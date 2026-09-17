@@ -28,7 +28,7 @@ class StatusPanel(QWidget):
         conn_group = QGroupBox("连接")
         conn_layout = QHBoxLayout(conn_group)
 
-        self.conn_indicator = QLabel("●")
+        self.conn_indicator = QLabel("OFF")
         self.conn_indicator.setStyleSheet("color: #B85C5C; font-size: 16pt;")
         conn_layout.addWidget(self.conn_indicator)
 
@@ -192,10 +192,12 @@ class StatusPanel(QWidget):
     def on_connection_changed(self, connected: bool, message: str):
         """连接状态改变。"""
         if connected:
-            self.conn_indicator.setStyleSheet("color: #6BA89A; font-size: 16pt;")
+            self.conn_indicator.setStyleSheet("color: #6BA89A; font-size: 12pt; font-weight: 600;")
+            self.conn_indicator.setText("ON")
             self.conn_status.setText(message)
         else:
-            self.conn_indicator.setStyleSheet("color: #B85C5C; font-size: 16pt;")
+            self.conn_indicator.setStyleSheet("color: #B85C5C; font-size: 12pt; font-weight: 600;")
+            self.conn_indicator.setText("OFF")
             self.conn_status.setText(message)
 
     @Slot(dict)

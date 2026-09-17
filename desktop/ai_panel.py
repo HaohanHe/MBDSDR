@@ -253,13 +253,13 @@ class AIPanel(QWidget):
         """更新 AI 内核状态指示。"""
         if AI_CORE_AVAILABLE and self.agent:
             model = self.agent.model_manager.model
-            self.ai_status_label.setText(f"● LLM: {model.split('/')[-1]}")
+            self.ai_status_label.setText(f"LLM: {model.split('/')[-1]}")
             self.ai_status_label.setStyleSheet("font-size: 8pt; color: #5A8A5A;")
         elif AI_CORE_AVAILABLE:
-            self.ai_status_label.setText("○ 未配置 API")
+            self.ai_status_label.setText("未配置 API")
             self.ai_status_label.setStyleSheet("font-size: 8pt; color: #C8A040;")
         else:
-            self.ai_status_label.setText("✕ AI 内核不可用")
+            self.ai_status_label.setText("AI 内核不可用")
             self.ai_status_label.setStyleSheet("font-size: 8pt; color: #C05050;")
 
     def _show_config(self):
@@ -392,7 +392,7 @@ class AIPanel(QWidget):
             "latency": latency,
         }
         self._tool_log.append(entry)
-        status = "✓" if success else "✕"
+        status = "OK" if success else "FAIL"
         color = "#5A8A5A" if success else "#C05050"
         self.tool_log_view.append(
             f'<span style="color:{color};">{status}</span> '
