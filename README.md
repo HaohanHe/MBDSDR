@@ -1,6 +1,6 @@
 # MBDSDR — AI 定义无线电全栈开源平台
 
-**M**B**D**SDR = **M**y callsign (BI4MIB) + **B**ei**D**ou (北斗) + **S**DR (软件定义无线电)
+**MBDSDR** = **MB** (呼号 BI4**MB**) + **BDS** (北斗卫星导航系统 BeiDou Navigation Satellite System) + **SDR** (软件定义无线电 Software Defined Radio)
 
 > 全开源 GPL-3.0 | 呼号 BI4MIB | 硬件板名 **ai-sdr Mini**
 > 目标：让大众人人都能用的国产化 AI 定义无线电软件，同时作为 IEEE/WCL 论文与会津大学投名状的参考实现。
