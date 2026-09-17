@@ -62,3 +62,15 @@ paper/
 # 论文不公开
 paper/
 MBDSDR-IEEE论文初稿*.md
+
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# 运行时数据
+recordings/
+*.cf32
+*.wav
+*.iq
+~/.mbdsdr/
