@@ -16,6 +16,7 @@ MBDSDR AI 内核 - Agent 主循环
 """
 
 import json
+import math
 import os
 import time
 from typing import List, Dict, Any, Optional, Callable
