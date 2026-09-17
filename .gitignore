@@ -1,0 +1,48 @@
+# 大文件备份（不进 git）
+MBDSDR-完整项目包-*.zip
+MBDSDR-工作区完整备份-*.zip
+MBDSDR-核心代码-*.zip
+MBDSDR-桌面端-*.zip
+ai-sdr-mini-kicad-*.zip
+ai-sdr-mini-v0.7-*.zip
+ai-sdr-mini-v0.7.1-*.zip
+ai-sdr-mini-原理图PCB-v0.7.1-投板包.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 临时
+.tmp-tool-results/
+*.tmp
+*.log
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# KiCad 自动生成
+*-backups/
+fp-info-cache/
+
+# 外部参考项目（不进主仓库，README 列出链接）
+kilo-code/
+mimo-code/
+opencode/
+hermes-self-evolution/
+stellarium-web-engine/
+
+# KiCad 自动生成缓存
+*.kicad_prl
+*.kicad_bak

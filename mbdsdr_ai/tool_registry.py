@@ -1,0 +1,481 @@
+"""
+MBDSDR AI 内核 - 工具注册表
+============================
+管理 MCP 工具的注册、发现、调用。
+
+核心能力：
+- 工具注册（MCP 工具封装为 OpenAI function calling 格式）
+- 工具发现（list_tools，让模型先知道有哪些工具）
+- 可靠调用（处理参数错误、工具不存在、调用超时）
+- 工具输出大小限制（大输出截断/写文件）
+- 工具可用性检查（设备未插时告知不可用）
+- 工具调用日志（记录每次调用的输入输出）
+- 内置工具（上下文查询、模型切换、配置管理等）
+"""
+
+import json
+import time
+import traceback
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional, Callable
+
+
+@dataclass
+class ToolResult:
+    """工具调用结果。"""
+    success: bool
+    content: str
+    tool_name: str = ""
+    args: Dict[str, Any] = field(default_factory=dict)
+    latency_ms: float = 0.0
+    error: str = ""
+    truncated: bool = False
+    data: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "success": self.success,
+            "content": self.content,
+            "tool_name": self.tool_name,
+            "args": self.args,
+            "latency_ms": self.latency_ms,
+            "error": self.error,
+            "truncated": self.truncated,
+            "data": self.data,
+        }
+
+
+@dataclass
+class ToolCallLog:
+    """工具调用日志条目。"""
+    timestamp: float
+    tool_name: str
+    args: Dict[str, Any]
+    success: bool
+    latency_ms: float
+    error: str = ""
+    content_preview: str = ""
+
+
+class ToolRegistry:
+    """
+    工具注册表。
+
+    管理所有可用工具，包括：
+    - MCP 硬件工具（通过 MCP 客户端调用 ai-sdr Mini）
+    - 内置 AI 工具（上下文查询、模型切换、配置管理等）
+    - 自进化工具（沙箱执行、代码修改等）
+    """
+
+    def __init__(self, tool_output_max_chars: int = 4000):
+        self.tools: Dict[str, Dict[str, Any]] = {}  # name -> {definition, handler, available, category}
+        self.tool_output_max_chars = tool_output_max_chars
+        self.call_log: List[ToolCallLog] = []
+        self.max_log_entries = 200
+        self._mcp_client = None  # MCP 客户端引用（运行时设置）
+
+    # ── 工具注册 ────────────────────────────────────────
+
+    def register(
+        self,
+        name: str,
+        description: str,
+        parameters: Dict[str, Any],
+        handler: Callable,
+        category: str = "general",
+        available: bool = True,
+    ):
+        """注册一个工具。"""
+        definition = {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": parameters,
+            },
+        }
+        self.tools[name] = {
+            "definition": definition,
+            "handler": handler,
+            "available": available,
+            "category": category,
+        }
+
+    def register_mcp_tools(self, mcp_tools: List[Dict[str, Any]], mcp_call_handler: Callable):
+        """
+        批量注册 MCP 工具。
+
+        mcp_tools: MCP 工具列表（从 list_tools 获取）
+        mcp_call_handler: 调用 MCP 工具的函数 (tool_name, args) -> result
+        """
+        for tool in mcp_tools:
+            name = tool.get("name", "")
+            if not name:
+                continue
+            description = tool.get("description", f"MCP 工具: {name}")
+            parameters = tool.get("inputSchema", tool.get("parameters", {"type": "object", "properties": {}}))
+
+            def make_handler(tool_name):
+                def handler(args):
+                    return mcp_call_handler(tool_name, args)
+                return handler
+
+            self.register(
+                name=name,
+                description=description,
+                parameters=parameters,
+                handler=make_handler(name),
+                category="mcp",
+                available=True,
+            )
+
+    def unregister(self, name: str):
+        """注销工具。"""
+        self.tools.pop(name, None)
+
+    def set_available(self, name: str, available: bool):
+        """设置工具可用性（设备未插时设为 False）。"""
+        if name in self.tools:
+            self.tools[name]["available"] = available
+
+    # ── 工具发现 ────────────────────────────────────────
+
+    def list_tools(self, include_unavailable: bool = False) -> List[Dict[str, Any]]:
+        """
+        列出所有可用工具（用于 list_tools 工具和模型工具发现）。
+        """
+        result = []
+        for name, tool in self.tools.items():
+            if not tool["available"] and not include_unavailable:
+                continue
+            fn = tool["definition"]["function"]
+            result.append({
+                "name": name,
+                "description": fn["description"],
+                "category": tool["category"],
+                "available": tool["available"],
+            })
+        return result
+
+    def get_tool_definitions(self, include_unavailable: bool = False) -> List[Dict[str, Any]]:
+        """获取 OpenAI function calling 格式的工具定义列表。"""
+        definitions = []
+        for name, tool in self.tools.items():
+            if not tool["available"] and not include_unavailable:
+                continue
+            definitions.append(tool["definition"])
+        return definitions
+
+    def get_tool_names(self) -> List[str]:
+        """获取所有工具名称。"""
+        return list(self.tools.keys())
+
+    def has_tool(self, name: str) -> bool:
+        """检查工具是否存在且可用。"""
+        return name in self.tools and self.tools[name]["available"]
+
+    # ── 工具调用 ────────────────────────────────────────
+
+    def call(self, tool_name: str, args: Dict[str, Any] = None) -> ToolResult:
+        """
+        调用工具。
+
+        处理：
+        - 工具不存在
+        - 工具不可用（设备未插）
+        - 参数错误
+        - 调用异常
+        - 输出过大截断
+        """
+        start_time = time.time()
+        args = args or {}
+
+        # 检查工具是否存在
+        if tool_name not in self.tools:
+            available = self.get_tool_names()
+            result = ToolResult(
+                success=False,
+                content=f"工具 '{tool_name}' 不存在。可用工具: {', '.join(available[:10])}{'...' if len(available) > 10 else ''}",
+                tool_name=tool_name,
+                args=args,
+                error="tool_not_found",
+            )
+            self._log_call(result)
+            return result
+
+        tool = self.tools[tool_name]
+
+        # 检查工具是否可用
+        if not tool["available"]:
+            result = ToolResult(
+                success=False,
+                content=f"工具 '{tool_name}' 当前不可用（设备未连接或功能未启用）。请先连接设备或检查配置。",
+                tool_name=tool_name,
+                args=args,
+                error="tool_unavailable",
+            )
+            self._log_call(result)
+            return result
+
+        # 调用 handler
+        try:
+            handler = tool["handler"]
+            raw_result = handler(args)
+
+            # 统一处理返回值
+            if isinstance(raw_result, ToolResult):
+                result = raw_result
+                result.tool_name = tool_name
+                result.args = args
+            elif isinstance(raw_result, dict):
+                result = ToolResult(
+                    success=raw_result.get("success", True),
+                    content=raw_result.get("content", json.dumps(raw_result, ensure_ascii=False)),
+                    tool_name=tool_name,
+                    args=args,
+                    data=raw_result,
+                )
+            elif isinstance(raw_result, str):
+                result = ToolResult(
+                    success=True,
+                    content=raw_result,
+                    tool_name=tool_name,
+                    args=args,
+                )
+            else:
+                result = ToolResult(
+                    success=True,
+                    content=str(raw_result),
+                    tool_name=tool_name,
+                    args=args,
+                )
+
+        except Exception as e:
+            result = ToolResult(
+                success=False,
+                content=f"工具 '{tool_name}' 调用异常: {type(e).__name__}: {e}\n{traceback.format_exc()[:500]}",
+                tool_name=tool_name,
+                args=args,
+                error=f"exception: {type(e).__name__}",
+            )
+
+        result.latency_ms = round((time.time() - start_time) * 1000, 1)
+
+        # 输出截断
+        if len(result.content) > self.tool_output_max_chars:
+            original_len = len(result.content)
+            result.content = result.content[:self.tool_output_max_chars] + \
+                f"\n... [输出已截断，原长度 {original_len} 字符]"
+            result.truncated = True
+
+        self._log_call(result)
+        return result
+
+    def call_from_model(self, tool_call: Dict[str, Any]) -> ToolResult:
+        """
+        从模型的 tool_calls 格式调用工具。
+
+        tool_call 格式：
+        {
+            "id": "call_xxx",
+            "type": "function",
+            "function": {"name": "xxx", "arguments": "{...}"}
+        }
+        """
+        fn = tool_call.get("function", {})
+        name = fn.get("name", "")
+        args_str = fn.get("arguments", "{}")
+
+        try:
+            args = json.loads(args_str)
+        except json.JSONDecodeError:
+            # 尝试修复
+            try:
+                fixed = args_str.replace("'", '"').replace("True", "true").replace("False", "false")
+                args = json.loads(fixed)
+            except Exception:
+                args = {"_raw": args_str}
+
+        return self.call(name, args)
+
+    # ── 调用日志 ────────────────────────────────────────
+
+    def _log_call(self, result: ToolResult):
+        """记录工具调用日志。"""
+        log = ToolCallLog(
+            timestamp=time.time(),
+            tool_name=result.tool_name,
+            args=result.args,
+            success=result.success,
+            latency_ms=result.latency_ms,
+            error=result.error,
+            content_preview=result.content[:200],
+        )
+        self.call_log.append(log)
+        if len(self.call_log) > self.max_log_entries:
+            self.call_log = self.call_log[-self.max_log_entries:]
+
+    def get_call_log(self, limit: int = 20, tool_name: str = None) -> List[Dict[str, Any]]:
+        """获取工具调用日志。"""
+        logs = self.call_log
+        if tool_name:
+            logs = [l for l in logs if l.tool_name == tool_name]
+        return [
+            {
+                "time": time.strftime("%H:%M:%S", time.localtime(l.timestamp)),
+                "tool": l.tool_name,
+                "success": l.success,
+                "latency_ms": l.latency_ms,
+                "error": l.error,
+                "preview": l.content_preview,
+            }
+            for l in reversed(logs[-limit:])
+        ]
+
+    def get_stats(self) -> Dict[str, Any]:
+        """获取工具调用统计。"""
+        total = len(self.call_log)
+        success = sum(1 for l in self.call_log if l.success)
+        failed = total - success
+        by_tool = {}
+        for l in self.call_log:
+            if l.tool_name not in by_tool:
+                by_tool[l.tool_name] = {"total": 0, "success": 0, "failed": 0, "total_latency": 0}
+            by_tool[l.tool_name]["total"] += 1
+            if l.success:
+                by_tool[l.tool_name]["success"] += 1
+            else:
+                by_tool[l.tool_name]["failed"] += 1
+            by_tool[l.tool_name]["total_latency"] += l.latency_ms
+
+        for t in by_tool.values():
+            t["avg_latency_ms"] = round(t["total_latency"] / max(1, t["total"]), 1)
+            del t["total_latency"]
+
+        return {
+            "total_calls": total,
+            "successful": success,
+            "failed": failed,
+            "success_rate": round(success / max(1, total), 4),
+            "registered_tools": len(self.tools),
+            "available_tools": sum(1 for t in self.tools.values() if t["available"]),
+            "by_tool": by_tool,
+        }
+
+    # ── 内置工具注册 ────────────────────────────────────
+
+    def register_builtin_tools(self, agent_ref=None):
+        """
+        注册内置 AI 工具（上下文查询、模型管理、配置管理等）。
+        agent_ref: Agent 引用（用于访问 context_manager, model_manager 等）。
+        """
+        # list_tools: 工具发现
+        self.register(
+            name="list_tools",
+            description="列出所有可用工具。AI 连接后应先调用此工具发现可用能力。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(self.list_tools(), ensure_ascii=False, indent=2),
+                data={"tools": self.list_tools()},
+            ),
+            category="meta",
+        )
+
+        # context_status: 上下文状态查询
+        if agent_ref:
+            self.register(
+                name="context_status",
+                description="查询当前上下文状态：token 用量、剩余空间、消息数、压缩次数、epoch。",
+                parameters={"type": "object", "properties": {}, "required": []},
+                handler=lambda args: ToolResult(
+                    success=True,
+                    content=agent_ref.context_manager.get_status_text(),
+                    data=agent_ref.context_manager.get_stats().to_dict(),
+                ),
+                category="meta",
+            )
+
+            # model_status: 模型状态查询
+            self.register(
+                name="model_status",
+                description="查询当前模型状态：当前模型、API 配置、调用统计、可用模型列表。",
+                parameters={"type": "object", "properties": {}, "required": []},
+                handler=lambda args: ToolResult(
+                    success=True,
+                    content=agent_ref.model_manager.get_status_text(),
+                    data=agent_ref.model_manager.get_status(),
+                ),
+                category="meta",
+            )
+
+            # list_models: 模型列表查询
+            self.register(
+                name="list_models",
+                description="查询所有可用模型列表。可用于切换模型前查看选项。",
+                parameters={"type": "object", "properties": {
+                    "refresh": {"type": "boolean", "description": "是否强制从 API 刷新"}
+                }, "required": []},
+                handler=lambda args: ToolResult(
+                    success=True,
+                    content=json.dumps(
+                        agent_ref.model_manager.fetch_models(force_refresh=args.get("refresh", False)),
+                        ensure_ascii=False, indent=2, default=lambda o: o.to_dict()
+                    ),
+                    data={"models": agent_ref.model_manager.list_models()},
+                ),
+                category="meta",
+            )
+
+            # switch_model: 模型切换
+            self.register(
+                name="switch_model",
+                description="切换当前使用的 LLM 模型。",
+                parameters={"type": "object", "properties": {
+                    "model": {"type": "string", "description": "模型 ID，如 Qwen/Qwen2.5-7B-Instruct"}
+                }, "required": ["model"]},
+                handler=lambda args: ToolResult(
+                    success=True,
+                    content=f"模型切换: {agent_ref.model_manager.switch_model(args['model'])[1]}",
+                ),
+                category="meta",
+            )
+
+            # tool_log: 工具调用日志
+            self.register(
+                name="tool_log",
+                description="查看最近的工具调用日志，用于调试和审计。",
+                parameters={"type": "object", "properties": {
+                    "limit": {"type": "integer", "description": "返回条数，默认 10"},
+                    "tool_name": {"type": "string", "description": "过滤指定工具"}
+                }, "required": []},
+                handler=lambda args: ToolResult(
+                    success=True,
+                    content=json.dumps(self.get_call_log(
+                        limit=args.get("limit", 10),
+                        tool_name=args.get("tool_name"),
+                    ), ensure_ascii=False, indent=2),
+                ),
+                category="meta",
+            )
+
+    def get_status_text(self) -> str:
+        """获取人类可读的工具注册表状态。"""
+        stats = self.get_stats()
+        lines = [
+            "=== MBDSDR 工具注册表 ===",
+            f"已注册工具: {stats['registered_tools']} 个",
+            f"可用工具: {stats['available_tools']} 个",
+            f"调用统计: {stats['successful']} 成功 / {stats['failed']} 失败 "
+            f"(成功率 {stats['success_rate']:.1%})",
+        ]
+        # 按类别分组
+        categories = {}
+        for name, tool in self.tools.items():
+            cat = tool["category"]
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append(f"{name}{'' if tool['available'] else ' (不可用)'}")
+        for cat, names in sorted(categories.items()):
+            lines.append(f"  [{cat}] {', '.join(names)}")
+        return "\n".join(lines)

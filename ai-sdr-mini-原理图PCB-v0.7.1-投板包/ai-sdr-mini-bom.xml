@@ -1,0 +1,1242 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<export version="E">
+  <design>
+    <source>/home/user/Doubao/chats/38438160041798146/ai-sdr-mini-kicad/ai-sdr-mini.kicad_sch</source>
+    <date>Wed 16 Sep 2026 11:07:35 PM +08</date>
+    <tool>Eeschema 7.0.11-7.0.11~ubuntu22.04.1</tool>
+    <sheet number="1" name="/" tstamps="/">
+      <title_block>
+        <title>MBDSDR ai-sdr Mini - AI Defined Radio Hardware</title>
+        <company>MBDSDR Open Source Project (BI4MIB)</company>
+        <rev>v0.7.1</rev>
+        <date>2026-09-16</date>
+        <source>ai-sdr-mini.kicad_sch</source>
+        <comment number="1" value="Complete v0.7.1 schematic, global-label nets, auto-routable"/>
+        <comment number="2" value="GPL-3.0 License"/>
+        <comment number="3" value="80x60mm 2-layer, JLCPCB SMT"/>
+        <comment number="4" value="Si4732 + ESP32-S3 + USB2514B + GNSS + IMU + Mag"/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+  </design>
+  <components>
+    <comp ref="C1">
+      <value>12pF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>536aa728-6101-5e03-ae95-0a3fb2f4cbae</tstamps>
+    </comp>
+    <comp ref="C3">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>c8fc7d3e-1bc1-56e4-8024-ad37648406f1</tstamps>
+    </comp>
+    <comp ref="C4">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>767c44ef-ebec-5fb0-8c4e-dc50f7acc55d</tstamps>
+    </comp>
+    <comp ref="C5">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>afd768cd-c824-5a0c-9c28-b1d70d14beed</tstamps>
+    </comp>
+    <comp ref="C6">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>2fc6c447-50c5-58e0-ac27-d780e10fe3ac</tstamps>
+    </comp>
+    <comp ref="C7">
+      <value>10uF</value>
+      <libsource lib="Device" part="C8" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>07e02c91-2ff1-5986-a9ec-6a18b2f940b3</tstamps>
+    </comp>
+    <comp ref="C8">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>8661cdb9-d76f-50f1-b331-8dfd94c8df09</tstamps>
+    </comp>
+    <comp ref="C9">
+      <value>10uF</value>
+      <libsource lib="Device" part="C8" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>4f5dfa39-66b9-548f-8bd8-4aaaec8db8f8</tstamps>
+    </comp>
+    <comp ref="C10">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>76959eeb-73ea-56c5-a4fa-40f5c64074bd</tstamps>
+    </comp>
+    <comp ref="C11">
+      <value>10uF</value>
+      <libsource lib="Device" part="C8" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>c4544031-b9c0-58c2-8175-ef327ad38d6e</tstamps>
+    </comp>
+    <comp ref="C12">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>e9081ae6-6f92-5e47-af6e-3db1bb136e95</tstamps>
+    </comp>
+    <comp ref="C13">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>eb64b956-d98e-5fbb-925c-ee7335d7d2a5</tstamps>
+    </comp>
+    <comp ref="C14">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>3478c01b-91ca-5c2e-9471-bb5ed09a30e0</tstamps>
+    </comp>
+    <comp ref="C15">
+      <value>10uF</value>
+      <libsource lib="Device" part="C8" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>d3bcce1e-bdf8-599a-b76e-87dc993c356c</tstamps>
+    </comp>
+    <comp ref="C16">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>dd394177-3300-5eeb-aa2d-c12d3414e592</tstamps>
+    </comp>
+    <comp ref="C17">
+      <value>18pF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>af446532-9157-52e5-bf65-4ff9d68993a5</tstamps>
+    </comp>
+    <comp ref="C18">
+      <value>18pF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>9db31992-e39e-5258-b200-aa66baa6971e</tstamps>
+    </comp>
+    <comp ref="C19">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>8e004610-4b96-5730-be24-93c7282e0b76</tstamps>
+    </comp>
+    <comp ref="C20">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>a602962d-eed4-545c-9919-49a9e6100a88</tstamps>
+    </comp>
+    <comp ref="C21">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>9f3ff180-c9b3-545f-950e-e9324f97aa3b</tstamps>
+    </comp>
+    <comp ref="C22">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>9a437cc1-2003-5aef-a23b-c703ff63b32d</tstamps>
+    </comp>
+    <comp ref="C23">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>811316c8-6fdd-5554-a193-0af7cf41acd9</tstamps>
+    </comp>
+    <comp ref="C24">
+      <value>100nF</value>
+      <libsource lib="Device" part="C" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>a65e73a4-5679-5878-9ca7-786916b1e702</tstamps>
+    </comp>
+    <comp ref="F1">
+      <value>500mA</value>
+      <libsource lib="Device" part="Fuse" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>1dd8c4ef-0e2b-5551-83ff-6e607ebf6694</tstamps>
+    </comp>
+    <comp ref="J1">
+      <value>KH-TYPE-C-6P</value>
+      <footprint>Connector_USB:USB_C_Receptacle_6P</footprint>
+      <libsource lib="MBDSDR" part="TYPEC6" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>11376f63-4fbc-5f55-aba1-6a47e542d7bd</tstamps>
+    </comp>
+    <comp ref="L2">
+      <value>100nH</value>
+      <libsource lib="Device" part="L" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>f68423b4-8430-5aae-bc29-9325c4c2f325</tstamps>
+    </comp>
+    <comp ref="LED1">
+      <value>Yellow</value>
+      <libsource lib="Device" part="LED" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>c94621ef-84d4-53ee-a386-0431f1c5634a</tstamps>
+    </comp>
+    <comp ref="LED2">
+      <value>Yellow</value>
+      <libsource lib="Device" part="LED" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>27a5001a-7a6d-5d04-8da4-2e2b0bff68a7</tstamps>
+    </comp>
+    <comp ref="LED3">
+      <value>Yellow</value>
+      <libsource lib="Device" part="LED" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>049a88db-b7bc-5078-8a24-1ed43c7d9575</tstamps>
+    </comp>
+    <comp ref="LED4">
+      <value>Yellow</value>
+      <libsource lib="Device" part="LED" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>bf471f23-a7b0-56b1-9be7-deeea32fd807</tstamps>
+    </comp>
+    <comp ref="R1">
+      <value>1k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>8590d622-5ef2-5215-87c6-79d29e8f9afe</tstamps>
+    </comp>
+    <comp ref="R2">
+      <value>1k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>65acd8ac-0436-58d8-b91e-e916c5d21a47</tstamps>
+    </comp>
+    <comp ref="R3">
+      <value>1k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>2486fa19-34d6-506a-9b16-5111e2d9bd20</tstamps>
+    </comp>
+    <comp ref="R4">
+      <value>1k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>b7e86695-6a38-55e7-b568-041bb9f58816</tstamps>
+    </comp>
+    <comp ref="R5">
+      <value>4.7k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>7e1af2b3-8413-5af7-81c7-61f556b7a069</tstamps>
+    </comp>
+    <comp ref="R6">
+      <value>4.7k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>11aee09d-40a1-5e07-9e5c-96d1a38fe642</tstamps>
+    </comp>
+    <comp ref="R7">
+      <value>10k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>4afa9971-50ea-540b-b2a2-94bdb1f8461b</tstamps>
+    </comp>
+    <comp ref="R8">
+      <value>10k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>606f9784-7eb0-59a4-bfc6-0ad6a27b422e</tstamps>
+    </comp>
+    <comp ref="R9">
+      <value>5.1k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>2c41e85a-53b5-547e-947e-5ad95f036485</tstamps>
+    </comp>
+    <comp ref="R10">
+      <value>5.1k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>afa81c0d-15c1-5889-8def-df793a041895</tstamps>
+    </comp>
+    <comp ref="R11">
+      <value>10k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>1402df25-47da-583c-b255-fdb2feaadbbb</tstamps>
+    </comp>
+    <comp ref="R12">
+      <value>12k 1%</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>9780fc5a-6ea9-5e1c-97e8-bd2a57d5048f</tstamps>
+    </comp>
+    <comp ref="R13">
+      <value>10k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>9b428c20-fbd9-5a38-b7a4-816dec611f79</tstamps>
+    </comp>
+    <comp ref="R14">
+      <value>10k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>404f7eaf-917c-5a58-b09d-0694704b73fa</tstamps>
+    </comp>
+    <comp ref="R15">
+      <value>10k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>3021913f-7765-585e-8746-266d29f00253</tstamps>
+    </comp>
+    <comp ref="R16">
+      <value>10k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>3d4fcc12-209f-5ece-8b39-c76ad0c13f7f</tstamps>
+    </comp>
+    <comp ref="R17">
+      <value>100k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>461db4c8-5a73-5a26-ab15-5a605b5de2d8</tstamps>
+    </comp>
+    <comp ref="R18">
+      <value>100k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>d61656c4-5987-5129-80df-462607b9968a</tstamps>
+    </comp>
+    <comp ref="R19">
+      <value>4.7k</value>
+      <libsource lib="Device" part="R" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>cf0e695d-e539-5e0a-9ed4-abae2283d007</tstamps>
+    </comp>
+    <comp ref="RF1">
+      <value>SMA</value>
+      <footprint>Connector_Coaxial:SMA_BWSMA-KE-Z011_Vertical</footprint>
+      <libsource lib="MBDSDR" part="SMA" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>b230c19f-ca29-5128-8d81-4707f8c5804d</tstamps>
+    </comp>
+    <comp ref="RF2">
+      <value>u.FL</value>
+      <footprint>Connector_Coaxial:U.FL_HRS_U.FL-R-SMT-1_Vertical</footprint>
+      <libsource lib="MBDSDR" part="UFL" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>6f6a9854-7d71-5749-9784-2e3712c06f21</tstamps>
+    </comp>
+    <comp ref="SW1">
+      <value>RESET</value>
+      <libsource lib="Switch" part="SW_Push" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>57bee5d1-400d-5bfb-971f-02ef682a72f0</tstamps>
+    </comp>
+    <comp ref="U1">
+      <value>USB2514B</value>
+      <footprint>Package_DFN_QFN:QFN-36-1EP_6x6mm_P0.5mm_EP4.1x4.1mm</footprint>
+      <libsource lib="MBDSDR" part="USB2514B" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>d88e7497-895b-5685-90d9-db31f1046493</tstamps>
+    </comp>
+    <comp ref="U2">
+      <value>SI4732</value>
+      <footprint>Package_SO:SOIC-16_3.9x9.9mm_P1.27mm</footprint>
+      <libsource lib="MBDSDR" part="SI4732" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>4dc08968-195f-59be-8663-40e3d260d121</tstamps>
+    </comp>
+    <comp ref="U3">
+      <value>TMAG5273</value>
+      <footprint>Package_TO_SOT_SMD:SOT-23-6</footprint>
+      <libsource lib="MBDSDR" part="TMAG5273" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>d3dc6b92-7778-521b-8784-df0ba4d46a39</tstamps>
+    </comp>
+    <comp ref="U4">
+      <value>ESP32-S3-N8R8</value>
+      <footprint>RF_Module:ESP32-S3-WROOM-1</footprint>
+      <libsource lib="MBDSDR" part="ESP32S3" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>ba73f660-c0c5-56eb-8c07-43d427a88e69</tstamps>
+    </comp>
+    <comp ref="U5">
+      <value>BMI260</value>
+      <footprint>Package_LGA:Bosch_LGA-14_3x2.5mm_P0.7mm</footprint>
+      <libsource lib="MBDSDR" part="BMI260" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>ab3d95de-a19a-509b-a89d-a826f18680b7</tstamps>
+    </comp>
+    <comp ref="U6">
+      <value>ATGM336H</value>
+      <footprint>RF_Module:ATGM336H-5NR32</footprint>
+      <libsource lib="MBDSDR" part="ATGM336H" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>836c17a2-77dd-5f1d-b3a4-e40f4bd47269</tstamps>
+    </comp>
+    <comp ref="U7">
+      <value>AMS1117-3.3</value>
+      <footprint>Package_TO_SOT_SMD:SOT-223-3_TabPin2</footprint>
+      <libsource lib="MBDSDR" part="AMS1117" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>0dfdef8b-f665-5a39-adc1-08e1fc2de363</tstamps>
+    </comp>
+    <comp ref="USB1">
+      <value>USB-A</value>
+      <footprint>Connector_USB:USB_A_Receptacle_HRO_TYPE-A-STA-2F</footprint>
+      <libsource lib="MBDSDR" part="USBA" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>03f34359-c135-5905-b9b0-23e1baf9ad7b</tstamps>
+    </comp>
+    <comp ref="X1">
+      <value>32.768kHz</value>
+      <libsource lib="Device" part="Crystal4" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>9b575dcb-49c6-5385-9234-6d99e08a36bc</tstamps>
+    </comp>
+    <comp ref="X2">
+      <value>24MHz</value>
+      <libsource lib="Device" part="Crystal4" description=""/>
+      <property name="Sheetname" value=""/>
+      <property name="Sheetfile" value="ai-sdr-mini.kicad_sch"/>
+      <sheetpath names="/" tstamps="/"/>
+      <tstamps>8a090fc8-79e1-5377-9d62-5c54aa13a293</tstamps>
+    </comp>
+  </components>
+  <libparts>
+    <libpart lib="Device" part="C">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">C</field>
+        <field name="Value">C</field>
+        <field name="Footprint">Capacitor_SMD:C_0402_1005Metric</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="" type="passive"/>
+        <pin num="2" name="" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Device" part="C8">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">C</field>
+        <field name="Value">C_0805</field>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="" type="passive"/>
+        <pin num="2" name="" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Device" part="Crystal4">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">Y</field>
+        <field name="Value">Crystal</field>
+        <field name="Footprint">Crystal:Crystal_SMD_3225-4Pin_3.2x2.5mm</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="1" type="passive"/>
+        <pin num="2" name="2" type="passive"/>
+        <pin num="3" name="3" type="passive"/>
+        <pin num="4" name="4" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Device" part="Fuse">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">F</field>
+        <field name="Value">Fuse</field>
+        <field name="Footprint">Fuse:Fuse_0805_2012Metric</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="" type="passive"/>
+        <pin num="2" name="" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Device" part="L">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">L</field>
+        <field name="Value">L</field>
+        <field name="Footprint">Inductor_SMD:L_0402_1005Metric</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="" type="passive"/>
+        <pin num="2" name="" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Device" part="LED">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">D</field>
+        <field name="Value">LED</field>
+        <field name="Footprint">LED_SMD:LED_0603_1608Metric</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="K" type="passive"/>
+        <pin num="2" name="A" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Device" part="R">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">R</field>
+        <field name="Value">R</field>
+        <field name="Footprint">Resistor_SMD:R_0402_1005Metric</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="" type="passive"/>
+        <pin num="2" name="" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="MBDSDR" part="AMS1117">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">AMS1117-3.3</field>
+        <field name="Footprint">Package_TO_SOT_SMD:SOT-223-3_TabPin2</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="GND" type="power_in"/>
+        <pin num="2" name="VOUT" type="power_out"/>
+        <pin num="3" name="VIN" type="power_in"/>
+      </pins>
+    </libpart>
+    <libpart lib="MBDSDR" part="ATGM336H">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">ATGM336H-5NR32-G</field>
+        <field name="Footprint">RF_Module:ATGM336H-5NR32</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="ANT" name="ANT" type="passive"/>
+        <pin num="GND" name="GND" type="power_in"/>
+        <pin num="ONOFF" name="ON/OFF" type="input"/>
+        <pin num="PPS" name="PPS" type="output"/>
+        <pin num="RXD" name="RXD" type="input"/>
+        <pin num="TXD" name="TXD" type="output"/>
+        <pin num="VBAT" name="VBAT" type="power_in"/>
+        <pin num="VCC" name="VCC" type="power_in"/>
+      </pins>
+    </libpart>
+    <libpart lib="MBDSDR" part="BMI260">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">BMI260</field>
+        <field name="Footprint">Package_LGA:Bosch_LGA-14_3x2.5mm_P0.7mm</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="CSB" name="CSB" type="input"/>
+        <pin num="GND" name="GND" type="power_in"/>
+        <pin num="INT1" name="INT1" type="output"/>
+        <pin num="INT2" name="INT2" type="output"/>
+        <pin num="SCL" name="SCL" type="input"/>
+        <pin num="SDA" name="SDA" type="bidirectional"/>
+        <pin num="SDO" name="SDO" type="input"/>
+        <pin num="VDD" name="VDD" type="power_in"/>
+        <pin num="VDDIO" name="VDDIO" type="power_in"/>
+      </pins>
+    </libpart>
+    <libpart lib="MBDSDR" part="ESP32S3">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">ESP32-S3-WROOM-1-N8R8</field>
+        <field name="Footprint">RF_Module:ESP32-S3-WROOM-1</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="3V3" name="3V3" type="power_in"/>
+        <pin num="EN" name="EN" type="input"/>
+        <pin num="GND" name="GND" type="power_in"/>
+        <pin num="IO0" name="GPIO0" type="input"/>
+        <pin num="IO1" name="GPIO1" type="bidirectional"/>
+        <pin num="IO2" name="GPIO2" type="bidirectional"/>
+        <pin num="IO3" name="GPIO3" type="bidirectional"/>
+        <pin num="IO4" name="GPIO4" type="bidirectional"/>
+        <pin num="IO5" name="GPIO5" type="bidirectional"/>
+        <pin num="IO7" name="GPIO7" type="bidirectional"/>
+        <pin num="IO8" name="GPIO8" type="bidirectional"/>
+        <pin num="IO9" name="GPIO9" type="bidirectional"/>
+        <pin num="IO10" name="GPIO10" type="bidirectional"/>
+        <pin num="IO11" name="GPIO11" type="bidirectional"/>
+        <pin num="IO12" name="GPIO12" type="bidirectional"/>
+        <pin num="IO13" name="GPIO13" type="bidirectional"/>
+        <pin num="IO14" name="GPIO14" type="bidirectional"/>
+        <pin num="IO15" name="GPIO15" type="bidirectional"/>
+        <pin num="IO16" name="GPIO16" type="bidirectional"/>
+        <pin num="IO17" name="GPIO17" type="bidirectional"/>
+        <pin num="IO18" name="GPIO18" type="bidirectional"/>
+        <pin num="IO19" name="GPIO19" type="bidirectional"/>
+        <pin num="IO20" name="GPIO20" type="bidirectional"/>
+        <pin num="IO21" name="GPIO21" type="bidirectional"/>
+        <pin num="IO46" name="GPIO46" type="bidirectional"/>
+      </pins>
+    </libpart>
+    <libpart lib="MBDSDR" part="SI4732">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">SI4732-A10-GSR</field>
+        <field name="Footprint">Package_SO:SOIC-16_3.9x9.9mm_P1.27mm</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="LOUT/DFS" type="output"/>
+        <pin num="2" name="GPO3/DCLK" type="output"/>
+        <pin num="3" name="GPO2/INTB" type="output"/>
+        <pin num="4" name="GPO1" type="passive"/>
+        <pin num="5" name="NC" type="passive"/>
+        <pin num="6" name="FMI" type="input"/>
+        <pin num="7" name="RFGND" type="power_in"/>
+        <pin num="8" name="AMI" type="input"/>
+        <pin num="9" name="RST" type="input"/>
+        <pin num="10" name="SENB" type="input"/>
+        <pin num="11" name="SCLK" type="input"/>
+        <pin num="12" name="SDIO" type="bidirectional"/>
+        <pin num="13" name="RCLK" type="input"/>
+        <pin num="14" name="VDD" type="power_in"/>
+        <pin num="15" name="GND" type="power_in"/>
+        <pin num="16" name="ROUT/DOUT" type="output"/>
+      </pins>
+    </libpart>
+    <libpart lib="MBDSDR" part="SMA">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">RF</field>
+        <field name="Value">BWSMA-KE-Z001</field>
+        <field name="Footprint">Connector_Coaxial:SMA_BWSMA-KE-Z011_Vertical</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="SIG" type="passive"/>
+        <pin num="2" name="SHIELD" type="power_in"/>
+      </pins>
+    </libpart>
+    <libpart lib="MBDSDR" part="TMAG5273">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">TMAG5273A1QDBVT</field>
+        <field name="Footprint">Package_TO_SOT_SMD:SOT-23-6</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="SCL" type="input"/>
+        <pin num="2" name="GND" type="power_in"/>
+        <pin num="3" name="GND/TEST" type="power_in"/>
+        <pin num="4" name="VCC" type="power_in"/>
+        <pin num="5" name="INT" type="output"/>
+        <pin num="6" name="SDA" type="bidirectional"/>
+      </pins>
+    </libpart>
+    <libpart lib="MBDSDR" part="TYPEC6">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">J</field>
+        <field name="Value">KH-TYPE-C-6P</field>
+        <field name="Footprint">Connector_USB:USB_C_Receptacle_6P</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="CC1" name="CC1" type="passive"/>
+        <pin num="CC2" name="CC2" type="passive"/>
+        <pin num="DM" name="D-" type="passive"/>
+        <pin num="DP" name="D+" type="passive"/>
+        <pin num="GND" name="GND" type="power_in"/>
+        <pin num="VBUS" name="VBUS" type="power_in"/>
+      </pins>
+    </libpart>
+    <libpart lib="MBDSDR" part="UFL">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">RF</field>
+        <field name="Value">HMT-U.FL-R-SMT</field>
+        <field name="Footprint">Connector_Coaxial:U.FL_HRS_U.FL-R-SMT-1_Vertical</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="SIG" type="passive"/>
+        <pin num="2" name="SHIELD" type="power_in"/>
+      </pins>
+    </libpart>
+    <libpart lib="MBDSDR" part="USB2514B">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">USB2514B-AEZC-TR</field>
+        <field name="Footprint">Package_DFN_QFN:QFN-36-1EP_6x6mm_P0.5mm_EP4.1x4.1mm</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="USBDM_DN1" type="passive"/>
+        <pin num="2" name="USBDP_DN1" type="passive"/>
+        <pin num="3" name="USBDM_DN2" type="passive"/>
+        <pin num="4" name="USBDP_DN2" type="passive"/>
+        <pin num="5" name="VDD33" type="power_in"/>
+        <pin num="6" name="USBDM_DN3" type="passive"/>
+        <pin num="7" name="USBDP_DN3" type="passive"/>
+        <pin num="8" name="USBDM_DN4" type="passive"/>
+        <pin num="9" name="USBDP_DN4" type="passive"/>
+        <pin num="10" name="VDDA33" type="power_in"/>
+        <pin num="11" name="TEST" type="power_in"/>
+        <pin num="12" name="PRTPWR1" type="passive"/>
+        <pin num="13" name="OCS_N1" type="passive"/>
+        <pin num="14" name="CRFILT" type="passive"/>
+        <pin num="15" name="VDD33" type="power_in"/>
+        <pin num="16" name="PRTPWR2" type="passive"/>
+        <pin num="17" name="OCS_N2" type="passive"/>
+        <pin num="18" name="PRTPWR3" type="passive"/>
+        <pin num="19" name="OCS_N3" type="passive"/>
+        <pin num="20" name="PRTPWR4" type="passive"/>
+        <pin num="21" name="NC" type="passive"/>
+        <pin num="22" name="NON_REM1" type="passive"/>
+        <pin num="23" name="VDD33" type="power_in"/>
+        <pin num="24" name="CFG_SEL0" type="input"/>
+        <pin num="25" name="CFG_SEL1" type="input"/>
+        <pin num="26" name="RESET_N" type="input"/>
+        <pin num="27" name="VBUS_DET" type="passive"/>
+        <pin num="28" name="LOCAL_PWR" type="passive"/>
+        <pin num="29" name="VDDA33" type="power_in"/>
+        <pin num="30" name="USBDM_UP" type="passive"/>
+        <pin num="31" name="USBDP_UP" type="passive"/>
+        <pin num="32" name="XTALOUT" type="passive"/>
+        <pin num="33" name="XTALIN" type="passive"/>
+        <pin num="34" name="PLLFILT" type="passive"/>
+        <pin num="35" name="RBIAS" type="passive"/>
+        <pin num="36" name="VDD33" type="power_in"/>
+        <pin num="37" name="EP" type="power_in"/>
+      </pins>
+    </libpart>
+    <libpart lib="MBDSDR" part="USBA">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">USB</field>
+        <field name="Value">USB-234-BCW</field>
+        <field name="Footprint">Connector_USB:USB_A_Receptacle_HRO_TYPE-A-STA-2F</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="VBUS" type="power_in"/>
+        <pin num="2" name="D-" type="passive"/>
+        <pin num="3" name="D+" type="passive"/>
+        <pin num="4" name="GND" type="power_in"/>
+      </pins>
+    </libpart>
+    <libpart lib="Switch" part="SW_Push">
+      <docs>~</docs>
+      <fields>
+        <field name="Reference">SW</field>
+        <field name="Value">SW_Push</field>
+        <field name="Footprint">Button_Switch_SMD:SW_SPST_TS1101</field>
+        <field name="Datasheet">~</field>
+      </fields>
+      <pins>
+        <pin num="1" name="1" type="passive"/>
+        <pin num="2" name="2" type="passive"/>
+      </pins>
+    </libpart>
+  </libparts>
+  <libraries>
+    <library logical="Device">
+      <uri>/usr/share/kicad/symbols//Device.kicad_sym</uri>
+    </library>
+    <library logical="Switch">
+      <uri>/usr/share/kicad/symbols//Switch.kicad_sym</uri>
+    </library>
+  </libraries>
+  <nets>
+    <net code="1" name="+3V3">
+      <node ref="C10" pin="1" pintype="passive"/>
+      <node ref="C11" pin="1" pintype="passive"/>
+      <node ref="C12" pin="1" pintype="passive"/>
+      <node ref="C13" pin="1" pintype="passive"/>
+      <node ref="C14" pin="1" pintype="passive"/>
+      <node ref="C15" pin="1" pintype="passive"/>
+      <node ref="C19" pin="1" pintype="passive"/>
+      <node ref="C20" pin="1" pintype="passive"/>
+      <node ref="C21" pin="1" pintype="passive"/>
+      <node ref="C22" pin="1" pintype="passive"/>
+      <node ref="C3" pin="1" pintype="passive"/>
+      <node ref="C5" pin="1" pintype="passive"/>
+      <node ref="C6" pin="1" pintype="passive"/>
+      <node ref="C9" pin="1" pintype="passive"/>
+      <node ref="L2" pin="1" pintype="passive"/>
+      <node ref="R1" pin="1" pintype="passive"/>
+      <node ref="R11" pin="1" pintype="passive"/>
+      <node ref="R19" pin="1" pintype="passive"/>
+      <node ref="R2" pin="1" pintype="passive"/>
+      <node ref="R3" pin="1" pintype="passive"/>
+      <node ref="R4" pin="1" pintype="passive"/>
+      <node ref="R5" pin="1" pintype="passive"/>
+      <node ref="R6" pin="1" pintype="passive"/>
+      <node ref="R7" pin="1" pintype="passive"/>
+      <node ref="R8" pin="1" pintype="passive"/>
+      <node ref="U1" pin="10" pinfunction="VDDA33" pintype="power_in"/>
+      <node ref="U1" pin="13" pinfunction="OCS_N1" pintype="passive"/>
+      <node ref="U1" pin="15" pinfunction="VDD33" pintype="power_in"/>
+      <node ref="U1" pin="17" pinfunction="OCS_N2" pintype="passive"/>
+      <node ref="U1" pin="19" pinfunction="OCS_N3" pintype="passive"/>
+      <node ref="U1" pin="23" pinfunction="VDD33" pintype="power_in"/>
+      <node ref="U1" pin="29" pinfunction="VDDA33" pintype="power_in"/>
+      <node ref="U1" pin="36" pinfunction="VDD33" pintype="power_in"/>
+      <node ref="U1" pin="5" pinfunction="VDD33" pintype="power_in"/>
+      <node ref="U2" pin="14" pinfunction="VDD" pintype="power_in"/>
+      <node ref="U3" pin="4" pinfunction="VCC" pintype="power_in"/>
+      <node ref="U4" pin="3V3" pinfunction="3V3" pintype="power_in"/>
+      <node ref="U5" pin="CSB" pinfunction="CSB" pintype="input"/>
+      <node ref="U5" pin="VDD" pinfunction="VDD" pintype="power_in"/>
+      <node ref="U5" pin="VDDIO" pinfunction="VDDIO" pintype="power_in"/>
+      <node ref="U6" pin="ONOFF" pinfunction="ON/OFF" pintype="input"/>
+      <node ref="U6" pin="VBAT" pinfunction="VBAT" pintype="power_in"/>
+      <node ref="U6" pin="VCC" pinfunction="VCC" pintype="power_in"/>
+      <node ref="U7" pin="2" pinfunction="VOUT" pintype="power_out"/>
+    </net>
+    <net code="2" name="+5V">
+      <node ref="C7" pin="1" pintype="passive"/>
+      <node ref="C8" pin="1" pintype="passive"/>
+      <node ref="F1" pin="2" pintype="passive"/>
+      <node ref="R17" pin="1" pintype="passive"/>
+      <node ref="U7" pin="3" pinfunction="VIN" pintype="power_in"/>
+      <node ref="USB1" pin="1" pinfunction="VBUS" pintype="power_in"/>
+    </net>
+    <net code="3" name="ANT_SMA">
+      <node ref="C4" pin="1" pintype="passive"/>
+      <node ref="RF1" pin="1" pinfunction="SIG" pintype="passive"/>
+      <node ref="U2" pin="8" pinfunction="AMI" pintype="input"/>
+    </net>
+    <net code="4" name="BOOT">
+      <node ref="R11" pin="2" pintype="passive"/>
+      <node ref="U4" pin="IO0" pinfunction="GPIO0" pintype="input"/>
+    </net>
+    <net code="5" name="CC1">
+      <node ref="J1" pin="CC1" pinfunction="CC1" pintype="passive"/>
+      <node ref="R9" pin="1" pintype="passive"/>
+    </net>
+    <net code="6" name="CC2">
+      <node ref="J1" pin="CC2" pinfunction="CC2" pintype="passive"/>
+      <node ref="R10" pin="1" pintype="passive"/>
+    </net>
+    <net code="7" name="CFG22">
+      <node ref="R13" pin="1" pintype="passive"/>
+      <node ref="U1" pin="22" pinfunction="NON_REM1" pintype="passive"/>
+    </net>
+    <net code="8" name="CFG24">
+      <node ref="R14" pin="1" pintype="passive"/>
+      <node ref="U1" pin="24" pinfunction="CFG_SEL0" pintype="input"/>
+    </net>
+    <net code="9" name="CFG25">
+      <node ref="R15" pin="1" pintype="passive"/>
+      <node ref="U1" pin="25" pinfunction="CFG_SEL1" pintype="input"/>
+    </net>
+    <net code="10" name="CFG28">
+      <node ref="R16" pin="1" pintype="passive"/>
+      <node ref="U1" pin="28" pinfunction="LOCAL_PWR" pintype="passive"/>
+    </net>
+    <net code="11" name="CRFILT">
+      <node ref="C23" pin="1" pintype="passive"/>
+      <node ref="U1" pin="14" pinfunction="CRFILT" pintype="passive"/>
+    </net>
+    <net code="12" name="EN">
+      <node ref="R8" pin="2" pintype="passive"/>
+      <node ref="SW1" pin="1" pinfunction="1" pintype="passive"/>
+      <node ref="U4" pin="EN" pinfunction="EN" pintype="input"/>
+    </net>
+    <net code="13" name="FM_IN">
+      <node ref="C4" pin="2" pintype="passive"/>
+      <node ref="U2" pin="6" pinfunction="FMI" pintype="input"/>
+    </net>
+    <net code="14" name="GND">
+      <node ref="C1" pin="2" pintype="passive"/>
+      <node ref="C10" pin="2" pintype="passive"/>
+      <node ref="C11" pin="2" pintype="passive"/>
+      <node ref="C12" pin="2" pintype="passive"/>
+      <node ref="C13" pin="2" pintype="passive"/>
+      <node ref="C14" pin="2" pintype="passive"/>
+      <node ref="C15" pin="2" pintype="passive"/>
+      <node ref="C16" pin="2" pintype="passive"/>
+      <node ref="C17" pin="2" pintype="passive"/>
+      <node ref="C18" pin="2" pintype="passive"/>
+      <node ref="C19" pin="2" pintype="passive"/>
+      <node ref="C20" pin="2" pintype="passive"/>
+      <node ref="C21" pin="2" pintype="passive"/>
+      <node ref="C22" pin="2" pintype="passive"/>
+      <node ref="C23" pin="2" pintype="passive"/>
+      <node ref="C24" pin="2" pintype="passive"/>
+      <node ref="C3" pin="2" pintype="passive"/>
+      <node ref="C5" pin="2" pintype="passive"/>
+      <node ref="C6" pin="2" pintype="passive"/>
+      <node ref="C7" pin="2" pintype="passive"/>
+      <node ref="C8" pin="2" pintype="passive"/>
+      <node ref="C9" pin="2" pintype="passive"/>
+      <node ref="J1" pin="GND" pinfunction="GND" pintype="power_in"/>
+      <node ref="R10" pin="2" pintype="passive"/>
+      <node ref="R12" pin="2" pintype="passive"/>
+      <node ref="R13" pin="2" pintype="passive"/>
+      <node ref="R14" pin="2" pintype="passive"/>
+      <node ref="R15" pin="2" pintype="passive"/>
+      <node ref="R16" pin="2" pintype="passive"/>
+      <node ref="R18" pin="2" pintype="passive"/>
+      <node ref="R9" pin="2" pintype="passive"/>
+      <node ref="RF1" pin="2" pinfunction="SHIELD" pintype="power_in"/>
+      <node ref="RF2" pin="2" pinfunction="SHIELD" pintype="power_in"/>
+      <node ref="SW1" pin="2" pinfunction="2" pintype="passive"/>
+      <node ref="U1" pin="11" pinfunction="TEST" pintype="power_in"/>
+      <node ref="U1" pin="37" pinfunction="EP" pintype="power_in"/>
+      <node ref="U2" pin="10" pinfunction="SENB" pintype="input"/>
+      <node ref="U2" pin="15" pinfunction="GND" pintype="power_in"/>
+      <node ref="U2" pin="7" pinfunction="RFGND" pintype="power_in"/>
+      <node ref="U3" pin="2" pinfunction="GND" pintype="power_in"/>
+      <node ref="U3" pin="3" pinfunction="GND/TEST" pintype="power_in"/>
+      <node ref="U4" pin="GND" pinfunction="GND" pintype="power_in"/>
+      <node ref="U5" pin="GND" pinfunction="GND" pintype="power_in"/>
+      <node ref="U5" pin="SDO" pinfunction="SDO" pintype="input"/>
+      <node ref="U6" pin="GND" pinfunction="GND" pintype="power_in"/>
+      <node ref="U7" pin="1" pinfunction="GND" pintype="power_in"/>
+      <node ref="USB1" pin="4" pinfunction="GND" pintype="power_in"/>
+      <node ref="X1" pin="2" pinfunction="2" pintype="passive"/>
+      <node ref="X1" pin="3" pinfunction="3" pintype="passive"/>
+      <node ref="X1" pin="4" pinfunction="4" pintype="passive"/>
+      <node ref="X2" pin="2" pinfunction="2" pintype="passive"/>
+      <node ref="X2" pin="4" pinfunction="4" pintype="passive"/>
+    </net>
+    <net code="15" name="GPS_ANT">
+      <node ref="C16" pin="1" pintype="passive"/>
+      <node ref="L2" pin="2" pintype="passive"/>
+      <node ref="RF2" pin="1" pinfunction="SIG" pintype="passive"/>
+      <node ref="U6" pin="ANT" pinfunction="ANT" pintype="passive"/>
+    </net>
+    <net code="16" name="GPS_PPS">
+      <node ref="U4" pin="IO16" pinfunction="GPIO16" pintype="bidirectional"/>
+      <node ref="U6" pin="PPS" pinfunction="PPS" pintype="output"/>
+    </net>
+    <net code="17" name="HUB_RESET">
+      <node ref="R7" pin="2" pintype="passive"/>
+      <node ref="U1" pin="26" pinfunction="RESET_N" pintype="input"/>
+      <node ref="U4" pin="IO21" pinfunction="GPIO21" pintype="bidirectional"/>
+    </net>
+    <net code="18" name="I2C_SCL">
+      <node ref="R5" pin="2" pintype="passive"/>
+      <node ref="U2" pin="11" pinfunction="SCLK" pintype="input"/>
+      <node ref="U3" pin="1" pinfunction="SCL" pintype="input"/>
+      <node ref="U4" pin="IO8" pinfunction="GPIO8" pintype="bidirectional"/>
+      <node ref="U5" pin="SCL" pinfunction="SCL" pintype="input"/>
+    </net>
+    <net code="19" name="I2C_SDA">
+      <node ref="R6" pin="2" pintype="passive"/>
+      <node ref="U2" pin="12" pinfunction="SDIO" pintype="bidirectional"/>
+      <node ref="U3" pin="6" pinfunction="SDA" pintype="bidirectional"/>
+      <node ref="U4" pin="IO9" pinfunction="GPIO9" pintype="bidirectional"/>
+      <node ref="U5" pin="SDA" pinfunction="SDA" pintype="bidirectional"/>
+    </net>
+    <net code="20" name="I2S_BCLK">
+      <node ref="U2" pin="2" pinfunction="GPO3/DCLK" pintype="output"/>
+      <node ref="U4" pin="IO4" pinfunction="GPIO4" pintype="bidirectional"/>
+    </net>
+    <net code="21" name="I2S_DIN">
+      <node ref="U2" pin="16" pinfunction="ROUT/DOUT" pintype="output"/>
+      <node ref="U4" pin="IO7" pinfunction="GPIO7" pintype="bidirectional"/>
+    </net>
+    <net code="22" name="I2S_LRCLK">
+      <node ref="U2" pin="1" pinfunction="LOUT/DFS" pintype="output"/>
+      <node ref="U4" pin="IO5" pinfunction="GPIO5" pintype="bidirectional"/>
+    </net>
+    <net code="23" name="IMU_INT">
+      <node ref="U4" pin="IO12" pinfunction="GPIO12" pintype="bidirectional"/>
+      <node ref="U5" pin="INT1" pinfunction="INT1" pintype="output"/>
+    </net>
+    <net code="24" name="LED1_A">
+      <node ref="LED1" pin="2" pinfunction="A" pintype="passive"/>
+      <node ref="R1" pin="2" pintype="passive"/>
+    </net>
+    <net code="25" name="LED1_K">
+      <node ref="LED1" pin="1" pinfunction="K" pintype="passive"/>
+      <node ref="U4" pin="IO1" pinfunction="GPIO1" pintype="bidirectional"/>
+    </net>
+    <net code="26" name="LED2_A">
+      <node ref="LED2" pin="2" pinfunction="A" pintype="passive"/>
+      <node ref="R2" pin="2" pintype="passive"/>
+    </net>
+    <net code="27" name="LED2_K">
+      <node ref="LED2" pin="1" pinfunction="K" pintype="passive"/>
+      <node ref="U4" pin="IO2" pinfunction="GPIO2" pintype="bidirectional"/>
+    </net>
+    <net code="28" name="LED3_A">
+      <node ref="LED3" pin="2" pinfunction="A" pintype="passive"/>
+      <node ref="R3" pin="2" pintype="passive"/>
+    </net>
+    <net code="29" name="LED3_K">
+      <node ref="LED3" pin="1" pinfunction="K" pintype="passive"/>
+      <node ref="U4" pin="IO3" pinfunction="GPIO3" pintype="bidirectional"/>
+    </net>
+    <net code="30" name="LED4_A">
+      <node ref="LED4" pin="2" pinfunction="A" pintype="passive"/>
+      <node ref="R4" pin="2" pintype="passive"/>
+    </net>
+    <net code="31" name="LED4_K">
+      <node ref="LED4" pin="1" pinfunction="K" pintype="passive"/>
+      <node ref="U4" pin="IO46" pinfunction="GPIO46" pintype="bidirectional"/>
+    </net>
+    <net code="32" name="MAG_INT">
+      <node ref="U3" pin="5" pinfunction="INT" pintype="output"/>
+      <node ref="U4" pin="IO13" pinfunction="GPIO13" pintype="bidirectional"/>
+    </net>
+    <net code="33" name="PLLFILT">
+      <node ref="C24" pin="1" pintype="passive"/>
+      <node ref="U1" pin="34" pinfunction="PLLFILT" pintype="passive"/>
+    </net>
+    <net code="34" name="RBIAS">
+      <node ref="R12" pin="1" pintype="passive"/>
+      <node ref="U1" pin="35" pinfunction="RBIAS" pintype="passive"/>
+    </net>
+    <net code="35" name="RCLK">
+      <node ref="C1" pin="1" pintype="passive"/>
+      <node ref="U2" pin="13" pinfunction="RCLK" pintype="input"/>
+      <node ref="X1" pin="1" pinfunction="1" pintype="passive"/>
+    </net>
+    <net code="36" name="SI4732_INT">
+      <node ref="U2" pin="3" pinfunction="GPO2/INTB" pintype="output"/>
+      <node ref="U4" pin="IO10" pinfunction="GPIO10" pintype="bidirectional"/>
+    </net>
+    <net code="37" name="SI4732_RST">
+      <node ref="R19" pin="2" pintype="passive"/>
+      <node ref="U2" pin="9" pinfunction="RST" pintype="input"/>
+      <node ref="U4" pin="IO11" pinfunction="GPIO11" pintype="bidirectional"/>
+    </net>
+    <net code="38" name="TYPEC_DM">
+      <node ref="J1" pin="DM" pinfunction="D-" pintype="passive"/>
+      <node ref="U1" pin="30" pinfunction="USBDM_UP" pintype="passive"/>
+    </net>
+    <net code="39" name="TYPEC_DP">
+      <node ref="J1" pin="DP" pinfunction="D+" pintype="passive"/>
+      <node ref="U1" pin="31" pinfunction="USBDP_UP" pintype="passive"/>
+    </net>
+    <net code="40" name="UART_RX">
+      <node ref="U4" pin="IO17" pinfunction="GPIO17" pintype="bidirectional"/>
+      <node ref="U6" pin="TXD" pinfunction="TXD" pintype="output"/>
+    </net>
+    <net code="41" name="UART_TX">
+      <node ref="U4" pin="IO18" pinfunction="GPIO18" pintype="bidirectional"/>
+      <node ref="U6" pin="RXD" pinfunction="RXD" pintype="input"/>
+    </net>
+    <net code="42" name="USBA_DM">
+      <node ref="U1" pin="6" pinfunction="USBDM_DN3" pintype="passive"/>
+      <node ref="USB1" pin="2" pinfunction="D-" pintype="passive"/>
+    </net>
+    <net code="43" name="USBA_DP">
+      <node ref="U1" pin="7" pinfunction="USBDP_DN3" pintype="passive"/>
+      <node ref="USB1" pin="3" pinfunction="D+" pintype="passive"/>
+    </net>
+    <net code="44" name="USB_DM">
+      <node ref="U1" pin="3" pinfunction="USBDM_DN2" pintype="passive"/>
+      <node ref="U4" pin="IO19" pinfunction="GPIO19" pintype="bidirectional"/>
+    </net>
+    <net code="45" name="USB_DP">
+      <node ref="U1" pin="4" pinfunction="USBDP_DN2" pintype="passive"/>
+      <node ref="U4" pin="IO20" pinfunction="GPIO20" pintype="bidirectional"/>
+    </net>
+    <net code="46" name="VBUS">
+      <node ref="F1" pin="1" pintype="passive"/>
+      <node ref="J1" pin="VBUS" pinfunction="VBUS" pintype="power_in"/>
+    </net>
+    <net code="47" name="VBUS_DET">
+      <node ref="R17" pin="2" pintype="passive"/>
+      <node ref="R18" pin="1" pintype="passive"/>
+      <node ref="U1" pin="27" pinfunction="VBUS_DET" pintype="passive"/>
+    </net>
+    <net code="48" name="XTALIN">
+      <node ref="C17" pin="1" pintype="passive"/>
+      <node ref="U1" pin="33" pinfunction="XTALIN" pintype="passive"/>
+      <node ref="X2" pin="1" pinfunction="1" pintype="passive"/>
+    </net>
+    <net code="49" name="XTALOUT">
+      <node ref="C18" pin="1" pintype="passive"/>
+      <node ref="U1" pin="32" pinfunction="XTALOUT" pintype="passive"/>
+      <node ref="X2" pin="3" pinfunction="3" pintype="passive"/>
+    </net>
+    <net code="50" name="unconnected-(U1-NC-Pad21)">
+      <node ref="U1" pin="21" pinfunction="NC" pintype="passive+no_connect"/>
+    </net>
+    <net code="51" name="unconnected-(U1-PRTPWR1-Pad12)">
+      <node ref="U1" pin="12" pinfunction="PRTPWR1" pintype="passive+no_connect"/>
+    </net>
+    <net code="52" name="unconnected-(U1-PRTPWR2-Pad16)">
+      <node ref="U1" pin="16" pinfunction="PRTPWR2" pintype="passive+no_connect"/>
+    </net>
+    <net code="53" name="unconnected-(U1-PRTPWR3-Pad18)">
+      <node ref="U1" pin="18" pinfunction="PRTPWR3" pintype="passive+no_connect"/>
+    </net>
+    <net code="54" name="unconnected-(U1-PRTPWR4-Pad20)">
+      <node ref="U1" pin="20" pinfunction="PRTPWR4" pintype="passive+no_connect"/>
+    </net>
+    <net code="55" name="unconnected-(U1-USBDM_DN1-Pad1)">
+      <node ref="U1" pin="1" pinfunction="USBDM_DN1" pintype="passive+no_connect"/>
+    </net>
+    <net code="56" name="unconnected-(U1-USBDM_DN4-Pad8)">
+      <node ref="U1" pin="8" pinfunction="USBDM_DN4" pintype="passive+no_connect"/>
+    </net>
+    <net code="57" name="unconnected-(U1-USBDP_DN1-Pad2)">
+      <node ref="U1" pin="2" pinfunction="USBDP_DN1" pintype="passive+no_connect"/>
+    </net>
+    <net code="58" name="unconnected-(U1-USBDP_DN4-Pad9)">
+      <node ref="U1" pin="9" pinfunction="USBDP_DN4" pintype="passive+no_connect"/>
+    </net>
+    <net code="59" name="unconnected-(U2-GPO1-Pad4)">
+      <node ref="U2" pin="4" pinfunction="GPO1" pintype="passive+no_connect"/>
+    </net>
+    <net code="60" name="unconnected-(U2-NC-Pad5)">
+      <node ref="U2" pin="5" pinfunction="NC" pintype="passive+no_connect"/>
+    </net>
+    <net code="61" name="unconnected-(U4-GPIO14-PadIO14)">
+      <node ref="U4" pin="IO14" pinfunction="GPIO14" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="62" name="unconnected-(U4-GPIO15-PadIO15)">
+      <node ref="U4" pin="IO15" pinfunction="GPIO15" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="63" name="unconnected-(U5-PadINT2)">
+      <node ref="U5" pin="INT2" pinfunction="INT2" pintype="output+no_connect"/>
+    </net>
+  </nets>
+</export>
