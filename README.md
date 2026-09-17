@@ -3,7 +3,7 @@
 **MBDSDR** = **MB** (呼号 BI4**MB**) + **BDS** (北斗卫星导航系统 BeiDou Navigation Satellite System) + **SDR** (软件定义无线电 Software Defined Radio)
 
 > 全开源 GPL-3.0 | 呼号 BI4MIB | 硬件板名 **ai-sdr Mini**
-> 目标：让大众人人都能用的国产化 AI 定义无线电软件，同时作为 IEEE 论文的参考实现。
+> 目标：让大众人人都能用的国产化 AI 定义无线电软件。
 
 ---
 
@@ -15,7 +15,7 @@ MBDSDR 是一个**全栈 AI 定义无线电（AI-Defined Radio, AIDR）参考平
 - **人在回路**：人设定目标，AI 执行调控，AI 办不到时反向指挥人操作
 - **自然语言优先**："找一个信号强的 FM 电台并录 30 秒" 替代手动调谐
 - **SDR 功能工具化**：全部功能封装为 MCP 工具，任意 AI IDE（Cursor/Claude/VS Code）可直接调用硬件
-- **能力可演进**：模型可在沙箱中改代码，用户可投稿新功能，一键恢复防幻觉变砖
+- **能力可演进**：模型可在沙箱中改代码，用户可贡献新功能，一键恢复防幻觉变砖
 - **不依赖 OpenGL**：多套 UI 方案并存，WOA/Wayland 等无 OpenGL 环境有降级
 
 ---
@@ -91,7 +91,7 @@ MBDSDR/
 │   ├── mcp_worker.py                 # MCP 工作线程
 │   └── requirements.txt              # 依赖
 │
-├── MBDSDR-IEEE论文初稿-v0.1.md       # IEEE 论文初稿 (499 行, 8 章 + 参考文献 + 附录)
+├── paper/TCCN-ADR-Draft-v0.1.md       # 论文初稿 (8 章 + 参考文献)
 ├── MBDSDR-AI定义无线电白皮书-v1.0.docx  # 白皮书 (458 段, 12 表, 96 标题)
 ├── AI定义无线电-概念定义与框架-v2.1.md   # AIDR 形式化定义与理论框架 (68KB)
 ├── 03-智能体内核-多模态与可靠性增强.md     # 专题: 智能体内核
@@ -345,7 +345,7 @@ python3 mbdsdr_mcp_client.py --host localhost --port 81 get_status
 2. **AI 辅助自主调控**：频偏校正、中心频点核对、跳频识别、自动找台等
 3. **自然语言优先交互**：极短自然语言指令驱动，传统 GUI 作降级
 4. **SDR 功能工具化与可编程性**：全部功能封装为 MCP 工具，支持自编程
-5. **能力可演进**：模型改沙箱/源码 + 用户投稿 + 一键恢复
+5. **能力可演进**：模型改沙箱/源码 + 用户贡献 + 一键恢复
 
 详见 `AI定义无线电-概念定义与框架-v2.1.md`（含形式化描述、状态空间、设计原则）。
 
@@ -353,8 +353,7 @@ python3 mbdsdr_mcp_client.py --host localhost --port 81 get_status
 
 ## 论文与白皮书
 
-- **IEEE 论文初稿**：`MBDSDR-IEEE论文初稿-v0.1.md`（499 行，8 章 + 25 篇参考文献 + 附录 BOM/MCP 协议示例）
-  - 拟投 WCL（IEEE Wireless Communications Letters）
+- **论文初稿**：`paper/TCCN-ADR-Draft-v0.1.md`（8 章 + 参考文献）
   - 8 个实验 Methodology 已设计，实验数据待硬件回采
   - 核心创新点：全栈 AIDR 参考实现、人在回路双向指令流、固件级 MCP 工具发现、自进化+一键恢复、9 轴指向系统
 
@@ -376,7 +375,7 @@ MBDSDR 支持模型自编程与功能演进：
 1. **沙箱执行**：模型生成的代码在隔离沙箱中执行，无法直接访问硬件
 2. **用户确认**：沙箱执行成功后展示 diff，用户确认后合入
 3. **一键恢复**：保留稳定版本快照，模型幻觉导致异常时一键回滚
-4. **用户投稿**：类似创意工坊，用户投稿新功能，专家委员会审查后合入
+4. **用户贡献**：类似创意工坊，用户贡献新功能，专家委员会审查后合入
 
 参考实现：`hermes-self-evolution/`、`kilo-code/`、`mimo-code/`、`opencode/`（已克隆，借鉴上下文管理与代码执行机制）。
 
@@ -421,18 +420,18 @@ python3 mbdsdr_mcp_client.py --host localhost --port 81 find_strongest_fm
 - [x] 固件 v0.6（14 个 MCP 工具 + list_tools 工具发现）
 - [x] 电脑端 MCP 客户端 + stdio 桥接器（端到端测试通过）
 - [x] 硬件模拟服务器（无硬件测试）
-- [x] IEEE 论文初稿 v0.1（8 章 + 参考文献 + 附录）
+- [x] 论文初稿 v0.1（8 章 + 参考文献）
 - [x] 白皮书 v1.0
 - [x] AIDR 概念定义 v2.1
 - [x] 5 个专题文档
 - [x] 自进化 agent 克隆（Hermes/Kilo/Mimo/OpenCode）
 - [ ] 硬件投板 + SMT 焊接
 - [ ] 固件烧录 + 真实硬件测试（8 个实验）
-- [ ] 论文实验数据采集 + 定稿投 WCL
+- [ ] 论文实验数据采集 + 定稿
 - [ ] 桌面端 Qt6 UI（日式低饱和扁平化，MiSans 字体）
 - [ ] 移动端 HTML UI 完善
 - [ ] pyrtlsdr 后端（异构双前端）
-- [ ] 自进化框架完善（沙箱 + 一键恢复 + 用户投稿）
+- [ ] 自进化框架完善（沙箱 + 一键恢复 + 用户贡献）
 - [ ] 发射子板 v0.8（SI4463/CC1120）
 - [ ] 原始 IQ 前端（ADC 直采）
 - [ ] VVVF 电磁逆向（电磁拾音器 + AI 逆向）
@@ -446,17 +445,7 @@ GPL-3.0（全开源）
 硬件：KiCad 工程 + BOM + 连接表，可直接投板
 固件：Arduino，可直接烧录
 软件：Python，可直接运行
-论文：CC-BY（拟投 IEEE，版权后续转移）
-
----
-
-## 致谢
-
-- 呼号 BI4MIB（何浩瀚）
-- 飞行社 / 2026 AI 先锋未来人才大赛
-- GNU Radio / SDR++ / SatDump 开源社区
-- KiCad / 立创EDA / 嘉立创 SMT
-- 硅基流动（LLM API）
+论文：CC-BY
 
 ---
 
