@@ -15,7 +15,7 @@ MBDSDR AI 内核 - 版本存储
 import json
 import os
 import time
-import shutil
+
 import hashlib
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple

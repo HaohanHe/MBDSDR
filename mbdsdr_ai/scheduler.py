@@ -23,7 +23,7 @@ import json
 import time
 import threading
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional
 
 
 @dataclass
