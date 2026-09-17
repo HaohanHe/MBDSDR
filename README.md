@@ -25,25 +25,36 @@ MBDSDR 是一个**全栈 AI 定义无线电（AI-Defined Radio, AIDR）参考平
 ```
 MBDSDR/
 ├── ai-sdr-mini-kicad/              # 硬件工程 (KiCad 7)
-│   ├── ai-sdr-mini.kicad_sch       # 原理图 (v0.7.1, 62 元件, 已修复 decoding-error)
+│   ├── ai-sdr-mini.kicad_sch       # 原理图 (v0.7.1, 62 元件)
 │   ├── ai-sdr-mini.kicad_pcb       # PCB 布局参考 (80×60mm, 未布线)
+│   ├── ai-sdr-mini.kicad_pro       # KiCad 工程文件
 │   ├── ai-sdr-mini.net              # 网表 (49 命名网络)
-│   ├── ai-sdr-mini-原理图.pdf        # 原理图 PDF (可直接预览)
-│   ├── BOM-MBDSDR-Mini-v0.7.1-最终下单版.xlsx  # BOM (19 关键件带立创编号)
+│   ├── ai-sdr-mini-bom.xml          # BOM (XML 格式)
+│   ├── BOM-MBDSDR-Mini-v0.7-数据手册修正版.csv  # BOM (CSV, 带立创编号)
 │   ├── 原理图连接表-v0.7-匹配立创工程.md       # 逐引脚权威连接表
 │   ├── README-导入说明.md            # 立创EDA 导入步骤
-│   ├── ai_sdr_mini_firmware_v0.5_WebOTA.ino  # ESP32 固件 v0.6 (1163 行)
+│   ├── schematic_layout_preview.svg  # 原理图布局预览 (SVG)
+│   ├── ai_sdr_mini_firmware_v0.5_WebOTA.ino  # ESP32 固件 v0.6
 │   ├── mbdsdr_protocol.h            # MCP 协议头
 │   ├── generate_schematic.py         # 数据驱动原理图生成器
-│   ├── normalize_sch.py              # KiCad S-表达式规范化器 (去注释)
-│   └── generate_pcb.py               # PCB 生成器
+│   ├── generate_pcb.py               # PCB 生成器
+│   ├── normalize_sch.py              # KiCad S-表达式规范化器
+│   ├── bisect_sch.py                 # 原理图二分排查
+│   ├── connectivity_check.py         # 连通性检查
+│   ├── gen_netlist.py                # 网表生成
+│   ├── preview_png.py                # 预览图生成
+│   ├── validate_sexpr.py             # S-表达式验证
+│   ├── verify_layout.py              # 布局验证
+│   └── wire_diag.py                  # 连线诊断
 │
-├── mbdsdr_mcp_client.py             # 电脑端 MCP 客户端 + stdio MCP 桥接器 (711 行, 硬件14工具)
-├── mbdsdr_ai_mcp_server.py           # AI 内核 MCP stdio 服务器 (暴露128工具给任意通用agent)
-├── mbdsdr_sim_server.py             # 硬件模拟服务器 (无硬件时测试 MCP 全链路)
+├── mbdsdr_mcp_client.py             # 电脑端 MCP 客户端 + stdio 桥接器 (硬件14工具)
+├── mbdsdr_ai_mcp_server.py           # AI 内核 MCP stdio 服务器 (暴露128工具)
+├── mbdsdr_sim_server.py             # 硬件模拟服务器 (无硬件时测试全链路)
+├── mbdsdr-mobile.html                # 移动端 Web UI
+├── mcp_server.example.json           # MCP 配置示例
 ├── MCP配置示例-Cursor-Claude.md      # Cursor / Claude Desktop MCP 配置指南
 │
-├── mbdsdr_ai/                        # AI 内核 v0.8.0 (30模块, 15482行, 128工具)
+├── mbdsdr_ai/                        # AI 内核 v0.8.0 (35模块, 128工具)
 │   ├── __init__.py                   # 包入口 (MBDSDRAgent, AgentConfig)
 │   ├── config.py                     # 配置管理
 │   ├── context_manager.py            # 上下文管理 (Kilo Code/Mimo Code 借鉴)
@@ -53,15 +64,15 @@ MBDSDR/
 │   ├── memory.py                     # 记忆系统
 │   ├── version_store.py              # 版本存储 (git-like 快照)
 │   ├── sandbox.py                    # 沙箱执行 (子进程隔离)
-│   ├── self_evolution.py             # 自进化引擎 (提出→验证→沙箱→评估→提交→回滚)
+│   ├── self_evolution.py             # 自进化引擎
 │   ├── guardian.py                   # 守护者 (修改前自动快照, 失败自动回滚)
 │   ├── workflow_engine.py            # 工作流引擎 (6个预设工作流)
 │   ├── scheduler.py                  # 定时任务调度器
-│   ├── sdr_backend.py                # SDR 后端抽象 (Mock/RTL-SDR/HackRF/USRP/ai-sdr Mini)
-│   ├── spectrum_processor.py         # 频谱处理 (FFT/峰值检测/亚bin精度/瀑布图/调制特征)
+│   ├── sdr_backend.py                # SDR 后端抽象 (Mock/RTL-SDR/HackRF/USRP/ai-sdr)
+│   ├── spectrum_processor.py         # 频谱处理 (FFT/峰值检测/瀑布图)
 │   ├── sdr_tools.py                  # SDR 专用工具注册器 (38个工具)
-│   ├── dsp.py                        # DSP 算法 (IQ校正/解调/AGC/基带录制/信号分析, 1024行)
-│   ├── decoders.py                   # 解码器 (卫星轨道/NOAA APT/SSTV/跳频/FT8/APRS/ADS-B)
+│   ├── dsp.py                        # DSP 算法 (IQ校正/解调/AGC/基带录制)
+│   ├── decoders.py                   # 解码器 (卫星/NOAA/SSTV/跳频/FT8/APRS/ADS-B)
 │   ├── hooks.py                      # Hook 事件系统 (44种事件类型)
 │   ├── subagents.py                  # 子代理系统 (7种子代理类型)
 │   ├── pose.py                       # 位姿融合 (6DOF/9DOF/倾斜补偿罗盘/AR投影)
@@ -69,41 +80,38 @@ MBDSDR/
 │   ├── file_tracker.py               # 文件变更跟踪/回滚
 │   ├── plugin_system.py              # 模块化插件系统 (7种插件类型)
 │   ├── llm_judge.py                  # LLM-as-Judge (8维度评分)
-│   ├── self_learning.py              # 自学习闭环 (记录经验→批量学习→获取建议)
+│   ├── self_learning.py              # 自学习闭环
 │   ├── orchestrator.py               # 智能编排器 (依赖管理+拓扑排序+并行执行)
-│   ├── code_editor.py                # 自编程核心 (源代码读取/修改/自动备份/热加载/git commit/回滚)
-│   ├── astronomy.py                  # 天文计算 (Stellarium 借鉴: 坐标转换/时间系统/大气折射/天线参数)
-│   └── amr.py                        # 自动调制识别 (KNN机器学习分类器, 24维特征, 45训练样本)
+│   ├── code_editor.py                # 自编程核心 (读取/修改/备份/热加载/git/回滚)
+│   ├── astronomy.py                  # 天文计算 (Stellarium 借鉴: 坐标转换/大气折射)
+│   └── amr.py                        # 自动调制识别 (KNN机器学习分类器)
 │
-├── tests/                            # 测试
-│   ├── test_full_integration.py      # 全面集成测试 v1
-│   ├── test_full_integration_v2.py   # 全面集成测试 v2 (185项, 100%通过)
-│   └── test_report_v2.txt            # 测试报告
-│
-├── desktop/                          # 桌面端 Qt6 UI (9文件, 3022行)
+├── desktop/                          # 桌面端 Qt6 UI (11文件)
 │   ├── main.py                       # 入口
 │   ├── main_window.py                # 主窗口
 │   ├── themes.py                     # 3套主题 (日式低饱和)
 │   ├── spectrum_widget.py            # 频谱图 (OpenGL优先+QPainter降级)
 │   ├── control_panel.py              # 控制面板
 │   ├── status_panel.py               # 状态面板
-│   ├── ai_panel.py                   # AI 对话面板 (调用 MBDSDRAgent)
+│   ├── ai_panel.py                   # AI 对话面板
 │   ├── mcp_worker.py                 # MCP 工作线程
+│   ├── rf_sky_view.py                # 射频天空视图 (卫星指向可视化)
 │   └── requirements.txt              # 依赖
 │
-├── paper/TCCN-ADR-Draft-v0.1.md       # 论文初稿 (8 章 + 参考文献)
-├── MBDSDR-AI定义无线电白皮书-v1.0.docx  # 白皮书 (458 段, 12 表, 96 标题)
-├── AI定义无线电-概念定义与框架-v2.1.md   # AIDR 形式化定义与理论框架 (68KB)
+├── tests/                            # 测试
+│   ├── test_full_integration.py      # 全面集成测试 v1
+│   ├── test_full_integration_v2.py   # 全面集成测试 v2 (185项, 100%通过)
+│   └── test_report_v2.txt            # 测试报告
+│
+├── AI定义无线电-概念定义与框架-v2.1.md   # AIDR 形式化定义与理论框架
 ├── 03-智能体内核-多模态与可靠性增强.md     # 专题: 智能体内核
 ├── 04-基带录制与文件格式.md               # 专题: 基带录制
 ├── 05-IQ前端校正与接收链.md               # 专题: IQ 前端
 ├── 06-MCP对外集成-AI即工具.md             # 专题: MCP 集成
 ├── 07-卫星指向与AR系统.md                 # 专题: 卫星指向与 AR
-│
-├── hermes-self-evolution/             # 克隆: Hermes Agent 自进化框架
-├── kilo-code/                          # 克隆: Kilo Code 上下文管理
-├── mimo-code/                          # 克隆: Mimo Code 多模态 agent
-└── opencode/                           # 克隆: OpenCode 开源 agent
+├── 原理图连接表-v0.7-匹配立创工程.md       # 硬件逐引脚连接表
+├── BOM-MBDSDR-Mini-v0.7-数据手册修正版.csv  # BOM (CSV)
+└── README.md
 ```
 
 ---
@@ -351,20 +359,13 @@ python3 mbdsdr_mcp_client.py --host localhost --port 81 get_status
 
 ---
 
-## 论文与白皮书
+## 文档
 
-- **论文初稿**：`paper/TCCN-ADR-Draft-v0.1.md`（8 章 + 参考文献）
-  - 8 个实验 Methodology 已设计，实验数据待硬件回采
-  - 核心创新点：全栈 AIDR 参考实现、人在回路双向指令流、固件级 MCP 工具发现、自进化+一键恢复、9 轴指向系统
-
-- **白皮书**：`MBDSDR-AI定义无线电白皮书-v1.0.docx`（458 段，12 表，96 标题）
-  - 面向大众与评审的项目介绍
-  - 含系统架构、双端协同、双向指令流、智能体内核等
-
-- **概念定义**：`AI定义无线电-概念定义与框架-v2.1.md`（68KB，8 章）
-  - AIDR 形式化定义、五大特征、形式化描述、设计原则、评估指标
+- **概念定义**：`AI定义无线电-概念定义与框架-v2.1.md`（AIDR 形式化定义、五大特征、设计原则、评估指标）
 
 - **5 个专题**：智能体内核、基带录制、IQ 前端、MCP 集成、卫星指向与 AR
+
+- **硬件连接表**：`原理图连接表-v0.7-匹配立创工程.md`（逐引脚权威连接表）
 
 ---
 
@@ -416,18 +417,15 @@ python3 mbdsdr_mcp_client.py --host localhost --port 81 find_strongest_fm
 
 ## 路线图
 
-- [x] 硬件原理图 v0.7.1（已修复 decoding-error，kicad-cli 金标准验证通过）
+- [x] 硬件原理图 v0.7.1（kicad-cli 金标准验证通过）
 - [x] 固件 v0.6（14 个 MCP 工具 + list_tools 工具发现）
 - [x] 电脑端 MCP 客户端 + stdio 桥接器（端到端测试通过）
 - [x] 硬件模拟服务器（无硬件测试）
-- [x] 论文初稿 v0.1（8 章 + 参考文献）
-- [x] 白皮书 v1.0
 - [x] AIDR 概念定义 v2.1
 - [x] 5 个专题文档
 - [x] 自进化 agent 克隆（Hermes/Kilo/Mimo/OpenCode）
 - [ ] 硬件投板 + SMT 焊接
-- [ ] 固件烧录 + 真实硬件测试（8 个实验）
-- [ ] 论文实验数据采集 + 定稿
+- [ ] 固件烧录 + 真实硬件测试
 - [ ] 桌面端 Qt6 UI（日式低饱和扁平化，MiSans 字体）
 - [ ] 移动端 HTML UI 完善
 - [ ] pyrtlsdr 后端（异构双前端）
@@ -445,9 +443,3 @@ GPL-3.0（全开源）
 硬件：KiCad 工程 + BOM + 连接表，可直接投板
 固件：Arduino，可直接烧录
 软件：Python，可直接运行
-论文：CC-BY
-
----
-
-*MBDSDR — 让人人都能用的 AI 定义无线电*
-*文档版本：README v0.1 (2026-09-16)*
