@@ -488,25 +488,307 @@ class AISDRMiniBackend(SDRBackend):
         self._host = host
         self._port = port
         self._ws = None
+        self._ws_lock = threading.Lock()
+        self._current_mode = "fm"  # fm / am / sw
+
+    def _send_mcp(self, method: str, params: Optional[Dict] = None) -> Optional[Dict]:
+        """发送 MCP JSON-RPC 请求并等待响应。"""
+        if not self._ws:
+            return None
+        try:
+            with self._ws_lock:
+                request = {
+                    "jsonrpc": "2.0",
+                    "id": int(time.time() * 1000) % 100000,
+                    "method": method,
+                    "params": params or {},
+                }
+                self._ws.send(json.dumps(request))
+                # 等待响应（最多 2 秒）
+                self._ws.settimeout(2.0)
+                result = json.loads(self._ws.recv())
+                return result.get("result") or result.get("params", {}).get("result")
+        except Exception:
+            return None
 
     def connect(self) -> bool:
-        # 通过 MCP 客户端连接
+        """通过 WebSocket 连接 ESP32。"""
         try:
-            self.status.connected = True
-            self._start_time = time.time()
-            return True
+            import websocket
+            url = f"ws://{self._host}:{self._port}"
+            self._ws = websocket.create_connection(url, timeout=3)
+            # 验证连接：调用 list_tools
+            result = self._send_mcp("list_tools")
+            if result is not None:
+                self.status.connected = True
+                self._start_time = time.time()
+                # 拉取当前状态
+                self._refresh_status()
+                return True
+            else:
+                self.disconnect()
+                return False
         except Exception:
+            self.status.connected = False
+            self._ws = None
             return False
+
+    def disconnect(self):
+        if self._ws:
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+        super().disconnect()
+
+    def _refresh_status(self):
+        """从设备拉取当前状态。"""
+        result = self._send_mcp("get_status")
+        if result:
+            if "freq" in result:
+                self.status.frequency_hz = float(result["freq"]) * 1000000 if result.get("mode_name") == "FM" else float(result["freq"]) * 1000
+            if "rssi" in result:
+                self.status.rssi = float(result["rssi"])
+            if "snr" in result:
+                self.status.snr = float(result["snr"])
+            if "volume" in result:
+                self.status.volume = int(result["volume"])
+            if "mode_name" in result:
+                self._current_mode = result["mode_name"].lower()
 
     def set_frequency(self, freq_hz: float) -> bool:
         if not super().set_frequency(freq_hz):
             return False
-        # 通过 MCP 发送 tune_fm / tune_am
+        # 根据频率范围选择 FM 或 AM
+        if 64000000 <= freq_hz <= 108000000:
+            result = self._send_mcp("tune_fm", {"freq_mhz": freq_hz / 1000000})
+            self._current_mode = "fm"
+        elif 531000 <= freq_hz <= 1710000:
+            result = self._send_mcp("tune_am", {"freq_khz": int(freq_hz / 1000)})
+            self._current_mode = "am"
+        else:
+            # SW 短波范围（需要上变频）
+            result = self._send_mcp("tune_am", {"freq_khz": int(freq_hz / 1000)})
+            self._current_mode = "sw"
+        return result is not None
+
+    def set_gain(self, gain_db: float) -> bool:
+        # SI4732 没有直接的增益控制，用 AGC
+        if not super().set_gain(gain_db):
+            return False
         return True
+
+    def set_volume(self, volume: int) -> bool:
+        """设置音量（0-63）。"""
+        volume = max(0, min(63, volume))
+        result = self._send_mcp("set_volume", {"volume": volume})
+        if result is not None:
+            self.status.volume = volume
+            return True
+        return False
+
+    def get_gps(self) -> Optional[Dict]:
+        """获取 GPS/北斗定位。"""
+        return self._send_mcp("get_gps")
+
+    def get_imu(self) -> Optional[Dict]:
+        """获取 9 轴姿态。"""
+        return self._send_mcp("get_imu")
+
+    def start_record(self) -> bool:
+        """开始 I2S 录音。"""
+        result = self._send_mcp("start_record")
+        if result is not None:
+            self.status.recording = True
+            return True
+        return False
+
+    def stop_record(self) -> Optional[Dict]:
+        """停止录音，返回采样数。"""
+        result = self._send_mcp("stop_record")
+        if result is not None:
+            self.status.recording = False
+        return result
 
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
         # SI4732 不出 IQ，返回 None
         return None
+
+
+class HackRFBackend(SDRBackend):
+    """
+    HackRF One 后端。
+
+    使用 hackrf 库（libhackrf + Python 绑定）。
+    支持 1 MHz - 6 GHz，最大 20 MS/s，半双工收发。
+    需要安装：pip install hackrf 以及 libhackrf 系统库。
+    """
+
+    def __init__(self, device_index: int = 0):
+        device = SDRDevice(
+            device_type="hackrf",
+            device_id=f"hackrf_{device_index}",
+            name=f"HackRF One #{device_index}",
+            frequency_range=(1000000, 6000000000),
+            sample_rate_range=(2000000, 20000000),
+            max_gain=40.0,
+            supports_iq=True,
+            supports_tx=True,
+        )
+        super().__init__(device)
+        self._device_index = device_index
+        self._hackrf = None
+
+    def connect(self) -> bool:
+        try:
+            import hackrf
+            self._hackrf = hackrf.HackRF()
+            self.status.connected = True
+            self._start_time = time.time()
+            return True
+        except Exception:
+            self.status.connected = False
+            return False
+
+    def disconnect(self):
+        if self._hackrf:
+            try:
+                self._hackrf.close()
+            except Exception:
+                pass
+            self._hackrf = None
+        super().disconnect()
+
+    def set_frequency(self, freq_hz: float) -> bool:
+        if not super().set_frequency(freq_hz):
+            return False
+        if self._hackrf:
+            try:
+                self._hackrf.frequency = int(freq_hz)
+            except Exception:
+                return False
+        return True
+
+    def set_sample_rate(self, rate_hz: float) -> bool:
+        if not super().set_sample_rate(rate_hz):
+            return False
+        if self._hackrf:
+            try:
+                self._hackrf.sample_rate = int(rate_hz)
+            except Exception:
+                return False
+        return True
+
+    def set_gain(self, gain_db: float) -> bool:
+        if not super().set_gain(gain_db):
+            return False
+        if self._hackrf:
+            try:
+                self._hackrf.gain = int(gain_db)
+            except Exception:
+                return False
+        return True
+
+    def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
+        if not self.status.connected or not self._hackrf:
+            return None
+        try:
+            samples = self._hackrf.read_samples(num_samples)
+            self._samples_read += num_samples
+            return samples
+        except Exception:
+            return None
+
+
+class USRPBackend(SDRBackend):
+    """
+    USRP 后端（Ettus Research / NI）。
+
+    使用 UHD 库（uhd Python 绑定）。
+    支持多种 USRP 型号（B200/B210/X300/X310/N200/N210 等）。
+    需要安装：pip install uhd 以及 libuhd 系统库。
+    """
+
+    def __init__(self, device_args: str = ""):
+        device = SDRDevice(
+            device_type="usrp",
+            device_id=f"usrp_{device_args or 'default'}",
+            name=f"USRP ({device_args or 'auto'})",
+            frequency_range=(10000, 6000000000),
+            sample_rate_range=(100000, 56000000),
+            max_gain=76.0,
+            supports_iq=True,
+            supports_tx=True,
+        )
+        super().__init__(device)
+        self._device_args = device_args
+        self._usrp = None
+        self._rx_stream = None
+
+    def connect(self) -> bool:
+        try:
+            import uhd
+            self._usrp = uhd.usrp.MultiUSRP(self._device_args)
+            self.status.connected = True
+            self._start_time = time.time()
+            return True
+        except Exception:
+            self.status.connected = False
+            return False
+
+    def disconnect(self):
+        if self._rx_stream:
+            try:
+                self._rx_stream = None
+            except Exception:
+                pass
+        if self._usrp:
+            self._usrp = None
+        super().disconnect()
+
+    def set_frequency(self, freq_hz: float) -> bool:
+        if not super().set_frequency(freq_hz):
+            return False
+        if self._usrp:
+            try:
+                self._usrp.set_rx_freq(uhd.libpyuhd.types.tune_request(freq_hz))
+            except Exception:
+                return False
+        return True
+
+    def set_sample_rate(self, rate_hz: float) -> bool:
+        if not super().set_sample_rate(rate_hz):
+            return False
+        if self._usrp:
+            try:
+                self._usrp.set_rx_rate(rate_hz)
+            except Exception:
+                return False
+        return True
+
+    def set_gain(self, gain_db: float) -> bool:
+        if not super().set_gain(gain_db):
+            return False
+        if self._usrp:
+            try:
+                self._usrp.set_rx_gain(gain_db)
+            except Exception:
+                return False
+        return True
+
+    def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
+        if not self.status.connected or not self._usrp:
+            return None
+        try:
+            samples = self._usrp.recv_num_samps(num_samples, self.status.frequency_hz,
+                                                   self.status.sample_rate_hz, [0], 0.1)
+            if samples is not None and len(samples) > 0:
+                self._samples_read += len(samples[0])
+                return samples[0]
+            return None
+        except Exception:
+            return None
 
 
 class SDRBackendManager:
@@ -531,7 +813,6 @@ class SDRBackendManager:
         # 尝试发现 RTL-SDR
         try:
             from rtlsdr import RtlSdr
-            # 尝试打开设备 0
             sdr = RtlSdr(0)
             sdr.close()
             rtl = RTLSDRBackend(0)
@@ -539,7 +820,24 @@ class SDRBackendManager:
         except Exception:
             pass  # 没有 RTL-SDR
 
-        # 自研 ai-sdr Mini（如果在同一网络）
+        # 尝试发现 HackRF
+        try:
+            import hackrf
+            hf = HackRFBackend(0)
+            # 不实际连接，只注册（用户手动连接）
+            self.backends[hf.device.device_id] = hf
+        except Exception:
+            pass  # 没有 HackRF 库
+
+        # 尝试发现 USRP
+        try:
+            import uhd
+            usrp = USRPBackend()
+            self.backends[usrp.device.device_id] = usrp
+        except Exception:
+            pass  # 没有 UHD 库
+
+        # 自研 ai-sdr Mini（注册但不自动连接，用户手动连接）
         ai_mini = AISDRMiniBackend()
         self.backends[ai_mini.device.device_id] = ai_mini
 
