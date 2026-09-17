@@ -137,8 +137,14 @@ class Guardian:
             os.makedirs(backup_path, exist_ok=True)
             if os.path.isdir(source_path):
                 for root, dirs, files in os.walk(source_path):
+                    # 排除快照目录本身，避免递归备份
+                    if os.path.abspath(root).startswith(os.path.abspath(self.store_path)):
+                        continue
                     for fname in files:
                         src_file = os.path.join(root, fname)
+                        # 跳过快照目录中的文件
+                        if os.path.abspath(src_file).startswith(os.path.abspath(self.store_path)):
+                            continue
                         rel_path = os.path.relpath(src_file, source_path)
                         dst_file = os.path.join(backup_path, rel_path)
                         os.makedirs(os.path.dirname(dst_file), exist_ok=True)
@@ -208,18 +214,38 @@ class Guardian:
                 # 目录回滚
                 if os.path.exists(source_path):
                     if os.path.isdir(source_path):
-                        shutil.rmtree(source_path)
+                        # 只删除 source_path 中除 store_path 以外的内容
+                        for item in os.listdir(source_path):
+                            item_path = os.path.join(source_path, item)
+                            # 跳过快照目录
+                            if os.path.abspath(item_path) == os.path.abspath(self.store_path):
+                                continue
+                            if os.path.isdir(item_path):
+                                shutil.rmtree(item_path)
+                            else:
+                                os.remove(item_path)
                     else:
                         os.remove(source_path)
+                else:
+                    os.makedirs(source_path, exist_ok=True)
                 # 检查备份目录中是否只有一个文件（单文件快照）
                 backup_files = os.listdir(snap.backup_path)
                 if len(backup_files) == 1 and os.path.isfile(os.path.join(snap.backup_path, backup_files[0])):
                     # 单文件快照：直接复制文件
                     shutil.copy2(os.path.join(snap.backup_path, backup_files[0]), source_path)
                 else:
-                    shutil.copytree(snap.backup_path, source_path)
+                    # 多文件快照：逐个复制（避免 copytree 目标已存在的问题）
+                    for root, dirs, files in os.walk(snap.backup_path):
+                        rel_root = os.path.relpath(root, snap.backup_path)
+                        dst_root = os.path.join(source_path, rel_root) if rel_root != '.' else source_path
+                        os.makedirs(dst_root, exist_ok=True)
+                        for fname in files:
+                            src_file = os.path.join(root, fname)
+                            dst_file = os.path.join(dst_root, fname)
+                            shutil.copy2(src_file, dst_file)
             elif os.path.isfile(snap.backup_path):
                 # 单文件回滚
+                os.makedirs(os.path.dirname(source_path), exist_ok=True)
                 shutil.copy2(snap.backup_path, source_path)
 
             snap.phase = "rolled_back"

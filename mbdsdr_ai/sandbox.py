@@ -142,6 +142,28 @@ class Sandbox:
         self._execution_count = 0
         os.makedirs(self.work_dir, exist_ok=True)
 
+    def _scan_dangerous_code(self, code: str) -> Optional[str]:
+        """预扫描代码，检测危险操作。返回危险描述或 None。"""
+        import re
+        # 危险导入模式
+        dangerous_imports = [
+            r'^\s*import\s+os\b', r'^\s*import\s+subprocess\b',
+            r'^\s*import\s+socket\b', r'^\s*import\s+shutil\b',
+            r'^\s*import\s+ctypes\b', r'^\s*import\s+pickle\b',
+            r'^\s*import\s+importlib\b', r'^\s*import\s+sys\b',
+            r'^\s*from\s+os\b', r'^\s*from\s+subprocess\b',
+            r'^\s*from\s+socket\b', r'^\s*from\s+shutil\b',
+            r'^\s*__import__\s*\(', r'^\s*eval\s*\(',
+            r'^\s*exec\s*\(', r'^\s*compile\s*\(',
+            r'^\s*open\s*\(', r'^\s*os\.system\b',
+            r'^\s*os\.popen\b', r'^\s*subprocess\.(call|run|Popen|check_output)',
+            r'^\s*shutil\.(rmtree|move|copy)', r'^\s*socket\.socket',
+        ]
+        for pattern in dangerous_imports:
+            if re.search(pattern, code, re.MULTILINE):
+                return f"检测到危险操作: {pattern.strip()}"
+        return None
+
     def execute(self, code: str, inputs: Dict[str, Any] = None) -> SandboxResult:
         """
         在沙箱中执行 Python 代码。
@@ -152,17 +174,30 @@ class Sandbox:
         start_time = time.time()
         self._execution_count += 1
 
+        # 预扫描危险代码
+        danger = self._scan_dangerous_code(code)
+        if danger:
+            return SandboxResult(
+                success=False,
+                error=f"代码被沙箱拦截: {danger}",
+                execution_time_ms=(time.time() - start_time) * 1000,
+            )
+
         # 准备输入
         input_json = json.dumps(inputs or {}, ensure_ascii=False)
 
-        # 构造完整代码
-        full_code = f'INPUT_DATA = {input_json}\n'
-        full_code += code
+        # 使用安全执行模板包装用户代码
+        # 把用户代码转义为 Python 字符串字面量，确保 compile() 收到字符串
+        escaped_code = code.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+        safe_code = SAFE_EXEC_TEMPLATE.replace("USER_CODE", f'"{escaped_code}"')
+        # 还原模板中的花括号转义（{{ -> {, }} -> }）
+        safe_code = safe_code.replace("{{", "{").replace("}}", "}")
+        safe_code = f"INPUT_DATA = {input_json}\n" + safe_code
 
         # 写入临时文件
         code_file = os.path.join(self.work_dir, f"code_{self._execution_count}.py")
         with open(code_file, "w", encoding="utf-8") as f:
-            f.write(full_code)
+            f.write(safe_code)
 
         try:
             # 在子进程中执行
