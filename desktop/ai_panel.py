@@ -63,6 +63,10 @@ class AIWorker(QObject):
 class AIPanel(QWidget):
     """AI 对话面板。"""
 
+    # 配置文件路径
+    CONFIG_DIR = os.path.expanduser("~/.mbdsdr")
+    CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
+
     # 信号：请求调用工具（外部 MCP 客户端处理）
     tool_call_requested = Signal(str, dict)  # (tool_name, params)
     # 信号：自然语言指令
@@ -76,8 +80,35 @@ class AIPanel(QWidget):
         self._worker_thread: Optional[QThread] = None
         self._worker: Optional[AIWorker] = None
         self._is_processing = False
+        self._saved_config = self._load_config()
         self._build_ui()
         self._add_welcome_message()
+
+    @classmethod
+    def _load_config(cls) -> Dict[str, Any]:
+        """从配置文件加载 API 配置。"""
+        try:
+            if os.path.exists(cls.CONFIG_FILE):
+                with open(cls.CONFIG_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception:
+            pass
+        return {}
+
+    @classmethod
+    def _save_config(cls, config: Dict[str, Any]):
+        """保存 API 配置到配置文件。"""
+        try:
+            os.makedirs(cls.CONFIG_DIR, exist_ok=True)
+            with open(cls.CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+            # 限制配置文件权限（仅所有者可读写）
+            try:
+                os.chmod(cls.CONFIG_FILE, 0o600)
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -246,16 +277,25 @@ class AIPanel(QWidget):
 
         api_key_edit = QLineEdit()
         api_key_edit.setEchoMode(QLineEdit.Password)
-        if self.agent:
+        api_key_edit.setPlaceholderText("sk-...（留空则不使用 LLM）")
+        if self.agent and self.agent.config.api_key:
             api_key_edit.setText(self.agent.config.api_key)
+        elif self._saved_config.get("api_key"):
+            api_key_edit.setText(self._saved_config["api_key"])
         form.addRow("API Key:", api_key_edit)
 
         base_url_edit = QLineEdit()
-        base_url_edit.setText(self.agent.config.base_url if self.agent else "https://api.siliconflow.cn/v1")
+        base_url_edit.setText(
+            (self.agent.config.base_url if self.agent else None)
+            or self._saved_config.get("api_base", "https://api.siliconflow.cn/v1")
+        )
         form.addRow("Base URL:", base_url_edit)
 
         model_edit = QLineEdit()
-        model_edit.setText(self.agent.config.model if self.agent else "Qwen/Qwen3.6-35B-A3B")
+        model_edit.setText(
+            (self.agent.config.model if self.agent else None)
+            or self._saved_config.get("model", "Qwen/Qwen3.6-35B-A3B")
+        )
         form.addRow("模型:", model_edit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -264,29 +304,53 @@ class AIPanel(QWidget):
         form.addRow(buttons)
 
         if dialog.exec() == QDialog.Accepted:
-            config = AgentConfig(
-                api_key=api_key_edit.text().strip(),
-                base_url=base_url_edit.text().strip(),
-                model=model_edit.text().strip(),
-            )
+            api_key = api_key_edit.text().strip()
+            base_url = base_url_edit.text().strip()
+            model = model_edit.text().strip()
+            # 保存到配置文件
+            self._saved_config = {
+                "api_key": api_key,
+                "api_base": base_url,
+                "model": model,
+            }
+            self._save_config(self._saved_config)
+            # 重新初始化 agent
+            config = AgentConfig(api_key=api_key, base_url=base_url, model=model)
             self.agent = MBDSDRAgent(config)
             self._update_ai_status()
-            self._add_system_message(f"AI 已配置: {config.model}")
+            self._add_system_message(f"AI 已配置并保存: {model}（配置文件: ~/.mbdsdr/config.json）")
 
     def init_agent(self, api_key: str = "", base_url: str = "", model: str = ""):
-        """初始化 AI Agent（由外部调用）。"""
+        """初始化 AI Agent（由外部调用）。
+
+        配置优先级：传入参数 > 配置文件(~/.mbdsdr/config.json) > 环境变量 > 默认值
+        """
         if not AI_CORE_AVAILABLE:
             self._add_system_message("警告: mbdsdr_ai 模块不可用，使用规则引擎降级。")
             return
 
-        config = AgentConfig(
-            api_key=api_key or os.environ.get("MBDSDR_API_KEY", ""),
-            base_url=base_url or os.environ.get("MBDSDR_API_BASE", "https://api.siliconflow.cn/v1"),
-            model=model or os.environ.get("MBDSDR_MODEL", "Qwen/Qwen3.6-35B-A3B"),
+        # 优先级：参数 > 配置文件 > 环境变量 > 默认值
+        final_api_key = (
+            api_key
+            or self._saved_config.get("api_key", "")
+            or os.environ.get("MBDSDR_API_KEY", "")
         )
+        final_base_url = (
+            base_url
+            or self._saved_config.get("api_base", "")
+            or os.environ.get("MBDSDR_API_BASE", "https://api.siliconflow.cn/v1")
+        )
+        final_model = (
+            model
+            or self._saved_config.get("model", "")
+            or os.environ.get("MBDSDR_MODEL", "Qwen/Qwen3.6-35B-A3B")
+        )
+
+        config = AgentConfig(api_key=final_api_key, base_url=final_base_url, model=final_model)
         self.agent = MBDSDRAgent(config)
         self._update_ai_status()
-        self._add_system_message(f"AI 内核已初始化: {config.model}")
+        source = "参数" if api_key else ("配置文件" if self._saved_config.get("api_key") else ("环境变量" if os.environ.get("MBDSDR_API_KEY") else "默认"))
+        self._add_system_message(f"AI 内核已初始化: {final_model}（配置来源: {source}）")
 
     def register_mcp_tools(self, mcp_tools: List[Dict], mcp_call_handler):
         """注册 MCP 硬件工具到 AI Agent。"""
