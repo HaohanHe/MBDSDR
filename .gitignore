@@ -55,3 +55,10 @@ Thumbs.db
 fp-info-cache/
 *.kicad_prl
 *.kicad_bak
+
+# 论文不公开
+paper/
+
+# 论文不公开
+paper/
+MBDSDR-IEEE论文初稿*.md
