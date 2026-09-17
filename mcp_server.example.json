@@ -1,28 +1,31 @@
 {
-  "_comment": "MBDSDR 桌面能力 MCP 接入示例：复制 mbdsdr 段到 Claude Desktop / Cursor / 其他支持 MCP 的 AI Host 配置。需先启动 MBDSDR 桌面（其本地 HTTP 默认 127.0.0.1:7878）。",
+  "_comment": "MBDSDR AI 内核 MCP 接入示例：复制 mbdsdr 段到 Claude Desktop / Cursor / Cline / Kilo Code / OpenCode 等支持 MCP 的 AI Host。把 args 里的路径改成你本机 MBDSDR 目录的绝对路径。API Key 不写在这里，用环境变量 MBDSDR_API_KEY 或 ~/.mbdsdr/config.json。",
   "mcpServers": {
     "mbdsdr": {
       "command": "python3",
-      "args": ["-m", "ai.mcp_stdio_server"],
-      "cwd": "REPLACE_WITH_/MBDSDR/src/desktop",
+      "args": ["/绝对路径/MBDSDR/mbdsdr_ai_mcp_server.py"],
       "env": {
-        "MBDSDR_DESKTOP_URL": "http://127.0.0.1:7878",
-        "SILICONFLOW_API_KEY": "sk-可选，配置后 AI 可调用视觉模型看频谱图",
-        "MBDSDR_LLM_MODEL": "Qwen/Qwen2.5-7B-Instruct"
+        "MBDSDR_API_BASE": "https://api.siliconflow.cn/v1",
+        "MBDSDR_MODEL": "Qwen/Qwen3.6-35B-A3B"
       }
     }
   },
   "_exposed_tools_overview": {
-    "spectrum": "spectrum_get_view / find_signals / analyze_range / suggest_next（频谱感知与主动观测）",
-    "sdr": "get_status / ui_set_frequency / ui_set_gain / spectrum_set_view / spectrum_set_resolution（接收机控制）",
-    "vision": "ui_screenshot / vision_inspect_spectrum（截图与多模态看频谱）",
-    "record": "ui_start_recording / ui_stop_recording / baseband_analyze_file（基带录制、定时录制、离线文件分析）",
-    "ui": "ui_capabilities"
+    "sdr": "sdr_status / sdr_set_frequency / sdr_set_gain / sdr_set_sample_rate / sdr_set_bandwidth / sdr_set_demod / sdr_connect / sdr_list_devices / sdr_switch_device（接收机控制）",
+    "spectrum": "sdr_spectrum_analyze / sdr_spectrum_zoom / sdr_spectrum_pan / sdr_spectrum_find_signals / sdr_spectrum_screenshot / sdr_spectrum_center_offset（频谱感知、缩放、平移、截图）",
+    "ai_sdr": "sdr_ai_sweep / sdr_ai_find_center / sdr_identify_modulation / sdr_detect_fhss / sdr_measure_signal / sdr_iq_correct（AI 辅助扫频、找中心频点、调制识别、跳频检测）",
+    "decode": "sdr_decode_sstv / sdr_decode_ft8 / sdr_decode_adsb / sdr_decode_aprs / sdr_decode_noaa_apt / sdr_analyze_recording（数字模式解码）",
+    "record": "sdr_record_start / sdr_record_stop / sdr_recordings_list（基带录制）",
+    "satellite": "sdr_satellite_sky_view / sdr_satellite_doppler / astro_set_observer / astro_equatorial_to_altaz / astro_pointing_guidance（卫星天空图、多普勒、天线指向辅助）",
+    "sensor": "sdr_get_gps / sdr_get_imu（GNSS / IMU）",
+    "self_evolution": "code_read_file / code_modify_file / code_modify_section / code_run_tests / code_hot_reload / code_git_commit / code_rollback / guardian_status / guardian_rollback / file_change_track / file_change_revert（自编程、自进化、一键回滚）",
+    "agent_core": "context_status / list_models / switch_model / model_status / memory_write / memory_search / hook_list / hook_trigger / judge_evaluate / learning_record / learning_learn（上下文、模型、记忆、钩子、评判、自学习）"
   },
   "_notes": [
     "协议：JSON-RPC 2.0 over stdio，MCP protocolVersion 2024-11-05，每行一个 JSON。",
-    "C++ 核心另有一个 MCP（mbdsdr mcp，66 个 DSP 原语工具），本服务器桥接运行中的桌面端高层能力，二者互补。",
-    "工具返回为 JSON 文本，ok=false 时 MCP isError=true，AI Host 可据此自纠换路。",
-    "所有写操作（改频率/增益/录制）在桌面智能体侧带状态检查点，可回滚。"
+    "命令行自测：python3 mbdsdr_ai_mcp_server.py --cli list_tools；python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_status '{}'",
+    "API Key 优先级：命令行 --api-key > ~/.mbdsdr/config.json > 环境变量 MBDSDR_API_KEY > 默认。密钥不入库。",
+    "工具返回为 JSON 文本，失败时 MCP isError=true，AI Host 可据此自纠换路。",
+    "所有写操作（改频率/增益/录制/改代码）带状态检查点与守护者快照，可一键回滚。"
   ]
 }

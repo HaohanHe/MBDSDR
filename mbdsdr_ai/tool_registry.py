@@ -217,6 +217,21 @@ class ToolRegistry:
             self._log_call(result)
             return result
 
+        # 参数别名归一化：弱模型可能传 path/freq/gain 等别名，自动映射到标准参数名
+        # 仅当标准键不存在时才映射，不覆盖已有值
+        _PARAM_ALIASES = {
+            "path": "file_path", "freq": "frequency_hz", "frequency": "frequency_hz",
+            "samplerate": "sample_rate_hz", "sample_rate": "sample_rate_hz",
+            "bw": "bandwidth_hz", "bandwidth": "bandwidth_hz",
+            "gain": "gain_db", "input_file": "input_path",
+            "sat": "satellite_name", "satellite": "satellite_name",
+            "lat": "latitude", "lon": "longitude",
+        }
+        if isinstance(args, dict):
+            for _alias, _std in _PARAM_ALIASES.items():
+                if _alias in args and _std not in args:
+                    args[_std] = args.pop(_alias)
+
         # 调用 handler
         try:
             handler = tool["handler"]
