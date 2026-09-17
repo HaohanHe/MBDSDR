@@ -21,7 +21,7 @@ Astronomy：借鉴 Stellarium/Stellarium Web Engine 的天文计算能力。
 
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Tuple
 from enum import Enum
 

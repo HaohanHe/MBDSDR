@@ -25,9 +25,9 @@ AI 定义无线电的自进化核心，让模型能够改进自身。
     任何一步失败 → 自动回滚
 """
 
-import json
+
 import time
-import copy
+
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable, Tuple
 

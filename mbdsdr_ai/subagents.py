@@ -21,7 +21,7 @@ Subagents：子代理框架，让主 Agent 可以创建专门的子 Agent 处理
 """
 
 import time
-import json
+
 import threading
 import traceback
 from dataclasses import dataclass, field

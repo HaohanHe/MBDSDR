@@ -21,7 +21,7 @@ import json
 import re
 import time
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Callable, Tuple
+from typing import List, Dict, Any, Optional, Callable
 
 
 @dataclass
