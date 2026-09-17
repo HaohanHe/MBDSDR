@@ -401,6 +401,15 @@ class AIPanel(QWidget):
             f'<span style="color:#999;">{latency:.0f}ms</span>'
         )
 
+    @Slot(str, dict)
+    def on_tool_result(self, tool_name: str, result: dict):
+        """Worker 工具调用结果回调（MCP/设备工具调用完成后更新 AI 面板日志）。"""
+        if not isinstance(result, dict):
+            result = {"result": str(result)}
+        success = "error" not in result
+        result_str = json.dumps(result, ensure_ascii=False)[:300]
+        self._add_tool_log(tool_name, {}, success, result_str, 0.0)
+
     def _append_to_view(self, html: str):
         cursor = self.conversation_view.textCursor()
         cursor.movePosition(QTextCursor.End)
