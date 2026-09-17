@@ -3,7 +3,7 @@
 **MBDSDR** = **MB** (呼号 BI4**MB**) + **BDS** (北斗卫星导航系统 BeiDou Navigation Satellite System) + **SDR** (软件定义无线电 Software Defined Radio)
 
 > 全开源 GPL-3.0 | 呼号 BI4MIB | 硬件板名 **ai-sdr Mini**
-> 目标：让大众人人都能用的国产化 AI 定义无线电软件，同时作为 IEEE/WCL 论文与会津大学投名状的参考实现。
+> 目标：让大众人人都能用的国产化 AI 定义无线电软件，同时作为 IEEE 论文的参考实现。
 
 ---
 
@@ -454,7 +454,6 @@ GPL-3.0（全开源）
 
 - 呼号 BI4MIB（何浩瀚）
 - 飞行社 / 2026 AI 先锋未来人才大赛
-- 会津大学（投名状目标）
 - GNU Radio / SDR++ / SatDump 开源社区
 - KiCad / 立创EDA / 嘉立创 SMT
 - 硅基流动（LLM API）
