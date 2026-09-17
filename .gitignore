@@ -1,12 +1,30 @@
-# 大文件备份（不进 git）
-MBDSDR-完整项目包-*.zip
-MBDSDR-工作区完整备份-*.zip
-MBDSDR-核心代码-*.zip
-MBDSDR-桌面端-*.zip
-ai-sdr-mini-kicad-*.zip
-ai-sdr-mini-v0.7-*.zip
-ai-sdr-mini-v0.7.1-*.zip
-ai-sdr-mini-原理图PCB-v0.7.1-投板包.zip
+# 二进制文件（不进仓库，只放源代码）
+*.xlsx
+*.docx
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.pdf
+*.zip
+*.gz
+*.tar
+*.so
+*.dll
+*.exe
+*.bin
+*.o
+*.a
+
+# 重复投板包目录（源文件在 ai-sdr-mini-kicad/）
+ai-sdr-mini-原理图PCB-v0.7.1-投板包/
+
+# 外部参考项目
+kilo-code/
+mimo-code/
+opencode/
+hermes-self-evolution/
+stellarium-web-engine/
 
 # Python
 __pycache__/
@@ -35,14 +53,5 @@ Thumbs.db
 # KiCad 自动生成
 *-backups/
 fp-info-cache/
-
-# 外部参考项目（不进主仓库，README 列出链接）
-kilo-code/
-mimo-code/
-opencode/
-hermes-self-evolution/
-stellarium-web-engine/
-
-# KiCad 自动生成缓存
 *.kicad_prl
 *.kicad_bak
