@@ -1,0 +1,28 @@
+{
+  "_comment": "MBDSDR 桌面能力 MCP 接入示例：复制 mbdsdr 段到 Claude Desktop / Cursor / 其他支持 MCP 的 AI Host 配置。需先启动 MBDSDR 桌面（其本地 HTTP 默认 127.0.0.1:7878）。",
+  "mcpServers": {
+    "mbdsdr": {
+      "command": "python3",
+      "args": ["-m", "ai.mcp_stdio_server"],
+      "cwd": "REPLACE_WITH_/MBDSDR/src/desktop",
+      "env": {
+        "MBDSDR_DESKTOP_URL": "http://127.0.0.1:7878",
+        "SILICONFLOW_API_KEY": "sk-可选，配置后 AI 可调用视觉模型看频谱图",
+        "MBDSDR_LLM_MODEL": "Qwen/Qwen2.5-7B-Instruct"
+      }
+    }
+  },
+  "_exposed_tools_overview": {
+    "spectrum": "spectrum_get_view / find_signals / analyze_range / suggest_next（频谱感知与主动观测）",
+    "sdr": "get_status / ui_set_frequency / ui_set_gain / spectrum_set_view / spectrum_set_resolution（接收机控制）",
+    "vision": "ui_screenshot / vision_inspect_spectrum（截图与多模态看频谱）",
+    "record": "ui_start_recording / ui_stop_recording / baseband_analyze_file（基带录制、定时录制、离线文件分析）",
+    "ui": "ui_capabilities"
+  },
+  "_notes": [
+    "协议：JSON-RPC 2.0 over stdio，MCP protocolVersion 2024-11-05，每行一个 JSON。",
+    "C++ 核心另有一个 MCP（mbdsdr mcp，66 个 DSP 原语工具），本服务器桥接运行中的桌面端高层能力，二者互补。",
+    "工具返回为 JSON 文本，ok=false 时 MCP isError=true，AI Host 可据此自纠换路。",
+    "所有写操作（改频率/增益/录制）在桌面智能体侧带状态检查点，可回滚。"
+  ]
+}

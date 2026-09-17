@@ -1,0 +1,1713 @@
+"""
+MBDSDR AI 内核 - Agent 主循环
+==============================
+整合上下文管理、模型管理、工具注册、记忆系统，实现真正的 LLM 驱动的 Agent。
+
+核心能力：
+- 真正的 LLM 调用（不是关键词匹配）
+- 工具调用循环（模型调用工具 -> 执行 -> 结果返回模型 -> 继续）
+- 自动上下文压缩
+- 记忆检索与写入
+- 多轮对话
+- 错误处理与恢复
+- 调用统计
+
+这是 MBDSDR 的智能体核心，桌面端/移动端/CLI 都通过这个 Agent 交互。
+"""
+
+import json
+import os
+import time
+from typing import List, Dict, Any, Optional, Callable
+
+from .config import AgentConfig
+from .context_manager import ContextManager, SYSTEM_PROMPT
+from .model_manager import ModelManager
+from .tool_registry import ToolRegistry, ToolResult
+from .memory import MemoryStore
+from .self_evolution import SelfEvolutionEngine
+from .guardian import Guardian
+from .workflow_engine import WorkflowEngine
+from .scheduler import Scheduler
+from .sdr_backend import SDRBackendManager
+from .spectrum_processor import SpectrumProcessor
+from .sdr_tools import register_sdr_tools
+from .hooks import HookManager, Event, EventType, create_logging_hook
+from .subagents import SubagentManager, SubagentStatus
+from .pose import PoseFusion, ARProjector, IMUData, GPSData
+from .workflow_recorder import WorkflowRecorder
+from .file_tracker import FileChangeTracker, ChangeType
+from .plugin_system import PluginManager
+from .llm_judge import LLMJudge, JudgeResult, JudgeDimension
+from .self_learning import SelfLearningEngine, Experience, ExperienceType
+from .orchestrator import Orchestrator, Task, TaskPriority
+from .code_editor import CodeEditor, EditRecord, EditStatus
+from .astronomy import Observer, EquatorialCoord, AltAzCoord, AntennaParams, unix_to_jd, jd_to_mjd, jd_to_gmst, jd_to_lst, lst_to_hms, compute_refraction, compute_airmass, compute_pointing_guidance
+from .amr import AMRClassifier, AMRResult, ModulationType
+
+
+class MBDSDRAgent:
+    """
+    MBDSDR AI 定义无线电智能体。
+
+    真正的 LLM 驱动的 Agent，支持工具调用、上下文管理、记忆系统。
+
+    用法:
+        config = AgentConfig(api_key="sk-...", model="Qwen/Qwen3.6-35B-A3B")
+        agent = MBDSDRAgent(config)
+        agent.register_mcp_tools(mcp_tools, mcp_call_handler)
+        response = agent.chat("调谐到 FM 98.5")
+        print(response["content"])
+    """
+
+    def __init__(self, config: AgentConfig = None):
+        self.config = config or AgentConfig()
+
+        # 初始化各子系统
+        self.context_manager = ContextManager(
+            max_context_tokens=self.config.max_context_tokens,
+            compaction_threshold=self.config.compaction_threshold,
+            compaction_target_ratio=self.config.compaction_target_ratio,
+            system_prompt=SYSTEM_PROMPT,
+            tool_output_max_chars=self.config.tool_output_max_chars,
+            on_compaction=self._compaction_callback,
+        )
+
+        self.model_manager = ModelManager(
+            api_key=self.config.api_key,
+            base_url=self.config.base_url,
+            model=self.config.model,
+            temperature=self.config.temperature,
+            top_p=self.config.top_p,
+            max_output_tokens=self.config.max_output_tokens,
+            timeout=self.config.timeout,
+        )
+
+        self.tool_registry = ToolRegistry(
+            tool_output_max_chars=self.config.tool_output_max_chars,
+        )
+
+        self.memory = MemoryStore()
+
+        # 守护者快照引擎（防幻觉变砖的核心防线）
+        self.guardian = Guardian()
+
+        # 工作流引擎（多步骤工具调用序列）
+        self.workflow_engine = WorkflowEngine()
+
+        # 调度器（定时任务）
+        self.scheduler = Scheduler()
+
+        # Hook 事件钩子系统（白皮书第四章 4.4）
+        self.hook_manager = HookManager(max_history=2000)
+
+        # Subagents 子代理框架（白皮书第四章 4.5）
+        self.subagent_manager = SubagentManager(
+            tool_registry=self.tool_registry,
+            model_manager=self.model_manager,
+        )
+
+        # 6DOF 位姿融合 + AR 投影（白皮书第八章）
+        self.pose_fusion = PoseFusion(mode="fused", declination=-9.0)  # 长春磁偏角约 -9°
+        self.ar_projector = ARProjector(camera_fov_deg=60.0, screen_aspect=16.0/9.0)
+
+        # 工作流录制与复用（白皮书第四章 4.6.4）
+        self.workflow_recorder = WorkflowRecorder()
+
+        # 文件变更跟踪器（白皮书第四章 4.6.6）
+        self.file_tracker = FileChangeTracker()
+
+        # 模块化插件系统（白皮书第九章 9.3）
+        self.plugin_manager = PluginManager(
+            tool_registry=self.tool_registry,
+            hook_manager=self.hook_manager,
+            subagent_manager=self.subagent_manager,
+        )
+
+        # LLM-as-Judge 多维评分系统（白皮书第四章 4.6.1）
+        self.llm_judge = LLMJudge(model_manager=self.model_manager)
+
+        # 自学习闭环系统（白皮书第四章 4.6.2）
+        self.self_learning = SelfLearningEngine(judge=self.llm_judge)
+
+        # 智能编排器（白皮书第四章 4.6.3）
+        self.orchestrator = Orchestrator(tool_registry=self.tool_registry)
+
+        # 代码编辑器（自编程核心）：读取/修改/热加载源代码，git commit，一键恢复
+        self.code_editor = CodeEditor(project_root=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+        # 天文计算（借鉴 Stellarium）：坐标转换、时间系统、大气折射、天线参数
+        self.observer = Observer()  # 默认观测者，用户可通过 GPS 设置
+        self.amr_classifier = AMRClassifier(k=5)  # 自动调制识别分类器
+
+        # 自进化引擎（默认关闭，需用户显式开启 enable_self_evolution）
+        self.evolution = SelfEvolutionEngine() if self.config.enable_self_evolution else None
+
+        # 注册内置工具
+        self.tool_registry.register_builtin_tools(agent_ref=self)
+
+        # 注册记忆读写工具
+        self._register_memory_tools()
+
+        # 注册守护者工具
+        self._register_guardian_tools()
+
+        # 注册工作流工具
+        self._register_workflow_tools()
+
+        # 注册调度器工具
+        self._register_scheduler_tools()
+
+        # 注册自进化工具（如果启用）
+        if self.evolution:
+            self._register_evolution_tools()
+
+        # 注册 SDR 专用工具（38个）
+        register_sdr_tools(self)
+
+        # 注册 Hook 事件钩子工具（白皮书第四章 4.4）
+        self._register_hook_tools()
+
+        # 注册 Subagents 子代理工具（白皮书第四章 4.5）
+        self._register_subagent_tools()
+
+        # 注册 6DOF 位姿 + AR 投影工具（白皮书第八章）
+        self._register_pose_tools()
+
+        # 注册工作流录制工具（白皮书第四章 4.6.4）
+        self._register_workflow_recorder_tools()
+
+        # 注册文件变更跟踪工具（白皮书第四章 4.6.6）
+        self._register_file_tracker_tools()
+
+        # 注册插件系统工具（白皮书第九章 9.3）
+        self._register_plugin_tools()
+
+        # 注册 LLM-as-Judge 工具（白皮书第四章 4.6.1）
+        self._register_judge_tools()
+
+        # 注册自学习工具（白皮书第四章 4.6.2）
+        self._register_learning_tools()
+
+        # 注册智能编排器工具（白皮书第四章 4.6.3）
+        self._register_orchestrator_tools()
+
+        # 注册自编程工具（代码编辑器）
+        self._register_code_editor_tools()
+
+        # 注册天文计算工具（借鉴 Stellarium）
+        self._register_astronomy_tools()
+
+        # 注册 AMR 自动调制识别工具
+        self._register_amr_tools()
+
+        # 连接工作流引擎和调度器的工具执行器
+        self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
+        self.scheduler.workflow_engine = self.workflow_engine
+        self.scheduler.tool_executor = self._workflow_tool_executor
+
+        # 运行时状态
+        self.conversation_id = f"conv_{int(time.time())}"
+        self.total_agent_calls = 0
+        self.last_error = None
+        self._mcp_client = None
+
+        # 验证配置
+        errors = self.config.validate()
+        if errors:
+            self.last_error = "; ".join(errors)
+
+    # ── 工具注册 ────────────────────────────────────────
+
+    def register_mcp_tools(self, mcp_tools: List[Dict[str, Any]], mcp_call_handler: Callable):
+        """
+        注册 MCP 硬件工具。
+
+        mcp_tools: 从设备 list_tools 获取的工具列表
+        mcp_call_handler: 调用 MCP 工具的函数 (tool_name, args) -> result
+        """
+        self.tool_registry.register_mcp_tools(mcp_tools, mcp_call_handler)
+        # 更新上下文管理器的工具定义
+        self.context_manager.set_tool_definitions(
+            self.tool_registry.get_tool_definitions()
+        )
+
+    def set_mcp_client(self, client):
+        """设置 MCP 客户端引用。"""
+        self._mcp_client = client
+
+    def _register_memory_tools(self):
+        """注册记忆读写工具。"""
+        self.tool_registry.register(
+            name="memory_write",
+            description="写入一条长期记忆。用于记住用户偏好、常用频率、重要设置等跨会话信息。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "记忆内容"},
+                    "category": {"type": "string", "description": "类别: preference/frequency/setting/fact/task/general", "default": "general"},
+                    "importance": {"type": "number", "description": "重要性 0.0-1.0", "default": 0.5},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "标签"},
+                },
+                "required": ["content"],
+            },
+            handler=lambda args: ToolResult(
+                success=True,
+                content=f"记忆已写入: {self.memory.add(**args).content}",
+            ),
+            category="memory",
+        )
+
+        self.tool_registry.register(
+            name="memory_search",
+            description="搜索长期记忆。用于检索用户之前的偏好、设置、历史信息。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "搜索关键词"},
+                    "category": {"type": "string", "description": "按类别过滤"},
+                    "limit": {"type": "integer", "description": "返回条数", "default": 5},
+                },
+                "required": ["query"],
+            },
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(
+                    [m.to_dict() for m in self.memory.search(**args)],
+                    ensure_ascii=False, indent=2,
+                ),
+            ),
+            category="memory",
+        )
+
+    def _workflow_tool_executor(self, tool_name: str, params: Dict[str, Any]) -> Any:
+        """工作流引擎的工具执行器（桥接到 Agent 的工具注册表）。"""
+        result = self.tool_registry.call(tool_name, params)
+        if result.success:
+            return result.content
+        else:
+            raise Exception(result.error or f"工具 {tool_name} 执行失败")
+
+    def _register_guardian_tools(self):
+        """注册守护者快照工具。"""
+        g = self.guardian
+        self.tool_registry.register(
+            name="guardian_status",
+            description="查看守护者快照状态（总快照数、已提交、已回滚、回滚率）。守护者是防幻觉变砖的核心防线，任何 AI 自修改前都会自动快照。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=g.get_status_text()),
+            category="guardian",
+        )
+        self.tool_registry.register(
+            name="guardian_rollback",
+            description="一键恢复：回滚到上一个已提交的快照。当 AI 自修改导致系统异常时，调用此工具立即恢复。",
+            parameters={"type": "object", "properties": {"snap_id": {"type": "string", "description": "指定回滚到的快照 ID（默认最近一个已提交快照）"}}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=g.rollback(args.get("snap_id"))[1] if args.get("snap_id") else g.rollback_to_last_committed()[1]),
+            category="guardian",
+        )
+        self.tool_registry.register(
+            name="guardian_list",
+            description="列出守护者快照历史（最近 20 个），查看每个快照的状态（created/committed/rolled_back）。",
+            parameters={"type": "object", "properties": {"phase": {"type": "string", "description": "按状态过滤: created/committed/rolled_back"}}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(g.list_snapshots(phase=args.get("phase"), limit=20), ensure_ascii=False, indent=2)),
+            category="guardian",
+        )
+
+    def _register_workflow_tools(self):
+        """注册工作流工具。"""
+        wf = self.workflow_engine
+        self.tool_registry.register(
+            name="workflow_list",
+            description="列出所有可用工作流（干扰源定位、NOAA卫星解码、SSTV解码、APRS监控、AI扫频找台、基带录制等）。工作流是预设的多步骤工具调用序列，说触发短语可自动执行。",
+            parameters={"type": "object", "properties": {"category": {"type": "string", "description": "按类别过滤"}}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(wf.list_workflows(category=args.get("category")), ensure_ascii=False, indent=2)),
+            category="workflow",
+        )
+        self.tool_registry.register(
+            name="workflow_execute",
+            description="执行一个工作流。工作流会自动按步骤调用工具，例如 'noaa_apt_receive_decode' 会自动找卫星→计算多普勒→调谐→录制→解码。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "workflow_name": {"type": "string", "description": "工作流名称，如 interference_localization, noaa_apt_receive_decode, sstv_receive_decode, aprs_monitor, ai_sweep_find_stations, baseband_record"},
+                    "parameters": {"type": "object", "description": "工作流参数（覆盖默认值）"},
+                },
+                "required": ["workflow_name"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(wf.execute(args["workflow_name"], args.get("parameters", {})).to_dict(), ensure_ascii=False, indent=2)),
+            category="workflow",
+        )
+        self.tool_registry.register(
+            name="workflow_trigger_match",
+            description="检查用户输入是否匹配某个工作流的触发短语。例如用户说'找干扰源'会匹配到 interference_localization 工作流。",
+            parameters={"type": "object", "properties": {"text": {"type": "string", "description": "用户输入文本"}}, "required": ["text"]},
+            handler=lambda args: ToolResult(success=True, content=f"匹配到工作流: {wf.match_trigger(args['text']).name}" if wf.match_trigger(args["text"]) else "未匹配到任何工作流"),
+            category="workflow",
+        )
+
+    def _register_scheduler_tools(self):
+        """注册调度器工具。"""
+        sched = self.scheduler
+        self.tool_registry.register(
+            name="scheduler_status",
+            description="查看调度器状态（任务总数、启用/禁用、总执行次数、成功率）。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=sched.get_status_text()),
+            category="scheduler",
+        )
+        self.tool_registry.register(
+            name="scheduler_list",
+            description="列出所有定时任务。",
+            parameters={"type": "object", "properties": {"enabled_only": {"type": "boolean", "description": "只列出启用的任务", "default": False}}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(sched.list_tasks(enabled_only=args.get("enabled_only", False)), ensure_ascii=False, indent=2)),
+            category="scheduler",
+        )
+        self.tool_registry.register(
+            name="scheduler_add",
+            description="添加定时任务。可以定时执行工作流（如每小时接收NOAA卫星）或工具调用。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "任务名称"},
+                    "task_type": {"type": "string", "description": "任务类型: workflow/tool", "default": "workflow"},
+                    "target": {"type": "string", "description": "工作流名称或工具名称"},
+                    "params": {"type": "object", "description": "任务参数"},
+                    "schedule_type": {"type": "string", "description": "调度类型: interval(间隔)/once(一次性)", "default": "interval"},
+                    "interval_seconds": {"type": "integer", "description": "间隔秒数（interval类型）", "default": 3600},
+                    "description": {"type": "string", "description": "任务描述"},
+                },
+                "required": ["name", "target"],
+            },
+            handler=lambda args: ToolResult(success=True, content=f"定时任务已添加: {args['name']}\nID: {sched.add_task(**args).task_id}"),
+            category="scheduler",
+        )
+        self.tool_registry.register(
+            name="scheduler_enable",
+            description="启用一个定时任务。",
+            parameters={"type": "object", "properties": {"task_id": {"type": "string", "description": "任务 ID"}}, "required": ["task_id"]},
+            handler=lambda args: ToolResult(success=True, content="任务已启用" if sched.enable_task(args["task_id"]) else "任务不存在"),
+            category="scheduler",
+        )
+        self.tool_registry.register(
+            name="scheduler_disable",
+            description="禁用一个定时任务。",
+            parameters={"type": "object", "properties": {"task_id": {"type": "string", "description": "任务 ID"}}, "required": ["task_id"]},
+            handler=lambda args: ToolResult(success=True, content="任务已禁用" if sched.disable_task(args["task_id"]) else "任务不存在"),
+            category="scheduler",
+        )
+        self.tool_registry.register(
+            name="scheduler_tick",
+            description="手动触发调度器检查并执行所有到期任务。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=f"执行了 {sched.tick()} 个到期任务"),
+            category="scheduler",
+        )
+
+    def _register_evolution_tools(self):
+        """注册自进化工具（需启用 enable_self_evolution）。"""
+        evo = self.evolution
+
+        self.tool_registry.register(
+            name="evolution_propose",
+            description="提出一个自进化建议。可以改进系统提示词、工具描述、配置参数或代码算法。修改会在沙箱中验证，不会直接影响主系统。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target_type": {"type": "string", "description": "进化目标类型: skill/tool_description/code/config/pipeline"},
+                    "target_name": {"type": "string", "description": "目标名称"},
+                    "description": {"type": "string", "description": "进化建议描述"},
+                    "proposed_change": {"type": "string", "description": "修改后的完整内容"},
+                    "risk_level": {"type": "string", "description": "风险等级: low/medium/high", "default": "low"},
+                },
+                "required": ["target_type", "target_name", "description", "proposed_change"],
+            },
+            handler=lambda args: ToolResult(
+                success=True,
+                content=f"进化建议已提出: {args.get('target_name')}\nID: {evo.propose(**args).id}\n下一步: 调用 evolution_evaluate 评估效果",
+            ),
+            category="evolution",
+        )
+
+        self.tool_registry.register(
+            name="evolution_evaluate",
+            description="评估一个进化建议的效果。运行测试用例，计算通过率，给出接受/拒绝建议。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "proposal_id": {"type": "string", "description": "进化建议 ID"},
+                },
+                "required": ["proposal_id"],
+            },
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(evo.evaluate(args["proposal_id"]), ensure_ascii=False, indent=2),
+            ),
+            category="evolution",
+        )
+
+        self.tool_registry.register(
+            name="evolution_commit",
+            description="提交一个进化建议为新版本（快照）。提交后可以应用或回滚。这是防幻觉变砖的关键：任何修改都有版本记录。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "proposal_id": {"type": "string", "description": "进化建议 ID"},
+                },
+                "required": ["proposal_id"],
+            },
+            handler=lambda args: ToolResult(
+                success=True,
+                content=f"版本已提交: {evo.commit(args['proposal_id']).id}",
+            ),
+            category="evolution",
+        )
+
+        self.tool_registry.register(
+            name="evolution_rollback",
+            description="一键恢复：回滚到上一个版本。防幻觉变砖的核心功能，任何修改都可以撤销。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "version_id": {"type": "string", "description": "回滚到指定版本（默认上一个版本）"},
+                },
+                "required": [],
+            },
+            handler=lambda args: ToolResult(
+                success=True,
+                content=evo.rollback(args.get("version_id"))[1],
+            ),
+            category="evolution",
+        )
+
+        self.tool_registry.register(
+            name="evolution_history",
+            description="查看自进化历史（所有版本记录）。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(evo.get_history(limit=10), ensure_ascii=False, indent=2),
+            ),
+            category="evolution",
+        )
+
+        self.tool_registry.register(
+            name="evolution_status",
+            description="查看自进化引擎状态（进化循环次数、建议统计、版本数）。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=evo.get_status_text(),
+            ),
+            category="evolution",
+        )
+
+    def _register_hook_tools(self):
+        """注册 Hook 事件钩子工具（白皮书第四章 4.4）。"""
+        hm = self.hook_manager
+
+        self.tool_registry.register(
+            name="hook_list",
+            description="列出所有已注册的事件钩子。包括钩子 ID、监听的事件类型、描述、优先级、启用状态、触发次数。Hook 系统让 AI 可以监听和响应各种事件（信号检测、录制完成、设备连接等）。",
+            parameters={"type": "object", "properties": {"event_type": {"type": "string", "description": "按事件类型筛选（可选）"}}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(hm.list_hooks(args.get("event_type")), ensure_ascii=False, indent=2)),
+            category="hook",
+        )
+
+        self.tool_registry.register(
+            name="hook_trigger",
+            description="手动触发一个事件。可以用来测试钩子系统，或者在工作流中主动发出事件。事件会被所有匹配的钩子监听到。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "event_type": {"type": "string", "description": "事件类型，如 sdr.signal_detected、sdr.record_complete"},
+                    "data": {"type": "object", "description": "事件数据"},
+                    "source": {"type": "string", "description": "事件来源", "default": "agent"},
+                },
+                "required": ["event_type"],
+            },
+            handler=lambda args: ToolResult(success=True, content=f"事件已触发: {args['event_type']}\n监听器响应数: {len(hm.trigger(Event(event_type=args['event_type'], data=args.get('data', {}), source=args.get('source', 'agent'))))}"),
+            category="hook",
+        )
+
+        self.tool_registry.register(
+            name="hook_history",
+            description="获取事件历史记录。可以查看最近发生了哪些事件，用于调试和审计。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "event_type": {"type": "string", "description": "按事件类型筛选（可选）"},
+                    "limit": {"type": "integer", "description": "返回条数，默认 50", "default": 50},
+                },
+                "required": [],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps([e.to_dict() for e in hm.get_history(args.get("event_type"), args.get("limit", 50))], ensure_ascii=False, indent=2)),
+            category="hook",
+        )
+
+        self.tool_registry.register(
+            name="hook_stats",
+            description="获取 Hook 系统统计信息。包括总钩子数、启用数、事件类型数、总触发次数、历史记录数。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(hm.get_stats(), ensure_ascii=False, indent=2)),
+            category="hook",
+        )
+
+    def _register_subagent_tools(self):
+        """注册 Subagents 子代理工具（白皮书第四章 4.5）。"""
+        sm = self.subagent_manager
+
+        self.tool_registry.register(
+            name="subagent_create",
+            description="创建一个子代理。子代理是专门处理特定任务的 AI 助手，有自己的工具集和上下文。可用类型: spectrum_analyzer(频谱分析)、signal_decoder(信号解码)、satellite_tracker(卫星跟踪)、interference_hunter(干扰定位)、baseband_recorder(基带录制)、hardware_controller(硬件控制)、code_evolver(代码进化)。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "agent_type": {"type": "string", "description": "子代理类型: spectrum_analyzer/signal_decoder/satellite_tracker/interference_hunter/baseband_recorder/hardware_controller/code_evolver"},
+                    "subagent_id": {"type": "string", "description": "自定义 ID（可选，自动生成）"},
+                },
+                "required": ["agent_type"],
+            },
+            handler=lambda args: ToolResult(success=True, content=f"子代理已创建\nID: {sm.create(args['agent_type'], args.get('subagent_id'))}\n类型: {args['agent_type']}"),
+            category="subagent",
+        )
+
+        self.tool_registry.register(
+            name="subagent_list",
+            description="列出所有子代理及其状态。包括 ID、类型、状态、已完成任务数、失败任务数、运行时间。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(sm.list_subagents(), ensure_ascii=False, indent=2)),
+            category="subagent",
+        )
+
+        self.tool_registry.register(
+            name="subagent_execute",
+            description="同步执行一个子代理任务，等待完成并返回结果。子代理会使用其专用工具集完成任务。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "subagent_id": {"type": "string", "description": "子代理 ID"},
+                    "goal": {"type": "string", "description": "任务目标描述"},
+                    "input_data": {"type": "object", "description": "输入数据（可选）"},
+                    "timeout_s": {"type": "number", "description": "超时秒数，默认 120", "default": 120},
+                },
+                "required": ["subagent_id", "goal"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(sm.execute_task(args["subagent_id"], args["goal"], args.get("input_data"), args.get("timeout_s", 120)).to_dict(), ensure_ascii=False, indent=2)),
+            category="subagent",
+        )
+
+        self.tool_registry.register(
+            name="subagent_stats",
+            description="获取子代理管理器统计信息。包括总子代理数、运行中数、总完成任务数、总失败任务数、支持的子代理类型。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(sm.get_stats(), ensure_ascii=False, indent=2)),
+            category="subagent",
+        )
+
+    def _register_pose_tools(self):
+        """注册 6DOF 位姿 + AR 投影工具（白皮书第八章）。"""
+        pf = self.pose_fusion
+        ap = self.ar_projector
+
+        self.tool_registry.register(
+            name="pose_get",
+            description="获取当前 6DOF 位姿。包括位置（经纬度/海拔）、姿态（横滚/俯仰/偏航）、四元数、速度、置信度。需要 IMU+磁力计+GNSS 数据更新后才有意义。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(pf.get_pose().to_dict(), ensure_ascii=False, indent=2)),
+            category="pose",
+        )
+
+        self.tool_registry.register(
+            name="pose_update_imu",
+            description="更新 IMU 数据（加速度计+陀螺仪+磁力计），更新位姿估计。这是 6DOF/9DOF 姿态估计的核心。数据来自 BMI260（6轴）+ TMAG5273（磁力计）。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "accel_x": {"type": "number", "description": "X 轴加速度 m/s²"},
+                    "accel_y": {"type": "number", "description": "Y 轴加速度 m/s²"},
+                    "accel_z": {"type": "number", "description": "Z 轴加速度 m/s²"},
+                    "gyro_x": {"type": "number", "description": "X 轴角速度 rad/s"},
+                    "gyro_y": {"type": "number", "description": "Y 轴角速度 rad/s"},
+                    "gyro_z": {"type": "number", "description": "Z 轴角速度 rad/s"},
+                    "mag_x": {"type": "number", "description": "X 轴磁力 μT"},
+                    "mag_y": {"type": "number", "description": "Y 轴磁力 μT"},
+                    "mag_z": {"type": "number", "description": "Z 轴磁力 μT"},
+                },
+                "required": ["accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(pf.update_imu(IMUData(**args)).to_dict(), ensure_ascii=False, indent=2)),
+            category="pose",
+        )
+
+        self.tool_registry.register(
+            name="pose_update_gps",
+            description="更新 GNSS 数据（北斗/GPS），融合位置和速度。数据来自 ATGM336H 模块。GNSS 提供绝对位置，IMU 提供相对姿态，两者融合得到完整 6DOF 位姿。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "latitude": {"type": "number", "description": "纬度（度）"},
+                    "longitude": {"type": "number", "description": "经度（度）"},
+                    "altitude": {"type": "number", "description": "海拔（米）"},
+                    "speed": {"type": "number", "description": "速度 m/s", "default": 0},
+                    "course": {"type": "number", "description": "航向（度）", "default": 0},
+                    "satellites": {"type": "integer", "description": "卫星数", "default": 0},
+                    "hdop": {"type": "number", "description": "HDOP", "default": 0},
+                    "fix_quality": {"type": "integer", "description": "定位质量 0=无 1=GPS 2=DGPS 4=RTK", "default": 1},
+                },
+                "required": ["latitude", "longitude"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(pf.update_gps(GPSData(**args)).to_dict(), ensure_ascii=False, indent=2)),
+            category="pose",
+        )
+
+        self.tool_registry.register(
+            name="ar_project_satellite",
+            description="AR 投影：计算卫星在相机视图中的屏幕位置。输入卫星的仰角/方位角/距离和当前位姿，输出归一化屏幕坐标 (0-1)、是否在视野内、标记大小。用于 AR 卫星指向辅助。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "satellite_name": {"type": "string", "description": "卫星名称"},
+                    "elevation_deg": {"type": "number", "description": "卫星仰角（度）"},
+                    "azimuth_deg": {"type": "number", "description": "卫星方位角（度）"},
+                    "distance_km": {"type": "number", "description": "距离（公里）", "default": 1000},
+                    "frequency_mhz": {"type": "number", "description": "下行频率 MHz", "default": 0},
+                    "doppler_hz": {"type": "number", "description": "多普勒频移 Hz", "default": 0},
+                },
+                "required": ["satellite_name", "elevation_deg", "azimuth_deg"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ap.project_satellite(args["satellite_name"], args["elevation_deg"], args["azimuth_deg"], args.get("distance_km", 1000), pf.get_pose(), args.get("frequency_mhz", 0), args.get("doppler_hz", 0)).__dict__, ensure_ascii=False, indent=2)),
+            category="pose",
+        )
+
+        self.tool_registry.register(
+            name="ar_pointing_guidance",
+            description="AR 指向辅助：告诉用户把天线/设备指向哪个方向才能对准目标卫星。输入目标方位角/仰角，输出水平/垂直方向调整、总偏差、对准状态。这是双向指令流的核心：AI 告诉用户具体操作。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target_azimuth": {"type": "number", "description": "目标方位角（度）"},
+                    "target_elevation": {"type": "number", "description": "目标仰角（度）"},
+                },
+                "required": ["target_azimuth", "target_elevation"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ap.get_pointing_guidance(args["target_azimuth"], args["target_elevation"], pf.get_pose()), ensure_ascii=False, indent=2)),
+            category="pose",
+        )
+
+    def _register_workflow_recorder_tools(self):
+        """注册工作流录制工具（白皮书第四章 4.6.4）。"""
+        wr = self.workflow_recorder
+
+        self.tool_registry.register(
+            name="workflow_record_start",
+            description="开始录制工作流。录制期间所有工具调用都会被记录，可以保存为可复用的工作流模板。类似宏录制，但支持参数化和条件分支。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "录制名称"},
+                    "description": {"type": "string", "description": "录制描述", "default": ""},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "标签", "default": []},
+                },
+                "required": ["name"],
+            },
+            handler=lambda args: ToolResult(success=True, content=f"录制已开始\nID: {wr.start_recording(args['name'], args.get('description',''), args.get('tags',[]))}\n后续工具调用将被记录"),
+            category="workflow_recorder",
+        )
+
+        self.tool_registry.register(
+            name="workflow_record_stop",
+            description="停止录制工作流。返回录制的步骤数和摘要。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps((lambda r: r.to_dict() if r else {})(wr.stop_recording()), ensure_ascii=False, indent=2)),
+            category="workflow_recorder",
+        )
+
+        self.tool_registry.register(
+            name="workflow_template_create",
+            description="从录制创建工作流模板。模板可以参数化，以后用不同参数回放。这是 Record & Replay 的核心：录一次，用无数次。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "recording_id": {"type": "string", "description": "录制 ID"},
+                    "name": {"type": "string", "description": "模板名称"},
+                    "description": {"type": "string", "description": "模板描述", "default": ""},
+                    "parameters": {"type": "object", "description": "参数定义 {参数名: 描述}", "default": {}},
+                },
+                "required": ["recording_id", "name"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(wr.create_template(args["recording_id"], args["name"], args.get("description",""), args.get("parameters",{})).to_dict(), ensure_ascii=False, indent=2)),
+            category="workflow_recorder",
+        )
+
+        self.tool_registry.register(
+            name="workflow_template_list",
+            description="列出所有工作流模板和录制。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps({"recordings": wr.list_recordings(), "templates": wr.list_templates()}, ensure_ascii=False, indent=2)),
+            category="workflow_recorder",
+        )
+
+        self.tool_registry.register(
+            name="workflow_recorder_status",
+            description="获取工作流录制器状态。包括当前录制、总录制数、总模板数。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(wr.get_status(), ensure_ascii=False, indent=2)),
+            category="workflow_recorder",
+        )
+
+    def _register_file_tracker_tools(self):
+        """注册文件变更跟踪工具（白皮书第四章 4.6.6）。"""
+        ft = self.file_tracker
+
+        self.tool_registry.register(
+            name="file_change_track",
+            description="记录一次文件变更。在自进化或代码修改时调用，记录修改前/修改后的内容、原因、执行者。用于审计和回滚。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "文件路径"},
+                    "change_type": {"type": "string", "description": "变更类型: create/modify/delete/rename/revert"},
+                    "content_before": {"type": "string", "description": "修改前内容", "default": ""},
+                    "content_after": {"type": "string", "description": "修改后内容", "default": ""},
+                    "reason": {"type": "string", "description": "变更原因", "default": ""},
+                    "actor": {"type": "string", "description": "执行者: agent/user/system", "default": "agent"},
+                },
+                "required": ["file_path", "change_type"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ft.track_change(args["file_path"], ChangeType(args["change_type"]), args.get("content_before",""), args.get("content_after",""), args.get("reason",""), args.get("actor","agent")).to_dict(), ensure_ascii=False, indent=2)),
+            category="file_tracker",
+        )
+
+        self.tool_registry.register(
+            name="file_change_history",
+            description="获取某个文件的变更历史。按时间倒序排列，包含每次变更的类型、原因、执行者、哈希。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "文件路径"},
+                    "limit": {"type": "integer", "description": "返回条数，默认 50", "default": 50},
+                },
+                "required": ["file_path"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ft.get_file_history(args["file_path"], args.get("limit", 50)), ensure_ascii=False, indent=2)),
+            category="file_tracker",
+        )
+
+        self.tool_registry.register(
+            name="file_change_revert",
+            description="回滚到某个变更之前的状态。防幻觉变砖的最后一道防线：任何修改都可以回滚。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "change_id": {"type": "string", "description": "要回滚的变更 ID"},
+                },
+                "required": ["change_id"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ft.revert_to(args["change_id"]).to_dict() if ft.revert_to(args["change_id"]) else {"error": "变更不存在"}, ensure_ascii=False, indent=2)),
+            category="file_tracker",
+        )
+
+        self.tool_registry.register(
+            name="file_change_stats",
+            description="获取文件变更跟踪器统计信息。包括总变更数、跟踪文件数、按类型/执行者分类、已回滚数。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ft.get_stats(), ensure_ascii=False, indent=2)),
+            category="file_tracker",
+        )
+
+        self.tool_registry.register(
+            name="file_change_changelog",
+            description="生成变更日志（changelog）。按时间倒序列出所有变更，包含时间、类型、文件、原因、执行者。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "since_timestamp": {"type": "number", "description": "起始时间戳（0=全部）", "default": 0},
+                },
+                "required": [],
+            },
+            handler=lambda args: ToolResult(success=True, content=ft.generate_changelog(args.get("since_timestamp", 0))),
+            category="file_tracker",
+        )
+
+    def _register_plugin_tools(self):
+        """注册模块化插件系统工具（白皮书第九章 9.3）。"""
+        pm = self.plugin_manager
+
+        self.tool_registry.register(
+            name="plugin_list",
+            description="列出所有已发现的插件及其状态。包括名称、版本、类型、状态、注册的工具/钩子/子代理数量。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(pm.list_plugins(), ensure_ascii=False, indent=2)),
+            category="plugin",
+        )
+
+        self.tool_registry.register(
+            name="plugin_load",
+            description="加载一个插件（不启用）。加载后可以用 plugin_enable 启用。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "plugin_name": {"type": "string", "description": "插件名称"},
+                },
+                "required": ["plugin_name"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(pm.load_plugin(args["plugin_name"]).to_dict(), ensure_ascii=False, indent=2)),
+            category="plugin",
+        )
+
+        self.tool_registry.register(
+            name="plugin_enable",
+            description="启用一个插件。启用后插件注册的工具、钩子、子代理会生效。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "plugin_name": {"type": "string", "description": "插件名称"},
+                },
+                "required": ["plugin_name"],
+            },
+            handler=lambda args: ToolResult(success=True, content=f"插件 {'已启用' if pm.enable_plugin(args['plugin_name']) else '启用失败'}: {args['plugin_name']}"),
+            category="plugin",
+        )
+
+        self.tool_registry.register(
+            name="plugin_disable",
+            description="禁用一个插件。禁用后插件注册的工具、钩子、子代理会失效。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "plugin_name": {"type": "string", "description": "插件名称"},
+                },
+                "required": ["plugin_name"],
+            },
+            handler=lambda args: ToolResult(success=True, content=f"插件 {'已禁用' if pm.disable_plugin(args['plugin_name']) else '禁用失败'}: {args['plugin_name']}"),
+            category="plugin",
+        )
+
+        self.tool_registry.register(
+            name="plugin_stats",
+            description="获取插件系统统计信息。包括总插件数、启用/禁用/错误数、注册的工具/钩子总数、按类型分类。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(pm.get_stats(), ensure_ascii=False, indent=2)),
+            category="plugin",
+        )
+
+        self.tool_registry.register(
+            name="plugin_install",
+            description="从路径安装插件（复制到插件目录）。这是创意工坊玩法的核心：用户投稿 → 安装到本地 → 专家委员会审查 → 合入。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "source_path": {"type": "string", "description": "插件源路径"},
+                    "plugin_name": {"type": "string", "description": "插件名称（可选，自动取目录名）"},
+                },
+                "required": ["source_path"],
+            },
+            handler=lambda args: ToolResult(success=True, content=f"插件已安装: {pm.install_plugin_from_path(args['source_path'], args.get('plugin_name'))}"),
+            category="plugin",
+        )
+
+    def _register_judge_tools(self):
+        """注册 LLM-as-Judge 评判工具（白皮书第四章 4.6.1）。"""
+        j = self.llm_judge
+
+        self.tool_registry.register(
+            name="judge_evaluate",
+            description="对 Agent 的回答进行多维评分。使用 LLM-as-Judge 从正确性、完整性、相关性、工具使用、安全性、可读性、创造性、效率 8 个维度评分。用于自学习闭环的反馈信号和输出质量评估。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "用户问题"},
+                    "answer": {"type": "string", "description": "Agent 回答"},
+                    "tool_calls": {"type": "array", "items": {"type": "object"}, "description": "工具调用记录", "default": []},
+                    "use_llm": {"type": "boolean", "description": "是否使用 LLM 评判（False 用规则评分）", "default": True},
+                },
+                "required": ["question", "answer"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(j.judge(args["question"], args["answer"], args.get("tool_calls",[]), "", args.get("use_llm", True)).to_dict(), ensure_ascii=False, indent=2)),
+            category="judge",
+        )
+
+        self.tool_registry.register(
+            name="judge_history",
+            description="获取评判历史记录。查看最近的评判结果和各维度得分趋势。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "返回条数，默认 20", "default": 20},
+                },
+                "required": [],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(j.get_history(args.get("limit", 20)), ensure_ascii=False, indent=2)),
+            category="judge",
+        )
+
+        self.tool_registry.register(
+            name="judge_stats",
+            description="获取评判器统计信息。包括总评判次数、平均分、各维度历史平均分、评判模型。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(j.get_stats(), ensure_ascii=False, indent=2)),
+            category="judge",
+        )
+
+    def _register_learning_tools(self):
+        """注册自学习工具（白皮书第四章 4.6.2）。"""
+        sl = self.self_learning
+
+        self.tool_registry.register(
+            name="learning_record",
+            description="记录一条学习经验。在任务完成后调用，记录问题、回答、工具调用、评分。这是自学习闭环的第一步：从经验中学习。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "experience_type": {"type": "string", "description": "经验类型: tool_call/task_completion/error_recovery/user_feedback/judge_feedback"},
+                    "question": {"type": "string", "description": "用户问题", "default": ""},
+                    "answer": {"type": "string", "description": "Agent 回答", "default": ""},
+                    "tool_calls": {"type": "array", "items": {"type": "object"}, "description": "工具调用记录", "default": []},
+                    "score": {"type": "number", "description": "评分 0-10", "default": 0},
+                    "feedback": {"type": "string", "description": "反馈", "default": ""},
+                },
+                "required": ["experience_type"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(sl.record_experience(ExperienceType(args["experience_type"]), args.get("question",""), args.get("answer",""), args.get("tool_calls",[]), args.get("score",0), args.get("feedback","")).to_dict(), ensure_ascii=False, indent=2)),
+            category="learning",
+        )
+
+        self.tool_registry.register(
+            name="learning_learn",
+            description="批量学习：从未学习的高分经验中提取规律。分析工具调用序列、错误恢复策略、任务模式，生成可复用的学习模式。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "学习的经验数量，默认 100", "default": 100},
+                },
+                "required": [],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps([p.to_dict() for p in sl.learn_batch(args.get("limit", 100))], ensure_ascii=False, indent=2)),
+            category="learning",
+        )
+
+        self.tool_registry.register(
+            name="learning_suggestion",
+            description="根据问题获取学习建议。查找与问题相关的学习模式，给出工具调用建议。这是自学习闭环的应用阶段：用学到的规律指导新任务。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "用户问题"},
+                },
+                "required": ["question"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(sl.get_suggestion(args["question"]).to_dict() if sl.get_suggestion(args["question"]) else {"message": "暂无相关学习建议"}, ensure_ascii=False, indent=2)),
+            category="learning",
+        )
+
+        self.tool_registry.register(
+            name="learning_experiences",
+            description="获取学习经验列表。查看记录的经验和评分。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "返回条数，默认 20", "default": 20},
+                    "min_score": {"type": "number", "description": "最低评分，默认 0", "default": 0},
+                },
+                "required": [],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(sl.get_experiences(args.get("limit", 20), args.get("min_score", 0)), ensure_ascii=False, indent=2)),
+            category="learning",
+        )
+
+        self.tool_registry.register(
+            name="learning_patterns",
+            description="获取学习到的模式列表。查看从经验中提取的规律和建议。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "返回条数，默认 20", "default": 20},
+                    "pattern_type": {"type": "string", "description": "模式类型: tool_sequence/error_recovery/task_pattern", "default": ""},
+                },
+                "required": [],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(sl.get_patterns(args.get("limit", 20), args.get("pattern_type") or None), ensure_ascii=False, indent=2)),
+            category="learning",
+        )
+
+        self.tool_registry.register(
+            name="learning_stats",
+            description="获取自学习引擎统计信息。包括总经验数、已学习数、高分经验数、平均分、总模式数、按类型分类。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(sl.get_stats(), ensure_ascii=False, indent=2)),
+            category="learning",
+        )
+
+    def _register_orchestrator_tools(self):
+        """注册智能编排器工具（白皮书第四章 4.6.3）。"""
+        oc = self.orchestrator
+
+        self.tool_registry.register(
+            name="orchestrator_add_task",
+            description="添加一个任务到编排器。任务可以有依赖关系、优先级、超时、重试。编排器会自动规划执行顺序。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "任务名称"},
+                    "description": {"type": "string", "description": "任务描述", "default": ""},
+                    "tool_name": {"type": "string", "description": "要调用的工具名", "default": ""},
+                    "tool_params": {"type": "object", "description": "工具参数", "default": {}},
+                    "dependencies": {"type": "array", "items": {"type": "string"}, "description": "依赖的任务 ID 列表", "default": []},
+                    "priority": {"type": "string", "description": "优先级: critical/high/medium/low", "default": "medium"},
+                    "timeout_s": {"type": "number", "description": "超时秒数", "default": 60},
+                    "max_retries": {"type": "integer", "description": "最大重试次数", "default": 2},
+                },
+                "required": ["name"],
+            },
+            handler=lambda args: ToolResult(success=True, content=f"任务已添加\nID: {oc.add_task(args['name'], args.get('description',''), args.get('tool_name',''), args.get('tool_params',{}), None, args.get('dependencies',[]), TaskPriority(args.get('priority','medium')), args.get('timeout_s',60), args.get('max_retries',2))}"),
+            category="orchestrator",
+        )
+
+        self.tool_registry.register(
+            name="orchestrator_plan",
+            description="规划任务执行顺序。基于依赖关系和优先级生成拓扑排序的执行顺序。在执行前调用，查看任务将如何被调度。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(oc.plan(), ensure_ascii=False, indent=2)),
+            category="orchestrator",
+        )
+
+        self.tool_registry.register(
+            name="orchestrator_execute",
+            description="执行所有任务。按照规划的顺序执行，支持依赖管理、重试、错误恢复。返回执行结果统计。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "stop_on_failure": {"type": "boolean", "description": "失败时是否停止", "default": False},
+                },
+                "required": [],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(oc.execute(None, args.get("stop_on_failure", False)).to_dict(), ensure_ascii=False, indent=2)),
+            category="orchestrator",
+        )
+
+        self.tool_registry.register(
+            name="orchestrator_list",
+            description="列出所有任务及其状态。查看任务的依赖、优先级、状态、执行时间。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(oc.list_tasks(), ensure_ascii=False, indent=2)),
+            category="orchestrator",
+        )
+
+        self.tool_registry.register(
+            name="orchestrator_stats",
+            description="获取编排器统计信息。包括总任务数、按状态/优先级分类、平均执行时间。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(oc.get_stats(), ensure_ascii=False, indent=2)),
+            category="orchestrator",
+        )
+
+        self.tool_registry.register(
+            name="orchestrator_pipeline",
+            description="创建标准 SDR 处理流水线。一键生成完整的 SDR 处理任务：连接→设频→设采样率→设增益→频谱分析→找信号→解调→录制。这是智能编排的典型应用：复杂任务自动分解为有序步骤。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "frequency_hz": {"type": "integer", "description": "中心频率 Hz"},
+                    "sample_rate": {"type": "integer", "description": "采样率 Hz", "default": 2048000},
+                    "gain_db": {"type": "integer", "description": "增益 dB", "default": 40},
+                    "demod_mode": {"type": "string", "description": "解调模式: fm/am/usb/lsb/cw", "default": "fm"},
+                    "record_duration_s": {"type": "integer", "description": "录制时长秒", "default": 10},
+                },
+                "required": ["frequency_hz"],
+            },
+            handler=lambda args: ToolResult(success=True, content=f"SDR 流水线已创建\n任务数: {len(oc.create_sdr_pipeline(args['frequency_hz'], args.get('sample_rate',2048000), args.get('gain_db',40), args.get('demod_mode','fm'), args.get('record_duration_s',10)))}\n调用 orchestrator_plan 查看顺序，orchestrator_execute 执行"),
+            category="orchestrator",
+        )
+
+    def _register_code_editor_tools(self):
+        """注册自编程工具（代码编辑器）。"""
+        ce = self.code_editor
+
+        self.tool_registry.register(
+            name="code_read_file",
+            description="读取源代码文件。可以读取项目中的任何源代码文件，用于了解现有实现、查找需要修改的位置。这是自编程的第一步：先读懂代码再修改。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "文件路径（相对于项目根目录，如 mbdsdr_ai/dsp.py）"},
+                    "max_lines": {"type": "integer", "description": "最大读取行数（0=全部）", "default": 0},
+                },
+                "required": ["file_path"],
+            },
+            handler=lambda args: ToolResult(success=True, content=(lambda r: f"文件: {args['file_path']}\n共 {r[1]} 行\n\n{r[0]}")(ce.read_file(args["file_path"], args.get("max_lines", 0)))),
+            category="code_editor",
+        )
+
+        self.tool_registry.register(
+            name="code_modify_file",
+            description="修改源代码文件。修改前自动备份，支持一键恢复。这是自编程的核心：模型可以直接修改源代码。修改后建议运行 code_run_tests 验证，然后 code_hot_reload 热加载，最后 code_git_commit 提交。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "文件路径"},
+                    "new_content": {"type": "string", "description": "新的完整文件内容"},
+                    "description": {"type": "string", "description": "修改描述", "default": ""},
+                },
+                "required": ["file_path", "new_content"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ce.modify_file(args["file_path"], args["new_content"], args.get("description","")).to_dict(), ensure_ascii=False, indent=2)),
+            category="code_editor",
+        )
+
+        self.tool_registry.register(
+            name="code_modify_section",
+            description="局部修改源代码文件中的一段内容。比 code_modify_file 更安全，只替换指定的代码段。修改前自动备份。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "文件路径"},
+                    "old_section": {"type": "string", "description": "要替换的旧代码段（必须完全匹配）"},
+                    "new_section": {"type": "string", "description": "新代码段"},
+                    "description": {"type": "string", "description": "修改描述", "default": ""},
+                },
+                "required": ["file_path", "old_section", "new_section"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ce.modify_section(args["file_path"], args["old_section"], args["new_section"], args.get("description","")).to_dict(), ensure_ascii=False, indent=2)),
+            category="code_editor",
+        )
+
+        self.tool_registry.register(
+            name="code_run_tests",
+            description="运行测试验证代码修改。支持 py_compile 语法检查和自定义测试命令。修改代码后必须运行测试，防止引入 bug。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "edit_id": {"type": "string", "description": "编辑记录 ID"},
+                    "test_command": {"type": "string", "description": "自定义测试命令（如 python -m pytest）", "default": ""},
+                    "test_files": {"type": "array", "items": {"type": "string"}, "description": "要测试的文件列表（运行 py_compile）", "default": []},
+                },
+                "required": ["edit_id"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ce.run_tests(args["edit_id"], args.get("test_command",""), args.get("test_files",[])), ensure_ascii=False, indent=2)),
+            category="code_editor",
+        )
+
+        self.tool_registry.register(
+            name="code_hot_reload",
+            description="热加载修改后的 Python 模块，无需重启程序。测试通过后调用此工具让修改立即生效。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "module_name": {"type": "string", "description": "模块名，如 mbdsdr_ai.dsp"},
+                },
+                "required": ["module_name"],
+            },
+            handler=lambda args: ToolResult(success=True, content=(lambda r: f"{'成功' if r[0] else '失败'}: {r[1]}")(ce.hot_reload(args["module_name"]))),
+            category="code_editor",
+        )
+
+        self.tool_registry.register(
+            name="code_git_commit",
+            description="Git commit 提交代码修改到版本控制。这是开源协作的核心：修改经过测试验证后提交到 git 仓库，形成可追溯的版本历史。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "commit 信息（描述修改内容）"},
+                    "files": {"type": "array", "items": {"type": "string"}, "description": "要提交的文件列表（None=全部修改）", "default": []},
+                    "edit_id": {"type": "string", "description": "关联的编辑记录 ID", "default": ""},
+                },
+                "required": ["message"],
+            },
+            handler=lambda args: ToolResult(success=True, content=(lambda r: f"{'成功' if r[0] else '失败'}: {r[1]}")(ce.git_commit(args["message"], args.get("files") or None, args.get("edit_id") or None))),
+            category="code_editor",
+        )
+
+        self.tool_registry.register(
+            name="code_git_status",
+            description="获取 git 状态。查看当前分支、修改的文件、最近的 commit。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ce.git_status(), ensure_ascii=False, indent=2)),
+            category="code_editor",
+        )
+
+        self.tool_registry.register(
+            name="code_rollback",
+            description="一键恢复：回滚到修改前的状态。防幻觉变砖的最后一道防线：任何代码修改都可以一键撤销。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "edit_id": {"type": "string", "description": "要回滚的编辑记录 ID"},
+                },
+                "required": ["edit_id"],
+            },
+            handler=lambda args: ToolResult(success=True, content=(lambda r: f"{'成功' if r[0] else '失败'}: {r[1]}")(ce.rollback(args["edit_id"]))),
+            category="code_editor",
+        )
+
+        self.tool_registry.register(
+            name="code_list_edits",
+            description="列出代码编辑记录。查看所有的修改历史、状态、测试结果。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "返回条数，默认 20", "default": 20},
+                },
+                "required": [],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ce.list_edits(args.get("limit", 20)), ensure_ascii=False, indent=2)),
+            category="code_editor",
+        )
+
+        self.tool_registry.register(
+            name="code_stats",
+            description="获取代码编辑器统计信息。包括总编辑数、按状态分类、git 可用性、项目根目录。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ce.get_stats(), ensure_ascii=False, indent=2)),
+            category="code_editor",
+        )
+
+    def _register_astronomy_tools(self):
+        """注册天文计算工具（借鉴 Stellarium）。"""
+        obs = self.observer
+
+        self.tool_registry.register(
+            name="astro_set_observer",
+            description="设置观测者位置（经纬度/高度）和气象参数（气压/温度/湿度）。用于卫星指向、坐标转换、大气折射计算。获取 GPS 后应调用此工具更新位置。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "latitude_deg": {"type": "number", "description": "纬度（度，北纬为正）"},
+                    "longitude_deg": {"type": "number", "description": "经度（度，东经为正）"},
+                    "height_m": {"type": "number", "description": "海拔高度（米）", "default": 0},
+                    "pressure_hpa": {"type": "number", "description": "气压（百帕）", "default": 1013.25},
+                    "temperature_c": {"type": "number", "description": "温度（摄氏度）", "default": 10},
+                    "humidity": {"type": "number", "description": "相对湿度（0-1）", "default": 0.2},
+                },
+                "required": ["latitude_deg", "longitude_deg"],
+            },
+            handler=lambda args: ToolResult(success=True, content=self._set_observer_handler(args)),
+            category="astronomy",
+        )
+
+        self.tool_registry.register(
+            name="astro_get_observer",
+            description="获取当前观测者信息（位置/气象参数）。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(obs.to_dict(), ensure_ascii=False, indent=2)),
+            category="astronomy",
+        )
+
+        self.tool_registry.register(
+            name="astro_equatorial_to_altaz",
+            description="赤道坐标（赤经/赤纬）转地平坐标（仰角/方位角）。用于将卫星/天体的赤道坐标转换为天线指向的仰角和方位角。自动应用大气折射修正。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "ra_deg": {"type": "number", "description": "赤经（度）"},
+                    "dec_deg": {"type": "number", "description": "赤纬（度）"},
+                },
+                "required": ["ra_deg", "dec_deg"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(EquatorialCoord(args["ra_deg"], args["dec_deg"]).to_altaz(obs).to_dict(), ensure_ascii=False, indent=2)),
+            category="astronomy",
+        )
+
+        self.tool_registry.register(
+            name="astro_altaz_to_equatorial",
+            description="地平坐标（仰角/方位角）转赤道坐标（赤经/赤纬）。用于将天线当前指向转换为赤道坐标。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "alt_deg": {"type": "number", "description": "仰角（度）"},
+                    "az_deg": {"type": "number", "description": "方位角（度，0=北，顺时针）"},
+                },
+                "required": ["alt_deg", "az_deg"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(AltAzCoord(args["alt_deg"], args["az_deg"]).to_equatorial(obs).to_dict(), ensure_ascii=False, indent=2)),
+            category="astronomy",
+        )
+
+        self.tool_registry.register(
+            name="astro_compute_refraction",
+            description="计算大气折射修正量（度）。基于气压/温度/湿度，告诉用户实际仰角和视仰角的差异。对低仰角卫星接收很重要。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "alt_deg": {"type": "number", "description": "真实仰角（度）"},
+                },
+                "required": ["alt_deg"],
+            },
+            handler=lambda args: ToolResult(success=True, content=f"仰角 {args['alt_deg']}° 的大气折射修正: {compute_refraction(args['alt_deg'], obs)*60:.2f} 弧分 ({compute_refraction(args['alt_deg'], obs):.4f}°)"),
+            category="astronomy",
+        )
+
+        self.tool_registry.register(
+            name="astro_compute_airmass",
+            description="计算大气质量（Airmass）。表示信号穿过大气层的路径长度，1=天顶，越大表示大气吸收越强。对低仰角接收的信号衰减评估很重要。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "alt_deg": {"type": "number", "description": "仰角（度）"},
+                },
+                "required": ["alt_deg"],
+            },
+            handler=lambda args: ToolResult(success=True, content=f"仰角 {args['alt_deg']}° 的大气质量: {compute_airmass(args['alt_deg']):.2f}"),
+            category="astronomy",
+        )
+
+        self.tool_registry.register(
+            name="astro_antenna_params",
+            description="计算天线参数（增益/波束宽度/视场/波长）。输入天线口径和工作频率，输出增益(dBi)、半功率波束宽度(度)、视场(度)、波长(cm)。用于评估天线是否适合接收目标信号。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "diameter_m": {"type": "number", "description": "天线口径（米）"},
+                    "frequency_hz": {"type": "number", "description": "工作频率（Hz）"},
+                    "efficiency": {"type": "number", "description": "天线效率（0-1，默认0.6）", "default": 0.6},
+                    "name": {"type": "string", "description": "天线名称", "default": "Antenna"},
+                },
+                "required": ["diameter_m", "frequency_hz"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(AntennaParams(name=args.get("name","Antenna"), diameter_m=args["diameter_m"], frequency_hz=args["frequency_hz"], efficiency=args.get("efficiency",0.6)).to_dict(), ensure_ascii=False, indent=2)),
+            category="astronomy",
+        )
+
+        self.tool_registry.register(
+            name="astro_pointing_guidance",
+            description="计算天线指向辅助。输入目标仰角/方位角和当前仰角/方位角，输出需要转动的方向和角度，以及是否在波束内。告诉用户如何调整天线指向目标卫星/信号源。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target_alt": {"type": "number", "description": "目标仰角（度）"},
+                    "target_az": {"type": "number", "description": "目标方位角（度）"},
+                    "current_alt": {"type": "number", "description": "当前仰角（度）"},
+                    "current_az": {"type": "number", "description": "当前方位角（度）"},
+                    "beamwidth_deg": {"type": "number", "description": "天线波束宽度（度，默认5）", "default": 5},
+                },
+                "required": ["target_alt", "target_az", "current_alt", "current_az"],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(compute_pointing_guidance(AltAzCoord(args["target_alt"], args["target_az"]), AltAzCoord(args["current_alt"], args["current_az"]), AntennaParams(beamwidth_deg=args.get("beamwidth_deg",5)) if False else None), ensure_ascii=False, indent=2)),
+            category="astronomy",
+        )
+
+        self.tool_registry.register(
+            name="astro_time_info",
+            description="获取天文时间系统信息（儒略日JD/简化儒略日MJD/格林尼治恒星时GMST/地方恒星时LST）。用于卫星轨道计算和精确时间同步。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=(lambda jd: json.dumps({"unix_time": time.time(), "jd": round(jd, 6), "mjd": round(jd_to_mjd(jd), 6), "gmst_hms": lst_to_hms(jd_to_gmst(jd)), "lst_hms": lst_to_hms(jd_to_lst(jd, obs.longitude_deg)), "observer_lon": obs.longitude_deg}, ensure_ascii=False, indent=2))(unix_to_jd())),
+            category="astronomy",
+        )
+
+    def _register_amr_tools(self):
+        """注册自动调制识别（AMR）工具。"""
+        amr = self.amr_classifier
+
+        self.tool_registry.register(
+            name="amr_classify",
+            description="自动调制识别（AMR）。分析信号的调制方式，支持 AM/FM/SSB/CW/FSK/PSK/QAM/OFDM/NOISE。使用 KNN 机器学习分类器（24维特征，内置45个训练样本），输出预测调制方式、置信度、前K候选。这是真正的机器学习分类器，不是规则猜测。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq_samples": {"type": "array", "items": {"type": "number"}, "description": "IQ 样本（实数列表，交替 I/Q），如 [I1,Q1,I2,Q2,...]。如果为空则使用模拟信号演示。", "default": []},
+                    "sample_rate": {"type": "number", "description": "采样率（Hz）", "default": 1.0},
+                },
+                "required": [],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(amr.classify_iq([complex(args["iq_samples"][i], args["iq_samples"][i+1]) for i in range(0, len(args["iq_samples"])-1, 2)] if args.get("iq_samples") else [complex(math.cos(2*math.pi*0.01*t), math.sin(2*math.pi*0.01*t)) for t in range(1000)], args.get("sample_rate", 1.0)).to_dict(), ensure_ascii=False, indent=2)),
+            category="amr",
+        )
+
+        self.tool_registry.register(
+            name="amr_extract_features",
+            description="从 IQ 样本中提取 24 维 AMR 特征。包括时域特征（幅度统计/峰均比/偏度/峰度）、频域特征（带宽/频谱质心/平坦度/滚降）、统计特征（过零率/瞬时频率/相位/IQ相关性/星座图密度）。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq_samples": {"type": "array", "items": {"type": "number"}, "description": "IQ 样本（实数列表，交替 I/Q）", "default": []},
+                    "sample_rate": {"type": "number", "description": "采样率（Hz）", "default": 1.0},
+                },
+                "required": [],
+            },
+            handler=lambda args: ToolResult(success=True, content=json.dumps(amr.extract_features_from_iq([complex(args["iq_samples"][i], args["iq_samples"][i+1]) for i in range(0, len(args["iq_samples"])-1, 2)] if args.get("iq_samples") else [complex(math.cos(2*math.pi*0.01*t), math.sin(2*math.pi*0.01*t)) for t in range(1000)], args.get("sample_rate", 1.0)).to_dict(), ensure_ascii=False, indent=2)),
+            category="amr",
+        )
+
+        self.tool_registry.register(
+            name="amr_add_sample",
+            description="添加 AMR 训练样本（增量学习）。用户可以标记已知调制方式的信号，添加到训练集中，提高分类准确率。这是自学习的一部分：用户标注→模型学习→分类更准。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq_samples": {"type": "array", "items": {"type": "number"}, "description": "IQ 样本（实数列表，交替 I/Q）"},
+                    "label": {"type": "string", "description": "调制方式标签: AM/FM/SSB/CW/FSK/PSK/QAM/OFDM/NOISE"},
+                    "sample_rate": {"type": "number", "description": "采样率（Hz）", "default": 1.0},
+                },
+                "required": ["iq_samples", "label"],
+            },
+            handler=lambda args: ToolResult(success=True, content=(lambda: (amr.add_training_sample([complex(args["iq_samples"][i], args["iq_samples"][i+1]) for i in range(0, len(args["iq_samples"])-1, 2)], ModulationType(args["label"]), args.get("sample_rate", 1.0)), f"已添加训练样本: {args['label']}，当前训练集 {amr.get_stats()['total_samples']} 个样本")[1])()),
+            category="amr",
+        )
+
+        self.tool_registry.register(
+            name="amr_stats",
+            description="获取 AMR 分类器统计信息。包括总样本数、K值、距离度量、按标签/来源分类的样本数、特征维度。",
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(success=True, content=json.dumps(amr.get_stats(), ensure_ascii=False, indent=2)),
+            category="amr",
+        )
+
+    def _set_observer_handler(self, args: Dict[str, Any]) -> str:
+        """设置观测者的 handler（避免复杂 lambda）。"""
+        obs = self.observer
+        obs.latitude_deg = args["latitude_deg"]
+        obs.longitude_deg = args["longitude_deg"]
+        obs.height_m = args.get("height_m", 0)
+        obs.pressure_hpa = args.get("pressure_hpa", 1013.25)
+        obs.temperature_c = args.get("temperature_c", 10)
+        obs.humidity = args.get("humidity", 0.2)
+        return f"观测者已设置: 纬度 {obs.latitude_deg}°, 经度 {obs.longitude_deg}°, 高度 {obs.height_m}m, 气压 {obs.pressure_hpa}hPa, 温度 {obs.temperature_c}°C"
+
+    # ── 核心对话循环 ────────────────────────────────────
+
+    def chat(self, user_input: str, max_tool_rounds: int = 10) -> Dict[str, Any]:
+        """
+        处理用户输入，返回 Agent 回复。
+
+        流程：
+        1. 添加用户消息到上下文
+        2. 检索相关记忆
+        3. 构建系统提示词（含记忆）
+        4. 调用 LLM
+        5. 如果模型调用工具，执行工具，结果返回模型，继续循环
+        6. 自动压缩上下文
+        7. 返回最终回复
+
+        返回:
+        {
+            "content": str,           # 最终回复文本
+            "tool_calls": list,       # 本轮调用的工具列表
+            "tool_results": list,     # 工具调用结果
+            "usage": dict,            # token 用量
+            "latency_ms": float,      # 总耗时
+            "compacted": bool,        # 是否触发了压缩
+            "error": str,             # 错误信息（如果有）
+        }
+        """
+        start_time = time.time()
+        self.total_agent_calls += 1
+
+        # 检查 API key
+        if not self.config.api_key:
+            return {
+                "content": "错误: API key 未设置。请配置硅基流动 API key 后使用。",
+                "tool_calls": [],
+                "tool_results": [],
+                "usage": {},
+                "latency_ms": 0,
+                "compacted": False,
+                "error": "api_key_not_set",
+            }
+
+        # 1. 添加用户消息
+        self.context_manager.add_user_message(user_input)
+
+        # 2. 检索相关记忆
+        memory_context = self.memory.build_memory_context(user_input)
+
+        # 3. 构建系统提示词（含记忆 + 工具说明）
+        system_prompt = SYSTEM_PROMPT
+        if memory_context:
+            system_prompt += memory_context
+        system_prompt += f"\n\n当前可用工具数: {len(self.tool_registry.get_tool_names())}。调用工具前先用 list_tools 确认工具列表。"
+        self.context_manager.set_system_prompt(system_prompt)
+
+        # 4. 工具调用循环
+        all_tool_calls = []
+        all_tool_results = []
+        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        compacted = False
+        final_content = ""
+        last_error = None
+
+        for round_num in range(max_tool_rounds):
+            # 检查是否需要压缩
+            if self.context_manager.needs_compaction():
+                self.context_manager.compact()
+                compacted = True
+
+            # 构建 API 消息
+            messages = self.context_manager.build_api_messages()
+            tools = self.tool_registry.get_tool_definitions() if self.config.enable_tool_calling else None
+
+            # 调用 LLM
+            response = self.model_manager.chat(
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+            )
+
+            # 累计用量
+            usage = response.get("usage", {})
+            total_usage["prompt_tokens"] += usage.get("prompt_tokens", 0)
+            total_usage["completion_tokens"] += usage.get("completion_tokens", 0)
+            total_usage["total_tokens"] += usage.get("total_tokens", 0)
+
+            if not response.get("success"):
+                last_error = response.get("error", "unknown_error")
+                final_content = f"模型调用失败: {last_error}"
+                break
+
+            content = response.get("content", "")
+            tool_calls = response.get("tool_calls", [])
+
+            # 如果没有工具调用，这是最终回复
+            if not tool_calls:
+                final_content = content
+                # 添加 assistant 消息到上下文
+                self.context_manager.add_assistant_message(content)
+                break
+
+            # 有工具调用，执行工具
+            # 先添加 assistant 消息（含 tool_calls）到上下文
+            self.context_manager.add_assistant_message(content, tool_calls=tool_calls)
+
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                tool_name = fn.get("name", "")
+                all_tool_calls.append({"name": tool_name, "arguments": fn.get("arguments", "")})
+
+                # 执行工具
+                result = self.tool_registry.call_from_model(tc)
+                all_tool_results.append(result.to_dict())
+
+                # 添加工具结果到上下文
+                self.context_manager.add_tool_message(
+                    tool_call_id=tc.get("id", ""),
+                    content=result.content,
+                    tool_name=tool_name,
+                )
+
+            # 继续循环，让模型看到工具结果后继续
+
+        # 5. 最终检查压缩
+        if self.context_manager.needs_compaction():
+            self.context_manager.compact()
+            compacted = True
+
+        # 6. 遗忘旧记忆（每 10 次调用执行一次）
+        if self.total_agent_calls % 10 == 0:
+            self.memory.forget_old()
+
+        latency_ms = round((time.time() - start_time) * 1000, 1)
+
+        return {
+            "content": final_content,
+            "tool_calls": all_tool_calls,
+            "tool_results": all_tool_results,
+            "usage": total_usage,
+            "latency_ms": latency_ms,
+            "compacted": compacted,
+            "error": last_error,
+            "rounds": len(all_tool_calls) + (1 if final_content else 0),
+        }
+
+    # ── 压缩回调 ────────────────────────────────────────
+
+    def _compaction_callback(self, history_text: str) -> str:
+        """
+        上下文压缩回调：用 LLM 总结被裁剪的历史。
+        """
+        try:
+            messages = [
+                {"role": "system", "content": "你是一个对话摘要助手。请简洁总结以下对话历史的关键信息，保留重要的频率、设置、用户偏好和未完成的任务。"},
+                {"role": "user", "content": f"请总结以下对话历史:\n\n{history_text[:3000]}"},
+            ]
+            response = self.model_manager.chat(messages=messages, max_tokens=500)
+            if response.get("success"):
+                return response.get("content", "摘要生成失败")
+        except Exception as e:
+            pass
+        return f"[自动压缩] 已裁剪早期对话历史"
+
+    # ── 状态查询 ────────────────────────────────────────
+
+    def get_status(self) -> Dict[str, Any]:
+        """获取 Agent 完整状态。"""
+        return {
+            "conversation_id": self.conversation_id,
+            "total_agent_calls": self.total_agent_calls,
+            "config": self.config.to_dict(),
+            "context": self.context_manager.get_stats().to_dict(),
+            "model": self.model_manager.get_status(),
+            "tools": self.tool_registry.get_stats(),
+            "memory": self.memory.get_stats(),
+            "last_error": self.last_error,
+        }
+
+    def get_status_text(self) -> str:
+        """获取人类可读的 Agent 状态。"""
+        lines = [
+            "=" * 50,
+            "  MBDSDR AI 定义无线电 - Agent 状态",
+            "=" * 50,
+            f"会话 ID: {self.conversation_id}",
+            f"总调用次数: {self.total_agent_calls}",
+            "",
+            self.context_manager.get_status_text(),
+            "",
+            self.model_manager.get_status_text(),
+            "",
+            self.tool_registry.get_status_text(),
+            "",
+            self.memory.get_status_text(),
+        ]
+        if self.last_error:
+            lines.append(f"\n上次错误: {self.last_error}")
+        return "\n".join(lines)
+
+    # ── 快捷命令 ────────────────────────────────────────
+
+    def run_command(self, command: str) -> str:
+        """
+        处理斜杠命令（/status, /context, /models, /clear 等）。
+        """
+        cmd = command.strip().lower()
+
+        if cmd in ("/status", "/状态"):
+            return self.get_status_text()
+
+        if cmd in ("/context", "/上下文"):
+            return self.context_manager.get_status_text()
+
+        if cmd in ("/models", "/模型"):
+            models = self.model_manager.fetch_models()
+            lines = [f"当前模型: {self.model_manager.model}", "", "可用模型:"]
+            for m in models:
+                weak = " [弱模型]" if m.is_weak else ""
+                lines.append(f"  - {m.id}{weak}")
+            return "\n".join(lines)
+
+        if cmd.startswith("/switch ") or cmd.startswith("/切换 "):
+            model_id = command.split(None, 1)[1] if " " in command else ""
+            if model_id:
+                success, msg = self.model_manager.switch_model(model_id)
+                return msg
+            return "用法: /switch <模型ID>"
+
+        if cmd in ("/clear", "/清空"):
+            self.context_manager.clear_history()
+            return "对话历史已清空，新 epoch 开始。"
+
+        if cmd in ("/tools", "/工具"):
+            return self.tool_registry.get_status_text()
+
+        if cmd in ("/memory", "/记忆"):
+            return self.memory.get_status_text()
+
+        if cmd in ("/help", "/帮助"):
+            return """MBDSDR Agent 命令:
+  /status    - 查看完整状态
+  /context   - 查看上下文状态
+  /models    - 查看可用模型
+  /switch <模型> - 切换模型
+  /clear     - 清空对话历史
+  /tools     - 查看工具列表
+  /memory    - 查看记忆状态
+  /help      - 显示帮助"""
+
+        return f"未知命令: {command}。输入 /help 查看可用命令。"
