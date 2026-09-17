@@ -1,3 +1,4 @@
+import os
 """
 MBDSDR AI 对话面板
 ===================
@@ -279,9 +280,9 @@ class AIPanel(QWidget):
             return
 
         config = AgentConfig(
-            api_key=api_key or "[REDACTED]",
-            base_url=base_url or "https://api.siliconflow.cn/v1",
-            model=model or "Qwen/Qwen3.6-35B-A3B",
+            api_key=api_key or os.environ.get("MBDSDR_API_KEY", ""),
+            base_url=base_url or os.environ.get("MBDSDR_API_BASE", "https://api.siliconflow.cn/v1"),
+            model=model or os.environ.get("MBDSDR_MODEL", "Qwen/Qwen3.6-35B-A3B"),
         )
         self.agent = MBDSDRAgent(config)
         self._update_ai_status()
