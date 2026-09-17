@@ -99,6 +99,17 @@ class MBSDRAIMCPServer:
         self._tools = self.tool_registry.list_tools()
         self._log(f"MBDSDR AI 内核初始化完成，共 {len(self._tools)} 个工具可用")
 
+        # 无硬件时自动连接 Mock 后端，让外部 AI IDE 一连接就能测试全部 SDR 功能
+        # 用户可以通过 sdr_connect 切换到真实硬件（RTL-SDR/HackRF/USRP/ai-sdr Mini）
+        try:
+            result = self.tool_registry.call("sdr_connect", {"backend": "mock"})
+            if result.success:
+                self._log("已自动连接 Mock SDR 后端（无真实硬件时的默认行为，可随时切换）")
+            else:
+                self._log(f"自动连接 Mock 后端返回: {result.error}")
+        except Exception as e:
+            self._log(f"自动连接 Mock 后端失败: {e}")
+
         # MCP 协议状态
         self._initialized = False
         self._request_id = 0
