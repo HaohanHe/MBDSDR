@@ -243,6 +243,38 @@ class MBDSDRAgent:
         """设置 MCP 客户端引用。"""
         self._mcp_client = client
 
+    def _parse_change_type(self, value: str) -> "ChangeType":
+        """宽松解析变更类型枚举（大小写不敏感+常见别名）。"""
+        aliases = {
+            "create": "create", "created": "create", "new": "create", "add": "create",
+            "modify": "modify", "modified": "modify", "edit": "modify", "edited": "modify", "change": "modify", "changed": "modify", "update": "modify", "updated": "modify",
+            "delete": "delete", "deleted": "delete", "remove": "delete", "removed": "delete", "del": "delete",
+            "rename": "rename", "renamed": "rename", "move": "rename", "moved": "rename",
+            "revert": "revert", "reverted": "revert", "rollback": "revert", "restore": "revert",
+        }
+        key = str(value).strip().lower()
+        mapped = aliases.get(key, key)
+        try:
+            return ChangeType(mapped)
+        except ValueError:
+            return ChangeType.MODIFY  # 默认 modify
+
+    def _parse_experience_type(self, value: str) -> "ExperienceType":
+        """宽松解析经验类型枚举（大小写不敏感+常见别名）。"""
+        aliases = {
+            "tool_call": "tool_call", "tool": "tool_call", "toolcall": "tool_call", "call": "tool_call",
+            "task_completion": "task_completion", "task": "task_completion", "complete": "task_completion", "completed": "task_completion", "success": "task_completion", "done": "task_completion",
+            "error_recovery": "error_recovery", "error": "error_recovery", "recovery": "error_recovery", "fail": "error_recovery", "failed": "error_recovery", "retry": "error_recovery",
+            "user_feedback": "user_feedback", "user": "user_feedback", "feedback": "user_feedback",
+            "judge_feedback": "judge_feedback", "judge": "judge_feedback", "evaluation": "judge_feedback", "review": "judge_feedback",
+        }
+        key = str(value).strip().lower()
+        mapped = aliases.get(key, key)
+        try:
+            return ExperienceType(mapped)
+        except ValueError:
+            return ExperienceType.TASK_COMPLETION  # 默认 task_completion
+
     def _register_memory_tools(self):
         """注册记忆读写工具。"""
         self.tool_registry.register(
@@ -781,7 +813,7 @@ class MBDSDRAgent:
                 },
                 "required": ["file_path", "change_type"],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(ft.track_change(args["file_path"], ChangeType(args["change_type"]), args.get("content_before",""), args.get("content_after",""), args.get("reason",""), args.get("actor","agent")).to_dict(), ensure_ascii=False, indent=2)),
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ft.track_change(args["file_path"], self._parse_change_type(args["change_type"]), args.get("content_before",""), args.get("content_after",""), args.get("reason",""), args.get("actor","agent")).to_dict(), ensure_ascii=False, indent=2)),
             category="file_tracker",
         )
 
@@ -975,7 +1007,7 @@ class MBDSDRAgent:
                 },
                 "required": ["experience_type"],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(sl.record_experience(ExperienceType(args["experience_type"]), args.get("question",""), args.get("answer",""), args.get("tool_calls",[]), args.get("score",0), args.get("feedback","")).to_dict(), ensure_ascii=False, indent=2)),
+            handler=lambda args: ToolResult(success=True, content=json.dumps(sl.record_experience(self._parse_experience_type(args["experience_type"]), args.get("question",""), args.get("answer",""), args.get("tool_calls",[]), args.get("score",0), args.get("feedback","")).to_dict(), ensure_ascii=False, indent=2)),
             category="learning",
         )
 
