@@ -1,14 +1,15 @@
 """
-MBDSDR AI - 气象卫星接收与解码
-================================
+MBDSDR AI - 卫星接收与解码
+==========================
 
-支持：
-- GK-2A (GEO-KOMPSAT-2A) LRIT
-- 风云四号 (FY-4A/4B) LRIT/HRIT
-- 风云三号 (FY-3) HRPT/AHRPT
-- GOES 系列 LRIT/HRIT
+支持各类开源卫星接收项目：
+- 气象卫星：GK-2A / 风云四号 / 风云三号 / GOES / Meteor / Himawari
+- 卫星电视：DVB-S / DVB-S2 / 模拟卫星电视
+- 深空探测：LRO / 其他月球/深空探测器
+- 业余卫星：NOAA / Meteor / ISS / 各业余通信卫星
 
 解码流程：QPSK解调 → Viterbi解码 → 解扰 → CADU提取 → 图像合成
+参考开源项目：SatDump / goestools / medet / aptdec
 """
 
 import numpy as np
@@ -40,7 +41,7 @@ class MeteorSatParams:
 
 # 卫星参数表
 METEOR_SATS: Dict[str, MeteorSatParams] = {
-    # 同步轨道
+    # ===== 气象卫星 - 同步轨道 =====
     "gk2a_lrit": MeteorSatParams(
         name="GK-2A LRIT",
         norad_id=43934,
@@ -101,6 +102,53 @@ METEOR_SATS: Dict[str, MeteorSatParams] = {
         orbital_type="GEO",
         description="风云四号B星，东经123.5度",
     ),
+    "goes16_lrit": MeteorSatParams(
+        name="GOES-16 LRIT",
+        norad_id=41864,
+        downlink_freq_hz=1692e6,
+        symbol_rate=90000,
+        modulation="QPSK",
+        viterbi_rate=0.5,
+        viterbi_K=7,
+        viterbi_g1=171,
+        viterbi_g2=133,
+        descrambler="CCDB",
+        cadu_length=1024,
+        orbital_type="GEO",
+        description="美国GOES-16气象卫星LRIT",
+    ),
+    "goes17_lrit": MeteorSatParams(
+        name="GOES-17 LRIT",
+        norad_id=43098,
+        downlink_freq_hz=1692e6,
+        symbol_rate=90000,
+        modulation="QPSK",
+        viterbi_rate=0.5,
+        viterbi_K=7,
+        viterbi_g1=171,
+        viterbi_g2=133,
+        descrambler="CCDB",
+        cadu_length=1024,
+        orbital_type="GEO",
+        description="美国GOES-17气象卫星LRIT",
+    ),
+    "himawari8_lrit": MeteorSatParams(
+        name="Himawari-8 LRIT",
+        norad_id=40083,
+        downlink_freq_hz=1686e6,
+        symbol_rate=90000,
+        modulation="QPSK",
+        viterbi_rate=0.5,
+        viterbi_K=7,
+        viterbi_g1=171,
+        viterbi_g2=133,
+        descrambler="CCDB",
+        cadu_length=1024,
+        orbital_type="GEO",
+        description="日本向日葵8号气象卫星LRIT",
+    ),
+
+    # ===== 气象卫星 - 极轨 =====
     "fy3_hrpt": MeteorSatParams(
         name="FY-3 HRPT",
         norad_id=37214,  # FY-3C
@@ -116,20 +164,116 @@ METEOR_SATS: Dict[str, MeteorSatParams] = {
         orbital_type="LEO",
         description="风云三号极轨卫星HRPT直接下传",
     ),
-    "goes16_lrit": MeteorSatParams(
-        name="GOES-16 LRIT",
-        norad_id=41864,
-        downlink_freq_hz=1692e6,
-        symbol_rate=90000,
-        modulation="QPSK",
+    "noaa15_apt": MeteorSatParams(
+        name="NOAA-15 APT",
+        norad_id=25338,
+        downlink_freq_hz=137.62e6,
+        symbol_rate=2400,
+        modulation="AFM",
+        viterbi_rate=1.0,
+        viterbi_K=0,
+        viterbi_g1=0,
+        viterbi_g2=0,
+        descrambler="none",
+        cadu_length=0,
+        orbital_type="LEO",
+        description="NOAA-15 自动图像传输（模拟）",
+    ),
+    "noaa19_apt": MeteorSatParams(
+        name="NOAA-19 APT",
+        norad_id=33591,
+        downlink_freq_hz=137.1e6,
+        symbol_rate=2400,
+        modulation="AFM",
+        viterbi_rate=1.0,
+        viterbi_K=0,
+        viterbi_g1=0,
+        viterbi_g2=0,
+        descrambler="none",
+        cadu_length=0,
+        orbital_type="LEO",
+        description="NOAA-19 自动图像传输（模拟）",
+    ),
+    "meteor_m2_hrpt": MeteorSatParams(
+        name="Meteor-M2 HRPT",
+        norad_id=40001,
+        downlink_freq_hz=1700e6,
+        symbol_rate=72000,
+        modulation="OQPSK",
         viterbi_rate=0.5,
         viterbi_K=7,
         viterbi_g1=171,
         viterbi_g2=133,
-        descrambler="CCDB",
+        descrambler="NRZ-M",
         cadu_length=1024,
+        orbital_type="LEO",
+        description="俄罗斯Meteor-M2极轨气象卫星",
+    ),
+
+    # ===== 卫星电视 =====
+    "dvbs_qpsk": MeteorSatParams(
+        name="DVB-S QPSK",
+        norad_id=0,
+        downlink_freq_hz=4e9,  # C/Ku波段，范围大
+        symbol_rate=27500000,
+        modulation="QPSK",
+        viterbi_rate=0.75,
+        viterbi_K=7,
+        viterbi_g1=171,
+        viterbi_g2=133,
+        descrambler="MPEG",
+        cadu_length=188,
         orbital_type="GEO",
-        description="美国GOES-16气象卫星LRIT",
+        description="DVB-S卫星电视标准（C/Ku波段）",
+    ),
+    "dvbs2_qpsk": MeteorSatParams(
+        name="DVB-S2 QPSK",
+        norad_id=0,
+        downlink_freq_hz=12e9,
+        symbol_rate=30000000,
+        modulation="QPSK/8PSK",
+        viterbi_rate=0.75,
+        viterbi_K=7,
+        viterbi_g1=171,
+        viterbi_g2=133,
+        descrambler="MPEG",
+        cadu_length=188,
+        orbital_type="GEO",
+        description="DVB-S2卫星电视标准（新一代）",
+    ),
+
+    # ===== 深空探测 =====
+    "lro_sband": MeteorSatParams(
+        name="LRO S-band",
+        norad_id=37349,
+        downlink_freq_hz=2200e6,
+        symbol_rate=0,  # 转发器模式
+        modulation="Doppler",
+        viterbi_rate=1.0,
+        viterbi_K=0,
+        viterbi_g1=0,
+        viterbi_g2=0,
+        descrambler="none",
+        cadu_length=0,
+        orbital_type="Lunar",
+        description="月球勘测轨道飞行器S波段多普勒跟踪",
+    ),
+
+    # ===== 业余卫星 =====
+    "iss_manual": MeteorSatParams(
+        name="ISS 业余模式",
+        norad_id=25544,
+        downlink_freq_hz=145.8e6,
+        symbol_rate=1200,
+        modulation="AFSK",
+        viterbi_rate=1.0,
+        viterbi_K=0,
+        viterbi_g1=0,
+        viterbi_g2=0,
+        descrambler="none",
+        cadu_length=0,
+        orbital_type="LEO",
+        description="国际空间站业余无线电（SSTV/包通信）",
     ),
 }
 
