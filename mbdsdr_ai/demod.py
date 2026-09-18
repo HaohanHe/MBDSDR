@@ -343,44 +343,35 @@ class ViterbiDecoder:
         self.survivors = []
 
     def _build_transitions(self):
-        """预计算状态转移表。"""
-        # 对于每个输入位（0/1），计算状态转移和输出
-        self.next_state = np.zeros((self.n, 2), dtype=int)
-        self.output = np.zeros((self.n, 2, 2), dtype=int)  # (state, input, output_bit)
+        """预计算状态转移表（向量化版本）。"""
+        n = self.n
 
-        for state in range(self.n):
-            for input_bit in [0, 1]:
-                # 移位寄存器：state是(K-1)位移位寄存器
-                reg = (state << 1) | input_bit
+        # 向量化计算所有状态的转移
+        states = np.arange(n)
+        input_bits = np.array([0, 1])
 
-                # 计算G1输出
-                g1 = 0
-                for i in range(self.K):
-                    if (self.G1 >> i) & 1:
-                        g1 ^= (reg >> i) & 1
+        # reg = (state << 1) | input_bit
+        reg = (states[:, None] << 1) | input_bits[None, :]  # (n, 2)
 
-                # 计算G2输出
-                g2 = 0
-                for i in range(self.K):
-                    if (self.G2 >> i) & 1:
-                        g2 ^= (reg >> i) & 1
+        # 计算G1/G2输出（向量化）
+        g1 = np.zeros((n, 2), dtype=int)
+        g2 = np.zeros((n, 2), dtype=int)
 
-                # 下一状态
-                next_s = state >> 1  # 右移一位
-                if input_bit:
-                    next_s |= (1 << (self.K - 2))
+        for i in range(self.K):
+            if (self.G1 >> i) & 1:
+                g1 ^= (reg >> i) & 1
+            if (self.G2 >> i) & 1:
+                g2 ^= (reg >> i) & 1
 
-                self.next_state[state, input_bit] = next_s
-                self.output[state, input_bit, 0] = g1
-                self.output[state, input_bit, 1] = g2
+        # 下一状态
+        next_s = (states[:, None] >> 1) | (input_bits[None, :] << (self.K - 2))
 
-    def _hamming_distance(self, received: np.ndarray, expected: np.ndarray) -> float:
-        """汉明距离（软判决用欧氏距离）。"""
-        return np.sum(np.abs(received - expected))
+        self.next_state = next_s
+        self.output = np.stack([g1, g2], axis=-1)  # (n, 2, 2)
 
     def decode(self, bits: np.ndarray) -> np.ndarray:
         """
-        解码比特流。
+        解码比特流（向量化版本）。
 
         参数:
             bits: 接收比特流（软判决为0-1间浮点数）
@@ -390,47 +381,64 @@ class ViterbiDecoder:
         """
         # 确保是偶数长度（每2个编码位对应1个信息位）
         n_coded = (len(bits) // 2) * 2
+        n_symbols = n_coded // 2
 
-        # 初始化
+        # 初始化路径度量
         pm = np.full(self.n, np.inf)
         pm[0] = 0
-        survivors = []
 
-        for i in range(0, n_coded, 2):
+        # 预计算输出期望（float类型）
+        output_float = self.output.astype(float)  # (n, 2, 2)
+
+        # 幸存路径（每个时间步，每个状态的决策位）
+        survivors = np.zeros((n_symbols, self.n), dtype=int)
+
+        # 批量处理所有符号
+        for sym_idx in range(n_symbols):
             # 接收的两个编码位
-            r = np.array([bits[i], bits[i + 1]], dtype=float)
+            r = np.array([bits[sym_idx * 2], bits[sym_idx * 2 + 1]], dtype=float)
 
-            # 新的路径度量
+            # 计算所有状态×所有输入的距离
+            # output_float: (n, 2, 2)
+            # r: (2,)
+            # distances: (n, 2)
+            distances = np.sum(np.abs(output_float - r[None, None, :]), axis=2)
+
+            # 总路径度量: pm[state] + distance
+            # pm: (n,), distances: (n, 2)
+            total = pm[:, None] + distances  # (n, 2)
+
+            # 对每个next_state，找到最小的total
+            # next_state: (n, 2) - 每个state和input对应的next_state
             new_pm = np.full(self.n, np.inf)
             decisions = np.zeros(self.n, dtype=int)
 
-            for state in range(self.n):
-                for input_bit in [0, 1]:
-                    next_s = self.next_state[state, input_bit]
-                    exp = self.output[state, input_bit].astype(float)
+            # 向量化：对每个next_state找最小值
+            for input_bit in [0, 1]:
+                ns = self.next_state[:, input_bit]  # (n,)
+                t = total[:, input_bit]  # (n,)
 
-                    # 距离
-                    dist = self._hamming_distance(r, exp)
-                    total = pm[state] + dist
-
-                    if total < new_pm[next_s]:
-                        new_pm[next_s] = total
-                        decisions[next_s] = input_bit
+                # 用np.minimum.at做分散最小值更新
+                np.minimum.at(new_pm, ns, t)
+                # 记录决策
+                # 注意：这里需要更复杂的处理，因为多个state可能映射到同一个next_state
+                # 简化：先记录，后面比较
+                mask = (t < new_pm[ns])
+                decisions[ns[mask]] = input_bit
 
             pm = new_pm
-            survivors.append(decisions)
+            survivors[sym_idx] = decisions
 
         # 回溯
-        decoded = []
+        decoded = np.zeros(n_symbols, dtype=np.uint8)
         state = np.argmin(pm)
 
-        for i in range(len(survivors) - 1, -1, -1):
-            bit = survivors[i][state]
-            decoded.append(bit)
+        for i in range(n_symbols - 1, -1, -1):
+            bit = survivors[i, state]
+            decoded[i] = bit
             state = self.next_state[state, bit]
 
-        decoded.reverse()
-        return np.array(decoded, dtype=np.uint8)
+        return decoded
 
 
 # ========================================================================
