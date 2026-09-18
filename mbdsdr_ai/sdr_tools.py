@@ -687,6 +687,144 @@ def register_sdr_tools(agent):
         category="sdr_analysis",
     )
 
+    # ═══════════════════════════════════════════════════
+    # 16. AX.25 / APRS 网络通信（8个）
+    # ═══════════════════════════════════════════════════
+
+    agent.tool_registry.register(
+        name="sdr_encode_ax25",
+        description="编码 AX.25 帧。输入源呼号、目的呼号、中继器路径、信息字段，输出 AX.25 帧字节（十六进制）。支持 UI/I/Supervisory 帧，支持 WIDEn-N 中继路径。AX.25 是业余无线电分组网络的核心数据链路层协议。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "description": "源呼号（如 BI4MIB 或 BI4MIB-7）"},
+                "destination": {"type": "string", "description": "目的呼号（如 APRS 或 CQ）"},
+                "digipeaters": {"type": "array", "items": {"type": "string"}, "description": "中继器路径列表（如 ['WIDE1-1', 'WIDE2-2']）"},
+                "info": {"type": "string", "description": "信息字段内容（文本）"},
+                "control": {"type": "integer", "description": "控制字段，默认 0x03 (UI帧)"},
+                "pid": {"type": "integer", "description": "协议ID，默认 0xF0 (无第三层)"},
+            },
+            "required": ["source", "destination", "info"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_encode_ax25(args)),
+        category="sdr_network",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_decode_ax25",
+        description="解码 AX.25 帧。输入十六进制帧数据或 WAV 音频文件路径，输出解析后的 AX.25 帧（源/目的呼号、中继器路径、控制字段、协议ID、信息字段、FCS校验结果）。支持从 AFSK 1200 baud 音频中解调。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "hex_data": {"type": "string", "description": "十六进制帧数据（不含首尾标志）"},
+                "audio_path": {"type": "string", "description": "WAV 音频文件路径（AFSK 1200 baud 调制的 AX.25 信号）"},
+            },
+        },
+        handler=lambda args: ToolResult(success=True, content=_decode_ax25(args)),
+        category="sdr_network",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_aprs_encode",
+        description="编码 APRS 报文。输入呼号、纬度、经度、注释、符号等，输出完整的 APRS AX.25 帧（十六进制）和可直接播放的 AFSK 音频 WAV 文件。支持位置报文、消息报文、气象报文。APRS 频率：中国 144.640MHz，美国 144.390MHz，欧洲 144.800MHz。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "description": "源呼号（如 BI4MIB）"},
+                "latitude": {"type": "number", "description": "纬度（十进制度，北纬正）"},
+                "longitude": {"type": "number", "description": "经度（十进制度，东经正）"},
+                "comment": {"type": "string", "description": "注释文本"},
+                "symbol": {"type": "string", "description": "APRS 符号（表+代码，如 '/-' 表示小车，默认 '/-'）"},
+                "digipeaters": {"type": "array", "items": {"type": "string"}, "description": "中继器路径，默认 ['WIDE2-2']"},
+                "output_wav": {"type": "string", "description": "输出 WAV 文件路径（可选）"},
+            },
+            "required": ["source", "latitude", "longitude"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_aprs_encode(args)),
+        category="sdr_network",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_aprs_decode",
+        description="解码 APRS 报文。输入 AX.25 帧十六进制或 WAV 音频文件，输出解析后的 APRS 报文（源呼号、数据类型、位置/消息/气象内容、中继器路径）。自动识别位置报文、消息报文、气象报文、对象报文。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "hex_data": {"type": "string", "description": "AX.25 帧十六进制数据"},
+                "audio_path": {"type": "string", "description": "WAV 音频文件路径"},
+            },
+        },
+        handler=lambda args: ToolResult(success=True, content=_aprs_decode(args)),
+        category="sdr_network",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_aprs_send_position",
+        description="发送 APRS 位置报告。这是一个便捷工具，自动编码 APRS 位置帧并调制为 AFSK 音频，通过 SDR 发射（如果已连接发射设备）或保存为 WAV 文件。输入呼号、经纬度、注释即可。默认中继路径 WIDE2-2。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "callsign": {"type": "string", "description": "你的呼号（如 BI4MIB）"},
+                "latitude": {"type": "number", "description": "纬度（十进制度）"},
+                "longitude": {"type": "number", "description": "经度（十进制度）"},
+                "comment": {"type": "string", "description": "注释文本（如 'MBDSDR AI SDR Station'）"},
+                "symbol": {"type": "string", "description": "APRS 符号，默认 '/-'（小车）"},
+                "frequency_hz": {"type": "integer", "description": "发射频率，默认 144640000 Hz（中国 APRS）"},
+                "output_wav": {"type": "string", "description": "保存 WAV 文件路径（可选，不发射时使用）"},
+            },
+            "required": ["callsign", "latitude", "longitude"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_aprs_send_position(args)),
+        category="sdr_network",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_kiss_encode",
+        description="编码 KISS 协议帧。KISS 是连接电脑与硬件 TNC（终端节点控制器）的标准协议。输入 AX.25 帧数据和端口号，输出 KISS 帧字节（十六进制），可通过串口发送给硬件 TNC。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "ax25_hex": {"type": "string", "description": "AX.25 帧十六进制数据"},
+                "port": {"type": "integer", "description": "KISS 端口号，默认 0"},
+                "command": {"type": "integer", "description": "KISS 命令，0=数据帧，默认 0"},
+            },
+            "required": ["ax25_hex"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_kiss_encode(args)),
+        category="sdr_network",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_kiss_decode",
+        description="解码 KISS 协议帧流。输入从硬件 TNC 接收的原始字节（十六进制），输出解析后的 KISS 帧列表（端口号、AX.25 帧数据）。支持 FEND/FESC 转义。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "hex_data": {"type": "string", "description": "从 TNC 接收的原始字节十六进制数据"},
+            },
+            "required": ["hex_data"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_kiss_decode(args)),
+        category="sdr_network",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_digipeater_process",
+        description="Digipeater 分组转发处理。输入接收到的 AX.25 帧，根据中继器路径（WIDEn-N 泛洪或指定呼号）决定是否转发，返回需要转发的帧或 None。支持重复帧检测（去重）、WIDEn-N 递减算法。用于构建 APRS 数字中继站。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "ax25_hex": {"type": "string", "description": "接收到的 AX.25 帧十六进制数据"},
+                "mycall": {"type": "string", "description": "本中继站呼号（如 BI4MIB）"},
+                "myssid": {"type": "integer", "description": "本中继站 SSID，默认 0"},
+                "digi_calls": {"type": "array", "items": {"type": "string"}, "description": "额外响应的中继器呼号列表"},
+            },
+            "required": ["ax25_hex", "mycall"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_digipeater_process(args)),
+        category="sdr_network",
+    )
+
 
 # ═══════════════════════════════════════════════════════
 # 工具实现函数
@@ -1442,5 +1580,423 @@ def _analyze_recording(args):
     result += f"占用带宽: {bw_info['bandwidth_hz']/1000:.1f} kHz\n"
     result += f"信号功率: {snr_info['signal_power']:.6f}\n"
     result += f"噪声功率: {snr_info['noise_power']:.6f}\n"
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════
+# AX.25 / APRS 工具实现
+# ═══════════════════════════════════════════════════════
+
+def _encode_ax25(args):
+    """编码 AX.25 帧。"""
+    from .ax25 import AX25Frame
+
+    source = args.get('source', '')
+    destination = args.get('destination', '')
+    info = args.get('info', '')
+    digipeaters_raw = args.get('digipeaters', [])
+    control = args.get('control', 0x03)
+    pid = args.get('pid', 0xF0)
+
+    # 解析中继器
+    digipeaters = []
+    for d in digipeaters_raw:
+        if '-' in d:
+            parts = d.split('-', 1)
+            call = parts[0]
+            ssid = int(parts[1]) if parts[1].isdigit() else 0
+        else:
+            call = d
+            ssid = 0
+        digipeaters.append((call, ssid, False))
+
+    # 解析源/目的呼号
+    src_call = source.split('-')[0] if '-' in source else source
+    src_ssid = int(source.split('-')[1]) if '-' in source and source.split('-')[1].isdigit() else 0
+    dst_call = destination.split('-')[0] if '-' in destination else destination
+    dst_ssid = int(destination.split('-')[1]) if '-' in destination and destination.split('-')[1].isdigit() else 0
+
+    frame = AX25Frame(
+        destination=dst_call,
+        dest_ssid=dst_ssid,
+        source=src_call,
+        source_ssid=src_ssid,
+        digipeaters=digipeaters,
+        control=control,
+        pid=pid,
+        info=info.encode('latin-1', errors='replace')
+    )
+
+    frame_bytes = frame.to_bytes()
+    hex_str = frame_bytes.hex().upper()
+
+    result = f"=== AX.25 帧编码 ===\n"
+    result += f"源: {src_call}-{src_ssid}\n"
+    result += f"目的: {dst_call}-{dst_ssid}\n"
+    if digipeaters:
+        result += f"中继: {', '.join([f'{c}-{s}' for c, s, _ in digipeaters])}\n"
+    result += f"控制: 0x{control:02X}\n"
+    result += f"协议ID: 0x{pid:02X}\n"
+    result += f"信息: {info}\n"
+    result += f"FCS: 0x{frame.fcs:04X}\n"
+    result += f"帧长度: {len(frame_bytes)} 字节\n"
+    result += f"十六进制: {hex_str}\n"
+
+    return result
+
+
+def _decode_ax25(args):
+    """解码 AX.25 帧。"""
+    from .ax25 import AX25Frame, parse_ax25_from_audio
+
+    hex_data = args.get('hex_data', '')
+    audio_path = args.get('audio_path', '')
+
+    frames = []
+
+    if audio_path:
+        # 从音频解调
+        frames = parse_ax25_from_audio(audio_path)
+        result = f"=== AX.25 音频解调 ===\n"
+        result += f"音频文件: {audio_path}\n"
+        result += f"检测到帧: {len(frames)} 个\n\n"
+    elif hex_data:
+        # 从十六进制解码
+        try:
+            data = bytes.fromhex(hex_data)
+            frame = AX25Frame.from_bytes(data)
+            if frame:
+                frames = [frame]
+            result = f"=== AX.25 帧解码 ===\n"
+            result += f"输入长度: {len(data)} 字节\n\n"
+        except ValueError as e:
+            return f"错误: 无效的十六进制数据 - {e}"
+    else:
+        return "错误: 请提供 hex_data 或 audio_path"
+
+    if not frames:
+        result += "未检测到有效的 AX.25 帧\n"
+        return result
+
+    for i, frame in enumerate(frames):
+        result += f"--- 帧 {i+1} ---\n"
+        result += f"源: {frame.source}-{frame.source_ssid}\n"
+        result += f"目的: {frame.destination}-{frame.dest_ssid}\n"
+        if frame.digipeaters:
+            digi_str = ', '.join([f"{c}-{s}{'*' if r else ''}" for c, s, r in frame.digipeaters])
+            result += f"中继: {digi_str}\n"
+        result += f"控制: 0x{frame.control:02X}\n"
+        result += f"协议ID: 0x{frame.pid:02X}\n"
+        try:
+            info_text = frame.info.decode('latin-1', errors='replace')
+            result += f"信息: {info_text}\n"
+        except Exception:
+            result += f"信息(hex): {frame.info.hex().upper()}\n"
+        result += f"FCS: 0x{frame.fcs:04X} {'有效' if frame.fcs_valid else '无效'}\n"
+        result += f"\n"
+
+    return result
+
+
+def _aprs_encode(args):
+    """编码 APRS 报文。"""
+    from .ax25 import APRSPosition, APRSPacket, AFSKModem, save_ax25_to_wav
+
+    source = args.get('source', '')
+    latitude = args.get('latitude', 0.0)
+    longitude = args.get('longitude', 0.0)
+    comment = args.get('comment', '')
+    symbol = args.get('symbol', '/-')
+    digipeaters = args.get('digipeaters', ['WIDE2-2'])
+    output_wav = args.get('output_wav', '')
+
+    # 构建位置
+    pos = APRSPosition(
+        latitude=latitude,
+        longitude=longitude,
+        symbol_table=symbol[0] if len(symbol) > 0 else '/',
+        symbol_code=symbol[1] if len(symbol) > 1 else '-',
+        comment=comment
+    )
+
+    # 解析源呼号
+    src_call = source.split('-')[0] if '-' in source else source
+    src_ssid = int(source.split('-')[1]) if '-' in source and source.split('-')[1].isdigit() else 0
+
+    # 构建 APRS 包
+    packet = APRSPacket(
+        source=src_call,
+        source_ssid=src_ssid,
+        destination='APRS',
+        dest_ssid=0,
+        digipeaters=digipeaters,
+        data_type='!',
+        payload=pos.encode()[1:],
+        position=pos
+    )
+
+    frame = packet.to_ax25_frame()
+    frame_bytes = frame.to_bytes()
+
+    result = f"=== APRS 位置编码 ===\n"
+    result += f"源: {src_call}-{src_ssid}\n"
+    result += f"位置: {latitude:.6f}, {longitude:.6f}\n"
+    result += f"符号: {symbol}\n"
+    result += f"注释: {comment}\n"
+    result += f"中继: {', '.join(digipeaters)}\n"
+    result += f"APRS 报文: !{pos.encode()[1:]}\n"
+    result += f"AX.25 帧长度: {len(frame_bytes)} 字节\n"
+    result += f"十六进制: {frame_bytes.hex().upper()}\n"
+
+    # 生成 WAV
+    if output_wav:
+        if save_ax25_to_wav(frame, output_wav):
+            result += f"AFSK 音频已保存: {output_wav}\n"
+        else:
+            result += f"警告: AFSK 音频保存失败\n"
+
+    return result
+
+
+def _aprs_decode(args):
+    """解码 APRS 报文。"""
+    from .ax25 import AX25Frame, APRSPacket, parse_ax25_from_audio
+
+    hex_data = args.get('hex_data', '')
+    audio_path = args.get('audio_path', '')
+
+    frames = []
+
+    if audio_path:
+        frames = parse_ax25_from_audio(audio_path)
+        result = f"=== APRS 音频解码 ===\n"
+        result += f"音频文件: {audio_path}\n"
+    elif hex_data:
+        try:
+            data = bytes.fromhex(hex_data)
+            frame = AX25Frame.from_bytes(data)
+            if frame:
+                frames = [frame]
+            result = f"=== APRS 报文解码 ===\n"
+        except ValueError as e:
+            return f"错误: 无效的十六进制数据 - {e}"
+    else:
+        return "错误: 请提供 hex_data 或 audio_path"
+
+    aprs_packets = []
+    for frame in frames:
+        packet = APRSPacket.from_ax25_frame(frame)
+        if packet:
+            aprs_packets.append(packet)
+
+    result += f"检测到 AX.25 帧: {len(frames)} 个\n"
+    result += f"其中 APRS 报文: {len(aprs_packets)} 个\n\n"
+
+    for i, packet in enumerate(aprs_packets):
+        result += f"--- APRS 报文 {i+1} ---\n"
+        result += f"源: {packet.source}-{packet.source_ssid}\n"
+        result += f"目的: {packet.destination}-{packet.dest_ssid}\n"
+        if packet.digipeaters:
+            result += f"中继: {', '.join(packet.digipeaters)}\n"
+        result += f"数据类型: '{packet.data_type}'\n"
+
+        if packet.position:
+            result += f"类型: 位置报文\n"
+            result += f"位置: {packet.position.latitude:.6f}, {packet.position.longitude:.6f}\n"
+            result += f"符号: {packet.position.symbol_table}{packet.position.symbol_code}\n"
+            if packet.position.altitude:
+                result += f"高度: {packet.position.altitude} 英尺\n"
+            if packet.position.course is not None:
+                result += f"航向/速度: {packet.position.course}° / {packet.position.speed} 节\n"
+            if packet.position.comment:
+                result += f"注释: {packet.position.comment}\n"
+        elif packet.message:
+            result += f"类型: 消息报文\n"
+            result += f"收件人: {packet.message.addressee}\n"
+            result += f"消息: {packet.message.message}\n"
+            if packet.message.message_id:
+                result += f"消息ID: {packet.message.message_id}\n"
+        else:
+            result += f"载荷: {packet.payload[:100]}\n"
+
+        result += f"\n"
+
+    return result
+
+
+def _aprs_send_position(args):
+    """发送 APRS 位置报告。"""
+    from .ax25 import APRSPosition, APRSPacket, save_ax25_to_wav
+
+    callsign = args.get('callsign', '')
+    latitude = args.get('latitude', 0.0)
+    longitude = args.get('longitude', 0.0)
+    comment = args.get('comment', 'MBDSDR AI SDR Station')
+    symbol = args.get('symbol', '/-')
+    frequency_hz = args.get('frequency_hz', 144640000)
+    output_wav = args.get('output_wav', '')
+
+    # 构建位置
+    pos = APRSPosition(
+        latitude=latitude,
+        longitude=longitude,
+        symbol_table=symbol[0] if len(symbol) > 0 else '/',
+        symbol_code=symbol[1] if len(symbol) > 1 else '-',
+        comment=comment
+    )
+
+    # 解析呼号
+    src_call = callsign.split('-')[0] if '-' in callsign else callsign
+    src_ssid = int(callsign.split('-')[1]) if '-' in callsign and callsign.split('-')[1].isdigit() else 0
+
+    # 构建 APRS 包
+    packet = APRSPacket(
+        source=src_call,
+        source_ssid=src_ssid,
+        destination='APRS',
+        dest_ssid=0,
+        digipeaters=['WIDE2-2'],
+        data_type='!',
+        payload=pos.encode()[1:],
+        position=pos
+    )
+
+    frame = packet.to_ax25_frame()
+
+    result = f"=== APRS 位置发送 ===\n"
+    result += f"呼号: {src_call}-{src_ssid}\n"
+    result += f"位置: {latitude:.6f}, {longitude:.6f}\n"
+    result += f"频率: {frequency_hz/1e6:.3f} MHz\n"
+    result += f"APRS 报文: !{pos.encode()[1:]}\n"
+
+    # 保存 WAV
+    if output_wav:
+        if save_ax25_to_wav(frame, output_wav):
+            result += f"AFSK 音频已保存: {output_wav}\n"
+            result += f"可通过 SDR 发射或用音频播放器播放到电台\n"
+        else:
+            result += f"警告: AFSK 音频保存失败\n"
+    else:
+        # 默认保存到临时文件
+        import tempfile
+        import os
+        tmp_path = os.path.join(tempfile.gettempdir(), f'mbdsdr_aprs_{src_call}.wav')
+        if save_ax25_to_wav(frame, tmp_path):
+            result += f"AFSK 音频已保存: {tmp_path}\n"
+
+    result += f"\n提示: 中国 APRS 频率 144.640 MHz，美国 144.390 MHz，欧洲 144.800 MHz\n"
+
+    return result
+
+
+def _kiss_encode(args):
+    """编码 KISS 帧。"""
+    from .ax25 import KISSInterface
+
+    ax25_hex = args.get('ax25_hex', '')
+    port = args.get('port', 0)
+    command = args.get('command', 0)
+
+    try:
+        ax25_data = bytes.fromhex(ax25_hex)
+    except ValueError as e:
+        return f"错误: 无效的十六进制数据 - {e}"
+
+    if command == 0:
+        kiss_frame = KISSInterface.encode_data_frame(ax25_data, port)
+    else:
+        kiss_frame = KISSInterface.encode_command(command, ax25_data, port)
+
+    result = f"=== KISS 帧编码 ===\n"
+    result += f"端口: {port}\n"
+    result += f"命令: {command} ({'数据帧' if command == 0 else '命令帧'})\n"
+    result += f"AX.25 数据长度: {len(ax25_data)} 字节\n"
+    result += f"KISS 帧长度: {len(kiss_frame)} 字节\n"
+    result += f"十六进制: {kiss_frame.hex().upper()}\n"
+    result += f"\n提示: 可通过串口发送给硬件 TNC（如 Kenwood TM-D710、Yaesu FTM-400）\n"
+
+    return result
+
+
+def _kiss_decode(args):
+    """解码 KISS 帧流。"""
+    from .ax25 import KISSInterface, AX25Frame
+
+    hex_data = args.get('hex_data', '')
+
+    try:
+        data = bytes.fromhex(hex_data)
+    except ValueError as e:
+        return f"错误: 无效的十六进制数据 - {e}"
+
+    frames = KISSInterface.decode_stream(data)
+
+    result = f"=== KISS 帧解码 ===\n"
+    result += f"输入长度: {len(data)} 字节\n"
+    result += f"检测到 KISS 帧: {len(frames)} 个\n\n"
+
+    for i, (port, ax25_data) in enumerate(frames):
+        result += f"--- KISS 帧 {i+1} ---\n"
+        result += f"端口: {port}\n"
+        result += f"AX.25 数据长度: {len(ax25_data)} 字节\n"
+        result += f"十六进制: {ax25_data.hex().upper()}\n"
+
+        # 尝试解析 AX.25
+        frame = AX25Frame.from_bytes(ax25_data)
+        if frame:
+            result += f"AX.25 解析: {frame.source}-{frame.source_ssid} -> {frame.destination}-{frame.dest_ssid}\n"
+            try:
+                info = frame.info.decode('latin-1', errors='replace')
+                result += f"信息: {info[:80]}\n"
+            except Exception:
+                pass
+        result += f"\n"
+
+    return result
+
+
+def _digipeater_process(args):
+    """Digipeater 分组转发处理。"""
+    from .ax25 import AX25Frame, Digipeater
+
+    ax25_hex = args.get('ax25_hex', '')
+    mycall = args.get('mycall', '')
+    myssid = args.get('myssid', 0)
+    digi_calls = args.get('digi_calls', [])
+
+    try:
+        data = bytes.fromhex(ax25_hex)
+    except ValueError as e:
+        return f"错误: 无效的十六进制数据 - {e}"
+
+    frame = AX25Frame.from_bytes(data)
+    if not frame:
+        return "错误: 无法解析 AX.25 帧"
+
+    if not frame.fcs_valid:
+        return "错误: FCS 校验失败，丢弃帧"
+
+    digi = Digipeater(mycall=mycall, myssid=myssid, digi_calls=digi_calls)
+    forwarded = digi.process_frame(frame)
+    stats = digi.get_stats()
+
+    result = f"=== Digipeater 处理 ===\n"
+    result += f"本中继站: {mycall}-{myssid}\n"
+    result += f"接收帧: {frame.source}-{frame.source_ssid} -> {frame.destination}-{frame.dest_ssid}\n"
+    if frame.digipeaters:
+        digi_str = ', '.join([f"{c}-{s}{'*' if r else ''}" for c, s, r in frame.digipeaters])
+        result += f"中继路径: {digi_str}\n"
+
+    if forwarded:
+        result += f"\n结果: 需要转发\n"
+        fwd_digi_str = ', '.join([f"{c}-{s}{'*' if r else ''}" for c, s, r in forwarded.digipeaters])
+        result += f"转发后中继路径: {fwd_digi_str}\n"
+        forwarded_bytes = forwarded.to_bytes()
+        result += f"转发帧十六进制: {forwarded_bytes.hex().upper()}\n"
+    else:
+        result += f"\n结果: 不转发（无匹配中继器或重复帧）\n"
+
+    result += f"\n统计: 听到 {stats['packets_heard']} 帧, 转发 {stats['packets_digipeated']} 帧\n"
 
     return result

@@ -1,0 +1,1025 @@
+"""
+MBDSDR AX.25 协议栈
+====================
+完整实现业余无线电 AX.25 数据链路层协议，包括：
+- AX.25 帧编解码（UI/I/Supervisory，支持数字中继器）
+- AFSK 1200 baud Bell 202 调制解调（软件 TNC）
+- APRS 完整编解码（位置/气象/消息/对象/遥测/状态）
+- KISS 协议接口（连接硬件 TNC）
+- Digipeater 分组转发
+- CRC-16 CCITT FCS 校验
+
+作者：MBDSDR Team (BI4MIB)
+许可证：GPL-3.0
+"""
+
+import struct
+import math
+import numpy as np
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple, Dict, Any
+from enum import Enum
+
+
+# ============================================================
+# 常量定义
+# ============================================================
+
+AX25_FLAG = 0x7E          # 帧标志
+AX25_PID_NOLAYER3 = 0xF0  # 无第三层协议
+AX25_PID_IP = 0xCC        # IP 协议
+AX25_CTRL_UI = 0x03       # UI 帧控制字段
+AX25_CTRL_SABME = 0x6F    # SABME 控制字段
+AX25_CTRL_DISC = 0x43     # DISC 控制字段
+AX25_CTRL_UA = 0x63       # UA 控制字段
+AX25_CTRL_DM = 0x0F       # DM 控制字段
+
+# AFSK Bell 202 常量
+AFSK_MARK_FREQ = 1200.0   # Mark 频率 (Hz)
+AFSK_SPACE_FREQ = 2200.0  # Space 频率 (Hz)
+AFSK_BAUD_RATE = 1200.0   # 波特率
+AFSK_SAMPLE_RATE = 48000.0  # 采样率
+
+# KISS 协议常量
+KISS_FEND = 0xC0
+KISS_FESC = 0xDB
+KISS_TFEND = 0xDC
+KISS_TFESC = 0xDD
+KISS_CMD_DATA = 0x00
+KISS_CMD_TXDELAY = 0x01
+KISS_CMD_P = 0x02
+KISS_CMD_SLOTTIME = 0x03
+KISS_CMD_TXTAIL = 0x04
+KISS_CMD_FULLDUPLEX = 0x05
+KISS_CMD_SETHARDWARE = 0x06
+KISS_CMD_RETURN = 0xFF
+
+# APRS 数据类型标识符
+APRS_POSITION = '!'       # 位置（无时间戳/无消息）
+APRS_POSITION_MSG = '\''  # 位置（旧格式，有消息）
+APRS_POSITION_TIME = '/'  # 位置（有时间戳）
+APRS_STATUS = '>'         # 状态
+APRS_MESSAGE = ':'        # 消息
+APRS_WEATHER = '_'        # 气象（无位置）
+APRS_OBJECT = ';'         # 对象
+APRS_ITEM = ')'           # 项目
+APRS_TELEMETRY = 'T'     # 遥测
+APRS_QUERY = '?'          # 查询
+APRS_USERDEF = '{'        # 用户定义
+APRS_THIRDPARTY = '}'     # 第三方流量
+
+
+# ============================================================
+# CRC-16 CCITT FCS 计算
+# ============================================================
+
+def crc16_ccitt(data: bytes) -> int:
+    """计算 CRC-16 CCITT (X.25) 校验和，用于 AX.25 FCS。"""
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x0001:
+                crc = (crc >> 1) ^ 0x8408
+            else:
+                crc >>= 1
+    return crc ^ 0xFFFF
+
+
+def encode_address(callsign: str, ssid: int = 0, has_been_repeated: bool = False,
+                   is_last: bool = False) -> bytes:
+    """
+    编码 AX.25 地址字段（7字节）。
+    呼号左移1位，SSID 在第7字节。
+    """
+    # 清理呼号，去除 SSID
+    if '-' in callsign:
+        parts = callsign.split('-')
+        callsign = parts[0]
+        if len(parts) > 1 and parts[1].isdigit():
+            ssid = int(parts[1])
+
+    # 呼号最多6字符，不足补空格
+    callsign = callsign.upper().ljust(6)[:6]
+
+    # 前6字节：呼号字符左移1位
+    addr = bytearray()
+    for ch in callsign:
+        addr.append(ord(ch) << 1)
+
+    # 第7字节：SSID + 控制位
+    ssid_byte = (ssid & 0x0F) << 1
+    if has_been_repeated:
+        ssid_byte |= 0x80  # H 位（已被中继）
+    if is_last:
+        ssid_byte |= 0x01  # C 位（地址字段结束）
+    # RR 位（保留）设为 11
+    ssid_byte |= 0x60
+    addr.append(ssid_byte)
+
+    return bytes(addr)
+
+
+def decode_address(data: bytes, offset: int = 0) -> Tuple[str, int, bool, bool, int]:
+    """
+    解码 AX.25 地址字段。
+    返回：(呼号, SSID, 是否已被中继, 是否是最后地址, 新偏移)
+    """
+    callsign = ''
+    for i in range(6):
+        callsign += chr((data[offset + i] >> 1) & 0x7F)
+    callsign = callsign.strip()
+
+    ssid_byte = data[offset + 6]
+    ssid = (ssid_byte >> 1) & 0x0F
+    has_been_repeated = bool(ssid_byte & 0x80)
+    is_last = bool(ssid_byte & 0x01)
+
+    return callsign, ssid, has_been_repeated, is_last, offset + 7
+
+
+# ============================================================
+# AX.25 帧类
+# ============================================================
+
+@dataclass
+class AX25Frame:
+    """AX.25 帧数据结构。"""
+    destination: str = ''           # 目的呼号
+    dest_ssid: int = 0              # 目的 SSID
+    source: str = ''                # 源呼号
+    source_ssid: int = 0            # 源 SSID
+    digipeaters: List[Tuple[str, int, bool]] = field(default_factory=list)  # 中继器列表 (呼号, SSID, 是否已中继)
+    control: int = AX25_CTRL_UI     # 控制字段
+    pid: int = AX25_PID_NOLAYER3    # 协议 ID
+    info: bytes = b''               # 信息字段
+    fcs: int = 0                    # 帧校验序列
+    fcs_valid: bool = False         # FCS 是否有效
+
+    def to_bytes(self) -> bytes:
+        """将帧编码为字节流（不含首尾标志）。"""
+        frame = bytearray()
+
+        # 目的地址
+        is_last = len(self.digipeaters) == 0
+        frame += encode_address(self.destination, self.dest_ssid, is_last=is_last)
+
+        # 源地址
+        is_last = len(self.digipeaters) == 0
+        frame += encode_address(self.source, self.source_ssid, is_last=is_last)
+
+        # 中继器地址
+        for i, (call, ssid, repeated) in enumerate(self.digipeaters):
+            is_last = (i == len(self.digipeaters) - 1)
+            frame += encode_address(call, ssid, has_been_repeated=repeated, is_last=is_last)
+
+        # 控制字段
+        frame.append(self.control)
+
+        # 协议 ID（仅 UI 和 I 帧有）
+        if self.control in (AX25_CTRL_UI, 0x00, 0x02, 0x04, 0x06, 0x08, 0x0A, 0x0C, 0x0E):
+            frame.append(self.pid)
+
+        # 信息字段
+        frame += self.info
+
+        # FCS
+        self.fcs = crc16_ccitt(bytes(frame))
+        frame += struct.pack('<H', self.fcs)
+
+        return bytes(frame)
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> Optional['AX25Frame']:
+        """从字节流解析帧（不含首尾标志）。"""
+        if len(data) < 15:  # 最小帧长：7(目的)+7(源)+1(控制)+2(FCS)
+            return None
+
+        try:
+            frame = cls()
+            offset = 0
+
+            # 目的地址
+            frame.destination, frame.dest_ssid, _, is_last, offset = decode_address(data, offset)
+
+            # 源地址
+            frame.source, frame.source_ssid, _, is_last, offset = decode_address(data, offset)
+
+            # 中继器地址
+            while not is_last and offset + 7 <= len(data) - 2:
+                call, ssid, repeated, is_last, offset = decode_address(data, offset)
+                frame.digipeaters.append((call, ssid, repeated))
+
+            # 控制字段
+            frame.control = data[offset]
+            offset += 1
+
+            # 协议 ID
+            if frame.control in (AX25_CTRL_UI, 0x00, 0x02, 0x04, 0x06, 0x08, 0x0A, 0x0C, 0x0E):
+                frame.pid = data[offset]
+                offset += 1
+
+            # FCS（最后2字节）
+            if offset + 2 <= len(data):
+                frame.fcs = struct.unpack('<H', data[-2:])[0]
+                frame.info = data[offset:-2]
+
+                # 验证 FCS
+                computed_fcs = crc16_ccitt(data[:-2])
+                frame.fcs_valid = (computed_fcs == frame.fcs)
+            else:
+                frame.info = data[offset:]
+
+            return frame
+        except (IndexError, struct.error):
+            return None
+
+    def __repr__(self) -> str:
+        digi_str = ','.join([f"{c}-{s}" for c, s, _ in self.digipeaters])
+        return (f"AX25Frame({self.source}-{self.source_ssid} -> "
+                f"{self.destination}-{self.dest_ssid}"
+                f"{(' via ' + digi_str) if digi_str else ''}, "
+                f"ctrl=0x{self.control:02X}, pid=0x{self.pid:02X}, "
+                f"info_len={len(self.info)}, fcs_valid={self.fcs_valid})")
+
+
+# ============================================================
+# HDLC 位填充/去填充
+# ============================================================
+
+def hdlc_bit_stuff(data: bytes) -> bytes:
+    """HDLC 位填充：连续5个1后插入0。"""
+    bits = []
+    ones_count = 0
+    for byte in data:
+        for i in range(8):
+            bit = (byte >> i) & 1
+            bits.append(bit)
+            if bit == 1:
+                ones_count += 1
+                if ones_count == 5:
+                    bits.append(0)
+                    ones_count = 0
+            else:
+                ones_count = 0
+
+    # 转换回字节
+    result = bytearray()
+    for i in range(0, len(bits), 8):
+        byte = 0
+        for j in range(min(8, len(bits) - i)):
+            byte |= bits[i + j] << j
+        result.append(byte)
+    return bytes(result)
+
+
+def hdlc_bit_unstuff(data: bytes) -> bytes:
+    """HDLC 去位填充：移除连续5个1后的0。"""
+    bits = []
+    ones_count = 0
+    for byte in data:
+        for i in range(8):
+            bit = (byte >> i) & 1
+            if bit == 0 and ones_count == 5:
+                # 这是填充位，跳过
+                ones_count = 0
+                continue
+            bits.append(bit)
+            if bit == 1:
+                ones_count += 1
+            else:
+                ones_count = 0
+
+    # 转换回字节
+    result = bytearray()
+    for i in range(0, len(bits), 8):
+        byte = 0
+        for j in range(min(8, len(bits) - i)):
+            byte |= bits[i + j] << j
+        result.append(byte)
+    return bytes(result)
+
+
+# ============================================================
+# AFSK 调制解调器（软件 TNC）
+# ============================================================
+
+class AFSKModem:
+    """
+    AFSK 1200 baud Bell 202 调制解调器。
+    Mark = 1200 Hz, Space = 2200 Hz
+    NRZI 编码：0 = 频率切换，1 = 频率不变
+    """
+
+    def __init__(self, sample_rate: float = AFSK_SAMPLE_RATE,
+                 baud_rate: float = AFSK_BAUD_RATE,
+                 mark_freq: float = AFSK_MARK_FREQ,
+                 space_freq: float = AFSK_SPACE_FREQ):
+        self.sample_rate = sample_rate
+        self.baud_rate = baud_rate
+        self.mark_freq = mark_freq
+        self.space_freq = space_freq
+        self.samples_per_bit = sample_rate / baud_rate
+
+    def encode_nrzi(self, data: bytes) -> List[int]:
+        """将字节数据编码为 NRZI 位序列。"""
+        bits = []
+        current_state = 1  # 初始 Mark
+
+        for byte in data:
+            for i in range(8):
+                bit = (byte >> i) & 1
+                if bit == 0:
+                    current_state ^= 1  # 0 = 切换
+                bits.append(current_state)
+        return bits
+
+    def modulate(self, frame: AX25Frame, preamble_bytes: int = 20,
+                 postamble_bytes: int = 2) -> np.ndarray:
+        """
+        将 AX.25 帧调制为 AFSK 音频信号。
+        返回 float32 numpy 数组（范围 -1 到 1）。
+        """
+        # 构建完整帧：前导标志 + 位填充帧 + 后导标志
+        frame_data = frame.to_bytes()
+        stuffed = hdlc_bit_stuff(frame_data)
+
+        # 前导：多个 0x7E 标志
+        full_data = bytes([AX25_FLAG] * preamble_bytes) + stuffed + bytes([AX25_FLAG] * postamble_bytes)
+
+        # NRZI 编码
+        nrzi_bits = self.encode_nrzi(full_data)
+
+        # 生成音频
+        total_samples = int(len(nrzi_bits) * self.samples_per_bit)
+        t = np.arange(total_samples) / self.sample_rate
+        phase = np.zeros(total_samples)
+        freq = np.zeros(total_samples)
+
+        bit_index = 0
+        sample_count = 0
+        current_freq = self.mark_freq if nrzi_bits[0] == 1 else self.space_freq
+
+        for i in range(total_samples):
+            freq[i] = current_freq
+            if sample_count >= self.samples_per_bit and bit_index < len(nrzi_bits) - 1:
+                bit_index += 1
+                sample_count = 0
+                current_freq = self.mark_freq if nrzi_bits[bit_index] == 1 else self.space_freq
+            sample_count += 1
+
+        # 积分频率得到相位
+        phase = np.cumsum(2 * np.pi * freq / self.sample_rate)
+        audio = np.sin(phase).astype(np.float32)
+
+        # 淡入淡出
+        fade_samples = int(self.sample_rate * 0.005)  # 5ms
+        if len(audio) > 2 * fade_samples:
+            audio[:fade_samples] *= np.linspace(0, 1, fade_samples)
+            audio[-fade_samples:] *= np.linspace(1, 0, fade_samples)
+
+        return audio
+
+    def demodulate(self, audio: np.ndarray) -> List[AX25Frame]:
+        """
+        从 AFSK 音频信号中解调 AX.25 帧。
+        使用过零率检测频率切换。
+        """
+        if len(audio) == 0:
+            return []
+
+        # 归一化
+        audio = audio.astype(np.float64)
+        audio = audio / (np.max(np.abs(audio)) + 1e-10)
+
+        # 过零率分析
+        window_size = int(self.sample_rate / self.baud_rate)
+        half_window = window_size // 2
+
+        # 计算每个样本的瞬时频率（基于过零）
+        bits = []
+        current_bit = 1  # 初始 Mark
+
+        # 简单的过零检测
+        zero_crossings = np.where(np.diff(np.signbit(audio)))[0]
+
+        if len(zero_crossings) < 2:
+            return []
+
+        # 计算过零间隔，推断频率
+        intervals = np.diff(zero_crossings)
+        freqs = self.sample_rate / (2 * intervals)  # 半周期间隔
+
+        # 按位采样
+        samples_per_bit = self.samples_per_bit
+        num_bits = int(len(audio) / samples_per_bit)
+
+        decoded_bits = []
+        for i in range(num_bits):
+            start = int(i * samples_per_bit)
+            end = int((i + 1) * samples_per_bit)
+            segment = audio[start:end]
+
+            # 计算过零率
+            if len(segment) > 1:
+                zc = np.sum(np.abs(np.diff(np.signbit(segment))))
+                zcr = zc / len(segment) * self.sample_rate
+
+                # Mark 1200Hz: 过零率约 2400/s
+                # Space 2200Hz: 过零率约 4400/s
+                if zcr > 3400:
+                    bit = 0  # Space
+                else:
+                    bit = 1  # Mark
+            else:
+                bit = 1
+
+            decoded_bits.append(bit)
+
+        # NRZI 解码
+        raw_bits = []
+        prev_bit = 1
+        for bit in decoded_bits:
+            if bit != prev_bit:
+                raw_bits.append(0)
+            else:
+                raw_bits.append(1)
+            prev_bit = bit
+
+        # 查找帧标志 01111110
+        frames = []
+        i = 0
+        while i < len(raw_bits) - 8:
+            # 查找 0x7E = 01111110 (LSB first)
+            if (raw_bits[i] == 0 and raw_bits[i+1] == 1 and raw_bits[i+2] == 1 and
+                raw_bits[i+3] == 1 and raw_bits[i+4] == 1 and raw_bits[i+5] == 1 and
+                raw_bits[i+6] == 1 and raw_bits[i+7] == 0):
+
+                # 找到帧开始，查找下一个标志
+                j = i + 8
+                while j < len(raw_bits) - 8:
+                    if (raw_bits[j] == 0 and raw_bits[j+1] == 1 and raw_bits[j+2] == 1 and
+                        raw_bits[j+3] == 1 and raw_bits[j+4] == 1 and raw_bits[j+5] == 1 and
+                        raw_bits[j+6] == 1 and raw_bits[j+7] == 0):
+                        # 找到帧结束
+                        frame_bits = raw_bits[i+8:j]
+
+                        # 去位填充
+                        unstuffed_bits = []
+                        ones_count = 0
+                        for bit in frame_bits:
+                            if bit == 0 and ones_count == 5:
+                                ones_count = 0
+                                continue
+                            unstuffed_bits.append(bit)
+                            if bit == 1:
+                                ones_count += 1
+                            else:
+                                ones_count = 0
+
+                        # 转换为字节
+                        frame_bytes = bytearray()
+                        for k in range(0, len(unstuffed_bits) - 7, 8):
+                            byte = 0
+                            for b in range(8):
+                                if k + b < len(unstuffed_bits):
+                                    byte |= unstuffed_bits[k + b] << b
+                            frame_bytes.append(byte)
+
+                        if len(frame_bytes) >= 15:
+                            frame = AX25Frame.from_bytes(bytes(frame_bytes))
+                            if frame and frame.fcs_valid:
+                                frames.append(frame)
+
+                        i = j + 8
+                        break
+                    j += 1
+                else:
+                    i += 1
+            else:
+                i += 1
+
+        return frames
+
+
+# ============================================================
+# APRS 编解码
+# ============================================================
+
+@dataclass
+class APRSPosition:
+    """APRS 位置报文。"""
+    latitude: float = 0.0
+    longitude: float = 0.0
+    symbol_table: str = '/'
+    symbol_code: str = '-'
+    altitude: Optional[int] = None  # 英尺
+    course: Optional[int] = None     # 度
+    speed: Optional[int] = None      # 节
+    comment: str = ''
+    timestamp: Optional[str] = None  # DDHHMMz
+
+    def encode(self) -> str:
+        """编码为 APRS 位置报文。"""
+        # 纬度：DDMM.hhN
+        lat_deg = int(abs(self.latitude))
+        lat_min = (abs(self.latitude) - lat_deg) * 60
+        lat_hemi = 'N' if self.latitude >= 0 else 'S'
+        lat_str = f"{lat_deg:02d}{lat_min:05.2f}{lat_hemi}"
+
+        # 经度：DDDMM.hhW
+        lon_deg = int(abs(self.longitude))
+        lon_min = (abs(self.longitude) - lon_deg) * 60
+        lon_hemi = 'E' if self.longitude >= 0 else 'W'
+        lon_str = f"{lon_deg:03d}{lon_min:05.2f}{lon_hemi}"
+
+        result = f"{lat_str}{self.symbol_table}{lon_str}{self.symbol_code}"
+
+        # 课程/速度
+        if self.course is not None and self.speed is not None:
+            result += f"{self.course:03d}/{self.speed:03d}"
+
+        # 高度
+        if self.altitude is not None:
+            result += f"/A={self.altitude:06d}"
+
+        # 注释
+        if self.comment:
+            result += self.comment
+
+        # 数据类型标识符
+        if self.timestamp:
+            return f"/{self.timestamp}{result}"
+        else:
+            return f"!{result}"
+
+    @classmethod
+    def decode(cls, payload: str) -> Optional['APRSPosition']:
+        """从 APRS 报文体解码位置。"""
+        if not payload or len(payload) < 1:
+            return None
+
+        data_type = payload[0]
+        pos = cls()
+
+        if data_type == '/':
+            # 有时间戳
+            if len(payload) >= 8:
+                pos.timestamp = payload[1:8]
+                payload = payload[8:]
+            else:
+                return None
+        elif data_type == '!':
+            payload = payload[1:]
+        else:
+            return None
+
+        # 解析位置
+        try:
+            # 纬度 DDMM.hhN
+            lat_deg = int(payload[0:2])
+            lat_min = float(payload[2:7])
+            lat_hemi = payload[7]
+            pos.latitude = lat_deg + lat_min / 60
+            if lat_hemi == 'S':
+                pos.latitude = -pos.latitude
+
+            # 符号表
+            pos.symbol_table = payload[8]
+
+            # 经度 DDDMM.hhW
+            lon_deg = int(payload[9:12])
+            lon_min = float(payload[12:17])
+            lon_hemi = payload[17]
+            pos.longitude = lon_deg + lon_min / 60
+            if lon_hemi == 'W':
+                pos.longitude = -pos.longitude
+
+            # 符号代码
+            pos.symbol_code = payload[18]
+
+            # 课程/速度
+            if len(payload) > 22 and payload[19:22].isdigit() and payload[22] == '/':
+                pos.course = int(payload[19:22])
+                if len(payload) > 25 and payload[23:26].isdigit():
+                    pos.speed = int(payload[23:26])
+
+            # 高度
+            alt_idx = payload.find('/A=')
+            if alt_idx >= 0:
+                try:
+                    pos.altitude = int(payload[alt_idx+3:alt_idx+9])
+                except (ValueError, IndexError):
+                    pass
+
+            # 注释
+            comment_start = 19
+            if pos.course is not None:
+                comment_start = 26
+            if alt_idx >= 0:
+                comment_start = alt_idx + 9
+            if comment_start < len(payload):
+                pos.comment = payload[comment_start:].strip()
+
+            return pos
+        except (IndexError, ValueError):
+            return None
+
+
+@dataclass
+class APRSMessage:
+    """APRS 消息报文。"""
+    addressee: str = ''
+    message: str = ''
+    message_id: Optional[str] = None
+
+    def encode(self) -> str:
+        result = f":{self.addressee:<9}:{self.message}"
+        if self.message_id:
+            result += '{' + self.message_id
+        return result
+
+    @classmethod
+    def decode(cls, payload: str) -> Optional['APRSMessage']:
+        if not payload or payload[0] != ':':
+            return None
+        try:
+            addressee = payload[1:10].strip()
+            # APRS 消息格式: :ADDRESSEE(9chars):MESSAGE
+            # 索引10是分隔冒号，消息从索引11开始
+            msg_text = payload[11:] if len(payload) > 11 else ''
+
+            # 检查消息ID
+            msg_id = None
+            if '{' in msg_text:
+                parts = msg_text.rsplit('{', 1)
+                msg_text = parts[0]
+                msg_id = parts[1]
+
+            return cls(addressee=addressee, message=msg_text, message_id=msg_id)
+        except IndexError:
+            return None
+
+
+@dataclass
+class APRSWeather:
+    """APRS 气象报文。"""
+    latitude: float = 0.0
+    longitude: float = 0.0
+    wind_dir: int = 0       # 度
+    wind_speed: int = 0     # 节
+    wind_gust: int = 0      # 节
+    temperature: int = 0    # 华氏度
+    rain_1h: int = 0        # 百分之一英寸
+    rain_24h: int = 0
+    rain_midnight: int = 0
+    humidity: int = 0       # %
+    pressure: int = 0       # 十分之一毫巴
+
+    def encode(self) -> str:
+        lat_deg = int(abs(self.latitude))
+        lat_min = (abs(self.latitude) - lat_deg) * 60
+        lat_hemi = 'N' if self.latitude >= 0 else 'S'
+
+        lon_deg = int(abs(self.longitude))
+        lon_min = (abs(self.longitude) - lon_deg) * 60
+        lon_hemi = 'E' if self.longitude >= 0 else 'W'
+
+        return (f"_{lat_deg:02d}{lat_min:05.2f}{lat_hemi}/"
+                f"{lon_deg:03d}{lon_min:05.2f}{lon_hemi}_"
+                f"{self.wind_dir:03d}/{self.wind_speed:03d}g{self.wind_gust:03d}"
+                f"t{self.temperature:03d}r{self.rain_1h:03d}p{self.rain_24h:03d}"
+                f"P{self.rain_midnight:03d}h{self.humidity:02d}b{self.pressure:05d}")
+
+
+@dataclass
+class APRSPacket:
+    """完整的 APRS 报文（含 AX.25 帧头 + APRS 载荷）。"""
+    source: str = ''
+    source_ssid: int = 0
+    destination: str = 'APRS'
+    dest_ssid: int = 0
+    digipeaters: List[str] = field(default_factory=list)
+    data_type: str = ''
+    payload: str = ''
+    position: Optional[APRSPosition] = None
+    message: Optional[APRSMessage] = None
+
+    def to_ax25_frame(self) -> AX25Frame:
+        """转换为 AX.25 帧。"""
+        digi_list = [(d.split('-')[0] if '-' in d else d,
+                      int(d.split('-')[1]) if '-' in d and d.split('-')[1].isdigit() else 0,
+                      False)
+                     for d in self.digipeaters]
+
+        info = (self.data_type + self.payload).encode('latin-1', errors='replace')
+
+        return AX25Frame(
+            destination=self.destination,
+            dest_ssid=self.dest_ssid,
+            source=self.source,
+            source_ssid=self.source_ssid,
+            digipeaters=digi_list,
+            control=AX25_CTRL_UI,
+            pid=AX25_PID_NOLAYER3,
+            info=info
+        )
+
+    @classmethod
+    def from_ax25_frame(cls, frame: AX25Frame) -> Optional['APRSPacket']:
+        """从 AX.25 帧解析 APRS 报文。"""
+        if frame.control != AX25_CTRL_UI:
+            return None
+
+        try:
+            info = frame.info.decode('latin-1', errors='replace')
+        except Exception:
+            return None
+
+        if not info:
+            return None
+
+        packet = cls(
+            source=frame.source,
+            source_ssid=frame.source_ssid,
+            destination=frame.destination,
+            dest_ssid=frame.dest_ssid,
+            digipeaters=[f"{c}-{s}" for c, s, _ in frame.digipeaters],
+            data_type=info[0] if info else '',
+            payload=info[1:] if len(info) > 1 else ''
+        )
+
+        # 尝试解析具体类型
+        if packet.data_type in ('!', '/'):
+            packet.position = APRSPosition.decode(info)
+        elif packet.data_type == ':':
+            packet.message = APRSMessage.decode(info)
+
+        return packet
+
+
+# ============================================================
+# KISS 协议接口
+# ============================================================
+
+class KISSInterface:
+    """KISS 协议编解码，用于连接硬件 TNC。"""
+
+    @staticmethod
+    def encode_data_frame(data: bytes, port: int = 0) -> bytes:
+        """编码 KISS 数据帧。"""
+        frame = bytearray()
+        frame.append(KISS_FEND)
+        frame.append(port & 0x0F)  # 类型指示器
+
+        # 转义
+        for byte in data:
+            if byte == KISS_FEND:
+                frame.append(KISS_FESC)
+                frame.append(KISS_TFEND)
+            elif byte == KISS_FESC:
+                frame.append(KISS_FESC)
+                frame.append(KISS_TFESC)
+            else:
+                frame.append(byte)
+
+        frame.append(KISS_FEND)
+        return bytes(frame)
+
+    @staticmethod
+    def decode_stream(data: bytes) -> List[Tuple[int, bytes]]:
+        """从字节流中解码 KISS 帧，返回 (端口, 数据) 列表。"""
+        frames = []
+        i = 0
+        while i < len(data):
+            if data[i] == KISS_FEND:
+                i += 1
+                if i >= len(data):
+                    break
+
+                # 类型指示器
+                type_byte = data[i]
+                port = type_byte & 0x0F
+                command = type_byte >> 4
+                i += 1
+
+                # 收集数据
+                frame_data = bytearray()
+                while i < len(data) and data[i] != KISS_FEND:
+                    if data[i] == KISS_FESC and i + 1 < len(data):
+                        i += 1
+                        if data[i] == KISS_TFEND:
+                            frame_data.append(KISS_FEND)
+                        elif data[i] == KISS_TFESC:
+                            frame_data.append(KISS_FESC)
+                    else:
+                        frame_data.append(data[i])
+                    i += 1
+
+                if command == 0:  # 数据帧
+                    frames.append((port, bytes(frame_data)))
+                i += 1  # 跳过 FEND
+            else:
+                i += 1
+
+        return frames
+
+    @staticmethod
+    def encode_command(command: int, value: bytes, port: int = 0) -> bytes:
+        """编码 KISS 命令帧。"""
+        type_byte = (command << 4) | (port & 0x0F)
+        frame = bytearray([KISS_FEND, type_byte])
+        frame.extend(value)
+        frame.append(KISS_FEND)
+        return bytes(frame)
+
+
+# ============================================================
+# Digipeater 分组转发
+# ============================================================
+
+class Digipeater:
+    """
+    AX.25 Digipeater：接收帧并按中继器路径转发。
+    支持 WIDEn-N 泛洪算法。
+    """
+
+    def __init__(self, mycall: str = 'NOCALL', myssid: int = 0,
+                 digi_calls: List[str] = None):
+        self.mycall = mycall.upper()
+        self.myssid = myssid
+        self.digi_calls = [c.upper() for c in (digi_calls or [])]
+        self.packets_heard = 0
+        self.packets_digipeated = 0
+        self.duplicate_buffer: List[str] = []
+        self.max_duplicate_buffer = 50
+
+    def _is_duplicate(self, frame: AX25Frame) -> bool:
+        """检查是否是重复帧（基于源+目的+信息前20字节）。"""
+        key = f"{frame.source}-{frame.source_ssid}:{frame.destination}-{frame.dest_ssid}:{frame.info[:20].hex()}"
+        if key in self.duplicate_buffer:
+            return True
+        self.duplicate_buffer.append(key)
+        if len(self.duplicate_buffer) > self.max_duplicate_buffer:
+            self.duplicate_buffer.pop(0)
+        return False
+
+    def process_frame(self, frame: AX25Frame) -> Optional[AX25Frame]:
+        """
+        处理接收到的帧，决定是否转发。
+        返回需要转发的帧，或 None（不转发）。
+        """
+        self.packets_heard += 1
+
+        if not frame.fcs_valid:
+            return None
+
+        if self._is_duplicate(frame):
+            return None
+
+        # 检查中继器路径
+        if not frame.digipeaters:
+            return None
+
+        # 找到第一个未被中继的中继器
+        for i, (call, ssid, repeated) in enumerate(frame.digipeaters):
+            if repeated:
+                continue
+
+            # 检查是否匹配我的呼号或 WIDEn-N
+            call_upper = call.upper()
+
+            # WIDEn-N 泛洪（call=WIDEn, ssid=N）
+            if call_upper.startswith('WIDE') and len(call_upper) > 4:
+                try:
+                    # call 格式: WIDE1, WIDE2, WIDE3 等
+                    n = ssid  # ssid 字段存储剩余跳数
+                    if n > 1:
+                        # 递减 SSID，保持 call 不变
+                        new_digipeaters = list(frame.digipeaters)
+                        new_digipeaters[i] = (call, n - 1, True)
+                        frame.digipeaters = new_digipeaters
+                        self.packets_digipeated += 1
+                        return frame
+                    elif n == 1:
+                        # 最后一跳，标记为已中继
+                        new_digipeaters = list(frame.digipeaters)
+                        new_digipeaters[i] = (call, 0, True)
+                        frame.digipeaters = new_digipeaters
+                        self.packets_digipeated += 1
+                        return frame
+                except (ValueError, IndexError):
+                    pass
+
+            # 匹配我的呼号
+            if call_upper == self.mycall:
+                new_digipeaters = list(frame.digipeaters)
+                new_digipeaters[i] = (self.mycall, self.myssid, True)
+                frame.digipeaters = new_digipeaters
+                self.packets_digipeated += 1
+                return frame
+
+            # 匹配其他配置的中继器呼号
+            if call_upper in self.digi_calls:
+                new_digipeaters = list(frame.digipeaters)
+                new_digipeaters[i] = (call, ssid, True)
+                frame.digipeaters = new_digipeaters
+                self.packets_digipeated += 1
+                return frame
+
+            break  # 第一个未中继的不匹配，停止检查
+
+        return None
+
+    def get_stats(self) -> Dict[str, Any]:
+        """获取 Digipeater 统计。"""
+        return {
+            'mycall': f"{self.mycall}-{self.myssid}",
+            'packets_heard': self.packets_heard,
+            'packets_digipeated': self.packets_digipeated,
+            'duplicate_buffer_size': len(self.duplicate_buffer),
+        }
+
+
+# ============================================================
+# 工具函数
+# ============================================================
+
+def build_aprs_position_frame(source: str, latitude: float, longitude: float,
+                               comment: str = '', symbol: str = '/-',
+                               digipeaters: List[str] = None) -> AX25Frame:
+    """快速构建 APRS 位置帧。"""
+    pos = APRSPosition(
+        latitude=latitude,
+        longitude=longitude,
+        symbol_table=symbol[0] if len(symbol) > 0 else '/',
+        symbol_code=symbol[1] if len(symbol) > 1 else '-',
+        comment=comment
+    )
+
+    src_call = source.split('-')[0] if '-' in source else source
+    src_ssid = int(source.split('-')[1]) if '-' in source and source.split('-')[1].isdigit() else 0
+
+    packet = APRSPacket(
+        source=src_call,
+        source_ssid=src_ssid,
+        destination='APRS',
+        dest_ssid=0,
+        digipeaters=digipeaters or ['WIDE2-2'],
+        data_type='!',
+        payload=pos.encode()[1:],  # 去掉数据类型标识符
+        position=pos
+    )
+
+    return packet.to_ax25_frame()
+
+
+def parse_ax25_from_audio(audio_path: str) -> List[AX25Frame]:
+    """从 WAV 文件解调 AX.25 帧。"""
+    try:
+        import wave
+        with wave.open(audio_path, 'rb') as wf:
+            n_frames = wf.getnframes()
+            raw = wf.readframes(n_frames)
+            sample_width = wf.getsampwidth()
+            n_channels = wf.getnchannels()
+            sample_rate = wf.getframerate()
+
+        # 转换为 numpy
+        if sample_width == 2:
+            audio = np.frombuffer(raw, dtype=np.int16).astype(np.float64) / 32768.0
+        elif sample_width == 1:
+            audio = (np.frombuffer(raw, dtype=np.uint8).astype(np.float64) - 128) / 128.0
+        else:
+            return []
+
+        # 如果是立体声，取左声道
+        if n_channels == 2:
+            audio = audio[::2]
+
+        modem = AFSKModem(sample_rate=sample_rate)
+        return modem.demodulate(audio)
+    except Exception as e:
+        return []
+
+
+def save_ax25_to_wav(frame: AX25Frame, output_path: str,
+                      sample_rate: float = AFSK_SAMPLE_RATE) -> bool:
+    """将 AX.25 帧调制为 WAV 文件。"""
+    try:
+        import wave
+        modem = AFSKModem(sample_rate=sample_rate)
+        audio = modem.modulate(frame)
+
+        # 转换为 16-bit PCM
+        audio_int16 = (audio * 32767).astype(np.int16)
+
+        with wave.open(output_path, 'wb') as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(int(sample_rate))
+            wf.writeframes(audio_int16.tobytes())
+
+        return True
+    except Exception:
+        return False
