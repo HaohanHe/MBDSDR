@@ -1152,12 +1152,13 @@ class MBDSDRAgent:
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "文件路径"},
-                    "new_content": {"type": "string", "description": "新的完整文件内容"},
+                    "new_content": {"type": "string", "description": "新的完整文件内容（也可用 content 参数）"},
+                    "content": {"type": "string", "description": "新的完整文件内容（new_content 的别名）"},
                     "description": {"type": "string", "description": "修改描述", "default": ""},
                 },
-                "required": ["file_path", "new_content"],
+                "required": ["file_path"],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(ce.modify_file(args["file_path"], args["new_content"], args.get("description","")).to_dict(), ensure_ascii=False, indent=2)),
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ce.modify_file(args["file_path"], args.get("new_content") or args.get("content") or "", args.get("description","")).to_dict(), ensure_ascii=False, indent=2)),
             category="code_editor",
         )
 
