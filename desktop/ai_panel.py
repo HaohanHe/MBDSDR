@@ -250,10 +250,23 @@ class AIPanel(QWidget):
         layout.addWidget(self.toggle_log_btn)
 
     def _update_ai_status(self):
-        """更新 AI 内核状态指示。"""
+        """更新 AI 内核状态指示（含上下文 token 使用情况）。"""
         if AI_CORE_AVAILABLE and self.agent:
             model = self.agent.model_manager.model
-            self.ai_status_label.setText(f"LLM: {model.split('/')[-1]}")
+            # 获取上下文状态
+            ctx_info = ""
+            try:
+                cm = self.agent.context_manager
+                current = getattr(cm, 'current_tokens', 0)
+                maximum = getattr(cm, 'max_tokens', 8192)
+                msg_count = getattr(cm, 'message_count', 0)
+                compressions = getattr(cm, 'compression_count', 0)
+                if current > 0:
+                    pct = current * 100 // maximum
+                    ctx_info = f" | ctx: {current}/{maximum} ({pct}%) | msgs: {msg_count}"
+            except Exception:
+                pass
+            self.ai_status_label.setText(f"LLM: {model.split('/')[-1]}{ctx_info}")
             self.ai_status_label.setStyleSheet("font-size: 8pt; color: #5A8A5A;")
         elif AI_CORE_AVAILABLE:
             self.ai_status_label.setText("未配置 API")
