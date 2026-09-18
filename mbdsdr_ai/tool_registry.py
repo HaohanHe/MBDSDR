@@ -152,6 +152,9 @@ class ToolRegistry:
             result.append({
                 "name": name,
                 "description": fn["description"],
+                "parameters": fn.get("parameters", {
+                    "type": "object", "properties": {},
+                }),
                 "category": tool["category"],
                 "available": tool["available"],
             })
