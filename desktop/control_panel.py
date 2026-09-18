@@ -38,6 +38,47 @@ PRESET_AM_STATIONS = [
     ("1251", "生活"),
 ]
 
+# SDR 常用频段预设（频率MHz, 名称, 模式）
+SDR_BAND_PRESETS = [
+    # 航空
+    ("118.000", "航空塔台", "AM"),
+    ("121.500", "航空应急", "AM"),
+    ("123.450", "航空通联", "AM"),
+    ("132.000", "航空进近", "AM"),
+    # 业余无线电 2m
+    ("144.390", "APRS 144", "AFSK"),
+    ("145.800", "ISS APRS", "AFSK"),
+    ("145.500", "2m 呼叫", "FM"),
+    ("146.520", "2m 全美呼叫", "FM"),
+    # 业余无线电 70cm
+    ("432.100", "70cm CW", "CW"),
+    ("433.000", "70cm 呼叫", "FM"),
+    ("435.000", "70cm 卫星", "FM"),
+    # 气象卫星
+    ("137.100", "NOAA 19 APT", "FM"),
+    ("137.620", "NOAA 15 APT", "FM"),
+    ("137.9125", "NOAA 18 APT", "FM"),
+    ("137.100", "METEOR M2", "FM"),
+    # 导航
+    ("1575.42", "GPS L1", "PSK"),
+    ("1561.098", "北斗 B1", "PSK"),
+    ("1227.60", "GPS L2", "PSK"),
+    # 广播
+    ("87.500", "FM 广播起点", "WFM"),
+    ("108.000", "FM 广播终点", "WFM"),
+    # 工业/物联网
+    ("433.920", "ISM 433", "ASK"),
+    ("868.000", "ISM 868", "FSK"),
+    ("915.000", "ISM 915", "FSK"),
+    ("2400.00", "WiFi/BT 2.4G", "QAM"),
+    # 短波
+    ("3.500", "80m 业余", "LSB"),
+    ("7.000", "40m 业余", "LSB"),
+    ("14.000", "20m 业余", "USB"),
+    ("21.000", "15m 业余", "USB"),
+    ("28.000", "10m 业余", "USB"),
+]
+
 
 class ControlPanel(QWidget):
     """调谐控制面板。"""
@@ -45,6 +86,7 @@ class ControlPanel(QWidget):
     # 信号
     tune_fm_requested = Signal(float)    # 请求调谐 FM (MHz)
     tune_am_requested = Signal(int)      # 请求调谐 AM (kHz)
+    tune_sdr_requested = Signal(float, str)  # 请求调谐 SDR (Hz, 模式)
     volume_changed = Signal(int)          # 音量改变 (0-63)
     record_toggled = Signal(bool)         # 录音开关
     mode_changed = Signal(str)            # 模式改变 ("FM"/"AM")
@@ -110,12 +152,22 @@ class ControlPanel(QWidget):
         layout.addWidget(freq_group)
 
         # ---- 预设电台 ----
-        preset_group = QGroupBox("预设电台")
+        preset_group = QGroupBox("频率预设")
         preset_layout = QVBoxLayout(preset_group)
+
+        # 频段分类选择
+        band_row = QHBoxLayout()
+        self.band_combo = QComboBox()
+        self.band_combo.setFixedHeight(28)
+        self.band_combo.addItems(["FM 广播", "AM 广播", "航空", "业余 2m", "业余 70cm", "气象卫星", "导航", "ISM/物联网", "短波"])
+        self.band_combo.currentIndexChanged.connect(self._on_band_changed)
+        band_row.addWidget(QLabel("频段:"))
+        band_row.addWidget(self.band_combo)
+        preset_layout.addLayout(band_row)
 
         self.preset_combo = QComboBox()
         self.preset_combo.setFixedHeight(32)
-        self._populate_presets("FM")
+        self._populate_presets("FM 广播")
         self.preset_combo.currentIndexChanged.connect(self._on_preset_selected)
         preset_layout.addWidget(self.preset_combo)
 
@@ -160,17 +212,38 @@ class ControlPanel(QWidget):
         # 弹性空间
         layout.addStretch()
 
-    def _populate_presets(self, mode: str):
+    def _populate_presets(self, band: str):
         """填充预设电台列表。"""
         self.preset_combo.blockSignals(True)
         self.preset_combo.clear()
-        if mode == "FM":
+        if band == "FM 广播":
             for freq, name in PRESET_FM_STATIONS:
-                self.preset_combo.addItem(f"{freq} MHz - {name}", freq)
-        else:
+                self.preset_combo.addItem(f"{freq} MHz - {name}", (float(freq), "FM"))
+        elif band == "AM 广播":
             for freq, name in PRESET_AM_STATIONS:
-                self.preset_combo.addItem(f"{freq} kHz - {name}", freq)
+                self.preset_combo.addItem(f"{freq} kHz - {name}", (float(freq) / 1000.0, "AM"))
+        else:
+            # SDR 频段预设，按频段过滤
+            band_keywords = {
+                "航空": ["航空"],
+                "业余 2m": ["2m", "APRS 144", "ISS"],
+                "业余 70cm": ["70cm"],
+                "气象卫星": ["NOAA", "METEOR"],
+                "导航": ["GPS", "北斗"],
+                "ISM/物联网": ["ISM", "WiFi"],
+                "短波": ["80m", "40m", "20m", "15m", "10m"],
+            }
+            keywords = band_keywords.get(band, [])
+            for freq, name, mode in SDR_BAND_PRESETS:
+                if any(k in name for k in keywords):
+                    self.preset_combo.addItem(f"{freq} MHz - {name} ({mode})", (float(freq), mode))
         self.preset_combo.blockSignals(False)
+
+    @Slot(int)
+    def _on_band_changed(self, index: int):
+        """频段分类切换。"""
+        band = self.band_combo.itemText(index)
+        self._populate_presets(band)
 
     def _update_freq_display(self):
         """更新频率显示。"""
@@ -227,17 +300,28 @@ class ControlPanel(QWidget):
     def _on_preset_selected(self, index: int):
         if index < 0:
             return
-        freq_str = self.preset_combo.itemData(index)
-        if freq_str is None:
+        data = self.preset_combo.itemData(index)
+        if data is None:
             return
-        if self._current_mode == "FM":
-            freq = float(freq_str)
-            self._current_freq_fm = freq
-            self.tune_fm_requested.emit(freq)
+        # 新格式: (freq_mhz, mode)
+        if isinstance(data, tuple):
+            freq_mhz, mode = data
+            self._current_freq_fm = freq_mhz
+            self.freq_input.setText(f"{freq_mhz:.3f}")
+            self.tune_fm_requested.emit(freq_mhz)
+            # 发射 SDR 调谐请求（包含模式）
+            if hasattr(self, 'tune_sdr_requested'):
+                self.tune_sdr_requested.emit(freq_mhz * 1e6, mode)
         else:
-            freq = int(freq_str)
-            self._current_freq_am = freq
-            self.tune_am_requested.emit(freq)
+            # 旧格式兼容
+            if self._current_mode == "FM":
+                freq = float(data)
+                self._current_freq_fm = freq
+                self.tune_fm_requested.emit(freq)
+            else:
+                freq = int(data)
+                self._current_freq_am = freq
+                self.tune_am_requested.emit(freq)
         self._update_freq_display()
 
     @Slot(int)

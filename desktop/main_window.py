@@ -61,6 +61,9 @@ class MainWindow(QMainWindow):
         # 自动连接模拟模式（无硬件时演示）
         QTimer.singleShot(500, self._auto_connect_simulation)
 
+        # 加载 GUI 配置（窗口大小、频率、主题等）
+        QTimer.singleShot(100, self._load_gui_config)
+
     # ========================================================================
     # UI 构建
     # ========================================================================
@@ -710,6 +713,63 @@ class MainWindow(QMainWindow):
             )
 
     def closeEvent(self, event):
-        """关闭时断开连接。"""
+        """关闭时断开连接并保存配置。"""
+        self._save_gui_config()
         self._disconnect()
         event.accept()
+
+    def _save_gui_config(self):
+        """保存 GUI 配置到 ~/.mbdsdr/gui_config.json。"""
+        import json
+        config_dir = os.path.expanduser("~/.mbdsdr")
+        config_file = os.path.join(config_dir, "gui_config.json")
+        try:
+            os.makedirs(config_dir, exist_ok=True)
+            config = {
+                "window": {
+                    "width": self.width(),
+                    "height": self.height(),
+                    "x": self.x(),
+                    "y": self.y(),
+                    "maximized": self.isMaximized(),
+                },
+                "current_freq_mhz": getattr(self.control_panel, '_current_freq_fm', 98.5),
+                "current_mode": getattr(self.control_panel, '_current_mode', 'FM'),
+                "volume": getattr(self.control_panel, 'volume_slider', None).value() if hasattr(self.control_panel, 'volume_slider') else 30,
+                "theme": self._current_theme,
+                "show_waterfall": getattr(self.spectrum, '_show_waterfall', True),
+                "observer_lat": self._observer_lat,
+                "observer_lon": self._observer_lon,
+            }
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _load_gui_config(self):
+        """从 ~/.mbdsdr/gui_config.json 加载 GUI 配置。"""
+        import json
+        config_file = os.path.expanduser("~/.mbdsdr/gui_config.json")
+        if not os.path.exists(config_file):
+            return
+        try:
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            # 恢复窗口大小和位置
+            win = config.get("window", {})
+            if not win.get("maximized", False):
+                w = win.get("width", 1400)
+                h = win.get("height", 900)
+                x = win.get("x", 100)
+                y = win.get("y", 100)
+                self.resize(w, h)
+                self.move(x, y)
+            # 恢复观察者坐标
+            self._observer_lat = config.get("observer_lat", 43.88)
+            self._observer_lon = config.get("observer_lon", 125.32)
+            # 恢复主题
+            theme = config.get("theme", "japanese_light")
+            if theme != self._current_theme:
+                self._apply_theme(theme)
+        except Exception:
+            pass

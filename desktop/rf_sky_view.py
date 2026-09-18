@@ -888,10 +888,135 @@ class RFSkyViewPanel(QFrame):
         self._build_control_bar()
 
     def _build_control_bar(self):
-        """构建底部浮动控制栏（半透明叠加在天空视图上）。"""
-        # 这里简化：控制栏作为独立 widget 放在天空视图下方
-        # 真正的浮动叠加需要在 RFSkyView 内部绘制
-        pass
+        """构建底部浮动控制栏（时间控制 + 视图控制）。"""
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QLabel, QFrame
+        from PySide6.QtCore import Qt
+
+        control_bar = QFrame()
+        control_bar.setObjectName("skyControlBar")
+        control_bar.setFixedHeight(36)
+        control_bar.setStyleSheet("""
+            QFrame#skyControlBar {
+                background: rgba(30, 40, 50, 200);
+                border-top: 1px solid rgba(120, 150, 180, 80);
+            }
+            QPushButton {
+                background: rgba(60, 80, 100, 150);
+                color: #C8D8E8;
+                border: 1px solid rgba(120, 150, 180, 100);
+                border-radius: 3px;
+                padding: 2px 8px;
+                font-size: 9pt;
+                min-width: 40px;
+            }
+            QPushButton:hover {
+                background: rgba(80, 110, 140, 200);
+            }
+            QPushButton:checked {
+                background: rgba(100, 140, 100, 200);
+                color: #E0F0E0;
+            }
+            QLabel {
+                color: #A8C0D8;
+                font-size: 9pt;
+                padding: 0 8px;
+            }
+        """)
+
+        bar_layout = QHBoxLayout(control_bar)
+        bar_layout.setContentsMargins(8, 2, 8, 2)
+        bar_layout.setSpacing(4)
+
+        # 时间控制
+        self.time_label = QLabel("实时")
+        self.time_label.setMinimumWidth(160)
+        bar_layout.addWidget(self.time_label)
+
+        bar_layout.addStretch()
+
+        btn_rewind = QPushButton("<< -10m")
+        btn_rewind.clicked.connect(lambda: self._adjust_time(-600))
+        bar_layout.addWidget(btn_rewind)
+
+        btn_pause = QPushButton("暂停")
+        btn_pause.setCheckable(True)
+        btn_pause.toggled.connect(self._toggle_pause)
+        self._pause_btn = btn_pause
+        bar_layout.addWidget(btn_pause)
+
+        btn_live = QPushButton("实时")
+        btn_live.clicked.connect(self._reset_time)
+        bar_layout.addWidget(btn_live)
+
+        btn_forward = QPushButton("+10m >>")
+        btn_forward.clicked.connect(lambda: self._adjust_time(600))
+        bar_layout.addWidget(btn_forward)
+
+        bar_layout.addSpacing(16)
+
+        # 视图控制
+        btn_reset = QPushButton("重置视图")
+        btn_reset.clicked.connect(self.reset_view)
+        bar_layout.addWidget(btn_reset)
+
+        # 插入到天空视图下方
+        self.layout().addWidget(control_bar)
+
+        # 时间状态
+        self._time_offset = 0.0  # 秒
+        self._paused = False
+        self._pause_start_time = 0.0
+
+        # 时间更新定时器
+        self._time_timer = QTimer(self)
+        self._time_timer.timeout.connect(self._update_time_label)
+        self._time_timer.start(1000)
+
+    def _adjust_time(self, seconds: float):
+        """调整时间偏移（快进/快退）。"""
+        self._time_offset += seconds
+        self._paused = True
+        self._pause_btn.setChecked(True)
+        self._update_time_label()
+
+    def _toggle_pause(self, paused: bool):
+        """暂停/继续时间。"""
+        self._paused = paused
+        if paused:
+            self._pause_start_time = time.time()
+        else:
+            # 恢复时，把暂停期间的时间加到偏移里
+            paused_duration = time.time() - self._pause_start_time
+            self._time_offset -= paused_duration
+        self._update_time_label()
+
+    def _reset_time(self):
+        """重置到实时。"""
+        self._time_offset = 0.0
+        self._paused = False
+        self._pause_btn.setChecked(False)
+        self._update_time_label()
+
+    def _update_time_label(self):
+        """更新时间显示标签。"""
+        if self._paused:
+            sim_time = time.time() + self._time_offset
+            time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(sim_time))
+            self.time_label.setText(f"模拟: {time_str} (暂停)")
+        elif abs(self._time_offset) > 1:
+            sim_time = time.time() + self._time_offset
+            time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(sim_time))
+            offset_min = self._time_offset / 60
+            sign = "+" if offset_min >= 0 else ""
+            self.time_label.setText(f"模拟: {time_str} ({sign}{offset_min:.0f}m)")
+        else:
+            self.time_label.setText("实时")
+
+    def get_sim_time(self) -> float:
+        """获取当前模拟时间（epoch 秒）。"""
+        if self._paused:
+            return time.time() + self._time_offset
+        return time.time() + self._time_offset
 
     # 代理方法
     def set_objects(self, objects):
