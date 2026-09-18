@@ -1357,6 +1357,84 @@ def register_sdr_tools(agent):
         category="satellite",
     )
 
+    # ========================================================================
+    # SatDump 集成工具
+    # ========================================================================
+
+    agent.tool_registry.register(
+        name="satdump_check",
+        description="检查 SatDump 是否安装，显示安装路径和版本。SatDump 是开源气象卫星解码软件，支持所有主流气象卫星。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_satdump_check(args)),
+        category="satellite",
+    )
+
+    agent.tool_registry.register(
+        name="satdump_list_sats",
+        description="列出 SatDump 支持的所有卫星（气象卫星/极轨/业余），显示名称和频率。用于选择要接收的卫星。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_satdump_list_sats(args)),
+        category="satellite",
+    )
+
+    agent.tool_registry.register(
+        name="satdump_live",
+        description="SatDump 实时接收模式。指定卫星名称和SDR，开始实时接收并解码。参考：SatDump live模式。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "satellite": {"type": "string", "description": "卫星名称key，如 gk2a_lrit / noaa19_apt"},
+                "frequency_hz": {"type": "number", "description": "中心频率（Hz）"},
+                "output_dir": {"type": "string", "description": "输出目录路径"},
+                "samplerate": {"type": "number", "description": "采样率（Hz），默认2048000", "default": 2048000},
+                "gain": {"type": "number", "description": "增益（dB），默认30", "default": 30.0},
+            },
+            "required": ["satellite", "frequency_hz", "output_dir"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_satdump_live(args)),
+        category="satellite",
+    )
+
+    agent.tool_registry.register(
+        name="satdump_process",
+        description="SatDump 离线处理模式。对已录制的IQ文件进行解码。参考：SatDump processing模式。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "input_file": {"type": "string", "description": "输入IQ文件路径"},
+                "satellite": {"type": "string", "description": "卫星名称key"},
+                "output_dir": {"type": "string", "description": "输出目录路径"},
+            },
+            "required": ["input_file", "satellite", "output_dir"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_satdump_process(args)),
+        category="satellite",
+    )
+
+    agent.tool_registry.register(
+        name="satdump_compose_image",
+        description="从 SatDump 输出目录合成云图。支持图像增强（直方图均衡+对比度增强）。输出PNG文件。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "input_dir": {"type": "string", "description": "SatDump输出目录"},
+                "output_file": {"type": "string", "description": "输出PNG文件路径"},
+                "enhance": {"type": "boolean", "description": "是否增强（默认true）", "default": True},
+            },
+            "required": ["input_dir", "output_file"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_satdump_compose_image(args)),
+        category="satellite",
+    )
+
 
 # ═══════════════════════════════════════════════════════
 # 工具实现函数
@@ -3543,5 +3621,129 @@ def _lro_od_demo(args):
     lines.append("  2. 多普勒积分时间5秒，精度1mm/s")
     lines.append("  3. EKF需要月球重力场模型（JGL系列）")
     lines.append("  4. 轨道误差评估（km级）")
+
+    return '\n'.join(lines)
+
+
+# ========================================================================
+# SatDump 集成工具实现
+# ========================================================================
+
+def _satdump_check(args):
+    """检查 SatDump 是否安装。"""
+    from mbdsdr_ai.satdump_integration import check_satdump_installed
+
+    result = check_satdump_installed()
+    lines = ["=== SatDump 安装检查 ==="]
+    lines.append("")
+    lines.append(f"状态: {'已安装' if result['installed'] else '未安装'}")
+    if result['installed']:
+        lines.append(f"路径: {result['path']}")
+    else:
+        lines.append(f"提示: {result['message']}")
+    lines.append("")
+    lines.append("SatDump 是开源气象卫星解码软件，支持：")
+    lines.append("  - GK-2A / 风云四号 / GOES / 向日葵")
+    lines.append("  - NOAA / Meteor / 风云三号")
+    lines.append("  - 实时接收 + 离线处理")
+    lines.append("")
+    lines.append("官网: https://www.satdump.org/")
+
+    return '\n'.join(lines)
+
+
+def _satdump_list_sats(args):
+    """列出 SatDump 支持的卫星。"""
+    from mbdsdr_ai.satdump_integration import list_satdump_satellites
+
+    sats = list_satdump_satellites()
+    lines = ["=== SatDump 支持的卫星 ==="]
+    lines.append("")
+    lines.append(f"共 {len(sats)} 颗卫星：")
+    lines.append("")
+
+    for s in sats:
+        lines.append(f"  {s['name']:20s}  {s['frequency_mhz']:7.1f} MHz  (key: {s['key']})")
+
+    return '\n'.join(lines)
+
+
+def _satdump_live(args):
+    """SatDump 实时接收。"""
+    from mbdsdr_ai.satdump_integration import satdump_live
+
+    satellite = args['satellite']
+    frequency = args['frequency_hz']
+    output_dir = args['output_dir']
+    samplerate = args.get('samplerate', 2048000)
+    gain = args.get('gain', 30.0)
+
+    result = satdump_live(satellite, frequency, output_dir, samplerate, gain)
+
+    lines = ["=== SatDump 实时接收 ==="]
+    lines.append("")
+    lines.append(f"卫星: {satellite}")
+    lines.append(f"频率: {frequency/1e6:.3f} MHz")
+    lines.append(f"输出目录: {output_dir}")
+    lines.append(f"采样率: {samplerate/1000:.0f} ksps")
+    lines.append(f"增益: {gain:.0f} dB")
+    lines.append("")
+    lines.append(f"状态: {'成功' if result.get('success') else '失败'}")
+    if 'message' in result:
+        lines.append(f"信息: {result['message']}")
+    if result.get('error'):
+        lines.append(f"错误: {result['error']}")
+    if result.get('command'):
+        lines.append(f"命令: {result['command']}")
+
+    return '\n'.join(lines)
+
+
+def _satdump_process(args):
+    """SatDump 离线处理。"""
+    from mbdsdr_ai.satdump_integration import satdump_process
+
+    input_file = args['input_file']
+    satellite = args['satellite']
+    output_dir = args['output_dir']
+
+    result = satdump_process(input_file, satellite, output_dir)
+
+    lines = ["=== SatDump 离线处理 ==="]
+    lines.append("")
+    lines.append(f"输入文件: {input_file}")
+    lines.append(f"卫星: {satellite}")
+    lines.append(f"输出目录: {output_dir}")
+    lines.append("")
+    lines.append(f"状态: {'成功' if result.get('success') else '失败'}")
+    if result.get('error'):
+        lines.append(f"错误: {result['error']}")
+    if result.get('stdout'):
+        lines.append(f"输出: {result['stdout'][:200]}")
+
+    return '\n'.join(lines)
+
+
+def _satdump_compose_image(args):
+    """合成云图。"""
+    from mbdsdr_ai.satdump_integration import compose_cloud_image
+
+    input_dir = args['input_dir']
+    output_file = args['output_file']
+    enhance = args.get('enhance', True)
+
+    result = compose_cloud_image(input_dir, output_file, enhance)
+
+    lines = ["=== 云图合成 ==="]
+    lines.append("")
+    lines.append(f"输入目录: {input_dir}")
+    lines.append(f"输出文件: {output_file}")
+    lines.append(f"增强: {'是' if enhance else '否'}")
+    lines.append("")
+    lines.append(f"状态: {'成功' if result.get('success') else '失败'}")
+    if result.get('error'):
+        lines.append(f"错误: {result['error']}")
+    if result.get('size'):
+        lines.append(f"图像尺寸: {result['size']}")
 
     return '\n'.join(lines)
