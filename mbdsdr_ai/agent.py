@@ -1595,6 +1595,16 @@ class MBDSDRAgent:
             content = response.get("content", "")
             tool_calls = response.get("tool_calls", [])
 
+            # 弱模型兜底：原生 tool_calls 为空时，从正文文本里提取工具调用
+            # （小模型/本地模型常把工具调用写成 <tool_call> 或 ```json 或裸 JSON）
+            if not tool_calls and content and self.config.enable_tool_calling:
+                valid_names = set(self.tool_registry.get_tool_names())
+                parsed = self.model_manager.parse_tool_calls_from_text(
+                    content, valid_names)
+                if parsed:
+                    tool_calls = parsed
+                    content = self._strip_tool_call_text(content)
+
             # 如果没有工具调用，这是最终回复
             if not tool_calls:
                 final_content = content
@@ -1647,6 +1657,45 @@ class MBDSDRAgent:
         }
 
     # ── 压缩回调 ────────────────────────────────────────
+
+    def _strip_tool_call_text(self, content: str) -> str:
+        """从正文中剥离已被兜底解析消费的工具调用标记，保留自然语言说明。"""
+        if not content:
+            return content
+        import re as _re
+        valid = set(self.tool_registry.get_tool_names())
+        text = content
+        # 1) <tool_call>...</tool_call>
+        text = _re.sub(r"<\s*tool_call\s*>.*?<\s*/\s*tool_call\s*>",
+                       "", text, flags=_re.DOTALL)
+        # 2) ```json ... ``` 代码块，仅当其中引用了真实工具名
+        def _drop_fence(m):
+            body = m.group(1)
+            try:
+                obj = json.loads(body)
+                objs = obj if isinstance(obj, list) else [obj]
+                names = [o.get("name") or o.get("tool") or
+                         (o.get("function") or {}).get("name")
+                         for o in objs if isinstance(o, dict)]
+                if any(n in valid for n in names):
+                    return ""
+            except Exception:
+                pass
+            return m.group(0)
+        text = _re.sub(r"```(?:json)?\s*(.*?)```", _drop_fence,
+                       text, flags=_re.DOTALL)
+        # 3) 裸 JSON 对象，仅当它整体就是一个工具调用
+        stripped = text.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                obj = json.loads(stripped)
+                name = (obj.get("name") or obj.get("tool") or
+                        (obj.get("function") or {}).get("name"))
+                if name in valid:
+                    return ""
+            except Exception:
+                pass
+        return text.strip()
 
     def _compaction_callback(self, history_text: str) -> str:
         """

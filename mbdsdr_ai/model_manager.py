@@ -333,6 +333,124 @@ class ModelManager:
             except Exception:
                 return {"_raw": args_str, "_parse_error": True}
 
+    # ── 弱模型文本工具调用兜底解析 ────────────────────────
+
+    # 匹配 <tool_call>...</tool_call>、```json ... ```、裸 JSON 片段
+    _TOOL_TAG_RE = __import__("re").compile(
+        r"<\s*tool_call\s*>(.*?)<\s*/\s*tool_call\s*>", __import__("re").DOTALL)
+    _JSON_FENCE_RE = __import__("re").compile(
+        r"```(?:json)?\s*(.*?)```", __import__("re").DOTALL)
+
+    @staticmethod
+    def _coerce_tool_json(raw: str, valid_names: set) -> List[Dict[str, Any]]:
+        """把一段 JSON 文本转成标准 tool_call 列表；只接受引用真实工具名的。"""
+        try:
+            data = json.loads(raw)
+        except Exception:
+            # 容错：单引号/尾逗号/Python 布尔
+            try:
+                fixed = raw.strip().replace("'", '"').replace("True", "true") \
+                    .replace("False", "false").replace("None", "null")
+                fixed = __import__("re").sub(r",\s*([}\]])", r"\1", fixed)
+                data = json.loads(fixed)
+            except Exception:
+                return []
+
+        candidates = data if isinstance(data, list) else [data]
+        out = []
+        for i, obj in enumerate(candidates):
+            if not isinstance(obj, dict):
+                continue
+            # 工具名：多种常见键
+            name = (obj.get("name") or obj.get("tool") or obj.get("tool_name")
+                    or obj.get("action") or (obj.get("function") or {}).get("name"))
+            if not name or name not in valid_names:
+                continue
+            # 参数：多种常见键
+            args = (obj.get("arguments") if "arguments" in obj else
+                    obj.get("args") if "args" in obj else
+                    obj.get("parameters") if "parameters" in obj else
+                    obj.get("input") if "input" in obj else
+                    (obj.get("function") or {}).get("arguments", {}))
+            if args is None:
+                args = {}
+            if isinstance(args, str):
+                args_str = args
+            else:
+                args_str = json.dumps(args, ensure_ascii=False)
+            out.append({
+                "id": obj.get("id", f"call_text_{i}"),
+                "type": "function",
+                "function": {"name": name, "arguments": args_str},
+            })
+        return out
+
+    def parse_tool_calls_from_text(self, content: str,
+                                   valid_tool_names: set) -> List[Dict[str, Any]]:
+        """
+        从模型正文里兜底提取工具调用（弱模型不支持原生 function calling 时）。
+
+        依次尝试：<tool_call> 标签 → ```json 代码块 → 花括号裸 JSON。
+        只有引用了真实工具名的 JSON 才被采纳，避免把普通说明文字误判成调用。
+        返回标准 OpenAI tool_call 结构列表。
+        """
+        if not content or not valid_tool_names:
+            return []
+
+        found: List[Dict[str, Any]] = []
+
+        # 1) <tool_call>...</tool_call>
+        for m in self._TOOL_TAG_RE.finditer(content):
+            found += self._coerce_tool_json(m.group(1), valid_tool_names)
+
+        # 2) ```json ... ``` 代码块
+        if not found:
+            for m in self._JSON_FENCE_RE.finditer(content):
+                found += self._coerce_tool_json(m.group(1), valid_tool_names)
+
+        # 3) 花括号裸 JSON（截取所有 {...} 平衡片段）
+        if not found:
+            for start, end in self._iter_json_objects(content):
+                found += self._coerce_tool_json(content[start:end], valid_tool_names)
+
+        # 去重（同名同参数只保留一次）
+        uniq, seen = [], set()
+        for tc in found:
+            key = (tc["function"]["name"], tc["function"]["arguments"])
+            if key not in seen:
+                seen.add(key)
+                uniq.append(tc)
+        return uniq
+
+    @staticmethod
+    def _iter_json_objects(text: str):
+        """枚举文本中花括号平衡的 JSON 对象区间（跳过字符串内括号）。"""
+        opens = 0
+        start = -1
+        in_str = False
+        esc = False
+        for i, ch in enumerate(text):
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                if opens == 0:
+                    start = i
+                opens += 1
+            elif ch == "}":
+                opens -= 1
+                if opens == 0 and start >= 0:
+                    yield start, i + 1
+                    start = -1
+
+
     # ── 状态查询 ────────────────────────────────────────
 
     def get_status(self) -> Dict[str, Any]:
