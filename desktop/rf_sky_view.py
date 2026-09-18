@@ -138,6 +138,16 @@ class RFSkyView(QWidget):
         self._heatmap: List[HeatmapCell] = []
         self._trajectories: Dict[str, List[Tuple[float, float]]] = {}  # name -> [(az, el), ...]
 
+        # 新时空：授时信息
+        self._time_info = {
+            "utc_time": None,
+            "gps_week": 0,
+            "gps_tow": 0.0,
+            "ntp_server": "",
+            "ntp_status": "system",  # system/ntp/gnss
+            "clock_offset_ms": 0.0,
+        }
+
         # 交互状态
         self._dragging = False
         self._last_mouse_pos = QPointF()
@@ -213,6 +223,14 @@ class RFSkyView(QWidget):
 
     def get_antenna(self) -> AntennaPointing:
         return self._antenna
+
+    def set_time_info(self, time_info: dict):
+        """
+        设置新时空授时信息。
+        time_info 包含：utc_time, gps_week, gps_tow, ntp_server, ntp_status, clock_offset_ms
+        """
+        self._time_info.update(time_info)
+        self.update()
 
     def set_heatmap(self, cells: List[HeatmapCell]):
         """设置信号强度热力图数据。"""
@@ -470,13 +488,21 @@ class RFSkyView(QWidget):
                 painter.setFont(self._font)
                 painter.drawText(QPointF(pos.x() + 10, pos.y() - 5), obj.name)
 
+                # 仰角/方位角（新时空标注）
+                painter.setPen(self._colors["text_dim"])
+                painter.setFont(self._mono_font)
+                painter.drawText(
+                    QPointF(pos.x() + 10, pos.y() + 22),
+                    f"EL {obj.elevation_deg:4.1f}° AZ {obj.azimuth_deg:5.1f}°"
+                )
+
                 # 频率（如果有）
                 if obj.frequency_hz > 0:
                     freq_mhz = obj.frequency_hz / 1e6
                     painter.setPen(self._colors["text_dim"])
                     painter.setFont(self._mono_font)
                     painter.drawText(
-                        QPointF(pos.x() + 10, pos.y() + 10),
+                        QPointF(pos.x() + 10, pos.y() + 36),
                         f"{freq_mhz:.1f} MHz"
                     )
 
@@ -680,12 +706,12 @@ class RFSkyView(QWidget):
         painter.restore()
 
     def _draw_info_overlay(self, painter: QPainter):
-        """绘制左下角信息叠加（半透明卡片）。"""
+        """绘制左下角信息叠加（半透明卡片，含新时空授时信息）。"""
         painter.save()
 
-        # 半透明背景
-        card_w = 220
-        card_h = 90
+        # 半透明背景（增大高度以容纳授时信息）
+        card_w = 240
+        card_h = 140
         card_x = 12
         card_y = self.height() - card_h - 12
 
@@ -724,10 +750,38 @@ class RFSkyView(QWidget):
         painter.setPen(self._colors["satellite"])
         painter.drawText(card_x + 80, y, f"{visible_count} 颗")
 
+        # 新时空：授时信息
+        y += 22
+        painter.setFont(self._font)
+        painter.setPen(self._colors["text"])
+        painter.drawText(card_x + 12, y, "授时")
+        painter.setFont(self._mono_font)
+        painter.setPen(self._colors["text_dim"])
+
+        # UTC 时间
+        from datetime import datetime, timezone
+        utc_now = self._time_info.get("utc_time") or datetime.now(timezone.utc)
+        if isinstance(utc_now, datetime):
+            utc_str = utc_now.strftime("%H:%M:%S")
+        else:
+            utc_str = str(utc_now)
+        ntp_status = self._time_info.get("ntp_status", "system")
+        painter.drawText(card_x + 80, y, f"UTC {utc_str} [{ntp_status}]")
+
+        y += 18
+        painter.setFont(self._mono_font)
+        painter.setPen(self._colors["text_dim"])
+        gps_week = self._time_info.get("gps_week", 0)
+        gps_tow = self._time_info.get("gps_tow", 0.0)
+        if gps_week > 0:
+            painter.drawText(card_x + 80, y, f"GPS W{gps_week} {gps_tow:06.1f}s")
+        else:
+            painter.drawText(card_x + 80, y, "GPS --:--:--")
+
         y += 18
         painter.setFont(self._font)
         painter.setPen(self._colors["text_dim"])
-        painter.drawText(card_x + 12, y, "滚轮缩放 | 拖拽旋转 | 双击重置 | 点击卫星")
+        painter.drawText(card_x + 12, y, "滚轮缩放 | 拖拽旋转 | 双击重置")
 
         painter.restore()
 

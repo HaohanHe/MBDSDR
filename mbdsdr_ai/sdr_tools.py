@@ -26,6 +26,7 @@ import os
 import time
 import json
 import numpy as np
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from .tool_registry import ToolResult
@@ -823,6 +824,196 @@ def register_sdr_tools(agent):
         },
         handler=lambda args: ToolResult(success=True, content=_digipeater_process(args)),
         category="sdr_network",
+    )
+
+    # ═══════════════════════════════════════════════════════
+    # 新时空工具（授时/GIS/PNT/卫星Pass预测）
+    # ═══════════════════════════════════════════════════════
+
+    agent.tool_registry.register(
+        name="time_get_info",
+        description="获取当前时间信息，包括 UTC 时间、本地时间、GPS 周内秒、本地时钟偏差、NTP 服务器状态。优先从 NTP 服务器获取精确时间，失败则用系统时间。用于授时、时钟校准、时间同步。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "prefer_ntp": {"type": "boolean", "description": "是否优先使用 NTP，默认 true"},
+            },
+        },
+        handler=lambda args: ToolResult(success=True, content=_time_get_info(args)),
+        category="new_spacetime",
+    )
+
+    agent.tool_registry.register(
+        name="time_ntp_sync",
+        description="从指定 NTP 服务器同步时间，返回 UTC 时间、往返延迟、时钟偏差。支持阿里云、腾讯云、cn.ntp.org.cn、pool.ntp.org 等公共 NTP 服务器。用于精确授时。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "server": {"type": "string", "description": "NTP 服务器地址，默认 ntp.aliyun.com"},
+                "timeout": {"type": "number", "description": "超时秒数，默认 3"},
+            },
+        },
+        handler=lambda args: ToolResult(success=True, content=_time_ntp_sync(args)),
+        category="new_spacetime",
+    )
+
+    agent.tool_registry.register(
+        name="gnss_system_info",
+        description="获取 GNSS 全球导航卫星系统信息，包括 GPS、北斗 BDS、GLONASS、Galileo 的频率、国家、频段。可查询单个系统或全部系统。用于了解各卫星导航系统的频率规划。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "system": {"type": "string", "description": "GNSS 系统：GPS/BDS/GLONASS/Galileo/all，默认 all"},
+            },
+        },
+        handler=lambda args: ToolResult(success=True, content=_gnss_system_info(args)),
+        category="new_spacetime",
+    )
+
+    agent.tool_registry.register(
+        name="gnss_parse_rmc",
+        description="解析 GNSS RMC NMEA 语句（推荐最小定位信息），提取 UTC 时间、经纬度、速度、航向、定位状态。输入 NMEA 语句字符串，输出结构化定位信息。用于解析 GNSS 接收机输出。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "nmea": {"type": "string", "description": "NMEA RMC 语句，如 $GNRMC,072545.00,A,4352.0000,N,12519.0000,E,..."},
+            },
+            "required": ["nmea"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_gnss_parse_rmc(args)),
+        category="new_spacetime",
+    )
+
+    agent.tool_registry.register(
+        name="gis_distance",
+        description="计算两个地理坐标点之间的大圆距离（Haversine 公式），返回公里数。输入两点的经纬度，用于计算两点间距离、航线长度、干扰源距离估算。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "lat1": {"type": "number", "description": "起点纬度（十进制度）"},
+                "lon1": {"type": "number", "description": "起点经度（十进制度）"},
+                "lat2": {"type": "number", "description": "终点纬度（十进制度）"},
+                "lon2": {"type": "number", "description": "终点经度（十进制度）"},
+            },
+            "required": ["lat1", "lon1", "lat2", "lon2"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_gis_distance(args)),
+        category="new_spacetime",
+    )
+
+    agent.tool_registry.register(
+        name="gis_bearing",
+        description="计算从起点到终点的方位角（度，0=北，顺时针）。输入两点经纬度，返回方位角。用于天线指向、干扰源方位、导航方向。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "lat1": {"type": "number", "description": "起点纬度"},
+                "lon1": {"type": "number", "description": "起点经度"},
+                "lat2": {"type": "number", "description": "终点纬度"},
+                "lon2": {"type": "number", "description": "终点经度"},
+            },
+            "required": ["lat1", "lon1", "lat2", "lon2"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_gis_bearing(args)),
+        category="new_spacetime",
+    )
+
+    agent.tool_registry.register(
+        name="gis_destination",
+        description="给定起点、方位角和距离，计算终点坐标。输入起点经纬度、方位角（度）、距离（公里），返回终点经纬度。用于天线指向预测、航点计算、干扰源定位。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "latitude": {"type": "number", "description": "起点纬度"},
+                "longitude": {"type": "number", "description": "起点经度"},
+                "bearing_deg": {"type": "number", "description": "方位角（度，0=北）"},
+                "distance_km": {"type": "number", "description": "距离（公里）"},
+            },
+            "required": ["latitude", "longitude", "bearing_deg", "distance_km"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_gis_destination(args)),
+        category="new_spacetime",
+    )
+
+    agent.tool_registry.register(
+        name="pnt_get_state",
+        description="获取泛在 PNT（定位导航授时）融合状态，包括当前位置、精度、时间、激活的定位源（GNSS/LEO/IMU/WiFi/蓝牙/UWB/蜂窝）、融合模式。新时空核心功能，多源定位融合。",
+        parameters={"type": "object", "properties": {}},
+        handler=lambda args: ToolResult(success=True, content=_pnt_get_state(args)),
+        category="new_spacetime",
+    )
+
+    agent.tool_registry.register(
+        name="pnt_update_source",
+        description="更新泛在 PNT 某个定位源的数据，触发多源融合。支持 GNSS、LEO_PNT、PPP_RTK、IMU、WiFi、蓝牙、UWB、蜂窝、NTP、视觉等源。输入源类型和定位数据，返回融合后的 PNT 状态。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "description": "定位源类型：gnss/leo_pnt/ppp_rtk/imu/wifi/bluetooth/uwb/cellular/ntp/visual"},
+                "latitude": {"type": "number", "description": "纬度（十进制度）"},
+                "longitude": {"type": "number", "description": "经度（十进制度）"},
+                "altitude_m": {"type": "number", "description": "海拔（米）"},
+                "accuracy_m": {"type": "number", "description": "定位精度（米）"},
+                "valid": {"type": "boolean", "description": "数据是否有效，默认 true"},
+                "satellites": {"type": "integer", "description": "可见卫星数（GNSS 源）"},
+            },
+            "required": ["source", "latitude", "longitude"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_pnt_update_source(args)),
+        category="new_spacetime",
+    )
+
+    agent.tool_registry.register(
+        name="satellite_predict_pass",
+        description="预测指定卫星的下一次过境（升起/中天/落下时间、最大仰角、持续时间、轨迹、多普勒频移）。使用 sgp4 轨道计算，时间步长 30 秒。输入卫星名、观察者经纬度，返回完整过境预测。用于卫星接收规划、天线指向调度。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "satellite_name": {"type": "string", "description": "卫星名称，如 NOAA 19/ISS/METEOR M2/Fengyun 3D"},
+                "observer_lat": {"type": "number", "description": "观察者纬度"},
+                "observer_lon": {"type": "number", "description": "观察者经度"},
+                "observer_alt": {"type": "number", "description": "观察者海拔（米），默认 0"},
+                "hours_ahead": {"type": "number", "description": "预测未来多少小时，默认 24"},
+                "min_elevation": {"type": "number", "description": "最小仰角（度），默认 5"},
+            },
+            "required": ["satellite_name", "observer_lat", "observer_lon"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_satellite_predict_pass(args)),
+        category="new_spacetime",
+    )
+
+    agent.tool_registry.register(
+        name="satellite_predict_all",
+        description="预测所有内置卫星的下一次过境，按升起时间排序。输入观察者经纬度，返回所有可见卫星的过境预测列表。用于卫星接收日程规划、天空图显示。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "observer_lat": {"type": "number", "description": "观察者纬度"},
+                "observer_lon": {"type": "number", "description": "观察者经度"},
+                "observer_alt": {"type": "number", "description": "观察者海拔（米），默认 0"},
+                "hours_ahead": {"type": "number", "description": "预测未来多少小时，默认 24"},
+                "min_elevation": {"type": "number", "description": "最小仰角（度），默认 5"},
+            },
+            "required": ["observer_lat", "observer_lon"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_satellite_predict_all(args)),
+        category="new_spacetime",
+    )
+
+    agent.tool_registry.register(
+        name="sky_view_visible",
+        description="获取当前天空图可见卫星列表，包括每颗卫星的仰角、方位角、距离、多普勒频移。输入观察者经纬度和最小仰角，返回可见卫星结构化数据。用于天空图渲染、卫星指向。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "observer_lat": {"type": "number", "description": "观察者纬度"},
+                "observer_lon": {"type": "number", "description": "观察者经度"},
+                "min_elevation": {"type": "number", "description": "最小仰角（度），默认 5"},
+            },
+            "required": ["observer_lat", "observer_lon"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_sky_view_visible(args)),
+        category="new_spacetime",
     )
 
 
@@ -2000,3 +2191,316 @@ def _digipeater_process(args):
     result += f"\n统计: 听到 {stats['packets_heard']} 帧, 转发 {stats['packets_digipeated']} 帧\n"
 
     return result
+
+
+# ═══════════════════════════════════════════════════════
+# 新时空工具实现（授时/GIS/PNT/卫星Pass预测）
+# ═══════════════════════════════════════════════════════
+
+def _time_get_info(args):
+    """获取时间信息。"""
+    try:
+        from mbdsdr_ai.new_spacetime import get_time_info
+    except ImportError:
+        from new_spacetime import get_time_info
+
+    prefer_ntp = args.get('prefer_ntp', True)
+    info = get_time_info(prefer_ntp=prefer_ntp)
+
+    lines = ["=== 时间信息 ==="]
+    lines.append(f"时间源: {info.source}")
+    if info.utc_time:
+        lines.append(f"UTC: {info.utc_time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}")
+    if info.local_time:
+        lines.append(f"本地: {info.local_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    if info.gps_time is not None:
+        gps_week = int(info.gps_time // 604800)
+        gps_tow = info.gps_time % 604800
+        lines.append(f"GPS: 第 {gps_week} 周, 周内 {gps_tow:.3f} 秒")
+    lines.append(f"闰秒: {info.leap_seconds} 秒 (GPS-UTC)")
+    if info.source == 'ntp':
+        lines.append(f"NTP服务器: {info.ntp_server}")
+        lines.append(f"NTP往返延迟: {info.ntp_rtt_ms:.1f} ms")
+        lines.append(f"本地时钟偏差: {info.clock_offset_ms:+.3f} ms")
+    return '\n'.join(lines)
+
+
+def _time_ntp_sync(args):
+    """NTP 时间同步。"""
+    try:
+        from mbdsdr_ai.new_spacetime import get_ntp_time, NTPError
+    except ImportError:
+        from new_spacetime import get_ntp_time, NTPError
+
+    server = args.get('server', 'ntp.aliyun.com')
+    timeout = args.get('timeout', 3.0)
+
+    try:
+        utc_time, rtt_ms = get_ntp_time(server, timeout)
+        system_utc = datetime.now(timezone.utc)
+        offset_ms = (utc_time - system_utc).total_seconds() * 1000
+
+        lines = ["=== NTP 时间同步 ==="]
+        lines.append(f"服务器: {server}")
+        lines.append(f"NTP UTC: {utc_time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}")
+        lines.append(f"系统 UTC: {system_utc.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}")
+        lines.append(f"时钟偏差: {offset_ms:+.3f} ms")
+        lines.append(f"往返延迟: {rtt_ms:.1f} ms")
+        lines.append(f"状态: 同步成功")
+        return '\n'.join(lines)
+    except NTPError as e:
+        return f"NTP 同步失败: {e}\n建议: 检查网络连接或更换 NTP 服务器"
+
+
+def _gnss_system_info(args):
+    """GNSS 系统信息。"""
+    try:
+        from mbdsdr_ai.new_spacetime import get_gnss_system_info
+    except ImportError:
+        from new_spacetime import get_gnss_system_info
+
+    system = args.get('system', 'all')
+    return get_gnss_system_info(system)
+
+
+def _gnss_parse_rmc(args):
+    """解析 GNSS RMC 语句。"""
+    try:
+        from mbdsdr_ai.new_spacetime import parse_gnss_rmc
+    except ImportError:
+        from new_spacetime import parse_gnss_rmc
+
+    nmea = args.get('nmea', '')
+    result = parse_gnss_rmc(nmea)
+
+    if result is None:
+        return "RMC 解析失败: 无效的 NMEA 语句或格式不正确"
+
+    lines = ["=== GNSS RMC 解析 ==="]
+    lines.append(f"定位状态: {'有效' if result['valid'] else '无效'}")
+    if result['utc_time']:
+        lines.append(f"UTC 时间: {result['utc_time'].strftime('%Y-%m-%d %H:%M:%S')}")
+    if result['latitude'] is not None:
+        lines.append(f"纬度: {result['latitude']:.6f}°")
+    if result['longitude'] is not None:
+        lines.append(f"经度: {result['longitude']:.6f}°")
+    lines.append(f"速度: {result['speed_knots']:.1f} 节 = {result['speed_kmh']:.1f} km/h")
+    lines.append(f"航向: {result['course_deg']:.1f}°")
+    return '\n'.join(lines)
+
+
+def _gis_distance(args):
+    """计算两点距离。"""
+    try:
+        from mbdsdr_ai.new_spacetime import haversine_distance, GeoPoint
+    except ImportError:
+        from new_spacetime import haversine_distance, GeoPoint
+
+    p1 = GeoPoint(latitude=args['lat1'], longitude=args['lon1'])
+    p2 = GeoPoint(latitude=args['lat2'], longitude=args['lon2'])
+    dist_km = haversine_distance(p1, p2)
+
+    lines = ["=== 地理距离计算 ==="]
+    lines.append(f"起点: {p1.to_string()}")
+    lines.append(f"终点: {p2.to_string()}")
+    lines.append(f"大圆距离: {dist_km:.3f} 公里")
+    lines.append(f"大圆距离: {dist_km*1000:.0f} 米")
+    lines.append(f"大圆距离: {dist_km/1.852:.2f} 海里")
+    return '\n'.join(lines)
+
+
+def _gis_bearing(args):
+    """计算方位角。"""
+    try:
+        from mbdsdr_ai.new_spacetime import bearing_between, GeoPoint
+    except ImportError:
+        from new_spacetime import bearing_between, GeoPoint
+
+    p1 = GeoPoint(latitude=args['lat1'], longitude=args['lon1'])
+    p2 = GeoPoint(latitude=args['lat2'], longitude=args['lon2'])
+    bearing = bearing_between(p1, p2)
+
+    # 方位角转方向文字
+    directions = ['北', '东北', '东', '东南', '南', '西南', '西', '西北']
+    idx = int((bearing + 22.5) / 45) % 8
+
+    lines = ["=== 方位角计算 ==="]
+    lines.append(f"起点: {p1.to_string()}")
+    lines.append(f"终点: {p2.to_string()}")
+    lines.append(f"方位角: {bearing:.1f}°（0=北，顺时针）")
+    lines.append(f"方向: {directions[idx]}")
+    return '\n'.join(lines)
+
+
+def _gis_destination(args):
+    """计算终点坐标。"""
+    try:
+        from mbdsdr_ai.new_spacetime import destination_point, GeoPoint
+    except ImportError:
+        from new_spacetime import destination_point, GeoPoint
+
+    start = GeoPoint(latitude=args['latitude'], longitude=args['longitude'])
+    dest = destination_point(start, args['bearing_deg'], args['distance_km'])
+
+    lines = ["=== 终点坐标计算 ==="]
+    lines.append(f"起点: {start.to_string()}")
+    lines.append(f"方位角: {args['bearing_deg']:.1f}°")
+    lines.append(f"距离: {args['distance_km']:.3f} 公里")
+    lines.append(f"终点: {dest.to_string()}")
+    return '\n'.join(lines)
+
+
+# 全局 PNT 融合引擎实例
+_pnt_engine = None
+
+
+def _get_pnt_engine():
+    global _pnt_engine
+    if _pnt_engine is None:
+        try:
+            from mbdsdr_ai.new_spacetime import PNTFusionEngine
+        except ImportError:
+            from new_spacetime import PNTFusionEngine
+        _pnt_engine = PNTFusionEngine()
+    return _pnt_engine
+
+
+def _pnt_get_state(args):
+    """获取 PNT 状态。"""
+    engine = _get_pnt_engine()
+    state = engine.get_state()
+    return state.summary()
+
+
+def _pnt_update_source(args):
+    """更新 PNT 源数据。"""
+    try:
+        from mbdsdr_ai.new_spacetime import PNTSource
+    except ImportError:
+        from new_spacetime import PNTSource
+
+    engine = _get_pnt_engine()
+    source_str = args.get('source', 'gnss').upper()
+
+    # 映射源类型
+    source_map = {
+        'GNSS': PNTSource.GNSS,
+        'LEO_PNT': PNTSource.LEO_PNT,
+        'LEO': PNTSource.LEO_PNT,
+        'PPP_RTK': PNTSource.PPP_RTK,
+        'PPP': PNTSource.PPP_RTK,
+        'RTK': PNTSource.PPP_RTK,
+        'IMU': PNTSource.IMU,
+        'WIFI': PNTSource.WIFI,
+        'BLUETOOTH': PNTSource.BLUETOOTH,
+        'BT': PNTSource.BLUETOOTH,
+        'UWB': PNTSource.UWB,
+        'CELLULAR': PNTSource.CELLULAR,
+        'NTP': PNTSource.NTP,
+        'VISUAL': PNTSource.VISUAL,
+    }
+    source = source_map.get(source_str, PNTSource.GNSS)
+
+    data = {
+        'latitude': args['latitude'],
+        'longitude': args['longitude'],
+        'altitude_m': args.get('altitude_m', 0.0),
+        'accuracy_m': args.get('accuracy_m', 10.0),
+        'valid': args.get('valid', True),
+    }
+    if 'satellites' in args:
+        data['satellites'] = args['satellites']
+
+    engine.update_source(source, data)
+    state = engine.get_state()
+
+    lines = [f"=== PNT 源更新: {source.value} ==="]
+    lines.append(f"输入: 纬度 {args['latitude']:.6f}°, 经度 {args['longitude']:.6f}°"
+                 f"{f', 精度 ±{data['accuracy_m']:.1f}m' if data['accuracy_m'] else ''}")
+    lines.append("")
+    lines.append(state.summary())
+    return '\n'.join(lines)
+
+
+def _satellite_predict_pass(args):
+    """预测卫星过境。"""
+    try:
+        from mbdsdr_ai.new_spacetime import predict_satellite_pass
+    except ImportError:
+        from new_spacetime import predict_satellite_pass
+
+    name = args['satellite_name']
+    lat = args['observer_lat']
+    lon = args['observer_lon']
+    alt = args.get('observer_alt', 0.0)
+    hours = args.get('hours_ahead', 24.0)
+    min_elev = args.get('min_elevation', 5.0)
+
+    p = predict_satellite_pass(name, lat, lon, alt, hours, min_elev)
+
+    if p is None:
+        return (f"卫星 {name} 在未来 {hours:.0f} 小时内没有仰角超过 {min_elev:.0f}° 的过境\n"
+                f"建议: 降低最小仰角或延长预测时间")
+
+    lines = [p.summary()]
+    lines.append("")
+    lines.append("轨迹点（方位, 仰角）:")
+    # 每隔10个点显示一个
+    for i, (az, el) in enumerate(p.trajectory):
+        if i % max(1, len(p.trajectory)//10) == 0:
+            lines.append(f"  {az:.0f}°, {el:.1f}°")
+    return '\n'.join(lines)
+
+
+def _satellite_predict_all(args):
+    """预测所有卫星过境。"""
+    try:
+        from mbdsdr_ai.new_spacetime import predict_all_passes
+    except ImportError:
+        from new_spacetime import predict_all_passes
+
+    lat = args['observer_lat']
+    lon = args['observer_lon']
+    alt = args.get('observer_alt', 0.0)
+    hours = args.get('hours_ahead', 24.0)
+    min_elev = args.get('min_elevation', 5.0)
+
+    passes = predict_all_passes(lat, lon, alt, hours, min_elev)
+
+    if not passes:
+        return f"未来 {hours:.0f} 小时内没有卫星过境（仰角 > {min_elev:.0f}°）"
+
+    lines = [f"=== 未来 {hours:.0f} 小时卫星过境预测（共 {len(passes)} 次） ==="]
+    lines.append("")
+    for i, p in enumerate(passes, 1):
+        rise_str = p.rise_time.strftime('%H:%M') if p.rise_time else '?'
+        set_str = p.set_time.strftime('%H:%M') if p.set_time else '?'
+        dur_str = f"{p.duration_sec/60:.0f}分" if p.duration_sec > 0 else '?'
+        freq_str = f"{p.frequency_hz/1e6:.1f}MHz" if p.frequency_hz > 0 else ''
+        lines.append(f"{i}. {p.name}: {rise_str}-{set_str} ({dur_str}), "
+                     f"最大仰角 {p.max_elevation:.0f}°, 方位 {p.max_azimuth:.0f}° {freq_str}")
+    return '\n'.join(lines)
+
+
+def _sky_view_visible(args):
+    """获取可见卫星列表。"""
+    try:
+        from mbdsdr_ai.new_spacetime import compute_visible_satellite_count
+    except ImportError:
+        from new_spacetime import compute_visible_satellite_count
+
+    lat = args['observer_lat']
+    lon = args['observer_lon']
+    min_elev = args.get('min_elevation', 5.0)
+
+    result = compute_visible_satellite_count(lat, lon, min_elev)
+
+    lines = [f"=== 天空图可见卫星（仰角 > {min_elev:.0f}°）==="]
+    lines.append(f"可见数量: {result['total_visible']} 颗")
+    lines.append("")
+    for sat in result['satellites']:
+        lines.append(f"  {sat['name']}: 仰角 {sat['elevation_deg']:.1f}°, "
+                     f"方位 {sat['azimuth_deg']:.0f}°, "
+                     f"距离 {sat['distance_km']:.0f}km, "
+                     f"多普勒 {sat['doppler_hz']:+.0f}Hz")
+    return '\n'.join(lines)
