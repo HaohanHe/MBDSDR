@@ -1150,6 +1150,123 @@ def register_sdr_tools(agent):
         category="hal",
     )
 
+    # ========================================================================
+    # 电台CAT控制与Morse工具
+    # ========================================================================
+
+    agent.tool_registry.register(
+        name="radio_list_ports",
+        description="列出所有可用的串口设备（USB转串口/主板串口），用于电台CAT控制。显示设备名和描述。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_radio_list_ports(args)),
+        category="radio_control",
+    )
+
+    agent.tool_registry.register(
+        name="radio_connect",
+        description="连接电台（CAT控制）。指定串口和波特率，支持ICOM CI-V/Yaesu/Kenwood等常见协议。连接后可设置频率、模式、PTT、发送CW。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "port": {"type": "string", "description": "串口设备，如 /dev/ttyUSB0 或 COM3"},
+                "baudrate": {"type": "number", "description": "波特率（默认38400）", "default": 38400},
+                "model": {"type": "string", "description": "电台型号（可选，自动检测）"},
+            },
+            "required": ["port"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_radio_connect(args)),
+        category="radio_control",
+    )
+
+    agent.tool_registry.register(
+        name="radio_set_frequency",
+        description="设置电台接收/发射频率。指定频率（Hz），电台自动切换到对应VFO。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "frequency_hz": {"type": "number", "description": "频率（Hz），如 14074000 = 14.074MHz"},
+            },
+            "required": ["frequency_hz"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_radio_set_frequency(args)),
+        category="radio_control",
+    )
+
+    agent.tool_registry.register(
+        name="radio_set_mode",
+        description="设置电台模式（USB/LSB/CW/AM/FM/DIG）。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "mode": {"type": "string", "description": "模式：USB/LSB/CW/AM/FM/DIG"},
+            },
+            "required": ["mode"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_radio_set_mode(args)),
+        category="radio_control",
+    )
+
+    agent.tool_registry.register(
+        name="radio_ptt",
+        description="控制电台PTT（发射/接收切换）。on=发射，off=接收。用于发射前的切换。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "state": {"type": "string", "description": "on=发射，off=接收"},
+            },
+            "required": ["state"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_radio_ptt(args)),
+        category="radio_control",
+    )
+
+    agent.tool_registry.register(
+        name="radio_send_cw",
+        description="通过电台内置键控器发送CW文本。输入要发送的文本和速度（WPM），电台自动编码为Morse并发射。需先PTT on。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "要发送的文本，如 'CQ CQ DE BI4MIB'"},
+                "wpm": {"type": "number", "description": "速度（词/分钟），默认20", "default": 20},
+            },
+            "required": ["text"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_radio_send_cw(args)),
+        category="radio_control",
+    )
+
+    agent.tool_registry.register(
+        name="morse_encode",
+        description="文本转Morse码。输入文本，输出国际Morse码字符串（.和-，字母间空格，词间/）。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "要编码的文本"},
+            },
+            "required": ["text"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_morse_encode(args)),
+        category="radio_control",
+    )
+
+    agent.tool_registry.register(
+        name="morse_decode",
+        description="Morse码转文本。输入Morse码字符串（.和-），输出解码文本。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "morse": {"type": "string", "description": "Morse码字符串，如 '.- -... -.-.'"},
+            },
+            "required": ["morse"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_morse_decode(args)),
+        category="radio_control",
+    )
+
 
 # ═══════════════════════════════════════════════════════
 # 工具实现函数
@@ -2948,5 +3065,157 @@ def _instrument_query(args):
     lines = ["=== SCPI 查询 ==="]
     lines.append(f"命令: {cmd}")
     lines.append(f"响应: {result}")
+
+    return '\n'.join(lines)
+
+
+# ========================================================================
+# 电台控制与 Morse 工具实现
+# ========================================================================
+
+# 全局电台实例（单例）
+_radio_instance = None
+
+def _get_radio():
+    global _radio_instance
+    if _radio_instance is None:
+        from mbdsdr_ai.radio_control import RadioCAT
+        _radio_instance = RadioCAT()
+    return _radio_instance
+
+
+def _radio_list_ports(args):
+    """列出可用串口。"""
+    radio = _get_radio()
+    ports = radio.list_ports()
+
+    lines = ["=== 可用串口设备 ==="]
+    lines.append("")
+    for p in ports:
+        lines.append(f"  {p}")
+    lines.append("")
+    lines.append("使用 radio_connect 工具连接电台，指定 port 参数。")
+
+    return '\n'.join(lines)
+
+
+def _radio_connect(args):
+    """连接电台。"""
+    from mbdsdr_ai.radio_control import RadioCAT
+
+    port = args['port']
+    baudrate = args.get('baudrate', 38400)
+    model = args.get('model', 'auto')
+
+    radio = RadioCAT(port=port, baudrate=baudrate, model=model)
+    ok = radio.connect()
+
+    global _radio_instance
+    _radio_instance = radio
+
+    lines = ["=== 电台连接 ==="]
+    lines.append(f"串口: {port}")
+    lines.append(f"波特率: {baudrate}")
+    lines.append(f"型号: {model}")
+    lines.append(f"状态: {'已连接' if ok else '失败'}")
+    lines.append("")
+    lines.append("支持操作:")
+    lines.append("  radio_set_frequency - 设置频率")
+    lines.append("  radio_set_mode - 设置模式 (USB/LSB/CW/AM/FM)")
+    lines.append("  radio_ptt - PTT控制 (on/off)")
+    lines.append("  radio_send_cw - 发送CW文本")
+
+    return '\n'.join(lines)
+
+
+def _radio_set_frequency(args):
+    """设置电台频率。"""
+    radio = _get_radio()
+    freq = int(args['frequency_hz'])
+    radio.set_frequency(freq)
+
+    lines = ["=== 频率设置 ==="]
+    lines.append(f"频率: {freq} Hz ({freq/1e6:.4f} MHz)")
+    lines.append(f"状态: 已设置")
+
+    return '\n'.join(lines)
+
+
+def _radio_set_mode(args):
+    """设置电台模式。"""
+    radio = _get_radio()
+    mode = args['mode'].upper()
+    radio.set_mode(mode)
+
+    lines = ["=== 模式设置 ==="]
+    lines.append(f"模式: {mode}")
+    lines.append(f"状态: 已设置")
+
+    return '\n'.join(lines)
+
+
+def _radio_ptt(args):
+    """PTT控制。"""
+    radio = _get_radio()
+    state = args['state'].lower()
+    on = state in ("on", "true", "1", "发射")
+    radio.set_ptt(on)
+
+    lines = ["=== PTT 控制 ==="]
+    lines.append(f"状态: {'发射 (TX)' if on else '接收 (RX)'}")
+    lines.append("")
+    if on:
+        lines.append("注意: 发射前请确认频率和模式正确，遵守当地无线电法规。")
+
+    return '\n'.join(lines)
+
+
+def _radio_send_cw(args):
+    """发送CW文本。"""
+    radio = _get_radio()
+    text = args['text']
+    wpm = args.get('wpm', 20)
+
+    # 先编码
+    from mbdsdr_ai.radio_control import morse_encode
+    morse = morse_encode(text)
+
+    ok = radio.send_cw_text(text, wpm)
+
+    lines = ["=== CW 发送 ==="]
+    lines.append(f"文本: {text}")
+    lines.append(f"速度: {wpm} WPM")
+    lines.append(f"Morse: {morse}")
+    lines.append(f"状态: {'已发送' if ok else '失败（需先PTT on）'}")
+    lines.append("")
+    lines.append("提示: 先调用 radio_ptt on 切换到发射，再调用本工具。")
+
+    return '\n'.join(lines)
+
+
+def _morse_encode(args):
+    """文本转Morse。"""
+    from mbdsdr_ai.radio_control import morse_encode
+
+    text = args['text']
+    result = morse_encode(text)
+
+    lines = ["=== Morse 编码 ==="]
+    lines.append(f"文本: {text}")
+    lines.append(f"Morse: {result}")
+
+    return '\n'.join(lines)
+
+
+def _morse_decode(args):
+    """Morse转文本。"""
+    from mbdsdr_ai.radio_control import morse_decode
+
+    morse = args['morse']
+    result = morse_decode(morse)
+
+    lines = ["=== Morse 解码 ==="]
+    lines.append(f"Morse: {morse}")
+    lines.append(f"文本: {result}")
 
     return '\n'.join(lines)
