@@ -3,6 +3,11 @@
 # 桌面图形界面(PySide6)依赖较重，单独放在 desktop/requirements.txt
 
 numpy>=1.24.0          # DSP、频谱处理
+scipy>=1.10.0           # 高级信号处理(滤波/重采样/频谱)、IQ校正
 requests>=2.28.0       # LLM / 多模态 API 调用
 websocket-client>=1.6.0   # 连接 ai-sdr Mini 硬件（mbdsdr_mcp_client.py）
 websockets>=12.0          # 设备模拟器（mbdsdr_sim_server.py）
+sgp4>=2.22.0            # 卫星轨道计算(SGP4/SDP4)
+skyfield>=1.45.0        # 高精度天文计算(卫星轨道/多普勒/过境预测)
+pysstv>=0.5.0           # SSTV 慢扫描电视编码(解码用内置 mbdsdr_ai/sstv_decoder.py)
+Pillow>=9.0.0           # 图像处理(NOAA APT/SSTV 解码输出 PNG)

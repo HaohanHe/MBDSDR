@@ -905,8 +905,30 @@ def _decode_noaa_apt(args):
     return output
 
 def _decode_sstv(args):
-    """SSTV 慢扫描电视解码（真实实现）。"""
+    """SSTV 慢扫描电视解码（真实实现，优先使用内置 sstv_decoder）。"""
     input_path = args["input_path"]
+    output_path = args.get("output_path")
+    mode = args.get("mode", "auto")
+
+    # 优先使用内置 sstv_decoder（支持 Martin M1/Scottie S1/Robot 36）
+    try:
+        from .sstv_decoder import decode_sstv as decode_sstv_new
+        result = decode_sstv_new(input_path, output_path=output_path, mode=mode)
+        if "error" not in result:
+            output = f"=== SSTV 解码完成 ===\n"
+            output += f"输入: {input_path}\n"
+            output += f"模式: {result.get('mode', 'auto')}\n"
+            output += f"尺寸: {result.get('width', 320)}x{result.get('height', 256)} 像素\n"
+            output += f"解码行数: {result.get('rows_decoded', 0)}\n"
+            if "output_path" in result:
+                output += f"输出: {result['output_path']}\n"
+            if "note" in result:
+                output += f"说明: {result['note']}\n"
+            return output
+    except Exception:
+        pass  # fallback 到旧实现
+
+    # fallback 到旧实现
     result = decode_sstv(input_path)
     if "error" in result:
         return f"解码失败: {result['error']}"
