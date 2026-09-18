@@ -627,6 +627,77 @@ def register_sdr_tools(agent):
         category="sdr_ai",
     )
 
+    # ========================================================================
+    # OpenAPI 集成工具（外部API调用）
+    # ========================================================================
+
+    agent.tool_registry.register(
+        name="openapi_list_apis",
+        description="列出所有可用的外部API（ISS位置/天气/飞机等）。用于了解MBDSDR能调用哪些外部数据服务。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_openapi_list_apis(args)),
+        category="sdr_ai",
+    )
+
+    agent.tool_registry.register(
+        name="openapi_iss_position",
+        description="获取国际空间站（ISS）当前实时位置（经纬度）。用于业余卫星接收、AR指向辅助。免费API无需key。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_openapi_iss_position(args)),
+        category="sdr_ai",
+    )
+
+    agent.tool_registry.register(
+        name="openapi_people_in_space",
+        description="获取当前太空人数和航天员姓名。用于科普、航天爱好者参考。免费API无需key。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_openapi_people_in_space(args)),
+        category="sdr_ai",
+    )
+
+    agent.tool_registry.register(
+        name="openapi_weather",
+        description="获取指定位置天气预报（温度/风速/湿度）。用于天线架设参考、大气衰减估算。免费API无需key。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "latitude": {"type": "number", "description": "纬度"},
+                "longitude": {"type": "number", "description": "经度"},
+            },
+            "required": ["latitude", "longitude"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_openapi_weather(args)),
+        category="sdr_ai",
+    )
+
+    agent.tool_registry.register(
+        name="openapi_aircraft_nearby",
+        description="获取附近飞机位置（ADS-B模式S）。用于ADS-B接收验证、航空频段监测。免费API无需key。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "latitude": {"type": "number", "description": "观测点纬度"},
+                "longitude": {"type": "number", "description": "观测点经度"},
+                "radius_km": {"type": "number", "description": "搜索半径（km），默认50", "default": 50},
+            },
+            "required": ["latitude", "longitude"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_openapi_aircraft_nearby(args)),
+        category="sdr_ai",
+    )
+
     # ═══════════════════════════════════════════════════
     # 13. IQ 前端校正（1个）— 白皮书第五章 5.2
     # ═══════════════════════════════════════════════════
@@ -3912,5 +3983,125 @@ def _signal_detect_interference(args):
         lines.append(f"    功率: {intr['power_db']:.1f} dB")
         lines.append(f"    置信度: {intr['confidence']*100:.0f}%")
         lines.append("")
+
+    return '\n'.join(lines)
+
+
+# ========================================================================
+# OpenAPI 集成工具实现
+# ========================================================================
+
+def _openapi_list_apis(args):
+    """列出所有可用外部API。"""
+    from mbdsdr_ai.openapi_integration import list_available_apis
+
+    apis = list_available_apis()
+
+    lines = ["=== 可用外部API列表 ==="]
+    lines.append("")
+    lines.append(f"共 {len(apis)} 个免费API：")
+    lines.append("")
+
+    for api in apis:
+        lines.append(f"  {api['name']:15s}  {api['description']}")
+        lines.append(f"    key: {api['key']}")
+        if not api['requires_key']:
+            lines.append(f"    （免费，无需key）")
+        lines.append("")
+
+    return '\n'.join(lines)
+
+
+def _openapi_iss_position(args):
+    """获取ISS位置。"""
+    from mbdsdr_ai.openapi_integration import get_iss_position
+
+    result = get_iss_position()
+
+    lines = ["=== 国际空间站（ISS）位置 ==="]
+    lines.append("")
+    if result.get('success'):
+        lines.append(f"纬度: {result['latitude']:.4f}°")
+        lines.append(f"经度: {result['longitude']:.4f}°")
+        lines.append(f"时间戳: {result['timestamp']}")
+        lines.append("")
+        lines.append("提示：用于业余卫星接收指向参考")
+    else:
+        lines.append(f"错误: {result.get('error', '未知错误')}")
+
+    return '\n'.join(lines)
+
+
+def _openapi_people_in_space(args):
+    """获取太空人数。"""
+    from mbdsdr_ai.openapi_integration import get_people_in_space
+
+    result = get_people_in_space()
+
+    lines = ["=== 当前太空人员 ==="]
+    lines.append("")
+    if result.get('success'):
+        lines.append(f"人数: {result['number']}")
+        lines.append("")
+        lines.append("航天员名单：")
+        for i, name in enumerate(result['people'], 1):
+            lines.append(f"  {i}. {name}")
+    else:
+        lines.append(f"错误: {result.get('error', '未知错误')}")
+
+    return '\n'.join(lines)
+
+
+def _openapi_weather(args):
+    """获取天气预报。"""
+    from mbdsdr_ai.openapi_integration import get_weather
+
+    lat = args['latitude']
+    lon = args['longitude']
+
+    result = get_weather(lat, lon)
+
+    lines = ["=== 天气预报 ==="]
+    lines.append("")
+    lines.append(f"位置: {lat:.4f}°, {lon:.4f}°")
+    lines.append("")
+    if result.get('success'):
+        lines.append(f"温度: {result['temperature_c']}°C")
+        lines.append(f"风速: {result['wind_speed_kmh']} km/h")
+        lines.append(f"湿度: {result['humidity_pct']}%")
+        lines.append("")
+        lines.append("提示：风速影响天线指向稳定性")
+        lines.append("      湿度影响大气衰减")
+    else:
+        lines.append(f"错误: {result.get('error', '未知错误')}")
+
+    return '\n'.join(lines)
+
+
+def _openapi_aircraft_nearby(args):
+    """获取附近飞机。"""
+    from mbdsdr_ai.openapi_integration import get_aircraft_nearby
+
+    lat = args['latitude']
+    lon = args['longitude']
+    radius = args.get('radius_km', 50)
+
+    result = get_aircraft_nearby(lat, lon, radius)
+
+    lines = ["=== 附近飞机（ADS-B） ==="]
+    lines.append("")
+    lines.append(f"位置: {lat:.4f}°, {lon:.4f}°")
+    lines.append(f"半径: {radius} km")
+    lines.append("")
+    if result.get('success'):
+        lines.append(f"飞机数量: {result['count']}")
+        lines.append("")
+        for i, ac in enumerate(result['aircraft'][:5], 1):
+            lines.append(f"  {i}. {ac['callsign']:10s}  高度: {ac['altitude_m']}m  速度: {ac['velocity_ms']:.0f}m/s")
+        lines.append("")
+        lines.append("提示：用于ADS-B接收验证")
+        lines.append("      1090MHz模式S接收")
+    else:
+        lines.append(f"错误: {result.get('error', '未知错误')}")
 
     return '\n'.join(lines)
