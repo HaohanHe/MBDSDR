@@ -70,11 +70,10 @@ class CallStats:
 # 内置模型列表（API 不可用时的 fallback）
 BUILTIN_MODELS = [
     ModelInfo(id="Qwen/Qwen3.6-35B-A3B", owned_by="Qwen", description="通义千问 3.6 35B (MoE A3B 激活)", context_window=131072, is_weak=False),
-    ModelInfo(id="Qwen/Qwen2.5-7B-Instruct", owned_by="Qwen", description="通义千问 2.5 7B 指令版", context_window=32768, is_weak=True),
-    ModelInfo(id="Qwen/Qwen2.5-1.5B-Instruct", owned_by="Qwen", description="通义千问 2.5 1.5B 轻量版", context_window=32768, is_weak=True),
+    ModelInfo(id="Qwen/Qwen3.5-4B", owned_by="Qwen", description="通义千问 3.5 4B 轻量版（弱模型测试用）", context_window=32768, is_weak=True),
+    ModelInfo(id="Qwen/Qwen3.5-9B", owned_by="Qwen", description="通义千问 3.5 9B", context_window=32768, is_weak=True),
     ModelInfo(id="deepseek-ai/DeepSeek-V3", owned_by="DeepSeek", description="深度求索 V3", context_window=131072, is_weak=False),
     ModelInfo(id="deepseek-ai/DeepSeek-R1", owned_by="DeepSeek", description="深度求索 R1 推理模型", context_window=131072, is_weak=False),
-    ModelInfo(id="meta-llama/Meta-Llama-3.1-8B-Instruct", owned_by="Meta", description="Llama 3.1 8B 指令版", context_window=131072, is_weak=True),
 ]
 
 
