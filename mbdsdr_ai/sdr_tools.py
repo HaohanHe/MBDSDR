@@ -1066,6 +1066,90 @@ def register_sdr_tools(agent):
         category="gnss_monitor",
     )
 
+    # ========================================================================
+    # 硬件抽象层（HAL）工具
+    # ========================================================================
+
+    agent.tool_registry.register(
+        name="sdr_list_hardware",
+        description="列出所有可用的 SDR 硬件和仪器。支持通过 SoapySDR 接入 RTL-SDR/HackRF/PlutoSDR/BladeRF/LimeSDR/USRP 等设备，以及通过 SCPI/VISA 接入示波器/信号发生器/频谱仪。显示设备类型、频率范围、RX/TX能力、是否可用。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_sdr_list_hardware(args)),
+        category="hal",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_connect_hardware",
+        description="连接指定的 SDR 硬件。输入设备名称或 SoapySDR device string（如 'driver=hackrf'、'driver=rtlsdr'、'driver=plutosdr'、'mock'）。自动检测设备能力（RX/TX/频率范围），失败时降级到模拟后端。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "device": {"type": "string", "description": "设备名称或SoapySDR device string，如 'driver=hackrf'、'mock'"},
+            },
+            "required": ["device"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_sdr_connect_hardware(args)),
+        category="hal",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_transmit_cw",
+        description="发射连续波（CW）信号。仅支持TX-capable设备（HackRF/PlutoSDR/BladeRF/LimeSDR/USRP）。指定频率、幅度和持续时间。用于设备测试、干扰源定位、信号校准。注意：需遵守当地无线电法规，未经许可不得在禁发频段发射。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "frequency_hz": {"type": "number", "description": "发射中心频率（Hz）"},
+                "amplitude": {"type": "number", "description": "幅度（0.0-1.0）", "default": 0.1},
+                "duration_sec": {"type": "number", "description": "持续时间（秒）", "default": 1.0},
+            },
+            "required": ["frequency_hz"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_sdr_transmit_cw(args)),
+        category="hal",
+    )
+
+    agent.tool_registry.register(
+        name="platform_info",
+        description="获取当前运行平台信息。检测是否为嵌入式设备（树莓派/Jetson/Windows on ARM）、CPU架构（ARM/x86）、GPU可用性。用于决定是否启用GPU加速、降级OpenGL等。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_platform_info(args)),
+        category="hal",
+    )
+
+    agent.tool_registry.register(
+        name="instrument_list",
+        description="列出所有可用的仪器设备（示波器/信号发生器/频谱仪/电源）。通过 VISA/SCPI 协议扫描。支持 Keysight/Tektronix/RIGOL/Siglent/Yokogawa 等厂商。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_instrument_list(args)),
+        category="hal",
+    )
+
+    agent.tool_registry.register(
+        name="instrument_query",
+        description="向已连接的仪器发送 SCPI 查询命令。如 '*IDN?'（识别）、':MEAS:VOLT?'（测量电压）、':WAV:DATA?'（读取波形）。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "scpi_command": {"type": "string", "description": "SCPI查询命令，如 '*IDN?'、':MEAS:VOLT? CHAN1'"},
+            },
+            "required": ["scpi_command"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_instrument_query(args)),
+        category="hal",
+    )
+
 
 # ═══════════════════════════════════════════════════════
 # 工具实现函数
@@ -2670,5 +2754,199 @@ def _gnss_direction_find(args):
     lines.append(f"置信度: {result['confidence']}")
     lines.append(f"说明: {result['note']}")
     lines.append(f"验证: {result['symmetric_check']}")
+
+    return '\n'.join(lines)
+
+
+# ========================================================================
+# HAL 工具实现
+# ========================================================================
+
+def _sdr_list_hardware(args):
+    """列出所有可用硬件。"""
+    try:
+        from mbdsdr_ai.hal import HardwareManager
+    except ImportError:
+        from hal import HardwareManager
+
+    mgr = HardwareManager()
+    devices = mgr.list_all_devices()
+
+    lines = ["=== MBDSDR 硬件清单 ==="]
+    lines.append("")
+
+    sdr_devices = [d for d in devices if d.get("type") == "sdr"]
+    inst_devices = [d for d in devices if d.get("type") == "instrument"]
+
+    lines.append(f"--- SDR 设备 ({len(sdr_devices)}个) ---")
+    for d in sdr_devices:
+        status = "可用" if d.get("available") else "未连接"
+        tx = d.get("tx", "RX only")
+        lines.append(f"  [{status}] {d['name']}")
+        lines.append(f"         驱动: {d.get('driver','?')}, 范围: {d.get('rx_range','?')}, {tx}")
+        if d.get("description"):
+            lines.append(f"         {d['description']}")
+
+    if inst_devices:
+        lines.append("")
+        lines.append(f"--- 仪器 ({len(inst_devices)}个) ---")
+        for d in inst_devices:
+            status = "可用" if d.get("available") else "未连接"
+            lines.append(f"  [{status}] {d['name']} ({d.get('instrument_type','?')})")
+            lines.append(f"         地址: {d.get('address','?')}")
+
+    # 平台信息
+    plat = mgr.get_platform_info()
+    lines.append("")
+    lines.append("--- 当前平台 ---")
+    lines.append(f"  系统: {plat.get('platform','?')}")
+    lines.append(f"  架构: {plat.get('machine','?')}")
+    lines.append(f"  嵌入式: {'是' if plat.get('is_embedded') else '否'}")
+    lines.append(f"  平台: {plat.get('platform_name','?')}")
+
+    return '\n'.join(lines)
+
+
+def _sdr_connect_hardware(args):
+    """连接 SDR 硬件。"""
+    try:
+        from mbdsdr_ai.hal import HardwareManager
+    except ImportError:
+        from hal import HardwareManager
+
+    device = args['device']
+    mgr = HardwareManager()
+    result = mgr.connect_sdr(device)
+
+    lines = [f"=== 连接硬件: {device} ==="]
+    if result.get("success"):
+        lines.append(f"状态: 成功")
+        lines.append(f"设备: {result.get('device', '?')}")
+        lines.append(f"TX能力: {'支持' if result.get('tx') else '不支持'}")
+    else:
+        lines.append(f"状态: 失败")
+        lines.append(f"原因: {result.get('error', '未知')}")
+
+    return '\n'.join(lines)
+
+
+def _sdr_transmit_cw(args):
+    """发射CW信号。"""
+    try:
+        from mbdsdr_ai.hal import HardwareManager
+    except ImportError:
+        from hal import HardwareManager
+
+    freq = args['frequency_hz']
+    amp = args.get('amplitude', 0.1)
+    dur = args.get('duration_sec', 1.0)
+
+    mgr = HardwareManager()
+    backend = mgr.get_active_backend()
+
+    if not backend:
+        return "错误: 未连接任何SDR设备，请先调用 sdr_connect_hardware"
+
+    if not backend.supports_tx():
+        return f"错误: 当前设备不支持TX发射。仅 HackRF/PlutoSDR/BladeRF/LimeSDR/USRP 等TX-capable设备支持。"
+
+    ok = mgr.transmit_cw(freq, amp, dur)
+
+    lines = ["=== CW 发射 ==="]
+    lines.append(f"频率: {freq/1e6:.3f} MHz")
+    lines.append(f"幅度: {amp:.2f}")
+    lines.append(f"持续时间: {dur:.1f} 秒")
+    lines.append(f"状态: {'发射成功' if ok else '发射失败'}")
+    lines.append("")
+    lines.append("注意: 发射需遵守当地无线电法规，未经许可不得在禁发频段发射。")
+
+    return '\n'.join(lines)
+
+
+def _platform_info(args):
+    """获取平台信息。"""
+    try:
+        from mbdsdr_ai.hal import detect_embedded_platform
+    except ImportError:
+        from hal import detect_embedded_platform
+
+    info = detect_embedded_platform()
+
+    lines = ["=== 平台信息 ==="]
+    lines.append(f"操作系统: {info.get('platform','?')}")
+    lines.append(f"CPU架构: {info.get('machine','?')}")
+    lines.append(f"ARM架构: {'是' if info.get('is_arm') else '否'}")
+    lines.append(f"嵌入式设备: {'是' if info.get('is_embedded') else '否'}")
+    lines.append(f"平台类型: {info.get('platform_name','?')}")
+    lines.append(f"GPU可用: {'是' if info.get('gpu_available') else '否'}")
+
+    # 建议
+    lines.append("")
+    lines.append("--- 优化建议 ---")
+    if info.get("is_embedded"):
+        lines.append("- 嵌入式平台: 建议使用QPainter软件渲染降级，禁用OpenGL")
+        lines.append("- 树莓派: 建议使用硬件编解码，限制采样率≤2MHz")
+        lines.append("- Jetson: 可启用GPU加速频谱处理")
+    else:
+        lines.append("- 桌面平台: 可启用OpenGL硬件加速，采样率可到20MHz+")
+
+    if info.get("platform_name") == "windows_on_arm":
+        lines.append("- Windows ARM: 必须使用QPainter软件渲染降级（OpenGL可能不可用）")
+
+    return '\n'.join(lines)
+
+
+def _instrument_list(args):
+    """列出仪器。"""
+    try:
+        from mbdsdr_ai.hal import InstrumentBackend
+    except ImportError:
+        from hal import InstrumentBackend
+
+    inst = InstrumentBackend()
+    instruments = inst.list_instruments()
+
+    lines = ["=== 仪器清单（SCPI/VISA）==="]
+    lines.append("")
+
+    if not instruments:
+        lines.append("未发现仪器。确保已安装 pyvisa-py，且仪器通过USB/LAN连接。")
+        lines.append("支持: Keysight/Tektronix/RIGOL/Siglent/Yokogawa等")
+        return '\n'.join(lines)
+
+    for i, d in enumerate(instruments):
+        status = "可用" if d.get("available", True) else "未连接"
+        lines.append(f"  [{status}] {d.get('vendor','?')} {d.get('model','?')}")
+        lines.append(f"         类型: {d.get('instrument_type','?')}")
+        lines.append(f"         地址: {d.get('address','?')}")
+
+    return '\n'.join(lines)
+
+
+def _instrument_query(args):
+    """SCPI查询。"""
+    try:
+        from mbdsdr_ai.hal import InstrumentBackend
+    except ImportError:
+        from hal import InstrumentBackend
+
+    cmd = args['scpi_command']
+    inst = InstrumentBackend()
+
+    # 尝试连接（如果已连接直接查询）
+    if not inst._resource:
+        # 自动扫描第一个可用仪器
+        instruments = inst.list_instruments()
+        available = [d for d in instruments if d.get("available", True)]
+        if available:
+            inst.connect(available[0].get("address", ""))
+        else:
+            return "错误: 未发现可用仪器"
+
+    result = inst.query(cmd)
+
+    lines = ["=== SCPI 查询 ==="]
+    lines.append(f"命令: {cmd}")
+    lines.append(f"响应: {result}")
 
     return '\n'.join(lines)
