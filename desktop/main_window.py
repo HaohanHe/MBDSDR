@@ -634,7 +634,7 @@ class MainWindow(QMainWindow):
             self._sky_update_timer.start(5000)  # 5秒更新一次
 
     def _update_sky_satellites(self):
-        """用 sgp4 实时计算卫星位置，更新天空图。"""
+        """用 sgp4 实时计算卫星位置，更新天空图（含新时空授时）。"""
         try:
             from mbdsdr_ai.decoders import BUILTIN_TLE, SATELLITE_FREQUENCIES, compute_satellite_position
         except ImportError:
@@ -665,6 +665,32 @@ class MainWindow(QMainWindow):
         if satellites:
             self.sky_view.set_objects(satellites)
             self.statusBar().showMessage(f"天空图已更新: {len(satellites)} 颗可见卫星", 3000)
+
+        # 新时空：更新授时信息（每30秒NTP同步一次，其余用系统时间）
+        self._update_time_info()
+
+    def _update_time_info(self):
+        """更新新时空授时信息到天空图。"""
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_info
+            # 每30次更新（约150秒）做一次NTP同步，其余用系统时间
+            if not hasattr(self, '_ntp_sync_counter'):
+                self._ntp_sync_counter = 0
+            self._ntp_sync_counter += 1
+            do_ntp = (self._ntp_sync_counter % 30 == 1)
+
+            info = get_time_info(prefer_ntp=do_ntp)
+            time_dict = {
+                "utc_time": info.utc_time,
+                "gps_week": int(info.gps_time // 604800) if info.gps_time else 0,
+                "gps_tow": info.gps_time % 604800 if info.gps_time else 0,
+                "ntp_server": info.ntp_server,
+                "ntp_status": info.source,
+                "clock_offset_ms": info.clock_offset_ms,
+            }
+            self.sky_view.set_time_info(time_dict)
+        except Exception:
+            pass
 
     def _on_sky_object_clicked(self, obj):
         """天空对象点击处理：显示详情，可选跟踪，并调用 MCP 工具调谐频率。"""

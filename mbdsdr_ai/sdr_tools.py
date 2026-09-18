@@ -1016,6 +1016,56 @@ def register_sdr_tools(agent):
         category="new_spacetime",
     )
 
+    # ========================================================================
+    # GNSS 干扰监测工具（新时空扩展）
+    # ========================================================================
+
+    agent.tool_registry.register(
+        name="gnss_monitor_band",
+        description="监测单个 GNSS 频带（L1/L2/L5/B1/B2/B3）的干扰情况。分析功率谱、噪声基底、干扰噪声比（INR），AI自动分类干扰类型（连续波/窄带/宽带）。用于 GNSS 信号质量评估和干扰检测。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "band_name": {"type": "string", "description": "频带名称：L1/L2/L5/B1/B2/B3"},
+                "center_freq_hz": {"type": "number", "description": "中心频率（Hz）"},
+                "duration_sec": {"type": "number", "description": "采样时长（秒）", "default": 1.0},
+                "sample_rate_hz": {"type": "number", "description": "采样率（Hz）", "default": 2.048e6},
+            },
+            "required": ["band_name", "center_freq_hz"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_gnss_monitor_band(args)),
+        category="gnss_monitor",
+    )
+
+    agent.tool_registry.register(
+        name="gnss_monitor_all",
+        description="监测所有 GNSS 频带（L1/L2/L5/B1/B2/B3），生成干扰告警报告。自动分类干扰类型并给出处理建议。用于 GNSS 电磁环境普查。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "duration_sec": {"type": "number", "description": "每个频带采样时长（秒）", "default": 0.5},
+                "inr_warning_db": {"type": "number", "description": "告警门限（dB）", "default": 10.0},
+            },
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_gnss_monitor_all(args)),
+        category="gnss_monitor",
+    )
+
+    agent.tool_registry.register(
+        name="gnss_direction_find",
+        description="基于八木天线 RSSI-方位角扫描数据，估算干扰源方向。输入各方位角的RSSI值，用质心法估算干扰源方位。用于干扰源定位（GP全向天线检测→八木测向→云台跟踪）。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "rssi_by_azimuth": {"type": "object", "description": "方位角(度)到RSSI(dBm)的映射，如 {\"0\": -60, \"45\": -55, \"90\": -70}"},
+            },
+            "required": ["rssi_by_azimuth"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_gnss_direction_find(args)),
+        category="gnss_monitor",
+    )
+
 
 # ═══════════════════════════════════════════════════════
 # 工具实现函数
@@ -2503,4 +2553,122 @@ def _sky_view_visible(args):
                      f"方位 {sat['azimuth_deg']:.0f}°, "
                      f"距离 {sat['distance_km']:.0f}km, "
                      f"多普勒 {sat['doppler_hz']:+.0f}Hz")
+    return '\n'.join(lines)
+
+
+# ========================================================================
+# GNSS 干扰监测工具实现
+# ========================================================================
+
+def _gnss_monitor_band(args):
+    """监测单个 GNSS 频带干扰。"""
+    try:
+        from mbdsdr_ai.gnss_monitor import monitor_gnss_band, GNSS_BANDS
+    except ImportError:
+        from gnss_monitor import monitor_gnss_band, GNSS_BANDS
+
+    band_name = args['band_name'].upper()
+    center_freq = args['center_freq_hz']
+    sample_rate = args.get('sample_rate_hz', 2.048e6)
+    duration = args.get('duration_sec', 1.0)
+
+    # 生成模拟IQ数据（模拟模式下）
+    n_samples = int(sample_rate * duration)
+    # 模拟噪声基底
+    iq = (np.random.randn(n_samples) + 1j * np.random.randn(n_samples)) / np.sqrt(2) * 0.01
+
+    # 模拟模式：在中心频点附近加一个模拟干扰
+    if band_name in GNSS_BANDS:
+        # 模拟一个 CW 干扰（中心频点偏移 5kHz）
+        t = np.arange(n_samples) / sample_rate
+        interference = 0.05 * np.exp(2j * np.pi * 5000 * t)
+        iq = iq + interference
+
+    result = monitor_gnss_band(iq, center_freq, sample_rate, band_name)
+
+    lines = [f"=== GNSS 频带监测: {band_name} ==="]
+    lines.append(f"中心频率: {center_freq/1e6:.3f} MHz")
+    lines.append(f"监测带宽: {sample_rate/1e6:.3f} MHz")
+    lines.append(f"平均功率: {result.power_dbm:.1f} dB")
+    lines.append(f"噪声基底: {result.noise_floor_dbm:.1f} dB")
+    lines.append(f"干扰噪声比(INR): {result.inr_db:.1f} dB")
+    lines.append(f"峰值频率: {result.peak_freq_hz/1e6:.3f} MHz")
+    lines.append(f"峰值功率: {result.peak_power_dbm:.1f} dB")
+    lines.append(f"干扰类型: {result.interference_type.value}")
+    lines.append(f"分类置信度: {result.confidence*100:.1f}%")
+
+    if result.interference_type.value != "none":
+        lines.append("")
+        lines.append("建议: 检测到干扰，建议持续监测并记录频谱数据")
+
+    return '\n'.join(lines)
+
+
+def _gnss_monitor_all(args):
+    """监测所有 GNSS 频带。"""
+    try:
+        from mbdsdr_ai.gnss_monitor import (
+            monitor_all_gnss_bands, generate_interference_alerts, GNSS_BANDS
+        )
+    except ImportError:
+        from gnss_monitor import (
+            monitor_all_gnss_bands, generate_interference_alerts, GNSS_BANDS
+        )
+
+    sample_rate = 2.048e6
+    duration = args.get('duration_sec', 0.5)
+    inr_warn = args.get('inr_warning_db', 10.0)
+
+    # 为每个频带生成模拟IQ数据
+    iq_by_band = {}
+    for band in GNSS_BANDS:
+        n = int(sample_rate * duration)
+        iq = (np.random.randn(n) + 1j * np.random.randn(n)) / np.sqrt(2) * 0.01
+        # 模拟 L1 频带有 CW 干扰
+        if band == "L1":
+            t = np.arange(n) / sample_rate
+            iq += 0.08 * np.exp(2j * np.pi * 3000 * t)
+        iq_by_band[band] = iq
+
+    results = monitor_all_gnss_bands(iq_by_band, sample_rate)
+    alerts = generate_interference_alerts(results, inr_warn)
+
+    lines = ["=== GNSS 全频带干扰监测报告 ==="]
+    lines.append("")
+
+    for r in results:
+        status = "正常" if r.interference_type.value == "none" else f"告警({r.interference_type.value})"
+        lines.append(f"{r.band_name:4s} ({r.center_freq_hz/1e6:7.3f} MHz): "
+                     f"INR {r.inr_db:5.1f} dB, {status}")
+
+    lines.append("")
+    if alerts:
+        lines.append(f"--- 干扰告警 ({len(alerts)}条) ---")
+        for a in alerts:
+            lines.append(f"[{a.severity.upper()}] {a.band_name}: {a.interference_type} "
+                         f"INR={a.inr_db:.1f}dB, 峰值={a.peak_freq_hz/1e6:.3f}MHz")
+            lines.append(f"       建议: {a.recommendation}")
+    else:
+        lines.append("未检测到超过门限的干扰。")
+
+    return '\n'.join(lines)
+
+
+def _gnss_direction_find(args):
+    """干扰源方向估算。"""
+    try:
+        from mbdsdr_ai.gnss_monitor import interference_direction_finding
+    except ImportError:
+        from gnss_monitor import interference_direction_finding
+
+    rssi_dict = args['rssi_by_azimuth']
+    result = interference_direction_finding(rssi_dict)
+
+    lines = ["=== 干扰源方向估算（八木天线RSSI扫描）==="]
+    lines.append(f"估算方向: {result['estimated_direction_deg']}°")
+    lines.append(f"峰值RSSI: {result['peak_rssi_dbm']} dBm")
+    lines.append(f"置信度: {result['confidence']}")
+    lines.append(f"说明: {result['note']}")
+    lines.append(f"验证: {result['symmetric_check']}")
+
     return '\n'.join(lines)
