@@ -134,21 +134,55 @@ def _resample_if_needed(samples: np.ndarray, orig_rate: int) -> np.ndarray:
 
 
 def _instantaneous_frequency(samples: np.ndarray, sample_rate: int, window: int = 64) -> np.ndarray:
-    """用解析信号相位差分估算瞬时频率。"""
-    # 希尔伯特变换求解析信号
-    if HAS_SCIPY:
-        from scipy.signal import hilbert
-        analytic = hilbert(samples)
-    else:
-        # 简化：用过零率
-        analytic = samples.astype(np.complex64)
-    phase = np.unwrap(np.angle(analytic))
-    # 相位差分 = 角频率
-    inst_freq = np.diff(phase) * sample_rate / (2 * np.pi)
-    # 滑动平均平滑
-    if len(inst_freq) > window:
-        kernel = np.ones(window) / window
-        inst_freq = np.convolve(inst_freq, kernel, mode="same")
+    """用过零率+抛物线插值估算瞬时频率，比希尔伯特变换更稳定。
+
+    对 SSTV 1200-2300Hz 正弦波，过零率法精度更高、噪声更小。
+    """
+    n = len(samples)
+    if n < 4:
+        return np.zeros(n, dtype=np.float32)
+
+    # 去直流（避免直流偏移导致过零计数错误）
+    samples = samples - np.mean(samples)
+
+    # 找过零点（符号变化）
+    signs = np.sign(samples)
+    signs[signs == 0] = 1  # 零值视为正
+    zero_crossings = np.where(np.diff(signs) != 0)[0]
+
+    if len(zero_crossings) < 2:
+        return np.full(n, 1500.0, dtype=np.float32)  # 默认中间频率
+
+    # 计算每个过零点的精确位置（线性插值）
+    cross_positions = []
+    for zc in zero_crossings:
+        if zc + 1 < n:
+            y0, y1 = samples[zc], samples[zc + 1]
+            if y1 != y0:
+                frac = -y0 / (y1 - y0)
+                cross_positions.append(zc + frac)
+            else:
+                cross_positions.append(float(zc))
+        else:
+            cross_positions.append(float(zc))
+    cross_positions = np.array(cross_positions)
+
+    # 计算相邻过零点之间的频率（两个过零点 = 半个周期）
+    inst_freq = np.full(n, 1500.0, dtype=np.float32)
+    if len(cross_positions) >= 2:
+        periods = np.diff(cross_positions) * 2  # 半周期 → 全周期（样本数）
+        freqs = sample_rate / np.clip(periods, 1, sample_rate)
+        # 将频率分配到对应区间
+        for i in range(len(freqs)):
+            start = int(cross_positions[i])
+            end = int(cross_positions[i + 1]) if i + 1 < len(cross_positions) else n
+            inst_freq[start:end] = freqs[i]
+
+    # 滑动中值滤波（去除尖峰噪声），比均值滤波更保边缘
+    if len(inst_freq) > window and window > 1:
+        from scipy.ndimage import median_filter as _median
+        inst_freq = _median(inst_freq, size=min(window, 31))
+
     return inst_freq
 
 
