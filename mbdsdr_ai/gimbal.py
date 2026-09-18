@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import math
 import socket
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Tuple
@@ -206,6 +207,8 @@ class GimbalController:
         self.board = BoardGimbalClient()
         # 姿态回读源（由 pose.py 的 IMU+磁力计融合结果注入）
         self._pose_provider: Optional[Callable[[], GimbalPose]] = None
+        # RSSI 回读源（SDR 后端注入，返回当前信号强度 dBm）
+        self._rssi_provider: Optional[Callable[[], float]] = None
 
     # ---- 后端管理 ----
     def use_manual(self) -> GimbalStatus:
@@ -232,6 +235,10 @@ class GimbalController:
     def set_pose_provider(self, provider: Callable[[], GimbalPose]):
         """注入 IMU+磁力计姿态回读函数。"""
         self._pose_provider = provider
+
+    def set_rssi_provider(self, provider: Callable[[], float]):
+        """注入 RSSI 回读函数（返回当前信号强度 dBm），用于测向扫描。"""
+        self._rssi_provider = provider
 
     # ---- 读姿态 ----
     def read_pose(self) -> GimbalPose:
@@ -305,6 +312,65 @@ class GimbalController:
         )
         r["beamwidth_deg"] = beamwidth_deg
         return r
+
+    def sweep_azimuth(self, az_start: float = 0.0, az_end: float = 360.0,
+                      step: float = 30.0, elevation: float = 20.0,
+                      settle_sec: float = 0.8,
+                      rssi_provider: Optional[Callable[[], float]] = None) -> Dict:
+        """
+        方位角步进测向扫描：八木/定向天线在云台上逐方位转动，每步读 RSSI。
+
+        - board_pwm / rotctld：自动转动、等待 settle、读 RSSI。
+        - manual：不自动转，返回每步人工引导清单（RSSI 留空，由人/AI 补采）。
+
+        返回 {samples:[{az,el,rssi}], peak_az, manual, guidance_steps}。
+        RSSI 单位 dBm，值越大（越接近0）信号越强。
+        """
+        provider = rssi_provider or self._rssi_provider
+        angles: List[float] = []
+        a = az_start
+        while a < az_end - 1e-6:
+            angles.append(round(a, 1))
+            a += step
+
+        samples: List[Dict] = []
+        manual = self.status.mode == GimbalMode.MANUAL
+
+        for az in angles:
+            entry: Dict = {"az": az, "el": elevation}
+            if manual:
+                # 人工模式：给出转到该方位的引导，不读 RSSI
+                tgt = GimbalPose(azimuth=az, elevation=elevation)
+                cur = self.read_pose()
+                az_err, el_err = cur.angular_error(tgt)
+                entry["rssi"] = None
+                entry["guidance"] = self._guidance_text(az_err, el_err)
+            else:
+                self.point_to(az, elevation)
+                time.sleep(max(0.0, settle_sec))
+                rssi = None
+                if provider is not None:
+                    try:
+                        rssi = float(provider())
+                    except Exception:
+                        rssi = None
+                entry["rssi"] = round(rssi, 1) if rssi is not None else None
+            samples.append(entry)
+
+        valid = [(s["az"], s["rssi"]) for s in samples if s["rssi"] is not None]
+        peak_az = max(valid, key=lambda x: x[1])[0] if valid else None
+
+        return {
+            "samples": samples,
+            "peak_az": peak_az,
+            "manual": manual,
+            "step": step,
+            "elevation": elevation,
+            "note": ("人工模式：按 guidance 逐方位转动八木，读 RSSI 后回填，"
+                     "再用 gnss_direction_find 质心定位" if manual
+                     else "自动扫描完成，peak_az 为最强信号方位；"
+                          "精细定位请把 samples 交给 gnss_direction_find"),
+        }
 
     def stop(self) -> Dict:
         if self.status.mode == GimbalMode.ROTCTLD and self.rotctld:
