@@ -335,7 +335,7 @@ class AFSKModem:
         return bits
 
     def modulate(self, frame: AX25Frame, preamble_bytes: int = 20,
-                 postamble_bytes: int = 2) -> np.ndarray:
+                 postamble_bytes: int = 4) -> np.ndarray:
         """
         将 AX.25 帧调制为 AFSK 音频信号。
         返回 float32 numpy 数组（范围 -1 到 1）。
@@ -383,121 +383,168 @@ class AFSKModem:
     def demodulate(self, audio: np.ndarray) -> List[AX25Frame]:
         """
         从 AFSK 音频信号中解调 AX.25 帧。
-        使用过零率检测频率切换。
+
+        FM 鉴频解调：FFT 构造解析信号取瞬时频率，半位窗平滑后逐样本判决
+        NRZI 电平；数字 PLL 做位定时恢复（翻转沿锁相、位中心采样），多初始
+        相位/增益尝试，按 0x7E 标志截取帧、HDLC 去填充并用 FCS(CRC-16) 校验。
+        低采样率输入先整数倍上采样到 ≥44.1kHz，保证每位有足够样本。
         """
-        if len(audio) == 0:
+        if audio is None or len(audio) == 0:
             return []
-
-        # 归一化
-        audio = audio.astype(np.float64)
-        audio = audio / (np.max(np.abs(audio)) + 1e-10)
-
-        # 过零率分析
-        window_size = int(self.sample_rate / self.baud_rate)
-        half_window = window_size // 2
-
-        # 计算每个样本的瞬时频率（基于过零）
-        bits = []
-        current_bit = 1  # 初始 Mark
-
-        # 简单的过零检测
-        zero_crossings = np.where(np.diff(np.signbit(audio)))[0]
-
-        if len(zero_crossings) < 2:
+        audio = np.asarray(audio, dtype=np.float64)
+        # 低采样率整数倍上采样，保证每位样本数（22050->44100, 11025->44100）
+        fsr = self.sample_rate
+        up = 1
+        while fsr * up < 44100:
+            up += 1
+        if up > 1:
+            old_x = np.arange(len(audio))
+            new_x = np.linspace(0, len(audio) - 1, (len(audio) - 1) * up + 1)
+            audio = np.interp(new_x, old_x, audio)
+            fsr = self.sample_rate * up
+        n = len(audio)
+        spb = fsr / self.baud_rate
+        win = max(3, int(round(spb)))
+        if n < int(spb * 8):
             return []
+        mx = np.max(np.abs(audio))
+        if mx > 0:
+            audio = audio / mx
+        # 尾部补若干位（延续末电平），保证帧结束标志完整落入采样窗
+        pad_bits = int(round(spb * 24))
+        audio = np.concatenate([audio, np.full(pad_bits, float(audio[-1]))])
+        n = len(audio)
 
-        # 计算过零间隔，推断频率
-        intervals = np.diff(zero_crossings)
-        freqs = self.sample_rate / (2 * intervals)  # 半周期间隔
+        # 1) FM 鉴频：FFT 构造解析信号 -> 瞬时相位 -> 瞬时频率
+        #    （AFSK 是二进制 FM，鉴频比过零率/短窗能量鲁棒，multimon-ng 同类思路）
+        n0 = n
+        spec = np.fft.fft(audio)
+        h_filter = np.zeros(n0)
+        if n0 % 2 == 0:
+            h_filter[0] = h_filter[n0 // 2] = 1
+            h_filter[1:n0 // 2] = 2
+        else:
+            h_filter[0] = 1
+            h_filter[1:(n0 + 1) // 2] = 2
+        analytic = np.fft.ifft(spec * h_filter)
+        phase = np.unwrap(np.angle(analytic))
+        inst_freq = np.concatenate(([phase[0]], np.diff(phase))) * fsr / (2 * np.pi)
+        # 半位周期移动平均：抑制鉴频毛刺，又不过度模糊翻转沿
+        w_avg = max(3, int(round(spb * 0.5)))
+        csum = np.cumsum(np.insert(inst_freq, 0, 0.0))
+        smoothed = (csum[w_avg:] - csum[:-w_avg]) / w_avg
+        pad_l = w_avg // 2
+        pad_r = w_avg - pad_l
+        inst_freq = np.pad(smoothed, (pad_l, pad_r - 1 if pad_r else 0), mode="edge")
+        if len(inst_freq) < n:
+            inst_freq = np.pad(inst_freq, (0, n - len(inst_freq)), mode="edge")
+        inst_freq = inst_freq[:n]
+        # 判决门限取 mark/space 中点
+        threshold = (self.mark_freq + self.space_freq) / 2.0
+        level = (inst_freq < threshold).astype(np.uint8)  # mark=1, space=0
 
-        # 按位采样
-        samples_per_bit = self.samples_per_bit
-        num_bits = int(len(audio) / samples_per_bit)
+        # 2) 数字 PLL 位定时恢复：逐样本推进位时钟，检测到电平翻转沿时
+        #    把时钟拉向最近的位边界；在每位中心采样 NRZI 电平。
+        #    对非整数 samples_per_bit、采样率偏差和翻转沿抖动都鲁棒。
+        def _run_pll(init_clock: float, gain: float) -> List[int]:
+            clock = init_clock
+            bits: List[int] = []
+            prev_lv = int(level[0])
+            last_edge = -10 * spb
+            for i in range(n):
+                cur = int(level[i])
+                if cur != prev_lv:
+                    # 去抖：只接受距上个沿超过 0.6 位的翻转（拒绝同一位内的抖动沿）
+                    if i - last_edge >= 0.6 * spb:
+                        err = clock if clock < spb / 2 else clock - spb
+                        clock -= gain * err
+                        last_edge = i
+                    prev_lv = cur
+                prev_clock = clock
+                clock += 1.0
+                if prev_clock < spb / 2 <= clock:
+                    bits.append(cur)  # 位中心采样
+                if clock >= spb:
+                    clock -= spb
+            return bits
 
-        decoded_bits = []
-        for i in range(num_bits):
-            start = int(i * samples_per_bit)
-            end = int((i + 1) * samples_per_bit)
-            segment = audio[start:end]
+        def _is_flag(bits, i):
+            return (i + 7 < len(bits) and bits[i] == 0 and
+                    all(bits[i + x] == 1 for x in range(1, 7)) and
+                    bits[i + 7] == 0)
 
-            # 计算过零率
-            if len(segment) > 1:
-                zc = np.sum(np.abs(np.diff(np.signbit(segment))))
-                zcr = zc / len(segment) * self.sample_rate
-
-                # Mark 1200Hz: 过零率约 2400/s
-                # Space 2200Hz: 过零率约 4400/s
-                if zcr > 3400:
-                    bit = 0  # Space
-                else:
-                    bit = 1  # Mark
-            else:
-                bit = 1
-
-            decoded_bits.append(bit)
-
-        # NRZI 解码
-        raw_bits = []
-        prev_bit = 1
-        for bit in decoded_bits:
-            if bit != prev_bit:
-                raw_bits.append(0)
-            else:
-                raw_bits.append(1)
-            prev_bit = bit
-
-        # 查找帧标志 01111110
-        frames = []
-        i = 0
-        while i < len(raw_bits) - 8:
-            # 查找 0x7E = 01111110 (LSB first)
-            if (raw_bits[i] == 0 and raw_bits[i+1] == 1 and raw_bits[i+2] == 1 and
-                raw_bits[i+3] == 1 and raw_bits[i+4] == 1 and raw_bits[i+5] == 1 and
-                raw_bits[i+6] == 1 and raw_bits[i+7] == 0):
-
-                # 找到帧开始，查找下一个标志
-                j = i + 8
-                while j < len(raw_bits) - 8:
-                    if (raw_bits[j] == 0 and raw_bits[j+1] == 1 and raw_bits[j+2] == 1 and
-                        raw_bits[j+3] == 1 and raw_bits[j+4] == 1 and raw_bits[j+5] == 1 and
-                        raw_bits[j+6] == 1 and raw_bits[j+7] == 0):
-                        # 找到帧结束
-                        frame_bits = raw_bits[i+8:j]
-
-                        # 去位填充
-                        unstuffed_bits = []
-                        ones_count = 0
-                        for bit in frame_bits:
-                            if bit == 0 and ones_count == 5:
-                                ones_count = 0
-                                continue
-                            unstuffed_bits.append(bit)
-                            if bit == 1:
-                                ones_count += 1
-                            else:
-                                ones_count = 0
-
-                        # 转换为字节
-                        frame_bytes = bytearray()
-                        for k in range(0, len(unstuffed_bits) - 7, 8):
-                            byte = 0
-                            for b in range(8):
-                                if k + b < len(unstuffed_bits):
-                                    byte |= unstuffed_bits[k + b] << b
-                            frame_bytes.append(byte)
-
-                        if len(frame_bytes) >= 15:
-                            frame = AX25Frame.from_bytes(bytes(frame_bytes))
-                            if frame and frame.fcs_valid:
-                                frames.append(frame)
-
-                        i = j + 8
-                        break
-                    j += 1
-                else:
+        def _extract_frames(raw_bits: List[int]) -> List['AX25Frame']:
+            out_frames = []
+            i = 0
+            total_bits = len(raw_bits)
+            while i < total_bits - 8:
+                if not _is_flag(raw_bits, i):
                     i += 1
-            else:
-                i += 1
+                    continue
+                j = i + 8
+                while j < total_bits - 8 and _is_flag(raw_bits, j):
+                    j += 8
+                frame_start = j
+                end = -1
+                k2 = frame_start
+                while k2 < total_bits - 8:
+                    if _is_flag(raw_bits, k2):
+                        end = k2
+                        break
+                    k2 += 1
+                if end < 0:
+                    break
+                frame_bits = raw_bits[frame_start:end]
+
+                # HDLC 去位填充：连续 5 个 1 后的 0 是填充位
+                unstuffed = []
+                ones = 0
+                for bit in frame_bits:
+                    if bit == 1:
+                        ones += 1
+                        unstuffed.append(bit)
+                    else:
+                        if ones == 5:
+                            ones = 0
+                            continue
+                        ones = 0
+                        unstuffed.append(bit)
+
+                frame_bytes = bytearray()
+                for k3 in range(0, len(unstuffed) - 7, 8):
+                    byte = 0
+                    for b in range(8):
+                        if unstuffed[k3 + b]:
+                            byte |= 1 << b
+                    frame_bytes.append(byte)
+
+                if len(frame_bytes) >= 15:
+                    frame = AX25Frame.from_bytes(bytes(frame_bytes))
+                    if frame and frame.fcs_valid:
+                        if not any(x.source == frame.source and x.info == frame.info
+                                   for x in out_frames):
+                            out_frames.append(frame)
+                i = end + 8
+            return out_frames
+
+        # 3) 多初始相位/增益尝试，FCS(CRC-16) 是极强校验，只有位定时正确
+        #    的那次才会通过；合并所有 FCS-valid 帧并去重。
+        frames: List['AX25Frame'] = []
+        seen = set()
+        for gain in (0.5, 0.3, 0.7):
+            for frac in (0.0, 0.25, 0.5, 0.75):
+                init_clock = frac * spb
+                nrzi_bits = _run_pll(init_clock, gain)
+                raw_bits = []
+                prev = 1
+                for b in nrzi_bits:
+                    raw_bits.append(0 if b != prev else 1)
+                    prev = b
+                for frame in _extract_frames(raw_bits):
+                    key = (frame.source, frame.destination, bytes(frame.info))
+                    if key not in seen:
+                        seen.add(key)
+                        frames.append(frame)
 
         return frames
 
