@@ -226,11 +226,39 @@ class ToolRegistry:
             "gain": "gain_db", "input_file": "input_path",
             "sat": "satellite_name", "satellite": "satellite_name",
             "lat": "latitude", "lon": "longitude",
+            "agc_enabled": "enabled", "agc": "enabled",
+            "task_name": "name", "template_name": "name", "workflow_name": "name",
+            "plugin_name": "name", "hook_name": "name", "scheduler_name": "name",
+            "subagent_name": "name", "event_name": "name",
+            "task_description": "description", "template_description": "description",
+            "workflow_description": "description", "subagent_type": "type",
         }
         if isinstance(args, dict):
             for _alias, _std in _PARAM_ALIASES.items():
                 if _alias in args and _std not in args:
                     args[_std] = args.pop(_alias)
+
+        # required 参数预校验：缺失时返回明确错误，不让 handler 抛 KeyError
+        tool_def = tool.get("definition", {}).get("function", {})
+        required_params = tool_def.get("parameters", {}).get("required", [])
+        if required_params and isinstance(args, dict):
+            missing = [p for p in required_params if p not in args or args[p] is None]
+            if missing:
+                param_descs = tool_def.get("parameters", {}).get("properties", {})
+                hints = []
+                for p in missing:
+                    desc = param_descs.get(p, {}).get("description", "")
+                    ptype = param_descs.get(p, {}).get("type", "any")
+                    hints.append(f"{p}({ptype}){': ' + desc if desc else ''}")
+                result = ToolResult(
+                    success=False,
+                    content=f"工具 '{tool_name}' 缺少必填参数: {', '.join(missing)}。参数说明: {'; '.join(hints)}",
+                    tool_name=tool_name,
+                    args=args,
+                    error="missing_required_params",
+                )
+                self._log_call(result)
+                return result
 
         # 调用 handler
         try:
@@ -268,7 +296,7 @@ class ToolRegistry:
         except Exception as e:
             result = ToolResult(
                 success=False,
-                content=f"工具 '{tool_name}' 调用异常: {type(e).__name__}: {e}\n{traceback.format_exc()[:500]}",
+                content=f"工具 '{tool_name}' 调用失败: {type(e).__name__}: {e}。请检查参数是否正确，或参考工具说明。",
                 tool_name=tool_name,
                 args=args,
                 error=f"exception: {type(e).__name__}",
