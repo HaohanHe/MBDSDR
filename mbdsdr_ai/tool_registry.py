@@ -174,6 +174,57 @@ class ToolRegistry:
         """检查工具是否存在且可用。"""
         return name in self.tools and self.tools[name]["available"]
 
+    def _resolve_tool_name(self, tool_name: str) -> str:
+        """工具名自动解析：兼容短名（spectrum_analyze）和全名（sdr_spectrum_analyze）。
+
+        工作流定义和弱模型可能用短名，这里按优先级尝试各种前缀映射，
+        找到第一个在工具注册表中存在的名字。
+        """
+        if tool_name in self.tools:
+            return tool_name
+
+        # 按优先级尝试的候选名
+        candidates = []
+
+        # 1. 直接加 sdr_ 前缀
+        candidates.append(f"sdr_{tool_name}")
+
+        # 2. spectrum_xxx → sdr_spectrum_xxx
+        if tool_name.startswith("spectrum_"):
+            candidates.append(f"sdr_{tool_name}")
+
+        # 3. pointing_xxx → sdr_satellite_xxx
+        if tool_name.startswith("pointing_"):
+            candidates.append(f"sdr_satellite_{tool_name[9:]}")
+
+        # 4. set_xxx → sdr_set_xxx
+        if tool_name.startswith("set_"):
+            candidates.append(f"sdr_{tool_name}")
+
+        # 5. record_xxx → sdr_record_xxx
+        if tool_name.startswith("record_"):
+            candidates.append(f"sdr_{tool_name}")
+
+        # 6. xxx_decode → sdr_decode_xxx
+        if tool_name.endswith("_decode"):
+            base = tool_name[:-7]  # 去掉 _decode
+            candidates.append(f"sdr_decode_{base}")
+
+        # 7. identify_xxx → sdr_identify_xxx
+        if tool_name.startswith("identify_"):
+            candidates.append(f"sdr_{tool_name}")
+
+        # 8. spectrum_center_offset → sdr_measure_signal
+        if tool_name == "spectrum_center_offset":
+            candidates.append("sdr_measure_signal")
+
+        # 返回第一个存在的候选名
+        for cand in candidates:
+            if cand in self.tools:
+                return cand
+
+        return tool_name  # 都找不到，返回原名（call 会报 tool_not_found）
+
     # ── 工具调用 ────────────────────────────────────────
 
     def call(self, tool_name: str, args: Dict[str, Any] = None) -> ToolResult:
@@ -189,6 +240,11 @@ class ToolRegistry:
         """
         start_time = time.time()
         args = args or {}
+
+        # 工具名自动解析：兼容短名（spectrum_analyze）和全名（sdr_spectrum_analyze）
+        # 工作流定义里用的是短名，这里自动映射到工具注册表的全名
+        if tool_name not in self.tools:
+            tool_name = self._resolve_tool_name(tool_name)
 
         # 检查工具是否存在
         if tool_name not in self.tools:
