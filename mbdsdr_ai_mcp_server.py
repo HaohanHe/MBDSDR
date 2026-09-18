@@ -2,7 +2,7 @@
 """
 MBDSDR AI 内核 - MCP stdio 服务器
 ====================================
-将 MBDSDR AI 内核的 128 个工具暴露为标准 MCP (Model Context Protocol) 服务，
+将 MBDSDR AI 内核的 195 个工具暴露为标准 MCP (Model Context Protocol) 服务，
 让任意 MCP 客户端 (Cursor / Claude Desktop / VS Code Copilot / 通用 agent / AI IDE)
 都能直接调用 MBDSDR 的全部功能。
 
@@ -25,7 +25,7 @@ MBDSDR AI 内核 - MCP stdio 服务器
 
 MCP 协议 (JSON-RPC 2.0 over stdio):
   - initialize: 初始化握手
-  - tools/list: 列出全部 128 个工具
+  - tools/list: 列出全部 195 个工具
   - tools/call: 调用工具
   - notifications/initialized: 初始化完成通知
 
@@ -63,7 +63,7 @@ class MBSDRAIMCPServer:
     """
     MBDSDR AI 内核 MCP stdio 服务器。
 
-    将 MBDSDRAgent 的 128 个工具暴露为标准 MCP 服务。
+    将 MBDSDRAgent 的 195 个工具暴露为标准 MCP 服务。
     任意 MCP 客户端 (Cursor / Claude Desktop / 通用 agent) 都能调用。
     """
 
@@ -310,7 +310,7 @@ class MBSDRAIMCPServer:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="MBDSDR AI 内核 MCP stdio 服务器 - 暴露 128 个工具给任意通用 agent",
+        description="MBDSDR AI 内核 MCP stdio 服务器 - 暴露 195 个工具给任意通用 agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
