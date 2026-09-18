@@ -287,6 +287,7 @@ class ToolRegistry:
             "workflow_name": "name",
             "task_description": "description", "template_description": "description",
             "workflow_description": "description", "subagent_type": "type",
+            "task": "goal", "input": "goal", "prompt": "goal",
         }
         if isinstance(args, dict):
             for _alias, _std in _PARAM_ALIASES.items():
