@@ -227,7 +227,7 @@ class ToolRegistry:
             "sat": "satellite_name", "satellite": "satellite_name",
             "lat": "latitude", "lon": "longitude",
             "agc_enabled": "enabled", "agc": "enabled",
-            "task_name": "name", "template_name": "name", "workflow_name": "name",
+            "task_name": "name", "template_name": "name",
             "plugin_name": "name", "hook_name": "name", "scheduler_name": "name",
             "subagent_name": "name", "event_name": "name",
             "task_description": "description", "template_description": "description",
