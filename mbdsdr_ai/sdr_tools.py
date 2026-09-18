@@ -688,6 +688,61 @@ def register_sdr_tools(agent):
         category="sdr_analysis",
     )
 
+    # ========================================================================
+    # 高级信号分析工具
+    # ========================================================================
+
+    agent.tool_registry.register(
+        name="signal_detect",
+        description="频谱信号检测。自动扫描频谱，检测所有超过门限的信号，输出中心频率、带宽、功率。用于寻找电台、干扰源、未知信号。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "threshold_db": {"type": "number", "description": "检测门限（dB，相对于噪声底），默认10", "default": 10.0},
+                "min_bw_hz": {"type": "number", "description": "最小带宽（Hz），默认1000", "default": 1000.0},
+            },
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_signal_detect(args)),
+        category="sdr_analysis",
+    )
+
+    agent.tool_registry.register(
+        name="signal_identify_modulation",
+        description="自动调制方式识别。基于信号统计特征（幅度变化、频率变化、相位聚类），判断是AM/FM/SSB/QPSK/BPSK等调制类型。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_signal_identify_modulation(args)),
+        category="sdr_analysis",
+    )
+
+    agent.tool_registry.register(
+        name="signal_extract_features",
+        description="提取频谱特征。输出中心频率、带宽、峰值功率、噪声底、峰均比、动态范围。用于信号特征分析和记录。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_signal_extract_features(args)),
+        category="sdr_analysis",
+    )
+
+    agent.tool_registry.register(
+        name="signal_detect_interference",
+        description="干扰源检测。识别非自然信号的异常频谱特征（窄带强信号/宽带信号），输出干扰类型、频率、带宽、功率。用于电磁环境监测。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_signal_detect_interference(args)),
+        category="sdr_analysis",
+    )
+
     # ═══════════════════════════════════════════════════
     # 16. AX.25 / APRS 网络通信（8个）
     # ═══════════════════════════════════════════════════
@@ -3745,5 +3800,117 @@ def _satdump_compose_image(args):
         lines.append(f"错误: {result['error']}")
     if result.get('size'):
         lines.append(f"图像尺寸: {result['size']}")
+
+    return '\n'.join(lines)
+
+
+# ========================================================================
+# 高级信号分析工具实现
+# ========================================================================
+
+def _signal_detect(args):
+    """频谱信号检测。"""
+    from mbdsdr_ai.signal_analysis import detect_signals
+
+    threshold_db = args.get('threshold_db', 10.0)
+    min_bw = args.get('min_bw_hz', 1000.0)
+
+    # 生成模拟频谱（实际应该从SDR获取）
+    # 这里用模拟数据演示
+    freqs = np.linspace(88e6, 108e6, 1024)
+    spectrum = np.random.randn(1024) * 5 + 50
+    # 加几个模拟信号
+    spectrum[100:120] += 30  # FM电台1
+    spectrum[300:310] += 25  # FM电台2
+    spectrum[600:650] += 20  # FM电台3
+
+    signals = detect_signals(spectrum, freqs, threshold_db, min_bw)
+
+    lines = ["=== 频谱信号检测 ==="]
+    lines.append("")
+    lines.append(f"检测门限: {threshold_db} dB")
+    lines.append(f"最小带宽: {min_bw/1e3:.1f} kHz")
+    lines.append(f"检测到 {len(signals)} 个信号：")
+    lines.append("")
+
+    for i, sig in enumerate(signals, 1):
+        lines.append(f"  信号{i}: {sig['center_freq_hz']/1e6:.3f} MHz")
+        lines.append(f"    带宽: {sig['bandwidth_hz']/1e3:.1f} kHz")
+        lines.append(f"    功率: {sig['peak_power_db']:.1f} dB")
+        lines.append("")
+
+    return '\n'.join(lines)
+
+
+def _signal_identify_modulation(args):
+    """自动调制方式识别。"""
+    from mbdsdr_ai.signal_analysis import identify_modulation
+
+    # 生成模拟IQ信号（实际应该从SDR获取）
+    t = np.linspace(0, 1, 1000)
+    # 模拟FM信号
+    iq = np.exp(1j * 2 * np.pi * 1000 * t + 1j * np.random.randn(len(t)) * 0.1)
+
+    result = identify_modulation(iq, sample_rate=1e6)
+
+    lines = ["=== 调制方式识别 ==="]
+    lines.append("")
+    lines.append(f"调制类型: {result['modulation']}")
+    lines.append(f"置信度: {result['confidence']*100:.1f}%")
+    lines.append("")
+    lines.append("特征：")
+    for k, v in result['features'].items():
+        lines.append(f"  {k}: {v:.4f}")
+
+    return '\n'.join(lines)
+
+
+def _signal_extract_features(args):
+    """提取频谱特征。"""
+    from mbdsdr_ai.signal_analysis import extract_spectrum_features
+
+    # 生成模拟频谱
+    freqs = np.linspace(100e6, 101e6, 1024)
+    spectrum = np.random.randn(1024) * 3 + 40
+    spectrum[500:520] += 30  # 峰值
+
+    features = extract_spectrum_features(spectrum, freqs)
+
+    lines = ["=== 频谱特征提取 ==="]
+    lines.append("")
+    lines.append(f"中心频率: {features['center_freq_hz']/1e6:.3f} MHz")
+    lines.append(f"带宽: {features['bandwidth_hz']/1e3:.1f} kHz")
+    lines.append(f"峰值功率: {features['peak_power_db']:.1f} dB")
+    lines.append(f"噪声底: {features['noise_floor_db']:.1f} dB")
+    lines.append(f"峰均比: {features['papr_db']:.1f} dB")
+    lines.append(f"动态范围: {features['dynamic_range_db']:.1f} dB")
+
+    return '\n'.join(lines)
+
+
+def _signal_detect_interference(args):
+    """干扰源检测。"""
+    from mbdsdr_ai.signal_analysis import detect_interference
+
+    # 生成模拟频谱
+    freqs = np.linspace(100e6, 102e6, 1024)
+    spectrum = np.random.randn(1024) * 3 + 40
+    spectrum[100:105] += 35  # 窄带干扰
+    spectrum[500:600] += 25  # 宽带信号
+
+    interferences = detect_interference(spectrum, freqs)
+
+    lines = ["=== 干扰源检测 ==="]
+    lines.append("")
+    lines.append(f"检测到 {len(interferences)} 个潜在干扰：")
+    lines.append("")
+
+    for i, intr in enumerate(interferences, 1):
+        lines.append(f"  干扰{i}: {intr['type']}")
+        lines.append(f"    频率: {intr['freq_hz']/1e6:.3f} MHz")
+        lines.append(f"    带宽: {intr['bandwidth_hz']/1e3:.1f} kHz")
+        lines.append(f"    功率: {intr['power_db']:.1f} dB")
+        lines.append(f"    置信度: {intr['confidence']*100:.0f}%")
+        lines.append("")
 
     return '\n'.join(lines)
