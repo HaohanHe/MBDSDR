@@ -1193,6 +1193,124 @@ def register_sdr_tools(agent):
     )
 
     # ========================================================================
+    # ========================================================================
+    # 云台/旋转器工具（手自一体天线指向）
+    # ========================================================================
+
+    agent.tool_registry.register(
+        name="gimbal_modes",
+        description="列出云台/旋转器支持的后端模式：board_pwm(板载ESP32直驱舵机，方位IO14/俯仰IO15)、rotctld(Hamlib专业旋转器协议)、manual(无电机人工转动+IMU引导)。用于接入天线指向机构前查询能力。",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=lambda args: ToolResult(success=True, content=_gimbal_modes(args)),
+        category="gimbal",
+    )
+
+    agent.tool_registry.register(
+        name="gimbal_connect",
+        description="连接云台后端。mode=board_pwm连接板载舵机；mode=rotctld连接Hamlib旋转器(需host/port，默认127.0.0.1:4533)；mode=manual进入人工引导模式。连接后才能指向。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "mode": {"type": "string", "description": "board_pwm / rotctld / manual"},
+                "host": {"type": "string", "description": "rotctld 主机，默认 127.0.0.1"},
+                "port": {"type": "integer", "description": "rotctld 端口，默认 4533"},
+            },
+            "required": ["mode"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_gimbal_connect(args)),
+        category="gimbal",
+    )
+
+    agent.tool_registry.register(
+        name="gimbal_point",
+        description="把天线指向给定方位角/仰角（度）。自动按当前后端执行（舵机/旋转器/人工引导），并回读IMU+磁力计姿态计算剩余偏差，返回是否已对准和人工转动指引。波束宽度内判定对准。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "azimuth": {"type": "number", "description": "目标方位角（度，0=北，90=东）"},
+                "elevation": {"type": "number", "description": "目标仰角（度，0=地平线，90=天顶）"},
+                "beamwidth_deg": {"type": "number", "description": "天线波束宽度（度），默认10，决定对准容差"},
+            },
+            "required": ["azimuth", "elevation"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_gimbal_point(args)),
+        category="gimbal",
+    )
+
+    agent.tool_registry.register(
+        name="gimbal_track_satellite",
+        description="跟踪卫星：输入卫星当前方位角/仰角和天线波束宽度，驱动云台指向并判断对准。配合 sky_view_visible / predict_satellite_pass 使用，构成过境跟踪闭环。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "sat_azimuth": {"type": "number", "description": "卫星方位角（度）"},
+                "sat_elevation": {"type": "number", "description": "卫星仰角（度）"},
+                "beamwidth_deg": {"type": "number", "description": "天线波束宽度（度），默认10"},
+            },
+            "required": ["sat_azimuth", "sat_elevation"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_gimbal_track_satellite(args)),
+        category="gimbal",
+    )
+
+    agent.tool_registry.register(
+        name="gimbal_read_pose",
+        description="读取天线当前姿态（方位角/仰角），优先来自IMU+磁力计融合，其次旋转器回读。用于确认实际指向、闭环跟踪。",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=lambda args: ToolResult(success=True, content=_gimbal_read_pose(args)),
+        category="gimbal",
+    )
+
+    agent.tool_registry.register(
+        name="gimbal_stop",
+        description="停止云台运动（rotctld发送停止命令，板载舵机回中/释放）。人工模式无动作。",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=lambda args: ToolResult(success=True, content=_gimbal_stop(args)),
+        category="gimbal",
+    )
+
+    # ========================================================================
+    # 数字模式工具（FT8/FT4/AIS/ADS-B/DVB 参数与 WSJT-X 解码）
+    # ========================================================================
+
+    agent.tool_registry.register(
+        name="digital_mode_params",
+        description="查询常见数字模式的物理层参数：FT8/FT4(8FSK/周期/音间隔/LDPC)、AIS船舶(GMSK/162MHz)、ADS-B飞机(PPM/1090MHz)、DVB-S/S2卫星电视(调制/FEC/符号率/频段)。用于接收前确定频率、解调方式和带宽。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "mode": {"type": "string", "description": "FT8 / FT4 / AIS / ADSB / DVBS"},
+            },
+            "required": ["mode"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_digital_mode_params(args)),
+        category="digital_modes",
+    )
+
+    agent.tool_registry.register(
+        name="digital_mode_frequencies",
+        description="列出 FT8/FT4 在各业余频段(160m~2m)的常用拨号频率（MHz）。用于快速调谐到数字模式通联频点。",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=lambda args: ToolResult(success=True, content=_digital_mode_frequencies(args)),
+        category="digital_modes",
+    )
+
+    agent.tool_registry.register(
+        name="wsjtx_read_decodes",
+        description="读取并解析 WSJT-X 的 ALL.TXT 解码日志，返回最近的 FT8/FT4/JT65/WSPR 解码消息（时间/SNR/时差/频率/报文）。需要本机运行 WSJT-X 并给出日志路径，默认路径自动探测。用于把外部专业解码器的结果交给 AI 分析。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "log_path": {"type": "string", "description": "WSJT-X ALL.TXT 路径，留空自动探测"},
+                "limit": {"type": "integer", "description": "返回最近多少条，默认30"},
+            },
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_wsjtx_read_decodes(args)),
+        category="digital_modes",
+    )
+
+    # ========================================================================
     # 硬件抽象层（HAL）工具
     # ========================================================================
 
@@ -4104,4 +4222,217 @@ def _openapi_aircraft_nearby(args):
     else:
         lines.append(f"错误: {result.get('error', '未知错误')}")
 
+    return '\n'.join(lines)
+
+
+# ========================================================================
+# 云台/旋转器处理函数（gimbal.py 的 MCP 适配层）
+# ========================================================================
+
+_GIMBAL_CONTROLLER = None
+
+
+def _get_gimbal_controller():
+    """懒加载全局云台控制器。"""
+    global _GIMBAL_CONTROLLER
+    if _GIMBAL_CONTROLLER is None:
+        from mbdsdr_ai.gimbal import GimbalController
+        _GIMBAL_CONTROLLER = GimbalController()
+    return _GIMBAL_CONTROLLER
+
+
+def _gimbal_modes(args):
+    return (
+        "=== 云台/旋转器后端模式 ===\n\n"
+        "1. board_pwm — 板载 ai-sdr-mini ESP32 直驱 2 轴舵机\n"
+        "   方位角 PWM = IO14，俯仰 PWM = IO15，+5V 供电（勿接3V3）\n"
+        "   适合小型八木/手机夹云台，IMU 本地闭环\n\n"
+        "2. rotctld — Hamlib 专业旋转器协议（TCP 4533）\n"
+        "   兼容市面业余无线电 AZ/EL 旋转器，适合大型八木/抛物面\n\n"
+        "3. manual — 无电机，AI 给出方位/俯仰和转动指引\n"
+        "   人工转动，IMU+磁力计回读实际姿态闭环\n\n"
+        "用 gimbal_connect 选择模式，再用 gimbal_point / gimbal_track_satellite 指向。"
+    )
+
+
+def _gimbal_connect(args):
+    gc = _get_gimbal_controller()
+    mode = args.get('mode', 'manual')
+
+    if mode == 'manual':
+        st = gc.use_manual()
+        return f"已进入人工引导模式：{st.backend_info}\nAI 会给出方位/俯仰转动指引，IMU+磁力计回读闭环。"
+
+    if mode == 'rotctld':
+        host = args.get('host', '127.0.0.1')
+        port = int(args.get('port', 4533))
+        st = gc.use_rotctld(host, port)
+        if st.connected:
+            return f"已连接 Hamlib 旋转器 {host}:{port}"
+        return (f"无法连接 rotctld {host}:{port}。\n"
+                f"请确认旋转器/rotctld 已启动（如 rotctld -m 1 -r /dev/ttyUSB0 -t 4533）。\n"
+                f"可先切换 manual 模式做人工引导。")
+
+    if mode == 'board_pwm':
+        st = gc.use_board()
+        if st.connected:
+            return f"已连接板载舵机云台：{st.backend_info}"
+        return ("已选择板载舵机模式，但当前无板子 WebSocket 通道。\n"
+                "桌面端连接 ai-sdr-mini 后会自动注入通道；当前可用 manual 模式。")
+
+    return f"未知模式：{mode}（可选 board_pwm / rotctld / manual）"
+
+
+def _gimbal_point(args):
+    gc = _get_gimbal_controller()
+    az = float(args['azimuth'])
+    el = float(args['elevation'])
+    bw = float(args.get('beamwidth_deg', 10.0))
+    r = gc.point_to(az, el)
+
+    lines = ["=== 天线指向 ===", ""]
+    lines.append(f"后端: {r.get('backend')}")
+    lines.append(f"目标: 方位 {r['target_az']:.1f}°  仰角 {r['target_el']:.1f}°")
+    lines.append(f"当前: 方位 {r.get('current_az', 0):.1f}°  仰角 {r.get('current_el', 0):.1f}°")
+    lines.append(f"偏差: 方位 {r.get('az_error_deg', 0):+.1f}°  仰角 {r.get('el_error_deg', 0):+.1f}°")
+    lines.append("")
+    if r.get('aligned'):
+        lines.append("已对准（偏差在波束宽度内），可以开始接收。")
+    else:
+        lines.append(f"引导: {r.get('guidance', '')}")
+        if r.get('backend') == 'manual':
+            lines.append("（人工模式：按指引转动天线，IMU 会实时回读偏差）")
+    return '\n'.join(lines)
+
+
+def _gimbal_track_satellite(args):
+    gc = _get_gimbal_controller()
+    az = float(args['sat_azimuth'])
+    el = float(args['sat_elevation'])
+    bw = float(args.get('beamwidth_deg', 10.0))
+    r = gc.point_to_satellite(az, el, bw)
+
+    lines = ["=== 卫星跟踪 ===", ""]
+    lines.append(f"卫星方位/仰角: {az:.1f}° / {el:.1f}°  波束宽度: {bw:.0f}°")
+    lines.append(f"当前天线: 方位 {r.get('current_az', 0):.1f}°  仰角 {r.get('current_el', 0):.1f}°")
+    lines.append(f"偏差: 方位 {r.get('az_error_deg', 0):+.1f}°  仰角 {r.get('el_error_deg', 0):+.1f}°")
+    lines.append("")
+    if r.get('aligned'):
+        lines.append("已对准卫星，开始接收过境信号。")
+        lines.append("提示：过境期间卫星持续移动，应按 sky_view_visible 刷新方位角后重复调用本工具跟踪。")
+    else:
+        lines.append(f"引导: {r.get('guidance', '')}")
+    return '\n'.join(lines)
+
+
+def _gimbal_read_pose(args):
+    gc = _get_gimbal_controller()
+    pose = gc.read_pose()
+    return (
+        "=== 天线当前姿态 ===\n\n"
+        f"方位角: {pose.azimuth:.1f}°\n"
+        f"仰角:   {pose.elevation:.1f}°\n"
+        f"模式:   {gc.status.mode.value}\n\n"
+        "方位角 0=北 90=东 180=南 270=西；仰角 0=地平线 90=天顶。"
+    )
+
+
+def _gimbal_stop(args):
+    gc = _get_gimbal_controller()
+    r = gc.stop()
+    return f"云台停止指令已发送（后端 {r.get('backend')}，结果 {r.get('ok')}）。"
+
+
+# ========================================================================
+# 数字模式处理函数（digital_modes.py 的 MCP 适配层）
+# ========================================================================
+
+def _digital_mode_params(args):
+    from mbdsdr_ai import digital_modes as dm
+    mode = args.get('mode', 'FT8').upper()
+
+    lines = [f"=== {mode} 物理层参数 ===", ""]
+    if mode in ("FT8", "FT4"):
+        p = dm.get_ft_params(mode)
+        for k, v in p.items():
+            lines.append(f"{k}: {v}")
+    elif mode == "AIS":
+        for k, v in dm.get_ais_params().items():
+            lines.append(f"{k}: {v}")
+    elif mode in ("ADSB", "ADS-B"):
+        for k, v in dm.get_adsb_params().items():
+            lines.append(f"{k}: {v}")
+    elif mode in ("DVBS", "DVB"):
+        d = dm.get_dvbs_params()
+        for std, params in d.items():
+            lines.append(f"[{std}]")
+            for k, v in params.items():
+                lines.append(f"  {k}: {v}")
+    else:
+        lines.append(f"未知模式 {mode}，可选 FT8/FT4/AIS/ADSB/DVBS")
+    return '\n'.join(lines)
+
+
+def _digital_mode_frequencies(args):
+    from mbdsdr_ai import digital_modes as dm
+    rows = dm.list_ft_frequencies()
+    lines = ["=== FT8/FT4 常用频率 ===", "",
+             f"{'频段':6s} {'FT8(MHz)':12s} {'FT4(MHz)':12s}"]
+    for r in rows:
+        lines.append(f"{r['band']:6s} {r['ft8_mhz']:<12.4f} {r['ft4_mhz']:<12.4f}")
+    lines.append("")
+    lines.append("提示：USB 模式，频率为音频载波基准；RTL-SDR 接收时按此拨号。")
+    return '\n'.join(lines)
+
+
+def _wsjtx_read_decodes(args):
+    import os
+    from mbdsdr_ai import digital_modes as dm
+
+    log_path = args.get('log_path')
+    limit = int(args.get('limit', 30))
+
+    if not log_path:
+        # 跨平台自动探测 WSJT-X ALL.TXT
+        candidates = []
+        home = os.path.expanduser('~')
+        candidates += [
+            os.path.join(home, '.config', 'WSJT-X', 'ALL.TXT'),       # Linux
+            os.path.join(home, 'Library', 'Application Support',
+                         'WSJT-X', 'ALL.TXT'),                        # macOS
+            os.path.join(home, 'AppData', 'Local', 'WSJT-X', 'ALL.TXT'),  # Windows
+            os.path.join(home, 'Documents', 'WSJT-X', 'ALL.TXT'),
+        ]
+        for c in candidates:
+            if os.path.exists(c):
+                log_path = c
+                break
+
+    if not log_path or not os.path.exists(log_path):
+        return ("未找到 WSJT-X ALL.TXT 日志。\n"
+                "请确认本机已安装并运行 WSJT-X，或用 log_path 显式指定。\n"
+                "常见路径：~/.config/WSJT-X/ALL.TXT (Linux)、"
+                "AppData/Local/WSJT-X/ALL.TXT (Windows)。")
+
+    # 直接读末尾 limit 条（ALL.TXT 每行一条解码）
+    msgs = []
+    try:
+        with open(log_path, 'r', errors='replace') as f:
+            all_lines = f.readlines()
+        for line in all_lines[-limit * 3:]:  # 多取些过滤空行
+            line = line.strip()
+            # WSJT-X ALL.TXT 形如: 260918_123456    3   0.2  357.000 ~  CQ ...
+            parts = line.split()
+            if len(parts) >= 5 and parts[0][0].isdigit():
+                msgs.append(line)
+            if len(msgs) >= limit:
+                break
+    except Exception as e:
+        return f"读取日志失败: {e}"
+
+    if not msgs:
+        return f"日志 {log_path} 中暂无解码记录（可能当前时段无信号或未在解码）。"
+
+    lines = [f"=== WSJT-X 最近 {len(msgs)} 条解码 ===", f"来源: {log_path}", ""]
+    lines.extend(msgs)
     return '\n'.join(lines)
