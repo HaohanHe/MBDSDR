@@ -45,6 +45,9 @@ class MainWindow(QMainWindow):
         self._worker: Optional[object] = None
         self._record_timer: Optional[QTimer] = None
         self._record_seconds = 0
+        self._sky_update_timer: Optional[QTimer] = None
+        self._observer_lat = 43.88  # 长春纬度
+        self._observer_lon = 125.32  # 长春经度
 
         # 构建 UI
         self._build_menu_bar()
@@ -621,8 +624,47 @@ class MainWindow(QMainWindow):
                 trajectory.append((az % 360, el))
         self.sky_view.set_trajectory("NOAA-19", trajectory)
 
+        # 启动实时卫星位置更新（每5秒用 sgp4 重新计算）
+        if self._sky_update_timer is None:
+            self._sky_update_timer = QTimer(self)
+            self._sky_update_timer.timeout.connect(self._update_sky_satellites)
+            self._sky_update_timer.start(5000)  # 5秒更新一次
+
+    def _update_sky_satellites(self):
+        """用 sgp4 实时计算卫星位置，更新天空图。"""
+        try:
+            from mbdsdr_ai.decoders import BUILTIN_TLE, SATELLITE_FREQUENCIES, compute_satellite_position
+        except ImportError:
+            return
+
+        satellites = []
+        for name in BUILTIN_TLE:
+            try:
+                pos = compute_satellite_position(
+                    name,
+                    latitude=self._observer_lat,
+                    longitude=self._observer_lon,
+                )
+                if pos and pos.get('elevation_deg', 0) > 0:
+                    freq_hz = SATELLITE_FREQUENCIES.get(name, 0) * 1e6
+                    satellites.append(SkyObject(
+                        name=name,
+                        azimuth_deg=pos.get('azimuth_deg', 0),
+                        elevation_deg=pos.get('elevation_deg', 0),
+                        obj_type="satellite",
+                        frequency_hz=freq_hz,
+                        signal_strength_db=pos.get('signal_strength_db', -100),
+                        description=f"{name} - {pos.get('distance_km', 0):.0f}km",
+                    ))
+            except Exception:
+                continue
+
+        if satellites:
+            self.sky_view.set_objects(satellites)
+            self.statusBar().showMessage(f"天空图已更新: {len(satellites)} 颗可见卫星", 3000)
+
     def _on_sky_object_clicked(self, obj):
-        """天空对象点击处理：显示详情，可选跟踪。"""
+        """天空对象点击处理：显示详情，可选跟踪，并调用 MCP 工具调谐频率。"""
         if obj.obj_type == "satellite":
             # 切换天线指向该卫星
             antenna = AntennaPointing(
@@ -635,15 +677,29 @@ class MainWindow(QMainWindow):
             )
             self.sky_view.set_antenna(antenna)
 
-            # 如果是气象卫星，自动调谐到其频率
+            # 如果是气象卫星，真正调用 MCP 工具调谐到其频率
             if obj.frequency_hz > 0:
                 freq_mhz = obj.frequency_hz / 1e6
                 self.freq_label.setText(f"{freq_mhz:.1f} MHz")
                 self.status_freq.setText(f"频率: {freq_mhz:.1f} MHz")
 
+                # 调用 MCP 工具设置频率（频谱-天空联动）
+                if self._worker:
+                    try:
+                        self._worker.call_tool("sdr_set_frequency", {"frequency_hz": int(obj.frequency_hz)})
+                    except Exception:
+                        pass
+
+                # 同时更新控制面板的频率显示
+                if hasattr(self, 'control_panel'):
+                    try:
+                        self.control_panel.freq_spin.setValue(freq_mhz)
+                    except Exception:
+                        pass
+
             # 状态栏提示
             self.statusBar().showMessage(
-                f"已跟踪 {obj.name} (AZ {obj.azimuth_deg:.1f}°, EL {obj.elevation_deg:.1f}°)",
+                f"已跟踪 {obj.name} (AZ {obj.azimuth_deg:.1f}°, EL {obj.elevation_deg:.1f}°) - 已自动调谐",
                 5000,
             )
         elif obj.obj_type == "interferer":
