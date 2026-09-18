@@ -63,6 +63,20 @@
 #define PIN_LED4          46   // IO46 -> LED4 AI/录音 (黄)
 #define PIN_BUTTON        0    // IO0  -> 复位按钮 (BOOT键复用)
 
+// ==================== 云台/舵机 (v0.7 新增, PH2.0-4Pin: GND/+5V/AZ/EL) ====================
+#define PIN_GIMBAL_AZ     14   // IO14 -> 舵机1 方位角 PWM (LEDC)
+#define PIN_GIMBAL_EL     15   // IO15 -> 舵机2 俯仰角 PWM (LEDC)
+// 舵机由 +5V_USB(保险丝后) 供电, 禁接3V3; 舵机电源端并 100uF+100nF
+#define GIMBAL_LEDC_AZ    0    // LEDC 通道0
+#define GIMBAL_LEDC_EL    1    // LEDC 通道1
+#define SERVO_PWM_FREQ    50   // 舵机频率 50Hz (周期20ms)
+#define SERVO_PWM_RES     16   // 16位分辨率
+// 舵机标定(us): 500us=0°, 2500us=180°; 50Hz@16bit满量程=20000us -> duty = us/20000*65535
+#define SERVO_MIN_US      500
+#define SERVO_MAX_US      2500
+float gimbal_cur_az = -1;       // 当前方位角(-1=未上电/释放)
+float gimbal_cur_el = -1;
+
 // 注(v0.7.1): SI4732_RST=IO11, BMI260_INT1=IO12, TMAG_INT=IO13, 三者已拆开,
 //     不再复用. IMU/MAG 当前用 I2C 轮询读取(sensor_task), 中断脚已接好待启用.
 
@@ -864,6 +878,47 @@ void mcp_sendError(uint8_t client, uint32_t id, int code, const String& msg) {
   webSocket.sendTXT(client, resp);
 }
 
+// ==================== 舵机云台 ====================
+// 角度(0-180) -> LEDC占空比. 50Hz@16bit: 周期20000us=65535
+// 脉宽 500us(0°) ~ 2500us(180°)
+// 兼容 Arduino-ESP32 core 3.x(pin-based) 与 2.x(channel-based)
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  #define GIMBAL_AZ_ARG   PIN_GIMBAL_AZ
+  #define GIMBAL_EL_ARG   PIN_GIMBAL_EL
+#else
+  #define GIMBAL_AZ_ARG   GIMBAL_LEDC_AZ
+  #define GIMBAL_EL_ARG   GIMBAL_LEDC_EL
+#endif
+
+void gimbal_writeAngle(uint8_t pin_or_ch, float angle) {
+  if (angle < 0) angle = 0;
+  if (angle > 180) angle = 180;
+  float us = SERVO_MIN_US + (angle / 180.0) * (SERVO_MAX_US - SERVO_MIN_US);
+  uint32_t duty = (uint32_t)(us / 20000.0 * 65535.0);
+  ledcWrite(pin_or_ch, duty);
+}
+
+void gimbal_init() {
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+  // core 3.x: ledcAttach(pin, freq, resolution), ledcWrite(pin, duty)
+  ledcAttach(PIN_GIMBAL_AZ, SERVO_PWM_FREQ, SERVO_PWM_RES);
+  ledcAttach(PIN_GIMBAL_EL, SERVO_PWM_FREQ, SERVO_PWM_RES);
+#else
+  // core 2.x: ledcSetup(channel,...)+ledcAttachPin(pin,channel), ledcWrite(channel,duty)
+  ledcSetup(GIMBAL_LEDC_AZ, SERVO_PWM_FREQ, SERVO_PWM_RES);
+  ledcSetup(GIMBAL_LEDC_EL, SERVO_PWM_FREQ, SERVO_PWM_RES);
+  ledcAttachPin(PIN_GIMBAL_AZ, GIMBAL_LEDC_AZ);
+  ledcAttachPin(PIN_GIMBAL_EL, GIMBAL_LEDC_EL);
+#endif
+  // 上电先回中位, 避免突然甩动; 收到gimbal_set后才转到目标
+  gimbal_writeAngle(GIMBAL_AZ_ARG, 90);
+  gimbal_writeAngle(GIMBAL_EL_ARG, 45);
+  delay(300);
+  // 释放舵机(停在中位, 不持续发力) — 写0占空比
+  ledcWrite(GIMBAL_AZ_ARG, 0);
+  ledcWrite(GIMBAL_EL_ARG, 0);
+}
+
 void mcp_handleCall(uint8_t client, uint32_t id, const String& method, const String& params) {
   if (method == "tune_fm") {
     // params: {"freq_mhz": 98.5}
@@ -938,6 +993,38 @@ void mcp_handleCall(uint8_t client, uint32_t id, const String& method, const Str
     delay(500);
     ESP.restart();
   }
+  else if (method == "gimbal_set") {
+    // params: {"az": 120.0, "el": 45.0}  角度; az=-1/el=-1 表示释放该轴
+    int paz = params.indexOf("\"az\"");
+    int pel = params.indexOf("\"el\"");
+    if (paz < 0 || pel < 0) { mcp_sendError(client, id, -32602, "missing az/el"); }
+    else {
+      float az = params.substring(paz + 5).toFloat();
+      float el = params.substring(pel + 5).toFloat();
+      String note = "";
+      if (az >= 0) {
+        if (az > 180.0) { az = 180.0; note = "az_clamped_to_180(360连续旋转请用rotctld旋转器)"; }
+        gimbal_writeAngle(GIMBAL_AZ_ARG, az);
+        gimbal_cur_az = az;
+      }
+      if (el >= 0) {
+        if (el > 90.0) el = 90.0;
+        gimbal_writeAngle(GIMBAL_EL_ARG, el * 2.0);  // 俯仰0-90 -> 舵机0-180半程
+        gimbal_cur_el = el;
+      }
+      String resp = "{\"ok\":true,\"az\":" + String(gimbal_cur_az, 1) +
+                    ",\"el\":" + String(gimbal_cur_el, 1);
+      if (note.length()) resp += ",\"note\":\"" + note + "\"";
+      resp += ",\"pins\":{\"az\":14,\"el\":15}}";
+      mcp_sendResponse(client, id, resp);
+    }
+  }
+  else if (method == "gimbal_get") {
+    String resp = "{\"ok\":true,\"az\":" + String(gimbal_cur_az, 1) +
+                  ",\"el\":" + String(gimbal_cur_el, 1) +
+                  ",\"mode\":\"board_pwm\",\"az_range\":\"0-180\",\"el_range\":\"0-90\"}";
+    mcp_sendResponse(client, id, resp);
+  }
   else if (method == "list_tools") {
     // MCP 工具发现: AI 调用此工具获取全部可用工具列表(名称/描述/参数)
     String tools = "[";
@@ -954,6 +1041,8 @@ void mcp_handleCall(uint8_t client, uint32_t id, const String& method, const Str
     tools += "{\"name\":\"trigger_ota\",\"desc\":\"触发OTA升级(返回Web OTA地址和espota命令)\",\"params\":{}},";
     tools += "{\"name\":\"web_ota_url\",\"desc\":\"获取Web OTA升级页面URL(浏览器上传固件.bin)\",\"params\":{}},";
     tools += "{\"name\":\"reboot\",\"desc\":\"重启ESP32\",\"params\":{}},";
+    tools += "{\"name\":\"gimbal_set\",\"desc\":\"驱动板载2轴舵机云台,az方位0-180度,el俯仰0-90度,-1释放;PWM=IO14/IO15,50Hz\",\"params\":{\"az\":\"float\",\"el\":\"float\"}},";
+    tools += "{\"name\":\"gimbal_get\",\"desc\":\"读取云台当前方位/俯仰角度\",\"params\":{}},";
     tools += "{\"name\":\"list_tools\",\"desc\":\"列出所有可用MCP工具(本工具)\",\"params\":{}}";
     tools += "]";
     mcp_sendResponse(client, id, tools);
@@ -1109,7 +1198,11 @@ void setup() {
   delay(10);
   digitalWrite(PIN_HUB_RESET, HIGH);
   Serial.println("[USB2514B] Reset done");
-  
+
+  // 舵机云台 (IO14方位 / IO15俯仰, 50Hz LEDC)
+  gimbal_init();
+  Serial.println("[Gimbal] LEDC servo ready: AZ=IO14, EL=IO15 (idle)");
+
   // WiFi AP模式
   WiFi.mode(WIFI_AP);
   WiFi.softAP(WIFI_SSID, WIFI_PASS);
