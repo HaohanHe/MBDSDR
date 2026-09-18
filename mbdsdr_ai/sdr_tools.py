@@ -1269,6 +1269,24 @@ def register_sdr_tools(agent):
         category="gimbal",
     )
 
+    agent.tool_registry.register(
+        name="gimbal_rssi_sweep",
+        description="定向天线方位测向扫描：云台带动八木/定向天线按步进逐方位转动（默认0-360°每30°），每步稳定后读RSSI，返回方位-RSSI样本和最强信号方位。板载/rotctld自动执行；人工模式返回逐方位转动指引。配合gnss_direction_find做干扰源/信标质心定位。前置：先用全向天线确定干扰频率并调谐，再切定向天线扫描。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "az_start": {"type": "number", "description": "起始方位角（度），默认0"},
+                "az_end": {"type": "number", "description": "结束方位角（度），默认360"},
+                "step": {"type": "number", "description": "方位步进（度），默认30；粗扫30、精扫10"},
+                "elevation": {"type": "number", "description": "扫描时固定仰角（度），默认20"},
+                "settle_sec": {"type": "number", "description": "每步转动后稳定等待秒数，默认0.8"},
+            },
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_gimbal_rssi_sweep(args, agent)),
+        category="gimbal",
+    )
+
     # ========================================================================
     # 数字模式工具（FT8/FT4/AIS/ADS-B/DVB 参数与 WSJT-X 解码）
     # ========================================================================
@@ -4341,6 +4359,57 @@ def _gimbal_stop(args):
     gc = _get_gimbal_controller()
     r = gc.stop()
     return f"云台停止指令已发送（后端 {r.get('backend')}，结果 {r.get('ok')}）。"
+
+
+def _gimbal_rssi_sweep(args, agent=None):
+    gc = _get_gimbal_controller()
+
+    # 注入当前 SDR 后端的 RSSI 读数作为信号强度源
+    rssi_provider = None
+    if agent is not None and getattr(agent, "sdr_manager", None) is not None:
+        backend = agent.sdr_manager.get_active()
+        if backend is not None:
+            def rssi_provider():
+                st = backend.get_status()
+                return float(st.rssi_db)
+            gc.set_rssi_provider(rssi_provider)
+
+    r = gc.sweep_azimuth(
+        az_start=float(args.get("az_start", 0)),
+        az_end=float(args.get("az_end", 360)),
+        step=float(args.get("step", 30)),
+        elevation=float(args.get("elevation", 20)),
+        settle_sec=float(args.get("settle_sec", 0.8)),
+    )
+
+    lines = ["=== 定向天线方位测向扫描 ===", ""]
+    lines.append(f"模式: {'人工引导' if r['manual'] else '自动'}, "
+                 f"步进 {r['step']}°, 仰角 {r['elevation']}°")
+    lines.append("")
+    if r["manual"]:
+        lines.append("逐方位人工流程（转到方位→读RSSI→回填）：")
+        for s in r["samples"]:
+            lines.append(f"  方位 {s['az']:5.0f}°: {s['guidance']}")
+        lines.append("")
+        lines.append("采完各方位 RSSI 后，用 gnss_direction_find 传入 {方位:RSSI} 做质心定位。")
+    else:
+        lines.append(f"{'方位(°)':8s}{'RSSI(dBm)':12s}")
+        for s in r["samples"]:
+            v = f"{s['rssi']:.1f}" if s["rssi"] is not None else "无读数"
+            bar = ""
+            if s["rssi"] is not None:
+                n = max(0, min(30, int((s["rssi"] + 100) / 2)))
+                bar = " " + "#" * n
+            lines.append(f"{s['az']:<8.0f}{v:<12s}{bar}")
+        lines.append("")
+        if r["peak_az"] is not None:
+            lines.append(f"最强信号方位（粗测）: {r['peak_az']:.0f}°")
+            lines.append("把以上 {方位:RSSI} 交给 gnss_direction_find 可做质心精定位，"
+                         "再用 gimbal_point 指向；精扫可把 step 调到 10°。")
+        else:
+            lines.append("未采到 RSSI（SDR 未连接或无读数）；可切 manual 模式人工测向。")
+    return "\n".join(lines)
+
 
 
 # ========================================================================

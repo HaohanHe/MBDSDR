@@ -189,23 +189,32 @@ class WorkflowEngine:
             self.workflows[wf.name] = wf
 
     def _preset_interference_localization(self) -> Workflow:
-        """干扰源定位工作流。"""
+        """干扰源定位工作流（全向检测→定向测向→质心定位→云台指向）。"""
         return Workflow.from_dict({
             "name": "interference_localization",
-            "description": "干扰源定位工作流：频谱扫描→信号检测→方向查找",
+            "description": "干扰源定位：GP全向天线检测干扰频率→切八木/定向天线→云台方位步进测向→质心定位→云台指向",
             "category": "analysis",
-            "tags": ["干扰源", "定位", "频谱扫描", "信号检测"],
+            "tags": ["干扰源", "定位", "测向", "云台", "八木", "频谱扫描"],
             "steps": [
-                {"step_id": 1, "tool_name": "spectrum_analyze", "params": {"freq_start": 0, "freq_end": 6000000000}, "description": "全频段扫描找干扰", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
-                {"step_id": 2, "tool_name": "spectrum_find_signals", "params": {"threshold_db": -60}, "description": "检测强信号", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
-                {"step_id": 3, "tool_name": "identify_modulation", "params": {"path": "{{recording_path}}"}, "description": "识别干扰信号调制方式", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
-                {"step_id": 4, "tool_name": "spectrum_center_offset", "params": {}, "description": "精确估计中心频点偏移", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
+                {"step_id": 1, "tool_name": "spectrum_analyze", "params": {"freq_start": 0, "freq_end": 6000000000}, "description": "阶段一 GP全向天线：全频段扫描，发现异常功率", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
+                {"step_id": 2, "tool_name": "signal_detect_interference", "params": {"threshold_db": -60}, "description": "检测并锁定干扰信号频率/带宽/类型", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
+                {"step_id": 3, "tool_name": "set_frequency", "params": {"frequency_hz": "{{interference_freq_hz}}"}, "description": "接收机调谐到干扰中心频率", "timeout": 15, "retry_on_failure": False, "max_retries": 0, "condition": ""},
+                {"step_id": 4, "tool_name": "gimbal_connect", "params": {"mode": "{{gimbal_mode}}"}, "description": "阶段二 切八木/定向天线并连接云台（board_pwm/rotctld/manual，默认manual）", "timeout": 15, "retry_on_failure": False, "max_retries": 0, "condition": ""},
+                {"step_id": 5, "tool_name": "gimbal_rssi_sweep", "params": {"az_start": 0, "az_end": 360, "step": 30, "elevation": 20}, "description": "阶段三 云台带八木0-360°步进测向，每步读RSSI（人工模式给逐方位指引）", "timeout": 120, "retry_on_failure": True, "max_retries": 1, "condition": ""},
+                {"step_id": 6, "tool_name": "gnss_direction_find", "params": {"rssi_by_azimuth": "{{rssi_by_azimuth}}"}, "description": "阶段四 质心法由方位-RSSI估算干扰源方位角", "timeout": 15, "retry_on_failure": False, "max_retries": 0, "condition": ""},
+                {"step_id": 7, "tool_name": "gimbal_rssi_sweep", "params": {"az_start": "{{peak_az_minus_20}}", "az_end": "{{peak_az_plus_20}}", "step": 10, "elevation": 20}, "description": "阶段五 粗定位方位±20°内10°精扫", "timeout": 90, "retry_on_failure": False, "max_retries": 0, "condition": ""},
+                {"step_id": 8, "tool_name": "gimbal_point", "params": {"azimuth": "{{interference_az}}", "elevation": 20}, "description": "阶段六 云台指向精定位方位，IMU闭环确认对准", "timeout": 20, "retry_on_failure": False, "max_retries": 0, "condition": ""},
             ],
-            "parameters": {"recording_path": {"default": "", "type": "string", "description": "录制文件路径"}},
-            "trigger_phrases": ["找干扰源", "干扰定位", "查干扰", "干扰源在哪"],
+            "parameters": {
+                "interference_freq_hz": {"default": "", "type": "float", "description": "阶段一检测到的干扰中心频率Hz（空则先全扫）"},
+                "gimbal_mode": {"default": "manual", "type": "string", "description": "云台后端 board_pwm/rotctld/manual"},
+                "rssi_by_azimuth": {"default": "", "type": "object", "description": "粗扫得到的{方位:RSSI}，自动传递"},
+                "interference_az": {"default": "", "type": "float", "description": "质心定位得到的干扰方位角，自动传递"},
+            },
+            "trigger_phrases": ["找干扰源", "干扰定位", "查干扰", "干扰源在哪", "干扰源什么方向", "测向"],
             "author": "mbdsdr",
             "source": "preset",
-            "version": 1,
+            "version": 2,
         })
 
     def _preset_noaa_apt(self) -> Workflow:
@@ -318,7 +327,11 @@ class WorkflowEngine:
     # ── 用户工作流加载/保存 ─────────────────────────────
 
     def _load_user_workflows(self):
-        """从 workflows_dir 加载用户自定义工作流。"""
+        """从 workflows_dir 加载用户自定义工作流。
+
+        版本门控：同名工作流若磁盘缓存版本低于内置预设版本（软件升级后
+        残留的旧 preset 导出），不覆盖新预设；用户自定义版本号更高才生效。
+        """
         if not os.path.exists(self.workflows_dir):
             return
         for fname in os.listdir(self.workflows_dir):
@@ -327,6 +340,11 @@ class WorkflowEngine:
                     with open(os.path.join(self.workflows_dir, fname), "r", encoding="utf-8") as f:
                         data = json.load(f)
                     wf = Workflow.from_dict(data)
+                    existing = self.workflows.get(wf.name)
+                    if existing is not None and existing.source == "preset" \
+                            and wf.version <= existing.version:
+                        # 旧版预设缓存，让位给新内置预设
+                        continue
                     wf.source = "user"
                     self.workflows[wf.name] = wf
                 except Exception as e:
