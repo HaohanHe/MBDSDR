@@ -524,6 +524,8 @@ class AISDRMiniBackend(SDRBackend):
                 self._start_time = time.time()
                 # 拉取当前状态
                 self._refresh_status()
+                # 注入云台板载通道：gimbal board_pwm 模式经此 WebSocket 下发
+                self._inject_gimbal_channel(available=True)
                 return True
             else:
                 self.disconnect()
@@ -533,6 +535,33 @@ class AISDRMiniBackend(SDRBackend):
             self._ws = None
             return False
 
+    def _inject_gimbal_channel(self, available: bool):
+        """连接成功后把板子 MCP 通道注入全局云台控制器（断开则清除）。"""
+        try:
+            from mbdsdr_ai.sdr_tools import _get_gimbal_controller
+            gc = _get_gimbal_controller()
+            if available:
+                gc.board.set_send_callable(
+                    lambda method, params: self._send_mcp(method, params) or {}
+                )
+                # 若当前就是板载模式，刷新连接状态
+                if gc.status.mode.value == "board_pwm":
+                    gc.status.connected = True
+            else:
+                gc.board.set_send_callable(None)
+                if gc.status.mode.value == "board_pwm":
+                    gc.status.connected = False
+        except Exception:
+            pass  # 云台模块缺失不影响 SDR 主功能
+
+    def gimbal_set(self, az: float, el: float) -> Optional[Dict]:
+        """驱动板载舵机云台（az 0-180°, el 0-90°, 负值释放）。"""
+        return self._send_mcp("gimbal_set", {"az": az, "el": el})
+
+    def gimbal_get(self) -> Optional[Dict]:
+        """读取板载云台当前角度。"""
+        return self._send_mcp("gimbal_get", {})
+
     def disconnect(self):
         if self._ws:
             try:
@@ -540,6 +569,7 @@ class AISDRMiniBackend(SDRBackend):
             except Exception:
                 pass
             self._ws = None
+        self._inject_gimbal_channel(available=False)
         super().disconnect()
 
     def _refresh_status(self):
