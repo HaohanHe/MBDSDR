@@ -1267,6 +1267,96 @@ def register_sdr_tools(agent):
         category="radio_control",
     )
 
+    # ========================================================================
+    # 气象卫星接收与解码工具
+    # ========================================================================
+
+    agent.tool_registry.register(
+        name="meteor_list_satellites",
+        description="列出所有支持的气象卫星（GK-2A/风云四号/风云三号/GOES），显示下行频率、符号率、调制方式等参数。用于赛前选择目标卫星。",
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_meteor_list_sats(args)),
+        category="meteor",
+    )
+
+    agent.tool_registry.register(
+        name="meteor_get_params",
+        description="获取指定气象卫星的完整接收参数（频率、符号率、调制、Viterbi参数）。用于配置SDR和解调器。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "satellite": {"type": "string", "description": "卫星名称key，如 gk2a_lrit / fy4a_lrit / fy3_hrpt"},
+            },
+            "required": ["satellite"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_meteor_get_params(args)),
+        category="meteor",
+    )
+
+    agent.tool_registry.register(
+        name="meteor_demod_setup",
+        description="配置气象卫星解调器（QPSK解调参数）。输入卫星名称，自动设置符号率、中心频率、Viterbi参数。用于SatDump/GNU Radio配置参考。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "satellite": {"type": "string", "description": "卫星名称key"},
+                "sdr_type": {"type": "string", "description": "SDR类型（rtlsdr/plutosdr/其他）", "default": "rtlsdr"},
+            },
+            "required": ["satellite"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_meteor_demod_setup(args)),
+        category="meteor",
+    )
+
+    agent.tool_registry.register(
+        name="lro_orbit_info",
+        description="获取LRO（月球勘测轨道飞行器）轨道信息。包括轨道高度、周期、倾角、多普勒范围。用于深空追迹定轨比赛的前期准备。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "altitude_km": {"type": "number", "description": "轨道高度（km），默认50", "default": 50.0},
+                "inclination_deg": {"type": "number", "description": "轨道倾角（度），默认90", "default": 90.0},
+            },
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_lro_orbit_info(args)),
+        category="meteor",
+    )
+
+    agent.tool_registry.register(
+        name="lro_doppler_predict",
+        description="预测LRO多普勒频移范围。输入观测时长，计算在月球轨道上的最大多普勒频移，用于设置接收机带宽。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "freq_hz": {"type": "number", "description": "载波频率（Hz），S-band约2.2GHz", "default": 2200e6},
+                "observation_time_s": {"type": "number", "description": "观测时长（秒），默认600", "default": 600.0},
+            },
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_lro_doppler_predict(args)),
+        category="meteor",
+    )
+
+    agent.tool_registry.register(
+        name="lro_od_demo",
+        description="LRO多普勒定轨演示。用模拟多普勒观测数据，运行EKF定轨算法，输出轨道估计结果和误差。用于比赛前的算法验证。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "n_observations": {"type": "number", "description": "观测点数，默认100", "default": 100},
+                "noise_std_mm_s": {"type": "number", "description": "多普勒噪声标准差（mm/s），默认1.0", "default": 1.0},
+            },
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_lro_od_demo(args)),
+        category="meteor",
+    )
+
 
 # ═══════════════════════════════════════════════════════
 # 工具实现函数
@@ -3217,5 +3307,241 @@ def _morse_decode(args):
     lines = ["=== Morse 解码 ==="]
     lines.append(f"Morse: {morse}")
     lines.append(f"文本: {result}")
+
+    return '\n'.join(lines)
+
+
+# ========================================================================
+# 气象卫星接收与解码工具实现
+# ========================================================================
+
+def _meteor_list_sats(args):
+    """列出所有支持的气象卫星。"""
+    from mbdsdr_ai.meteor_sat import list_meteor_satellites
+
+    sats = list_meteor_satellites()
+    lines = ["=== 支持的气象卫星 ==="]
+    lines.append("")
+    lines.append(f"共 {len(sats)} 颗卫星：")
+    lines.append("")
+
+    for s in sats:
+        lines.append(f"【{s['name']}】")
+        lines.append(f"  频率: {s['frequency_mhz']:.1f} MHz")
+        lines.append(f"  符号率: {s['symbol_rate_ksps']:.0f} ksps")
+        lines.append(f"  调制: {s['modulation']}")
+        lines.append(f"  轨道: {s['orbital_type']}")
+        lines.append(f"  key: {s['key']}")
+        lines.append(f"  说明: {s['description']}")
+        lines.append("")
+
+    lines.append("使用 meteor_get_params 获取完整参数，meteor_demod_setup 配置解调器。")
+    return '\n'.join(lines)
+
+
+def _meteor_get_params(args):
+    """获取卫星参数。"""
+    from mbdsdr_ai.meteor_sat import get_satellite_params
+
+    key = args['satellite'].lower()
+    sat = get_satellite_params(key)
+
+    if sat is None:
+        return f"错误: 未找到卫星 '{key}'。使用 meteor_list_satellites 查看可用卫星。"
+
+    lines = [f"=== {sat.name} 参数 ==="]
+    lines.append("")
+    lines.append(f"下行频率: {sat.downlink_freq_hz/1e6:.3f} MHz")
+    lines.append(f"符号率: {sat.symbol_rate/1000:.0f} ksps")
+    lines.append(f"调制方式: {sat.modulation}")
+    lines.append(f"Viterbi码率: 1/{int(1/sat.viterbi_rate)}")
+    lines.append(f"Viterbi约束长度: K={sat.viterbi_K}")
+    lines.append(f"Viterbi生成多项式: G1={oct(sat.viterbi_g1)}, G2={oct(sat.viterbi_g2)}")
+    lines.append(f"解扰方式: {sat.descrambler}")
+    lines.append(f"CADU长度: {sat.cadu_length} bytes")
+    lines.append(f"轨道类型: {sat.orbital_type}")
+    lines.append("")
+    lines.append(f"说明: {sat.description}")
+
+    return '\n'.join(lines)
+
+
+def _meteor_demod_setup(args):
+    """配置解调器。"""
+    from mbdsdr_ai.meteor_sat import get_satellite_params
+
+    key = args['satellite'].lower()
+    sdr_type = args.get('sdr_type', 'rtlsdr')
+    sat = get_satellite_params(key)
+
+    if sat is None:
+        return f"错误: 未找到卫星 '{key}'。"
+
+    lines = [f"=== {sat.name} 解调器配置 ==="]
+    lines.append("")
+    lines.append("【SatDump配置参考】")
+    lines.append(f"  中心频率: {sat.downlink_freq_hz/1e6:.3f} MHz")
+    lines.append(f"  符号率: {sat.symbol_rate/1000:.0f} ksps")
+    lines.append(f"  调制: {sat.modulation}")
+    lines.append(f"  Viterbi: 1/{int(1/sat.viterbi_rate)} K={sat.viterbi_K}")
+    lines.append("")
+    lines.append("【SDR采样率建议】")
+    if sdr_type == 'rtlsdr':
+        lines.append(f"  RTL-SDR: 采样率 2.048 MSPS（ oversample ~16x）")
+        lines.append(f"  RTL-SDR: 增益 30-40 dB（按需调整）")
+    elif sdr_type == 'plutosdr':
+        lines.append(f"  PlutoSDR: 采样率 2.5 MSPS")
+        lines.append(f"  PlutoSDR: 带宽 1.5 MHz")
+    lines.append("")
+    lines.append("【天线指向】")
+    if sat.orbital_type == "GEO":
+        lines.append(f"  同步轨道: 固定指向卫星方位角/仰角")
+        lines.append(f"  建议: 用Look4Sat计算方位角仰角，粗对后SatDump频谱细调")
+    else:
+        lines.append(f"  极轨卫星: 需要跟踪过境轨迹")
+        lines.append(f"  建议: 提前10分钟开始跟踪，对准预测轨迹")
+    lines.append("")
+    lines.append("【接收链路】")
+    lines.append("  天线 → 馈源 → LNA → 带通滤波 → SDR → 解调 → 图像")
+
+    return '\n'.join(lines)
+
+
+def _lro_orbit_info(args):
+    """LRO轨道信息。"""
+    from mbdsdr_ai.meteor_sat import LROOrbit
+
+    alt = args.get('altitude_km', 50.0)
+    inc = args.get('inclination_deg', 90.0)
+
+    orbit = LROOrbit(altitude_km=alt, inclination_deg=inc)
+
+    lines = ["=== LRO 月球轨道信息 ==="]
+    lines.append("")
+    lines.append(f"轨道高度: {alt:.0f} km")
+    lines.append(f"轨道倾角: {inc:.0f} 度")
+    lines.append(f"轨道半径: {orbit.radius/1000:.1f} km")
+    lines.append(f"轨道周期: {orbit.period/60:.1f} 分钟")
+    lines.append(f"平均运动: {orbit.mean_motion*1000:.4f} mrad/s")
+    lines.append("")
+    lines.append("【多普勒定轨关键参数】")
+    lines.append("  载波频率: S-band ~2.2 GHz")
+    lines.append("  多普勒积分: 5 秒")
+    lines.append("  多普勒精度: ~1 mm/s (White Sands) / ~8 mm/s (其他站)")
+    lines.append("  定轨方法: EKF / 最小二乘")
+    lines.append("")
+    lines.append("【观测建议】")
+    lines.append("  1. 提前预测LRO过境时间")
+    lines.append("  2. 手动对准预计位置")
+    lines.append("  3. 采集IQ数据并提取多普勒频率")
+    lines.append("  4. 用EKF解算轨道")
+
+    return '\n'.join(lines)
+
+
+def _lro_doppler_predict(args):
+    """LRO多普勒预测。"""
+    import numpy as np
+    from mbdsdr_ai.meteor_sat import LROOrbit, doppler_shift, MOON_RADIUS
+
+    freq = args.get('freq_hz', 2200e6)
+    obs_time = args.get('observation_time_s', 600.0)
+
+    orbit = LROOrbit(altitude_km=50)
+
+    # 模拟一个观测过程
+    dt = 1.0  # 1秒采样
+    times = np.arange(0, obs_time, dt)
+
+    # 地面站位置（月面观测站，简化为月心坐标系原点附近）
+    station_pos = np.array([MOON_RADIUS, 0, 0])
+
+    doppler_values = []
+    for t in times:
+        pos = orbit.position(t)
+        vel = orbit.velocity(t)
+        dop = doppler_shift(pos, vel, station_pos, freq)
+        doppler_values.append(dop)
+
+    dop_arr = np.array(doppler_values)
+
+    lines = ["=== LRO 多普勒预测 ==="]
+    lines.append("")
+    lines.append(f"载波频率: {freq/1e9:.2f} GHz")
+    lines.append(f"观测时长: {obs_time:.0f} 秒")
+    lines.append(f"最大多普勒频移: {np.max(np.abs(dop_arr)):.1f} Hz")
+    lines.append(f"多普勒范围: [{np.min(dop_arr):.1f}, {np.max(dop_arr):.1f}] Hz")
+    lines.append(f"多普勒变化率: {np.max(np.abs(np.diff(dop_arr))):.2f} Hz/s")
+    lines.append("")
+    lines.append("【接收机带宽建议】")
+    bw = np.max(np.abs(dop_arr)) * 2 + 100  # 余量
+    lines.append(f"  建议带宽: {bw/1000:.1f} kHz")
+    lines.append("")
+    lines.append("【注意】")
+    lines.append("  1. 实际多普勒受轨道倾角和地面站位置影响")
+    lines.append("  2. 比赛中2.2GHz带通滤波器带宽约20MHz")
+    lines.append("  3. 需要用LNA放大信号（LRO信号极弱）")
+
+    return '\n'.join(lines)
+
+
+def _lro_od_demo(args):
+    """LRO定轨演示。"""
+    import numpy as np
+    from mbdsdr_ai.meteor_sat import LROOrbit, doppler_shift, ekf_orbit_determination, MOON_RADIUS
+
+    n_obs = int(args.get('n_observations', 100))
+    noise_std = args.get('noise_std_mm_s', 1.0)
+
+    # 生成模拟观测数据
+    orbit = LROOrbit(altitude_km=50, inclination_deg=90)
+    station_pos = np.array([MOON_RADIUS, 0, 0])
+    freq = 2200e6
+
+    dt = 10.0  # 10秒间隔
+    times = np.arange(n_obs) * dt
+
+    true_states = []
+    observations = []
+    for t in times:
+        pos = orbit.position(t)
+        vel = orbit.velocity(t)
+        true_states.append(np.concatenate([pos, vel]))
+
+        dop = doppler_shift(pos, vel, station_pos, freq)
+        # 加入噪声（mm/s级 -> Hz）
+        c = 299792458.0
+        noise_vel = np.random.randn() * noise_std / 1000.0  # m/s
+        dop_noisy = dop - noise_vel / c * freq
+        observations.append((t, dop_noisy))
+
+    # EKF定轨
+    true_states = np.array(true_states)
+    initial_state = true_states[0] + np.random.randn(6) * [1e3, 1e3, 1e3, 100, 100, 100]
+
+    Q = np.eye(6) * 10  # 过程噪声
+    R = np.array([[(noise_std/1000.0/freq*299792458.0)**2]])  # 测量噪声
+
+    states, covs = ekf_orbit_determination(observations, initial_state, Q, R)
+
+    # 计算误差
+    errors = np.linalg.norm(states[:, :3] - true_states[:, :3], axis=1)
+
+    lines = ["=== LRO 多普勒定轨演示 ==="]
+    lines.append("")
+    lines.append(f"观测点数: {n_obs}")
+    lines.append(f"观测间隔: {dt:.0f} 秒")
+    lines.append(f"多普勒噪声: {noise_std:.1f} mm/s")
+    lines.append("")
+    lines.append("【定轨结果】")
+    lines.append(f"  初始位置误差: {np.linalg.norm(states[0,:3]-true_states[0,:3])/1000:.2f} km")
+    lines.append(f"  最终位置误差: {errors[-1]/1000:.2f} km")
+    lines.append(f"  平均位置误差: {np.mean(errors)/1000:.2f} km")
+    lines.append("")
+    lines.append("【比赛建议】")
+    lines.append("  1. 实际LRO轨道用SPICE kernel计算（sgp4不适用月球）")
+    lines.append("  2. 多普勒积分时间5秒，精度1mm/s")
+    lines.append("  3. EKF需要月球重力场模型（JGL系列）")
+    lines.append("  4. 比赛成绩看轨道误差（km级）")
 
     return '\n'.join(lines)
