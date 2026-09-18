@@ -349,7 +349,7 @@ class WorkflowEngine:
     # ── 参数模板解析 ────────────────────────────────────
 
     def _resolve_params(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        """解析参数模板（{{variable}}）。"""
+        """解析参数模板（{{variable}}），纯数字字符串自动转 int/float。"""
         resolved = {}
         for key, value in params.items():
             if isinstance(value, str):
@@ -357,7 +357,15 @@ class WorkflowEngine:
                 def replace_var(match):
                     var_name = match.group(1)
                     return str(context.get(var_name, match.group(0)))
-                resolved[key] = re.sub(r'\{\{(\w+)\}\}', replace_var, value)
+                resolved_str = re.sub(r'\{\{(\w+)\}\}', replace_var, value)
+                # 如果整个值是纯数字，自动转换类型（避免工具收到字符串数字报 TypeError）
+                if resolved_str.lstrip('-').isdigit():
+                    resolved[key] = int(resolved_str)
+                else:
+                    try:
+                        resolved[key] = float(resolved_str)
+                    except ValueError:
+                        resolved[key] = resolved_str
             else:
                 resolved[key] = value
         return resolved
@@ -467,9 +475,19 @@ class WorkflowEngine:
 
             # 将结果存入上下文（供后续步骤使用）
             context[f"step_{step.step_id}_result"] = result
-            if isinstance(result, dict):
-                for k, v in result.items():
-                    context[k] = v
+            # 解析 ToolResult 的 content 为 dict，提取关键字段供后续步骤模板使用
+            result_dict = None
+            if hasattr(result, 'content') and result.content:
+                try:
+                    result_dict = json.loads(result.content) if isinstance(result.content, str) else result.content
+                except (json.JSONDecodeError, TypeError):
+                    result_dict = None
+            elif isinstance(result, dict):
+                result_dict = result
+            if isinstance(result_dict, dict):
+                for k, v in result_dict.items():
+                    if isinstance(v, (str, int, float, bool)):
+                        context[k] = v
 
         # 更新统计
         workflow.usage_count += 1
