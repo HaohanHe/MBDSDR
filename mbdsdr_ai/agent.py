@@ -84,6 +84,12 @@ class MBDSDRAgent:
             timeout=self.config.timeout,
         )
 
+        # 从真实 API 获取模型列表（失败则 fallback 到内置列表，不阻塞初始化）
+        try:
+            self.model_manager.fetch_models(force_refresh=True)
+        except Exception:
+            pass
+
         self.tool_registry = ToolRegistry(
             tool_output_max_chars=self.config.tool_output_max_chars,
         )
