@@ -1273,14 +1273,14 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="meteor_list_satellites",
-        description="列出所有支持的气象卫星（GK-2A/风云四号/风云三号/GOES），显示下行频率、符号率、调制方式等参数。用于赛前选择目标卫星。",
+        description="列出所有支持的气象卫星（GK-2A/风云四号/风云三号/GOES），显示下行频率、符号率、调制方式等参数。参考开源项目：SatDump/goestools/medet/aptdec。",
         parameters={
             "type": "object",
             "properties": {},
             "required": [],
         },
         handler=lambda args: ToolResult(success=True, content=_meteor_list_sats(args)),
-        category="meteor",
+        category="satellite",
     )
 
     agent.tool_registry.register(
@@ -1294,7 +1294,7 @@ def register_sdr_tools(agent):
             "required": ["satellite"],
         },
         handler=lambda args: ToolResult(success=True, content=_meteor_get_params(args)),
-        category="meteor",
+        category="satellite",
     )
 
     agent.tool_registry.register(
@@ -1309,12 +1309,12 @@ def register_sdr_tools(agent):
             "required": ["satellite"],
         },
         handler=lambda args: ToolResult(success=True, content=_meteor_demod_setup(args)),
-        category="meteor",
+        category="satellite",
     )
 
     agent.tool_registry.register(
         name="lro_orbit_info",
-        description="获取LRO（月球勘测轨道飞行器）轨道信息。包括轨道高度、周期、倾角、多普勒范围。用于深空追迹定轨比赛的前期准备。",
+        description="获取LRO（月球勘测轨道飞行器）轨道信息。包括轨道高度、周期、倾角、多普勒范围。用于深空探测器跟踪与轨道计算。",
         parameters={
             "type": "object",
             "properties": {
@@ -1324,7 +1324,7 @@ def register_sdr_tools(agent):
             "required": [],
         },
         handler=lambda args: ToolResult(success=True, content=_lro_orbit_info(args)),
-        category="meteor",
+        category="satellite",
     )
 
     agent.tool_registry.register(
@@ -1339,12 +1339,12 @@ def register_sdr_tools(agent):
             "required": [],
         },
         handler=lambda args: ToolResult(success=True, content=_lro_doppler_predict(args)),
-        category="meteor",
+        category="satellite",
     )
 
     agent.tool_registry.register(
         name="lro_od_demo",
-        description="LRO多普勒定轨演示。用模拟多普勒观测数据，运行EKF定轨算法，输出轨道估计结果和误差。用于比赛前的算法验证。",
+        description="LRO多普勒定轨演示。用模拟多普勒观测数据，运行EKF定轨算法，输出轨道估计结果和误差。参考：NASA LRO POD技术文档。",
         parameters={
             "type": "object",
             "properties": {
@@ -1354,7 +1354,7 @@ def register_sdr_tools(agent):
             "required": [],
         },
         handler=lambda args: ToolResult(success=True, content=_lro_od_demo(args)),
-        category="meteor",
+        category="satellite",
     )
 
 
@@ -3479,7 +3479,7 @@ def _lro_doppler_predict(args):
     lines.append("")
     lines.append("【注意】")
     lines.append("  1. 实际多普勒受轨道倾角和地面站位置影响")
-    lines.append("  2. 比赛中2.2GHz带通滤波器带宽约20MHz")
+    lines.append("  2. 实际2.2GHz带通滤波器带宽约20MHz")
     lines.append("  3. 需要用LNA放大信号（LRO信号极弱）")
 
     return '\n'.join(lines)
@@ -3538,10 +3538,10 @@ def _lro_od_demo(args):
     lines.append(f"  最终位置误差: {errors[-1]/1000:.2f} km")
     lines.append(f"  平均位置误差: {np.mean(errors)/1000:.2f} km")
     lines.append("")
-    lines.append("【比赛建议】")
+    lines.append("【技术建议】")
     lines.append("  1. 实际LRO轨道用SPICE kernel计算（sgp4不适用月球）")
     lines.append("  2. 多普勒积分时间5秒，精度1mm/s")
     lines.append("  3. EKF需要月球重力场模型（JGL系列）")
-    lines.append("  4. 比赛成绩看轨道误差（km级）")
+    lines.append("  4. 轨道误差评估（km级）")
 
     return '\n'.join(lines)
