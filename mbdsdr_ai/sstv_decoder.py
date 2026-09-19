@@ -41,8 +41,8 @@ SSTV_MODES = {
         "sync_ms": 4.862,
         "sep_freq": 1500,
         "sep_ms": 0.572,
-        "channel_order": ["G", "B", "R"],
-        "pixel_ms": 0.2288,  # 73.216ms / 320
+        "channel_order": ["G", "B", "R"],  # pysstv MartinM1 COLOR_SEQ=(green,blue,red)
+        "pixel_ms": 0.4576,  # SCAN 146.432ms / 320，单通道像素时钟
     },
     "Scottie S1": {
         "vis_code": 0x3C,
@@ -258,11 +258,11 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
     # 计算瞬时频率
     freq = _instantaneous_frequency(samples, sr)
 
-    # 检测模式
+    # 检测模式。VIS 头同时给出图像数据起点 data_start，无论是否自动选模式
+    # 都需要它来跳过 leader/校准脉冲，否则显式指定模式时会从 VIS 头里误锁同步。
     detected_mode = mode
-    data_start = 0
+    vis_code, data_start = _detect_vis_header(freq, sr)
     if mode == "auto":
-        vis_code, data_start = _detect_vis_header(freq, sr)
         if vis_code is not None:
             for mname, mdef in SSTV_MODES.items():
                 if mdef["vis_code"] == vis_code:
@@ -281,44 +281,92 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
     # 初始化图像
     image = np.zeros((height, width, 3), dtype=np.uint8)
 
-    # 逐行解码
-    pos = data_start
-    sync_samples = int(sr * mdef["sync_ms"] / 1000)
-    sep_samples = int(sr * mdef["sep_ms"] / 1000)
-    pixel_samples = max(1, int(sr * mdef["pixel_ms"] / 1000))
-    channel_samples = pixel_samples * width
+    # --- 鲁棒行同步：先检测候选同步段，再按行周期跟踪/外推 ---
+    # 噪声会让 1200Hz 同步段的瞬时频率抖出判据带而被切碎，因此：
+    # 1) 对 |f-1200|<=110Hz 二值图做形态学闭运算，桥接亚毫秒级抖动；
+    # 2) 保留长度 >=60% 标称同步时长的段作为候选；
+    # 3) 以行周期跟踪，某行同步丢失时按周期外推（FM 内容位置仍准确）。
+    fr = np.where(np.isfinite(freq), freq, 1500.0)
+    sync_band = np.abs(fr - 1200.0) <= 110.0
+    sync_band[:data_start] = False
+    min_sync_len = int(0.6 * sr * mdef["sync_ms"] / 1000)
+    candidates = []
+    try:
+        from scipy import ndimage as _ndi
+        labeled = _ndi.label(sync_band)[0]
+        for k in range(1, int(labeled.max()) + 1):
+            idx = np.where(labeled == k)[0]
+            if len(idx) >= min_sync_len:
+                candidates.append(int(idx[0]))
+    except Exception:
+        i = data_start
+        while i < len(fr):
+            if sync_band[i]:
+                j = i
+                while j < len(fr) and sync_band[j]:
+                    j += 1
+                if j - i >= min_sync_len:
+                    candidates.append(i)
+                i = j
+            else:
+                i += 1
 
-    for row in range(height):
-        if pos + sync_samples + sep_samples + channel_samples * 3 >= len(freq):
+    # 行周期 = 同步 + 起始分隔 + 3*(通道像素 + 通道间隔)
+    row_period_ms = (mdef["sync_ms"] + mdef["sep_ms"]
+                     + 3 * (mdef["pixel_ms"] * width + mdef["sep_ms"]))
+    row_period = int(round(row_period_ms * sr / 1000.0))
+    sync_starts = []
+    if candidates:
+        window = int(0.012 * sr)  # 期望位置 ±12ms 内接受候选
+        # 首锚点必须成周期序列：其后 1/2/3 个行周期位置至少 2 个仍有候选，
+        # 以剔除噪声在首行前制造的孤立假同步段（周期外推对首锚点极敏感）。
+        first = None
+        for c in candidates:
+            hits = sum(
+                1 for k in (1, 2, 3)
+                if any(abs(x - (c + k * row_period)) <= window for x in candidates)
+            )
+            if hits >= 2:
+                first = c
+                break
+        if first is None:
+            first = candidates[0]
+        for row in range(height):
+            expected = first + row * row_period
+            near = [c for c in candidates if abs(c - expected) <= window]
+            sync_starts.append(min(near, key=lambda c: abs(c - expected))
+                               if near else expected)
+
+    sync_samples = int(round(sr * mdef["sync_ms"] / 1000))
+    sep_samples = int(round(sr * mdef["sep_ms"] / 1000))
+    # 像素时钟用浮点累积（如 Martin M1 为 20.18 样本/像素），int 截断会让
+    # 每个通道短约 1.3ms，累积到第二、三通道造成水平错位（棋盘格反相）。
+    px_float = sr * mdef["pixel_ms"] / 1000.0
+    channel_samples = int(round(px_float * width))
+    half_win = max(1, int(round(px_float * 0.4)))
+
+    n_rows = min(height, len(sync_starts))
+    for row in range(n_rows):
+        # 同步起点 + 同步脉冲 + 起始分隔，到达第一个颜色通道。
+        pos = sync_starts[row] + sync_samples + sep_samples
+        if pos + channel_samples * 3 >= len(freq):
             break
 
-        # 找同步脉冲（1200Hz）
-        sync_search_end = min(pos + sync_samples * 3, len(freq))
-        sync_found = False
-        for s in range(pos, sync_search_end):
-            if 1100 < freq[s] < 1300:
-                pos = s
-                sync_found = True
-                break
-
-        # 跳过同步 + 分隔
-        pos += sync_samples + sep_samples
-
-        # 采样三个通道
+        # 采样三个通道（pysstv Martin：每通道后都有 INTER_CH_GAP 黑电平间隔）
         channel_data = {}
         for ch_name in mdef["channel_order"]:
             if pos + channel_samples >= len(freq):
                 break
-            # 每像素取中间样本
+            # 按浮点像素时钟取每个像素中心窗口的均值
             pixels = np.zeros(width, dtype=np.uint8)
             for px in range(width):
-                px_start = pos + px * pixel_samples
-                px_end = min(px_start + pixel_samples, len(freq))
-                if px_end > px_start:
-                    px_freq = np.mean(freq[px_start:px_end])
-                    pixels[px] = _freq_to_pixel(px_freq)
+                center = int(round(pos + (px + 0.5) * px_float))
+                a = max(0, center - half_win)
+                b = min(center + half_win, len(freq))
+                if b > a:
+                    pixels[px] = _freq_to_pixel(np.mean(freq[a:b]))
             channel_data[ch_name] = pixels
-            pos += channel_samples
+            pos += channel_samples + sep_samples
 
         # 组合 RGB
         if "R" in channel_data and "G" in channel_data and "B" in channel_data:
