@@ -1439,7 +1439,7 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="amr_classify",
-            description="自动调制识别（AMR）。分析信号的调制方式，支持 AM/FM/SSB/CW/FSK/PSK/QAM/OFDM/NOISE。使用 KNN 机器学习分类器（24维特征，内置45个训练样本），输出预测调制方式、置信度、前K候选。这是真正的机器学习分类器，不是规则猜测。",
+            description="自动调制识别（AMR）。分析信号的调制方式，支持 AM/FM/SSB/CW/FSK/PSK/QAM/OFDM/NOISE。使用 KNN 机器学习分类器（25维真实FFT特征，内置128个多SNR训练模板），输出预测调制方式、置信度、前K候选。这是真正的机器学习分类器，不是规则猜测。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -1454,7 +1454,7 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="amr_extract_features",
-            description="从 IQ 样本中提取 24 维 AMR 特征。包括时域特征（幅度统计/峰均比/偏度/峰度）、频域特征（带宽/频谱质心/平坦度/滚降）、统计特征（过零率/瞬时频率/相位/IQ相关性/星座图密度）。",
+            description="从 IQ 样本中提取 25 维 AMR 特征。包括时域特征（幅度统计/峰均比/偏度/峰度）、频域特征（带宽/频谱质心/平坦度/滚降/频谱幅度变异系数）、统计特征（过零率/瞬时频率/相位/IQ相关性/星座图密度）。",
             parameters={
                 "type": "object",
                 "properties": {
