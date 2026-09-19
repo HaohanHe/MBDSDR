@@ -278,6 +278,9 @@ class ToolRegistry:
 
         # 参数别名归一化：弱模型可能传 path/freq/gain 等别名，自动映射到标准参数名
         # 仅当标准键不存在时才映射，不覆盖已有值
+        # 关键：必须按"目标工具 schema 实际声明的键"来映射，否则会把工具本来就接受的
+        # 标准名（如 meteor 工具的 satellite、workflow_execute 的 workflow_name）
+        # 错误改名为另一个工具才用的 satellite_name/name，导致模型传对了反而报缺参。
         _PARAM_ALIASES = {
             "path": "file_path", "freq": "frequency_hz", "frequency": "frequency_hz",
             "samplerate": "sample_rate_hz", "sample_rate": "sample_rate_hz",
@@ -292,13 +295,16 @@ class ToolRegistry:
             "workflow_description": "description", "subagent_type": "type",
             "task": "goal", "input": "goal", "prompt": "goal",
         }
+        tool_def = tool.get("definition", {}).get("function", {})
+        _prop_keys = set(tool_def.get("parameters", {}).get("properties", {}).keys())
         if isinstance(args, dict):
             for _alias, _std in _PARAM_ALIASES.items():
-                if _alias in args and _std not in args:
+                # 仅当：模型传了别名、没传标准名、且该工具确实声明标准名、且未声明别名本身时才映射
+                if (_alias in args and _std not in args
+                        and _std in _prop_keys and _alias not in _prop_keys):
                     args[_std] = args.pop(_alias)
 
         # required 参数预校验：缺失时返回明确错误，不让 handler 抛 KeyError
-        tool_def = tool.get("definition", {}).get("function", {})
         required_params = tool_def.get("parameters", {}).get("required", [])
         if required_params and isinstance(args, dict):
             missing = [p for p in required_params if p not in args or args[p] is None]
