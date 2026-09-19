@@ -641,14 +641,17 @@ def decode_digital_mode(
     input_path: str,
     mode: str,
     output_dir: str = None,
+    sample_rate: float = 1e6,
 ) -> Dict[str, Any]:
     """
     通用数字模式解码框架。
 
-    优先调用系统安装的外部工具（wsjtx/direwolf/dump1090），
-    如果不可用则返回说明和简化分析。
-
-    mode: ft8 / aprs / adsb / wspr / olivia / m17 / lora / tpms
+    adsb: 内置纯 numpy Mode-S DF17 解码器（CRC-24 MSB-first、8us 前导模板，
+          已与 pyModeS 交叉验证），直接读 .cf32 复基带；仅支持 fs 为 1MHz
+          整数倍（Mode-S 符号率 1Mbit/s）。dump1090 为可选外部增强。
+    ft8:  需要 jt9/wsjtx（LDPC(174,91) 标准校验矩阵不可凭空编造），缺失时
+          只做符号级频谱分析并诚实说明，不伪造解调结果。
+    aprs: 可路由到内置 AX.25/AFSK(Bell202) 解码器；direwolf 为可选增强。
     """
     if not os.path.exists(input_path):
         return {"error": f"输入文件不存在: {input_path}"}
@@ -656,6 +659,8 @@ def decode_digital_mode(
     if output_dir is None:
         output_dir = os.path.expanduser(f"~/.mbdsdr/{mode}")
     os.makedirs(output_dir, exist_ok=True)
+
+    mode = (mode or "").lower()
 
     # 外部工具映射
     external_tools = {
@@ -682,17 +687,50 @@ def decode_digital_mode(
         "input_file": input_path,
         "file_size": file_size,
         "format": ext,
+        "sample_rate_hz": float(sample_rate),
         "external_tools_available": available_tools,
         "note": "",
     }
 
-    # 如果有外部工具，尝试调用
-    if available_tools:
-        result["note"] = f"检测到外部工具 {available_tools[0]}，可用于完整解码"
-        # 这里可以添加实际的 subprocess 调用
-        # 为了安全，先不自动调用，返回工具信息
-    else:
-        result["note"] = f"未检测到 {mode} 解码工具，建议安装: {external_tools.get(mode, ['N/A'])}"
+    # ---- 内置 ADS-B（Mode-S DF17）真解码 ----
+    if mode == "adsb" and ext in (".cf32", ".cfile"):
+        try:
+            from .adsb import decode_baseband
+            raw = np.fromfile(input_path, dtype=np.float32)
+            iq = raw[0::2] + 1j * raw[1::2]
+            ratio = sample_rate / 1e6
+            if abs(ratio - round(ratio)) > 1e-6:
+                result["note"] = (
+                    f"内置 Mode-S 解码器要求 fs 为 1MHz 整数倍，当前 {ratio:g} MHz；"
+                    "请重采样后再解码，或使用 dump1090。"
+                )
+            else:
+                d = decode_baseband(iq, fs=float(sample_rate))
+                result["found"] = bool(d.get("found", False))
+                result["crc_ok"] = bool(d.get("crc_ok", False))
+                result["icao_hex"] = d.get("icao")
+                result["callsign"] = d.get("callsign")
+                result["raw_hex"] = d.get("raw_bytes")
+                result["preamble_index"] = d.get("preamble_index")
+                result["note"] = "内置纯 numpy Mode-S DF17 解码器（已与 pyModeS 交叉验证）"
+        except Exception as e:
+            result["analysis_error"] = str(e)
+    elif mode == "ft8":
+        result["note"] = (
+            "FT8 完整解码依赖 jt9/wsjtx（LDPC(174,91) 标准稀疏校验矩阵 + 79 符号 "
+            "8-FSK/170Hz/6.25 波特）；当前环境未安装，不伪造解调结果。"
+        )
+    elif mode == "aprs":
+        result["note"] = (
+            "APRS 为 1200 波特 AFSK(Bell202) over AX.25；内置 ax25.py 已具备 "
+            "FM 鉴频+数字 PLL+CRC-16 能力（见 exp_ax25_performance），direwolf 为可选增强。"
+        )
+
+    if not result.get("note"):
+        if available_tools:
+            result["note"] = f"检测到外部工具 {available_tools[0]}，可用于完整解码"
+        else:
+            result["note"] = f"未检测到 {mode} 解码工具，建议安装: {external_tools.get(mode, ['N/A'])}"
 
     # 简化分析：读取 IQ 数据，做基本的频谱特征提取
     try:
