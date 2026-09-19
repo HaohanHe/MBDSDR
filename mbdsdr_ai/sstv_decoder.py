@@ -337,13 +337,22 @@ def _identify_sstv_mode(freq: np.ndarray, sr: int, data_start: int,
     except Exception:
         pass
     if len(raw) < 4:
-        return "Martin M1", {"reason": "no-sync-markers", "vis": vis_code}
+        return "unknown", {"reason": "no-sync-markers", "vis": vis_code,
+                           "n_markers": len(raw)}
     raw_arr = np.array(raw)
     gaps = np.diff(raw_arr) / sr * 1000.0
     valid = gaps[(gaps > 100.0) & (gaps < 1200.0)]
     pulse_ms = float(np.median(widths)) if widths else 0.0
     period_ms = float(np.median(valid)) if len(valid) else 0.0
-    info = {"pulse_ms": pulse_ms, "period_ms": period_ms, "vis": vis_code}
+    # 噪声门限：真实 SSTV 同步周期高度一致（变异系数很小）；纯噪声/弱信号里
+    # 随机触发的"1200Hz 段"周期杂乱。标记过少或周期不稳时判 unknown，不瞎猜制式。
+    n_markers = len(raw)
+    period_cv = float(np.std(valid) / period_ms) if (
+        len(valid) >= 6 and period_ms > 0) else 1.0
+    info = {"pulse_ms": pulse_ms, "period_ms": period_ms, "vis": vis_code,
+            "n_markers": n_markers, "period_cv": round(period_cv, 3)}
+    if n_markers < 8 or period_cv > 0.35:
+        return "unknown", {**info, "reason": "weak-or-noise"}
 
     # Robot36：9ms 同步，周期 ~150ms（逐行）或 ~288-300ms（组首两行）
     if pulse_ms >= 7.0 and (130.0 <= period_ms <= 175.0):
@@ -360,12 +369,12 @@ def _identify_sstv_mode(freq: np.ndarray, sr: int, data_start: int,
         return "Scottie S2", info
     if pulse_ms >= 7.0 and 400.0 <= period_ms <= 440.0:
         return "Scottie S1", info
-    # 兜底：VIS 能对上就用 VIS
-    if vis_code is not None:
+    # 兜底：VIS 能对上才用 VIS（VIS 在合成/真实信号上都曾解错，仅作弱兜底）
+    if vis_code is not None and vis_code in (8, 44, 40, 60, 56):
         for name, mdef in SSTV_MODES.items():
             if mdef.get("vis_code") == vis_code:
                 return name, info
-    return "Martin M1", {**info, "reason": "fallback"}
+    return "unknown", {**info, "reason": "no-match"}
 
 
 def _freq_to_pixel_series(fr: np.ndarray, pos: int, px_samples: float,
@@ -576,7 +585,13 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
         }
 
     if mode == "auto" and detected_mode not in SSTV_MODES:
-        detected_mode = "Martin M1"  # 时序无法确定时的最后兜底
+        # 自动识别未能可靠判定（噪声/弱信号/非SSTV）：诚实返回，不兜底出垃圾图
+        return {
+            "success": False,
+            "mode": "unknown",
+            "error": "未检测到可靠的 SSTV 同步时序（噪声/弱信号/非 SSTV）",
+            "identification": id_info,
+        }
 
     if detected_mode not in SSTV_MODES:
         return {"error": f"不支持的模式: {detected_mode}"}
