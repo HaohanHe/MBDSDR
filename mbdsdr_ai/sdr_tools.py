@@ -769,12 +769,39 @@ def register_sdr_tools(agent):
         parameters={
             "type": "object",
             "properties": {
-                "threshold_db": {"type": "number", "description": "检测门限（dB，相对于噪声底），默认10", "default": 10.0},
+                "threshold_db": {"type": "number", "description": "检测门限（dB，相对于实测噪声底），默认10", "default": 10.0},
                 "min_bw_hz": {"type": "number", "description": "最小带宽（Hz），默认1000", "default": 1000.0},
             },
             "required": [],
         },
-        handler=lambda args: ToolResult(success=True, content=_signal_detect(args)),
+        handler=lambda args: ToolResult(success=True, content=_signal_detect(mgr, spec, args)),
+        category="sdr_analysis",
+    )
+
+    agent.tool_registry.register(
+        name="energy_sense",
+        description=(
+            "认知无线电能量检测频谱感知。对一段 IQ（直接传入，或从当前已连接 SDR 实时采集）"
+            "在二元假设 H0 空闲/H1 占用下做统计判决。需先用 noise_power（已知噪声功率）或 "
+            "noise_ref_samples（频段空闲时采的纯噪声参考段）标定门限；可设目标虚警率 pfa 与 "
+            "noise_uncertainty_db（噪声不确定度，体现 SNR wall）。返回占用/空闲判决、统计量、"
+            "门限、粗估 SNR 与理论检测概率。用于判断频段是否空闲、找信号、找干扰源。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "iq_samples": {"type": "array", "items": {"type": "number"},
+                               "description": "待检测 IQ，实数列表交替 I/Q（[I1,Q1,...]）；为空则从已连接设备采集 n_samples 点"},
+                "noise_ref_samples": {"type": "array", "items": {"type": "number"},
+                                      "description": "纯噪声参考段 IQ（交替 I/Q），用于估计噪声功率定标"},
+                "noise_power": {"type": "number", "description": "已知噪声功率 σ²（与 noise_ref_samples 二选一）"},
+                "n_samples": {"type": "number", "description": "从设备采集时的样本数，默认 1024", "default": 1024},
+                "pfa": {"type": "number", "description": "目标虚警率，默认 0.01", "default": 0.01},
+                "noise_uncertainty_db": {"type": "number", "description": "噪声功率不确定度(dB)，默认 0；>0 时按保守上限定门限并存在 SNR wall", "default": 0.0},
+            },
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_energy_sense(mgr, args)),
         category="sdr_analysis",
     )
 
@@ -810,7 +837,7 @@ def register_sdr_tools(agent):
             "properties": {},
             "required": [],
         },
-        handler=lambda args: ToolResult(success=True, content=_signal_detect_interference(args)),
+        handler=lambda args: ToolResult(success=True, content=_signal_detect_interference(mgr, spec, args)),
         category="sdr_analysis",
     )
 
@@ -4023,37 +4050,103 @@ def _satdump_compose_image(args):
 # 高级信号分析工具实现
 # ========================================================================
 
-def _signal_detect(args):
-    """频谱信号检测。"""
-    from mbdsdr_ai.signal_analysis import detect_signals
+def _coerce_iq(seq):
+    """把工具入参的 IQ 数据转为复 numpy 数组。
 
-    threshold_db = args.get('threshold_db', 10.0)
-    min_bw = args.get('min_bw_hz', 1000.0)
+    支持：复数列表、实数列表交替 I/Q（[I1,Q1,I2,Q2,...]，与 amr_* 工具一致）、
+    [[I,Q],...] 二维实数。空输入返回 None。
+    """
+    if seq is None:
+        return None
+    arr = np.asarray(seq)
+    if arr.size == 0:
+        return None
+    if np.iscomplexobj(arr):
+        return arr.astype(np.complex128)
+    flat = arr.reshape(-1).astype(np.float64)
+    n = len(flat) - (len(flat) % 2)
+    if n == 0:
+        return None
+    iq = flat[:n].reshape(-1, 2)
+    return (iq[:, 0] + 1j * iq[:, 1]).astype(np.complex128)
 
-    # 生成模拟频谱（实际应该从SDR获取）
-    # 这里用模拟数据演示
-    freqs = np.linspace(88e6, 108e6, 1024)
-    spectrum = np.random.randn(1024) * 5 + 50
-    # 加几个模拟信号
-    spectrum[100:120] += 30  # FM电台1
-    spectrum[300:310] += 25  # FM电台2
-    spectrum[600:650] += 20  # FM电台3
 
-    signals = detect_signals(spectrum, freqs, threshold_db, min_bw)
+def _energy_sense(mgr, args):
+    """认知无线电能量检测：对给定 IQ（或当前设备实时采集）做 H0/H1 判决。"""
+    from mbdsdr_ai.spectrum_sensing import EnergyDetector, theory_pd
 
-    lines = ["=== 频谱信号检测 ==="]
-    lines.append("")
-    lines.append(f"检测门限: {threshold_db} dB")
-    lines.append(f"最小带宽: {min_bw/1e3:.1f} kHz")
-    lines.append(f"检测到 {len(signals)} 个信号：")
-    lines.append("")
+    iq = _coerce_iq(args.get("iq_samples"))
+    source = "传入IQ"
+    if iq is None:
+        backend = _get_backend(mgr)
+        if not backend or not getattr(backend.status, "connected", False):
+            return ("错误: 设备未连接，请先调用 sdr_connect，或直接通过 iq_samples 提供待检测样本；"
+                    "并用 noise_power 或 noise_ref_samples 标定噪声门限")
+        n_cap = int(args.get("n_samples", 1024))
+        raw = backend.read_samples(n_cap)
+        if raw is None:
+            return "错误: 该设备不支持 IQ 样本输出（如 SI4732 只输出解调后音频）"
+        iq = np.asarray(raw, dtype=np.complex128)
+        source = "设备实时采集"
 
-    for i, sig in enumerate(signals, 1):
-        lines.append(f"  信号{i}: {sig['center_freq_hz']/1e6:.3f} MHz")
-        lines.append(f"    带宽: {sig['bandwidth_hz']/1e3:.1f} kHz")
-        lines.append(f"    功率: {sig['peak_power_db']:.1f} dB")
-        lines.append("")
+    noise_ref = _coerce_iq(args.get("noise_ref_samples"))
+    noise_power = args.get("noise_power")
+    pfa = float(args.get("pfa", 0.01))
+    unc = float(args.get("noise_uncertainty_db", 0.0))
 
+    try:
+        ed = EnergyDetector(
+            noise_power=float(noise_power) if noise_power is not None else None,
+            noise_uncertainty_db=unc,
+        )
+        res = ed.detect(
+            iq.tolist(), pfa=pfa,
+            noise_ref=noise_ref.tolist() if noise_ref is not None else None,
+        )
+    except ValueError as e:
+        return (f"错误: {e}。能量检测必须先标定噪声：可提供 noise_power，或在频段空闲时"
+                f"采集一段纯噪声作为 noise_ref_samples。")
+
+    theory = theory_pd(res.estimated_snr_db, res.n, pfa, unc)
+    lines = [
+        "=== 能量检测（频谱感知）===",
+        f"数据来源: {source}，样本数 N={res.n}",
+        f"目标虚警率 Pfa={res.pfa_target:g}" + (f"，噪声不确定度 {unc:g} dB" if unc else ""),
+        f"噪声功率 σ²={res.noise_power:.3e}",
+        f"检测门限 γ={res.threshold:.3e}",
+        f"实测统计量 T={res.statistic:.3e}",
+        f"判决: {'频段占用 H1（检测到信号）' if res.decision else '频段空闲 H0（未检测到信号）'}",
+        f"本次能量粗估 SNR≈{res.estimated_snr_db:.1f} dB（对应理论检测概率 Pd≈{theory:.3f}）",
+    ]
+    return "\n".join(lines)
+
+
+def _signal_detect(mgr, spec, args):
+    """频谱信号检测：从当前设备实时采集，在噪声底之上找超门限信号。"""
+    backend = _get_backend(mgr)
+    if not backend or not getattr(backend.status, "connected", False):
+        return "错误: 设备未连接，请先调用 sdr_connect"
+    samples = backend.read_samples(4096)
+    if samples is None:
+        return "错误: 该设备不支持 IQ 样本输出（如 SI4732 只输出解调后音频）"
+
+    rel_threshold_db = float(args.get('threshold_db', 10.0))
+    min_bw = float(args.get('min_bw_hz', 1000.0))
+    spectrum = spec.compute_spectrum(
+        samples, backend.get_frequency(), backend.get_sample_rate(), fft_size=4096)
+    abs_threshold = spectrum.noise_floor_db + rel_threshold_db
+    signals = spec.find_signals(spectrum, threshold_db=abs_threshold, min_bandwidth_hz=min_bw)
+
+    lines = ["=== 频谱信号检测 ===",
+             f"中心频率: {spectrum.center_freq/1e6:.3f} MHz，采样率: {spectrum.sample_rate/1e6:.3f} MHz",
+             f"噪声底: {spectrum.noise_floor_db:.1f} dB，检测门限: 噪声底+{rel_threshold_db:.0f} dB = {abs_threshold:.1f} dB",
+             f"最小带宽: {min_bw/1e3:.1f} kHz",
+             f"检测到 {len(signals)} 个信号："]
+    if not signals:
+        lines.append("  （当前频段无超门限信号）")
+    for i, sig in enumerate(signals[:10], 1):
+        lines.append(f"  {i}. {sig['center_freq']/1e6:.3f} MHz，带宽 {sig['bandwidth']/1e3:.1f} kHz，"
+                     f"峰值 {sig['peak_power_db']:.1f} dB（高出噪声底 {sig['peak_power_db']-spectrum.noise_floor_db:.1f} dB）")
     return '\n'.join(lines)
 
 
@@ -4103,31 +4196,36 @@ def _signal_extract_features(args):
     return '\n'.join(lines)
 
 
-def _signal_detect_interference(args):
-    """干扰源检测。"""
+def _signal_detect_interference(mgr, spec, args):
+    """干扰源检测：从当前设备实时采集，在相对噪声底的频谱上识别窄带/宽带干扰。"""
     from mbdsdr_ai.signal_analysis import detect_interference
 
-    # 生成模拟频谱
-    freqs = np.linspace(100e6, 102e6, 1024)
-    spectrum = np.random.randn(1024) * 3 + 40
-    spectrum[100:105] += 35  # 窄带干扰
-    spectrum[500:600] += 25  # 宽带信号
+    backend = _get_backend(mgr)
+    if not backend or not getattr(backend.status, "connected", False):
+        return "错误: 设备未连接，请先调用 sdr_connect"
+    samples = backend.read_samples(4096)
+    if samples is None:
+        return "错误: 该设备不支持 IQ 样本输出（如 SI4732 只输出解调后音频）"
 
-    interferences = detect_interference(spectrum, freqs)
+    spectrum = spec.compute_spectrum(
+        samples, backend.get_frequency(), backend.get_sample_rate(), fft_size=4096)
+    # 归一化为相对噪声底的 dB，使 detect_interference 的绝对阈值语义为“高出噪声底 dB”
+    rel_powers = np.asarray(spectrum.powers_db) - spectrum.noise_floor_db
+    interferences = detect_interference(
+        rel_powers, np.asarray(spectrum.frequencies))
 
-    lines = ["=== 干扰源检测 ==="]
-    lines.append("")
-    lines.append(f"检测到 {len(interferences)} 个潜在干扰：")
-    lines.append("")
-
+    type_name = {"narrowband": "窄带强干扰", "broadband": "宽带干扰"}
+    lines = ["=== 干扰源检测 ===",
+             f"中心频率: {spectrum.center_freq/1e6:.3f} MHz，噪声底: {spectrum.noise_floor_db:.1f} dB",
+             f"检测到 {len(interferences)} 个潜在干扰："]
+    if not interferences:
+        lines.append("  （当前频段未发现高出噪声底 15 dB 以上的窄带/宽带干扰特征）")
     for i, intr in enumerate(interferences, 1):
-        lines.append(f"  干扰{i}: {intr['type']}")
+        lines.append(f"  {i}. {type_name.get(intr['type'], intr['type'])}")
         lines.append(f"    频率: {intr['freq_hz']/1e6:.3f} MHz")
         lines.append(f"    带宽: {intr['bandwidth_hz']/1e3:.1f} kHz")
-        lines.append(f"    功率: {intr['power_db']:.1f} dB")
+        lines.append(f"    高出噪声底: {intr['power_db']:.1f} dB")
         lines.append(f"    置信度: {intr['confidence']*100:.0f}%")
-        lines.append("")
-
     return '\n'.join(lines)
 
 
