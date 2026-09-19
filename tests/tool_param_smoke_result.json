@@ -40,7 +40,7 @@
       "name": "test",
       "target": "TEST"
     },
-    "snippet": "定时任务已添加: test ID: task_1789783871_0019"
+    "snippet": "定时任务已添加: test ID: task_1789784099_0021"
   },
   "scheduler_enable": {
     "cat": "NEED_RESOURCE",
@@ -174,7 +174,7 @@
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== 卫星天空视图 === 位置: 43.8868°N, 125.3245°E 最小仰角: 0.0° 类型: all 可见卫星数: 1  1. NOAA 15    仰角: 6."
+    "snippet": "=== 卫星天空视图 === 位置: 43.8868°N, 125.3245°E 最小仰角: 0.0° 类型: all 可见卫星数: 1  1. NOAA 15    仰角: 14"
   },
   "sdr_satellite_doppler": {
     "cat": "OK",
@@ -184,7 +184,7 @@
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== 卫星多普勒计算 === 卫星: NOAA 19 标称频率: 100.000000 MHz 修正频率: 100.000994 MHz 多普勒频移: 994.3 Hz 最大多普"
+    "snippet": "=== 卫星多普勒计算 === 卫星: NOAA 19 标称频率: 100.000000 MHz 修正频率: 100.000893 MHz 多普勒频移: 892.7 Hz 最大多普"
   },
   "sdr_ai_sweep": {
     "cat": "OK",
@@ -193,7 +193,7 @@
       "freq_end_hz": 1.0,
       "step_hz": 1.0
     },
-    "snippet": "AI 扫频完成 范围: 0.0 - 0.0 MHz, 步进 0 kHz 扫描点数: 1 最强台: 0.000 MHz @ 39.1 dB 已自动调谐到最强台  扫描结果（前10个最"
+    "snippet": "AI 扫频完成 范围: 0.0 - 0.0 MHz, 步进 0 kHz 扫描点数: 1 最强台: 0.000 MHz @ 38.6 dB 已自动调谐到最强台  扫描结果（前10个最"
   },
   "openapi_weather": {
     "cat": "OK",
@@ -201,7 +201,7 @@
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== 天气预报 ===  位置: 43.8868°, 125.3245°  温度: 24.5°C 风速: 13.6 km/h 湿度: 45%  提示：风速影响天线指向稳定性   "
+    "snippet": "=== 天气预报 ===  位置: 43.8868°, 125.3245°  温度: 24.8°C 风速: 14.2 km/h 湿度: 44%  提示：风速影响天线指向稳定性   "
   },
   "openapi_aircraft_nearby": {
     "cat": "OK",
@@ -320,7 +320,7 @@
       "observer_lat": 43.8868,
       "observer_lon": 125.3245
     },
-    "snippet": "=== NOAA 19 过境预测 === 升起: 03:25:43 UTC, 方位 157° 中天: 03:30:13 UTC, 仰角 15.9°, 方位 271° 落下: 03:"
+    "snippet": "=== NOAA 19 过境预测 === 升起: 03:25:31 UTC, 方位 157° 中天: 03:30:31 UTC, 仰角 15.9°, 方位 291° 落下: 03:"
   },
   "satellite_predict_all": {
     "cat": "OK",
@@ -328,7 +328,7 @@
       "observer_lat": 43.8868,
       "observer_lon": 125.3245
     },
-    "snippet": "=== 未来 24 小时卫星过境预测（共 6 次） ===  1. NOAA 15: 02:11-02:20 (9分), 最大仰角 15°, 方位 283° 0.0MHz 2. I"
+    "snippet": "=== 未来 24 小时卫星过境预测（共 6 次） ===  1. NOAA 15: 02:15-02:20 (5分), 最大仰角 15°, 方位 296° 0.0MHz 2. I"
   },
   "sky_view_visible": {
     "cat": "OK",
@@ -336,7 +336,7 @@
       "observer_lat": 43.8868,
       "observer_lon": 125.3245
     },
-    "snippet": "=== 天空图可见卫星（仰角 > 5°）=== 可见数量: 1 颗    NOAA 15: 仰角 6.6°, 方位 159°, 距离 2646km, 多普勒 +0Hz"
+    "snippet": "=== 天空图可见卫星（仰角 > 5°）=== 可见数量: 1 颗    NOAA 15: 仰角 14.7°, 方位 268°, 距离 2046km, 多普勒 +0Hz"
   },
   "gnss_monitor_band": {
     "cat": "OK",
@@ -344,7 +344,7 @@
       "band_name": "L1",
       "center_freq_hz": 100000000
     },
-    "snippet": "=== GNSS 频带监测: L1 === 中心频率: 100.000 MHz 监测带宽: 2.048 MHz 平均功率: -105.2 dB 噪声基底: -104.6 dB 干扰"
+    "snippet": "=== GNSS 频带监测: L1 === 中心频率: 100.000 MHz 监测带宽: 2.048 MHz 平均功率: -105.2 dB 噪声基底: -104.5 dB 干扰"
   },
   "gnss_direction_find": {
     "cat": "OK",
@@ -512,7 +512,7 @@
     "args": {
       "agent_type": "test"
     },
-    "snippet": "子代理已创建 ID: subagent_test_1789783873569_0 类型: test"
+    "snippet": "子代理已创建 ID: subagent_test_1789784101373_0 类型: test"
   },
   "subagent_execute": {
     "cat": "NEED_RESOURCE",
@@ -564,7 +564,7 @@
     "args": {
       "name": "test"
     },
-    "snippet": "录制已开始 ID: rec_1789783873570 后续工具调用将被记录"
+    "snippet": "录制已开始 ID: rec_1789784101373 后续工具调用将被记录"
   },
   "workflow_template_create": {
     "cat": "NEED_RESOURCE",
@@ -580,14 +580,14 @@
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md",
       "change_type": "test"
     },
-    "snippet": "{   \"change_id\": \"chg_1789783873570_13\",   \"file_path\": \"/home/user/Doubao/chats/384381600"
+    "snippet": "{   \"change_id\": \"chg_1789784101374_14\",   \"file_path\": \"/home/user/Doubao/chats/384381600"
   },
   "file_change_history": {
     "cat": "OK",
     "args": {
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "[   {     \"change_id\": \"chg_1789783873570_13\",     \"file_path\": \"/home/user/Doubao/chats/3"
+    "snippet": "[   {     \"change_id\": \"chg_1789784101374_14\",     \"file_path\": \"/home/user/Doubao/chats/3"
   },
   "file_change_revert": {
     "cat": "NEED_RESOURCE",
@@ -637,7 +637,7 @@
     "args": {
       "experience_type": "test"
     },
-    "snippet": "{   \"experience_id\": \"exp_1789783873992_14\",   \"experience_type\": \"task_completion\",   \"qu"
+    "snippet": "{   \"experience_id\": \"exp_1789784101801_15\",   \"experience_type\": \"task_completion\",   \"qu"
   },
   "learning_suggestion": {
     "cat": "OK",
@@ -661,7 +661,7 @@
     "snippet": "SDR 流水线已创建 任务数: 9 调用 orchestrator_plan 查看顺序，orchestrator_execute 执行"
   },
   "code_read_file": {
-    "cat": "NEED_HW",
+    "cat": "OK",
     "args": {
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
@@ -672,7 +672,7 @@
     "args": {
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "{   \"edit_id\": \"edit_1789783874002_1\",   \"file_path\": \"/home/user/Doubao/chats/38438160041"
+    "snippet": "{   \"edit_id\": \"edit_1789784101811_1\",   \"file_path\": \"/home/user/Doubao/chats/38438160041"
   },
   "code_modify_section": {
     "cat": "NEED_RESOURCE",
@@ -702,7 +702,7 @@
     "args": {
       "message": "HELLO"
     },
-    "snippet": "成功: 已提交: 2440029c [main 2440029] HELLO  1 file changed, 20 insertions(+), 20 deletions(-) "
+    "snippet": "成功: 已提交: 5453a587 [main 5453a58] HELLO  2 files changed, 21 insertions(+), 16 deletions(-)"
   },
   "code_rollback": {
     "cat": "NEED_RESOURCE",
@@ -725,7 +725,7 @@
       "ra_deg": 1.0,
       "dec_deg": 1.0
     },
-    "snippet": "{   \"alt_deg\": -39.9207,   \"az_deg\": 326.7641,   \"alt_dms\": \"-39°55'14.7\\\"\",   \"az_compass"
+    "snippet": "{   \"alt_deg\": -40.2911,   \"az_deg\": 327.9108,   \"alt_dms\": \"-40°17'28.0\\\"\",   \"az_compass"
   },
   "astro_altaz_to_equatorial": {
     "cat": "OK",
@@ -733,7 +733,7 @@
       "alt_deg": 1.0,
       "az_deg": 1.0
     },
-    "snippet": "{   \"ra_deg\": 334.6802710727706,   \"dec_deg\": 46.74162419586798,   \"ra_hms\": \"22h18m43.3s\""
+    "snippet": "{   \"ra_deg\": 335.63246432799644,   \"dec_deg\": 46.74162419586798,   \"ra_hms\": \"22h22m31.8s"
   },
   "astro_compute_refraction": {
     "cat": "OK",
