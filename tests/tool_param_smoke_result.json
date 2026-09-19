@@ -23,7 +23,7 @@
   "workflow_execute": {
     "cat": "BAD_ARG",
     "args": {
-      "name": "test"
+      "name": "interference_localization"
     },
     "snippet": "工具 'workflow_execute' 缺少必填参数: workflow_name。参数说明: workflow_name(string): 工作流名称，如 interfere"
   },
@@ -40,17 +40,17 @@
       "name": "test",
       "target": "TEST"
     },
-    "snippet": "定时任务已添加: test ID: task_1789781980_0007"
+    "snippet": "定时任务已添加: test ID: task_1789782177_0009"
   },
   "scheduler_enable": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
       "task_id": "test"
     },
     "snippet": "任务不存在"
   },
   "scheduler_disable": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
       "task_id": "test"
     },
@@ -134,39 +134,39 @@
     "snippet": "频谱平移: 1.0 kHz 视图范围: 99.745 - 100.257 MHz"
   },
   "sdr_decode_noaa_apt": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
       "input_path": "/tmp/mbdsdr_test.bin"
     },
-    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
+    "snippet": "解码失败: 不支持的格式: .bin（支持 .wav/.cf32）"
   },
   "sdr_decode_sstv": {
     "cat": "OK",
     "args": {
       "input_path": "/tmp/mbdsdr_test.bin"
     },
-    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
+    "snippet": "解码失败: 读取文件失败: "
   },
   "sdr_decode_ft8": {
     "cat": "OK",
     "args": {
       "input_path": "/tmp/mbdsdr_test.bin"
     },
-    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
+    "snippet": "=== FT8 解码 === 输入: /tmp/mbdsdr_test.bin 文件大小: 0 字节 可用工具: [] 状态: 未检测到 FT8 解码工具，建议安装 wsjtx 说"
   },
   "sdr_decode_aprs": {
     "cat": "OK",
     "args": {
       "input_path": "/tmp/mbdsdr_test.bin"
     },
-    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
+    "snippet": "=== APRS 解码 === 输入: /tmp/mbdsdr_test.bin 可用工具: [] 状态: 未检测到 APRS 解码工具，建议安装 direwolf 说明: 未检测"
   },
   "sdr_decode_adsb": {
     "cat": "OK",
     "args": {
       "input_path": "/tmp/mbdsdr_test.bin"
     },
-    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
+    "snippet": "=== ADS-B 解码 === 输入: /tmp/mbdsdr_test.bin 可用工具: [] 状态: 未检测到 ADS-B 解码工具，建议安装 dump1090 说明: 未"
   },
   "sdr_satellite_sky_view": {
     "cat": "OK",
@@ -174,7 +174,7 @@
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== 卫星天空视图 === 位置: 43.8868°N, 125.3245°E 最小仰角: 0.0° 类型: all  当前没有可见卫星（仰角 > 0.0°） 内置卫星: NOA"
+    "snippet": "=== 卫星天空视图 === 位置: 43.8868°N, 125.3245°E 最小仰角: 0.0° 类型: all 可见卫星数: 2  1. NOAA 19    仰角: 4."
   },
   "sdr_satellite_doppler": {
     "cat": "OK",
@@ -184,7 +184,7 @@
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== 卫星多普勒计算 === 卫星: NOAA 19 标称频率: 100.000000 MHz 修正频率: 100.001233 MHz 多普勒频移: 1232.9 Hz 最大多"
+    "snippet": "=== 卫星多普勒计算 === 卫星: NOAA 19 标称频率: 100.000000 MHz 修正频率: 100.001235 MHz 多普勒频移: 1235.3 Hz 最大多"
   },
   "sdr_ai_sweep": {
     "cat": "OK",
@@ -193,7 +193,7 @@
       "freq_end_hz": 1.0,
       "step_hz": 1.0
     },
-    "snippet": "AI 扫频完成 范围: 0.0 - 0.0 MHz, 步进 0 kHz 扫描点数: 1 最强台: 0.000 MHz @ 39.0 dB 已自动调谐到最强台  扫描结果（前10个最"
+    "snippet": "AI 扫频完成 范围: 0.0 - 0.0 MHz, 步进 0 kHz 扫描点数: 1 最强台: 0.000 MHz @ 38.8 dB 已自动调谐到最强台  扫描结果（前10个最"
   },
   "openapi_weather": {
     "cat": "OK",
@@ -212,11 +212,11 @@
     "snippet": "=== 附近飞机（ADS-B） ===  位置: 43.8868°, 125.3245° 半径: 50 km  错误: 'NoneType' object is not subsc"
   },
   "sdr_analyze_recording": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
-      "file_path": "/tmp/mbdsdr_test.bin"
+      "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "错误: 文件不存在: /tmp/mbdsdr_test.bin"
+    "snippet": "错误: 不支持的格式: .md（支持 .cf32/.cs16/.wav）"
   },
   "sdr_encode_ax25": {
     "cat": "OK",
@@ -268,7 +268,7 @@
     "snippet": "错误: 无效的十六进制数据 - non-hexadecimal number found in fromhex() arg at position 0"
   },
   "gnss_parse_rmc": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
       "nmea": "test"
     },
@@ -320,7 +320,7 @@
       "observer_lat": 43.8868,
       "observer_lon": 125.3245
     },
-    "snippet": "=== NOAA 19 过境预测 === 升起: 01:43:43 UTC, 方位 158° 中天: 01:48:13 UTC, 仰角 15.8°, 方位 285° 落下: 01:"
+    "snippet": "=== NOAA 19 过境预测 === 升起: 01:43:30 UTC, 方位 158° 中天: 01:48:00 UTC, 仰角 15.8°, 方位 268° 落下: 01:"
   },
   "satellite_predict_all": {
     "cat": "OK",
@@ -328,7 +328,7 @@
       "observer_lat": 43.8868,
       "observer_lon": 125.3245
     },
-    "snippet": "=== 未来 24 小时卫星过境预测（共 6 次） ===  1. NOAA 18: 01:43-01:53 (10分), 最大仰角 16°, 方位 283° 0.0MHz 2. "
+    "snippet": "=== 未来 24 小时卫星过境预测（共 6 次） ===  1. NOAA 18: 01:43-01:53 (10分), 最大仰角 16°, 方位 296° 0.0MHz 2. "
   },
   "sky_view_visible": {
     "cat": "OK",
@@ -347,11 +347,18 @@
     "snippet": "=== GNSS 频带监测: L1 === 中心频率: 100.000 MHz 监测带宽: 2.048 MHz 平均功率: -105.2 dB 噪声基底: -104.6 dB 干扰"
   },
   "gnss_direction_find": {
-    "cat": "CRASH",
+    "cat": "OK",
     "args": {
-      "rssi_by_azimuth": 0.0
+      "rssi_by_azimuth": {
+        "0": -82.0,
+        "30": -75.0,
+        "60": -68.0,
+        "90": -74.0,
+        "120": -80.0,
+        "150": -83.0
+      }
     },
-    "snippet": "工具 'gnss_direction_find' 调用失败: KeyError: 'estimated_direction_deg'。请检查参数是否正确，或参考工具说明。"
+    "snippet": "=== 干扰源方向估算（八木天线RSSI扫描）=== 估算方向: 61.9° 峰值RSSI: -68.0 dBm 置信度: medium 说明: 八木天线RSSI扫描质心法定位，建"
   },
   "gimbal_connect": {
     "cat": "OK",
@@ -456,14 +463,14 @@
   "meteor_get_params": {
     "cat": "BAD_ARG",
     "args": {
-      "satellite_name": "NOAA 19"
+      "satellite_name": "noaa19_apt"
     },
     "snippet": "工具 'meteor_get_params' 缺少必填参数: satellite。参数说明: satellite(string): 卫星名称key，如 gk2a_lrit / fy"
   },
   "meteor_demod_setup": {
     "cat": "BAD_ARG",
     "args": {
-      "satellite_name": "NOAA 19"
+      "satellite_name": "noaa19_apt"
     },
     "snippet": "工具 'meteor_demod_setup' 缺少必填参数: satellite。参数说明: satellite(string): 卫星名称key"
   },
@@ -471,22 +478,22 @@
     "cat": "BAD_ARG",
     "args": {
       "frequency_hz": 100000000,
-      "output_dir": "test",
-      "satellite_name": "NOAA 19"
+      "output_dir": "/tmp/mbdsdr_param_out",
+      "satellite_name": "noaa19_apt"
     },
     "snippet": "工具 'satdump_live' 缺少必填参数: satellite。参数说明: satellite(string): 卫星名称key，如 gk2a_lrit / noaa19_"
   },
   "satdump_process": {
     "cat": "BAD_ARG",
     "args": {
-      "output_dir": "test",
-      "input_path": "/tmp/mbdsdr_test.bin",
-      "satellite_name": "NOAA 19"
+      "output_dir": "/tmp/mbdsdr_param_out",
+      "input_path": "/tmp/mbdsdr_param_in.bin",
+      "satellite_name": "noaa19_apt"
     },
     "snippet": "工具 'satdump_process' 缺少必填参数: input_file, satellite。参数说明: input_file(string): 输入IQ文件路径; sat"
   },
   "satdump_compose_image": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
       "input_dir": "test",
       "output_file": "/tmp/mbdsdr_test.bin"
@@ -505,15 +512,15 @@
     "args": {
       "agent_type": "test"
     },
-    "snippet": "子代理已创建 ID: subagent_test_1789781983952_0 类型: test"
+    "snippet": "子代理已创建 ID: subagent_test_1789782180333_0 类型: test"
   },
   "subagent_execute": {
-    "cat": "CRASH",
+    "cat": "NEED_RESOURCE",
     "args": {
-      "subagent_id": "test",
-      "goal": "test"
+      "subagent_id": "__nonexistent_resource__",
+      "goal": "扫描当前频段并报告最强信号"
     },
-    "snippet": "工具 'subagent_execute' 调用失败: ValueError: 子代理不存在: test。请检查参数是否正确，或参考工具说明。"
+    "snippet": "工具 'subagent_execute' 调用失败: ValueError: 子代理不存在: __nonexistent_resource__。请检查参数是否正确，或参考工具说明"
   },
   "pose_update_imu": {
     "cat": "OK",
@@ -557,33 +564,33 @@
     "args": {
       "name": "test"
     },
-    "snippet": "录制已开始 ID: rec_1789781983952 后续工具调用将被记录"
+    "snippet": "录制已开始 ID: rec_1789782180333 后续工具调用将被记录"
   },
   "workflow_template_create": {
-    "cat": "CRASH",
+    "cat": "NEED_RESOURCE",
     "args": {
-      "recording_id": "test",
+      "recording_id": "__nonexistent_resource__",
       "name": "test"
     },
-    "snippet": "工具 'workflow_template_create' 调用失败: ValueError: 录制不存在: test。请检查参数是否正确，或参考工具说明。"
+    "snippet": "工具 'workflow_template_create' 调用失败: ValueError: 录制不存在: __nonexistent_resource__。请检查参数是否正确，"
   },
   "file_change_track": {
     "cat": "OK",
     "args": {
-      "file_path": "/tmp/mbdsdr_test.bin",
+      "file_path": "/home/user/Doubao/chats/38438160041798146/README.md",
       "change_type": "test"
     },
-    "snippet": "{   \"change_id\": \"chg_1789781983952_8\",   \"file_path\": \"/tmp/mbdsdr_test.bin\",   \"change_t"
+    "snippet": "{   \"change_id\": \"chg_1789782180333_9\",   \"file_path\": \"/home/user/Doubao/chats/3843816004"
   },
   "file_change_history": {
     "cat": "OK",
     "args": {
-      "file_path": "/tmp/mbdsdr_test.bin"
+      "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "[   {     \"change_id\": \"chg_1789781983952_8\",     \"file_path\": \"/tmp/mbdsdr_test.bin\",    "
+    "snippet": "[   {     \"change_id\": \"chg_1789782180333_9\",     \"file_path\": \"/home/user/Doubao/chats/38"
   },
   "file_change_revert": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
       "change_id": "test"
     },
@@ -630,7 +637,7 @@
     "args": {
       "experience_type": "test"
     },
-    "snippet": "{   \"experience_id\": \"exp_1789781984412_9\",   \"experience_type\": \"task_completion\",   \"que"
+    "snippet": "{   \"experience_id\": \"exp_1789782180777_10\",   \"experience_type\": \"task_completion\",   \"qu"
   },
   "learning_suggestion": {
     "cat": "OK",
@@ -654,30 +661,30 @@
     "snippet": "SDR 流水线已创建 任务数: 9 调用 orchestrator_plan 查看顺序，orchestrator_execute 执行"
   },
   "code_read_file": {
-    "cat": "CRASH",
+    "cat": "NEED_HW",
     "args": {
-      "file_path": "/tmp/mbdsdr_test.bin"
+      "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "工具 'code_read_file' 调用失败: FileNotFoundError: 文件不存在: /tmp/mbdsdr_test.bin。请检查参数是否正确，或参考工具说明"
+    "snippet": "文件: /home/user/Doubao/chats/38438160041798146/README.md 共 214 行  # MBDSDR  **全栈开源的 AI 定义无线"
   },
   "code_modify_file": {
     "cat": "OK",
     "args": {
-      "file_path": "/tmp/mbdsdr_test.bin"
+      "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "{   \"edit_id\": \"edit_1789781984421_1\",   \"file_path\": \"/tmp/mbdsdr_test.bin\",   \"backup_pa"
+    "snippet": "{   \"edit_id\": \"edit_1789782180789_1\",   \"file_path\": \"/home/user/Doubao/chats/38438160041"
   },
   "code_modify_section": {
-    "cat": "CRASH",
+    "cat": "NEED_RESOURCE",
     "args": {
-      "file_path": "/tmp/mbdsdr_test.bin",
-      "old_section": "test",
-      "new_section": "test"
+      "file_path": "/home/user/Doubao/chats/38438160041798146/README.md",
+      "old_section": "__no_such_section__",
+      "new_section": "# test\n"
     },
     "snippet": "工具 'code_modify_section' 调用失败: ValueError: 未找到要替换的内容段。请检查参数是否正确，或参考工具说明。"
   },
   "code_run_tests": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
       "edit_id": "test"
     },
@@ -695,10 +702,10 @@
     "args": {
       "message": "HELLO"
     },
-    "snippet": "成功: 已提交: 854a474f [main 854a474] HELLO  1 file changed, 227 insertions(+)  create mode 100"
+    "snippet": "成功: 已提交: bb02de24 [main bb02de2] HELLO  4 files changed, 825 insertions(+), 216 deletions("
   },
   "code_rollback": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
       "edit_id": "test"
     },
@@ -718,7 +725,7 @@
       "ra_deg": 1.0,
       "dec_deg": 1.0
     },
-    "snippet": "{   \"alt_deg\": -36.4356,   \"az_deg\": 317.7468,   \"alt_dms\": \"-36°26'08.3\\\"\",   \"az_compass"
+    "snippet": "{   \"alt_deg\": -36.8301,   \"az_deg\": 318.644,   \"alt_dms\": \"-36°49'48.4\\\"\",   \"az_compass\""
   },
   "astro_altaz_to_equatorial": {
     "cat": "OK",
@@ -726,7 +733,7 @@
       "alt_deg": 1.0,
       "az_deg": 1.0
     },
-    "snippet": "{   \"ra_deg\": 326.7855442778125,   \"dec_deg\": 46.74162419586798,   \"ra_hms\": \"21h47m08.5s\""
+    "snippet": "{   \"ra_deg\": 327.606631925787,   \"dec_deg\": 46.74162419586798,   \"ra_hms\": \"21h50m25.6s\","
   },
   "astro_compute_refraction": {
     "cat": "OK",
@@ -761,11 +768,76 @@
     "snippet": "{   \"target\": {     \"alt_deg\": 1.0,     \"az_deg\": 1.0,     \"alt_dms\": \"+01°00'00.0\\\"\",    "
   },
   "amr_add_sample": {
-    "cat": "CRASH",
+    "cat": "OK",
     "args": {
-      "iq_samples": [],
-      "label": "test"
+      "iq_samples": [
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0,
+        0.5,
+        0.0
+      ],
+      "label": "FSK"
     },
-    "snippet": "工具 'amr_add_sample' 调用失败: ValueError: 'test' is not a valid ModulationType。请检查参数是否正确，或参考工具"
+    "snippet": "已添加训练样本: FSK，当前训练集 46 个样本"
   }
 }
