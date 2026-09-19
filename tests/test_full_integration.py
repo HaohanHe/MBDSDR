@@ -800,7 +800,7 @@ def test_amr_module(result: TestResult, agent: MBDSDRAgent):
         # 统计
         stats = amr.get_stats()
         result.record("训练样本数 >= 40", stats["total_samples"] >= 40, f"实际 {stats['total_samples']}")
-        result.record("特征维度 = 24", stats["n_features"] == 24)
+        result.record("特征维度 = 25", stats["n_features"] == 25)
 
         # 生成 FM 测试信号
         fm_samples = []
@@ -811,7 +811,7 @@ def test_amr_module(result: TestResult, agent: MBDSDRAgent):
 
         # 特征提取
         feature = amr.extract_features_from_iq(fm_samples, sample_rate=1.0)
-        result.record("24 维特征提取", len(feature.to_list()) == 24)
+        result.record("25 维特征提取", len(feature.to_list()) == 25)
         result.record("幅度特征", feature.mean_amplitude > 0)
         result.record("过零率", 0 <= feature.zero_crossing_rate <= 1)
 

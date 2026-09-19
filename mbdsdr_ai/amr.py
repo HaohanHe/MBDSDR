@@ -7,7 +7,7 @@ AMRClassifier：真正的机器学习分类器，用于自动识别信号调制�
 
 之前的实现只有 14 维特征提取 + 规则猜测，不是真正的分类器。
 本模块实现：
-- 特征提取（24 维特征，比之前的 14 维更丰富）
+- 特征提取（25 维特征，含真实 FFT 频谱统计）
 - KNN（K 近邻）分类器（纯 Python 实现，无需 scikit-learn）
 - 内置训练数据集（典型调制信号的特征模板）
 - 分类置信度计算
@@ -28,6 +28,7 @@ AMRClassifier：真正的机器学习分类器，用于自动识别信号调制�
 
 import math
 
+import numpy as np
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional, Tuple
@@ -50,7 +51,7 @@ class ModulationType(str, Enum):
 
 @dataclass
 class AMRFeature:
-    """AMR 特征向量（24 维）。"""
+    """AMR 特征向量（25 维）。"""
     # 时域特征
     mean_amplitude: float = 0.0  # 平均幅度
     std_amplitude: float = 0.0  # 幅度标准差
@@ -70,6 +71,7 @@ class AMRFeature:
     spectral_kurtosis: float = 0.0  # 频谱峰度
     spectral_flatness: float = 0.0  # 频谱平坦度
     spectral_rolloff: float = 0.0  # 频谱滚降点
+    spectral_magnitude_cv: float = 0.0  # 频谱幅度变异系数(std/mean)，区分多载波等幅子载波与噪声
 
     # 统计特征
     zero_crossing_rate: float = 0.0  # 过零率
@@ -82,14 +84,14 @@ class AMRFeature:
     carrier_offset: float = 0.0  # 载波频率偏移（归一化）
 
     def to_list(self) -> List[float]:
-        """转换为特征列表（24维）。"""
+        """转换为特征列表（25维）。"""
         return [
             self.mean_amplitude, self.std_amplitude, self.max_amplitude,
             self.min_amplitude, self.rms_amplitude, self.peak_to_average,
             self.amplitude_skewness, self.amplitude_kurtosis,
             self.center_frequency, self.bandwidth, self.spectral_centroid,
             self.spectral_spread, self.spectral_skewness, self.spectral_kurtosis,
-            self.spectral_flatness, self.spectral_rolloff,
+            self.spectral_flatness, self.spectral_rolloff, self.spectral_magnitude_cv,
             self.zero_crossing_rate, self.mean_frequency, self.std_frequency,
             self.mean_phase, self.std_phase, self.iq_correlation,
             self.constellation_density, self.carrier_offset,
@@ -113,6 +115,7 @@ class AMRFeature:
             "spectral_kurtosis": round(self.spectral_kurtosis, 4),
             "spectral_flatness": round(self.spectral_flatness, 4),
             "spectral_rolloff": round(self.spectral_rolloff, 4),
+            "spectral_magnitude_cv": round(self.spectral_magnitude_cv, 4),
             "zero_crossing_rate": round(self.zero_crossing_rate, 4),
             "mean_frequency": round(self.mean_frequency, 4),
             "std_frequency": round(self.std_frequency, 4),
@@ -286,8 +289,70 @@ class KNNClassifier:
             "fitted": self._fitted,
             "samples_by_label": label_counts,
             "samples_by_source": source_counts,
-            "n_features": 24,
+            "n_features": 25,
         }
+
+
+def synthesize_modulation_iq(mod: str, rng, snr_db: float = 25.0,
+                             fs: float = 100_000.0, n: int = 8192) -> np.ndarray:
+    """
+    生成指定调制的复基带 IQ 样本（用于内置训练模板与离线测试）。
+
+    支持 AM/FM/CW/FSK/PSK/QAM/OFDM/NOISE。OFDM 含循环前缀与保护带，
+    数字调制含简单脉冲成型。噪声按给定 SNR（dB）叠加复高斯白噪声。
+    """
+    t = np.arange(n) / fs
+    audio = 0.6 * np.sin(2 * np.pi * 1000 * t) + 0.3 * np.sin(2 * np.pi * 1700 * t)
+
+    def upsample(sym, sps):
+        out = np.repeat(sym.astype(complex), sps)
+        if sps > 2:
+            out = np.convolve(out, np.ones(sps) / sps, mode="same")
+        return out[:n]
+
+    if mod == "AM":
+        x = (0.6 + 0.4 * audio).astype(complex)
+    elif mod == "FM":
+        x = np.exp(1j * 2 * np.pi * 3000 * np.cumsum(audio) / fs)
+    elif mod == "CW":
+        x = np.ones(n, dtype=complex)
+    elif mod == "FSK":
+        sps = 20
+        bits = rng.integers(0, 2, int(np.ceil(n / sps)))
+        f = np.where(np.repeat(bits, sps) == 1, 2000.0, -2000.0)[:n]
+        x = np.exp(1j * 2 * np.pi * np.cumsum(f) / fs)
+    elif mod == "PSK":
+        sps = 16
+        bits = rng.integers(0, 2, int(np.ceil(n / sps)))
+        x = upsample(np.where(bits == 1, 1.0, -1.0), sps)
+    elif mod == "QAM":
+        sps = 16
+        bi = rng.integers(0, 2, int(np.ceil(n / sps)))
+        bq = rng.integers(0, 2, int(np.ceil(n / sps)))
+        sym = ((2 * bi - 1) + 1j * (2 * bq - 1)) / np.sqrt(2)
+        x = upsample(sym, sps)
+    elif mod == "OFDM":
+        nfft, cp = 64, 16
+        frames = []
+        while sum(len(fr) for fr in frames) < n:
+            grid = np.zeros(nfft, dtype=complex)
+            grid[8:56] = np.exp(1j * (np.pi / 2) * rng.integers(0, 4, 48))  # QPSK + 保护带
+            ofdm = np.fft.ifft(np.fft.ifftshift(grid)) * np.sqrt(nfft)
+            frames.append(np.concatenate([ofdm[-cp:], ofdm]))
+        x = np.concatenate(frames)[:n]
+    elif mod == "NOISE":
+        x = (rng.standard_normal(n) + 1j * rng.standard_normal(n)) / np.sqrt(2)
+    else:
+        raise ValueError(f"不支持的调制类型: {mod}")
+
+    x = np.asarray(x, dtype=np.complex128)
+    x = x / (np.sqrt(np.mean(np.abs(x) ** 2)) + 1e-12)
+    if mod != "NOISE":
+        sig_p = np.mean(np.abs(x) ** 2)
+        noise_p = sig_p / (10 ** (snr_db / 10.0))
+        w = np.sqrt(noise_p / 2.0) * (rng.standard_normal(n) + 1j * rng.standard_normal(n))
+        x = x + w
+    return x.astype(np.complex128)
 
 
 class AMRClassifier:
@@ -297,298 +362,30 @@ class AMRClassifier:
     整合特征提取和 KNN 分类，提供完整的 AMR 功能。
     """
 
+    # 内置模板覆盖的调制类型
+    BUILTIN_MODULATIONS = ("AM", "FM", "CW", "FSK", "PSK", "QAM", "OFDM", "NOISE")
+
     def __init__(self, k: int = 5):
         self.classifier = KNNClassifier(k=k)
         self._load_builtin_training_data()
 
     def _load_builtin_training_data(self):
-        """加载内置训练数据（典型调制信号的特征模板）。"""
-        samples = []
-
-        # AM（幅度调制）：幅度变化大，频谱有载波和边带
-        for i in range(5):
-            samples.append(TrainingSample(
-                feature=AMRFeature(
-                    mean_amplitude=0.5 + i * 0.02,
-                    std_amplitude=0.3 + i * 0.01,
-                    max_amplitude=0.95,
-                    min_amplitude=0.05,
-                    rms_amplitude=0.55,
-                    peak_to_average=3.0 + i * 0.1,
-                    amplitude_skewness=0.2,
-                    amplitude_kurtosis=2.5,
-                    center_frequency=0.0,
-                    bandwidth=0.15,
-                    spectral_centroid=0.5,
-                    spectral_spread=0.1,
-                    spectral_skewness=0.1,
-                    spectral_kurtosis=3.0,
-                    spectral_flatness=0.3,
-                    spectral_rolloff=0.7,
-                    zero_crossing_rate=0.3,
-                    mean_frequency=0.0,
-                    std_frequency=0.05,
-                    mean_phase=0.0,
-                    std_phase=0.5,
-                    iq_correlation=0.8,
-                    constellation_density=0.4,
-                ),
-                label=ModulationType.AM,
-            ))
-
-        # FM（频率调制）：幅度恒定，频率变化
-        for i in range(5):
-            samples.append(TrainingSample(
-                feature=AMRFeature(
-                    mean_amplitude=0.7,
-                    std_amplitude=0.05,
-                    max_amplitude=0.75,
-                    min_amplitude=0.65,
-                    rms_amplitude=0.7,
-                    peak_to_average=1.1,
-                    amplitude_skewness=0.0,
-                    amplitude_kurtosis=3.0,
-                    center_frequency=0.0,
-                    bandwidth=0.3 + i * 0.02,
-                    spectral_centroid=0.5,
-                    spectral_spread=0.2,
-                    spectral_skewness=0.0,
-                    spectral_kurtosis=2.8,
-                    spectral_flatness=0.5,
-                    spectral_rolloff=0.8,
-                    zero_crossing_rate=0.5,
-                    mean_frequency=0.0,
-                    std_frequency=0.2 + i * 0.01,
-                    mean_phase=0.0,
-                    std_phase=1.0,
-                    iq_correlation=0.0,
-                    constellation_density=0.8,
-                ),
-                label=ModulationType.FM,
-            ))
-
-        # SSB（单边带）：幅度变化，频谱只有一个边带
-        for i in range(5):
-            samples.append(TrainingSample(
-                feature=AMRFeature(
-                    mean_amplitude=0.3 + i * 0.02,
-                    std_amplitude=0.25,
-                    max_amplitude=0.8,
-                    min_amplitude=0.0,
-                    rms_amplitude=0.35,
-                    peak_to_average=4.0,
-                    amplitude_skewness=0.5,
-                    amplitude_kurtosis=3.5,
-                    center_frequency=0.1,
-                    bandwidth=0.08,
-                    spectral_centroid=0.6,
-                    spectral_spread=0.06,
-                    spectral_skewness=-0.3,
-                    spectral_kurtosis=4.0,
-                    spectral_flatness=0.2,
-                    spectral_rolloff=0.6,
-                    zero_crossing_rate=0.2,
-                    mean_frequency=0.1,
-                    std_frequency=0.03,
-                    mean_phase=0.0,
-                    std_phase=0.8,
-                    iq_correlation=0.9,
-                    constellation_density=0.3,
-                ),
-                label=ModulationType.SSB,
-            ))
-
-        # CW（连续波/莫尔斯）：幅度开关，频率恒定
-        for i in range(5):
-            samples.append(TrainingSample(
-                feature=AMRFeature(
-                    mean_amplitude=0.4,
-                    std_amplitude=0.45,
-                    max_amplitude=0.9,
-                    min_amplitude=0.0,
-                    rms_amplitude=0.5,
-                    peak_to_average=2.0,
-                    amplitude_skewness=0.1,
-                    amplitude_kurtosis=1.5,
-                    center_frequency=0.0,
-                    bandwidth=0.02,
-                    spectral_centroid=0.5,
-                    spectral_spread=0.01,
-                    spectral_skewness=0.0,
-                    spectral_kurtosis=10.0,
-                    spectral_flatness=0.1,
-                    spectral_rolloff=0.5,
-                    zero_crossing_rate=0.1,
-                    mean_frequency=0.0,
-                    std_frequency=0.005,
-                    mean_phase=0.0,
-                    std_phase=0.1,
-                    iq_correlation=0.95,
-                    constellation_density=0.1,
-                ),
-                label=ModulationType.CW,
-            ))
-
-        # FSK（频移键控）：频率在两个值之间跳变
-        for i in range(5):
-            samples.append(TrainingSample(
-                feature=AMRFeature(
-                    mean_amplitude=0.65,
-                    std_amplitude=0.05,
-                    max_amplitude=0.7,
-                    min_amplitude=0.6,
-                    rms_amplitude=0.65,
-                    peak_to_average=1.1,
-                    amplitude_skewness=0.0,
-                    amplitude_kurtosis=3.0,
-                    center_frequency=0.0,
-                    bandwidth=0.2,
-                    spectral_centroid=0.5,
-                    spectral_spread=0.15,
-                    spectral_skewness=0.0,
-                    spectral_kurtosis=2.0,
-                    spectral_flatness=0.6,
-                    spectral_rolloff=0.75,
-                    zero_crossing_rate=0.45,
-                    mean_frequency=0.0,
-                    std_frequency=0.15,
-                    mean_phase=0.0,
-                    std_phase=0.8,
-                    iq_correlation=0.0,
-                    constellation_density=0.7,
-                ),
-                label=ModulationType.FSK,
-            ))
-
-        # PSK（相移键控）：相位跳变，幅度恒定
-        for i in range(5):
-            samples.append(TrainingSample(
-                feature=AMRFeature(
-                    mean_amplitude=0.7,
-                    std_amplitude=0.03,
-                    max_amplitude=0.72,
-                    min_amplitude=0.68,
-                    rms_amplitude=0.7,
-                    peak_to_average=1.05,
-                    amplitude_skewness=0.0,
-                    amplitude_kurtosis=3.0,
-                    center_frequency=0.0,
-                    bandwidth=0.25,
-                    spectral_centroid=0.5,
-                    spectral_spread=0.18,
-                    spectral_skewness=0.0,
-                    spectral_kurtosis=2.5,
-                    spectral_flatness=0.55,
-                    spectral_rolloff=0.8,
-                    zero_crossing_rate=0.5,
-                    mean_frequency=0.0,
-                    std_frequency=0.02,
-                    mean_phase=0.0,
-                    std_phase=1.5,
-                    iq_correlation=0.0,
-                    constellation_density=0.9,
-                ),
-                label=ModulationType.PSK,
-            ))
-
-        # QAM（正交幅度调制）：幅度和相位都变化，星座图有多个点
-        for i in range(5):
-            samples.append(TrainingSample(
-                feature=AMRFeature(
-                    mean_amplitude=0.5,
-                    std_amplitude=0.2,
-                    max_amplitude=0.85,
-                    min_amplitude=0.15,
-                    rms_amplitude=0.55,
-                    peak_to_average=2.5,
-                    amplitude_skewness=0.3,
-                    amplitude_kurtosis=2.8,
-                    center_frequency=0.0,
-                    bandwidth=0.3,
-                    spectral_centroid=0.5,
-                    spectral_spread=0.2,
-                    spectral_skewness=0.0,
-                    spectral_kurtosis=2.3,
-                    spectral_flatness=0.5,
-                    spectral_rolloff=0.85,
-                    zero_crossing_rate=0.48,
-                    mean_frequency=0.0,
-                    std_frequency=0.03,
-                    mean_phase=0.0,
-                    std_phase=1.8,
-                    iq_correlation=0.1,
-                    constellation_density=0.95,
-                ),
-                label=ModulationType.QAM,
-            ))
-
-        # OFDM（正交频分复用）：类似噪声，峰均比高
-        for i in range(5):
-            samples.append(TrainingSample(
-                feature=AMRFeature(
-                    mean_amplitude=0.4,
-                    std_amplitude=0.25,
-                    max_amplitude=0.95,
-                    min_amplitude=0.0,
-                    rms_amplitude=0.45,
-                    peak_to_average=8.0 + i * 0.5,
-                    amplitude_skewness=0.8,
-                    amplitude_kurtosis=4.5,
-                    center_frequency=0.0,
-                    bandwidth=0.8,
-                    spectral_centroid=0.5,
-                    spectral_spread=0.4,
-                    spectral_skewness=0.0,
-                    spectral_kurtosis=2.0,
-                    spectral_flatness=0.9,
-                    spectral_rolloff=0.95,
-                    zero_crossing_rate=0.5,
-                    mean_frequency=0.0,
-                    std_frequency=0.1,
-                    mean_phase=0.0,
-                    std_phase=2.0,
-                    iq_correlation=0.0,
-                    constellation_density=1.0,
-                ),
-                label=ModulationType.OFDM,
-            ))
-
-        # NOISE（噪声）：完全随机
-        for i in range(5):
-            samples.append(TrainingSample(
-                feature=AMRFeature(
-                    mean_amplitude=0.3,
-                    std_amplitude=0.3,
-                    max_amplitude=0.9,
-                    min_amplitude=0.0,
-                    rms_amplitude=0.35,
-                    peak_to_average=5.0,
-                    amplitude_skewness=0.5,
-                    amplitude_kurtosis=3.0,
-                    center_frequency=0.0,
-                    bandwidth=1.0,
-                    spectral_centroid=0.5,
-                    spectral_spread=0.5,
-                    spectral_skewness=0.0,
-                    spectral_kurtosis=2.0,
-                    spectral_flatness=1.0,
-                    spectral_rolloff=1.0,
-                    zero_crossing_rate=0.5,
-                    mean_frequency=0.0,
-                    std_frequency=0.5,
-                    mean_phase=0.0,
-                    std_phase=3.0,
-                    iq_correlation=0.0,
-                    constellation_density=1.0,
-                ),
-                label=ModulationType.NOISE,
-            ))
-
-        self.classifier.fit(samples)
+        """加载内置训练数据：用合成典型信号提取的真实特征作为 KNN 模板。"""
+        rng = np.random.default_rng(20260919)
+        fs = 100_000.0
+        per_class = 16
+        for mod in self.BUILTIN_MODULATIONS:
+            label = ModulationType[mod]
+            for i in range(per_class):
+                # 多个 SNR 与随机实现，提升模板对噪声的鲁棒性（覆盖 10~30 dB）
+                snr = 10.0 + 2.0 * (i % 11)
+                iq = synthesize_modulation_iq(mod, rng, snr_db=snr, fs=fs)
+                feature = self.extract_features_from_iq(list(iq), fs)
+                self.classifier.add_sample(feature, label, source="builtin")
 
     def extract_features_from_iq(self, iq_samples: List[complex], sample_rate: float = 1.0) -> AMRFeature:
         """
-        从 IQ 样本中提取 24 维特征。
+        从 IQ 样本中提取 25 维特征。
 
         参数：
             iq_samples: IQ 样本列表
@@ -657,16 +454,49 @@ class AMRClassifier:
             normalized_points.add((round(s.real / norm_amp, 1), round(s.imag / norm_amp, 1)))
         constellation_density = len(normalized_points) / 100.0
 
-        # 频域特征（简化：使用幅度谱的统计量代替完整 FFT）
-        # 实际项目中应该使用 numpy.fft，这里用简化计算
+        # 载波偏移与瞬时频率带宽（归一化到采样率）
         center_freq = mean_freq / sample_rate if sample_rate > 0 else 0
         bandwidth = std_freq / sample_rate if sample_rate > 0 else 0.1
-        spectral_centroid = 0.5
-        spectral_spread = bandwidth
-        spectral_skewness = 0.0
-        spectral_kurtosis = 3.0
-        spectral_flatness = 0.5 if bandwidth > 0.1 else 0.3
-        spectral_rolloff = 0.8
+
+        # 频域特征：复基带 FFT，频谱统计量按功率谱/幅度谱实算
+        spec = np.fft.fft(np.asarray(iq_samples, dtype=np.complex128))
+        mag = np.abs(spec)
+        power = mag ** 2
+        fn = np.fft.fftshift(np.fft.fftfreq(n))  # 归一化频率 [-0.5, 0.5)
+        ps = np.fft.fftshift(power)
+        ms = np.fft.fftshift(mag)
+        total_p = float(ps.sum())
+        if total_p > 1e-12:
+            spectral_centroid = float(np.sum(fn * ps) / total_p)
+            spectral_spread = float(np.sqrt(np.sum((fn - spectral_centroid) ** 2 * ps) / total_p))
+            if spectral_spread > 1e-9:
+                spectral_skewness = float(
+                    np.sum(((fn - spectral_centroid) / spectral_spread) ** 3 * ps) / total_p)
+                spectral_kurtosis = float(
+                    np.sum(((fn - spectral_centroid) / spectral_spread) ** 4 * ps) / total_p - 3.0)
+            else:
+                spectral_skewness = 0.0
+                spectral_kurtosis = 0.0
+            mpos = ms[ms > 1e-12]
+            if mpos.size > 1:
+                geo_mean = float(np.exp(np.mean(np.log(mpos))))
+                spectral_flatness = float(geo_mean / (np.mean(ms) + 1e-12))
+            else:
+                spectral_flatness = 0.0
+            spectral_flatness = max(0.0, min(1.0, spectral_flatness))
+            mean_mag = float(np.mean(mag))
+            # 频谱幅度变异系数：等幅多载波子载波近恒定，白噪声幅度为瑞利分布(CV≈0.52)
+            spectral_magnitude_cv = float(np.std(mag) / mean_mag) if mean_mag > 1e-12 else 0.0
+            # 85% 能量占用带宽：自中心频点向外累计，返回归一化频率半径
+            order = np.argsort(np.abs(fn))
+            cum_energy = np.cumsum(ps[order]) / total_p
+            idx = int(np.searchsorted(cum_energy, 0.85))
+            idx = min(idx, len(order) - 1)
+            spectral_rolloff = float(abs(fn[order[idx]]))
+        else:
+            spectral_centroid = spectral_spread = spectral_skewness = 0.0
+            spectral_kurtosis = spectral_flatness = spectral_rolloff = 0.0
+            spectral_magnitude_cv = 0.0
 
         return AMRFeature(
             mean_amplitude=mean_amp,
@@ -685,6 +515,7 @@ class AMRClassifier:
             spectral_kurtosis=spectral_kurtosis,
             spectral_flatness=spectral_flatness,
             spectral_rolloff=spectral_rolloff,
+            spectral_magnitude_cv=spectral_magnitude_cv,
             zero_crossing_rate=zcr,
             mean_frequency=mean_freq,
             std_frequency=std_freq,
