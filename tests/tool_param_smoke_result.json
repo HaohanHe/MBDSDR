@@ -1,0 +1,771 @@
+{
+  "switch_model": {
+    "cat": "OK",
+    "args": {
+      "model": "test"
+    },
+    "snippet": "模型切换: 模型已切换: Qwen/Qwen3.6-35B-A3B -> test"
+  },
+  "memory_write": {
+    "cat": "OK",
+    "args": {
+      "content": "HELLO"
+    },
+    "snippet": "记忆已写入: HELLO"
+  },
+  "memory_search": {
+    "cat": "OK",
+    "args": {
+      "query": "test"
+    },
+    "snippet": "[   {     \"id\": \"mem_3\",     \"content\": \"test content for batch tool test\",     \"category\""
+  },
+  "workflow_execute": {
+    "cat": "BAD_ARG",
+    "args": {
+      "name": "test"
+    },
+    "snippet": "工具 'workflow_execute' 缺少必填参数: workflow_name。参数说明: workflow_name(string): 工作流名称，如 interfere"
+  },
+  "workflow_trigger_match": {
+    "cat": "OK",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "未匹配到任何工作流"
+  },
+  "scheduler_add": {
+    "cat": "OK",
+    "args": {
+      "name": "test",
+      "target": "TEST"
+    },
+    "snippet": "定时任务已添加: test ID: task_1789781980_0007"
+  },
+  "scheduler_enable": {
+    "cat": "OK",
+    "args": {
+      "task_id": "test"
+    },
+    "snippet": "任务不存在"
+  },
+  "scheduler_disable": {
+    "cat": "OK",
+    "args": {
+      "task_id": "test"
+    },
+    "snippet": "任务不存在"
+  },
+  "sdr_switch_device": {
+    "cat": "OTHER",
+    "args": {
+      "device_id": "mock"
+    },
+    "snippet": "已切换到: 模拟 SDR（开发测试用）"
+  },
+  "sdr_set_frequency": {
+    "cat": "OK",
+    "args": {
+      "frequency_hz": 100000000
+    },
+    "snippet": "频率已设置: 100.000 MHz"
+  },
+  "sdr_set_sample_rate": {
+    "cat": "OK",
+    "args": {
+      "sample_rate_hz": 1024000
+    },
+    "snippet": "采样率已设置: 1.024 MHz"
+  },
+  "sdr_set_bandwidth": {
+    "cat": "OK",
+    "args": {
+      "bandwidth_hz": 12500
+    },
+    "snippet": "带宽已设置: 12500 Hz"
+  },
+  "sdr_set_gain": {
+    "cat": "OK",
+    "args": {
+      "gain_db": 20
+    },
+    "snippet": "增益已设置: 20 dB (AGC 已关闭)"
+  },
+  "sdr_set_agc": {
+    "cat": "OK",
+    "args": {
+      "enabled": true
+    },
+    "snippet": "AGC 已开启"
+  },
+  "sdr_set_demod": {
+    "cat": "OK",
+    "args": {
+      "mode": "NFM"
+    },
+    "snippet": "解调模式已设置: NFM"
+  },
+  "sdr_set_squelch": {
+    "cat": "OK",
+    "args": {
+      "squelch_db": 1.0
+    },
+    "snippet": "静噪已设置: 1.0 dB"
+  },
+  "sdr_set_volume": {
+    "cat": "OK",
+    "args": {
+      "volume": 1.0
+    },
+    "snippet": "音量已设置: 100%"
+  },
+  "sdr_spectrum_zoom": {
+    "cat": "OK",
+    "args": {
+      "factor": 2.0
+    },
+    "snippet": "频谱缩放: 2.0x 视图范围: 99.744 - 100.256 MHz"
+  },
+  "sdr_spectrum_pan": {
+    "cat": "OK",
+    "args": {
+      "offset_hz": 1000
+    },
+    "snippet": "频谱平移: 1.0 kHz 视图范围: 99.745 - 100.257 MHz"
+  },
+  "sdr_decode_noaa_apt": {
+    "cat": "OK",
+    "args": {
+      "input_path": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
+  },
+  "sdr_decode_sstv": {
+    "cat": "OK",
+    "args": {
+      "input_path": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
+  },
+  "sdr_decode_ft8": {
+    "cat": "OK",
+    "args": {
+      "input_path": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
+  },
+  "sdr_decode_aprs": {
+    "cat": "OK",
+    "args": {
+      "input_path": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
+  },
+  "sdr_decode_adsb": {
+    "cat": "OK",
+    "args": {
+      "input_path": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
+  },
+  "sdr_satellite_sky_view": {
+    "cat": "OK",
+    "args": {
+      "latitude": 43.8868,
+      "longitude": 125.3245
+    },
+    "snippet": "=== 卫星天空视图 === 位置: 43.8868°N, 125.3245°E 最小仰角: 0.0° 类型: all  当前没有可见卫星（仰角 > 0.0°） 内置卫星: NOA"
+  },
+  "sdr_satellite_doppler": {
+    "cat": "OK",
+    "args": {
+      "satellite_name": "NOAA 19",
+      "frequency_hz": 100000000,
+      "latitude": 43.8868,
+      "longitude": 125.3245
+    },
+    "snippet": "=== 卫星多普勒计算 === 卫星: NOAA 19 标称频率: 100.000000 MHz 修正频率: 100.001233 MHz 多普勒频移: 1232.9 Hz 最大多"
+  },
+  "sdr_ai_sweep": {
+    "cat": "OK",
+    "args": {
+      "freq_start_hz": 1.0,
+      "freq_end_hz": 1.0,
+      "step_hz": 1.0
+    },
+    "snippet": "AI 扫频完成 范围: 0.0 - 0.0 MHz, 步进 0 kHz 扫描点数: 1 最强台: 0.000 MHz @ 39.0 dB 已自动调谐到最强台  扫描结果（前10个最"
+  },
+  "openapi_weather": {
+    "cat": "OK",
+    "args": {
+      "latitude": 43.8868,
+      "longitude": 125.3245
+    },
+    "snippet": "=== 天气预报 ===  位置: 43.8868°, 125.3245°  温度: 23.5°C 风速: 11.9 km/h 湿度: 48%  提示：风速影响天线指向稳定性   "
+  },
+  "openapi_aircraft_nearby": {
+    "cat": "OK",
+    "args": {
+      "latitude": 43.8868,
+      "longitude": 125.3245
+    },
+    "snippet": "=== 附近飞机（ADS-B） ===  位置: 43.8868°, 125.3245° 半径: 50 km  错误: 'NoneType' object is not subsc"
+  },
+  "sdr_analyze_recording": {
+    "cat": "OK",
+    "args": {
+      "file_path": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "错误: 文件不存在: /tmp/mbdsdr_test.bin"
+  },
+  "sdr_encode_ax25": {
+    "cat": "OK",
+    "args": {
+      "source": "BI4MIB",
+      "destination": "TEST",
+      "info": "test"
+    },
+    "snippet": "=== AX.25 帧编码 === 源: BI4MIB-0 目的: TEST-0 控制: 0x03 协议ID: 0xF0 信息: test FCS: 0x0736 帧长度: 22 "
+  },
+  "sdr_aprs_encode": {
+    "cat": "OK",
+    "args": {
+      "source": "BI4MIB",
+      "latitude": 43.8868,
+      "longitude": 125.3245
+    },
+    "snippet": "=== APRS 位置编码 === 源: BI4MIB-0 位置: 43.886800, 125.324500 符号: /- 注释:  中继: WIDE2-2 APRS 报文: !"
+  },
+  "sdr_aprs_send_position": {
+    "cat": "OK",
+    "args": {
+      "callsign": "BI4MIB",
+      "latitude": 43.8868,
+      "longitude": 125.3245
+    },
+    "snippet": "=== APRS 位置发送 === 呼号: BI4MIB-0 位置: 43.886800, 125.324500 频率: 144.640 MHz APRS 报文: !4353.21"
+  },
+  "sdr_kiss_encode": {
+    "cat": "OK",
+    "args": {
+      "ax25_hex": "test"
+    },
+    "snippet": "错误: 无效的十六进制数据 - non-hexadecimal number found in fromhex() arg at position 0"
+  },
+  "sdr_kiss_decode": {
+    "cat": "OK",
+    "args": {
+      "hex_data": "test"
+    },
+    "snippet": "错误: 无效的十六进制数据 - non-hexadecimal number found in fromhex() arg at position 0"
+  },
+  "sdr_digipeater_process": {
+    "cat": "OK",
+    "args": {
+      "ax25_hex": "test",
+      "mycall": "test"
+    },
+    "snippet": "错误: 无效的十六进制数据 - non-hexadecimal number found in fromhex() arg at position 0"
+  },
+  "gnss_parse_rmc": {
+    "cat": "OK",
+    "args": {
+      "nmea": "test"
+    },
+    "snippet": "RMC 解析失败: 无效的 NMEA 语句或格式不正确"
+  },
+  "gis_distance": {
+    "cat": "OK",
+    "args": {
+      "lat1": 43.8868,
+      "lon1": 125.3245,
+      "lat2": 43.8868,
+      "lon2": 125.3245
+    },
+    "snippet": "=== 地理距离计算 === 起点: 43.886800°N, 125.324500°E 终点: 43.886800°N, 125.324500°E 大圆距离: 0.000 公里 "
+  },
+  "gis_bearing": {
+    "cat": "OK",
+    "args": {
+      "lat1": 43.8868,
+      "lon1": 125.3245,
+      "lat2": 43.8868,
+      "lon2": 125.3245
+    },
+    "snippet": "=== 方位角计算 === 起点: 43.886800°N, 125.324500°E 终点: 43.886800°N, 125.324500°E 方位角: 0.0°（0=北，顺时"
+  },
+  "gis_destination": {
+    "cat": "OK",
+    "args": {
+      "latitude": 43.8868,
+      "longitude": 125.3245,
+      "bearing_deg": 1.0,
+      "distance_km": 1.0
+    },
+    "snippet": "=== 终点坐标计算 === 起点: 43.886800°N, 125.324500°E 方位角: 1.0° 距离: 1.000 公里 终点: 43.895792°N, 125.3"
+  },
+  "pnt_update_source": {
+    "cat": "OK",
+    "args": {
+      "source": "BI4MIB",
+      "latitude": 43.8868,
+      "longitude": 125.3245
+    },
+    "snippet": "=== PNT 源更新: gnss === 输入: 纬度 43.886800°, 经度 125.324500°, 精度 ±10.0m  === 泛在 PNT 状态 === 位置: "
+  },
+  "satellite_predict_pass": {
+    "cat": "OK",
+    "args": {
+      "satellite_name": "NOAA 19",
+      "observer_lat": 43.8868,
+      "observer_lon": 125.3245
+    },
+    "snippet": "=== NOAA 19 过境预测 === 升起: 01:43:43 UTC, 方位 158° 中天: 01:48:13 UTC, 仰角 15.8°, 方位 285° 落下: 01:"
+  },
+  "satellite_predict_all": {
+    "cat": "OK",
+    "args": {
+      "observer_lat": 43.8868,
+      "observer_lon": 125.3245
+    },
+    "snippet": "=== 未来 24 小时卫星过境预测（共 6 次） ===  1. NOAA 18: 01:43-01:53 (10分), 最大仰角 16°, 方位 283° 0.0MHz 2. "
+  },
+  "sky_view_visible": {
+    "cat": "OK",
+    "args": {
+      "observer_lat": 43.8868,
+      "observer_lon": 125.3245
+    },
+    "snippet": "=== 天空图可见卫星（仰角 > 5°）=== 可见数量: 0 颗 "
+  },
+  "gnss_monitor_band": {
+    "cat": "OK",
+    "args": {
+      "band_name": "L1",
+      "center_freq_hz": 100000000
+    },
+    "snippet": "=== GNSS 频带监测: L1 === 中心频率: 100.000 MHz 监测带宽: 2.048 MHz 平均功率: -105.2 dB 噪声基底: -104.6 dB 干扰"
+  },
+  "gnss_direction_find": {
+    "cat": "CRASH",
+    "args": {
+      "rssi_by_azimuth": 0.0
+    },
+    "snippet": "工具 'gnss_direction_find' 调用失败: KeyError: 'estimated_direction_deg'。请检查参数是否正确，或参考工具说明。"
+  },
+  "gimbal_connect": {
+    "cat": "OK",
+    "args": {
+      "mode": "NFM"
+    },
+    "snippet": "未知模式：NFM（可选 board_pwm / rotctld / manual）"
+  },
+  "gimbal_point": {
+    "cat": "OK",
+    "args": {
+      "azimuth": 0.0,
+      "elevation": 45.0
+    },
+    "snippet": "=== 天线指向 ===  后端: offline 目标: 方位 0.0°  仰角 45.0° 当前: 方位 0.0°  仰角 0.0° 偏差: 方位 +0.0°  仰角 +45."
+  },
+  "gimbal_track_satellite": {
+    "cat": "OK",
+    "args": {
+      "sat_azimuth": 0.0,
+      "sat_elevation": 45.0
+    },
+    "snippet": "=== 卫星跟踪 ===  卫星方位/仰角: 0.0° / 45.0°  波束宽度: 10° 当前天线: 方位 0.0°  仰角 0.0° 偏差: 方位 +0.0°  仰角 +45"
+  },
+  "digital_mode_params": {
+    "cat": "OK",
+    "args": {
+      "mode": "NFM"
+    },
+    "snippet": "=== NFM 物理层参数 ===  未知模式 NFM，可选 FT8/FT4/AIS/ADSB/DVBS"
+  },
+  "sdr_connect_hardware": {
+    "cat": "OK",
+    "args": {
+      "device": "mock"
+    },
+    "snippet": "=== 连接硬件: mock === 状态: 成功 设备: 模拟后端 TX能力: 支持"
+  },
+  "sdr_transmit_cw": {
+    "cat": "NEED_HW",
+    "args": {
+      "frequency_hz": 100000000
+    },
+    "snippet": "错误: 未连接任何SDR设备，请先调用 sdr_connect_hardware"
+  },
+  "instrument_query": {
+    "cat": "OK",
+    "args": {
+      "scpi_command": "help"
+    },
+    "snippet": "错误: 未发现可用仪器"
+  },
+  "radio_connect": {
+    "cat": "OK",
+    "args": {
+      "port": "/dev/ttyUSB0"
+    },
+    "snippet": "=== 电台连接 === 串口: /dev/ttyUSB0 波特率: 38400 型号: auto 状态: 已连接  支持操作:   radio_set_frequency - 设"
+  },
+  "radio_set_frequency": {
+    "cat": "OK",
+    "args": {
+      "frequency_hz": 100000000
+    },
+    "snippet": "=== 频率设置 === 频率: 100000000 Hz (100.0000 MHz) 状态: 已设置"
+  },
+  "radio_set_mode": {
+    "cat": "OK",
+    "args": {
+      "mode": "NFM"
+    },
+    "snippet": "=== 模式设置 === 模式: NFM 状态: 已设置"
+  },
+  "radio_ptt": {
+    "cat": "OK",
+    "args": {
+      "state": "test"
+    },
+    "snippet": "=== PTT 控制 === 状态: 接收 (RX) "
+  },
+  "radio_send_cw": {
+    "cat": "OK",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "=== CW 发送 === 文本: HELLO 速度: 20 WPM Morse: .... . .-.. .-.. --- 状态: 已发送  提示: 先调用 radio_ptt "
+  },
+  "morse_encode": {
+    "cat": "OK",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "=== Morse 编码 === 文本: HELLO Morse: .... . .-.. .-.. ---"
+  },
+  "morse_decode": {
+    "cat": "OK",
+    "args": {
+      "morse": ".... . .-.. .-.. ---"
+    },
+    "snippet": "=== Morse 解码 === Morse: .... . .-.. .-.. --- 文本: HELLO"
+  },
+  "meteor_get_params": {
+    "cat": "BAD_ARG",
+    "args": {
+      "satellite_name": "NOAA 19"
+    },
+    "snippet": "工具 'meteor_get_params' 缺少必填参数: satellite。参数说明: satellite(string): 卫星名称key，如 gk2a_lrit / fy"
+  },
+  "meteor_demod_setup": {
+    "cat": "BAD_ARG",
+    "args": {
+      "satellite_name": "NOAA 19"
+    },
+    "snippet": "工具 'meteor_demod_setup' 缺少必填参数: satellite。参数说明: satellite(string): 卫星名称key"
+  },
+  "satdump_live": {
+    "cat": "BAD_ARG",
+    "args": {
+      "frequency_hz": 100000000,
+      "output_dir": "test",
+      "satellite_name": "NOAA 19"
+    },
+    "snippet": "工具 'satdump_live' 缺少必填参数: satellite。参数说明: satellite(string): 卫星名称key，如 gk2a_lrit / noaa19_"
+  },
+  "satdump_process": {
+    "cat": "BAD_ARG",
+    "args": {
+      "output_dir": "test",
+      "input_path": "/tmp/mbdsdr_test.bin",
+      "satellite_name": "NOAA 19"
+    },
+    "snippet": "工具 'satdump_process' 缺少必填参数: input_file, satellite。参数说明: input_file(string): 输入IQ文件路径; sat"
+  },
+  "satdump_compose_image": {
+    "cat": "OK",
+    "args": {
+      "input_dir": "test",
+      "output_file": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "=== 云图合成 ===  输入目录: test 输出文件: /tmp/mbdsdr_test.bin 增强: 是  状态: 失败 错误: 未找到输出图像"
+  },
+  "hook_trigger": {
+    "cat": "OK",
+    "args": {
+      "event_type": "test"
+    },
+    "snippet": "事件已触发: test 监听器响应数: 0"
+  },
+  "subagent_create": {
+    "cat": "OK",
+    "args": {
+      "agent_type": "test"
+    },
+    "snippet": "子代理已创建 ID: subagent_test_1789781983952_0 类型: test"
+  },
+  "subagent_execute": {
+    "cat": "CRASH",
+    "args": {
+      "subagent_id": "test",
+      "goal": "test"
+    },
+    "snippet": "工具 'subagent_execute' 调用失败: ValueError: 子代理不存在: test。请检查参数是否正确，或参考工具说明。"
+  },
+  "pose_update_imu": {
+    "cat": "OK",
+    "args": {
+      "accel_x": 1.0,
+      "accel_y": 1.0,
+      "accel_z": 1.0,
+      "gyro_x": 1.0,
+      "gyro_y": 1.0,
+      "gyro_z": 1.0
+    },
+    "snippet": "{   \"latitude\": 0.0,   \"longitude\": 0.0,   \"altitude\": 0.0,   \"roll\": 0.0,   \"pitch\": 0.0,"
+  },
+  "pose_update_gps": {
+    "cat": "OK",
+    "args": {
+      "latitude": 43.8868,
+      "longitude": 125.3245
+    },
+    "snippet": "{   \"latitude\": 43.8868,   \"longitude\": 125.3245,   \"altitude\": 0.0,   \"roll\": 0.0,   \"pit"
+  },
+  "ar_project_satellite": {
+    "cat": "OK",
+    "args": {
+      "satellite_name": "NOAA 19",
+      "elevation_deg": 45.0,
+      "azimuth_deg": 0.0
+    },
+    "snippet": "{   \"name\": \"NOAA 19\",   \"screen_x\": 0.5,   \"screen_y\": -0.8333333333333333,   \"elevation\""
+  },
+  "ar_pointing_guidance": {
+    "cat": "OK",
+    "args": {
+      "target_azimuth": 0.0,
+      "target_elevation": 45.0
+    },
+    "snippet": "{   \"horizontal_direction\": \"正对目标\",   \"vertical_direction\": \"向上抬 45.0°\",   \"azimuth_error_"
+  },
+  "workflow_record_start": {
+    "cat": "OK",
+    "args": {
+      "name": "test"
+    },
+    "snippet": "录制已开始 ID: rec_1789781983952 后续工具调用将被记录"
+  },
+  "workflow_template_create": {
+    "cat": "CRASH",
+    "args": {
+      "recording_id": "test",
+      "name": "test"
+    },
+    "snippet": "工具 'workflow_template_create' 调用失败: ValueError: 录制不存在: test。请检查参数是否正确，或参考工具说明。"
+  },
+  "file_change_track": {
+    "cat": "OK",
+    "args": {
+      "file_path": "/tmp/mbdsdr_test.bin",
+      "change_type": "test"
+    },
+    "snippet": "{   \"change_id\": \"chg_1789781983952_8\",   \"file_path\": \"/tmp/mbdsdr_test.bin\",   \"change_t"
+  },
+  "file_change_history": {
+    "cat": "OK",
+    "args": {
+      "file_path": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "[   {     \"change_id\": \"chg_1789781983952_8\",     \"file_path\": \"/tmp/mbdsdr_test.bin\",    "
+  },
+  "file_change_revert": {
+    "cat": "OK",
+    "args": {
+      "change_id": "test"
+    },
+    "snippet": "{   \"error\": \"变更不存在\" }"
+  },
+  "plugin_load": {
+    "cat": "OK",
+    "args": {
+      "plugin_name": "test"
+    },
+    "snippet": "{   \"manifest\": {     \"name\": \"test\",     \"version\": \"0.1.0\",     \"description\": \"自动发现的插件:"
+  },
+  "plugin_enable": {
+    "cat": "OK",
+    "args": {
+      "plugin_name": "test"
+    },
+    "snippet": "插件 启用失败: test"
+  },
+  "plugin_disable": {
+    "cat": "OK",
+    "args": {
+      "plugin_name": "test"
+    },
+    "snippet": "插件 禁用失败: test"
+  },
+  "plugin_install": {
+    "cat": "OK",
+    "args": {
+      "source_path": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "插件已安装: mbdsdr_test.bin"
+  },
+  "judge_evaluate": {
+    "cat": "OK",
+    "args": {
+      "question": "test",
+      "answer": "test"
+    },
+    "snippet": "{   \"overall_score\": 5.0,   \"dimensions\": [     {       \"dimension\": \"parse_error\",       "
+  },
+  "learning_record": {
+    "cat": "OK",
+    "args": {
+      "experience_type": "test"
+    },
+    "snippet": "{   \"experience_id\": \"exp_1789781984412_9\",   \"experience_type\": \"task_completion\",   \"que"
+  },
+  "learning_suggestion": {
+    "cat": "OK",
+    "args": {
+      "question": "test"
+    },
+    "snippet": "{   \"message\": \"暂无相关学习建议\" }"
+  },
+  "orchestrator_add_task": {
+    "cat": "OK",
+    "args": {
+      "name": "test"
+    },
+    "snippet": "任务已添加 ID: task_1"
+  },
+  "orchestrator_pipeline": {
+    "cat": "OK",
+    "args": {
+      "frequency_hz": 100000000
+    },
+    "snippet": "SDR 流水线已创建 任务数: 9 调用 orchestrator_plan 查看顺序，orchestrator_execute 执行"
+  },
+  "code_read_file": {
+    "cat": "CRASH",
+    "args": {
+      "file_path": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "工具 'code_read_file' 调用失败: FileNotFoundError: 文件不存在: /tmp/mbdsdr_test.bin。请检查参数是否正确，或参考工具说明"
+  },
+  "code_modify_file": {
+    "cat": "OK",
+    "args": {
+      "file_path": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "{   \"edit_id\": \"edit_1789781984421_1\",   \"file_path\": \"/tmp/mbdsdr_test.bin\",   \"backup_pa"
+  },
+  "code_modify_section": {
+    "cat": "CRASH",
+    "args": {
+      "file_path": "/tmp/mbdsdr_test.bin",
+      "old_section": "test",
+      "new_section": "test"
+    },
+    "snippet": "工具 'code_modify_section' 调用失败: ValueError: 未找到要替换的内容段。请检查参数是否正确，或参考工具说明。"
+  },
+  "code_run_tests": {
+    "cat": "OK",
+    "args": {
+      "edit_id": "test"
+    },
+    "snippet": "{   \"success\": false,   \"error\": \"编辑记录不存在: test\" }"
+  },
+  "code_hot_reload": {
+    "cat": "OK",
+    "args": {
+      "module_name": "test"
+    },
+    "snippet": "失败: 热加载失败: ModuleNotFoundError: No module named 'test'"
+  },
+  "code_git_commit": {
+    "cat": "OK",
+    "args": {
+      "message": "HELLO"
+    },
+    "snippet": "成功: 已提交: 854a474f [main 854a474] HELLO  1 file changed, 227 insertions(+)  create mode 100"
+  },
+  "code_rollback": {
+    "cat": "OK",
+    "args": {
+      "edit_id": "test"
+    },
+    "snippet": "失败: 编辑记录不存在: test"
+  },
+  "astro_set_observer": {
+    "cat": "OK",
+    "args": {
+      "latitude_deg": 43.8868,
+      "longitude_deg": 125.3245
+    },
+    "snippet": "观测者已设置: 纬度 43.8868°, 经度 125.3245°, 高度 0m, 气压 1013.25hPa, 温度 10°C"
+  },
+  "astro_equatorial_to_altaz": {
+    "cat": "OK",
+    "args": {
+      "ra_deg": 1.0,
+      "dec_deg": 1.0
+    },
+    "snippet": "{   \"alt_deg\": -36.4356,   \"az_deg\": 317.7468,   \"alt_dms\": \"-36°26'08.3\\\"\",   \"az_compass"
+  },
+  "astro_altaz_to_equatorial": {
+    "cat": "OK",
+    "args": {
+      "alt_deg": 1.0,
+      "az_deg": 1.0
+    },
+    "snippet": "{   \"ra_deg\": 326.7855442778125,   \"dec_deg\": 46.74162419586798,   \"ra_hms\": \"21h47m08.5s\""
+  },
+  "astro_compute_refraction": {
+    "cat": "OK",
+    "args": {
+      "alt_deg": 1.0
+    },
+    "snippet": "仰角 1.0° 的大气折射修正: 21.74 弧分 (0.3624°)"
+  },
+  "astro_compute_airmass": {
+    "cat": "OK",
+    "args": {
+      "alt_deg": 1.0
+    },
+    "snippet": "仰角 1.0° 的大气质量: 26.31"
+  },
+  "astro_antenna_params": {
+    "cat": "OK",
+    "args": {
+      "diameter_m": 1.0,
+      "frequency_hz": 100000000
+    },
+    "snippet": "{   \"name\": \"Antenna\",   \"diameter_m\": 1.0,   \"frequency_hz\": 100000000,   \"frequency_mhz\""
+  },
+  "astro_pointing_guidance": {
+    "cat": "OK",
+    "args": {
+      "target_alt": 1.0,
+      "target_az": 1.0,
+      "current_alt": 1.0,
+      "current_az": 1.0
+    },
+    "snippet": "{   \"target\": {     \"alt_deg\": 1.0,     \"az_deg\": 1.0,     \"alt_dms\": \"+01°00'00.0\\\"\",    "
+  },
+  "amr_add_sample": {
+    "cat": "CRASH",
+    "args": {
+      "iq_samples": [],
+      "label": "test"
+    },
+    "snippet": "工具 'amr_add_sample' 调用失败: ValueError: 'test' is not a valid ModulationType。请检查参数是否正确，或参考工具"
+  }
+}
