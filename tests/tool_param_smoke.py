@@ -181,6 +181,11 @@ def build_args(tool):
 
 def classify(txt, success, error):
     low = txt.lower()
+    stripped = txt.strip()
+    # 成功返回实质数据载荷（如读到的文件正文、查询结果）时，正文里出现的
+    # “未连接/不可用/not implemented”等词只是数据内容，不能据此判为缺硬件/空壳。
+    if success and len(stripped) > 150:
+        return "OK"
     if any(k in low for k in ("缺少必填", "missing required", "缺参数", "required 参数", "缺少参数", "required:")):
         return "BAD_ARG"
     todo_strong = ("not implemented", "尚未实现", "功能未实现", "未实现该功能", "待实现",
