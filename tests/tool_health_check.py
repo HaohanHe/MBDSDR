@@ -25,7 +25,13 @@ def classify(name, res):
     # 先判语义，再判 error，避免"缺参提示"被误判成崩溃
     if any(k in low for k in ("缺少必填", "missing required", "缺参数", "required 参数", "参数说明")):
         return "NEED_ARG", txt[:100]
-    if any(k in txt for k in ("未实现", "not implemented", "TODO", "占位", "placeholder", "尚未实现", "待实现")):
+    # 占位判定要严：明确未实现措辞才算；裸 todo/占位/placeholder 可能出现在正常数据
+    # （如 commit message、文件名），只有配合调用失败才算，避免误判。
+    todo_strong = ("not implemented", "尚未实现", "功能未实现", "未实现该功能", "待实现",
+                   "coming soon", "this feature is not", "功能开发中")
+    todo_weak = ("todo", "占位", "placeholder")
+    if any(k in low for k in todo_strong) or (not getattr(res, "success", True)
+                                              and any(k in low for k in todo_weak)):
         return "TODO", txt[:120]
     if any(k in low for k in ("未连接", "not connected", "设备未", "硬件未", "no device", "未插", "需先连接")):
         return "NEED_HW", txt[:100]

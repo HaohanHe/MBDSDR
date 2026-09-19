@@ -183,7 +183,10 @@ def classify(txt, success, error):
     low = txt.lower()
     if any(k in low for k in ("缺少必填", "missing required", "缺参数", "required 参数", "缺少参数", "required:")):
         return "BAD_ARG"
-    if any(k in txt for k in ("未实现", "not implemented", "TODO", "占位", "placeholder", "尚未实现", "待实现")):
+    todo_strong = ("not implemented", "尚未实现", "功能未实现", "未实现该功能", "待实现",
+                   "coming soon", "this feature is not", "功能开发中")
+    todo_weak = ("todo", "占位", "placeholder")
+    if any(k in low for k in todo_strong) or (not success and any(k in low for k in todo_weak)):
         return "TODO"
     if any(k in low for k in ("未连接", "not connected", "设备未", "硬件未", "no device", "未插", "需先连接",
                               "无法打开", "failed to open", "no sdr", "未找到设备", "permission denied",
