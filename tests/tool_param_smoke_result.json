@@ -21,11 +21,11 @@
     "snippet": "[   {     \"id\": \"mem_3\",     \"content\": \"test content for batch tool test\",     \"category\""
   },
   "workflow_execute": {
-    "cat": "BAD_ARG",
+    "cat": "OK",
     "args": {
-      "name": "interference_localization"
+      "workflow_name": "interference_localization"
     },
-    "snippet": "工具 'workflow_execute' 缺少必填参数: workflow_name。参数说明: workflow_name(string): 工作流名称，如 interfere"
+    "snippet": "{   \"workflow_name\": \"interference_localization\",   \"success\": false,   \"total_steps\": 8, "
   },
   "workflow_trigger_match": {
     "cat": "OK",
@@ -40,7 +40,7 @@
       "name": "test",
       "target": "TEST"
     },
-    "snippet": "定时任务已添加: test ID: task_1789782177_0009"
+    "snippet": "定时任务已添加: test ID: task_1789782331_0011"
   },
   "scheduler_enable": {
     "cat": "NEED_RESOURCE",
@@ -174,7 +174,7 @@
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== 卫星天空视图 === 位置: 43.8868°N, 125.3245°E 最小仰角: 0.0° 类型: all 可见卫星数: 2  1. NOAA 19    仰角: 4."
+    "snippet": "=== 卫星天空视图 === 位置: 43.8868°N, 125.3245°E 最小仰角: 0.0° 类型: all 可见卫星数: 2  1. NOAA 19    仰角: 11"
   },
   "sdr_satellite_doppler": {
     "cat": "OK",
@@ -184,7 +184,7 @@
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== 卫星多普勒计算 === 卫星: NOAA 19 标称频率: 100.000000 MHz 修正频率: 100.001235 MHz 多普勒频移: 1235.3 Hz 最大多"
+    "snippet": "=== 卫星多普勒计算 === 卫星: NOAA 19 标称频率: 100.000000 MHz 修正频率: 100.001213 MHz 多普勒频移: 1213.3 Hz 最大多"
   },
   "sdr_ai_sweep": {
     "cat": "OK",
@@ -193,7 +193,7 @@
       "freq_end_hz": 1.0,
       "step_hz": 1.0
     },
-    "snippet": "AI 扫频完成 范围: 0.0 - 0.0 MHz, 步进 0 kHz 扫描点数: 1 最强台: 0.000 MHz @ 38.8 dB 已自动调谐到最强台  扫描结果（前10个最"
+    "snippet": "AI 扫频完成 范围: 0.0 - 0.0 MHz, 步进 0 kHz 扫描点数: 1 最强台: 0.000 MHz @ 39.0 dB 已自动调谐到最强台  扫描结果（前10个最"
   },
   "openapi_weather": {
     "cat": "OK",
@@ -201,7 +201,7 @@
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== 天气预报 ===  位置: 43.8868°, 125.3245°  温度: 23.5°C 风速: 11.9 km/h 湿度: 48%  提示：风速影响天线指向稳定性   "
+    "snippet": "=== 天气预报 ===  位置: 43.8868°, 125.3245°  温度: 24.0°C 风速: 12.8 km/h 湿度: 46%  提示：风速影响天线指向稳定性   "
   },
   "openapi_aircraft_nearby": {
     "cat": "OK",
@@ -320,7 +320,7 @@
       "observer_lat": 43.8868,
       "observer_lon": 125.3245
     },
-    "snippet": "=== NOAA 19 过境预测 === 升起: 01:43:30 UTC, 方位 158° 中天: 01:48:00 UTC, 仰角 15.8°, 方位 268° 落下: 01:"
+    "snippet": "=== NOAA 19 过境预测 === 升起: 01:45:33 UTC, 方位 161° 中天: 01:48:03 UTC, 仰角 15.8°, 方位 273° 落下: 01:"
   },
   "satellite_predict_all": {
     "cat": "OK",
@@ -328,7 +328,7 @@
       "observer_lat": 43.8868,
       "observer_lon": 125.3245
     },
-    "snippet": "=== 未来 24 小时卫星过境预测（共 6 次） ===  1. NOAA 18: 01:43-01:53 (10分), 最大仰角 16°, 方位 296° 0.0MHz 2. "
+    "snippet": "=== 未来 24 小时卫星过境预测（共 6 次） ===  1. NOAA 18: 01:45-01:53 (8分), 最大仰角 16°, 方位 271° 0.0MHz 2. N"
   },
   "sky_view_visible": {
     "cat": "OK",
@@ -336,7 +336,7 @@
       "observer_lat": 43.8868,
       "observer_lon": 125.3245
     },
-    "snippet": "=== 天空图可见卫星（仰角 > 5°）=== 可见数量: 0 颗 "
+    "snippet": "=== 天空图可见卫星（仰角 > 5°）=== 可见数量: 2 颗    NOAA 19: 仰角 11.6°, 方位 162°, 距离 2353km, 多普勒 +0Hz   NOA"
   },
   "gnss_monitor_band": {
     "cat": "OK",
@@ -461,36 +461,36 @@
     "snippet": "=== Morse 解码 === Morse: .... . .-.. .-.. --- 文本: HELLO"
   },
   "meteor_get_params": {
-    "cat": "BAD_ARG",
+    "cat": "OK",
     "args": {
-      "satellite_name": "noaa19_apt"
+      "satellite": "noaa19_apt"
     },
-    "snippet": "工具 'meteor_get_params' 缺少必填参数: satellite。参数说明: satellite(string): 卫星名称key，如 gk2a_lrit / fy"
+    "snippet": "=== NOAA-19 APT 参数 ===  下行频率: 137.100 MHz 符号率: 2 ksps 调制方式: AFM Viterbi码率: 1/1 Viterbi约束长度"
   },
   "meteor_demod_setup": {
-    "cat": "BAD_ARG",
+    "cat": "OK",
     "args": {
-      "satellite_name": "noaa19_apt"
+      "satellite": "noaa19_apt"
     },
-    "snippet": "工具 'meteor_demod_setup' 缺少必填参数: satellite。参数说明: satellite(string): 卫星名称key"
+    "snippet": "=== NOAA-19 APT 解调器配置 ===  【SatDump配置参考】   中心频率: 137.100 MHz   符号率: 2 ksps   调制: AFM   Vit"
   },
   "satdump_live": {
-    "cat": "BAD_ARG",
+    "cat": "OK",
     "args": {
+      "satellite": "noaa19_apt",
       "frequency_hz": 100000000,
-      "output_dir": "/tmp/mbdsdr_param_out",
-      "satellite_name": "noaa19_apt"
+      "output_dir": "/tmp/mbdsdr_param_out"
     },
-    "snippet": "工具 'satdump_live' 缺少必填参数: satellite。参数说明: satellite(string): 卫星名称key，如 gk2a_lrit / noaa19_"
+    "snippet": "=== SatDump 实时接收 ===  卫星: noaa19_apt 频率: 100.000 MHz 输出目录: /tmp/mbdsdr_param_out 采样率: 2048"
   },
   "satdump_process": {
-    "cat": "BAD_ARG",
+    "cat": "OK",
     "args": {
-      "output_dir": "/tmp/mbdsdr_param_out",
-      "input_path": "/tmp/mbdsdr_param_in.bin",
-      "satellite_name": "noaa19_apt"
+      "input_file": "/tmp/mbdsdr_param_in.bin",
+      "satellite": "noaa19_apt",
+      "output_dir": "/tmp/mbdsdr_param_out"
     },
-    "snippet": "工具 'satdump_process' 缺少必填参数: input_file, satellite。参数说明: input_file(string): 输入IQ文件路径; sat"
+    "snippet": "=== SatDump 离线处理 ===  输入文件: /tmp/mbdsdr_param_in.bin 卫星: noaa19_apt 输出目录: /tmp/mbdsdr_para"
   },
   "satdump_compose_image": {
     "cat": "NEED_RESOURCE",
@@ -512,7 +512,7 @@
     "args": {
       "agent_type": "test"
     },
-    "snippet": "子代理已创建 ID: subagent_test_1789782180333_0 类型: test"
+    "snippet": "子代理已创建 ID: subagent_test_1789782334001_0 类型: test"
   },
   "subagent_execute": {
     "cat": "NEED_RESOURCE",
@@ -564,7 +564,7 @@
     "args": {
       "name": "test"
     },
-    "snippet": "录制已开始 ID: rec_1789782180333 后续工具调用将被记录"
+    "snippet": "录制已开始 ID: rec_1789782334002 后续工具调用将被记录"
   },
   "workflow_template_create": {
     "cat": "NEED_RESOURCE",
@@ -580,14 +580,14 @@
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md",
       "change_type": "test"
     },
-    "snippet": "{   \"change_id\": \"chg_1789782180333_9\",   \"file_path\": \"/home/user/Doubao/chats/3843816004"
+    "snippet": "{   \"change_id\": \"chg_1789782334002_10\",   \"file_path\": \"/home/user/Doubao/chats/384381600"
   },
   "file_change_history": {
     "cat": "OK",
     "args": {
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "[   {     \"change_id\": \"chg_1789782180333_9\",     \"file_path\": \"/home/user/Doubao/chats/38"
+    "snippet": "[   {     \"change_id\": \"chg_1789782334002_10\",     \"file_path\": \"/home/user/Doubao/chats/3"
   },
   "file_change_revert": {
     "cat": "NEED_RESOURCE",
@@ -637,7 +637,7 @@
     "args": {
       "experience_type": "test"
     },
-    "snippet": "{   \"experience_id\": \"exp_1789782180777_10\",   \"experience_type\": \"task_completion\",   \"qu"
+    "snippet": "{   \"experience_id\": \"exp_1789782334438_11\",   \"experience_type\": \"task_completion\",   \"qu"
   },
   "learning_suggestion": {
     "cat": "OK",
@@ -661,18 +661,18 @@
     "snippet": "SDR 流水线已创建 任务数: 9 调用 orchestrator_plan 查看顺序，orchestrator_execute 执行"
   },
   "code_read_file": {
-    "cat": "NEED_HW",
+    "cat": "OK",
     "args": {
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "文件: /home/user/Doubao/chats/38438160041798146/README.md 共 214 行  # MBDSDR  **全栈开源的 AI 定义无线"
+    "snippet": "文件: /home/user/Doubao/chats/38438160041798146/README.md 共 1 行  "
   },
   "code_modify_file": {
     "cat": "OK",
     "args": {
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "{   \"edit_id\": \"edit_1789782180789_1\",   \"file_path\": \"/home/user/Doubao/chats/38438160041"
+    "snippet": "{   \"edit_id\": \"edit_1789782334449_1\",   \"file_path\": \"/home/user/Doubao/chats/38438160041"
   },
   "code_modify_section": {
     "cat": "NEED_RESOURCE",
@@ -702,7 +702,7 @@
     "args": {
       "message": "HELLO"
     },
-    "snippet": "成功: 已提交: bb02de24 [main bb02de2] HELLO  4 files changed, 825 insertions(+), 216 deletions("
+    "snippet": "成功: 已提交: 82c44400 [main 82c4440] HELLO  2 files changed, 144 insertions(+), 66 deletions(-"
   },
   "code_rollback": {
     "cat": "NEED_RESOURCE",
@@ -725,7 +725,7 @@
       "ra_deg": 1.0,
       "dec_deg": 1.0
     },
-    "snippet": "{   \"alt_deg\": -36.8301,   \"az_deg\": 318.644,   \"alt_dms\": \"-36°49'48.4\\\"\",   \"az_compass\""
+    "snippet": "{   \"alt_deg\": -37.1336,   \"az_deg\": 319.3518,   \"alt_dms\": \"-37°08'00.9\\\"\",   \"az_compass"
   },
   "astro_altaz_to_equatorial": {
     "cat": "OK",
@@ -733,7 +733,7 @@
       "alt_deg": 1.0,
       "az_deg": 1.0
     },
-    "snippet": "{   \"ra_deg\": 327.606631925787,   \"dec_deg\": 46.74162419586798,   \"ra_hms\": \"21h50m25.6s\","
+    "snippet": "{   \"ra_deg\": 328.24843063213973,   \"dec_deg\": 46.74162419586798,   \"ra_hms\": \"21h52m59.6s"
   },
   "astro_compute_refraction": {
     "cat": "OK",
