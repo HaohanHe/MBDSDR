@@ -719,6 +719,25 @@ def register_sdr_tools(agent):
         category="sdr_analysis",
     )
 
+    agent.tool_registry.register(
+        name="sdr_cfo_correct",
+        description="载波频率偏移（CFO）估计与自动校正，面向无 TCXO 的低成本 SDR（如 RTL2832U，频偏可达数十 ppm）。对未调制载波/CW/FM 载波/卫星信标/带导频信号，先 FFT 峰值+抛物线亚 bin 粗估，再在相位相干性达标时用 Kay 相位差分精估到亚 Hz，最后复混频补偿。返回频偏 Hz、折合 ppm、粗/精估、校正后残余频偏、相干性与可信度，并给出调谐修正建议。这是对话触发的技能（如\"这个台频率偏了，帮我校正\"），不是固定按钮。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "iq_samples": {"type": "array", "items": {"type": "number"},
+                               "description": "可选，实数交替 I/Q 列表 [I1,Q1,I2,Q2,...]；不提供则从已连接设备实时采集"},
+                "sample_rate": {"type": "number", "description": "传入 iq_samples 时必填，采样率 Hz"},
+                "f_expected_hz": {"type": "number", "description": "标称载波在基带的预期频率 Hz，默认 0（信号应在中心）"},
+                "search_hz": {"type": "number", "description": "可选，只在标称频率±该范围找峰，抗邻近强台"},
+                "num_samples": {"type": "integer", "description": "设备采集时的样本数，默认 16384"},
+            },
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_cfo_correct(mgr, args)),
+        category="sdr_analysis",
+    )
+
     # ═══════════════════════════════════════════════════
     # 14. 真实解调（1个）— 最基本的 SDR 功能
     # ═══════════════════════════════════════════════════
@@ -4069,6 +4088,49 @@ def _coerce_iq(seq):
         return None
     iq = flat[:n].reshape(-1, 2)
     return (iq[:, 0] + 1j * iq[:, 1]).astype(np.complex128)
+
+
+def _cfo_correct(mgr, args):
+    """载波频偏（CFO）估计与校正：FFT 粗估 + 相干性门控的 Kay 精估 + 复混频补偿。"""
+    from mbdsdr_ai.cfo import estimate_and_correct
+
+    iq = _coerce_iq(args.get("iq_samples"))
+    fs = args.get("sample_rate")
+    if iq is None:
+        backend = _get_backend(mgr)
+        if not backend or not getattr(backend.status, "connected", False):
+            return "错误: 设备未连接，请先调用 sdr_connect，或通过 iq_samples 提供样本"
+        iq = backend.read_samples(int(args.get("num_samples", 16384)))
+        if iq is None:
+            return "错误: 该设备不支持 IQ 样本输出"
+        fs = backend.get_sample_rate()
+        source = "设备实时采集"
+    else:
+        if not fs:
+            return "错误: 传入 iq_samples 时必须同时提供 sample_rate"
+        source = "传入IQ"
+
+    f_exp = float(args.get("f_expected_hz", 0.0))
+    search = args.get("search_hz")
+    r = estimate_and_correct(iq, float(fs), f_expected=f_exp, search_hz=search)
+
+    if r.coherence >= 0.9:
+        conf = "高（精估已启用，残余亚 Hz 量级）"
+    elif r.coherence >= 0.5:
+        conf = "中（仅 FFT 粗估，残余约 0.1 个频率 bin，建议加长样本或提高增益）"
+    else:
+        conf = "低（信号可能淹没在噪声中，频偏估计仅供参考，建议先确认载波/提高增益）"
+
+    lines = ["=== 载波频偏（CFO）估计与校正 ===",
+             f"数据来源: {source}，N={len(iq)}，采样率 {fs/1e3:.1f} kS/s，频率分辨率 {fs/len(iq):.2f} Hz",
+             f"估计频偏: {r.offset_hz:.3f} Hz（相对标称 {f_exp/1e6:.4f} MHz）",
+             f"折合晶体误差: {r.offset_ppm_100mhz:.2f} ppm（按 100 MHz 载波参考）",
+             f"  FFT 粗估: {r.coarse_hz:.3f} Hz；Kay 精估: {r.fine_hz:.3f} Hz"
+             f"（{'已启用' if r.fine_applied else '未启用，相干性不足'}）",
+             f"校正后残余频偏: {r.residual_hz:.3f} Hz",
+             f"相位相干性: {r.coherence:.3f}，可信度: {conf}",
+             f"建议调谐修正: 将接收频率上移 {r.offset_hz:.1f} Hz（或在基带用该值复混频补偿）"]
+    return '\n'.join(lines)
 
 
 def _energy_sense(mgr, args):
