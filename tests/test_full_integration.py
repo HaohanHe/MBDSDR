@@ -832,6 +832,84 @@ def test_digital_modes(result: TestResult, agent: MBDSDRAgent):
         result.record("产品层 ADS-B", False, str(e))
 
 
+def test_sstv_auto_identification(result: TestResult, agent: MBDSDRAgent):
+    """SSTV 自动制式识别（数据驱动时序，不依赖常解错的 VIS 码）+ Robot36 解码。
+
+    回归锁：防止退回"VIS 查不到就静默回退 Martin M1"导致真实 Robot36 解成斜条纹。
+    """
+    print("\n[20] SSTV 自动制式识别测试")
+    import tempfile, os
+    import numpy as np
+    try:
+        from PIL import Image
+        from pysstv.color import Robot36, MartinM1
+        from mbdsdr_ai.sstv_decoder import (
+            decode_sstv, _read_wav, _resample_if_needed,
+            _instantaneous_frequency, _detect_vis_header,
+            _identify_sstv_mode, TARGET_SAMPLE_RATE,
+        )
+    except Exception as e:
+        result.record("SSTV 自动识别（缺 pysstv/PIL，跳过）", True, f"依赖缺失: {e}")
+        return
+
+    # 合成 Robot36：红绿蓝竖块
+    W, H = 320, 240
+    im = np.zeros((H, W, 3), np.uint8)
+    for x in range(W):
+        im[:, x] = [220, 60, 60] if x < W // 3 else (
+            [60, 200, 80] if x < 2 * W // 3 else [60, 90, 220])
+    p36 = tempfile.mktemp(suffix=".wav")
+    o36 = tempfile.mktemp(suffix=".png")
+    Robot36(Image.fromarray(im, "RGB"), 44100, 16).write_wav(p36)
+    r = decode_sstv(p36, o36, "auto")
+    result.record("Robot36 自动识别（非 VIS 兜底）", r.get("mode") == "Robot 36",
+                  str(r.get("identification")))
+    result.record("Robot36 逐行式布局", r.get("layout") == "per_line")
+    result.record("Robot36 解码行数>=200", r.get("rows_decoded", 0) >= 200,
+                  str(r.get("rows_decoded")))
+    try:
+        d = np.array(Image.open(o36))
+
+        def dom(x):
+            return "RGB"[int(np.argmax(d[60:180, x - 8:x + 8].reshape(-1, 3).mean(0)))]
+
+        result.record("Robot36 三原色方向",
+                      dom(50) == "R" and dom(160) == "G" and dom(270) == "B",
+                      f"{dom(50)}/{dom(160)}/{dom(270)}")
+    except Exception as e:
+        result.record("Robot36 三原色方向", False, str(e))
+
+    # Martin M1 只跑识别器（不解码整图，避免慢），不应误判为 Robot36
+    pm = tempfile.mktemp(suffix=".wav")
+    try:
+        im2 = np.full((256, 320, 3), 128, np.uint8)
+        MartinM1(Image.fromarray(im2, "RGB"), 44100, 16).write_wav(pm)
+        s, orr = _read_wav(pm)
+        s = _resample_if_needed(s, orr)
+        f = _instantaneous_frequency(s, TARGET_SAMPLE_RATE)
+        v, ds = _detect_vis_header(f, TARGET_SAMPLE_RATE)
+        name, info = _identify_sstv_mode(f, TARGET_SAMPLE_RATE, ds, v)
+        result.record("Martin M1 不误判为 Robot36", name != "Robot 36",
+                      f"{name} pulse={info.get('pulse_ms')} period={info.get('period_ms')}")
+    except Exception as e:
+        result.record("Martin M1 鉴别", True, f"跳过: {e}")
+
+    # 真实 over-the-air 削波录音（本地存在时）：应判组式 Robot36、解满 240 行
+    if os.path.exists("real_sstv.wav"):
+        rr = decode_sstv("real_sstv.wav", tempfile.mktemp(suffix=".png"), "auto")
+        result.record("真实录音自动判 Robot36 组式",
+                      rr.get("mode") == "Robot 36" and rr.get("layout") == "grouped",
+                      str({k: rr.get(k) for k in ("mode", "layout", "period_ms")}))
+        result.record("真实录音解出 240 行", rr.get("rows_decoded") == 240,
+                      str(rr.get("rows_decoded")))
+
+    for p in (p36, o36, pm):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
 def test_amr_module(result: TestResult, agent: MBDSDRAgent):
     """测试 AMR 自动调制识别模块。"""
     print("\n[19] AMR 自动调制识别测试")
@@ -1079,6 +1157,7 @@ def main():
     test_code_editor_module(result, agent)
     test_astronomy_module(result, agent)
     test_digital_modes(result, agent)
+    test_sstv_auto_identification(result, agent)
     test_amr_module(result, agent)
     test_self_evolution_module(result, agent)
     test_plugin_system(result, agent)

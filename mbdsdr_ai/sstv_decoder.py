@@ -228,6 +228,284 @@ def _detect_vis_header(freq: np.ndarray, sample_rate: int) -> Tuple[Optional[int
     return None, 0
 
 
+# ---------------------------------------------------------------------------
+# 数据驱动的制式识别（不依赖可能解错的 VIS 码）
+#
+# 真实 over-the-air 录音里 VIS 头常因切入时机、噪声、频偏而解错（实测一份
+# Robot36 录音 VIS 解出非标准码 121，旧逻辑静默回退 Martin M1 导致斜条纹）。
+# 因此制式判定以信号本身可测的物理特征为准：1200Hz 行同步的脉宽与间隔、
+# 一个同步周期内的通道段结构；VIS 仅作辅助校验。
+# ---------------------------------------------------------------------------
+def _find_sync_markers(freq: np.ndarray, sr: int, data_start: int,
+                       sync_ms_nom: float = 9.0,
+                       band_hz: float = 110.0):
+    """检测 1200Hz 同步脉冲，做周期清洗后返回起点数组及脉宽/间隔中位值。
+
+    Returns:
+        (markers np.ndarray[int], pulse_ms float, gap_ms float)
+    """
+    fr = np.where(np.isfinite(freq), freq, 1500.0)
+    band = np.abs(fr - 1200.0) <= band_hz
+    band[:data_start] = False
+    min_len = int(0.6 * sr * sync_ms_nom / 1000.0)
+    raw: list = []
+    widths: list = []
+    try:
+        from scipy import ndimage as _ndi
+        labeled = _ndi.label(band)[0]
+        for k in range(1, int(labeled.max()) + 1):
+            idx = np.where(labeled == k)[0]
+            if len(idx) >= min_len:
+                raw.append(int(idx[0]))
+                widths.append(len(idx) / sr * 1000.0)
+    except Exception:
+        i = data_start
+        while i < len(fr):
+            if band[i]:
+                j = i
+                while j < len(fr) and band[j]:
+                    j += 1
+                if j - i >= min_len:
+                    raw.append(i)
+                    widths.append((j - i) / sr * 1000.0)
+                i = j
+            else:
+                i += 1
+    if len(raw) < 4:
+        return np.array(raw, dtype=int), (
+            float(np.median(widths)) if widths else 0.0), 0.0
+
+    raw_arr = np.array(raw)
+    gaps = np.diff(raw_arr) / sr * 1000.0
+    # 候选间隔的众数（在合理 100~1200ms 内取中位）
+    valid = gaps[(gaps > 100.0) & (gaps < 1200.0)]
+    if len(valid) == 0:
+        return raw_arr, float(np.median(widths)), 0.0
+    period = float(np.median(valid))
+    win = int(0.015 * sr)
+    period_samp = period * sr / 1000.0
+    # 首锚点：其后 1/2/3 个周期都有候选
+    first = None
+    for c in raw_arr:
+        hits = sum(
+            1 for k in (1, 2, 3)
+            if np.any(np.abs(raw_arr - (c + k * period_samp)) <= win)
+        )
+        if hits >= 3:
+            first = int(c)
+            break
+    if first is None:
+        first = int(raw_arr[0])
+    markers: list = []
+    g = 0
+    while True:
+        exp = first + g * period_samp
+        if exp > len(fr):
+            break
+        m = raw_arr[np.abs(raw_arr - exp) <= win]
+        markers.append(int(m[np.argmin(np.abs(m - exp))]) if len(m) else int(exp))
+        g += 1
+        if g > 4096:
+            break
+    return np.array(markers, dtype=int), float(np.median(widths)), period
+
+
+def _identify_sstv_mode(freq: np.ndarray, sr: int, data_start: int,
+                        vis_code: Optional[int]):
+    """基于同步时序特征识别 SSTV 制式。
+
+    返回 (mode_name, info_dict)。Robot36 同步脉宽约 9ms，存在两种发送变体：
+    逐行式（pysstv，每 150ms 一个同步）与组首式（多数空中实现，每两行一个
+    同步，约 288~300ms）。Martin/Scottie 家族同步脉宽约 4.862ms 或 9ms、
+    间隔显著不同。
+    """
+    # 用较松的 4.5ms 最小脉宽，一次把 4.862ms 与 9ms 同步都抓到
+    fr = np.where(np.isfinite(freq), freq, 1500.0)
+    band = np.abs(fr - 1200.0) <= 110.0
+    band[:data_start] = False
+    min_len = int(0.6 * sr * 4.5 / 1000.0)
+    raw: list = []
+    widths: list = []
+    try:
+        from scipy import ndimage as _ndi
+        labeled = _ndi.label(band)[0]
+        for k in range(1, int(labeled.max()) + 1):
+            idx = np.where(labeled == k)[0]
+            if len(idx) >= min_len:
+                raw.append(int(idx[0]))
+                widths.append(len(idx) / sr * 1000.0)
+    except Exception:
+        pass
+    if len(raw) < 4:
+        return "Martin M1", {"reason": "no-sync-markers", "vis": vis_code}
+    raw_arr = np.array(raw)
+    gaps = np.diff(raw_arr) / sr * 1000.0
+    valid = gaps[(gaps > 100.0) & (gaps < 1200.0)]
+    pulse_ms = float(np.median(widths)) if widths else 0.0
+    period_ms = float(np.median(valid)) if len(valid) else 0.0
+    info = {"pulse_ms": pulse_ms, "period_ms": period_ms, "vis": vis_code}
+
+    # Robot36：9ms 同步，周期 ~150ms（逐行）或 ~288-300ms（组首两行）
+    if pulse_ms >= 7.0 and (130.0 <= period_ms <= 175.0):
+        return "Robot 36", {**info, "robot_layout": "per_line"}
+    if pulse_ms >= 7.0 and (270.0 <= period_ms <= 330.0):
+        return "Robot 36", {**info, "robot_layout": "grouped"}
+    # Martin M1：4.862ms 同步、~446ms；Martin M2 ~227ms
+    if pulse_ms < 7.0 and 400.0 <= period_ms <= 480.0:
+        return "Martin M1", info
+    if pulse_ms < 7.0 and 200.0 <= period_ms <= 250.0:
+        return "Martin M2", info
+    # Scottie：9ms 同步但 sync 位于红通道前，周期 ~278(S2)/~427(S1)
+    if pulse_ms >= 7.0 and 260.0 <= period_ms <= 295.0:
+        return "Scottie S2", info
+    if pulse_ms >= 7.0 and 400.0 <= period_ms <= 440.0:
+        return "Scottie S1", info
+    # 兜底：VIS 能对上就用 VIS
+    if vis_code is not None:
+        for name, mdef in SSTV_MODES.items():
+            if mdef.get("vis_code") == vis_code:
+                return name, info
+    return "Martin M1", {**info, "reason": "fallback"}
+
+
+def _freq_to_pixel_series(fr: np.ndarray, pos: int, px_samples: float,
+                          n: int, half_win: float) -> np.ndarray:
+    """按浮点像素时钟读取 n 个像素，取每像素中心窗口均值并映射到 0-255。
+
+    用累积和做 O(n) 向量化滑动窗口均值，避免逐像素切片（76800 次 mean）
+    带来的数十秒级解码耗时。
+    """
+    h = max(1, int(round(px_samples * half_win)))
+    centers = pos + (np.arange(n) + 0.5) * px_samples
+    c = np.round(centers).astype(np.int64)
+    a = np.clip(c - h, 0, len(fr) - 1)
+    b = np.clip(c + h, 1, len(fr))
+    csum = np.concatenate(([0.0], np.cumsum(fr.astype(np.float64))))
+    winsum = csum[b] - csum[a]
+    length = np.clip(b - a, 1, None)
+    mean_f = winsum / length
+    return np.clip((mean_f - 1500.0) / 800.0 * 255.0, 0, 255)
+
+
+def _ycbcr_to_rgb(Y: np.ndarray, Cb: np.ndarray, Cr: np.ndarray):
+    R = np.clip(Y + 1.402 * (Cr - 128.0), 0, 255)
+    G = np.clip(Y - 0.344136 * (Cb - 128.0) - 0.714136 * (Cr - 128.0), 0, 255)
+    B = np.clip(Y + 1.772 * (Cb - 128.0), 0, 255)
+    return R, G, B
+
+
+def _decode_robot36(freq: np.ndarray, sr: int, data_start: int,
+                    layout: str = "grouped") -> Dict[str, Any]:
+    """数据驱动解码 Robot36（320x240，YUV 4:2:0 风格两行一组）。
+
+    像素时钟不硬编码，而由实测同步周期反推（发射/录音链路时基偏差可达 4%），
+    以消除累积水平错位。兼容逐行式（~150ms/同步）与组首式（~300ms/同步）。
+    经 pysstv 合成闭环验证：偶数行色差为 Cb(B-Y)、奇数行为 Cr(R-Y)。
+
+    色差直流恢复：真实 over-the-air 录音常削波/带频偏，使 Cb/Cr 中值偏离
+    中性电平 128 而整幅偏色；按全帧色差中值对齐 128 校正（自然图像色差中值
+    本应在中性附近，干净信号 DC≈0 不受影响）。
+    """
+    width, height = 320, 240
+    markers, pulse_ms, period_ms = _find_sync_markers(
+        freq, sr, data_start, sync_ms_nom=9.0)
+    if len(markers) < 2 or period_ms <= 0:
+        return {"success": False, "error": "Robot36: 同步标记不足"}
+    if layout == "auto":
+        layout = "per_line" if period_ms < 200.0 else "grouped"
+
+    fr = np.where(np.isfinite(freq), freq, 1500.0)
+    sync_ms, porch_ms, gap_ms = 9.0, 3.0, 6.0  # gap 含 4.5ms 色差间隔+1.5ms porch
+    image = np.zeros((height, width, 3), dtype=np.uint8)
+
+    # 先收集每行的 Y 与对应 Cb/Cr，再做全帧色差直流恢复后统一着色
+    row_y: Dict[int, np.ndarray] = {}
+    row_cb: Dict[int, np.ndarray] = {}
+    row_cr: Dict[int, np.ndarray] = {}
+
+    if layout == "per_line":
+        # 每行：sync+porch, Y(88), gap, UV(44)；周期约 150ms
+        y_plus_uv = (period_ms - sync_ms - porch_ms - gap_ms)
+        y_scan = max(1.0, y_plus_uv * 2.0 / 3.0)
+        uv_scan = max(1.0, y_plus_uv / 3.0)
+        ypx = sr * y_scan / width / 1000.0
+        uvpx = sr * uv_scan / width / 1000.0
+        o_y = int((sync_ms + porch_ms) * sr / 1000.0)
+        o_uv = int((sync_ms + porch_ms + y_scan + gap_ms) * sr / 1000.0)
+        line_uv: Dict[int, np.ndarray] = {}
+        n_lines = 0
+        for li, s in enumerate(markers):
+            if li >= height or s + o_uv + int(uv_scan * sr / 1000.0) >= len(fr):
+                break
+            row_y[li] = _freq_to_pixel_series(fr, s + o_y, ypx, width, 0.4)
+            line_uv[li] = _freq_to_pixel_series(fr, s + o_uv, uvpx, width, 0.4)
+            n_lines = li + 1
+        # 偶数行色差=Cb，奇数行=Cr；两行组成一对共享色度
+        for li in range(n_lines):
+            if li % 2 == 0:
+                row_cb[li] = line_uv[li]
+                row_cr[li] = line_uv.get(li + 1, line_uv[li])
+            else:
+                row_cr[li] = line_uv[li]
+                row_cb[li] = line_uv.get(li - 1, line_uv[li])
+    else:
+        # 组首式：每同步周期含两行 Y0,UV0(Cb),Y1,UV1(Cr)，周期约 300ms
+        y_plus_uv = (period_ms - sync_ms - porch_ms) / 2.0 - gap_ms
+        y_scan = max(1.0, y_plus_uv * 2.0 / 3.0)
+        uv_scan = max(1.0, y_plus_uv / 3.0)
+        ypx = sr * y_scan / width / 1000.0
+        uvpx = sr * uv_scan / width / 1000.0
+        y_samp = int(y_scan * sr / 1000.0)
+        uv_samp = int(uv_scan * sr / 1000.0)
+        gap_samp = int(gap_ms * sr / 1000.0)
+        o_y0 = int((sync_ms + porch_ms) * sr / 1000.0)
+        o_cb = o_y0 + y_samp + gap_samp
+        o_y1 = o_cb + uv_samp
+        o_cr = o_y1 + y_samp + gap_samp
+        r0 = 0
+        for s in markers:
+            if r0 + 1 >= height or s + o_cr + uv_samp >= len(fr):
+                break
+            Y0 = _freq_to_pixel_series(fr, s + o_y0, ypx, width, 0.4)
+            Cb = _freq_to_pixel_series(fr, s + o_cb, uvpx, width, 0.4)
+            Y1 = _freq_to_pixel_series(fr, s + o_y1, ypx, width, 0.4)
+            Cr = _freq_to_pixel_series(fr, s + o_cr, uvpx, width, 0.4)
+            row_y[r0], row_cb[r0], row_cr[r0] = Y0, Cb, Cr
+            row_y[r0 + 1], row_cb[r0 + 1], row_cr[r0 + 1] = Y1, Cb, Cr
+            r0 += 2
+
+    if not row_y:
+        return {"success": False, "error": "Robot36: 未解码出任何行"}
+
+    # 全帧色差直流恢复（中值对齐中性 128）
+    cb_all = np.concatenate([row_cb[r] for r in sorted(row_cb)])
+    cr_all = np.concatenate([row_cr[r] for r in sorted(row_cr)])
+    cb_dc = float(np.median(cb_all)) - 128.0
+    cr_dc = float(np.median(cr_all)) - 128.0
+
+    for r in sorted(row_y):
+        Cb = row_cb[r] - cb_dc
+        Cr = row_cr[r] - cr_dc
+        R, G, B = _ycbcr_to_rgb(row_y[r], Cb, Cr)
+        image[r, :, 0] = R
+        image[r, :, 1] = G
+        image[r, :, 2] = B
+
+    return {
+        "success": True,
+        "mode": "Robot 36",
+        "width": width,
+        "height": height,
+        "layout": layout,
+        "period_ms": round(period_ms, 2),
+        "pulse_ms": round(pulse_ms, 2),
+        "cb_dc": round(cb_dc, 1),
+        "cr_dc": round(cr_dc, 1),
+        "rows_decoded": int(np.sum(np.any(image > 0, axis=(1, 2)))),
+        "image": image,
+    }
+
+
 def decode_sstv(file_path: str, output_path: Optional[str] = None,
                  mode: str = "auto") -> Dict[str, Any]:
     """
@@ -262,14 +540,43 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
     # 都需要它来跳过 leader/校准脉冲，否则显式指定模式时会从 VIS 头里误锁同步。
     detected_mode = mode
     vis_code, data_start = _detect_vis_header(freq, sr)
+    id_info: Dict[str, Any] = {}
     if mode == "auto":
-        if vis_code is not None:
-            for mname, mdef in SSTV_MODES.items():
-                if mdef["vis_code"] == vis_code:
-                    detected_mode = mname
-                    break
-        if detected_mode == "auto":
-            detected_mode = "Martin M1"  # 默认
+        detected_mode, id_info = _identify_sstv_mode(freq, sr, data_start, vis_code)
+
+    # Robot36 走数据驱动的两行组解码器（兼容逐行/组首两种发送变体）
+    if detected_mode in ("Robot 36", "Robot36"):
+        layout = id_info.get("robot_layout", "auto")
+        res = _decode_robot36(freq, sr, data_start, layout=layout)
+        if not res.get("success"):
+            return {"error": res.get("error", "Robot36 解码失败")}
+        image = res.pop("image")
+        if output_path is None:
+            output_path = os.path.splitext(file_path)[0] + "_sstv.png"
+        if HAS_PIL:
+            Image.fromarray(image).save(output_path)
+        else:
+            np.save(output_path + ".npy", image)
+            output_path = output_path + ".npy"
+        return {
+            "success": True,
+            "mode": "Robot 36",
+            "width": res["width"],
+            "height": res["height"],
+            "layout": res["layout"],
+            "period_ms": res["period_ms"],
+            "rows_decoded": res["rows_decoded"],
+            "output_path": output_path,
+            "identification": {
+                "method": "timing",
+                "vis_raw": vis_code,
+                "pulse_ms": res["pulse_ms"],
+                "period_ms": res["period_ms"],
+            },
+        }
+
+    if mode == "auto" and detected_mode not in SSTV_MODES:
+        detected_mode = "Martin M1"  # 时序无法确定时的最后兜底
 
     if detected_mode not in SSTV_MODES:
         return {"error": f"不支持的模式: {detected_mode}"}
