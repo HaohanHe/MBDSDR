@@ -469,11 +469,12 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_decode_adsb",
-        description="解码 ADS-B 飞机广播信号。输入录制文件，输出飞机信息（ICAO地址、呼号、位置、高度、速度、航向）。ADS-B 频率 1090MHz。需要 2MHz 以上采样率。",
+        description="解码 ADS-B 飞机广播信号。输入录制文件，输出 ICAO 地址、呼号、CRC 校验结果（内置纯 numpy Mode-S DF17 解码器，已与 pyModeS 交叉验证）。ADS-B 频率 1090MHz，需 2MHz 以上采样率；内置解码器要求采样率为 1MHz 整数倍。",
         parameters={
             "type": "object",
             "properties": {
                 "input_path": {"type": "string", "description": "输入录制文件路径（cf32 格式）"},
+                "sample_rate": {"type": "number", "description": "采样率 Hz，必须为 1MHz 整数倍（如 2000000/4000000），默认 1000000"},
                 "duration": {"type": "number", "description": "持续解码时长（可选，实时模式）"},
             },
             "required": ["input_path"],
@@ -2037,18 +2038,25 @@ def _decode_aprs(args):
     return output
 
 def _decode_adsb(args):
-    """ADS-B 飞机广播解码（框架实现）。"""
+    """ADS-B 飞机广播解码（内置纯 numpy Mode-S DF17，已与 pyModeS 交叉验证）。"""
     input_path = args["input_path"]
-    result = decode_digital_mode(input_path, mode="adsb")
+    sample_rate = float(args.get("sample_rate", 1e6))
+    result = decode_digital_mode(input_path, mode="adsb", sample_rate=sample_rate)
     if "error" in result:
         return f"解码失败: {result['error']}"
     output = f"=== ADS-B 解码 ===\n"
     output += f"输入: {input_path}\n"
-    output += f"可用工具: {result.get('external_tools_available', '无')}\n"
-    if result.get("external_tools_available"):
-        output += f"状态: 检测到 dump1090，可用于完整解码\n"
+    output += f"采样率: {sample_rate/1e6:g} MHz\n"
+    if result.get("found"):
+        output += f"前导检测: 命中（样本索引 {result.get('preamble_index')}）\n"
+        output += f"CRC-24 校验: {'通过' if result.get('crc_ok') else '失败'}\n"
+        output += f"ICAO 地址: {result.get('icao_hex')}\n"
+        if result.get("callsign"):
+            output += f"航班呼号: {result.get('callsign')}\n"
+        output += f"原始帧: {result.get('raw_hex')}\n"
     else:
-        output += f"状态: 未检测到 ADS-B 解码工具，建议安装 dump1090\n"
+        output += "前导检测: 未命中（无有效 Mode-S 帧或信噪比过低）\n"
+    output += f"可用外部工具: {result.get('external_tools_available', '无')}\n"
     if "note" in result:
         output += f"说明: {result['note']}\n"
     return output
