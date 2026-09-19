@@ -3292,8 +3292,16 @@ def _gnss_direction_find(args):
     except ImportError:
         from gnss_monitor import interference_direction_finding
 
-    rssi_dict = args['rssi_by_azimuth']
+    rssi_dict = args.get('rssi_by_azimuth') if isinstance(args, dict) else None
+    # 弱模型可能传空、传列表或漏传；这里要优雅报错而不是抛 KeyError
+    if not rssi_dict or not isinstance(rssi_dict, dict):
+        return ("错误: 需要提供 rssi_by_azimuth，即 {方位角度: RSSI(dBm)} 的映射，"
+                "例如 {\"0\": -82, \"30\": -75, \"60\": -68, \"90\": -74}。"
+                "请先用定向天线方位扫描工具（gimbal/gp 扫描）采集各方位 RSSI，再把结果交给本工具做质心定位。")
+
     result = interference_direction_finding(rssi_dict)
+    if not isinstance(result, dict) or "error" in result:
+        return f"无法估算干扰源方向: {result.get('error', '样本不足') if isinstance(result, dict) else '无效样本'}。请至少提供一组有效的 {方位: RSSI} 样本。"
 
     lines = ["=== 干扰源方向估算（八木天线RSSI扫描）==="]
     lines.append(f"估算方向: {result['estimated_direction_deg']}°")
