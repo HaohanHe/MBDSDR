@@ -787,6 +787,51 @@ def test_astronomy_module(result: TestResult, agent: MBDSDRAgent):
     result.record("角距离计算", guidance["angular_distance_deg"] > 0)
 
 
+def test_digital_modes(result: TestResult, agent: MBDSDRAgent):
+    """数字模式解码（ADS-B Mode-S 纯 numpy 闭环）。"""
+    print("\n[19] 数字模式解码测试")
+    import tempfile, os
+    from mbdsdr_ai.adsb import (
+        build_identification_frame, modulate_baseband, decode_baseband,
+        mode_s_crc24,
+    )
+
+    fs = 4e6
+    frame = build_identification_frame("780ABC", "CCA123")
+    result.record("ADS-B 帧长度 14 字节", len(frame) == 14)
+    result.record("ADS-B DF17 头", frame[0] == 0x8D)
+
+    iq = modulate_baseband(frame, fs=fs, lead_us=2.0)
+    result.record("ADS-B 基带非空", len(iq) > 400)
+
+    d = decode_baseband(iq, fs=fs)
+    result.record("ADS-B 前导命中", bool(d.get("found")))
+    result.record("ADS-B CRC-24 通过", bool(d.get("crc_ok")))
+    result.record("ADS-B ICAO 解码", d.get("icao") == "780ABC")
+    result.record("ADS-B 呼号解码", d.get("callsign") == "CCA123")
+
+    # CRC 权威向量自检（MSB-first 长除法，完整 112bit 合法报文余 0）
+    from mbdsdr_ai.adsb import _bytes_to_bits
+    auth = bytes.fromhex("8D406B902015A678D4D220AA4BDA")
+    result.record("ADS-B CRC 权威向量余数0", mode_s_crc24(_bytes_to_bits(auth)) == 0)
+
+    # 产品层 decode_digital_mode 走 .cf32
+    try:
+        from mbdsdr_ai.decoders import decode_digital_mode
+        import numpy as np
+        iqf = np.empty(2 * len(iq), dtype=np.float32)
+        iqf[0::2] = iq.real.astype(np.float32)
+        iqf[1::2] = iq.imag.astype(np.float32)
+        cf = tempfile.mktemp(suffix=".cf32")
+        iqf.tofile(cf)
+        r = decode_digital_mode(cf, "adsb", sample_rate=fs)
+        result.record("产品层 ADS-B 前导", bool(r.get("found")))
+        result.record("产品层 ADS-B 呼号", r.get("callsign") == "CCA123")
+        os.remove(cf)
+    except Exception as e:
+        result.record("产品层 ADS-B", False, str(e))
+
+
 def test_amr_module(result: TestResult, agent: MBDSDRAgent):
     """测试 AMR 自动调制识别模块。"""
     print("\n[19] AMR 自动调制识别测试")
@@ -1033,6 +1078,7 @@ def main():
     test_orchestrator_module(result, agent)
     test_code_editor_module(result, agent)
     test_astronomy_module(result, agent)
+    test_digital_modes(result, agent)
     test_amr_module(result, agent)
     test_self_evolution_module(result, agent)
     test_plugin_system(result, agent)
