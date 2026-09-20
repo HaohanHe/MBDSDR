@@ -77,6 +77,17 @@ SSTV_MODES = {
         "channel_order": ["G", "R", "B"],  # 实测：Scottie 系 R/B 与 Martin 相反
         "pixel_ms": 0.5410,  # SCAN 86.564ms / 160
     },
+    "Scottie DX": {
+        "vis_code": 0x4C,  # pysstv 权威 VIS
+        "width": 320,
+        "height": 256,
+        "sync_freq": 1200,
+        "sync_ms": 9.0,
+        "sep_freq": 1500,
+        "sep_ms": 1.5,
+        "channel_order": ["R", "G", "B"],  # 实测：红通道正确，彩色映射待精调
+        "pixel_ms": 1.0753,  # SCAN 344.1ms / 320
+    },
     "Robot 36": {
         "vis_code": 0x08,
         "width": 320,
@@ -414,6 +425,9 @@ def _identify_sstv_mode(freq: np.ndarray, sr: int, data_start: int,
         return "Scottie S2", info
     if pulse_ms >= 7.0 and 400.0 <= period_ms <= 440.0:
         return "Scottie S1", info
+    # Scottie DX：9ms 同步、~1044ms（长扫描 344.1ms/通道）
+    if pulse_ms >= 7.0 and 950.0 <= period_ms <= 1100.0:
+        return "Scottie DX", info
     # 兜底：VIS 能对上才用 VIS（VIS 在合成/真实信号上都曾解错，仅作弱兜底）
     if vis_code is not None and vis_code in (8, 44, 40, 60, 56):
         for name, mdef in SSTV_MODES.items():
