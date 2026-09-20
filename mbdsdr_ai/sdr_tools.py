@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from .tool_registry import ToolResult
+from . import orbit
 from .sdr_backend import SDRBackendManager, SDRStatus
 from .spectrum_processor import SpectrumProcessor
 from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth
@@ -2069,10 +2070,12 @@ def _satellite_sky_view(args):
     min_elev = args.get("min_elevation", 0.0)
     sat_type = args.get("satellite_type", "all")
 
-    visible = list_visible_satellites(lat, lon, alt, min_elev, sat_type)
+    visible = orbit.visible_satellites(lat, lon, alt / 1000.0, min_elev, sat_type)
 
     if not visible:
-        return f"=== 卫星天空视图 ===\n位置: {lat}°N, {lon}°E\n最小仰角: {min_elev}°\n类型: {sat_type}\n\n当前没有可见卫星（仰角 > {min_elev}°）\n内置卫星: {', '.join(BUILTIN_TLE.keys())}"
+        return (f"=== 卫星天空视图 ===\n位置: {lat}°N, {lon}°E\n最小仰角: {min_elev}°\n"
+                f"类型: {sat_type}\n\n当前没有可见卫星（仰角 > {min_elev}°）\n"
+                f"内置卫星: {', '.join(orbit.BUILTIN_SATS.keys())}")
 
     output = f"=== 卫星天空视图 ===\n"
     output += f"位置: {lat}°N, {lon}°E\n"
@@ -2081,11 +2084,12 @@ def _satellite_sky_view(args):
     output += f"可见卫星数: {len(visible)}\n\n"
 
     for i, sat in enumerate(visible):
-        output += f"{i+1}. {sat.name}\n"
-        output += f"   仰角: {sat.elevation:.1f}°, 方位角: {sat.azimuth:.1f}°\n"
-        output += f"   距离: {sat.distance_km:.1f} km, 高度: {sat.altitude_km:.1f} km\n"
-        if sat.name in SATELLITE_FREQUENCIES:
-            output += f"   下行频率: {SATELLITE_FREQUENCIES[sat.name]:.3f} MHz\n"
+        output += f"{i+1}. {sat['satellite']}\n"
+        output += f"   仰角: {sat['elevation']:.1f}°, 方位: {sat['azimuth']:.1f}°\n"
+        output += f"   距离: {sat['range_km']:.0f} km, 高度: {sat['altitude_km']:.0f} km\n"
+        output += f"   视向速度: {sat['range_rate_kms']:+.2f} km/s\n"
+        if sat['satellite'] in SATELLITE_FREQUENCIES:
+            output += f"   下行频率: {SATELLITE_FREQUENCIES[sat['satellite']]:.3f} MHz\n"
         output += "\n"
 
     return output
@@ -2098,22 +2102,21 @@ def _satellite_doppler(args):
     lon = args.get("longitude", 125.32)
     alt = args.get("altitude", 0.0)
 
-    result = compute_doppler_correction(sat_name, freq_hz, lat, lon, alt)
+    result = orbit.doppler_correction(sat_name, freq_hz, lat, lon, alt / 1000.0)
 
     if "error" in result:
-        return f"多普勒计算失败: {result['error']}\n支持的卫星: {', '.join(BUILTIN_TLE.keys())}"
+        return (f"多普勒计算失败: {result['error']}\n"
+                f"支持的卫星: {', '.join(orbit.BUILTIN_SATS.keys())}")
 
-    output = f"=== 卫星多普勒计算 ===\n"
+    output = f"=== 卫星多普勒计算 (sgp4 真速度) ===\n"
     output += f"卫星: {result['satellite']}\n"
     output += f"标称频率: {result['nominal_freq_mhz']:.6f} MHz\n"
     output += f"修正频率: {result['corrected_freq_mhz']:.6f} MHz\n"
     output += f"多普勒频移: {result['doppler_shift_hz']:.1f} Hz\n"
-    output += f"最大多普勒: {result['max_doppler_hz']:.1f} Hz\n"
-    output += f"仰角: {result['elevation_deg']:.1f}°\n"
-    output += f"方位角: {result['azimuth_deg']:.1f}°\n"
-    output += f"距离: {result['distance_km']:.1f} km\n"
-    if "note" in result:
-        output += f"说明: {result['note']}\n"
+    output += f"视向速度: {result['range_rate_kms']:+.2f} km/s\n"
+    output += f"仰角: {result['elevation_deg']:.1f}°, 方位: {result['azimuth_deg']:.1f}°\n"
+    output += f"距离: {result['range_km']:.0f} km\n"
+    output += f"TLE epoch: {result.get('epoch','?')}\n"
     return output
 
 def _get_gps(mgr):
