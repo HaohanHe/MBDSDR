@@ -939,6 +939,141 @@ class USRPBackend(SDRBackend):
             return None
 
 
+class FileIQBackend(SDRBackend):
+    """
+    IQ 文件回放源（离线复现）。
+
+    把录制的 IQ 文件当作一台 SDR 设备顺序/循环回放，便于无棒环境下反复跑解码器、
+    做可复现实验（对标 SDR++ IQ file playback / GNU Radio file source）。
+
+    支持格式（按扩展名，或 fmt= 显式指定）：
+      .npy            complex 一维数组（本项目自检/录音默认）
+      .cu8/.u8/.bin   unsigned 8-bit 交错 IQ（`rtl_sdr` 命令原生录制格式）
+      .cfile/.cf32     complex float32 交错（GNU Radio .cfile）
+      .cs16/.s16      signed 16-bit 交错
+    同名 .json sidecar 可提供 {"sample_rate":..., "center_freq":..., "format":...}。
+    """
+
+    def __init__(self, path: str, sample_rate: float = 2_400_000,
+                 center_freq: float = 100_000_000, loop: bool = True, fmt: str = None):
+        device = SDRDevice(
+            device_type="iq_file",
+            device_id=f"iqfile_{os.path.basename(path)}",
+            name=f"IQ 文件回放: {os.path.basename(path)}",
+            frequency_range=(1, 8_000_000_000),
+            sample_rate_range=(1, 61_440_000),
+            max_gain=0.0,
+            supports_iq=True,
+            supports_tx=False,
+        )
+        super().__init__(device)
+        self._path = path
+        self._loop = loop
+        self._fmt = fmt
+        self._samples = None
+        self._cursor = 0
+        self._rate = sample_rate
+        self._freq = center_freq
+        self.status.sample_rate_hz = sample_rate
+        self.status.frequency_hz = center_freq
+
+    def _load(self) -> int:
+        import json
+        meta_path = os.path.splitext(self._path)[0] + ".json"
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path) as f:
+                    meta = json.load(f)
+                self._rate = meta.get("sample_rate", self._rate)
+                self._freq = meta.get("center_freq", self._freq)
+                self._fmt = meta.get("format", self._fmt)
+            except Exception:
+                pass
+        ext = (self._fmt or os.path.splitext(self._path)[1].lower().lstrip(".")).lower()
+        if ext == "npy":
+            self._samples = np.asarray(np.load(self._path), dtype=np.complex128)
+        elif ext in ("cu8", "u8", "bin"):
+            raw = np.fromfile(self._path, dtype=np.uint8)
+            raw = raw[:len(raw) // 2 * 2].reshape(-1, 2).astype(np.float32)
+            self._samples = np.asarray(((raw - 127.5) / 127.5).view(np.complex64).reshape(-1),
+                                       dtype=np.complex128)
+        elif ext in ("cfile", "cf32", "iq", "fc32"):
+            raw = np.fromfile(self._path, dtype=np.float32)
+            raw = raw[:len(raw) // 2 * 2].reshape(-1, 2)
+            self._samples = np.asarray(raw.view(np.complex64).reshape(-1), dtype=np.complex128)
+        elif ext in ("cs16", "s16", "sc16"):
+            raw = np.fromfile(self._path, dtype=np.int16)
+            raw = raw[:len(raw) // 2 * 2].reshape(-1, 2).astype(np.float32) / 32768.0
+            self._samples = np.asarray(raw.view(np.complex64).reshape(-1), dtype=np.complex128)
+        else:
+            raise ValueError(f"不支持的 IQ 文件格式: {ext}（支持 npy/cu8/cfile/cs16）")
+        self.status.sample_rate_hz = self._rate
+        self.status.frequency_hz = self._freq
+        return len(self._samples)
+
+    def connect(self) -> bool:
+        try:
+            self._load()
+            self.status.connected = True
+            self._start_time = time.time()
+            return True
+        except Exception:
+            self.status.connected = False
+            return False
+
+    def disconnect(self):
+        self._samples = None
+        self._cursor = 0
+        super().disconnect()
+
+    def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
+        if not self.status.connected or self._samples is None:
+            return None
+        n = len(self._samples)
+        if self._cursor >= n:
+            if not self._loop:
+                return None
+            self._cursor = 0
+        end = self._cursor + num_samples
+        if end <= n:
+            out = self._samples[self._cursor:end].copy()
+            self._cursor = 0 if (end == n and self._loop) else end
+        else:
+            tail = self._samples[self._cursor:n]
+            if self._loop:
+                head = self._samples[:num_samples - len(tail)]
+                out = np.concatenate([tail, head])
+                self._cursor = len(head)
+            else:
+                out = tail
+                self._cursor = n
+        self._samples_read += len(out)
+        return out
+
+    def seek(self, position: int):
+        if self._samples is not None:
+            self._cursor = max(0, min(int(position), len(self._samples) - 1))
+
+    def playback_info(self) -> Dict[str, Any]:
+        n = 0 if self._samples is None else len(self._samples)
+        return {
+            "path": self._path, "total_samples": n,
+            "duration_s": n / self._rate if self._rate else 0,
+            "cursor": self._cursor, "sample_rate": self._rate,
+            "center_freq": self._freq, "loop": self._loop,
+        }
+
+    def set_frequency(self, freq_hz: float) -> bool:
+        ok = super().set_frequency(freq_hz)
+        self._freq = self.status.frequency_hz
+        return ok
+
+    def set_sample_rate(self, rate_hz: float) -> bool:
+        ok = super().set_sample_rate(rate_hz)
+        self._rate = self.status.sample_rate_hz
+        return ok
+
+
 class SDRBackendManager:
     """
     SDR 后端管理器。
@@ -1037,6 +1172,22 @@ class SDRBackendManager:
 
     def get_active(self) -> Optional[SDRBackend]:
         return self.active_backend
+
+    def open_iq_file(self, path: str, sample_rate: float = 2_400_000,
+                     center_freq: float = 100_000_000, loop: bool = True,
+                     fmt: str = None) -> Optional["FileIQBackend"]:
+        """打开 IQ 录制文件作为回放源并切换为当前设备（离线复现实验）。"""
+        be = FileIQBackend(path, sample_rate, center_freq, loop, fmt)
+        if not be.connect():
+            return None
+        if self.active_backend and self.active_backend is not be:
+            try:
+                self.active_backend.disconnect()
+            except Exception:
+                pass
+        self.backends[be.device.device_id] = be
+        self.active_backend = be
+        return be
 
     def get_status(self) -> Optional[SDRStatus]:
         if self.active_backend:

@@ -274,6 +274,29 @@ def register_sdr_tools(agent):
         category="sdr_device",
     )
 
+    agent.tool_registry.register(
+        name="sdr_open_iq_file",
+        description=(
+            "打开本地 IQ 录制文件作为回放源（离线复现实验，无需插着 SDR 棒）。"
+            "支持 .cu8/.bin(rtl_sdr 原始 unsigned8 交错)、.cfile/.cf32(GNU Radio 浮点交错)、"
+            ".cs16/.s16(有符号16位交错)、.npy(复数数组)。同名 .json sidecar 可带 sample_rate/center_freq。"
+            "打开后即成为当前设备，可对其跑频谱、解调、CW/FT8/SSTV/ADS-B 等全部解码工具，默认循环回放。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "IQ 文件绝对路径"},
+                "sample_rate_hz": {"type": "number", "description": "录制采样率 Hz，cu8/cfile 无元数据时必填，如 2400000"},
+                "center_freq_hz": {"type": "number", "description": "录制时中心频率 Hz，如 101800000"},
+                "format": {"type": "string", "description": "可选，显式格式：cu8/cfile/cs16/npy，默认按扩展名"},
+                "loop": {"type": "boolean", "description": "是否循环回放，默认 true"},
+            },
+            "required": ["path"],
+        },
+        handler=lambda args: _tool_open_iq_file(mgr, args),
+        category="sdr_device",
+    )
+
     # ═══════════════════════════════════════════════════
     # 2. 频率与采样率（4个）
     # ═══════════════════════════════════════════════════
@@ -1970,6 +1993,39 @@ def _format_status(status: Optional[SDRStatus]) -> str:
         f"已读样本: {status.samples_read:,}",
     ]
     return "\n".join(lines)
+
+
+def _tool_open_iq_file(mgr, args) -> "ToolResult":
+    """打开 IQ 录制文件作为回放源（只加载一次）。"""
+    import os
+    path = args.get("path", "")
+    if not path or not os.path.exists(path):
+        return ToolResult(success=False,
+                          content=f"IQ 文件不存在: {path}")
+    be = mgr.open_iq_file(
+        path,
+        sample_rate=args.get("sample_rate_hz", 2_400_000),
+        center_freq=args.get("center_freq_hz", 100_000_000),
+        loop=args.get("loop", True),
+        fmt=args.get("format"),
+    )
+    if be is None:
+        return ToolResult(
+            success=False,
+            content="打开 IQ 文件失败：格式不支持或文件损坏。支持 cu8/cfile/cs16/npy；"
+                    "原始格式需通过 sample_rate_hz/center_freq_hz 告知录制参数。",
+        )
+    info = be.playback_info()
+    return ToolResult(
+        success=True,
+        content=(
+            f"已切换到 IQ 文件回放源: {os.path.basename(path)}\n"
+            f"时长: {info['duration_s']:.2f}s，总样本: {info['total_samples']:,}\n"
+            f"采样率: {info['sample_rate']/1e6:.3f} MHz，中心频率: {info['center_freq']/1e6:.3f} MHz\n"
+            f"循环回放: {'是' if info['loop'] else '否'}。现可对其调用频谱/解调/CW/FT8/SSTV/ADS-B 等工具。"
+        ),
+    )
+
 
 def _spectrum_analyze(mgr, spec, args):
     backend = _get_backend(mgr)
