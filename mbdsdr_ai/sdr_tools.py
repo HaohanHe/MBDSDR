@@ -40,6 +40,7 @@ from .watcher import watch_capture
 from .adsb_lite import decode_adsb
 from .rds_lite import decode_rds
 from .noaa_apt_lite import decode_apt as lite_decode_apt, save_apt_png as lite_save_apt
+from .wfm_stereo_lite import decode_stereo as lite_decode_stereo
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
     detect_fhss, list_visible_satellites, compute_doppler_correction,
@@ -771,6 +772,30 @@ def register_sdr_tools(agent):
             "required": [],
         },
         handler=lambda args: _noaa_apt_decode_tool(mgr, args),
+        category="sdr_decode",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_wfm_stereo",
+        description=(
+            "解商用 FM 广播的立体声复合信号并输出双声道 WAV（对标 GQRX/SDR# 立体声）。"
+            "从 WFM 复基带 IQ 提取 19kHz 导频做锁相、二倍频 38kHz 相干解调差信号 (L-R)，"
+            "与主信道 (L+R) 合成 L/R，去加重后输出立体声 WAV。报告是否检测到立体声及导频信噪比。"
+            "给 input_path 为原始 IQ 文件（.cf32/.cu8/.cfile，内部宽带 FM 鉴频）；不给则实时设备采集"
+            "（freq_mhz 调频、duration_s 时长、finally 恢复原状态）。非立体声/信号弱时自动降级单声道。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "input_path": {"type": "string", "description": "原始 IQ 文件路径（.cf32/.cu8/.cfile）；不给则实时采集"},
+                "freq_mhz": {"type": "number", "description": "实时模式广播频率 MHz，如 98.0"},
+                "duration_s": {"type": "number", "description": "实时采集时长秒，默认 8，上限 120"},
+                "sample_rate_khz": {"type": "number", "description": "实时 IQ 采样率 kHz，默认 240"},
+                "deemph_us": {"type": "number", "description": "去加重时间常数 µs：中国/欧洲 50（默认），美国 75"},
+            },
+            "required": [],
+        },
+        handler=lambda args: _wfm_stereo_tool(mgr, args),
         category="sdr_decode",
     )
 
@@ -2991,6 +3016,87 @@ def _recordings_list(args):
     files.sort(key=lambda x: x["modified"], reverse=True)
     limit = args.get("limit", 20)
     return json.dumps(files[:limit], ensure_ascii=False, indent=2)
+
+def _wfm_stereo_tool(mgr, args) -> "ToolResult":
+    """WFM 广播立体声解码：IQ 文件或实时采集，输出双声道 WAV。"""
+    from scipy.io import wavfile as _wf
+    input_path = args.get("input_path")
+    duration = min(float(args.get("duration_s", 8.0)), 120.0)
+    deemph = float(args.get("deemph_us", 50.0))
+    chunks, src = [], ""
+
+    if input_path:
+        try:
+            from .sdr_backend import FileIQBackend
+            fb = FileIQBackend(input_path)
+            fb.connect()
+            sr = float(fb.get_sample_rate())
+            fb.seek(0); fb._loop = False
+            target = int(sr * duration) if duration and duration < 120 else (1 << 40)
+            while True:
+                x = fb.read_samples(min(target - sum(len(c) for c in chunks), 262144)
+                                    if target < (1 << 40) else 262144)
+                if x is None or len(x) == 0:
+                    break
+                chunks.append(np.asarray(x, dtype=np.complex64))
+            if not chunks:
+                return ToolResult(success=False, content="IQ 文件无数据")
+            iq = np.concatenate(chunks)
+            src = f"IQ 文件 {os.path.basename(input_path)}（{fb.get_frequency()/1e6:.3f}MHz）"
+        except Exception as e:
+            return ToolResult(success=False, content=f"读取 IQ 文件失败: {e}")
+    else:
+        backend = _get_backend(mgr)
+        if not backend or not backend.status.connected:
+            return ToolResult(success=False, content="设备未连接（给 input_path 可离线解码 IQ 文件）")
+        sr_req = float(args.get("sample_rate_khz", 240.0)) * 1e3
+        old = (backend.get_frequency(), backend.get_sample_rate(),
+               getattr(backend.status, "demod_mode", "WFM"))
+        try:
+            if args.get("freq_mhz") is not None:
+                backend.set_frequency(int(float(args["freq_mhz"]) * 1e6))
+            if hasattr(backend, "set_sample_rate"):
+                backend.set_sample_rate(sr_req)
+            backend.set_demod("WFM")
+            sr = float(backend.get_sample_rate())
+            target = int(sr * duration)
+            while sum(len(c) for c in chunks) < target:
+                x = backend.read_samples(min(target - sum(len(c) for c in chunks), 262144))
+                if x is None or len(x) == 0:
+                    break
+                chunks.append(np.asarray(x, dtype=np.complex64))
+        except Exception as e:
+            return ToolResult(success=False, content=f"实时采集 FM 失败: {e}")
+        finally:
+            try:
+                backend.set_frequency(int(old[0]))
+                if hasattr(backend, "set_sample_rate"):
+                    backend.set_sample_rate(old[1])
+                backend.set_demod(old[2] or "WFM")
+            except Exception:
+                pass
+        if not chunks:
+            return ToolResult(success=False, content="未采集到 IQ 数据")
+        iq = np.concatenate(chunks)
+        src = f"实时采集 {backend.get_frequency()/1e6:.3f}MHz / {duration:.0f}s"
+
+    r = lite_decode_stereo(iq, sr, out_sr=48000, deemph_us=deemph)
+    l, rr = r["l"], r["r"]
+    if len(l) == 0:
+        return ToolResult(success=False, content="信号太短，无法解码")
+    outdir = os.path.join(os.getcwd(), "experiments", "fm_stereo")
+    os.makedirs(outdir, exist_ok=True)
+    out = os.path.join(outdir, f"stereo_{int(time.time())}.wav")
+    stereo_pcm = np.column_stack([l, rr])
+    _wf.write(out, 48000, (stereo_pcm * 32767).astype(np.int16))
+    mode = "立体声 (L/R 分离)" if r["stereo"] else "单声道（未检测到 19kHz 导频）"
+    lines = [
+        f"=== FM 广播接收（{src}）===",
+        f"制式: {mode}　导频 SNR: {r['pilot_snr_db']} dB　时长: {r['duration_s']}s",
+        f"双声道 WAV(48k): {out}",
+    ]
+    return ToolResult(success=True, content="\n".join(lines))
+
 
 def _decode_noaa_apt(args):
     """NOAA APT 气象卫星图像解码（真实实现）。"""
