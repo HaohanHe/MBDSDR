@@ -439,6 +439,21 @@ def register_sdr_tools(agent):
     )
 
     agent.tool_registry.register(
+        name="sdr_decode_cw",
+        description="解码 CW 莫尔斯电报。输入音频 wav（已解调音频或幅度包络），输出莫尔斯文本、估计电码速度(WPM)与置信度。CW 常用频段：3.5/7/14/21/28MHz。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "input_path": {"type": "string", "description": "输入 wav 文件路径"},
+                "wpm_hint": {"type": "number", "description": "已知电码速度(字/分)，可选，给定时辅助定单位"},
+            },
+            "required": ["input_path"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_decode_cw(args)),
+        category="sdr_decode",
+    )
+
+    agent.tool_registry.register(
         name="sdr_decode_ft8",
         description="解码 FT8 数字通信信号。输入录制文件，输出解码到的 FT8 报文（呼号、网格、信号报告）。FT8 常用频率：14.074MHz(20m), 7.074MHz(40m), 21.074MHz(15m), 28.074MHz(10m)。需要 15 秒周期对齐。",
         parameters={
@@ -2018,6 +2033,38 @@ def _decode_sstv(args):
     if "note" in result:
         output += f"说明: {result['note']}\n"
     return output
+
+def _decode_cw(args):
+    """CW 莫尔斯解码：读 wav，提取幅度包络，调 cw_decoder。"""
+    input_path = args["input_path"]
+    try:
+        import wave
+        import struct
+        with wave.open(input_path, "rb") as w:
+            rate = w.getframerate()
+            n = w.getnframes()
+            ch = w.getnchannels()
+            sw = w.getsampwidth()
+            raw = w.readframes(n)
+        if sw == 2:
+            fmt = "<" + ("h" * n * ch)
+            vals = struct.unpack(fmt, raw)
+        else:
+            vals = [b for b in raw]
+        # 取第一通道，降采样到每 4 点取最大（包络）
+        mono = vals[0::ch]
+        from .cw_decoder import decode_cw
+        res = decode_cw(list(mono), sample_rate=rate)
+        out = f"=== CW 解码完成 ===\n输入: {input_path}\n"
+        out += f"文本: {res['text']!r}\n"
+        out += f"估计速度: {res['wpm_est']} WPM | 点长 {res['dit_ms']}ms\n"
+        out += f"置信度: {res['confidence']}\n"
+        if res["chars"]:
+            out += "逐字符: " + " ".join(f"{c['char']}({c['code']})" for c in res["chars"]) + "\n"
+        return out
+    except Exception as e:
+        return f"CW 解码失败: {e}"
+
 
 def _decode_ft8(args):
     """FT8 数字通信解码（框架实现）。"""
