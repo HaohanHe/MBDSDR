@@ -36,6 +36,7 @@ from .spectrum_processor import SpectrumProcessor
 from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth, wfm_broadcast_demod, rds_decode_from_wfm, audio_to_playback
 from .sweep import sweep_scan
 from .frequency_manager import FrequencyManager
+from .watcher import watch_capture
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
     detect_fhss, list_visible_satellites, compute_doppler_correction,
@@ -536,6 +537,32 @@ def register_sdr_tools(agent):
         },
         handler=lambda args: ToolResult(success=True, content=_bookmark_add(fm, args)),
         category="sdr_device",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_watch_capture",
+        description=(
+            "在某个频率守听并自动抓取一次突发信号：先自适应估计噪声底，信号出现并持续最短确认时间"
+            "（去毛刺）后自动开始录制（含约0.5秒触发前缓冲，不丢信号开头），信号消失或达到最长时长自动停止，"
+            "存成 IQ 文件供后续解调/解码。用于抓间歇发射、干扰源、SSTV/FT8/卫星过境等时隙信号、无人值守取证。"
+            "频率可用书签（target，如 'ISS 国际空间站下行 145.800'）或 freq_mhz 指定；都不给就守当前频率。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "书签名/关键词/频率（MHz 数字），可选"},
+                "freq_mhz": {"type": "number", "description": "直接指定守听频率 MHz，可选；与 target 二选一"},
+                "margin_db": {"type": "number", "description": "触发门限=噪声底+裕度 dB，默认 8；漏触发调小、误触发调大"},
+                "max_wait_s": {"type": "number", "description": "最长守听等待秒数，默认 30"},
+                "max_record_s": {"type": "number", "description": "单次最长录制秒数，默认 10"},
+                "min_active_s": {"type": "number", "description": "信号至少持续多少秒才确认，默认 0.15（去毛刺）"},
+                "hang_s": {"type": "number", "description": "信号消失后保留多少秒再停，合并短暂衰落，默认 0.5"},
+                "format": {"type": "string", "description": "存盘格式 cu8（rtl_sdr 通用，省空间）或 cf32（浮点），默认 cu8"},
+            },
+            "required": [],
+        },
+        handler=lambda args: _watch_capture_tool(mgr, fm, args),
+        category="sdr_spectrum",
     )
 
     agent.tool_registry.register(
@@ -2271,6 +2298,103 @@ def _bookmark_add(fm, args) -> str:
         note=str(args.get("note", "") or ""),
     )
     return f"已保存书签：{_fmt_bookmark(bm)}"
+
+
+def _watch_capture_tool(mgr, fm, args) -> "ToolResult":
+    """守听某频率，自动抓取一次突发信号并存盘（含触发前缓冲）。"""
+    backend = _get_backend(mgr)
+    if not backend or not backend.status.connected:
+        return ToolResult(success=False, content="错误: 设备未连接，无法守听")
+    if getattr(backend.device, "device_type", "") == "iq_file":
+        return ToolResult(success=False,
+                          content="离线 IQ 文件回放源不能实时守听，请切换实时设备")
+
+    target = args.get("target")
+    freq_mhz = args.get("freq_mhz")
+    bm = None
+    if target:
+        bm = fm.find(str(target))
+        if bm is None:
+            return ToolResult(success=False,
+                              content=f"未找到书签 '{target}'，可用 sdr_bookmark_list 查询")
+        freq = bm.center_hz
+    elif freq_mhz is not None:
+        freq = float(freq_mhz) * 1e6
+    else:
+        freq = backend.get_frequency()
+
+    try:
+        backend.set_frequency(int(freq))
+        if bm and bm.mode and hasattr(backend, "set_demod"):
+            backend.set_demod(bm.mode)
+        if bm and bm.bandwidth_hz and hasattr(backend, "set_bandwidth"):
+            backend.set_bandwidth(bm.bandwidth_hz)
+    except Exception as e:
+        return ToolResult(success=False, content=f"设置守听频率失败: {e}")
+
+    sr = float(backend.get_sample_rate())
+
+    def acquire(n):
+        parts, need = [], n
+        while need > 0:
+            x = backend.read_samples(min(need, 16384))
+            if x is None or len(x) == 0:
+                break
+            parts.append(np.asarray(x))
+            need -= len(parts[-1])
+        if not parts:
+            return np.zeros(0, dtype=np.complex128)
+        return np.concatenate(parts)
+
+    res = watch_capture(
+        acquire, sr,
+        margin_db=float(args.get("margin_db", 8.0)),
+        max_wait_s=float(args.get("max_wait_s", 30.0)),
+        max_record_s=float(args.get("max_record_s", 10.0)),
+        min_active_s=float(args.get("min_active_s", 0.15)),
+        hang_s=float(args.get("hang_s", 0.5)),
+    )
+
+    head = (f"守听 {freq/1e6:.4f} MHz：噪声底 {res['noise_floor_db']:.1f}dB，"
+            f"门限 {res['threshold_db']:.1f}dB，等待 {res['waited_s']:.1f}s")
+    if res["status"] != "triggered":
+        return ToolResult(success=True, content=head +
+                          f"\n未抓到持续活动（{res.get('reason','')}）。"
+                          f"若确有信号可减小 margin_db 或延长 max_wait_s。")
+
+    samples = res["samples"]
+    fmt = str(args.get("format", "cu8")).lower()
+    if fmt not in ("cu8", "cf32"):
+        fmt = "cu8"
+    outdir = os.path.join(os.getcwd(), "experiments", "watch")
+    os.makedirs(outdir, exist_ok=True)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    base = os.path.join(outdir, f"{freq/1e6:.4f}mhz_{ts}")
+    data_path = base + f".{fmt}"
+    if fmt == "cu8":
+        u8 = np.empty(2 * len(samples), dtype=np.uint8)
+        u8[0::2] = np.clip(samples.real, -1, 1) * 127.5 + 127.5
+        u8[1::2] = np.clip(samples.imag, -1, 1) * 127.5 + 127.5
+        u8.tofile(data_path)
+    else:
+        samples.astype(np.complex64).tofile(data_path)
+    sidecar = {
+        "format": fmt, "sample_rate": sr, "center_freq": float(freq),
+        "sample_rate_hz": sr, "center_hz": float(freq),
+        "samples": int(len(samples)), "duration_s": float(res["recorded_s"]),
+        "noise_floor_db": float(res["noise_floor_db"]),
+        "threshold_db": float(res["threshold_db"]),
+        "peak_db": float(res["peak_db"]),
+        "start_unix": time.time(), "source": "watch_capture",
+    }
+    with open(data_path + ".json", "w", encoding="utf-8") as f:
+        json.dump(sidecar, f, ensure_ascii=False, indent=2)
+
+    return ToolResult(success=True, content=(
+        f"{head}\n抓到活动！峰值 {res['peak_db']:.1f}dB（超门限 "
+        f"{res['peak_db']-res['threshold_db']:.1f}dB），录制 {res['recorded_s']:.2f}s\n"
+        f"已保存: {data_path}\n"
+        f"可用 sdr_open_iq_file 回放，再用 sdr_demodulate/对应解码器分析。"))
 
 
 def _spectrum_analyze(mgr, spec, args):
