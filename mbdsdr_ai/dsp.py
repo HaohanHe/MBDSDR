@@ -328,6 +328,37 @@ def rds_decode_from_wfm(x: np.ndarray, sample_rate: float) -> dict:
     return {"rds_present": carrier_db > -20.0, "carrier_db": round(carrier_db, 2)}
 
 
+def audio_to_playback(x: np.ndarray, in_sr: float, cutoff_hz: float = 4500.0,
+                      out_sr: int = 48000) -> np.ndarray:
+    """
+    把窄带解调结果（基带速率）整理为可播放音频：
+    去直流 → 按模式音频带宽低通 → 抗混叠降采样到 out_sr → 归一化。
+    用于 AM 航空 / NFM 对讲机 / SSB / CW，使各模式都能直接存成可听 WAV。
+    """
+    from math import gcd
+    from scipy.signal import resample_poly, butter, lfilter
+
+    x = np.asarray(x, dtype=np.float64)
+    x = x - np.mean(x)
+    if len(x) < 4:
+        return np.zeros(0, dtype=np.float32)
+
+    nyq = in_sr / 2.0
+    cut = min(0.98, cutoff_hz / nyq)
+    if cut < 0.98:
+        b, a = butter(5, cut, btype="low")
+        x = lfilter(b, a, x)
+
+    if int(round(in_sr)) != int(out_sr):
+        g = gcd(int(round(in_sr)), int(out_sr))
+        x = resample_poly(x, int(out_sr) // g, int(round(in_sr)) // g)
+
+    peak = float(np.max(np.abs(x))) if len(x) else 0.0
+    if peak > 1e-9:
+        x = x / peak * 0.95
+    return x.astype(np.float32)
+
+
 def am_demod(x: np.ndarray) -> np.ndarray:
     """
     AM 调幅解调（包络检波）。
