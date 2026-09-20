@@ -972,13 +972,21 @@ class FileIQBackend(SDRBackend):
 
     def _load(self) -> int:
         import json
-        meta_path = os.path.splitext(self._path)[0] + ".json"
-        if os.path.exists(meta_path):
+        # 兼容两种 sidecar 命名：数据文件全名+.json（本项目录制/值守写出，
+        # 如 x.cu8.json）与 去扩展名+.json（GNU Radio 惯例，如 x.json）。
+        meta_candidates = [
+            self._path + ".json",
+            os.path.splitext(self._path)[0] + ".json",
+        ]
+        meta_path = next((p for p in meta_candidates if os.path.exists(p)), None)
+        if meta_path:
             try:
                 with open(meta_path) as f:
                     meta = json.load(f)
-                self._rate = meta.get("sample_rate", self._rate)
-                self._freq = meta.get("center_freq", self._freq)
+                self._rate = meta.get("sample_rate",
+                             meta.get("sample_rate_hz", self._rate))
+                self._freq = meta.get("center_freq",
+                             meta.get("center_hz", self._freq))
                 self._fmt = meta.get("format", self._fmt)
             except Exception:
                 pass
