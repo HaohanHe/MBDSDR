@@ -33,7 +33,7 @@ from .tool_registry import ToolResult
 from . import orbit
 from .sdr_backend import SDRBackendManager, SDRStatus
 from .spectrum_processor import SpectrumProcessor
-from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth, wfm_broadcast_demod, rds_decode_from_wfm
+from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth, wfm_broadcast_demod, rds_decode_from_wfm, audio_to_playback
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
     detect_fhss, list_visible_satellites, compute_doppler_correction,
@@ -2679,8 +2679,8 @@ def _demodulate(mgr, args):
 
     mode_u = mode.upper()
     is_broadcast_fm = mode_u in ("FM", "WFM") and deviation >= 50000
-    # 宽带广播 FM 需要至少约 0.5s 才能稳定鉴频/去加重/降采样
-    target_n = max(int(num_samples), int(sample_rate * 0.5)) if is_broadcast_fm else int(num_samples)
+    # 无论哪种模式，至少采约 0.5s 才能稳定解调并产出可听音频
+    target_n = max(int(num_samples), int(sample_rate * 0.5))
     blocks = []
     got = 0
     while got < target_n:
@@ -2706,8 +2706,12 @@ def _demodulate(mgr, args):
         except Exception:
             rds_line = ""
     else:
-        audio = demodulate(samples, mode=mode, sample_rate=sample_rate, deviation=deviation)
-        audio_sr = int(sample_rate)
+        raw_audio = demodulate(samples, mode=mode, sample_rate=sample_rate, deviation=deviation)
+        # 窄带模式也整理为 48k 可播放音频（航空 AM 4.5k / NFM 3.5k / SSB 3k / CW 1.2k）
+        narrow_cut = {"AM": 4500, "NFM": 3500, "LSB": 3000, "USB": 3000, "CW": 1200}
+        audio = audio_to_playback(raw_audio, int(sample_rate),
+                                  narrow_cut.get(mode_u, 4500), 48000)
+        audio_sr = 48000
 
     # 音频特征
     audio_rms = float(np.sqrt(np.mean(audio ** 2)))
