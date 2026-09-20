@@ -33,7 +33,7 @@ from .tool_registry import ToolResult
 from . import orbit
 from .sdr_backend import SDRBackendManager, SDRStatus
 from .spectrum_processor import SpectrumProcessor
-from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth
+from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth, wfm_broadcast_demod, rds_decode_from_wfm
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
     detect_fhss, list_visible_satellites, compute_doppler_correction,
@@ -2677,26 +2677,53 @@ def _demodulate(mgr, args):
     deviation = args.get("deviation", 75000.0)
     sample_rate = backend.get_sample_rate()
 
-    samples = backend.read_samples(num_samples)
-    if samples is None:
+    mode_u = mode.upper()
+    is_broadcast_fm = mode_u in ("FM", "WFM") and deviation >= 50000
+    # 宽带广播 FM 需要至少约 0.5s 才能稳定鉴频/去加重/降采样
+    target_n = max(int(num_samples), int(sample_rate * 0.5)) if is_broadcast_fm else int(num_samples)
+    blocks = []
+    got = 0
+    while got < target_n:
+        part = backend.read_samples(min(16384, target_n - got))
+        if part is None or len(part) == 0:
+            break
+        blocks.append(np.asarray(part))
+        got += len(part)
+    if not blocks:
         return "错误: 该设备不支持 IQ 样本"
+    samples = np.concatenate(blocks)
 
     # 真实解调
-    audio = demodulate(samples, mode=mode, sample_rate=sample_rate, deviation=deviation)
+    rds_line = ""
+    if is_broadcast_fm:
+        # 完整广播 FM 接收链：鉴频→降采样→50µs去加重→15k低通，输出 48k 可播放音频
+        audio = wfm_broadcast_demod(samples, sample_rate, audio_sr=48000, deemph_us=50.0)
+        audio_sr = 48000
+        try:
+            r = rds_decode_from_wfm(samples, sample_rate)
+            rds_line = (f"RDS 57kHz 副载波: {'检测到' if r['rds_present'] else '未检测到'} "
+                        f"({r['carrier_db']} dB)\n")
+        except Exception:
+            rds_line = ""
+    else:
+        audio = demodulate(samples, mode=mode, sample_rate=sample_rate, deviation=deviation)
+        audio_sr = int(sample_rate)
 
     # 音频特征
     audio_rms = float(np.sqrt(np.mean(audio ** 2)))
     audio_peak = float(np.max(np.abs(audio)))
     audio_mean = float(np.mean(audio))
-    audio_duration = len(audio) / sample_rate
+    audio_duration = len(audio) / audio_sr
 
     result = f"=== 解调完成 ===\n"
-    result += f"模式: {mode}\n"
+    result += f"模式: {mode}" + ("（宽带广播，含去加重/降采样）" if is_broadcast_fm else "") + "\n"
     result += f"输入样本: {len(samples)} IQ 样本\n"
-    result += f"输出音频: {len(audio)} 样本 ({audio_duration:.3f} 秒)\n"
+    result += f"输出音频: {len(audio)} 样本 ({audio_duration:.3f} 秒, {audio_sr} Hz)\n"
     result += f"采样率: {sample_rate/1e6:.3f} MHz\n"
-    if mode in ("FM", "WFM", "NFM"):
+    if mode_u in ("FM", "WFM", "NFM"):
         result += f"频偏: {deviation/1000:.1f} kHz\n"
+    if rds_line:
+        result += rds_line
     result += f"\n--- 音频特征 ---\n"
     result += f"RMS: {audio_rms:.6f}\n"
     result += f"峰值: {audio_peak:.6f}\n"
@@ -2711,8 +2738,9 @@ def _demodulate(mgr, args):
         with wave.open(tmp_path, 'wb') as wf:
             wf.setnchannels(1)
             wf.setsampwidth(2)
-            wf.setframerate(int(sample_rate))
-            audio_int16 = np.clip(audio / (audio_peak + 1e-12), -1, 1) * 32767
+            wf.setframerate(audio_sr)
+            scale = 1.0 if audio_peak <= 1.0 else 1.0 / (audio_peak + 1e-12)
+            audio_int16 = np.clip(audio * scale, -1, 1) * 32767
             wf.writeframes(audio_int16.astype(np.int16).tobytes())
         result += f"\n音频已保存: {tmp_path}\n"
     except Exception as e:
