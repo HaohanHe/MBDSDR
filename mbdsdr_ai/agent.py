@@ -217,6 +217,9 @@ class MBDSDRAgent:
         self.conversation_id = f"conv_{int(time.time())}"
         self.total_agent_calls = 0
         self.last_error = None
+        # repeat-call guard（借鉴 DeepSeek harness repeat-tool-reminder）
+        self._repeat_key = None
+        self._repeat_count = 0
         self._mcp_client = None
 
         # 验证配置
@@ -1624,6 +1627,22 @@ class MBDSDRAgent:
                 # 执行工具
                 result = self.tool_registry.call_from_model(tc)
                 all_tool_results.append(result.to_dict())
+
+                # repeat-call guard：检测连续相同工具+参数，递增提醒
+                try:
+                    canon = json.dumps(fn.get("arguments", ""), sort_keys=True, ensure_ascii=False)
+                except Exception:
+                    canon = str(fn.get("arguments", ""))
+                key = tool_name + "|" + canon
+                if key == self._repeat_key:
+                    self._repeat_count += 1
+                else:
+                    self._repeat_key = key
+                    self._repeat_count = 1
+                if self._repeat_count in (3, 5, 8):
+                    nudge = ("[guard] 你已连续用相同参数调用 %s 第 %d 次。若任务未完成，请换方法或换参数，"
+                             "不要重复同一调用；若证据已足够就给最终答案。" % (tool_name, self._repeat_count))
+                    result.content = nudge + "\n---\n" + result.content
 
                 # 添加工具结果到上下文
                 self.context_manager.add_tool_message(
