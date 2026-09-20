@@ -55,6 +55,28 @@ SSTV_MODES = {
         "channel_order": ["R", "G", "B"],
         "pixel_ms": 0.2308,  # 73.83ms / 320
     },
+    "Martin M2": {
+        "vis_code": 0x28,  # pysstv 权威 VIS
+        "width": 160,
+        "height": 256,
+        "sync_freq": 1200,
+        "sync_ms": 4.862,
+        "sep_freq": 1500,
+        "sep_ms": 0.572,
+        "channel_order": ["G", "B", "R"],  # pysstv MartinM2 COLOR_SEQ=(green,blue,red)
+        "pixel_ms": 0.4576,  # SCAN 73.216ms / 160
+    },
+    "Scottie S2": {
+        "vis_code": 0x38,  # pysstv 权威 VIS
+        "width": 160,
+        "height": 256,
+        "sync_freq": 1200,
+        "sync_ms": 9.0,
+        "sep_freq": 1500,
+        "sep_ms": 1.5,
+        "channel_order": ["G", "R", "B"],  # 实测：Scottie 系 R/B 与 Martin 相反
+        "pixel_ms": 0.5410,  # SCAN 86.564ms / 160
+    },
     "Robot 36": {
         "vis_code": 0x08,
         "width": 320,
@@ -369,10 +391,11 @@ def _identify_sstv_mode(freq: np.ndarray, sr: int, data_start: int,
     if n_markers < 8 or period_cv > 0.35:
         return "unknown", {**info, "reason": "weak-or-noise"}
 
-    # Robot36：9ms 同步，周期 ~150ms（逐行）或 ~288-300ms（组首两行）
+    # Robot36：9ms 同步，周期 ~150ms（逐行）或 ~290-300ms（组首两行）。
+    # 注意：组首 ~290-300，与 Scottie S2（~272ms）区分，下界收窄到 285。
     if pulse_ms >= 7.0 and (130.0 <= period_ms <= 175.0):
         return "Robot 36", {**info, "robot_layout": "per_line"}
-    if pulse_ms >= 7.0 and (270.0 <= period_ms <= 330.0):
+    if pulse_ms >= 7.0 and (285.0 <= period_ms <= 330.0):
         return "Robot 36", {**info, "robot_layout": "grouped"}
     # PD 系列：SYNC 约 20ms（明显长于 Robot 9ms），组周期 450~1050ms。
     # 按标称组周期最近邻细分型号（Y0+Cb+Cr+Y1，WIDTH/HEIGHT 随型号）。
