@@ -79,9 +79,67 @@ def register_sdr_tools(agent):
         category="planning",
     )
 
-    # ═══════════════════════════════════════════════════
-    # 1. 设备管理（5个）
-    # ═══════════════════════════════════════════════════
+    # sdr_todo：结构化任务清单（借鉴 deepseek-harness tool-todo）
+    # 全量替换语义；三态；顺序模式最多一个 in_progress
+    if not hasattr(agent, "_todos"):
+        agent._todos = []
+
+    def _todo_handler(args):
+        items = args.get("items", [])
+        if not isinstance(items, list):
+            return ToolResult(success=False, content="items 必须是数组")
+        norm = []
+        active = 0
+        for it in items:
+            if isinstance(it, str):
+                it = {"content": it, "status": "pending"}
+            content = str(it.get("content", "")).strip()
+            status = it.get("status", "pending")
+            if status not in ("pending", "in_progress", "completed"):
+                status = "pending"
+            if not content:
+                continue
+            if status == "in_progress":
+                active += 1
+            norm.append({"content": content, "status": status})
+        if active > 1 and not args.get("allow_parallel", False):
+            return ToolResult(success=False,
+                              content="顺序模式最多只能有一个 in_progress 任务；若确为并行（子代理/后台）请传 allow_parallel=true")
+        agent._todos = norm
+        mark = {"pending": "[ ]", "in_progress": "[~]", "completed": "[x]"}
+        lines = "\n".join(f"{i+1}. {mark[t['status']]} {t['content']}" for i, t in enumerate(norm))
+        done = sum(1 for t in norm if t["status"] == "completed")
+        return ToolResult(success=True,
+                          content=f"任务清单已更新（{done}/{len(norm)} 完成）：\n{lines}")
+
+    agent.tool_registry.register(
+        name="sdr_todo",
+        description=("记录并更新当前工作的结构化任务清单。每次调用传入【完整】列表，它会整体替换旧清单"
+                     "（没有局部更新）。多步工作开始前为每个具体步骤建一条；顺序工作时最多一个 in_progress；"
+                     "一完成立即标 completed（不要批量）；全部完成后才允许没有 in_progress。琐碎单步任务不用。"
+                     "状态：pending 未开始 / in_progress 正在做 / completed 已完成。"),
+        parameters={
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "content": {"type": "string", "description": "任务内容"},
+                            "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]},
+                        },
+                        "required": ["content"],
+                    },
+                },
+                "allow_parallel": {"type": "boolean", "description": "确为并行（子代理/后台命令）时传 true"},
+            },
+            "required": ["items"],
+        },
+        handler=_todo_handler,
+        category="planning",
+    )
+
 
     agent.tool_registry.register(
         name="sdr_connect",
