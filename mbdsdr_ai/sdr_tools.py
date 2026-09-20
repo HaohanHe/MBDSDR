@@ -140,6 +140,81 @@ def register_sdr_tools(agent):
         category="planning",
     )
 
+    # spill：超长输出转存文件，上下文只留 locator（借鉴 deepseek-harness spill）
+    # 频谱 dump/长解码日志/TLE 列表动辄几千行，全塞上下文浪费 token。
+    _spill_dir = os.path.expanduser("~/.mbdsdr/spill")
+    os.makedirs(_spill_dir, exist_ok=True)
+
+    def _spill_save(args):
+        text = args.get("text", "")
+        if not text:
+            return ToolResult(success=False, content="text 为空")
+        name = args.get("name") or f"spill_{int(time.time())}"
+        safe = "".join(c for c in name if c.isalnum() or c in "-_.")[:60] or "spill"
+        path = os.path.join(_spill_dir, safe + ".txt")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+        except OSError as e:
+            return ToolResult(success=False, content=f"spill 写入失败（best-effort，原文仍在上下文）: {e}")
+        n = len(text)
+        preview = text[:200].replace("\n", " ")
+        return ToolResult(
+            success=True,
+            content=f"[spill] 已转存 {n} 字符到 {safe}.txt。上下文不再保留全文；需要时用 sdr_spill_read('{safe}') 读回。\n开头预览: {preview}",
+        )
+
+    def _spill_read(args):
+        name = args.get("locator", "")
+        safe = "".join(c for c in name if c.isalnum() or c in "-_.")[:60]
+        path = os.path.join(_spill_dir, safe + ".txt")
+        if not os.path.exists(path):
+            return ToolResult(success=False, content=f"找不到 spill: {safe}")
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = f.readlines()
+        except OSError as e:
+            return ToolResult(success=False, content=f"读取失败: {e}")
+        offset = int(args.get("offset", 0))
+        limit = int(args.get("limit", 200))
+        seg = "".join(lines[offset:offset + limit])
+        total = len(lines)
+        return ToolResult(
+            success=True,
+            content=f"[spill] {safe}: 共 {total} 行，返回第 {offset}~{offset+min(limit, total-offset)} 行：\n{seg}",
+        )
+
+    agent.tool_registry.register(
+        name="sdr_spill_save",
+        description=("把超长文本（频谱 dump、长解码日志、TLE 列表等）转存到磁盘，上下文只留一个定位符和开头预览，"
+                     "不再占用 token。之后需要细节时用 sdr_spill_read 按行读回。"),
+        parameters={
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "要转存的完整文本"},
+                "name": {"type": "string", "description": "可选名字（字母数字-_.），默认自动"},
+            },
+            "required": ["text"],
+        },
+        handler=_spill_save,
+        category="planning",
+    )
+    agent.tool_registry.register(
+        name="sdr_spill_read",
+        description="按定位符读回之前 spill 转存的文本，可分页（offset/limit 行）。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "locator": {"type": "string", "description": "spill_save 返回的名字"},
+                "offset": {"type": "integer", "description": "起始行，默认 0"},
+                "limit": {"type": "integer", "description": "返回行数，默认 200"},
+            },
+            "required": ["locator"],
+        },
+        handler=_spill_read,
+        category="planning",
+    )
+
 
     agent.tool_registry.register(
         name="sdr_connect",
