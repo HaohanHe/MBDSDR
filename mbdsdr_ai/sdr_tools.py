@@ -34,6 +34,7 @@ from . import orbit
 from .sdr_backend import SDRBackendManager, SDRStatus
 from .spectrum_processor import SpectrumProcessor
 from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth, wfm_broadcast_demod, rds_decode_from_wfm, audio_to_playback
+from .sweep import sweep_scan
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
     detect_fhss, list_visible_satellites, compute_doppler_correction,
@@ -451,6 +452,30 @@ def register_sdr_tools(agent):
             "required": [],
         },
         handler=lambda args: ToolResult(success=True, content=_spectrum_analyze(mgr, spec, args)),
+        category="sdr_spectrum",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_sweep_scan",
+        description=(
+            "宽带扫频活动扫描：在一个远大于瞬时带宽的频率范围内自动步进调谐、拼接功率谱，"
+            "列出所有正在发射的频点（中心频率、带宽、峰值功率）。用于找台、找干扰源、巡查频段占用。"
+            "例如扫整个调频广播 87.5-108MHz、航空 118-136MHz、对讲机 430-440MHz。"
+            "会临时改变接收频率，扫描结束自动回到原频率。离线 IQ 文件源为单段固定录制，不能扫频。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "f_start_mhz": {"type": "number", "description": "起始频率 MHz，如 87.5"},
+                "f_stop_mhz": {"type": "number", "description": "结束频率 MHz，如 108"},
+                "sample_rate_hz": {"type": "number", "description": "每段瞬时采样率/带宽 Hz，默认用设备当前值（RTL 建议 2.4M）"},
+                "margin_db": {"type": "number", "description": "活动门限=噪声底+该裕度 dB，默认 6；漏检多就调小，虚警多就调大"},
+                "dwell_samples": {"type": "integer", "description": "每个调谐点驻留样本数，默认 16384，越多越稳但越慢"},
+                "overlap": {"type": "number", "description": "相邻段重叠比例 0-0.9，默认 0.5"},
+            },
+            "required": ["f_start_mhz", "f_stop_mhz"],
+        },
+        handler=lambda args: _sweep_scan_tool(mgr, args),
         category="sdr_spectrum",
     )
 
@@ -2025,6 +2050,85 @@ def _tool_open_iq_file(mgr, args) -> "ToolResult":
             f"循环回放: {'是' if info['loop'] else '否'}。现可对其调用频谱/解调/CW/FT8/SSTV/ADS-B 等工具。"
         ),
     )
+
+
+def _sweep_scan_tool(mgr, args) -> "ToolResult":
+    """宽带扫频活动扫描：步进调谐拼接频谱，返回活动频点。"""
+    backend = _get_backend(mgr)
+    if not backend or not backend.status.connected:
+        return ToolResult(success=False, content="错误: 设备未连接，无法扫频")
+
+    dev_type = getattr(backend.device, "device_type", "")
+    if dev_type == "iq_file":
+        return ToolResult(
+            success=False,
+            content="当前是离线 IQ 文件回放源（单段固定录制），不能步进调谐扫频。"
+                    "请切换到实时 SDR 设备后再扫频；对单段文件可用 sdr_spectrum_analyze。",
+        )
+    if not getattr(backend.device, "supports_iq", False):
+        return ToolResult(success=False, content="错误: 当前设备不提供 IQ，无法扫频")
+
+    f0 = float(args["f_start_mhz"]) * 1e6
+    f1 = float(args["f_stop_mhz"]) * 1e6
+    if f1 <= f0:
+        return ToolResult(success=False, content="错误: 结束频率必须大于起始频率")
+
+    sr = float(args.get("sample_rate_hz") or backend.get_sample_rate() or 2.4e6)
+    dwell = int(args.get("dwell_samples", 16384))
+    margin = float(args.get("margin_db", 6.0))
+    overlap = float(args.get("overlap", 0.5))
+
+    saved_freq = backend.get_frequency()
+    saved_sr = backend.get_sample_rate()
+    try:
+        if hasattr(backend, "set_sample_rate"):
+            backend.set_sample_rate(sr)
+
+        def acquire(center, sample_rate, n):
+            if hasattr(backend, "set_frequency"):
+                backend.set_frequency(int(center))
+                time.sleep(0.03)  # 等 PLL/调谐器稳定
+            got = []
+            need = n
+            while need > 0:
+                part = backend.read_samples(min(need, 16384))
+                if part is None or len(part) == 0:
+                    break
+                got.append(np.asarray(part))
+                need -= len(part)
+            return np.concatenate(got) if got else np.zeros(0, dtype=np.complex128)
+
+        res = sweep_scan(acquire, f0, f1, sr, overlap=overlap,
+                         dwell_samples=dwell, margin_db=margin)
+    except Exception as e:
+        return ToolResult(success=False, content=f"扫频失败: {e}")
+    finally:
+        # 无论成功与否，恢复扫描前的频率/采样率
+        try:
+            if hasattr(backend, "set_sample_rate") and saved_sr:
+                backend.set_sample_rate(saved_sr)
+            if hasattr(backend, "set_frequency") and saved_freq:
+                backend.set_frequency(int(saved_freq))
+        except Exception:
+            pass
+
+    lines = [
+        f"=== 扫频 {f0/1e6:.2f}-{f1/1e6:.2f} MHz ===",
+        f"瞬时带宽 {sr/1e6:.2f}MHz，调谐 {len(res.centers_scanned)} 段，"
+        f"噪声底 {res.noise_floor_db:.1f}dB，门限 {res.threshold_db:.1f}dB",
+        f"检出活动信号 {len(res.activities)} 个（按强度排序）:",
+    ]
+    if not res.activities:
+        lines.append("  未发现超过门限的信号。可减小 margin_db 或确认频段/天线。")
+    for k, a in enumerate(res.activities[:20], 1):
+        lines.append(
+            f"  {k:2d}. {a.center_hz/1e6:9.4f} MHz  带宽 {a.bandwidth_hz/1e3:7.1f} kHz  "
+            f"峰 {a.peak_db:6.1f}dB  范围 {a.low_hz/1e6:.3f}-{a.high_hz/1e6:.3f}"
+        )
+    if len(res.activities) > 20:
+        lines.append(f"  …另有 {len(res.activities)-20} 个，缩小范围或提高门限可细看")
+    lines.append("已自动回到扫描前频率。")
+    return ToolResult(success=True, content="\n".join(lines))
 
 
 def _spectrum_analyze(mgr, spec, args):
