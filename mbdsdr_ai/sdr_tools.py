@@ -39,6 +39,7 @@ from .frequency_manager import FrequencyManager
 from .watcher import watch_capture
 from .adsb_lite import decode_adsb
 from .rds_lite import decode_rds
+from .noaa_apt_lite import decode_apt as lite_decode_apt, save_apt_png as lite_save_apt
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
     detect_fhss, list_visible_satellites, compute_doppler_correction,
@@ -748,17 +749,28 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_decode_noaa_apt",
-        description="解码 NOAA 气象卫星 APT 图像。输入录制的 cf32/wav 文件，输出 PNG 云图。NOAA 15/18/19 卫星频率 137.1MHz/137.9125MHz/137.1MHz。需要先录制卫星过境信号。",
+        description=(
+            "解码 NOAA POES 气象卫星 APT 云图（NOAA-15/18/19，137.620/137.9125/137.100 MHz "
+            "宽带 FM 下行，2400Hz 副载波，每 0.5 秒一行、A/B 两通道可见光/红外），输出 PNG。"
+            "三种来源：给 input_path 为录制文件——.wav（rtl_fm/录音机解调后音频）或 .cf32/.cu8/"
+            ".cfile 等原始 IQ（内部做宽带 FM 鉴频）；不给 input_path 则用实时设备，可给 freq_mhz、"
+            "duration_s 自动调谐采集。做 sync A/B 相关对齐、双通道切分与灰度映射，报告对齐行数与"
+            "行同步锁定率。配合 sdr_satellite_passes 看过境、sdr_satellite_doppler 预置多普勒频偏。"
+            "图像黑白颠倒时置 polarity=-1；通道温度定标/地图投影为后续。"
+        ),
         parameters={
             "type": "object",
             "properties": {
-                "input_path": {"type": "string", "description": "输入录制文件路径（cf32 或 wav）"},
-                "output_path": {"type": "string", "description": "输出 PNG 路径（可选，默认同目录）"},
-                "channel": {"type": "string", "description": "通道: A(红外)/B(可见光)/both，默认 both"},
+                "input_path": {"type": "string", "description": "录制文件路径：.wav 解调音频或 .cf32/.cu8/.cfile 原始 IQ；不给则实时采集"},
+                "freq_mhz": {"type": "number", "description": "实时模式下行频率 MHz，如 137.100/137.620/137.9125；缺省用当前频点"},
+                "duration_s": {"type": "number", "description": "实时采集/解码时长秒，默认 60（每行0.5s，60s≈120行），上限 900"},
+                "sample_rate_khz": {"type": "number", "description": "实时 IQ 采样率 kHz，默认 240"},
+                "polarity": {"type": "integer", "description": "灰度极性，1 默认；黑白颠倒用 -1"},
+                "channel": {"type": "string", "description": "兼容旧参数：A/both（默认 both 输出 A/B 双通道）"},
             },
-            "required": ["input_path"],
+            "required": [],
         },
-        handler=lambda args: ToolResult(success=True, content=_decode_noaa_apt(args)),
+        handler=lambda args: _noaa_apt_decode_tool(mgr, args),
         category="sdr_decode",
     )
 
@@ -2625,6 +2637,162 @@ def _rds_decode_tool(mgr, args) -> "ToolResult":
              f"  PI 识别码：{res['pi_hex']}　PTY：{pty_name}",
              f"  同步块 {res['blocks_synced']}，完整组 {res['groups_decoded']}。"
              f"RT 电台文本/AF 频率表为后续。"]
+    return ToolResult(success=True, content="\n".join(lines))
+
+
+def _wfm_audio_from_iq(iq, sr, out_sr=24000, audio_lpf=4500.0):
+    """宽带 FM 正交鉴频 -> 低通 -> 降采样，得含 APT 2400Hz 副载波的音频（不做去加重）。"""
+    from math import gcd
+    from scipy.signal import butter, sosfiltfilt, resample_poly
+    x = np.asarray(iq, dtype=np.complex128)
+    x = x - np.mean(x)
+    inst = np.angle(x[1:] * np.conj(x[:-1])) * (sr / (2.0 * np.pi))  # Hz 瞬时频偏
+    nyq = sr / 2.0
+    if audio_lpf < nyq * 0.9:
+        sos = butter(4, audio_lpf / nyq, btype="low", output="sos")
+        inst = sosfiltfilt(sos, inst)
+    g = gcd(int(out_sr), int(sr))
+    up, down = int(out_sr) // g, int(sr) // g
+    if (up, down) != (1, 1):
+        inst = resample_poly(inst, up, down)
+    return inst.astype(np.float64)
+
+
+def _read_wav_mono(path):
+    from scipy.io import wavfile
+    sr, data = wavfile.read(path)
+    data = np.asarray(data)
+    if data.ndim > 1:
+        data = data.mean(axis=1)
+    if np.issubdtype(data.dtype, np.integer):
+        m = np.iinfo(data.dtype).max
+        data = data.astype(np.float64) / m
+    return float(sr), data.astype(np.float64)
+
+
+def _noaa_apt_decode_tool(mgr, args) -> "ToolResult":
+    """NOAA APT 云图解码：实时 IQ / 离线 IQ 文件 / 离线 WAV 三路径（物理正确 lite）。"""
+    import os
+    import time as _time
+    polarity = int(args.get("polarity", 1))
+    duration = min(float(args.get("duration_s", 60.0)), 900.0)
+    input_path = args.get("input_path") or args.get("audio_path")
+    AUDIO_SR = 24000
+
+    if input_path:
+        if not os.path.exists(input_path):
+            return ToolResult(success=False, content=f"错误: 文件不存在: {input_path}")
+        ext = os.path.splitext(input_path)[1].lower()
+        if ext == ".wav":
+            try:
+                a_sr, audio = _read_wav_mono(input_path)
+            except Exception as e:
+                return ToolResult(success=False, content=f"读取 WAV 失败: {e}")
+            src = f"音频 {os.path.basename(input_path)}（{a_sr/1000:.1f}kHz/{len(audio)/a_sr:.1f}s）"
+        else:
+            # 原始 IQ：用 FileIQBackend 复用多格式与 sidecar，再宽带 FM 鉴频
+            try:
+                from .sdr_backend import FileIQBackend
+                fb = FileIQBackend(input_path)
+                fb.connect()
+                sr = float(fb.get_sample_rate())
+                fb.seek(0)
+                fb._loop = False
+                chunks, got = [], 0
+                target = int(sr * duration) if duration and duration < 900 else (1 << 40)
+                while got < target:
+                    x = fb.read_samples(min(target - got, 262144) if target < (1 << 40) else 262144)
+                    if x is None or len(x) == 0:
+                        break
+                    chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
+                if not chunks:
+                    return ToolResult(success=False, content="IQ 文件无数据")
+                audio = _wfm_audio_from_iq(np.concatenate(chunks), sr)
+                a_sr = AUDIO_SR
+                src = f"IQ 文件 {os.path.basename(input_path)}（{fb.get_frequency()/1e6:.3f}MHz）"
+            except Exception as e:
+                return ToolResult(success=False, content=f"读取 IQ 文件失败: {e}")
+    else:
+        backend = _get_backend(mgr)
+        if not backend or not backend.status.connected:
+            return ToolResult(success=False,
+                              content="错误: 设备未连接（给 input_path 可离线解码 WAV/IQ 文件）")
+        dev_type = getattr(backend.device, "device_type", "")
+        if dev_type == "iq_file":
+            sr = float(backend.get_sample_rate())
+            if hasattr(backend, "seek"):
+                backend.seek(0)
+            saved_loop = getattr(backend, "_loop", True)
+            backend._loop = False
+            chunks, got, need = [], 0, int(sr * duration)
+            try:
+                while got < need:
+                    x = backend.read_samples(min(need - got, 262144))
+                    if x is None or len(x) == 0:
+                        break
+                    chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
+            finally:
+                backend._loop = saved_loop
+            if not chunks:
+                return ToolResult(success=False, content="IQ 文件已读到末尾，无数据")
+            audio = _wfm_audio_from_iq(np.concatenate(chunks), sr)
+            a_sr = AUDIO_SR
+            src = f"IQ 文件回放（{backend.get_frequency()/1e6:.3f}MHz）"
+        else:
+            sr_req = float(args.get("sample_rate_khz", 240.0)) * 1e3
+            old = (backend.get_frequency(), backend.get_sample_rate(),
+                   getattr(backend.status, "demod_mode", "WFM"))
+            try:
+                if args.get("freq_mhz") is not None:
+                    backend.set_frequency(int(float(args["freq_mhz"]) * 1e6))
+                if hasattr(backend, "set_sample_rate"):
+                    backend.set_sample_rate(sr_req)
+                backend.set_demod("WFM")
+                sr = float(backend.get_sample_rate())
+                target, chunks, got = int(sr * duration), [], 0
+                while got < target:
+                    x = backend.read_samples(min(target - got, 262144))
+                    if x is None or len(x) == 0:
+                        break
+                    chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
+            except Exception as e:
+                return ToolResult(success=False, content=f"采集 NOAA APT 失败: {e}")
+            finally:
+                try:
+                    backend.set_frequency(int(old[0]))
+                    if hasattr(backend, "set_sample_rate"):
+                        backend.set_sample_rate(old[1])
+                    backend.set_demod(old[2] or "WFM")
+                except Exception:
+                    pass
+            if not chunks:
+                return ToolResult(success=False, content="未采集到 IQ 数据")
+            audio = _wfm_audio_from_iq(np.concatenate(chunks), sr)
+            a_sr = AUDIO_SR
+            src = f"实时采集 {backend.get_frequency()/1e6:.3f}MHz / {duration:.0f}s"
+
+    res = lite_decode_apt(audio, a_sr, polarity=polarity, min_lines=8)
+    if not res.get("apt_present"):
+        hint = {
+            "no_sync": "未找到规则 APT 行同步（可能未在过境窗口、信号弱、多普勒未补偿或音频不是解调后的 APT）；可查 sdr_satellite_passes 过境时间、用 sdr_satellite_doppler 预置频偏、加大天线/延长采集。",
+            "too_short": "音频太短，至少需数秒（每行 0.5s）。",
+            "too_few_lines": "仅对齐极少数行，信号不稳定。",
+        }.get(res.get("reason"), "未解码到 APT")
+        return ToolResult(success=True, content=(
+            f"{src}：{hint}（对齐行 {res.get('lines_aligned', 0)}，"
+            f"锁定率 {res.get('lock_ratio', 0)}）"))
+
+    out_dir = os.path.join(os.getcwd(), "experiments", "noaa_apt")
+    os.makedirs(out_dir, exist_ok=True)
+    prefix = os.path.join(out_dir, f"apt_{int(_time.time())}")
+    paths = lite_save_apt(res, prefix)
+    lines = [f"{src}：NOAA APT 解码成功",
+             f"  对齐行 {res['lines_aligned']}（约 {res['lines_aligned']*0.5:.0f}s 云图），"
+             f"行同步锁定率 {res['lock_ratio']}",
+             f"  A/B 双通道拼接图：{paths['combo']}",
+             f"  通道A：{paths['a']}",
+             f"  通道B：{paths['b']}",
+             "  若黑白颠倒请用 polarity=-1 重解；通道温度定标/地图投影为后续。"]
     return ToolResult(success=True, content="\n".join(lines))
 
 
