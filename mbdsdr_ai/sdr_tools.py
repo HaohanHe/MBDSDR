@@ -2067,25 +2067,30 @@ def _decode_cw(args):
 
 
 def _decode_ft8(args):
-    """FT8 数字通信解码（框架实现）。"""
+    """FT8：内置轻量分析（找音峰+8FSK硬判决）+ 外部 jt9 完整译码提示。"""
     input_path = args["input_path"]
-    result = decode_digital_mode(input_path, mode="ft8")
-    if "error" in result:
-        return f"解码失败: {result['error']}"
-    output = f"=== FT8 解码 ===\n"
-    output += f"输入: {input_path}\n"
-    output += f"文件大小: {result.get('file_size', 0)} 字节\n"
-    output += f"可用工具: {result.get('external_tools_available', '无')}\n"
-    if result.get("external_tools_available"):
-        output += f"状态: 检测到外部工具，可用于完整解码\n"
-    else:
-        output += f"状态: 未检测到 FT8 解码工具，建议安装 wsjtx\n"
-    if "spectral_peak" in result:
-        output += f"频谱峰值: {result['spectral_peak']:.2f}\n"
-        output += f"频谱均值: {result['spectral_mean']:.2f}\n"
-    if "note" in result:
-        output += f"说明: {result['note']}\n"
-    return output
+    out = f"=== FT8 分析 ===\n输入: {input_path}\n"
+    try:
+        import wave, struct
+        from .ft8_lite import analyze_ft8_audio
+        with wave.open(input_path, "rb") as w:
+            rate = w.getframerate(); n = w.getnframes(); ch = w.getnchannels(); sw = w.getsampwidth()
+            raw = w.readframes(n)
+        if sw == 2:
+            vals = struct.unpack("<" + "h" * n * ch, raw)
+        else:
+            vals = list(raw)
+        mono = vals[0::ch]
+        res = analyze_ft8_audio(list(mono), rate)
+        if not res.get("detected"):
+            out += f"未检测到 FT8 音峰（{res.get('reason','')}）\n"
+        else:
+            out += f"检测到 FT8：中心 {res['center_hz']}Hz，SNR {res['snr_est_db']}dB\n"
+            out += f"原始符号 {res['num_symbols']} 个，判决裕度 {res['avg_margin']}\n"
+            out += "呼号文本还原需 jt9/wsjtx（LDPC 译码）\n"
+    except Exception as e:
+        out += f"内置分析异常: {e}\n"
+    return out
 
 def _decode_aprs(args):
     """APRS 自动位置报告解码（框架实现）。"""
