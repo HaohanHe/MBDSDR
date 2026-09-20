@@ -168,24 +168,44 @@ def find_line_starts(video4160: np.ndarray) -> Tuple[np.ndarray, float]:
     peaks, props = find_peaks(corr, height=PEAK_H, distance=min_dist)
     if len(peaks) == 0:
         return np.array([], dtype=np.int64), 0.0
-    anchor_c = peaks[np.argmax(props["peak_heights"])]  # 锚线 sync 中心
-    if props["peak_heights"].max() < 5.0:
+    # 锚线优先取信号中段（15%~85%）最高峰，避开滤波/重采样两端瞬态；
+    # 中段无合格峰才退回全局最高。
+    n_v = len(video4160)
+    mid_lo, mid_hi = int(n_v * 0.15), int(n_v * 0.85)
+    mid_idx = [i for i, p in enumerate(peaks) if mid_lo <= p <= mid_hi]
+    if mid_idx:
+        ai = max(mid_idx, key=lambda i: props["peak_heights"][i])
+    else:
+        ai = int(np.argmax(props["peak_heights"]))
+    anchor_c = peaks[ai]
+    if props["peak_heights"][ai] < 5.0:
         return np.array([], dtype=np.int64), 0.0
+    edge_guard = APT_LINE_SAMPLES  # 两端各约 1 行受瞬态影响，不计入锁定率
     centers = []
+    clean_locked = 0
     expected = 0
-    max_k = len(video4160) // APT_LINE_SAMPLES + 2
+    max_k = n_v // APT_LINE_SAMPLES + 2
     for k in range(-max_k, max_k + 1):
         c0 = anchor_c + k * APT_LINE_SAMPLES
         lo, hi = c0 - 20, c0 + 20
         if lo < 0 or hi >= len(corr):
             continue
-        expected += 1
         seg = corr[lo:hi]
         j = int(np.argmax(seg))
+        line_start = c0 - half
+        full_line = (line_start >= 0 and line_start + APT_LINE_SAMPLES <= n_v)
+        # 干净行：整行完整且距两端再留 1 行保护带
+        clean_line = (line_start - edge_guard >= 0
+                      and line_start + APT_LINE_SAMPLES + edge_guard <= n_v)
         if seg[j] >= PEAK_H:
             centers.append(lo + j)
+            if clean_line:
+                clean_locked += 1
+        # 锁定率只统计远离两端瞬态的干净网格点
+        if clean_line:
+            expected += 1
     centers = sorted(set(centers))
-    lock_ratio = len(centers) / max(expected, 1)
+    lock_ratio = clean_locked / max(expected, 1)
     starts = np.array(sorted(c - half for c in centers), dtype=np.int64)
     return starts, lock_ratio
 
