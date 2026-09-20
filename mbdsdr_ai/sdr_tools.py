@@ -37,6 +37,7 @@ from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, es
 from .sweep import sweep_scan
 from .frequency_manager import FrequencyManager
 from .watcher import watch_capture
+from .adsb_lite import decode_adsb
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
     detect_fhss, list_visible_satellites, compute_doppler_correction,
@@ -563,6 +564,30 @@ def register_sdr_tools(agent):
         },
         handler=lambda args: _watch_capture_tool(mgr, fm, args),
         category="sdr_spectrum",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_adsb_decode",
+        description=(
+            "解码 1090MHz 航空 ADS-B / Mode S 信号（飞机广播位置/速度/呼号）。"
+            "实时设备会自动调到 1090MHz、原始 IQ 模式、2.4MHz 采样率，采集 duration_s 秒后解码；"
+            "也可对已打开的 IQ 录制文件（FileIQBackend）离线解码。内置 lite 解码器做 "
+            "preamble 同步 + PPM 位判决 + CRC-24 严格校验，输出 CRC 有效帧、去重后的飞机 "
+            "ICAO24 地址、DF17 消息类型与呼号（callsign）。城市开阔环境通常几秒即可收到多架飞机；"
+            "CPR 经纬度具体解算与弱信号多帧合并标注为后续（可接 dump1090 后端）。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "duration_s": {"type": "number", "description": "采集时长秒，默认 8（飞机每秒多帧）"},
+                "freq_mhz": {"type": "number", "description": "频率 MHz，默认 1090"},
+                "sample_rate_mhz": {"type": "number", "description": "采样率 MHz，默认 2.4（RTL 棒推荐）"},
+                "threshold_sigma": {"type": "number", "description": "检测门限系数（噪声底+kσ），默认 4；漏检调小、虚警调大"},
+            },
+            "required": [],
+        },
+        handler=lambda args: _adsb_decode_tool(mgr, args),
+        category="sdr_decode",
     )
 
     agent.tool_registry.register(
@@ -2395,6 +2420,86 @@ def _watch_capture_tool(mgr, fm, args) -> "ToolResult":
         f"{res['peak_db']-res['threshold_db']:.1f}dB），录制 {res['recorded_s']:.2f}s\n"
         f"已保存: {data_path}\n"
         f"可用 sdr_open_iq_file 回放，再用 sdr_demodulate/对应解码器分析。"))
+
+
+def _adsb_decode_tool(mgr, args) -> "ToolResult":
+    """采集/读取一段 1090MHz IQ，解码 ADS-B/Mode S。"""
+    backend = _get_backend(mgr)
+    if not backend or not backend.status.connected:
+        return ToolResult(success=False, content="错误: 设备未连接")
+
+    duration = min(float(args.get("duration_s", 8.0)), 30.0)
+    k = float(args.get("threshold_sigma", 4.0))
+    dev_type = getattr(backend.device, "device_type", "")
+
+    if dev_type == "iq_file":
+        sr = float(backend.get_sample_rate())
+        need = int(sr * duration)
+        if hasattr(backend, "seek"):
+            backend.seek(0)
+        saved_loop = getattr(backend, "_loop", True)
+        backend._loop = False  # 离线解码顺序读一遍，避免短文件循环重复计数
+        chunks, got = [], 0
+        try:
+            while got < need:
+                x = backend.read_samples(min(need - got, 262144))
+                if x is None or len(x) == 0:
+                    break
+                chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
+        finally:
+            backend._loop = saved_loop
+        if not chunks:
+            return ToolResult(success=False, content="IQ 文件已读到末尾，无数据")
+        iq = np.concatenate(chunks)
+        res = decode_adsb(iq, sr, threshold_sigma=k)
+        src = f"IQ 文件回放（{res['duration_s']}s）"
+    else:
+        freq = float(args.get("freq_mhz", 1090.0)) * 1e6
+        sr = float(args.get("sample_rate_mhz", 2.4)) * 1e6
+        old = (backend.get_frequency(), backend.get_sample_rate(),
+               getattr(backend.status, "demod_mode", "FM"))
+        try:
+            backend.set_frequency(int(freq))
+            if hasattr(backend, "set_sample_rate"):
+                backend.set_sample_rate(sr)
+            backend.set_demod("RAW")
+            target = int(sr * duration)
+            chunks, got = [], 0
+            while got < target:
+                x = backend.read_samples(min(target - got, 262144))
+                if x is None or len(x) == 0:
+                    break
+                chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
+        except Exception as e:
+            return ToolResult(success=False, content=f"采集 ADS-B 失败: {e}")
+        finally:
+            try:
+                backend.set_frequency(int(old[0]))
+                if hasattr(backend, "set_sample_rate"):
+                    backend.set_sample_rate(old[1])
+                backend.set_demod(old[2] or "FM")
+            except Exception:
+                pass
+        if not chunks:
+            return ToolResult(success=False, content="未采集到 IQ 数据")
+        iq = np.concatenate(chunks)
+        res = decode_adsb(iq, sr, threshold_sigma=k)
+        src = f"实时采集 {freq/1e6:.1f}MHz / {sr/1e6:.1f}Msps / {duration:.0f}s"
+
+    if res["crc_ok"] == 0:
+        return ToolResult(success=True, content=(
+            f"{src}：未解码到 CRC 有效的 Mode S 帧（候选 preamble {res['candidates']}，"
+            f"CRC 失败 {res['crc_failed']}）。可靠近窗户/室外、检查 1090MHz 天线、"
+            f"或减小 threshold_sigma 后延长 duration_s 重试。"))
+
+    lines = [f"{src}：解码 {res['crc_ok']} 个 CRC 有效帧，去重 {len(res['aircraft'])} 架飞机："]
+    for icao, a in sorted(res["aircraft"].items()):
+        tag = f"呼号 {a['callsign']}" if a["callsign"] else (a["message_type"] or f"DF{a['df']}")
+        extra = "（含CPR位置，待解算）" if a["needs_cpr"] else ""
+        lines.append(f"  ICAO {icao}：{tag}{extra}")
+    lines.append(f"候选 {res['candidates']}，CRC 剔除 {res['crc_failed']}。"
+                 f"CPR 经纬度/弱信号多帧合并为后续（可接 dump1090 后端）。")
+    return ToolResult(success=True, content="\n".join(lines))
 
 
 def _spectrum_analyze(mgr, spec, args):

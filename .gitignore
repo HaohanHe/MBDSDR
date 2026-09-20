@@ -74,3 +74,9 @@ recordings/
 *.wav
 *.iq
 ~/.mbdsdr/
+
+# 第三方参考源码（仅本地学习，不入库）
+reference/
+# 测试/运行产物
+syn_*.npy
+tests/test_report.txt
