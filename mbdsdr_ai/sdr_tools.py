@@ -907,6 +907,38 @@ def register_sdr_tools(agent):
         category="sdr_satellite",
     )
 
+    agent.tool_registry.register(
+        name="sdr_satellite_doppler_track",
+        description=(
+            "卫星过境期间一边按 sgp4 视线速度实时补偿多普勒频移、一边把原始 IQ 流式录成 cf32"
+            "（原子能力，供模型组合成接收技能）。先用 sdr_satellite_passes 选定过境时刻，到点调用"
+            "本工具：每隔 update_interval_s 用真 sgp4 重算视线速度并把接收机调到 标称频率+多普勒，"
+            "同时持续采 IQ 落盘，输出 cf32 路径、sidecar（含逐点仰角/方位/多普勒轨迹）与多普勒/"
+            "仰角范围。录完把 cf32 交给 sdr_decode_noaa_apt 即可出 NOAA 云图。当前仰角低于 "
+            "min_elevation（卫星未升起）时不录制并提示。这是通用跟踪录制，不限 APT（SSTV/业余卫星"
+            "同理，换 frequency_mhz/demod 即可）。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "satellite_name": {"type": "string", "description": "内置卫星名，如 'NOAA 15'/'NOAA 18'/'NOAA 19'/'ISS (ZARYA)'/'METEOR M2'"},
+                "frequency_mhz": {"type": "number", "description": "标称下行频率 MHz，如 NOAA APT 137.100/137.620/137.9125"},
+                "duration_s": {"type": "number", "description": "跟踪录制时长秒，默认 300（典型过境 10-15 分钟）"},
+                "sample_rate_khz": {"type": "number", "description": "IQ 采样率 kHz，默认 240"},
+                "demod": {"type": "string", "description": "录制期间解调模式标记，APT 用 WFM（默认），原始分析用 RAW"},
+                "latitude": {"type": "number", "description": "地面站纬度，默认长春 43.82"},
+                "longitude": {"type": "number", "description": "地面站经度，默认 125.32"},
+                "altitude_m": {"type": "number", "description": "地面站海拔米，默认 0"},
+                "update_interval_s": {"type": "number", "description": "多普勒重算/调谐间隔秒，默认 2"},
+                "min_elevation": {"type": "number", "description": "录制所需最小仰角度，默认 0；低于则不录"},
+                "output": {"type": "string", "description": "可选输出 cf32 路径，默认 experiments/satellite/<sat>_<ts>.cf32"},
+            },
+            "required": ["satellite_name", "frequency_mhz"],
+        },
+        handler=lambda args: _satellite_doppler_track(mgr, args),
+        category="sdr_satellite",
+    )
+
     # ═══════════════════════════════════════════════════
     # 9. 定位（2个）
     # ═══════════════════════════════════════════════════
@@ -3194,6 +3226,126 @@ def _satellite_passes(args):
             out += f"   多普勒范围: {p['doppler_hz']['min_hz']:.0f} ~ {p['doppler_hz']['max_hz']:.0f} Hz\n"
         out += "\n"
     return out
+
+def _satellite_doppler_track(mgr, args):
+    """过境期间分段多普勒补偿 + 流式录 IQ（cf32 + sidecar 轨迹）。"""
+    import time as _time
+    sat = args["satellite_name"]
+    nominal = int(float(args["frequency_mhz"]) * 1e6)
+    duration = min(float(args.get("duration_s", 300.0)), 1200.0)
+    sr = float(args.get("sample_rate_khz", 240.0)) * 1e3
+    demod = args.get("demod", "WFM")
+    lat = float(args.get("latitude", 43.82))
+    lon = float(args.get("longitude", 125.32))
+    alt_km = float(args.get("altitude_m", 0.0)) / 1000.0
+    interval = max(float(args.get("update_interval_s", 2.0)), 0.05)
+    min_elev = float(args.get("min_elevation", 0.0))
+
+    backend = _get_backend(mgr)
+    if not backend or not backend.status.connected:
+        return ToolResult(success=False, content="错误: 设备未连接，无法跟踪录制")
+
+    def state_at(when):
+        return orbit.compute_satellite_state(sat, lat, lon, alt_km, when=when)
+
+    st0 = state_at(_time.time())
+    if st0 is None:
+        return ToolResult(success=False, content=(
+            f"无法计算卫星 {sat}（TLE 不可用或不在内置列表）。"
+            f"支持: {', '.join(orbit.BUILTIN_SATS.keys())}"))
+    if st0["elevation"] < min_elev:
+        return ToolResult(success=True, content=(
+            f"{sat} 当前仰角 {st0['elevation']:.1f}°（方位 {st0['azimuth']:.1f}°），"
+            f"低于录制门限 {min_elev:.0f}°，卫星尚未升起，暂不录制。"
+            f"请先用 sdr_satellite_passes 查过境时刻，到点再调用本工具。"))
+
+    import os, json
+    out = args.get("output")
+    if not out:
+        d = os.path.join(os.getcwd(), "experiments", "satellite")
+        os.makedirs(d, exist_ok=True)
+        tag = sat.replace(" ", "").replace("(", "").replace(")", "")
+        out = os.path.join(d, f"{tag}_{int(_time.time())}.cf32")
+
+    old = (backend.get_frequency(), backend.get_sample_rate(),
+           getattr(backend.status, "demod_mode", demod))
+    track, n_samples, tune_count = [], 0, 0
+    t_start = _time.time()
+    try:
+        if hasattr(backend, "set_sample_rate"):
+            backend.set_sample_rate(sr)
+        backend.set_demod(demod)
+        with open(out, "wb") as fh:
+            while True:
+                now = _time.time()
+                elapsed = now - t_start
+                if elapsed >= duration:
+                    break
+                st = state_at(now)
+                if st is None:
+                    break
+                shift = -nominal * st["range_rate_kms"] / orbit.C_LIGHT
+                backend.set_frequency(int(nominal + shift))
+                tune_count += 1
+                track.append({"t_s": round(elapsed, 2),
+                              "elevation_deg": round(st["elevation"], 2),
+                              "azimuth_deg": round(st["azimuth"], 2),
+                              "doppler_hz": round(shift, 1),
+                              "tuned_hz": int(nominal + shift)})
+                if st["elevation"] < min_elev and tune_count > 1:
+                    break  # 卫星落下
+                want = int(sr * min(interval, duration - elapsed))
+                got = 0
+                t_rd = _time.time()
+                while got < want:
+                    x = backend.read_samples(min(want - got, 262144))
+                    if x is None or len(x) == 0:
+                        break
+                    b = np.asarray(x, dtype=np.complex64)
+                    b.tofile(fh)
+                    n_samples += len(b); got += len(b)
+                dt = _time.time() - t_rd
+                if dt < interval:
+                    _time.sleep(max(0.0, interval - dt))
+    except Exception as e:
+        return ToolResult(success=False, content=f"多普勒跟踪录制失败: {e}")
+    finally:
+        try:
+            backend.set_frequency(int(old[0]))
+            if hasattr(backend, "set_sample_rate"):
+                backend.set_sample_rate(old[1])
+            backend.set_demod(old[2] or demod)
+        except Exception:
+            pass
+
+    if n_samples == 0:
+        return ToolResult(success=False, content="跟踪期间未采集到样本")
+    sidecar = {
+        "format": "cf32", "sample_rate": sr, "center_freq": nominal,
+        "satellite": sat, "demod": demod,
+        "latitude": lat, "longitude": lon, "altitude_m": args.get("altitude_m", 0.0),
+        "duration_recorded_s": round(n_samples / sr, 2),
+        "tune_count": tune_count,
+        "doppler_min_hz": min(p["doppler_hz"] for p in track),
+        "doppler_max_hz": max(p["doppler_hz"] for p in track),
+        "elevation_start_deg": track[0]["elevation_deg"],
+        "elevation_end_deg": track[-1]["elevation_deg"],
+        "track": track,
+    }
+    with open(out + ".json", "w") as f:
+        json.dump(sidecar, f, ensure_ascii=False, indent=1)
+    lines = [
+        f"=== {sat} 多普勒跟踪录制完成 ===",
+        f"标称频率: {nominal/1e6:.6f} MHz　解调标记: {demod}　采样率: {sr/1e3:.0f} kHz",
+        f"录制: {sidecar['duration_recorded_s']:.1f}s，{n_samples} 样本，调谐 {tune_count} 次（每 {interval:.1f}s 补偿）",
+        f"多普勒范围: {sidecar['doppler_min_hz']:.0f} ~ {sidecar['doppler_max_hz']:.0f} Hz",
+        f"仰角: {sidecar['elevation_start_deg']:.1f}° → {sidecar['elevation_end_deg']:.1f}°",
+        f"IQ 文件: {out}",
+        f"轨迹 sidecar: {out}.json",
+        "下一步：把该 cf32 交给 sdr_decode_noaa_apt（input_path）即可出云图。",
+    ]
+    return ToolResult(success=True, content="\n".join(lines))
+
 
 def _get_gps(mgr):
     return "GPS 定位（需自研 ai-sdr Mini 设备连接）\n当前为模拟后端，实际数据需连接 ATGM336H 模块\n模拟数据: 43.82°N, 125.32°E, 海拔 250m, 12 星, HDOP 0.8"
