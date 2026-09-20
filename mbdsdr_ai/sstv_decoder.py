@@ -481,18 +481,39 @@ def _decode_robot36(freq: np.ndarray, sr: int, data_start: int,
                 row_cb[li] = line_uv.get(li - 1, line_uv[li])
     else:
         # 组首式：每同步周期含两行 Y0,UV0(Cb),Y1,UV1(Cr)，周期约 300ms
-        y_plus_uv = (period_ms - sync_ms - porch_ms) / 2.0 - gap_ms
-        y_scan = max(1.0, y_plus_uv * 2.0 / 3.0)
-        uv_scan = max(1.0, y_plus_uv / 3.0)
+        # 数据驱动估计过渡段(porch)：sync 结束后，过渡段频率平滑(std小)，
+        # Y 内容是宽动态(std大)。找宽动态起点，而非写死 porch_ms。
+        def _group_y0_start(fr, s, sr, period_ms, pulse_ms):
+            p = int(pulse_ms * sr / 1000.0)
+            scan_end = min(s + int(period_ms * sr / 1000.0), len(fr) - 16)
+            t = s + p
+            step = max(1, int(1e-3 * sr))
+            win = max(8, int(8e-3 * sr))
+            while t + win < scan_end:
+                w = fr[t:t + win]
+                if np.isfinite(w).sum() >= win // 2 and np.nanstd(w) > 150.0:
+                    break
+                t += step
+            return t - s
+        # 用前若干个有效 sync 取中位，稳健估计过渡段长度
+        starts = []
+        for s in markers[:12]:
+            if s + int(period_ms * sr / 1000.0) >= len(fr):
+                continue
+            starts.append(_group_y0_start(fr, s, sr, period_ms, pulse_ms))
+        y0_off_ms = float(np.median(starts)) if starts else (sync_ms + porch_ms)
+        remaining_ms = max(period_ms - y0_off_ms, 200.0)
+        # 两行各一段 Y 一段 UV，Y:UV≈2:1，无额外 gap
+        uv_scan = remaining_ms / (2.0 * 3.0)
+        y_scan = 2.0 * uv_scan
         ypx = sr * y_scan / width / 1000.0
         uvpx = sr * uv_scan / width / 1000.0
         y_samp = int(y_scan * sr / 1000.0)
         uv_samp = int(uv_scan * sr / 1000.0)
-        gap_samp = int(gap_ms * sr / 1000.0)
-        o_y0 = int((sync_ms + porch_ms) * sr / 1000.0)
-        o_cb = o_y0 + y_samp + gap_samp
+        o_y0 = int(y0_off_ms * sr / 1000.0)
+        o_cb = o_y0 + y_samp
         o_y1 = o_cb + uv_samp
-        o_cr = o_y1 + y_samp + gap_samp
+        o_cr = o_y1 + y_samp
         r0 = 0
         for s in markers:
             if r0 + 1 >= height or s + o_cr + uv_samp >= len(fr):
