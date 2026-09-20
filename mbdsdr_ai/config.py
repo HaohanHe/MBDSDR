@@ -25,7 +25,7 @@ DEFAULT_CONFIG = {
     "timeout": 60,
     "tool_output_max_chars": 4000,     # 工具输出最大字符数，超过截断/写文件
     "enable_tool_calling": True,
-    "enable_self_evolution": False,     # 自进化默认关闭，需用户显式开启
+    "enable_self_evolution": True,      # 自进化默认开启（沙箱验证+快照回滚，不改真实文件）
     "sandbox_enabled": True,
     "auto_recovery": True,              # 一键恢复防幻觉变砖
     "language": "zh-CN",
@@ -55,7 +55,7 @@ class AgentConfig:
     enable_tool_calling: bool = True
 
     # 自进化
-    enable_self_evolution: bool = False
+    enable_self_evolution: bool = True
     sandbox_enabled: bool = True
     auto_recovery: bool = True
 
