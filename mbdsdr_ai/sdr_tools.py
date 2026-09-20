@@ -35,6 +35,7 @@ from .sdr_backend import SDRBackendManager, SDRStatus
 from .spectrum_processor import SpectrumProcessor
 from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth, wfm_broadcast_demod, rds_decode_from_wfm, audio_to_playback
 from .sweep import sweep_scan
+from .frequency_manager import FrequencyManager
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
     detect_fhss, list_visible_satellites, compute_doppler_correction,
@@ -55,6 +56,9 @@ def register_sdr_tools(agent):
         agent.spectrum = SpectrumProcessor(fft_size=1024)
 
     mgr = agent.sdr_manager
+    if not hasattr(agent, "freq_manager"):
+        agent.freq_manager = FrequencyManager()
+    fm = agent.freq_manager
     spec = agent.spectrum
 
     # 计划存储（harness planning 机制：先列步骤再动手，防长任务漂移）
@@ -477,6 +481,61 @@ def register_sdr_tools(agent):
         },
         handler=lambda args: _sweep_scan_tool(mgr, args),
         category="sdr_spectrum",
+    )
+
+    # ---------- 频率管理器 / 书签 ----------
+    agent.tool_registry.register(
+        name="sdr_bookmark_list",
+        description=(
+            "列出内置标准频率库与用户书签（调频广播/航空/海事/业余/FT8/气象卫星/ISS/ADS-B/对讲/授时/导航）。"
+            "可按类别过滤或关键词搜索。想知道某类信号在哪个频率、有哪些常用频点时先调用本工具。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "类别名，如 航空/海事/空间/气象卫星/FT8/业余/广播/航管/对讲/ISM/授时/导航卫星；留空列全部"},
+                "query": {"type": "string", "description": "关键词，如 ISS/ADS-B/应急/FT8 20m；留空不搜索"},
+            },
+            "required": [],
+        },
+        handler=lambda args: ToolResult(success=True, content=_bookmark_list(fm, args)),
+        category="sdr_device",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_bookmark_goto",
+        description=(
+            "按书签名或频率跳转到指定台站，并自动设置解调模式与带宽。"
+            "可传书签名（如 'ISS 国际空间站下行 145.800'、'航空应急频率 121.500'、'ADS-B 1090ES 1090.000'）、"
+            "关键词（如 1090、145.8）或数字频率（98.5 视为 MHz，145800000 视为 Hz）。频段书签跳到其中央并提示用扫频找具体台。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "书签名/关键词/频率数字"},
+            },
+            "required": ["target"],
+        },
+        handler=lambda args: _bookmark_goto(mgr, fm, args),
+        category="sdr_device",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_bookmark_add",
+        description="把一个频率保存为用户书签（持久化，重启不丢），例如收到的本地中继、未知台、实验频点。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "书签名称"},
+                "freq_mhz": {"type": "number", "description": "频率 MHz"},
+                "mode": {"type": "string", "description": "解调模式 WFM/NFM/AM/USB/LSB/CW/DIG/RAW，可留空"},
+                "bandwidth_khz": {"type": "number", "description": "接收带宽 kHz，可留空"},
+                "note": {"type": "string", "description": "备注，可留空"},
+            },
+            "required": ["name", "freq_mhz"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_bookmark_add(fm, args)),
+        category="sdr_device",
     )
 
     agent.tool_registry.register(
@@ -2129,6 +2188,89 @@ def _sweep_scan_tool(mgr, args) -> "ToolResult":
         lines.append(f"  …另有 {len(res.activities)-20} 个，缩小范围或提高门限可细看")
     lines.append("已自动回到扫描前频率。")
     return ToolResult(success=True, content="\n".join(lines))
+
+
+def _fmt_bookmark(b) -> str:
+    if b.is_range:
+        head = f"[{b.category}] {b.name}: {b.start_hz/1e6:.3f}-{b.end_hz/1e6:.3f} MHz（频段）"
+    else:
+        head = f"[{b.category}] {b.name}: {b.freq_hz/1e6:.4f} MHz"
+    extras = []
+    if b.mode:
+        extras.append(b.mode)
+    if b.bandwidth_hz:
+        extras.append(f"带宽 {b.bandwidth_hz/1e3:g}k")
+    tag = ("  " + " / ".join(extras)) if extras else ""
+    note = f"  — {b.note}" if b.note else ""
+    return head + tag + note
+
+
+def _bookmark_list(fm, args) -> str:
+    category = args.get("category") or None
+    query = args.get("query") or None
+    items = fm.list(category=category, query=query)
+    if not items:
+        cats = "、".join(fm.categories())
+        return f"没有匹配的书签。可用类别：{cats}"
+    lines = [f"共 {len(items)} 条书签："]
+    lines += [_fmt_bookmark(b) for b in items]
+    return "\n".join(lines)
+
+
+def _bookmark_goto(mgr, fm, args) -> "ToolResult":
+    target = str(args.get("target", "")).strip()
+    if not target:
+        return ToolResult(success=False, content="错误: 需要提供书签名、关键词或频率")
+    b = fm.find(target)
+    if b is None:
+        return ToolResult(success=False,
+                          content=f"未找到与 '{target}' 匹配的书签，可用 sdr_bookmark_list 查看，或 sdr_bookmark_add 保存")
+
+    backend = _get_backend(mgr)
+    if not backend or not backend.status.connected:
+        return ToolResult(success=False, content="错误: 设备未连接，无法跳转频率")
+
+    freq = b.center_hz
+    actions = [f"频率 {freq/1e6:.4f} MHz"]
+    if b.mode and hasattr(backend, "set_demod"):
+        try:
+            backend.set_demod(b.mode)
+            actions.append(f"模式 {b.mode}")
+        except Exception:
+            pass
+    if b.bandwidth_hz and hasattr(backend, "set_bandwidth"):
+        try:
+            backend.set_bandwidth(b.bandwidth_hz)
+            actions.append(f"带宽 {b.bandwidth_hz/1e3:g}k")
+        except Exception:
+            pass
+    try:
+        backend.set_frequency(int(freq))
+    except Exception as e:
+        return ToolResult(success=False, content=f"设置频率失败: {e}")
+
+    tip = ""
+    if b.is_range:
+        tip = (f"\n这是频段书签（{b.start_hz/1e6:.3f}-{b.end_hz/1e6:.3f}MHz），"
+               f"已跳到中央；用 sdr_sweep_scan 在该范围找具体活动频点。")
+    note = f"\n说明：{b.note}" if b.note else ""
+    return ToolResult(success=True,
+                      content=f"已跳转到 {b.name}\n  " + "，".join(actions) + tip + note)
+
+
+def _bookmark_add(fm, args) -> str:
+    name = str(args.get("name", "")).strip()
+    freq = args.get("freq_mhz")
+    if not name or freq is None:
+        return "错误: 需要 name 和 freq_mhz"
+    bm = fm.add(
+        name=name,
+        freq_hz=float(freq) * 1e6,
+        mode=str(args.get("mode", "") or "").upper(),
+        bandwidth_hz=float(args.get("bandwidth_khz", 0) or 0) * 1e3,
+        note=str(args.get("note", "") or ""),
+    )
+    return f"已保存书签：{_fmt_bookmark(bm)}"
 
 
 def _spectrum_analyze(mgr, spec, args):

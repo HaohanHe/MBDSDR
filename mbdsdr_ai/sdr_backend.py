@@ -142,7 +142,9 @@ class SDRBackend:
         return True
 
     def set_demod(self, mode: str) -> bool:
-        valid = ["FM", "AM", "SSB", "LSB", "USB", "CW", "NFM", "WFM"]
+        # RAW/DIG 表示不解调模拟音频、直接取原始 IQ（ADS-B/APRS/FT8/导航等数字链路）
+        valid = ["FM", "AM", "SSB", "LSB", "USB", "CW", "NFM", "WFM",
+                 "RAW", "DIG"]
         if mode.upper() not in valid:
             return False
         self.status.demod_mode = mode.upper()
