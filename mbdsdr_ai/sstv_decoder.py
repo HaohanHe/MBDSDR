@@ -34,7 +34,7 @@ except ImportError:
 # SSTV 模式定义（时序单位：毫秒，频率单位：Hz）
 SSTV_MODES = {
     "Martin M1": {
-        "vis_code": 0x5C,
+        "vis_code": 0x2C,  # pysstv 权威 VIS（旧表误写 0x5C）
         "width": 320,
         "height": 256,
         "sync_freq": 1200,
@@ -66,6 +66,21 @@ SSTV_MODES = {
         "channel_order": ["Y", "R-Y", "B-Y"],
         "pixel_ms": 0.2604,  # 83.33ms / 320
     },
+    # ---- PD 系列（G3PLX，两行组：Y0 / Cb(两行平均) / Cr(两行平均) / Y1）----
+    # 通用：SYNC=20ms、PORCH=2.08ms、无通道间隔；色度为相邻两行平均。
+    # 参数来自 pysstv 权威实现。像素时钟解码时按实测组周期反推，不硬编码。
+    "PD90":  {"vis_code": 0x63, "width": 320, "height": 256, "sync_ms": 20.0,
+              "porch_ms": 2.08, "pixel_ms": 0.532, "family": "pd"},
+    "PD120": {"vis_code": 0x5F, "width": 640, "height": 496, "sync_ms": 20.0,
+              "porch_ms": 2.08, "pixel_ms": 0.19, "family": "pd"},
+    "PD160": {"vis_code": 0x62, "width": 512, "height": 400, "sync_ms": 20.0,
+              "porch_ms": 2.08, "pixel_ms": 0.382, "family": "pd"},
+    "PD180": {"vis_code": 0x60, "width": 640, "height": 496, "sync_ms": 20.0,
+              "porch_ms": 2.08, "pixel_ms": 0.286, "family": "pd"},
+    "PD240": {"vis_code": 0x61, "width": 640, "height": 496, "sync_ms": 20.0,
+              "porch_ms": 2.08, "pixel_ms": 0.382, "family": "pd"},
+    "PD290": {"vis_code": 0x5E, "width": 800, "height": 616, "sync_ms": 20.0,
+              "porch_ms": 2.08, "pixel_ms": 0.286, "family": "pd"},
 }
 
 TARGET_SAMPLE_RATE = 48000
@@ -359,6 +374,13 @@ def _identify_sstv_mode(freq: np.ndarray, sr: int, data_start: int,
         return "Robot 36", {**info, "robot_layout": "per_line"}
     if pulse_ms >= 7.0 and (270.0 <= period_ms <= 330.0):
         return "Robot 36", {**info, "robot_layout": "grouped"}
+    # PD 系列：SYNC 约 20ms（明显长于 Robot 9ms），组周期 450~1050ms。
+    # 按标称组周期最近邻细分型号（Y0+Cb+Cr+Y1，WIDTH/HEIGHT 随型号）。
+    if pulse_ms >= 15.0 and (450.0 <= period_ms <= 1050.0):
+        pd_period = {"PD120": 508.0, "PD90": 703.0, "PD180": 754.0,
+                     "PD160": 804.0, "PD290": 937.0, "PD240": 1000.0}
+        best = min(pd_period, key=lambda k: abs(pd_period[k] - period_ms))
+        return best, {**info, "family": "pd", "pd_ref_period": pd_period[best]}
     # Martin M1：4.862ms 同步、~446ms；Martin M2 ~227ms
     if pulse_ms < 7.0 and 400.0 <= period_ms <= 480.0:
         return "Martin M1", info
@@ -515,6 +537,78 @@ def _decode_robot36(freq: np.ndarray, sr: int, data_start: int,
     }
 
 
+def _decode_pd(freq: np.ndarray, sr: int, data_start: int,
+               mode: str = "PD120") -> Dict[str, Any]:
+    """数据驱动解码 PD 系列（G3PLX）。
+
+    一组两行：SYNC(20ms) + PORCH(2.08ms) + Y0(width) + Cb(两行平均)
+    + Cr(两行平均) + Y1(width)，无通道间隔。色度为相邻两行共享平均。
+    像素时钟由实测组周期反推（不硬编码 PIXEL），消除时基偏差累积错位。
+    经 pysstv PD 合成闭环验证。
+    """
+    mdef = SSTV_MODES[mode]
+    width, height = mdef["width"], mdef["height"]
+    sync_ms = mdef.get("sync_ms", 20.0)
+    porch_ms = mdef.get("porch_ms", 2.08)
+
+    markers, pulse_ms, period_ms = _find_sync_markers(
+        freq, sr, data_start, sync_ms_nom=20.0)
+    if len(markers) < 2 or period_ms <= 0:
+        return {"success": False, "error": f"{mode}: 同步标记不足"}
+
+    fr = np.where(np.isfinite(freq), freq, 1500.0)
+    # 反推像素时钟：组周期 = sync + porch + 4*width*px
+    px_ms = max(0.05, (period_ms - sync_ms - porch_ms) / (4.0 * width))
+    px_samples = sr * px_ms / 1000.0
+    image = np.zeros((height, width, 3), dtype=np.uint8)
+    row_y: Dict[int, np.ndarray] = {}
+    row_cb: Dict[int, np.ndarray] = {}
+    row_cr: Dict[int, np.ndarray] = {}
+
+    o_y0 = int((sync_ms + porch_ms) * sr / 1000.0)
+    seg = int(width * px_samples)
+    o_cb = o_y0 + seg
+    o_cr = o_cb + seg
+    o_y1 = o_cr + seg
+
+    r0 = 0
+    for s in markers:
+        if r0 + 1 >= height or s + o_y1 + seg >= len(fr):
+            break
+        Y0 = _freq_to_pixel_series(fr, s + o_y0, px_samples, width, 0.4)
+        # pysstv PD 顺序：Y0 / Cr(两行平均,p[2]) / Cb(两行平均,p[1]) / Y1
+        # （PIL YCbCr=(Y,Cb,Cr)，index2=Cr、index1=Cb）——勿写反，否则红蓝互换
+        Cr = _freq_to_pixel_series(fr, s + o_cb, px_samples, width, 0.4)
+        Cb = _freq_to_pixel_series(fr, s + o_cr, px_samples, width, 0.4)
+        Y1 = _freq_to_pixel_series(fr, s + o_y1, px_samples, width, 0.4)
+        row_y[r0], row_cb[r0], row_cr[r0] = Y0, Cb, Cr
+        row_y[r0 + 1], row_cb[r0 + 1], row_cr[r0 + 1] = Y1, Cb, Cr
+        r0 += 2
+
+    if not row_y:
+        return {"success": False, "error": f"{mode}: 未解码出任何行"}
+
+    cb_all = np.concatenate([row_cb[r] for r in sorted(row_cb)])
+    cr_all = np.concatenate([row_cr[r] for r in sorted(row_cr)])
+    cb_dc = float(np.median(cb_all)) - 128.0
+    cr_dc = float(np.median(cr_all)) - 128.0
+
+    for r in sorted(row_y):
+        R, G, B = _ycbcr_to_rgb(row_y[r], row_cb[r] - cb_dc, row_cr[r] - cr_dc)
+        image[r, :, 0] = R
+        image[r, :, 1] = G
+        image[r, :, 2] = B
+
+    return {
+        "success": True, "mode": mode, "width": width, "height": height,
+        "period_ms": round(period_ms, 2), "pulse_ms": round(pulse_ms, 2),
+        "px_ms": round(px_ms, 3), "cb_dc": round(cb_dc, 1),
+        "cr_dc": round(cr_dc, 1),
+        "rows_decoded": int(np.sum(np.any(image > 0, axis=(1, 2)))),
+        "image": image,
+    }
+
+
 def decode_sstv(file_path: str, output_path: Optional[str] = None,
                  mode: str = "auto") -> Dict[str, Any]:
     """
@@ -581,6 +675,34 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
                 "vis_raw": vis_code,
                 "pulse_ms": res["pulse_ms"],
                 "period_ms": res["period_ms"],
+            },
+        }
+
+    # PD 系列走数据驱动两行组解码器（Y0/Cb/Cr/Y1，色度两行平均）
+    if SSTV_MODES.get(detected_mode, {}).get("family") == "pd":
+        res = _decode_pd(freq, sr, data_start, mode=detected_mode)
+        if not res.get("success"):
+            return {"error": res.get("error", "PD 解码失败")}
+        image = res.pop("image")
+        if output_path is None:
+            output_path = os.path.splitext(file_path)[0] + "_sstv.png"
+        if HAS_PIL:
+            Image.fromarray(image).save(output_path)
+        else:
+            np.save(output_path + ".npy", image)
+            output_path = output_path + ".npy"
+        return {
+            "success": True,
+            "mode": res["mode"],
+            "width": res["width"],
+            "height": res["height"],
+            "period_ms": res["period_ms"],
+            "px_ms": res["px_ms"],
+            "rows_decoded": res["rows_decoded"],
+            "output_path": output_path,
+            "identification": {
+                "method": "timing", "vis_raw": vis_code,
+                "pulse_ms": res["pulse_ms"], "period_ms": res["period_ms"],
             },
         }
 
