@@ -282,23 +282,81 @@ def decode_noaa_apt(
     sample_rate: int = 20800,
 ) -> Dict[str, Any]:
     """
-    解码 NOAA APT 气象卫星图像。
+    解码 NOAA POES APT 气象卫星云图（物理正确实现，转 noaa_apt_lite）。
 
-    NOAA APT 格式：
-    - 采样率：20800 Hz（标准）
-    - 每行：2080 像素（同步A + 空间A + 同步B + 空间B）
-    - 每秒：10 行（20800 / 2080 = 10）
-    - 调制：AM（幅度调制）
+    APT 物理参数：
+    - 137.100/137.620/137.9125 MHz 宽带 FM 下行，2400Hz 副载波、频偏 ±416Hz；
+    - 每行 0.5s，4160 视频率下 2080 样本（每秒 2 行，非 10 行）；
+    - sync A/B(39)+space(47)+image(909)+telemetry(45)，A/B 两通道。
 
-    输入：wav 或 cf32 格式的录音文件
-    输出：PNG 图像（通道A、通道B、合成图）
+    输入：.wav（解调后音频）或 .cf32/.cu8/.cfile 等原始 IQ（内部宽带 FM 鉴频）。
+    输出：PNG（通道 A、通道 B、A/B 拼接）。
     """
     if not os.path.exists(input_path):
         return {"error": f"输入文件不存在: {input_path}"}
-
     if output_dir is None:
         output_dir = os.path.expanduser("~/.mbdsdr/noaa_apt")
     os.makedirs(output_dir, exist_ok=True)
+
+    from .noaa_apt_lite import decode_apt, save_apt_png
+    ext = os.path.splitext(input_path)[1].lower()
+    try:
+        if ext == ".wav":
+            from scipy.io import wavfile
+            sr_w, data = wavfile.read(input_path)
+            data = np.asarray(data)
+            if data.ndim > 1:
+                data = data.mean(axis=1)
+            if np.issubdtype(data.dtype, np.integer):
+                data = data.astype(np.float64) / np.iinfo(data.dtype).max
+            audio, a_sr = data.astype(np.float64), float(sr_w)
+        else:
+            from .sdr_backend import FileIQBackend
+            fb = FileIQBackend(input_path)
+            fb.connect()
+            sr_iq = float(fb.get_sample_rate())
+            fb.seek(0); fb._loop = False
+            chunks = []
+            while True:
+                x = fb.read_samples(262144)
+                if x is None or len(x) == 0:
+                    break
+                chunks.append(np.asarray(x, dtype=np.complex64))
+            if not chunks:
+                return {"error": "IQ 文件无数据"}
+            iq = np.concatenate(chunks)
+            z = iq - np.mean(iq)
+            from scipy.signal import butter, sosfiltfilt, resample_poly
+            from math import gcd
+            inst = np.angle(z[1:] * np.conj(z[:-1])) * (sr_iq / (2.0 * np.pi))
+            sos = butter(4, 4500.0 / (sr_iq / 2.0), btype="low", output="sos")
+            inst = sosfiltfilt(sos, inst)
+            out_sr = 24000
+            g = gcd(out_sr, int(sr_iq))
+            audio = resample_poly(inst, out_sr // g, int(sr_iq) // g)
+            a_sr = float(out_sr)
+    except Exception as e:
+        return {"error": f"读取/解调失败: {e}"}
+
+    res = decode_apt(audio, a_sr, min_lines=8)
+    if not res.get("apt_present"):
+        return {"error": f"未找到 APT 同步（对齐行 {res.get('lines_aligned', 0)}，"
+                         f"锁定率 {res.get('lock_ratio', 0)}）；可能未在过境窗口或信号弱"}
+    prefix = os.path.join(output_dir, f"NOAA_{int(time.time())}")
+    paths = save_apt_png(res, prefix)
+    h, w = res["image_a"].shape
+    outputs = [
+        {"channel": "A", "path": paths["a"], "size": (h, w)},
+        {"channel": "B", "path": paths["b"], "size": res["image_b"].shape},
+        {"channel": "combined", "path": paths["combo"], "size": (h, 2 * w)},
+    ]
+    return {"lines_decoded": res["lines_aligned"],
+            "lock_ratio": res["lock_ratio"], "outputs": outputs}
+
+    # ── 以下为早期占位实现（AM/10行每秒/包络等物理假设错误），保留不可达，勿用 ──
+    if False:
+        if output_dir is None:
+            output_dir = os.path.expanduser("~/.mbdsdr/noaa_apt")
 
     # 读取音频数据
     try:
