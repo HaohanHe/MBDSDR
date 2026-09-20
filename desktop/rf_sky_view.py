@@ -1090,3 +1090,67 @@ class RFSkyViewPanel(QFrame):
 
     def reset_view(self):
         self.sky_view.reset_view()
+
+
+# ============================================================================
+# 实时卫星跟踪桥：把真 sgp4 轨道数据接进天空图
+# ============================================================================
+
+class SatelliteTracker:
+    """定时从 mbdsdr_ai.orbit 拉真 sgp4 卫星位置，更新天空图。
+
+    无硬件依赖：TLE 在线拉取+缓存，纯算法。卫星在地平线下也画（半透明），
+    便于看到过顶前后轨迹。
+    """
+
+    # 各卫星标称下行频率（MHz），用于标注
+    _FREQ = {
+        "NOAA 15": 137.620, "NOAA 18": 137.9125, "NOAA 19": 137.100,
+        "ISS (ZARYA)": 145.800, "METEOR M2": 137.100, "FENGYUN 3D": 136.900,
+    }
+
+    def __init__(self, sky_view, lat: float, lon: float, alt_km: float = 0.0,
+                 interval_ms: int = 10000):
+        self.sky_view = sky_view
+        self.lat = lat
+        self.lon = lon
+        self.alt_km = alt_km
+        self._timer = QTimer(self.sky_view)
+        self._timer.timeout.connect(self.refresh)
+        self._timer.start(interval_ms)
+        self.refresh()
+
+    def refresh(self):
+        try:
+            from mbdsdr_ai import orbit
+        except Exception:
+            return
+        objs = []
+        traj = {}
+        import time as _t
+        now = _t.time()
+        for name in orbit.BUILTIN_SATS:
+            st = orbit.compute_satellite_state(name, self.lat, self.lon, self.alt_km)
+            if st is None:
+                continue
+            freq = self._FREQ.get(name, 0.0) * 1e6
+            objs.append(SkyObject(
+                name=name,
+                azimuth_deg=st["azimuth"],
+                elevation_deg=max(0.0, st["elevation"]),
+                obj_type="satellite",
+                frequency_hz=freq,
+                description=f"仰角{st['elevation']:.0f}° 距离{st['range_km']:.0f}km",
+            ))
+            # 未来 10 分钟轨迹（每 60s 一点）
+            pts = []
+            for k in range(0, 11):
+                p = orbit.compute_satellite_state(name, self.lat, self.lon,
+                                                   self.alt_km, when=now + k * 60)
+                if p:
+                    pts.append((p["azimuth"], p["elevation"]))
+            if pts:
+                traj[name] = pts
+        self.sky_view.set_objects(objs)
+        for name, pts in traj.items():
+            self.sky_view.set_trajectory(name, pts)
