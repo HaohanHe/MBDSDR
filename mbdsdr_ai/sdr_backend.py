@@ -398,18 +398,28 @@ class MockSDRBackend(SDRBackend):
 
 class RTLSDRBackend(SDRBackend):
     """
-    RTL-SDR 后端（RTL2832U + 调谐器）。
+    RTL-SDR 后端（RTL2832U + E4000/FC0012/FC0013/R820T/R820T2）。
 
-    使用 pyrtlsdr 库。需要安装：pip install pyrtlsdr
-    以及 librtlsdr 系统库。
+    两种接入方式：
+    - 本地 USB：RTLSDRBackend(device_index=0, ppm=...)，依赖 pyrtlsdr + librtlsdr。
+    - rtl_tcp 网络：RTLSDRBackend(host="127.0.0.1", port=1234)，走 rtl_tcp 协议，
+      适合本机装不上 librtlsdr / WOA / 远端共享棒 / 手机端共用一个前端。
+
+    廉价棒晶振有 20~50ppm 频偏，务必用 ppm 校正（可由 AI 对照已知信标估计）。
+    HF 短波（<24MHz）需要 direct sampling（RTL2832 直采）或外接上变频器。
     """
 
-    def __init__(self, device_index: int = 0):
+    # pyrtlsdr 调谐器枚举索引 → 名称
+    _TUNER_NAMES = {0: "Unknown", 1: "E4000", 2: "FC0013", 3: "FC0025",
+                    4: "FC2580", 5: "R820T", 6: "R828D", 7: "R860", 8: "R2000"}
+
+    def __init__(self, device_index: int = 0, host: Optional[str] = None,
+                 port: int = 1234, ppm: int = 0):
         device = SDRDevice(
             device_type="rtl_sdr",
-            device_id=f"rtl_{device_index}",
-            name=f"RTL-SDR #{device_index}",
-            frequency_range=(24000000, 1766000000),
+            device_id=f"rtl_{device_index}" if host is None else f"rtl_tcp_{host}_{port}",
+            name=f"RTL-SDR #{device_index}" if host is None else f"rtl_tcp {host}:{port}",
+            frequency_range=(500000, 1766000000),  # direct sampling 可下探至 ~0.5MHz
             sample_rate_range=(250000, 3200000),
             max_gain=49.6,
             supports_iq=True,
@@ -417,22 +427,66 @@ class RTLSDRBackend(SDRBackend):
         )
         super().__init__(device)
         self._device_index = device_index
+        self._host = host
+        self._port = port
+        self._ppm = ppm
         self._sdr = None
+        self._direct = 0  # 0=off, 1=I, 2=Q
+        self.tuner_name = "Unknown"
+
+    @staticmethod
+    def list_devices() -> list:
+        """枚举本机 USB RTL-SDR，返回 [{index, serial, tuner}]，无库/无设备返回 []。"""
+        try:
+            from rtlsdr import RtlSdr
+            out = []
+            n = RtlSdr.get_device_count()
+            try:
+                serials = RtlSdr.get_device_serial_addresses()
+            except Exception:
+                serials = {}
+            for i in range(n):
+                tuner = "Unknown"
+                try:
+                    probe = RtlSdr(i)
+                    tuner = RTLSDRBackend._TUNER_NAMES.get(int(probe.tuner_type), "Unknown")
+                    probe.close()
+                except Exception:
+                    pass
+                out.append({"index": i, "serial": serials.get(i, ""), "tuner": tuner})
+            return out
+        except Exception:
+            return []
 
     def connect(self) -> bool:
         try:
-            from rtlsdr import RtlSdr
-            self._sdr = RtlSdr(self._device_index)
+            if self._host is not None:
+                from rtlsdr import RtlSdrTcpClient
+                self._sdr = RtlSdrTcpClient(hostname=self._host, port=self._port)
+            else:
+                from rtlsdr import RtlSdr
+                self._sdr = RtlSdr(self._device_index)
+            # 调谐器型号
+            try:
+                self.tuner_name = self._TUNER_NAMES.get(int(self._sdr.tuner_type), "Unknown")
+            except Exception:
+                self.tuner_name = "Unknown"
+            # 上电先应用 ppm
+            if self._ppm:
+                self.set_ppm(self._ppm)
             self.status.connected = True
             self._start_time = time.time()
             return True
-        except Exception as e:
+        except Exception:
             self.status.connected = False
             return False
 
     def disconnect(self):
         if self._sdr:
-            self._sdr.close()
+            try:
+                self._sdr.close()
+            except Exception:
+                pass
             self._sdr = None
         super().disconnect()
 
@@ -454,8 +508,72 @@ class RTLSDRBackend(SDRBackend):
         if not super().set_gain(gain_db):
             return False
         if self._sdr:
-            self._sdr.gain = gain_db
+            try:
+                self._sdr.gain = float(gain_db)
+            except Exception:
+                return False
         return True
+
+    def set_agc(self, enabled: bool) -> bool:
+        if not super().set_agc(enabled):
+            return False
+        if self._sdr:
+            try:
+                self._sdr.set_agc_mode(bool(enabled))
+            except Exception:
+                try:
+                    self._sdr.agc_mode = bool(enabled)
+                except Exception:
+                    return False
+        return True
+
+    def set_bandwidth(self, bw_hz: float) -> bool:
+        if not super().set_bandwidth(bw_hz):
+            return False
+        if self._sdr:
+            try:
+                self._sdr.bandwidth = int(bw_hz)
+            except Exception:
+                return False
+        return True
+
+    def set_ppm(self, ppm: int) -> bool:
+        """设置晶振频偏校正（ppm）。廉价棒典型 20~50ppm。"""
+        self._ppm = int(ppm)
+        if self._sdr:
+            try:
+                self._sdr.freq_correction = int(ppm)
+                return True
+            except Exception:
+                return False
+        return True
+
+    def set_direct_sampling(self, branch: str = "q") -> bool:
+        """HF 短波直采：branch='q'/'i' 开启，'off' 关闭。需调谐器支持（RTL2832 原生）。"""
+        mapping = {"off": 0, "i": 1, "q": 2}
+        val = mapping.get(str(branch).lower(), 2)
+        self._direct = val
+        if self._sdr:
+            try:
+                self._sdr.set_direct_sampling(val)
+                return True
+            except Exception:
+                try:
+                    self._sdr.direct_sampling = ("off" if val == 0 else branch.lower())
+                    return True
+                except Exception:
+                    return False
+        return True
+
+    def set_bias_tee(self, enabled: bool) -> bool:
+        """偏置供电（RTL-SDR Blog V3/V4 等支持，给有源天线/LNA 供电）。"""
+        if self._sdr:
+            try:
+                self._sdr.set_bias_tee(bool(enabled))
+                return True
+            except Exception:
+                return False  # 老棒/老库不支持
+        return False
 
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
         if not self.status.connected or not self._sdr:
