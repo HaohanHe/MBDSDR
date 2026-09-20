@@ -214,3 +214,77 @@ def visible_satellites(
             out.append(st)
     out.sort(key=lambda x: x["elevation"], reverse=True)
     return out
+
+
+def predict_passes(
+    observer_lat: float,
+    observer_lon: float,
+    observer_alt: float = 0.0,
+    hours: float = 24.0,
+    min_elevation: float = 10.0,
+    satellite_type: str = "all",
+    nominal_freq_hz: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """预测未来 hours 小时内的卫星过境事件。
+
+    扫描仰角从 <min_elevation 升到 >=min_elevation 再降回 <min_elevation 的段，
+    记录升起/中天/落下时刻、最大仰角、方位、多普勒范围。
+    """
+    step = 30.0  # 秒
+    n_steps = int(hours * 3600.0 / step)
+    t0 = time.time()
+    names = [n for n in BUILTIN_SATS
+             if not (satellite_type == "weather" and not any(
+                 k in n for k in ("NOAA", "METEOR", "FENGYUN")))
+             and not (satellite_type == "amateur" and "ISS" not in n)]
+    passes = []
+    for name in names:
+        elev_series = []
+        for k in range(n_steps + 1):
+            st = compute_satellite_state(name, observer_lat, observer_lon,
+                                         observer_alt, when=t0 + k * step)
+            if st is None:
+                elev_series = []
+                break
+            elev_series.append((t0 + k * step, st))
+        if not elev_series:
+            continue
+        # 找过境段：仰角 >= min_elevation 的连续段
+        above = [e >= min_elevation for _, e in
+                 [(t, s["elevation"]) for t, s in elev_series]]
+        i = 0
+        while i < len(above):
+            if above[i]:
+                j = i
+                while j < len(above) and above[j]:
+                    j += 1
+                seg = elev_series[i:j]
+                if len(seg) >= 2:
+                    max_idx = max(range(len(seg)),
+                                  key=lambda k: seg[k][1]["elevation"])
+                    t_rise, s_rise = seg[0]
+                    t_cul, s_cul = seg[max_idx]
+                    t_set, s_set = seg[-1]
+                    dop = None
+                    if nominal_freq_hz:
+                        shifts = [-nominal_freq_hz * s["range_rate_kms"] / C_LIGHT
+                                  for _, s in seg]
+                        dop = {"min_hz": round(min(shifts), 1),
+                               "max_hz": round(max(shifts), 1)}
+                    passes.append({
+                        "satellite": name,
+                        "rise_time": time.strftime("%H:%M:%S", time.localtime(t_rise)),
+                        "rise_azimuth": round(s_rise["azimuth"], 1),
+                        "culmination_time": time.strftime("%H:%M:%S", time.localtime(t_cul)),
+                        "max_elevation": round(s_cul["elevation"], 1),
+                        "culmination_azimuth": round(s_cul["azimuth"], 1),
+                        "set_time": time.strftime("%H:%M:%S", time.localtime(t_set)),
+                        "set_azimuth": round(s_set["azimuth"], 1),
+                        "duration_s": round(t_set - t_rise),
+                        "doppler_hz": dop,
+                    })
+                i = j
+            else:
+                i += 1
+    passes.sort(key=lambda p: p["rise_time"])
+    return passes

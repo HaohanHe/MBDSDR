@@ -522,6 +522,25 @@ def register_sdr_tools(agent):
         category="sdr_satellite",
     )
 
+    agent.tool_registry.register(
+        name="sdr_satellite_passes",
+        description="预测未来一段时间内哪些卫星过顶。输入经纬度和时长，返回每次过境的升起/中天/落下时刻、最大仰角、方位角、持续时长和多普勒范围。用于提前安排卫星接收、指挥天线指向。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "latitude": {"type": "number", "description": "地面站纬度"},
+                "longitude": {"type": "number", "description": "地面站经度"},
+                "hours": {"type": "number", "description": "预测未来多少小时，默认 24"},
+                "min_elevation": {"type": "number", "description": "最小仰角阈值（度），默认 10"},
+                "satellite_type": {"type": "string", "description": "weather/amateur/all，默认 all"},
+                "nominal_freq_hz": {"type": "number", "description": "可选，用于估算多普勒范围，如 NOAA APT 137912500"},
+            },
+            "required": ["latitude", "longitude"],
+        },
+        handler=lambda args: ToolResult(success=True, content=_satellite_passes(args)),
+        category="sdr_satellite",
+    )
+
     # ═══════════════════════════════════════════════════
     # 9. 定位（2个）
     # ═══════════════════════════════════════════════════
@@ -2118,6 +2137,30 @@ def _satellite_doppler(args):
     output += f"距离: {result['range_km']:.0f} km\n"
     output += f"TLE epoch: {result.get('epoch','?')}\n"
     return output
+
+
+def _satellite_passes(args):
+    """未来卫星过境预测（sgp4）。"""
+    lat = args["latitude"]
+    lon = args["longitude"]
+    alt = args.get("altitude", 0.0)
+    hours = args.get("hours", 24.0)
+    min_elev = args.get("min_elevation", 10.0)
+    stype = args.get("satellite_type", "all")
+    freq = args.get("nominal_freq_hz")
+    passes = orbit.predict_passes(lat, lon, alt / 1000.0, hours, min_elev, stype, freq)
+    if not passes:
+        return f"未来 {hours}h 内没有仰角 >= {min_elev}° 的卫星过境。"
+    out = f"=== 未来 {hours}h 卫星过境预测 (仰角>={min_elev}°) ===\n共 {len(passes)} 次\n\n"
+    for i, p in enumerate(passes):
+        out += f"{i+1}. {p['satellite']}\n"
+        out += f"   升: {p['rise_time']} (方位 {p['rise_azimuth']}°)\n"
+        out += f"   中天: {p['culmination_time']} 最大仰角 {p['max_elevation']}° (方位 {p['culmination_azimuth']}°)\n"
+        out += f"   落: {p['set_time']} (方位 {p['set_azimuth']}°)  时长 {p['duration_s']}s\n"
+        if p.get("doppler_hz"):
+            out += f"   多普勒范围: {p['doppler_hz']['min_hz']:.0f} ~ {p['doppler_hz']['max_hz']:.0f} Hz\n"
+        out += "\n"
+    return out
 
 def _get_gps(mgr):
     return "GPS 定位（需自研 ai-sdr Mini 设备连接）\n当前为模拟后端，实际数据需连接 ATGM336H 模块\n模拟数据: 43.82°N, 125.32°E, 海拔 250m, 12 星, HDOP 0.8"
