@@ -70,15 +70,41 @@ class ContextStats:
         }
 
 
+_ENC = None
+_ENC_FAILED = False
+
+
+def _get_encoder():
+    """惰性加载 tiktoken 真分词器；不可用时返回 None（回退启发式）。"""
+    global _ENC, _ENC_FAILED
+    if _ENC is not None:
+        return _ENC
+    if _ENC_FAILED:
+        return None
+    try:
+        import tiktoken
+        _ENC = tiktoken.get_encoding("cl100k_base")
+        return _ENC
+    except Exception:
+        _ENC_FAILED = True
+        return None
+
+
 def estimate_tokens(text: str) -> int:
     """
     估算文本的 token 数。
-    中文/日文/韩文：约 1.5 token/字
-    英文：约 4 字符/token（含空格标点）
-    混合文本按字符类型加权。
+
+    优先用 tiktoken 真分词器（cl100k_base，贴近主流 LLM 真实 token 计数）；
+    tiktoken 不可用时回退启发式（CJK ~1.5/字，英文 ~4 字符/token）。
     """
     if not text:
         return 0
+    enc = _get_encoder()
+    if enc is not None:
+        try:
+            return len(enc.encode(text))
+        except Exception:
+            pass
     cjk = 0
     other = 0
     for ch in text:
