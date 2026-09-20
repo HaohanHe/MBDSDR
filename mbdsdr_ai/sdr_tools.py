@@ -56,6 +56,29 @@ def register_sdr_tools(agent):
     mgr = agent.sdr_manager
     spec = agent.spectrum
 
+    # 计划存储（harness planning 机制：先列步骤再动手，防长任务漂移）
+    if not hasattr(agent, "_plans"):
+        agent._plans = {}
+
+    agent.tool_registry.register(
+        name="sdr_plan",
+        description="把一个多步任务拆成步骤计划，先写下来再动手。长任务/多工具任务前先调用本工具列步骤，防止执行中途漂移。步骤用短字符串数组传入。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "goal": {"type": "string", "description": "任务总目标"},
+                "steps": {"type": "array", "items": {"type": "string"}, "description": "步骤列表，按顺序"},
+            },
+            "required": ["goal", "steps"],
+        },
+        handler=lambda args: ToolResult(
+            success=True,
+            content="计划已建立：\n目标: " + args["goal"] + "\n步骤:\n" +
+                    "\n".join(f"{i+1}. {s}" for i, s in enumerate(args["steps"])),
+        ),
+        category="planning",
+    )
+
     # ═══════════════════════════════════════════════════
     # 1. 设备管理（5个）
     # ═══════════════════════════════════════════════════
