@@ -903,7 +903,31 @@ def test_sstv_auto_identification(result: TestResult, agent: MBDSDRAgent):
         result.record("真实录音解出 240 行", rr.get("rows_decoded") == 240,
                       str(rr.get("rows_decoded")))
 
-    for p in (p36, o36, pm):
+    # PD90 闭环：自动识别 + 两行组 Y0/Cr/Cb/Y1 + 三原色方向（锁 Cb/Cr 不写反）
+    from pysstv.color import PD90
+    ppd = tempfile.mktemp(suffix=".wav")
+    opd = tempfile.mktemp(suffix=".png")
+    im3 = np.zeros((256, 320, 3), np.uint8)
+    im3[:, :106] = [220, 60, 60]; im3[:, 106:213] = [60, 200, 80]; im3[:, 213:] = [60, 90, 220]
+    PD90(Image.fromarray(im3, "RGB"), 44100, 16).write_wav(ppd)
+    rp = decode_sstv(ppd, opd, "auto")
+    result.record("PD90 自动识别", rp.get("mode") == "PD90",
+                  str({k: rp.get(k) for k in ("mode", "period_ms", "px_ms")}))
+    result.record("PD90 解码行数>=240", rp.get("rows_decoded", 0) >= 240,
+                  str(rp.get("rows_decoded")))
+    try:
+        dd = np.array(Image.open(opd))
+
+        def dpd(x):
+            return "RGB"[int(np.argmax(dd[60:200, x - 8:x + 8].reshape(-1, 3).mean(0)))]
+
+        result.record("PD90 三原色方向(R/G/B)",
+                      dpd(50) == "R" and dpd(160) == "G" and dpd(270) == "B",
+                      f"{dpd(50)}/{dpd(160)}/{dpd(270)}")
+    except Exception as e:
+        result.record("PD90 三原色方向", False, str(e))
+
+    for p in (p36, o36, pm, ppd, opd):
         try:
             os.remove(p)
         except OSError:
