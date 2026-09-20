@@ -250,6 +250,84 @@ def fm_demod(x: np.ndarray, deviation: float = 75000.0,
     return audio.astype(np.float32)
 
 
+def wfm_broadcast_demod(x: np.ndarray, sample_rate: float,
+                        audio_sr: int = 48000, deemph_us: float = 50.0,
+                        audio_cutoff: float = 15000.0) -> np.ndarray:
+    """
+    完整宽带调频广播（WFM / 商用 FM）接收链，对标 GQRX/SDR# 的单声道 FM：
+
+      去直流 → 正交鉴频 → 抗混叠降采样到音频率 → 去加重 → 15kHz 音频低通 → 归一化
+
+    sample_rate : 输入 IQ 采样率（FM 广播建议 ≥200kHz，如 240k/1.0M/2.4M）
+    audio_sr    : 输出音频采样率（默认 48k）
+    deemph_us   : 去加重时间常数，中国/欧洲/澳洲 50µs，美国/韩国 75µs
+    仅输出单声道（L+R，基带 0–15kHz）；立体声复合解码（19kHz pilot / 38kHz 副载波）
+    与 RDS（57kHz 副载波）为独立后续模块。
+    """
+    from scipy.signal import resample_poly, butter, lfilter
+
+    x = np.asarray(x, dtype=np.complex128)
+    x = x - np.mean(x)
+    if len(x) < 4:
+        return np.zeros(0, dtype=np.float32)
+
+    # 1) 正交鉴频（频偏归一化，广播 FM 最大频偏 75kHz）
+    phase_diff = np.angle(x[1:] * np.conj(x[:-1]))
+    audio = phase_diff * (sample_rate / (2.0 * np.pi * 75000.0))
+    audio = audio - np.mean(audio)
+
+    # 2) 降采样到音频率（resample_poly 内置抗混叠低通）
+    from math import gcd
+    if int(sample_rate) != int(audio_sr):
+        g = gcd(int(round(sample_rate)), int(audio_sr))
+        up = int(audio_sr) // g
+        down = int(round(sample_rate)) // g
+        audio = resample_poly(audio, up, down)
+
+    # 3) 去加重（一阶 RC 低通：y[n] = a*y[n-1] + (1-a)*x[n]）
+    if deemph_us and deemph_us > 0:
+        a = float(np.exp(-1.0 / (deemph_us * 1e-6 * audio_sr)))
+        audio = lfilter([1.0 - a], [1.0, -a], audio)
+
+    # 4) 音频低通（去除 15k 以上残余，含立体声/RDS 副载波泄漏）
+    nyq = audio_sr / 2.0
+    norm_cut = min(0.99, audio_cutoff / nyq)
+    if norm_cut < 0.99:
+        b, a = butter(5, norm_cut, btype="low")
+        audio = lfilter(b, a, audio)
+
+    # 5) 归一化到 [-1,1]（留 5% 余量，避免削波）
+    peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
+    if peak > 1e-9:
+        audio = audio / peak * 0.95
+    return audio.astype(np.float32)
+
+
+def rds_decode_from_wfm(x: np.ndarray, sample_rate: float) -> dict:
+    """
+    从 WFM 基带 IQ 中解码 RDS（57kHz 副载波，1187.5 波特双相码）的占位实现：
+    做带通选通与载波能量检测，返回 RDS 副载波是否存在及电平；完整块同步/纠错
+    （104bit 组、差分解码、CRC）后续接入成熟开源 RDS 库。此函数先让链路可观测。
+    """
+    from scipy.signal import butter, lfilter
+    x = np.asarray(x, dtype=np.complex128)
+    x = x - np.mean(x)
+    if len(x) < 4:
+        return {"rds_present": False, "carrier_db": None}
+    phase = np.angle(x[1:] * np.conj(x[:-1]))
+    mp = phase * (sample_rate / (2.0 * np.pi * 75000.0))
+    mp = mp - np.mean(mp)
+    nyq = sample_rate / 2.0
+    # RDS 副载波 57kHz ± 2kHz
+    b, a = butter(4, [55000.0 / nyq, 59000.0 / nyq], btype="band")
+    band = lfilter(b, a, mp)
+    rms = float(np.sqrt(np.mean(band ** 2)))
+    floor = float(np.sqrt(np.mean(mp ** 2))) + 1e-12
+    carrier_db = 20.0 * np.log10(rms / floor + 1e-12)
+    # 经验门限：副载波能量相对复合基带明显即判存在（最终以块同步为准）
+    return {"rds_present": carrier_db > -20.0, "carrier_db": round(carrier_db, 2)}
+
+
 def am_demod(x: np.ndarray) -> np.ndarray:
     """
     AM 调幅解调（包络检波）。
