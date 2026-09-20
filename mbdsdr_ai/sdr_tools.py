@@ -38,6 +38,7 @@ from .sweep import sweep_scan
 from .frequency_manager import FrequencyManager
 from .watcher import watch_capture
 from .adsb_lite import decode_adsb
+from .rds_lite import decode_rds
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
     detect_fhss, list_visible_satellites, compute_doppler_correction,
@@ -587,6 +588,29 @@ def register_sdr_tools(agent):
             "required": [],
         },
         handler=lambda args: _adsb_decode_tool(mgr, args),
+        category="sdr_decode",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_rds_decode",
+        description=(
+            "解码 FM 广播（WFM，87.5-108MHz）的 RDS 数据：电台名 PS（Program Service）、"
+            "PI 台站识别码、PTY 节目类型。实时设备会调到指定 FM 频率、WFM 模式并以足够高的"
+            "采样率（默认240kHz，保留57kHz RDS 副载波）采集 duration_s 秒后解码；也可对已打开的"
+            " FM 频段 IQ 录制文件离线解码。内置 lite 解码器做 57kHz BPSK 副载波恢复、双相码判决、"
+            "(26,16) 循环码块同步与 A/B/C/D offset 校验、0A 组 PS 字符重组。用于回答“这个电台叫"
+            "什么/现在播的台名”。RT 电台文本/AF 频率表为后续。无 RDS 的台或信号弱会明确提示。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "freq_mhz": {"type": "number", "description": "FM 频率 MHz，如 98.0；缺省用当前频点"},
+                "duration_s": {"type": "number", "description": "采集时长秒，默认 5（PS 每组约88ms，几秒即可收全8字符）"},
+                "sample_rate_khz": {"type": "number", "description": "采样率 kHz，默认 240，必须 >140 以保留57k副载波"},
+            },
+            "required": [],
+        },
+        handler=lambda args: _rds_decode_tool(mgr, args),
         category="sdr_decode",
     )
 
@@ -2499,6 +2523,108 @@ def _adsb_decode_tool(mgr, args) -> "ToolResult":
         lines.append(f"  ICAO {icao}：{tag}{extra}")
     lines.append(f"候选 {res['candidates']}，CRC 剔除 {res['crc_failed']}。"
                  f"CPR 经纬度/弱信号多帧合并为后续（可接 dump1090 后端）。")
+    return ToolResult(success=True, content="\n".join(lines))
+
+
+def _fm_composite_baseband(iq, sr):
+    """正交鉴频得到 FM 复合基带 mpx（保留到 ~100kHz，含 19k pilot/38k/57k RDS）。"""
+    iq = np.asarray(iq, dtype=np.complex128)
+    iq = iq - np.mean(iq)
+    if len(iq) < 2:
+        return np.zeros(0)
+    ph = np.angle(iq[1:] * np.conj(iq[:-1]))
+    mpx = ph * (sr / (2.0 * np.pi * 75000.0))
+    return mpx - np.mean(mpx)
+
+
+_RDS_PTY = {0: "无/未定义", 1: "新闻", 2: "时事", 3: "信息", 4: "体育", 5: "教育",
+            6: "戏剧", 7: "文化", 8: "科学", 9: "综艺", 10: "流行音乐", 11: "摇滚",
+            12: "轻音乐", 13: "古典", 14: "民族/民俗", 15: "资讯", 16: "天气",
+            17: "财经", 18: "儿童", 20: "民族音乐", 29: "紧急告警"}
+
+
+def _rds_decode_tool(mgr, args) -> "ToolResult":
+    """采集/读取一段 FM 复合基带，解码 RDS（PS 电台名/PI/PTY）。"""
+    backend = _get_backend(mgr)
+    if not backend or not backend.status.connected:
+        return ToolResult(success=False, content="错误: 设备未连接")
+
+    duration = min(float(args.get("duration_s", 5.0)), 15.0)
+    dev_type = getattr(backend.device, "device_type", "")
+
+    if dev_type == "iq_file":
+        sr = float(backend.get_sample_rate())
+        if hasattr(backend, "seek"):
+            backend.seek(0)
+        saved_loop = getattr(backend, "_loop", True)
+        backend._loop = False
+        chunks, got = [], 0
+        need = int(sr * duration)
+        try:
+            while got < need:
+                x = backend.read_samples(min(need - got, 262144))
+                if x is None or len(x) == 0:
+                    break
+                chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
+        finally:
+            backend._loop = saved_loop
+        if not chunks:
+            return ToolResult(success=False, content="IQ 文件已读到末尾，无数据")
+        iq = np.concatenate(chunks)
+        src = f"IQ 文件回放（中心 {backend.get_frequency()/1e6:.1f}MHz / {sr/1e3:.0f}kHz）"
+    else:
+        req_sr = float(args.get("sample_rate_khz", 240.0)) * 1e3
+        old = (backend.get_frequency(), backend.get_sample_rate(),
+               getattr(backend.status, "demod_mode", "WFM"))
+        try:
+            if args.get("freq_mhz") is not None:
+                backend.set_frequency(int(float(args["freq_mhz"]) * 1e6))
+            if hasattr(backend, "set_sample_rate"):
+                backend.set_sample_rate(req_sr)
+            backend.set_demod("WFM")
+            sr = float(backend.get_sample_rate())
+            target = int(sr * duration)
+            chunks, got = [], 0
+            while got < target:
+                x = backend.read_samples(min(target - got, 262144))
+                if x is None or len(x) == 0:
+                    break
+                chunks.append(np.asarray(x, dtype=np.complex64)); got += len(chunks[-1])
+        except Exception as e:
+            return ToolResult(success=False, content=f"采集 FM/RDS 失败: {e}")
+        finally:
+            try:
+                backend.set_frequency(int(old[0]))
+                if hasattr(backend, "set_sample_rate"):
+                    backend.set_sample_rate(old[1])
+                backend.set_demod(old[2] or "WFM")
+            except Exception:
+                pass
+        if not chunks:
+            return ToolResult(success=False, content="未采集到 IQ 数据")
+        iq = np.concatenate(chunks)
+        src = f"实时采集 {backend.get_frequency()/1e6:.2f}MHz / {sr/1e3:.0f}kHz / {duration:.0f}s"
+
+    if sr < 140000:
+        return ToolResult(success=False, content=(
+            f"{src}：采样率 {sr/1e3:.0f}kHz 低于 140kHz，无法保留 57kHz RDS 副载波，"
+            f"请用 ≥200kHz 采样率重新采集 FM IQ。"))
+
+    mpx = _fm_composite_baseband(iq, sr)
+    res = decode_rds(mpx, sr)
+    if not res.get("rds_present"):
+        return ToolResult(success=True, content=(
+            f"{src}：未解码到有效 RDS 组（同步块 {res.get('blocks_synced', 0)}、"
+            f"完整组 {res.get('groups_partial', 0)}）。可能该台不发 RDS、信号弱/多径、"
+            f"频偏过大或天线不佳；可对准更强的本地 FM 台、延长 duration_s 后重试。"))
+
+    pty = int(res.get("pty", 0))
+    pty_name = _RDS_PTY.get(pty, f"类型{pty}")
+    lines = [f"{src}：RDS 解码成功",
+             f"  电台名 PS：{res.get('ps') or '（本组未含 PS）'}",
+             f"  PI 识别码：{res['pi_hex']}　PTY：{pty_name}",
+             f"  同步块 {res['blocks_synced']}，完整组 {res['groups_decoded']}。"
+             f"RT 电台文本/AF 频率表为后续。"]
     return ToolResult(success=True, content="\n".join(lines))
 
 
