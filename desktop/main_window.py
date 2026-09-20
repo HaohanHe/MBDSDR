@@ -27,7 +27,7 @@ from control_panel import ControlPanel
 from status_panel import StatusPanel
 from ai_panel import AIPanel
 from mcp_worker import MCPWorkerManager
-from rf_sky_view import RFSkyView, SkyObject, AntennaPointing, HeatmapCell
+from rf_sky_view import RFSkyView, SkyObject, AntennaPointing, HeatmapCell, SatelliteTracker
 
 
 class MainWindow(QMainWindow):
@@ -583,29 +583,22 @@ class MainWindow(QMainWindow):
     # ========================================================================
 
     def _init_sky_view_demo(self):
-        """初始化天空视图演示数据（卫星位置、天线指向、热力图）。"""
+        """初始化天空视图：真 sgp4 卫星位置 + 信号热力演示。"""
         import math
 
-        # 演示卫星数据（实际使用时从 decoders.py 的卫星轨道计算获取）
-        satellites = [
-            SkyObject("NOAA-19", 45, 65, "satellite", 137.1e6, -45, "气象卫星 APT"),
-            SkyObject("NOAA-15", 120, 40, "satellite", 137.62e6, -52, "气象卫星 APT"),
-            SkyObject("NOAA-18", 200, 25, "satellite", 137.9125e6, -58, "气象卫星 APT"),
-            SkyObject("ISS (Zarya)", 80, 55, "satellite", 145.8e6, -40, "国际空间站 APRS"),
-            SkyObject("FY-3B", 300, 35, "satellite", 1700e6, -60, "风云3号 气象卫星"),
-            SkyObject("GPS PRN 12", 150, 70, "satellite", 1575.42e6, -30, "GPS 导航卫星"),
-            SkyObject("北斗 G3", 220, 60, "satellite", 1561.098e6, -35, "北斗导航卫星"),
-        ]
-        self.sky_view.set_objects(satellites)
+        # 真 sgp4 实时卫星跟踪（观测站坐标，可在设置中改）
+        obs_lat = getattr(self, "obs_lat", 43.88)
+        obs_lon = getattr(self, "obs_lon", 125.32)
+        self.sat_tracker = SatelliteTracker(self.sky_view, obs_lat, obs_lon)
 
-        # 天线指向（演示：指向 NOAA-19）
+        # 天线指向（默认正北水平，实际由云台/跟踪驱动）
         antenna = AntennaPointing(
-            azimuth_deg=45,
-            elevation_deg=65,
+            azimuth_deg=0,
+            elevation_deg=0,
             beamwidth_deg=30,
             gain_dbi=5.0,
-            is_tracking=True,
-            target_name="NOAA-19",
+            is_tracking=False,
+            target_name="",
         )
         self.sky_view.set_antenna(antenna)
 
@@ -617,21 +610,7 @@ class MainWindow(QMainWindow):
                 signal = -70 + 20 * math.sin(math.radians(az * 2)) + 10 * math.cos(math.radians(el * 3))
                 heatmap.append(HeatmapCell(az, el, signal))
         self.sky_view.set_heatmap(heatmap)
-
-        # 演示卫星轨迹（NOAA-19）
-        trajectory = []
-        for t in range(-30, 31):
-            az = 45 + t * 1.5
-            el = 65 - (t * t) * 0.05
-            if 0 <= el <= 90:
-                trajectory.append((az % 360, el))
-        self.sky_view.set_trajectory("NOAA-19", trajectory)
-
-        # 启动实时卫星位置更新（每5秒用 sgp4 重新计算）
-        if self._sky_update_timer is None:
-            self._sky_update_timer = QTimer(self)
-            self._sky_update_timer.timeout.connect(self._update_sky_satellites)
-            self._sky_update_timer.start(5000)  # 5秒更新一次
+        # 卫星位置与轨迹由 SatelliteTracker 真 sgp4 实时驱动，不再用演示轨迹。
 
     def _update_sky_satellites(self):
         """用 sgp4 实时计算卫星位置，更新天空图（含新时空授时）。"""
