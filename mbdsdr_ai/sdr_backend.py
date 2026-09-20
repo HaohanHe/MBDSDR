@@ -172,9 +172,10 @@ class SDRBackend:
         """
         开始录制基带（真正写文件）。
 
-        启动后台线程，持续读取 IQ 样本并写入文件。
-        支持 cf32/cs16/wav/csv 四种格式。
+        启动后台线程，边采边流式写盘，支持长时间录制不占内存。
+        支持 cu8（rtl_sdr 原生 unsigned8，生态最通用）/ cf32 / cs16 / wav / csv。
         duration > 0 时到点自动停止。
+        录制同时写同名 .json sidecar（含 format/sample_rate/center_freq），可直接回放。
         """
         if not self.status.connected:
             return False
@@ -205,127 +206,117 @@ class SDRBackend:
 
     def _recording_loop(self, path: str, fmt: str, duration: float,
                         gain: float, decimation: int):
-        """录制线程主循环：持续读取 IQ 样本并写入文件。"""
+        """录制线程主循环：边采边流式写盘，支持长时间录制不占内存。"""
         chunk_size = 16384  # 每次读取的样本数
-        all_samples = []
+        samples_total = 0
+        fh = None
+        wf = None
+        fmt_l = fmt.lower()
+        effective_rate = int(self.status.sample_rate_hz / max(decimation, 1))
 
         try:
-            while not self._recording_stop_event.is_set():
-                # 检查定时停止
-                if duration > 0:
-                    elapsed = time.time() - self._recording_start_time
-                    if elapsed >= duration:
-                        break
+            if fmt_l == "wav":
+                import wave
+                wf = wave.open(path, "wb")
+                wf.setnchannels(2)
+                wf.setsampwidth(2)
+                wf.setframerate(effective_rate)
+            elif fmt_l == "csv":
+                fh = open(path, "w", encoding="utf-8")
+                fh.write("I,Q\n")
+            else:
+                fh = open(path, "wb")  # cf32 / cs16 / cu8
 
-                # 读取 IQ 样本
+            while not self._recording_stop_event.is_set():
+                if duration > 0 and (time.time() - self._recording_start_time) >= duration:
+                    break
+
                 samples = self.read_samples(chunk_size)
                 if samples is None or len(samples) == 0:
                     time.sleep(0.01)
                     continue
 
-                # 抽取
                 if decimation > 1:
                     samples = samples[::decimation]
 
-                all_samples.append(samples)
-                self._recording_samples_total += len(samples)
+                # pyrtlsdr 等后端返回的 IQ 已归一化到约 [-1,1]，直接按满量程量化
+                z = np.asarray(samples, dtype=np.complex128) * gain
+                if fmt_l == "cf32":
+                    np.column_stack([z.real, z.imag]).astype(np.float32).tofile(fh)
+                elif fmt_l == "cs16":
+                    ci = np.clip(z.real, -1.0, 1.0) * 32767
+                    cq = np.clip(z.imag, -1.0, 1.0) * 32767
+                    np.column_stack([ci, cq]).astype(np.int16).tofile(fh)
+                elif fmt_l == "cu8":
+                    # rtl_sdr / SDR# / GQRX 通用 unsigned 8-bit 交错，中心 127.5
+                    ui = np.clip(z.real, -1.0, 1.0) * 127.5 + 127.5
+                    uq = np.clip(z.imag, -1.0, 1.0) * 127.5 + 127.5
+                    np.column_stack([ui, uq]).astype(np.uint8).tofile(fh)
+                elif fmt_l == "wav":
+                    ci = np.clip(z.real, -1.0, 1.0) * 32767
+                    cq = np.clip(z.imag, -1.0, 1.0) * 32767
+                    wf.writeframes(np.column_stack([ci, cq]).astype(np.int16).tobytes())
+                elif fmt_l == "csv":
+                    np.savetxt(fh, np.column_stack([z.real, z.imag]), fmt="%.8f", delimiter=",")
 
-                # 避免内存爆炸：超过 100MB 时先写一部分
-                total_bytes = self._recording_samples_total * 8
-                if total_bytes > 100 * 1024 * 1024:
-                    # 流式写入（简化：先累积，最后一次性写）
-                    pass
+                samples_total += len(z)
+                self._recording_samples_total = samples_total
 
         except Exception as e:
             print(f"录制线程错误: {e}")
-
-        # 停止录制，写文件
-        self.status.recording = False
-
-        if all_samples:
-            # 合并所有样本
-            combined = np.concatenate(all_samples)
-
-            # 按格式写入
+        finally:
             try:
-                if fmt == "cf32":
-                    interleaved = np.column_stack([combined.real, combined.imag]).flatten().astype(np.float32)
-                    interleaved.tofile(path)
-                elif fmt == "cs16":
-                    max_val = np.max(np.abs(combined))
-                    if max_val > 0:
-                        normalized = combined / max_val * gain
-                    else:
-                        normalized = combined
-                    normalized = np.clip(normalized, -1.0, 1.0)
-                    i16 = (normalized.real * 32767).astype(np.int16)
-                    q16 = (normalized.imag * 32767).astype(np.int16)
-                    interleaved = np.column_stack([i16, q16]).flatten()
-                    interleaved.tofile(path)
-                elif fmt == "wav":
-                    import wave
-                    max_val = np.max(np.abs(combined))
-                    if max_val > 0:
-                        normalized = combined / max_val * gain
-                    else:
-                        normalized = combined
-                    normalized = np.clip(normalized, -1.0, 1.0)
-                    i16 = (normalized.real * 32767).astype(np.int16)
-                    q16 = (normalized.imag * 32767).astype(np.int16)
-                    interleaved = np.column_stack([i16, q16]).flatten()
-                    effective_rate = int(self.status.sample_rate_hz / max(decimation, 1))
-                    with wave.open(path, 'wb') as wf:
-                        wf.setnchannels(2)
-                        wf.setsampwidth(2)
-                        wf.setframerate(effective_rate)
-                        wf.writeframes(interleaved.tobytes())
-                elif fmt == "csv":
-                    with open(path, 'w') as f:
-                        f.write("I,Q\n")
-                        for s in combined[::max(decimation, 1)]:
-                            f.write(f"{s.real:.8f},{s.imag:.8f}\n")
-            except Exception as e:
-                print(f"写录制文件错误: {e}")
+                if wf is not None:
+                    wf.close()
+                if fh is not None:
+                    fh.close()
+            except Exception:
+                pass
+            self.status.recording = False
+            self._write_recording_sidecar(path, fmt_l, effective_rate,
+                                          samples_total, decimation)
 
-            # 写 sidecar JSON 元数据
-            try:
-                effective_rate = self.status.sample_rate_hz / max(decimation, 1)
-                metadata = {
-                    "path": path,
-                    "format": fmt,
-                    "center_hz": float(self.status.frequency_hz),
-                    "sample_rate_hz": float(self.status.sample_rate_hz),
-                    "decimation": decimation,
-                    "effective_rate_hz": float(effective_rate),
-                    "samples": int(self._recording_samples_total),
-                    "bytes": int(os.path.getsize(path)) if os.path.exists(path) else 0,
-                    "duration_s": float(time.time() - self._recording_start_time),
-                    "start_unix": float(self._recording_start_time),
-                    "end_unix": float(time.time()),
-                    "gain_db": float(self.status.gain_db),
-                    "agc_enabled": bool(self.status.agc_enabled),
-                    "note": f"wav: I=ch1,Q=ch2; cf32/cs16: interleaved little-endian",
-                }
-                with open(path + ".json", 'w', encoding='utf-8') as f:
-                    json.dump(metadata, f, indent=2, ensure_ascii=False)
-            except Exception as e:
-                print(f"写 sidecar JSON 错误: {e}")
+    def _write_recording_sidecar(self, path: str, fmt: str, effective_rate: int,
+                                 samples_total: int, decimation: int):
+        """写 sidecar 元数据；键名与 FileIQBackend 对齐，录完即可回放。"""
+        try:
+            metadata = {
+                # FileIQBackend 直接识别的三个键
+                "format": fmt,
+                "sample_rate": float(effective_rate),
+                "center_freq": float(self.status.frequency_hz),
+                # 兼容旧字段
+                "path": path,
+                "center_hz": float(self.status.frequency_hz),
+                "sample_rate_hz": float(effective_rate),
+                "decimation": decimation,
+                "samples": int(samples_total),
+                "bytes": int(os.path.getsize(path)) if os.path.exists(path) else 0,
+                "duration_s": float(samples_total / effective_rate) if effective_rate else 0,
+                "start_unix": float(self._recording_start_time),
+                "end_unix": float(time.time()),
+                "gain_db": float(self.status.gain_db),
+                "agc_enabled": bool(self.status.agc_enabled),
+                "note": "cu8=rtl_sdr unsigned8 interleaved; cf32=float32 interleaved; "
+                        "cs16=int16 interleaved; wav I=ch1 Q=ch2",
+            }
+            with open(path + ".json", "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"写 sidecar JSON 错误: {e}")
 
     def stop_recording(self) -> str:
-        """停止录制，返回文件路径。"""
-        if not self.status.recording:
-            return ""
-
+        """停止录制，返回文件路径。定时自动停止后再调用也应幂等返回该路径。"""
         path = self.status.recording_path
-        self._recording_stop_event.set()
-
-        # 等待录制线程结束（最多 5 秒）
-        if self._recording_thread and self._recording_thread.is_alive():
-            self._recording_thread.join(timeout=5.0)
+        if self.status.recording:
+            self._recording_stop_event.set()
+            # 等待录制线程结束（最多 5 秒）
+            if self._recording_thread and self._recording_thread.is_alive():
+                self._recording_thread.join(timeout=5.0)
 
         self.status.recording = False
         self.status.recording_path = ""
-        return path
+        return path or ""
 
 
 class MockSDRBackend(SDRBackend):
