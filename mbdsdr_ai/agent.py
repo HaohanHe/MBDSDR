@@ -209,6 +209,7 @@ class MBDSDRAgent:
         self._register_amr_tools()
         self._register_web_tools()
         self._register_skill_tools()
+        self._register_ft8_ldpc_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -399,6 +400,40 @@ class MBDSDRAgent:
             },
             handler=_load,
             category="skill",
+        )
+
+    def _register_ft8_ldpc_tools(self):
+        """FT8 (174,91) LDPC BP 译码——H 矩阵从 wsjtx 权威源码提取。"""
+        from mbdsdr_ai import ft8_ldpc
+
+        def _decode(args):
+            llr = args.get("llr")
+            if not isinstance(llr, list) or len(llr) != 174:
+                return ToolResult(False, "llr 必须是 174 个浮点（信道对数似然比）")
+            bits, iters = ft8_ldpc.ldpc_bp_decode([float(x) for x in llr],
+                                                  max_iter=int(args.get("max_iter", 25)))
+            return ToolResult(True, json.dumps({
+                "decoded_bits": bits,
+                "n_info_bits": 91,
+                "iters": iters,
+                "info_bits": bits[:91],
+            }, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="ft8_ldpc_decode",
+            description="FT8 信号的 (174,91) LDPC 置信传播译码。输入 174 个信道 LLR，"
+                        "输出 91 个信息位（77 数据 + CRC14）。配合 8FSK 软判决用。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "llr": {"type": "array", "items": {"type": "number"},
+                            "description": "174 个信道 LLR"},
+                    "max_iter": {"type": "integer", "default": 25},
+                },
+                "required": ["llr"],
+            },
+            handler=_decode,
+            category="decode",
         )
 
     def _register_memory_tools(self):
