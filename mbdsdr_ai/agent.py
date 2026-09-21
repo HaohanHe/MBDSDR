@@ -405,6 +405,7 @@ class MBDSDRAgent:
     def _register_ft8_ldpc_tools(self):
         """FT8 (174,91) LDPC BP 译码——H 矩阵从 wsjtx 权威源码提取。"""
         from mbdsdr_ai import ft8_ldpc
+        from mbdsdr_ai import ft8_decode
 
         def _decode(args):
             llr = args.get("llr")
@@ -433,6 +434,40 @@ class MBDSDRAgent:
                 "required": ["llr"],
             },
             handler=_decode,
+            category="decode",
+        )
+
+        def _soft_decode(args):
+            energies = args.get("tone_energies")
+            if not isinstance(energies, list) or len(energies) != 58:
+                return ToolResult(False, "tone_energies 必须是 58 个数据符号、每个 8 路能量")
+            if not all(isinstance(e, list) and len(e) == 8 for e in energies):
+                return ToolResult(False, "每个数据符号需要 8 路 tone 能量")
+            r = ft8_decode.decode_ft8_payload(energies,
+                                              max_iter=int(args.get("max_iter", 30)))
+            return ToolResult(True, json.dumps({
+                "data_bits": r["data_bits"],
+                "crc_bits": r["crc_bits"],
+                "iters": r["iters"],
+            }, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="ft8_soft_decode",
+            description="FT8 完整软解码：输入 58 个数据符号（已去掉 3 段 Costas 同步）"
+                        "的 8 路 tone 能量，内部做 gray 反映射、colorder 重排、LDPC BP，"
+                        "输出 77 数据位 + 14 CRC 位。比硬判决更抗噪。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "tone_energies": {"type": "array",
+                                      "description": "58×8 能量矩阵（数据符号位置 7-35、43-71）",
+                                      "items": {"type": "array",
+                                                "items": {"type": "number"}}},
+                    "max_iter": {"type": "integer", "default": 30},
+                },
+                "required": ["tone_energies"],
+            },
+            handler=_soft_decode,
             category="decode",
         )
 

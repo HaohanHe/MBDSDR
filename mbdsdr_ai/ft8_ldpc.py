@@ -19,6 +19,21 @@ _M = 83   # 校验方程数
 
 
 @lru_cache(maxsize=1)
+def get_colorder() -> list[int]:
+    """LDPC 码字顺序→传输顺序的置换（encode174.f90: codeword(colorder+1)=itmp）。
+
+    解码反映射：itmp[j] = codeword[colorder[j]]。返回 174 个 0-based 索引。
+    """
+    import os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "repos",
+                        "wsjtx", "lib", "ft8", "ldpc_174_91_c_colorder.f90")
+    path = os.path.normpath(path)
+    txt = open(path, "r", encoding="utf-8").read()
+    nums = [int(x) for x in re.findall(r"\d+", txt.split("colorder")[1])]
+    return nums[:_N]
+
+
+@lru_cache(maxsize=1)
 def _parse_graph():
     """从 wsjtx parity.f90 解析 Tanner 图。
 
