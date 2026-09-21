@@ -407,6 +407,30 @@ class MBDSDRAgent:
         from mbdsdr_ai import ft8_ldpc
         from mbdsdr_ai import ft8_decode
         from mbdsdr_ai.ft8_callsign import unpack28
+        from mbdsdr_ai.ft8_unpack import unpack77
+
+        def _unpack_message(args):
+            bits = args.get("bits")
+            if not isinstance(bits, list) or len(bits) != 77:
+                return ToolResult(False, "bits 必须是 77 个数据位（LDPC 信息位前 77 位）")
+            r = unpack77([int(x) for x in bits])
+            return ToolResult(True, json.dumps(r, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="ft8_unpack_message",
+            description="把 FT8 解码出的 77 个数据位还原成可读消息文本（移植 wsjtx unpack77 主分支）。"
+                        "支持自由文本和标准消息（CQ/call 网格、call call 信号报告/RRR/RR73/73）。"
+                        "接在 ft8_soft_decode 的 data_bits 之后用。",
+            parameters={
+                "type": "object",
+                "properties": {"bits": {"type": "array",
+                                        "items": {"type": "integer"},
+                                        "description": "77 个数据位（0/1）"}},
+                "required": ["bits"],
+            },
+            handler=_unpack_message,
+            category="decode",
+        )
 
         def _unpack_call(args):
             try:
