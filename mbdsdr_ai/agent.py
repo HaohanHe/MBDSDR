@@ -406,6 +406,29 @@ class MBDSDRAgent:
         """FT8 (174,91) LDPC BP 译码——H 矩阵从 wsjtx 权威源码提取。"""
         from mbdsdr_ai import ft8_ldpc
         from mbdsdr_ai import ft8_decode
+        from mbdsdr_ai.ft8_callsign import unpack28
+
+        def _unpack_call(args):
+            try:
+                n28 = int(args.get("n28"))
+            except (TypeError, ValueError):
+                return ToolResult(False, "n28 必须是整数")
+            call, ok = unpack28(n28)
+            return ToolResult(True, json.dumps({"callsign": call, "known": ok},
+                                               ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="ft8_unpack_callsign",
+            description="把 FT8/FT4 的 28 位呼号字段解成呼号文本（移植 wsjtx unpack28）。"
+                        "支持 CQ/DE/QRZ/CQ_nnn 特殊 token 与标准呼号；22bit hash 段返回 <hash:n>。",
+            parameters={
+                "type": "object",
+                "properties": {"n28": {"type": "integer", "description": "28 位呼号字段整数值"}},
+                "required": ["n28"],
+            },
+            handler=_unpack_call,
+            category="decode",
+        )
 
         def _decode(args):
             llr = args.get("llr")
