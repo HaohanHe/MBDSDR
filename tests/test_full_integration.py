@@ -1236,6 +1236,28 @@ def test_rds_ct_mjd(result: TestResult):
                   str(dt.date()))
 
 
+def test_ax25_roundtrip(result: TestResult):
+    """AX.25 UI 帧编解码往返：构造帧 -> 字节流 -> 解回 -> 字段一致、FCS 有效。"""
+    try:
+        from mbdsdr_ai.ax25 import AX25Frame
+    except Exception as e:  # noqa: BLE001
+        result.record("AX.25 模块可导入", False, str(e))
+        return
+    f = AX25Frame(destination="CQ", dest_ssid=0, source="BI4MIB", source_ssid=9,
+                  info=b">TEST from BI4MIB")
+    blob = f.to_bytes()
+    back = AX25Frame.from_bytes(blob)
+    result.record("AX.25 帧可解析", back is not None)
+    if back is None:
+        return
+    result.record("AX.25 FCS 有效", back.fcs_valid is True, f"fcs_valid={back.fcs_valid}")
+    result.record("AX.25 目的/源呼号往返",
+                  back.destination == "CQ" and back.source == "BI4MIB",
+                  f"{back.destination}/{back.source}")
+    result.record("AX.25 信息字段往返", back.info == b">TEST from BI4MIB",
+                  back.info[:30].decode("ascii", "replace"))
+
+
 def main():
     """主测试函数。"""
     print("=" * 60)
@@ -1287,6 +1309,7 @@ def main():
     test_tool_callability(result, agent)
     test_sstv_robot72_roundtrip(result)
     test_rds_ct_mjd(result)
+    test_ax25_roundtrip(result)
 
     # 输出总结
     print(result.summary())
