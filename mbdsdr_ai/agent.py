@@ -497,10 +497,14 @@ class MBDSDRAgent:
                 },
                 "required": ["proposal_id"],
             },
-            handler=lambda args: ToolResult(
-                success=True,
-                content=f"版本已提交: {evo.commit(args['proposal_id']).id}",
-            ),
+            handler=lambda args: (
+                lambda v: ToolResult(
+                    success=True, content=f"版本已提交: {v.id}"
+                ) if v else ToolResult(
+                    success=False,
+                    content="提案不存在：请先调用 evolution_propose 创建提案，再用其返回的 proposal_id 提交。",
+                )
+            )(evo.commit(args.get("proposal_id", ""))),
             category="evolution",
         )
 
@@ -1406,7 +1410,23 @@ class MBDSDRAgent:
                 },
                 "required": ["diameter_m", "frequency_hz"],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(AntennaParams(name=args.get("name","Antenna"), diameter_m=args["diameter_m"], frequency_hz=args["frequency_hz"], efficiency=args.get("efficiency",0.6)).to_dict(), ensure_ascii=False, indent=2)),
+            handler=lambda args: (
+                lambda: ToolResult(
+                    success=True,
+                    content=json.dumps(
+                        AntennaParams(
+                            name=args.get("name", "Antenna"),
+                            diameter_m=args["diameter_m"],
+                            frequency_hz=args["frequency_hz"],
+                            efficiency=args.get("efficiency", 0.6),
+                        ).to_dict(),
+                        ensure_ascii=False, indent=2,
+                    ),
+                )
+            )() if args.get("diameter_m", 0) and args.get("frequency_hz", 0) else ToolResult(
+                success=False,
+                content="diameter_m 和 frequency_hz 必须为正数：请提供真实天线口径（米）和工作频率（Hz）。",
+            ),
             category="astronomy",
         )
 
