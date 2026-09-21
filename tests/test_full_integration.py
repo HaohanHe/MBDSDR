@@ -1180,8 +1180,9 @@ def test_tool_callability(result: TestResult, agent: MBDSDRAgent):
             defn = tr.tools[name]["definition"].get("function", {}).get("parameters", {})
             props = defn.get("properties", {})
             args = {r: 1.0 if props[r].get("type") == "number" else (
-                True if props[r].get("type") == "boolean" else (
-                    [] if props[r].get("type") == "array" else "README.md"))
+                1 if props[r].get("type") == "integer" else (
+                    True if props[r].get("type") == "boolean" else (
+                        [] if props[r].get("type") == "array" else "README.md")))
                 for r in (defn.get("required") or []) if r in props}
             res = tr.call(name, args)
             low = (getattr(res, "content", "") or "").lower()
