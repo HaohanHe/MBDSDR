@@ -99,6 +99,18 @@ SSTV_MODES = {
         "channel_order": ["Y", "R-Y", "B-Y"],
         "pixel_ms": 0.2604,  # 83.33ms / 320
     },
+    "Robot 72": {
+        "vis_code": 0x0C,  # Robot72 彩色 VIS（320x240，每帧约 72s）
+        "width": 320,
+        "height": 240,
+        "sync_freq": 1200,
+        "sync_ms": 9.0,
+        "sep_freq": 1500,
+        "sep_ms": 1.0,
+        "channel_order": ["Y", "R-Y", "B-Y"],
+        "pixel_ms": 0.2604,  # 83.33ms / 320，行周期 ≈ 9+1+3*83.33 ≈ 260ms
+        "family": "robot72",
+    },
     # ---- PD 系列（G3PLX，两行组：Y0 / Cb(两行平均) / Cr(两行平均) / Y1）----
     # 通用：SYNC=20ms、PORCH=2.08ms、无通道间隔；色度为相邻两行平均。
     # 参数来自 pysstv 权威实现。像素时钟解码时按实测组周期反推，不硬编码。
@@ -595,6 +607,62 @@ def _decode_robot36(freq: np.ndarray, sr: int, data_start: int,
     }
 
 
+def _decode_robot72(freq: np.ndarray, sr: int, data_start: int) -> Dict[str, Any]:
+    """数据驱动解码 Robot72（320x240）。
+
+    与 Robot36 的区别：Robot72 每行同时发 Y、R-Y、B-Y 三个完整段
+    （各约 83.33ms），而非隔行共享色度；行周期约 260ms。
+    段长不硬编码，由实测同步周期反推（发射/录音时基偏差可达数 %）。
+    """
+    width, height = 320, 240
+    markers, pulse_ms, period_ms = _find_sync_markers(
+        freq, sr, data_start, sync_ms_nom=9.0)
+    if len(markers) < 2 or period_ms <= 0:
+        return {"success": False, "error": "Robot72: 同步标记不足"}
+
+    fr = np.where(np.isfinite(freq), freq, 1500.0)
+    sync_ms, porch_ms = 9.0, 1.0
+    seg_ms = max(10.0, (period_ms - sync_ms - porch_ms) / 3.0)
+    ypix = sr * seg_ms / width / 1000.0
+    o_y = int((sync_ms + porch_ms) * sr / 1000.0)
+    o_cr = int((sync_ms + porch_ms + seg_ms) * sr / 1000.0)
+    o_cb = int((sync_ms + porch_ms + 2.0 * seg_ms) * sr / 1000.0)
+    seg_samp = int(seg_ms * sr / 1000.0)
+
+    image = np.zeros((height, width, 3), dtype=np.uint8)
+    row_y: Dict[int, np.ndarray] = {}
+    row_cb: Dict[int, np.ndarray] = {}
+    row_cr: Dict[int, np.ndarray] = {}
+    n = 0
+    for li, s in enumerate(markers):
+        if li >= height or s + o_cb + seg_samp >= len(fr):
+            break
+        Y = _freq_to_pixel_series(fr, s + o_y, ypix, width, 0.4)
+        Cr = _freq_to_pixel_series(fr, s + o_cr, ypix, width, 0.4)
+        Cb = _freq_to_pixel_series(fr, s + o_cb, ypix, width, 0.4)
+        row_y[li], row_cb[li], row_cr[li] = Y, Cb, Cr
+        n = li + 1
+    if not row_y:
+        return {"success": False, "error": "Robot72: 未解码出任何行"}
+
+    # 全帧色差直流恢复（中值对齐中性 128）
+    cb_all = np.concatenate([row_cb[r] for r in sorted(row_cb)])
+    cr_all = np.concatenate([row_cr[r] for r in sorted(row_cr)])
+    cb_dc = float(np.median(cb_all)) - 128.0
+    cr_dc = float(np.median(cr_all)) - 128.0
+    for r in sorted(row_y):
+        R, G, B = _ycbcr_to_rgb(row_y[r], row_cb[r] - cb_dc, row_cr[r] - cr_dc)
+        image[r, :, 0] = R
+        image[r, :, 1] = G
+        image[r, :, 2] = B
+    return {
+        "success": True, "mode": "Robot 72", "width": width, "height": height,
+        "period_ms": round(period_ms, 2), "pulse_ms": round(pulse_ms, 2),
+        "cb_dc": round(cb_dc, 1), "cr_dc": round(cr_dc, 1),
+        "rows_decoded": n, "image": image,
+    }
+
+
 def _decode_pd(freq: np.ndarray, sr: int, data_start: int,
                mode: str = "PD120") -> Dict[str, Any]:
     """数据驱动解码 PD 系列（G3PLX）。
@@ -704,6 +772,27 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
     id_info: Dict[str, Any] = {}
     if mode == "auto":
         detected_mode, id_info = _identify_sstv_mode(freq, sr, data_start, vis_code)
+
+    # Robot72 走每行 Y/Cr/Cb 三段解码器
+    if detected_mode in ("Robot 72", "Robot72"):
+        res = _decode_robot72(freq, sr, data_start)
+        if not res.get("success"):
+            return {"error": res.get("error", "Robot72 解码失败")}
+        image = res.pop("image")
+        if output_path is None:
+            output_path = os.path.splitext(file_path)[0] + "_sstv.png"
+        if HAS_PIL:
+            Image.fromarray(image).save(output_path)
+        else:
+            np.save(output_path + ".npy", image)
+            output_path = output_path + ".npy"
+        return {
+            "success": True, "mode": "Robot 72", "width": res["width"],
+            "height": res["height"], "period_ms": res["period_ms"],
+            "pulse_ms": res["pulse_ms"], "rows_decoded": res["rows_decoded"],
+            "output_path": output_path,
+            "identification": {"method": "timing", "vis_raw": vis_code},
+        }
 
     # Robot36 走数据驱动的两行组解码器（兼容逐行/组首两种发送变体）
     if detected_mode in ("Robot 36", "Robot36"):
