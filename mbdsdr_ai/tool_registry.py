@@ -369,11 +369,17 @@ class ToolRegistry:
 
         result.latency_ms = round((time.time() - start_time) * 1000, 1)
 
-        # 输出截断
+        # 输出裁剪（借鉴 DeepSeek harness tool-result-pruner：head/tail 保留，
+        # 只砍中间）。频谱/扫频数据头部常有表头、尾部常有结论，纯从头切会丢结论。
         if len(result.content) > self.tool_output_max_chars:
             original_len = len(result.content)
-            result.content = result.content[:self.tool_output_max_chars] + \
-                f"\n... [输出已截断，原长度 {original_len} 字符]"
+            head = int(self.tool_output_max_chars * 0.6)
+            tail = self.tool_output_max_chars - head
+            result.content = (
+                result.content[:head]
+                + f"\n...[中间 {original_len - head - tail} 字符已裁剪]...\n"
+                + result.content[-tail:]
+            )
             result.truncated = True
 
         self._log_call(result)
