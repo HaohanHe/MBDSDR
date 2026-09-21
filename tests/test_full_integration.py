@@ -1140,6 +1140,59 @@ def test_memory_module(result: TestResult, agent: MBDSDRAgent):
         result.record("MemoryStore", False, str(e))
 
 
+def test_ft8_roundtrip(result: TestResult):
+    """FT8 8FSK 符号往返：合成已知符号→解调→相对序列正确。"""
+    import math as _m
+    import numpy as _np
+    from mbdsdr_ai.ft8_lite import detect_ft8_tone_center, demodulate_8fsk, TONE_SPACING_HZ
+    sr = 12000
+    sps = int(sr * 256 / 1000)
+    n_sym = 79
+    base = 1500.0
+    rng = _np.random.default_rng(42)
+    symbols = rng.integers(0, 8, size=n_sym)
+    tt = _np.arange(sps) / sr
+    audio = _np.concatenate([
+        _np.sin(2 * _m.pi * (base + (float(s) - 3.5) * TONE_SPACING_HZ) * tt)
+        for s in symbols
+    ]).tolist()
+    peak = detect_ft8_tone_center(audio, sr)
+    if not peak.get("detected"):
+        result.record("FT8 音峰检出", False, str(peak))
+        return
+    dem = demodulate_8fsk(audio, sr, peak["center_hz"], symbols=n_sym)
+    got = dem["tone_indices"]
+    exp = symbols.tolist()
+    best = max(sum(1 for a, b in zip(got, exp) if a == (b + d) % 8) for d in range(8))
+    result.record("FT8 8FSK 符号往返(>=0.85)", best / n_sym >= 0.85,
+                  f"best={best}/{n_sym}")
+
+
+def test_tool_callability(result: TestResult, agent: MBDSDRAgent):
+    """全部工具 dry-call：无硬件时不得 traceback 崩溃，只友好返回。"""
+    bad = ("traceback (most recent", "isadirectoryerror", "permissionerror",
+           "keyerror", "indexerror", "typeerror", "attributeerror",
+           "math domain")
+    crashes = []
+    tr = agent.tool_registry
+    for name in tr.get_tool_names():
+        try:
+            defn = tr.tools[name]["definition"].get("function", {}).get("parameters", {})
+            props = defn.get("properties", {})
+            args = {r: 1.0 if props[r].get("type") == "number" else (
+                True if props[r].get("type") == "boolean" else (
+                    [] if props[r].get("type") == "array" else "README.md"))
+                for r in (defn.get("required") or []) if r in props}
+            res = tr.call(name, args)
+            low = (getattr(res, "content", "") or "").lower()
+            if any(b in low for b in bad):
+                crashes.append((name, low[:120]))
+        except Exception as e:  # noqa: BLE001
+            crashes.append((name, repr(e)[:120]))
+    result.record("全部工具无硬件不崩溃", len(crashes) == 0,
+                  "" if not crashes else "; ".join(f"{n}:{m}" for n, m in crashes[:5]))
+
+
 def main():
     """主测试函数。"""
     print("=" * 60)
@@ -1187,6 +1240,8 @@ def main():
     test_plugin_system(result, agent)
     test_context_and_model(result, agent)
     test_memory_module(result, agent)
+    test_ft8_roundtrip(result)
+    test_tool_callability(result, agent)
 
     # 输出总结
     print(result.summary())
