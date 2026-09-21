@@ -1278,6 +1278,26 @@ def test_aprs_position_roundtrip(result: TestResult):
                   abs(back.longitude - 125.32) < 0.01, f"{back.longitude}")
 
 
+def test_hdlc_bitstuff_roundtrip(result: TestResult):
+    """HDLC 位填充/去填充往返：含连续5个1的边界字节往返应还原。"""
+    try:
+        from mbdsdr_ai.ax25 import hdlc_bit_stuff, hdlc_bit_unstuff
+    except Exception as e:  # noqa: BLE001
+        result.record("HDLC 位填充函数可导入", False, str(e))
+        return
+    cases = [b"\x7e", b"\xff\xff", bytes(range(256)),
+             b"\x01\x03\xf0>BI4MIB", b"\xff\x00\xff\x01\x02"]
+    ok = True
+    for c in cases:
+        stuffed = hdlc_bit_stuff(c)
+        unstuffed = hdlc_bit_unstuff(stuffed)
+        if unstuffed != c:
+            ok = False
+            result.record(f"HDLC 往返 {c[:4]!r}", False, f"got {unstuffed[:8]!r}")
+            break
+    result.record("HDLC 位填充往返（边界字节）", ok)
+
+
 def main():
     """主测试函数。"""
     print("=" * 60)
@@ -1331,6 +1351,7 @@ def main():
     test_rds_ct_mjd(result)
     test_ax25_roundtrip(result)
     test_aprs_position_roundtrip(result)
+    test_hdlc_bitstuff_roundtrip(result)
 
     # 输出总结
     print(result.summary())
