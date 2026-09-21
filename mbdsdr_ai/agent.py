@@ -448,6 +448,7 @@ class MBDSDRAgent:
             return ToolResult(True, json.dumps({
                 "data_bits": r["data_bits"],
                 "crc_bits": r["crc_bits"],
+                "crc_ok": r["crc_ok"],
                 "iters": r["iters"],
             }, ensure_ascii=False))
 
