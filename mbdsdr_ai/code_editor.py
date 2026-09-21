@@ -128,6 +128,10 @@ class CodeEditor:
         """
         full_path = self._resolve_path(file_path)
 
+        if not file_path.strip():
+            raise FileNotFoundError("file_path 不能为空：请指定要读取的文件（相对项目根目录或绝对路径）。")
+        if os.path.isdir(full_path):
+            raise FileNotFoundError(f"目标是目录而非文件: {full_path}（请指定具体文件路径）。")
         if not os.path.exists(full_path):
             raise FileNotFoundError(f"文件不存在: {full_path}")
 
@@ -159,6 +163,11 @@ class CodeEditor:
         """
         full_path = self._resolve_path(file_path)
         use_backup = auto_backup if auto_backup is not None else self.auto_backup
+
+        if not file_path.strip():
+            raise FileNotFoundError("file_path 不能为空：请指定要修改的文件。")
+        if os.path.isdir(full_path):
+            raise FileNotFoundError(f"目标是目录而非文件: {full_path}（请指定具体文件路径）。")
 
         # 读取原始内容
         original_content = ""
