@@ -191,6 +191,28 @@ def _parse_group(bits: np.ndarray, a_pos: int) -> Optional[dict]:
         out["ps_seg"] = seg
         out["ps_chars"] = "".join(chr(c) if 32 <= c < 127 else " "
                                   for c in (c1, c2))
+    elif group_type == 2:  # 2A/2B RadioText 滚动文本
+        addr = b & 0xF              # 段地址 0..15
+        ab = (b >> 4) & 1           # A/B 文本版标志（1=新文本版）
+        c0 = info["C"] >> 8
+        c1 = info["C"] & 0xFF
+        c2 = info["D"] >> 8
+        c3 = info["D"] & 0xFF
+        out["rt_addr"] = addr
+        out["rt_ab"] = ab
+        out["rt_chars"] = bytes(c if 32 <= c < 127 else 32
+                                for c in (c0, c1, c2, c3)).decode("ascii")
+    elif group_type == 4 and version_b == 0:  # 4A 时钟时间 CT
+        c = info["C"]; d = info["D"]
+        # block C: b15=1, bits14..1 = MJD bits15..2；MJD 低 2 位放 block D bit5..4
+        mjd = (((c & 0x7FFF) >> 1) << 2) | ((d >> 4) & 0x3)
+        hour = (d >> 11) & 0x1F
+        minute = (d >> 6) & 0x3F
+        off_neg = (d >> 0) & 1       # 1=本地时间偏负
+        out["ct_mjd"] = int(mjd)
+        out["ct_hour"] = int(hour)
+        out["ct_minute"] = int(minute)
+        out["ct_offset_neg"] = int(off_neg)
     return out
 
 
@@ -254,17 +276,47 @@ def decode_rds(mpx: np.ndarray, sample_rate: float, min_groups: int = 2) -> dict
     pi = groups[0]["pi"]
     pty = groups[1]["pty"] if len(groups) > 1 else groups[0]["pty"]
     ps_buf: Dict[int, str] = {}
+    rt_buf: Dict[int, Dict[int, str]] = {0: {}, 1: {}}  # ab -> addr -> 4字符
+    ct: Dict[str, int] = {}
     for g in groups:
         if g["group_type"] == 0 and "ps_chars" in g:
             ps_buf[g["ps_seg"]] = g["ps_chars"]
+        elif g["group_type"] == 2 and "rt_chars" in g:
+            rt_buf[g.get("rt_ab", 0)][g["rt_addr"]] = g["rt_chars"]
+        elif g["group_type"] == 4 and "ct_mjd" in g:
+            ct = {"mjd": g["ct_mjd"], "hour": g["ct_hour"],
+                  "minute": g["ct_minute"], "offset_neg": g["ct_offset_neg"]}
     ps = None
     if ps_buf:
         ps = "".join(ps_buf.get(i, "??") for i in range(max(ps_buf) + 1)).strip()
-    return {
+    rt = None
+    for ab in (1, 0):  # 优先最新一版文本
+        if rt_buf[ab]:
+            seg = rt_buf[ab]
+            rt = "".join(seg.get(i, "    ") for i in range(max(seg) + 1)).strip()
+            if rt:
+                rt_ab = ab
+                break
+    else:
+        rt_ab = None
+    # MJD -> YYYY-MM-DD
+    ct_date = None
+    if ct:
+        try:
+            from datetime import datetime, timedelta
+            ct_date = (datetime(1858, 11, 17)
+                       + timedelta(days=int(ct["mjd"]))).strftime("%Y-%m-%d")
+        except Exception:
+            ct_date = None
+    out = {
         "rds_present": True,
         "pi_hex": f"{pi:04X}",
         "pty": int(pty),
         "ps": ps,
+        "rt": rt,
+        "ct": (f"{ct_date} {ct['hour']:02d}:{ct['minute']:02d}"
+               if ct and ct_date else None),
         "blocks_synced": best[0],
         "groups_decoded": len(groups),
     }
+    return out
