@@ -1194,6 +1194,32 @@ def test_tool_callability(result: TestResult, agent: MBDSDRAgent):
                   "" if not crashes else "; ".join(f"{n}:{m}" for n, m in crashes[:5]))
 
 
+def test_sstv_robot72_roundtrip(result: TestResult):
+    """Robot72 结构往返：构造标准时序轨迹 -> 解码 -> 行数/尺寸正确。"""
+    import numpy as _np
+    try:
+        from mbdsdr_ai.sstv_decoder import _decode_robot72
+    except Exception as e:  # noqa: BLE001
+        result.record("Robot72 解码器可用", False, str(e))
+        return
+    sr = 48000
+    sync = int(9e-3 * sr); porch = int(1e-3 * sr); px = int(0.2604e-3 * sr)
+    freq = list(_np.full(int(0.3 * sr), 1500.0))
+    for li in range(240):
+        freq += [1200.0] * sync + [1500.0] * porch
+        for _ch in range(3):
+            for _p in range(320):
+                freq += [1500.0 + (li - 120) * 3.0] * px
+    freq = _np.array(freq)
+    res = _decode_robot72(freq, sr, 0)
+    result.record("Robot72 往返 success", res.get("success") is True, str(res.get("error")))
+    result.record("Robot72 行数>=230", res.get("rows_decoded", 0) >= 230,
+                   str(res.get("rows_decoded")))
+    result.record("Robot72 尺寸 320x240",
+                  (res.get("width"), res.get("height")) == (320, 240),
+                  f"{res.get('width')}x{res.get('height')}")
+
+
 def main():
     """主测试函数。"""
     print("=" * 60)
@@ -1243,6 +1269,7 @@ def main():
     test_memory_module(result, agent)
     test_ft8_roundtrip(result)
     test_tool_callability(result, agent)
+    test_sstv_robot72_roundtrip(result)
 
     # 输出总结
     print(result.summary())
