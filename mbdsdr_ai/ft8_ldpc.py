@@ -1,0 +1,106 @@
+"""FT8 (174,91) LDPC 译码——从 wsjtx 权威源码提取 H 矩阵。
+
+以前因"拿不到 LDPC H 矩阵"卡壳；现在直接解析
+repos/wsjtx/lib/ft8/ldpc_174_91_c_parity.f90 的 Mn 数组，
+建稀疏校验矩阵，做 min-sum BP 译码。
+
+参数（ft8_params.f90）：KK=91 信息位（77+CRC14），NN=174 码字位，
+83 个校验方程，每个校验 3 个变量节点。
+"""
+from __future__ import annotations
+
+import math
+import re
+from functools import lru_cache
+
+_N = 174  # 码字长
+_K = 91   # 信息位
+_M = 83   # 校验方程数
+
+
+@lru_cache(maxsize=1)
+def _parse_graph():
+    """从 wsjtx parity.f90 解析 Tanner 图。
+
+    wsjtx: Mn(3,N)=每 bit 连的 3 个 check；Nm(7,M)=每 check 连的 bit；
+    nrw(M)=每 check 实际 bit 数（≤7）。全部 1-based。
+    返回 (check_vars, var_checks)，0-based。
+    """
+    import os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "repos",
+                        "wsjtx", "lib", "ft8", "ldpc_174_91_c_parity.f90")
+    path = os.path.normpath(path)
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    txt = open(path, "r", encoding="utf-8").read()
+    mn_nums = [int(x) for x in re.findall(r"\d+", txt.split("data Mn/")[1].split("data Nm/")[0])]
+    nm_nums = [int(x) for x in re.findall(r"\d+", txt.split("data Nm/")[1].split("data nrw/")[0])]
+    nrw_nums = [int(x) for x in re.findall(r"\d+", txt.split("data nrw/")[1])]
+
+    # Mn(3,N): 每列 3 个 check → var_checks
+    var_checks: list[list[int]] = [[] for _ in range(_N)]
+    for v in range(_N):
+        var_checks[v] = [mn_nums[3 * v + k] - 1 for k in range(3)]
+    # Nm(7,M): 每列最多 7 个 bit，nrw 给实际个数
+    check_vars: list[list[int]] = []
+    for c in range(_M):
+        n = nrw_nums[c]
+        check_vars.append([nm_nums[7 * c + i] - 1 for i in range(n)])
+    return check_vars, var_checks
+
+
+def ldpc_bp_decode(llr: list[float], max_iter: int = 25) -> tuple[list[int], int]:
+    """min-sum BP 译码。
+
+    输入：174 个信道 LLR（正=偏向 0，负=偏向 1；或反之，按约定）。
+    输出：(硬判决码字 0/1, 实际迭代次数)。
+    """
+    check_vars, var_checks = _parse_graph()
+
+    # 初始化：变量→校验消息 = 信道 LLR
+    q: dict[tuple[int, int], float] = {}  # (check, var) -> msg
+    for c, vs in enumerate(check_vars):
+        for v in vs:
+            q[(c, v)] = llr[v]
+
+    decoded = [0] * _N
+    for it in range(max_iter):
+        # 校验→变量：tanh/min-sum
+        r: dict[tuple[int, int], float] = {}
+        for c, vs in enumerate(check_vars):
+            for v in vs:
+                others = [q[(c, u)] for u in vs if u != v]
+                prod_sign = 1.0
+                min_abs = float("inf")
+                for x in others:
+                    prod_sign *= 1 if x >= 0 else -1
+                    min_abs = min(min_abs, abs(x))
+                r[(c, v)] = prod_sign * min_abs * 0.75  # 归一化因子 0.75
+        # 变量→校验 + 硬判决
+        for v in range(_N):
+            total = llr[v] + sum(r[(c, v)] for c in var_checks[v])
+            decoded[v] = 0 if total >= 0 else 1
+            for c in var_checks[v]:
+                q[(c, v)] = total - r[(c, v)]
+        # 早停：所有校验满足
+        if all(sum(decoded[v] for v in check_vars[c]) % 2 == 0 for c in range(len(check_vars))):
+            return decoded, it + 1
+    return decoded, max_iter
+
+
+if __name__ == "__main__":
+    cv, vc = _parse_graph()
+    print(f"校验行 M={len(cv)}, 每校验变量数={sorted(set(len(x) for x in cv))}")
+    print(f"变量 N={len(vc)}, 每变量校验数={sorted(set(len(x) for x in vc))}")
+    # 自测1：全零码字
+    d, iters = ldpc_bp_decode([10.0] * _N)
+    print(f"全零解码: 全零={sum(d)==0}, 迭代={iters}")
+    # 自测2：全零码字但中间翻几位（模拟噪声），LLR 反转
+    import random
+    random.seed(1)
+    llr = [10.0] * _N
+    flipped = random.sample(range(_N), 6)
+    for v in flipped:
+        llr[v] = -8.0
+    d2, it2 = ldpc_bp_decode(llr)
+    print(f"噪声测试(翻{len(flipped)}位): 全零={sum(d2)==0}, 迭代={it2}")
