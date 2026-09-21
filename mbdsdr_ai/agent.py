@@ -1644,8 +1644,20 @@ class MBDSDRAgent:
                 tool_name = fn.get("name", "")
                 all_tool_calls.append({"name": tool_name, "arguments": fn.get("arguments", "")})
 
-                # 执行工具
+                # 执行工具（可重试：临时不可用/超时/忙；参数错误不重试，直接喂模型改）
+                RETRY_BAD = ("未知", "不是一个", "必须", "可选", "为空", "不能为空",
+                             "不存在", "找不到", "不支持")
+                RETRY_OK = ("未连接", "无设备", "没有设备", "暂时", "重试",
+                            "timeout", "timed out", "busy", "忙", "不可用", "未就绪")
                 result = self.tool_registry.call_from_model(tc)
+                for _attempt in range(2):  # 最多再重试 2 次
+                    if getattr(result, "success", False):
+                        break
+                    low = (getattr(result, "content", "") or "").lower()
+                    if any(h in low for h in RETRY_BAD) or not any(h in low for h in RETRY_OK):
+                        break  # 参数错误或非临时错误：交给模型改，不空转
+                    time.sleep(0.4)
+                    result = self.tool_registry.call_from_model(tc)
                 all_tool_results.append(result.to_dict())
 
                 # repeat-call guard：检测连续相同工具+参数，递增提醒
