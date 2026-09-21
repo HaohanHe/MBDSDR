@@ -116,3 +116,56 @@ def analyze_ft8_audio(samples: List[float], sample_rate: float) -> Dict:
         return {"detected": False, "reason": "未检测到 FT8 音峰", **peak}
     dem = demodulate_8fsk(samples, sample_rate, peak["center_hz"])
     return {"detected": True, **peak, **dem}
+
+
+def decode_ft8_audio(samples: List[float], sample_rate: float) -> Dict:
+    """端到端：FT8 音频 → 可读消息文本。
+
+    找音峰 → 试 8 个相位 → 58 个数据符号输出 8 路能量（软判决）
+    → LDPC BP → CRC14 → unpack77。一条命令出呼号网格。
+    """
+    from mbdsdr_ai import ft8_decode
+    from mbdsdr_ai.ft8_unpack import unpack77
+
+    peak = detect_ft8_tone_center(samples, sample_rate)
+    if not peak.get("detected"):
+        return {"decoded": False, "reason": "未检测到 FT8 音峰", **peak}
+
+    sps = int(sample_rate * SYMBOL_MS / 1000)
+    segs = [samples[s * sps:(s + 1) * sps] for s in range(79)]
+
+    data_pos = ft8_decode.data_symbol_positions()  # 58 个数据符号位置
+    best = None
+    for phase in range(8):
+        center = peak["center_hz"] - (phase - 3.5) * TONE_SPACING_HZ
+        tones = [center + (i - 3.5) * TONE_SPACING_HZ for i in range(8)]
+        energies_58 = []
+        ok = True
+        for p in data_pos:
+            if p >= len(segs) or len(segs[p]) < sps // 2:
+                ok = False
+                break
+            energies_58.append([_goertzel(segs[p], sample_rate, t) for t in tones])
+        if not ok:
+            continue
+        r = ft8_decode.decode_ft8_payload(energies_58)
+        # 打分：CRC 通过优先，其次 LDPC 早停（迭代少=收敛好）
+        score = (1000 if r["crc_ok"] else 0) - r["iters"]
+        if best is None or score > best[0]:
+            best = (score, energies_58, r)
+
+    if best is None:
+        return {"decoded": False, "reason": "符号段不足", **peak}
+
+    _, energies_58, r = best
+    msg = unpack77(r["data_bits"])
+    return {
+        "decoded": r["crc_ok"],
+        "crc_ok": r["crc_ok"],
+        "iters": r["iters"],
+        "message": msg.get("text"),
+        "type": msg.get("type"),
+        "call1": msg.get("call1"),
+        "call2": msg.get("call2"),
+        "center_hz": peak["center_hz"],
+    }

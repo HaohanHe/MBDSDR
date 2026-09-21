@@ -406,8 +406,35 @@ class MBDSDRAgent:
         """FT8 (174,91) LDPC BP 译码——H 矩阵从 wsjtx 权威源码提取。"""
         from mbdsdr_ai import ft8_ldpc
         from mbdsdr_ai import ft8_decode
+        from mbdsdr_ai import ft8_lite
         from mbdsdr_ai.ft8_callsign import unpack28
         from mbdsdr_ai.ft8_unpack import unpack77
+
+        def _decode_audio(args):
+            samples = args.get("samples")
+            rate = args.get("sample_rate")
+            if not isinstance(samples, list) or rate is None:
+                return ToolResult(False, "需要 samples(浮点列表) 和 sample_rate")
+            r = ft8_lite.decode_ft8_audio([float(x) for x in samples], float(rate))
+            return ToolResult(True, json.dumps(r, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="ft8_decode_audio",
+            description="端到端 FT8 音频解码：输入一段 FT8 音频采样（约 15 秒），"
+                        "自动找音峰、判相位、软判决、LDPC 译码、CRC14 校验、unpack77，"
+                        "直接输出可读消息文本（呼号/网格/报告）。一条命令出结果。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "samples": {"type": "array", "items": {"type": "number"},
+                                "description": "音频浮点采样（单声道）"},
+                    "sample_rate": {"type": "number", "description": "采样率 Hz"},
+                },
+                "required": ["samples", "sample_rate"],
+            },
+            handler=_decode_audio,
+            category="decode",
+        )
 
         def _unpack_message(args):
             bits = args.get("bits")
