@@ -207,6 +207,7 @@ class MBDSDRAgent:
 
         # 注册 AMR 自动调制识别工具
         self._register_amr_tools()
+        self._register_web_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -277,6 +278,86 @@ class MBDSDRAgent:
             return ExperienceType(mapped)
         except ValueError:
             return ExperienceType.TASK_COMPLETION  # 默认 task_completion
+
+    def _register_web_tools(self):
+        """联网取资料与克隆开源项目（借鉴 DeepSeek harness tool-web：fetch/search/trust policy）。
+
+        让 agent 不再只能用本地工具：可以直接 HTTP 拉取技术文档/数据手册/参考实现，
+        也可以 git clone 开源 SDR 项目（wsjtx/dump1090/redsea 等）到工作区学习，
+        把"缺 H 矩阵/缺解码器"这类死路变成自己去取。
+        """
+        import urllib.request
+        import urllib.parse
+        import subprocess
+
+        def _fetch(args):
+            url = (args.get("url") or "").strip()
+            if not url:
+                return ToolResult(False, "url 不能为空")
+            p = urllib.parse.urlparse(url)
+            if p.scheme not in ("http", "https"):
+                return ToolResult(False, f"只允许 http/https，收到 {p.scheme!r}")
+            max_bytes = min(int(args.get("max_bytes", 200000)), 500000)
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "MBDSDR/1.0"})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    raw = r.read(max_bytes + 1)
+                    truncated = len(raw) > max_bytes
+                    text = raw[:max_bytes].decode("utf-8", "replace")
+                return ToolResult(True, f"HTTP {r.status} 取自 {url}\n{text}"
+                                          + ("\n...[截断]" if truncated else ""))
+            except Exception as e:  # noqa: BLE001
+                return ToolResult(False, f"fetch 失败: {e}")
+
+        self.tool_registry.register(
+            name="web_fetch_url",
+            description="HTTP/HTTPS 拉取一个 URL 的文本内容。用于在线查技术文档、数据手册、"
+                        "参考实现、解码器源码片段。只取文本，超时 15s，最多 500KB。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "http/https URL"},
+                    "max_bytes": {"type": "integer", "description": "最大字节数", "default": 200000},
+                },
+                "required": ["url"],
+            },
+            handler=_fetch,
+            category="web",
+        )
+
+        def _clone(args):
+            url = (args.get("url") or "").strip()
+            if not url:
+                return ToolResult(False, "url 不能为空")
+            name = (args.get("dest") or "").strip() or url.rstrip("/").split("/")[-1].replace(".git", "")
+            dest = os.path.join(self.workspace_root if hasattr(self, "workspace_root") else ".", "repos", name)
+            if os.path.exists(dest):
+                return ToolResult(True, f"已存在: {dest}")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            try:
+                subprocess.run(["git", "clone", "--depth", "1", url, dest],
+                               check=True, timeout=120, capture_output=True, text=True)
+                return ToolResult(True, f"已克隆到 {dest}")
+            except subprocess.TimeoutExpired:
+                return ToolResult(False, "克隆超时(120s)")
+            except Exception as e:  # noqa: BLE001
+                return ToolResult(False, f"克隆失败: {e}")
+
+        self.tool_registry.register(
+            name="git_clone_repo",
+            description="git clone --depth 1 一个开源仓库到工作区 repos/ 目录。用于学习开源 SDR 项目"
+                        "（如 wsjtx、dump1090、redsea、sdr++）的源码、H 矩阵、解码器参数。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "git URL"},
+                    "dest": {"type": "string", "description": "目标目录名(可选)"},
+                },
+                "required": ["url"],
+            },
+            handler=_clone,
+            category="web",
+        )
 
     def _register_memory_tools(self):
         """注册记忆读写工具。"""
