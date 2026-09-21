@@ -1258,6 +1258,26 @@ def test_ax25_roundtrip(result: TestResult):
                   back.info[:30].decode("ascii", "replace"))
 
 
+def test_aprs_position_roundtrip(result: TestResult):
+    """APRS 位置报文编解码往返：编码 -> 解回 -> 经纬度一致。"""
+    try:
+        from mbdsdr_ai.ax25 import APRSPosition
+    except Exception as e:  # noqa: BLE001
+        result.record("APRS 模块可导入", False, str(e))
+        return
+    p = APRSPosition(latitude=43.88, longitude=125.32, comment="BI4MIB test")
+    s = p.encode()
+    back = APRSPosition.decode(s)
+    result.record("APRS 报文可解码", back is not None)
+    if back is None:
+        return
+    # DDMM.mm 分钟精度，比较容差 0.01°
+    result.record("APRS 纬度往返(容差0.01)",
+                  abs(back.latitude - 43.88) < 0.01, f"{back.latitude}")
+    result.record("APRS 经度往返(容差0.01)",
+                  abs(back.longitude - 125.32) < 0.01, f"{back.longitude}")
+
+
 def main():
     """主测试函数。"""
     print("=" * 60)
@@ -1310,6 +1330,7 @@ def main():
     test_sstv_robot72_roundtrip(result)
     test_rds_ct_mjd(result)
     test_ax25_roundtrip(result)
+    test_aprs_position_roundtrip(result)
 
     # 输出总结
     print(result.summary())
