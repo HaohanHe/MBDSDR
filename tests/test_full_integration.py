@@ -1300,6 +1300,26 @@ def test_hdlc_bitstuff_roundtrip(result: TestResult):
     result.record("HDLC 位填充往返（前 N 字节）", ok)
 
 
+def test_kiss_roundtrip(result: TestResult):
+    """KISS 帧编解码往返：payload 含 FEND/FESC 边界字节，转义后应解回。"""
+    try:
+        from mbdsdr_ai.ax25 import KISSInterface
+    except Exception as e:  # noqa: BLE001
+        result.record("KISS 接口可导入", False, str(e))
+        return
+    # payload 含 FEND(0xC0)/FESC(0xDB) 触发转义
+    payload = bytes([0xC0, 0xDB, ord('B'), ord('I'), ord('4'), ord('M'), ord('I'), 0xC0])
+    wire = KISSInterface.encode_data_frame(payload, port=2)
+    frames = KISSInterface.decode_stream(wire)
+    result.record("KISS 解出 1 帧", len(frames) == 1, f"frames={len(frames)}")
+    if len(frames) != 1:
+        return
+    port, data = frames[0]
+    result.record("KISS 端口往返=2", port == 2, f"port={port}")
+    result.record("KISS payload 转义往返", data == payload,
+                  data[:10].hex())
+
+
 def main():
     """主测试函数。"""
     print("=" * 60)
@@ -1354,6 +1374,7 @@ def main():
     test_ax25_roundtrip(result)
     test_aprs_position_roundtrip(result)
     test_hdlc_bitstuff_roundtrip(result)
+    test_kiss_roundtrip(result)
 
     # 输出总结
     print(result.summary())
