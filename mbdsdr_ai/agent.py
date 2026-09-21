@@ -208,6 +208,7 @@ class MBDSDRAgent:
         # 注册 AMR 自动调制识别工具
         self._register_amr_tools()
         self._register_web_tools()
+        self._register_skill_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -357,6 +358,47 @@ class MBDSDRAgent:
             },
             handler=_clone,
             category="web",
+        )
+
+    def _register_skill_tools(self):
+        """技能目录与按需加载（借鉴 DeepSeek harness skill 子系统）。
+
+        模型只看到技能名+描述；需要时 skill_load 才读完整正文，不堆上下文。
+        自进化：往 skills/ 丢新目录即新技能，下次自动发现。
+        """
+        from mbdsdr_ai.skill_registry import SkillRegistry
+
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.skill_registry = SkillRegistry(os.path.join(project_root, "skills"))
+
+        self.tool_registry.register(
+            name="skill_list",
+            description="列出当前所有可用技能的名称和简短描述。技能是按需加载的操作指引，"
+                        "比如找干扰源、卫星过境跟踪、SSTV 解码。先看目录，需要细节时再 skill_load。",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(self.skill_registry.list(), ensure_ascii=False, indent=2)),
+            category="skill",
+        )
+
+        def _load(args):
+            name = (args.get("name") or "").strip()
+            body = self.skill_registry.load(name)
+            if body is None:
+                return ToolResult(False, f"未找到技能 {name!r}，先 skill_list 看可用名称")
+            return ToolResult(True, f"<skill_content name=\"{name}\">\n{body}\n</skill_content>")
+
+        self.tool_registry.register(
+            name="skill_load",
+            description="按名称加载一个技能的完整操作指引。先 skill_list 看有哪些，再用本工具读细节。",
+            parameters={
+                "type": "object",
+                "properties": {"name": {"type": "string", "description": "技能名 kebab-case"}},
+                "required": ["name"],
+            },
+            handler=_load,
+            category="skill",
         )
 
     def _register_memory_tools(self):
