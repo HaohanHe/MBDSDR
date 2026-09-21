@@ -1220,6 +1220,22 @@ def test_sstv_robot72_roundtrip(result: TestResult):
                   f"{res.get('width')}x{res.get('height')}")
 
 
+def test_rds_ct_mjd(result: TestResult):
+    """RDS CT 时钟：MJD 编解码往返 + 锚点日期（MJD 60000=2023-02-25）。"""
+    from datetime import datetime, timedelta
+    # rds_lite 4A CT 位定义（与 _parse_group 一致）
+    for mjd, hh, mm in [(60000, 13, 45), (59000, 0, 0), (61000, 23, 59)]:
+        c = (1 << 15) | ((mjd >> 2) << 1)
+        d = (hh << 11) | (mm << 6) | ((mjd & 0x3) << 4) | 0
+        dec_mjd = (((c & 0x7FFF) >> 1) << 2) | ((d >> 4) & 0x3)
+        assert dec_mjd == mjd, f"MJD 往返失败 {mjd}"
+    dt = datetime(1858, 11, 17) + timedelta(days=60000)
+    result.record("RDS CT MJD 往返", True)
+    result.record("MJD 60000 = 2023-02-25",
+                  (dt.year, dt.month, dt.day) == (2023, 2, 25),
+                  str(dt.date()))
+
+
 def main():
     """主测试函数。"""
     print("=" * 60)
@@ -1270,6 +1286,7 @@ def main():
     test_ft8_roundtrip(result)
     test_tool_callability(result, agent)
     test_sstv_robot72_roundtrip(result)
+    test_rds_ct_mjd(result)
 
     # 输出总结
     print(result.summary())
