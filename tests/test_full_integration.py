@@ -1320,6 +1320,28 @@ def test_kiss_roundtrip(result: TestResult):
                   data[:10].hex())
 
 
+def test_afsk_modem_roundtrip(result: TestResult):
+    """AFSK 真往返：构造 UI 帧 -> 调制为音频 -> 解调 -> 解回帧。"""
+    try:
+        from mbdsdr_ai.ax25 import AX25Frame, AFSKModem
+        import numpy as _np
+    except Exception as e:  # noqa: BLE001
+        result.record("AFSK modem 可导入", False, str(e))
+        return
+    f = AX25Frame(destination="CQ", source="BI4MIB", info=b">HI BI4MIB AFSK test")
+    modem = AFSKModem()
+    audio = modem.modulate(f)
+    frames = modem.demodulate(_np.asarray(audio, dtype=float))
+    result.record("AFSK 解出>=1 帧", len(frames) >= 1, f"frames={len(frames)}")
+    if not frames:
+        return
+    got = frames[0]
+    result.record("AFSK 信息字段往返",
+                  got.info == b">HI BI4MIB AFSK test",
+                  got.info[:20].decode("ascii", "replace"))
+    result.record("AFSK FCS 有效", got.fcs_valid is True, f"fcs_valid={got.fcs_valid}")
+
+
 def main():
     """主测试函数。"""
     print("=" * 60)
@@ -1375,6 +1397,7 @@ def main():
     test_aprs_position_roundtrip(result)
     test_hdlc_bitstuff_roundtrip(result)
     test_kiss_roundtrip(result)
+    test_afsk_modem_roundtrip(result)
 
     # 输出总结
     print(result.summary())
