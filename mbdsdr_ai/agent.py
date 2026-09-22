@@ -1728,7 +1728,7 @@ class MBDSDRAgent:
                 },
                 "required": ["change_id"],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(ft.revert_to(args["change_id"]).to_dict() if ft.revert_to(args["change_id"]) else {"error": "变更不存在"}, ensure_ascii=False, indent=2)),
+            handler=lambda args: ToolResult(success=True, content=json.dumps(ft.revert_to(args["change_id"], file_writer=lambda p,c: open(p,"w",encoding="utf-8").write(c)).to_dict() if ft.revert_to(args["change_id"], file_writer=lambda p,c: open(p,"w",encoding="utf-8").write(c)) else {"error": "变更不存在"}, ensure_ascii=False, indent=2)),
             category="file_tracker",
         )
 
