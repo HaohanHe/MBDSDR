@@ -214,6 +214,7 @@ class MBDSDRAgent:
         self._register_fst4_tools()
         self._register_cw_tools()
         self._register_adsb_tools()
+        self._register_rds_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -700,6 +701,41 @@ class MBDSDRAgent:
                 "required": ["iq"],
             },
             handler=_adsb,
+            category="decode",
+        )
+
+    def _register_rds_tools(self):
+        """RDS FM 57kHz 副载波：从 MPX 解码 PI/PS/节目名。"""
+        from mbdsdr_ai.rds_lite import decode_rds
+        import numpy as np
+
+        def _rds(args):
+            mpx = args.get("mpx")
+            if not isinstance(mpx, list):
+                return ToolResult(False, "mpx 必须是实数 MPX 采样列表")
+            sr = float(args.get("sample_rate", 1710000) or 1710000)
+            try:
+                res = decode_rds(np.array(mpx, dtype=np.float64), sr,
+                                 min_groups=int(args.get("min_groups", 2) or 2))
+            except Exception as e:
+                return ToolResult(False, f"RDS 解码失败: {e}")
+            return ToolResult(True, json.dumps(res, ensure_ascii=False, default=str))
+
+        self.tool_registry.register(
+            name="rds_decode_mpx",
+            description="FM RDS (57kHz 副载波) 解码：输入一段实数 MPX 复合基带采样，"
+                        "做双相码恢复、块同步、CRC，输出电台 PI 码、电台名(PS)、"
+                        "节目类型等 RDS 信息。用于 FM 广播/RDS 接收技能。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "mpx": {"type": "array", "items": {"type": "number"}},
+                    "sample_rate": {"type": "number", "description": "采样率 Hz，默认 1710000"},
+                    "min_groups": {"type": "integer", "description": "最少解码组数，默认 2"},
+                },
+                "required": ["mpx"],
+            },
+            handler=_rds,
             category="decode",
         )
 
