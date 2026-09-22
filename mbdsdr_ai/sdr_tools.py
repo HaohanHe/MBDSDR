@@ -5624,17 +5624,36 @@ def _signal_identify_modulation(args):
 
 
 def _signal_extract_features(args):
-    """提取频谱特征。"""
+    """提取频谱特征：优先用真 IQ 流算 FFT，无硬件时回退合成并标注。"""
     from mbdsdr_ai.signal_analysis import extract_spectrum_features
 
-    # 生成模拟频谱
-    freqs = np.linspace(100e6, 101e6, 1024)
-    spectrum = np.random.randn(1024) * 3 + 40
-    spectrum[500:520] += 30  # 峰值
+    note = ""
+    iq = args.get("iq_data")
+    if iq is None:
+        try:
+            from mbdsdr_ai.sdr_backend import get_current_iq
+            iq = get_current_iq(n=1024)
+        except Exception:
+            iq = None
+    if iq is not None:
+        iq = np.asarray(iq, dtype=np.complex128)
+        win = np.hanning(len(iq))
+        spec = np.abs(np.fft.rfft(iq * win))
+        center = args.get("center_freq_hz", 100e6)
+        sr = args.get("sample_rate", 2.4e6)
+        freqs = center + np.fft.rfftfreq(len(iq), 1/sr) - sr/2
+        spectrum = 20 * np.log10(spec + 1e-9)
+    else:
+        freqs = np.linspace(100e6, 101e6, 1024)
+        spectrum = np.random.randn(1024) * 3 + 40
+        spectrum[500:520] += 30
+        note = "（注：无 SDR 硬件，用合成频谱演示特征提取）"
 
     features = extract_spectrum_features(spectrum, freqs)
 
     lines = ["=== 频谱特征提取 ==="]
+    if note:
+        lines.append(note)
     lines.append("")
     lines.append(f"中心频率: {features['center_freq_hz']/1e6:.3f} MHz")
     lines.append(f"带宽: {features['bandwidth_hz']/1e3:.1f} kHz")
