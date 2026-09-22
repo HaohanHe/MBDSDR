@@ -76,7 +76,7 @@ def decode_cw(samples: List[float], sample_rate: float = 11025,
 
     返回 dict: text, chars, dit_ms, dah_ms, wpm_est, confidence。
     """
-    if not samples:
+    if samples is None or len(samples) == 0:
         return {"text": "", "chars": [], "wpm_est": 0, "confidence": 0}
 
     n = len(samples)
