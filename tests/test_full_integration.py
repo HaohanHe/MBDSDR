@@ -242,6 +242,11 @@ def test_dsp_module(result: TestResult, agent: MBDSDRAgent):
     try:
         audio = ssb_demod(fm_signal, "usb")
         result.record("SSB (USB) 解调", len(audio) > 0)
+        # 回归：USB 与 LSB 输出必须不同（防假边带 bug 回归）
+        audio_lsb = ssb_demod(fm_signal, "lsb")
+        result.record("SSB USB/LSB 边带不同（防假边带）",
+                      len(audio) > 0 and len(audio_lsb) > 0 and
+                      not np.allclose(audio, audio_lsb))
     except Exception as e:
         result.record("SSB (USB)", False, str(e))
 
