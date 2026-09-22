@@ -298,29 +298,35 @@ class Subagent:
         return result
 
     def _execute(self, task: SubagentTask) -> Tuple[str, Dict[str, Any], List[str]]:
-        """
-        实际执行任务（简化版）。
-
-        根据子代理类型和任务目标，调用相应工具。
-        完整实现应该用 LLM 驱动工具调用循环。
-        """
+        """实际执行任务：真调 tool_registry 对应的工具，不是打印占位。"""
         tools_called = []
         data = {}
         output = ""
 
-        # 简化：根据子代理类型执行预设逻辑
+        def _call(name, args=None):
+            """真调工具并记录。"""
+            try:
+                res = self.tool_registry.call(name, args or {})
+                tools_called.append(name)
+                return res.content
+            except Exception as e:
+                return f"[{name} 调用失败: {e}]"
+
         if self.agent_type == "spectrum_analyzer":
-            output, data = self._execute_spectrum_analysis(task)
-            tools_called = ["sdr_spectrum_analyze", "sdr_spectrum_find_signals", "sdr_identify_modulation"]
+            freq = task.input_data.get("frequency_hz", 100000000)
+            output = _call("sdr_spectrum_analyze", {"frequency_hz": freq})
+            data = {"frequency_hz": freq, "analysis_type": "spectrum"}
         elif self.agent_type == "satellite_tracker":
-            output, data = self._execute_satellite_tracking(task)
-            tools_called = ["sdr_satellite_sky_view", "sdr_satellite_doppler"]
+            sat = task.input_data.get("satellite_name", "NOAA 19")
+            output = _call("sdr_satellite_sky_view", {"satellite": sat})
+            data = {"satellite": sat, "tracking_type": "orbit"}
         elif self.agent_type == "baseband_recorder":
-            output, data = self._execute_recording(task)
-            tools_called = ["sdr_record_start", "sdr_record_stop", "sdr_recordings_list"]
+            dur = task.input_data.get("duration", 10)
+            output = _call("sdr_record_start", {"duration_s": dur})
+            data = {"duration": dur, "recording_type": "baseband"}
         else:
-            output = f"子代理 {self.agent_type} 执行任务: {task.goal}\n（简化执行，完整 LLM 驱动需要模型管理器）"
-            data = {"goal": task.goal, "input": task.input_data}
+            output = f"子代理 {self.agent_type} 不支持的任务类型: {task.goal}"
+            data = {"goal": task.goal}
 
         return output, data, tools_called
 
