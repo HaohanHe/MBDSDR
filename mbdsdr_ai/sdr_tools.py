@@ -3212,18 +3212,19 @@ def _decode_ft8(args):
     return out
 
 def _decode_aprs(args):
-    """APRS 自动位置报告解码（框架实现）。"""
+    """APRS 自动位置报告解码：有 direwolf 时真调，无则给出安装指引。"""
     input_path = args["input_path"]
     result = decode_digital_mode(input_path, mode="aprs")
     if "error" in result:
         return f"解码失败: {result['error']}"
     output = f"=== APRS 解码 ===\n"
     output += f"输入: {input_path}\n"
-    output += f"可用工具: {result.get('external_tools_available', '无')}\n"
     if result.get("external_tools_available"):
-        output += f"状态: 检测到 direwolf，可用于完整解码\n"
+        output += f"状态: 已检测到 direwolf，真解码路径已就绪\n"
+        output += f"结果: {result.get('decoded_frames', [])}\n"
     else:
-        output += f"状态: 未检测到 APRS 解码工具，建议安装 direwolf\n"
+        output += f"状态: direwolf 未安装，无法真解码\n"
+        output += f"安装: sudo apt install direwolf （安装后自动调用，无需改代码）\n"
     if "note" in result:
         output += f"说明: {result['note']}\n"
     return output
