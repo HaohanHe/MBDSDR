@@ -369,12 +369,26 @@ class SelfEvolutionEngine:
         """
         一键恢复：回滚到指定版本（默认上一个版本）。
 
-        防幻觉变砖的核心功能。
+        防幻觉变砖的核心功能。先恢复真落盘备份，再回退版本库。
         """
+        # 1) 优先恢复真实文件（apply 时存的磁盘备份）
+        restored = []
+        for pid, (rp, old) in list(self._disk_backups.items()):
+            try:
+                with open(rp, "w", encoding="utf-8") as f:
+                    f.write(old)
+                restored.append(rp)
+                self._disk_backups.pop(pid, None)
+            except Exception as e:
+                return False, f"真实文件 {rp} 回滚失败: {e}"
+        # 2) 再回退版本库
         if version_id:
-            return self.version_store.rollback(version_id)
+            ok, msg = self.version_store.rollback(version_id)
         else:
-            return self.version_store.rollback_to_parent()
+            ok, msg = self.version_store.rollback_to_parent()
+        if restored:
+            return True, f"已恢复 {len(restored)} 个真实文件: {restored}；{msg}"
+        return ok, msg
 
     # ── 完整进化循环 ────────────────────────────────────
 
