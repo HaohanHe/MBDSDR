@@ -218,6 +218,7 @@ class MBDSDRAgent:
         self._register_apt_tools()
         self._register_aprs_tools()
         self._register_analog_demod_tools()
+        self._register_wfm_stereo_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -870,6 +871,40 @@ class MBDSDRAgent:
                 "required": ["iq", "sample_rate"],
             },
             handler=_demod,
+            category="demod",
+        )
+
+    def _register_wfm_stereo_tools(self):
+        """WFM 立体声：IQ -> 19kHz pilot 提取 -> L/R。"""
+        from mbdsdr_ai.wfm_stereo_lite import decode_stereo
+        import numpy as np
+
+        def _wfm(args):
+            iq = args.get("iq")
+            if not isinstance(iq, list):
+                return ToolResult(False, "iq 必须是复数采样列表")
+            sr = float(args.get("sample_rate", 240000) or 240000)
+            try:
+                res = decode_stereo(np.array(iq, dtype=complex), sr)
+            except Exception as e:
+                return ToolResult(False, f"WFM 立体声解码失败: {e}")
+            summary = {k: v for k, v in res.items() if k not in ("l", "r")}
+            return ToolResult(True, json.dumps(summary, ensure_ascii=False, default=str))
+
+        self.tool_registry.register(
+            name="demod_wfm_stereo",
+            description="FM 立体声广播解调：输入 WFM 复基带 IQ，做鉴频、提取 19kHz "
+                        "导频、二倍频恢复 38kHz 副载波，分离出 L/R 立体声；"
+                        "导频能量不足时回退单声道。用于听 FM 立体声广播。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"}},
+                    "sample_rate": {"type": "number", "description": "默认 240000"},
+                },
+                "required": ["iq", "sample_rate"],
+            },
+            handler=_wfm,
             category="demod",
         )
 
