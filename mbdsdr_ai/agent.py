@@ -225,6 +225,7 @@ class MBDSDRAgent:
         self._register_doppler_tools()
         self._register_time_sync_tools()
         self._register_constellation_tools()
+        self._register_baseband_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -1115,6 +1116,45 @@ class MBDSDRAgent:
             },
             handler=_evm,
             category="spectrum",
+        )
+
+    def _register_baseband_tools(self):
+        """Baseband 录制/回放。"""
+        from mbdsdr_ai.baseband_io import save_iq
+
+        def _save(args):
+            iq = args.get("iq")
+            if not isinstance(iq, list):
+                return ToolResult(False, "iq 必须是复数采样列表")
+            try:
+                info = save_iq(
+                    iq,
+                    str(args.get("path", "/tmp/mbdsdr_capture.iq")),
+                    float(args.get("sample_rate", 2.4e6)),
+                    center_freq_hz=float(args.get("center_freq_hz", 0)),
+                    note=str(args.get("note", "")),
+                )
+            except Exception as e:
+                return ToolResult(False, f"录制失败: {e}")
+            return ToolResult(True, json.dumps(info, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="baseband_save",
+            description="Baseband 录制：把一段复数 IQ 存成二进制文件（float32 交错），"
+                        "记录采样率、中心频率、时长，供事后回放分析。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"}},
+                    "path": {"type": "string", "description": "保存路径，默认 /tmp/mbdsdr_capture.iq"},
+                    "sample_rate": {"type": "number"},
+                    "center_freq_hz": {"type": "number"},
+                    "note": {"type": "string"},
+                },
+                "required": ["iq", "sample_rate"],
+            },
+            handler=_save,
+            category="capture",
         )
 
     def _register_memory_tools(self):
