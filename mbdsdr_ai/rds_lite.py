@@ -64,9 +64,10 @@ def make_block(data16: int, offset_name: str) -> List[int]:
 
 def build_b_block(pi_unused: int = 0, tp: int = 0, pty: int = 0,
                   group_type: int = 0, version_b: int = 0, low5: int = 0) -> int:
-    """Block B 16bit 信息：TP(1) PTY(5) GTC(4) A/B(1) 低5位。"""
-    return (((tp & 1) << 15) | ((pty & 0x1F) << 10) |
-            ((group_type & 0xF) << 6) | ((version_b & 1) << 5) | (low5 & 0x1F))
+    """Block B 16bit 信息（EN 50067）：
+    bit15..12=GroupType(4) bit11=VerB(1) bit10=TP(1) bit9..5=PTY(5) bit4..0=low5(5)。"""
+    return (((group_type & 0xF) << 12) | ((version_b & 1) << 11) |
+            ((tp & 1) << 10) | ((pty & 0x1F) << 5) | (low5 & 0x1F))
 
 
 def build_0a_group(pi: int, seg: int, chars2: str, pty: int = 1,
@@ -178,14 +179,14 @@ def _parse_group(bits: np.ndarray, a_pos: int) -> Optional[dict]:
     for i, nm in ((0, "A"), (1, "B"), (2, "C"), (3, "D")):
         info[nm] = _bits_to_int(bits[a_pos + i * 26:a_pos + i * 26 + 16])
     b = info["B"]
-    group_type = (b >> 6) & 0xF
-    version_b = (b >> 5) & 1
-    pty = (b >> 10) & 0x1F
-    tp = (b >> 15) & 1
+    group_type = (b >> 12) & 0xF
+    version_b = (b >> 11) & 1
+    tp = (b >> 10) & 1
+    pty = (b >> 5) & 0x1F
     out = {"pi": info["A"], "pty": pty, "tp": tp,
            "group_type": group_type, "version_b": version_b}
     if group_type == 0:  # 0A/0B 基本调谐，PS 电台名
-        seg = (info["C"] >> 9) & 0x7
+        seg = (info["C"] >> 10) & 0x3
         c1 = info["D"] >> 8
         c2 = info["D"] & 0xFF
         out["ps_seg"] = seg
