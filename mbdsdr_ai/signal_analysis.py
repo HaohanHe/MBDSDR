@@ -125,20 +125,17 @@ def identify_modulation(iq: np.ndarray, sample_rate: float) -> Dict:
         modulation = "SSB"
         confidence = 0.7
 
-    # QPSK：恒定幅度，相位离散
+    # QPSK / BPSK：恒定幅度
     elif amp_cv < 0.05 and std_freq < 0.05:
-        # 检查相位是否有4个聚类
         phase_norm = (phase + np.pi) / (2 * np.pi)
         hist, _ = np.histogram(phase_norm, bins=8, range=(0, 1))
-        peaks = np.sum(hist > np.mean(hist) * 1.5)
+        peaks = int(np.sum(hist > np.mean(hist) * 1.5))
         if peaks >= 3:
             modulation = "QPSK"
             confidence = 0.8
-
-    # BPSK：恒定幅度，2个相位聚类
-    elif amp_cv < 0.05 and peaks < 3 and peaks >= 1:
-        modulation = "BPSK"
-        confidence = 0.7
+        elif peaks >= 1:
+            modulation = "BPSK"
+            confidence = 0.7
 
     return {
         "modulation": modulation,
