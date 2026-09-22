@@ -219,6 +219,7 @@ class MBDSDRAgent:
         self._register_aprs_tools()
         self._register_analog_demod_tools()
         self._register_wfm_stereo_tools()
+        self._register_signal_quality_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -906,6 +907,37 @@ class MBDSDRAgent:
             },
             handler=_wfm,
             category="demod",
+        )
+
+    def _register_signal_quality_tools(self):
+        """IQ 信号质量/星座统计。"""
+        from mbdsdr_ai.signal_quality import signal_quality
+        import numpy as np
+
+        def _sq(args):
+            iq = args.get("iq")
+            if not isinstance(iq, list):
+                return ToolResult(False, "iq 必须是复数采样列表")
+            try:
+                res = signal_quality(np.array(iq, dtype=complex))
+            except Exception as e:
+                return ToolResult(False, f"信号质量统计失败: {e}")
+            return ToolResult(True, json.dumps(res, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="signal_quality_stats",
+            description="信号质量/星座统计：输入一段复 IQ，输出 DC 偏移、I/Q 不平衡、"
+                        "RMS、峰均比(PAPR)、平均相位等，用于诊断硬件（增益/正交误差）和"
+                        "判断信号质量。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"}},
+                },
+                "required": ["iq"],
+            },
+            handler=_sq,
+            category="spectrum",
         )
 
     def _register_memory_tools(self):
