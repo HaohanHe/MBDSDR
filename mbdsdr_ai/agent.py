@@ -958,7 +958,9 @@ class MBDSDRAgent:
                 hours = float(args.get("hours", 24) or 24)
                 min_el = float(args.get("min_elevation", 10) or 10)
                 stype = str(args.get("satellite_type", "all") or "all")
-                ps = predict_passes(lat, lon, alt, hours, min_el, stype)
+                freq = float(args.get("frequency_hz", 137.1e6) or 137.1e6)
+                ps = predict_passes(lat, lon, alt, hours, min_el, stype,
+                                    nominal_freq_hz=freq)
             except Exception as e:
                 return ToolResult(False, f"过境预测失败: {e}")
             return ToolResult(True, json.dumps({"passes": ps, "count": len(ps)},
