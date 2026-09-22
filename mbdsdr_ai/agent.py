@@ -550,6 +550,7 @@ class MBDSDRAgent:
     def _register_spectrum_tools(self):
         """IQ 信号频谱分析：平均 PSD + 峰值保持 + 结构化峰列表（找台/找干扰源）。"""
         from mbdsdr_ai.signal_spectrum import analyze_iq_spectrum
+        import numpy as np
 
         def _analyze(args):
             iq = args.get("iq")
