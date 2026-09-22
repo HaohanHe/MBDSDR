@@ -222,6 +222,7 @@ class MBDSDRAgent:
         self._register_signal_quality_tools()
         self._register_orbit_tools()
         self._register_pointing_tools()
+        self._register_doppler_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -1021,6 +1022,38 @@ class MBDSDRAgent:
                 },
             },
             handler=_point,
+            category="orbit",
+        )
+
+    def _register_doppler_tools(self):
+        """新时空：多普勒补偿调谐频率。"""
+        from mbdsdr_ai.orbit import doppler_correction
+
+        def _doppler(args):
+            try:
+                name = str(args.get("satellite", "NOAA 15"))
+                f0 = float(args.get("nominal_freq_hz", 137.62e6))
+                lat = float(args.get("observer_lat", 43.8))
+                lon = float(args.get("observer_lon", 126.5))
+                r = doppler_correction(name, f0, lat, lon)
+            except Exception as e:
+                return ToolResult(False, f"多普勒计算失败: {e}")
+            return ToolResult(True, json.dumps(r, ensure_ascii=False, default=str))
+
+        self.tool_registry.register(
+            name="doppler_tune_frequency",
+            description="多普勒补偿调谐：给定卫星标称频率和观察者位置，根据卫星视线速度"
+                        "算出当前多普勒频移和应调到的接收频率。接收卫星/发射前自动补偿频偏。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "satellite": {"type": "string"},
+                    "nominal_freq_hz": {"type": "number", "description": "卫星标称频率 Hz，默认 137.62e6"},
+                    "observer_lat": {"type": "number"},
+                    "observer_lon": {"type": "number"},
+                },
+            },
+            handler=_doppler,
             category="orbit",
         )
 
