@@ -1030,6 +1030,37 @@ class MBDSDRAgent:
             category="orbit",
         )
 
+        def _gimbal_move(args):
+            try:
+                from mbdsdr_ai.gimbal import RotctldClient
+                c = RotctldClient(host=args.get("host", "127.0.0.1"),
+                                  port=int(args.get("port", 4533)))
+                az = float(args["azimuth_deg"])
+                el = float(args["elevation_deg"])
+                ok = c.set_position(az, el)
+                if ok:
+                    return ToolResult(True, f"云台已指向 方位{az:.0f}° 仰角{el:.0f}°")
+                return ToolResult(False, "云台连接失败，检查 rotctld 是否运行")
+            except Exception as e:
+                return ToolResult(False, f"云台控制失败: {e}")
+
+        self.tool_registry.register(
+            name="gimbal_move",
+            description="控制 rotctld 云台/旋转器指向指定方位仰角。用于自动跟踪卫星过境时驱动天线对准。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "azimuth_deg": {"type": "number", "description": "方位角 0-360"},
+                    "elevation_deg": {"type": "number", "description": "仰角 -5-180"},
+                    "host": {"type": "string", "default": "127.0.0.1"},
+                    "port": {"type": "integer", "default": 4533},
+                },
+                "required": ["azimuth_deg", "elevation_deg"],
+            },
+            handler=_gimbal_move,
+            category="pointing",
+        )
+
     def _register_doppler_tools(self):
         """新时空：多普勒补偿调谐频率。"""
         from mbdsdr_ai.orbit import doppler_correction
