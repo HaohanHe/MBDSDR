@@ -1151,6 +1151,37 @@ class MBDSDRAgent:
             category="spectrum",
         )
 
+        def _squelch(args):
+            from mbdsdr_ai.signal_quality import squelch_gate
+            iq = args.get("iq")
+            if not isinstance(iq, list):
+                return ToolResult(False, "iq 必须是复数 IQ 采样列表")
+            th = float(args.get("threshold_db", -50.0))
+            blk = int(args.get("block", 1024))
+            try:
+                r = squelch_gate(np.array(iq, dtype=complex),
+                                 threshold_db=th, block=blk)
+            except Exception as e:
+                return ToolResult(False, f"静噪门控失败: {e}")
+            return ToolResult(True, json.dumps(r, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="sdr_squelch_gate",
+            description="静噪门控：对一段复 IQ 按块算 RSSI(dBFS)，判断是否超过门控并给占空比。"
+                        "用于自动值守、活动检测、降低无信号时的噪音输出。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"}},
+                    "threshold_db": {"type": "number", "description": "门控阈值 dBFS"},
+                    "block": {"type": "integer", "description": "每块采样数"},
+                },
+                "required": ["iq"],
+            },
+            handler=_squelch,
+            category="spectrum",
+        )
+
     def _register_baseband_tools(self):
         """Baseband 录制/回放。"""
         from mbdsdr_ai.baseband_io import save_iq
