@@ -220,6 +220,7 @@ class MBDSDRAgent:
         self._register_analog_demod_tools()
         self._register_wfm_stereo_tools()
         self._register_signal_quality_tools()
+        self._register_orbit_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -938,6 +939,44 @@ class MBDSDRAgent:
             },
             handler=_sq,
             category="spectrum",
+        )
+
+    def _register_orbit_tools(self):
+        """新时空核心：TLE 卫星过境预测（仰角/方位/多普勒）。"""
+        from mbdsdr_ai.orbit import predict_passes
+
+        def _passes(args):
+            try:
+                lat = float(args.get("observer_lat", 43.8))
+                lon = float(args.get("observer_lon", 126.5))
+                alt = float(args.get("observer_alt", 0) or 0)
+                hours = float(args.get("hours", 24) or 24)
+                min_el = float(args.get("min_elevation", 10) or 10)
+                stype = str(args.get("satellite_type", "all") or "all")
+                ps = predict_passes(lat, lon, alt, hours, min_el, stype)
+            except Exception as e:
+                return ToolResult(False, f"过境预测失败: {e}")
+            return ToolResult(True, json.dumps({"passes": ps, "count": len(ps)},
+                                               ensure_ascii=False, default=str))
+
+        self.tool_registry.register(
+            name="predict_satellite_passes",
+            description="卫星过境预测（新时空核心）：给定观察者经纬度，预测未来 N 小时内"
+                        "气象/业余卫星的过境时刻、最大仰角、升落时间和多普勒频移范围。"
+                        "用于 AI 反向指挥人架天线/调谐/录制。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "observer_lat": {"type": "number", "description": "观察者纬度，默认 43.8"},
+                    "observer_lon": {"type": "number", "description": "观察者经度，默认 126.5"},
+                    "observer_alt": {"type": "number", "description": "海拔 m，默认 0"},
+                    "hours": {"type": "number", "description": "预测时长小时，默认 24"},
+                    "min_elevation": {"type": "number", "description": "最低仰角度，默认 10"},
+                    "satellite_type": {"type": "string", "enum": ["all", "weather", "amateur"]},
+                },
+            },
+            handler=_passes,
+            category="orbit",
         )
 
     def _register_memory_tools(self):
