@@ -393,9 +393,9 @@ def ssb_demod(x: np.ndarray, mode: str = "USB",
         mixed = x * np.conj(lo)
         audio = mixed.real
     else:
-        # 下边带：下变频后取虚部（符号反转）
+        # 下边带：本振符号翻转 = 频谱镜像（正确取边带）
         mixed = x * lo
-        audio = -mixed.imag
+        audio = mixed.real
 
     # 低通滤波（简单移动平均）
     kernel_size = max(1, int(sample_rate / 4000))  # ~4kHz 音频带宽
