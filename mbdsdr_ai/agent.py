@@ -221,6 +221,7 @@ class MBDSDRAgent:
         self._register_wfm_stereo_tools()
         self._register_signal_quality_tools()
         self._register_orbit_tools()
+        self._register_pointing_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -976,6 +977,50 @@ class MBDSDRAgent:
                 },
             },
             handler=_passes,
+            category="orbit",
+        )
+
+    def _register_pointing_tools(self):
+        """新时空：当前时刻卫星位置 + 天线指向建议（AI 反向指挥人）。"""
+        from mbdsdr_ai.orbit import compute_satellite_state, BUILTIN_SATS
+
+        def _point(args):
+            try:
+                name = str(args.get("satellite", "NOAA 19"))
+                lat = float(args.get("observer_lat", 43.8))
+                lon = float(args.get("observer_lon", 126.5))
+                s = compute_satellite_state(name, lat, lon)
+                if s is None:
+                    return ToolResult(False, f"未知卫星: {name}")
+                visible = s["elevation"] >= 0
+                # AI 给人的指向指令
+                if visible:
+                    cmd = (f"把天线指向方位 {s['azimuth']:.0f}°、仰角 {s['elevation']:.0f}°"
+                           f"（卫星距离 {s['range_km']:.0f} km）")
+                else:
+                    cmd = (f"卫星现在在地平线下（仰角 {s['elevation']:.0f}°），"
+                           f"方位 {s['azimuth']:.0f}°，等过境再架天线")
+                s["visible"] = visible
+                s["instruction"] = cmd
+            except Exception as e:
+                return ToolResult(False, f"指向计算失败: {e}")
+            return ToolResult(True, json.dumps(s, ensure_ascii=False, default=str))
+
+        self.tool_registry.register(
+            name="satellite_now_pointing",
+            description="当前时刻卫星位置与天线指向建议：给定卫星和观察者经纬度，"
+                        "输出方位角、仰角、距离、是否可见，并直接生成一句给人听的"
+                        "操作指令（把天线架到哪个方位仰角）。这是 AI 反向指挥人架天线的核心。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "satellite": {"type": "string",
+                                  "description": "如 NOAA 19/NOAA 15/ISS (ZARYA)/METEOR M2/FENGYUN 3D"},
+                    "observer_lat": {"type": "number"},
+                    "observer_lon": {"type": "number"},
+                },
+            },
+            handler=_point,
             category="orbit",
         )
 
