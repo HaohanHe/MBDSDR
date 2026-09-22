@@ -34,7 +34,7 @@ except ImportError:
 # ═══════════════════════════════════════════════════════
 
 # TLE 数据格式：(名称, 第一行, 第二行)
-# 这些是常用卫星的近似 TLE，实际使用时应定期更新
+# 内置仅作离线回退（近似值）。真实使用优先从 celestrak 联网拉最新 TLE。
 BUILTIN_TLE = {
     "NOAA 15": (
         "1 25338U 98030A   26250.50000000  .00000050  00000-0  10000-3 0  9993",
@@ -61,6 +61,28 @@ BUILTIN_TLE = {
         "2 54234  98.9000 100.0000 0010000  90.0000 270.0000 14.20000000400000",
     ),
 }
+
+# 卫星名称 -> NORAD CATNR（用于从 celestrak 联网拉最新 TLE）
+SATELLITE_CATNR = {
+    "NOAA 15": 25338,
+    "NOAA 18": 28654,
+    "NOAA 19": 33591,
+    "ISS (ZARYA)": 25544,
+    "METEOR M2": 44016,
+    "FENGYUN 3D": 54234,
+}
+
+
+def _resolve_tle(satellite_name: str):
+    """优先联网拉最新 TLE；失败回退内置近似值。返回 (line1, line2, source)。"""
+    catnr = SATELLITE_CATNR.get(satellite_name)
+    if catnr is not None:
+        try:
+            from .orbit import fetch_tle
+            return (*fetch_tle(catnr), "celestrak")
+        except Exception:
+            pass
+    return (*BUILTIN_TLE[satellite_name], "builtin-fallback")
 
 # 卫星下行频率（MHz）
 SATELLITE_FREQUENCIES = {
@@ -116,8 +138,8 @@ def compute_satellite_position(
     jd, fr = jday(dt.tm_year, dt.tm_mon, dt.tm_mday,
                    dt.tm_hour, dt.tm_min, dt.tm_sec)
 
-    # 从 TLE 创建卫星对象
-    line1, line2 = BUILTIN_TLE[satellite_name]
+    # 从 TLE 创建卫星对象（优先联网最新，回退内置）
+    line1, line2, _src = _resolve_tle(satellite_name)
     satellite = Satrec.twoline2rv(line1, line2)
 
     # 计算卫星位置（ECI 坐标系，单位 km）
