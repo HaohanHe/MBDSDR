@@ -552,7 +552,6 @@ def _decode_robot36(freq: np.ndarray, sr: int, data_start: int,
             starts.append(_group_y0_start(fr, s, sr, period_ms, pulse_ms))
         y0_off_ms = float(np.median(starts)) if starts else (sync_ms + porch_ms)
         remaining_ms = max(period_ms - y0_off_ms, 200.0)
-        # 两行各一段 Y 一段 UV，Y:UV≈2:1，无额外 gap
         uv_scan = remaining_ms / (2.0 * 3.0)
         y_scan = 2.0 * uv_scan
         ypx = sr * y_scan / width / 1000.0

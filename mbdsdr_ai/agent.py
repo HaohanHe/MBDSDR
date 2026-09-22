@@ -212,6 +212,7 @@ class MBDSDRAgent:
         self._register_ft8_ldpc_tools()
         self._register_spectrum_tools()
         self._register_fst4_tools()
+        self._register_cw_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -630,6 +631,36 @@ class MBDSDRAgent:
                 "required": ["llr"],
             },
             handler=_fst4_decode,
+            category="decode",
+        )
+
+    def _register_cw_tools(self):
+        """CW 摩尔斯音频解码：音频 -> 文字。"""
+        from mbdsdr_ai.cw_decoder import decode_cw
+
+        def _cw(args):
+            audio = args.get("audio")
+            if not isinstance(audio, list):
+                return ToolResult(False, "audio 必须是单声道浮点采样列表")
+            sr = float(args.get("sample_rate", 11025) or 11025)
+            r = decode_cw([float(x) for x in audio], sr, wpm=args.get("wpm"))
+            return ToolResult(True, json.dumps(r, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="cw_decode_audio",
+            description="CW（摩尔斯电报）音频解码：输入一段解调后的单声道音频采样，"
+                        "自动估计电码速度，输出摩尔斯文本、dit 时长和识别置信度。"
+                        "用于 CW 接收技能。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "audio": {"type": "array", "items": {"type": "number"}},
+                    "sample_rate": {"type": "number", "description": "默认 11025"},
+                    "wpm": {"type": "number", "description": "已知电码速度（可选）"},
+                },
+                "required": ["audio"],
+            },
+            handler=_cw,
             category="decode",
         )
 
