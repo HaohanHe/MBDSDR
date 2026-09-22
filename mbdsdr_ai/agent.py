@@ -1204,6 +1204,11 @@ class MBDSDRAgent:
     def _workflow_tool_executor(self, tool_name: str, params: Dict[str, Any]) -> Any:
         """工作流引擎的工具执行器（桥接到 Agent 的工具注册表）。"""
         result = self.tool_registry.call(tool_name, params)
+        # 录制工作流：记录本次工具调用
+        try:
+            self.wr.record_tool_call(tool_name, params, result.success)
+        except Exception:
+            pass
         if result.success:
             return result.content
         else:
