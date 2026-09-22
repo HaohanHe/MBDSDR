@@ -36,6 +36,37 @@ def signal_quality(iq: np.ndarray) -> Dict:
     }
 
 
+def squelch_gate(iq: np.ndarray, threshold_db: float = -50.0,
+                 block: int = 1024) -> Dict:
+    """静噪门控：按块算 RSSI(dBFS)，判断信号是否超过门控并给占空比。
+
+    dBFS 以满量程 1.0 为参考（IQ 归一化后 |x|<=1）。
+    """
+    x = np.asarray(iq, dtype=np.complex128)
+    n = len(x)
+    if n < block:
+        block = n
+    blocks = n // block
+    if blocks == 0:
+        blocks = 1
+        block = n
+    rssi_db = []
+    for i in range(blocks):
+        seg = x[i * block:(i + 1) * block]
+        p = float(np.mean(np.abs(seg) ** 2))
+        rssi_db.append(10.0 * np.log10(p + 1e-12))
+    rssi_db = np.array(rssi_db)
+    open_blocks = int(np.sum(rssi_db > threshold_db))
+    return {
+        "rssi_dbfs": round(float(np.mean(rssi_db)), 2),
+        "peak_rssi_dbfs": round(float(np.max(rssi_db)), 2),
+        "threshold_db": threshold_db,
+        "open": bool(np.mean(rssi_db) > threshold_db),
+        "duty_cycle": round(open_blocks / max(blocks, 1), 3),
+        "block_count": int(blocks),
+    }
+
+
 if __name__ == "__main__":
     # 自测：加 DC 偏移 + I/Q 不平衡，应被检出
     rng = np.random.default_rng(0)
