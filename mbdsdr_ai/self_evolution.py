@@ -237,7 +237,8 @@ class SelfEvolutionEngine:
                         test_result["passed"] = sandbox_result.success
                         test_result["sandbox"] = sandbox_result.to_dict()
                     else:
-                        test_result["passed"] = True  # 无测试代码默认通过
+                        test_result["passed"] = None  # 无测试代码：未知，不自动 accept
+                        test_result["skipped"] = True
                 if test_result["passed"]:
                     passed += 1
             except Exception as e:
