@@ -215,6 +215,7 @@ class MBDSDRAgent:
         self._register_cw_tools()
         self._register_adsb_tools()
         self._register_rds_tools()
+        self._register_apt_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -736,6 +737,43 @@ class MBDSDRAgent:
                 "required": ["mpx"],
             },
             handler=_rds,
+            category="decode",
+        )
+
+    def _register_apt_tools(self):
+        """NOAA APT 气象卫星图：音频 -> A/B 双通道灰度图。"""
+        from mbdsdr_ai.noaa_apt_lite import decode_apt
+        import numpy as np
+
+        def _apt(args):
+            audio = args.get("audio")
+            if not isinstance(audio, list):
+                return ToolResult(False, "audio 必须是单声道浮点采样列表")
+            sr = float(args.get("sample_rate", 24000) or 24000)
+            try:
+                res = decode_apt(np.array(audio, dtype=np.float64), sr,
+                                 polarity=int(args.get("polarity", 1) or 1))
+            except Exception as e:
+                return ToolResult(False, f"APT 解码失败: {e}")
+            # 图像数组不直接塞回（太大），回摘要 + 存图
+            summary = {k: v for k, v in res.items() if k not in ("image_a", "image_b")}
+            return ToolResult(True, json.dumps(summary, ensure_ascii=False, default=str))
+
+        self.tool_registry.register(
+            name="apt_decode_audio",
+            description="NOAA APT 气象卫星云图 (137MHz) 解码：输入一段解调后的单声道音频，"
+                        "自动做瞬时频率解调、行同步，输出 A/B 双通道是否检测到 APT、"
+                        "对齐行数、锁定质量。用于 NOAA 气象卫星接收技能。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "audio": {"type": "array", "items": {"type": "number"}},
+                    "sample_rate": {"type": "number", "description": "默认 24000"},
+                    "polarity": {"type": "integer", "description": "真机若反相传 -1"},
+                },
+                "required": ["audio"],
+            },
+            handler=_apt,
             category="decode",
         )
 
