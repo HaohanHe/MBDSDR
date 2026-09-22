@@ -297,6 +297,8 @@ class MainWindow(QMainWindow):
         self.ai_panel = AIPanel()
         self.ai_panel.tool_call_requested.connect(self._on_ai_tool_call)
         right_tab.addTab(self.ai_panel, "AI 助手")
+        # 启动即从 ~/.mbdsdr/config.json 初始化 agent，否则永远走规则降级
+        self._init_ai_agent_from_config()
 
         right_tab.setCurrentIndex(0)
         main_splitter.addWidget(right_tab)
@@ -519,6 +521,23 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def _on_mode_changed(self, mode: str):
         pass  # 模式切换在控制面板内部处理
+
+    def _init_ai_agent_from_config(self):
+        """从 ~/.mbdsdr/config.json 读 API 配置并初始化 AI agent。"""
+        import json as _json, os
+        cfg_path = os.path.expanduser("~/.mbdsdr/config.json")
+        try:
+            if os.path.exists(cfg_path):
+                with open(cfg_path) as f:
+                    cfg = _json.load(f)
+                if cfg.get("api_key"):
+                    self.ai_panel.init_agent(
+                        api_key=cfg.get("api_key", ""),
+                        base_url=cfg.get("base_url", ""),
+                        model=cfg.get("model", ""),
+                    )
+        except Exception:
+            pass  # 无配置则保持规则降级，不崩溃
 
     @Slot(str, dict)
     def _on_ai_tool_call(self, tool_name: str, params: dict):
