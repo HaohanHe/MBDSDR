@@ -223,6 +223,7 @@ class MBDSDRAgent:
         self._register_orbit_tools()
         self._register_pointing_tools()
         self._register_doppler_tools()
+        self._register_time_sync_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -1054,6 +1055,33 @@ class MBDSDRAgent:
                 },
             },
             handler=_doppler,
+            category="orbit",
+        )
+
+    def _register_time_sync_tools(self):
+        """新时空授时：NTP 校时。"""
+        from mbdsdr_ai.time_sync import ntp_offset
+
+        def _ntp(args):
+            server = str(args.get("server", "ntp.aliyun.com"))
+            try:
+                r = ntp_offset(server, timeout=float(args.get("timeout", 3) or 3))
+            except Exception as e:
+                return ToolResult(False, f"NTP 查询失败: {e}")
+            return ToolResult(True, json.dumps(r, ensure_ascii=False, default=str))
+
+        self.tool_registry.register(
+            name="time_sync_ntp",
+            description="NTP 授时：查询 NTP 服务器，返回本地时钟与标准时间的偏差。"
+                        "新时空系统的授时基础（卫星过境/多普勒计算都依赖准确时间）。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "server": {"type": "string", "description": "NTP 服务器，默认 ntp.aliyun.com"},
+                    "timeout": {"type": "number"},
+                },
+            },
+            handler=_ntp,
             category="orbit",
         )
 
