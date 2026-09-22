@@ -32,10 +32,10 @@ APT_IMG_A_OFFSET = APT_SYNC_LEN + APT_SPACE_LEN                          # 86
 APT_IMG_B_OFFSET = APT_HALF + APT_SYNC_LEN + APT_SPACE_LEN               # 1126
 
 # 39 样本 APT 同步向量（1040Hz 方波，7 个脉冲），0/1
+# 39 样本标准 NOAA APT 同步字（1040Hz 方波，sync code A 位序列展开，19 次跳变）
 _SYNC_WORD = np.array([
-    0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1,
-    0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0,
+    0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1,
 ], dtype=np.float64)
 
 
