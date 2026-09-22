@@ -37,35 +37,33 @@ def _graph():
 
 
 def ldpc_bp_decode(llr: list[float], max_iter: int = 25):
-    """归一化 min-sum BP。输入 N 个信道 LLR（正=偏0），返回 (bits, iters)。"""
+    """归一化 min-sum BP（dict 消息图，无下标错位）。输入 N 个 LLR（正=偏0）。"""
     N, M, check_vars, var_checks = _graph()
     if len(llr) != N:
         raise ValueError(f"需要 {N} 个 LLR，得到 {len(llr)}")
-    sc = 0.75
-    q = [[[float(llr[v])] * len(check_vars[c]) for c in range(M)] for v in range(N)]
-    r = [[0.0] * len(var_checks[v]) for v in range(N)]
+    # q[(c,v)]: variable v -> check c 的消息
+    q = {(c, v): float(llr[v]) for c, vs in enumerate(check_vars) for v in vs}
     bits = [0] * N
     it = 0
     for it in range(1, max_iter + 1):
-        for v in range(N):
-            for k, c in enumerate(var_checks[v]):
-                j = check_vars[c].index(v)
+        # check -> variable: min-sum
+        r = {}
+        for c, vs in enumerate(check_vars):
+            for v in vs:
+                others = [q[(c, u)] for u in vs if u != v]
                 prod = 1.0
-                s = 0.0
-                for i, u in enumerate(check_vars[c]):
-                    if u == v:
-                        continue
-                    j2 = var_checks[u].index(c)
-                    prod *= (1 if q[u][c][j2] >= 0 else -1)
-                    s = min(s, abs(q[u][c][j2])) if s != 0 else abs(q[u][c][j2])
-                r[v][k] = sc * prod * s
+                s = float("inf")
+                for x in others:
+                    prod *= 1 if x >= 0 else -1
+                    s = min(s, abs(x))
+                r[(c, v)] = prod * s * 0.75
+        # variable -> check + 硬判决
         for v in range(N):
-            total = float(llr[v]) + sum(r[v])
+            total = float(llr[v]) + sum(r[(c, v)] for c in var_checks[v])
             bits[v] = 0 if total >= 0 else 1
-            for k, c in enumerate(var_checks[v]):
-                j = check_vars[c].index(v)
-                q[v][c][j] = total - r[v][k]
-        if all((sum(bits[u] for u in check_vars[c]) % 2) == 0 for c in range(M)):
+            for c in var_checks[v]:
+                q[(c, v)] = total - r[(c, v)]
+        if all(sum(bits[u] for u in check_vars[c]) % 2 == 0 for c in range(M)):
             break
     return bits, it
 
