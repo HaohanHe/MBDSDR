@@ -64,6 +64,14 @@ class MainWindow(QMainWindow):
         # 加载 GUI 配置（窗口大小、频率、主题等）
         QTimer.singleShot(100, self._load_gui_config)
 
+        # 天空图实时更新定时器（每 5 秒刷新卫星位置 + 授时）
+        self._sky_update_timer = QTimer(self)
+        self._sky_update_timer.setInterval(5000)
+        self._sky_update_timer.timeout.connect(self._update_sky_satellites)
+        self._sky_update_timer.start()
+        # 立即先刷一次
+        QTimer.singleShot(1200, self._update_sky_satellites)
+
     # ========================================================================
     # UI 构建
     # ========================================================================
@@ -287,6 +295,7 @@ class MainWindow(QMainWindow):
         self.control_panel.volume_changed.connect(self._on_volume_changed)
         self.control_panel.record_toggled.connect(self._on_record_toggled)
         self.control_panel.mode_changed.connect(self._on_mode_changed)
+        self.control_panel.tune_sdr_requested.connect(self._on_tune_sdr)
         right_tab.addTab(self.control_panel, "控制")
 
         # Tab 2: 状态
@@ -296,6 +305,7 @@ class MainWindow(QMainWindow):
         # Tab 3: AI
         self.ai_panel = AIPanel()
         self.ai_panel.tool_call_requested.connect(self._on_ai_tool_call)
+        self.ai_panel.command_submitted.connect(self._on_ai_command)
         right_tab.addTab(self.ai_panel, "AI 助手")
         # 启动即从 ~/.mbdsdr/config.json 初始化 agent，否则永远走规则降级
         self._init_ai_agent_from_config()
@@ -499,6 +509,21 @@ class MainWindow(QMainWindow):
     def _on_tune_am(self, freq: int):
         if self._worker:
             self._worker.call_tool("tune_am", {"freq_khz": freq})
+
+    @Slot(float, str)
+    def _on_tune_sdr(self, freq_hz: float, mode: str):
+        if self._worker:
+            self._worker.call_tool("tune_sdr",
+                                   {"freq_hz": freq_hz, "mode": mode})
+        self.spectrum.set_center_freq(freq_hz / 1e6)
+
+    @Slot(str)
+    def _on_ai_command(self, text: str):
+        # AI 面板提交的自然语言指令 -> 转发给 AI worker
+        try:
+            self.ai_panel._call_ai(text)
+        except Exception:
+            pass
 
     @Slot(int)
     def _on_volume_changed(self, volume: int):
