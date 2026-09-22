@@ -211,6 +211,7 @@ class MBDSDRAgent:
         self._register_skill_tools()
         self._register_ft8_ldpc_tools()
         self._register_spectrum_tools()
+        self._register_fst4_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -601,6 +602,35 @@ class MBDSDRAgent:
             },
             handler=_analyze,
             category="spectrum",
+        )
+
+    def _register_fst4_tools(self):
+        """FST4 LDPC (240,101) BP 译码——与 FT8 同源的物理层。"""
+        from mbdsdr_ai.fst4_ldpc import ldpc_bp_decode, _graph
+
+        def _fst4_decode(args):
+            llr = args.get("llr")
+            if not isinstance(llr, list):
+                return ToolResult(False, "llr 必须是 240 个信道 LLR（浮点）")
+            N, M, _, _ = _graph()
+            if len(llr) != N:
+                return ToolResult(False, f"需要 {N} 个 LLR，得到 {len(llr)}")
+            bits, iters = ldpc_bp_decode([float(x) for x in llr])
+            return ToolResult(True, json.dumps({"bits": bits, "iters": iters,
+                                               "n": N, "checks": M}))
+
+        self.tool_registry.register(
+            name="fst4_ldpc_decode",
+            description="FST4 软判决 LDPC (240,101) min-sum BP 译码：输入 240 个信道 LLR，"
+                        "输出纠正后的 240 位码字和迭代次数。FST4 物理层（帧/波形/解包后续接）。",
+            parameters={
+                "type": "object",
+                "properties": {"llr": {"type": "array", "items": {"type": "number"},
+                                      "description": "240 个信道 LLR"}},
+                "required": ["llr"],
+            },
+            handler=_fst4_decode,
+            category="decode",
         )
 
     def _register_memory_tools(self):
