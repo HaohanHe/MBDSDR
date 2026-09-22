@@ -36,7 +36,7 @@ BUILTIN_SATS: Dict[str, int] = {
     "NOAA 18": 28654,
     "NOAA 19": 33591,
     "ISS (ZARYA)": 25544,
-    "METEOR M2": 42025,
+    "METEOR M2": 44016,
     "FENGYUN 3D": 54234,
 }
 
