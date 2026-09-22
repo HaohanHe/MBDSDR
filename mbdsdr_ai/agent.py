@@ -216,6 +216,7 @@ class MBDSDRAgent:
         self._register_adsb_tools()
         self._register_rds_tools()
         self._register_apt_tools()
+        self._register_aprs_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -774,6 +775,52 @@ class MBDSDRAgent:
                 "required": ["audio"],
             },
             handler=_apt,
+            category="decode",
+        )
+
+    def _register_aprs_tools(self):
+        """APRS/AX.25 AFSK 解调：音频 -> 呼号/经纬度/报文。"""
+        from mbdsdr_ai.ax25 import AFSKModem
+        import numpy as np
+
+        def _aprs(args):
+            audio = args.get("audio")
+            if not isinstance(audio, list):
+                return ToolResult(False, "audio 必须是单声道浮点采样列表")
+            sr = float(args.get("sample_rate", 22050) or 22050)
+            try:
+                m = AFSKModem(sample_rate=sr)
+                frames = m.demodulate(np.array(audio, dtype=np.float64))
+                out = []
+                for f in frames:
+                    out.append({
+                        "source": getattr(f, "source", None),
+                        "source_ssid": getattr(f, "source_ssid", None),
+                        "destination": getattr(f, "destination", None),
+                        "digipeaters": getattr(f, "digipeaters", None),
+                        "info": bytes(getattr(f, "info", b"")).decode("ascii", "replace"),
+                        "fcs_valid": getattr(f, "fcs_valid", None),
+                    })
+            except Exception as e:
+                return ToolResult(False, f"APRS 解调失败: {e}")
+            return ToolResult(True, json.dumps({"frames": out, "count": len(out)},
+                                               ensure_ascii=False, default=str))
+
+        self.tool_registry.register(
+            name="aprs_decode_audio",
+            description="APRS / AX.25 (AFSK 1200) 解调：输入一段单声道音频，"
+                        "做 AFSK 解调、HDLC 位同步、CRC(FCS) 校验，输出每帧的"
+                        "源呼号、目的、 digipeater 路径、信息字段（位置/报文/气象）。"
+                        "用于 APRS 网络/位置跟踪技能。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "audio": {"type": "array", "items": {"type": "number"}},
+                    "sample_rate": {"type": "number", "description": "默认 22050"},
+                },
+                "required": ["audio"],
+            },
+            handler=_aprs,
             category="decode",
         )
 
