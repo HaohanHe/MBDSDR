@@ -213,6 +213,7 @@ class MBDSDRAgent:
         self._register_spectrum_tools()
         self._register_fst4_tools()
         self._register_cw_tools()
+        self._register_adsb_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -661,6 +662,44 @@ class MBDSDRAgent:
                 "required": ["audio"],
             },
             handler=_cw,
+            category="decode",
+        )
+
+    def _register_adsb_tools(self):
+        """ADS-B Mode S 1090MHz：从 IQ 找前导、CRC24、解 DF/ICAO/呼号。"""
+        from mbdsdr_ai.adsb_lite import decode_adsb
+        import numpy as np
+
+        def _adsb(args):
+            iq = args.get("iq")
+            if not isinstance(iq, list):
+                return ToolResult(False, "iq 必须是复数采样列表")
+            sr = float(args.get("sample_rate", 2_000_000) or 2_000_000)
+            try:
+                arr = np.array(iq, dtype=complex)
+                res = decode_adsb(arr, sr,
+                                  threshold_sigma=float(args.get("threshold_sigma", 4.0) or 4.0))
+            except Exception as e:
+                return ToolResult(False, f"ADS-B 解码失败: {e}")
+            return ToolResult(True, json.dumps(res, ensure_ascii=False, default=str))
+
+        self.tool_registry.register(
+            name="adsb_decode_iq",
+            description="ADS-B / Mode S (1090MHz) 接收解码：输入一段复数 IQ，"
+                        "自动找前导、做 CRC24 校验，输出每帧的 DF、ICAO 地址、"
+                        "呼号、报文类型和校验是否通过，并按 ICAO 汇总飞机。"
+                        "用于飞机跟踪/ADS-B 接收技能。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"},
+                           "description": "复数 IQ 采样（复数浮点列表）"},
+                    "sample_rate": {"type": "number", "description": "采样率 Hz，默认 2000000"},
+                    "threshold_sigma": {"type": "number", "description": "检测门限 sigma 倍数，默认 4"},
+                },
+                "required": ["iq"],
+            },
+            handler=_adsb,
             category="decode",
         )
 
