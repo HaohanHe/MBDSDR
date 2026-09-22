@@ -546,7 +546,11 @@ class MainWindow(QMainWindow):
         self.control_panel.update_record_time(self._record_seconds)
 
     def _toggle_record(self):
-        self.record_btn.toggle()
+        # record_btn.toggled 已触发本槽，不要再 toggle() 否则无限递归。
+        # 同步控制面板的录音按钮，由它的 toggled 走正常录音链路。
+        checked = self.record_btn.isChecked()
+        if self.control_panel.record_button.isChecked() != checked:
+            self.control_panel.record_button.setChecked(checked)
 
     def _toggle_waterfall(self):
         self.spectrum.toggle_waterfall()
