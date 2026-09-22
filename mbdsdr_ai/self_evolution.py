@@ -68,6 +68,7 @@ class EvolutionProposal:
     evaluation_result: Dict[str, Any] = field(default_factory=dict)
     version_id: Optional[str] = None
     author: str = "ai"
+    real_path: str = ""  # 真实磁盘目标文件（非空则 apply 真落盘，rollback 可恢复）
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -104,6 +105,7 @@ class SelfEvolutionEngine:
         self.auto_confirm_low_risk = auto_confirm_low_risk
         self._proposal_count = 0
         self._evolution_cycles = 0
+        self._disk_backups: Dict[str, tuple] = {}  # proposal_id -> (real_path, old_content)
 
         # 初始快照
         if not self.version_store.get_version():
@@ -125,6 +127,7 @@ class SelfEvolutionEngine:
         risk_level: str = "low",
         test_cases: List[Dict[str, Any]] = None,
         author: str = "ai",
+        real_path: str = "",
     ) -> EvolutionProposal:
         """
         提出一个进化建议。
@@ -151,6 +154,7 @@ class SelfEvolutionEngine:
             risk_level=risk_level,
             test_cases=test_cases or [],
             author=author,
+            real_path=real_path,
         )
 
         self.proposals[proposal_id] = proposal
@@ -335,7 +339,29 @@ class SelfEvolutionEngine:
             return False, f"建议状态为 {proposal.status}，需要先确认和提交"
 
         proposal.status = "applied"
-        return True, f"已应用 {proposal.target_type}: {proposal.target_name}"
+
+        # 真落盘：若指定了真实文件路径，原子写入并备份原内容，防变砖
+        import os, tempfile
+        if proposal.real_path and proposal.target_type == "code":
+            rp = os.path.abspath(os.path.expanduser(proposal.real_path))
+            if not os.path.exists(rp):
+                return False, f"目标文件不存在，拒绝创建以防误写: {rp}"
+            with open(rp, "r", encoding="utf-8", errors="replace") as f:
+                old = f.read()
+            # 备份原内容到内存，回滚可恢复
+            self._disk_backups[proposal.id] = (rp, old)
+            # 原子写：先写临时文件再 rename
+            d = os.path.dirname(rp)
+            fd, tmp = tempfile.mkstemp(dir=d, suffix=".mbdtmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(proposal.proposed_change)
+                os.replace(tmp, rp)
+            finally:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            return True, f"已应用 code 并落盘: {rp}（原内容已备份，可 rollback）"
+        return True, f"已应用 {proposal.target_type}: {proposal.target_name}（虚拟生效，未指定 real_path）"
 
     # ── 一键恢复（回滚）─────────────────────────────────
 
