@@ -44,7 +44,8 @@ QUICK_COMMANDS = [
 class AIWorker(QObject):
     """后台 AI 调用 Worker（避免 UI 卡顿）。"""
     finished = Signal(dict)  # 结果
-    error = Signal(str)       # 错误
+    error = Signal(str)     # 错误
+    delta = Signal(str)     # 流式增量文本
 
     def __init__(self, agent: "MBDSDRAgent", user_input: str):
         super().__init__()
@@ -54,7 +55,10 @@ class AIWorker(QObject):
     @Slot()
     def run(self):
         try:
-            result = self.agent.chat(self.user_input)
+            result = self.agent.chat(
+                self.user_input,
+                on_delta=lambda d: self.delta.emit(d),
+            )
             self.finished.emit(result)
         except Exception as e:
             self.error.emit(f"{type(e).__name__}: {e}\n{traceback.format_exc()[:500]}")
@@ -477,12 +481,32 @@ class AIPanel(QWidget):
         self._worker_thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_ai_finished)
         self._worker.error.connect(self._on_ai_error)
+        self._worker.delta.connect(self._on_stream_delta)
         self._worker.finished.connect(self._worker_thread.quit)
         self._worker.error.connect(self._worker_thread.quit)
         self._worker_thread.finished.connect(self._worker.deleteLater)
         self._worker_thread.finished.connect(self._worker_thread.deleteLater)
 
+        # 新建一条空 AI 消息用于流式追加
+        self._stream_html = ""
+        self._append_to_view(
+            '<div style="margin: 6px 0; padding: 8px; background: #F5F3F0; '
+            'border-radius: 6px; border-left: 3px solid #5A8A5A;">'
+            '<span style="color: #4A7A4A; font-size: 8pt;">AI</span><br>')
+
         self._worker_thread.start()
+
+    @Slot(str)
+    def _on_stream_delta(self, piece: str):
+        """流式增量实时打字到 AI 消息末尾。"""
+        try:
+            cursor = self.conversation_view.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertText(piece)
+            self.conversation_view.setTextCursor(cursor)
+            self.conversation_view.ensureCursorVisible()
+        except Exception:
+            pass
 
     @Slot(dict)
     def _on_ai_finished(self, result: dict):
