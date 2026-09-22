@@ -337,9 +337,23 @@ class ContextManager:
     # ── 构建 API 请求消息 ───────────────────────────────
 
     def build_api_messages(self) -> List[Dict[str, Any]]:
-        """构建发送给 LLM API 的消息列表。"""
+        """构建发送给 LLM API 的消息列表（只保留 OpenAI/硅基流动允许字段）。"""
         messages = [{"role": "system", "content": self.system_prompt}]
-        messages.extend(self.history)
+        for m in self.history:
+            role = m.get("role", "user")
+            clean: Dict[str, Any] = {"role": role,
+                                     "content": m.get("content", "") or ""}
+            if role == "assistant" and m.get("tool_calls"):
+                clean["tool_calls"] = m["tool_calls"]
+            if role == "tool":
+                tcid = m.get("tool_call_id", "")
+                if tcid:
+                    clean["tool_call_id"] = tcid
+                if m.get("name"):
+                    clean["name"] = m["name"]
+            elif m.get("name"):
+                clean["name"] = m["name"]
+            messages.append(clean)
         return messages
 
     # ── 导出/导入 ───────────────────────────────────────
