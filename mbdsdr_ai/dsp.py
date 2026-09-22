@@ -603,9 +603,14 @@ def compute_snr(x: np.ndarray, signal_band: Tuple[float, float] = None,
     如果指定 signal_band（Hz），在该频带内计算信号功率，
     其余频带计算噪声功率。
     """
-    spectrum = np.fft.fftshift(np.fft.fft(x))
-    powers = np.abs(spectrum) ** 2
-    freqs = np.fft.fftshift(np.fft.fftfreq(len(x), 1.0 / sample_rate))
+    # 加 Hann 窗减少频谱泄漏（裸 FFT 会把信号功率摊到邻近 bin，
+    # 导致噪声功率偏高、SNR 估计偏低）。窗增益补偿用于功率归一化。
+    n = len(x)
+    win = np.hanning(n)
+    win_gain = float(np.mean(win))
+    spectrum = np.fft.fftshift(np.fft.fft(x * win))
+    powers = np.abs(spectrum) ** 2 / (win_gain ** 2)
+    freqs = np.fft.fftshift(np.fft.fftfreq(n, 1.0 / sample_rate))
 
     if signal_band:
         # 指定信号频带

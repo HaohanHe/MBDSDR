@@ -19,6 +19,11 @@ def signal_quality(iq: np.ndarray) -> Dict:
     mag = np.abs(x)
     rms = float(np.sqrt(np.mean(mag ** 2)))
     peak = float(np.max(mag))
+    # 圆形均值：不能直接平均角度（跨 ±π 边界会错）。
+    # 用 atan2(mean(sin), mean(cos)) 求合矢量方向。
+    ang = np.angle(x)
+    mean_phase = float(np.degrees(np.arctan2(
+        np.mean(np.sin(ang)), np.mean(np.cos(ang)))))
     return {
         "dc_offset_i": round(float(np.mean(I)), 6),
         "dc_offset_q": round(float(np.mean(Q)), 6),
@@ -26,7 +31,7 @@ def signal_quality(iq: np.ndarray) -> Dict:
         "rms": round(rms, 4),
         "peak": round(peak, 4),
         "papr_db": round(20 * np.log10((peak + 1e-9) / (rms + 1e-9)), 2),
-        "mean_phase_deg": round(float(np.degrees(np.mean(np.angle(x))))),
+        "mean_phase_deg": round(mean_phase, 2),
         "sample_count": int(len(x)),
     }
 
