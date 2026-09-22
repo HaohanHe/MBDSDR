@@ -2444,7 +2444,8 @@ class MBDSDRAgent:
 
     # ── 核心对话循环 ────────────────────────────────────
 
-    def chat(self, user_input: str, max_tool_rounds: int = 10) -> Dict[str, Any]:
+    def chat(self, user_input: str, max_tool_rounds: int = 10,
+             on_delta=None) -> Dict[str, Any]:
         """
         处理用户输入，返回 Agent 回复。
 
@@ -2514,12 +2515,24 @@ class MBDSDRAgent:
             messages = self.context_manager.build_api_messages()
             tools = self.tool_registry.get_tool_definitions() if self.config.enable_tool_calling else None
 
-            # 调用 LLM
-            response = self.model_manager.chat(
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",
-            )
+            # 调用 LLM（流式，on_delta 回调实时吐字）
+            response = {"success": True, "content": "", "tool_calls": [],
+                        "usage": {}, "model": self.model_manager.model,
+                        "latency_ms": 0}
+            try:
+                for ev in self.model_manager.chat_stream(messages=messages,
+                                                         tools=tools,
+                                                         tool_choice="auto"):
+                    if ev.get("done"):
+                        response = ev
+                    elif on_delta is not None and ev.get("delta"):
+                        try:
+                            on_delta(ev["delta"])
+                        except Exception:
+                            pass
+            except Exception as e:
+                response = {"success": False, "content": "", "tool_calls": [],
+                            "usage": {}, "error": str(e)}
 
             # 累计用量
             usage = response.get("usage", {})
