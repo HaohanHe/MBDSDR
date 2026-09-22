@@ -210,6 +210,7 @@ class MBDSDRAgent:
         self._register_web_tools()
         self._register_skill_tools()
         self._register_ft8_ldpc_tools()
+        self._register_spectrum_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -544,6 +545,61 @@ class MBDSDRAgent:
             },
             handler=_soft_decode,
             category="decode",
+        )
+
+    def _register_spectrum_tools(self):
+        """IQ 信号频谱分析：平均 PSD + 峰值保持 + 结构化峰列表（找台/找干扰源）。"""
+        from mbdsdr_ai.signal_spectrum import analyze_iq_spectrum
+
+        def _analyze(args):
+            iq = args.get("iq")
+            if not isinstance(iq, list):
+                return ToolResult(False, "iq 必须是复数采样列表（complex 可表示为 [re,im] 或复数浮点）")
+            sr = float(args.get("sample_rate", 0) or 0)
+            if sr <= 0:
+                return ToolResult(False, "需要 sample_rate")
+            # 支持 [re,im,...] 交错 或 复数浮点列表
+            try:
+                if iq and isinstance(iq[0], (int, float)) and len(iq) % 2 == 0 and args.get("interleaved"):
+                    arr = np.array(iq[0::2], dtype=np.float64) + 1j * np.array(iq[1::2], dtype=np.float64)
+                else:
+                    arr = np.array(iq, dtype=complex)
+            except Exception as e:
+                return ToolResult(False, f"IQ 解析失败: {e}")
+            r = analyze_iq_spectrum(
+                arr, sr,
+                center_hz=float(args.get("center_hz", 0) or 0),
+                fft_size=int(args.get("fft_size", 2048) or 2048),
+                n_peaks=int(args.get("n_peaks", 12) or 12),
+                margin_db=float(args.get("margin_db", 8) or 8),
+            )
+            # 只回峰列表+摘要，不回整段频谱数组（省 token）
+            summary = {k: r[k] for k in (
+                "n_samples", "sample_rate", "center_hz", "fft_size",
+                "frames_averaged", "noise_floor_db", "peaks")}
+            return ToolResult(True, json.dumps(summary, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="spectrum_analyze_iq",
+            description="分析一段复数 IQ 采样：同时给出 Welch 平均 PSD、峰值保持(peak hold)、"
+                        "噪声底，以及结构化的活动信号峰列表（每个峰的中心频率、峰值功率dB、"
+                        "相对底噪的突出度、估计带宽）。用于找台/找干扰源/频谱扫描。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"},
+                           "description": "复数 IQ 采样（复数浮点列表，或 interleaved 实虚交错）"},
+                    "sample_rate": {"type": "number", "description": "采样率 Hz"},
+                    "center_hz": {"type": "number", "description": "这段频谱的中心频率（换算绝对频率）"},
+                    "fft_size": {"type": "integer", "description": "FFT 点数，默认 2048"},
+                    "n_peaks": {"type": "integer", "description": "最多返回峰数，默认 12"},
+                    "margin_db": {"type": "number", "description": "峰突出于底噪的门限 dB，默认 8"},
+                    "interleaved": {"type": "boolean", "description": "true 表示 iq 是实虚交错"},
+                },
+                "required": ["iq", "sample_rate"],
+            },
+            handler=_analyze,
+            category="spectrum",
         )
 
     def _register_memory_tools(self):
