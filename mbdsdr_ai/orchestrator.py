@@ -254,7 +254,8 @@ class Orchestrator:
 
             # 检查依赖是否都成功
             deps_ok = all(
-                self.tasks.get(dep_id, Task(status=TaskStatus.FAILED)).status == TaskStatus.COMPLETED
+                (dep_id in self.tasks and
+                 self.tasks[dep_id].status == TaskStatus.COMPLETED)
                 for dep_id in task.dependencies
             )
 
