@@ -5590,17 +5590,28 @@ def _signal_detect(mgr, spec, args):
 
 
 def _signal_identify_modulation(args):
-    """自动调制方式识别。"""
+    """自动调制方式识别：优先用当前 SDR IQ 流，无硬件时回退合成并标注。"""
     from mbdsdr_ai.signal_analysis import identify_modulation
 
-    # 生成模拟IQ信号（实际应该从SDR获取）
-    t = np.linspace(0, 1, 1000)
-    # 模拟FM信号
-    iq = np.exp(1j * 2 * np.pi * 1000 * t + 1j * np.random.randn(len(t)) * 0.1)
+    # 优先用当前 SDR IQ 流
+    iq = args.get("iq_data")
+    note = ""
+    if iq is None:
+        try:
+            from mbdsdr_ai.sdr_backend import get_current_iq
+            iq = get_current_iq(n=1000)
+        except Exception:
+            iq = None
+    if iq is None:
+        t = np.linspace(0, 1, 1000)
+        iq = np.exp(1j * 2 * np.pi * 1000 * t + 1j * np.random.randn(len(t)) * 0.1)
+        note = "（注：无 SDR 硬件，用合成 FM 信号演示识别逻辑）"
 
-    result = identify_modulation(iq, sample_rate=1e6)
+    result = identify_modulation(np.asarray(iq), sample_rate=args.get("sample_rate", 1e6))
 
     lines = ["=== 调制方式识别 ==="]
+    if note:
+        lines.append(note)
     lines.append("")
     lines.append(f"调制类型: {result['modulation']}")
     lines.append(f"置信度: {result['confidence']*100:.1f}%")
