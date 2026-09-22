@@ -36,8 +36,10 @@ DATA_BITS_LONG = 112
 DATA_BITS_SHORT = 56
 CRC_POLY = 0xFFF409  # Mode-S 24 位 CRC 生成多项式（低 24 位）
 
-# Mode-S 6-bit 字符表（机载识别），索引即 6 bit 编码。
-CHARSET = "#ABCDEFGHIJKLMNOPQRSTUVWXYZ##### 0123456789######"
+# Mode-S 6-bit 呼号字符表（ICAO Annex 10），索引即 6 bit 编码。
+# idx0=space, 1-26=A-Z, 27-31=space, 32-41=0-9, 42-46=..=+:, 47=?, 其余 space
+CHARSET = (" " + "ABCDEFGHIJKLMNOPQRSTUVWXYZ" + " " * 5 +
+           "0123456789" + "..=+:?" + " " * 16)
 
 
 def _bytes_to_bits(data: bytes) -> List[int]:
@@ -98,7 +100,7 @@ def build_identification_frame(icao_hex: str, callsign: str,
                                category: int = 0) -> bytes:
     """构造 DF17 机载识别长报文（14 字节，含 CRC-24）。
 
-    DF=17（10001），CA=5 -> 首字节 0x8D；TC=11（01011）机载识别。
+    DF=17（10001），CA=5 -> 首字节 0x8D；TC=1（00001）机载识别（标准 TC 1-4）。
     """
     icao = int(icao_hex.replace("0x", "").replace(" ", ""), 16) & 0xFFFFFF
     data = bytearray(11)
@@ -106,7 +108,7 @@ def build_identification_frame(icao_hex: str, callsign: str,
     data[1] = (icao >> 16) & 0xFF
     data[2] = (icao >> 8) & 0xFF
     data[3] = icao & 0xFF
-    data[4] = (11 << 3) | (category & 0x07)  # TC=11
+    data[4] = (1 << 3) | (category & 0x07)  # TC=1（机载识别 TC 1-4）
     data[5:11] = encode_callsign(callsign)
     crc = mode_s_crc24(_bytes_to_bits(bytes(data)))
     frame = bytes(data) + bytes([(crc >> 16) & 0xFF,
@@ -216,7 +218,7 @@ def decode_baseband(iq: np.ndarray, fs: float = 4e6,
         result["icao"] = f"{raw[1]:02X}{raw[2]:02X}{raw[3]:02X}"
     if len(raw) >= 5:
         result["tc"] = raw[4] >> 3
-    if crc_ok and len(raw) >= 11 and result.get("tc") == 11:
+    if crc_ok and len(raw) >= 11 and result.get("tc") in (1, 2, 3, 4):
         result["callsign"] = decode_callsign(raw[5:11])
     return result
 
