@@ -224,6 +224,7 @@ class MBDSDRAgent:
         self._register_pointing_tools()
         self._register_doppler_tools()
         self._register_time_sync_tools()
+        self._register_constellation_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -1083,6 +1084,37 @@ class MBDSDRAgent:
             },
             handler=_ntp,
             category="orbit",
+        )
+
+    def _register_constellation_tools(self):
+        """星座图 EVM 统计。"""
+        from mbdsdr_ai.constellation import evm_qpsk
+        import numpy as np
+
+        def _evm(args):
+            sym = args.get("symbols")
+            if not isinstance(sym, list):
+                return ToolResult(False, "symbols 必须是复数符号列表")
+            try:
+                r = evm_qpsk(np.array(sym, dtype=complex))
+            except Exception as e:
+                return ToolResult(False, f"EVM 计算失败: {e}")
+            return ToolResult(True, json.dumps(r, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="constellation_evm",
+            description="星座图 EVM 统计：输入一段 QPSK 软符号（复数），算每符号到理想星座点的"
+                        "RMS 误差向量幅度(EVM%)和 EVM dB，并给出四象限聚类中心。用于诊断"
+                        "数字信号质量/解调好坏。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "symbols": {"type": "array", "items": {"type": "number"}},
+                },
+                "required": ["symbols"],
+            },
+            handler=_evm,
+            category="spectrum",
         )
 
     def _register_memory_tools(self):
