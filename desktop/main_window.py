@@ -479,8 +479,11 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_log(self, msg: str):
-        # 可以写入日志文件，这里暂不处理
-        pass
+        # 写入状态栏
+        try:
+            self.statusBar().showMessage(str(msg), 5000)
+        except Exception:
+            pass
 
     # ========================================================================
     # 信号槽：从控制面板/AI 面板接收指令
