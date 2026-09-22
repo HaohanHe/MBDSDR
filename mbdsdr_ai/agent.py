@@ -217,6 +217,7 @@ class MBDSDRAgent:
         self._register_rds_tools()
         self._register_apt_tools()
         self._register_aprs_tools()
+        self._register_analog_demod_tools()
 
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
@@ -822,6 +823,54 @@ class MBDSDRAgent:
             },
             handler=_aprs,
             category="decode",
+        )
+
+    def _register_analog_demod_tools(self):
+        """SDR++ 核心：IQ -> AM/FM/SSB 音频解调。"""
+        from mbdsdr_ai.analog_demod import demod_analog
+        import numpy as np
+
+        def _demod(args):
+            iq = args.get("iq")
+            if not isinstance(iq, list):
+                return ToolResult(False, "iq 必须是复数采样列表")
+            sr = float(args.get("sample_rate", 0) or 0)
+            if sr <= 0:
+                return ToolResult(False, "需要 sample_rate")
+            try:
+                arr = np.array(iq, dtype=complex)
+                r = demod_analog(
+                    arr, sr,
+                    mode=str(args.get("mode", "fm") or "fm"),
+                    max_dev=float(args.get("max_dev", 5000) or 5000),
+                    audio_bw=float(args.get("audio_bw", 3000) or 3000),
+                )
+            except Exception as e:
+                return ToolResult(False, f"解调失败: {e}")
+            # 音频数组大，只回摘要（前端要音频时再取）
+            audio_len = len(r.pop("audio"))
+            summary = {**r, "audio_samples": audio_len}
+            return ToolResult(True, json.dumps(summary, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="demod_analog_audio",
+            description="模拟音频解调（SDR++ 核心）：输入一段复数 IQ，"
+                        "按模式解调成单声道音频——am=包络检波、fm=相位差分鉴频、"
+                        "usb/lsb=边带。用于听广播/听通话。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"}},
+                    "sample_rate": {"type": "number"},
+                    "mode": {"type": "string", "enum": ["am", "fm", "usb", "lsb"],
+                             "description": "默认 fm"},
+                    "max_dev": {"type": "number", "description": "FM 最大频偏 Hz，默认 5000"},
+                    "audio_bw": {"type": "number", "description": "音频带宽 Hz，默认 3000"},
+                },
+                "required": ["iq", "sample_rate"],
+            },
+            handler=_demod,
+            category="demod",
         )
 
     def _register_memory_tools(self):
