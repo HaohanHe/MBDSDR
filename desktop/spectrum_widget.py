@@ -182,8 +182,24 @@ class SpectrumWidget(QWidget):
         self.update()
 
     @Slot()
+    def set_iq_data(self, iq):
+        """喂入真 IQ 采样（numpy complex 数组），频谱画真 FFT。
+        无真硬件时不调用，自动回退到合成数据（标注"仿真"）。"""
+        import numpy as _np
+        arr = _np.asarray(iq, dtype=_np.complex128)
+        if len(arr) < 64:
+            return
+        win = _np.hanning(len(arr))
+        spec = _np.abs(_np.fft.rfft(arr * win))
+        self._real_spectrum = 20 * _np.log10(spec + 1e-9)
+        self._current_spectrum = self._real_spectrum
+        self._using_real = True
+
     def _on_timer(self):
-        self.generator.generate()
+        if getattr(self, "_using_real", False) and getattr(self, "_real_spectrum", None) is not None:
+            self._current_spectrum = self._real_spectrum
+        else:
+            self.generator.generate()
         self.update()
 
     # ========================================================================
@@ -247,8 +263,11 @@ class SpectrumWidget(QWidget):
             painter.drawLine(QPointF(rect.x(), y), QPointF(rect.x() + rect.width(), y))
 
     def _draw_spectrum(self, painter: QPainter, rect: QRectF):
-        """绘制频谱曲线。"""
-        spectrum = self.generator.spectrum
+        """绘制频谱曲线。真 IQ 流优先，否则回退合成。"""
+        if getattr(self, "_using_real", False) and getattr(self, "_current_spectrum", None) is not None:
+            spectrum = self._current_spectrum
+        else:
+            spectrum = self.generator.spectrum
         if len(spectrum) == 0:
             return
 
