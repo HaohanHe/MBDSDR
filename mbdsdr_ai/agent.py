@@ -1182,6 +1182,46 @@ class MBDSDRAgent:
             category="spectrum",
         )
 
+        def _anr(args):
+            from mbdsdr_ai.dsp import anr_denoise
+            iq = args.get("iq")
+            if not isinstance(iq, list):
+                return ToolResult(False, "iq 必须是复数 IQ 采样列表")
+            try:
+                out = anr_denoise(
+                    np.array(iq, dtype=complex),
+                    frame=int(args.get("frame", 256)),
+                    hop=int(args.get("hop", 128)),
+                    noise_frames=int(args.get("noise_frames", 10)),
+                    oversub=float(args.get("oversub", 2.0)),
+                )
+            except Exception as e:
+                return ToolResult(False, f"ANR 降噪失败: {e}")
+            return ToolResult(True, json.dumps({
+                "denoised_iq": [[float(v.real), float(v.imag)] for v in out],
+                "input_samples": len(iq),
+                "output_samples": len(out),
+            }))
+
+        self.tool_registry.register(
+            name="sdr_anr_denoise",
+            description="自动降噪(ANR)：STFT 谱减。用前若干帧估计噪声谱，逐帧减去，"
+                        "保留相位。建议开头留一段纯噪声供估计。输出降噪后 IQ。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"}},
+                    "frame": {"type": "integer"},
+                    "hop": {"type": "integer"},
+                    "noise_frames": {"type": "integer"},
+                    "oversub": {"type": "number"},
+                },
+                "required": ["iq"],
+            },
+            handler=_anr,
+            category="spectrum",
+        )
+
     def _register_baseband_tools(self):
         """Baseband 录制/回放。"""
         from mbdsdr_ai.baseband_io import save_iq
