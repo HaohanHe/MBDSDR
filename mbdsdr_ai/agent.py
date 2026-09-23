@@ -347,6 +347,10 @@ class MBDSDRAgent:
             url = (args.get("url") or "").strip()
             if not url:
                 return ToolResult(False, "url 不能为空")
+            # 安全：只允许 https，拒绝 file://、ext::、ssh scp 等可执行任意命令的 scheme
+            if not (url.startswith("https://") or url.startswith("http://")):
+                return ToolResult(False,
+                    "安全限制：git clone 只允许 https:// URL，拒绝 file:///ext:: 等")
             name = (args.get("dest") or "").strip() or url.rstrip("/").split("/")[-1].replace(".git", "")
             dest = os.path.join(self.workspace_root if hasattr(self, "workspace_root") else ".", "repos", name)
             if os.path.exists(dest):
