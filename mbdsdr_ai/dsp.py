@@ -715,3 +715,33 @@ def anr_denoise(x: np.ndarray, frame: int = 256, hop: int = 128,
     cleaned = np.maximum(cleaned, floor)
     out_spec = cleaned * phase
     return istft(out_spec)
+
+
+def find_spectrum_peaks(x: np.ndarray, sample_rate: float = 2400000.0,
+                        n_peaks: int = 10, rel_threshold_db: float = 15.0) -> Dict:
+    """在一段复 IQ 的幅度谱上找显著峰（找台/活动扫描）。
+
+    返回每个峰的频率(Hz, 相对中心)和功率(dB)，按功率降序。
+    """
+    x = np.asarray(x, dtype=np.complex128)
+    n = len(x)
+    if n < 64:
+        return {"peaks": []}
+    win = np.hanning(n)
+    win_gain = float(np.mean(win))
+    spec = np.fft.fftshift(np.fft.fft(x * win))
+    mag_db = 20.0 * np.log10(np.abs(spec) / (win_gain * n) + 1e-12)
+    freqs = np.fft.fftshift(np.fft.fftfreq(n, d=1.0 / sample_rate))
+    peak_idx = int(np.argmax(mag_db))
+    floor_db = float(np.median(mag_db))
+    thresh = mag_db[peak_idx] - rel_threshold_db
+    # 简单局部极大：比左右相邻都大且过阈
+    cand = []
+    for i in range(2, n - 2):
+        if mag_db[i] >= thresh and mag_db[i] >= mag_db[i - 1] and mag_db[i] >= mag_db[i + 1]:
+            cand.append((float(freqs[i]), float(mag_db[i])))
+    cand.sort(key=lambda c: -c[1])
+    peaks = [{"freq_hz": round(f, 1), "power_dbfs": round(p, 2)}
+             for f, p in cand[:n_peaks]]
+    return {"peaks": peaks, "floor_db": round(floor_db, 2),
+            "peak_count": len(peaks)}
