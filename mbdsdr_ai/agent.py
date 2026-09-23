@@ -1284,6 +1284,46 @@ class MBDSDRAgent:
             category="spectrum",
         )
 
+        def _overview(args):
+            """一次信号体检：制式识别 + 谱峰 + 质量摘要。"""
+            iq = args.get("iq")
+            if not isinstance(iq, list):
+                return ToolResult(False, "iq 必须是复数 IQ 采样列表")
+            sr = float(args.get("sample_rate", 2.4e6))
+            try:
+                from mbdsdr_ai.signal_analysis import identify_modulation
+                from mbdsdr_ai.dsp import find_spectrum_peaks
+                from mbdsdr_ai.signal_quality import signal_quality
+                x = np.array(iq, dtype=complex)
+                mod = identify_modulation(x, sr)
+                peaks = find_spectrum_peaks(x, sr,
+                                            n_peaks=int(args.get("n_peaks", 5)))
+                qual = signal_quality(x)
+            except Exception as e:
+                return ToolResult(False, f"信号体检失败: {e}")
+            return ToolResult(True, json.dumps({
+                "modulation": mod,
+                "peaks": peaks,
+                "quality": qual,
+            }, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="sdr_signal_overview",
+            description="信号体检：对一段复 IQ 一次返回制式识别 + 显著谱峰频率 + 信号质量摘要。"
+                        "AI 对话中快速'看一眼这是什么信号'。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"}},
+                    "sample_rate": {"type": "number"},
+                    "n_peaks": {"type": "integer"},
+                },
+                "required": ["iq"],
+            },
+            handler=_overview,
+            category="spectrum",
+        )
+
     def _register_baseband_tools(self):
         """Baseband 录制/回放。"""
         from mbdsdr_ai.baseband_io import save_iq
