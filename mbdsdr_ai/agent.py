@@ -1222,6 +1222,34 @@ class MBDSDRAgent:
             category="spectrum",
         )
 
+        def _scatter(args):
+            from mbdsdr_ai.constellation import scatter_points
+            iq = args.get("iq")
+            if not isinstance(iq, list):
+                return ToolResult(False, "iq 必须是复数 IQ 采样列表")
+            try:
+                r = scatter_points(np.array(iq, dtype=complex),
+                                   n_points=int(args.get("n_points", 1024)))
+            except Exception as e:
+                return ToolResult(False, f"星座散点提取失败: {e}")
+            return ToolResult(True, json.dumps(r, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="sdr_constellation_scatter",
+            description="实时星座散点数据：把一段复 IQ 去 DC、自动增益归一化后输出可直接画散点的"
+                        "(I,Q) 坐标列表，供 UI 星座图控件使用。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"}},
+                    "n_points": {"type": "integer"},
+                },
+                "required": ["iq"],
+            },
+            handler=_scatter,
+            category="spectrum",
+        )
+
     def _register_baseband_tools(self):
         """Baseband 录制/回放。"""
         from mbdsdr_ai.baseband_io import save_iq

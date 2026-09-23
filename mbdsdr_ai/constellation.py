@@ -44,3 +44,27 @@ if __name__ == "__main__":
     clean = evm_qpsk(sym)
     noisy = evm_qpsk(sym + 0.1 * (rng.standard_normal(2000) + 1j * rng.standard_normal(2000)))
     print("干净 EVM%:", clean["evm_rms_pct"], "| 加噪 EVM%:", noisy["evm_rms_pct"])
+
+
+def scatter_points(iq: np.ndarray, n_points: int = 1024) -> Dict:
+    """把一段复 IQ 转成星座散点坐标（给 UI 画星座图用）。
+
+    去 DC、自动增益归一化到单位方差，均匀重采样到 n_points 个点。
+    不做符号判决/频偏校正（那由解调链路负责），只提供可直接画散点的坐标。
+    """
+    x = np.asarray(iq, dtype=np.complex128)
+    if len(x) == 0:
+        return {"points": [], "n_points": 0}
+    x = x - np.mean(x)
+    p = float(np.mean(np.abs(x) ** 2))
+    if p > 1e-12:
+        x = x / np.sqrt(p)
+    if len(x) >= n_points:
+        idx = np.linspace(0, len(x) - 1, n_points).astype(int)
+        pts = x[idx]
+    else:
+        pts = x
+    return {
+        "points": [[float(p.real), float(p.imag)] for p in pts],
+        "n_points": int(len(pts)),
+    }
