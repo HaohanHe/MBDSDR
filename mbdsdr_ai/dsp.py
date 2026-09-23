@@ -670,3 +670,48 @@ def estimate_bandwidth(x: np.ndarray, sample_rate: float = 2400000.0,
         "peak_power_db": float(peak_power),
         "threshold_db": float(threshold),
     }
+
+
+def anr_denoise(x: np.ndarray, frame: int = 256, hop: int = 128,
+                noise_frames: int = 10, oversub: float = 2.0,
+                floor_db: float = -30.0) -> np.ndarray:
+    """STFT 谱减自动降噪（ANR）。
+
+    用前 noise_frames 帧估计噪声功率谱，逐帧从观测谱中减去（过减因子
+    oversub，保留 floor_db 地板防止音乐噪声）。纯 numpy，可测。
+    """
+    x = np.asarray(x, dtype=np.complex128)
+    n = len(x)
+    win = np.hanning(frame)
+    wg = float(np.mean(win))
+
+    def stft(seg):
+        frames = []
+        for s in range(0, len(seg) - frame, hop):
+            frames.append(np.fft.fft(seg[s:s + frame] * win))
+        return np.array(frames) if frames else np.zeros((1, frame), complex)
+
+    def istft(fr):
+        out = np.zeros(n, dtype=complex)
+        wsum = np.zeros(n)
+        k = 0
+        for s in range(0, n - frame, hop):
+            seg = np.fft.ifft(fr[k]) * win
+            out[s:s + frame] += seg
+            wsum[s:s + frame] += win ** 2
+            k += 1
+        wsum = np.where(wsum > 1e-9, wsum, 1.0)
+        return out / wsum
+
+    spec = stft(x)
+    mag = np.abs(spec)
+    # 噪声谱：前 noise_frames 帧平均
+    nf = min(noise_frames, len(mag))
+    noise_mag = np.mean(mag[:nf], axis=0, keepdims=True)
+    # 谱减：保留相位
+    phase = spec / (mag + 1e-12)
+    cleaned = mag - oversub * noise_mag
+    floor = np.maximum(mag, 1e-12) * (10.0 ** (floor_db / 20.0))
+    cleaned = np.maximum(cleaned, floor)
+    out_spec = cleaned * phase
+    return istft(out_spec)
