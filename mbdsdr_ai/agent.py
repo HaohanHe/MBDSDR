@@ -1250,6 +1250,40 @@ class MBDSDRAgent:
             category="spectrum",
         )
 
+        def _peaks(args):
+            from mbdsdr_ai.dsp import find_spectrum_peaks
+            iq = args.get("iq")
+            if not isinstance(iq, list):
+                return ToolResult(False, "iq 必须是复数 IQ 采样列表")
+            try:
+                r = find_spectrum_peaks(
+                    np.array(iq, dtype=complex),
+                    sample_rate=float(args.get("sample_rate", 2.4e6)),
+                    n_peaks=int(args.get("n_peaks", 10)),
+                    rel_threshold_db=float(args.get("rel_threshold_db", 15.0)),
+                )
+            except Exception as e:
+                return ToolResult(False, f"谱峰搜索失败: {e}")
+            return ToolResult(True, json.dumps(r, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="sdr_spectrum_peaks",
+            description="频谱活动扫描/找台：对一段复 IQ 的幅度谱找显著峰，输出各峰相对中心的频率(Hz)和"
+                        "功率(dB)，按功率降序。用于自动发现活跃频率。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"}},
+                    "sample_rate": {"type": "number"},
+                    "n_peaks": {"type": "integer"},
+                    "rel_threshold_db": {"type": "number"},
+                },
+                "required": ["iq"],
+            },
+            handler=_peaks,
+            category="spectrum",
+        )
+
     def _register_baseband_tools(self):
         """Baseband 录制/回放。"""
         from mbdsdr_ai.baseband_io import save_iq
