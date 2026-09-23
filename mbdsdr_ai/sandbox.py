@@ -92,7 +92,6 @@ safe_builtins = {{
     "map": map,
     "filter": filter,
     "isinstance": isinstance,
-    "type": type,
     "Exception": Exception,
     "ValueError": ValueError,
     "TypeError": TypeError,

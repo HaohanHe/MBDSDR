@@ -284,11 +284,19 @@ class CodeEditor:
                         results["failed"] += 1
                         results["success"] = False
 
-        # 运行自定义测试命令
+        # 运行测试命令：禁止 shell=True，只允许 python/pytest/unittest 子命令
         if test_command:
             try:
+                import shlex as _shlex
+                argv = _shlex.split(test_command)
+                if not argv:
+                    raise ValueError("空测试命令")
+                base = os.path.basename(argv[0]).lower()
+                if base not in ("python", "python3", "pytest", "py.test"):
+                    raise ValueError(
+                        f"安全限制：测试命令只允许 python/pytest，收到 {base!r}")
                 result = subprocess.run(
-                    test_command, shell=True, capture_output=True, text=True,
+                    argv, shell=False, capture_output=True, text=True,
                     timeout=120, cwd=self.project_root
                 )
                 passed = result.returncode == 0
@@ -467,11 +475,33 @@ class CodeEditor:
             "auto_backup": self.auto_backup,
         }
 
+    # 禁止读取的敏感路径片段（防 SSH 私钥/凭证外泄）
+    _FORBIDDEN_FRAGMENTS = (
+        ".ssh", ".aws", ".gnupg", ".config/gcloud", ".docker",
+        "id_rsa", "id_dsa", ".npmrc", ".pypirc", ".netrc",
+        "credentials", "secrets", ".env",
+    )
+
     def _resolve_path(self, file_path: str) -> str:
-        """解析文件路径（相对路径转绝对路径）。"""
+        """解析文件路径：限制在 project_root 内，拒绝敏感凭证路径。"""
+        if not file_path or not file_path.strip():
+            raise FileNotFoundError("file_path 不能为空")
+        # 敏感片段黑名单（无论相对/绝对）
+        low = file_path.lower()
+        for frag in self._FORBIDDEN_FRAGMENTS:
+            if frag in low:
+                raise PermissionError(
+                    f"安全限制：禁止访问敏感路径 {frag!r}")
         if os.path.isabs(file_path):
-            return file_path
-        return os.path.join(self.project_root, file_path)
+            full = os.path.normpath(file_path)
+        else:
+            full = os.path.normpath(os.path.join(self.project_root, file_path))
+        # 必须落在 project_root 内，防 ../../etc/passwd
+        root = os.path.normpath(self.project_root)
+        if not (full == root or full.startswith(root + os.sep)):
+            raise PermissionError(
+                f"安全限制：只能访问项目根目录内文件，{full!r} 越界")
+        return full
 
     def _backup_file(self, file_path: str, content: str, edit_id: str) -> str:
         """备份文件。"""

@@ -129,4 +129,8 @@ def save_config(config: AgentConfig, path: str = "~/.mbdsdr/config.json"):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(config.to_dict(), f, indent=2, ensure_ascii=False)
+    try:
+        os.chmod(path, 0o600)  # 含 API key，仅所有者可读写
+    except OSError:
+        pass
     config._config_path = path
