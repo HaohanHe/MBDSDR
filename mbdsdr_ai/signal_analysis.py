@@ -95,7 +95,7 @@ def identify_modulation(iq: np.ndarray, sample_rate: float) -> Dict:
     """
     # 基本特征
     amplitude = np.abs(iq)
-    phase = np.angle(iq)
+    phase = np.unwrap(np.angle(iq))
     freq = np.diff(phase)
 
     # 特征计算
@@ -111,23 +111,24 @@ def identify_modulation(iq: np.ndarray, sample_rate: float) -> Dict:
     confidence = 0.0
 
     # AM：幅度变化大，频率变化小
-    if amp_cv > 0.3 and std_freq < 0.1:
+    if amp_cv > 0.3 and std_freq < 0.2:
         modulation = "AM"
         confidence = min(0.9, amp_cv)
 
-    # FM：幅度恒定，频率变化大
-    elif amp_cv < 0.1 and std_freq > 0.2:
+    # FM：幅度恒定，频率连续变化（中等 std）
+    elif amp_cv < 0.1 and 0.05 < std_freq < 0.8:
         modulation = "FM"
-        confidence = min(0.9, std_freq)
+        confidence = min(0.9, std_freq * 3)
 
     # SSB：单边带，幅度变化中等
-    elif 0.1 < amp_cv < 0.3 and std_freq > 0.1:
+    elif 0.1 < amp_cv < 0.3 and std_freq > 0.05:
         modulation = "SSB"
         confidence = 0.7
 
-    # QPSK / BPSK：恒定幅度
-    elif amp_cv < 0.05 and std_freq < 0.05:
-        phase_norm = (phase + np.pi) / (2 * np.pi)
+    # QPSK / BPSK：恒定幅度 + 离散相位跳变（std_freq 很大）
+    elif amp_cv < 0.05 and std_freq > 0.8:
+        raw_phase = np.angle(iq)
+        phase_norm = (raw_phase + np.pi) / (2 * np.pi)
         hist, _ = np.histogram(phase_norm, bins=8, range=(0, 1))
         peaks = int(np.sum(hist > np.mean(hist) * 1.5))
         if peaks >= 3:
