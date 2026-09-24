@@ -579,12 +579,27 @@ class HardwareManager:
     自动检测可用设备，提供统一接口。
     """
 
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+
     def __init__(self):
+        if getattr(self, "_initialized", False):
+            return
         self._soapy_backend = None
         self._mock_backend = None
         self._instrument = None
         self._active_backend = None
         self._platform = detect_embedded_platform()
+        self._initialized = True
+
+    @classmethod
+    def get_instance(cls):
+        return cls()
 
     def get_platform_info(self) -> Dict[str, Any]:
         return self._platform
