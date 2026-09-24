@@ -34,7 +34,7 @@ BIT_US = 1.0
 HALF_US = 0.5
 
 # ADS-B 6bit 字符表（TC1-4 呼号）
-_ADSB_CHAR = "?ABCDEFGHIJKLMNOPQRSTUVWXYZ##### ###############0123456789######"
+_ADSB_CHAR = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ##### ###############0123456789######"
 
 
 # --------------------------------------------------------------------------- #
@@ -239,7 +239,7 @@ def _decode_callsign(bits: Sequence[int]) -> Optional[str]:
         if v >= len(_ADSB_CHAR):
             return None
         chars.append(_ADSB_CHAR[v])
-    cs = "".join(chars).strip()
+    cs = "".join(chars).replace("@", " ").strip()
     return cs or None
 
 
@@ -256,7 +256,7 @@ def message_type_for_tc(tc: int) -> tuple[str, bool]:
     if tc == 28:
         return "aircraft status", False
     if tc == 29:
-        return "target state & status", True
+        return "target state & status", False
     if tc == 31:
         return "operation status", False
     if 20 <= tc <= 22:
@@ -268,11 +268,22 @@ def parse_frame(bits: Sequence[int], nbits: int, start_us: float,
                 confidence: float) -> Optional[ADSBFrame]:
     if nbits not in (56, 112) or len(bits) < nbits:
         return None
-    if crc24(bits, nbits) != 0:
-        return None
     df = int("".join(str(b) for b in bits[0:5]), 2)
+    crc_rem = crc24(bits, nbits)
+    # DF20/DF21: Address/Parity — crc 余数是 ICAO 地址，不要求 ==0
+    if df in (20, 21) and nbits == 112:
+        icao = crc_rem
+        crc_ok = True  # Address/Parity 模式，余数即地址
+    # DF11: Parity/Interrogator — 低7bit为 IID，允许非零
+    elif df == 11 and nbits == 56:
+        icao = crc_rem & 0xFFFFFF80  # 高17bit为地址
+        crc_ok = True
+    elif crc_rem != 0:
+        return None
+    else:
+        icao = int("".join(str(b) for b in bits[8:32]), 2)
+        crc_ok = True
     ca = int("".join(str(b) for b in bits[5:8]), 2)
-    icao = int("".join(str(b) for b in bits[8:32]), 2)
     raw = bits_to_bytes(bits[:nbits]).hex()
     tc = None
     msg_type = ""
@@ -286,7 +297,7 @@ def parse_frame(bits: Sequence[int], nbits: int, start_us: float,
     else:
         msg_type = {0: "short air-to-air", 4: "altitude reply",
                     5: "identity reply", 11: "all-call reply"}.get(df, "short reply")
-    return ADSBFrame(df=df, icao_hex=f"{icao:06X}", nbits=nbits, crc_ok=True, ca=ca,
+    return ADSBFrame(df=df, icao_hex=f"{icao:06X}", nbits=nbits, crc_ok=crc_ok, ca=ca,
                      tc=tc, msg_type=msg_type, callsign=callsign, start_us=start_us,
                      confidence=confidence, raw_hex=raw, needs_cpr=needs_cpr)
 

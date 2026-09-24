@@ -992,20 +992,20 @@ class FileIQBackend(SDRBackend):
                 pass
         ext = (self._fmt or os.path.splitext(self._path)[1].lower().lstrip(".")).lower()
         if ext == "npy":
-            self._samples = np.asarray(np.load(self._path), dtype=np.complex128)
+            self._samples = np.asarray(np.load(self._path), dtype=np.complex64)
         elif ext in ("cu8", "u8", "bin"):
             raw = np.fromfile(self._path, dtype=np.uint8)
             raw = raw[:len(raw) // 2 * 2].reshape(-1, 2).astype(np.float32)
             self._samples = np.asarray(((raw - 127.5) / 127.5).view(np.complex64).reshape(-1),
-                                       dtype=np.complex128)
+                                       dtype=np.complex64)
         elif ext in ("cfile", "cf32", "iq", "fc32"):
             raw = np.fromfile(self._path, dtype=np.float32)
             raw = raw[:len(raw) // 2 * 2].reshape(-1, 2)
-            self._samples = np.asarray(raw.view(np.complex64).reshape(-1), dtype=np.complex128)
+            self._samples = np.asarray(raw.view(np.complex64).reshape(-1), dtype=np.complex64)
         elif ext in ("cs16", "s16", "sc16"):
             raw = np.fromfile(self._path, dtype=np.int16)
             raw = raw[:len(raw) // 2 * 2].reshape(-1, 2).astype(np.float32) / 32768.0
-            self._samples = np.asarray(raw.view(np.complex64).reshape(-1), dtype=np.complex128)
+            self._samples = np.asarray(raw.view(np.complex64).reshape(-1), dtype=np.complex64)
         else:
             raise ValueError(f"不支持的 IQ 文件格式: {ext}（支持 npy/cu8/cfile/cs16）")
         self.status.sample_rate_hz = self._rate

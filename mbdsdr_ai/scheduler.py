@@ -225,6 +225,54 @@ class Scheduler:
 
     # ── 任务执行 ────────────────────────────────────────
 
+    @staticmethod
+    def _parse_cron_field(field: str, min_val: int, max_val: int) -> set:
+        """解析单个 cron 字段，返回匹配的整数集合。支持 *, */N, a-b, a,b,c。"""
+        values = set()
+        for part in field.split(","):
+            part = part.strip()
+            if part == "*":
+                values.update(range(min_val, max_val + 1))
+            elif part.startswith("*/"):
+                step = int(part[2:])
+                values.update(range(min_val, max_val + 1, step))
+            elif "-" in part:
+                a, b = part.split("-", 1)
+                values.update(range(int(a), int(b) + 1))
+            else:
+                values.add(int(part))
+        return values
+
+    @classmethod
+    def _next_cron_run(cls, cron_expr: str, after_ts: float) -> float:
+        """根据简化版 5 字段 cron 表达式计算 after_ts 之后的下次执行时间戳。
+
+        字段：分 时 日 月 周（0=周日）。不点名则按每分钟步进查找。
+        解析失败时回退到 1 小时间隔。
+        """
+        import datetime
+        try:
+            parts = cron_expr.strip().split()
+            if len(parts) != 5:
+                return after_ts + 3600
+            minutes = cls._parse_cron_field(parts[0], 0, 59)
+            hours = cls._parse_cron_field(parts[1], 0, 23)
+            days = cls._parse_cron_field(parts[2], 1, 31)
+            months = cls._parse_cron_field(parts[3], 1, 12)
+            weekdays = cls._parse_cron_field(parts[4], 0, 6)
+        except Exception:
+            return after_ts + 3600
+
+        dt = datetime.datetime.fromtimestamp(after_ts)
+        dt = dt.replace(second=0, microsecond=0) + datetime.timedelta(minutes=1)
+        for _ in range(60 * 24 * 366):  # 最多向后找一年
+            if (dt.minute in minutes and dt.hour in hours
+                    and dt.day in days and dt.month in months
+                    and dt.weekday() in weekdays):
+                return dt.timestamp()
+            dt += datetime.timedelta(minutes=1)
+        return after_ts + 3600
+
     def _execute_task(self, task: ScheduledTask) -> bool:
         """执行一个任务。"""
         try:
@@ -267,7 +315,8 @@ class Scheduler:
                 task.enabled = False  # 一次性任务执行后禁用
             elif task.schedule_type == "interval":
                 task.next_run = now + task.interval_seconds
-            # cron 类型暂不支持复杂解析，按 interval 处理
+            elif task.schedule_type == "cron":
+                task.next_run = self._next_cron_run(task.cron_expression, now)
 
             executed += 1
 

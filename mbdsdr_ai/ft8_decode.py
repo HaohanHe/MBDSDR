@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import math
-from typing import List, Sequence
+from typing import List, Optional, Sequence
 
 from mbdsdr_ai import ft8_ldpc
 
@@ -15,6 +15,26 @@ from mbdsdr_ai import ft8_ldpc
 SYNC_POS = set(range(0, 7)) | set(range(36, 43)) | set(range(72, 79))
 # 58 个数据符号位置（0-based）
 DATA_POS = [k for k in range(79) if k not in SYNC_POS]
+
+# 标准 FT8 Costas7 序列（genft8.f90 icos7），三个同步块(0-6/36-42/72-78)共用
+ICOS7 = [3, 1, 4, 0, 6, 5, 2]
+_SYNC_BLOCKS = (range(0, 7), range(36, 43), range(72, 79))
+
+
+def costas_correlation(tone_indices: Sequence[int]) -> float:
+    """79 符号硬判决音调序列与标准 Costas7 序列的匹配度（同步质量）。
+
+    在三个同步块位置（0-6、36-42、72-78）逐符号比对 ICOS7，
+    返回匹配数 / 21（0.0~1.0）。越高表示位同步越准。
+    """
+    hits = 0
+    total = 0
+    for block in _SYNC_BLOCKS:
+        for j, pos in enumerate(block):
+            total += 1
+            if pos < len(tone_indices) and int(tone_indices[pos]) == ICOS7[j]:
+                hits += 1
+    return hits / total if total else 0.0
 
 # genft8: graymap = [0,1,3,2,5,6,4,7]，index→tone；反映射 tone→index
 _GRAYMAP = [0, 1, 3, 2, 5, 6, 4, 7]
@@ -50,18 +70,25 @@ def soft_tones_to_llr(tone_energies: Sequence[Sequence[float]]) -> List[float]:
 
 
 def reorder_to_ldpc(llr_cw: Sequence[float]) -> List[float]:
-    """传输 codeword 顺序 LLR → LDPC H 矩阵顺序（colorder 反映射）。"""
-    colorder = ft8_ldpc.get_colorder()
-    # encode: cw[colorder[j]] = itmp[j]  ⇒  itmp[j] = cw[colorder[j]]
-    return [llr_cw[colorder[j]] for j in range(ft8_ldpc._N)]
+    """传输 codeword 顺序 LLR → LDPC H 矩阵顺序。
+
+    标准 FT8 (174,91) LDPC 码没有 colorder 置换（encode174_91.f90 直接
+    codeword(1:K)=message, codeword(K+1:N)=pchecks）；colorder 只属于旧的
+    (174,87) 码。因此这里是恒等映射，保留函数名/签名以备外部调用。
+    """
+    return list(llr_cw)
 
 
 def decode_ft8_payload(tone_energies: Sequence[Sequence[float]],
-                       max_iter: int = 30) -> dict:
+                       max_iter: int = 30,
+                       full_tones: Optional[Sequence[int]] = None) -> dict:
     """完整软解码：58 符号 8 路能量 → 91 信息位。
 
-    返回 {info_bits(91), crc_bits(14), data_bits(77), iters, converged}。
+    返回 {info_bits(91), crc_bits(14), data_bits(77), iters, converged,
+          costas_score}。
     CRC14 校验是否通过由调用方用 chkcrc 逻辑判定（本函数给出原始位）。
+    full_tones 为 79 符号硬判决音调序列（可选）；提供时据此计算 costas_score，
+    否则 costas_score 置 0.0（无 Costas 同步信息）。
     """
     llr_cw = soft_tones_to_llr(tone_energies)
     llr_ldpc = reorder_to_ldpc(llr_cw)
@@ -74,6 +101,7 @@ def decode_ft8_payload(tone_energies: Sequence[Sequence[float]],
         "codeword": cw,
         "iters": iters,
         "crc_ok": check_crc14(info),
+        "costas_score": costas_correlation(full_tones) if full_tones is not None else 0.0,
     }
 
 
@@ -92,8 +120,12 @@ _CRC_P = [1, 1, 0, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1]
 
 
 def crc14(msg_bits: Sequence[int]) -> int:
-    """对 77 个消息位计算 14 bit CRC（多项式 0x6757）。"""
-    mc = [int(b) for b in msg_bits] + [0] * 14
+    """对 77 个消息位计算 14 bit CRC（多项式 0x6757）。
+
+    WSJT-X 标准：77 bit 消息写入 12 字节(96bit)，尾部 19 bit 补零
+    （5 bit 零填充 + 14 bit CRC 字段），CRC 在全部 96 bit 上做多项式除法。
+    """
+    mc = [int(b) for b in msg_bits] + [0] * 5 + [0] * 14  # 77+5+14=96
     r = mc[:15]
     for i in range(0, len(mc) - 14):
         r[14] = mc[i + 14] if i + 14 < len(mc) else 0
@@ -107,11 +139,12 @@ def crc14(msg_bits: Sequence[int]) -> int:
 
 
 def check_crc14(info_bits: Sequence[int]) -> bool:
-    """校验 91 位（77 消息 + 14 CRC）。余数为 0 即通过。"""
-    mc = [int(b) for b in info_bits]
+    """校验 91 位（77 消息 + 14 CRC）：组装成 96 bit 块后求余，余数为 0 即通过。"""
+    info = [int(b) for b in info_bits]
+    mc = info[:77] + [0] * 5 + info[77:91]  # 77+5+14=96
     r = mc[:15]
     for i in range(0, len(mc) - 14):
-        r[14] = mc[i + 14]
+        r[14] = mc[i + 14] if i + 14 < len(mc) else 0
         if r[0]:
             r = [(r[k] ^ _CRC_P[k]) for k in range(15)]
         r = r[1:] + r[:1]

@@ -690,7 +690,7 @@ def test_amr_module(result, agent):
 
         stats = amr.get_stats()
         result.record("训练样本数 >= 40", stats["total_samples"] >= 40, f"实际 {stats['total_samples']}")
-        result.record("特征维度 = 24", stats["n_features"] == 24)
+        result.record("特征维度 = 25", stats["n_features"] == 25)
 
         fm_samples = []
         for t in range(500):
@@ -699,7 +699,7 @@ def test_amr_module(result, agent):
             fm_samples.append(complex(math.cos(phase), math.sin(phase)))
 
         feature = amr.extract_features_from_iq(fm_samples, sample_rate=1.0)
-        result.record("特征提取（24维）", len(feature.to_list()) == 24)
+        result.record("特征提取（25维）", len(feature.to_list()) == 25)
         result.record("幅度特征", feature.mean_amplitude > 0)
         result.record("过零率", 0 <= feature.zero_crossing_rate <= 1)
 

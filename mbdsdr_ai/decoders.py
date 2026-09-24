@@ -142,72 +142,76 @@ def compute_satellite_position(
     line1, line2, _src = _resolve_tle(satellite_name)
     satellite = Satrec.twoline2rv(line1, line2)
 
-    # 计算卫星位置（ECI 坐标系，单位 km）
-    e, r, v = satellite.sgp4(jd, fr)
+    # 计算卫星位置（TEME/ECI 坐标系，单位 km）
+    e, r_teme, v_teme = satellite.sgp4(jd, fr)
     if e != 0:
         return None
 
-    sat_x, sat_y, sat_z = r  # km
+    # TEME -> ECEF：绕 z 轴转 -GMST
+    jd_utc = timestamp / 86400.0 + 2440587.5
+    t_ut1 = (jd_utc - 2451545.0) / 36525.0
+    gmst_sec = (67310.54841 + (876600.0 * 3600.0 + 8640184.812866) * t_ut1
+                + 0.093104 * t_ut1 * t_ut1 - 6.2e-6 * t_ut1 ** 3)
+    gmst = math.radians((gmst_sec % 86400.0) / 240.0) % (2.0 * math.pi)
+    cg, sg = math.cos(-gmst), math.sin(-gmst)
+    sat_x = cg * r_teme[0] - sg * r_teme[1]
+    sat_y = sg * r_teme[0] + cg * r_teme[1]
+    sat_z = r_teme[2]
 
-    # 简化：将 ECI 转换为观测点的仰角/方位角
-    # （完整实现需要考虑地球自转，这里用简化的球面几何）
+    # 速度 TEME -> ECEF（含 Coriolis：v_ECEF = R·v_TEME - Ω×r）
+    omega_earth = 7.2921159e-5
+    vx = cg * v_teme[0] - sg * v_teme[1] + omega_earth * sat_y
+    vy = sg * v_teme[0] + cg * v_teme[1] - omega_earth * sat_x
+    vz = v_teme[2]
 
-    # 观测点的 ECEF 位置（简化，不考虑地球自转）
+    # 观测点 ECEF（WGS84 椭球）
     obs_lat_rad = math.radians(observer_lat)
     obs_lon_rad = math.radians(observer_lon)
     earth_radius = 6378.137  # km
+    ecc2 = 0.00669437999014
+    sin_lat = math.sin(obs_lat_rad)
+    cos_lat = math.cos(obs_lat_rad)
+    n = earth_radius / math.sqrt(1.0 - ecc2 * sin_lat * sin_lat)
+    alt_km = observer_alt / 1000.0
+    obs_x = (n + alt_km) * cos_lat * math.cos(obs_lon_rad)
+    obs_y = (n + alt_km) * cos_lat * math.sin(obs_lon_rad)
+    obs_z = (n * (1.0 - ecc2) + alt_km) * sin_lat
 
-    obs_x = (earth_radius + observer_alt / 1000.0) * math.cos(obs_lat_rad) * math.cos(obs_lon_rad)
-    obs_y = (earth_radius + observer_alt / 1000.0) * math.cos(obs_lat_rad) * math.sin(obs_lon_rad)
-    obs_z = (earth_radius + observer_alt / 1000.0) * math.sin(obs_lat_rad)
-
-    # 卫星相对于观测点的位置
+    # 站心矢量
     dx = sat_x - obs_x
     dy = sat_y - obs_y
     dz = sat_z - obs_z
     distance = math.sqrt(dx * dx + dy * dy + dz * dz)
 
-    # 计算仰角（简化：卫星相对于观测点的高度角）
-    # 观测点的法向量
-    nx = math.cos(obs_lat_rad) * math.cos(obs_lon_rad)
-    ny = math.cos(obs_lat_rad) * math.sin(obs_lon_rad)
-    nz = math.sin(obs_lat_rad)
+    # ENU 变换（正确基向量）
+    sin_lon, cos_lon = math.sin(obs_lon_rad), math.cos(obs_lon_rad)
+    east_comp = -sin_lon * dx + cos_lon * dy
+    north_comp = -sin_lat * cos_lon * dx - sin_lat * sin_lon * dy + cos_lat * dz
+    up_comp = cos_lat * cos_lon * dx + cos_lat * sin_lon * dy + sin_lat * dz
 
-    # 卫星方向向量（归一化）
-    rx, ry, rz = dx / distance, dy / distance, dz / distance
+    elevation = math.degrees(math.asin(max(-1.0, min(1.0, up_comp / distance)))) if distance > 0 else 0.0
+    azimuth = (math.degrees(math.atan2(east_comp, north_comp)) + 360.0) % 360.0
 
-    # 仰角 = 90 - 卫星方向与法向量的夹角
-    dot = rx * nx + ry * ny + rz * nz
-    elevation = math.degrees(math.asin(max(-1, min(1, dot))))
+    # 视线速度 = 卫星 ECEF 速度投影到站星方向
+    if distance > 0:
+        range_rate = (vx * dx + vy * dy + vz * dz) / distance  # km/s, 远离为正
+    else:
+        range_rate = 0.0
 
-    # 方位角（简化计算）
-    east = -math.sin(obs_lon_rad)
-    north = -math.sin(obs_lat_rad) * math.cos(obs_lon_rad)
-    up = math.cos(obs_lat_rad) * math.cos(obs_lon_rad)
-
-    east_comp = rx * east + ry * (-math.cos(obs_lon_rad)) + rz * 0
-    north_comp = rx * north + ry * (-math.sin(obs_lat_rad) * math.sin(obs_lon_rad)) + rz * math.cos(obs_lat_rad)
-
-    azimuth = math.degrees(math.atan2(east_comp, north_comp))
-    if azimuth < 0:
-        azimuth += 360
-
-    # 多普勒频移（简化：基于径向速度）
+    # 多普勒频移
     if satellite_name in SATELLITE_FREQUENCIES:
         freq_hz = SATELLITE_FREQUENCIES[satellite_name] * 1e6
-        # 径向速度（简化，用位置差近似）
-        radial_velocity = 0  # km/s，简化为 0，实际需要速度向量
-        # 多普勒 = f0 * v/c
         c = 299792.458  # km/s
-        doppler = freq_hz * radial_velocity / c
+        doppler = freq_hz * range_rate / c
     else:
         doppler = 0.0
         freq_hz = 0
 
-    # 卫星的经纬度（简化，从 ECI 近似）
+    # 卫星经纬度（从 ECEF 反算，简化为球坐标）
     sat_lon = math.degrees(math.atan2(sat_y, sat_x))
-    sat_lat = math.degrees(math.asin(sat_z / math.sqrt(sat_x**2 + sat_y**2 + sat_z**2)))
-    sat_alt = math.sqrt(sat_x**2 + sat_y**2 + sat_z**2) - earth_radius
+    sat_r = math.sqrt(sat_x**2 + sat_y**2 + sat_z**2)
+    sat_lat = math.degrees(math.asin(sat_z / sat_r)) if sat_r > 0 else 0.0
+    sat_alt = sat_r - earth_radius
 
     return SatellitePass(
         name=satellite_name,

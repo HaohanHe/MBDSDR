@@ -308,6 +308,25 @@ class MBDSDRAgent:
         import urllib.parse
         import subprocess
 
+        def _is_private_ip(host: str) -> bool:
+            """解析主机名并判断是否指向内网/回环地址（SSRF 防护）。"""
+            import ipaddress
+            import socket
+            try:
+                infos = socket.getaddrinfo(host, None)
+            except socket.gaierror:
+                return True  # 无法解析则拒绝，避免 DNS rebinding 后绕过
+            for info in infos:
+                ip_str = info[4][0]
+                try:
+                    ip = ipaddress.ip_address(ip_str)
+                except ValueError:
+                    continue
+                if (ip.is_private or ip.is_loopback or ip.is_link_local
+                        or ip.is_reserved or ip.is_multicast):
+                    return True
+            return False
+
         def _fetch(args):
             url = (args.get("url") or "").strip()
             if not url:
@@ -315,6 +334,12 @@ class MBDSDRAgent:
             p = urllib.parse.urlparse(url)
             if p.scheme not in ("http", "https"):
                 return ToolResult(False, f"只允许 http/https，收到 {p.scheme!r}")
+            host = p.hostname
+            if not host:
+                return ToolResult(False, "URL 缺少主机名")
+            # SSRF 防护：拒绝内网/回环/链路本地 IP
+            if _is_private_ip(host):
+                return ToolResult(False, f"安全限制：拒绝访问内网/回环地址 {host!r}")
             max_bytes = min(int(args.get("max_bytes", 200000)), 500000)
             try:
                 req = urllib.request.Request(url, headers={"User-Agent": "MBDSDR/1.0"})

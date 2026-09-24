@@ -232,12 +232,40 @@ class MBSDRAIMCPServer:
         arguments = params.get("arguments", {})
         return self.call_tool(name, arguments)
 
-    def handle_request(self, request: Dict) -> Optional[Dict]:
+    def handle_request(self, request) -> Optional[Dict]:
         """
-        处理一条 JSON-RPC 请求。
+        处理一条 JSON-RPC 请求（支持单条 dict 或批量 list）。
 
-        返回响应 dict，或 None (通知消息无响应)。
+        返回响应 dict（或批量 list），或 None (通知消息无响应)。
+        非 dict/非 list 的 JSON 载荷返回 JSON-RPC 错误而不是崩溃。
         """
+        # 批量请求：JSON-RPC 2.0 允许 array 批量
+        if isinstance(request, list):
+            responses = []
+            for req in request:
+                if not isinstance(req, dict):
+                    responses.append({
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": {"code": -32600, "message": "Invalid Request: expected object"},
+                    })
+                    continue
+                resp = self._handle_single(req)
+                if resp is not None:
+                    responses.append(resp)
+            return responses if responses else None
+
+        if not isinstance(request, dict):
+            return {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32600, "message": "Invalid Request: expected object or array"},
+            }
+
+        return self._handle_single(request)
+
+    def _handle_single(self, request: Dict) -> Optional[Dict]:
+        """处理单条 JSON-RPC 请求。"""
         method = request.get("method", "")
         request_id = request.get("id")
 
@@ -296,9 +324,22 @@ class MBSDRAIMCPServer:
                 self._log(f"JSON 解析失败: {line[:100]}")
                 continue
 
-            response = self.handle_request(request)
+            try:
+                response = self.handle_request(request)
+            except Exception as e:
+                self._log(f"处理请求异常: {e}")
+                continue
+
             if response is not None:
-                print(json.dumps(response, ensure_ascii=False), flush=True)
+                try:
+                    print(json.dumps(response, ensure_ascii=False), flush=True)
+                except BrokenPipeError:
+                    # 客户端已断开，正常退出
+                    self._log("客户端断开 (BrokenPipe)，退出")
+                    break
+                except Exception as e:
+                    self._log(f"写入响应失败: {e}")
+                    break
 
         self._log("MCP 服务器退出")
 

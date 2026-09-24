@@ -37,9 +37,9 @@ DATA_BITS_SHORT = 56
 CRC_POLY = 0xFFF409  # Mode-S 24 位 CRC 生成多项式（低 24 位）
 
 # Mode-S 6-bit 呼号字符表（ICAO Annex 10），索引即 6 bit 编码。
-# idx0=space, 1-26=A-Z, 27-31=space, 32-41=0-9, 42-46=..=+:, 47=?, 其余 space
-CHARSET = (" " + "ABCDEFGHIJKLMNOPQRSTUVWXYZ" + " " * 5 +
-           "0123456789" + "..=+:?" + " " * 16)
+# idx0=@(空格/填充), 1-26=A-Z, 27-31=[\]^_, 32=空格,
+# 33-47=!"#$%&'()*+,-./, 48-57=0-9, 58-63=:;<=>?
+CHARSET = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_ !\"#$%&'()*+,-./0123456789:;<=>?"
 
 
 def _bytes_to_bits(data: bytes) -> List[int]:
@@ -78,22 +78,35 @@ def mode_s_crc24(bits: List[int]) -> int:
 
 
 def encode_callsign(callsign: str) -> bytes:
-    """把最多 6 字符航班号编码为 6 字节（每字符 6 bit），不足右侧补空格。"""
-    cs = callsign.upper().ljust(6)[:6]
-    out = bytearray()
+    """把最多 8 字符航班号按 6bit/字符打包为 6 字节，不足右侧补空格(idx32)。"""
+    cs = callsign.upper().ljust(8)[:8]
+    bits = []
     for ch in cs:
-        if ch not in CHARSET:
-            ch = " "
-        out.append(CHARSET.index(ch))
+        idx = CHARSET.index(ch) if ch in CHARSET else 32  # 空格
+        for b in range(5, -1, -1):
+            bits.append((idx >> b) & 1)
+    out = bytearray()
+    for i in range(0, 48, 8):
+        byte = 0
+        for b in range(8):
+            byte = (byte << 1) | bits[i + b]
+        out.append(byte)
     return bytes(out)
 
 
 def decode_callsign(six_bytes: bytes) -> str:
-    chars = []
+    """从 6 字节(48bit)中按 6bit/字符解出 8 字符呼号。"""
+    bits = []
     for byte in six_bytes:
-        idx = byte & 0x3F
+        for i in range(7, -1, -1):
+            bits.append((byte >> i) & 1)
+    chars = []
+    for i in range(0, 48, 6):
+        idx = 0
+        for b in range(6):
+            idx = (idx << 1) | bits[i + b]
         chars.append(CHARSET[idx] if idx < len(CHARSET) else " ")
-    return "".join(chars).strip()
+    return "".join(chars).replace("@", " ").strip()
 
 
 def build_identification_frame(icao_hex: str, callsign: str,
@@ -205,7 +218,7 @@ def decode_baseband(iq: np.ndarray, fs: float = 4e6,
         back = env[s + chip:s + 2 * chip].sum()
         bits.append(1 if front > back else 0)
     raw = _bits_to_bytes(bits)
-    crc_ok = (mode_s_crc24(bits) == 0) if len(bits) == DATA_BITS_LONG else False
+    crc_ok = (mode_s_crc24(bits) == 0)
     result: Dict[str, Any] = {
         "found": True,
         "crc_ok": bool(crc_ok),
