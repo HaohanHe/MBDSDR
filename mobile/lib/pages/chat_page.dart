@@ -95,14 +95,11 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('AI 对话')),
-      body: Column(
-        children: [
-          Expanded(child: _buildMessageList()),
-          _buildInputArea(),
-        ],
-      ),
+    return Column(
+      children: [
+        Expanded(child: _buildMessageList()),
+        _buildInputArea(),
+      ],
     );
   }
 

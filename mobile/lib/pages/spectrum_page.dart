@@ -52,9 +52,9 @@ class _SpectrumPageState extends State<SpectrumPage> {
         final lowFreq = conn.centerFreqMhz - conn.spanMhz / 2;
         final highFreq = conn.centerFreqMhz + conn.spanMhz / 2;
 
-        return Scaffold(
-          backgroundColor: const Color(0xFF1A1A1A),
-          body: SafeArea(
+        return Container(
+          color: const Color(0xFF1A1A1A),
+          child: SafeArea(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
