@@ -664,6 +664,145 @@ class ToolRegistry:
         #       plugins/meteor_support, plugins/noaa_metop_support（见 mbdsdr_ai/satdump_adapter.py）
         self.register_satdump_tools()
 
+        # ── minimodem 真实 FSK 调制解调工具 ──
+        # 来源: repos/minimodem/src/{fsk.c,minimodem.c,baudot.c,databits_ascii.c}
+        self.register_minimodem_tools()
+
+    def register_minimodem_tools(self):
+        """注册 minimodem 真实移植的通用软件 FSK 调制解调工具。
+
+        移植自 repos/minimodem/src/（GPLv3, Kamal Mostafa）：
+          - fsk.c            FSK 调制/FFT-bin 判决解调
+          - minimodem.c:81   fsk_transmit_frame 帧结构
+          - minimodem.c:900-921 Bell 103/202 频率预设
+          - databits_ascii.c 8N1 UART 数据位
+          - baudot.c         ITA-2 Baudot 字母/数字换档
+        """
+        self.register(
+            name="fsk_modulate",
+            description="FSK 调制：把 0/1 比特流调制成单声道音频。"
+                        "默认 Bell 103 (300bps, mark=1270/space=1070Hz)；baud>=400 自动 Bell 202。",
+            parameters={"type": "object", "properties": {
+                "bits": {"type": "array", "items": {"type": "integer"}, "description": "0/1 比特"},
+                "baud": {"type": "number", "description": "比特率 bps", "default": 300},
+                "mark_freq": {"type": "number", "description": "mark 频率 Hz（可选，默认按 Bell 预设）"},
+                "space_freq": {"type": "number", "description": "space 频率 Hz（可选）"},
+                "sample_rate": {"type": "number", "description": "采样率 Hz", "default": 48000}
+            }, "required": ["bits"]},
+            handler=lambda args: self._fsk_modulate_handler(args),
+            category="digital_modes",
+        )
+        self.register(
+            name="fsk_demodulate",
+            description="FSK 解调：把单声道音频解回 0/1 比特流与置信度（FFT-bin 幅度判决）。",
+            parameters={"type": "object", "properties": {
+                "samples": {"type": "array", "items": {"type": "number"}, "description": "音频采样"},
+                "baud": {"type": "number", "description": "比特率 bps", "default": 300},
+                "mark_freq": {"type": "number", "description": "mark 频率 Hz（可选）"},
+                "space_freq": {"type": "number", "description": "space 频率 Hz（可选）"},
+                "n_bits": {"type": "integer", "description": "期望比特数（可选）"},
+                "sample_rate": {"type": "number", "description": "采样率 Hz", "default": 48000}
+            }, "required": ["samples"]},
+            handler=lambda args: self._fsk_demodulate_handler(args),
+            category="digital_modes",
+        )
+        self.register(
+            name="baudot_encode",
+            description="Baudot/ITA-2 (RTTY) 字符串编码为 5bit 字序列，自动处理字母/数字换档。",
+            parameters={"type": "object", "properties": {
+                "text": {"type": "string", "description": "输入文本"}
+            }, "required": ["text"]},
+            handler=lambda args: self._baudot_encode_handler(args),
+            category="digital_modes",
+        )
+        self.register(
+            name="baudot_decode",
+            description="Baudot/ITA-2 (RTTY) 5bit 字序列解码为字符串，自动处理字母/数字换档。",
+            parameters={"type": "object", "properties": {
+                "words": {"type": "array", "items": {"type": "integer"}, "description": "5bit 字序列"}
+            }, "required": ["words"]},
+            handler=lambda args: self._baudot_decode_handler(args),
+            category="digital_modes",
+        )
+        self.register(
+            name="minimodem_decode_audio",
+            description="minimodem 完整收音频：FSK 解调后按帧还原文本（codec=ascii 用 8N1 UART，baudot 用 5bit ITA-2）。",
+            parameters={"type": "object", "properties": {
+                "samples": {"type": "array", "items": {"type": "number"}, "description": "音频采样"},
+                "baud": {"type": "number", "description": "比特率 bps", "default": 300},
+                "codec": {"type": "string", "description": "ascii 或 baudot", "default": "ascii"},
+                "sample_rate": {"type": "number", "description": "采样率 Hz", "default": 48000}
+            }, "required": ["samples"]},
+            handler=lambda args: self._minimodem_decode_audio_handler(args),
+            category="digital_modes",
+        )
+
+    def _fsk_modulate_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        from .minimodem_adapter import fsk_modulate
+        bits = list(args.get("bits", []))
+        audio = fsk_modulate(
+            bits,
+            baud=args.get("baud", 300),
+            mark_freq=args.get("mark_freq"),
+            space_freq=args.get("space_freq"),
+            sample_rate=args.get("sample_rate", 48000),
+        )
+        return ToolResult(
+            success=True,
+            content=f"FSK 调制: {len(bits)} bits → {len(audio)} 采样 "
+                    f"(baud={args.get('baud', 300)})",
+            data={"audio": audio, "n_samples": len(audio)},
+        )
+
+    def _fsk_demodulate_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        from .minimodem_adapter import fsk_demodulate
+        res = fsk_demodulate(
+            args.get("samples", []),
+            baud=args.get("baud", 300),
+            mark_freq=args.get("mark_freq"),
+            space_freq=args.get("space_freq"),
+            n_bits=args.get("n_bits"),
+            sample_rate=args.get("sample_rate", 48000),
+        )
+        return ToolResult(
+            success=True,
+            content=f"FSK 解调: {len(res['bits'])} bits (conf={res['confidence']:.2f}) "
+                    f"mark={res['mark_freq']:.0f}Hz space={res['space_freq']:.0f}Hz",
+            data=res,
+        )
+
+    def _baudot_encode_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        from .minimodem_adapter import baudot_encode
+        words = baudot_encode(args.get("text", ""))
+        return ToolResult(
+            success=True,
+            content=f"Baudot 编码: '{args.get('text','')}' → {len(words)} 个 5bit 字",
+            data={"words": words, "n_words": len(words)},
+        )
+
+    def _baudot_decode_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        from .minimodem_adapter import baudot_decode
+        text = baudot_decode(list(args.get("words", [])))
+        return ToolResult(
+            success=True,
+            content=f"Baudot 解码: '{text}'",
+            data={"text": text},
+        )
+
+    def _minimodem_decode_audio_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        from .minimodem_adapter import minimodem_decode_audio
+        res = minimodem_decode_audio(
+            args.get("samples", []),
+            baud=args.get("baud", 300),
+            sample_rate=args.get("sample_rate", 48000),
+            codec=args.get("codec", "ascii"),
+        )
+        return ToolResult(
+            success=True,
+            content=f"minimodem 解码: \"{res['text']}\" (conf={res['confidence']:.2f})",
+            data=res,
+        )
+
     def register_satdump_tools(self):
         """注册 SatDump 真实源码移植的卫星图像工具。
 
