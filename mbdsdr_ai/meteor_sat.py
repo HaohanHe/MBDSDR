@@ -14,6 +14,7 @@ MBDSDR AI - 卫星接收与解码
 
 import numpy as np
 import logging
+import collections
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 
@@ -223,12 +224,15 @@ METEOR_SATS: Dict[str, MeteorSatParams] = {
         modulation="OQPSK",
         viterbi_rate=0.5,
         viterbi_K=7,
-        viterbi_g1=171,
-        viterbi_g2=133,
+        # 来源: SatDump viterbi27 CCSDS_R2_K7_POLYS / CCSDS 131.0-B —
+        # 本 ViterbiDecoder 按 reg 位掩码取值（bit0=输入），CCSDS K=7 r=1/2
+        # 多项式应写为 G1=0x4F(=79), G2=0x6D(=109)；此前误用八进制写法 171/133。
+        viterbi_g1=0x4F,   # 79,  g(D)=1+D+D^2+D^3+D^6
+        viterbi_g2=0x6D,   # 109, g(D)=1+D^2+D^3+D^5+D^6
         descrambler="NRZ-M",
         cadu_length=1024,
         orbital_type="LEO",
-        description="俄罗斯Meteor-M2极轨气象卫星",
+        description="俄罗斯Meteor-M2极轨气象卫星（LRPT 72kbaud QPSK）",
     ),
 
     # ===== 卫星电视 =====
@@ -324,6 +328,62 @@ def get_satellite_params(key: str) -> Optional[MeteorSatParams]:
 # 信号处理模块
 # ========================================================================
 
+# 来源: SatDump plugins/meteor_support/meteor/deint.h:9-10（改编自
+#        github.com/dbdexter-dev/meteor_decode）；交叉印证 NASA LRPT
+#        Demonstration Report: "36 interleaver branches, 2048 bits per
+#        elementary delay"。Meteor LRPT 在卷积编码(rate=1/2)之后做卷积交织，
+#        因此接收端必须在 Viterbi 之前先做卷积去交织，否则突发错误无法被
+#        Viterbi 纠正。
+LRPT_DEINT_BRANCHES = 36   # I = INTER_BRANCH_COUNT，去交织分支数
+LRPT_DEINT_DELAY = 2048    # J = INTER_BRANCH_DELAY，相邻分支的符号延迟
+
+
+def convolutional_interleave(data: np.ndarray,
+                              num_branches: int = LRPT_DEINT_BRANCHES,
+                              branch_delay: int = LRPT_DEINT_DELAY) -> np.ndarray:
+    """Forney 卷积交织器（发射端）。
+
+    输入符号按 num_branches 轮询分发到各分支；第 k 个分支的 FIFO 深度为
+    k*branch_delay，因此第 k 路相对第 0 路多延迟 k*branch_delay 个符号。
+    与 convolutional_deinterleave 互逆，级联总时延 = num_branches*(num_branches-1)*branch_delay。
+
+    来源: CCSDS 131.0-B 卷积交织；meteor_decode deint.cpp deinterleave() 的正向。
+    """
+    data = np.asarray(data)
+    # 分支 k 的延迟线深度 = k*branch_delay（预填零，模拟初始时延）
+    bufs = [collections.deque([0] * (k * branch_delay)) for k in range(num_branches)]
+    out = np.empty_like(data)
+    for n, sym in enumerate(data):
+        b = n % num_branches
+        bufs[b].append(sym)        # 压入当前符号
+        out[n] = bufs[b].popleft()  # 弹出延迟后的符号
+    return out
+
+
+def convolutional_deinterleave(data: np.ndarray,
+                               num_branches: int = LRPT_DEINT_BRANCHES,
+                               branch_delay: int = LRPT_DEINT_DELAY) -> np.ndarray:
+    """Forney 卷积去交织器（接收端，位于 Viterbi 之前）。
+
+    第 k 个分支的 FIFO 深度取 (num_branches-1-k)*branch_delay，与交织器互补，
+    从而把发射端打散到各分支的符号重新聚拢为原始顺序。
+    注意：开头 num_branches*(num_branches-1)*branch_delay 个输出为时延预热零，
+    之后才是有效数据（交给后续 Viterbi/帧同步吸收）。
+
+    来源: SatDump deint.cpp:60-89 deinterleave()；CCSDS 131.0-B。
+    """
+    data = np.asarray(data)
+    # 分支 k 延迟线深度 = (num_branches-1-k)*branch_delay（与交织器互补）
+    bufs = [collections.deque([0] * ((num_branches - 1 - k) * branch_delay))
+            for k in range(num_branches)]
+    out = np.empty_like(data)
+    for n, sym in enumerate(data):
+        b = n % num_branches
+        bufs[b].append(sym)
+        out[n] = bufs[b].popleft()
+    return out
+
+
 def qpsk_demodulate(iq: np.ndarray, sps: int) -> np.ndarray:
     """
     QPSK 解调（真实实现，委托给 demod.QPSKDemodulator）。
@@ -384,9 +444,10 @@ def demodulate_lrpt(iq: np.ndarray, sample_rate: float,
     链路：
       1. QPSK 解调（RRC 匹配滤波 → Costas 载波恢复 → Gardner 位同步 → 判决）
       2. 符号转比特（格雷码映射）
-      3. Viterbi 解码（K=7, r=1/2, G1=171/G2=133）
-      4. 解扰（CCDB 或 NRZ-M，按卫星参数选择）
-      5. CADU 帧提取（搜索 ASM 同步字）
+      3. 卷积去交织（Forney, I=36, J=2048；Viterbi 之前，见 deint.cpp）
+      4. Viterbi 解码（K=7, r=1/2, G1=0x4F/G2=0x6D = CCSDS R2 K7）
+      5. 解扰（CCDB 或 NRZ-M，按卫星参数选择）
+      6. CADU 帧提取（搜索 ASM 同步字）
 
     参数:
         iq: 复数 IQ 采样（已由前端下变频到基带）
@@ -411,14 +472,22 @@ def demodulate_lrpt(iq: np.ndarray, sample_rate: float,
     # 2. 符号转比特
     bits = q.symbols_to_bits(symbols).astype(np.float64)
 
-    # 3. Viterbi 解码（rate<1 时）
+    # 3. 卷积去交织（Viterbi 之前）
+    # 来源: SatDump plugins/meteor_support/meteor/deint.cpp:60-89 deinterleave() —
+    #        Meteor LRPT 在卷积编码后做卷积交织，接收端必须先去交织再 Viterbi；
+    #        否则突发错误无法被 Viterbi 纠正。I=36 分支, 相邻分支延迟 J=2048。
+    if sat_params.viterbi_rate < 1.0 and sat_params.viterbi_K > 0:
+        bits = convolutional_deinterleave(
+            bits, LRPT_DEINT_BRANCHES, LRPT_DEINT_DELAY).astype(np.float64)
+
+    # 4. Viterbi 解码（rate<1 时）
     if sat_params.viterbi_rate < 1.0 and sat_params.viterbi_K > 0:
         dec = ViterbiDecoder(K=sat_params.viterbi_K,
                              G1=sat_params.viterbi_g1,
                              G2=sat_params.viterbi_g2)
         bits = dec.decode(bits).astype(np.float64)
 
-    # 4. 解扰
+    # 5. 解扰
     if sat_params.descrambler == "CCDB":
         bits = _demod_descramble_ccdb(bits.astype(np.uint8)).astype(np.float64)
     elif sat_params.descrambler == "NRZ-M":

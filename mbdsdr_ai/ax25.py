@@ -54,18 +54,21 @@ KISS_CMD_FULLDUPLEX = 0x05
 KISS_CMD_SETHARDWARE = 0x06
 KISS_CMD_RETURN = 0xFF
 
-# APRS 数据类型标识符
-APRS_POSITION = '!'       # 位置（无时间戳/无消息）
-APRS_POSITION_MSG = '\''  # 位置（旧格式，有消息）
-APRS_POSITION_TIME = '/'  # 位置（有时间戳）
-APRS_STATUS = '>'         # 状态
-APRS_MESSAGE = ':'        # 消息
-APRS_WEATHER = '_'        # 气象（无位置）
-APRS_OBJECT = ';'         # 对象
-APRS_ITEM = ')'           # 项目
-APRS_TELEMETRY = 'T'     # 遥测
-APRS_QUERY = '?'          # 查询
-APRS_USERDEF = '{'        # 用户定义
+# APRS 数据类型标识符 (DTI)
+# 来源: direwolf decode_aprs.c:336-488 (aprs_tt.c DTI 表)
+APRS_POSITION = '!'       # 位置（无时间戳，无消息）   decode_aprs.c:338
+APRS_POSITION_MSG = '='   # 位置（无时间戳，有消息）   decode_aprs.c:341  (旧误标为 ' Mic-E)
+APRS_POSITION_TIME = '/'  # 位置（有时间戳，无消息）   decode_aprs.c:386
+APRS_POSITION_TIME_MSG = '@'  # 位置（有时间戳，有消息） decode_aprs.c:387
+APRS_STATUS = '>'         # 状态报告                  decode_aprs.c:440
+APRS_MESSAGE = ':'        # 消息 / bulletin / 遥测元数据 decode_aprs.c:394
+APRS_WEATHER = '_'        # 无位置气象报告            decode_aprs.c:459
+APRS_OBJECT = ';'         # Object                    decode_aprs.c:428
+APRS_ITEM = ')'           # Item                      decode_aprs.c:380
+APRS_TELEMETRY = 'T'     # 遥测                      decode_aprs.c:453
+APRS_QUERY = '?'          # 查询                      decode_aprs.c:447
+APRS_MIC_E = "'"          # Mic-E 压缩位置（旧格式）  decode_aprs.c:373
+APRS_USERDEF = '{'        # 用户自定义                decode_aprs.c:465
 APRS_THIRDPARTY = '}'     # 第三方流量
 
 
@@ -161,17 +164,20 @@ class AX25Frame:
         """将帧编码为字节流（不含首尾标志）。"""
         frame = bytearray()
 
-        # 目的地址（命令帧：AX.25 目的地址 SSID 字节 bit7 = C/R 命令位，须置 1）
-        is_last = len(self.digipeaters) == 0
-        dest_addr = bytearray(encode_address(self.destination, self.dest_ssid, is_last=is_last))
+        # 来源: direwolf ax25_pad.c:428,431,1253-1257 — 目的站 SSID 永远不是最后地址(L=0)；
+        # 只有地址字段的最后一个站 SSID 字节 bit0=1（HDLC 地址扩展位）。
+        # 之前 BUG: 把 is_last 传给目的站，无中继时目的站 bit0=1，direwolf
+        # ax25_get_num_addr 扫到第 7 字节就停，认为只有 1 个地址而拒收整帧。
+        # 目的地址（命令帧：C/R 位 bit7=1；目的站永远 is_last=False）
+        dest_addr = bytearray(encode_address(self.destination, self.dest_ssid, is_last=False))
         dest_addr[6] |= 0x80  # C-bit = 1（命令帧）
         frame += dest_addr
 
-        # 源地址
-        is_last = len(self.digipeaters) == 0
-        frame += encode_address(self.source, self.source_ssid, is_last=is_last)
+        # 源地址：无中继时源站是最后地址(L=1)；有中继时源站不是最后地址
+        src_is_last = (len(self.digipeaters) == 0)
+        frame += encode_address(self.source, self.source_ssid, is_last=src_is_last)
 
-        # 中继器地址
+        # 中继器地址：只有最后一个中继站是最后地址(L=1)
         for i, (call, ssid, repeated) in enumerate(self.digipeaters):
             is_last = (i == len(self.digipeaters) - 1)
             frame += encode_address(call, ssid, has_been_repeated=repeated, is_last=is_last)
@@ -413,6 +419,27 @@ class AFSKModem:
         mx = np.max(np.abs(audio))
         if mx > 0:
             audio = audio / mx
+        # 来源: direwolf demod_afsk.c:450-451,638-703 — 带通预滤波（1014–2386 Hz）。
+        # direwolf 用 FIR（prefilter_baud=0.155，f1=1200-186=1014, f2=2200+186=2386）。
+        # 这里用二阶 RBJ biquad 带通做等效预滤波，抑制带外噪声/邻道干扰。
+        bp_f0 = (self.mark_freq + self.space_freq) / 2.0  # 1700 Hz
+        bp_bw = (self.space_freq - self.mark_freq) + 2 * 0.155 * self.baud_rate  # 1372 Hz
+        bp_Q = bp_f0 / bp_bw
+        w0 = 2.0 * math.pi * bp_f0 / fsr
+        alpha = math.sin(w0) / (2.0 * bp_Q)
+        cos_w0 = math.cos(w0)
+        b0 = alpha; b1 = 0.0; b2 = -alpha
+        a0 = 1.0 + alpha; a1 = -2.0 * cos_w0; a2 = 1.0 - alpha
+        b0 /= a0; b1 /= a0; b2 /= a0; a1 /= a0; a2 /= a0
+        # 直接 II 型转置 biquad
+        x1 = x2 = y1 = y2 = 0.0
+        y = np.empty_like(audio)
+        for idx, x in enumerate(audio):
+            v = x - a1 * y1 - a2 * y2
+            yv = b0 * v + b1 * y1 + b2 * y2
+            x2 = x1; x1 = x; y2 = y1; y1 = yv
+            y[idx] = yv
+        audio = y
         # 尾部补若干位（延续末电平），保证帧结束标志完整落入采样窗
         pad_bits = int(round(spb * 24))
         audio = np.concatenate([audio, np.full(pad_bits, float(audio[-1]))])
@@ -489,12 +516,27 @@ class AFSKModem:
                     j += 8
                 frame_start = j
                 end = -1
+                aborted = False
+                ones_run = 0
                 k2 = frame_start
                 while k2 < total_bits - 8:
+                    # 来源: direwolf hdlc_rec.c:677, hdlc_rec2.c:684 — Abort 序列 0xFE
+                    # 连续 7 个 1 (>=7) 表示帧异常终止，丢弃当前帧，不继续解析。
+                    if raw_bits[k2] == 1:
+                        ones_run += 1
+                        if ones_run >= 7:
+                            aborted = True
+                            break
+                    else:
+                        ones_run = 0
                     if _is_flag(raw_bits, k2):
                         end = k2
                         break
                     k2 += 1
+                if aborted:
+                    # abort：跳到 abort 之后继续找下一个 flag
+                    i = k2 + 1
+                    continue
                 if end < 0:
                     break
                 frame_bits = raw_bits[frame_start:end]

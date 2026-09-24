@@ -472,6 +472,42 @@ class RTLSDRBackend(SDRBackend):
     _TUNER_NAMES = {0: "Unknown", 1: "E4000", 2: "FC0013", 3: "FC0025",
                     4: "FC2580", 5: "R820T", 6: "R828D", 7: "R860", 8: "R2000"}
 
+    # 来源: librtlsdr src/librtlsdr.c:1100-1104 — 合法采样率区间为
+    # (225000, 300000] ∪ (900000, 3200000]，300k~900k 是死区（库直接返回 -EINVAL）。
+    # 常用档：低段 rtl_433 默认 250000（rtl_433/include/rtl_433.h:13），
+    # 高段常用 1000000/1024000/2400000。
+    _RTL_LOW_MAX = 300_000      # 低段上沿（合法）
+    _RTL_HIGH_MIN = 900_000     # 死区上沿（900000 本身非法，>900000 才合法）
+    _RTL_ABS_MAX = 3_200_000
+    _RTL_PREFERRED_LOW = 250_000   # rtl_433 默认
+    _RTL_PREFERRED_HIGH = 1_000_000  # 高段常用起点
+
+    @classmethod
+    def _clamp_sample_rate(cls, rate_hz: float) -> Tuple[float, bool]:
+        """把请求采样率钳位到 librtlsdr 合法区间。
+
+        合法: (225000, 300000] ∪ (900000, 3200000]。
+        死区 (300000, 900000] 内的值按中点 600k 二分：偏下钳到 250k，偏上钳到 1M。
+        低于 225k 钳到 250k；高于 3.2M 钳到 3.2M。
+
+        返回 (clamped_rate, was_clamped)。
+        """
+        r = float(rate_hz)
+        # 来源: librtlsdr src/librtlsdr.c:1100-1104 — 区间判定
+        low_ok = (225_000 < r <= cls._RTL_LOW_MAX)
+        high_ok = (cls._RTL_HIGH_MIN < r <= cls._RTL_ABS_MAX)
+        if low_ok or high_ok:
+            return r, False
+        # 死区或越界：钳位到最近常用合法档
+        if r <= 225_000:
+            return float(cls._RTL_PREFERRED_LOW), True
+        if r > cls._RTL_ABS_MAX:
+            return float(cls._RTL_ABS_MAX), True
+        # 死区 (300000, 900000]：以 600k 为界偏下偏上
+        if r < 600_000:
+            return float(cls._RTL_PREFERRED_LOW), True
+        return float(cls._RTL_PREFERRED_HIGH), True
+
     def __init__(self, device_index: int = 0, host: Optional[str] = None,
                  port: int = 1234, ppm: int = 0):
         device = SDRDevice(
@@ -479,7 +515,8 @@ class RTLSDRBackend(SDRBackend):
             device_id=f"rtl_{device_index}" if host is None else f"rtl_tcp_{host}_{port}",
             name=f"RTL-SDR #{device_index}" if host is None else f"rtl_tcp {host}:{port}",
             frequency_range=(500000, 1766000000),  # direct sampling 可下探至 ~0.5MHz
-            sample_rate_range=(250000, 3200000),
+            # 来源: librtlsdr src/librtlsdr.c:1100-1104 — 声明为两段合法区间而非连续范围
+            sample_rate_range=(225_001, 3_200_000),
             max_gain=49.6,
             supports_iq=True,
             supports_tx=False,
@@ -558,20 +595,56 @@ class RTLSDRBackend(SDRBackend):
         if self._sdr is None:
             return True
         self._sdr.center_freq = freq_hz
+        # 来源: librtlsdr src/librtlsdr.c:1702 — rtlsdr_reset_buffer；
+        # rtl_433 src/sdr.c:1706 — 换频后必须 reset_buffer，否则 USB 队列里
+        # 残留的旧频率 URB 会被当成新频数据读出。
+        try:
+            self._sdr.reset_buffer()
+        except Exception as e:
+            logger.warning(f"RTL-SDR reset_buffer 失败（忽略）: {e}")
         return True
 
     def _apply_sample_rate(self, rate_hz: float) -> bool:
         if self._sdr is None:
             return True
-        self._sdr.sample_rate = rate_hz
+        # 来源: librtlsdr src/librtlsdr.c:1100-1104 — 死区 (300k,900k] 非法，
+        # 先在软件层钳位到合法档，避免 pyrtlsdr 抛 EINVAL。
+        clamped, was = self._clamp_sample_rate(rate_hz)
+        if was:
+            logger.warning(
+                f"RTL-SDR 采样率 {rate_hz:.0f} Hz 落在 librtlsdr 死区/越界，"
+                f"已钳位到 {clamped:.0f} Hz")
+        try:
+            self._sdr.sample_rate = clamped
+        except Exception as e:
+            logger.warning(f"RTL-SDR 设置采样率 {clamped:.0f} 失败: {e}")
+            return False
+        # 来源: librtlsdr src/librtlsdr.c:1702 — 换采样率后也要 reset_buffer
+        try:
+            self._sdr.reset_buffer()
+        except Exception as e:
+            logger.warning(f"RTL-SDR reset_buffer 失败（忽略）: {e}")
         return True
 
     def _apply_gain(self, gain_db: float) -> bool:
         if self._sdr is None:
             return True
         try:
+            # 来源: librtlsdr include/rtl-sdr.h:253 + src/librtlsdr.c:1073 —
+            # 手动增益必须先 set_tuner_gain_mode(dev, 1)，再 set_tuner_gain()；
+            # rtl_433 src/sdr.c:1409 同样先切 manual 再设增益。
+            # pyrtlsdr 的 gain 属性接收 dB 浮点，内部自动查表并 ×10 转 0.1dB
+            # （等价 rtl_433 src/sdr.c:1396 atof*10），无需我们手动乘 10。
+            try:
+                self._sdr.set_manual_gain_mode(1)  # 1 = manual tuner gain
+            except Exception:
+                try:
+                    self._sdr.gain_mode = 1
+                except Exception:
+                    pass
             self._sdr.gain = float(gain_db)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"RTL-SDR 设置增益 {gain_db} dB 失败: {e}")
             return False
         return True
 
@@ -607,6 +680,18 @@ class RTLSDRBackend(SDRBackend):
             return False
         if self._sdr:
             try:
+                # 来源: librtlsdr include/rtl-sdr.h:253 + src/librtlsdr.c:1073 —
+                # tuner gain mode: 0=auto(AGC), 1=manual。
+                # 开 AGC 时显式切 tuner 到 auto；关 AGC 时由后续 _apply_gain 切回 manual。
+                # 注意这是 tuner 前端 AGC，与下面的 RTL2832 数字 AGC 相互独立
+                # （librtlsdr src/librtlsdr.c:1157 set_agc_mode）。
+                try:
+                    self._sdr.set_manual_gain_mode(0 if enabled else 1)
+                except Exception:
+                    try:
+                        self._sdr.gain_mode = 0 if enabled else 1
+                    except Exception:
+                        pass
                 self._sdr.set_agc_mode(bool(enabled))
             except Exception:
                 try:

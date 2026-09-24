@@ -176,36 +176,65 @@ class IQCalibrator:
 
 def decimate(x: np.ndarray, factor: int) -> np.ndarray:
     """
-    整数抽取：先 Hanning 窗 sinc 低通抗混叠，再每 factor 取 1。
+    整数抽取：先抗混叠低通，再每 factor 取 1。
 
-    这是 DDC（数字下变频）的末级。
+    这是 DDC（数字下变频）的末级。对照 GNU Radio rational_resampler 的
+    多相滤波结构（gr-blocks/lib/rational_resampler_base_cc.cc）：
+    抽取前必须先把 |f| > fs_out/2 的分量滤掉，否则高频会折叠混叠到基带，
+    严重劣化解调质量。本实现用 Kaiser 窗 FIR 做抗混叠低通，截止 = fs_out/2，
+    留 ~20% 过渡带，抽头数取 kaiserord 与 32*factor 的较大者。
     """
     if factor <= 1:
         return x
 
-    # 设计低通滤波器（截止频率 0.5/factor）
-    num_taps = min(64, len(x) // 4)
-    if num_taps < 4:
-        # 样本太少，直接抽取
+    n = len(x)
+    if n == 0:
+        return x
+
+    # 样本太少：凑不齐滤波器阶数，退化为直接抽取（避免边缘瞬态主导输出）
+    if n < 8 * factor:
         return x[::factor]
 
-    t = np.arange(num_taps) - (num_taps - 1) / 2
-    # sinc 低通
-    h = np.sinc(2 * t / factor) / factor
-    # Hanning 窗
-    h *= np.hanning(num_taps)
-    # 归一化
-    h /= np.sum(h)
+    # 来源: GNU Radio rational_resampler_base_cc.cc:43-74 (design_resampler_filter)
+    # — 抽取前必须抗混叠低通：截止 = 输出 Nyquist = fs/(2*factor)，留 ~20% 过渡带
+    # 归一化频率单位：输入 Nyquist = 1.0；折叠频率 = 1/factor（输入 Nyquist 单位）
+    stopband_edge = 1.0 / factor          # 阻带边缘：从此处开始全部折叠，必须衰减
+    trans = 0.2 / factor                  # 20% 过渡带
+    passband_edge = stopband_edge - trans  # 通带边缘
+    cutoff = (passband_edge + stopband_edge) / 2.0  # -6dB 截止
+    ripple_db = 60.0                      # 阻带衰减（Kaiser 窗 ~60dB）
 
-    # 滤波
-    if x.dtype in (np.complex64, np.complex128):
-        i_filtered = np.convolve(x.real, h, mode='same')
-        q_filtered = np.convolve(x.imag, h, mode='same')
-        filtered = i_filtered + 1j * q_filtered
-    else:
-        filtered = np.convolve(x, h, mode='same')
+    try:
+        from scipy.signal import kaiserord, firwin, lfilter
+        numtaps, beta = kaiserord(ripple_db, trans)
+        # 工程经验：FIR 阶数至少 32*factor（任务规格），取 kaiserord 与 32*factor 较大者
+        numtaps = max(numtaps, 32 * factor)
+        # 偶数阶 → 奇数抽头（Type I 线性相位 FIR）
+        if numtaps % 2 == 0:
+            numtaps += 1
+        # 抽头数不能超过信号长度的 ~1/3，否则边缘瞬态主导输出
+        numtaps = min(numtaps, max(8, n // 3))
+        if numtaps % 2 == 0:
+            numtaps -= 1
+        taps = firwin(numtaps, cutoff, window=('kaiser', beta), scale=True)
+        # 因果 FIR 滤波（scipy lfilter 对复数数组自动处理 I/Q 两路）
+        filtered = lfilter(taps, 1.0, x)
+    except ImportError:
+        # scipy 不可用：numpy 兜底 sinc + Hanning 窗（抽头仍按 32*factor 量级取）
+        numtaps = min(max(32 * factor, 32), max(8, n // 3))
+        if numtaps % 2 == 0:
+            numtaps += 1
+        t = np.arange(numtaps) - (numtaps - 1) / 2
+        h = 2.0 * cutoff * np.sinc(2.0 * cutoff * t)
+        h *= np.hanning(numtaps)
+        h /= np.sum(h)
+        if x.dtype in (np.complex64, np.complex128):
+            filtered = (np.convolve(x.real, h, mode='same')
+                        + 1j * np.convolve(x.imag, h, mode='same'))
+        else:
+            filtered = np.convolve(x, h, mode='same')
 
-    # 抽取
+    # 滤波完成后再抽取（多相结构的等价离线实现）
     return filtered[::factor]
 
 
@@ -591,7 +620,9 @@ def write_csv(x: np.ndarray, path: str, decimation: int = 1):
     教学、表格审计用。建议配合大抽取。
     """
     if decimation > 1:
-        x = x[::decimation]
+        # 来源: GNU Radio rational_resampler_base_cc.cc — 降采样前必须抗混叠低通
+        # 不能裸 x[::decimation]，否则高频折叠到低频污染审计数据
+        x = decimate(x, decimation)
     with open(path, 'w') as f:
         f.write("I,Q\n")
         for sample in x:

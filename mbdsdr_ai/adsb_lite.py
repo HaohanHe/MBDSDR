@@ -23,7 +23,8 @@ from typing import List, Optional, Sequence
 
 import numpy as np
 
-# Mode S CRC 生成多项式（省略最高位 x^24）
+# 来源: dump1090 crc.c:28 — Mode S CRC-24 生成多项式（省略最高位 x^24），
+# 正确值是 0xFFF409，不是网上常被误写的 0xFFFA04
 MODES_CRC_GENERATOR = 0xFFF409
 
 # preamble 四个 0.5µs 脉冲的起始时刻（µs），数据从 8µs 开始
@@ -33,8 +34,10 @@ DATA_START_US = 8.0
 BIT_US = 1.0
 HALF_US = 0.5
 
-# ADS-B 6bit 字符表（TC1-4 呼号）
-_ADSB_CHAR = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ##### ###############0123456789######"
+# 来源: dump1090 ais_charset.c:4 — 完整 64 项 6bit 呼号字符表。
+# idx0=@(填充), 1-26=A-Z, 27=[, 28=\, 29=], 30=^, 31=_, 32=空格,
+# 33-47=!"#$%&'()*+,-./, 48-57=0-9, 58-63=:;<=>?
+_ADSB_CHAR = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_ !\"#$%&'()*+,-./0123456789:;<=>?"
 
 
 # --------------------------------------------------------------------------- #
@@ -270,17 +273,24 @@ def parse_frame(bits: Sequence[int], nbits: int, start_us: float,
         return None
     df = int("".join(str(b) for b in bits[0:5]), 2)
     crc_rem = crc24(bits, nbits)
-    # DF20/DF21: Address/Parity — crc 余数是 ICAO 地址，不要求 ==0
+    # 来源: dump1090 mode_s.c:587-597 — DF20/DF21 用 Address/Parity：
+    # 发送方把 ICAO XOR 进 CRC，接收机算出的 syndrome 本身就是地址，不要求 ==0
     if df in (20, 21) and nbits == 112:
         icao = crc_rem
         crc_ok = True  # Address/Parity 模式，余数即地址
-    # DF11: Parity/Interrogator — 低7bit为 IID，允许非零
+    # 来源: dump1090 mode_s.c:574,624-626 — DF11 用 Parity/Interrogator：
+    # ICAO 地址在明文 AA 域 bit8-32（不是从 syndrome 反推！）；
+    # syndrome 高 17bit 必须为 0，低 7bit 是询问器 IID（允许非零）
     elif df == 11 and nbits == 56:
-        icao = crc_rem & 0xFFFFFF80  # 高17bit为地址
+        if crc_rem & 0xFFFFFF80 != 0:
+            return None
+        icao = int("".join(str(b) for b in bits[8:32]), 2)
         crc_ok = True
     elif crc_rem != 0:
         return None
     else:
+        # 来源: dump1090 mode_s.c:624-626 — DF17/DF18 等：ICAO 在明文 AA 域
+        # bit8-32，II=0 时 syndrome==0 即 CRC 正确
         icao = int("".join(str(b) for b in bits[8:32]), 2)
         crc_ok = True
     ca = int("".join(str(b) for b in bits[5:8]), 2)
