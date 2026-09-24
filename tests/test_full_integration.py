@@ -816,9 +816,9 @@ def test_digital_modes(result: TestResult, agent: MBDSDRAgent):
     result.record("ADS-B 呼号解码", d.get("callsign") == "CCA123")
 
     # CRC 权威向量自检（MSB-first 长除法，完整 112bit 合法报文余 0）
-    from mbdsdr_ai.adsb import _bytes_to_bits
+    from mbdsdr_ai.adsb import bytes_to_bits
     auth = bytes.fromhex("8D406B902015A678D4D220AA4BDA")
-    result.record("ADS-B CRC 权威向量余数0", mode_s_crc24(_bytes_to_bits(auth)) == 0)
+    result.record("ADS-B CRC 权威向量余数0", mode_s_crc24(bytes_to_bits(auth)) == 0)
 
     # 产品层 decode_digital_mode 走 .cf32
     try:
