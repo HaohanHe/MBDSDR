@@ -223,6 +223,9 @@ class MBDSDRAgent:
         self._register_aprs_tools()
         self._register_ax25_tools()
         self._register_analog_demod_tools()
+        # GQRX 真实 AGC / IQ校正 / 接收机管道（来源 gqrx src/dsp/agc_impl.cpp 等）
+        from mbdsdr_ai.gqrx_receiver import register_gqrx_receiver_tools
+        register_gqrx_receiver_tools(self.tool_registry)
         self._register_wfm_stereo_tools()
         self._register_signal_quality_tools()
         self._register_orbit_tools()
