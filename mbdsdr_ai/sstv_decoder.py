@@ -311,7 +311,7 @@ def _detect_vis_header(freq: np.ndarray, sample_rate: int) -> Tuple[Optional[int
                 if not parity_ok:
                     # parity 失败时仍返回 vis_code，但标记不可信（调用方有时序兜底）
                     pass
-                data_start = vis_code_start + 9 * bit_samples
+                data_start = vis_code_start + 9 * bit_samples + int(sample_rate * 0.010)  # 10ms guard: skip VIS stop bit merging with first image sync
                 return vis_code, data_start
         i += 1
 
