@@ -591,6 +591,35 @@ class MBDSDRAgent:
             category="decode",
         )
 
+        def _ft8_encode(args):
+            text = (args.get("text") or "").strip()
+            if not text:
+                return ToolResult(False, "text 不能为空，如 'CQ BI4MIB OM74'")
+            from mbdsdr_ai.ft8_encode import encode_ft8_text
+            tones = encode_ft8_text(text)
+            return ToolResult(True, json.dumps({
+                "tones": tones, "n_tones": len(tones),
+                "note": "79 个 8FSK 音调索引(0-7)；3 个 Costas7 同步块在符号 0-6/36-42/72-78",
+            }, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="ft8_encode",
+            description="FT8 编码：把标准文本消息（如 'CQ BI4MIB OM74'、'BI4MIB K1ABC 73'、"
+                        "'BI4MIB K1ABC -17'）编码成 79 个 8FSK 音调索引。参数全部移植自 "
+                        "WSJT-X lib/ft8 真实源码（Costas7 同步、Gray 映射、CRC14、LDPC(174,91)）。"
+                        "与 ft8_soft_decode 互为往返。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string",
+                             "description": "标准消息文本，如 'CQ BI4MIB OM74'"},
+                },
+                "required": ["text"],
+            },
+            handler=_ft8_encode,
+            category="decode",
+        )
+
     def _register_spectrum_tools(self):
         """IQ 信号频谱分析：平均 PSD + 峰值保持 + 结构化峰列表（找台/找干扰源）。"""
         from mbdsdr_ai.signal_spectrum import analyze_iq_spectrum
@@ -673,6 +702,34 @@ class MBDSDRAgent:
                 "required": ["llr"],
             },
             handler=_fst4_decode,
+            category="decode",
+        )
+
+        def _fst4_encode(args):
+            text = (args.get("text") or "").strip()
+            if not text:
+                return ToolResult(False, "text 不能为空，如 'CQ BI4MIB OM74'")
+            from mbdsdr_ai.fst4_encode import encode_fst4_text
+            tones = encode_fst4_text(text)
+            return ToolResult(True, json.dumps({
+                "tones": tones, "n_tones": len(tones),
+                "note": "160 个 4FSK 音调索引(0-3)；5 个 8 符号同步块交替 isyncword1/2",
+            }, ensure_ascii=False))
+
+        self.tool_registry.register(
+            name="fst4_encode",
+            description="FST4 编码：把标准文本消息编码成 160 个 4FSK 音调索引。参数移植自 "
+                        "WSJT-X lib/fst4 真实源码（5×8 同步字、2bit Gray 映射、rvec 加扰、"
+                        "CRC24、LDPC(240,101)）。与 fst4_ldpc_decode / decode_fst4_message 互为往返。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string",
+                             "description": "标准消息文本，如 'CQ BI4MIB OM74'"},
+                },
+                "required": ["text"],
+            },
+            handler=_fst4_encode,
             category="decode",
         )
 

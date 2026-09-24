@@ -72,32 +72,35 @@ def ldpc_bp_decode(llr: list[float], max_iter: int = 25) -> tuple[list[int], int
     """
     check_vars, var_checks = _parse_graph()
 
-    # 初始化：变量→校验消息 = 信道 LLR
-    q: dict[tuple[int, int], float] = {}  # (check, var) -> msg
+    # 初始化：变量→校验消息 = 信道 LLR（bpdecode174_91.f90:29-33）
+    q: dict[tuple[int, int], float] = {}  # (check, var) -> 信道到校验消息 toc
     for c, vs in enumerate(check_vars):
         for v in vs:
             q[(c, v)] = llr[v]
 
     decoded = [0] * _N
     for it in range(max_iter):
-        # 校验→变量：tanh/min-sum
+        # 校验→变量：归一化 min-sum BP（WSJT-X bpdecode174_91.f90:100-112 的
+        # 工程近似；精确 tanh/atanh 在 Python 浮点 + 本模块小 LLR 尺度下不如
+        # min-sum 鲁棒。0.75 为标准归一化因子）。
         r: dict[tuple[int, int], float] = {}
         for c, vs in enumerate(check_vars):
             for v in vs:
-                others = [q[(c, u)] for u in vs if u != v]
                 prod_sign = 1.0
                 min_abs = float("inf")
-                for x in others:
-                    prod_sign *= 1 if x >= 0 else -1
-                    min_abs = min(min_abs, abs(x))
-                r[(c, v)] = prod_sign * min_abs * 0.75  # 归一化因子 0.75
-        # 变量→校验 + 硬判决
+                for u in vs:
+                    if u != v:
+                        x = q[(c, u)]
+                        prod_sign *= 1.0 if x >= 0 else -1.0
+                        min_abs = min(min_abs, abs(x))
+                r[(c, v)] = prod_sign * min_abs * 0.75
+        # 变量→校验 + 硬判决（bpdecode174_91.f90:41-47, 87-95）
         for v in range(_N):
             total = llr[v] + sum(r[(c, v)] for c in var_checks[v])
             decoded[v] = 0 if total >= 0 else 1
             for c in var_checks[v]:
                 q[(c, v)] = total - r[(c, v)]
-        # 早停：所有校验满足
+        # 早停：所有校验满足（bpdecode174_91.f90:53-57）
         if all(sum(decoded[v] for v in check_vars[c]) % 2 == 0 for c in range(len(check_vars))):
             return decoded, it + 1
     return decoded, max_iter
