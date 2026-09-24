@@ -666,9 +666,13 @@ class RTLSDRBackend(SDRBackend):
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
         if not self.status.connected or not self._sdr:
             return None
-        samples = self._sdr.read_samples(num_samples)
-        self._samples_read += num_samples
-        return samples
+        try:
+            samples = self._sdr.read_samples(num_samples)
+            self._samples_read += num_samples
+            return samples
+        except Exception:
+            # USB 拔出或设备错误，降级返回 None
+            return None
 
 
 class AISDRMiniBackend(SDRBackend):
@@ -785,9 +789,9 @@ class AISDRMiniBackend(SDRBackend):
             if "freq" in result:
                 self.status.frequency_hz = float(result["freq"]) * 1000000 if result.get("mode_name") == "FM" else float(result["freq"]) * 1000
             if "rssi" in result:
-                self.status.rssi = float(result["rssi"])
+                self.status.rssi_db = float(result["rssi"])
             if "snr" in result:
-                self.status.snr = float(result["snr"])
+                self.status.snr_db = float(result["snr"])
             if "volume" in result:
                 self.status.volume = int(result["volume"])
             if "mode_name" in result:
@@ -1170,6 +1174,10 @@ class SDRBackendManager:
     def __init__(self):
         self.backends: Dict[str, SDRBackend] = {}
         self.active_backend: Optional[SDRBackend] = None
+        # VFO（可变频率振荡器）管理：当前中心频点 + 多个监听频率预设
+        self.vfos: Dict[str, Dict] = {}  # vfo_id -> {name, frequency_hz, demod_mode, bandwidth_hz, active}
+        self._vfo_counter = 0
+        self.active_vfo_id: Optional[str] = None
         self._discover()
 
     def _discover(self):
@@ -1283,3 +1291,84 @@ class SDRBackendManager:
         if self.active_backend:
             return self.active_backend.get_status()
         return None
+
+    # ──────────────────────────────────────────────────────────
+    # VFO（可变频率振荡器）管理：监听频率预设列表
+    # ──────────────────────────────────────────────────────────
+
+    def vfo_add(self, name: str, frequency_hz: float, demod_mode: str = "FM",
+                bandwidth_hz: float = 12500) -> Optional[str]:
+        """添加一个 VFO。返回 vfo_id；参数非法时返回 None。"""
+        try:
+            if frequency_hz is None or float(frequency_hz) <= 0:
+                return None
+            self._vfo_counter += 1
+            vfo_id = f"vfo_{self._vfo_counter}"
+            self.vfos[vfo_id] = {
+                "vfo_id": vfo_id,
+                "name": str(name),
+                "frequency_hz": float(frequency_hz),
+                "demod_mode": str(demod_mode),
+                "bandwidth_hz": float(bandwidth_hz),
+                "active": False,
+            }
+            return vfo_id
+        except Exception:
+            return None
+
+    def vfo_remove(self, vfo_id: str) -> bool:
+        """删除一个 VFO。如果是当前激活的，先取消激活。不存在则返回 False。"""
+        try:
+            if vfo_id not in self.vfos:
+                return False
+            if self.active_vfo_id == vfo_id:
+                self.active_vfo_id = None
+            self.vfos.pop(vfo_id, None)
+            return True
+        except Exception:
+            return False
+
+    def vfo_list(self) -> List[Dict]:
+        """列出所有 VFO，每个包含 vfo_id, name, frequency_hz, demod_mode, bandwidth_hz, active。"""
+        try:
+            return [dict(v) for v in self.vfos.values()]
+        except Exception:
+            return []
+
+    def vfo_select(self, vfo_id: str) -> bool:
+        """切换到指定 VFO：设置 active_backend 的频率和解调模式，标记该 VFO 为 active。"""
+        try:
+            if vfo_id not in self.vfos:
+                return False
+            vfo = self.vfos[vfo_id]
+            # 切换时把之前 active 的 VFO 标记为非 active
+            for vid, v in self.vfos.items():
+                v["active"] = (vid == vfo_id)
+            self.active_vfo_id = vfo_id
+            # 应用到当前激活后端（若存在且已连接）
+            be = self.active_backend
+            if be is not None:
+                connected = getattr(getattr(be, "status", None), "connected", False)
+                if connected and hasattr(be, "set_frequency"):
+                    try:
+                        be.set_frequency(vfo["frequency_hz"])
+                    except Exception:
+                        pass
+                # set_demod 不存在时只设频率
+                if connected and hasattr(be, "set_demod"):
+                    try:
+                        be.set_demod(vfo["demod_mode"])
+                    except Exception:
+                        pass
+            return True
+        except Exception:
+            return False
+
+    def vfo_get_active(self) -> Optional[Dict]:
+        """获取当前激活的 VFO 信息。无激活 VFO 时返回 None。"""
+        try:
+            if self.active_vfo_id and self.active_vfo_id in self.vfos:
+                return dict(self.vfos[self.active_vfo_id])
+            return None
+        except Exception:
+            return None

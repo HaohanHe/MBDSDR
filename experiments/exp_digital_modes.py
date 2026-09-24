@@ -20,9 +20,11 @@
 """
 
 import argparse
+import json
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 
 import numpy as np
 from PIL import Image
@@ -228,6 +230,35 @@ def main():
     print("\nCSV:")
     for p in (p1, p2, p3):
         print(" ", p)
+
+    # --- 论文级 JSON 结论输出 ---
+    sstv_clean = next((r for r in sstv_rows if r["snr_db"] == "clean"), sstv_rows[0])
+    adsb_best = max(adsb_rows, key=lambda r: r["crc_pass_rate"])
+    result = {
+        "experiment": "digital_modes_sstv_adsb",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "config": {
+            "trials": args.trials,
+            "sstv_trials": args.sstv_trials,
+            "seed": args.seed,
+        },
+        "metrics": {
+            "sstv_clean_corr_mean": sstv_clean["corr_mean"],
+            "sstv_clean_success_rate": sstv_clean["success_rate"],
+            "adsb_best_crc_pass_rate": adsb_best["crc_pass_rate"],
+            "adsb_best_crc_pass_snr_db": adsb_best["snr_db"],
+            "adsb_false_alarm_rate": fa_row["crc_false_alarm_rate"],
+            "adsb_preamble_fa_rate": fa_row["preamble_false_alarm_rate"],
+        },
+        "samples": {
+            "sstv_trials_total": args.sstv_trials * len(sstv_rows),
+            "adsb_trials_total": args.trials * len(adsb_rows),
+            "adsb_fa_trials": max(args.trials, 500),
+        },
+        "output_files": [p1, p2, p3],
+    }
+    print("\n=== JSON RESULT ===")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

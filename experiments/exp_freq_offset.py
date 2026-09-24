@@ -13,8 +13,10 @@
 """
 import argparse
 import csv
+import json
 import os
 import sys
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -112,6 +114,7 @@ def exp_ppm(rng, fs, n, trials, out):
     for r in rows:
         print(f"    {r['ppm_at_100mhz']:>2} ppm ({r['true_cfo_hz']:>6.0f} Hz) "
               f"残余 RMS={r['rms_residual_hz']} Hz")
+    return rows
 
 
 def main():
@@ -125,10 +128,42 @@ def main():
 
     os.makedirs(args.out, exist_ok=True)
     rng = np.random.default_rng(args.seed)
-    exp_snr(rng, args.fs, args.n, args.trials, args.out)
+    snr_rows = exp_snr(rng, args.fs, args.n, args.trials, args.out)
     exp_blocklength(rng, args.fs, args.trials, args.out)
-    exp_ppm(rng, args.fs, args.n, args.trials, args.out)
+    ppm_rows = exp_ppm(rng, args.fs, args.n, args.trials, args.out)
     print("完成，输出目录：", args.out)
+
+    # --- 论文级 JSON 结论输出 ---
+    best_snr_row = min(snr_rows, key=lambda r: r["rms_twostage_hz"])
+    result = {
+        "experiment": "cfo_estimation_performance",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "config": {
+            "trials": args.trials,
+            "seed": args.seed,
+            "fs": args.fs,
+            "n": args.n,
+        },
+        "metrics": {
+            "best_rms_two_stage_hz": best_snr_row["rms_twostage_hz"],
+            "best_rms_snr_db": best_snr_row["snr_db"],
+            "worst_rms_two_stage_hz": max(r["rms_twostage_hz"] for r in snr_rows),
+            "ppm_residual_rms_hz_50ppm": ppm_rows[-1]["rms_residual_hz"],
+            "ppm_estimate_rms_hz_50ppm": ppm_rows[-1]["rms_estimate_error_hz"],
+        },
+        "samples": {
+            "snr_sweep_total": len(snr_rows) * args.trials,
+            "blocklength_total": 2 * 6 * args.trials,
+            "ppm_total": len(ppm_rows) * args.trials,
+        },
+        "output_files": [
+            os.path.join(args.out, "cfo_accuracy_vs_snr.csv"),
+            os.path.join(args.out, "cfo_vs_blocklength.csv"),
+            os.path.join(args.out, "cfo_ppm_scenario.csv"),
+        ],
+    }
+    print("\n=== JSON RESULT ===")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

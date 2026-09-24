@@ -175,7 +175,8 @@ class ToolRegistry:
 
     def has_tool(self, name: str) -> bool:
         """检查工具是否存在且可用。"""
-        return name in self.tools and self.tools[name]["available"]
+        resolved = name if name in self.tools else self._resolve_tool_name(name)
+        return resolved in self.tools and self.tools[resolved]["available"]
 
     def _resolve_tool_name(self, tool_name: str) -> str:
         """工具名自动解析：兼容短名（spectrum_analyze）和全名（sdr_spectrum_analyze）。

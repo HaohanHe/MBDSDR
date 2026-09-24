@@ -17,8 +17,10 @@
 """
 import argparse
 import csv
+import json
 import os
 import sys
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -112,6 +114,38 @@ def run(trials: int, fs: float, train_seed: int = TRAIN_SEED,
     print(f"种子隔离            = 是（train/test 独立 RNG，无重叠）")
     print(f"输出: {p1}")
     print(f"输出: {p2}")
+
+    # --- 论文级 JSON 结论输出 ---
+    result = {
+        "experiment": "amr_accuracy_vs_snr",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "config": {
+            "trials": trials,
+            "fs": fs,
+            "train_seed": train_seed,
+            "test_seed": test_seed,
+            "mods": MODS,
+            "snrs": SNRS,
+            "conf_snr_db": CONF_SNR,
+            "knn_k": 5,
+        },
+        "metrics": {
+            "overall_accuracy_at_10db": round(float(mid), 4),
+            "best_snr_db": 30,
+            "best_accuracy": round(float(high), 4),
+            "worst_snr_db": SNRS[0],
+            "worst_accuracy": round(float(low), 4),
+            "confusion_diag_accuracy_at_10db": round(float(diag_acc), 4),
+        },
+        "samples": {
+            "total_trials": trials * len(MODS) * len(SNRS),
+            "modulations": len(MODS),
+            "snr_points": len(SNRS),
+        },
+        "output_files": [p1, p2],
+    }
+    print("\n=== JSON RESULT ===")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

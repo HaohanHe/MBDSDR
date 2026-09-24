@@ -6,7 +6,8 @@
 链路：44100 合成 -> 降采样到目标率 -> 解调（模拟真实声卡采集）。
 指标：FCS(CRC16) 通过率。
 """
-import sys, os, csv, math, random
+import sys, os, csv, math, random, json
+from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mbdsdr_ai import ax25
 
@@ -45,6 +46,34 @@ def main():
         wr = csv.DictWriter(f, fieldnames=["sample_rate", "snr_db", "pass", "trials"])
         wr.writeheader(); wr.writerows(rows)
     print(f"\n已写 {out}")
+
+    # --- 论文级 JSON 结论输出 ---
+    pass_rates = [r["pass"] / r["trials"] for r in rows]
+    best_idx = int(max(range(len(rows)), key=lambda i: pass_rates[i]))
+    worst_idx = int(min(range(len(rows)), key=lambda i: pass_rates[i]))
+    result = {
+        "experiment": "ax25_demod_performance",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "config": {
+            "sample_rates": [11025, 22050, 44100],
+            "snr_levels": ["clean" if s is None else s for s in SNRS],
+            "trials": TRIALS,
+        },
+        "metrics": {
+            "best_pass_rate": round(pass_rates[best_idx], 4),
+            "best_condition": f"sr={rows[best_idx]['sample_rate']},snr={rows[best_idx]['snr_db']}",
+            "worst_pass_rate": round(pass_rates[worst_idx], 4),
+            "worst_condition": f"sr={rows[worst_idx]['sample_rate']},snr={rows[worst_idx]['snr_db']}",
+        },
+        "samples": {
+            "total_frames": len(rows) * TRIALS,
+            "sample_rates": 3,
+            "snr_points": len(SNRS),
+        },
+        "output_files": [out],
+    }
+    print("\n=== JSON RESULT ===")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

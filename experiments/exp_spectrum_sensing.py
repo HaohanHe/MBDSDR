@@ -20,8 +20,10 @@
 """
 import argparse
 import csv
+import json
 import os
 import sys
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -68,6 +70,7 @@ def experiment_roc(rng, trials, out):
             })
     _write(out, "sensing_roc.csv", rows)
     print(f"[1] ROC：{len(rows)} 行（N={n}, SNR={snr_list}）")
+    return rows
 
 
 def experiment_pd_snr(rng, trials, out):
@@ -89,6 +92,7 @@ def experiment_pd_snr(rng, trials, out):
             })
     _write(out, "sensing_pd_vs_snr.csv", rows)
     print(f"[2] Pd vs SNR：{len(rows)} 行（Pfa={pfa}, N={n_list}）")
+    return rows
 
 
 def experiment_noise_uncertainty(rng, trials, out):
@@ -124,6 +128,7 @@ def experiment_noise_uncertainty(rng, trials, out):
     r = ed.detect((np.sqrt(SIG2 / 2) * (rng.standard_normal(2048)
                + 1j * rng.standard_normal(2048))).tolist(), pfa=pfa)
     print(f"    产品 API 冒烟：H0 判决={r.decision}（应为 False），T={r.statistic:.3f}，γ={r.threshold:.3f}")
+    return rows
 
 
 def _write(out, name, rows):
@@ -143,10 +148,56 @@ def main():
     a = ap.parse_args()
     rng = np.random.default_rng(a.seed)
     print(f"=== 频谱感知能量检测实验（trials={a.trials}, seed={a.seed}）===")
-    experiment_roc(rng, a.trials, a.out)
-    experiment_pd_snr(rng, a.trials, a.out)
-    experiment_noise_uncertainty(rng, a.trials, a.out)
+    roc_rows = experiment_roc(rng, a.trials, a.out)
+    pd_rows = experiment_pd_snr(rng, a.trials, a.out)
+    nu_rows = experiment_noise_uncertainty(rng, a.trials, a.out)
     print("完成，输出目录：", a.out)
+
+    # --- 论文级 JSON 结论输出 ---
+    # 从 ROC 数据计算 SNR=-4dB 时的近似 AUC
+    roc_neg4 = sorted([r for r in roc_rows if r["snr_db"] == -4.0],
+                      key=lambda r: r["pfa_meas"])
+    if len(roc_neg4) >= 2:
+        xs = [r["pfa_meas"] for r in roc_neg4]
+        ys = [r["pd_meas"] for r in roc_neg4]
+        auc_approx = float(np.trapz(ys, xs))
+    else:
+        auc_approx = None
+    # Pd at Pfa=0.01, N=1024, SNR=0dB
+    pd_ref = next((r for r in pd_rows if r["n"] == 1024 and r["snr_db"] == "0"), None)
+    # 噪声不确定度损失：在某个 SNR 下，unc=0 vs unc=2 dB 的 Pd 差
+    nu_snr0_unc0 = next((r for r in nu_rows if r["noise_uncertainty_db"] == "0" and r["snr_db"] == "0"), None)
+    nu_snr0_unc2 = next((r for r in nu_rows if r["noise_uncertainty_db"] == "2" and r["snr_db"] == "0"), None)
+    noise_loss = None
+    if nu_snr0_unc0 and nu_snr0_unc2:
+        noise_loss = round(nu_snr0_unc0["pd_meas"] - nu_snr0_unc2["pd_meas"], 4)
+    result = {
+        "experiment": "spectrum_sensing_energy_detection",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "config": {
+            "trials": a.trials,
+            "seed": a.seed,
+            "noise_power": SIG2,
+        },
+        "metrics": {
+            "auc_roc_at_snr_neg4db": auc_approx,
+            "pd_at_pfa_0.01_n1024_snr0db": pd_ref["pd_meas"] if pd_ref else None,
+            "pd_theory_at_pfa_0.01_n1024_snr0db": pd_ref["pd_theory"] if pd_ref else None,
+            "noise_uncertainty_loss_pd_at_0db": noise_loss,
+        },
+        "samples": {
+            "roc_total": len(roc_rows) * a.trials * 2,
+            "pd_snr_total": len(pd_rows) * a.trials * 2,
+            "noise_unc_total": len(nu_rows) * a.trials * 2,
+        },
+        "output_files": [
+            os.path.join(a.out, "sensing_roc.csv"),
+            os.path.join(a.out, "sensing_pd_vs_snr.csv"),
+            os.path.join(a.out, "sensing_noise_uncertainty.csv"),
+        ],
+    }
+    print("\n=== JSON RESULT ===")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

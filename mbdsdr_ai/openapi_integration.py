@@ -13,6 +13,8 @@ MBDSDR AI - OpenAPI 集成层
 - AIS船舶
 """
 
+import math
+
 import requests
 from typing import Dict, List, Optional
 
@@ -91,7 +93,9 @@ def get_aircraft_nearby(lat: float, lon: float, radius_km: float = 50) -> Dict:
     try:
         # 计算边界框
         dlat = radius_km / 111.0
-        dlon = radius_km / (111.0 * abs(lat) * 3.14159 / 180.0)
+        # 经度 1 度 ≈ 111 * cos(lat) km，低纬地区 cos 接近 1
+        lat_rad = math.radians(lat)
+        dlon = radius_km / (111.0 * max(abs(math.cos(lat_rad)), 0.01))
 
         url = f"https://opensky-network.org/api/states/all?lamin={lat-dlat}&lamax={lat+dlat}&lomin={lon-dlon}&lomax={lon+dlon}"
         resp = requests.get(url, timeout=10)

@@ -21,8 +21,10 @@ frame=10 ms、FFT=1024 时，纯噪声逐帧 argmax 峰功率 99 分位约 35 dB
 """
 import argparse
 import csv
+import json
 import os
 import sys
+from datetime import datetime, timezone
 
 import numpy as np
 
@@ -213,14 +215,55 @@ def main():
           f"channels={args.n_channels} thr={args.threshold}dB "
           f"trials={args.trials}")
 
-    exp_pd_vs_snr(rng, args.fs, n, channels, dwell_samples, args.num_frames,
+    pd_rows = exp_pd_vs_snr(rng, args.fs, n, channels, dwell_samples, args.num_frames,
                   args.frame_ms, args.threshold, args.n_channels, args.trials, args.out)
-    exp_pfa(rng, args.fs, n, channels, args.num_frames, args.frame_ms,
+    pfa_rows = exp_pfa(rng, args.fs, n, channels, args.num_frames, args.frame_ms,
             args.trials, args.out)
-    exp_param(rng, args.fs, n, channels, dwell_samples, args.dwell_ms,
+    param_rows = exp_param(rng, args.fs, n, channels, dwell_samples, args.dwell_ms,
               args.num_frames, args.frame_ms, args.threshold, args.n_channels,
               args.trials, args.out)
     print("完成。")
+
+    # --- 论文级 JSON 结论输出 ---
+    pd_best = max(pd_rows, key=lambda r: r["detection_rate"])
+    pfa_at_thr = next((r for r in pfa_rows if r["threshold_db"] == args.threshold), pfa_rows[0])
+    param_best = [r for r in param_rows if r["timing_alignment"] == "aligned"]
+    param_best = max(param_best, key=lambda r: r["n_detected"]) if param_best else {}
+    result = {
+        "experiment": "fhss_detection",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "config": {
+            "fs": args.fs,
+            "frame_ms": args.frame_ms,
+            "num_frames": args.num_frames,
+            "dwell_ms": args.dwell_ms,
+            "n_channels": args.n_channels,
+            "threshold_db": args.threshold,
+            "trials": args.trials,
+            "seed": args.seed,
+        },
+        "metrics": {
+            "pd_best": pd_best["detection_rate"],
+            "pd_best_snr_db": pd_best["snr_db"],
+            "pfa_noise_at_threshold": pfa_at_thr["noise_false_alarm_rate"],
+            "pfa_cw_at_threshold": pfa_at_thr["cw_false_alarm_rate"],
+            "hop_rate_mae_hz_best": param_best.get("hop_rate_mae_hz", ""),
+            "dwell_mae_ms_best": param_best.get("dwell_mae_ms", ""),
+            "unique_exact_rate_best": param_best.get("unique_exact_rate", ""),
+        },
+        "samples": {
+            "pd_trials_total": len(pd_rows) * args.trials,
+            "pfa_trials_total": len(pfa_rows) * 2 * args.trials,
+            "param_trials_total": len(param_rows) * args.trials,
+        },
+        "output_files": [
+            os.path.join(args.out, "fhss_pd_vs_snr.csv"),
+            os.path.join(args.out, "fhss_pfa_vs_threshold.csv"),
+            os.path.join(args.out, "fhss_param_vs_snr.csv"),
+        ],
+    }
+    print("\n=== JSON RESULT ===")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

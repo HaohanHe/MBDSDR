@@ -34,6 +34,7 @@ from . import orbit
 from .sdr_backend import SDRBackendManager, SDRStatus
 from .spectrum_processor import SpectrumProcessor
 from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, estimate_bandwidth, wfm_broadcast_demod, rds_decode_from_wfm, audio_to_playback
+from .audio_out import AudioPlayer
 from .sweep import sweep_scan
 from .frequency_manager import FrequencyManager
 from .watcher import watch_capture
@@ -443,6 +444,134 @@ def register_sdr_tools(agent):
         },
         handler=lambda args: ToolResult(success=_get_backend(mgr).set_volume(args["volume"]), content=f"音量已设置: {args['volume']:.0%}"),
         category="sdr_demod",
+    )
+
+    # ---------- 实时音频播放（sounddevice 可选依赖） ----------
+    def _audio_player_handler(args):
+        action = args.get("action", "status")
+        try:
+            # 懒初始化：在 agent 上挂一个 _audio_player
+            if not hasattr(agent, "_audio_player") or agent._audio_player is None:
+                agent._audio_player = AudioPlayer()
+
+            player = agent._audio_player
+
+            if action == "start":
+                gain = float(args.get("gain", 1.0))
+                sample_rate = int(args.get("sample_rate", 48000))
+                # 重新创建以应用新采样率（若采样率变化）
+                if player.sample_rate != sample_rate:
+                    try:
+                        player.stop()
+                    except Exception:
+                        pass
+                    player = AudioPlayer(sample_rate=sample_rate)
+                    agent._audio_player = player
+                player.set_gain(gain)
+                ok = player.start()
+                if not ok:
+                    return ToolResult(
+                        success=False,
+                        content=(f"音频播放启动失败：sounddevice 可用={player.available}，"
+                                 f"采样率={sample_rate} Hz，增益={gain}。"
+                                 f"请确认已 pip install sounddevice 且系统存在可用音频输出设备。"),
+                    )
+                return ToolResult(
+                    success=True,
+                    content=(f"音频播放已启动：采样率={player.sample_rate} Hz，"
+                             f"声道={player.channels}，增益={player.gain}，"
+                             f"sounddevice 可用={player.available}。"
+                             f"解调后的音频块将实时输出到默认声卡。"),
+                )
+
+            if action == "stop":
+                player.stop()
+                return ToolResult(success=True, content="音频播放已停止。")
+
+            # status
+            return ToolResult(
+                success=True,
+                content=(f"音频播放状态：playing={player.is_playing}，"
+                         f"sounddevice 可用={player.available}，"
+                         f"采样率={player.sample_rate} Hz，"
+                         f"声道={player.channels}，增益={player.gain}。"),
+            )
+        except Exception as e:
+            return ToolResult(success=False, content=f"音频播放操作失败：{e!r}")
+
+    agent.tool_registry.register(
+        name="sdr_play_audio",
+        description=("实时音频播放控制。启动后可将解调音频块输出到默认声卡；"
+                     "sounddevice 未安装时自动降级。"
+                     "action=start 启动播放，action=stop 停止，action=status 查询状态。"),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["start", "stop", "status"], "description": "操作：start/stop/status"},
+                "gain": {"type": "number", "description": "播放增益 0-5，默认 1.0", "default": 1.0, "minimum": 0, "maximum": 5},
+                "sample_rate": {"type": "integer", "description": "采样率 Hz，默认 48000", "default": 48000},
+            },
+            "required": ["action"],
+        },
+        handler=_audio_player_handler,
+        category="sdr_demod",
+    )
+
+    # ═══════════════════════════════════════════════════
+    # 4.5 VFO 管理（4个）：监听频率预设
+    # ═══════════════════════════════════════════════════
+
+    agent.tool_registry.register(
+        name="vfo_add",
+        description="添加一个监听频率（VFO）。VFO 是预存的频率+解调模式预设，可快速切换守听。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "VFO 名称（如\"FM广播103.9\"）"},
+                "frequency_hz": {"type": "number", "description": "频率Hz"},
+                "demod_mode": {"type": "string", "description": "解调模式，默认\"FM\"，可选 FM/AM/SSB/CW/WFM/NFM", "default": "FM"},
+                "bandwidth_hz": {"type": "number", "description": "带宽Hz，默认12500", "default": 12500},
+            },
+            "required": ["name", "frequency_hz"],
+        },
+        handler=lambda args: _vfo_add_tool(mgr, args),
+        category="sdr_frequency",
+    )
+
+    agent.tool_registry.register(
+        name="vfo_remove",
+        description="删除一个 VFO。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "vfo_id": {"type": "string", "description": "要删除的 VFO ID（由 vfo_add 返回 / vfo_list 列出）"},
+            },
+            "required": ["vfo_id"],
+        },
+        handler=lambda args: _vfo_remove_tool(mgr, args),
+        category="sdr_frequency",
+    )
+
+    agent.tool_registry.register(
+        name="vfo_list",
+        description="列出所有已保存的 VFO（监听频率预设），包含当前激活状态。",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=lambda args: _vfo_list_tool(mgr, args),
+        category="sdr_frequency",
+    )
+
+    agent.tool_registry.register(
+        name="vfo_select",
+        description="切换到指定 VFO：将当前 SDR 设备调谐到该 VFO 的频率和解调模式，并标记为激活。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "vfo_id": {"type": "string", "description": "要切换到的 VFO ID（由 vfo_add 返回 / vfo_list 列出）"},
+            },
+            "required": ["vfo_id"],
+        },
+        handler=lambda args: _vfo_select_tool(mgr, args),
+        category="sdr_frequency",
     )
 
     # ═══════════════════════════════════════════════════
@@ -2195,6 +2324,78 @@ def register_sdr_tools(agent):
 def _get_backend(mgr):
     """获取当前激活的后端。"""
     return mgr.get_active()
+
+
+def _vfo_add_tool(mgr, args) -> "ToolResult":
+    name = str(args.get("name", "")).strip()
+    freq = args.get("frequency_hz")
+    if not name or freq is None:
+        return ToolResult(success=False, content="必须提供 name 和 frequency_hz")
+    try:
+        freq = float(freq)
+    except (TypeError, ValueError):
+        return ToolResult(success=False, content=f"频率无效: {freq!r}")
+    demod_mode = str(args.get("demod_mode", "FM"))
+    bandwidth_hz = args.get("bandwidth_hz", 12500)
+    try:
+        bandwidth_hz = float(bandwidth_hz)
+    except (TypeError, ValueError):
+        bandwidth_hz = 12500
+    vid = mgr.vfo_add(name, freq, demod_mode, bandwidth_hz)
+    if not vid:
+        return ToolResult(success=False, content=f"添加 VFO 失败（频率必须 >0）: {name} @ {freq} Hz")
+    return ToolResult(
+        success=True,
+        content=f"已添加 VFO: id={vid} 名称=\"{name}\" 频率={freq/1e6:.3f} MHz 解调={demod_mode} 带宽={bandwidth_hz:.0f} Hz",
+    )
+
+
+def _vfo_remove_tool(mgr, args) -> "ToolResult":
+    vid = str(args.get("vfo_id", ""))
+    if not vid:
+        return ToolResult(success=False, content="必须提供 vfo_id")
+    ok = mgr.vfo_remove(vid)
+    if not ok:
+        return ToolResult(success=False, content=f"删除失败：未找到 VFO \"{vid}\"")
+    return ToolResult(success=True, content=f"已删除 VFO: {vid}")
+
+
+def _vfo_list_tool(mgr, args) -> "ToolResult":
+    items = mgr.vfo_list()
+    if not items:
+        return ToolResult(success=True, content="当前没有保存任何 VFO。使用 vfo_add 添加监听频率预设。")
+    lines = [f"共 {len(items)} 个 VFO："]
+    for it in items:
+        mark = "*" if it.get("active") else " "
+        lines.append(
+            f"{mark} [{it['vfo_id']}] {it['name']} — "
+            f"{it['frequency_hz']/1e6:.3f} MHz  {it['demod_mode']}  "
+            f"BW={it['bandwidth_hz']:.0f} Hz"
+        )
+    active = mgr.vfo_get_active()
+    if active:
+        lines.append(f"当前激活: [{active['vfo_id']}] {active['name']} @ {active['frequency_hz']/1e6:.3f} MHz")
+    else:
+        lines.append("当前无激活 VFO。使用 vfo_select 切换。")
+    return ToolResult(success=True, content="\n".join(lines))
+
+
+def _vfo_select_tool(mgr, args) -> "ToolResult":
+    vid = str(args.get("vfo_id", ""))
+    if not vid:
+        return ToolResult(success=False, content="必须提供 vfo_id")
+    ok = mgr.vfo_select(vid)
+    if not ok:
+        return ToolResult(success=False, content=f"切换失败：未找到 VFO \"{vid}\"")
+    active = mgr.vfo_get_active()
+    if not active:
+        return ToolResult(success=False, content="切换后未获取到激活 VFO 信息")
+    return ToolResult(
+        success=True,
+        content=f"已切换到 VFO [{active['vfo_id']}] {active['name']} — "
+                f"{active['frequency_hz']/1e6:.3f} MHz  解调={active['demod_mode']}  "
+                f"BW={active['bandwidth_hz']:.0f} Hz",
+    )
 
 def _disconnect_sdr(mgr):
     backend = mgr.get_active()
