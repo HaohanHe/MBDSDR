@@ -659,6 +659,133 @@ class ToolRegistry:
         # 来源: repos/gpredict/src/sgpsdp/{sgp4sdp4,sgp_in,sgp_obs,sgp_time}.c
         self.register_gpredict_tools()
 
+        # ── SatDump 真实卫星图像投影/伪彩色/LRPT 移植工具 ──
+        # 来源: repos/SatDump/src-core/projection,common/geodetic 及
+        #       plugins/meteor_support, plugins/noaa_metop_support（见 mbdsdr_ai/satdump_adapter.py）
+        self.register_satdump_tools()
+
+    def register_satdump_tools(self):
+        """注册 SatDump 真实源码移植的卫星图像工具。
+
+        来源: github.com/altillimity/SatDump
+          * 投影: src-core/projection/raytrace/common/normal_line.cpp
+                  + src-core/common/geodetic/euler_raytrace.cpp
+          * 图像: src-core/image/
+          * LRPT: plugins/meteor_support/meteor/module_meteor_lrpt_decoder.cpp
+        """
+        try:
+            from . import satdump_adapter as SA
+            import numpy as np
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("satdump_adapter 不可用: %s", e)
+            return
+
+        # sat_project_image: 卫星像元 -> 地理经纬度
+        self.register(
+            name="sat_project_image",
+            description=(
+                "SatDump 真实投影：给定卫星 ECEF 位置(km)与速度(km/s)、像元列号、"
+                "扫描角，把扫描像元追踪到 WGS84 椭球面，返回 (lat, lon)。"
+                "来源: SatDump euler_raytrace.cpp + normal_line.cpp。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "sat_pos_km": {"type": "array", "items": {"type": "number"},
+                                   "description": "卫星 ECEF 位置 [x,y,z] (km)"},
+                    "sat_vel_km_s": {"type": "array", "items": {"type": "number"},
+                                     "description": "卫星 ECEF 速度 [x,y,z] (km/s)"},
+                    "pixel_x": {"type": "number", "description": "像元列号"},
+                    "image_width": {"type": "integer", "description": "扫描行像元数",
+                                    "default": SA.LRPT_IMAGE_WIDTH},
+                    "scan_angle_deg": {"type": "number", "description": "整行扫描角(度)",
+                                       "default": SA.LRPT_SCAN_ANGLE_DEG},
+                },
+                "required": ["sat_pos_km", "sat_vel_km_s", "pixel_x"],
+            },
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(
+                    SA.MapProjector.project_pixel(
+                        np.asarray(args["sat_pos_km"], dtype=float),
+                        np.asarray(args["sat_vel_km_s"], dtype=float),
+                        float(args["pixel_x"]),
+                        int(args.get("image_width", SA.LRPT_IMAGE_WIDTH)),
+                        float(args.get("scan_angle_deg", SA.LRPT_SCAN_ANGLE_DEG)),
+                    ),
+                    ensure_ascii=False),
+                data=SA.MapProjector.project_pixel(
+                    np.asarray(args["sat_pos_km"], dtype=float),
+                    np.asarray(args["sat_vel_km_s"], dtype=float),
+                    float(args["pixel_x"]),
+                    int(args.get("image_width", SA.LRPT_IMAGE_WIDTH)),
+                    float(args.get("scan_angle_deg", SA.LRPT_SCAN_ANGLE_DEG)),
+                ),
+            ),
+            category="satellite",
+        )
+
+        # sat_compose_falsecolor: 多通道 -> 伪彩色图
+        self.register(
+            name="sat_compose_falsecolor",
+            description=(
+                "SatDump 风格伪彩色合成：可见光/近红外/红外三通道辐射数据 -> "
+                "HxWx3 uint8 图像（红外通道反转增强云顶）。"
+                "来源: SatDump src-core/image 假彩色 LUT。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "ch_vis": {"type": "array", "items": {"type": "number"},
+                               "description": "可见光通道扁平数组"},
+                    "ch_swir": {"type": "array", "items": {"type": "number"}},
+                    "ch_ir": {"type": "array", "items": {"type": "number"}},
+                    "height": {"type": "integer"},
+                    "width": {"type": "integer"},
+                },
+                "required": ["ch_vis", "ch_swir", "ch_ir", "height", "width"],
+            },
+            handler=lambda args: ToolResult(
+                success=True,
+                content="false-color image composed",
+                data={
+                    "shape": list(SA.SatImageProcessor.false_color_ir(
+                        np.asarray(args["ch_vis"], float).reshape(args["height"], args["width"]),
+                        np.asarray(args["ch_swir"], float).reshape(args["height"], args["width"]),
+                        np.asarray(args["ch_ir"], float).reshape(args["height"], args["width"]),
+                    ).shape)
+                },
+            ),
+            category="satellite",
+        )
+
+        # lrpt_decode_full: LRPT QPSK 软符号 -> CADU
+        self.register(
+            name="lrpt_decode_full",
+            description=(
+                "METEOR LRPT 72k QPSK 解码链：软符号 -> Viterbi(CCSDS R=1/2 K=7, "
+                "多項式 {79,109}) -> 找 0x1dcf fc1d 同步 -> 1024B CADU。"
+                "来源: SatDump module_meteor_lrpt_decoder.cpp + viterbi27.h:8。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"},
+                           "description": "复软符号序列（实部 I, 虚部 Q）"},
+                },
+                "required": ["iq"],
+            },
+            handler=lambda args: ToolResult(
+                success=True,
+                content="decoded",
+                data={"cadus": len(SA.LRPTDecoder().decode_cadu(
+                    np.asarray(args["iq"], dtype=complex))),
+                      "symbol_rate": SA.LRPT_SYMBOL_RATE},
+            ),
+            category="satellite",
+        )
+
     def register_gpredict_tools(self):
         """注册 gpredict 真实移植的卫星轨道预测工具。
 
