@@ -57,6 +57,7 @@ class EditRecord:
     error: str = ""
     timestamp: float = field(default_factory=time.time)
     description: str = ""
+    guardian_snap_id: str = ""  # 守护者快照 ID（修改前由 guardian 真备份）
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -103,6 +104,16 @@ class CodeEditor:
         self.git_enabled = git_enabled
         self.edits: Dict[str, EditRecord] = {}
         self._counter = 0
+
+        # 守护者快照引擎：修改前真备份（与 code_editor 自身的 .bak 互补）。
+        # 失败不阻断主流程——guardian 是额外防线，不是单点依赖。
+        self.guardian = None
+        try:
+            from .guardian import Guardian
+            self.guardian = Guardian(
+                store_path=os.path.join(backup_dir, "guardian_snapshots"))
+        except Exception as e:
+            print(f"警告: CodeEditor 守护者初始化失败（不影响备份主流程）: {e}")
 
         # 检查 git 是否可用
         self.git_available = self._check_git()
@@ -200,6 +211,20 @@ class CodeEditor:
             backup_path = self._backup_file(full_path, original_content, edit_id)
             record.backup_path = backup_path
             record.status = EditStatus.BACKED_UP
+
+        # 守护者真快照：在写盘之前由 guardian 复制原文件到快照库。
+        # 这是防幻觉变砖的第二道防线（独立于上面的 .bak）。
+        if self.guardian is not None and os.path.exists(full_path):
+            try:
+                snap = self.guardian.create_snapshot(
+                    full_path,
+                    label=f"修改前: {os.path.basename(full_path)}",
+                    metadata={"edit_id": edit_id, "description": description},
+                )
+                record.guardian_snap_id = snap.snap_id
+            except Exception as e:
+                # 守护者快照失败不阻断编辑本身（.bak 仍在）
+                record.error = f"guardian 快照失败: {e}"
 
         # 写入新内容
         try:

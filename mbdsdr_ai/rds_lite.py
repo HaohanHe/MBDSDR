@@ -72,9 +72,13 @@ def build_b_block(pi_unused: int = 0, tp: int = 0, pty: int = 0,
 
 def build_0a_group(pi: int, seg: int, chars2: str, pty: int = 1,
                    tp: int = 0, ms: int = 0, di: int = 0) -> List[int]:
-    """构造 0A 基本调谐组（104bit）：A=PI，B=组0/A，C=段地址+DI/MS，D=2字符PS。"""
+    """构造 0A 基本调谐组（104bit）：A=PI，B=组0/A，C=段地址+DI/MS，D=2字符PS。
+
+    EN 50067：0A 组 block C 的 bit15..14 为 PS 段地址（0..3，每段 2 字符，
+    4 段拼出 8 字符电台名），bit13..0 保留/DI 扩展。
+    """
     b = build_b_block(pty=pty, tp=tp, group_type=0, version_b=0)
-    c = ((seg & 0x7) << 9) | ((di & 0xF) << 5) | ((ms & 1) << 4)
+    c = ((seg & 0x3) << 14) | ((di & 0xF) << 5) | ((ms & 1) << 4)
     ch = (chars2 + "  ")[:2]
     d = (ord(ch[0]) << 8) | ord(ch[1])
     out = make_block(pi, "A") + make_block(b, "B") + make_block(c, "C") + make_block(d, "D")
@@ -186,7 +190,8 @@ def _parse_group(bits: np.ndarray, a_pos: int) -> Optional[dict]:
     out = {"pi": info["A"], "pty": pty, "tp": tp,
            "group_type": group_type, "version_b": version_b}
     if group_type == 0:  # 0A/0B 基本调谐，PS 电台名
-        seg = (info["C"] >> 10) & 0x3
+        # EN 50067：block C bit15..14 = PS 段地址（0..3），block D 高/低字节各 1 字符
+        seg = (info["C"] >> 14) & 0x3
         c1 = info["D"] >> 8
         c2 = info["D"] & 0xFF
         out["ps_seg"] = seg

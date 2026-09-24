@@ -23,7 +23,7 @@ SDR Backend：统一的 SDR 硬件抽象层。
 """
 
 import time
-
+import logging
 
 import os
 import json
@@ -31,6 +31,8 @@ import threading
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,6 +69,7 @@ class SDRStatus:
     device_temp: float = 0.0
     samples_read: int = 0
     uptime_seconds: float = 0.0
+    error: str = ""  # 最近一次 setter 失败/硬件回读失败的错误描述，空串=正常
 
 
 class SDRBackend:
@@ -99,35 +102,98 @@ class SDRBackend:
         self.status.connected = False
 
     def set_frequency(self, freq_hz: float) -> bool:
-        """设置频率。"""
+        """设置中心频率。失败时回滚 status，不留"已设置"假状态。"""
         if not self.status.connected:
             return False
         if freq_hz < self.device.frequency_range[0] or freq_hz > self.device.frequency_range[1]:
             return False
+        old = self.status.frequency_hz
+        self.status.error = ""
+        try:
+            ok = self._apply_frequency(freq_hz)
+        except Exception as e:
+            ok = False
+            self.status.error = f"set_frequency异常: {e}"
+        if not ok:
+            self.status.frequency_hz = old  # 回滚
+            if not self.status.error:
+                self.status.error = "set_frequency失败"
+            logger.warning(f"set_frequency({freq_hz}) 失败，已回滚到 {old}")
+            return False
         self.status.frequency_hz = freq_hz
+        return True
+
+    def _apply_frequency(self, freq_hz: float) -> bool:
+        """子类覆写：把频率真正写入硬件。默认无硬件（mock/文件），直接成功。"""
         return True
 
     def get_frequency(self) -> float:
         return self.status.frequency_hz
 
     def set_sample_rate(self, rate_hz: float) -> bool:
+        """设置采样率。失败时回滚 status。"""
         if not self.status.connected:
             return False
+        old = self.status.sample_rate_hz
+        self.status.error = ""
+        try:
+            ok = self._apply_sample_rate(rate_hz)
+        except Exception as e:
+            ok = False
+            self.status.error = f"set_sample_rate异常: {e}"
+        if not ok:
+            self.status.sample_rate_hz = old
+            if not self.status.error:
+                self.status.error = "set_sample_rate失败"
+            logger.warning(f"set_sample_rate({rate_hz}) 失败，已回滚到 {old}")
+            return False
         self.status.sample_rate_hz = rate_hz
+        return True
+
+    def _apply_sample_rate(self, rate_hz: float) -> bool:
+        """子类覆写：把采样率真正写入硬件。"""
         return True
 
     def get_sample_rate(self) -> float:
         return self.status.sample_rate_hz
 
     def set_gain(self, gain_db: float) -> bool:
+        """设置增益。失败时回滚 status。"""
         if not self.status.connected:
             return False
-        self.status.gain_db = max(0, min(gain_db, self.device.max_gain))
+        clamped = max(0, min(gain_db, self.device.max_gain))
+        old = self.status.gain_db
+        self.status.error = ""
+        try:
+            ok = self._apply_gain(clamped)
+        except Exception as e:
+            ok = False
+            self.status.error = f"set_gain异常: {e}"
+        if not ok:
+            self.status.gain_db = old
+            if not self.status.error:
+                self.status.error = "set_gain失败"
+            logger.warning(f"set_gain({clamped}) 失败，已回滚到 {old}")
+            return False
+        self.status.gain_db = clamped
         self.status.agc_enabled = False
+        return True
+
+    def _apply_gain(self, gain_db: float) -> bool:
+        """子类覆写：把增益真正写入硬件。"""
         return True
 
     def get_gain(self) -> float:
         return self.status.gain_db
+
+    def readback_hw_state(self) -> bool:
+        """连接成功后从硬件回读实际 center_freq/sample_rate/gain，对齐内部状态。
+
+        硬件不支持回读时记录 warning 并返回 False，不抛异常。
+        子类应覆写此方法实现真实回读。
+        """
+        logger.warning(f"{self.__class__.__name__} 不支持硬件回读，软件状态可能与硬件实际不一致")
+        return False
 
     def set_agc(self, enabled: bool) -> bool:
         if not self.status.connected:
@@ -469,6 +535,11 @@ class RTLSDRBackend(SDRBackend):
                 self.set_ppm(self._ppm)
             self.status.connected = True
             self._start_time = time.time()
+            # 回读硬件实际参数，对齐软件状态
+            try:
+                self.readback_hw_state()
+            except Exception as e:
+                logger.warning(f"RTL-SDR 回读失败: {e}")
             return True
         except Exception:
             self.status.connected = False
@@ -483,29 +554,53 @@ class RTLSDRBackend(SDRBackend):
             self._sdr = None
         super().disconnect()
 
-    def set_frequency(self, freq_hz: float) -> bool:
-        if not super().set_frequency(freq_hz):
-            return False
-        if self._sdr:
-            self._sdr.center_freq = freq_hz
+    def _apply_frequency(self, freq_hz: float) -> bool:
+        if self._sdr is None:
+            return True
+        self._sdr.center_freq = freq_hz
         return True
 
-    def set_sample_rate(self, rate_hz: float) -> bool:
-        if not super().set_sample_rate(rate_hz):
-            return False
-        if self._sdr:
-            self._sdr.sample_rate = rate_hz
+    def _apply_sample_rate(self, rate_hz: float) -> bool:
+        if self._sdr is None:
+            return True
+        self._sdr.sample_rate = rate_hz
         return True
 
-    def set_gain(self, gain_db: float) -> bool:
-        if not super().set_gain(gain_db):
+    def _apply_gain(self, gain_db: float) -> bool:
+        if self._sdr is None:
+            return True
+        try:
+            self._sdr.gain = float(gain_db)
+        except Exception:
             return False
-        if self._sdr:
-            try:
-                self._sdr.gain = float(gain_db)
-            except Exception:
-                return False
         return True
+
+    def readback_hw_state(self) -> bool:
+        if not self._sdr:
+            return False
+        got = 0
+        try:
+            self.status.frequency_hz = float(self._sdr.center_freq)
+            got += 1
+        except Exception:
+            pass
+        try:
+            self.status.sample_rate_hz = float(self._sdr.sample_rate)
+            got += 1
+        except Exception:
+            pass
+        try:
+            self.status.gain_db = float(self._sdr.gain)
+            self.status.agc_enabled = False
+            got += 1
+        except Exception:
+            pass
+        if got:
+            logger.info(f"RTL-SDR 回读硬件状态: freq={self.status.frequency_hz/1e6:.3f}MHz, "
+                        f"rate={self.status.sample_rate_hz/1e3:.1f}kHz, gain={self.status.gain_db:.1f}dB")
+        else:
+            logger.warning("RTL-SDR 不支持参数回读")
+        return got > 0
 
     def set_agc(self, enabled: bool) -> bool:
         if not super().set_agc(enabled):
@@ -698,10 +793,8 @@ class AISDRMiniBackend(SDRBackend):
             if "mode_name" in result:
                 self._current_mode = result["mode_name"].lower()
 
-    def set_frequency(self, freq_hz: float) -> bool:
-        if not super().set_frequency(freq_hz):
-            return False
-        # 根据频率范围选择 FM 或 AM
+    def _apply_frequency(self, freq_hz: float) -> bool:
+        # 根据频率范围选择 FM 或 AM 模式下发 MCP
         if 64000000 <= freq_hz <= 108000000:
             result = self._send_mcp("tune_fm", {"freq_mhz": freq_hz / 1000000})
             self._current_mode = "fm"
@@ -709,15 +802,13 @@ class AISDRMiniBackend(SDRBackend):
             result = self._send_mcp("tune_am", {"freq_khz": int(freq_hz / 1000)})
             self._current_mode = "am"
         else:
-            # SW 短波范围（需要上变频）
+            # SW 短波范围（需要上变频器）
             result = self._send_mcp("tune_am", {"freq_khz": int(freq_hz / 1000)})
             self._current_mode = "sw"
         return result is not None
 
-    def set_gain(self, gain_db: float) -> bool:
-        # SI4732 没有直接的增益控制，用 AGC
-        if not super().set_gain(gain_db):
-            return False
+    def _apply_gain(self, gain_db: float) -> bool:
+        # SI4732 没有直接增益控制，走 AGC；无硬件写入，视为成功
         return True
 
     def set_volume(self, volume: int) -> bool:
@@ -801,34 +892,31 @@ class HackRFBackend(SDRBackend):
             self._hackrf = None
         super().disconnect()
 
-    def set_frequency(self, freq_hz: float) -> bool:
-        if not super().set_frequency(freq_hz):
+    def _apply_frequency(self, freq_hz: float) -> bool:
+        if self._hackrf is None:
+            return True
+        try:
+            self._hackrf.frequency = int(freq_hz)
+        except Exception:
             return False
-        if self._hackrf:
-            try:
-                self._hackrf.frequency = int(freq_hz)
-            except Exception:
-                return False
         return True
 
-    def set_sample_rate(self, rate_hz: float) -> bool:
-        if not super().set_sample_rate(rate_hz):
+    def _apply_sample_rate(self, rate_hz: float) -> bool:
+        if self._hackrf is None:
+            return True
+        try:
+            self._hackrf.sample_rate = int(rate_hz)
+        except Exception:
             return False
-        if self._hackrf:
-            try:
-                self._hackrf.sample_rate = int(rate_hz)
-            except Exception:
-                return False
         return True
 
-    def set_gain(self, gain_db: float) -> bool:
-        if not super().set_gain(gain_db):
+    def _apply_gain(self, gain_db: float) -> bool:
+        if self._hackrf is None:
+            return True
+        try:
+            self._hackrf.gain = int(gain_db)
+        except Exception:
             return False
-        if self._hackrf:
-            try:
-                self._hackrf.gain = int(gain_db)
-            except Exception:
-                return False
         return True
 
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
@@ -888,34 +976,32 @@ class USRPBackend(SDRBackend):
             self._usrp = None
         super().disconnect()
 
-    def set_frequency(self, freq_hz: float) -> bool:
-        if not super().set_frequency(freq_hz):
+    def _apply_frequency(self, freq_hz: float) -> bool:
+        if self._usrp is None:
+            return True
+        try:
+            import uhd
+            self._usrp.set_rx_freq(uhd.libpyuhd.types.tune_request(freq_hz))
+        except Exception:
             return False
-        if self._usrp:
-            try:
-                self._usrp.set_rx_freq(uhd.libpyuhd.types.tune_request(freq_hz))
-            except Exception:
-                return False
         return True
 
-    def set_sample_rate(self, rate_hz: float) -> bool:
-        if not super().set_sample_rate(rate_hz):
+    def _apply_sample_rate(self, rate_hz: float) -> bool:
+        if self._usrp is None:
+            return True
+        try:
+            self._usrp.set_rx_rate(rate_hz)
+        except Exception:
             return False
-        if self._usrp:
-            try:
-                self._usrp.set_rx_rate(rate_hz)
-            except Exception:
-                return False
         return True
 
-    def set_gain(self, gain_db: float) -> bool:
-        if not super().set_gain(gain_db):
+    def _apply_gain(self, gain_db: float) -> bool:
+        if self._usrp is None:
+            return True
+        try:
+            self._usrp.set_rx_gain(gain_db)
+        except Exception:
             return False
-        if self._usrp:
-            try:
-                self._usrp.set_rx_gain(gain_db)
-            except Exception:
-                return False
         return True
 
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
@@ -1064,15 +1150,13 @@ class FileIQBackend(SDRBackend):
             "center_freq": self._freq, "loop": self._loop,
         }
 
-    def set_frequency(self, freq_hz: float) -> bool:
-        ok = super().set_frequency(freq_hz)
-        self._freq = self.status.frequency_hz
-        return ok
+    def _apply_frequency(self, freq_hz: float) -> bool:
+        self._freq = freq_hz
+        return True
 
-    def set_sample_rate(self, rate_hz: float) -> bool:
-        ok = super().set_sample_rate(rate_hz)
-        self._rate = self.status.sample_rate_hz
-        return ok
+    def _apply_sample_rate(self, rate_hz: float) -> bool:
+        self._rate = rate_hz
+        return True
 
 
 class SDRBackendManager:
@@ -1154,6 +1238,11 @@ class SDRBackendManager:
 
         if backend.connect():
             self.active_backend = backend
+            # 连接成功后从硬件回读实际参数，对齐软件状态与硬件实际
+            try:
+                backend.readback_hw_state()
+            except Exception as e:
+                logger.warning(f"硬件回读失败（不影响连接）: {e}")
             return True
         return False
 

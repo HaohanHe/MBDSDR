@@ -298,20 +298,45 @@ class Subagent:
         return result
 
     def _execute(self, task: SubagentTask) -> Tuple[str, Dict[str, Any], List[str]]:
-        """实际执行任务：真调 tool_registry 对应的工具，不是打印占位。"""
-        tools_called = []
-        data = {}
-        output = ""
+        """实际执行任务：真调 tool_registry 对应的工具，不是打印占位。
 
-        def _call(name, args=None):
-            """真调工具并记录。"""
-            try:
-                res = self.tool_registry.call(name, args or {})
-                tools_called.append(name)
-                return res.content
-            except Exception as e:
-                return f"[{name} 调用失败: {e}]"
+        修复"假执行"：
+        - 必须有 tool_registry；没有则直接报错（不造假成功）。
+        - 每个工具调用检查 ToolResult.success，失败即抛异常，由 execute_task
+          标记为 FAILED，而不是把错误串当成功输出。
+        - 支持 input_data 里显式指定 tool_name（通用调用路径）。
+        - 未内置映射的子代理类型不再返回假数据，而是抛 NotImplementedError。
+        """
+        tools_called: List[str] = []
+        data: Dict[str, Any] = {}
 
+        if self.tool_registry is None:
+            raise RuntimeError(
+                f"子代理 {self.subagent_id} 未注入 tool_registry，无法真调工具")
+
+        def _call(name: str, args: Optional[Dict[str, Any]] = None) -> str:
+            """真调工具并记录；权限/存在/成功与否都显式判定。"""
+            if not self.can_use_tool(name):
+                raise PermissionError(
+                    f"子代理 {self.agent_type} 无权使用工具 {name}")
+            res = self.tool_registry.call(name, args or {})
+            tools_called.append(name)
+            if not res.success:
+                # 工具不存在/不可用/执行失败：明确报错，不当成功
+                raise RuntimeError(
+                    f"工具 {name} 执行失败 [{res.error}]: {res.content}")
+            return res.content
+
+        # 通用路径：input_data 显式指定 tool_name → 真调该工具
+        explicit_tool = task.input_data.get("tool_name") or task.input_data.get("tool")
+        if explicit_tool:
+            params = {k: v for k, v in task.input_data.items()
+                      if k not in ("tool_name", "tool")}
+            output = _call(explicit_tool, params)
+            data = {"tool_name": explicit_tool, "params": params}
+            return output, data, tools_called
+
+        # 内置类型 → 默认工具映射
         if self.agent_type == "spectrum_analyzer":
             freq = task.input_data.get("frequency_hz", 100000000)
             output = _call("sdr_spectrum_analyze", {"frequency_hz": freq})
@@ -325,8 +350,10 @@ class Subagent:
             output = _call("sdr_record_start", {"duration_s": dur})
             data = {"duration": dur, "recording_type": "baseband"}
         else:
-            output = f"子代理 {self.agent_type} 不支持的任务类型: {task.goal}"
-            data = {"goal": task.goal}
+            # 未内置默认工具的子代理类型：返回明确错误，不造假成功数据
+            raise NotImplementedError(
+                f"子代理类型 {self.agent_type!r} 未配置默认工具；"
+                f"请在 input_data 中传入 tool_name 及参数")
 
         return output, data, tools_called
 

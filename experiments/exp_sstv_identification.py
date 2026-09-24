@@ -43,6 +43,13 @@ SR = 44100
 SNR_GRID = (None, 20, 15, 10, 5, 0, -5)
 PREFIX_S = 20.0  # 识别只用前 20s（含足够同步脉冲）
 
+# --- P1 修复：SSTV 检测前的噪声门限参数 ---
+SSTV_LEADER_HZ = 1900.0   # SSTV 引导音频率
+SSTV_BREAK_HZ = 1200.0    # VIS 分隔/同步频率
+GATE_HEAD_S = 1.0         # 只取头部 1s（引导音所在窗口）做 FFT 判决
+GATE_SNR_DB = 10.0        # 峰能量超出静默段噪声底的 dB 门限
+QUIET_BAND_HZ = (3000.0, 5000.0)  # SSTV 不占用的静默段，用于估计噪声底
+
 
 def _channel_corr(a, b):
     a = a.astype(np.float64) - a.mean()
@@ -59,8 +66,44 @@ def _encode(mode, image):
     return raw
 
 
+def _sstv_noise_gate(audio, sr=SR):
+    """SSTV 检测前的先验噪声门限。
+
+    对信号头部短时窗做 FFT，在 SSTV 不占用的静默段（3~5 kHz）估计噪声底，
+    再检查 1900 Hz 引导音 / 1200 Hz 同步音附近的窄带峰能量是否显著超过噪声底
+    （>= GATE_SNR_DB）。纯高斯噪声频谱平坦，不会在 1900 Hz 形成窄带峰，
+    因此门限应将其直接判为非 SSTV，不再进入 VIS/模式检测。
+    """
+    y = np.asarray(audio, dtype=np.float64)
+    n_head = min(len(y), int(GATE_HEAD_S * sr))
+    if n_head < int(0.1 * sr):
+        return False
+    seg = y[:n_head] * np.hanning(n_head)
+    spec = np.abs(np.fft.rfft(seg))
+    freqs = np.fft.rfftfreq(n_head, d=1.0 / sr)
+    quiet = (freqs >= QUIET_BAND_HZ[0]) & (freqs <= QUIET_BAND_HZ[1])
+    if int(quiet.sum()) < 8:
+        return False
+    floor = float(np.median(spec[quiet]))
+    if floor <= 1e-12:
+        return False
+
+    def _peak_db(target, tol):
+        m = (freqs >= target - tol) & (freqs <= target + tol)
+        if not m.any():
+            return -np.inf
+        return float(20.0 * np.log10(spec[m].max() / floor))
+
+    leader_db = _peak_db(SSTV_LEADER_HZ, 40.0)
+    break_db = _peak_db(SSTV_BREAK_HZ, 60.0)
+    # 引导音必须显著突出；1200 Hz 同步音作为辅助（门限略低）
+    return leader_db > GATE_SNR_DB and break_db > (GATE_SNR_DB - 6.0)
+
+
 def _identify(audio, sr=SR):
-    """音频 -> 重采样 -> 瞬时频率 -> VIS/数据起点 -> 时序识别制式。"""
+    """音频 -> 噪声门限 -> 重采样 -> 瞬时频率 -> VIS/数据起点 -> 时序识别制式。"""
+    if not _sstv_noise_gate(audio, sr):
+        return "noise", {}
     y = _resample_if_needed(audio.astype(np.float64), sr)
     freq = _instantaneous_frequency(y, TARGET_SAMPLE_RATE)
     vis, ds = _detect_vis_header(freq, TARGET_SAMPLE_RATE)
@@ -254,6 +297,37 @@ def main():
         with open(os.path.join(OUT_DIR, "sstv_real_ota.json"), "w",
                   encoding="utf-8") as f:
             json.dump(ota, f, ensure_ascii=False, indent=2)
+
+    # --- P1 修复后：打印完整配置与实验结论，便于论文引用 ---
+    print("\n========== SSTV 识别实验 配置 ==========")
+    print(f"采样率 SR            = {SR}")
+    print(f"识别前缀 PREFIX_S    = {PREFIX_S} s")
+    print(f"SNR 网格             = {tuple('clean' if s is None else s for s in SNR_GRID)}")
+    print(f"ID trials            = {args.id_trials}")
+    print(f"Decode trials        = {args.dec_trials}")
+    print(f"随机种子 seed        = {args.seed}")
+    print(f"[噪声门限] 引导音    = {SSTV_LEADER_HZ} Hz")
+    print(f"[噪声门限] 同步音    = {SSTV_BREAK_HZ} Hz")
+    print(f"[噪声门限] 头部窗口  = {GATE_HEAD_S} s")
+    print(f"[噪声门限] SNR 门限  = {GATE_SNR_DB} dB")
+    print(f"[噪声门限] 静默段    = {QUIET_BAND_HZ[0]:.0f}-{QUIET_BAND_HZ[1]:.0f} Hz")
+    print("========== SSTV 识别实验 结论 ==========")
+    # 汇总纯噪声虚警率与各 SNR 下识别率
+    noise_rows = [r for r in id_rows if r["true_mode"] == "noise"]
+    if noise_rows:
+        fa_rates = [1.0 - r["correct_rate"] for r in noise_rows]
+        print(f"纯噪声误报率（按 SNR）: " +
+              ", ".join(f"{r['snr_db']}={1-r['correct_rate']:.3f}" for r in noise_rows))
+        print(f"纯噪声平均误报率      = {sum(fa_rates)/len(fa_rates):.3f}")
+    sstv_rows = [r for r in id_rows if r["true_mode"] in ("Martin M1", "Robot 36")]
+    for mode in ("Martin M1", "Robot 36"):
+        mr = [r for r in sstv_rows if r["true_mode"] == mode]
+        if mr:
+            clean_r = next((r for r in mr if r["snr_db"] == "clean"), mr[0])
+            print(f"{mode} clean 识别率   = {clean_r['correct_rate']:.3f}")
+            low = next((r for r in mr if str(r["snr_db"]) == "-5"), None)
+            if low:
+                print(f"{mode} -5dB 识别率     = {low['correct_rate']:.3f}")
 
 
 if __name__ == "__main__":

@@ -8,8 +8,8 @@ MBDSDR 纯 Python CW（莫尔斯电报）解码器
 算法：
 1. 短时能量包络，自适应阈值（取 5%/95% 分位的中点）
 2. 检测电平跳变，得到 mark（按键）/space（停顿）段
-3. 用 mark 段众数长度估计单位点长 unit，>1.5*unit 判为划(-)
-4. 用 space 长度切分：~unit=字母内，3*unit=字母间，7*unit=字间
+3. 用 mark 段中位数估计单位点长 unit（自适应），>2*unit 判为划(-)
+4. 用 space 长度切分（相对 unit）：<1.5=字符内，1.5~5=字符间，>=5=字间
 5. 莫尔斯表映射为文本
 
 MBDSDR Project - AI定义无线电 - GPL-3.0 - BI4MIB
@@ -104,25 +104,28 @@ def decode_cw(samples: List[float], sample_rate: float = 11025,
     unit_ms = unit / sample_rate * 1000.0
     wpm_est = 1200.0 / unit_ms if unit_ms > 0 else 0  # PARIS: 1dit=1.2s/50=24ms@12wpm
 
-    # 遍历段，切字符
+    # 遍历段，切字符。Morse 标准时长（unit = 1 dit）：
+    #   dot=1, dash=3, 字符内元素间隔=1, 字符间隔=3, 单词间隔=7。
+    # 用自适应 unit（取点长中位数）按阈值划分 off 段：
+    #   gap < 1.5*unit            -> 同一字符内的点划间隔（不切分）
+    #   1.5*unit <= gap < 5*unit  -> 字符间隔（新字母）
+    #   gap >= 5*unit             -> 单词间隔（新单词）
     letters = []
     cur_mark = []
-    pending_gap = 0
     for on, d in segs:
         if on:
-            pending_gap = 0
-            sym = "-" if d > unit * 1.7 else "."
+            sym = "-" if d > unit * 2.0 else "."  # dash=3 unit，中点阈值 2.0
             cur_mark.append(sym)
         else:
-            if d >= unit * 6.0:  # 字间隔（标准 7 unit）
+            if d >= unit * 5.0:        # 单词间隔（标准 7 unit）
                 if cur_mark:
                     letters.append(("".join(cur_mark), "word"))
                     cur_mark = []
-            elif d >= unit * 2.5:  # 字母间隔（标准 3 unit）
+            elif d >= unit * 1.5:      # 字符间隔（标准 3 unit）
                 if cur_mark:
                     letters.append(("".join(cur_mark), "char"))
                     cur_mark = []
-            # 否则字母内间隔，忽略
+            # gap < 1.5*unit：字符内元素间隔，保持当前字符不切开
     if cur_mark:
         letters.append(("".join(cur_mark), "char"))
 

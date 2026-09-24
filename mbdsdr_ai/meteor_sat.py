@@ -13,8 +13,29 @@ MBDSDR AI - 卫星接收与解码
 """
 
 import numpy as np
+import logging
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
+
+# 接入同包 demod.py 的真实数字解调链（QPSK/Costas/Gardner/Viterbi/CCDB解扰）。
+# demod.py 仅依赖 numpy，无重外部依赖；用 try/except 兜底，避免包内循环导入时崩溃。
+try:
+    from .demod import (
+        QPSKDemodulator,
+        ViterbiDecoder,
+        descramble_ccdb as _demod_descramble_ccdb,
+        descramble_nrz_m,
+    )
+    _HAS_REAL_DEMOD = True
+except Exception as _e:  # pragma: no cover - 兜底
+    QPSKDemodulator = None
+    ViterbiDecoder = None
+    _demod_descramble_ccdb = None
+    descramble_nrz_m = None
+    _HAS_REAL_DEMOD = False
+    logger.warning("demod.py 不可用，卫星解调将不可用: %s", _e)
 
 
 # ========================================================================
@@ -305,45 +326,109 @@ def get_satellite_params(key: str) -> Optional[MeteorSatParams]:
 
 def qpsk_demodulate(iq: np.ndarray, sps: int) -> np.ndarray:
     """
-    QPSK 解调。
+    QPSK 解调（真实实现，委托给 demod.QPSKDemodulator）。
+
+    链路：RRC 匹配滤波 → Costas 环载波恢复 → Gardner 位同步 → QPSK 星座判决。
 
     参数:
         iq: 复数IQ采样
         sps: 每符号采样数
 
     返回:
-        解调后的符号序列（复数）
+        解调后的符号序列（复数，±1/√2 星座点）
     """
-    # 匹配滤波（简单低通）
-    # 抽取
-    n_symbols = len(iq) // sps
-    symbols = iq[:n_symbols * sps:sps]
-
-    # 载波恢复（简化：直接取相位）
-    # 实际需要Costas环
-    return symbols
+    if not _HAS_REAL_DEMOD:
+        raise RuntimeError("demod.py 不可用，无法进行真实 QPSK 解调")
+    demod = QPSKDemodulator(sps=int(sps))
+    return demod.demodulate(iq)
 
 
 def viterbi_decode_demo(bits: np.ndarray, rate: float = 0.5, K: int = 7) -> np.ndarray:
     """
-    Viterbi解码（演示框架）。
+    Viterbi 解码（真实实现，委托给 demod.ViterbiDecoder）。
 
-    实际完整Viterbi需要较大计算量，这里提供框架接口。
-    完整实现可调用gnuradio的viterbi或自己实现。
+    使用标准 K=7, rate=1/2, G1=171, G2=133 卷积码（CCSDS 气象卫星标准）。
+
+    参数:
+        bits: 接收的编码比特流（软判决 0-1 浮点或硬判决 0/1）
+        rate: 码率（保留参数，目前仅支持 1/2）
+        K: 约束长度
+
+    返回:
+        解码后的信息比特
     """
-    # 简化演示：返回前N个比特
-    # 实际应该用维特比算法解码卷积码
-    return bits[:len(bits)//2]
+    if not _HAS_REAL_DEMOD:
+        raise RuntimeError("demod.py 不可用，无法进行 Viterbi 解码")
+    if abs(rate - 0.5) > 1e-6:
+        raise NotImplementedError(f"目前仅实现 rate=1/2 Viterbi，收到 rate={rate}")
+    dec = ViterbiDecoder(K=K, G1=171, G2=133)
+    return dec.decode(bits)
 
 
 def descramble_ccdb(bits: np.ndarray) -> np.ndarray:
     """
-    CCDB解扰（CSSR标准）。
+    CCDB 解扰（真实实现，委托给 demod.descramble_ccdb）。
 
-    使用CCDB生成多项式进行解扰。
+    使用 CCSDS 标准生成多项式 x^8 + x^7 + x^5 + x^3 + 1。
     """
-    # 简化演示
-    return bits
+    if not _HAS_REAL_DEMOD:
+        raise RuntimeError("demod.py 不可用，无法进行 CCDB 解扰")
+    return _demod_descramble_ccdb(bits)
+
+
+def demodulate_lrpt(iq: np.ndarray, sample_rate: float,
+                    sat_params: "MeteorSatParams") -> List[np.ndarray]:
+    """
+    真实 LRPT 解调管道骨架。
+
+    链路：
+      1. QPSK 解调（RRC 匹配滤波 → Costas 载波恢复 → Gardner 位同步 → 判决）
+      2. 符号转比特（格雷码映射）
+      3. Viterbi 解码（K=7, r=1/2, G1=171/G2=133）
+      4. 解扰（CCDB 或 NRZ-M，按卫星参数选择）
+      5. CADU 帧提取（搜索 ASM 同步字）
+
+    参数:
+        iq: 复数 IQ 采样（已由前端下变频到基带）
+        sample_rate: 采样率 Hz
+        sat_params: 卫星参数（符号率/调制方式/Viterbi 参数/解扰方式）
+
+    返回:
+        List[np.ndarray]：提取出的 CADU 比特帧列表；无同步帧时返回空列表
+    """
+    if not _HAS_REAL_DEMOD:
+        raise RuntimeError("demod.py 不可用，无法运行 LRPT 解调管道")
+    if sat_params.modulation not in ("QPSK", "OQPSK"):
+        # TODO: OQPSK 需在 Costas 前加 OQPSK 偏移对齐；AFM/AFSK 走 APT 模拟链路
+        raise NotImplementedError(f"暂不支持调制方式: {sat_params.modulation}")
+
+    sps = max(1, int(round(sample_rate / sat_params.symbol_rate)))
+
+    # 1. QPSK 解调
+    q = QPSKDemodulator(sps=sps)
+    symbols = q.demodulate(iq)
+
+    # 2. 符号转比特
+    bits = q.symbols_to_bits(symbols).astype(np.float64)
+
+    # 3. Viterbi 解码（rate<1 时）
+    if sat_params.viterbi_rate < 1.0 and sat_params.viterbi_K > 0:
+        dec = ViterbiDecoder(K=sat_params.viterbi_K,
+                             G1=sat_params.viterbi_g1,
+                             G2=sat_params.viterbi_g2)
+        bits = dec.decode(bits).astype(np.float64)
+
+    # 4. 解扰
+    if sat_params.descrambler == "CCDB":
+        bits = _demod_descramble_ccdb(bits.astype(np.uint8)).astype(np.float64)
+    elif sat_params.descrambler == "NRZ-M":
+        bits = descramble_nrz_m(bits.astype(np.uint8)).astype(np.float64)
+    # TODO: MPEG 解扰（DVB-S）尚未实现
+
+    # 5. CADU 提取
+    if sat_params.cadu_length > 0:
+        return extract_cadu(bits.astype(np.uint8), sat_params.cadu_length)
+    return []
 
 
 def extract_cadu(bits: np.ndarray, cadu_length: int = 1024) -> List[np.ndarray]:
@@ -382,22 +467,19 @@ def extract_cadu(bits: np.ndarray, cadu_length: int = 1024) -> List[np.ndarray]:
 # 图像合成
 # ========================================================================
 
-def compose_visible_image(cadu_data: List[np.ndarray]) -> np.ndarray:
+def compose_visible_image(cadu_data: List[np.ndarray]) -> Optional[np.ndarray]:
     """
-    从CADU数据合成可见光云图。
+    从 CADU 数据合成可见光云图。
 
-    简化演示：返回一个模拟的云图矩阵。
+    TODO: 尚未实现真实图像合成。需要：
+      1. 按 CCSDS 虚拟信道数据单元（VCDU）拆解 CADU，提取图像层；
+      2. 按卫星相机行格式（Meteor-M2 每帧 4 通道交错）重组行；
+      3. 去同步字、去字节填充、按行拼成灰度/RGB 图像。
+    目前不再返回伪造的径向渐变"假云图"，避免上层误以为解码成功。
     """
-    # 实际实现需要解析CADU中的图像数据
-    # 这里返回一个演示图像
-    size = 512
-    # 生成模拟云图（径向渐变+噪声）
-    y, x = np.mgrid[-1:1:size*1j, -1:1:size*1j]
-    r = np.sqrt(x**2 + y**2)
-    img = np.exp(-r**2 * 2) * 255
-    img += np.random.randn(size, size) * 10
-    img = np.clip(img, 0, 255).astype(np.uint8)
-    return img
+    # TODO: 接 satdump_integration 或自实现 VCDU→图像重组
+    logger.warning("compose_visible_image 尚未实现真实图像合成，返回 None")
+    return None
 
 
 # ========================================================================
