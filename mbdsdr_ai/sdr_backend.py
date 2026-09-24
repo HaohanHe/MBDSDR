@@ -529,6 +529,9 @@ class RTLSDRBackend(SDRBackend):
         self._sdr = None
         self._direct = 0  # 0=off, 1=I, 2=Q
         self.tuner_name = "Unknown"
+        # 来源: librtlsdr src/librtlsdr.c:959-969 —— 真实离散增益表在
+        # mbdsdr_ai/rtlsdr_params.py，连上探测到调谐器型号后填充。
+        self._gain_table_db: list = []
 
     @staticmethod
     def list_devices() -> list:
@@ -567,6 +570,13 @@ class RTLSDRBackend(SDRBackend):
                 self.tuner_name = self._TUNER_NAMES.get(int(self._sdr.tuner_type), "Unknown")
             except Exception:
                 self.tuner_name = "Unknown"
+            # 来源: librtlsdr src/librtlsdr.c:956-1008 rtlsdr_get_tuner_gains ——
+            # 按探测到的调谐器型号载入真实离散增益表（dB）。
+            try:
+                from . import rtlsdr_params as _rp
+                self._gain_table_db = _rp.get_gain_table(self.tuner_name)
+            except Exception:
+                self._gain_table_db = []
             # 上电先应用 ppm
             if self._ppm:
                 self.set_ppm(self._ppm)
@@ -635,6 +645,17 @@ class RTLSDRBackend(SDRBackend):
             # rtl_433 src/sdr.c:1409 同样先切 manual 再设增益。
             # pyrtlsdr 的 gain 属性接收 dB 浮点，内部自动查表并 ×10 转 0.1dB
             # （等价 rtl_433 src/sdr.c:1396 atof*10），无需我们手动乘 10。
+            # 来源: librtlsdr src/convenience/convenience.c:116-141 nearest_gain —
+            # 驱动只接受离散增益档，先把请求值吸附到最近一档，避免 pyrtlsdr
+            # 内部再做隐式四舍五入造成与回读值不一致。
+            target = gain_db
+            if self._gain_table_db:
+                snapped = min(self._gain_table_db, key=lambda g: abs(g - gain_db))
+                if abs(snapped - gain_db) > 1e-6:
+                    logger.info(
+                        f"RTL-SDR 增益 {gain_db:.1f}dB 吸附到最近离散档 {snapped:.1f}dB "
+                        f"(调谐器 {self.tuner_name})")
+                target = snapped
             try:
                 self._sdr.set_manual_gain_mode(1)  # 1 = manual tuner gain
             except Exception:
@@ -642,7 +663,7 @@ class RTLSDRBackend(SDRBackend):
                     self._sdr.gain_mode = 1
                 except Exception:
                     pass
-            self._sdr.gain = float(gain_db)
+            self._sdr.gain = float(target)
         except Exception as e:
             logger.warning(f"RTL-SDR 设置增益 {gain_db} dB 失败: {e}")
             return False
