@@ -355,3 +355,96 @@ def interference_direction_finding(
         "note": "八木天线RSSI扫描质心法定位，建议多角度验证",
         "symmetric_check": f"对称方向 {symmetric_angle:.0f}° 需验证排除镜像",
     }
+
+
+# ============================================================
+# 真实串口 GNSS 定位封装（骨架，等真硬件调试）
+# ------------------------------------------------------------
+# 与上面的 SDR 干扰监测解耦：这里只负责从串口 GNSS 模块读 NMEA，
+# 给上层（状态面板 / 天空图）提供一个干净的 get_position()。
+# 无真实定位时 source="none"、坐标为 None，绝不造假。
+# 解析/串口细节见 mbdsdr_ai/serial_gnss.py。
+# ============================================================
+
+from dataclasses import dataclass as _dc
+from typing import Optional as _Opt
+
+try:
+    from .serial_gnss import SerialGNSSReader
+except Exception:  # pragma: no cover - 包外直接运行/缺 pyserial 时降级
+    try:
+        from serial_gnss import SerialGNSSReader  # type: ignore
+    except Exception:
+        SerialGNSSReader = None  # type: ignore
+
+
+@_dc
+class GNSSPosition:
+    """一次真实 GNSS 定位快照。无数据时 source='none'、坐标为 None。"""
+    source: str = "none"            # "real" / "none"
+    lat: _Opt[float] = None
+    lon: _Opt[float] = None
+    alt: _Opt[float] = None
+    sats: _Opt[int] = None
+    hdop: _Opt[float] = None
+    speed: _Opt[float] = None       # km/h
+    course: _Opt[float] = None       # 度
+    utc_time: _Opt[str] = None
+    timestamp: _Opt[float] = None
+
+
+class RealGNSSMonitor:
+    """封装 SerialGNSSReader，向上层暴露 get_position()。
+
+    用法::
+        m = RealGNSSMonitor()
+        m.start()                 # auto_detect；找不到设备也不崩
+        pos = m.get_position()     # GNSSPosition；无 fix 时 source="none"
+        m.stop()
+    """
+
+    def __init__(self, port: Optional[str] = None, baudrate: Optional[int] = None):
+        self.port = port
+        self.baudrate = baudrate
+        self._reader = SerialGNSSReader() if SerialGNSSReader is not None else None
+        self._started = False
+
+    def start(self) -> bool:
+        if self._reader is None:
+            return False
+        try:
+            self._started = bool(self._reader.start(self.port, self.baudrate))
+        except Exception:
+            self._started = False
+        return self._started
+
+    def stop(self):
+        if self._reader is not None:
+            try:
+                self._reader.stop()
+            except Exception:
+                pass
+        self._started = False
+
+    def get_position(self) -> GNSSPosition:
+        """返回最新定位。无串口/无 fix 时 source='none'，坐标全 None。"""
+        if self._reader is None:
+            return GNSSPosition(source="none")
+        try:
+            fix = self._reader.get_fix()
+        except Exception:
+            return GNSSPosition(source="none")
+        if not fix or fix.get("source") != "real":
+            return GNSSPosition(source="none")
+        return GNSSPosition(
+            source="real",
+            lat=fix.get("latitude"),
+            lon=fix.get("longitude"),
+            alt=fix.get("altitude_m"),
+            sats=fix.get("satellites"),
+            hdop=fix.get("hdop"),
+            speed=fix.get("speed_kmh"),
+            course=fix.get("course_deg"),
+            utc_time=fix.get("utc_time"),
+            timestamp=fix.get("timestamp"),
+        )

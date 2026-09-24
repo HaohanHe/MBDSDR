@@ -161,7 +161,10 @@ def parse_gnss_rmc(nmea_sentence: str) -> Optional[Dict[str, Any]]:
         sentence = nmea_sentence.split('*')[0]
         fields = sentence.split(',')
 
-        if len(fields) < 10 or fields[0] not in ('$GNRMC', '$GPRMC', '$GARMC'):
+        if len(fields) < 10 or fields[0][0] != '$' or fields[0][3:] != 'RMC':
+            return None
+        # 多星座 talker 前缀 GP/GL/GA/GB/BD/GN（来源 direwolf dwgpsnmea.c:38-42）
+        if fields[0][1:3] not in ('GP', 'GL', 'GA', 'GB', 'BD', 'GN'):
             return None
 
         # 时间（HHMMSS.ss）
@@ -232,6 +235,173 @@ def parse_gnss_rmc(nmea_sentence: str) -> Optional[Dict[str, Any]]:
 
     except (ValueError, IndexError):
         return None
+
+
+# ------------------------------------------------------------
+# 扩展：全语句 NMEA 解析（多星座 GP/GL/GA/GB/BD/GN）
+# 来源：NMEA-0183 standard；talker ID 参考 direwolf dwgpsnmea.c:38-42
+# 与 mbdsdr_ai/serial_gnss.py NMEAParser 字段口径保持一致。
+# ------------------------------------------------------------
+
+_NMEA_TALKERS = ('GP', 'GL', 'GA', 'GB', 'BD', 'GN')
+
+
+def _nmea_ddmm(value: str, hemi: str, is_lat: bool) -> Optional[float]:
+    """ddmm.mmmm / dddmm.mmmm → 十进制度。空字段返回 None。"""
+    if not value:
+        return None
+    try:
+        n = 2 if is_lat else 3
+        deg = int(value[0:n])
+        minute = float(value[n:])
+    except (ValueError, IndexError):
+        return None
+    deg += minute / 60.0
+    if hemi == 'S' or hemi == 'W':
+        deg = -deg
+    return deg
+
+
+def parse_gnss_gga(line: str) -> Optional[Dict[str, Any]]:
+    """解析 GGA 定位语句。
+    示例: $GNGGA,072545.00,4352.0000,N,12519.0000,E,1,09,0.9,150.0,M,0.0,M,,*CC
+    """
+    if not line or not line.startswith('$'):
+        return None
+    body = line.split('*')[0]
+    fields = body.split(',')
+    if len(fields) < 10 or fields[0][3:] != 'GGA' or fields[0][1:3] not in _NMEA_TALKERS:
+        return None
+
+    def _f(i):
+        try:
+            return float(fields[i]) if fields[i] != '' else None
+        except (ValueError, IndexError):
+            return None
+
+    return {
+        "talker": fields[0][1:3],
+        "utc_time": fields[1] if len(fields) > 1 else '',
+        "latitude": _nmea_ddmm(fields[2], fields[3], True) if len(fields) > 3 else None,
+        "longitude": _nmea_ddmm(fields[4], fields[5], False) if len(fields) > 5 else None,
+        "fix_quality": int(fields[6]) if len(fields) > 6 and fields[6].isdigit() else 0,
+        "satellites": int(fields[7]) if len(fields) > 7 and fields[7].isdigit() else 0,
+        "hdop": _f(8),
+        "altitude_m": _f(9),
+    }
+
+
+def parse_gnss_gsa(line: str) -> Optional[Dict[str, Any]]:
+    """解析 GSA（参与定位卫星号 + PDOP/HDOP/VDOP）。"""
+    if not line or not line.startswith('$'):
+        return None
+    fields = line.split('*')[0].split(',')
+    if len(fields) < 17 or fields[0][3:] != 'GSA' or fields[0][1:3] not in _NMEA_TALKERS:
+        return None
+    used = [int(x) for x in fields[3:15] if x.strip().isdigit()]
+    return {
+        "talker": fields[0][1:3],
+        "mode": fields[1],
+        "fix_type": int(fields[2]) if fields[2].isdigit() else 1,
+        "satellites_used": used,
+        "pdop": float(fields[15]) if fields[15] else None,
+        "hdop": float(fields[16]) if fields[16] else None,
+        "vdop": float(fields[17]) if len(fields) > 17 and fields[17] else None,
+    }
+
+
+def parse_gnss_gsv(line: str) -> Optional[Dict[str, Any]]:
+    """解析单帧 GSV（可见卫星摘要，不跨帧聚合）。"""
+    if not line or not line.startswith('$'):
+        return None
+    fields = line.split('*')[0].split(',')
+    if len(fields) < 4 or fields[0][3:] != 'GSV' or fields[0][1:3] not in _NMEA_TALKERS:
+        return None
+    sats = []
+    i = 4
+    while i + 3 < len(fields):
+        if fields[i]:
+            try:
+                sats.append({
+                    "id": int(fields[i]),
+                    "elevation": float(fields[i + 1]) if fields[i + 1] else None,
+                    "azimuth": float(fields[i + 2]) if fields[i + 2] else None,
+                    "snr_db": float(fields[i + 3]) if fields[i + 3] else None,
+                })
+            except ValueError:
+                pass
+        i += 4
+    return {
+        "talker": fields[0][1:3],
+        "total_messages": int(fields[1]) if fields[1].isdigit() else 0,
+        "satellites_in_view": int(fields[3]) if fields[3].isdigit() else 0,
+        "sats": sats,
+    }
+
+
+def parse_gnss_vtg(line: str) -> Optional[Dict[str, Any]]:
+    """解析 VTG（航迹角 + 地面速度）。"""
+    if not line or not line.startswith('$'):
+        return None
+    fields = line.split('*')[0].split(',')
+    if fields[0][3:] != 'VTG' or fields[0][1:3] not in _NMEA_TALKERS:
+        return None
+
+    def _f(i):
+        try:
+            return float(fields[i]) if i < len(fields) and fields[i] != '' else None
+        except ValueError:
+            return None
+
+    # $--VTG,course_T,T,course_M,M,speed_knots,N,speed_kmh,K
+    return {
+        "talker": fields[0][1:3],
+        "course_deg": _f(1),
+        "speed_knots": _f(5),
+        "speed_kmh": _f(7),
+    }
+
+
+def parse_gnss_zda(line: str) -> Optional[Dict[str, Any]]:
+    """解析 ZDA（UTC 日期时间，高精度授时）。"""
+    if not line or not line.startswith('$'):
+        return None
+    fields = line.split('*')[0].split(',')
+    if fields[0][3:] != 'ZDA' or fields[0][1:3] not in _NMEA_TALKERS:
+        return None
+    dt = None
+    try:
+        if len(fields) > 4 and fields[1] and fields[2] and fields[3] and fields[4]:
+            hh = int(fields[1][0:2]); mm = int(fields[1][2:4]); ss = int(float(fields[1][4:]))
+            dt = datetime(int(fields[4]), int(fields[3]), int(fields[2]),
+                          hh, mm, ss, tzinfo=timezone.utc)
+    except (ValueError, IndexError):
+        dt = None
+    return {"talker": fields[0][1:3], "datetime_utc": dt, "raw_time": fields[1]}
+
+
+def parse_nmea_sentence(line: str) -> Optional[Dict[str, Any]]:
+    """根据语句类型分发到对应解析器。识别不了返回 None。"""
+    if not line or not line.startswith('$'):
+        return None
+    head = line.split(',', 1)[0]
+    if len(head) < 6:
+        return None
+    # '$' + talker(2) + type(3)：$GNGGA -> type 在 [3:6]
+    stype = head[3:6]
+    if stype == 'GGA':
+        return parse_gnss_gga(line)
+    if stype == 'RMC':
+        return parse_gnss_rmc(line)
+    if stype == 'GSA':
+        return parse_gnss_gsa(line)
+    if stype == 'GSV':
+        return parse_gnss_gsv(line)
+    if stype == 'VTG':
+        return parse_gnss_vtg(line)
+    if stype == 'ZDA':
+        return parse_gnss_zda(line)
+    return None
 
 
 # ============================================================
