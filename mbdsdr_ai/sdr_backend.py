@@ -1019,6 +1019,433 @@ class HackRFBackend(SDRBackend):
             return None
 
 
+class SoapySDRBackend(SDRBackend):
+    """
+    通用 SoapySDR 后端（pothosware/SoapySDR 统一抽象层）。
+
+    SoapySDR 是 SDR 生态的"总线"：同一个 API 驱动 RTL-SDR、HackRF、USRP、BladeRF、
+    Airspy、LimeSDR、Red Pitaya 等数十种前端，只要装好对应 Soapy* 支持模块即可。
+    本后端按三层降级策略接入，**绝不假成功**：
+      1) 有 SoapySDR Python 绑定（``import SoapySDR``）→ 原生 API 全功能；
+      2) 无 Python 绑定但有 ``SoapySDRUtil`` CLI → 解析其文本输出做枚举；
+      3) 两者都没有 → list_devices() 返回 [] 并 log warning，connect() 直接失败。
+
+    关键 API 与行号（来源: repos/SoapySDR）：
+      - Device::enumerate(args) 枚举入口        —— lib/Factory.cpp:41
+      - 枚举结果自动注入 driver 键             —— lib/Factory.cpp:101
+      - Device::make(args) 打开设备             —— lib/Factory.cpp:133
+      - SOAPY_SDR_RX = 1（接收方向）            —— include/SoapySDR/Constants.h:22
+      - setFrequency(RX, chan, freq)            —— include/SoapySDR/Device.hpp:801
+      - getFrequencyRange(RX, chan) → RangeList —— include/SoapySDR/Device.hpp:855
+      - setSampleRate(RX, chan, rate)           —— include/SoapySDR/Device.hpp:884
+      - getSampleRateRange(RX, chan) → RangeList—— include/SoapySDR/Device.hpp:909
+      - setGain(RX, chan, db)                   —— include/SoapySDR/Device.hpp:725
+      - getGainRange(RX, chan) → Range          —— include/SoapySDR/Device.hpp:759
+      - setupStream(RX, format, channels)       —— include/SoapySDR/Device.hpp:267
+      - readStream(stream, buffs, n, ...)       —— include/SoapySDR/Device.hpp:352
+      - Range.minimum()/maximum()               —— include/SoapySDR/Types.hpp:64
+    Python 侧真实用法参考: repos/SoapySDR/swig/python/apps/MeasureDelay.py:81(setupStream),
+      :108(readStream, 返回对象 .ret/.flags/.timeNs)。
+    """
+
+    # 我们用复数 float32 流（与 pyrtlsdr 返回一致，上层解调链无需改）。
+    # 来源: include/SoapySDR/Device.hpp:230 附近 stream format 字符串；
+    # MeasureDelay.py:81 用 SOAPY_SDR_CF32。
+    _STREAM_FORMAT = "CF32"
+
+    def __init__(self, device_args: Any = "", device_info: Optional[Dict[str, Any]] = None):
+        """
+        :param device_args: 打开设备用的参数字符串或 dict，例如
+                            "driver=rtlsdr,serial=00000001"（来自 enumerate 结果）。
+        :param device_info: enumerate 阶段拿到的身份信息 dict（label/serial/...），
+                            用于构造 SDRDevice；缺省时填占位。
+        """
+        info = device_info or {}
+        # 枚举身份字段；拿不到时给安全默认，绝不伪造真实范围。
+        driver = info.get("driver", "soapy")
+        label = info.get("label", str(device_args) or "SoapySDR device")
+        serial = info.get("serial", "")
+        # 频率/采样率/增益范围：优先用枚举阶段探测到的真实范围；
+        # 探测不到时给"宽但保守"的占位范围，connect 后会用 readback_hw_state() 校正。
+        freq_range = self._range_tuple(info.get("freq_range"), (1e3, 7.2e9))
+        rate_range = self._range_tuple(info.get("sample_rate_range"), (1e3, 61.44e6))
+        max_gain = float((info.get("gain_range") or (0.0, 60.0))[1]) \
+            if isinstance(info.get("gain_range"), (tuple, list)) else 60.0
+
+        device = SDRDevice(
+            device_type=f"soapy_{driver}",
+            device_id=f"soapy_{driver}_{serial or label}",
+            name=label,
+            frequency_range=freq_range,
+            sample_rate_range=rate_range,
+            max_gain=max_gain,
+            supports_iq=True,
+            supports_tx=False,  # 接收优先；TX 由具体 driver 决定，本后端默认只收
+        )
+        super().__init__(device)
+        # 统一存成字符串，SoapySDR.Device() 两种都吃
+        if isinstance(device_args, dict):
+            self._args_str = ",".join(f"{k}={v}" for k, v in device_args.items())
+        else:
+            self._args_str = str(device_args)
+        self._serial = serial
+        self._driver = driver
+        self._sdr = None       # SoapySDR.Device 实例
+        self._stream = None    # setupStream 返回的流句柄
+        self._chan = 0
+        self._rx = 1           # SOAPY_SDR_RX，来源: Constants.h:22
+
+    # ------------------------------------------------------------------
+    # 工具：RangeList → (min, max)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _range_tuple(rl, default: Tuple[float, float]) -> Tuple[float, float]:
+        """把 SoapySDR RangeList / 单个 Range / 已有 tuple 归一成 (min, max)。
+
+        来源: include/SoapySDR/Types.hpp:91 —— 整个 RangeList 的最小=front().minimum()，
+        最大=back().maximum()。Python SWIG 对象用 .minimum()/.maximum() 方法访问。
+        注意 getGainRange()（Device.hpp:759）返回单个 Range 而非 RangeList，
+        而 getFrequencyRange()/getSampleRateRange() 返回 RangeList，二者都要兼容。
+        """
+        try:
+            if not rl:
+                return default
+            # 单个 Range 对象（带 minimum()/maximum() 方法）
+            if hasattr(rl, "minimum") and hasattr(rl, "maximum"):
+                return (float(rl.minimum()), float(rl.maximum()))
+            if isinstance(rl, (tuple, list)):
+                if len(rl) == 2 and all(isinstance(x, (int, float)) for x in rl):
+                    return (float(rl[0]), float(rl[1]))
+                # RangeList 形态：元素是 Range 对象
+                lo = min(float(r.minimum()) for r in rl)
+                hi = max(float(r.maximum()) for r in rl)
+                return (lo, hi)
+        except Exception:
+            pass
+        return default
+
+    # ------------------------------------------------------------------
+    # 枚举：优先 Python 绑定，降级 SoapySDRUtil CLI，都没有返回 []
+    # ------------------------------------------------------------------
+    @classmethod
+    def list_devices(cls) -> List[Dict[str, Any]]:
+        """枚举真实 SoapySDR 设备。
+
+        返回每台设备一个 dict，键：driver/label/serial/manufacturer/product/
+        gain_range/freq_range/sample_rate_range/device_args。
+        无 Python 绑定、无 CLI 时返回 [] 并 log warning（**绝不**返回假设备）。
+        """
+        # 路径 1：原生 Python 绑定
+        try:
+            import SoapySDR  # noqa: F401
+        except Exception:
+            SoapySDR = None
+
+        if SoapySDR is not None:
+            try:
+                return cls._enumerate_via_python(SoapySDR)
+            except Exception as e:
+                logger.warning(f"SoapySDR Python 枚举失败，尝试 CLI 降级: {e}")
+
+        # 路径 2：SoapySDRUtil --find 命令行
+        try:
+            return cls._enumerate_via_cli()
+        except Exception as e:
+            logger.warning(f"SoapySDRUtil CLI 枚举失败: {e}")
+
+        # 路径 3：都没有 → 优雅报设备未找到
+        logger.warning(
+            "未发现 SoapySDR：既无 Python 绑定(import SoapySDR)，"
+            "也无 SoapySDRUtil CLI。安装 SoapySDR + 对应 Soapy* 模块后可识别硬件。"
+        )
+        return []
+
+    @classmethod
+    def _enumerate_via_python(cls, SoapySDR) -> List[Dict[str, Any]]:
+        """用 SoapySDR.Device.enumerate() 枚举；并 best-effort 开probe读真实范围。
+
+        来源: lib/Factory.cpp:41 enumerate(args)；:101 注入 driver 键。
+        enumerate 本身只给身份信息（label/serial/manufacturer/product），
+        范围要 open 后查 getFrequencyRange 等（Device.hpp:855/909/759）。
+        """
+        # 来源: lib/Factory.cpp:41 — enumerate() 无参即枚举全部
+        found = SoapySDR.Device.enumerate() or []
+        out: List[Dict[str, Any]] = []
+        for kwargs in found:
+            # SWIG Kwargs 支持 .to_dict() 或直接迭代；做一次防御性转换
+            try:
+                info = dict(kwargs)
+            except Exception:
+                info = {str(k): str(getattr(kwargs, k, "")) for k in getattr(kwargs, "keys", lambda: [])()}
+            entry = {
+                "driver": info.get("driver", "?"),
+                "label": info.get("label", info.get("driver", "SoapySDR device")),
+                "serial": info.get("serial", ""),
+                "manufacturer": info.get("manufacturer", ""),
+                "product": info.get("product", ""),
+                "gain_range": None,
+                "freq_range": None,
+                "sample_rate_range": None,
+                "device_args": dict(info),
+            }
+            # best-effort 开一下设备读范围；失败不影响身份列出
+            try:
+                probe = SoapySDR.Device(info)
+                rx = getattr(SoapySDR, "SOAPY_SDR_RX", 1)
+                entry["freq_range"] = cls._range_tuple(
+                    probe.getFrequencyRange(rx, 0), (1e3, 7.2e9))
+                entry["sample_rate_range"] = cls._range_tuple(
+                    probe.getSampleRateRange(rx, 0), (1e3, 61.44e6))
+                entry["gain_range"] = cls._range_tuple(
+                    probe.getGainRange(rx, 0), (0.0, 60.0))
+                # 来源: lib/Factory.cpp:133 make() 返回的指针由 Python 端 del/close 释放
+                del probe
+            except Exception as e:
+                logger.debug(f"probe {entry['label']} 读范围失败(忽略): {e}")
+            out.append(entry)
+        return out
+
+    @classmethod
+    def _enumerate_via_cli(cls) -> List[Dict[str, Any]]:
+        """解析 ``SoapySDRUtil --find=""`` 的文本输出。
+
+        SoapySDRUtil --find 输出形如：
+            Found device 0:
+            :driver=rtlsdr
+            :label=Generic RTL2832U :: 00000001
+            :serial=00000001
+            :manufacturer=...
+            :product=...
+        CLI 路径拿不到频率/增益范围（那要 open 后查询），相关字段留 None。
+        """
+        import subprocess
+        try:
+            proc = subprocess.run(
+                ["SoapySDRUtil", "--find", ""],
+                capture_output=True, text=True, timeout=10,
+            )
+        except FileNotFoundError:
+            raise RuntimeError("SoapySDRUtil 未安装")
+        if proc.returncode != 0:
+            raise RuntimeError(f"SoapySDRUtil --find 退出码 {proc.returncode}: {proc.stderr[:200]}")
+
+        out: List[Dict[str, Any]] = []
+        cur: Dict[str, str] = {}
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if line.startswith(":") and "=" in line:
+                k, v = line[1:].split("=", 1)
+                cur[k.strip()] = v.strip()
+            elif line.startswith("Found device") and cur:
+                out.append(cur)
+                cur = {}
+        if cur:
+            out.append(cur)
+
+        result = []
+        for info in out:
+            result.append({
+                "driver": info.get("driver", "?"),
+                "label": info.get("label", info.get("driver", "SoapySDR device")),
+                "serial": info.get("serial", ""),
+                "manufacturer": info.get("manufacturer", ""),
+                "product": info.get("product", ""),
+                "gain_range": None,
+                "freq_range": None,
+                "sample_rate_range": None,
+                "device_args": dict(info),
+            })
+        return result
+
+    # ------------------------------------------------------------------
+    # 连接 / 断开：真实打开，失败返回 False（绝不切 mock 报成功）
+    # ------------------------------------------------------------------
+    def connect(self) -> bool:
+        try:
+            import SoapySDR
+        except Exception as e:
+            self.status.error = f"SoapySDR Python 绑定未安装，无法打开真实设备: {e}"
+            logger.error(self.status.error)
+            self.status.connected = False
+            return False
+
+        try:
+            # 来源: lib/Factory.cpp:133 Device::make(args) —— Python 端即构造 Device(args)
+            self._sdr = SoapySDR.Device(self._args_str)
+            self._rx = getattr(SoapySDR, "SOAPY_SDR_RX", 1)
+        except Exception as e:
+            self.status.error = f"SoapySDR 打开设备失败({self._args_str}): {e}"
+            logger.error(self.status.error)
+            self._sdr = None
+            self.status.connected = False
+            return False
+
+        try:
+            # 来源: Device.hpp:267 setupStream(direction, format, channels)
+            self._stream = self._sdr.setupStream(self._rx, self._STREAM_FORMAT, [self._chan])
+            # 来源: Device.hpp:339 附近 activateStream —— 必须先 activate 才能 readStream
+            self._sdr.activateStream(self._stream)
+        except Exception as e:
+            self.status.error = f"SoapySDR 建立接收流失败: {e}"
+            logger.error(self.status.error)
+            self.disconnect()
+            return False
+
+        self.status.connected = True
+        self.status.error = ""
+        self._start_time = time.time()
+        # 回读硬件真实范围/参数，对齐软件状态
+        try:
+            self.readback_hw_state()
+        except Exception as e:
+            logger.warning(f"SoapySDR 回读状态失败(忽略): {e}")
+        logger.info(f"SoapySDR 设备已连接: {self.device.name} (args={self._args_str})")
+        return True
+
+    def disconnect(self):
+        if self._sdr is not None:
+            try:
+                if self._stream is not None:
+                    # 来源: Device.hpp:267 附近 deactivateStream/closeStream
+                    self._sdr.deactivateStream(self._stream)
+                    self._sdr.closeStream(self._stream)
+            except Exception as e:
+                logger.debug(f"关闭流时忽略错误: {e}")
+            self._stream = None
+            try:
+                del self._sdr  # Python 端释放 Device（对应 C++ delete）
+            except Exception:
+                pass
+            self._sdr = None
+        super().disconnect()
+
+    # ------------------------------------------------------------------
+    # 调谐 / 增益 / 采样率：真实写硬件，异常记入 status.error
+    # ------------------------------------------------------------------
+    def _apply_frequency(self, freq_hz: float) -> bool:
+        if self._sdr is None:
+            return True
+        try:
+            # 来源: Device.hpp:801 setFrequency(RX, chan, freq)
+            self._sdr.setFrequency(self._rx, self._chan, float(freq_hz))
+            return True
+        except Exception as e:
+            self.status.error = f"setFrequency({freq_hz}) 失败: {e}"
+            return False
+
+    def _apply_sample_rate(self, rate_hz: float) -> bool:
+        if self._sdr is None:
+            return True
+        try:
+            # 来源: Device.hpp:884 setSampleRate(RX, chan, rate)
+            self._sdr.setSampleRate(self._rx, self._chan, float(rate_hz))
+            return True
+        except Exception as e:
+            self.status.error = f"setSampleRate({rate_hz}) 失败: {e}"
+            return False
+
+    def _apply_gain(self, gain_db: float) -> bool:
+        if self._sdr is None:
+            return True
+        try:
+            # 来源: Device.hpp:725 setGain(RX, chan, db) —— 总增益
+            self._sdr.setGain(self._rx, self._chan, float(gain_db))
+            return True
+        except Exception as e:
+            self.status.error = f"setGain({gain_db}) 失败: {e}"
+            return False
+
+    def set_agc(self, enabled: bool) -> bool:
+        if not super().set_agc(enabled):
+            return False
+        if self._sdr is not None:
+            try:
+                # 来源: Device.hpp:708 setGainMode(RX, chan, automatic)
+                self._sdr.setGainMode(self._rx, self._chan, bool(enabled))
+            except Exception as e:
+                self.status.error = f"setGainMode 失败: {e}"
+                return False
+        return True
+
+    def set_bandwidth(self, bw_hz: float) -> bool:
+        if not super().set_bandwidth(bw_hz):
+            return False
+        if self._sdr is not None and bw_hz > 0:
+            try:
+                # 来源: Device.hpp:921 setBandwidth(RX, chan, bw)
+                self._sdr.setBandwidth(self._rx, self._chan, float(bw_hz))
+                return True
+            except Exception as e:
+                self.status.error = f"setBandwidth({bw_hz}) 失败: {e}"
+                return False
+        return True
+
+    def readback_hw_state(self) -> bool:
+        """open 后回读真实频率/采样率/增益/范围，对齐 SDRDevice 与 SDRStatus。"""
+        if self._sdr is None:
+            return False
+        got = 0
+        try:
+            # 来源: Device.hpp:892 getSampleRate(RX, chan)
+            self.status.sample_rate_hz = float(
+                self._sdr.getSampleRate(self._rx, self._chan))
+            got += 1
+        except Exception:
+            pass
+        try:
+            # 来源: Device.hpp:789 附近 getFrequency(RX, chan)
+            self.status.frequency_hz = float(
+                self._sdr.getFrequency(self._rx, self._chan))
+            got += 1
+        except Exception:
+            pass
+        try:
+            self.status.gain_db = float(
+                self._sdr.getGain(self._rx, self._chan))
+            got += 1
+        except Exception:
+            pass
+        # 用硬件真实范围覆盖构造时的占位范围
+        try:
+            fr = self._sdr.getFrequencyRange(self._rx, self._chan)
+            self.device.frequency_range = self._range_tuple(
+                fr, self.device.frequency_range)
+            sr = self._sdr.getSampleRateRange(self._rx, self._chan)
+            self.device.sample_rate_range = self._range_tuple(
+                sr, self.device.sample_rate_range)
+            gr = self._sdr.getGainRange(self._rx, self._chan)
+            self.device.max_gain = float(gr.maximum())
+        except Exception:
+            pass
+        return got > 0
+
+    def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
+        """读取 IQ 样本。
+
+        来源: Device.hpp:352 readStream(stream, buffs, n, flags, timeNs, timeoutUs)。
+        Python 用法: MeasureDelay.py:108 —— 传 [numpy_complex64 数组]，
+        返回 status 对象，有效样本数取 status.ret。失败(负数)记 error 并返回 None。
+        """
+        if not self.status.connected or self._sdr is None or self._stream is None:
+            return None
+        try:
+            buff = np.zeros(int(num_samples), np.complex64)
+            # 500ms 超时；来源: MeasureDelay.py:107 timeout_us = 5e5
+            status = self._sdr.readStream(
+                self._stream, [buff], int(num_samples), timeoutUs=500_000)
+            n_read = int(getattr(status, "ret", 0))
+            if n_read <= 0:
+                # 来源: Device.hpp readStream 返回负数为错误码（如 OVERFLOW/TIMEOUT）
+                if n_read < 0:
+                    self.status.error = f"readStream 错误码 {n_read}"
+                return None
+            self._samples_read += n_read
+            return buff[:n_read].copy()
+        except Exception as e:
+            self.status.error = f"read_samples 异常: {e}"
+            return None
+
+
 class USRPBackend(SDRBackend):
     """
     USRP 后端（Ettus Research / NI）。
@@ -1457,3 +1884,99 @@ class SDRBackendManager:
             return None
         except Exception:
             return None
+
+
+# ======================================================================
+# 模块级：合并枚举所有 SDR 设备（SoapySDR + 原生 RTL-SDR / HackRF）
+# ======================================================================
+
+def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
+    """枚举本机所有可用 SDR 设备并去重合并。
+
+    合并来源：
+      - SoapySDRBackend.list_devices() —— SoapySDR 总线识别的所有前端
+        （RTL-SDR/HackRF/USRP/BladeRF/Airspy...），来源: lib/Factory.cpp:41。
+      - RTLSDRBackend.list_devices() —— pyrtlsdr 原生 USB 枚举（见本文件 RTLSDRBackend）。
+      - HackRFBackend —— 无专用枚举接口，靠 import 探测（本函数只做 best-effort 标识）。
+
+    去重键：优先 serial，其次 label。SoapySDR 条目信息更全（含真实范围），
+    已覆盖到同 serial 的原生条目时优先保留 SoapySDR 条目。
+
+    返回 [] 表示"真的没发现设备"（绝不返回假设备/mock）。
+    """
+    merged: Dict[str, Dict[str, Any]] = {}
+
+    def _key_of(d: Dict[str, Any]) -> str:
+        return d.get("serial") or d.get("label") or d.get("driver", "?")
+
+    # 1) SoapySDR 总线枚举（信息最全，先放）
+    try:
+        for dev in SoapySDRBackend.list_devices():
+            merged[_key_of(dev)] = dev
+    except Exception as e:
+        logger.warning(f"SoapySDR 枚举异常: {e}")
+
+    # 2) 原生 RTL-SDR（pyrtlsdr）——与 SoapySDR 的 rtlsdr 条目去重
+    try:
+        for dev in RTLSDRBackend.list_devices():
+            serial = dev.get("serial", "")
+            key = serial or f"rtl_index_{dev.get('index', 0)}"
+            if key in merged:
+                continue  # SoapySDR 已识别同 serial 设备，保留信息更全的那条
+            merged[key] = {
+                "driver": "rtlsdr",
+                "label": f"RTL-SDR #{dev.get('index', 0)} ({dev.get('tuner', '?')})",
+                "serial": serial,
+                "manufacturer": "",
+                "product": dev.get("tuner", ""),
+                "gain_range": (0.0, 49.6),
+                # 来源: SoapyRTLSDR/Settings.cpp:489-497 —— RTL-SDR 两段合法采样率
+                "sample_rate_range": (225001, 3_200_000),
+                # 来源: SoapyRTLSDR/Settings.cpp:410-427 —— R820T 类默认 24MHz~1.764GHz
+                "freq_range": (24e6, 1764e6),
+                "device_args": {"driver": "rtlsdr", "index": dev.get("index", 0)},
+            }
+    except Exception as e:
+        logger.warning(f"原生 RTL-SDR 枚举异常: {e}")
+
+    # 3) HackRF：仅当能 import hackrf 时给一个占位条目（真实打开由 connect 决定成败）
+    try:
+        import hackrf  # noqa: F401
+        key = "hackrf_0"
+        if key not in merged:
+            merged[key] = {
+                "driver": "hackrf",
+                "label": "HackRF One (libhackrf)",
+                "serial": "",
+                "manufacturer": "Great Scott Gadgets",
+                "product": "HackRF One",
+                "gain_range": (0.0, 40.0),
+                "sample_rate_range": (2e6, 20e6),
+                "freq_range": (1e6, 6e9),
+                "device_args": {"index": 0},
+            }
+    except Exception:
+        pass  # 没有 hackrf 库就不列
+
+    return list(merged.values())
+
+
+def build_backend_for_device(dev: Dict[str, Any]) -> Optional[SDRBackend]:
+    """根据 enumerate_all_sdr_devices() 产出的设备 dict 构造对应后端实例。
+
+    真正 connect 的成败由后端自己负责，本函数不假装成功。
+    """
+    driver = (dev.get("driver") or "").lower()
+    args = dev.get("device_args") or {}
+    try:
+        if driver == "rtlsdr" and not isinstance(args, dict) or (
+                isinstance(args, dict) and args.get("index") is not None and "driver" not in args):
+            # 纯 pyrtlsdr 原生条目（无 SoapySDR）
+            return RTLSDRBackend(device_index=int(args.get("index", 0)))
+        if driver == "hackrf":
+            return HackRFBackend(device_index=int(args.get("index", 0)))
+        # 其余一律走 SoapySDR 通用后端（rtlsdr 经 SoapySDR、usrp、bladerf...）
+        return SoapySDRBackend(device_args=args, device_info=dev)
+    except Exception as e:
+        logger.error(f"构造 {driver} 后端失败: {e}")
+        return None
