@@ -356,10 +356,10 @@ class SoapySDRBackend(SDRBackendBase):
                 except Exception as e:
                     logger.warning(f"读取RX失败: {e}")
 
-        # 模拟数据
-        t = np.arange(num_samples) / self._sample_rate
-        noise = (np.random.randn(num_samples) + 1j * np.random.randn(num_samples)) / np.sqrt(2) * 0.01
-        return noise.astype(np.complex64)
+        # 设备/流未就绪：不返回白噪声冒充真 IQ，抛错让上层知道
+        raise RuntimeError(
+            "RX 流未就绪（device 或 rx_stream 为 None），未收真实 IQ；"
+            "请先 connect() 并 setupStream()")
 
     def write_tx(self, iq_samples: np.ndarray) -> bool:
         """写 TX IQ 采样。"""
@@ -743,10 +743,12 @@ class HardwareManager:
                 "tx": self._soapy_backend.supports_tx(),
             }
 
-        # 降级到模拟
-        self._active_backend = MockSDRBackend()
-        self._active_backend.connect()
-        return {"success": True, "device": "模拟后端(降级)", "tx": True}
+        # 真硬件连不上：不偷偷切 mock，明确报错，由调用方显式选 mock
+        return {
+            "success": False,
+            "error": f"SoapySDR 连接 {device_str!r} 失败",
+            "fallback_mock_available": True,
+        }
 
     def get_active_backend(self) -> Optional[SDRBackendBase]:
         return self._active_backend
