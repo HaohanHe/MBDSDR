@@ -52,6 +52,7 @@ from .decoders import (
     detect_fhss, list_visible_satellites, compute_doppler_correction,
     BUILTIN_TLE, SATELLITE_FREQUENCIES,
 )
+from .multimon_decoders import register_multimon_tools
 
 
 def register_sdr_tools(agent):
@@ -75,6 +76,10 @@ def register_sdr_tools(agent):
     # 计划存储（harness planning 机制：先列步骤再动手，防长任务漂移）
     if not hasattr(agent, "_plans"):
         agent._plans = {}
+
+    # multimon-ng 数字模式解码（POCSAG/BCH、AFSK1200、DTMF、ZVEI）
+    # 来源: multimon-ng pocsag.c/bch.c/demod_afsk12.c/demod_dtmf.c/demod_zvei1.c
+    register_multimon_tools(agent.tool_registry)
 
     agent.tool_registry.register(
         name="sdr_plan",
