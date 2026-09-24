@@ -618,6 +618,98 @@ class ToolRegistry:
         # 来源: repos/sdrangel/sdrbase/dsp/* 及 plugins/channelrx/*
         self.register_sdrangel_tools()
 
+        # ── librtlsdr 真实硬件参数查询工具 ──
+        # 来源: repos/librtlsdr/src/librtlsdr.c:959-969,1100-1101,1157,1165
+        self.register_rtlsdr_params_tools()
+
+    def register_rtlsdr_params_tools(self):
+        """注册 librtlsdr 真实参数查询工具（纯查表，无需插设备）。
+
+        来源: mbdsdr_ai/rtlsdr_params.py（移植自 repos/librtlsdr）
+          - 增益表     librtlsdr.c:959-969  rtlsdr_get_tuner_gains
+          - 频率范围   tuner_e4k.c:351-352 / tuner_r82xx.c:1168
+          - 采样率区间 librtlsdr.c:1100-1101 + rtl-sdr.h:260-263
+        """
+        from . import rtlsdr_params as rp
+
+        self.register(
+            name="rtlsdr_list_gains",
+            description=(
+                "列出某 RTL-SDR 调谐器真实支持的离散增益档（dB）。"
+                "来源 librtlsdr rtlsdr_get_tuner_gains()。"
+                "可选调谐器: E4000/FC0012/FC0013/FC2580/R820T/R828D。"
+            ),
+            parameters={"type": "object", "properties": {
+                "tuner": {"type": "string", "description": "调谐器型号，如 R820T/E4000", "default": "R820T"}
+            }, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(
+                    rp.get_tuner_summary(args.get("tuner", "R820T")),
+                    ensure_ascii=False, indent=2),
+                data=rp.get_tuner_summary(args.get("tuner", "R820T")),
+            ),
+            category="sdr",
+        )
+
+        self.register(
+            name="rtlsdr_get_freq_range",
+            description=(
+                "返回某 RTL-SDR 调谐器的真实频率范围 (Hz) 与采样率合法区间。"
+                "来源 tuner_e4k.c:351-352 / tuner_r82xx.c:1168 / librtlsdr.c:1100-1101。"
+            ),
+            parameters={"type": "object", "properties": {
+                "tuner": {"type": "string", "description": "调谐器型号", "default": "R820T"}
+            }, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps({
+                    "tuner": args.get("tuner", "R820T"),
+                    "freq_range_hz": rp.get_frequency_range(args.get("tuner", "R820T")),
+                    "sample_rate_valid": [rp.SAMPLE_RATE_MIN_HZ, rp.SAMPLE_RATE_MAX_HZ],
+                    "sample_rate_dead_band": [rp.SAMPLE_RATE_DEAD_LOW, rp.SAMPLE_RATE_DEAD_HIGH],
+                    "recommended_rates_hz": rp.get_supported_sample_rates(),
+                }, ensure_ascii=False, indent=2),
+                data={"tuner": args.get("tuner", "R820T")},
+            ),
+            category="sdr",
+        )
+
+        self.register(
+            name="rtlsdr_set_params",
+            description=(
+                "把目标增益/采样率吸附到 librtlsdr 真实支持的离散档，"
+                "返回可直接下发的参数（增益 dB、合法采样率 Hz、最近档）。"
+                "移植自 convenience.c:116-141 nearest_gain。"
+            ),
+            parameters={"type": "object", "properties": {
+                "tuner": {"type": "string", "description": "调谐器型号", "default": "R820T"},
+                "gain_db": {"type": "number", "description": "目标增益 dB"},
+                "sample_rate_hz": {"type": "number", "description": "目标采样率 Hz"},
+            }, "required": []},
+            handler=lambda args: self._rtlsdr_set_params_handler(args),
+            category="sdr",
+        )
+
+    def _rtlsdr_set_params_handler(self, args):
+        from . import rtlsdr_params as rp
+        tuner = args.get("tuner", "R820T")
+        out = {"tuner": tuner}
+        if "gain_db" in args and args["gain_db"] is not None:
+            g = rp.nearest_gain(tuner, float(args["gain_db"]))
+            out["gain_db"] = g
+            out["gain_table_db"] = rp.get_gain_table(tuner)
+        if "sample_rate_hz" in args and args["sample_rate_hz"] is not None:
+            r = float(args["sample_rate_hz"])
+            out["sample_rate_requested_hz"] = r
+            out["sample_rate_valid"] = rp.is_valid_sample_rate(r)
+            out["recommended_rates_hz"] = rp.get_supported_sample_rates()
+        return ToolResult(
+            success=True,
+            content=json.dumps(out, ensure_ascii=False, indent=2),
+            data=out,
+        )
+
     def register_sdrangel_tools(self):
         """注册 SDRangel 真实源码移植的 DSP 工具。
 
