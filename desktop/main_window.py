@@ -29,6 +29,10 @@ from ai_panel import AIPanel
 from mcp_worker import MCPWorkerManager
 from rf_sky_view import RFSkyView, SkyObject, AntennaPointing, HeatmapCell, SatelliteTracker
 from module_panel import ModulePanel
+# 气象云图 / 多普勒定轨面板（懒加载：构造时只建 Qt 控件，后端 ToolRegistry
+# 在用户首次点解码/定轨时才创建，避免拖慢启动）。
+from weather_panel import WeatherPanel
+from doppler_panel import DopplerPanel
 
 
 class MainWindow(QMainWindow):
@@ -303,6 +307,14 @@ class MainWindow(QMainWindow):
         self.module_panel.tune_requested.connect(self._on_module_tune)
         left_tab.addTab(self.module_panel, "模块 / 信号流")
 
+        # Tab 4: 气象卫星云图面板（GK-2A/FY-4/FY-3/GOES/NOAA）
+        self.weather_panel = WeatherPanel()
+        left_tab.addTab(self.weather_panel, "气象云图")
+
+        # Tab 5: 多普勒定轨面板（LRO / Iridium / 自定义 TLE，EKF/RLS）
+        self.doppler_panel = DopplerPanel()
+        left_tab.addTab(self.doppler_panel, "多普勒定轨")
+
         # 初始化天空视图演示数据
         self._init_sky_view_demo()
 
@@ -547,6 +559,7 @@ class MainWindow(QMainWindow):
         self._worker = None
         self._active_sdr_backend = backend
         self._is_sim = False
+        self._panels_set_sdr_connected(True)
         self.conn_label.setText(f"  状态: {backend.device.name}  ")
         self.conn_label.setStyleSheet("color: #6BA89A; font-weight: 600;")
         self.status_conn.setText(backend.device.name)
@@ -562,6 +575,7 @@ class MainWindow(QMainWindow):
         self._is_sim = False
         self._worker = self._worker_manager.start(host=host, port=port, use_simulation=False)
         self._connect_worker_signals()
+        self._panels_set_sdr_connected(True)
         self.conn_label.setText(f"  状态: 连接中 {host}:{port}  ")
         self.conn_label.setStyleSheet("color: #C4B85C; font-weight: 600;")
         self.status_conn.setText(f"连接中 {host}:{port}")
@@ -585,6 +599,17 @@ class MainWindow(QMainWindow):
         self._worker.error_occurred.connect(self._on_error)
         self._worker.log_message.connect(self._on_log)
 
+    def _panels_set_sdr_connected(self, connected: bool):
+        """把真实 SDR 硬件连接状态同步到气象云图 / 多普勒定轨面板。
+        未连接时这两个面板的「实时 SDR」模式按钮置灰并显示未连接。"""
+        for panel in (getattr(self, "weather_panel", None),
+                      getattr(self, "doppler_panel", None)):
+            if panel is not None:
+                try:
+                    panel.set_sdr_connected(connected)
+                except Exception:
+                    pass
+
     def _disconnect(self):
         """断开连接。"""
         # 断开真实 SDR 后端（SoapySDR/RTL-SDR/HackRF）
@@ -594,6 +619,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self._active_sdr_backend = None
+        self._panels_set_sdr_connected(False)
         if self._worker_manager:
             self._worker_manager.stop()
         self._worker = None
