@@ -2457,6 +2457,11 @@ def register_sdr_tools(agent):
         category="sdr_decode",
     )
 
+    # redsea 真实 RDS 块同步/CRC/PS/RT/PTY/AF 解码工具（rds_decode_mpx /
+    # rds_decode_groups / rds_extract_ps_rt）
+    from .rds_lite import register_rds_tools
+    register_rds_tools(agent.tool_registry)
+
 
 # ═══════════════════════════════════════════════════════
 # 工具实现函数
