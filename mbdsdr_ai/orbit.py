@@ -43,8 +43,6 @@ BUILTIN_SATS: Dict[str, int] = {
 _TLE_CACHE: Dict[str, Tuple[float, Tuple[str, str]]] = {}
 _CACHE_DIR = os.path.join(os.path.expanduser("~"), ".mbdsdr", "tle_cache")
 _CTX = ssl.create_default_context()
-_CTX.check_hostname = False
-_CTX.verify_mode = ssl.CERT_NONE
 
 
 def _gmst_days(jd_ut1: float) -> float:
