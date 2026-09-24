@@ -38,13 +38,8 @@ class SpectrumDataGenerator:
         self.waterfall: List[np.ndarray] = []
         self.max_waterfall_lines = 200
         self._noise_level = -90.0  # dBm
-        self._stations = [
-            (98.5, -30, 0.05),   # (freq_mhz, peak_dbm, width_mhz)
-            (97.4, -45, 0.08),
-            (100.0, -50, 0.06),
-            (95.5, -40, 0.07),
-            (101.8, -35, 0.05),
-        ]
+        # 不预存任何 FM 台假峰——各地频率不同，有真 IQ 才显示真信号
+        self._stations = []
 
     def set_center_freq(self, freq_mhz: float):
         self.center_freq = freq_mhz
