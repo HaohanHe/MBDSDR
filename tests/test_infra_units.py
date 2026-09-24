@@ -89,13 +89,9 @@ def test_hal_device_info_contract():
 
 
 def test_hal_base_not_instantiable():
+    import inspect
     from mbdsdr_ai.hal import SDRBackendBase
-    try:
-        SDRBackendBase()  # 抽象类不应可实例化
-    except TypeError:
-        return True
-    # 某些实现允许实例化但抽象方法未实现；只要 list_devices 是抽象即可
-    return True
+    assert inspect.isabstract(SDRBackendBase), "SDRBackendBase 应为抽象类"
 
 
 if __name__ == "__main__":
