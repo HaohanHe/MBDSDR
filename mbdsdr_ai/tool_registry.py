@@ -668,6 +668,27 @@ class ToolRegistry:
         # 来源: repos/minimodem/src/{fsk.c,minimodem.c,baudot.c,databits_ascii.c}
         self.register_minimodem_tools()
 
+        # ── goestools 真实 GOES LRIT/HRIT 帧解析移植工具 ──
+        # 来源: repos/goestools/src/{lrit,assembler,decoder}/*（见 mbdsdr_ai/goes_lrit.py）
+        self.register_goeslrit_tools()
+
+    def register_goeslrit_tools(self):
+        """注册 goestools 真实源码移植的 GOES LRIT/HRIT 解析工具。
+
+        来源: github.com/pietern/goestools
+          - src/decoder/{packetizer,derandomizer,correlator}.*  帧同步/解扰
+          - src/assembler/{vcdu,virtual_channel,transport_pdu,session_pdu,crc}.*  VCDU→文件
+          - src/lrit/lrit.{h,cc}  LRIT 文件头结构
+        """
+        try:
+            from . import goes_lrit as GL
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("goes_lrit 不可用: %s", e)
+            return
+
+        GL.register_tool_registry(self)
+
     def register_minimodem_tools(self):
         """注册 minimodem 真实移植的通用软件 FSK 调制解调工具。
 
@@ -1022,6 +1043,129 @@ class ToolRegistry:
         # ── DSDcc 真实 4FSK/C4FM 数字语音解码移植工具（DMR/P25） ──
         # 来源: repos/DSDcc/{dsd_symbol,dsd_filters,dsd_sync,dmr,dsd_mbe}.cpp
         self.register_dsdcc_tools()
+
+        # ── RTKLIB 真实时间/坐标转换 + RINEX 解析 + SPP 单点定位 + NTRIP ──
+        # 来源: repos/RTKLIB/src/{rtklib.h,rtkcmn.c,ephemeris.c,pntpos.c,rinex.c,stream.c}
+        self.register_rtklib_tools()
+
+    def register_rtklib_tools(self):
+        """注册 RTKLIB 真实 GNSS 解算工具（时间/坐标/RINEX/SPP/NTRIP）。
+
+        来源: repos/RTKLIB（见 mbdsdr_ai/rtklib_adapter.py 注释内 file:line）
+          - 时间系统  rtkcmn.c:1246/1261/1425/1442（GPS周秒<->UTC，含闰秒表 :136）
+          - 坐标转换  rtkcmn.c:1634 ecef2pos / :1655 pos2ecef / :1686 ecef2enu
+          - 卫星位置  ephemeris.c:181 eph2pos（开普勒轨道）
+          - SPP       pntpos.c:250/253 伪距残差 + 最小二乘
+          - NTRIP     stream.c:1293 reqntrip_c（HTTP GET + Basic Auth）
+        """
+        from . import rtklib_adapter as ra
+
+        self.register(
+            name="gps_time_to_utc",
+            description=(
+                "把 GPS 周数(GPS week)与周内秒(tow)换算为 UTC 日历时刻（含闰秒）。"
+                "移植自 RTKLIB rtkcmn.c:1425 gpst2utc()。返回 年/月/日/时/分/秒 与当前闰秒数。"
+            ),
+            parameters={"type": "object", "properties": {
+                "week": {"type": "integer", "description": "GPS 周数"},
+                "tow": {"type": "number", "description": "周内秒(s)"},
+            }, "required": ["week", "tow"]},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(ra.gps_time_to_utc(int(args["week"]), float(args["tow"])),
+                                   ensure_ascii=False, indent=2),
+                data=ra.gps_time_to_utc(int(args["week"]), float(args["tow"])),
+            ),
+            category="gnss",
+        )
+
+        self.register(
+            name="ecef_to_llh",
+            description=(
+                "把地心地固直角坐标(ECEF, 米)换算为 WGS84 经纬高(度/米)。"
+                "移植自 RTKLIB rtkcmn.c:1634 ecef2pos()（Bowring 迭代）。"
+            ),
+            parameters={"type": "object", "properties": {
+                "x": {"type": "number", "description": "ECEF X (m)"},
+                "y": {"type": "number", "description": "ECEF Y (m)"},
+                "z": {"type": "number", "description": "ECEF Z (m)"},
+            }, "required": ["x", "y", "z"]},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(ra.ecef_to_llh(float(args["x"]), float(args["y"]),
+                                                  float(args["z"])),
+                                   ensure_ascii=False, indent=2),
+                data=ra.ecef_to_llh(float(args["x"]), float(args["y"]), float(args["z"])),
+            ),
+            category="gnss",
+        )
+
+        self.register(
+            name="rinex_parse",
+            description=(
+                "解析 RINEX 导航文件文本，提取广播星历（卫星号/GPS周/toe/长半轴/偏心率）。"
+                "移植自 RTKLIB rinex.c:1005 decode_eph() + :1187 readrnxnavb()。"
+            ),
+            parameters={"type": "object", "properties": {
+                "nav_text": {"type": "string", "description": "RINEX 导航文件文本"},
+            }, "required": ["nav_text"]},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(ra.rinex_parse(args["nav_text"]),
+                                   ensure_ascii=False, indent=2),
+                data=ra.rinex_parse(args["nav_text"]),
+            ),
+            category="gnss",
+        )
+
+        self.register(
+            name="spp_locate",
+            description=(
+                "给定每颗卫星的 ECEF 位置、钟差、伪距，用伪距最小二乘解算接收机位置。"
+                "移植自 RTKLIB pntpos.c:250/253 残差与设计矩阵。返回 ECEF/经纬高/钟差/RMS。"
+            ),
+            parameters={"type": "object", "properties": {
+                "rs": {"type": "array", "items": {"type": "array", "items": {"type": "number"}},
+                       "description": "每颗卫星 ECEF 位置 [[x,y,z],...] (m)"},
+                "dts": {"type": "array", "items": {"type": "number"},
+                        "description": "每颗卫星钟差 [s,...]"},
+                "pr": {"type": "array", "items": {"type": "number"},
+                       "description": "每颗卫星伪距 [m,...]"},
+            }, "required": ["rs", "dts", "pr"]},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(ra.spp_locate(args["rs"], args["dts"], args["pr"]),
+                                   ensure_ascii=False, indent=2, default=float),
+                data=ra.spp_locate(args["rs"], args["dts"], args["pr"]),
+            ),
+            category="gnss",
+        )
+
+        self.register(
+            name="ntrip_connect",
+            description=(
+                "向 NTRIP caster 发起握手（HTTP GET /mountpoint + Basic Auth），"
+                "验证能否拿到 RTCM3 数据流。移植自 RTKLIB stream.c:1293 reqntrip_c()。"
+            ),
+            parameters={"type": "object", "properties": {
+                "host": {"type": "string", "description": "caster 主机"},
+                "port": {"type": "integer", "description": "端口（默认 2101）", "default": 2101},
+                "mountpoint": {"type": "string", "description": "挂载点"},
+                "user": {"type": "string", "description": "用户名（可选）", "default": ""},
+                "password": {"type": "string", "description": "密码（可选）", "default": ""},
+            }, "required": ["host", "mountpoint"]},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(ra.ntrip_connect(
+                    args["host"], int(args.get("port", 2101)), args["mountpoint"],
+                    args.get("user", ""), args.get("password", "")),
+                    ensure_ascii=False, indent=2),
+                data=ra.ntrip_connect(
+                    args["host"], int(args.get("port", 2101)), args["mountpoint"],
+                    args.get("user", ""), args.get("password", "")),
+            ),
+            category="gnss",
+        )
 
     def register_dsdcc_tools(self):
         """注册 DSDcc 真实 4FSK/C4FM 数字语音解码工具（DMR/P25 Phase1）。
