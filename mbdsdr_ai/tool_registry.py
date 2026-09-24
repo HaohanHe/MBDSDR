@@ -655,6 +655,89 @@ class ToolRegistry:
         # 来源: repos/librtlsdr/src/librtlsdr.c:959-969,1100-1101,1157,1165
         self.register_rtlsdr_params_tools()
 
+        # ── gpredict 真实 SGP4 轨道预测工具 ──
+        # 来源: repos/gpredict/src/sgpsdp/{sgp4sdp4,sgp_in,sgp_obs,sgp_time}.c
+        self.register_gpredict_tools()
+
+    def register_gpredict_tools(self):
+        """注册 gpredict 真实移植的卫星轨道预测工具。
+
+        来源: mbdsdr_ai/gpredict_adapter.py（逐行移植 repos/gpredict/src/sgpsdp/）
+          - tle_parse          sgp_in.c:110-230  Convert_Satellite_Data
+          - sgp4_propagate     sgp4sdp4.c:22-269 SGP4 近地传播
+          - sat_pass_predict   sgp_obs.c:86-140 站心方位/仰角 + AOS/LOS 扫描
+          - doppler_calc       sgp_obs.c:126 range_rate -> f_obs=f_src(1-v_r/c)
+        """
+        import json as _json
+        try:
+            from mbdsdr_ai import gpredict_adapter as GAD
+        except Exception:
+            GAD = None
+        if GAD is None:
+            return
+
+        def _g(result):
+            return ToolResult(success=True,
+                              content=_json.dumps(result, ensure_ascii=False, indent=2),
+                              data=result)
+
+        self.register(
+            name="tle_parse",
+            description="解析两行根数(TLE)：校验和验证 + 提取倾角/RAAN/偏心率/近地点幅角/平近点角/平均运动/BSTAR。"
+                        "输入卫星名+TLE两行。来源 gpredict sgp_in.c。",
+            parameters={"type": "object", "properties": {
+                "name": {"type": "string", "description": "卫星名"},
+                "line1": {"type": "string", "description": "TLE 第1行"},
+                "line2": {"type": "string", "description": "TLE 第2行"},
+            }, "required": ["name", "line1", "line2"]},
+            handler=lambda a: _g(GAD.tool_tle_parse(a["name"], a["line1"], a["line2"])),
+            category="satellite",
+        )
+        self.register(
+            name="sgp4_propagate",
+            description="SGP4 真实轨道传播：给定 TLE+时刻，输出卫星 ECI/TEME 位置(km)与速度(km/s)。"
+                        "近地卫星(周期<225min)。来源 gpredict sgp4sdp4.c:SGP4。",
+            parameters={"type": "object", "properties": {
+                "name": {"type": "string"}, "line1": {"type": "string"}, "line2": {"type": "string"},
+                "unix_s": {"type": "number", "description": "时刻 unix 秒；默认现在"},
+            }, "required": ["name", "line1", "line2"]},
+            handler=lambda a: _g(GAD.tool_sgp4_propagate(a["name"], a["line1"], a["line2"], a.get("unix_s"))),
+            category="satellite",
+        )
+        self.register(
+            name="sat_pass_predict",
+            description="卫星过境预测：给定 TLE+观测站经纬度，预测未来N小时 AOS/LOS/最大仰角/持续时间。"
+                        "来源 gpredict 过境扫描逻辑。",
+            parameters={"type": "object", "properties": {
+                "name": {"type": "string"}, "line1": {"type": "string"}, "line2": {"type": "string"},
+                "lat_deg": {"type": "number"}, "lon_deg": {"type": "number"},
+                "alt_km": {"type": "number", "default": 0.0},
+                "hours": {"type": "number", "default": 24.0},
+                "min_el_deg": {"type": "number", "default": 0.0},
+            }, "required": ["name", "line1", "line2", "lat_deg", "lon_deg"]},
+            handler=lambda a: _g(GAD.tool_sat_pass_predict(
+                a["name"], a["line1"], a["line2"], a["lat_deg"], a["lon_deg"],
+                a.get("alt_km", 0.0), a.get("hours", 24.0), a.get("min_el_deg", 0.0))),
+            category="satellite",
+        )
+        self.register(
+            name="doppler_calc",
+            description="多普勒频移：给定 TLE+观测站+发射频率，用真实视线速度计算接收频率。"
+                        "f_obs=f_src*(1-v_r/c)。来源 gpredict range_rate。",
+            parameters={"type": "object", "properties": {
+                "name": {"type": "string"}, "line1": {"type": "string"}, "line2": {"type": "string"},
+                "lat_deg": {"type": "number"}, "lon_deg": {"type": "number"},
+                "alt_km": {"type": "number", "default": 0.0},
+                "freq_hz": {"type": "number", "description": "发射频率 Hz"},
+                "unix_s": {"type": "number"},
+            }, "required": ["name", "line1", "line2", "lat_deg", "lon_deg", "freq_hz"]},
+            handler=lambda a: _g(GAD.tool_doppler_calc(
+                a["name"], a["line1"], a["line2"], a["lat_deg"], a["lon_deg"],
+                a.get("alt_km", 0.0), a["freq_hz"], a.get("unix_s"))),
+            category="satellite",
+        )
+
+
         # ── libhackrf 真实硬件参数查询工具 ──
         # 来源: repos/hackrf host/libhackrf/src/hackrf.c:2022-2102,1775,1920
         #       + firmware/common/max2837.c:344-395
