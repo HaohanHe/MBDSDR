@@ -35,10 +35,17 @@ AX25_CTRL_UA = 0x63       # UA 控制字段
 AX25_CTRL_DM = 0x0F       # DM 控制字段
 
 # AFSK Bell 202 常量
-AFSK_MARK_FREQ = 1200.0   # Mark 频率 (Hz)
-AFSK_SPACE_FREQ = 2200.0  # Space 频率 (Hz)
-AFSK_BAUD_RATE = 1200.0   # 波特率
-AFSK_SAMPLE_RATE = 48000.0  # 采样率
+# 来源: direwolf audio.h:470-472
+#   #define DEFAULT_MARK_FREQ  1200   (audio.h:470)
+#   #define DEFAULT_SPACE_FREQ 2200   (audio.h:471)
+#   #define DEFAULT_BAUD       1200   (audio.h:472)
+# 1200 baud VHF APRS：mark=1200Hz, space=2200Hz（Bell 202）。
+# 采样率：direwolf 默认 44100 (audio.h:442 DEFAULT_SAMPLES_PER_SEC)，
+#   也接受 48000（audio.h:447-450，SDR 常用）；这里默认 48000，与现有 SDR 链路一致。
+AFSK_MARK_FREQ = 1200.0   # Mark 频率 (Hz)   audio.h:470
+AFSK_SPACE_FREQ = 2200.0  # Space 频率 (Hz)  audio.h:471
+AFSK_BAUD_RATE = 1200.0   # 波特率           audio.h:472
+AFSK_SAMPLE_RATE = 48000.0  # 采样率（direwolf 默认 44100，audio.h:442；48000 亦支持）
 
 # KISS 协议常量
 KISS_FEND = 0xC0
@@ -74,10 +81,19 @@ APRS_THIRDPARTY = '}'     # 第三方流量
 
 # ============================================================
 # CRC-16 CCITT FCS 计算
+# ------------------------------------------------------------
+# 来源: direwolf fcs_calc.c:76-87 (fcs_calc)
+#   crc = 0xffff;
+#   for each byte: crc = (crc >> 8) ^ ccitt_table[(crc ^ byte) & 0xff];
+#   return crc ^ 0xffff;
+# 表来自 RFC1549 (fcs_calc.c:34)。这是 CRC-16/X.25：
+#   多项式 0x1021（正常）→ 反射 0x8408（表项 table[0x80]=0x8408，fcs_calc.c:52），
+#   初值 0xFFFF，输入/输出反转，最终异或 0xFFFF。
+#   校验矢量 "123456789" -> 0x906E（已与 C 表逐字节核对一致）。
 # ============================================================
 
 def crc16_ccitt(data: bytes) -> int:
-    """计算 CRC-16 CCITT (X.25) 校验和，用于 AX.25 FCS。"""
+    """计算 CRC-16 CCITT/X.25 FCS。位级反射算法，与 fcs_calc.c 表驱动结果逐字节一致。"""
     crc = 0xFFFF
     for byte in data:
         crc ^= byte
@@ -254,59 +270,89 @@ class AX25Frame:
 
 # ============================================================
 # HDLC 位填充/去填充
+# ------------------------------------------------------------
+# 来源: direwolf hdlc_rec.c:695-705 —
+#   "(pat_det & 0xfc) == 0x7c" 即连续 5 个 '1' 后跟一个 '0' 时，
+#   该 '0' 是位填充(bit stuffing)，接收端必须丢弃。
+#   pat_det 为 8 位移位寄存器，LSB first（hdlc_rec.c:511 "Octets are sent LSB first"）。
+#   标志序列 0x7E = 01111110（hdlc_rec.c:526）；异常中止 0xFE = 11111110（hdlc_rec.c:677）。
 # ============================================================
 
-def hdlc_bit_stuff(data: bytes) -> bytes:
-    """HDLC 位填充：连续5个1后插入0。"""
-    bits = []
-    ones_count = 0
-    for byte in data:
-        for i in range(8):
-            bit = (byte >> i) & 1
-            bits.append(bit)
-            if bit == 1:
-                ones_count += 1
-                if ones_count == 5:
-                    bits.append(0)
-                    ones_count = 0
-            else:
-                ones_count = 0
+def bits_to_bytes(bits: List[int]) -> bytes:
+    """把位序列（LSB first）打包成字节；末字节不足 8 位时右侧补 0。
 
-    # 转换回字节
+    注意：这里不丢弃任何位——末字节的不足位补 0 填充。接收端去填充后，
+    由 hdlc_bit_unstuff 负责丢弃尾部填充位（只保留完整字节）。
+    """
     result = bytearray()
     for i in range(0, len(bits), 8):
         byte = 0
         for j in range(min(8, len(bits) - i)):
-            byte |= bits[i + j] << j
+            if bits[i + j]:
+                byte |= 1 << j
         result.append(byte)
     return bytes(result)
+
+
+def bytes_to_bits(data: bytes) -> List[int]:
+    """把字节拆成位序列（LSB first，与 direwolf hdlc_rec.c:511 一致）。"""
+    bits = []
+    for byte in data:
+        for i in range(8):
+            bits.append((byte >> i) & 1)
+    return bits
+
+
+def stuff_bits(bits: List[int]) -> List[int]:
+    """HDLC 位填充：连续 5 个 1 后插入一个 0。来源: hdlc_rec.c:695-705（发射侧等价实现）。"""
+    out = []
+    ones = 0
+    for bit in bits:
+        out.append(bit)
+        if bit == 1:
+            ones += 1
+            if ones == 5:
+                out.append(0)
+                ones = 0
+        else:
+            ones = 0
+    return out
+
+
+def unstuff_bits(bits: List[int]) -> List[int]:
+    """HDLC 去位填充：连续 5 个 1 后丢弃紧随的 0。来源: hdlc_rec.c:695-705。"""
+    out = []
+    ones = 0
+    for bit in bits:
+        if bit == 1:
+            ones += 1
+            out.append(bit)
+        else:
+            if ones == 5:
+                # 这是填充位，丢弃
+                ones = 0
+                continue
+            ones = 0
+            out.append(bit)
+    return out
+
+
+def hdlc_bit_stuff(data: bytes) -> bytes:
+    """HDLC 位填充：连续5个1后插入0。位序列打包成字节（末尾可能有零填充）。"""
+    return bits_to_bytes(stuff_bits(bytes_to_bits(data)))
 
 
 def hdlc_bit_unstuff(data: bytes) -> bytes:
-    """HDLC 去位填充：移除连续5个1后的0。"""
-    bits = []
-    ones_count = 0
-    for byte in data:
-        for i in range(8):
-            bit = (byte >> i) & 1
-            if bit == 0 and ones_count == 5:
-                # 这是填充位，跳过
-                ones_count = 0
-                continue
-            bits.append(bit)
-            if bit == 1:
-                ones_count += 1
-            else:
-                ones_count = 0
+    """HDLC 去位填充：移除连续5个1后的0。
 
-    # 转换回字节
-    result = bytearray()
-    for i in range(0, len(bits), 8):
-        byte = 0
-        for j in range(min(8, len(bits) - i)):
-            byte |= bits[i + j] << j
-        result.append(byte)
-    return bytes(result)
+    发射侧位填充后位长不一定是 8 的整数倍，打包成字节时末尾补了 0；
+    接收侧去填充后多出的尾部填充位必须丢弃——只保留完整字节（与 direwolf
+    接收端"只收完整 octet"一致，hdlc_rec.c:713-728 仅在 olen==8 时落盘）。
+    原始 AX.25 帧是整数字节，故截断到 8 的整数倍即精确还原。
+    """
+    unstuffed = unstuff_bits(bytes_to_bits(data))
+    n = (len(unstuffed) // 8) * 8
+    return bits_to_bytes(unstuffed[:n])
 
 
 # ============================================================

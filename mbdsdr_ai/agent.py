@@ -217,6 +217,7 @@ class MBDSDRAgent:
         self._register_rds_tools()
         self._register_apt_tools()
         self._register_aprs_tools()
+        self._register_ax25_tools()
         self._register_analog_demod_tools()
         self._register_wfm_stereo_tools()
         self._register_signal_quality_tools()
@@ -918,6 +919,116 @@ class MBDSDRAgent:
             handler=_aprs,
             category="decode",
         )
+
+    def _register_ax25_tools(self):
+        """AX.25 / AFSK / APRS 编解码工具（对照 direwolf 真实源码校准）。"""
+        import numpy as np
+        from mbdsdr_ai.ax25 import (
+            AX25Frame, AFSKModem, hdlc_bit_stuff, hdlc_bit_unstuff, crc16_ccitt,
+        )
+        from mbdsdr_ai.aprs_parser import parse_aprs_frame
+
+        def _encode(args):
+            src = args.get("source", "NOCALL")
+            dst = args.get("destination", "APRS")
+            info = (args.get("info", "") or "").encode("latin-1")
+            digis = args.get("digipeaters", []) or []
+            f = AX25Frame(destination=dst, source=src, digipeaters=[(d, 0, False) for d in digis],
+                          control=0x03, pid=0xF0, info=info)
+            blob = f.to_bytes()
+            return ToolResult(True, json.dumps({
+                "hex": blob.hex(), "fcs": f"0x{f.fcs:04X}", "len": len(blob),
+                "stuffed_hex": hdlc_bit_stuff(blob).hex(),
+            }, ensure_ascii=False))
+        self.tool_registry.register(
+            name="ax25_encode",
+            description="AX.25 UI 帧编码：源/目的呼号 + digipeater 路径 + 信息字段，"
+                        "生成含 CRC-16/X.25 FCS 的字节流（含 HDLC 位填充）。"
+                        "参数与 direwolf ax25_pad.c/fcs_calc.c 一致。",
+            parameters={"type": "object", "properties": {
+                "source": {"type": "string"}, "destination": {"type": "string"},
+                "info": {"type": "string", "description": "APRS 信息字段文本"},
+                "digipeaters": {"type": "array", "items": {"type": "string"}},
+            }, "required": ["source"]},
+            handler=_encode, category="encode")
+
+        def _decode(args):
+            blob = bytes.fromhex(args.get("hex", ""))
+            f = AX25Frame.from_bytes(blob)
+            if f is None:
+                return ToolResult(False, "帧过短或解析失败")
+            return ToolResult(True, json.dumps({
+                "source": f.source, "destination": f.destination,
+                "digipeaters": [c for c, _, _ in f.digipeaters],
+                "info": f.info.decode("latin-1", "replace"),
+                "fcs_valid": f.fcs_valid,
+            }, ensure_ascii=False))
+        self.tool_registry.register(
+            name="ax25_decode",
+            description="AX.25 帧解码：从字节流解析源/目的/digipeater/控制/PID/信息字段，"
+                        "并用 CRC-16/X.25 (FCS) 校验。",
+            parameters={"type": "object", "properties": {
+                "hex": {"type": "string", "description": "帧字节十六进制(不含标志)"},
+            }, "required": ["hex"]},
+            handler=_decode, category="decode")
+
+        def _modulate(args):
+            f = AX25Frame(destination=args.get("destination", "APRS"),
+                          source=args.get("source", "NOCALL"),
+                          control=0x03, pid=0xF0,
+                          info=(args.get("info", "") or "").encode("latin-1"))
+            sr = float(args.get("sample_rate", 48000))
+            audio = AFSKModem(sample_rate=sr).modulate(f)
+            return ToolResult(True, json.dumps({
+                "sample_rate": sr, "samples": len(audio),
+                "audio": np.round(audio[::max(1, len(audio)//2000)].tolist(), 4),
+            }, ensure_ascii=False))
+        self.tool_registry.register(
+            name="afsk_modulate",
+            description="AFSK 1200 Bell 202 调制：把 AX.25 帧调制成 mark=1200Hz/space=2200Hz "
+                        "音频（NRZI）。参数来源 direwolf audio.h:470-472。",
+            parameters={"type": "object", "properties": {
+                "source": {"type": "string"}, "destination": {"type": "string"},
+                "info": {"type": "string"}, "sample_rate": {"type": "number"},
+            }, "required": ["source"]},
+            handler=_modulate, category="encode")
+
+        def _demodulate(args):
+            audio = args.get("audio")
+            if not isinstance(audio, list):
+                return ToolResult(False, "audio 必须是单声道浮点采样列表")
+            sr = float(args.get("sample_rate", 48000))
+            frames = AFSKModem(sample_rate=sr).demodulate(np.array(audio, dtype=np.float64))
+            out = [{"source": f.source, "destination": f.destination,
+                    "info": f.info.decode("latin-1", "replace"), "fcs_valid": f.fcs_valid}
+                   for f in frames]
+            return ToolResult(True, json.dumps({"frames": out, "count": len(out)},
+                                               ensure_ascii=False))
+        self.tool_registry.register(
+            name="afsk_demodulate",
+            description="AFSK 1200 Bell 202 解调：音频 -> 鉴频 -> 数字 PLL 位同步 -> "
+                        "HDLC 去位填充 -> CRC-16/X.25 校验，输出 AX.25 帧列表。",
+            parameters={"type": "object", "properties": {
+                "audio": {"type": "array", "items": {"type": "number"}},
+                "sample_rate": {"type": "number"},
+            }, "required": ["audio"]},
+            handler=_demodulate, category="decode")
+
+        def _parse(args):
+            blob = bytes.fromhex(args.get("hex", ""))
+            f = AX25Frame.from_bytes(blob)
+            if f is None:
+                return ToolResult(False, "帧解析失败")
+            return ToolResult(True, json.dumps(parse_aprs_frame(f),
+                                               ensure_ascii=False, default=str))
+        self.tool_registry.register(
+            name="aprs_parse",
+            description="APRS 报文解析：从 AX.25 帧解析位置(未压缩/压缩/MIC-E)、气象、"
+                        "遥测、消息，输出结构化 dict。公式对照 direwolf decode_aprs.c。",
+            parameters={"type": "object", "properties": {
+                "hex": {"type": "string", "description": "AX.25 帧字节十六进制"},
+            }, "required": ["hex"]},
+            handler=_parse, category="decode")
 
     def _register_analog_demod_tools(self):
         """SDR++ 核心：IQ -> AM/FM/SSB 音频解调。"""
