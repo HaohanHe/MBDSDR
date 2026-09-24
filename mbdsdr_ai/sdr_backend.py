@@ -965,22 +965,36 @@ class HackRFBackend(SDRBackend):
     使用 hackrf 库（libhackrf + Python 绑定）。
     支持 1 MHz - 6 GHz，最大 20 MS/s，半双工收发。
     需要安装：pip install hackrf 以及 libhackrf 系统库。
+
+    硬件量程/增益档全部来自 mbdsdr_ai/hackrf_params.HackRFParams（移植自
+    repos/hackrf 的 libhackrf 与 max2837 固件驱动），关键来源：
+      - 频率 1-6000 MHz        host/libhackrf/src/hackrf.h:235,662,670
+      - 采样率 2-20 MHz       host/libhackrf/src/hackrf.h:247,1794
+      - LNA(RX IF) 0-40/8dB   host/libhackrf/src/hackrf.c:2027,2031; firmware/common/max2837.c:344-371
+      - VGA(RX BB) 0-62/2dB   host/libhackrf/src/hackrf.c:2054,2058; firmware/common/max2837.c:373-381
+      - TXVGA 0-47/1dB        host/libhackrf/src/hackrf.c:2081; firmware/common/max2837.c:383-395
+    更完整的 ctypes 直连后端见 mbdsdr_ai/hackrf_params.py:HackRFBackend。
     """
 
     def __init__(self, device_index: int = 0):
+        # 量程/增益档一律用真实参数表，不再在本处硬编码魔数。
+        from .hackrf_params import HackRFParams
+        self._params = HackRFParams()
         device = SDRDevice(
             device_type="hackrf",
             device_id=f"hackrf_{device_index}",
             name=f"HackRF One #{device_index}",
-            frequency_range=(1000000, 6000000000),
-            sample_rate_range=(2000000, 20000000),
-            max_gain=40.0,
+            frequency_range=(self._params.min_freq_hz, self._params.max_freq_hz),
+            sample_rate_range=(self._params.min_sr_hz, self._params.max_sr_hz),
+            max_gain=float(self._params.lna_max_db),  # RX 路径最大前端增益档
             supports_iq=True,
             supports_tx=True,
         )
         super().__init__(device)
         self._device_index = device_index
         self._hackrf = None
+        self._lna_db = 8
+        self._vga_db = 16
 
     def connect(self) -> bool:
         try:
@@ -1021,13 +1035,67 @@ class HackRFBackend(SDRBackend):
         return True
 
     def _apply_gain(self, gain_db: float) -> bool:
+        """默认总增益映射到 VGA(基带) 档，自动吸附到偶数 dB（hackrf.c:2058）。"""
         if self._hackrf is None:
             return True
         try:
-            self._hackrf.gain = int(gain_db)
+            v = self._params.clamp_vga_gain(gain_db)
+            self._hackrf.vga_gain = v
+            self._vga_db = v
         except Exception:
             return False
         return True
+
+    def set_lna_gain(self, db: int) -> bool:
+        """真实设置 RX IF(LNA) 增益，吸附到 8dB 档（hackrf.c:2031）。
+
+        来源: host/libhackrf/src/hackrf.c:2022-2047；firmware/common/max2837.c:344-371。
+        """
+        if not self.status.connected or self._hackrf is None:
+            return False
+        v = self._params.clamp_lna_gain(db)
+        try:
+            self._hackrf.lna_gain = v
+            self._lna_db = v
+            return True
+        except Exception:
+            return False
+
+    def set_vga_gain(self, db: int) -> bool:
+        """真实设置 RX 基带(VGA) 增益，吸附到偶数 dB 档（hackrf.c:2058）。
+
+        来源: host/libhackrf/src/hackrf.c:2049-2074；firmware/common/max2837.c:373-381。
+        """
+        if not self.status.connected or self._hackrf is None:
+            return False
+        v = self._params.clamp_vga_gain(db)
+        try:
+            self._hackrf.vga_gain = v
+            self._vga_db = v
+            return True
+        except Exception:
+            return False
+
+    def set_txvga_gain(self, db: int) -> bool:
+        """真实设置 TX IF 增益，钳到 0-47 dB（hackrf.c:2081）。"""
+        if not self.status.connected or self._hackrf is None:
+            return False
+        v = self._params.clamp_txvga_gain(db)
+        try:
+            self._hackrf.txvga_gain = v
+            return True
+        except Exception:
+            return False
+
+    def set_bias_tee(self, on: bool) -> bool:
+        """开关天线偏置 3.3V/50mA（hackrf.c:2102）。"""
+        if not self.status.connected or self._hackrf is None:
+            return False
+        try:
+            self._hackrf.antenna_power = bool(on)
+            return True
+        except Exception:
+            return False
 
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
         if not self.status.connected or not self._hackrf:
@@ -2023,24 +2091,54 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"原生 RTL-SDR 枚举异常: {e}")
 
-    # 3) HackRF：仅当能 import hackrf 时给一个占位条目（真实打开由 connect 决定成败）
+    # 3) HackRF：始终列出一个条目（已知平台），量程用真实参数表。
+    #    真实打开由 connect() 决定成败——无 libhackrf/无设备时 connect 返回 False，
+    #    这里绝不伪造"已连接"。
+    #    量程来源: mbdsdr_ai/hackrf_params.py（移植自 repos/hackrf）。
     try:
-        import hackrf  # noqa: F401
-        key = "hackrf_0"
-        if key not in merged:
-            merged[key] = {
-                "driver": "hackrf",
-                "label": "HackRF One (libhackrf)",
-                "serial": "",
-                "manufacturer": "Great Scott Gadgets",
-                "product": "HackRF One",
-                "gain_range": (0.0, 40.0),
-                "sample_rate_range": (2e6, 20e6),
-                "freq_range": (1e6, 6e9),
-                "device_args": {"index": 0},
-            }
+        from .hackrf_params import HackRFParams
+        _hp = HackRFParams()
     except Exception:
-        pass  # 没有 hackrf 库就不列
+        _hp = None
+    key = "hackrf_0"
+    if key not in merged and _hp is not None:
+        merged[key] = {
+            "driver": "hackrf",
+            "label": "HackRF One (libhackrf)",
+            "serial": "",
+            "manufacturer": "Great Scott Gadgets",
+            "product": "HackRF One",
+            "gain_range": (float(_hp.lna_min_db), float(_hp.lna_max_db)),
+            "vga_gain_range": (float(_hp.vga_min_db), float(_hp.vga_max_db)),
+            "txvga_gain_range": (float(_hp.txvga_min_db), float(_hp.txvga_max_db)),
+            "sample_rate_range": (float(_hp.min_sr_hz), float(_hp.max_sr_hz)),
+            "freq_range": (float(_hp.min_freq_hz), float(_hp.max_freq_hz)),
+            "device_args": {"index": 0},
+        }
+
+    # 4) gr-osmosdr 通用后端枚举（rtl/hackrf/bladerf/uhd/soapy 统一设备字符串）
+    #    来源: mbdsdr_ai/osmosdr_source.py（移植自 repos/gr-osmosdr/lib/source_impl.cc:202-269）
+    #    仅补充尚未被 SoapySDR/pyrtlsdr 识别到的后端（bladerf/uhd/airspy 等）。
+    #    无库/无设备时 DeviceEnumerator.enumerate() 返回 []，绝不造假。
+    try:
+        from .osmosdr_source import DeviceEnumerator as _OsmoEnum
+        for dev in _OsmoEnum.enumerate():
+            key = dev.get("serial") or f"osmo_{dev.get('driver')}_{dev.get('index', 0)}"
+            if key in merged:
+                continue
+            merged[key] = {
+                "driver": dev.get("driver"),
+                "label": dev.get("label", dev.get("driver", "")),
+                "serial": dev.get("serial", ""),
+                "manufacturer": "",
+                "product": dev.get("subdriver", ""),
+                "gain_range": (0.0, 0.0),
+                "sample_rate_range": (0.0, 0.0),
+                "freq_range": (0.0, 0.0),
+                "device_args": {"osmosdr_string": dev.get("device_string", "")},
+            }
+    except Exception as e:
+        logger.warning(f"gr-osmosdr 枚举异常: {e}")
 
     return list(merged.values())
 

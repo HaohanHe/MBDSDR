@@ -655,6 +655,17 @@ class ToolRegistry:
         # 来源: repos/librtlsdr/src/librtlsdr.c:959-969,1100-1101,1157,1165
         self.register_rtlsdr_params_tools()
 
+        # ── libhackrf 真实硬件参数查询工具 ──
+        # 来源: repos/hackrf host/libhackrf/src/hackrf.c:2022-2102,1775,1920
+        #       + firmware/common/max2837.c:344-395
+        self.register_hackrf_params_tools()
+
+        # ── gr-osmosdr 通用 SDR 源抽象工具 ──
+        # 来源: repos/gr-osmosdr/lib/{source_impl.cc, ranges.cc, arg_helpers.h,
+        #       rtl/rtl_source_c.cc, hackrf/hackrf_source_c.cc,
+        #       bladerf/bladerf_common.cc, uhd/uhd_source_c.cc, soapy/soapy_source_c.cc}
+        self.register_osmosdr_tools()
+
         # ── dablin 真实 DAB/DAB+ FIC/FIB/FIG + ETI 层移植工具 ──
         # 来源: repos/dablin/src/{fic_decoder.cpp, eti_player.cpp, eti_source.h, tools.cpp}
         self.register_dab_plus_tools()
@@ -814,6 +825,196 @@ class ToolRegistry:
             out["sample_rate_requested_hz"] = r
             out["sample_rate_valid"] = rp.is_valid_sample_rate(r)
             out["recommended_rates_hz"] = rp.get_supported_sample_rates()
+        return ToolResult(
+            success=True,
+            content=json.dumps(out, ensure_ascii=False, indent=2),
+            data=out,
+        )
+
+    def register_osmosdr_tools(self):
+        """注册 gr-osmosdr 通用 SDR 源抽象工具。
+
+        移植自 repos/gr-osmosdr：
+          - 设备字符串解析/路由  lib/arg_helpers.h:48-110 + lib/source_impl.cc:271-397
+          - 增益/频率范围        lib/ranges.cc:44-154
+          - RTL 后端            lib/rtl/rtl_source_c.cc:385,421-429,473-489,531-565
+          - HackRF 后端         lib/hackrf/hackrf_source_c.cc:307-327
+                                 + hackrf_common.cc:216,250-254,283
+          - bladeRF 后端        lib/bladerf/bladerf_common.cc:428,576-578,638,756,792-796
+          - UHD 后端            lib/uhd/uhd_source_c.cc:140
+          - Soapy 后端          lib/soapy/soapy_source_c.cc:112-122
+        纯查表/路由，无需插设备；无硬件时不造假。
+        """
+        from . import osmosdr_source as osmo
+
+        self.register(
+            name="osmosdr_list_devices",
+            description=(
+                "枚举 gr-osmosdr 支持的所有 SDR 设备（RTL-SDR/HackRF/bladeRF/USRP/AirSpy/SoapySDR），"
+                "返回 [{driver,index,label,serial,device_string}]。"
+                "无设备/无后端库时返回空列表，绝不伪造。"
+                "来源 gr-osmosdr lib/source_impl.cc:202-269。"
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(
+                    osmo.DeviceEnumerator.enumerate(), ensure_ascii=False, indent=2),
+                data={"devices": osmo.DeviceEnumerator.enumerate()},
+            ),
+            category="sdr",
+        )
+
+        self.register(
+            name="osmosdr_create_source",
+            description=(
+                "按 gr-osmosdr 设备字符串创建统一 SDR 源对象并路由到对应后端。"
+                "格式与 gr-osmosdr 完全一致：'rtl=0' / 'hackrf=<serial>' / "
+                "'bladerf=0' / 'uhd,type=b200' / 'soapy=0,driver=rtlsdr'。"
+                "返回 driver、默认采样率、增益级名等。真正 read_samples 需插设备。"
+                "来源 source_impl.cc:271-397。"
+            ),
+            parameters={"type": "object", "properties": {
+                "device_string": {"type": "string",
+                                  "description": "gr-osmosdr 设备字符串",
+                                  "default": "rtl=0"}
+            }, "required": ["device_string"]},
+            handler=lambda args: self._osmosdr_create_source_handler(args),
+            category="sdr",
+        )
+
+        self.register(
+            name="osmosdr_get_gain_ranges",
+            description=(
+                "返回某 gr-osmosdr 后端各增益级的 (start,stop,step) 范围。"
+                "支持 rtl(LNA/IF)、hackrf(RF/IF/BB)、bladerf(LNA/VGA1/VGA2)。"
+                "增益命名与 gr-osmosdr 一致。来源 ranges.cc + 各后端 get_gain_range。"
+            ),
+            parameters={"type": "object", "properties": {
+                "driver": {"type": "string",
+                           "description": "后端名 rtl/hackrf/bladerf/uhd/soapy",
+                           "default": "hackrf"}
+            }, "required": ["driver"]},
+            handler=lambda args: self._osmosdr_gain_ranges_handler(args),
+            category="sdr",
+        )
+
+    def _osmosdr_create_source_handler(self, args):
+        from . import osmosdr_source as osmo
+        ds = args.get("device_string", "rtl=0")
+        try:
+            src = osmo.OsmoSDRSource(ds)
+        except RuntimeError as e:
+            return ToolResult(success=False, content=str(e), error=str(e))
+        return ToolResult(
+            success=True,
+            content=json.dumps(src.summary(), ensure_ascii=False, indent=2),
+            data=src.summary(),
+        )
+
+    def _osmosdr_gain_ranges_handler(self, args):
+        from . import osmosdr_source as osmo
+        drv = args.get("driver", "hackrf")
+        stat = osmo.BACKEND_STATIC.get(drv, {})
+        out = {
+            "driver": drv,
+            "label": stat.get("label", drv),
+            "gain_names": stat.get("gain_names", []),
+            "gain_ranges": {k: v.to_pp_string()
+                            for k, v in stat.get("gain_ranges", {}).items()},
+            "note": stat.get("note", ""),
+        }
+        return ToolResult(
+            success=True,
+            content=json.dumps(out, ensure_ascii=False, indent=2),
+            data=out,
+        )
+
+    def register_hackrf_params_tools(self):
+        """注册 libhackrf 真实参数查询工具（纯查表，无需插设备）。
+
+        来源: mbdsdr_ai/hackrf_params.py（移植自 repos/hackrf）
+          - LNA(RX IF) 0-40/8dB   host/libhackrf/src/hackrf.c:2022-2047 ; firmware/common/max2837.c:344-371
+          - VGA(RX BB) 0-62/2dB   host/libhackrf/src/hackrf.c:2049-2074 ; firmware/common/max2837.c:373-381
+          - TXVGA 0-47/1dB       host/libhackrf/src/hackrf.c:2076-2100 ; firmware/common/max2837.c:383-395
+          - 频率 1-6000MHz       host/libhackrf/src/hackrf.h:235,662,670
+          - 采样率 2-20MHz       host/libhackrf/src/hackrf.h:247,1794
+        """
+        from . import hackrf_params as hp
+
+        self.register(
+            name="hackrf_list_gains",
+            description=(
+                "列出 HackRF One 真实支持的离散增益档（dB）："
+                "LNA(RX IF) 0-40/8dB 共6档；VGA(RX 基带) 0-62/2dB 共32档；"
+                "TXVGA(TX IF) 0-47/1dB 共48档。"
+                "来源 hackrf.c:2022-2102 + max2837.c:344-395。"
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(hp.DEFAULT_PARAMS.summary(),
+                                   ensure_ascii=False, indent=2),
+                data=hp.DEFAULT_PARAMS.summary(),
+            ),
+            category="sdr",
+        )
+
+        self.register(
+            name="hackrf_get_freq_range",
+            description=(
+                "返回 HackRF One 真实频率范围(Hz)与采样率合法区间。"
+                "来源 hackrf.h:235,662,670(1-6000MHz) + hackrf.h:247,1794(2-20MHz)。"
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps({
+                    "freq_range_hz": [hp.DEFAULT_PARAMS.min_freq_hz,
+                                      hp.DEFAULT_PARAMS.max_freq_hz],
+                    "sample_rate_range_hz": [hp.DEFAULT_PARAMS.min_sr_hz,
+                                             hp.DEFAULT_PARAMS.max_sr_hz],
+                    "default_sample_rate_hz": hp.DEFAULT_PARAMS.default_sr_hz,
+                    "recommended_rates_hz": hp.SUPPORTED_SAMPLE_RATES,
+                }, ensure_ascii=False, indent=2),
+                data={},
+            ),
+            category="sdr",
+        )
+
+        self.register(
+            name="hackrf_set_params",
+            description=(
+                "把目标 LNA/VGA/TXVGA 增益与采样率吸附到 HackRF 真实支持的离散档，"
+                "返回可直接下发的参数。LNA 吸附到 8 的倍数(hackrf.c:2031)，"
+                "VGA 吸附到偶数(hackrf.c:2058)，TXVGA 钳到 0-47(hackrf.c:2081)。"
+            ),
+            parameters={"type": "object", "properties": {
+                "lna_gain_db": {"type": "number", "description": "目标 RX IF(LNA) 增益 dB"},
+                "vga_gain_db": {"type": "number", "description": "目标 RX 基带(VGA) 增益 dB"},
+                "txvga_gain_db": {"type": "number", "description": "目标 TX IF 增益 dB"},
+                "sample_rate_hz": {"type": "number", "description": "目标采样率 Hz"},
+            }, "required": []},
+            handler=lambda args: self._hackrf_set_params_handler(args),
+            category="sdr",
+        )
+
+    def _hackrf_set_params_handler(self, args):
+        from . import hackrf_params as hp
+        p = hp.DEFAULT_PARAMS
+        out: Dict[str, Any] = {}
+        if args.get("lna_gain_db") is not None:
+            out["lna_gain_db"] = p.clamp_lna_gain(float(args["lna_gain_db"]))
+            out["lna_gain_levels_db"] = p.lna_gain_levels_db()
+        if args.get("vga_gain_db") is not None:
+            out["vga_gain_db"] = p.clamp_vga_gain(float(args["vga_gain_db"]))
+        if args.get("txvga_gain_db") is not None:
+            out["txvga_gain_db"] = p.clamp_txvga_gain(float(args["txvga_gain_db"]))
+        if args.get("sample_rate_hz") is not None:
+            r = float(args["sample_rate_hz"])
+            out["sample_rate_requested_hz"] = r
+            out["sample_rate_valid"] = p.is_valid_sample_rate(r)
+            out["sample_rate_range_hz"] = [p.min_sr_hz, p.max_sr_hz]
         return ToolResult(
             success=True,
             content=json.dumps(out, ensure_ascii=False, indent=2),
