@@ -670,6 +670,114 @@ class ToolRegistry:
         # 来源: repos/dablin/src/{fic_decoder.cpp, eti_player.cpp, eti_source.h, tools.cpp}
         self.register_dab_plus_tools()
 
+        # ── DSDcc 真实 4FSK/C4FM 数字语音解码移植工具（DMR/P25） ──
+        # 来源: repos/DSDcc/{dsd_symbol,dsd_filters,dsd_sync,dmr,dsd_mbe}.cpp
+        self.register_dsdcc_tools()
+
+    def register_dsdcc_tools(self):
+        """注册 DSDcc 真实 4FSK/C4FM 数字语音解码工具（DMR/P25 Phase1）。
+
+        来源: repos/DSDcc/dsdcc/{dsd_symbol.cpp, dsd_filters.cpp, dsd_sync.cpp,
+              dmr.cpp, dsd_mbe.cpp}。纯 numpy，可离线往返。
+        """
+        self.register(
+            name="fourfsk_demod",
+            description="4FSK(C4FM) 解调：根升余弦匹配滤波(α=0.2) + 符号同步 + "
+                        "4 电平判决，把判别器采样转成 dibit 流。DMR/P25 均 4800 sym/s。",
+            parameters={"type": "object", "properties": {
+                "samples": {"type": "array", "items": {"type": "number"},
+                            "description": "实数判别器采样(建议48000 S/s)"},
+                "sps": {"type": "integer", "description": "每符号采样数(默认10=4800baud)",
+                        "default": 10},
+            }, "required": ["samples"]},
+            handler=lambda args: self._fourfsk_demod_handler(args),
+            category="digital",
+        )
+        self.register(
+            name="dmr_decode",
+            description="DMR 时隙解码：BS/MS voice/data 4 组同步字检测(容差2)、时隙分离、"
+                        "AMBE+2 语音帧(72bit/20ms)提取、EMB 色码。输入 144-dibit 时隙。",
+            parameters={"type": "object", "properties": {
+                "slot_dibits": {"type": "array", "items": {"type": "integer"},
+                                "description": "144 个 dibit(0..3)，以同步字段对齐"}
+            }, "required": ["slot_dibits"]},
+            handler=lambda args: self._dmr_decode_handler(args),
+            category="digital",
+        )
+        self.register(
+            name="p25_decode",
+            description="P25 Phase1 (C4FM) 解码：NID 同步检测 + NAC(12bit)/DUID(4bit) 解析，"
+                        "IMBE 语音帧(88bit/20ms)。",
+            parameters={"type": "object", "properties": {
+                "nid_dibits": {"type": "array", "items": {"type": "integer"},
+                               "description": "24 个 dibit 的 NID 字"}
+            }, "required": ["nid_dibits"]},
+            handler=lambda args: self._p25_decode_handler(args),
+            category="digital",
+        )
+        self.register(
+            name="dsd_decode_iq",
+            description="一键：对一段判别器/基带采样做 4FSK 解调并自动搜索 DMR/P25 同步字，"
+                        "返回命中位置与突发类型。",
+            parameters={"type": "object", "properties": {
+                "samples": {"type": "array", "items": {"type": "number"},
+                            "description": "实数采样(建议48000 S/s)"},
+                "mode": {"type": "string", "enum": ["auto", "dmr", "p25"],
+                         "default": "auto"}
+            }, "required": ["samples"]},
+            handler=lambda args: self._dsd_decode_iq_handler(args),
+            category="digital",
+        )
+
+    def _fourfsk_demod_handler(self, args):
+        from .dsdcc_lite import FourFSKDemod
+        import numpy as np
+        samples = list(args.get("samples", []))
+        sps = int(args.get("sps", 10))
+        demod = FourFSKDemod(sps=sps)
+        dibits, values = demod.demodulate(np.asarray(samples, dtype=float))
+        return ToolResult(
+            success=True,
+            content=f"4FSK 解调: {len(dibits)} symbols, "
+                    f"levels[min={float(np.min(values)):.2f},max={float(np.max(values)):.2f}]",
+            data={"dibits": dibits.tolist(), "nsymbols": int(len(dibits))},
+        )
+
+    def _dmr_decode_handler(self, args):
+        from .dsdcc_lite import DMRDecoder
+        slot = list(args.get("slot_dibits", []))
+        res = DMRDecoder().decode_slot(slot)
+        return ToolResult(
+            success=res.ok,
+            content=f"DMR: {res.burst} slot{res.slot} CC={res.color_code} "
+                    f"voice={res.is_voice} ambe_frames={len(res.ambe_frames)} "
+                    f"sync_errs={res.sync_errors}",
+            data=res.__dict__,
+        )
+
+    def _p25_decode_handler(self, args):
+        from .dsdcc_lite import P25Decoder
+        nid = list(args.get("nid_dibits", []))
+        res = P25Decoder().decode_nid(nid)
+        return ToolResult(
+            success=res.ok,
+            content=f"P25 NID: NAC={res.nac:#05x} DUID={res.duid} voice={res.is_voice}",
+            data=res.__dict__,
+        )
+
+    def _dsd_decode_iq_handler(self, args):
+        from .dsdcc_lite import dsd_decode_iq
+        samples = list(args.get("samples", []))
+        mode = args.get("mode", "auto")
+        res = dsd_decode_iq(samples, mode=mode)
+        return ToolResult(
+            success=True,
+            content=f"DSD: {res['nsymbols']} symbols, "
+                    f"dmr_syncs={len(res.get('dmr_syncs', []))}, "
+                    f"p25_syncs={len(res.get('p25_syncs', []))}",
+            data=res,
+        )
+
     def register_dab_plus_tools(self):
         """注册 dablin 真实 DAB/DAB+ 解析工具（ETI/FIC/FIB/FIG）。
 
