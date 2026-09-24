@@ -293,7 +293,7 @@ class _SkyPageState extends State<SkyPage> {
       return Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: Material(
-          color: selected ? AppTheme.accent.withValues(alpha: 0.12) : AppTheme.card,
+          color: selected ? AppTheme.accent.withOpacity(0.12) : AppTheme.card,
           borderRadius: BorderRadius.circular(10),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),

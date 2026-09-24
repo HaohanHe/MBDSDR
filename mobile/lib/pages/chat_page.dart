@@ -162,7 +162,7 @@ class _ChatPageState extends State<ChatPage> {
               _timeFmt.format(m.time),
               style: TextStyle(
                 color: isUser
-                    ? Colors.white.withValues(alpha: 0.7)
+                    ? Colors.white.withOpacity(0.7)
                     : AppTheme.textSecondary,
                 fontSize: 11,
               ),
