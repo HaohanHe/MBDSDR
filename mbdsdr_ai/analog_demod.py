@@ -16,6 +16,10 @@ from __future__ import annotations
 import numpy as np
 from typing import Dict, Callable, Optional
 
+# GQRX 真实 AGC / 音频率常量（来源: gqrx src/dsp/agc_impl.cpp, receiver.cpp:64）。
+# 本文件保留原有 SDR++ 去加重链，窄带 AGC 改用真实 CAgc 移植（见 mbdsdr_ai/gqrx_receiver.py）。
+from mbdsdr_ai.gqrx_receiver import GqrxAGC, AUDIO_RATE as GQRX_AUDIO_RATE
+
 
 def _lowpass(x: np.ndarray, sr: float, cutoff: float, taps: int = 63) -> np.ndarray:
     n = np.arange(taps) - taps // 2
@@ -225,7 +229,11 @@ class NarrowbandReceiver:
         self._sql_hyst_db = 3.0
         self.last_signal_power_db = -150.0
 
-        self._agc = _GqrxAGC(self.sample_rate)
+        # GQRX 真实 AGC（CAgc 移植）。默认参数与 nbrx.cpp:47 完全一致：
+        #   agc_on=true, use_hang=false, threshold=-100dB, manual_gain=0, slope=0, decay=500ms。
+        # 来源: gqrx src/dsp/agc_impl.cpp:197-317。
+        self._agc = GqrxAGC(self.sample_rate, agc_on=True, use_hang=False,
+                            threshold_db=-100, slope=0, decay_ms=500)
 
         # SDR++ 去加重（来源: radio_module.h:105 deemp.init(NULL,50e-6,48000)）。
         # 初始 tau=0（不去加重），set_mode 按模式默认档打开。
@@ -366,7 +374,11 @@ class NarrowbandReceiver:
         gated = filt if sql_open else np.zeros_like(filt)
 
         # 4) AGC（静噪之后、解调之前）——来源: GQRX nbrx.cpp:78-79
-        agc_out = self._agc.process(gated, gated=sql_open)
+        #    静噪关闭时不更新 AGC（避免静音把增益抽风拉满），与真实 CAgc 一致。
+        if sql_open:
+            agc_out = self._agc.process(gated)
+        else:
+            agc_out = np.zeros_like(filt)
 
         # 5) 解调
         audio = self._demod(agc_out)
@@ -376,9 +388,16 @@ class NarrowbandReceiver:
 
         # 6b) SDR++ 去加重（来源: radio_module.h:110 afChain.addBlock(&deemp)）
         #     一阶 RC IIR，tau=50μs(欧)/75μs(美)；tau=0 时直通。
+        #     与 GQRX NFM 的 75μs(nbrx.cpp:52) 一致；WFM 的 50μs 在立体声块里。
         if len(audio) and getattr(self, "deemph", None) is not None \
                 and self.deemph.tau > 0:
             audio = self.deemph.process(audio)
+
+        # 6c) 音频重采样到 48kHz（GQRX 音频输出采样率）。
+        #     来源: gqrx receiver.cpp:64 d_audio_rate(48000)，
+        #           nbrx.cpp:68-69 audio_rr0 = resampler_ff(audio_rate/PREF_QUAD_RATE)。
+        from mbdsdr_ai.gqrx_receiver import _resample_to
+        audio = _resample_to(audio, self.sample_rate, GQRX_AUDIO_RATE) if len(audio) else audio
 
         peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
         if peak > 1e-9:
@@ -386,7 +405,7 @@ class NarrowbandReceiver:
         rms = float(np.sqrt(np.mean(audio ** 2))) if len(audio) else 0.0
         return {
             "audio": audio.astype(np.float32).tolist(),
-            "sample_rate": self.sample_rate,
+            "sample_rate": GQRX_AUDIO_RATE,
             "mode": self.mode,
             "rms_db": round(20 * np.log10(rms + 1e-9), 1),
             "squelch_open": sql_open,
