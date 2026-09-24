@@ -484,6 +484,57 @@ class SatellitePass:
         }
 
 
+def _sat_elaz_at_unix(sat: "Satrec", t_unix: float,
+                      lat_deg: float, lon_deg: float, alt_km: float
+                      ) -> Optional[Tuple[float, float]]:
+    """真坐标变换：TEME -> ECEF(绕 z 转 -GMST) -> ENU -> (仰角, 方位角)。
+
+    来源: gpredict repos/gpredict/src/predict-tools.c:82 + sgp_obs.c:110-122。
+    椭球用 WGS-72（与 SGP4 内核 xkmper=6378.135 一致，见 sgp4sdp4.h:211,216），
+    避免轨道 WGS-72 / 站心 WGS-84 混用的米级系统差。
+    """
+    # WGS-72 椭球（与 orbit.py 一致；sgp4sdp4.h:211 xkmper=6378.135, :216 f=1/298.26）
+    a = 6378.135
+    f = 1.0 / 298.26
+    e2 = f * (2.0 - f)
+    omega_e = 7.292115e-5  # sgp4sdp4.h:250 mfactor
+
+    jd_utc = t_unix / 86400.0 + 2440587.5
+    jd = int(jd_utc)
+    fr = jd_utc - jd
+    e, r_teme, v_teme = sat.sgp4(jd, fr)
+    if e != 0:
+        return None
+    # GMST（astronomy 自身的折叠式，与 orbit._gmst_days 等价）
+    gmst = jd_to_gmst(jd_utc)
+    cg, sg = math.cos(-gmst), math.sin(-gmst)
+    rx = cg * r_teme[0] - sg * r_teme[1]
+    ry = sg * r_teme[0] + cg * r_teme[1]
+    r_ecef = (rx, ry, r_teme[2])
+    # 站 ECEF（WGS-72）
+    lat = math.radians(lat_deg)
+    lon = math.radians(lon_deg)
+    sin_lat, cos_lat = math.sin(lat), math.cos(lat)
+    n = a / math.sqrt(1.0 - e2 * sin_lat * sin_lat)
+    sx = (n + alt_km) * cos_lat * math.cos(lon)
+    sy = (n + alt_km) * cos_lat * math.sin(lon)
+    sz = (n * (1.0 - e2) + alt_km) * sin_lat
+    # 站心矢量
+    dx = r_ecef[0] - sx
+    dy = r_ecef[1] - sy
+    dz = r_ecef[2] - sz
+    dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if dist <= 0:
+        return None
+    sin_b, cos_b = math.sin(lon), math.cos(lon)
+    east = -sin_b * dx + cos_b * dy
+    north = -sin_lat * cos_b * dx - sin_lat * sin_b * dy + cos_lat * dz
+    up = cos_lat * cos_b * dx + cos_lat * sin_b * dy + sin_lat * dz
+    el = math.degrees(math.asin(max(-1.0, min(1.0, up / dist))))
+    az = (math.degrees(math.atan2(east, north)) + 360.0) % 360.0
+    return el, az
+
+
 def predict_satellite_pass(
     satellite_name: str,
     tle_line1: str,
@@ -495,12 +546,14 @@ def predict_satellite_pass(
     time_step_s: int = 60,
 ) -> List[SatellitePass]:
     """
-    预测卫星过境（简化版，使用 sgp4 库）。
+    预测卫星过境（使用 sgp4 真传播 + ECI→ECEF→ENU 真坐标变换）。
 
-    如果 sgp4 库不可用，返回空列表。
+    算法：粗扫 time_step_s 定位仰角跨越 min_alt_deg 的区间，再二分法把 AOS/LOS
+    收敛到 ~0.25s 精度（对照 gpredict predict-tools.c:129-314 的粗/细扫）。
+    若 sgp4 库不可用，返回空列表。
     """
     try:
-        from sgp4.api import Satrec, jday
+        from sgp4.api import Satrec
     except ImportError:
         return []
 
@@ -508,66 +561,103 @@ def predict_satellite_pass(
         start_time = time.time()
 
     satellite = Satrec.twoline2rv(tle_line1, tle_line2)
+    lat = observer.latitude_deg
+    lon = observer.longitude_deg
+    alt_km = observer.height_m / 1000.0
 
-    passes = []
-    current_pass = None
+    def _elaz(t_unix: float):
+        return _sat_elaz_at_unix(satellite, t_unix, lat, lon, alt_km)
+
+    passes: List[SatellitePass] = []
     t = start_time
-    end_time = start_time + duration_hours * 3600
+    end_time = start_time + duration_hours * 3600.0
 
-    while t < end_time:
-        # 计算卫星位置
-        dt = time.gmtime(t)
-        jd, fr = jday(dt.tm_year, dt.tm_mon, dt.tm_mday, dt.tm_hour, dt.tm_min, dt.tm_sec)
-        e, r, v = satellite.sgp4(jd, fr)
-
-        if e != 0:
-            t += time_step_s
-            continue
-
-        # 转换为赤道坐标（简化：直接使用 ECI 位置）
-        # 这里简化处理，实际需要 ECI→ECEF→地平转换
-        # 为了简化，我们使用 sgp4 的位置直接估算
-        # （实际项目中应该使用 skyfield 或更完整的转换）
-
-        # 简化：计算卫星相对于观测者的大致仰角
-        # 这只是一个近似，实际需要完整的坐标转换
-        obs_x = observer.longitude_deg
-        obs_y = observer.latitude_deg
-
-        # 使用 sgp4 位置计算距离和大致方向
-        sat_range = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
-
-        # 简化的仰角估算（不准确，仅用于演示）
-        # 实际应该使用完整的 ECI→ECEF→地平转换
-        alt_approx = 45.0  # 占位值
-
-        if alt_approx >= min_alt_deg:
-            if current_pass is None:
-                current_pass = {
-                    "rise_time": t,
-                    "max_alt": alt_approx,
-                    "max_alt_time": t,
-                    "rise_az": 0.0,
-                }
-            elif alt_approx > current_pass["max_alt"]:
-                current_pass["max_alt"] = alt_approx
-                current_pass["max_alt_time"] = t
-        else:
-            if current_pass is not None:
-                passes.append(SatellitePass(
-                    satellite_name=satellite_name,
-                    rise_time=current_pass["rise_time"],
-                    set_time=t,
-                    max_alt_time=current_pass["max_alt_time"],
-                    max_alt_deg=current_pass["max_alt"],
-                    rise_az_deg=current_pass["rise_az"],
-                    set_az_deg=180.0,
-                    duration_s=t - current_pass["rise_time"],
-                ))
-                current_pass = None
-
+    # 粗扫：记录 (t, el, az)
+    coarse = []
+    while t <= end_time:
+        r = _elaz(t)
+        if r is not None:
+            coarse.append((t, r[0], r[1]))
         t += time_step_s
+    if not coarse:
+        return passes
 
+    # 找仰角 >= min_alt_deg 的连续段
+    i = 0
+    n = len(coarse)
+    while i < n:
+        if coarse[i][1] < min_alt_deg:
+            i += 1
+            continue
+        j = i
+        while j < n and coarse[j][1] >= min_alt_deg:
+            j += 1
+        # AOS：在 coarse[i-1] 与 coarse[i] 之间二分
+        if i > 0:
+            t_lo, el_lo = coarse[i - 1][0], coarse[i - 1][1]
+            t_hi, el_hi = coarse[i][0], coarse[i][1]
+            for _ in range(40):
+                if t_hi - t_lo < 0.25:
+                    break
+                t_mid = 0.5 * (t_lo + t_hi)
+                r_mid = _elaz(t_mid)
+                el_mid = r_mid[0] if r_mid else el_lo
+                if (el_mid - min_alt_deg) * (el_lo - min_alt_deg) <= 0:
+                    t_hi, el_hi = t_mid, el_mid
+                else:
+                    t_lo, el_lo = t_mid, el_mid
+            rise_time = 0.5 * (t_lo + t_hi)
+        else:
+            rise_time = coarse[i][0]
+        # LOS：在 coarse[j-1] 与 coarse[j] 之间二分
+        if j < n:
+            t_lo, el_lo = coarse[j - 1][0], coarse[j - 1][1]
+            t_hi, el_hi = coarse[j][0], coarse[j][1]
+            for _ in range(40):
+                if t_hi - t_lo < 0.25:
+                    break
+                t_mid = 0.5 * (t_lo + t_hi)
+                r_mid = _elaz(t_mid)
+                el_mid = r_mid[0] if r_mid else el_lo
+                if (el_mid - min_alt_deg) * (el_lo - min_alt_deg) <= 0:
+                    t_hi, el_hi = t_mid, el_mid
+                else:
+                    t_lo, el_lo = t_mid, el_mid
+            set_time = 0.5 * (t_lo + t_hi)
+        else:
+            set_time = coarse[j - 1][0]
+
+        # 中天：本段细采样找最大仰角
+        best_el = -90.0
+        best_t = rise_time
+        best_az_rise = coarse[i][2]
+        best_az_set = coarse[j - 1][2]
+        ts = rise_time
+        while ts <= set_time + 1e-6:
+            r = _elaz(ts)
+            if r is not None and r[0] > best_el:
+                best_el = r[0]
+                best_t = ts
+            ts += 2.0
+        # rise/set 方位角（细扫后重算）
+        r_rise = _elaz(rise_time)
+        r_set = _elaz(set_time)
+        if r_rise is not None:
+            best_az_rise = r_rise[1]
+        if r_set is not None:
+            best_az_set = r_set[1]
+
+        passes.append(SatellitePass(
+            satellite_name=satellite_name,
+            rise_time=rise_time,
+            set_time=set_time,
+            max_alt_time=best_t,
+            max_alt_deg=best_el,
+            rise_az_deg=best_az_rise,
+            set_az_deg=best_az_set,
+            duration_s=set_time - rise_time,
+        ))
+        i = j
     return passes
 
 

@@ -3,8 +3,9 @@ MBDSDR 频谱显示组件
 ====================
 优先 OpenGL 渲染，无 OpenGL 时降级为 QPainter 软件渲染。
 支持频谱图、瀑布图、缩放、平移、频率标记。
-由于 SI4732 不出原始 IQ，频谱数据由 RSSI 扫频/模拟生成，
-预留真实 IQ 数据接口。
+
+频谱数据源：真实复数 IQ FFT（Nuttall 窗 + fftshift + dBFS + IIR 平滑）。
+无硬件/无 IQ 数据时显示"未连接/无数据"，不生成模拟峰。
 """
 
 import math
@@ -24,22 +25,46 @@ except ImportError:
 
 
 # ============================================================================
-# 频谱数据生成器
+# 窗函数
+# ============================================================================
+
+# 来源: SDR++ core/src/dsp/window/nuttall.h:5-8 — 4-term Nuttall window。
+# SDR++ 默认 FFT 窗 (core.cpp:128 fftWindow=2=NUTTALL)，旁瓣 -93dB，
+# 比 Hann(-31dB) 更适合"强信号旁找弱信号"。
+def _nuttall_window(n: int) -> np.ndarray:
+    k = np.arange(n, dtype=np.float64)
+    coefs = (0.355768, 0.487396, 0.144232, 0.012604)
+    w = (coefs[0]
+         - coefs[1] * np.cos(2.0 * np.pi * k / (n - 1))
+         + coefs[2] * np.cos(4.0 * np.pi * k / (n - 1))
+         - coefs[3] * np.cos(6.0 * np.pi * k / (n - 1)))
+    return w.astype(np.float32)
+
+
+# ============================================================================
+# 频谱数据生成器（真 IQ FFT，无模拟峰）
 # ============================================================================
 
 class SpectrumDataGenerator:
-    """生成频谱数据（模拟或从 RSSI 扫频）。"""
+    """真 IQ FFT 频谱生成器。无数据时返回平坦底噪，不生成模拟峰。"""
+
+    # 固定 FFT 大小（任务要求 1024/2048；2048 兼顾分辨率与帧率）
+    FFT_SIZE = 2048
 
     def __init__(self, num_bins: int = 512):
         self.num_bins = num_bins
         self.center_freq = 98.5  # MHz
         self.span = 4.0  # MHz (±2MHz)
-        self.spectrum = np.zeros(num_bins, dtype=np.float32)
+        # 无数据时频谱为平坦低噪底（-100 dBFS），不画假峰
+        self.spectrum = np.full(num_bins, -100.0, dtype=np.float32)
         self.waterfall: List[np.ndarray] = []
         self.max_waterfall_lines = 200
-        self._noise_level = -90.0  # dBm
-        # 不预存任何 FM 台假峰——各地频率不同，有真 IQ 才显示真信号
-        self._stations = []
+        # 是否已收到真实 IQ 数据
+        self._has_real_data = False
+        # 来源: SDR++ core/src/gui/widgets/waterfall.cpp:914-920
+        # IIR 指数平滑: smooth = alpha*new + (1-alpha)*old
+        self._smoothing_alpha = 0.4  # α≈0.4，任务要求 0.3~0.5
+        self._smoothing_buf: Optional[np.ndarray] = None
 
     def set_center_freq(self, freq_mhz: float):
         self.center_freq = freq_mhz
@@ -47,59 +72,83 @@ class SpectrumDataGenerator:
     def set_span(self, span_mhz: float):
         self.span = max(0.1, span_mhz)
 
+    def has_data(self) -> bool:
+        """是否已收到真实 IQ 数据。"""
+        return self._has_real_data
+
+    def clear_data(self):
+        """断开/清空：恢复到"未连接"状态，不保留旧频谱。"""
+        self._has_real_data = False
+        self._smoothing_buf = None
+        self.spectrum = np.full(self.num_bins, -100.0, dtype=np.float32)
+        self.waterfall.clear()
+
+    # 来源: SDR++ core/src/signal_path/iq_frontend.cpp:248-267 — FFT执行+功率谱
+    # 来源: GQRX src/dsp/rx_fft.cpp:126-156 — fftshift + 幅度谱
     def push_iq(self, iq: np.ndarray, sample_rate: float):
-        """喂入真实复 IQ，用 FFT 算功率谱（dBFS），替代模拟高斯峰。"""
+        """喂入真实复 IQ，做 Nuttall 窗复数 FFT → fftshift → dBFS → IIR 平滑。"""
         x = np.asarray(iq, dtype=np.complex64)
         n = len(x)
-        if n < 16:
+        if n < 64:
             return
-        win = np.hanning(n).astype(np.complex64)
-        spec = np.fft.rfft(x * win)
-        power_db = 20 * np.log10(np.abs(spec) / (n / 2) + 1e-12)
-        # 重采样到 num_bins
+
+        # 截取/补零到固定 FFT_SIZE
+        fft_size = self.FFT_SIZE
+        if n >= fft_size:
+            x = x[:fft_size]
+        else:
+            x = np.concatenate([x, np.zeros(fft_size - n, dtype=np.complex64)])
+
+        # 来源: SDR++ iq_frontend.cpp:252 — 窗乘 (Nuttall, nuttall.h:5-8)
+        win = _nuttall_window(fft_size)
+
+        # 来源: SDR++ iq_frontend.cpp:257 — 复数 FFT（复 IQ 必须用 fft 而非 rfft）
+        spec = np.fft.fft(x * win)
+        # 来源: SDR++ iq_frontend.cpp:283-291 / GQRX rx_fft.cpp:126-156
+        # fftshift 把 DC 搬到频谱中心
+        spec = np.fft.fftshift(spec)
+
+        # dBFS: 20*log10(|X| / 窗相干增益归一化)
+        # 窗相干增益 = mean(win)；满幅正弦波峰 = fft_size/2 * win_cg
+        win_cg = float(np.mean(win))
+        mag = np.abs(spec) / (fft_size * win_cg / 2.0)
+        power_db = 20.0 * np.log10(mag + 1e-12).astype(np.float32)
+
+        # 重采样到 num_bins。
+        # 来源: SDR++ core/src/gui/widgets/waterfall.cpp:81-87 — max 抽取
+        # （窄脉冲信号在缩小时不被平均抹平）
         if len(power_db) != self.num_bins:
-            idx = np.linspace(0, len(power_db) - 1, self.num_bins).astype(int)
-            power_db = power_db[idx]
-        # 居中（零频在中间）
-        power_db = np.fft.fftshift(power_db)
-        self.spectrum = power_db.astype(np.float32)
+            edges = np.linspace(0, len(power_db), self.num_bins + 1).astype(int)
+            resampled = np.empty(self.num_bins, dtype=np.float32)
+            for i in range(self.num_bins):
+                lo, hi = edges[i], edges[i + 1]
+                seg = power_db[lo:hi]
+                resampled[i] = float(np.max(seg)) if seg.size else -120.0
+            power_db = resampled
+
+        # 来源: SDR++ waterfall.cpp:914-920 — IIR 指数平滑
+        # smooth = alpha*new + beta*old, beta = 1-alpha
+        if self._smoothing_buf is None or len(self._smoothing_buf) != self.num_bins:
+            self._smoothing_buf = power_db.copy()
+        else:
+            a = self._smoothing_alpha
+            self._smoothing_buf = a * power_db + (1.0 - a) * self._smoothing_buf
+
+        self.spectrum = self._smoothing_buf.astype(np.float32)
         self.span = sample_rate / 1e6
+        self._has_real_data = True
+
+        # 瀑布追加
         self.waterfall.append(self.spectrum.copy())
         if len(self.waterfall) > self.max_waterfall_lines:
             self.waterfall.pop(0)
 
     def generate(self) -> np.ndarray:
-        """生成一帧频谱数据。若已有真实 IQ 则返回真频谱，否则回退模拟。"""
-        # 已有真实 IQ 数据时直接返回，不再叠假高斯峰
-        if np.any(self.spectrum < -20):
+        """返回当前帧频谱。有真 IQ 返真频谱；无数据返平坦底噪（不画模拟峰）。"""
+        if self._has_real_data:
             return self.spectrum
-        freqs = np.linspace(
-            self.center_freq - self.span / 2,
-            self.center_freq + self.span / 2,
-            self.num_bins
-        )
-
-        # 基底噪声
-        spectrum = np.full(self.num_bins, self._noise_level, dtype=np.float32)
-        spectrum += np.random.normal(0, 2.0, self.num_bins).astype(np.float32)
-
-        # 模拟电台信号（高斯峰）
-        for sf, peak, width in self._stations:
-            dist = np.abs(freqs - sf)
-            gaussian = peak * np.exp(-(dist ** 2) / (2 * width ** 2))
-            spectrum += gaussian.astype(np.float32)
-
-        # 限制范围
-        spectrum = np.clip(spectrum, -110, -10)
-
-        self.spectrum = spectrum
-
-        # 添加到瀑布图
-        self.waterfall.append(spectrum.copy())
-        if len(self.waterfall) > self.max_waterfall_lines:
-            self.waterfall.pop(0)
-
-        return spectrum
+        # 无硬件/无数据：返回平坦低噪底，由 UI 层画"未连接"文字
+        return np.full(self.num_bins, -100.0, dtype=np.float32)
 
     def get_freq_at_x(self, x_ratio: float) -> float:
         """根据 x 位置比例 (0-1) 获取频率。"""
@@ -201,24 +250,23 @@ class SpectrumWidget(QWidget):
         self.update()
 
     @Slot()
-    def set_iq_data(self, iq):
-        """喂入真 IQ 采样（numpy complex 数组），频谱画真 FFT。
-        无真硬件时不调用，自动回退到合成数据（标注"仿真"）。"""
-        import numpy as _np
-        arr = _np.asarray(iq, dtype=_np.complex128)
+    def set_iq_data(self, iq, sample_rate: float = 2_400_000.0):
+        """喂入真 IQ 采样（numpy complex 数组），走 generator 真 FFT 管线。
+        sample_rate: IQ 采样率 Hz，用于设置频谱 span。"""
+        arr = np.asarray(iq, dtype=np.complex64)
         if len(arr) < 64:
             return
-        win = _np.hanning(len(arr))
-        spec = _np.abs(_np.fft.rfft(arr * win))
-        self._real_spectrum = 20 * _np.log10(spec + 1e-9)
-        self._current_spectrum = self._real_spectrum
-        self._using_real = True
+        # 统一走 generator.push_iq（Nuttall 窗 + 复 FFT + fftshift + dBFS + IIR 平滑）
+        self.generator.push_iq(arr, sample_rate)
+
+    def set_connected(self, connected: bool):
+        """外部通知连接状态。断开时清空真数据，显示"未连接"。"""
+        if not connected:
+            self.generator.clear_data()
 
     def _on_timer(self):
-        if getattr(self, "_using_real", False) and getattr(self, "_real_spectrum", None) is not None:
-            self._current_spectrum = self._real_spectrum
-        else:
-            self.generator.generate()
+        # 统一从 generator 取数据：有真 IQ 返真频谱，无数据返平坦底噪
+        self.generator.generate()
         self.update()
 
     # ========================================================================
@@ -282,11 +330,8 @@ class SpectrumWidget(QWidget):
             painter.drawLine(QPointF(rect.x(), y), QPointF(rect.x() + rect.width(), y))
 
     def _draw_spectrum(self, painter: QPainter, rect: QRectF):
-        """绘制频谱曲线。真 IQ 流优先，否则回退合成。"""
-        if getattr(self, "_using_real", False) and getattr(self, "_current_spectrum", None) is not None:
-            spectrum = self._current_spectrum
-        else:
-            spectrum = self.generator.spectrum
+        """绘制频谱曲线。数据统一来自 generator（真 FFT 或平坦底噪）。"""
+        spectrum = self.generator.spectrum
         if len(spectrum) == 0:
             return
 
@@ -326,6 +371,20 @@ class SpectrumWidget(QWidget):
         # 绘制曲线
         painter.setPen(QPen(self.line_color, 2))
         painter.drawPath(path)
+
+        # 无数据时画"未连接/无数据"提示，不显示模拟峰
+        if not self.generator.has_data():
+            painter.setPen(QPen(self.text_color, 1))
+            font = QFont()
+            font.setPointSize(12)
+            painter.setFont(font)
+            text = "未连接 / 无 IQ 数据"
+            metrics = painter.fontMetrics()
+            tw = metrics.horizontalAdvance(text)
+            painter.drawText(
+                QPointF(rect.x() + (w - tw) / 2, rect.y() + rect.height() / 2),
+                text
+            )
 
     def _draw_marker(self, painter: QPainter, rect: QRectF):
         """绘制中心频率标记。"""
@@ -511,6 +570,19 @@ if HAS_OPENGL:
             self._show_waterfall = not self._show_waterfall
             self.update()
 
+        # 来源: 与 SpectrumWidget.set_iq_data 对齐 — 统一走 generator 真 FFT 管线
+        def set_iq_data(self, iq, sample_rate: float = 2_400_000.0):
+            """喂入真 IQ 采样，走 generator 真 FFT（Nuttall 窗 + 复 FFT + IIR 平滑）。"""
+            arr = np.asarray(iq, dtype=np.complex64)
+            if len(arr) < 64:
+                return
+            self.generator.push_iq(arr, sample_rate)
+
+        def set_connected(self, connected: bool):
+            """外部通知连接状态。断开时清空真数据，显示"未连接"。"""
+            if not connected:
+                self.generator.clear_data()
+
         def initializeGL(self):
             from PySide6.QtGui import QOpenGLFunctions
             self.gl = self.context().functions()
@@ -586,6 +658,17 @@ if HAS_OPENGL:
             center_x = w / 2
             painter.setPen(QPen(QColor("#D4956A"), 1, Qt.DashLine))
             painter.drawLine(QPointF(center_x, 0), QPointF(center_x, spectrum_h))
+
+            # 无数据时画"未连接/无数据"提示
+            if not self.generator.has_data():
+                painter.setPen(QPen(QColor("#D0D0D0"), 1))
+                font = QFont()
+                font.setPointSize(12)
+                painter.setFont(font)
+                text = "未连接 / 无 IQ 数据"
+                metrics = painter.fontMetrics()
+                tw = metrics.horizontalAdvance(text)
+                painter.drawText(QPointF((w - tw) / 2, spectrum_h / 2), text)
 
             # 瀑布图
             if self._show_waterfall and waterfall_h > 0 and self.generator.waterfall:
