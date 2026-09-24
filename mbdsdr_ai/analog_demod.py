@@ -26,6 +26,85 @@ def _lowpass(x: np.ndarray, sr: float, cutoff: float, taps: int = 63) -> np.ndar
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  SDR++ 校准常量（来源: repos/sdrpp/decoder_modules/radio/src/demodulators/*.h）
+#  与上面 GQRX 风格链路并存：切到对应模式时用 SDR++ 的 IF 采样率/带宽/去加重。
+# ═══════════════════════════════════════════════════════════════════════
+
+# 去加重时间常数表 —— 来源: radio_module.h:25-28 deempTaus
+#   {22us: 22e-6, 50us: 50e-6, 75us: 75e-6}
+# 50μs = 欧洲/中国 FM 广播；75μs = 美国 FM 广播。
+SDRPP_DEEMP_TAU_US = {"none": 0.0, "22us": 22e-6, "50us": 50e-6, "75us": 75e-6}
+
+# 各解调模式的 IF 采样率 / 默认带宽 / 最小带宽
+#   WFM:  wfm.h:268/270/271   IF=250000  defaultBW=150000 minBW=50000
+#   NFM:  nfm.h:56/58/59      IF=50000   defaultBW=12500  minBW=1000
+#   AM:   am.h:76/78/79       IF=15000   defaultBW=10000  minBW=1000
+#   USB:  usb.h:70/72/73/74   IF=24000   defaultBW=2800   minBW=500 maxBW=IF/2=12000
+SDRPP_MODE_PARAMS = {
+    #        if_sr      default_bw  min_bw   default_deemph
+    "wfm":  (250_000.0, 150_000.0, 50_000.0, "50us"),   # wfm.h:278 默认 50μs
+    "nfm":  (50_000.0,  12_500.0,  1_000.0,  "none"),   # nfm.h:66  默认不去加重
+    "am":   (15_000.0,  10_000.0,  1_000.0,  "none"),   # am.h:84  不允许去加重
+    "usb":  (24_000.0,  2_800.0,   500.0,    "none"),   # usb.h:78
+}
+
+# WFM 立体声/导频参数 —— 来源: core/src/dsp/demod/broadcast_fm.h
+#   导频 19kHz 带通 18750~19250 (broadcast_fm.h:43)
+#   音频低通 15kHz、过渡带 4kHz (broadcast_fm.h:49)
+#   RDS 副载波 57kHz、重采样到 5000Hz (broadcast_fm.h:52-53)
+SDRPP_WFM_PILOT_BAND = (18_750.0, 19_250.0)
+SDRPP_WFM_AUDIO_LP = 15_000.0
+SDRPP_RDS_SUBCARRIER = 57_000.0
+SDRPP_RDS_RESAMPLE_RATE = 5_000.0
+
+# 音频（AF）输出采样率 —— 来源: radio_module.h:105 deemp.init(NULL,50e-6,48000.0)
+# SDR++ 解调后的音频链统一工作在 48000Hz。
+SDRPP_AUDIO_SR = 48_000.0
+
+
+class DeemphasisFilter:
+    """SDR++ 一阶 RC 去加重滤波器。
+
+    （来源: core/src/dsp/filter/deephasis.h:58-94）
+        dt = 1/samplerate;  alpha = dt/(tau+dt);
+        out[i] = alpha*in[i] + (1-alpha)*out[i-1]
+    tau: 75μs(美)/50μs(欧)/22μs。逐样本 IIR，状态跨块连续。
+    """
+
+    def __init__(self, tau: float, samplerate: float):
+        self.tau = float(tau)
+        self.sr = float(samplerate)
+        self._last = 0.0
+        self._update_alpha()
+
+    def _update_alpha(self) -> None:
+        dt = 1.0 / self.sr                      # deephasis.h:92
+        self.alpha = dt / (self.tau + dt)       # deephasis.h:93
+
+    def set_tau(self, tau: float) -> None:
+        self.tau = float(tau)
+        self._update_alpha()
+
+    def set_samplerate(self, sr: float) -> None:
+        self.sr = float(sr)
+        self._update_alpha()
+
+    def process(self, x: np.ndarray) -> np.ndarray:
+        if self.tau <= 0 or len(x) == 0:
+            return x
+        x = np.asarray(x, dtype=np.float64)
+        out = np.empty_like(x)
+        prev = self._last
+        a = self.alpha
+        for i in range(len(x)):                 # deephasis.h:60-62
+            prev = a * x[i] + (1.0 - a) * prev
+            out[i] = prev
+        self._last = out[-1]
+        return out.astype(np.float32)
+
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  GQRX 风格窄带解调链（状态化，流式逐块处理）
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -35,6 +114,8 @@ _MODE_DEFAULTS: Dict[str, Dict[str, float]] = {
     #           bw_hz    bfo_hz   squelch_dbfs
     "am":  dict(bw_hz=10_000.0, bfo_hz=0.0,   sql_db=-40.0),
     "fm":  dict(bw_hz=12_500.0, bfo_hz=0.0,   sql_db=-40.0),
+    # wfm 默认带宽 150kHz —— 来源: SDR++ wfm.h:270 getDefaultBandwidth()=150000
+    "wfm": dict(bw_hz=150_000.0, bfo_hz=0.0,  sql_db=-30.0),
     "usb": dict(bw_hz=2_400.0,  bfo_hz=1_500.0, sql_db=-60.0),
     "lsb": dict(bw_hz=2_400.0,  bfo_hz=-1_500.0, sql_db=-60.0),
     "cw":  dict(bw_hz=500.0,    bfo_hz=700.0,  sql_db=-60.0),
@@ -146,6 +227,10 @@ class NarrowbandReceiver:
 
         self._agc = _GqrxAGC(self.sample_rate)
 
+        # SDR++ 去加重（来源: radio_module.h:105 deemp.init(NULL,50e-6,48000)）。
+        # 初始 tau=0（不去加重），set_mode 按模式默认档打开。
+        self.deemph = DeemphasisFilter(0.0, self.sample_rate)
+
         self.set_mode(mode)
 
     # ------------------------------------------------------------------
@@ -206,13 +291,28 @@ class NarrowbandReceiver:
         # 来源: GQRX mainwindow.cpp:1313 — 切模式后把静噪门限刷成当前档
         self.squelch_db = d["sql_db"]
         self.audio_bw = min(3_000.0, d["bw_hz"] * 0.4)
-        if mode == "fm":
+        if mode in ("fm", "nfm"):
             self.max_dev = 5_000.0
+        elif mode == "wfm":
+            # WFM 最大频偏 = 带宽/2 —— 来源: wfm.h:78 demod.init(...,bandwidth/2.0,...)
+            self.max_dev = self.bw_hz / 2.0
+            self.audio_bw = SDRPP_WFM_AUDIO_LP   # 15kHz，broadcast_fm.h:49
         elif mode == "am":
             self.max_dev = 0.0
+
+        # SDR++ 去加重档：按模式默认（wfm=50μs，nfm/am/ssb=none）
+        # 来源: radio_module.h:25-28 tau 表 + 各 demodulator getDefaultDeemphasisMode()
+        sdrpp_key = {"wfm": "wfm", "fm": "nfm", "nfm": "nfm",
+                     "am": "am", "usb": "usb", "lsb": "usb"}.get(mode)
+        if sdrpp_key and sdrpp_key in SDRPP_MODE_PARAMS:
+            deemp_name = SDRPP_MODE_PARAMS[sdrpp_key][3]
+            self.deemph.set_tau(SDRPP_DEEMP_TAU_US[deemp_name])
+            self.deemph.set_samplerate(self.sample_rate)
+            self.deemph_region = deemp_name
         self._agc.reset()
         return {"mode": mode, "bw_hz": self.bw_hz, "bfo_hz": self.bfo_hz,
-                "squelch_db": self.squelch_db}
+                "squelch_db": self.squelch_db,
+                "deemphasis": getattr(self, "deemph_region", "none")}
 
     # ------------------------------------------------------------------
     #  静噪
@@ -274,6 +374,12 @@ class NarrowbandReceiver:
         # 6) 音频低通
         audio = _lowpass(audio, self.sample_rate, self.audio_bw) if len(audio) else audio
 
+        # 6b) SDR++ 去加重（来源: radio_module.h:110 afChain.addBlock(&deemp)）
+        #     一阶 RC IIR，tau=50μs(欧)/75μs(美)；tau=0 时直通。
+        if len(audio) and getattr(self, "deemph", None) is not None \
+                and self.deemph.tau > 0:
+            audio = self.deemph.process(audio)
+
         peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
         if peak > 1e-9:
             audio = audio / peak
@@ -306,7 +412,8 @@ class NarrowbandReceiver:
         if mode == "am":
             audio = np.abs(x)
             audio = audio - np.mean(audio)
-        elif mode == "fm":
+        elif mode in ("fm", "nfm", "wfm"):
+            # 正交鉴频（来源: SDR++ core/src/dsp/demod/quadrature.h 的相位差分）
             if len(x) < 2:
                 return np.zeros(len(x), dtype=np.float64)
             phase = np.angle(x[1:] * np.conj(x[:-1]))
