@@ -70,17 +70,9 @@ class _SkyPageState extends State<SkyPage> {
       biasDeg = (targetAz - heading + 540) % 360 - 180;
     }
 
-    return Scaffold(
-      backgroundColor: AppTheme.bg,
-      appBar: AppBar(
-        title: const Text('卫星指向引导'),
-        backgroundColor: AppTheme.bg,
-        foregroundColor: AppTheme.text,
-        elevation: 0,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-        children: [
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      children: [
           // ---------- 罗盘 ----------
           Center(
             child: SizedBox(
@@ -149,7 +141,6 @@ class _SkyPageState extends State<SkyPage> {
           else
             ..._buildPassesTiles(passes),
         ],
-      ),
     );
   }
 
@@ -379,13 +370,13 @@ class _CompassPainter extends CustomPainter {
 
     // 内圈淡底
     final bgPaint = Paint()
-      ..color = AppTheme.bgAlt.withValues(alpha: 0.4)
+      ..color = AppTheme.bgAlt.withOpacity(0.4)
       ..style = PaintingStyle.fill;
     canvas.drawCircle(center, radius, bgPaint);
 
     // ---------- 刻度：每 30° ----------
     final tickPaint = Paint()
-      ..color = AppTheme.primary.withValues(alpha: 0.7)
+      ..color = AppTheme.primary.withOpacity(0.7)
       ..strokeWidth = 1.5;
     final majorTickPaint = Paint()
       ..color = AppTheme.primary
