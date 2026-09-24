@@ -33,6 +33,7 @@ from .scheduler import Scheduler
 from .sdr_backend import SDRBackendManager
 from .spectrum_processor import SpectrumProcessor
 from .sdr_tools import register_sdr_tools
+from .fldigi_modes import register_fldigi_modes_tools
 from .hooks import HookManager, Event, EventType, create_logging_hook
 from .subagents import SubagentManager, SubagentStatus
 from .pose import PoseFusion, ARProjector, IMUData, GPSData
@@ -171,6 +172,9 @@ class MBDSDRAgent:
 
         # 注册 SDR 专用工具（38个）
         register_sdr_tools(self)
+
+        # 注册 fldigi 多模式数字解码（PSK31/RTTY/MFSK/FeldHell，真实源码移植）
+        register_fldigi_modes_tools(self.tool_registry)
 
         # 注册 Hook 事件钩子工具（白皮书第四章 4.4）
         self._register_hook_tools()
