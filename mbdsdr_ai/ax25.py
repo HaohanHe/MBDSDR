@@ -107,12 +107,13 @@ def encode_address(callsign: str, ssid: int = 0, has_been_repeated: bool = False
     for ch in callsign:
         addr.append(ord(ch) << 1)
 
-    # 第7字节：SSID + 控制位
+    # 第7字节：SSID + 控制位。格式 0b C RRR SSID RRRRRR 1：
+    #   bit7=C/R 命令位（仅目的地址置 1），bits6-4=保留(110)，bits3-1=SSID，bit0=扩展位
     ssid_byte = (ssid & 0x0F) << 1
     if has_been_repeated:
-        ssid_byte |= 0x80  # H 位（已被中继）
+        ssid_byte |= 0x80  # H 位（已被中继，仅源/中继地址）
     if is_last:
-        ssid_byte |= 0x01  # C 位（地址字段结束）
+        ssid_byte |= 0x01  # 扩展位（地址字段结束=1）
     # RR 位（保留）设为 11
     ssid_byte |= 0x60
     addr.append(ssid_byte)
@@ -160,9 +161,11 @@ class AX25Frame:
         """将帧编码为字节流（不含首尾标志）。"""
         frame = bytearray()
 
-        # 目的地址
+        # 目的地址（命令帧：AX.25 目的地址 SSID 字节 bit7 = C/R 命令位，须置 1）
         is_last = len(self.digipeaters) == 0
-        frame += encode_address(self.destination, self.dest_ssid, is_last=is_last)
+        dest_addr = bytearray(encode_address(self.destination, self.dest_ssid, is_last=is_last))
+        dest_addr[6] |= 0x80  # C-bit = 1（命令帧）
+        frame += dest_addr
 
         # 源地址
         is_last = len(self.digipeaters) == 0

@@ -252,17 +252,23 @@ class Orchestrator:
             if not task:
                 continue
 
-            # 检查依赖是否都成功
-            deps_ok = all(
-                (dep_id in self.tasks and
-                 self.tasks[dep_id].status == TaskStatus.COMPLETED)
-                for dep_id in task.dependencies
-            )
+            # 惰性依赖检查：执行到这里才看上游真实状态，不预先求值。
+            # 上游未完成/失败/缺失 → 本任务排队跳过，不拿 None 当结果调用。
+            deps_missing = []
+            deps_failed = []
+            for dep_id in task.dependencies:
+                dep = self.tasks.get(dep_id)
+                if dep is None:
+                    deps_missing.append(dep_id)
+                elif dep.status != TaskStatus.COMPLETED:
+                    deps_failed.append(f"{dep_id}({dep.status.value})")
 
-            if not deps_ok:
+            if deps_missing or deps_failed:
                 task.status = TaskStatus.SKIPPED
+                task.error = (
+                    f"依赖未就绪: missing={deps_missing} not_completed={deps_failed}")
                 skipped += 1
-                errors.append(f"任务 {task.name} 因依赖失败而跳过")
+                errors.append(f"任务 {task.name} 因依赖未完成而跳过: {task.error}")
                 if stop_on_failure:
                     break
                 continue
@@ -293,7 +299,12 @@ class Orchestrator:
         )
 
     def _execute_task(self, task: Task) -> bool:
-        """执行单个任务（含重试）。"""
+        """执行单个任务（含重试）。
+
+        依赖结果在执行时惰性收集：只有当上游任务真正 COMPLETED 且有输出时，
+        才把上游结果注入到传给 handler 的参数里；未完成/缺失的上游绝不在此
+        处被当可调用对象或 None 直接使用（execute() 已 gate 掉这种情况）。
+        """
         task.status = TaskStatus.RUNNING
         task.started_at = time.time()
 
@@ -301,11 +312,26 @@ class Orchestrator:
             try:
                 task.retries = attempt
 
+                # 惰性收集上游结果（执行时才读，不在 add_task 时急切求值）
+                upstream: Dict[str, Any] = {}
+                for dep_id in task.dependencies:
+                    dep = self.tasks.get(dep_id)
+                    if dep is None or dep.status != TaskStatus.COMPLETED:
+                        # 防御：execute() 的 gate 应已跳过这里；双保险
+                        raise RuntimeError(
+                            f"依赖 {dep_id} 未完成，任务 {task.task_id} 不能执行")
+                    upstream[dep_id] = dep.result
+                    upstream[dep.name] = dep.result
+
+                # 合并到 handler 参数（副本，不污染原始 tool_params）
+                effective_params = dict(task.tool_params)
+                effective_params["_upstream"] = upstream
+
                 # 执行 handler 或调用工具
                 if task.handler:
-                    task.result = task.handler(task.tool_params)
+                    task.result = task.handler(effective_params)
                 elif task.tool_name and self.tool_registry:
-                    tool_result = self.tool_registry.call(task.tool_name, task.tool_params)
+                    tool_result = self.tool_registry.call(task.tool_name, effective_params)
                     task.result = tool_result.content if tool_result.success else tool_result.error
                     if not tool_result.success:
                         raise Exception(tool_result.error)

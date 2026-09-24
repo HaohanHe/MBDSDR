@@ -33,6 +33,18 @@ from abc import ABC, abstractmethod
 logger = logging.getLogger(__name__)
 
 
+def _import_soapy():
+    """惰性导入 SoapySDR，未安装时返回 None（不抛异常）。
+
+    模块顶部不得 import SoapySDR，否则无硬件环境 `import mbdsdr_ai.hal` 即崩。
+    """
+    try:
+        import SoapySDR
+        return SoapySDR
+    except ImportError:
+        return None
+
+
 class DeviceCapability(Enum):
     """设备能力。"""
     RX = "rx"
@@ -253,6 +265,10 @@ class SoapySDRBackend(SDRBackendBase):
     def set_frequency(self, freq_hz: float):
         self._center_freq = freq_hz
         if self._device:
+            SoapySDR = _import_soapy()
+            if SoapySDR is None:
+                logger.warning("SoapySDR 未安装，无法下发频率")
+                return
             try:
                 self._device.setFrequency(SoapySDR.SOAPY_SDR_RX, 0, freq_hz)
             except Exception as e:
@@ -261,6 +277,10 @@ class SoapySDRBackend(SDRBackendBase):
     def set_sample_rate(self, rate_hz: float):
         self._sample_rate = rate_hz
         if self._device:
+            SoapySDR = _import_soapy()
+            if SoapySDR is None:
+                logger.warning("SoapySDR 未安装，无法下发采样率")
+                return
             try:
                 self._device.setSampleRate(SoapySDR.SOAPY_SDR_RX, 0, rate_hz)
             except Exception as e:
@@ -269,6 +289,10 @@ class SoapySDRBackend(SDRBackendBase):
     def set_gain(self, gain_db: float, stage: str = ""):
         self._gain = gain_db
         if self._device:
+            SoapySDR = _import_soapy()
+            if SoapySDR is None:
+                logger.warning("SoapySDR 未安装，无法下发增益")
+                return
             try:
                 if stage:
                     self._device.setGain(SoapySDR.SOAPY_SDR_RX, 0, gain_db, stage)
@@ -277,17 +301,60 @@ class SoapySDRBackend(SDRBackendBase):
             except Exception as e:
                 logger.warning(f"设置增益失败: {e}")
 
+    def setupStream(self, direction: str = "RX", format: str = "CF32",
+                    channels: Optional[List[int]] = None) -> bool:
+        """
+        设置并激活 SoapySDR 流。
+
+        参数:
+            direction: "RX" 或 "TX"
+            format: 流格式（CF32 / CS16 / CU8）
+            channels: 通道列表，默认 [0]
+        返回:
+            True 成功
+        异常:
+            RuntimeError: SoapySDR 未安装或设备未连接时抛出明确异常
+        """
+        SoapySDR = _import_soapy()
+        if SoapySDR is None:
+            raise RuntimeError("SoapySDR 未安装，无法 setupStream")
+        if not self._device:
+            raise RuntimeError("设备未连接，无法 setupStream")
+        if channels is None:
+            channels = [0]
+        try:
+            dir_const = (SoapySDR.SOAPY_SDR_RX if direction.upper() == "RX"
+                         else SoapySDR.SOAPY_SDR_TX)
+            stream = self._device.setupStream(dir_const, format, channels)
+            if stream is None:
+                raise RuntimeError(f"setupStream 返回空流 (dir={direction}, fmt={format})")
+            self._device.activateStream(stream)
+            if direction.upper() == "RX":
+                self._rx_stream = stream
+            else:
+                self._tx_stream = stream
+            logger.info(f"流已设置并激活: dir={direction}, fmt={format}, ch={channels}")
+            return True
+        except Exception as e:
+            logger.error(f"setupStream 失败: {e}")
+            raise
+
     def read_rx(self, num_samples: int) -> np.ndarray:
         """读取 RX IQ 采样。"""
         if self._device and self._rx_stream:
-            try:
-                buff = np.array([np.complex64] * num_samples)
-                flags = 0
-                time_ns = 0
-                n = self._rx_stream.read(buff, num_samples, flags, time_ns)
-                return buff[:n]
-            except Exception as e:
-                logger.warning(f"读取RX失败: {e}")
+            SoapySDR = _import_soapy()
+            if SoapySDR is None:
+                logger.warning("SoapySDR 未安装，无法读取真实 IQ")
+            else:
+                try:
+                    buff = np.zeros(num_samples, dtype=np.complex64)
+                    flags = 0
+                    time_ns = 0
+                    n = self._rx_stream.read(buff, num_samples, flags, time_ns)
+                    if n and n > 0:
+                        return buff[:n]
+                except Exception as e:
+                    logger.warning(f"读取RX失败: {e}")
 
         # 模拟数据
         t = np.arange(num_samples) / self._sample_rate
@@ -312,6 +379,9 @@ class SoapySDRBackend(SDRBackendBase):
     def supports_tx(self) -> bool:
         """检查当前设备是否支持TX。"""
         if not self._device:
+            return False
+        SoapySDR = _import_soapy()
+        if SoapySDR is None:
             return False
         try:
             return self._device.hasTxChannel(SoapySDR.SOAPY_SDR_TX, 0)

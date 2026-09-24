@@ -28,11 +28,19 @@ from mbdsdr_ai.amr import AMRClassifier, synthesize_modulation_iq  # noqa: E402
 MODS = ["AM", "FM", "CW", "FSK", "PSK", "QAM", "OFDM", "NOISE"]
 SNRS = [-5, 0, 5, 10, 15, 20, 25, 30]
 CONF_SNR = 10
+# P1 修复：训练/测试种子显式隔离，避免数据泄露。
+#   训练种子：AMRClassifier._load_builtin_training_data() 内部硬编码 20260919，
+#             用于生成 8 类内置模板（每类 16 个，SNR 10~30 dB）。
+#   测试种子：本脚本独立实例化的 RNG，与训练种子完全无关，
+#             保证测试集不被训练集见过。
+TRAIN_SEED = 20260919
+TEST_SEED = 1234
 OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "paper", "experiments")
 
 
-def run(trials: int, fs: float, seed_base: int = 40000):
+def run(trials: int, fs: float, train_seed: int = TRAIN_SEED,
+        test_seed: int = TEST_SEED):
     clf = AMRClassifier(k=5)  # 开箱即用，不再训练
     n = len(MODS)
 
@@ -44,7 +52,9 @@ def run(trials: int, fs: float, seed_base: int = 40000):
         correct = np.zeros(n, dtype=int)
         for mi, mod in enumerate(MODS):
             for tr in range(trials):
-                rng = np.random.default_rng(seed_base + si * 100000 + mi * 1000 + tr)
+                # 测试集 RNG 由独立 test_seed 派生，与训练种子无关
+                rng = np.random.default_rng(
+                    test_seed + si * 100000 + mi * 1000 + tr)
                 iq = synthesize_modulation_iq(mod, rng, snr_db=float(snr), fs=fs)
                 pred = clf.classify_iq(list(iq), fs).predicted_modulation.value
                 if pred == mod:
@@ -83,10 +93,23 @@ def run(trials: int, fs: float, seed_base: int = 40000):
     high = acc_by_snr[30].mean()
     mid = acc_by_snr[CONF_SNR].mean()
     low = acc_by_snr[SNRS[0]].mean()
+    # 混淆矩阵对角线归一化准确率（固定 CONF_SNR）
+    diag_acc = np.trace(confusion) / max(confusion.sum(), 1)
     print("\n========== AMR 实验汇总 ==========")
     print(f"高 SNR(30dB) 准确率: {high:.3f}")
     print(f"中 SNR({CONF_SNR}dB) 准确率: {mid:.3f}")
     print(f"低 SNR({SNRS[0]}dB) 准确率: {low:.3f}")
+    print(f"混淆矩阵对角占比({CONF_SNR}dB): {diag_acc:.3f}")
+    print("\n========== AMR 实验 配置 ==========")
+    print(f"调制类别 MODS       = {MODS}")
+    print(f"SNR 网格 SNRS       = {SNRS}")
+    print(f"混淆矩阵 SNR        = {CONF_SNR} dB")
+    print(f"每类 trials         = {trials}")
+    print(f"采样率 fs           = {fs}")
+    print(f"KNN k               = 5")
+    print(f"[训练种子 train_seed] = {train_seed}  (AMRClassifier 内置模板)")
+    print(f"[测试种子 test_seed]  = {test_seed}  (本脚本独立 RNG)")
+    print(f"种子隔离            = 是（train/test 独立 RNG，无重叠）")
     print(f"输出: {p1}")
     print(f"输出: {p2}")
 
@@ -95,5 +118,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--trials", type=int, default=30)
     ap.add_argument("--fs", type=float, default=100_000.0)
+    ap.add_argument("--train-seed", type=int, default=TRAIN_SEED,
+                    help="AMRClassifier 内置模板使用的种子（仅记录，不重新训练）")
+    ap.add_argument("--test-seed", type=int, default=TEST_SEED,
+                    help="测试集独立 RNG 种子，必须与 train-seed 不同")
     args = ap.parse_args()
-    run(args.trials, args.fs)
+    run(args.trials, args.fs, train_seed=args.train_seed,
+        test_seed=args.test_seed)

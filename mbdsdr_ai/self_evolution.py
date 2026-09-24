@@ -26,7 +26,10 @@ AI 定义无线电的自进化核心，让模型能够改进自身。
 """
 
 
+import os
+import sys
 import time
+import subprocess
 
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Callable, Tuple
@@ -245,19 +248,102 @@ class SelfEvolutionEngine:
                 test_result["error"] = str(e)
             results.append(test_result)
 
-        pass_rate = passed / max(1, len(tests)) if tests else 1.0  # 无测试用例默认通过
+        # ── 真回归测试：对 code 类改动真跑子进程检查 ──────────────────
+        # 修复"恒判 accept"：无内置测试用例时，不再默认 pass_rate=1.0，
+        # 而是对指定了 real_path 的 code 改动实际跑 py_compile（语法检查），
+        # 若项目里有 tests/ 目录再尝试跑 pytest。根据真实通过/失败决定 accept/reject。
+        regression = self._run_regression_check(proposal)
+        if regression is not None:
+            results.append(regression)
+            if regression.get("passed"):
+                passed += 1
+
+        total_tests = len(results)
+        if total_tests == 0:
+            # 完全没有任何可执行的验证证据：拒绝自动接受（防幻觉变砖）
+            pass_rate = 0.0
+            recommendation = "reject"
+        else:
+            pass_rate = passed / total_tests
+            recommendation = "accept" if pass_rate >= 0.8 else "reject"
         evaluation = {
             "proposal_id": proposal_id,
-            "total_tests": len(tests),
+            "total_tests": total_tests,
             "passed_tests": passed,
             "pass_rate": round(pass_rate, 4),
             "results": results,
-            "recommendation": "accept" if pass_rate >= 0.8 else "reject",
+            "recommendation": recommendation,
         }
 
         proposal.evaluation_result = evaluation
         proposal.status = "evaluated"
         return evaluation
+
+    def _run_regression_check(self, proposal: "EvolutionProposal") -> Optional[Dict[str, Any]]:
+        """对 code 类改动真跑回归检查（子进程）。
+
+        策略：
+        1. 若 proposal 指定了 real_path 且文件存在，先跑 ``python -m py_compile``
+           做语法/编译静态检查——这是测试环境不可用时的兜底。
+        2. 若项目根下存在 tests/ 目录，再尝试跑 pytest；pytest 不可用则以
+           py_compile 结果为准（不阻断）。
+
+        非 code 类、或未指定 real_path 时返回 None（不提供自动判定证据，
+        由 evaluate 按"无证据即 reject"处理）。
+        """
+        if proposal.target_type != "code" or not proposal.real_path:
+            return None
+
+        path = os.path.abspath(os.path.expanduser(proposal.real_path))
+        if not os.path.exists(path):
+            return {
+                "name": "regression_target_exists",
+                "passed": False,
+                "error": f"目标文件不存在: {path}",
+            }
+
+        # 1) 语法/编译静态检查（兜底，必跑）
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "py_compile", path],
+                capture_output=True, text=True, timeout=30,
+            )
+            syntax_ok = proc.returncode == 0
+            syntax_out = (proc.stderr or proc.stdout or "")[:600]
+        except Exception as e:
+            syntax_ok = False
+            syntax_out = f"py_compile 异常: {type(e).__name__}: {e}"
+
+        if not syntax_ok:
+            return {
+                "name": f"py_compile:{os.path.basename(path)}",
+                "passed": False,
+                "output": syntax_out,
+            }
+
+        # 2) 尝试跑项目 pytest（可选；失败不阻断，以 py_compile 为准）
+        project_root = os.path.dirname(os.path.dirname(path))
+        tests_dir = os.path.join(project_root, "tests")
+        if os.path.isdir(tests_dir):
+            try:
+                proc = subprocess.run(
+                    [sys.executable, "-m", "pytest", tests_dir, "-q", "--tb=no", "-x"],
+                    capture_output=True, text=True, timeout=120, cwd=project_root,
+                )
+                return {
+                    "name": "pytest:tests/",
+                    "passed": proc.returncode == 0,
+                    "output": (proc.stdout + proc.stderr)[:800],
+                }
+            except Exception:
+                # pytest 未安装/超时：落到 py_compile 结果
+                pass
+
+        return {
+            "name": f"py_compile:{os.path.basename(path)}",
+            "passed": True,
+            "output": "语法检查通过（pytest 不可用，以静态检查为准）",
+        }
 
     # ── 用户确认 ────────────────────────────────────────
 

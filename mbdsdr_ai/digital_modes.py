@@ -197,3 +197,39 @@ DVBS_PARAMS = {
 def get_dvbs_params() -> Dict:
     """获取DVB-S/S2参数。"""
     return DVBS_PARAMS
+
+
+# ========================================================================
+# QPSK / Viterbi 数字解调桥接（接线到 demod.py 真实实现）
+# ========================================================================
+# 此前本模块只存 FT8/AIS/ADS-B/DVB-S 的参数表；真实 QPSK 解调（RRC 匹配
+# 滤波 + Costas 载波恢复 + Gardner 位同步 + 判决）与 K=7 r=1/2 卷积码
+# Viterbi 解码实现在 demod.py（meteor_sat 也复用）。这里把它接到本数字模式
+# 入口，提供统一函数，避免 demod 沦为旁路模块；demod.py 保持不动、不删除。
+try:  # 包内相对导入优先，兼容直接脚本运行
+    from .demod import QPSKDemodulator, ViterbiDecoder
+except Exception:  # pragma: no cover
+    try:
+        from mbdsdr_ai.demod import QPSKDemodulator, ViterbiDecoder
+    except Exception:
+        QPSKDemodulator = None
+        ViterbiDecoder = None
+
+
+def get_qpsk_viterbi():
+    """返回 (QPSKDemodulator, ViterbiDecoder) 类；numpy 不可用时为 (None, None)。"""
+    return QPSKDemodulator, ViterbiDecoder
+
+
+def demodulate_qpsk(iq, sps: int = 4, beta: float = 0.35, num_taps: int = 101):
+    """统一 QPSK 解调入口：匹配滤波→Costas→Gardner→四相判决，返回复符号数组。"""
+    if QPSKDemodulator is None:
+        raise RuntimeError("demod.QPSKDemodulator 不可用（需要 numpy）")
+    return QPSKDemodulator(sps=sps, beta=beta, num_taps=num_taps).demodulate(iq)
+
+
+def decode_viterbi(bits, K: int = 7, G1: int = 171, G2: int = 133):
+    """统一 Viterbi 解码入口（K=7, r=1/2, G1=171/G2=133），返回信息比特数组。"""
+    if ViterbiDecoder is None:
+        raise RuntimeError("demod.ViterbiDecoder 不可用（需要 numpy）")
+    return ViterbiDecoder(K=K, G1=G1, G2=G2).decode(bits)
