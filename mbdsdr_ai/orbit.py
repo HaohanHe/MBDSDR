@@ -12,6 +12,12 @@ MBDSDR AI 内核 - 真实轨道计算模块 (SGP4)
 参考：SGP4/SDP4 标准（Vallado）。椭球参数统一使用 WGS-72（与 Python sgp4 库默认
 legacy 模式及 gpredict sgp4sdp4.h 硬编码一致），避免轨道 WGS-72 / 站心 WGS-84 混用
 引入的米级系统差。
+
+校准：本模块的 WGS-72 常数(6378.135km, f=1/298.26)与 GMST 折叠式(_gmst_days)已与
+逐行移植 gpredict C 源码的 mbdsdr_ai/gpredict_adapter.py 交叉验证：同一卫星 TLE+时刻下，
+本模块 ECEF-ENU 法与 gpredict sgp_obs.c 站心法的方位/仰角差 <0.02°/0.01°（见
+tests/gpredict_test.py::test_coordinate_az_el）。gpredict_adapter 提供无第三方依赖的纯
+Python SGP4 参考实现，本模块保留 sgp4 库高性能传播路径。
 """
 from __future__ import annotations
 
