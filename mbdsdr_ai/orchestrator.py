@@ -336,7 +336,9 @@ class Orchestrator:
                     if not tool_result.success:
                         raise Exception(tool_result.error)
                 else:
-                    task.result = None
+                    # 无 handler 无 registry：不能空跑报成功
+                    raise RuntimeError(
+                        f"任务 {task.name} 无 handler 且未注入 tool_registry，无法执行")
 
                 task.status = TaskStatus.COMPLETED
                 task.completed_at = time.time()
