@@ -587,6 +587,47 @@ class AGC:
         self._current_gain = 1.0
 
 
+# ── GNU Radio 真实 DSP 参数校准（来源: repos/gnuradio）─────────────
+# 与 mbdsdr_ai/gnuradio_blocks.py 逐行移植对齐。本常量块把现有
+# decimate()/AGC() 的工程经验值校准到 GNU Radio 内核真实默认值。
+#
+# 1) 有理重采样 FIR 设计（gr-filter/lib/rational_resampler_impl.cc:43-74
+#    design_resampler_filter）：
+GR_RESAMPLER_KAISER_BETA = 7.0        # rational_resampler_impl.cc:55  float beta = 7.0;
+GR_RESAMPLER_FRACTIONAL_BW = 0.4      # rational_resampler_impl.cc:124/:142 默认 0.4
+GR_RESAMPLER_HALFBAND = 0.5           # rational_resampler_impl.cc:56
+#   → decimate() 的 Kaiser 阻带波纹 60dB 与 beta=7.0（≈75dB）一致，
+#     截止 mid_transition_band 与本文件 cutoff 取中点的做法对齐。
+#
+# 2) FFT 快速卷积（gr-filter/lib/fft_filter.cc:76/77 + fft_filter.h:72）：
+GR_FFT_FILTER_FFTSIZE = lambda nt: int(2 * 2 ** np.ceil(np.log2(max(nt, 1))))
+#   fft_filter.cc:76  d_fftsize = 2*2^ceil(log2(ntaps))
+GR_FFT_FILTER_NSAMPLES = lambda nt, fs: fs - nt + 1   # fft_filter.cc:77
+GR_FFT_FILTER_TAILSIZE = lambda nt: nt - 1            # fft_filter.h:72
+#   fft_filter.cc:52  抽头先乘 scale=1/fftsize 再 FFT（吸收归一化）。
+#
+# 3) AGC2（gr-analog/include/gnuradio/analog/agc2.h:41-45）默认值：
+GR_AGC2_ATTACK_RATE = 1e-1            # agc2.h:41
+GR_AGC2_DECAY_RATE = 1e-2             # agc2.h:42
+GR_AGC2_REFERENCE = 1.0               # agc2.h:43
+GR_AGC2_INIT_GAIN = 1.0               # agc2.h:44
+GR_AGC2_MAX_GAIN = 0.0                # agc2.h:45  0 = 不限
+GR_AGC2_GAIN_FLOOR = 10e-5            # agc2.h:79  gain<0 时钳到 1e-4
+
+
+def make_gr_agc2(reference: float = GR_AGC2_REFERENCE,
+                 attack_rate: float = GR_AGC2_ATTACK_RATE,
+                 decay_rate: float = GR_AGC2_DECAY_RATE):
+    """构造与 GNU Radio agc2_cc 内核逐样本等价的 AGC2（agc2.h:64-85）。
+
+    返回 mbdsdr_ai.gnuradio_blocks.AGC2 实例，可直接 .process(complex_iq)。
+    若需要 SDRangel 滑动包络 AGC，仍用上面的 AGC / sdrangel_adapter.MagAGC。
+    """
+    from .gnuradio_blocks import AGC2
+    return AGC2(attack_rate=attack_rate, decay_rate=decay_rate,
+                reference=reference, gain=GR_AGC2_INIT_GAIN, max_gain=GR_AGC2_MAX_GAIN)
+
+
 # ═══════════════════════════════════════════════════════
 # 4. 基带录制（真正写文件）
 # ═══════════════════════════════════════════════════════

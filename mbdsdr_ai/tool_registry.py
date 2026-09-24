@@ -647,9 +647,90 @@ class ToolRegistry:
         # 来源: repos/sdrangel/sdrbase/dsp/* 及 plugins/channelrx/*
         self.register_sdrangel_tools()
 
+        # ── GNU Radio 真实 DSP 块移植工具 ──
+        # 来源: repos/gnuradio/gr-*（见 mbdsdr_ai/gnuradio_blocks.py）
+        self.register_gnuradio_blocks_tools()
+
         # ── librtlsdr 真实硬件参数查询工具 ──
         # 来源: repos/librtlsdr/src/librtlsdr.c:959-969,1100-1101,1157,1165
         self.register_rtlsdr_params_tools()
+
+        # ── dablin 真实 DAB/DAB+ FIC/FIB/FIG + ETI 层移植工具 ──
+        # 来源: repos/dablin/src/{fic_decoder.cpp, eti_player.cpp, eti_source.h, tools.cpp}
+        self.register_dab_plus_tools()
+
+    def register_dab_plus_tools(self):
+        """注册 dablin 真实 DAB/DAB+ 解析工具（ETI/FIC/FIB/FIG）。
+
+        来源: repos/dablin/src/{fic_decoder.cpp, eti_player.cpp, eti_source.h, tools.cpp}
+        """
+        self.register(
+            name="dab_fic_decode",
+            description="解码 DAB FIC 字节流：FIB CRC-16/CCITT 校验 + FIG 解析，返回 "
+                        "ensemble(EId/标签)、服务列表、子信道配置(起始CU/比特率)。",
+            parameters={"type": "object", "properties": {
+                "fic_bytes": {"type": "array", "items": {"type": "integer"},
+                              "description": "FIC 字节数组(32 的倍数, 每 FIB 32 字节)"}
+            }, "required": ["fic_bytes"]},
+            handler=lambda args: self._dab_fic_decode_handler(args),
+            category="broadcast",
+        )
+        self.register(
+            name="dab_eti_parse",
+            description="解析单个 6144 字节 ETI(NI) 帧：FSYNC(0x073AB6)同步、MNSC/STC/"
+                        "FIC 层拆解、两级 CRC-16/CCITT 校验，并解码其中 FIC。",
+            parameters={"type": "object", "properties": {
+                "frame": {"type": "array", "items": {"type": "integer"},
+                          "description": "6144 字节 ETI 帧数组"}
+            }, "required": ["frame"]},
+            handler=lambda args: self._dab_eti_parse_handler(args),
+            category="broadcast",
+        )
+        self.register(
+            name="dab_decode_iq",
+            description="从一段(可能含前缀杂散的) ETI 字节完成基带后解码：自动找 FSYNC "
+                        "同步 -> 帧对齐 -> ETI 层解析 -> FIC 服务表。",
+            parameters={"type": "object", "properties": {
+                "data": {"type": "array", "items": {"type": "integer"},
+                         "description": "ETI 字节流(可能含前缀)"}
+            }, "required": ["data"]},
+            handler=lambda args: self._dab_decode_iq_handler(args),
+            category="broadcast",
+        )
+
+    def _dab_fic_decode_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        from .dab_plus_lite import dab_fic_decode
+        fb = bytes(args.get("fic_bytes", []))
+        res = dab_fic_decode(fb)
+        return ToolResult(
+            success=True,
+            content=f"DAB FIC: ensemble {res['ensemble']['label']!r} "
+                    f"(EId {res['ensemble']['eid']:#06x}), "
+                    f"{len(res['services'])} services, {len(res['subchannels'])} subchannels, "
+                    f"discarded FIBs={res['discarded_fibs']}",
+            data=res,
+        )
+
+    def _dab_eti_parse_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        from .dab_plus_lite import dab_eti_parse
+        frame = bytes(args.get("frame", []))
+        res = dab_eti_parse(frame)
+        return ToolResult(
+            success=res.get("ok", False),
+            content=f"ETI parse: ok={res.get('ok')}, nst={res.get('nst')}, "
+                    f"ficl={res.get('ficl')}, subchannels={res.get('subchannels')}",
+            data=res,
+        )
+
+    def _dab_decode_iq_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        from .dab_plus_lite import dab_decode_iq
+        data = bytes(args.get("data", []))
+        res = dab_decode_iq(data)
+        return ToolResult(
+            success=res.get("ok", False),
+            content=f"DAB decode: ok={res.get('ok')}, sync_offset={res.get('sync_offset')}",
+            data=res,
+        )
 
     def register_rtlsdr_params_tools(self):
         """注册 librtlsdr 真实参数查询工具（纯查表，无需插设备）。
@@ -822,6 +903,156 @@ class ToolRegistry:
                 "channel_offset": {"type": "number", "description": "通道中心偏移 Hz"},
             }, "required": ["baseband_sr", "channel_sr"]},
             handler=_downchannelize,
+            category="dsp",
+        )
+
+    def register_gnuradio_blocks_tools(self):
+        """注册 GNU Radio 真实源码移植的 DSP 块。
+
+        来源: mbdsdr_ai/gnuradio_blocks.py（逐行对照 repos/gnuradio）
+          - FIRFilter           gr-filter/lib/fir_filter.cc:34,91-114
+          - FFTFilter           gr-filter/lib/fft_filter.cc:76,77,115-149 + fft_filter.h:72
+          - AGC2                gr-analog/include/gnuradio/analog/agc2.h:64-85
+          - RationalResampler   gr-filter/lib/rational_resampler_impl.cc:43-74,248-256
+          - PFBArbResampler     gr-filter/lib/pfb_arb_resampler.cc:83,100,148-206
+        """
+        import numpy as np
+        from .gnuradio_blocks import (
+            FIRFilter, FFTFilter, AGC2, RationalResampler, PFBArbResampler,
+        )
+
+        def _fir_filter(args):
+            taps = list(args.get("taps", [1.0]))
+            sig = list(args.get("signal", []))
+            x = np.array(sig, dtype=complex if any(isinstance(v, list) for v in sig) else float)
+            y = FIRFilter(taps).filter(np.asarray(sig))
+            return ToolResult(
+                success=True,
+                content=f"FIRFilter: {len(taps)} 抽头 → 输出 {len(y)} 点 "
+                        f"(fir_filter.cc:34 抽头反转后卷积)",
+                data={"ntaps": len(taps), "n_out": int(len(y)),
+                      "source": "gr-filter/lib/fir_filter.cc:34,91-114"},
+            )
+
+        def _fft_filter(args):
+            taps = list(args.get("taps", [1.0]))
+            n = int(args.get("n", 1024))
+            x = np.random.randn(n)
+            ff = FFTFilter(taps)
+            y = ff.filter(x)
+            return ToolResult(
+                success=True,
+                content=f"FFTFilter overlap-add: fftsize={ff.fftsize} "
+                        f"nsamples={ff.nsamples} tailsize={ff.tailsize} → {len(y)} 点",
+                data={"ntaps": len(taps), "fftsize": ff.fftsize,
+                      "nsamples": ff.nsamples, "tailsize": ff.tailsize,
+                      "source": "gr-filter/lib/fft_filter.cc:76,77,115-149"},
+            )
+
+        def _agc_process(args):
+            ref = float(args.get("reference", 1.0))
+            attack = float(args.get("attack_rate", 1e-1))
+            decay = float(args.get("decay_rate", 1e-2))
+            n = int(args.get("n", 2000))
+            sig = np.concatenate([np.full(n // 2, 0.2 + 0j),
+                                  np.full(n // 2, 3.0 + 0j)])
+            agc = AGC2(attack_rate=attack, decay_rate=decay, reference=ref)
+            out = agc.process(sig)
+            return ToolResult(
+                success=True,
+                content=f"AGC2: ref={ref} attack={attack} decay={decay} "
+                        f"尾段输出幅度={np.mean(np.abs(out[-200:])):.3f}",
+                data={"reference": ref, "tail_level": float(np.mean(np.abs(out[-200:]))),
+                      "gain": float(agc.gain),
+                      "source": "gr-analog/.../agc2.h:41-45,64-85"},
+            )
+
+        def _rational_resample(args):
+            up = int(args.get("interpolation", 2))
+            down = int(args.get("decimation", 1))
+            n = int(args.get("n", 2048))
+            f0 = float(args.get("f0", 0.1))
+            x = np.cos(2 * np.pi * f0 * np.arange(n))
+            y = RationalResampler(up, down).process(x)
+            return ToolResult(
+                success=True,
+                content=f"RationalResampler {up}/{down}: {n} → {len(y)} 点 "
+                        f"(Kaiser β=7.0, fractional_bw=0.4)",
+                data={"interp": up, "decim": down, "n_in": n, "n_out": int(len(y)),
+                      "beta": 7.0, "fractional_bw": 0.4,
+                      "source": "gr-filter/lib/rational_resampler_impl.cc:55,68,248-256"},
+            )
+
+        def _pfb_resample(args):
+            rate = float(args.get("rate", 0.75))
+            n = int(args.get("n", 4000))
+            f0 = float(args.get("f0", 0.3))
+            nfilts = int(args.get("filter_size", 32))
+            x = np.exp(2j * np.pi * f0 * np.arange(n))
+            L = 257
+            t = np.arange(L) - (L - 1) / 2
+            taps = np.sinc(0.5 * t) * np.hanning(L)
+            y = PFBArbResampler(rate=rate, taps=taps, filter_size=nfilts).process(x)
+            return ToolResult(
+                success=True,
+                content=f"PFBArbResampler rate={rate}: {n} → {len(y)} 点 "
+                        f"(比率 {len(y)/n:.3f})",
+                data={"rate": rate, "n_in": n, "n_out": int(len(y)),
+                      "ratio": len(y) / n, "filter_size": nfilts,
+                      "source": "gr-filter/lib/pfb_arb_resampler.cc:100,148-206"},
+            )
+
+        self.register(
+            name="fir_filter",
+            description="GNU Radio 移植 FIR 滤波：抽头卷积，支持实数/复数。输出==numpy.convolve(x,taps)。",
+            parameters={"type": "object", "properties": {
+                "taps": {"type": "array", "items": {"type": "number"}, "description": "FIR 抽头系数"},
+                "signal": {"type": "array", "items": {"type": "number"}, "description": "输入样本"},
+            }, "required": ["taps"]},
+            handler=_fir_filter,
+            category="dsp",
+        )
+        self.register(
+            name="fft_filter",
+            description="GNU Radio 移植 overlap-add 快速卷积 FFT 滤波（长抽头高效）。fftsize=2·2^ceil(log2(ntaps))。",
+            parameters={"type": "object", "properties": {
+                "taps": {"type": "array", "items": {"type": "number"}, "description": "FIR 抽头"},
+                "n": {"type": "integer", "description": "测试信号长度", "default": 1024},
+            }, "required": ["taps"]},
+            handler=_fft_filter,
+            category="dsp",
+        )
+        self.register(
+            name="agc_process",
+            description="GNU Radio AGC2（attack/decay）：逐样本把输出幅度收敛到 reference。默认 attack=1e-1 decay=1e-2。",
+            parameters={"type": "object", "properties": {
+                "reference": {"type": "number", "description": "目标输出幅度", "default": 1.0},
+                "attack_rate": {"type": "number", "default": 0.1},
+                "decay_rate": {"type": "number", "default": 0.01},
+            }, "required": []},
+            handler=_agc_process,
+            category="dsp",
+        )
+        self.register(
+            name="rational_resample",
+            description="GNU Radio 有理重采样：interpolation/decimation 倍插值/抽取，Kaiser 窗抗混叠(β=7.0)。",
+            parameters={"type": "object", "properties": {
+                "interpolation": {"type": "integer", "default": 2},
+                "decimation": {"type": "integer", "default": 1},
+                "f0": {"type": "number", "description": "测试单音归一化频率", "default": 0.1},
+            }, "required": []},
+            handler=_rational_resample,
+            category="dsp",
+        )
+        self.register(
+            name="pfb_resample",
+            description="GNU Radio 多相任意重采样：任意 rate=out/in，多相滤波器组+微分线性插值，无混叠。",
+            parameters={"type": "object", "properties": {
+                "rate": {"type": "number", "description": "输出/输入采样率比", "default": 0.75},
+                "filter_size": {"type": "integer", "description": "多相分支数", "default": 32},
+                "f0": {"type": "number", "default": 0.3},
+            }, "required": ["rate"]},
+            handler=_pfb_resample,
             category="dsp",
         )
 
