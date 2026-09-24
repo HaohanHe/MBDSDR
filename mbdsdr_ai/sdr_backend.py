@@ -2116,6 +2116,43 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
             "device_args": {"index": 0},
         }
 
+    # 3.5) bladeRF (Nuand)：始终列出一个条目，量程用真实参数表。
+    #      真实打开由 mbdsdr_ai.bladerf_params.BladeRFBackend.connect() 决定——
+    #      无 libbladeRF/无设备时 connect 返回 False，这里绝不伪造"已连接"。
+    #      量程来源: mbdsdr_ai/bladerf_params.py（移植自 repos/bladeRF）
+    #        - bladeRF 2.0 Micro (AD9361) RX 70MHz-6GHz, SR 520834-61.44MHz, BW 200k-56MHz
+    #          fpga_common/include/bladerf2_common.h:518-562
+    #        - legacy VGA 分级 (LMS6002D): RXVGA1 5-30dB(26档), RXVGA2 0-30dB(31档)
+    #          host/libraries/libbladeRF/include/bladeRF1.h:154,160,166,172
+    try:
+        from .bladerf_params import BladeRFParams as _BladeRFParams
+        _bp = _BladeRFParams()
+    except Exception:
+        _bp = None
+    key = "bladerf_0"
+    if key not in merged and _bp is not None:
+        merged[key] = {
+            "driver": "bladerf",
+            "label": "Nuand bladeRF (libbladeRF)",
+            "serial": "",
+            "manufacturer": "Nuand LLC",
+            "product": "bladeRF 2.0 Micro",
+            "gain_range": (float(_bp.rx_total_gain_min_db),
+                           float(_bp.rx_total_gain_max_db)),
+            "rxvga1_gain_range": (float(_bp.rxvga1_min_db),
+                                  float(_bp.rxvga1_max_db)),
+            "rxvga2_gain_range": (float(_bp.rxvga2_min_db),
+                                  float(_bp.rxvga2_max_db)),
+            "txvga1_gain_range": (float(_bp.txvga1_min_db),
+                                  float(_bp.txvga1_max_db)),
+            "txvga2_gain_range": (float(_bp.txvga2_min_db),
+                                  float(_bp.txvga2_max_db)),
+            "sample_rate_range": (float(_bp.min_sr_hz), float(_bp.max_sr_hz)),
+            "bandwidth_range": (float(_bp.min_bw_hz), float(_bp.max_bw_hz)),
+            "freq_range": (float(_bp.min_freq_hz), float(_bp.max_freq_hz)),
+            "device_args": {"device_identifier": ""},
+        }
+
     # 4) gr-osmosdr 通用后端枚举（rtl/hackrf/bladerf/uhd/soapy 统一设备字符串）
     #    来源: mbdsdr_ai/osmosdr_source.py（移植自 repos/gr-osmosdr/lib/source_impl.cc:202-269）
     #    仅补充尚未被 SoapySDR/pyrtlsdr 识别到的后端（bladerf/uhd/airspy 等）。
@@ -2157,6 +2194,13 @@ def build_backend_for_device(dev: Dict[str, Any]) -> Optional[SDRBackend]:
             return RTLSDRBackend(device_index=int(args.get("index", 0)))
         if driver == "hackrf":
             return HackRFBackend(device_index=int(args.get("index", 0)))
+        if driver == "bladerf":
+            # 真实打开由 BladeRFBackend.connect() 决定成败；
+            # 无 libbladeRF/无设备时 connect 返回 False，绝不假成功。
+            # 来源: mbdsdr_ai/bladerf_params.py（移植自 repos/bladeRF）。
+            from .bladerf_params import BladeRFBackend as _BladeRFBackend
+            return _BladeRFBackend(
+                device_identifier=str(args.get("device_identifier", "") or ""))
         # 其余一律走 SoapySDR 通用后端（rtlsdr 经 SoapySDR、usrp、bladerf...）
         return SoapySDRBackend(device_args=args, device_info=dev)
     except Exception as e:

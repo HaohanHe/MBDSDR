@@ -1030,6 +1030,17 @@ class ToolRegistry:
         #       + firmware/common/max2837.c:344-395
         self.register_hackrf_params_tools()
 
+        # ── LimeSuite 真实硬件参数查询工具 ──
+        # 来源: repos/LimeSuite src/lime/LimeSuite.h:280-289,382,1099-1104
+        #       + src/API/lms7_device.cpp:690,1032,1384
+        #       + src/lms7002m/LMS7002M.cpp:763-914
+        self.register_limesdr_params_tools()
+
+        # ── libbladeRF 真实硬件参数查询工具 ──
+        # 来源: repos/bladeRF host/libraries/libbladeRF/include/bladeRF1.h:150-222
+        #       + fpga_common/include/bladerf2_common.h:344-562
+        self.register_bladerf_params_tools()
+
         # ── gr-osmosdr 通用 SDR 源抽象工具 ──
         # 来源: repos/gr-osmosdr/lib/{source_impl.cc, ranges.cc, arg_helpers.h,
         #       rtl/rtl_source_c.cc, hackrf/hackrf_source_c.cc,
@@ -1047,6 +1058,9 @@ class ToolRegistry:
         # ── RTKLIB 真实时间/坐标转换 + RINEX 解析 + SPP 单点定位 + NTRIP ──
         # 来源: repos/RTKLIB/src/{rtklib.h,rtkcmn.c,ephemeris.c,pntpos.c,rinex.c,stream.c}
         self.register_rtklib_tools()
+
+        # Kismet 真实 802.11 帧解析+设备发现/跟踪+RSSI+指纹
+        self.register_kismet_tools()
 
     def register_rtklib_tools(self):
         """注册 RTKLIB 真实 GNSS 解算工具（时间/坐标/RINEX/SPP/NTRIP）。
@@ -1165,6 +1179,122 @@ class ToolRegistry:
                     args.get("user", ""), args.get("password", "")),
             ),
             category="gnss",
+        )
+
+
+    # Kismet 设备跟踪器单例（跨工具调用保持状态）
+    _kismet_tracker = None
+
+    def register_kismet_tools(self):
+        """注册 Kismet 真实 802.11 帧解析/设备发现/设备列表工具。
+
+        来源: repos/kismet（见 mbdsdr_ai/kismet_adapter.py 注释内 file:line）
+          - 帧解包    phy_80211_dissectors.cc:609-791（frame_control/地址1-4/序列）
+          - 管理帧    phy_80211_dissectors.cc:956-1003（beacon/probe/认证）
+          - IE 解析   dot11_parsers/dot11_ie.cc:82-92 + phy_80211_dissectors.cc:1679-1882
+          - 信号      kis_dlt_radiotap.cc:380,418（int8 dBm）
+          - 设备跟踪  devicetracker.cc:1152-1266（首末时间/包计数/分类）
+          - 指纹 OUI  manuf.cc:59-61
+        """
+        from . import kismet_adapter as ka
+
+        if ToolRegistry._kismet_tracker is None:
+            ToolRegistry._kismet_tracker = ka.DeviceTracker()
+        tracker = ToolRegistry._kismet_tracker
+        parser = ka.Dot11Parser()
+
+        def _hex_to_bytes(s: str) -> bytes:
+            return bytes.fromhex(s.replace(":", "").replace(" ", ""))
+
+        self.register(
+            name="kismet_parse_dot11",
+            description=(
+                "Kismet 真实 802.11 帧解析：给定一整条裸 802.11 帧字节(hex)，"
+                "解出帧控制(type/subtype/to_ds/from_ds)、持续时间、地址1-4、序列控制、"
+                "BSSID/源/目的；管理帧进一步解出 SSID/信道/支持速率/信标间隔。"
+                "移植自 Kismet phy_80211_dissectors.cc:609-1003 + dot11_ie.cc:82-92。"
+            ),
+            parameters={"type": "object", "properties": {
+                "frame_hex": {"type": "string",
+                              "description": "裸 802.11 帧十六进制串（无 radiotap 头）"},
+            }, "required": ["frame_hex"]},
+            handler=lambda args: (
+                lambda f: ToolResult(
+                    success=not f.corrupt,
+                    content=json.dumps({
+                        "type": f.type, "subtype": f.subtype,
+                        "to_ds": f.to_ds, "from_ds": f.from_ds,
+                        "bssid": f.bssid, "source": f.source_mac,
+                        "dest": f.dest_mac, "ssid": f.ssid,
+                        "ssid_hidden": f.ssid_hidden, "channel": f.channel,
+                        "beacon_interval_tu": f.beacon_interval_tu,
+                        "rates_mbps": f.rates_mbps,
+                    }, ensure_ascii=False, indent=2),
+                    data={
+                        "type": f.type, "subtype": f.subtype, "to_ds": f.to_ds,
+                        "from_ds": f.from_ds, "bssid": f.bssid,
+                        "source": f.source_mac, "dest": f.dest_mac,
+                        "ssid": f.ssid, "ssid_hidden": f.ssid_hidden,
+                        "channel": f.channel, "beacon_interval_tu": f.beacon_interval_tu,
+                        "rates_mbps": f.rates_mbps, "corrupt": f.corrupt,
+                    },
+                )
+            )(parser.parse(_hex_to_bytes(args["frame_hex"]))),
+            category="wireless",
+        )
+
+        self.register(
+            name="kismet_discover_devices",
+            description=(
+                "Kismet 真实设备发现：喂入一组 802.11 帧(hex)与对应信号强度(dBm)，"
+                "维护设备表（首次/最后发现时间、包计数、信号均值、AP/客户端分类）。"
+                "移植自 Kismet devicetracker.cc:1152 update_common_device()。"
+            ),
+            parameters={"type": "object", "properties": {
+                "frames_hex": {"type": "array", "items": {"type": "string"},
+                               "description": "裸 802.11 帧 hex 列表"},
+                "signals_dbm": {"type": "array", "items": {"type": "number"},
+                                "description": "与帧对应的信号强度(dBm)，可空"},
+            }, "required": ["frames_hex"]},
+            handler=lambda args: (
+                lambda _ingested: ToolResult(
+                    success=True,
+                    content=json.dumps({
+                        "device_count": len(tracker.device_list()),
+                        "devices": tracker.device_list(),
+                    }, ensure_ascii=False, indent=2),
+                    data={"device_count": len(tracker.device_list()),
+                          "devices": tracker.device_list()},
+                )
+            )([
+                tracker.ingest_dot11(
+                    parser.parse(_hex_to_bytes(fr)),
+                    signal_dbm=(args["signals_dbm"][i]
+                                if i < len(args.get("signals_dbm", [])) else None),
+                )
+                for i, fr in enumerate(args["frames_hex"])
+            ]),
+            category="wireless",
+        )
+
+        self.register(
+            name="kismet_device_list",
+            description=(
+                "返回 Kismet 跟踪器当前发现的全部设备列表（按最后发现时间倒序），"
+                "含 MAC/类型/SSID/信道/包计数/首末时间/平均信号/厂商(OUI)。"
+                "移植自 Kismet devicetracker.cc 设备列表导出。"
+            ),
+            parameters={"type": "object", "properties": {}},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps({
+                    "device_count": len(tracker.device_list()),
+                    "devices": tracker.device_list(),
+                }, ensure_ascii=False, indent=2),
+                data={"device_count": len(tracker.device_list()),
+                      "devices": tracker.device_list()},
+            ),
+            category="wireless",
         )
 
     def register_dsdcc_tools(self):
@@ -1616,6 +1746,229 @@ class ToolRegistry:
             out["sample_rate_requested_hz"] = r
             out["sample_rate_valid"] = p.is_valid_sample_rate(r)
             out["sample_rate_range_hz"] = [p.min_sr_hz, p.max_sr_hz]
+        return ToolResult(
+            success=True,
+            content=json.dumps(out, ensure_ascii=False, indent=2),
+            data=out,
+        )
+
+    def register_limesdr_params_tools(self):
+        """注册 LimeSuite 真实参数查询工具（纯查表，无需插设备）。
+
+        来源: mbdsdr_ai/limesuite_params.py（移植自 repos/LimeSuite）
+          - 频率 100k-3.8GHz(USB)   src/API/lms7_device.cpp:1384
+          - 采样率 100k-61.44MHz    src/API/lms7_device.cpp:690
+          - 组合增益 0-73dB         src/lime/LimeSuite.h:382
+          - LNA 0-30dB(15档)        src/lms7002m/LMS7002M.cpp:789-837
+          - TIA 0-12dB(3档)         src/lms7002m/LMS7002M.cpp:890-914
+          - PGA G_PGA_RBB 5-bit(32码) src/lms7002m/LMS7002M.cpp:763-787
+        """
+        from . import limesuite_params as lp
+
+        self.register(
+            name="limesdr_list_gains",
+            description=(
+                "列出 LimeSDR (LMS7002M) 真实支持的分级增益档："
+                "LNA(RFE) 0-30dB 共15档(非线性步进)；"
+                "TIA(RFE) 0-12dB 共3档(0/9/12)；"
+                "PGA(RBB) G_PGA_RBB 5-bit 共32码；"
+                "组合增益 0-73dB。"
+                "来源 LMS7002M.cpp:789-914 + LimeSuite.h:382。"
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(lp.DEFAULT_PARAMS.summary(),
+                                   ensure_ascii=False, indent=2),
+                data=lp.DEFAULT_PARAMS.summary(),
+            ),
+            category="sdr",
+        )
+
+        self.register(
+            name="limesdr_get_freq_range",
+            description=(
+                "返回 LimeSDR 真实频率范围(Hz)与采样率合法区间。"
+                "USB: 100k-3.8GHz/100k-61.44MHz (lms7_device.cpp:1384,690)；"
+                "Mini: 10M-3.5GHz/100k-30.72MHz (LimeSDR_mini.cpp:312,307)。"
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps({
+                    "usb": {
+                        "freq_range_hz": [lp.DEFAULT_PARAMS.min_freq_hz,
+                                          lp.DEFAULT_PARAMS.max_freq_hz],
+                        "sample_rate_range_hz": [lp.DEFAULT_PARAMS.min_sr_hz,
+                                                 lp.DEFAULT_PARAMS.max_sr_hz],
+                    },
+                    "mini": {
+                        "freq_range_hz": [lp.LIMESDR_MINI_MIN_FREQ_HZ,
+                                          lp.LIMESDR_MINI_MAX_FREQ_HZ],
+                        "sample_rate_range_hz": [lp.LIMESDR_MINI_MIN_SR_HZ,
+                                                 lp.LIMESDR_MINI_MAX_SR_HZ],
+                    },
+                    "recommended_rates_hz": lp.SUPPORTED_SAMPLE_RATES,
+                }, ensure_ascii=False, indent=2),
+                data={},
+            ),
+            category="sdr",
+        )
+
+        self.register(
+            name="limesdr_set_params",
+            description=(
+                "把目标组合增益/LNA/TIA 与采样率吸附到 LimeSDR 真实支持的离散档，"
+                "返回可直接下发的参数。组合增益钳到 0-73(LimeSuite.h:382)，"
+                "LNA 吸附到 15 档阶梯(LMS7002M.cpp:794-809)，"
+                "TIA 吸附到 0/9/12(LMS7002M.cpp:895-898)。"
+            ),
+            parameters={"type": "object", "properties": {
+                "combined_gain_db": {"type": "number", "description": "目标组合 RX 增益 dB (0-73)"},
+                "lna_gain_db": {"type": "number", "description": "目标 LNA(RFE) 增益 dB"},
+                "tia_gain_db": {"type": "number", "description": "目标 TIA(RFE) 增益 dB"},
+                "sample_rate_hz": {"type": "number", "description": "目标采样率 Hz"},
+            }, "required": []},
+            handler=lambda args: self._limesdr_set_params_handler(args),
+            category="sdr",
+        )
+
+    def _limesdr_set_params_handler(self, args):
+        from . import limesuite_params as lp
+        p = lp.DEFAULT_PARAMS
+        out: Dict[str, Any] = {}
+        if args.get("combined_gain_db") is not None:
+            out["combined_gain_db"] = p.clamp_combined_gain(float(args["combined_gain_db"]))
+        if args.get("lna_gain_db") is not None:
+            out["lna_gain_db"] = p.clamp_lna_gain(float(args["lna_gain_db"]))
+            out["lna_levels_db"] = p.lna_gain_levels_db()
+        if args.get("tia_gain_db") is not None:
+            out["tia_gain_db"] = p.clamp_tia_gain(float(args["tia_gain_db"]))
+            out["tia_levels_db"] = p.tia_gain_levels_db()
+        if args.get("sample_rate_hz") is not None:
+            r = float(args["sample_rate_hz"])
+            out["sample_rate_requested_hz"] = r
+            out["sample_rate_valid"] = p.is_valid_sample_rate(r)
+            out["sample_rate_range_hz"] = [p.min_sr_hz, p.max_sr_hz]
+        return ToolResult(
+            success=True,
+            content=json.dumps(out, ensure_ascii=False, indent=2),
+            data=out,
+        )
+
+    def register_bladerf_params_tools(self):
+        """注册 libbladeRF 真实参数查询工具（纯查表，无需插设备）。
+
+        来源: mbdsdr_ai/bladerf_params.py（移植自 repos/bladeRF）
+          - RXVGA1 5-30dB(26档)  host/libraries/libbladeRF/include/bladeRF1.h:154,160
+          - RXVGA2 0-30dB(31档)  host/libraries/libbladeRF/include/bladeRF1.h:166,172
+          - TXVGA1 -35..-4dB     host/libraries/libbladeRF/include/bladeRF1.h:178,184
+          - TXVGA2 0-25dB        host/libraries/libbladeRF/include/bladeRF1.h:190,196
+          - bladeRF2 RX 70M-6G   fpga_common/include/bladerf2_common.h:550-555
+          - bladeRF2 SR 520834-61.44M  fpga_common/include/bladerf2_common.h:518-523
+          - bladeRF2 BW 200k-56M       fpga_common/include/bladerf2_common.h:542-547
+          - ADC/DAC 12-bit       host/libraries/libbladeRF/include/libbladeRF.h:2144
+        """
+        from . import bladerf_params as bp
+
+        self.register(
+            name="bladerf_list_gains",
+            description=(
+                "列出 Nuand bladeRF 真实支持的离散增益档（dB）："
+                "legacy VGA 分级 RXVGA1 5-30dB 共26档、RXVGA2 0-30dB 共31档"
+                "（合计 RX 5-60dB）；TXVGA1 -35~-4dB、TXVGA2 0-25dB；"
+                "LNA 三档 0/3/6dB。"
+                "来源 bladeRF1.h:154-222。"
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps(bp.DEFAULT_PARAMS.summary(),
+                                   ensure_ascii=False, indent=2),
+                data=bp.DEFAULT_PARAMS.summary(),
+            ),
+            category="sdr",
+        )
+
+        self.register(
+            name="bladerf_get_freq_range",
+            description=(
+                "返回 Nuand bladeRF 真实频率范围(Hz)、采样率合法区间与带宽区间。"
+                "bladeRF 2.0 Micro: RX 70MHz-6GHz, TX 47MHz-6GHz, "
+                "SR 520834-61.44MHz, BW 200kHz-56MHz。"
+                "来源 bladerf2_common.h:518-562。"
+            ),
+            parameters={"type": "object", "properties": {}, "required": []},
+            handler=lambda args: ToolResult(
+                success=True,
+                content=json.dumps({
+                    "freq_range_hz_rx": [bp.DEFAULT_PARAMS.min_freq_hz,
+                                         bp.DEFAULT_PARAMS.max_freq_hz],
+                    "freq_range_hz_tx": [bp.DEFAULT_PARAMS.min_tx_freq_hz,
+                                         bp.DEFAULT_PARAMS.max_freq_hz],
+                    "sample_rate_range_hz": [bp.DEFAULT_PARAMS.min_sr_hz,
+                                             bp.DEFAULT_PARAMS.max_sr_hz],
+                    "bandwidth_range_hz": [bp.DEFAULT_PARAMS.min_bw_hz,
+                                           bp.DEFAULT_PARAMS.max_bw_hz],
+                    "default_sample_rate_hz": bp.DEFAULT_PARAMS.default_sr_hz,
+                    "adc_dac_bits": bp.SAMPLE_BITS_ADC_DAC,
+                }, ensure_ascii=False, indent=2),
+                data={},
+            ),
+            category="sdr",
+        )
+
+        self.register(
+            name="bladerf_set_params",
+            description=(
+                "把目标 RXVGA1/RXVGA2 增益与采样率/带宽/频率吸附/校验到 bladeRF 真实支持的档位，"
+                "返回可直接下发的参数。RXVGA1 钳到 5-30dB(bladeRF1.h:154,160)，"
+                "RXVGA2 钳到 0-30dB(bladeRF1.h:166,172)，"
+                "采样率校验 520834-61.44MHz(bladerf2_common.h:518-523)，"
+                "带宽校验 200kHz-56MHz(bladerf2_common.h:542-547)。"
+            ),
+            parameters={"type": "object", "properties": {
+                "rxvga1_db": {"type": "number", "description": "目标 RXVGA1 (pre-LPF) 增益 dB"},
+                "rxvga2_db": {"type": "number", "description": "目标 RXVGA2 (post-LPF) 增益 dB"},
+                "txvga1_db": {"type": "number", "description": "目标 TXVGA1 增益 dB"},
+                "txvga2_db": {"type": "number", "description": "目标 TXVGA2 (PA) 增益 dB"},
+                "sample_rate_hz": {"type": "number", "description": "目标采样率 Hz"},
+                "bandwidth_hz": {"type": "number", "description": "目标带宽 Hz"},
+                "frequency_hz": {"type": "number", "description": "目标频率 Hz"},
+            }, "required": []},
+            handler=lambda args: self._bladerf_set_params_handler(args),
+            category="sdr",
+        )
+
+    def _bladerf_set_params_handler(self, args):
+        from . import bladerf_params as bp
+        p = bp.DEFAULT_PARAMS
+        out: Dict[str, Any] = {}
+        if args.get("rxvga1_db") is not None:
+            out["rxvga1_db"] = p.clamp_rxvga1(float(args["rxvga1_db"]))
+            out["rxvga1_levels_db"] = p.rxvga1_levels_db()
+        if args.get("rxvga2_db") is not None:
+            out["rxvga2_db"] = p.clamp_rxvga2(float(args["rxvga2_db"]))
+            out["rxvga2_levels_db"] = p.rxvga2_levels_db()
+        if args.get("txvga1_db") is not None:
+            out["txvga1_db"] = p.clamp_txvga1(float(args["txvga1_db"]))
+        if args.get("txvga2_db") is not None:
+            out["txvga2_db"] = p.clamp_txvga2(float(args["txvga2_db"]))
+        if args.get("sample_rate_hz") is not None:
+            r = float(args["sample_rate_hz"])
+            out["sample_rate_requested_hz"] = r
+            out["sample_rate_valid"] = p.is_valid_sample_rate(r)
+            out["sample_rate_range_hz"] = [p.min_sr_hz, p.max_sr_hz]
+        if args.get("bandwidth_hz") is not None:
+            b = float(args["bandwidth_hz"])
+            out["bandwidth_requested_hz"] = b
+            out["bandwidth_valid"] = p.is_valid_bandwidth(b)
+            out["bandwidth_range_hz"] = [p.min_bw_hz, p.max_bw_hz]
+        if args.get("frequency_hz") is not None:
+            f = float(args["frequency_hz"])
+            out["frequency_requested_hz"] = f
+            out["frequency_valid"] = p.is_valid_frequency(f)
+            out["frequency_range_hz"] = [p.min_freq_hz, p.max_freq_hz]
         return ToolResult(
             success=True,
             content=json.dumps(out, ensure_ascii=False, indent=2),
