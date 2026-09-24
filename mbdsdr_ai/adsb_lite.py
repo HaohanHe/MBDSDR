@@ -152,6 +152,11 @@ class ADSBFrame:
     confidence: float = 0.0
     raw_hex: str = ""
     needs_cpr: bool = False
+    altitude_ft: Optional[int] = None
+    velocity: dict = field(default_factory=dict)
+    cpr_odd: Optional[bool] = None
+    cpr_lat: Optional[int] = None
+    cpr_lon: Optional[int] = None
 
     def to_dict(self) -> dict:
         return {
@@ -159,7 +164,9 @@ class ADSBFrame:
             "crc_ok": self.crc_ok, "type_code": self.tc, "message_type": self.msg_type,
             "callsign": self.callsign, "start_us": round(self.start_us, 2),
             "confidence": round(self.confidence, 3), "raw_hex": self.raw_hex,
-            "needs_cpr": self.needs_cpr,
+            "needs_cpr": self.needs_cpr, "altitude_ft": self.altitude_ft,
+            "velocity": self.velocity, "cpr_odd": self.cpr_odd,
+            "cpr_lat": self.cpr_lat, "cpr_lon": self.cpr_lon,
         }
 
 
@@ -246,6 +253,68 @@ def _decode_callsign(bits: Sequence[int]) -> Optional[str]:
     return cs or None
 
 
+# ME 字段在整帧 bit 序列中的起点：长帧 DF/CA(8) + ICAO(24) = 32 bit。
+_ME0 = 32
+
+
+def _me_gb(bits: Sequence[int], first: int, last: int) -> int:
+    """复刻 dump1090 getbits(me, first, last)：ME 内 1-based 闭区间，作用于整帧 bits。"""
+    v = 0
+    for i in range(_ME0 + first - 1, _ME0 + last):
+        v = (v << 1) | (bits[i] & 1)
+    return v
+
+
+def decode_altitude_ac12(ac12: int) -> Optional[int]:
+    """来源: dump1090 mode_s.c:156 decodeAC12Field —— 12bit AC 高度（ft）。"""
+    if not (ac12 & 0x10):
+        return None  # Gillham 编码，lite 不展开
+    n = ((ac12 & 0x0FE0) >> 1) | (ac12 & 0x000F)
+    return int(n) * 25 - 1000
+
+
+def decode_velocity(bits: Sequence[int]) -> dict:
+    """来源: dump1090 mode_s.c:856 decodeESAirborneVelocity —— TC19。"""
+    import math
+    sub = _me_gb(bits, 6, 8)
+    out: dict = {"subtype": sub}
+    if sub not in (1, 2, 3, 4):
+        return out
+    if sub in (1, 2):
+        ew_raw, ns_raw = _me_gb(bits, 15, 24), _me_gb(bits, 26, 35)
+        if ew_raw and ns_raw:
+            ew_sign = -1 if bits[_ME0 + 13] else 1   # ME bit14
+            ns_sign = -1 if bits[_ME0 + 24] else 1   # ME bit25
+            scale = 4 if sub == 2 else 1
+            ew = (ew_raw - 1) * ew_sign * scale
+            ns = (ns_raw - 1) * ns_sign * scale
+            out["kind"] = "ground_speed"
+            out["groundspeed_kt"] = round(math.hypot(ns, ew), 1)
+            trk = math.degrees(math.atan2(ew, ns))
+            out["track_deg"] = round(trk + 360 if trk < 0 else trk, 2)
+    elif sub in (3, 4):
+        if bits[_ME0 + 13]:
+            out["heading_deg"] = round(_me_gb(bits, 15, 24) * 360.0 / 1024.0, 2)
+        air = _me_gb(bits, 26, 35)
+        if air:
+            scale = 4 if sub == 4 else 1
+            out["kind"] = "true_airspeed" if bits[_ME0 + 24] else "indicated_airspeed"
+            out["airspeed_kt"] = (air - 1) * scale
+    vert = _me_gb(bits, 38, 46)
+    if vert:
+        sign = -1 if bits[_ME0 + 36] else 1  # ME bit37
+        out["vert_rate_ft_min"] = (vert - 1) * sign * 64
+    return out
+
+
+def extract_cpr(bits: Sequence[int]) -> dict:
+    """来源: dump1090 mode_s.c:1003 —— 抽出 CPR 偶/奇标志与 17bit lat/lon。"""
+    odd = bool(bits[_ME0 + 21])  # ME bit22 = F 标志
+    return {"cpr_odd": odd,
+            "cpr_lat": _me_gb(bits, 23, 39),
+            "cpr_lon": _me_gb(bits, 40, 56)}
+
+
 def message_type_for_tc(tc: int) -> tuple[str, bool]:
     """返回 (类型描述, 是否含 CPR 位置待解)。"""
     if 1 <= tc <= 4:
@@ -299,17 +368,29 @@ def parse_frame(bits: Sequence[int], nbits: int, start_us: float,
     msg_type = ""
     callsign = None
     needs_cpr = False
+    altitude = None
+    velocity: dict = {}
+    cpr_odd = cpr_lat = cpr_lon = None
     if nbits == 112:
         tc = int("".join(str(b) for b in bits[32:37]), 2)
         msg_type, needs_cpr = message_type_for_tc(tc)
         if 1 <= tc <= 4:
             callsign = _decode_callsign(bits)
+        elif tc == 19:
+            velocity = decode_velocity(bits)
+        elif (9 <= tc <= 18 or tc == 0 or 20 <= tc <= 22 or 5 <= tc <= 8):
+            cpr = extract_cpr(bits)
+            cpr_odd, cpr_lat, cpr_lon = cpr["cpr_odd"], cpr["cpr_lat"], cpr["cpr_lon"]
+            if 9 <= tc <= 18 or tc == 0 or 20 <= tc <= 22:
+                altitude = decode_altitude_ac12(_me_gb(bits, 9, 20))
     else:
         msg_type = {0: "short air-to-air", 4: "altitude reply",
                     5: "identity reply", 11: "all-call reply"}.get(df, "short reply")
     return ADSBFrame(df=df, icao_hex=f"{icao:06X}", nbits=nbits, crc_ok=crc_ok, ca=ca,
                      tc=tc, msg_type=msg_type, callsign=callsign, start_us=start_us,
-                     confidence=confidence, raw_hex=raw, needs_cpr=needs_cpr)
+                     confidence=confidence, raw_hex=raw, needs_cpr=needs_cpr,
+                     altitude_ft=altitude, velocity=velocity,
+                     cpr_odd=cpr_odd, cpr_lat=cpr_lat, cpr_lon=cpr_lon)
 
 
 def expected_len_for_df(df: int) -> int:
