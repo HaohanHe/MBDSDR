@@ -614,6 +614,35 @@ class ToolRegistry:
                 category="voice",
             )
 
+            # ── HD Radio (NRSC-5) 工具 ──────────────────────────────
+            self.register(
+                name="hdradio_ofdm_demod",
+                description="HD Radio (NRSC-5) OFDM 解调：将 744kHz 基带 IQ 解调为 QPSK 比特流。参考 nrsc5 ofdm/sync。",
+                parameters={"type": "object", "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"}, "description": "复 IQ 采样（实部/虚部交替）"}
+                }, "required": ["iq"]},
+                handler=lambda args: self._hdradio_ofdm_demod_handler(args),
+                category="broadcast",
+            )
+            self.register(
+                name="hdradio_frame_parse",
+                description="HD Radio 帧解析：从 HDLC 字节流提取 PSD 节目名/标题，校验 FCS16。",
+                parameters={"type": "object", "properties": {
+                    "data": {"type": "array", "items": {"type": "integer"}, "description": "帧字节（0-255）"}
+                }, "required": ["data"]},
+                handler=lambda args: self._hdradio_frame_parse_handler(args),
+                category="broadcast",
+            )
+            self.register(
+                name="hdradio_decode_iq",
+                description="HD Radio 完整 IQ 接收：粗+细同步 → OFDM/QPSK 解调 → 比特流（HDC 音频为骨架）。",
+                parameters={"type": "object", "properties": {
+                    "iq": {"type": "array", "items": {"type": "number"}, "description": "复 IQ 采样"}
+                }, "required": ["iq"]},
+                handler=lambda args: self._hdradio_decode_iq_handler(args),
+                category="broadcast",
+            )
+
         # ── SDRangel 真实 DSP 引擎移植工具 ──
         # 来源: repos/sdrangel/sdrbase/dsp/* 及 plugins/channelrx/*
         self.register_sdrangel_tools()
@@ -867,4 +896,54 @@ class ToolRegistry:
             success=True,
             content=f"FreeDV {mode}: demodulated {len(signal)} samples → {len(bits)} bits (SNR est: {snr:.1f} dB)",
             data={"bits": bits.tolist(), "n_bits": len(bits), "snr": snr},
+        )
+
+    # ── HD Radio (NRSC-5) handlers ──────────────────────────────────────
+
+    @staticmethod
+    def _iq_to_complex(args: Dict[str, Any]) -> "np.ndarray":
+        import numpy as np
+        raw = np.array(args.get("iq", []), dtype=float)
+        if raw.size == 0:
+            return np.empty(0, dtype=complex)
+        if raw.size % 2 == 0:
+            return (raw[0::2] + 1j * raw[1::2]).astype(complex)
+        return raw.astype(complex)
+
+    def _hdradio_ofdm_demod_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        import numpy as np
+        from . import nrsc5_lite as N
+        iq = self._iq_to_complex(args)
+        if iq.size == 0:
+            return ToolResult(success=False, content="空 IQ 输入")
+        res = N.hdradio_ofdm_demod(iq)
+        return ToolResult(
+            success=True,
+            content=f"HD Radio OFDM: {len(iq)} 采样 → {len(res['bits'])} bits "
+                    f"(FFT={res['fft_size']}, CP={res['cp']}, data_carriers={res['data_carriers']})",
+            data={"bits": res["bits"].tolist(), "n_bits": len(res["bits"]),
+                  "sym_offset": int(res["sym_offset"])},
+        )
+
+    def _hdradio_frame_parse_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        from . import nrsc5_lite as N
+        data = bytes(args.get("data", []))
+        res = N.hdradio_frame_parse(data)
+        return ToolResult(
+            success=True,
+            content=f"HD Radio 帧: 提取 {res['psd_count']} 条 PSD 文本: {res['titles']}",
+            data=res,
+        )
+
+    def _hdradio_decode_iq_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        from . import nrsc5_lite as N
+        iq = self._iq_to_complex(args)
+        if iq.size == 0:
+            return ToolResult(success=False, content="空 IQ 输入")
+        res = N.hdradio_decode_iq(iq)
+        return ToolResult(
+            success=True,
+            content=f"HD Radio 接收: {res['n_bits']} bits (FFT={res['fft_size']})。"
+                    f" HDC 音频为骨架，需外部 HE-AAC v2 库。",
+            data=res,
         )
