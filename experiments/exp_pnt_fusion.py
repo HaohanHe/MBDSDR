@@ -12,7 +12,8 @@
   D GNSS 受干扰失效 -> 降级到 LEO+WiFi
   E 全失效降级到 WiFi 粗定位
 """
-import sys, os, math, csv, random
+import sys, os, math, csv, random, json
+from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 TRUE_LAT, TRUE_LON = 43.8868, 125.3245
@@ -90,6 +91,34 @@ def main():
         wr = csv.DictWriter(f, fieldnames=["scene", "description", "rmse_m", "mean_err_m", "max_err_m", "trials"])
         wr.writeheader(); wr.writerows(rows)
     print(f"\n已写 {out}")
+
+    # --- 论文级 JSON 结论输出 ---
+    rmses = {r["scene"]: r["rmse_m"] for r in rows}
+    result = {
+        "experiment": "pnt_fusion_montecarlo",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "config": {
+            "scenes": list("ABCDE"),
+            "trials_per_scene": N,
+            "seed": 42,
+        },
+        "metrics": {
+            "best_rmse_m": min(rmses.values()),
+            "best_scene": min(rmses, key=rmses.get),
+            "worst_rmse_m": max(rmses.values()),
+            "worst_scene": max(rmses, key=rmses.get),
+            "scene_A_rmse_m": rmses.get("A"),
+            "scene_E_rmse_m": rmses.get("E"),
+        },
+        "samples": {
+            "total": len(rows) * N,
+            "scenes": len(rows),
+            "trials_per_scene": N,
+        },
+        "output_files": [out],
+    }
+    print("\n=== JSON RESULT ===")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

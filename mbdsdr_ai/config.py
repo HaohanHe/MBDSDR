@@ -72,11 +72,11 @@ class AgentConfig:
             self.api_key = env_key
 
         env_url = os.environ.get("MBDSDR_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
-        if env_url and self.base_url == DEFAULT_CONFIG["base_url"]:
+        if env_url:
             self.base_url = env_url
 
         env_model = os.environ.get("MBDSDR_MODEL")
-        if env_model and self.model == DEFAULT_CONFIG["model"]:
+        if env_model:
             self.model = env_model
 
     def to_dict(self) -> Dict[str, Any]:

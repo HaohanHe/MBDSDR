@@ -8,6 +8,7 @@
   - arg_ok: 关键参数是否填对
 """
 import sys, os, json, csv, logging
+from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 logging.disable(logging.WARNING)
 
@@ -68,6 +69,26 @@ def main():
         wr = csv.DictWriter(f, fieldnames=["task", "expected", "called", "picked_expected", "args_ok"])
         wr.writeheader(); wr.writerows(rows)
     print("已写", out)
+
+    # --- 论文级 JSON 结论输出 ---
+    result = {
+        "experiment": "weak_model_toolcall",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "config": {
+            "cases": [{"task": c[0], "expected_tool": c[1], "required_args": c[2]} for c in CASES],
+        },
+        "metrics": {
+            "call_rate": round(call_ok / n, 4),
+            "pick_rate": round(pick_ok / n, 4),
+            "arg_rate": round(arg_ok / n, 4),
+        },
+        "samples": {
+            "total_cases": n,
+        },
+        "output_files": [out],
+    }
+    print("\n=== JSON RESULT ===")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

@@ -22,3 +22,4 @@ Pillow>=9.0.0           # 图像处理(NOAA APT/SSTV 解码输出 PNG)
 # pyserial>=3.5         # 串口电台控制（无硬件时不需要）
 # SoapySDR             # SDR硬件统一接入（系统级安装）
 pyrtlsdr>=0.3.3         # RTL-SDR (RTL2832U) 接收；缺失时自动降级到 mock 后端
+sounddevice>=0.4.6      # 实时音频播放（解调后声音输出到默认声卡）；缺失时自动降级为无音频播放（AudioPlayer.available=False）

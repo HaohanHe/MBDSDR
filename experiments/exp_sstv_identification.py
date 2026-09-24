@@ -22,6 +22,7 @@ import json
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 
 import numpy as np
 from PIL import Image
@@ -328,6 +329,38 @@ def main():
             low = next((r for r in mr if str(r["snr_db"]) == "-5"), None)
             if low:
                 print(f"{mode} -5dB 识别率     = {low['correct_rate']:.3f}")
+
+    # --- 论文级 JSON 结论输出 ---
+    noise_rows = [r for r in id_rows if r["true_mode"] == "noise"]
+    fa_rates = [1.0 - r["correct_rate"] for r in noise_rows] if noise_rows else []
+    mm_clean = next((r for r in id_rows if r["true_mode"] == "Martin M1" and r["snr_db"] == "clean"), None)
+    r36_clean = next((r for r in id_rows if r["true_mode"] == "Robot 36" and r["snr_db"] == "clean"), None)
+    out_files = [os.path.join(OUT_DIR, "sstv_mode_identification.csv")]
+    if not args.skip_decode:
+        out_files.append(os.path.join(OUT_DIR, "sstv_robot36_quality.csv"))
+    result = {
+        "experiment": "sstv_mode_identification",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "config": {
+            "id_trials": args.id_trials,
+            "dec_trials": args.dec_trials,
+            "seed": args.seed,
+            "sr": SR,
+            "prefix_s": PREFIX_S,
+        },
+        "metrics": {
+            "martin_m1_clean_rate": mm_clean["correct_rate"] if mm_clean else None,
+            "robot36_clean_rate": r36_clean["correct_rate"] if r36_clean else None,
+            "avg_false_alarm_rate": round(sum(fa_rates) / len(fa_rates), 4) if fa_rates else None,
+        },
+        "samples": {
+            "id_trials_total": len(id_rows) * args.id_trials,
+            "snr_points": len(SNR_GRID),
+        },
+        "output_files": out_files,
+    }
+    print("\n=== JSON RESULT ===")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
