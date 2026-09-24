@@ -4,6 +4,8 @@ MBDSDR 设备状态面板
 连接状态、RSSI/SNR、GPS 定位、IMU 9 轴数据、录音状态。
 """
 
+import datetime
+
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
@@ -66,8 +68,8 @@ class StatusPanel(QWidget):
         layout.addWidget(signal_group)
 
         # ---- GPS ----
-        gps_group = QGroupBox("GPS / 北斗")
-        gps_layout = QGridLayout(gps_group)
+        self.gps_group = QGroupBox("GPS / 北斗")
+        gps_layout = QGridLayout(self.gps_group)
 
         gps_layout.addWidget(QLabel("定位:"), 0, 0)
         self.gps_fix = QLabel("--")
@@ -99,11 +101,17 @@ class StatusPanel(QWidget):
         self.gps_hdop.setObjectName("statusValue")
         gps_layout.addWidget(self.gps_hdop, 3, 3)
 
-        layout.addWidget(gps_group)
+        # 数据时间戳（来源/更新时间）
+        gps_layout.addWidget(QLabel("更新:"), 4, 0)
+        self.gps_timestamp = QLabel("--")
+        self.gps_timestamp.setObjectName("statusValue")
+        gps_layout.addWidget(self.gps_timestamp, 4, 1, 1, 3)
+
+        layout.addWidget(self.gps_group)
 
         # ---- IMU 9 轴 ----
-        imu_group = QGroupBox("IMU 9 轴姿态")
-        imu_layout = QGridLayout(imu_group)
+        self.imu_group = QGroupBox("IMU 9 轴姿态")
+        imu_layout = QGridLayout(self.imu_group)
 
         # 加速度
         imu_layout.addWidget(QLabel("加速度:"), 0, 0)
@@ -154,7 +162,13 @@ class StatusPanel(QWidget):
         imu_layout.addWidget(self.imu_temp, 3, 1)
         imu_layout.addWidget(QLabel("C"), 3, 2)
 
-        layout.addWidget(imu_group)
+        # 数据时间戳
+        imu_layout.addWidget(QLabel("更新:"), 4, 0)
+        self.imu_timestamp = QLabel("--")
+        self.imu_timestamp.setObjectName("statusValue")
+        imu_layout.addWidget(self.imu_timestamp, 4, 1, 1, 3)
+
+        layout.addWidget(self.imu_group)
 
         # ---- 设备信息 ----
         info_group = QGroupBox("设备信息")
@@ -230,38 +244,120 @@ class StatusPanel(QWidget):
 
     @Slot(dict)
     def on_gps_updated(self, gps: dict):
-        """GPS 数据更新。"""
-        fix = gps.get("fix", False)
-        self.gps_fix.setText("已定位" if fix else "未定位")
-        self.gps_fix.setStyleSheet("color: #6BA89A;" if fix else "color: #B85C5C;")
+        """GPS 数据更新。
 
-        self.gps_sats.setText(str(gps.get("sats", "--")))
-        self.gps_lat.setText(f"{gps.get('lat', 0):.6f}")
-        self.gps_lon.setText(f"{gps.get('lon', 0):.6f}")
-        self.gps_alt.setText(f"{gps.get('alt', 0):.1f} m")
-        self.gps_hdop.setText(f"{gps.get('hdop', 0):.1f}")
+        三要素：来源（real/sim/none）、定位状态、数据时间戳。
+        source=="none" 或（无 fix 且非 sim）时一律显示 "--"，绝不用 0 伪装。
+        """
+        source = gps.get("source", "real")
+        fix = gps.get("fix", False)
+
+        # 数据时间戳
+        self._update_timestamp(self.gps_timestamp, gps.get("timestamp"))
+
+        if source == "none" or (not fix and source != "sim"):
+            # 未连接 / 未定位：灰色，全部 "--"
+            self.gps_fix.setText("未连接")
+            self.gps_fix.setStyleSheet("color: #999999;")
+            self.gps_sats.setText("--")
+            self.gps_lat.setText("--")
+            self.gps_lon.setText("--")
+            self.gps_alt.setText("--")
+            self.gps_hdop.setText("--")
+            self.gps_group.setTitle("GPS / 北斗")
+        elif source == "sim":
+            # 模拟模式：橙色"模拟定位"角标，坐标加 [模拟] 前缀
+            self.gps_fix.setText("模拟定位")
+            self.gps_fix.setStyleSheet("color: #C4845C;")
+            self.gps_group.setTitle("GPS / 北斗 [模拟]")
+            lat = gps.get("lat")
+            lon = gps.get("lon")
+            alt = gps.get("alt")
+            hdop = gps.get("hdop")
+            self.gps_sats.setText(str(gps.get("sats", 0)))
+            self.gps_lat.setText(f"[模拟] {lat:.6f}" if lat is not None else "--")
+            self.gps_lon.setText(f"[模拟] {lon:.6f}" if lon is not None else "--")
+            self.gps_alt.setText(f"[模拟] {alt:.1f} m" if alt is not None else "--")
+            self.gps_hdop.setText(f"[模拟] {hdop:.1f}" if hdop is not None else "--")
+        else:
+            # source=="real" 且 fix==True：绿色"已定位"，真实坐标
+            self.gps_fix.setText("已定位")
+            self.gps_fix.setStyleSheet("color: #6BA89A;")
+            self.gps_group.setTitle("GPS / 北斗")
+            lat = gps.get("lat")
+            lon = gps.get("lon")
+            alt = gps.get("alt")
+            hdop = gps.get("hdop")
+            self.gps_sats.setText(str(gps.get("sats", 0)))
+            self.gps_lat.setText(f"{lat:.6f}" if lat is not None else "--")
+            self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "--")
+            self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "--")
+            self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "--")
 
     @Slot(dict)
     def on_imu_updated(self, imu: dict):
-        """IMU 数据更新。"""
-        acc = imu.get("acc", [0, 0, 0])
-        gyr = imu.get("gyr", [0, 0, 0])
-        mag = imu.get("mag", [0, 0, 0])
-        temp = imu.get("temp", 0)
+        """IMU 数据更新。
 
-        self.acc_x.setText(f"{acc[0]:.2f}")
-        self.acc_y.setText(f"{acc[1]:.2f}")
-        self.acc_z.setText(f"{acc[2]:.2f}")
+        source=="none" 时全部 "--"；sim 模式在 group 标题打 [模拟] 角标。
+        """
+        source = imu.get("source", "real")
 
-        self.gyr_x.setText(f"{gyr[0]:.1f}")
-        self.gyr_y.setText(f"{gyr[1]:.1f}")
-        self.gyr_z.setText(f"{gyr[2]:.1f}")
+        # 数据时间戳
+        self._update_timestamp(self.imu_timestamp, imu.get("timestamp"))
 
-        self.mag_x.setText(f"{mag[0]:.1f}")
-        self.mag_y.setText(f"{mag[1]:.1f}")
-        self.mag_z.setText(f"{mag[2]:.1f}")
+        if source == "none":
+            # 未连接：全部 "--"
+            self.acc_x.setText("--")
+            self.acc_y.setText("--")
+            self.acc_z.setText("--")
+            self.gyr_x.setText("--")
+            self.gyr_y.setText("--")
+            self.gyr_z.setText("--")
+            self.mag_x.setText("--")
+            self.mag_y.setText("--")
+            self.mag_z.setText("--")
+            self.imu_temp.setText("--")
+            self.imu_group.setTitle("IMU 9 轴姿态 [未连接]")
+            return
 
-        self.imu_temp.setText(f"{temp:.1f}")
+        # 模拟模式：标题加角标；真实模式：正常标题
+        if source == "sim":
+            self.imu_group.setTitle("IMU 9 轴姿态 [模拟]")
+        else:
+            self.imu_group.setTitle("IMU 9 轴姿态")
+
+        acc = imu.get("acc") or [None, None, None]
+        gyr = imu.get("gyr") or [None, None, None]
+        mag = imu.get("mag") or [None, None, None]
+        temp = imu.get("temp")
+
+        def _fmt(v, nd):
+            return f"{v:.{nd}f}" if v is not None else "--"
+
+        self.acc_x.setText(_fmt(acc[0], 2))
+        self.acc_y.setText(_fmt(acc[1], 2))
+        self.acc_z.setText(_fmt(acc[2], 2))
+
+        self.gyr_x.setText(_fmt(gyr[0], 1))
+        self.gyr_y.setText(_fmt(gyr[1], 1))
+        self.gyr_z.setText(_fmt(gyr[2], 1))
+
+        self.mag_x.setText(_fmt(mag[0], 1))
+        self.mag_y.setText(_fmt(mag[1], 1))
+        self.mag_z.setText(_fmt(mag[2], 1))
+
+        self.imu_temp.setText(_fmt(temp, 1))
+
+    def _update_timestamp(self, label: QLabel, ts):
+        """把 unix 时间戳格式化为 '更新于 HH:MM:SS'；无值时显示 '--'。"""
+        if ts is None:
+            label.setText("--")
+            return
+        try:
+            dt = datetime.datetime.fromtimestamp(float(ts))
+            label.setText(f"更新于 {dt.strftime('%H:%M:%S')}")
+        except Exception:
+            label.setText("--")
 
     @Slot(str, dict)
     def on_tool_result(self, tool_name: str, result: dict):

@@ -73,18 +73,24 @@ class SimDataGenerator:
 
     def get_gps(self) -> Dict:
         import random
+        # 模拟模式：返回合成坐标，但必须标注 source="sim"，
+        # 面板会据此显示"模拟定位"角标，绝不伪装成真实 fix。
         return {
             "fix": True,
+            "source": "sim",
             "lat": round(39.9042 + random.uniform(-0.0001, 0.0001), 6),
             "lon": round(116.4074 + random.uniform(-0.0001, 0.0001), 6),
             "alt": round(50.0 + random.uniform(-0.5, 0.5), 1),
             "sats": 12 + random.randint(-1, 1),
             "hdop": round(0.8 + random.uniform(-0.05, 0.05), 1),
+            "timestamp": time.time(),
         }
 
     def get_imu(self) -> Dict:
         import random
+        # 模拟模式：合成 9 轴数据，标注 source="sim"
         return {
+            "source": "sim",
             "acc": [
                 round(random.uniform(-0.05, 0.05), 2),
                 round(random.uniform(-0.05, 0.05), 2),
@@ -101,6 +107,7 @@ class SimDataGenerator:
                 round(random.uniform(40, 50), 1),
             ],
             "temp": round(25.0 + random.uniform(-0.5, 0.5), 1),
+            "timestamp": time.time(),
         }
 
 
@@ -216,15 +223,51 @@ class MCPWorker(QObject):
 
                 try:
                     gps = self.client.get_gps()
-                    self.gps_updated.emit(gps)
+                    # 真实硬件：仅在有 fix 时标注 source="real"；
+                    # 否则按"未连接"处理，emit 全 None 字典，避免 UI 用旧值/0 伪装。
+                    if isinstance(gps, dict) and gps.get("fix"):
+                        gps["source"] = "real"
+                        gps["timestamp"] = time.time()
+                        self.gps_updated.emit(gps)
+                    else:
+                        self.gps_updated.emit({
+                            "fix": False, "source": "none",
+                            "lat": None, "lon": None, "alt": None,
+                            "sats": 0, "hdop": None,
+                            "timestamp": time.time(),
+                        })
                 except Exception as e:
                     self.log_message.emit(f"get_gps 失败: {e}")
+                    self.gps_updated.emit({
+                        "fix": False, "source": "none",
+                        "lat": None, "lon": None, "alt": None,
+                        "sats": 0, "hdop": None,
+                        "timestamp": time.time(),
+                    })
 
                 try:
                     imu = self.client.get_imu()
-                    self.imu_updated.emit(imu)
+                    # 真实硬件：有有效 acc 数据才标注 source="real"；
+                    # 否则 emit 全 None 字典。
+                    if isinstance(imu, dict) and imu.get("acc") is not None:
+                        imu["source"] = "real"
+                        imu["timestamp"] = time.time()
+                        self.imu_updated.emit(imu)
+                    else:
+                        self.imu_updated.emit({
+                            "source": "none",
+                            "acc": None, "gyr": None,
+                            "mag": None, "temp": None,
+                            "timestamp": time.time(),
+                        })
                 except Exception as e:
                     self.log_message.emit(f"get_imu 失败: {e}")
+                    self.imu_updated.emit({
+                        "source": "none",
+                        "acc": None, "gyr": None,
+                        "mag": None, "temp": None,
+                        "timestamp": time.time(),
+                    })
         except Exception as e:
             self.error_occurred.emit(f"轮询异常: {e}")
             self.log_message.emit(f"轮询异常: {traceback.format_exc()}")

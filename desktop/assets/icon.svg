@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MBDSDR 应用图标（矢量版）
+  日式低饱和配色：米白 #F5F3EF / 蓝灰 #5B7B8C / 橙 #C4845C
+  由 generate_icon.py 的位图设计对应而来；viewBox 0 0 1024 1024
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- 圆角方形底 -->
+  <rect x="36" y="36" width="952" height="952" rx="240" ry="240"
+        fill="#F5F3EF" stroke="#5B7B8C" stroke-opacity="0.25" stroke-width="8"/>
+
+  <!-- 字母 M -->
+  <g fill="#5B7B8C">
+    <rect x="280" y="430" width="92" height="330"/>
+    <rect x="652" y="430" width="92" height="330"/>
+    <!-- V 斜撑用粗折线 -->
+    <path d="M 372 430 L 512 650 L 652 430" fill="none"
+          stroke="#5B7B8C" stroke-width="92" stroke-linejoin="miter"/>
+  </g>
+
+  <!-- 无线电波弧（上半圆，从左到右经顶端） -->
+  <g fill="none" stroke-width="26">
+    <path d="M 442 400 A 70 70 0 0 0 582 400"  stroke="#5B7B8C"/>
+    <path d="M 387 400 A 125 125 0 0 0 637 400" stroke="#5B7B8C"/>
+    <path d="M 332 400 A 180 180 0 0 0 692 400" stroke="#C4845C"/>
+  </g>
+
+  <!-- 卫星点缀圆点 -->
+  <circle cx="512" cy="220" r="20" fill="#C4845C"/>
+</svg>

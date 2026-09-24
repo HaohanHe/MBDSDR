@@ -36,6 +36,13 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MBDSDR - AI 定义无线电")
+        # 应用图标（直接实例化主窗口时也能显示标题栏图标；打包后由 main.py 统一设置）
+        _icon_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "assets", "icon.png"
+        )
+        if os.path.exists(_icon_path):
+            from PySide6.QtGui import QIcon
+            self.setWindowIcon(QIcon(_icon_path))
         self.setMinimumSize(1200, 800)
         self.resize(1400, 900)
 
@@ -46,8 +53,12 @@ class MainWindow(QMainWindow):
         self._record_timer: Optional[QTimer] = None
         self._record_seconds = 0
         self._sky_update_timer: Optional[QTimer] = None
-        self._observer_lat = 43.88  # 长春纬度
-        self._observer_lon = 125.32  # 长春经度
+        # 观测站坐标：默认 None 表示“未配置观测站位置”（不再硬编码长春坐标）。
+        # 由 GNSS 真实定位或 gui_config.json 手动配置后填充；None 时天空图不计算卫星。
+        self._observer_lat: Optional[float] = None
+        self._observer_lon: Optional[float] = None
+        self._is_sim: bool = False  # 是否处于模拟模式（模拟时天空图标注“模拟数据”）
+        self.sat_tracker: Optional[SatelliteTracker] = None
 
         # 构建 UI
         self._build_menu_bar()
@@ -391,6 +402,7 @@ class MainWindow(QMainWindow):
     def _connect_simulation(self):
         """连接模拟模式。"""
         self._disconnect()
+        self._is_sim = True
         self._worker = self._worker_manager.start(use_simulation=True)
         self._connect_worker_signals()
         self.conn_label.setText("  状态: 模拟模式  ")
@@ -419,6 +431,7 @@ class MainWindow(QMainWindow):
     def _connect_real(self, host: str, port: int):
         """连接真实硬件。"""
         self._disconnect()
+        self._is_sim = False
         self._worker = self._worker_manager.start(host=host, port=port, use_simulation=False)
         self._connect_worker_signals()
         self.conn_label.setText(f"  状态: 连接中 {host}:{port}  ")
@@ -482,7 +495,15 @@ class MainWindow(QMainWindow):
     @Slot(dict)
     def _on_gps_for_ui(self, gps: dict):
         if gps.get("fix"):
-            self.status_gps.setText(f"GPS: {gps.get('lat', 0):.4f}, {gps.get('lon', 0):.4f}")
+            lat = gps.get("lat")
+            lon = gps.get("lon")
+            self.status_gps.setText(f"GPS: {lat:.4f}, {lon:.4f}")
+            # GNSS 有真实定位时，自动用其坐标更新观测站位置，驱动天空图卫星计算。
+            # sim 模式下该坐标为合成值，_apply_observer_location 会据此标注“模拟数据”。
+            if lat is not None and lon is not None:
+                self._observer_lat = float(lat)
+                self._observer_lon = float(lon)
+                self._apply_observer_location()
         else:
             self.status_gps.setText("GPS: 未定位")
 
@@ -637,15 +658,17 @@ class MainWindow(QMainWindow):
     # ========================================================================
 
     def _init_sky_view_demo(self):
-        """初始化天空视图：真 sgp4 卫星位置 + 信号热力演示。"""
-        import math
+        """初始化天空视图：天线指向默认值 + 真实 sgp4 卫星跟踪。
 
-        # 真 sgp4 实时卫星跟踪（观测站坐标，可在设置中改）
-        obs_lat = getattr(self, "obs_lat", 43.88)
-        obs_lon = getattr(self, "obs_lon", 125.32)
-        self.sat_tracker = SatelliteTracker(self.sky_view, obs_lat, obs_lon)
+        观测站坐标为 None（未配置/GNSS 未定位）时，SatelliteTracker 不启动计算，
+        天空图显示空状态提示；坐标由 GNSS 或配置文件就位后再启动。
+        """
+        # 卫星位置统一由 SatelliteTracker 驱动（mbdsdr_ai.orbit 真实 celestrak TLE）。
+        self.sat_tracker = SatelliteTracker(
+            self.sky_view, self._observer_lat, self._observer_lon,
+        )
 
-        # 天线指向（默认正北水平，实际由云台/跟踪驱动）
+        # 天线指向（默认正北水平，is_tracking=False；这是合理的默认状态而非假数据）
         antenna = AntennaPointing(
             azimuth_deg=0,
             elevation_deg=0,
@@ -656,49 +679,40 @@ class MainWindow(QMainWindow):
         )
         self.sky_view.set_antenna(antenna)
 
-        # 演示信号热力图（方位-仰角-信号强度）
-        heatmap = []
-        for az in range(0, 360, 20):
-            for el in [15, 30, 45, 60, 75]:
-                # 模拟：某些方向信号较强
-                signal = -70 + 20 * math.sin(math.radians(az * 2)) + 10 * math.cos(math.radians(el * 3))
-                heatmap.append(HeatmapCell(az, el, signal))
-        self.sky_view.set_heatmap(heatmap)
-        # 卫星位置与轨迹由 SatelliteTracker 真 sgp4 实时驱动，不再用演示轨迹。
+        # 不再生成假信号热力图（原 -70+20*sin... 伪热力已移除）：
+        # 无真实射频扫描数据时不显示热力图。
+        self._apply_observer_location()
 
-    def _update_sky_satellites(self):
-        """用 sgp4 实时计算卫星位置，更新天空图（含新时空授时）。"""
-        try:
-            from mbdsdr_ai.decoders import BUILTIN_TLE, SATELLITE_FREQUENCIES, compute_satellite_position
-        except ImportError:
+    def _apply_observer_location(self):
+        """根据当前观测站坐标同步 SatelliteTracker 与天空图数据来源标注。
+
+        - 坐标为 None：停止卫星计算，天空图显示“无数据”空状态；
+        - 坐标已就位：交给 SatelliteTracker 做真实 sgp4 计算；
+        - sim 模式下坐标为合成值，天空图标注橙色“模拟数据”角标。
+        """
+        lat = self._observer_lat
+        lon = self._observer_lon
+        if lat is None or lon is None:
+            # 未设置观测站位置（GNSS 未连接或未手动配置）
+            if self.sat_tracker is not None:
+                self.sat_tracker.set_location(None, None)
+            self.sky_view.set_data_source("none")
             return
 
-        satellites = []
-        for name in BUILTIN_TLE:
-            try:
-                pos = compute_satellite_position(
-                    name,
-                    latitude=self._observer_lat,
-                    longitude=self._observer_lon,
-                )
-                if pos and pos.get('elevation_deg', 0) > 0:
-                    freq_hz = SATELLITE_FREQUENCIES.get(name, 0) * 1e6
-                    satellites.append(SkyObject(
-                        name=name,
-                        azimuth_deg=pos.get('azimuth_deg', 0),
-                        elevation_deg=pos.get('elevation_deg', 0),
-                        obj_type="satellite",
-                        frequency_hz=freq_hz,
-                        signal_strength_db=pos.get('signal_strength_db', -100),
-                        description=f"{name} - {pos.get('distance_km', 0):.0f}km",
-                    ))
-            except Exception:
-                continue
+        if self.sat_tracker is None:
+            self.sat_tracker = SatelliteTracker(self.sky_view, lat, lon)
+        else:
+            self.sat_tracker.set_location(lat, lon)
+        # sim 模式坐标为合成数据，标注“模拟数据”；真实 GNSS/手动配置为 real
+        self.sky_view.set_data_source("sim" if self._is_sim else "real")
 
-        if satellites:
-            self.sky_view.set_objects(satellites)
-            self.statusBar().showMessage(f"天空图已更新: {len(satellites)} 颗可见卫星", 3000)
+    def _update_sky_satellites(self):
+        """天空图周期任务：仅刷新新时空授时信息。
 
+        卫星位置统一由 SatelliteTracker（mbdsdr_ai.orbit 真实 celestrak TLE）
+        以自身定时器驱动；原 decoders.BUILTIN_TLE 硬编码 TLE 计算路径已移除，
+        避免两套卫星数据冲突。
+        """
         # 新时空：更新授时信息（每30秒NTP同步一次，其余用系统时间）
         self._update_time_info()
 
@@ -823,9 +837,11 @@ class MainWindow(QMainWindow):
                 y = win.get("y", 100)
                 self.resize(w, h)
                 self.move(x, y)
-            # 恢复观察者坐标
-            self._observer_lat = config.get("observer_lat", 43.88)
-            self._observer_lon = config.get("observer_lon", 125.32)
+            # 恢复观测站坐标：缺失时默认 None（未配置），不再回退到长春硬编码坐标
+            self._observer_lat = config.get("observer_lat")
+            self._observer_lon = config.get("observer_lon")
+            # 坐标就位后同步 SatelliteTracker 与天空图空状态/角标
+            self._apply_observer_location()
             # 恢复主题
             theme = config.get("theme", "japanese_light")
             if theme != self._current_theme:

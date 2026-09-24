@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QIcon
 
 from themes import get_theme, DEFAULT_THEME, get_app_font
 from main_window import MainWindow
@@ -60,6 +60,14 @@ def main():
     # 创建主窗口
     window = MainWindow()
     window.app = app  # 传递 app 引用给主题切换
+
+    # 设置应用图标（标题栏 / 任务栏）
+    icon_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "assets", "icon.png"
+    )
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+        window.setWindowIcon(QIcon(icon_path))
 
     # 如果指定了连接参数，自动连接
     if args.sim:

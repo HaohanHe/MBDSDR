@@ -138,6 +138,10 @@ class RFSkyView(QWidget):
         self._heatmap: List[HeatmapCell] = []
         self._trajectories: Dict[str, List[Tuple[float, float]]] = {}  # name -> [(az, el), ...]
 
+        # 数据来源："none"=无观测站位置(空状态) / "real"=真实GNSS或手动配置 / "sim"=模拟数据
+        # sim 模式右上角显示橙色“模拟数据”角标；none 时画布中央显示空状态提示。
+        self._data_source: str = "none"
+
         # 新时空：授时信息
         self._time_info = {
             "utc_time": None,
@@ -204,6 +208,19 @@ class RFSkyView(QWidget):
     def set_objects(self, objects: List[SkyObject]):
         """设置天空对象列表。"""
         self._objects = objects
+        self.update()
+
+    def set_data_source(self, source: str):
+        """设置数据来源标注。
+
+        source:
+            "none" - 无观测站位置（GNSS 未连接或未手动配置），画布中央显示空状态提示；
+            "real" - 真实 GNSS 定位或手动配置坐标，无角标；
+            "sim"  - 模拟模式（合成坐标/信号），右上角显示橙色“模拟数据”角标。
+        """
+        if source not in ("none", "real", "sim"):
+            source = "none"
+        self._data_source = source
         self.update()
 
     def add_object(self, obj: SkyObject):
@@ -380,6 +397,9 @@ class RFSkyView(QWidget):
         # 悬停提示
         if self._hovered_object:
             self._draw_hover_tooltip(painter)
+
+        # 数据来源标注（空状态提示 / 模拟数据角标），最顶层绘制
+        self._draw_data_source_overlay(painter)
 
         painter.end()
 
@@ -785,6 +805,40 @@ class RFSkyView(QWidget):
 
         painter.restore()
 
+    def _draw_data_source_overlay(self, painter: QPainter):
+        """绘制数据来源标注：无数据空状态提示 / 模拟数据角标。"""
+        painter.save()
+
+        if self._data_source == "none":
+            # 空状态：画布中央提示“未连接 GNSS 或未配置观测站位置”
+            f = QFont(self._font)
+            f.setPointSize(11)
+            painter.setFont(f)
+            painter.setPen(self._colors["text_dim"])
+            text = "无数据 — 未连接 GNSS 或未配置观测站位置"
+            painter.drawText(QRectF(0, 0, self.width(), self.height()),
+                             Qt.AlignCenter, text)
+        elif self._data_source == "sim":
+            # 模拟数据角标：右上角，日式低饱和橙 #C4845C
+            badge_text = "模拟数据"
+            f = QFont(self._font)
+            f.setBold(True)
+            f.setPointSize(9)
+            painter.setFont(f)
+            fm = QFontMetrics(f)
+            pad_x, pad_y = 10, 5
+            bw = fm.horizontalAdvance(badge_text) + pad_x * 2
+            bh = fm.height() + pad_y * 2
+            bx = self.width() - bw - 12
+            by = 12
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor("#C4845C")))
+            painter.drawRoundedRect(QRectF(bx, by, bw, bh), 4, 4)
+            painter.setPen(QColor("#1A1D23"))
+            painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignCenter, badge_text)
+
+        painter.restore()
+
     def _draw_hover_tooltip(self, painter: QPainter):
         """绘制悬停对象的详细提示。"""
         obj = self._hovered_object
@@ -1109,48 +1163,80 @@ class SatelliteTracker:
         "ISS (ZARYA)": 145.800, "METEOR M2": 137.100, "FENGYUN 3D": 136.900,
     }
 
-    def __init__(self, sky_view, lat: float, lon: float, alt_km: float = 0.0,
-                 interval_ms: int = 10000):
+    def __init__(self, sky_view, lat: Optional[float], lon: Optional[float],
+                 alt_km: float = 0.0, interval_ms: int = 10000):
         self.sky_view = sky_view
         self.lat = lat
         self.lon = lon
         self.alt_km = alt_km
         self._timer = QTimer(self.sky_view)
         self._timer.timeout.connect(self.refresh)
+        # 观测站坐标为 None（未配置/GNSS 未定位）时不启动计算，
+        # 清空卫星与轨迹，天空图由调用方置为“无数据”空状态。
+        if lat is None or lon is None:
+            self.lat = None
+            self.lon = None
+            self.sky_view.set_objects([])
+            self.sky_view.clear_trajectories()
+            return
         self._timer.start(interval_ms)
         self.refresh()
 
+    def set_location(self, lat: Optional[float], lon: Optional[float],
+                     alt_km: Optional[float] = None):
+        """更新观测站坐标；传入 None 则停止卫星计算并清空天空图（空状态）。"""
+        self.lat = lat
+        self.lon = lon
+        if alt_km is not None:
+            self.alt_km = alt_km
+        if lat is None or lon is None:
+            self._timer.stop()
+            self.sky_view.set_objects([])
+            self.sky_view.clear_trajectories()
+            self.sky_view.set_data_source("none")
+            return
+        if not self._timer.isActive():
+            self._timer.start()
+        self.refresh()
+
     def refresh(self):
+        # 观测站坐标未知时不计算卫星位置
+        if self.lat is None or self.lon is None:
+            return
         try:
             from mbdsdr_ai import orbit
         except Exception:
             return
-        objs = []
-        traj = {}
-        import time as _t
-        now = _t.time()
-        for name in orbit.BUILTIN_SATS:
-            st = orbit.compute_satellite_state(name, self.lat, self.lon, self.alt_km)
-            if st is None:
-                continue
-            freq = self._FREQ.get(name, 0.0) * 1e6
-            objs.append(SkyObject(
-                name=name,
-                azimuth_deg=st["azimuth"],
-                elevation_deg=max(0.0, st["elevation"]),
-                obj_type="satellite",
-                frequency_hz=freq,
-                description=f"仰角{st['elevation']:.0f}° 距离{st['range_km']:.0f}km",
-            ))
-            # 未来 10 分钟轨迹（每 60s 一点）
-            pts = []
-            for k in range(0, 11):
-                p = orbit.compute_satellite_state(name, self.lat, self.lon,
-                                                   self.alt_km, when=now + k * 60)
-                if p:
-                    pts.append((p["azimuth"], p["elevation"]))
-            if pts:
-                traj[name] = pts
-        self.sky_view.set_objects(objs)
-        for name, pts in traj.items():
-            self.sky_view.set_trajectory(name, pts)
+        try:
+            objs = []
+            traj = {}
+            import time as _t
+            now = _t.time()
+            for name in orbit.BUILTIN_SATS:
+                st = orbit.compute_satellite_state(name, self.lat, self.lon, self.alt_km)
+                if st is None:
+                    continue
+                freq = self._FREQ.get(name, 0.0) * 1e6
+                objs.append(SkyObject(
+                    name=name,
+                    azimuth_deg=st["azimuth"],
+                    elevation_deg=max(0.0, st["elevation"]),
+                    obj_type="satellite",
+                    frequency_hz=freq,
+                    description=f"仰角{st['elevation']:.0f}° 距离{st['range_km']:.0f}km",
+                ))
+                # 未来 10 分钟轨迹（每 60s 一点）
+                pts = []
+                for k in range(0, 11):
+                    p = orbit.compute_satellite_state(name, self.lat, self.lon,
+                                                       self.alt_km, when=now + k * 60)
+                    if p:
+                        pts.append((p["azimuth"], p["elevation"]))
+                if pts:
+                    traj[name] = pts
+            self.sky_view.set_objects(objs)
+            for name, pts in traj.items():
+                self.sky_view.set_trajectory(name, pts)
+        except Exception:
+            # TLE 拉取/轨道计算失败（断网等）时保持上一帧，不崩溃
+            pass
