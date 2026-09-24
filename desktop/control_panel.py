@@ -13,30 +13,13 @@ from PySide6.QtGui import QFont, QIntValidator, QDoubleValidator
 
 
 # 预设电台（FM，MHz）
-PRESET_FM_STATIONS = [
-    ("87.6", "北京文艺"),
-    ("88.7", "Hit FM"),
-    ("90.0", "中央音乐"),
-    ("91.5", "轻松调频"),
-    ("95.5", "北京交通"),
-    ("97.4", "北京音乐"),
-    ("98.5", "音乐之声"),
-    ("101.8", "都市之声"),
-    ("103.9", "北京交通"),
-    ("106.1", "中国之声"),
-]
+# 不预存地区性广播台：FM 频率随城市/地区不同，硬编码其他城市的电台没有意义。
+# 本地电台请用“自动扫台”（sdr_fm_scan）动态发现，或在频率框手动输入后自行保存。
+PRESET_FM_STATIONS: list[tuple[str, str]] = []
 
 # 预设 AM 电台（kHz）
-PRESET_AM_STATIONS = [
-    ("540", "中央人民"),
-    ("639", "中国之声"),
-    ("720", "乡村"),
-    ("828", "新闻"),
-    ("900", "经济"),
-    ("1008", "文艺"),
-    ("1134", "交通"),
-    ("1251", "生活"),
-]
+# 同样不预存地区性中波台：频率随地区不同。请自动扫台或手动输入。
+PRESET_AM_STATIONS: list[tuple[str, str]] = []
 
 # SDR 常用频段预设（频率MHz, 名称, 模式）
 SDR_BAND_PRESETS = [
@@ -217,11 +200,17 @@ class ControlPanel(QWidget):
         self.preset_combo.blockSignals(True)
         self.preset_combo.clear()
         if band == "FM 广播":
-            for freq, name in PRESET_FM_STATIONS:
-                self.preset_combo.addItem(f"{freq} MHz - {name}", (float(freq), "FM"))
+            if PRESET_FM_STATIONS:
+                for freq, name in PRESET_FM_STATIONS:
+                    self.preset_combo.addItem(f"{freq} MHz - {name}", (float(freq), "FM"))
+            else:
+                self.preset_combo.addItem("（无预设：请用“自动扫台”或手动输入频率）", None)
         elif band == "AM 广播":
-            for freq, name in PRESET_AM_STATIONS:
-                self.preset_combo.addItem(f"{freq} kHz - {name}", (float(freq) / 1000.0, "AM"))
+            if PRESET_AM_STATIONS:
+                for freq, name in PRESET_AM_STATIONS:
+                    self.preset_combo.addItem(f"{freq} kHz - {name}", (float(freq) / 1000.0, "AM"))
+            else:
+                self.preset_combo.addItem("（无预设：请用“自动扫台”或手动输入频率）", None)
         else:
             # SDR 频段预设，按频段过滤
             band_keywords = {
