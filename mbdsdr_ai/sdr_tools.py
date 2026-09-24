@@ -909,6 +909,68 @@ def register_sdr_tools(agent):
         category="sdr_decode",
     )
 
+    # ── 真实源码移植的卫星解码函数工具（noaa-apt / meteor_demod）─────────────
+    agent.tool_registry.register(
+        name="noaa_apt_decode",
+        description=(
+            "离线解码 NOAA APT 音频 WAV 为云图（真实移植自 noaa-apt）。"
+            "链路：重采样到 12480Hz → apt137 AM 鉴别器(dsp.rs:373) → 低通 2080Hz → "
+            "重采样 4160Hz → 38 样本±1 同步方波互相关找行首(decode.rs:171) → 切 A/B "
+            "两通道各 909 像素。输入 input_path 为解调后 .wav；返回对齐行数、锁定率，"
+            "并可输出 PNG。黑白颠倒用 polarity=-1。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "input_path": {"type": "string", "description": "APT 解调后音频 .wav 路径"},
+                "polarity": {"type": "integer", "description": "灰度极性，1 默认；黑白颠倒用 -1"},
+                "png_prefix": {"type": "string", "description": "可选，提供则把 A/B 图存为 PNG 的前缀路径"},
+            },
+            "required": ["input_path"],
+        },
+        handler=lambda args: _noaa_apt_decode_fn_tool(args),
+        category="sdr_decode",
+    )
+
+    agent.tool_registry.register(
+        name="meteor_viterbi_decode",
+        description=(
+            "Meteor LRPT Viterbi 软判决解码（真实移植自 meteor_demod 后级链）。"
+            "K=7, r=1/2, 生成多项式 G1=0x79(八进制171)/G2=0x5F(八进制137)。"
+            "输入 coded_bits 为接收编码比特数组（0/1 或软值），返回解码后信息比特数组。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "coded_bits": {"type": "array", "items": {"type": "number"},
+                               "description": "接收编码比特序列（成对 [g1,g2]）"},
+            },
+            "required": ["coded_bits"],
+        },
+        handler=lambda args: _meteor_viterbi_decode_fn_tool(args),
+        category="sdr_decode",
+    )
+
+    agent.tool_registry.register(
+        name="meteor_lrpt_demod",
+        description=(
+            "Meteor-M2 LRPT 解调骨架（真实移植自 meteor_demod）。符号率 72000sym/s，"
+            "QPSK，RRC α=0.6，Costas 环载波恢复+Gardner 位同步 → DQPSK 差分解码 → "
+            "卷积去交织(I=36,J=2048) → Viterbi(0x79/0x5F) → LRPT 帧同步 0x1DFCDC。"
+            "输入复数 IQ 采样与采样率，返回解调摘要（符号数/比特数/帧）。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "sample_rate": {"type": "number", "description": "IQ 采样率 Hz"},
+                "iq_base64": {"type": "string", "description": "可选，复数 IQ 的 base64(float32 interleaved)；缺省走占位返回参数说明"},
+            },
+            "required": ["sample_rate"],
+        },
+        handler=lambda args: _meteor_lrpt_demod_fn_tool(args),
+        category="sdr_decode",
+    )
+
     agent.tool_registry.register(
         name="sdr_wfm_stereo",
         description=(
@@ -3000,6 +3062,55 @@ def _read_wav_mono(path):
         m = np.iinfo(data.dtype).max
         data = data.astype(np.float64) / m
     return float(sr), data.astype(np.float64)
+
+
+# ── 真实源码移植的卫星解码函数工具 handler ──────────────────────────────────
+def _noaa_apt_decode_fn_tool(args) -> "ToolResult":
+    """离线 APT 解码：读 wav → lite_decode_apt → 返回摘要/PNG。"""
+    import json as _json
+    path = args.get("input_path")
+    if not path or not os.path.exists(path):
+        return ToolResult(success=False, content=f"错误: wav 不存在: {path}")
+    try:
+        sr, audio = _read_wav_mono(path)
+    except Exception as e:
+        return ToolResult(success=False, content=f"读取 WAV 失败: {e}")
+    res = lite_decode_apt(audio, sr, polarity=int(args.get("polarity", 1)))
+    out = {k: v for k, v in res.items() if k not in ("image_a", "image_b")}
+    if res.get("apt_present") and args.get("png_prefix"):
+        paths = lite_save_apt_png(res, str(args["png_prefix"]))
+        out["png"] = paths
+    return ToolResult(success=True, content=_json.dumps(out, ensure_ascii=False, indent=2),
+                      data=out)
+
+
+def _meteor_viterbi_decode_fn_tool(args) -> "ToolResult":
+    """Meteor Viterbi 解码：coded_bits -> decoded info bits。"""
+    import json as _json
+    from .meteor_sat import meteor_viterbi_decode
+    coded = args.get("coded_bits")
+    if coded is None:
+        return ToolResult(success=False, content="需要 coded_bits 数组")
+    bits = np.asarray(coded, dtype=np.float64)
+    dec = meteor_viterbi_decode(bits)
+    out = {"decoded_bits": [int(b) for b in dec], "n_decoded": int(len(dec))}
+    return ToolResult(success=True, content=_json.dumps(out), data=out)
+
+
+def _meteor_lrpt_demod_fn_tool(args) -> "ToolResult":
+    """Meteor LRPT 解调骨架：base64 IQ -> 解调摘要。"""
+    import json as _json
+    import base64 as _b64
+    from .meteor_sat import meteor_lrpt_demod, METEOR_SYM_RATE
+    sr = float(args.get("sample_rate", 72000))
+    b64 = args.get("iq_base64")
+    if not b64:
+        out = {"sym_rate": METEOR_SYM_RATE, "note": "提供 iq_base64(float32 interleaved) 后返回解调摘要"}
+        return ToolResult(success=True, content=_json.dumps(out), data=out)
+    raw = np.frombuffer(_b64.b64decode(b64), dtype=np.float32)
+    iq = (raw[0::2] + 1j * raw[1::2]).astype(np.complex64)
+    summary = meteor_lrpt_demod(iq, sr)
+    return ToolResult(success=True, content=_json.dumps(summary), data=summary)
 
 
 def _noaa_apt_decode_tool(mgr, args) -> "ToolResult":

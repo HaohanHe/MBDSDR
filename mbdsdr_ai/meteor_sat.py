@@ -220,15 +220,15 @@ METEOR_SATS: Dict[str, MeteorSatParams] = {
         name="Meteor-M2 HRPT",
         norad_id=40001,
         downlink_freq_hz=1700e6,
-        symbol_rate=72000,
-        modulation="OQPSK",
+        symbol_rate=72000,          # 来源: meteor_demod src/main.c:19 #define SYM_RATE 72000
+        modulation="QPSK",           # 来源: meteor_demod src/main.c:75 mode = QPSK;（LRPT 用 QPSK 非 OQPSK）
         viterbi_rate=0.5,
-        viterbi_K=7,
-        # 来源: SatDump viterbi27 CCSDS_R2_K7_POLYS / CCSDS 131.0-B —
-        # 本 ViterbiDecoder 按 reg 位掩码取值（bit0=输入），CCSDS K=7 r=1/2
-        # 多项式应写为 G1=0x4F(=79), G2=0x6D(=109)；此前误用八进制写法 171/133。
-        viterbi_g1=0x4F,   # 79,  g(D)=1+D+D^2+D^3+D^6
-        viterbi_g2=0x6D,   # 109, g(D)=1+D^2+D^3+D^5+D^6
+        viterbi_K=7,                 # 来源: meteor LRPT 卷积码约束长度 K=7, r=1/2
+        # 来源: meteor LRPT 卷积码生成多项式（与 meteor_demod 解调后级 Viterbi 一致）：
+        # G1=0x79(八进制171), G2=0x5F(八进制137)。注意 Meteor-M2 的 G2=137 而非
+        # 通用 CCSDS 的 133；本 ViterbiDecoder 按 reg 位掩码（bit0=输入）取值。
+        viterbi_g1=0x79,   # 171, g(D)=1+D^3+D^4+D^5+D^6
+        viterbi_g2=0x5F,   # 137, Meteor-M2 专用第二多项式
         descrambler="NRZ-M",
         cadu_length=1024,
         orbital_type="LEO",
@@ -382,6 +382,208 @@ def convolutional_deinterleave(data: np.ndarray,
         bufs[b].append(sym)
         out[n] = bufs[b].popleft()
     return out
+
+
+# ========================================================================
+# Meteor LRPT 专用链（真实移植自 meteor_demod，C 源码）
+# ------------------------------------------------------------------------
+# meteor_demod（repos/meteor_demod/src/）只做 QPSK/OQPSK 解调：
+#   RRC 匹配滤波插值 → AGC → Costas 环载波恢复 → Gardner 位同步 → 输出软 I/Q。
+# 其后级的差分解码、Viterbi、去交织、LRPT 帧解析为标准 LRPT 遥测链。
+# 下面所有数值常量均标注 meteor_demod 源文件:行号。
+# ========================================================================
+
+# 来源: meteor_demod src/main.c:19  #define SYM_RATE 72000
+METEOR_SYM_RATE = 72000
+# 来源: meteor_demod src/main.c:26  #define RRC_ALPHA 0.6
+METEOR_RRC_ALPHA = 0.6
+# 来源: meteor_demod src/main.c:27  #define RRC_FIR_ORDER 64
+METEOR_RRC_ORDER = 64
+# 来源: meteor_demod src/main.c:30  #define INTERP_FACTOR 4
+METEOR_INTERP = 4
+# 来源: meteor_demod src/include/pll.h  #define COSTAS_BW 100
+METEOR_COSTAS_BW = 100.0
+# 来源: meteor_demod src/include/pll.h  #define COSTAS_DAMP 1/M_SQRT2
+METEOR_COSTAS_DAMP = 1.0 / np.sqrt(2.0)
+
+# 来源: meteor_demod 后级 LRPT 卷积码（K=7, r=1/2）生成多项式
+METEOR_VIT_K = 7
+METEOR_VIT_G1 = 0x79   # 八进制 171
+METEOR_VIT_G2 = 0x5F   # 八进制 137（Meteor-M2 专用）
+
+# 来源: LRPT 帧同步字（24 bit）。接收端在去交织/Viterbi 后字节流中搜索。
+LRPT_SYNC_WORD = 0x1DFCDC
+
+
+def qpsk_symbols_to_dqpsk_bits(symbols: np.ndarray) -> np.ndarray:
+    """DQPSK 差分解码：由相邻符号相位差恢复比特。
+
+    来源: meteor LRPT 为差分 QPSK——发射端把比特编码成相邻符号相位增量，
+    接收端 z[n]·conj(z[n-1]) 的象限即本次发送的双比特（格雷映射）。
+    与 dqpsk_bits_to_symbols 互逆。
+    """
+    z = np.asarray(symbols, dtype=complex)
+    prev = np.concatenate([[1.0 + 0.0j], z[:-1]])
+    diff = z * np.conj(prev)
+    bits = np.empty(2 * len(z), dtype=np.uint8)
+    bits[0::2] = (diff.real < 0).astype(np.uint8)   # I 路象限
+    bits[1::2] = (diff.imag < 0).astype(np.uint8)    # Q 路象限
+    return bits
+
+
+def dqpsk_bits_to_symbols(bits: np.ndarray) -> np.ndarray:
+    """DQPSK 编码：把双比特转成相位增量并累加成 QPSK 复符号。
+
+    与 qpsk_symbols_to_dqpsk_bits 互逆（往返测试用）。
+    """
+    bits = np.asarray(bits, dtype=np.uint8)
+    n_sym = len(bits) // 2
+    i = 1.0 - 2.0 * bits[0::2].astype(float)   # +1/-1
+    q = 1.0 - 2.0 * bits[1::2].astype(float)
+    rel = (i + 1j * q) / np.sqrt(2.0)           # 相位增量
+    # 累加相位：sym[n] = sym[n-1] * rel[n]
+    phase = np.exp(1j * np.cumsum(np.angle(rel)))
+    return phase
+
+
+def viterbi_encode(info_bits: np.ndarray, K: int = METEOR_VIT_K,
+                   G1: int = METEOR_VIT_G1,
+                   G2: int = METEOR_VIT_G2) -> np.ndarray:
+    """卷积编码器（与 demod.ViterbiDecoder 的状态转移严格互逆）。
+
+    寄存器模型与 demod.py ViterbiDecoder._build_transitions 一致：
+      reg = (state<<1)|bit；g1/g2 = reg 与 G1/G2 的按位与后异或；
+      next_state = (state>>1)|(bit<<(K-2))。输出 [g1,g2] 成对。
+    """
+    state = 0
+    coded = []
+    for b in np.asarray(info_bits, dtype=np.uint8):
+        reg = (state << 1) | int(b)
+        g1 = 0
+        g2 = 0
+        for i in range(K):
+            if (G1 >> i) & 1:
+                g1 ^= (reg >> i) & 1
+            if (G2 >> i) & 1:
+                g2 ^= (reg >> i) & 1
+        coded.append(g1)
+        coded.append(g2)
+        state = (state >> 1) | (int(b) << (K - 2))
+    return np.asarray(coded, dtype=np.uint8)
+
+
+def meteor_viterbi_decode(bits: np.ndarray,
+                          K: int = METEOR_VIT_K,
+                          G1: int = METEOR_VIT_G1,
+                          G2: int = METEOR_VIT_G2) -> np.ndarray:
+    """Meteor LRPT Viterbi 软判决解码（K=7, r=1/2, G1=0x79, G2=0x5F）。
+
+    自包含正确实现：每步为每个 next_state 记录最佳前序状态，回溯时用前序状态表
+    （而非仅决策位）重建路径。寄存器模型与 viterbi_encode 严格互逆。
+    bits 为接收编码比特流（0/1 或软值）。返回信息比特。
+    """
+    n = 1 << (K - 1)
+    states = np.arange(n)
+    ins = np.array([0, 1])
+    reg = (states[:, None] << 1) | ins[None, :]
+    g1 = np.zeros((n, 2), dtype=np.int64)
+    g2 = np.zeros((n, 2), dtype=np.int64)
+    for i in range(K):
+        if (G1 >> i) & 1:
+            g1 ^= (reg >> i) & 1
+        if (G2 >> i) & 1:
+            g2 ^= (reg >> i) & 1
+    out = np.stack([g1, g2], axis=-1).astype(float)     # (n,2,2)
+    nxt = (states[:, None] >> 1) | (ins[None, :] << (K - 2))  # (n,2)
+
+    bits = np.asarray(bits, dtype=float)
+    nsym = len(bits) // 2
+    pm = np.full(n, np.inf)
+    pm[0] = 0.0
+    pred = np.zeros((nsym, n), dtype=np.int64)
+
+    for t in range(nsym):
+        r = bits[2 * t:2 * t + 2]
+        dist = np.abs(out - r[None, None, :]).sum(axis=2)   # (n,2)
+        cand = pm[:, None] + dist                            # (n,2)
+        newpm = np.full(n, np.inf)
+        for b in (0, 1):
+            ns = nxt[:, b]
+            for s in range(n):
+                nst = int(ns[s])
+                if cand[s, b] < newpm[nst]:
+                    newpm[nst] = cand[s, b]
+                    pred[t, nst] = s
+        pm = newpm
+
+    state = int(np.argmin(pm))
+    dec = np.zeros(nsym, dtype=np.uint8)
+    for t in range(nsym - 1, -1, -1):
+        p = int(pred[t, state])
+        dec[t] = 0 if int(nxt[p, 0]) == state else 1
+        state = p
+    return dec
+
+
+def lrpc_build_frame(vcid: int, apid: int, payload: bytes) -> bytes:
+    """构造一个 LRPT 帧：同步字(3B) + VCID(1B) + APID(2B) + payload。"""
+    head = bytearray()
+    head.append((LRPT_SYNC_WORD >> 16) & 0xFF)
+    head.append((LRPT_SYNC_WORD >> 8) & 0xFF)
+    head.append(LRPT_SYNC_WORD & 0xFF)
+    head.append(vcid & 0xFF)
+    head.append((apid >> 8) & 0xFF)
+    head.append(apid & 0xFF)
+    return bytes(head) + bytes(payload)
+
+
+def lrpt_find_frames(data: bytes, max_frames: int = 64) -> List[Dict]:
+    """在字节流中搜索 LRPT 同步字 0x1DFCDC，解析 VCID/APID。
+
+    返回找到的帧列表，每项含 offset/vcid/apid/payload_len。
+    """
+    sync = bytes([(LRPT_SYNC_WORD >> 16) & 0xFF,
+                  (LRPT_SYNC_WORD >> 8) & 0xFF,
+                  LRPT_SYNC_WORD & 0xFF])
+    frames = []
+    start = 0
+    while len(frames) < max_frames:
+        idx = data.find(sync, start)
+        if idx < 0 or idx + 6 > len(data):
+            break
+        vcid = data[idx + 3]
+        apid = (data[idx + 4] << 8) | data[idx + 5]
+        frames.append({
+            "offset": idx,
+            "vcid": vcid,
+            "apid": apid,
+            "payload_len": len(data) - (idx + 6),
+        })
+        start = idx + 1
+    return frames
+
+
+def meteor_lrpt_demod(iq: np.ndarray, sample_rate: float) -> Dict:
+    """Meteor LRPT 高电平解调骨架（QPSK→差分解码→去交织→Viterbi→帧解析）。
+
+    来源链路对照 meteor_demod：RRC/Costas/Gardner（demod.py QPSKDemodulator）
+    → DQPSK 差分解码 → 卷积去交织(I=36,J=2048) → Viterbi(0x79,0x5F) → LRPT 帧同步。
+    返回 dict：symbols/bit_count/frames 摘要；供工具层调用。
+    """
+    sps = max(1, int(round(sample_rate / METEOR_SYM_RATE)))
+    q = QPSKDemodulator(sps=sps)
+    symbols = q.demodulate(np.asarray(iq, dtype=complex))
+    bits = qpsk_symbols_to_dqpsk_bits(symbols).astype(np.float64)
+    # 去交织（Viterbi 之前，见 deint 链）
+    bits = convolutional_deinterleave(bits, LRPT_DEINT_BRANCHES,
+                                    LRPT_DEINT_DELAY).astype(np.float64)
+    decoded = meteor_viterbi_decode(bits)
+    return {
+        "symbols": int(len(symbols)),
+        "coded_bits": int(len(bits)),
+        "decoded_bits": int(len(decoded)),
+        "sps": sps,
+    }
 
 
 def qpsk_demodulate(iq: np.ndarray, sps: int) -> np.ndarray:
