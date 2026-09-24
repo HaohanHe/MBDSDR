@@ -614,6 +614,96 @@ class ToolRegistry:
                 category="voice",
             )
 
+        # ── SDRangel 真实 DSP 引擎移植工具 ──
+        # 来源: repos/sdrangel/sdrbase/dsp/* 及 plugins/channelrx/*
+        self.register_sdrangel_tools()
+
+    def register_sdrangel_tools(self):
+        """注册 SDRangel 真实源码移植的 DSP 工具。
+
+        来源: mbdsdr_ai/sdrangel_adapter.py
+          - DSPDeviceEngine  dspdevicesourceengine.cpp:288-337
+          - FFTFilter        fftfilt.cpp:144-186,436-457
+          - DownChannelizer  downchannelizer.cpp:116-144 (HB order=48, downchannelizer.h:31)
+        """
+        import numpy as np
+        from .sdrangel_adapter import (
+            FFTFilter, DownChannelizer, DSPDeviceEngine, DEVICE_PRESETS,
+        )
+
+        def _dsp_engine_create(args):
+            sr = int(args.get("sample_rate", 1024000))
+            cf = int(args.get("center_frequency", 100e6))
+            eng = DSPDeviceEngine(sample_rate=sr, center_frequency=cf)
+            eng.start()
+            return ToolResult(
+                success=True,
+                content=f"DSPDeviceEngine 创建: sr={sr} center={cf} state={eng.state}",
+                data={"sample_rate": sr, "center_frequency": cf, "state": eng.state,
+                      "sources": DEVICE_PRESETS},
+            )
+
+        def _fft_filter(args):
+            f1 = float(args.get("f1", 0.0))
+            f2 = float(args.get("f2", 0.05))
+            flen = int(args.get("flen", 1024))
+            f = FFTFilter(f1, f2, flen=flen)
+            kind = "lowpass" if f1 == 0 else ("highpass" if f2 == 0 else
+                   ("bandpass" if f1 < f2 else "bandreject"))
+            return ToolResult(
+                success=True,
+                content=f"FFTFilter 设计: {kind} f1={f1} f2={f2} flen={flen} block={flen//2}",
+                data={"kind": kind, "f1": f1, "f2": f2, "flen": flen,
+                      "block": flen // 2, "source": "fftfilt.cpp:144-186"},
+            )
+
+        def _downchannelize(args):
+            bsr = int(args.get("baseband_sr", 1024000))
+            csr = int(args.get("channel_sr", 64000))
+            off = float(args.get("channel_offset", 0.0))
+            dc = DownChannelizer(bsr, csr, channel_offset=off)
+            return ToolResult(
+                success=True,
+                content=f"DownChannelizer: {bsr}->{dc.channel_sr} "
+                        f"({dc.n_stages} 级半带, offset={off}Hz)",
+                data={"baseband_sr": bsr, "channel_sr": dc.channel_sr,
+                      "n_stages": dc.n_stages, "channel_offset": off,
+                      "hb_order": 48, "source": "downchannelizer.cpp:136, h=downchannelizer.h:31"},
+            )
+
+        self.register(
+            name="dsp_engine_create",
+            description="创建 SDRangel 移植的 DSP 采样流引擎（源→DC校正→多通道下变频→解调）。",
+            parameters={"type": "object", "properties": {
+                "sample_rate": {"type": "integer", "description": "基带采样率 Hz，默认 1024000"},
+                "center_frequency": {"type": "integer", "description": "中心频率 Hz，默认 100e6"},
+            }, "required": []},
+            handler=_dsp_engine_create,
+            category="dsp",
+        )
+        self.register(
+            name="fft_filter",
+            description="设计 SDRangel fftfilt overlap-add FFT 滤波器（低通/高通/带通/带阻）。f1,f2 为归一化频率(0.5=Nyquist)。",
+            parameters={"type": "object", "properties": {
+                "f1": {"type": "number", "description": "下边带/高通截止（归一化），低通=0"},
+                "f2": {"type": "number", "description": "上边带/低通截止（归一化），高通=0"},
+                "flen": {"type": "integer", "description": "FFT 长度(2的幂)，默认1024"},
+            }, "required": ["f1", "f2"]},
+            handler=_fft_filter,
+            category="dsp",
+        )
+        self.register(
+            name="downchannelize",
+            description="SDRangel 移植的整数 2^N 下变频通道化：NCO混频+半带链抽取。",
+            parameters={"type": "object", "properties": {
+                "baseband_sr": {"type": "integer", "description": "基带采样率 Hz"},
+                "channel_sr": {"type": "integer", "description": "目标通道采样率 Hz（须为 baseband_sr/2^N）"},
+                "channel_offset": {"type": "number", "description": "通道中心偏移 Hz"},
+            }, "required": ["baseband_sr", "channel_sr"]},
+            handler=_downchannelize,
+            category="dsp",
+        )
+
     def get_status_text(self) -> str:
         """获取人类可读的工具注册表状态。"""
         stats = self.get_stats()

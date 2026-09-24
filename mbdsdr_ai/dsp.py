@@ -286,6 +286,16 @@ def fm_demod(x: np.ndarray, deviation: float = 75000.0,
     y[n] = angle(x[n] * conj(x[n-1])) / (2π * deviation / sample_rate)
 
     deviation: 最大频偏，广播 FM 75kHz，窄带 FM 5kHz
+
+    ── SDRangel NFM 真实参数（来源: plugins/channelrx/demodnfm/）──
+      - 默认 m_rfBandwidth = 12500 Hz   (nfmdemodsettings.cpp:57)
+      - 默认 m_afBandwidth = 3000 Hz    (nfmdemodsettings.cpp:58)
+      - 默认 m_fmDeviation = 5000 Hz    (nfmdemodsettings.cpp:59)
+      - RF 带通 [-dev,+dev]/channelSR   (nfmdemodsink.cpp:297-299)
+      - FM 缩放 = audioSR/fmDeviation   (nfmdemodsink.cpp:321,390)
+      - 相位差分鉴频 unwrap 到[-1,1]    (sdrbase/dsp/phasediscri.h:75-92)
+      - 音频带通 300Hz ~ afBandwidth    (nfmdemodsink.cpp:326)
+    精确实现见 mbdsdr_ai/sdrangel_adapter.py::NFMDemodSink。
     """
     if len(x) < 2:
         return np.zeros(len(x), dtype=np.float32)
@@ -433,6 +443,15 @@ def ssb_demod(x: np.ndarray, mode: str = "USB",
     LSB: 取下边带
 
     carrier_offset: 载波偏移频率（BFO），典型 1500Hz
+
+    ── SDRangel SSB 滤波器真实参数（来源: plugins/channelrx/demodssb/ssbdemodsink.cpp）──
+      - FFT 长度 m_ssbFftLen = 2048            (ssbdemodsink.cpp:31)
+      - 默认带宽 m_Bandwidth = 5000 Hz         (ssbdemodsink.cpp:52)
+      - 默认低截 m_LowCutoff = 300 Hz          (ssbdemodsink.cpp:53)
+      - 滤波器 f1=LowCutoff/audioSR, f2=Bandwidth/audioSR (ssbdemodsink.cpp:73,301)
+      - USB 保留正频率 bin / LSB 保留负 bin    (fftfilt.cpp:475-502)
+      - 检波 audio = (I+Q)*0.7                 (ssbdemodsink.cpp:208)
+    精确 overlap-add 边带滤波见 mbdsdr_ai/sdrangel_adapter.py::SSBFilter/SSBDemodSink。
     """
     n = len(x)
     t = np.arange(n) / sample_rate
@@ -514,7 +533,24 @@ class AGC:
     自动增益控制（简化版）。
 
     维持输出信号幅度在目标水平。
+
+    ── SDRangel 真实参数校准（来源: sdrbase/dsp/agc.cpp:53-179 MagAGC）──
+      - historySize = 12000 样本     (ssbdemodsink.cpp:40  m_agc(12000, target, 1e-2))
+      - target (m_R) = 3276          (ssbdemodsink.cpp:32  -10dB 幅度, 32768/10)
+      - threshold = 1e-2 (magsq)     (agc.cpp:57)
+      - stepLength = min(2400, history/2)  (agc.cpp:60, @48kHz 最长 50ms 攻击/释放)
+      - stepDelta  = 1/stepLength    (agc.cpp:61)
+      - 增益 = target / sqrt(mean(|x|^2)) (agc.cpp:117)
+      - 硬限幅: 输出幅度不超过 1.0    (agc.cpp:104-111)
+    本类保持一阶 attack/release 结构；精确的滑动均值+smootherstep 包络见
+    mbdsdr_ai/sdrangel_adapter.py::MagAGC（与 SDRangel 逐行对齐）。
     """
+
+    # SDRangel MagAGC 标定常量（供调用方参考/对齐）
+    SDRANGEL_HISTORY = 12000        # ssbdemodsink.cpp:40
+    SDRANGEL_TARGET_I16 = 3276      # ssbdemodsink.cpp:32
+    SDRANGEL_STEP_LEN_MAX = 2400    # agc.cpp:60  (@48kHz = 50ms)
+    SDRANGEL_THRESHOLD = 1e-2       # agc.cpp:57
 
     def __init__(self, target_level: float = 0.5, attack: float = 0.01,
                  release: float = 0.001, max_gain: float = 60.0):
