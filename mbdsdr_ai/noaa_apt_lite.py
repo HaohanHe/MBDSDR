@@ -51,6 +51,15 @@ APT_HALF = APT_SYNC_LEN + APT_SPACE_LEN + APT_IMAGE_LEN + APT_TELEM_LEN  # 1040
 APT_IMG_A_OFFSET = APT_SYNC_LEN + APT_SPACE_LEN               # 86
 APT_IMG_B_OFFSET = APT_HALF + APT_SYNC_LEN + APT_SPACE_LEN    # 1126
 
+# --- SatDump 交叉校准 (2026-09) ---
+# SatDump plugins/analog_support/noaa_apt/module_noaa_apt_decoder.cpp 印证：
+#   :802-803  cha = crop_to(86, 86+909); chb = crop_to(1126, 1126+909)
+#   :1018     for (int i = 0; i < 39; i++)  // 同步段 39 像素
+#   :115-153  NOAA APT 下行频率 137.1 / 137.9125 / 137.62 MHz
+# 与本文件 APT_SYNC_LEN=39 / APT_IMAGE_LEN=909 / 偏移 86,1126 完全一致。
+# 数字 HRPT 帧参数见 mbdsdr_ai/satdump_adapter.py HRPT_*：
+#   665.4kbps BPSK, 60-bit sync 0x0A116FD719D83C95, 11090 words x 10 bits。
+
 # 来源: noaa-apt src/default_settings.toml [profiles.standard]
 #   work_rate=12480 (=FINAL_RATE*3)，resample_cutout=4800，resample_atten=30，
 #   resample_delta_freq=1000，demodulation_atten=25。

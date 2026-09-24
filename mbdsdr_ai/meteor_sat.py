@@ -235,6 +235,23 @@ METEOR_SATS: Dict[str, MeteorSatParams] = {
         description="俄罗斯Meteor-M2极轨气象卫星（LRPT 72kbaud QPSK）",
     ),
 
+    # --- SatDump 真实源码交叉校准 (2026-09 移植) ---
+    # 以下常量以 SatDump 上游为准，见 mbdsdr_ai/satdump_adapter.py：
+    #   * 符号率 72000 sym/s QPSK 与上游一致:
+    #     SatDump resources/pipelines/Meteor-M.json "meteor_m2_lrpt":
+    #       psk_demod symbolrate=72e3, rrc_alpha=0.5, pll_bw=0.002
+    #     (注: 本文件上方 meteor_demod 链用 rrc_alpha=0.6，是另一套实现；
+    #      SatDump 官方 LRPT 链路取 0.5，以 satdump_adapter.LRPT_RRC_ALPHA 为准。)
+    #   * Viterbi 多项式: SatDump src-core/common/codings/viterbi/viterbi27.h:8
+    #       static std::vector<int> CCSDS_R2_K7_POLYS = {79, 109};
+    #     十进制 {79,109} = {0x4F,0x6D}，即上面 {0x79,0x5B} 的位反转存储；
+    #     satdump_adapter.LRPT_VITERBI_POLYS=(79,109) 与上游逐值一致。
+    #   * CADU 1024B、同步字 0x1dcf fc1d:
+    #     SatDump plugins/meteor_support/meteor/module_meteor_lrpt_decoder.cpp:14,256
+    #   * 成像幅宽: scan_angle=110.1°, image_width=1568
+    #     SatDump resources/projections_settings/meteor_m2-4_msumr_lrpt.json
+    # ================================================================
+
     # ===== 卫星电视 =====
     "dvbs_qpsk": MeteorSatParams(
         name="DVB-S QPSK",
