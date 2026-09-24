@@ -574,6 +574,46 @@ class ToolRegistry:
                 category="meta",
             )
 
+            # ── Codec2 / FreeDV voice codec tools ──────────────────
+            self.register(
+                name="codec2_encode",
+                description="Codec2 1600bps 语音编码：将 8kHz 音频采样压缩为比特流。",
+                parameters={"type": "object", "properties": {
+                    "audio": {"type": "array", "items": {"type": "number"}, "description": "8kHz 音频采样数组"}
+                }, "required": ["audio"]},
+                handler=lambda args: self._codec2_encode_handler(args),
+                category="voice",
+            )
+            self.register(
+                name="codec2_decode",
+                description="Codec2 1600bps 语音解码：将比特流恢复为 8kHz 音频采样。",
+                parameters={"type": "object", "properties": {
+                    "bits": {"type": "array", "items": {"type": "integer"}, "description": "编码比特数组"}
+                }, "required": ["bits"]},
+                handler=lambda args: self._codec2_decode_handler(args),
+                category="voice",
+            )
+            self.register(
+                name="freedv_modulate",
+                description="FreeDV 调制：将比特流调制为音频信号（700D OFDM 或 1600 DBPSK）。",
+                parameters={"type": "object", "properties": {
+                    "bits": {"type": "array", "items": {"type": "integer"}, "description": "输入比特"},
+                    "mode": {"type": "string", "description": "模式: 700D 或 1600", "default": "700D"}
+                }, "required": ["bits"]},
+                handler=lambda args: self._freedv_modulate_handler(args),
+                category="voice",
+            )
+            self.register(
+                name="freedv_demodulate",
+                description="FreeDV 解调：将音频信号解调为比特流。",
+                parameters={"type": "object", "properties": {
+                    "signal": {"type": "array", "items": {"type": "number"}, "description": "音频采样"},
+                    "mode": {"type": "string", "description": "模式: 700D 或 1600", "default": "700D"}
+                }, "required": ["signal"]},
+                handler=lambda args: self._freedv_demodulate_handler(args),
+                category="voice",
+            )
+
     def get_status_text(self) -> str:
         """获取人类可读的工具注册表状态。"""
         stats = self.get_stats()
@@ -594,3 +634,55 @@ class ToolRegistry:
         for cat, names in sorted(categories.items()):
             lines.append(f"  [{cat}] {', '.join(names)}")
         return "\n".join(lines)
+
+    # ── Codec2 / FreeDV handlers ──────────────────────────────────────
+
+    def _codec2_encode_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        """Codec2 encode handler."""
+        import numpy as np
+        from .codec2_lite import codec2_encode
+        audio = np.array(args.get("audio", []), dtype=float)
+        bits = codec2_encode(audio)
+        return ToolResult(
+            success=True,
+            content=f"Codec2 encoded {len(audio)} samples → {len(bits)} bits ({len(bits)/0.04:.0f} bps)",
+            data={"bits": bits.tolist(), "n_bits": len(bits)},
+        )
+
+    def _codec2_decode_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        """Codec2 decode handler."""
+        import numpy as np
+        from .codec2_lite import codec2_decode
+        bits = np.array(args.get("bits", []), dtype=np.uint8)
+        audio = codec2_decode(bits)
+        return ToolResult(
+            success=True,
+            content=f"Codec2 decoded {len(bits)} bits → {len(audio)} audio samples",
+            data={"audio": audio.tolist(), "n_samples": len(audio)},
+        )
+
+    def _freedv_modulate_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        """FreeDV modulate handler."""
+        import numpy as np
+        from .freedv_modem import freedv_modulate
+        bits = np.array(args.get("bits", []), dtype=np.uint8)
+        mode = args.get("mode", "700D")
+        signal = freedv_modulate(bits, mode)
+        return ToolResult(
+            success=True,
+            content=f"FreeDV {mode}: modulated {len(bits)} bits → {len(signal)} audio samples",
+            data={"signal": signal.tolist(), "n_samples": len(signal)},
+        )
+
+    def _freedv_demodulate_handler(self, args: Dict[str, Any]) -> "ToolResult":
+        """FreeDV demodulate handler."""
+        import numpy as np
+        from .freedv_modem import freedv_demodulate
+        signal = np.array(args.get("signal", []), dtype=float)
+        mode = args.get("mode", "700D")
+        bits, snr = freedv_demodulate(signal, mode)
+        return ToolResult(
+            success=True,
+            content=f"FreeDV {mode}: demodulated {len(signal)} samples → {len(bits)} bits (SNR est: {snr:.1f} dB)",
+            data={"bits": bits.tolist(), "n_bits": len(bits), "snr": snr},
+        )
