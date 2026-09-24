@@ -142,6 +142,9 @@ class RFSkyView(QWidget):
         # sim 模式右上角显示橙色“模拟数据”角标；none 时画布中央显示空状态提示。
         self._data_source: str = "none"
 
+        # 观测站坐标（真实 GNSS 或手动配置）；未定位时为 None，不显示坐标
+        self._observer: Optional[Dict[str, float]] = None
+
         # 新时空：授时信息
         self._time_info = {
             "utc_time": None,
@@ -222,6 +225,33 @@ class RFSkyView(QWidget):
             source = "none"
         self._data_source = source
         self.update()
+
+    def set_gnss_position(self, fix_dict: dict):
+        """由真实串口 GNSS fix 驱动观测站坐标与数据来源标注。
+
+        fix_dict 口径：{source, latitude, longitude, altitude_m, ...}
+        - source=="real"：更新观测站坐标并设 source="real"（无角标）；
+        - 其它（none/无坐标）：清空坐标并设 source="none"，画布显示空状态，
+          绝不在无真实数据时显示坐标。
+        （与真硬件联调：坐标变化后由上层 SatelliteTracker.set_location 刷新卫星，
+          这里只负责记录观测站位置与来源标注。）
+        """
+        source = fix_dict.get("source", "none")
+        if source == "real" and fix_dict.get("latitude") is not None \
+                and fix_dict.get("longitude") is not None:
+            self._observer = {
+                "lat": fix_dict["latitude"],
+                "lon": fix_dict["longitude"],
+                "alt_m": fix_dict.get("altitude_m"),
+            }
+            self.set_data_source("real")
+        else:
+            self._observer = None
+            self.set_data_source("none")
+
+    def get_observer(self) -> Optional[Dict[str, float]]:
+        """返回当前观测站坐标 {lat,lon,alt_m}；未定位时 None。"""
+        return self._observer
 
     def add_object(self, obj: SkyObject):
         """添加一个天空对象。"""

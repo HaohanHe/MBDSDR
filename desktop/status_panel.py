@@ -294,6 +294,46 @@ class StatusPanel(QWidget):
             self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "--")
             self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "--")
 
+    def update_gnss(self, fix_dict: dict):
+        """由真实串口 GNSS（mbdsdr_ai.serial_gnss.get_fix）驱动 GPS 组。
+
+        fix_dict 口径：{source, latitude, longitude, altitude_m, satellites,
+                       hdop, speed_kmh, course_deg, utc_time, fix_quality, timestamp}
+        source=="real"  → 绿色(#5B8C5A)显示真实坐标/卫星数/HDOP/高度；
+        source=="none"  → 灰色“未连接/无数据”，坐标一律空，绝不造假。
+        （UI 与真硬件联调待插模块后再细化。）
+        """
+        source = fix_dict.get("source", "none")
+        ts = fix_dict.get("timestamp")
+        self._update_timestamp(self.gps_timestamp, ts)
+
+        if source != "real":
+            # 未连接 / 无定位：灰色
+            self.gps_fix.setText("未连接")
+            self.gps_fix.setStyleSheet("color: #999999;")
+            self.gps_sats.setText("--")
+            self.gps_lat.setText("--")
+            self.gps_lon.setText("--")
+            self.gps_alt.setText("--")
+            self.gps_hdop.setText("--")
+            self.gps_group.setTitle("GPS / 北斗")
+            return
+
+        # 已定位：绿色 #5B8C5A
+        self.gps_fix.setText("已定位")
+        self.gps_fix.setStyleSheet("color: #5B8C5A;")
+        self.gps_group.setTitle("GPS / 北斗")
+        lat = fix_dict.get("latitude")
+        lon = fix_dict.get("longitude")
+        alt = fix_dict.get("altitude_m")
+        hdop = fix_dict.get("hdop")
+        sats = fix_dict.get("satellites")
+        self.gps_sats.setText(str(sats) if sats is not None else "--")
+        self.gps_lat.setText(f"{lat:.6f}" if lat is not None else "--")
+        self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "--")
+        self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "--")
+        self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "--")
+
     @Slot(dict)
     def on_imu_updated(self, imu: dict):
         """IMU 数据更新。
