@@ -521,7 +521,7 @@ if HAS_OPENGL:
 
         def paintGL(self):
             self.generator.generate()
-            self.gl.glClear(self.gl.GL_COLOR_BUFFER_BIT)
+            self.gl.glClear(0x00004000)  # GL_COLOR_BUFFER_BIT; QOpenGLFunctions does not expose the constant
 
             # 用 QPainter 在 OpenGL 上绘制（简化实现，保证兼容性）
             painter = QPainter(self)
@@ -656,7 +656,7 @@ if HAS_OPENGL:
 # 工厂函数：自动选择 OpenGL 或软件渲染
 # ============================================================================
 
-def create_spectrum_widget(parent=None, prefer_opengl: bool = True):
+def create_spectrum_widget(parent=None, prefer_opengl: bool = False):
     """创建频谱组件，优先 OpenGL，不可用时降级为 QPainter。"""
     # 检测平台：offscreen/minimal 不支持 OpenGL，直接用软件渲染
     try:

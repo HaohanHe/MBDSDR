@@ -205,7 +205,8 @@ class MainWindow(QMainWindow):
 
         # 渲染模式指示
         render_text = "OpenGL" if HAS_OPENGL else "软件渲染"
-        render_label = QLabel(f"  渲染: {render_text}  ")
+        self._render_label = QLabel(f"  渲染: {render_text}  ")
+        render_label = self._render_label
         render_label.setStyleSheet("color: #6B6B6B; font-size: 9pt;")
         toolbar.addWidget(render_label)
 
@@ -268,7 +269,9 @@ class MainWindow(QMainWindow):
         spectrum_layout.addWidget(spectrum_header)
 
         # 频谱组件
-        self.spectrum = create_spectrum_widget(prefer_opengl=True)
+        self.spectrum = create_spectrum_widget(prefer_opengl=False)  # QOpenGLWidget fails to composite on some Windows GPUs; QPainter is equivalent here
+        _is_gl = self.spectrum.__class__.__name__ == "SpectrumGLWidget"
+        self._render_label.setText("  渲染: " + ("OpenGL" if _is_gl else "软件渲染 (QPainter)") + "  ")
         self.spectrum.freq_changed.connect(self._on_spectrum_freq_changed)
         spectrum_layout.addWidget(self.spectrum, stretch=1)
 
