@@ -88,8 +88,8 @@ def unpack77(bits77: list[int]) -> dict:
             isnr = irpt - 35
             if isnr > 50:
                 isnr -= 101
-            s = f"{isnr:+03d}".replace("+", "+") if isnr >= 0 else f"{isnr:03d}"
-            sep = " R" if ir == 1 else " "
+            s = f"{isnr:+03d}"
+            sep = " R" if ir == 1 else ""
             text = f"{call1}{sep} {call2} {s}".strip()
         else:
             text = None
