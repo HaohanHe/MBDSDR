@@ -676,6 +676,12 @@ class MainWindow(QMainWindow):
                                    {"freq_hz": freq_hz, "mode": mode})
         self.spectrum.set_center_freq(freq_hz / 1e6)
 
+    @Slot(float)
+    def _on_module_tune(self, freq_hz: float):
+        """模块面板里改了频率 → 同步到频谱中心频。"""
+        self.spectrum.set_center_freq(freq_hz / 1e6)
+        self.freq_label.setText(f"{freq_hz / 1e6:.3f} MHz")
+
     @Slot(str)
     def _on_ai_command(self, text: str):
         # AI 面板提交的自然语言指令 -> 转发给 AI worker

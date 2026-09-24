@@ -1380,6 +1380,69 @@ class SoapySDRBackend(SDRBackend):
                 return False
         return True
 
+    # ------------------------------------------------------------------
+    #  对齐 SDR++ soapy_source 的设备控制面
+    #  （来源: source_modules/soapy_source/src/main.cpp）
+    # ------------------------------------------------------------------
+    def set_antenna(self, antenna: str) -> bool:
+        """选择接收天线。
+
+        来源: soapy_source/main.cpp:334 setAntenna(RX,chan,antennaList[uiAntennaId])
+              + :372 listAntennas()。天线名必须来自 list_antennas()，不写死。
+        """
+        if self._sdr is None:
+            return False
+        try:
+            self._sdr.setAntenna(self._rx, self._chan, str(antenna))
+            self._antenna = str(antenna)
+            return True
+        except Exception as e:
+            self.status.error = f"setAntenna({antenna}) 失败: {e}"
+            return False
+
+    def list_antennas(self) -> List[str]:
+        """列出本设备可用接收天线。来源: soapy_source/main.cpp:172。"""
+        if self._sdr is None:
+            return []
+        try:
+            return list(self._sdr.listAntennas(self._rx, self._chan))
+        except Exception:
+            return []
+
+    def select_bandwidth_by_samplerate(self, sample_rate: float) -> float:
+        """自动选一个 ≥ 采样率的最小模拟带宽。
+
+        来源: soapy_source/main.cpp:101-115 selectBwBySr()：
+          从大到小遍历带宽列表，挑第一个 >= samplerate 的；
+          SDR++ 里 "Auto" 档(-1)就走这个逻辑。
+        """
+        if self._sdr is None:
+            return 0.0
+        try:
+            rng = self._sdr.getBandwidthRange(self._rx, self._chan)
+            cands = [float(r.minimum()) for r in rng]
+        except Exception:
+            return 0.0
+        chosen = 0.0
+        for bw in sorted(cands, reverse=True):   # 从大到小
+            if bw >= sample_rate:
+                chosen = bw
+            else:
+                break
+        if chosen > 0:
+            self.set_bandwidth(chosen)
+        return chosen
+
+    def recommended_block_size(self) -> int:
+        """推荐单次 readStream 块大小。
+
+        来源: soapy_source/main.cpp:501 blockSize = sampleRate/200.0f
+        即每秒约 200 块。
+        """
+        sr = self.status.sample_rate_hz or self.device.sample_rate_range[1]
+        return max(512, int(sr / 200.0))
+
+
     def readback_hw_state(self) -> bool:
         """open 后回读真实频率/采样率/增益/范围，对齐 SDRDevice 与 SDRStatus。"""
         if self._sdr is None:
