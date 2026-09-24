@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTabWidget, QStatusBar, QToolBar, QMenuBar, QMenu, QLabel,
     QFileDialog, QMessageBox, QInputDialog, QComboBox, QPushButton,
-    QFrame, QSizePolicy
+    QFrame, QSizePolicy, QDialog, QDialogButtonBox
 )
 
 # 确保能导入同目录模块
@@ -28,6 +28,7 @@ from status_panel import StatusPanel
 from ai_panel import AIPanel
 from mcp_worker import MCPWorkerManager
 from rf_sky_view import RFSkyView, SkyObject, AntennaPointing, HeatmapCell, SatelliteTracker
+from module_panel import ModulePanel
 
 
 class MainWindow(QMainWindow):
@@ -59,6 +60,9 @@ class MainWindow(QMainWindow):
         self._observer_lon: Optional[float] = None
         self._is_sim: bool = False  # 是否处于模拟模式（模拟时天空图标注“模拟数据”）
         self.sat_tracker: Optional[SatelliteTracker] = None
+        # 真实 SDR 后端（SoapySDR/RTL-SDR/HackRF 等）。由设备选择对话框真实 connect 后填充；
+        # 与 self._worker（ai-sdr Mini WebSocket）互斥。硬件失败绝不静默切 mock。
+        self._active_sdr_backend: Optional[object] = None
 
         # 构建 UI
         self._build_menu_bar()
@@ -293,6 +297,12 @@ class MainWindow(QMainWindow):
         self.sky_view.object_clicked.connect(self._on_sky_object_clicked)
         left_tab.addTab(self.sky_view, "射频天空")
 
+        # Tab 3: SDR++ 式模块面板（源设备选择 + 信号流图 + 参数 + sink）
+        # 来源: SDR++ core/src/core.cpp:138-157 的 Source/Radio/Sinks 菜单结构
+        self.module_panel = ModulePanel()
+        self.module_panel.tune_requested.connect(self._on_module_tune)
+        left_tab.addTab(self.module_panel, "模块 / 信号流")
+
         # 初始化天空视图演示数据
         self._init_sky_view_demo()
 
@@ -412,21 +422,139 @@ class MainWindow(QMainWindow):
         self.sim_btn.setEnabled(False)
         self.disconnect_btn.setEnabled(True)
 
+    # 设备选择对话框中"ai-sdr Mini WebSocket"特殊条目的 data 标记
+    _WS_SPECIAL = "__ai_sdr_mini_ws__"
+
     def _connect_dialog(self):
-        """弹出连接对话框。"""
-        host, ok = QInputDialog.getText(
-            self, "连接 ai-sdr Mini",
-            "设备 IP 地址:",
-            text="192.168.4.1"
-        )
-        if ok and host.strip():
-            port, ok2 = QInputDialog.getInt(
-                self, "连接 ai-sdr Mini",
-                "端口:",
-                value=81, min=1, max=65535
-            )
-            if ok2:
-                self._connect_real(host.strip(), port)
+        """弹出设备选择对话框：动态枚举真实 SDR 设备，选中后真实 connect。
+
+        来源: mbdsdr_ai/sdr_backend.py enumerate_all_sdr_devices() ——
+        合并 SoapySDR 总线 + 原生 RTL-SDR/HackRF 枚举并去重。
+        无设备时下拉框显示"未发现 SDR 设备"，不再写死设备列表。
+        """
+        # 动态枚举真实设备（任何异常都不应让 GUI 崩溃）
+        try:
+            from mbdsdr_ai.sdr_backend import (
+                enumerate_all_sdr_devices, build_backend_for_device)
+            devices = enumerate_all_sdr_devices()
+        except Exception as e:
+            devices = []
+            QMessageBox.warning(self, "设备枚举失败", f"枚举 SDR 设备时出错：\n{e}")
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("选择 SDR 设备")
+        dlg.setMinimumWidth(420)
+        layout = QVBoxLayout(dlg)
+
+        layout.addWidget(QLabel("检测到的 SDR 设备："))
+        combo = QComboBox()
+
+        # 保留原 ai-sdr Mini WebSocket 入口（自研板走 MCP/WebSocket）
+        combo.addItem("ai-sdr Mini (WebSocket 192.168.4.1:81)", self._WS_SPECIAL)
+
+        if devices:
+            for dev in devices:
+                label = dev.get("label") or dev.get("driver", "SDR 设备")
+                combo.addItem(label, dev)
+        else:
+            # 无真实设备：显式提示，且不可选（data=None）
+            none_item = "未发现 SDR 设备（请接好 USB/安装 SoapySDR 驱动后点刷新）"
+            combo.addItem(none_item, None)
+            idx = combo.count() - 1
+            combo.model().item(idx).setEnabled(False)
+        layout.addWidget(combo)
+
+        # 刷新按钮：重新枚举并重建下拉框内容
+        refresh_btn = QPushButton("刷新设备列表")
+        layout.addWidget(refresh_btn)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+
+        def _reload_devices():
+            """点刷新：重新枚举，保留已选。"""
+            try:
+                new_devices = enumerate_all_sdr_devices()
+            except Exception:
+                new_devices = []
+            prev = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("ai-sdr Mini (WebSocket 192.168.4.1:81)", self._WS_SPECIAL)
+            if new_devices:
+                for dev in new_devices:
+                    combo.addItem(dev.get("label") or dev.get("driver", "SDR 设备"), dev)
+            else:
+                combo.addItem("未发现 SDR 设备（请接好 USB/安装 SoapySDR 驱动后点刷新）", None)
+                combo.model().item(combo.count() - 1).setEnabled(False)
+            # 尽量恢复之前的选择
+            match = combo.findData(prev)
+            combo.setCurrentIndex(match if match >= 0 else 0)
+            combo.blockSignals(False)
+
+        refresh_btn.clicked.connect(_reload_devices)
+
+        if dlg.exec() != QDialog.Accepted:
+            return
+
+        data = combo.currentData()
+        if data is None:
+            return  # "未发现设备"项不可选；兜底
+
+        # ai-sdr Mini WebSocket：走原 host/port 流程
+        if data == self._WS_SPECIAL:
+            host, ok = QInputDialog.getText(
+                self, "连接 ai-sdr Mini", "设备 IP 地址:", text="192.168.4.1")
+            if ok and host.strip():
+                port, ok2 = QInputDialog.getInt(
+                    self, "连接 ai-sdr Mini", "端口:",
+                    value=81, min=1, max=65535)
+                if ok2:
+                    self._connect_real(host.strip(), port)
+            return
+
+        # 真实 SDR 设备：构造对应后端并真实 connect。
+        # 红线：硬件失败绝不静默切 mock 报 success，弹错误提示。
+        backend = build_backend_for_device(data)
+        if backend is None:
+            QMessageBox.critical(
+                self, "连接失败",
+                f"无法为设备「{data.get('label', '?')}」构造后端。")
+            return
+
+        try:
+            ok = backend.connect()
+        except Exception as e:
+            ok = False
+            backend.status.error = f"connect 异常: {e}"
+
+        if not ok:
+            err = backend.get_status().error or "未知错误（设备被占用/无权限/驱动缺失）"
+            QMessageBox.critical(
+                self, "连接失败",
+                f"无法连接到 {backend.device.name}：\n{err}\n\n"
+                f"（未切换到模拟模式，请检查硬件后重试）")
+            try:
+                backend.disconnect()
+            except Exception:
+                pass
+            return
+
+        # 连接成功：停掉旧 worker，切换到真实后端
+        self._worker_manager.stop()
+        self._worker = None
+        self._active_sdr_backend = backend
+        self._is_sim = False
+        self.conn_label.setText(f"  状态: {backend.device.name}  ")
+        self.conn_label.setStyleSheet("color: #6BA89A; font-weight: 600;")
+        self.status_conn.setText(backend.device.name)
+        self.connect_btn.setEnabled(False)
+        self.sim_btn.setEnabled(False)
+        self.disconnect_btn.setEnabled(True)
+        self.statusBar().showMessage(
+            f"已连接 {backend.device.name}", 4000)
 
     def _connect_real(self, host: str, port: int):
         """连接真实硬件。"""
@@ -459,6 +587,13 @@ class MainWindow(QMainWindow):
 
     def _disconnect(self):
         """断开连接。"""
+        # 断开真实 SDR 后端（SoapySDR/RTL-SDR/HackRF）
+        if self._active_sdr_backend is not None:
+            try:
+                self._active_sdr_backend.disconnect()
+            except Exception:
+                pass
+            self._active_sdr_backend = None
         if self._worker_manager:
             self._worker_manager.stop()
         self._worker = None

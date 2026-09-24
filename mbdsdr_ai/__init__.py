@@ -36,7 +36,12 @@ from .self_evolution import SelfEvolutionEngine, EvolutionProposal
 from .guardian import Guardian, Snapshot
 from .workflow_engine import WorkflowEngine, Workflow, WorkflowResult
 from .scheduler import Scheduler, ScheduledTask
-from .sdr_backend import SDRBackendManager, SDRBackend, MockSDRBackend, RTLSDRBackend, AISDRMiniBackend, SDRDevice, SDRStatus
+from .sdr_backend import (
+    SDRBackendManager, SDRBackend, MockSDRBackend, RTLSDRBackend,
+    AISDRMiniBackend, HackRFBackend, USRPBackend, FileIQBackend,
+    SoapySDRBackend, SDRDevice, SDRStatus,
+    enumerate_all_sdr_devices, build_backend_for_device,
+)
 from .spectrum_processor import SpectrumProcessor, SpectrumData, WaterfallData
 from .sdr_tools import register_sdr_tools
 from .dsp import (
