@@ -223,6 +223,7 @@ class MBDSDRAgent:
         self._register_aprs_tools()
         self._register_ax25_tools()
         self._register_analog_demod_tools()
+        self._register_acars_tools()
         # GQRX 真实 AGC / IQ校正 / 接收机管道（来源 gqrx src/dsp/agc_impl.cpp 等）
         from mbdsdr_ai.gqrx_receiver import register_gqrx_receiver_tools
         register_gqrx_receiver_tools(self.tool_registry)
@@ -1083,6 +1084,99 @@ class MBDSDRAgent:
             },
             handler=_demod,
             category="demod",
+        )
+
+    def _register_acars_tools(self):
+        """ACARS 航空通信：MSK 解调 + 帧同步 + CRC16 消息解析。
+        移植自 acarsdec (TLeconte) + libacars (szpajder)。"""
+        from mbdsdr_ai.acars_decoder import (
+            acars_decode_iq, acars_parse_message, acars_msk_demod,
+        )
+
+        def _decode(args):
+            audio = args.get("audio")
+            if not isinstance(audio, list):
+                return ToolResult(False, "audio 必须是实数 FM 解调音频列表")
+            sr = float(args.get("sample_rate", 12500) or 12500)
+            try:
+                res = acars_decode_iq(audio, sr, 1200)
+            except Exception as e:
+                return ToolResult(False, f"ACARS 解码失败: {e}")
+            return ToolResult(True, json.dumps(res, ensure_ascii=False, default=str))
+
+        self.tool_registry.register(
+            name="acars_decode_iq",
+            description="ACARS 航空通信寻址与报告系统 (VHF ~131.5MHz) 解码："
+                        "输入 FM 解调后的单声道音频，做 MSK 解调(1200bps, "
+                        "mark=2400/space=1200Hz)、双 SYN(0x16) 帧同步、CRC16-CCITT "
+                        "校验，输出飞机注册号(reg)、模式(mode)、标签(label)、"
+                        "块序号、航班号与文本内容。移植自 acarsdec+libacars。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "audio": {"type": "array", "items": {"type": "number"},
+                              "description": "FM 解调后的实数音频采样"},
+                    "sample_rate": {"type": "number", "description": "采样率 Hz，默认 12500"},
+                },
+                "required": ["audio"],
+            },
+            handler=_decode,
+            category="decode",
+        )
+
+        def _parse(args):
+            body = args.get("body")
+            if not isinstance(body, list):
+                return ToolResult(False, "body 必须是整数字节列表")
+            try:
+                res = acars_parse_message(body)
+            except Exception as e:
+                return ToolResult(False, f"ACARS 解析失败: {e}")
+            return ToolResult(True, json.dumps(res, ensure_ascii=False, default=str))
+
+        self.tool_registry.register(
+            name="acars_parse_message",
+            description="ACARS 消息字节级解析：输入 SOH 之后的原始字节流"
+                        "(含 CRC 与 DEL 结尾)，做奇偶位剥离、CRC16-CCITT 校验、"
+                        "字段拆分(mode/reg/ack/label/block_id/flight/text)。"
+                        "移植自 libacars acars.c。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "body": {"type": "array", "items": {"type": "integer"}},
+                },
+                "required": ["body"],
+            },
+            handler=_parse,
+            category="decode",
+        )
+
+        def _demod(args):
+            audio = args.get("audio")
+            if not isinstance(audio, list):
+                return ToolResult(False, "audio 必须是实数音频列表")
+            sr = float(args.get("sample_rate", 12500) or 12500)
+            try:
+                bits = acars_msk_demod(audio, sr, 1200)
+            except Exception as e:
+                return ToolResult(False, f"MSK 解调失败: {e}")
+            return ToolResult(True, json.dumps({"bits": bits[:512], "n_bits": len(bits)}))
+
+        self.tool_registry.register(
+            name="acars_msk_demod",
+            description="ACARS MSK 解调：实数音频 -> 恢复比特序列(LSB-first)。"
+                        "mark=2400Hz 判 1，space=1200Hz 判 0，1200bps。"
+                        "移植自 acarsdec msk.c。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "audio": {"type": "array", "items": {"type": "number"}},
+                    "sample_rate": {"type": "number", "description": "默认 12500"},
+                },
+                "required": ["audio"],
+            },
+            handler=_demod,
+            category="decode",
         )
 
     def _register_wfm_stereo_tools(self):
