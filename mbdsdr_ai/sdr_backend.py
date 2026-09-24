@@ -2153,6 +2153,38 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
             "device_args": {"device_identifier": ""},
         }
 
+    # 3.6) LimeSDR (MyriadRF)：始终列出一个条目，量程用真实参数表。
+    #      真实打开由 mbdsdr_ai.limesuite_params.LimeSDRBackend.connect() 决定——
+    #      无 libLimeSuite/无设备时 connect 返回 False，这里绝不伪造"已连接"。
+    #      量程来源: mbdsdr_ai/limesuite_params.py（移植自 repos/LimeSuite）
+    #        - 频率 100k-3.8GHz (USB)  src/API/lms7_device.cpp:1384
+    #        - 采样率 100k-61.44MHz (USB) src/API/lms7_device.cpp:690
+    #        - 组合增益 0-73dB        src/lime/LimeSuite.h:382
+    #        - LNA 0-30dB(15档)       src/lms7002m/LMS7002M.cpp:789-837
+    #        - TIA 0-12dB(3档)        src/lms7002m/LMS7002M.cpp:890-914
+    try:
+        from .limesuite_params import LimeSDRParams as _LimeSDRParams
+        _lp = _LimeSDRParams()
+    except Exception:
+        _lp = None
+    key = "limesdr_0"
+    if key not in merged and _lp is not None:
+        merged[key] = {
+            "driver": "limesdr",
+            "label": "LimeSDR (libLimeSuite)",
+            "serial": "",
+            "manufacturer": "MyriadRF",
+            "product": "LimeSDR (LMS7002M)",
+            "gain_range": (float(_lp.gain_min_db), float(_lp.gain_max_db)),
+            "lna_gain_range": (float(min(_lp.lna_gain_levels_db())),
+                               float(max(_lp.lna_gain_levels_db()))),
+            "tia_gain_range": (float(min(_lp.tia_gain_levels_db())),
+                               float(max(_lp.tia_gain_levels_db()))),
+            "sample_rate_range": (float(_lp.min_sr_hz), float(_lp.max_sr_hz)),
+            "freq_range": (float(_lp.min_freq_hz), float(_lp.max_freq_hz)),
+            "device_args": {"index": 0},
+        }
+
     # 4) gr-osmosdr 通用后端枚举（rtl/hackrf/bladerf/uhd/soapy 统一设备字符串）
     #    来源: mbdsdr_ai/osmosdr_source.py（移植自 repos/gr-osmosdr/lib/source_impl.cc:202-269）
     #    仅补充尚未被 SoapySDR/pyrtlsdr 识别到的后端（bladerf/uhd/airspy 等）。
@@ -2201,6 +2233,12 @@ def build_backend_for_device(dev: Dict[str, Any]) -> Optional[SDRBackend]:
             from .bladerf_params import BladeRFBackend as _BladeRFBackend
             return _BladeRFBackend(
                 device_identifier=str(args.get("device_identifier", "") or ""))
+        if driver == "limesdr":
+            # 真实打开由 LimeSDRBackend.connect() 决定成败；
+            # 无 libLimeSuite/无设备时 connect 返回 False，绝不假成功。
+            # 来源: mbdsdr_ai/limesuite_params.py（移植自 repos/LimeSuite）。
+            from .limesuite_params import LimeSDRBackend as _LimeSDRBackend
+            return _LimeSDRBackend(device_index=int(args.get("index", 0)))
         # 其余一律走 SoapySDR 通用后端（rtlsdr 经 SoapySDR、usrp、bladerf...）
         return SoapySDRBackend(device_args=args, device_info=dev)
     except Exception as e:

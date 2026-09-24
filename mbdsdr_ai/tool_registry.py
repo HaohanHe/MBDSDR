@@ -672,6 +672,22 @@ class ToolRegistry:
         # 来源: repos/goestools/src/{lrit,assembler,decoder}/*（见 mbdsdr_ai/goes_lrit.py）
         self.register_goeslrit_tools()
 
+        # ── GK-2A LRIT 全管道（IQ→解调→FEC→帧→图像→PNG）──
+        # 来源: repos/SatDump/plugins/xrit_support/xrit/gk2a/（见 mbdsdr_ai/gk2a_lrit.py）
+        self.register_gk2a_tools()
+
+        # ── 风云 FY-4 LRIT/HRIT + FY-3 HRPT 接收管道 ──
+        # 来源: repos/SatDump/plugins/xrit_support/xrit/fy4/（见 mbdsdr_ai/fengyun_sat.py）
+        self.register_fengyun_tools()
+
+        # ── 气象卫星图像处理链（中值/CLAHE/白平衡/Kuwahara/几何校正/RGB）──
+        # 来源: repos/SatDump/src-core/image/,projection/（见 mbdsdr_ai/sat_image_processing.py）
+        self.register_sat_image_tools()
+
+        # ── 深空追迹多普勒定轨（EKF+RLS, LRO参考轨道）──
+        # 来源: 课件Demo算法 + gpredict/RTKLIB（见 mbdsdr_ai/orbit_determination.py）
+        self.register_orbit_determination_tools()
+
     def register_goeslrit_tools(self):
         """注册 goestools 真实源码移植的 GOES LRIT/HRIT 解析工具。
 
@@ -688,6 +704,72 @@ class ToolRegistry:
             return
 
         GL.register_tool_registry(self)
+
+    def register_gk2a_tools(self):
+        """注册 GK-2A LRIT 全管道接收工具（IQ→解调→FEC→帧同步→图像→PNG）。
+
+        来源: repos/SatDump/plugins/xrit_support/xrit/gk2a/
+          - gk2a_headers.h     GK-2A 专用分段头
+          - decomp.cpp:27      图像压缩类型（JPEG2000，合成测试用无压缩直通）
+          - segment_decoder.h  段拼接规则
+        物理层来源: SatDump GK2A.json + viterbi27.h + reedsolomon.cpp
+        """
+        try:
+            from . import gk2a_lrit as GK
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("gk2a_lrit 不可用: %s", e)
+            return
+        GK.register_tool_registry(self)
+
+    def register_fengyun_tools(self):
+        """注册风云 FY-4 LRIT/HRIT + FY-3 HRPT 接收管道工具。
+
+        来源: repos/SatDump/plugins/xrit_support/xrit/fy4/
+          - fy4_headers.h      FY-4 专用 ImageInformationRecord
+          - segment_decoder.h  段拼接 imemcpy 规则
+          - FengYun-4.json     DVB-S2 物理层参数（90k/120k/1M sym/s）
+        FY-3 HRPT: repos/SatDump noaa_metop_support + satdump_adapter.HRPTDecoder
+        """
+        try:
+            from . import fengyun_sat as FY
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("fengyun_sat 不可用: %s", e)
+            return
+        FY.register_tool_registry(self)
+
+    def register_sat_image_tools(self):
+        """注册气象卫星图像处理链工具（中值/CLAHE/白平衡/Kuwahara/几何校正/RGB）。
+
+        来源: repos/SatDump/src-core/image/processing.cpp + projection/
+          - processing.cpp:69   中值滤波
+          - processing.cpp:179  直方图均衡
+          - processing.cpp:103  Kuwahara 降噪
+          - geos.cpp            全圆盘投影正反变换
+        """
+        try:
+            from . import sat_image_processing as SIP
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("sat_image_processing 不可用: %s", e)
+            return
+        SIP.register_tool_registry(self)
+
+    def register_orbit_determination_tools(self):
+        """注册深空追迹多普勒定轨工具（EKF+RLS, LRO参考轨道）。
+
+        来源: 课件Demo算法（read_data/select_observations/calibrate_observation_time/
+        propagate_ecef_state_and_stm/pseudorange_rate_and_jacobian/reference_epoch_rls_update）
+        开源参考: gpredict sgp_obs.c:126, RTKLIB rtkcmn.c filter_()
+        """
+        try:
+            from . import orbit_determination as OD
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("orbit_determination 不可用: %s", e)
+            return
+        OD.register_tool_registry(self)
 
     def register_minimodem_tools(self):
         """注册 minimodem 真实移植的通用软件 FSK 调制解调工具。
