@@ -106,8 +106,8 @@ def satdump_live(satellite: str, frequency: float, output_dir: str,
         }
     except subprocess.TimeoutExpired:
         return {
-            "success": True,
-            "message": "接收已启动（后台运行中）",
+            "success": False,
+            "error": "satdump 启动超时（30s 未完成），进程已被 kill",
             "command": ' '.join(cmd),
         }
 
