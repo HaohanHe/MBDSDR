@@ -12,9 +12,9 @@ import '../theme.dart';
 
 class SpectrumPage extends StatefulWidget {
   /// 直接传入连接服务引用（不经过 Provider）。
-  final ConnectionService conn;
+  final ConnectionService connection;
 
-  const SpectrumPage({super.key, required this.conn});
+  const SpectrumPage({super.key, required this.connection});
 
   @override
   State<SpectrumPage> createState() => _SpectrumPageState();
@@ -46,9 +46,9 @@ class _SpectrumPageState extends State<SpectrumPage> {
   Widget build(BuildContext context) {
     // 外层监听 conn（ChangeNotifier），保证连接状态变化时顶部信息条刷新。
     return AnimatedBuilder(
-      animation: widget.conn,
+      animation: widget.connection,
       builder: (context, _) {
-        final conn = widget.conn;
+        final conn = widget.connection;
         final lowFreq = conn.centerFreqMhz - conn.spanMhz / 2;
         final highFreq = conn.centerFreqMhz + conn.spanMhz / 2;
 

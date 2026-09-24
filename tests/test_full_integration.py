@@ -899,12 +899,12 @@ def test_sstv_auto_identification(result: TestResult, agent: MBDSDRAgent):
     except Exception as e:
         result.record("Martin M1 鉴别", True, f"跳过: {e}")
 
-    # 真实 over-the-air 削波录音（本地存在时）：应判组式 Robot36、解满 240 行
+    # 真实 over-the-air 削波录音（本地存在时）：实为 Robot72(VIS=0x0C)，应判 Robot72、解满 240 行
     if os.path.exists("real_sstv.wav"):
         rr = decode_sstv("real_sstv.wav", tempfile.mktemp(suffix=".png"), "auto")
-        result.record("真实录音自动判 Robot36 组式",
-                      rr.get("mode") == "Robot 36" and rr.get("layout") == "grouped",
-                      str({k: rr.get(k) for k in ("mode", "layout", "period_ms")}))
+        result.record("真实录音自动判 Robot72",
+                      rr.get("mode") == "Robot 72",
+                      str({k: rr.get(k) for k in ("mode", "period_ms")}))
         result.record("真实录音解出 240 行", rr.get("rows_decoded") == 240,
                       str(rr.get("rows_decoded")))
 
@@ -1151,7 +1151,7 @@ def test_ft8_roundtrip(result: TestResult):
     import numpy as _np
     from mbdsdr_ai.ft8_lite import detect_ft8_tone_center, demodulate_8fsk, TONE_SPACING_HZ
     sr = 12000
-    sps = int(sr * 256 / 1000)
+    sps = int(sr * 160 / 1000)  # FT8 标准符号时长 160ms (NSPS=1920@12kHz)
     n_sym = 79
     base = 1500.0
     rng = _np.random.default_rng(42)
