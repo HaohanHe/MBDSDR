@@ -25,6 +25,7 @@ AI 可以通过 tool calling 直接调用，也可以通过工作流组合调用
 import os
 import time
 import json
+import threading
 import numpy as np
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
@@ -42,6 +43,10 @@ from .adsb_lite import decode_adsb
 from .rds_lite import decode_rds
 from .noaa_apt_lite import decode_apt as lite_decode_apt, save_apt_png as lite_save_apt
 from .wfm_stereo_lite import decode_stereo as lite_decode_stereo
+from .fm_scan import (
+    scan_fm_band, analyze_fm_frequency, synthesize_fm_station,
+    load_presets, save_presets, compare_with_last_scan,
+)
 from .decoders import (
     decode_noaa_apt, decode_sstv, decode_digital_mode,
     detect_fhss, list_visible_satellites, compute_doppler_correction,
@@ -2314,6 +2319,75 @@ def register_sdr_tools(agent):
         },
         handler=lambda args: ToolResult(success=True, content=_satdump_compose_image(args)),
         category="satellite",
+    )
+
+    # ---------- FM 广播搜台 / 存台 / 收听 ----------
+    agent.tool_registry.register(
+        name="sdr_fm_scan",
+        description=(
+            "FM 广播自动搜台：扫 87-108MHz（可配范围），步长 100kHz，每个频点采一小段 IQ，"
+            "算 FM 信道功率（中心 150kHz 内功率谱密度 vs 带外噪声底）+ 19kHz 导频存在性（立体声指示），"
+            "输出按强度排序的电台列表 [{freq_mhz, strength_db, stereo, active}]。"
+            "自动对比上次保存的预设，标注新增/消失/持续电台。save=true 时把结果存到 ~/.mbdsdr/fm_presets.json。"
+            "无硬件时用 Mock 后端合成信号自测不崩。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "f_start_mhz": {"type": "number", "description": "起始频率 MHz，默认 87.0"},
+                "f_stop_mhz": {"type": "number", "description": "结束频率 MHz，默认 108.0"},
+                "step_khz": {"type": "number", "description": "步进 kHz，默认 100"},
+                "sample_rate_hz": {"type": "number", "description": "每频点采样率 Hz，默认 1000000（1MHz）"},
+                "dwell_samples": {"type": "integer", "description": "每频点采集样本数，默认 16384"},
+                "threshold_db": {"type": "number", "description": "电台检出门限 dB，默认 2.0"},
+                "save": {"type": "boolean", "description": "是否保存结果到预设文件，默认 false"},
+            },
+            "required": [],
+        },
+        handler=lambda args: _fm_scan_tool(mgr, args),
+        category="sdr_spectrum",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_fm_preset",
+        description=(
+            "FM 电台预设管理：list 列出 ~/.mbdsdr/fm_presets.json 中保存的电台；"
+            "save 把当前扫描结果（或显式指定的频点列表）保存为预设。"
+            "预设持久化到磁盘，重启不丢，供 sdr_fm_scan 对比变化。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "description": "操作：list 或 save", "enum": ["list", "save"]},
+                "stations": {"type": "array", "description": "save 时显式指定的电台列表 [{freq_mhz, name?, stereo?}]；不传则保存最近一次扫描结果"},
+            },
+            "required": ["action"],
+        },
+        handler=lambda args: _fm_preset_tool(mgr, args),
+        category="sdr_device",
+    )
+
+    agent.tool_registry.register(
+        name="sdr_listen_fm",
+        description=(
+            "收听 FM 广播：调谐到指定频率 → 宽带 FM 解调（单声道）→ audio_out 实时播放。"
+            "action=start 启动后台解调播放线程，action=stop 停止。"
+            "无 sounddevice 时安全降级（解调正常运行但不输出声音），无硬件时用 Mock 后端合成信号不崩。"
+            "同一时刻只能收听一个频率，start 新频率会自动 stop 旧的。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "freq_mhz": {"type": "number", "description": "FM 广播频率 MHz，如 98.0"},
+                "action": {"type": "string", "description": "start 开始收听 / stop 停止", "enum": ["start", "stop"]},
+                "sample_rate_hz": {"type": "number", "description": "IQ 采样率 Hz，默认 1000000"},
+                "audio_sr": {"type": "integer", "description": "输出音频采样率，默认 48000"},
+                "gain": {"type": "number", "description": "播放增益 0.0-5.0，默认 1.0"},
+            },
+            "required": ["action"],
+        },
+        handler=lambda args: _listen_fm_tool(mgr, args),
+        category="sdr_decode",
     )
 
 
@@ -6282,3 +6356,380 @@ def _wsjtx_read_decodes(args):
     lines = [f"=== WSJT-X 最近 {len(msgs)} 条解码 ===", f"来源: {log_path}", ""]
     lines.extend(msgs)
     return '\n'.join(lines)
+
+
+# ═══════════════════════════════════════════════════════
+# FM 广播搜台 / 存台 / 收听（纯软件，无硬件降级不崩）
+# ═══════════════════════════════════════════════════════
+
+def _fm_make_acquire(mgr, sample_rate_hz):
+    """构造 scan_fm_band 用的 acquire 回调，封装后端调谐+读 IQ。
+
+    后端未连接时返回合成噪声（让扫描流程不崩）；
+    已连接时调谐到中心频率并读取 IQ。
+    """
+    backend = _get_backend(mgr)
+    if backend is None or not getattr(backend, "status", None) or not backend.status.connected:
+        # 无硬件：纯噪声 acquire（扫描会跑完，检出 0 台，不崩）
+        def _noise_acquire(center_hz, sr, n):
+            return 0.05 * (np.random.randn(n) + 1j * np.random.randn(n)).astype(np.complex128)
+        return _noise_acquire
+
+    dev_type = getattr(backend.device, "device_type", "")
+    if dev_type == "iq_file":
+        # 离线 IQ 文件是单段固定录制，不能步进调谐
+        return None
+
+    saved_sr = backend.get_sample_rate()
+    try:
+        if hasattr(backend, "set_sample_rate"):
+            backend.set_sample_rate(sample_rate_hz)
+    except Exception:
+        pass
+
+    def _hw_acquire(center_hz, sr, n):
+        try:
+            if hasattr(backend, "set_frequency"):
+                backend.set_frequency(int(center_hz))
+                time.sleep(0.02)
+            got = []
+            need = n
+            while need > 0:
+                part = backend.read_samples(min(need, 16384))
+                if part is None or len(part) == 0:
+                    break
+                got.append(np.asarray(part, dtype=np.complex128))
+                need -= len(part)
+            if got:
+                return np.concatenate(got)[:n]
+        except Exception:
+            pass
+        return None
+
+    return _hw_acquire
+
+
+def _fm_scan_tool(mgr, args) -> "ToolResult":
+    """FM 广播自动搜台：扫频段 → 检出电台 → 对比预设 → 可选保存。"""
+    f_start = float(args.get("f_start_mhz", 87.0))
+    f_stop = float(args.get("f_stop_mhz", 108.0))
+    step_khz = float(args.get("step_khz", 100.0))
+    sr = float(args.get("sample_rate_hz", 1000000.0))
+    dwell = int(args.get("dwell_samples", 16384))
+    threshold = float(args.get("threshold_db", 2.0))
+    do_save = bool(args.get("save", False))
+
+    if f_stop <= f_start:
+        return ToolResult(success=False, content="错误: 结束频率必须大于起始频率")
+
+    acquire = _fm_make_acquire(mgr, sr)
+    if acquire is None:
+        return ToolResult(success=False, content=(
+            "当前是离线 IQ 文件回放源（单段固定录制），不能步进调谐扫频。"
+            "请切换到实时 SDR 设备后再扫频。"))
+
+    backend = _get_backend(mgr)
+    hw_connected = backend is not None and getattr(backend, "status", None) and backend.status.connected
+    saved_freq = None
+    saved_sr = None
+    if hw_connected:
+        try:
+            saved_freq = backend.get_frequency()
+            saved_sr = backend.get_sample_rate()
+        except Exception:
+            pass
+
+    try:
+        result = scan_fm_band(
+            acquire, f_start_mhz=f_start, f_stop_mhz=f_stop,
+            step_khz=step_khz, sample_rate_hz=sr, dwell_samples=dwell,
+            carrier_threshold_db=threshold,
+        )
+    except Exception as e:
+        return ToolResult(success=False, content=f"FM 扫频失败: {e}")
+    finally:
+        if hw_connected and saved_freq is not None:
+            try:
+                if hasattr(backend, "set_frequency"):
+                    backend.set_frequency(int(saved_freq))
+                if hasattr(backend, "set_sample_rate") and saved_sr:
+                    backend.set_sample_rate(saved_sr)
+            except Exception:
+                pass
+
+    # 保存最近一次扫描结果到 mgr（供 sdr_fm_preset save 使用）
+    stations_dicts = [s.to_dict() for s in result.stations]
+    mgr._last_fm_scan = {
+        "stations": stations_dicts,
+        "meta": {
+            "f_start_mhz": result.f_start_mhz,
+            "f_stop_mhz": result.f_stop_mhz,
+            "step_khz": result.step_khz,
+            "sample_rate_hz": result.sample_rate_hz,
+            "noise_floor_db": result.noise_floor_db,
+            "scan_time_s": result.scan_time_s,
+        },
+    }
+
+    # 对比上次预设
+    comparison = compare_with_last_scan(stations_dicts)
+    new_freqs = {s["freq_mhz"] for s in comparison["new"]}
+    gone_freqs = {s["freq_mhz"] for s in comparison["gone"]}
+
+    # 保存
+    saved_path = None
+    if do_save:
+        scan_meta = mgr._last_fm_scan["meta"]
+        saved_path = save_presets(stations_dicts, scan_meta)
+
+    # 格式化输出
+    lines = [
+        f"=== FM 搜台 {result.f_start_mhz:.1f}-{result.f_stop_mhz:.1f} MHz ===",
+        f"步进 {result.step_khz:.0f}kHz，采样率 {result.sample_rate_hz/1e3:.0f}kHz，"
+        f"每点 {result.dwell_samples} 样本，噪声底 {result.noise_floor_db:.1f}dB",
+        f"门限 {threshold}dB，检出 {len(result.stations)} 个电台（按强度排序），耗时 {result.scan_time_s:.1f}s",
+    ]
+    if not hw_connected:
+        lines.append("（无硬件：当前为模拟后端，结果仅供链路验证）")
+    if not result.stations:
+        lines.append("  未检出超过门限的电台。可降低 threshold_db 或确认天线/频率范围。")
+    for k, st in enumerate(result.stations[:30], 1):
+        tags = []
+        if st.stereo:
+            tags.append("立体声")
+        if st.freq_mhz in new_freqs:
+            tags.append("新增")
+        tag_str = f" [{'/'.join(tags)}]" if tags else ""
+        lines.append(f"  {k:2d}. {st.freq_mhz:7.3f} MHz  强度 {st.strength_db:5.1f}dB{tag_str}")
+    if len(result.stations) > 30:
+        lines.append(f"  …另有 {len(result.stations)-30} 个")
+    if comparison["gone"]:
+        lines.append(f"  相比上次消失 {len(comparison['gone'])} 个: " +
+                     ", ".join(f"{s['freq_mhz']:.1f}" for s in comparison["gone"][:10]))
+    if saved_path:
+        lines.append(f"已保存到预设: {saved_path}")
+    lines.append("")
+    lines.append("JSON 数据:")
+    lines.append(json.dumps(stations_dicts, ensure_ascii=False))
+    return ToolResult(success=True, content="\n".join(lines),
+                      data={"stations": stations_dicts, "comparison": comparison,
+                            "noise_floor_db": result.noise_floor_db})
+
+
+def _fm_preset_tool(mgr, args) -> "ToolResult":
+    """FM 电台预设管理：list / save。"""
+    action = str(args.get("action", "")).strip().lower()
+    if action not in ("list", "save"):
+        return ToolResult(success=False, content="action 必须是 list 或 save")
+
+    if action == "list":
+        data = load_presets()
+        stations = data.get("stations", [])
+        lines = [f"=== FM 电台预设（共 {len(stations)} 个）==="]
+        if data.get("updated_at"):
+            lines.append(f"上次更新: {data['updated_at']}")
+        if data.get("last_scan"):
+            ls = data["last_scan"]
+            lines.append(f"上次扫描: {ls.get('f_start_mhz','?')}-{ls.get('f_stop_mhz','?')}MHz "
+                         f"(噪声底 {ls.get('noise_floor_db','?')}dB)")
+        if not stations:
+            lines.append("  （空，先用 sdr_fm_scan save=true 或 sdr_fm_preset action=save 保存）")
+        for k, s in enumerate(stations, 1):
+            name = s.get("name", "")
+            stereo = "立体声" if s.get("stereo") else "单声道"
+            nm = f"  {name}" if name else ""
+            lines.append(f"  {k:2d}. {s['freq_mhz']:7.3f} MHz  {stereo}  "
+                         f"强度 {s.get('strength_db','?')}dB{nm}")
+        return ToolResult(success=True, content="\n".join(lines),
+                          data={"stations": stations, "updated_at": data.get("updated_at")})
+
+    # action == save
+    explicit = args.get("stations")
+    if explicit and isinstance(explicit, list):
+        stations = []
+        for s in explicit:
+            if isinstance(s, dict) and "freq_mhz" in s:
+                stations.append({
+                    "freq_mhz": float(s["freq_mhz"]),
+                    "strength_db": float(s.get("strength_db", 0.0)),
+                    "stereo": bool(s.get("stereo", False)),
+                    "active": bool(s.get("active", True)),
+                    "name": str(s.get("name", "")),
+                })
+    elif hasattr(mgr, "_last_fm_scan") and mgr._last_fm_scan:
+        stations = mgr._last_fm_scan["stations"]
+    else:
+        return ToolResult(success=False, content=(
+            "没有可保存的扫描结果。请先运行 sdr_fm_scan（save=true 可直接保存），"
+            "或在 stations 参数中显式指定电台列表。"))
+
+    scan_meta = getattr(mgr, "_last_fm_scan", {}).get("meta", {}) if hasattr(mgr, "_last_fm_scan") else {}
+    path = save_presets(stations, scan_meta)
+    return ToolResult(success=True,
+                      content=f"已保存 {len(stations)} 个 FM 电台预设到 {path}",
+                      data={"stations": stations, "path": path})
+
+
+# ── FM 收听：后台解调播放线程 ──
+
+class _FMListener:
+    """FM 实时收听控制器：后台线程读 IQ → FM 解调 → AudioPlayer 播放。"""
+
+    def __init__(self, backend, sample_rate_hz=1000000, audio_sr=48000, gain=1.0):
+        self.backend = backend
+        self.sample_rate_hz = int(sample_rate_hz)
+        self.audio_sr = int(audio_sr)
+        self.gain = float(gain)
+        self.player = AudioPlayer(sample_rate=self.audio_sr, channels=1, gain=self.gain)
+        self._thread = None
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self.freq_mhz = None
+        self.blocks_played = 0
+        self.error = None
+
+    def start(self, freq_mhz: float) -> bool:
+        if self._thread and self._thread.is_alive():
+            return False  # 已在运行
+        self.freq_mhz = float(freq_mhz)
+        self._stop.clear()
+        self.blocks_played = 0
+        self.error = None
+        # 调谐
+        try:
+            if hasattr(self.backend, "set_frequency"):
+                self.backend.set_frequency(int(self.freq_mhz * 1e6))
+            if hasattr(self.backend, "set_sample_rate"):
+                self.backend.set_sample_rate(self.sample_rate_hz)
+            if hasattr(self.backend, "set_demod"):
+                self.backend.set_demod("WFM")
+        except Exception as e:
+            self.error = str(e)
+        # 启动音频
+        self.player.start()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return True
+
+    def _run(self):
+        """后台解调循环。"""
+        chunk = 16384
+        try:
+            while not self._stop.is_set():
+                # 读 IQ
+                iq = None
+                try:
+                    parts = []
+                    need = chunk
+                    while need > 0 and not self._stop.is_set():
+                        p = self.backend.read_samples(min(need, 16384))
+                        if p is None or len(p) == 0:
+                            break
+                        parts.append(np.asarray(p, dtype=np.complex128))
+                        need -= len(p)
+                    if parts:
+                        iq = np.concatenate(parts)
+                except Exception as e:
+                    self.error = f"read IQ: {e}"
+                    time.sleep(0.05)
+                    continue
+
+                if iq is None or len(iq) < 256:
+                    time.sleep(0.01)
+                    continue
+
+                # FM 解调（单声道）
+                try:
+                    audio = wfm_broadcast_demod(iq, self.sample_rate_hz,
+                                                 audio_sr=self.audio_sr, deemph_us=50.0)
+                except Exception as e:
+                    self.error = f"demod: {e}"
+                    time.sleep(0.05)
+                    continue
+
+                if len(audio) > 0:
+                    self.player.write(audio.astype(np.float32))
+                    self.blocks_played += 1
+        except Exception as e:
+            self.error = f"listener thread: {e}"
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        self.player.stop()
+
+    @property
+    def is_running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+
+def _listen_fm_tool(mgr, args) -> "ToolResult":
+    """FM 收听：start 调谐+解调+播放，stop 停止。"""
+    action = str(args.get("action", "")).strip().lower()
+    if action not in ("start", "stop"):
+        return ToolResult(success=False, content="action 必须是 start 或 stop")
+
+    # 获取或创建 listener（挂到 mgr 上）
+    listener = getattr(mgr, "_fm_listener", None)
+
+    if action == "stop":
+        if listener is None or not listener.is_running:
+            return ToolResult(success=True, content="当前没有正在收听的 FM 广播。")
+        freq = listener.freq_mhz
+        blocks = listener.blocks_played
+        listener.stop()
+        mgr._fm_listener = None
+        return ToolResult(success=True,
+                          content=f"已停止收听 {freq:.1f}MHz（共播放 {blocks} 个音频块）。")
+
+    # action == start
+    freq_mhz = args.get("freq_mhz")
+    if freq_mhz is None:
+        return ToolResult(success=False, content="start 时必须提供 freq_mhz")
+    try:
+        freq_mhz = float(freq_mhz)
+    except (TypeError, ValueError):
+        return ToolResult(success=False, content=f"频率无效: {freq_mhz!r}")
+    if not (87.0 <= freq_mhz <= 108.0):
+        return ToolResult(success=False, content=f"频率 {freq_mhz}MHz 不在 FM 广播频段 87-108MHz")
+
+    sr = int(args.get("sample_rate_hz", 1000000))
+    audio_sr = int(args.get("audio_sr", 48000))
+    gain = float(args.get("gain", 1.0))
+
+    backend = _get_backend(mgr)
+    if backend is None or not getattr(backend, "status", None) or not backend.status.connected:
+        return ToolResult(success=False, content=(
+            "设备未连接，无法收听。请先 sdr_connect 连接 SDR 设备（RTL-SDR/HackRF 等），"
+            "或用 Mock 后端做链路测试。"))
+
+    # 如果已有 listener 在运行，先停掉
+    if listener is not None and listener.is_running:
+        listener.stop()
+
+    listener = _FMListener(backend, sample_rate_hz=sr, audio_sr=audio_sr, gain=gain)
+    mgr._fm_listener = listener
+    ok = listener.start(freq_mhz)
+    if not ok:
+        return ToolResult(success=False, content="启动收听失败（可能已有线程在运行）。")
+
+    # 等一小段时间让线程跑起来，检查是否有错误
+    time.sleep(0.3)
+    if listener.error and not listener.is_running:
+        return ToolResult(success=False, content=f"收听线程启动失败: {listener.error}")
+
+    audio_avail = listener.player.available
+    mode = "实时播放" if audio_avail else "解调运行中（无 sounddevice，音频输出已降级）"
+    lines = [
+        f"=== 开始收听 FM {freq_mhz:.1f} MHz ===",
+        f"采样率 {sr/1e3:.0f}kHz → 音频 {audio_sr/1e3:.0f}kHz，增益 {gain}",
+        f"状态: {mode}",
+        f"用 sdr_listen_fm action=stop 停止收听。",
+    ]
+    if listener.error:
+        lines.append(f"（线程警告: {listener.error}）")
+    return ToolResult(success=True, content="\n".join(lines),
+                      data={"freq_mhz": freq_mhz, "audio_available": audio_avail,
+                            "running": listener.is_running})
