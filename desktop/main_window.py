@@ -502,18 +502,18 @@ class MainWindow(QMainWindow):
     @Slot(float)
     def _on_tune_fm(self, freq: float):
         if self._worker:
-            self._worker.call_tool("tune_fm", {"freq_mhz": freq})
+            self._worker.request_tool.emit("tune_fm", {"freq_mhz": freq})
         self.spectrum.set_center_freq(freq)
 
     @Slot(int)
     def _on_tune_am(self, freq: int):
         if self._worker:
-            self._worker.call_tool("tune_am", {"freq_khz": freq})
+            self._worker.request_tool.emit("tune_am", {"freq_khz": freq})
 
     @Slot(float, str)
     def _on_tune_sdr(self, freq_hz: float, mode: str):
         if self._worker:
-            self._worker.call_tool("tune_sdr",
+            self._worker.request_tool.emit("tune_sdr",
                                    {"freq_hz": freq_hz, "mode": mode})
         self.spectrum.set_center_freq(freq_hz / 1e6)
 
@@ -528,20 +528,20 @@ class MainWindow(QMainWindow):
     @Slot(int)
     def _on_volume_changed(self, volume: int):
         if self._worker:
-            self._worker.call_tool("set_volume", {"volume": volume})
+            self._worker.request_tool.emit("set_volume", {"volume": volume})
 
     @Slot(bool)
     def _on_record_toggled(self, recording: bool):
         if recording:
             if self._worker:
-                self._worker.call_tool("start_record", {})
+                self._worker.request_tool.emit("start_record", {})
             self._record_seconds = 0
             self._record_timer = QTimer(self)
             self._record_timer.timeout.connect(self._update_record_time)
             self._record_timer.start(1000)
         else:
             if self._worker:
-                self._worker.call_tool("stop_record", {})
+                self._worker.request_tool.emit("stop_record", {})
             if self._record_timer:
                 self._record_timer.stop()
                 self._record_timer = None
@@ -570,7 +570,7 @@ class MainWindow(QMainWindow):
     @Slot(str, dict)
     def _on_ai_tool_call(self, tool_name: str, params: dict):
         if self._worker:
-            self._worker.call_tool(tool_name, params)
+            self._worker.request_tool.emit(tool_name, params)
         # 同步更新 UI
         if tool_name == "tune_fm":
             self.spectrum.set_center_freq(params.get("freq_mhz", 98.5))
@@ -582,7 +582,7 @@ class MainWindow(QMainWindow):
     def _on_spectrum_freq_changed(self, freq: float):
         self.control_panel.set_freq_fm(freq)
         if self._worker:
-            self._worker.call_tool("tune_fm", {"freq_mhz": freq})
+            self._worker.request_tool.emit("tune_fm", {"freq_mhz": freq})
 
     # ========================================================================
     # 其他操作
@@ -745,7 +745,7 @@ class MainWindow(QMainWindow):
                 # 调用 MCP 工具设置频率（频谱-天空联动）
                 if self._worker:
                     try:
-                        self._worker.call_tool("sdr_set_frequency", {"frequency_hz": int(obj.frequency_hz)})
+                        self._worker.request_tool.emit("sdr_set_frequency", {"frequency_hz": int(obj.frequency_hz)})
                     except Exception:
                         pass
 

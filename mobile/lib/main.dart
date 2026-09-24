@@ -1,191 +1,251 @@
-import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:flutter_compass/flutter_compass.dart';
-import 'package:sensors_plus/sensors_plus.dart';
+import 'package:provider/provider.dart';
+import 'theme.dart';
+import 'connection.dart';
+import 'pages/spectrum_page.dart';
+import 'pages/sky_page.dart';
+import 'pages/chat_page.dart';
 
-// MBDSDR 原生手机端
+// MBDSDR 原生手机端入口
 // 定位：把手机变成 AI 的"眼睛和手臂"——GPS 给位置、指南针给朝向、IMU 给姿态，
 // AI 据此算出卫星仰角/方位角，反向指挥人把天线/手机转到正对卫星的方向。
-
-// 日式低饱和主题（与桌面端一致）
-const Color kBg = Color(0xFFF5F3EF);
-const Color kInk = Color(0xFF5B7B8C);
-const Color kAccent = Color(0xFFC4845C);
+//
+// 架构：
+//   main.dart              — 入口 + 路由 + 底部导航 + 连接设置
+//   connection.dart        — WebSocket 客户端（自动重连 / 心跳 / 传感器采集 / 广播流）
+//   theme.dart             — 日式低饱和主题
+//   pages/spectrum_page.dart — 实时频谱（FFT 柱状图）
+//   pages/sky_page.dart      — 卫星指向引导（罗盘 + 箭头 + 仰角）
+//   pages/chat_page.dart     — AI 对话
 
 void main() => runApp(const MbdsdrApp());
 
 class MbdsdrApp extends StatelessWidget {
   const MbdsdrApp({super.key});
+
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'MBDSDR',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        scaffoldBackgroundColor: kBg,
-        colorScheme: ColorScheme.fromSeed(seedColor: kInk),
-        fontFamily: 'MiSans',
+    return ChangeNotifierProvider(
+      create: (_) => ConnectionService(),
+      child: MaterialApp(
+        title: 'MBDSDR',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light,
+        home: const HomePage(),
       ),
-      home: const HomePage(),
     );
   }
 }
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
+  int _currentIndex = 0;
   final _urlCtrl = TextEditingController(text: 'ws://192.168.1.10:8765');
-  WebSocketChannel? _ws;
-  bool _connected = false;
-  String _log = '';
-  String _fix = '定位中...';
-  double _heading = 0;
-  List<dynamic> _passes = [];
-  final List<String> _chat = [];
 
-  void _logLine(String s) {
-    setState(() => _log = '${DateTime.now().second}s  $s\n$_log');
+  @override
+  void dispose() {
+    _urlCtrl.dispose();
+    super.dispose();
   }
 
-  Future<void> _connect() async {
-    try {
-      _ws = WebSocketChannel.connect(Uri.parse(_urlCtrl.text.trim()));
-      await _ws!.ready;
-      _ws!.stream.listen(_onMsg, onDone: _onDisconnect, onError: (e) {
-        _logLine('WS 错误: $e');
-        _onDisconnect();
-      });
-      _ws!.sink.add(jsonEncode({
-        'type': 'handshake',
-        'source': 'mobile',
-        'payload': {
-          'device': 'flutter',
-          'capabilities': ['gps', 'compass', 'imu', 'camera'],
-        },
-      }));
-      setState(() => _connected = true);
-      _logLine('已连接 ${_urlCtrl.text}');
-      _startSensors();
-    } catch (e) {
-      _logLine('连接失败: $e');
+  void _onItemTapped(int index) {
+    setState(() => _currentIndex = index);
+  }
+
+  void _openConnectionSheet() {
+    final conn = context.read<ConnectionService>();
+    _urlCtrl.text = conn.serverUrl;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.card,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          left: 20,
+          right: 20,
+          top: 20,
+          bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '连接设置',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.text,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _urlCtrl,
+              decoration: const InputDecoration(
+                labelText: '电脑端 WebSocket 地址',
+                hintText: 'ws://192.168.1.10:8765',
+                prefixIcon: Icon(Icons.cable, color: AppTheme.primary),
+              ),
+              keyboardType: TextInputType.url,
+            ),
+            const SizedBox(height: 12),
+            Consumer<ConnectionService>(
+              builder: (_, conn, __) {
+                final connected = conn.isConnected;
+                return Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: connected
+                            ? null
+                            : () {
+                                conn.serverUrl = _urlCtrl.text.trim();
+                                conn.connect();
+                                Navigator.pop(ctx);
+                              },
+                        icon: Icon(connected
+                            ? Icons.check_circle
+                            : Icons.sync_alt),
+                        label: Text(connected ? '已连接' : '连接'),
+                      ),
+                    ),
+                    if (connected) ...[
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: () {
+                          conn.disconnect();
+                          Navigator.pop(ctx);
+                        },
+                        icon: const Icon(Icons.link_off),
+                        label: const Text('断开'),
+                      ),
+                    ],
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            Consumer<ConnectionService>(
+              builder: (_, conn, __) => Text(
+                '状态：${_stateText(conn.state)}  |  定位：${conn.positionFix}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppTheme.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _stateText(ConnState s) {
+    switch (s) {
+      case ConnState.connected:
+        return '已连接';
+      case ConnState.connecting:
+        return '连接中...';
+      case ConnState.reconnecting:
+        return '重连中...';
+      case ConnState.disconnected:
+        return '未连接';
     }
-  }
-
-  void _onDisconnect() {
-    setState(() => _connected = false);
-    _logLine('连接断开');
-  }
-
-  void _onMsg(dynamic raw) {
-    final m = jsonDecode(raw as String) as Map<String, dynamic>;
-    switch (m['type']) {
-      case 'satellite_passes':
-        setState(() => _passes = m['payload']?['passes'] ?? []);
-        break;
-      case 'ai_command':
-        final cmd = m['payload']?['text'] ?? '';
-        setState(() => _chat.add('AI: $cmd'));
-        break;
-      default:
-        _logLine('收: ${m['type']}');
-    }
-  }
-
-  // 上报位置/朝向/姿态，AI 据此指挥
-  void _startSensors() {
-    Geolocator.getPositionStream().listen((pos) {
-      _fix = '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}'
-          '  alt ${pos.altitude.toStringAsFixed(0)}m';
-      _sendTelemetry('fix', {
-        'lat': pos.latitude, 'lon': pos.longitude, 'alt': pos.altitude,
-      });
-    });
-    FlutterCompass.events?.listen((evt) {
-      _heading = evt.heading ?? 0;
-      _sendTelemetry('heading', {'deg': _heading});
-    });
-    accelerometerEventStream().listen((e) {
-      _sendTelemetry('imu', {'x': e.x, 'y': e.y, 'z': e.z});
-    });
-  }
-
-  void _sendTelemetry(String kind, Map<String, dynamic> data) {
-    if (!_connected) return;
-    _ws?.sink.add(jsonEncode({'type': 'telemetry', 'kind': kind, 'payload': data}));
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('MBDSDR'),
-        backgroundColor: kBg,
-        elevation: 0,
-        foregroundColor: kInk,
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // 连接卡
-          Row(children: [
-            Expanded(
-              child: TextField(
-                controller: _urlCtrl,
-                decoration: const InputDecoration(labelText: '电脑端地址'),
+    return Consumer<ConnectionService>(
+      builder: (context, conn, _) {
+        final pages = [
+          SpectrumPage(connection: conn),
+          SkyPage(connection: conn),
+          ChatPage(connection: conn),
+        ];
+        return Scaffold(
+          appBar: AppBar(
+            title: Row(
+              children: [
+                const Text('MBDSDR',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(width: 10),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: conn.isConnected
+                        ? AppTheme.success.withOpacity(0.15)
+                        : AppTheme.danger.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        conn.isConnected
+                            ? Icons.circle
+                            : Icons.circle_outlined,
+                        size: 8,
+                        color: conn.isConnected
+                            ? AppTheme.success
+                            : AppTheme.danger,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        conn.isConnected ? '在线' : '离线',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: conn.isConnected
+                              ? AppTheme.success
+                              : AppTheme.danger,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.settings_ethernet),
+                tooltip: '连接设置',
+                onPressed: _openConnectionSheet,
               ),
-            ),
-            const SizedBox(width: 8),
-            FilledButton(
-              onPressed: _connected ? null : _connect,
-              child: Text(_connected ? '已连' : '连接'),
-            ),
-          ]),
-          const SizedBox(height: 16),
-          // 状态卡
-          Card(
-            child: ListTile(
-              leading: Icon(Icons.circle,
-                  color: _connected ? Colors.green : Colors.red),
-              title: Text(_fix),
-              subtitle: Text('朝向 ${_heading.toStringAsFixed(0)}°'),
-            ),
+            ],
           ),
-          const SizedBox(height: 12),
-          const Text('卫星过境（AI 指挥指向）',
-              style: TextStyle(fontWeight: FontWeight.bold, color: kInk)),
-          ..._passes.map((p) => ListTile(
-                dense: true,
-                leading: const Icon(Icons.satellite_alt, color: kAccent),
-                title: Text(p['name']?.toString() ?? 'SAT'),
-                subtitle: Text(
-                    '仰角 ${p['max_el']}°  方位 ${p['azimuth']}°  ${p['rise_time']}'),
-              )),
-          const Divider(),
-          const Text('AI 指令',
-              style: TextStyle(fontWeight: FontWeight.bold, color: kInk)),
-          ..._chat.map((c) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Text(c),
-              )),
-          const SizedBox(height: 12),
-          Container(
-            height: 160,
-            padding: const EdgeInsets.all(8),
-            color: Colors.black12,
-            child: SingleChildScrollView(
-              child: Text(_log, style: const TextStyle(fontSize: 11)),
-            ),
+          body: IndexedStack(
+            index: _currentIndex,
+            children: pages,
           ),
-        ],
-      ),
+          bottomNavigationBar: BottomNavigationBar(
+            currentIndex: _currentIndex,
+            onTap: _onItemTapped,
+            items: const [
+              BottomNavigationBarItem(
+                icon: Icon(Icons.bar_chart),
+                label: '频谱',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.explore),
+                label: '指向',
+              ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.chat_bubble_outline),
+                label: 'AI 对话',
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

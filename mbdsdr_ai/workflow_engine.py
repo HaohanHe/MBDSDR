@@ -367,27 +367,51 @@ class WorkflowEngine:
 
     # ── 参数模板解析 ────────────────────────────────────
 
-    def _resolve_params(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        """解析参数模板（{{variable}}），纯数字字符串自动转 int/float。"""
-        resolved = {}
-        for key, value in params.items():
-            if isinstance(value, str):
-                # 替换所有 {{variable}}
-                def replace_var(match):
-                    var_name = match.group(1)
-                    return str(context.get(var_name, match.group(0)))
-                resolved_str = re.sub(r'\{\{(\w+)\}\}', replace_var, value)
-                # 如果整个值是纯数字，自动转换类型（避免工具收到字符串数字报 TypeError）
-                if resolved_str.lstrip('-').isdigit():
-                    resolved[key] = int(resolved_str)
-                else:
-                    try:
-                        resolved[key] = float(resolved_str)
-                    except ValueError:
-                        resolved[key] = resolved_str
+    def _lookup_var(self, var_name: str, context: Dict[str, Any]) -> Any:
+        """按点分路径从 context 查找变量，如 'step_1.result.freq'。"""
+        parts = var_name.split(".")
+        val = context
+        for part in parts:
+            if isinstance(val, dict):
+                if part not in val:
+                    return None
+                val = val[part]
+            elif hasattr(val, part):
+                val = getattr(val, part)
             else:
-                resolved[key] = value
-        return resolved
+                return None
+        return val
+
+    def _render_string(self, text: str, context: Dict[str, Any]) -> str:
+        """将字符串中的 {{variable}} 替换为 context 中的值。"""
+        def replace_var(match):
+            var_name = match.group(1)
+            val = self._lookup_var(var_name, context)
+            if val is None:
+                return match.group(0)  # 未找到则保留原模板
+            return str(val)
+        return re.sub(r'\{\{([\w.]+)\}\}', replace_var, text)
+
+    def _resolve_value(self, value: Any, context: Dict[str, Any]) -> Any:
+        """递归解析任意值中的 {{variable}} 模板。"""
+        if isinstance(value, str):
+            rendered = self._render_string(value, context)
+            # 纯数字字符串自动转 int/float
+            if rendered.lstrip('-').isdigit():
+                return int(rendered)
+            try:
+                return float(rendered)
+            except ValueError:
+                return rendered
+        elif isinstance(value, dict):
+            return {k: self._resolve_value(v, context) for k, v in value.items()}
+        elif isinstance(value, list):
+            return [self._resolve_value(v, context) for v in value]
+        return value
+
+    def _resolve_params(self, params: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
+        """解析参数模板（{{variable}}），支持嵌套 dict/list 和点分路径。"""
+        return {k: self._resolve_value(v, context) for k, v in params.items()}
 
     def _check_condition(self, condition: str, context: Dict[str, Any]) -> bool:
         """检查条件表达式（简单的变量存在性检查）。"""
@@ -504,6 +528,8 @@ class WorkflowEngine:
             elif isinstance(result, dict):
                 result_dict = result
             if isinstance(result_dict, dict):
+                # 整份结果存到 step_N，支持 {{step_1.freq}} 点分访问
+                context[f"step_{step.step_id}"] = result_dict
                 for k, v in result_dict.items():
                     if isinstance(v, (str, int, float, bool)):
                         context[k] = v

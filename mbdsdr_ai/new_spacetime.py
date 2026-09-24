@@ -383,7 +383,7 @@ def predict_satellite_pass(satellite_name: str, observer_lat: float, observer_lo
         return None
 
     if frequency_hz == 0 and satellite_name in SATELLITE_FREQUENCIES:
-        frequency_hz = SATELLITE_FREQUENCIES[satellite_name]
+        frequency_hz = SATELLITE_FREQUENCIES[satellite_name] * 1e6  # MHz -> Hz
 
     now = datetime.now(timezone.utc)
     step = timedelta(seconds=30)
@@ -462,7 +462,7 @@ def predict_all_passes(observer_lat: float, observer_lon: float, observer_alt: f
 
     passes = []
     for name in BUILTIN_TLE:
-        freq = SATELLITE_FREQUENCIES.get(name, 0.0)
+        freq = SATELLITE_FREQUENCIES.get(name, 0.0) * 1e6  # MHz -> Hz
         p = predict_satellite_pass(name, observer_lat, observer_lon, observer_alt,
                                     hours_ahead, min_elevation, freq)
         if p:

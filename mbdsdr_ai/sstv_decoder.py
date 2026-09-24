@@ -253,37 +253,67 @@ def _freq_to_pixel(freq: float) -> int:
 
 
 def _detect_vis_header(freq: np.ndarray, sample_rate: int) -> Tuple[Optional[int], int]:
-    """检测 VIS 头，返回 (vis_code, 数据起始样本索引)。"""
-    # 找 1900Hz break（VIS 头标志）
+    """检测 VIS 头，返回 (vis_code, 数据起始样本索引)。
+    标准 SSTV VIS：1100Hz=mark(1), 1300Hz=space(0), 偶校验。
+    """
     threshold_break = 1800
-    threshold_1200 = (1100, 1300)
-    threshold_1300 = (1250, 1350)
     threshold_1100 = (1050, 1150)
+    threshold_1300 = (1250, 1350)
 
-    # 简化：扫描找连续的 1900Hz 区域
     in_break = False
     break_start = 0
-    for i in range(len(freq)):
-        if freq[i] > threshold_break and not in_break:
+    lookahead = int(sample_rate * 0.025)  # <25ms 的低频跌落视为毛刺，跳过
+    n = len(freq)
+    i = 0
+    while i < n:
+        if not in_break and freq[i] > threshold_break:
             in_break = True
             break_start = i
-        elif freq[i] < threshold_break and in_break:
+            i += 1
+            continue
+        if in_break and freq[i] < threshold_break:
+            # break 出口：若很快又回到 1900Hz 以上，说明只是长 break 里的 1200
+            # 毛刺（部分录音前置是 1900-1200(短)-1900 结构），不是真正出口。
+            went_back = False
+            for k in range(i, min(n, i + lookahead)):
+                if freq[k] > threshold_break:
+                    went_back = True
+                    break
+            if went_back:
+                in_break = True
+                break_start = k
+                i = k
+                continue
             break_len = i - break_start
-            if break_len > sample_rate * 0.005:  # 至少 5ms
-                # 找到 break，后面是 1200Hz 引导 + VIS 码
+            if break_len > sample_rate * 0.005:
+                # 真正的 break 出口。SSTV 标准中 300ms 1200Hz 引导在 break 之前，
+                # break 之后紧跟 30ms 1200Hz 起始位，然后才是 7 数据位。
                 vis_start = i
-                # 跳过 1200Hz 引导（约 300ms）
-                vis_code_start = vis_start + int(sample_rate * 0.35)
-                # 解码 VIS 码（30ms/bit，起始位+7数据+结束位）
                 bit_samples = int(sample_rate * 0.030)
+                # 只跳过起始位，从第一个数据位起点采样
+                vis_code_start = vis_start + bit_samples
                 vis_code = 0
+                parity = 0
                 for bit in range(7):
-                    bit_start = vis_code_start + (bit + 1) * bit_samples
-                    if bit_start + bit_samples // 2 < len(freq):
+                    bit_start = vis_code_start + bit * bit_samples
+                    if bit_start + bit_samples // 2 < n:
                         bit_freq = np.mean(freq[bit_start:bit_start + bit_samples // 2])
-                        if threshold_1300[0] < bit_freq < threshold_1300[1]:
+                        if threshold_1100[0] < bit_freq < threshold_1100[1]:
                             vis_code |= (1 << bit)
-                return vis_code, vis_code_start + 9 * bit_samples
+                            parity += 1
+                # parity 位（第8位，偶校验）
+                parity_start = vis_code_start + 7 * bit_samples
+                parity_ok = True
+                if parity_start + bit_samples // 2 < n:
+                    p_freq = np.mean(freq[parity_start:parity_start + bit_samples // 2])
+                    p_bit = 1 if (threshold_1100[0] < p_freq < threshold_1100[1]) else 0
+                    parity_ok = ((parity + p_bit) % 2 == 0)
+                if not parity_ok:
+                    # parity 失败时仍返回 vis_code，但标记不可信（调用方有时序兜底）
+                    pass
+                data_start = vis_code_start + 9 * bit_samples
+                return vis_code, data_start
+        i += 1
 
     return None, 0
 
@@ -419,6 +449,8 @@ def _identify_sstv_mode(freq: np.ndarray, sr: int, data_start: int,
     if pulse_ms >= 7.0 and (130.0 <= period_ms <= 175.0):
         return "Robot 36", {**info, "robot_layout": "per_line"}
     if pulse_ms >= 7.0 and (285.0 <= period_ms <= 330.0):
+        if vis_code == 12:  # 0x0C = Robot72
+            return "Robot 72", {**info, "robot_layout": "robot72"}
         return "Robot 36", {**info, "robot_layout": "grouped"}
     # PD 系列：SYNC 约 20ms（明显长于 Robot 9ms），组周期 450~1050ms。
     # 按标称组周期最近邻细分型号（Y0+Cb+Cr+Y1，WIDTH/HEIGHT 随型号）。
@@ -441,7 +473,7 @@ def _identify_sstv_mode(freq: np.ndarray, sr: int, data_start: int,
     if pulse_ms >= 7.0 and 950.0 <= period_ms <= 1100.0:
         return "Scottie DX", info
     # 兜底：VIS 能对上才用 VIS（VIS 在合成/真实信号上都曾解错，仅作弱兜底）
-    if vis_code is not None and vis_code in (8, 44, 40, 60, 56):
+    if vis_code is not None and vis_code in (8, 12, 44, 40, 60, 56):
         for name, mdef in SSTV_MODES.items():
             if mdef.get("vis_code") == vis_code:
                 return name, info

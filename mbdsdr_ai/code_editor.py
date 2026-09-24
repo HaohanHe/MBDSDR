@@ -169,6 +169,15 @@ class CodeEditor:
         if os.path.isdir(full_path):
             raise FileNotFoundError(f"目标是目录而非文件: {full_path}（请指定具体文件路径）。")
 
+        # 安全：禁止修改核心安全文件（防自编程破坏安全边界）
+        _PROTECTED_FILES = {
+            "agent.py", "tool_registry.py", "context_manager.py",
+            "sandbox.py", "config.py", "code_editor.py",
+        }
+        if os.path.basename(full_path) in _PROTECTED_FILES:
+            raise PermissionError(
+                f"安全限制：禁止修改核心安全文件 {os.path.basename(full_path)!r}")
+
         # 读取原始内容
         original_content = ""
         if os.path.exists(full_path):

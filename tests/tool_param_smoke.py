@@ -209,6 +209,64 @@ def classify(txt, success, error):
     return "OTHER"
 
 
+# ============================================================================
+# 解码类工具的正确性断言（替代单纯的 len(text)>150 判 OK）
+# ============================================================================
+
+# 某些工具需要仓库内真实测试文件，而非自动构造的 /tmp 占位文件
+SPECIAL_ARGS = {
+    "sdr_decode_sstv": {"input_path": os.path.join(_REPO_ROOT, "syn_robot36.wav")},
+}
+
+
+def _assert_morse_encode(txt, success, _args):
+    """HELLO → Morse 应包含 H=.... 、E=. 、L=.-.. 、O=---"""
+    if not success:
+        return False, "工具返回失败"
+    if "HELLO" not in txt:
+        return False, "输出未包含原文 HELLO"
+    if "...." not in txt:
+        return False, "未编码出 H=...."
+    if "---" not in txt:
+        return False, "未编码出 O=---"
+    return True, ""
+
+
+def _assert_morse_decode(txt, success, _args):
+    """输入是 HELLO 的 Morse 码（.... . .-.. .-.. ---），应解出 HELLO"""
+    if not success:
+        return False, "工具返回失败"
+    if "HELLO" not in txt.upper():
+        return False, f"未解码出 HELLO，输出: {txt[:100]}"
+    return True, ""
+
+
+def _assert_sstv_decode(txt, success, _args):
+    """syn_robot36.wav 应解码出非空图（尺寸 > 0，解码行数 > 0）"""
+    if not success:
+        return False, "工具返回失败"
+    if "SSTV 解码完成" not in txt:
+        return False, f"未完成解码，输出: {txt[:120]}"
+    import re
+    m = re.search(r"尺寸:\s*(\d+)x(\d+)", txt)
+    if not m:
+        return False, "输出未包含尺寸信息"
+    w, h = int(m.group(1)), int(m.group(2))
+    if w <= 0 or h <= 0:
+        return False, f"图像尺寸为零: {w}x{h}"
+    m2 = re.search(r"解码行数:\s*(\d+)", txt)
+    if m2 and int(m2.group(1)) == 0:
+        return False, "解码行数为 0"
+    return True, f"图像 {w}x{h}"
+
+
+SPECIAL_ASSERTS = {
+    "morse_encode": _assert_morse_encode,
+    "morse_decode": _assert_morse_decode,
+    "sdr_decode_sstv": _assert_sstv_decode,
+}
+
+
 def main():
     ag = MBDSDRAgent(AgentConfig())
     register_sdr_tools(ag)
@@ -236,22 +294,32 @@ def main():
         if not required:
             continue  # 无参工具已在第一轮体检覆盖
         args = build_args(t)
+        # 解码类工具可能需要仓库内真实测试文件（如 syn_robot36.wav），覆盖自动构造的占位参数
+        if name in SPECIAL_ARGS:
+            args = SPECIAL_ARGS[name]
         try:
             res = reg.call(name, args)
             txt = res.content if hasattr(res, "content") else str(res)
             success = getattr(res, "success", False)
             error = getattr(res, "error", "")
             cat = classify(txt, success, error)
+            # 解码类工具的正确性断言：不满足则判 ASSERT_FAIL，避免空壳/长报错被误判 OK
+            if cat == "OK" and name in SPECIAL_ASSERTS:
+                passed, reason = SPECIAL_ASSERTS[name](txt, success, args)
+                if not passed:
+                    cat = "ASSERT_FAIL"
             snippet = (txt or str(error))[:90].replace("\n", " ")
+            if cat == "ASSERT_FAIL":
+                snippet = reason[:90]
         except Exception as e:
             cat, snippet = "CRASH", f"{type(e).__name__}: {e}"[:90]
         buckets[cat].append(name)
         detail.append((name, cat, args, snippet))
 
-    for cat in ("OK", "NEED_HW", "NEED_RESOURCE", "BAD_ARG", "TODO", "CRASH", "OTHER"):
+    for cat in ("OK", "NEED_HW", "NEED_RESOURCE", "BAD_ARG", "TODO", "ASSERT_FAIL", "CRASH", "OTHER"):
         items = buckets.get(cat, [])
         print(f"=== {cat}: {len(items)} ===")
-        if cat in ("NEED_RESOURCE", "BAD_ARG", "TODO", "CRASH", "OTHER"):
+        if cat in ("NEED_RESOURCE", "BAD_ARG", "TODO", "ASSERT_FAIL", "CRASH", "OTHER"):
             for n in items:
                 snip = next((s for x, c, a, s in detail if x == n and c == cat), "")
                 print(f"  - {n}: {snip}")

@@ -46,16 +46,39 @@ class DCBlocker:
             return self._process_real(x)
 
     def _process_real(self, x: np.ndarray) -> np.ndarray:
-        y = np.zeros_like(x, dtype=np.float64)
+        """向量化 DC 阻断：y[n] = x[n] - x[n-1] + R*y[n-1]。
+
+        用 scipy.signal.lfilter 做一阶 IIR，保留流式状态；
+        scipy 不可用时退化为 numpy 向量化差分 + 递推。
+        """
+        r = self.r
         x_prev = self._x_prev
         y_prev = self._y_prev
-        r = self.r
-        for n in range(len(x)):
-            y[n] = x[n] - x_prev + r * y_prev
-            x_prev = x[n]
-            y_prev = y[n]
-        self._x_prev = x_prev
-        self._y_prev = y_prev
+
+        try:
+            from scipy.signal import lfilter
+            # 一阶 IIR: b=[1,-1], a=[1,-r]，初始状态 zi[0] = -x_prev + r*y_prev
+            zi = np.array([-x_prev + r * y_prev], dtype=np.float64)
+            y, zf = lfilter([1.0, -1.0], [1.0, -r], x.astype(np.float64), zi=zi)
+            self._x_prev = float(x[-1]) if len(x) else x_prev
+            self._y_prev = float(y[-1]) if len(y) else y_prev
+            return y.astype(x.dtype)
+        except ImportError:
+            pass
+
+        # numpy 兜底：向量化差分 + 一阶递推
+        x64 = x.astype(np.float64)
+        diff = np.empty_like(x64)
+        if len(x64) > 0:
+            diff[0] = x64[0] - x_prev
+            diff[1:] = x64[1:] - x64[:-1]
+        y = np.zeros_like(x64)
+        yp = y_prev
+        for n in range(len(x64)):
+            yp = diff[n] + r * yp
+            y[n] = yp
+        self._x_prev = float(x64[-1]) if len(x64) else x_prev
+        self._y_prev = yp
         return y.astype(x.dtype)
 
     def reset(self):

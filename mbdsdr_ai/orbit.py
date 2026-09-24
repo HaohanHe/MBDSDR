@@ -132,13 +132,13 @@ def compute_satellite_state(
     rx = cg * r_teme[0] - sg * r_teme[1]
     ry = sg * r_teme[0] + cg * r_teme[1]
     r_ecef = (rx, ry, r_teme[2])
-    # 速度：旋转 + Coriolis 项（地球自转 ω×r）
+    # 速度：旋转 − Coriolis 项（输运定理 v_ECEF = R·v_TEME − Ω×r）
     vx = cg * v_teme[0] - sg * v_teme[1]
     vy = sg * v_teme[0] + cg * v_teme[1]
     # GMST 对时间的导数即地球自转角速度（rad/s），r 单位 km → ω×r 单位 km/s
     omega_earth = 7.2921159e-5
-    vx += -omega_earth * r_ecef[1]
-    vy += omega_earth * r_ecef[0]
+    vx += omega_earth * r_ecef[1]   # - (Ω×r)_x = +ω·y
+    vy += -omega_earth * r_ecef[0]  # - (Ω×r)_y = -ω·x
     v_ecef = (vx, vy, v_teme[2])
     # 站 ECEF
     s_ecef = geodetic_to_ecef(observer_lat, observer_lon, observer_alt)
@@ -167,7 +167,7 @@ def compute_satellite_state(
         "range_km": dist,
         "range_rate_kms": range_rate,
         "altitude_km": math.sqrt(r_ecef[0]**2 + r_ecef[1]**2 + r_ecef[2]**2) - WGS84_A,
-        "epoch": line1[20:32].strip(),
+        "epoch": line1[18:32].strip(),
     }
 
 

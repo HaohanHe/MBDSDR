@@ -117,6 +117,7 @@ class MCPWorker(QObject):
     imu_updated = Signal(dict)          # get_imu 结果
     connection_changed = Signal(bool, str)  # 连接状态 (connected, message)
     tool_result = Signal(str, dict)     # 工具调用结果 (tool_name, result)
+    request_tool = Signal(str, dict)    # UI 请求调用工具 (tool_name, params)，worker 线程执行
     error_occurred = Signal(str)        # 错误信息
     log_message = Signal(str)           # 日志
 
@@ -132,6 +133,8 @@ class MCPWorker(QObject):
         self.running = False
         self.poll_interval_ms = 1000  # 轮询间隔
         self._timer: Optional[QTimer] = None
+        # UI 线程 emit request_tool → worker 线程在 call_tool 槽中执行（跨线程自动排队）
+        self.request_tool.connect(self.call_tool)
 
     @Slot()
     def start(self):
@@ -262,6 +265,9 @@ class MCPWorker(QObject):
             "get_version": lambda p: self.client.get_version(),
             "reboot": lambda p: self.client.reboot(),
             "list_tools": lambda p: self.client.list_tools(),
+            # 通用 JSON-RPC 转发：AI 层注册的 SDR 工具（不直接操作硬件，由远端 MCP 服务路由）
+            "tune_sdr": lambda p: self.client.call("tune_sdr", p).get("result", {}),
+            "sdr_set_frequency": lambda p: self.client.call("sdr_set_frequency", p).get("result", {}),
         }
 
         if tool_name in method_map:
@@ -318,7 +324,19 @@ class MCPWorker(QObject):
                 {"name": "stop_record", "desc": "停止录音"},
                 {"name": "get_version", "desc": "获取版本"},
                 {"name": "reboot", "desc": "重启"},
+                {"name": "tune_sdr", "desc": "调谐SDR（频率Hz+模式）"},
+                {"name": "sdr_set_frequency", "desc": "设置SDR中心频率Hz"},
             ]}
+        elif tool_name == "tune_sdr":
+            freq_hz = params.get("freq_hz", 100_000_000)
+            mode = params.get("mode", "NFM")
+            self.sim.mode = 1 if mode in ("FM", "WFM", "NFM") else 0
+            self.sim.freq = int(freq_hz / 1000)
+            return {"ok": True, "freq_hz": freq_hz, "mode": mode}
+        elif tool_name == "sdr_set_frequency":
+            freq_hz = params.get("frequency_hz", 100_000_000)
+            self.sim.freq = int(freq_hz / 1000)
+            return {"ok": True, "frequency_hz": freq_hz}
         else:
             return {"error": f"未知工具: {tool_name}"}
 

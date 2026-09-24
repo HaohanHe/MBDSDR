@@ -4,10 +4,10 @@ MBDSDR FT8 轻量分析层
 
 纯 Python 做 FT8 频谱感知与 8FSK 符号解调：
 1. 在带宽内找 FT8 音峰簇（79Hz 内 8 个等间隔峰，间隔 6.25Hz）
-2. 按 256ms 符号时长做 8FSK 硬判决，输出原始音调序列
+2. 按 160ms 符号时长做 8FSK 硬判决，输出原始音调序列
 3. 时间对齐：15s 周期边界检测
 
-注意：完整 LDPC(K=79,N=174) 译码需外部 jt9/wsjtx 二进制；本模块输出
+注意：完整 LDPC(K=91,N=174) 译码需外部 jt9/wsjtx 二进制；本模块输出
 音峰位置、同步质量与原始符号序列，作为工具供 AI 判断"是否有 FT8、在哪、
 时间对齐到哪"。不假装还原呼号文本。
 
@@ -18,7 +18,7 @@ import math
 from typing import List, Dict, Optional
 
 TONE_SPACING_HZ = 6.25
-SYMBOL_MS = 256
+SYMBOL_MS = 160
 PERIOD_S = 15
 BANDWIDTH_HZ = 79
 
