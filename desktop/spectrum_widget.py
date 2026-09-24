@@ -52,8 +52,32 @@ class SpectrumDataGenerator:
     def set_span(self, span_mhz: float):
         self.span = max(0.1, span_mhz)
 
+    def push_iq(self, iq: np.ndarray, sample_rate: float):
+        """喂入真实复 IQ，用 FFT 算功率谱（dBFS），替代模拟高斯峰。"""
+        x = np.asarray(iq, dtype=np.complex64)
+        n = len(x)
+        if n < 16:
+            return
+        win = np.hanning(n).astype(np.complex64)
+        spec = np.fft.rfft(x * win)
+        power_db = 20 * np.log10(np.abs(spec) / (n / 2) + 1e-12)
+        # 重采样到 num_bins
+        if len(power_db) != self.num_bins:
+            idx = np.linspace(0, len(power_db) - 1, self.num_bins).astype(int)
+            power_db = power_db[idx]
+        # 居中（零频在中间）
+        power_db = np.fft.fftshift(power_db)
+        self.spectrum = power_db.astype(np.float32)
+        self.span = sample_rate / 1e6
+        self.waterfall.append(self.spectrum.copy())
+        if len(self.waterfall) > self.max_waterfall_lines:
+            self.waterfall.pop(0)
+
     def generate(self) -> np.ndarray:
-        """生成一帧频谱数据。"""
+        """生成一帧频谱数据。若已有真实 IQ 则返回真频谱，否则回退模拟。"""
+        # 已有真实 IQ 数据时直接返回，不再叠假高斯峰
+        if np.any(self.spectrum < -20):
+            return self.spectrum
         freqs = np.linspace(
             self.center_freq - self.span / 2,
             self.center_freq + self.span / 2,
