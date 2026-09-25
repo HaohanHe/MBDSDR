@@ -73,6 +73,8 @@ class ControlPanel(QWidget):
     volume_changed = Signal(int)          # 音量改变 (0-63)
     record_toggled = Signal(bool)         # 录音开关
     mode_changed = Signal(str)            # 模式改变 ("FM"/"AM")
+    gain_changed = Signal(int)             # 硬件增益 (dB, RTL-SDR LNA 0~49)
+    squelch_changed = Signal(float)        # 静噪门限 (dBFS, -120~0)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -199,6 +201,42 @@ class ControlPanel(QWidget):
 
         volume_layout.addLayout(vol_row)
         layout.addWidget(volume_group)
+
+        # ---- 接收：硬件增益 + 静噪（对标 SDR++ 右侧控制条）----
+        rx_group = QGroupBox("接收")
+        rx_layout = QVBoxLayout(rx_group)
+
+        gain_row = QHBoxLayout()
+        self.gain_label = QLabel("LNA")
+        self.gain_label.setObjectName("statusValue")
+        self.gain_label.setFixedWidth(40)
+        gain_row.addWidget(self.gain_label)
+        self.gain_slider = QSlider(Qt.Horizontal)
+        self.gain_slider.setRange(0, 49)      # RTL-SDR 典型 LNA 增益上限 ~49dB
+        self.gain_slider.setValue(0)
+        self.gain_slider.valueChanged.connect(self._on_gain_changed)
+        gain_row.addWidget(self.gain_slider)
+        self.gain_val = QLabel("0dB")
+        self.gain_val.setFixedWidth(44)
+        gain_row.addWidget(self.gain_val)
+        rx_layout.addLayout(gain_row)
+
+        sq_row = QHBoxLayout()
+        self.squelch_label = QLabel("静噪")
+        self.squelch_label.setObjectName("statusValue")
+        self.squelch_label.setFixedWidth(40)
+        sq_row.addWidget(self.squelch_label)
+        self.squelch_slider = QSlider(Qt.Horizontal)
+        self.squelch_slider.setRange(-120, 0)
+        self.squelch_slider.setValue(-80)
+        self.squelch_slider.valueChanged.connect(self._on_squelch_changed)
+        sq_row.addWidget(self.squelch_slider)
+        self.squelch_val = QLabel("-80")
+        self.squelch_val.setFixedWidth(44)
+        sq_row.addWidget(self.squelch_val)
+        rx_layout.addLayout(sq_row)
+
+        layout.addWidget(rx_group)
 
         # ---- 录音 ----
         record_group = QGroupBox("录音")
@@ -343,6 +381,14 @@ class ControlPanel(QWidget):
         self._volume = value
         self.volume_label.setText(str(value))
         self.volume_changed.emit(value)
+
+    def _on_gain_changed(self, db: int):
+        self.gain_val.setText(f"{db}dB")
+        self.gain_changed.emit(db)
+
+    def _on_squelch_changed(self, dbfs: int):
+        self.squelch_val.setText(str(dbfs))
+        self.squelch_changed.emit(float(dbfs))
 
     @Slot(bool)
     def _on_record_toggled(self, checked: bool):
