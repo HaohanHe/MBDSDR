@@ -191,6 +191,101 @@ def detect_doppler_timeseries(iq_samples: np.ndarray, fs: float,
     return np.array(ts), np.array(fds), np.array(snrs)
 
 
+# ---------------------------------------------------------------------------
+# 真实 IQ 文件加载（.cf32 / .raw / .iq / .wav）
+# ---------------------------------------------------------------------------
+
+def load_iq_file(path: str, sample_rate: Optional[float] = None
+                 ) -> Tuple[np.ndarray, float]:
+    """读取真实录制的复基带 IQ 文件，返回 (complex128 数组, 采样率 Hz)。
+
+    支持格式（按扩展名分流）：
+      - .cf32 / .raw / .iq：裸复数 float32 交织 I/Q（默认采样率需由 sample_rate
+        或同名 .json/.txt 旁注文件提供）。
+      - .wav：双声道 int16 PCM，左=I、右=Q；单声道按实基带处理（虚部为 0）。
+        采样率从 WAV 头读取，忽略 sample_rate 参数。
+
+    绝不合成任何数据：文件为空 / 字节数不足时返回空数组，由调用方判定"无观测"。
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"IQ 文件不存在: {path}")
+
+    if ext == ".wav":
+        import wave
+        with wave.open(path, "rb") as wf:
+            nch = wf.getnchannels()
+            sw = wf.getsampwidth()
+            fs = float(wf.getframerate())
+            nframes = wf.getnframes()
+            raw = wf.readframes(nframes)
+        if sw != 2:
+            raise ValueError(f"暂仅支持 16-bit WAV（当前 sampwidth={sw}）")
+        data = np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0
+        if nch == 2:
+            i = data[0::2]
+            q = data[1::2]
+            iq = i + 1j * q
+        elif nch == 1:
+            iq = data.astype(np.complex128)
+        else:
+            raise ValueError(f"暂仅支持 1/2 声道 WAV（当前 channels={nch}）")
+        return np.ascontiguousarray(iq, dtype=np.complex128), fs
+
+    # 裸复数文件
+    fs = sample_rate
+    if fs is None:
+        # 尝试同名旁注文件读取采样率
+        for sidecar in (path + ".json", os.path.splitext(path)[0] + ".fs"):
+            try:
+                with open(sidecar, "r", encoding="utf-8") as fh:
+                    txt = fh.read().strip()
+                fs = float(txt)
+                break
+            except Exception:
+                fs = None
+    if fs is None:
+        raise ValueError("裸 IQ 文件 (.cf32/.raw/.iq) 必须提供 sample_rate "
+                         "（或同名 .fs/.json 旁注文件写明采样率）")
+
+    raw = np.fromfile(path, dtype=np.float32)
+    if raw.size < 2:
+        return np.array([], dtype=np.complex128), float(fs)
+    iq = (raw[0::2] + 1j * raw[1::2]).astype(np.complex128)
+    return np.ascontiguousarray(iq), float(fs)
+
+
+def extract_doppler_observations(iq: np.ndarray, fs: float,
+                                f0: float = F0_DEFAULT_HZ,
+                                t0: float = 0.0,
+                                window_s: float = 0.5,
+                                hop_s: float = 0.25,
+                                snr_threshold_db: float = 8.0,
+                                min_observations: int = 5
+                                ) -> List[Tuple[float, float]]:
+    """从一段真实复基带 IQ 提取多普勒频偏观测序列 [(t_unix, fd_hz), ...]。
+
+    流程：滑窗 FFT（detect_doppler_timeseries）→ 仅保留 SNR 超过门限的窗口 →
+    把相对文件起点的秒数加上 t0 得到绝对时间戳。
+
+    门限不足 / 有效窗口少于 min_observations 时返回空列表，表示"无有效观测"，
+    调用方不得据此运行 EKF/RLS。不做任何 sin/random 补点。
+    """
+    iq = np.asarray(iq, dtype=np.complex128)
+    if iq.size < max(64, int(window_s * fs)):
+        return []
+    rel_t, fds, snrs = detect_doppler_timeseries(
+        iq, fs=fs, f0=f0, window_s=window_s, hop_s=hop_s)
+    obs: List[Tuple[float, float]] = []
+    for k in range(len(rel_t)):
+        if snrs[k] < snr_threshold_db:
+            continue                      # 无信号 / 噪声窗，丢弃
+        obs.append((float(t0 + rel_t[k]), float(fds[k])))
+    if len(obs) < min_observations:
+        return []
+    return obs
+
+
 # ═══════════════════════════════════════════════════════
 # 3. 观测模型：伪距率与雅可比
 # ═══════════════════════════════════════════════════════
@@ -624,6 +719,63 @@ def residual_statistics(residuals: np.ndarray) -> Dict[str, float]:
     }
 
 
+def ecef_state_to_keplerian(state_ecef: np.ndarray, unix_s: float) -> Dict[str, float]:
+    """把 7 维 ECEF 状态 [x,y,z,vx,vy,vz,b] 转成经典轨道根数（ECI 下解算）。
+
+    返回 dict：a(km), e, i(deg), raan(deg), argp(deg), M(deg)，以及 r/v。
+    仅作结果展示用；不参与滤波更新。
+    """
+    state_ecef = np.asarray(state_ecef, dtype=float)
+    r_ecef = state_ecef[0:3]
+    v_ecef = state_ecef[3:6]
+    jd = jd_from_unix(unix_s)
+    r_eci, v_eci = ecef_to_eci(r_ecef, v_ecef, jd)
+
+    rm = float(np.linalg.norm(r_eci))
+    vm2 = float(v_eci @ v_eci)
+    energy = vm2 / 2.0 - GM_EARTH / rm
+    a = -GM_EARTH / (2.0 * energy) if abs(energy) > 1e-12 else float("nan")
+
+    h = np.cross(r_eci, v_eci)
+    hm = float(np.linalg.norm(h))
+    incl = math.degrees(math.acos(max(-1.0, min(1.0, h[2] / hm)))) if hm > 0 else float("nan")
+
+    k = np.array([0.0, 0.0, 1.0])
+    n = np.cross(k, h)
+    nm = float(np.linalg.norm(n))
+    if nm > 1e-9:
+        raan = math.degrees(math.atan2(n[1], n[0])) % 360.0
+    else:
+        raan = float("nan")
+
+    e_vec = np.cross(v_eci, h) / GM_EARTH - r_eci / rm
+    e = float(np.linalg.norm(e_vec))
+
+    if nm > 1e-9 and e > 1e-9:
+        argp = math.degrees(math.atan2(
+            float(np.dot(n / nm, e_vec)),
+            float(np.dot(e_vec, r_eci) / (e * rm)))) % 360.0
+    else:
+        argp = float("nan")
+
+    if e > 1e-9:
+        nu = math.atan2(
+            float(np.dot(e_vec, r_eci)) / (e * rm),
+            float(np.dot(r_eci, v_eci)) / (e * hm))
+        nu = (nu + 2.0 * math.pi) % (2.0 * math.pi)
+        E = 2.0 * math.atan2(
+            math.sqrt(1.0 + e) * math.sin(nu / 2.0),
+            math.sqrt(1.0 - e) * math.cos(nu / 2.0))
+        M = math.degrees(E - e * math.sin(E)) % 360.0
+    else:
+        M = float("nan")
+    return {
+        "a_km": float(a), "e": float(e), "i_deg": float(incl),
+        "raan_deg": float(raan), "argp_deg": float(argp), "M_deg": float(M),
+        "r_ecef_km": r_ecef.tolist(), "v_ecef_kmps": v_ecef.tolist(),
+    }
+
+
 def sky_plot(az: np.ndarray, el: np.ndarray,
              save_path: Optional[str] = None, title: str = "Sky Plot") -> np.ndarray:
     """方位/仰角天空图数据（保存 PNG）。返回 az/el 数组本身。"""
@@ -712,10 +864,18 @@ def doppler_orbit_determine(observations: List[Tuple[float, float]],
                             ) -> Dict[str, Any]:
     """端到端：喂入多普勒观测序列 -> 输出轨道估计与误差诊断。
 
-    observations: [(t_unix, fd_hz), ...]  多普勒频偏序列。
+    observations: [(t_unix, fd_hz), ...]  多普勒频偏序列（必须来自真实 SDR/IQ）。
     init_state  : 7 维初值（ECEF）。
-    estimator   : "ekf" 或 "rls"。
+    estimator   : "ekf" / "rls" / "ls"（批处理最小二乘）。
+
+    观测为空 / 仅有 1 个点时直接拒绝，绝不运行 predict/update，避免输出假轨道。
     """
+    observations = list(observations or [])
+    if len(observations) < 2:
+        raise ValueError(
+            f"观测不足（仅 {len(observations)} 点）：EKF/RLS 不执行。"
+            "请接入真实 SDR 流或加载有效 IQ 文件并检出载波。")
+
     rx_pos = geodetic_to_ecef(rx_lat, rx_lon, rx_alt)
     # 地面站 ECEF 速度 = Ω×r = (-w y, w x, 0)
     rx_vel = np.array([-OMEGA_E * rx_pos[1], OMEGA_E * rx_pos[0], 0.0])
@@ -731,10 +891,17 @@ def doppler_orbit_determine(observations: List[Tuple[float, float]],
     r_sigma = C_LIGHT_KMS / f0 * 10.0
     q_sigma = np.array([1e-5, 1e-5, 1e-5, 1e-6, 1e-6, 1e-6, 1e-6])
 
-    if estimator == "rls":
+    if estimator in ("rls", "ls"):
+        # 参考历元批处理最小二乘（迭代）：RLS 用先验 P 作弱约束；纯最小二乘
+        # 把先验信息压到接近零，等价于无加权约束的批量 LS。
         t0 = observations[0][0]
-        x_ref, P_ref, resids = reference_epoch_rls_update(
-            init_state, init_P, obs, t0, r_sigma)
+        if estimator == "ls":
+            ls_P = init_P * 1e6            # 几乎不约束先验 -> 纯批处理 LS
+            x_ref, P_ref, resids = reference_epoch_rls_update(
+                init_state, ls_P, obs, t0, r_sigma)
+        else:
+            x_ref, P_ref, resids = reference_epoch_rls_update(
+                init_state, init_P, obs, t0, r_sigma)
         est_t, est_r, est_v = [], [], []
         for (ti, _, _, _) in obs:
             si, _ = propagate_ecef_state_and_stm(x_ref, ti - t0)
@@ -742,7 +909,7 @@ def doppler_orbit_determine(observations: List[Tuple[float, float]],
             est_r.append(si[0:3])
             est_v.append(si[3:6])
         return {
-            "estimator": "rls",
+            "estimator": estimator,
             "state_ref": x_ref,
             "times": np.array(est_t),
             "positions_ecef": np.array(est_r),
@@ -890,7 +1057,7 @@ def register_tool_registry(registry) -> None:
                 "rx_lon": {"type": "number", "default": 116.4},
                 "rx_alt": {"type": "number", "default": 0.0},
                 "f0": {"type": "number", "default": F0_DEFAULT_HZ},
-                "estimator": {"type": "string", "enum": ["ekf", "rls"], "default": "ekf"},
+                "estimator": {"type": "string", "enum": ["ekf", "rls", "ls"], "default": "ekf"},
             },
             "required": ["observations", "init_state"],
         },

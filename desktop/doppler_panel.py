@@ -2,15 +2,16 @@
 MBDSDR 桌面端 - 多普勒定轨面板 (DopplerPanel)
 ==============================================
 
-用多普勒频偏观测序列估计卫星轨道（EKF / 参考历元 RLS），并显示：
-  - 三维位置误差 (km) 随时间收敛曲线
-  - 残差直方图
-  - 天空图（方位/仰角极坐标）
+只接受真实观测：
+  - 实时 SDR：外部通过 feed_iq(iq, fs) 喂入真实复基带 IQ，面板做窄带 FFT
+    提取载波频偏（多普勒频移），带时间戳累积成观测序列。
+  - 离线 IQ 文件：用户选择真实录制的 .cf32/.raw/.iq/.wav，滑窗 FFT 提取观测。
 
-目标：LRO（月球轨道）/ Iridium-107 / 自定义 TLE。
-地面站坐标需用户输入或从 ~/.mbdsdr/config.json 读取（ground_station_lat/lon）。
-无真实 SDR 硬件时实时模式置灰并显示「未连接SDR设备」；
-[模拟] 按钮用合成 Iridium 数据跑收敛，结果标 [模拟]。
+无 SDR 连接且无 IQ 文件 -> 显示「未连接 / 无观测数据」，不画多普勒曲线、
+不运行 EKF/RLS、不输出轨道根数。面板内不存在任何 sin/random 合成观测。
+
+定轨估计器（EKF / RLS / 最小二乘）仅在有 >=2 个真实观测时才执行 predict/update；
+结果收敛后显示轨道根数（a/e/i/RAAN/argp/M）、位置速度与残差。
 
 配色全部取自 themes.py（日式低饱和），不硬编码新颜色。
 """
@@ -20,17 +21,18 @@ import os
 import sys
 import time
 import traceback
-from typing import Dict, List, Optional
+from collections import deque
+from typing import Deque, Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 
-from PySide6.QtCore import Qt, QThread, Signal, QObject
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox, QPushButton,
     QLabel, QLineEdit, QRadioButton, QButtonGroup, QFrame, QGroupBox,
-    QMessageBox,
+    QFileDialog, QMessageBox, QPlainTextEdit,
 )
 
 import matplotlib
@@ -45,18 +47,23 @@ def _theme_colors() -> Dict[str, str]:
     return get_theme(DEFAULT_THEME).colors
 
 
-# 合成 Iridium 风格 TLE（与 tests/test_orbit_determination.py 一致）
-_SYN_IRIDIUM_TLE = (
+# 先验轨道（仅用于 EKF 初值，不是观测数据）：Iridium 风格 LEO。
+# TLE 会过期，仅作 EKF/RLS 的初始猜测；真实轨道由多普勒观测修正。
+_PRIOR_IRIDIUM_TLE = (
     "1 99999U 24001A   24278.00000000  .00000000  00000-0  00000-0 0  9999",
     "2 99999  86.4000 160.0000 0001000 320.0000 320.0000 14.34000000    00",
 )
 
+MIN_OBS = 2                     # EKF/RLS 至少需要的真实观测点数
+RT_WINDOW_S = 0.5               # 实时 FFT 窗长
+RT_FLUSH_MS = 1000              # 实时观测刷新周期
+
 
 # ======================================================================
-# 后台定轨线程
+# 后台定轨线程：只跑真实观测
 # ======================================================================
 class OrbitWorker(QObject):
-    finished = Signal(object)   # dict(plot data) 或 ToolResult
+    finished = Signal(dict)
     progress = Signal(str)
     failed = Signal(str)
 
@@ -64,14 +71,6 @@ class OrbitWorker(QObject):
         super().__init__(parent)
         self._action = action
         self._params = params
-        self._reg = None
-
-    def _ensure_registry(self):
-        if self._reg is None:
-            from mbdsdr_ai.tool_registry import ToolRegistry
-            self._reg = ToolRegistry()
-            self._reg.register_builtin_tools()
-        return self._reg
 
     def run(self):
         try:
@@ -79,156 +78,92 @@ class OrbitWorker(QObject):
                 self._run_determine()
             elif self._action == "lro":
                 self._run_lro()
-            elif self._action == "demo":
-                self._run_demo()
         except Exception as e:  # noqa: BLE001
             self.failed.emit(f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=2)}")
 
-    # ------------------------------------------------------------------
-    def _build_synthetic_iridium(self, rx_lat, rx_lon, rx_alt, rng_seed=7):
-        """合成一次 Iridium 过境的多普勒观测（真值 + 钟漂 + 噪声）。"""
+    def _run_determine(self):
+        """用真实多普勒观测序列运行 EKF/RLS/LS。观测已在面板侧校验非空。"""
         from mbdsdr_ai import orbit_determination as od
-        rng = np.random.default_rng(rng_seed)
-        f0 = od.F0_DEFAULT_HZ
-        rx_pos = od.geodetic_to_ecef(rx_lat, rx_lon, rx_alt)
-        rx_vel = np.array([-od.OMEGA_E * rx_pos[1], od.OMEGA_E * rx_pos[0], 0.0])
 
-        # 固定在合成 TLE 历元附近（2024-10-04），保证 SGP4 传播误差最小、EKF 可收敛
-        import datetime as _dt
-        epoch = _dt.datetime(2024, 10, 4, 0, 0, 0)
-        epoch_u = (epoch - _dt.datetime(1970, 1, 1)).total_seconds()
-        ts = epoch_u + np.arange(0, 4 * 3600, 5.0)
-        l1, l2 = _SYN_IRIDIUM_TLE
-        states = [od.leosat_state_from_tle(l1, l2, t) for t in ts]
-        els = np.array([od.ecef_to_azel(states[k][0], rx_pos, rx_lat, rx_lon)[1]
-                        for k in range(len(ts))])
-        ic = int(np.argmax(els))
-        above = els > 10.0
-        s = ic
-        while s > 0 and above[s - 1]:
-            s -= 1
-        e = ic
-        while e < len(els) - 1 and above[e + 1]:
-            e += 1
-
-        truth, obs = [], []
-        azs, els_obs = [], []
-        clk_drift = 30.0
-        for k in range(s, e + 1):
-            r, v = states[k]
-            t = ts[k]
-            sv = r - rx_pos
-            rho = np.linalg.norm(sv)
-            u = sv / rho
-            rho_dot = u @ (v - rx_vel)
-            fd = od.rangerate_to_fd(rho_dot, f0) + clk_drift + rng.normal(0.0, 10.0)
-            obs.append({"t": float(t), "fd": float(fd)})
-            truth.append(r)
-            az, el = od.ecef_to_azel(r, rx_pos, rx_lat, rx_lon)
-            azs.append(az); els_obs.append(el)
-        truth = np.array(truth)
-        # 初值：真值 + ~10km 偏差
-        x0 = np.concatenate([
-            truth[0] + np.array([10.0, -5.0, 3.0]),
-            states[s][1] + np.array([0.001, -0.002, 0.001]),
-            [0.0],
-        ])
-        return obs, x0, truth, np.array(azs), np.array(els_obs), f0
-
-    def _run_demo(self):
-        from mbdsdr_ai import orbit_determination as od
+        obs: List[Tuple[float, float]] = self._params["observations"]
         rx_lat = float(self._params["rx_lat"])
         rx_lon = float(self._params["rx_lon"])
         rx_alt = float(self._params["rx_alt"])
+        f0 = float(self._params["f0"])
         estimator = self._params["estimator"]
-        self.progress.emit("[模拟] 合成 Iridium 过境多普勒观测 ...")
+        init_state = np.asarray(self._params["init_state"], dtype=float)
 
-        obs, x0, truth, azs, els_obs, f0 = self._build_synthetic_iridium(
-            rx_lat, rx_lon, rx_alt)
+        self.progress.emit(f"运行 {estimator.upper()} 定轨，N={len(obs)} ...")
         res = od.doppler_orbit_determine(
-            [(o["t"], o["fd"]) for o in obs],
-            rx_lat, rx_lon, rx_alt, x0, f0=f0, estimator=estimator)
-        err, _ = od.position_error_curve(res["positions_ecef"], truth)
+            obs, rx_lat, rx_lon, rx_alt, init_state, f0=f0, estimator=estimator)
+
+        times = np.asarray(res["times"], dtype=float)
+        pos = np.asarray(res["positions_ecef"], dtype=float)
+        vels = np.asarray(res["velocities_ecef"], dtype=float)
+        residuals = np.asarray(res["residuals"], dtype=float)
         stats = res["residual_stats"]
+
+        # 由末状态算轨道根数（展示用）
+        final_state = res.get("state", res.get("state_ref"))
+        kepler = od.ecef_state_to_keplerian(final_state, float(times[-1]))
+
+        # 天空轨迹（由估计位置反算方位/仰角）
+        rx_pos = od.geodetic_to_ecef(rx_lat, rx_lon, rx_alt)
+        azs, els = [], []
+        for k in range(len(pos)):
+            az, el = od.ecef_to_azel(pos[k], rx_pos, rx_lat, rx_lon)
+            azs.append(az)
+            els.append(el)
+
+        # 收敛判据：残差 RMS 折算回频偏 < 20 Hz
+        fd_rms = abs(stats["rms"]) * f0 / od.C_LIGHT_KMS
         self.finished.emit({
-            "simulated": True,
+            "simulated": False,
             "estimator": res["estimator"],
-            "times": (np.asarray(res["times"]) - res["times"][0]).tolist(),
-            "pos_error_km": err.tolist(),
-            "residuals": np.asarray(res["residuals"]).tolist(),
-            "azimuth_deg": azs.tolist(),
-            "elevation_deg": els_obs.tolist(),
-            "final_error_km": float(err[-1]),
+            "times": (times - times[0]).tolist(),
+            "observations_fd": [float(fd) for _, fd in obs],
+            "observations_t": [float(t - obs[0][0]) for t, _ in obs],
+            "residuals": residuals.tolist(),
+            "azimuth_deg": azs,
+            "elevation_deg": els,
             "residual_rms": stats["rms"],
-            "converged": bool(err[-1] < 1.0),
+            "fd_rms_hz": fd_rms,
+            "converged": bool(fd_rms < 20.0),
+            "kepler": kepler,
+            "r_ecef_km": final_state[0:3].tolist(),
+            "v_ecef_kmps": final_state[3:6].tolist(),
+            "n_obs": len(obs),
         })
 
     def _run_lro(self):
-        reg = self._ensure_registry()
+        """LRO 天空预测（星历参考，非多普勒定轨）。"""
+        from mbdsdr_ai import orbit_determination as od
         rx_lat = float(self._params["rx_lat"])
         rx_lon = float(self._params["rx_lon"])
-        self.progress.emit("调用 lro_track 计算 LRO 天空轨迹 ...")
-        res = reg.call("lro_track", {
-            "rx_lat": rx_lat, "rx_lon": rx_lon, "hours": 24.0, "n": 288,
-        })
-        data = getattr(res, "data", {}) or {}
+        self.progress.emit("计算 LRO 参考天空轨迹 ...")
+        t0 = time.time()
+        times = t0 + np.linspace(0, 24 * 3600.0, 288)
+        ref = od.get_lro_reference(times)
+        rx_pos = od.geodetic_to_ecef(rx_lat, rx_lon, 0.0)
+        azs, els = [], []
+        for i in range(len(times)):
+            az, el = od.ecef_to_azel(ref["r_ecef"][i], rx_pos, rx_lat, rx_lon)
+            azs.append(az)
+            els.append(el)
         self.finished.emit({
             "simulated": False,
-            "estimator": "lro_track",
-            "times": list(range(len(data.get("azimuth_deg", [])))),
-            "pos_error_km": [],
-            "residuals": [],
-            "azimuth_deg": data.get("azimuth_deg", []),
-            "elevation_deg": data.get("elevation_deg", []),
-            "final_error_km": None,
-            "residual_rms": None,
-            "converged": None,
-            "content": getattr(res, "content", ""),
-            "success": getattr(res, "success", False),
-        })
-
-    def _run_determine(self):
-        """离线 IQ / 实时 SDR：真实多普勒观测需先从 IQ 提取频偏。
-        这里如实调用后端 doppler_orbit_determine；若未提供观测序列则返回提示。"""
-        reg = self._ensure_registry()
-        obs = self._params.get("observations")
-        if not obs:
-            self.finished.emit({
-                "simulated": False, "estimator": self._params["estimator"],
-                "times": [], "pos_error_km": [], "residuals": [],
-                "azimuth_deg": [], "elevation_deg": [],
-                "final_error_km": None, "residual_rms": None, "converged": None,
-                "content": "未提供多普勒观测序列：请先从 IQ 提取频偏（离线文件需先解调）。",
-                "success": False,
-            })
-            return
-        res = reg.call("doppler_orbit_determine", {
-            "observations": obs,
-            "init_state": self._params["init_state"],
-            "rx_lat": self._params["rx_lat"],
-            "rx_lon": self._params["rx_lon"],
-            "rx_alt": self._params["rx_alt"],
-            "estimator": self._params["estimator"],
-        })
-        data = getattr(res, "data", {}) or {}
-        stats = data.get("residual_stats", {})
-        self.finished.emit({
-            "simulated": False,
-            "estimator": data.get("estimator", self._params["estimator"]),
-            "times": [t - data["times"][0] for t in data.get("times", [])],
-            "pos_error_km": [],
-            "residuals": [],
-            "azimuth_deg": [], "elevation_deg": [],
-            "final_error_km": None,
-            "residual_rms": stats.get("rms"),
-            "converged": None,
-            "content": getattr(res, "content", ""),
-            "success": getattr(res, "success", False),
+            "estimator": "lro_predict",
+            "times": (times - times[0]).tolist(),
+            "observations_fd": [], "observations_t": [],
+            "residuals": [], "azimuth_deg": azs, "elevation_deg": els,
+            "residual_rms": None, "fd_rms_hz": None, "converged": None,
+            "kepler": None, "r_ecef_km": None, "v_ecef_kmps": None, "n_obs": 0,
+            "content": "LRO 天空预测（参考星历，非多普勒定轨）",
         })
 
 
 # ======================================================================
-# matplotlib 画布：三子图
+# matplotlib 画布
 # ======================================================================
 class OrbitCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None):
@@ -236,7 +171,7 @@ class OrbitCanvas(FigureCanvasQTAgg):
         self._c = c
         fig = Figure(figsize=(7, 5))
         fig.patch.set_facecolor(c["card"])
-        self.ax_err = fig.add_subplot(2, 2, 1)
+        self.ax_obs = fig.add_subplot(2, 2, 1)
         self.ax_hist = fig.add_subplot(2, 2, 2)
         self.ax_sky = fig.add_subplot(2, 2, 3, projection="polar")
         self.ax_sky.set_theta_zero_location("N")
@@ -245,66 +180,72 @@ class OrbitCanvas(FigureCanvasQTAgg):
         self.ax_status.axis("off")
         super().__init__(fig)
         self._style_axes()
-        self._show_empty()
+        self.show_disconnected("未连接 / 无观测数据")
 
     def _style_axes(self):
         c = self._c
-        for ax in (self.ax_err, self.ax_hist, self.ax_sky):
+        for ax in (self.ax_obs, self.ax_hist, self.ax_sky):
             ax.set_facecolor(c["bg_alt"])
             ax.tick_params(colors=c["text_secondary"], labelsize=8)
             for spine in getattr(ax, "spines", {}).values():
                 spine.set_color(c["border"])
             ax.title.set_color(c["text"])
 
-    def _show_empty(self, msg: str = "无观测数据"):
-        for ax in (self.ax_err, self.ax_hist, self.ax_sky):
+    def show_disconnected(self, msg: str = "未连接 / 无观测数据"):
+        for ax in (self.ax_obs, self.ax_hist, self.ax_sky):
             ax.clear()
-        self.ax_err.text(0.5, 0.5, msg, ha="center", va="center",
-                         transform=self.ax_err.transAxes,
+            ax.set_facecolor(self._c["bg_alt"])
+        self.ax_obs.text(0.5, 0.5, msg, ha="center", va="center",
+                         transform=self.ax_obs.transAxes,
                          color=self._c["text_disabled"], fontsize=11)
-        self.ax_err.set_facecolor(self._c["bg_alt"])
+        self.ax_obs.set_title("多普勒频偏观测 (Hz)", fontsize=9)
+        self.ax_status.clear()
+        self.ax_status.axis("off")
+        self.ax_status.text(0.05, 0.95, "等待真实观测 ...",
+                            va="top", ha="left",
+                            color=self._c["text_disabled"], fontsize=9,
+                            family="monospace")
         self.draw_idle()
 
     def plot_results(self, d: Dict):
         c = self._c
         prim = c["primary"]; acc = c["accent"]; txt = c["text"]
 
-        # 1) 位置误差曲线
-        self.ax_err.clear()
-        self.ax_err.set_facecolor(c["bg_alt"])
-        pe = d.get("pos_error_km", [])
-        if pe:
-            t = d.get("times", list(range(len(pe))))
-            self.ax_err.plot(t, pe, color=prim, lw=1.8, label="位置误差")
-            self.ax_err.axhline(1.0, color=acc, ls="--", lw=1.0, label="1 km 门限")
-            self.ax_err.set_ylabel("误差 (km)", color=txt, fontsize=8)
-            self.ax_err.set_xlabel("时间 (s)", color=txt, fontsize=8)
-            self.ax_err.set_title("三维位置误差收敛", fontsize=9)
-            self.ax_err.legend(fontsize=7, loc="upper right")
-            self.ax_err.grid(True, alpha=0.3)
+        # 1) 真实多普勒频偏观测
+        self.ax_obs.clear()
+        self.ax_obs.set_facecolor(c["bg_alt"])
+        ot = d.get("observations_t", [])
+        ofd = d.get("observations_fd", [])
+        if ot and ofd:
+            self.ax_obs.plot(ot, ofd, color=prim, lw=1.6, marker="o",
+                             markersize=2, label="实测 fd")
+            self.ax_obs.axhline(0, color=c["border"], lw=0.6)
+            self.ax_obs.set_ylabel("频偏 (Hz)", color=txt, fontsize=8)
+            self.ax_obs.set_xlabel("时间 (s)", color=txt, fontsize=8)
+            self.ax_obs.set_title("真实多普勒频偏观测", fontsize=9)
+            self.ax_obs.legend(fontsize=7)
+            self.ax_obs.grid(True, alpha=0.3)
         else:
-            self.ax_err.text(0.5, 0.5, "无误差曲线", ha="center", va="center",
-                             transform=self.ax_err.transAxes,
+            self.ax_obs.text(0.5, 0.5, "无观测", ha="center", va="center",
+                             transform=self.ax_obs.transAxes,
                              color=c["text_disabled"], fontsize=9)
-            self.ax_err.set_title("三维位置误差收敛", fontsize=9)
+            self.ax_obs.set_title("真实多普勒频偏观测", fontsize=9)
 
         # 2) 残差直方图
         self.ax_hist.clear()
         self.ax_hist.set_facecolor(c["bg_alt"])
         res = d.get("residuals", [])
-        if res:
-            self.ax_hist.hist(res, bins=25, color=prim, edgecolor=c["border"], alpha=0.85)
-            self.ax_hist.set_title("残差直方图", fontsize=9)
-            self.ax_hist.set_xlabel("伪距率残差", color=txt, fontsize=8)
-            self.ax_hist.set_ylabel("计数", color=txt, fontsize=8)
+        if len(res) >= 2:
+            self.ax_hist.hist(res, bins=15, color=prim, edgecolor=c["border"], alpha=0.85)
+            self.ax_hist.set_title("滤波残差", fontsize=9)
             self.ax_hist.grid(True, alpha=0.3)
         else:
-            self.ax_hist.text(0.5, 0.5, "无残差", ha="center", va="center",
+            self.ax_hist.text(0.5, 0.5, "残差不足", ha="center", va="center",
                               transform=self.ax_hist.transAxes,
                               color=c["text_disabled"], fontsize=9)
-            self.ax_hist.set_title("残差直方图", fontsize=9)
+            self.ax_hist.set_title("滤波残差", fontsize=9)
 
-        # 3) 天空图（极坐标）
+        # 3) 天空图
         self.ax_sky.clear()
         self.ax_sky.set_facecolor(c["bg_alt"])
         self.ax_sky.set_theta_zero_location("N")
@@ -314,45 +255,51 @@ class OrbitCanvas(FigureCanvasQTAgg):
         if az and el:
             az_rad = np.deg2rad(np.asarray(az))
             r = 90.0 - np.asarray(el)
-            self.ax_sky.plot(az_rad, r, color=acc, lw=1.6, marker="o",
-                             markersize=2)
+            self.ax_sky.plot(az_rad, r, color=acc, lw=1.4, marker="o", markersize=2)
             self.ax_sky.set_yticks([0, 30, 60, 90])
             self.ax_sky.set_yticklabels(["90°", "60°", "30°", "0°"],
                                         color=c["text_secondary"], fontsize=7)
         else:
-            self.ax_sky.text(0.5, 0.5, "无天空轨迹", ha="center", va="center",
-                             transform=self.ax_sky.transAxes,
-                             color=c["text_disabled"], fontsize=8)
+            self.ax_sky.text(0.5, 0.5, "无轨迹", ha="center", va="center",
+                            transform=self.ax_sky.transAxes,
+                            color=c["text_disabled"], fontsize=8)
         self.ax_sky.set_title("天空图 (AZ/EL)", fontsize=9, va="bottom")
 
-        # 4) 状态文本
+        # 4) 状态 / 轨道根数
         self.ax_status.clear()
         self.ax_status.axis("off")
         self.ax_status.set_facecolor(c["card"])
-        lines = []
-        if d.get("simulated"):
-            lines.append("[模拟]")
-        lines.append(f"估计器: {d.get('estimator','?')}")
-        fe = d.get("final_error_km")
-        lines.append(f"最终位置误差: {fe:.3f} km" if fe is not None else
-                     "最终位置误差: --")
-        rms = d.get("residual_rms")
-        lines.append(f"残差 RMS: {rms:.5f}" if rms is not None else "残差 RMS: --")
+        lines = [f"估计器: {d.get('estimator','?')}  N={d.get('n_obs',0)}"]
+        k = d.get("kepler")
+        if k:
+            lines += [
+                f"a   = {k['a_km']:.1f} km",
+                f"e   = {k['e']:.4f}",
+                f"i   = {k['i_deg']:.2f} deg",
+                f"RAAN= {k['raan_deg']:.2f} deg",
+                f"argp= {k['argp_deg']:.2f} deg",
+                f"M   = {k['M_deg']:.2f} deg",
+            ]
+            if d.get("r_ecef_km"):
+                rx, ry, rz = d["r_ecef_km"]
+                lines.append(f"r=({rx:.0f},{ry:.0f},{rz:.0f}) km")
+        else:
+            lines.append("轨道根数: --")
+        rms = d.get("fd_rms_hz")
+        if rms is not None:
+            lines.append(f"残差RMS= {rms:.2f} Hz")
         conv = d.get("converged")
-        lines.append("收敛状态: " +
-                     ("已收敛 (<1km)" if conv is True else
-                      ("未收敛" if conv is False else "--")))
-        if d.get("content"):
-            lines.append(d["content"][:60])
+        lines.append("收敛: " + ("已收敛" if conv is True else
+                                ("迭代中/未收敛" if conv is False else "--")))
         self.ax_status.text(0.05, 0.95, "\n".join(lines),
-                            va="top", ha="left", color=txt, fontsize=9,
+                            va="top", ha="left", color=txt, fontsize=8,
                             family="monospace")
         self.figure.tight_layout()
         self.draw_idle()
 
 
 # ======================================================================
-# 多普勒定轨面板主体
+# 面板主体
 # ======================================================================
 class DopplerPanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
@@ -361,14 +308,25 @@ class DopplerPanel(QWidget):
         self._sdr_connected = False
         self._worker: Optional[QThread] = None
         self._worker_obj: Optional[OrbitWorker] = None
-        self._build_ui()
 
+        # 真实观测状态
+        self._observations: List[Tuple[float, float]] = []   # (t_unix, fd_hz)
+        self._iq_path: Optional[str] = None
+        self._rt_buffer: Deque[np.ndarray] = deque()
+        self._rt_fs: float = 0.0
+        self._rt_timer = QTimer(self)
+        self._rt_timer.setInterval(RT_FLUSH_MS)
+        self._rt_timer.timeout.connect(self._rt_flush)
+
+        self._build_ui()
+        self._refresh_gate()
+
+    # ------------------------------------------------------------------
     def _build_ui(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(8)
 
-        # ===== 控制卡片 =====
         ctrl = QFrame()
         ctrl.setObjectName("card")
         cl = QVBoxLayout(ctrl)
@@ -383,70 +341,83 @@ class DopplerPanel(QWidget):
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         self.target_combo = QComboBox()
-        self.target_combo.setToolTip("选择定轨目标：LRO 月球轨道 / Iridium-107 / 自定义 TLE")
+        self.target_combo.setToolTip("先验轨道目标（TLE 仅作初值，真实轨道由观测修正）")
         self.target_combo.addItems(["LRO (月球轨道)", "Iridium-107", "自定义 TLE"])
+        self.target_combo.currentIndexChanged.connect(self._refresh_gate)
         form.addRow("目标", self.target_combo)
 
         self.mode_combo = QComboBox()
-        self.mode_combo.setToolTip("离线 IQ 文件或实时 SDR（无硬件时实时置灰）")
+        self.mode_combo.setToolTip("观测来源：实时 SDR 流 或 离线录制 IQ 文件")
         self.mode_combo.addItems(["离线 IQ 文件", "实时 SDR"])
-        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        form.addRow("观测模式", self.mode_combo)
+        self.mode_combo.currentIndexChanged.connect(self._refresh_gate)
+        form.addRow("观测来源", self.mode_combo)
 
-        # 地面站参数（默认留空，提示用户输入；可从 ~/.mbdsdr/config.json 读取）
+        # 中心频率 / 采样率
+        freq_row = QHBoxLayout()
+        self.f0_edit = QLineEdit(str(2271.0e6))
+        self.f0_edit.setToolTip("下行中心频率 (Hz)")
+        self.fs_edit = QLineEdit(str(2.4e6))
+        self.fs_edit.setToolTip("采样率 (Hz)；裸 IQ 文件需与此一致")
+        freq_row.addWidget(QLabel("中心Hz")); freq_row.addWidget(self.f0_edit)
+        freq_row.addWidget(QLabel("采样Hz")); freq_row.addWidget(self.fs_edit)
+        form.addRow("射频", freq_row)
+
         st = QHBoxLayout()
         self.lat_edit = QLineEdit("")
         self.lat_edit.setPlaceholderText("未设置")
-        self.lat_edit.setToolTip("地面站纬度 (°N)，请输入；或在 ~/.mbdsdr/config.json 设置 ground_station_lat")
         self.lon_edit = QLineEdit("")
         self.lon_edit.setPlaceholderText("未设置")
-        self.lon_edit.setToolTip("地面站经度 (°E)，请输入；或在 ~/.mbdsdr/config.json 设置 ground_station_lon")
         self.alt_edit = QLineEdit("0.0")
-        self.alt_edit.setToolTip("地面站高度 (km)")
         st.addWidget(QLabel("纬度")); st.addWidget(self.lat_edit)
         st.addWidget(QLabel("经度")); st.addWidget(self.lon_edit)
-        st.addWidget(QLabel("高度km")); st.addWidget(self.alt_edit)
+        st.addWidget(QLabel("km")); st.addWidget(self.alt_edit)
         form.addRow("地面站", st)
 
-        # 估计器
         est = QHBoxLayout()
         self.ekf_radio = QRadioButton("EKF")
-        self.ekf_radio.setToolTip("扩展卡尔曼滤波（序贯估计）")
         self.ekf_radio.setChecked(True)
         self.rls_radio = QRadioButton("RLS")
-        self.rls_radio.setToolTip("参考历元递推最小二乘（批处理）")
+        self.ls_radio = QRadioButton("最小二乘")
         self.est_group = QButtonGroup(self)
-        self.est_group.addButton(self.ekf_radio)
-        self.est_group.addButton(self.rls_radio)
-        est.addWidget(self.ekf_radio)
-        est.addWidget(self.rls_radio)
+        for b in (self.ekf_radio, self.rls_radio, self.ls_radio):
+            self.est_group.addButton(b)
+            est.addWidget(b)
         est.addStretch()
         form.addRow("估计器", est)
 
         cl.addLayout(form)
 
+        # IQ 文件选择
+        file_row = QHBoxLayout()
+        self.pick_btn = QPushButton("选择 IQ 文件 ...")
+        self.pick_btn.setToolTip("选择真实录制的 .cf32/.raw/.iq/.wav")
+        self.pick_btn.clicked.connect(self._on_pick_iq)
+        self.iq_label = QLabel("未加载")
+        self.iq_label.setStyleSheet(f"color: {self._c['text_disabled']};")
+        file_row.addWidget(self.pick_btn)
+        file_row.addWidget(self.iq_label, 1)
+        cl.addLayout(file_row)
+
+        # 自定义 TLE
+        self.tle_edit = QPlainTextEdit()
+        self.tle_edit.setPlaceholderText("自定义 TLE 两行（选填）：\n1 xxxxU ...\n2 xxxx ...")
+        self.tle_edit.setMaximumHeight(56)
+        self.tle_edit.setToolTip("仅「自定义 TLE」时使用，作为 EKF 先验初值")
+        cl.addWidget(self.tle_edit)
+
         btn_row = QHBoxLayout()
         self.start_btn = QPushButton("开始定轨")
         self.start_btn.setObjectName("recordButton")
-        self.start_btn.setToolTip("在后台线程调用后端定轨工具")
         self.start_btn.clicked.connect(self._on_start)
         btn_row.addWidget(self.start_btn)
-
         self.stop_btn = QPushButton("停止")
-        self.stop_btn.setToolTip("停止后台定轨线程")
         self.stop_btn.clicked.connect(self._on_stop)
         self.stop_btn.setEnabled(False)
         btn_row.addWidget(self.stop_btn)
-
-        self.demo_btn = QPushButton("[模拟] Iridium 合成定轨演示")
-        self.demo_btn.setToolTip("用合成 Iridium 过境数据跑 EKF/RLS 收敛，标 [模拟]")
-        self.demo_btn.clicked.connect(self._on_demo)
-        btn_row.addWidget(self.demo_btn)
         cl.addLayout(btn_row)
 
         outer.addWidget(ctrl)
 
-        # ===== 曲线显示 =====
         plot_card = QFrame()
         plot_card.setObjectName("card")
         pl = QVBoxLayout(plot_card)
@@ -458,90 +429,235 @@ class DopplerPanel(QWidget):
         pl.addWidget(self.canvas, 1)
         outer.addWidget(plot_card, 1)
 
-        # ===== 结果状态栏 =====
-        self.status_label = QLabel("就绪 — 无观测数据")
+        self.status_label = QLabel("未连接 / 无观测数据")
         self.status_label.setObjectName("statusValue")
-        self.status_label.setToolTip("最终位置误差 / 残差 RMS / 收敛状态")
         outer.addWidget(self.status_label)
 
-        self._on_mode_changed()
-
+    # ------------------------------------------------------------------
+    # 对外接口
     # ------------------------------------------------------------------
     def set_sdr_connected(self, connected: bool):
         self._sdr_connected = bool(connected)
-        self._on_mode_changed()
+        if not self._sdr_connected:
+            self._rt_timer.stop()
+            self._rt_buffer.clear()
+        self._refresh_gate()
 
-    def _is_busy(self) -> bool:
-        return self._worker is not None and self._worker.isRunning()
+    def feed_iq(self, iq: np.ndarray, fs: float):
+        """实时 SDR 复基带喂入（由 main_window 在 IQ 轮询时调用）。
 
-    def _on_mode_changed(self, *_):
-        realtime = self.mode_combo.currentText() == "实时 SDR"
-        if realtime and not self._sdr_connected:
-            self.start_btn.setEnabled(False)
-            self.status_label.setText("未连接SDR设备 — 实时观测不可用")
+        累积到缓冲，由定时器定期做窄带 FFT 提取多普勒频偏观测。无连接时丢弃。
+        """
+        if not self._sdr_connected:
+            return
+        iq = np.asarray(iq, dtype=np.complex128)
+        if iq.size == 0:
+            return
+        self._rt_fs = float(fs)
+        self._rt_buffer.append(iq)
+        # 缓冲最多保留 ~2 秒
+        max_samples = max(4096, int(self._rt_fs * 2.0))
+        total = sum(len(x) for x in self._rt_buffer)
+        while total > max_samples and len(self._rt_buffer) > 1:
+            total -= len(self._rt_buffer.popleft())
+        if not self._rt_timer.isActive():
+            self._rt_timer.start()
+        self._refresh_gate()
+
+    def set_iq_file(self, path: str):
+        """加载离线 IQ 文件并提取观测序列。"""
+        from mbdsdr_ai import orbit_determination as od
+        try:
+            fs = float(self.fs_edit.text())
+        except ValueError:
+            fs = None
+        try:
+            iq, fs_actual = od.load_iq_file(path, sample_rate=fs)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "IQ 文件", f"加载失败: {e}")
+            return
+        self._iq_path = path
+        self._iq_loaded_fs = fs_actual
+        try:
+            f0 = float(self.f0_edit.text())
+        except ValueError:
+            f0 = od.F0_DEFAULT_HZ
+        obs = od.extract_doppler_observations(
+            iq, fs_actual, f0=f0, t0=time.time())
+        self._observations = obs
+        self.iq_label.setText(os.path.basename(path))
+        if obs:
+            self.status_label.setText(
+                f"IQ 已加载：{os.path.basename(path)}，检出 {len(obs)} 个观测")
         else:
-            self.start_btn.setEnabled(not self._is_busy())
+            self.status_label.setText("IQ 文件中未检出有效载波（SNR 不足）")
+        self._refresh_gate()
 
-    def _refresh_start_enabled(self):
-        """结束后台后只恢复按钮可用性，不覆盖已显示的结果状态。"""
-        realtime = self.mode_combo.currentText() == "实时 SDR"
-        if realtime and not self._sdr_connected:
-            self.start_btn.setEnabled(False)
-        else:
-            self.start_btn.setEnabled(True)
+    def start_processing(self):
+        self._on_start()
 
-    def _ground_station(self):
+    def stop_processing(self):
+        self._on_stop()
+
+    # ------------------------------------------------------------------
+    def _is_realtime(self) -> bool:
+        return self.mode_combo.currentText() == "实时 SDR"
+
+    def _estimator(self) -> str:
+        if self.rls_radio.isChecked():
+            return "rls"
+        if self.ls_radio.isChecked():
+            return "ls"
+        return "ekf"
+
+    def _ground_station(self) -> Optional[Tuple[float, float, float]]:
         try:
             lat = float(self.lat_edit.text())
             lon = float(self.lon_edit.text())
             alt = float(self.alt_edit.text())
         except ValueError:
-            QMessageBox.warning(self, "参数错误", "地面站坐标需为数字。")
             return None
         return lat, lon, alt
 
-    def _estimator(self) -> str:
-        return "rls" if self.rls_radio.isChecked() else "ekf"
+    def _refresh_gate(self):
+        """根据 连接/文件/观测 状态决定控件可用性与提示文案。"""
+        busy = self._is_busy()
+        realtime = self._is_realtime()
+        target = self.target_combo.currentText()
+
+        # LRO 是天空预测，不需要多普勒观测；其余目标需要真实观测
+        need_obs = not target.startswith("LRO")
+
+        if realtime and not self._sdr_connected:
+            self.start_btn.setEnabled(False)
+            self.status_label.setText("未连接SDR设备 — 实时观测不可用")
+            self.canvas.show_disconnected("未连接SDR设备 / 无观测数据")
+            return
+
+        if not need_obs:
+            # LRO 预测：随时可跑
+            self.start_btn.setEnabled(not busy)
+            if self.status_label.text().startswith("就绪"):
+                self.status_label.setText("就绪 — LRO 天空预测")
+            return
+
+        # 需要真实观测的目标
+        n = len(self._observations)
+        if realtime:
+            if n >= MIN_OBS:
+                self.start_btn.setEnabled(not busy)
+                self.status_label.setText(f"实时观测已积累 {n} 点")
+            else:
+                self.start_btn.setEnabled(False)
+                self.status_label.setText(f"实时观测不足（{n}/{MIN_OBS}）— 等待载波")
+                self.canvas.show_disconnected("实时采集中 / 观测不足")
+        else:
+            if self._iq_path is None:
+                self.start_btn.setEnabled(False)
+                self.status_label.setText("未加载 IQ 文件 — 无观测数据")
+                self.canvas.show_disconnected("未加载 IQ 文件 / 无观测数据")
+            elif n >= MIN_OBS:
+                self.start_btn.setEnabled(not busy)
+                self.status_label.setText(f"IQ 观测就绪 N={n}")
+            else:
+                self.start_btn.setEnabled(False)
+                self.status_label.setText("IQ 文件未检出有效载波 — 观测不足")
+                self.canvas.show_disconnected("无有效观测 / SNR 不足")
+
+    def _rt_flush(self):
+        """实时 FFT：对缓冲做一次窄带 FFT，提取多普勒频偏。"""
+        from mbdsdr_ai import orbit_determination as od
+        if not self._rt_buffer or self._rt_fs <= 0:
+            return
+        win = int(self._rt_fs * RT_WINDOW_S)
+        if win < 64:
+            return
+        # 拼出最近 win 个样本
+        chunks = list(self._rt_buffer)
+        data = np.concatenate(chunks)
+        if len(data) < win:
+            return
+        seg = data[-win:]
+        try:
+            f0 = float(self.f0_edit.text())
+        except ValueError:
+            f0 = od.F0_DEFAULT_HZ
+        fd, snr = od.detect_doppler(seg, f0=f0, fs=self._rt_fs)
+        if snr >= 8.0:
+            self._observations.append((time.time(), float(fd)))
+        self._refresh_gate()
 
     # ------------------------------------------------------------------
+    def _on_pick_iq(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择真实录制的 IQ 文件", "",
+            "IQ Files (*.cf32 *.raw *.iq *.wav);;All Files (*)")
+        if path:
+            self.set_iq_file(path)
+
+    def _initial_state(self, t_unix: float):
+        """由先验 TLE 计算 ECEF 初值 (7 维)。"""
+        from mbdsdr_ai import orbit_determination as od
+        target = self.target_combo.currentText()
+        if target.startswith("LRO"):
+            return None
+        if target.startswith("自定义"):
+            lines = [l.strip() for l in self.tle_edit.toPlainText().splitlines()
+                     if l.strip()]
+            if len(lines) < 2:
+                raise ValueError("自定义 TLE 需要两行数据")
+            l1, l2 = lines[0], lines[1]
+        else:
+            l1, l2 = _PRIOR_IRIDIUM_TLE
+        r, v = od.leosat_state_from_tle(l1, l2, t_unix)
+        return np.concatenate([r, v, [0.0]])
+
     def _on_start(self):
         if self._is_busy():
             return
         gs = self._ground_station()
         if gs is None:
+            QMessageBox.warning(self, "参数错误", "地面站坐标需为数字。")
             return
-        realtime = self.mode_combo.currentText() == "实时 SDR"
-        if realtime and not self._sdr_connected:
-            QMessageBox.warning(self, "未连接 SDR", "未连接SDR设备，无法实时观测。")
-            return
-
         target = self.target_combo.currentText()
+
         if target.startswith("LRO"):
             self._start_worker("lro", {"rx_lat": gs[0], "rx_lon": gs[1]})
-        else:
-            # Iridium-107 / 自定义 TLE：真实观测需先从 IQ 提取多普勒频偏
-            self._start_worker("determine", {
-                "rx_lat": gs[0], "rx_lon": gs[1], "rx_alt": gs[2],
-                "estimator": self._estimator(),
-                "observations": [],   # 真实观测未接入时如实提示
-            })
+            return
 
-    def _on_demo(self):
-        if self._is_busy():
+        # 需要真实观测
+        if self._is_realtime() and not self._sdr_connected:
+            QMessageBox.warning(self, "未连接 SDR", "未连接SDR设备，无法实时观测。")
             return
-        gs = self._ground_station()
-        if gs is None:
+        if len(self._observations) < MIN_OBS:
+            QMessageBox.information(self, "观测不足",
+                                   "尚无足够真实多普勒观测，EKF/RLS 不执行。")
             return
-        self._start_worker("demo", {
+        try:
+            f0 = float(self.f0_edit.text())
+        except ValueError:
+            f0 = 2271.0e6
+        try:
+            init_state = self._initial_state(self._observations[0][0])
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "先验初值", f"无法从 TLE 生成初值: {e}")
+            return
+        self._start_worker("determine", {
             "rx_lat": gs[0], "rx_lon": gs[1], "rx_alt": gs[2],
             "estimator": self._estimator(),
+            "observations": list(self._observations),
+            "init_state": init_state, "f0": f0,
         })
 
     def _on_stop(self):
+        self._rt_timer.stop()
         if self._worker is not None:
             self._worker.quit()
             self._worker.wait(1500)
         self._on_idle()
+
+    def _is_busy(self) -> bool:
+        return self._worker is not None and self._worker.isRunning()
 
     def _start_worker(self, action: str, params: Dict):
         self._worker = QThread()
@@ -563,7 +679,7 @@ class DopplerPanel(QWidget):
         if self._worker is not None:
             self._worker = None
             self._worker_obj = None
-        self._refresh_start_enabled()
+        self._refresh_gate()
 
     def _on_progress(self, text: str):
         self.status_label.setText(text)
@@ -573,21 +689,14 @@ class DopplerPanel(QWidget):
         QMessageBox.critical(self, "定轨错误", text)
 
     def _on_result(self, d: Dict):
-        if not isinstance(d, dict):
-            d = {}
         self.canvas.plot_results(d)
-        tag = " [模拟]" if d.get("simulated") else ""
-        self.plot_title.setText(f"定轨结果{tag} — {self.target_combo.currentText()}")
-
-        fe = d.get("final_error_km")
-        rms = d.get("residual_rms")
+        self.plot_title.setText(f"定轨结果 — {self.target_combo.currentText()}")
+        rms = d.get("fd_rms_hz")
         conv = d.get("converged")
-        parts = [f"{d.get('estimator','?')}{tag}"]
-        parts.append(f"最终位置误差: {fe:.3f} km" if fe is not None else
-                     "最终位置误差: --")
-        parts.append(f"残差RMS: {rms:.5f}" if rms is not None else "残差RMS: --")
-        parts.append("收敛: " +
-                     ("已收敛" if conv is True else ("未收敛" if conv is False else "--")))
+        parts = [f"{d.get('estimator','?')} N={d.get('n_obs',0)}"]
+        parts.append(f"残差RMS: {rms:.2f} Hz" if rms is not None else "残差RMS: --")
+        parts.append("收敛: " + ("已收敛" if conv is True else
+                                ("未收敛" if conv is False else "--")))
         self.status_label.setText(" | ".join(parts))
 
 
