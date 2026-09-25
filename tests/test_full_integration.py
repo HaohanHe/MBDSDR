@@ -21,14 +21,30 @@ import time
 import math
 import traceback
 
+import pytest
+
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mbdsdr_ai import MBDSDRAgent, AgentConfig
 
 
+@pytest.fixture(scope="module")
+def result():
+    """pytest 兼容：脚本式测试原本由 main() 顺序传入 result，pytest 下用 fixture 注入。"""
+    return TestResult()
+
+
+@pytest.fixture(scope="module")
+def agent():
+    """pytest 兼容：与 main() 一致地构造一个测试用 Agent。"""
+    config = AgentConfig(api_key="sk-test", model="test-model")
+    return MBDSDRAgent(config)
+
+
 class TestResult:
     """测试结果收集器。"""
+    __test__ = False  # 不是 pytest 测试类，避免收集警告
     def __init__(self):
         self.passed = 0
         self.failed = 0
