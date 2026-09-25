@@ -7,7 +7,12 @@ MBDSDR 桌面端主窗口
 
 import os
 import sys
+import math
+import tempfile
+from datetime import datetime
 from typing import Optional
+
+import numpy as np
 
 from PySide6.QtCore import Qt, QTimer, Slot
 from PySide6.QtGui import QAction, QKeySequence, QFont
@@ -20,6 +25,10 @@ from PySide6.QtWidgets import (
 
 # 确保能导入同目录模块
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 确保能导入仓库根下的 mbdsdr_ai 包（baseband_io / audio_out / sdr_backend）
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from themes import get_theme, THEMES, DEFAULT_THEME
 from spectrum_widget import create_spectrum_widget, HAS_OPENGL
@@ -33,6 +42,16 @@ from module_panel import ModulePanel
 # 在用户首次点解码/定轨时才创建，避免拖慢启动）。
 from weather_panel import WeatherPanel
 from doppler_panel import DopplerPanel
+
+# 真实 baseband 存盘 + 声卡实时输出（可选依赖，导入失败也不拖垮 GUI）
+try:
+    from mbdsdr_ai.baseband_io import save_iq as _save_iq
+except Exception:  # pragma: no cover
+    _save_iq = None
+try:
+    from mbdsdr_ai.audio_out import AudioPlayer
+except Exception:  # pragma: no cover
+    AudioPlayer = None  # type: ignore
 
 
 class MainWindow(QMainWindow):
@@ -68,6 +87,27 @@ class MainWindow(QMainWindow):
         # 与 self._worker（ai-sdr Mini WebSocket）互斥。硬件失败绝不静默切 mock。
         self._active_sdr_backend: Optional[object] = None
 
+        # ---- 真实数据链路状态（A 频谱 / B baseband 录制 / C 声卡输出）----
+        # 统一的 IQ 轮询定时器（50ms / 20fps）：一次 read_samples 同时喂给
+        # 频谱、录制缓冲、FM 解调声卡输出，避免多个定时器抢读同一个流。
+        self._iq_poll_timer: Optional[QTimer] = None
+        # baseband 录制状态
+        self._recording: bool = False
+        self._record_file_path: Optional[str] = None
+        self._record_iq_buffer: list = []
+        self._record_sr: float = 2_400_000.0
+        self._record_center_hz: float = 0.0
+        self._record_guard: bool = False  # 同步两个录音按钮时防重入
+        # 声卡实时输出（sounddevice 可选；无设备时 available=False 安全降级）
+        self._audio_player = None
+        if AudioPlayer is not None:
+            try:
+                self._audio_player = AudioPlayer(sample_rate=48000, channels=1, gain=0.5)
+            except Exception:
+                self._audio_player = None
+        # 静噪门限（dBFS / dBm 估计）：信号低于此值时声卡静音不输出
+        self._squelch_db: float = -80.0
+
         # 构建 UI
         self._build_menu_bar()
         self._build_tool_bar()
@@ -90,6 +130,12 @@ class MainWindow(QMainWindow):
         self._sky_update_timer.start()
         # 立即先刷一次
         QTimer.singleShot(1200, self._update_sky_satellites)
+
+        # (A) 真实 IQ 轮询定时器：连接 SDR 后才 start；无 SDR 时保持"未连接"。
+        # 一次 tick 读一块 IQ，分发给频谱 / baseband 录制 / FM 解调声卡。
+        self._iq_poll_timer = QTimer(self)
+        self._iq_poll_timer.setInterval(50)  # 20 fps
+        self._iq_poll_timer.timeout.connect(self._poll_sdr_iq)
 
     # ========================================================================
     # UI 构建
@@ -568,6 +614,8 @@ class MainWindow(QMainWindow):
         self.disconnect_btn.setEnabled(True)
         self.statusBar().showMessage(
             f"已连接 {backend.device.name}", 4000)
+        # (A/B/C) 启动真实 IQ 流：频谱/录制/声卡全部接通
+        self._start_iq_streams()
 
     def _connect_real(self, host: str, port: int):
         """连接真实硬件。"""
@@ -613,12 +661,25 @@ class MainWindow(QMainWindow):
     def _disconnect(self):
         """断开连接。"""
         # 断开真实 SDR 后端（SoapySDR/RTL-SDR/HackRF）
+        # 先停掉录制 / IQ 轮询 / 声卡，避免断开后还在读空句柄
+        self._stop_iq_streams()
+        if self._recording:
+            # 断开时若还在录制，先落盘存盘
+            try:
+                self._apply_recording(False)
+            except Exception:
+                self._recording = False
         if self._active_sdr_backend is not None:
             try:
                 self._active_sdr_backend.disconnect()
             except Exception:
                 pass
             self._active_sdr_backend = None
+        # 频谱清空为"未连接/无 IQ 数据"，绝不保留旧假谱
+        try:
+            self.spectrum.set_connected(False)
+        except Exception:
+            pass
         self._panels_set_sdr_connected(False)
         if self._worker_manager:
             self._worker_manager.stop()
@@ -720,22 +781,32 @@ class MainWindow(QMainWindow):
     def _on_volume_changed(self, volume: int):
         if self._worker:
             self._worker.request_tool.emit("set_volume", {"volume": volume})
+        # (C) 真实声卡音量：0-63 → 0.0-2.0 增益
+        if self._audio_player is not None:
+            try:
+                self._audio_player.set_gain(volume / 63.0 * 2.0)
+            except Exception:
+                pass
 
     @Slot(bool)
     def _on_record_toggled(self, recording: bool):
-        if recording:
-            if self._worker:
-                self._worker.request_tool.emit("start_record", {})
-            self._record_seconds = 0
-            self._record_timer = QTimer(self)
-            self._record_timer.timeout.connect(self._update_record_time)
-            self._record_timer.start(1000)
-        else:
-            if self._worker:
-                self._worker.request_tool.emit("stop_record", {})
-            if self._record_timer:
-                self._record_timer.stop()
-                self._record_timer = None
+        """控制面板录音按钮 toggled → 走与工具栏/菜单一致的本地 baseband 录制链路。"""
+        # 同步工具栏录音按钮（防重入 guard）
+        if self.record_btn.isChecked() != recording:
+            self._record_guard = True
+            try:
+                self.record_btn.setChecked(recording)
+            finally:
+                self._record_guard = False
+        # 转发给旧 worker（WebSocket 模式）保持兼容；真实 SDR 模式下 worker 为 None
+        if self._worker:
+            try:
+                self._worker.request_tool.emit(
+                    "start_record" if recording else "stop_record", {})
+            except Exception:
+                pass
+        # 真正的本地 baseband 录制状态机（幂等：已是该状态则 no-op）
+        self._apply_recording(recording)
 
     @Slot(str)
     def _on_mode_changed(self, mode: str):
@@ -784,11 +855,317 @@ class MainWindow(QMainWindow):
         self.control_panel.update_record_time(self._record_seconds)
 
     def _toggle_record(self):
-        # record_btn.toggled 已触发本槽，不要再 toggle() 否则无限递归。
-        # 同步控制面板的录音按钮，由它的 toggled 走正常录音链路。
-        checked = self.record_btn.isChecked()
-        if self.control_panel.record_button.isChecked() != checked:
-            self.control_panel.record_button.setChecked(checked)
+        """菜单 / 工具栏录音按钮统一入口。
+
+        工具栏 record_btn.toggled 会触发本槽；菜单/快捷键触发时按钮尚未变化。
+        用 _record_guard 防止两个按钮互相 setChecked 引发无限递归。
+        真正的录制动作统一交给 _apply_recording（幂等）。
+        """
+        if self._record_guard:
+            return
+        target = not self._recording
+        self._record_guard = True
+        try:
+            # 两边按钮都对齐到 target（值相同则 Qt 不再发 toggled，不会死循环）
+            if self.record_btn.isChecked() != target:
+                self.record_btn.setChecked(target)
+            if self.control_panel.record_button.isChecked() != target:
+                self.control_panel.record_button.setChecked(target)
+        finally:
+            self._record_guard = False
+        # control_panel.record_button.setChecked 会触发 record_toggled
+        # → _on_record_toggled → _apply_recording；这里兜底再调一次（幂等）。
+        self._apply_recording(target)
+
+    # ========================================================================
+    # (A/B/C) 真实 IQ 数据流：频谱 / baseband 录制 / 声卡解调输出
+    # ========================================================================
+
+    def _start_iq_streams(self):
+        """真实 SDR 连接成功后：启动 IQ 轮询定时器 + 打开声卡输出。
+
+        无后端 / 无 read_samples / 无声卡设备时全部安全降级，绝不崩溃。
+        """
+        # (C) 尝试打开声卡；无 sounddevice / 无设备时 available=False 安全降级
+        if self._audio_player is not None:
+            try:
+                ok = self._audio_player.start()
+                if not ok:
+                    self.statusBar().showMessage(
+                        "无音频输出设备（声卡已禁用，不影响频谱/录制）", 5000)
+            except Exception:
+                pass
+        # (A) 启动 IQ 轮询定时器
+        if self._iq_poll_timer is not None and not self._iq_poll_timer.isActive():
+            self._iq_poll_timer.start()
+
+    def _stop_iq_streams(self):
+        """断开时：停 IQ 轮询 + 关声卡。"""
+        if self._iq_poll_timer is not None:
+            try:
+                self._iq_poll_timer.stop()
+            except Exception:
+                pass
+        if self._audio_player is not None:
+            try:
+                self._audio_player.stop()
+            except Exception:
+                pass
+
+    def _active_read_samples(self):
+        """防御性拿到 (read_samples_fn, sample_rate)。无后端/无方法返 (None, None)。"""
+        backend = self._active_sdr_backend
+        if backend is None:
+            return None, None
+        # 已连接？
+        try:
+            st = backend.get_status()
+            if st is not None and not getattr(st, "connected", True):
+                return None, None
+        except Exception:
+            pass
+        read = getattr(backend, "read_samples", None)
+        if not callable(read):
+            return None, None
+        try:
+            sr = float(getattr(backend, "get_sample_rate", lambda: 2_400_000.0)())
+        except Exception:
+            sr = 2_400_000.0
+        return read, sr
+
+    def _poll_sdr_iq(self):
+        """每 50ms 从真实后端读一块 IQ，分发给频谱 / 录制 / FM 解调声卡。
+
+        - 无后端/无 read_samples/返回 None：不崩溃，频谱保持"未连接"。
+        - 模拟模式(worker)：worker 无 iq_data 接口，保持"未连接"，不造假峰。
+        """
+        read, sr = self._active_read_samples()
+        if read is None:
+            return
+        try:
+            iq = read(4096)
+        except Exception:
+            return
+        if iq is None:
+            return
+        iq = np.asarray(iq, dtype=np.complex64)
+        if iq.size < 64:
+            return
+
+        # (A) 喂频谱（真 FFT：Nuttall 窗 + 复 FFT + fftshift + dBFS + IIR）
+        try:
+            self.spectrum.set_iq_data(iq, sr)
+        except Exception:
+            pass
+
+        # 更新 RSSI 显示（从后端状态或 IQ 功率估计）
+        self._update_rssi_from_iq(iq)
+
+        # (B) 录制中：累积到 buffer
+        if self._recording and self._record_iq_buffer is not None:
+            try:
+                self._record_iq_buffer.append(iq.copy())
+            except Exception:
+                pass
+
+        # (C) FM 鉴频解调 → 声卡输出（带静噪门控）
+        self._demod_and_play(iq, sr)
+
+    def _update_rssi_from_iq(self, iq: np.ndarray):
+        """用 IQ 功率估计 RSSI(dBFS) 更新状态栏；失败静默。"""
+        try:
+            p = float(np.mean(np.abs(iq) ** 2))
+            dbfs = 10.0 * math.log10(p + 1e-12)
+            txt = f"RSSI: {dbfs:.1f} dBFS"
+            self.rssi_label.setText(txt)
+            self.status_rssi.setText(txt)
+        except Exception:
+            pass
+
+    def _demod_and_play(self, iq: np.ndarray, sr: float):
+        """简单 FM 复数鉴频 → 重采样到 48k → 静噪门控 → 写声卡。
+
+        鉴频: audio = angle(conj(iq[:-1]) * iq[1:])（标准差分相位）。
+        无 AudioPlayer / 无设备 / 被静噪门住时全部安全 no-op。
+        """
+        player = self._audio_player
+        if player is None or not getattr(player, "available", False):
+            return
+        if iq.size < 16:
+            return
+        # 静噪门控：信号太弱不输出（避免底噪刺耳）
+        try:
+            p = float(np.mean(np.abs(iq) ** 2))
+            dbfs = 10.0 * math.log10(p + 1e-12)
+            if dbfs < self._squelch_db:
+                return
+        except Exception:
+            return
+        try:
+            # 标准复数鉴频：相邻采样相位差
+            phase = np.angle(iq[1:] * np.conj(iq[:-1])).astype(np.float32)
+            audio = self._decimate_to_48k(phase, sr)
+            if audio is None or audio.size == 0:
+                return
+            player.write(audio)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _decimate_to_48k(audio: np.ndarray, sr: float) -> Optional[np.ndarray]:
+        """把鉴频音频（采样率 sr）降到 48k。简单移动平均低通 + 整数抽取。"""
+        target = 48000
+        if sr <= 0:
+            return audio
+        if sr > target * 1.5:
+            d = int(round(sr / target))
+            if d >= 2 and audio.size >= d:
+                n = (audio.size // d) * d
+                # 移动平均（低通）后抽取
+                return audio[:n].reshape(-1, d).mean(axis=1).astype(np.float32)
+            return audio
+        if sr < target * 0.8:
+            # 上采样：线性插值（scipy 不可用时也能跑）
+            try:
+                import numpy as _np
+                n_src = audio.size
+                n_dst = max(1, int(round(n_src * target / sr)))
+                x_old = _np.linspace(0.0, 1.0, n_src, endpoint=False)
+                x_new = _np.linspace(0.0, 1.0, n_dst, endpoint=False)
+                return _np.interp(x_new, x_old, audio).astype(_np.float32)
+            except Exception:
+                return audio
+        return audio
+
+    # ------------------------------------------------------------------
+    # (B) baseband 录制状态机
+    # ------------------------------------------------------------------
+
+    def _apply_recording(self, on: bool):
+        """统一录制状态切换（幂等）。on=True 开始，on=False 停止并存盘。"""
+        if on == self._recording:
+            return
+        if on:
+            self._start_recording()
+        else:
+            self._stop_recording()
+
+    def _start_recording(self):
+        """开始录制：检查后端 → 建文件名 → 清 buffer → 状态栏提示。
+        无 SDR 后端时弹提示且不造假文件（按钮会被调用方弹回）。"""
+        backend = self._active_sdr_backend
+        if backend is None or not callable(getattr(backend, "read_samples", None)):
+            QMessageBox.warning(
+                self, "无法录音",
+                "未连接 SDR，无法录制 baseband。\n请先连接真实 SDR 设备。")
+            # 复位状态/按钮
+            self._recording = False
+            self._record_guard = True
+            try:
+                self.record_btn.setChecked(False)
+                self.control_panel.record_button.setChecked(False)
+            finally:
+                self._record_guard = False
+            return
+
+        if _save_iq is None:
+            QMessageBox.warning(self, "无法录音", "baseband_io 不可用，无法存盘。")
+            self._recording = False
+            return
+
+        try:
+            sr = float(backend.get_sample_rate())
+        except Exception:
+            sr = 2_400_000.0
+        try:
+            center_hz = float(backend.get_frequency())
+        except Exception:
+            center_hz = 0.0
+
+        rec_dir = os.path.expanduser("~/mbdsdr_recordings")
+        try:
+            os.makedirs(rec_dir, exist_ok=True)
+        except Exception:
+            rec_dir = tempfile.gettempdir()
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(rec_dir, f"baseband_{ts}.iq")
+
+        self._record_file_path = path
+        self._record_iq_buffer = []
+        self._record_sr = sr
+        self._record_center_hz = center_hz
+        self._recording = True
+
+        # 1s 计时 UI（沿用原有 _record_timer）
+        self._record_seconds = 0
+        if self._record_timer is None:
+            self._record_timer = QTimer(self)
+            self._record_timer.timeout.connect(self._update_record_time)
+        self._record_timer.start(1000)
+
+        # UI：录音中按钮变红显示"停止中"
+        self.record_btn.setText("停止中")
+        self.record_btn.setStyleSheet(
+            "background-color:#B86B5C; color:#FFFFFF; font-weight:600;")
+        try:
+            self.control_panel.record_button.setText("停止录音")
+            self.control_panel.record_status.setText("录音中... 00:00")
+        except Exception:
+            pass
+        self.statusBar().showMessage(f"开始录制 baseband: {path}")
+
+    def _stop_recording(self):
+        """停止录制：拼接 buffer → save_iq 落盘（.iq + .json sidecar）→ 状态栏汇报。"""
+        self._recording = False
+        if self._record_timer is not None:
+            try:
+                self._record_timer.stop()
+            except Exception:
+                pass
+            self._record_timer = None
+
+        info = None
+        try:
+            if self._record_iq_buffer:
+                iq = np.concatenate(self._record_iq_buffer)
+            else:
+                iq = np.zeros(0, dtype=np.complex64)
+            if iq.size > 0 and self._record_file_path and _save_iq is not None:
+                info = _save_iq(
+                    iq, self._record_file_path,
+                    sample_rate=self._record_sr,
+                    center_freq_hz=self._record_center_hz,
+                    note="MBDSDR baseband recording (float32 interleaved I/Q)")
+        except Exception as e:
+            self.statusBar().showMessage(f"录制存盘失败: {e}", 5000)
+            info = None
+        finally:
+            self._record_iq_buffer = []
+
+        # UI 恢复
+        self.record_btn.setText("录音")
+        self.record_btn.setStyleSheet("")
+        secs = getattr(self, "_record_seconds", 0)
+        try:
+            self.control_panel.record_button.setText("开始录音")
+        except Exception:
+            pass
+        if info:
+            kb = info.get("size_bytes", 0) / 1024.0
+            msg = (f"录制完成: {info['path']}  "
+                   f"({info['samples']} 样本, {kb:.1f} KB, {secs}s)")
+            try:
+                self.control_panel.record_status.setText(
+                    f"已存 {info['samples']} 样本 ({kb:.0f} KB)")
+            except Exception:
+                pass
+        else:
+            msg = "录制结束（无数据落盘）"
+            try:
+                self.control_panel.record_status.setText("未录音")
+            except Exception:
+                pass
+        self.statusBar().showMessage(msg, 8000)
 
     def _toggle_waterfall(self):
         self.spectrum.toggle_waterfall()
