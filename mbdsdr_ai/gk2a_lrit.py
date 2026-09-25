@@ -47,6 +47,7 @@ MBDSDR AI 内核 - GK-2A LRIT 全管道接收链（IQ 采样 → 云图 PNG）
 
 from __future__ import annotations
 
+import io
 import math
 import struct
 from dataclasses import dataclass, field
@@ -762,16 +763,68 @@ class GK2ALRITReassembler:
 
 
 # ============================================================================
-# GK-2A 图像段组装 → 灰度画布
+# JPEG2000 真解码（Pillow + libopenjp2）
+# 来源: SatDump plugins/xrit_support/xrit/gk2a/decomp.cpp:27-43
+#   GK-2A 压缩标志 compression_flag: 0=无, 1=小波/JPEG2000, 2=渐进JPEG
+# GK-2A 下行图像段在通用头之后即为 .jp2 码流（CCSDS 122.0-B-1 的 JPEG2000 子集）。
 # ============================================================================
+
+def decode_jpeg2000(data: bytes) -> Optional[np.ndarray]:
+    """用 Pillow+OpenJPEG 解码 JPEG2000 字节流，返回灰度 numpy 数组。
+
+    参数:
+        data: .jp2 码流字节（GK-2A 图像段在文件头之后的净荷）。
+
+    返回:
+        成功 → 2D numpy 数组（灰度）。位深保持原始：
+          - 8-bit 灰度 → dtype=uint8, shape=(H, W)
+          - 10/16-bit  → dtype=uint16, shape=(H, W)
+        失败/空数据/损坏字节 → None（调用方回退到无压缩直通）。
+
+    实现说明:
+      - 走 io.BytesIO(data) + PIL.Image.open()，后端为 libopenjp2
+        （Debian/Ubuntu 包 libopenjp2-7 / Pillow 编译时启用 jpeg2k 支持）。
+      - 若 PIL 解出多通道（RGB/RGBA/CMYK），按 GK-2A 实际为单通道灰度的约定
+        转灰度；多通道兜底再对最后一维求均值。
+      - 捕获所有异常（含 SyntaxError / OSError / ValueError 等），
+        任何异常都返回 None，绝不向上抛。
+
+    已知局限（如实记录，不假装解码成功）:
+      - GK-2A 真实下行使用 CCSDS 122.0-B-1 子集的 JPEG2000。标准 JP2 码流
+        （FF FF 4F FF 90 ... / 00 00 00 0C 6A50 20 20 0D 0A870A ...）
+        libopenjp2 可解。
+      - 若某些 GK-2A 专用子格式使用 openjpeg 不支持的定制量化/可逆块/
+        非标准 marker，PIL 会抛异常 → 本函数返回 None → 上层回退到
+        "无压缩直通" 并在 metadata 标注 "compression": "none[回退]"。
+        这是有意为之的安全降级路径，不是 bug。
+    """
+    if not data:
+        return None
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(data)) as im:
+            im.load()
+            # GK-2A 业务上是单通道灰度；若 PIL 给出多通道模式则转灰度。
+            # 保留 16-bit 模式 ("I;16" / "I;16B" / "I") 的位深不降级到 L。
+            if im.mode not in ("L", "I", "I;16", "I;16B", "I;32", "F"):
+                im = im.convert("L")
+            arr = np.asarray(im)
+        if arr.ndim == 3:
+            # 兜底：convert("L") 后理论上不会到这；保险起见对通道维求均值
+            arr = arr.mean(axis=-1).astype(arr.dtype)
+        return arr
+    except Exception:  # noqa: BLE001 —— 任何解码失败都走回退路径
+        return None
+
 
 @dataclass
 class GK2AImage:
     width: int
     height: int
-    pixels: np.ndarray          # uint8, shape (height, width)
+    pixels: np.ndarray          # uint8 或 uint16, shape (height, width)
     annotation: str = ""
     image_seq_nb: int = 0
+    compression: str = "unknown"  # "jpeg2000" / "none" / "none[回退]"
 
 
 class GK2AImageAssembler:
@@ -779,6 +832,12 @@ class GK2AImageAssembler:
 
     来源: segment_decoder.h:54-65 pushSegment()
       image_seq_nb 区分整图；line_nb 为该段起始行；段宽=columns。
+
+    每段净荷先尝试 JPEG2000 真解码（decode_jpeg2000）：
+      - 成功 → 用解码出的 numpy 数组（可能 uint8/uint16）
+      - 失败/None → 回退到原"无压缩直通"（按 uint8 裸像素解析），
+        并在 GK2AImage.compression 中标注 "none[回退]"。
+    原直通代码完整保留作为 fallback，未删除。
     """
 
     def __init__(self) -> None:
@@ -800,17 +859,47 @@ class GK2AImageAssembler:
 
         width = h.columns
         height = h.lines * total_seg if h.lines else 0
-        # 每行像素 = columns；段内行数 = len(data)/columns
-        canvas = np.zeros((height, width), dtype=np.uint8)
+
+        # ── 逐段解码：先试 JPEG2000，失败回退无压缩直通 ──
+        decoded: Dict[int, np.ndarray] = {}
+        comp_tags: List[str] = []
+        canvas_dtype = np.uint8
         for y0, (sh, sdata) in sorted(pool.items()):
-            rows = len(sdata) // max(1, width)
-            arr = np.frombuffer(sdata[: rows * width], dtype=np.uint8)
-            arr = arr.reshape(rows, width)
+            arr = decode_jpeg2000(sdata)
+            if arr is not None:
+                decoded[y0] = arr
+                comp_tags.append("jpeg2000")
+                if arr.dtype.itemsize > canvas_dtype().itemsize:
+                    canvas_dtype = arr.dtype
+            else:
+                # 原"无压缩直通"路径（保留作为 fallback）
+                rows = len(sdata) // max(1, width)
+                arr = np.frombuffer(sdata[: rows * width], dtype=np.uint8)
+                arr = arr.reshape(rows, width)
+                decoded[y0] = arr
+                comp_tags.append("none[回退]")
+
+        canvas = np.zeros((height, width), dtype=canvas_dtype)
+        for y0, arr in decoded.items():
             r0 = y0 - 1  # line_nb 1-based
-            canvas[r0: r0 + rows, :] = arr
+            hh = min(arr.shape[0], max(0, height - r0))
+            ww = min(arr.shape[1], width)
+            if hh <= 0 or ww <= 0:
+                continue
+            canvas[r0: r0 + hh, :ww] = arr[:hh, :ww]
         self._segs.pop(ident, None)
+
+        # 所有段都成功解 JP2 → "jpeg2000"；任一回退 → "none[回退]"；
+        # （混合情况以最"诚实"的标签为准：有回退就标回退）
+        if all(t == "jpeg2000" for t in comp_tags):
+            comp_label = "jpeg2000"
+        elif any(t == "jpeg2000" for t in comp_tags):
+            comp_label = "mixed[jp2+none回退]"
+        else:
+            comp_label = "none[回退]"
         return GK2AImage(width=width, height=height, pixels=canvas,
-                        annotation=h.annotation, image_seq_nb=ident)
+                        annotation=h.annotation, image_seq_nb=ident,
+                        compression=comp_label)
 
 
 # ============================================================================
@@ -889,15 +978,20 @@ def decode_iq_to_image(iq: np.ndarray, out_png: str,
             return GK2ADecodeResult(success=False, error="未组装出完整图像",
                                     n_files=len(reassembler._vcs))
 
-        # 5. 保存 PNG
+        # 5. 保存 PNG（uint8 → L；uint16 → I;16，保留 10/16-bit 位深）
         from PIL import Image
-        Image.fromarray(img.pixels, mode="L").save(out_png)
+        if img.pixels.dtype == np.uint16:
+            Image.fromarray(img.pixels, mode="I;16").save(out_png)
+        else:
+            Image.fromarray(img.pixels.astype(np.uint8), mode="L").save(out_png)
         return GK2ADecodeResult(
             success=True, png_path=out_png,
             width=img.width, height=img.height,
             annotation=img.annotation,
             n_files=len(reassembler._vcs),
-            metadata={"image_seq_nb": img.image_seq_nb},
+            metadata={"image_seq_nb": img.image_seq_nb,
+                      "compression": img.compression,
+                      "dtype": str(img.pixels.dtype)},
         )
     except Exception as e:  # noqa: BLE001
         return GK2ADecodeResult(success=False, error=f"{type(e).__name__}: {e}")
@@ -908,28 +1002,41 @@ def decode_iq_to_image(iq: np.ndarray, out_png: str,
 # ============================================================================
 
 def build_gk2a_lrit_file(image: np.ndarray, line_nb: int, total_segments: int,
-                         image_seq: int = 1, annotation: str = "GK2A TEST") -> bytes:
+                         image_seq: int = 1, annotation: str = "GK2A TEST",
+                         payload: Optional[bytes] = None,
+                         compression_flag: int = 0,
+                         bits_per_pixel: int = 8) -> bytes:
     """把一段图像行打包为一个完整 GK-2A LRIT 文件字节流。
 
     布局: PrimaryHeader(16) + ImageStructure(8+3) + Segmentation(7+3) + Annotation
-          + 原始像素数据（compression=0 无压缩）。
+          + 图像数据净荷。
+
+    参数:
+        image: 本段图像（仅用于推导宽高；当 payload=None 时也作为裸像素写入）。
+        line_nb / total_segments / image_seq: GK-2A 分段头字段。
+        payload: 若给出，直接作为文件净荷（例如外部已编码好的 .jp2 码流，
+                 配合 compression_flag=1 模拟 GK-2A 真实下行的 JPEG2000 段）。
+                 为 None 时把 image 按 uint8 裸像素写入（原无压缩路径）。
+        compression_flag: 写入 ImageStructureRecord 的压缩标志
+                 （0=无, 1=小波/J2K, 2=渐进JPEG；来源 decomp.cpp:27-43）。
+        bits_per_pixel: 写入 ImageStructureRecord 的位深字段。
     """
     hdr = bytearray()
     # ── PrimaryHeader type=0, len=16
     hdr += bytes([H_PRIMARY])
     hdr += (16).to_bytes(2, "big")
     hdr += bytes([0])            # file_type_code=0 (image)
-    data_bits = image.size * 8
+    data_bits = image.size * 8 if payload is None else len(payload) * 8
     hdr += (16).to_bytes(4, "big")       # total_header_length（占位，后面回填）
     hdr += data_bits.to_bytes(8, "big")  # data_length
     # ── ImageStructureRecord type=1（record_length=9: 3头+6负载）
     # 来源: xrit_file.h:33-49  ImageStructureRecord
     hdr += bytes([H_IMAGE_STRUCTURE])
     hdr += (9).to_bytes(2, "big")
-    hdr += bytes([8])                       # bit_per_pixel=8
+    hdr += bytes([bits_per_pixel])          # bit_per_pixel
     hdr += image.shape[1].to_bytes(2, "big") # columns
     hdr += image.shape[0].to_bytes(2, "big")# lines
-    hdr += bytes([0])                       # compression_flag=0 (无压缩)
+    hdr += bytes([compression_flag])        # compression_flag
     # ── GK-2A SegmentationIdentification type=128
     # 来源: gk2a_headers.h:43-61
     hdr += bytes([H_SEGMENT_ID])
@@ -944,8 +1051,11 @@ def build_gk2a_lrit_file(image: np.ndarray, line_nb: int, total_segments: int,
     hdr += ann
     # 回填 total_header_length
     struct.pack_into(">I", hdr, 4, len(hdr))
-    # ── 像素数据
-    hdr += image.astype(np.uint8).tobytes()
+    # ── 图像数据净荷：外部预编码 payload（如 .jp2）优先，否则裸像素直通
+    if payload is not None:
+        hdr += payload
+    else:
+        hdr += image.astype(np.uint8).tobytes()
     return bytes(hdr)
 
 
