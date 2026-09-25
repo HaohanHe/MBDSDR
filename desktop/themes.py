@@ -1,7 +1,7 @@
 """
 MBDSDR 桌面端主题系统
 =======================
-三套主题：日式低饱和浅色 (japanese_light)、深色 (dark)、高对比 (high_contrast)。
+三套主题：默认低饱和浅色 (default)、深色 (dark)、高对比 (high_contrast)。
 设计原则：不喧宾夺主、稳定可读优先、低饱和扁平化、禁用 emoji。
 字体优先 MiSans，回退 Noto Sans CJK / 系统无衬线。
 """
@@ -370,9 +370,9 @@ class Theme:
 
 # 日式低饱和浅色（默认主题）
 # 配色规范：米白底 + 蓝灰文字 + 橙强调 + 绿成功 + 红警示，全链路低饱和。
-JAPANESE_LIGHT = Theme(
-    name="japanese_light",
-    display_name="日式浅色",
+DEFAULT_LIGHT = Theme(
+    name="default",
+    display_name="默认",
     colors={
         # 背景 / 卡片
         "bg": "#F5F3EF",            # 主背景 米白暖灰
@@ -472,14 +472,18 @@ HIGH_CONTRAST = Theme(
 )
 
 THEMES = {
-    "japanese_light": JAPANESE_LIGHT,
+    "default": DEFAULT_LIGHT,
     "dark": DARK,
     "high_contrast": HIGH_CONTRAST,
 }
 
-DEFAULT_THEME = "japanese_light"
+# 兼容旧配置里写死的主题 key
+_THEME_ALIASES = {"japanese_light": "default", "light": "default"}
+
+DEFAULT_THEME = "default"
 
 
 def get_theme(name: str) -> Theme:
     """按名称获取主题，不存在则返回默认。"""
+    name = _THEME_ALIASES.get(name, name)
     return THEMES.get(name, THEMES[DEFAULT_THEME])
