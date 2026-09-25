@@ -783,8 +783,144 @@ class NTRIPStream:
 
 
 # ============================================================
+# NTRIPManager —— 配置驱动的差分管理层（供桌面端按需启用）
+# ============================================================
+@dataclass
+class NTRIPConfig:
+    """NTRIP caster 配置。所有字段为空时不启用差分。"""
+    host: str = ""
+    port: int = 2101
+    mountpoint: str = ""
+    user: str = ""
+    password: str = ""
+    enabled: bool = False
+
+
+class NTRIPManager:
+    """配置驱动的 NTRIP 差分管理。
+
+    - 从 dict 加载配置（来自 gui_config.json 的 "ntrip" 段）
+    - 配置不完整(host/mountpoint为空或 enabled=False)时不连接
+    - 连接成功后通过 on_rtcm_data(bytes) 回调吐出 RTCM3 原始字节
+    - 提供 start()/stop()/is_connected()/stats()
+    """
+
+    def __init__(self, config: Optional[Dict] = None,
+                 on_rtcm_data: Optional[Callable[[bytes], None]] = None):
+        self._lock = threading.Lock()
+        self._cfg = NTRIPConfig()
+        self._stream: Optional[NTRIPStream] = None
+        self._bytes_received: int = 0
+        self._on_rtcm_data = on_rtcm_data
+        if config:
+            self.load_config(config)
+
+    def load_config(self, config: Dict) -> None:
+        """从 dict 读取 ntrip 配置段。
+
+        兼容两种传法：
+          1) 整份 gui_config（含 "ntrip" 子段）；
+          2) 直接传 ntrip 段本身。
+        识别的键：host/port/mountpoint/user/password/enabled。
+        """
+        if not isinstance(config, dict):
+            return
+        seg = config.get("ntrip")
+        seg = seg if isinstance(seg, dict) else config
+        cfg = NTRIPConfig()
+        cfg.host = str(seg.get("host", "") or "")
+        try:
+            cfg.port = int(seg.get("port", NTRIP_DEFAULT_PORT) or NTRIP_DEFAULT_PORT)
+        except (TypeError, ValueError):
+            cfg.port = NTRIP_DEFAULT_PORT
+        cfg.mountpoint = str(seg.get("mountpoint", "") or "")
+        cfg.user = str(seg.get("user", "") or "")
+        cfg.password = str(seg.get("password", "") or "")
+        cfg.enabled = bool(seg.get("enabled", False))
+        with self._lock:
+            self._cfg = cfg
+
+    def is_configured(self) -> bool:
+        """enabled==True 且 host/mountpoint 均非空，才认为配置完整。"""
+        with self._lock:
+            return (self._cfg.enabled
+                    and bool(self._cfg.host)
+                    and bool(self._cfg.mountpoint))
+
+    def start(self) -> bool:
+        """配置完整则创建 NTRIPStream 并握手；未配置返回 False 不报错。"""
+        if not self.is_configured():
+            return False
+        with self._lock:
+            # 清理旧连接
+            if self._stream is not None:
+                try:
+                    self._stream.close()
+                except Exception:
+                    pass
+                self._stream = None
+            self._bytes_received = 0
+            cfg = self._cfg
+            stream = NTRIPStream(
+                host=cfg.host, port=cfg.port, mountpoint=cfg.mountpoint,
+                user=cfg.user, password=cfg.password,
+                on_data=self._handle_rtcm,
+            )
+            ok = stream.connect()
+            if ok:
+                self._stream = stream
+            else:
+                stream.close()
+            return ok
+
+    def stop(self) -> None:
+        """关闭 NTRIPStream（不持有锁执行 close，避免与接收线程死锁）。"""
+        with self._lock:
+            stream = self._stream
+            self._stream = None
+        if stream is not None:
+            stream.close()
+
+    def is_connected(self) -> bool:
+        """NTRIPStream 正在运行（握手成功且接收线程未退出）。"""
+        with self._lock:
+            return (self._stream is not None
+                    and self._stream._running.is_set())
+
+    def stats(self) -> Dict[str, Any]:
+        """返回 {host, mountpoint, connected, bytes_received}。"""
+        with self._lock:
+            connected = (self._stream is not None
+                         and self._stream._running.is_set())
+            return {
+                "host": self._cfg.host,
+                "mountpoint": self._cfg.mountpoint,
+                "connected": connected,
+                "bytes_received": self._bytes_received,
+            }
+
+    def _handle_rtcm(self, data: bytes) -> None:
+        """NTRIPStream on_data 包装：累加字节计数，再转发给用户回调。"""
+        with self._lock:
+            self._bytes_received += len(data)
+        cb = self._on_rtcm_data
+        if cb is not None:
+            try:
+                cb(data)
+            except Exception:
+                pass
+
+
+# ============================================================
 # 模块级便捷函数（供 ToolRegistry 直接调用）
 # ============================================================
+def ntrip_manager_from_config(config: Dict,
+                              on_rtcm_data: Optional[Callable[[bytes], None]] = None
+                              ) -> NTRIPManager:
+    """从配置 dict 创建 NTRIPManager 实例（不自动 start，由调用方决定）。"""
+    return NTRIPManager(config=config, on_rtcm_data=on_rtcm_data)
+
+
 def gps_time_to_utc(week: int, tow: float) -> Dict[str, Any]:
     """GPS 周/周内秒 -> UTC 日历。见 TimeSystem.gps_time_to_utc。"""
     return TimeSystem.gps_time_to_utc(week, tow)
