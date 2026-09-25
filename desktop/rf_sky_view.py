@@ -46,6 +46,18 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QLabel
 
+# 交互控制复用 mbdsdr_ai/sky_interaction.py (Stellarium 视角模型独立重实现):
+#   ViewState  -- 视图中心 (center_az/center_alt) + FOV
+#   sky_to_screen / screen_to_sky -- 正反投影 (与 handler 共用同一套数学)
+#   SkyInteractionHandler -- 拖拽反投影平移 / 滚轮指数缩放 / 双击居中 / 角距点选
+from mbdsdr_ai.celestial_geometry import AzimuthalEquidistantProjection
+from mbdsdr_ai.sky_interaction import (
+    ViewState,
+    SkyInteractionHandler,
+    sky_to_screen,
+    screen_to_sky,
+)
+
 
 # ============================================================================
 # 数据类型
@@ -165,9 +177,16 @@ def load_ground_station_config() -> Optional[Dict[str, float]]:
 # ============================================================================
 
 
-class RFSkyView(QWidget):
+class RFSkyView(QWidget, SkyInteractionHandler):
     """
     射频天空视图：方位角等距投影的天空图（天顶居中，地平线为边缘圆）。
+
+    交互由混入类 SkyInteractionHandler 接管（Stellarium 视角模型）：
+      - 左键拖拽：反投影平移视角（center_az/center_alt）
+      - 滚轮：指数缩放 FOV（30..180°）
+      - 左键点击：角距拾取天体
+      - 双击：goto 居中到点击方向
+    正反投影统一走 sky_interaction.sky_to_screen/screen_to_sky，保证点选精确。
 
     信号：
         object_clicked(SkyObject) - 点击天空对象
@@ -180,7 +199,7 @@ class RFSkyView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # 视图状态
+        # 视图状态（旧的 _zoom/_pan_x/_pan_y 保留为兼容字段，投影不再使用）
         self._zoom = 1.0
         self._pan_x = 0.0
         self._pan_y = 0.0
@@ -195,6 +214,16 @@ class RFSkyView(QWidget):
         self._antenna = AntennaPointing()
         self._heatmap: List[HeatmapCell] = []
         self._trajectories: Dict[str, List[Tuple[float, float]]] = {}
+
+        # === SkyInteractionHandler 所需的宿主属性（必须在 handler 初始化前设置）===
+        # 视图中心默认看天顶，FOV=120°（能看到天顶到地平线附近）
+        self.view_state = ViewState(center_alt=90.0, fov_deg=120.0)
+        # 方位角等距投影实例（handler / 正反投影共用）
+        self.projection = AzimuthalEquidistantProjection()
+        # 可拾取对象列表；set_objects 会同步更新此引用
+        self.sky_objects = self._objects
+        # 初始化 handler 的运行时拖拽状态（读取上面已设好的属性）
+        SkyInteractionHandler.__init__(self)
 
         # 数据来源："none"=无观测站位置 / "real"=真实GNSS或手动配置 / "sim"=模拟
         self._data_source: str = "none"
@@ -227,15 +256,9 @@ class RFSkyView(QWidget):
         self._last_mouse_pos = QPointF()
         self._hovered_object: Optional[SkyObject] = None
 
-        # 方位角等距投影（Stellarium fisheye）。
-        # 坐标系：地平系 +x=北 +y=东 +z=天底；投影输出 (北分量, 东分量)。
-        try:
-            from mbdsdr_ai.celestial_geometry import (
-                AzimuthalEquidistantProjection,
-            )
-            self._proj = AzimuthalEquidistantProjection()
-        except Exception:
-            self._proj = None
+        # 方位角等距投影实例已在上方 handler 初始化前创建为 self.projection。
+        # self._proj 作为别名保留，兼容旧代码引用。
+        self._proj = self.projection
 
         # 颜色（日式低饱和）
         self._colors = {
@@ -294,6 +317,7 @@ class RFSkyView(QWidget):
     def set_objects(self, objects: List[SkyObject]):
         """设置天空对象列表。"""
         self._objects = objects
+        self.sky_objects = objects  # 同步给 SkyInteractionHandler 点选用
         self.update()
 
     def set_data_source(self, source: str):
@@ -342,10 +366,12 @@ class RFSkyView(QWidget):
 
     def add_object(self, obj: SkyObject):
         self._objects.append(obj)
+        self.sky_objects = self._objects
         self.update()
 
     def clear_objects(self):
         self._objects.clear()
+        self.sky_objects = self._objects
         self.update()
 
     def set_antenna(self, antenna: AntennaPointing):
@@ -389,81 +415,48 @@ class RFSkyView(QWidget):
         self.update()
 
     def reset_view(self):
-        self._zoom = 1.0
-        self._pan_x = 0.0
-        self._pan_y = 0.0
+        """重置视角：回到天顶居中 + FOV=120°（Stellarium moveToAltAzi + zoomTo）。"""
+        self.view_state.look_at(0.0, 90.0)
+        self.view_state.zoom_to(120.0)
         self._rotation = 0.0
         self.update()
 
     # ========================================================================
-    # 坐标转换：方位角等距投影 (Stellarium StelProjectorClasses.cpp:363-395)
+    # 坐标转换：统一委托给 sky_interaction.sky_to_screen / screen_to_sky
+    #   （正反投影必须用同一套数学，否则点选不准）
     # ========================================================================
 
-    def _sky_disk_radius(self) -> float:
-        return min(self.width(), self.height()) * 0.45 * self._zoom
+    def _widget_size_tuple(self) -> Tuple[int, int]:
+        return int(self.width()), int(self.height())
 
     def _sky_center(self) -> Tuple[float, float]:
-        return (self.width() / 2 + self._pan_x, self.height() / 2 + self._pan_y)
+        """屏幕中心 = widget 中心（视图平移现在由 view_state 管理）。"""
+        return self.width() / 2.0, self.height() / 2.0
+
+    def _sky_disk_radius(self) -> float:
+        """天空圆盘半径 = FOV 半角对应的像素半径（即可见圆盘边缘）。
+
+        ppr = min(w,h)/deg2rad(fov)；半角 fov/2 对应半径
+            deg2rad(fov/2) * ppr = min(w,h)/2。
+        """
+        return min(self.width(), self.height()) / 2.0
 
     def _sky_to_screen(self, azimuth_deg: float, elevation_deg: float) -> QPointF:
-        """天空坐标 (az, alt) -> 屏幕坐标。
-
-        天顶(alt=90°)映射到圆心；地平(alt=0°)映射到边缘圆。
-        方位角 0°=北在顶部，顺时针增大。
-
-        用 celestial_geometry.AzimuthalEquidistantProjection 做前向投影：
-          投影输出 (北分量*f, 东分量*f)，地平处模长 = pi/2 弧度。
-        屏幕坐标约定 y 向下，故北(+)映射到 -y，东(+)映射到 +x。
-        参考 StelProjectorClasses.cpp:365-372 forward。
-        """
-        cx, cy = self._sky_center()
-        radius = self._sky_disk_radius()
-        if self._proj is not None:
-            alt = max(-90.0, min(90.0, elevation_deg))
-            px, py = self._proj.project_azalt(azimuth_deg, alt)
-            if not (math.isfinite(px) and math.isfinite(py)):
-                return QPointF(cx, cy)
-            # 地平处归一化半径 = pi/2
-            scale = radius * 2.0 / math.pi
-            sx = cx + py * scale   # 东 -> 右
-            sy = cy - px * scale    # 北 -> 上
-            return QPointF(sx, sy)
-
-        # 纯数学回退（与投影等价的线性映射）
-        r = radius * (90.0 - max(0.0, min(90.0, elevation_deg))) / 90.0
-        ang = math.radians(azimuth_deg - 90.0 + self._rotation)
-        return QPointF(cx + r * math.cos(ang), cy + r * math.sin(ang))
+        """(az, alt) -> 屏幕像素。委托 sky_interaction.sky_to_screen。"""
+        px, py = sky_to_screen(azimuth_deg, elevation_deg,
+                               self.view_state, self.projection,
+                               self._widget_size_tuple())
+        if not (math.isfinite(px) and math.isfinite(py)):
+            cx, cy = self._sky_center()
+            return QPointF(cx, cy)
+        return QPointF(px, py)
 
     def _screen_to_sky(self, screen_x: float, screen_y: float) -> Tuple[float, float]:
-        """屏幕坐标 -> (az, alt)。用投影逆变换 (StelProjectorClasses.cpp:389-394)。"""
-        cx, cy = self._sky_center()
-        radius = self._sky_disk_radius()
-        if radius < 1:
-            return 0.0, 90.0
-        scale = radius * 2.0 / math.pi
-        px = -(screen_y - cy) / scale   # 北分量
-        py = (screen_x - cx) / scale    # 东分量
-        # 截断到地平圆
-        mag = math.hypot(px, py)
-        max_mag = math.pi / 2.0
-        if mag > max_mag:
-            px *= max_mag / mag
-            py *= max_mag / mag
-            mag = max_mag
-        if self._proj is not None:
-            try:
-                v = self._proj.unproject_vec(px, py)
-                from mbdsdr_ai.celestial_geometry import azalt_from_vec
-                az, alt = azalt_from_vec(v)
-                return az % 360.0, alt
-            except Exception:
-                pass
-        # 回退
-        if mag < 1e-6:
-            return 0.0, 90.0
-        alt = 90.0 - math.degrees(mag)
-        az = (math.degrees(math.atan2(py, px)) + 360.0) % 360.0
-        return az, alt
+        """屏幕像素 -> (az, alt)。委托 sky_interaction.screen_to_sky。"""
+        az, alt = screen_to_sky(screen_x, screen_y,
+                                self.view_state, self.projection,
+                                self._widget_size_tuple())
+        return az % 360.0, alt
 
     # ========================================================================
     # 颜色工具
@@ -513,7 +506,7 @@ class RFSkyView(QWidget):
         self._draw_passes_panel(painter)
 
         if self._hovered_object:
-            self._draw_hover_tooltip(painter)
+            self._draw_picked_info(painter)
 
         self._draw_data_source_overlay(painter)
 
@@ -562,9 +555,14 @@ class RFSkyView(QWidget):
         grid_pen = QPen(grid_col, 1, Qt.DashLine)
         painter.setPen(grid_pen)
 
+        cx, cy = self._sky_center()
         for elev in (0, 30, 60):
-            r = radius * (90.0 - elev) / 90.0
-            painter.drawEllipse(QPointF(cx, cy), r, r)
+            # 用投影后的半径画圈（与 _sky_to_screen 同一套数学）；
+            # 中心看天顶时这些圈是正圆，平移后为近似。
+            edge = self._sky_to_screen(0, elev)
+            r = math.hypot(edge.x() - cx, edge.y() - cy)
+            if r > 1.0:
+                painter.drawEllipse(QPointF(cx, cy), r, r)
             label_pos = self._sky_to_screen(270, elev)
             painter.setPen(self._ink())
             painter.drawText(QPointF(label_pos.x() - 26, label_pos.y() + 4), f"{elev}°")
@@ -686,7 +684,96 @@ class RFSkyView(QWidget):
                 painter.setPen(self._ink())
                 painter.setFont(self._font)
                 painter.drawText(QPointF(pos.x() + 10, pos.y() + 4), obj.name)
+
+        # 选中对象：橙色圆环高亮（日式低饱和橙 #C4845C）
+        if self._hovered_object is not None and self._hovered_object.visible \
+                and self._hovered_object.is_above_horizon():
+            hp = self._sky_to_screen(self._hovered_object.azimuth_deg,
+                                    self._hovered_object.elevation_deg)
+            ring_pen = QPen(self._colors["accent"], 2)
+            painter.setPen(ring_pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(hp, 12, 12)
+            painter.drawEllipse(hp, 16, 16)
         painter.restore()
+
+    def _draw_picked_info(self, painter: QPainter):
+        """选中天体旁的信息卡：呼号 / AZ / EL / 距离 km / 多普勒 Hz。"""
+        obj = self._hovered_object
+        if not obj:
+            return
+        pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
+        dist_km = self._parse_distance_km(obj)
+        doppler_hz = self._estimate_doppler_hz(obj)
+
+        lines = [
+            obj.name,
+            f"AZ {obj.azimuth_deg:6.1f}  EL {obj.elevation_deg:5.1f}",
+            f"距离 {dist_km:7.1f} km",
+        ]
+        if obj.frequency_hz > 0:
+            lines.append(f"频率 {obj.frequency_hz / 1e6:8.3f} MHz")
+            lines.append(f"多普勒 {doppler_hz:+8.1f} Hz")
+
+        painter.save()
+        painter.setFont(self._font)
+        fm = QFontMetrics(self._font)
+        box_w = max(fm.horizontalAdvance(l) for l in lines) + 24
+        box_h = len(lines) * 18 + 14
+        box_x = int(pos.x() + 18)
+        box_y = int(pos.y() - box_h - 12)
+        if box_x + box_w > self.width() - 8:
+            box_x = int(pos.x() - box_w - 18)
+        if box_y < 8:
+            box_y = int(pos.y() + 18)
+        bg = QColor(245, 243, 239, 235) if self._sky_brightness > 0.5 \
+            else QColor(20, 28, 38, 235)
+        painter.setBrush(QBrush(bg))
+        # 橙色边框呼应选中环
+        painter.setPen(QPen(self._colors["accent"], 1))
+        painter.drawRoundedRect(box_x, box_y, box_w, box_h, 4, 4)
+        y = box_y + 18
+        for i, line in enumerate(lines):
+            f = QFont(self._font)
+            f.setBold(i == 0)
+            painter.setFont(f)
+            painter.setPen(self._ink())
+            painter.drawText(box_x + 12, y, line)
+            y += 18
+        painter.restore()
+
+    @staticmethod
+    def _parse_distance_km(obj: SkyObject) -> float:
+        """从 description 解析距离 km（如 '仰角45 距离823km'）；解析不到返回 0。"""
+        import re
+        m = re.search(r"距离\s*([0-9.]+)\s*km", obj.description or "")
+        if m:
+            try:
+                return float(m.group(1))
+            except ValueError:
+                pass
+        return 0.0
+
+    @staticmethod
+    def _estimate_doppler_hz(obj: SkyObject) -> float:
+        """估算多普勒频移 f_d = -v_rel*f/c。
+
+        v_rel 优先从 description 解析（如 '径向速度-2.3km/s'）；无则取 0。
+        光速 c=299792458 m/s。
+        """
+        if obj.frequency_hz <= 0:
+            return 0.0
+        import re
+        v_rel = 0.0
+        m = re.search(r"径向速度\s*(-?[0-9.]+)\s*km/s", obj.description or "")
+        if m:
+            v_rel = float(m.group(1)) * 1000.0  # km/s -> m/s
+        else:
+            m = re.search(r"v_rel\s*=?\s*(-?[0-9.]+)\s*m/s", obj.description or "")
+            if m:
+                v_rel = float(m.group(1))
+        c = 299792458.0
+        return -v_rel * obj.frequency_hz / c
 
     def _draw_antenna_beam(self, painter: QPainter):
         if self._antenna.elevation_deg <= 0:
@@ -961,46 +1048,46 @@ class RFSkyView(QWidget):
             y += 18
 
     # ========================================================================
-    # 交互事件（滚轮缩放 / 拖拽旋转 —— 接口预留，供后续增强）
+    # 交互事件：直接委托给混入类 SkyInteractionHandler
+    #   handler 内部已处理：拖拽阈值 4px / 反投影平移 / 滚轮指数缩放 /
+    #   双击 goto 居中 / 角距拾取。这里只做转发，不重复实现交互逻辑。
     # ========================================================================
 
     def mousePressEvent(self, event: QMouseEvent):
-        if event.button() == Qt.LeftButton:
-            self._dragging = True
-            self._last_mouse_pos = QPointF(event.position())
-            clicked = self._find_object_at(event.position().x(), event.position().y())
-            if clicked:
-                self.object_clicked.emit(clicked)
+        SkyInteractionHandler.mousePressEvent(self, event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
-        pos = event.position()
-        hovered = self._find_object_at(pos.x(), pos.y())
-        if hovered != self._hovered_object:
-            self._hovered_object = hovered
-            self.update()
-        if self._dragging:
-            dx = pos.x() - self._last_mouse_pos.x()
-            dy = pos.y() - self._last_mouse_pos.y()
-            self._rotation = (self._rotation + dx * 0.3) % 360
-            self._pan_y += dy
-            self._last_mouse_pos = QPointF(pos)
-            self.update()
+        SkyInteractionHandler.mouseMoveEvent(self, event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        if event.button() == Qt.LeftButton:
-            self._dragging = False
+        SkyInteractionHandler.mouseReleaseEvent(self, event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        self.reset_view()
+        # 双击：goto 居中到点击方向（Stellarium moveToAltAzi）
+        SkyInteractionHandler.mouseDoubleClickEvent(self, event)
 
     def wheelEvent(self, event: QWheelEvent):
-        delta = event.angleDelta().y()
-        if delta > 0:
-            self._zoom = min(3.0, self._zoom * 1.1)
-        else:
-            self._zoom = max(0.3, self._zoom / 1.1)
+        SkyInteractionHandler.wheelEvent(self, event)
+
+    # ------------------------------------------------------------------ 钩子
+    def on_view_changed(self) -> None:
+        """视角（平移/缩放/居中）变化 -> 触发重绘。"""
         self.update()
 
+    def on_object_picked(self, obj) -> None:
+        """点选到天体（obj 非 None 时）：高亮 + emit 信号。"""
+        if obj is None:
+            # 点击空白处：不选中、不 emit
+            return
+        self._hovered_object = obj
+        self.object_clicked.emit(obj)
+        self.update()
+
+    def on_drag_state_changed(self, dragging: bool) -> None:
+        """拖拽状态切换（留空，仅同步旧字段兼容）。"""
+        self._dragging = dragging
+
+    # -- 兼容旧接口（handler 用角距拾取，这里保留像素拾取供外部调用）----------
     def _find_object_at(self, x: float, y: float, tolerance: float = 12.0) -> Optional[SkyObject]:
         for obj in self._objects:
             if not obj.visible or not obj.is_above_horizon():

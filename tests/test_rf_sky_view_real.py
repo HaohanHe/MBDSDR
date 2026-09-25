@@ -126,9 +126,10 @@ class TestProjection:
         v = RFSkyView()
         v.resize(600, 600)
         cx, cy = v._sky_center()
-        # 天顶 az=0 alt=90 -> 圆心
+        # 天顶 az=0 alt=90 -> 圆心（ViewState 把 center_alt 钳到 90-1e-4 避免极点
+        # 奇异，故投影中心有 ~5e-4 px 的数值偏移，容差取 1e-3）
         pz = v._sky_to_screen(0, 90)
-        assert abs(pz.x() - cx) < 1e-6 and abs(pz.y() - cy) < 1e-6
+        assert abs(pz.x() - cx) < 1e-3 and abs(pz.y() - cy) < 1e-3
         # 地平北 az=0 alt=0 -> 圆心正上方（y < cy）
         pn = v._sky_to_screen(0, 0)
         assert abs(pn.x() - cx) < 2.0 and pn.y() < cy
