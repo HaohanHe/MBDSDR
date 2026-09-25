@@ -49,15 +49,16 @@ class TestImportsAndInterfaces:
                             target_name="ISS")
         assert a.is_tracking and a.target_name == "ISS"
 
-    def test_builtin_tles_are_real_three_lines(self):
-        """内置 TLE 必须是合法三行（标题+1+2），可被 sgp4 解析。"""
-        from desktop.rf_sky_view import DEFAULT_TLES
-        assert len(DEFAULT_TLES) >= 4
-        for name, info in DEFAULT_TLES.items():
-            tle = info["tle"]
-            assert tle[1].startswith("1 "), f"{name} line1 非法"
-            assert tle[2].startswith("2 "), f"{name} line2 非法"
-            assert len(tle[1]) >= 69 and len(tle[2]) >= 69
+    def test_no_hardcoded_tle_catalog(self):
+        """不再内置硬编码 TLE：模块不导出 DEFAULT_TLES；TLE 只能从用户文件
+        (~/.mbdsdr/tle/) 或 Celestrak 在线/缓存加载，二者皆无则显“无 TLE 数据”。"""
+        import desktop.rf_sky_view as mod
+        assert not hasattr(mod, "DEFAULT_TLES"), "硬编码 TLE 必须移除"
+        assert callable(getattr(mod, "_load_user_tle_catalog", None))
+        assert callable(getattr(mod, "_load_celestrak_tle_catalog", None))
+        # 两个加载器都必须返回 list（可能为空，但绝不抛异常、不造假）
+        assert isinstance(mod._load_user_tle_catalog(), list)
+        assert isinstance(mod._load_celestrak_tle_catalog(), list)
 
 
 # ----------------------------------------------------------------------
@@ -158,11 +159,12 @@ class TestPaintingRobust:
         v.resize(400, 400)
         v.repaint()
 
-    def test_paint_with_sim_badge(self):
+    def test_paint_with_antenna_overlay(self):
         from desktop.rf_sky_view import RFSkyView, AntennaPointing
         v = RFSkyView()
         v.resize(400, 400)
-        v.set_data_source("sim")
+        # 模拟模式已移除：数据源只允许 none/real；天线指向叠加层在无数据下也能绘制
+        v.set_data_source("none")
         v.set_antenna(AntennaPointing(azimuth_deg=120, elevation_deg=40))
         v.repaint()
 
