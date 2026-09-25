@@ -85,6 +85,29 @@ class ControlPanel(QWidget):
 
         self._build_ui()
         self._update_freq_display()
+        # 默认未连接 SDR：调谐/音量/模式/录音控件全部置灰，绝不暴露假可控状态
+        self.set_sdr_connected(False)
+
+    def set_sdr_connected(self, connected: bool):
+        """无真实 SDR 时禁用调谐/音量/模式/录音等操作控件。
+
+        连接成功后由 main_window._panels_set_sdr_connected(True) 统一启用；
+        断开时再置灰。频率只读显示(freq_display)保持可用展示，不置灰。
+        """
+        self._sdr_connected = bool(connected)
+        widgets = [
+            getattr(self, "mode_combo", None),
+            getattr(self, "freq_input", None),
+            getattr(self, "tune_button", None),
+            getattr(self, "band_combo", None),
+            getattr(self, "preset_combo", None),
+            getattr(self, "volume_slider", None),
+            getattr(self, "record_button", None),
+        ]
+        widgets += self._step_buttons
+        for w in widgets:
+            if w is not None:
+                w.setEnabled(self._sdr_connected)
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -124,11 +147,13 @@ class ControlPanel(QWidget):
         freq_layout.addLayout(mode_freq_row)
 
         # 频率步进按钮
+        self._step_buttons = []
         step_row = QHBoxLayout()
         for step, label in [(-1.0, "-1.0"), (-0.1, "-0.1"), (0.1, "+0.1"), (1.0, "+1.0")]:
             btn = QPushButton(label)
             btn.setFixedHeight(28)
             btn.clicked.connect(lambda checked, s=step: self._step_freq(s))
+            self._step_buttons.append(btn)
             step_row.addWidget(btn)
         freq_layout.addLayout(step_row)
 

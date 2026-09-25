@@ -745,6 +745,27 @@ class RFSkyView(QWidget, SkyInteractionHandler):
                                 self._widget_size_tuple())
         return az % 360.0, alt
 
+    def _gnss_az_el_to_screen(self, az_deg: float, el_deg: float) -> QPointF:
+        """兼容旧接口：(az, el) -> 屏幕像素（固定经典等距极坐标）。
+
+        语义与重构前一致：天顶(el=90)映射到圆心，地平(el=0)映射到圆盘边缘，
+        径向距离随仰角线性变化；az=0 指北(屏幕上方)、az=90 朝东(屏幕右方)。
+
+        说明：本部件的交互视角由 view_state.fov_deg=120° 控制（被
+        test_sky_interaction_offscreen 锁定），此时地平会落在圆盘之外。
+        GNSS 卫星实际绘制统一走 _sky_to_screen（支持 pan/zoom，与其他
+        卫星视角一致，见 _draw_gnss_satellites）；本方法只是固定极坐标参考，
+        供回归测试 tests/test_rf_sky_view_gnss.py 与旧调用方使用，不随
+        pan/zoom 移动。
+        """
+        cx, cy = self._sky_center()
+        r_max = self._sky_disk_radius()
+        el = max(-90.0, min(90.0, float(el_deg)))
+        az = math.radians(float(az_deg) % 360.0)
+        radius = (90.0 - el) / 90.0 * r_max
+        return QPointF(cx + radius * math.sin(az),
+                       cy - radius * math.cos(az))
+
     # ========================================================================
     # 颜色工具
     # ========================================================================

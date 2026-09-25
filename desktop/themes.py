@@ -114,7 +114,7 @@ class Theme:
         QLabel#statusValue {{
             font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
             font-size: 11pt;
-            color: {c['primary']};
+            color: {c['text']};
         }}
         QLabel#freqDisplay {{
             font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
@@ -139,12 +139,13 @@ class Theme:
             border-color: {c['primary']};
         }}
         QPushButton:pressed {{
-            background-color: {c['primary']};
-            color: {c['card']};
+            background-color: {c['button_pressed']};
+            color: {c['text']};
         }}
         QPushButton:disabled {{
             color: {c['text_disabled']};
-            background-color: {c['button']};
+            background-color: {c['button_disabled']};
+            border-color: {c['grid']};
         }}
         QPushButton#recordButton {{
             background-color: {c['accent']};
@@ -158,6 +159,12 @@ class Theme:
         QPushButton#recordButton:checked {{
             background-color: {c['danger']};
             border-color: {c['danger']};
+        }}
+        QPushButton#recordButton:disabled {{
+            background-color: {c['button_disabled']};
+            color: {c['text_disabled']};
+            border-color: {c['grid']};
+            font-weight: 400;
         }}
         QComboBox {{
             background-color: {c['card']};
@@ -266,6 +273,94 @@ class Theme:
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             height: 0;
         }}
+        QGroupBox {{
+            background-color: {c['card']};
+            border: 1px solid {c['border']};
+            border-radius: 8px;
+            margin-top: 14px;
+            padding-top: 8px;
+            font-weight: 600;
+            color: {c['text']};
+        }}
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 4px;
+            color: {c['text']};
+        }}
+        QSpinBox, QDoubleSpinBox {{
+            background-color: {c['card']};
+            color: {c['text']};
+            border: 1px solid {c['border']};
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 10pt;
+        }}
+        QSpinBox:focus, QDoubleSpinBox:focus {{
+            border-color: {c['primary']};
+        }}
+        QSpinBox::up-button, QSpinBox::down-button,
+        QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+            width: 16px;
+            background: {c['bg_alt']};
+            border: none;
+        }}
+        QProgressBar {{
+            background-color: {c['grid']};
+            border: 1px solid {c['border']};
+            border-radius: 6px;
+            text-align: center;
+            color: {c['text']};
+            height: 14px;
+        }}
+        QProgressBar::chunk {{
+            background-color: {c['primary']};
+            border-radius: 5px;
+        }}
+        QMenuBar {{
+            background-color: {c['bg_alt']};
+            color: {c['text']};
+            border-bottom: 1px solid {c['border']};
+        }}
+        QMenuBar::item {{
+            background: transparent;
+            padding: 6px 12px;
+            color: {c['text']};
+        }}
+        QMenuBar::item:selected {{
+            background-color: {c['button_hover']};
+            border-radius: 4px;
+        }}
+        QMenu {{
+            background-color: {c['card']};
+            color: {c['text']};
+            border: 1px solid {c['border']};
+        }}
+        QMenu::item {{
+            padding: 6px 24px;
+        }}
+        QMenu::item:selected {{
+            background-color: {c['button_hover']};
+            color: {c['text']};
+        }}
+        QTableWidget, QTableView, QTreeWidget, QTreeView {{
+            background-color: {c['card']};
+            color: {c['text']};
+            border: 1px solid {c['border']};
+            border-radius: 6px;
+            gridline-color: {c['grid']};
+            selection-background-color: {c['primary']};
+            selection-color: {c['card']};
+        }}
+        QHeaderView::section {{
+            background-color: {c['bg_alt']};
+            color: {c['text']};
+            border: none;
+            border-right: 1px solid {c['grid']};
+            border-bottom: 1px solid {c['border']};
+            padding: 4px 8px;
+            font-weight: 600;
+        }}
         """
 
 
@@ -273,34 +368,44 @@ class Theme:
 # 三套主题实例
 # ============================================================================
 
-# 日式低饱和浅色
+# 日式低饱和浅色（默认主题）
+# 配色规范：米白底 + 蓝灰文字 + 橙强调 + 绿成功 + 红警示，全链路低饱和。
 JAPANESE_LIGHT = Theme(
     name="japanese_light",
     display_name="日式浅色",
     colors={
-        "bg": "#F5F3EF",           # 米白暖灰
-        "bg_alt": "#EDEBE6",       # 稍深
-        "card": "#FFFFFF",          # 纯白卡片
-        "text": "#2C2C2C",         # 深灰文字
-        "text_secondary": "#6B6B6B",  # 次要文字
-        "text_disabled": "#A8A8A8",
-        "border": "#E0DEDA",       # 浅灰边框
-        "primary": "#5B7B8C",      # 低饱和蓝灰
-        "accent": "#C4845C",       # 低饱和橙
+        # 背景 / 卡片
+        "bg": "#F5F3EF",            # 主背景 米白暖灰
+        "bg_alt": "#FAF8F5",        # 次级背景/状态栏/工具栏
+        "card": "#FFFFFF",           # 卡片/面板
+        # 文字
+        "text": "#5B7B8C",           # 文字主色 蓝灰
+        "text_secondary": "#8A9BA8", # 文字次色 更浅蓝灰
+        "text_disabled": "#A0A0A0", # 禁用文字
+        # 线条
+        "border": "#C8C0B4",        # 边框
+        "grid": "#D8D2C8",          # 网格线/分割线 浅米灰
+        # 语义色
+        "primary": "#C4845C",       # 强调/高亮/选中 橙
+        "accent": "#C4845C",        # 主操作按钮 橙
         "accent_hover": "#B0754E",
-        "danger": "#B85C5C",       # 低饱和红
-        "button": "#F0EEE9",
-        "button_hover": "#E8E5DF",
+        "success": "#6BA89A",       # 已连接/成功 绿
+        "danger": "#B85C5C",        # 未连接/警告/错误 红
+        # 按钮态
+        "button": "#FFFFFF",         # 按钮默认背景
+        "button_hover": "#F0EDE8",
+        "button_pressed": "#E8E4DD",
+        "button_disabled": "#D8D2C8",
     },
     spectrum_colors=[
-        "#4A6B7C",  # 深蓝灰
-        "#5B8C9A",  # 蓝青
-        "#6BA89A",  # 青绿
-        "#8FB87A",  # 黄绿
-        "#C4B85C",  # 黄
-        "#C49A5C",  # 橙黄
-        "#C4845C",  # 橙
-        "#B86B5C",  # 橙红
+        "#5B7B8C",  # 蓝灰
+        "#6B8C9A",  # 蓝青
+        "#6BA89A",  # 青绿(成功)
+        "#8FAF8A",  # 灰绿
+        "#B8B08A",  # 灰黄
+        "#C4A87A",  # 暖米
+        "#C4845C",  # 橙(强调)
+        "#B87C6B",  # 砖红
     ],
 )
 
