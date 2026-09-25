@@ -36,7 +36,7 @@ import math
 import os
 import time
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Set
 
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
 from PySide6.QtGui import (
@@ -251,6 +251,24 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         # 未来过境列表：[{name, rise(HH:MM UTC), max_alt, duration_min}]
         self._upcoming_passes: List[Dict[str, float]] = []
 
+        # === 真实 GNSS 卫星天空图（NMEA GSV/GSA 驱动）===
+        # 合并去重后的可见卫星：[{prn, talker, constellation, az, el, snr_db}]
+        self._gnss_satellites: List[Dict] = []
+        # GSA satellites_used：参与定位的 PRN 集合
+        self._gnss_sats_used: Set[int] = set()
+        # 是否有有效 GSV 数据（无数据时画“未连接”，绝不造假卫星）
+        self._gnss_connected: bool = False
+        # GSA fix_type：0=未知/无, 2=2D, 3=3D
+        self._gnss_fix_type: int = 0
+        # 各星座配色（日式低饱和）
+        self._gnss_colors: Dict[str, QColor] = {
+            "GPS": QColor("#5B7B8C"),       # 蓝灰
+            "BeiDou": QColor("#C4845C"),    # 橙
+            "GLONASS": QColor("#7BA05B"),   # 柔和绿
+            "Galileo": QColor("#8C6B5B"),   # 柔和紫棕
+            "未知": QColor("#B0B0B0"),      # 灰
+        }
+
         # 交互状态
         self._dragging = False
         self._last_mouse_pos = QPointF()
@@ -301,6 +319,10 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             "Consolas", "monospace",
         ])
         self._mono_font.setPointSize(9)
+
+        # GNSS 卫星 PRN 标注用小号字体
+        self._gnss_label_font = QFont(self._font)
+        self._gnss_label_font.setPointSize(8)
 
         self.setMouseTracking(True)
         self.setMinimumSize(400, 400)
@@ -363,6 +385,111 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         """喂入未来过境列表（rise 时间字符串 + max_alt + duration_min）。"""
         self._upcoming_passes = list(passes)[:12]
         self.update()
+
+    # ------------------------------------------------------------------ #
+    # 真实 GNSS 卫星天空图（NMEA GSV/GSA 驱动）
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _talker_to_constellation(talker: str, prn: int) -> str:
+        """NMEA talker 前缀 -> 星座名。
+
+        参考 direwolf dwgpsnmea.c:38-42：
+          GP->GPS, GL->GLONASS, GA->Galileo, GB/BD->BeiDou, GN->混合。
+        GN（混合）时按 PRN 粗判：GLONASS slot 常占 65-96；其余编号空间
+        GPS/Galileo/BDS 重叠（1-32），无法可靠区分时标“未知”（灰色）。
+        """
+        t = (talker or "").upper()
+        if t == "GP":
+            return "GPS"
+        if t == "GL":
+            return "GLONASS"
+        if t == "GA":
+            return "Galileo"
+        if t in ("GB", "BD"):
+            return "BeiDou"
+        if t == "GN":
+            try:
+                p = int(prn)
+            except (TypeError, ValueError):
+                return "未知"
+            if 65 <= p <= 96:
+                return "GLONASS"
+            # 其余编号各星座重叠，保守标未知（不造假颜色）
+            return "未知"
+        return "未知"
+
+    def update_gnss_satellites(self, gsv_frames: List[Dict],
+                               gsa_frame: Optional[Dict] = None):
+        """入口：喂入最新 GSV（可多 talker）与可选 GSA，刷新天空图卫星层。
+
+        参数:
+            gsv_frames: NMEAParser._parse_gsv 返回的 frame 列表（可能多个 talker，
+                        每项含 talker 与 sats[{id, elevation, azimuth, snr_db}]）。
+            gsa_frame:  NMEAParser._parse_gsa 返回的 frame（含 satellites_used /
+                        fix_type）；None 表示无 GSA。
+
+        同一星座同一 PRN 只保留最新一条；缺 az/el 的条目不画。
+        gsv_frames 为空时标记未连接、不画任何假卫星。
+        """
+        merged: Dict[Tuple[str, int], Dict] = {}
+        for frame in (gsv_frames or []):
+            talker = frame.get("talker", "")
+            cons_default = self._talker_to_constellation(talker, 0)
+            for sat in frame.get("sats", []) or []:
+                prn = sat.get("id")
+                if not isinstance(prn, int):
+                    continue
+                el = sat.get("elevation")
+                az = sat.get("azimuth")
+                if el is None or az is None:
+                    continue  # 该卫星仅列出无测量，不画
+                cons = self._talker_to_constellation(talker, prn)
+                key = (cons, prn)
+                merged[key] = {
+                    "prn": prn,
+                    "talker": talker,
+                    "constellation": cons,
+                    "elevation": float(el),
+                    "azimuth": float(az),
+                    "snr_db": sat.get("snr_db"),
+                    "constellation_hint": cons_default,
+                }
+        self._gnss_satellites = list(merged.values())
+
+        self._gnss_sats_used = set()
+        self._gnss_fix_type = 0
+        if gsa_frame:
+            try:
+                self._gnss_sats_used = {
+                    int(p) for p in (gsa_frame.get("satellites_used") or [])
+                    if isinstance(p, int)
+                }
+            except (TypeError, ValueError):
+                self._gnss_sats_used = set()
+            try:
+                self._gnss_fix_type = int(gsa_frame.get("fix_type") or 0)
+            except (TypeError, ValueError):
+                self._gnss_fix_type = 0
+
+        self._gnss_connected = len(self._gnss_satellites) > 0
+        self.update()
+
+    def _gnss_az_el_to_screen(self, azimuth_deg: float,
+                              elevation_deg: float) -> QPointF:
+        """GNSS 卫星 (az, el) -> 屏幕像素。
+
+        线性（等距）极坐标投影：
+          屏幕中心 = 天顶(el=90)，外圈 = 地平线(el=0)
+          radius = (1 - elevation/90) * max_radius
+          x = cx + radius*sin(az),  y = cy - radius*cos(az)  （az=0 指北=向上）
+        """
+        cx, cy = self._sky_center()
+        max_r = self._sky_disk_radius()
+        el = max(0.0, min(90.0, float(elevation_deg)))
+        az = math.radians(float(azimuth_deg) % 360.0)
+        r = (1.0 - el / 90.0) * max_r
+        return QPointF(cx + r * math.sin(az), cy - r * math.cos(az))
 
     def add_object(self, obj: SkyObject):
         self._objects.append(obj)
@@ -498,6 +625,8 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         self._draw_celestial_bodies(painter)
         self._draw_objects(painter)
         self._draw_antenna_pointer(painter)
+        # 真实 GNSS 卫星点（GSV/GSA 驱动）叠加在天文天空图之上
+        self._draw_gnss_satellites(painter)
 
         if self._show_compass:
             self._draw_compass(painter)
@@ -508,6 +637,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         if self._hovered_object:
             self._draw_picked_info(painter)
 
+        self._draw_gnss_overlay(painter)
         self._draw_data_source_overlay(painter)
 
         painter.end()
@@ -970,6 +1100,101 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             painter.setPen(self._colors["accent"])
             painter.drawText(panel_x + panel_w - 78, ty,
                              f"{float(p.get('max_alt', 0)):4.0f} deg")
+            ty += row_h
+        painter.restore()
+
+    def _draw_gnss_satellites(self, painter: QPainter):
+        """在极坐标天空图上画真实 GNSS 卫星点（GSV/GSA 驱动）。
+
+        - 每颗卫星一个圆（半径 7px）：GSA used 实心+加粗高亮外圈，仅可见未使用空心；
+        - 颜色按星座（GPS 蓝灰 / BeiDou 橙 / GLONASS 绿 / Galileo 紫棕 / 未知灰）；
+        - snr_db 0..50+ 映射 alpha 0.3..1.0，反映信号强度；
+        - 圆旁小号字标注 PRN。
+        """
+        if not self._gnss_connected or not self._gnss_satellites:
+            return
+        painter.save()
+        painter.setFont(self._gnss_label_font)
+        dot_r = 7.0
+        for sat in self._gnss_satellites:
+            pos = self._gnss_az_el_to_screen(sat["azimuth"], sat["elevation"])
+            base = self._gnss_colors.get(sat["constellation"],
+                                         self._gnss_colors["未知"])
+            snr = sat.get("snr_db")
+            snr = float(snr) if snr is not None else 0.0
+            # snr 0..50+ -> alpha 0.3..1.0
+            alpha = int(255.0 * max(0.3, min(1.0, snr / 50.0)))
+            used = sat["prn"] in self._gnss_sats_used
+
+            if used:
+                # 参与定位：实心填充（alpha 随信噪比）+ 同色加粗高亮外圈
+                fill = QBrush(QColor(base.red(), base.green(), base.blue(), alpha))
+                painter.setBrush(fill)
+                painter.setPen(QPen(QColor(base.red(), base.green(), base.blue(), 255), 1.4))
+                painter.drawEllipse(pos, dot_r, dot_r)
+                painter.setPen(QPen(QColor(base.red(), base.green(), base.blue(), 255), 2.4))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(pos, dot_r + 3.5, dot_r + 3.5)
+            else:
+                # 仅可见未使用：空心圆（笔透明度随信噪比）
+                pen_col = QColor(base.red(), base.green(), base.blue(), alpha)
+                painter.setPen(QPen(pen_col, 1.2))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(pos, dot_r, dot_r)
+
+            # PRN 标注
+            painter.setPen(self._ink())
+            painter.drawText(QPointF(pos.x() + dot_r + 3, pos.y() - dot_r - 2),
+                             str(sat["prn"]))
+        painter.restore()
+
+    def _draw_gnss_overlay(self, painter: QPainter):
+        """GNSS 状态与图例：左上角状态卡；无数据时居中显示“GNSS 未连接”。"""
+        painter.save()
+        if not self._gnss_connected:
+            f = QFont(self._font)
+            f.setPointSize(11)
+            painter.setFont(f)
+            painter.setPen(QColor("#9AA0A6"))
+            painter.drawText(QRectF(0, self.height() * 0.30, self.width(), 60),
+                             Qt.AlignHCenter | Qt.AlignVCenter, "GNSS 未连接")
+            painter.restore()
+            return
+
+        # 各星座可见计数
+        counts: Dict[str, int] = {}
+        for s in self._gnss_satellites:
+            counts[s["constellation"]] = counts.get(s["constellation"], 0) + 1
+
+        n_vis = len(self._gnss_satellites)
+        n_used = len(self._gnss_sats_used)
+        fix_txt = {3: "3D", 2: "2D"}.get(self._gnss_fix_type, "无")
+
+        cons_order = ["GPS", "BeiDou", "GLONASS", "Galileo", "未知"]
+        rows = [c for c in cons_order if counts.get(c, 0) > 0]
+        row_h = 18
+        card_w = 250
+        card_h = 26 + row_h * (1 + len(rows))
+        x0, y0 = 12.0, 12.0
+
+        bg = QColor(245, 243, 239, 225) if self._sky_brightness > 0.5 \
+            else QColor(20, 28, 38, 215)
+        painter.setBrush(QBrush(bg))
+        painter.setPen(QPen(QColor("#5B7B8C"), 1))
+        painter.drawRoundedRect(QRectF(x0, y0, card_w, card_h), 6, 6)
+
+        painter.setFont(self._font)
+        painter.setPen(self._ink())
+        painter.drawText(QPointF(x0 + 10, y0 + 19),
+                         f"GNSS: 已连接 | 可见 {n_vis} 颗 | 定位 {n_used} 颗 | 固定: {fix_txt}")
+        ty = y0 + 19 + row_h
+        for cons in rows:
+            col = self._gnss_colors[cons]
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(col))
+            painter.drawRect(QRectF(x0 + 12, ty - 9, 10, 10))
+            painter.setPen(self._ink())
+            painter.drawText(QPointF(x0 + 30, ty), f"{cons}  {counts[cons]} 颗")
             ty += row_h
         painter.restore()
 

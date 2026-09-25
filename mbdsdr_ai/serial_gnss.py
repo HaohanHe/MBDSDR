@@ -389,6 +389,10 @@ class SerialGNSSReader:
         self._reconnect_interval = 2.0   # 重连尝试间隔（秒）
         # 最新融合状态
         self._fix: Dict[str, Any] = self._empty_fix()
+        # 最新 GSV/GSA 缓存：供天空图绘制真实卫星天空图
+        # _latest_gsv: talker -> 最近一次聚合完成的 GSV frame（sats 完整列表）
+        self._latest_gsv: Dict[str, Dict[str, Any]] = {}
+        self._latest_gsa: Optional[Dict[str, Any]] = None
 
     @staticmethod
     def _empty_fix() -> Dict[str, Any]:
@@ -631,6 +635,13 @@ class SerialGNSSReader:
                     f["speed_kmh"] = rec["speed_kmh"]
                 if rec.get("course_deg") is not None:
                     f["course_deg"] = rec["course_deg"]
+            elif s == "GSV":
+                # 只缓存聚合完成（或单帧）的完整 GSV；中间帧 parser 已返回 None
+                talker = rec.get("talker")
+                if talker:
+                    self._latest_gsv[talker] = dict(rec)
+            elif s == "GSA":
+                self._latest_gsa = dict(rec)
 
     def get_fix(self) -> Dict[str, Any]:
         """返回最新 fix 快照。无数据时 source='none'、坐标为 None，绝不造假。"""
@@ -642,6 +653,31 @@ class SerialGNSSReader:
                     snap["source"] = "none"
                     return snap
             return dict(self._fix)
+
+    def _gsv_stale(self) -> bool:
+        """与 get_fix 一致的新鲜度判定：连续 10s 无新 NMEA 视为数据丢失。"""
+        return (self._running.is_set() and self._fix["timestamp"] is not None
+                and time.time() - self._fix["timestamp"] > 10.0)
+
+    def get_gsv_frames(self) -> List[Dict[str, Any]]:
+        """返回各 talker 最新一帧（聚合后）GSV 的列表，供天空图绘制卫星位置。
+
+        每项 :: {"talker": "GP"/"GL"/"GA"/"GB"/"GN",
+                 "sats": [{"id":prn, "elevation":deg, "azimuth":deg, "snr_db":dB}, ...]}
+
+        无数据 / 数据过期时返回 []，绝不造假卫星。
+        """
+        with self._lock:
+            if self._gsv_stale():
+                return []
+            return [dict(fr) for fr in self._latest_gsv.values()]
+
+    def get_gsa(self) -> Optional[Dict[str, Any]]:
+        """返回最新 GSA 帧（satellites_used / fix_type / pdop...）。无数据返回 None。"""
+        with self._lock:
+            if self._gsv_stale():
+                return None
+            return dict(self._latest_gsa) if self._latest_gsa else None
 
 
 # ============================================================

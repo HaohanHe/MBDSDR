@@ -1359,6 +1359,14 @@ class MainWindow(QMainWindow):
             self.sky_view.set_gnss_position(fix_dict)
         except Exception:
             pass
+        # 真实 GNSS 卫星天空图：各星座可见卫星位置/信噪比 + GSA 定位卫星标记
+        # （1s 轮询即 GSV 典型刷新率；无数据时天空图自行显示“GNSS 未连接”）
+        try:
+            gsv_frames = self._gnss.get_gsv_frames()
+            gsa_frame = self._gnss.get_gsa()
+            self.sky_view.update_gnss_satellites(gsv_frames, gsa_frame)
+        except Exception:
+            pass
         # 真实 GNSS 自动设定地面站位置：仅当用户尚未手动配置
         # （_observer_lat/lon 均为 None，即 gui_config.json 无坐标、非模拟）时才写入，
         # 避免覆盖手动配置坐标或模拟坐标。
