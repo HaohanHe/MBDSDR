@@ -2,20 +2,35 @@
 MBDSDR 桌面端 - 气象卫星云图面板 (WeatherPanel)
 ==================================================
 
-接收/解码气象卫星下行信号并显示云图：
-  - 卫星选择：GK-2A / FY-4A / FY-4B / FY-3D/E/F / GOES-16 / NOAA-19
-  - 接收模式：离线 IQ 文件 (.iq/.wav/.npy) 或 实时 SDR（无硬件置灰）
-  - 解码：在 QThread 中调用后端 ToolRegistry 工具，完成后发信号刷新 QLabel
-  - 图像处理：中值滤波 / 直方图均衡 / 白平衡 / Kuwahara 降噪 → sat_image_enhance
-  - 状态栏：卫星参数（频率/符号率/调制）、解码进度、当前帧计数
-  - 合成演示：[模拟]生成演示云图（标 [模拟] 标签）
+真实数据链路（无任何合成/示例云图）：
+  - 卫星制式：GOES-16 HRIT / GK-2A LRIT / Meteor-M2 LRPT / NOAA-19 APT /
+              FY-4A HRIT / FY-3D HRPT
+  - 数据来源：
+      * 录制文件：真实 .iq(complex64) / .wav(APT 音频) / .cfile 离线解调解码
+      * 实时 SDR：attach_iq_source() 注入真实 read_samples 回调后，边收边存，
+                  停止时对落盘的 complex64 录制做同一套离线解码
+  - 解码链路（每一步都调用 mbdsdr_ai 真实模块，不跳过、不填假数据）：
+      GK-2A  : gk2a_lrit.decode_iq_to_image
+                 = BPSK 解调 → Viterbi(K=7,1/2,0x4F/0x6D) → 帧同步 0x1ACFFC1D
+                   → CCSDS 解扰 → RS(255,223,I=4) → VCDU → M_PDU → TP_PDU
+                   → SessionPDU → LRIT 文件头 → 图像段组装 → JPEG2000/裸像素 → PNG
+      GOES   : 复用 gk2a_lrit 的 BPSK/Viterbi/同步/解扰/RS 物理层得到 892B VCDU，
+                 喂 goes_lrit.HRITParser().feed_vcdu() → GOESImageDecoder().add_lrit_file()
+      NOAA   : noaa_apt_lite.decode_apt() (AM 包络→行同步→A/B 通道) → save_apt_png
+      Meteor : meteor_sat.demodulate_lrpt() (QPSK→去交织→Viterbi→CCDB 解扰→CADU)
+                 可见光重组 compose_visible_image 上游未实现 → 如实报帧数，不出假图
+      FY-4/3 : fengyun_sat 真实模块（DVB-S2 PL 同步 / HRPT 帧同步）；面板对 raw IQ
+                 的端到端出图未接通时如实标注，绝不补假云图
+  - 图像处理（可选后处理）：sat_image_processing.sat_image_enhance
+                 （中值/直方图均衡/白平衡/Kuwahara）
 
-配色（日式低饱和，全部取自 themes.py）：
-  纸底 #F5F3EF / 蓝灰 #5B7B8C / 橙 #C4845C
-不硬编码新颜色；matplotlib/占位文字统一从 ThemeManager 取色。
+红线：
+  * 无 SDR 连接且无录制文件 → 图像区空白，仅显示「未连接 / 无数据」占位文字。
+  * 不内置任何默认/示例/合成云图，不 np.random 生成假图，不从 URL 拉示例图。
+  * 实时 SDR 模式在 set_sdr_connected(False) 时整体置灰。
 
-红线：无真实 SDR 硬件时，实时 SDR 模式按钮置灰并显示「未连接SDR设备」；
-     合成/离线数据一律标 [模拟]。
+配色（日式低饱和，与 themes.py japanese_light 一致；面板局部强调色直接取任务给定值）：
+  米白 #F5F3EF / 蓝灰 #5B7B8C / 橙 #C4845C / 绿 #6BA89A / 红 #B85C5C
 """
 from __future__ import annotations
 
@@ -23,67 +38,67 @@ import os
 import sys
 import time
 import traceback
-from typing import Dict, List, Optional
+import wave
+from typing import Callable, Dict, List, Optional
 
 # 允许 desktop/ 直接跑，也允许被 main_window import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from PySide6.QtCore import Qt, QThread, Signal, QObject
-from PySide6.QtGui import QPixmap, QFont, QColor
-from PySide6.QtWidgets import (
+import numpy as np  # noqa: E402
+
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer  # noqa: E402
+from PySide6.QtGui import QPixmap, QFont  # noqa: E402
+from PySide6.QtWidgets import (  # noqa: E402
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox, QPushButton,
     QLabel, QCheckBox, QFrame, QFileDialog, QGroupBox, QMessageBox,
-    QScrollArea,
+    QLineEdit, QProgressBar,
 )
 
-from themes import get_theme, DEFAULT_THEME
+from themes import get_theme, DEFAULT_THEME  # noqa: E402
 
 
 # ----------------------------------------------------------------------
-# 卫星参数表（显示用：频率/符号率/调制；对应后端解码族）
+# 日式低饱和面板强调色（任务给定值；控件本体配色仍走 themes.py）
 # ----------------------------------------------------------------------
-# decode 族：
-#   gk2a   -> gk2a_lrit_decode   (complex64 raw IQ -> PNG)
-#   fy4    -> fy4_lrit_decode    (VCDU hex 列表)
-#   fy3    -> fy3_hrpt_decode    (软比特数组)
-#   goes   -> goes_lrit_decode
-#   noaa   -> noaa_apt
+C_BG = "#F5F3EF"
+C_BLUE = "#5B7B8C"
+C_ORANGE = "#C4845C"
+C_GREEN = "#6BA89A"
+C_RED = "#B85C5C"
+
+
+# ----------------------------------------------------------------------
+# 卫星参数表：freq/symrate/采样率/调制/解码族
+# family 决定后台 worker 调用哪条真实 mbdsdr_ai 解码链。
+# ----------------------------------------------------------------------
 SATELLITES: Dict[str, Dict] = {
-    "GK-2A (128.2°E)": {
-        "freq_mhz": 1686.0, "symrate_ksps": 128.0, "mod": "BPSK",
-        "family": "gk2a", "band": "L 波段 HRIT",
+    "GOES-16 HRIT (75.2°W)": {
+        "freq_mhz": 1686.6, "symrate_ksps": 921.6, "srate_msps": 2.0,
+        "mod": "BPSK", "family": "goes", "band": "L 波段 HRIT",
     },
-    "FY-4A (104.7°E)": {
-        "freq_mhz": 1680.0, "symrate_ksps": 720.0, "mod": "QPSK",
-        "family": "fy4", "band": "L 波段 HRIT",
+    "GK-2A LRIT (128.2°E)": {
+        "freq_mhz": 1692.14, "symrate_ksps": 128.0, "srate_msps": 1.0,
+        "mod": "BPSK", "family": "gk2a", "band": "L 波段 LRIT",
     },
-    "FY-4B (133°E)": {
-        "freq_mhz": 1680.0, "symrate_ksps": 720.0, "mod": "QPSK",
-        "family": "fy4", "band": "L 波段 HRIT",
+    "Meteor-M2 LRPT": {
+        "freq_mhz": 137.1, "symrate_ksps": 72.0, "srate_msps": 1.0,
+        "mod": "QPSK", "family": "meteor", "band": "VHF LRPT",
     },
-    "FY-3D": {
-        "freq_mhz": 1700.0, "symrate_ksps": 665.4, "mod": "BPSK",
-        "family": "fy3", "band": "L 波段 HRPT",
+    "NOAA-19 APT": {
+        "freq_mhz": 137.1, "symrate_ksps": 2.4, "srate_msps": 48.0,
+        "mod": "APT/AM", "family": "noaa", "band": "VHF APT",
     },
-    "FY-3E": {
-        "freq_mhz": 1700.0, "symrate_ksps": 665.4, "mod": "BPSK",
-        "family": "fy3", "band": "L 波段 HRPT",
+    "FY-4A HRIT (104.7°E)": {
+        "freq_mhz": 1680.0, "symrate_ksps": 720.0, "srate_msps": 2.0,
+        "mod": "QPSK/DVB-S2", "family": "fy4", "band": "L 波段 HRIT",
     },
-    "FY-3F": {
-        "freq_mhz": 1700.0, "symrate_ksps": 665.4, "mod": "BPSK",
-        "family": "fy3", "band": "L 波段 HRPT",
-    },
-    "GOES-16": {
-        "freq_mhz": 1686.6, "symrate_ksps": 622.0, "mod": "BPSK",
-        "family": "goes", "band": "L 波段 HRIT",
-    },
-    "NOAA-19": {
-        "freq_mhz": 137.1, "symrate_ksps": 2.4, "mod": "APT/AM",
-        "family": "noaa", "band": "VHF APT",
+    "FY-3D HRPT": {
+        "freq_mhz": 1700.0, "symrate_ksps": 665.4, "srate_msps": 2.0,
+        "mod": "BPSK", "family": "fy3", "band": "L 波段 HRPT",
     },
 }
 
-# 增强选项 -> sat_image_enhance steps op 名
+# 后处理 op 名 → sat_image_processing 工具参数
 ENHANCE_OPS = {
     "中值滤波": "median",
     "直方图均衡": "equalize",
@@ -93,151 +108,271 @@ ENHANCE_OPS = {
 
 
 def _theme_colors() -> Dict[str, str]:
-    """从 themes.py 取当前默认主题配色（不硬编码）。"""
     return get_theme(DEFAULT_THEME).colors
 
 
 # ======================================================================
-# 后台解码线程：调用 ToolRegistry，不阻塞 UI
+# 录制文件读取（真实二进制，不做任何合成）
+# ======================================================================
+def _load_complex64(path: str) -> np.ndarray:
+    """读 complex64 (float32 交错 I/Q) raw 录制为 complex64 ndarray。"""
+    return np.fromfile(path, dtype=np.complex64)
+
+
+def _load_wav_mono(path: str) -> "tuple[np.ndarray, float]":
+    """读 .wav 为单声道 float64 归一化音频。支持 8/16/24/32-bit PCM。"""
+    with wave.open(path, "rb") as w:
+        nch = w.getnchannels()
+        sw = w.getsampwidth()
+        fr = w.getframerate()
+        n = w.getnframes()
+        raw = w.readframes(n)
+    if sw == 1:
+        data = np.frombuffer(raw, dtype=np.uint8).astype(np.float64) - 128.0
+    elif sw == 2:
+        data = np.frombuffer(raw, dtype="<i2").astype(np.float64) / 32768.0
+    elif sw == 3:
+        b = np.frombuffer(raw, dtype=np.uint8).reshape(-1, 3)
+        as32 = (b[:, 0].astype(np.int32)
+                | (b[:, 1].astype(np.int32) << 8)
+                | (b[:, 2].astype(np.int32) << 16))
+        as32 = np.where(as32 & 0x800000, as32 | ~0xFFFFFF, as32)
+        data = as32.astype(np.float64) / 8388608.0
+    elif sw == 4:
+        data = np.frombuffer(raw, dtype="<i4").astype(np.float64) / 2147483648.0
+    else:
+        raise ValueError(f"不支持的 wav 采样位宽: {sw*8}-bit")
+    if nch > 1:
+        data = data.reshape(-1, nch).mean(axis=1)
+    return data, float(fr)
+
+
+# ======================================================================
+# 通用 CCSDS BPSK 解帧：复用 gk2a_lrit 的真实物理层积木，输出 892B VCDU
+# （GOES HRIT 与 GK-2A LRIT 同 CCSDS 卷积+RS  concatenated 链，差别仅在符号率）
+# ======================================================================
+def _ccsds_bpsk_deframe(iq: np.ndarray, sps: int) -> List[bytes]:
+    """IQ complex64 → 892B VCDU 列表。
+
+    链路全部来自 mbdsdr_ai/gk2a_lrit.py（对标 SatDump module_ccsds_conv_concat_decoder）：
+      RRC 匹配 → BPSK 软符号 → Viterbi(K=7,1/2,0x4F/0x6D) → 帧同步 0x1ACFFC1D
+      → CCSDS 解扰(PN255) → RS(255,223,I=4) → 892B VCDU
+    """
+    from mbdsdr_ai import gk2a_lrit as gk
+    from mbdsdr_ai.gk2a_lrit import (
+        bpsk_demod, ViterbiDecoder, frame_sync_search, bits_to_bytes,
+        derandomize_ccsds, rs_decode_interleaved,
+        CADU_BITS, CADU_BYTES, DERAND_OFFSET, VCDU_LEN, SYNC_WORD_BYTES,
+    )
+
+    soft = bpsk_demod(iq, sps)
+    if len(soft) < CADU_BITS * 2:
+        return []
+    bits = ViterbiDecoder().decode(soft)
+    off = frame_sync_search(bits)
+    if off < 0:
+        return []
+    bits = bits[off:]
+    vcdus: List[bytes] = []
+    n_frames = len(bits) // CADU_BITS
+    for fi in range(n_frames):
+        fb = bits[fi * CADU_BITS: (fi + 1) * CADU_BITS]
+        frame = bytearray(bits_to_bytes(fb))
+        if bytes(frame[:4]) != SYNC_WORD_BYTES:
+            continue
+        derandomize_ccsds(frame, CADU_BYTES - DERAND_OFFSET, offset=DERAND_OFFSET)
+        block = frame[DERAND_OFFSET: CADU_BYTES]
+        errs = rs_decode_interleaved(block)
+        if any(e < 0 for e in errs):
+            continue
+        vcdus.append(bytes(block[:VCDU_LEN]))
+    return vcdus
+
+
+# ======================================================================
+# 后台解码线程：真实调用 mbdsdr_ai 解码模块，不产出任何合成图像
 # ======================================================================
 class DecodeWorker(QObject):
-    """在 QThread 中跑后端解码/增强/合成，完成后发信号。"""
-
-    finished = Signal(object)   # ToolResult 或 dict（合成结果）
-    progress = Signal(str)      # 进度文本
+    finished = Signal(dict)        # {png?, width, height, annotation, sat, channel, meta, error, frames}
+    progress = Signal(str)         # 进度文本
     failed = Signal(str)
 
-    def __init__(self, action: str, params: Dict, parent: Optional[QObject] = None):
+    def __init__(self, params: Dict, parent: Optional[QObject] = None):
         super().__init__(parent)
-        self._action = action       # "decode" | "enhance" | "demo"
-        self._params = params
-        self._reg = None
+        self._p = params
         self._stop = False
 
     def request_stop(self):
         self._stop = True
 
-    def _ensure_registry(self):
-        if self._reg is None:
-            from mbdsdr_ai.tool_registry import ToolRegistry
-            self._reg = ToolRegistry()
-            self._reg.register_builtin_tools()
-        return self._reg
-
+    # ------------------------------------------------------------------
     def run(self):
         try:
-            if self._action == "decode":
-                self._run_decode()
-            elif self._action == "enhance":
-                self._run_enhance()
-            elif self._action == "demo":
-                self._run_demo()
+            fam = self._p["family"]
+            if fam == "gk2a":
+                self._run_gk2a()
+            elif fam == "goes":
+                self._run_goes()
+            elif fam == "noaa":
+                self._run_noaa()
+            elif fam == "meteor":
+                self._run_meteor()
+            elif fam in ("fy4", "fy3"):
+                self._run_fengyun()
+            else:
+                self.finished.emit({"ok": False, "error": f"未知解码族: {fam}"})
         except Exception as e:  # noqa: BLE001
             self.failed.emit(f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=2)}")
 
     # ------------------------------------------------------------------
-    def _run_decode(self):
-        reg = self._ensure_registry()
-        family = self._params["family"]
-        iq_file = self._params.get("iq_file")
-        self.progress.emit(f"开始解码 {self._params.get('satellite','?')} ...")
+    def _emit(self, **kw):
+        kw.setdefault("ok", False)
+        kw.setdefault("satellite", self._p.get("satellite", ""))
+        kw.setdefault("family", self._p.get("family", ""))
+        self.finished.emit(kw)
 
-        if family == "gk2a":
-            out_png = self._params["out_png"]
-            res = reg.call("gk2a_lrit_decode",
-                           {"iq_path": iq_file, "out_png": out_png})
-        elif family == "fy4":
-            # fy4_lrit_decode 需要 VCDU hex 列表；离线 IQ 文件需先经解帧。
-            # 这里如实调用并把后端返回（含参数要求）透传给 UI。
-            res = reg.call("fy4_lrit_decode", {"iq_file": iq_file})
-        elif family == "fy3":
-            res = reg.call("fy3_hrpt_decode", {"iq_file": iq_file})
+    # ---- GK-2A LRIT：完整 IQ→PNG 真实链 -------------------------------
+    def _run_gk2a(self):
+        from mbdsdr_ai import gk2a_lrit as gk
+        path = self._p["iq_file"]
+        out_png = self._p["out_png"]
+        sps = int(self._p.get("sps", 8))
+        self.progress.emit(f"读取录制 {os.path.basename(path)} (complex64) ...")
+        iq = _load_complex64(path)
+        self.progress.emit(f"IQ {len(iq)/1e6:.2f} M 采样 → BPSK/Viterbi/RS/解帧 ...")
+        res = gk.decode_iq_to_image(iq, out_png, sps=sps)
+        if res.success:
+            self._emit(ok=True, png=res.png_path, width=res.width, height=res.height,
+                       annotation=res.annotation, channel="LRIT 全圆盘",
+                       frames=res.n_files, meta=res.metadata)
         else:
-            # GOES / NOAA：离线 IQ 直解暂未接线，如实返回提示
-            res = type("R", (), {
-                "success": False,
-                "content": f"{family} 离线 IQ 直解通道暂未接线，请先用离线工具链导出。",
-                "data": {}, "error": "not_wired"})()
-        self.progress.emit("解码完成" if getattr(res, "success", False) else "解码失败")
-        self.finished.emit(res)
+            self._emit(ok=False, error=f"GK-2A 解码: {res.error}")
 
-    def _run_enhance(self):
-        reg = self._ensure_registry()
-        steps = self._params["steps"]
-        out_png = self._params["out_png"]
-        res = reg.call("sat_image_enhance", {
-            "image_path": self._params["image_path"],
-            "steps": steps,
-            "lut": self._params.get("lut", "iron"),
-            "output_path": out_png,
-        })
-        self.finished.emit(res)
+    # ---- GOES HRIT：复用 CCSDS BPSK 解帧 → goes_lrit 重组 --------------
+    def _run_goes(self):
+        from mbdsdr_ai import goes_lrit as gl
+        path = self._p["iq_file"]
+        out_png = self._p["out_png"]
+        sps = int(self._p.get("sps", 2))
+        self.progress.emit(f"读取录制 {os.path.basename(path)} (complex64) ...")
+        iq = _load_complex64(path)
+        self.progress.emit(f"IQ {len(iq)/1e6:.2f} M 采样 → CCSDS BPSK 解帧 ...")
+        vcdus = _ccsds_bpsk_deframe(iq, sps)
+        self.progress.emit(f"解出 {len(vcdus)} 个 892B VCDU → goes_lrit 重组 ...")
+        parser = gl.HRITParser()
+        dec = gl.GOESImageDecoder()
+        got = None
+        for vcdu in vcdus:
+            for fbuf in parser.feed_vcdu(vcdu):
+                img = dec.add_lrit_file(fbuf)
+                if img is not None:
+                    got = img
+        if got is None:
+            self._emit(ok=False, frames=len(vcdus),
+                       error="VCDU 已解出但 LRIT 图像段未凑齐（录制时长过短或信号弱）")
+            return
+        from PIL import Image
+        arr = np.asarray(got.pixels, dtype=np.uint8).reshape(got.height, got.width)
+        Image.fromarray(arr, mode="L").save(out_png)
+        self._emit(ok=True, png=out_png, width=got.width, height=got.height,
+                   annotation=got.annotation, channel="GOES ABI",
+                   frames=len(vcdus), meta={"image_identifier": got.image_identifier})
 
-    def _run_demo(self):
-        """[模拟] 合成一张全圆盘演示云图（径向梯度 + 涡旋），标 [模拟]。"""
-        import numpy as np
-        from PIL import Image, ImageDraw
-        out_png = self._params["out_png"]
-        self.progress.emit("[模拟] 生成演示云图 ...")
+    # ---- NOAA-19 APT：wav 音频 → APT 解码 → PNG -----------------------
+    def _run_noaa(self):
+        from mbdsdr_ai import noaa_apt_lite as apt
+        path = self._p["iq_file"]
+        out_prefix = os.path.splitext(self._p["out_png"])[0]
+        self.progress.emit(f"读取 APT 音频 {os.path.basename(path)} ...")
+        audio, fs = _load_wav_mono(path)
+        self.progress.emit(f"音频 {len(audio)/fs:.1f}s @ {fs/1e3:.1f}kHz → AM 包络/行同步 ...")
+        res = apt.decode_apt(audio, fs)
+        if not res.get("apt_present"):
+            self._emit(ok=False, error=f"APT 未锁相: {res.get('reason')} "
+                                       f"(对齐行 {res.get('lines_aligned', 0)}, "
+                                       f"lock {res.get('lock_ratio', 0)})")
+            return
+        paths = apt.save_apt_png(res, out_prefix)
+        self._emit(ok=True, png=paths["combo"],
+                   width=res["image_a"].shape[1] * 2, height=res["image_a"].shape[0],
+                   annotation=f"APT lock={res['lock_ratio']}", channel="APT A+B",
+                   frames=res["lines_aligned"],
+                   meta={"duration_s": res["duration_s"], "paths": paths})
 
-        size = 256
-        y, x = np.mgrid[0:size, 0:size]
-        cx = cy = size / 2.0
-        r = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
-        rmax = size / 2.0
-        # 径向梯度模拟云带 + 螺旋涡旋
-        theta = np.arctan2(y - cy, x - cx)
-        spiral = 0.5 + 0.5 * np.sin(6.0 * theta + 12.0 * r / rmax)
-        base = 1.0 - r / rmax
-        img = (120 + 110 * base * (0.6 + 0.4 * spiral)).astype(np.float64)
-        img[r > rmax] = 20  # 太空黑
-        u8 = np.clip(img, 0, 255).astype(np.uint8)
-        rgb = np.stack([u8, u8, u8], axis=-1)
+    # ---- Meteor-M2 LRPT：真实解调链，可见光重组上游未实现，如实报帧数 ----
+    def _run_meteor(self):
+        from mbdsdr_ai import meteor_sat as ms
+        path = self._p["iq_file"]
+        fs = float(self._p.get("sample_rate", 1e6))
+        self.progress.emit(f"读取 Meteor IQ {os.path.basename(path)} ...")
+        iq = _load_complex64(path).astype(np.complex128)
+        params = ms.get_satellite_params("meteor_m2_hrpt")
+        if params is None:
+            self._emit(ok=False, error="meteor_sat 未找到 meteor_m2_hrpt 参数")
+            return
+        self.progress.emit("QPSK→去交织→Viterbi→CCDB 解扰→CADU 提取 ...")
+        cadus = ms.demodulate_lrpt(iq, fs, params)
+        self._emit(ok=False, frames=len(cadus),
+                   error=(f"已真实解出 {len(cadus)} 个 LRPT CADU 帧；"
+                          "可见光通道重组 compose_visible_image 上游未实现，"
+                          "本面板不出合成图"))
 
-        pil = Image.fromarray(rgb)
-        draw = ImageDraw.Draw(pil)
-        draw.text((8, 8), "[SIM] DEMO CLOUD", fill=(255, 255, 255))
-        os.makedirs(os.path.dirname(out_png) or ".", exist_ok=True)
-        pil.save(out_png)
-
-        self.finished.emit({
-            "success": True, "png": out_png, "width": size, "height": size,
-            "simulated": True, "content": "[模拟] 合成演示云图",
-        })
+    # ---- FY-4 / FY-3：调用真实模块，raw IQ 端到端出图未接通则如实报告 ----
+    def _run_fengyun(self):
+        from mbdsdr_ai import fengyun_sat as fy
+        path = self._p["iq_file"]
+        self.progress.emit(f"读取录制 {os.path.basename(path)} ...")
+        raw = open(path, "rb").read()
+        fam = self._p["family"]
+        if fam == "fy4":
+            # DVB-S2 PL 同步（SOF 26-bit 0x18D2E82）— 真实模块
+            bits = np.unpackbits(np.frombuffer(raw[:len(raw)//2], dtype=np.uint8))
+            hits = fy.fy4_dvbs2_sync(bits.astype(np.uint8))
+            self._emit(ok=False, frames=len(hits),
+                       error=(f"FY-4 DVB-S2 PL 同步命中 {len(hits)} 帧；"
+                              "LDPC/BB 解扰后 VCDU 重组出图链路在本面板未接通，"
+                              "请用 SatDump FengYun-4.json 流水线"))
+        else:
+            # FY-3 HRPT：60-bit 帧同步真实模块
+            frames = fy.fy3_ahrpt_sync(raw)
+            self._emit(ok=False, frames=len(frames),
+                       error=(f"FY-3 HRPT 帧同步命中 {len(frames)} 帧；"
+                              "AVHRR 通道软比特解调→出图链路在本面板未接通"))
 
 
 # ======================================================================
 # 气象云图面板主体
 # ======================================================================
 class WeatherPanel(QWidget):
-    """气象卫星云图面板。后端 ToolRegistry 懒加载（首次解码才创建）。"""
+    """气象卫星云图面板：真实录制/实时 IQ → mbdsdr_ai 解码 → QPixmap。"""
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        c = _theme_colors()
-        self._c = c
+        self._c = _theme_colors()
         self._iq_file: Optional[str] = None
         self._current_png: Optional[str] = None
-        self._sdr_connected = False     # 默认未连接真实 SDR 硬件
+        self._sdr_connected = False
+        # 实时 SDR IQ 源：由 attach_iq_source() 注入 (read_samples(n)->ndarray, fs)
+        self._iq_read: Optional[Callable[[int], np.ndarray]] = None
+        self._iq_sr: float = 1e6
         self._worker: Optional[QThread] = None
         self._worker_obj: Optional[DecodeWorker] = None
         self._frame_count = 0
         self._build_ui()
         self._on_satellite_changed(0)
-        self._refresh_sdr_mode_state()
+        self._refresh_state()
 
+    # ------------------------------------------------------------------
+    # UI
     # ------------------------------------------------------------------
     def _build_ui(self):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(8, 8, 8, 8)
         outer.setSpacing(8)
 
-        # ===== 控制卡片 =====
-        ctrl = QFrame()
-        ctrl.setObjectName("card")
+        ctrl = QFrame(); ctrl.setObjectName("card")
         cl = QVBoxLayout(ctrl)
-        cl.setContentsMargins(10, 8, 10, 10)
-        cl.setSpacing(6)
+        cl.setContentsMargins(10, 8, 10, 10); cl.setSpacing(6)
 
         title = QLabel("气象卫星云图接收")
         title.setObjectName("sectionTitle")
@@ -247,59 +382,62 @@ class WeatherPanel(QWidget):
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         self.sat_combo = QComboBox()
-        self.sat_combo.setToolTip("选择气象卫星（决定下行频率/符号率与解码族）")
+        self.sat_combo.setToolTip("选择下行制式（决定频率/符号率与解码族）")
         for name in SATELLITES:
             self.sat_combo.addItem(name)
         self.sat_combo.currentIndexChanged.connect(self._on_satellite_changed)
-        form.addRow("卫星", self.sat_combo)
+        form.addRow("卫星制式", self.sat_combo)
 
-        self.mode_combo = QComboBox()
-        self.mode_combo.setToolTip("离线 IQ 文件解码，或实时 SDR 接收（无硬件时置灰）")
-        self.mode_combo.addItems(["离线 IQ 文件", "实时 SDR"])
-        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        form.addRow("接收模式", self.mode_combo)
+        self.src_combo = QComboBox()
+        self.src_combo.setToolTip("离线录制文件解码，或实时 SDR 边收边解")
+        self.src_combo.addItems(["录制文件", "实时 SDR"])
+        self.src_combo.currentIndexChanged.connect(self._refresh_state)
+        form.addRow("数据来源", self.src_combo)
 
         # 文件选择
         file_row = QHBoxLayout()
         self.file_label = QLabel("未选择文件")
         self.file_label.setStyleSheet(f"color:{self._c['text_secondary']};")
-        self.file_btn = QPushButton("选择 IQ 文件...")
-        self.file_btn.setToolTip("打开 .iq (complex64 raw) / .wav / .npy 录制文件")
+        self.file_btn = QPushButton("选择录制文件...")
+        self.file_btn.setToolTip("complex64 raw .iq/.cfile/.raw，或 NOAA APT 的 .wav")
         self.file_btn.clicked.connect(self._on_pick_file)
         file_row.addWidget(self.file_label, 1)
         file_row.addWidget(self.file_btn)
         file_w = QWidget(); file_w.setLayout(file_row)
-        form.addRow("IQ 文件", file_w)
+        form.addRow("录制文件", file_w)
 
+        # 频率/符号率/采样率（可编辑）
+        self.freq_edit = QLineEdit()
+        self.freq_edit.setToolTip("下行中心频率 MHz")
+        form.addRow("中心频率", self.freq_edit)
+        self.sym_edit = QLineEdit()
+        self.sym_edit.setToolTip("符号率 ksps")
+        form.addRow("符号率", self.sym_edit)
+        self.sr_edit = QLineEdit()
+        self.sr_edit.setToolTip("采样率 Msps（complex64 录制）")
+        form.addRow("采样率", self.sr_edit)
         cl.addLayout(form)
 
-        # 操作按钮行
+        # 按钮行
         btn_row = QHBoxLayout()
         self.start_btn = QPushButton("开始解码")
         self.start_btn.setObjectName("recordButton")
-        self.start_btn.setToolTip("在后台线程调用后端解码工具出图")
-        self.start_btn.clicked.connect(self._on_start)
+        self.start_btn.setToolTip("后台线程调用 mbdsdr_ai 真实解码链出图")
+        self.start_btn.clicked.connect(self.start_decode)
         btn_row.addWidget(self.start_btn)
-
         self.stop_btn = QPushButton("停止")
-        self.stop_btn.setToolTip("停止当前解码（后台轮询取消标志）")
-        self.stop_btn.clicked.connect(self._on_stop)
+        self.stop_btn.setToolTip("停止接收/解码")
+        self.stop_btn.clicked.connect(self.stop_decode)
         self.stop_btn.setEnabled(False)
         btn_row.addWidget(self.stop_btn)
-
-        self.demo_btn = QPushButton("[模拟] 生成演示云图")
-        self.demo_btn.setToolTip("用合成测试数据生成一张演示云图，不依赖硬件/录制文件")
-        self.demo_btn.clicked.connect(self._on_demo)
-        btn_row.addWidget(self.demo_btn)
         cl.addLayout(btn_row)
 
-        # 图像处理选项
-        enh_box = QGroupBox("图像处理（应用后调用 sat_image_enhance）")
+        # 后处理
+        enh_box = QGroupBox("后处理（调用 sat_image_enhance，仅对已出图生效）")
         eh = QHBoxLayout(enh_box)
         self.enh_checks: Dict[str, QCheckBox] = {}
         for label in ENHANCE_OPS:
             cb = QCheckBox(label)
-            cb.setToolTip(f"后端处理: {ENHANCE_OPS[label]}")
             cb.toggled.connect(self._on_enhance_toggled)
             self.enh_checks[label] = cb
             eh.addWidget(cb)
@@ -308,77 +446,126 @@ class WeatherPanel(QWidget):
 
         outer.addWidget(ctrl)
 
-        # ===== 图像显示卡片 =====
-        img_card = QFrame()
-        img_card.setObjectName("card")
+        # 图像卡片
+        img_card = QFrame(); img_card.setObjectName("card")
         il = QVBoxLayout(img_card)
         il.setContentsMargins(10, 8, 10, 10)
         self.image_title = QLabel("云图")
         self.image_title.setObjectName("sectionTitle")
         il.addWidget(self.image_title)
+        self.meta_label = QLabel("卫星: — | 通道: — | 时间: — | 分辨率: —")
+        self.meta_label.setStyleSheet(f"color:{self._c['text_secondary']};font-size:11px;")
+        il.addWidget(self.meta_label)
 
-        self.image_label = QLabel("无数据")
+        self.image_label = QLabel("未连接 / 无数据")
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setMinimumHeight(320)
+        self.image_label.setMinimumHeight(340)
         self.image_label.setStyleSheet(
-            f"background-color:{self._c['bg_alt']};border:1px solid {self._c['border']};"
-            f"border-radius:6px;color:{self._c['text_disabled']};")
+            f"background-color:{self._c['bg_alt']};"
+            f"border:1px dashed {self._c['border']};border-radius:6px;"
+            f"color:{self._c['text_disabled']};")
         f = QFont(self.image_label.font()); f.setPointSize(12)
         self.image_label.setFont(f)
         il.addWidget(self.image_label, 1)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100); self.progress.setValue(0)
+        self.progress.setTextVisible(True)
+        self.progress.setVisible(False)
+        il.addWidget(self.progress)
         outer.addWidget(img_card, 1)
 
-        # ===== 状态栏 =====
         self.status_label = QLabel("就绪")
         self.status_label.setObjectName("statusValue")
-        self.status_label.setToolTip("卫星参数 / 解码进度 / 当前帧计数")
         outer.addWidget(self.status_label)
 
     # ------------------------------------------------------------------
-    # 对外接口
+    # 对外接口（main_window 依赖）
     # ------------------------------------------------------------------
     def set_sdr_connected(self, connected: bool):
-        """由主窗口在真实硬件 connect 成功 / disconnect 后调用。"""
+        """主窗口在真实硬件 connect/disconnect 后调用。"""
         self._sdr_connected = bool(connected)
-        self._refresh_sdr_mode_state()
+        self._refresh_state()
+
+    def attach_iq_source(self, read_samples: Callable[[int], np.ndarray],
+                         sample_rate_hz: float):
+        """注入实时 SDR IQ 读取回调（可选）。
+
+        read_samples(n) 返回 n 个 complex64 采样。未注入时实时模式只能
+        录制到内存后落盘解码，不会伪造图像。
+        """
+        self._iq_read = read_samples
+        self._iq_sr = float(sample_rate_hz)
+        self._refresh_state()
+
+    def set_iq_file(self, path: str):
+        """外部直接指定录制文件路径。"""
+        if path and os.path.exists(path):
+            self._iq_file = path
+            self.file_label.setText(os.path.basename(path))
+            self.file_label.setToolTip(path)
+            self.src_combo.setCurrentIndex(0)
+            self._refresh_state()
 
     # ------------------------------------------------------------------
+    # 内部状态
+    # ------------------------------------------------------------------
     def _current_sat(self) -> Dict:
-        name = self.sat_combo.currentText()
-        return SATELLITES.get(name, {})
+        return SATELLITES.get(self.sat_combo.currentText(), {})
+
+    def _is_realtime(self) -> bool:
+        return self.src_combo.currentText() == "实时 SDR"
 
     def _on_satellite_changed(self, _idx: int):
         sat = self._current_sat()
-        self._sat_params = sat
-        self._update_status()
+        self.freq_edit.setText(f"{sat.get('freq_mhz', 0):.3f}")
+        self.sym_edit.setText(f"{sat.get('symrate_ksps', 0):.1f}")
+        self.sr_edit.setText(f"{sat.get('srate_msps', 1.0):.2f}")
+        self._refresh_state()
 
-    def _on_mode_changed(self, _idx: int):
-        self._refresh_sdr_mode_state()
+    def _refresh_state(self):
+        realtime = self._is_realtime()
+        busy = self._is_busy()
+        no_hw = realtime and not self._sdr_connected
 
-    def _refresh_sdr_mode_state(self):
-        realtime = self.mode_combo.currentText() == "实时 SDR"
-        if realtime and not self._sdr_connected:
-            # 红线：无真实硬件时，实时 SDR 按钮置灰并如实提示
+        # 文件选择仅离线模式可用
+        self.file_btn.setEnabled(not realtime and not busy)
+        # 频率/符号率/采样率编辑：解码中锁定
+        for w in (self.freq_edit, self.sym_edit, self.sr_edit, self.sat_combo, self.src_combo):
+            w.setEnabled(not busy)
+        # 实时模式需要 SDR 连接；离线需要文件
+        if no_hw:
             self.start_btn.setEnabled(False)
-            self.file_btn.setEnabled(False)
-            self._update_status(extra="未连接SDR设备 — 实时模式不可用，请接好硬件或改用离线 IQ 文件")
+        elif busy:
+            self.start_btn.setEnabled(False)
+        elif realtime:
+            # 实时：只要 SDR 已连接即可开始（边收边落盘）
+            self.start_btn.setEnabled(self._sdr_connected)
         else:
-            self.start_btn.setEnabled(not self._is_busy())
-            self.file_btn.setEnabled(not realtime)
+            self.start_btn.setEnabled(self._iq_file is not None)
+        self.stop_btn.setEnabled(busy)
+
+        if no_hw:
+            self._set_placeholder("未连接SDR设备 — 请接好硬件，或切到「录制文件」离线解码")
+            self._update_status(extra="未连接SDR设备")
+        elif not busy and not self._current_png:
+            self._set_placeholder("未连接 / 无数据")
             self._update_status()
+
+    def _set_placeholder(self, text: str):
+        if not self._current_png or not os.path.exists(self._current_png):
+            self.image_label.setPixmap(QPixmap())
+            self.image_label.setText(text)
 
     def _is_busy(self) -> bool:
         return self._worker is not None and self._worker.isRunning()
 
     def _on_pick_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择 IQ 录制文件", "",
-            "IQ/音频文件 (*.iq *.wav *.npy *.cfile *.raw);;所有文件 (*)")
+            self, "选择录制文件", "",
+            "录制文件 (*.iq *.cfile *.raw *.complex64 *.wav);;所有文件 (*)")
         if path:
-            self._iq_file = path
-            self.file_label.setText(os.path.basename(path))
-            self.file_label.setToolTip(path)
-            self._update_status()
+            self.set_iq_file(path)
 
     # ------------------------------------------------------------------
     def _out_png_path(self, tag: str) -> str:
@@ -388,62 +575,111 @@ class WeatherPanel(QWidget):
         os.makedirs(art, exist_ok=True)
         return os.path.join(art, f"weather_{tag}_{int(time.time())}.png")
 
-    def _on_start(self):
+    # ------------------------------------------------------------------
+    def start_decode(self):
+        """开始解码（离线录制文件 或 实时 SDR 落盘后解码）。"""
         if self._is_busy():
             return
-        realtime = self.mode_combo.currentText() == "实时 SDR"
-        if realtime and not self._sdr_connected:
-            QMessageBox.warning(self, "未连接 SDR", "未连接SDR设备，无法实时接收。")
-            return
-        if not realtime and not self._iq_file:
-            QMessageBox.information(self, "选择文件", "请先选择离线 IQ 录制文件。")
-            return
-
+        realtime = self._is_realtime()
         sat = self._current_sat()
         out_png = self._out_png_path("decode")
+
+        if realtime:
+            if not self._sdr_connected:
+                QMessageBox.warning(self, "未连接 SDR", "未连接SDR设备，无法实时接收。")
+                return
+            # 实时：先录制到临时 complex64 文件，停止后解码
+            tmp = self._out_png_path("live").replace(".png", ".iq")
+            self._live_iq_path = tmp
+            self._live_buf: List[np.ndarray] = []
+            self._live_stop = False
+            self.progress.setVisible(True); self.progress.setValue(0)
+            self._start_live_capture()
+            return
+
+        # 离线
+        if not self._iq_file:
+            QMessageBox.information(self, "选择文件", "请先选择真实录制的 IQ/WAV 文件。")
+            return
+        self.progress.setVisible(True); self.progress.setValue(0)
         params = {
             "family": sat.get("family", "gk2a"),
             "satellite": self.sat_combo.currentText(),
             "iq_file": self._iq_file,
             "out_png": out_png,
-            "realtime": realtime,
+            "sps": max(1, round(float(self.sr_edit.text()) * 1e6 /
+                               (float(self.sym_edit.text()) * 1e3 or 1))),
+            "sample_rate": float(self.sr_edit.text()) * 1e6,
         }
-        self._start_worker("decode", params)
+        self._start_worker(params)
 
-    def _on_demo(self):
-        if self._is_busy():
+    # ------------------------------------------------------------------
+    # 实时录制循环（在面板所在线程用 QTimer 拉 IQ，不另起线程抢设备）
+    # ------------------------------------------------------------------
+    def _start_live_capture(self):
+        self._live_timer = QTimer(self)
+        self._live_timer.setInterval(200)  # 200ms 拉一块
+        self._live_timer.timeout.connect(self._live_pump)
+        self._live_timer.start()
+        self.start_btn.setEnabled(False); self.stop_btn.setEnabled(True)
+        self._update_status(extra="实时接收中 ... (停止后自动解码落盘录制)")
+
+    def _live_pump(self):
+        if self._iq_read is None:
+            # 未注入 IQ 回调：如实提示，不伪造数据
+            self._live_timer.stop()
+            self._on_idle()
+            QMessageBox.information(
+                self, "无 IQ 源",
+                "实时 SDR 已连接但面板未拿到 IQ 流回调。\n"
+                "请用「录制文件」模式选择已落盘的 complex64 录制。")
             return
-        out_png = self._out_png_path("demo")
-        self._start_worker("demo", {"out_png": out_png})
+        try:
+            blk = self._iq_read(8192)
+        except Exception as e:  # noqa: BLE001
+            self._live_timer.stop()
+            self._on_idle()
+            self._update_status(extra=f"IQ 读取失败: {e}")
+            return
+        if blk is None or len(blk) == 0:
+            return
+        self._live_buf.append(np.asarray(blk, dtype=np.complex64))
+        secs = sum(len(b) for b in self._live_buf) / self._iq_sr
+        self.progress.setValue(min(99, int(secs)))
+        self._update_status(extra=f"实时录制 {secs:.1f}s ...")
 
-    def _on_stop(self):
+    def stop_decode(self):
+        """停止接收/解码。"""
+        if self._is_realtime() and getattr(self, "_live_timer", None) is not None:
+            self._live_timer.stop()
+            # 把缓冲落盘后离线解码
+            if self._live_buf:
+                iq = np.concatenate(self._live_buf)
+                iq.tofile(self._live_iq_path)
+                self._live_buf = []
+                sat = self._current_sat()
+                out_png = self._out_png_path("live")
+                params = {
+                    "family": sat.get("family", "gk2a"),
+                    "satellite": self.sat_combo.currentText(),
+                    "iq_file": self._live_iq_path,
+                    "out_png": out_png,
+                    "sps": max(1, round(float(self.sr_edit.text()) * 1e6 /
+                                       (float(self.sym_edit.text()) * 1e3 or 1))),
+                    "sample_rate": self._iq_sr,
+                }
+                self._start_worker(params)
+                return
         if self._worker_obj is not None:
             self._worker_obj.request_stop()
         if self._worker is not None:
-            self._worker.quit()
-            self._worker.wait(1500)
+            self._worker.quit(); self._worker.wait(1500)
         self._on_idle()
 
-    def _on_enhance_toggled(self, _checked: bool):
-        # 仅在已有图像时即时应用（避免无谓后端调用）
-        if self._current_png and os.path.exists(self._current_png) and not self._is_busy():
-            steps = [{"op": ENHANCE_OPS[label]}
-                     for label, cb in self.enh_checks.items() if cb.isChecked()]
-            if not steps:
-                # 无增强项：恢复原始图
-                self._show_image(self._current_png)
-                return
-            out_png = self._out_png_path("enh")
-            self._start_worker("enhance", {
-                "image_path": self._current_png,
-                "steps": steps,
-                "out_png": out_png,
-            })
-
     # ------------------------------------------------------------------
-    def _start_worker(self, action: str, params: Dict):
+    def _start_worker(self, params: Dict):
         self._worker = QThread()
-        self._worker_obj = DecodeWorker(action, params)
+        self._worker_obj = DecodeWorker(params)
         self._worker_obj.moveToThread(self._worker)
         self._worker.started.connect(self._worker_obj.run)
         self._worker_obj.progress.connect(self._on_progress)
@@ -452,54 +688,48 @@ class WeatherPanel(QWidget):
         self._worker_obj.finished.connect(self._worker.quit)
         self._worker.finished.connect(self._on_idle)
         self._worker.start()
-        self.start_btn.setEnabled(False)
-        self.stop_btn.setEnabled(True)
+        self.start_btn.setEnabled(False); self.stop_btn.setEnabled(True)
         self._update_status(extra="解码中 ...")
 
     def _on_idle(self):
         self.stop_btn.setEnabled(False)
+        self.progress.setVisible(False)
         if self._worker is not None:
-            self._worker = None
-            self._worker_obj = None
-        self._refresh_sdr_mode_state()
+            self._worker = None; self._worker_obj = None
+        self._refresh_state()
 
     def _on_progress(self, text: str):
         self._update_status(extra=text)
 
     def _on_failed(self, text: str):
-        self.image_label.setText("解码失败")
+        self._set_placeholder("解码失败")
         self._update_status(extra=f"错误: {text.splitlines()[0]}")
         QMessageBox.critical(self, "解码错误", text)
 
-    def _on_result(self, result):
-        # result 可能是 ToolResult 或 dict（合成）
-        png = None
-        simulated = False
-        if isinstance(result, dict):
-            png = result.get("png")
-            simulated = result.get("simulated", False)
-            ok = result.get("success", False)
-            msg = result.get("content", "")
-        else:
-            png = (getattr(result, "data", {}) or {}).get("png")
-            ok = getattr(result, "success", False)
-            msg = getattr(result, "content", "") or getattr(result, "error", "")
-
-        if ok and png and os.path.exists(png):
-            self._current_png = png
+    def _on_result(self, res: dict):
+        if res.get("ok") and res.get("png") and os.path.exists(res["png"]):
+            self._current_png = res["png"]
             self._frame_count += 1
-            self._show_image(png)
-            tag = " [模拟]" if simulated else ""
-            self.image_title.setText(f"云图{tag} — {self.sat_combo.currentText()}")
-            self._update_status(extra=f"出图成功{tag}: {os.path.basename(png)}")
+            self._show_image(res["png"])
+            self.image_title.setText(f"云图 — {res.get('satellite','')}")
+            ts = time.strftime("%Y-%m-%d %H:%M:%S")
+            self.meta_label.setText(
+                f"卫星: {res.get('satellite','—')} | "
+                f"通道: {res.get('channel','—')} | "
+                f"时间: {ts} | "
+                f"分辨率: {res.get('width','?')}×{res.get('height','?')} | "
+                f"注释: {res.get('annotation','') or '—'}")
+            self._update_status(extra=f"出图成功: {os.path.basename(res['png'])}")
         else:
-            self.image_label.setText("无数据")
-            self._update_status(extra=f"未出图: {msg}")
+            # 不出图：保持空白占位，如实说明，绝不补假图
+            self._set_placeholder("无数据")
+            self.meta_label.setText("卫星: — | 通道: — | 时间: — | 分辨率: —")
+            self._update_status(extra=f"未出图: {res.get('error','未知原因')}")
 
     def _show_image(self, path: str):
         pix = QPixmap(path)
         if pix.isNull():
-            self.image_label.setText("图像加载失败")
+            self._set_placeholder("图像加载失败")
             return
         self.image_label.setPixmap(
             pix.scaled(self.image_label.size(),
@@ -507,20 +737,37 @@ class WeatherPanel(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # 尺寸变化时重绘已加载的图
         if self._current_png and os.path.exists(self._current_png):
             self._show_image(self._current_png)
+
+    # ------------------------------------------------------------------
+    def _on_enhance_toggled(self, _checked: bool):
+        if not (self._current_png and os.path.exists(self._current_png)) or self._is_busy():
+            return
+        steps = [{"op": ENHANCE_OPS[l]} for l, cb in self.enh_checks.items() if cb.isChecked()]
+        if not steps:
+            self._show_image(self._current_png); return
+        out_png = self._out_png_path("enh")
+        try:
+            from mbdsdr_ai.tool_registry import ToolRegistry
+            reg = ToolRegistry(); reg.register_builtin_tools()
+            reg.call("sat_image_enhance", {
+                "image_path": self._current_png, "steps": steps,
+                "output_path": out_png})
+            if os.path.exists(out_png):
+                self._current_png = out_png
+                self._show_image(out_png)
+        except Exception as e:  # noqa: BLE001
+            self._update_status(extra=f"后处理失败: {e}")
 
     # ------------------------------------------------------------------
     def _update_status(self, extra: str = ""):
         sat = self._current_sat()
         if not sat:
-            self.status_label.setText(extra or "就绪")
-            return
-        line = (f"{sat.get('freq_mhz', 0):.1f} MHz | "
-                f"{sat.get('symrate_ksps', 0):.1f} ksps | "
-                f"{sat.get('mod', '?')} | {sat.get('band', '')} | "
-                f"帧计数: {self._frame_count}")
+            self.status_label.setText(extra or "就绪"); return
+        line = (f"{self.freq_edit.text()} MHz | "
+                f"{self.sym_edit.text()} ksps | {sat.get('mod','?')} | "
+                f"{sat.get('band','')} | 帧/段: {self._frame_count}")
         if extra:
             line += f" | {extra}"
         self.status_label.setText(line)
@@ -532,7 +779,7 @@ if __name__ == "__main__":
     from themes import get_theme
     get_theme(DEFAULT_THEME).apply(app)
     w = WeatherPanel()
-    w.resize(900, 700)
+    w.resize(900, 720)
     w.show()
     print("WeatherPanel launched; sdr_connected =", w._sdr_connected)
     sys.exit(app.exec())
