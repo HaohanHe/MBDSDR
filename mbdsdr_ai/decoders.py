@@ -231,11 +231,14 @@ def list_visible_satellites(
     observer_alt: float = 0.0,
     min_elevation: float = 0.0,
     satellite_type: str = "all",
+    timestamp: float = None,
 ) -> List[SatellitePass]:
     """
     列出当前天空中可见的卫星。
 
     计算所有内置卫星的位置，筛选仰角大于 min_elevation 的卫星。
+    timestamp: Unix 时间戳（秒，UTC）。None 时用 time.time()（向后兼容）。
+              时间穿梭时由 TimeEngine.now_unix() 注入。
     """
     visible = []
     for name in BUILTIN_TLE:
@@ -244,7 +247,8 @@ def list_visible_satellites(
         if satellite_type == "amateur" and "ISS" not in name:
             continue
 
-        pos = compute_satellite_position(name, observer_lat, observer_lon, observer_alt)
+        pos = compute_satellite_position(name, observer_lat, observer_lon, observer_alt,
+                                         timestamp=timestamp)
         if pos and pos.elevation >= min_elevation:
             visible.append(pos)
 

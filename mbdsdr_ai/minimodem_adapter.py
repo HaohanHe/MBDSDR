@@ -21,7 +21,7 @@ Copyright 对应：上游 GPLv3 (C) 2011-2020 Kamal Mostafa <kamal@whence.com>�
 from __future__ import annotations
 
 import math
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -516,3 +516,114 @@ def minimodem_decode_audio(samples: Sequence[float], baud: float = 300.0,
         text = bc.decode_words(words)
     return {"text": text, "confidence": float(conf),
             "mark_freq": modem.f_mark, "space_freq": modem.f_space}
+
+
+# =====================================================================
+# Bell 103 300 baud 专用模式（追加，不改动上方现有接口）
+# =====================================================================
+# Bell 103 标准（来源: minimodem/src/minimodem.c:911-921）：
+#   baud = 300 bps
+#   mark  = 1270 Hz  (bit=1)
+#   space = 1070 Hz  (bit=0)
+#   shift = 200 Hz
+#   band_width = 50 Hz
+# 这是最早的拨号电话音频调制解调器标准，也是 HF/VHF 电台常用的
+# 300 baud FSK 呼叫模式。
+BELL103_BAUD = 300.0          # minimodem.c:913
+BELL103_MARK_FREQ = 1270.0    # minimodem.c:917
+BELL103_SPACE_FREQ = 1070.0   # minimodem.c:919
+BELL103_BAND_WIDTH = 50.0     # minimodem.c:921
+
+
+def bell103_300baud_modem(sample_rate: float = 48000.0) -> FSKModem:
+    """构造一个 Bell 103 300 baud 专用 FSKModem。
+
+    显式传入 mark/space，避免依赖 baud 自动判定分支（minimodem.c:911-921）。
+    """
+    return FSKModem(
+        sample_rate=sample_rate,
+        baud=BELL103_BAUD,
+        mark_freq=BELL103_MARK_FREQ,
+        space_freq=BELL103_SPACE_FREQ,
+        band_width=BELL103_BAND_WIDTH,
+    )
+
+
+def bell103_modulate_text(text: str, sample_rate: float = 48000.0) -> List[float]:
+    """Bell 103 300baud 发送文本：ASCII 8N1 帧 -> FSK 音频。"""
+    modem = bell103_300baud_modem(sample_rate)
+    fr = ASCIIFrame()
+    bits = fr.encode_bytes(text.encode("ascii", errors="replace"))
+    return modem.modulate_bits(bits).tolist()
+
+
+def bell103_demodulate_text(samples: Sequence[float],
+                            sample_rate: float = 48000.0) -> dict:
+    """Bell 103 300baud 接收：FSK 音频 -> ASCII 8N1 文本。"""
+    modem = bell103_300baud_modem(sample_rate)
+    audio = np.asarray(samples, dtype=np.float64)
+    fr = ASCIIFrame()
+    n_frames = len(audio) // modem.bit_nsamples // 10
+    bits, conf = modem.demodulate_bits(audio, n_bits=n_frames * 10)
+    text = fr.decode_bits(bits).decode("ascii", errors="replace")
+    return {"text": text, "confidence": float(conf),
+            "mark_freq": modem.f_mark, "space_freq": modem.f_space,
+            "baud": BELL103_BAUD}
+
+
+# ---------------------------------------------------------------------
+# 独立的 Bell103 工具注册函数（模块级，不修改 tool_registry.py）
+# ---------------------------------------------------------------------
+def register_minimodem_tools(registry) -> None:
+    """向 registry 追加 Bell 103 300 baud 专用工具。
+
+    注意：tool_registry.ToolRegistry 已有同名方法注册了通用 fsk_* /
+    baudot_* 工具；本函数是模块级独立注册入口，只追加 bell103_* 工具，
+    不改动现有 Bell202 / ASCII / Baudot 接口。
+    """
+    from mbdsdr_ai.tool_registry import ToolResult
+
+    def _bell103_modulate(args: Dict[str, Any]) -> "ToolResult":
+        text = args.get("text", "")
+        fs = args.get("sample_rate", 48000)
+        audio = bell103_modulate_text(text, sample_rate=fs)
+        return ToolResult(
+            success=True,
+            content=f"Bell103 调制: '{text}' -> {len(audio)} 采样 "
+                    f"(mark={BELL103_MARK_FREQ:.0f}/space={BELL103_SPACE_FREQ:.0f}Hz, "
+                    f"{BELL103_BAUD:.0f}baud)",
+            data={"audio": audio, "n_samples": len(audio),
+                  "mark_freq": BELL103_MARK_FREQ, "space_freq": BELL103_SPACE_FREQ},
+        )
+
+    def _bell103_demodulate(args: Dict[str, Any]) -> "ToolResult":
+        samples = args.get("samples", [])
+        fs = args.get("sample_rate", 48000)
+        res = bell103_demodulate_text(samples, sample_rate=fs)
+        return ToolResult(
+            success=True,
+            content=f"Bell103 解调: '{res['text']}' (conf={res['confidence']:.2f})",
+            data=res,
+        )
+
+    registry.register(
+        name="bell103_modulate_text",
+        description="Bell 103 300baud FSK 调制：ASCII 文本 -> 单声道音频 "
+                    "(mark=1270Hz/space=1070Hz, 300baud, 8N1 UART)。来源: minimodem.c:911-921。",
+        parameters={"type": "object", "properties": {
+            "text": {"type": "string"},
+            "sample_rate": {"type": "number", "default": 48000},
+        }, "required": ["text"]},
+        handler=_bell103_modulate,
+        category="digital_modes",
+    )
+    registry.register(
+        name="bell103_demodulate_text",
+        description="Bell 103 300baud FSK 解调：音频 -> ASCII 文本（FFT-bin 幅度判决 + 8N1 帧切分）。",
+        parameters={"type": "object", "properties": {
+            "samples": {"type": "array", "items": {"type": "number"}},
+            "sample_rate": {"type": "number", "default": 48000},
+        }, "required": ["samples"]},
+        handler=_bell103_demodulate,
+        category="digital_modes",
+    )

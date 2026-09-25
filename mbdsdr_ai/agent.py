@@ -236,6 +236,51 @@ class MBDSDRAgent:
         self._register_constellation_tools()
         self._register_baseband_tools()
 
+        # ── 本轮新增开源项目移植（边学边做，来源见各适配器注释）──
+        # SDR UI/接收机架构：SDR# / OpenWebRX / CubicSDR / HDSDR
+        from mbdsdr_ai.sdrsharp_adapter import register_sdrsharp_tools
+        from mbdsdr_ai.openwebrx_adapter import register_openwebrx_tools
+        from mbdsdr_ai.cubicsdr_adapter import register_cubicsdr_tools
+        from mbdsdr_ai.hdsdr_adapter import register_hdsdr_tools
+        register_sdrsharp_tools(self.tool_registry)
+        register_openwebrx_tools(self.tool_registry)
+        register_cubicsdr_tools(self.tool_registry)
+        register_hdsdr_tools(self.tool_registry)
+        # 协议/频谱分析：URH / inspectrum / SigDigger + URH式三层解码框架
+        from mbdsdr_ai.urh_adapter import register_urh_tools
+        from mbdsdr_ai.inspectrum_adapter import register_inspectrum_tools
+        from mbdsdr_ai.sigdigger_adapter import register_sigdigger_tools
+        from mbdsdr_ai.protocol_stack import register_protocol_stack_tools
+        register_urh_tools(self.tool_registry)
+        register_inspectrum_tools(self.tool_registry)
+        register_sigdigger_tools(self.tool_registry)
+        register_protocol_stack_tools(self.tool_registry)
+        # 数字语音/集群：M17 / op25(P25) / sdrtrunk
+        from mbdsdr_ai.m17_adapter import register_m17_tools
+        from mbdsdr_ai.op25_adapter import register_op25_tools
+        from mbdsdr_ai.sdrtrunk_adapter import register_sdrtrunk_tools
+        register_m17_tools(self.tool_registry)
+        register_op25_tools(self.tool_registry)
+        register_sdrtrunk_tools(self.tool_registry)
+        # 业余无线电模式：pat(Winlink) / ARDOP / JS8Call / Xastir / minimodem Bell103
+        from mbdsdr_ai.pat_adapter import register_pat_tools
+        from mbdsdr_ai.ardop_adapter import register_ardop_tools
+        from mbdsdr_ai.js8call_adapter import register_js8call_tools
+        from mbdsdr_ai.xastir_adapter import register_xastir_tools
+        from mbdsdr_ai.minimodem_adapter import register_minimodem_tools as register_minimodem_bell103_tools
+        register_pat_tools(self.tool_registry)
+        register_ardop_tools(self.tool_registry)
+        register_js8call_tools(self.tool_registry)
+        register_xastir_tools(self.tool_registry)
+        register_minimodem_bell103_tools(self.tool_registry)
+        # 卫星地面站 + SDRangel 插件：r2cloud / satnogs / OGN+FireDetector+RemoteControl
+        from mbdsdr_ai.r2cloud_adapter import register_r2cloud_tools
+        from mbdsdr_ai.satnogs_adapter import register_satnogs_tools
+        from mbdsdr_ai.sdrangel_plugins import register_sdrangel_plugins_tools
+        register_r2cloud_tools(self.tool_registry)
+        register_satnogs_tools(self.tool_registry)
+        register_sdrangel_plugins_tools(self.tool_registry)
+
         # 连接工作流引擎和调度器的工具执行器
         self.workflow_engine.set_tool_executor(self._workflow_tool_executor)
         self.scheduler.workflow_engine = self.workflow_engine

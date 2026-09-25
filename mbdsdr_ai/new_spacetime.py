@@ -50,6 +50,216 @@ GNSS_SYSTEMS = {
 
 
 # ============================================================
+# 时间引擎（TimeEngine）—— 仿 Stellarium StelCore 时间系统
+# ============================================================
+#
+# Stellarium 时间模型参考（C++ 源码）：
+#   - src/core/StelCore.hpp:1016
+#       QPair<double,double> JD;  // JD.first=JD_UT, JD.second=DeltaT(秒)
+#       // getJDE() = TT = JD.first + JD.second/86400
+#   - src/core/StelCore.cpp:94
+#       timeSpeed(JD_SECOND)   // 默认：真实速度（1 真实秒 / 真实秒）
+#   - src/core/StelCore.cpp:1243-1246
+#       void StelCore::setJD(double newJD) {
+#           JD.first = newJD;
+#           JD.second = computeDeltaT(newJD);
+#       }
+#   - src/core/StelCore.cpp:1251-1253
+#       double StelCore::getJD() const { return JD.first; }
+#   - src/core/StelCore.cpp:1386-1391
+#       void StelCore::setTimeRate(double ts) { timeSpeed = ts; ... }
+#   - src/core/StelCore.cpp:2299-2308  (核心 tick)
+#       void StelCore::updateTime(double deltaTime) {
+#           JD.first = jdOfLastJDUpdate
+#                    + (now_ms - last_ms)/1000.0 * timeSpeed;
+#           JD.second = computeDeltaT(JD.first);
+#       }
+#
+# 本模块把这套模型搬到 Python：
+#   * 内部维护 simulation JD（UT），对应 StelCore::JD.first
+#   * time_rate 以"实时倍率"暴露（0=暂停, 1=实时, N=N倍速, -N=倒流）
+#     内部换算成 Stellarium 的 days/real-second：rate * JD_SECOND
+#   * tick(real_dt) 实现 sim_jd += real_dt * rate * JD_SECOND
+#   * 所有天文/卫星计算必须通过 get_time_engine().now_unix() / now_utc() / now_jd()
+#     取时间，而不是直接 time.time() / datetime.now() —— 这是修复
+#     "装饰条"问题的关键（UI 改了显示值但计算仍读系统时钟）。
+
+# Unix epoch (1970-01-01 00:00 UTC) 对应的儒略日
+_UNIX_EPOCH_JD = 2440587.5
+
+
+def _load_skyfield_timescale():
+    """惰性加载 skyfield 时间尺度（带缓存）。失败则回退到纯 Python 换算。"""
+    try:
+        from skyfield.api import load as _sf_load
+        return _sf_load().timescale()
+    except Exception:
+        return None
+
+
+_ts = _load_skyfield_timescale()
+
+
+def utc_to_jd(dt: datetime) -> float:
+    """datetime(UTC) -> 儒略日 UT（与 Stellarium StelCore::getJD() 同语义）。"""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if _ts is not None:
+        try:
+            return float(_ts.utc(dt).ut1)
+        except Exception:
+            pass
+    # 回退：Unix 时间戳换算（精度足够 SGP4 预报）
+    return dt.timestamp() / 86400.0 + _UNIX_EPOCH_JD
+
+
+def jd_to_utc(jd: float) -> datetime:
+    """儒略日 UT -> datetime(UTC)。对应 StelCore::getJD() 的逆变换。"""
+    if _ts is not None:
+        try:
+            t = _ts.ut1(jd)
+            return t.utc_datetime().replace(tzinfo=None) if t.utc_datetime().tzinfo is None \
+                else t.utc_datetime().astimezone(timezone.utc)
+        except Exception:
+            pass
+    # 回退
+    return datetime.fromtimestamp((jd - _UNIX_EPOCH_JD) * 86400.0, tz=timezone.utc)
+
+
+class TimeEngine:
+    """
+    模拟时间引擎。镜像 Stellarium StelCore 的时间状态机。
+
+    用法：
+        eng = TimeEngine()
+        eng.set_rate(60)          # 60 倍速（1 真实秒 = 1 模拟分钟）
+        eng.set_utc(datetime(2026, 9, 26, tzinfo=timezone.utc))  # 跳时
+        eng.tick(0.5)             # 推进 0.5 真实秒
+        print(eng.now_unix())     # -> 模拟 Unix 时间戳（供 sgp4 使用）
+
+    默认 rate=1 且未 set_time 时，now_unix() == time.time()，
+    与旧行为完全向后兼容。
+    """
+
+    # Stellarium JD_SECOND = 1.0/86400.0 天/秒
+    JD_SECOND = 1.0 / 86400.0
+
+    def __init__(self) -> None:
+        # simulation JD(UT)；None 表示尚未显式设置，跟随系统时钟
+        self._sim_jd: Optional[float] = None
+        # 时间倍率：0=暂停, 1=实时, N=N倍速, -N=倒流
+        self._rate: float = 1.0
+        # 上次 tick 的墙钟时刻（秒），用于无参 tick() 自动算 real_dt
+        self._last_wall: Optional[float] = None
+
+    # ---- 时间跳转（对应 StelCore::setJD） -------------------------------
+    def set_jd(self, jd: float) -> None:
+        """设置模拟儒略日（UT）。立即生效，下一帧所有计算用新 JD。
+        对应 StelCore::setJD() —— src/core/StelCore.cpp:1243。"""
+        self._sim_jd = float(jd)
+        self._last_wall = time.time()
+
+    def set_utc(self, dt: datetime) -> None:
+        """设置模拟时间（UTC datetime）。"""
+        self.set_jd(utc_to_jd(dt))
+
+    def set_unix(self, ts: float) -> None:
+        """设置模拟时间（Unix 时间戳，秒）。"""
+        self.set_jd(ts / 86400.0 + _UNIX_EPOCH_JD)
+
+    def set_time_now(self) -> None:
+        """跳回当前真实系统时间。对应 StelCore::setTimeNow()。"""
+        self._sim_jd = None
+        self._last_wall = time.time()
+
+    # ---- 时间速率（对应 StelCore::setTimeRate） ------------------------
+    def set_rate(self, rate: float) -> None:
+        """设置时间流速倍率。
+          rate=0   暂停
+          rate=1   实时（1 模拟秒/真实秒）
+          rate=N   N 倍加速
+          rate=-N  N 倍倒流
+        对应 StelCore::setTimeRate() —— src/core/StelCore.cpp:1386。
+        注意：Stellarium 内部 timeSpeed 单位是 天/真实秒，这里归一化为倍率。
+        """
+        self._rate = float(rate)
+        self._last_wall = time.time()
+
+    def get_rate(self) -> float:
+        return self._rate
+
+    def pause(self) -> None:
+        self.set_rate(0.0)
+
+    def resume(self, rate: float = 1.0) -> None:
+        self.set_rate(rate)
+
+    # ---- tick（对应 StelCore::updateTime） -----------------------------
+    def tick(self, real_dt: Optional[float] = None) -> None:
+        """推进模拟时钟。
+        对应 StelCore::updateTime() —— src/core/StelCore.cpp:2299:
+            JD.first = jdOfLastJDUpdate + real_elapsed_seconds * timeSpeed
+        其中 timeSpeed = rate * JD_SECOND（天/真实秒）。
+        real_dt: 距上次 tick 的真实秒数；None 则自动用墙钟差值。
+        """
+        if real_dt is None:
+            now = time.time()
+            real_dt = 0.0 if self._last_wall is None else max(0.0, now - self._last_wall)
+            self._last_wall = now
+        if self._sim_jd is None:
+            # 尚未显式跳时：模拟时间 = 真实时间（向后兼容旧行为）
+            return
+        # 核心：sim_jd += real_dt * rate * JD_SECOND
+        self._sim_jd += real_dt * self._rate * self.JD_SECOND
+
+    # ---- 当前模拟时间读取 ----------------------------------------------
+    def now_jd(self) -> float:
+        """返回当前模拟儒略日（UT）。对应 StelCore::getJD() —— StelCore.cpp:1251。"""
+        if self._sim_jd is None:
+            return time.time() / 86400.0 + _UNIX_EPOCH_JD
+        return self._sim_jd
+
+    def now_unix(self) -> float:
+        """返回当前模拟 Unix 时间戳（秒，UTC）。供 sgp4 / 轨道计算使用。"""
+        return (self.now_jd() - _UNIX_EPOCH_JD) * 86400.0
+
+    def now_utc(self) -> datetime:
+        """返回当前模拟 UTC datetime。"""
+        return jd_to_utc(self.now_jd())
+
+    def is_following_system(self) -> bool:
+        """是否跟随系统时间（未显式跳时）。"""
+        return self._sim_jd is None
+
+    def state(self) -> Dict[str, Any]:
+        """调试/UI 状态快照。"""
+        return {
+            "sim_jd": self.now_jd(),
+            "sim_utc": self.now_utc().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "rate": self._rate,
+            "following_system": self.is_following_system(),
+        }
+
+
+# ---- 全局单例（对应 Stellarium 的 StelCore 全局实例） --------------------
+_global_engine: Optional[TimeEngine] = None
+
+
+def get_time_engine() -> TimeEngine:
+    """获取全局 TimeEngine 单例。所有天文计算必须从这里取时间。"""
+    global _global_engine
+    if _global_engine is None:
+        _global_engine = TimeEngine()
+    return _global_engine
+
+
+def reset_time_engine() -> None:
+    """测试/重置用：丢弃全局引擎。"""
+    global _global_engine
+    _global_engine = None
+
+
+# ============================================================
 # 授时功能
 # ============================================================
 
@@ -555,7 +765,10 @@ def predict_satellite_pass(satellite_name: str, observer_lat: float, observer_lo
     if frequency_hz == 0 and satellite_name in SATELLITE_FREQUENCIES:
         frequency_hz = SATELLITE_FREQUENCIES[satellite_name] * 1e6  # MHz -> Hz
 
-    now = datetime.now(timezone.utc)
+    # 从全局 TimeEngine 取"模拟现在"，而非 datetime.now()。
+    # 这是修复"装饰条"问题的核心：UI 拖动时间后，pass 预测起点随之改变。
+    # 对应 Stellarium：所有天体位置从 StelCore::getJD() 取时间 (StelCore.cpp:1251)。
+    now = get_time_engine().now_utc()
     step = timedelta(seconds=30)
     total_steps = int(hours_ahead * 3600 / 30)
 
@@ -876,13 +1089,20 @@ def get_gnss_system_info(system: str = "all") -> str:
 
 def compute_visible_satellite_count(observer_lat: float, observer_lon: float,
                                       min_elevation: float = 5.0) -> Dict[str, Any]:
-    """计算当前可见卫星数量（新时空天空图用）。"""
+    """计算当前可见卫星数量（新时空天空图用）。
+
+    时间来源：全局 TimeEngine.now_unix()，而非 time.time()。
+    对应 Stellarium：StelCore::getJD() 驱动所有天体位置计算 (StelCore.cpp:1251)。
+    """
     try:
         from .decoders import list_visible_satellites
     except ImportError:
         from decoders import list_visible_satellites
 
-    visible = list_visible_satellites(observer_lat, observer_lon, 0, min_elevation)
+    # 注入模拟时间：时间穿梭后这里取到的是 sim time，不是系统时间
+    sim_ts = get_time_engine().now_unix()
+    visible = list_visible_satellites(observer_lat, observer_lon, 0, min_elevation,
+                                      timestamp=sim_ts)
     return {
         "total_visible": len(visible),
         "satellites": [

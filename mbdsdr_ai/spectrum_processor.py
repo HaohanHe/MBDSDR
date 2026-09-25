@@ -436,3 +436,137 @@ class SpectrumProcessor:
         lines.append("        " + "  ".join(freq_labels))
 
         return "\n".join(lines)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # 【跨切面扩展】频谱峰值标注 / 测量游标（借鉴 inspectrum + sigutils）
+    # 只追加方法，不修改/删除已有方法签名。
+    # ═══════════════════════════════════════════════════════════════════
+
+    def peak_detect(
+        self,
+        spectrum: SpectrumData,
+        height_db: float = 0.0,
+        distance: int = 1,
+        prominence_db: float = 6.0,
+        max_peaks: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        在频谱上检出所有显著峰值（峰值频率/幅度/左右半功率带宽）。
+
+        借鉴：
+          * inspectrum src/util.h range_t.length() —— 峰区间长度 = max-min
+          * sigutils src/sigutils/detect.c:48 滑动窗峰检测；prominence 对应
+            detect.h:38 MIN_SNR=6dB（峰比噪声底突出至少 6dB）。
+
+        参数:
+            height_db:    峰值最低高度（相对噪声底的 dB，默认 0=不额外限高）
+            distance:     两峰最小间隔（bin 数）
+            prominence_db:峰突出度（比邻域高多少 dB，默认 6，对齐 sigutils MIN_SNR）
+            max_peaks:    最多返回峰数
+
+        返回: 每峰 {freq_hz, power_db, prominence_db, left_freq_hz, right_freq_hz,
+                     bandwidth_hz(-3dB), bin}
+        """
+        powers = spectrum.powers_db
+        freqs = spectrum.frequencies
+        noise = spectrum.noise_floor_db
+
+        # 1) 找局部极大值（比左右邻居高）
+        peaks: List[Dict[str, Any]] = []
+        n = len(powers)
+        for i in range(1, n - 1):
+            if powers[i] >= powers[i - 1] and powers[i] > powers[i + 1]:
+                # 2) 突出度：比噪声底高 prominence_db（sigutils detect.h:38）
+                prom = powers[i] - noise
+                if prom < prominence_db:
+                    continue
+                if powers[i] < noise + height_db:
+                    continue
+                # 3) -3dB 半功率带宽（inspectrum 游标测量思路）
+                thr = powers[i] - 3.0
+                lo = i
+                while lo > 0 and powers[lo] > thr:
+                    lo -= 1
+                hi = i
+                while hi < n - 1 and powers[hi] > thr:
+                    hi += 1
+                peaks.append({
+                    "bin": int(i),
+                    "freq_hz": float(freqs[i]),
+                    "power_db": float(powers[i]),
+                    "prominence_db": float(prom),
+                    "left_freq_hz": float(freqs[lo]),
+                    "right_freq_hz": float(freqs[hi]),
+                    "bandwidth_hz": float(abs(freqs[hi] - freqs[lo])),
+                })
+
+        # 4) 按 distance 去重（保留功率更高者），按功率降序
+        peaks.sort(key=lambda p: p["power_db"], reverse=True)
+        kept: List[Dict[str, Any]] = []
+        for p in peaks:
+            if all(abs(p["bin"] - q["bin"]) >= distance for q in kept):
+                kept.append(p)
+            if len(kept) >= max_peaks:
+                break
+        return kept
+
+    def measure_cursors(
+        self,
+        spectrum: SpectrumData,
+        left_freq_hz: float,
+        right_freq_hz: float,
+    ) -> Dict[str, Any]:
+        """
+        频谱游标测量：在一对水平游标（左右频率）之间测量信号参数。
+
+        借鉴 inspectrum：
+          * src/util.h range_t.length() = maximum - minimum → 游标间隔即带宽
+          * src/spectrogramplot.cpp:94  频率分辨率 = sample_rate / fft_size
+
+        返回:
+            cursor_bandwidth_hz   : 游标间隔（游标直接框出的带宽）
+            cursor_center_hz      : 游标区间中心
+            peak_freq_hz          : 区间内最强峰频
+            peak_power_db        : 区间内峰值功率
+            avg_power_db          : 区间内平均功率
+            signal_bandwidth_hz  : 区间内按 -3dB 估计的信号实际带宽
+        """
+        freqs = spectrum.frequencies
+        powers = spectrum.powers_db
+
+        f_lo = min(left_freq_hz, right_freq_hz)
+        f_hi = max(left_freq_hz, right_freq_hz)
+        mask = (freqs >= f_lo) & (freqs <= f_hi)
+        if not np.any(mask):
+            return {"error": "游标区间内无数据",
+                    "left_freq_hz": f_lo, "right_freq_hz": f_hi}
+
+        seg_powers = powers[mask]
+        seg_freqs = freqs[mask]
+
+        peak_idx = int(np.argmax(seg_powers))
+        peak_power = float(seg_powers[peak_idx])
+
+        # -3dB 实际信号带宽（在区间内峰两侧）
+        thr = peak_power - 3.0
+        bins = np.where(mask)[0]
+        gidx = bins[peak_idx]
+        lo = gidx
+        while lo > 0 and powers[lo] > thr:
+            lo -= 1
+        hi = gidx
+        n = len(powers)
+        while hi < n - 1 and powers[hi] > thr:
+            hi += 1
+
+        return {
+            "cursor_bandwidth_hz": float(f_hi - f_lo),       # range_t.length()
+            "cursor_center_hz": float((f_lo + f_hi) / 2),
+            "peak_freq_hz": float(seg_freqs[peak_idx]),
+            "peak_power_db": peak_power,
+            "avg_power_db": float(np.mean(seg_powers)),
+            "noise_floor_db": float(spectrum.noise_floor_db),
+            "snr_db": float(peak_power - spectrum.noise_floor_db),
+            "signal_bandwidth_hz": float(abs(freqs[hi] - freqs[lo])),
+            "freq_resolution_hz": float(spectrum.sample_rate / spectrum.fft_size),
+        }
