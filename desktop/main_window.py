@@ -205,6 +205,8 @@ class MainWindow(QMainWindow):
         self._vfo_in_sr: float = 0.0
         self._vfo_out_sr: float = 48000.0
         self._vfo_bw: float = 12000.0
+        # 调试/测试断言用：记录 _demod_and_play 本次实际使用的解调模式
+        self._last_demod_mode: str = "FM"
 
         # ---- 扫频找台（任务 3）：后台 QThread 跑 sweep_scan，真实后端取 IQ ----
         self._sweep_worker: Optional[_SweepWorker] = None
@@ -1695,17 +1697,42 @@ class MainWindow(QMainWindow):
             return False
 
     def _demod_and_play(self, iq: np.ndarray, sr: float):
-        """FM 复数鉴频 → 静噪门控 → 写声卡。
+        """按当前解调模式真正解调 → 静噪门控 → 写声卡。
 
-        优先走 SDR++ 风格 VFO 链（变频→重采样→低通），VFO 输出已是 48k；
-        VFO 不可用/失败时回退到直接对全带宽 IQ 鉴频 + _decimate_to_48k。
-        无 AudioPlayer / 无设备 / 被静噪门住时全部安全 no-op。
+        接收链对标 SDR++/gqrx：
+          - VFO 路径（路径 A）：先 VFO 信道变频+重采样+低通（repos/sdrpp/core/src/dsp/
+            channel/rx_vfo.h:89），VFO 输出已是 48k complex IQ，再按模式解调，结果直接写
+            48k 声卡，不再重采样。
+          - WFM 广播例外：最大频偏 75kHz，需 ≥200kHz 带宽，VFO bw=12k 太窄，故跳过 VFO，
+            直接对全带宽 IQ 跑 wfm_broadcast_demod（内部已鉴频→重采样到48k→去加重→低通→归一化，
+            对标 repos/sdrpp/core/src/module_demod/analog_module.cpp 的 WFM 链）。
+          - 回退路径（路径 B）：VFO 不可用时对原始全带宽 IQ 按模式解调，再用
+            dsp.audio_to_playback 按模式音频带宽低通 + 抗混叠重采样到 48k。
+        无 AudioPlayer / 无设备 / 被静噪门住 / RAW/DIG 模式时全部安全 no-op。
         """
         player = self._audio_player
         if player is None or not getattr(player, "available", False):
             return
         if iq.size < 16:
             return
+
+        # 1) 读取当前解调模式（后端为 None / 未连接时默认 FM，绝不崩）
+        try:
+            mode = "FM"
+            be = self._active_sdr_backend
+            if be is not None and getattr(be, "status", None) is not None:
+                m = getattr(be.status, "demod_mode", None)
+                if m:
+                    mode = str(m).upper()
+        except Exception:
+            mode = "FM"
+        # 调试/测试断言用：记录本次实际使用的解调模式
+        self._last_demod_mode = mode
+
+        # RAW/DIG：数字模式不解调，不输出音频
+        if mode in ("RAW", "DIG"):
+            return
+
         # 静噪门控：信号太弱不输出（避免底噪刺耳）。基于全带宽 IQ 功率。
         try:
             p = float(np.mean(np.abs(iq) ** 2))
@@ -1715,18 +1742,27 @@ class MainWindow(QMainWindow):
         except Exception:
             return
 
-        # ---- 路径 A：VFO 链（SDR++ 风格：先信道滤波再鉴频）----
+        from mbdsdr_ai import dsp as _dsp
+
+        # 2) WFM 广播特殊处理：跳过 VFO，直接对原始全带宽 IQ 鉴频（内部已重采样到 48k）
+        if mode == "WFM":
+            try:
+                audio = _dsp.wfm_broadcast_demod(iq, sample_rate=sr, audio_sr=48000)
+                if audio is not None and audio.size > 0:
+                    player.write(audio)
+            except Exception:
+                pass
+            return
+
+        # ---- 路径 A：VFO 信道滤波后按模式解调（VFO 输出已是 48k complex IQ，直接写声卡）----
         vfo_ok = False
         try:
             if self._ensure_vfo(sr):
                 vfo_out = self._vfo.process(iq)
                 if vfo_out is not None and len(vfo_out) > 16:
-                    # VFO 输出已是 out_sr(48k)，鉴频后直接写声卡，不再 decimate
-                    phase = np.angle(
-                        vfo_out[1:] * np.conj(vfo_out[:-1])
-                    ).astype(np.float32)
-                    if phase.size > 0:
-                        player.write(phase)
+                    audio = self._demod_at_48k(_dsp, mode, vfo_out)
+                    if audio is not None and audio.size > 0:
+                        player.write(audio)
                         vfo_ok = True
         except Exception:
             vfo_ok = False
@@ -1734,11 +1770,9 @@ class MainWindow(QMainWindow):
         if vfo_ok:
             return
 
-        # ---- 路径 B（回退）：直接对全带宽 IQ 鉴频 + 整数抽取到 48k ----
+        # ---- 路径 B（回退）：直接对全带宽 IQ 按模式解调 + audio_to_playback 重采样到 48k ----
         try:
-            # 标准复数鉴频：相邻采样相位差
-            phase = np.angle(iq[1:] * np.conj(iq[:-1])).astype(np.float32)
-            audio = self._decimate_to_48k(phase, sr)
+            audio = self._demod_at_native_sr(_dsp, mode, iq, sr)
             if audio is None or audio.size == 0:
                 return
             player.write(audio)
@@ -1746,30 +1780,63 @@ class MainWindow(QMainWindow):
             pass
 
     @staticmethod
-    def _decimate_to_48k(audio: np.ndarray, sr: float) -> Optional[np.ndarray]:
-        """把鉴频音频（采样率 sr）降到 48k。简单移动平均低通 + 整数抽取。"""
-        target = 48000
-        if sr <= 0:
-            return audio
-        if sr > target * 1.5:
-            d = int(round(sr / target))
-            if d >= 2 and audio.size >= d:
-                n = (audio.size // d) * d
-                # 移动平均（低通）后抽取
-                return audio[:n].reshape(-1, d).mean(axis=1).astype(np.float32)
-            return audio
-        if sr < target * 0.8:
-            # 上采样：线性插值（scipy 不可用时也能跑）
-            try:
-                import numpy as _np
-                n_src = audio.size
-                n_dst = max(1, int(round(n_src * target / sr)))
-                x_old = _np.linspace(0.0, 1.0, n_src, endpoint=False)
-                x_new = _np.linspace(0.0, 1.0, n_dst, endpoint=False)
-                return _np.interp(x_new, x_old, audio).astype(_np.float32)
-            except Exception:
-                return audio
-        return audio
+    def _demod_at_48k(dsp, mode: str, vfo_out: np.ndarray) -> np.ndarray:
+        """VFO 输出已是 48k complex IQ，按模式解调后直接可写声卡（不再重采样）。
+
+        模式→函数映射：
+          NFM  -> dsp.fm_demod(vfo_out, deviation=5000.0,  sample_rate=48000)
+          FM   -> dsp.fm_demod(vfo_out, deviation=75000.0, sample_rate=48000)
+          AM   -> dsp.am_demod(vfo_out)
+          USB  -> dsp.ssb_demod(vfo_out, mode="USB", sample_rate=48000)
+          LSB  -> dsp.ssb_demod(vfo_out, mode="LSB", sample_rate=48000)
+          CW   -> dsp.cw_demod(vfo_out, tone_freq=700.0, sample_rate=48000)
+        """
+        if mode == "NFM":
+            return dsp.fm_demod(vfo_out, deviation=5000.0, sample_rate=48000)
+        if mode == "FM":
+            return dsp.fm_demod(vfo_out, deviation=75000.0, sample_rate=48000)
+        if mode == "AM":
+            return dsp.am_demod(vfo_out)
+        if mode == "USB":
+            return dsp.ssb_demod(vfo_out, mode="USB", sample_rate=48000)
+        if mode == "LSB":
+            return dsp.ssb_demod(vfo_out, mode="LSB", sample_rate=48000)
+        if mode == "CW":
+            return dsp.cw_demod(vfo_out, tone_freq=700.0, sample_rate=48000)
+        # 兜底（RAW/DIG/WFM 不应走到这里）
+        return dsp.fm_demod(vfo_out, deviation=75000.0, sample_rate=48000)
+
+    @staticmethod
+    def _demod_at_native_sr(dsp, mode: str, iq: np.ndarray, sr: float) -> np.ndarray:
+        """回退路径：对原始全带宽 IQ（采样率 sr）按模式解调，再按模式音频带宽重采样到 48k。
+
+        各模式音频带宽 cutoff_hz（对应 audio_to_playback 的低通截止）：
+          WFM=15000, NFM=3000, FM=15000, AM=4000, USB=3000, LSB=3000, CW=1000
+        """
+        cutoff = {
+            "WFM": 15000.0,
+            "NFM": 3000.0,
+            "FM": 15000.0,
+            "AM": 4000.0,
+            "USB": 3000.0,
+            "LSB": 3000.0,
+            "CW": 1000.0,
+        }.get(mode, 4000.0)
+        if mode == "NFM":
+            audio = dsp.fm_demod(iq, deviation=5000.0, sample_rate=sr)
+        elif mode == "FM":
+            audio = dsp.fm_demod(iq, deviation=75000.0, sample_rate=sr)
+        elif mode == "AM":
+            audio = dsp.am_demod(iq)
+        elif mode == "USB":
+            audio = dsp.ssb_demod(iq, mode="USB", sample_rate=sr)
+        elif mode == "LSB":
+            audio = dsp.ssb_demod(iq, mode="LSB", sample_rate=sr)
+        elif mode == "CW":
+            audio = dsp.cw_demod(iq, tone_freq=700.0, sample_rate=sr)
+        else:
+            audio = dsp.fm_demod(iq, deviation=75000.0, sample_rate=sr)
+        return dsp.audio_to_playback(audio, in_sr=sr, cutoff_hz=cutoff, out_sr=48000)
 
     # ------------------------------------------------------------------
     # (B) baseband 录制状态机
