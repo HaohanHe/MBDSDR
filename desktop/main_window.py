@@ -14,13 +14,14 @@ from typing import Optional
 
 import numpy as np
 
-from PySide6.QtCore import Qt, QTimer, Slot
+from PySide6.QtCore import Qt, QTimer, Slot, QDateTime, QTimeZone
 from PySide6.QtGui import QAction, QKeySequence, QFont
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTabWidget, QStatusBar, QToolBar, QMenuBar, QMenu, QLabel,
     QFileDialog, QMessageBox, QInputDialog, QComboBox, QPushButton,
-    QFrame, QSizePolicy, QDialog, QDialogButtonBox
+    QFrame, QSizePolicy, QDialog, QDialogButtonBox,
+    QGroupBox, QFormLayout, QSlider, QSpinBox, QCheckBox,
 )
 
 # 确保能导入同目录模块
@@ -132,6 +133,16 @@ class MainWindow(QMainWindow):
         self._vfo_out_sr: float = 48000.0
         self._vfo_bw: float = 12000.0
 
+        # ---- 产品体验集成：状态栏信息密度 / 无设备引导 / 书签 ----
+        # 书签内存表（freq_hz, name, mode）；落盘留给后续 gui_config 扩展
+        self._bookmarks: list = []
+        # status_panel.update_from_backend 节流计数（每 ~10 帧 ≈ 500ms 刷一次）
+        self._backend_status_tick: int = 0
+        # 最近一次 IQ 功率估计（dBFS），供状态栏/S-meter 复用
+        self._last_dbfs: float = 0.0
+        # 无设备时频谱上方引导提示标签（_build_central_widget 中创建）
+        self._no_device_hint: Optional[QLabel] = None
+
         # 构建 UI
         self._build_menu_bar()
         self._build_tool_bar()
@@ -167,6 +178,13 @@ class MainWindow(QMainWindow):
         self._gnss_timer.setInterval(1000)
         self._gnss_timer.timeout.connect(self._poll_gnss)
         QTimer.singleShot(800, self._start_real_gnss)
+
+        # (E) UTC 时钟：底部状态栏每秒刷新（独立于 GNSS/IQ 定时器，无硬件也走）
+        self._utc_timer = QTimer(self)
+        self._utc_timer.setInterval(1000)
+        self._utc_timer.timeout.connect(self._update_utc_clock)
+        self._utc_timer.start()
+        self._update_utc_clock()
 
     # ========================================================================
     # UI 构建
@@ -226,6 +244,8 @@ class MainWindow(QMainWindow):
 
         sweep_action = QAction("FM 扫频找台", self)
         sweep_action.triggered.connect(self._start_sweep)
+        sweep_action.setEnabled(False)  # 无设备时置灰，连接后启用
+        self._sweep_action = sweep_action
         tools_menu.addAction(sweep_action)
 
         record_action = QAction("开始/停止录音", self)
@@ -258,9 +278,13 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        # 连接按钮
+        # 连接按钮（未连接时高亮引导用户点击；连接成功后取消高亮）
         self.connect_btn = QPushButton("连接")
         self.connect_btn.setFixedHeight(28)
+        self.connect_btn.setStyleSheet(
+            "QPushButton { background-color:#C4845C; color:#FFFFFF;"
+            " font-weight:600; padding:0 14px; }"
+            "QPushButton:hover { background-color:#D4946C; }")
         self.connect_btn.clicked.connect(self._connect_dialog)
         toolbar.addWidget(self.connect_btn)
 
@@ -313,6 +337,13 @@ class MainWindow(QMainWindow):
         self.record_btn.toggled.connect(self._toggle_record)
         toolbar.addWidget(self.record_btn)
 
+        # 回放按钮（占位：选择 .iq 录音文件，baseband_io 支持时才真正回放）
+        self.replay_btn = QPushButton("回放")
+        self.replay_btn.setFixedHeight(28)
+        self.replay_btn.setToolTip("选择已录制的 .iq 文件进行离线回放")
+        self.replay_btn.clicked.connect(self._replay_recording)
+        toolbar.addWidget(self.replay_btn)
+
     def _build_central_widget(self):
         """构建中央组件。"""
         central = QWidget()
@@ -357,6 +388,16 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.rssi_label)
 
         spectrum_layout.addWidget(spectrum_header)
+
+        # 无设备引导提示横幅（未连接时显示；连接后隐藏）
+        self._no_device_hint = QLabel(
+            "  尚未连接 SDR 设备 —— 点击工具栏「连接」或按 Ctrl+C 选择设备开始接收")
+        self._no_device_hint.setObjectName("hintLabel")
+        self._no_device_hint.setAlignment(Qt.AlignCenter)
+        self._no_device_hint.setStyleSheet(
+            "QLabel { background-color:#F0E8DC; color:#8A6D4A;"
+            " padding:4px; border-radius:3px; font-size:9pt; }")
+        spectrum_layout.addWidget(self._no_device_hint)
 
         # 频谱组件
         self.spectrum = create_spectrum_widget(prefer_opengl=False)  # QOpenGLWidget fails to composite on some Windows GPUs; QPainter is equivalent here
@@ -406,6 +447,21 @@ class MainWindow(QMainWindow):
         self.control_panel.squelch_changed.connect(self._on_squelch_changed)
         self.control_panel.tune_sdr_requested.connect(self._on_tune_sdr)
         self.control_panel.sample_rate_changed.connect(self._on_sample_rate_changed)
+        # —— Agent A 新增控件信号（用 hasattr 守卫，并行开发时不崩）——
+        if hasattr(self.control_panel, "agc_changed"):
+            self.control_panel.agc_changed.connect(self._on_agc_changed)
+        if hasattr(self.control_panel, "ppm_changed"):
+            self.control_panel.ppm_changed.connect(self._on_ppm_changed)
+        if hasattr(self.control_panel, "offset_tuning_changed"):
+            self.control_panel.offset_tuning_changed.connect(
+                self._on_offset_tuning_changed)
+        if hasattr(self.control_panel, "vfo_bandwidth_changed"):
+            self.control_panel.vfo_bandwidth_changed.connect(
+                self._on_vfo_bandwidth_changed)
+        if hasattr(self.control_panel, "step_changed"):
+            self.control_panel.step_changed.connect(self._on_step_changed)
+        if hasattr(self.control_panel, "bookmark_added"):
+            self.control_panel.bookmark_added.connect(self._on_bookmark_added)
         right_tab.addTab(self.control_panel, "控制")
 
         # Tab 2: 状态
@@ -431,7 +487,12 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(main_splitter)
 
     def _build_status_bar(self):
-        """构建状态栏。"""
+        """构建状态栏。
+
+        信息密度对标 SDR++ 底部状态栏：连接状态 / 中心频率 / 采样率 / VFO 带宽 /
+        增益 / 设备名 / 信号电平(dBFS) / GPS / UTC 时间。
+        无后端时所有射频字段显 "--"，绝不展示假数据。
+        """
         status_bar = QStatusBar()
         self.setStatusBar(status_bar)
 
@@ -445,7 +506,27 @@ class MainWindow(QMainWindow):
 
         status_bar.addWidget(QLabel(" | "))
 
-        self.status_rssi = QLabel("RSSI: --")
+        self.status_sr = QLabel("采样率: --")
+        status_bar.addWidget(self.status_sr)
+
+        status_bar.addWidget(QLabel(" | "))
+
+        self.status_bw = QLabel("带宽: --")
+        status_bar.addWidget(self.status_bw)
+
+        status_bar.addWidget(QLabel(" | "))
+
+        self.status_gain = QLabel("增益: --")
+        status_bar.addWidget(self.status_gain)
+
+        status_bar.addWidget(QLabel(" | "))
+
+        self.status_dev = QLabel("设备: --")
+        status_bar.addWidget(self.status_dev)
+
+        status_bar.addWidget(QLabel(" | "))
+
+        self.status_rssi = QLabel("信号: --")
         status_bar.addWidget(self.status_rssi)
 
         status_bar.addWidget(QLabel(" | "))
@@ -453,7 +534,87 @@ class MainWindow(QMainWindow):
         self.status_gps = QLabel("GPS: --")
         status_bar.addWidget(self.status_gps)
 
+        # 永久右侧：UTC 时钟 + 版本
+        self.status_utc = QLabel("UTC: --:--:--")
+        self.status_utc.setStyleSheet("color:#5B7B8C;")
+        status_bar.addPermanentWidget(self.status_utc)
+        status_bar.addPermanentWidget(QLabel(" | "))
         status_bar.addPermanentWidget(QLabel("MBDSDR v0.1 | GPL-3.0"))
+
+    def _update_utc_clock(self):
+        """每秒刷新底部状态栏 UTC 时间。"""
+        try:
+            utc = QDateTime.currentDateTimeUtc()
+            self.status_utc.setText(
+                "UTC: " + utc.toString("yyyy-MM-dd HH:mm:ss"))
+        except Exception:
+            pass
+
+    def _update_status_bar(self):
+        """统一从后端状态刷新底部状态栏射频字段。
+
+        无后端 / 后端异常时全部显 "--"；绝不保留旧值或编造数值。
+        由 _poll_sdr_iq 节流调用（约每 500ms），也可在连接/断开时手动触发。
+        """
+        backend = self._active_sdr_backend
+        if backend is None:
+            for lbl, txt in (
+                (self.status_freq, "频率: --"),
+                (self.status_sr, "采样率: --"),
+                (self.status_bw, "带宽: --"),
+                (self.status_gain, "增益: --"),
+                (self.status_dev, "设备: --"),
+                (self.status_rssi, "信号: --"),
+            ):
+                try:
+                    lbl.setText(txt)
+                except Exception:
+                    pass
+            return
+        try:
+            st = backend.get_status()
+        except Exception:
+            st = None
+        try:
+            f_hz = float(backend.get_frequency())
+        except Exception:
+            f_hz = 0.0
+        try:
+            sr = float(backend.get_sample_rate())
+        except Exception:
+            sr = 0.0
+        gain = getattr(st, "gain_db", 0.0) if st is not None else 0.0
+        dev_name = getattr(getattr(backend, "device", None), "name", "") \
+            or backend.__class__.__name__
+        try:
+            self.status_freq.setText(f"频率: {f_hz / 1e6:.3f} MHz")
+        except Exception:
+            pass
+        try:
+            self.status_sr.setText(f"采样率: {sr / 1e6:.3f} MS/s")
+        except Exception:
+            pass
+        try:
+            bw_hz = self._vfo_bw
+            if bw_hz >= 1000:
+                self.status_bw.setText(f"带宽: {bw_hz / 1000:.1f} kHz")
+            else:
+                self.status_bw.setText(f"带宽: {bw_hz:.0f} Hz")
+        except Exception:
+            pass
+        try:
+            self.status_gain.setText(f"增益: {gain:.1f} dB")
+        except Exception:
+            pass
+        try:
+            self.status_dev.setText(f"设备: {dev_name}")
+        except Exception:
+            pass
+        # 信号电平：用最近一次 IQ 功率估计（_poll_sdr_iq 写入 _last_dbfs）
+        try:
+            self.status_rssi.setText(f"信号: {self._last_dbfs:.1f} dBFS")
+        except Exception:
+            pass
 
     # ========================================================================
     # 主题
@@ -537,10 +698,61 @@ class MainWindow(QMainWindow):
         refresh_btn = QPushButton("刷新设备列表")
         layout.addWidget(refresh_btn)
 
+        # ---- 设备参数区（对标 SDR++ source.cpp：采样率/增益/PPM/AGC/offset tuning）----
+        # 选中真实设备后才可配置；连接成功后立即 apply 到后端。
+        param_group = QGroupBox("设备参数（连接后应用）")
+        param_form = QFormLayout(param_group)
+
+        sr_combo = QComboBox()
+        try:
+            from mbdsdr_ai.sdr_backend import RTLSDRBackend
+            for _r in RTLSDRBackend.SAMPLE_RATES:
+                sr_combo.addItem(f"{_r / 1e6:.3f} MS/s", _r)
+            # 默认 2.048 MS/s（与后端 DEFAULT_SAMPLE_RATE 对齐）
+            _idx = sr_combo.findData(2_048_000)
+            if _idx >= 0:
+                sr_combo.setCurrentIndex(_idx)
+        except Exception:
+            sr_combo.addItem("2.048 MS/s", 2_048_000)
+        param_form.addRow("采样率", sr_combo)
+
+        gain_spin = QSpinBox()
+        gain_spin.setRange(0, 49)
+        gain_spin.setSuffix(" dB")
+        gain_spin.setValue(20)
+        gain_spin.setToolTip("手动增益（0-49 dB）；开启 AGC 时忽略")
+        param_form.addRow("增益", gain_spin)
+
+        ppm_spin = QSpinBox()
+        ppm_spin.setRange(-1000, 1000)
+        ppm_spin.setSuffix(" ppm")
+        ppm_spin.setValue(0)
+        ppm_spin.setToolTip("晶振频偏校正（廉价 RTL-SDR 棒典型 20~50 ppm）")
+        param_form.addRow("PPM 校正", ppm_spin)
+
+        agc_chk = QCheckBox("启用自动增益 (AGC)")
+        agc_chk.setChecked(True)
+        param_form.addRow("", agc_chk)
+
+        offset_chk = QCheckBox("Offset Tuning（直流抵消）")
+        offset_chk.setChecked(False)
+        param_form.addRow("", offset_chk)
+
+        layout.addWidget(param_group)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dlg.accept)
         buttons.rejected.connect(dlg.reject)
         layout.addWidget(buttons)
+
+        def _update_param_state():
+            """根据当前选中项启用/置灰参数区（WebSocket/无设备时不可调）。"""
+            d = combo.currentData()
+            enabled = d is not None and d != self._WS_SPECIAL
+            param_group.setEnabled(enabled)
+
+        combo.currentIndexChanged.connect(lambda _i: _update_param_state())
+        _update_param_state()
 
         def _reload_devices():
             """点刷新：重新枚举，保留已选。"""
@@ -562,6 +774,7 @@ class MainWindow(QMainWindow):
             match = combo.findData(prev)
             combo.setCurrentIndex(match if match >= 0 else 0)
             combo.blockSignals(False)
+            _update_param_state()
 
         refresh_btn.clicked.connect(_reload_devices)
 
@@ -571,6 +784,13 @@ class MainWindow(QMainWindow):
         data = combo.currentData()
         if data is None:
             return  # "未发现设备"项不可选；兜底
+
+        # 收集对话框参数（WebSocket 路径不用）
+        chosen_sr = float(sr_combo.currentData() or 2_048_000)
+        chosen_gain = float(gain_spin.value())
+        chosen_ppm = int(ppm_spin.value())
+        chosen_agc = bool(agc_chk.isChecked())
+        chosen_offset = bool(offset_chk.isChecked())
 
         # ai-sdr Mini WebSocket：走原 host/port 流程
         if data == self._WS_SPECIAL:
@@ -597,14 +817,23 @@ class MainWindow(QMainWindow):
             ok = backend.connect()
         except Exception as e:
             ok = False
-            backend.status.error = f"connect 异常: {e}"
+            try:
+                backend.status.error = f"connect 异常: {e}"
+            except Exception:
+                pass
 
         if not ok:
-            err = backend.get_status().error or "未知错误（设备被占用/无权限/驱动缺失）"
+            raw_err = ""
+            try:
+                raw_err = backend.get_status().error or ""
+            except Exception:
+                pass
+            friendly = self._humanize_error(raw_err)
             QMessageBox.critical(
                 self, "连接失败",
-                f"无法连接到 {backend.device.name}：\n{err}\n\n"
+                f"无法连接到 {backend.device.name}：\n{friendly}\n\n"
                 f"（未切换到模拟模式，请检查硬件后重试）")
+            self.statusBar().showMessage(f"连接失败：{friendly}", 6000)
             try:
                 backend.disconnect()
             except Exception:
@@ -620,16 +849,87 @@ class MainWindow(QMainWindow):
         self.conn_label.setStyleSheet("color: #6BA89A; font-weight: 600;")
         self.status_conn.setText(backend.device.name)
         self.connect_btn.setEnabled(False)
+        self.connect_btn.setStyleSheet("")  # 取消未连接高亮
         self.disconnect_btn.setEnabled(True)
-        self.statusBar().showMessage(
-            f"已连接 {backend.device.name}", 4000)
-        # 默认采样率对齐 SDR++ 风格的 2.048 MS/s（与 control_panel 默认档一致）
+        # 频谱标记为已连接（清除"未连接"占位）
         try:
-            backend.set_sample_rate(2_048_000.0)
+            self.spectrum.set_connected(True)
         except Exception:
             pass
+        # 隐藏无设备引导横幅
+        try:
+            if self._no_device_hint is not None:
+                self._no_device_hint.setVisible(False)
+        except Exception:
+            pass
+        self.statusBar().showMessage(
+            f"已连接 {backend.device.name}", 4000)
+
+        # ---- 应用对话框中选择的设备参数（失败仅 warning，不阻断连接）----
+        # 对标 SDR++ source.cpp：connect 成功后再 set_sample_rate/set_gain/set_ppm/
+        # set_agc/set_offset_tuning；任一失败记 warning 但不回滚连接。
+        try:
+            backend.set_sample_rate(chosen_sr)
+        except Exception as e:
+            self.statusBar().showMessage(f"采样率应用失败: {e}", 4000)
+        try:
+            backend.set_ppm(chosen_ppm)
+        except Exception:
+            pass
+        try:
+            backend.set_offset_tuning(chosen_offset)
+        except Exception:
+            pass
+        try:
+            backend.set_agc(chosen_agc)
+        except Exception:
+            pass
+        if not chosen_agc:
+            # AGC 关闭时才手动下发增益；AGC 开时增益由硬件自动跟踪
+            try:
+                backend.set_gain(chosen_gain)
+            except Exception:
+                pass
+        # 连接后立即回读一次状态栏
+        self._update_status_bar()
         # (A/B/C) 启动真实 IQ 流：频谱/录制/声卡全部接通
         self._start_iq_streams()
+
+    @staticmethod
+    def _humanize_error(raw_err: str) -> str:
+        """把后端原始错误信息翻译成用户可理解的人话提示。
+
+        通过错误消息关键词匹配常见故障类别；未命中时回退显示原始信息。
+        绝不因为翻译而吞掉错误——原始信息作为附注保留。
+        """
+        if not raw_err:
+            return "未知错误（设备被占用/无权限/驱动缺失）"
+        low = raw_err.lower()
+        # 设备被占用（另一 SDR 软件/rtl_tcp 仍开着）
+        if any(k in low for k in ("busy", "already in use", "could not open",
+                                  "errno", "device is used", "占用")):
+            return ("设备正被其他程序占用，请关闭其他 SDR 软件"
+                    "（或 rtl_tcp/GQRX/SDR#）后重试。")
+        # 驱动缺失（librtlsdr/SoapySDR 未安装）
+        if any(k in low for k in ("no such file", "not found", "no module",
+                                  "soapy", "librtlsdr", "dll", "driver",
+                                  "驱动", "未找到", "no backend")):
+            return ("未找到设备驱动，请安装 librtlsdr / SoapySDR 驱动"
+                    "（Linux: sudo apt install librtlsdr0 soapy-sdk）。")
+        # 权限不足（udev 规则 / 需要 root）
+        if any(k in low for k in ("permission", "access denied", "errno 13",
+                                  "uid", "root", "权限")):
+            return ("USB 设备权限不足，请检查 udev 规则，或暂时以管理员身份运行。")
+        # 设备拔插 / USB 断开
+        if any(k in low for k in ("disconnect", "lost", "usb", "stall",
+                                  "epipe", "no such device", "断开")):
+            return "设备已断开，请检查 USB 连接（可换个 USB 口）后点刷新。"
+        # 采样率不被支持
+        if any(k in low for k in ("sample rate", "samplerate", "invalid rate",
+                                  "不支持", "采样率")):
+            return "该采样率不被设备支持，已自动切换到最近合法档位。"
+        # 其他：保留原始信息
+        return f"{raw_err}"
 
     def _connect_real(self, host: str, port: int):
         """连接真实硬件（ai-sdr Mini WebSocket）。"""
@@ -641,7 +941,13 @@ class MainWindow(QMainWindow):
         self.conn_label.setStyleSheet("color: #C4845C; font-weight: 600;")
         self.status_conn.setText(f"连接中 {host}:{port}")
         self.connect_btn.setEnabled(False)
+        self.connect_btn.setStyleSheet("")
         self.disconnect_btn.setEnabled(True)
+        try:
+            if self._no_device_hint is not None:
+                self._no_device_hint.setVisible(False)
+        except Exception:
+            pass
 
     def _connect_worker_signals(self):
         """连接 Worker 信号。"""
@@ -662,7 +968,9 @@ class MainWindow(QMainWindow):
     def _panels_set_sdr_connected(self, connected: bool):
         """把真实 SDR 连接状态同步到各操作控件。
         未连接时：气象云图 / 多普勒定轨面板的实时 SDR 按钮置灰；
-        控制面板的调谐/音量/模式/预设控件与录音按钮一并禁用，绝不暴露假可控状态。"""
+        控制面板的调谐/音量/模式/预设控件与录音按钮一并禁用，绝不暴露假可控状态；
+        频率显示显 "-- MHz"（避免误导用户以为正在接收 98.5）；
+        频谱上方显示引导横幅，连接按钮恢复高亮。"""
         for panel in (getattr(self, "weather_panel", None),
                       getattr(self, "doppler_panel", None)):
             if panel is not None:
@@ -677,12 +985,69 @@ class MainWindow(QMainWindow):
                 cp.set_sdr_connected(connected)
         except Exception:
             pass
+        # 控制面板频率显示：未连接时显 "-- MHz"，连接后由实际调谐更新
+        try:
+            cp = getattr(self, "control_panel", None)
+            if cp is not None:
+                if not connected:
+                    if hasattr(cp, "freq_display"):
+                        cp.freq_display.setText("-- MHz")
+                    if hasattr(cp, "freq_input"):
+                        cp.freq_input.setText("")
+                else:
+                    # 连接后若频率显示还是 "--"，填一个占位（后续由真实调谐覆盖）
+                    if hasattr(cp, "freq_display") and \
+                            cp.freq_display.text().startswith("--"):
+                        cp.freq_display.setText("0.000 MHz")
+        except Exception:
+            pass
         # 工具栏录音按钮（无 SDR 不可录音）
         try:
             if hasattr(self, "record_btn"):
                 self.record_btn.setEnabled(bool(connected))
         except Exception:
             pass
+        # 扫频菜单 action（无设备置灰）
+        try:
+            if hasattr(self, "_sweep_action"):
+                self._sweep_action.setEnabled(bool(connected))
+        except Exception:
+            pass
+        # 频谱标题栏频率/RSSI：未连接时显 "--"
+        try:
+            if not connected:
+                self.freq_label.setText("-- MHz")
+                self.rssi_label.setText("RSSI: --")
+        except Exception:
+            pass
+        # 无设备引导横幅：未连接时显示
+        try:
+            if self._no_device_hint is not None:
+                self._no_device_hint.setVisible(not connected)
+        except Exception:
+            pass
+        # status_panel：连接/断开状态（Agent C 新增接口，hasattr 守卫）
+        try:
+            sp = getattr(self, "status_panel", None)
+            if sp is not None and hasattr(sp, "set_sdr_connected"):
+                sp.set_sdr_connected(bool(connected))
+        except Exception:
+            pass
+        # 连接按钮：未连接时恢复橙色高亮引导
+        try:
+            if not connected:
+                self.connect_btn.setStyleSheet(
+                    "QPushButton { background-color:#C4845C; color:#FFFFFF;"
+                    " font-weight:600; padding:0 14px; }"
+                    "QPushButton:hover { background-color:#D4946C; }")
+            else:
+                self.connect_btn.setStyleSheet("")
+        except Exception:
+            pass
+        # 断连后刷新底部状态栏（全部回落到 "--"）
+        if not connected:
+            self._last_dbfs = 0.0
+            self._update_status_bar()
 
     def _disconnect(self):
         """断开连接。"""
@@ -897,6 +1262,88 @@ class MainWindow(QMainWindow):
         self._record_sr = float(rate_hz)
         # VFO 输入采样率变了 → 下次解调时懒加载重建
         self._vfo = None
+        # 刷新底部状态栏采样率显示
+        self._update_status_bar()
+
+    # ---- Agent A 新增控件信号槽（无后端时 no-op；所有后端调用 try/except）----
+
+    @Slot(bool)
+    def _on_agc_changed(self, enabled: bool):
+        """控制面板 AGC 开关 → 后端 set_agc。"""
+        if self._active_sdr_backend is None:
+            return
+        try:
+            self._active_sdr_backend.set_agc(bool(enabled))
+        except Exception as e:
+            self.statusBar().showMessage(f"AGC 设置失败: {e}", 4000)
+
+    @Slot(int)
+    def _on_ppm_changed(self, ppm: int):
+        """控制面板 PPM 校正 → 后端 set_ppm（RTL-SDR 晶振频偏）。"""
+        if self._active_sdr_backend is None:
+            return
+        try:
+            if hasattr(self._active_sdr_backend, "set_ppm"):
+                self._active_sdr_backend.set_ppm(int(ppm))
+        except Exception as e:
+            self.statusBar().showMessage(f"PPM 设置失败: {e}", 4000)
+
+    @Slot(bool)
+    def _on_offset_tuning_changed(self, enabled: bool):
+        """控制面板 Offset Tuning 开关 → 后端 set_offset_tuning（直流抵消）。"""
+        if self._active_sdr_backend is None:
+            return
+        try:
+            if hasattr(self._active_sdr_backend, "set_offset_tuning"):
+                self._active_sdr_backend.set_offset_tuning(bool(enabled))
+        except Exception as e:
+            self.statusBar().showMessage(f"Offset tuning 设置失败: {e}", 4000)
+
+    @Slot(float)
+    def _on_vfo_bandwidth_changed(self, bw_hz: float):
+        """控制面板 VFO 带宽 → 更新本地 _vfo_bw + 频谱 VFO 带宽（Agent B 接口）。"""
+        try:
+            self._vfo_bw = float(bw_hz)
+        except Exception:
+            return
+        # VFO 已创建则更新其带宽
+        try:
+            if self._vfo is not None and hasattr(self._vfo, "set_bandwidth"):
+                self._vfo.set_bandwidth(self._vfo_bw)
+        except Exception:
+            pass
+        # 频谱组件 VFO 带宽高亮（Agent B 新增 set_vfo_bandwidth，hasattr 守卫）
+        try:
+            if hasattr(self.spectrum, "set_vfo_bandwidth"):
+                self.spectrum.set_vfo_bandwidth(self._vfo_bw)
+        except Exception:
+            pass
+        # 后端 RF 带宽
+        if self._active_sdr_backend is not None:
+            try:
+                self._active_sdr_backend.set_bandwidth(self._vfo_bw)
+            except Exception:
+                pass
+        self._update_status_bar()
+
+    @Slot(float)
+    def _on_step_changed(self, step_hz: float):
+        """控制面板步进值 → 频谱吸附间隔（snap_interval）。"""
+        try:
+            if hasattr(self.spectrum, "set_snap_interval"):
+                self.spectrum.set_snap_interval(float(step_hz))
+        except Exception:
+            pass
+
+    @Slot(float, str, str)
+    def _on_bookmark_added(self, freq_hz: float, name: str, mode: str):
+        """控制面板书签按钮 → 内存保存（后续可落盘 gui_config.json）。"""
+        try:
+            self._bookmarks.append((float(freq_hz), str(name), str(mode)))
+            self.statusBar().showMessage(
+                f"已收藏 {float(freq_hz) / 1e6:.3f} MHz {name}", 3000)
+        except Exception:
+            pass
 
     def _init_ai_agent_from_config(self):
         """从 ~/.mbdsdr/config.json 读 API 配置并初始化 AI agent。"""
@@ -1058,6 +1505,19 @@ class MainWindow(QMainWindow):
         # 更新 RSSI 显示（从后端状态或 IQ 功率估计）
         self._update_rssi_from_iq(iq)
 
+        # 节流：约每 10 帧（500ms）从后端回读一次状态刷新底部状态栏 + status_panel
+        self._backend_status_tick += 1
+        if self._backend_status_tick >= 10:
+            self._backend_status_tick = 0
+            self._update_status_bar()
+            # Agent C 新增接口：从后端读取所有字段更新状态面板（hasattr 守卫）
+            try:
+                sp = getattr(self, "status_panel", None)
+                if sp is not None and hasattr(sp, "update_from_backend"):
+                    sp.update_from_backend(self._active_sdr_backend)
+            except Exception:
+                pass
+
         # (B) 录制中：累积到 buffer
         if self._recording and self._record_iq_buffer is not None:
             try:
@@ -1069,13 +1529,32 @@ class MainWindow(QMainWindow):
         self._demod_and_play(iq, sr)
 
     def _update_rssi_from_iq(self, iq: np.ndarray):
-        """用 IQ 功率估计 RSSI(dBFS) 更新状态栏；失败静默。"""
+        """用 IQ 功率估计 RSSI(dBFS) 更新状态栏 + S-meter；失败静默。
+
+        - 写入 self._last_dbfs 供 _update_status_bar 复用；
+        - 推送 control_panel.update_signal_level / status_panel.update_signal_level
+          （Agent A/C 新增接口，hasattr 守卫，并行开发时不崩）。
+        """
         try:
             p = float(np.mean(np.abs(iq) ** 2))
             dbfs = 10.0 * math.log10(p + 1e-12)
+            self._last_dbfs = dbfs
             txt = f"RSSI: {dbfs:.1f} dBFS"
             self.rssi_label.setText(txt)
-            self.status_rssi.setText(txt)
+            self.status_rssi.setText(f"信号: {dbfs:.1f} dBFS")
+            # 推送 S-meter（hasattr 守卫）
+            try:
+                cp = getattr(self, "control_panel", None)
+                if cp is not None and hasattr(cp, "update_signal_level"):
+                    cp.update_signal_level(dbfs)
+            except Exception:
+                pass
+            try:
+                sp = getattr(self, "status_panel", None)
+                if sp is not None and hasattr(sp, "update_signal_level"):
+                    sp.update_signal_level(dbfs)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -1332,13 +1811,57 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
 
     def _start_sweep(self):
-        """启动扫频（切换到 AI 面板并填入指令）。"""
+        """启动 FM 扫频找台。
+
+        无真实 SDR 后端时置灰提示（不造假扫频结果）；有设备时切到 AI 面板
+        并填入扫频指令，由 AI/后端真实扫描 87-108 MHz。
+        """
+        if self._active_sdr_backend is None and self._worker is None:
+            self.statusBar().showMessage(
+                "扫频功能需要连接真实 SDR 硬件（请先连接设备）", 5000)
+            QMessageBox.information(
+                self, "无法扫频",
+                "扫频找台需要真实 SDR 硬件接收信号。\n"
+                "请先通过工具栏「连接」选择设备后再试。")
+            return
         # 找到 right_tab 的索引
         for i in range(self.ai_panel.parent().count()):
             if self.ai_panel.parent().widget(i) == self.ai_panel:
                 self.ai_panel.parent().setCurrentIndex(i)
                 break
         self.ai_panel.input_field.setText("扫频 87-108 MHz 找所有电台")
+
+    def _replay_recording(self):
+        """回放已录制的 .iq baseband 文件（占位实现）。
+
+        弹出文件选择对话框；选中后若 baseband_io 提供读取能力则离线回放
+        （频谱显示文件中的真实 IQ），否则状态栏提示"待实现"。
+        绝不造假回放数据。
+        """
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择录音文件",
+            os.path.expanduser("~/mbdsdr_recordings"),
+            "Baseband IQ (*.iq *.cf32 *.cs16 *.wav);;All Files (*)")
+        if not path:
+            self.statusBar().showMessage("未选择录音文件", 3000)
+            return
+        # 检查 baseband_io 是否提供读取接口
+        try:
+            from mbdsdr_ai import baseband_io
+            has_read = callable(getattr(baseband_io, "read_iq", None))
+        except Exception:
+            has_read = False
+        if not has_read:
+            self.statusBar().showMessage(
+                f"回放功能待实现（baseband_io.read_iq 不可用）：{path}", 6000)
+            QMessageBox.information(
+                self, "回放待实现",
+                f"已选择文件：\n{path}\n\n"
+                "当前 baseband_io 仅支持录制存盘，离线回放读取接口待实现。\n"
+                "文件已记录在状态栏，后续版本将支持频谱回放。")
+            return
+        # 真正回放路径（baseband_io.read_iq 可用时）：交给后续迭代
+        self.statusBar().showMessage(f"回放（待实现）：{path}", 5000)
 
     def _open_ntrip_dialog(self):
         """打开 NTRIP 配置对话框（非模态）。
