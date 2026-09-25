@@ -2,12 +2,18 @@
 MBDSDR 调谐控制面板
 ====================
 频率显示/调节、模式选择、音量、预设电台、录音控制。
+
+控件布局参考：
+- SDR++ rtl_sdr_source/main.cpp（设备配置菜单：PPM 整数输入、Offset Tuning /
+  RTL AGC / Tuner AGC 垂直复选框列表、Gain 滑杆）。
+- GQRX dockrxopt/dockinputctl（带宽档位下拉、AGC 预设、PPM 频偏校正）。
 """
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Qt, Signal, Slot, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QSlider, QComboBox, QLineEdit, QFrame, QGroupBox, QSizePolicy
+    QSlider, QComboBox, QLineEdit, QFrame, QGroupBox, QSizePolicy,
+    QCheckBox, QSpinBox, QProgressBar, QInputDialog,
 )
 from PySide6.QtGui import QFont, QIntValidator, QDoubleValidator
 
@@ -62,20 +68,43 @@ SDR_BAND_PRESETS = [
     ("28.000", "10m 业余", "USB"),
 ]
 
+# 模式 → 默认 VFO 带宽（Hz）。对标 GQRX/SDR++ 各解调方式的典型中频带宽。
+MODE_VFO_BANDWIDTH = {
+    "FM": 12_000,    # NBFM 语音
+    "WFM": 180_000,  # 广播调频立体声
+    "AM": 6_000,
+    "USB": 3_000,
+    "LSB": 3_000,
+    "CW": 500,
+}
+
+# 合法频率范围：10 kHz ~ 6 GHz（SDR 全频段，不再硬编码 FM/AM 广播段）
+FREQ_MIN_HZ = 10_000.0
+FREQ_MAX_HZ = 6.0e9
+
 
 class ControlPanel(QWidget):
     """调谐控制面板。"""
 
-    # 信号
+    # ===== 既有信号（保持不变，仅新增不删除）=====
     tune_fm_requested = Signal(float)    # 请求调谐 FM (MHz)
     tune_am_requested = Signal(int)      # 请求调谐 AM (kHz)
     tune_sdr_requested = Signal(float, str)  # 请求调谐 SDR (Hz, 模式)
     volume_changed = Signal(int)          # 音量改变 (0-63)
     record_toggled = Signal(bool)         # 录音开关
-    mode_changed = Signal(str)            # 模式改变 ("FM"/"AM")
+    mode_changed = Signal(str)            # 模式改变
     gain_changed = Signal(int)             # 硬件增益 (dB, RTL-SDR LNA 0~49)
     squelch_changed = Signal(float)        # 静噪门限 (dBFS, -120~0)
     sample_rate_changed = Signal(float)    # 采样率改变 (Hz)
+
+    # ===== 新增信号 =====
+    step_changed = Signal(float)               # 频率步进改变 (Hz)
+    vfo_bandwidth_changed = Signal(float)      # VFO 带宽改变 (Hz)
+    agc_changed = Signal(bool)                 # AGC 自动增益开关
+    ppm_changed = Signal(int)                  # PPM 频偏校正
+    offset_tuning_changed = Signal(bool)       # Offset 调谐开关
+    bookmark_added = Signal(float, str, str)   # 收藏新增 (freq_hz, name, mode)，供主窗口持久化
+
     # 采样率档位：与 RTLSDRBackend.SAMPLE_RATES 对齐（11 档离散表）。
     # 动态导入失败时回退到硬编码表，保证 GUI 不崩。
     try:
@@ -90,11 +119,14 @@ class ControlPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_mode = "FM"
-        self._current_freq_fm = 98.5
-        self._current_freq_am = 980
+        # 统一以 Hz 为内部频率真值（兼容 SDR 全频段），默认 98.5 MHz
+        self._freq_hz = 98.5e6
+        self._step_hz = 10_000.0   # 默认步进 10 kHz
         self._volume = 30
         self._recording = False
         self._record_seconds = 0
+        # 收藏列表：内存中，初始为空，不预存任何地区性电台
+        self._bookmarks: list[tuple[float, str, str]] = []
 
         self._build_ui()
         self._update_freq_display()
@@ -106,6 +138,7 @@ class ControlPanel(QWidget):
 
         连接成功后由 main_window._panels_set_sdr_connected(True) 统一启用；
         断开时再置灰。频率只读显示(freq_display)保持可用展示，不置灰。
+        收藏查看/删除始终可用，仅“收藏当前频率”按钮随连接状态禁用。
         """
         self._sdr_connected = bool(connected)
         widgets = [
@@ -117,6 +150,13 @@ class ControlPanel(QWidget):
             getattr(self, "volume_slider", None),
             getattr(self, "record_button", None),
             getattr(self, "sample_rate_combo", None),
+            # 新增控件
+            getattr(self, "step_combo", None),
+            getattr(self, "vfo_bw_combo", None),
+            getattr(self, "agc_check", None),
+            getattr(self, "ppm_spin", None),
+            getattr(self, "offset_check", None),
+            getattr(self, "bookmark_add_btn", None),
         ]
         widgets += self._step_buttons
         for w in widgets:
@@ -133,7 +173,7 @@ class ControlPanel(QWidget):
         freq_layout = QVBoxLayout(freq_group)
 
         # 大字体频率显示
-        self.freq_display = QLabel("98.50 MHz")
+        self.freq_display = QLabel("98.500 MHz")
         self.freq_display.setObjectName("freqDisplay")
         self.freq_display.setAlignment(Qt.AlignCenter)
         self.freq_display.setMinimumHeight(60)
@@ -143,7 +183,7 @@ class ControlPanel(QWidget):
         mode_freq_row = QHBoxLayout()
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["FM", "AM"])
+        self.mode_combo.addItems(["FM", "WFM", "AM", "USB", "LSB", "CW"])
         self.mode_combo.setFixedWidth(80)
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
         mode_freq_row.addWidget(self.mode_combo)
@@ -160,13 +200,25 @@ class ControlPanel(QWidget):
 
         freq_layout.addLayout(mode_freq_row)
 
-        # 频率步进按钮
-        self._step_buttons = []
+        # 频率步进选择 + ±1 步按钮
         step_row = QHBoxLayout()
-        for step, label in [(-1.0, "-1.0"), (-0.1, "-0.1"), (0.1, "+0.1"), (1.0, "+1.0")]:
-            btn = QPushButton(label)
+        step_row.addWidget(QLabel("步进:"))
+        self.step_combo = QComboBox()
+        for txt, hz in [("10Hz", 10.0), ("100Hz", 100.0), ("1kHz", 1_000.0),
+                        ("10kHz", 10_000.0), ("100kHz", 100_000.0), ("1MHz", 1_000_000.0)]:
+            self.step_combo.addItem(txt, hz)
+        # 默认选中 10kHz
+        _def_step = self.step_combo.findData(10_000.0)
+        self.step_combo.setCurrentIndex(_def_step if _def_step >= 0 else 3)
+        self.step_combo.currentIndexChanged.connect(self._on_step_combo_changed)
+        step_row.addWidget(self.step_combo, 1)
+
+        self._step_buttons = []
+        for text, direction in [("-", -1), ("+", +1)]:
+            btn = QPushButton(text)
             btn.setFixedHeight(28)
-            btn.clicked.connect(lambda checked, s=step: self._step_freq(s))
+            btn.setFixedWidth(44)
+            btn.clicked.connect(lambda checked, d=direction: self._apply_step(d))
             self._step_buttons.append(btn)
             step_row.addWidget(btn)
         freq_layout.addLayout(step_row)
@@ -195,6 +247,30 @@ class ControlPanel(QWidget):
 
         layout.addWidget(preset_group)
 
+        # ---- 收藏（书签）----
+        bookmark_group = QGroupBox("收藏")
+        bookmark_layout = QVBoxLayout(bookmark_group)
+
+        self.bookmark_combo = QComboBox()
+        self.bookmark_combo.setFixedHeight(28)
+        self._refresh_bookmarks()
+        self.bookmark_combo.currentIndexChanged.connect(self._on_bookmark_selected)
+        bookmark_layout.addWidget(self.bookmark_combo)
+
+        bm_btn_row = QHBoxLayout()
+        self.bookmark_add_btn = QPushButton("收藏当前频率")
+        self.bookmark_add_btn.setFixedHeight(28)
+        self.bookmark_add_btn.clicked.connect(self._on_bookmark_add)
+        bm_btn_row.addWidget(self.bookmark_add_btn)
+
+        self.bookmark_del_btn = QPushButton("删除选中")
+        self.bookmark_del_btn.setFixedHeight(28)
+        self.bookmark_del_btn.clicked.connect(self._on_bookmark_del)
+        bm_btn_row.addWidget(self.bookmark_del_btn)
+        bookmark_layout.addLayout(bm_btn_row)
+
+        layout.addWidget(bookmark_group)
+
         # ---- 音量 ----
         volume_group = QGroupBox("音量")
         volume_layout = QVBoxLayout(volume_group)
@@ -214,9 +290,22 @@ class ControlPanel(QWidget):
         volume_layout.addLayout(vol_row)
         layout.addWidget(volume_group)
 
-        # ---- 接收：采样率 + 硬件增益 + 静噪（对标 SDR++ 右侧控制条）----
+        # ---- 接收：S-meter + 采样率 + 带宽 + 增益 + AGC + PPM + Offset + 静噪 ----
         rx_group = QGroupBox("接收")
         rx_layout = QVBoxLayout(rx_group)
+
+        # 信号电平表（S-meter）：真实数据驱动，由 update_signal_level() 喂入
+        smeter_row = QHBoxLayout()
+        self.smeter_label = QLabel("--")
+        self.smeter_label.setObjectName("statusValue")
+        self.smeter_label.setFixedWidth(70)
+        smeter_row.addWidget(self.smeter_label)
+        self.smeter_bar = QProgressBar()
+        self.smeter_bar.setRange(-120, 0)
+        self.smeter_bar.setValue(-120)
+        self.smeter_bar.setTextVisible(False)
+        smeter_row.addWidget(self.smeter_bar, 1)
+        rx_layout.addLayout(smeter_row)
 
         # 采样率下拉框（11 档离散表，默认 2.048 MHz = 索引 5）
         sr_row = QHBoxLayout()
@@ -241,6 +330,24 @@ class ControlPanel(QWidget):
         sr_row.addWidget(self.sample_rate_combo)
         rx_layout.addLayout(sr_row)
 
+        # VFO 带宽选择（采样率下方一行）
+        bw_row = QHBoxLayout()
+        self.vfo_bw_label = QLabel("带宽")
+        self.vfo_bw_label.setObjectName("statusValue")
+        self.vfo_bw_label.setFixedWidth(40)
+        bw_row.addWidget(self.vfo_bw_label)
+        self.vfo_bw_combo = QComboBox()
+        for txt, hz in [("500Hz (CW)", 500.0), ("3kHz (SSB)", 3_000.0),
+                        ("6kHz (AM)", 6_000.0), ("12kHz (NBFM)", 12_000.0),
+                        ("180kHz (WFM)", 180_000.0)]:
+            self.vfo_bw_combo.addItem(txt, hz)
+        # FM 默认 12kHz
+        _def_bw = self.vfo_bw_combo.findData(MODE_VFO_BANDWIDTH["FM"])
+        self.vfo_bw_combo.setCurrentIndex(_def_bw if _def_bw >= 0 else 3)
+        self.vfo_bw_combo.currentIndexChanged.connect(self._on_vfo_bw_changed)
+        bw_row.addWidget(self.vfo_bw_combo, 1)
+        rx_layout.addLayout(bw_row)
+
         gain_row = QHBoxLayout()
         self.gain_label = QLabel("LNA")
         self.gain_label.setObjectName("statusValue")
@@ -255,6 +362,31 @@ class ControlPanel(QWidget):
         self.gain_val.setFixedWidth(44)
         gain_row.addWidget(self.gain_val)
         rx_layout.addLayout(gain_row)
+
+        # AGC 自动增益开关（增益滑杆下方）
+        self.agc_check = QCheckBox("AGC 自动增益")
+        self.agc_check.toggled.connect(self._on_agc_changed)
+        rx_layout.addWidget(self.agc_check)
+
+        # PPM 频偏校正（AGC 下方）
+        ppm_row = QHBoxLayout()
+        self.ppm_label = QLabel("PPM")
+        self.ppm_label.setObjectName("statusValue")
+        self.ppm_label.setFixedWidth(40)
+        ppm_row.addWidget(self.ppm_label)
+        self.ppm_spin = QSpinBox()
+        self.ppm_spin.setRange(-1000, 1000)
+        self.ppm_spin.setSingleStep(1)
+        self.ppm_spin.setValue(0)
+        self.ppm_spin.valueChanged.connect(self._on_ppm_changed)
+        ppm_row.addWidget(self.ppm_spin)
+        ppm_row.addStretch(1)
+        rx_layout.addLayout(ppm_row)
+
+        # Offset 调谐开关（PPM 下方）
+        self.offset_check = QCheckBox("Offset 调谐")
+        self.offset_check.toggled.connect(self._on_offset_tuning_changed)
+        rx_layout.addWidget(self.offset_check)
 
         sq_row = QHBoxLayout()
         self.squelch_label = QLabel("静噪")
@@ -292,6 +424,65 @@ class ControlPanel(QWidget):
 
         # 弹性空间
         layout.addStretch()
+
+    # ========================================================================
+    # 频率解析 / 统一频率真值
+    # ========================================================================
+
+    def _parse_freq_text(self, text: str) -> float:
+        """把用户输入解析为 Hz。
+
+        支持：
+        - 带 M/MHz/k/kHz/G 后缀，如 "98.5M"=98.5MHz, "144500k"=144.5MHz
+        - 纯数字：FM/WFM 按 MHz，AM 按 kHz；绝对值 >10000 视为 Hz（如 144500000）
+        解析失败抛 ValueError。
+        """
+        t = text.strip().replace(",", "").replace(" ", "")
+        if not t:
+            raise ValueError("empty")
+        low = t.lower()
+        suffix = None
+        for suf in ("mhz", "khz", "hz", "ghz", "g", "m", "k"):
+            if low.endswith(suf):
+                suffix = suf
+                num = t[: -len(suf)]
+                break
+        else:
+            num = t
+        if num in ("", "-", "+", "."):
+            raise ValueError("no number")
+        val = float(num)
+        if suffix is None:
+            if abs(val) > 10000:
+                suffix = "hz"
+            elif self._current_mode in ("FM", "WFM"):
+                suffix = "m"
+            else:
+                suffix = "k"
+        if suffix in ("m", "mhz"):
+            return val * 1e6
+        if suffix in ("g", "ghz"):
+            return val * 1e9
+        if suffix in ("k", "khz"):
+            return val * 1e3
+        return val  # hz
+
+    def _set_freq_hz(self, freq_hz: float):
+        """统一设置频率真值并更新显示、发射调谐信号。"""
+        freq_hz = max(FREQ_MIN_HZ, min(FREQ_MAX_HZ, float(freq_hz)))
+        self._freq_hz = freq_hz
+        self._update_freq_display()
+        self._emit_tune(freq_hz)
+
+    def _emit_tune(self, freq_hz: float):
+        mode = self._current_mode
+        # 兼容旧信号
+        if mode in ("FM", "WFM"):
+            self.tune_fm_requested.emit(freq_hz / 1e6)
+        elif mode == "AM":
+            self.tune_am_requested.emit(int(round(freq_hz / 1e3)))
+        # SDR 主路径（Hz, 模式）
+        self.tune_sdr_requested.emit(freq_hz, mode)
 
     def _populate_presets(self, band: str):
         """填充预设电台列表。"""
@@ -333,13 +524,17 @@ class ControlPanel(QWidget):
         self._populate_presets(band)
 
     def _update_freq_display(self):
-        """更新频率显示。"""
-        if self._current_mode == "FM":
-            self.freq_display.setText(f"{self._current_freq_fm:.2f} MHz")
-            self.freq_input.setText(f"{self._current_freq_fm:.1f}")
+        """更新频率显示（按数量级自适应 MHz/kHz/Hz）。"""
+        hz = self._freq_hz
+        if hz >= 1e6:
+            self.freq_display.setText(f"{hz / 1e6:.3f} MHz")
+            self.freq_input.setText(f"{hz / 1e6:g}")
+        elif hz >= 1e3:
+            self.freq_display.setText(f"{hz / 1e3:.1f} kHz")
+            self.freq_input.setText(f"{hz / 1e3:g}")
         else:
-            self.freq_display.setText(f"{self._current_freq_am} kHz")
-            self.freq_input.setText(str(self._current_freq_am))
+            self.freq_display.setText(f"{hz:.0f} Hz")
+            self.freq_input.setText(f"{hz:g}")
 
     # ========================================================================
     # 槽函数
@@ -351,37 +546,41 @@ class ControlPanel(QWidget):
         self.mode_changed.emit(mode)
         self._populate_presets(mode)
         self._update_freq_display()
+        # 切换模式时自动套用该模式的典型 VFO 带宽，并 emit vfo_bandwidth_changed
+        bw = MODE_VFO_BANDWIDTH.get(mode, MODE_VFO_BANDWIDTH["FM"])
+        self.vfo_bw_combo.blockSignals(True)
+        idx = self.vfo_bw_combo.findData(float(bw))
+        if idx >= 0:
+            self.vfo_bw_combo.setCurrentIndex(idx)
+        self.vfo_bw_combo.blockSignals(False)
+        self.vfo_bandwidth_changed.emit(float(bw))
 
     @Slot()
     def _on_freq_input(self):
-        text = self.freq_input.text().strip()
+        text = self.freq_input.text()
         try:
-            if self._current_mode == "FM":
-                freq = float(text)
-                if 64 <= freq <= 108:
-                    self._current_freq_fm = freq
-                    self.tune_fm_requested.emit(freq)
-            else:
-                freq = int(float(text))
-                if 531 <= freq <= 1710:
-                    self._current_freq_am = freq
-                    self.tune_am_requested.emit(freq)
-            self._update_freq_display()
-        except ValueError:
-            pass
+            freq_hz = self._parse_freq_text(text)
+        except (ValueError, OSError):
+            # 解析失败：输入框变红，稍后恢复原值，绝不崩溃
+            self.freq_input.setStyleSheet("background-color:#d98a8a;")
+            QTimer.singleShot(700, self._restore_freq_input)
+            return
+        self.freq_input.setStyleSheet("")
+        self._set_freq_hz(freq_hz)
 
-    @Slot(float)
-    def _step_freq(self, step: float):
-        if self._current_mode == "FM":
-            new_freq = max(64.0, min(108.0, self._current_freq_fm + step))
-            self._current_freq_fm = new_freq
-            self.tune_fm_requested.emit(new_freq)
-        else:
-            step_khz = int(step * 100) if abs(step) >= 1 else int(step * 10)
-            new_freq = max(531, min(1710, self._current_freq_am + step_khz))
-            self._current_freq_am = new_freq
-            self.tune_am_requested.emit(new_freq)
+    def _restore_freq_input(self):
+        self.freq_input.setStyleSheet("")
         self._update_freq_display()
+
+    @Slot(int)
+    def _on_step_combo_changed(self, index: int):
+        hz = float(self.step_combo.itemData(index) or 10_000.0)
+        self._step_hz = hz
+        self.step_changed.emit(hz)
+
+    def _apply_step(self, direction: int):
+        """按当前选中的步进 ±1 步。"""
+        self._set_freq_hz(self._freq_hz + direction * self._step_hz)
 
     @Slot(int)
     def _on_preset_selected(self, index: int):
@@ -393,23 +592,17 @@ class ControlPanel(QWidget):
         # 新格式: (freq_mhz, mode)
         if isinstance(data, tuple):
             freq_mhz, mode = data
-            self._current_freq_fm = freq_mhz
-            self.freq_input.setText(f"{freq_mhz:.3f}")
-            self.tune_fm_requested.emit(freq_mhz)
-            # 发射 SDR 调谐请求（包含模式）
-            if hasattr(self, 'tune_sdr_requested'):
-                self.tune_sdr_requested.emit(freq_mhz * 1e6, mode)
+            self._current_mode = mode
+            self.mode_combo.blockSignals(True)
+            self.mode_combo.setCurrentText(mode)
+            self.mode_combo.blockSignals(False)
+            self._set_freq_hz(freq_mhz * 1e6)
         else:
             # 旧格式兼容
-            if self._current_mode == "FM":
-                freq = float(data)
-                self._current_freq_fm = freq
-                self.tune_fm_requested.emit(freq)
+            if self._current_mode in ("FM", "WFM"):
+                self._set_freq_hz(float(data) * 1e6)
             else:
-                freq = int(data)
-                self._current_freq_am = freq
-                self.tune_am_requested.emit(freq)
-        self._update_freq_display()
+                self._set_freq_hz(float(data) * 1e3)
 
     @Slot(int)
     def _on_volume_changed(self, value: int):
@@ -428,9 +621,76 @@ class ControlPanel(QWidget):
         if rate > 0:
             self.sample_rate_changed.emit(rate)
 
+    @Slot(int)
+    def _on_vfo_bw_changed(self, index: int):
+        """VFO 带宽档位切换 → emit vfo_bandwidth_changed(bw_hz)。"""
+        bw = float(self.vfo_bw_combo.itemData(index) or 0.0)
+        if bw > 0:
+            self.vfo_bandwidth_changed.emit(bw)
+
     def _on_squelch_changed(self, dbfs: int):
         self.squelch_val.setText(str(dbfs))
         self.squelch_changed.emit(float(dbfs))
+
+    @Slot(bool)
+    def _on_agc_changed(self, checked: bool):
+        self.agc_changed.emit(checked)
+
+    @Slot(int)
+    def _on_ppm_changed(self, ppm: int):
+        self.ppm_changed.emit(int(ppm))
+
+    @Slot(bool)
+    def _on_offset_tuning_changed(self, checked: bool):
+        self.offset_tuning_changed.emit(checked)
+
+    # ---- 收藏 ----
+    def _refresh_bookmarks(self):
+        self.bookmark_combo.blockSignals(True)
+        self.bookmark_combo.clear()
+        if not self._bookmarks:
+            self.bookmark_combo.addItem("（暂无收藏）", None)
+        else:
+            for i, (hz, name, mode) in enumerate(self._bookmarks):
+                self.bookmark_combo.addItem(
+                    f"{name} ({hz / 1e6:.3f}MHz {mode})", i)
+        self.bookmark_combo.blockSignals(False)
+
+    @Slot()
+    def _on_bookmark_add(self):
+        default_name = f"{self._freq_hz / 1e6:.3f}MHz {self._current_mode}"
+        name, ok = QInputDialog.getText(
+            self, "收藏频率", "名称:", QLineEdit.Normal, default_name)
+        if not ok:
+            return
+        name = name.strip() or default_name
+        self._bookmarks.append((self._freq_hz, name, self._current_mode))
+        self._refresh_bookmarks()
+        self.bookmark_combo.setCurrentIndex(self.bookmark_combo.count() - 1)
+        self.bookmark_added.emit(self._freq_hz, name, self._current_mode)
+
+    @Slot()
+    def _on_bookmark_del(self):
+        idx = self.bookmark_combo.currentData()
+        if idx is None or not isinstance(idx, int):
+            return
+        if 0 <= idx < len(self._bookmarks):
+            del self._bookmarks[idx]
+            self._refresh_bookmarks()
+
+    @Slot(int)
+    def _on_bookmark_selected(self, index: int):
+        idx = self.bookmark_combo.itemData(index)
+        if idx is None or not isinstance(idx, int):
+            return
+        if not (0 <= idx < len(self._bookmarks)):
+            return
+        hz, _name, mode = self._bookmarks[idx]
+        self._current_mode = mode
+        self.mode_combo.blockSignals(True)
+        self.mode_combo.setCurrentText(mode)
+        self.mode_combo.blockSignals(False)
+        self._set_freq_hz(hz)
 
     @Slot(bool)
     def _on_record_toggled(self, checked: bool):
@@ -451,16 +711,39 @@ class ControlPanel(QWidget):
     def set_freq_fm(self, freq: float):
         """从外部设置 FM 频率（如频谱组件双击）。"""
         self._current_mode = "FM"
+        self.mode_combo.blockSignals(True)
         self.mode_combo.setCurrentText("FM")
-        self._current_freq_fm = freq
+        self.mode_combo.blockSignals(False)
+        self._freq_hz = freq * 1e6
         self._update_freq_display()
 
     def set_freq_am(self, freq: int):
         """从外部设置 AM 频率。"""
         self._current_mode = "AM"
+        self.mode_combo.blockSignals(True)
         self.mode_combo.setCurrentText("AM")
-        self._current_freq_am = freq
+        self.mode_combo.blockSignals(False)
+        self._freq_hz = freq * 1e3
         self._update_freq_display()
+
+    def update_signal_level(self, dbfs):
+        """由主窗口从 IQ 功率估计后调用，更新 S-meter。真实数据驱动，绝不造假。
+
+        传入 None 或不可解析值时显示 "--" 并把进度条归零（空）。
+        """
+        if dbfs is None:
+            self.smeter_label.setText("--")
+            self.smeter_bar.setValue(self.smeter_bar.minimum())
+            return
+        try:
+            v = float(dbfs)
+        except (TypeError, ValueError):
+            self.smeter_label.setText("--")
+            self.smeter_bar.setValue(self.smeter_bar.minimum())
+            return
+        v = max(-120.0, min(0.0, v))
+        self.smeter_bar.setValue(int(v))
+        self.smeter_label.setText(f"{v:.0f} dBFS")
 
     def update_record_time(self, seconds: int):
         """更新录音时长显示。"""

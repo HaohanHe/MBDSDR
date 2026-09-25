@@ -6,7 +6,7 @@ MBDSDR 频谱显示组件
 频谱数据源：真实复数 IQ 采样 → 窗函数 → numpy.fft.fft（复输入）
 → fftshift → dBFS 归一化 → 多帧幅度平均 → 频率轴映射。
 
-无 SDR / 无 IQ 数据时：频谱区域只画网格 + 红色"未连接 / 无 IQ 数据"提示，
+无 SDR / 无 IQ 数据时：频谱区域只画网格 + 红色"未连接 SDR"提示，
 **不绘制任何谱线、不生成高斯峰、不使用 np.random 造假谱**。
 """
 
@@ -32,7 +32,7 @@ except ImportError:
 
 
 # ============================================================================
-# 日式低饱和配色
+# 默认低饱和配色（米白 / 蓝灰 / 橙）
 # ============================================================================
 
 PAL_BG = "#F5F3EF"          # 米白背景
@@ -284,6 +284,52 @@ def value_to_color(value: float, min_val: float, max_val: float,
 # 绘图共享逻辑（QPainter 软件渲染 / QPainter-on-OpenGL 共用）
 # ============================================================================
 
+def _view_center_hz(state: "_PlotState") -> float:
+    """谱面当前显示窗口中心频率（Hz）= 实际调谐中心 + 视图平移偏移。
+
+    普通拖动/滚轮/箭头会改 generator.center_freq_hz（真调谐）；
+    Ctrl 拖动只改 state.view_offset_hz（视图平移，不调谐，对标 SDR++ center 模式）。
+    """
+    return state.panel.generator.center_freq_hz + state.view_offset_hz
+
+
+def _freq_to_x(rect: QRectF, view_center_hz: float, span_hz: float,
+               freq_hz: float) -> float:
+    """绝对频率 → 谱面 x 像素（含视图平移偏移）。"""
+    return (rect.x()
+            + (freq_hz - (view_center_hz - span_hz / 2.0)) / span_hz
+            * rect.width())
+
+
+def _draw_vfo_band(painter: QPainter, state: "_PlotState", rect: QRectF):
+    """在谱面画 VFO 带宽矩形（对标 SDR++ waterfall.cpp:221-231 / waterfall.h:77）。
+
+    SDR++ VFO 是半透明填充矩形 + 选中边框；这里用默认主题橙 #C4845C：
+    填充 alpha=30，边框 alpha=120。仅在有真数据时由调用方决定是否绘制。
+    """
+    gen = state.panel.generator
+    bw = state.vfo_bandwidth_hz
+    if bw is None or bw <= 0:
+        return
+    span = gen.sample_rate_hz
+    view_center = _view_center_hz(state)
+    vfo_center = view_center + state.vfo_offset_hz
+    x_center = _freq_to_x(rect, view_center, span, vfo_center)
+    x_half = (bw / 2.0) / span * rect.width()
+    x0 = x_center - x_half
+    x1 = x_center + x_half
+    if x1 <= rect.x() or x0 >= rect.x() + rect.width():
+        return  # 完全在视口外
+    fill = QColor(PAL_LINE)
+    fill.setAlpha(30)
+    painter.fillRect(QRectF(x0, rect.y(), x1 - x0, rect.height()), QBrush(fill))
+    edge = QColor(PAL_LINE)
+    edge.setAlpha(120)
+    painter.setPen(QPen(edge, 1, Qt.SolidLine))
+    painter.setBrush(Qt.NoBrush)
+    painter.drawRect(QRectF(x0, rect.y(), x1 - x0, rect.height()))
+
+
 class _PlotState:
     """两个渲染路径共享的交互状态。"""
 
@@ -297,6 +343,29 @@ class _PlotState:
         self.markers: List[float] = []                 # 固定 marker 频率 Hz
         self.show_peaks = True
         self.peak_rel_db = 6.0
+        # ---- 调谐步进网格（对标 SDR++ waterfall.h:38 snapInterval）----
+        # 普通滚轮/左右箭头按此步进调谐；Shift ×10，Alt ×0.1。
+        self.snap_interval = 10_000.0                   # Hz，默认 10 kHz
+        # ---- VFO 带宽显示（对标 SDR++ waterfall.cpp:221-231 VFO 矩形）----
+        # None = 不绘制 VFO 矩形；否则在谱面画半透明橙色带宽带。
+        self.vfo_bandwidth_hz: Optional[float] = None
+        self.vfo_offset_hz = 0.0                        # VFO 中心相对调谐中心偏移
+        # ---- 视图平移偏移（Ctrl 拖动 RF shift：只移视图不调谐）----
+        self.view_offset_hz = 0.0
+
+    # ------------------------------------------------------------------ setter
+    def set_snap_interval(self, hz: float):
+        """主窗口设置调谐步进网格（Hz）。"""
+        if hz and hz > 0:
+            self.snap_interval = float(hz)
+
+    def set_vfo_bandwidth(self, bw_hz: Optional[float]):
+        """主窗口设置 VFO 带宽（Hz）；传 None 关闭 VFO 矩形。"""
+        self.vfo_bandwidth_hz = None if bw_hz is None else float(bw_hz)
+
+    def set_vfo_offset(self, offset_hz: float):
+        """主窗口设置 VFO 中心相对调谐中心的偏移（Hz）。"""
+        self.vfo_offset_hz = float(offset_hz)
 
 
 def _render_plot(painter: QPainter, state: _PlotState, w: int, h: int):
@@ -321,21 +390,34 @@ def _render_plot(painter: QPainter, state: _PlotState, w: int, h: int):
     spec_rect = QRectF(0, 0, w, spectrum_h)
     wf_rect = QRectF(0, spectrum_h, w, waterfall_h)
 
+    # 显示窗口中心（含 Ctrl 拖动的视图平移偏移）
+    view_center = _view_center_hz(state)
+    span = gen.sample_rate_hz
+
     _draw_grid(painter, spec_rect, grid)
 
     # ---- 频谱曲线：仅在有真 IQ 数据时绘制 ----
     if has_data:
+        # VFO 带宽矩形（先画在谱线下方；无数据时不画，保持"未连接"干净）
+        _draw_vfo_band(painter, state, spec_rect)
         _draw_spectrum(painter, state, spec_rect, line)
         _draw_peaks(painter, state, spec_rect, QColor(PAL_PEAK))
     else:
-        # 无数据：空白谱面 + 红色提示（不画任何谱线）
+        # 无数据：空白谱面 + 红色两行提示（不画任何谱线/瀑布/峰值/VFO）
         painter.setPen(QPen(QColor(PAL_OFFLINE), 1))
-        f = QFont()
-        f.setPointSize(13)
-        painter.setFont(f)
-        msg = "未连接 / 无 IQ 数据"
-        tw = painter.fontMetrics().horizontalAdvance(msg)
-        painter.drawText(QPointF((w - tw) / 2, spectrum_h / 2), msg)
+        f1 = QFont()
+        f1.setPointSize(13)
+        painter.setFont(f1)
+        msg1 = "未连接 SDR"
+        tw1 = painter.fontMetrics().horizontalAdvance(msg1)
+        y1 = spectrum_h / 2.0 - 4
+        painter.drawText(QPointF((w - tw1) / 2.0, y1), msg1)
+        f2 = QFont()
+        f2.setPointSize(9)
+        painter.setFont(f2)
+        msg2 = "点击工具栏「连接」选择设备"
+        tw2 = painter.fontMetrics().horizontalAdvance(msg2)
+        painter.drawText(QPointF((w - tw2) / 2.0, y1 + 20), msg2)
 
     # 中心频率游标
     _draw_center_cursor(painter, spec_rect, QColor(PAL_LINE))
@@ -351,7 +433,7 @@ def _render_plot(painter: QPainter, state: _PlotState, w: int, h: int):
         painter.setPen(QPen(grid, 1))
         painter.drawLine(QPointF(0, wf_rect.y()), QPointF(w, wf_rect.y()))
 
-    _draw_freq_scale(painter, spec_rect, gen, text)
+    _draw_freq_scale(painter, spec_rect, view_center, span, text)
     _draw_db_scale(painter, spec_rect, state, text)
 
 
@@ -381,11 +463,13 @@ def _draw_spectrum(painter, state, rect, line_color):
     if n == 0:
         return
     w = rect.width()
+    view_center = _view_center_hz(state)
+    span = gen.sample_rate_hz
     path = QPainterPath()
     fill = QPainterPath()
     fill.moveTo(rect.x(), rect.y() + rect.height())
     for i in range(n):
-        x = rect.x() + w * i / (n - 1)
+        x = _freq_to_x(rect, view_center, span, gen.bin_to_freq(i))
         db = spec[i]
         if not np.isfinite(db):
             db = state.db_min
@@ -430,9 +514,10 @@ def _draw_peaks(painter, state, rect, color):
     f = QFont()
     f.setPointSize(8)
     painter.setFont(f)
+    view_center = _view_center_hz(state)
+    span = gen.sample_rate_hz
     for freq_hz, db in peaks:
-        idx = gen.freq_to_bin(freq_hz)
-        x = rect.x() + rect.width() * idx / (gen.num_bins - 1)
+        x = _freq_to_x(rect, view_center, span, freq_hz)
         y = _db_to_y(rect, db, state.db_min, state.db_max)
         painter.drawEllipse(QPointF(x, y), 3, 3)
         label = f"{freq_hz/1e6:.3f}MHz {db:.1f}dB"
@@ -443,8 +528,9 @@ def _draw_hover_readout(painter, state, rect, text_color, line_color):
     if state.mouse_x_ratio is None or not state.mouse_in_spectrum:
         return
     gen = state.panel.generator
-    freq_hz = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
-               + state.mouse_x_ratio * gen.sample_rate_hz)
+    view_center = _view_center_hz(state)
+    span = gen.sample_rate_hz
+    freq_hz = view_center - span / 2.0 + state.mouse_x_ratio * span
     x = rect.x() + state.mouse_x_ratio * rect.width()
     val = gen.value_at_freq(freq_hz)
     painter.setPen(QPen(line_color, 1, Qt.DashLine))
@@ -461,11 +547,12 @@ def _draw_hover_readout(painter, state, rect, text_color, line_color):
 
 def _draw_fixed_markers(painter, state, rect, color):
     gen = state.panel.generator
+    view_center = _view_center_hz(state)
+    span = gen.sample_rate_hz
     f = QFont()
     f.setPointSize(8)
     for freq_hz in state.markers:
-        idx = gen.freq_to_bin(freq_hz)
-        x = rect.x() + rect.width() * idx / (gen.num_bins - 1)
+        x = _freq_to_x(rect, view_center, span, freq_hz)
         val = gen.value_at_freq(freq_hz)
         painter.setPen(QPen(color, 1))
         painter.drawLine(QPointF(x, rect.y()),
@@ -496,14 +583,14 @@ def _draw_waterfall(painter, rect, state):
     painter.drawImage(rect, image)
 
 
-def _draw_freq_scale(painter, rect, gen, text_color):
+def _draw_freq_scale(painter, rect, view_center_hz: float, span_hz: float,
+                     text_color):
     painter.setPen(text_color)
     f = QFont()
     f.setPointSize(8)
     painter.setFont(f)
-    span = gen.sample_rate_hz
     for i in range(5):
-        freq = gen.center_freq_hz - span / 2.0 + span * i / 4.0
+        freq = view_center_hz - span_hz / 2.0 + span_hz * i / 4.0
         x = rect.x() + rect.width() * i / 4.0
         s = f"{freq/1e6:.2f}"
         tw = painter.fontMetrics().horizontalAdvance(s)
@@ -534,7 +621,7 @@ class SpectrumPanel(QWidget):
         super().__init__(parent)
         self.generator = SpectrumDataGenerator(num_bins=512)
 
-        # 配色（默认日式低饱和；set_theme_colors 可覆盖 bg/grid/text/line）
+        # 配色（默认低饱和；set_theme_colors 可覆盖 bg/grid/text/line）
         self.color_bg = PAL_BG
         self.color_grid = PAL_GRID
         self.color_text = PAL_GRID
@@ -612,6 +699,16 @@ class SpectrumPanel(QWidget):
         bar.addWidget(self._peak_spin)
 
         bar.addStretch(1)
+
+        # 只读状态显示：当前中心频率 / span（无数据时显 --）
+        # 对标 SDR++ main_window.cpp 顶部频率读数；这里只读展示，由 _refresh_status_labels 刷新。
+        self._freq_label = QLabel("--")
+        self._span_label = QLabel("--")
+        self._freq_label.setStyleSheet(f"color:{PAL_GRID};")
+        self._span_label.setStyleSheet(f"color:{PAL_GRID};")
+        bar.addWidget(self._freq_label)
+        bar.addSpacing(12)
+        bar.addWidget(self._span_label)
         return bar
 
     # ------------------------------------------------------------------ dB 滑杆
@@ -685,7 +782,7 @@ class SpectrumPanel(QWidget):
         if not self._connected:
             self.generator.clear_data()
             self._state.markers.clear()
-        self._plot.update()
+        self._refresh_status_labels()
 
     def clear(self):
         """清空频谱（未连接语义）。"""
@@ -696,7 +793,7 @@ class SpectrumPanel(QWidget):
                   sample_rate_hz: float):
         """真接 SDR 复 IQ：做窗+fft+dBFS+平均。"""
         self.generator.push_iq(iq_data, center_freq_hz, sample_rate_hz)
-        self._plot.update()
+        self._refresh_status_labels()
 
     # 向后兼容：main_window 当前调用 set_iq_data(iq, sample_rate)
     @Slot(object, float)
@@ -708,7 +805,7 @@ class SpectrumPanel(QWidget):
     def set_center_freq(self, freq_mhz: float):
         """兼容接口：主窗口以 MHz 设置中心频率。"""
         self.generator.center_freq_hz = float(freq_mhz) * 1e6
-        self._plot.update()
+        self._refresh_status_labels()
 
     def set_span(self, span_mhz: float):
         """兼容：缩放窗口（span 实际由采样率决定，这里仅触发重绘）。"""
@@ -719,11 +816,22 @@ class SpectrumPanel(QWidget):
         self._plot.update()
 
     def set_theme_colors(self, bg, grid, text, line, marker, spectrum_colors):
-        """兼容 main_window 主题；峰色/离线色固定为日式低饱和。"""
+        """兼容 main_window 主题；峰色/离线色固定为默认低饱和。"""
         self.color_bg = QColor(bg)
         self.color_grid = QColor(grid)
         self.color_text = QColor(text)
         self.color_line = QColor(line)
+        self._plot.update()
+
+    # ------------------------------------------------------------------ 状态读数
+    def _refresh_status_labels(self):
+        """刷新顶部中心频率/span 只读读数并触发重绘。无数据时显 --。"""
+        if self.generator.has_data():
+            self._freq_label.setText(f"{self.generator.center_freq_hz/1e6:.3f} MHz")
+            self._span_label.setText(f"{self.generator.sample_rate_hz/1e6:.3f} MHz")
+        else:
+            self._freq_label.setText("--")
+            self._span_label.setText("--")
         self._plot.update()
 
     # ------------------------------------------------------------------ 交互转发
@@ -732,31 +840,100 @@ class SpectrumPanel(QWidget):
 
 
 # ============================================================================
-# 绘图表面：QPainter 软件渲染
+# 调谐交互共享 mixin（QPainter / OpenGL 两条渲染路径行为一致）
+# 对标 SDR++ core/src/gui/main_window.cpp：
+#   - 553-576  左右箭头调谐：nfreq = roundl(nfreq/interval)*interval
+#   - 579-609  滚轮调谐：Shift ×10 / Alt ×0.1 / 普通 = snapInterval；Ctrl 缩放 span
+#   - 269-281  VFO 拖动调谐；309-322 中心频率拖动（centerFreqMoved → tune）
 # ============================================================================
 
-class SpectrumPlot(QWidget):
-    def __init__(self, state: _PlotState, parent=None):
-        super().__init__(parent)
-        self.state = state
+class _TuningPlotMixin:
+    """滚轮/键盘/拖动调谐共用逻辑。self.state 必须是 _PlotState。"""
+
+    def _tuning_common_init(self):
+        # 接收键盘事件需要 StrongFocus（否则 keyPressEvent 不触发）
+        self.setFocusPolicy(Qt.StrongFocus)
         self.setMinimumHeight(300)
         self.setMouseTracking(True)
-        self._press_x = None
+        self._press_x: Optional[float] = None
+        self._press_anchor_x = 0.0
         self._is_panning = False
-        self._last_pan_emit = 0.0   # 节流 panning 的 freq_changed 发射
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self.update)
-        self._timer.start(50)
+        self._rf_shift = False          # Ctrl 拖动 = 只平移视图，不调谐中心频率
+        self._last_pan_emit = 0.0
 
-    def paintEvent(self, event):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        _render_plot(p, self.state, self.width(), self.height())
-        p.end()
-
-    # ---- 鼠标 ----
+    # ------------------------------------------------------------------ 工具
     def _x_ratio(self, event):
         return event.position().x() / max(1, self.width())
+
+    def _snap_center(self) -> float:
+        """把当前中心频率对齐到 snap_interval 网格（SDR++ roundl 语义）。"""
+        gen = self.state.panel.generator
+        interval = self.state.snap_interval
+        if interval and interval > 0:
+            gen.center_freq_hz = round(gen.center_freq_hz / interval) * interval
+        return gen.center_freq_hz
+
+    def _emit_tuned(self, freq_hz: float):
+        self.state.panel.on_plot_freq_changed(freq_hz / 1e6)
+        self.state.panel._refresh_status_labels()
+
+    # ------------------------------------------------------------------ 滚轮
+    def wheelEvent(self, event):
+        # main_window.cpp:579-609：有 VFO 时滚轮=调谐；否则缩放。
+        # 这里：Ctrl=缩放 span（原功能），普通/Shift/Alt=按 snap 步进调谐。
+        gen = self.state.panel.generator
+        mods = event.modifiers()
+        dy = event.angleDelta().y()
+        if mods & Qt.ControlModifier:
+            # Ctrl+滚轮 = 缩放 view bandwidth（保留原缩放功能）
+            factor = 1.1 if dy > 0 else 1 / 1.1
+            gen.sample_rate_hz = max(48_000.0, min(20_000_000.0,
+                                                   gen.sample_rate_hz * factor))
+            self._emit_tuned(gen.center_freq_hz)
+        else:
+            wheel = 1 if dy > 0 else -1     # 上滚=加频，下滚=减频
+            interval = self.state.snap_interval
+            if mods & Qt.ShiftModifier:
+                interval *= 10.0             # Shift = ×10
+            elif mods & Qt.AltModifier:
+                interval *= 0.1              # Alt   = ×0.1
+            nfreq = gen.center_freq_hz + interval * wheel
+            # main_window.cpp:596  roundl(nfreq/interval)*interval
+            nfreq = round(nfreq / interval) * interval
+            gen.center_freq_hz = nfreq
+            self._emit_tuned(nfreq)
+        self.update()
+
+    # ------------------------------------------------------------------ 键盘
+    def keyPressEvent(self, event):
+        # main_window.cpp:553-576：左右箭头按 snapInterval 调谐。
+        key = event.key()
+        if key in (Qt.Key_Left, Qt.Key_Right):
+            interval = self.state.snap_interval
+            mods = event.modifiers()
+            if mods & Qt.ShiftModifier:
+                interval *= 10.0
+            elif mods & Qt.AltModifier:
+                interval *= 0.1
+            direction = -1.0 if key == Qt.Key_Left else 1.0
+            gen = self.state.panel.generator
+            nfreq = gen.center_freq_hz + interval * direction
+            nfreq = round(nfreq / interval) * interval
+            gen.center_freq_hz = nfreq
+            self._emit_tuned(nfreq)
+            self.update()
+        else:
+            super().keyPressEvent(event)
+
+    # ------------------------------------------------------------------ 鼠标
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._press_x = event.position().x()
+            self._press_anchor_x = event.position().x()
+            self._is_panning = True
+            self._last_pan_emit = 0.0
+            # Ctrl 按住：RF shift 模式，只平移视图不改中心频率
+            self._rf_shift = bool(event.modifiers() & Qt.ControlModifier)
 
     def mouseMoveEvent(self, event):
         r = self._x_ratio(event)
@@ -766,31 +943,30 @@ class SpectrumPlot(QWidget):
             dx = event.position().x() - self._press_anchor_x
             gen = self.state.panel.generator
             shift = -dx / max(1, self.width()) * gen.sample_rate_hz
-            gen.center_freq_hz += shift
+            if self._rf_shift:
+                # 仅平移视图偏移，不调谐、不 emit（对标 center tuning 平移）
+                self.state.view_offset_hz += shift
+            else:
+                # 普通拖动 = 调谐中心频率（main_window.cpp:309-322 centerFreqMoved）
+                gen.center_freq_hz += shift
+                now = time.monotonic()
+                if now - self._last_pan_emit >= 0.1:
+                    self._last_pan_emit = now
+                    snapped = self._snap_center()
+                    self._emit_tuned(snapped)
             self._press_anchor_x = event.position().x()
-            # 节流：拖拽时不要每像素都 emit（会刷屏后端），≥100ms 才发一次
-            now = time.monotonic()
-            if now - self._last_pan_emit >= 0.1:
-                self._last_pan_emit = now
-                self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
         self.update()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._press_x = event.position().x()
-            self._press_anchor_x = event.position().x()
-            self._is_panning = True
-            self._last_pan_emit = 0.0
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             moved = abs(event.position().x() - (self._press_x or 0))
             self._is_panning = False
-            # 拖拽结束：emit 一次最终中心频率（后端据此真正调谐）
             if moved > 4:
-                gen = self.state.panel.generator
-                self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
-            # 小位移 = 点击放置固定 marker（读真实数组）
+                if not self._rf_shift:
+                    # 拖拽结束：对齐网格并 emit 最终中心频率
+                    snapped = self._snap_center()
+                    self._emit_tuned(snapped)
+                # rf_shift 视图平移结束：不调谐，仅停留视图位置
             elif self.state.panel.generator.has_data():
                 gen = self.state.panel.generator
                 freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
@@ -806,20 +982,34 @@ class SpectrumPlot(QWidget):
             self.update()
 
     def mouseDoubleClickEvent(self, event):
-        # 双击直接调谐到鼠标处频率（SDR++ waterfall 行为）
+        # 双击直接调谐到鼠标处频率（SDR++ waterfall 行为），并对齐 snap 网格
         gen = self.state.panel.generator
         freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
                 + self._x_ratio(event) * gen.sample_rate_hz)
         gen.center_freq_hz = freq
-        self.state.panel.on_plot_freq_changed(freq / 1e6)
+        snapped = self._snap_center()
+        self._emit_tuned(snapped)
         self.update()
 
-    def wheelEvent(self, event):
-        gen = self.state.panel.generator
-        factor = 1.1 if event.angleDelta().y() > 0 else 1 / 1.1
-        gen.sample_rate_hz = max(48_000.0, min(20_000_000.0,
-                                               gen.sample_rate_hz * factor))
-        self.update()
+
+# ============================================================================
+# 绘图表面：QPainter 软件渲染
+# ============================================================================
+
+class SpectrumPlot(_TuningPlotMixin, QWidget):
+    def __init__(self, state: _PlotState, parent=None):
+        super().__init__(parent)
+        self.state = state
+        self._tuning_common_init()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.update)
+        self._timer.start(50)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        _render_plot(p, self.state, self.width(), self.height())
+        p.end()
 
 
 # ============================================================================
@@ -827,16 +1017,11 @@ class SpectrumPlot(QWidget):
 # ============================================================================
 
 if HAS_OPENGL:
-    class SpectrumGLPlot(QOpenGLWidget):
+    class SpectrumGLPlot(_TuningPlotMixin, QOpenGLWidget):
         def __init__(self, state: _PlotState, parent=None):
             super().__init__(parent)
             self.state = state
-            self.setMinimumHeight(300)
-            self.setMouseTracking(True)
-            self._press_x = None
-            self._press_anchor_x = 0
-            self._is_panning = False
-            self._last_pan_emit = 0.0
+            self._tuning_common_init()
             self._timer = QTimer(self)
             self._timer.timeout.connect(self.update)
             self._timer.start(50)
@@ -850,64 +1035,7 @@ if HAS_OPENGL:
             p.setRenderHint(QPainter.Antialiasing, True)
             _render_plot(p, self.state, self.width(), self.height())
             p.end()
-
-        # 与 SpectrumPlot 相同的鼠标交互
-        def _x_ratio(self, event):
-            return event.position().x() / max(1, self.width())
-
-        def mouseMoveEvent(self, event):
-            r = self._x_ratio(event)
-            self.state.mouse_x_ratio = r
-            self.state.mouse_in_spectrum = True
-            if self._is_panning:
-                dx = event.position().x() - self._press_anchor_x
-                gen = self.state.panel.generator
-                shift = -dx / max(1, self.width()) * gen.sample_rate_hz
-                gen.center_freq_hz += shift
-                self._press_anchor_x = event.position().x()
-                now = time.monotonic()
-                if now - self._last_pan_emit >= 0.1:
-                    self._last_pan_emit = now
-                    self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
-            self.update()
-
-        def mousePressEvent(self, event):
-            if event.button() == Qt.LeftButton:
-                self._press_x = event.position().x()
-                self._press_anchor_x = event.position().x()
-                self._is_panning = True
-                self._last_pan_emit = 0.0
-
-        def mouseReleaseEvent(self, event):
-            if event.button() == Qt.LeftButton:
-                moved = abs(event.position().x() - (self._press_x or 0))
-                self._is_panning = False
-                if moved > 4:
-                    gen = self.state.panel.generator
-                    self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
-                elif self.state.panel.generator.has_data():
-                    gen = self.state.panel.generator
-                    freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
-                            + self._x_ratio(event) * gen.sample_rate_hz)
-                    self.state.markers.append(freq)
-                    if len(self.state.markers) > 8:
-                        self.state.markers.pop(0)
-                self.update()
-
-        def mouseDoubleClickEvent(self, event):
-            gen = self.state.panel.generator
-            freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
-                    + self._x_ratio(event) * gen.sample_rate_hz)
-            gen.center_freq_hz = freq
-            self.state.panel.on_plot_freq_changed(freq / 1e6)
-            self.update()
-
-        def wheelEvent(self, event):
-            gen = self.state.panel.generator
-            factor = 1.1 if event.angleDelta().y() > 0 else 1 / 1.1
-            gen.sample_rate_hz = max(48_000.0, min(20_000_000.0,
-                                                   gen.sample_rate_hz * factor))
-            self.update()
+        # 滚轮/键盘/鼠标调谐交互全部继承自 _TuningPlotMixin，与 SpectrumPlot 一致。
 
 
 # ============================================================================
