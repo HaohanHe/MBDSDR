@@ -448,3 +448,22 @@ class RealGNSSMonitor:
             utc_time=fix.get("utc_time"),
             timestamp=fix.get("timestamp"),
         )
+
+    # -- 天空图卫星分布（GSV/GSA）透传 -------------------------------------
+    def get_gsv_frames(self):
+        """透传 reader.get_gsv_frames()：各星座最新可见卫星列表；无数据 []。"""
+        if self._reader is None:
+            return []
+        try:
+            return self._reader.get_gsv_frames()
+        except Exception:
+            return []
+
+    def get_gsa(self):
+        """透传 reader.get_gsa()：最新 GSA（used 卫星 / 定位模式）；无数据 None。"""
+        if self._reader is None:
+            return None
+        try:
+            return self._reader.get_gsa()
+        except Exception:
+            return None
