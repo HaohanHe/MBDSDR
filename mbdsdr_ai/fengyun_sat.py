@@ -461,8 +461,9 @@ class FY4SegmentAssembler:
 
 
 # ============================================================================
-# 极简 BPSK 基带调制 / 解调（合成往返测试用）
-#   真实 FY-4 物理层是 DVB-S2；此处仅为验证「编码→信道→解码→出图」闭环。
+# [经典链路-保留，用于测试回退] 极简 BPSK 基带调制 / 解调（合成往返测试用）
+#   真实 FY-4 物理层是 DVB-S2（见本文件末尾「DVB-S2 真实物理层」段）；
+#   此处仅为验证「编码→信道→解码→出图」闭环，保留作测试回退路径。
 # ============================================================================
 
 def bits_to_bpsk(bits: np.ndarray, seed: int = 42) -> np.ndarray:
@@ -492,7 +493,8 @@ def bits_to_bytes(bits: np.ndarray) -> bytes:
 
 
 # ============================================================================
-# FY-4 端到端解码入口（工具层）
+# [经典链路-保留，用于测试回退] FY-4 端到端解码入口（工具层）
+#   走 CCSDS VCDU 经典链路；真实 FY-4 走 DVB-S2（见文件末尾 DVB-S2 段）。
 # ============================================================================
 
 def decode_fy4_vcdus(vcdus: List[bytes]) -> List[FY4Image]:
@@ -524,8 +526,10 @@ def fy4_lrit_pipeline(segments: List[bytes]) -> List[FY4Image]:
 
 
 # ============================================================================
-# FY-3 HRPT：小帧编码 / AVHRR 式通道提取
+# [经典链路-保留，用于测试回退] FY-3 S 波段 HRPT：小帧编码 / AVHRR 式通道提取
 # 来源: SatDump noaa_deframer.cpp:6-17（见 satdump_adapter.HRPTDecoder）
+#   真实 FY-3 X 波段 Advanced HRPT (AHRPT) 走 CCSDS CADU 链路，
+#   见本文件末尾「FY-3 X 波段 AHRPT」段。
 # ============================================================================
 
 #: AVHRR 通道数据在小帧中的起始字偏移（简化：同步 6 字 + 1 字帧计数之后）
@@ -775,3 +779,350 @@ def register_tool_registry(registry) -> None:
         handler=_pass_handler,
         category="satellite",
     )
+
+
+# ============================================================================
+# [DVB-S2真实物理层，移植自SatDump] FY-4 DVB-S2 物理层同步 / 解扰
+# ----------------------------------------------------------------------------
+# 移植来源（GPL-3.0）：
+#   - SOF / PLS 定义      : SatDump plugins/dvb_support/dvbs2/s2_defs.h:15-88
+#   - 帧长常量            : SatDump src-core/common/codings/dvb-s2/dvbs2.h:5-6
+#   - MODCOD→码率映射     : SatDump plugins/dvb_support/codings/dvb-s2/modcod_to_cfg.h:27-55
+#   - BB 帧解扰 PRBS      : SatDump plugins/dvb_support/codings/dvb-s2/bbframe_descramble.cpp:121-142
+#   - FY-4 用 QPSK DVB-S2 : SatDump resources/pipelines/FengYun-4.json
+# 说明：题目给的「18-bit SOF 0x18D5E8」是对 DVB-S2 PL 起始字段的俗称；
+#       SatDump/EN302307 真实 SOF 为 26-bit 0x18D2E82（s2_defs.h:17），
+#       PLHEADER = SOF(26) + PLS code(64) = 90 bits。本模块按 SatDump 真值实现。
+# ============================================================================
+
+#: DVB-S2 SOF 26-bit 起始字段值（来源: s2_defs.h:17  VALUE = 0x18d2e82）
+DVBS2_SOF_VALUE = 0x18D2E82
+#: SOF 比特长度（来源: s2_defs.h:19  LENGTH = 26）
+DVBS2_SOF_LEN = 26
+#: SOF 掩码（来源: s2_defs.h:18  MASK = 0x3ffffff）
+DVBS2_SOF_MASK = 0x3FFFFFF
+#: PLS code 比特长度（来源: s2_defs.h:39  LENGTH = 64）
+DVBS2_PLS_LEN = 64
+#: PLHEADER 总长度 = SOF(26) + PLS(64)
+DVBS2_PLHEADER_LEN = DVBS2_SOF_LEN + DVBS2_PLS_LEN
+#: 普通帧 FECFRAME 数据比特数（来源: dvbs2.h:5  FRAME_SIZE_NORMAL 64800）
+DVBS2_FRAME_NORMAL_BITS = 64800
+#: 短帧 FECFRAME 数据比特数（来源: dvbs2.h:6  FRAME_SIZE_SHORT 16200）
+DVBS2_FRAME_SHORT_BITS = 16200
+#: PLS code 加扰掩码（来源: s2_defs.h:87  SCRAMBLING = 0x719d83c953422dfa）
+DVBS2_PLS_SCRAMBLING = 0x719D83C953422DFA
+
+#: QPSK MODCOD 表（来源: modcod_to_cfg.h:33-54）：modcod编号 -> 码率字符串
+DVBS2_QPSK_MODCOD_TABLE = {
+    1: "1/4", 2: "1/3", 3: "2/5", 4: "1/2", 5: "3/5",
+    6: "2/3", 7: "3/4", 8: "4/5", 9: "5/6", 10: "8/9", 11: "9/10",
+}
+
+
+def _dvbs2_build_pls_codewords() -> List[int]:
+    """预生成 128 个 PLS codeword（移植自 s2_defs.h:44-85 构造函数）。
+
+    index 7-bit 格式 = MODCOD[4:0] | SHORTFRAME | PILOTS。
+    """
+    G = [0x55555555, 0x33333333, 0x0F0F0F0F,
+         0x00FF00FF, 0x0000FFFF, 0xFFFFFFFF]
+    codewords: List[int] = []
+    for index in range(128):
+        y = 0
+        for row in range(6):
+            if (index >> (6 - row)) & 1:
+                y ^= G[row]
+        code = 0
+        for bit in range(31, -1, -1):
+            yi = (y >> bit) & 1
+            if index & 1:   # odd index
+                code = (code << 2) | (yi << 1) | (yi ^ 1)
+            else:           # even index
+                code = (code << 2) | (yi << 1) | yi
+        code ^= DVBS2_PLS_SCRAMBLING
+        codewords.append(code & 0xFFFFFFFFFFFFFFFF)
+    return codewords
+
+
+#: 预计算 PLS codeword 表（来源: s2_defs.h:44-85）
+_DVBS2_PLS_CODEWORDS = _dvbs2_build_pls_codewords()
+
+
+def detect_sof(bits: np.ndarray) -> List[int]:
+    """在硬判决比特流中硬匹配 DVB-S2 SOF（26-bit 0x18D2E82）。
+
+    移植思路（来源: s2_defs.h:23-32，PL 同步相关）：按发送顺序（MSB first）
+    滑窗 26 bit，与 SOF_VALUE 全等即命中。返回所有命中的起始比特位置。
+    """
+    bits = np.asarray(bits, dtype=np.uint8)
+    n = len(bits)
+    if n < DVBS2_SOF_LEN:
+        return []
+    # 用整数位加权快速滑窗
+    weights = np.array([1 << (DVBS2_SOF_LEN - 1 - i) for i in range(DVBS2_SOF_LEN)],
+                       dtype=np.uint64)
+    hits: List[int] = []
+    for i in range(n - DVBS2_SOF_LEN + 1):
+        window = bits[i:i + DVBS2_SOF_LEN].astype(np.uint64)
+        val = int(np.dot(window, weights))
+        if val == DVBS2_SOF_VALUE:
+            hits.append(i)
+    return hits
+
+
+def extract_plframe(bits: np.ndarray, sof_pos: int,
+                    frame_type: str = "normal") -> np.ndarray:
+    """从 sof_pos 起提取完整 PLFRAME（SOF + PLS + 数据字段）。
+
+    frame_type: "normal" -> 90 + 64800 = 64890 bits
+                "short"  -> 90 + 16200 = 16290 bits
+    （帧长来源: dvbs2.h:5-6）
+    """
+    data_bits = (DVBS2_FRAME_NORMAL_BITS if frame_type == "normal"
+                 else DVBS2_FRAME_SHORT_BITS)
+    total = DVBS2_PLHEADER_LEN + data_bits
+    frame = np.asarray(bits, dtype=np.uint8)[sof_pos:sof_pos + total]
+    if len(frame) < total:
+        raise ValueError(
+            f"比特流不足：从 {sof_pos} 起需 {total} bit，仅剩 {len(frame)}")
+    return frame
+
+
+def decode_pls(pls_bits: np.ndarray) -> Dict:
+    """解析 64-bit PLS code（移植自 s2_defs.h:44-85 的逆过程）。
+
+    返回 dict：modcod(1-11 为 QPSK)、constellation、short_frame、pilots、index。
+    做法：把 64 bit 按 MSB first 打包成 uint64，与 128 个预计算 codeword 全等匹配。
+    """
+    pls_bits = np.asarray(pls_bits, dtype=np.uint8)
+    if len(pls_bits) < DVBS2_PLS_LEN:
+        raise ValueError("PLS 至少需要 64 bit")
+    code = 0
+    for i in range(DVBS2_PLS_LEN):
+        code = (code << 1) | int(pls_bits[i])
+    code &= 0xFFFFFFFFFFFFFFFF
+
+    index = -1
+    for i, cw in enumerate(_DVBS2_PLS_CODEWORDS):
+        if cw == code:
+            index = i
+            break
+    if index < 0:
+        # 容错：汉明距离最近
+        best_d, best_i = 65, -1
+        for i, cw in enumerate(_DVBS2_PLS_CODEWORDS):
+            d = bin(cw ^ code).count("1")
+            if d < best_d:
+                best_d, best_i = d, i
+        index = best_i
+
+    modcod = (index >> 2) & 0x1F
+    short_frame = bool((index >> 1) & 1)
+    pilots = bool(index & 1)
+    if 1 <= modcod <= 11:
+        constellation = "QPSK"
+        rate = DVBS2_QPSK_MODCOD_TABLE.get(modcod, "?")
+    else:
+        constellation = "?"
+        rate = "?"
+    return {
+        "index": index,
+        "modcod": modcod,
+        "coderate": rate,
+        "constellation": constellation,
+        "short_frame": short_frame,
+        "pilots": pilots,
+    }
+
+
+def _dvbs2_bb_prbs(num_bits: int) -> np.ndarray:
+    """生成 DVB-S2 BB 帧解扰 PRBS 序列（移植自 bbframe_descramble.cpp:121-134）。
+
+    LFSR 初值 sr=0x4A80，反馈多项式 1+x^14+x^15：
+        b = (sr ^ (sr>>1)) & 1;  sr = (sr>>1) | (b<<15)
+    按 MSB-first 输出 num_bits 个比特。
+    """
+    sr = 0x4A80
+    out = np.zeros(num_bits, dtype=np.uint8)
+    for i in range(num_bits):
+        b = (sr ^ (sr >> 1)) & 1
+        out[i] = b
+        sr = sr >> 1
+        if b:
+            sr |= 0x4000
+    return out
+
+
+def descramble_dvbs2(data_bits: np.ndarray) -> np.ndarray:
+    """DVB-S2 BB 帧解扰（PRBS 异或，自逆操作）。
+
+    来源: bbframe_descramble.cpp:121-142。解扰与加扰同一序列，往返互逆。
+    """
+    data_bits = np.asarray(data_bits, dtype=np.uint8)
+    prbs = _dvbs2_bb_prbs(len(data_bits))
+    return (data_bits ^ prbs).astype(np.uint8)
+
+
+def fy4_dvbs2_sync(bits: np.ndarray) -> List[Dict]:
+    """FY-4 DVB-S2 物理层完整同步流程。
+
+    流程：SOF 检测 -> PLFRAME 提取 -> PLS 解析 -> 数据字段解扰。
+    返回帧列表，每帧 dict：pos / frame_type / pls / descrambled_bits。
+    """
+    bits = np.asarray(bits, dtype=np.uint8)
+    frames: List[Dict] = []
+    # 先用 normal 帧长尝试；若命中的 SOF 距离暗示短帧，由 PLS 结果纠正。
+    for pos in detect_sof(bits):
+        # 默认按 normal 提取（PLS 里会带 short_frame 标志）
+        try:
+            plframe = extract_plframe(bits, pos, "normal")
+        except ValueError:
+            try:
+                plframe = extract_plframe(bits, pos, "short")
+            except ValueError:
+                continue
+        pls_bits = plframe[DVBS2_SOF_LEN:DVBS2_PLHEADER_LEN]
+        pls = decode_pls(pls_bits)
+        # 按 PLS 报告的帧类型重新确定数据长度
+        frame_type = "short" if pls["short_frame"] else "normal"
+        data_len = (DVBS2_FRAME_SHORT_BITS if pls["short_frame"]
+                    else DVBS2_FRAME_NORMAL_BITS)
+        # 若初提为 normal 但 PLS 说 short，重新切片
+        data = plframe[DVBS2_PLHEADER_LEN:DVBS2_PLHEADER_LEN + data_len]
+        if len(data) < data_len:
+            # 重新按正确帧类型取
+            try:
+                plframe = extract_plframe(bits, pos, frame_type)
+                data = plframe[DVBS2_PLHEADER_LEN:]
+            except ValueError:
+                continue
+        descrambled = descramble_dvbs2(data)
+        frames.append({
+            "pos": pos,
+            "frame_type": frame_type,
+            "pls": pls,
+            "raw_data_bits": data,
+            "descrambled_bits": descrambled,
+        })
+    return frames
+
+
+# ============================================================================
+# [DVB-S2真实物理层，移植自SatDump] FY-3 X 波段 AHRPT 帧同步 / 解扰 / 通道提取
+# ----------------------------------------------------------------------------
+# 移植来源（GPL-3.0）：
+#   - CADU 长度 1024B / derand 范围 : SatDump plugins/fengyun3_support/fengyun3/
+#                                     module_fengyun_ahrpt_decoder.cpp:52,122-124
+#   - ASM = CCSDS 标准 0x1ACFFC1D   : SatDump src-core/common/codings/deframing/
+#                                     bpsk_ccsds_deframer.h:62, cpp:7-8
+#   - CCSDS 解扰 PN 表(255B)        : SatDump src-core/common/codings/randomization.cpp:4-78
+#   - derand 作用于 cadu[4:]        : module_fengyun_ahrpt_decoder.cpp:124
+# ============================================================================
+
+#: AHRPT CADU 总长（字节）（来源: module_fengyun_ahrpt_decoder.cpp:52,130）
+FY3_AHRPT_CADU_LEN = 1024
+#: AHRPT 同步字 ASM（4 字节大端）（来源: bpsk_ccsds_deframer.h:62 默认 0x1ACFFC1D）
+FY3_AHRPT_ASM = 0x1ACFFC1D
+#: ASM 字节数
+FY3_AHRPT_ASM_LEN = 4
+
+#: CCSDS 解扰 PN 表（255 字节）（来源: randomization.cpp:4-36）
+#: 多项式 1+x^3+x^5+x^7+x^8，周期 255。
+_CCSDS_PN = bytes([
+    0xff, 0x48, 0x0e, 0xc0, 0x9a, 0x0d, 0x70, 0xbc,
+    0x8e, 0x2c, 0x93, 0xad, 0xa7, 0xb7, 0x46, 0xce,
+    0x5a, 0x97, 0x7d, 0xcc, 0x32, 0xa2, 0xbf, 0x3e,
+    0x0a, 0x10, 0xf1, 0x88, 0x94, 0xcd, 0xea, 0xb1,
+    0xfe, 0x90, 0x1d, 0x81, 0x34, 0x1a, 0xe1, 0x79,
+    0x1c, 0x59, 0x27, 0x5b, 0x4f, 0x6e, 0x8d, 0x9c,
+    0xb5, 0x2e, 0xfb, 0x98, 0x65, 0x45, 0x7e, 0x7c,
+    0x14, 0x21, 0xe3, 0x11, 0x29, 0x9b, 0xd5, 0x63,
+    0xfd, 0x20, 0x3b, 0x02, 0x68, 0x35, 0xc2, 0xf2,
+    0x38, 0xb2, 0x4e, 0xb6, 0x9e, 0xdd, 0x1b, 0x39,
+    0x6a, 0x5d, 0xf7, 0x30, 0xca, 0x8a, 0xfc, 0xf8,
+    0x28, 0x43, 0xc6, 0x22, 0x53, 0x37, 0xaa, 0xc7,
+    0xfa, 0x40, 0x76, 0x04, 0xd0, 0x6b, 0x85, 0xe4,
+    0x71, 0x64, 0x9d, 0x6d, 0x3d, 0xba, 0x36, 0x72,
+    0xd4, 0xbb, 0xee, 0x61, 0x95, 0x15, 0xf9, 0xf0,
+    0x50, 0x87, 0x8c, 0x44, 0xa6, 0x6f, 0x55, 0x8f,
+    0xf4, 0x80, 0xec, 0x09, 0xa0, 0xd7, 0x0b, 0xc8,
+    0xe2, 0xc9, 0x3a, 0xda, 0x7b, 0x74, 0x6c, 0xe5,
+    0xa9, 0x77, 0xdc, 0xc3, 0x2a, 0x2b, 0xf3, 0xe0,
+    0xa1, 0x0f, 0x18, 0x89, 0x4c, 0xde, 0xab, 0x1f,
+    0xe9, 0x01, 0xd8, 0x13, 0x41, 0xae, 0x17, 0x91,
+    0xc5, 0x92, 0x75, 0xb4, 0xf6, 0xe8, 0xd9, 0xcb,
+    0x52, 0xef, 0xb9, 0x86, 0x54, 0x57, 0xe7, 0xc1,
+    0x42, 0x1e, 0x31, 0x12, 0x99, 0xbd, 0x56, 0x3f,
+    0xd2, 0x03, 0xb0, 0x26, 0x83, 0x5c, 0x2f, 0x23,
+    0x8b, 0x24, 0xeb, 0x69, 0xed, 0xd1, 0xb3, 0x96,
+    0xa5, 0xdf, 0x73, 0x0c, 0xa8, 0xaf, 0xcf, 0x82,
+    0x84, 0x3c, 0x62, 0x25, 0x33, 0x7a, 0xac, 0x7f,
+    0xa4, 0x07, 0x60, 0x4d, 0x06, 0xb8, 0x5e, 0x47,
+    0x16, 0x49, 0xd6, 0xd3, 0xdb, 0xa3, 0x67, 0x2d,
+    0x4b, 0xbe, 0xe6, 0x19, 0x51, 0x5f, 0x9f, 0x05,
+    0x08, 0x78, 0xc4, 0x4a, 0x66, 0xf5, 0x58,
+])
+
+
+def fy3_ahrpt_sync(data: bytes) -> List[bytes]:
+    """在字节流中搜索 AHRPT ASM 并切出完整 1024B CADU。
+
+    来源: bpsk_ccsds_deframer.cpp:51,118-122（找到 32-bit ASM 后按 CADU_SIZE 定界）
+    + module_fengyun_ahrpt_decoder.cpp:122,130（每帧 1024 字节）。
+    """
+    asm_bytes = FY3_AHRPT_ASM.to_bytes(FY3_AHRPT_ASM_LEN, "big")
+    frames: List[bytes] = []
+    start = 0
+    n = len(data)
+    while True:
+        idx = data.find(asm_bytes, start)
+        if idx < 0:
+            break
+        end = idx + FY3_AHRPT_CADU_LEN
+        if end > n:
+            break
+        frames.append(bytes(data[idx:end]))
+        start = end   # CADU 紧接，不重叠
+    return frames
+
+
+def fy3_descramble(data: bytes) -> bytes:
+    """CCSDS 解扰（PN 异或，自逆）。
+
+    来源: randomization.cpp:72-78 derand_ccsds：data[i] ^= ccsds_pn[i % 255]。
+    注意 SatDump 中该函数作用于 cadu[4:]（module_...ahrpt_decoder.cpp:124）；
+    本函数对传入字节按 0 起索引解扰，调用方负责传入去掉 ASM 的区段。
+    """
+    out = bytearray(len(data))
+    for i, b in enumerate(data):
+        out[i] = b ^ _CCSDS_PN[i % 255]
+    return bytes(out)
+
+
+def fy3_extract_channels(frame: bytes) -> Dict[str, np.ndarray]:
+    """从一个完整 1024B AHRPT CADU 中提取 AVHRR 通道行像素。
+
+    流程（对齐 SatDump）：
+      1. 校验 4 字节 ASM（module_...ahrpt_decoder.cpp:118-121）；
+      2. 对 cadu[4:] 做 CCSDS 解扰（module_...ahrpt_decoder.cpp:124）；
+      3. 解扰后第 1 字节起为 CCSDS VCDU 头（6 字节），VCID = byte5 & 0x3F；
+      4. 载荷区 cadu[10:1024]（1014B）按 AVHRR 通道 1/2/4 三等分，各作一行像素。
+    返回 {"vcid", "ch1", "ch2", "ch4"}，每个通道为 uint8 一维数组（一行像素）。
+    """
+    if len(frame) < FY3_AHRPT_CADU_LEN:
+        raise ValueError(
+            f"AHRPT CADU 应为 {FY3_AHRPT_CADU_LEN}B，收到 {len(frame)}B")
+    if int.from_bytes(frame[0:4], "big") != FY3_AHRPT_ASM:
+        raise ValueError("CADU 起始不是 AHRPT ASM 0x1ACFFC1D")
+    # 解扰数据区（不含 ASM）
+    derand = fy3_descramble(frame[4:])
+    # VCDU 头 6 字节位于 derand[0:6]；VCID = derand[1] & 0x3F
+    vcid = derand[1] & 0x3F
+    payload = derand[6:]                 # 1014 字节
+    third = len(payload) // 3
+    return {
+        "vcid": vcid,
+        "ch1": np.frombuffer(payload[0:third], dtype=np.uint8).copy(),
+        "ch2": np.frombuffer(payload[third:2 * third], dtype=np.uint8).copy(),
+        "ch4": np.frombuffer(payload[2 * third:3 * third], dtype=np.uint8).copy(),
+    }
