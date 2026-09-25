@@ -132,6 +132,9 @@ class MainWindow(QMainWindow):
         self._build_central_widget()
         self._build_status_bar()
 
+        # 启动即无硬件：所有 SDR 操作控件（调谐/音量/模式/录音/面板实时按钮）置灰
+        self._panels_set_sdr_connected(False)
+
         # 应用默认主题
         self._apply_theme(DEFAULT_THEME)
 
@@ -643,8 +646,9 @@ class MainWindow(QMainWindow):
         self._worker.log_message.connect(self._on_log)
 
     def _panels_set_sdr_connected(self, connected: bool):
-        """把真实 SDR 硬件连接状态同步到气象云图 / 多普勒定轨面板。
-        未连接时这两个面板的「实时 SDR」模式按钮置灰并显示未连接。"""
+        """把真实 SDR 连接状态同步到各操作控件。
+        未连接时：气象云图 / 多普勒定轨面板的实时 SDR 按钮置灰；
+        控制面板的调谐/音量/模式/预设控件与录音按钮一并禁用，绝不暴露假可控状态。"""
         for panel in (getattr(self, "weather_panel", None),
                       getattr(self, "doppler_panel", None)):
             if panel is not None:
@@ -652,6 +656,19 @@ class MainWindow(QMainWindow):
                     panel.set_sdr_connected(connected)
                 except Exception:
                     pass
+        # 控制面板：调谐/音量/模式/录音
+        try:
+            cp = getattr(self, "control_panel", None)
+            if cp is not None and hasattr(cp, "set_sdr_connected"):
+                cp.set_sdr_connected(connected)
+        except Exception:
+            pass
+        # 工具栏录音按钮（无 SDR 不可录音）
+        try:
+            if hasattr(self, "record_btn"):
+                self.record_btn.setEnabled(bool(connected))
+        except Exception:
+            pass
 
     def _disconnect(self):
         """断开连接。"""
