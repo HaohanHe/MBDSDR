@@ -11,6 +11,7 @@ MBDSDR 频谱显示组件
 """
 
 import numpy as np
+import time
 from typing import Optional, List, Tuple
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, Slot, QTimer
@@ -20,7 +21,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox, QLabel,
-    QDoubleSpinBox,
+    QDoubleSpinBox, QSlider, QFrame,
 )
 
 try:
@@ -57,17 +58,20 @@ class SpectrumDataGenerator:
     不生成任何模拟峰；无数据时 spectrum 为 NaN（UI 层据此不画谱线）。
     """
 
-    WINDOWS = ("Hann", "Hamming", "Blackman", "None")
-    FFT_SIZES = (1024, 2048, 4096, 8192)
+    # SDR++ iq_frontend.h:17-21 FFTWindow 枚举仅 RECTANGULAR/BLACKMAN/NUTTALL；
+    # main_window.cpp:91 默认 NUTTALL。这里额外补 Hann/Hamming/Flattop/None 便于对比。
+    WINDOWS = ("Nuttall", "Hann", "Hamming", "Blackman", "Flattop", "None")
+    # SDR++ main_window.cpp:34 setRawFFTSize(fftSize) 支持大尺寸 FFT，16384 是常用档。
+    FFT_SIZES = (1024, 2048, 4096, 8192, 16384)
     AVG_FRAMES = (1, 4, 8, 16)
 
     def __init__(self, num_bins: int = 512):
         self.num_bins = num_bins
-        # 单位：Hz
+        # 单位：Hz（SDR++ main_window.cpp:84-85 默认带宽 8MHz，这里给个常见 FM 广播中心）
         self.center_freq_hz = 98.5e6
         self.sample_rate_hz = 2.4e6
-        # FFT 参数
-        self.window_name = "Hann"      # 默认 Hann
+        # FFT 参数；默认窗 Nuttall（main_window.cpp:91 IQFrontEnd::FFTWindow::NUTTALL）
+        self.window_name = "Nuttall"
         self.fft_size = 2048
         self.avg_frames = 1
         # 当前帧频谱（长度 num_bins）；NaN 表示无数据 → 不画谱线
@@ -118,9 +122,33 @@ class SpectrumDataGenerator:
             return np.hamming(n).astype(np.float64)
         if self.window_name == "Blackman":
             return np.blackman(n).astype(np.float64)
+        if self.window_name == "Nuttall":
+            # 3-term Blackman-Nuttall（SDR++ iq_frontend.cpp 用的同款系数）：
+            # a0=0.355768, a1=0.487396, a2=0.144232, a3=0.012604
+            k = np.arange(n, dtype=np.float64)
+            if n == 1:
+                return np.ones(1, dtype=np.float64)
+            x = k / (n - 1)
+            return (0.355768
+                    - 0.487396 * np.cos(2.0 * np.pi * x)
+                    + 0.144232 * np.cos(4.0 * np.pi * x)
+                    - 0.012604 * np.cos(6.0 * np.pi * x))
+        if self.window_name == "Flattop":
+            # 4-term 平底窗（准高斯；窄带幅度精度高）：
+            # a0=0.21557895, a1=0.41663158, a2=0.277263158,
+            # a3=0.083578947, a4=0.006947428
+            k = np.arange(n, dtype=np.float64)
+            if n == 1:
+                return np.ones(1, dtype=np.float64)
+            x = k / (n - 1)
+            return (0.21557895
+                    - 0.41663158 * np.cos(2.0 * np.pi * x)
+                    + 0.277263158 * np.cos(4.0 * np.pi * x)
+                    - 0.083578947 * np.cos(6.0 * np.pi * x)
+                    + 0.006947428 * np.cos(8.0 * np.pi * x))
         if self.window_name == "None":
             return np.ones(n, dtype=np.float64)
-        return np.hanning(n).astype(np.float64)   # 默认 Hann
+        return np.hanning(n).astype(np.float64)   # Hann
 
     # ------------------------------------------------------------------ FFT
     def push_iq(self, iq: np.ndarray, center_freq_hz: float,
@@ -525,7 +553,14 @@ class SpectrumPanel(QWidget):
             self._plot = SpectrumGLPlot(self._state)
         else:
             self._plot = SpectrumPlot(self._state)
-        root.addWidget(self._plot, stretch=1)
+
+        # 右侧 dB Max/Min 垂直滑杆（对标 SDR++ main_window.cpp:635-656）
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(2)
+        body.addWidget(self._plot, stretch=1)
+        body.addLayout(self._build_db_sliders())
+        root.addLayout(body, stretch=1)
 
         # 初始：未连接 → 控件置灰
         self._connected = False
@@ -540,7 +575,8 @@ class SpectrumPanel(QWidget):
         bar.addWidget(QLabel("窗:"))
         self._win_combo = QComboBox()
         self._win_combo.addItems(SpectrumDataGenerator.WINDOWS)
-        self._win_combo.setCurrentText("Hann")
+        # SDR++ main_window.cpp:91 默认 NUTTALL
+        self._win_combo.setCurrentText(self.generator.window_name)
         self._win_combo.currentTextChanged.connect(self.generator.set_window)
         bar.addWidget(self._win_combo)
 
@@ -577,6 +613,63 @@ class SpectrumPanel(QWidget):
 
         bar.addStretch(1)
         return bar
+
+    # ------------------------------------------------------------------ dB 滑杆
+    def _build_db_sliders(self) -> QVBoxLayout:
+        """右侧 Max/Min 垂直滑杆，对标 SDR++ main_window.cpp:635-656。
+
+        SDR++ 行为（main_window.cpp:638-656）：
+          - VSliderFloat 范围 0.0 ~ -160.0（顶部 0 dB，底部 -160 dB）
+          - 拖 Max 时 fftMax = max(fftMax, fftMin + 10)   （line 639）
+          - 拖 Min 时 fftMin = min(fftMax - 10, fftMin)   （line 652）
+        """
+        col = QVBoxLayout()
+        col.setContentsMargins(2, 0, 2, 0)
+        col.setSpacing(2)
+
+        col.addWidget(QLabel("Max", alignment=Qt.AlignHCenter))
+        self._db_max_slider = QSlider(Qt.Vertical)
+        # Qt 垂直滑杆：minimum 在底部、maximum 在顶部。
+        # 我们用 dB 整数值：-160（底）.. 0（顶）。
+        self._db_max_slider.setRange(-160, 0)
+        self._db_max_slider.setValue(int(self._state.db_max))
+        self._db_max_slider.setMinimumHeight(150)
+        self._db_max_slider.valueChanged.connect(self._on_db_max_changed)
+        col.addWidget(self._db_max_slider, stretch=1)
+
+        col.addWidget(QLabel("Min", alignment=Qt.AlignHCenter))
+        self._db_min_slider = QSlider(Qt.Vertical)
+        self._db_min_slider.setRange(-160, 0)
+        self._db_min_slider.setValue(int(self._state.db_min))
+        self._db_min_slider.setMinimumHeight(150)
+        self._db_min_slider.valueChanged.connect(self._on_db_min_changed)
+        col.addWidget(self._db_min_slider, stretch=1)
+
+        return col
+
+    def _on_db_max_changed(self, val: int):
+        # SDR++ main_window.cpp:639: fftMax = max(fftMax, fftMin + 10)
+        val = int(val)
+        min_val = self._db_min_slider.value()
+        if val <= min_val + 10:
+            val = min_val + 10
+            self._db_max_slider.blockSignals(True)
+            self._db_max_slider.setValue(val)
+            self._db_max_slider.blockSignals(False)
+        self._state.db_max = float(val)
+        self._plot.update()
+
+    def _on_db_min_changed(self, val: int):
+        # SDR++ main_window.cpp:652: fftMin = min(fftMax - 10, fftMin)
+        val = int(val)
+        max_val = self._db_max_slider.value()
+        if val >= max_val - 10:
+            val = max_val - 10
+            self._db_min_slider.blockSignals(True)
+            self._db_min_slider.setValue(val)
+            self._db_min_slider.blockSignals(False)
+        self._state.db_min = float(val)
+        self._plot.update()
 
     def _set_controls_enabled(self, on: bool):
         for w_ in (self._win_combo, self._fft_combo, self._avg_combo,
@@ -650,6 +743,7 @@ class SpectrumPlot(QWidget):
         self.setMouseTracking(True)
         self._press_x = None
         self._is_panning = False
+        self._last_pan_emit = 0.0   # 节流 panning 的 freq_changed 发射
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.update)
         self._timer.start(50)
@@ -674,7 +768,11 @@ class SpectrumPlot(QWidget):
             shift = -dx / max(1, self.width()) * gen.sample_rate_hz
             gen.center_freq_hz += shift
             self._press_anchor_x = event.position().x()
-            self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
+            # 节流：拖拽时不要每像素都 emit（会刷屏后端），≥100ms 才发一次
+            now = time.monotonic()
+            if now - self._last_pan_emit >= 0.1:
+                self._last_pan_emit = now
+                self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
         self.update()
 
     def mousePressEvent(self, event):
@@ -682,13 +780,18 @@ class SpectrumPlot(QWidget):
             self._press_x = event.position().x()
             self._press_anchor_x = event.position().x()
             self._is_panning = True
+            self._last_pan_emit = 0.0
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
             moved = abs(event.position().x() - (self._press_x or 0))
             self._is_panning = False
+            # 拖拽结束：emit 一次最终中心频率（后端据此真正调谐）
+            if moved > 4:
+                gen = self.state.panel.generator
+                self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
             # 小位移 = 点击放置固定 marker（读真实数组）
-            if moved <= 4 and self.state.panel.generator.has_data():
+            elif self.state.panel.generator.has_data():
                 gen = self.state.panel.generator
                 freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
                         + self._x_ratio(event) * gen.sample_rate_hz)
@@ -703,6 +806,7 @@ class SpectrumPlot(QWidget):
             self.update()
 
     def mouseDoubleClickEvent(self, event):
+        # 双击直接调谐到鼠标处频率（SDR++ waterfall 行为）
         gen = self.state.panel.generator
         freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
                 + self._x_ratio(event) * gen.sample_rate_hz)
@@ -732,6 +836,7 @@ if HAS_OPENGL:
             self._press_x = None
             self._press_anchor_x = 0
             self._is_panning = False
+            self._last_pan_emit = 0.0
             self._timer = QTimer(self)
             self._timer.timeout.connect(self.update)
             self._timer.start(50)
@@ -760,7 +865,10 @@ if HAS_OPENGL:
                 shift = -dx / max(1, self.width()) * gen.sample_rate_hz
                 gen.center_freq_hz += shift
                 self._press_anchor_x = event.position().x()
-                self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
+                now = time.monotonic()
+                if now - self._last_pan_emit >= 0.1:
+                    self._last_pan_emit = now
+                    self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
             self.update()
 
         def mousePressEvent(self, event):
@@ -768,12 +876,16 @@ if HAS_OPENGL:
                 self._press_x = event.position().x()
                 self._press_anchor_x = event.position().x()
                 self._is_panning = True
+                self._last_pan_emit = 0.0
 
         def mouseReleaseEvent(self, event):
             if event.button() == Qt.LeftButton:
                 moved = abs(event.position().x() - (self._press_x or 0))
                 self._is_panning = False
-                if moved <= 4 and self.state.panel.generator.has_data():
+                if moved > 4:
+                    gen = self.state.panel.generator
+                    self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
+                elif self.state.panel.generator.has_data():
                     gen = self.state.panel.generator
                     freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
                             + self._x_ratio(event) * gen.sample_rate_hz)

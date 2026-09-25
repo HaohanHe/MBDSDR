@@ -876,3 +876,169 @@ def find_spectrum_peaks(x: np.ndarray, sample_rate: float = 2400000.0,
              for f, p in cand[:n_peaks]]
     return {"peaks": peaks, "floor_db": round(floor_db, 2),
             "peak_count": len(peaks)}
+
+
+# ═══════════════════════════════════════════════════════
+# 6. SDR++ 风格接收 VFO（数字下变频通道）
+# ═══════════════════════════════════════════════════════
+
+class VFO:
+    """SDR++ 风格接收 VFO：频率变频 → 有理重采样 → 低通滤波。
+
+    逐行对照 SDR++ 源码（repos/sdrpp/core/src/dsp/channel/）：
+      - __init__     ↔ rx_vfo.h:19-33  init()
+      - set_offset   ↔ rx_vfo.h:72-77  setOffset()
+      - set_bandwidth ↔ rx_vfo.h:60-70 setBandwidth()
+      - process      ↔ rx_vfo.h:89-100 process()（xlator → resamp → filter）
+      - _generate_taps ↔ rx_vfo.h:117-121 generateTaps()
+
+    频率变频（FrequencyXlator）对照 channel/frequency_xlator.h:
+      - :21-23 init(in, offset, samplerate) → math::hzToRads(offset, samplerate)
+      - :15-19 phase=1+0j, phaseDelta = cos(offset)+j*sin(offset)
+      - :43-50 volk 旋转器：out[i] = in[i]*phase; phase *= phaseDelta
+    关键：rx_vfo.h:27 调 xlator.init(NULL, -_offset, _inSamplerate) ——
+    传负 offset，目的是把用户指定的目标频率（在输入频谱上的位置）搬移到 DC。
+
+    低通抽头对照 taps/low_pass.h:7-11 + taps/estimate_tap_count.h:5：
+      count = 3.8 * samplerate / transWidth；windowed_sinc.h:17-26 窗函数 sinc。
+    rx_vfo.h:119-120: filterWidth = bandwidth/2.0；
+      lowPass(filterWidth, filterWidth*0.1, outSamplerate)
+    （即截止=bandwidth/2，过渡带=filterWidth*0.1=bandwidth*0.05；以源码为准。）
+    """
+
+    def __init__(self, in_samplerate: float, out_samplerate: float,
+                 bandwidth: float, offset: float = 0.0):
+        """in_samplerate: 输入采样率(Hz); out_samplerate: 输出采样率(Hz);
+        bandwidth: VFO 带宽(Hz); offset: 变频偏移(Hz)，正=把 +offset 处信号搬到 DC。"""
+        self._in_sr = float(in_samplerate)
+        self._out_sr = float(out_samplerate)
+        self._bandwidth = float(bandwidth)
+        self._offset = float(offset)
+
+        # rx_vfo.h:24 filterNeeded = (_bandwidth != _outSamplerate)
+        self._filter_needed = abs(self._bandwidth - self._out_sr) > 1e-6
+
+        # rx_vfo.h:27 xlator.init(NULL, -_offset, _inSamplerate)
+        self._phase = complex(1.0, 0.0)
+        self._rebuild_xlator()
+
+        # rx_vfo.h:28 resamp.init(NULL, _inSamplerate, _outSamplerate)
+        self._up = 1
+        self._down = 1
+        self._rebuild_rational()
+
+        # rx_vfo.h:29-30 generateTaps + filter.init
+        self._taps = None
+        if self._filter_needed:
+            self._generate_taps()
+
+    # ---------- 内部：频率变频 ----------
+    def _rebuild_xlator(self):
+        """frequency_xlator.h:21-23 hzToRads(offset, sr) = 2π*offset/sr。
+        rx_vfo.h:27/76 传给 xlator 的是 -_offset（把目标频率搬到 DC）。"""
+        self._d_theta = 2.0 * np.pi * (-self._offset) / self._in_sr
+        self._phase_delta = complex(np.cos(self._d_theta), np.sin(self._d_theta))
+
+    # ---------- 内部：有理重采样系数 ----------
+    def _rebuild_rational(self):
+        from math import gcd
+        g = gcd(int(round(self._out_sr)), int(round(self._in_sr)))
+        self._up = int(round(self._out_sr)) // g
+        self._down = int(round(self._in_sr)) // g
+
+    # ---------- 内部：低通抽头 ----------
+    def _generate_taps(self):
+        """rx_vfo.h:117-121 generateTaps()。"""
+        cutoff = self._bandwidth / 2.0          # rx_vfo.h:119
+        trans_width = cutoff * 0.1             # rx_vfo.h:120 lowPass(filterWidth, filterWidth*0.1, ...)
+        # estimate_tap_count.h:5: count = 3.8 * samplerate / transWidth
+        count = int(round(3.8 * self._out_sr / trans_width))
+        if count % 2 == 0:
+            count += 1  # 奇数抽头 = Type I 线性相位 FIR
+        count = max(15, min(count, 4095))
+
+        try:
+            from scipy.signal import firwin
+            nyq = self._out_sr / 2.0
+            self._taps = firwin(count, cutoff / nyq, window='nuttall',
+                                scale=True).astype(np.float64)
+        except ImportError:
+            # numpy 兜底：窗函数 sinc（windowed_sinc.h:17-26 的直译，Nuttall 窗）
+            t = np.arange(count) - (count - 1) / 2.0
+            h = 2.0 * (cutoff / self._out_sr) * np.sinc(2.0 * (cutoff / self._out_sr) * t)
+            n = np.arange(count)
+            w = (0.355768
+                 - 0.487396 * np.cos(2.0 * np.pi * n / max(count - 1, 1))
+                 + 0.144232 * np.cos(4.0 * np.pi * n / max(count - 1, 1))
+                 - 0.012604 * np.cos(6.0 * np.pi * n / max(count - 1, 1)))
+            taps = h * w
+            taps /= np.sum(taps)
+            self._taps = taps.astype(np.float64)
+
+    # ---------- 公开接口 ----------
+    def set_offset(self, offset_hz: float):
+        """设置变频偏移（对照 rx_vfo.h:72-77 setOffset）。"""
+        self._offset = float(offset_hz)
+        self._rebuild_xlator()
+
+    def set_bandwidth(self, bandwidth_hz: float):
+        """设置 VFO 带宽并重建低通滤波器（对照 rx_vfo.h:60-70 setBandwidth）。"""
+        self._bandwidth = float(bandwidth_hz)
+        self._filter_needed = abs(self._bandwidth - self._out_sr) > 1e-6
+        if self._filter_needed:
+            self._generate_taps()
+        else:
+            self._taps = None
+
+    def reset(self):
+        """重置相位累加器（对照 frequency_xlator.h:35-41 reset）。"""
+        self._phase = complex(1.0, 0.0)
+
+    def process(self, iq: np.ndarray) -> np.ndarray:
+        """处理一帧复 IQ：变频 → 重采样 → 低通滤波（对照 rx_vfo.h:89-100）。
+        返回处理后的复 IQ（长度约 = len(iq) * out_sr / in_sr）。"""
+        n = len(iq)
+        if n == 0:
+            return iq
+        x = np.asarray(iq)
+        in_dtype = x.dtype
+
+        # 1) 频率变频（在 in_sr 上）—— rx_vfo.h:90 xlator.process
+        # frequency_xlator.h:43-50: out[i] = in[i]*phase; phase *= phaseDelta
+        # 向量化：phase_k = phase0 * exp(j * d_theta * k)，状态跨帧保持
+        k = np.arange(n, dtype=np.float64)
+        mult = self._phase * np.exp(1j * self._d_theta * k)
+        x = x * mult.astype(np.complex128 if x.dtype == np.complex128 else np.complex64)
+        # 推进相位累加器：phase *= phaseDelta^n
+        self._phase = self._phase * np.exp(1j * self._d_theta * n)
+        mag = abs(self._phase)
+        if mag > 1e-12:
+            self._phase /= mag  # 防长期幅度漂移（volk rotator 同样有此问题）
+
+        # 2) 有理重采样 in_sr → out_sr —— rx_vfo.h:92/94 resamp.process
+        if self._up != 1 or self._down != 1:
+            try:
+                from scipy.signal import resample_poly
+                x = resample_poly(x, self._up, self._down)
+            except ImportError:
+                # numpy 兜底：线性插值（粗糙但可用；scipy 不可用时的降级路径）
+                n_new = int(round(n * self._out_sr / self._in_sr))
+                t_old = np.linspace(0.0, 1.0, n, endpoint=False)
+                t_new = np.linspace(0.0, 1.0, n_new, endpoint=False)
+                x = (np.interp(t_new, t_old, x.real)
+                     + 1j * np.interp(t_new, t_old, x.imag))
+        # else: in_sr == out_sr，跳过重采样（rx_vfo.h:28 也允许）
+
+        # 3) 低通滤波（在 out_sr 上）—— rx_vfo.h:97 filter.process
+        if self._filter_needed and self._taps is not None:
+            try:
+                from scipy.signal import lfilter
+                x = lfilter(self._taps, 1.0, x)
+            except ImportError:
+                if x.dtype in (np.complex64, np.complex128):
+                    x = (np.convolve(x.real, self._taps, mode='same')
+                         + 1j * np.convolve(x.imag, self._taps, mode='same'))
+                else:
+                    x = np.convolve(x, self._taps, mode='same')
+
+        return x.astype(in_dtype)
