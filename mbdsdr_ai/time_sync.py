@@ -3,6 +3,12 @@ MBDSDR 授时（纯 socket，无第三方依赖）
 ======================================
 NTP 校时：查询 NTP 服务器，返回本地时钟偏差。
 新时空主线的授时能力（与仰角/轨道配套）。
+
+与 TimeEngine 的关系：
+  - NTP 测量的是"真实世界系统时钟"的偏差（time.time() 域）。
+  - TimeEngine（new_spacetime.TimeEngine）是"模拟时钟"，可被时间穿梭拖动。
+  - 两者解耦：NTP 校时不影响模拟时间；但可通过 simulation_clock_offset()
+    查看当前模拟时间相对真实时间的偏移，供 UI 显示"你穿越了多久"。
 """
 from __future__ import annotations
 import socket
@@ -13,6 +19,29 @@ from typing import Dict
 
 # NTP 时间戳：1900-01-01 到 1970-01-01 的秒数
 _NTP_DELTA = 2208988800
+
+
+def simulation_clock_offset() -> Dict:
+    """
+    当前模拟时间相对真实系统时间的偏移（秒）。
+    正 = 模拟时间在未来；负 = 在过去。
+    时间穿梭时 UI 可用此值显示"已穿越多久"。
+    对应 Stellarium StelCore::getJD() 与系统 JD 的差。
+    """
+    try:
+        from new_spacetime import get_time_engine
+    except ImportError:
+        from .new_spacetime import get_time_engine
+    eng = get_time_engine()
+    sim_unix = eng.now_unix()
+    real_unix = time.time()
+    return {
+        "simulation_unix": sim_unix,
+        "real_unix": real_unix,
+        "offset_seconds": round(sim_unix - real_unix, 3),
+        "rate": eng.get_rate(),
+        "following_system": eng.is_following_system(),
+    }
 
 
 def ntp_offset(server: str = "ntp.aliyun.com", port: int = 123, timeout: float = 3.0) -> Dict:
