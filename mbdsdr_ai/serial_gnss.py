@@ -27,13 +27,14 @@ MBDSDR AI - 真实串口 GNSS 接入（骨架）
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import socket
 import base64
 import math
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, Callable, List
+from typing import Optional, Dict, Any, Callable, List, Tuple
 
 try:
     import serial  # pyserial 3.5+
@@ -45,9 +46,22 @@ except Exception:  # pragma: no cover - 无 pyserial 时退化，不影响 impor
     _SERIAL_AVAILABLE = False
 
 
-# 常见 GNSS 波特率（来源：NMEA-0183 / 各模块默认波特率表，UBlox/NEO/M8N 默认 9600，
-# 老模块 4800，RTK 模块常配 38400/115200）
-DEFAULT_BAUDRATES = [4800, 9600, 38400, 57600, 115200]
+# 常见 GNSS 波特率（来源：NMEA-0183 / 各模块默认波特率表）。
+# ATGM336H / UBlox NEO-M8N 默认 9600，故 9600 排首位；RTK 模块常配 38400/115200。
+DEFAULT_BAUDRATES = [9600, 38400, 115200, 57600, 4800]
+
+# auto_detect 探测窗口参数：
+# - 每个 端口×波特率 组合至少读 _AUTODETECT_PORT_WINDOW 秒（GNSS 模块上电 / CH340 枚举有延迟）
+# - 窗口内累计收到至少 _AUTODETECT_MIN_NMEA 条“$ 开头且校验和正确”的语句才算命中
+# - 所有组合扫描总时长硬上限 _AUTODETECT_TOTAL_BUDGET 秒，避免 UI 启动卡死
+_AUTODETECT_PORT_WINDOW = 1.5
+_AUTODETECT_MIN_NMEA = 3
+_AUTODETECT_TOTAL_BUDGET = 15.0
+_AUTODETECT_READ_CHUNK = 0.2  # 单次 readline 阻塞上限（秒），便于在窗口内循环计数
+
+# GSV 多帧聚合：同一 talker 的一帧序列若超过 _GSV_AGG_TIMEOUT 秒未收齐最后一帧，
+# 丢弃不完整缓冲，避免天空图把半截帧当成完整卫星列表而闪烁。
+_GSV_AGG_TIMEOUT = 2.0
 
 # 多星座 talker 前缀（来源 direwolf dwgpsnmea.c:38-42；补充 BD=北斗部分厂商私有前缀）
 TALKER_IDS = ("GP", "GL", "GA", "GB", "BD", "GN")
@@ -111,13 +125,24 @@ class NMEAParser:
     每条语句 dict 至少包含 ``talker``、``sentence``（如 'GGA'）；
     具体字段见各 parse_* 实现。
 
-    GSV 多帧聚合：内部按 ``talker`` 缓冲各帧，收到最后一帧时合并返回
+    GSV 多帧聚合：内部按 ``(talker, total_messages)`` 缓冲各帧，收到最后一帧时合并返回
     完整 sats 列表（dict 带 ``aggregated=True``）；中间帧返回 None。
+    若某 talker 的一帧序列超过 ``_GSV_AGG_TIMEOUT`` 秒仍未收齐最后一帧，
+    丢弃不完整缓冲（避免返回半截卫星列表导致天空图闪烁）。
     """
 
     def __init__(self):
-        # GSV 多帧缓冲：key = f"{talker}GSV"，value = 已收到帧的 dict 列表
-        self._gsv_buf: Dict[str, List[Dict[str, Any]]] = {}
+        # GSV 多帧缓冲：key = (talker, total_messages)，value =
+        #   {"frames": [已收到的 frame dict, ...], "ts": 收到首帧的 monotonic 时间}
+        self._gsv_buf: Dict[Tuple[str, int], Dict[str, Any]] = {}
+
+    def _gsv_sweep_stale(self, now: Optional[float] = None) -> None:
+        """丢弃超过 _GSV_AGG_TIMEOUT 仍未收齐的 GSV 缓冲（防半截帧残留）。"""
+        now = time.time() if now is None else now
+        stale = [k for k, v in self._gsv_buf.items()
+                 if now - v.get("ts", now) > _GSV_AGG_TIMEOUT]
+        for k in stale:
+            self._gsv_buf.pop(k, None)
 
     def parse(self, line: str) -> Optional[Dict[str, Any]]:
         line = (line or "").strip()
@@ -227,10 +252,15 @@ class NMEAParser:
             "vdop": float(f[17]) if len(f) > 17 and f[17] else None,
         }
 
-    # ---- GSV: 可见卫星（可能多帧，按 talker 聚合） ----
-    # $GNGSV,nummsg,msgnum,numsv,sv,elev,az,snr,sv,...*CC
-    # 单帧(total_messages==1)直接返回；多帧时缓存各帧，最后一帧合并返回。
-    # 中间帧返回 None（调用方应忽略）。北斗 GBGSV 卫星 PRN 可能 >32，正常按整数解析。
+    # ---- GSV: 可见卫星（可能多帧，按 talker+总帧数 聚合） ----
+    # $xxGSV,total_messages,message_number,satellites_in_view,sv,elev,az,snr,...*CC
+    # 每个星座（GP=GPS / GB|BD=北斗 / GL=GLONASS / GA=Galileo）独立发多帧 GSV。
+    # 聚合 key = (talker, total_messages)：
+    #   - message_number==1            → 该 talker 新序列开始，清空旧缓冲；
+    #   - message_number<total          → 追加进缓冲，暂不返回（中间帧）；
+    #   - message_number==total         → 收齐，合并全部缓冲帧后返回完整 sats。
+    # 若一帧序列超过 _GSV_AGG_TIMEOUT 秒未收齐，sweep 丢弃半截缓冲，绝不返回部分帧。
+    # 北斗 GBGSV 卫星 PRN 可能 >32，按整数正常解析。
     def _parse_gsv(self, talker: str, f: List[str]) -> Optional[Dict[str, Any]]:
         sats = []
         # 每 4 字段一组：id, elev, az, snr
@@ -255,20 +285,29 @@ class NMEAParser:
             "sats": sats,
             "aggregated": False,
         }
-        # 单帧直接返回
+        # 先清扫过期的半截缓冲（可能某 talker 掉帧后再也收不到末帧）
+        self._gsv_sweep_stale()
+        # 单帧（total<=1）直接返回，不进聚合缓冲
         if total <= 1:
             return frame
-        # 多帧：按 talker 分组缓冲
-        key = f"{talker}GSV"
+        # 多帧：按 (talker, total) 分组缓冲
+        key: Tuple[str, int] = (talker, total)
+        now = time.time()
         if num <= 1:
-            # 新一帧序列开始，重置缓冲（防止上轮丢帧导致脏数据）
-            self._gsv_buf[key] = [frame]
+            # 新一帧序列开始：重置该 talker 该总帧数的缓冲（防上轮丢帧脏数据）
+            self._gsv_buf[key] = {"frames": [frame], "ts": now}
         else:
-            self._gsv_buf.setdefault(key, []).append(frame)
+            entry = self._gsv_buf.get(key)
+            if entry is None:
+                # 错过了第 1 帧（例如读取中途启动）：以当前帧为新起点继续收，
+                # 收齐末帧后合并手上已有帧，不空返也不报错。
+                entry = {"frames": [], "ts": now}
+                self._gsv_buf[key] = entry
+            entry["frames"].append(frame)
         if num >= total:
-            # 收到最后一帧：合并所有缓冲帧
+            # 收到最后一帧：合并该 talker 缓冲的全部帧为完整 sats 列表
             all_sats: List[Dict[str, Any]] = []
-            buffered = self._gsv_buf.pop(key, [frame])
+            buffered = self._gsv_buf.pop(key, {"frames": [frame]})["frames"]
             for fr in buffered:
                 all_sats.extend(fr.get("sats", []))
             agg = dict(frame)
@@ -392,7 +431,10 @@ class SerialGNSSReader:
         # 最新 GSV/GSA 缓存：供天空图绘制真实卫星天空图
         # _latest_gsv: talker -> 最近一次聚合完成的 GSV frame（sats 完整列表）
         self._latest_gsv: Dict[str, Dict[str, Any]] = {}
-        self._latest_gsa: Optional[Dict[str, Any]] = None
+        # _latest_gsa: talker -> 该星座最新 GSA 数据
+        #   GP=GPS / BD|GB=北斗 / GL=GLONASS / GA=Galileo 分别独立存储，互不覆盖。
+        #   get_gsa() 返回该 dict，并在顶层合并所有星座的 used PRN 供天空图高亮。
+        self._latest_gsa: Dict[str, Dict[str, Any]] = {}
 
     @staticmethod
     def _empty_fix() -> Dict[str, Any]:
@@ -406,6 +448,30 @@ class SerialGNSSReader:
         }
 
     @staticmethod
+    def _discover_by_id_ports() -> List[Dict[str, Any]]:
+        """补充扫描 Linux ``/dev/serial/by-id/``（按 USB 序列号的稳定设备标识）。
+
+        CH340/CP2102 等 USB-TTL 在此目录下有符号链接，比 ``/dev/ttyUSBx`` 更稳定
+        （插拔后 ttyUSBx 编号可能漂移，by-id 名不变）。目录不存在/无权限时返回 []。
+        """
+        out: List[Dict[str, Any]] = []
+        base = "/dev/serial/by-id"
+        try:
+            for name in os.listdir(base):
+                path = os.path.join(base, name)
+                if os.path.exists(path):
+                    out.append({
+                        "device": path,
+                        "description": "usb-serial by-id",
+                        "manufacturer": "",
+                        "hwid": name,
+                        "usb_ttl_chip": None,
+                    })
+        except OSError:
+            pass
+        return out
+
+    @staticmethod
     def list_candidate_ports() -> List[Dict[str, Any]]:
         """枚举候选串口，返回带描述信息的字典列表。
 
@@ -417,27 +483,37 @@ class SerialGNSSReader:
              "hwid": "USB VID:PID=1A86:7523 ..."}
 
         自动识别 CH340/CP2102/FT232/PL2303 等常见 USB-TTL 芯片（description
-        或 manufacturer 命中关键字即视为已知芯片）。无 pyserial 返回 []。
+        或 manufacturer 命中关键字即视为已知芯片）。同时合并 ``/dev/serial/by-id``
+        下的稳定符号链接（按 realpath 去重，避免重复探测同一物理口）。
+        无 pyserial 返回 []。
         """
-        if not _SERIAL_AVAILABLE or list_ports is None:
-            return []
         ports: List[Dict[str, Any]] = []
-        try:
-            for p in list_ports.comports():
-                desc = (p.description or "")
-                mfr = (p.manufacturer or "")
-                ports.append({
-                    "device": p.device,
-                    "description": desc,
-                    "manufacturer": mfr,
-                    "hwid": (p.hwid or ""),
-                    "usb_ttl_chip": next(
-                        (chip for chip in _USB_TTL_CHIPS
-                         if chip in (desc + " " + mfr).lower()),
-                        None),
-                })
-        except Exception:
-            pass
+        seen_realpaths: set = set()
+        if _SERIAL_AVAILABLE and list_ports is not None:
+            try:
+                for p in list_ports.comports():
+                    desc = (p.description or "")
+                    mfr = (p.manufacturer or "")
+                    rp = os.path.realpath(p.device)
+                    seen_realpaths.add(rp)
+                    ports.append({
+                        "device": p.device,
+                        "description": desc,
+                        "manufacturer": mfr,
+                        "hwid": (p.hwid or ""),
+                        "usb_ttl_chip": next(
+                            (chip for chip in _USB_TTL_CHIPS
+                             if chip in (desc + " " + mfr).lower()),
+                            None),
+                    })
+            except Exception:
+                pass
+        # 追加 /dev/serial/by-id 符号链接（realpath 去重）
+        for info in SerialGNSSReader._discover_by_id_ports():
+            if os.path.realpath(info["device"]) in seen_realpaths:
+                continue
+            seen_realpaths.add(os.path.realpath(info["device"]))
+            ports.append(info)
         return ports
 
     @staticmethod
@@ -452,44 +528,58 @@ class SerialGNSSReader:
 
     @classmethod
     def auto_detect(cls, baudrates: Optional[List[int]] = None,
-                    read_timeout: float = 0.6) -> Optional[Dict[str, Any]]:
-        """扫描所有候选串口 × 波特率，读到一条合法 NMEA 即锁定。
+                    read_timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
+        """扫描所有候选串口 × 波特率，读到足够合法 NMEA 即锁定。
 
-        优先探测 description/manufacturer 命中 GNSS 关键字（GPS/GNSS/u-blox/
-        NEO/M8N 等）的端口，缩短热插拔后的锁定时间。
+        - 每个 端口×波特率 组合读取窗口至少 ``_AUTODETECT_PORT_WINDOW``（1.5s）：
+          GNSS 模块上电、CH340 枚举后才开始吐 NMEA，窗口太短会漏检。
+        - 命中判据：窗口内累计收到至少 ``_AUTODETECT_MIN_NMEA``（3）条
+          “``$`` 开头且校验和正确”的 NMEA 语句——单条可能是上电残留/乱码误判。
+        - 所有组合扫描总时长硬上限 ``_AUTODETECT_TOTAL_BUDGET``（15s），
+          到点立即放弃，避免 UI 启动卡死。
+        - 优先探测 description/manufacturer 命中 GNSS 关键字的端口。
 
-        返回 {"port":..., "baudrate":...}；无设备/无合法 NMEA 返回 None，绝不崩溃。
+        返回 {"port":..., "baudrate":...}；无设备/无合法 NMEA 返回 None，
+        不阻塞、不抛异常、不返回假数据。
         """
         if not _SERIAL_AVAILABLE:
             return None
-        baudrates = baudrates or DEFAULT_BAUDRATES
+        baudrates = baudrates or list(DEFAULT_BAUDRATES)
+        window = float(read_timeout) if read_timeout else _AUTODETECT_PORT_WINDOW
+        if window < _AUTODETECT_PORT_WINDOW:
+            window = _AUTODETECT_PORT_WINDOW  # 探测窗口下限 1.5s
         infos = cls.list_candidate_ports()
         if not infos:
             return None
         # GNSS 相关端口排前面（sort 稳定，保持其余顺序）
         infos.sort(key=lambda info: 0 if cls._is_gnss_port(info) else 1)
         parser = NMEAParser()
+        budget_deadline = time.time() + _AUTODETECT_TOTAL_BUDGET
         for info in infos:
+            if time.time() >= budget_deadline:
+                break
             port = info["device"]
-            # GNSS 嫌疑端口给足窗口；普通端口缩短窗口以加快整体扫描
-            win = read_timeout if cls._is_gnss_port(info) else read_timeout * 0.5
             for baud in baudrates:
+                if time.time() >= budget_deadline:
+                    break
                 ser = None
                 try:
-                    ser = serial.Serial(port, baud, timeout=win)
-                    # 丢弃启动垃圾，读若干行找合法 NMEA
-                    deadline = time.time() + win + 0.3
-                    while time.time() < deadline:
+                    # 单次 readline 阻塞短一点，便于在窗口内循环累计合法语句数
+                    ser = serial.Serial(port, baud, timeout=_AUTODETECT_READ_CHUNK)
+                    win_deadline = time.time() + window
+                    valid = 0
+                    while time.time() < win_deadline:
                         raw = ser.readline()
                         if not raw:
-                            break
+                            continue  # 本 chunk 超时，继续等到窗口结束
                         try:
                             line = raw.decode("ascii", errors="ignore")
                         except Exception:
                             continue
                         if line.startswith("$") and parser.parse(line) is not None:
-                            ser.close()
-                            return {"port": port, "baudrate": baud}
+                            valid += 1
+                            if valid >= _AUTODETECT_MIN_NMEA:
+                                return {"port": port, "baudrate": baud}
                 except Exception:
                     # 端口被占用/无权限/非 GNSS：试下一个
                     pass
@@ -641,21 +731,33 @@ class SerialGNSSReader:
                 if talker:
                     self._latest_gsv[talker] = dict(rec)
             elif s == "GSA":
-                self._latest_gsa = dict(rec)
+                # 按 talker 分别存储：GP GSA 是 GPS 用星，BD GSA 是北斗用星……
+                # 不同星座的 GSA 互不覆盖，get_gsa() 再合并 used PRN。
+                talker = rec.get("talker")
+                if talker:
+                    self._latest_gsa[talker] = dict(rec)
 
     def get_fix(self) -> Dict[str, Any]:
-        """返回最新 fix 快照。无数据时 source='none'、坐标为 None，绝不造假。"""
+        """返回最新 fix 快照。
+
+        无有效 RMC/GGA（从未收到任何 NMEA）或数据过期（>10s 无新 NMEA）时，
+        返回 ``source="none"`` 且所有坐标字段为 None——绝不返回 (0,0) 或旧坐标。
+        只要 10s 内收到过合法 NMEA，就返回最新合并结果（即便 fix 未定，
+        source 仍为 "real"、坐标为 None，符合“收到语句但未定位”的状态）。
+        """
         with self._lock:
-            # 超过 10 秒无新数据视为丢失
-            if self._running.is_set() and self._fix["timestamp"] is not None:
-                if time.time() - self._fix["timestamp"] > 10.0:
-                    snap = dict(self._fix)
-                    snap["source"] = "none"
-                    return snap
+            ts = self._fix["timestamp"]
+            stale = ts is None or (time.time() - ts > 10.0)
+            if stale:
+                # 过期/无数据：显式返回空 fix，杜绝旧坐标残留
+                return self._empty_fix()
             return dict(self._fix)
 
     def _gsv_stale(self) -> bool:
-        """与 get_fix 一致的新鲜度判定：连续 10s 无新 NMEA 视为数据丢失。"""
+        """天空图数据新鲜度：仅当“读线程在跑但连续 >10s 无新 NMEA”才视为过期。
+
+        未启动线程时不算 stale（兼容直接 _merge 的单元测试/喂数据场景）。
+        """
         return (self._running.is_set() and self._fix["timestamp"] is not None
                 and time.time() - self._fix["timestamp"] > 10.0)
 
@@ -672,12 +774,49 @@ class SerialGNSSReader:
                 return []
             return [dict(fr) for fr in self._latest_gsv.values()]
 
-    def get_gsa(self) -> Optional[Dict[str, Any]]:
-        """返回最新 GSA 帧（satellites_used / fix_type / pdop...）。无数据返回 None。"""
+    def get_gsa(self) -> Dict[str, Any]:
+        """返回按 talker ID 分组的 GSA 数据，供天空图标记“定位中”卫星。
+
+        返回 dict ::
+
+            {
+              "GP": {"talker":"GP", "fix_type":3, "mode":"A",
+                     "satellites_used":[1,2,3], "prns":[1,2,3],
+                     "pdop":..,"hdop":..,"vdop":..},
+              "BD": {...}, "GL": {...}, "GA": {...},
+              # 顶层合并字段（兼容天空图 update_gnss_satellites 的扁平读法）：
+              "satellites_used": [1,2,3,33],   # 所有星座 used PRN 合并去重
+              "fix_type": 3,                   # 最能代表当前定位的 fix_type
+            }
+
+        无 GSA 数据时返回空 dict ``{}``（falsy），绝不返回 None 或假数据。
+        """
         with self._lock:
-            if self._gsv_stale():
-                return None
-            return dict(self._latest_gsa) if self._latest_gsa else None
+            if self._gsv_stale() or not self._latest_gsa:
+                return {}
+            out: Dict[str, Any] = {}
+            used: List[int] = []
+            best_fix = 0
+            for talker, rec in self._latest_gsa.items():
+                g = dict(rec)
+                prns = list(rec.get("satellites_used", []) or [])
+                g["prns"] = prns  # 任务约定的字段名别名
+                out[talker] = g
+                used.extend(prns)
+                ft = rec.get("fix_type", 0) or 0
+                # 取最高精度：3D(3) > 2D(2) > 无(1/0)
+                if ft > best_fix:
+                    best_fix = ft
+            # 顶层合并 used PRN（去重、保序），供天空图直接高亮
+            seen = set()
+            merged_used: List[int] = []
+            for p in used:
+                if p not in seen:
+                    seen.add(p)
+                    merged_used.append(p)
+            out["satellites_used"] = merged_used
+            out["fix_type"] = best_fix
+            return out
 
 
 # ============================================================
@@ -872,6 +1011,32 @@ if __name__ == "__main__":
     check("GBGSV 末帧聚合 3 颗（PRN>32 正常）", b2 and b2["aggregated"] is True
           and len(b2["sats"]) == 3 and any(s["id"] == 211 for s in b2["sats"]))
 
+    # --- 3d2. GP GSV 三帧完整聚合（验收：收齐才返回完整列表） ---
+    pgps = NMEAParser()
+    g1 = pgps.parse(make("GPGSV,3,1,8,01,88,045,42"))
+    g2 = pgps.parse(make("GPGSV,3,2,8,02,45,120,38"))
+    g3 = pgps.parse(make("GPGSV,3,3,8,03,30,200,25"))
+    check("GP GSV 帧1/2 不返回（未收齐）", g1 is None and g2 is None)
+    check("GP GSV 帧3 收齐返回 3 颗", g3 and g3["aggregated"] is True
+          and len(g3["sats"]) == 3
+          and [s["id"] for s in g3["sats"]] == [1, 2, 3])
+
+    # --- 3d3. GSV 超时：半截缓冲超 2s 被丢弃，不返回部分帧 ---
+    pto = NMEAParser()
+    t1 = pto.parse(make("GPGSV,2,1,6,01,80,040,40"))
+    t2 = pto.parse(make("GPGSV,2,2,6,02,40,100,30"))  # 正常收齐 -> 2 颗
+    check("超时用例前置：2 帧收齐=2 颗", t2 and len(t2["sats"]) == 2)
+    pin = NMEAParser()
+    pin.parse(make("GPGSV,3,1,9,11,80,040,40"))   # 帧1
+    r_mid = pin.parse(make("GPGSV,3,2,9,12,40,100,30"))  # 帧2
+    check("半截序列中间帧不返回", r_mid is None)
+    # 把缓冲时间戳拨到 999 秒前，模拟超过 _GSV_AGG_TIMEOUT 未收齐
+    pin._gsv_buf[("GP", 3)]["ts"] = time.time() - 999
+    r_last = pin.parse(make("GPGSV,3,3,9,13,20,200,25"))  # 迟到的末帧
+    # 半截缓冲已被丢弃：末帧单独成帧，只剩 1 颗（而非错误地拼出 3 颗）
+    check("超时丢弃半截缓冲，不返回部分帧", r_last and len(r_last["sats"]) == 1
+          and r_last["sats"][0]["id"] == 13)
+
     # --- 3e. BDTXT 文本语句（不崩溃） ---
     txt = p.parse(make("BDTXT,01,01,01,HW U-BLOX 8 READY"))
     check("BDTXT 解析为 TXT", txt and txt["sentence"] == "TXT"
@@ -887,7 +1052,28 @@ if __name__ == "__main__":
     rd = SerialGNSSReader()
     fix = rd.get_fix()
     check("无串口 get_fix source=none", fix["source"] == "none" and fix["latitude"] is None)
+    check("无串口 get_fix 坐标全 None", fix["latitude"] is None
+          and fix["longitude"] is None and fix["altitude_m"] is None)
     check("无串口 is_connected()=False", rd.is_connected() is False)
+
+    # --- 5b. GSA 多星座：GP GSA + BD GSA 分别存储，used PRN 合并 ---
+    rg = SerialGNSSReader()
+    gsa_gp = p.parse(make("GPGSA,A,3,01,02,03,,,,,,,,,,1.2,0.9,0.6"))
+    gsa_bd = p.parse(make("BDGSA,A,3,31,32,,,,,,,,,,,,1.5,1.0,0.8"))
+    assert gsa_gp and gsa_bd
+    rg._merge(gsa_gp)
+    rg._merge(gsa_bd)
+    gsa_out = rg.get_gsa()
+    check("get_gsa 按 talker 分组含 GP/BD", "GP" in gsa_out and "BD" in gsa_out)
+    check("GP GSA used PRN=[1,2,3]", gsa_out.get("GP", {}).get("satellites_used") == [1, 2, 3])
+    check("BD GSA used PRN=[31,32]", gsa_out.get("BD", {}).get("satellites_used") == [31, 32])
+    check("GP fix_type=3", gsa_out.get("GP", {}).get("fix_type") == 3)
+    check("顶层合并 used PRN=[1,2,3,31,32]", gsa_out.get("satellites_used") == [1, 2, 3, 31, 32])
+    check("顶层合并 fix_type=3", gsa_out.get("fix_type") == 3)
+    # 无 GSA 数据时返回空 dict
+    rg_empty = SerialGNSSReader()
+    check("无 GSA get_gsa 返回 {}", rg_empty.get_gsa() == {})
+    check("无 GSV get_gsv_frames 返回 []", rg_empty.get_gsv_frames() == [])
 
     # --- 6. auto_detect 在无设备环境返回 None 不崩溃 ---
     res = SerialGNSSReader.auto_detect()
