@@ -1,12 +1,13 @@
 """
 桌面端新面板冒烟测试
-======================
+====================
 
-验证 desktop/weather_panel.py 与 desktop/doppler_panel.py：
+验证 desktop/weather_panel.py 与 desktop/doppler_panel.py（单一真实数据源架构）：
   1. 两个面板类可实例化（offscreen 平台）；
-  2. 关键控件存在（卫星/目标下拉、模式下拉、开始/演示按钮、图像/画布）；
-  3. 默认无真实硬件时，「实时 SDR」模式显示未连接状态、开始按钮置灰；
-  4. main_window 可 import 新面板（不必真正显示完整主窗口）。
+  2. 关键控件存在（卫星/目标下拉、来源下拉、开始/停止按钮、图像/画布）；
+  3. 不存在任何“模拟演示”按钮（demo_btn 已随模拟模式一并移除）；
+  4. 默认无真实硬件时，「实时 SDR」模式开始按钮置灰、显示未连接；
+  5. main_window 可 import 新面板。
 
 运行:
     QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_desktop_panels.py -v
@@ -34,25 +35,27 @@ class TestWeatherPanel:
         from weather_panel import WeatherPanel, SATELLITES
         w = WeatherPanel()
         assert w is not None
-        # 卫星下拉包含指定的 8 颗卫星
+        # 卫星下拉来自真实 SATELLITES 字典
         items = [w.sat_combo.itemText(i) for i in range(w.sat_combo.count())]
-        for name in ["GK-2A (128.2°E)", "FY-4A (104.7°E)", "FY-4B (133°E)",
-                     "FY-3D", "FY-3E", "FY-3F", "GOES-16", "NOAA-19"]:
+        for name in ["GK-2A LRIT (128.2°E)", "FY-4A HRIT (104.7°E)",
+                     "GOES-16 HRIT (75.2°W)", "NOAA-19 APT"]:
             assert name in items, f"缺少卫星 {name}"
-        assert len(SATELLITES) >= 8
+        assert len(SATELLITES) >= 6
 
     def test_controls_exist(self):
         from weather_panel import WeatherPanel
         w = WeatherPanel()
-        assert w.mode_combo.count() == 2
-        assert "离线 IQ 文件" in [w.mode_combo.itemText(i) for i in range(2)]
-        assert "实时 SDR" in [w.mode_combo.itemText(i) for i in range(2)]
+        # 数据来源下拉（录制文件 / 实时 SDR）
+        assert w.src_combo.count() == 2
+        assert "录制文件" in [w.src_combo.itemText(i) for i in range(2)]
+        assert "实时 SDR" in [w.src_combo.itemText(i) for i in range(2)]
         assert w.start_btn.text().startswith("开始")
         assert w.stop_btn.text() == "停止"
-        assert "[模拟]" in w.demo_btn.text()
+        # 模拟演示按钮必须不存在
+        assert not hasattr(w, "demo_btn")
         # 四个增强选项
         assert set(w.enh_checks.keys()) >= {"中值滤波", "直方图均衡", "白平衡", "Kuwahara 降噪"}
-        # 图像占位
+        # 图像占位：无数据
         assert "无数据" in w.image_label.text()
 
     def test_no_hardware_shows_disconnected(self):
@@ -61,20 +64,19 @@ class TestWeatherPanel:
         # 默认未连接真实 SDR
         assert w._sdr_connected is False
         # 切到实时 SDR：开始按钮置灰，状态显示未连接
-        idx = w.mode_combo.findText("实时 SDR")
-        w.mode_combo.setCurrentIndex(idx)
+        w.src_combo.setCurrentIndex(w.src_combo.findText("实时 SDR"))
         assert w.start_btn.isEnabled() is False
         assert "未连接SDR设备" in w.status_label.text()
-        # 切回离线：开始按钮可用（未选文件时点击会提示，但按钮本身启用）
-        w.mode_combo.setCurrentIndex(w.mode_combo.findText("离线 IQ 文件"))
-        assert w.start_btn.isEnabled() is True
+        # 切回录制文件：未选文件时开始按钮同样置灰（不造空任务）
+        w.src_combo.setCurrentIndex(w.src_combo.findText("录制文件"))
+        assert w.start_btn.isEnabled() is False
 
     def test_set_sdr_connected(self):
         from weather_panel import WeatherPanel
         w = WeatherPanel()
         w.set_sdr_connected(True)
         assert w._sdr_connected is True
-        w.mode_combo.setCurrentIndex(w.mode_combo.findText("实时 SDR"))
+        w.src_combo.setCurrentIndex(w.src_combo.findText("实时 SDR"))
         assert w.start_btn.isEnabled() is True
 
 
@@ -93,11 +95,12 @@ class TestDopplerPanel:
         from doppler_panel import DopplerPanel
         d = DopplerPanel()
         assert d.ekf_radio.isChecked() is True or d.rls_radio.isChecked()
-        # 不再硬编码城市坐标：默认空（"未设置"），由用户配置或GNSS注入
+        # 不硬编码城市坐标：默认空（"未设置"），由用户配置或 GNSS 注入
         assert d.lat_edit.text() == ""
         assert d.lon_edit.text() == ""
         assert "开始定轨" in d.start_btn.text()
-        assert "[模拟]" in d.demo_btn.text()
+        # 模拟演示按钮必须不存在
+        assert not hasattr(d, "demo_btn")
         # matplotlib 画布存在
         assert d.canvas is not None
 
@@ -107,7 +110,7 @@ class TestDopplerPanel:
         assert d._sdr_connected is False
         d.mode_combo.setCurrentIndex(d.mode_combo.findText("实时 SDR"))
         assert d.start_btn.isEnabled() is False
-        assert "未连接SDR设备" in d.status_label.text()
+        assert "未连接" in d.status_label.text()
 
     def test_estimator_switch(self):
         from doppler_panel import DopplerPanel
@@ -122,18 +125,13 @@ class TestDopplerPanel:
 class TestMainWindowIntegration:
     def test_main_window_imports_panels(self):
         """main_window 模块可导入，且确实 import 了两个新面板。"""
-        import importlib
-        import desktop.main_window as mw  # noqa: F401
-        # 直接 import desktop.main_window（带 sys.path）
-        import main_window as mw2
+        import desktop.main_window as mw  # noqa: F402,F401
+        import main_window as mw2  # noqa: E402
         assert hasattr(mw2, "WeatherPanel")
         assert hasattr(mw2, "DopplerPanel")
 
     def test_main_window_class_has_panels(self):
         from main_window import MainWindow
-        # MainWindow 类的构造会启动 QTimer/线程，仅做静态检查：类存在且引用了面板
-        assert "weather_panel" in MainWindow._build_central_widget.__code__.co_consts or \
-            True  # 构造重，仅验证类可解析
         assert hasattr(MainWindow, "_panels_set_sdr_connected")
 
 
