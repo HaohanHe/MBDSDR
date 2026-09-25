@@ -35,7 +35,7 @@ def main():
     parser.add_argument("--host", type=str, default=None, help="设备 IP 地址")
     parser.add_argument("--port", type=int, default=81, help="设备端口")
     parser.add_argument("--theme", type=str, default=DEFAULT_THEME,
-                        choices=["japanese_light", "dark", "high_contrast"],
+                        choices=["default", "dark", "high_contrast"],
                         help="主题")
     args = parser.parse_args()
 
@@ -82,7 +82,7 @@ def main():
 
     print("=" * 60)
     print("  MBDSDR - AI 定义无线电桌面端")
-    print("  版本: 0.1.0 | GPL-3.0 | 呼号 BI4MIB")
+    print("  版本: 0.1.0 | GPL-3.0")
     print(f"  主题: {theme.display_name}")
     print(f"  渲染: {'OpenGL' if hasattr(window.spectrum, 'initializeGL') else '软件渲染 (QPainter)'}")
     if args.sim:

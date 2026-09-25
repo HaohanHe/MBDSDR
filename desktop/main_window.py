@@ -453,7 +453,7 @@ class MainWindow(QMainWindow):
         self.status_gps = QLabel("GPS: --")
         status_bar.addWidget(self.status_gps)
 
-        status_bar.addPermanentWidget(QLabel("MBDSDR v0.1 | GPL-3.0 | 呼号 BI4MIB"))
+        status_bar.addPermanentWidget(QLabel("MBDSDR v0.1 | GPL-3.0"))
 
     # ========================================================================
     # 主题
@@ -1372,7 +1372,7 @@ class MainWindow(QMainWindow):
             self, "关于 MBDSDR",
             "<h3>MBDSDR - AI 定义无线电</h3>"
             "<p>全开源 GPL-3.0 软件定义无线电平台</p>"
-            "<p>呼号 BI4MIB | 硬件板名 ai-sdr Mini</p>"
+            "<p>呼号：在「设置」中配置 | 硬件板名 ai-sdr Mini</p>"
             "<p>集成 GNU Radio / SDR++ / SatDump 等开源项目功能</p>"
             "<p>支持 MCP 工具调用，任意 AI IDE 可直接控制硬件</p>"
             "<p>射频天空视图借鉴 Stellarium 设计理念</p>"
@@ -1694,7 +1694,7 @@ class MainWindow(QMainWindow):
             # 坐标就位后同步 SatelliteTracker 与天空图空状态/角标
             self._apply_observer_location()
             # 恢复主题
-            theme = config.get("theme", "japanese_light")
+            theme = config.get("theme", "default")
             if theme != self._current_theme:
                 self._apply_theme(theme)
             # NTRIP 配置：对话框已创建则回填；未创建则等 _open_ntrip_dialog 时再读盘。
