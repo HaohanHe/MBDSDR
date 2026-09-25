@@ -30,6 +30,13 @@ try:
 except ImportError:
     HAS_OPENGL = False
 
+# 多 VFO 管理器（纯数据层，无 Qt/硬件依赖）。SpectrumPanel 持有一个实例，
+# VFO 拖拽时移动 current / 新建 VFO，并按悬停/点击确认维护三态焦点。
+try:
+    from mbdsdr_ai.vfo_manager import VfoManager
+except Exception:  # pragma: no cover - 防御性：后端包未就位时不阻塞 UI 启动
+    VfoManager = None  # type: ignore
+
 
 # ============================================================================
 # 默认低饱和配色（米白 / 蓝灰 / 橙）
@@ -76,12 +83,45 @@ class SpectrumDataGenerator:
         self.avg_frames = 1
         # 当前帧频谱（长度 num_bins）；NaN 表示无数据 → 不画谱线
         self.spectrum: np.ndarray = np.full(num_bins, np.nan, dtype=np.float32)
-        self.waterfall: List[np.ndarray] = []
-        self.max_waterfall_lines = 120
+
+        # ---- 瀑布图环形行缓冲（对标 SDR++ waterfall.h:290-293 rawFFTs 环形缓冲）----
+        # SDR++ 用固定 waterfallHeight 行 × rawFFTSize 列的 float 环形数组，
+        # getFFTBuffer() 里 currentFFTLine-- 后回绕写入新行；pushFFT() 里 memmove
+        # 把整帧缓冲上移一行再把新行写到底部。这里用 numpy 2D 环形缓冲复刻：
+        # 新行从底部写入画布，旧行向上滚动，O(1) 写入、无 list.pop(0) 开销。
+        self.max_waterfall_lines = 256
+        self._wf_buf = np.full((self.max_waterfall_lines, num_bins),
+                               np.nan, dtype=np.float32)
+        self._wf_head = 0          # 下一个写入槽位（写后回绕）
+        self._wf_count = 0         # 已写入的有效行数（<= max_waterfall_lines）
+        self.wf_rows_written = 0   # 单调递增计数，供瀑布画布做增量同步
         self._has_real_data = False
         # 多帧幅度平均累加器（复数 FFT 幅度域平均，降低噪声）
         self._mag_accum: Optional[np.ndarray] = None
         self._avg_count = 0
+
+    # ------------------------------------------------------------------ 瀑布行缓冲
+    def wf_row_count(self) -> int:
+        return self._wf_count
+
+    def wf_latest_rows(self, k: int) -> np.ndarray:
+        """返回最新 k 行瀑布数据，按 旧→新 顺序排列（shape (m, num_bins)）。
+
+        画布增量绘制时按此顺序逐行 scroll + 写底，最新一行落在画布底部。
+        无数据返回 shape (0, num_bins)。
+        """
+        k = max(0, min(int(k), self._wf_count))
+        if k == 0:
+            return np.empty((0, self.num_bins), dtype=np.float32)
+        # 最新一行是 (head - 1) mod N；往回数 k 行，旧→新顺序
+        N = self.max_waterfall_lines
+        start = (self._wf_head - k) % N
+        if start + k <= N:
+            return self._wf_buf[start:start + k]
+        # 跨环边界：拼两段
+        part1 = self._wf_buf[start:]
+        part2 = self._wf_buf[:(start + k - N)]
+        return np.concatenate([part1, part2], axis=0)
 
     # ------------------------------------------------------------------ 配置
     def set_window(self, name: str):
@@ -113,7 +153,10 @@ class SpectrumDataGenerator:
         """断开/清空：回到"未连接"，不保留旧谱线。"""
         self._has_real_data = False
         self.spectrum = np.full(self.num_bins, np.nan, dtype=np.float32)
-        self.waterfall.clear()
+        self._wf_buf.fill(np.nan)
+        self._wf_head = 0
+        self._wf_count = 0
+        self.wf_rows_written = 0
         self._reset_average()
 
     # ------------------------------------------------------------------ 窗函数
@@ -200,9 +243,11 @@ class SpectrumDataGenerator:
         self.spectrum = self._resample_max(power_db)
         self._has_real_data = True
 
-        self.waterfall.append(self.spectrum.copy())
-        if len(self.waterfall) > self.max_waterfall_lines:
-            self.waterfall.pop(0)
+        # 写入环形行缓冲：新行落在 head 槽位，head 回绕（SDR++ currentFFTLine 语义）
+        self._wf_buf[self._wf_head] = self.spectrum
+        self._wf_head = (self._wf_head + 1) % self.max_waterfall_lines
+        self._wf_count = min(self._wf_count + 1, self.max_waterfall_lines)
+        self.wf_rows_written += 1
 
     def _resample_max(self, spec: np.ndarray) -> np.ndarray:
         if len(spec) == self.num_bins:
@@ -301,19 +346,38 @@ def _freq_to_x(rect: QRectF, view_center_hz: float, span_hz: float,
             * rect.width())
 
 
+def _effective_vfo(state: "_PlotState") -> Optional[Tuple[float, float]]:
+    """返回当前应绘制/命中的 VFO 绝对中心频率与带宽 (center_hz, bw_hz)。
+
+    优先级（对标任务要求）：
+      1. VfoManager.current 存在 → 用其 center_hz / bw_hz（拖拽中移动的就是它）。
+      2. 否则 _PlotState.vfo_bandwidth_hz 已由主窗口设置 → 用 view_center + offset。
+      3. 都没有 → None（不画 VFO 矩形）。
+    """
+    mgr = getattr(state.panel, "vfo_manager", None)
+    if mgr is not None and getattr(mgr, "current", None) is not None:
+        cur = mgr.current
+        if cur.active and cur.bw_hz > 0:
+            return (float(cur.center_hz), float(cur.bw_hz))
+    if state.vfo_bandwidth_hz is not None and state.vfo_bandwidth_hz > 0:
+        view_center = _view_center_hz(state)
+        return (view_center + state.vfo_offset_hz, float(state.vfo_bandwidth_hz))
+    return None
+
+
 def _draw_vfo_band(painter: QPainter, state: "_PlotState", rect: QRectF):
     """在谱面画 VFO 带宽矩形（对标 SDR++ waterfall.cpp:221-231 / waterfall.h:77）。
 
     SDR++ VFO 是半透明填充矩形 + 选中边框；这里用默认主题橙 #C4845C：
     填充 alpha=30，边框 alpha=120。仅在有真数据时由调用方决定是否绘制。
     """
-    gen = state.panel.generator
-    bw = state.vfo_bandwidth_hz
-    if bw is None or bw <= 0:
+    eff = _effective_vfo(state)
+    if eff is None:
         return
+    vfo_center, bw = eff
+    gen = state.panel.generator
     span = gen.sample_rate_hz
     view_center = _view_center_hz(state)
-    vfo_center = view_center + state.vfo_offset_hz
     x_center = _freq_to_x(rect, view_center, span, vfo_center)
     x_half = (bw / 2.0) / span * rect.width()
     x0 = x_center - x_half
@@ -352,6 +416,18 @@ class _PlotState:
         self.vfo_offset_hz = 0.0                        # VFO 中心相对调谐中心偏移
         # ---- 视图平移偏移（Ctrl 拖动 RF shift：只移视图不调谐）----
         self.view_offset_hz = 0.0
+
+        # ---- 持久瀑布画布（对标 SDR++ waterfallFb 帧缓冲）----
+        # SDR++ pushFFT() 用 memmove 把整帧缓冲上移一行、再把新行写到底部；
+        # 这里用 numpy (h,w,4) 缓冲 + 同名 QImage 包装实现同款增量滚动，
+        # 避免每帧逐像素 setPixelColor。无数据时整块填充背景色（空白，不画假噪声）。
+        self._wf_canvas: Optional[QImage] = None
+        self._wf_buf: Optional[np.ndarray] = None
+        self._wf_cw: int = -1          # 画布宽度（像素）
+        self._wf_ch: int = -1          # 画布高度（像素）
+        self._wf_consumed: int = 0     # 已并入画布的瀑布行数（对齐 gen.wf_rows_written）
+        self._wf_lut: Optional[np.ndarray] = None   # db→RGB 查找表 (256,3)
+        self._wf_lut_key: Tuple[float, float] = (0.0, 0.0)
 
     # ------------------------------------------------------------------ setter
     def set_snap_interval(self, hz: float):
@@ -427,8 +503,8 @@ def _render_plot(painter: QPainter, state: _PlotState, w: int, h: int):
         _draw_hover_readout(painter, state, spec_rect, text, line)
         _draw_fixed_markers(painter, state, spec_rect, line)
 
-    # 瀑布图（仅在有数据时追加过内容）
-    if state.show_waterfall and waterfall_h > 0 and gen.waterfall:
+    # 瀑布图：持久增量画布（无数据时画布为空白背景，不画假噪声）
+    if state.show_waterfall and waterfall_h > 0:
         _draw_waterfall(painter, wf_rect, state)
         painter.setPen(QPen(grid, 1))
         painter.drawLine(QPointF(0, wf_rect.y()), QPointF(w, wf_rect.y()))
@@ -563,24 +639,108 @@ def _draw_fixed_markers(painter, state, rect, color):
                          f"{freq_hz/1e6:.3f}MHz {db_txt}")
 
 
+def _wf_build_lut(state: "_PlotState"):
+    """db → RGB 查找表（256×3），与 value_to_color 色带一致。"""
+    n = 256
+    lut = np.empty((n, 3), dtype=np.uint8)
+    dmin, dmax = state.db_min, state.db_max
+    for i in range(n):
+        v = dmin + (dmax - dmin) * i / (n - 1)
+        c = value_to_color(v, dmin, dmax, WATERFALL_COLORS)
+        lut[i] = (c.red(), c.green(), c.blue())
+    state._wf_lut = lut
+    state._wf_lut_key = (dmin, dmax)
+
+
+def _wf_paint_row_into(state: "_PlotState", row_db: np.ndarray, dst_row: np.ndarray):
+    """把一行 dB 频谱（长度 num_bins）映射到画布一行 (w,4) 的 RGB。"""
+    w = dst_row.shape[0]
+    n = len(row_db)
+    idx = np.linspace(0, n - 1, w).astype(np.int64)
+    vals = row_db[idx]
+    vals = np.where(np.isfinite(vals), vals, state.db_min)
+    dmin, dmax = state.db_min, state.db_max
+    t = np.clip((vals - dmin) / (dmax - dmin + 1e-9), 0.0, 1.0)
+    li = (t * 255.0).astype(np.int64)
+    dst_row[:, 0:3] = state._wf_lut[li]
+    dst_row[:, 3] = 255
+
+
+def _wf_ensure_canvas(state: "_PlotState", w: int, h: int) -> bool:
+    """确保持久瀑布画布缓冲尺寸匹配；尺寸变化时重建为空白。"""
+    if w <= 0 or h <= 0:
+        state._wf_canvas = None
+        return False
+    if (state._wf_cw == w and state._wf_ch == h
+            and state._wf_buf is not None and state._wf_canvas is not None):
+        return True
+    bg = QColor(PAL_BG)
+    buf = np.empty((h, w, 4), dtype=np.uint8)
+    buf[:, :, 0] = bg.red()
+    buf[:, :, 1] = bg.green()
+    buf[:, :, 2] = bg.blue()
+    buf[:, :, 3] = 255
+    state._wf_buf = buf
+    state._wf_cw = w
+    state._wf_ch = h
+    state._wf_consumed = 0   # 尺寸变化后从环形缓冲全量重建
+    # QImage 直接包装 numpy 缓冲（不拷贝）；buf 由 state 持有，保证内存存活。
+    # 需 C 连续内存；Format_RGBA8888 字节序为 R,G,B,A，与 buf 通道一致。
+    state._wf_canvas = QImage(
+        memoryview(buf), w, h, w * 4, QImage.Format.Format_RGBA8888)
+    return True
+
+
 def _draw_waterfall(painter, rect, state):
+    """持久瀑布画布增量绘制（对标 SDR++ waterfall.cpp:898 pushFFT 行滚动）。
+
+    每帧只做：把新行 scroll 上移一行 + 写新行到底部，再整图 drawImage。
+    无数据时画布为空白背景（不画假噪声）。
+    """
     gen = state.panel.generator
     w = int(rect.width())
-    n_lines = min(len(gen.waterfall), int(rect.height()))
-    if n_lines <= 0:
+    h = int(rect.height())
+    if not _wf_ensure_canvas(state, w, h):
         return
-    image = QImage(w, n_lines, QImage.Format_RGB32)
-    rows = len(gen.waterfall)
-    for row in range(n_lines):
-        idx = rows - 1 - row
-        spec = gen.waterfall[idx]
-        n = len(spec)
-        for col in range(w):
-            si = min(int(col * n / w), n - 1)
-            v = spec[si] if np.isfinite(spec[si]) else state.db_min
-            c = value_to_color(v, state.db_min, state.db_max, WATERFALL_COLORS)
-            image.setPixelColor(col, row, c)
-    painter.drawImage(rect, image)
+    if state._wf_lut is None or state._wf_lut_key != (state.db_min, state.db_max):
+        _wf_build_lut(state)
+
+    buf = state._wf_buf
+    bg = QColor(PAL_BG)
+    total = gen.wf_rows_written
+    consumed = state._wf_consumed
+
+    # 检测复位（clear_data() 后 total 归零）：清空画布回到空白。
+    if total < consumed:
+        buf[:, :, 0] = bg.red()
+        buf[:, :, 1] = bg.green()
+        buf[:, :, 2] = bg.blue()
+        buf[:, :, 3] = 255
+        consumed = 0
+        state._wf_consumed = 0
+
+    pending = total - consumed
+    if pending > 0:
+        if pending >= h:
+            # 积压一屏以上：直接全量重建（取最新 h 行，旧→新，贴底）。
+            rows = gen.wf_latest_rows(h)
+            m = len(rows)
+            buf[:, :, 0] = bg.red()
+            buf[:, :, 1] = bg.green()
+            buf[:, :, 2] = bg.blue()
+            buf[:, :, 3] = 255
+            for i in range(m):
+                _wf_paint_row_into(state, rows[i], buf[h - m + i])
+            state._wf_consumed = total
+        else:
+            # 增量：旧内容上移一行（SDR++ memmove 语义），新行写底部。
+            rows = gen.wf_latest_rows(pending)
+            for row in rows:
+                buf[0:h - 1, :, :] = buf[1:h, :, :]
+                _wf_paint_row_into(state, row, buf[h - 1, :, :])
+            state._wf_consumed = total
+
+    painter.drawImage(rect, state._wf_canvas)
 
 
 def _draw_freq_scale(painter, rect, view_center_hz: float, span_hz: float,
@@ -620,6 +780,10 @@ class SpectrumPanel(QWidget):
     def __init__(self, parent=None, prefer_opengl: bool = False):
         super().__init__(parent)
         self.generator = SpectrumDataGenerator(num_bins=512)
+
+        # 多 VFO 管理器（纯数据层）：拖拽 VFO 框时移动 current / 新建 VFO。
+        # 三态焦点 active_context/current/visual 按悬停/点击确认语义维护。
+        self.vfo_manager = VfoManager() if VfoManager is not None else None
 
         # 配色（默认低饱和；set_theme_colors 可覆盖 bg/grid/text/line）
         self.color_bg = PAL_BG
@@ -801,6 +965,20 @@ class SpectrumPanel(QWidget):
         cf = self.generator.center_freq_hz
         self.update_iq(iq, cf, sample_rate)
 
+    def set_markers(self, freqs_hz):
+        """外部批量设置活动频点 marker（Hz 列表）。空列表/None 清空。
+
+        供扫频找台完成后标注实测到的活动频点；marker 只在当前瞬时带宽内
+        可见，超出 span 的频点不绘制（_draw_fixed_markers 自然裁剪）。
+        """
+        self._state.markers = [float(f) for f in (freqs_hz or [])]
+        self._plot.update()
+
+    def clear_markers(self):
+        """清空所有固定 marker。"""
+        self._state.markers.clear()
+        self._plot.update()
+
     @Slot(float)
     def set_center_freq(self, freq_mhz: float):
         """兼容接口：主窗口以 MHz 设置中心频率。"""
@@ -813,6 +991,11 @@ class SpectrumPanel(QWidget):
 
     def toggle_waterfall(self):
         self._state.show_waterfall = not self._state.show_waterfall
+        self._plot.update()
+
+    def set_vfo_bandwidth(self, bw_hz: Optional[float]):
+        """主窗口设置 VFO 带宽（Hz）；转发给 _PlotState。传 None 关闭 VFO 矩形。"""
+        self._state.set_vfo_bandwidth(bw_hz)
         self._plot.update()
 
     def set_theme_colors(self, bg, grid, text, line, marker, spectrum_colors):
@@ -860,10 +1043,44 @@ class _TuningPlotMixin:
         self._is_panning = False
         self._rf_shift = False          # Ctrl 拖动 = 只平移视图，不调谐中心频率
         self._last_pan_emit = 0.0
+        # ---- VFO 框拖拽状态（对标 SDR++ waterfall.cpp:466-476 拖动 VFO）----
+        self._vfo_dragging = False
+        self._vfo_drag_vfo = None       # 正在拖拽的 VfoState
+        self._vfo_press_x = 0.0
+        self._vfo_press_gen_center = 0.0
+        self._vfo_press_vfo_center = 0.0
 
     # ------------------------------------------------------------------ 工具
     def _x_ratio(self, event):
         return event.position().x() / max(1, self.width())
+
+    def _spectrum_height(self) -> int:
+        """谱图区高度像素（与 _render_plot 一致：开瀑布时 55%）。"""
+        h = self.height()
+        return int(h * 0.55) if self.state.show_waterfall else h
+
+    def _freq_at_x(self, x_px: float) -> float:
+        """谱面某 x 像素对应的绝对频率（含视图平移偏移）。"""
+        gen = self.state.panel.generator
+        view_center = _view_center_hz(self.state)
+        span = gen.sample_rate_hz
+        return view_center - span / 2.0 + x_px / max(1, self.width()) * span
+
+    def _hit_vfo_band(self, x_px: float) -> bool:
+        """某 x 像素是否落在 VFO 带宽矩形横向范围内（需有真数据）。"""
+        if not self.state.panel.generator.has_data():
+            return False
+        eff = _effective_vfo(self.state)
+        if eff is None:
+            return False
+        vfo_center, bw = eff
+        gen = self.state.panel.generator
+        span = gen.sample_rate_hz
+        view_center = _view_center_hz(self.state)
+        x_center = _freq_to_x(QRectF(0, 0, self.width(), 1),
+                              view_center, span, vfo_center)
+        x_half = (bw / 2.0) / span * self.width()
+        return (x_center - x_half) <= x_px <= (x_center + x_half)
 
     def _snap_center(self) -> float:
         """把当前中心频率对齐到 snap_interval 网格（SDR++ roundl 语义）。"""
@@ -880,15 +1097,26 @@ class _TuningPlotMixin:
     # ------------------------------------------------------------------ 滚轮
     def wheelEvent(self, event):
         # main_window.cpp:579-609：有 VFO 时滚轮=调谐；否则缩放。
-        # 这里：Ctrl=缩放 span（原功能），普通/Shift/Alt=按 snap 步进调谐。
+        # 这里：Ctrl=以光标所在频率为锚点缩放 span（缩放后光标处频率不变），
+        #       普通/Shift/Alt=按 snap 步进调谐（行为不变）。
         gen = self.state.panel.generator
         mods = event.modifiers()
         dy = event.angleDelta().y()
         if mods & Qt.ControlModifier:
-            # Ctrl+滚轮 = 缩放 view bandwidth（保留原缩放功能）
+            # Ctrl+滚轮 = 以光标为中心缩放 span（对标 SDR++ waterfall.cpp
+            # processInputs 的鼠标锚点缩放：缩放前后光标处绝对频率不变）。
             factor = 1.1 if dy > 0 else 1 / 1.1
-            gen.sample_rate_hz = max(48_000.0, min(20_000_000.0,
-                                                   gen.sample_rate_hz * factor))
+            span = gen.sample_rate_hz
+            new_span = max(48_000.0, min(20_000_000.0, span * factor))
+            # 光标处绝对频率（含 Ctrl 拖动的视图平移偏移）
+            r = event.position().x() / max(1, self.width())
+            view_center = _view_center_hz(self.state)
+            anchor_freq = view_center + (r - 0.5) * span
+            # 保持光标频率不变：new_view_center = anchor - (r-0.5)*new_span
+            new_view_center = anchor_freq - (r - 0.5) * new_span
+            gen.sample_rate_hz = new_span
+            # view_offset 保持不变，反解出真调谐中心
+            gen.center_freq_hz = new_view_center - self.state.view_offset_hz
             self._emit_tuned(gen.center_freq_hz)
         else:
             wheel = 1 if dy > 0 else -1     # 上滚=加频，下滚=减频
@@ -926,10 +1154,51 @@ class _TuningPlotMixin:
             super().keyPressEvent(event)
 
     # ------------------------------------------------------------------ 鼠标
+    def _begin_vfo_drag(self, x_px: float, event):
+        """命中 VFO 带宽矩形 → 进入 VFO 拖拽模式（而非普通平移调谐）。
+
+        对标 SDR++ waterfall.cpp:336-340 选中 VFO + 466-476 拖动 VFO：
+        - 已有 current VFO 且命中它 → 点击确认收编为 current（temporary=False），移动它；
+        - 否则新建一个 VFO（center=光标频率），继承粘滞带宽/模式。
+        """
+        state = self.state
+        mgr = state.panel.vfo_manager
+        gen = state.panel.generator
+        mouse_freq = self._freq_at_x(x_px)
+
+        vfo = None
+        if mgr is not None:
+            if mgr.current is not None and mgr.current.active:
+                vfo = mgr.current
+                # 点击确认：收编为 current，并刷新粘滞快照
+                mgr.set_active_context(vfo, temporary=False)
+            else:
+                bw0 = (state.vfo_bandwidth_hz if state.vfo_bandwidth_hz
+                       else getattr(mgr, "last_bw_hz", 8000.0))
+                vfo = mgr.add(mouse_freq, bw0, "FM", inherit_last=True)
+                mgr.set_active_context(vfo, temporary=False)
+
+        self._vfo_dragging = True
+        self._vfo_drag_vfo = vfo
+        self._vfo_press_x = x_px
+        self._vfo_press_gen_center = gen.center_freq_hz
+        self._vfo_press_vfo_center = float(vfo.center_hz) if vfo is not None else mouse_freq
+        # 不进入普通平移
+        self._is_panning = False
+        self._rf_shift = False
+
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
-            self._press_x = event.position().x()
-            self._press_anchor_x = event.position().x()
+            x = event.position().x()
+            y = event.position().y()
+            # 命中 VFO 带宽矩形（谱图区内）→ VFO 拖拽模式，而非普通平移调谐
+            in_spectrum = y <= self._spectrum_height()
+            if in_spectrum and self._hit_vfo_band(x):
+                self._begin_vfo_drag(x, event)
+                self.update()
+                return
+            self._press_x = x
+            self._press_anchor_x = x
             self._is_panning = True
             self._last_pan_emit = 0.0
             # Ctrl 按住：RF shift 模式，只平移视图不改中心频率
@@ -939,6 +1208,30 @@ class _TuningPlotMixin:
         r = self._x_ratio(event)
         self.state.mouse_x_ratio = r
         self.state.mouse_in_spectrum = True
+
+        # VFO 拖拽：实时移动 VFO 中心 + 调谐中心频率，emit freq_changed
+        if self._vfo_dragging:
+            x = event.position().x()
+            gen = self.state.panel.generator
+            shift = -(x - self._vfo_press_x) / max(1, self.width()) * gen.sample_rate_hz
+            gen.center_freq_hz = self._vfo_press_gen_center + shift
+            vfo = self._vfo_drag_vfo
+            if vfo is not None:
+                vfo.center_hz = self._vfo_press_vfo_center + shift
+            self._emit_tuned(gen.center_freq_hz)
+            self.update()
+            return
+
+        # 悬停（未按键）：更新 VfoManager 三态焦点 active_context（临时悬停语义）
+        mgr = self.state.panel.vfo_manager
+        if mgr is not None and not self._is_panning:
+            y = event.position().y()
+            if y <= self._spectrum_height() and self._hit_vfo_band(x_px=event.position().x()):
+                if mgr.current is not None:
+                    mgr.set_active_context(mgr.current, temporary=True)
+            else:
+                mgr.clear_active_context()
+
         if self._is_panning:
             dx = event.position().x() - self._press_anchor_x
             gen = self.state.panel.generator
@@ -959,6 +1252,18 @@ class _TuningPlotMixin:
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            # VFO 拖拽结束：对齐网格并 emit 最终中心频率
+            if self._vfo_dragging:
+                self._vfo_dragging = False
+                gen = self.state.panel.generator
+                snapped = self._snap_center()
+                # VFO 跟随到对齐后的中心
+                if self._vfo_drag_vfo is not None:
+                    self._vfo_drag_vfo.center_hz = snapped
+                self._vfo_drag_vfo = None
+                self._emit_tuned(snapped)
+                self.update()
+                return
             moved = abs(event.position().x() - (self._press_x or 0))
             self._is_panning = False
             if moved > 4:

@@ -13,7 +13,7 @@ MBDSDR 桌面端 - 多普勒定轨面板 (DopplerPanel)
 定轨估计器（EKF / RLS / 最小二乘）仅在有 >=2 个真实观测时才执行 predict/update；
 结果收敛后显示轨道根数（a/e/i/RAAN/argp/M）、位置速度与残差。
 
-配色全部取自 themes.py（日式低饱和），不硬编码新颜色。
+配色全部取自 themes.py（低饱和默认主题），不硬编码新颜色。
 """
 from __future__ import annotations
 

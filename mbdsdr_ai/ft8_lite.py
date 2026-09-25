@@ -156,52 +156,50 @@ def analyze_ft8_audio(samples: List[float], sample_rate: float) -> Dict:
 def decode_ft8_audio(samples: List[float], sample_rate: float) -> Dict:
     """端到端：FT8 音频 → 可读消息文本。
 
-    找音峰 → 试 8 个相位 → 58 个数据符号输出 8 路能量（软判决）
-    → LDPC BP → CRC14 → unpack77。一条命令出呼号网格。
+    真 Costas 跟踪路径（替代旧 Goertzel 粗扫 + 8 相位枚举）：
+      costas_sync 粗同步（sync8.f90 时频谱 Costas7 匹配）
+      → three_stage_sync 三段精同步（sync8d.f90 复数匹配 + 三块相位差残余频偏
+        + 79×8 路能量积分，对应 ft8b.f90:109-162）
+      → 58 数据符号 8 路软能量送 ft8_decode.decode_ft8_payload
+      → CRC14 → unpack77。
+
+    接口签名保持不变：decode_ft8_audio(samples, sample_rate) -> dict。
     """
     from mbdsdr_ai import ft8_decode
     from mbdsdr_ai.ft8_unpack import unpack77
+    from mbdsdr_ai import ft8_costas
 
-    peak = detect_ft8_tone_center(samples, sample_rate)
-    if not peak.get("detected"):
-        return {"decoded": False, "reason": "未检测到 FT8 音峰", **peak}
-
-    sps = int(sample_rate * SYMBOL_MS / 1000)
-    segs = [samples[s * sps:(s + 1) * sps] for s in range(79)]
+    # 粗同步：搜整个音频带（300-3000Hz），取 top-N 候选
+    cands = ft8_costas.costas_sync(
+        samples, sample_rate,
+        search_lo_hz=300.0, search_hi_hz=3000.0,
+        freq_step_hz=1.0, max_candidates=6)
+    if not cands:
+        return {"decoded": False, "reason": "Costas 同步峰未检出"}
 
     data_pos = ft8_decode.data_symbol_positions()  # 58 个数据符号位置
-    # 收集各相位假设的解码候选，统一带去重（sync8.f90: 近频近时只留最强）
-    candidates: List[Dict] = []
-    for phase in range(8):
-        center = peak["center_hz"] - (phase - 3.5) * TONE_SPACING_HZ
-        tones = [center + (i - 3.5) * TONE_SPACING_HZ for i in range(8)]
-        energies_58 = []
-        ok = True
-        for p in data_pos:
-            if p >= len(segs) or len(segs[p]) < sps // 2:
-                ok = False
-                break
-            energies_58.append([_goertzel(segs[p], sample_rate, t) for t in tones])
-        if not ok:
-            continue
-        r = ft8_decode.decode_ft8_payload(energies_58)
+    decoded_cands: List[Dict] = []
+    for c in cands:
+        # 三段精同步：频率/时间精调 + 残余频偏校正 + 79×8 能量矩阵
+        ref = ft8_costas.three_stage_sync(samples, sample_rate, c)
+        e58 = ref["energies_79"][data_pos, :].tolist()
+        r = ft8_decode.decode_ft8_payload(e58, snr_db=ref["snr_est_db"])
         # 打分：CRC 通过优先，其次 LDPC 早停（迭代少=收敛好）
         score = (1000 if r["crc_ok"] else 0) - r["iters"]
-        candidates.append({
-            "center_hz": center,
-            "snr_est_db": peak.get("snr_est_db", 0.0),
-            "time_s": 0.0,
+        decoded_cands.append({
+            "center_hz": ref["center_hz"],
+            "time_s": ref["time_offset_s"],
+            "snr_est_db": ref["snr_est_db"],
             "score": score,
             "r": r,
         })
 
-    if not candidates:
-        return {"decoded": False, "reason": "符号段不足", **peak}
+    # 近重复去重：同频段同时间只留 SNR 最高者（sync8.f90:138-149）
+    decoded_cands = dedup_candidates(decoded_cands)
+    if not decoded_cands:
+        return {"decoded": False, "reason": "去重后无候选"}
 
-    # 近重复去重：同频段同时间只留 SNR 最高者
-    candidates = dedup_candidates(candidates)
-    best = max(candidates, key=lambda c: c["score"])
-
+    best = max(decoded_cands, key=lambda c: c["score"])
     r = best["r"]
     msg = unpack77(r["data_bits"])
     return {
@@ -213,5 +211,6 @@ def decode_ft8_audio(samples: List[float], sample_rate: float) -> Dict:
         "call1": msg.get("call1"),
         "call2": msg.get("call2"),
         "center_hz": best["center_hz"],
-        "deduped_count": len(candidates),
+        "deduped_count": len(decoded_cands),
+        "snr_est_db": best["snr_est_db"],
     }

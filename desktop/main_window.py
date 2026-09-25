@@ -14,7 +14,7 @@ from typing import Optional
 
 import numpy as np
 
-from PySide6.QtCore import Qt, QTimer, Slot, QDateTime, QTimeZone
+from PySide6.QtCore import Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal
 from PySide6.QtGui import QAction, QKeySequence, QFont
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QInputDialog, QComboBox, QPushButton,
     QFrame, QSizePolicy, QDialog, QDialogButtonBox,
     QGroupBox, QFormLayout, QSlider, QSpinBox, QCheckBox,
+    QDoubleSpinBox, QProgressDialog,
 )
 
 # 确保能导入同目录模块
@@ -58,6 +59,78 @@ try:
     from mbdsdr_ai.gnss_monitor import RealGNSSMonitor
 except Exception:  # pragma: no cover
     RealGNSSMonitor = None  # type: ignore
+
+
+class _SweepWorker(QThread):
+    """后台宽带扫频线程：步进调谐真实 SDR → 逐段 PSD → 拼接 → 活动信号提取。
+
+    对标 SDR++ Frequency Scanner 的交互模式：在独立线程里逐中心频率
+    set_frequency → read_samples，主线程只负责进度/取消与结果回贴。
+    acquire 回调直接驱动真实后端，绝不合成 IQ；取消通过 _cancel 标志在下一个
+    调谐段边界生效（read_samples 自带 1s 超时，不会永久阻塞）。
+    """
+
+    progress = Signal(float)            # 当前正在调谐的中心频率 Hz（仅作进度提示）
+    finished_ok = Signal(object)        # sweep.SweepResult
+    failed = Signal(str)
+    cancelled = Signal()
+
+    def __init__(self, backend, f_start_hz: float, f_stop_hz: float,
+                 sample_rate_hz: float, step_hz: float, overlap: float,
+                 dwell_samples: int, parent=None):
+        super().__init__(parent)
+        self._backend = backend
+        self._f0 = float(f_start_hz)
+        self._f1 = float(f_stop_hz)
+        self._sr = float(sample_rate_hz)
+        self._step = float(step_hz)
+        self._overlap = float(overlap)
+        self._dwell = int(dwell_samples)
+        self._cancel = False
+
+    def cancel(self):
+        """请求取消：在下一个调谐段边界停止。"""
+        self._cancel = True
+
+    def run(self):
+        import time as _time
+        try:
+            from mbdsdr_ai.sweep import sweep_scan
+        except Exception as e:  # noqa: BLE001
+            self.failed.emit(f"sweep 模块导入失败: {e}")
+            return
+
+        backend = self._backend
+
+        def acquire(center_hz, sample_rate_hz, n):
+            if self._cancel:
+                return None
+            try:
+                backend.set_frequency(float(center_hz))
+            except Exception:
+                return None
+            # 调谐后短暂驻留，让 AGC/滤波器稳定（SDR++ scanner 换频后也会等）
+            _time.sleep(0.04)
+            try:
+                iq = backend.read_samples(int(n))
+            except Exception:
+                return None
+            self.progress.emit(float(center_hz))
+            return iq
+
+        try:
+            result = sweep_scan(
+                acquire, self._f0, self._f1, self._sr,
+                step_hz=self._step, overlap=self._overlap,
+                dwell_samples=self._dwell,
+            )
+        except Exception as e:  # noqa: BLE001
+            self.failed.emit(str(e))
+            return
+        if self._cancel:
+            self.cancelled.emit()
+        else:
+            self.finished_ok.emit(result)
 
 
 class MainWindow(QMainWindow):
@@ -132,6 +205,21 @@ class MainWindow(QMainWindow):
         self._vfo_in_sr: float = 0.0
         self._vfo_out_sr: float = 48000.0
         self._vfo_bw: float = 12000.0
+
+        # ---- 扫频找台（任务 3）：后台 QThread 跑 sweep_scan，真实后端取 IQ ----
+        self._sweep_worker: Optional[_SweepWorker] = None
+        self._sweep_progress: Optional[QProgressDialog] = None
+        self._sweep_prev_center_hz: float = 0.0
+
+        # ---- baseband 离线回放（任务 4）：QTimer 按采样率把文件 IQ 推给频谱 ----
+        self._replay_timer: Optional[QTimer] = None
+        self._replay_iq: Optional[np.ndarray] = None
+        self._replay_pos: int = 0
+        self._replay_sr: float = 0.0
+        self._replay_center_hz: float = 0.0
+        self._replay_total: int = 0
+        self._replay_block: int = 0
+        self._replay_resume_poll: bool = False
 
         # ---- 产品体验集成：状态栏信息密度 / 无设备引导 / 书签 ----
         # 书签内存表（freq_hz, name, mode）；落盘留给后续 gui_config 扩展
@@ -1052,7 +1140,24 @@ class MainWindow(QMainWindow):
     def _disconnect(self):
         """断开连接。"""
         # 断开真实 SDR 后端（SoapySDR/RTL-SDR/HackRF）
-        # 先停掉录制 / IQ 轮询 / 声卡，避免断开后还在读空句柄
+        # 先停掉回放 / 扫频 / 录制 / IQ 轮询 / 声卡，避免断开后还在读空句柄
+        try:
+            self._stop_replay()
+        except Exception:
+            pass
+        if self._sweep_worker is not None and self._sweep_worker.isRunning():
+            try:
+                self._sweep_worker.cancel()
+                self._sweep_worker.wait(1500)
+            except Exception:
+                pass
+            self._sweep_worker = None
+            if self._sweep_progress is not None:
+                try:
+                    self._sweep_progress.close()
+                except Exception:
+                    pass
+                self._sweep_progress = None
         self._stop_iq_streams()
         if self._recording:
             # 断开时若还在录制，先落盘存盘
@@ -1502,6 +1607,16 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # 多普勒定轨面板：tap 同一块 IQ（不另起 read_samples，避免抢环形缓冲）。
+        # 面板内部自行缓冲 ~2s 并按 1s 周期做窄带 FFT 提取频偏观测；未选实时
+        # 模式/未连接时 feed_iq 内部直接丢弃，零开销。
+        try:
+            dp = getattr(self, "doppler_panel", None)
+            if dp is not None and hasattr(dp, "feed_iq"):
+                dp.feed_iq(iq, sr)
+        except Exception:
+            pass
+
         # 更新 RSSI 显示（从后端状态或 IQ 功率估计）
         self._update_rssi_from_iq(iq)
 
@@ -1811,33 +1926,187 @@ class MainWindow(QMainWindow):
             self.showFullScreen()
 
     def _start_sweep(self):
-        """启动 FM 扫频找台。
+        """启动宽带扫频找台（真实后端步进调谐 → 拼接 PSD → 提取活动信号）。
 
-        无真实 SDR 后端时置灰提示（不造假扫频结果）；有设备时切到 AI 面板
-        并填入扫频指令，由 AI/后端真实扫描 87-108 MHz。
+        对标 SDR++ Frequency Scanner：弹出参数对话框（起止频率/步进/驻留），
+        在 QThread 里用 sweep_scan() 步进调谐真实 SDR 并逐段取 IQ；完成后在
+        频谱上标注活动频点，并把峰值列表（频率/带宽/峰值 dB）输出到 AI 面板。
+        无本地 SDR 后端（仅有 WebSocket worker）或取消时绝不造假结果。
         """
-        if self._active_sdr_backend is None and self._worker is None:
+        backend = self._active_sdr_backend
+        # 扫频需要本地后端的 set_frequency + read_samples；WebSocket worker
+        # 没有本地 IQ 流，无法步进取数。
+        if backend is None or not callable(getattr(backend, "read_samples", None)) \
+                or not callable(getattr(backend, "set_frequency", None)):
             self.statusBar().showMessage(
-                "扫频功能需要连接真实 SDR 硬件（请先连接设备）", 5000)
+                "扫频需要连接本地 SDR 硬件（请先用工具栏「连接」选 USB 设备）", 5000)
             QMessageBox.information(
                 self, "无法扫频",
-                "扫频找台需要真实 SDR 硬件接收信号。\n"
-                "请先通过工具栏「连接」选择设备后再试。")
+                "扫频找台需要真实 SDR 硬件步进调谐并逐段接收 IQ。\n"
+                "ai-sdr Mini WebSocket 模式不暴露本地 IQ 流，暂不支持扫频。\n"
+                "请连接 RTL-SDR/HackRF/SoapySDR 等 USB 设备后再试。")
             return
-        # 找到 right_tab 的索引
-        for i in range(self.ai_panel.parent().count()):
-            if self.ai_panel.parent().widget(i) == self.ai_panel:
-                self.ai_panel.parent().setCurrentIndex(i)
-                break
-        self.ai_panel.input_field.setText("扫频 87-108 MHz 找所有电台")
+        if self._sweep_worker is not None and self._sweep_worker.isRunning():
+            return  # 已经在扫
 
+        # ---- 扫频参数对话框（对标 SDR++ scanner 的 start/end/step/dwell）----
+        try:
+            sr = float(backend.get_sample_rate())
+        except Exception:
+            sr = 2_400_000.0
+        dlg = QDialog(self)
+        dlg.setWindowTitle("扫频找台")
+        dlg.setMinimumWidth(380)
+        form = QFormLayout(dlg)
+
+        start_sp = QDoubleSpinBox(); start_sp.setRange(10.0, 6000.0)
+        start_sp.setDecimals(3); start_sp.setSuffix(" MHz"); start_sp.setValue(87.0)
+        stop_sp = QDoubleSpinBox(); stop_sp.setRange(10.0, 6000.0)
+        stop_sp.setDecimals(3); stop_sp.setSuffix(" MHz"); stop_sp.setValue(108.0)
+        step_sp = QDoubleSpinBox(); step_sp.setRange(0.01, 20.0)
+        step_sp.setDecimals(3); step_sp.setSuffix(" MHz")
+        step_sp.setValue(round(sr * 0.5 / 1e6, 3))  # overlap 0.5 对应的步进
+        dwell_sp = QSpinBox(); dwell_sp.setRange(4096, 65536)
+        dwell_sp.setSingleStep(4096); dwell_sp.setValue(16384)
+        dwell_sp.setToolTip("每个调谐段采集的样本数（驻留时间 = dwell/sr）")
+
+        form.addRow("起始频率", start_sp)
+        form.addRow("终止频率", stop_sp)
+        form.addRow("步进宽度", step_sp)
+        form.addRow("驻留样本数", dwell_sp)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(dlg.accept)
+        btns.rejected.connect(dlg.reject)
+        form.addRow(btns)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        f0 = start_sp.value() * 1e6
+        f1 = stop_sp.value() * 1e6
+        step = step_sp.value() * 1e6
+        dwell = dwell_sp.value()
+        if f1 <= f0:
+            QMessageBox.warning(self, "参数错误", "终止频率必须大于起始频率。")
+            return
+
+        # ---- 暂停统一 IQ 轮询：扫频线程独占 set_frequency/read_samples，
+        # 否则两个消费者抢同一环形缓冲，且主循环改频会打乱步进。
+        try:
+            self._sweep_prev_center_hz = float(backend.get_frequency())
+        except Exception:
+            self._sweep_prev_center_hz = f0
+        self._stop_iq_streams()
+
+        worker = _SweepWorker(backend, f0, f1, sr, step, 0.5, dwell, parent=self)
+        self._sweep_worker = worker
+        prog = QProgressDialog("扫频中...", "取消", 0, 0, self)
+        prog.setWindowTitle("扫频找台")
+        prog.setWindowModality(Qt.WindowModal)
+        prog.setMinimumDuration(0)
+        prog.setValue(0)
+        self._sweep_progress = prog
+
+        worker.progress.connect(
+            lambda c_hz: prog.setLabelText(
+                f"扫频中...  当前调谐 {c_hz/1e6:.3f} MHz"))
+        worker.finished_ok.connect(self._on_sweep_done)
+        worker.failed.connect(self._on_sweep_failed)
+        worker.cancelled.connect(self._on_sweep_cancelled)
+        prog.canceled.connect(worker.cancel)
+
+        worker.start()
+
+    def _sweep_cleanup(self):
+        """扫频结束（成功/失败/取消）后的公共清理：关进度框、恢复 IQ 轮询。"""
+        if self._sweep_progress is not None:
+            try:
+                self._sweep_progress.close()
+            except Exception:
+                pass
+            self._sweep_progress = None
+        # 等后台线程真正退出，避免 "QThread destroyed while running" 告警
+        wk = self._sweep_worker
+        if wk is not None:
+            try:
+                wk.wait(2000)
+            except Exception:
+                pass
+        self._sweep_worker = None
+        # 恢复实时 IQ 轮询（后端仍连接时）
+        if self._active_sdr_backend is not None:
+            self._start_iq_streams()
+
+    def _on_sweep_done(self, result):
+        """扫频完成：标注活动频点、切到最强台、AI 面板输出峰值列表。"""
+        backend = self._active_sdr_backend
+        activities = list(getattr(result, "activities", []) or [])
+        # 在频谱上标注所有实测活动频点（marker 仅在当前 span 内可见）
+        try:
+            self.spectrum.set_markers([a.center_hz for a in activities])
+        except Exception:
+            pass
+        # 调谐到最强活动台，让第一个 marker 立即可见
+        if activities and backend is not None:
+            try:
+                backend.set_frequency(float(activities[0].center_hz))
+                self.spectrum.generator.center_freq_hz = float(activities[0].center_hz)
+            except Exception:
+                pass
+        self._sweep_cleanup()
+
+        # 状态栏摘要
+        n = len(activities)
+        try:
+            nf = getattr(result, "noise_floor_db", 0.0)
+            f0 = float(result.freqs_hz[0]) / 1e6
+            f1 = float(result.freqs_hz[-1]) / 1e6
+        except Exception:
+            nf = 0.0; f0 = 0.0; f1 = 0.0
+        self.statusBar().showMessage(
+            f"扫频完成：{n} 个活动频点（噪声底 {nf:.1f} dB）", 10000)
+        # AI 面板输出完整峰值列表
+        try:
+            rows = ["<b>扫频找台结果（实测）</b><br>"
+                    f"范围 {f0:.1f}–{f1:.1f} MHz，"
+                    f"门限 {getattr(result,'threshold_db',0.0):.1f} dB<br>"]
+            if activities:
+                rows.append(
+                    "<table width='100%' cellspacing='2' cellpadding='2' "
+                    "style='font-size:8pt;'>"
+                    "<tr style='color:#5B7B8C;'><td><b>中心MHz</b></td>"
+                    "<td><b>带宽kHz</b></td><td><b>峰值dB</b></td></tr>")
+                for a in activities:
+                    rows.append(
+                        f"<tr><td>{a.center_hz/1e6:.3f}</td>"
+                        f"<td>{a.bandwidth_hz/1e3:.1f}</td>"
+                        f"<td>{a.peak_db:.1f}</td></tr>")
+                rows.append("</table>")
+            else:
+                rows.append("该频段未检测到超过门限的活动信号（可能无电台/增益过低）。")
+            self.ai_panel._add_system_message("".join(rows))
+        except Exception:
+            pass
+
+    def _on_sweep_failed(self, msg: str):
+        self._sweep_cleanup()
+        self.statusBar().showMessage(f"扫频失败：{msg}", 8000)
+        QMessageBox.warning(self, "扫频失败", f"扫频过程出错：\n{msg}")
+
+    def _on_sweep_cancelled(self):
+        self._sweep_cleanup()
+        self.statusBar().showMessage("扫频已取消", 4000)
+
+    # ------------------------------------------------------------------
+    # baseband 离线回放（任务 4）
+    # ------------------------------------------------------------------
     def _replay_recording(self):
-        """回放已录制的 .iq baseband 文件（占位实现）。
+        """回放已录制的 .iq/.cf32/.wav baseband 文件。
 
-        弹出文件选择对话框；选中后若 baseband_io 提供读取能力则离线回放
-        （频谱显示文件中的真实 IQ），否则状态栏提示"待实现"。
-        绝不造假回放数据。
+        用 QFileDialog 选文件 → baseband_io.load_iq() 读回真实 IQ →
+        QTimer 按原始采样率把样本分块推给 spectrum.update_iq() 做离线回放。
+        文件里有什么就播什么，绝不造假。回放期间暂停实时 SDR 轮询，结束后恢复。
         """
+        if self._replay_timer is not None:
+            self._stop_replay()
         path, _ = QFileDialog.getOpenFileName(
             self, "选择录音文件",
             os.path.expanduser("~/mbdsdr_recordings"),
@@ -1845,23 +2114,91 @@ class MainWindow(QMainWindow):
         if not path:
             self.statusBar().showMessage("未选择录音文件", 3000)
             return
-        # 检查 baseband_io 是否提供读取接口
         try:
             from mbdsdr_ai import baseband_io
-            has_read = callable(getattr(baseband_io, "read_iq", None))
-        except Exception:
-            has_read = False
-        if not has_read:
-            self.statusBar().showMessage(
-                f"回放功能待实现（baseband_io.read_iq 不可用）：{path}", 6000)
-            QMessageBox.information(
-                self, "回放待实现",
-                f"已选择文件：\n{path}\n\n"
-                "当前 baseband_io 仅支持录制存盘，离线回放读取接口待实现。\n"
-                "文件已记录在状态栏，后续版本将支持频谱回放。")
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "回放失败", f"baseband_io 不可用：\n{e}")
             return
-        # 真正回放路径（baseband_io.read_iq 可用时）：交给后续迭代
-        self.statusBar().showMessage(f"回放（待实现）：{path}", 5000)
+        try:
+            rec = baseband_io.load_iq(path)
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "回放失败", f"读取文件失败：\n{e}")
+            return
+        if rec.get("error"):
+            QMessageBox.warning(self, "回放失败", str(rec["error"]))
+            return
+        iq = np.asarray(rec["iq"], dtype=np.complex64)
+        if iq.size < 64:
+            QMessageBox.information(self, "回放", "文件中有效样本太少，无法回放。")
+            return
+        sr = float(rec.get("sample_rate", 2.4e6))
+        center_hz = float(rec.get("center_freq_hz", 0.0))
+
+        # 停止实时轮询（回放期间独占频谱）；结束后按当时连接状态恢复
+        self._replay_resume_poll = self._iq_poll_timer is not None and \
+            self._iq_poll_timer.isActive()
+        self._stop_iq_streams()
+        try:
+            self.spectrum.set_connected(True)
+        except Exception:
+            pass
+
+        self._replay_iq = iq
+        self._replay_pos = 0
+        self._replay_sr = sr
+        self._replay_center_hz = center_hz
+        self._replay_total = int(iq.size)
+        # 每 50ms 推一块（按采样率换算样本数），与实时 20fps 观感一致
+        self._replay_block = max(1024, int(sr * 0.05))
+        self._replay_timer = QTimer(self)
+        self._replay_timer.setInterval(50)
+        self._replay_timer.timeout.connect(self._replay_tick)
+        self._replay_timer.start()
+        self.statusBar().showMessage(
+            f"回放中: {os.path.basename(path)}  "
+            f"0.0/{self._replay_total/sr:.1f}s", 0)
+
+    def _replay_tick(self):
+        """回放定时器：按采样率把下一块真实 IQ 推给频谱，更新进度。"""
+        if self._replay_iq is None or self._replay_timer is None:
+            self._stop_replay()
+            return
+        n = self._replay_block
+        seg = self._replay_iq[self._replay_pos:self._replay_pos + n]
+        if seg.size >= 64:
+            try:
+                self.spectrum.update_iq(seg, self._replay_center_hz, self._replay_sr)
+            except Exception:
+                pass
+        self._replay_pos += n
+        cur_s = self._replay_pos / self._replay_sr
+        tot_s = self._replay_total / self._replay_sr
+        self.statusBar().showMessage(
+            f"回放中: {min(cur_s, tot_s):.1f}/{tot_s:.1f}s", 0)
+        if self._replay_pos >= self._replay_total:
+            self._stop_replay()
+            self.statusBar().showMessage(
+                f"回放完成（{tot_s:.1f}s）", 5000)
+
+    def _stop_replay(self):
+        """停止回放并恢复实时状态。"""
+        if self._replay_timer is not None:
+            try:
+                self._replay_timer.stop()
+            except Exception:
+                pass
+            self._replay_timer = None
+        self._replay_iq = None
+        self._replay_pos = 0
+        # 回放结束：若实时后端仍连着，恢复统一 IQ 轮询；否则保持未连接空白
+        if self._replay_resume_poll and self._active_sdr_backend is not None:
+            self._start_iq_streams()
+        elif self._active_sdr_backend is None:
+            try:
+                self.spectrum.set_connected(False)
+            except Exception:
+                pass
+        self._replay_resume_poll = False
 
     def _open_ntrip_dialog(self):
         """打开 NTRIP 配置对话框（非模态）。

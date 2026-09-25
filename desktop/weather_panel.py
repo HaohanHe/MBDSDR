@@ -7,8 +7,9 @@ MBDSDR 桌面端 - 气象卫星云图面板 (WeatherPanel)
               FY-4A HRIT / FY-3D HRPT
   - 数据来源：
       * 录制文件：真实 .iq(complex64) / .wav(APT 音频) / .cfile 离线解调解码
-      * 实时 SDR：attach_iq_source() 注入真实 read_samples 回调后，边收边存，
-                  停止时对落盘的 complex64 录制做同一套离线解码
+      * 实时 SDR：需先在主窗口调谐到下行频率并用工具栏录音(Ctrl+R)落盘，
+                  再切「录制文件」对同一 baseband 解码（不另起 read_samples
+                  定时器与主窗口统一 IQ 轮询抢同一环形缓冲）
   - 解码链路（每一步都调用 mbdsdr_ai 真实模块，不跳过、不填假数据）：
       GK-2A  : gk2a_lrit.decode_iq_to_image
                  = BPSK 解调 → Viterbi(K=7,1/2,0x4F/0x6D) → 帧同步 0x1ACFFC1D
@@ -29,7 +30,7 @@ MBDSDR 桌面端 - 气象卫星云图面板 (WeatherPanel)
   * 不内置任何默认/示例/合成云图，不 np.random 生成假图，不从 URL 拉示例图。
   * 实时 SDR 模式在 set_sdr_connected(False) 时整体置灰。
 
-配色（日式低饱和，与 themes.py japanese_light 一致；面板局部强调色直接取任务给定值）：
+配色（低饱和默认主题，与 themes.py 一致；面板局部强调色直接取任务给定值）：
   米白 #F5F3EF / 蓝灰 #5B7B8C / 橙 #C4845C / 绿 #6BA89A / 红 #B85C5C
 """
 from __future__ import annotations
@@ -39,14 +40,14 @@ import sys
 import time
 import traceback
 import wave
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 # 允许 desktop/ 直接跑，也允许被 main_window import
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np  # noqa: E402
 
-from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer  # noqa: E402
+from PySide6.QtCore import Qt, QThread, Signal, QObject  # noqa: E402
 from PySide6.QtGui import QPixmap, QFont  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox, QPushButton,
@@ -58,7 +59,7 @@ from themes import get_theme, DEFAULT_THEME  # noqa: E402
 
 
 # ----------------------------------------------------------------------
-# 日式低饱和面板强调色（任务给定值；控件本体配色仍走 themes.py）
+# 低饱和面板强调色（任务给定值；控件本体配色仍走 themes.py）
 # ----------------------------------------------------------------------
 C_BG = "#F5F3EF"
 C_BLUE = "#5B7B8C"
@@ -352,9 +353,6 @@ class WeatherPanel(QWidget):
         self._iq_file: Optional[str] = None
         self._current_png: Optional[str] = None
         self._sdr_connected = False
-        # 实时 SDR IQ 源：由 attach_iq_source() 注入 (read_samples(n)->ndarray, fs)
-        self._iq_read: Optional[Callable[[int], np.ndarray]] = None
-        self._iq_sr: float = 1e6
         self._worker: Optional[QThread] = None
         self._worker_obj: Optional[DecodeWorker] = None
         self._frame_count = 0
@@ -487,17 +485,6 @@ class WeatherPanel(QWidget):
         self._sdr_connected = bool(connected)
         self._refresh_state()
 
-    def attach_iq_source(self, read_samples: Callable[[int], np.ndarray],
-                         sample_rate_hz: float):
-        """注入实时 SDR IQ 读取回调（可选）。
-
-        read_samples(n) 返回 n 个 complex64 采样。未注入时实时模式只能
-        录制到内存后落盘解码，不会伪造图像。
-        """
-        self._iq_read = read_samples
-        self._iq_sr = float(sample_rate_hz)
-        self._refresh_state()
-
     def set_iq_file(self, path: str):
         """外部直接指定录制文件路径。"""
         if path and os.path.exists(path):
@@ -588,13 +575,17 @@ class WeatherPanel(QWidget):
             if not self._sdr_connected:
                 QMessageBox.warning(self, "未连接 SDR", "未连接SDR设备，无法实时接收。")
                 return
-            # 实时：先录制到临时 complex64 文件，停止后解码
-            tmp = self._out_png_path("live").replace(".png", ".iq")
-            self._live_iq_path = tmp
-            self._live_buf: List[np.ndarray] = []
-            self._live_stop = False
-            self.progress.setVisible(True); self.progress.setValue(0)
-            self._start_live_capture()
+            # 实时过境接收需要独占调谐到卫星下行频率并录制一个完整过境段。
+            # 不再在此面板另起 read_samples 定时器——那会与主窗口统一 IQ 轮询
+            # （50ms 一次 read_samples）抢同一环形缓冲，两路消费者互相偷样本。
+            # 改为引导用户走已验证的录制文件链路：主窗口录音 → 落盘 .iq → 本面板解码。
+            QMessageBox.information(
+                self, "实时接收指引",
+                "接收卫星云图需要把接收机调到下行频率并录制一个过境段。\n\n"
+                "操作步骤：\n"
+                "  1. 在主窗口调谐到下方中心频率；\n"
+                "  2. 点工具栏「录音」(Ctrl+R) 录制 baseband 到 .iq 文件；\n"
+                "  3. 停止录制后切到「录制文件」，选择该 .iq 解码出图。")
             return
 
         # 离线
@@ -614,62 +605,8 @@ class WeatherPanel(QWidget):
         self._start_worker(params)
 
     # ------------------------------------------------------------------
-    # 实时录制循环（在面板所在线程用 QTimer 拉 IQ，不另起线程抢设备）
-    # ------------------------------------------------------------------
-    def _start_live_capture(self):
-        self._live_timer = QTimer(self)
-        self._live_timer.setInterval(200)  # 200ms 拉一块
-        self._live_timer.timeout.connect(self._live_pump)
-        self._live_timer.start()
-        self.start_btn.setEnabled(False); self.stop_btn.setEnabled(True)
-        self._update_status(extra="实时接收中 ... (停止后自动解码落盘录制)")
-
-    def _live_pump(self):
-        if self._iq_read is None:
-            # 未注入 IQ 回调：如实提示，不伪造数据
-            self._live_timer.stop()
-            self._on_idle()
-            QMessageBox.information(
-                self, "无 IQ 源",
-                "实时 SDR 已连接但面板未拿到 IQ 流回调。\n"
-                "请用「录制文件」模式选择已落盘的 complex64 录制。")
-            return
-        try:
-            blk = self._iq_read(8192)
-        except Exception as e:  # noqa: BLE001
-            self._live_timer.stop()
-            self._on_idle()
-            self._update_status(extra=f"IQ 读取失败: {e}")
-            return
-        if blk is None or len(blk) == 0:
-            return
-        self._live_buf.append(np.asarray(blk, dtype=np.complex64))
-        secs = sum(len(b) for b in self._live_buf) / self._iq_sr
-        self.progress.setValue(min(99, int(secs)))
-        self._update_status(extra=f"实时录制 {secs:.1f}s ...")
-
     def stop_decode(self):
         """停止接收/解码。"""
-        if self._is_realtime() and getattr(self, "_live_timer", None) is not None:
-            self._live_timer.stop()
-            # 把缓冲落盘后离线解码
-            if self._live_buf:
-                iq = np.concatenate(self._live_buf)
-                iq.tofile(self._live_iq_path)
-                self._live_buf = []
-                sat = self._current_sat()
-                out_png = self._out_png_path("live")
-                params = {
-                    "family": sat.get("family", "gk2a"),
-                    "satellite": self.sat_combo.currentText(),
-                    "iq_file": self._live_iq_path,
-                    "out_png": out_png,
-                    "sps": max(1, round(float(self.sr_edit.text()) * 1e6 /
-                                       (float(self.sym_edit.text()) * 1e3 or 1))),
-                    "sample_rate": self._iq_sr,
-                }
-                self._start_worker(params)
-                return
         if self._worker_obj is not None:
             self._worker_obj.request_stop()
         if self._worker is not None:
