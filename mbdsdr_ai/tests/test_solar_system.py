@@ -51,25 +51,25 @@ def test_sun_noon_altitude():
     """
     station = CHANGCHUN
     lat = station.latitude_deg
+    lon = station.longitude_deg
 
-    # 今天日期
+    # 长春经度 125.3E，地方正午 UTC ≈ 12:00 - lon/15 = 03:32 UTC
+    # 扫描 02:00 ~ 05:00 UTC（3 小时窗口，步长 5 分钟 = 36 点）
     now = _time.time()
-    # 扫描一天找太阳最高时刻（步长 10 分钟）
+    today_00_utc = now - (now % 86400)  # 今天 00:00 UTC
+    noon_utc_approx = today_00_utc + (12.0 - lon / 15.0) * 3600.0
     best_alt = -999
-    best_t = now
     best_sun = None
-    t = now - 12 * 3600  # 从 12 小时前开始扫
-    for i in range(144 * 2):  # 24 小时，步长 10 min
+    t = noon_utc_approx - 1.5 * 3600.0
+    for _ in range(36):
         sun = get_sun_position(t, station)
         if sun is not None and sun.alt_deg > best_alt:
             best_alt = sun.alt_deg
-            best_t = t
             best_sun = sun
-        t += 600
+        t += 300  # 5 分钟步长
 
     assert best_sun is not None, "未找到太阳最高点"
     expected_max_alt = 90.0 - abs(lat - best_sun.dec_deg)
-    # 容差：2°（大气折射、方程时差、扫描步长）
     diff = abs(best_alt - expected_max_alt)
     print(f"[OK] 太阳正午高度: 实测={best_alt:.2f}°, 公式预测={expected_max_alt:.2f}°, "
           f"差={diff:.2f}°, dec={best_sun.dec_deg:.2f}°")
