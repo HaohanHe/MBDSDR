@@ -52,6 +52,11 @@ try:
     from mbdsdr_ai.audio_out import AudioPlayer
 except Exception:  # pragma: no cover
     AudioPlayer = None  # type: ignore
+# 真实串口 GNSS（NMEA）：插上模块后 auto_detect 定位；缺 pyserial 等依赖时降级为 none
+try:
+    from mbdsdr_ai.gnss_monitor import RealGNSSMonitor
+except Exception:  # pragma: no cover
+    RealGNSSMonitor = None  # type: ignore
 
 
 class MainWindow(QMainWindow):
@@ -83,6 +88,13 @@ class MainWindow(QMainWindow):
         self._observer_lon: Optional[float] = None
         self._is_sim: bool = False  # 是否处于模拟模式（模拟时天空图标注“模拟数据”）
         self.sat_tracker: Optional[SatelliteTracker] = None
+        # 真实串口 GNSS 监测：插上 GNSS 模块后 auto_detect 定位，驱动状态面板 GPS 组
+        # 与天空图观测站坐标。找不到设备/缺依赖时降级为 none，绝不崩、绝不造假坐标。
+        self._gnss = RealGNSSMonitor() if RealGNSSMonitor is not None else None
+        self._gnss_timer: Optional[QTimer] = None
+        # 地面站坐标是否由真实 GNSS 自动设定（True 时才允许 GNSS 写入；
+        # 用户在 gui_config.json 手动配置的坐标优先，不被 GNSS 覆盖）。
+        self._observer_from_gnss: bool = False
         # 真实 SDR 后端（SoapySDR/RTL-SDR/HackRF 等）。由设备选择对话框真实 connect 后填充；
         # 与 self._worker（ai-sdr Mini WebSocket）互斥。硬件失败绝不静默切 mock。
         self._active_sdr_backend: Optional[object] = None
@@ -136,6 +148,13 @@ class MainWindow(QMainWindow):
         self._iq_poll_timer = QTimer(self)
         self._iq_poll_timer.setInterval(50)  # 20 fps
         self._iq_poll_timer.timeout.connect(self._poll_sdr_iq)
+
+        # (D) 真实串口 GNSS 轮询定时器：每 1s 读一次 NMEA fix。
+        # UI 初始化完成后再延迟 auto_detect 启动，避免阻塞首屏；找不到设备也不崩。
+        self._gnss_timer = QTimer(self)
+        self._gnss_timer.setInterval(1000)
+        self._gnss_timer.timeout.connect(self._poll_gnss)
+        QTimer.singleShot(800, self._start_real_gnss)
 
     # ========================================================================
     # UI 构建
@@ -1283,6 +1302,73 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    # ========================================================================
+    # 真实串口 GNSS（NMEA）轮询
+    # ========================================================================
+
+    def _start_real_gnss(self):
+        """UI 初始化完成后启动真实串口 GNSS auto_detect。
+
+        找不到设备 / 缺 pyserial 时 start() 返回 False，不抛异常、不阻塞 UI。
+        无论成败都开启 1s 轮询定时器：无设备时 get_position() 返回 source="none"，
+        状态面板与天空图停留在“未连接/地面站未设置”空状态。
+        """
+        if self._gnss is None:
+            return
+        try:
+            self._gnss.start()
+        except Exception:
+            pass
+        if self._gnss_timer is not None:
+            self._gnss_timer.start()
+
+    @Slot()
+    def _poll_gnss(self):
+        """每 1s 读一次真实串口 GNSS fix，刷新状态面板与天空图。
+
+        无串口/无 fix 时 pos.source=="none"、坐标全 None：状态面板显示“未连接”，
+        天空图回到“地面站未设置”空状态，绝不保留旧坐标或编造坐标。
+        """
+        if self._gnss is None:
+            return
+        try:
+            pos = self._gnss.get_position()
+        except Exception:
+            return
+
+        fix_dict = {
+            "source": pos.source,
+            "latitude": pos.lat,
+            "longitude": pos.lon,
+            "altitude_m": pos.alt,
+            "satellites": pos.sats,
+            "hdop": pos.hdop,
+            "speed_kmh": pos.speed,
+            "course_deg": pos.course,
+            "utc_time": pos.utc_time,
+            "fix_quality": 0,
+            "timestamp": pos.timestamp,
+        }
+        # 状态面板 GPS 组（real 绿 / none 灰）
+        try:
+            self.status_panel.update_gnss(fix_dict)
+        except Exception:
+            pass
+        # 天空图观测站坐标与数据来源角标
+        try:
+            self.sky_view.set_gnss_position(fix_dict)
+        except Exception:
+            pass
+        # 真实 GNSS 自动设定地面站位置：仅当用户尚未手动配置
+        # （_observer_lat/lon 均为 None，即 gui_config.json 无坐标、非模拟）时才写入，
+        # 避免覆盖手动配置坐标或模拟坐标。
+        if pos.source == "real" and pos.lat is not None and pos.lon is not None:
+            if self._observer_lat is None and self._observer_lon is None:
+                self._observer_lat = float(pos.lat)
+                self._observer_lon = float(pos.lon)
+                self._observer_from_gnss = True
+                self._apply_observer_location()
+
     def _on_sky_object_clicked(self, obj):
         """天空对象点击处理：显示详情，可选跟踪，并调用 MCP 工具调谐频率。"""
         if obj.obj_type == "satellite":
@@ -1333,6 +1419,17 @@ class MainWindow(QMainWindow):
         """关闭时断开连接并保存配置。"""
         self._save_gui_config()
         self._disconnect()
+        # 停止真实串口 GNSS 轮询定时器与后台串口读线程
+        try:
+            if self._gnss_timer is not None:
+                self._gnss_timer.stop()
+        except Exception:
+            pass
+        try:
+            if self._gnss is not None:
+                self._gnss.stop()
+        except Exception:
+            pass
         event.accept()
 
     def _save_gui_config(self):

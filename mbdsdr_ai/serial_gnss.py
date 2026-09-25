@@ -52,7 +52,19 @@ DEFAULT_BAUDRATES = [4800, 9600, 38400, 57600, 115200]
 TALKER_IDS = ("GP", "GL", "GA", "GB", "BD", "GN")
 
 # NMEA 语句类型（去掉 2 位 talker 后的 3 字母类型）
-KNOWN_SENTENCE_TYPES = ("GGA", "RMC", "GSA", "GSV", "VTG", "ZDA")
+KNOWN_SENTENCE_TYPES = ("GGA", "RMC", "GSA", "GSV", "VTG", "ZDA",
+                        "GLL", "GST", "TXT")
+
+# auto_detect 优先探测的 GNSS 关键字（出现在 description/manufacturer 中即优先）
+_GNSS_KEYWORDS = (
+    "gps", "gnss", "u-blox", "ublox", "neo-m", "neo-6", "neo-7", "neo-8",
+    "m8n", "m8t", "m8g", "max-m", "lea-", "atgm", "quectel", "lc29",
+    "ag3335", "ag3325", "mt333", "sirf", "simcom", "l76", "cam-m8",
+)
+
+# 常见 USB-TTL 芯片关键字（仅用于端口识别信息展示，不影响解析）
+_USB_TTL_CHIPS = ("ch340", "ch341", "cp2102", "cp210", "ft232", "ft231x",
+                  "pl2303", "pl230", "ch9102")
 
 
 # ============================================================
@@ -97,7 +109,14 @@ class NMEAParser:
 
     每条语句 dict 至少包含 ``talker``、``sentence``（如 'GGA'）；
     具体字段见各 parse_* 实现。
+
+    GSV 多帧聚合：内部按 ``talker`` 缓冲各帧，收到最后一帧时合并返回
+    完整 sats 列表（dict 带 ``aggregated=True``）；中间帧返回 None。
     """
+
+    def __init__(self):
+        # GSV 多帧缓冲：key = f"{talker}GSV"，value = 已收到帧的 dict 列表
+        self._gsv_buf: Dict[str, List[Dict[str, Any]]] = {}
 
     def parse(self, line: str) -> Optional[Dict[str, Any]]:
         line = (line or "").strip()
@@ -139,6 +158,12 @@ class NMEAParser:
                 return self._parse_vtg(talker, fields)
             if stype == "ZDA":
                 return self._parse_zda(talker, fields)
+            if stype == "GLL":
+                return self._parse_gll(talker, fields)
+            if stype == "GST":
+                return self._parse_gst(talker, fields)
+            if stype == "TXT":
+                return self._parse_txt(talker, fields)
         except (ValueError, IndexError):
             return None
         return None
@@ -201,9 +226,11 @@ class NMEAParser:
             "vdop": float(f[17]) if len(f) > 17 and f[17] else None,
         }
 
-    # ---- GSV: 可见卫星（可能多帧）。返回本帧摘要，不聚合 ----
+    # ---- GSV: 可见卫星（可能多帧，按 talker 聚合） ----
     # $GNGSV,nummsg,msgnum,numsv,sv,elev,az,snr,sv,...*CC
-    def _parse_gsv(self, talker: str, f: List[str]) -> Dict[str, Any]:
+    # 单帧(total_messages==1)直接返回；多帧时缓存各帧，最后一帧合并返回。
+    # 中间帧返回 None（调用方应忽略）。北斗 GBGSV 卫星 PRN 可能 >32，正常按整数解析。
+    def _parse_gsv(self, talker: str, f: List[str]) -> Optional[Dict[str, Any]]:
         sats = []
         # 每 4 字段一组：id, elev, az, snr
         i = 4
@@ -211,18 +238,89 @@ class NMEAParser:
             sid, elev, az, snr = f[i], f[i + 1], f[i + 2], f[i + 3]
             if sid:
                 sats.append({
-                    "id": int(sid) if sid.isdigit() else sid,
+                    "id": int(sid) if sid.lstrip("-").isdigit() else sid,
                     "elevation": float(elev) if elev else None,
                     "azimuth": float(az) if az else None,
                     "snr_db": float(snr) if snr else None,
                 })
             i += 4
-        return {
+        total = int(f[1]) if len(f) > 1 and f[1].isdigit() else 0
+        num = int(f[2]) if len(f) > 2 and f[2].isdigit() else 0
+        frame = {
             "talker": talker, "sentence": "GSV",
-            "total_messages": int(f[1]) if len(f) > 1 and f[1].isdigit() else 0,
-            "message_number": int(f[2]) if len(f) > 2 and f[2].isdigit() else 0,
+            "total_messages": total,
+            "message_number": num,
             "satellites_in_view": int(f[3]) if len(f) > 3 and f[3].isdigit() else 0,
             "sats": sats,
+            "aggregated": False,
+        }
+        # 单帧直接返回
+        if total <= 1:
+            return frame
+        # 多帧：按 talker 分组缓冲
+        key = f"{talker}GSV"
+        if num <= 1:
+            # 新一帧序列开始，重置缓冲（防止上轮丢帧导致脏数据）
+            self._gsv_buf[key] = [frame]
+        else:
+            self._gsv_buf.setdefault(key, []).append(frame)
+        if num >= total:
+            # 收到最后一帧：合并所有缓冲帧
+            all_sats: List[Dict[str, Any]] = []
+            buffered = self._gsv_buf.pop(key, [frame])
+            for fr in buffered:
+                all_sats.extend(fr.get("sats", []))
+            agg = dict(frame)
+            agg["sats"] = all_sats
+            agg["aggregated"] = True
+            agg["message_number"] = num
+            agg["total_messages"] = total
+            return agg
+        # 中间帧：数据未齐，暂不返回
+        return None
+
+    # ---- GLL: 地理坐标（经纬度 + UTC 时间 + 状态） ----
+    # $GNGLL,llll.ll,a,yyyyy.yy,a,hhmmss.ss,a[,m]*CC
+    def _parse_gll(self, talker: str, f: List[str]) -> Dict[str, Any]:
+        status = f[6] if len(f) > 6 else "V"
+        return {
+            "talker": talker, "sentence": "GLL",
+            "latitude": _ddmm_to_deg(f[1], f[2], True) if len(f) > 2 else None,
+            "longitude": _ddmm_to_deg(f[3], f[4], False) if len(f) > 4 else None,
+            "utc_time": f[5] if len(f) > 5 else "",
+            "valid": status == "A",
+            "status": status,
+        }
+
+    # ---- GST: GNSS 伪距噪声统计（误差椭圆/各轴标准差） ----
+    # $GNGST,hhmmss.ss,rms,major,minor,orient,lat_sig,lon_sig,alt_sig*CC
+    # 空字段一律 None。
+    def _parse_gst(self, talker: str, f: List[str]) -> Dict[str, Any]:
+        def _f(i: int) -> Optional[float]:
+            try:
+                return float(f[i]) if len(f) > i and f[i] != "" else None
+            except ValueError:
+                return None
+        return {
+            "talker": talker, "sentence": "GST",
+            "utc_time": f[1] if len(f) > 1 else "",
+            "rms_std": _f(2),
+            "major_sigma": _f(3),
+            "minor_sigma": _f(4),
+            "orient": _f(5),
+            "lat_sigma": _f(6),
+            "lon_sigma": _f(7),
+            "alt_sigma": _f(8),
+        }
+
+    # ---- TXT: u-blox/厂商文本语句（BDTXT 等），不崩溃即可 ----
+    # $--TXT,...任意逗号分隔文本...*CC
+    def _parse_txt(self, talker: str, f: List[str]) -> Dict[str, Any]:
+        # 把 f[1:] 全部拼成文本（TXT 载荷本身可能含逗号）
+        text = ",".join(f[1:]) if len(f) > 1 else ""
+        return {
+            "talker": talker, "sentence": "TXT",
+            "text": text,
         }
 
     # ---- VTG: 航迹角 + 地面速度 ----
@@ -284,6 +382,10 @@ class SerialGNSSReader:
         self._lock = threading.Lock()
         self._port: Optional[str] = None
         self._baudrate: Optional[int] = None
+        # 热插拔状态
+        self._connected = False          # 串口真正打开且近期有数据
+        self._data_timeout = 5.0         # 连续无数据超过此秒数视为断线
+        self._reconnect_interval = 2.0   # 重连尝试间隔（秒）
         # 最新融合状态
         self._fix: Dict[str, Any] = self._empty_fix()
 
@@ -299,39 +401,79 @@ class SerialGNSSReader:
         }
 
     @staticmethod
-    def list_candidate_ports() -> List[str]:
-        """列出候选串口：Windows COM* / Linux /dev/ttyUSB*,/dev/ttyACM*。"""
+    def list_candidate_ports() -> List[Dict[str, Any]]:
+        """枚举候选串口，返回带描述信息的字典列表。
+
+        每项 ::
+
+            {"device": "/dev/ttyUSB0",
+             "description": "USB-SERIAL CH340",
+             "manufacturer": "QinHeng",
+             "hwid": "USB VID:PID=1A86:7523 ..."}
+
+        自动识别 CH340/CP2102/FT232/PL2303 等常见 USB-TTL 芯片（description
+        或 manufacturer 命中关键字即视为已知芯片）。无 pyserial 返回 []。
+        """
         if not _SERIAL_AVAILABLE or list_ports is None:
             return []
-        ports = []
+        ports: List[Dict[str, Any]] = []
         try:
             for p in list_ports.comports():
-                ports.append(p.device)
+                desc = (p.description or "")
+                mfr = (p.manufacturer or "")
+                ports.append({
+                    "device": p.device,
+                    "description": desc,
+                    "manufacturer": mfr,
+                    "hwid": (p.hwid or ""),
+                    "usb_ttl_chip": next(
+                        (chip for chip in _USB_TTL_CHIPS
+                         if chip in (desc + " " + mfr).lower()),
+                        None),
+                })
         except Exception:
             pass
         return ports
+
+    @staticmethod
+    def list_candidate_port_devices() -> List[str]:
+        """向后兼容：仅返回设备名（如 '/dev/ttyUSB0'）字符串列表。"""
+        return [p["device"] for p in SerialGNSSReader.list_candidate_ports()]
+
+    @staticmethod
+    def _is_gnss_port(info: Dict[str, Any]) -> bool:
+        desc = (info.get("description", "") + " " + info.get("manufacturer", "")).lower()
+        return any(k in desc for k in _GNSS_KEYWORDS)
 
     @classmethod
     def auto_detect(cls, baudrates: Optional[List[int]] = None,
                     read_timeout: float = 0.6) -> Optional[Dict[str, Any]]:
         """扫描所有候选串口 × 波特率，读到一条合法 NMEA 即锁定。
 
+        优先探测 description/manufacturer 命中 GNSS 关键字（GPS/GNSS/u-blox/
+        NEO/M8N 等）的端口，缩短热插拔后的锁定时间。
+
         返回 {"port":..., "baudrate":...}；无设备/无合法 NMEA 返回 None，绝不崩溃。
         """
         if not _SERIAL_AVAILABLE:
             return None
         baudrates = baudrates or DEFAULT_BAUDRATES
-        ports = cls.list_candidate_ports()
-        if not ports:
+        infos = cls.list_candidate_ports()
+        if not infos:
             return None
+        # GNSS 相关端口排前面（sort 稳定，保持其余顺序）
+        infos.sort(key=lambda info: 0 if cls._is_gnss_port(info) else 1)
         parser = NMEAParser()
-        for port in ports:
+        for info in infos:
+            port = info["device"]
+            # GNSS 嫌疑端口给足窗口；普通端口缩短窗口以加快整体扫描
+            win = read_timeout if cls._is_gnss_port(info) else read_timeout * 0.5
             for baud in baudrates:
                 ser = None
                 try:
-                    ser = serial.Serial(port, baud, timeout=read_timeout)
+                    ser = serial.Serial(port, baud, timeout=win)
                     # 丢弃启动垃圾，读若干行找合法 NMEA
-                    deadline = time.time() + read_timeout + 0.3
+                    deadline = time.time() + win + 0.3
                     while time.time() < deadline:
                         raw = ser.readline()
                         if not raw:
@@ -354,6 +496,10 @@ class SerialGNSSReader:
                             pass
         return None
 
+    def _open_serial(self, port: str, baudrate: int):
+        """打开串口（抽出成方法便于自测时 mock 重连状态机）。"""
+        return serial.Serial(port, baudrate, timeout=1.0)
+
     def start(self, port: Optional[str] = None, baudrate: Optional[int] = None):
         """打开串口并启动后台读取线程。port/baudrate 为 None 时先 auto_detect。"""
         if self._running.is_set():
@@ -364,11 +510,12 @@ class SerialGNSSReader:
                 return False
             port, baudrate = info["port"], info["baudrate"]
         try:
-            self._ser = serial.Serial(port, baudrate, timeout=1.0)
+            self._ser = self._open_serial(port, baudrate)
         except Exception:
             self._ser = None
             return False
         self._port, self._baudrate = port, baudrate
+        self._connected = True
         self._running.set()
         self._thread = threading.Thread(target=self._read_loop, daemon=True)
         self._thread.start()
@@ -385,15 +532,66 @@ class SerialGNSSReader:
             except Exception:
                 pass
             self._ser = None
+        self._connected = False
+
+    def is_connected(self) -> bool:
+        """返回串口是否真正打开且在读数据（后台线程维护状态）。"""
+        return self._running.is_set() and self._connected
+
+    def _close_ser(self):
+        """关闭当前串口并标记断开（不阻塞调用方，供后台线程调用）。"""
+        if self._ser is not None:
+            try:
+                self._ser.close()
+            except Exception:
+                pass
+        self._ser = None
+        self._connected = False
+
+    def _reconnect(self) -> bool:
+        """后台线程内重连：每隔 _reconnect_interval 秒尝试重开当前 port/baud。
+
+        无限重试直到成功或 ``stop()`` 被调用（热插拔场景下用户可能随时插上模块）。
+        返回 True=重连成功可继续读；False=被 stop() 打断。
+        """
+        while self._running.is_set():
+            time.sleep(self._reconnect_interval)
+            if not self._running.is_set():
+                return False
+            try:
+                self._ser = self._open_serial(self._port, self._baudrate)  # type: ignore[arg-type]
+                self._connected = True
+                return True
+            except Exception:
+                self._ser = None
+                self._connected = False
+                continue
+        return False
 
     def _read_loop(self):
-        while self._running.is_set() and self._ser is not None:
+        """后台读循环：读 NMEA → 合并；断线自动重连，不阻塞调用方。"""
+        last_data = time.time()
+        while self._running.is_set():
+            if self._ser is None:
+                # 断线态：进入重连循环（无限重试直到成功或 stop）
+                self._connected = False
+                if not self._reconnect():
+                    break
+                last_data = time.time()
+                continue
             try:
                 raw = self._ser.readline()
             except Exception:
-                break
-            if not raw:
+                # 读异常（拔线/USB 断开）→ 关掉，进入重连
+                self._close_ser()
                 continue
+            if not raw:
+                # readline 超时（timeout=1s 返回空）：检查是否长时间无数据
+                if time.time() - last_data > self._data_timeout:
+                    self._close_ser()
+                continue
+            last_data = time.time()
+            self._connected = True
             try:
                 line = raw.decode("ascii", errors="ignore")
             except Exception:
@@ -584,13 +782,63 @@ if __name__ == "__main__":
     check("RMC speed_kmh≈19.45", rmc and abs(rmc["speed_kmh"] - 10.5 * 1.852) < 1e-3)
     check("RMC valid", rmc and rmc["valid"] is True)
 
-    # --- 3. GSA / VTG / ZDA / GSV ---
+    # --- 3. GSA / VTG / ZDA ---
     check("GSA", p.parse(make("GNGSA,A,3,01,02,03,,,,,,,,,,1.0,0.8,0.9")) is not None)
     check("VTG", p.parse(make("GNVTG,45.0,T,,M,10.5,N,19.4,K")) is not None)
     zda = p.parse(make("GNZDA,072545.00,24,09,2026,,"))
     check("ZDA", zda is not None and zda["datetime_utc"] is not None)
-    gsv = p.parse(make("GNGSV,2,1,11,01,88,045,42,02,45,120,38"))
-    check("GSV 解析出 2 颗", gsv and len(gsv["sats"]) == 2)
+
+    # --- 3b. GLL 地理坐标语句 ---
+    gll = p.parse(make("GNGLL,4352.0000,N,12519.0000,E,072545.00,A"))
+    print("GLL:", make("GNGLL,4352.0000,N,12519.0000,E,072545.00,A"))
+    check("GLL sentence", gll and gll["sentence"] == "GLL")
+    check("GLL 纬度≈43.8667", gll and abs(gll["latitude"] - 43.866667) < 1e-4)
+    check("GLL 经度≈125.3167", gll and abs(gll["longitude"] - 125.316667) < 1e-4)
+    check("GLL utc_time", gll and gll["utc_time"] == "072545.00")
+    check("GLL valid=True", gll and gll["valid"] is True)
+    gll_v = p.parse(make("GNGLL,4352.0000,N,12519.0000,E,072545.00,V"))
+    check("GLL status=V 时 valid=False", gll_v and gll_v["valid"] is False)
+
+    # --- 3c. GST 伪距噪声统计 ---
+    gst = p.parse(make("GNGST,072545.00,1.0,2.0,1.0,30.0,0.8,0.6,5.0"))
+    print("GST:", make("GNGST,072545.00,1.0,2.0,1.0,30.0,0.8,0.6,5.0"))
+    check("GST sentence", gst and gst["sentence"] == "GST")
+    check("GST rms_std=1.0", gst and gst["rms_std"] == 1.0)
+    check("GST major_sigma=2.0", gst and gst["major_sigma"] == 2.0)
+    check("GST minor_sigma=1.0", gst and gst["minor_sigma"] == 1.0)
+    check("GST orient=30.0", gst and gst["orient"] == 30.0)
+    check("GST lat_sigma=0.8", gst and gst["lat_sigma"] == 0.8)
+    check("GST lon_sigma=0.6", gst and gst["lon_sigma"] == 0.6)
+    check("GST alt_sigma=5.0", gst and gst["alt_sigma"] == 5.0)
+    gst_empty = p.parse(make("GNGST,072545.00,,,,,,,"))
+    check("GST 空字段为 None", gst_empty and gst_empty["major_sigma"] is None
+          and gst_empty["alt_sigma"] is None)
+
+    # --- 3d. GSV 多帧聚合（按 talker 分组） ---
+    pg = NMEAParser()
+    f1 = pg.parse(make("GNGSV,3,1,11,01,88,045,42,02,45,120,38"))
+    f2 = pg.parse(make("GNGSV,3,2,11,03,40,200,30"))
+    f3 = pg.parse(make("GNGSV,3,3,11,04,30,300,25"))
+    check("GSV 中间帧返回 None", f1 is None and f2 is None)
+    check("GSV 末帧聚合返回 dict", f3 is not None and f3["aggregated"] is True)
+    check("GSV 聚合出 4 颗卫星", f3 and len(f3["sats"]) == 4)
+    check("GSV 聚合含 PRN=4", f3 and any(s["id"] == 4 for s in f3["sats"]))
+    # 单帧 GSV 直接返回（不聚合）
+    gsv1 = pg.parse(make("GNGSV,1,1,4,01,80,040,40"))
+    check("GSV 单帧直接返回 aggregated=False", gsv1 and gsv1["aggregated"] is False
+          and len(gsv1["sats"]) == 1)
+    # 不同 talker 分组互不干扰：北斗 GBGSV 多帧
+    pb = NMEAParser()
+    b1 = pb.parse(make("GBGSV,2,1,6,211,80,040,40,212,50,100,35"))
+    b2 = pb.parse(make("GBGSV,2,2,6,213,30,200,20"))
+    check("GBGSV 中间帧 None", b1 is None)
+    check("GBGSV 末帧聚合 3 颗（PRN>32 正常）", b2 and b2["aggregated"] is True
+          and len(b2["sats"]) == 3 and any(s["id"] == 211 for s in b2["sats"]))
+
+    # --- 3e. BDTXT 文本语句（不崩溃） ---
+    txt = p.parse(make("BDTXT,01,01,01,HW U-BLOX 8 READY"))
+    check("BDTXT 解析为 TXT", txt and txt["sentence"] == "TXT"
+          and "U-BLOX" in txt["text"])
 
     # --- 4. 多星座 talker 前缀（含北斗 BD/GB） ---
     check("BDGGA 北斗前缀", p.parse(make("BDGGA,072545.00,4352.00,N,12519.00,E,1,9,0.9,150.0,M,,,,"))["sentence"] == "GGA")
@@ -602,9 +850,70 @@ if __name__ == "__main__":
     rd = SerialGNSSReader()
     fix = rd.get_fix()
     check("无串口 get_fix source=none", fix["source"] == "none" and fix["latitude"] is None)
+    check("无串口 is_connected()=False", rd.is_connected() is False)
 
     # --- 6. auto_detect 在无设备环境返回 None 不崩溃 ---
     res = SerialGNSSReader.auto_detect()
     check("无设备 auto_detect 返回 None", res is None)
+
+    # --- 6b. list_candidate_ports 向后兼容 ---
+    devs = SerialGNSSReader.list_candidate_port_devices()
+    check("list_candidate_port_devices 返回字符串列表", isinstance(devs, list))
+    infos = SerialGNSSReader.list_candidate_ports()
+    check("list_candidate_ports 返回 dict 列表", isinstance(infos, list))
+
+    # --- 7. 热插拔重连状态机（mock 串口，无真实硬件） ---
+    class _Disconnect(Exception):
+        pass
+
+    class _FakeSerial:
+        def __init__(self, script):
+            self._script = list(script)
+            self.closed = False
+
+        def readline(self):
+            if self._script:
+                item = self._script.pop(0)
+                if isinstance(item, Exception):
+                    raise item
+                return item
+            return b""  # 模拟 readline 超时
+
+        def close(self):
+            self.closed = True
+
+    gga_line = make(
+        "GNGGA,072545.00,4352.00,N,12519.00,E,1,9,0.9,150.0,M,,,,"
+    ).encode("ascii")
+
+    rd2 = SerialGNSSReader()
+    rd2._reconnect_interval = 0.02   # 加快测试
+    rd2._data_timeout = 1.0         # 测试窗口内不触发超时断线
+    opens = {"n": 0}
+
+    def fake_open(port, baud):
+        opens["n"] += 1
+        # 重连后给一个稳定串口（一帧 GGA，之后静默）
+        return _FakeSerial([gga_line])
+
+    rd2._open_serial = fake_open
+    rd2._port = "/dev/fake"
+    rd2._baudrate = 9600
+    # 首连：读到一帧 GGA 后抛异常模拟拔线
+    rd2._ser = _FakeSerial([gga_line, _Disconnect("unplugged")])
+    rd2._connected = True
+    rd2._running.set()
+    rd2._thread = threading.Thread(target=rd2._read_loop, daemon=True)
+    rd2._thread.start()
+
+    time.sleep(0.6)  # 等：首帧合并 → 断线 → 重连 → 重连后首帧合并
+    fix2 = rd2.get_fix()
+    check("拔线后自动重连并恢复 fix", fix2["source"] == "real"
+          and fix2["latitude"] is not None)
+    check("重连至少发生一次", opens["n"] >= 1)
+    check("重连后 is_connected()=True", rd2.is_connected() is True)
+    rd2.stop()
+    time.sleep(0.1)
+    check("stop() 后 is_connected()=False", rd2.is_connected() is False)
 
     print("\nserial_gnss self-test PASSED")

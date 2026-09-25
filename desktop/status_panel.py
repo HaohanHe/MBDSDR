@@ -107,6 +107,13 @@ class StatusPanel(QWidget):
         self.gps_timestamp.setObjectName("statusValue")
         gps_layout.addWidget(self.gps_timestamp, 4, 1, 1, 3)
 
+        # 卫星信号强度（可选）：fix_dict 带 satellite_signals 时显示最强 5 颗 SNR；
+        # 无该字段时保持 "--"，不报错。
+        gps_layout.addWidget(QLabel("信号:"), 5, 0)
+        self.gps_signals = QLabel("--")
+        self.gps_signals.setObjectName("statusValue")
+        gps_layout.addWidget(self.gps_signals, 5, 1, 1, 3)
+
         layout.addWidget(self.gps_group)
 
         # ---- IMU 9 轴 ----
@@ -308,7 +315,7 @@ class StatusPanel(QWidget):
         self._update_timestamp(self.gps_timestamp, ts)
 
         if source != "real":
-            # 未连接 / 无定位：灰色
+            # 未连接 / 无定位：灰色，坐标一律空，绝不保留旧值
             self.gps_fix.setText("未连接")
             self.gps_fix.setStyleSheet("color: #999999;")
             self.gps_sats.setText("--")
@@ -316,6 +323,7 @@ class StatusPanel(QWidget):
             self.gps_lon.setText("--")
             self.gps_alt.setText("--")
             self.gps_hdop.setText("--")
+            self.gps_signals.setText("--")
             self.gps_group.setTitle("GPS / 北斗")
             return
 
@@ -333,6 +341,32 @@ class StatusPanel(QWidget):
         self.gps_lon.setText(f"{lon:.6f}" if lon is not None else "--")
         self.gps_alt.setText(f"{alt:.1f} m" if alt is not None else "--")
         self.gps_hdop.setText(f"{hdop:.1f}" if hdop is not None else "--")
+        # 可选：最强 5 颗卫星 SNR（无 satellite_signals 字段时显示 '--'，不报错）
+        self._update_signal_strength(fix_dict.get("satellite_signals"))
+
+    def _update_signal_strength(self, signals):
+        """可选：显示最强 5 颗卫星的 SNR。
+
+        signals: [{"id": int, "snr_db": float}, ...]；缺省/为空/异常时显示 '--'，
+        绝不抛错。当前串口 GNSS 暂未上报该字段，故平时保持 '--'（前向兼容）。
+        """
+        if not signals:
+            self.gps_signals.setText("--")
+            return
+        try:
+            ranked = sorted(
+                [s for s in signals if s.get("snr_db") is not None],
+                key=lambda s: float(s.get("snr_db", 0)),
+                reverse=True,
+            )[:5]
+        except Exception:
+            self.gps_signals.setText("--")
+            return
+        if not ranked:
+            self.gps_signals.setText("--")
+            return
+        parts = [f"#{s.get('id', '?')} {float(s['snr_db']):.0f}dB" for s in ranked]
+        self.gps_signals.setText("  ".join(parts))
 
     @Slot(dict)
     def on_imu_updated(self, imu: dict):
