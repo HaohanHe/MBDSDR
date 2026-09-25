@@ -37,7 +37,7 @@ from .guardian import Guardian, Snapshot
 from .workflow_engine import WorkflowEngine, Workflow, WorkflowResult
 from .scheduler import Scheduler, ScheduledTask
 from .sdr_backend import (
-    SDRBackendManager, SDRBackend, MockSDRBackend, RTLSDRBackend,
+    SDRBackendManager, SDRBackend, RTLSDRBackend,
     AISDRMiniBackend, HackRFBackend, USRPBackend, FileIQBackend,
     SoapySDRBackend, SDRDevice, SDRStatus,
     enumerate_all_sdr_devices, build_backend_for_device,

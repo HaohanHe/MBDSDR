@@ -9,7 +9,10 @@ SDR Backend：统一的 SDR 硬件抽象层。
 - USRP（UHD）
 - PlutoSDR（ADALM-PLUTO / AD9361，经 libiio 或 SoapyPlutoSDR）
 - 自研 ai-sdr Mini（SI4732 + ESP32，通过 MCP/WebSocket）
-- 模拟后端（用于开发测试，生成模拟信号）
+
+架构原则：每个数据域运行时只有一个真实后端；无硬件时 active_backend 为 None
+（显式未连接），绝不实例化模拟后端并报 success=True。FileIQBackend 读取用户
+明确选择的真实录制文件（.wav/.cf32/.iq），属合法离线回放源，保留。
 
 PlutoSDR 接入说明：
 - 首选 pylibiio（``pip install pylibiio``），USB/网络均走 ``iio.Context(uri)``；
@@ -48,7 +51,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SDRDevice:
     """SDR 设备信息。"""
-    device_type: str  # rtl_sdr / hackrf / usrp / ai_sdr_mini / mock
+    device_type: str  # rtl_sdr / hackrf / usrp / plutosdr / bladerf / limesdr / ai_sdr_mini / file
     device_id: str
     name: str
     frequency_range: Tuple[float, float]  # Hz
@@ -134,7 +137,7 @@ class SDRBackend:
         return True
 
     def _apply_frequency(self, freq_hz: float) -> bool:
-        """子类覆写：把频率真正写入硬件。默认无硬件（mock/文件），直接成功。"""
+        """子类覆写：把频率真正写入硬件或回放文件。默认无操作直接成功。"""
         return True
 
     def get_frequency(self) -> float:
@@ -395,74 +398,6 @@ class SDRBackend:
         self.status.recording = False
         self.status.recording_path = ""
         return path or ""
-
-
-class MockSDRBackend(SDRBackend):
-    """
-    模拟 SDR 后端（用于开发测试）。
-
-    生成模拟的 IQ 信号，包含：
-    - 中心频率处的载波
-    - 随机噪声
-    - 可选的 FM 调制信号
-    """
-
-    def __init__(self):
-        device = SDRDevice(
-            device_type="mock",
-            device_id="mock_0",
-            name="模拟 SDR（开发测试用）",
-            frequency_range=(500000, 6000000000),
-            sample_rate_range=(250000, 3200000),
-            max_gain=49.6,
-            supports_iq=True,
-            supports_tx=False,
-        )
-        super().__init__(device)
-        self._noise_level = 0.1
-        self._signal_level = 0.5
-        self._fm_deviation = 75000.0
-
-    def connect(self) -> bool:
-        self.status.connected = True
-        self._start_time = time.time()
-        self.status.rssi_db = -60.0
-        self.status.snr_db = 20.0
-        return True
-
-    def read_samples(self, num_samples: int) -> np.ndarray:
-        if not self.status.connected:
-            return None
-
-        # 生成模拟 IQ 信号
-        t = np.arange(num_samples) / self.status.sample_rate_hz
-
-        # 中心载波（有微小频偏）
-        freq_offset = 1000.0  # 1kHz 频偏
-        carrier = self._signal_level * np.exp(1j * 2 * np.pi * freq_offset * t)
-
-        # FM 调制（模拟广播信号）
-        if self.status.demod_mode in ("FM", "NFM", "WFM"):
-            modulating = 0.5 * np.sin(2 * np.pi * 1000 * t)  # 1kHz 音频
-            phase = 2 * np.pi * self._fm_deviation * np.cumsum(modulating) / self.status.sample_rate_hz
-            carrier = self._signal_level * np.exp(1j * phase)
-
-        # 噪声
-        noise = self._noise_level * (np.random.randn(num_samples) + 1j * np.random.randn(num_samples))
-
-        # AGC 增益
-        gain = 10 ** (self.status.gain_db / 20.0) if not self.status.agc_enabled else 1.0
-
-        samples = (carrier + noise) * gain
-        self._samples_read += num_samples
-
-        # 更新 RSSI/SNR
-        signal_power = np.mean(np.abs(carrier) ** 2)
-        noise_power = np.mean(np.abs(noise) ** 2)
-        self.status.rssi_db = 10 * np.log10(signal_power + noise_power) - 100
-        self.status.snr_db = 10 * np.log10(signal_power / max(noise_power, 1e-10))
-
-        return samples
 
 
 class RTLSDRBackend(SDRBackend):
@@ -2451,11 +2386,11 @@ class SDRBackendManager:
         self._discover()
 
     def _discover(self):
-        """发现可用的 SDR 设备。"""
-        # 模拟后端总是可用
-        mock = MockSDRBackend()
-        self.backends[mock.device.device_id] = mock
+        """发现可用的 SDR 设备（仅注册真实硬件后端）。
 
+        无硬件时 backends 为空、active_backend 为 None（显式未连接），
+        绝不注册模拟后端作为默认源。
+        """
         # 尝试发现 RTL-SDR
         try:
             from rtlsdr import RtlSdr
@@ -2495,8 +2430,7 @@ class SDRBackendManager:
         except Exception as e:
             logger.debug(f"PlutoSDRBackend 注册失败(忽略): {e}")
 
-        # 默认使用模拟后端
-        self.active_backend = mock
+        # 无默认后端：active_backend 保持 None，等用户显式 connect 真实设备。
 
     def list_devices(self) -> List[Dict[str, Any]]:
         """列出所有可用设备。"""
@@ -2516,11 +2450,15 @@ class SDRBackendManager:
         ]
 
     def connect(self, device_id: str = None) -> bool:
-        """连接设备。"""
+        """连接设备。无设备可选时返回 False（显式未连接）。"""
         if device_id and device_id in self.backends:
             backend = self.backends[device_id]
         else:
             backend = self.active_backend
+
+        if backend is None:
+            logger.warning("connect: 无可用后端（未发现真实硬件），保持未连接")
+            return False
 
         if backend.connect():
             self.active_backend = backend
