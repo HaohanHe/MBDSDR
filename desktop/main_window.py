@@ -86,7 +86,6 @@ class MainWindow(QMainWindow):
         # 由 GNSS 真实定位或 gui_config.json 手动配置后填充；None 时天空图不计算卫星。
         self._observer_lat: Optional[float] = None
         self._observer_lon: Optional[float] = None
-        self._is_sim: bool = False  # 是否处于模拟模式（模拟时天空图标注“模拟数据”）
         self.sat_tracker: Optional[SatelliteTracker] = None
         # 真实串口 GNSS 监测：插上 GNSS 模块后 auto_detect 定位，驱动状态面板 GPS 组
         # 与天空图观测站坐标。找不到设备/缺依赖时降级为 none，绝不崩、绝不造假坐标。
@@ -130,9 +129,6 @@ class MainWindow(QMainWindow):
 
         # 应用默认主题
         self._apply_theme(DEFAULT_THEME)
-
-        # 自动连接模拟模式（无硬件时演示）
-        QTimer.singleShot(500, self._auto_connect_simulation)
 
         # 加载 GUI 配置（窗口大小、频率、主题等）
         QTimer.singleShot(100, self._load_gui_config)
@@ -178,13 +174,6 @@ class MainWindow(QMainWindow):
         disconnect_action.setShortcut(QKeySequence("Ctrl+D"))
         disconnect_action.triggered.connect(self._disconnect)
         file_menu.addAction(disconnect_action)
-
-        file_menu.addSeparator()
-
-        sim_action = QAction("模拟模式（无硬件）", self)
-        sim_action.setShortcut(QKeySequence("Ctrl+M"))
-        sim_action.triggered.connect(lambda: self._connect_simulation())
-        file_menu.addAction(sim_action)
 
         file_menu.addSeparator()
 
@@ -261,11 +250,6 @@ class MainWindow(QMainWindow):
         self.connect_btn.clicked.connect(self._connect_dialog)
         toolbar.addWidget(self.connect_btn)
 
-        self.sim_btn = QPushButton("模拟模式")
-        self.sim_btn.setFixedHeight(28)
-        self.sim_btn.clicked.connect(lambda: self._connect_simulation())
-        toolbar.addWidget(self.sim_btn)
-
         self.disconnect_btn = QPushButton("断开")
         self.disconnect_btn.setFixedHeight(28)
         self.disconnect_btn.clicked.connect(self._disconnect)
@@ -299,7 +283,7 @@ class MainWindow(QMainWindow):
         render_text = "OpenGL" if HAS_OPENGL else "软件渲染"
         self._render_label = QLabel(f"  渲染: {render_text}  ")
         render_label = self._render_label
-        render_label.setStyleSheet("color: #6B6B6B; font-size: 9pt;")
+        render_label.setStyleSheet("color: #5B7B8C; font-size: 9pt;")
         toolbar.addWidget(render_label)
 
         # 拉伸空白（QToolBar 没有 addStretch，用空白 QWidget 替代）
@@ -490,23 +474,6 @@ class MainWindow(QMainWindow):
     # MCP 连接管理
     # ========================================================================
 
-    def _auto_connect_simulation(self):
-        """自动连接模拟模式（启动时无硬件演示）。"""
-        self._connect_simulation()
-
-    def _connect_simulation(self):
-        """连接模拟模式。"""
-        self._disconnect()
-        self._is_sim = True
-        self._worker = self._worker_manager.start(use_simulation=True)
-        self._connect_worker_signals()
-        self.conn_label.setText("  状态: 模拟模式  ")
-        self.conn_label.setStyleSheet("color: #C4845C; font-weight: 600;")
-        self.status_conn.setText("模拟模式")
-        self.connect_btn.setEnabled(False)
-        self.sim_btn.setEnabled(False)
-        self.disconnect_btn.setEnabled(True)
-
     # 设备选择对话框中"ai-sdr Mini WebSocket"特殊条目的 data 标记
     _WS_SPECIAL = "__ai_sdr_mini_ws__"
 
@@ -631,13 +598,11 @@ class MainWindow(QMainWindow):
         self._worker_manager.stop()
         self._worker = None
         self._active_sdr_backend = backend
-        self._is_sim = False
         self._panels_set_sdr_connected(True)
         self.conn_label.setText(f"  状态: {backend.device.name}  ")
         self.conn_label.setStyleSheet("color: #6BA89A; font-weight: 600;")
         self.status_conn.setText(backend.device.name)
         self.connect_btn.setEnabled(False)
-        self.sim_btn.setEnabled(False)
         self.disconnect_btn.setEnabled(True)
         self.statusBar().showMessage(
             f"已连接 {backend.device.name}", 4000)
@@ -645,17 +610,15 @@ class MainWindow(QMainWindow):
         self._start_iq_streams()
 
     def _connect_real(self, host: str, port: int):
-        """连接真实硬件。"""
+        """连接真实硬件（ai-sdr Mini WebSocket）。"""
         self._disconnect()
-        self._is_sim = False
-        self._worker = self._worker_manager.start(host=host, port=port, use_simulation=False)
+        self._worker = self._worker_manager.start(host=host, port=port)
         self._connect_worker_signals()
         self._panels_set_sdr_connected(True)
         self.conn_label.setText(f"  状态: 连接中 {host}:{port}  ")
-        self.conn_label.setStyleSheet("color: #C4B85C; font-weight: 600;")
+        self.conn_label.setStyleSheet("color: #C4845C; font-weight: 600;")
         self.status_conn.setText(f"连接中 {host}:{port}")
         self.connect_btn.setEnabled(False)
-        self.sim_btn.setEnabled(False)
         self.disconnect_btn.setEnabled(True)
 
     def _connect_worker_signals(self):
@@ -664,8 +627,8 @@ class MainWindow(QMainWindow):
             return
         self._worker.status_updated.connect(self.status_panel.on_status_updated)
         self._worker.status_updated.connect(self._on_status_for_ui)
-        self._worker.gps_updated.connect(self.status_panel.on_gps_updated)
-        self._worker.gps_updated.connect(self._on_gps_for_ui)
+        # GNSS 唯一数据源：真实串口 RealGNSSMonitor._poll_gnss → status_panel.update_gnss。
+        # 不再连接 worker.gps_updated（避免 WebSocket 旧 sim 路径与串口真实值双写横跳）。
         self._worker.imu_updated.connect(self.status_panel.on_imu_updated)
         self._worker.connection_changed.connect(self.status_panel.on_connection_changed)
         self._worker.connection_changed.connect(self._on_connection_for_ui)
@@ -715,7 +678,6 @@ class MainWindow(QMainWindow):
         self.conn_label.setStyleSheet("font-weight: 600;")
         self.status_conn.setText("未连接")
         self.connect_btn.setEnabled(True)
-        self.sim_btn.setEnabled(True)
         self.disconnect_btn.setEnabled(False)
 
     # ========================================================================
@@ -740,21 +702,6 @@ class MainWindow(QMainWindow):
         self.rssi_label.setText(f"RSSI: {rssi}")
         self.status_freq.setText(f"频率: {freq}")
         self.status_rssi.setText(f"RSSI: {rssi} dBm")
-
-    @Slot(dict)
-    def _on_gps_for_ui(self, gps: dict):
-        if gps.get("fix"):
-            lat = gps.get("lat")
-            lon = gps.get("lon")
-            self.status_gps.setText(f"GPS: {lat:.4f}, {lon:.4f}")
-            # GNSS 有真实定位时，自动用其坐标更新观测站位置，驱动天空图卫星计算。
-            # sim 模式下该坐标为合成值，_apply_observer_location 会据此标注“模拟数据”。
-            if lat is not None and lon is not None:
-                self._observer_lat = float(lat)
-                self._observer_lon = float(lon)
-                self._apply_observer_location()
-        else:
-            self.status_gps.setText("GPS: 未定位")
 
     @Slot(str)
     def _on_error(self, error: str):
@@ -964,7 +911,7 @@ class MainWindow(QMainWindow):
         """每 50ms 从真实后端读一块 IQ，分发给频谱 / 录制 / FM 解调声卡。
 
         - 无后端/无 read_samples/返回 None：不崩溃，频谱保持"未连接"。
-        - 模拟模式(worker)：worker 无 iq_data 接口，保持"未连接"，不造假峰。
+        - worker(WebSocket) 模式无本地 IQ 流，本定时器不启动，保持"未连接"，不造假峰。
         """
         read, sr = self._active_read_samples()
         if read is None:
@@ -1133,7 +1080,7 @@ class MainWindow(QMainWindow):
         # UI：录音中按钮变红显示"停止中"
         self.record_btn.setText("停止中")
         self.record_btn.setStyleSheet(
-            "background-color:#B86B5C; color:#FFFFFF; font-weight:600;")
+            "background-color:#B85C5C; color:#FFFFFF; font-weight:600;")
         try:
             self.control_panel.record_button.setText("停止录音")
             self.control_panel.record_status.setText("录音中... 00:00")
@@ -1284,9 +1231,8 @@ class MainWindow(QMainWindow):
     def _apply_observer_location(self):
         """根据当前观测站坐标同步 SatelliteTracker 与天空图数据来源标注。
 
-        - 坐标为 None：停止卫星计算，天空图显示“无数据”空状态；
-        - 坐标已就位：交给 SatelliteTracker 做真实 sgp4 计算；
-        - sim 模式下坐标为合成值，天空图标注橙色“模拟数据”角标。
+        - 坐标为 None：停止卫星计算，天空图显示“地面站未设置”空状态；
+        - 坐标已就位：交给 SatelliteTracker 做真实 sgp4 计算，数据源恒为 real。
         """
         lat = self._observer_lat
         lon = self._observer_lon
@@ -1301,8 +1247,8 @@ class MainWindow(QMainWindow):
             self.sat_tracker = SatelliteTracker(self.sky_view, lat, lon)
         else:
             self.sat_tracker.set_location(lat, lon)
-        # sim 模式坐标为合成数据，标注“模拟数据”；真实 GNSS/手动配置为 real
-        self.sky_view.set_data_source("sim" if self._is_sim else "real")
+        # 坐标来源只能是真实 GNSS 或 gui_config.json 手动配置，恒为 real
+        self.sky_view.set_data_source("real")
 
     def _update_sky_satellites(self):
         """天空图周期任务：仅刷新新时空授时信息。
@@ -1389,6 +1335,15 @@ class MainWindow(QMainWindow):
             self.status_panel.update_gnss(fix_dict)
         except Exception:
             pass
+        # 底部状态栏 GPS 标签（同一串口数据源，避免再走 worker 双写）
+        try:
+            if pos.source == "real" and pos.lat is not None and pos.lon is not None:
+                self.status_gps.setText(
+                    f"GPS: {float(pos.lat):.4f}, {float(pos.lon):.4f}")
+            else:
+                self.status_gps.setText("GPS: 未连接")
+        except Exception:
+            pass
         # 天空图观测站坐标与数据来源角标
         try:
             self.sky_view.set_gnss_position(fix_dict)
@@ -1403,8 +1358,8 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         # 真实 GNSS 自动设定地面站位置：仅当用户尚未手动配置
-        # （_observer_lat/lon 均为 None，即 gui_config.json 无坐标、非模拟）时才写入，
-        # 避免覆盖手动配置坐标或模拟坐标。
+        # （_observer_lat/lon 均为 None，即 gui_config.json 无坐标）时才写入，
+        # 避免覆盖手动配置坐标。
         if pos.source == "real" and pos.lat is not None and pos.lon is not None:
             if self._observer_lat is None and self._observer_lon is None:
                 self._observer_lat = float(pos.lat)

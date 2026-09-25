@@ -72,8 +72,9 @@ class StatusPanel(QWidget):
         gps_layout = QGridLayout(self.gps_group)
 
         gps_layout.addWidget(QLabel("定位:"), 0, 0)
-        self.gps_fix = QLabel("--")
+        self.gps_fix = QLabel("未连接")
         self.gps_fix.setObjectName("statusValue")
+        self.gps_fix.setStyleSheet("color: #999999;")
         gps_layout.addWidget(self.gps_fix, 0, 1)
 
         gps_layout.addWidget(QLabel("卫星:"), 0, 2)
@@ -117,7 +118,7 @@ class StatusPanel(QWidget):
         layout.addWidget(self.gps_group)
 
         # ---- IMU 9 轴 ----
-        self.imu_group = QGroupBox("IMU 9 轴姿态")
+        self.imu_group = QGroupBox("IMU 9 轴姿态 [未连接]")
         imu_layout = QGridLayout(self.imu_group)
 
         # 加速度
@@ -245,7 +246,7 @@ class StatusPanel(QWidget):
         if rssi > -50:
             self.rssi_value.setStyleSheet("color: #6BA89A;")  # 强信号-绿
         elif rssi > -70:
-            self.rssi_value.setStyleSheet("color: #C4B85C;")  # 中等-黄
+            self.rssi_value.setStyleSheet("color: #C4845C;")  # 中等-橙
         else:
             self.rssi_value.setStyleSheet("color: #B85C5C;")  # 弱-红
 
@@ -306,7 +307,7 @@ class StatusPanel(QWidget):
 
         fix_dict 口径：{source, latitude, longitude, altitude_m, satellites,
                        hdop, speed_kmh, course_deg, utc_time, fix_quality, timestamp}
-        source=="real"  → 绿色(#5B8C5A)显示真实坐标/卫星数/HDOP/高度；
+        source=="real"  → 绿色(#6BA89A)显示真实坐标/卫星数/HDOP/高度；
         source=="none"  → 灰色“未连接/无数据”，坐标一律空，绝不造假。
         （UI 与真硬件联调待插模块后再细化。）
         """
@@ -327,9 +328,9 @@ class StatusPanel(QWidget):
             self.gps_group.setTitle("GPS / 北斗")
             return
 
-        # 已定位：绿色 #5B8C5A
+        # 已定位：绿色 #6BA89A
         self.gps_fix.setText("已定位")
-        self.gps_fix.setStyleSheet("color: #5B8C5A;")
+        self.gps_fix.setStyleSheet("color: #6BA89A;")
         self.gps_group.setTitle("GPS / 北斗")
         lat = fix_dict.get("latitude")
         lon = fix_dict.get("longitude")
@@ -372,15 +373,14 @@ class StatusPanel(QWidget):
     def on_imu_updated(self, imu: dict):
         """IMU 数据更新。
 
-        source=="none" 时全部 "--"；sim 模式在 group 标题打 [模拟] 角标。
+        source=="none" 或 acc 为 None（无九轴硬件/未连接）时：
+        所有数值 label 一律 "--"，标题打 [未连接]，绝不显示任何姿态数值。
         """
         source = imu.get("source", "real")
+        acc = imu.get("acc")
 
-        # 数据时间戳
-        self._update_timestamp(self.imu_timestamp, imu.get("timestamp"))
-
-        if source == "none":
-            # 未连接：全部 "--"
+        if source == "none" or acc is None:
+            # 未连接：全部 "--"，时间戳也清空（不伪造更新时间）
             self.acc_x.setText("--")
             self.acc_y.setText("--")
             self.acc_z.setText("--")
@@ -391,16 +391,15 @@ class StatusPanel(QWidget):
             self.mag_y.setText("--")
             self.mag_z.setText("--")
             self.imu_temp.setText("--")
+            self.imu_timestamp.setText("--")
             self.imu_group.setTitle("IMU 9 轴姿态 [未连接]")
             return
 
-        # 模拟模式：标题加角标；真实模式：正常标题
-        if source == "sim":
-            self.imu_group.setTitle("IMU 9 轴姿态 [模拟]")
-        else:
-            self.imu_group.setTitle("IMU 9 轴姿态")
+        # 真实模式：正常标题
+        self.imu_group.setTitle("IMU 9 轴姿态")
+        # 数据时间戳
+        self._update_timestamp(self.imu_timestamp, imu.get("timestamp"))
 
-        acc = imu.get("acc") or [None, None, None]
         gyr = imu.get("gyr") or [None, None, None]
         mag = imu.get("mag") or [None, None, None]
         temp = imu.get("temp")
