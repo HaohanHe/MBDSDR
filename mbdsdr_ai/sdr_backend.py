@@ -7,8 +7,18 @@ SDR Backend：统一的 SDR 硬件抽象层。
 - RTL-SDR（RTL2832U + E4000/FC0012/FC0013/R820T/R820T2）
 - HackRF One
 - USRP（UHD）
+- PlutoSDR（ADALM-PLUTO / AD9361，经 libiio 或 SoapyPlutoSDR）
 - 自研 ai-sdr Mini（SI4732 + ESP32，通过 MCP/WebSocket）
 - 模拟后端（用于开发测试，生成模拟信号）
+
+PlutoSDR 接入说明：
+- 首选 pylibiio（``pip install pylibiio``），USB/网络均走 ``iio.Context(uri)``；
+  系统包等价物为 ``apt install libiio-dev python3-libiio``。
+- 备选 SoapySDR + SoapyPlutoSDR 驱动（``SoapySDR.Device(dict(driver="plutosdr"))``）。
+- 两者都不可用时，PlutoSDRBackend 类仍可导入，但 enumerate() 返回 []、connect()
+  返回 False 并在 status.error 标注 "[未连接-无libiio/SoapySDR驱动]"，绝不假装收数据。
+- 出厂频率 325 MHz–3.8 GHz；解锁 AD9361 校准后可到 70 MHz–6 GHz。
+  本后端默认按出厂 325–3800 MHz 声明，覆盖 2.2 GHz LRO / 1.69 GHz GK-2A 接收。
 
 统一接口：
 - connect() / disconnect()
@@ -1686,6 +1696,602 @@ class USRPBackend(SDRBackend):
             return None
 
 
+class PlutoSDRBackend(SDRBackend):
+    """
+    ADALM-PLUTO (PlutoSDR) 后端 —— 基于 AD9361 射频收发器。
+
+    硬件能力（出厂固件）：
+      - 频率：325 MHz – 3.8 GHz（解锁 AD9361 校准表后可到 70 MHz – 6 GHz）
+      - 采样率：最高 61.44 MSPS，常用 2.5 – 10 MSPS
+      - 接收：1x1 MIMO（RX only 默认；TX 另开通道）
+      - 增益：RX 0 – 73 dB（manual / slow_attack / fast_attack AGC）
+
+    接入方式（按优先级）：
+      1) pylibiio（``import iio``）—— 原生 IIO 接口，USB / 网络直连；
+         URI 形如 ``ip:192.168.2.1``（USB gadget 网卡）、``ip:pluto.local``、
+         ``usb:1.2.3``（裸 USB 总线地址）。
+      2) SoapySDR + SoapyPlutoSDR —— ``SoapySDR.Device(dict(driver="plutosdr"))``。
+      3) 两者都没有 —— 类仍可导入，enumerate() 返回 []，connect() 返回 False，
+         status.error 标注 "[未连接-无libiio/SoapySDR驱动]"，**绝不**假装收数据。
+
+    IIO 属性映射（来源: AD9361 Linux 驱动Documentation/iio/ 与
+      Analog Devices wiki "AD9361 IIO Device Tree Bindings"）：
+      - 本地振荡器中心频率  -> ``ad9361-phy`` 通道 ``altvoltage0``(RX_LO)/``altvoltage1``(TX_LO)
+        的 ``frequency`` 属性；本后端 RX 默认写 ``altvoltage0``。
+      - RX 采样率            -> ``ad9361-phy`` 通道 ``voltage0``(RX) 的 ``sampling_frequency``
+      - RX 模拟带宽          -> ``ad9361-phy`` 通道 ``voltage0`` 的 ``rf_bandwidth``
+      - RX 增益模式          -> ``ad9361-phy`` 通道 ``voltage0`` 的 ``gain_control_mode``
+        （manual / slow_attack / fast_attack）
+      - RX 硬件增益          -> ``ad9361-phy`` 通道 ``voltage0`` 的 ``hardwaregain``
+      - 数据流 buffer        -> ``cf-ad9361-lpc`` 设备，通道 ``voltage0``（16-bit I/Q 交错）
+
+    安装：``pip install pylibiio`` 或 ``apt install libiio-dev python3-libiio``。
+    """
+
+    # 出厂频率范围（AD9361 校准表默认）。解锁后可到 70e6 – 6000e6。
+    FREQ_MIN_HZ = 325_000_000.0
+    FREQ_MAX_HZ = 3_800_000_000.0
+    # 解锁后的扩展范围（仅在显式 unlock=True 时使用）
+    FREQ_MIN_UNLOCKED_HZ = 70_000_000.0
+    FREQ_MAX_UNLOCKED_HZ = 6_000_000_000.0
+    # AD9361 采样率量程
+    SR_MIN_HZ = 521_000.0
+    SR_MAX_HZ = 61_440_000.0
+    # RX 增益量程（dB）
+    GAIN_MIN_DB = 0.0
+    GAIN_MAX_DB = 73.0
+    # 网络模式下 PlutoSDR 固定 USB gadget IP
+    DEFAULT_NET_URI = "ip:192.168.2.1"
+
+    def __init__(self, uri: Optional[str] = None, unlocked: bool = False,
+                 device_info: Optional[Dict[str, Any]] = None):
+        """
+        :param uri: IIO context URI；None 时由 enumerate() 决定（先 USB 后网络）。
+        :param unlocked: True 时按 70 MHz – 6 GHz 声明频率范围（需固件已解锁）。
+        :param device_info: enumerate 阶段拿到的身份信息（label/serial/...）。
+        """
+        info = device_info or {}
+        if unlocked:
+            freq_range = (self.FREQ_MIN_UNLOCKED_HZ, self.FREQ_MAX_UNLOCKED_HZ)
+        else:
+            freq_range = (self.FREQ_MIN_HZ, self.FREQ_MAX_HZ)
+        device = SDRDevice(
+            device_type="plutosdr",
+            device_id=f"plutosdr_{uri or 'auto'}",
+            name=info.get("label") or "PlutoSDR (ADALM-PLUTO)",
+            frequency_range=freq_range,
+            sample_rate_range=(self.SR_MIN_HZ, self.SR_MAX_HZ),
+            max_gain=self.GAIN_MAX_DB,
+            supports_iq=True,
+            supports_tx=True,  # AD9361 半双工收发
+        )
+        super().__init__(device)
+        self._uri = uri
+        self._unlocked = unlocked
+        self._serial = info.get("serial", "")
+        # 运行时句柄
+        self._ctx = None           # iio.Context
+        self._phy = None           # iio.Device (ad9361-phy)
+        self._rx_chan = None       # iio.Channel (voltage0)
+        self._rx_lo_chan = None    # iio.Channel (altvoltage0 = RX_LO)
+        self._stream_dev = None    # iio.Device (cf-ad9361-lpc / cf-ad9361-dds-core-lpc)
+        self._buffer = None        # iio.Buffer
+        self._soapy = None         # SoapySDR.Device（备用路径）
+        self._soapy_stream = None
+        self._backend_lib = None   # "iio" / "soapy" / None
+        # 默认参数（未连接时也记录，便于上层查询）
+        self.status.sample_rate_hz = 2_000_000.0
+        self.status.frequency_hz = 1_690_000_000.0  # GK-2A LR-M 默认
+
+    # ------------------------------------------------------------------
+    # 驱动可用性探测
+    # ------------------------------------------------------------------
+    @classmethod
+    def _try_import_iio(cls):
+        """尝试 import iio；失败返回 None。"""
+        try:
+            import iio  # pylibiio
+            return iio
+        except Exception:
+            return None
+
+    @classmethod
+    def _try_import_soapy(cls):
+        """尝试 import SoapySDR；失败返回 None。"""
+        try:
+            import SoapySDR
+            return SoapySDR
+        except Exception:
+            return None
+
+    @classmethod
+    def driver_status(cls) -> Dict[str, Any]:
+        """返回当前环境驱动可用性摘要（供上层 UI / 日志展示）。"""
+        return {
+            "pylibiio": cls._try_import_iio() is not None,
+            "soapysdr": cls._try_import_soapy() is not None,
+            "note": "需要 pip install pylibiio 或 apt install libiio-dev python3-libiio"
+                    "（或 SoapySDR + SoapyPlutoSDR）。",
+        }
+
+    # ------------------------------------------------------------------
+    # enumerate()：扫描 USB / 网络 PlutoSDR
+    # ------------------------------------------------------------------
+    @classmethod
+    def enumerate(cls) -> List[Dict[str, Any]]:
+        """扫描可用 PlutoSDR 设备。
+
+        优先用 pylibiio 的 ``iio.scan_contexts()``（USB 枚举）；
+        失败/不可用时回退探测默认网络 URI ``ip:192.168.2.1``（短超时）。
+        无任何驱动时返回 []，不抛异常。
+
+        返回形如：
+            [{"driver": "plutosdr", "uri": "ip:192.168.2.1",
+              "name": "PlutoSDR", "serial": "...",
+              "freq_range": (325e6, 3.8e9), "sample_rate_range": (...),
+              "gain_range": (0.0, 73.0)}]
+        """
+        out: List[Dict[str, Any]] = []
+        iio_mod = cls._try_import_iio()
+
+        if iio_mod is not None:
+            # 路径 1：libiio scan_contexts() —— 枚举 USB / 网络 / 串行上下文
+            try:
+                contexts = iio_mod.scan_contexts() or {}
+                # scan_contexts() 返回 dict: {uri: description}
+                for uri, desc in contexts.items():
+                    uri_s = str(uri)
+                    desc_s = str(desc) if desc else ""
+                    # 只保留看起来像 PlutoSDR 的设备
+                    if cls._uri_is_pluto(uri_s, desc_s):
+                        out.append(cls._make_entry(uri_s, desc_s))
+            except Exception as e:
+                logger.debug(f"iio.scan_contexts() 失败: {e}")
+
+            # 路径 1b：USB 枚举兜底（scan_contexts 在某些后端下返回空）
+            if not out:
+                for usb_uri in ("usb:1.2.5", "usb:1.2.4", "usb:1.2.3"):
+                    try:
+                        probe = iio_mod.Context(usb_uri)
+                        # 能打开就认为是 PlutoSDR
+                        out.append(cls._make_entry(usb_uri, "PlutoSDR (USB)"))
+                        del probe
+                        break
+                    except Exception:
+                        continue
+
+        # 路径 2：网络兜底 —— 尝试默认 192.168.2.1
+        if not out:
+            net_entry = cls._probe_network_default(iio_mod)
+            if net_entry is not None:
+                out.append(net_entry)
+
+        if not out:
+            # 无设备 / 无驱动：静默返回空列表（调用方不应报错）
+            logger.debug("PlutoSDRBackend.enumerate(): 未发现 PlutoSDR 设备"
+                         "（无 libiio/SoapySDR 或无硬件）。")
+        return out
+
+    @classmethod
+    def _uri_is_pluto(cls, uri: str, desc: str) -> bool:
+        """启发式判断 IIO 上下文是否为 PlutoSDR。"""
+        text = (uri + " " + desc).lower()
+        # PlutoSDR 常见标识
+        pluto_markers = ("pluto", "adalm", "ad9364", "ad9363a", "192.168.2.1",
+                         "1.2.3", "1.2.4", "1.2.5", "1.2.6")
+        return any(m in text for m in pluto_markers)
+
+    @classmethod
+    def _make_entry(cls, uri: str, desc: str) -> Dict[str, Any]:
+        return {
+            "driver": "plutosdr",
+            "uri": uri,
+            "label": desc or "PlutoSDR (ADALM-PLUTO)",
+            "name": "PlutoSDR",
+            "serial": "",
+            "manufacturer": "Analog Devices",
+            "product": "ADALM-PLUTO",
+            "freq_range": (cls.FREQ_MIN_HZ, cls.FREQ_MAX_HZ),
+            "sample_rate_range": (cls.SR_MIN_HZ, cls.SR_MAX_HZ),
+            "gain_range": (cls.GAIN_MIN_DB, cls.GAIN_MAX_DB),
+            "device_args": {"uri": uri},
+        }
+
+    @classmethod
+    def _probe_network_default(cls, iio_mod) -> Optional[Dict[str, Any]]:
+        """尝试打开默认网络 URI；成功返回 entry，失败/超时返回 None。
+
+        用 socket 先做一次 TCP 连通性探测（短超时），避免 iio.Context 长时间阻塞。
+        """
+        import socket
+        host = "192.168.2.1"
+        # 先 ping TCP 30431 (libiio 网络默认端口)
+        try:
+            with socket.create_connection((host, 30431), timeout=0.5):
+                pass
+        except Exception:
+            return None
+        # 端口通，再用 iio.Context 验证身份
+        if iio_mod is None:
+            return None
+        try:
+            ctx = iio_mod.Context(cls.DEFAULT_NET_URI)
+            # 校验是否真的是 ad9361
+            has_phy = any("ad9361" in (dev.name or "").lower()
+                          for dev in ctx.devices)
+            del ctx
+            if has_phy:
+                return cls._make_entry(cls.DEFAULT_NET_URI,
+                                       f"PlutoSDR (network {host})")
+        except Exception as e:
+            logger.debug(f"网络 PlutoSDR 探测失败: {e}")
+        return None
+
+    # ------------------------------------------------------------------
+    # open / close（connect/disconnect 别名）
+    # ------------------------------------------------------------------
+    def connect(self) -> bool:
+        """打开 PlutoSDR。优先 pylibiio，回退 SoapySDR，都没有则返回 False。"""
+        # 先探测驱动
+        iio_mod = self._try_import_iio()
+        soapy_mod = self._try_import_soapy()
+
+        if iio_mod is None and soapy_mod is None:
+            self.status.error = ("[未连接-无libiio/SoapySDR驱动] "
+                                 "请 pip install pylibiio 或安装 SoapyPlutoSDR。")
+            logger.warning(self.status.error)
+            self.status.connected = False
+            return False
+
+        # 决定 URI：显式 > 枚举到的第一个 > 默认网络
+        uri = self._uri
+        if not uri:
+            try:
+                found = self.enumerate()
+                if found:
+                    uri = found[0]["uri"]
+            except Exception:
+                uri = None
+        if not uri:
+            uri = self.DEFAULT_NET_URI
+
+        # 路径 1：pylibiio 原生
+        if iio_mod is not None:
+            try:
+                return self._open_via_iio(iio_mod, uri)
+            except Exception as e:
+                self.status.error = f"[libiio] 打开 {uri} 失败: {e}"
+                logger.warning(self.status.error)
+                # 继续尝试 SoapySDR
+
+        # 路径 2：SoapySDR
+        if soapy_mod is not None:
+            try:
+                return self._open_via_soapy(soapy_mod, uri)
+            except Exception as e:
+                self.status.error = f"[SoapySDR] 打开 PlutoSDR 失败: {e}"
+                logger.error(self.status.error)
+                self.status.connected = False
+                return False
+
+        self.status.connected = False
+        return False
+
+    def _open_via_iio(self, iio_mod, uri: str) -> bool:
+        """通过 pylibiio 打开设备并配置 RX 通道。"""
+        self._ctx = iio_mod.Context(uri)
+        # 找 ad9361-phy
+        phy = None
+        stream = None
+        for dev in self._ctx.devices:
+            name = (dev.name or "").lower()
+            if "ad9361-phy" in name or "ad9364" in name:
+                phy = dev
+            elif "cf-ad9361" in name and ("lpc" in name or "dds" in name):
+                stream = dev
+        if phy is None:
+            raise RuntimeError(f"{uri} 上未找到 ad9361-phy 设备")
+        self._phy = phy
+
+        # RX LO: altvoltage0（ad9361-phy 输出通道，控制 RX 本振）
+        self._rx_lo_chan = self._find_channel(phy, "altvoltage0", is_output=True)
+        # RX 基带通道: voltage0（输入）
+        self._rx_chan = self._find_channel(phy, "voltage0", is_output=False)
+
+        # 数据流设备
+        if stream is None:
+            # 兜底：找任意带 buffer 能力的设备
+            for dev in self._ctx.devices:
+                if dev.buffer_attrs or dev.channels:
+                    stream = dev
+                    break
+        self._stream_dev = stream
+
+        # 应用默认参数
+        self._apply_sample_rate(self.status.sample_rate_hz)
+        self._apply_bandwidth(self.status.sample_rate_hz * 0.8)
+        self._apply_frequency(self.status.frequency_hz)
+        self._apply_gain(self.status.gain_db)
+
+        # 创建 RX buffer（4 MSamples，16-bit I/Q 交错 = 16 MB）
+        self._create_iio_buffer(4_000_000)
+
+        self._backend_lib = "iio"
+        self.status.connected = True
+        self.status.error = ""
+        self._start_time = time.time()
+        logger.info(f"PlutoSDR 已通过 libiio 打开: {uri}")
+        try:
+            self.readback_hw_state()
+        except Exception as e:
+            logger.debug(f"PlutoSDR 回读状态失败(忽略): {e}")
+        return True
+
+    def _find_channel(self, dev, channel_id: str, is_output: Optional[bool] = None):
+        """在 iio.Device 上按 channel_id 找 Channel。"""
+        for ch in dev.channels:
+            if ch.id == channel_id:
+                if is_output is None or ch.output == is_output:
+                    return ch
+        return None
+
+    def _create_iio_buffer(self, num_samples: int):
+        """在 stream 设备上创建 RX 采样 buffer。"""
+        if self._stream_dev is None:
+            return
+        # 使能 RX 通道
+        rx_ch = None
+        for ch in self._stream_dev.channels:
+            if not ch.output:
+                rx_ch = ch
+                break
+        if rx_ch is not None:
+            rx_ch.enabled = True
+        # samples_count 是"每个通道的样本数"；16-bit I/Q 交错
+        self._buffer = self._stream_dev.create_buffer(num_samples, circular=False)
+
+    def _open_via_soapy(self, SoapySDR, uri: str) -> bool:
+        """通过 SoapySDR + SoapyPlutoSDR 打开。"""
+        args = {"driver": "plutosdr"}
+        # 把 uri 转成 SoapySDR 能识别的参数
+        if uri.startswith("ip:"):
+            args["remote"] = uri[3:]
+        elif uri.startswith("usb:"):
+            args["soapy"] = uri  # SoapyPlutoSDR 接受 usb: URI
+        self._soapy = SoapySDR.Device(args)
+        self._rx = getattr(SoapySDR, "SOAPY_SDR_RX", 1)
+        self._stream = self._soapy.setupStream(self._rx, "CF32", [0])
+        self._soapy.activateStream(self._stream)
+        self._backend_lib = "soapy"
+        self.status.connected = True
+        self.status.error = ""
+        self._start_time = time.time()
+        logger.info(f"PlutoSDR 已通过 SoapySDR 打开: {args}")
+        try:
+            self.readback_hw_state()
+        except Exception as e:
+            logger.debug(f"PlutoSDR(Soapy) 回读失败(忽略): {e}")
+        return True
+
+    def disconnect(self):
+        """关闭 buffer / context / stream。"""
+        try:
+            if self._buffer is not None:
+                self._buffer = None  # iio Buffer GC 释放
+        except Exception:
+            pass
+        try:
+            if self._soapy_stream is not None and self._soapy is not None:
+                self._soapy.deactivateStream(self._soapy_stream)
+                self._soapy.closeStream(self._soapy_stream)
+        except Exception:
+            pass
+        self._soapy_stream = None
+        self._soapy = None
+        self._ctx = None
+        self._phy = None
+        self._rx_chan = None
+        self._rx_lo_chan = None
+        self._stream_dev = None
+        self._backend_lib = None
+        super().disconnect()
+
+    # open/close 别名（与任务要求的接口名对齐）
+    def open(self, uri: Optional[str] = None) -> bool:
+        if uri:
+            self._uri = uri
+            self.device.device_id = f"plutosdr_{uri}"
+        return self.connect()
+
+    def close(self):
+        self.disconnect()
+
+    # ------------------------------------------------------------------
+    # 调谐 / 采样率 / 增益
+    # ------------------------------------------------------------------
+    def _apply_frequency(self, freq_hz: float) -> bool:
+        """写 RX LO 频率（ad9361-phy/altvoltage0:frequency）。"""
+        if self._backend_lib == "iio":
+            try:
+                if self._rx_lo_chan is not None:
+                    self._rx_lo_chan.attrs["frequency"].value = str(int(freq_hz))
+                else:
+                    # 兜底：写 phy 直接属性
+                    self._phy.attrs["out_altvoltage0_RX_LO_frequency"].value = str(int(freq_hz))
+                return True
+            except Exception as e:
+                self.status.error = f"[iio] set frequency 失败: {e}"
+                return False
+        if self._backend_lib == "soapy" and self._soapy is not None:
+            try:
+                self._soapy.setFrequency(self._rx, 0, float(freq_hz))
+                return True
+            except Exception as e:
+                self.status.error = f"[soapy] setFrequency 失败: {e}"
+                return False
+        # 未连接：参数已由基类写入 status.frequency_hz，不报错（降级模式）
+        return True
+
+    def _apply_sample_rate(self, rate_hz: float) -> bool:
+        """写 RX 采样率（ad9361-phy/voltage0:sampling_frequency）。"""
+        if self._backend_lib == "iio":
+            try:
+                if self._rx_chan is not None:
+                    self._rx_chan.attrs["sampling_frequency"].value = str(int(rate_hz))
+                return True
+            except Exception as e:
+                self.status.error = f"[iio] set sampling_frequency 失败: {e}"
+                return False
+        if self._backend_lib == "soapy" and self._soapy is not None:
+            try:
+                self._soapy.setSampleRate(self._rx, 0, float(rate_hz))
+                return True
+            except Exception as e:
+                self.status.error = f"[soapy] setSampleRate 失败: {e}"
+                return False
+        return True
+
+    def _apply_bandwidth(self, bw_hz: float) -> bool:
+        """写 RX 模拟带宽（rf_bandwidth）。"""
+        if self._backend_lib == "iio" and self._rx_chan is not None:
+            try:
+                self._rx_chan.attrs["rf_bandwidth"].value = str(int(bw_hz))
+                return True
+            except Exception:
+                return False
+        return True
+
+    def _apply_gain(self, gain_db: float) -> bool:
+        """切 manual 增益模式并写 hardwaregain。"""
+        if self._backend_lib == "iio":
+            try:
+                if self._rx_chan is not None:
+                    self._rx_chan.attrs["gain_control_mode"].value = "manual"
+                    self._rx_chan.attrs["hardwaregain"].value = str(float(gain_db))
+                return True
+            except Exception as e:
+                self.status.error = f"[iio] set gain 失败: {e}"
+                return False
+        if self._backend_lib == "soapy" and self._soapy is not None:
+            try:
+                self._soapy.setGain(self._rx, 0, float(gain_db))
+                return True
+            except Exception as e:
+                self.status.error = f"[soapy] setGain 失败: {e}"
+                return False
+        return True
+
+    def set_agc(self, enabled: bool) -> bool:
+        if not super().set_agc(enabled):
+            return False
+        if self._backend_lib == "iio" and self._rx_chan is not None:
+            try:
+                mode = "slow_attack" if enabled else "manual"
+                self._rx_chan.attrs["gain_control_mode"].value = mode
+                return True
+            except Exception as e:
+                self.status.error = f"[iio] set gain_control_mode 失败: {e}"
+                return False
+        if self._backend_lib == "soapy" and self._soapy is not None:
+            try:
+                self._soapy.setGainMode(self._rx, 0, bool(enabled))
+                return True
+            except Exception as e:
+                self.status.error = f"[soapy] setGainMode 失败: {e}"
+                return False
+        return True
+
+    # ------------------------------------------------------------------
+    # readback
+    # ------------------------------------------------------------------
+    def readback_hw_state(self) -> bool:
+        if self._backend_lib == "iio" and self._rx_chan is not None:
+            got = 0
+            try:
+                self.status.sample_rate_hz = float(
+                    self._rx_chan.attrs["sampling_frequency"].value)
+                got += 1
+            except Exception:
+                pass
+            try:
+                if self._rx_lo_chan is not None:
+                    self.status.frequency_hz = float(
+                        self._rx_lo_chan.attrs["frequency"].value)
+                    got += 1
+            except Exception:
+                pass
+            try:
+                self.status.gain_db = float(
+                    self._rx_chan.attrs["hardwaregain"].value)
+                got += 1
+            except Exception:
+                pass
+            return got > 0
+        if self._backend_lib == "soapy" and self._soapy is not None:
+            try:
+                self.status.sample_rate_hz = float(self._soapy.getSampleRate(self._rx, 0))
+                self.status.frequency_hz = float(self._soapy.getFrequency(self._rx, 0))
+                self.status.gain_db = float(self._soapy.getGain(self._rx, 0))
+                return True
+            except Exception:
+                return False
+        return False
+
+    # ------------------------------------------------------------------
+    # read_samples / recv_samples
+    # ------------------------------------------------------------------
+    def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
+        """读取 num_samples 个 IQ 样本，返回 complex64 numpy 数组。"""
+        if not self.status.connected:
+            return None
+        try:
+            if self._backend_lib == "iio":
+                return self._read_samples_iio(num_samples)
+            if self._backend_lib == "soapy":
+                return self._read_samples_soapy(num_samples)
+        except Exception as e:
+            self.status.error = f"read_samples 异常: {e}"
+            return None
+        return None
+
+    # 任务要求的别名
+    def recv_samples(self, num_samples: int) -> Optional[np.ndarray]:
+        return self.read_samples(num_samples)
+
+    def _read_samples_iio(self, num_samples: int) -> Optional[np.ndarray]:
+        """从 iio.Buffer 读 16-bit I/Q 交错样本，归一化为 complex64。"""
+        if self._buffer is None:
+            return None
+        # buffer.refill() 阻塞直到填充满
+        self._buffer.refill()
+        # read() 返回 bytes；16-bit 小端 I/Q 交错
+        raw = self._buffer.read()
+        arr = np.frombuffer(raw, dtype=np.int16)
+        # 截断到偶数长度
+        arr = arr[:len(arr) // 2 * 2]
+        # 拆 I/Q 并归一化到 [-1, 1]
+        i = arr[0::2].astype(np.float32) / 32768.0
+        q = arr[1::2].astype(np.float32) / 32768.0
+        samples = (i + 1j * q).astype(np.complex64)
+        # 按请求数截断（buffer 一次读满，可能多于请求）
+        if len(samples) > num_samples:
+            samples = samples[:num_samples]
+        self._samples_read += len(samples)
+        return samples
+
+    def _read_samples_soapy(self, num_samples: int) -> Optional[np.ndarray]:
+        buff = np.zeros(int(num_samples), np.complex64)
+        status = self._soapy.readStream(
+            self._stream, [buff], int(num_samples), timeoutUs=500_000)
+        n_read = int(getattr(status, "ret", 0))
+        if n_read <= 0:
+            if n_read < 0:
+                self.status.error = f"readStream 错误码 {n_read}"
+            return None
+        self._samples_read += n_read
+        return buff[:n_read].copy()
+
+
 class FileIQBackend(SDRBackend):
     """
     IQ 文件回放源（离线复现）。
@@ -1880,6 +2486,14 @@ class SDRBackendManager:
         # 自研 ai-sdr Mini（注册但不自动连接，用户手动连接）
         ai_mini = AISDRMiniBackend()
         self.backends[ai_mini.device.device_id] = ai_mini
+
+        # PlutoSDR（注册但不自动连接；无 libiio/SoapySDR 时 connect 返回 False，
+        # enumerate() 返回 []，不伪造硬件）
+        try:
+            pluto = PlutoSDRBackend()
+            self.backends[pluto.device.device_id] = pluto
+        except Exception as e:
+            logger.debug(f"PlutoSDRBackend 注册失败(忽略): {e}")
 
         # 默认使用模拟后端
         self.active_backend = mock
@@ -2185,6 +2799,35 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
             "device_args": {"index": 0},
         }
 
+    # 3.7) PlutoSDR (Analog Devices ADALM-PLUTO / AD9361)：
+    #      真实枚举由 PlutoSDRBackend.enumerate() 负责（libiio scan_contexts + 网络探测）。
+    #      无 libiio/SoapySDR 或无硬件时 enumerate() 返回 []，绝不伪造设备。
+    #      频率出厂 325 MHz–3.8 GHz（可解锁 70 MHz–6 GHz），覆盖 2.2 GHz LRO / 1.69 GHz GK-2A。
+    try:
+        for dev in PlutoSDRBackend.enumerate():
+            key = dev.get("uri") or f"plutosdr_{dev.get('serial', '')}"
+            if key in merged:
+                continue
+            merged[key] = {
+                "driver": "plutosdr",
+                "label": dev.get("label", "PlutoSDR (ADALM-PLUTO)"),
+                "serial": dev.get("serial", ""),
+                "manufacturer": dev.get("manufacturer", "Analog Devices"),
+                "product": dev.get("product", "ADALM-PLUTO"),
+                "gain_range": dev.get("gain_range",
+                                      (PlutoSDRBackend.GAIN_MIN_DB,
+                                       PlutoSDRBackend.GAIN_MAX_DB)),
+                "sample_rate_range": dev.get("sample_rate_range",
+                                             (PlutoSDRBackend.SR_MIN_HZ,
+                                              PlutoSDRBackend.SR_MAX_HZ)),
+                "freq_range": dev.get("freq_range",
+                                      (PlutoSDRBackend.FREQ_MIN_HZ,
+                                       PlutoSDRBackend.FREQ_MAX_HZ)),
+                "device_args": {"uri": dev.get("uri", "")},
+            }
+    except Exception as e:
+        logger.warning(f"PlutoSDR 枚举异常: {e}")
+
     # 4) gr-osmosdr 通用后端枚举（rtl/hackrf/bladerf/uhd/soapy 统一设备字符串）
     #    来源: mbdsdr_ai/osmosdr_source.py（移植自 repos/gr-osmosdr/lib/source_impl.cc:202-269）
     #    仅补充尚未被 SoapySDR/pyrtlsdr 识别到的后端（bladerf/uhd/airspy 等）。
@@ -2239,6 +2882,14 @@ def build_backend_for_device(dev: Dict[str, Any]) -> Optional[SDRBackend]:
             # 来源: mbdsdr_ai/limesuite_params.py（移植自 repos/LimeSuite）。
             from .limesuite_params import LimeSDRBackend as _LimeSDRBackend
             return _LimeSDRBackend(device_index=int(args.get("index", 0)))
+        if driver == "plutosdr":
+            # 真实打开由 PlutoSDRBackend.connect() 决定成败；
+            # 无 libiio/SoapyPlutoSDR/无硬件时 connect 返回 False 并在 status.error
+            # 标注 "[未连接-无libiio/SoapySDR驱动]"，绝不假成功。
+            return PlutoSDRBackend(
+                uri=str(args.get("uri", "") or None),
+                device_info=dev,
+            )
         # 其余一律走 SoapySDR 通用后端（rtlsdr 经 SoapySDR、usrp、bladerf...）
         return SoapySDRBackend(device_args=args, device_info=dev)
     except Exception as e:
