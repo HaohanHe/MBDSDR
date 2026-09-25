@@ -1,26 +1,42 @@
 """
-MBDSDR 射频天空视图 (RF Sky View)
-====================================
-借鉴 Stellarium 的天空视图概念，将其搬到 SDR 领域：
-极坐标投影显示卫星位置、天线指向、信号源方向、干扰源方位。
+MBDSDR 射频天空视图 (RF Sky View) — 真实天文数据驱动
+=====================================================
+借鉴 Stellarium 的天空视图概念，搬到 SDR 领域：方位角等距投影
+(azimuthal equidistant) 显示卫星实时位置、太阳/月亮、天线指向、
+未来过境列表与昼夜背景。
 
-核心功能：
-- 极坐标投影（方位角 0-360° + 仰角 0-90° → 屏幕坐标）
-- 卫星实时位置（基于 sgp4 轨道计算，支持 NOAA/ISS/风云等）
-- 天线指向指示（基于 IMU 6DOF/9DOF 位姿融合）
-- 信号强度热力图（方位-仰角-信号强度颜色渐变）
-- 干扰源/信号源标注（用户或 AI 标记）
-- 可交互：点击卫星显示详情、滚轮缩放、拖拽旋转、双击居中
+本版本彻底移除任何经验性的假信号生成：卫星位置由 sgp4 + skyfield 真
+传播给出，太阳/月亮由真实历表给出，昼夜背景由太阳高度决定。无 TLE 或
+计算失败时优雅显示“未连接”，绝不伪造天空。
 
-设计风格：日式低饱和、半透明叠加、不喧宾夺主、稳定可读优先。
-字体优先 MiSans，禁用 emoji。
+坐标 / 投影数学参考 Stellarium (GPL-3.0)，独立重实现于
+mbdsdr_ai/celestial_geometry.py：
+  - StelProjectorClasses.cpp:363-395  azimuthal equidistant (fisheye)
+      forward: h=sqrt(vx²+vy²); f=atan2(h,-vz)/h; x=vx*f, y=vy*f
+      backward: a=sqrt(x²+y²); f=sin(a)/a; vz=-cos(a)
+  - StelCore.cpp:1075                  equinox-of-date -> alt/az 旋转
+  - StelObserver.cpp:229-230           Rz(GMST+lon)*Ry(90-lat) 本地旋转
+  - Satellite.cpp:1298-1305           固定步长采样轨道 trail
+  - gSatTEME.cpp:66,80                twoline2rv + sgp4 传播
+  - gSatWrapper.cpp:133-165           slant range -> 站心 az/alt
+  - StelObject.cpp:939                民用晨昏太阳高度 -6°
+  - MilkyWay.cpp:350 / StelToast.cpp:334  全天空亮度经验断点
+  - StelCore.cpp:1243,2299            setJD / updateTime 时间引擎
+
+时间统一来自 mbdsdr_ai.new_spacetime.get_time_engine()（时间穿梭真实驱动），
+不使用系统墙钟做天文计算。
+
+设计风格：日式低饱和 —— 米白 #F5F3EF 纸面、蓝灰 #5B7B8C 主色、
+橙 #C4845C 强调色。字体优先 MiSans，禁用 emoji。
 
 MBDSDR Project - AI定义无线电 - 全开源 GPL-3.0 - 呼号 BI4MIB
 """
 
 import math
+import os
 import time
-from typing import Optional, List, Dict, Tuple, Callable
+from datetime import datetime, timezone
+from typing import Optional, List, Dict, Tuple
 
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
 from PySide6.QtGui import (
@@ -37,7 +53,7 @@ from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QLabel
 
 
 class SkyObject:
-    """天空中的对象（卫星/信号源/干扰源）。"""
+    """天空中的对象（卫星/信号源/干扰源/日月）。"""
 
     def __init__(
         self,
@@ -52,8 +68,8 @@ class SkyObject:
     ):
         self.name = name
         self.azimuth_deg = azimuth_deg  # 方位角 0-360°（北=0，东=90）
-        self.elevation_deg = elevation_deg  # 仰角 0-90°
-        self.obj_type = obj_type  # satellite / signal / interferer / custom
+        self.elevation_deg = elevation_deg  # 仰角 -90..90°
+        self.obj_type = obj_type  # satellite / signal / interferer / sun / moon / custom
         self.frequency_hz = frequency_hz
         self.signal_strength_db = signal_strength_db
         self.description = description
@@ -96,20 +112,62 @@ class HeatmapCell:
 
 
 # ============================================================================
+# 地面站配置（从用户配置读取，不写死城市）
+# ============================================================================
+
+
+def load_ground_station_config() -> Optional[Dict[str, float]]:
+    """从 ~/.mbdsdr/config.json 与环境变量读取地面站坐标。
+
+    优先级（后者覆盖前者）：
+      1) JSON: ground_station_lat / ground_station_lon / ground_station_alt_m
+      2) 环境变量: MBDSDR_GS_LAT / MBDSDR_GS_LON / MBDSDR_GS_ALT_M
+
+    未配置或坐标非法时返回 None（调用方据此显示“地面站未设置”，不造假）。
+    """
+    lat = lon = alt = None
+    path = os.path.expanduser("~/.mbdsdr/config.json")
+    try:
+        if os.path.exists(path):
+            import json
+            with open(path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            lat = cfg.get("ground_station_lat")
+            lon = cfg.get("ground_station_lon")
+            alt = cfg.get("ground_station_alt_m")
+    except Exception:
+        pass
+    # 环境变量覆盖
+    env_lat = os.environ.get("MBDSDR_GS_LAT")
+    env_lon = os.environ.get("MBDSDR_GS_LON")
+    env_alt = os.environ.get("MBDSDR_GS_ALT_M")
+    if env_lat is not None:
+        lat = env_lat
+    if env_lon is not None:
+        lon = env_lon
+    if env_alt is not None:
+        alt = env_alt
+    try:
+        lat = float(lat) if lat is not None else None
+        lon = float(lon) if lon is not None else None
+        alt = float(alt) if alt is not None else 0.0
+    except (TypeError, ValueError):
+        return None
+    if lat is None or lon is None:
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+    return {"lat": lat, "lon": lon, "alt_m": alt}
+
+
+# ============================================================================
 # 射频天空视图主组件
 # ============================================================================
 
 
 class RFSkyView(QWidget):
     """
-    射频天空视图：极坐标投影的天空图。
-
-    借鉴 Stellarium 的设计理念：
-    - 沉浸式主视图，天空占据大部分区域
-    - 半透明叠加信息，不遮挡主视图
-    - 底部简洁工具栏
-    - 键盘快捷键驱动
-    - 滚轮缩放，拖拽旋转
+    射频天空视图：方位角等距投影的天空图（天顶居中，地平线为边缘圆）。
 
     信号：
         object_clicked(SkyObject) - 点击天空对象
@@ -123,10 +181,10 @@ class RFSkyView(QWidget):
         super().__init__(parent)
 
         # 视图状态
-        self._zoom = 1.0  # 缩放因子
-        self._pan_x = 0.0  # 平移 x
-        self._pan_y = 0.0  # 平移 y
-        self._rotation = 0.0  # 视图旋转（度）
+        self._zoom = 1.0
+        self._pan_x = 0.0
+        self._pan_y = 0.0
+        self._rotation = 0.0
         self._show_grid = True
         self._show_compass = True
         self._show_heatmap = False
@@ -136,13 +194,14 @@ class RFSkyView(QWidget):
         self._objects: List[SkyObject] = []
         self._antenna = AntennaPointing()
         self._heatmap: List[HeatmapCell] = []
-        self._trajectories: Dict[str, List[Tuple[float, float]]] = {}  # name -> [(az, el), ...]
+        self._trajectories: Dict[str, List[Tuple[float, float]]] = {}
 
-        # 数据来源："none"=无观测站位置(空状态) / "real"=真实GNSS或手动配置 / "sim"=模拟数据
-        # sim 模式右上角显示橙色“模拟数据”角标；none 时画布中央显示空状态提示。
+        # 数据来源："none"=无观测站位置 / "real"=真实GNSS或手动配置 / "sim"=模拟
         self._data_source: str = "none"
+        # 卫星轨道计算是否真正连通（TLE+sgp4 至少成功算出一颗）
+        self._satellites_connected: bool = False
 
-        # 观测站坐标（真实 GNSS 或手动配置）；未定位时为 None，不显示坐标
+        # 观测站坐标；未定位时为 None
         self._observer: Optional[Dict[str, float]] = None
 
         # 新时空：授时信息
@@ -151,33 +210,58 @@ class RFSkyView(QWidget):
             "gps_week": 0,
             "gps_tow": 0.0,
             "ntp_server": "",
-            "ntp_status": "system",  # system/ntp/gnss
+            "ntp_status": "system",
             "clock_offset_ms": 0.0,
         }
+
+        # 真实天体位置（由 SatelliteTracker 每帧喂入；None=不绘制，不造假）
+        self._sun: Optional[Dict[str, float]] = None   # {az, alt}
+        self._moon: Optional[Dict[str, float]] = None  # {az, alt, illum}
+        self._sky_brightness: float = 0.0              # 0=深夜 1=白天
+
+        # 未来过境列表：[{name, rise(HH:MM UTC), max_alt, duration_min}]
+        self._upcoming_passes: List[Dict[str, float]] = []
 
         # 交互状态
         self._dragging = False
         self._last_mouse_pos = QPointF()
         self._hovered_object: Optional[SkyObject] = None
 
+        # 方位角等距投影（Stellarium fisheye）。
+        # 坐标系：地平系 +x=北 +y=东 +z=天底；投影输出 (北分量, 东分量)。
+        try:
+            from mbdsdr_ai.celestial_geometry import (
+                AzimuthalEquidistantProjection,
+            )
+            self._proj = AzimuthalEquidistantProjection()
+        except Exception:
+            self._proj = None
+
         # 颜色（日式低饱和）
         self._colors = {
-            "bg": QColor("#1A1D23"),
-            "grid": QColor("#3A3F4A"),
-            "grid_text": QColor("#8B90A0"),
-            "horizon": QColor("#5A6070"),
-            "zenith": QColor("#6B7280"),
-            "satellite": QColor("#7EB8D4"),  # 低饱和蓝
-            "signal": QColor("#D4A574"),  # 低饱和橙
-            "interferer": QColor("#D47E7E"),  # 低饱和红
-            "custom": QColor("#A5D47E"),  # 低饱和绿
-            "antenna": QColor("#E8C547"),  # 天线指向（低饱和金）
-            "antenna_beam": QColor(232, 197, 71, 40),  # 半透明波束
-            "text": QColor("#D0D4DC"),
-            "text_dim": QColor("#8B90A0"),
-            "heatmap_low": QColor("#2A4A3A"),
-            "heatmap_mid": QColor("#8A7A2A"),
-            "heatmap_high": QColor("#8A3A3A"),
+            "paper": QColor("#F5F3EF"),       # 米白纸面
+            "day_zenith": QColor("#DCE7EC"),
+            "day_horizon": QColor("#F5F3EF"),
+            "night_zenith": QColor("#0E1622"),
+            "night_horizon": QColor("#1B2A3A"),
+            "primary": QColor("#5B7B8C"),      # 蓝灰主色
+            "accent": QColor("#C4845C"),       # 橙强调
+            "grid_day": QColor(120, 140, 150, 90),
+            "grid_night": QColor(90, 110, 130, 120),
+            "horizon_day": QColor("#5B7B8C"),
+            "horizon_night": QColor("#7E97A8"),
+            "sat_weather": QColor("#5B7B8C"),  # 气象卫星：蓝灰
+            "sat_amateur": QColor("#C4845C"),  # ISS/业余：橙
+            "signal": QColor("#C4845C"),
+            "interferer": QColor("#B06A6A"),
+            "custom": QColor("#7E9B7E"),
+            "sun": QColor("#D9A441"),
+            "moon": QColor("#9AA7B4"),
+            "antenna": QColor("#C4845C"),
+            "antenna_beam": QColor(196, 132, 92, 36),
+            "heatmap_low": QColor("#3E5A4A"),
+            "heatmap_mid": QColor("#8A7A3A"),
+            "heatmap_high": QColor("#8A4A3A"),
         }
 
         # 字体
@@ -195,11 +279,10 @@ class RFSkyView(QWidget):
         ])
         self._mono_font.setPointSize(9)
 
-        # 启用鼠标追踪（悬停检测）
         self.setMouseTracking(True)
         self.setMinimumSize(400, 400)
 
-        # 自动刷新定时器（30fps）
+        # 自动刷新（30fps 重绘；轨道计算由 SatelliteTracker 单独定时器驱动）
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.update)
         self._refresh_timer.start(33)
@@ -214,28 +297,19 @@ class RFSkyView(QWidget):
         self.update()
 
     def set_data_source(self, source: str):
-        """设置数据来源标注。
-
-        source:
-            "none" - 无观测站位置（GNSS 未连接或未手动配置），画布中央显示空状态提示；
-            "real" - 真实 GNSS 定位或手动配置坐标，无角标；
-            "sim"  - 模拟模式（合成坐标/信号），右上角显示橙色“模拟数据”角标。
-        """
+        """设置数据来源标注："none" / "real" / "sim"。"""
         if source not in ("none", "real", "sim"):
             source = "none"
         self._data_source = source
         self.update()
 
-    def set_gnss_position(self, fix_dict: dict):
-        """由真实串口 GNSS fix 驱动观测站坐标与数据来源标注。
+    def set_satellites_connected(self, connected: bool):
+        """标记卫星轨道计算是否真正连通（TLE+sgp4 成功）。"""
+        self._satellites_connected = bool(connected)
+        self.update()
 
-        fix_dict 口径：{source, latitude, longitude, altitude_m, ...}
-        - source=="real"：更新观测站坐标并设 source="real"（无角标）；
-        - 其它（none/无坐标）：清空坐标并设 source="none"，画布显示空状态，
-          绝不在无真实数据时显示坐标。
-        （与真硬件联调：坐标变化后由上层 SatelliteTracker.set_location 刷新卫星，
-          这里只负责记录观测站位置与来源标注。）
-        """
+    def set_gnss_position(self, fix_dict: dict):
+        """由真实串口 GNSS fix 驱动观测站坐标与数据来源标注。"""
         source = fix_dict.get("source", "none")
         if source == "real" and fix_dict.get("latitude") is not None \
                 and fix_dict.get("longitude") is not None:
@@ -250,21 +324,31 @@ class RFSkyView(QWidget):
             self.set_data_source("none")
 
     def get_observer(self) -> Optional[Dict[str, float]]:
-        """返回当前观测站坐标 {lat,lon,alt_m}；未定位时 None。"""
         return self._observer
 
+    def set_celestial_bodies(self, sun: Optional[Dict[str, float]],
+                             moon: Optional[Dict[str, float]],
+                             sky_brightness: float):
+        """喂入真实太阳/月亮位置与天空亮度因子（由 SatelliteTracker 计算）。"""
+        self._sun = sun
+        self._moon = moon
+        self._sky_brightness = max(0.0, min(1.0, float(sky_brightness)))
+        self.update()
+
+    def set_upcoming_passes(self, passes: List[Dict]):
+        """喂入未来过境列表（rise 时间字符串 + max_alt + duration_min）。"""
+        self._upcoming_passes = list(passes)[:12]
+        self.update()
+
     def add_object(self, obj: SkyObject):
-        """添加一个天空对象。"""
         self._objects.append(obj)
         self.update()
 
     def clear_objects(self):
-        """清空所有天空对象。"""
         self._objects.clear()
         self.update()
 
     def set_antenna(self, antenna: AntennaPointing):
-        """设置天线指向状态。"""
         self._antenna = antenna
         self.update()
 
@@ -272,21 +356,15 @@ class RFSkyView(QWidget):
         return self._antenna
 
     def set_time_info(self, time_info: dict):
-        """
-        设置新时空授时信息。
-        time_info 包含：utc_time, gps_week, gps_tow, ntp_server, ntp_status, clock_offset_ms
-        """
         self._time_info.update(time_info)
         self.update()
 
     def set_heatmap(self, cells: List[HeatmapCell]):
-        """设置信号强度热力图数据。"""
         self._heatmap = cells
         self._show_heatmap = len(cells) > 0
         self.update()
 
     def set_trajectory(self, name: str, points: List[Tuple[float, float]]):
-        """设置卫星轨迹（方位角, 仰角）点列表。"""
         self._trajectories[name] = points
         self.update()
 
@@ -311,7 +389,6 @@ class RFSkyView(QWidget):
         self.update()
 
     def reset_view(self):
-        """重置视图（缩放/平移/旋转）。"""
         self._zoom = 1.0
         self._pan_x = 0.0
         self._pan_y = 0.0
@@ -319,70 +396,89 @@ class RFSkyView(QWidget):
         self.update()
 
     # ========================================================================
-    # 坐标转换
+    # 坐标转换：方位角等距投影 (Stellarium StelProjectorClasses.cpp:363-395)
     # ========================================================================
 
+    def _sky_disk_radius(self) -> float:
+        return min(self.width(), self.height()) * 0.45 * self._zoom
+
+    def _sky_center(self) -> Tuple[float, float]:
+        return (self.width() / 2 + self._pan_x, self.height() / 2 + self._pan_y)
+
     def _sky_to_screen(self, azimuth_deg: float, elevation_deg: float) -> QPointF:
+        """天空坐标 (az, alt) -> 屏幕坐标。
+
+        天顶(alt=90°)映射到圆心；地平(alt=0°)映射到边缘圆。
+        方位角 0°=北在顶部，顺时针增大。
+
+        用 celestial_geometry.AzimuthalEquidistantProjection 做前向投影：
+          投影输出 (北分量*f, 东分量*f)，地平处模长 = pi/2 弧度。
+        屏幕坐标约定 y 向下，故北(+)映射到 -y，东(+)映射到 +x。
+        参考 StelProjectorClasses.cpp:365-372 forward。
         """
-        天空坐标（方位角, 仰角）→ 屏幕坐标。
+        cx, cy = self._sky_center()
+        radius = self._sky_disk_radius()
+        if self._proj is not None:
+            alt = max(-90.0, min(90.0, elevation_deg))
+            px, py = self._proj.project_azalt(azimuth_deg, alt)
+            if not (math.isfinite(px) and math.isfinite(py)):
+                return QPointF(cx, cy)
+            # 地平处归一化半径 = pi/2
+            scale = radius * 2.0 / math.pi
+            sx = cx + py * scale   # 东 -> 右
+            sy = cy - px * scale    # 北 -> 上
+            return QPointF(sx, sy)
 
-        极坐标投影：
-        - 圆心 = 天顶（仰角 90°）
-        - 半径与 (90 - 仰角) 成正比
-        - 方位角 0° = 北（上方），顺时针增加
-        """
-        w = self.width()
-        h = self.height()
-        cx = w / 2 + self._pan_x
-        cy = h / 2 + self._pan_y
-
-        # 视图半径（取宽高较小值的 45%）
-        radius = min(w, h) * 0.45 * self._zoom
-
-        # 仰角 → 径向距离（仰角 90°=0，仰角 0°=radius）
+        # 纯数学回退（与投影等价的线性映射）
         r = radius * (90.0 - max(0.0, min(90.0, elevation_deg))) / 90.0
-
-        # 方位角 → 角度（北=0 在上方，顺时针）
-        # Qt 角度：0°=右（东），逆时针为正
-        # 我们需要：0°=上（北），顺时针为正
-        angle_rad = math.radians(azimuth_deg - 90.0 + self._rotation)
-
-        x = cx + r * math.cos(angle_rad)
-        y = cy + r * math.sin(angle_rad)
-
-        return QPointF(x, y)
+        ang = math.radians(azimuth_deg - 90.0 + self._rotation)
+        return QPointF(cx + r * math.cos(ang), cy + r * math.sin(ang))
 
     def _screen_to_sky(self, screen_x: float, screen_y: float) -> Tuple[float, float]:
-        """
-        屏幕坐标 → 天空坐标（方位角, 仰角）。
-        用于点击/拖拽交互。
-        """
-        w = self.width()
-        h = self.height()
-        cx = w / 2 + self._pan_x
-        cy = h / 2 + self._pan_y
+        """屏幕坐标 -> (az, alt)。用投影逆变换 (StelProjectorClasses.cpp:389-394)。"""
+        cx, cy = self._sky_center()
+        radius = self._sky_disk_radius()
+        if radius < 1:
+            return 0.0, 90.0
+        scale = radius * 2.0 / math.pi
+        px = -(screen_y - cy) / scale   # 北分量
+        py = (screen_x - cx) / scale    # 东分量
+        # 截断到地平圆
+        mag = math.hypot(px, py)
+        max_mag = math.pi / 2.0
+        if mag > max_mag:
+            px *= max_mag / mag
+            py *= max_mag / mag
+            mag = max_mag
+        if self._proj is not None:
+            try:
+                v = self._proj.unproject_vec(px, py)
+                from mbdsdr_ai.celestial_geometry import azalt_from_vec
+                az, alt = azalt_from_vec(v)
+                return az % 360.0, alt
+            except Exception:
+                pass
+        # 回退
+        if mag < 1e-6:
+            return 0.0, 90.0
+        alt = 90.0 - math.degrees(mag)
+        az = (math.degrees(math.atan2(py, px)) + 360.0) % 360.0
+        return az, alt
 
-        radius = min(w, h) * 0.45 * self._zoom
+    # ========================================================================
+    # 颜色工具
+    # ========================================================================
 
-        dx = screen_x - cx
-        dy = screen_y - cy
-        r = math.sqrt(dx * dx + dy * dy)
-
-        if r < 1:
-            return 0.0, 90.0  # 天顶
-
-        # 限制在视图半径内
-        r = min(r, radius)
-
-        # 仰角
-        elevation = 90.0 - (r / radius) * 90.0
-
-        # 方位角
-        angle_rad = math.atan2(dy, dx)
-        azimuth = math.degrees(angle_rad) + 90.0 - self._rotation
-        azimuth = azimuth % 360.0
-
-        return azimuth, elevation
+    def _ink(self) -> QColor:
+        """根据昼夜亮度返回前景文字/网格色（白天深、夜晚浅）。"""
+        b = self._sky_brightness
+        # 0=夜 -> 浅蓝灰字；1=昼 -> 深灰字
+        night = QColor("#D8DEE6")
+        day = QColor("#3A4550")
+        r = int(night.red() * (1 - b) + day.red() * b)
+        g = int(night.green() * (1 - b) + day.green() * b)
+        bl = int(night.blue() * (1 - b) + day.blue() * b)
+        return QColor(r, g, bl)
 
     # ========================================================================
     # 绘制
@@ -393,135 +489,153 @@ class RFSkyView(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
 
-        # 背景
-        painter.fillRect(self.rect(), self._colors["bg"])
+        # 纸面背景（米白）
+        painter.fillRect(self.rect(), self._colors["paper"])
 
-        # 热力图（在网格下方）
+        self._draw_sky_disk(painter)
+
         if self._show_heatmap and self._heatmap:
             self._draw_heatmap(painter)
-
-        # 网格
         if self._show_grid:
             self._draw_grid(painter)
-
-        # 轨迹
         if self._show_trajectories:
             self._draw_trajectories(painter)
 
-        # 天线波束
         self._draw_antenna_beam(painter)
-
-        # 天空对象
+        self._draw_celestial_bodies(painter)
         self._draw_objects(painter)
-
-        # 天线指向标记
         self._draw_antenna_pointer(painter)
 
-        # 罗盘
         if self._show_compass:
             self._draw_compass(painter)
 
-        # 信息叠加（左下角）
         self._draw_info_overlay(painter)
+        self._draw_passes_panel(painter)
 
-        # 悬停提示
         if self._hovered_object:
             self._draw_hover_tooltip(painter)
 
-        # 数据来源标注（空状态提示 / 模拟数据角标），最顶层绘制
         self._draw_data_source_overlay(painter)
 
         painter.end()
 
-    def _draw_grid(self, painter: QPainter):
-        """绘制极坐标网格（方位角线 + 仰角圈）。"""
-        w = self.width()
-        h = self.height()
-        cx = w / 2 + self._pan_x
-        cy = h / 2 + self._pan_y
-        radius = min(w, h) * 0.45 * self._zoom
+    def _draw_sky_disk(self, painter: QPainter):
+        """绘制天空圆盘背景：按太阳高度做昼夜/黄昏渐变。
 
+        亮度因子来自 atmosphere.sky_brightness_factor（MilkyWay.cpp:350 断点）：
+        白天=米白浅蓝、黄昏=渐变、夜晚=深蓝。
+        """
+        cx, cy = self._sky_center()
+        radius = self._sky_disk_radius()
+        if radius < 2:
+            return
+        b = self._sky_brightness
+
+        def mix(c1: QColor, c2: QColor, t: float) -> QColor:
+            return QColor(
+                int(c1.red() * (1 - t) + c2.red() * t),
+                int(c1.green() * (1 - t) + c2.green() * t),
+                int(c1.blue() * (1 - t) + c2.blue() * t),
+            )
+
+        zenith = mix(self._colors["night_zenith"], self._colors["day_zenith"], b)
+        horizon = mix(self._colors["night_horizon"], self._colors["day_horizon"], b)
+
+        painter.save()
+        painter.setPen(Qt.NoPen)
+        grad = QRadialGradient(QPointF(cx, cy), radius)
+        grad.setColorAt(0.0, zenith)
+        grad.setColorAt(1.0, horizon)
+        painter.setBrush(QBrush(grad))
+        painter.drawEllipse(QPointF(cx, cy), radius, radius)
+        painter.restore()
+
+    def _draw_grid(self, painter: QPainter):
+        """极坐标网格（方位线 + 仰角圈）。"""
+        cx, cy = self._sky_center()
+        radius = self._sky_disk_radius()
         painter.save()
         painter.setFont(self._font)
 
-        # 仰角圈（0°, 30°, 60°, 90°）
-        grid_pen = QPen(self._colors["grid"], 1, Qt.DashLine)
+        grid_col = self._colors["grid_day"] if self._sky_brightness > 0.5 \
+            else self._colors["grid_night"]
+        grid_pen = QPen(grid_col, 1, Qt.DashLine)
         painter.setPen(grid_pen)
 
-        for elev in [0, 30, 60]:
+        for elev in (0, 30, 60):
             r = radius * (90.0 - elev) / 90.0
             painter.drawEllipse(QPointF(cx, cy), r, r)
-
-            # 仰角标签（在左侧）
             label_pos = self._sky_to_screen(270, elev)
-            painter.setPen(self._colors["grid_text"])
-            painter.drawText(QPointF(label_pos.x() - 25, label_pos.y() + 4), f"{elev}°")
+            painter.setPen(self._ink())
+            painter.drawText(QPointF(label_pos.x() - 26, label_pos.y() + 4), f"{elev}°")
             painter.setPen(grid_pen)
 
-        # 方位角线（每 30°）
         for az in range(0, 360, 30):
-            start = self._sky_to_screen(az, 0)
-            end = self._sky_to_screen(az, 90)
-            painter.drawLine(start, end)
+            painter.drawLine(self._sky_to_screen(az, 0), self._sky_to_screen(az, 90))
 
-        # 地平线（加粗）
-        horizon_pen = QPen(self._colors["horizon"], 2)
+        horizon_pen = QPen(
+            self._colors["horizon_day"] if self._sky_brightness > 0.5
+            else self._colors["horizon_night"], 2)
         painter.setPen(horizon_pen)
         painter.drawEllipse(QPointF(cx, cy), radius, radius)
-
         painter.restore()
 
     def _draw_compass(self, painter: QPainter):
-        """绘制罗盘方位标签（N/E/S/W + 度数）。"""
         painter.save()
         painter.setFont(self._font)
-
-        # 主方位
-        main_dirs = [
-            (0, "N", 90),    # 北
-            (90, "E", 90),   # 东
-            (180, "S", 90),  # 南
-            (270, "W", 90),  # 西
-        ]
-
-        for az, label, elev in main_dirs:
-            pos = self._sky_to_screen(az, elev)
-            painter.setPen(self._colors["text"])
+        for az, label in ((0, "N"), (90, "E"), (180, "S"), (270, "W")):
+            pos = self._sky_to_screen(az, 90)
             f = QFont(self._font)
             f.setBold(True)
             f.setPointSize(12)
             painter.setFont(f)
+            painter.setPen(self._ink())
             painter.drawText(QPointF(pos.x() - 8, pos.y() + 5), label)
             painter.setFont(self._font)
-
-        # 方位角刻度（每 30°）
-        painter.setPen(self._colors["grid_text"])
+        painter.setPen(self._ink())
         for az in range(0, 360, 30):
             if az % 90 == 0:
-                continue  # 跳过主方位
-            pos = self._sky_to_screen(az, 5)
+                continue
+            pos = self._sky_to_screen(az, 3)
             painter.drawText(QPointF(pos.x() - 12, pos.y() + 4), f"{az}°")
+        painter.restore()
 
+    def _draw_celestial_bodies(self, painter: QPainter):
+        """绘制真实太阳/月亮标记（在地平线上方才画）。"""
+        painter.save()
+        # 太阳
+        if self._sun and self._sun.get("alt", -99) > -1:
+            pos = self._sky_to_screen(self._sun["az"], max(0.0, self._sun["alt"]))
+            col = self._colors["sun"]
+            painter.setPen(QPen(col, 1))
+            painter.setBrush(QBrush(QColor(col.red(), col.green(), col.blue(), 60)))
+            painter.drawEllipse(pos, 14, 14)
+            painter.setBrush(QBrush(col))
+            painter.drawEllipse(pos, 7, 7)
+            painter.setPen(self._ink())
+            painter.drawText(QPointF(pos.x() + 12, pos.y() - 8), "太阳")
+        # 月亮
+        if self._moon and self._moon.get("alt", -99) > 0:
+            pos = self._sky_to_screen(self._moon["az"], self._moon["alt"])
+            col = self._colors["moon"]
+            painter.setPen(QPen(col, 1))
+            painter.setBrush(QBrush(col))
+            painter.drawEllipse(pos, 6, 6)
+            painter.setPen(self._ink())
+            painter.drawText(QPointF(pos.x() + 10, pos.y() - 6), "月亮")
         painter.restore()
 
     def _draw_objects(self, painter: QPainter):
         """绘制天空对象（卫星/信号源/干扰源）。"""
         painter.save()
-
         for obj in self._objects:
             if not obj.visible or not obj.is_above_horizon():
                 continue
-
             pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
-
-            # 颜色
             color = QColor(obj.color) if obj.color else self._colors.get(
-                obj.obj_type, self._colors["custom"]
-            )
+                obj.obj_type, self._colors["custom"])
 
-            # 绘制对象标记
             if obj.obj_type == "satellite":
-                # 卫星：小菱形 + 名称
                 size = 6
                 diamond = QPolygonF([
                     QPointF(pos.x(), pos.y() - size),
@@ -532,43 +646,27 @@ class RFSkyView(QWidget):
                 painter.setPen(QPen(color, 2))
                 painter.setBrush(QBrush(color))
                 painter.drawPolygon(diamond)
-
-                # 名称
-                painter.setPen(self._colors["text"])
+                painter.setPen(self._ink())
                 painter.setFont(self._font)
                 painter.drawText(QPointF(pos.x() + 10, pos.y() - 5), obj.name)
-
-                # 仰角/方位角（新时空标注）
-                painter.setPen(self._colors["text_dim"])
+                painter.setPen(self._ink())
                 painter.setFont(self._mono_font)
                 painter.drawText(
                     QPointF(pos.x() + 10, pos.y() + 22),
-                    f"EL {obj.elevation_deg:4.1f}° AZ {obj.azimuth_deg:5.1f}°"
-                )
-
-                # 频率（如果有）
+                    f"EL {obj.elevation_deg:4.1f} AZ {obj.azimuth_deg:5.1f}")
                 if obj.frequency_hz > 0:
-                    freq_mhz = obj.frequency_hz / 1e6
-                    painter.setPen(self._colors["text_dim"])
-                    painter.setFont(self._mono_font)
                     painter.drawText(
                         QPointF(pos.x() + 10, pos.y() + 36),
-                        f"{freq_mhz:.1f} MHz"
-                    )
-
+                        f"{obj.frequency_hz / 1e6:.1f} MHz")
             elif obj.obj_type == "signal":
-                # 信号源：同心圆
                 painter.setPen(QPen(color, 2))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawEllipse(pos, 5, 5)
                 painter.drawEllipse(pos, 9, 9)
-
-                painter.setPen(self._colors["text"])
+                painter.setPen(self._ink())
                 painter.setFont(self._font)
                 painter.drawText(QPointF(pos.x() + 12, pos.y() + 4), obj.name)
-
             elif obj.obj_type == "interferer":
-                # 干扰源：三角形 + 警告标记
                 size = 7
                 triangle = QPolygonF([
                     QPointF(pos.x(), pos.y() - size),
@@ -578,128 +676,78 @@ class RFSkyView(QWidget):
                 painter.setPen(QPen(color, 2))
                 painter.setBrush(QBrush(color))
                 painter.drawPolygon(triangle)
-
-                painter.setPen(self._colors["text"])
+                painter.setPen(self._ink())
                 painter.setFont(self._font)
                 painter.drawText(QPointF(pos.x() + 10, pos.y() - 5), obj.name)
-
             else:
-                # 自定义：圆点
                 painter.setPen(QPen(color, 2))
                 painter.setBrush(QBrush(color))
                 painter.drawEllipse(pos, 5, 5)
-
-                painter.setPen(self._colors["text"])
+                painter.setPen(self._ink())
                 painter.setFont(self._font)
                 painter.drawText(QPointF(pos.x() + 10, pos.y() + 4), obj.name)
-
         painter.restore()
 
     def _draw_antenna_beam(self, painter: QPainter):
-        """绘制天线波束覆盖区域。"""
         if self._antenna.elevation_deg <= 0:
             return
-
         painter.save()
-
-        # 波束中心
-        center = self._sky_to_screen(
-            self._antenna.azimuth_deg,
-            self._antenna.elevation_deg,
-        )
-
-        # 波束边缘（近似：在中心方位±半功率波束宽度，仰角±半功率波束宽度）
         half_bw = self._antenna.beamwidth_deg / 2.0
-
-        # 绘制波束扇形（简化为椭圆区域）
-        beam_color = self._colors["antenna_beam"]
-        painter.setBrush(QBrush(beam_color))
-        painter.setPen(Qt.NoPen)
-
-        # 计算波束覆盖的屏幕区域（近似椭圆）
-        # 取波束四个角点
         corners = [
-            self._sky_to_screen(
-                self._antenna.azimuth_deg - half_bw,
-                self._antenna.elevation_deg + half_bw,
-            ),
-            self._sky_to_screen(
-                self._antenna.azimuth_deg + half_bw,
-                self._antenna.elevation_deg + half_bw,
-            ),
-            self._sky_to_screen(
-                self._antenna.azimuth_deg + half_bw,
-                max(0, self._antenna.elevation_deg - half_bw),
-            ),
-            self._sky_to_screen(
-                self._antenna.azimuth_deg - half_bw,
-                max(0, self._antenna.elevation_deg - half_bw),
-            ),
+            self._sky_to_screen(self._antenna.azimuth_deg - half_bw,
+                                self._antenna.elevation_deg + half_bw),
+            self._sky_to_screen(self._antenna.azimuth_deg + half_bw,
+                                self._antenna.elevation_deg + half_bw),
+            self._sky_to_screen(self._antenna.azimuth_deg + half_bw,
+                                max(0, self._antenna.elevation_deg - half_bw)),
+            self._sky_to_screen(self._antenna.azimuth_deg - half_bw,
+                                max(0, self._antenna.elevation_deg - half_bw)),
         ]
-
-        beam_path = QPainterPath()
-        beam_path.moveTo(corners[0])
+        painter.setBrush(QBrush(self._colors["antenna_beam"]))
+        painter.setPen(Qt.NoPen)
+        path = QPainterPath()
+        path.moveTo(corners[0])
         for c in corners[1:]:
-            beam_path.lineTo(c)
-        beam_path.closeSubpath()
-
-        painter.drawPath(beam_path)
-
+            path.lineTo(c)
+        path.closeSubpath()
+        painter.drawPath(path)
         painter.restore()
 
     def _draw_antenna_pointer(self, painter: QPainter):
-        """绘制天线指向标记（十字准星）。"""
         if self._antenna.elevation_deg <= 0:
             return
-
-        pos = self._sky_to_screen(
-            self._antenna.azimuth_deg,
-            self._antenna.elevation_deg,
-        )
-
+        pos = self._sky_to_screen(self._antenna.azimuth_deg,
+                                  self._antenna.elevation_deg)
         painter.save()
         painter.setPen(QPen(self._colors["antenna"], 2))
-
-        # 十字准星
-        size = 12
-        painter.drawLine(QPointF(pos.x() - size, pos.y()), QPointF(pos.x() - 4, pos.y()))
-        painter.drawLine(QPointF(pos.x() + 4, pos.y()), QPointF(pos.x() + size, pos.y()))
-        painter.drawLine(QPointF(pos.x(), pos.y() - size), QPointF(pos.x(), pos.y() - 4))
-        painter.drawLine(QPointF(pos.x(), pos.y() + 4), QPointF(pos.x(), pos.y() + size))
-
-        # 中心点
+        s = 12
+        painter.drawLine(QPointF(pos.x() - s, pos.y()), QPointF(pos.x() - 4, pos.y()))
+        painter.drawLine(QPointF(pos.x() + 4, pos.y()), QPointF(pos.x() + s, pos.y()))
+        painter.drawLine(QPointF(pos.x(), pos.y() - s), QPointF(pos.x(), pos.y() - 4))
+        painter.drawLine(QPointF(pos.x(), pos.y() + 4), QPointF(pos.x(), pos.y() + s))
         painter.setBrush(QBrush(self._colors["antenna"]))
         painter.drawEllipse(pos, 3, 3)
-
-        # 跟踪状态标签
         if self._antenna.is_tracking and self._antenna.target_name:
             painter.setPen(self._colors["antenna"])
             painter.setFont(self._font)
-            painter.drawText(
-                QPointF(pos.x() + 16, pos.y() - 8),
-                f"跟踪: {self._antenna.target_name}"
-            )
-
+            painter.drawText(QPointF(pos.x() + 16, pos.y() - 8),
+                             f"跟踪: {self._antenna.target_name}")
         painter.restore()
 
     def _draw_trajectories(self, painter: QPainter):
-        """绘制卫星轨迹。"""
+        """卫星轨迹（半透明线）。"""
         painter.save()
-
         for name, points in self._trajectories.items():
             if len(points) < 2:
                 continue
-
-            # 找到对应卫星的颜色
-            color = self._colors["satellite"]
+            color = self._colors["sat_weather"]
             for obj in self._objects:
                 if obj.name == name:
                     color = QColor(obj.color) if obj.color else color
                     break
-
-            pen = QPen(color, 1, Qt.DashLine)
+            c = QColor(color.red(), color.green(), color.blue(), 110)
+            pen = QPen(c, 1, Qt.DashLine)
             painter.setPen(pen)
-
             path = QPainterPath()
             first = True
             for az, el in points:
@@ -712,252 +760,229 @@ class RFSkyView(QWidget):
                     first = False
                 else:
                     path.lineTo(pos)
-
             painter.drawPath(path)
-
         painter.restore()
 
     def _draw_heatmap(self, painter: QPainter):
-        """绘制信号强度热力图。"""
         if not self._heatmap:
             return
-
         painter.save()
         painter.setPen(Qt.NoPen)
-
         for cell in self._heatmap:
             if cell.elevation_deg <= 0:
                 continue
-
             pos = self._sky_to_screen(cell.azimuth_deg, cell.elevation_deg)
-
-            # 信号强度 → 颜色（-100dB 低 → -30dB 高）
             norm = max(0.0, min(1.0, (cell.signal_db + 100) / 70))
+            lo, mid, hi = (self._colors["heatmap_low"], self._colors["heatmap_mid"],
+                           self._colors["heatmap_high"])
             if norm < 0.5:
                 t = norm * 2
-                color = QColor(
-                    int(self._colors["heatmap_low"].red() * (1 - t) + self._colors["heatmap_mid"].red() * t),
-                    int(self._colors["heatmap_low"].green() * (1 - t) + self._colors["heatmap_mid"].green() * t),
-                    int(self._colors["heatmap_low"].blue() * (1 - t) + self._colors["heatmap_mid"].blue() * t),
-                    80,
-                )
+                c = QColor(int(lo.red() * (1 - t) + mid.red() * t),
+                           int(lo.green() * (1 - t) + mid.green() * t),
+                           int(lo.blue() * (1 - t) + mid.blue() * t), 80)
             else:
                 t = (norm - 0.5) * 2
-                color = QColor(
-                    int(self._colors["heatmap_mid"].red() * (1 - t) + self._colors["heatmap_high"].red() * t),
-                    int(self._colors["heatmap_mid"].green() * (1 - t) + self._colors["heatmap_high"].green() * t),
-                    int(self._colors["heatmap_mid"].blue() * (1 - t) + self._colors["heatmap_high"].blue() * t),
-                    80,
-                )
-
-            painter.setBrush(QBrush(color))
+                c = QColor(int(mid.red() * (1 - t) + hi.red() * t),
+                           int(mid.green() * (1 - t) + hi.green() * t),
+                           int(mid.blue() * (1 - t) + hi.blue() * t), 80)
+            painter.setBrush(QBrush(c))
             painter.drawEllipse(pos, 15, 15)
-
         painter.restore()
 
     def _draw_info_overlay(self, painter: QPainter):
-        """绘制左下角信息叠加（半透明卡片，含新时空授时信息）。"""
+        """左下角信息卡片（天线指向 / 可见卫星 / 授时）。"""
         painter.save()
-
-        # 半透明背景（增大高度以容纳授时信息）
-        card_w = 240
-        card_h = 140
-        card_x = 12
-        card_y = self.height() - card_h - 12
-
-        bg_color = QColor(26, 29, 35, 200)
-        painter.setBrush(QBrush(bg_color))
-        painter.setPen(QPen(QColor(58, 63, 74), 1))
+        card_w, card_h = 240, 132
+        card_x, card_y = 12, self.height() - card_h - 12
+        bg = QColor(245, 243, 239, 220) if self._sky_brightness > 0.5 \
+            else QColor(20, 28, 38, 210)
+        border = QColor("#5B7B8C") if self._sky_brightness > 0.5 else QColor("#3A4A5A")
+        painter.setBrush(QBrush(bg))
+        painter.setPen(QPen(border, 1))
         painter.drawRoundedRect(card_x, card_y, card_w, card_h, 6, 6)
 
-        # 文本
-        painter.setPen(self._colors["text"])
-        painter.setFont(self._font)
+        ink = self._ink()
+        dim = QColor("#7A8694") if self._sky_brightness > 0.5 else QColor("#8A96A4")
+        label_col = QColor("#3A4550") if self._sky_brightness > 0.5 else QColor("#C8D0DA")
 
         y = card_y + 20
+        painter.setPen(label_col)
+        painter.setFont(self._font)
         painter.drawText(card_x + 12, y, "天线指向")
         painter.setFont(self._mono_font)
-        painter.setPen(self._colors["antenna"])
-        painter.drawText(
-            card_x + 80, y,
-            f"AZ {self._antenna.azimuth_deg:5.1f}°  EL {self._antenna.elevation_deg:4.1f}°"
-        )
+        painter.setPen(QPen(self._colors["antenna"], 2).color())
+        painter.drawText(card_x + 80, y,
+                         f"AZ {self._antenna.azimuth_deg:5.1f} EL {self._antenna.elevation_deg:4.1f}")
 
         y += 18
         painter.setFont(self._font)
-        painter.setPen(self._colors["text"])
-        painter.drawText(card_x + 12, y, "波束宽度")
-        painter.setFont(self._mono_font)
-        painter.setPen(self._colors["text_dim"])
-        painter.drawText(card_x + 80, y, f"{self._antenna.beamwidth_deg:.0f}°  增益 {self._antenna.gain_dbi:.1f} dBi")
-
-        y += 18
-        painter.setFont(self._font)
-        painter.setPen(self._colors["text"])
+        painter.setPen(label_col)
         painter.drawText(card_x + 12, y, "可见卫星")
         painter.setFont(self._mono_font)
-        visible_count = sum(1 for o in self._objects if o.visible and o.is_above_horizon())
-        painter.setPen(self._colors["satellite"])
-        painter.drawText(card_x + 80, y, f"{visible_count} 颗")
+        visible = sum(1 for o in self._objects if o.visible and o.is_above_horizon())
+        painter.setPen(ink)
+        painter.drawText(card_x + 80, y, f"{visible} 颗")
 
-        # 新时空：授时信息
-        y += 22
+        y += 18
         painter.setFont(self._font)
-        painter.setPen(self._colors["text"])
-        painter.drawText(card_x + 12, y, "授时")
+        painter.setPen(label_col)
+        painter.drawText(card_x + 12, y, "太阳高度")
         painter.setFont(self._mono_font)
-        painter.setPen(self._colors["text_dim"])
+        painter.setPen(ink)
+        sun_alt = self._sun["alt"] if self._sun else None
+        painter.drawText(card_x + 80, y,
+                         f"{sun_alt:5.1f} deg" if sun_alt is not None else "--")
 
-        # UTC 时间
-        from datetime import datetime, timezone
+        y += 20
+        painter.setFont(self._font)
+        painter.setPen(label_col)
+        painter.drawText(card_x + 12, y, "UTC")
+        painter.setFont(self._mono_font)
+        painter.setPen(dim)
         utc_now = self._time_info.get("utc_time") or datetime.now(timezone.utc)
-        if isinstance(utc_now, datetime):
-            utc_str = utc_now.strftime("%H:%M:%S")
-        else:
-            utc_str = str(utc_now)
-        ntp_status = self._time_info.get("ntp_status", "system")
-        painter.drawText(card_x + 80, y, f"UTC {utc_str} [{ntp_status}]")
-
-        y += 18
-        painter.setFont(self._mono_font)
-        painter.setPen(self._colors["text_dim"])
-        gps_week = self._time_info.get("gps_week", 0)
-        gps_tow = self._time_info.get("gps_tow", 0.0)
-        if gps_week > 0:
-            painter.drawText(card_x + 80, y, f"GPS W{gps_week} {gps_tow:06.1f}s")
-        else:
-            painter.drawText(card_x + 80, y, "GPS --:--:--")
+        utc_str = utc_now.strftime("%H:%M:%S") if isinstance(utc_now, datetime) else str(utc_now)
+        painter.drawText(card_x + 52, y, f"{utc_str} [{self._time_info.get('ntp_status','system')}]")
 
         y += 18
         painter.setFont(self._font)
-        painter.setPen(self._colors["text_dim"])
+        painter.setPen(dim)
         painter.drawText(card_x + 12, y, "滚轮缩放 | 拖拽旋转 | 双击重置")
+        painter.restore()
 
+    def _draw_passes_panel(self, painter: QPainter):
+        """右侧未来过境列表（rise 时间 / 最大仰角 / 时长）。"""
+        if not self._upcoming_passes:
+            return
+        painter.save()
+        rows = self._upcoming_passes[:8]
+        row_h = 18
+        panel_w = 190
+        panel_h = 26 + len(rows) * row_h
+        panel_x = self.width() - panel_w - 12
+        panel_y = 56
+        bg = QColor(245, 243, 239, 220) if self._sky_brightness > 0.5 \
+            else QColor(20, 28, 38, 210)
+        painter.setBrush(QBrush(bg))
+        painter.setPen(QPen(QColor("#5B7B8C"), 1))
+        painter.drawRoundedRect(panel_x, panel_y, panel_w, panel_h, 6, 6)
+
+        ink = self._ink()
+        dim = QColor("#7A8694") if self._sky_brightness > 0.5 else QColor("#8A96A4")
+        painter.setFont(self._font)
+        painter.setPen(ink)
+        painter.drawText(panel_x + 10, panel_y + 16, "未来过境 (24h)")
+
+        painter.setFont(self._mono_font)
+        ty = panel_y + 16 + row_h
+        for p in rows:
+            painter.setPen(dim)
+            painter.drawText(panel_x + 10, ty, str(p.get("rise", "--")))
+            painter.setPen(ink)
+            name = str(p.get("name", ""))[:12]
+            painter.drawText(panel_x + 58, ty, name)
+            painter.setPen(self._colors["accent"])
+            painter.drawText(panel_x + panel_w - 78, ty,
+                             f"{float(p.get('max_alt', 0)):4.0f} deg")
+            ty += row_h
         painter.restore()
 
     def _draw_data_source_overlay(self, painter: QPainter):
-        """绘制数据来源标注：无数据空状态提示 / 模拟数据角标。"""
+        """数据来源标注：未连接空状态 / 模拟角标 / 卫星未连接提示。"""
         painter.save()
-
         if self._data_source == "none":
-            # 空状态：画布中央提示“未连接 GNSS 或未配置观测站位置”
             f = QFont(self._font)
             f.setPointSize(11)
             painter.setFont(f)
-            painter.setPen(self._colors["text_dim"])
-            text = "无数据 — 未连接 GNSS 或未配置观测站位置"
+            painter.setPen(self._ink())
             painter.drawText(QRectF(0, 0, self.width(), self.height()),
-                             Qt.AlignCenter, text)
-        elif self._data_source == "sim":
-            # 模拟数据角标：右上角，日式低饱和橙 #C4845C
-            badge_text = "模拟数据"
-            f = QFont(self._font)
-            f.setBold(True)
-            f.setPointSize(9)
-            painter.setFont(f)
-            fm = QFontMetrics(f)
-            pad_x, pad_y = 10, 5
-            bw = fm.horizontalAdvance(badge_text) + pad_x * 2
-            bh = fm.height() + pad_y * 2
-            bx = self.width() - bw - 12
-            by = 12
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(QColor("#C4845C")))
-            painter.drawRoundedRect(QRectF(bx, by, bw, bh), 4, 4)
-            painter.setPen(QColor("#1A1D23"))
-            painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignCenter, badge_text)
-
+                             Qt.AlignCenter,
+                             "未连接 — 地面站未设置 (配置经纬度或连接 GNSS)")
+        else:
+            # 已配置站址但卫星轨道计算未连通
+            if not self._satellites_connected:
+                f = QFont(self._font)
+                f.setPointSize(10)
+                painter.setFont(f)
+                painter.setPen(self._colors["accent"])
+                painter.drawText(QRectF(0, 0, self.width(), self.height() - 60),
+                                 Qt.AlignCenter, "卫星数据未连接 (TLE 不可用)")
+            if self._data_source == "sim":
+                badge = "[模拟]"
+                f = QFont(self._font)
+                f.setBold(True)
+                f.setPointSize(9)
+                painter.setFont(f)
+                fm = QFontMetrics(f)
+                bw = fm.horizontalAdvance(badge) + 20
+                bh = fm.height() + 10
+                bx, by = self.width() - bw - 12, 12
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QBrush(QColor("#C4845C")))
+                painter.drawRoundedRect(QRectF(bx, by, bw, bh), 4, 4)
+                painter.setPen(QColor("#F5F3EF"))
+                painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignCenter, badge)
         painter.restore()
 
     def _draw_hover_tooltip(self, painter: QPainter):
-        """绘制悬停对象的详细提示。"""
         obj = self._hovered_object
         if not obj:
             return
-
         pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
-
-        # 提示框
         lines = [
             obj.name,
-            f"方位 {obj.azimuth_deg:.1f}°  仰角 {obj.elevation_deg:.1f}°",
+            f"方位 {obj.azimuth_deg:.1f}  仰角 {obj.elevation_deg:.1f}",
         ]
         if obj.frequency_hz > 0:
             lines.append(f"频率 {obj.frequency_hz / 1e6:.1f} MHz")
-        if obj.signal_strength_db != 0:
-            lines.append(f"信号 {obj.signal_strength_db:.1f} dB")
         if obj.description:
             lines.append(obj.description[:30])
-
-        # 计算框大小
         painter.setFont(self._font)
         fm = QFontMetrics(self._font)
-        max_w = max(fm.horizontalAdvance(line) for line in lines)
-        box_w = max_w + 20
+        box_w = max(fm.horizontalAdvance(l) for l in lines) + 20
         box_h = len(lines) * 18 + 12
-
         box_x = int(pos.x() + 15)
         box_y = int(pos.y() - box_h - 10)
-
-        # 确保在窗口内
         if box_x + box_w > self.width():
             box_x = int(pos.x() - box_w - 15)
         if box_y < 0:
             box_y = int(pos.y() + 15)
-
-        # 绘制
-        bg_color = QColor(26, 29, 35, 230)
-        painter.setBrush(QBrush(bg_color))
-        painter.setPen(QPen(QColor(100, 105, 120), 1))
+        bg = QColor(245, 243, 239, 235) if self._sky_brightness > 0.5 \
+            else QColor(20, 28, 38, 235)
+        painter.setBrush(QBrush(bg))
+        painter.setPen(QPen(QColor("#5B7B8C"), 1))
         painter.drawRoundedRect(box_x, box_y, box_w, box_h, 4, 4)
-
-        painter.setPen(self._colors["text"])
+        painter.setPen(self._ink())
         y = box_y + 18
         for i, line in enumerate(lines):
-            if i == 0:
-                f = QFont(self._font)
-                f.setBold(True)
-                painter.setFont(f)
-            else:
-                painter.setFont(self._font)
+            f = QFont(self._font)
+            f.setBold(i == 0)
+            painter.setFont(f)
             painter.drawText(box_x + 10, y, line)
             y += 18
 
     # ========================================================================
-    # 交互事件
+    # 交互事件（滚轮缩放 / 拖拽旋转 —— 接口预留，供后续增强）
     # ========================================================================
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
             self._dragging = True
             self._last_mouse_pos = QPointF(event.position())
-
-            # 检查是否点击了天空对象
             clicked = self._find_object_at(event.position().x(), event.position().y())
             if clicked:
                 self.object_clicked.emit(clicked)
 
     def mouseMoveEvent(self, event: QMouseEvent):
         pos = event.position()
-
-        # 悬停检测
         hovered = self._find_object_at(pos.x(), pos.y())
         if hovered != self._hovered_object:
             self._hovered_object = hovered
             self.update()
-
-        # 拖拽旋转
         if self._dragging:
             dx = pos.x() - self._last_mouse_pos.x()
             dy = pos.y() - self._last_mouse_pos.y()
-
-            # 水平拖拽 → 旋转视图
-            self._rotation += dx * 0.3
-            self._rotation = self._rotation % 360
-
-            # 垂直拖拽 → 平移
+            self._rotation = (self._rotation + dx * 0.3) % 360
             self._pan_y += dy
-
             self._last_mouse_pos = QPointF(pos)
             self.update()
 
@@ -966,11 +991,9 @@ class RFSkyView(QWidget):
             self._dragging = False
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
-        """双击重置视图。"""
         self.reset_view()
 
     def wheelEvent(self, event: QWheelEvent):
-        """滚轮缩放。"""
         delta = event.angleDelta().y()
         if delta > 0:
             self._zoom = min(3.0, self._zoom * 1.1)
@@ -979,14 +1002,11 @@ class RFSkyView(QWidget):
         self.update()
 
     def _find_object_at(self, x: float, y: float, tolerance: float = 12.0) -> Optional[SkyObject]:
-        """找到指定屏幕坐标附近的天空对象。"""
         for obj in self._objects:
             if not obj.visible or not obj.is_above_horizon():
                 continue
             pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
-            dx = pos.x() - x
-            dy = pos.y() - y
-            if math.sqrt(dx * dx + dy * dy) < tolerance:
+            if math.hypot(pos.x() - x, pos.y() - y) < tolerance:
                 return obj
         return None
 
@@ -1000,198 +1020,151 @@ class RFSkyView(QWidget):
 
 
 class RFSkyViewPanel(QFrame):
-    """
-    射频天空视图面板：包含标题栏、控制按钮和 RFSkyView。
-
-    借鉴 Stellarium 的 UI 设计：
-    - 沉浸式主视图
-    - 顶部简洁标题栏（半透明）
-    - 底部控制按钮（半透明浮动）
-    - 不喧宾夺主
-    """
+    """射频天空视图面板：包含标题栏、控制按钮和 RFSkyView。"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("skyViewPanel")
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
-        # 天空视图
         self.sky_view = RFSkyView()
         layout.addWidget(self.sky_view)
-
-        # 底部浮动控制栏
         self._build_control_bar()
 
     def _build_control_bar(self):
-        """构建底部浮动控制栏（时间控制 + 视图控制）。"""
-        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QLabel, QFrame
-        from PySide6.QtCore import Qt
-
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QFrame
         control_bar = QFrame()
         control_bar.setObjectName("skyControlBar")
         control_bar.setFixedHeight(36)
         control_bar.setStyleSheet("""
-            QFrame#skyControlBar {
-                background: rgba(30, 40, 50, 200);
-                border-top: 1px solid rgba(120, 150, 180, 80);
-            }
-            QPushButton {
-                background: rgba(60, 80, 100, 150);
-                color: #C8D8E8;
-                border: 1px solid rgba(120, 150, 180, 100);
-                border-radius: 3px;
-                padding: 2px 8px;
-                font-size: 9pt;
-                min-width: 40px;
-            }
-            QPushButton:hover {
-                background: rgba(80, 110, 140, 200);
-            }
-            QPushButton:checked {
-                background: rgba(100, 140, 100, 200);
-                color: #E0F0E0;
-            }
-            QLabel {
-                color: #A8C0D8;
-                font-size: 9pt;
-                padding: 0 8px;
-            }
+            QFrame#skyControlBar { background: rgba(245,243,239,200);
+                border-top: 1px solid rgba(91,123,140,80); }
+            QPushButton { background: rgba(91,123,140,150); color: #F5F3EF;
+                border: 1px solid rgba(91,123,140,120); border-radius: 3px;
+                padding: 2px 8px; font-size: 9pt; min-width: 40px; }
+            QPushButton:hover { background: rgba(196,132,92,200); }
+            QLabel { color: #5B7B8C; font-size: 9pt; padding: 0 8px; }
         """)
-
-        bar_layout = QHBoxLayout(control_bar)
-        bar_layout.setContentsMargins(8, 2, 8, 2)
-        bar_layout.setSpacing(4)
-
-        # 时间控制
+        bar = QHBoxLayout(control_bar)
+        bar.setContentsMargins(8, 2, 8, 2)
+        bar.setSpacing(4)
         self.time_label = QLabel("实时")
         self.time_label.setMinimumWidth(160)
-        bar_layout.addWidget(self.time_label)
-
-        bar_layout.addStretch()
-
-        btn_rewind = QPushButton("<< -10m")
-        btn_rewind.clicked.connect(lambda: self._adjust_time(-600))
-        bar_layout.addWidget(btn_rewind)
-
-        btn_pause = QPushButton("暂停")
-        btn_pause.setCheckable(True)
-        btn_pause.toggled.connect(self._toggle_pause)
-        self._pause_btn = btn_pause
-        bar_layout.addWidget(btn_pause)
-
-        btn_live = QPushButton("实时")
-        btn_live.clicked.connect(self._reset_time)
-        bar_layout.addWidget(btn_live)
-
-        btn_forward = QPushButton("+10m >>")
-        btn_forward.clicked.connect(lambda: self._adjust_time(600))
-        bar_layout.addWidget(btn_forward)
-
-        bar_layout.addSpacing(16)
-
-        # 视图控制
-        btn_reset = QPushButton("重置视图")
-        btn_reset.clicked.connect(self.reset_view)
-        bar_layout.addWidget(btn_reset)
-
-        # 插入到天空视图下方
+        bar.addWidget(self.time_label)
+        bar.addStretch()
+        for label, cb in (("<< -10m", lambda: self._adjust(-600)),
+                          ("实时", self._reset_time),
+                          ("+10m >>", lambda: self._adjust(600))):
+            b = QPushButton(label)
+            b.clicked.connect(cb)
+            bar.addWidget(b)
+        bar.addSpacing(16)
+        b = QPushButton("重置视图")
+        b.clicked.connect(self.reset_view)
+        bar.addWidget(b)
         self.layout().addWidget(control_bar)
+        self._offset = 0.0
 
-        # 时间状态
-        self._time_offset = 0.0  # 秒
-        self._paused = False
-        self._pause_start_time = 0.0
-
-        # 时间更新定时器
-        self._time_timer = QTimer(self)
-        self._time_timer.timeout.connect(self._update_time_label)
-        self._time_timer.start(1000)
-
-    def _adjust_time(self, seconds: float):
-        """调整时间偏移（快进/快退）。"""
-        self._time_offset += seconds
-        self._paused = True
-        self._pause_btn.setChecked(True)
-        self._update_time_label()
-
-    def _toggle_pause(self, paused: bool):
-        """暂停/继续时间。"""
-        self._paused = paused
-        if paused:
-            self._pause_start_time = time.time()
-        else:
-            # 恢复时，把暂停期间的时间加到偏移里
-            paused_duration = time.time() - self._pause_start_time
-            self._time_offset -= paused_duration
-        self._update_time_label()
+    def _adjust(self, seconds: float):
+        self._offset += seconds
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            eng = get_time_engine()
+            eng.set_unix(eng.now_unix() + seconds)
+        except Exception:
+            pass
+        self._update_label()
 
     def _reset_time(self):
-        """重置到实时。"""
-        self._time_offset = 0.0
-        self._paused = False
-        self._pause_btn.setChecked(False)
-        self._update_time_label()
+        self._offset = 0.0
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            get_time_engine().set_time_now()
+        except Exception:
+            pass
+        self._update_label()
 
-    def _update_time_label(self):
-        """更新时间显示标签。"""
-        if self._paused:
-            sim_time = time.time() + self._time_offset
-            time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(sim_time))
-            self.time_label.setText(f"模拟: {time_str} (暂停)")
-        elif abs(self._time_offset) > 1:
-            sim_time = time.time() + self._time_offset
-            time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(sim_time))
-            offset_min = self._time_offset / 60
-            sign = "+" if offset_min >= 0 else ""
-            self.time_label.setText(f"模拟: {time_str} ({sign}{offset_min:.0f}m)")
-        else:
+    def _update_label(self):
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            t = get_time_engine().now_utc()
+            self.time_label.setText(t.strftime("%Y-%m-%d %H:%M UTC"))
+        except Exception:
             self.time_label.setText("实时")
 
     def get_sim_time(self) -> float:
-        """获取当前模拟时间（epoch 秒）。"""
-        if self._paused:
-            return time.time() + self._time_offset
-        return time.time() + self._time_offset
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            return get_time_engine().now_unix()
+        except Exception:
+            return time.time()
 
-    # 代理方法
     def set_objects(self, objects):
         self.sky_view.set_objects(objects)
 
-    def add_object(self, obj):
-        self.sky_view.add_object(obj)
-
     def set_antenna(self, antenna):
         self.sky_view.set_antenna(antenna)
-
-    def set_heatmap(self, cells):
-        self.sky_view.set_heatmap(cells)
-
-    def set_trajectory(self, name, points):
-        self.sky_view.set_trajectory(name, points)
 
     def reset_view(self):
         self.sky_view.reset_view()
 
 
 # ============================================================================
-# 实时卫星跟踪桥：把真 sgp4 轨道数据接进天空图
+# 内置默认 TLE（离线兜底；联网时由 orbit.fetch_tle 自动刷新）
+# ----------------------------------------------------------------------------
+# 这些 TLE 为 2026-09-24 (epoch 26267) 的 celestrak 实测值，作为离线兜底。
+# 真实运行时 SatelliteTracker 优先尝试在线拉取最新 TLE；拉取失败则用此兜底，
+# 保证无网络也能算出合理的 az/alt。计算仍失败则显示“未连接”，不造假。
+# 参考 gSatTEME.cpp:66 twoline2rv。
 # ============================================================================
 
+DEFAULT_TLES: Dict[str, Dict[str, object]] = {
+    "NOAA 15": {
+        "freq_mhz": 137.620, "kind": "weather",
+        "tle": ["NOAA 15",
+                "1 25338U 98030A   26267.25018134  .00000087  00000+0  53050-4 0  9999",
+                "2 25338  98.5051 285.1988 0011269  60.6345 299.5961 14.27170562475423"],
+    },
+    "NOAA 18": {
+        "freq_mhz": 137.9125, "kind": "weather",
+        "tle": ["NOAA 18",
+                "1 28654U 05018A   26267.27642994  .00000032  00000+0  39901-4 0  9995",
+                "2 28654  98.8051 345.4844 0013504 226.2734 133.7322 14.13744400100313"],
+    },
+    "NOAA 19": {
+        "freq_mhz": 137.100, "kind": "weather",
+        "tle": ["NOAA 19",
+                "1 33591U 09005A   26267.29309843  .00000009  00000+0  28340-4 0  9995",
+                "2 33591  98.9434 338.1952 0014779 109.0362 251.2412 14.13486774908481"],
+    },
+    "ISS (ZARYA)": {
+        "freq_mhz": 145.800, "kind": "amateur",
+        "tle": ["ISS (ZARYA)",
+                "1 25544U 98067A   26267.14191496  .00009634  00000+0  18116-3 0  9999",
+                "2 25544  51.6318 170.3464 0004691 174.6338 185.4701 15.49258637587098"],
+    },
+    "FENGYUN 3D": {
+        "freq_mhz": 136.900, "kind": "weather",
+        "tle": ["FENGYUN 3D",
+                "1 43010U 17072A   26267.23430764 -.00000010  00000+0  17383-4 0  9994",
+                "2 43010  99.0253 243.5043 0002376 107.2307 252.9129 14.19756230459047"],
+    },
+}
+
+
+# ============================================================================
+# 实时卫星跟踪桥：sgp4 + skyfield 真传播，喂入天空图
+# ============================================================================
+
+
 class SatelliteTracker:
-    """定时从 mbdsdr_ai.orbit 拉真 sgp4 卫星位置，更新天空图。
+    """定时用 sgp4+skyfield 计算卫星实时地平坐标，更新天空图。
 
-    无硬件依赖：TLE 在线拉取+缓存，纯算法。卫星在地平线下也画（半透明），
-    便于看到过顶前后轨迹。
+    时间统一从 new_spacetime.get_time_engine() 取（时间穿梭真实驱动），
+    不用系统墙钟。站址由外部 set_location 注入；为 None 时不计算，
+    天空图显示“未连接”。TLE 内置兜底 + 在线刷新，失败不造假。
     """
-
-    # 各卫星标称下行频率（MHz），用于标注
-    _FREQ = {
-        "NOAA 15": 137.620, "NOAA 18": 137.9125, "NOAA 19": 137.100,
-        "ISS (ZARYA)": 145.800, "METEOR M2": 137.100, "FENGYUN 3D": 136.900,
-    }
 
     def __init__(self, sky_view, lat: Optional[float], lon: Optional[float],
                  alt_km: float = 0.0, interval_ms: int = 10000):
@@ -1199,22 +1172,132 @@ class SatelliteTracker:
         self.lat = lat
         self.lon = lon
         self.alt_km = alt_km
+        self._interval_ms = interval_ms
+        self._sat_cache: Dict[str, object] = {}   # name -> skyfield EarthSatellite
+        self._ts = None
         self._timer = QTimer(self.sky_view)
         self._timer.timeout.connect(self.refresh)
-        # 观测站坐标为 None（未配置/GNSS 未定位）时不启动计算，
-        # 清空卫星与轨迹，天空图由调用方置为“无数据”空状态。
         if lat is None or lon is None:
             self.lat = None
             self.lon = None
             self.sky_view.set_objects([])
             self.sky_view.clear_trajectories()
+            self.sky_view.set_satellites_connected(False)
             return
         self._timer.start(interval_ms)
         self.refresh()
 
+    # ------------------------------------------------------------------ TLE
+    def _get_ts(self):
+        if self._ts is None:
+            try:
+                from mbdsdr_ai.sat_passes import make_timescale
+                self._ts = make_timescale()
+            except Exception:
+                self._ts = False
+        return self._ts or None
+
+    def _get_satellite(self, name: str):
+        """返回 (skyfield.EarthSatellite, kind)；失败返回 (None, None)。
+
+        优先在线拉最新 TLE（orbit.fetch_tle，带缓存），失败回退内置兜底 TLE。
+        参考 gSatTEME.cpp:66 twoline2rv。
+        """
+        if name in self._sat_cache:
+            return self._sat_cache[name]
+        info = DEFAULT_TLES.get(name)
+        if info is None:
+            return None, None
+        kind = info["kind"]
+        line1 = line2 = None
+        # 1) 在线刷新（best-effort）
+        try:
+            from mbdsdr_ai import orbit
+            catnr = orbit.BUILTIN_SATS.get(name)
+            if catnr is not None:
+                l1, l2 = orbit.fetch_tle(catnr)
+                line1, line2 = l1, l2
+        except Exception:
+            line1 = line2 = None
+        # 2) 内置兜底
+        if line1 is None:
+            tle = info["tle"]
+            if len(tle) >= 3:
+                line1, line2 = tle[1], tle[2]
+        if line1 is None:
+            return None, None
+        try:
+            from skyfield.api import EarthSatellite
+            ts = self._get_ts()
+            sat = EarthSatellite(line1, line2, name, ts)
+        except Exception:
+            return None, None
+        self._sat_cache[name] = (sat, kind)
+        return sat, kind
+
+    # ------------------------------------------------------------- 位置计算
+    def _topos(self):
+        from skyfield.api import Topos
+        return Topos(latitude_degrees=self.lat, longitude_degrees=self.lon,
+                     elevation_m=self.alt_km * 1000.0)
+
+    def _engine_unix(self) -> float:
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            eng = get_time_engine()
+            eng.tick()
+            return eng.now_unix()
+        except Exception:
+            return time.time()
+
+    def _compute_sun_moon(self, t_unix: float) -> Tuple[Optional[Dict], Optional[Dict], float]:
+        """真实太阳/月亮 az/alt + 天空亮度因子。任何一步失败都优雅降级。"""
+        sun = moon = None
+        brightness = 0.0
+        jd = t_unix / 86400.0 + 2440587.5
+        # 亮度：纯 Python Meeus（atmosphere，离线可用）
+        try:
+            from mbdsdr_ai import atmosphere
+            sun_alt = atmosphere.sun_altitude_deg(jd, self.lat, self.lon)
+            brightness = atmosphere.sky_brightness_factor(sun_alt)
+        except Exception:
+            sun_alt = None
+        # 太阳方位角（Meeus，离线）
+        try:
+            from mbdsdr_ai.atmosphere import _sun_ra_dec_deg, _gmst_deg
+            ra, dec = _sun_ra_dec_deg(jd)
+            lst = (_gmst_deg(jd) + self.lon) % 360.0
+            ha = math.radians((lst - ra) % 360.0)
+            lat = math.radians(self.lat)
+            dec_r = math.radians(dec)
+            sin_alt = math.sin(lat) * math.sin(dec_r) \
+                + math.cos(lat) * math.cos(dec_r) * math.cos(ha)
+            sin_alt = max(-1.0, min(1.0, sin_alt))
+            alt = math.degrees(math.asin(sin_alt))
+            cos_alt = max(0.05, math.cos(math.radians(alt)))
+            cos_az = (math.sin(dec_r) - math.sin(math.radians(alt)) * math.sin(lat)) \
+                / (cos_alt * math.cos(lat))
+            sin_az = -math.cos(dec_r) * math.sin(ha) / cos_alt
+            az = (math.degrees(math.atan2(sin_az, cos_az)) + 360.0) % 360.0
+            sun = {"az": az, "alt": alt}
+        except Exception:
+            pass
+        # 月亮：优先真实历表（solar_system），失败则不画（不造假）
+        try:
+            from mbdsdr_ai import solar_system
+            mp = solar_system.get_moon_position(
+                t_unix, (self.lat, self.lon, self.alt_km * 1000.0))
+            if mp is not None:
+                moon = {"az": mp.az_deg, "alt": mp.alt_deg,
+                        "illum": mp.illumination or 0.0}
+        except Exception:
+            moon = None
+        return sun, moon, brightness
+
+    # ------------------------------------------------------------------ 主刷新
     def set_location(self, lat: Optional[float], lon: Optional[float],
                      alt_km: Optional[float] = None):
-        """更新观测站坐标；传入 None 则停止卫星计算并清空天空图（空状态）。"""
+        """更新观测站坐标；None 则停止计算并清空（空状态）。"""
         self.lat = lat
         self.lon = lon
         if alt_km is not None:
@@ -1223,50 +1306,107 @@ class SatelliteTracker:
             self._timer.stop()
             self.sky_view.set_objects([])
             self.sky_view.clear_trajectories()
+            self.sky_view.set_satellites_connected(False)
+            self.sky_view.set_celestial_bodies(None, None, 0.0)
             self.sky_view.set_data_source("none")
             return
         if not self._timer.isActive():
-            self._timer.start()
+            self._timer.start(self._interval_ms)
         self.refresh()
 
     def refresh(self):
-        # 观测站坐标未知时不计算卫星位置
+        """每帧：从 TimeEngine 取时间 -> sgp4 算卫星 -> 投影喂给天空图。"""
         if self.lat is None or self.lon is None:
             return
+        t_unix = self._engine_unix()
+
+        # 太阳/月亮/昼夜
         try:
-            from mbdsdr_ai import orbit
+            sun, moon, brightness = self._compute_sun_moon(t_unix)
+            self.sky_view.set_celestial_bodies(sun, moon, brightness)
         except Exception:
-            return
-        try:
-            objs = []
-            traj = {}
-            import time as _t
-            now = _t.time()
-            for name in orbit.BUILTIN_SATS:
-                st = orbit.compute_satellite_state(name, self.lat, self.lon, self.alt_km)
-                if st is None:
-                    continue
-                freq = self._FREQ.get(name, 0.0) * 1e6
-                objs.append(SkyObject(
-                    name=name,
-                    azimuth_deg=st["azimuth"],
-                    elevation_deg=max(0.0, st["elevation"]),
-                    obj_type="satellite",
-                    frequency_hz=freq,
-                    description=f"仰角{st['elevation']:.0f}° 距离{st['range_km']:.0f}km",
-                ))
-                # 未来 10 分钟轨迹（每 60s 一点）
-                pts = []
-                for k in range(0, 11):
-                    p = orbit.compute_satellite_state(name, self.lat, self.lon,
-                                                       self.alt_km, when=now + k * 60)
-                    if p:
-                        pts.append((p["azimuth"], p["elevation"]))
-                if pts:
-                    traj[name] = pts
-            self.sky_view.set_objects(objs)
-            for name, pts in traj.items():
-                self.sky_view.set_trajectory(name, pts)
-        except Exception:
-            # TLE 拉取/轨道计算失败（断网等）时保持上一帧，不崩溃
             pass
+
+        ts = self._get_ts()
+        if ts is None:
+            self.sky_view.set_satellites_connected(False)
+            return
+
+        try:
+            t = ts.from_datetime(
+                datetime.fromtimestamp(t_unix, tz=timezone.utc))
+        except Exception:
+            self.sky_view.set_satellites_connected(False)
+            return
+
+        topo = self._topos()
+        objs: List[SkyObject] = []
+        connected = 0
+
+        for name, info in DEFAULT_TLES.items():
+            sat, kind = self._get_satellite(name)
+            if sat is None:
+                continue
+            try:
+                diff = sat - topo
+                alt, az, dist = diff.at(t).altaz()
+                alt_d, az_d = float(alt.degrees), float(az.degrees)
+            except Exception:
+                continue
+            connected += 1
+            color = ("#C4845C" if kind == "amateur" else "#5B7B8C")
+            objs.append(SkyObject(
+                name=name,
+                azimuth_deg=az_d,
+                elevation_deg=alt_d,
+                obj_type="satellite",
+                frequency_hz=float(info["freq_mhz"]) * 1e6,
+                color=color,
+                description=f"仰角{alt_d:.0f} 距离{float(dist.km):.0f}km",
+            ))
+            # 未来 10 分钟轨迹（每 60s 一点）—— Satellite.cpp:1298-1305 采样思想
+            pts = []
+            for k in range(0, 11):
+                try:
+                    tk = ts.from_datetime(
+                        datetime.fromtimestamp(t_unix + k * 60, tz=timezone.utc))
+                    a, e, _ = (sat - topo).at(tk).altaz()
+                    pts.append((float(a.degrees), float(e.degrees)))
+                except Exception:
+                    continue
+            if pts:
+                self.sky_view.set_trajectory(name, pts)
+
+        self.sky_view.set_objects(objs)
+        self.sky_view.set_satellites_connected(connected > 0)
+
+        # 未来过境列表（predict_upcoming_passes，best-effort）
+        try:
+            self._refresh_passes(ts, t_unix)
+        except Exception:
+            pass
+
+    def _refresh_passes(self, ts, t_unix: float):
+        """预测未来 24h 过境，喂入天空图侧栏。失败则清空列表（不造假）。"""
+        try:
+            from mbdsdr_ai import sat_passes
+            gs = sat_passes.GroundStation(
+                lat_deg=self.lat, lon_deg=self.lon, alt_m=self.alt_km * 1000.0)
+            t0 = ts.from_datetime(
+                datetime.fromtimestamp(t_unix, tz=timezone.utc))
+            tle_list = [info["tle"] for info in DEFAULT_TLES.values()]
+            results = sat_passes.predict_upcoming_passes(
+                tle_list, gs, hours=24.0, min_alt=10.0)
+            rows = []
+            for r in results[:8]:
+                p = r["pass"]
+                dt = p.rise_time.utc_datetime()
+                rows.append({
+                    "name": p.sat_name,
+                    "rise": dt.strftime("%H:%M"),
+                    "max_alt": p.max_alt,
+                    "duration_min": p.duration / 60.0,
+                })
+            self.sky_view.set_upcoming_passes(rows)
+        except Exception:
+            self.sky_view.set_upcoming_passes([])

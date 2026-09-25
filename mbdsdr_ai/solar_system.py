@@ -131,39 +131,31 @@ class _EphemerisBackend:
         self._init()
 
     def _init(self) -> None:
-        # 1) 尝试 skyfield + de421.bsp
+        # 1) 尝试 skyfield + 本地已有的 .bsp 星历（不自动下载，避免网络挂起）
         try:
-            from skyfield.api import Loader
             import os
-            # 标准缓存目录
+            from skyfield.api import Loader
             cache_dir = os.path.expanduser("~/.cache/skyfield")
-            os.makedirs(cache_dir, exist_ok=True)
-            loader = Loader(cache_dir)
-            # 尝试加载 de421.bsp（若已缓存则直接用；未缓存则尝试下载）
-            try:
-                eph = loader("de421.bsp")
-            except Exception:
-                # 尝试其他常见文件名
-                for alt in ("de440s.bsp", "de430.bsp", "de422.bsp"):
+            # 只在已有 .bsp 文件时才用 skyfield，避免 Loader 尝试网络下载挂起
+            bsp_files = []
+            if os.path.isdir(cache_dir):
+                bsp_files = [f for f in os.listdir(cache_dir) if f.endswith(".bsp")]
+            if bsp_files:
+                loader = Loader(cache_dir)
+                # 优先 de421，否则取第一个
+                bsp_name = "de421.bsp" if "de421.bsp" in bsp_files else bsp_files[0]
+                eph = loader(bsp_name)
+                ts = loader.timescale()
+                self._sf_ts = ts
+                self._sf_eph = eph
+                for key in ("sun", "moon", "mercury", "venus", "mars",
+                            "jupiter", "saturn", "earth"):
                     try:
-                        eph = loader(alt)
-                        break
+                        self._sf_planets[key] = eph[key]
                     except Exception:
-                        continue
-                else:
-                    raise RuntimeError("no bsp ephemeris available")
-            ts = loader.timescale()
-            self._sf_ts = ts
-            self._sf_eph = eph
-            # 预取天体
-            for key in ("sun", "moon", "mercury", "venus", "mars",
-                        "jupiter", "saturn", "earth"):
-                try:
-                    self._sf_planets[key] = eph[key]
-                except Exception:
-                    pass
-            self.kind = "skyfield"
-            return
+                        pass
+                self.kind = "skyfield"
+                return
         except Exception:
             pass
 
