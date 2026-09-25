@@ -111,6 +111,11 @@ class MainWindow(QMainWindow):
         self._record_sr: float = 2_400_000.0
         self._record_center_hz: float = 0.0
         self._record_guard: bool = False  # 同步两个录音按钮时防重入
+        # sidecar 元数据（开始录制时从真实后端捕获，停止落盘时写入 .json）
+        self._record_start_time: str = ""
+        self._record_gain_db: float = 0.0
+        self._record_device: str = ""
+        self._record_driver: str = ""
         # 声卡实时输出（sounddevice 可选；无设备时 available=False 安全降级）
         self._audio_player = None
         if AudioPlayer is not None:
@@ -1056,6 +1061,17 @@ class MainWindow(QMainWindow):
         except Exception:
             center_hz = 0.0
 
+        # sidecar 元数据：从真实后端捕获开始时间 / 射频增益 / 设备名 / 驱动
+        self._record_start_time = datetime.now().isoformat(timespec="seconds")
+        try:
+            self._record_gain_db = float(getattr(backend.status, "gain_db", 0.0))
+        except Exception:
+            self._record_gain_db = 0.0
+        _dev_obj = getattr(backend, "device", None)
+        self._record_device = str(
+            getattr(_dev_obj, "name", "") or backend.__class__.__name__)
+        self._record_driver = backend.__class__.__name__
+
         rec_dir = os.path.expanduser("~/mbdsdr_recordings")
         try:
             os.makedirs(rec_dir, exist_ok=True)
@@ -1109,6 +1125,10 @@ class MainWindow(QMainWindow):
                     iq, self._record_file_path,
                     sample_rate=self._record_sr,
                     center_freq_hz=self._record_center_hz,
+                    start_time=self._record_start_time or None,
+                    gain_db=self._record_gain_db,
+                    device=self._record_device,
+                    driver=self._record_driver,
                     note="MBDSDR baseband recording (float32 interleaved I/Q)")
         except Exception as e:
             self.statusBar().showMessage(f"录制存盘失败: {e}", 5000)
