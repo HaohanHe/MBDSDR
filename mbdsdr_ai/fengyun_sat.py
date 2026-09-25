@@ -690,8 +690,28 @@ def register_tool_registry(registry) -> None:
                           data={"shape": list(img.shape)})
 
     def _pass_handler(args):
-        lat = float(args.get("observer_lat", 39.9))
-        lon = float(args.get("observer_lon", 116.4))
+        # 地面站坐标：优先用参数，否则从配置读取；都没有则报错
+        cfg_lat = cfg_lon = None
+        cfg_path = os.path.expanduser("~/.mbdsdr/config.json")
+        try:
+            if os.path.exists(cfg_path):
+                import json as _cfg_json
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    _cfg = _cfg_json.load(f)
+                cfg_lat = _cfg.get("ground_station_lat")
+                cfg_lon = _cfg.get("ground_station_lon")
+        except Exception:
+            pass
+        lat = args.get("observer_lat", cfg_lat)
+        lon = args.get("observer_lon", cfg_lon)
+        if lat is None or lon is None:
+            return ToolResult(
+                success=False,
+                content="未配置地面站坐标。请在参数中传入 observer_lat/observer_lon，"
+                        "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。",
+            )
+        lat = float(lat)
+        lon = float(lon)
         t0 = float(args.get("t_start", __import__("time").time()))
         dur = float(args.get("duration_s", 600))
         curve = fy3_pass_curve(FY3_SYNTH_TLE, lat, lon, 0.0, t0, dur)

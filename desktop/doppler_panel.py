@@ -8,7 +8,7 @@ MBDSDR 桌面端 - 多普勒定轨面板 (DopplerPanel)
   - 天空图（方位/仰角极坐标）
 
 目标：LRO（月球轨道）/ Iridium-107 / 自定义 TLE。
-地面站默认北京 (39.9°N, 116.4°E)。
+地面站坐标需用户输入或从 ~/.mbdsdr/config.json 读取（ground_station_lat/lon）。
 无真实 SDR 硬件时实时模式置灰并显示「未连接SDR设备」；
 [模拟] 按钮用合成 Iridium 数据跑收敛，结果标 [模拟]。
 
@@ -393,12 +393,14 @@ class DopplerPanel(QWidget):
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         form.addRow("观测模式", self.mode_combo)
 
-        # 地面站参数
+        # 地面站参数（默认留空，提示用户输入；可从 ~/.mbdsdr/config.json 读取）
         st = QHBoxLayout()
-        self.lat_edit = QLineEdit("39.9")
-        self.lat_edit.setToolTip("地面站纬度 (°N)，默认北京")
-        self.lon_edit = QLineEdit("116.4")
-        self.lon_edit.setToolTip("地面站经度 (°E)，默认北京")
+        self.lat_edit = QLineEdit("")
+        self.lat_edit.setPlaceholderText("未设置")
+        self.lat_edit.setToolTip("地面站纬度 (°N)，请输入；或在 ~/.mbdsdr/config.json 设置 ground_station_lat")
+        self.lon_edit = QLineEdit("")
+        self.lon_edit.setPlaceholderText("未设置")
+        self.lon_edit.setToolTip("地面站经度 (°E)，请输入；或在 ~/.mbdsdr/config.json 设置 ground_station_lon")
         self.alt_edit = QLineEdit("0.0")
         self.alt_edit.setToolTip("地面站高度 (km)")
         st.addWidget(QLabel("纬度")); st.addWidget(self.lat_edit)

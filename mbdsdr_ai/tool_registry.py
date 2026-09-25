@@ -923,7 +923,46 @@ class ToolRegistry:
             logger.warning("satdump_adapter 不可用: %s", e)
             return
 
-        # sat_project_image: 卫星像元 -> 地理经纬度
+        def _sat_project_image_handler(args):
+            # 参数校验：sat_pos_km / sat_vel_km_s 必须是长度>=3 的数组，pixel_x 必须是有限数
+            try:
+                sat_pos = np.asarray(args["sat_pos_km"], dtype=float)
+                sat_vel = np.asarray(args["sat_vel_km_s"], dtype=float)
+                pixel_x = float(args["pixel_x"])
+            except (KeyError, ValueError, TypeError) as e:
+                return ToolResult(
+                    success=False,
+                    content=f"参数错误：sat_pos_km/sat_vel_km_s 必须为长度>=3 的数值数组，"
+                            f"pixel_x 必须为数字。原始错误: {e}",
+                )
+            if sat_pos.size < 3 or sat_vel.size < 3:
+                return ToolResult(
+                    success=False,
+                    content=f"参数错误：sat_pos_km 与 sat_vel_km_s 必须各含至少 3 个元素 "
+                            f"[x,y,z]，当前 sat_pos={sat_pos.size}, sat_vel={sat_vel.size}",
+                )
+            if not np.isfinite(pixel_x):
+                return ToolResult(
+                    success=False,
+                    content=f"参数错误：pixel_x 必须为有限数，当前 {pixel_x}",
+                )
+            try:
+                result = SA.MapProjector.project_pixel(
+                    sat_pos, sat_vel, pixel_x,
+                    int(args.get("image_width", SA.LRPT_IMAGE_WIDTH)),
+                    float(args.get("scan_angle_deg", SA.LRPT_SCAN_ANGLE_DEG)),
+                )
+            except Exception as e:  # noqa: BLE001
+                return ToolResult(
+                    success=False,
+                    content=f"投影计算失败: {type(e).__name__}: {e}。请检查卫星位置/速度是否有效。",
+                )
+            return ToolResult(
+                success=True,
+                content=json.dumps(result, ensure_ascii=False),
+                data=result,
+            )
+
         self.register(
             name="sat_project_image",
             description=(
@@ -946,25 +985,7 @@ class ToolRegistry:
                 },
                 "required": ["sat_pos_km", "sat_vel_km_s", "pixel_x"],
             },
-            handler=lambda args: ToolResult(
-                success=True,
-                content=json.dumps(
-                    SA.MapProjector.project_pixel(
-                        np.asarray(args["sat_pos_km"], dtype=float),
-                        np.asarray(args["sat_vel_km_s"], dtype=float),
-                        float(args["pixel_x"]),
-                        int(args.get("image_width", SA.LRPT_IMAGE_WIDTH)),
-                        float(args.get("scan_angle_deg", SA.LRPT_SCAN_ANGLE_DEG)),
-                    ),
-                    ensure_ascii=False),
-                data=SA.MapProjector.project_pixel(
-                    np.asarray(args["sat_pos_km"], dtype=float),
-                    np.asarray(args["sat_vel_km_s"], dtype=float),
-                    float(args["pixel_x"]),
-                    int(args.get("image_width", SA.LRPT_IMAGE_WIDTH)),
-                    float(args.get("scan_angle_deg", SA.LRPT_SCAN_ANGLE_DEG)),
-                ),
-            ),
+            handler=_sat_project_image_handler,
             category="satellite",
         )
 

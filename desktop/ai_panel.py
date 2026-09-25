@@ -331,6 +331,21 @@ class AIPanel(QWidget):
                 "model": model,
             }
             self._save_config(self._saved_config)
+
+            if not api_key:
+                # 未填写 API Key：不初始化 agent，避免后续调用失败
+                self.agent = None
+                self._update_ai_status()
+                self._add_system_message(
+                    "未填写 API Key，AI 将不可用。请在配置对话框中填入 API Key 后重启对话。"
+                )
+                QMessageBox.information(
+                    self, "未配置 API Key",
+                    "未填写 API Key，AI 对话功能将不可用。\n"
+                    "请重新点击「配置」填入 API Key。"
+                )
+                return
+
             # 重新初始化 agent
             config = AgentConfig(api_key=api_key, base_url=base_url, model=model)
             self.agent = MBDSDRAgent(config)
@@ -362,6 +377,15 @@ class AIPanel(QWidget):
             or self._saved_config.get("model", "")
             or os.environ.get("MBDSDR_MODEL", "Qwen/Qwen3.6-35B-A3B")
         )
+
+        if not final_api_key:
+            # 没有 API Key：不初始化 agent，避免后续调用失败
+            self.agent = None
+            self._update_ai_status()
+            self._add_system_message(
+                "未配置 API Key，AI 对话功能不可用。请点击右上角「配置」填入 API Key。"
+            )
+            return
 
         config = AgentConfig(api_key=final_api_key, base_url=final_base_url, model=final_model)
         self.agent = MBDSDRAgent(config)
@@ -462,9 +486,19 @@ class AIPanel(QWidget):
         # 使用真正的 AI Agent
         if self.agent and AI_CORE_AVAILABLE:
             self._call_ai(text)
+        elif not AI_CORE_AVAILABLE:
+            # AI 内核完全不可用
+            self._add_ai_message(
+                "AI 内核模块未安装（mbdsdr_ai 不可用）。\n"
+                "请先安装依赖：pip install -r requirements.txt。"
+            )
         else:
-            # 降级：规则引擎
-            self._rule_based_response(text)
+            # AI 内核可用但未配置 API Key —— 不编造回复，不假装执行工具
+            self._add_ai_message(
+                "AI 未配置 API Key。\n\n"
+                "请点击右上角「配置」按钮填入 API Key 后使用完整 AI 功能。\n"
+                "当前仅支持手动控制面板操作。"
+            )
 
     def _call_ai(self, text: str):
         """调用真正的 AI Agent（后台线程）。"""
@@ -489,6 +523,7 @@ class AIPanel(QWidget):
 
         # 新建一条空 AI 消息用于流式追加
         self._stream_html = ""
+        self._streamed_any = False  # 标记是否收到过流式增量，避免 finished 时重复追加
         self._append_to_view(
             '<div style="margin: 6px 0; padding: 8px; background: #F5F3F0; '
             'border-radius: 6px; border-left: 3px solid #5A8A5A;">'
@@ -500,6 +535,7 @@ class AIPanel(QWidget):
     def _on_stream_delta(self, piece: str):
         """流式增量实时打字到 AI 消息末尾。"""
         try:
+            self._streamed_any = True
             cursor = self.conversation_view.textCursor()
             cursor.movePosition(QTextCursor.End)
             cursor.insertText(piece)
@@ -548,6 +584,11 @@ class AIPanel(QWidget):
 
         if error:
             self._add_ai_message(f"[错误] {error}\n\n{content}")
+        elif self._streamed_any:
+            # 流式已把 content 打字到对话区，不再重复追加完整内容；
+            # 仅在流式内容为空（模型不支持流）时才补一条消息。
+            if not content:
+                self._add_ai_message("（AI 未返回文本内容，可能只执行了工具调用）")
         elif content:
             self._add_ai_message(content)
         else:
