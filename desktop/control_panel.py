@@ -75,6 +75,17 @@ class ControlPanel(QWidget):
     mode_changed = Signal(str)            # 模式改变 ("FM"/"AM")
     gain_changed = Signal(int)             # 硬件增益 (dB, RTL-SDR LNA 0~49)
     squelch_changed = Signal(float)        # 静噪门限 (dBFS, -120~0)
+    sample_rate_changed = Signal(float)    # 采样率改变 (Hz)
+    # 采样率档位：与 RTLSDRBackend.SAMPLE_RATES 对齐（11 档离散表）。
+    # 动态导入失败时回退到硬编码表，保证 GUI 不崩。
+    try:
+        from mbdsdr_ai.sdr_backend import RTLSDRBackend
+        SAMPLE_RATES = list(RTLSDRBackend.SAMPLE_RATES)
+    except Exception:
+        SAMPLE_RATES = [
+            250_000, 1_024_000, 1_536_000, 1_792_000, 1_920_000,
+            2_048_000, 2_160_000, 2_400_000, 2_560_000, 2_880_000, 3_200_000,
+        ]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -105,6 +116,7 @@ class ControlPanel(QWidget):
             getattr(self, "preset_combo", None),
             getattr(self, "volume_slider", None),
             getattr(self, "record_button", None),
+            getattr(self, "sample_rate_combo", None),
         ]
         widgets += self._step_buttons
         for w in widgets:
@@ -202,9 +214,32 @@ class ControlPanel(QWidget):
         volume_layout.addLayout(vol_row)
         layout.addWidget(volume_group)
 
-        # ---- 接收：硬件增益 + 静噪（对标 SDR++ 右侧控制条）----
+        # ---- 接收：采样率 + 硬件增益 + 静噪（对标 SDR++ 右侧控制条）----
         rx_group = QGroupBox("接收")
         rx_layout = QVBoxLayout(rx_group)
+
+        # 采样率下拉框（11 档离散表，默认 2.048 MHz = 索引 5）
+        sr_row = QHBoxLayout()
+        self.sr_label = QLabel("采样率")
+        self.sr_label.setObjectName("statusValue")
+        self.sr_label.setFixedWidth(40)
+        sr_row.addWidget(self.sr_label)
+        self.sample_rate_combo = QComboBox()
+        for _rate in self.SAMPLE_RATES:
+            if _rate >= 1_000_000:
+                _txt = f"{_rate / 1e6:.3f} MHz"
+            else:
+                _txt = f"{_rate / 1e3:.0f} kHz"
+            self.sample_rate_combo.addItem(_txt, float(_rate))
+        # 默认选中 2.048 MHz（索引 5）
+        try:
+            _default_idx = self.SAMPLE_RATES.index(2_048_000)
+        except ValueError:
+            _default_idx = 0
+        self.sample_rate_combo.setCurrentIndex(_default_idx)
+        self.sample_rate_combo.currentIndexChanged.connect(self._on_sample_rate_changed)
+        sr_row.addWidget(self.sample_rate_combo)
+        rx_layout.addLayout(sr_row)
 
         gain_row = QHBoxLayout()
         self.gain_label = QLabel("LNA")
@@ -385,6 +420,13 @@ class ControlPanel(QWidget):
     def _on_gain_changed(self, db: int):
         self.gain_val.setText(f"{db}dB")
         self.gain_changed.emit(db)
+
+    @Slot(int)
+    def _on_sample_rate_changed(self, index: int):
+        """采样率档位切换 → emit sample_rate_changed(rate_hz)。"""
+        rate = float(self.sample_rate_combo.itemData(index) or 0.0)
+        if rate > 0:
+            self.sample_rate_changed.emit(rate)
 
     def _on_squelch_changed(self, dbfs: int):
         self.squelch_val.setText(str(dbfs))

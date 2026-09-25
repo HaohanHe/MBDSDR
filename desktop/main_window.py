@@ -125,6 +125,12 @@ class MainWindow(QMainWindow):
                 self._audio_player = None
         # 静噪门限（dBFS / dBm 估计）：信号低于此值时声卡静音不输出
         self._squelch_db: float = -80.0
+        # VFO（SDR++ 风格接收链：变频→重采样→低通）。懒加载：连接后根据后端采样率创建。
+        # VFO 失败/scipy 不可用时回退到直接鉴频，绝不崩。
+        self._vfo = None  # type: Optional[object]
+        self._vfo_in_sr: float = 0.0
+        self._vfo_out_sr: float = 48000.0
+        self._vfo_bw: float = 12000.0
 
         # 构建 UI
         self._build_menu_bar()
@@ -399,6 +405,7 @@ class MainWindow(QMainWindow):
         self.control_panel.gain_changed.connect(self._on_gain_changed)
         self.control_panel.squelch_changed.connect(self._on_squelch_changed)
         self.control_panel.tune_sdr_requested.connect(self._on_tune_sdr)
+        self.control_panel.sample_rate_changed.connect(self._on_sample_rate_changed)
         right_tab.addTab(self.control_panel, "控制")
 
         # Tab 2: 状态
@@ -616,6 +623,11 @@ class MainWindow(QMainWindow):
         self.disconnect_btn.setEnabled(True)
         self.statusBar().showMessage(
             f"已连接 {backend.device.name}", 4000)
+        # 默认采样率对齐 SDR++ 风格的 2.048 MS/s（与 control_panel 默认档一致）
+        try:
+            backend.set_sample_rate(2_048_000.0)
+        except Exception:
+            pass
         # (A/B/C) 启动真实 IQ 流：频谱/录制/声卡全部接通
         self._start_iq_streams()
 
@@ -748,11 +760,26 @@ class MainWindow(QMainWindow):
         if self._worker:
             self._worker.request_tool.emit("tune_fm", {"freq_mhz": freq})
         self.spectrum.set_center_freq(freq)
+        # 真实 SDR 后端：真正下发到硬件
+        if self._active_sdr_backend is not None:
+            try:
+                self._active_sdr_backend.set_frequency(freq * 1e6)
+            except Exception:
+                pass
+        # 更新频率显示
+        self.freq_label.setText(f"{freq:.3f} MHz")
+        self.status_freq.setText(f"频率: {freq:.3f} MHz")
 
     @Slot(int)
     def _on_tune_am(self, freq: int):
         if self._worker:
             self._worker.request_tool.emit("tune_am", {"freq_khz": freq})
+        # 真实 SDR 后端：真正下发到硬件
+        if self._active_sdr_backend is not None:
+            try:
+                self._active_sdr_backend.set_frequency(freq * 1e3)
+            except Exception:
+                pass
 
     @Slot(float, str)
     def _on_tune_sdr(self, freq_hz: float, mode: str):
@@ -760,6 +787,19 @@ class MainWindow(QMainWindow):
             self._worker.request_tool.emit("tune_sdr",
                                    {"freq_hz": freq_hz, "mode": mode})
         self.spectrum.set_center_freq(freq_hz / 1e6)
+        # 真实 SDR 后端：真正下发频率 + 解调模式
+        if self._active_sdr_backend is not None:
+            try:
+                self._active_sdr_backend.set_frequency(freq_hz)
+            except Exception:
+                pass
+            try:
+                self._active_sdr_backend.set_demod(mode)
+            except Exception:
+                pass
+        # 更新频率显示
+        self.freq_label.setText(f"{freq_hz / 1e6:.3f} MHz")
+        self.status_freq.setText(f"频率: {freq_hz / 1e6:.3f} MHz")
 
     @Slot(float)
     def _on_module_tune(self, freq_hz: float):
@@ -780,6 +820,12 @@ class MainWindow(QMainWindow):
         if self._worker:
             try:
                 self._worker.request_tool.emit("sdr_set_gain", {"gain_db": float(db)})
+            except Exception:
+                pass
+        # 真实 SDR 后端：真正下发 LNA 增益
+        if self._active_sdr_backend is not None:
+            try:
+                self._active_sdr_backend.set_gain(float(db))
             except Exception:
                 pass
 
@@ -819,7 +865,38 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_mode_changed(self, mode: str):
-        pass  # 模式切换在控制面板内部处理
+        # 真实 SDR 后端：下发解调模式
+        if self._active_sdr_backend is not None:
+            try:
+                self._active_sdr_backend.set_demod(mode)
+            except Exception:
+                pass
+        # 根据模式调整 VFO 带宽（WFM 广播 ~180k，窄带 FM/AM ~12k）
+        try:
+            m = (mode or "FM").upper()
+            if m == "WFM" or m == "FM":
+                bw = 180000.0 if m == "WFM" else 12000.0
+            else:
+                bw = 12000.0
+            if self._vfo is not None:
+                self._vfo_bw = bw
+                self._vfo.set_bandwidth(bw)
+        except Exception:
+            pass
+
+    @Slot(float)
+    def _on_sample_rate_changed(self, rate_hz: float):
+        """控制面板采样率下拉切换 → 下发后端 + 重建 VFO + 更新录制采样率。"""
+        # 真实 SDR 后端：真正下发采样率
+        if self._active_sdr_backend is not None:
+            try:
+                self._active_sdr_backend.set_sample_rate(float(rate_hz))
+            except Exception:
+                pass
+        # 更新录制采样率（下一次开始录制时生效）
+        self._record_sr = float(rate_hz)
+        # VFO 输入采样率变了 → 下次解调时懒加载重建
+        self._vfo = None
 
     def _init_ai_agent_from_config(self):
         """从 ~/.mbdsdr/config.json 读 API 配置并初始化 AI agent。"""
@@ -854,6 +931,15 @@ class MainWindow(QMainWindow):
         self.control_panel.set_freq_fm(freq)
         if self._worker:
             self._worker.request_tool.emit("tune_fm", {"freq_mhz": freq})
+        # 真实 SDR 后端：频谱拖动/双击 → 真正下发中心频率
+        if self._active_sdr_backend is not None:
+            try:
+                self._active_sdr_backend.set_frequency(freq * 1e6)
+            except Exception:
+                pass
+        # 更新状态栏频率显示
+        self.freq_label.setText(f"{freq:.3f} MHz")
+        self.status_freq.setText(f"频率: {freq:.3f} MHz")
 
     # ========================================================================
     # 其他操作
@@ -952,7 +1038,9 @@ class MainWindow(QMainWindow):
         if read is None:
             return
         try:
-            iq = read(4096)
+            # 16384 样点：与 spectrum_widget FFT 16384 档位对齐；
+            # RTL-SDR 后端已有环形缓冲（生产者线程持续读），消费者可一次读大块。
+            iq = read(16384)
         except Exception:
             return
         if iq is None:
@@ -991,10 +1079,32 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _demod_and_play(self, iq: np.ndarray, sr: float):
-        """简单 FM 复数鉴频 → 重采样到 48k → 静噪门控 → 写声卡。
+    def _ensure_vfo(self, in_sr: float) -> bool:
+        """懒加载创建/重建 VFO。成功返回 True；VFO 不可用返回 False（走回退路径）。"""
+        if in_sr <= 0:
+            return False
+        if self._vfo is not None and abs(self._vfo_in_sr - in_sr) < 1.0:
+            return True  # 已有且采样率一致
+        try:
+            from mbdsdr_ai.dsp import VFO
+            self._vfo = VFO(
+                in_samplerate=float(in_sr),
+                out_samplerate=self._vfo_out_sr,
+                bandwidth=self._vfo_bw,
+                offset=0.0,  # RTL-SDR 零中频：VFO 中心 = 中心频率
+            )
+            self._vfo_in_sr = float(in_sr)
+            return True
+        except Exception:
+            self._vfo = None
+            self._vfo_in_sr = 0.0
+            return False
 
-        鉴频: audio = angle(conj(iq[:-1]) * iq[1:])（标准差分相位）。
+    def _demod_and_play(self, iq: np.ndarray, sr: float):
+        """FM 复数鉴频 → 静噪门控 → 写声卡。
+
+        优先走 SDR++ 风格 VFO 链（变频→重采样→低通），VFO 输出已是 48k；
+        VFO 不可用/失败时回退到直接对全带宽 IQ 鉴频 + _decimate_to_48k。
         无 AudioPlayer / 无设备 / 被静噪门住时全部安全 no-op。
         """
         player = self._audio_player
@@ -1002,7 +1112,7 @@ class MainWindow(QMainWindow):
             return
         if iq.size < 16:
             return
-        # 静噪门控：信号太弱不输出（避免底噪刺耳）
+        # 静噪门控：信号太弱不输出（避免底噪刺耳）。基于全带宽 IQ 功率。
         try:
             p = float(np.mean(np.abs(iq) ** 2))
             dbfs = 10.0 * math.log10(p + 1e-12)
@@ -1010,6 +1120,27 @@ class MainWindow(QMainWindow):
                 return
         except Exception:
             return
+
+        # ---- 路径 A：VFO 链（SDR++ 风格：先信道滤波再鉴频）----
+        vfo_ok = False
+        try:
+            if self._ensure_vfo(sr):
+                vfo_out = self._vfo.process(iq)
+                if vfo_out is not None and len(vfo_out) > 16:
+                    # VFO 输出已是 out_sr(48k)，鉴频后直接写声卡，不再 decimate
+                    phase = np.angle(
+                        vfo_out[1:] * np.conj(vfo_out[:-1])
+                    ).astype(np.float32)
+                    if phase.size > 0:
+                        player.write(phase)
+                        vfo_ok = True
+        except Exception:
+            vfo_ok = False
+
+        if vfo_ok:
+            return
+
+        # ---- 路径 B（回退）：直接对全带宽 IQ 鉴频 + 整数抽取到 48k ----
         try:
             # 标准复数鉴频：相邻采样相位差
             phase = np.angle(iq[1:] * np.conj(iq[:-1])).astype(np.float32)

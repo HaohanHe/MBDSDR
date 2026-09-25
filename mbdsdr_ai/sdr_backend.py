@@ -400,6 +400,158 @@ class SDRBackend:
         return path or ""
 
 
+class _ThreadedRingReader:
+    """生产者线程 + 环形缓冲读取器。
+
+    对照 SDR++:
+    - core/src/dsp/buffer/ring_buffer.h:4  RING_BUF_SZ = 1000000（容量）
+    - ring_buffer.h:22-34 init() —— readc/writec/readable/writable 计数 + 分配 buffer
+    - ring_buffer.h:36-64 read() —— waitUntilReadable → memcpy(处理回绕) → 更新计数 → notify canWrite
+    - ring_buffer.h:131-160 write() —— waitUntilWritable → memcpy → 更新计数 → notify canRead
+    - ring_buffer.h:186-196 stopReader/stopWriter —— 置停止标志 + notify 所有等待者
+    - source_modules/rtl_sdr_source/src/main.cpp:526-539 worker()/asyncHandler() ——
+      独立线程持续 read_async，把 uint8 转 float 后写 stream.swap。
+
+    解决 QTimer 50ms 只读 4096 样点导致的严重欠读（2.048MS/s 下每帧应有 ~102k 样点）。
+    缓冲满时丢弃最旧数据（不阻塞生产者），避免设备侧 USB 缓冲区溢出。
+    """
+
+    def __init__(self, read_fn, block_size: int = 8192, ring_size: int = 1_000_000):
+        """
+        参数:
+            read_fn: callable(n) -> np.ndarray[complex64]，从设备读 n 个样点。
+            block_size: 生产者每次读的样点数（对照 SDR++ main.cpp:324 asyncCount）。
+            ring_size: 环形缓冲容量（复数样点数，对照 ring_buffer.h:4 RING_BUF_SZ）。
+        """
+        self._read_fn = read_fn
+        self._block_size = int(block_size)
+        self._ring_size = int(ring_size)
+        # 对照 ring_buffer.h:31 _buffer = buffer::alloc<T>(size)
+        self._buf = np.zeros(self._ring_size, dtype=np.complex64)
+        # 对照 ring_buffer.h:27-29 writec/readc/readable
+        self._read_idx = 0
+        self._write_idx = 0
+        self._count = 0  # 当前可读样点数（= ring_buffer.h 的 readable）
+        # 对照 ring_buffer.h:234-237 _readable_mtx/_writable_mtx/canReadVar/canWriteVar。
+        # 这里用单把锁 + 一个 Condition（SDR++ 是两把锁+两个 cond_var，单生产者单消费者
+        # 下合并为一把锁足够，逻辑等价）。
+        self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)
+        self._stop = False  # 对照 ring_buffer.h:232-233 _stopReader/_stopWriter
+        self._thread: Optional[threading.Thread] = None
+        self._dropped = 0  # 缓冲满时丢弃的最旧样点数（监控用）
+
+    def start(self):
+        """启动生产者线程（对照 SDR++ main.cpp:326 workerThread = std::thread(...)）。"""
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._stop = False
+        self._thread = threading.Thread(
+            target=self._produce_loop,
+            name="mbdsdr-ring-producer",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _produce_loop(self):
+        """对照 SDR++ main.cpp:526-529 worker() + asyncHandler()。"""
+        while not self._stop:
+            try:
+                chunk = self._read_fn(self._block_size)
+            except Exception as e:
+                # 设备拔出/关闭会抛异常，退出循环
+                if self._stop:
+                    break
+                logger.warning(f"环形缓冲生产者读设备失败: {e}")
+                time.sleep(0.01)
+                continue
+            if chunk is None or len(chunk) == 0:
+                if self._stop:
+                    break
+                time.sleep(0.005)
+                continue
+            self._write(chunk)
+
+    def _write(self, chunk: np.ndarray):
+        """对照 ring_buffer.h:131-160 write()：写满则覆盖最旧（不阻塞生产者）。"""
+        n = len(chunk)
+        with self._lock:
+            free = self._ring_size - self._count
+            if n > free:
+                # 缓冲满：丢弃最旧数据（SDR++ ring_buffer 默认会阻塞写等待消费者，
+                # 但设备侧 read_async 是持续供给的，消费者慢时阻塞生产者只会让 USB URB
+                # 积压溢出，故选择覆盖最旧——等价于 ring_buffer.h:218 setMaxLatency
+                # 限制最大延迟，这里直接用覆盖实现"丢旧保新"）。
+                drop = n - free
+                self._read_idx = (self._read_idx + drop) % self._ring_size
+                self._count -= drop
+                self._dropped += drop
+            # 处理回绕，对照 ring_buffer.h:139-145
+            first = min(n, self._ring_size - self._write_idx)
+            self._buf[self._write_idx:self._write_idx + first] = chunk[:first]
+            if n > first:
+                self._buf[0:n - first] = chunk[first:]
+            self._write_idx = (self._write_idx + n) % self._ring_size
+            self._count += n
+            # 对照 ring_buffer.h:157 canReadVar.notify_one()
+            self._cond.notify_all()
+
+    def read(self, n: int, timeout: float = 1.0) -> Optional[np.ndarray]:
+        """消费者读 n 个样点；超时或停止返回 None。对照 ring_buffer.h:36-64 read()。"""
+        n = int(n)
+        if n <= 0:
+            return np.empty(0, dtype=np.complex64)
+        if n > self._ring_size:
+            # 请求超过缓冲容量，无意义
+            return None
+        with self._lock:
+            # 对照 ring_buffer.h:112-121 waitUntilReadable()
+            deadline = time.time() + timeout
+            while self._count < n:
+                if self._stop:
+                    return None
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    return None
+                self._cond.wait(timeout=remaining)
+            if self._count < n:
+                return None
+            # 处理回绕拷贝，对照 ring_buffer.h:44-50
+            out = np.empty(n, dtype=np.complex64)
+            first = min(n, self._ring_size - self._read_idx)
+            out[:first] = self._buf[self._read_idx:self._read_idx + first]
+            if n > first:
+                out[first:] = self._buf[0:n - first]
+            self._read_idx = (self._read_idx + n) % self._ring_size
+            self._count -= n
+            # 对照 ring_buffer.h:61 canWriteVar.notify_one()
+            self._cond.notify_all()
+            return out
+
+    def available(self) -> int:
+        """当前可读样点数（对照 ring_buffer.h:123-129 getReadable()）。"""
+        with self._lock:
+            return self._count
+
+    def clear(self):
+        """清空缓冲（换频/换采样率后调用，丢弃旧频数据）。"""
+        with self._lock:
+            self._count = 0
+            self._read_idx = 0
+            self._write_idx = 0
+            self._cond.notify_all()
+
+    def stop(self):
+        """干净停止生产者线程。对照 ring_buffer.h:186-196 stopReader/stopWriter
+        + SDR++ main.cpp:332-342 stop()：置标志 → notify → join。"""
+        self._stop = True
+        with self._cond:
+            self._cond.notify_all()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+
+
 class RTLSDRBackend(SDRBackend):
     """
     RTL-SDR 后端（RTL2832U + E4000/FC0012/FC0013/R820T/R820T2）。
@@ -426,6 +578,37 @@ class RTLSDRBackend(SDRBackend):
     _RTL_ABS_MAX = 3_200_000
     _RTL_PREFERRED_LOW = 250_000   # rtl_433 默认
     _RTL_PREFERRED_HIGH = 1_000_000  # 高段常用起点
+
+    # 来源: SDR++ source_modules/rtl_sdr_source/src/main.cpp:27-39 ——
+    # rtl_sdr_source 模块硬编码的 11 个离散采样率档（用户只能在这 11 档里选）。
+    # 对照 main.cpp:377-385 的 srId 下拉框：选哪档就 set 哪档，不做连续区间映射。
+    SAMPLE_RATES = [
+        250_000,      # main.cpp:28
+        1_024_000,    # main.cpp:29
+        1_536_000,    # main.cpp:30
+        1_792_000,    # main.cpp:31
+        1_920_000,    # main.cpp:32
+        2_048_000,    # main.cpp:33
+        2_160_000,    # main.cpp:34
+        2_400_000,    # main.cpp:35（SDR++ 新设备默认 main.cpp:202）
+        2_560_000,    # main.cpp:36
+        2_880_000,    # main.cpp:37
+        3_200_000,    # main.cpp:38
+    ]
+
+    # 默认采样率：对齐 hint 的 2.048 MS/s（SDR++ main.cpp:202 默认 2.4M，
+    # 但我们按项目 hint 选 2.048M——1.024M 的整数倍，便于 ADS-B/数字链路抽取）。
+    DEFAULT_SAMPLE_RATE = 2_048_000
+
+    @classmethod
+    def nearest_sample_rate(cls, rate_hz: float) -> int:
+        """把任意请求采样率吸附到 SDR++ main.cpp:27-39 定义的最近离散档。
+
+        对照 SDR++ main.cpp:377-385：用户只能从 11 档里选，不存在"连续采样率"。
+        用最近邻（欧氏距离，平局取低档）吸附，再交给底层 _clamp_sample_rate
+        做死区/越界安全检查。
+        """
+        return min(cls.SAMPLE_RATES, key=lambda s: (abs(s - float(rate_hz)), s))
 
     @classmethod
     def _clamp_sample_rate(cls, rate_hz: float) -> Tuple[float, bool]:
@@ -467,6 +650,9 @@ class RTLSDRBackend(SDRBackend):
             supports_tx=False,
         )
         super().__init__(device)
+        # 默认采样率：吸附到 SDR++ main.cpp:27-39 离散档里的 2.048M（见类常量
+        # DEFAULT_SAMPLE_RATE 注释）。connect() 后 _apply_sample_rate 会真正下发硬件。
+        self.status.sample_rate_hz = float(self.DEFAULT_SAMPLE_RATE)
         self._device_index = device_index
         self._host = host
         self._port = port
@@ -474,6 +660,13 @@ class RTLSDRBackend(SDRBackend):
         self._sdr = None
         self._direct = 0  # 0=off, 1=I, 2=Q
         self.tuner_name = "Unknown"
+        # 来源: SDR++ main.cpp:485-494 offsetTuning checkbox —— 默认 False，
+        # 开启后 RTL2832 把本振偏移到采样率中央，便于直流抵消。
+        self._offset_tuning = False
+        # 来源: SDR++ ring_buffer.h:4 RING_BUF_SZ=1000000 +
+        # main.cpp:526-539 worker()/asyncHandler() —— 生产者线程持续读设备写环形缓冲，
+        # 消费者按帧取数。connect() 成功后创建并 start。
+        self._ring_reader: Optional["_ThreadedRingReader"] = None
         # 来源: librtlsdr src/librtlsdr.c:959-969 —— 真实离散增益表在
         # mbdsdr_ai/rtlsdr_params.py，连上探测到调谐器型号后填充。
         self._gain_table_db: list = []
@@ -525,6 +718,13 @@ class RTLSDRBackend(SDRBackend):
             # 上电先应用 ppm
             if self._ppm:
                 self.set_ppm(self._ppm)
+            # 来源: SDR++ main.cpp:322 start() 序列里的 rtlsdr_set_offset_tuning
+            # （485-494 是运行时 checkbox）。在打开设备后、启动采数前应用。
+            if self._offset_tuning:
+                try:
+                    self._sdr.set_offset_tuning(True)
+                except Exception as e:
+                    logger.warning(f"RTL-SDR 设置 offset_tuning 失败: {e}")
             self.status.connected = True
             self._start_time = time.time()
             # 回读硬件实际参数，对齐软件状态
@@ -532,12 +732,33 @@ class RTLSDRBackend(SDRBackend):
                 self.readback_hw_state()
             except Exception as e:
                 logger.warning(f"RTL-SDR 回读失败: {e}")
+            # 来源: SDR++ main.cpp:326 workerThread + 526-539 worker()/asyncHandler()
+            # + ring_buffer.h:4 RING_BUF_SZ=1000000 —— 启动生产者线程持续读设备写环形缓冲，
+            # 替代 QTimer 50ms 只读 4096 样点造成的严重欠读。
+            try:
+                self._ring_reader = _ThreadedRingReader(
+                    read_fn=self._sdr.read_samples,
+                    block_size=8192,
+                    ring_size=1_000_000,
+                )
+                self._ring_reader.start()
+            except Exception as e:
+                logger.warning(f"RTL-SDR 启动环形缓冲生产者失败: {e}")
+                self._ring_reader = None
             return True
         except Exception:
             self.status.connected = False
             return False
 
     def disconnect(self):
+        # 对照 SDR++ main.cpp:332-342 stop()：先停生产者线程（置标志+notify+join），
+        # 再关设备（close 会解除生产者阻塞在 read_samples 上的等待）。
+        if self._ring_reader is not None:
+            try:
+                self._ring_reader.stop()
+            except Exception:
+                pass
+            self._ring_reader = None
         if self._sdr:
             try:
                 self._sdr.close()
@@ -549,7 +770,26 @@ class RTLSDRBackend(SDRBackend):
     def _apply_frequency(self, freq_hz: float) -> bool:
         if self._sdr is None:
             return True
-        self._sdr.center_freq = freq_hz
+        # 来源: SDR++ main.cpp:344-359 tune() —— set 后回读验证，最多重试 3 次
+        # （SDR++ 原版 main.cpp:349-352 重试 10 次直到回读匹配；我们 3 次足够）。
+        target = int(freq_hz)
+        for attempt in range(1, 4):
+            try:
+                self._sdr.center_freq = target
+            except Exception as e:
+                logger.warning(f"RTL-SDR set_center_freq 第{attempt}次失败: {e}")
+                continue
+            try:
+                actual = int(self._sdr.center_freq)
+            except Exception:
+                # 回读不可用，直接认为成功（pyrtlsdr 某些后端不支持回读）
+                break
+            if actual == target:
+                break
+            logger.warning(
+                f"RTL-SDR 调谐第{attempt}次: 请求 {target}Hz, 回读 {actual}Hz, 重试")
+        else:
+            logger.warning(f"RTL-SDR 调谐 {target}Hz 重试3次仍未回读匹配")
         # 来源: librtlsdr src/librtlsdr.c:1702 — rtlsdr_reset_buffer；
         # rtl_433 src/sdr.c:1706 — 换频后必须 reset_buffer，否则 USB 队列里
         # 残留的旧频率 URB 会被当成新频数据读出。
@@ -557,17 +797,27 @@ class RTLSDRBackend(SDRBackend):
             self._sdr.reset_buffer()
         except Exception as e:
             logger.warning(f"RTL-SDR reset_buffer 失败（忽略）: {e}")
+        # 清空环形缓冲里换频前的旧频数据，避免新旧频 IQ 混叠
+        if self._ring_reader is not None:
+            self._ring_reader.clear()
         return True
 
     def _apply_sample_rate(self, rate_hz: float) -> bool:
         if self._sdr is None:
             return True
-        # 来源: librtlsdr src/librtlsdr.c:1100-1104 — 死区 (300k,900k] 非法，
-        # 先在软件层钳位到合法档，避免 pyrtlsdr 抛 EINVAL。
-        clamped, was = self._clamp_sample_rate(rate_hz)
+        # 来源: SDR++ main.cpp:27-39 + 377-385 —— 先吸附到 11 个离散档之一，
+        # SDR++ 用户只能在这 11 档里选，不接受连续采样率。
+        snapped = self.nearest_sample_rate(rate_hz)
+        if snapped != int(rate_hz):
+            logger.info(
+                f"RTL-SDR 采样率 {rate_hz:.0f} Hz 吸附到 SDR++ 离散档 "
+                f"{snapped} Hz (main.cpp:27-39)")
+        # 来源: librtlsdr src/librtlsdr.c:1100-1104 —— 死区 (300k,900k] 非法，
+        # 再做一次底层安全钳位（吸附后的档位都在合法区间内，这里基本不会触发）。
+        clamped, was = self._clamp_sample_rate(float(snapped))
         if was:
             logger.warning(
-                f"RTL-SDR 采样率 {rate_hz:.0f} Hz 落在 librtlsdr 死区/越界，"
+                f"RTL-SDR 采样率 {snapped} Hz 落在 librtlsdr 死区/越界，"
                 f"已钳位到 {clamped:.0f} Hz")
         try:
             self._sdr.sample_rate = clamped
@@ -714,9 +964,38 @@ class RTLSDRBackend(SDRBackend):
                 return False  # 老棒/老库不支持
         return False
 
+    def set_offset_tuning(self, enabled: bool) -> bool:
+        """Offset Tuning（DC 偏移抵消）。
+
+        来源: SDR++ main.cpp:485-494 offsetTuning checkbox + main.cpp:322
+        rtlsdr_set_offset_tuning。开启后 RTL2832 把本振偏移到采样率中央，
+        让直流尖峰落到基带边缘，便于数字 DC 抵消。pyrtlsdr 暴露 set_offset_tuning。
+        """
+        self._offset_tuning = bool(enabled)
+        if self._sdr:
+            try:
+                self._sdr.set_offset_tuning(bool(enabled))
+                return True
+            except Exception as e:
+                logger.warning(f"RTL-SDR set_offset_tuning({enabled}) 失败: {e}")
+                return False
+        return True
+
     def read_samples(self, num_samples: int) -> Optional[np.ndarray]:
         if not self.status.connected or not self._sdr:
             return None
+        # 优先走生产者线程填充的环形缓冲（对照 SDR++ ring_buffer.h:36-64 read()），
+        # 接口签名不变，main_window 无感知。
+        if self._ring_reader is not None:
+            try:
+                samples = self._ring_reader.read(num_samples, timeout=1.0)
+            except Exception:
+                return None
+            if samples is None:
+                return None
+            self._samples_read += len(samples)
+            return samples
+        # 兜底：环形缓冲未启动时直接同步读（保持原行为）
         try:
             samples = self._sdr.read_samples(num_samples)
             self._samples_read += num_samples
