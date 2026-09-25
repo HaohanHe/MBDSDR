@@ -39,7 +39,11 @@ datetime 或 JD。
 from __future__ import annotations
 
 import math
+import os
+import shutil
+import threading
 import time as _time
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple, Union
@@ -49,6 +53,26 @@ from typing import Any, Dict, Optional, Tuple, Union
 AU_KM = 149597870.7          # 1 AU 公里数（IAU）
 SPEED_OF_LIGHT_KM_S = 299792.458
 J2000_JD = 2451545.0
+
+# ── de421.bsp 星历自动下载 ──────────────────────────────
+# JPL DE421 星历：覆盖 1900-2050，行星位置亚角秒级精度。
+# 缓存目录与官方下载地址。下载在后台 daemon 线程进行，不阻塞导入/GUI。
+EPHEMERIS_DIR = os.path.expanduser("~/.mbdsdr/ephemeris")
+DE421_FILENAME = "de421.bsp"
+DE421_PATH = os.path.join(EPHEMERIS_DIR, DE421_FILENAME)
+DE421_URL = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de421.bsp"
+DE421_URL_MIRROR = "https://ssd.jpl.nasa.gov/ftp/eph/planets/bsp/de421.bsp"
+# 完整 de421.bsp 约 17MB；小于 10MB 视为不完整/损坏。
+DE421_MIN_BYTES = 10 * 1024 * 1024
+
+# 各后端精度标注（arcsec = 角秒）。
+# - de421_bsp : JPL 数值星历，行星位置亚角秒级 (< 0.1 arcsec)，月球约 0.01 arcsec。
+# - vsop87    : VSOP87 级数 + 月球简化理论，太阳 ~1 arcsec，月球 ~10 arcsec。
+_BACKEND_PRECISION = {
+    "de421_bsp": "DE421 数值星历: 行星位置 <0.1 arcsec (亚角秒), 月球 ~0.01 arcsec",
+    "vsop87_astropy": "VSOP87 级数回退: 太阳 ~1 arcsec, 月球 ~10 arcsec",
+    "none": "无可用历表",
+}
 
 # 行星名 → skyfield/astropy 名称映射
 _PLANET_NAMES = {
@@ -82,7 +106,8 @@ class BodyPosition:
     phase_angle_deg: Optional[float] = None   # 相位角（度，太阳-天体-观测者夹角）
     illumination: Optional[float] = None       # 被照亮比例 [0,1]
     angular_diameter_deg: Optional[float] = None  # 角直径（度）
-    backend: str = "unknown"   # "skyfield" / "astropy-builtin"
+    backend: str = "unknown"   # "de421_bsp" / "vsop87_astropy[回退]" / "none"
+    precision: str = ""        # 当前后端精度说明（arcsec）
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -97,6 +122,7 @@ class BodyPosition:
             "illumination": round(self.illumination, 4) if self.illumination is not None else None,
             "angular_diameter_deg": round(self.angular_diameter_deg, 4) if self.angular_diameter_deg is not None else None,
             "backend": self.backend,
+            "precision": self.precision,
         }
 
 
@@ -117,49 +143,152 @@ class GroundStation:
         )
 
 
+# ── de421.bsp 下载与加载 ──────────────────────────────
+
+def _file_valid(path: str) -> bool:
+    """检查本地缓存 .bsp 是否存在且大小达标（> 10MB）。"""
+    try:
+        return os.path.isfile(path) and os.path.getsize(path) >= DE421_MIN_BYTES
+    except OSError:
+        return False
+
+
+def download_de421(timeout: int = 60) -> Optional[str]:
+    """下载（或复用本地缓存）de421.bsp，返回本地路径；失败返回 None，不抛异常。
+
+    - 若 ``~/.mbdsdr/ephemeris/de421.bsp`` 已存在且 > 10MB，直接返回路径（不重复下载）。
+    - 否则下载到同目录的 ``.part`` 临时文件，成功后原子重命名为 ``de421.bsp``。
+    - 主地址失败自动尝试镜像；任意异常都会清理临时文件并返回 None。
+    - ``timeout`` 为单条连接超时（秒），默认 60s。
+    """
+    os.makedirs(EPHEMERIS_DIR, exist_ok=True)
+    target = os.path.join(EPHEMERIS_DIR, DE421_FILENAME)
+
+    # 缓存命中：直接返回
+    if _file_valid(target):
+        return target
+
+    tmp = target + ".part"
+    headers = {"User-Agent": "mbdsdr-ephemeris/1.0 (+https://github.com)"}
+    for url in (DE421_URL, DE421_URL_MIRROR):
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as resp, open(tmp, "wb") as f:
+                shutil.copyfileobj(resp, f, length=1024 * 256)
+            # 下载完整性校验
+            if not _file_valid(tmp):
+                raise IOError(
+                    f"下载文件过小: {os.path.getsize(tmp) if os.path.exists(tmp) else 0} bytes"
+                )
+            os.replace(tmp, target)  # 原子重命名
+            return target
+        except Exception:
+            # 清理临时文件，继续尝试下一个地址
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+            continue
+    return None
+
+
+def load_de421_bsp(path: str) -> Optional["_EphemerisHandle"]:
+    """加载 .bsp 星历，返回统一句柄；失败返回 None。
+
+    优先用 skyfield（完整视位置/光行差/章动处理）；skyfield 不可用时
+    退到 jplephem 直接读 SPK（仅 ICRS 地心矢量，精度仍为亚角秒，但
+    不做大气/光行差修正）。
+    """
+    handle = _EphemerisHandle()
+    try:
+        from skyfield.api import Loader
+        loader = Loader(os.path.dirname(path) or EPHEMERIS_DIR)
+        eph = loader(os.path.basename(path))
+        ts = loader.timescale()
+        handle.engine = "skyfield"
+        handle.ts = ts
+        handle.eph = eph
+        for key in ("sun", "moon", "mercury", "venus", "mars",
+                    "jupiter", "saturn", "earth"):
+            try:
+                handle.planets[key] = eph[key]
+            except Exception:
+                pass
+        return handle
+    except Exception:
+        pass
+
+    # fallback: jplephem 直接加载
+    try:
+        from jplephem.spk import SPK
+        handle.engine = "jplephem"
+        handle.spk = SPK.open(path)
+        return handle
+    except Exception:
+        return None
+
+
+# NAIF 整数天体 ID（jplephem 直接读 SPK 时使用）
+_JPLEPHEM_IDS = {
+    "sun": 10, "mercury": 1, "venus": 2, "earth": 399,
+    "mars": 4, "jupiter": 5, "saturn": 6, "uranus": 7, "neptune": 8,
+    "moon": 301,
+}
+
+
 # ── 后端懒加载 ─────────────────────────────────────────
 
-class _EphemerisBackend:
-    """统一的历表后端封装。优先 skyfield，fallback astropy builtin。"""
+@dataclass
+class _EphemerisHandle:
+    """一次成功加载后的星历句柄（引擎无关）。"""
+    engine: Optional[str] = None     # "skyfield" | "jplephem"
+    ts: Any = None                   # skyfield timescale
+    eph: Any = None                  # skyfield ephemeris
+    planets: Dict[str, Any] = field(default_factory=dict)
+    spk: Any = None                  # jplephem SPK
 
-    def __init__(self) -> None:
-        self.kind: str = "none"   # "skyfield" | "astropy-builtin" | "none"
-        self._sf_ts = None        # skyfield timescale
-        self._sf_eph = None       # skyfield ephemeris
-        self._sf_planets: Dict[str, Any] = {}
-        self._astropy = None     # astropy 模块引用
+
+class _EphemerisBackend:
+    """统一的历表后端封装。
+
+    启动流程（不阻塞）：
+      1. 若本地 ``~/.mbdsdr/ephemeris/de421.bsp`` 已存在且完整，立即加载为高精度后端；
+      2. 否则先用 astropy builtin（VSOP87 级数）初始化可用后端，同时在 daemon 线程
+         后台下载 de421.bsp；下载完成后通过 :meth:`_hot_swap_to_bsp` 热切换到高精度。
+
+    后端名 :pyattr:`backend_name`：
+      - ``de421_bsp``            : JPL DE421 数值星历（亚角秒精度）
+      - ``vsop87_astropy[回退]`` : VSOP87 级数回退（太阳 ~1'', 月球 ~10''）
+      - ``none``                  : 无可用历表
+    """
+
+    def __init__(self, auto_download: bool = True) -> None:
+        self.kind: str = "none"          # "de421_bsp" | "vsop87_astropy" | "none"
+        self._engine: Optional[str] = None
+        self._handle: Optional[_EphemerisHandle] = None
+        self._astropy = None             # astropy 模块引用
+        self._lock = threading.RLock()
+        self._download_thread: Optional[threading.Thread] = None
         self._init()
+        if auto_download:
+            self._maybe_start_background_download()
+
+    # -- 初始化 ----------------------------------------------------
 
     def _init(self) -> None:
-        # 1) 尝试 skyfield + 本地已有的 .bsp 星历（不自动下载，避免网络挂起）
-        try:
-            import os
-            from skyfield.api import Loader
-            cache_dir = os.path.expanduser("~/.cache/skyfield")
-            # 只在已有 .bsp 文件时才用 skyfield，避免 Loader 尝试网络下载挂起
-            bsp_files = []
-            if os.path.isdir(cache_dir):
-                bsp_files = [f for f in os.listdir(cache_dir) if f.endswith(".bsp")]
-            if bsp_files:
-                loader = Loader(cache_dir)
-                # 优先 de421，否则取第一个
-                bsp_name = "de421.bsp" if "de421.bsp" in bsp_files else bsp_files[0]
-                eph = loader(bsp_name)
-                ts = loader.timescale()
-                self._sf_ts = ts
-                self._sf_eph = eph
-                for key in ("sun", "moon", "mercury", "venus", "mars",
-                            "jupiter", "saturn", "earth"):
-                    try:
-                        self._sf_planets[key] = eph[key]
-                    except Exception:
-                        pass
-                self.kind = "skyfield"
+        # 1) 本地已有完整 de421.bsp → 直接加载高精度
+        if _file_valid(DE421_PATH):
+            handle = load_de421_bsp(DE421_PATH)
+            if handle is not None:
+                self._apply_handle(handle)
                 return
-        except Exception:
-            pass
-
         # 2) fallback: astropy builtin（VSOP87 级数，离线可用）
+        self._init_astropy()
+
+    def _init_astropy(self) -> None:
         try:
             import astropy
             import astropy.coordinates
@@ -170,18 +299,93 @@ class _EphemerisBackend:
                 "units": astropy.units,
                 "Time": AstropyTime,
             }
-            # 验证 builtin 可用
             with astropy.coordinates.solar_system_ephemeris.set("builtin"):
                 t = AstropyTime("2025-01-01T00:00:00")
                 astropy.coordinates.get_body("sun", t)
-            self.kind = "astropy-builtin"
-            return
+            self.kind = "vsop87_astropy"
         except Exception:
             self.kind = "none"
+            self._astropy = None
+
+    def _apply_handle(self, handle: _EphemerisHandle) -> None:
+        """原子地切换到 .bsp 句柄（持锁）。"""
+        with self._lock:
+            self._handle = handle
+            self._engine = handle.engine
+            # 兼容旧引用，供 _position_skyfield 使用
+            self._sf_ts = handle.ts
+            self._sf_eph = handle.eph
+            self._sf_planets = handle.planets
+            self.kind = "de421_bsp"
+
+    # -- 后台下载与热切换 ------------------------------------------
+
+    def _maybe_start_background_download(self) -> None:
+        """若本地无 de421.bsp，启动 daemon 线程后台下载（不阻塞）。"""
+        with self._lock:
+            if self.kind == "de421_bsp":
+                return  # 已有高精度后端，无需下载
+            if self._download_thread is not None and self._download_thread.is_alive():
+                return
+            th = threading.Thread(
+                target=self._download_worker,
+                name="de421-download",
+                daemon=True,   # 程序退出时不阻塞、不报错
+            )
+            self._download_thread = th
+        th.start()
+
+    def _download_worker(self) -> None:
+        try:
+            path = download_de421()
+        except Exception:
+            path = None
+        if not path:
+            return  # 下载失败：保持当前回退后端，不抛异常
+        try:
+            handle = load_de421_bsp(path)
+        except Exception:
+            handle = None
+        if handle is not None:
+            self._hot_swap_to_bsp(handle)
+
+    def _hot_swap_to_bsp(self, handle: Optional[_EphemerisHandle] = None) -> None:
+        """后台下载完成后调用，把后端从回退热切换到 de421.bsp。
+
+        不传 handle 时会从 :data:`DE421_PATH` 重新加载。
+        """
+        if handle is None:
+            if not _file_valid(DE421_PATH):
+                return
+            handle = load_de421_bsp(DE421_PATH)
+        if handle is not None:
+            self._apply_handle(handle)
+
+    # -- 对外属性 --------------------------------------------------
 
     @property
     def available(self) -> bool:
+        """当前是否有高精度（或回退）历表可用。"""
         return self.kind != "none"
+
+    @property
+    def backend_name(self) -> str:
+        """当前后端名：de421_bsp / vsop87_astropy[回退] / none。"""
+        with self._lock:
+            if self.kind == "de421_bsp":
+                return "de421_bsp"
+            if self.kind == "vsop87_astropy":
+                return "vsop87_astropy[回退]"
+            return "none"
+
+    @property
+    def precision_note(self) -> str:
+        return _BACKEND_PRECISION.get(self.kind, _BACKEND_PRECISION["none"])
+
+    @property
+    def download_in_progress(self) -> bool:
+        t = self._download_thread
+        return t is not None and t.is_alive()
 
 
 _backend: Optional[_EphemerisBackend] = None
@@ -267,7 +471,7 @@ def _normalize_station(station: Any) -> GroundStation:
 def _position_skyfield(body_key: str, t_unix: float,
                        station: GroundStation) -> Optional[BodyPosition]:
     be = _get_backend()
-    if be.kind != "skyfield":
+    if be._engine != "skyfield":
         return None
     from skyfield.api import Topos
 
@@ -310,7 +514,7 @@ def _position_skyfield(body_key: str, t_unix: float,
         alt_deg=alt_deg,
         distance_au=distance_au,
         distance_km=distance_km,
-        backend="skyfield",
+        backend="de421_bsp",
     )
 
 
@@ -351,12 +555,126 @@ def _moon_phase_skyfield(t_unix: float, station: GroundStation,
     return phase_angle, illumination
 
 
+# ── jplephem 后端实现（skyfield 不可用时的 .bsp 直接读取）───
+
+def _unix_to_jd(t_unix: float) -> float:
+    """unix 秒 → 儒略日（UT）。"""
+    return 2440587.5 + t_unix / 86400.0
+
+
+def _gmst_deg(jd_ut: float) -> float:
+    """近似格林尼治平恒星时（度，IAU 1982 简化式）。"""
+    t = (jd_ut - 2451545.0) / 36525.0
+    gmst = (280.46061837
+            + 360.98564736629 * (jd_ut - 2451545.0)
+            + 0.000387933 * t * t
+            - t * t * t / 38710000.0)
+    return gmst % 360.0
+
+
+def _icrs_xyz_to_radec_deg(x_km: float, y_km: float, z_km: float
+                           ) -> Tuple[float, float, float]:
+    """ICRS 直角坐标（km）→ (ra_deg, dec_deg, distance_au)。"""
+    r = math.sqrt(x_km * x_km + y_km * y_km + z_km * z_km)
+    ra = math.degrees(math.atan2(y_km, x_km)) % 360.0
+    dec = math.degrees(math.asin(max(-1.0, min(1.0, z_km / r))))
+    return ra, dec, r / AU_KM
+
+
+def _radec_to_altaz(ra_deg: float, dec_deg: float, jd_ut: float,
+                    lon_deg: float, lat_deg: float) -> Tuple[float, float]:
+    """赤道坐标 → 地平坐标（地心近似，忽略周日视差，够用作回退）。"""
+    lst = (_gmst_deg(jd_ut) + lon_deg) % 360.0
+    ha = math.radians(lst - ra_deg)
+    dec = math.radians(dec_deg)
+    lat = math.radians(lat_deg)
+    sin_alt = (math.sin(dec) * math.sin(lat)
+               + math.cos(dec) * math.cos(lat) * math.cos(ha))
+    alt = math.degrees(math.asin(max(-1.0, min(1.0, sin_alt))))
+    # az: 0=北，顺时针
+    y = -math.sin(ha) * math.cos(dec)
+    x = (math.sin(dec) * math.cos(lat)
+         - math.cos(dec) * math.sin(lat) * math.cos(ha))
+    az = math.degrees(math.atan2(y, x)) % 360.0
+    return alt, az
+
+
+def _jplephem_geo_vector(spk: Any, body_id: int, jd: float) -> Tuple[float, float, float]:
+    """返回 body 相对地心的 ICRS 矢量（km）。自动处理 EMB/地球链。"""
+    earth_id = 399
+    # 优先直接段
+    def _try(a: int, b: int):
+        try:
+            return spk[a, b].compute(jd)
+        except Exception:
+            return None
+
+    if body_id == earth_id:
+        return (0.0, 0.0, 0.0)
+    v = _try(body_id, earth_id)
+    if v is not None:
+        return tuple(float(c) for c in v)  # type: ignore[return-value]
+    # 链：body wrt SSB - earth wrt SSB
+    body_ssb = _try(body_id, 0)
+    earth_ssb = _try(earth_id, 0)
+    if body_ssb is None:
+        # 经 EMB(3) 链
+        emb = _try(3, 0)
+        e_emb = _try(earth_id, 3)
+        b_emb = _try(body_id, 3)
+        if emb is None or b_emb is None:
+            raise ValueError(f"无法定位天体 {body_id}")
+        earth_ssb = tuple(a + b for a, b in zip(emb, e_emb)) if e_emb is not None else emb
+        body_ssb = tuple(a + b for a, b in zip(emb, b_emb))
+    return tuple(float(b - e) for b, e in zip(body_ssb, earth_ssb))  # type: ignore[return-value]
+
+
+def _position_jplephem(body_key: str, t_unix: float,
+                        station: GroundStation) -> Optional[BodyPosition]:
+    """jplephem 引擎：ICRS 地心矢量 → RA/Dec/距离 → 近似 Alt/Az。"""
+    be = _get_backend()
+    if be._engine != "jplephem":
+        return None
+    spk = be._handle.spk
+    body_id = _JPLEPHEM_IDS.get(body_key)
+    if body_id is None:
+        return None
+    jd = _unix_to_jd(t_unix)
+    try:
+        v = _jplephem_geo_vector(spk, body_id, jd)
+    except Exception:
+        return None
+    ra, dec, dist_au = _icrs_xyz_to_radec_deg(*v)
+    alt, az = _radec_to_altaz(ra, dec, jd, station.longitude_deg, station.latitude_deg)
+    return BodyPosition(
+        name=body_key,
+        ra_deg=ra, dec_deg=dec, az_deg=az, alt_deg=alt,
+        distance_au=dist_au, distance_km=dist_au * AU_KM,
+        backend="de421_bsp",
+    )
+
+
+def _moon_phase_jplephem(t_unix: float, station: GroundStation,
+                         moon_pos: BodyPosition) -> Tuple[float, float]:
+    """jplephem 引擎月相：用真实地心太阳/月球矢量算相位角。"""
+    be = _get_backend()
+    spk = be._handle.spk
+    jd = _unix_to_jd(t_unix)
+    sun_v = _jplephem_geo_vector(spk, 10, jd)
+    moon_v = _jplephem_geo_vector(spk, 301, jd)
+    dot = sum(a * b for a, b in zip(sun_v, moon_v))
+    mn = math.sqrt(sum(a * a for a in moon_v))
+    sn = math.sqrt(sum(a * a for a in sun_v))
+    cos_phase = max(-1.0, min(1.0, dot / (mn * sn)))
+    return math.degrees(math.acos(cos_phase)), 0.5 * (1.0 + cos_phase)
+
+
 # ── astropy builtin 后端实现 ───────────────────────────
 
 def _position_astropy(body_key: str, t_unix: float,
                       station: GroundStation) -> Optional[BodyPosition]:
     be = _get_backend()
-    if be.kind != "astropy-builtin":
+    if be.kind != "vsop87_astropy":
         return None
     ap = be._astropy
     coord = ap["coord"]
@@ -389,7 +707,7 @@ def _position_astropy(body_key: str, t_unix: float,
         alt_deg=alt_deg,
         distance_au=distance_au,
         distance_km=distance_km,
-        backend="astropy-builtin",
+        backend="vsop87_astropy[回退]",
     )
 
 
@@ -432,6 +750,35 @@ def _moon_phase_astropy(t_unix: float, station: GroundStation,
 
 # ── 公共 API ──────────────────────────────────────────
 
+def _compute_position(body_key: str, t_unix: float,
+                      station: GroundStation) -> Optional[BodyPosition]:
+    """按当前引擎派发位置计算（skyfield / jplephem / astropy）。"""
+    be = _get_backend()
+    if be._engine == "skyfield":
+        return _position_skyfield(body_key, t_unix, station)
+    if be._engine == "jplephem":
+        return _position_jplephem(body_key, t_unix, station)
+    return _position_astropy(body_key, t_unix, station)
+
+
+def _compute_moon_phase(t_unix: float, station: GroundStation,
+                         moon_pos: BodyPosition) -> Tuple[float, float]:
+    be = _get_backend()
+    if be._engine == "skyfield":
+        return _moon_phase_skyfield(t_unix, station, moon_pos)
+    if be._engine == "jplephem":
+        return _moon_phase_jplephem(t_unix, station, moon_pos)
+    return _moon_phase_astropy(t_unix, station, moon_pos)
+
+
+def _stamp_backend(pos: BodyPosition) -> BodyPosition:
+    """在结果上标注当前后端名与精度（arcsec）。"""
+    be = _get_backend()
+    pos.backend = be.backend_name
+    pos.precision = be.precision_note
+    return pos
+
+
 def get_sun_position(time: Any, ground_station: Any) -> Optional[BodyPosition]:
     """
     获取太阳视位置。
@@ -453,11 +800,7 @@ def get_sun_position(time: Any, ground_station: Any) -> Optional[BodyPosition]:
     t_unix, _ = _normalize_time(time)
     station = _normalize_station(ground_station)
 
-    if be.kind == "skyfield":
-        pos = _position_skyfield("sun", t_unix, station)
-    else:
-        pos = _position_astropy("sun", t_unix, station)
-
+    pos = _compute_position("sun", t_unix, station)
     if pos is None:
         return None
 
@@ -466,7 +809,7 @@ def get_sun_position(time: Any, ground_station: Any) -> Optional[BodyPosition]:
         pos.angular_diameter_deg = 2.0 * _SUN_ANGULAR_RADIUS_AT_1AU_DEG / pos.distance_au
     pos.phase_angle_deg = 0.0  # 太阳被照亮 100%
     pos.illumination = 1.0
-    return pos
+    return _stamp_backend(pos)
 
 
 def get_moon_position(time: Any, ground_station: Any) -> Optional[BodyPosition]:
@@ -486,16 +829,10 @@ def get_moon_position(time: Any, ground_station: Any) -> Optional[BodyPosition]:
     t_unix, _ = _normalize_time(time)
     station = _normalize_station(ground_station)
 
-    if be.kind == "skyfield":
-        pos = _position_skyfield("moon", t_unix, station)
-        if pos is None:
-            return None
-        phase_angle, illumination = _moon_phase_skyfield(t_unix, station, pos)
-    else:
-        pos = _position_astropy("moon", t_unix, station)
-        if pos is None:
-            return None
-        phase_angle, illumination = _moon_phase_astropy(t_unix, station, pos)
+    pos = _compute_position("moon", t_unix, station)
+    if pos is None:
+        return None
+    phase_angle, illumination = _compute_moon_phase(t_unix, station, pos)
 
     pos.phase_angle_deg = phase_angle
     pos.illumination = illumination
@@ -504,7 +841,7 @@ def get_moon_position(time: Any, ground_station: Any) -> Optional[BodyPosition]:
     if pos.distance_km and pos.distance_km > 0:
         pos.angular_diameter_deg = 2.0 * _MOON_ANGULAR_RADIUS_MEAN_DEG * (384400.0 / pos.distance_km)
 
-    return pos
+    return _stamp_backend(pos)
 
 
 def get_planet_position(planet_name: str, time: Any,
@@ -534,11 +871,7 @@ def get_planet_position(planet_name: str, time: Any,
     t_unix, _ = _normalize_time(time)
     station = _normalize_station(ground_station)
 
-    if be.kind == "skyfield":
-        pos = _position_skyfield(name, t_unix, station)
-    else:
-        pos = _position_astropy(name, t_unix, station)
-
+    pos = _compute_position(name, t_unix, station)
     if pos is None:
         return None
 
@@ -571,16 +904,20 @@ def get_planet_position(planet_name: str, time: Any,
     except Exception:
         pass
 
-    return pos
+    return _stamp_backend(pos)
 
 
 def get_backend_info() -> Dict[str, Any]:
     """返回当前历表后端信息（调试用）。"""
     be = _get_backend()
     return {
-        "backend": be.kind,
+        "backend": be.backend_name,
+        "kind": be.kind,
         "available": be.available,
-        "planets_loaded": list(be._sf_planets.keys()) if be.kind == "skyfield" else [],
+        "precision": be.precision_note,
+        "download_in_progress": be.download_in_progress,
+        "ephemeris_path": DE421_PATH if _file_valid(DE421_PATH) else None,
+        "planets_loaded": list(be._sf_planets.keys()) if be._engine == "skyfield" else [],
     }
 
 
