@@ -40,6 +40,11 @@ from typing import List, Dict, Any, Optional, Tuple
 RTL433_DEFAULT_SAMPLE_RATE = 250_000
 # 来源: repos/rtl_433/include/rtl_433.h:14
 RTL433_DEFAULT_FREQUENCY_HZ = 433_920_000
+# 来源: repos/rtl_433/src/rtl_433.c:1318-1319 —— None 表示 AGC（自动增益，不手动设）
+RTL433_DEFAULT_GAIN_DB = None
+# 来源: repos/rtl_433/src/r_api.c:153-155 —— 最小 SNR / 电平门限
+RTL433_MIN_SNR_DB = 9.0
+RTL433_MIN_LEVEL_DB = -12.1442
 
 # OOK 包络检测状态机常量（来源: repos/rtl_433/src/pulse_detect.c:24-27）
 OOK_EST_HIGH_RATIO = 64     # 高电平估计的滑动速度

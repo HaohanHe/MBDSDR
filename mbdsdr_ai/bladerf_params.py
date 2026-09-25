@@ -189,7 +189,7 @@ class BladeRFParams:
     # ── 采样率 ──
     min_sr_hz: int = field(default=BLADERF2_MIN_SAMPLERATE_HZ)
     max_sr_hz: int = field(default=BLADERF2_MAX_SAMPLERATE_HZ)
-    default_sr_hz: int = field(default=2_000_000)  # 常用起步值（example_rx_meta/include/include.h:36）
+    default_sr_hz: int = field(default=5_000_000)  # 来源: gqrx ioconfig.cpp:279-302 BladeRF 5M 甜点档
 
     # ── 带宽 ──
     min_bw_hz: int = field(default=BLADERF2_MIN_BANDWIDTH_HZ)

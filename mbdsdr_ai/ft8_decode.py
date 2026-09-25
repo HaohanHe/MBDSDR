@@ -81,19 +81,37 @@ def reorder_to_ldpc(llr_cw: Sequence[float]) -> List[float]:
 
 def decode_ft8_payload(tone_energies: Sequence[Sequence[float]],
                        max_iter: int = 30,
-                       full_tones: Optional[Sequence[int]] = None) -> dict:
+                       full_tones: Optional[Sequence[int]] = None,
+                       snr_db: Optional[float] = None) -> dict:
     """完整软解码：58 符号 8 路能量 → 91 信息位。
 
     返回 {info_bits(91), crc_bits(14), data_bits(77), iters, converged,
-          costas_score}。
+          costas_score, rejected, reject_reason}。
     CRC14 校验是否通过由调用方用 chkcrc 逻辑判定（本函数给出原始位）。
     full_tones 为 79 符号硬判决音调序列（可选）；提供时据此计算 costas_score，
     否则 costas_score 置 0.0（无 Costas 同步信息）。
+    snr_db 为该候选的估计 SNR（dB，可选）；提供时启用 wsjtx ft8b.f90:483-486
+    的"假解码"联合拒绝门：同步命中数 nsync<=10 且 SNR<-25dB 时标记 rejected。
+
+    wsjtx 另有 nharderrors>36 拒绝（ft8b.f90:444）；该判据需要与已知正确码字
+    的汉明距离，本解码链无参考码字，故不启用（对应需求"如果有"）。
     """
     llr_cw = soft_tones_to_llr(tone_energies)
     llr_ldpc = reorder_to_ldpc(llr_cw)
     cw, iters = ft8_ldpc.ldpc_bp_decode(llr_ldpc, max_iter=max_iter)
     info = cw[:91]
+    costas = costas_correlation(full_tones) if full_tones is not None else 0.0
+
+    # 联合拒绝门（wsjtx ft8b.f90:483-486: nsync.le.10 .and. xsnr.lt.-25 -> bail）
+    # costas_score 为 21 个同步符号的命中率（0~1），还原 wsjtx 的 nsync 计数值。
+    rejected = False
+    reject_reason = ""
+    nsync = costas * 21.0
+    if (snr_db is not None and full_tones is not None
+            and nsync <= 10.0 and snr_db < -25.0):
+        rejected = True
+        reject_reason = "low_sync_low_snr"
+
     return {
         "info_bits": info,           # 77 数据 + 14 CRC
         "data_bits": info[:77],
@@ -101,7 +119,9 @@ def decode_ft8_payload(tone_energies: Sequence[Sequence[float]],
         "codeword": cw,
         "iters": iters,
         "crc_ok": check_crc14(info),
-        "costas_score": costas_correlation(full_tones) if full_tones is not None else 0.0,
+        "costas_score": costas,
+        "rejected": rejected,
+        "reject_reason": reject_reason,
     }
 
 

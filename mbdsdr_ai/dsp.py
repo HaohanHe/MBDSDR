@@ -1042,3 +1042,168 @@ class VFO:
                     x = np.convolve(x, self._taps, mode='same')
 
         return x.astype(in_dtype)
+
+
+# ═══════════════════════════════════════════════════════
+# 7. SDR++ 风格 Stream 路由与 DSP 链
+# ═══════════════════════════════════════════════════════
+
+from .dsp_stream import PingPongStream
+
+
+class StreamSplitter:
+    """一进 N 出流分配器。
+
+    对照 sdrpp/core/src/dsp/routing/splitter.h:46-61。
+
+    从 input_stream 读一帧，对每个绑定的下游 output_stream 拷贝数据并 swap，
+    然后 flush 输入流。解决"录音和 AI 扫频抢数据"的问题
+    （sdr_backend.py:315 vs sdr_tools.py:3283）。
+
+    用法：
+        splitter = StreamSplitter(input_stream)
+        splitter.bind(recorder_stream)
+        splitter.bind(spectrum_stream)
+        splitter.start()
+    """
+
+    def __init__(self, input_stream: PingPongStream):
+        self._input = input_stream
+        self._outputs: list = []
+        self._lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
+        self._running = False
+
+    def bind(self, output_stream: PingPongStream) -> None:
+        """注册一个下游输出流。
+
+        对照 splitter.h:13-27 bindStream()。
+        """
+        with self._lock:
+            if output_stream not in self._outputs:
+                self._outputs.append(output_stream)
+
+    def unbind(self, output_stream: PingPongStream) -> None:
+        """移除一个下游输出流。
+
+        对照 splitter.h:29-44 unbindStream()。
+        """
+        with self._lock:
+            if output_stream in self._outputs:
+                self._outputs.remove(output_stream)
+
+    def run_once(self) -> int:
+        """从输入读一帧，分发给所有下游。
+
+        对照 splitter.h:46-61 run()。
+
+        Returns:
+            本次分发的样本数；-1 表示输入流已停止。
+        """
+        buf, n = self._input.read()
+        if n < 0:
+            return -1
+
+        # 拷贝给每个下游并 swap
+        with self._lock:
+            outputs_snapshot = list(self._outputs)
+
+        for out_stream in outputs_snapshot:
+            out_stream.write_buf[:n] = buf[:n]
+            if not out_stream.swap(n):
+                # 下游停止，flush 输入流并退出
+                self._input.flush()
+                return -1
+
+        # 读完后 flush 输入，通知生产者可以写下一帧
+        self._input.flush()
+        return n
+
+    def start(self) -> None:
+        """启动后台分发线程。"""
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        """停止分发线程。"""
+        self._running = False
+        self._input.stop_reader()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+
+    def _run_loop(self):
+        while self._running:
+            n = self.run_once()
+            if n < 0:
+                break
+
+
+class DSPChain:
+    """轻量 DSP 处理链：按启用顺序串联处理块。
+
+    对照 sdrpp/core/src/dsp/chain.h:62-90 enableBlock() / disableBlock()。
+
+    SDR++ 的 chain 通过重连上下游 stream 指针实现块的动态启停，
+    不重启线程。这里用 Python 函数链的轻量方式实现：
+    每个 block 是一个有 .process(x) -> ndarray 的对象，
+    set_block_enabled 控制是否跳过该块。
+
+    先用在 front_end() 的 DCBlocker / IQCalibrator / decimate 可独立开关。
+    """
+
+    def __init__(self):
+        self._blocks: list = []       # [(name, block, enabled)]
+        self._block_map: dict = {}    # name -> index
+
+    def add_block(self, name: str, block, enabled: bool = True) -> None:
+        """添加一个处理块。
+
+        Args:
+            name: 块名称（用于开关控制）。
+            block: 必须有 process(x: ndarray) -> ndarray 方法。
+            enabled: 是否默认启用。
+        """
+        if name in self._block_map:
+            raise ValueError(f"Block '{name}' already exists")
+        idx = len(self._blocks)
+        self._blocks.append((name, block, enabled))
+        self._block_map[name] = idx
+
+    def set_block_enabled(self, name: str, enabled: bool) -> None:
+        """启用或禁用某个块。
+
+        对照 chain.h:121-128 setBlockEnabled()。
+        禁用的块在 process() 中被跳过，数据直通。
+        """
+        if name not in self._block_map:
+            raise ValueError(f"Block '{name}' not found")
+        idx = self._block_map[name]
+        _, block, _ = self._blocks[idx]
+        self._blocks[idx] = (name, block, enabled)
+
+    def process(self, data: np.ndarray) -> np.ndarray:
+        """按启用顺序串联处理所有块。
+
+        对照 chain.h 的处理流：依次经过每个启用的 block.process()。
+        禁用的块被跳过，数据直通（等价于 SDR++ 的
+        after->setInput(before ? &before->out : _in)）。
+        """
+        result = data
+        for name, block, enabled in self._blocks:
+            if enabled and hasattr(block, 'process'):
+                result = block.process(result)
+        return result
+
+    def reset(self) -> None:
+        """重置所有块的内部状态（如 DCBlocker 的历史值）。"""
+        for name, block, enabled in self._blocks:
+            if hasattr(block, 'reset'):
+                block.reset()
+
+
+# 需要 threading 导入（StreamSplitter 用到）
+import threading  # noqa: E402  (文件末尾追加，避免顶部循环导入)
