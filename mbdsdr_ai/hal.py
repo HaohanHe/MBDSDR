@@ -19,7 +19,7 @@ MBDSDR AI - 硬件抽象层（HAL）
 设计原则：
 - 所有硬件都是可选后端，通过 SoapySDR device string 统一访问
 - RX/TX 能力由设备能力标志决定
-- 无硬件时自动降级为模拟后端（mock）
+- 无硬件时显式未连接，绝不降级模拟
 - 嵌入式部署（树莓派/Jetson/ARM）自动检测并优化
 """
 
@@ -247,7 +247,7 @@ class SoapySDRBackend(SDRBackendBase):
             logger.info(f"已连接: {args_str}")
             return True
         except ImportError:
-            logger.warning("SoapySDR 未安装，使用模拟模式")
+            logger.warning("SoapySDR 未安装，无法连接真实设备")
             return False
         except Exception as e:
             logger.error(f"连接失败: {e}")
@@ -400,68 +400,6 @@ class SoapySDRBackend(SDRBackendBase):
             )
         except Exception:
             return DeviceInfo(name="未知", driver="soapy")
-
-
-class MockSDRBackend(SDRBackendBase):
-    """
-    模拟 SDR 后端（无硬件时使用）。
-    生成模拟 IQ 数据，支持基本 RX/TX 模拟。
-    """
-
-    def list_devices(self) -> List[DeviceInfo]:
-        return [DeviceInfo(
-            name="MBDSDR 模拟后端",
-            driver="mock",
-            rx_range=(100e3, 2e9),
-            tx_range=(100e3, 2e9),
-            sample_rates=[2e6, 4e6],
-            capabilities=["rx", "tx", "hf", "vhf", "uhf", "embedded"],
-            is_available=True,
-            description="无硬件模拟后端，用于开发测试",
-        )]
-
-    def connect(self, device_str: str = "") -> bool:
-        self._running = True
-        return True
-
-    def disconnect(self):
-        self._running = False
-
-    def set_frequency(self, freq_hz: float):
-        self._center_freq = freq_hz
-
-    def set_sample_rate(self, rate_hz: float):
-        self._sample_rate = rate_hz
-
-    def set_gain(self, gain_db: float, stage: str = ""):
-        self._gain = gain_db
-
-    def read_rx(self, num_samples: int) -> np.ndarray:
-        """生成模拟IQ数据（噪声+可选信号）。"""
-        t = np.arange(num_samples) / self._sample_rate
-        noise = (np.random.randn(num_samples) + 1j * np.random.randn(num_samples)) / np.sqrt(2) * 0.01
-        # 在中心频点附近加一个弱信号
-        signal = 0.005 * np.exp(2j * np.pi * 1000 * t)
-        return (noise + signal).astype(np.complex64)
-
-    def write_tx(self, iq_samples: np.ndarray) -> bool:
-        """模拟TX（实际不发射，只记录）。"""
-        logger.info(f"模拟TX: 发射 {len(iq_samples)} 个采样, 频率 {self._center_freq/1e6:.1f} MHz")
-        return True
-
-    def supports_tx(self) -> bool:
-        return True
-
-    def get_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            name="MBDSDR 模拟后端",
-            driver="mock",
-            rx_range=(100e3, 2e9),
-            tx_range=(100e3, 2e9),
-            capabilities=["rx", "tx", "mock"],
-            is_available=True,
-            description="无硬件模拟后端",
-        )
 
 
 class InstrumentBackend:
@@ -661,7 +599,6 @@ class HardwareManager:
         if getattr(self, "_initialized", False):
             return
         self._soapy_backend = None
-        self._mock_backend = None
         self._instrument = None
         self._active_backend = None
         self._platform = detect_embedded_platform()
@@ -695,19 +632,6 @@ class HardwareManager:
         except Exception as e:
             all_devices.append({"type": "sdr", "name": f"SoapySDR错误: {e}", "available": False})
 
-        # 模拟后端
-        mock = MockSDRBackend()
-        for d in mock.list_devices():
-            all_devices.append({
-                "type": "sdr",
-                "name": d.name,
-                "driver": d.driver,
-                "rx_range": f"{d.rx_range[0]/1e6:.1f}-{d.rx_range[1]/1e6:.1f} MHz",
-                "tx": "TX" if "tx" in d.capabilities else "RX only",
-                "available": True,
-                "description": d.description,
-            })
-
         # 仪器
         try:
             inst = InstrumentBackend()
@@ -727,13 +651,12 @@ class HardwareManager:
         return all_devices
 
     def connect_sdr(self, device_str: str = "") -> Dict[str, Any]:
-        """连接 SDR 设备。"""
-        if not device_str or device_str == "mock":
-            self._active_backend = MockSDRBackend()
-            self._active_backend.connect()
-            return {"success": True, "device": "模拟后端", "tx": True}
+        """连接 SDR 设备。
 
-        # 尝试 SoapySDR
+        只对接真实 SoapySDR 硬件。device_str 为空时自动枚举第一个真实设备；
+        无设备 / 连接失败一律显式返回 success=False，绝不降级模拟后端。
+        """
+        # 尝试 SoapySDR（device_str 为空时 connect() 内部自动选第一个真实设备）
         self._soapy_backend = SoapySDRBackend()
         if self._soapy_backend.connect(device_str):
             self._active_backend = self._soapy_backend
@@ -743,11 +666,15 @@ class HardwareManager:
                 "tx": self._soapy_backend.supports_tx(),
             }
 
-        # 真硬件连不上：不偷偷切 mock，明确报错，由调用方显式选 mock
+        # 真硬件连不上：明确报错，不偷偷切任何模拟后端
+        if not device_str:
+            return {
+                "success": False,
+                "error": "未找到 SDR 设备",
+            }
         return {
             "success": False,
             "error": f"SoapySDR 连接 {device_str!r} 失败",
-            "fallback_mock_available": True,
         }
 
     def get_active_backend(self) -> Optional[SDRBackendBase]:
