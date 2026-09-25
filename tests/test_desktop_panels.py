@@ -93,8 +93,9 @@ class TestDopplerPanel:
         from doppler_panel import DopplerPanel
         d = DopplerPanel()
         assert d.ekf_radio.isChecked() is True or d.rls_radio.isChecked()
-        assert d.lat_edit.text() == "39.9"
-        assert d.lon_edit.text() == "116.4"
+        # 不再硬编码城市坐标：默认空（"未设置"），由用户配置或GNSS注入
+        assert d.lat_edit.text() == ""
+        assert d.lon_edit.text() == ""
         assert "开始定轨" in d.start_btn.text()
         assert "[模拟]" in d.demo_btn.text()
         # matplotlib 画布存在

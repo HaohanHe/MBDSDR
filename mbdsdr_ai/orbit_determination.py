@@ -815,8 +815,28 @@ def register_tool_registry(registry) -> None:
 
     def _lro_track(args: Dict[str, Any]) -> ToolResult:
         hours = float(args.get("hours", 24.0))
-        rx_lat = float(args.get("rx_lat", 39.9))
-        rx_lon = float(args.get("rx_lon", 116.4))
+        # 地面站坐标：优先用参数，否则从配置读取；都没有则报错
+        cfg_lat = cfg_lon = None
+        cfg_path = os.path.expanduser("~/.mbdsdr/config.json")
+        try:
+            if os.path.exists(cfg_path):
+                import json as _cfg_json
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    _cfg = _cfg_json.load(f)
+                cfg_lat = _cfg.get("ground_station_lat")
+                cfg_lon = _cfg.get("ground_station_lon")
+        except Exception:
+            pass
+        rx_lat = args.get("rx_lat", cfg_lat)
+        rx_lon = args.get("rx_lon", cfg_lon)
+        if rx_lat is None or rx_lon is None:
+            return ToolResult(
+                success=False,
+                content="未配置地面站坐标。请在参数中传入 rx_lat/rx_lon，"
+                        "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。",
+            )
+        rx_lat = float(rx_lat)
+        rx_lon = float(rx_lon)
         n = int(args.get("n", 288))
         import time as _t
         t0 = float(args.get("t_unix", _t.time()))

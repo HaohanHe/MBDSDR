@@ -62,6 +62,31 @@ class MBDSDRAgent:
         print(response["content"])
     """
 
+    @staticmethod
+    def _get_ground_station_latlon() -> tuple:
+        """从 ~/.mbdsdr/config.json 读取地面站坐标 (lat, lon)。
+
+        返回 (lat, lon)；未配置时返回 (None, None)。
+        不内置任何城市坐标，避免地区性硬编码。
+        """
+        cfg_path = os.path.expanduser("~/.mbdsdr/config.json")
+        try:
+            if os.path.exists(cfg_path):
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+            else:
+                return (None, None)
+        except Exception:
+            return (None, None)
+        try:
+            lat = cfg.get("ground_station_lat")
+            lon = cfg.get("ground_station_lon")
+            if lat is not None and lon is not None:
+                return (float(lat), float(lon))
+        except (TypeError, ValueError):
+            pass
+        return (None, None)
+
     def __init__(self, config: AgentConfig = None):
         self.config = config or AgentConfig()
 
@@ -116,7 +141,9 @@ class MBDSDRAgent:
         )
 
         # 6DOF 位姿融合 + AR 投影（白皮书第八章）
-        self.pose_fusion = PoseFusion(mode="fused", declination=-9.0)  # 长春磁偏角约 -9°
+        # declination 为磁偏角（度），随地理位置变化；此处 -9.0 仅为示例默认值，
+        # 实际使用应根据当地磁偏角设置（可从配置或 GPS 计算）。
+        self.pose_fusion = PoseFusion(mode="fused", declination=-9.0)
         self.ar_projector = ARProjector(camera_fov_deg=60.0, screen_aspect=16.0/9.0)
 
         # 工作流录制与复用（白皮书第四章 4.6.4）
@@ -650,7 +677,14 @@ class MBDSDRAgent:
             if not text:
                 return ToolResult(False, "text 不能为空，如 'CQ BI4MIB OM74'")
             from mbdsdr_ai.ft8_encode import encode_ft8_text
-            tones = encode_ft8_text(text)
+            try:
+                tones = encode_ft8_text(text)
+            except Exception as e:  # noqa: BLE001
+                return ToolResult(
+                    False,
+                    f"FT8编码失败: {type(e).__name__}: {e}，请使用标准消息格式如 "
+                    f"'CQ BI4MIB OM74'、'BI4MIB K1ABC 73'、'BI4MIB K1ABC -17'",
+                )
             return ToolResult(True, json.dumps({
                 "tones": tones, "n_tones": len(tones),
                 "note": "79 个 8FSK 音调索引(0-7)；3 个 Costas7 同步块在符号 0-6/36-42/72-78",
@@ -764,7 +798,14 @@ class MBDSDRAgent:
             if not text:
                 return ToolResult(False, "text 不能为空，如 'CQ BI4MIB OM74'")
             from mbdsdr_ai.fst4_encode import encode_fst4_text
-            tones = encode_fst4_text(text)
+            try:
+                tones = encode_fst4_text(text)
+            except Exception:  # noqa: BLE001
+                return ToolResult(
+                    False,
+                    f"FST4编码失败：消息格式不正确，请使用标准格式如 "
+                    f"'CQ BI4MIB OM74'、'BI4MIB K1ABC 73'",
+                )
             return ToolResult(True, json.dumps({
                 "tones": tones, "n_tones": len(tones),
                 "note": "160 个 4FSK 音调索引(0-3)；5 个 8 符号同步块交替 isyncword1/2",
@@ -1026,15 +1067,18 @@ class MBDSDRAgent:
             handler=_decode, category="decode")
 
         def _modulate(args):
-            f = AX25Frame(destination=args.get("destination", "APRS"),
-                          source=args.get("source", "NOCALL"),
-                          control=0x03, pid=0xF0,
-                          info=(args.get("info", "") or "").encode("latin-1"))
-            sr = float(args.get("sample_rate", 48000))
-            audio = AFSKModem(sample_rate=sr).modulate(f)
+            try:
+                f = AX25Frame(destination=args.get("destination", "APRS"),
+                              source=args.get("source", "NOCALL"),
+                              control=0x03, pid=0xF0,
+                              info=(args.get("info", "") or "").encode("latin-1"))
+                sr = float(args.get("sample_rate", 48000))
+                audio = AFSKModem(sample_rate=sr).modulate(f)
+            except Exception:  # noqa: BLE001
+                return ToolResult(False, "AFSK 调制失败：参数格式不正确，请检查 source/destination 呼号格式")
             return ToolResult(True, json.dumps({
                 "sample_rate": sr, "samples": len(audio),
-                "audio": np.round(audio[::max(1, len(audio)//2000)].tolist(), 4),
+                "audio": np.round(audio[::max(1, len(audio)//2000)], 4).tolist(),
             }, ensure_ascii=False))
         self.tool_registry.register(
             name="afsk_modulate",
@@ -1295,8 +1339,18 @@ class MBDSDRAgent:
 
         def _passes(args):
             try:
-                lat = float(args.get("observer_lat", 43.8))
-                lon = float(args.get("observer_lon", 126.5))
+                # 地面站坐标：优先用参数，否则从配置读取；都没有则报错
+                cfg_lat, cfg_lon = MBDSDRAgent._get_ground_station_latlon()
+                lat = args.get("observer_lat", cfg_lat)
+                lon = args.get("observer_lon", cfg_lon)
+                if lat is None or lon is None:
+                    return ToolResult(
+                        False,
+                        "未配置地面站坐标。请在参数中传入 observer_lat/observer_lon，"
+                        "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。",
+                    )
+                lat = float(lat)
+                lon = float(lon)
                 alt = float(args.get("observer_alt", 0) or 0)
                 hours = float(args.get("hours", 24) or 24)
                 min_el = float(args.get("min_elevation", 10) or 10)
@@ -1317,8 +1371,8 @@ class MBDSDRAgent:
             parameters={
                 "type": "object",
                 "properties": {
-                    "observer_lat": {"type": "number", "description": "观察者纬度，默认 43.8"},
-                    "observer_lon": {"type": "number", "description": "观察者经度，默认 126.5"},
+                    "observer_lat": {"type": "number", "description": "观察者纬度（未传则从配置读取）"},
+                    "observer_lon": {"type": "number", "description": "观察者经度（未传则从配置读取）"},
                     "observer_alt": {"type": "number", "description": "海拔 m，默认 0"},
                     "hours": {"type": "number", "description": "预测时长小时，默认 24"},
                     "min_elevation": {"type": "number", "description": "最低仰角度，默认 10"},
@@ -1336,8 +1390,17 @@ class MBDSDRAgent:
         def _point(args):
             try:
                 name = str(args.get("satellite", "NOAA 19"))
-                lat = float(args.get("observer_lat", 43.8))
-                lon = float(args.get("observer_lon", 126.5))
+                cfg_lat, cfg_lon = MBDSDRAgent._get_ground_station_latlon()
+                lat = args.get("observer_lat", cfg_lat)
+                lon = args.get("observer_lon", cfg_lon)
+                if lat is None or lon is None:
+                    return ToolResult(
+                        False,
+                        "未配置地面站坐标。请在参数中传入 observer_lat/observer_lon，"
+                        "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。",
+                    )
+                lat = float(lat)
+                lon = float(lon)
                 s = compute_satellite_state(name, lat, lon)
                 if s is None:
                     return ToolResult(False, f"未知卫星: {name}")
@@ -1412,8 +1475,17 @@ class MBDSDRAgent:
             try:
                 name = str(args.get("satellite", "NOAA 15"))
                 f0 = float(args.get("nominal_freq_hz", 137.62e6))
-                lat = float(args.get("observer_lat", 43.8))
-                lon = float(args.get("observer_lon", 126.5))
+                cfg_lat, cfg_lon = MBDSDRAgent._get_ground_station_latlon()
+                lat = args.get("observer_lat", cfg_lat)
+                lon = args.get("observer_lon", cfg_lon)
+                if lat is None or lon is None:
+                    return ToolResult(
+                        False,
+                        "未配置地面站坐标。请在参数中传入 observer_lat/observer_lon，"
+                        "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。",
+                    )
+                lat = float(lat)
+                lon = float(lon)
                 r = doppler_correction(name, f0, lat, lon)
             except Exception as e:
                 return ToolResult(False, f"多普勒计算失败: {e}")

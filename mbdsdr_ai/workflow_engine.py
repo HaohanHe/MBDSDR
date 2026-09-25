@@ -173,6 +173,34 @@ class WorkflowEngine:
         self._load_presets()
         self._load_user_workflows()
 
+    @staticmethod
+    def _get_ground_station() -> Dict[str, Any]:
+        """从 ~/.mbdsdr/config.json 读取地面站坐标。
+
+        返回 {"lat": float|None, "lon": float|None, "configured": bool}。
+        未配置时 lat/lon 为 None，调用方应提示用户配置。
+        """
+        cfg_path = os.path.expanduser("~/.mbdsdr/config.json")
+        result = {"lat": None, "lon": None, "configured": False}
+        try:
+            if os.path.exists(cfg_path):
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+            else:
+                return result
+        except Exception:
+            return result
+        try:
+            lat = cfg.get("ground_station_lat")
+            lon = cfg.get("ground_station_lon")
+            if lat is not None and lon is not None:
+                result["lat"] = float(lat)
+                result["lon"] = float(lon)
+                result["configured"] = True
+        except (TypeError, ValueError):
+            pass
+        return result
+
     # ── 预设工作流 ──────────────────────────────────────
 
     def _load_presets(self):
@@ -218,15 +246,37 @@ class WorkflowEngine:
         })
 
     def _preset_noaa_apt(self) -> Workflow:
-        """NOAA 气象卫星 APT 接收解码工作流。"""
+        """NOAA 气象卫星 APT 接收解码工作流。
+
+        地面站坐标从 ~/.mbdsdr/config.json 的 ground_station_lat/lon 读取；
+        未配置时 lat/lon 默认为空字符串，执行时步骤会提示"地面站坐标未配置"。
+        """
+        gs = self._get_ground_station()
+        lat_default = gs["lat"] if gs["configured"] else ""
+        lon_default = gs["lon"] if gs["configured"] else ""
+        lat_desc = (
+            f"地面站纬度（已配置: {gs['lat']}）"
+            if gs["configured"]
+            else "地面站纬度（未配置，请在 ~/.mbdsdr/config.json 设置 ground_station_lat）"
+        )
+        lon_desc = (
+            f"地面站经度（已配置: {gs['lon']}）"
+            if gs["configured"]
+            else "地面站经度（未配置，请在 ~/.mbdsdr/config.json 设置 ground_station_lon）"
+        )
+        sky_view_desc = (
+            "查找当前可见的 NOAA 卫星"
+            if gs["configured"]
+            else "查找当前可见的 NOAA 卫星（地面站坐标未配置，请先配置 ground_station_lat/lon）"
+        )
         return Workflow.from_dict({
             "name": "noaa_apt_receive_decode",
             "description": "NOAA 气象卫星 APT 图像接收与自动解码完整工作流",
             "category": "satellite",
             "tags": ["NOAA", "APT", "气象卫星", "图像解码"],
             "steps": [
-                {"step_id": 1, "tool_name": "sdr_satellite_sky_view", "params": {"latitude": 43.8, "longitude": 125.3}, "description": "查找当前可见的 NOAA 卫星（长春坐标）", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
-                {"step_id": 2, "tool_name": "sdr_satellite_doppler", "params": {"satellite_name": "NOAA 19", "frequency_hz": 137100000, "latitude": 43.8, "longitude": 125.3}, "description": "计算多普勒修正频率", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
+                {"step_id": 1, "tool_name": "sdr_satellite_sky_view", "params": {"latitude": "{{ground_station_lat}}", "longitude": "{{ground_station_lon}}"}, "description": sky_view_desc, "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
+                {"step_id": 2, "tool_name": "sdr_satellite_doppler", "params": {"satellite_name": "NOAA 19", "frequency_hz": 137100000, "latitude": "{{ground_station_lat}}", "longitude": "{{ground_station_lon}}"}, "description": "计算多普勒修正频率", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
                 {"step_id": 3, "tool_name": "sdr_set_frequency", "params": {"frequency_hz": "{{doppler_freq}}"}, "description": "设置接收频率（多普勒修正）", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
                 {"step_id": 4, "tool_name": "sdr_record_start", "params": {"duration": 900, "format": "wav"}, "description": "录制卫星过境信号（15分钟）", "timeout": 30, "retry_on_failure": True, "max_retries": 2, "condition": ""},
                 {"step_id": 5, "tool_name": "sdr_decode_noaa_apt", "params": {"input_path": "{{recording_path}}"}, "description": "解码 APT 气象图像", "timeout": 60, "retry_on_failure": True, "max_retries": 2, "condition": ""},
@@ -234,11 +284,13 @@ class WorkflowEngine:
             "parameters": {
                 "doppler_freq": {"default": 137100000, "type": "float", "description": "多普勒修正频率"},
                 "recording_path": {"default": "", "type": "string", "description": "录制文件路径"},
+                "ground_station_lat": {"default": lat_default, "type": "float", "description": lat_desc},
+                "ground_station_lon": {"default": lon_default, "type": "float", "description": lon_desc},
             },
             "trigger_phrases": ["接收NOAA卫星", "解码气象卫星", "NOAA APT", "看卫星云图", "卫星云图"],
             "author": "mbdsdr",
             "source": "preset",
-            "version": 1,
+            "version": 2,
         })
 
     def _preset_sstv(self) -> Workflow:

@@ -55,6 +55,31 @@ from .decoders import (
 from .multimon_decoders import register_multimon_tools
 
 
+def _get_ground_station_latlon() -> tuple:
+    """从 ~/.mbdsdr/config.json 读取地面站坐标 (lat, lon)。
+
+    返回 (lat, lon)；未配置时返回 (None, None)。
+    不内置任何城市坐标，避免地区性硬编码。
+    """
+    cfg_path = os.path.expanduser("~/.mbdsdr/config.json")
+    try:
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        else:
+            return (None, None)
+    except Exception:
+        return (None, None)
+    try:
+        lat = cfg.get("ground_station_lat")
+        lon = cfg.get("ground_station_lon")
+        if lat is not None and lon is not None:
+            return (float(lat), float(lon))
+    except (TypeError, ValueError):
+        pass
+    return (None, None)
+
+
 def register_sdr_tools(agent):
     """
     把所有 SDR 工具注册到 Agent 中。
@@ -1086,8 +1111,8 @@ def register_sdr_tools(agent):
         parameters={
             "type": "object",
             "properties": {
-                "latitude": {"type": "number", "description": "纬度，例如 43.8（长春）"},
-                "longitude": {"type": "number", "description": "经度，例如 125.3（长春）"},
+                "latitude": {"type": "number", "description": "地面站纬度 (°N)，如 39.9；未传则从配置读取"},
+                "longitude": {"type": "number", "description": "地面站经度 (°E)，如 116.4；未传则从配置读取"},
                 "altitude_m": {"type": "number", "description": "海拔，单位米，默认 0"},
                 "satellite_type": {"type": "string", "description": "卫星类型: weather(气象)/amateur(业余)/iss(国际空间站)/all，默认 all"},
             },
@@ -1152,8 +1177,8 @@ def register_sdr_tools(agent):
                 "duration_s": {"type": "number", "description": "跟踪录制时长秒，默认 300（典型过境 10-15 分钟）"},
                 "sample_rate_khz": {"type": "number", "description": "IQ 采样率 kHz，默认 240"},
                 "demod": {"type": "string", "description": "录制期间解调模式标记，APT 用 WFM（默认），原始分析用 RAW"},
-                "latitude": {"type": "number", "description": "地面站纬度，默认长春 43.82"},
-                "longitude": {"type": "number", "description": "地面站经度，默认 125.32"},
+                "latitude": {"type": "number", "description": "地面站纬度 (°N)；未传则从配置读取"},
+                "longitude": {"type": "number", "description": "地面站经度 (°E)；未传则从配置读取"},
                 "altitude_m": {"type": "number", "description": "地面站海拔米，默认 0"},
                 "update_interval_s": {"type": "number", "description": "多普勒重算/调谐间隔秒，默认 2"},
                 "min_elevation": {"type": "number", "description": "录制所需最小仰角度，默认 0；低于则不录"},
@@ -3685,8 +3710,15 @@ def _satellite_doppler(args):
     """卫星多普勒计算（真实实现）。"""
     sat_name = args["satellite_name"]
     freq_hz = args["frequency_hz"]
-    lat = args.get("latitude", 43.82)
-    lon = args.get("longitude", 125.32)
+    # 地面站坐标：优先用参数，否则从配置读取；都没有则报错
+    cfg_lat, cfg_lon = _get_ground_station_latlon()
+    lat = args.get("latitude", cfg_lat)
+    lon = args.get("longitude", cfg_lon)
+    if lat is None or lon is None:
+        return ("错误: 未配置地面站坐标。请在参数中传入 latitude/longitude，"
+                "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。")
+    lat = float(lat)
+    lon = float(lon)
     alt = args.get("altitude", 0.0)
 
     result = orbit.doppler_correction(sat_name, freq_hz, lat, lon, alt / 1000.0)
@@ -3738,8 +3770,17 @@ def _satellite_doppler_track(mgr, args):
     duration = min(float(args.get("duration_s", 300.0)), 1200.0)
     sr = float(args.get("sample_rate_khz", 240.0)) * 1e3
     demod = args.get("demod", "WFM")
-    lat = float(args.get("latitude", 43.82))
-    lon = float(args.get("longitude", 125.32))
+    cfg_lat, cfg_lon = _get_ground_station_latlon()
+    lat = args.get("latitude", cfg_lat)
+    lon = args.get("longitude", cfg_lon)
+    if lat is None or lon is None:
+        return ToolResult(
+            success=False,
+            content="错误: 未配置地面站坐标。请在参数中传入 latitude/longitude，"
+                    "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。",
+        )
+    lat = float(lat)
+    lon = float(lon)
     alt_km = float(args.get("altitude_m", 0.0)) / 1000.0
     interval = max(float(args.get("update_interval_s", 2.0)), 0.05)
     min_elev = float(args.get("min_elevation", 0.0))

@@ -267,6 +267,11 @@ def encode_ft8_tones(msg77: list[int]) -> list[int]:
 def encode_ft8_text(text: str) -> list[int]:
     """标准文本消息（如 'CQ BI4MIB OM74'）→ 79 音调。"""
     parts = text.split()
+    if len(parts) < 2:
+        raise ValueError(
+            f"FT8 消息至少需要 2 个空格分隔字段，如 'CQ BI4MIB OM74' 或 "
+            f"'BI4MIB K1ABC 73'，当前收到 {len(parts)} 个字段: {parts!r}"
+        )
     if parts[0].upper() == "CQ":
         call1 = "CQ"
         call2 = parts[1]
