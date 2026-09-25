@@ -15,6 +15,7 @@ MBDSDR AX.25 协议栈
 
 import struct
 import math
+import time
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict, Any
@@ -976,6 +977,11 @@ class KISSInterface:
 # Digipeater 分组转发
 # ============================================================
 
+# 去重 TTL（秒）。来源: direwolf/src/dedupe.c:134 TTL=30s；:245 判定 now-ts<30。
+# 超过 30s 的同指纹帧不再判重，避免环形缓冲无 TTL 造成的长期误杀。
+DEDUP_TTL_SEC = 30
+
+
 class Digipeater:
     """
     AX.25 Digipeater：接收帧并按中继器路径转发。
@@ -989,15 +995,40 @@ class Digipeater:
         self.digi_calls = [c.upper() for c in (digi_calls or [])]
         self.packets_heard = 0
         self.packets_digipeated = 0
-        self.duplicate_buffer: List[str] = []
+        # 来源: direwolf/src/dedupe.c:134,245 + ax25_pad.c:2803-2806 ——
+        # 缓冲改为 (crc16_fingerprint, timestamp) 二元组；判定重复时要求 now-ts<30s。
+        self.duplicate_buffer: List[Tuple[int, float]] = []
         self.max_duplicate_buffer = 50
 
+    @staticmethod
+    def _frame_fingerprint(frame: AX25Frame) -> int:
+        """计算帧指纹：crc16_ccitt(src + '\\x00' + dest + '\\x00' + info)。
+
+        来源: direwolf ax25_pad.c:2803-2806 —— 指纹=crc16(src+dest+info, seed=0xffff)。
+        复用本模块 crc16_ccitt（seed 0xFFFF，最终 XOR 0xFFFF，与 fcs_calc.c 一致）。
+        用 \\x00 分隔 src/dest，避免 "AB"+"CD" 与 "ABC"+"D" 这类拼接歧义。
+        """
+        payload = (
+            frame.source.encode("ascii", errors="replace") + b"\x00"
+            + frame.destination.encode("ascii", errors="replace") + b"\x00"
+            + bytes(frame.info)
+        )
+        return crc16_ccitt(payload)
+
     def _is_duplicate(self, frame: AX25Frame) -> bool:
-        """检查是否是重复帧（基于源+目的+信息前20字节）。"""
-        key = f"{frame.source}-{frame.source_ssid}:{frame.destination}-{frame.dest_ssid}:{frame.info[:20].hex()}"
-        if key in self.duplicate_buffer:
-            return True
-        self.duplicate_buffer.append(key)
+        """检查是否是重复帧（CRC16 指纹 + 30s TTL，来源 direwolf dedupe.c:134,245）。"""
+        now = time.time()
+        fp = self._frame_fingerprint(frame)
+        # 先清掉过期条目（now - ts >= TTL）
+        self.duplicate_buffer = [
+            (c, ts) for (c, ts) in self.duplicate_buffer
+            if now - ts < DEDUP_TTL_SEC
+        ]
+        # 在 TTL 窗口内同指纹才算重复
+        for c, ts in self.duplicate_buffer:
+            if c == fp and now - ts < DEDUP_TTL_SEC:
+                return True
+        self.duplicate_buffer.append((fp, now))
         if len(self.duplicate_buffer) > self.max_duplicate_buffer:
             self.duplicate_buffer.pop(0)
         return False

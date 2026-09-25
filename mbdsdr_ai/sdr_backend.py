@@ -66,13 +66,20 @@ class SDRDevice:
 class SDRStatus:
     """SDR 当前状态。"""
     connected: bool = False
-    frequency_hz: float = 100000000.0
-    sample_rate_hz: float = 2400000.0
+    # 来源: gqrx/src/applications/gqrx/receiver.cpp:66 —— GQRX 默认守 144.8 MHz 业余段；
+    # 我们面向普通用户首启体验，落在 98 MHz FM 广播段，一上来就能听到东西。
+    frequency_hz: float = 98_000_000.0
+    # None 表示"未选定，由后端子类决定"。各后端在 __init__ 里设自己的甜点档
+    # （RTL 2.048M / HackRF 8M / USRP 1M / Pluto 2M，来源 gqrx ioconfig.cpp:266,279-302）；
+    # connect() 时若仍为 None，用 2.048M 兜底。
+    sample_rate_hz: Optional[float] = None
     gain_db: float = 0.0
     agc_enabled: bool = True
     bandwidth_hz: float = 0.0  # 0=自动
     demod_mode: str = "FM"  # FM/AM/SSB/LSB/USB/CW/NFM/WFM
-    squelch_db: float = -100.0
+    # 来源: gqrx/src/qtgui/dockrxopt.cpp:697 —— reset 到 -150 dB = 完全开门，
+    # 与 analog_demod.py 静噪默认对齐。
+    squelch_db: float = -150.0
     volume: float = 0.5
     rssi_db: float = -100.0
     snr_db: float = 0.0
@@ -91,6 +98,10 @@ class SDRBackend:
 
     所有具体后端都继承此类并实现接口。
     """
+
+    # 若某个后端在 __init__ 里没有显式设采样率（status.sample_rate_hz 仍为 None），
+    # connect() 时用 2.048M 兜底（1.024M 整数倍，便于 ADS-B/数字链路抽取）。
+    _FALLBACK_SAMPLE_RATE_HZ: float = 2_048_000.0
 
     def __init__(self, device: SDRDevice):
         self.device = device
@@ -727,11 +738,18 @@ class RTLSDRBackend(SDRBackend):
                     logger.warning(f"RTL-SDR 设置 offset_tuning 失败: {e}")
             self.status.connected = True
             self._start_time = time.time()
+            # 兜底：若子类未显式设采样率，用 2.048M 兜底（见 SDRBackend._FALLBACK_SAMPLE_RATE_HZ）
+            if self.status.sample_rate_hz is None:
+                self.status.sample_rate_hz = self._FALLBACK_SAMPLE_RATE_HZ
             # 回读硬件实际参数，对齐软件状态
             try:
                 self.readback_hw_state()
             except Exception as e:
                 logger.warning(f"RTL-SDR 回读失败: {e}")
+            # 来源: gqrx/src/applications/gqrx/mainwindow.cpp:571-579 ——
+            # 首次用 RTL 时不读硬件默认 0 dB（"聋棒"），直接拉到离散增益表中点。
+            # 触发条件：回读后 gain_db 仍为 0.0（用户从未手动设过增益）且增益表已加载。
+            self._maybe_apply_first_gain_midpoint()
             # 来源: SDR++ main.cpp:326 workerThread + 526-539 worker()/asyncHandler()
             # + ring_buffer.h:4 RING_BUF_SZ=1000000 —— 启动生产者线程持续读设备写环形缓冲，
             # 替代 QTimer 50ms 只读 4096 样点造成的严重欠读。
@@ -890,6 +908,19 @@ class RTLSDRBackend(SDRBackend):
         else:
             logger.warning("RTL-SDR 不支持参数回读")
         return got > 0
+
+    def _maybe_apply_first_gain_midpoint(self) -> None:
+        """首启增益自动拉到增益表中点（来源 gqrx mainwindow.cpp:571-579）。
+
+        仅在回读后 gain_db 仍为 0.0（用户从未手动设过增益）且离散增益表已加载时触发；
+        用户已手动设过非零增益时不覆盖。
+        """
+        if self.status.gain_db == 0.0 and self._gain_table_db:
+            mid_gain = float(self._gain_table_db[len(self._gain_table_db) // 2])
+            if self._apply_gain(mid_gain):
+                self.status.gain_db = mid_gain
+                logger.info("RTL-SDR 首启自动增益: 0 dB -> %.1f dB（增益表中点，"
+                            "来源 gqrx mainwindow.cpp:571-579）", mid_gain)
 
     def set_agc(self, enabled: bool) -> bool:
         if not super().set_agc(enabled):
@@ -1219,6 +1250,9 @@ class HackRFBackend(SDRBackend):
         self._hackrf = None
         self._lna_db = 8
         self._vga_db = 16
+        # 来源: gqrx/src/qtgui/ioconfig.cpp:279-302 —— HackRF 默认 8 MS/s 甜点档
+        # （GQRX ioconfig 里 HackRF start_sample_rate=8e6）。
+        self.status.sample_rate_hz = 8_000_000.0
 
     def connect(self) -> bool:
         try:
@@ -1226,6 +1260,8 @@ class HackRFBackend(SDRBackend):
             self._hackrf = hackrf.HackRF()
             self.status.connected = True
             self._start_time = time.time()
+            if self.status.sample_rate_hz is None:
+                self.status.sample_rate_hz = self._FALLBACK_SAMPLE_RATE_HZ
             return True
         except Exception:
             self.status.connected = False
@@ -1846,6 +1882,9 @@ class USRPBackend(SDRBackend):
         self._device_args = device_args
         self._usrp = None
         self._rx_stream = None
+        # 来源: gqrx/src/qtgui/ioconfig.cpp:279-302 —— USRP 默认 1 MS/s 起步档
+        # （GQRX ioconfig 里 USRP start_sample_rate=1e6）。
+        self.status.sample_rate_hz = 1_000_000.0
 
     def connect(self) -> bool:
         try:
@@ -1853,6 +1892,8 @@ class USRPBackend(SDRBackend):
             self._usrp = uhd.usrp.MultiUSRP(self._device_args)
             self.status.connected = True
             self._start_time = time.time()
+            if self.status.sample_rate_hz is None:
+                self.status.sample_rate_hz = self._FALLBACK_SAMPLE_RATE_HZ
             return True
         except Exception:
             self.status.connected = False

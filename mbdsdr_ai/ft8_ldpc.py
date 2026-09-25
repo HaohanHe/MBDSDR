@@ -69,6 +69,12 @@ def ldpc_bp_decode(llr: list[float], max_iter: int = 25) -> tuple[list[int], int
 
     输入：174 个信道 LLR（正=偏向 0，负=偏向 1；或反之，按约定）。
     输出：(硬判决码字 0/1, 实际迭代次数)。
+
+    早停判据（移植自 wsjtx/lib/ft8/bpdecode174_91.f90:69-83）：
+    每轮统计未满足校验数 ncheck；与上一轮 nclast 比较，若 ncheck 连续 5 轮
+    不下降（nd=ncheck-nclast >= 0），且已迭代 >=10 轮、ncheck > 15，则提前
+    退出——此时校验方程长期卡在高残差，继续迭代已无收益。该判据只省无效迭代，
+    不改变"ncheck==0 即收敛返回"这一正确译码路径的结果。
     """
     check_vars, var_checks = _parse_graph()
 
@@ -79,6 +85,8 @@ def ldpc_bp_decode(llr: list[float], max_iter: int = 25) -> tuple[list[int], int
             q[(c, v)] = llr[v]
 
     decoded = [0] * _N
+    nclast: int | None = None   # 上一轮未满足校验数（nclast）
+    no_improve = 0              # ncheck 连续不下降计数（ncnt）
     for it in range(max_iter):
         # 校验→变量：归一化 min-sum BP（WSJT-X bpdecode174_91.f90:100-112 的
         # 工程近似；精确 tanh/atanh 在 Python 浮点 + 本模块小 LLR 尺度下不如
@@ -100,10 +108,24 @@ def ldpc_bp_decode(llr: list[float], max_iter: int = 25) -> tuple[list[int], int
             decoded[v] = 0 if total >= 0 else 1
             for c in var_checks[v]:
                 q[(c, v)] = total - r[(c, v)]
-        # 早停：所有校验满足（bpdecode174_91.f90:53-57）
-        if all(sum(decoded[v] for v in check_vars[c]) % 2 == 0 for c in range(len(check_vars))):
+        # 统计未满足校验数 ncheck（bpdecode174_91.f90:55-58）
+        ncheck = sum(
+            1 for c in range(_M)
+            if sum(decoded[v] for v in check_vars[c]) % 2 != 0
+        )
+        # 收敛：所有校验满足（bpdecode174_91.f90:53-57）
+        if ncheck == 0:
             return decoded, it + 1
-    return decoded, max_iter
+        # 早停：ncheck 连续 5 轮不下降且残差长期高企（bpdecode174_91.f90:69-83）
+        if nclast is not None:
+            if ncheck - nclast < 0:
+                no_improve = 0          # ncheck 下降，重置计数
+            else:
+                no_improve += 1
+            if no_improve >= 5 and it >= 10 and ncheck > 15:
+                break
+        nclast = ncheck
+    return decoded, it + 1
 
 
 if __name__ == "__main__":

@@ -22,6 +22,41 @@ SYMBOL_MS = 160
 PERIOD_S = 15
 BANDWIDTH_HZ = 79
 
+# 近重复候选去重阈值（对标 wsjtx/lib/ft8/sync8.f90:138-149：
+# |fdiff|<4Hz 且 |tdiff|<0.04s 视为同一信号的重复检测，只留最强）
+FT8_DEDUP_FREQ_HZ = 4.0
+FT8_DEDUP_TIME_S = 0.04
+
+
+def dedup_candidates(candidates: List[Dict]) -> List[Dict]:
+    """近重复候选去重。
+
+    频率差 < FT8_DEDUP_FREQ_HZ 且时间差 < FT8_DEDUP_TIME_S 的候选视为同一
+    信号的重复检测，只保留 SNR 最高的那个。按 SNR 降序处理，先保留的强候选
+    作为判重基准。候选 dict 需含 center_hz；snr_est_db（或 snr_db）决定强弱；
+    time_s（或 t0，缺省 0.0）为周期内时间偏移。
+    """
+    def _snr(c: Dict) -> float:
+        return float(c.get("snr_est_db", c.get("snr_db", -1e9)))
+
+    def _t(c: Dict) -> float:
+        return float(c.get("time_s", c.get("t0", 0.0)))
+
+    ordered = sorted(candidates, key=_snr, reverse=True)
+    kept: List[Dict] = []
+    for cand in ordered:
+        dup = False
+        for k in kept:
+            df = abs(float(cand.get("center_hz", 0.0))
+                     - float(k.get("center_hz", 0.0)))
+            dt = abs(_t(cand) - _t(k))
+            if df < FT8_DEDUP_FREQ_HZ and dt < FT8_DEDUP_TIME_S:
+                dup = True
+                break
+        if not dup:
+            kept.append(cand)
+    return kept
+
 
 def _goertzel(samples: List[float], rate: float, freq: float) -> float:
     """单频 Goertzel（任意频率，不量化到 bin），返回该频率能量幅度。"""
@@ -135,7 +170,8 @@ def decode_ft8_audio(samples: List[float], sample_rate: float) -> Dict:
     segs = [samples[s * sps:(s + 1) * sps] for s in range(79)]
 
     data_pos = ft8_decode.data_symbol_positions()  # 58 个数据符号位置
-    best = None
+    # 收集各相位假设的解码候选，统一带去重（sync8.f90: 近频近时只留最强）
+    candidates: List[Dict] = []
     for phase in range(8):
         center = peak["center_hz"] - (phase - 3.5) * TONE_SPACING_HZ
         tones = [center + (i - 3.5) * TONE_SPACING_HZ for i in range(8)]
@@ -151,13 +187,22 @@ def decode_ft8_audio(samples: List[float], sample_rate: float) -> Dict:
         r = ft8_decode.decode_ft8_payload(energies_58)
         # 打分：CRC 通过优先，其次 LDPC 早停（迭代少=收敛好）
         score = (1000 if r["crc_ok"] else 0) - r["iters"]
-        if best is None or score > best[0]:
-            best = (score, energies_58, r)
+        candidates.append({
+            "center_hz": center,
+            "snr_est_db": peak.get("snr_est_db", 0.0),
+            "time_s": 0.0,
+            "score": score,
+            "r": r,
+        })
 
-    if best is None:
+    if not candidates:
         return {"decoded": False, "reason": "符号段不足", **peak}
 
-    _, energies_58, r = best
+    # 近重复去重：同频段同时间只留 SNR 最高者
+    candidates = dedup_candidates(candidates)
+    best = max(candidates, key=lambda c: c["score"])
+
+    r = best["r"]
     msg = unpack77(r["data_bits"])
     return {
         "decoded": r["crc_ok"],
@@ -167,5 +212,6 @@ def decode_ft8_audio(samples: List[float], sample_rate: float) -> Dict:
         "type": msg.get("type"),
         "call1": msg.get("call1"),
         "call2": msg.get("call2"),
-        "center_hz": peak["center_hz"],
+        "center_hz": best["center_hz"],
+        "deduped_count": len(candidates),
     }

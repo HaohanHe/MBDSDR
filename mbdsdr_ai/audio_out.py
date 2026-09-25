@@ -48,13 +48,14 @@ class AudioPlayer:
     channels : int
         声道数，1=单声道，2=立体声。
     gain : float
-        播放增益，范围 0.0-5.0，默认 1.0。
+        播放增益，范围 0.0-5.0，默认 0.5（≈ -6 dB）。
+        来源: gqrx/src/applications/gqrx/receiver.cpp:49,124 DEFAULT_AUDIO_GAIN=-6.0。
     """
 
     #: 单块最大缓存样本数，防止上游喂得太快导致无界增长
     _MAX_QUEUED_SAMPLES = 48000 * 2  # ≈2 秒 @48k
 
-    def __init__(self, sample_rate: int = 48000, channels: int = 1, gain: float = 1.0):
+    def __init__(self, sample_rate: int = 48000, channels: int = 1, gain: float = 0.5):
         self.sample_rate = int(sample_rate)
         self.channels = int(channels)
         self.gain = float(gain)

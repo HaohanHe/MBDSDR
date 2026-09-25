@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -76,6 +77,17 @@ DATA_BITS_SHORT = 56  # DF11 等短帧 = 32bit 数据 + 24bit PI
 # idx0=@(填充), 1-26=A-Z, 27=[, 28=\, 29=], 30=^, 31=_, 32=空格,
 # 33-47=!"#$%&'()*+,-./, 48-57=0-9, 58-63=:;<=>?
 CHARSET = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_ !\"#$%&'()*+,-./0123456789:;<=>?"
+
+# 来源: dump1090.h:89 —— Mode S 载频 1090 MHz
+MODES_DEFAULT_FREQ_HZ = 1_090_000_000
+# 来源: dump1090.c:156 —— 默认采样率 2.4 Msps（dump1090 常用输入档）
+MODES_DEFAULT_SPS = 2_400_000
+# 来源: dump1090.h:97 —— 哨兵值 999999 表示 AGC（自动增益）
+MODES_DEFAULT_GAIN_DB = 999_999
+
+# 来源: dump1090/icao_filter.c:23 SIZE=4096, :26 TTL=60000ms, :118-125 双缓冲每 60s 翻转。
+# ICAO 老化窗口：超过 60s 未出现的 ICAO 从 even/odd CPR 缓冲中清除，防止无限增长。
+ICAO_FILTER_TTL_SEC = 60.0
 
 # 来源: dump1090 cpr.c:77-138 —— NL 表（Number of Longitude bands）。
 # 阈值纬度（绝对值，度）与对应 NL。对称于赤道。
@@ -452,9 +464,55 @@ class ADSBDecoder:
     """
 
     def __init__(self) -> None:
-        # 每个 ICAO 缓存最近一次 even/odd CPR 位置帧
-        self._even: Dict[str, Dict[str, int]] = {}
-        self._odd: Dict[str, Dict[str, int]] = {}
+        # 每个 ICAO 缓存最近一次 even/odd CPR 位置帧（带 ts，用于 TTL 清理）
+        self._even: Dict[str, Dict[str, Any]] = {}
+        self._odd: Dict[str, Dict[str, Any]] = {}
+        # 来源: dump1090 icao_filter.c:23,26,118-125 —— ICAO 双缓冲老化表。
+        # a/b 两个 set 交替作为"当前窗口"；每 60s 翻转一次，旧 inactive set 清空。
+        # 一个 ICAO 在 active 或 inactive set 中都算"近期见过"，最长保留 2*TTL。
+        self._icao_seen_a: set = set()
+        self._icao_seen_b: set = set()
+        self._icao_active: str = "a"
+        self._icao_last_flip: float = time.time()
+
+    # ------------------------------------------------------------------
+    # ICAO 双缓冲老化（来源: dump1090 icao_filter.c:118-125 flip 逻辑）
+    # ------------------------------------------------------------------
+    def _current_set(self) -> set:
+        return self._icao_seen_a if self._icao_active == "a" else self._icao_seen_b
+
+    def _other_set(self) -> set:
+        return self._icao_seen_b if self._icao_active == "a" else self._icao_seen_a
+
+    def _maybe_flip_icao(self) -> None:
+        """每 ICAO_FILTER_TTL_SEC 翻转一次双缓冲：清空旧 inactive set 并切换 active。"""
+        now = time.time()
+        if now - self._icao_last_flip >= ICAO_FILTER_TTL_SEC:
+            # 翻转前：当前 active 保留（成为新的 inactive），旧 inactive 清空
+            self._other_set().clear()
+            self._icao_active = "b" if self._icao_active == "a" else "a"
+            self._icao_last_flip = now
+
+    def _mark_icao(self, icao: str) -> None:
+        """记录某 ICAO 在当前窗口内出现过。"""
+        self._maybe_flip_icao()
+        self._current_set().add(icao)
+
+    def _is_icao_recent(self, icao: str) -> bool:
+        """ICAO 在最近一个翻转周期内出现过（active 或 inactive set 中）。"""
+        self._maybe_flip_icao()
+        return icao in self._icao_seen_a or icao in self._icao_seen_b
+
+    def _purge_stale_cpr(self) -> None:
+        """清除超过 ICAO_FILTER_TTL_SEC 未更新的 even/odd CPR 条目。"""
+        now = time.time()
+        for d in (self._even, self._odd):
+            stale = [
+                k for k, v in d.items()
+                if now - float(v.get("ts", 0.0)) >= ICAO_FILTER_TTL_SEC
+            ]
+            for k in stale:
+                del d[k]
 
     def handle(self, raw: bytes) -> Dict[str, Any]:
         fr = decode_frame(raw)
@@ -469,12 +527,14 @@ class ADSBDecoder:
         return out
 
     def _update_cpr(self, fr: ADSBFrame) -> None:
+        self._mark_icao(fr.icao_hex)
         c = fr.cpr
-        rec = {"cpr_lat": c["cpr_lat"], "cpr_lon": c["cpr_lon"]}
+        rec = {"cpr_lat": c["cpr_lat"], "cpr_lon": c["cpr_lon"], "ts": time.time()}
         if c.get("cpr_odd"):
             self._odd[fr.icao_hex] = rec
         else:
             self._even[fr.icao_hex] = rec
+        self._purge_stale_cpr()
 
     def _try_global(self, icao: str, fflag: int) -> Optional[Tuple[float, float]]:
         e = self._even.get(icao)

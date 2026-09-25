@@ -281,3 +281,40 @@ class FrequencyManager:
                 self._save_user()
                 return True
         return False
+
+    def get_bookmarks_in_range(self, low_hz: float, high_hz: float
+                               ) -> List[Bookmark]:
+        """返回频率范围 [low_hz, high_hz] 内可见的书签。
+
+        对标 openwebrx/owrx/bookmarks.py 按可视频谱范围查询书签的做法：
+        点频书签以 freq_hz 为其频点，区间书签以 [start_hz, end_hz] 为覆盖段；
+        只要书签频点/频段与 [low_hz, high_hz] 有交集即返回。
+        """
+        out: List[Bookmark] = []
+        for b in self.bookmarks:
+            if b.is_range:
+                lo, hi = b.start_hz, b.end_hz
+            else:
+                lo = hi = b.freq_hz
+            if lo <= high_hz and hi >= low_hz:   # 区间相交
+                out.append(b)
+        return out
+
+
+# ---- 数字模式默认参数表（对标 wsjtx widgets/mainwindow.cpp:10984-11008、
+# models/FrequencyList.cpp 各波段默认频点）----
+MODE_PARAMS = {
+    "FT8": {"tr_period_s": 15.0, "nsps": 6912, "ftol_hz": 50,
+            "tone_spacing_hz": 6.25, "sample_rate": 12000},
+    "FT4": {"tr_period_s": 7.5, "nsps": 2304, "ftol_hz": 50,
+            "tone_spacing_hz": 18.75, "sample_rate": 12000},
+    "FST4": {"tr_period_s": 15.0, "nsps": 6912, "ftol_hz": 50,
+             "tone_spacing_hz": 6.25, "sample_rate": 12000},
+    "WSPR": {"tr_period_s": 120.0, "nsps": 16384, "ftol_hz": 100,
+             "tone_spacing_hz": 1.4648, "sample_rate": 12000},
+}
+
+
+def get_mode_params(mode: str) -> dict:
+    """返回指定数字模式的默认帧/采样参数；未知模式返回空 dict。"""
+    return MODE_PARAMS.get(str(mode).upper(), {})
