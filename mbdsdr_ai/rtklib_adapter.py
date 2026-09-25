@@ -678,6 +678,129 @@ class SPPLocator:
             "rms_m": rms, "n_sat": n, "iters": it + 1,
         }
 
+    # ----------------------------------------------------------
+    # 多星座 SPP —— 参考 pntpos.c:199 rescode() / pntpos()
+    # 状态向量：[x,y,z, b_gps, b_glo, b_gal, b_cmp]（pntpos.c:210,256-258）
+    # ----------------------------------------------------------
+    def locate_multi(self, obs: List[Dict[str, Any]],
+                     x0: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+                     use_wls: bool = True) -> Dict[str, Any]:
+        """多星座伪距单点定位。
+
+        每条观测 dict 字段：
+            rs:  (3,) 卫星 ECEF 位置(m)
+            dts: float 卫星钟差(s)
+            pr:  float 伪距(m)
+            system: "GPS"/"GLONASS"/"Galileo"/"BeiDou"
+
+        来源: RTKLIB src/pntpos.c:199 rescode():
+          - 状态 x[0:3]=位置, x[3]=GPS 接收机钟差(m)
+          - pntpos.c:256 GLO 观测残差减 x[4]，H 列 4=1
+          - pntpos.c:257 GAL 观测残差减 x[5]，H 列 5=1
+          - pntpos.c:258 CMP 观测残差减 x[6]，H 列 6=1
+          - pntpos.c:270-275 缺失星座加零伪观测(var=0.01)防秩亏
+        收敛判据：位置修正量范数 < conv_tol (1e-4 m)。
+        """
+        # 过滤无星历/无效观测
+        valid: List[Dict[str, Any]] = []
+        for o in obs:
+            rs = np.asarray(o.get("rs"), dtype=float)
+            dts = float(o.get("dts", 0.0))
+            pr = float(o.get("pr", 0.0))
+            sysname = str(o.get("system", "GPS"))
+            if rs.shape != (3,) or pr <= 0.0:
+                continue
+            valid.append({"rs": rs, "dts": dts, "pr": pr, "system": sysname})
+
+        n = len(valid)
+        # pntpos.c:214 循环；至少 4 颗卫星才能解 4 参数（位置+GPS钟差）
+        if n < 4:
+            return {"fix_type": "NONE", "n_sat": n,
+                    "error": "need at least 4 satellites"}
+
+        # 哪些星座实际出现（pntpos.c:206 mask[4]）
+        present = {"GPS": False, "GLONASS": False, "Galileo": False, "BeiDou": False}
+        for o in valid:
+            present[o["system"]] = True
+
+        # 状态：位置(3) + GPS钟差(1) + 各附加星座钟差(最多3)
+        # 列布局：0:2=x,y,z; 3=b_gps; 4=b_glo?; 5=b_gal?; 6=b_cmp?
+        # 为简化固定为 7 维（NX=7，对应 rtklib.h NX）
+        NX = 7
+        sys_col = {"GPS": 3, "GLONASS": 4, "Galileo": 5, "BeiDou": 6}
+
+        x = np.array([x0[0], x0[1], x0[2], 0.0, 0.0, 0.0, 0.0])
+
+        for it in range(self.max_iter):
+            rows: List[Tuple[np.ndarray, float, float]] = []  # (H_row, v, weight)
+            lat0, lon0 = 0.0, 0.0
+            for o in valid:
+                rs = o["rs"]; rr = x[:3]
+                r, e = CoordinateConverter.geodist(rs, rr)   # pntpos.c:227
+                # pntpos.c:250  v = P - (r + dtr - c*dts)
+                dtr = x[3]
+                v = o["pr"] - (r + dtr - CLIGHT * o["dts"])
+                Hrow = np.zeros(NX)
+                Hrow[0] = -e[0]; Hrow[1] = -e[1]; Hrow[2] = -e[2]
+                Hrow[3] = 1.0
+                # pntpos.c:256-258 非 GPS 星座：残差减该星座钟差，H 列=1
+                col = sys_col[o["system"]]
+                if col != 3:
+                    v -= x[col]
+                    Hrow[col] = 1.0
+                # 仰角加权（pntpos.c:39 varerr 简化版：仰角越低方差越大）
+                lat0, lon0, _ = CoordinateConverter.ecef_to_llh(*rr)
+                _, el = CoordinateConverter.satazel(lat0, lon0, e)
+                # var = 1/sin(el)^2 近似（pntpos.c:42 EFACT_GPS/GLO）
+                w = 1.0 / max(0.1, math.sin(el) ** 2) if use_wls else 1.0
+                rows.append((Hrow, v, w))
+
+            # pntpos.c:270-275 缺失星座加零伪观测防秩亏
+            for sysname, col in sys_col.items():
+                if sysname == "GPS":
+                    continue
+                if not present[sysname]:
+                    Hrow = np.zeros(NX); Hrow[col] = 1.0
+                    rows.append((Hrow, 0.0, 1.0 / 0.01))
+
+            H = np.array([r[0] for r in rows])
+            vv = np.array([r[1] for r in rows])
+            W = np.diag([1.0 / r[2] for r in rows]) if use_wls else np.eye(len(rows))
+            # 加权最小二乘 dx = (H'WH)^-1 H'W v
+            A = H.T @ W @ H
+            b = H.T @ W @ vv
+            dx, *_ = np.linalg.lstsq(A, b, rcond=None)
+            x = x + dx
+            if float(np.linalg.norm(dx[:3])) < self.conv_tol:
+                break
+
+        # 残差 RMS 与 HDOP
+        res = []
+        lat, lon, h = CoordinateConverter.ecef_to_llh(x[0], x[1], x[2])
+        Hpos = np.zeros((n, 3))
+        for i, o in enumerate(valid):
+            r, e = CoordinateConverter.geodist(o["rs"], x[:3])
+            res.append(o["pr"] - (r + x[3] - CLIGHT * o["dts"]))
+            Hpos[i] = -e
+        rms = float(np.sqrt(np.mean(np.square(res)))) if res else 0.0
+        try:
+            Q = np.linalg.inv(Hpos.T @ Hpos)
+            hdop = float(math.sqrt(Q[0, 0] + Q[1, 1]))
+        except np.linalg.LinAlgError:
+            hdop = 99.0
+
+        biases = {s: float(x[c]) for s, c in sys_col.items() if present[s]}
+        return {
+            "x": float(x[0]), "y": float(x[1]), "z": float(x[2]),
+            "lat_rad": lat, "lon_rad": lon, "h": h,
+            "lat_deg": lat * R2D, "lon_deg": lon * R2D,
+            "b_m_gps": float(x[3]),
+            "sys_biases_m": biases,
+            "rms_m": rms, "n_sat": n, "iters": it + 1,
+            "hdop": hdop,
+            "systems_present": [s for s, p in present.items() if p],
+        }
+
 
 # ============================================================
 # NTRIPStream —— 参考 stream.c NTRIP client
@@ -959,3 +1082,119 @@ def ntrip_connect(host: str, port: int = NTRIP_DEFAULT_PORT,
     if ok:
         stream.close()  # 仅验证握手，长期接收由调用方持有实例
     return {"host": host, "port": port, "mountpoint": mountpoint, "handshake_ok": ok}
+
+
+# ============================================================
+# GNSSPipeline —— RTCM3 字节流 + 本地观测 -> 位置解
+# ============================================================
+class GNSSPipeline:
+    """统一 GNSS 解算流水线。
+
+    输入：
+      - feed_rtcm(bytes): 来自 NTRIP/串口的 RTCM3 字节流
+      - feed_rover_obs(list[dict]): 本地流动站观测（{prn, system, rs, dts, pr, ...}）
+
+    逻辑：
+      - 收到 1005/1006 -> 缓存基站 ECEF 坐标
+      - 收到 MSM7 (1077/1087/1097/1127) -> 缓存基站观测
+      - 当流动站观测到来：
+          * 若有基站坐标 + 基站共视观测 -> RTK float
+          * 否则 -> SPP（多星座）
+
+    输出位置 dict:
+      {"lat_deg","lon_deg","alt","fix_type":"SPP"/"RTK_FLOAT"/"NONE",
+       "num_sats","hdop"}
+    """
+
+    def __init__(self) -> None:
+        # 延迟导入避免循环依赖
+        from .rtcm3_decoder import RTCM3Decoder
+        self.decoder = RTCM3Decoder()
+        self.base_ecef: Optional[np.ndarray] = None
+        self.base_obs_by_sys: Dict[str, List[Dict[str, Any]]] = {}
+        self.last_solution: Dict[str, Any] = {}
+
+    # ----------------------------------------------------------
+    def feed_rtcm(self, data: bytes) -> List[Dict[str, Any]]:
+        """喂入 RTCM3 字节流，返回解析出的消息列表。"""
+        msgs = self.decoder.feed(data)
+        for m in msgs:
+            if not m.get("crc_ok") or not m.get("supported"):
+                continue
+            if m["type"] in (1005, 1006):
+                self.base_ecef = np.array(m["antenna_ecef"], dtype=float)
+            elif m["type"] in (1077, 1087, 1097, 1127):
+                sysname = m["constellation"]
+                self.base_obs_by_sys[sysname] = m["observations"]
+        return msgs
+
+    # ----------------------------------------------------------
+    def solve(self, rover_obs: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """用当前缓存的基站数据 + 流动站观测解算位置。
+
+        rover_obs 每条：{prn, system, rs(3), dts, pr, pseudorange, ...}
+        """
+        # 构造 SPP 输入（多星座）
+        spp_obs: List[Dict[str, Any]] = []
+        for o in rover_obs:
+            rs = np.asarray(o.get("rs"), dtype=float)
+            if rs.shape != (3,):
+                continue
+            spp_obs.append({
+                "rs": rs,
+                "dts": float(o.get("dts", 0.0)),
+                "pr": float(o.get("pseudorange", o.get("pr", 0.0))),
+                "system": o.get("system", "GPS"),
+            })
+
+        # 判定是否可做 RTK
+        has_base = (self.base_ecef is not None
+                    and len(self.base_obs_by_sys) > 0
+                    and len(spp_obs) >= 4)
+
+        if has_base:
+            try:
+                from .rtk_solver import RTKFloatSolver, RTKInput, RTKObs
+                # 对齐基站/流动站观测（按 prn）
+                base_flat: List[RTKObs] = []
+                for sysname, olist in self.base_obs_by_sys.items():
+                    for o in olist:
+                        base_flat.append(RTKObs(
+                            prn=o["prn"], system=sysname,
+                            pseudorange=o.get("pseudorange") or 0.0,
+                            carrier_phase=o.get("carrier_phase") or 0.0,
+                        ))
+                rover_flat = [RTKObs(
+                    prn=o["prn"], system=o.get("system", "GPS"),
+                    rs=np.asarray(o.get("rs"), dtype=float),
+                    dts=float(o.get("dts", 0.0)),
+                    pseudorange=float(o.get("pseudorange", o.get("pr", 0.0))),
+                    carrier_phase=float(o.get("carrier_phase", o.get("pseudorange", 0.0))),
+                ) for o in rover_obs]
+                inp = RTKInput(
+                    base_ecef=np.asarray(self.base_ecef, dtype=float),
+                    base_obs=base_flat, rover_obs=rover_flat,
+                )
+                sol = RTKFloatSolver().solve(inp)
+                if sol.get("fix_type") == "RTK_FLOAT":
+                    self.last_solution = {
+                        "lat_deg": sol["lat_deg"], "lon_deg": sol["lon_deg"],
+                        "alt": sol["alt"], "fix_type": "RTK_FLOAT",
+                        "num_sats": sol["num_sats"], "hdop": sol["hdop"],
+                    }
+                    return self.last_solution
+            except Exception:
+                pass  # 退回 SPP
+
+        # SPP 兜底
+        if len(spp_obs) >= 4:
+            sol = SPPLocator().locate_multi(spp_obs)
+            self.last_solution = {
+                "lat_deg": sol["lat_deg"], "lon_deg": sol["lon_deg"],
+                "alt": sol["h"], "fix_type": "SPP",
+                "num_sats": sol["n_sat"], "hdop": sol["hdop"],
+            }
+            return self.last_solution
+
+        return {"lat_deg": 0.0, "lon_deg": 0.0, "alt": 0.0,
+                "fix_type": "NONE", "num_sats": len(spp_obs), "hdop": 99.0}
