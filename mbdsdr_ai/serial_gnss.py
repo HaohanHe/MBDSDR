@@ -4,12 +4,13 @@ MBDSDR AI - 真实串口 GNSS 接入（骨架）
 
 把真实 GNSS 模块（USB-TTL / USB-CDC，输出 NMEA-0183）接到本软件：
 
-- ``NMEAParser``      : 解析 GGA/RMC/GSA/GSV/VTG/ZDA 全语句，兼容多星座
+- ``NMEAParser``      : 解析 GGA/RMC/GSA/GSV/VTG/ZDA/GLL/GST/TXT 全语句，兼容多星座
                          talker 前缀 GP/GL/GA/GB/BD/GN（含北斗 BDGGA/GBGSV），
-                        带 NMEA XOR 校验和验证。
+                         GSV 多帧按 talker 聚合，带 NMEA XOR 校验和验证。
 - ``SerialGNSSReader``: 后台线程读串口、逐行解析、维护最新 fix；``auto_detect()``
                         扫描 Windows COM* / Linux /dev/ttyUSB*,/dev/ttyACM* 与
-                        常见波特率，读到合法 NMEA 即锁定。无设备返回 None 不崩溃。
+                        常见波特率，读到合法 NMEA 即锁定；断线自动热插拔重连。
+                        无设备返回 None 不崩溃。
 - ``NTRIPClient``     : 连 NTRIP caster（HTTP GET + Basic Auth），把 RTCM3 原始字节
                         通过回调吐出。接口打通即可，不在此解算 RTCM。
 
