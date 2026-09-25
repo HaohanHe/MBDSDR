@@ -396,6 +396,8 @@ class MainWindow(QMainWindow):
         self.control_panel.volume_changed.connect(self._on_volume_changed)
         self.control_panel.record_toggled.connect(self._on_record_toggled)
         self.control_panel.mode_changed.connect(self._on_mode_changed)
+        self.control_panel.gain_changed.connect(self._on_gain_changed)
+        self.control_panel.squelch_changed.connect(self._on_squelch_changed)
         self.control_panel.tune_sdr_requested.connect(self._on_tune_sdr)
         right_tab.addTab(self.control_panel, "控制")
 
@@ -774,6 +776,17 @@ class MainWindow(QMainWindow):
             pass
 
     @Slot(int)
+    def _on_gain_changed(self, db: int):
+        if self._worker:
+            try:
+                self._worker.request_tool.emit("sdr_set_gain", {"gain_db": float(db)})
+            except Exception:
+                pass
+
+    def _on_squelch_changed(self, dbfs: float):
+        # 本地声卡门控：信号低于此 dBFS 时静音（不下发硬件）
+        self._squelch_db = float(dbfs)
+
     def _on_volume_changed(self, volume: int):
         if self._worker:
             self._worker.request_tool.emit("set_volume", {"volume": volume})
