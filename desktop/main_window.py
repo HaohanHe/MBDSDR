@@ -98,6 +98,8 @@ class MainWindow(QMainWindow):
         # 真实 SDR 后端（SoapySDR/RTL-SDR/HackRF 等）。由设备选择对话框真实 connect 后填充；
         # 与 self._worker（ai-sdr Mini WebSocket）互斥。硬件失败绝不静默切 mock。
         self._active_sdr_backend: Optional[object] = None
+        # NTRIP 配置对话框（非模态）。首次从菜单打开时才创建；保持引用防 GC。
+        self._ntrip_dialog: Optional[object] = None
 
         # ---- 真实数据链路状态（A 频谱 / B baseband 录制 / C 声卡输出）----
         # 统一的 IQ 轮询定时器（50ms / 20fps）：一次 read_samples 同时喂给
@@ -227,6 +229,12 @@ class MainWindow(QMainWindow):
         record_action.setShortcut(QKeySequence("Ctrl+R"))
         record_action.triggered.connect(self._toggle_record)
         tools_menu.addAction(record_action)
+
+        tools_menu.addSeparator()
+
+        ntrip_action = QAction("NTRIP 设置", self)
+        ntrip_action.triggered.connect(self._open_ntrip_dialog)
+        tools_menu.addAction(ntrip_action)
 
         tools_menu.addSeparator()
 
@@ -1204,6 +1212,33 @@ class MainWindow(QMainWindow):
                 break
         self.ai_panel.input_field.setText("扫频 87-108 MHz 找所有电台")
 
+    def _open_ntrip_dialog(self):
+        """打开 NTRIP 配置对话框（非模态）。
+
+        首次打开时创建 NtripConfigDialog 并保持引用 self._ntrip_dialog 防 GC；
+        之后重复打开只是 show()/raise_activate()，不重复构造。
+        """
+        if self._ntrip_dialog is None:
+            try:
+                from ntrip_panel import NtripConfigDialog
+            except Exception:
+                from desktop.ntrip_panel import NtripConfigDialog  # type: ignore
+            dlg = NtripConfigDialog(parent=self)
+            # 回填上次保存的配置（若有）
+            try:
+                import json
+                cfg_file = os.path.expanduser("~/.mbdsdr/gui_config.json")
+                if os.path.exists(cfg_file):
+                    with open(cfg_file, "r") as f:
+                        saved = json.load(f)
+                    dlg.apply_config(saved.get("ntrip"))
+            except Exception:
+                pass
+            self._ntrip_dialog = dlg
+        self._ntrip_dialog.show()
+        self._ntrip_dialog.raise_()
+        self._ntrip_dialog.activateWindow()
+
     def _show_about(self):
         QMessageBox.about(
             self, "关于 MBDSDR",
@@ -1440,6 +1475,22 @@ class MainWindow(QMainWindow):
             pass
         event.accept()
 
+    def _read_ntrip_from_disk(self) -> Optional[dict]:
+        """读取 gui_config.json 里的 ntrip 段（不存在/损坏返回 None）。
+        仅用于「对话框未打开」时保存配置不丢旧值；绝不打印密码。"""
+        import json
+        cfg_file = os.path.expanduser("~/.mbdsdr/gui_config.json")
+        try:
+            if os.path.exists(cfg_file):
+                with open(cfg_file, "r") as f:
+                    cfg = json.load(f)
+                seg = cfg.get("ntrip")
+                if isinstance(seg, dict):
+                    return seg
+        except Exception:
+            pass
+        return None
+
     def _save_gui_config(self):
         """保存 GUI 配置到 ~/.mbdsdr/gui_config.json。"""
         import json
@@ -1463,6 +1514,21 @@ class MainWindow(QMainWindow):
                 "observer_lat": self._observer_lat,
                 "observer_lon": self._observer_lon,
             }
+            # NTRIP 配置：对话框已打开则取当前表单值；否则保留磁盘上的旧值。
+            # 密码本地明文保存（不打印日志），未配置时写空串。
+            ntrip_dlg = getattr(self, "_ntrip_dialog", None)
+            if ntrip_dlg is not None:
+                try:
+                    config["ntrip"] = ntrip_dlg.get_config()
+                except Exception:
+                    pass
+            else:
+                # 对话框未打开：尽量保留已存在的 ntrip 段，避免 _load 后丢配置
+                old = self._read_ntrip_from_disk()
+                config["ntrip"] = old or {
+                    "host": "", "port": 2101,
+                    "mountpoint": "", "username": "", "password": "",
+                }
             with open(config_file, 'w') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
         except Exception:
@@ -1495,5 +1561,12 @@ class MainWindow(QMainWindow):
             theme = config.get("theme", "japanese_light")
             if theme != self._current_theme:
                 self._apply_theme(theme)
+            # NTRIP 配置：对话框已创建则回填；未创建则等 _open_ntrip_dialog 时再读盘。
+            ntrip_dlg = getattr(self, "_ntrip_dialog", None)
+            if ntrip_dlg is not None:
+                try:
+                    ntrip_dlg.apply_config(config.get("ntrip"))
+                except Exception:
+                    pass
         except Exception:
             pass
