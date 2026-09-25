@@ -2,759 +2,814 @@
 MBDSDR 频谱显示组件
 ====================
 优先 OpenGL 渲染，无 OpenGL 时降级为 QPainter 软件渲染。
-支持频谱图、瀑布图、缩放、平移、频率标记。
 
-频谱数据源：真实复数 IQ FFT（Nuttall 窗 + fftshift + dBFS + IIR 平滑）。
-无硬件/无 IQ 数据时显示"未连接/无数据"，不生成模拟峰。
+频谱数据源：真实复数 IQ 采样 → 窗函数 → numpy.fft.fft（复输入）
+→ fftshift → dBFS 归一化 → 多帧幅度平均 → 频率轴映射。
+
+无 SDR / 无 IQ 数据时：频谱区域只画网格 + 红色"未连接 / 无 IQ 数据"提示，
+**不绘制任何谱线、不生成高斯峰、不使用 np.random 造假谱**。
 """
 
-import math
 import numpy as np
 from typing import Optional, List, Tuple
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal, Slot
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QLinearGradient, QImage, QPainterPath, QPolygonF
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import Qt, QRectF, QPointF, Signal, Slot, QTimer
+from PySide6.QtGui import (
+    QPainter, QColor, QPen, QBrush, QFont, QLinearGradient, QImage,
+    QPainterPath, QPolygonF,
+)
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox, QLabel,
+    QDoubleSpinBox,
+)
 
 try:
     from PySide6.QtOpenGLWidgets import QOpenGLWidget
-    from PySide6.QtOpenGL import QOpenGLBuffer, QOpenGLShaderProgram, QOpenGLShader
     HAS_OPENGL = True
 except ImportError:
     HAS_OPENGL = False
 
 
 # ============================================================================
-# 窗函数
+# 日式低饱和配色
 # ============================================================================
 
-# 来源: SDR++ core/src/dsp/window/nuttall.h:5-8 — 4-term Nuttall window。
-# SDR++ 默认 FFT 窗 (core.cpp:128 fftWindow=2=NUTTALL)，旁瓣 -93dB，
-# 比 Hann(-31dB) 更适合"强信号旁找弱信号"。
-def _nuttall_window(n: int) -> np.ndarray:
-    k = np.arange(n, dtype=np.float64)
-    coefs = (0.355768, 0.487396, 0.144232, 0.012604)
-    w = (coefs[0]
-         - coefs[1] * np.cos(2.0 * np.pi * k / (n - 1))
-         + coefs[2] * np.cos(4.0 * np.pi * k / (n - 1))
-         - coefs[3] * np.cos(6.0 * np.pi * k / (n - 1)))
-    return w.astype(np.float32)
+PAL_BG = "#F5F3EF"          # 米白背景
+PAL_GRID = "#5B7B8C"        # 蓝灰 网格/文字
+PAL_LINE = "#C4845C"        # 橙   谱线/游标
+PAL_PEAK = "#6BA89A"        # 绿   峰值标注
+PAL_OFFLINE = "#B85C5C"     # 红   未连接提示
+
+# 瀑布图色带（低饱和，从冷到暖）
+WATERFALL_COLORS = [
+    "#EDEAE4", "#D8DCD8", "#AFC0C4", "#8FA8B0",
+    "#6BA89A", "#9FB07A", "#C4B85C", "#C4845C", "#B85C5C",
+]
 
 
 # ============================================================================
-# 频谱数据生成器（真 IQ FFT，无模拟峰）
+# 频谱数据生成器（真 IQ FFT，无任何合成数据）
 # ============================================================================
 
 class SpectrumDataGenerator:
-    """真 IQ FFT 频谱生成器。无数据时返回平坦底噪，不生成模拟峰。"""
+    """对真实复 IQ 做窗函数 + numpy.fft.fft → fftshift → dBFS → 多帧平均。
 
-    # 固定 FFT 大小（任务要求 1024/2048；2048 兼顾分辨率与帧率）
-    FFT_SIZE = 2048
+    不生成任何模拟峰；无数据时 spectrum 为 NaN（UI 层据此不画谱线）。
+    """
+
+    WINDOWS = ("Hann", "Hamming", "Blackman", "None")
+    FFT_SIZES = (1024, 2048, 4096, 8192)
+    AVG_FRAMES = (1, 4, 8, 16)
 
     def __init__(self, num_bins: int = 512):
         self.num_bins = num_bins
-        self.center_freq = 98.5  # MHz
-        self.span = 4.0  # MHz (±2MHz)
-        # 无数据时频谱为平坦低噪底（-100 dBFS），不画假峰
-        self.spectrum = np.full(num_bins, -100.0, dtype=np.float32)
+        # 单位：Hz
+        self.center_freq_hz = 98.5e6
+        self.sample_rate_hz = 2.4e6
+        # FFT 参数
+        self.window_name = "Hann"      # 默认 Hann
+        self.fft_size = 2048
+        self.avg_frames = 1
+        # 当前帧频谱（长度 num_bins）；NaN 表示无数据 → 不画谱线
+        self.spectrum: np.ndarray = np.full(num_bins, np.nan, dtype=np.float32)
         self.waterfall: List[np.ndarray] = []
-        self.max_waterfall_lines = 200
-        # 是否已收到真实 IQ 数据
+        self.max_waterfall_lines = 120
         self._has_real_data = False
-        # 来源: SDR++ core/src/gui/widgets/waterfall.cpp:914-920
-        # IIR 指数平滑: smooth = alpha*new + (1-alpha)*old
-        self._smoothing_alpha = 0.4  # α≈0.4，任务要求 0.3~0.5
-        self._smoothing_buf: Optional[np.ndarray] = None
+        # 多帧幅度平均累加器（复数 FFT 幅度域平均，降低噪声）
+        self._mag_accum: Optional[np.ndarray] = None
+        self._avg_count = 0
 
-    def set_center_freq(self, freq_mhz: float):
-        self.center_freq = freq_mhz
+    # ------------------------------------------------------------------ 配置
+    def set_window(self, name: str):
+        if name in self.WINDOWS and name != self.window_name:
+            self.window_name = name
+            self._reset_average()
 
-    def set_span(self, span_mhz: float):
-        self.span = max(0.1, span_mhz)
+    def set_fft_size(self, n: int):
+        n = int(n)
+        if n in self.FFT_SIZES and n != self.fft_size:
+            self.fft_size = n
+            self._reset_average()
 
+    def set_avg_frames(self, n: int):
+        n = int(n)
+        if n in self.AVG_FRAMES and n != self.avg_frames:
+            self.avg_frames = n
+            self._reset_average()
+
+    def _reset_average(self):
+        self._mag_accum = None
+        self._avg_count = 0
+
+    # ------------------------------------------------------------------ 状态
     def has_data(self) -> bool:
-        """是否已收到真实 IQ 数据。"""
         return self._has_real_data
 
     def clear_data(self):
-        """断开/清空：恢复到"未连接"状态，不保留旧频谱。"""
+        """断开/清空：回到"未连接"，不保留旧谱线。"""
         self._has_real_data = False
-        self._smoothing_buf = None
-        self.spectrum = np.full(self.num_bins, -100.0, dtype=np.float32)
+        self.spectrum = np.full(self.num_bins, np.nan, dtype=np.float32)
         self.waterfall.clear()
+        self._reset_average()
 
-    # 来源: SDR++ core/src/signal_path/iq_frontend.cpp:248-267 — FFT执行+功率谱
-    # 来源: GQRX src/dsp/rx_fft.cpp:126-156 — fftshift + 幅度谱
-    def push_iq(self, iq: np.ndarray, sample_rate: float):
-        """喂入真实复 IQ，做 Nuttall 窗复数 FFT → fftshift → dBFS → IIR 平滑。"""
+    # ------------------------------------------------------------------ 窗函数
+    def _window(self, n: int) -> np.ndarray:
+        if self.window_name == "Hamming":
+            return np.hamming(n).astype(np.float64)
+        if self.window_name == "Blackman":
+            return np.blackman(n).astype(np.float64)
+        if self.window_name == "None":
+            return np.ones(n, dtype=np.float64)
+        return np.hanning(n).astype(np.float64)   # 默认 Hann
+
+    # ------------------------------------------------------------------ FFT
+    def push_iq(self, iq: np.ndarray, center_freq_hz: float,
+                sample_rate_hz: float):
+        """喂入真实复 IQ，做 窗×fft → fftshift → dBFS → 多帧平均。"""
         x = np.asarray(iq, dtype=np.complex64)
         n = len(x)
         if n < 64:
             return
 
-        # 截取/补零到固定 FFT_SIZE
-        fft_size = self.FFT_SIZE
-        if n >= fft_size:
-            x = x[:fft_size]
+        self.center_freq_hz = float(center_freq_hz)
+        self.sample_rate_hz = float(sample_rate_hz)
+
+        N = self.fft_size
+        if n >= N:
+            x = x[:N]
         else:
-            x = np.concatenate([x, np.zeros(fft_size - n, dtype=np.complex64)])
+            x = np.concatenate([x, np.zeros(N - n, dtype=np.complex64)])
 
-        # 来源: SDR++ iq_frontend.cpp:252 — 窗乘 (Nuttall, nuttall.h:5-8)
-        win = _nuttall_window(fft_size)
+        # 真实窗函数
+        win = self._window(N)
 
-        # 来源: SDR++ iq_frontend.cpp:257 — 复数 FFT（复 IQ 必须用 fft 而非 rfft）
+        # 复 IQ 必须用 np.fft.fft（不是 rfft）
         spec = np.fft.fft(x * win)
-        # 来源: SDR++ iq_frontend.cpp:283-291 / GQRX rx_fft.cpp:126-156
-        # fftshift 把 DC 搬到频谱中心
+        # DC 搬到中心
         spec = np.fft.fftshift(spec)
 
-        # dBFS: 20*log10(|X| / 窗相干增益归一化)
-        # 窗相干增益 = mean(win)；满幅正弦波峰 = fft_size/2 * win_cg
+        # dBFS 归一化：满幅正弦波峰 = N * 窗相干增益 / 2
         win_cg = float(np.mean(win))
-        mag = np.abs(spec) / (fft_size * win_cg / 2.0)
-        power_db = 20.0 * np.log10(mag + 1e-12).astype(np.float32)
+        mag = np.abs(spec) / (N * win_cg / 2.0)
 
-        # 重采样到 num_bins。
-        # 来源: SDR++ core/src/gui/widgets/waterfall.cpp:81-87 — max 抽取
-        # （窄脉冲信号在缩小时不被平均抹平）
-        if len(power_db) != self.num_bins:
-            edges = np.linspace(0, len(power_db), self.num_bins + 1).astype(int)
-            resampled = np.empty(self.num_bins, dtype=np.float32)
-            for i in range(self.num_bins):
-                lo, hi = edges[i], edges[i + 1]
-                seg = power_db[lo:hi]
-                resampled[i] = float(np.max(seg)) if seg.size else -120.0
-            power_db = resampled
-
-        # 来源: SDR++ waterfall.cpp:914-920 — IIR 指数平滑
-        # smooth = alpha*new + beta*old, beta = 1-alpha
-        if self._smoothing_buf is None or len(self._smoothing_buf) != self.num_bins:
-            self._smoothing_buf = power_db.copy()
+        # 多帧幅度平均
+        if self._mag_accum is None or len(self._mag_accum) != N:
+            self._mag_accum = mag.copy()
+            self._avg_count = 1
         else:
-            a = self._smoothing_alpha
-            self._smoothing_buf = a * power_db + (1.0 - a) * self._smoothing_buf
+            self._mag_accum += mag
+            self._avg_count += 1
 
-        self.spectrum = self._smoothing_buf.astype(np.float32)
-        self.span = sample_rate / 1e6
+        if self._avg_count < self.avg_frames:
+            return  # 帧数不足，等下一帧
+
+        avg_mag = self._mag_accum / self._avg_count
+        self._reset_average()
+
+        power_db = (20.0 * np.log10(avg_mag + 1e-12)).astype(np.float32)
+
+        # 重采样到 num_bins（max 抽取，窄脉冲不被平均抹平）
+        self.spectrum = self._resample_max(power_db)
         self._has_real_data = True
 
-        # 瀑布追加
         self.waterfall.append(self.spectrum.copy())
         if len(self.waterfall) > self.max_waterfall_lines:
             self.waterfall.pop(0)
 
-    def generate(self) -> np.ndarray:
-        """返回当前帧频谱。有真 IQ 返真频谱；无数据返平坦底噪（不画模拟峰）。"""
-        if self._has_real_data:
-            return self.spectrum
-        # 无硬件/无数据：返回平坦低噪底，由 UI 层画"未连接"文字
-        return np.full(self.num_bins, -100.0, dtype=np.float32)
+    def _resample_max(self, spec: np.ndarray) -> np.ndarray:
+        if len(spec) == self.num_bins:
+            return spec.astype(np.float32)
+        edges = np.linspace(0, len(spec), self.num_bins + 1).astype(int)
+        out = np.empty(self.num_bins, dtype=np.float32)
+        for i in range(self.num_bins):
+            lo, hi = edges[i], edges[i + 1]
+            seg = spec[lo:hi]
+            out[i] = float(seg.max()) if seg.size else -120.0
+        return out
 
-    def get_freq_at_x(self, x_ratio: float) -> float:
-        """根据 x 位置比例 (0-1) 获取频率。"""
-        return self.center_freq - self.span / 2 + x_ratio * self.span
+    # ------------------------------------------------------------------ 频率轴
+    def bin_to_freq(self, idx: int) -> float:
+        """第 idx 个 bin 中心频率（Hz）。center ± sample_rate/2。"""
+        idx = max(0, min(self.num_bins - 1, idx))
+        return (self.center_freq_hz - self.sample_rate_hz / 2.0
+                + self.sample_rate_hz * (idx + 0.5) / self.num_bins)
+
+    def freq_to_bin(self, freq_hz: float) -> int:
+        f0 = self.center_freq_hz - self.sample_rate_hz / 2.0
+        idx = int(round((freq_hz - f0) / self.sample_rate_hz * self.num_bins))
+        return max(0, min(self.num_bins - 1, idx))
+
+    def value_at_freq(self, freq_hz: float) -> Optional[float]:
+        """返回该频率的功率(dBFS)；无数据返回 None。读取真实频谱数组。"""
+        if not self._has_real_data:
+            return None
+        v = self.spectrum[self.freq_to_bin(freq_hz)]
+        return float(v) if np.isfinite(v) else None
+
+    def find_peaks(self, rel_threshold_db: float,
+                   max_peaks: int = 8) -> List[Tuple[float, float]]:
+        """检测高于"噪声底 + rel_threshold_db"的局部极大值。
+
+        返回 [(freq_hz, power_db), ...]，按功率降序。无数据返回 []。
+        """
+        if not self._has_real_data:
+            return []
+        s = self.spectrum
+        if len(s) < 3:
+            return []
+        floor = float(np.nanmedian(s))
+        thresh = floor + rel_threshold_db
+        peaks: List[Tuple[float, float]] = []
+        for i in range(1, len(s) - 1):
+            v = s[i]
+            if not np.isfinite(v):
+                continue
+            if v >= s[i - 1] and v > s[i + 1] and v >= thresh:
+                peaks.append((self.bin_to_freq(i), float(v)))
+        peaks.sort(key=lambda p: p[1], reverse=True)
+        return peaks[:max_peaks]
 
 
 # ============================================================================
-# 颜色映射
+# 颜色工具
 # ============================================================================
 
 def value_to_color(value: float, min_val: float, max_val: float,
-                    colors: List[str]) -> QColor:
-    """将数值映射到颜色（频谱渐变）。"""
+                   colors: List[str]) -> QColor:
     if max_val <= min_val:
         return QColor(colors[0])
-
-    ratio = (value - min_val) / (max_val - min_val)
-    ratio = max(0.0, min(1.0, ratio))
-
-    # 在颜色列表中插值
+    ratio = max(0.0, min(1.0, (value - min_val) / (max_val - min_val)))
     n = len(colors) - 1
     idx = ratio * n
     i = int(idx)
     f = idx - i
-
     if i >= n:
         return QColor(colors[n])
-
-    c1 = QColor(colors[i])
-    c2 = QColor(colors[min(i + 1, n)])
-
+    c1, c2 = QColor(colors[i]), QColor(colors[min(i + 1, n)])
     r = int(c1.red() + (c2.red() - c1.red()) * f)
     g = int(c1.green() + (c2.green() - c1.green()) * f)
     b = int(c1.blue() + (c2.blue() - c1.blue()) * f)
-
     return QColor(r, g, b)
 
 
 # ============================================================================
-# 频谱组件（QPainter 软件渲染，基础版，OpenGL 不可用时使用）
+# 绘图共享逻辑（QPainter 软件渲染 / QPainter-on-OpenGL 共用）
 # ============================================================================
 
-class SpectrumWidget(QWidget):
-    """频谱显示组件（QPainter 软件渲染版，OpenGL 不可用时使用）。"""
+class _PlotState:
+    """两个渲染路径共享的交互状态。"""
 
-    freq_changed = Signal(float)  # 用户点击/拖拽改变中心频率
+    def __init__(self, panel: "SpectrumPanel"):
+        self.panel = panel
+        self.db_min = -100.0
+        self.db_max = -20.0
+        self.show_waterfall = True
+        self.mouse_x_ratio: Optional[float] = None     # 鼠标悬停 x 比例
+        self.mouse_in_spectrum = False
+        self.markers: List[float] = []                 # 固定 marker 频率 Hz
+        self.show_peaks = True
+        self.peak_rel_db = 6.0
 
-    def __init__(self, parent=None):
+
+def _render_plot(painter: QPainter, state: _PlotState, w: int, h: int):
+    panel = state.panel
+    gen = panel.generator
+    has_data = gen.has_data()
+
+    bg = QColor(panel.color_bg)
+    grid = QColor(panel.color_grid)
+    text = QColor(panel.color_text)
+    line = QColor(panel.color_line)
+
+    # 背景
+    painter.fillRect(0, 0, w, h, bg)
+
+    if state.show_waterfall:
+        spectrum_h = int(h * 0.55)
+    else:
+        spectrum_h = h
+    waterfall_h = h - spectrum_h
+
+    spec_rect = QRectF(0, 0, w, spectrum_h)
+    wf_rect = QRectF(0, spectrum_h, w, waterfall_h)
+
+    _draw_grid(painter, spec_rect, grid)
+
+    # ---- 频谱曲线：仅在有真 IQ 数据时绘制 ----
+    if has_data:
+        _draw_spectrum(painter, state, spec_rect, line)
+        _draw_peaks(painter, state, spec_rect, QColor(PAL_PEAK))
+    else:
+        # 无数据：空白谱面 + 红色提示（不画任何谱线）
+        painter.setPen(QPen(QColor(PAL_OFFLINE), 1))
+        f = QFont()
+        f.setPointSize(13)
+        painter.setFont(f)
+        msg = "未连接 / 无 IQ 数据"
+        tw = painter.fontMetrics().horizontalAdvance(msg)
+        painter.drawText(QPointF((w - tw) / 2, spectrum_h / 2), msg)
+
+    # 中心频率游标
+    _draw_center_cursor(painter, spec_rect, QColor(PAL_LINE))
+
+    # 悬停读数 + 固定 marker（都读真实数组）
+    if has_data:
+        _draw_hover_readout(painter, state, spec_rect, text, line)
+        _draw_fixed_markers(painter, state, spec_rect, line)
+
+    # 瀑布图（仅在有数据时追加过内容）
+    if state.show_waterfall and waterfall_h > 0 and gen.waterfall:
+        _draw_waterfall(painter, wf_rect, state)
+        painter.setPen(QPen(grid, 1))
+        painter.drawLine(QPointF(0, wf_rect.y()), QPointF(w, wf_rect.y()))
+
+    _draw_freq_scale(painter, spec_rect, gen, text)
+    _draw_db_scale(painter, spec_rect, state, text)
+
+
+def _draw_grid(painter, rect, grid):
+    painter.setPen(QPen(grid, 1, Qt.DashLine))
+    for i in range(1, 5):
+        x = rect.x() + rect.width() * i / 5
+        painter.drawLine(QPointF(x, rect.y()),
+                         QPointF(x, rect.y() + rect.height()))
+    for i in range(1, 4):
+        y = rect.y() + rect.height() * i / 4
+        painter.drawLine(QPointF(rect.x(), y),
+                         QPointF(rect.x() + rect.width(), y))
+
+
+def _db_to_y(rect, db, db_min, db_max):
+    h = rect.height()
+    ratio = (db - db_min) / (db_max - db_min)
+    ratio = max(0.0, min(1.0, ratio))
+    return rect.y() + rect.height() - ratio * h * 0.92
+
+
+def _draw_spectrum(painter, state, rect, line_color):
+    gen = state.panel.generator
+    spec = gen.spectrum
+    n = len(spec)
+    if n == 0:
+        return
+    w = rect.width()
+    path = QPainterPath()
+    fill = QPainterPath()
+    fill.moveTo(rect.x(), rect.y() + rect.height())
+    for i in range(n):
+        x = rect.x() + w * i / (n - 1)
+        db = spec[i]
+        if not np.isfinite(db):
+            db = state.db_min
+        y = _db_to_y(rect, db, state.db_min, state.db_max)
+        if i == 0:
+            path.moveTo(x, y)
+        else:
+            path.lineTo(x, y)
+        fill.lineTo(x, y)
+    fill.lineTo(rect.x() + w, rect.y() + rect.height())
+    fill.closeSubpath()
+    # 低饱和橙渐变填充
+    grad = QLinearGradient(0, rect.y(), 0, rect.y() + rect.height())
+    grad.setColorAt(0.0, QColor(PAL_LINE).lighter(130))
+    grad.setColorAt(1.0, QColor(PAL_LINE).darker(160))
+    painter.fillPath(fill, QBrush(grad))
+    painter.setPen(QPen(line_color, 2))
+    painter.drawPath(path)
+
+
+def _draw_center_cursor(painter, rect, color):
+    cx = rect.x() + rect.width() / 2
+    painter.setPen(QPen(color, 1, Qt.DashLine))
+    painter.drawLine(QPointF(cx, rect.y()),
+                     QPointF(cx, rect.y() + rect.height()))
+    painter.setBrush(QBrush(color))
+    painter.setPen(Qt.NoPen)
+    painter.drawPolygon(QPolygonF([
+        QPointF(cx - 6, rect.y()),
+        QPointF(cx + 6, rect.y()),
+        QPointF(cx, rect.y() + 10),
+    ]))
+
+
+def _draw_peaks(painter, state, rect, color):
+    gen = state.panel.generator
+    peaks = gen.find_peaks(state.peak_rel_db) if state.show_peaks else []
+    if not peaks:
+        return
+    painter.setPen(QPen(color, 1))
+    painter.setBrush(QBrush(color))
+    f = QFont()
+    f.setPointSize(8)
+    painter.setFont(f)
+    for freq_hz, db in peaks:
+        idx = gen.freq_to_bin(freq_hz)
+        x = rect.x() + rect.width() * idx / (gen.num_bins - 1)
+        y = _db_to_y(rect, db, state.db_min, state.db_max)
+        painter.drawEllipse(QPointF(x, y), 3, 3)
+        label = f"{freq_hz/1e6:.3f}MHz {db:.1f}dB"
+        painter.drawText(QPointF(x + 6, y - 6), label)
+
+
+def _draw_hover_readout(painter, state, rect, text_color, line_color):
+    if state.mouse_x_ratio is None or not state.mouse_in_spectrum:
+        return
+    gen = state.panel.generator
+    freq_hz = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
+               + state.mouse_x_ratio * gen.sample_rate_hz)
+    x = rect.x() + state.mouse_x_ratio * rect.width()
+    val = gen.value_at_freq(freq_hz)
+    painter.setPen(QPen(line_color, 1, Qt.DashLine))
+    painter.drawLine(QPointF(x, rect.y()),
+                     QPointF(x, rect.y() + rect.height()))
+    painter.setPen(QPen(text_color, 1))
+    f = QFont()
+    f.setPointSize(9)
+    painter.setFont(f)
+    db_txt = f"{val:.1f} dBFS" if val is not None else "--"
+    painter.drawText(QPointF(rect.x() + 6, rect.y() + 14),
+                     f"{freq_hz/1e6:.4f} MHz   {db_txt}")
+
+
+def _draw_fixed_markers(painter, state, rect, color):
+    gen = state.panel.generator
+    f = QFont()
+    f.setPointSize(8)
+    for freq_hz in state.markers:
+        idx = gen.freq_to_bin(freq_hz)
+        x = rect.x() + rect.width() * idx / (gen.num_bins - 1)
+        val = gen.value_at_freq(freq_hz)
+        painter.setPen(QPen(color, 1))
+        painter.drawLine(QPointF(x, rect.y()),
+                         QPointF(x, rect.y() + rect.height()))
+        painter.setFont(f)
+        db_txt = f"{val:.1f}dB" if val is not None else "--"
+        painter.drawText(QPointF(x + 4, rect.y() + 26),
+                         f"{freq_hz/1e6:.3f}MHz {db_txt}")
+
+
+def _draw_waterfall(painter, rect, state):
+    gen = state.panel.generator
+    w = int(rect.width())
+    n_lines = min(len(gen.waterfall), int(rect.height()))
+    if n_lines <= 0:
+        return
+    image = QImage(w, n_lines, QImage.Format_RGB32)
+    rows = len(gen.waterfall)
+    for row in range(n_lines):
+        idx = rows - 1 - row
+        spec = gen.waterfall[idx]
+        n = len(spec)
+        for col in range(w):
+            si = min(int(col * n / w), n - 1)
+            v = spec[si] if np.isfinite(spec[si]) else state.db_min
+            c = value_to_color(v, state.db_min, state.db_max, WATERFALL_COLORS)
+            image.setPixelColor(col, row, c)
+    painter.drawImage(rect, image)
+
+
+def _draw_freq_scale(painter, rect, gen, text_color):
+    painter.setPen(text_color)
+    f = QFont()
+    f.setPointSize(8)
+    painter.setFont(f)
+    span = gen.sample_rate_hz
+    for i in range(5):
+        freq = gen.center_freq_hz - span / 2.0 + span * i / 4.0
+        x = rect.x() + rect.width() * i / 4.0
+        s = f"{freq/1e6:.2f}"
+        tw = painter.fontMetrics().horizontalAdvance(s)
+        painter.drawText(QPointF(x - tw / 2, rect.y() + rect.height() + 14), s)
+
+
+def _draw_db_scale(painter, rect, state, text_color):
+    painter.setPen(text_color)
+    f = QFont()
+    f.setPointSize(8)
+    painter.setFont(f)
+    for i in range(5):
+        db = state.db_max - (state.db_max - state.db_min) * i / 4.0
+        y = rect.y() + rect.height() * 0.92 * i / 4.0 + rect.height() * 0.04
+        painter.drawText(QPointF(rect.x() + 4, y + 4), f"{db:.0f}")
+
+
+# ============================================================================
+# 频谱面板（容器：工具栏 + 绘图表面）—— main_window 直接操作的对象
+# ============================================================================
+
+class SpectrumPanel(QWidget):
+    """对外统一接口。包含参数工具栏与实际绘图表面（QPainter / OpenGL）。"""
+
+    freq_changed = Signal(float)   # MHz
+
+    def __init__(self, parent=None, prefer_opengl: bool = False):
         super().__init__(parent)
         self.generator = SpectrumDataGenerator(num_bins=512)
-        self.spectrum_colors = [
-            "#4A6B7C", "#5B8C9A", "#6BA89A", "#8FB87A",
-            "#C4B85C", "#C49A5C", "#C4845C", "#B86B5C",
-        ]
-        self.bg_color = QColor("#1E1E20")
-        self.grid_color = QColor("#3A3A3E")
-        self.text_color = QColor("#D0D0D0")
-        self.line_color = QColor("#7A9CAC")
-        self.marker_color = QColor("#D4956A")
 
-        self._zoom_factor = 1.0
-        self._pan_offset = 0.0
-        self._last_mouse_x = 0
-        self._is_panning = False
-        self._show_waterfall = True
-        self._db_min = -100
-        self._db_max = -20
+        # 配色（默认日式低饱和；set_theme_colors 可覆盖 bg/grid/text/line）
+        self.color_bg = PAL_BG
+        self.color_grid = PAL_GRID
+        self.color_text = PAL_GRID
+        self.color_line = PAL_LINE
 
-        self.setMinimumHeight(300)
-        self.setMouseTracking(True)
+        self._state = _PlotState(self)
 
-        # 定时器刷新
-        from PySide6.QtCore import QTimer
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._on_timer)
-        self._timer.start(50)  # 20 FPS
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(2)
 
-    def set_theme_colors(self, bg: str, grid: str, text: str, line: str,
-                          marker: str, spectrum_colors: List[str]):
-        """设置主题颜色。"""
-        self.bg_color = QColor(bg)
-        self.grid_color = QColor(grid)
-        self.text_color = QColor(text)
-        self.line_color = QColor(line)
-        self.marker_color = QColor(marker)
-        self.spectrum_colors = spectrum_colors
-        self.update()
+        root.addLayout(self._build_toolbar())
 
+        # 选择绘图表面
+        if prefer_opengl and HAS_OPENGL:
+            self._plot = SpectrumGLPlot(self._state)
+        else:
+            self._plot = SpectrumPlot(self._state)
+        root.addWidget(self._plot, stretch=1)
+
+        # 初始：未连接 → 控件置灰
+        self._connected = False
+        self._set_controls_enabled(False)
+
+    # ------------------------------------------------------------------ 工具栏
+    def _build_toolbar(self) -> QHBoxLayout:
+        bar = QHBoxLayout()
+        bar.setContentsMargins(4, 0, 4, 0)
+        bar.setSpacing(6)
+
+        bar.addWidget(QLabel("窗:"))
+        self._win_combo = QComboBox()
+        self._win_combo.addItems(SpectrumDataGenerator.WINDOWS)
+        self._win_combo.setCurrentText("Hann")
+        self._win_combo.currentTextChanged.connect(self.generator.set_window)
+        bar.addWidget(self._win_combo)
+
+        bar.addWidget(QLabel("FFT:"))
+        self._fft_combo = QComboBox()
+        self._fft_combo.addItems([str(s) for s in SpectrumDataGenerator.FFT_SIZES])
+        self._fft_combo.setCurrentText("2048")
+        self._fft_combo.currentTextChanged.connect(
+            lambda t: self.generator.set_fft_size(int(t)))
+        bar.addWidget(self._fft_combo)
+
+        bar.addWidget(QLabel("平均:"))
+        self._avg_combo = QComboBox()
+        self._avg_combo.addItems([str(a) for a in SpectrumDataGenerator.AVG_FRAMES])
+        self._avg_combo.setCurrentText("1")
+        self._avg_combo.currentTextChanged.connect(
+            lambda t: self.generator.set_avg_frames(int(t)))
+        bar.addWidget(self._avg_combo)
+
+        self._peak_chk = QCheckBox("峰值")
+        self._peak_chk.setChecked(True)
+        self._peak_chk.toggled.connect(
+            lambda on: setattr(self._state, "show_peaks", bool(on)))
+        bar.addWidget(self._peak_chk)
+
+        bar.addWidget(QLabel("阈值dB:"))
+        self._peak_spin = QDoubleSpinBox()
+        self._peak_spin.setRange(1.0, 30.0)
+        self._peak_spin.setValue(self._state.peak_rel_db)
+        self._peak_spin.setSingleStep(1.0)
+        self._peak_spin.valueChanged.connect(
+            lambda v: setattr(self._state, "peak_rel_db", float(v)))
+        bar.addWidget(self._peak_spin)
+
+        bar.addStretch(1)
+        return bar
+
+    def _set_controls_enabled(self, on: bool):
+        for w_ in (self._win_combo, self._fft_combo, self._avg_combo,
+                   self._peak_chk, self._peak_spin):
+            w_.setEnabled(on)
+
+    # ------------------------------------------------------------------ 对外接口
+    @Slot(bool)
+    def set_connected(self, connected: bool):
+        """外部通知 SDR 连接状态。断开时清空频谱并禁用控件。"""
+        self._connected = bool(connected)
+        self._set_controls_enabled(self._connected)
+        if not self._connected:
+            self.generator.clear_data()
+            self._state.markers.clear()
+        self._plot.update()
+
+    def clear(self):
+        """清空频谱（未连接语义）。"""
+        self.set_connected(False)
+
+    @Slot(object, float, float)
+    def update_iq(self, iq_data: np.ndarray, center_freq_hz: float,
+                  sample_rate_hz: float):
+        """真接 SDR 复 IQ：做窗+fft+dBFS+平均。"""
+        self.generator.push_iq(iq_data, center_freq_hz, sample_rate_hz)
+        self._plot.update()
+
+    # 向后兼容：main_window 当前调用 set_iq_data(iq, sample_rate)
+    @Slot(object, float)
+    def set_iq_data(self, iq, sample_rate: float = 2_400_000.0):
+        cf = self.generator.center_freq_hz
+        self.update_iq(iq, cf, sample_rate)
+
+    @Slot(float)
     def set_center_freq(self, freq_mhz: float):
-        self.generator.set_center_freq(freq_mhz)
-        self.update()
+        """兼容接口：主窗口以 MHz 设置中心频率。"""
+        self.generator.center_freq_hz = float(freq_mhz) * 1e6
+        self._plot.update()
 
     def set_span(self, span_mhz: float):
-        self.generator.set_span(span_mhz)
-        self.update()
+        """兼容：缩放窗口（span 实际由采样率决定，这里仅触发重绘）。"""
+        self._plot.update()
 
     def toggle_waterfall(self):
-        self._show_waterfall = not self._show_waterfall
-        self.update()
+        self._state.show_waterfall = not self._state.show_waterfall
+        self._plot.update()
 
-    @Slot()
-    def set_iq_data(self, iq, sample_rate: float = 2_400_000.0):
-        """喂入真 IQ 采样（numpy complex 数组），走 generator 真 FFT 管线。
-        sample_rate: IQ 采样率 Hz，用于设置频谱 span。"""
-        arr = np.asarray(iq, dtype=np.complex64)
-        if len(arr) < 64:
-            return
-        # 统一走 generator.push_iq（Nuttall 窗 + 复 FFT + fftshift + dBFS + IIR 平滑）
-        self.generator.push_iq(arr, sample_rate)
+    def set_theme_colors(self, bg, grid, text, line, marker, spectrum_colors):
+        """兼容 main_window 主题；峰色/离线色固定为日式低饱和。"""
+        self.color_bg = QColor(bg)
+        self.color_grid = QColor(grid)
+        self.color_text = QColor(text)
+        self.color_line = QColor(line)
+        self._plot.update()
 
-    def set_connected(self, connected: bool):
-        """外部通知连接状态。断开时清空真数据，显示"未连接"。"""
-        if not connected:
-            self.generator.clear_data()
+    # ------------------------------------------------------------------ 交互转发
+    def on_plot_freq_changed(self, freq_mhz: float):
+        self.freq_changed.emit(freq_mhz)
 
-    def _on_timer(self):
-        # 统一从 generator 取数据：有真 IQ 返真频谱，无数据返平坦底噪
-        self.generator.generate()
-        self.update()
 
-    # ========================================================================
-    # 绘制
-    # ========================================================================
+# ============================================================================
+# 绘图表面：QPainter 软件渲染
+# ============================================================================
+
+class SpectrumPlot(QWidget):
+    def __init__(self, state: _PlotState, parent=None):
+        super().__init__(parent)
+        self.state = state
+        self.setMinimumHeight(300)
+        self.setMouseTracking(True)
+        self._press_x = None
+        self._is_panning = False
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.update)
+        self._timer.start(50)
 
     def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        _render_plot(p, self.state, self.width(), self.height())
+        p.end()
 
-        w = self.width()
-        h = self.height()
+    # ---- 鼠标 ----
+    def _x_ratio(self, event):
+        return event.position().x() / max(1, self.width())
 
-        # 背景
-        painter.fillRect(self.rect(), self.bg_color)
-
-        # 计算频谱区域和瀑布图区域
-        if self._show_waterfall:
-            spectrum_h = int(h * 0.5)
-            waterfall_h = h - spectrum_h
-        else:
-            spectrum_h = h
-            waterfall_h = 0
-
-        spectrum_rect = QRectF(0, 0, w, spectrum_h)
-        waterfall_rect = QRectF(0, spectrum_h, w, waterfall_h)
-
-        # 绘制网格
-        self._draw_grid(painter, spectrum_rect)
-
-        # 绘制频谱
-        self._draw_spectrum(painter, spectrum_rect)
-
-        # 绘制中心频率标记
-        self._draw_marker(painter, spectrum_rect)
-
-        # 绘制瀑布图
-        if self._show_waterfall and waterfall_h > 0:
-            self._draw_waterfall(painter, waterfall_rect)
-
-        # 绘制频率刻度
-        self._draw_freq_scale(painter, spectrum_rect)
-
-        # 绘制 dB 刻度
-        self._draw_db_scale(painter, spectrum_rect)
-
-        painter.end()
-
-    def _draw_grid(self, painter: QPainter, rect: QRectF):
-        """绘制网格。"""
-        painter.setPen(QPen(self.grid_color, 1, Qt.DashLine))
-
-        # 垂直网格线（5 条）
-        for i in range(1, 5):
-            x = rect.x() + rect.width() * i / 5
-            painter.drawLine(QPointF(x, rect.y()), QPointF(x, rect.y() + rect.height()))
-
-        # 水平网格线（4 条）
-        for i in range(1, 4):
-            y = rect.y() + rect.height() * i / 4
-            painter.drawLine(QPointF(rect.x(), y), QPointF(rect.x() + rect.width(), y))
-
-    def _draw_spectrum(self, painter: QPainter, rect: QRectF):
-        """绘制频谱曲线。数据统一来自 generator（真 FFT 或平坦底噪）。"""
-        spectrum = self.generator.spectrum
-        if len(spectrum) == 0:
-            return
-
-        w = rect.width()
-        h = rect.height()
-        n = len(spectrum)
-
-        # 构建路径
-        path = QPainterPath()
-        fill_path = QPainterPath()
-        fill_path.moveTo(rect.x(), rect.y() + rect.height())
-
-        for i in range(n):
-            x = rect.x() + w * i / (n - 1)
-            db_val = spectrum[i]
-            # 映射 dB 到 y 坐标（db_min -> 底部, db_max -> 顶部）
-            ratio = (db_val - self._db_min) / (self._db_max - self._db_min)
-            ratio = max(0.0, min(1.0, ratio))
-            y = rect.y() + rect.height() - ratio * h * 0.9
-
-            if i == 0:
-                path.moveTo(x, y)
-            else:
-                path.lineTo(x, y)
-            fill_path.lineTo(x, y)
-
-        fill_path.lineTo(rect.x() + w, rect.y() + rect.height())
-        fill_path.closeSubpath()
-
-        # 填充渐变
-        gradient = QLinearGradient(0, rect.y(), 0, rect.y() + rect.height())
-        gradient.setColorAt(0.0, QColor(self.spectrum_colors[-1]).lighter(120))
-        gradient.setColorAt(0.5, QColor(self.spectrum_colors[len(self.spectrum_colors)//2]).lighter(110))
-        gradient.setColorAt(1.0, QColor(self.spectrum_colors[0]).darker(150))
-        painter.fillPath(fill_path, QBrush(gradient))
-
-        # 绘制曲线
-        painter.setPen(QPen(self.line_color, 2))
-        painter.drawPath(path)
-
-        # 无数据时画"未连接/无数据"提示，不显示模拟峰
-        if not self.generator.has_data():
-            painter.setPen(QPen(self.text_color, 1))
-            font = QFont()
-            font.setPointSize(12)
-            painter.setFont(font)
-            text = "未连接 / 无 IQ 数据"
-            metrics = painter.fontMetrics()
-            tw = metrics.horizontalAdvance(text)
-            painter.drawText(
-                QPointF(rect.x() + (w - tw) / 2, rect.y() + rect.height() / 2),
-                text
-            )
-
-    def _draw_marker(self, painter: QPainter, rect: QRectF):
-        """绘制中心频率标记。"""
-        center_x = rect.x() + rect.width() / 2
-
-        # 垂直线
-        pen = QPen(self.marker_color, 1, Qt.DashLine)
-        painter.setPen(pen)
-        painter.drawLine(QPointF(center_x, rect.y()), QPointF(center_x, rect.y() + rect.height()))
-
-        # 标记三角形
-        painter.setBrush(QBrush(self.marker_color))
-        painter.setPen(Qt.NoPen)
-        triangle = QPolygonF([
-            QPointF(center_x - 6, rect.y()),
-            QPointF(center_x + 6, rect.y()),
-            QPointF(center_x, rect.y() + 10),
-        ])
-        painter.drawPolygon(triangle)
-
-    def _draw_waterfall(self, painter: QPainter, rect: QRectF):
-        """绘制瀑布图。"""
-        if not self.generator.waterfall:
-            return
-
-        w = int(rect.width())
-        h = int(rect.height())
-        n_lines = min(len(self.generator.waterfall), h)
-
-        # 创建图像
-        image = QImage(w, n_lines, QImage.Format_RGB32)
-
-        for row in range(n_lines):
-            # 从最新到最旧（最新在底部）
-            idx = len(self.generator.waterfall) - 1 - row
-            if idx < 0:
-                break
-            spectrum = self.generator.waterfall[idx]
-            n = len(spectrum)
-
-            for col in range(w):
-                spec_idx = int(col * n / w)
-                if spec_idx >= n:
-                    spec_idx = n - 1
-                color = value_to_color(
-                    spectrum[spec_idx],
-                    self._db_min, self._db_max,
-                    self.spectrum_colors
-                )
-                image.setPixelColor(col, row, color)
-
-        # 绘制图像（拉伸到瀑布图区域）
-        painter.drawImage(rect, image)
-
-        # 分隔线
-        painter.setPen(QPen(self.grid_color, 1))
-        painter.drawLine(QPointF(rect.x(), rect.y()), QPointF(rect.x() + rect.width(), rect.y()))
-
-    def _draw_freq_scale(self, painter: QPainter, rect: QRectF):
-        """绘制频率刻度。"""
-        painter.setPen(self.text_color)
-        font = QFont()
-        font.setPointSize(8)
-        painter.setFont(font)
-
-        center = self.generator.center_freq
-        span = self.generator.span
-
-        for i in range(5):
-            freq = center - span / 2 + span * i / 4
-            x = rect.x() + rect.width() * i / 4
-            text = f"{freq:.1f}"
-            metrics = painter.fontMetrics()
-            text_w = metrics.horizontalAdvance(text)
-            painter.drawText(QPointF(x - text_w / 2, rect.y() + rect.height() + 14), text)
-
-    def _draw_db_scale(self, painter: QPainter, rect: QRectF):
-        """绘制 dB 刻度。"""
-        painter.setPen(self.text_color)
-        font = QFont()
-        font.setPointSize(8)
-        painter.setFont(font)
-
-        for i in range(5):
-            db = self._db_max - (self._db_max - self._db_min) * i / 4
-            y = rect.y() + rect.height() * 0.9 * i / 4 + rect.height() * 0.05
-            text = f"{db:.0f}"
-            painter.drawText(QPointF(rect.x() + 4, y + 4), text)
-
-    # ========================================================================
-    # 鼠标交互（缩放、平移、点击选频）
-    # ========================================================================
-
-    def wheelEvent(self, event):
-        """鼠标滚轮缩放。"""
-        delta = event.angleDelta().y()
-        if delta > 0:
-            self._zoom_factor *= 1.1
-        else:
-            self._zoom_factor /= 1.1
-
-        self._zoom_factor = max(0.1, min(10.0, self._zoom_factor))
-        new_span = self.generator.span / self._zoom_factor if delta > 0 else self.generator.span * self._zoom_factor
-        self.generator.set_span(max(0.1, new_span))
-        self._zoom_factor = 1.0  # 重置，因为已经应用到 span
+    def mouseMoveEvent(self, event):
+        r = self._x_ratio(event)
+        self.state.mouse_x_ratio = r
+        self.state.mouse_in_spectrum = True
+        if self._is_panning:
+            dx = event.position().x() - self._press_anchor_x
+            gen = self.state.panel.generator
+            shift = -dx / max(1, self.width()) * gen.sample_rate_hz
+            gen.center_freq_hz += shift
+            self._press_anchor_x = event.position().x()
+            self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
         self.update()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
+            self._press_x = event.position().x()
+            self._press_anchor_x = event.position().x()
             self._is_panning = True
-            self._last_mouse_x = event.position().x()
-
-    def mouseMoveEvent(self, event):
-        if self._is_panning:
-            dx = event.position().x() - self._last_mouse_x
-            self._last_mouse_x = event.position().x()
-            # 平移中心频率
-            freq_shift = -dx / self.width() * self.generator.span
-            self.generator.set_center_freq(self.generator.center_freq + freq_shift)
-            self.freq_changed.emit(self.generator.center_freq)
-            self.update()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
+            moved = abs(event.position().x() - (self._press_x or 0))
             self._is_panning = False
+            # 小位移 = 点击放置固定 marker（读真实数组）
+            if moved <= 4 and self.state.panel.generator.has_data():
+                gen = self.state.panel.generator
+                freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
+                        + self._x_ratio(event) * gen.sample_rate_hz)
+                self.state.markers.append(freq)
+                if len(self.state.markers) > 8:
+                    self.state.markers.pop(0)
+            self.update()
+        elif event.button() == Qt.RightButton:
+            # 右键移除最近一个 marker
+            if self.state.markers:
+                self.state.markers.pop()
+            self.update()
 
     def mouseDoubleClickEvent(self, event):
-        """双击设置中心频率。"""
-        x_ratio = event.position().x() / self.width()
-        freq = self.generator.get_freq_at_x(x_ratio)
-        self.generator.set_center_freq(freq)
-        self.freq_changed.emit(freq)
+        gen = self.state.panel.generator
+        freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
+                + self._x_ratio(event) * gen.sample_rate_hz)
+        gen.center_freq_hz = freq
+        self.state.panel.on_plot_freq_changed(freq / 1e6)
+        self.update()
+
+    def wheelEvent(self, event):
+        gen = self.state.panel.generator
+        factor = 1.1 if event.angleDelta().y() > 0 else 1 / 1.1
+        gen.sample_rate_hz = max(48_000.0, min(20_000_000.0,
+                                               gen.sample_rate_hz * factor))
         self.update()
 
 
 # ============================================================================
-# OpenGL 频谱组件（优先使用，性能更好）
+# 绘图表面：OpenGL（保留路径；内部仍用 QPainter 绘制以保证兼容）
 # ============================================================================
 
 if HAS_OPENGL:
-    class SpectrumGLWidget(QOpenGLWidget):
-        """OpenGL 频谱显示组件（优先使用）。"""
-
-        freq_changed = Signal(float)
-
-        def __init__(self, parent=None):
+    class SpectrumGLPlot(QOpenGLWidget):
+        def __init__(self, state: _PlotState, parent=None):
             super().__init__(parent)
-            self.generator = SpectrumDataGenerator(num_bins=512)
-            self.spectrum_colors = [
-                "#4A6B7C", "#5B8C9A", "#6BA89A", "#8FB87A",
-                "#C4B85C", "#C49A5C", "#C4845C", "#B86B5C",
-            ]
-            self._program: Optional[QOpenGLShaderProgram] = None
-            self._vbo: Optional[QOpenGLBuffer] = None
-            self._show_waterfall = True
-            self._db_min = -100
-            self._db_max = -20
-            self._zoom_factor = 1.0
-            self._is_panning = False
-            self._last_mouse_x = 0
-
+            self.state = state
             self.setMinimumHeight(300)
             self.setMouseTracking(True)
-
-            from PySide6.QtCore import QTimer
+            self._press_x = None
+            self._press_anchor_x = 0
+            self._is_panning = False
             self._timer = QTimer(self)
             self._timer.timeout.connect(self.update)
             self._timer.start(50)
 
-        def set_theme_colors(self, bg, grid, text, line, marker, spectrum_colors):
-            self.spectrum_colors = spectrum_colors
-            self.update()
-
-        def set_center_freq(self, freq_mhz):
-            self.generator.set_center_freq(freq_mhz)
-            self.update()
-
-        def set_span(self, span_mhz):
-            self.generator.set_span(span_mhz)
-            self.update()
-
-        def toggle_waterfall(self):
-            self._show_waterfall = not self._show_waterfall
-            self.update()
-
-        # 来源: 与 SpectrumWidget.set_iq_data 对齐 — 统一走 generator 真 FFT 管线
-        def set_iq_data(self, iq, sample_rate: float = 2_400_000.0):
-            """喂入真 IQ 采样，走 generator 真 FFT（Nuttall 窗 + 复 FFT + IIR 平滑）。"""
-            arr = np.asarray(iq, dtype=np.complex64)
-            if len(arr) < 64:
-                return
-            self.generator.push_iq(arr, sample_rate)
-
-        def set_connected(self, connected: bool):
-            """外部通知连接状态。断开时清空真数据，显示"未连接"。"""
-            if not connected:
-                self.generator.clear_data()
-
         def initializeGL(self):
-            from PySide6.QtGui import QOpenGLFunctions
             self.gl = self.context().functions()
-            self.gl.glClearColor(0.12, 0.12, 0.13, 1.0)
-
-        def resizeGL(self, w, h):
-            self.gl.glViewport(0, 0, w, h)
+            self.gl.glClearColor(1.0, 1.0, 1.0, 1.0)
 
         def paintGL(self):
-            self.generator.generate()
-            self.gl.glClear(0x00004000)  # GL_COLOR_BUFFER_BIT; QOpenGLFunctions does not expose the constant
+            p = QPainter(self)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            _render_plot(p, self.state, self.width(), self.height())
+            p.end()
 
-            # 用 QPainter 在 OpenGL 上绘制（简化实现，保证兼容性）
-            painter = QPainter(self)
-            painter.setRenderHint(QPainter.Antialiasing, True)
+        # 与 SpectrumPlot 相同的鼠标交互
+        def _x_ratio(self, event):
+            return event.position().x() / max(1, self.width())
 
-            w = self.width()
-            h = self.height()
-
-            if self._show_waterfall:
-                spectrum_h = int(h * 0.5)
-                waterfall_h = h - spectrum_h
-            else:
-                spectrum_h = h
-                waterfall_h = 0
-
-            spectrum_rect = QRectF(0, 0, w, spectrum_h)
-            waterfall_rect = QRectF(0, spectrum_h, w, waterfall_h)
-
-            # 背景
-            painter.fillRect(self.rect(), QColor("#1E1E20"))
-
-            # 网格
-            painter.setPen(QPen(QColor("#3A3A3E"), 1, Qt.DashLine))
-            for i in range(1, 5):
-                x = w * i / 5
-                painter.drawLine(QPointF(x, 0), QPointF(x, spectrum_h))
-            for i in range(1, 4):
-                y = spectrum_h * i / 4
-                painter.drawLine(QPointF(0, y), QPointF(w, y))
-
-            # 频谱曲线
-            spectrum = self.generator.spectrum
-            n = len(spectrum)
-            path = QPainterPath()
-            fill_path = QPainterPath()
-            fill_path.moveTo(0, spectrum_h)
-
-            for i in range(n):
-                x = w * i / (n - 1)
-                db_val = spectrum[i]
-                ratio = (db_val - self._db_min) / (self._db_max - self._db_min)
-                ratio = max(0.0, min(1.0, ratio))
-                y = spectrum_h - ratio * spectrum_h * 0.9
-                if i == 0:
-                    path.moveTo(x, y)
-                else:
-                    path.lineTo(x, y)
-                fill_path.lineTo(x, y)
-
-            fill_path.lineTo(w, spectrum_h)
-            fill_path.closeSubpath()
-
-            gradient = QLinearGradient(0, 0, 0, spectrum_h)
-            gradient.setColorAt(0.0, QColor(self.spectrum_colors[-1]).lighter(120))
-            gradient.setColorAt(0.5, QColor(self.spectrum_colors[len(self.spectrum_colors)//2]))
-            gradient.setColorAt(1.0, QColor(self.spectrum_colors[0]).darker(150))
-            painter.fillPath(fill_path, QBrush(gradient))
-            painter.setPen(QPen(QColor("#7A9CAC"), 2))
-            painter.drawPath(path)
-
-            # 中心频率标记
-            center_x = w / 2
-            painter.setPen(QPen(QColor("#D4956A"), 1, Qt.DashLine))
-            painter.drawLine(QPointF(center_x, 0), QPointF(center_x, spectrum_h))
-
-            # 无数据时画"未连接/无数据"提示
-            if not self.generator.has_data():
-                painter.setPen(QPen(QColor("#D0D0D0"), 1))
-                font = QFont()
-                font.setPointSize(12)
-                painter.setFont(font)
-                text = "未连接 / 无 IQ 数据"
-                metrics = painter.fontMetrics()
-                tw = metrics.horizontalAdvance(text)
-                painter.drawText(QPointF((w - tw) / 2, spectrum_h / 2), text)
-
-            # 瀑布图
-            if self._show_waterfall and waterfall_h > 0 and self.generator.waterfall:
-                wf_w = w
-                wf_h = min(len(self.generator.waterfall), waterfall_h)
-                image = QImage(wf_w, wf_h, QImage.Format_RGB32)
-                for row in range(wf_h):
-                    idx = len(self.generator.waterfall) - 1 - row
-                    if idx < 0:
-                        break
-                    spec = self.generator.waterfall[idx]
-                    for col in range(wf_w):
-                        si = min(int(col * len(spec) / wf_w), len(spec) - 1)
-                        color = value_to_color(spec[si], self._db_min, self._db_max, self.spectrum_colors)
-                        image.setPixelColor(col, row, color)
-                painter.drawImage(waterfall_rect, image)
-
-            # 频率刻度
-            painter.setPen(QColor("#D0D0D0"))
-            font = QFont()
-            font.setPointSize(8)
-            painter.setFont(font)
-            center = self.generator.center_freq
-            span = self.generator.span
-            for i in range(5):
-                freq = center - span / 2 + span * i / 4
-                x = w * i / 4
-                text = f"{freq:.1f}"
-                metrics = painter.fontMetrics()
-                tw = metrics.horizontalAdvance(text)
-                painter.drawText(QPointF(x - tw / 2, spectrum_h + 14), text)
-
-            painter.end()
-
-        def wheelEvent(self, event):
-            delta = event.angleDelta().y()
-            factor = 1.1 if delta > 0 else 0.9
-            self.generator.set_span(max(0.1, self.generator.span * factor))
+        def mouseMoveEvent(self, event):
+            r = self._x_ratio(event)
+            self.state.mouse_x_ratio = r
+            self.state.mouse_in_spectrum = True
+            if self._is_panning:
+                dx = event.position().x() - self._press_anchor_x
+                gen = self.state.panel.generator
+                shift = -dx / max(1, self.width()) * gen.sample_rate_hz
+                gen.center_freq_hz += shift
+                self._press_anchor_x = event.position().x()
+                self.state.panel.on_plot_freq_changed(gen.center_freq_hz / 1e6)
             self.update()
 
         def mousePressEvent(self, event):
             if event.button() == Qt.LeftButton:
+                self._press_x = event.position().x()
+                self._press_anchor_x = event.position().x()
                 self._is_panning = True
-                self._last_mouse_x = event.position().x()
-
-        def mouseMoveEvent(self, event):
-            if self._is_panning:
-                dx = event.position().x() - self._last_mouse_x
-                self._last_mouse_x = event.position().x()
-                freq_shift = -dx / self.width() * self.generator.span
-                self.generator.set_center_freq(self.generator.center_freq + freq_shift)
-                self.freq_changed.emit(self.generator.center_freq)
-                self.update()
 
         def mouseReleaseEvent(self, event):
             if event.button() == Qt.LeftButton:
+                moved = abs(event.position().x() - (self._press_x or 0))
                 self._is_panning = False
+                if moved <= 4 and self.state.panel.generator.has_data():
+                    gen = self.state.panel.generator
+                    freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
+                            + self._x_ratio(event) * gen.sample_rate_hz)
+                    self.state.markers.append(freq)
+                    if len(self.state.markers) > 8:
+                        self.state.markers.pop(0)
+                self.update()
 
         def mouseDoubleClickEvent(self, event):
-            x_ratio = event.position().x() / self.width()
-            freq = self.generator.get_freq_at_x(x_ratio)
-            self.generator.set_center_freq(freq)
-            self.freq_changed.emit(freq)
+            gen = self.state.panel.generator
+            freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
+                    + self._x_ratio(event) * gen.sample_rate_hz)
+            gen.center_freq_hz = freq
+            self.state.panel.on_plot_freq_changed(freq / 1e6)
+            self.update()
+
+        def wheelEvent(self, event):
+            gen = self.state.panel.generator
+            factor = 1.1 if event.angleDelta().y() > 0 else 1 / 1.1
+            gen.sample_rate_hz = max(48_000.0, min(20_000_000.0,
+                                                   gen.sample_rate_hz * factor))
             self.update()
 
 
 # ============================================================================
-# 工厂函数：自动选择 OpenGL 或软件渲染
+# 工厂函数
 # ============================================================================
 
 def create_spectrum_widget(parent=None, prefer_opengl: bool = False):
-    """创建频谱组件，优先 OpenGL，不可用时降级为 QPainter。"""
-    # 检测平台：offscreen/minimal 不支持 OpenGL，直接用软件渲染
+    """创建频谱组件，优先 OpenGL，不可用时降级为 QPainter 软件渲染。"""
     try:
         from PySide6.QtWidgets import QApplication
-        platform = QApplication.instance().platformName() if QApplication.instance() else ""
+        platform = (QApplication.instance().platformName()
+                    if QApplication.instance() else "")
         if platform in ("offscreen", "minimal", "webgl"):
             prefer_opengl = False
     except Exception:
         pass
-
-    if prefer_opengl and HAS_OPENGL:
-        try:
-            widget = SpectrumGLWidget(parent)
-            # 验证 OpenGL 上下文是否真的可用
-            return widget
-        except Exception:
-            pass
-    return SpectrumWidget(parent)
+    return SpectrumPanel(parent, prefer_opengl=prefer_opengl)
