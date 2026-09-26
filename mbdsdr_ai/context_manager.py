@@ -14,10 +14,33 @@ MBDSDR AI 内核 - 上下文管理器
 """
 
 import json
+import os
 import time
 import hashlib
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Callable
+
+
+# 常见模型的真实上下文窗口（参考各模型官方文档）
+MODEL_CONTEXT_WINDOWS = {
+    "Qwen3.6": 32768, "Qwen3.5": 32768, "Qwen3": 32768,
+    "Qwen2.5": 32768, "Qwen2": 32768,
+    "DeepSeek-V3": 128000, "DeepSeek-R1": 128000, "deepseek": 128000,
+    "Llama-3.1": 128000, "Llama-3": 8192, "llama": 8192,
+    "GLM-4": 128000, "glm": 32768,
+    "gpt-4o": 128000, "gpt-4-turbo": 128000, "gpt-3.5": 16384,
+}
+DEFAULT_CONTEXT_WINDOW = 8192
+
+
+def get_model_context_window(model_name: str) -> int:
+    """根据模型名返回上下文窗口大小；未知模型返回默认 8192。"""
+    if not model_name:
+        return DEFAULT_CONTEXT_WINDOW
+    for pattern, window in MODEL_CONTEXT_WINDOWS.items():
+        if pattern.lower() in model_name.lower():
+            return window
+    return DEFAULT_CONTEXT_WINDOW
 
 
 # 系统提示词（MBDSDR AI 定义无线电）
@@ -166,14 +189,24 @@ class ContextManager:
         compaction_target_ratio: float = 0.5,
         system_prompt: str = SYSTEM_PROMPT,
         tool_output_max_chars: int = 4000,
-        on_compaction: Optional[Callable[[str], str]] = None,
+        on_compaction: Optional[Callable[[str, Optional[str]], str]] = None,
+        recent_turns_keep: int = 6,
+        model_name: str = "",
     ):
         self.max_context_tokens = max_context_tokens
         self.compaction_threshold = compaction_threshold
         self.compaction_target_ratio = compaction_target_ratio
         self.system_prompt = system_prompt
         self.tool_output_max_chars = tool_output_max_chars
-        self.on_compaction = on_compaction  # 压缩回调：传入历史摘要需求，返回摘要
+        self.on_compaction = on_compaction  # 压缩回调：(历史文本, 旧摘要) -> 新摘要
+        self.recent_turns_keep = recent_turns_keep
+        self.model_name = model_name
+
+        # 模型感知上下文窗口：用户没显式改默认值时，按真实模型窗口覆盖
+        if model_name and max_context_tokens == 8192:
+            inferred = get_model_context_window(model_name)
+            if inferred != 8192:
+                self.max_context_tokens = inferred
 
         self.history: List[Dict[str, Any]] = []
         self.tool_definitions: List[Dict[str, Any]] = []
@@ -272,57 +305,143 @@ class ContextManager:
 
     # ── 压缩（Compaction）───────────────────────────────
 
+    # 结构化摘要模板（参考 Kilo Code SUMMARY_TEMPLATE）
+    SUMMARY_TEMPLATE = (
+        "请把以下早期对话历史压缩成一份结构化摘要，保留对后续对话真正有用的信息。"
+        "按以下小节输出：\n"
+        "## 目标 (Objective)\n用户最初想达成什么。\n"
+        "## 重要细节 (Important Details)\n"
+        "关键的频率/模式/设置/设备状态/用户偏好/错误信息等事实。\n"
+        "## 工作状态 (Work State)\n"
+        "- 已完成 (Completed): ...\n"
+        "- 进行中 (Active): ...\n"
+        "- 受阻 (Blocked): ...\n"
+        "## 下一步 (Next Move)\n下一步建议做什么。\n"
+        "## 相关文件/资源 (Relevant Files)\n涉及的文件、设备、参数名。\n"
+        "只输出摘要正文，不要复述本提示词。"
+    )
+
     def needs_compaction(self) -> bool:
         """判断是否需要压缩。"""
         return self.get_stats().usage_ratio >= self.compaction_threshold
 
+    def _find_existing_summary(self) -> Optional[str]:
+        """
+        检测历史开头是否已有压缩摘要消息。
+        若有，提取其正文（去掉外层标记）作为 previous_summary 返回。
+        """
+        if not self.history:
+            return None
+        first = self.history[0]
+        if first.get("role") == "system" and "上下文压缩摘要" in (first.get("content") or ""):
+            content = first.get("content", "")
+            # 去掉 "[上下文压缩摘要 epoch=N]\n" 前缀
+            idx = content.find("\n")
+            return content[idx + 1:] if idx != -1 else content
+        return None
+
+    def _select_recent_messages(self, available_for_history: int):
+        """
+        从后往前遍历历史，选出要原样保留的近期消息。
+
+        约束：
+        1. 至少保留 recent_turns_keep 轮（一轮 = 一条 user 消息及其后续 assistant 回复）。
+        2. 不割裂工具调用链：若保留了 role=tool 消息，必须连带保留其前面
+           带 tool_calls 的 assistant 消息。
+        3. 累计 token 尽量不超过 available_for_history（预算）。
+
+        返回 (kept, removed) 两个消息列表。
+        """
+        kept: List[Dict[str, Any]] = []
+        current_tokens = 0
+        user_turns_seen = 0
+        n = len(self.history)
+
+        for i in range(n - 1, -1, -1):
+            msg = self.history[i]
+            msg_tokens = estimate_message_tokens(msg)
+            is_user = msg.get("role") == "user"
+
+            over_budget = current_tokens + msg_tokens > available_for_history
+            # 还没攒够 recent_turns_keep 轮时，超预算也必须继续保留
+            need_more_turns = user_turns_seen < self.recent_turns_keep
+
+            if over_budget and not need_more_turns and kept:
+                break
+
+            kept.insert(0, msg)
+            current_tokens += msg_tokens
+            if is_user:
+                user_turns_seen += 1
+
+        # 工具链完整性修正：若保留区间最旧的一条是 tool 消息，
+        # 向前扩展直到把对应的 assistant(tool_calls=...) 一起保留。
+        while kept and kept[0].get("role") == "tool":
+            # 找到 kept 在原 history 中的起始位置
+            try:
+                start_idx = self.history.index(kept[0])
+            except ValueError:
+                break
+            if start_idx <= 0:
+                break
+            prev = self.history[start_idx - 1]
+            # 前一条是带 tool_calls 的 assistant：必须一起保留
+            if prev.get("role") == "assistant" and prev.get("tool_calls"):
+                kept.insert(0, prev)
+            else:
+                break
+
+        removed = self.history[:len(self.history) - len(kept)]
+        return kept, removed
+
     def compact(self, custom_summary: str = None) -> bool:
         """
-        执行上下文压缩。
+        执行上下文压缩（参考 Kilo Code select() + anchored summary 模式）。
 
         策略：
-        1. 保留最近 N 条消息（目标使用率 compaction_target_ratio）
-        2. 用 LLM 总结被裁剪的历史（如果有 on_compaction 回调）
-        3. 在历史开头插入摘要消息
-        4. 开启新 epoch
+        1. 目标历史 token 预算 = max_context_tokens * compaction_target_ratio - system_tokens
+        2. 从后往前选保留边界（至少保留 recent_turns_keep 轮）
+        3. 被裁剪的 head 送 LLM 摘要；若已有旧摘要则传入让 LLM 合并（anchored summary）
+        4. recent 部分原样保留，工具结果消息完整不截断
+        5. 压缩后历史 = [结构化摘要 system 消息] + 保留的最近消息
 
         返回是否执行了压缩。
         """
         if not self.needs_compaction() and custom_summary is None:
             return False
 
-        # 计算需要保留多少条消息才能达到目标使用率
+        # 目标历史 token 预算
         target_tokens = int(self.max_context_tokens * self.compaction_target_ratio)
         system_tokens = self.get_system_tokens()
         available_for_history = max(0, target_tokens - system_tokens)
 
-        # 从后往前累加，找到保留边界
-        kept = []
-        current_tokens = 0
-        for msg in reversed(self.history):
-            msg_tokens = estimate_message_tokens(msg)
-            if current_tokens + msg_tokens > available_for_history and kept:
-                break
-            kept.insert(0, msg)
-            current_tokens += msg_tokens
+        # 检测已有摘要（anchored summary：合并而非重写）
+        previous_summary = self._find_existing_summary()
 
-        # 被裁剪的部分
-        removed = self.history[:len(self.history) - len(kept)]
+        # 选保留区间
+        kept, removed = self._select_recent_messages(available_for_history)
 
         # 生成摘要
         summary = custom_summary
-        if summary is None and removed and self.on_compaction:
-            removed_text = self._messages_to_text(removed)
-            try:
-                summary = self.on_compaction(removed_text)
-            except Exception as e:
-                summary = f"[历史摘要生成失败: {e}] 已裁剪 {len(removed)} 条消息"
-
         if summary is None and removed:
-            summary = f"[上下文压缩] 已裁剪 {len(removed)} 条早期消息，保留最近 {len(kept)} 条。"
+            removed_text = self._messages_to_text(removed)
+            if self.on_compaction:
+                try:
+                    summary = self.on_compaction(removed_text, previous_summary)
+                except TypeError:
+                    # 旧回调只接受一个参数
+                    try:
+                        summary = self.on_compaction(removed_text)
+                    except Exception as e:
+                        summary = f"[历史摘要生成失败: {e}] 已裁剪 {len(removed)} 条消息"
+                except Exception as e:
+                    summary = f"[历史摘要生成失败: {e}] 已裁剪 {len(removed)} 条消息"
+            if summary is None:
+                summary = (f"[上下文压缩] 已裁剪 {len(removed)} 条早期消息，"
+                           f"保留最近 {len(kept)} 条。")
 
         # 重建历史：摘要 + 保留的消息
-        new_history = []
+        new_history: List[Dict[str, Any]] = []
         if summary:
             new_history.append({
                 "role": "system",
@@ -374,6 +493,44 @@ class ContextManager:
         return messages
 
     # ── 导出/导入 ───────────────────────────────────────
+
+    def export_messages(self) -> List[Dict[str, Any]]:
+        """返回可序列化的消息列表（去掉 _truncated 等内部字段）。"""
+        out: List[Dict[str, Any]] = []
+        for m in self.history:
+            clean: Dict[str, Any] = {}
+            for k, v in m.items():
+                if k.startswith("_"):
+                    continue
+                clean[k] = v
+            out.append(clean)
+        return out
+
+    def save_to_file(self, path: str) -> str:
+        """将 history + epoch + compaction_count 存为 JSON，返回绝对路径。"""
+        path = os.path.expanduser(path)
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        data = {
+            "epoch": self.epoch,
+            "compaction_count": self.compaction_count,
+            "last_compaction_time": self.last_compaction_time,
+            "max_context_tokens": self.max_context_tokens,
+            "history": self.export_messages(),
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return path
+
+    def load_from_file(self, path: str) -> int:
+        """从 JSON 恢复 history + epoch + compaction_count，恢复的消息条数。"""
+        path = os.path.expanduser(path)
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.epoch = data.get("epoch", self.epoch)
+        self.compaction_count = data.get("compaction_count", 0)
+        self.last_compaction_time = data.get("last_compaction_time")
+        self.history = data.get("history", [])
+        return len(self.history)
 
     def export_state(self) -> Dict[str, Any]:
         """导出上下文状态（用于持久化/调试）。"""

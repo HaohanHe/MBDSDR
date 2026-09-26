@@ -22,9 +22,15 @@ import time
 from typing import List, Dict, Any, Optional, Callable
 
 from .config import AgentConfig
-from .context_manager import ContextManager, SYSTEM_PROMPT
+from .context_manager import (
+    ContextManager,
+    SYSTEM_PROMPT,
+    get_model_context_window,
+    estimate_tokens,
+)
 from .model_manager import ModelManager
 from .tool_registry import ToolRegistry, ToolResult
+from .conversation import ConversationStore
 from .memory import MemoryStore
 from .self_evolution import SelfEvolutionEngine
 from .guardian import Guardian
@@ -98,7 +104,14 @@ class MBDSDRAgent:
             system_prompt=SYSTEM_PROMPT,
             tool_output_max_chars=self.config.tool_output_max_chars,
             on_compaction=self._compaction_callback,
+            model_name=self.config.model,
         )
+
+        # 根据模型自动调整上下文窗口（用户没显式设置非默认值时）
+        if self.config.max_context_tokens == 8192:
+            model_window = get_model_context_window(self.config.model)
+            if model_window != 8192:
+                self.context_manager.max_context_tokens = model_window
 
         self.model_manager = ModelManager(
             api_key=self.config.api_key,
@@ -321,6 +334,8 @@ class MBDSDRAgent:
         self._repeat_key = None
         self._repeat_count = 0
         self._mcp_client = None
+        # 多会话持久化存储
+        self.conversation_store = ConversationStore()
 
         # 验证配置
         errors = self.config.validate()
@@ -3124,9 +3139,31 @@ class MBDSDRAgent:
 
             # 累计用量
             usage = response.get("usage", {})
+
+            # 流式 API 常不返回 usage（除非设 stream_options.include_usage），用真实字符数估算
+            if not usage or not usage.get("total_tokens"):
+                _content = response.get("content", "") or ""
+                _tcs = response.get("tool_calls", []) or []
+                prompt_est = self.context_manager.get_total_tokens()
+                completion_est = estimate_tokens(_content)
+                for _tc in _tcs:
+                    try:
+                        completion_est += estimate_tokens(
+                            json.dumps(_tc, ensure_ascii=False))
+                    except Exception:
+                        completion_est += estimate_tokens(str(_tc))
+                usage = {
+                    "prompt_tokens": prompt_est,
+                    "completion_tokens": completion_est,
+                    "total_tokens": prompt_est + completion_est,
+                    "estimated": True,
+                }
+
             total_usage["prompt_tokens"] += usage.get("prompt_tokens", 0)
             total_usage["completion_tokens"] += usage.get("completion_tokens", 0)
             total_usage["total_tokens"] += usage.get("total_tokens", 0)
+            if usage.get("estimated"):
+                total_usage["estimated"] = True
 
             if not response.get("success"):
                 last_error = response.get("error", "unknown_error")
@@ -3157,17 +3194,32 @@ class MBDSDRAgent:
             # 先添加 assistant 消息（含 tool_calls）到上下文
             self.context_manager.add_assistant_message(content, tool_calls=tool_calls)
 
-            for tc in tool_calls:
+            for i, tc in enumerate(tool_calls):
                 fn = tc.get("function", {})
                 tool_name = fn.get("name", "")
                 all_tool_calls.append({"name": tool_name, "arguments": fn.get("arguments", "")})
+
+                # 确保 tool_call_id 非空（文本解析的工具调用可能缺 id）
+                tc_id = tc.get("id", "") or f"call_{int(time.time()*1000)}_{i}"
+                tc["id"] = tc_id
+
+                # 工具执行安全调用：异常时返回错误给 LLM 而非卡死主循环
+                def _safe_tool_call(_tc=tc):
+                    try:
+                        return self.tool_registry.call_from_model(_tc)
+                    except Exception as _e:
+                        return ToolResult(
+                            success=False,
+                            content=f"工具执行异常: {type(_e).__name__}: {_e}",
+                            error=str(_e),
+                        )
 
                 # 执行工具（可重试：临时不可用/超时/忙；参数错误不重试，直接喂模型改）
                 RETRY_BAD = ("未知", "不是一个", "必须", "可选", "为空", "不能为空",
                              "不存在", "找不到", "不支持")
                 RETRY_OK = ("未连接", "无设备", "没有设备", "暂时", "重试",
                             "timeout", "timed out", "busy", "忙", "不可用", "未就绪")
-                result = self.tool_registry.call_from_model(tc)
+                result = _safe_tool_call()
                 for _attempt in range(2):  # 最多再重试 2 次
                     if getattr(result, "success", False):
                         break
@@ -3175,7 +3227,7 @@ class MBDSDRAgent:
                     if any(h in low for h in RETRY_BAD) or not any(h in low for h in RETRY_OK):
                         break  # 参数错误或非临时错误：交给模型改，不空转
                     time.sleep(0.4)
-                    result = self.tool_registry.call_from_model(tc)
+                    result = _safe_tool_call()
                 all_tool_results.append(result.to_dict())
 
                 # repeat-call guard：检测连续相同工具+参数，递增提醒
@@ -3196,12 +3248,18 @@ class MBDSDRAgent:
 
                 # 添加工具结果到上下文
                 self.context_manager.add_tool_message(
-                    tool_call_id=tc.get("id", ""),
+                    tool_call_id=tc_id,
                     content=result.content,
                     tool_name=tool_name,
                 )
 
             # 继续循环，让模型看到工具结果后继续
+
+        # 工具循环耗尽：没有最终回复也没有错误时，明确告知而非静默空字符串
+        if not final_content and not last_error:
+            final_content = ("（工具调用已达最大轮次 " + str(max_tool_rounds) +
+                             "，未能生成最终回复。请简化问题或分步骤提问。）")
+            last_error = "tool_rounds_exhausted"
 
         # 5. 最终检查压缩
         if self.context_manager.needs_compaction():
@@ -3266,21 +3324,84 @@ class MBDSDRAgent:
                 pass
         return text.strip()
 
-    def _compaction_callback(self, history_text: str) -> str:
+    def _compaction_callback(self, history_text: str,
+                             previous_summary: str = None) -> str:
         """
-        上下文压缩回调：用 LLM 总结被裁剪的历史。
+        上下文压缩回调：用 LLM 总结被裁剪的历史（anchored summary 模式）。
+
+        若已有旧摘要（previous_summary），让 LLM 在旧摘要基础上合并新内容，
+        而非从头重写——保留早期已压缩的关键事实。
         """
         try:
+            sys_prompt = ContextManager.SUMMARY_TEMPLATE
+            user_content_parts = []
+            if previous_summary:
+                user_content_parts.append(
+                    f"【已有的旧摘要，请在其基础上更新合并，不要丢弃其中仍重要的事实】\n"
+                    f"{previous_summary}\n")
+            user_content_parts.append(
+                f"【需要并入摘要的新对话历史】\n\n{history_text[:4000]}")
+            user_content = "\n".join(user_content_parts)
+
             messages = [
-                {"role": "system", "content": "你是一个对话摘要助手。请简洁总结以下对话历史的关键信息，保留重要的频率、设置、用户偏好和未完成的任务。"},
-                {"role": "user", "content": f"请总结以下对话历史:\n\n{history_text[:3000]}"},
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_content},
             ]
-            response = self.model_manager.chat(messages=messages, max_tokens=500)
+            response = self.model_manager.chat(messages=messages, max_tokens=600)
             if response.get("success"):
-                return response.get("content", "摘要生成失败")
-        except Exception as e:
+                content = response.get("content", "")
+                if content and content.strip():
+                    return content
+        except Exception:
             pass
         return f"[自动压缩] 已裁剪早期对话历史"
+
+    # ── 对话管理（多会话持久化）──────────────────────────
+
+    def save_conversation(self, path: str = None) -> str:
+        """
+        保存当前对话到 JSON 文件。
+        默认路径: ~/.mbdsdr/conversations/<conversation_id>.json
+        返回保存的文件路径。
+        """
+        messages = self.get_conversation_messages()
+        cid = self.conversation_id
+        if path:
+            # 直接走 ContextManager 的文件保存（含 epoch 等元数据）
+            return self.context_manager.save_to_file(path)
+        # 走 ConversationStore（含 title / updated_at 等元信息）
+        return self.conversation_store.save(cid, messages)
+
+    def load_conversation(self, path: str) -> int:
+        """
+        从文件加载对话。path 可以是完整 JSON 路径，也可以是 conversation_id。
+        返回加载的消息条数。
+        """
+        path = os.path.expanduser(path)
+        if not os.path.exists(path):
+            # 当作 conversation_id 在 ConversationStore 目录里找
+            msgs = self.conversation_store.load(path)
+            self.context_manager.history = list(msgs)
+            self.conversation_id = path
+            return len(msgs)
+        # 完整文件路径：走 ContextManager 恢复（含 epoch）
+        n = self.context_manager.load_from_file(path)
+        # 从文件名推断 conversation_id
+        base = os.path.splitext(os.path.basename(path))[0]
+        self.conversation_id = base
+        return n
+
+    def new_conversation(self):
+        """清空历史并生成新 conversation_id（开启全新会话）。"""
+        self.context_manager.clear_history()
+        self.conversation_id = f"conv_{int(time.time() * 1000)}"
+        self._repeat_key = None
+        self._repeat_count = 0
+        return self.conversation_id
+
+    def get_conversation_messages(self) -> List[Dict[str, Any]]:
+        """返回当前对话消息列表（供 UI 显示真对话轮次）。"""
+        return self.context_manager.export_messages()
 
     # ── 状态查询 ────────────────────────────────────────
 
