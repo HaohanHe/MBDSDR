@@ -474,6 +474,7 @@ class MainWindow(QMainWindow):
     def _build_tool_bar(self):
         """构建工具栏（SDR++ 风格：大触控目标，前置频率/模式/音量，右侧折叠坞菜单）。"""
         toolbar = QToolBar("主工具栏")
+        toolbar.setObjectName("mainToolBar")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
@@ -628,7 +629,8 @@ class MainWindow(QMainWindow):
         # 频谱标题栏
         spectrum_header = QFrame()
         spectrum_header.setObjectName("card")
-        spectrum_header.setFixedHeight(36)
+        # 弹性：最小高度兜底，内容可随行高流体（不写死为固定值）
+        spectrum_header.setMinimumHeight(tokens().SIZE["topbar_h"] - 20)
         header_layout = QHBoxLayout(spectrum_header)
         header_layout.setContentsMargins(12, 4, 12, 4)
 
@@ -3096,7 +3098,10 @@ class MainWindow(QMainWindow):
     # 右侧 QDockWidget 停靠体系（控制 / 状态 / AI 助手）
     # ------------------------------------------------------------------
     def _wrap_panel_in_dock(self, title: str, panel: QWidget) -> QDockWidget:
-        """把面板包进无框架 QScrollArea 再放进 QDockWidget（横向不滚、可纵向滚）。"""
+        """把面板包进无框架 QScrollArea 再放进 QDockWidget（横向不滚、可纵向滚）。
+
+        弹性尺寸：最小宽来自 tokens（下限兜底），不设固定宽；面板随窗口流体缩放。
+        """
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -3104,7 +3109,7 @@ class MainWindow(QMainWindow):
         scroll.setWidget(panel)
         dock = QDockWidget(title, self)
         dock.setWidget(scroll)
-        dock.setMinimumWidth(300)
+        dock.setMinimumWidth(tokens().SIZE["min_dock_w"])
         return dock
 
     def _toggle_right_docks(self):
