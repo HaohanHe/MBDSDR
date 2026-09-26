@@ -32,7 +32,7 @@ MBDSDR 是一个**用纯 Python（NumPy / SciPy）实现基带处理、用 PySid
 | 业务 | 模块文件 | 合成自证测试 | 真机验证 |
 |---|---|---|---|
 | FM 宽带 / AM / SSB 通用解调 | `analog_demod.py`, `demod.py` | `tests/ham_modes_roundtrip.py`（部分） | 待完成 |
-| FM 立体声解调（MPX → L/R + RDS） | `wfm_stereo_lite.py` | 经 `ham_modes_roundtrip.py` / `protocol_spectrum_roundtrip.py` 间接覆盖 | 待完成 |
+| FM 立体声解调（MPX → L/R） | `wfm_stereo_lite.py` | 经 `ham_modes_roundtrip.py` / `protocol_spectrum_roundtrip.py` 间接覆盖 | 待完成 |
 | CW（摩尔斯电报）解调 | `cw_decoder.py` | `tests/ham_modes_roundtrip.py` | 待完成 |
 
 ### 2.2 数字语音
@@ -88,14 +88,14 @@ MBDSDR 是一个**用纯 Python（NumPy / SciPy）实现基带处理、用 PySid
 
 | 业务 | 模块文件 | 合成自证测试 | 真机验证 |
 |---|---|---|---|
-| SSTV（Robot36 / Martin / Scottie 等） | `sstv_decoder.py` | 无独立 roundtrip（仓库根目录保留 `syn_robot36.wav` 作为人工检视样本） | 待完成 |
+| SSTV（Robot36 / Martin / Scottie 等） | `sstv_decoder.py` | 无独立 roundtrip 测试 | 待完成 |
 
 ### 2.7 轨道与天线指向（支撑模块）
 
 | 功能 | 模块文件 | 测试 |
 |---|---|---|
 | SGP4 轨道 / 过境预报 | `sat_tracker.py`, `orbit.py`, `sat_passes.py`, `new_spacetime*.py` | `tests/test_sat_tracker.py`, `tests/test_orbit_determination.py`, `tests/test_new_spacetime_tle.py` |
-| 天体几何 / 多普勒 | `celestial_geometry.py`, `astronomy.py`, `atmosphere.py` | `tests/test_solar_system_ephemeris.py`, `tests/test_atmosphere.py` |
+| 天体几何 / 多普勒 | `celestial_geometry.py`, `astronomy.py`, `atmosphere.py` | `tests/test_solar_system_ephemeris.py` |
 | Gpredict 外部适配 | `gpredict_adapter.py` | `tests/gpredict_test.py` |
 | 卫星流水线编排 | `sat_pipeline_runner.py`, `sat_pipeline_params.py` | `tests/test_sat_pipeline.py`, `tests/sat_groundstation_roundtrip.py` |
 
