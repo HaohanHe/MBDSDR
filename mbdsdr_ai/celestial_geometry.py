@@ -477,6 +477,23 @@ class _BaseProjection:
     def _backward(self, x: float, y: float) -> np.ndarray:
         raise NotImplementedError
 
+    # -- 屏幕像素缩放 -------------------------------------------------------
+    # 对照 Stellarium StelProjector::pixelPerRad (StelProjector.cpp:172):
+    #   pixelPerRad = 0.5*viewportFovDiameter / fovToViewScalingFactor(fov/2)
+    # 不同投影的归一化坐标量纲不同:
+    #   - 等距方位投影: 归一化坐标 = 与中心的角距离(弧度)
+    #   - 透视投影:     归一化坐标 = tan(off-axis angle)
+    # 故每投影自行把"半视场角"映射到 min_dim/2 像素。
+    def screen_scale(self, min_dim_px: float, fov_deg: float) -> float:
+        """返回 每 1 单位归一化坐标 对应的屏幕像素数。
+
+        默认 = 等距方位投影: 归一化坐标是弧度, 半视场角 -> min_dim/2,
+        故 scale = min_dim / fov_rad (与历史 _pixel_per_rad 一致)。
+        """
+        if min_dim_px <= 0:
+            return 1.0
+        return min_dim_px / deg2rad(fov_deg)
+
     # -- 对外接口 (接受 az/alt 角度或 Vec3d) --------------------------------
     def project_azalt(self, az_deg: float, alt_deg: float) -> tuple[float, float]:
         """(az, alt) 度 -> 归一化屏幕坐标 (x, y)。"""
@@ -593,6 +610,48 @@ class AzimuthalEquidistantProjection(_BaseProjection):
         return np.array([x * f, y * f, -math.cos(a)])
 
 
+class PerspectiveProjection(_BaseProjection):
+    """透视投影 (Pinhole camera / StelProjector 透视方式)。
+
+    参考 Stellarium web engine src/projections/proj_perspective.c:44-48
+    与 src/projection.c:60-98 project_to_win:
+      视空间: 相机沿 -z 看, 可见点 v[2] < 0 (在相机前方)。
+      归一化坐标:
+          x_n = v[0] / (-v[2])     # screen-up 轴 (北分量)
+          y_n = v[1] / (-v[2])     # screen-right 轴 (东分量)
+      这是针孔相机的透视除法; 远处天球点方向 = 射线方向。
+      反投影: d = sqrt(1+x²+y²); v = (x/d, y/d, -1/d)。
+
+    与等距方位投影不同: 透视是"看向一个窗口", 视场中心物体无畸变地放大,
+    视场外物体被裁剪 (背向相机 v[2]>=0 返回 inf)。这正是 Stellarium 默认
+    的人眼观感 (不是全天圆顶)。
+    """
+
+    name = "perspective"
+    max_fov_deg = 179.999
+
+    def _forward(self, v: np.ndarray) -> tuple[float, float]:
+        # 透视除法; v[2]>=0 = 相机背面, 不可见
+        if -v[2] <= 1e-12:
+            return float("inf"), float("inf")
+        inv = 1.0 / (-v[2])
+        return v[0] * inv, v[1] * inv
+
+    def _backward(self, x: float, y: float) -> np.ndarray:
+        d = math.sqrt(1.0 + x * x + y * y)
+        return np.array([x / d, y / d, -1.0 / d])
+
+    def screen_scale(self, min_dim_px: float, fov_deg: float) -> float:
+        """半视场角 -> min_dim/2 像素。
+
+        边缘 off-axis 角 = fov/2, 归一化坐标 = tan(fov/2)。
+        故 scale = (min_dim/2) / tan(fov/2)。
+        """
+        if min_dim_px <= 0:
+            return 1.0
+        return (min_dim_px * 0.5) / math.tan(deg2rad(fov_deg) * 0.5)
+
+
 # ---------------------------------------------------------------------------
 # 工厂函数
 # ---------------------------------------------------------------------------
@@ -604,6 +663,8 @@ def make_projection(name: str) -> _BaseProjection:
         "orthographic": OrthographicProjection,
         "azimuthequidistant": AzimuthalEquidistantProjection,
         "fisheye": AzimuthalEquidistantProjection,
+        "perspective": PerspectiveProjection,
+        "pinhole": PerspectiveProjection,
     }
     if name not in table:
         raise ValueError(f"未知投影: {name!r}; 可选: {list(table.keys())}")

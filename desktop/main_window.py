@@ -496,10 +496,7 @@ class MainWindow(QMainWindow):
         # 连接按钮（未连接时高亮引导用户点击；连接成功后取消高亮）
         self.connect_btn = QPushButton("连接")
         self.connect_btn.setFixedHeight(32)
-        self.connect_btn.setStyleSheet(
-            "QPushButton { background-color:#C4845C; color:#FFFFFF;"
-            " font-weight:600; padding:0 14px; }"
-            "QPushButton:hover { background-color:#D4946C; }")
+        self.connect_btn.setStyleSheet(self._connect_button_qss())
         self.connect_btn.clicked.connect(self._connect_dialog)
         toolbar.addWidget(self.connect_btn)
 
@@ -656,9 +653,11 @@ class MainWindow(QMainWindow):
             "  正在枚举 SDR 设备…若未自动连接，请点击工具栏「连接」或按 Ctrl+C  ")
         self._no_device_hint.setObjectName("hintLabel")
         self._no_device_hint.setAlignment(Qt.AlignCenter)
+        _hint_bg = self._tok("light_hint_bg", "#F0E8DC")
+        _hint_fg = self._tok("light_hint_text", "#8A6D4A")
         self._no_device_hint.setStyleSheet(
-            "QLabel { background-color:#F0E8DC; color:#8A6D4A;"
-            " padding:4px; border-radius:3px; font-size:9pt; }")
+            f"QLabel {{ background-color:{_hint_bg}; color:{_hint_fg};"
+            f" padding:4px; border-radius:3px; font-size:9pt; }}")
         spectrum_layout.addWidget(self._no_device_hint)
 
         # 频谱组件
@@ -680,8 +679,11 @@ class MainWindow(QMainWindow):
         left_tab.addTab(spectrum_widget, "频谱")
 
         # Tab 2: 射频天空视图（借鉴 Stellarium）
-        self.sky_view = RFSkyView()
-        self.sky_view.object_clicked.connect(self._on_sky_object_clicked)
+        # 路B（星空组）会产出自包含天空 widget 并暴露工厂 create_sky_widget()；
+        # 这里工厂优先、缺失时回退内置 RFSkyView——接口未就绪绝不崩。
+        self.sky_view = self._create_sky_widget()
+        if hasattr(self.sky_view, "object_clicked"):
+            self.sky_view.object_clicked.connect(self._on_sky_object_clicked)
         left_tab.addTab(self.sky_view, "射频天空")
 
         # Tab 3: SDR++ 式模块面板（源设备选择 + 信号流图 + 参数 + sink）
@@ -900,7 +902,7 @@ class MainWindow(QMainWindow):
 
         # 永久右侧：UTC 时钟 + 版本
         self.status_utc = QLabel("UTC: --:--:--")
-        self.status_utc.setStyleSheet("color:#5B7B8C;")
+        self.status_utc.setStyleSheet(f"color:{self._tok('light_text', '#5B7B8C')};")
         status_bar.addPermanentWidget(self.status_utc)
         status_bar.addPermanentWidget(QLabel(" | "))
         status_bar.addPermanentWidget(QLabel("MBDSDR v0.1 | GPL-3.0"))
@@ -914,6 +916,53 @@ class MainWindow(QMainWindow):
             if "频谱" in tab.tabText(i):
                 tab.setCurrentIndex(i)
                 return
+
+    # ------------------------------------------------------------------
+    # 视觉常量：全部从 tokens 单例取色，不在业务代码散落 magic hex。
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _tok(name: str, default: str = "") -> str:
+        """从 tokens.COLORS 取一个语义色（取不到回退 default，绝不崩）。"""
+        try:
+            return tokens().COLORS.get(name, default)
+        except Exception:
+            return default
+
+    def _connect_button_qss(self) -> str:
+        """主操作（连接）按钮高亮 QSS——强调色取自 tokens，不硬编码 hex。"""
+        accent = self._tok("light_accent", "#C4845C")
+        hover = self._tok("light_accent_hover", "#D4946C")
+        return (
+            f"QPushButton {{ background-color:{accent}; color:#FFFFFF;"
+            f" font-weight:600; padding:0 14px; }}"
+            f"QPushButton:hover {{ background-color:{hover}; }}")
+
+    def _conn_label_qss(self, connected: bool, highlighted: bool = False) -> str:
+        """工具栏连接状态文字色：已连=成功绿，未连=主题字色。"""
+        if connected:
+            return f"color: {self._tok('success', '#6BA89A')}; font-weight: 600;"
+        if highlighted:
+            return f"color: {self._tok('light_accent', '#C4845C')}; font-weight: 600;"
+        return "font-weight: 600;"
+
+    def _create_sky_widget(self):
+        """创建射频天空 widget：路B工厂 create_sky_widget() 优先，回退 RFSkyView。
+
+        路B（星空组，负责 rf_sky_view.py）会产出自包含天空 widget 并在模块里
+        暴露 ``create_sky_widget()`` 工厂。这里用 hasattr/try 守卫：
+          * 工厂存在 → 调用它拿到路B产物；
+          * 工厂缺失（路B尚未交付）→ 回退本模块已 import 的 RFSkyView。
+        无论哪条路，返回的 widget 都要支持 addTab / set_callsign / get_observer /
+        object_clicked 等既有接口（缺哪个由调用方 hasattr 守卫，绝不崩）。
+        """
+        try:
+            from rf_sky_view import create_sky_widget as _factory  # type: ignore
+            w = _factory()
+            if w is not None:
+                return w
+        except Exception:
+            pass
+        return RFSkyView()
 
     def _set_processing_status(self, text: str):
         """更新底 Dock 的"正在处理"指示（录制/回放/流水线）。无设备由调用方置灰。"""
@@ -1271,7 +1320,7 @@ class MainWindow(QMainWindow):
         self._panels_set_sdr_connected(True)
         try:
             self.conn_label.setText(f"  状态: {backend.device.name}  ")
-            self.conn_label.setStyleSheet("color: #6BA89A; font-weight: 600;")
+            self.conn_label.setStyleSheet(self._conn_label_qss(True))
             self.status_conn.setText(backend.device.name)
         except Exception:
             pass
@@ -1645,7 +1694,7 @@ class MainWindow(QMainWindow):
         self._connect_worker_signals()
         self._panels_set_sdr_connected(True)
         self.conn_label.setText(f"  状态: 连接中 {host}:{port}  ")
-        self.conn_label.setStyleSheet("color: #C4845C; font-weight: 600;")
+        self.conn_label.setStyleSheet(self._conn_label_qss(False, highlighted=True))
         self.status_conn.setText(f"连接中 {host}:{port}")
         self.connect_btn.setEnabled(False)
         self.connect_btn.setStyleSheet("")
@@ -1740,13 +1789,10 @@ class MainWindow(QMainWindow):
                 sp.set_sdr_connected(bool(connected))
         except Exception:
             pass
-        # 连接按钮：未连接时恢复橙色高亮引导
+        # 连接按钮：未连接时恢复橙色高亮引导（色值取自 tokens，与工具栏同源）
         try:
             if not connected:
-                self.connect_btn.setStyleSheet(
-                    "QPushButton { background-color:#C4845C; color:#FFFFFF;"
-                    " font-weight:600; padding:0 14px; }"
-                    "QPushButton:hover { background-color:#D4946C; }")
+                self.connect_btn.setStyleSheet(self._connect_button_qss())
             else:
                 self.connect_btn.setStyleSheet("")
         except Exception:
@@ -1819,10 +1865,11 @@ class MainWindow(QMainWindow):
     def _on_connection_for_ui(self, connected: bool, message: str):
         if connected:
             self.conn_label.setText(f"  状态: {message}  ")
-            self.conn_label.setStyleSheet("color: #6BA89A; font-weight: 600;")
+            self.conn_label.setStyleSheet(self._conn_label_qss(True))
             self.status_conn.setText(message)
         else:
             self.conn_label.setText(f"  状态: {message}  ")
+            self.conn_label.setStyleSheet(self._conn_label_qss(False))
             self.status_conn.setText(message)
 
     @Slot(dict)
@@ -2275,8 +2322,28 @@ class MainWindow(QMainWindow):
                         "无音频输出设备（声卡已禁用，不影响频谱/录制）", 5000)
             except Exception:
                 pass
+        # 路C（DSP 流）后端若自带 start_audio()，一并调用（hasattr 守卫，缺失不崩）
+        self._backend_audio_hook("start_audio")
         # (A) 启动多线程流水线：IQ reader → splitter → FFT/demod/record 各 worker
         self._build_pipeline()
+
+    def _backend_audio_hook(self, method: str) -> None:
+        """路C 后端音频钩子：backend 暴露 start_audio()/stop_audio() 时调用。
+
+        路C 会在 backend 上提供 ``start_audio()`` / ``stop_audio()``（声卡/DSP
+        音频通路）。这里用 hasattr 守卫：方法不存在就静默跳过，绝不崩；
+        存在则真实调用一次。本端本地 AudioPlayer 仍按既有逻辑独立启停。
+        """
+        be = getattr(self, "_active_sdr_backend", None)
+        if be is None:
+            return
+        fn = getattr(be, method, None)
+        if not callable(fn):
+            return
+        try:
+            fn()
+        except Exception:
+            pass
 
     def _build_pipeline(self):
         """组装并启动接收流水线（见 receive_pipeline.ReceivePipeline）。
@@ -2580,6 +2647,8 @@ class MainWindow(QMainWindow):
                 self._audio_player.stop()
             except Exception:
                 pass
+        # 路C 后端若自带 stop_audio()，一并调用（hasattr 守卫，缺失不崩）
+        self._backend_audio_hook("stop_audio")
 
     def _active_read_samples(self):
         """防御性拿到 (read_samples_fn, sample_rate)。无后端/无方法返 (None, None)。"""
@@ -3017,10 +3086,11 @@ class MainWindow(QMainWindow):
             self._record_timer.timeout.connect(self._update_record_time)
         self._record_timer.start(1000)
 
-        # UI：录音中按钮变红显示"停止中"
+        # UI：录音中按钮变红显示"停止中"（danger 色取自 tokens）
         self.record_btn.setText("停止中")
         self.record_btn.setStyleSheet(
-            "background-color:#B85C5C; color:#FFFFFF; font-weight:600;")
+            f"background-color:{self._tok('danger', '#B85C5C')};"
+            " color:#FFFFFF; font-weight:600;")
         try:
             self.control_panel.record_button.setText("停止录音")
             self.control_panel.record_status.setText("录音中... 00:00")
@@ -3331,10 +3401,11 @@ class MainWindow(QMainWindow):
                     f"范围 {f0:.1f}–{f1:.1f} MHz，"
                     f"门限 {getattr(result,'threshold_db',0.0):.1f} dB<br>"]
             if activities:
+                _tbl_color = self._tok('light_text', '#5B7B8C')
                 rows.append(
                     "<table width='100%' cellspacing='2' cellpadding='2' "
                     "style='font-size:8pt;'>"
-                    "<tr style='color:#5B7B8C;'><td><b>中心MHz</b></td>"
+                    f"<tr style='color:{_tbl_color};'><td><b>中心MHz</b></td>"
                     "<td><b>带宽kHz</b></td><td><b>峰值dB</b></td></tr>")
                 for a in activities:
                     rows.append(

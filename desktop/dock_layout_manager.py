@@ -276,16 +276,30 @@ class DockLayoutManager:
                 pass
 
     def reset_splitters(self) -> None:
-        """双击 handle：把中央/右侧比例复位到 token 默认（弹性建议）。"""
-        # QMainWindow 的 dock 比例由用户拖动决定；这里只做"复位到初始比例"的轻量动作
-        pass
+        """双击 handle：把内部频谱 FFT/瀑布 Splitter 复位到 token 默认比例。
+
+        QMainWindow 的 dock 比例由用户拖动决定并持久化，这里只复位频谱区内部的
+        垂直 Splitter（SpectrumPanel.reset_splitter 按 tokens RATIO 计算，非死像素）。
+        """
+        try:
+            spec = getattr(self.mw, "spectrum", None)
+            if spec is not None and hasattr(spec, "reset_splitter"):
+                spec.reset_splitter()
+        except Exception:
+            pass
 
     def _attach_splitter_reset(self) -> None:
-        """给主窗口内所有 QSplitter 装双击复位过滤器。"""
+        """给主窗口内所有 QSplitter 的 handle 装双击复位过滤器。
+
+        注意：QDoubleClick 发生在 handle 子控件上，必须 installEventFilter 到
+        handle(i) 本身（不是 QSplitter.viewport()，那里收不到 handle 的双击）。
+        """
         for sp in self.mw.findChildren(QSplitter):
             try:
-                sp.handle(0)
-                sp.viewport().installEventFilter(self._reset_filter)
+                for i in range(sp.count() - 1):
+                    h = sp.handle(i)
+                    if h is not None:
+                        h.installEventFilter(self._reset_filter)
             except Exception:
                 pass
 

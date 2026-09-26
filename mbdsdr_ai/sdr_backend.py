@@ -40,12 +40,22 @@ import logging
 
 import os
 import json
+import collections
 import threading
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# 实时接收链 + 声卡输出（可选依赖，导入失败时音频路径安全降级，不崩）
+try:
+    from .receive_chain import ReceiveChain
+    from .audio_out import AudioPlayer
+except Exception as _e:  # pragma: no cover - 取决于运行环境
+    ReceiveChain = None
+    AudioPlayer = None
+    logger.warning("ReceiveChain/AudioPlayer 导入失败，实时音频路径将降级: %s", _e)
 
 
 @dataclass
@@ -117,12 +127,28 @@ class SDRBackend:
         self._recording_gain = 1.0
         self._recording_decimation = 1
 
+        # ── 实时接收链 + 声卡输出（所有后端共享，无硬件时安全降级）──
+        # ReceiveChain 把 15 个 DSP 模块串成端到端解调链；AudioPlayer 走
+        # sounddevice/PortAudio 出声。无设备时全部方法返回 None/False，不造假。
+        self._receive_chain: Optional[ReceiveChain] = None
+        self._audio_player: Optional[AudioPlayer] = None
+        self._audio_thread: Optional[threading.Thread] = None
+        self._audio_stop_event = threading.Event()
+        # 音频线程产出块的有界队列，供 read_audio() 拉取（不抢实时循环）
+        self._audio_out_q: "collections.deque" = collections.deque()
+        self._audio_out_lock = threading.Lock()
+        self._audio_max_q_samples = 48000 * 3  # ≈3s 缓冲上限
+
     def connect(self) -> bool:
         """连接设备。"""
         raise NotImplementedError
 
     def disconnect(self):
         """断开设备。"""
+        try:
+            self.stop_audio()
+        except Exception:
+            pass
         self.status.connected = False
 
     def set_frequency(self, freq_hz: float) -> bool:
@@ -145,6 +171,9 @@ class SDRBackend:
             logger.warning(f"set_frequency({freq_hz}) 失败，已回滚到 {old}")
             return False
         self.status.frequency_hz = freq_hz
+        # 换频后清空接收链状态 + 环形缓冲（RTLSDRBackend._apply_frequency 已
+        # reset_buffer + ring_reader.clear()，这里再重置链状态，避免旧频残留）
+        self._invalidate_rx_chain(rebuild=False)
         return True
 
     def _apply_frequency(self, freq_hz: float) -> bool:
@@ -172,6 +201,8 @@ class SDRBackend:
             logger.warning(f"set_sample_rate({rate_hz}) 失败，已回滚到 {old}")
             return False
         self.status.sample_rate_hz = rate_hz
+        # 采样率改变 → 前端 fs_in 变了，重建整条接收链
+        self._invalidate_rx_chain(rebuild=True)
         return True
 
     def _apply_sample_rate(self, rate_hz: float) -> bool:
@@ -229,6 +260,8 @@ class SDRBackend:
         if not self.status.connected:
             return False
         self.status.bandwidth_hz = bw_hz
+        # 信道带宽改变 → 重建信道化/解调器
+        self._invalidate_rx_chain(rebuild=True)
         return True
 
     def set_demod(self, mode: str) -> bool:
@@ -250,6 +283,8 @@ class SDRBackend:
                 bw_info["high_hz"] - bw_info["low_hz"])
         except Exception:
             pass  # 表缺失时保留原有 bandwidth，不阻断模式切换
+        # 模式改变 → 重建整条接收链（if_sr/解调器/重采样器都可能变）
+        self._invalidate_rx_chain(rebuild=True)
         return True
 
     def set_squelch(self, db: float) -> bool:
@@ -269,6 +304,226 @@ class SDRBackend:
             self.status.uptime_seconds = time.time() - self._start_time
             self.status.samples_read = self._samples_read
         return self.status
+
+    # ==================================================================
+    # 实时接收链 + 声卡输出（UI / 录音 / 声卡消费面）
+    #
+    # 流式接口契约：
+    #   read_samples(n) -> complex64 (n,) | None     # 原始 IQ（频谱/瀑布）
+    #   read_audio(n)   -> float32   (n,) | None      # 解调音频（48kHz）
+    #   start_audio()/stop_audio()                   # 声卡实时播放线程
+    #   get_spectrum_data(nfft) -> float32 | None    # FFT 功率谱 dB
+    # 无设备时以上全部返回 None/False，绝不造假。
+    # ==================================================================
+
+    def _invalidate_rx_chain(self, rebuild: bool = True) -> None:
+        """配置变更后使接收链失效。rebuild=True 强制重建；False 仅清状态。
+
+        无连接时静默返回（不抛异常、不造假）。
+        """
+        if not self.status.connected:
+            self._receive_chain = None
+            return
+        if rebuild:
+            self._receive_chain = None  # 下次 _ensure 时按最新 status 重建
+        elif self._receive_chain is not None:
+            try:
+                self._receive_chain.reset()
+            except Exception:
+                pass
+        # 清空环形缓冲里旧频/旧模式数据（若存在）
+        rr = getattr(self, "_ring_reader", None)
+        if rr is not None:
+            try:
+                rr.clear()
+            except Exception:
+                pass
+
+    def _ensure_receive_chain(self):
+        """按需构建/同步 ReceiveChain。未连接或依赖缺失返回 None（不造假）。"""
+        if not self.status.connected:
+            self._receive_chain = None
+            return None
+        if ReceiveChain is None:
+            return None
+        if self._receive_chain is None:
+            try:
+                self._receive_chain = ReceiveChain(
+                    fs_in=self.status.sample_rate_hz or self._FALLBACK_SAMPLE_RATE_HZ,
+                    mode=self.status.demod_mode,
+                    bandwidth=(self.status.bandwidth_hz or None),
+                    frequency_offset=0.0,
+                    squelch_db=self.status.squelch_db,
+                    gain_db=self.status.gain_db,
+                )
+            except Exception as e:
+                logger.warning("ReceiveChain 构建失败: %s", e)
+                self._receive_chain = None
+                return None
+        else:
+            # 动态轻量参数直接同步进已有链（不重建滤波器）
+            try:
+                self._receive_chain.set_squelch(self.status.squelch_db)
+                self._receive_chain.set_gain(self.status.gain_db)
+            except Exception:
+                pass
+        return self._receive_chain
+
+    def read_audio(self, num_samples: int) -> Optional[np.ndarray]:
+        """取 num_samples 个解调音频样本（float32, 48kHz）。
+
+        音频线程在跑时从其输出队列取数；否则自己拉一块 IQ 跑链。
+        未连接/无数据返回 None。
+        """
+        if not self.status.connected:
+            return None
+        chain = self._ensure_receive_chain()
+        if chain is None:
+            return None
+        num_samples = int(num_samples)
+        if num_samples <= 0:
+            return np.zeros(0, dtype=np.float32)
+
+        # 音频线程在跑 → 从其输出队列凑够 num_samples
+        if self._audio_thread is not None and self._audio_thread.is_alive():
+            collected = []
+            got = 0
+            deadline = time.time() + 1.0
+            while got < num_samples and time.time() < deadline:
+                with self._audio_out_lock:
+                    blk = self._audio_out_q.popleft() if self._audio_out_q else None
+                if blk is None:
+                    if self._audio_stop_event.is_set():
+                        break
+                    time.sleep(0.002)
+                    continue
+                collected.append(blk)
+                got += len(blk)
+            if not collected:
+                return None
+            out = np.concatenate(collected, axis=0)
+            return out[:num_samples].astype(np.float32)
+
+        # 音频线程没跑：自己拉 IQ 跑一块
+        try:
+            iq = self.read_samples(max(num_samples * 4, 4096))
+        except Exception:
+            return None
+        if iq is None or len(iq) == 0:
+            return None
+        try:
+            audio = chain.process(iq)
+        except Exception:
+            return None
+        if audio is None or len(audio) == 0:
+            return None
+        return audio[:num_samples].astype(np.float32)
+
+    def _audio_loop(self) -> None:
+        """实时音频线程：读 IQ → ReceiveChain → 声卡（+ 供 read_audio 拉取）。"""
+        iq_block = 8192
+        while not self._audio_stop_event.is_set():
+            chain = self._ensure_receive_chain()
+            if chain is None:
+                time.sleep(0.05)
+                continue
+            try:
+                iq = self.read_samples(iq_block)
+            except Exception:
+                iq = None
+            if iq is None or len(iq) == 0:
+                if self._audio_stop_event.is_set():
+                    break
+                time.sleep(0.005)
+                continue
+            try:
+                audio = chain.process(iq)
+            except Exception as e:
+                logger.debug("接收链 process 异常: %s", e)
+                continue
+            if audio is None or len(audio) == 0:
+                continue
+            # 写声卡（无设备时 AudioPlayer.write 安全返回 0，不崩）
+            if self._audio_player is not None:
+                try:
+                    self._audio_player.write(audio)
+                except Exception:
+                    pass
+            # 入队供 read_audio() 拉取（有界，丢旧保新）
+            with self._audio_out_lock:
+                self._audio_out_q.append(audio)
+                total = 0
+                for b in self._audio_out_q:
+                    total += len(b)
+                while total > self._audio_max_q_samples and self._audio_out_q:
+                    old = self._audio_out_q.popleft()
+                    total -= len(old)
+
+    def start_audio(self) -> bool:
+        """启动声卡实时播放线程。
+
+        返回 True=线程已启动；未连接/依赖缺失返回 False（不崩、不造假）。
+        sounddevice 无设备时 AudioPlayer.start() 返回 False，线程仍运行，
+        音频只缓冲供 read_audio/录音（不出声但不崩）。
+        """
+        if not self.status.connected:
+            return False
+        chain = self._ensure_receive_chain()
+        if chain is None:
+            return False
+        channels = 2 if chain.is_stereo else 1
+        if AudioPlayer is None:
+            return False
+        self._audio_player = AudioPlayer(sample_rate=48000, channels=channels,
+                                         gain=self.status.volume)
+        try:
+            if not self._audio_player.start():
+                logger.info("声卡不可用：音频降级为只缓冲（不出声）")
+        except Exception as e:
+            logger.info("AudioPlayer 启动异常（降级只缓冲）: %s", e)
+        self._audio_stop_event.clear()
+        with self._audio_out_lock:
+            self._audio_out_q.clear()
+        self._audio_thread = threading.Thread(
+            target=self._audio_loop, name="mbdsdr-audio", daemon=True)
+        self._audio_thread.start()
+        return True
+
+    def stop_audio(self) -> None:
+        """停止声卡播放线程（可重复调用，安全）。"""
+        self._audio_stop_event.set()
+        t = self._audio_thread
+        if t is not None:
+            t.join(timeout=1.0)
+            self._audio_thread = None
+        if self._audio_player is not None:
+            try:
+                self._audio_player.stop()
+            except Exception:
+                pass
+            self._audio_player = None
+        with self._audio_out_lock:
+            self._audio_out_q.clear()
+
+    def get_spectrum_data(self, nfft: int = 1024) -> Optional[np.ndarray]:
+        """返回 nfft 点 FFT 功率谱 dB（float32，已 fftshift，居中 DC）。
+
+        未连接返回 None。窗函数 Hann。
+        """
+        if not self.status.connected:
+            return None
+        nfft = int(nfft)
+        try:
+            iq = self.read_samples(nfft)
+        except Exception:
+            return None
+        if iq is None or len(iq) < nfft:
+            return None
+        x = np.asarray(iq[:nfft], dtype=np.complex128)
+        window = np.hanning(nfft)
+        spec = np.fft.fftshift(np.fft.fft(x * window))
+        db = 20.0 * np.log10(np.abs(spec) + 1e-12)
+        return db.astype(np.float32)
 
     def start_recording(self, path: str, duration: float = 0,
                         fmt: str = "cf32", gain: float = 1.0,

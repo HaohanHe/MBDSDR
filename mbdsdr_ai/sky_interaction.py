@@ -185,11 +185,16 @@ def build_view_rotation(view: ViewState) -> np.ndarray:
 # 对等距方位投影, fovToViewScalingFactor(fov/2) = fov/2 (弧度), 故:
 #   pixelPerRad = (min_dim/2) / deg2rad(fov/2) = min_dim / deg2rad(fov)
 # ---------------------------------------------------------------------------
-def _pixel_per_rad(view: ViewState, widget_size: Tuple[int, int]) -> float:
+def _pixel_per_rad(view: ViewState, widget_size: Tuple[int, int],
+                    projection: Optional[Any] = None) -> float:
     w, h = widget_size
     min_dim = float(min(w, h))
     if min_dim <= 0:
         return 1.0
+    # 每投影自行决定 归一化坐标->像素 的缩放 (透视 vs 等距方位量纲不同)。
+    # 缺省回退到历史等距方位公式, 保证老路径数值不变。
+    if projection is not None and hasattr(projection, "screen_scale"):
+        return float(projection.screen_scale(min_dim, view.fov_deg))
     return min_dim / deg2rad(view.fov_deg)
 
 
@@ -231,7 +236,7 @@ def sky_to_screen(az_deg: float, alt_deg: float,
 
     x_n, y_n = projection.project_vec(v_view)
 
-    ppr = _pixel_per_rad(view, widget_size)
+    ppr = _pixel_per_rad(view, widget_size, projection)
     cx, cy = _widget_center(widget_size)
 
     # 归一化坐标 -> 屏幕像素。
@@ -272,7 +277,7 @@ def screen_to_sky(screen_x: float, screen_y: float,
     if projection is None:
         projection = AzimuthalEquidistantProjection()
 
-    ppr = _pixel_per_rad(view, widget_size)
+    ppr = _pixel_per_rad(view, widget_size, projection)
     cx, cy = _widget_center(widget_size)
 
     # 撤销屏幕整体旋转

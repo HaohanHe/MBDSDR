@@ -116,15 +116,20 @@ class XlatingFIR:
         else:
             dec = resample_poly(mixed, self._up, self._down)
 
-        # 3) FIR 低通（rx_vfo.h:97 filter.process），状态跨块连续
-        y = np.convolve(dec, self._lpf, mode="full")
-        out = y[: len(dec)]
-        # 保存尾部状态（下一块接着卷）
-        tail = y[len(dec):]
-        if len(tail) < len(self._z):
-            # 不足时用已有状态补齐
-            self._z = np.concatenate([self._z[len(tail):], tail]) if len(tail) else self._z
+        # 3) FIR 低通（rx_vfo.h:97 filter.process），状态跨块连续。
+        # 正确的流式 FIR：把上一块末尾 (M-1) 个重采样输入样本拼到本块前面，
+        # 卷积后取与本块对齐的 N 个输出。旧实现 y=convolve(dec,lpf) 后取
+        # y[:len(dec)]，既没接历史、又切片错位，导致滤波器每块都从零历史
+        # 重新爬升、输出被压到近零（直流被滤成 ~1e-7）。
+        m = len(self._lpf)
+        if m > 1:
+            ext = np.concatenate((self._z, dec))
+            y = np.convolve(ext, self._lpf, mode="full")
+            out = y[m - 1: m - 1 + len(dec)]
+            # 状态恒为 m-1 个输入样本（dec 短于 m-1 时需带上旧 z，
+            # 直接取 ext 尾部保证定长，避免切片错位）
+            self._z = ext[-(m - 1):]
         else:
-            self._z = tail[: len(self._z)]
+            out = dec
 
         return out.astype(np.complex128)

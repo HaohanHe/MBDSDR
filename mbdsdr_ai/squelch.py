@@ -43,11 +43,18 @@ def rms_dbfs(x: np.ndarray) -> float:
 
     对照 gqrx/src/dsp/rx_meter_c.cc 的 get_level_db()：
         level = 10*log10(mean(|x|^2))
+
+    复数信号测真实功率 mean(I^2+Q^2)，不虚部丢弃。
     """
-    x = np.asarray(x, dtype=np.float64).ravel()
+    x = np.asarray(x)
     if x.size == 0:
         return -150.0
-    p = float(np.mean(x * x))
+    if np.iscomplexobj(x):
+        xf = x.astype(np.complex128).ravel()
+        p = float(np.mean(xf.real * xf.real + xf.imag * xf.imag))
+    else:
+        xf = x.astype(np.float64).ravel()
+        p = float(np.mean(xf * xf))
     if p <= 0:
         return -150.0
     return 10.0 * np.log10(p)
