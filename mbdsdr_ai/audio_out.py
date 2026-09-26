@@ -226,32 +226,27 @@ class AudioPlayer:
             return 0
 
     def _resample_to_native(self, data: np.ndarray, in_sr: float) -> np.ndarray:
-        """把任意采样率的音频块重采样到 self.sample_rate（多相 FIR）。
+        """把任意采样率的音频块重采样到 self.sample_rate（有状态多相 FIR）。
 
         对照 SDR++ radio_module.h:594 resamp.setOutSamplerate +
-        rational_resampler.h:120-165 多相滤波。系数按 (in_sr, out_sr) 缓存。
+        rational_resampler.h:120-165 多相滤波。
+
+        历史实现是每次都调 scipy.signal.resample_poly —— 逐块无状态，
+        块与块之间滤波器历史丢失，块边界产生可闻滴答。这里改用本仓库
+        mbdsdr_ai/audio_resampler.py 的 AudioResampler：按 (in_sr, out_sr)
+        缓存一个有状态实例，跨块保留延迟线与多相相位游标。
         """
-        from math import gcd
+        from .audio_resampler import AudioResampler
         key = (int(round(in_sr)), self.sample_rate)
-        cached = self._resamp_cache.get(key)
-        if cached is None:
-            g = gcd(key[0], key[1])
-            up = key[1] // g
-            down = key[0] // g
-            self._resamp_cache[key] = (up, down)
-            cached = (up, down)
-        up, down = cached
+        rs = self._resamp_cache.get(key)
+        if rs is None:
+            rs = AudioResampler(in_sr, self.sample_rate)
+            self._resamp_cache[key] = rs
         try:
-            from scipy.signal import resample_poly
-            return resample_poly(data, up, down).astype(np.float32)
+            return rs.process(data)
         except Exception:
-            # scipy 不可用时线性插值兜底
-            n_new = int(round(data.size * self.sample_rate / in_sr))
-            if n_new <= 0:
-                return np.zeros(0, dtype=np.float32)
-            t_old = np.linspace(0.0, 1.0, data.size, endpoint=False)
-            t_new = np.linspace(0.0, 1.0, n_new, endpoint=False)
-            return np.interp(t_new, t_old, data).astype(np.float32)
+            # 重采样异常兜底：原样返回（不放大、不崩溃），上层 clip
+            return np.asarray(data, dtype=np.float32)
 
     def stop(self) -> None:
         """停止并关闭音频流。可重复调用，安全。"""
