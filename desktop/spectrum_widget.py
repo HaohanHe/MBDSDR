@@ -37,6 +37,13 @@ try:
 except Exception:  # pragma: no cover - 防御性：后端包未就位时不阻塞 UI 启动
     VfoManager = None  # type: ignore
 
+# CarWith 设计令牌：QSplitter handle 厚度 / FFT-瀑布分区比例统一从 tokens 取，
+# 不在此处散落 magic number。
+try:
+    from tokens import tokens as _tokens
+except Exception:  # pragma: no cover
+    _tokens = None  # type: ignore
+
 
 # ============================================================================
 # 默认低饱和配色（米白 / 蓝灰 / 橙）
@@ -940,11 +947,19 @@ class SpectrumPanel(QWidget):
 
         self._splitter = QSplitter(Qt.Vertical)
         self._splitter.setContentsMargins(0, 0, 0, 0)
+        # handle 厚度统一取自 tokens（4px）；QSS 里也写了，这里显式兜底。
+        try:
+            self._splitter.setHandleWidth(int(_tokens().SIZE["splitter_handle"]))
+        except Exception:
+            pass
         self._splitter.addWidget(self._fft_plot)
         self._splitter.addWidget(self._wf_plot)
+        # 弹性分区：stretch 因子 3:2（对应 tokens RATIO spectrum_fft/spectrum_wf），
+        # 不写死 setSizes([固定像素])；最小高度兜底防止两区被拖塌。
         self._splitter.setStretchFactor(0, 3)
         self._splitter.setStretchFactor(1, 2)
-        self._splitter.setSizes([300, 200])
+        self._fft_plot.setMinimumHeight(120)
+        self._wf_plot.setMinimumHeight(60)
 
         # 右侧 dB Max/Min 垂直滑杆（对标 SDR++ main_window.cpp:635-656）
         body = QHBoxLayout()
@@ -1210,6 +1225,21 @@ class SpectrumPanel(QWidget):
         # 瀑布关闭时隐藏下方分屏，FFT 曲线自动占满整个 splitter 高度。
         self._wf_plot.setVisible(self._state.show_waterfall)
         self._redraw()
+
+    def reset_splitter(self):
+        """双击 splitter handle：按 tokens RATIO 的 FFT/瀑布比例复位（弹性，非死像素）。"""
+        try:
+            total = self._splitter.height()
+            if total <= 0:
+                return
+            f = float(_tokens().RATIO["spectrum_fft"])
+            w = float(_tokens().RATIO["spectrum_wf"])
+            h = f + w
+            fft_h = int(round(total * f / h))
+            wf_h = max(60, total - fft_h)
+            self._splitter.setSizes([fft_h, wf_h])
+        except Exception:
+            pass
 
     def set_snap_interval(self, hz: float):
         """主窗口设置滚轮 / 键盘调谐步进网格（Hz），转发给 _PlotState。"""

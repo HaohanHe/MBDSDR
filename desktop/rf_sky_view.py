@@ -79,13 +79,24 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QLabel
 
 # 交互控制复用 mbdsdr_ai/sky_interaction.py (Stellarium 视角模型独立重实现):
-from mbdsdr_ai.celestial_geometry import AzimuthalEquidistantProjection
+from mbdsdr_ai.celestial_geometry import (
+    AzimuthalEquidistantProjection,
+    PerspectiveProjection,
+    GroundStation,
+    vec_from_radec,
+    altaz_to_j2000,
+    j2000_to_altaz,
+)
 from mbdsdr_ai.sky_interaction import (
     ViewState,
     SkyInteractionHandler,
     sky_to_screen,
     screen_to_sky,
 )
+from mbdsdr_ai import skyengine
+from mbdsdr_ai.skyengine import stars as _stars
+from mbdsdr_ai.skyengine import satellites as _sats
+from mbdsdr_ai.skyengine import jtime as _jtime
 
 
 # ============================================================================
@@ -373,10 +384,24 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         self._trajectories: Dict[str, List[Tuple[float, float]]] = {}
 
         # === SkyInteractionHandler 所需的宿主属性 ===
-        self.view_state = ViewState(center_alt=90.0, fov_deg=120.0)
-        self.projection = AzimuthalEquidistantProjection()
+        # Stellarium StelProjector 透视投影 (pinhole camera); FOV 5..120°。
+        self.view_state = ViewState(center_alt=90.0, fov_deg=120.0,
+                                    min_fov=5.0, max_fov=120.0)
+        self.projection = PerspectiveProjection()
         self.sky_objects = self._objects
         SkyInteractionHandler.__init__(self)
+
+        # 图层开关 (Stellarium core.lines / landscapes / atmosphere)
+        self._show_atmosphere: bool = True
+        self._show_landscape: bool = True
+        self._show_eqgrid: bool = False     # 赤道网格 (RA 时圈 + 赤纬圈)
+        self._show_azgrid: bool = True      # 方位网格 (self._show_grid 同步)
+        self._bortle: int = 3
+
+        # 卫星目录索引 (SatelliteTracker 每帧喂入, 供信息卡/搜索)
+        self._sat_catalog: Dict[str, Dict[str, object]] = {}
+        # 当前选中天体的完整信息 (信息卡用)
+        self._selected_info: Optional[Dict[str, object]] = None
 
         # 数据来源状态
         # "none" = 无观测站位置; "real" = 真实GNSS或手动配置
@@ -480,10 +505,53 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         self.setMouseTracking(True)
         self.setMinimumSize(400, 400)
 
+        # 搜索框 + 分类下拉 (自包含, 不依赖外部面板)
+        self._build_search_widgets()
+
         # 自动刷新
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.update)
         self._refresh_timer.start(33)
+
+    # ========================================================================
+    # 自包含 UI: 搜索框 / 信息卡 / FOV 显示 (Stellarium 顶栏)
+    # ========================================================================
+    def _build_search_widgets(self):
+        """顶部搜索框 + 分类结果下拉。"""
+        from PySide6.QtWidgets import QLineEdit, QListWidget, QListWidgetItem
+        self._QLineEdit = QLineEdit
+        self._QListWidget = QListWidget
+        self._search_edit = QLineEdit(self)
+        self._search_edit.setPlaceholderText("搜索天体: ISS / Vega / NOAA…")
+        self._search_edit.setFixedHeight(26)
+        self._search_edit.textChanged.connect(self._on_search_text)
+        self._search_popup = QListWidget(self)
+        self._search_popup.setWindowFlags(Qt.Popup)
+        self._search_popup.clicked.connect(self._on_search_picked)
+        self._search_results: List[Dict[str, object]] = []
+
+    def set_satellite_catalog(self, catalog: List[Dict[str, object]]):
+        """SatelliteTracker 喂入当前 TLE 目录, 供信息卡/搜索分类。"""
+        self._sat_catalog = {}
+        for e in (catalog or []):
+            name = str(e.get("name", ""))
+            if not name:
+                continue
+            line1 = str(e.get("line1", ""))
+            norad = _sats.norad_from_tle(line1)
+            meta = _sats.SATELLITE_INDEX.get(norad) if norad else None
+            self._sat_catalog[name] = {
+                "norad": norad,
+                "cospar": _sats.cospar_from_tle(line1,
+                                                meta.cospar_override if meta else ""),
+                "kind": meta.kind if meta else "satellite",
+                "kind_label": meta.kind_label if meta else "Artificial Satellite",
+                "aliases": list(meta.aliases) if meta else [name],
+                "line1": line1,
+                "line2": str(e.get("line2", "")),
+                "freq_mhz": float(e.get("freq_mhz", 0.0)),
+            }
+        self.update()
 
     # ========================================================================
     # 公共 API
@@ -726,6 +794,136 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         self.view_state.zoom_to(120.0)
         self._rotation = 0.0
         self.update()
+
+    # ========================================================================
+    # 时间 / 坐标辅助 (Stellarium observer.tt 儒略日内核)
+    # ========================================================================
+    def _current_jd(self) -> float:
+        """当前儒略日 (UTC)。优先 new_spacetime 时间引擎 (时间穿梭), 否则墙钟。"""
+        try:
+            from mbdsdr_ai.new_spacetime import get_time_engine
+            eng = get_time_engine()
+            eng.tick()
+            return _jtime.unix_to_jd(eng.now_unix())
+        except Exception:
+            return _jtime.unix_to_jd(time.time())
+
+    def _ground_station(self) -> Optional[GroundStation]:
+        if self._observer is None:
+            return None
+        return GroundStation(self._observer["lon"], self._observer["lat"],
+                             self._observer.get("alt_m", 0.0))
+
+    # ------------------------------------------------------------------ #
+    # 搜索 (分类: 空间站 / 人造卫星 / 恒星, 图标区分)
+    # ------------------------------------------------------------------ #
+    def _on_search_text(self, text: str):
+        text = (text or "").strip().lower()
+        self._search_results = []
+        if not text:
+            self._search_popup.hide()
+            return
+        # 1) 卫星: 按名称 + 别名 + NORAD 号匹配
+        for name, info in self._sat_catalog.items():
+            hay = (name + " " + " ".join(info.get("aliases", [])) + " "
+                   + str(info.get("norad") or "")).lower()
+            if text in hay:
+                self._search_results.append({
+                    "kind": info["kind"], "kind_label": info["kind_label"],
+                    "label": name, "sub": info["kind_label"],
+                    "az": None, "alt": None, "obj_name": name,
+                })
+        # 2) 恒星: 亮星星表按名匹配
+        for s in _stars.BRIGHT_STARS:
+            if text in s.name.lower():
+                self._search_results.append({
+                    "kind": "star", "kind_label": "Long-Period Variable Star",
+                    "label": s.name, "sub": "Variable / Long-Period Variable Star",
+                    "ra": s.ra_deg, "dec": s.dec_deg, "vmag": s.vmag,
+                })
+        # 填充下拉
+        self._search_popup.clear()
+        for r in self._search_results[:40]:
+            icon = {"space_station": "🛰", "satellite": "●",
+                    "weather": "◉", "star": "✦"}.get(r["kind"], "•")
+            item = self._QListWidgetItem(f"{icon}  {r['label']}   —   {r['sub']}")
+            self._search_popup.addItem(item)
+        if self._search_results:
+            self._search_popup.setFixedWidth(self._search_edit.width())
+            pos = self._search_edit.mapTo(self, self._search_edit.rect().bottomLeft())
+            self._search_popup.move(pos)
+            self._search_popup.show()
+
+    def _on_search_picked(self, item):
+        row = self._search_popup.currentRow()
+        if row < 0 or row >= len(self._search_results):
+            return
+        r = self._search_results[row]
+        self._search_popup.hide()
+        # 卫星 -> 在 objects 里找并选中居中
+        if r["kind"] in ("space_station", "satellite", "weather", "amateur"):
+            for obj in self._objects:
+                if obj.name == r["obj_name"]:
+                    self._hovered_object = obj
+                    self._build_selected_info(obj)
+                    self.view_state.look_at(obj.azimuth_deg, obj.elevation_deg)
+                    self.update()
+                    return
+        # 恒星 -> 居中到该星 (无需选中信息卡)
+        if r["kind"] == "star" and self._ground_station() is not None:
+            jd = self._current_jd()
+            gs = self._ground_station()
+            v = j2000_to_altaz(vec_from_radec(r["ra"], r["dec"]), gs, jd)
+            from mbdsdr_ai.celestial_geometry import azalt_from_vec
+            az, alt = azalt_from_vec(v)
+            self.view_state.look_at(az, alt)
+            self.update()
+
+    # ------------------------------------------------------------------ #
+    # 选中信息卡 (Stellarium 规格 10.4)
+    # ------------------------------------------------------------------ #
+    def _build_selected_info(self, obj: SkyObject) -> None:
+        """根据选中卫星构建信息卡字段: NORAD/COSPAR/别名/Dist/RaDec/AzAlt/
+        Magnitude(占位)/Visibility(Rise/Set)。无值给占位, 不编造。"""
+        info: Dict[str, object] = {
+            "title": obj.name, "kind_label": "Satellite",
+            "norad": None, "cospar": "", "aliases": [],
+            "dist_km": self._parse_distance_km(obj),
+            "az": obj.azimuth_deg, "alt": obj.elevation_deg,
+            "ra": None, "dec": None, "mag": None,
+            "rise": None, "set": None,
+        }
+        meta = self._sat_catalog.get(obj.name)
+        if meta:
+            info["norad"] = meta["norad"]
+            info["cospar"] = meta["cospar"]
+            info["aliases"] = meta["aliases"]
+            info["kind_label"] = meta["kind_label"]
+        # Ra/Dec: 地平 -> 当前赤道 -> J2000
+        gs = self._ground_station()
+        if gs is not None:
+            try:
+                jd = self._current_jd()
+                from mbdsdr_ai.celestial_geometry import vec_from_azalt, radec_from_vec
+                v = vec_from_azalt(obj.azimuth_deg, obj.elevation_deg)
+                vj = altaz_to_j2000(v, gs, jd)
+                ra, dec = radec_from_vec(vj)
+                info["ra"], info["dec"] = ra, dec
+            except Exception:
+                pass
+            # Visibility: 未来 24h 升落
+            if meta and meta.get("line1"):
+                try:
+                    from sgp4.api import Satrec
+                    sat = Satrec.twoline2rv(meta["line1"], meta["line2"])
+                    alt_km = (self._observer.get("alt_m", 0.0)) / 1000.0
+                    rs = _sats.next_rise_set(sat, self._observer["lat"],
+                                             self._observer["lon"], alt_km, jd)
+                    info["rise"] = rs["rise_jd"]
+                    info["set"] = rs["set_jd"]
+                except Exception:
+                    pass
+        self._selected_info = info
 
     # ========================================================================
     # 坐标转换：统一委托给 sky_interaction.sky_to_screen / screen_to_sky
@@ -1493,10 +1691,14 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         self.update()
 
     def on_object_picked(self, obj) -> None:
-        """点选到天体：高亮 + emit 信号。"""
+        """点选到天体：高亮 + 构建信息卡 + emit 信号。"""
         if obj is None:
+            self._hovered_object = None
+            self._selected_info = None
+            self.update()
             return
         self._hovered_object = obj
+        self._build_selected_info(obj)
         self.object_clicked.emit(obj)
         self.update()
 

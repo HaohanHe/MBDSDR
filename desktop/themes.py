@@ -441,6 +441,9 @@ DARK = Theme(
         "danger": "#D47070",
         "button": "#333336",
         "button_hover": "#3D3D41",
+        "button_pressed": "#2A2A2D",
+        "button_disabled": "#262629",
+        "grid": "#3A3A3E",
     },
     spectrum_colors=[
         "#5B8C9A",
@@ -472,6 +475,9 @@ HIGH_CONTRAST = Theme(
         "danger": "#FF4444",
         "button": "#222222",
         "button_hover": "#333333",
+        "button_pressed": "#444444",
+        "button_disabled": "#1A1A1A",
+        "grid": "#444444",
     },
     spectrum_colors=[
         "#00BFFF",

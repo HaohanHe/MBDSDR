@@ -78,6 +78,10 @@ class DesignTokens:
             "light_text_sub": "#8A9BA8",
             "light_border":   "#C8C0B4",
             "light_accent":   "#C4845C",
+            "light_accent_hover": "#D4946C",   # 主操作按钮 hover（连接按钮高亮）
+            "light_hint_bg":   "#F0E8DC",      # 无设备引导横幅底色
+            "light_hint_text": "#8A6D4A",      # 无设备引导横幅文字
+            "disabled_gray":   "#999999",      # 次要置灰文字/指示
         }
 
         # ---- 文字 alpha 层级（叠加在白字上）----
@@ -159,6 +163,8 @@ class DesignTokens:
             "analysis_right":    0.40,   # analysis 预设：右射频天空占比
             "focus_side":        0.28,  # focus 预设：右侧控制条占比
             "grid_cell":         0.5,   # grid 四宫格单元格占比
+            "spectrum_fft":     0.60,  # 频谱 Splitter：上 FFT 曲线占比
+            "spectrum_wf":       0.40,   # 频谱 Splitter：下瀑布图占比
         }
 
         # ---- 动效 ----
