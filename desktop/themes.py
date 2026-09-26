@@ -374,7 +374,6 @@ class Theme:
             color: {c['text']};
             border-radius: 8px;
             padding: 6px 12px;
-            margins: 4px;
         }}
         """
 

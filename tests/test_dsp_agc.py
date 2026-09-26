@@ -70,11 +70,16 @@ def test_agc_attack_fast():
     env = np.sqrt(np.convolve(np.abs(out) ** 2, np.ones(300) / 300, mode="same"))
     # 稳态包络（后 100ms）
     steady_level = float(np.mean(env[pre + int(sr * 0.1):]))
-    lo = 0.1 * steady_level
-    hi = 0.9 * steady_level
     post = env[pre:]
-    idx_lo = np.where(post > lo)[0]
-    idx_hi = np.where(post > hi)[0]
+    # 信号区谷底索引：静音噪声被 AGC 放大、信号压增益后先回落再上升，
+    # 从谷底之后测上升沿，避免把放大噪声误判为已上升。
+    dip_rel = int(np.argmin(post[: int(sr * 0.05)]))
+    floor = float(post[dip_rel])
+    lo = floor + 0.1 * (steady_level - floor)
+    hi = floor + 0.9 * (steady_level - floor)
+    after = post[dip_rel:]
+    idx_lo = np.where(after > lo)[0]
+    idx_hi = np.where(after > hi)[0]
     assert len(idx_lo) and len(idx_hi), "输出包络未上升到稳态"
     rise_ms = (idx_hi[0] - idx_lo[0]) / sr * 1000.0
     assert rise_ms < 10.0, f"AGC attack 上升时间 {rise_ms:.1f}ms > 10ms"

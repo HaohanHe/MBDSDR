@@ -66,7 +66,8 @@ class CDP:
 
 
 def launch_chromium():
-    udir = WORK + "/chrome-profile"
+    import uuid
+    udir = WORK + "/chrome-profile-" + uuid.uuid4().hex[:8]
     os.makedirs(udir, exist_ok=True)
     log = open(WORK+"/chromium.log", "w")
     p = subprocess.Popen([
