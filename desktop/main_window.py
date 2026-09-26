@@ -14,7 +14,9 @@ from typing import Optional
 
 import numpy as np
 
-from PySide6.QtCore import Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal
+from PySide6.QtCore import (
+    Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal, QSettings,
+)
 from PySide6.QtGui import QAction, QKeySequence, QFont, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -22,7 +24,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QInputDialog, QComboBox, QPushButton,
     QFrame, QSizePolicy, QDialog, QDialogButtonBox, QLineEdit,
     QGroupBox, QFormLayout, QSlider, QSpinBox, QCheckBox,
-    QDoubleSpinBox, QProgressDialog,
+    QDoubleSpinBox, QProgressDialog, QDockWidget, QScrollArea,
 )
 
 # 确保能导入同目录模块
@@ -311,6 +313,9 @@ class MainWindow(QMainWindow):
         self._build_central_widget()
         self._build_status_bar()
 
+        # 恢复上次退出时的窗口几何与右侧坞布局（QDockWidget 由 QMainWindow 管理）
+        self._restore_window_state()
+
         # 启动即无硬件：所有 SDR 操作控件（调谐/音量/模式/录音/面板实时按钮）置灰
         self._panels_set_sdr_connected(False)
 
@@ -463,10 +468,18 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(about_action)
 
     def _build_tool_bar(self):
-        """构建工具栏。"""
+        """构建工具栏（SDR++ 风格：大触控目标，前置频率/模式/音量，右侧折叠坞菜单）。"""
         toolbar = QToolBar("主工具栏")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
+
+        # 坞面板折叠按钮（汉堡菜单）：一键显示/隐藏右侧控制/状态/AI 坞
+        self.toggle_docks_btn = QPushButton("☰")
+        self.toggle_docks_btn.setFixedWidth(36)
+        self.toggle_docks_btn.setFixedHeight(32)
+        self.toggle_docks_btn.setToolTip("显示 / 隐藏右侧面板坞")
+        self.toggle_docks_btn.clicked.connect(self._toggle_right_docks)
+        toolbar.addWidget(self.toggle_docks_btn)
 
         # 连接状态
         self.conn_label = QLabel("  状态: 未连接  ")
@@ -477,7 +490,7 @@ class MainWindow(QMainWindow):
 
         # 连接按钮（未连接时高亮引导用户点击；连接成功后取消高亮）
         self.connect_btn = QPushButton("连接")
-        self.connect_btn.setFixedHeight(28)
+        self.connect_btn.setFixedHeight(32)
         self.connect_btn.setStyleSheet(
             "QPushButton { background-color:#C4845C; color:#FFFFFF;"
             " font-weight:600; padding:0 14px; }"
@@ -486,10 +499,29 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.connect_btn)
 
         self.disconnect_btn = QPushButton("断开")
-        self.disconnect_btn.setFixedHeight(28)
+        self.disconnect_btn.setFixedHeight(32)
         self.disconnect_btn.clicked.connect(self._disconnect)
         self.disconnect_btn.setEnabled(False)
         toolbar.addWidget(self.disconnect_btn)
+
+        toolbar.addSeparator()
+
+        # 大字号频率显示（等宽字体 bold；由 _update_status_bar 从真实后端同步）
+        self.toolbar_freq_label = QLabel("-- MHz")
+        self.toolbar_freq_label.setStyleSheet(
+            "font-family: 'Consolas','Menlo',monospace; font-size:14pt;"
+            " font-weight:700; padding:0 6px;")
+        self.toolbar_freq_label.setToolTip("当前中心频率（实时从后端读取）")
+        toolbar.addWidget(self.toolbar_freq_label)
+
+        # 解调模式下拉（与控制面板 mode_combo 同源：改它走既有信号链切解调）
+        self.toolbar_mode_combo = QComboBox()
+        self.toolbar_mode_combo.addItems(["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"])
+        self.toolbar_mode_combo.setFixedHeight(32)
+        self.toolbar_mode_combo.setToolTip("解调模式")
+        self.toolbar_mode_combo.currentTextChanged.connect(
+            self._on_toolbar_mode_selected)
+        toolbar.addWidget(self.toolbar_mode_combo)
 
         toolbar.addSeparator()
 
@@ -498,44 +530,45 @@ class MainWindow(QMainWindow):
         self.theme_combo = QComboBox()
         for name, theme in THEMES.items():
             self.theme_combo.addItem(theme.display_name, name)
-        self.theme_combo.setFixedHeight(28)
+        self.theme_combo.setFixedHeight(32)
         self.theme_combo.currentIndexChanged.connect(self._on_theme_combo_changed)
         toolbar.addWidget(self.theme_combo)
 
         toolbar.addSeparator()
 
-        # 瀑布图开关
-        self.waterfall_btn = QPushButton("瀑布图")
-        self.waterfall_btn.setFixedHeight(28)
-        self.waterfall_btn.setCheckable(True)
-        self.waterfall_btn.setChecked(True)
-        self.waterfall_btn.clicked.connect(self._toggle_waterfall)
-        toolbar.addWidget(self.waterfall_btn)
-
-        toolbar.addSeparator()
-
         # 多 VFO：新建 VFO 按钮（在当前频谱中心建一个次听 VFO）
         self.new_vfo_btn = QPushButton("+ VFO")
-        self.new_vfo_btn.setFixedHeight(28)
+        self.new_vfo_btn.setFixedHeight(32)
         self.new_vfo_btn.setToolTip("在当前频谱中心新建一个 VFO（次听）")
         self.new_vfo_btn.clicked.connect(self._on_new_vfo_button)
         toolbar.addWidget(self.new_vfo_btn)
 
         # 主听/次听循环切换按钮（Ctrl+Tab）
         self.cycle_vfo_btn = QPushButton("切换主听")
-        self.cycle_vfo_btn.setFixedHeight(28)
+        self.cycle_vfo_btn.setFixedHeight(32)
         self.cycle_vfo_btn.setToolTip("在 VFO 之间循环切换主听（Ctrl+Tab）")
         self.cycle_vfo_btn.clicked.connect(self._on_cycle_vfo)
         toolbar.addWidget(self.cycle_vfo_btn)
 
         toolbar.addSeparator()
 
-        # 渲染模式指示
-        render_text = "OpenGL" if HAS_OPENGL else "软件渲染"
-        self._render_label = QLabel(f"  渲染: {render_text}  ")
-        render_label = self._render_label
-        render_label.setStyleSheet("color: #5B7B8C; font-size: 9pt;")
-        toolbar.addWidget(render_label)
+        # 音量滑块（0-100 映射到控制面板 volume_slider 0-63，走既有音量链）
+        self.toolbar_volume = QSlider(Qt.Horizontal)
+        self.toolbar_volume.setRange(0, 100)
+        self.toolbar_volume.setFixedWidth(100)
+        self.toolbar_volume.setFixedHeight(32)
+        self.toolbar_volume.setToolTip("音量（映射到控制面板 0-63）")
+        self._toolbar_vol_prev = 48
+        self.toolbar_volume.setValue(48)  # 先定值再接线，避免构造期误触发
+        self.toolbar_volume.valueChanged.connect(self._on_toolbar_volume_changed)
+        toolbar.addWidget(self.toolbar_volume)
+
+        # 静音按钮（checkable：按下静音到 0，再按恢复到上次音量）
+        self.toolbar_mute_btn = QPushButton("静音")
+        self.toolbar_mute_btn.setFixedHeight(32)
+        self.toolbar_mute_btn.setCheckable(True)
+        self.toolbar_mute_btn.toggled.connect(self._on_toolbar_mute_toggled)
+        toolbar.addWidget(self.toolbar_mute_btn)
 
         # 拉伸空白（QToolBar 没有 addStretch，用空白 QWidget 替代）
         spacer = QWidget()
@@ -545,30 +578,26 @@ class MainWindow(QMainWindow):
         # 录音按钮
         self.record_btn = QPushButton("录音")
         self.record_btn.setObjectName("recordButton")
-        self.record_btn.setFixedHeight(28)
+        self.record_btn.setFixedHeight(32)
         self.record_btn.setCheckable(True)
         self.record_btn.toggled.connect(self._toggle_record)
         toolbar.addWidget(self.record_btn)
 
         # 回放按钮（占位：选择 .iq 录音文件，baseband_io 支持时才真正回放）
         self.replay_btn = QPushButton("回放")
-        self.replay_btn.setFixedHeight(28)
+        self.replay_btn.setFixedHeight(32)
         self.replay_btn.setToolTip("选择已录制的 .iq 文件进行离线回放")
         self.replay_btn.clicked.connect(self._replay_recording)
         toolbar.addWidget(self.replay_btn)
 
     def _build_central_widget(self):
-        """构建中央组件。"""
-        central = QWidget()
-        self.setCentralWidget(central)
+        """构建中央组件。
 
-        main_layout = QHBoxLayout(central)
-        main_layout.setContentsMargins(4, 4, 4, 4)
-        main_layout.setSpacing(4)
-
-        # 主分割器：左侧频谱 + 右侧面板
-        main_splitter = QSplitter(Qt.Horizontal)
-
+        中央区 = left_tab（频谱/射频天空/模块信号流/气象云图/多普勒定轨/
+        卫星跟踪/新时空/ADS-B 航路 共 8 个页签）直接作为 QMainWindow 的 central
+        widget；右侧控制/状态/AI 三个面板改为 QDockWidget 停靠体系（可拖动/浮动/
+        关闭/叠页签），由 QMainWindow 自动管理，不再用 QSplitter 包裹。
+        """
         # 左侧：频谱显示 + 射频天空视图（Tab 切换）
         left_tab = QTabWidget()
         left_tab.setTabPosition(QTabWidget.North)
@@ -615,8 +644,6 @@ class MainWindow(QMainWindow):
 
         # 频谱组件
         self.spectrum = create_spectrum_widget(prefer_opengl=False)  # QOpenGLWidget fails to composite on some Windows GPUs; QPainter is equivalent here
-        _is_gl = self.spectrum.__class__.__name__ == "SpectrumGLWidget"
-        self._render_label.setText("  渲染: " + ("OpenGL" if _is_gl else "软件渲染 (QPainter)") + "  ")
         self.spectrum.freq_changed.connect(self._on_spectrum_freq_changed)
         # 共享同一个 VfoManager：频谱绘制/拖拽 与 DSP 绑定/主听切换 操作同一份数据
         if self._vfo_mgr is not None:
@@ -673,13 +700,10 @@ class MainWindow(QMainWindow):
         # 初始化天空视图演示数据
         self._init_sky_view()
 
-        main_splitter.addWidget(left_tab)
+        # 中央区 = left_tab（8 个页签）；右侧控制/状态/AI 改 QDockWidget 停靠体系
+        self.setCentralWidget(left_tab)
 
-        # 右侧：控制面板 + 状态面板 + AI 面板（Tab）
-        right_tab = QTabWidget()
-        right_tab.setTabPosition(QTabWidget.East)
-
-        # Tab 1: 控制
+        # 右侧坞 1: 控制面板
         self.control_panel = ControlPanel()
         self.control_panel.tune_fm_requested.connect(self._on_tune_fm)
         self.control_panel.tune_am_requested.connect(self._on_tune_am)
@@ -720,29 +744,39 @@ class MainWindow(QMainWindow):
                 self.control_panel.load_bookmarks_from_list(bm_list)
         except Exception:
             pass
-        right_tab.addTab(self.control_panel, "控制")
 
-        # Tab 2: 状态
+        # 右侧坞 2: 状态面板
         self.status_panel = StatusPanel()
-        right_tab.addTab(self.status_panel, "状态")
 
-        # Tab 3: AI
+        # 右侧坞 3: AI 助手面板
         self.ai_panel = AIPanel()
         self.ai_panel.tool_call_requested.connect(self._on_ai_tool_call)
         self.ai_panel.command_submitted.connect(self._on_ai_command)
-        right_tab.addTab(self.ai_panel, "AI 助手")
         # 启动即从 ~/.mbdsdr/config.json 初始化 agent，否则永远走规则降级
         self._init_ai_agent_from_config()
 
-        right_tab.setCurrentIndex(0)
-        main_splitter.addWidget(right_tab)
+        # ---- QDockWidget 停靠体系（可拖动 / 浮动 / 关闭，右侧叠页签切换）----
+        self.control_dock = self._wrap_panel_in_dock("控制", self.control_panel)
+        self.status_dock = self._wrap_panel_in_dock("状态", self.status_panel)
+        self.ai_dock = self._wrap_panel_in_dock("AI 助手", self.ai_panel)
+        # objectName 必填：QMainWindow.saveState/restoreState 靠它持久化坞布局
+        self.control_dock.setObjectName("controlDock")
+        self.status_dock.setObjectName("statusDock")
+        self.ai_dock.setObjectName("aiDock")
 
-        # 设置分割比例
-        main_splitter.setStretchFactor(0, 3)
-        main_splitter.setStretchFactor(1, 2)
-        main_splitter.setSizes([800, 500])
+        for d in (self.control_dock, self.status_dock, self.ai_dock):
+            d.setFeatures(QDockWidget.DockWidgetMovable
+                          | QDockWidget.DockWidgetFloatable
+                          | QDockWidget.DockWidgetClosable)
+            d.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+            self.addDockWidget(Qt.RightDockWidgetArea, d)
 
-        main_layout.addWidget(main_splitter)
+        # 三个坞叠在同一个右侧坞里，可页签切换
+        self.tabifyDockWidget(self.control_dock, self.status_dock)
+        self.tabifyDockWidget(self.status_dock, self.ai_dock)
+        # 默认显示控制页
+        self.control_dock.show()
+        self.control_dock.raise_()
 
     def _build_status_bar(self):
         """构建状态栏。
@@ -841,6 +875,11 @@ class MainWindow(QMainWindow):
                     lbl.setText(txt)
                 except Exception:
                     pass
+            # 顶栏大字号频率显示同步为 "--"（无后端绝不展示旧值/假值）
+            try:
+                self.toolbar_freq_label.setText("-- MHz")
+            except Exception:
+                pass
             return
         try:
             st = backend.get_status()
@@ -859,6 +898,20 @@ class MainWindow(QMainWindow):
             or backend.__class__.__name__
         try:
             self.status_freq.setText(f"频率: {f_hz / 1e6:.3f} MHz")
+        except Exception:
+            pass
+        # 顶栏大字号频率显示同步（与底部状态栏同源，均来自 backend.get_frequency()）
+        try:
+            self.toolbar_freq_label.setText(f"{f_hz / 1e6:.3f} MHz")
+        except Exception:
+            pass
+        # 顶栏解调模式下拉同步（blockSignals 防回环；后端未上报则不动，不编造）
+        try:
+            mode = getattr(st, "demod_mode", None) or getattr(st, "mode", None)
+            if mode:
+                self.toolbar_mode_combo.blockSignals(True)
+                self.toolbar_mode_combo.setCurrentText(str(mode).upper())
+                self.toolbar_mode_combo.blockSignals(False)
         except Exception:
             pass
         try:
@@ -2955,6 +3008,76 @@ class MainWindow(QMainWindow):
         else:
             self.showFullScreen()
 
+    # ------------------------------------------------------------------
+    # 右侧 QDockWidget 停靠体系（控制 / 状态 / AI 助手）
+    # ------------------------------------------------------------------
+    def _wrap_panel_in_dock(self, title: str, panel: QWidget) -> QDockWidget:
+        """把面板包进无框架 QScrollArea 再放进 QDockWidget（横向不滚、可纵向滚）。"""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(panel)
+        dock = QDockWidget(title, self)
+        dock.setWidget(scroll)
+        dock.setMinimumWidth(300)
+        return dock
+
+    def _toggle_right_docks(self):
+        """☰ 按钮：一键显示 / 隐藏右侧三个坞面板。"""
+        visible = not self.control_dock.isVisible()
+        for d in (self.control_dock, self.status_dock, self.ai_dock):
+            d.setVisible(visible)
+
+    def _on_toolbar_mode_selected(self, mode: str):
+        """工具栏模式下拉 → 走控制面板既有信号链（真实切解调 + VFO 带宽）。
+
+        直接改 control_panel.mode_combo 文本（不 blockSignals），让其内部
+        currentTextChanged → ControlPanel._on_mode_changed → mode_changed →
+        MainWindow._on_mode_changed 整条链按原样触发，不绕过后端下发。
+        """
+        cp = getattr(self, "control_panel", None)
+        if cp is None or not hasattr(cp, "mode_combo"):
+            return
+        target = (mode or "FM").upper()
+        if cp.mode_combo.currentText().upper() != target:
+            cp.mode_combo.setCurrentText(target)
+
+    def _on_toolbar_volume_changed(self, value: int):
+        """工具栏音量(0-100) → 映射到控制面板 volume_slider(0-63)，走既有音量链。"""
+        cp = getattr(self, "control_panel", None)
+        if cp is None or not hasattr(cp, "volume_slider"):
+            return
+        target = int(round(max(0, min(100, value)) * 63 / 100.0))
+        if cp.volume_slider.value() != target:
+            cp.volume_slider.setValue(target)
+
+    def _on_toolbar_mute_toggled(self, checked: bool):
+        """静音按钮：按下音量归零，再按恢复到上次音量（复用既有音量链）。"""
+        if checked:
+            self._toolbar_vol_prev = self.toolbar_volume.value()
+            self.toolbar_volume.setValue(0)
+        else:
+            self.toolbar_volume.setValue(
+                int(getattr(self, "_toolbar_vol_prev", 48)))
+
+    # ------------------------------------------------------------------
+    # 窗口几何 + 坞布局持久化（QSettings）
+    # ------------------------------------------------------------------
+    def _restore_window_state(self):
+        s = QSettings("MBDSDR", "Desktop")
+        geom = s.value("window_geometry")
+        if geom is not None:
+            self.restoreGeometry(geom)
+        state = s.value("dock_state")
+        if state is not None:
+            self.restoreState(state)
+
+    def _save_window_state(self):
+        s = QSettings("MBDSDR", "Desktop")
+        s.setValue("window_geometry", self.saveGeometry())
+        s.setValue("dock_state", self.saveState())
+
     def _start_sweep(self):
         """启动宽带扫频找台（真实后端步进调谐 → 拼接 PSD → 提取活动信号）。
 
@@ -3707,6 +3830,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """关闭时断开连接并保存配置。"""
+        # 窗口几何 + 右侧坞布局落 QSettings（下次启动原样恢复）
+        try:
+            self._save_window_state()
+        except Exception:
+            pass
         # 运行参数（频率/增益/模式/带宽/采样率/呼号/AGC/主题）立即落盘，退出不丢
         try:
             self.settings.flush()

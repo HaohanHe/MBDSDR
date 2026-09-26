@@ -103,7 +103,7 @@ class Theme:
         QFrame#card {{
             background-color: {c['card']};
             border: 1px solid {c['border']};
-            border-radius: 8px;
+            border-radius: 12px;
         }}
         QLabel#sectionTitle {{
             font-size: 11pt;
@@ -123,15 +123,15 @@ class Theme:
             color: {c['text']};
             background-color: {c['card']};
             border: 1px solid {c['border']};
-            border-radius: 8px;
+            border-radius: 12px;
             padding: 8px 16px;
         }}
         QPushButton {{
             background-color: {c['button']};
             color: {c['text']};
             border: 1px solid {c['border']};
-            border-radius: 6px;
-            padding: 6px 14px;
+            border-radius: 8px;
+            padding: 8px 16px;
             font-size: 10pt;
         }}
         QPushButton:hover {{
@@ -170,8 +170,8 @@ class Theme:
             background-color: {c['card']};
             color: {c['text']};
             border: 1px solid {c['border']};
-            border-radius: 6px;
-            padding: 5px 10px;
+            border-radius: 8px;
+            padding: 6px 12px;
             font-size: 10pt;
         }}
         QComboBox:hover {{
@@ -207,8 +207,8 @@ class Theme:
             background-color: {c['card']};
             color: {c['text']};
             border: 1px solid {c['border']};
-            border-radius: 6px;
-            padding: 6px 10px;
+            border-radius: 8px;
+            padding: 7px 12px;
             font-size: 10pt;
         }}
         QLineEdit:focus {{
@@ -218,14 +218,14 @@ class Theme:
             background-color: {c['card']};
             color: {c['text']};
             border: 1px solid {c['border']};
-            border-radius: 6px;
+            border-radius: 8px;
             padding: 6px;
             font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
             font-size: 9pt;
         }}
         QTabWidget::pane {{
             border: 1px solid {c['border']};
-            border-radius: 6px;
+            border-radius: 10px;
             background-color: {c['card']};
         }}
         QTabBar::tab {{
@@ -233,9 +233,9 @@ class Theme:
             color: {c['text_secondary']};
             border: 1px solid {c['border']};
             border-bottom: none;
-            border-top-left-radius: 6px;
-            border-top-right-radius: 6px;
-            padding: 6px 16px;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            padding: 6px 14px;
             margin-right: 2px;
         }}
         QTabBar::tab:selected {{
@@ -276,9 +276,10 @@ class Theme:
         QGroupBox {{
             background-color: {c['card']};
             border: 1px solid {c['border']};
-            border-radius: 8px;
-            margin-top: 14px;
-            padding-top: 8px;
+            border-radius: 12px;
+            margin-top: 16px;
+            padding: 12px 10px 10px 10px;
+            font-size: 11pt;
             font-weight: 600;
             color: {c['text']};
         }}
@@ -292,8 +293,8 @@ class Theme:
             background-color: {c['card']};
             color: {c['text']};
             border: 1px solid {c['border']};
-            border-radius: 6px;
-            padding: 4px 8px;
+            border-radius: 8px;
+            padding: 5px 10px;
             font-size: 10pt;
         }}
         QSpinBox:focus, QDoubleSpinBox:focus {{
@@ -308,14 +309,14 @@ class Theme:
         QProgressBar {{
             background-color: {c['grid']};
             border: 1px solid {c['border']};
-            border-radius: 6px;
+            border-radius: 8px;
             text-align: center;
             color: {c['text']};
             height: 14px;
         }}
         QProgressBar::chunk {{
             background-color: {c['primary']};
-            border-radius: 5px;
+            border-radius: 6px;
         }}
         QMenuBar {{
             background-color: {c['bg_alt']};
@@ -347,7 +348,7 @@ class Theme:
             background-color: {c['card']};
             color: {c['text']};
             border: 1px solid {c['border']};
-            border-radius: 6px;
+            border-radius: 8px;
             gridline-color: {c['grid']};
             selection-background-color: {c['primary']};
             selection-color: {c['card']};
@@ -360,6 +361,20 @@ class Theme:
             border-bottom: 1px solid {c['border']};
             padding: 4px 8px;
             font-weight: 600;
+        }}
+        QScrollArea {{
+            background: transparent;
+            border: none;
+        }}
+        QDockWidget {{
+            color: {c['text']};
+        }}
+        QDockWidget::title {{
+            background: {c['bg_alt']};
+            color: {c['text']};
+            border-radius: 8px;
+            padding: 6px 12px;
+            margins: 4px;
         }}
         """
 
@@ -477,8 +492,8 @@ THEMES = {
     "high_contrast": HIGH_CONTRAST,
 }
 
-# 兼容旧配置里写死的主题 key
-_THEME_ALIASES = {"japanese_light": "default", "light": "default"}
+# 兼容旧配置里写死的主题 key（未知名一律回退默认主题）
+_THEME_ALIASES = {"light": "default"}
 
 DEFAULT_THEME = "default"
 

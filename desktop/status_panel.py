@@ -100,6 +100,8 @@ class StatusPanel(QWidget):
         self._sdr_connected = False
         self._build_ui()
         self._start_utc_clock()
+        # 初始即未连接：SDR 相关卡片整组置灰，绝不错误呈现"有数据"
+        self.set_sdr_connected(False)
 
     # ========================================================================
     # UI 构建
@@ -131,8 +133,8 @@ class StatusPanel(QWidget):
         layout.addWidget(conn_group)
 
         # ---- 信号质量 ----
-        signal_group = QGroupBox("信号质量")
-        signal_layout = QGridLayout(signal_group)
+        self.signal_group = QGroupBox("信号质量")
+        signal_layout = QGridLayout(self.signal_group)
 
         signal_layout.addWidget(QLabel("RSSI:"), 0, 0)
         self.rssi_value = QLabel("--")
@@ -170,11 +172,11 @@ class StatusPanel(QWidget):
         self._set_level_bar_color("#9AA5AC")  # 灰色（无信号）
         signal_layout.addWidget(self.level_bar, 2, 3)
 
-        layout.addWidget(signal_group)
+        layout.addWidget(self.signal_group)
 
         # ---- SDR 接收参数（新增）----
-        rx_group = QGroupBox("SDR 接收参数")
-        rx_layout = QGridLayout(rx_group)
+        self.rx_group = QGroupBox("SDR 接收参数")
+        rx_layout = QGridLayout(self.rx_group)
 
         # 每行两个字段：标签 | 值 | 标签 | 值
         rx_layout.addWidget(QLabel("中心频率:"), 0, 0)
@@ -227,7 +229,7 @@ class StatusPanel(QWidget):
         self.rx_offset.setObjectName("statusValue")
         rx_layout.addWidget(self.rx_offset, 4, 3)
 
-        layout.addWidget(rx_group)
+        layout.addWidget(self.rx_group)
 
         # ---- GPS ----
         self.gps_group = QGroupBox("GPS / 北斗")
@@ -343,8 +345,8 @@ class StatusPanel(QWidget):
         self.imu_group.setVisible(False)
 
         # ---- 设备信息（通用 SDR 设备字段 + 原有 ai-sdr Mini 字段）----
-        info_group = QGroupBox("设备信息")
-        info_layout = QGridLayout(info_group)
+        self.info_group = QGroupBox("设备信息")
+        info_layout = QGridLayout(self.info_group)
 
         info_layout.addWidget(QLabel("设备名:"), 0, 0)
         self.dev_name = QLabel("未连接")
@@ -397,7 +399,7 @@ class StatusPanel(QWidget):
         self.uptime.setObjectName("statusValue")
         info_layout.addWidget(self.uptime, 5, 3)
 
-        layout.addWidget(info_group)
+        layout.addWidget(self.info_group)
 
         layout.addStretch()
 
@@ -594,9 +596,12 @@ class StatusPanel(QWidget):
             self.rssi_value.setStyleSheet("color: #B85C5C;")
 
     def set_sdr_connected(self, connected: bool):
-        """连接状态切换：连接时正常显示；断开时把 SDR 相关字段全部 "--"。"""
+        """连接状态切换：连接时正常显示；断开时把 SDR 相关字段全部 "--" 并整组置灰。"""
         self._sdr_connected = bool(connected)
         if connected:
+            # 连接：恢复信号质量 / 接收参数 / GPS / 设备信息四组的可用视觉
+            for grp in (self.signal_group, self.rx_group, self.gps_group, self.info_group):
+                self._set_card_enabled(grp, True)
             return
         # 断开：清空 SDR 接收参数 / 设备 / 信号电平
         self.rx_freq.setText("--")
@@ -621,6 +626,30 @@ class StatusPanel(QWidget):
         self.snr_value.setText("--")
         self.mode_value.setText("--")
         self.freq_value.setText("--")
+
+        # 视觉置灰：conn_group 始终可用（它本身就是连接状态指示器）；
+        # imu_group 始终隐藏（无九轴硬件不占位）。
+        for grp in (self.signal_group, self.rx_group, self.gps_group, self.info_group):
+            self._set_card_enabled(grp, False)
+
+    def set_disconnected(self):
+        """便捷入口：断开连接（无参，供主窗口/测试直接调用）。"""
+        self.set_sdr_connected(False)
+
+    @staticmethod
+    def _set_card_enabled(card: QGroupBox, enabled: bool):
+        """断连时把卡片整组禁用并把 QGroupBox 标题置灰 (#9AA0A6)；连接时恢复。
+
+        setEnabled(False) 会连带禁用卡片内所有子控件（视觉上整体变灰）；
+        conn_group 不传入此方法，保持始终可用。
+        """
+        if card is None:
+            return
+        card.setEnabled(enabled)
+        if enabled:
+            card.setStyleSheet("")
+        else:
+            card.setStyleSheet("QGroupBox::title { color: #9AA0A6; }")
 
     # ========================================================================
     # 内部工具
@@ -662,7 +691,19 @@ class StatusPanel(QWidget):
 
     @Slot(dict)
     def on_status_updated(self, status: dict):
-        """SDR 状态更新。字段缺失一律显 "--"，绝不默认 0 伪造数值。"""
+        """SDR 状态更新。字段缺失一律显 "--"，绝不默认 0 伪造数值。
+
+        硬红线：只有真实后端回包才更新。凡携带 simulated/fake/demo 等
+        "模拟/演示数据"标记的字典一律整体忽略，不刷新任何字段。
+        """
+        if not isinstance(status, dict):
+            return
+        if status.get("source") == "simulated" or status.get("source") == "fake":
+            return
+        if status.get("fake") is True or status.get("simulated") is True \
+                or status.get("demo") is True:
+            return
+
         rssi = status.get("rssi")
         snr = status.get("snr")
         mode = status.get("mode_name")
@@ -675,18 +716,25 @@ class StatusPanel(QWidget):
         self.freq_value.setText(freq if freq else "--")
 
         # 运行时间
-        if uptime > 0:
-            h, rem = divmod(uptime, 3600)
-            m, s = divmod(rem, 60)
-            self.uptime.setText(f"{h:02d}:{m:02d}:{s:02d}")
+        try:
+            if uptime and uptime > 0:
+                h, rem = divmod(int(uptime), 3600)
+                m, s = divmod(rem, 60)
+                self.uptime.setText(f"{h:02d}:{m:02d}:{s:02d}")
+        except (TypeError, ValueError):
+            pass
 
-        # RSSI 颜色指示
-        if rssi > -50:
-            self.rssi_value.setStyleSheet("color: #6BA89A;")  # 强信号-绿
-        elif rssi > -70:
-            self.rssi_value.setStyleSheet("color: #C4845C;")  # 中等-橙
-        else:
-            self.rssi_value.setStyleSheet("color: #B85C5C;")  # 弱-红
+        # RSSI 颜色指示（rssi 为 None 时不染色，保持默认）
+        if rssi is not None:
+            try:
+                if rssi > -50:
+                    self.rssi_value.setStyleSheet("color: #6BA89A;")  # 强信号-绿
+                elif rssi > -70:
+                    self.rssi_value.setStyleSheet("color: #C4845C;")  # 中等-橙
+                else:
+                    self.rssi_value.setStyleSheet("color: #B85C5C;")  # 弱-红
+            except TypeError:
+                pass
 
     @Slot(dict)
     def on_gps_updated(self, gps: dict):
@@ -733,8 +781,11 @@ class StatusPanel(QWidget):
                        hdop, speed_kmh, course_deg, utc_time, fix_quality, timestamp}
         source=="real"  → 绿色(#6BA89A)显示真实坐标/卫星数/HDOP/高度；
         source=="none"  → 灰色“未连接/无数据”，坐标一律空，绝不造假。
-        （UI 与真硬件联调待插模块后再细化。）
+        fix_dict 为 None / 空字典 / 非 dict 时一律按"无数据"处理，绝不抛异常、
+        绝不保留旧坐标。
         """
+        if not isinstance(fix_dict, dict):
+            fix_dict = {}
         source = fix_dict.get("source", "none")
         ts = fix_dict.get("timestamp")
         self._update_timestamp(self.gps_timestamp, ts)

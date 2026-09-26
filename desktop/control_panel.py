@@ -123,9 +123,10 @@ class ControlPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._current_mode = "FM"
-        # 统一以 Hz 为内部频率真值（兼容 SDR 全频段），默认 98.5 MHz
-        self._freq_hz = 98.5e6
+        # 未连接时无模式/无频率真值；连接后由后端或持久化配置回填。
+        # 绝不硬编码 98.5 MHz / FM 这类演示默认值伪装成"已在收听某台"。
+        self._current_mode = None
+        self._freq_hz = None
         self._step_hz = 10_000.0   # 默认步进 10 kHz
         self._volume = 30
         self._recording = False
@@ -173,6 +174,27 @@ class ControlPanel(QWidget):
             if w is not None:
                 w.setEnabled(self._sdr_connected)
 
+    def set_connected(self, connected: bool):
+        """主窗口在连接/断开时调用（hasattr 守卫，方法名固定为 set_connected）。
+
+        - connected=False：所有频率输入/模式下拉/增益/音量/静噪等射频控件
+          setEnabled(False)，freq_display 显 "-- MHz"，频率与模式真值清空，
+          绝不残留 98.5/FM 之类的演示状态。
+        - connected=True：恢复控件使能；具体真实频率/模式由后端或持久化配置
+          通过 set_frequency_hz()/set_mode() 等回填，本方法不编造数值。
+        """
+        self.set_sdr_connected(connected)
+        if not connected:
+            self._freq_hz = None
+            self._current_mode = None
+            self.freq_display.setText("-- MHz")
+            self.freq_input.clear()
+            self.freq_input.setStyleSheet("")
+            # 模式下拉回到"无选择"，避免残留 FM 等假象
+            self.mode_combo.blockSignals(True)
+            self.mode_combo.setCurrentIndex(-1)
+            self.mode_combo.blockSignals(False)
+
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -182,8 +204,8 @@ class ControlPanel(QWidget):
         freq_group = QGroupBox("频率")
         freq_layout = QVBoxLayout(freq_group)
 
-        # 大字体频率显示
-        self.freq_display = QLabel("98.500 MHz")
+        # 大字体频率显示（未连接时显 "-- MHz"，绝不显示 98.500 这类假频率）
+        self.freq_display = QLabel("-- MHz")
         self.freq_display.setObjectName("freqDisplay")
         self.freq_display.setAlignment(Qt.AlignCenter)
         self.freq_display.setMinimumHeight(60)
@@ -196,9 +218,14 @@ class ControlPanel(QWidget):
         self.mode_combo.addItems(["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"])
         self.mode_combo.setFixedWidth(80)
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
+        # 未连接时不预选任何模式（index=-1）；FM 仍在下拉里作为可选项，但不主动设为当前值
+        self.mode_combo.blockSignals(True)
+        self.mode_combo.setCurrentIndex(-1)
+        self.mode_combo.blockSignals(False)
         mode_freq_row.addWidget(self.mode_combo)
 
-        self.freq_input = QLineEdit("98.5")
+        self.freq_input = QLineEdit("")
+        self.freq_input.setPlaceholderText("输入频率")
         self.freq_input.setFixedHeight(32)
         self.freq_input.returnPressed.connect(self._on_freq_input)
         mode_freq_row.addWidget(self.freq_input)
@@ -548,8 +575,12 @@ class ControlPanel(QWidget):
         self._populate_presets(band)
 
     def _update_freq_display(self):
-        """更新频率显示（按数量级自适应 MHz/kHz/Hz）。"""
+        """更新频率显示（按数量级自适应 MHz/kHz/Hz）。无真值时显 "-- MHz"。"""
         hz = self._freq_hz
+        if hz is None:
+            # 未连接 / 未取得真实频率：显 "-- MHz"，输入框留空（占位符提示）
+            self.freq_display.setText("-- MHz")
+            return
         if hz >= 1e6:
             self.freq_display.setText(f"{hz / 1e6:.3f} MHz")
             self.freq_input.setText(f"{hz / 1e6:g}")
