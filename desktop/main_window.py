@@ -34,7 +34,7 @@ if _REPO_ROOT not in sys.path:
 
 from themes import get_theme, THEMES, DEFAULT_THEME
 from spectrum_widget import create_spectrum_widget, HAS_OPENGL
-from control_panel import ControlPanel
+from control_panel import ControlPanel, MODE_VFO_BANDWIDTH
 from status_panel import StatusPanel
 from ai_panel import AIPanel
 from mcp_worker import MCPWorkerManager
@@ -308,6 +308,10 @@ class MainWindow(QMainWindow):
 
         # 加载 GUI 配置（窗口大小、频率、主题等）
         QTimer.singleShot(100, self._load_gui_config)
+
+        # 启动自动选源：枚举到 RTL-SDR 就直接连接，无需用户手选。
+        # 延迟到事件循环就绪后执行；无设备时状态栏明确提示，绝不静默走假后端。
+        QTimer.singleShot(200, self._auto_enumerate_and_connect)
 
         # 天空图实时更新定时器（每 5 秒刷新卫星位置 + 授时）
         self._sky_update_timer = QTimer(self)
@@ -583,9 +587,10 @@ class MainWindow(QMainWindow):
 
         spectrum_layout.addWidget(spectrum_header)
 
-        # 无设备引导提示横幅（未连接时显示；连接后隐藏）
+        # 无设备引导提示横幅（未连接时显示；连接后隐藏；自动枚举失败时由
+        # _show_no_rtl_hint 覆写为具体排查信息）
         self._no_device_hint = QLabel(
-            "  尚未连接 SDR 设备 —— 点击工具栏「连接」或按 Ctrl+C 选择设备开始接收")
+            "  正在枚举 SDR 设备…若未自动连接，请点击工具栏「连接」或按 Ctrl+C  ")
         self._no_device_hint.setObjectName("hintLabel")
         self._no_device_hint.setAlignment(Qt.AlignCenter)
         self._no_device_hint.setStyleSheet(
@@ -971,6 +976,187 @@ class MainWindow(QMainWindow):
     # 设备选择对话框中"ai-sdr Mini WebSocket"特殊条目的 data 标记
     _WS_SPECIAL = "__ai_sdr_mini_ws__"
 
+    # ------------------------------------------------------------------
+    # 启动自动选源：枚举到 RTL 就默认选中连接，无需用户手选。
+    # 对标 SDR++ 开箱体验：插上棒启动即收，不弹设备选择对话框。
+    # 枚举失败（缺 pyrtlsdr / 缺驱动 / 无棒）时状态栏明确提示，绝不静默走假后端。
+    # ------------------------------------------------------------------
+    def _auto_enumerate_and_connect(self):
+        """启动后自动枚举 SDR 设备；找到 RTL-SDR 则直接连接，否则提示排查。
+
+        只在启动时调用一次（QTimer.singleShot 延迟到事件循环就绪）。
+        用户已手动连接 / 已有后端时直接返回，不重复连接。
+        任何异常都不崩溃，降级为状态栏提示 + 保持未连接状态。
+        """
+        if self._active_sdr_backend is not None:
+            return
+        try:
+            from mbdsdr_ai.sdr_backend import (
+                enumerate_all_sdr_devices, build_backend_for_device)
+            devices = enumerate_all_sdr_devices()
+        except Exception as e:
+            # 枚举本身抛异常（典型：pyrtlsdr 未安装 / librtlsdr 缺失）
+            self._show_no_rtl_hint(f"设备枚举失败：{e}")
+            return
+
+        # 优先选 RTL-SDR 原生棒（driver == "rtlsdr"），其次任意真实设备
+        rtl_dev = None
+        other_dev = None
+        for dev in devices:
+            if not isinstance(dev, dict):
+                continue
+            drv = (dev.get("driver") or "").lower()
+            if drv == "rtlsdr":
+                rtl_dev = dev
+                break
+            if other_dev is None:
+                other_dev = dev
+
+        chosen = rtl_dev or other_dev
+        if chosen is None:
+            # 真的没设备：明确提示，不弹对话框、不造假
+            self._show_no_rtl_hint("未找到 RTL-SDR，检查 Zadig WinUSB 驱动 / pip install pyrtlsdr")
+            return
+
+        # 构造后端并连接（默认参数：2.048MS/s、AGC 开、PPM 0、offset 关）
+        try:
+            backend = build_backend_for_device(chosen)
+        except Exception as e:
+            self._show_no_rtl_hint(f"构造后端失败：{e}")
+            return
+        if backend is None:
+            self._show_no_rtl_hint("未找到 RTL-SDR，检查 Zadig WinUSB 驱动 / pip install pyrtlsdr")
+            return
+
+        ok = self._connect_backend(
+            backend,
+            sample_rate=2_048_000.0,
+            gain=20.0,
+            ppm=0,
+            agc=True,
+            offset_tuning=False,
+        )
+        if not ok:
+            # 连接失败：状态栏已由 _connect_backend 写了错误；补充无设备引导
+            self._show_no_rtl_hint(
+                "RTL-SDR 连接失败，检查 Zadig WinUSB 驱动 / pip install pyrtlsdr")
+
+    def _show_no_rtl_hint(self, message: str):
+        """无设备 / 枚举失败时：状态栏 + 频谱上方横幅同时显示明确提示。
+
+        绝不静默走假后端、绝不显示"已连接"。横幅文字与状态栏一致，
+        用户一眼看到排查方向（Zadig 驱动 / pyrtlsdr 库）。
+        """
+        try:
+            self.statusBar().showMessage(message, 8000)
+        except Exception:
+            pass
+        try:
+            if self._no_device_hint is not None:
+                self._no_device_hint.setText(f"  {message}  ")
+                self._no_device_hint.setVisible(True)
+        except Exception:
+            pass
+        try:
+            self.status_conn.setText("未连接")
+        except Exception:
+            pass
+
+    def _connect_backend(self, backend, sample_rate: float = 2_048_000.0,
+                         gain: float = 20.0, ppm: int = 0,
+                         agc: bool = True, offset_tuning: bool = False) -> bool:
+        """通用后端连接流程：connect → 成功则切状态 + 下发参数 + 启动 IQ 流。
+
+        被 _connect_dialog（用户手动选设备）和 _auto_enumerate_and_connect
+        （启动自动选 RTL）共用。连接失败返回 False 并写状态栏，不抛异常。
+        红线：硬件失败绝不静默切 mock 报 success。
+        """
+        try:
+            ok = backend.connect()
+        except Exception as e:
+            ok = False
+            try:
+                backend.status.error = f"connect 异常: {e}"
+            except Exception:
+                pass
+
+        if not ok:
+            raw_err = ""
+            try:
+                raw_err = backend.get_status().error or ""
+            except Exception:
+                pass
+            friendly = self._humanize_error(raw_err) if raw_err else \
+                "设备无响应：请检查 USB 棒、librtlsdr 驱动、以及设备是否被 SDR#/GQRX 占用。"
+            self.statusBar().showMessage(f"连接失败：{friendly}", 6000)
+            try:
+                backend.disconnect()
+            except Exception:
+                pass
+            return False
+
+        # 连接成功：停掉旧 worker，切换到真实后端
+        self._worker_manager.stop()
+        self._worker = None
+        self._active_sdr_backend = backend
+        self._panels_set_sdr_connected(True)
+        try:
+            self.conn_label.setText(f"  状态: {backend.device.name}  ")
+            self.conn_label.setStyleSheet("color: #6BA89A; font-weight: 600;")
+            self.status_conn.setText(backend.device.name)
+        except Exception:
+            pass
+        self.connect_btn.setEnabled(False)
+        self.connect_btn.setStyleSheet("")
+        self.disconnect_btn.setEnabled(True)
+        try:
+            self.spectrum.set_connected(True)
+        except Exception:
+            pass
+        try:
+            if self._no_device_hint is not None:
+                self._no_device_hint.setVisible(False)
+        except Exception:
+            pass
+        self.statusBar().showMessage(f"已连接 {backend.device.name}", 4000)
+
+        # 下发设备参数（失败仅 warning，不阻断连接）
+        try:
+            backend.set_sample_rate(float(sample_rate))
+        except Exception as e:
+            self.statusBar().showMessage(f"采样率应用失败: {e}", 4000)
+        # 连接后立即下发默认中心频率（从控制面板读回，否则 98.5MHz）
+        default_freq = 98_500_000.0
+        try:
+            default_freq = float(self.control_panel.get_frequency_hz())
+        except Exception:
+            default_freq = 98_500_000.0
+        try:
+            backend.set_frequency(default_freq)
+        except Exception as e:
+            self.statusBar().showMessage(f"初始频率下发失败: {e}", 4000)
+        try:
+            backend.set_ppm(int(ppm))
+        except Exception:
+            pass
+        try:
+            backend.set_offset_tuning(bool(offset_tuning))
+        except Exception:
+            pass
+        try:
+            backend.set_agc(bool(agc))
+        except Exception:
+            pass
+        if not agc:
+            try:
+                backend.set_gain(float(gain))
+            except Exception:
+                pass
+        self._update_status_bar()
+        # 启动真实 IQ 流：频谱/录制/声卡全部接通
+        self._start_iq_streams()
+        return True
+
     def _connect_dialog(self):
         """弹出设备选择对话框：动态枚举真实 SDR 设备，选中后真实 connect。
 
@@ -1140,8 +1326,8 @@ class MainWindow(QMainWindow):
                     self._connect_real(host.strip(), port)
             return
 
-        # 真实 SDR 设备：构造对应后端并真实 connect。
-        # 红线：硬件失败绝不静默切 mock 报 success，弹错误提示。
+        # 真实 SDR 设备：构造后端并走通用连接流程（_connect_backend，
+        # 与启动自动选源共用同一段 connect + 下发参数 + 启动 IQ 流逻辑）。
         backend = build_backend_for_device(data)
         if backend is None:
             QMessageBox.critical(
@@ -1149,113 +1335,20 @@ class MainWindow(QMainWindow):
                 f"无法为设备「{data.get('label', '?')}」构造后端。")
             return
 
-        try:
-            ok = backend.connect()
-        except Exception as e:
-            ok = False
-            try:
-                backend.status.error = f"connect 异常: {e}"
-            except Exception:
-                pass
-
+        ok = self._connect_backend(
+            backend,
+            sample_rate=chosen_sr,
+            gain=chosen_gain,
+            ppm=chosen_ppm,
+            agc=chosen_agc,
+            offset_tuning=chosen_offset,
+        )
         if not ok:
-            raw_err = ""
-            try:
-                raw_err = backend.get_status().error or ""
-            except Exception:
-                pass
-            if raw_err:
-                friendly = self._humanize_error(raw_err)
-                # 非空错误：人话 + 原始错误都展示，避免吞掉后端线索
-                msg = f"连接失败：{friendly}\n\n底层错误：{raw_err}"
-            else:
-                # connect() 返回 False 但 status.error 为空（后端未填错误），
-                # 给出明确的人话排查清单，不再显示模糊的"未知错误"。
-                friendly = ("设备无响应：请检查 USB 棒、librtlsdr 驱动、"
-                            "以及设备是否被 SDR#/GQRX 占用。")
-                msg = ("连接失败：设备无响应。请检查："
-                       "1) RTL-SDR 棒已插入 USB 口；"
-                       "2) 已安装 librtlsdr 驱动（Windows 需 zadig 替换驱动）；"
-                       "3) 设备未被其他软件（SDR#/GQRX）占用。")
-            QMessageBox.critical(self, "连接失败", msg)
-            self.statusBar().showMessage(f"连接失败：{friendly}", 6000)
-            try:
-                backend.disconnect()
-            except Exception:
-                pass
-            return
-
-        # 连接成功：停掉旧 worker，切换到真实后端
-        self._worker_manager.stop()
-        self._worker = None
-        self._active_sdr_backend = backend
-        self._panels_set_sdr_connected(True)
-        self.conn_label.setText(f"  状态: {backend.device.name}  ")
-        self.conn_label.setStyleSheet("color: #6BA89A; font-weight: 600;")
-        self.status_conn.setText(backend.device.name)
-        self.connect_btn.setEnabled(False)
-        self.connect_btn.setStyleSheet("")  # 取消未连接高亮
-        self.disconnect_btn.setEnabled(True)
-        # 频谱标记为已连接（清除"未连接"占位）
-        try:
-            self.spectrum.set_connected(True)
-        except Exception:
-            pass
-        # 隐藏无设备引导横幅
-        try:
-            if self._no_device_hint is not None:
-                self._no_device_hint.setVisible(False)
-        except Exception:
-            pass
-        self.statusBar().showMessage(
-            f"已连接 {backend.device.name}", 4000)
-
-        # ---- 应用对话框中选择的设备参数（失败仅 warning，不阻断连接）----
-        # 对标 SDR++ source.cpp：connect 成功后再 set_sample_rate/set_gain/set_ppm/
-        # set_agc/set_offset_tuning；任一失败记 warning 但不回滚连接。
-        try:
-            backend.set_sample_rate(chosen_sr)
-        except Exception as e:
-            self.statusBar().showMessage(f"采样率应用失败: {e}", 4000)
-        # 连接后立即下发默认中心频率（FM 广播段），
-        # 否则硬件停在出厂默认频率（0Hz/上次频率），用户调谐前收不到东西。
-        default_freq = 98_500_000.0
-        if hasattr(self.control_panel, "get_frequency_hz"):
-            try:
-                default_freq = float(self.control_panel.get_frequency_hz())
-            except Exception:
-                default_freq = 98_500_000.0
-        elif hasattr(self.control_panel, "_freq_hz"):
-            try:
-                default_freq = float(self.control_panel._freq_hz)
-            except Exception:
-                default_freq = 98_500_000.0
-        try:
-            backend.set_frequency(default_freq)
-        except Exception as e:
-            self.statusBar().showMessage(f"初始频率下发失败: {e}", 4000)
-        try:
-            backend.set_ppm(chosen_ppm)
-        except Exception:
-            pass
-        try:
-            backend.set_offset_tuning(chosen_offset)
-        except Exception:
-            pass
-        try:
-            backend.set_agc(chosen_agc)
-        except Exception:
-            pass
-        if not chosen_agc:
-            # AGC 关闭时才手动下发增益；AGC 开时增益由硬件自动跟踪
-            try:
-                backend.set_gain(chosen_gain)
-            except Exception:
-                pass
-        # 连接后立即回读一次状态栏
-        self._update_status_bar()
-        # (A/B/C) 启动真实 IQ 流：频谱/录制/声卡全部接通
-        self._start_iq_streams()
+            # _connect_backend 已在状态栏写了详细错误；对话框额外弹一次提醒
+            QMessageBox.warning(
+                self, "连接失败",
+                "设备连接失败，请查看状态栏错误详情。\n"
+                "常见原因：USB 棒未插 / 驱动未装（Zadig WinUSB）/ 被其他软件占用。")
 
     @staticmethod
     def _humanize_error(raw_err: str) -> str:
@@ -1646,22 +1739,27 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _on_mode_changed(self, mode: str):
+        """模式切换（WFM/NFM/AM/USB/LSB/CW）：立刻切解调 + 改 VFO 带宽，音频不断。
+
+        - backend.set_demod(mode) 同步下发硬件解调模式；
+        - _demod_cfg.mode 更新后，后台解调 worker 下一帧即按新模式解调，
+          声卡流不重建、不中断（对标 SDR++ 切模式音频无缝）；
+        - VFO 带宽按 MODE_VFO_BANDWIDTH 逐模式套用（CW 500Hz / SSB 3k /
+          AM 6k / NBFM 12k / WFM 180k），推到已绑定的 DDC。
+        """
         # 真实 SDR 后端：下发解调模式
         if self._active_sdr_backend is not None:
             try:
                 self._active_sdr_backend.set_demod(mode)
             except Exception:
                 pass
-        # 同步到解调 worker 共享配置（后台线程下一帧生效）
+        # 同步到解调 worker 共享配置（后台线程下一帧生效，音频不中断）
         if self._demod_cfg is not None:
             self._demod_cfg.mode = str(mode).upper()
-        # 根据模式调整 VFO 带宽（WFM 广播 ~180k，窄带 FM/AM ~12k）
+        # 根据模式套用典型 VFO 带宽（MODE_VFO_BANDWIDTH，逐模式精确值）
         try:
             m = (mode or "FM").upper()
-            if m == "WFM" or m == "FM":
-                bw = 180000.0 if m == "WFM" else 12000.0
-            else:
-                bw = 12000.0
+            bw = float(MODE_VFO_BANDWIDTH.get(m, MODE_VFO_BANDWIDTH["FM"]))
             self._vfo_bw = bw
             # 推到已绑定的主/次 VFO DSP（VfoManager.push_bandwidth → set_bandwidth）
             if self._vfo_mgr is not None:
@@ -1673,9 +1771,15 @@ class MainWindow(QMainWindow):
                             pass
             elif self._vfo is not None and hasattr(self._vfo, "set_bandwidth"):
                 self._vfo.set_bandwidth(bw)
+            # 频谱 VFO 带宽高亮同步
+            try:
+                if hasattr(self.spectrum, "set_vfo_bandwidth"):
+                    self.spectrum.set_vfo_bandwidth(bw)
+            except Exception:
+                pass
         except Exception:
             pass
-        # 持久化：解调模式（带宽由用户在带宽下拉显式改动时另存）
+        # 持久化：解调模式
         try:
             self.settings.set("demod_mode", str(mode))
         except Exception:
@@ -2151,7 +2255,17 @@ class MainWindow(QMainWindow):
                 pass
 
     def _stop_iq_streams(self):
-        """断开时：停流水线全部线程 + 清 VfoManager 绑定 + 关声卡。"""
+        """断开时：停流水线全部线程 + 清 VfoManager 绑定 + 关声卡 + 停 IQ 轮询。
+
+        干净关闭对标 SDR++ main.cpp stop()：先停生产者线程再关设备，
+        确保不残留读线程 / 不占着 USB 棒。所有操作 try/except，绝不崩。
+        """
+        # 停 UI 线程 IQ 轮询定时器（流水线模式下未启动，但防御性停止）
+        try:
+            if self._iq_poll_timer is not None:
+                self._iq_poll_timer.stop()
+        except Exception:
+            pass
         # 停流水线（reader + splitter + FFT/demod/record workers），join 回收
         if self._pipeline is not None:
             try:
@@ -2263,17 +2377,82 @@ class MainWindow(QMainWindow):
         # (C) FM 鉴频解调 → 声卡输出（带静噪门控）
         self._demod_and_play(iq, sr)
 
-    def _update_rssi_from_iq(self, iq: np.ndarray):
-        """用 IQ 功率估计 RSSI(dBFS) 更新状态栏 + S-meter；失败静默。
+    def _compute_vfo_rssi_dbfs(self) -> Optional[float]:
+        """从频谱 FFT 数据计算当前 VFO 带宽内的信号功率 (dBFS)。
 
-        - 写入 self._last_dbfs 供 _update_status_bar 复用；
-        - 推送 control_panel.update_signal_level / status_panel.update_signal_level
-          （Agent A/C 新增接口，hasattr 守卫，并行开发时不崩）。
+        优先用 FFT worker 已算好的频谱（generator.spectrum，dBFS/bin），
+        取 VFO 中心 ± bw/2 对应的 bin 范围，dBFS→线性求和→dBFS，
+        得到"当前 VFO 处"的信号强度。无 FFT 数据 / VFO 超出带宽时返回 None，
+        由调用方回退到全带宽 IQ 功率。绝不造假值。
         """
         try:
-            p = float(np.mean(np.abs(iq) ** 2))
-            dbfs = 10.0 * math.log10(p + 1e-12)
-            self._last_dbfs = dbfs
+            gen = getattr(self.spectrum, "generator", None)
+            if gen is None:
+                return None
+            spec = getattr(gen, "spectrum", None)
+            if spec is None or not isinstance(spec, np.ndarray) or spec.size == 0:
+                return None
+            # 全部 NaN = 无真实数据
+            if np.all(np.isnan(spec)):
+                return None
+            num_bins = int(gen.num_bins)
+            sr = float(gen.sample_rate_hz)
+            cf = float(gen.center_freq_hz)
+            if sr <= 0 or num_bins <= 0:
+                return None
+            # VFO 中心频率与带宽
+            vfo_center = float(self._vfo_center_hz) if self._vfo_center_hz > 0 else cf
+            bw = float(self._vfo_bw) if self._vfo_bw > 0 else 12000.0
+            # VFO 完全落在当前 FFT 带宽外？回退全带宽
+            f_lo = cf - sr / 2.0
+            f_hi = cf + sr / 2.0
+            v_lo = vfo_center - bw / 2.0
+            v_hi = vfo_center + bw / 2.0
+            if v_hi < f_lo or v_lo > f_hi:
+                return None
+            # bin 索引：f = f_lo + i * (sr / num_bins)
+            bin_width = sr / num_bins
+            i_lo = int(max(0, (v_lo - f_lo) / bin_width))
+            i_hi = int(min(num_bins - 1, (v_hi - f_lo) / bin_width))
+            if i_hi < i_lo:
+                return None
+            band = spec[i_lo:i_hi + 1]
+            band = band[~np.isnan(band)]
+            if band.size == 0:
+                return None
+            # dBFS/bin → 线性功率求和 → dBFS（带内总功率）
+            linear = np.power(10.0, band / 10.0)
+            total_p = float(np.sum(linear))
+            if total_p <= 0:
+                return None
+            return 10.0 * math.log10(total_p + 1e-12)
+        except Exception:
+            return None
+
+    def _update_rssi_from_iq(self, iq: np.ndarray):
+        """RSSI/信号强度：状态栏实时显示当前 VFO 处信号强度 dBFS。
+
+        计算优先级：
+          1. VFO 带宽内 FFT 功率（_compute_vfo_rssi_dbfs，最贴近"当前 VFO 处"）；
+          2. 全带宽真 IQ 平均功率（np.mean(|iq|^2)，兜底）。
+        两者均从真实 IQ / 真实 FFT 算出，绝不造假。
+        写入 self._last_dbfs 供 _update_status_bar 复用；推送 S-meter。
+        """
+        dbfs = None
+        # 优先：VFO 带宽内 FFT 功率
+        try:
+            dbfs = self._compute_vfo_rssi_dbfs()
+        except Exception:
+            dbfs = None
+        # 兜底：全带宽真 IQ 平均功率
+        if dbfs is None:
+            try:
+                p = float(np.mean(np.abs(iq) ** 2))
+                dbfs = 10.0 * math.log10(p + 1e-12)
+            except Exception:
+                return
+        try:
+            self._last_dbfs = float(dbfs)
             txt = f"RSSI: {dbfs:.1f} dBFS"
             self.rssi_label.setText(txt)
             self.status_rssi.setText(f"信号: {dbfs:.1f} dBFS")
