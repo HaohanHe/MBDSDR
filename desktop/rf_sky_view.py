@@ -74,6 +74,7 @@ from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, Signal
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QFontMetrics,
     QPainterPath, QPolygonF,
+    QLinearGradient,
     QMouseEvent, QWheelEvent, QResizeEvent,
 )
 from PySide6.QtWidgets import QWidget, QFrame, QVBoxLayout, QLabel
@@ -999,43 +1000,46 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
 
-        painter.fillRect(self.rect(), self._colors["paper"])
+        # 1) 天空背景 (透视窗口, 全屏) + 近地平线大气渐变
+        self._paint_sky_background(painter)
 
-        self._draw_sky_disk(painter)
+        if self._observer is not None:
+            # 2) 恒星 (分级星点 + 亮星标签)
+            self._draw_stars(painter)
+            # 3) 地景剪影
+            if self._show_landscape:
+                self._draw_landscape(painter)
+            # 4) 网格: 方位 / 赤道 (独立开关)
+            if self._show_grid and self._show_azgrid:
+                self._draw_az_grid(painter)
+            if self._show_eqgrid:
+                self._draw_eq_grid(painter)
+            if self._show_trajectories:
+                self._draw_trajectories(painter)
+            # 5) 天体/卫星层
+            self._draw_antenna_beam(painter)
+            self._draw_celestial_bodies(painter)
+            self._draw_objects(painter)
+            self._draw_antenna_pointer(painter)
+            self._draw_gnss_satellites(painter)
+            if self._show_compass:
+                self._draw_compass(painter)
+            if self._hovered_object:
+                self._draw_picked_info(painter)
 
-        if self._show_heatmap and self._heatmap:
-            self._draw_heatmap(painter)
-        if self._show_grid:
-            self._draw_grid(painter)
-        if self._show_trajectories:
-            self._draw_trajectories(painter)
-
-        self._draw_antenna_beam(painter)
-        self._draw_celestial_bodies(painter)
-        self._draw_objects(painter)
-        self._draw_antenna_pointer(painter)
-        self._draw_gnss_satellites(painter)
-
-        if self._show_compass:
-            self._draw_compass(painter)
-
+        # 6) 常驻叠加: FOV 显示 / 信息卡 / 过境 / GNSS / 空状态
+        self._draw_fov(painter)
         self._draw_info_overlay(painter)
         self._draw_passes_panel(painter)
-
-        if self._hovered_object:
-            self._draw_picked_info(painter)
-
         self._draw_gnss_overlay(painter)
         self._draw_data_source_overlay(painter)
 
         painter.end()
 
-    def _draw_sky_disk(self, painter: QPainter):
-        """天空圆盘背景：按太阳高度做昼夜/黄昏渐变。"""
-        cx, cy = self._sky_center()
-        radius = self._sky_disk_radius()
-        if radius < 2:
-            return
+    # ------------------------------------------------------------------ #
+    # 天空背景: 透视窗口全屏, 近地平线大气散射渐变 (Preetham 简化)
+    # ------------------------------------------------------------------ #
+    def _paint_sky_background(self, painter: QPainter):
         b = self._sky_brightness
 
         def mix(c1: QColor, c2: QColor, t: float) -> QColor:
@@ -1045,71 +1049,220 @@ class RFSkyView(QWidget, SkyInteractionHandler):
                 int(c1.blue() * (1 - t) + c2.blue() * t),
             )
 
-        zenith = mix(self._colors["night_zenith"], self._colors["day_zenith"], b)
-        horizon = mix(self._colors["night_horizon"], self._colors["day_horizon"], b)
-
+        # 夜: 天顶深蓝 -> 地平线微亮; 昼: 浅蓝 -> 米白
+        zenith = mix(QColor("#070D18"), QColor("#7FA8C8"), b)
+        horizon = mix(QColor("#16233A"), QColor("#DCE7EC"), b)
         painter.save()
         painter.setPen(Qt.NoPen)
-        from PySide6.QtGui import QRadialGradient
-        grad = QRadialGradient(QPointF(cx, cy), radius)
+        grad = QLinearGradient(0, 0, 0, self.height())
         grad.setColorAt(0.0, zenith)
+        grad.setColorAt(0.62, mix(zenith, horizon, 0.5))
         grad.setColorAt(1.0, horizon)
         painter.setBrush(QBrush(grad))
-        painter.drawEllipse(QPointF(cx, cy), radius, radius)
+        painter.drawRect(self.rect())
+        painter.restore()
+
+    # ------------------------------------------------------------------ #
+    # 恒星: J2000 -> 地平 -> 透视投影, 分级星点 + 亮星标签
+    # ------------------------------------------------------------------ #
+    def _draw_stars(self, painter: QPainter):
+        gs = self._ground_station()
+        if gs is None:
+            return
+        jd = self._current_jd()
+        painter.save()
+        painter.setFont(self._font)
+        for s in _stars.BRIGHT_STARS:
+            try:
+                v = j2000_to_altaz(vec_from_radec(s.ra_deg, s.dec_deg), gs, jd)
+                from mbdsdr_ai.celestial_geometry import azalt_from_vec
+                az, alt = azalt_from_vec(v)
+            except Exception:
+                continue
+            if alt < -1.0:
+                continue
+            pos = self._sky_to_screen(az, alt)
+            if not self._on_screen(pos):
+                continue
+            r, bright = _stars.star_draw(s.vmag, self._bortle)
+            if r <= 0:
+                continue
+            cr, cg, cb = _stars.bv_to_rgb(s.bv)
+            alpha = int(255 * (0.35 + 0.65 * bright))
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor(cr, cg, cb, alpha)))
+            painter.drawEllipse(pos, r, r)
+            # 亮星 (V<2.0) 文字标签
+            if s.vmag <= 2.0:
+                painter.setPen(QColor(210, 220, 235, int(200 * bright + 40)))
+                painter.drawText(QPointF(pos.x() + r + 2, pos.y() - r), s.name)
+        painter.restore()
+
+    def _on_screen(self, pos: QPointF, margin: float = 4.0) -> bool:
+        return (-margin <= pos.x() <= self.width() + margin
+                and -margin <= pos.y() <= self.height() + margin)
+
+    # ------------------------------------------------------------------ #
+    # 地景剪影 (底部地平线山峦轮廓, 可开关)
+    # ------------------------------------------------------------------ #
+    def _draw_landscape(self, painter: QPainter):
+        # 采样地平线 (alt=0) 各方位, 连成剪影轮廓; 低于地平线涂黑。
+        pts = []
+        for az in range(0, 361, 6):
+            pos = self._sky_to_screen(float(az), 0.0)
+            pts.append(pos)
+        if not pts:
+            return
+        painter.save()
+        painter.setPen(Qt.NoPen)
+        col = QColor("#0A0F18") if self._sky_brightness < 0.5 \
+            else QColor("#3A4A5A")
+        painter.setBrush(QBrush(col))
+        path = QPainterPath()
+        # 取地平线附近 y 的代表位置做轮廓 (透视下地平线在画面中下部)
+        on = [p for p in pts if self._on_screen(p)]
+        if not on:
+            painter.restore()
+            return
+        ys = sorted(p.y() for p in on)
+        horizon_y = ys[len(ys) // 2]
+        path.moveTo(0.0, self.height())
+        path.lineTo(0.0, horizon_y)
+        for p in pts:
+            if self._on_screen(p):
+                path.lineTo(p.x(), p.y())
+        path.lineTo(self.width(), self.height())
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.restore()
+
+    # ------------------------------------------------------------------ #
+    # 方位网格 (等方位射线 + 等高圈), lines.c azimuthal
+    # ------------------------------------------------------------------ #
+    def _draw_az_grid(self, painter: QPainter):
+        painter.save()
+        grid_col = QColor(120, 150, 170, 70)
+        painter.setPen(QPen(grid_col, 1, Qt.DashLine))
+        # 等方位射线 (每 30°), 从地平 alt=0 向天顶 alt=90
+        for az in range(0, 360, 30):
+            path = QPainterPath()
+            first = True
+            for k in range(0, 21):
+                alt = k * 4.5
+                p = self._sky_to_screen(float(az), alt)
+                if not self._on_screen(p):
+                    first = True
+                    continue
+                if first:
+                    path.moveTo(p); first = False
+                else:
+                    path.lineTo(p)
+            painter.drawPath(path)
+        # 等高圈 (alt = 0,30,60)
+        for alt in (0.0, 30.0, 60.0):
+            path = QPainterPath()
+            first = True
+            for az in range(0, 361, 4):
+                p = self._sky_to_screen(float(az), alt)
+                if not self._on_screen(p):
+                    first = True
+                    continue
+                if first:
+                    path.moveTo(p); first = False
+                else:
+                    path.lineTo(p)
+            painter.drawPath(path)
+        painter.restore()
+
+    # ------------------------------------------------------------------ #
+    # 赤道网格 (RA 时圈 + 赤纬圈), lines.c equatorial
+    # ------------------------------------------------------------------ #
+    def _draw_eq_grid(self, painter: QPainter):
+        gs = self._ground_station()
+        if gs is None:
+            return
+        jd = self._current_jd()
+        painter.save()
+        grid_col = QColor(150, 120, 170, 60)
+        painter.setPen(QPen(grid_col, 1, Qt.DotLine))
+        # 赤纬圈: 每 30°, RA 扫一圈
+        for dec in range(-60, 91, 30):
+            path = QPainterPath()
+            first = True
+            for rah in range(0, 25):  # 0..24h
+                ra = rah * 15.0
+                try:
+                    v = j2000_to_altaz(vec_from_radec(float(ra), float(dec)), gs, jd)
+                    from mbdsdr_ai.celestial_geometry import azalt_from_vec
+                    az, alt = azalt_from_vec(v)
+                except Exception:
+                    continue
+                p = self._sky_to_screen(az, alt)
+                if not self._on_screen(p):
+                    first = True
+                    continue
+                if first:
+                    path.moveTo(p); first = False
+                else:
+                    path.lineTo(p)
+            painter.drawPath(path)
+        # RA 时圈: 每 2h, dec 扫一圈
+        for rah in range(0, 24, 2):
+            ra = rah * 15.0
+            path = QPainterPath()
+            first = True
+            for dec in range(-80, 81, 10):
+                try:
+                    v = j2000_to_altaz(vec_from_radec(float(ra), float(dec)), gs, jd)
+                    from mbdsdr_ai.celestial_geometry import azalt_from_vec
+                    az, alt = azalt_from_vec(v)
+                except Exception:
+                    continue
+                p = self._sky_to_screen(az, alt)
+                if not self._on_screen(p):
+                    first = True
+                    continue
+                if first:
+                    path.moveTo(p); first = False
+                else:
+                    path.lineTo(p)
+            painter.drawPath(path)
+        painter.restore()
+
+    # ------------------------------------------------------------------ #
+    # FOV 常驻显示 (右上角 "FOV xx.x°")
+    # ------------------------------------------------------------------ #
+    def _draw_fov(self, painter: QPainter):
+        painter.save()
+        f = QFont(self._mono_font)
+        f.setPointSize(9)
+        painter.setFont(f)
+        painter.setPen(QColor(200, 210, 225, 220))
+        painter.drawText(self.width() - 92, 18,
+                         f"FOV {self.view_state.fov_deg:4.1f}°")
         painter.restore()
 
     def _draw_grid(self, painter: QPainter):
-        """极坐标网格（方位线 + 仰角圈）。"""
-        cx, cy = self._sky_center()
-        radius = self._sky_disk_radius()
-        painter.save()
-        painter.setFont(self._font)
-
-        grid_col = self._colors["grid_day"] if self._sky_brightness > 0.5 \
-            else self._colors["grid_night"]
-        grid_pen = QPen(grid_col, 1, Qt.DashLine)
-        painter.setPen(grid_pen)
-
-        for elev in (0, 30, 60):
-            edge = self._sky_to_screen(0, elev)
-            r = math.hypot(edge.x() - cx, edge.y() - cy)
-            if r > 1.0:
-                painter.drawEllipse(QPointF(cx, cy), r, r)
-            label_pos = self._sky_to_screen(270, elev)
-            painter.setPen(self._ink())
-            painter.drawText(QPointF(label_pos.x() - 26, label_pos.y() + 4),
-                             f"{elev}°")
-            painter.setPen(grid_pen)
-
-        for az in range(0, 360, 30):
-            painter.drawLine(self._sky_to_screen(az, 0),
-                             self._sky_to_screen(az, 90))
-
-        horizon_pen = QPen(
-            self._colors["horizon_day"] if self._sky_brightness > 0.5
-            else self._colors["horizon_night"], 2)
-        painter.setPen(horizon_pen)
-        painter.drawEllipse(QPointF(cx, cy), radius, radius)
-        painter.restore()
+        """兼容旧接口: 方位网格已由 _draw_az_grid (透视) 实现。"""
+        self._draw_az_grid(painter)
 
     def _draw_compass(self, painter: QPainter):
+        """方位罗盘: N/E/S/W 标在方位圈 (alt=0 附近), N 红色。"""
         painter.save()
         painter.setFont(self._font)
-        for az, label in ((0, "N"), (90, "E"), (180, "S"), (270, "W")):
-            pos = self._sky_to_screen(az, 90)
-            f = QFont(self._font)
-            f.setBold(True)
-            f.setPointSize(12)
-            painter.setFont(f)
-            painter.setPen(self._ink())
-            painter.drawText(QPointF(pos.x() - 8, pos.y() + 5), label)
-            painter.setFont(self._font)
-        painter.setPen(self._ink())
-        for az in range(0, 360, 30):
-            if az % 90 == 0:
+        f = QFont(self._font)
+        f.setBold(True)
+        f.setPointSize(12)
+        painter.setFont(f)
+        for az, label, col in ((0, "N", QColor("#D05A5A")),
+                                (90, "E", self._ink()),
+                                (180, "S", self._ink()),
+                                (270, "W", self._ink())):
+            pos = self._sky_to_screen(float(az), 2.0)
+            if not self._on_screen(pos):
                 continue
-            pos = self._sky_to_screen(az, 3)
-            painter.drawText(QPointF(pos.x() - 12, pos.y() + 4), f"{az}°")
+            painter.setPen(col)
+            painter.drawText(QPointF(pos.x() - 8, pos.y() + 5), label)
         painter.restore()
 
     def _draw_celestial_bodies(self, painter: QPainter):
@@ -1210,47 +1363,78 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         painter.restore()
 
     def _draw_picked_info(self, painter: QPainter):
-        """选中天体旁的信息卡。"""
+        """选中天体信息卡 (Stellarium 规格 10.4)。"""
         obj = self._hovered_object
         if not obj:
             return
         pos = self._sky_to_screen(obj.azimuth_deg, obj.elevation_deg)
-        dist_km = self._parse_distance_km(obj)
-        doppler_hz = self._estimate_doppler_hz(obj)
+
+        # 选中标记环
+        painter.save()
+        painter.setPen(QPen(self._colors["accent"], 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawEllipse(pos, 12, 12)
+        painter.drawEllipse(pos, 16, 16)
+        painter.restore()
+
+        info = self._selected_info or {}
+        norad = info.get("norad")
+        title = f"NORAD {norad}" if norad else obj.name
+        kind_label = info.get("kind_label", "Satellite")
+
+        def _dms(deg: float, signed: bool = True) -> str:
+            sign = "-" if deg < 0 else ("+" if signed else "")
+            a = abs(deg)
+            d = int(a)
+            m = int((a - d) * 60.0)
+            s = ((a - d) * 60.0 - m) * 60.0
+            return f"{sign}{d:3d}°{m:02d}'{s:04.1f}\""
+
+        def _hms(ra_deg: float) -> str:
+            h = ra_deg / 15.0
+            hh = int(h); mm = int((h - hh) * 60); ss = ((h - hh) * 60 - mm) * 60
+            return f"{hh:02d}h {mm:02d}m {ss:04.1f}s"
+
+        rise = info.get("rise"); sset = info.get("set")
+        def _hm(jd):
+            if jd is None:
+                return "..:.."
+            from datetime import datetime, timezone
+            return datetime.fromtimestamp(_jtime.jd_to_unix(jd),
+                                          tz=timezone.utc).strftime("%H:%M")
 
         lines = [
-            obj.name,
-            f"AZ {obj.azimuth_deg:6.1f}  EL {obj.elevation_deg:5.1f}",
-            f"距离 {dist_km:7.1f} km",
+            (title, True),
+            (kind_label, False),
+            ("Also known as: " + " · ".join(info.get("aliases", [obj.name]))
+             + (f" · COSPAR {info['cospar']}" if info.get("cospar") else ""), False),
+            (f"Magnitude  {'—' if info.get('mag') is None else info['mag']}", False),
+            (f"Distance   {info.get('dist_km', 0.0):.2f} km", False),
+            ("Ra/Dec    " + (f"{_hms(info['ra'])}  {_dms(info['dec'])}"
+                            if info.get("ra") is not None else "—"), False),
+            (f"Az/Alt    {_dms(obj.azimuth_deg)}  {_dms(obj.elevation_deg)}", False),
+            (f"Visibility  Rise {_hm(rise)}   Set {_hm(sset)}", False),
         ]
-        if obj.frequency_hz > 0:
-            lines.append(f"频率 {obj.frequency_hz / 1e6:8.3f} MHz")
-            lines.append(f"多普勒 {doppler_hz:+8.1f} Hz")
 
         painter.save()
         painter.setFont(self._font)
         fm = QFontMetrics(self._font)
-        box_w = max(fm.horizontalAdvance(l) for l in lines) + 24
-        box_h = len(lines) * 18 + 14
-        box_x = int(pos.x() + 18)
-        box_y = int(pos.y() - box_h - 12)
-        if box_x + box_w > self.width() - 8:
-            box_x = int(pos.x() - box_w - 18)
-        if box_y < 8:
-            box_y = int(pos.y() + 18)
-        bg = QColor(245, 243, 239, 235) if self._sky_brightness > 0.5 \
-            else QColor(20, 28, 38, 235)
+        box_w = max(fm.horizontalAdvance(t) for t, _ in lines) + 28
+        box_h = len(lines) * 17 + 18
+        box_x = 14
+        box_y = 40
+        bg = QColor(20, 28, 38, 235)
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(self._colors["accent"], 1))
-        painter.drawRoundedRect(box_x, box_y, box_w, box_h, 4, 4)
-        y = box_y + 18
-        for i, line in enumerate(lines):
+        painter.drawRoundedRect(box_x, box_y, box_w, box_h, 6, 6)
+        ty = box_y + 18
+        for text, bold in lines:
             f = QFont(self._font)
-            f.setBold(i == 0)
+            f.setBold(bold)
             painter.setFont(f)
-            painter.setPen(self._ink())
-            painter.drawText(box_x + 12, y, line)
-            y += 18
+            painter.setPen(QColor(232, 238, 245) if not bold else QColor(255, 200, 140))
+            painter.drawText(box_x + 12, ty, text)
+            ty += 17
         painter.restore()
 
     @staticmethod
@@ -1717,6 +1901,13 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         return None
 
     def resizeEvent(self, event: QResizeEvent):
+        # 搜索框: 顶部居中 (自包含 UI)
+        try:
+            w = min(260, self.width() - 200)
+            self._search_edit.setGeometry(max(60, (self.width() - w) // 2), 8,
+                                          w, 26)
+        except Exception:
+            pass
         self.update()
 
 
@@ -2057,6 +2248,7 @@ class SatelliteTracker:
                 self.sky_view.set_trajectory(name, pts)
 
         self.sky_view.set_objects(objs)
+        self.sky_view.set_satellite_catalog(self._catalog)
         self.sky_view.set_satellites_connected(connected > 0)
 
         # 未来过境列表（best-effort）
