@@ -215,8 +215,9 @@ class WebSpectraEncoder:
         bins = self.quantize(db)
 
         if self.compression == "adpcm":
-            # 把 uint8 升为 int16 做 ADPCM（量化误差在解码后还原时 <1dB 由头里的 db 范围决定）
-            payload = _adpcm_encode(bins.astype(np.int16))
+            # uint8→int16 做 IMA ADPCM；负载前两字节存样本数（小端 uint16）
+            adpcm = _adpcm_encode(bins.astype(np.int16))
+            payload = struct.pack("<H", len(bins)) + adpcm
             comp_flag = 1
         else:
             payload = bins.tobytes()
@@ -260,7 +261,9 @@ class WebSpectraDecoder:
             raise ValueError(f"不是频谱帧（marker=0x{marker:02x}）")
         payload = frame[_HEADER.size:]
         if comp == 1:
-            bins16 = _adpcm_decode(payload)
+            n_samples = struct.unpack_from("<H", payload, 0)[0]
+            adpcm_data = payload[2:]
+            bins16 = _adpcm_decode(adpcm_data)[:n_samples]
             bins = bins16.astype(np.uint8)
         else:
             bins = np.frombuffer(payload, dtype=np.uint8)
