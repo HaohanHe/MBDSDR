@@ -64,10 +64,11 @@ class RtlTcpClient:
 
     # 命令 opcode（命令包格式：1 字节 cmd + 4 字节大端 uint32 param，
     # 对照 rtl_tcp.c:281-284 packed command 结构 + rtl_tcp.c:315-375 switch 派发）。
-    CMD_SET_FREQUENCY = 0x01        # rtl_tcp.c:316  set center freq (Hz)
-    CMD_SET_SAMPLE_RATE = 0x02      # rtl_tcp.c:320  set sample rate (Hz)
-    CMD_SET_GAIN = 0x03             # set tuner gain (0.1 dB 单位)
-    CMD_SET_FREQ_CORRECTION = 0x04  # set freq correction (ppm)
+    CMD_SET_FREQUENCY = 0x01        # rtl_tcp.c  SET_FREQUENCY (Hz)
+    CMD_SET_SAMPLE_RATE = 0x02      # rtl_tcp.c  SET_SAMPLE_RATE (Hz)
+    CMD_SET_GAIN_MODE = 0x03        # SET_GAIN_MODE: 1=manual, 0=AGC (先切手动才能写增益)
+    CMD_SET_GAIN = 0x04             # SET_GAIN: 0.1 dB 单位 (200 = 20.0 dB)
+    CMD_SET_FREQ_CORRECTION = 0x05  # SET_FREQ_CORRECTION (ppm)
 
     # dongle_info_t 固定 12 字节（rtl_tcp.c:79-83）。
     _DONGLE_INFO_LEN = 12
@@ -166,11 +167,17 @@ class RtlTcpClient:
         return self._send_cmd(self.CMD_SET_SAMPLE_RATE, int(rate_hz))
 
     def set_gain(self, gain_tenths_db: int) -> bool:
-        """设置调谐器增益。参数是 0.1 dB 单位的整数（200 = 20.0 dB）。opcode 0x03。"""
+        """设置调谐器增益。参数是 0.1 dB 单位的整数（200 = 20.0 dB）。
+
+        真实 rtl_tcp 协议：先 0x03=gain_mode(1=manual) 切手动增益，
+        再 0x04 下发增益值；否则 0x03 会被服务器当成写增益而不是切模式。
+        """
+        if not self._send_cmd(self.CMD_SET_GAIN_MODE, 1):
+            return False
         return self._send_cmd(self.CMD_SET_GAIN, int(gain_tenths_db))
 
     def set_freq_correction(self, ppm: int) -> bool:
-        """设置晶振频偏校正（ppm）。opcode 0x04。"""
+        """设置晶振频偏校正（ppm）。opcode 0x05。"""
         return self._send_cmd(self.CMD_SET_FREQ_CORRECTION, int(ppm))
 
     # ── IQ 流读取 ───────────────────────────────────────────────────────
