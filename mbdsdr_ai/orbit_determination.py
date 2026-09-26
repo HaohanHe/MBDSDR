@@ -950,14 +950,36 @@ def register_tool_registry(registry) -> None:
     """把多普勒定轨 / LRO 跟踪工具注册到 MBDSDR ToolRegistry。"""
     from .tool_registry import ToolResult
 
+    def _latlon(args: Dict[str, Any]):
+        """地面站坐标：优先用 args 显式传入；否则从 ~/.mbdsdr/config.json 读；
+        都没有就报错，绝不默认写死北京坐标。"""
+        lat = args.get("rx_lat")
+        lon = args.get("rx_lon")
+        if lat is None or lon is None:
+            try:
+                import json, os
+                with open(os.path.expanduser("~/.mbdsdr/config.json"), encoding="utf-8") as f:
+                    cfg = json.load(f)
+                lat = lat if lat is not None else cfg.get("ground_station_lat")
+                lon = lon if lon is not None else cfg.get("ground_station_lon")
+            except Exception:
+                pass
+        if lat is None or lon is None:
+            raise ValueError(
+                "未提供地面站坐标：请在设置里配置地面站，或传 rx_lat/rx_lon。"
+            )
+        return float(lat), float(lon)
+
     def _doppler_orbit_determine(args: Dict[str, Any]) -> ToolResult:
         obs_in = args.get("observations", [])
         observations = [(float(o["t"]), float(o["fd"])) for o in obs_in]
         try:
+            _rx_lat, _rx_lon = _latlon(args)
+
             res = doppler_orbit_determine(
                 observations,
-                rx_lat=float(args.get("rx_lat", 39.9)),
-                rx_lon=float(args.get("rx_lon", 116.4)),
+                rx_lat=_rx_lat,
+                rx_lon=_rx_lon,
                 rx_alt=float(args.get("rx_alt", 0.0)),
                 init_state=np.array(args.get("init_state"), dtype=float),
                 f0=float(args.get("f0", F0_DEFAULT_HZ)),
@@ -1053,8 +1075,8 @@ def register_tool_registry(registry) -> None:
                     "type": "array", "items": {"type": "number"},
                     "description": "7 维初值 [x,y,z,vx,vy,vz,b]（ECEF, km,km/s）",
                 },
-                "rx_lat": {"type": "number", "default": 39.9},
-                "rx_lon": {"type": "number", "default": 116.4},
+                "rx_lat": {"type": "number", "description": "地面站纬度；不传则从设置读取"},
+                "rx_lon": {"type": "number", "description": "地面站经度；不传则从设置读取"},
                 "rx_alt": {"type": "number", "default": 0.0},
                 "f0": {"type": "number", "default": F0_DEFAULT_HZ},
                 "estimator": {"type": "string", "enum": ["ekf", "rls", "ls"], "default": "ekf"},
@@ -1076,8 +1098,8 @@ def register_tool_registry(registry) -> None:
             "type": "object",
             "properties": {
                 "hours": {"type": "number", "default": 24.0},
-                "rx_lat": {"type": "number", "default": 39.9},
-                "rx_lon": {"type": "number", "default": 116.4},
+                "rx_lat": {"type": "number", "description": "地面站纬度；不传则从设置读取"},
+                "rx_lon": {"type": "number", "description": "地面站经度；不传则从设置读取"},
                 "n": {"type": "integer", "default": 288},
             },
             "required": [],
