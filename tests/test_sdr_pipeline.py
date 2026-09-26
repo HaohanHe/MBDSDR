@@ -1,22 +1,26 @@
 """
 SDR 真实数据链路测试
 =====================
-接通三条真实数据链路的回归测试：
+验证数据处理链路的回归测试（确定性输入，无需真实硬件/声卡）：
 
-(A) 频谱控件真接 SDR 后端 IQ 流（SpectrumDataGenerator.push_iq 真做 FFT）；
-(B) baseband 录制真存盘（baseband_io.save_iq + load_iq round-trip，虚部不丢）；
-(C) 声卡实时输出（AudioPlayer 在无 sounddevice 时安全降级，available=False）。
+(A) 后端读取契约：确定性后端 read_samples 返回 complex64；未连接返回 None；
+    采样率可读；主窗口归一化到 complex64 不丢样本。
+(B) 频谱控件真做 FFT：SpectrumDataGenerator.push_iq 对已知复音，峰值落在
+    正确的频率 bin；无数据时频谱为 NaN。
+(C) baseband 录制真存盘：baseband_io.save_iq + load_iq round-trip，虚部不丢。
+(D) 声卡实时输出：AudioPlayer 在无 sounddevice 时安全降级，available=False。
+(E) 主窗口录制/断开流程：录制真落盘、断开后频谱清空。
 
-运行（offscreen Qt，无需真实硬件/声卡）：
+说明：这里的确定性后端只在测试内生成已知 IQ 以验证处理管线，它不进入设备
+枚举、不在 UI 中显示为真实设备，与"无硬件不造假"的产品原则不冲突。
+
+运行（offscreen Qt）：
     QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_sdr_pipeline.py -v
-
-也可直接：
-    QT_QPA_PLATFORM=offscreen python3 tests/test_sdr_pipeline.py
 """
 import os
 import sys
 import json
-import tempfile
+import time
 
 # 必须在 import PySide6 之前设置 offscreen 平台
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -32,41 +36,132 @@ import pytest  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# (A) MockSDRBackend.read_samples 返回 complex64
+# 确定性测试后端：循环输出一段已知复数 IQ（实部、虚部都非零）
 # ---------------------------------------------------------------------------
-class TestMockBackendIQ:
+class DeterministicIQBackend:
+    """测试专用后端，不进设备枚举、不进 UI。
+
+    循环输出一段已知 100kHz 复音，用于验证读取/归一化/录制链路。
+    实现主窗口依赖的最小后端接口：connect/disconnect、read_samples、
+    get_sample_rate、get_status。
+    """
+
+    def __init__(self, sample_rate: float = 2_400_000.0, n: int = 16384):
+        from mbdsdr_ai.sdr_backend import SDRDevice, SDRBackend
+        dev = SDRDevice(
+            device_type="test", device_id="test-0", name="deterministic-test",
+            frequency_range=(1e6, 2e9), sample_rate_range=(1e5, 3.2e6),
+            max_gain=40.0)
+        self._backend = SDRBackend(dev)
+        self.device = dev
+        self.status = self._backend.status
+        self._sr = float(sample_rate)
+        t = np.arange(n) / self._sr
+        self._iq = np.exp(1j * 2 * np.pi * 100_000.0 * t).astype(np.complex64)
+        self._pos = 0
+        self.status.sample_rate_hz = self._sr
+        self.status.frequency_hz = 98_500_000.0
+
+    def connect(self) -> bool:
+        self.status.connected = True
+        self._backend._start_time = time.time()
+        return True
+
+    def disconnect(self):
+        self.status.connected = False
+
+    def get_sample_rate(self) -> float:
+        return self._sr
+
+    def get_status(self):
+        return self._backend.get_status()
+
+    def read_samples(self, num_samples: int):
+        if not self.status.connected:
+            return None
+        total = len(self._iq)
+        chunks = []
+        idx = self._pos
+        remaining = int(num_samples)
+        while remaining > 0:
+            take = min(remaining, total - idx)
+            chunks.append(self._iq[idx:idx + take])
+            idx = (idx + take) % total
+            remaining -= take
+        self._pos = idx
+        self._backend._samples_read += int(num_samples)
+        return np.concatenate(chunks)[:num_samples].astype(np.complex64)
+
+
+# ---------------------------------------------------------------------------
+# (A) 后端读取契约
+# ---------------------------------------------------------------------------
+class TestBackendReadIQ:
     def test_read_samples_complex64(self):
-        from mbdsdr_ai.sdr_backend import MockSDRBackend
-        b = MockSDRBackend()
+        b = DeterministicIQBackend()
         assert b.connect() is True
-        iq = b.read_samples(4096)
-        assert iq is not None
-        iq = np.asarray(iq)
-        # 后端返回复数 IQ（Mock 为 complex128；MainWindow 喂频谱前会统一转 complex64）
+        iq = np.asarray(b.read_samples(4096))
         assert np.iscomplexobj(iq), f"期望复数 IQ，实际 dtype={iq.dtype}"
         assert len(iq) == 4096
         # 真复数：实部/虚部都不该全为 0
         assert np.any(iq.real != 0)
         assert np.any(iq.imag != 0)
-        # MainWindow 的归一化链路：np.asarray(iq, dtype=complex64) 不丢样本
+        # 主窗口归一化链路：转 complex64 不丢样本
         normed = np.asarray(iq, dtype=np.complex64)
         assert normed.dtype == np.complex64
         assert len(normed) == 4096
 
     def test_read_samples_disconnected_returns_none(self):
-        from mbdsdr_ai.sdr_backend import MockSDRBackend
-        b = MockSDRBackend()  # 不 connect
+        b = DeterministicIQBackend()  # 不 connect
         assert b.read_samples(1024) is None
 
     def test_get_sample_rate_exists(self):
-        from mbdsdr_ai.sdr_backend import MockSDRBackend
-        b = MockSDRBackend()
+        b = DeterministicIQBackend()
         sr = b.get_sample_rate()
         assert isinstance(sr, float) and sr > 0
 
 
 # ---------------------------------------------------------------------------
-# (B) baseband_io save_iq + load_iq round-trip
+# (B) SpectrumDataGenerator.push_iq 真做 FFT
+# ---------------------------------------------------------------------------
+class TestSpectrumRealFFT:
+    def test_tone_appears_at_correct_bin(self):
+        from spectrum_widget import SpectrumDataGenerator
+        gen = SpectrumDataGenerator(num_bins=512)
+        sr = 2_400_000.0
+        n = gen.fft_size
+        t = np.arange(n) / sr
+        center_bin = gen.num_bins // 2
+
+        # +100 kHz 复音 → 峰值应在中心 bin 右侧
+        tone = np.exp(1j * 2 * np.pi * 100_000.0 * t).astype(np.complex64)
+        gen.push_iq(tone, 98_500_000.0, sr)
+        assert gen.has_data() is True
+        peak_bin = int(np.argmax(gen.spectrum))
+        assert peak_bin > center_bin + 5, \
+            f"+100kHz 峰值应在中心右侧，实际 peak_bin={peak_bin}"
+
+        # 换 -100 kHz → 峰值应在中心左侧
+        gen.clear_data()
+        tone2 = np.exp(1j * 2 * np.pi * (-100_000.0) * t).astype(np.complex64)
+        gen.push_iq(tone2, 98_500_000.0, sr)
+        peak_bin2 = int(np.argmax(gen.spectrum))
+        assert peak_bin2 < center_bin - 5, \
+            f"-100kHz 峰值应在中心左侧，实际 peak_bin2={peak_bin2}"
+
+    def test_no_data_shows_nan(self):
+        from spectrum_widget import SpectrumDataGenerator
+        gen = SpectrumDataGenerator(num_bins=512)
+        assert gen.has_data() is False
+        # 无数据：频谱全为 NaN（不画谱线）
+        assert np.isnan(gen.spectrum).all()
+        # 喂 <64 样本不触发
+        gen.push_iq(np.zeros(32, dtype=np.complex64), 98_500_000.0, 2_400_000.0)
+        assert gen.has_data() is False
+
+
+# ---------------------------------------------------------------------------
+# (C) baseband_io save_iq + load_iq round-trip
 # ---------------------------------------------------------------------------
 class TestBasebandRoundTrip:
     def test_roundtrip_imag_not_lost(self, tmp_path):
@@ -75,29 +170,24 @@ class TestBasebandRoundTrip:
         n = 4096
         iq = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(np.complex64)
         path = str(tmp_path / "bb_test.iq")
-        info = save_iq(iq, path, sample_rate=2_400_000.0,
-                       center_freq_hz=98_500_000.0, note="pytest")
-        # sidecar 含 sample_rate / center_freq_hz
+        save_iq(iq, path, sample_rate=2_400_000.0,
+                center_freq_hz=98_500_000.0, note="pytest")
         assert os.path.exists(path + ".json")
         with open(path + ".json") as f:
             meta = json.load(f)
         assert meta["sample_rate"] == 2_400_000.0
         assert meta["center_freq_hz"] == 98_500_000.0
         assert meta["samples"] == n
-        # 读回
         back = load_iq(path)
-        back_iq = np.asarray(back["iq"])  # load_iq 返回 list，转 numpy
+        back_iq = np.asarray(back["iq"])
         assert back_iq.shape == (n,)
-        # 虚部不能丢（原始虚部非零，读回后仍非零且近似相等）
         assert np.any(back_iq.imag != 0)
         np.testing.assert_allclose(back_iq.real, iq.real, atol=1e-7)
         np.testing.assert_allclose(back_iq.imag, iq.imag, atol=1e-7)
-        # sidecar 采样率被读回
         assert back["sample_rate"] == 2_400_000.0
         assert back["center_freq_hz"] == 98_500_000.0
 
     def test_roundtrip_interleaved_input(self, tmp_path):
-        """交错实数输入（[re,im,re,im,...]）也能 round-trip。"""
         from mbdsdr_ai.baseband_io import save_iq, load_iq
         rng = np.random.default_rng(7)
         n = 2048
@@ -107,34 +197,30 @@ class TestBasebandRoundTrip:
         inter[1::2] = iq.imag
         path = str(tmp_path / "bb_inter.iq")
         save_iq(inter.tolist(), path, sample_rate=1_000_000.0, center_freq_hz=100e6)
-        back = np.asarray(load_iq(path)["iq"])
-        np.testing.assert_allclose(back.real, iq.real, atol=1e-7)
-        np.testing.assert_allclose(back.imag, iq.imag, atol=1e-7)
+        back_iq = np.asarray(load_iq(path)["iq"])
+        np.testing.assert_allclose(back_iq.real, iq.real, atol=1e-7)
+        np.testing.assert_allclose(back_iq.imag, iq.imag, atol=1e-7)
 
 
 # ---------------------------------------------------------------------------
-# (C) AudioPlayer 无 sounddevice 时安全降级
+# (D) AudioPlayer 无 sounddevice 时安全降级
 # ---------------------------------------------------------------------------
 class TestAudioPlayerDegrade:
     def test_available_false_and_write_noop(self):
         from mbdsdr_ai.audio_out import AudioPlayer
         p = AudioPlayer(sample_rate=48000, channels=1, gain=0.5)
-        # 本测试环境未装 sounddevice → available 必须为 False（或 start 失败后变 False）
         started = p.start()
         assert started is False
         assert p.available is False
-        # write 不崩溃，返回 0（未入队任何样本）
         audio = np.zeros(1024, dtype=np.float32)
-        n = p.write(audio)
-        assert n == 0
-        # stop 可重复调用不崩
+        assert p.write(audio) == 0
         p.stop()
         p.stop()
 
     def test_set_gain_clamp(self):
         from mbdsdr_ai.audio_out import AudioPlayer
         p = AudioPlayer()
-        p.set_gain(10.0)   # 越界
+        p.set_gain(10.0)
         assert p.gain == 5.0
         p.set_gain(-2.0)
         assert p.gain == 0.0
@@ -143,48 +229,7 @@ class TestAudioPlayerDegrade:
 
 
 # ---------------------------------------------------------------------------
-# (A) SpectrumDataGenerator.push_iq 真做 FFT（有信号时峰值在对应频率 bin）
-# ---------------------------------------------------------------------------
-class TestSpectrumRealFFT:
-    def test_tone_appears_at_correct_bin(self):
-        from spectrum_widget import SpectrumDataGenerator
-        gen = SpectrumDataGenerator(num_bins=512)
-        sr = 2_400_000.0
-        n = gen.FFT_SIZE  # 2048
-        t = np.arange(n) / sr
-
-        # +100 kHz 偏移正弦 → 峰值应在中心 bin(256) 右侧
-        tone = np.exp(1j * 2 * np.pi * 100_000.0 * t).astype(np.complex64)
-        gen.push_iq(tone, sr)
-        assert gen.has_data() is True
-        spec = gen.spectrum
-        peak_bin = int(np.argmax(spec))
-        center_bin = 256
-        assert peak_bin > center_bin + 5, \
-            f"+100kHz 峰值应在中心右侧，实际 peak_bin={peak_bin}"
-
-        # 换 -100 kHz → 峰值应在中心左侧
-        gen.clear_data()
-        tone2 = np.exp(1j * 2 * np.pi * (-100_000.0) * t).astype(np.complex64)
-        gen.push_iq(tone2, sr)
-        peak_bin2 = int(np.argmax(gen.spectrum))
-        assert peak_bin2 < center_bin - 5, \
-            f"-100kHz 峰值应在中心左侧，实际 peak_bin2={peak_bin2}"
-
-    def test_no_data_shows_empty(self):
-        from spectrum_widget import SpectrumDataGenerator
-        gen = SpectrumDataGenerator(num_bins=512)
-        assert gen.has_data() is False
-        out = gen.generate()
-        # 无数据：平坦底噪 -100 dBFS
-        assert np.allclose(out, -100.0, atol=1e-3)
-        # 喂 <64 样本不触发
-        gen.push_iq(np.zeros(32, dtype=np.complex64), 2_400_000.0)
-        assert gen.has_data() is False
-
-
-# ---------------------------------------------------------------------------
-# MainWindow 录音状态切换不崩溃（offscreen + mock backend）
+# (E) MainWindow 录制/断开流程（offscreen + 确定性后端）
 # ---------------------------------------------------------------------------
 @pytest.mark.usefixtures("qtapp")
 class TestMainWindowRecordingFlow:
@@ -192,72 +237,64 @@ class TestMainWindowRecordingFlow:
         import main_window as mw
         return mw.MainWindow()
 
-    def test_record_toggle_with_mock_backend(self, tmp_path, monkeypatch):
-        import main_window as mw
+    def test_record_toggle_with_backend(self, tmp_path, monkeypatch):
         from PySide6.QtWidgets import QMessageBox
-        from mbdsdr_ai.sdr_backend import MockSDRBackend
 
-        # 把录制目录重定向到 tmp_path，避免污染 ~/mbdsdr_recordings
         real_expanduser = os.path.expanduser
-        monkeypatch.setattr(os.path, "expanduser",
-                            lambda p: str(tmp_path) if p.startswith("~") else real_expanduser(p))
-        # offscreen 环境下 QMessageBox.warning 是模态阻塞框，必须替换为 no-op
+
+        def _fake_expanduser(p):
+            # matplotlib 会传入 PosixPath（无 startswith），先转 str 再判断
+            if str(p).startswith("~"):
+                return str(tmp_path)
+            return real_expanduser(p)
+
+        monkeypatch.setattr(os.path, "expanduser", _fake_expanduser)
         monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
 
         w = self._make_window()
-        # 无后端时开始录音应弹提示且不写文件
+        # 无后端时开始录音应不进入录制状态、不写文件
         assert w._active_sdr_backend is None
         w._apply_recording(True)
-        assert w._recording is False, "无 SDR 时不应进入录制状态"
+        assert w._recording is False
 
-        # 接上 mock 后端
-        b = MockSDRBackend()
+        # 接上确定性后端
+        b = DeterministicIQBackend()
         b.connect()
         w._active_sdr_backend = b
 
-        # 开始录制
         w._apply_recording(True)
         assert w._recording is True
         assert w._record_file_path is not None
 
-        # 轮询几帧，IQ 应累积进 buffer
         for _ in range(5):
             w._poll_sdr_iq()
-        assert len(w._record_iq_buffer) >= 1, "录制中 buffer 应有数据块"
+        assert len(w._record_iq_buffer) >= 1
 
-        # 停止录制 → 落盘
         w._apply_recording(False)
         assert w._recording is False
         path = w._record_file_path
         assert os.path.exists(path), f"录制文件应存在: {path}"
-        assert os.path.exists(path + ".json"), "sidecar 应存在"
+        assert os.path.exists(path + ".json")
         with open(path + ".json") as f:
             meta = json.load(f)
         assert meta["sample_rate"] == b.get_sample_rate()
         assert meta["samples"] > 0
-        # 虚部不丢：读回 sidecar 对应文件，样本数为偶数
         from mbdsdr_ai.baseband_io import load_iq
-        back = load_iq(path)
-        assert back["samples"] == meta["samples"]
-        # 复位（避免 closeEvent 里再 stop 声卡/定时器报错）
+        assert load_iq(path)["samples"] == meta["samples"]
         w._disconnect()
 
     def test_volume_changes_do_not_crash(self, qtapp):
-        import main_window as mw
         w = self._make_window()
-        # 滑杆拖到任意值：无设备时 AudioPlayer.set_gain 安全
         for v in (0, 15, 30, 63):
             w._on_volume_changed(v)
         if w._audio_player is not None:
-            # 63/63*2.0 = 2.0 gain
             assert abs(w._audio_player.gain - 2.0) < 1e-6
         w._disconnect()
 
     def test_disconnect_clears_spectrum(self, qtapp):
-        import main_window as mw
-        from mbdsdr_ai.sdr_backend import MockSDRBackend
         w = self._make_window()
-        b = MockSDRBackend(); b.connect()
+        b = DeterministicIQBackend()
+        b.connect()
         w._active_sdr_backend = b
         w._start_iq_streams()
         for _ in range(3):

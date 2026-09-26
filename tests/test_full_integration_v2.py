@@ -14,12 +14,16 @@ import math
 import tempfile
 import traceback
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mbdsdr_ai import MBDSDRAgent, AgentConfig
 
 
 class TestResult:
+    __test__ = False  # 不是 pytest 测试类，避免收集警告
+
     def __init__(self):
         self.passed = 0
         self.failed = 0
@@ -62,6 +66,19 @@ class TestResult:
                 lines.append(f"  - {name}: {detail[:200]}")
         lines.append("=" * 60)
         return "\n".join(lines)
+
+
+@pytest.fixture(scope="module")
+def result():
+    """pytest 兼容：脚本式测试由 main() 顺序传入 result，pytest 下用 fixture 注入。"""
+    return TestResult()
+
+
+@pytest.fixture(scope="module")
+def agent():
+    """pytest 兼容：与 main() 一致地构造测试用 Agent。"""
+    config = AgentConfig(api_key="sk-test", model="test-model")
+    return MBDSDRAgent(config)
 
 
 def test_module_imports(result):
