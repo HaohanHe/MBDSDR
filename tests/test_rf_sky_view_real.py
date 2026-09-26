@@ -121,29 +121,32 @@ class TestRealSatelliteComputation:
 
 # ----------------------------------------------------------------------
 class TestProjection:
-    def test_azimuthal_equidistant_mapping(self):
-        """天顶->圆心；地平北点->顶部；东点->右侧。"""
+    def test_perspective_mapping(self):
+        """透视投影 (StelProjector): 天顶->屏幕中心; 北/东方向正确。
+
+        视图中心在天顶 (alt=90), FOV=120° (半视场 60°)。视场内的点
+        (与天顶夹角 < 60°, 即 alt > 30°) 应按方向落到中心上/右方。
+        """
         from desktop.rf_sky_view import RFSkyView
         v = RFSkyView()
         v.resize(600, 600)
         cx, cy = v._sky_center()
-        # 天顶 az=0 alt=90 -> 圆心（ViewState 把 center_alt 钳到 90-1e-4 避免极点
-        # 奇异，故投影中心有 ~5e-4 px 的数值偏移，容差取 1e-3）
+        # 天顶 az=0 alt=90 -> 屏幕中心
         pz = v._sky_to_screen(0, 90)
         assert abs(pz.x() - cx) < 1e-3 and abs(pz.y() - cy) < 1e-3
-        # 地平北 az=0 alt=0 -> 圆心正上方（y < cy）
-        pn = v._sky_to_screen(0, 0)
+        # 正北方向 alt=30 (与天顶夹角 60°, 恰在半视场边缘) -> 中心上方
+        pn = v._sky_to_screen(0, 30)
         assert abs(pn.x() - cx) < 2.0 and pn.y() < cy
-        # 地平东 az=90 alt=0 -> 圆心正右方（x > cx）
-        pe = v._sky_to_screen(90, 0)
+        # 正东方向 alt=30 -> 中心右方
+        pe = v._sky_to_screen(90, 30)
         assert pe.x() > cx and abs(pe.y() - cy) < 2.0
 
     def test_projection_roundtrip(self):
-        """屏幕->天空->屏幕 往返误差小。"""
+        """屏幕->天空->屏幕 往返误差小 (点取在半视场 60° 内, alt>=30°)。"""
         from desktop.rf_sky_view import RFSkyView
         v = RFSkyView()
         v.resize(600, 600)
-        for az, alt in [(0, 45), (90, 30), (180, 60), (270, 10), (45, 75)]:
+        for az, alt in [(0, 60), (90, 45), (180, 60), (270, 45), (45, 75)]:
             s = v._sky_to_screen(az, alt)
             az2, alt2 = v._screen_to_sky(s.x(), s.y())
             assert abs(alt2 - alt) < 1.0, f"alt 往返 {alt}->{alt2}"
