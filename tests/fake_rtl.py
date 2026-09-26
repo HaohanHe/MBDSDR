@@ -15,6 +15,12 @@
 
     瞬时频偏 = deviation·sin(2π·mod_freq·t)，经正交鉴频（dsp.fm_demod）
     后输出应忠实复现 mod_freq 的正弦音。再加一点点复高斯噪声当底噪。
+
+调用历史（call_history）：
+    所有对设备的控制面调用（set_* 方法 + center_freq/sample_rate/gain/
+    freq_correction/bandwidth 属性写入）都按时间顺序追加到 self.call_history，
+    格式为 (name, args, kwargs)。测试用它断言 connect() 后真的对设备下发了
+    sample_rate / center_freq / gain / agc，而不是停在出厂默认。
 """
 
 import numpy as np
@@ -24,10 +30,12 @@ class FakeRtlSdr:
     """pyrtlsdr.RtlSdr 的最小可注入替身。
 
     只实现 RTLSDRBackend 真正用到的属性/方法：
-      - center_freq / sample_rate / gain：可读写（pyrtlsdr 是 property）
+      - center_freq / sample_rate / gain / freq_correction / bandwidth：
+        可读写 property，写入时记录到 call_history
       - tuner_type：int（R820T = 5，与 sdr_backend.py:580 枚举一致）
       - read_samples(n) -> np.complex64 一维数组
-      - set_manual_gain_mode(mode) / reset_buffer() / close()
+      - set_manual_gain_mode / set_agc_mode / set_direct_sampling /
+        set_bias_tee / set_offset_tuning / reset_buffer / close
 
     参数与真实棒一致：
       center_freq=98.5 MHz（FM 广播段，一上来就有"台"），
@@ -48,11 +56,16 @@ class FakeRtlSdr:
                  noise_amplitude: float = 0.01,
                  signal_offset_hz: float = 0.0,
                  seed: int = 20260926):
+        # 调用历史：测试断言 connect() 后真的对设备下发了哪些设置
+        self.call_history = []
         # 与 pyrtlsdr.RtlSdr 同名同语义：写进去的是 RF 中心频率，
         # read_samples 返回的是它下变频后的基带 IQ（载波在 DC）。
-        self.center_freq = int(fm_carrier_hz)
-        self.sample_rate: float = 2_048_000.0
-        self.gain = 20.0
+        self._center_freq = int(fm_carrier_hz)
+        self._sample_rate: float = 2_048_000.0
+        self._gain = 20.0
+        self._freq_correction = 0
+        self._bandwidth = 0
+        self._agc_mode = False
         # pyrtlsdr RtlSdr.tuner_type：5 = R820T（RTLSDRBackend._TUNER_NAMES[5]）
         self.tuner_type = 5
 
@@ -70,8 +83,96 @@ class FakeRtlSdr:
         self._global_idx = 0
         self._closed = False
         # 真实棒属性占位（RTLSDRBackend 探测时可能读）
-        self.direct_sampling = 0
+        self._direct_sampling = 0
         self._offset_tuning = False
+        self._manual_gain_mode = 1  # 1=manual, 0=AGC（pyrtlsdr 默认 manual）
+
+    # ------------------------------------------------------------------
+    # 调用历史记录
+    # ------------------------------------------------------------------
+    def _record(self, name: str, *args, **kwargs):
+        """追加一条控制面调用记录。属性写入通过 property setter 调用此方法。"""
+        self.call_history.append((name, args, kwargs))
+
+    def calls_named(self, name: str) -> list:
+        """返回所有名为 name 的调用记录 [(args, kwargs), ...]，便于断言。"""
+        return [(a, kw) for n, a, kw in self.call_history if n == name]
+
+    # ------------------------------------------------------------------
+    # 可读写属性（写入时记录到 call_history）
+    # ------------------------------------------------------------------
+    @property
+    def center_freq(self) -> int:
+        return self._center_freq
+
+    @center_freq.setter
+    def center_freq(self, value):
+        self._record("center_freq", int(value))
+        self._center_freq = int(value)
+
+    @property
+    def sample_rate(self) -> float:
+        return self._sample_rate
+
+    @sample_rate.setter
+    def sample_rate(self, value):
+        self._record("sample_rate", float(value))
+        self._sample_rate = float(value)
+
+    @property
+    def gain(self) -> float:
+        return self._gain
+
+    @gain.setter
+    def gain(self, value):
+        self._record("gain", float(value))
+        self._gain = float(value)
+
+    @property
+    def freq_correction(self) -> int:
+        return self._freq_correction
+
+    @freq_correction.setter
+    def freq_correction(self, value):
+        self._record("freq_correction", int(value))
+        self._freq_correction = int(value)
+
+    @property
+    def bandwidth(self) -> int:
+        return self._bandwidth
+
+    @bandwidth.setter
+    def bandwidth(self, value):
+        self._record("bandwidth", int(value))
+        self._bandwidth = int(value)
+
+    @property
+    def agc_mode(self) -> bool:
+        return self._agc_mode
+
+    @agc_mode.setter
+    def agc_mode(self, value):
+        self._record("agc_mode", bool(value))
+        self._agc_mode = bool(value)
+
+    @property
+    def direct_sampling(self):
+        return self._direct_sampling
+
+    @direct_sampling.setter
+    def direct_sampling(self, value):
+        # pyrtlsdr 接受 int (0/1/2) 或 str ("off"/"i"/"q")
+        self._record("direct_sampling", value)
+        self._direct_sampling = value
+
+    @property
+    def gain_mode(self) -> int:
+        return self._manual_gain_mode
+
+    @gain_mode.setter
+    def gain_mode(self, value):
+        self._record("gain_mode", int(value))
+        self._manual_gain_mode = int(value)
 
     # ------------------------------------------------------------------
     # 数据面：吐基带 FM IQ
@@ -88,7 +189,7 @@ class FakeRtlSdr:
         if self._closed:
             raise OSError("FakeRtlSdr: device closed")
         n = int(num_samples)
-        sr = float(self.sample_rate)
+        sr = float(self._sample_rate)
         t = (self._global_idx + np.arange(n)) / sr
         self._global_idx += n
 
@@ -108,24 +209,40 @@ class FakeRtlSdr:
         return (iq + noise).astype(np.complex64)
 
     # ------------------------------------------------------------------
-    # 控制面：与 pyrtlsdr.RtlSdr 同名的 no-op / 记录方法
+    # 控制面：与 pyrtlsdr.RtlSdr 同名的方法（全部记录到 call_history）
     # ------------------------------------------------------------------
     def set_manual_gain_mode(self, mode):
-        """pyrtlsdr：1=手动增益，0=AGC。这里只记不报错。"""
-        self._manual_gain_mode = bool(mode)
+        """pyrtlsdr：1=手动增益，0=AGC。记录不报错。"""
+        self._record("set_manual_gain_mode", int(mode))
+        self._manual_gain_mode = int(mode)
 
-    def reset_buffer(self):
-        """丢弃内部缓冲（真实棒用于清 USB 残留）。我们无缓冲，空操作。"""
-        return None
+    def set_agc_mode(self, enabled):
+        """RTL2832 数字 AGC（与 tuner 前端 AGC 相互独立）。"""
+        self._record("set_agc_mode", bool(enabled))
+        self._agc_mode = bool(enabled)
 
-    def set_offset_tuning(self, enabled: bool):
-        self._offset_tuning = bool(enabled)
+    def set_direct_sampling(self, mode):
+        """0=off, 1=I branch, 2=Q branch。"""
+        self._record("set_direct_sampling", int(mode))
+        self._direct_sampling = int(mode)
         return True
 
     def set_bias_tee(self, enabled: bool):
+        self._record("set_bias_tee", bool(enabled))
         return True
 
+    def set_offset_tuning(self, enabled: bool):
+        self._record("set_offset_tuning", bool(enabled))
+        self._offset_tuning = bool(enabled)
+        return True
+
+    def reset_buffer(self):
+        """丢弃内部缓冲（真实棒用于清 USB 残留）。我们无缓冲，空操作。"""
+        self._record("reset_buffer")
+        return None
+
     def close(self):
+        self._record("close")
         self._closed = True
 
     # 方便测试断言
@@ -134,6 +251,6 @@ class FakeRtlSdr:
         return self._closed
 
     def __repr__(self) -> str:  # pragma: no cover - 调试用
-        return (f"FakeRtlSdr(center_freq={self.center_freq/1e6:.1f}MHz, "
-                f"sr={self.sample_rate/1e3:.0f}k, gain={self.gain}dB, "
+        return (f"FakeRtlSdr(center_freq={self._center_freq/1e6:.1f}MHz, "
+                f"sr={self._sample_rate/1e3:.0f}k, gain={self._gain}dB, "
                 f"closed={self._closed})")
