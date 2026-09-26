@@ -33,6 +33,12 @@ class FakeRtlSdr:
       center_freq=98.5 MHz（FM 广播段，一上来就有"台"），
       sample_rate=2.048 MS/s（RTLSDRBackend.DEFAULT_SAMPLE_RATE），
       gain=20 dB，调制音 1 kHz，频偏 75 kHz（广播 FM 标准）。
+
+    signal_offset_hz：可选的发射频偏。真实场景里 RTL-SDR 只 tune 到一个中心
+      频率，而"想听的台"往往不在中心，而是落在中心右侧/左侧若干 kHz/MHz。
+      传 signal_offset_hz=+100_000 即模拟"电台在中心频率 +100 kHz 处"：
+      read_samples 在吐基带前用 NCO exp(j·2π·offset·t) 把整条 FM 信号搬离 DC。
+      默认 0 = 电台恰好落在 DC（与历史行为一致，旧测试不受影响）。
     """
 
     def __init__(self, device_index: int = 0,
@@ -40,6 +46,7 @@ class FakeRtlSdr:
                  mod_freq: float = 1000.0,
                  deviation: float = 75000.0,
                  noise_amplitude: float = 0.01,
+                 signal_offset_hz: float = 0.0,
                  seed: int = 20260926):
         # 与 pyrtlsdr.RtlSdr 同名同语义：写进去的是 RF 中心频率，
         # read_samples 返回的是它下变频后的基带 IQ（载波在 DC）。
@@ -52,6 +59,10 @@ class FakeRtlSdr:
         self._mod_freq = float(mod_freq)
         self._deviation = float(deviation)
         self._noise_amp = float(noise_amplitude)
+        # 电台相对中心频率的位置：0=在 DC；+100k=在中心右侧 100 kHz。
+        # read_samples 吐基带前用 NCO 把信号搬到这个位置，模拟"棒 tune 到
+        # 中心，但台不在中心"的真实射频场景（供 VFO DDC 搬频测试用）。
+        self._signal_offset_hz = float(signal_offset_hz)
         # 固定种子：同一支棒每次吐的信号可复现，测试不抖动
         self._rng = np.random.default_rng(seed)
         # 全局样本计数器：让跨次 read_samples 的相位严格连续，
@@ -84,6 +95,12 @@ class FakeRtlSdr:
         phase = -(self._deviation / self._mod_freq) * np.cos(
             2.0 * np.pi * self._mod_freq * t)
         iq = np.exp(1j * phase)
+
+        # NCO 搬频：把"在 DC 的电台"搬到 signal_offset_hz 处。
+        # t 用的是绝对样本号（含 _global_idx 累计），所以跨块相位严格连续，
+        # 不会在块边界打出跳变。offset=0 时 mult=1，行为与旧版完全一致。
+        if self._signal_offset_hz != 0.0:
+            iq = iq * np.exp(1j * 2.0 * np.pi * self._signal_offset_hz * t)
 
         # 复高斯底噪：I/Q 各一份，幅度 noise_amp
         noise = self._noise_amp * (
