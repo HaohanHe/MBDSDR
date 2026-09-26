@@ -157,6 +157,9 @@ class ControlPanel(QWidget):
             getattr(self, "ppm_spin", None),
             getattr(self, "offset_check", None),
             getattr(self, "bookmark_add_btn", None),
+            # 增益 / 静噪滑杆：无设备时禁用，不暴露假可控状态
+            getattr(self, "gain_slider", None),
+            getattr(self, "squelch_slider", None),
         ]
         widgets += self._step_buttons
         for w in widgets:
@@ -707,6 +710,10 @@ class ControlPanel(QWidget):
     # ========================================================================
     # 外部接口
     # ========================================================================
+
+    def get_frequency_hz(self) -> float:
+        """返回当前内部频率真值 (Hz)。供主窗口连接后下发初始中心频率。"""
+        return float(self._freq_hz)
 
     def set_freq_fm(self, freq: float):
         """从外部设置 FM 频率（如频谱组件双击）。"""
