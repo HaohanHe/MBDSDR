@@ -81,3 +81,11 @@ reference/
 syn_*.npy
 tests/test_report.txt
 repos/
+
+# Agent 运行工作区（内部 scratch，不入库）
+.sessions/
+
+# 上游克隆（仅本地学习，功能已在适配器中重写；以坏 gitlink 形式入库会报错）
+SigDigger/
+inspectrum/
+sigutils/
