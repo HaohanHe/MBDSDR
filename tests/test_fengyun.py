@@ -145,7 +145,10 @@ class TestFY3PassPredict(unittest.TestCase):
 
     def test_fy3_pass_curve(self):
         lat, lon = 39.9, 116.4   # 北京附近
-        t0 = time.time()
+        # 固定参考时刻：TLE 历元(2024-01-01 12:00 UTC)附近的一次高过境，
+        # 峰值仰角 85.4°、多普勒过零。用固定时刻替代 time.time()，
+        # 避免随真实时间漂移导致断言失败（SGP4 在历元附近最准）。
+        t0 = 1704033900.0  # 2023-12-31 14:45 UTC，覆盖 15:45 峰值
 
         # 粗扫 6 小时，找到仰角峰值时刻（合成 TLE 几何）
         peak_t, peak_el = t0, -90.0
