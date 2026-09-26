@@ -364,6 +364,9 @@ class RFSkyView(QWidget, SkyInteractionHandler):
 
     object_clicked = Signal(object)  # SkyObject
     pointing_changed = Signal(float, float)  # az, el
+    # 选中卫星后点「调到该星」：携带实时多普勒校正后的调谐参数。
+    # dict: {name, tuned_freq_hz, doppler_shift_hz, base_freq_hz, mode}
+    tune_satellite_requested = Signal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -435,6 +438,32 @@ class RFSkyView(QWidget, SkyInteractionHandler):
 
         # 未来过境列表
         self._upcoming_passes: List[Dict[str, float]] = []
+
+        # === 「调到该星」覆盖按钮（自包含，不依赖 main_window）===
+        # 选中带 TLE 的卫星且有观测站时才启用；否则置灰。
+        # 按钮旁实时显示多普勒偏移(Hz)。
+        from PySide6.QtWidgets import QPushButton
+        self._tune_btn = QPushButton("📡 调到该星", self)
+        self._tune_btn.setCheckable(False)
+        self._tune_btn.setEnabled(False)
+        self._tune_btn.setToolTip("按实时多普勒校正调谐到该卫星下行频率")
+        self._tune_btn.clicked.connect(self._on_tune_satellite)
+        self._doppler_label = QLabel("多普勒 --", self)
+        self._doppler_label.setStyleSheet(
+            "QLabel { background: rgba(245,243,239,210); color:#3a5a6a;"
+            " padding:2px 6px; border-radius:3px; font-size:9pt; }")
+        self._tune_btn.setStyleSheet(
+            "QPushButton { background: rgba(91,123,140,220); color:#F5F3EF;"
+            " border:none; padding:4px 10px; border-radius:3px; }"
+            "QPushButton:hover { background: rgba(196,132,92,220); }"
+            "QPushButton:disabled { background: rgba(150,150,150,120); }")
+        self._tune_btn.hide()
+        self._doppler_label.hide()
+        # 选中卫星名（None=未选卫星）；定时器刷新多普勒读数
+        self._tune_sat_name: Optional[str] = None
+        self._tune_refresh_timer = QTimer(self)
+        self._tune_refresh_timer.setInterval(2000)
+        self._tune_refresh_timer.timeout.connect(self._refresh_tune_doppler)
 
         # === 真实 GNSS 卫星天空图（NMEA GSV/GSA 驱动）===
         self._gnss_satellites: List[Dict] = []
@@ -925,6 +954,119 @@ class RFSkyView(QWidget, SkyInteractionHandler):
                 except Exception:
                     pass
         self._selected_info = info
+        # 选中后刷新「调到该星」按钮可用性（无 TLE/无观测站则置灰）
+        self._update_tune_button(obj)
+
+    # ------------------------------------------------------------------ #
+    # 「调到该星」：实时多普勒校正调谐（自包含，不依赖 main_window）
+    # ------------------------------------------------------------------ #
+    def _selected_sat_tle(self) -> Optional[Dict[str, object]]:
+        """返回当前选中卫星的 TLE 目录条目（含 line1/line2），否则 None。"""
+        info = self._selected_info or {}
+        name = info.get("title")
+        if not name:
+            return None
+        meta = self._sat_catalog.get(name)
+        if not meta or not meta.get("line1") or not meta.get("line2"):
+            return None
+        return meta
+
+    def _update_tune_button(self, obj=None):
+        """根据选中对象/观测站/TLE 可用性更新按钮与多普勒读数。"""
+        meta = self._selected_sat_tle()
+        gs_ready = self._observer is not None
+        if meta is None or not gs_ready:
+            self._tune_sat_name = None
+            self._tune_btn.hide()
+            self._doppler_label.hide()
+            self._tune_refresh_timer.stop()
+            return
+        name = (self._selected_info or {}).get("title")
+        self._tune_sat_name = name
+        self._tune_btn.show()
+        self._doppler_label.show()
+        self._tune_btn.setEnabled(True)
+        self._refresh_tune_doppler()
+        self._tune_refresh_timer.start()
+        self._position_tune_overlay()
+
+    def _build_tune_tracker(self, meta: Dict[str, object]):
+        """用目录里的 TLE 构建卫星追踪器；缺依赖/失败返回 None。"""
+        try:
+            from mbdsdr_ai.satellite.tracker import SatelliteTracker
+            return SatelliteTracker(
+                str(meta.get("name") or (self._selected_info or {}).get("title")
+                    or "SAT"),
+                str(meta["line1"]), str(meta["line2"]),
+                norad=int(meta.get("norad") or 0))
+        except Exception:
+            return None
+
+    def _compute_tune(self):
+        """计算当前选中卫星的实时调谐参数；失败返回 None。"""
+        meta = self._selected_sat_tle()
+        if meta is None or self._observer is None:
+            return None
+        tr = self._build_tune_tracker(meta)
+        if tr is None:
+            return None
+        try:
+            from mbdsdr_ai.satellite.tracker import (
+                GroundStation, tune_command, DOWNLINK_FREQUENCIES)
+        except Exception:
+            return None
+        gs = GroundStation(float(self._observer["lat"]),
+                           float(self._observer["lon"]),
+                           float(self._observer.get("alt_m", 0.0)) / 1000.0)
+        try:
+            res = tune_command(tr, gs)
+        except Exception:
+            return None
+        if not res or "error" in res:
+            return None
+        # 下行频率已知的卫星给一个默认模式（NOAA APT=WFM 式接收）
+        f_down = res.get("base_freq_hz", 0.0)
+        mode = "WFM" if f_down and f_down < 200e6 else "NFM"
+        res["mode"] = mode
+        return res
+
+    def _refresh_tune_doppler(self):
+        """刷新按钮旁的多普勒偏移读数（不实际调谐，只显示）。"""
+        if self._tune_sat_name is None:
+            return
+        res = self._compute_tune()
+        if res is None:
+            self._doppler_label.setText("多普勒 --")
+            return
+        dop = res.get("doppler_shift_hz", 0.0)
+        sign = "+" if dop >= 0 else "−"
+        self._doppler_label.setText(f"多普勒 {sign}{abs(dop):.0f} Hz")
+
+    def _on_tune_satellite(self):
+        """点击 → 算实时多普勒 → 发 tune_satellite_requested 给主窗口调谐。"""
+        res = self._compute_tune()
+        if res is None:
+            return
+        self.tune_satellite_requested.emit({
+            "name": res.get("satellite", self._tune_sat_name),
+            "tuned_freq_hz": float(res["tuned_freq_hz"]),
+            "doppler_shift_hz": float(res.get("doppler_shift_hz", 0.0)),
+            "base_freq_hz": float(res.get("base_freq_hz", 0.0)),
+            "mode": res.get("mode", "NFM"),
+        })
+
+    def _position_tune_overlay(self):
+        """把调谐按钮+多普勒标签放到左下角。"""
+        try:
+            bw = max(self._tune_btn.sizeHint().width(), 110)
+            dw = self._doppler_label.sizeHint().width()
+            h = 26
+            x = 12
+            y = self.height() - h - 12
+            self._tune_btn.setGeometry(x, y, bw, h)
+            self._doppler_label.setGeometry(x + bw + 6, y, max(dw, 90), h)
+        except Exception:
+            pass
 
     # ========================================================================
     # 坐标转换：统一委托给 sky_interaction.sky_to_screen / screen_to_sky
@@ -1879,6 +2021,11 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         if obj is None:
             self._hovered_object = None
             self._selected_info = None
+            # 取消选中：隐藏调谐按钮
+            self._tune_sat_name = None
+            self._tune_btn.hide()
+            self._doppler_label.hide()
+            self._tune_refresh_timer.stop()
             self.update()
             return
         self._hovered_object = obj
@@ -1908,6 +2055,8 @@ class RFSkyView(QWidget, SkyInteractionHandler):
                                           w, 26)
         except Exception:
             pass
+        # 调谐按钮覆盖层跟随尺寸
+        self._position_tune_overlay()
         self.update()
 
 
