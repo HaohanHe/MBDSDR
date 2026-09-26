@@ -53,6 +53,24 @@ from doppler_panel import DopplerPanel
 from sat_track_panel import SatTrackPanel
 from new_spacetime_panel import NewSpacetimePanel
 from adsb_map_panel import AdsbMapPanel
+# 内核能力面板（扫频 / 自动调制识别 / 书签管理 / 远程服务设置）。
+# 用 try/except 守卫：内核模块缺失时面板降级为不可用，绝不拖垮启动。
+try:
+    from scanner_panel import ScannerPanel
+except Exception:  # pragma: no cover
+    ScannerPanel = None  # type: ignore
+try:
+    from modulation_panel import ModulationPanel
+except Exception:  # pragma: no cover
+    ModulationPanel = None  # type: ignore
+try:
+    from bookmark_panel import BookmarkPanel
+except Exception:  # pragma: no cover
+    BookmarkPanel = None  # type: ignore
+try:
+    from settings_panel import ServiceSettingsPanel
+except Exception:  # pragma: no cover
+    ServiceSettingsPanel = None  # type: ignore
 # 卫星闭环跟踪器（mbdsdr_ai.sat_tracker）：选中卫星->实时 az/el/多普勒->自动调谐。
 # 用别名避免与 rf_sky_view 里的展示型 SatelliteTracker 冲突。缺 skyfield 时降级。
 try:
@@ -800,6 +818,13 @@ class MainWindow(QMainWindow):
         # 默认显示控制页
         self.control_dock.show()
         self.control_dock.raise_()
+
+        # ---- 内核能力面板：扫频 / 自动调制识别（底部坞）+ 书签 / 服务设置（右侧）----
+        self.scanner_panel = None
+        self.modulation_panel = None
+        self.bookmark_panel = None
+        self.service_settings_panel = None
+        self._build_kernel_panels()
 
         # ---- CarWith 设计体系：面板注册表挂载 + Dock 布局管理器 ----
         # 把实际创建的控件挂进注册表（注册表只存引用，不拥有生命周期）
@@ -1767,6 +1792,19 @@ class MainWindow(QMainWindow):
         try:
             if hasattr(self, "_sweep_action"):
                 self._sweep_action.setEnabled(bool(connected))
+        except Exception:
+            pass
+        # 内核能力面板：扫频 / 信号识别 随连接状态启停；服务设置注入后端
+        try:
+            be = getattr(self, "_active_sdr_backend", None)
+            for pname in ("scanner_panel", "modulation_panel"):
+                p = getattr(self, pname, None)
+                if p is not None:
+                    p.set_backend(be)
+                    p.set_sdr_connected(bool(connected))
+            sp = getattr(self, "service_settings_panel", None)
+            if sp is not None and hasattr(sp, "set_backend"):
+                sp.set_backend(be)
         except Exception:
             pass
         # 频谱标题栏频率/RSSI：未连接时显 "--"
@@ -3188,6 +3226,171 @@ class MainWindow(QMainWindow):
         for d in (self.control_dock, self.status_dock, self.ai_dock):
             d.setVisible(visible)
 
+    # ------------------------------------------------------------------ #
+    # 内核能力面板：扫频 / 自动调制识别 / 书签 / 远程服务设置
+    # ------------------------------------------------------------------ #
+    def _build_kernel_panels(self):
+        """把内核能力面板接成可停靠坞（缺面板类时 hasattr 守卫，不崩）。"""
+        # 底部坞：扫频 + 自动调制识别
+        if ScannerPanel is not None:
+            try:
+                self.scanner_panel = ScannerPanel()
+                self.scanner_panel.segment_chosen.connect(
+                    self._on_scanner_segment_chosen)
+                self.scanner_panel.scan_began.connect(self._on_panel_scan_began)
+                self.scanner_panel.scan_ended.connect(self._on_panel_scan_ended)
+                self.scanner_dock = self._wrap_panel_in_dock(
+                    "扫频", self.scanner_panel)
+                self.scanner_dock.setObjectName("scannerDock")
+                self.addDockWidget(Qt.BottomDockWidgetArea, self.scanner_dock)
+            except Exception:  # noqa: BLE001
+                self.scanner_panel = None
+        if ModulationPanel is not None:
+            try:
+                self.modulation_panel = ModulationPanel()
+                self.modulation_panel.apply_demod_requested.connect(
+                    self._on_apply_demod_requested)
+                self.modulation_dock = self._wrap_panel_in_dock(
+                    "信号识别", self.modulation_panel)
+                self.modulation_dock.setObjectName("modulationDock")
+                self.addDockWidget(Qt.BottomDockWidgetArea, self.modulation_dock)
+                # 扫频/识别两个底部坞上下叠
+                try:
+                    self.tabifyDockWidget(self.scanner_dock, self.modulation_dock)
+                except Exception:
+                    pass
+            except Exception:  # noqa: BLE001
+                self.modulation_panel = None
+
+        # 右侧坞：书签管理 + 服务设置（叠到控制/状态/AI 旁边）
+        if BookmarkPanel is not None:
+            try:
+                self.bookmark_panel = BookmarkPanel()
+                self.bookmark_panel.tune_requested.connect(
+                    self._on_bookmark_tune_requested)
+                self.bookmark_panel.set_current_freq_provider(
+                    self._safe_center_hz)
+                self.bookmark_dock = self._wrap_panel_in_dock(
+                    "书签", self.bookmark_panel)
+                self.bookmark_dock.setObjectName("bookmarkDock")
+                self.addDockWidget(Qt.RightDockWidgetArea, self.bookmark_dock)
+                self.tabifyDockWidget(self.ai_dock, self.bookmark_dock)
+            except Exception:  # noqa: BLE001
+                self.bookmark_panel = None
+        if ServiceSettingsPanel is not None:
+            try:
+                self.service_settings_panel = ServiceSettingsPanel()
+                self.service_settings_dock = self._wrap_panel_in_dock(
+                    "服务设置", self.service_settings_panel)
+                self.service_settings_dock.setObjectName("serviceSettingsDock")
+                self.addDockWidget(Qt.RightDockWidgetArea, self.service_settings_dock)
+                self.tabifyDockWidget(self.bookmark_dock
+                                      if self.bookmark_panel is not None
+                                      else self.ai_dock,
+                                      self.service_settings_dock)
+            except Exception:  # noqa: BLE001
+                self.service_settings_panel = None
+
+        # 天空视图「调到该星」信号（rf_sky_view 自包含，hasattr 守卫）
+        try:
+            sv = getattr(self, "sky_view", None)
+            if sv is not None and hasattr(sv, "tune_satellite_requested"):
+                sv.tune_satellite_requested.connect(
+                    self._on_sky_tune_satellite)
+        except Exception:
+            pass
+
+    def _on_scanner_segment_chosen(self, seg: dict):
+        """扫频活动段点击 → 确认后调谐到峰值频点并建议解调模式。"""
+        peak = float(seg.get("peak_freq", 0.0))
+        if peak <= 0:
+            return
+        kind = seg.get("kind", "?")
+        mode = seg.get("suggested_mode", "NFM")
+        bw = float(seg.get("bandwidth", 0.0))
+        reply = QMessageBox.question(
+            self, "检测到信号",
+            f"检测到 {kind} 信号（{peak/1e6:.3f} MHz，"
+            f"峰值 {seg.get('peak_db', 0):.1f} dB），\n"
+            f"是否切换到 {mode} 模式调谐到该频率？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if reply != QMessageBox.Yes:
+            return
+        self._on_tune_sdr(peak, mode)
+        if bw > 0 and hasattr(self, "_on_vfo_bandwidth_changed_ui"):
+            try:
+                self._on_vfo_bandwidth_changed_ui("", bw)
+            except Exception:
+                pass
+
+    def _on_panel_scan_began(self):
+        """扫频开始：暂停共享 IQ 轮询，避免抢读同一环形缓冲。"""
+        try:
+            if self._active_sdr_backend is not None:
+                try:
+                    self._panel_scan_prev_center = float(
+                        self._active_sdr_backend.get_frequency())
+                except Exception:
+                    self._panel_scan_prev_center = None
+            self._stop_iq_streams()
+        except Exception:
+            pass
+
+    def _on_panel_scan_ended(self):
+        """扫频结束：若仍连接则恢复 IQ 流并调回扫频前频点。"""
+        try:
+            if self._active_sdr_backend is not None:
+                prev = getattr(self, "_panel_scan_prev_center", None)
+                if prev:
+                    try:
+                        self._active_sdr_backend.set_frequency(prev)
+                    except Exception:
+                        pass
+                self._start_iq_streams()
+        except Exception:
+            pass
+
+    def _on_apply_demod_requested(self, mode: str, bandwidth_hz: float):
+        """自动识别结果「应用」→ 设置解调模式 + 带宽。"""
+        try:
+            if hasattr(self.control_panel, "set_mode"):
+                self.control_panel.set_mode(mode)
+        except Exception:
+            pass
+        try:
+            self._on_mode_changed(mode)
+        except Exception:
+            pass
+        if bandwidth_hz > 0:
+            try:
+                self._on_vfo_bandwidth_changed_ui("", float(bandwidth_hz))
+            except Exception:
+                pass
+        self.statusBar().showMessage(f"已应用解调：{mode}", 3000)
+
+    def _on_bookmark_tune_requested(self, freq_hz: float, mode: str,
+                                    bandwidth_hz: float):
+        """书签点击 → 调谐 + 设模式 + 带宽。"""
+        self._on_tune_sdr(float(freq_hz), mode or "NFM")
+        if bandwidth_hz and bandwidth_hz > 0:
+            try:
+                self._on_vfo_bandwidth_changed_ui("", float(bandwidth_hz))
+            except Exception:
+                pass
+
+    def _on_sky_tune_satellite(self, info: dict):
+        """天空视图「调到该星」→ 用实时多普勒校正后的频率真正调谐。"""
+        freq = float(info.get("tuned_freq_hz", 0.0))
+        if freq <= 0:
+            return
+        mode = info.get("mode", "NFM")
+        dop = float(info.get("doppler_shift_hz", 0.0))
+        self._on_tune_sdr(freq, mode)
+        self.statusBar().showMessage(
+            f"已调谐 {info.get('name','卫星')}：{freq/1e6:.4f} MHz "
+            f"(多普勒 {dop:+.0f} Hz)", 5000)
+
+
     def _on_toolbar_mode_selected(self, mode: str):
         """工具栏模式下拉 → 走控制面板既有信号链（真实切解调 + VFO 带宽）。
 
@@ -4010,6 +4213,13 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """关闭时断开连接并保存配置。"""
+        # 先停掉远程控制 / Web 服务（daemon 线程，避免端口残留）
+        try:
+            sp = getattr(self, "service_settings_panel", None)
+            if sp is not None and hasattr(sp, "shutdown_all"):
+                sp.shutdown_all()
+        except Exception:
+            pass
         # 窗口几何 + 右侧坞布局落 QSettings（下次启动原样恢复）
         try:
             self._save_window_state()
