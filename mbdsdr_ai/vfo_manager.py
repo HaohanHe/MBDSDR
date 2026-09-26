@@ -27,8 +27,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Any, List, Optional, Tuple
 
 
 # 单边带模式名（大小写不敏感）。其余模式一律按对称带宽处理。
@@ -40,7 +40,10 @@ _SSB_LOWER = "LSB"
 class VfoState:
     """单个 VFO（可变频率振荡器）的状态快照。
 
-    纯数据对象：本类不持有任何线程、音频队列或硬件句柄。
+    纯数据对象为主：本类不主动创建线程/音频队列/硬件句柄。
+    运行时可由上层 bind_dsp() 填入 dsp_vfo / output_stream（对照
+    SDR++ vfo_manager.h:33 dspVFO + :29 output），老代码不填这两个
+    字段完全不受影响。
     """
 
     vfo_id: str
@@ -54,6 +57,9 @@ class VfoState:
     gain_db: Optional[float] = None  # None 表示使用 AGC
     delta_lock: bool = False
     active: bool = True
+    # 运行时 DSP 绑定（可选，默认 None = 纯配置态）
+    dsp_vfo: Any = field(default=None, repr=False)        # 对照 vfo_manager.h:33
+    output_stream: Any = field(default=None, repr=False)  # 对照 vfo_manager.h:29
 
 
 def vfo_coverage(center_hz: float, bw_hz: float, mode: str) -> Tuple[float, float]:
@@ -170,6 +176,47 @@ class VfoManager:
     def ordered_by_freq(self) -> List[VfoState]:
         """按中心频率升序返回 VFO；同频保持加入顺序（稳定排序）。"""
         return sorted(self._vfos, key=lambda v: v.center_hz)
+
+    # ── DSP 运行时绑定（对照 SDR++ vfo_manager.cpp:30-49）──────────
+
+    def bind_dsp(self, vfo_id: str, dsp_vfo: Any,
+                 output_stream: Any = None) -> bool:
+        """把一个已创建的 DSP VFO 对象和输出流绑定到配置态 VfoState。
+
+        对照 vfo_manager.cpp:16 output = &dspVFO->out。老代码不调用本方法
+        时 VfoState.dsp_vfo 保持 None，纯数据语义不变。
+        """
+        v = self._by_id.get(vfo_id)
+        if v is None:
+            return False
+        v.dsp_vfo = dsp_vfo
+        v.output_stream = output_stream
+        return True
+
+    def push_offset(self, vfo_id: str, offset_hz: float) -> bool:
+        """把变频偏移实时推到已绑定的 DSP VFO（对照 vfo_manager.cpp:32
+        dspVFO->setOffset(...)）。未绑定则静默返回 False。"""
+        v = self._by_id.get(vfo_id)
+        if v is None or v.dsp_vfo is None:
+            return False
+        setter = getattr(v.dsp_vfo, "set_offset", None)
+        if callable(setter):
+            setter(float(offset_hz))
+            return True
+        return False
+
+    def push_bandwidth(self, vfo_id: str, bw_hz: float) -> bool:
+        """把带宽实时推到已绑定 DSP VFO（对照 vfo_manager.cpp:48
+        dspVFO->setBandwidth(...)）。"""
+        v = self._by_id.get(vfo_id)
+        if v is None or v.dsp_vfo is None:
+            return False
+        setter = getattr(v.dsp_vfo, "set_bandwidth", None)
+        if callable(setter):
+            setter(float(bw_hz))
+            v.bw_hz = float(bw_hz)
+            return True
+        return False
 
     # ── 循环切换 current ──────────────────────────────────
 

@@ -1768,12 +1768,17 @@ class MainWindow(QMainWindow):
         if mode in ("RAW", "DIG"):
             return
 
-        # 静噪门控：信号太弱不输出（避免底噪刺耳）。基于全带宽 IQ 功率。
+        # 静噪门控：信号太弱时渐出静音（不再硬 return 导致咔哒）。
+        # 对照 SDR++ power_squelch.h 门在 IF 域 + 后级 LPF 平滑；我们在
+        # 音频域用 AudioPlayer 的 5ms ramp 等效实现（audio_out.py _callback）。
         try:
             p = float(np.mean(np.abs(iq) ** 2))
             dbfs = 10.0 * math.log10(p + 1e-12)
             if dbfs < self._squelch_db:
+                player.set_muted(True)
                 return
+            else:
+                player.set_muted(False)
         except Exception:
             return
 

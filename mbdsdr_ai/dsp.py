@@ -312,6 +312,39 @@ def fm_demod(x: np.ndarray, deviation: float = 75000.0,
     return audio.astype(np.float32)
 
 
+class QuadratureDemod:
+    """有状态 FM 正交鉴频器（对照 GR quadrature_demod_cf_impl.cc:37 set_history(2)）。
+
+    纯函数 fm_demod() 每块丢 1 个样本（块边界相位差断了），本类缓存上一块
+    末样本，跨帧连续。公式与 fm_demod 完全一致：
+        out = gain * arg(x[n] * conj(x[n-1]))
+        gain = sample_rate / (2π * deviation)
+    """
+
+    def __init__(self, sample_rate: float = 48000.0, deviation: float = 5000.0):
+        self.sample_rate = float(sample_rate)
+        self.deviation = float(deviation)
+        self.gain = self.sample_rate / (2.0 * np.pi * self.deviation)
+        self._last: Optional[complex] = None
+
+    def reset(self):
+        self._last = None
+
+    def process(self, x: np.ndarray) -> np.ndarray:
+        x = np.asarray(x, dtype=np.complex128)
+        if len(x) < 2:
+            return np.zeros(0, dtype=np.float32)
+        # 前置补上一块末样本（= GR set_history(2) 让调度器补的那个样本）
+        if self._last is not None:
+            x = np.concatenate(([self._last], x))
+        phase_diff = np.angle(x[1:] * np.conj(x[:-1]))
+        self._last = complex(x[-1])
+        audio = phase_diff * self.gain
+        # 去直流（块级均值，跨帧由调用方的 DCBlocker 处理）
+        audio = audio - np.mean(audio)
+        return audio.astype(np.float32)
+
+
 def wfm_broadcast_demod(x: np.ndarray, sample_rate: float,
                         audio_sr: int = 48000, deemph_us: float = 50.0,
                         audio_cutoff: float = 15000.0) -> np.ndarray:
@@ -932,6 +965,14 @@ class VFO:
         if self._filter_needed:
             self._generate_taps()
 
+        # ── 块间状态持久化（对照 GR block.cc:97 forecast history + fir_filter_with_buffer.cc:71）──
+        # LPF 滤波器初始条件，跨帧传递，消除每块开头瞬态咔哒
+        self._lpf_zi = None
+        # AGC2（对照 gr-analog agc2.h:64-85，已移植在 gnuradio_blocks.py:325）
+        # 默认关闭，UI 可开；开启后在变频后、重采样前对复 IQ 做逐样本 AGC
+        self._agc = None
+        self._agc_enabled = False
+
     # ---------- 内部：频率变频 ----------
     def _rebuild_xlator(self):
         """frequency_xlator.h:21-23 hzToRads(offset, sr) = 2π*offset/sr。
@@ -993,6 +1034,24 @@ class VFO:
     def reset(self):
         """重置相位累加器（对照 frequency_xlator.h:35-41 reset）。"""
         self._phase = complex(1.0, 0.0)
+        # 换频/换带宽后 LPF 状态也要清，否则旧频残留会串到新频
+        self._lpf_zi = None
+        if self._agc is not None:
+            self._agc.reset(gain=1.0)
+
+    def set_agc(self, enabled: bool, attack_rate: float = 1e-1,
+                decay_rate: float = 1e-2, reference: float = 1.0):
+        """开关 VFO 内 AGC2（对照 agc2_cc_impl.cc:42-50 work 调 scaleN）。
+
+        默认参数 = GR agc2.h:41-45 默认值。开启后在变频后、重采样前对复 IQ
+        做逐样本 attack/decay AGC，状态跨帧保留。"""
+        self._agc_enabled = bool(enabled)
+        if enabled and self._agc is None:
+            from .gnuradio_blocks import AGC2
+            self._agc = AGC2(attack_rate=attack_rate, decay_rate=decay_rate,
+                             reference=reference, gain=1.0, max_gain=0.0)
+        elif not enabled and self._agc is not None:
+            self._agc.reset(gain=1.0)
 
     def process(self, iq: np.ndarray) -> np.ndarray:
         """处理一帧复 IQ：变频 → 重采样 → 低通滤波（对照 rx_vfo.h:89-100）。
@@ -1015,6 +1074,10 @@ class VFO:
         if mag > 1e-12:
             self._phase /= mag  # 防长期幅度漂移（volk rotator 同样有此问题）
 
+        # 1.5) 可选 AGC2（变频后、重采样前，对照 agc2_cc_impl.cc:42-50）
+        if self._agc_enabled and self._agc is not None:
+            x = self._agc.process(x)
+
         # 2) 有理重采样 in_sr → out_sr —— rx_vfo.h:92/94 resamp.process
         if self._up != 1 or self._down != 1:
             try:
@@ -1030,10 +1093,14 @@ class VFO:
         # else: in_sr == out_sr，跳过重采样（rx_vfo.h:28 也允许）
 
         # 3) 低通滤波（在 out_sr 上）—— rx_vfo.h:97 filter.process
+        # 用 lfilter_zi 跨帧保持滤波器状态（对照 GR block.cc:97 history +
+        # fir_filter_with_buffer.cc:71-76 环形缓冲），消除每块开头瞬态咔哒
         if self._filter_needed and self._taps is not None:
             try:
-                from scipy.signal import lfilter
-                x = lfilter(self._taps, 1.0, x)
+                from scipy.signal import lfilter, lfilter_zi
+                if self._lpf_zi is None or len(self._lpf_zi) != len(self._taps):
+                    self._lpf_zi = lfilter_zi(self._taps, 1.0)
+                x, self._lpf_zi = lfilter(self._taps, 1.0, x, zi=self._lpf_zi)
             except ImportError:
                 if x.dtype in (np.complex64, np.complex128):
                     x = (np.convolve(x.real, self._taps, mode='same')
