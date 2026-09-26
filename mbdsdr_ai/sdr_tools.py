@@ -3892,10 +3892,38 @@ def _satellite_doppler_track(mgr, args):
 
 
 def _get_gps(mgr):
-    return "GPS 定位（需自研 ai-sdr Mini 设备连接）\n当前为模拟后端，实际数据需连接 ATGM336H 模块\n模拟数据: 43.82°N, 125.32°E, 海拔 250m, 12 星, HDOP 0.8"
+    # 真实数据源：GNSS monitor（串口 NMEA）。无连接/无 fix 就如实报，
+    # 绝不编造经纬度/星数冒充已定位。
+    gnss = getattr(mgr, "gnss", None)
+    if gnss is None:
+        return "GPS 定位: 未连接（请在工具菜单连接 GNSS 串口）"
+    try:
+        d = gnss.status()
+    except Exception:
+        return "GPS 定位: 未连接（GNSS 串口未就绪）"
+    if not d or not d.get("fix"):
+        return "GPS 定位: 搜索中（未定位，无卫星 fix）"
+    return (
+        f"GPS 定位: {d.get('lat', '?'):.5f}, {d.get('lon', '?'):.5f}　"
+        f"卫星 {d.get('numsats', '?')} 颗　HDOP {d.get('hdop', '?')}"
+    )
+
 
 def _get_imu(mgr):
-    return "IMU 姿态（需自研 ai-sdr Mini 设备连接）\n当前为模拟后端，实际数据需连接 BMI260+TMAG5273\n模拟数据: 加速度(0,0,1)g, 角速度(0,0,0)°/s, 航向 0°"
+    # 真实数据源：九轴 IMU 串口/I2C。没接硬件就显未连接，不编加速度/航向。
+    imu = getattr(mgr, "imu", None)
+    if imu is None:
+        return "IMU 姿态: 未连接（未检测到九轴硬件）"
+    try:
+        d = imu.status()
+    except Exception:
+        return "IMU 姿态: 未连接（IMU 硬件未就绪）"
+    if not d:
+        return "IMU 姿态: 未连接（无数据）"
+    return (
+        f"IMU 姿态: 航向 {d.get('heading_deg', '?'):.1f}°　"
+        f"加速度({d.get('ax', '?'):.2f},{d.get('ay', '?'):.2f},{d.get('az', '?'):.2f})g"
+    )
 
 def _identify_modulation(mgr, spec, args):
     backend = _get_backend(mgr)
