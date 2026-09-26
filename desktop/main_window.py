@@ -59,6 +59,16 @@ try:
     from mbdsdr_ai.gnss_monitor import RealGNSSMonitor
 except Exception:  # pragma: no cover
     RealGNSSMonitor = None  # type: ignore
+# 多 VFO 状态管理 + 多线程接收流水线（可缺依赖降级，不拖垮 GUI）
+try:
+    from mbdsdr_ai.vfo_manager import VfoManager
+except Exception:  # pragma: no cover
+    VfoManager = None  # type: ignore
+try:
+    from receive_pipeline import ReceivePipeline, SharedDemodConfig
+except Exception:  # pragma: no cover
+    ReceivePipeline = None  # type: ignore
+    SharedDemodConfig = None  # type: ignore
 
 
 class _SweepWorker(QThread):
@@ -207,6 +217,22 @@ class MainWindow(QMainWindow):
         self._vfo_bw: float = 12000.0
         # 调试/测试断言用：记录 _demod_and_play 本次实际使用的解调模式
         self._last_demod_mode: str = "FM"
+
+        # ---- 多线程接收流水线（重构：IQ reader/splitter/FFT/demod 全部后台线程）----
+        # VfoManager 统一管理多 VFO 的配置态与 DSP 绑定（push_offset/push_bandwidth
+        # 真正调到 dsp.VFO.set_offset → DDC 搬频，不再硬编码 offset=0）。
+        self._vfo_mgr = VfoManager() if VfoManager is not None else None
+        # UI 线程写 / 解调 worker 线程读的共享解调参数（模式 + 静噪门限）
+        self._demod_cfg = (SharedDemodConfig() if SharedDemodConfig is not None
+                           else None)
+        # 当前运行的流水线对象（连接后建，断开时拆）
+        self._pipeline = None  # type: Optional[object]
+        # VfoManager 里主/第二 VFO 的 id（None = 未建）
+        self._main_vfo_id: Optional[str] = None
+        self._vfo2_id: Optional[str] = None
+        # 主 VFO 收听频率 vs 硬件中心频率：offset = vfo_center - backend_center
+        self._vfo_center_hz: float = 0.0
+        self._backend_center_hz: float = 0.0
 
         # ---- 扫频找台（任务 3）：后台 QThread 跑 sweep_scan，真实后端取 IQ ----
         self._sweep_worker: Optional[_SweepWorker] = None
@@ -1276,6 +1302,10 @@ class MainWindow(QMainWindow):
         # 更新频率显示
         self.freq_label.setText(f"{freq:.3f} MHz")
         self.status_freq.setText(f"频率: {freq:.3f} MHz")
+        # VFO 收听频率跟随 → DDC 重算 offset
+        self._vfo_center_hz = freq * 1e6
+        self._backend_center_hz = freq * 1e6
+        self._update_main_vfo_offset()
 
     @Slot(int)
     def _on_tune_am(self, freq: int):
@@ -1307,12 +1337,23 @@ class MainWindow(QMainWindow):
         # 更新频率显示
         self.freq_label.setText(f"{freq_hz / 1e6:.3f} MHz")
         self.status_freq.setText(f"频率: {freq_hz / 1e6:.3f} MHz")
+        # VFO 收听频率跟随 → DDC 重算 offset
+        self._vfo_center_hz = freq_hz
+        self._backend_center_hz = freq_hz
+        if self._demod_cfg is not None:
+            self._demod_cfg.mode = str(mode).upper()
+        self._update_main_vfo_offset()
 
     @Slot(float)
     def _on_module_tune(self, freq_hz: float):
         """模块面板里改了频率 → 同步到频谱中心频。"""
         self.spectrum.set_center_freq(freq_hz / 1e6)
         self.freq_label.setText(f"{freq_hz / 1e6:.3f} MHz")
+        self.status_freq.setText(f"频率: {freq_hz / 1e6:.3f} MHz")
+        # VFO 收听频率跟随 → DDC 重算 offset
+        self._vfo_center_hz = freq_hz
+        self._backend_center_hz = freq_hz
+        self._update_main_vfo_offset()
 
     @Slot(str)
     def _on_ai_command(self, text: str):
@@ -1339,6 +1380,8 @@ class MainWindow(QMainWindow):
     def _on_squelch_changed(self, dbfs: float):
         # 本地声卡门控：信号低于此 dBFS 时静音（不下发硬件）
         self._squelch_db = float(dbfs)
+        if self._demod_cfg is not None:
+            self._demod_cfg.squelch_db = float(dbfs)
 
     def _on_volume_changed(self, volume: int):
         if self._worker:
@@ -1378,6 +1421,9 @@ class MainWindow(QMainWindow):
                 self._active_sdr_backend.set_demod(mode)
             except Exception:
                 pass
+        # 同步到解调 worker 共享配置（后台线程下一帧生效）
+        if self._demod_cfg is not None:
+            self._demod_cfg.mode = str(mode).upper()
         # 根据模式调整 VFO 带宽（WFM 广播 ~180k，窄带 FM/AM ~12k）
         try:
             m = (mode or "FM").upper()
@@ -1385,15 +1431,23 @@ class MainWindow(QMainWindow):
                 bw = 180000.0 if m == "WFM" else 12000.0
             else:
                 bw = 12000.0
-            if self._vfo is not None:
-                self._vfo_bw = bw
+            self._vfo_bw = bw
+            # 推到已绑定的主/次 VFO DSP（VfoManager.push_bandwidth → set_bandwidth）
+            if self._vfo_mgr is not None:
+                for vid in (self._main_vfo_id, self._vfo2_id):
+                    if vid is not None:
+                        try:
+                            self._vfo_mgr.push_bandwidth(vid, bw)
+                        except Exception:
+                            pass
+            elif self._vfo is not None and hasattr(self._vfo, "set_bandwidth"):
                 self._vfo.set_bandwidth(bw)
         except Exception:
             pass
 
     @Slot(float)
     def _on_sample_rate_changed(self, rate_hz: float):
-        """控制面板采样率下拉切换 → 下发后端 + 重建 VFO + 更新录制采样率。"""
+        """控制面板采样率下拉切换 → 下发后端 + 重建流水线（VFO 重采样系数变了）。"""
         # 真实 SDR 后端：真正下发采样率
         if self._active_sdr_backend is not None:
             try:
@@ -1402,8 +1456,9 @@ class MainWindow(QMainWindow):
                 pass
         # 更新录制采样率（下一次开始录制时生效）
         self._record_sr = float(rate_hz)
-        # VFO 输入采样率变了 → 下次解调时懒加载重建
-        self._vfo = None
+        # VFO 输入采样率变了 → 拆旧流水线重建（新 VFO 的 in_sr/重采样系数正确）
+        self._stop_iq_streams()
+        self._start_iq_streams()
         # 刷新底部状态栏采样率显示
         self._update_status_bar()
 
@@ -1448,9 +1503,16 @@ class MainWindow(QMainWindow):
             self._vfo_bw = float(bw_hz)
         except Exception:
             return
-        # VFO 已创建则更新其带宽
+        # VFO 已创建则更新其带宽（经 VfoManager.push_bandwidth → set_bandwidth）
         try:
-            if self._vfo is not None and hasattr(self._vfo, "set_bandwidth"):
+            if self._vfo_mgr is not None:
+                for vid in (self._main_vfo_id, self._vfo2_id):
+                    if vid is not None:
+                        try:
+                            self._vfo_mgr.push_bandwidth(vid, self._vfo_bw)
+                        except Exception:
+                            pass
+            elif self._vfo is not None and hasattr(self._vfo, "set_bandwidth"):
                 self._vfo.set_bandwidth(self._vfo_bw)
         except Exception:
             pass
@@ -1529,6 +1591,10 @@ class MainWindow(QMainWindow):
         # 更新状态栏频率显示
         self.freq_label.setText(f"{freq:.3f} MHz")
         self.status_freq.setText(f"频率: {freq:.3f} MHz")
+        # VFO 收听频率跟随 → DDC 重算 offset
+        self._vfo_center_hz = freq * 1e6
+        self._backend_center_hz = freq * 1e6
+        self._update_main_vfo_offset()
 
     # ========================================================================
     # 其他操作
@@ -1566,9 +1632,10 @@ class MainWindow(QMainWindow):
     # ========================================================================
 
     def _start_iq_streams(self):
-        """真实 SDR 连接成功后：启动 IQ 轮询定时器 + 打开声卡输出。
+        """真实 SDR 连接成功后：打开声卡 + 启动多线程接收流水线。
 
         无后端 / 无 read_samples / 无声卡设备时全部安全降级，绝不崩溃。
+        旧的 UI 线程 QTimer 轮询路径不再启动——FFT 与解调全部移到后台线程。
         """
         # (C) 尝试打开声卡；无 sounddevice / 无设备时 available=False 安全降级
         if self._audio_player is not None:
@@ -1579,17 +1646,166 @@ class MainWindow(QMainWindow):
                         "无音频输出设备（声卡已禁用，不影响频谱/录制）", 5000)
             except Exception:
                 pass
-        # (A) 启动 IQ 轮询定时器
-        if self._iq_poll_timer is not None and not self._iq_poll_timer.isActive():
-            self._iq_poll_timer.start()
+        # (A) 启动多线程流水线：IQ reader → splitter → FFT/demod/record 各 worker
+        self._build_pipeline()
 
-    def _stop_iq_streams(self):
-        """断开时：停 IQ 轮询 + 关声卡。"""
-        if self._iq_poll_timer is not None:
+    def _build_pipeline(self):
+        """组装并启动接收流水线（见 receive_pipeline.ReceivePipeline）。
+
+        - 无后端 / 无 read_samples / 流水线模块不可用：直接返回，不启动任何线程，
+          频谱保持"未连接"，状态栏显 "--"。
+        - 创建主 VFO + 第二 VFO 的 dsp.VFO，经 VfoManager.bind_dsp 绑定，
+          offset 由 _update_main_vfo_offset 真搬频。
+        """
+        read, sr = self._active_read_samples()
+        if read is None:
+            return
+        if self._pipeline is not None:
+            return
+        if ReceivePipeline is None or self._demod_cfg is None:
+            return
+        be = self._active_sdr_backend
+        try:
+            self._backend_center_hz = float(be.get_frequency())
+        except Exception:
+            self._backend_center_hz = 0.0
+        if self._vfo_center_hz <= 0.0:
+            self._vfo_center_hz = self._backend_center_hz
+
+        # 建两个 dsp.VFO（DDC：NCO 搬频 → 有理重采样 → Nuttall LPF）
+        from mbdsdr_ai.dsp import VFO
+        try:
+            main_vfo = VFO(in_samplerate=sr, out_samplerate=self._vfo_out_sr,
+                           bandwidth=self._vfo_bw, offset=0.0)
+            vfo2 = VFO(in_samplerate=sr, out_samplerate=self._vfo_out_sr,
+                       bandwidth=self._vfo_bw, offset=0.0)
+        except Exception:
+            main_vfo, vfo2 = None, None
+        self._vfo = main_vfo          # 兼容旧引用（_on_mode_changed 等仍可触达）
+        self._vfo_in_sr = float(sr)
+
+        # VfoManager 登记 + bind_dsp（对照 SDR++ vfo_manager.cpp:16,30-49）
+        if self._vfo_mgr is not None:
+            s1 = self._vfo_mgr.add(self._vfo_center_hz, self._vfo_bw,
+                                   self._demod_cfg.mode)
+            self._vfo_mgr.bind_dsp(s1.vfo_id, main_vfo,
+                                   output_stream=self._audio_player)
+            self._main_vfo_id = s1.vfo_id
+            s2 = self._vfo_mgr.add(self._vfo_center_hz, self._vfo_bw,
+                                   self._demod_cfg.mode)
+            self._vfo_mgr.bind_dsp(s2.vfo_id, vfo2, output_stream=None)
+            self._vfo2_id = s2.vfo_id
+
+        # 同步当前解调模式 / 静噪到 worker 共享配置
+        try:
+            self._demod_cfg.squelch_db = self._squelch_db
+            be_mode = getattr(getattr(be, "status", None), "demod_mode", None)
+            if be_mode:
+                self._demod_cfg.mode = str(be_mode).upper()
+        except Exception:
+            pass
+
+        pipe = ReceivePipeline(
+            read_fn=read, sr=sr,
+            gen=self.spectrum.generator,
+            center_getter=self._safe_center_hz,
+            main_vfo_dsp=main_vfo, vfo2_dsp=vfo2,
+            player=self._audio_player, config=self._demod_cfg,
+            on_record_iq=self._on_pipeline_record_iq,
+        )
+        pipe.frame_ready.connect(self._on_pipeline_frame_ready)
+        pipe.start()
+        self._pipeline = pipe
+        # 首帧：把 offset（= vfo_center - backend_center）推给 DDC
+        self._update_main_vfo_offset()
+
+    def _safe_center_hz(self) -> float:
+        """后台 FFT worker 回读硬件中心频率（失败回落到缓存值，绝不崩）。"""
+        try:
+            return float(self._active_sdr_backend.get_frequency())
+        except Exception:
+            return self._backend_center_hz
+
+    def _update_main_vfo_offset(self):
+        """把主 VFO 收听频率搬到 DDC：offset = vfo_center - backend_center。
+
+        调用链：UI 调谐事件 → _on_tune_* → 本方法 →
+        VfoManager.push_offset(vfo_id, offset) → dsp_vfo.set_offset(offset)
+        → VFO._rebuild_xlator() 重算 _d_theta（dsp.py:980），process() 真搬频。
+        """
+        offset = self._vfo_center_hz - self._backend_center_hz
+        if self._vfo_mgr is not None and self._main_vfo_id is not None:
             try:
-                self._iq_poll_timer.stop()
+                self._vfo_mgr.push_offset(self._main_vfo_id, offset)
             except Exception:
                 pass
+
+    @Slot(object, float)
+    def _on_pipeline_frame_ready(self, iq: np.ndarray, sr: float):
+        """FFT worker 算完一帧后跨线程回到 UI：只做轻量 repaint + tap。
+
+        重活（窗×FFT×fftshift×dBFS×IIR）已在 FftWorker 线程完成，这里绝不做 FFT。
+        """
+        # 频谱 repaint（generator 内部状态已被 worker 更新）
+        try:
+            self.spectrum._refresh_status_labels()
+            self.spectrum._plot.update()
+        except Exception:
+            pass
+
+        # 多普勒定轨面板 tap：feed_iq 碰 Qt 控件（定时器/刷新门），必须在 UI 线程
+        try:
+            dp = getattr(self, "doppler_panel", None)
+            if dp is not None and hasattr(dp, "feed_iq"):
+                dp.feed_iq(iq, sr)
+        except Exception:
+            pass
+
+        # RSSI（从 IQ 功率估计，16384 样本开销极小）
+        self._update_rssi_from_iq(iq)
+
+        # 节流：约每 10 帧（500ms）回读后端状态刷新底部状态栏 + status_panel
+        self._backend_status_tick += 1
+        if self._backend_status_tick >= 10:
+            self._backend_status_tick = 0
+            self._update_status_bar()
+            try:
+                sp = getattr(self, "status_panel", None)
+                if sp is not None and hasattr(sp, "update_from_backend"):
+                    sp.update_from_backend(self._active_sdr_backend)
+            except Exception:
+                pass
+
+    def _on_pipeline_record_iq(self, iq: np.ndarray):
+        """录制 tap：RecordTap 线程把每帧 IQ（已是独立副本）交给 UI 累积。"""
+        if self._recording and self._record_iq_buffer is not None:
+            try:
+                self._record_iq_buffer.append(iq)
+            except Exception:
+                pass
+
+    def _stop_iq_streams(self):
+        """断开时：停流水线全部线程 + 清 VfoManager 绑定 + 关声卡。"""
+        # 停流水线（reader + splitter + FFT/demod/record workers），join 回收
+        if self._pipeline is not None:
+            try:
+                self._pipeline.shutdown()
+            except Exception:
+                pass
+            self._pipeline = None
+        # 清 VfoManager 里的运行时绑定
+        if self._vfo_mgr is not None:
+            for vid in (self._main_vfo_id, self._vfo2_id):
+                if vid is not None:
+                    try:
+                        self._vfo_mgr.remove(vid)
+                    except Exception:
+                        pass
+        self._main_vfo_id = None
+        self._vfo2_id = None
+        self._vfo = None
+        self._vfo_in_sr = 0.0
+        # 关声卡
         if self._audio_player is not None:
             try:
                 self._audio_player.stop()
