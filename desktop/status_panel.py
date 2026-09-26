@@ -690,8 +690,8 @@ class StatusPanel(QWidget):
     def on_gps_updated(self, gps: dict):
         """GPS 数据更新。
 
-        三要素：来源（real/sim/none）、定位状态、数据时间戳。
-        source=="none" 或（无 fix 且非 sim）时一律显示 "--"，绝不用 0 伪装。
+        两要素：来源（real/none）、定位状态、数据时间戳。
+        source=="none" 或无 fix 时一律显示 "--"，绝不用 0 伪装。
         """
         source = gps.get("source", "real")
         fix = gps.get("fix", False)
@@ -699,7 +699,7 @@ class StatusPanel(QWidget):
         # 数据时间戳
         self._update_timestamp(self.gps_timestamp, gps.get("timestamp"))
 
-        if source == "none" or (not fix and source != "sim"):
+        if source == "none" or not fix:
             # 未连接 / 未定位：灰色，全部 "--"
             self.gps_fix.setText("未连接")
             self.gps_fix.setStyleSheet("color: #999999;")
@@ -709,20 +709,6 @@ class StatusPanel(QWidget):
             self.gps_alt.setText("--")
             self.gps_hdop.setText("--")
             self.gps_group.setTitle("GPS / 北斗")
-        elif source == "sim":
-            # 模拟模式：橙色"模拟定位"角标，坐标加 [模拟] 前缀
-            self.gps_fix.setText("模拟定位")
-            self.gps_fix.setStyleSheet("color: #C4845C;")
-            self.gps_group.setTitle("GPS / 北斗 [模拟]")
-            lat = gps.get("lat")
-            lon = gps.get("lon")
-            alt = gps.get("alt")
-            hdop = gps.get("hdop")
-            self.gps_sats.setText(str(gps.get("sats", 0)))
-            self.gps_lat.setText(f"[模拟] {lat:.6f}" if lat is not None else "--")
-            self.gps_lon.setText(f"[模拟] {lon:.6f}" if lon is not None else "--")
-            self.gps_alt.setText(f"[模拟] {alt:.1f} m" if alt is not None else "--")
-            self.gps_hdop.setText(f"[模拟] {hdop:.1f}" if hdop is not None else "--")
         else:
             # source=="real" 且 fix==True：绿色"已定位"，真实坐标
             self.gps_fix.setText("已定位")

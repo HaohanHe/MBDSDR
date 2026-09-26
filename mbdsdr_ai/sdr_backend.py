@@ -2836,17 +2836,15 @@ class SDRBackendManager:
         except Exception:
             pass  # 没有 UHD 库
 
-        # 自研 ai-sdr Mini（注册但不自动连接，用户手动连接）
-        ai_mini = AISDRMiniBackend()
-        self.backends[ai_mini.device.device_id] = ai_mini
-
-        # PlutoSDR（注册但不自动连接；无 libiio/SoapySDR 时 connect 返回 False，
-        # enumerate() 返回 []，不伪造硬件）
+        # PlutoSDR：仅当真实 enumerate() 探测到设备时才注册（libiio USB/网络）。
         try:
-            pluto = PlutoSDRBackend()
-            self.backends[pluto.device.device_id] = pluto
+            for _pd in PlutoSDRBackend.enumerate():
+                _uri = _pd.get("uri")
+                _pl = PlutoSDRBackend(uri=_uri, device_info=_pd) if _uri \
+                    else PlutoSDRBackend(device_info=_pd)
+                self.backends[_pl.device.device_id] = _pl
         except Exception as e:
-            logger.debug(f"PlutoSDRBackend 注册失败(忽略): {e}")
+            logger.debug(f"PlutoSDR 枚举失败(忽略): {e}")
 
         # 无默认后端：active_backend 保持 None，等用户显式 connect 真实设备。
 
@@ -3065,101 +3063,10 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"原生 RTL-SDR 枚举异常: {e}")
 
-    # 3) HackRF：始终列出一个条目（已知平台），量程用真实参数表。
-    #    真实打开由 connect() 决定成败——无 libhackrf/无设备时 connect 返回 False，
-    #    这里绝不伪造"已连接"。
-    #    量程来源: mbdsdr_ai/hackrf_params.py（移植自 repos/hackrf）。
-    try:
-        from .hackrf_params import HackRFParams
-        _hp = HackRFParams()
-    except Exception:
-        _hp = None
-    key = "hackrf_0"
-    if key not in merged and _hp is not None:
-        merged[key] = {
-            "driver": "hackrf",
-            "label": "HackRF One (libhackrf)",
-            "serial": "",
-            "manufacturer": "Great Scott Gadgets",
-            "product": "HackRF One",
-            "gain_range": (float(_hp.lna_min_db), float(_hp.lna_max_db)),
-            "vga_gain_range": (float(_hp.vga_min_db), float(_hp.vga_max_db)),
-            "txvga_gain_range": (float(_hp.txvga_min_db), float(_hp.txvga_max_db)),
-            "sample_rate_range": (float(_hp.min_sr_hz), float(_hp.max_sr_hz)),
-            "freq_range": (float(_hp.min_freq_hz), float(_hp.max_freq_hz)),
-            "device_args": {"index": 0},
-        }
-
-    # 3.5) bladeRF (Nuand)：始终列出一个条目，量程用真实参数表。
-    #      真实打开由 mbdsdr_ai.bladerf_params.BladeRFBackend.connect() 决定——
-    #      无 libbladeRF/无设备时 connect 返回 False，这里绝不伪造"已连接"。
-    #      量程来源: mbdsdr_ai/bladerf_params.py（移植自 repos/bladeRF）
-    #        - bladeRF 2.0 Micro (AD9361) RX 70MHz-6GHz, SR 520834-61.44MHz, BW 200k-56MHz
-    #          fpga_common/include/bladerf2_common.h:518-562
-    #        - legacy VGA 分级 (LMS6002D): RXVGA1 5-30dB(26档), RXVGA2 0-30dB(31档)
-    #          host/libraries/libbladeRF/include/bladeRF1.h:154,160,166,172
-    try:
-        from .bladerf_params import BladeRFParams as _BladeRFParams
-        _bp = _BladeRFParams()
-    except Exception:
-        _bp = None
-    key = "bladerf_0"
-    if key not in merged and _bp is not None:
-        merged[key] = {
-            "driver": "bladerf",
-            "label": "Nuand bladeRF (libbladeRF)",
-            "serial": "",
-            "manufacturer": "Nuand LLC",
-            "product": "bladeRF 2.0 Micro",
-            "gain_range": (float(_bp.rx_total_gain_min_db),
-                           float(_bp.rx_total_gain_max_db)),
-            "rxvga1_gain_range": (float(_bp.rxvga1_min_db),
-                                  float(_bp.rxvga1_max_db)),
-            "rxvga2_gain_range": (float(_bp.rxvga2_min_db),
-                                  float(_bp.rxvga2_max_db)),
-            "txvga1_gain_range": (float(_bp.txvga1_min_db),
-                                  float(_bp.txvga1_max_db)),
-            "txvga2_gain_range": (float(_bp.txvga2_min_db),
-                                  float(_bp.txvga2_max_db)),
-            "sample_rate_range": (float(_bp.min_sr_hz), float(_bp.max_sr_hz)),
-            "bandwidth_range": (float(_bp.min_bw_hz), float(_bp.max_bw_hz)),
-            "freq_range": (float(_bp.min_freq_hz), float(_bp.max_freq_hz)),
-            "device_args": {"device_identifier": ""},
-        }
-
-    # 3.6) LimeSDR (MyriadRF)：始终列出一个条目，量程用真实参数表。
-    #      真实打开由 mbdsdr_ai.limesuite_params.LimeSDRBackend.connect() 决定——
-    #      无 libLimeSuite/无设备时 connect 返回 False，这里绝不伪造"已连接"。
-    #      量程来源: mbdsdr_ai/limesuite_params.py（移植自 repos/LimeSuite）
-    #        - 频率 100k-3.8GHz (USB)  src/API/lms7_device.cpp:1384
-    #        - 采样率 100k-61.44MHz (USB) src/API/lms7_device.cpp:690
-    #        - 组合增益 0-73dB        src/lime/LimeSuite.h:382
-    #        - LNA 0-30dB(15档)       src/lms7002m/LMS7002M.cpp:789-837
-    #        - TIA 0-12dB(3档)        src/lms7002m/LMS7002M.cpp:890-914
-    try:
-        from .limesuite_params import LimeSDRParams as _LimeSDRParams
-        _lp = _LimeSDRParams()
-    except Exception:
-        _lp = None
-    key = "limesdr_0"
-    if key not in merged and _lp is not None:
-        merged[key] = {
-            "driver": "limesdr",
-            "label": "LimeSDR (libLimeSuite)",
-            "serial": "",
-            "manufacturer": "MyriadRF",
-            "product": "LimeSDR (LMS7002M)",
-            "gain_range": (float(_lp.gain_min_db), float(_lp.gain_max_db)),
-            "lna_gain_range": (float(min(_lp.lna_gain_levels_db())),
-                               float(max(_lp.lna_gain_levels_db()))),
-            "tia_gain_range": (float(min(_lp.tia_gain_levels_db())),
-                               float(max(_lp.tia_gain_levels_db()))),
-            "sample_rate_range": (float(_lp.min_sr_hz), float(_lp.max_sr_hz)),
-            "freq_range": (float(_lp.min_freq_hz), float(_lp.max_freq_hz)),
-            "device_args": {"index": 0},
-        }
-
-    # 3.7) PlutoSDR (Analog Devices ADALM-PLUTO / AD9361)：
+    # 3) HackRF / bladeRF / LimeSDR：不再无条件列出。
+    #    这些设备只有在被真实枚举到时才出现——SoapySDR 总线(步骤1)或
+    #    gr-osmosdr(步骤4)探测到即列出；无对应库/无设备时不产生任何条目。
+    # 4) PlutoSDR (Analog Devices ADALM-PLUTO / AD9361)：
     #      真实枚举由 PlutoSDRBackend.enumerate() 负责（libiio scan_contexts + 网络探测）。
     #      无 libiio/SoapySDR 或无硬件时 enumerate() 返回 []，绝不伪造设备。
     #      频率出厂 325 MHz–3.8 GHz（可解锁 70 MHz–6 GHz），覆盖 2.2 GHz LRO / 1.69 GHz GK-2A。
@@ -3188,7 +3095,7 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"PlutoSDR 枚举异常: {e}")
 
-    # 4) gr-osmosdr 通用后端枚举（rtl/hackrf/bladerf/uhd/soapy 统一设备字符串）
+    # 5) gr-osmosdr 通用后端枚举（rtl/hackrf/bladerf/uhd/soapy 统一设备字符串）
     #    来源: mbdsdr_ai/osmosdr_source.py（移植自 repos/gr-osmosdr/lib/source_impl.cc:202-269）
     #    仅补充尚未被 SoapySDR/pyrtlsdr 识别到的后端（bladerf/uhd/airspy 等）。
     #    无库/无设备时 DeviceEnumerator.enumerate() 返回 []，绝不造假。

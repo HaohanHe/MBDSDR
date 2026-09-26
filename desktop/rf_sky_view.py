@@ -379,7 +379,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         SkyInteractionHandler.__init__(self)
 
         # 数据来源状态
-        # "none" = 无观测站位置; "real" = 真实GNSS或手动配置; "sim" = 模拟
+        # "none" = 无观测站位置; "real" = 真实GNSS或手动配置
         self._data_source: str = "none"
         # 卫星轨道计算是否真正连通（TLE+sgp4 至少成功算出一颗）
         self._satellites_connected: bool = False
@@ -496,8 +496,8 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         self.update()
 
     def set_data_source(self, source: str):
-        """设置数据来源标注："none" / "real" / "sim"。"""
-        if source not in ("none", "real", "sim"):
+        """设置数据来源标注："none" / "real"。"""
+        if source not in ("none", "real"):
             source = "none"
         self._data_source = source
         self.update()
@@ -1400,7 +1400,6 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         优先级：
           1. 无观测站坐标 -> "地面站未设置"（红色警告）
           2. 有观测站但无 TLE -> "无 TLE 数据"（红色警告）
-          3. 模拟模式 -> 橙色 [模拟] 角标
         """
         painter.save()
 
@@ -1441,22 +1440,6 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             painter.restore()
             return
 
-        # 模拟模式角标
-        if self._data_source == "sim":
-            badge = "[模拟]"
-            f = QFont(self._font)
-            f.setBold(True)
-            f.setPointSize(9)
-            painter.setFont(f)
-            fm = QFontMetrics(f)
-            bw = fm.horizontalAdvance(badge) + 20
-            bh = fm.height() + 10
-            bx, by = self.width() - bw - 12, 12
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QBrush(QColor("#C4845C")))
-            painter.drawRoundedRect(QRectF(bx, by, bw, bh), 4, 4)
-            painter.setPen(QColor("#F5F3EF"))
-            painter.drawText(QRectF(bx, by, bw, bh), Qt.AlignCenter, badge)
         painter.restore()
 
     # ========================================================================

@@ -671,7 +671,7 @@ class MainWindow(QMainWindow):
         left_tab.addTab(self.adsb_map_panel, "ADS-B 航路")
 
         # 初始化天空视图演示数据
-        self._init_sky_view_demo()
+        self._init_sky_view()
 
         main_splitter.addWidget(left_tab)
 
@@ -1003,8 +1003,6 @@ class MainWindow(QMainWindow):
     # MCP 连接管理
     # ========================================================================
 
-    # 设备选择对话框中"ai-sdr Mini WebSocket"特殊条目的 data 标记
-    _WS_SPECIAL = "__ai_sdr_mini_ws__"
     # 设备选择对话框中"远程 rtl_tcp 源"特殊条目的 data 标记
     _RTL_TCP_SPECIAL = "__rtl_tcp_remote__"
 
@@ -1213,8 +1211,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("检测到的 SDR 设备："))
         combo = QComboBox()
 
-        # 保留原 ai-sdr Mini WebSocket 入口（自研板走 MCP/WebSocket）
-        combo.addItem("ai-sdr Mini (WebSocket 192.168.4.1:81)", self._WS_SPECIAL)
         # 远程 rtl_tcp 源：连局域网/公网已跑 rtl_tcp 服务的机器，复用参数区
         combo.addItem("远程 rtl_tcp 源 (host:port)", self._RTL_TCP_SPECIAL)
 
@@ -1299,7 +1295,7 @@ class MainWindow(QMainWindow):
         def _update_param_state():
             """根据当前选中项启用/置灰参数区（WebSocket/无设备时不可调）。"""
             d = combo.currentData()
-            enabled = d is not None and d != self._WS_SPECIAL
+            enabled = d is not None
             # 远程 rtl_tcp 源也支持采样率/增益/PPM 参数，参数区保持启用。
             param_group.setEnabled(enabled)
             # PPM 晶振频偏校正只对 RTL-SDR 类设备有意义（廉价棒典型 20~50ppm）；
@@ -1323,7 +1319,6 @@ class MainWindow(QMainWindow):
             prev = combo.currentData()
             combo.blockSignals(True)
             combo.clear()
-            combo.addItem("ai-sdr Mini (WebSocket 192.168.4.1:81)", self._WS_SPECIAL)
             combo.addItem("远程 rtl_tcp 源 (host:port)", self._RTL_TCP_SPECIAL)
             if new_devices:
                 for dev in new_devices:
@@ -1352,18 +1347,6 @@ class MainWindow(QMainWindow):
         chosen_ppm = int(ppm_spin.value())
         chosen_agc = bool(agc_chk.isChecked())
         chosen_offset = bool(offset_chk.isChecked())
-
-        # ai-sdr Mini WebSocket：走原 host/port 流程
-        if data == self._WS_SPECIAL:
-            host, ok = QInputDialog.getText(
-                self, "连接 ai-sdr Mini", "设备 IP 地址:", text="192.168.4.1")
-            if ok and host.strip():
-                port, ok2 = QInputDialog.getInt(
-                    self, "连接 ai-sdr Mini", "端口:",
-                    value=81, min=1, max=65535)
-                if ok2:
-                    self._connect_real(host.strip(), port)
-            return
 
         # 远程 rtl_tcp 源：问 host:port，构造 RtlTcpBackend 后走通用连接流程
         if data == self._RTL_TCP_SPECIAL:
@@ -3315,7 +3298,7 @@ class MainWindow(QMainWindow):
     # 射频天空视图
     # ========================================================================
 
-    def _init_sky_view_demo(self):
+    def _init_sky_view(self):
         """初始化天空视图：天线指向默认值 + 真实 sgp4 卫星跟踪。
 
         观测站坐标为 None（未配置/GNSS 未定位）时，SatelliteTracker 不启动计算，
