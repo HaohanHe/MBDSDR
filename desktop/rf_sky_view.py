@@ -1347,6 +1347,13 @@ class RFSkyView(QWidget, SkyInteractionHandler):
     def _draw_gnss_overlay(self, painter: QPainter):
         """GNSS 状态与图例。"""
         painter.save()
+        # 无地面站坐标时，中心区域由 _draw_data_source_overlay 的
+        # "地面站未设置"空状态独占；这里不再绘制任何 GNSS 文字/图例，
+        # 避免与居中的空状态文字重叠。
+        if self._observer is None:
+            painter.restore()
+            return
+
         if not self._gnss_connected:
             f = QFont(self._font)
             f.setPointSize(11)
@@ -1404,14 +1411,33 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         painter.save()
 
         if self._data_source == "none" or self._observer is None:
-            # 空状态：地面站未设置
+            # 空状态：地面站未设置（最高优先级，独占中心区域）
             f = QFont(self._font)
             f.setPointSize(12)
             painter.setFont(f)
+            text = "地面站未设置\n请配置经纬度或连接 GNSS"
+
+            # 先量出多行文字包围盒，在其外层包一层半透明圆角卡片，
+            # 避免文字直接浮在天空圆盘上、也便于与其它 overlay 区分。
+            fm = QFontMetrics(f)
+            tight = fm.boundingRect(text)  # 多行文字紧凑包围盒，左上角在 (0,0)
+            pad = 20.0
+            radius = 12.0
+            card_w = tight.width() + pad * 2
+            card_h = tight.height() + pad * 2
+            card_x = self.width() / 2.0 - card_w / 2.0
+            card_y = self.height() / 2.0 - card_h / 2.0
+
+            card_bg = QColor(245, 243, 239, 220) if self._sky_brightness > 0.5 \
+                else QColor(20, 28, 38, 215)
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(card_bg))
+            painter.drawRoundedRect(QRectF(card_x, card_y, card_w, card_h),
+                                    radius, radius)
+
             painter.setPen(self._colors["warning"])
-            painter.drawText(QRectF(0, 0, self.width(), self.height()),
-                             Qt.AlignCenter,
-                             "地面站未设置\n请配置经纬度或连接 GNSS")
+            painter.drawText(QRectF(card_x, card_y, card_w, card_h),
+                             Qt.AlignCenter, text)
             painter.restore()
             return
 

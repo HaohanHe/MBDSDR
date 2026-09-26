@@ -21,7 +21,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox, QLabel,
-    QDoubleSpinBox, QSlider, QFrame, QMenu,
+    QDoubleSpinBox, QSlider, QFrame, QMenu, QSplitter,
 )
 
 try:
@@ -555,7 +555,17 @@ class _PlotState:
         self.vfo_offset_hz = float(offset_hz)
 
 
-def _render_plot(painter: QPainter, state: _PlotState, w: int, h: int):
+# FFT 谱面底部预留高度（像素）：用于画频率轴刻度，避免标签被裁剪。
+_SPEC_BOTTOM_PAD = 18
+
+
+def _render_spectrum(painter: QPainter, state: _PlotState, w: int, h: int):
+    """上方 FFT 频谱曲线 widget 的完整绘制（整个 widget 即谱面）。
+
+    仅画频谱相关元素：网格 / VFO 带宽矩形 / 谱线 / 峰值 / 中心游标 /
+    悬停读数 / 固定 marker / 频率轴与 dB 轴。瀑布图由 WaterfallWidget 单独绘制。
+    无真实 IQ 数据时只画网格 + 红色“未连接 SDR”提示，不画任何假谱线。
+    """
     panel = state.panel
     gen = panel.generator
     has_data = gen.has_data()
@@ -565,19 +575,12 @@ def _render_plot(painter: QPainter, state: _PlotState, w: int, h: int):
     text = QColor(panel.color_text)
     line = QColor(panel.color_line)
 
-    # 背景
     painter.fillRect(0, 0, w, h, bg)
 
-    if state.show_waterfall:
-        spectrum_h = int(h * 0.55)
-    else:
-        spectrum_h = h
-    waterfall_h = h - spectrum_h
+    # 谱面绘图区（底部留出频率轴刻度空间）；x 方向从 0 到全宽，
+    # 与 _freq_at_x 的“x=0 ↔ 视口左缘”映射保持一致。
+    spec_rect = QRectF(0, 0, w, max(1, h - _SPEC_BOTTOM_PAD))
 
-    spec_rect = QRectF(0, 0, w, spectrum_h)
-    wf_rect = QRectF(0, spectrum_h, w, waterfall_h)
-
-    # 显示窗口中心（含 Ctrl 拖动的视图平移偏移）
     view_center = _view_center_hz(state)
     span = gen.sample_rate_hz
 
@@ -597,7 +600,7 @@ def _render_plot(painter: QPainter, state: _PlotState, w: int, h: int):
         painter.setFont(f1)
         msg1 = "未连接 SDR"
         tw1 = painter.fontMetrics().horizontalAdvance(msg1)
-        y1 = spectrum_h / 2.0 - 4
+        y1 = spec_rect.y() + spec_rect.height() / 2.0 - 4
         painter.drawText(QPointF((w - tw1) / 2.0, y1), msg1)
         f2 = QFont()
         f2.setPointSize(9)
@@ -614,14 +617,22 @@ def _render_plot(painter: QPainter, state: _PlotState, w: int, h: int):
         _draw_hover_readout(painter, state, spec_rect, text, line)
         _draw_fixed_markers(painter, state, spec_rect, line)
 
-    # 瀑布图：持久增量画布（无数据时画布为空白背景，不画假噪声）
-    if state.show_waterfall and waterfall_h > 0:
-        _draw_waterfall(painter, wf_rect, state)
-        painter.setPen(QPen(grid, 1))
-        painter.drawLine(QPointF(0, wf_rect.y()), QPointF(w, wf_rect.y()))
-
+    # 频率轴（画在谱面底部预留区）+ dB 轴
     _draw_freq_scale(painter, spec_rect, view_center, span, text)
     _draw_db_scale(painter, spec_rect, state, text)
+
+
+def _render_wf_only(painter: QPainter, state: _PlotState, w: int, h: int):
+    """下方瀑布图 widget 的完整绘制（整个 widget 即瀑布画布）。
+
+    复用持久增量画布 _draw_waterfall；无数据时画布为空白背景，不画假噪声。
+    """
+    panel = state.panel
+    bg = QColor(panel.color_bg)
+    painter.fillRect(0, 0, w, h, bg)
+    if state.show_waterfall and h > 0:
+        wf_rect = QRectF(0, 0, w, h)
+        _draw_waterfall(painter, wf_rect, state)
 
 
 def _draw_grid(painter, rect, grid):
@@ -918,23 +929,39 @@ class SpectrumPanel(QWidget):
 
         root.addLayout(self._build_toolbar())
 
-        # 选择绘图表面
-        if prefer_opengl and HAS_OPENGL:
-            self._plot = SpectrumGLPlot(self._state)
-        else:
-            self._plot = SpectrumPlot(self._state)
+        # SDR++ 风格：垂直 QSplitter 上下分屏 ——
+        #   上方 = FFT 频谱曲线（承载全部调谐 / VFO 拖拽交互）
+        #   下方 = 瀑布图（持久增量画布）
+        # 分隔条可拖拽调整两区高度；stretch 3:2，默认 300:200。
+        self._fft_plot = SpectrumCurveWidget(self._state)
+        self._wf_plot = WaterfallWidget(self._state)
+        # 向后兼容别名：main_window / 测试直接用 panel._plot.update()。
+        self._plot = self._fft_plot
+
+        self._splitter = QSplitter(Qt.Vertical)
+        self._splitter.setContentsMargins(0, 0, 0, 0)
+        self._splitter.addWidget(self._fft_plot)
+        self._splitter.addWidget(self._wf_plot)
+        self._splitter.setStretchFactor(0, 3)
+        self._splitter.setStretchFactor(1, 2)
+        self._splitter.setSizes([300, 200])
 
         # 右侧 dB Max/Min 垂直滑杆（对标 SDR++ main_window.cpp:635-656）
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(2)
-        body.addWidget(self._plot, stretch=1)
+        body.addWidget(self._splitter, stretch=1)
         body.addLayout(self._build_db_sliders())
         root.addLayout(body, stretch=1)
 
         # 初始：未连接 → 控件置灰
         self._connected = False
         self._set_controls_enabled(False)
+
+    def _redraw(self):
+        """同时重绘 FFT 曲线与瀑布图。"""
+        self._fft_plot.update()
+        self._wf_plot.update()
 
     # ------------------------------------------------------------------ 工具栏
     def _build_toolbar(self) -> QHBoxLayout:
@@ -1058,7 +1085,7 @@ class SpectrumPanel(QWidget):
             self._db_max_slider.setValue(val)
             self._db_max_slider.blockSignals(False)
         self._state.db_max = float(val)
-        self._plot.update()
+        self._redraw()
 
     def _on_db_min_changed(self, val: int):
         # SDR++ main_window.cpp:652: fftMin = min(fftMax - 10, fftMin)
@@ -1070,7 +1097,7 @@ class SpectrumPanel(QWidget):
             self._db_min_slider.setValue(val)
             self._db_min_slider.blockSignals(False)
         self._state.db_min = float(val)
-        self._plot.update()
+        self._redraw()
 
     def _set_controls_enabled(self, on: bool):
         for w_ in (self._win_combo, self._fft_combo, self._avg_combo,
@@ -1118,7 +1145,7 @@ class SpectrumPanel(QWidget):
         self._state._wf_cw = -1
         self._state._wf_ch = -1
         self._state._wf_consumed = 0
-        self._plot.update()
+        self._redraw()
 
     def _on_wf_smooth_toggled(self, on: bool):
         self._state.wf_smooth = bool(on)
@@ -1161,12 +1188,12 @@ class SpectrumPanel(QWidget):
         可见，超出 span 的频点不绘制（_draw_fixed_markers 自然裁剪）。
         """
         self._state.markers = [float(f) for f in (freqs_hz or [])]
-        self._plot.update()
+        self._redraw()
 
     def clear_markers(self):
         """清空所有固定 marker。"""
         self._state.markers.clear()
-        self._plot.update()
+        self._redraw()
 
     @Slot(float)
     def set_center_freq(self, freq_mhz: float):
@@ -1176,16 +1203,22 @@ class SpectrumPanel(QWidget):
 
     def set_span(self, span_mhz: float):
         """兼容：缩放窗口（span 实际由采样率决定，这里仅触发重绘）。"""
-        self._plot.update()
+        self._redraw()
 
     def toggle_waterfall(self):
         self._state.show_waterfall = not self._state.show_waterfall
-        self._plot.update()
+        # 瀑布关闭时隐藏下方分屏，FFT 曲线自动占满整个 splitter 高度。
+        self._wf_plot.setVisible(self._state.show_waterfall)
+        self._redraw()
+
+    def set_snap_interval(self, hz: float):
+        """主窗口设置滚轮 / 键盘调谐步进网格（Hz），转发给 _PlotState。"""
+        self._state.set_snap_interval(hz)
 
     def set_vfo_bandwidth(self, bw_hz: Optional[float]):
         """主窗口设置 VFO 带宽（Hz）；转发给 _PlotState。传 None 关闭 VFO 矩形。"""
         self._state.set_vfo_bandwidth(bw_hz)
-        self._plot.update()
+        self._redraw()
 
     def set_theme_colors(self, bg, grid, text, line, marker, spectrum_colors):
         """兼容 main_window 主题；峰色/离线色固定为默认低饱和。"""
@@ -1193,7 +1226,7 @@ class SpectrumPanel(QWidget):
         self.color_grid = QColor(grid)
         self.color_text = QColor(text)
         self.color_line = QColor(line)
-        self._plot.update()
+        self._redraw()
 
     # ------------------------------------------------------------------ 状态读数
     def _refresh_status_labels(self):
@@ -1204,7 +1237,7 @@ class SpectrumPanel(QWidget):
         else:
             self._freq_label.setText("--")
             self._span_label.setText("--")
-        self._plot.update()
+        self._redraw()
 
     # ------------------------------------------------------------------ 交互转发
     def on_plot_freq_changed(self, freq_mhz: float):
@@ -1252,7 +1285,7 @@ class _TuningPlotMixin:
         return event.position().x() / max(1, self.width())
 
     def _spectrum_height(self) -> int:
-        """谱图区高度像素（与 _render_plot 一致：开瀑布时 55%）。"""
+        """谱图区高度像素。默认按 55% 估；SpectrumCurveWidget 已重写为整块高度。"""
         h = self.height()
         return int(h * 0.55) if self.state.show_waterfall else h
 
@@ -1266,14 +1299,14 @@ class _TuningPlotMixin:
     def _hit_vfo_at(self, x_px: float):
         """命中检测：返回 (vfo, region)，region ∈ {'body','left','right'}。
 
-        从后往前遍历（后画的 VFO 在上层，重叠时优先命中）。边缘命中容差 6px。
+        从后往前遍历（后画的 VFO 在上层，重叠时优先命中）。边缘命中容差 5px。
         未命中返回 (None, None)。
         """
         mgr = self.state.panel.vfo_manager
         if mgr is None or not self.state.panel.generator.has_data():
             return None, None
         rect = QRectF(0, 0, self.width(), self._spectrum_height())
-        edge = 6.0
+        edge = 5.0
         for vfo in reversed(mgr.list_all()):
             if not vfo.active or vfo.bw_hz <= 0:
                 continue
@@ -1326,6 +1359,22 @@ class _TuningPlotMixin:
             gen.center_freq_hz = new_view_center - self.state.view_offset_hz
             self._emit_tuned(gen.center_freq_hz)
         else:
+            # 光标悬停在某个 VFO 的左右边沿上 → 滚轮改带宽（而非调谐中心）。
+            # 命中 body / 未命中 VFO 时退回普通步进调谐。
+            vfo, edge_region = self._hit_vfo_at(event.position().x())
+            if edge_region in ('left', 'right') and vfo is not None:
+                wheel = 1 if dy > 0 else -1     # 上滚=扩带宽，下滚=收带宽
+                bw_step = self.state.snap_interval
+                if mods & Qt.ShiftModifier:
+                    bw_step *= 10.0
+                elif mods & Qt.AltModifier:
+                    bw_step *= 0.1
+                new_bw = max(100.0, float(vfo.bw_hz) + bw_step * wheel)
+                vfo.bw_hz = new_bw
+                self.state.panel.vfo_bw_changed.emit(vfo.vfo_id, float(vfo.bw_hz))
+                self.update()
+                return
+
             wheel = 1 if dy > 0 else -1     # 上滚=加频，下滚=减频
             interval = self.state.snap_interval
             if mods & Qt.ShiftModifier:
@@ -1477,15 +1526,16 @@ class _TuningPlotMixin:
             vfo = self._vfo_drag_vfo
             if vfo is None:
                 return
-            # 拖拽时硬件中心频率随光标平移（保持 VFO 在视口内可见）
-            shift = -(x - self._vfo_press_x) / max(1, self.width()) * gen.sample_rate_hz
-            gen.center_freq_hz = self._vfo_press_gen_center + shift
-
             if self._vfo_drag_mode == 'move':
+                # 移动 VFO：硬件中心随光标平移（保持 VFO 在视口内可见）
+                shift = -(x - self._vfo_press_x) / max(1, self.width()) * gen.sample_rate_hz
+                gen.center_freq_hz = self._vfo_press_gen_center + shift
                 vfo.center_hz = self._vfo_press_vfo_center + shift
                 self.state.panel.vfo_moved.emit(vfo.vfo_id, float(vfo.center_hz))
             else:
-                # 缩放：对应边缘跟随光标频率，中心与带宽重算
+                # 缩放：视图保持不动，边沿直接落在光标所在绝对频率上。
+                # （不能像 move 那样平移 gen.center，否则 _freq_at_x 的视图平移
+                # 会把光标频率抵消回按下时的边沿，导致带宽纹丝不动。）
                 cur_edge = self._freq_at_x(x)
                 if self._vfo_drag_mode == 'resize_l':
                     left, right = cur_edge, self._vfo_press_right
@@ -1501,17 +1551,26 @@ class _TuningPlotMixin:
             return
 
         # 悬停（未按键）：更新 VfoManager 三态焦点 active_context（临时悬停语义）
+        # 并按命中区域切换鼠标光标：边沿 → SizeHorCursor（提示可拖改带宽）。
         mgr = self.state.panel.vfo_manager
         if mgr is not None and not self._is_panning:
             y = event.position().y()
             if y <= self._spectrum_height():
-                vfo, _reg = self._hit_vfo_at(event.position().x())
+                vfo, reg = self._hit_vfo_at(event.position().x())
                 if vfo is not None:
                     mgr.set_active_context(vfo, temporary=True)
+                    if reg in ('left', 'right'):
+                        self.setCursor(Qt.SizeHorCursor)
+                    else:
+                        self.unsetCursor()
                 else:
                     mgr.clear_active_context()
+                    self.unsetCursor()
             else:
                 mgr.clear_active_context()
+                self.unsetCursor()
+        else:
+            self.unsetCursor()
 
         if self._is_panning:
             dx = event.position().x() - self._press_anchor_x
@@ -1556,16 +1615,22 @@ class _TuningPlotMixin:
 
             # VFO 移动/缩放结束：对齐网格并 emit 最终值
             if self._vfo_drag_mode is not None:
+                was_resize = self._vfo_drag_mode in ('resize_l', 'resize_r')
                 self._vfo_drag_mode = None
                 vfo = self._vfo_drag_vfo
                 self._vfo_drag_vfo = None
                 gen = self.state.panel.generator
                 snapped = self._snap_center()
                 if vfo is not None:
-                    # 移动后 VFO 中心跟随对齐后的硬件中心
-                    vfo.center_hz = snapped
-                    self.state.panel.vfo_moved.emit(vfo.vfo_id, float(vfo.center_hz))
-                    self.state.panel.vfo_bw_changed.emit(vfo.vfo_id, float(vfo.bw_hz))
+                    if was_resize:
+                        # 缩放结束：边沿/中心已在拖拽中按 left/right 重算，
+                        # 保持用户摆放的位置，只补发最终带宽信号。
+                        self.state.panel.vfo_bw_changed.emit(vfo.vfo_id, float(vfo.bw_hz))
+                    else:
+                        # 移动后 VFO 中心跟随对齐后的硬件中心
+                        vfo.center_hz = snapped
+                        self.state.panel.vfo_moved.emit(vfo.vfo_id, float(vfo.center_hz))
+                        self.state.panel.vfo_bw_changed.emit(vfo.vfo_id, float(vfo.bw_hz))
                 self._emit_tuned(snapped)
                 self.update()
                 return
@@ -1615,10 +1680,12 @@ class _TuningPlotMixin:
 
 
 # ============================================================================
-# 绘图表面：QPainter 软件渲染
+# 绘图表面：上方 FFT 频谱曲线 widget（承载全部调谐 / VFO 拖拽交互）
 # ============================================================================
 
-class SpectrumPlot(_TuningPlotMixin, QWidget):
+class SpectrumCurveWidget(_TuningPlotMixin, QWidget):
+    """上方 FFT 频谱曲线。整个 widget 即谱面，鼠标 / 滚轮 / 键盘交互全在此。"""
+
     def __init__(self, state: _PlotState, parent=None):
         super().__init__(parent)
         self.state = state
@@ -1627,37 +1694,42 @@ class SpectrumPlot(_TuningPlotMixin, QWidget):
         self._timer.timeout.connect(self.update)
         self._timer.start(50)
 
+    def _spectrum_height(self) -> int:
+        # 瀑布已拆到下方独立 widget，本 widget 整块都是谱面。
+        return self.height()
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        _render_plot(p, self.state, self.width(), self.height())
+        _render_spectrum(p, self.state, self.width(), self.height())
         p.end()
 
 
 # ============================================================================
-# 绘图表面：OpenGL（保留路径；内部仍用 QPainter 绘制以保证兼容）
+# 绘图表面：下方瀑布图 widget（仅持久增量画布，不承载调谐交互）
 # ============================================================================
 
-if HAS_OPENGL:
-    class SpectrumGLPlot(_TuningPlotMixin, QOpenGLWidget):
-        def __init__(self, state: _PlotState, parent=None):
-            super().__init__(parent)
-            self.state = state
-            self._tuning_common_init()
-            self._timer = QTimer(self)
-            self._timer.timeout.connect(self.update)
-            self._timer.start(50)
+class WaterfallWidget(QWidget):
+    """下方瀑布图。只读显示；调谐 / VFO 交互由上方 SpectrumCurveWidget 负责。"""
 
-        def initializeGL(self):
-            self.gl = self.context().functions()
-            self.gl.glClearColor(1.0, 1.0, 1.0, 1.0)
+    def __init__(self, state: _PlotState, parent=None):
+        super().__init__(parent)
+        self.state = state
+        self.setMinimumHeight(80)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.update)
+        self._timer.start(100)
 
-        def paintGL(self):
-            p = QPainter(self)
-            p.setRenderHint(QPainter.Antialiasing, True)
-            _render_plot(p, self.state, self.width(), self.height())
-            p.end()
-        # 滚轮/键盘/鼠标调谐交互全部继承自 _TuningPlotMixin，与 SpectrumPlot 一致。
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        _render_wf_only(p, self.state, self.width(), self.height())
+        p.end()
+
+
+# 向后兼容别名：旧代码若直接引用 SpectrumPlot / SpectrumGLPlot 仍可用。
+SpectrumPlot = SpectrumCurveWidget
+SpectrumGLPlot = SpectrumCurveWidget
 
 
 # ============================================================================
