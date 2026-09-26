@@ -106,6 +106,8 @@ class ControlPanel(QWidget):
     agc_changed = Signal(bool)                 # AGC 自动增益开关
     ppm_changed = Signal(int)                  # PPM 频偏校正
     offset_tuning_changed = Signal(bool)       # Offset 调谐开关
+    dc_removal_changed = Signal(bool)          # DC 偏移去除开关（默认开）
+    iq_balance_changed = Signal(bool)          # I/Q 不平衡校正开关（默认开）
     bookmark_added = Signal(float, str, str)   # 收藏新增 (freq_hz, name, mode)，供主窗口持久化
 
     # 采样率档位：与 RTLSDRBackend.SAMPLE_RATES 对齐（11 档离散表）。
@@ -159,6 +161,8 @@ class ControlPanel(QWidget):
             getattr(self, "agc_check", None),
             getattr(self, "ppm_spin", None),
             getattr(self, "offset_check", None),
+            getattr(self, "dc_removal_check", None),
+            getattr(self, "iq_balance_check", None),
             getattr(self, "bookmark_add_btn", None),
             # 增益 / 静噪滑杆：无设备时禁用，不暴露假可控状态
             getattr(self, "gain_slider", None),
@@ -395,6 +399,18 @@ class ControlPanel(QWidget):
         self.offset_check = QCheckBox("Offset 调谐")
         self.offset_check.toggled.connect(self._on_offset_tuning_changed)
         rx_layout.addWidget(self.offset_check)
+
+        # IQ 前端校正：DC 去除 + I/Q 平衡（默认开，对标 SDR++/GQRX 前端校正）
+        iq_cal_row = QHBoxLayout()
+        self.dc_removal_check = QCheckBox("DC 去除")
+        self.dc_removal_check.setChecked(True)
+        self.dc_removal_check.toggled.connect(self._on_dc_removal_changed)
+        iq_cal_row.addWidget(self.dc_removal_check)
+        self.iq_balance_check = QCheckBox("IQ 平衡")
+        self.iq_balance_check.setChecked(True)
+        self.iq_balance_check.toggled.connect(self._on_iq_balance_changed)
+        iq_cal_row.addWidget(self.iq_balance_check)
+        rx_layout.addLayout(iq_cal_row)
 
         sq_row = QHBoxLayout()
         self.squelch_label = QLabel("静噪")
@@ -652,6 +668,16 @@ class ControlPanel(QWidget):
     def _on_offset_tuning_changed(self, checked: bool):
         self.offset_tuning_changed.emit(checked)
 
+    @Slot(bool)
+    def _on_dc_removal_changed(self, checked: bool):
+        """DC 偏移去除开关 → emit dc_removal_changed(bool)。"""
+        self.dc_removal_changed.emit(checked)
+
+    @Slot(bool)
+    def _on_iq_balance_changed(self, checked: bool):
+        """I/Q 不平衡校正开关 → emit iq_balance_changed(bool)。"""
+        self.iq_balance_changed.emit(checked)
+
     # ---- 收藏 ----
     def _refresh_bookmarks(self):
         self.bookmark_combo.blockSignals(True)
@@ -737,6 +763,14 @@ class ControlPanel(QWidget):
         self.mode_combo.blockSignals(False)
         self._freq_hz = freq * 1e3
         self._update_freq_display()
+
+    def get_dc_removal_enabled(self) -> bool:
+        """返回 DC 偏移去除开关当前状态（默认开）。"""
+        return bool(self.dc_removal_check.isChecked())
+
+    def get_iq_balance_enabled(self) -> bool:
+        """返回 I/Q 不平衡校正开关当前状态（默认开）。"""
+        return bool(self.iq_balance_check.isChecked())
 
     def update_signal_level(self, dbfs):
         """由主窗口从 IQ 功率估计后调用，更新 S-meter。真实数据驱动，绝不造假。
