@@ -976,6 +976,8 @@ class MainWindow(QMainWindow):
 
     # 设备选择对话框中"ai-sdr Mini WebSocket"特殊条目的 data 标记
     _WS_SPECIAL = "__ai_sdr_mini_ws__"
+    # 设备选择对话框中"远程 rtl_tcp 源"特殊条目的 data 标记
+    _RTL_TCP_SPECIAL = "__rtl_tcp_remote__"
 
     # ------------------------------------------------------------------
     # 启动自动选源：枚举到 RTL 就默认选中连接，无需用户手选。
@@ -1184,6 +1186,8 @@ class MainWindow(QMainWindow):
 
         # 保留原 ai-sdr Mini WebSocket 入口（自研板走 MCP/WebSocket）
         combo.addItem("ai-sdr Mini (WebSocket 192.168.4.1:81)", self._WS_SPECIAL)
+        # 远程 rtl_tcp 源：连局域网/公网已跑 rtl_tcp 服务的机器，复用参数区
+        combo.addItem("远程 rtl_tcp 源 (host:port)", self._RTL_TCP_SPECIAL)
 
         def _dev_label(dev):
             """设备下拉框显示名：在枚举 label 后追加来源/驱动标签，
@@ -1267,11 +1271,15 @@ class MainWindow(QMainWindow):
             """根据当前选中项启用/置灰参数区（WebSocket/无设备时不可调）。"""
             d = combo.currentData()
             enabled = d is not None and d != self._WS_SPECIAL
+            # 远程 rtl_tcp 源也支持采样率/增益/PPM 参数，参数区保持启用。
             param_group.setEnabled(enabled)
             # PPM 晶振频偏校正只对 RTL-SDR 类设备有意义（廉价棒典型 20~50ppm）；
             # HackRF/Pluto/Airspy/USRP 等 Soapy 前端无 ppm 概念，置灰该输入。
-            is_rtl = bool(enabled) and isinstance(d, dict) \
-                and (d.get("driver") or "").lower() == "rtlsdr"
+            # 远程 rtl_tcp 源后端本质也是 RTL-SDR 棒，PPM 同样有效，一并启用。
+            is_rtl = bool(enabled) and (
+                (isinstance(d, dict) and (d.get("driver") or "").lower() == "rtlsdr")
+                or d == self._RTL_TCP_SPECIAL
+            )
             ppm_spin.setEnabled(is_rtl)
 
         combo.currentIndexChanged.connect(lambda _i: _update_param_state())
@@ -1287,6 +1295,7 @@ class MainWindow(QMainWindow):
             combo.blockSignals(True)
             combo.clear()
             combo.addItem("ai-sdr Mini (WebSocket 192.168.4.1:81)", self._WS_SPECIAL)
+            combo.addItem("远程 rtl_tcp 源 (host:port)", self._RTL_TCP_SPECIAL)
             if new_devices:
                 for dev in new_devices:
                     combo.addItem(_dev_label(dev), dev)
@@ -1327,6 +1336,44 @@ class MainWindow(QMainWindow):
                     self._connect_real(host.strip(), port)
             return
 
+        # 远程 rtl_tcp 源：问 host:port，构造 RtlTcpBackend 后走通用连接流程
+        if data == self._RTL_TCP_SPECIAL:
+            host_port, ok = QInputDialog.getText(
+                self, "连接远程 rtl_tcp 源",
+                "请输入 host:port（默认端口 1234）:",
+                text="127.0.0.1:1234")
+            if not ok or not host_port.strip():
+                return
+            host, port = self._parse_host_port(host_port.strip(), default_port=1234)
+            if host is None:
+                QMessageBox.critical(
+                    self, "连接失败",
+                    f"无法解析地址「{host_port.strip()}」，格式应为 host:port"
+                    "（如 192.168.1.100:1234）")
+                return
+            try:
+                from mbdsdr_ai.rtltcp_client import RtlTcpBackend
+            except ImportError:
+                QMessageBox.critical(
+                    self, "连接失败",
+                    "rtl_tcp 客户端模块未就绪（mbdsdr_ai.rtltcp_client 导入失败）")
+                return
+            backend = RtlTcpBackend(host, port, ppm=chosen_ppm)
+            ok = self._connect_backend(
+                backend,
+                sample_rate=chosen_sr,
+                gain=chosen_gain,
+                ppm=chosen_ppm,
+                agc=chosen_agc,
+                offset_tuning=chosen_offset,
+            )
+            if not ok:
+                QMessageBox.warning(
+                    self, "连接失败",
+                    f"无法连接远程 rtl_tcp 源 {host}:{port}\n"
+                    "请检查地址/端口、网络连通性，以及远端 rtl_tcp 服务是否在运行。")
+            return
+
         # 真实 SDR 设备：构造后端并走通用连接流程（_connect_backend，
         # 与启动自动选源共用同一段 connect + 下发参数 + 启动 IQ 流逻辑）。
         backend = build_backend_for_device(data)
@@ -1352,6 +1399,43 @@ class MainWindow(QMainWindow):
                 "常见原因：USB 棒未插 / 驱动未装（Zadig WinUSB）/ 被其他软件占用。")
 
     @staticmethod
+    def _parse_host_port(s: str, default_port: int = 1234):
+        """解析 'host:port' 字符串，返回 (host, port)；解析失败返回 (None, None)。
+        支持 IPv6 [::1]:1234 格式。"""
+        s = s.strip()
+        if not s:
+            return None, None
+        # IPv6 带方括号
+        if s.startswith("["):
+            end = s.find("]")
+            if end < 0:
+                return None, None
+            host = s[1:end]
+            rest = s[end + 1:]
+            if rest.startswith(":"):
+                try:
+                    port = int(rest[1:])
+                except ValueError:
+                    return None, None
+            else:
+                port = default_port
+            return host, port
+        # 普通 host:port（rsplit 一次，兼容 host 不含端口时默认端口）
+        if ":" in s:
+            parts = s.rsplit(":", 1)
+            host = parts[0]
+            try:
+                port = int(parts[1])
+            except ValueError:
+                return None, None
+        else:
+            host = s
+            port = default_port
+        if not host or port < 1 or port > 65535:
+            return None, None
+        return host, port
+
+    @staticmethod
     def _humanize_error(raw_err: str) -> str:
         """把后端原始错误信息翻译成用户可理解的人话提示。
 
@@ -1364,6 +1448,13 @@ class MainWindow(QMainWindow):
         # Python 库缺失（pyrtlsdr 未安装）
         if any(k in low for k in ("no module named", "importerror", "no module")):
             return "未安装 Python 库：pip install pyrtlsdr"
+        # 网络连接失败（远程 rtl_tcp 源连不上）。
+        # 注意必须排在"设备被占用"分支之前：socket 错误常带 "[Errno 111] Connection refused"，
+        # 里面的 "errno" 会被占用分支的裸词误命中。
+        if any(k in low for k in ("connection refused", "timeout", "timed out",
+                                  "network", "unreachable", "连接失败", "refused")):
+            return ("无法连接远程 rtl_tcp 源：请检查 host:port 是否正确、"
+                    "网络是否连通、远端 rtl_tcp 服务是否在运行（默认端口 1234）。")
         # 权限不足（udev 规则 / 需要 root / WinUSB 驱动）
         if any(k in low for k in ("permission", "access denied", "errno 13",
                                   "uid", "root", "权限")):
