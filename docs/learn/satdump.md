@@ -183,3 +183,171 @@ SatDump `plugins/analog_support/noaa_apt/module_noaa_apt_decoder.cpp` 印证了
 ```bash
 pytest tests/satdump_test.py -v
 ```
+
+---
+
+# 追加：卫星追踪 / 过境预测 / APT 解调管道（mbdsdr_ai/satellite/ 移植对照）
+
+> 本节对应任务「深学 SatDump 源码，移植到 mbdsdr_ai/satellite/」。
+> 上游镜像：`repos/SatDump/`（已存在，无需 clone）。
+> 注意：上游任务书里写的 `src-core/satellite/sat_tracker.cpp` 在当前 SatDump 已重构到
+> `src-core/common/tracking/` 与 `src-core/libs/predict/`（libpredict 打包），下文按真实路径标注。
+
+## 8. 卫星追踪（SGP4 传播 + 站心观测）
+
+### 8.1 类结构 `SatelliteTracker`
+来源：`src-core/common/tracking/tracking.h:10-46`
+
+```cpp
+class SatelliteTracker {
+  predict_orbital_elements_t *satellite_object;   // :13
+  predict_position satellite_orbit;                // :14
+  LinearInterpolator *interp_x/y/z, *interp_vx/vy/vz; // :16-21 备用：JSON 星历插值
+public:
+  SatelliteTracker(TLE tle);                      // :24  from TLE
+  geodetic::geodetic_coords_t get_sat_position_at(double utc_time);  // :28
+  predict_observation get_observed_position(double utc, gs_lat, gs_lon, gs_alt); // :32-45
+};
+```
+
+### 8.2 TLE 解析与传播
+来源：`src-core/common/tracking/tracking.cpp:10-13`
+- 构造：`predict_parse_tle(line1, line2)` → `predict_orbital_elements_t*`。
+- 传播：`predict_orbit(sat, &orbit, predict_to_julian_double(utc))`（:64, :85），
+  内部走 `libs/predict/sgp4.c / sdp4.c`（NORAD SGP4/SDP4 标准）。
+- ECI→经纬高：`Calculate_LatLonAlt(time, pos, &out)`（:73）。
+
+### 8.3 站心观测（仰角/方位/距离）
+来源：`tracking.h:32-45`
+```cpp
+observer = predict_create_observer("Main", gs_lat*DEG_TO_RAD, gs_lon*DEG_TO_RAD, gs_alt);
+predict_orbit(sat, &orbit, jd);
+predict_observe_orbit(observer, &orbit, &observation_pos);  // observation_pos.elevation / .azimuth (rad)
+```
+**移植到 MBDSDR**：复用 `mbdsdr_ai/orbit.py::_state_from_satrec()`——它已用
+sgp4 库做 TEME→ECEF(GMST)→ENU 变换，输出 elevation/azimuth/range_km/range_rate_kms，
+与 libpredict 数学等价（orbit.py:120-174 已与 gpredict 交叉验证 <0.02°）。
+
+## 9. 过境预测（AOS/LOS）
+
+### 9.1 数据结构
+来源：`src-core/common/tracking/scheduler/passes.h:8-14`
+```cpp
+struct SatellitePass { int norad; double aos_time, los_time; float max_elevation; };
+```
+
+### 9.2 核心算法（LEO）
+来源：`passes.cpp:9-106`
+1. :12 建 observer；:13 按 norad 从 kepler DB 取 TLE；:20 解析。
+2. :23 `predict_is_geosynchronous()` — GEO 单独处理（若可见则整段算一个过境）。
+3. :42-79 LEO 主循环：
+   - :45 `next_los = predict_next_los(obs, sat, jd)` — 找下一个 LOS；
+   - :50-54 从该 LOS 往前每 10s 回退调用 `predict_next_aos()`，直到 AOS 时间早于 LOS；
+   - :62-69 在 [AOS, LOS] 之间分 50 段采样，记录 `max_el`；
+   - :78 `current_time = next_los + 1` 继续下一圈。
+4. :108-117 `filterPassesByElevation` — 按 max_el 阈值过滤。
+
+**移植到 MBDSDR**：`orbit.py:285-400 predict_passes()` 已用「60s 粗扫定位跨越 →
+二分法收敛到 0.25s（`_bisect_threshold` orbit.py:254-282）→ 2s 细采样找 max_el」
+等价实现，且额外输出 rise/set azimuth、持续时长、多普勒 min/max。
+本次 `mbdsdr_ai/satellite/tracker.py` 在此基础上封装成 `SatelliteTracker` / `PassPredictor`
+两个类，输出任务书要求的 `{aos, los, max_el, max_el_t, doppler_at_aos}`。
+
+## 10. NOAA APT 解调/解码管道
+
+### 10.1 解调（IQ WAV → APT 音频）
+来源：`plugins/analog_support/noaa_apt/module_noaa_apt_demod.cpp`
+- :36 重采样到符号率；:43 `QuadratureDemodBlock`（正交 FM 鉴频），
+  增益 `hz_to_rad(d_symbolrate/2, d_symbolrate)`。
+- :112 输出 int16 WAV（采样率 = APT 符号率 ~4160Hz 或音频采样率）。
+
+### 10.2 解码（音频 → 16-bit 图像）
+来源：`plugins/analog_support/noaa_apt/module_noaa_apt_decoder.cpp` + `.h`
+
+常量（`.h:14-15`）：
+| 常量 | 值 | 含义 |
+|---|---|---|
+| `APT_IMG_WIDTH` | 2080 | 每行像素数（A+B 两通道） |
+| `APT_IMG_OVERS` | 4 | 过采样（4 样本/像素） |
+
+接收链（`.cpp:205-214`）：
+```
+int16 WAV → RealToComplex → FreqShift(-2400 Hz)   // :206 把副载波搬到零频
+         → RationalResampler → 2080*2*4 = 16640 sps // :208
+         → FIR low_pass(1040 Hz)                   // :213 抗混叠
+         → ComplexToMag                            // :214 取包络 = 视频
+```
+- :234 视频幅度 `v = (v*2)*65535` → 16-bit 灰度。
+
+行同步（`.cpp:1013-1048 synchronize()`）：
+- :1015 同步字 `sync_a[39] = {0,0,0,255,255,0,0,255,255,0,0,...,0}`（39 样本 0/255）；
+- :1018-1020 按 OVERS=4 上采样到 156 样本模板；
+- :1025-1045 每行在 2080*4 个位置做滑动绝对差互相关，取最小差位置为行首，
+  每 4 样本抽 1 还原 2080 像素/行。
+
+通道切分（`.cpp:311-315, :802-803`）：
+| 段 | 像素区间（2080 宽） |
+|---|---|
+| 通道 A 图像 | 86 .. 86+909 |
+| 通道 B 图像 | 1126 .. 1126+909 |
+| 遥测楔 1 | 997 .. 997+41 |
+| 遥测楔 2 | 2037 .. 2037+41 |
+| 空格 A | 42 .. 42+43 |
+| 空格 B | 1081 .. 1081+43 |
+
+卫星自动识别（`.cpp:115-153`）：
+| 下行频率 | 卫星 | NORAD |
+|---|---|---|
+| 137.1000 MHz | NOAA-19 | 33591 |
+| 137.9125 MHz | NOAA-18 | 28654 |
+| 137.6200 MHz | NOAA-15 | 25338 |
+（:752-766 NORAD 映射）
+
+行时间戳（`.cpp:969-973`）：每行 `start_tt + line*0.5`（2 行/秒，行率 0.5s/行）。
+
+**移植到 MBDSDR**：`mbdsdr_ai/noaa_apt_lite.py` 已逐常量对照 noaa-apt(Rust) 实现了
+完整合成/解调/同步/切通道；本次 `mbdsdr_ai/satellite/decoders.py` 提供更薄的
+`NOAAAPTDecoder` 类封装（WAV/原始 IQ 入 → PNG 出），常量与 SatDump 上表完全一致。
+
+## 11. 产品生成（ImageProduct）
+
+来源：`src-core/products/image_product.h:42-115`
+```cpp
+class ImageProduct : public Product {
+  struct ImageHolder {           // :71-83
+    int abs_index;               //   绝对通道号（-1 不校准）
+    std::string channel_name;    //   "AVHRR-1" ...
+    image::Image image;          //   像素矩阵
+    int bit_depth = 16;
+    double wavenumber = -1;      //   波数（红外通道）
+    channel_polarization_t polarization;
+    std::string calibration_type;
+  };
+  std::vector<ImageHolder> images;   // :85
+  void set_proj_cfg_tle_timestamps(json cfg, TLE tle, vector<double> timestamps); // :110
+};
+```
+**移植到 MBDSDR**：`mbdsdr_ai/satellite/products.py::ImageProduct` 用 numpy 数组 +
+dataclass 镜像该结构，提供 `channels` 字典、`set_projection()`、`compose_rgb()`
+假彩色合成、`save_png()`。
+
+## 12. 移植清单（本次新增，不改现有文件）
+
+| 新文件 | 作用 |
+|---|---|
+| `mbdsdr_ai/satellite/__init__.py` | 包入口，导出 SatelliteTracker/PassPredictor/NOAAAPTDecoder/ImageProduct |
+| `mbdsdr_ai/satellite/tracker.py` | SGP4 传播、AOS/LOS 预测、实时多普勒（复用 orbit.py） |
+| `mbdsdr_ai/satellite/decoders.py` | NOAA APT：同步字检测、行重组、A/B 通道分离、PNG 输出 |
+| `mbdsdr_ai/satellite/products.py` | ImageProduct：通道数据/地理元数据/假彩色合成/PNG |
+| `tests/test_satellite_tracker.py` | SGP4 位置对照、AOS/LOS、多普勒 |
+| `tests/test_apt_decoder.py` | 合成 APT 信号 → 解码出正确通道图像 |
+| `tests/test_products.py` | 图像产品、通道合成 |
+
+## 13. 增强（任务书「我们的增强」）
+
+- `decoders.auto_detect_decoder(freq_hz)`：按下行频率识别 NOAA-15/18/19 → 选 APT 解码器
+  （对照 SatDump `.cpp:115-153`），MetOp/FY 留接口；
+- `tracker.SatelliteTracker.next_pass_countdown()`：下一次过境倒计时；
+- `tracker.doppler_correction()`：实时 `f_rx = f_carrier*(1 - v_los/c)`（orbit.py:205-229）；
+- `products.ImageProduct.estimate_geocorrection_offset()`：AI 估计图像行偏移占位接口；
+- 与 rf_sky_view 联动：选中卫星 → `tuner_freq = f_down + doppler`（见 tracker.to_rf_command()）。
