@@ -282,8 +282,22 @@ class MainWindow(QMainWindow):
         self._replay_resume_poll: bool = False
 
         # ---- 产品体验集成：状态栏信息密度 / 无设备引导 / 书签 ----
-        # 书签内存表（freq_hz, name, mode）；落盘留给后续 gui_config 扩展
+        # 书签内存表（freq_hz, name, mode）；持久化走 FrequencyManager（见下方）
         self._bookmarks: list = []
+        # IQ 前端校正链（DC 去除 / IQ 平衡 / 抗混叠抽取）。
+        # 懒加载：后端不可用时置 None，所有调用点 try/except 守卫，绝不崩。
+        try:
+            from mbdsdr_ai.iq_frontend import IQFrontend
+            self._iq_frontend = IQFrontend(dc_removal=True, iq_balance=True,
+                                           decimation=1)
+        except Exception:
+            self._iq_frontend = None
+        # 频率管理器：内置标准频率库 + 用户自定义书签持久化到 ~/.mbdsdr/bookmarks.json
+        try:
+            from mbdsdr_ai.frequency_manager import FrequencyManager
+            self._freq_mgr = FrequencyManager()
+        except Exception:
+            self._freq_mgr = None
         # status_panel.update_from_backend 节流计数（每 ~10 帧 ≈ 500ms 刷一次）
         self._backend_status_tick: int = 0
         # 最近一次 IQ 功率估计（dBFS），供状态栏/S-meter 复用
@@ -691,6 +705,21 @@ class MainWindow(QMainWindow):
             self.control_panel.step_changed.connect(self._on_step_changed)
         if hasattr(self.control_panel, "bookmark_added"):
             self.control_panel.bookmark_added.connect(self._on_bookmark_added)
+        if hasattr(self.control_panel, "dc_removal_changed"):
+            self.control_panel.dc_removal_changed.connect(
+                self._on_dc_removal_changed)
+        if hasattr(self.control_panel, "iq_balance_changed"):
+            self.control_panel.iq_balance_changed.connect(
+                self._on_iq_balance_changed)
+        # 从 FrequencyManager 加载书签（内置标准频率库 + 用户自定义持久化书签）
+        try:
+            if self._freq_mgr is not None and hasattr(
+                    self.control_panel, "load_bookmarks_from_list"):
+                bm_list = [(b.freq_hz, b.name, b.mode)
+                           for b in self._freq_mgr.list() if b.freq_hz > 0]
+                self.control_panel.load_bookmarks_from_list(bm_list)
+        except Exception:
+            pass
         right_tab.addTab(self.control_panel, "控制")
 
         # Tab 2: 状态
@@ -1627,6 +1656,12 @@ class MainWindow(QMainWindow):
                     pass
                 self._sweep_progress = None
         self._stop_iq_streams()
+        # 断开时重置 IQ 前端校正链状态，避免换源/换频后旧直流残留
+        if self._iq_frontend is not None:
+            try:
+                self._iq_frontend.reset()
+            except Exception:
+                pass
         if self._recording:
             # 断开时若还在录制，先落盘存盘
             try:
@@ -1988,13 +2023,38 @@ class MainWindow(QMainWindow):
 
     @Slot(float, str, str)
     def _on_bookmark_added(self, freq_hz: float, name: str, mode: str):
-        """控制面板书签按钮 → 内存保存（后续可落盘 gui_config.json）。"""
+        """控制面板书签按钮 → 内存保存 + FrequencyManager 持久化。"""
         try:
             self._bookmarks.append((float(freq_hz), str(name), str(mode)))
+            if self._freq_mgr is not None:
+                try:
+                    self._freq_mgr.add(
+                        str(name), float(freq_hz), mode=str(mode),
+                        category="自定义")
+                except Exception:
+                    pass
             self.statusBar().showMessage(
                 f"已收藏 {float(freq_hz) / 1e6:.3f} MHz {name}", 3000)
         except Exception:
             pass
+
+    @Slot(bool)
+    def _on_dc_removal_changed(self, enabled: bool):
+        """控制面板 DC 去除开关 → IQFrontend.set_dc_removal。"""
+        if self._iq_frontend is not None:
+            try:
+                self._iq_frontend.set_dc_removal(bool(enabled))
+            except Exception:
+                pass
+
+    @Slot(bool)
+    def _on_iq_balance_changed(self, enabled: bool):
+        """控制面板 IQ 平衡开关 → IQFrontend.set_iq_balance。"""
+        if self._iq_frontend is not None:
+            try:
+                self._iq_frontend.set_iq_balance(bool(enabled))
+            except Exception:
+                pass
 
     def _init_ai_agent_from_config(self):
         """从 ~/.mbdsdr/config.json 读 API 配置并初始化 AI agent。"""
@@ -2107,6 +2167,20 @@ class MainWindow(QMainWindow):
         read, sr = self._active_read_samples()
         if read is None:
             return
+        # IQ 前端校正链（DC 去除 / IQ 平衡 / 抗混叠抽取）：在 reader 线程中逐块处理
+        if self._iq_frontend is not None and read is not None:
+            _raw_read = read
+            _fe = self._iq_frontend
+
+            def _iq_frontend_read(n, _raw=_raw_read, _f=_fe):
+                iq = _raw(n)
+                if iq is not None:
+                    try:
+                        iq = _f.process(iq)
+                    except Exception:
+                        pass
+                return iq
+            read = _iq_frontend_read
         if self._pipeline is not None:
             return
         if ReceivePipeline is None or self._demod_cfg is None:

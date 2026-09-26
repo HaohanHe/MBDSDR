@@ -193,7 +193,7 @@ class ControlPanel(QWidget):
         mode_freq_row = QHBoxLayout()
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["FM", "WFM", "AM", "USB", "LSB", "CW"])
+        self.mode_combo.addItems(["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"])
         self.mode_combo.setFixedWidth(80)
         self.mode_combo.currentTextChanged.connect(self._on_mode_changed)
         mode_freq_row.addWidget(self.mode_combo)
@@ -683,12 +683,20 @@ class ControlPanel(QWidget):
         self.bookmark_combo.blockSignals(True)
         self.bookmark_combo.clear()
         if not self._bookmarks:
-            self.bookmark_combo.addItem("（暂无收藏）", None)
+            self.bookmark_combo.addItem("暂无书签，右键频谱保存当前频率", None)
         else:
             for i, (hz, name, mode) in enumerate(self._bookmarks):
                 self.bookmark_combo.addItem(
                     f"{name} ({hz / 1e6:.3f}MHz {mode})", i)
         self.bookmark_combo.blockSignals(False)
+
+    def load_bookmarks_from_list(self, bookmarks: list):
+        """从外部（FrequencyManager）加载书签列表。
+
+        每项为 (freq_hz, name, mode) 元组；替换当前内存书签并刷新下拉框。
+        """
+        self._bookmarks = list(bookmarks)
+        self._refresh_bookmarks()
 
     @Slot()
     def _on_bookmark_add(self):
