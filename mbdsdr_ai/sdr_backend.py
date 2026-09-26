@@ -238,6 +238,18 @@ class SDRBackend:
         if mode.upper() not in valid:
             return False
         self.status.demod_mode = mode.upper()
+        # 切模式时自动按 SDR++ 默认设置解调带宽，不写死。
+        # 来源: repos/sdrpp/decoder_modules/radio/src/demodulators/*/getDefaultBandwidth()
+        #   WFM=150000, NFM=12500, AM=10000, USB/LSB=2800, CW=200, DSB=4600
+        # 我们的 modes_defaults.py 已对齐这些值（WFM ±75k=150k 等），
+        # 从表中取 high-low 作为总带宽，避免每个调用方各写一份常量。
+        try:
+            from .modes_defaults import get_mode_bandwidth
+            bw_info = get_mode_bandwidth(mode.upper())
+            self.status.bandwidth_hz = float(
+                bw_info["high_hz"] - bw_info["low_hz"])
+        except Exception:
+            pass  # 表缺失时保留原有 bandwidth，不阻断模式切换
         return True
 
     def set_squelch(self, db: float) -> bool:
@@ -731,30 +743,64 @@ class RTLSDRBackend(SDRBackend):
                 self._gain_table_db = _rp.get_gain_table(self.tuner_name)
             except Exception:
                 self._gain_table_db = []
-            # 上电先应用 ppm
-            if self._ppm:
-                self.set_ppm(self._ppm)
-            # 来源: SDR++ main.cpp:322 start() 序列里的 rtlsdr_set_offset_tuning
-            # （485-494 是运行时 checkbox）。在打开设备后、启动采数前应用。
-            if self._offset_tuning:
-                try:
-                    self._sdr.set_offset_tuning(True)
-                except Exception as e:
-                    logger.warning(f"RTL-SDR 设置 offset_tuning 失败: {e}")
             self.status.connected = True
             self._start_time = time.time()
             # 兜底：若子类未显式设采样率，用 2.048M 兜底（见 SDRBackend._FALLBACK_SAMPLE_RATE_HZ）
             if self.status.sample_rate_hz is None:
                 self.status.sample_rate_hz = self._FALLBACK_SAMPLE_RATE_HZ
-            # 回读硬件实际参数，对齐软件状态
+
+            # ═══════════════════════════════════════════════════════════════
+            # SDR++ 对齐：打开设备后、启动采数前，必须逐项显式下发硬件设置。
+            # 对照 repos/sdrpp/source_modules/rtl_sdr_source/src/main.cpp:307-322
+            # start() 函数——上一版 connect() 只 readback 不下发，导致棒停在
+            # 出厂默认频率/采样率（"插上收不到台"的根因）。
+            # ═══════════════════════════════════════════════════════════════
+
+            # 1) main.cpp:307 rtlsdr_set_sample_rate —— 先设采样率（SDR++ 顺序第一）
+            self.set_sample_rate(self.status.sample_rate_hz)
+
+            # 2) main.cpp:308 rtlsdr_set_center_freq —— 再设中心频率。
+            #    SDRStatus 默认 98 MHz（FM 广播段），用户可在 connect 前通过
+            #    status.frequency_hz 预设；绝不能留 0 或出厂残留。
+            target_freq = self.status.frequency_hz or 98_000_000.0
+            self.set_frequency(target_freq)
+
+            # 3) main.cpp:309 rtlsdr_set_freq_correction —— 始终下发 ppm（含 0），
+            #    避免上一次运行的频偏校正残留在棒上。
+            self.set_ppm(self._ppm)
+
+            # 4) main.cpp:310 rtlsdr_set_tuner_bandwidth(openDev, 0) —— 0=自动，
+            #    由 librtlsdr 按采样率选最接近的模拟前端滤波器带宽。
+            self.set_bandwidth(0)
+
+            # 5) main.cpp:311 rtlsdr_set_direct_sampling —— 默认关闭（非 HF 模式）
+            self.set_direct_sampling("off")
+
+            # 6) main.cpp:312 rtlsdr_set_bias_tee —— 默认关闭（不给有源天线供电）
+            self.set_bias_tee(False)
+
+            # 7) main.cpp:313 rtlsdr_set_agc_mode + main.cpp:319
+            #    rtlsdr_set_tuner_gain_mode(1) —— RTL2832 数字 AGC 关闭，
+            #    调谐器切手动增益模式（SDR++ 默认 rtlAgc=false, tunerAgc=false）。
+            self.set_agc(False)
+
+            # 8) main.cpp:314/320 rtlsdr_set_tuner_gain —— 手动增益模式下必须显式
+            #    下发增益值。首启时拉到增益表中点（来源 gqrx mainwindow.cpp:571-579，
+            #    比 SDR++ 默认最低增益更适合"插上就有台"的用户体验）。
+            self._maybe_apply_first_gain_midpoint()
+
+            # 9) main.cpp:322 rtlsdr_set_offset_tuning —— 默认关闭；用户预开启时下发
+            if self._offset_tuning:
+                try:
+                    self._sdr.set_offset_tuning(True)
+                except Exception as e:
+                    logger.warning(f"RTL-SDR 设置 offset_tuning 失败: {e}")
+
+            # 回读硬件实际参数，验证上面的下发真的生效（而非静默失败）
             try:
                 self.readback_hw_state()
             except Exception as e:
                 logger.warning(f"RTL-SDR 回读失败: {e}")
-            # 来源: gqrx/src/applications/gqrx/mainwindow.cpp:571-579 ——
-            # 首次用 RTL 时不读硬件默认 0 dB（"聋棒"），直接拉到离散增益表中点。
-            # 触发条件：回读后 gain_db 仍为 0.0（用户从未手动设过增益）且增益表已加载。
-            self._maybe_apply_first_gain_midpoint()
             # 来源: SDR++ main.cpp:326 workerThread + 526-539 worker()/asyncHandler()
             # + ring_buffer.h:4 RING_BUF_SZ=1000000 —— 启动生产者线程持续读设备写环形缓冲，
             # 替代 QTimer 50ms 只读 4096 样点造成的严重欠读。
