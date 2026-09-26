@@ -45,6 +45,8 @@ from module_panel import ModulePanel
 from weather_panel import WeatherPanel
 from doppler_panel import DopplerPanel
 from sat_track_panel import SatTrackPanel
+from new_spacetime_panel import NewSpacetimePanel
+from adsb_map_panel import AdsbMapPanel
 # 卫星闭环跟踪器（mbdsdr_ai.sat_tracker）：选中卫星->实时 az/el/多普勒->自动调谐。
 # 用别名避免与 rf_sky_view 里的展示型 SatelliteTracker 冲突。缺 skyfield 时降级。
 try:
@@ -639,6 +641,14 @@ class MainWindow(QMainWindow):
         self.sat_track_panel.satellite_changed.connect(self._on_sat_combo_changed)
         # 初始化卫星目录（无观测者位置也能列出 TLE 供选择）
         self._init_loop_sat_catalog()
+
+        # Tab 7: 新时空（AMR 实时识别 + 卫星过境时间线 + 授时 + 频率轨道图）
+        self.new_spacetime_panel = NewSpacetimePanel()
+        left_tab.addTab(self.new_spacetime_panel, "新时空")
+
+        # Tab 8: ADS-B 航路图（1090MHz 飞机实时位置）
+        self.adsb_map_panel = AdsbMapPanel()
+        left_tab.addTab(self.adsb_map_panel, "ADS-B 航路")
 
         # 初始化天空视图演示数据
         self._init_sky_view_demo()
