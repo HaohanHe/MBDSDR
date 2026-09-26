@@ -10,10 +10,12 @@ c._send("Page.enable")
 c._send("Runtime.enable")
 
 # This local build's assignWasmExports forgets to attach _free/_malloc onto the
-# Module object (it only sets closure vars), while the JS wrappers call
-# Module._free / Module._malloc.  We:
-#   - disable the JS<->C translation bridge (the only early Module._malloc user)
-#   - no-op Module._free (leaks a little, fine for a demo session)
+# Module object.  Strategy:
+#   - no-op Module._free (the early observer getter calls it; leaking is fine)
+#   - disable translateFn bridge (avoids early Module._malloc)
+#   - no-op setFont (avoids fetch+_malloc+writeArrayToMemory which corrupts heap
+#     when Module._malloc is missing)
+# The wasm renderer itself uses internal closure malloc, unaffected.
 hook = r"""
 (function(){
   if (window.__hooked) return; window.__hooked = true;
@@ -29,6 +31,7 @@ hook = r"""
         opts.onReady = function(mod){
           window.__stel = mod;
           window.__bootLog.push('onReady fired');
+          mod.setFont = function(){ return Promise.resolve(); };
           try { return origReady && origReady.apply(this, arguments); }
           catch(e){ window.__bootLog.push('onReady threw: '+e.stack); throw e; }
         };
@@ -56,21 +59,21 @@ while time.time() < deadline:
     d = json.loads(raw)
     if d.get("method") == "Runtime.exceptionThrown":
         ed = d["params"]["exceptionDetails"]
-        exc.append(str(ed.get("exception",{}).get("description", ed.get("text","")))[:600])
+        exc.append(str(ed.get("exception",{}).get("description", ed.get("text","")))[:500])
     if c.eval("window.__stel?1:0") == 1:
         print(">>> onReady fired")
         break
 
-print("=== bootLog ===")
-for l in json.loads(c.eval("JSON.stringify(window.__bootLog||[])")):
-    print(l[:500])
-print("=== exceptions ===")
-for e in exc: print(e)
-
-for i in range(30):
-    if not c.eval("window.__stel.core.progressbars.length"):
+print("bootLog:", json.loads(c.eval("JSON.stringify(window.__bootLog||[])")))
+print("exceptions:", exc)
+for i in range(40):
+    pb = c.eval("window.__stel.core.progressbars.length")
+    if not pb:
         print("data loaded after", i, "s"); break
     time.sleep(1)
-c.wait_redraw(1000)
+print("fov deg:", c.eval("window.__stel.core.fov*180/Math.PI"))
+print("observer.v:", c.eval("window.__stel.core.observer && window.__stel.core.observer.v"))
+print("lat deg:", c.eval("window.__stel.core.observer.latitude*180/Math.PI"))
+c.wait_redraw(1500)
 c.screenshot(WORK+"/boot.png")
 c.close()
