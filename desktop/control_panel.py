@@ -506,7 +506,8 @@ class ControlPanel(QWidget):
         if suffix is None:
             if abs(val) > 10000:
                 suffix = "hz"
-            elif self._current_mode in ("FM", "WFM"):
+            elif self._current_mode in ("FM", "WFM") or self._current_mode is None:
+                # None = 未连接/未选模式；沿用历史默认按 MHz 解析（FM 广播段最常用）
                 suffix = "m"
             else:
                 suffix = "k"
@@ -782,7 +783,13 @@ class ControlPanel(QWidget):
     # ========================================================================
 
     def get_frequency_hz(self) -> float:
-        """返回当前内部频率真值 (Hz)。供主窗口连接后下发初始中心频率。"""
+        """返回当前内部频率真值 (Hz)。供主窗口连接后下发初始中心频率。
+
+        未设置过频率时返回文档化默认 98.5 MHz（FM 广播段），避免调用方对 None 崩溃。
+        UI 显示层在未连接时仍显 "-- MHz"，不在状态区造假。
+        """
+        if self._freq_hz is None:
+            return 98.5e6
         return float(self._freq_hz)
 
     def set_freq_fm(self, freq: float):
