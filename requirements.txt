@@ -5,24 +5,23 @@
 # ===== 核心依赖（必须） =====
 numpy>=1.24.0          # DSP、频谱处理
 scipy>=1.10.0          # 滤波/重采样/频谱（wfm_stereo_lite 等模块直接 import，缺失会崩）
-requests>=2.28.0       # LLM / 多模态 API 调用
+requests>=2.28.0       # LLM / 多模态 API 调用 / TLE 下载
 setuptools<81.0.0      # pyrtlsdr 0.2.x 运行需要 pkg_resources；Python3.14 自带的 setuptools>=84 已移除它
 websocket-client>=1.6.0   # 连接 ai-sdr Mini 硬件（mbdsdr_mcp_client.py）
 websockets>=12.0          # 设备模拟器（mbdsdr_sim_server.py）
 sgp4>=2.22.0            # 卫星轨道计算(SGP4/SDP4)
+skyfield>=1.45.0        # 高精度天文计算(卫星轨道/多普勒/过境预测)
+pymap3d>=2.9.0          # 坐标转换(ECEF/ENU/经纬高，卫星指向与GNSS)
+pyserial>=3.5           # GNSS 串口 NMEA 读取（CH340/PL2303 等 USB 转串口）
 Pillow>=9.0.0           # 图像处理(NOAA APT/SSTV 解码输出 PNG)
 
 # ===== 推荐依赖（可选，缺失时自动降级） =====
-# scipy>=1.10.0         # 高级信号处理(滤波/重采样/频谱)、IQ校正
-#                        缺失时：用numpy实现简化版
-# skyfield>=1.45.0      # 高精度天文计算(卫星轨道/多普勒/过境预测)
-#                        缺失时：用sgp4+简化坐标转换
 # pysstv>=0.5.0         # SSTV 慢扫描电视编码
 #                        缺失时：用内置sstv_decoder.py
 
 # ===== 硬件相关依赖（可选） =====
-# pyserial>=3.5         # 串口电台控制（无硬件时不需要）
-# SoapySDR             # SDR硬件统一接入（系统级安装）
+# SoapySDR             # SDR硬件统一接入（系统级安装，pip 可能失败，失败不影响 RTL-SDR）
+#                        安装: https://github.com/pothosware/SoapySDR/wiki
 # 固定 0.2.93：0.3.4+/0.5 需要 rtlsdr_set_dithering（仅 rtlsdr-blog 分支 DLL 提供），
 # 与官方 osmocom librtlsdr Windows DLL 不兼容，import 即崩。
 pyrtlsdr==0.2.93        # RTL-SDR 硬件接收必需；未安装时 connect() 报明确错误（status.error），绝不降级模拟 IQ

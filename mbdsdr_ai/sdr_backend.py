@@ -1456,7 +1456,11 @@ class SoapySDRBackend(SDRBackend):
             supports_tx=False,  # 接收优先；TX 由具体 driver 决定，本后端默认只收
         )
         super().__init__(device)
-        # 统一存成字符串，SoapySDR.Device() 两种都吃
+        # 保留 enumerate 原样返回的 dict（含 driver/serial/label/manufacturer/product），
+        # connect() 直接把它传回 SoapySDR.Device()——这是官方标准用法
+        # （MeasureDelay.py:81 附近 Device(enumerate()[i])）。自拼字符串会被 label 里的
+        # 逗号/空格误导，所以优先 dict。_args_str 仅用于日志展示。
+        self._device_args = device_args
         if isinstance(device_args, dict):
             self._args_str = ",".join(f"{k}={v}" for k, v in device_args.items())
         else:
@@ -1510,9 +1514,17 @@ class SoapySDRBackend(SDRBackend):
         """
         # 路径 1：原生 Python 绑定
         try:
-            import SoapySDR  # noqa: F401
-        except Exception:
+            import SoapySDR
+        except ImportError as e:
             SoapySDR = None
+            # 红线提示：明确告诉用户怎么装，绝不静默把"没装库"和"没插设备"混为一谈
+            logger.warning(
+                "未安装 SoapySDR Python 绑定：pip install SoapySDR"
+                "（并按需安装 SoapyRTLSDR/SoapyHackRF/SoapyPlutoSDR 等驱动模块）。"
+                "原始导入错误: %s", e)
+        except Exception as e:
+            SoapySDR = None
+            logger.warning(f"SoapySDR 导入异常，降级 CLI 枚举: {e}")
 
         if SoapySDR is not None:
             try:
@@ -1526,10 +1538,11 @@ class SoapySDRBackend(SDRBackend):
         except Exception as e:
             logger.warning(f"SoapySDRUtil CLI 枚举失败: {e}")
 
-        # 路径 3：都没有 → 优雅报设备未找到
+        # 路径 3：都没有 → 优雅报设备未找到（返回 []，绝不抛异常到上层、绝不假设备）
         logger.warning(
             "未发现 SoapySDR：既无 Python 绑定(import SoapySDR)，"
-            "也无 SoapySDRUtil CLI。安装 SoapySDR + 对应 Soapy* 模块后可识别硬件。"
+            "也无 SoapySDRUtil CLI。请执行 pip install SoapySDR，"
+            "并按需安装对应 Soapy* 驱动模块后再识别硬件。"
         )
         return []
 
@@ -1637,14 +1650,18 @@ class SoapySDRBackend(SDRBackend):
         try:
             import SoapySDR
         except Exception as e:
-            self.status.error = f"SoapySDR Python 绑定未安装，无法打开真实设备: {e}"
+            # 红线：无 Python 绑定时绝不切 mock 报成功；错误原因冒到 UI。
+            self.status.error = (
+                f"未安装 SoapySDR：pip install SoapySDR（并装对应 Soapy* 驱动）。"
+                f"原始导入错误: {e}")
             logger.error(self.status.error)
             self.status.connected = False
             return False
 
         try:
-            # 来源: lib/Factory.cpp:133 Device::make(args) —— Python 端即构造 Device(args)
-            self._sdr = SoapySDR.Device(self._args_str)
+            # 来源: lib/Factory.cpp:133 Device::make(args) —— Python 端即构造 Device(args)。
+            # enumerate() 返回的 dict 可直接传回（官方标准用法）；空串/空 dict 表示自动选第一台。
+            self._sdr = SoapySDR.Device(self._device_args)
             self._rx = getattr(SoapySDR, "SOAPY_SDR_RX", 1)
         except Exception as e:
             self.status.error = f"SoapySDR 打开设备失败({self._args_str}): {e}"
@@ -1860,21 +1877,31 @@ class SoapySDRBackend(SDRBackend):
 
         来源: Device.hpp:352 readStream(stream, buffs, n, flags, timeNs, timeoutUs)。
         Python 用法: MeasureDelay.py:108 —— 传 [numpy_complex64 数组]，
-        返回 status 对象，有效样本数取 status.ret。失败(负数)记 error 并返回 None。
+        返回 status 对象，有效样本数取 status.ret。
+
+        红线：
+          - 未连接/无流 → 返回 None（错误态）；
+          - 已连接但 readStream 超时(-1)/溢出(-2) → 返回 **空 complex64 数组**（len=0），
+            绝不把上面零填充的 buff 当真实 IQ 吐出去（那是造假数据）。
+            上层 _poll_sdr_iq 见 iq.size<64 即跳过本帧，天然兼容。
+          - 抛异常（设备拔出/流损坏）→ 返回 None 并把原因写进 status.error。
         """
         if not self.status.connected or self._sdr is None or self._stream is None:
             return None
         try:
             buff = np.zeros(int(num_samples), np.complex64)
-            # 500ms 超时；来源: MeasureDelay.py:107 timeout_us = 5e5
+            # 500ms 超时；来源: MeasureDelay.py:107 timeout_us = 5e5。
+            # flags=0, timeNs=0（单次读，不靠硬件时间戳同步）。
             status = self._sdr.readStream(
-                self._stream, [buff], int(num_samples), timeoutUs=500_000)
+                self._stream, [buff], int(num_samples), 0, 0, timeoutUs=500_000)
             n_read = int(getattr(status, "ret", 0))
             if n_read <= 0:
-                # 来源: Device.hpp readStream 返回负数为错误码（如 OVERFLOW/TIMEOUT）
+                # 来源: Device.hpp readStream 返回负数为状态码（TIMEOUT=-1/OVERFLOW=-2）。
+                # 这些是"本帧没新样本"的瞬时状态，不是硬错误：返回空数组让上层跳过。
                 if n_read < 0:
-                    self.status.error = f"readStream 错误码 {n_read}"
-                return None
+                    logger.debug(
+                        f"readStream 瞬时状态码 {n_read}（本帧无新样本，跳过）")
+                return np.empty(0, np.complex64)
             self._samples_read += n_read
             return buff[:n_read].copy()
         except Exception as e:
@@ -2958,9 +2985,12 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
     def _key_of(d: Dict[str, Any]) -> str:
         return d.get("serial") or d.get("label") or d.get("driver", "?")
 
-    # 1) SoapySDR 总线枚举（信息最全，先放）
+    # 1) SoapySDR 总线枚举（信息最全，先放）。
+    #    打 source="soapy" 标记，供 build_backend_for_device 与 UI 下拉框区分来源。
     try:
         for dev in SoapySDRBackend.list_devices():
+            dev = dict(dev)
+            dev.setdefault("source", "soapy")
             merged[_key_of(dev)] = dev
     except Exception as e:
         logger.warning(f"SoapySDR 枚举异常: {e}")
@@ -2974,6 +3004,7 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
                 continue  # SoapySDR 已识别同 serial 设备，保留信息更全的那条
             merged[key] = {
                 "driver": "rtlsdr",
+                "source": "rtl_native",  # 原生 pyrtlsdr 条目：build_backend 走 RTLSDRBackend
                 "label": f"RTL-SDR #{dev.get('index', 0)} ({dev.get('tuner', '?')})",
                 "serial": serial,
                 "manufacturer": "",
@@ -3146,9 +3177,12 @@ def build_backend_for_device(dev: Dict[str, Any]) -> Optional[SDRBackend]:
     driver = (dev.get("driver") or "").lower()
     args = dev.get("device_args") or {}
     try:
-        if driver == "rtlsdr" and not isinstance(args, dict) or (
-                isinstance(args, dict) and args.get("index") is not None and "driver" not in args):
-            # 纯 pyrtlsdr 原生条目（无 SoapySDR）
+        # 纯 pyrtlsdr 原生条目（enumerate_all_sdr_devices 步骤2 打的 source="rtl_native"）
+        # 走原生 RTLSDRBackend（环形缓冲）。注意不能再用 "device_args 里有没有 index"
+        # 判断：原生条目和 SoapySDR 的 rtlsdr 条目 device_args 都可能带 driver 键，
+        # 必须用显式 source 标记区分，否则原生棒会被错派给 SoapySDRBackend（无 Soapy
+        # 绑定时 connect 必失败）。
+        if driver == "rtlsdr" and dev.get("source") == "rtl_native":
             return RTLSDRBackend(device_index=int(args.get("index", 0)))
         if driver == "hackrf":
             return HackRFBackend(device_index=int(args.get("index", 0)))

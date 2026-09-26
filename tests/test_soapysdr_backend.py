@@ -16,6 +16,8 @@ import types
 import unittest
 from unittest import mock
 
+import numpy as np
+
 
 # ---------------------------------------------------------------------------
 # Fake SoapySDR 模块：模拟 SWIG 绑定
@@ -121,6 +123,20 @@ class TestSoapySDREnumerate(unittest.TestCase):
             devs = SoapySDRBackend.list_devices()
         self.assertEqual(devs, [])
 
+    def test_import_error_returns_empty_and_logs_pip_hint(self):
+        """红线：import SoapySDR 抛 ImportError 时，enumerate 返回 []，绝不抛异常到上层，
+        且日志明确提示 pip install SoapySDR（而不是静默把"没装库"当成"没插设备"）。"""
+        # setUp 已把 SoapySDR 从 sys.modules 摘掉 → import 必抛 ImportError；
+        # 再让 CLI 降级也不可用，强制走到"都没有"分支。
+        self.assertNotIn("SoapySDR", sys.modules)
+        with mock.patch("subprocess.run", side_effect=FileNotFoundError), \
+                self.assertLogs("mbdsdr_ai.sdr_backend", level="WARNING") as cm:
+            from mbdsdr_ai.sdr_backend import SoapySDRBackend
+            devs = SoapySDRBackend.list_devices()
+        self.assertEqual(devs, [])
+        joined = "\n".join(cm.output)
+        self.assertIn("pip install SoapySDR", joined)
+
     def test_cli_fallback_parsing(self):
         """路径2：无 Python 绑定，解析 SoapySDRUtil --find 文本输出。"""
         fake_stdout = (
@@ -168,6 +184,65 @@ class TestEnumerateAllDedup(unittest.TestCase):
         self.assertEqual(serials.count("00000001"), 1)
         # hackrf 仍在
         self.assertIn("SN0001", serials)
+
+
+class TestReadSamplesTimeout(unittest.TestCase):
+    """红线：readStream 超时/无可读样本时返回空 complex64 数组，绝不造假 IQ。"""
+
+    def _make_connected_backend(self):
+        from mbdsdr_ai.sdr_backend import SoapySDRBackend
+        be = SoapySDRBackend(
+            device_args={"driver": "hackrf"},
+            device_info={"label": "HackRF One", "serial": "SN1"},
+        )
+        # 不真连硬件，直接伪造已连接状态 + mock 设备/流句柄
+        be.status.connected = True
+        be._sdr = mock.Mock()
+        be._stream = object()
+        return be
+
+    def test_not_connected_returns_none(self):
+        """未连接 → 仍返回 None（错误态），与既有契约一致。"""
+        from mbdsdr_ai.sdr_backend import SoapySDRBackend
+        be = SoapySDRBackend(device_args={}, device_info={})
+        self.assertIsNone(be.read_samples(1024))
+
+    def test_timeout_returns_empty_complex64_not_fake(self):
+        """readStream 返回超时码 ret=-1 → 空 complex64 数组，且不推进样本计数。"""
+        be = self._make_connected_backend()
+        fake_status = mock.Mock()
+        fake_status.ret = -1  # SOAPY_SDR_TIMEOUT
+        be._sdr.readStream.return_value = fake_status
+
+        out = be.read_samples(8192)
+
+        self.assertIsNotNone(out)
+        self.assertIsInstance(out, np.ndarray)
+        self.assertEqual(out.dtype, np.complex64)
+        self.assertEqual(out.size, 0)          # 空数组，不是 8192 个零样点假数据
+        self.assertEqual(be._samples_read, 0)  # 没读到真实样本，计数不推进
+
+    def test_zero_return_returns_empty(self):
+        """ret=0（本帧无可读样本）同样返回空数组。"""
+        be = self._make_connected_backend()
+        fake_status = mock.Mock()
+        fake_status.ret = 0
+        be._sdr.readStream.return_value = fake_status
+        out = be.read_samples(4096)
+        self.assertEqual(out.size, 0)
+        self.assertEqual(out.dtype, np.complex64)
+
+    def test_success_returns_real_samples(self):
+        """正常读到 n_read 个样本 → 返回前 n_read 个 complex64，并推进计数。"""
+        be = self._make_connected_backend()
+        n = 1000
+        fake_status = mock.Mock()
+        fake_status.ret = n
+        be._sdr.readStream.return_value = fake_status
+        out = be.read_samples(2048)
+        self.assertEqual(out.size, n)
+        self.assertEqual(out.dtype, np.complex64)
+        self.assertEqual(be._samples_read, n)
 
 
 if __name__ == "__main__":

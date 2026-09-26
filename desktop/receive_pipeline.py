@@ -194,6 +194,15 @@ class DemodWorker(QThread):
         # 记录本次实际用的解调模式（调试/测试断言）
         self.last_demod_mode: str = "FM"
 
+    def set_audio_enabled(self, on: bool) -> None:
+        """运行时切换本 VFO 是否把解调结果写声卡（主听/次听切换）。
+
+        主听 VFO 置 True（写声卡），次听 VFO 置 False（仍跑 DDC+解调验证并行
+        链路，但不写声卡）。GIL 下 bool 赋值原子，worker 循环每帧读到新值。
+        多 VFO 各自独立 DDC 真解调；当前共享单一声卡，只允许一个 VFO 出声。
+        """
+        self._audio_enabled = bool(on)
+
     def _demod_48k(self, dsp, mode: str, vfo_out: np.ndarray) -> np.ndarray:
         """VFO 输出已是 48k complex IQ，按模式解调（沿用原 main_window 映射）。"""
         if mode == "NFM":

@@ -457,3 +457,130 @@ def test_monitor_no_device():
 def test_talker_ids_and_baudrates_exported():
     assert "GP" in TALKER_IDS and "GN" in TALKER_IDS and "BD" in TALKER_IDS
     assert 9600 in DEFAULT_BAUDRATES
+
+
+# ============================================================
+# 4. 拔线 / 串口异常不崩 + 自动重连（mock 串口）
+# ============================================================
+
+class _UnplugThenReopen:
+    """脚本化假串口：先吐一批字节，再在 readline 里抛 OSError（模拟拔线）。"""
+
+    def __init__(self, script):
+        self._script = list(script)
+        self.closed = False
+
+    def readline(self):
+        if self._script:
+            item = self._script.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+        return b""
+
+    def close(self):
+        self.closed = True
+
+
+def test_reader_unplug_does_not_crash_and_reconnects():
+    """拔线（readline 抛 OSError）后读线程不崩、自动进入重连循环，不刷异常。"""
+    gga = mk(GGA_BODY)
+    reader = SerialGNSSReader()
+    reader._reconnect_interval = 0.02   # 加快测试
+    reader._data_timeout = 1.0          # 测试窗口内不靠超时触发断线
+    opens = {"n": 0}
+
+    def fake_open(port, baud):
+        opens["n"] += 1
+        # 重连后给一个安静串口（一帧 GGA 之后静默）
+        return _UnplugThenReopen([gga])
+
+    reader._open_serial = fake_open
+    reader._port = "/dev/fake_gnss"
+    reader._baudrate = 9600
+    # 首连：读到一帧 GGA 后立刻抛 OSError 模拟拔线
+    reader._ser = _UnplugThenReopen([gga, OSError("USB disconnected")])
+    reader._connected = True
+    reader._running.set()
+    t = threading.Thread(target=reader._read_loop, daemon=True)
+    t.start()
+    try:
+        time.sleep(0.6)  # 等：首帧合并 → 拔线异常被吞 → 重连
+        # 不崩即通过；重连至少发生一次
+        assert opens["n"] >= 1, "拔线后应触发至少一次重连"
+        # 重连后能再读到 fix
+        fix = reader.get_fix()
+        assert fix["source"] == "real"
+    finally:
+        reader._running.clear()
+        t.join(timeout=2.0)
+
+
+def test_reader_explicit_port_does_not_autodetect():
+    """指定了 port 但 baudrate=None 时不应误走 auto_detect 忽略用户端口。"""
+    reader = SerialGNSSReader()
+    opened = {}
+
+    def fake_open(port, baud):
+        opened["port"] = port
+        opened["baud"] = baud
+        raise OSError("no such port")  # 打开失败，走 return False 路径
+
+    reader._open_serial = fake_open
+    ok = reader.start("COM10", None)
+    assert ok is False
+    assert opened["port"] == "COM10", "指定 COM10 不应被 auto_detect 覆盖"
+    assert opened["baud"] == 9600, "未指定波特率应默认 9600"
+    reader.stop()
+
+
+# ============================================================
+# 5. RealGNSSMonitor 新接口：start(port, baud) 参数透传 + is_connected
+# ============================================================
+
+def test_monitor_start_accepts_port_baud_args():
+    from mbdsdr_ai.gnss_monitor import RealGNSSMonitor
+
+    class StubReader:
+        def __init__(self):
+            self.calls = []
+
+        def start(self, port, baud):
+            self.calls.append((port, baud))
+            return True
+
+        def stop(self):
+            pass
+
+        def is_connected(self):
+            return True
+
+    m = RealGNSSMonitor()
+    m._reader = StubReader()
+    # 显式传 COM10 / 115200
+    assert m.start("COM10", 115200) is True
+    assert m._reader.calls == [("COM10", 115200)]
+    assert m.is_connected is True
+    # 空串 port 应规整为 None（auto_detect）
+    m._reader.calls.clear()
+    m.start("   ", 9600)
+    assert m._reader.calls == [(None, 9600)]
+
+
+def test_monitor_is_connected_delegates():
+    from mbdsdr_ai.gnss_monitor import RealGNSSMonitor
+
+    class OffReader:
+        def is_connected(self):
+            return False
+
+        def stop(self):
+            pass
+
+    m = RealGNSSMonitor()
+    m._reader = OffReader()
+    assert m.is_connected is False
+    # reader=None 也不崩
+    m._reader = None
+    assert m.is_connected is False
+    assert m.start() is False
