@@ -54,6 +54,12 @@ WATERFALL_COLORS = [
     "#6BA89A", "#9FB07A", "#C4B85C", "#C4845C", "#B85C5C",
 ]
 
+# SDR++ 经典瀑布调色板（深蓝→青→绿→黄→橙→红，对标 SDR++ 默认色带）
+WATERFALL_COLORS_SDRPP = [
+    "#000000", "#000033", "#000066", "#000099", "#0000CC", "#0033FF", "#0099FF",
+    "#00FFFF", "#66FF66", "#FFFF00", "#FF9900", "#FF3300", "#FF0000", "#CC0000",
+]
+
 
 # ============================================================================
 # 频谱数据生成器（真 IQ FFT，无任何合成数据）
@@ -99,6 +105,10 @@ class SpectrumDataGenerator:
         # 多帧幅度平均累加器（复数 FFT 幅度域平均，降低噪声）
         self._mag_accum: Optional[np.ndarray] = None
         self._avg_count = 0
+        # ---- 瀑布时间平滑（IIR：新行 = 0.7*new + 0.3*prev）----
+        # 只影响瀑布显示，不影响频谱曲线；prev 存最近一次写入的瀑布行。
+        self.wf_smooth = False
+        self._prev_wf_row: Optional[np.ndarray] = None
 
     # ------------------------------------------------------------------ 瀑布行缓冲
     def wf_row_count(self) -> int:
@@ -145,6 +155,23 @@ class SpectrumDataGenerator:
         self._mag_accum = None
         self._avg_count = 0
 
+    def reconfigure(self, fft_size: int, num_bins: int):
+        """性能模式切换：改 FFT 点数 / 谱线数，重建 spectrum 与瀑布环形缓冲。
+
+        保持 center_freq_hz / sample_rate_hz / 窗函数 / 平均帧数不变；
+        重建后旧数据作废（spectrum 与 _wf_buf 全部填 NaN）。
+        """
+        self.fft_size = int(fft_size)
+        self.num_bins = int(num_bins)
+        self.spectrum = np.full(self.num_bins, np.nan, dtype=np.float32)
+        self._wf_buf = np.full((self.max_waterfall_lines, self.num_bins),
+                               np.nan, dtype=np.float32)
+        self._wf_head = 0
+        self._wf_count = 0
+        self.wf_rows_written = 0
+        self._prev_wf_row = None
+        self._reset_average()
+
     # ------------------------------------------------------------------ 状态
     def has_data(self) -> bool:
         return self._has_real_data
@@ -157,6 +184,7 @@ class SpectrumDataGenerator:
         self._wf_head = 0
         self._wf_count = 0
         self.wf_rows_written = 0
+        self._prev_wf_row = None
         self._reset_average()
 
     # ------------------------------------------------------------------ 窗函数
@@ -243,8 +271,16 @@ class SpectrumDataGenerator:
         self.spectrum = self._resample_max(power_db)
         self._has_real_data = True
 
+        # 瀑布行：可选 IIR 时间平滑（只影响瀑布，不影响上面的频谱曲线）
+        if self.wf_smooth and self._prev_wf_row is not None \
+                and len(self._prev_wf_row) == self.num_bins:
+            wf_row = 0.7 * self.spectrum + 0.3 * self._prev_wf_row
+        else:
+            wf_row = self.spectrum
+        self._prev_wf_row = wf_row.copy()
+
         # 写入环形行缓冲：新行落在 head 槽位，head 回绕（SDR++ currentFFTLine 语义）
-        self._wf_buf[self._wf_head] = self.spectrum
+        self._wf_buf[self._wf_head] = wf_row
         self._wf_head = (self._wf_head + 1) % self.max_waterfall_lines
         self._wf_count = min(self._wf_count + 1, self.max_waterfall_lines)
         self.wf_rows_written += 1
@@ -308,7 +344,9 @@ class SpectrumDataGenerator:
 # ============================================================================
 
 def value_to_color(value: float, min_val: float, max_val: float,
-                   colors: List[str]) -> QColor:
+                   colors: Optional[List[str]] = None) -> QColor:
+    if colors is None:
+        colors = WATERFALL_COLORS
     if max_val <= min_val:
         return QColor(colors[0])
     ratio = max(0.0, min(1.0, (value - min_val) / (max_val - min_val)))
@@ -474,6 +512,9 @@ class _PlotState:
         self.markers: List[float] = []                 # 固定 marker 频率 Hz
         self.show_peaks = True
         self.peak_rel_db = 6.0
+        # ---- 瀑布调色板 / 时间平滑 ----
+        self.wf_colors: List[str] = list(WATERFALL_COLORS)   # 当前瀑布色带
+        self.wf_smooth: bool = False                 # IIR 时间平滑（仅瀑布）
         # ---- 调谐步进网格（对标 SDR++ waterfall.h:38 snapInterval）----
         # 普通滚轮/左右箭头按此步进调谐；Shift ×10，Alt ×0.1。
         self.snap_interval = 10_000.0                   # Hz，默认 10 kHz
@@ -710,13 +751,14 @@ def _draw_fixed_markers(painter, state, rect, color):
 
 
 def _wf_build_lut(state: "_PlotState"):
-    """db → RGB 查找表（256×3），与 value_to_color 色带一致。"""
+    """db → RGB 查找表（256×3），使用 state.wf_colors 指定的色带。"""
     n = 256
     lut = np.empty((n, 3), dtype=np.uint8)
     dmin, dmax = state.db_min, state.db_max
+    colors = state.wf_colors
     for i in range(n):
         v = dmin + (dmax - dmin) * i / (n - 1)
-        c = value_to_color(v, dmin, dmax, WATERFALL_COLORS)
+        c = value_to_color(v, dmin, dmax, colors)
         lut[i] = (c.red(), c.green(), c.blue())
     state._wf_lut = lut
     state._wf_lut_key = (dmin, dmax)
@@ -924,6 +966,27 @@ class SpectrumPanel(QWidget):
             lambda t: self.generator.set_avg_frames(int(t)))
         bar.addWidget(self._avg_combo)
 
+        # 性能模式（高/均衡/低）：切换 FFT 点数 / 谱线数 / 刷新间隔
+        bar.addWidget(QLabel("性能:"))
+        self._perf_combo = QComboBox()
+        self._perf_combo.addItems(["高", "均衡", "低"])
+        self._perf_combo.setCurrentIndex(0)
+        self._perf_combo.currentIndexChanged.connect(self.set_performance_mode)
+        bar.addWidget(self._perf_combo)
+
+        # 瀑布调色板（默认低饱和 / SDR++ 经典蓝-青-绿-黄-红）
+        bar.addWidget(QLabel("调色板:"))
+        self._palette_combo = QComboBox()
+        self._palette_combo.addItems(["默认", "经典SDR++"])
+        self._palette_combo.currentIndexChanged.connect(self._on_palette_changed)
+        bar.addWidget(self._palette_combo)
+
+        # 瀑布时间平滑（IIR，仅影响瀑布显示）
+        self._wf_smooth_chk = QCheckBox("瀑布平滑")
+        self._wf_smooth_chk.setChecked(False)
+        self._wf_smooth_chk.toggled.connect(self._on_wf_smooth_toggled)
+        bar.addWidget(self._wf_smooth_chk)
+
         self._peak_chk = QCheckBox("峰值")
         self._peak_chk.setChecked(True)
         self._peak_chk.toggled.connect(
@@ -1011,8 +1074,57 @@ class SpectrumPanel(QWidget):
 
     def _set_controls_enabled(self, on: bool):
         for w_ in (self._win_combo, self._fft_combo, self._avg_combo,
+                   self._perf_combo, self._palette_combo, self._wf_smooth_chk,
                    self._peak_chk, self._peak_spin):
             w_.setEnabled(on)
+
+    # ------------------------------------------------------------------ 性能模式
+    # level 0=高 / 1=均衡 / 2=低：FFT 点数、谱线数、刷新间隔三档联动。
+    _PERF_LEVELS = (
+        # (fft_size, num_bins, refresh_ms)
+        (2048, 512, 50),
+        (1024, 384, 66),
+        (512, 256, 100),
+    )
+
+    def set_performance_mode(self, level: int):
+        """切换渲染性能档位：重建 FFT/谱线与瀑布环形缓冲，调刷新定时器。
+
+        保持 center_freq_hz / sample_rate_hz 不变。level: 0 高 / 1 均衡 / 2 低。
+        """
+        level = int(level)
+        if not (0 <= level < len(self._PERF_LEVELS)):
+            return
+        fft_size, num_bins, refresh_ms = self._PERF_LEVELS[level]
+        self.generator.reconfigure(fft_size, num_bins)
+        # 调整绘图定时器刷新间隔（QTimer.setInterval 即时生效）
+        timer = getattr(self._plot, "_timer", None)
+        if timer is not None:
+            timer.setInterval(refresh_ms)
+        # 同步 FFT 下拉（512 不在 FFT_SIZES 列表时保持原显示，不报错）
+        self._fft_combo.blockSignals(True)
+        self._fft_combo.setCurrentText(str(fft_size))
+        self._fft_combo.blockSignals(False)
+        self._refresh_status_labels()
+
+    # ------------------------------------------------------------------ 调色板 / 平滑
+    def _on_palette_changed(self, idx: int):
+        """切换瀑布调色板：重建 LUT 并清空 key，使整幅瀑布用新色带重绘。"""
+        self._state.wf_colors = list(
+            WATERFALL_COLORS_SDRPP if idx == 1 else WATERFALL_COLORS)
+        # 强制 LUT 重建 + 让画布从空白重绘（旧行随新数据以新色带重涂）
+        self._state._wf_lut = None
+        self._state._wf_lut_key = (0.0, 0.0)
+        self._state._wf_cw = -1
+        self._state._wf_ch = -1
+        self._state._wf_consumed = 0
+        self._plot.update()
+
+    def _on_wf_smooth_toggled(self, on: bool):
+        self._state.wf_smooth = bool(on)
+        self.generator.wf_smooth = bool(on)
+        # 切换时清掉上一帧 IIR 记忆，避免新旧系数串扰
+        self.generator._prev_wf_row = None
 
     # ------------------------------------------------------------------ 对外接口
     @Slot(bool)
@@ -1230,17 +1342,24 @@ class _TuningPlotMixin:
     # ------------------------------------------------------------------ 键盘
     def keyPressEvent(self, event):
         # main_window.cpp:553-576：左右箭头按 snapInterval 调谐。
+        # 上下箭头 = 细调（snap_interval*0.1，对标 SDR++ 步进微调）；
+        # Shift ×10 / Alt ×0.1 修饰同样生效。
         key = event.key()
-        if key in (Qt.Key_Left, Qt.Key_Right):
-            interval = self.state.snap_interval
+        if key in (Qt.Key_Left, Qt.Key_Right, Qt.Key_Up, Qt.Key_Down):
+            gen = self.state.panel.generator
             mods = event.modifiers()
+            if key in (Qt.Key_Left, Qt.Key_Right):
+                interval = self.state.snap_interval          # 左右 = 整格步进
+                direction = -1.0 if key == Qt.Key_Left else 1.0
+            else:
+                interval = self.state.snap_interval * 0.1     # 上下 = 细调 1/10 格
+                direction = 1.0 if key == Qt.Key_Up else -1.0
             if mods & Qt.ShiftModifier:
                 interval *= 10.0
             elif mods & Qt.AltModifier:
                 interval *= 0.1
-            direction = -1.0 if key == Qt.Key_Left else 1.0
-            gen = self.state.panel.generator
             nfreq = gen.center_freq_hz + interval * direction
+            # main_window.cpp:596  roundl(nfreq/interval)*interval
             nfreq = round(nfreq / interval) * interval
             gen.center_freq_hz = nfreq
             self._emit_tuned(nfreq)
@@ -1459,19 +1578,29 @@ class _TuningPlotMixin:
                     snapped = self._snap_center()
                     self._emit_tuned(snapped)
                 # rf_shift 视图平移结束：不调谐，仅停留视图位置
-            elif self.state.panel.generator.has_data():
-                gen = self.state.panel.generator
-                freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
-                        + self._x_ratio(event) * gen.sample_rate_hz)
-                self.state.markers.append(freq)
-                if len(self.state.markers) > 8:
-                    self.state.markers.pop(0)
+            else:
+                y = event.position().y()
+                # 单击谱面空白处（未命中 VFO / 非 Shift 新建模式，已在 press 阶段分流）
+                # → 直接跳频到点击位置，行为与 mouseDoubleClickEvent 一致。
+                # 瀑布区（y > 谱面高度）不响应。
+                if y <= self._spectrum_height():
+                    gen = self.state.panel.generator
+                    freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
+                            + self._x_ratio(event) * gen.sample_rate_hz)
+                    gen.center_freq_hz = freq
+                    snapped = self._snap_center()
+                    self._emit_tuned(snapped)
             self.update()
         elif event.button() == Qt.RightButton:
-            # 右键未命中 VFO 时：移除最近一个 marker（命中 VFO 的删除菜单在 contextMenuEvent）
-            vfo, _reg = self._hit_vfo_at(event.position().x())
-            if vfo is None and self.state.markers:
-                self.state.markers.pop()
+            # 右键命中 VFO → 删除菜单（contextMenuEvent）；
+            # 右键谱面空白处 → 添加 marker；瀑布区不响应。
+            x = event.position().x()
+            y = event.position().y()
+            vfo, _reg = self._hit_vfo_at(x)
+            if vfo is None and y <= self._spectrum_height():
+                self.state.markers.append(self._freq_at_x(x))
+                if len(self.state.markers) > 8:
+                    self.state.markers.pop(0)
             self.update()
 
     def mouseDoubleClickEvent(self, event):
