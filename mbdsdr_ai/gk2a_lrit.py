@@ -646,6 +646,7 @@ def frame_sync_search(bitstream: np.ndarray) -> int:
     """在硬比特流中搜索同步字 0x1ACFFC1D，返回比特偏移。未找到 -1。
 
     来源: module_ccsds_conv_concat_decoder.cpp:120 BPSK_CCSDS_Deframer
+    注意：本函数是硬匹配（错 1 bit 就丢帧），真机有 BER 时请用 CCSDSDeframer。
     """
     target = bytes_to_bits(SYNC_WORD_BYTES)
     L = len(target)
@@ -653,6 +654,118 @@ def frame_sync_search(bitstream: np.ndarray) -> int:
         if np.array_equal(bitstream[i:i + L], target):
             return i
     return -1
+
+
+class CCSDSDeframer:
+    """三态机 CCSDS CADU 帧同步（对照 SatDump bpsk_ccsds_deframer.h/.cpp）。
+
+    三态阈值（bpsk_ccsds_deframer.h:33-35）：
+      NOSYNC=2   —— 未同步，必须严格匹配 ASM 或 ASM_INV 才进 SYNCING
+      SYNCING=6  —— 同步中，Hamming 距离 < 6 算好帧，连续 10 个好帧进 SYNCED
+      SYNCED=12  —— 已同步，Hamming 距离 < 12 算好帧，错 1 帧直接回 NOSYNC
+
+    同时支持 ASM_INV（0x1ACFFC1D ^ 0xFFFFFFFF），因为 Costas 环有 180° 相位模糊，
+    锁定后比特可能整体反相。检测到反相时自动对后续比特取反（bit_inv）。
+
+    用法（流式）：
+        deframer = CCSDSDeframer()
+        for chunk in bit_chunks:
+            frames = deframer.work(chunk)   # list[bytes]，每个 1024 字节 CADU
+            for cadu in frames:
+                ...
+    """
+
+    STATE_NOSYNC = 2
+    STATE_SYNCING = 6
+    STATE_SYNCED = 12
+    GOOD_TO_SYNC = 10   # 连续好帧数进 SYNCED
+    BAD_TO_NOSYNC = 2   # 连续坏帧数回 NOSYNC
+
+    def __init__(self, cadu_bytes: int = 1024, asm: int = SYNC_WORD):
+        self.asm = asm & 0xFFFFFFFF
+        self.asm_inv = self.asm ^ 0xFFFFFFFF
+        self.cadu_bits = cadu_bytes * 8
+        self.shifter = 0
+        self.state = self.STATE_NOSYNC
+        self.bit_inv = False
+        self.bit_of_frame = 0
+        self.good_count = 0
+        self.bad_count = 0
+        self.buf = bytearray(cadu_bytes)
+
+    @staticmethod
+    def _hamming32(a: int, b: int) -> int:
+        """32 位整数 Hamming 距离（popcount of XOR）。"""
+        return bin((a ^ b) & 0xFFFFFFFF).count('1')
+
+    def _reset_frame(self):
+        self.bit_of_frame = 0
+
+    def _write_bit(self, bit: int):
+        byte_idx = self.bit_of_frame // 8
+        bit_idx = 7 - (self.bit_of_frame % 8)
+        if bit:
+            self.buf[byte_idx] |= (1 << bit_idx)
+        else:
+            self.buf[byte_idx] &= ~(1 << bit_idx)
+        self.bit_of_frame += 1
+
+    def work(self, bits: np.ndarray) -> list:
+        """喂入一段硬比特（0/1），返回本段落中完整的 CADU 帧列表（bytes）。"""
+        frames = []
+        bits = np.asarray(bits, dtype=np.uint8).ravel()
+        for b in bits:
+            b = int(b) & 1
+            self.shifter = ((self.shifter << 1) | b) & 0xFFFFFFFF
+
+            if self.bit_of_frame > 0:
+                # 正在收帧：写比特（已考虑反相），凑满就输出
+                self._write_bit(b ^ self.bit_inv)
+                if self.bit_of_frame >= self.cadu_bits:
+                    frames.append(bytes(self.buf))
+                    self._reset_frame()
+                continue
+
+            # 不在收帧：做同步检测
+            if self.state == self.STATE_NOSYNC:
+                if self.shifter == self.asm:
+                    self.bit_inv = False
+                    self._reset_frame()
+                    self.state = self.STATE_SYNCING
+                    self.good_count = 0
+                    self.bad_count = 0
+                elif self.shifter == self.asm_inv:
+                    self.bit_inv = True
+                    self._reset_frame()
+                    self.state = self.STATE_SYNCING
+                    self.good_count = 0
+                    self.bad_count = 0
+
+            elif self.state == self.STATE_SYNCING:
+                target = self.asm_inv if self.bit_inv else self.asm
+                if self._hamming32(self.shifter, target) < self.state:
+                    self._reset_frame()
+                    self.good_count += 1
+                    self.bad_count = 0
+                    if self.good_count >= self.GOOD_TO_SYNC:
+                        self.state = self.STATE_SYNCED
+                else:
+                    self.bad_count += 1
+                    self.good_count = 0
+                    if self.bad_count >= self.BAD_TO_NOSYNC:
+                        self.state = self.STATE_NOSYNC
+
+            elif self.state == self.STATE_SYNCED:
+                target = self.asm_inv if self.bit_inv else self.asm
+                if self._hamming32(self.shifter, target) < self.state:
+                    self._reset_frame()
+                else:
+                    # 错一帧直接回未同步（bpsk_ccsds_deframer.cpp:91-103）
+                    self.state = self.STATE_NOSYNC
+                    self.good_count = 0
+                    self.bad_count = 0
+
+        return frames
 
 
 # ============================================================================

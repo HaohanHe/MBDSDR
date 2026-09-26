@@ -81,22 +81,27 @@ class CostasLoop:
     二阶环路，用于恢复载波相位和频率偏移。
     """
 
-    def __init__(self, noise_bw: float = 0.01, damping: float = 0.707):
+    def __init__(self, noise_bw: float = 0.01, damping: float = 0.707,
+                 order: int = 4, freq_limit: float = 1.0):
         """
         参数:
-            noise_bw: 归一化噪声带宽（0.001-0.1）
+            noise_bw: 归一化环路带宽（0.001-0.1），直接代入 alpha/beta 公式
+                      （对照 SatDump costas_loop.cpp:8-11，不乘 2π）
             damping: 阻尼系数（0.707为临界阻尼）
+            order: 调制阶数，2=BPSK（误差 I*Q），4=QPSK（误差 sign(I)*Q - sign(Q)*I）
+            freq_limit: 频率估计限幅（对照 costas_loop.cpp:48,61-64）
         """
         self.noise_bw = noise_bw
         self.damping = damping
+        self.order = int(order)
+        self.freq_limit = float(freq_limit)
 
-        # 环路滤波器系数
+        # 环路滤波器系数（对照 costas_loop.cpp:8-11，直接用 noise_bw，不乘 2π）
         zeta = damping
-        wn = noise_bw * 2 * np.pi  # 自然角频率
-
-        # 二阶环路增益
-        self.alpha = (4 * zeta * wn) / (1 + 2 * zeta * wn + wn ** 2)
-        self.beta = (4 * wn ** 2) / (1 + 2 * zeta * wn + wn ** 2)
+        bn = noise_bw
+        denom = 1.0 + 2.0 * zeta * bn + bn * bn
+        self.alpha = (4.0 * zeta * bn) / denom
+        self.beta = (4.0 * bn * bn) / denom
 
         # 状态
         self.phase = 0.0
@@ -116,14 +121,28 @@ class CostasLoop:
         nco = np.exp(1j * self.phase)
         corr = sample * nco
 
-        # QPSK相位误差检测器
-        # e = sign(I)*Q - sign(Q)*I
+        # 相位误差检测器（对照 costas_loop.cpp:32-44）
+        # order=2 BPSK: error = I*Q
+        # order=4 QPSK: error = sign(I)*Q - sign(Q)*I
         I = corr.real
         Q = corr.imag
-        error = np.sign(I) * Q - np.sign(Q) * I
+        if self.order == 2:
+            error = I * Q
+        else:
+            error = np.sign(I) * Q - np.sign(Q) * I
+        # branchless clip（对照 costas_loop.cpp:48）
+        if error > 1.0:
+            error = 1.0
+        elif error < -1.0:
+            error = -1.0
 
         # 环路滤波器（二阶）
         self.freq += self.beta * error
+        # 频率限幅（对照 costas_loop.cpp:61-64）
+        if self.freq > self.freq_limit:
+            self.freq = self.freq_limit
+        elif self.freq < -self.freq_limit:
+            self.freq = -self.freq_limit
         self.phase += self.freq + self.alpha * error
 
         # 相位归一化
@@ -316,11 +335,13 @@ class ViterbiDecoder:
     """
     完整Viterbi卷积码解码器。
 
-    标准K=7, rate=1/2，G1=171, G2=133
-    用于气象卫星LRIT/HRPT解码。
+    标准K=7, rate=1/2。默认多项式为 CCSDS {79,109}（八进制 0o117/0o155，
+    十六进制 0x4F/0x6D），用于 GK-2A/GOES/Meteor 等 CCSDS 标准卫星下行。
+    NOAA APT / 部分旧制式用 {171,133}（0o253/0o245），需显式传入。
+    对照 SatDump viterbi27.h:8 CCSDS_R2_K7_POLYS={79,109}。
     """
 
-    def __init__(self, K: int = 7, G1: int = 171, G2: int = 133):
+    def __init__(self, K: int = 7, G1: int = 79, G2: int = 109):
         """
         参数:
             K: 约束长度
