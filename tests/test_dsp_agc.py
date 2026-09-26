@@ -48,11 +48,15 @@ def test_agc_stabilizes_burst():
 
 
 def test_agc_attack_fast():
-    """信号出现后 attack 收敛时间 < 10ms。"""
+    """信号出现后 attack 上升时间（10%→90%）< 10ms。
+
+    注：GqrxAGC 有 15ms 延迟线（gqrx_receiver.py:92 DELAY_TIMECONST，补偿滤波群延迟），
+    输出绝对时延含此延迟；这里测包络上升速度（attack 时间常数），不含延迟线偏移。
+    """
     sr = 48_000.0
     # 静音开头，然后突然加 -20dBFS 信号
     pre = int(sr * 0.05)  # 50ms 静音
-    burst = int(sr * 0.1)  # 100ms 信号
+    burst = int(sr * 0.2)  # 200ms 信号
     t = np.arange(burst) / sr
     sig = np.zeros(pre + burst, dtype=np.complex128)
     sig[:pre] = 1e-4 * (np.random.randn(pre) + 1j * np.random.randn(pre))
@@ -62,16 +66,15 @@ def test_agc_attack_fast():
                   slope=0, decay_ms=500)
     out = agc.process(sig)
 
-    # 稳态目标电平（信号出现后后 50ms 的 RMS）
-    steady_seg = out[pre + int(sr * 0.05):]
-    target_db = _rms_db(steady_seg)
-
-    # 逐样本找达到目标 -1dB 内的位置
-    post = out[pre:]
-    rms_rolling = np.sqrt(np.convolve(np.abs(post) ** 2,
-                                     np.ones(200) / 200, mode="same"))
-    rms_db = 20.0 * np.log10(rms_rolling + 1e-12)
-    reached = np.where(rms_db > target_db - 1.0)[0]
-    if len(reached):
-        attack_ms = reached[0] / sr * 1000.0
-        assert attack_ms < 10.0, f"AGC attack {attack_ms:.1f}ms > 10ms"
+    # 输出包络（滑动 RMS）
+    env = np.sqrt(np.convolve(np.abs(out) ** 2, np.ones(300) / 300, mode="same"))
+    # 稳态包络（后 100ms）
+    steady_level = float(np.mean(env[pre + int(sr * 0.1):]))
+    lo = 0.1 * steady_level
+    hi = 0.9 * steady_level
+    post = env[pre:]
+    idx_lo = np.where(post > lo)[0]
+    idx_hi = np.where(post > hi)[0]
+    assert len(idx_lo) and len(idx_hi), "输出包络未上升到稳态"
+    rise_ms = (idx_hi[0] - idx_lo[0]) / sr * 1000.0
+    assert rise_ms < 10.0, f"AGC attack 上升时间 {rise_ms:.1f}ms > 10ms"

@@ -881,12 +881,44 @@ class MainWindow(QMainWindow):
         self.callsign_edit.editingFinished.connect(self._on_callsign_edited)
         status_bar.addWidget(self.callsign_edit)
 
+        # CarWith 底 Dock 增强：主页按钮（回频谱）+ 正在播放/处理任务指示。
+        # 无设备时置灰，不造数（processing 文本由录制/回放/流水线真实状态驱动）。
+        self.home_btn = QPushButton("⌂")
+        self.home_btn.setObjectName("iconButton")
+        self.home_btn.setFixedWidth(32)
+        self.home_btn.setToolTip("回到频谱主页")
+        self.home_btn.clicked.connect(self._go_home)
+        status_bar.addPermanentWidget(self.home_btn)
+
+        self.status_processing = QLabel("待机")
+        self.status_processing.setObjectName("dockHint")
+        self.status_processing.setToolTip("正在播放 / 处理任务状态（无设备时置灰）")
+        status_bar.addPermanentWidget(self.status_processing)
+        status_bar.addPermanentWidget(QLabel(" | "))
+
         # 永久右侧：UTC 时钟 + 版本
         self.status_utc = QLabel("UTC: --:--:--")
         self.status_utc.setStyleSheet("color:#5B7B8C;")
         status_bar.addPermanentWidget(self.status_utc)
         status_bar.addPermanentWidget(QLabel(" | "))
         status_bar.addPermanentWidget(QLabel("MBDSDR v0.1 | GPL-3.0"))
+
+    def _go_home(self):
+        """主页按钮：切回频谱 Tab。"""
+        tab = getattr(self, "left_tab", None)
+        if tab is None:
+            return
+        for i in range(tab.count()):
+            if "频谱" in tab.tabText(i):
+                tab.setCurrentIndex(i)
+                return
+
+    def _set_processing_status(self, text: str):
+        """更新底 Dock 的"正在处理"指示（录制/回放/流水线）。无设备由调用方置灰。"""
+        try:
+            self.status_processing.setText(text)
+        except Exception:
+            pass
 
     def _update_utc_clock(self):
         """每秒刷新底部状态栏 UTC 时间。"""
@@ -3124,11 +3156,31 @@ class MainWindow(QMainWindow):
         state = s.value("dock_state")
         if state is not None:
             self.restoreState(state)
+        # CarWith 布局预设：恢复上次的预设名并应用（失败静默退回当前布局）
+        dlm = getattr(self, "dock_layout", None)
+        if dlm is not None:
+            preset = s.value("layout_preset")
+            if preset in dlm.PRESETS:
+                try:
+                    dlm.apply_preset(preset)
+                    idx = self.layout_combo.findData(preset)
+                    if idx >= 0:
+                        self.layout_combo.blockSignals(True)
+                        self.layout_combo.setCurrentIndex(idx)
+                        self.layout_combo.blockSignals(False)
+                except Exception:
+                    pass
 
     def _save_window_state(self):
         s = QSettings("MBDSDR", "Desktop")
         s.setValue("window_geometry", self.saveGeometry())
         s.setValue("dock_state", self.saveState())
+        dlm = getattr(self, "dock_layout", None)
+        if dlm is not None:
+            try:
+                dlm.save_state()
+            except Exception:
+                pass
 
     def _start_sweep(self):
         """启动宽带扫频找台（真实后端步进调谐 → 拼接 PSD → 提取活动信号）。
