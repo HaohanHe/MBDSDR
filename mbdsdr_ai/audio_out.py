@@ -236,7 +236,10 @@ class AudioPlayer:
         mbdsdr_ai/audio_resampler.py 的 AudioResampler：按 (in_sr, out_sr)
         缓存一个有状态实例，跨块保留延迟线与多相相位游标。
         """
-        from .audio_resampler import AudioResampler
+        try:
+            from .audio_resampler import AudioResampler
+        except ImportError:  # 直接以脚本运行时兜底
+            from audio_resampler import AudioResampler  # type: ignore
         key = (int(round(in_sr)), self.sample_rate)
         rs = self._resamp_cache.get(key)
         if rs is None:

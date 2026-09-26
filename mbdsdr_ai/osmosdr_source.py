@@ -759,3 +759,108 @@ def osmosdr_list_backends() -> List[Dict[str, Any]]:
         {"driver": drv, **{k: v for k, v in meta.items() if k != "gain_ranges"}}
         for drv, meta in BACKEND_STATIC.items()
     ]
+
+
+# =====================================================================
+# SoapySDRSource —— 真实 SoapySDR 流（setupStream / readStream）
+# =====================================================================
+class SoapySDRSource(OsmoSDRSource):
+    """真实 SoapySDR 接收源：setupStream → activateStream → readStream。
+
+    对照 repos/SoapySDR/include/SoapySDR/Device.hpp：
+      - :267 setupStream(direction, format, channels)
+      - :308 activateStream(stream)
+      - :352 readStream(stream, buffs, numElems, flags, timeNs, timeoutUs)
+      - :278 closeStream(stream)
+
+    红线：
+      * SoapySDR 模块未安装 / 无设备时，start_stream() 抛明确 RuntimeError，
+        read_samples() 也抛错——绝不返回合成 IQ。
+      * 只在 start_stream() 真正成功后才有真实数据；未 start 时 read_samples
+        抛错，不假装"已连接"。
+    """
+
+    def __init__(self, device_string: str = ""):
+        super().__init__(device_string)
+        self._soapy_dev: Any = None
+        self._soapy_stream: Any = None
+        self._stream_open = False
+
+    # ---- 真实打开流 -------------------------------------------------
+    def start_stream(self) -> None:
+        """真正打开 SoapySDR 设备并 setupStream + activateStream。
+
+        失败抛 RuntimeError（含原因）；成功后 read_samples() 从硬件读 IQ。
+        """
+        try:
+            import SoapySDR  # type: ignore
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(
+                f"SoapySDR Python 模块未安装，无法打开真实 SDR 流: {e}. "
+                "（refusing to fabricate IQ samples）") from e
+
+        # 解析设备 args（device_string 形如 "soapy=0,driver=hackrf"）
+        args: Dict[str, str] = {}
+        for _k, v in self.extra.items():
+            args[str(_k)] = str(v)
+        # driver=xxx 优先用枚举结果里的 subdriver
+        if self.driver and self.driver != "soapy":
+            args.setdefault("driver", self.driver)
+
+        try:
+            self._soapy_dev = SoapySDR.Device(args)
+        except Exception as e:  # noqa: BLE001
+            raise RuntimeError(
+                f"SoapySDR.Device({args}) 打开失败（无设备或驱动缺失）: {e}") from e
+
+        # 应用已设置的频率/采样率/增益（Device.hpp setSampleRate/setFrequency/setGain）
+        rx_chan = 0
+        if self._sample_rate_hz:
+            self._soapy_dev.setSampleRate(SoapySDR.SOAPY_SDR_RX, rx_chan,
+                                          self._sample_rate_hz)
+        if self._freq_hz:
+            self._soapy_dev.setFrequency(SoapySDR.SOAPY_SDR_RX, rx_chan,
+                                         self._freq_hz)
+
+        # Device.hpp:267 setupStream（CF32 复数浮点基带）
+        self._soapy_stream = self._soapy_dev.setupStream(
+            SoapySDR.SOAPY_SDR_RX, SoapySDR.SOAPY_SDR_CF32, [rx_chan])
+        # Device.hpp:308 activateStream
+        self._soapy_dev.activateStream(self._soapy_stream)
+        self._stream_open = True
+        logger.info("SoapySDR stream opened (sr=%g Hz, freq=%g Hz)",
+                    self._sample_rate_hz, self._freq_hz)
+
+    def stop_stream(self) -> None:
+        """deactivateStream + closeStream（Device.hpp:328/:278）。"""
+        if self._soapy_dev is None or self._soapy_stream is None:
+            return
+        try:
+            import SoapySDR  # type: ignore
+            self._soapy_dev.deactivateStream(self._soapy_stream)
+            self._soapy_dev.closeStream(self._soapy_stream)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("SoapySDR closeStream 异常: %s", e)
+        finally:
+            self._soapy_stream = None
+            self._soapy_dev = None
+            self._stream_open = False
+
+    # ---- 真实读样本 -------------------------------------------------
+    def read_samples(self, n: int) -> np.ndarray:
+        """从硬件读 n 个复 IQ（CF32）。未开流时抛错，不返回假数据。"""
+        if not self._stream_open or self._soapy_dev is None or self._soapy_stream is None:
+            raise RuntimeError(
+                "SoapySDR 流未开启；请先 start_stream()。"
+                "（refusing to fabricate IQ samples）")
+        import SoapySDR  # type: ignore
+        buf = np.zeros(n, dtype=np.complex64)
+        # Device.hpp:352 readStream —— Python 绑定返回 (retCode, nRead, flags)
+        ret = self._soapy_dev.readStream(self._soapy_stream, [buf], n)
+        if isinstance(ret, tuple):
+            code, n_read = ret[0], ret[1]
+        else:
+            code, n_read = 0, int(ret)
+        if code < 0:
+            raise RuntimeError(f"SoapySDR readStream 错误码={code}")
+        return buf[:n_read].copy()

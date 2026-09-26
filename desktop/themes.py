@@ -486,10 +486,64 @@ HIGH_CONTRAST = Theme(
     ],
 )
 
+# ============================================================================
+# CarWith 深色（设计体系落地，QSS 委托 tokens.py 单例）
+# ============================================================================
+class CarDarkTheme(Theme):
+    """CarWith 设计体系深色主题。
+
+    QSS 不在此处手写，而是委托 tokens.DesignTokens 单例——所有圆角/字号/间距/
+    比例都与 Figma 设计稿（1920x1200）严格对齐。颜色字典保留供频谱组件调色与
+    QPalette 使用；主题 key 为 "dark_car"（额外主题，不替换 default）。
+    """
+
+    def _build_qss(self) -> str:
+        try:
+            from tokens import tokens
+            return tokens().to_stylesheet("dark")
+        except Exception:
+            return super()._build_qss()
+
+
+DARK_CAR = CarDarkTheme(
+    name="dark_car",
+    display_name="CarWith 深色",
+    colors={
+        "bg": "#000000",
+        "bg_alt": "#1f1f1f",
+        "card": "#2b2c2f",
+        "text": "#ffffff",
+        "text_secondary": "#c7c7c7",
+        "text_disabled": "#666666",
+        "border": "#585c63",
+        "grid": "#35373c",
+        "primary": "#919cac",
+        "accent": "#919cac",
+        "accent_hover": "#a8b3c2",
+        "success": "#6BA89A",
+        "danger": "#B85C5C",
+        "button": "#35373c",
+        "button_hover": "#3d3f44",
+        "button_pressed": "#36383a",
+        "button_disabled": "#1f1f1f",
+    },
+    spectrum_colors=[
+        "#919cac",
+        "#7d8a9c",
+        "#6BA89A",
+        "#8fa3a8",
+        "#a89f8a",
+        "#c4b89a",
+        "#c4a88a",
+        "#b89a8a",
+    ],
+)
+
 THEMES = {
     "default": DEFAULT_LIGHT,
     "dark": DARK,
     "high_contrast": HIGH_CONTRAST,
+    "dark_car": DARK_CAR,
 }
 
 # 兼容旧配置里写死的主题 key（未知名一律回退默认主题）

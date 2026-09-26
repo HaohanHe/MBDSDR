@@ -42,6 +42,10 @@ from ai_panel import AIPanel
 from mcp_worker import MCPWorkerManager
 from rf_sky_view import RFSkyView, SkyObject, AntennaPointing, HeatmapCell, SatelliteTracker
 from module_panel import ModulePanel
+# CarWith 设计体系：token 单例 / 面板注册表 / Dock 布局管理器
+from tokens import tokens
+from panel_registry import registry
+from dock_layout_manager import DockLayoutManager
 # 气象云图 / 多普勒定轨面板（懒加载：构造时只建 Qt 控件，后端 ToolRegistry
 # 在用户首次点解码/定轨时才创建，避免拖慢启动）。
 from weather_panel import WeatherPanel
@@ -536,6 +540,19 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
+        # 布局预设切换（focus 专注 / analysis 分析 / grid 网格）
+        toolbar.addWidget(QLabel(" 布局: "))
+        self.layout_combo = QComboBox()
+        self.layout_combo.addItem("专注", "focus")
+        self.layout_combo.addItem("分析", "analysis")
+        self.layout_combo.addItem("网格", "grid")
+        self.layout_combo.setFixedHeight(32)
+        self.layout_combo.setToolTip("切换布局预设（可自由拖动，自动持久化）")
+        self.layout_combo.currentIndexChanged.connect(self._on_layout_preset_changed)
+        toolbar.addWidget(self.layout_combo)
+
+        toolbar.addSeparator()
+
         # 多 VFO：新建 VFO 按钮（在当前频谱中心建一个次听 VFO）
         self.new_vfo_btn = QPushButton("+ VFO")
         self.new_vfo_btn.setFixedHeight(32)
@@ -701,6 +718,8 @@ class MainWindow(QMainWindow):
         self._init_sky_view()
 
         # 中央区 = left_tab（8 个页签）；右侧控制/状态/AI 改 QDockWidget 停靠体系
+        # 存为属性：DockLayoutManager / 布局预设需要切页、搬面板
+        self.left_tab = left_tab
         self.setCentralWidget(left_tab)
 
         # 右侧坞 1: 控制面板
@@ -777,6 +796,29 @@ class MainWindow(QMainWindow):
         # 默认显示控制页
         self.control_dock.show()
         self.control_dock.raise_()
+
+        # ---- CarWith 设计体系：面板注册表挂载 + Dock 布局管理器 ----
+        # 把实际创建的控件挂进注册表（注册表只存引用，不拥有生命周期）
+        reg = registry()
+        reg.attach_widget("spectrum", self.spectrum)
+        reg.attach_widget("rf_sky", self.sky_view)
+        reg.attach_widget("weather", self.weather_panel)
+        reg.attach_widget("doppler", self.doppler_panel)
+        reg.attach_widget("module", self.module_panel)
+        reg.attach_widget("sat_track", self.sat_track_panel)
+        reg.attach_widget("new_spacetime", self.new_spacetime_panel)
+        reg.attach_widget("adsb", self.adsb_map_panel)
+        reg.attach_widget("control", self.control_panel)
+        reg.attach_widget("status", self.status_panel)
+        reg.attach_widget("ai", self.ai_panel)
+
+        # Dock 布局管理器：管理停靠/悬浮/折叠窄条/三预设。
+        # 初始不立即 apply_preset（保留既有 tabify 状态）；由 _restore_window_state
+        # 或用户从顶栏预设下拉选择时切换。这里只建好引用与折叠窄条。
+        self.dock_layout = DockLayoutManager(self)
+        # 停靠面板最小宽用 token（弹性下限，不是死值）
+        for d in (self.control_dock, self.status_dock, self.ai_dock):
+            d.setMinimumWidth(tokens().SIZE["min_dock_w"])
 
     def _build_status_bar(self):
         """构建状态栏。
@@ -978,6 +1020,16 @@ class MainWindow(QMainWindow):
         theme_name = self.theme_combo.itemData(index)
         if theme_name:
             self._apply_theme(theme_name)
+
+    def _on_layout_preset_changed(self, index: int):
+        """顶栏布局预设下拉：切换 focus / analysis / grid。"""
+        name = self.layout_combo.itemData(index)
+        if not name:
+            return
+        dlm = getattr(self, "dock_layout", None)
+        if dlm is not None:
+            dlm.apply_preset(name)
+            dlm.save_state()
 
     # ========================================================================
     # 运行参数持久化（desktop_settings.json）
