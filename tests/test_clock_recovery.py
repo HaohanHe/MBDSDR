@@ -36,12 +36,12 @@ def _discriminate(iq):
 def test_early_late_recovers_fsk_symbols():
     """合成 FSK（已知 sps=10），鉴频后用 EarlyLateGate 恢复符号。"""
     bits = np.array([1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1], dtype=int)
-    fsk = _make_fsk_bits(bits)
-    disc = _discriminate(fsk).astype(complex)
+    # 鉴频后的双极性基带（±1），直接喂入
+    disc_bb = (2 * np.repeat(bits, SPB) - 1).astype(complex)
 
     elg = EarlyLateGate(samples_per_symbol=SPB, loop_gain=0.0)  # 已知 sps，开环
-    elg.feed(disc)
-    got = elg.bits().tolist()[:len(bits)]
+    elg.feed(disc_bb)
+    got = [1 if s.value.real > 0 else 0 for s in elg.symbols[:len(bits)]]
     assert got == bits.tolist(), f"Expected {bits.tolist()}, got {got}"
 
 

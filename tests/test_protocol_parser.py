@@ -88,7 +88,7 @@ def test_field_types():
     sync = bytes([0xAA, 0xAA])
     packet = _build_packet(sync, bytes([0x01, 0x02]))
     bits = bytes_to_bits(packet)
-    parser = ProtocolParser(sync_word=sync)
+    parser = ProtocolParser(sync_word=sync, length_offset=0, length_field_bytes=1)
     msg = parser.parse(bits)[0]
 
     assert msg.field("SYNC").type == FieldType.SYNC
