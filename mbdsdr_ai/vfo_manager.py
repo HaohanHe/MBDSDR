@@ -218,6 +218,30 @@ class VfoManager:
             return True
         return False
 
+    # ── 主听 / 次听（primary / secondary）──────────────────
+    #
+    # “主听”即正在解调并送声卡的 VFO，等价于 CubicSDR 的 current（用户点击确认、
+    # 正在听或配置的焦点）。这里暴露一个稳定的字符串 id 视图，供 UI 层接线
+    # （工具栏按钮 / 频谱点击 / Ctrl+Tab 循环）使用，避免 UI 直接持有 VfoState
+    # 引用导致删除后悬空。
+
+    @property
+    def active_vfo_id(self) -> Optional[str]:
+        """当前主听（current）VFO 的 id；无主听返回 None。"""
+        return self.current.vfo_id if self.current is not None else None
+
+    def set_primary(self, vfo_id: str) -> Optional[VfoState]:
+        """把指定 VFO 设为主听（current），并刷新粘滞快照。
+
+        找不到该 id 时返回 None 且不改动现有焦点。与 set_active_context(...,
+        temporary=False) 等价，但按 id 调用，便于 UI 层信号槽接线。
+        """
+        v = self._by_id.get(vfo_id)
+        if v is None:
+            return None
+        self.set_active_context(v, temporary=False)
+        return v
+
     # ── 循环切换 current ──────────────────────────────────
 
     def _cycle(self, step: int) -> Optional[VfoState]:

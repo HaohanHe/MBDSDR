@@ -17,7 +17,7 @@ MBDSDR 桌面端 - SDR++ 式模块面板（信号流图 + 设备选择 + 参数 
 
 无设备时下拉显示"未发现SDR设备"，绝不写死假设备（用户红线）。
 
-配色（日式低饱和）：
+配色（低饱和浅色默认主题）：
   纸底 #F5F3EF / 青灰 #5B7B8C / 赭石 #C4845C
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QLabel, QDoubleSpinBox, QSlider, QGroupBox, QMessageBox, QFrame,
 )
 
-# 日式低饱和配色（用户指定）
+# 低饱和浅色配色（默认主题）
 PAPER = QColor("#F5F3EF")     # 纸底
 STEEL = QColor("#5B7B8C")     # 青灰（主结构/连线）
 OCHRE = QColor("#C4845C")     # 赭石（强调/选中/sink）

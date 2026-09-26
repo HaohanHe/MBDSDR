@@ -56,11 +56,12 @@ Stellarium (StelCore.cpp:1072 updateTransformMatrices) 的天球变换链:
 时间统一来自 mbdsdr_ai.new_spacetime.get_time_engine()（时间穿梭真实驱动），
 不使用系统墙钟做天文计算。
 
-设计风格：日式低饱和 —— 米白 #F5F3EF 纸面、蓝灰 #5B7B8C 主色、
+设计风格：低饱和米白纸面 —— 米白 #F5F3EF 纸面、蓝灰 #5B7B8C 主色、
 橙 #C4845C 强调色、绿 #6BA89A 真实数据、红 #B85C5C 警告。
 字体优先 MiSans，禁用 emoji。
 
-MBDSDR Project - AI定义无线电 - 全开源 GPL-3.0 - 呼号 BI4MIB
+MBDSDR Project - AI定义无线电 - 全开源 GPL-3.0
+呼号由用户在状态栏设置（未设置时角标显“呼号：未设置”），不写死。
 """
 
 import math
@@ -388,6 +389,9 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         # 观测站坐标；未定位时为 None
         self._observer: Optional[Dict[str, float]] = None
 
+        # 操作员呼号（由主窗口 set_callsign 从设置注入；空串 = 未设置）
+        self._callsign: str = ""
+
         # 新时空：授时信息
         self._time_info = {
             "utc_time": None,
@@ -426,7 +430,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
 
         self._proj = self.projection
 
-        # 颜色（日式低饱和）
+        # 颜色（低饱和米白纸面配色）
         self._colors = {
             "paper": QColor("#F5F3EF"),
             "day_zenith": QColor("#DCE7EC"),
@@ -496,6 +500,14 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         if source not in ("none", "real", "sim"):
             source = "none"
         self._data_source = source
+        self.update()
+
+    def set_callsign(self, callsign: str):
+        """设置操作员呼号（由主窗口从 desktop_settings.json 注入）。
+
+        空串/空白 = 未设置，左下角信息卡显“呼号：未设置”。绝不写死呼号。
+        """
+        self._callsign = str(callsign or "").strip()
         self.update()
 
     def set_satellites_connected(self, connected: bool):
@@ -1180,7 +1192,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
     def _draw_info_overlay(self, painter: QPainter):
         """左下角信息卡片。"""
         painter.save()
-        card_w, card_h = 240, 132
+        card_w, card_h = 240, 150
         card_x, card_y = 12, self.height() - card_h - 12
         bg = QColor(245, 243, 239, 220) if self._sky_brightness > 0.5 \
             else QColor(20, 28, 38, 210)
@@ -1237,6 +1249,15 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             else str(utc_now)
         painter.drawText(card_x + 52, y,
                          f"{utc_str} [{self._time_info.get('ntp_status', 'system')}]")
+
+        y += 18
+        painter.setFont(self._font)
+        painter.setPen(label_col)
+        painter.drawText(card_x + 12, y, "呼号")
+        painter.setFont(self._mono_font)
+        painter.setPen(ink)
+        painter.drawText(card_x + 52, y,
+                         self._callsign if self._callsign else "未设置")
 
         y += 18
         painter.setFont(self._font)

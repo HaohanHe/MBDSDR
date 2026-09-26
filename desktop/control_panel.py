@@ -755,3 +755,78 @@ class ControlPanel(QWidget):
     def set_volume(self, volume: int):
         """从外部设置音量。"""
         self.volume_slider.setValue(volume)
+
+    # ========================================================================
+    # 启动恢复用 setter（持久化参数回填）
+    # ------------------------------------------------------------------------
+    # 这些 setter 只在程序启动、从 desktop_settings.json 读回上次参数时调用。
+    # 一律 blockSignals：只更新控件显示与内部真值，不向 main_window 发射变更信号，
+    # 从而不触发后端下发 / 不重复写配置。用户手动操作仍走原有 _on_* 信号路径。
+    # ========================================================================
+
+    def set_frequency_hz(self, freq_hz: float):
+        """从外部恢复中心频率 (Hz)，不发射调谐信号。"""
+        freq_hz = max(FREQ_MIN_HZ, min(FREQ_MAX_HZ, float(freq_hz)))
+        self._freq_hz = freq_hz
+        self._update_freq_display()
+
+    def set_mode(self, mode: str):
+        """从外部恢复解调模式，不发射 mode_changed / vfo_bandwidth_changed。"""
+        mode = (mode or "FM").upper()
+        self._current_mode = mode
+        self.mode_combo.blockSignals(True)
+        self.mode_combo.setCurrentText(mode)
+        self.mode_combo.blockSignals(False)
+        self._populate_presets(mode)
+        self._update_freq_display()
+        # 同步带宽下拉到该模式典型带宽（blockSignals，不 emit）
+        bw = MODE_VFO_BANDWIDTH.get(mode, MODE_VFO_BANDWIDTH["FM"])
+        self.vfo_bw_combo.blockSignals(True)
+        idx = self.vfo_bw_combo.findData(float(bw))
+        if idx >= 0:
+            self.vfo_bw_combo.setCurrentIndex(idx)
+        self.vfo_bw_combo.blockSignals(False)
+
+    def set_gain(self, db: float):
+        """从外部恢复 LNA 增益 (dB)，不发射 gain_changed。"""
+        db = int(max(0, min(49, float(db))))
+        self.gain_slider.blockSignals(True)
+        self.gain_slider.setValue(db)
+        self.gain_slider.blockSignals(False)
+        self.gain_val.setText(f"{db}dB")
+
+    def set_sample_rate(self, rate_hz: float):
+        """从外部恢复采样率档位；无精确匹配时选最近档，不发射 sample_rate_changed。"""
+        rate = float(rate_hz)
+        idx = self.sample_rate_combo.findData(rate)
+        if idx < 0 and self.sample_rate_combo.count():
+            best, best_diff = 0, None
+            for i in range(self.sample_rate_combo.count()):
+                d = abs(float(self.sample_rate_combo.itemData(i)) - rate)
+                if best_diff is None or d < best_diff:
+                    best_diff, best = d, i
+            idx = best
+        self.sample_rate_combo.blockSignals(True)
+        self.sample_rate_combo.setCurrentIndex(idx)
+        self.sample_rate_combo.blockSignals(False)
+
+    def set_vfo_bandwidth(self, bw_hz: float):
+        """从外部恢复 VFO 带宽；无精确匹配选最近档，不发射 vfo_bandwidth_changed。"""
+        bw = float(bw_hz)
+        idx = self.vfo_bw_combo.findData(bw)
+        if idx < 0 and self.vfo_bw_combo.count():
+            best, best_diff = 3, None
+            for i in range(self.vfo_bw_combo.count()):
+                d = abs(float(self.vfo_bw_combo.itemData(i)) - bw)
+                if best_diff is None or d < best_diff:
+                    best_diff, best = d, i
+            idx = best
+        self.vfo_bw_combo.blockSignals(True)
+        self.vfo_bw_combo.setCurrentIndex(idx)
+        self.vfo_bw_combo.blockSignals(False)
+
+    def set_agc(self, enabled: bool):
+        """从外部恢复 AGC 开关，不发射 agc_changed。"""
+        self.agc_check.blockSignals(True)
+        self.agc_check.setChecked(bool(enabled))
+        self.agc_check.blockSignals(False)

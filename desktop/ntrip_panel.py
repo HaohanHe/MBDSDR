@@ -12,7 +12,7 @@ NtripConfigDialog(QDialog) —— 非模态对话框，运行主窗口时可保�
   - 状态指示灯：红=未连接 / 黄=连接中 / 绿=已连接(字节数: N)。
   - QTimer 1s 轮询 NTRIPManager.stats() 刷新收流字节数。
 
-风格：遵循 desktop/themes.py 日式低饱和主题，原生 PySide6，不引入 web。
+风格：遵循 desktop/themes.py 默认低饱和主题，原生 PySide6，不引入 web。
 密码仅明文存本地 ~/.mbdsdr/gui_config.json，绝不写入日志。
 """
 
@@ -39,7 +39,7 @@ if _REPO_ROOT not in sys.path:
 
 from mbdsdr_ai.rtklib_adapter import NTRIPManager, NTRIP_DEFAULT_PORT  # noqa: E402
 
-# 日式低饱和主题里的指示灯颜色（与 themes.py spectrum_colors 对齐，不重色）
+# 默认低饱和主题里的指示灯颜色（与 themes.py spectrum_colors 对齐，不重色）
 _COLOR_IDLE = "#B85C5C"     # 低饱和红 = 未连接/未配置
 _COLOR_BUSY = "#C4B85C"     # 低饱和黄 = 连接中
 _COLOR_OK = "#6BA89A"       # 低饱和青绿 = 已连接

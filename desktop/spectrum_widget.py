@@ -21,7 +21,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QCheckBox, QLabel,
-    QDoubleSpinBox, QSlider, QFrame,
+    QDoubleSpinBox, QSlider, QFrame, QMenu,
 )
 
 try:
@@ -365,33 +365,100 @@ def _effective_vfo(state: "_PlotState") -> Optional[Tuple[float, float]]:
     return None
 
 
-def _draw_vfo_band(painter: QPainter, state: "_PlotState", rect: QRectF):
-    """在谱面画 VFO 带宽矩形（对标 SDR++ waterfall.cpp:221-231 / waterfall.h:77）。
-
-    SDR++ VFO 是半透明填充矩形 + 选中边框；这里用默认主题橙 #C4845C：
-    填充 alpha=30，边框 alpha=120。仅在有真数据时由调用方决定是否绘制。
-    """
-    eff = _effective_vfo(state)
-    if eff is None:
-        return
-    vfo_center, bw = eff
+def _vfo_px_range(state: "_PlotState", rect: QRectF,
+                  center_hz: float, bw_hz: float) -> Optional[Tuple[float, float]]:
+    """返回某个 VFO 矩形在谱面的 (x0, x1) 像素坐标；完全在视口外返回 None。"""
     gen = state.panel.generator
     span = gen.sample_rate_hz
     view_center = _view_center_hz(state)
-    x_center = _freq_to_x(rect, view_center, span, vfo_center)
-    x_half = (bw / 2.0) / span * rect.width()
-    x0 = x_center - x_half
-    x1 = x_center + x_half
+    x_center = _freq_to_x(rect, view_center, span, center_hz)
+    x_half = (bw_hz / 2.0) / span * rect.width()
+    x0, x1 = x_center - x_half, x_center + x_half
     if x1 <= rect.x() or x0 >= rect.x() + rect.width():
-        return  # 完全在视口外
-    fill = QColor(PAL_LINE)
-    fill.setAlpha(30)
-    painter.fillRect(QRectF(x0, rect.y(), x1 - x0, rect.height()), QBrush(fill))
-    edge = QColor(PAL_LINE)
-    edge.setAlpha(120)
-    painter.setPen(QPen(edge, 1, Qt.SolidLine))
-    painter.setBrush(Qt.NoBrush)
-    painter.drawRect(QRectF(x0, rect.y(), x1 - x0, rect.height()))
+        return None
+    return (x0, x1)
+
+
+def _draw_vfo_band(painter: QPainter, state: "_PlotState", rect: QRectF):
+    """在谱面绘制全部 VFO 矩形（对标 SDR++ waterfall.cpp:221-231）。
+
+    - 主听 VFO（= vfo_manager.current）：橙色 #C4845C，实线边框，实心标签。
+    - 次听 VFO：蓝灰 #5B7B8C，虚线细边框，半透明填充。
+    - 每个矩形上方标注 "VFO X  145.800 MHz"。
+    - 若无 VfoManager 或其列表为空，回退到旧版单 VFO 高亮（_effective_vfo）。
+    """
+    mgr = state.panel.vfo_manager
+    gen = state.panel.generator
+
+    # 收集要画的 VFO：优先用 mgr.list_all()；否则回退旧版单带高亮
+    vfos_to_draw = []  # List[(vfo_state_or_None, center_hz, bw_hz, is_primary, letter)]
+    if mgr is not None:
+        all_vfos = mgr.list_all()
+        for idx, v in enumerate(all_vfos):
+            if not v.active or v.bw_hz <= 0:
+                continue
+            letter = chr(ord('A') + (idx % 26))
+            vfos_to_draw.append((v, float(v.center_hz), float(v.bw_hz),
+                                 v is mgr.current, letter))
+
+    if not vfos_to_draw:
+        # 旧版回退：无多 VFO 时仍画单带宽高亮
+        eff = _effective_vfo(state)
+        if eff is None:
+            return
+        vfo_center, bw = eff
+        rng = _vfo_px_range(state, rect, vfo_center, bw)
+        if rng is None:
+            return
+        x0, x1 = rng
+        fill = QColor(PAL_LINE); fill.setAlpha(30)
+        painter.fillRect(QRectF(x0, rect.y(), x1 - x0, rect.height()), QBrush(fill))
+        edge = QColor(PAL_LINE); edge.setAlpha(120)
+        painter.setPen(QPen(edge, 1, Qt.SolidLine))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(x0, rect.y(), x1 - x0, rect.height()))
+        return
+
+    f = QFont()
+    f.setPointSize(8)
+    painter.setFont(f)
+
+    for v, center_hz, bw_hz, is_primary, letter in vfos_to_draw:
+        rng = _vfo_px_range(state, rect, center_hz, bw_hz)
+        if rng is None:
+            continue
+        x0, x1 = rng
+        if is_primary:
+            fill = QColor(PAL_LINE); fill.setAlpha(45)
+            edge = QColor(PAL_LINE); edge.setAlpha(200)
+            pen = QPen(edge, 2, Qt.SolidLine)
+        else:
+            # 次听 VFO：蓝灰 #5B7B8C，虚线细框
+            fill = QColor(PAL_GRID); fill.setAlpha(25)
+            edge = QColor(PAL_GRID); edge.setAlpha(160)
+            pen = QPen(edge, 1, Qt.DashLine)
+        painter.fillRect(QRectF(x0, rect.y(), x1 - x0, rect.height()), QBrush(fill))
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(x0, rect.y(), x1 - x0, rect.height()))
+        # 标签：矩形顶部内部
+        label = f"VFO {letter}  {center_hz/1e6:.3f} MHz"
+        painter.setPen(QPen(edge, 1))
+        painter.drawText(QPointF(x0 + 3, rect.y() + 12), label)
+
+    # Shift 拖拽新建 VFO 的橡皮筋预览
+    if state.vfo_create_band is not None:
+        f_lo, f_hi = state.vfo_create_band
+        c0 = min(f_lo, f_hi); c1 = max(f_lo, f_hi)
+        view_center = _view_center_hz(state)
+        span = gen.sample_rate_hz
+        xa = _freq_to_x(rect, view_center, span, c0)
+        xb = _freq_to_x(rect, view_center, span, c1)
+        fill = QColor(PAL_GRID); fill.setAlpha(35)
+        painter.fillRect(QRectF(xa, rect.y(), xb - xa, rect.height()), QBrush(fill))
+        painter.setPen(QPen(QColor(PAL_GRID), 1, Qt.DashLine))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(xa, rect.y(), xb - xa, rect.height()))
 
 
 class _PlotState:
@@ -416,6 +483,9 @@ class _PlotState:
         self.vfo_offset_hz = 0.0                        # VFO 中心相对调谐中心偏移
         # ---- 视图平移偏移（Ctrl 拖动 RF shift：只移视图不调谐）----
         self.view_offset_hz = 0.0
+        # ---- Shift 拖拽新建 VFO 的橡皮筋临时矩形（频率 Hz 二元组）----
+        # None = 不显示；否则 (freq_start, freq_cur) 在谱面画半透明蓝灰带。
+        self.vfo_create_band: Optional[Tuple[float, float]] = None
 
         # ---- 持久瀑布画布（对标 SDR++ waterfallFb 帧缓冲）----
         # SDR++ pushFFT() 用 memmove 把整帧缓冲上移一行、再把新行写到底部；
@@ -776,6 +846,13 @@ class SpectrumPanel(QWidget):
     """对外统一接口。包含参数工具栏与实际绘图表面（QPainter / OpenGL）。"""
 
     freq_changed = Signal(float)   # MHz
+    # 多 VFO 交互信号：频谱组件只动 vfo_manager 数据层并发出信号，
+    # 主窗口接收后绑定 DSP / 更新控制面板 / 切换主听。
+    vfo_created = Signal(str, float, float)   # vfo_id, center_hz, bw_hz
+    vfo_moved = Signal(str, float)            # vfo_id, center_hz
+    vfo_bw_changed = Signal(str, float)       # vfo_id, bw_hz
+    vfo_selected = Signal(str)                # vfo_id（用户点击设为主听）
+    vfo_removed = Signal(str)                 # vfo_id（用户右键删除）
 
     def __init__(self, parent=None, prefer_opengl: bool = False):
         super().__init__(parent)
@@ -1044,11 +1121,19 @@ class _TuningPlotMixin:
         self._rf_shift = False          # Ctrl 拖动 = 只平移视图，不调谐中心频率
         self._last_pan_emit = 0.0
         # ---- VFO 框拖拽状态（对标 SDR++ waterfall.cpp:466-476 拖动 VFO）----
-        self._vfo_dragging = False
+        # _vfo_drag_mode: None | 'move' | 'resize_l' | 'resize_r'
+        self._vfo_drag_mode: Optional[str] = None
         self._vfo_drag_vfo = None       # 正在拖拽的 VfoState
         self._vfo_press_x = 0.0
         self._vfo_press_gen_center = 0.0
+        # move 模式：记录按下时的 VFO 中心
         self._vfo_press_vfo_center = 0.0
+        # resize 模式：记录按下时的左右边沿绝对频率
+        self._vfo_press_left = 0.0
+        self._vfo_press_right = 0.0
+        # Shift+空白拖拽 = 橡皮筋新建 VFO
+        self._vfo_create_mode = False
+        self._vfo_create_start_x = 0.0
 
     # ------------------------------------------------------------------ 工具
     def _x_ratio(self, event):
@@ -1066,21 +1151,31 @@ class _TuningPlotMixin:
         span = gen.sample_rate_hz
         return view_center - span / 2.0 + x_px / max(1, self.width()) * span
 
-    def _hit_vfo_band(self, x_px: float) -> bool:
-        """某 x 像素是否落在 VFO 带宽矩形横向范围内（需有真数据）。"""
-        if not self.state.panel.generator.has_data():
-            return False
-        eff = _effective_vfo(self.state)
-        if eff is None:
-            return False
-        vfo_center, bw = eff
-        gen = self.state.panel.generator
-        span = gen.sample_rate_hz
-        view_center = _view_center_hz(self.state)
-        x_center = _freq_to_x(QRectF(0, 0, self.width(), 1),
-                              view_center, span, vfo_center)
-        x_half = (bw / 2.0) / span * self.width()
-        return (x_center - x_half) <= x_px <= (x_center + x_half)
+    def _hit_vfo_at(self, x_px: float):
+        """命中检测：返回 (vfo, region)，region ∈ {'body','left','right'}。
+
+        从后往前遍历（后画的 VFO 在上层，重叠时优先命中）。边缘命中容差 6px。
+        未命中返回 (None, None)。
+        """
+        mgr = self.state.panel.vfo_manager
+        if mgr is None or not self.state.panel.generator.has_data():
+            return None, None
+        rect = QRectF(0, 0, self.width(), self._spectrum_height())
+        edge = 6.0
+        for vfo in reversed(mgr.list_all()):
+            if not vfo.active or vfo.bw_hz <= 0:
+                continue
+            rng = _vfo_px_range(self.state, rect, vfo.center_hz, vfo.bw_hz)
+            if rng is None:
+                continue
+            x0, x1 = rng
+            if abs(x_px - x0) <= edge:
+                return vfo, 'left'
+            if abs(x_px - x1) <= edge:
+                return vfo, 'right'
+            if x0 <= x_px <= x1:
+                return vfo, 'body'
+        return None, None
 
     def _snap_center(self) -> float:
         """把当前中心频率对齐到 snap_interval 网格（SDR++ roundl 语义）。"""
@@ -1154,49 +1249,87 @@ class _TuningPlotMixin:
             super().keyPressEvent(event)
 
     # ------------------------------------------------------------------ 鼠标
-    def _begin_vfo_drag(self, x_px: float, event):
-        """命中 VFO 带宽矩形 → 进入 VFO 拖拽模式（而非普通平移调谐）。
+    def _begin_vfo_drag(self, x_px: float, vfo, region: str, event):
+        """命中已有 VFO → 进入移动 / 缩放拖拽模式。
 
         对标 SDR++ waterfall.cpp:336-340 选中 VFO + 466-476 拖动 VFO：
-        - 已有 current VFO 且命中它 → 点击确认收编为 current（temporary=False），移动它；
-        - 否则新建一个 VFO（center=光标频率），继承粘滞带宽/模式。
+        - 点击 VFO body → 设为主听（current）并开始移动；
+        - 拖拽左右边缘 → 调整带宽；
+        - 拖拽同时移动硬件中心频率，使 VFO 始终可见（不把信号拖出视口）。
         """
         state = self.state
         mgr = state.panel.vfo_manager
         gen = state.panel.generator
-        mouse_freq = self._freq_at_x(x_px)
 
-        vfo = None
+        # 点击确认：收编为主听（current），刷新粘滞快照，并通知主窗口
         if mgr is not None:
-            if mgr.current is not None and mgr.current.active:
-                vfo = mgr.current
-                # 点击确认：收编为 current，并刷新粘滞快照
-                mgr.set_active_context(vfo, temporary=False)
-            else:
-                bw0 = (state.vfo_bandwidth_hz if state.vfo_bandwidth_hz
-                       else getattr(mgr, "last_bw_hz", 8000.0))
-                vfo = mgr.add(mouse_freq, bw0, "FM", inherit_last=True)
-                mgr.set_active_context(vfo, temporary=False)
+            mgr.set_active_context(vfo, temporary=False)
+            state.panel.vfo_selected.emit(vfo.vfo_id)
 
-        self._vfo_dragging = True
+        self._vfo_drag_mode = 'move' if region == 'body' else ('resize_l' if region == 'left' else 'resize_r')
         self._vfo_drag_vfo = vfo
         self._vfo_press_x = x_px
         self._vfo_press_gen_center = gen.center_freq_hz
-        self._vfo_press_vfo_center = float(vfo.center_hz) if vfo is not None else mouse_freq
+        self._vfo_press_vfo_center = float(vfo.center_hz)
+        half = float(vfo.bw_hz) / 2.0
+        self._vfo_press_left = float(vfo.center_hz) - half
+        self._vfo_press_right = float(vfo.center_hz) + half
         # 不进入普通平移
         self._is_panning = False
         self._rf_shift = False
+
+    def _delete_vfo(self, vfo_id: str):
+        """删除指定 VFO（至少保留一个），切主听到剩余 VFO，发 vfo_removed。"""
+        mgr = self.state.panel.vfo_manager
+        if mgr is None:
+            return
+        if len(mgr.list_all()) <= 1:
+            return  # 至少保留一个 VFO
+        v = mgr.get(vfo_id)
+        if v is None:
+            return
+        was_current = (mgr.current is v)
+        mgr.remove(vfo_id)
+        # 删的是主听 → 切到列表首个剩余 VFO
+        if was_current and mgr.list_all():
+            mgr.set_active_context(mgr.list_all()[0], temporary=False)
+        self.state.panel.vfo_removed.emit(vfo_id)
+        self.update()
+
+    def contextMenuEvent(self, event):
+        """右键命中 VFO → 弹“删除此 VFO”菜单；否则交给默认（marker 移除）。"""
+        vfo, _region = self._hit_vfo_at(event.pos().x())
+        mgr = self.state.panel.vfo_manager
+        if vfo is not None and mgr is not None and len(mgr.list_all()) > 1:
+            menu = QMenu(self)
+            act = menu.addAction(f"删除此 VFO ({vfo.vfo_id})")
+            chosen = menu.exec(event.globalPos())
+            if chosen == act:
+                self._delete_vfo(vfo.vfo_id)
+            event.accept()
+            return
+        super().contextMenuEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             x = event.position().x()
             y = event.position().y()
-            # 命中 VFO 带宽矩形（谱图区内）→ VFO 拖拽模式，而非普通平移调谐
             in_spectrum = y <= self._spectrum_height()
-            if in_spectrum and self._hit_vfo_band(x):
-                self._begin_vfo_drag(x, event)
-                self.update()
-                return
+            if in_spectrum:
+                vfo, region = self._hit_vfo_at(x)
+                if vfo is not None:
+                    self._begin_vfo_drag(x, vfo, region, event)
+                    self.update()
+                    return
+                # Shift + 空白处 → 橡皮筋新建 VFO
+                if event.modifiers() & Qt.ShiftModifier:
+                    self._vfo_create_mode = True
+                    self._vfo_create_start_x = x
+                    self.state.vfo_create_band = (self._freq_at_x(x), self._freq_at_x(x))
+                    self._is_panning = False
+                    self._rf_shift = False
+                    self.update()
+                    return
             self._press_x = x
             self._press_anchor_x = x
             self._is_panning = True
@@ -1209,15 +1342,41 @@ class _TuningPlotMixin:
         self.state.mouse_x_ratio = r
         self.state.mouse_in_spectrum = True
 
-        # VFO 拖拽：实时移动 VFO 中心 + 调谐中心频率，emit freq_changed
-        if self._vfo_dragging:
+        # Shift 橡皮筋新建：实时更新预览矩形
+        if self._vfo_create_mode:
+            x = event.position().x()
+            f0 = self._freq_at_x(self._vfo_create_start_x)
+            f1 = self._freq_at_x(x)
+            self.state.vfo_create_band = (f0, f1)
+            self.update()
+            return
+
+        # VFO 移动 / 缩放拖拽
+        if self._vfo_drag_mode is not None:
             x = event.position().x()
             gen = self.state.panel.generator
+            vfo = self._vfo_drag_vfo
+            if vfo is None:
+                return
+            # 拖拽时硬件中心频率随光标平移（保持 VFO 在视口内可见）
             shift = -(x - self._vfo_press_x) / max(1, self.width()) * gen.sample_rate_hz
             gen.center_freq_hz = self._vfo_press_gen_center + shift
-            vfo = self._vfo_drag_vfo
-            if vfo is not None:
+
+            if self._vfo_drag_mode == 'move':
                 vfo.center_hz = self._vfo_press_vfo_center + shift
+                self.state.panel.vfo_moved.emit(vfo.vfo_id, float(vfo.center_hz))
+            else:
+                # 缩放：对应边缘跟随光标频率，中心与带宽重算
+                cur_edge = self._freq_at_x(x)
+                if self._vfo_drag_mode == 'resize_l':
+                    left, right = cur_edge, self._vfo_press_right
+                else:
+                    left, right = self._vfo_press_left, cur_edge
+                if right - left > 100.0:   # 最小带宽 100 Hz
+                    vfo.center_hz = (left + right) / 2.0
+                    vfo.bw_hz = right - left
+                    self.state.panel.vfo_bw_changed.emit(vfo.vfo_id, float(vfo.bw_hz))
+
             self._emit_tuned(gen.center_freq_hz)
             self.update()
             return
@@ -1226,9 +1385,12 @@ class _TuningPlotMixin:
         mgr = self.state.panel.vfo_manager
         if mgr is not None and not self._is_panning:
             y = event.position().y()
-            if y <= self._spectrum_height() and self._hit_vfo_band(x_px=event.position().x()):
-                if mgr.current is not None:
-                    mgr.set_active_context(mgr.current, temporary=True)
+            if y <= self._spectrum_height():
+                vfo, _reg = self._hit_vfo_at(event.position().x())
+                if vfo is not None:
+                    mgr.set_active_context(vfo, temporary=True)
+                else:
+                    mgr.clear_active_context()
             else:
                 mgr.clear_active_context()
 
@@ -1252,18 +1414,43 @@ class _TuningPlotMixin:
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
-            # VFO 拖拽结束：对齐网格并 emit 最终中心频率
-            if self._vfo_dragging:
-                self._vfo_dragging = False
+            # 橡皮筋新建 VFO 结束：按 rubber-band 区间 center/bw 创建
+            if self._vfo_create_mode:
+                self._vfo_create_mode = False
+                band = self.state.vfo_create_band
+                self.state.vfo_create_band = None
+                if band is not None:
+                    f0, f1 = band
+                    lo, hi = min(f0, f1), max(f0, f1)
+                    bw = hi - lo
+                    if bw >= 100.0:
+                        center = (lo + hi) / 2.0
+                        mgr = self.state.panel.vfo_manager
+                        if mgr is not None:
+                            mode = getattr(mgr, "last_mode", "FM")
+                            v = mgr.add(center, bw, mode, inherit_last=False)
+                            mgr.set_active_context(v, temporary=False)
+                            self.state.panel.vfo_created.emit(v.vfo_id, center, bw)
+                            self.state.panel.vfo_selected.emit(v.vfo_id)
+                self.update()
+                return
+
+            # VFO 移动/缩放结束：对齐网格并 emit 最终值
+            if self._vfo_drag_mode is not None:
+                self._vfo_drag_mode = None
+                vfo = self._vfo_drag_vfo
+                self._vfo_drag_vfo = None
                 gen = self.state.panel.generator
                 snapped = self._snap_center()
-                # VFO 跟随到对齐后的中心
-                if self._vfo_drag_vfo is not None:
-                    self._vfo_drag_vfo.center_hz = snapped
-                self._vfo_drag_vfo = None
+                if vfo is not None:
+                    # 移动后 VFO 中心跟随对齐后的硬件中心
+                    vfo.center_hz = snapped
+                    self.state.panel.vfo_moved.emit(vfo.vfo_id, float(vfo.center_hz))
+                    self.state.panel.vfo_bw_changed.emit(vfo.vfo_id, float(vfo.bw_hz))
                 self._emit_tuned(snapped)
                 self.update()
                 return
+
             moved = abs(event.position().x() - (self._press_x or 0))
             self._is_panning = False
             if moved > 4:
@@ -1281,8 +1468,9 @@ class _TuningPlotMixin:
                     self.state.markers.pop(0)
             self.update()
         elif event.button() == Qt.RightButton:
-            # 右键移除最近一个 marker
-            if self.state.markers:
+            # 右键未命中 VFO 时：移除最近一个 marker（命中 VFO 的删除菜单在 contextMenuEvent）
+            vfo, _reg = self._hit_vfo_at(event.position().x())
+            if vfo is None and self.state.markers:
                 self.state.markers.pop()
             self.update()
 

@@ -15,12 +15,12 @@ from typing import Optional
 import numpy as np
 
 from PySide6.QtCore import Qt, QTimer, Slot, QDateTime, QTimeZone, QThread, Signal
-from PySide6.QtGui import QAction, QKeySequence, QFont
+from PySide6.QtGui import QAction, QKeySequence, QFont, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTabWidget, QStatusBar, QToolBar, QMenuBar, QMenu, QLabel,
     QFileDialog, QMessageBox, QInputDialog, QComboBox, QPushButton,
-    QFrame, QSizePolicy, QDialog, QDialogButtonBox,
+    QFrame, QSizePolicy, QDialog, QDialogButtonBox, QLineEdit,
     QGroupBox, QFormLayout, QSlider, QSpinBox, QCheckBox,
     QDoubleSpinBox, QProgressDialog,
 )
@@ -44,6 +44,15 @@ from module_panel import ModulePanel
 # 在用户首次点解码/定轨时才创建，避免拖慢启动）。
 from weather_panel import WeatherPanel
 from doppler_panel import DopplerPanel
+from sat_track_panel import SatTrackPanel
+# 卫星闭环跟踪器（mbdsdr_ai.sat_tracker）：选中卫星->实时 az/el/多普勒->自动调谐。
+# 用别名避免与 rf_sky_view 里的展示型 SatelliteTracker 冲突。缺 skyfield 时降级。
+try:
+    from mbdsdr_ai.sat_tracker import SatelliteTracker as LoopSatTracker
+except Exception:  # pragma: no cover
+    LoopSatTracker = None  # type: ignore
+# 运行参数持久化（频率/增益/模式/带宽/采样率/呼号/AGC/主题 落 JSON，退出不丢）
+from settings import DesktopSettings
 
 # 真实 baseband 存盘 + 声卡实时输出（可选依赖，导入失败也不拖垮 GUI）
 try:
@@ -161,6 +170,11 @@ class MainWindow(QMainWindow):
 
         # 状态
         self._current_theme = DEFAULT_THEME
+        # 运行参数持久化：启动即读回上次频率/增益/模式/带宽/采样率/呼号/AGC/主题。
+        # _restoring_settings=True 期间 _apply_theme 不回写配置，避免启动默认主题覆盖
+        # 已读回的主题；控件由专用 setters（内部 blockSignals）回填，不触发 save。
+        self._restoring_settings = True
+        self.settings = DesktopSettings.load()
         self._worker_manager = MCPWorkerManager()
         self._worker: Optional[object] = None
         self._record_timer: Optional[QTimer] = None
@@ -171,10 +185,23 @@ class MainWindow(QMainWindow):
         self._observer_lat: Optional[float] = None
         self._observer_lon: Optional[float] = None
         self.sat_tracker: Optional[SatelliteTracker] = None
-        # 真实串口 GNSS 监测：插上 GNSS 模块后 auto_detect 定位，驱动状态面板 GPS 组
-        # 与天空图观测站坐标。找不到设备/缺依赖时降级为 none，绝不崩、绝不造假坐标。
+        # ---- 卫星闭环自动跟踪（过境预测 -> 闭环调谐）----
+        # loop_tracker 持有选中卫星与实时 az/el/多普勒；_sat_track_timer 500ms 轮询。
+        # 与上面的展示型 sat_tracker（rf_sky_view 桥）互不相干。
+        self._loop_sat_tracker = None      # mbdsdr_ai.sat_tracker.SatelliteTracker
+        self._sat_track_timer: Optional[QTimer] = None
+        self._sat_track_prev_freq_hz: Optional[float] = None
+        self._sat_track_prev_mode: Optional[str] = None
+        self._sat_track_mode: str = "FM"
+        # 真实串口 GNSS 监测：插上 GNSS 模块后由用户在「工具 → 连接 GNSS」里选口/波特率
+        # 启动，驱动状态面板 GPS 组与天空图观测站坐标。找不到设备/缺依赖时降级为 none，
+        # 绝不崩、绝不造假坐标。不在启动时自动开串口（用户可能根本没接 GNSS）。
         self._gnss = RealGNSSMonitor() if RealGNSSMonitor is not None else None
         self._gnss_timer: Optional[QTimer] = None
+        # GNSS 串口配置（持久化到 gui_config.json）：
+        #   port="" → auto_detect；Windows CH340 接收器填 "COM10"
+        self._gnss_port: str = ""
+        self._gnss_baudrate: int = 9600
         # 地面站坐标是否由真实 GNSS 自动设定（True 时才允许 GNSS 写入；
         # 用户在 gui_config.json 手动配置的坐标优先，不被 GNSS 覆盖）。
         self._observer_from_gnss: bool = False
@@ -230,6 +257,8 @@ class MainWindow(QMainWindow):
         # VfoManager 里主/第二 VFO 的 id（None = 未建）
         self._main_vfo_id: Optional[str] = None
         self._vfo2_id: Optional[str] = None
+        # vfo_id → DemodWorker 映射（主听切换时切换哪一路写声卡）
+        self._vfo_workers: dict = {}
         # 主 VFO 收听频率 vs 硬件中心频率：offset = vfo_center - backend_center
         self._vfo_center_hz: float = 0.0
         self._backend_center_hz: float = 0.0
@@ -271,6 +300,10 @@ class MainWindow(QMainWindow):
         # 应用默认主题
         self._apply_theme(DEFAULT_THEME)
 
+        # 用读回的运行参数回填控件（专用 setter 内部 blockSignals，不触发 save/后端）。
+        # 放在 _panels_set_sdr_connected(False) 之后，避免恢复出的频率显示被清成 "--"。
+        self._apply_restored_settings()
+
         # 加载 GUI 配置（窗口大小、频率、主题等）
         QTimer.singleShot(100, self._load_gui_config)
 
@@ -289,11 +322,12 @@ class MainWindow(QMainWindow):
         self._iq_poll_timer.timeout.connect(self._poll_sdr_iq)
 
         # (D) 真实串口 GNSS 轮询定时器：每 1s 读一次 NMEA fix。
-        # UI 初始化完成后再延迟 auto_detect 启动，避免阻塞首屏；找不到设备也不崩。
+        # 不在启动时自动开串口——用户可能没接 GNSS；等「工具 → 连接 GNSS」手动触发。
+        # 定时器照常跑：未连接时 _poll_gnss 把状态显示为“GNSS: 未连接”。
         self._gnss_timer = QTimer(self)
         self._gnss_timer.setInterval(1000)
         self._gnss_timer.timeout.connect(self._poll_gnss)
-        QTimer.singleShot(800, self._start_real_gnss)
+        self._gnss_timer.start()
 
         # (E) UTC 时钟：底部状态栏每秒刷新（独立于 GNSS/IQ 定时器，无硬件也走）
         self._utc_timer = QTimer(self)
@@ -377,6 +411,32 @@ class MainWindow(QMainWindow):
 
         tools_menu.addSeparator()
 
+        # 真实串口 GNSS：手动选择串口号/波特率后打开 NMEA 流
+        gnss_action = QAction("连接 GNSS...", self)
+        gnss_action.triggered.connect(self._open_gnss_dialog)
+        tools_menu.addAction(gnss_action)
+
+        gnss_disconnect_action = QAction("断开 GNSS", self)
+        gnss_disconnect_action.triggered.connect(self._disconnect_gnss)
+        tools_menu.addAction(gnss_disconnect_action)
+
+        tools_menu.addSeparator()
+
+        # 卫星闭环跟踪：开始/停止/更新 TLE（与"卫星跟踪"页签按钮等价）
+        sat_start_action = QAction("开始跟踪选中卫星", self)
+        sat_start_action.triggered.connect(self._menu_start_sat_track)
+        tools_menu.addAction(sat_start_action)
+
+        sat_stop_action = QAction("停止卫星跟踪", self)
+        sat_stop_action.triggered.connect(self._stop_satellite_tracking)
+        tools_menu.addAction(sat_stop_action)
+
+        sat_tle_action = QAction("更新卫星 TLE (Celestrak)", self)
+        sat_tle_action.triggered.connect(self._on_update_sat_tle)
+        tools_menu.addAction(sat_tle_action)
+
+        tools_menu.addSeparator()
+
         about_action = QAction("关于 MBDSDR", self)
         about_action.triggered.connect(self._show_about)
         tools_menu.addAction(about_action)
@@ -430,6 +490,22 @@ class MainWindow(QMainWindow):
         self.waterfall_btn.setChecked(True)
         self.waterfall_btn.clicked.connect(self._toggle_waterfall)
         toolbar.addWidget(self.waterfall_btn)
+
+        toolbar.addSeparator()
+
+        # 多 VFO：新建 VFO 按钮（在当前频谱中心建一个次听 VFO）
+        self.new_vfo_btn = QPushButton("+ VFO")
+        self.new_vfo_btn.setFixedHeight(28)
+        self.new_vfo_btn.setToolTip("在当前频谱中心新建一个 VFO（次听）")
+        self.new_vfo_btn.clicked.connect(self._on_new_vfo_button)
+        toolbar.addWidget(self.new_vfo_btn)
+
+        # 主听/次听循环切换按钮（Ctrl+Tab）
+        self.cycle_vfo_btn = QPushButton("切换主听")
+        self.cycle_vfo_btn.setFixedHeight(28)
+        self.cycle_vfo_btn.setToolTip("在 VFO 之间循环切换主听（Ctrl+Tab）")
+        self.cycle_vfo_btn.clicked.connect(self._on_cycle_vfo)
+        toolbar.addWidget(self.cycle_vfo_btn)
 
         toolbar.addSeparator()
 
@@ -520,6 +596,17 @@ class MainWindow(QMainWindow):
         _is_gl = self.spectrum.__class__.__name__ == "SpectrumGLWidget"
         self._render_label.setText("  渲染: " + ("OpenGL" if _is_gl else "软件渲染 (QPainter)") + "  ")
         self.spectrum.freq_changed.connect(self._on_spectrum_freq_changed)
+        # 共享同一个 VfoManager：频谱绘制/拖拽 与 DSP 绑定/主听切换 操作同一份数据
+        if self._vfo_mgr is not None:
+            self.spectrum.vfo_manager = self._vfo_mgr
+        # 多 VFO 交互信号接线
+        self.spectrum.vfo_created.connect(self._on_vfo_created)
+        self.spectrum.vfo_moved.connect(self._on_vfo_moved)
+        self.spectrum.vfo_bw_changed.connect(self._on_vfo_bw_changed_ui)
+        self.spectrum.vfo_selected.connect(self._on_vfo_selected)
+        self.spectrum.vfo_removed.connect(self._on_vfo_removed)
+        # Ctrl+Tab 循环切换主听 VFO
+        QShortcut(QKeySequence("Ctrl+Tab"), self, self._on_cycle_vfo)
         spectrum_layout.addWidget(self.spectrum, stretch=1)
 
         left_tab.addTab(spectrum_widget, "频谱")
@@ -542,6 +629,16 @@ class MainWindow(QMainWindow):
         # Tab 5: 多普勒定轨面板（LRO / Iridium / 自定义 TLE，EKF/RLS）
         self.doppler_panel = DopplerPanel()
         left_tab.addTab(self.doppler_panel, "多普勒定轨")
+
+        # Tab 6: 卫星闭环自动跟踪（选星->实时 az/el/多普勒->自动调谐 SDR）
+        self.sat_track_panel = SatTrackPanel()
+        left_tab.addTab(self.sat_track_panel, "卫星跟踪")
+        self.sat_track_panel.track_requested.connect(self._start_satellite_tracking)
+        self.sat_track_panel.stop_requested.connect(self._stop_satellite_tracking)
+        self.sat_track_panel.update_tle_requested.connect(self._on_update_sat_tle)
+        self.sat_track_panel.satellite_changed.connect(self._on_sat_combo_changed)
+        # 初始化卫星目录（无观测者位置也能列出 TLE 供选择）
+        self._init_loop_sat_catalog()
 
         # 初始化天空视图演示数据
         self._init_sky_view_demo()
@@ -647,8 +744,21 @@ class MainWindow(QMainWindow):
 
         status_bar.addWidget(QLabel(" | "))
 
-        self.status_gps = QLabel("GPS: --")
+        self.status_gps = QLabel("GNSS: 未连接")
         status_bar.addWidget(self.status_gps)
+
+        status_bar.addWidget(QLabel(" | "))
+
+        # 呼号：全局可编辑（placeholder 提示），值持久化到 desktop_settings.json，
+        # 同时驱动射频天空图角标显示。空串 = 未设置。
+        status_bar.addWidget(QLabel("呼号:"))
+        self.callsign_edit = QLineEdit()
+        self.callsign_edit.setPlaceholderText("输入你的呼号")
+        self.callsign_edit.setMaxLength(16)
+        self.callsign_edit.setFixedWidth(130)
+        self.callsign_edit.setToolTip("业余无线电呼号（落盘保存，显示在射频天空图）")
+        self.callsign_edit.editingFinished.connect(self._on_callsign_edited)
+        status_bar.addWidget(self.callsign_edit)
 
         # 永久右侧：UTC 时钟 + 版本
         self.status_utc = QLabel("UTC: --:--:--")
@@ -759,10 +869,90 @@ class MainWindow(QMainWindow):
             self.theme_combo.setCurrentIndex(idx)
             self.theme_combo.blockSignals(False)
 
+        # 用户手动切主题时持久化；启动恢复阶段不回写（避免默认主题覆盖已读回值）
+        if not getattr(self, "_restoring_settings", False):
+            try:
+                self.settings.set("theme", theme_name)
+            except Exception:
+                pass
+
     def _on_theme_combo_changed(self, index: int):
         theme_name = self.theme_combo.itemData(index)
         if theme_name:
             self._apply_theme(theme_name)
+
+    # ========================================================================
+    # 运行参数持久化（desktop_settings.json）
+    # ========================================================================
+
+    def _apply_restored_settings(self):
+        """启动时把上次持久化的运行参数回填到控件。
+
+        全部走 control_panel 的专用恢复 setter（内部 blockSignals），不发射变更信号，
+        因此不会触发后端下发、也不会立刻写配置。呼号框与天空图角标一并恢复。
+        结束后清掉 _restoring_settings 守卫，之后用户改动才会真正落盘。
+        """
+        s = self.settings
+        # 频率 / 模式 / 增益 / 采样率 / AGC
+        try:
+            self.control_panel.set_frequency_hz(float(s.get("frequency_hz", 98e6)))
+        except Exception:
+            pass
+        try:
+            self.control_panel.set_mode(str(s.get("demod_mode", "FM") or "FM"))
+        except Exception:
+            pass
+        try:
+            self.control_panel.set_gain(float(s.get("gain_db", 20.0)))
+        except Exception:
+            pass
+        try:
+            self.control_panel.set_sample_rate(
+                float(s.get("sample_rate_hz", 2_048_000.0)))
+        except Exception:
+            pass
+        try:
+            self.control_panel.set_agc(bool(s.get("agc_enabled", True)))
+        except Exception:
+            pass
+        # 带宽：0/缺省 = 随模式自动（set_mode 已套好该模式默认带宽），非 0 才显式覆盖
+        bw = float(s.get("bandwidth_hz", 0.0) or 0.0)
+        if bw > 0:
+            try:
+                self.control_panel.set_vfo_bandwidth(bw)
+            except Exception:
+                pass
+        # 呼号：状态栏编辑框 + 天空图角标（blockSignals 避免 editingFinished 回写）
+        cs = str(s.get("callsign", "") or "")
+        try:
+            self.callsign_edit.blockSignals(True)
+            self.callsign_edit.setText(cs)
+            self.callsign_edit.blockSignals(False)
+        except Exception:
+            pass
+        try:
+            self.sky_view.set_callsign(cs)
+        except Exception:
+            pass
+        # 主题（恢复到上次退出时的主题；_restoring_settings 守卫下不回写）
+        try:
+            self._apply_theme(str(s.get("theme", "default") or "default"))
+        except Exception:
+            pass
+        self._restoring_settings = False
+
+    @Slot()
+    def _on_callsign_edited(self):
+        """呼号编辑框失焦/回车 → 持久化 + 刷新天空图角标。"""
+        cs = self.callsign_edit.text().strip()
+        try:
+            self.settings.set("callsign", cs)
+        except Exception:
+            pass
+        try:
+            self.sky_view.set_callsign(cs)
+        except Exception:
+            pass
 
     # ========================================================================
     # MCP 连接管理
@@ -798,10 +988,25 @@ class MainWindow(QMainWindow):
         # 保留原 ai-sdr Mini WebSocket 入口（自研板走 MCP/WebSocket）
         combo.addItem("ai-sdr Mini (WebSocket 192.168.4.1:81)", self._WS_SPECIAL)
 
+        def _dev_label(dev):
+            """设备下拉框显示名：在枚举 label 后追加来源/驱动标签，
+            让 RTL 原生棒与 SoapySDR 总线设备（HackRF/Pluto/Airspy...）一眼可分。"""
+            base = dev.get("label") or dev.get("driver", "SDR 设备")
+            source = (dev.get("source") or "").lower()
+            driver = (dev.get("driver") or "").lower()
+            if source == "soapy":
+                tag = "SoapySDR"
+            elif source == "rtl_native":
+                tag = "RTL-SDR 原生"
+            elif driver:
+                tag = driver
+            else:
+                tag = ""
+            return f"{base} ({tag})" if tag else base
+
         if devices:
             for dev in devices:
-                label = dev.get("label") or dev.get("driver", "SDR 设备")
-                combo.addItem(label, dev)
+                combo.addItem(_dev_label(dev), dev)
         else:
             # 无真实设备：显式提示，且不可选（data=None）
             none_item = "未发现 SDR 设备（请接好 USB/安装 SoapySDR 驱动后点刷新）"
@@ -866,6 +1071,11 @@ class MainWindow(QMainWindow):
             d = combo.currentData()
             enabled = d is not None and d != self._WS_SPECIAL
             param_group.setEnabled(enabled)
+            # PPM 晶振频偏校正只对 RTL-SDR 类设备有意义（廉价棒典型 20~50ppm）；
+            # HackRF/Pluto/Airspy/USRP 等 Soapy 前端无 ppm 概念，置灰该输入。
+            is_rtl = bool(enabled) and isinstance(d, dict) \
+                and (d.get("driver") or "").lower() == "rtlsdr"
+            ppm_spin.setEnabled(is_rtl)
 
         combo.currentIndexChanged.connect(lambda _i: _update_param_state())
         _update_param_state()
@@ -882,7 +1092,7 @@ class MainWindow(QMainWindow):
             combo.addItem("ai-sdr Mini (WebSocket 192.168.4.1:81)", self._WS_SPECIAL)
             if new_devices:
                 for dev in new_devices:
-                    combo.addItem(dev.get("label") or dev.get("driver", "SDR 设备"), dev)
+                    combo.addItem(_dev_label(dev), dev)
             else:
                 combo.addItem("未发现 SDR 设备（请接好 USB/安装 SoapySDR 驱动后点刷新）", None)
                 combo.model().item(combo.count() - 1).setEnabled(False)
@@ -1343,6 +1553,12 @@ class MainWindow(QMainWindow):
         if self._demod_cfg is not None:
             self._demod_cfg.mode = str(mode).upper()
         self._update_main_vfo_offset()
+        # 持久化：频率 + 解调模式（防抖写盘）
+        try:
+            self.settings.set("frequency_hz", float(freq_hz))
+            self.settings.set("demod_mode", str(mode))
+        except Exception:
+            pass
 
     @Slot(float)
     def _on_module_tune(self, freq_hz: float):
@@ -1376,6 +1592,11 @@ class MainWindow(QMainWindow):
                 self._active_sdr_backend.set_gain(float(db))
             except Exception:
                 pass
+        # 持久化：LNA 增益
+        try:
+            self.settings.set("gain_db", float(db))
+        except Exception:
+            pass
 
     def _on_squelch_changed(self, dbfs: float):
         # 本地声卡门控：信号低于此 dBFS 时静音（不下发硬件）
@@ -1444,6 +1665,11 @@ class MainWindow(QMainWindow):
                 self._vfo.set_bandwidth(bw)
         except Exception:
             pass
+        # 持久化：解调模式（带宽由用户在带宽下拉显式改动时另存）
+        try:
+            self.settings.set("demod_mode", str(mode))
+        except Exception:
+            pass
 
     @Slot(float)
     def _on_sample_rate_changed(self, rate_hz: float):
@@ -1461,12 +1687,22 @@ class MainWindow(QMainWindow):
         self._start_iq_streams()
         # 刷新底部状态栏采样率显示
         self._update_status_bar()
+        # 持久化：采样率
+        try:
+            self.settings.set("sample_rate_hz", float(rate_hz))
+        except Exception:
+            pass
 
     # ---- Agent A 新增控件信号槽（无后端时 no-op；所有后端调用 try/except）----
 
     @Slot(bool)
     def _on_agc_changed(self, enabled: bool):
         """控制面板 AGC 开关 → 后端 set_agc。"""
+        # 持久化 AGC 开关（无后端也要存，连接后生效）
+        try:
+            self.settings.set("agc_enabled", bool(enabled))
+        except Exception:
+            pass
         if self._active_sdr_backend is None:
             return
         try:
@@ -1529,6 +1765,11 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
         self._update_status_bar()
+        # 持久化：VFO 带宽
+        try:
+            self.settings.set("bandwidth_hz", float(bw_hz))
+        except Exception:
+            pass
 
     @Slot(float)
     def _on_step_changed(self, step_hz: float):
@@ -1685,6 +1926,8 @@ class MainWindow(QMainWindow):
         self._vfo_in_sr = float(sr)
 
         # VfoManager 登记 + bind_dsp（对照 SDR++ vfo_manager.cpp:16,30-49）
+        # vfo_id → DemodWorker 映射：主听切换时按 id 切换哪一路写声卡。
+        self._vfo_workers = {}
         if self._vfo_mgr is not None:
             s1 = self._vfo_mgr.add(self._vfo_center_hz, self._vfo_bw,
                                    self._demod_cfg.mode)
@@ -1695,6 +1938,8 @@ class MainWindow(QMainWindow):
                                    self._demod_cfg.mode)
             self._vfo_mgr.bind_dsp(s2.vfo_id, vfo2, output_stream=None)
             self._vfo2_id = s2.vfo_id
+            # 首建：s1（主 VFO）为默认主听
+            self._vfo_mgr.set_active_context(s1, temporary=False)
 
         # 同步当前解调模式 / 静噪到 worker 共享配置
         try:
@@ -1716,6 +1961,11 @@ class MainWindow(QMainWindow):
         pipe.frame_ready.connect(self._on_pipeline_frame_ready)
         pipe.start()
         self._pipeline = pipe
+        # 登记 vfo_id → demod worker（主听切换时切换哪一路写声卡）
+        self._vfo_workers = {
+            self._main_vfo_id: pipe._demod1,
+            self._vfo2_id: pipe._demod2,
+        }
         # 首帧：把 offset（= vfo_center - backend_center）推给 DDC
         self._update_main_vfo_offset()
 
@@ -1727,18 +1977,124 @@ class MainWindow(QMainWindow):
             return self._backend_center_hz
 
     def _update_main_vfo_offset(self):
-        """把主 VFO 收听频率搬到 DDC：offset = vfo_center - backend_center。
+        """把每个已绑定 DSP 的 VFO 收听频率搬到各自 DDC：offset = vfo_center - backend_center。
 
         调用链：UI 调谐事件 → _on_tune_* → 本方法 →
         VfoManager.push_offset(vfo_id, offset) → dsp_vfo.set_offset(offset)
         → VFO._rebuild_xlator() 重算 _d_theta（dsp.py:980），process() 真搬频。
+        多 VFO 时每个 DDC 各自搬频到自己的中心频率。
         """
-        offset = self._vfo_center_hz - self._backend_center_hz
-        if self._vfo_mgr is not None and self._main_vfo_id is not None:
+        if self._vfo_mgr is None:
+            return
+        for v in self._vfo_mgr.list_all():
             try:
-                self._vfo_mgr.push_offset(self._main_vfo_id, offset)
+                offset = float(v.center_hz) - self._backend_center_hz
+                self._vfo_mgr.push_offset(v.vfo_id, offset)
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------ 多 VFO 接线
+    def _on_new_vfo_button(self):
+        """工具栏「+ VFO」：在当前频谱中心新建一个次听 VFO。
+
+        带宽取当前主 VFO 带宽（_vfo_bw，默认 12.5 kHz）。新建后设为主听。
+        若流水线已运行且还有空闲 DDC 通道（当前共 2 路 demod worker），
+        则把新 VFO 绑到对应 worker；超出 2 路的 VFO 只在频谱上显示，
+        次听 VFO 解调待后续流水线扩展为动态通道。
+        """
+        mgr = self._vfo_mgr
+        if mgr is None:
+            return
+        center = self.spectrum.generator.center_freq_hz
+        mode = self._demod_cfg.mode if self._demod_cfg else "FM"
+        v = mgr.add(center, self._vfo_bw, mode, inherit_last=False)
+        mgr.set_active_context(v, temporary=False)
+        self.statusBar().showMessage(
+            f"新建 VFO {v.vfo_id} @ {center/1e6:.3f} MHz", 3000)
+        # 新建后立即把 offset 推给已绑定 DSP（若有）
+        self._update_main_vfo_offset()
+        self.spectrum._plot.update()
+
+    def _on_cycle_vfo(self):
+        """Ctrl+Tab / 「切换主听」按钮：在 VFO 之间循环切到下一个主听。"""
+        mgr = self._vfo_mgr
+        if mgr is None or not mgr.list_all():
+            return
+        nxt = mgr.next()
+        if nxt is None:
+            return
+        self._apply_primary_vfo(nxt.vfo_id)
+
+    def _on_vfo_created(self, vfo_id: str, center_hz: float, bw_hz: float):
+        """频谱 Shift 拖拽新建 VFO：尝试绑 DSP 通道（超出 2 路则仅显示）。"""
+        # Shift 拖拽新建的 VFO 已由频谱组件 add() 进 mgr；这里补 offset 推送
+        self._update_main_vfo_offset()
+        self.statusBar().showMessage(
+            f"新建 VFO {vfo_id} @ {center_hz/1e6:.3f} MHz", 3000)
+
+    def _on_vfo_moved(self, vfo_id: str, center_hz: float):
+        """VFO 被拖拽移动：更新该 VFO 的 DDC offset。"""
+        mgr = self._vfo_mgr
+        if mgr is None:
+            return
+        v = mgr.get(vfo_id)
+        if v is None:
+            return
+        try:
+            offset = float(center_hz) - self._backend_center_hz
+            mgr.push_offset(vfo_id, offset)
+        except Exception:
+            pass
+
+    def _on_vfo_bw_changed_ui(self, vfo_id: str, bw_hz: float):
+        """VFO 边缘拖拽改带宽：推到该 VFO 的 DDC。"""
+        mgr = self._vfo_mgr
+        if mgr is None:
+            return
+        try:
+            mgr.push_bandwidth(vfo_id, float(bw_hz))
+        except Exception:
+            pass
+
+    def _on_vfo_selected(self, vfo_id: str):
+        """点击 VFO 矩形 → 设为主听，切换声卡输出到该 VFO 的解调 worker。"""
+        self._apply_primary_vfo(vfo_id)
+
+    def _apply_primary_vfo(self, vfo_id: str):
+        """把 vfo_id 设为主听：该路 demod 写声卡，其余静音。更新控制面板。"""
+        mgr = self._vfo_mgr
+        if mgr is not None:
+            mgr.set_primary(vfo_id)
+        # 切换声卡输出：在 vfo_id → worker 映射里，主听那路 audio_enabled=True
+        workers = getattr(self, "_vfo_workers", {}) or {}
+        for vid, worker in workers.items():
+            try:
+                worker.set_audio_enabled(vid == vfo_id)
+            except Exception:
+                pass
+        # 更新控制面板频率/模式显示为主听 VFO 的参数
+        v = mgr.get(vfo_id) if mgr is not None else None
+        if v is not None:
+            try:
+                self.control_panel.set_freq_fm(v.center_hz / 1e6)
+                self._vfo_center_hz = float(v.center_hz)
+                self._update_main_vfo_offset()
+            except Exception:
+                pass
+        tag = "主听" if vfo_id in workers else "次听-未解调"
+        self.statusBar().showMessage(
+            f"主听切换 → {vfo_id}（{tag}）", 3000)
+
+    def _on_vfo_removed(self, vfo_id: str):
+        """频谱右键删除 VFO：清掉 worker 映射并切主听到剩余 VFO。"""
+        workers = getattr(self, "_vfo_workers", {}) or {}
+        workers.pop(vfo_id, None)
+        # 被删的若是主听，_apply_primary_vfo 会切到 mgr.current（频谱已处理）
+        if self._vfo_mgr is not None:
+            cur = self._vfo_mgr.active_vfo_id
+            if cur is not None:
+                self._apply_primary_vfo(cur)
+        self.statusBar().showMessage(f"已删除 VFO {vfo_id}", 3000)
 
     @Slot(object, float)
     def _on_pipeline_frame_ready(self, iq: np.ndarray, sr: float):
@@ -1793,14 +2149,15 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             self._pipeline = None
-        # 清 VfoManager 里的运行时绑定
+        # 清 vfo_id → worker 映射
+        self._vfo_workers = {}
+        # 清 VfoManager 里的运行时绑定（全部 VFO，含用户新建的）
         if self._vfo_mgr is not None:
-            for vid in (self._main_vfo_id, self._vfo2_id):
-                if vid is not None:
-                    try:
-                        self._vfo_mgr.remove(vid)
-                    except Exception:
-                        pass
+            for v in list(self._vfo_mgr.list_all()):
+                try:
+                    self._vfo_mgr.remove(v.vfo_id)
+                except Exception:
+                    pass
         self._main_vfo_id = None
         self._vfo2_id = None
         self._vfo = None
@@ -2614,6 +2971,142 @@ class MainWindow(QMainWindow):
         # 坐标来源只能是真实 GNSS 或 gui_config.json 手动配置，恒为 real
         self.sky_view.set_data_source("real")
 
+    # ========================================================================
+    # 卫星闭环自动跟踪（过境预测 -> 实时 az/el/多普勒 -> 自动调谐 SDR）
+    # ========================================================================
+    def _init_loop_sat_catalog(self):
+        """创建闭环跟踪器并填充卫星下拉框（无观测者位置也能列出 TLE）。"""
+        if LoopSatTracker is None:
+            return
+        try:
+            self._loop_sat_tracker = LoopSatTracker(None)
+        except Exception:
+            self._loop_sat_tracker = None
+            return
+        names = [s["name"] for s in self._loop_sat_tracker.list_satellites()]
+        self.sat_track_panel.populate_satellites(names)
+        self.sat_track_panel.set_tle_date(self._loop_sat_tracker.tle_date)
+        if names:
+            self.sat_track_panel.set_downlink_mhz(
+                self._loop_sat_tracker.downlink_freq_for(names[0]) / 1e6)
+
+    def _on_sat_combo_changed(self, name: str):
+        """下拉框切换卫星：回填该星的标准下行频率。"""
+        if self._loop_sat_tracker is not None and name:
+            f = self._loop_sat_tracker.downlink_freq_for(name)
+            if f > 0:
+                self.sat_track_panel.set_downlink_mhz(f / 1e6)
+
+    def _on_update_sat_tle(self):
+        """从 Celestrak 在线刷新内置 TLE；失败保留内置，不崩。"""
+        if self._loop_sat_tracker is None:
+            self._init_loop_sat_catalog()
+        if self._loop_sat_tracker is None:
+            return
+        n = self._loop_sat_tracker.update_tle_from_celestrak()
+        names = [s["name"] for s in self._loop_sat_tracker.list_satellites()]
+        self.sat_track_panel.populate_satellites(names)
+        self.sat_track_panel.set_tle_date(self._loop_sat_tracker.tle_date)
+        if n > 0:
+            self.statusBar().showMessage(f"TLE 已更新（{n} 颗刷新）", 4000)
+        else:
+            self.statusBar().showMessage("TLE 在线更新失败，使用内置 TLE", 4000)
+
+    def _menu_start_sat_track(self):
+        """菜单项触发：等价于点面板上的开始按钮。"""
+        name = self.sat_track_panel.sat_combo.currentText().strip()
+        if not name:
+            return
+        self._start_satellite_tracking(name, self.sat_track_panel.current_downlink_hz())
+
+    def _start_satellite_tracking(self, sat_name: str, downlink_freq_hz: float):
+        """进入闭环自动跟踪：选星 -> 500ms 轮询 az/el/多普勒 -> 自动调谐 SDR。
+
+        硬约束：
+          - 调谐频率 = 下行频率 + 多普勒偏移（含多普勒校正）；
+          - 仰角 < 5° 时停止并提示过境结束；
+          - 无观测者位置时拒绝跟踪并提示。
+        """
+        if LoopSatTracker is None:
+            self.statusBar().showMessage("卫星跟踪不可用（缺 skyfield 依赖）", 4000)
+            return
+        if self._observer_lat is None or self._observer_lon is None:
+            self.sat_track_panel.set_tracking_state(False)
+            self.statusBar().showMessage(
+                "需要观测者位置：连接 GNSS 或在 gui_config.json 配置 observer_lat/lon",
+                6000)
+            return
+
+        from mbdsdr_ai.sat_passes import GroundStation
+        gs = GroundStation(lat_deg=self._observer_lat,
+                           lon_deg=self._observer_lon)
+        if self._loop_sat_tracker is None:
+            self._loop_sat_tracker = LoopSatTracker(gs)
+        else:
+            # 切换观测站坐标后必须在 select_satellite 之前注入，
+            # 否则 _build_satellite 仍用旧 Topos。
+            self._loop_sat_tracker.ground_station = gs
+
+        if not self._loop_sat_tracker.select_satellite(sat_name):
+            self.statusBar().showMessage(f"无法选中卫星 {sat_name}", 4000)
+            return
+        self._loop_sat_tracker.set_downlink_freq(downlink_freq_hz)
+
+        # 记录调谐前频率/模式，过境结束后恢复
+        self._sat_track_prev_freq_hz = self._vfo_center_hz
+        self._sat_track_prev_mode = getattr(self.control_panel, "_current_mode", "FM")
+        # 气象卫星 APT 用 WFM 接收；业余中继沿用当前模式
+        if sat_name.upper().startswith(("NOAA", "METEOR", "FENGYUN")):
+            self._sat_track_mode = "WFM"
+        else:
+            self._sat_track_mode = self._sat_track_prev_mode or "FM"
+
+        if self._sat_track_timer is None:
+            self._sat_track_timer = QTimer(self)
+            self._sat_track_timer.setInterval(500)
+            self._sat_track_timer.timeout.connect(self._poll_satellite_track)
+        self._sat_track_timer.start()
+        self.sat_track_panel.set_tracking_state(True)
+        self.statusBar().showMessage(
+            f"开始跟踪 {sat_name}（下行 {downlink_freq_hz/1e6:.4f} MHz）", 4000)
+        self._poll_satellite_track()  # 立即先调谐一次
+
+    def _poll_satellite_track(self):
+        """500ms 轮询：取实时 az/el/多普勒 -> 自动调谐 SDR -> 刷新面板。"""
+        if self._loop_sat_tracker is None:
+            return
+        pos = self._loop_sat_tracker.current_position()
+        self.sat_track_panel.update_position(pos)
+        if not pos.get("valid"):
+            return
+        el = float(pos["elevation"])
+        # 仰角 < 5°：过境结束，停止闭环
+        if el < 5.0:
+            self._stop_satellite_tracking()
+            self.statusBar().showMessage(
+                f"卫星过境结束（仰角 {el:.1f}° < 5°）", 6000)
+            return
+        # 核心：调谐频率 = 下行频率 + 多普勒偏移（含多普勒校正）
+        corrected = float(pos["corrected_freq_hz"])
+        try:
+            self._on_tune_sdr(corrected, self._sat_track_mode)
+        except Exception:
+            pass
+
+    def _stop_satellite_tracking(self):
+        """停止闭环跟踪，恢复用户之前的接收频率。"""
+        if self._sat_track_timer is not None:
+            self._sat_track_timer.stop()
+        self.sat_track_panel.set_tracking_state(False)
+        if self._sat_track_prev_freq_hz is not None:
+            mode = self._sat_track_prev_mode or "FM"
+            try:
+                self._on_tune_sdr(self._sat_track_prev_freq_hz, mode)
+            except Exception:
+                pass
+        self._sat_track_prev_freq_hz = None
+        self.statusBar().showMessage("卫星跟踪已停止", 3000)
+
     def _update_sky_satellites(self):
         """天空图周期任务：仅刷新新时空授时信息。
 
@@ -2651,21 +3144,69 @@ class MainWindow(QMainWindow):
     # 真实串口 GNSS（NMEA）轮询
     # ========================================================================
 
-    def _start_real_gnss(self):
-        """UI 初始化完成后启动真实串口 GNSS auto_detect。
+    def _open_gnss_dialog(self):
+        """弹出 GNSS 串口连接对话框：选串口号（如 COM10）+ 波特率。
 
-        找不到设备 / 缺 pyserial 时 start() 返回 False，不抛异常、不阻塞 UI。
-        无论成败都开启 1s 轮询定时器：无设备时 get_position() 返回 source="none"，
-        状态面板与天空图停留在“未连接/地面站未设置”空状态。
+        串口号留空 → auto_detect 自动扫描所有候选口。确定后先断开旧连接再按新参数
+        start()；打开失败不抛异常，仅在状态栏提示。成功/失败均持久化到 gui_config.json。
         """
+        if self._gnss is None:
+            QMessageBox.warning(self, "GNSS", "串口 GNSS 依赖不可用（pyserial 未安装）。")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("连接 GNSS")
+        form = QFormLayout(dlg)
+        port_edit = QLineEdit(self._gnss_port)
+        port_edit.setPlaceholderText("COM10（留空自动检测）")
+        form.addRow("串口号:", port_edit)
+        baud_combo = QComboBox()
+        for b in (9600, 19200, 38400, 57600, 115200):
+            baud_combo.addItem(str(b), b)
+        idx = baud_combo.findData(self._gnss_baudrate)
+        if idx >= 0:
+            baud_combo.setCurrentIndex(idx)
+        form.addRow("波特率:", baud_combo)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        port = port_edit.text().strip()
+        baud = int(baud_combo.currentData())
+        self._gnss_port = port
+        self._gnss_baudrate = baud
+        # 若已连着旧口，先干净断开再按新参数重开（reader 内部自带热插拔重连）
+        try:
+            self._gnss.stop()
+        except Exception:
+            pass
+        ok = False
+        try:
+            ok = bool(self._gnss.start(port or None, baud))
+        except Exception:
+            ok = False
+        if ok:
+            self.statusBar().showMessage(
+                f"GNSS 已连接: {port or '自动检测'} @ {baud}，正在搜星…", 5000)
+        else:
+            self.statusBar().showMessage(
+                f"GNSS 连接失败: {port or '自动检测'} @ {baud}"
+                f"（检查串口/波特率/接线，端口是否被占用）", 10000)
+        try:
+            self._save_gui_config()
+        except Exception:
+            pass
+
+    def _disconnect_gnss(self):
+        """手动断开 GNSS 串口（保留轮询定时器，状态栏回到“未连接”）。"""
         if self._gnss is None:
             return
         try:
-            self._gnss.start()
+            self._gnss.stop()
         except Exception:
             pass
-        if self._gnss_timer is not None:
-            self._gnss_timer.start()
+        self.statusBar().showMessage("GNSS 已断开", 3000)
 
     @Slot()
     def _poll_gnss(self):
@@ -2699,13 +3240,26 @@ class MainWindow(QMainWindow):
             self.status_panel.update_gnss(fix_dict)
         except Exception:
             pass
-        # 底部状态栏 GPS 标签（同一串口数据源，避免再走 worker 双写）
+        # 底部状态栏 GNSS 标签：三态文案（同一串口数据源，不走 worker 双写）
         try:
-            if pos.source == "real" and pos.lat is not None and pos.lon is not None:
-                self.status_gps.setText(
-                    f"GPS: {float(pos.lat):.4f}, {float(pos.lon):.4f}")
+            connected = bool(self._gnss.is_connected)
+        except Exception:
+            connected = False
+        try:
+            if not connected:
+                self.status_gps.setText("GNSS: 未连接")
             else:
-                self.status_gps.setText("GPS: 未连接")
+                sats = pos.sats if isinstance(pos.sats, int) and pos.sats >= 0 else 0
+                if pos.lat is not None and pos.lon is not None:
+                    ns = "N" if float(pos.lat) >= 0 else "S"
+                    ew = "E" if float(pos.lon) >= 0 else "W"
+                    hdop_s = (f" HDOP={float(pos.hdop):.1f}"
+                              if isinstance(pos.hdop, (int, float)) else "")
+                    self.status_gps.setText(
+                        f"GNSS: {abs(float(pos.lat)):.4f}°{ns} "
+                        f"{abs(float(pos.lon)):.4f}°{ew} {sats}星{hdop_s}")
+                else:
+                    self.status_gps.setText(f"GNSS: 搜索中/{sats} 星")
         except Exception:
             pass
         # 天空图观测站坐标与数据来源角标
@@ -2779,6 +3333,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """关闭时断开连接并保存配置。"""
+        # 运行参数（频率/增益/模式/带宽/采样率/呼号/AGC/主题）立即落盘，退出不丢
+        try:
+            self.settings.flush()
+        except Exception:
+            pass
         self._save_gui_config()
         self._disconnect()
         # 停止真实串口 GNSS 轮询定时器与后台串口读线程
@@ -2832,6 +3391,8 @@ class MainWindow(QMainWindow):
                 "show_waterfall": getattr(self.spectrum, '_show_waterfall', True),
                 "observer_lat": self._observer_lat,
                 "observer_lon": self._observer_lon,
+                "gnss_port": self._gnss_port,
+                "gnss_baudrate": self._gnss_baudrate,
             }
             # NTRIP 配置：对话框已打开则取当前表单值；否则保留磁盘上的旧值。
             # 密码本地明文保存（不打印日志），未配置时写空串。
@@ -2874,6 +3435,14 @@ class MainWindow(QMainWindow):
             # 恢复观测站坐标：缺失时默认 None（未配置），不再回退到长春硬编码坐标
             self._observer_lat = config.get("observer_lat")
             self._observer_lon = config.get("observer_lon")
+            # 恢复 GNSS 串口配置（port="" 留空 → 连接时 auto_detect）
+            try:
+                gp = config.get("gnss_port", "")
+                self._gnss_port = str(gp) if gp else ""
+                gb = config.get("gnss_baudrate", 9600)
+                self._gnss_baudrate = int(gb)
+            except Exception:
+                pass
             # 坐标就位后同步 SatelliteTracker 与天空图空状态/角标
             self._apply_observer_location()
             # 恢复主题

@@ -20,5 +20,12 @@ if not defined PYW (
   exit /b 1
 )
 
+rem 快速依赖检查：PySide6 缺失时提示先跑 run_windows.bat，不静默失败
+"%PYW%" -c "import PySide6" >nul 2>nul
+if errorlevel 1 (
+  mshta "javascript:new ActiveXObject('WScript.Shell').Popup('依赖未安装。请先双击 scripts\run_windows.bat 完成依赖安装，之后再用本入口启动。',0,'MBDSDR',48);close()"
+  exit /b 1
+)
+
 start "MBDSDR" "%PYW%" "%~dp0..\desktop\main.py"
 exit /b 0

@@ -596,14 +596,25 @@ class SerialGNSSReader:
         return serial.Serial(port, baudrate, timeout=1.0)
 
     def start(self, port: Optional[str] = None, baudrate: Optional[int] = None):
-        """打开串口并启动后台读取线程。port/baudrate 为 None 时先 auto_detect。"""
+        """打开串口并启动后台读取线程。
+
+        - ``port`` 为 None / 空串：先 ``auto_detect()`` 扫描所有候选口×波特率；
+        - ``port`` 指定（如 Windows "COM10"）：直接打开该口；``baudrate`` 缺省用 9600。
+        打开失败（占用/无权限/不存在）返回 False，不抛异常。
+        """
         if self._running.is_set():
             return
-        if port is None or baudrate is None:
+        # 空串 / 纯空格视为未指定 → auto_detect
+        if isinstance(port, str) and port.strip() == "":
+            port = None
+        if port is None:
             info = self.auto_detect()
             if info is None:
                 return False
             port, baudrate = info["port"], info["baudrate"]
+        elif baudrate is None:
+            # 用户指定了串口号但没给波特率：CH340 GNSS 模块默认 9600
+            baudrate = 9600
         try:
             self._ser = self._open_serial(port, baudrate)
         except Exception:

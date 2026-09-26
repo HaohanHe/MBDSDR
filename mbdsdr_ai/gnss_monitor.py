@@ -398,9 +398,15 @@ class RealGNSSMonitor:
 
     用法::
         m = RealGNSSMonitor()
-        m.start()                 # auto_detect；找不到设备也不崩
+        m.start()                  # auto_detect；找不到设备也不崩
+        m.start("COM10", 9600)     # Windows 下显式指定 CH340 串口号/波特率
         pos = m.get_position()     # GNSSPosition；无 fix 时 source="none"
         m.stop()
+
+    三种 UI 状态由 is_connected() + get_position() 共同判定：
+      - ``is_connected()==False``                 → 串口未开（显示“未连接”）；
+      - 已连接但 ``pos.lat is None``               → 正在搜星（显示“搜索中/N 星”）；
+      - 已连接且 ``pos.lat`` 有值                   → 已定位。
     """
 
     def __init__(self, port: Optional[str] = None, baudrate: Optional[int] = None):
@@ -409,13 +415,29 @@ class RealGNSSMonitor:
         self._reader = SerialGNSSReader() if SerialGNSSReader is not None else None
         self._started = False
 
-    def start(self) -> bool:
+    def start(self, port: Optional[str] = None,
+              baudrate: Optional[int] = None) -> bool:
+        """打开串口并启动后台 NMEA 读取线程。
+
+        - ``port`` 为 None / 空串时走 ``SerialGNSSReader.auto_detect()`` 自动扫描；
+          Windows 下可传 "COM10"（CH340 USB 转串口 GNSS 接收器）。
+        - ``baudrate`` 默认 9600（ATGM336H / u-blox NEO-M8N 默认波特率）。
+        - 找不到设备 / 端口被占用 / 无权限时返回 False，不抛异常、不崩 UI。
+        """
         if self._reader is None:
+            self._started = False
             return False
+        p = port if port is not None else self.port
+        b = baudrate if baudrate is not None else self.baudrate
+        # 空串 / 纯空格视为“未指定”→ auto_detect
+        if isinstance(p, str) and p.strip() == "":
+            p = None
         try:
-            self._started = bool(self._reader.start(self.port, self.baudrate))
+            self._started = bool(self._reader.start(p, b))
         except Exception:
             self._started = False
+        if self._started:
+            self.port, self.baudrate = p, b
         return self._started
 
     def stop(self):
@@ -425,6 +447,25 @@ class RealGNSSMonitor:
             except Exception:
                 pass
         self._started = False
+
+    @property
+    def is_connected(self) -> bool:
+        """串口是否真正打开且在读 NMEA（后台读线程维护状态）。
+
+        拔线 / 长时间无数据时由 reader 内部置 False 并重连；这里只读不阻塞。
+        reader 不可用 / 异常时一律返回 False，绝不向上抛。
+        """
+        if self._reader is None:
+            return False
+        try:
+            return bool(self._reader.is_connected())
+        except Exception:
+            return False
+
+    @property
+    def started(self) -> bool:
+        """本次会话是否已调用过 start()（不管底层串口当前是否在线）。"""
+        return self._started
 
     def get_position(self) -> GNSSPosition:
         """返回最新定位。无串口/无 fix 时 source='none'，坐标全 None。"""

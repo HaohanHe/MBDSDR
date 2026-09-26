@@ -274,6 +274,50 @@ def test_update_last_state_refreshes():
     assert v2.gain_db == 30.0
 
 
+# ── 8. 主听/次听：active_vfo_id / set_primary ──────────────────
+
+def test_active_vfo_id_none_initially():
+    mgr = VfoManager()
+    assert mgr.active_vfo_id is None
+
+
+def test_active_vfo_id_after_set_primary():
+    mgr = VfoManager()
+    v1 = mgr.add(100e6, 12.5e3, "FM")
+    v2 = mgr.add(200e6, 12.5e3, "FM")
+    # 未确认主听时 active_vfo_id 为 None
+    assert mgr.active_vfo_id is None
+    # set_primary 收编 v1
+    assert mgr.set_primary(v1.vfo_id) is v1
+    assert mgr.active_vfo_id == v1.vfo_id
+    # 切到 v2
+    assert mgr.set_primary(v2.vfo_id) is v2
+    assert mgr.active_vfo_id == v2.vfo_id
+    # 未知 id 不改动
+    assert mgr.set_primary("nope") is None
+    assert mgr.active_vfo_id == v2.vfo_id
+
+
+def test_two_vfos_switch_active_and_delete():
+    """创建两个 VFO、切换主听、删除一个，验证剩余 VFO 主听指针正确。"""
+    mgr = VfoManager()
+    v1 = mgr.add(100e6, 12.5e3, "FM")
+    v2 = mgr.add(150e6, 12.5e3, "AM")
+    mgr.set_primary(v1.vfo_id)
+    assert mgr.active_vfo_id == v1.vfo_id
+    # 切到 v2
+    mgr.set_primary(v2.vfo_id)
+    assert mgr.active_vfo_id == v2.vfo_id
+    # 删除 v1（非主听），主听不变
+    mgr.remove(v1.vfo_id)
+    assert mgr.get(v1.vfo_id) is None
+    assert mgr.active_vfo_id == v2.vfo_id
+    assert [v.vfo_id for v in mgr.list_all()] == [v2.vfo_id]
+    # 删除主听 v2 → current 清空
+    mgr.remove(v2.vfo_id)
+    assert mgr.active_vfo_id is None
+
+
 if __name__ == "__main__":
     import inspect
     fns = [(n, f) for n, f in sorted(globals().items())
