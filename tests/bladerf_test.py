@@ -188,19 +188,12 @@ class TestBackendNoDeviceNoCrash(unittest.TestCase):
 class TestSdrBackendIntegration(unittest.TestCase):
     """sdr_backend.enumerate_all_sdr_devices() 必须包含 bladeRF 条目。"""
 
-    def test_enumerate_includes_bladerf(self):
+    def test_enumerate_absent_without_hardware(self):
+        # 无真实 bladeRF 时枚举不得包含 bladerf 条目（不再无条件列出假设备）
         from mbdsdr_ai.sdr_backend import enumerate_all_sdr_devices
         devs = enumerate_all_sdr_devices()
-        bladerfs = [d for d in devs if d.get("driver") == "bladerf"]
-        self.assertEqual(len(bladerfs), 1)
-        d = bladerfs[0]
-        # bladerf2_common.h:550-555,518-523,542-547
-        self.assertEqual(d["freq_range"], (70e6, 6e9))
-        self.assertEqual(d["sample_rate_range"], (520834, 61_440_000))
-        self.assertEqual(d["bandwidth_range"], (200_000, 56_000_000))
-        # bladeRF1.h:154,160,166,172
-        self.assertEqual(d["rxvga1_gain_range"], (5.0, 30.0))
-        self.assertEqual(d["rxvga2_gain_range"], (0.0, 30.0))
+        self.assertEqual(
+            [d for d in devs if d.get("driver") == "bladerf"], [])
 
 
 if __name__ == "__main__":

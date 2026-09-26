@@ -339,6 +339,8 @@ class StatusPanel(QWidget):
         imu_layout.addWidget(self.imu_timestamp, 4, 1, 1, 3)
 
         layout.addWidget(self.imu_group)
+        # 无真实 IMU 时整组隐藏；只有真实九轴硬件上报数据才显示
+        self.imu_group.setVisible(False)
 
         # ---- 设备信息（通用 SDR 设备字段 + 原有 ai-sdr Mini 字段）----
         info_group = QGroupBox("设备信息")
@@ -660,17 +662,17 @@ class StatusPanel(QWidget):
 
     @Slot(dict)
     def on_status_updated(self, status: dict):
-        """SDR 状态更新。"""
-        rssi = status.get("rssi", 0)
-        snr = status.get("snr", 0)
-        mode = status.get("mode_name", "--")
-        freq = status.get("freq_display", "--")
+        """SDR 状态更新。字段缺失一律显 "--"，绝不默认 0 伪造数值。"""
+        rssi = status.get("rssi")
+        snr = status.get("snr")
+        mode = status.get("mode_name")
+        freq = status.get("freq_display")
         uptime = status.get("uptime", 0)
 
-        self.rssi_value.setText(f"{rssi} dBm")
-        self.snr_value.setText(f"{snr} dB")
-        self.mode_value.setText(mode)
-        self.freq_value.setText(freq)
+        self.rssi_value.setText(f"{rssi} dBm" if rssi is not None else "--")
+        self.snr_value.setText(f"{snr} dB" if snr is not None else "--")
+        self.mode_value.setText(mode if mode else "--")
+        self.freq_value.setText(freq if freq else "--")
 
         # 运行时间
         if uptime > 0:
@@ -815,10 +817,12 @@ class StatusPanel(QWidget):
             self.imu_temp.setText("--")
             self.imu_timestamp.setText("--")
             self.imu_group.setTitle("IMU 9 轴姿态 [未连接]")
+            self.imu_group.setVisible(False)
             return
 
         # 真实模式：正常标题
         self.imu_group.setTitle("IMU 9 轴姿态")
+        self.imu_group.setVisible(True)
         # 数据时间戳
         self._update_timestamp(self.imu_timestamp, imu.get("timestamp"))
 
