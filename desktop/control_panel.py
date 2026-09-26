@@ -173,6 +173,9 @@ class ControlPanel(QWidget):
         for w in widgets:
             if w is not None:
                 w.setEnabled(self._sdr_connected)
+        # 连接后恢复频率显示（断连期间 set_frequency_hz 只存内部值不刷显示）
+        if self._sdr_connected and self._freq_hz is not None:
+            self._update_freq_display()
 
     def set_connected(self, connected: bool):
         """主窗口在连接/断开时调用（hasattr 守卫，方法名固定为 set_connected）。
@@ -857,20 +860,29 @@ class ControlPanel(QWidget):
     # ========================================================================
 
     def set_frequency_hz(self, freq_hz: float):
-        """从外部恢复中心频率 (Hz)，不发射调谐信号。"""
+        """从外部恢复中心频率 (Hz)，不发射调谐信号。
+
+        断连时只存内部真值、不刷新 freq_display（保持 "-- MHz"），
+        避免持久化频率被误当成正在接收的频率；连接后由 set_sdr_connected(True) 恢复显示。
+        """
         freq_hz = max(FREQ_MIN_HZ, min(FREQ_MAX_HZ, float(freq_hz)))
         self._freq_hz = freq_hz
-        self._update_freq_display()
+        if self._sdr_connected:
+            self._update_freq_display()
 
     def set_mode(self, mode: str):
-        """从外部恢复解调模式，不发射 mode_changed / vfo_bandwidth_changed。"""
+        """从外部恢复解调模式，不发射 mode_changed / vfo_bandwidth_changed。
+
+        断连时只存内部真值、不刷新 freq_display；连接后由 set_sdr_connected(True) 恢复。
+        """
         mode = (mode or "FM").upper()
         self._current_mode = mode
         self.mode_combo.blockSignals(True)
         self.mode_combo.setCurrentText(mode)
         self.mode_combo.blockSignals(False)
         self._populate_presets(mode)
-        self._update_freq_display()
+        if self._sdr_connected:
+            self._update_freq_display()
         # 同步带宽下拉到该模式典型带宽（blockSignals，不 emit）
         bw = MODE_VFO_BANDWIDTH.get(mode, MODE_VFO_BANDWIDTH["FM"])
         self.vfo_bw_combo.blockSignals(True)

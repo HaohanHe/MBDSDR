@@ -89,3 +89,6 @@ repos/
 SigDigger/
 inspectrum/
 sigutils/
+
+# Figma/APK reverse-engineering reference (not our code)
+docs/design_ref/
