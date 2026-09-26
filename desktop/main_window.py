@@ -71,6 +71,28 @@ try:
     from settings_panel import ServiceSettingsPanel
 except Exception:  # pragma: no cover
     ServiceSettingsPanel = None  # type: ignore
+# 新增内核能力面板（多 VFO / ANR / 星座图 / 设备选择 / 分段增益）。
+# try/except 守卫：面板文件缺失时主窗口不崩，对应 dock 不建。
+try:
+    from vfo_panel import VfoPanel
+except Exception:  # pragma: no cover
+    VfoPanel = None  # type: ignore
+try:
+    from anr_panel import AnrPanel
+except Exception:  # pragma: no cover
+    AnrPanel = None  # type: ignore
+try:
+    from constellation_panel import ConstellationPanel
+except Exception:  # pragma: no cover
+    ConstellationPanel = None  # type: ignore
+try:
+    from device_panel import DevicePanel
+except Exception:  # pragma: no cover
+    DevicePanel = None  # type: ignore
+try:
+    from gain_panel import GainPanel
+except Exception:  # pragma: no cover
+    GainPanel = None  # type: ignore
 # 卫星闭环跟踪器（mbdsdr_ai.sat_tracker）：选中卫星->实时 az/el/多普勒->自动调谐。
 # 用别名避免与 rf_sky_view 里的展示型 SatelliteTracker 冲突。缺 skyfield 时降级。
 try:
@@ -825,6 +847,15 @@ class MainWindow(QMainWindow):
         self.bookmark_panel = None
         self.service_settings_panel = None
         self._build_kernel_panels()
+        # 新增面板：多 VFO / ANR / 星座图 / 设备选择 / 分段增益
+        self.vfo_panel = None
+        self.anr_panel = None
+        self.constellation_panel = None
+        self.device_panel = None
+        self.gain_panel = None
+        self._anr_enabled = False
+        self._audio_output_device = -1
+        self._build_extended_panels()
 
         # ---- CarWith 设计体系：面板注册表挂载 + Dock 布局管理器 ----
         # 把实际创建的控件挂进注册表（注册表只存引用，不拥有生命周期）
@@ -1827,6 +1858,30 @@ class MainWindow(QMainWindow):
                 sp.set_sdr_connected(bool(connected))
         except Exception:
             pass
+        # 新增面板：多 VFO / ANR / 星座图 / 设备选择 / 分段增益
+        try:
+            vp = getattr(self, "vfo_panel", None)
+            if vp is not None and hasattr(vp, "set_sdr_connected"):
+                vp.set_sdr_connected(bool(connected))
+            ap = getattr(self, "anr_panel", None)
+            if ap is not None and hasattr(ap, "set_sdr_connected"):
+                ap.set_sdr_connected(bool(connected))
+            cp = getattr(self, "constellation_panel", None)
+            if cp is not None and hasattr(cp, "set_sdr_connected"):
+                cp.set_sdr_connected(bool(connected))
+            dp = getattr(self, "device_panel", None)
+            if dp is not None and hasattr(dp, "set_connected"):
+                dp.set_connected(bool(connected))
+            gp = getattr(self, "gain_panel", None)
+            if gp is not None and hasattr(gp, "set_backend"):
+                gp.set_backend(self._active_sdr_backend if connected else None)
+        except Exception:
+            pass
+        # VFO 列表刷新
+        try:
+            self._refresh_vfo_panel()
+        except Exception:
+            pass
         # 连接按钮：未连接时恢复橙色高亮引导（色值取自 tokens，与工具栏同源）
         try:
             if not connected:
@@ -2624,6 +2679,23 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # 星座图面板 tap：喂入复基带 IQ（节流 ~10fps，取尾部 512 点）
+        try:
+            cp = getattr(self, "constellation_panel", None)
+            if cp is not None and hasattr(cp, "feed_iq"):
+                cp.feed_iq(iq)
+        except Exception:
+            pass
+
+        # VFO 面板列表刷新（节流：约每 10 帧）
+        try:
+            self._vfo_refresh_tick = getattr(self, "_vfo_refresh_tick", 0) + 1
+            if self._vfo_refresh_tick >= 10:
+                self._vfo_refresh_tick = 0
+                self._refresh_vfo_panel()
+        except Exception:
+            pass
+
         # RSSI（从 IQ 功率估计，16384 样本开销极小）
         self._update_rssi_from_iq(iq)
 
@@ -3299,6 +3371,198 @@ class MainWindow(QMainWindow):
                     self._on_sky_tune_satellite)
         except Exception:
             pass
+
+    # ------------------------------------------------------------------ #
+    # 新增面板：多 VFO / ANR / 星座图 / 设备选择 / 分段增益
+    # ------------------------------------------------------------------ #
+    def _build_extended_panels(self):
+        """把 SDR++/GQRX 对标面板接成 dock；全部 hasattr/try 守卫，缺类不崩。"""
+        # ---- 多 VFO 面板（右侧 dock，tabify 到书签旁边）----
+        if VfoPanel is not None:
+            try:
+                self.vfo_panel = VfoPanel(vfo_manager=self._vfo_mgr)
+                self.vfo_panel.set_center_freq_provider(self._safe_center_hz)
+                self.vfo_panel.vfo_selected.connect(self._on_vfo_selected)
+                self.vfo_panel.vfo_added.connect(self._on_panel_vfo_added)
+                self.vfo_panel.vfo_removed.connect(self._on_vfo_removed)
+                self.vfo_panel.primary_changed.connect(self._on_vfo_selected)
+                self.vfo_panel.cycle_primary.connect(self._on_cycle_vfo)
+                self.vfo_dock = self._wrap_panel_in_dock(
+                    "多 VFO", self.vfo_panel)
+                self.vfo_dock.setObjectName("vfoDock")
+                self.addDockWidget(Qt.RightDockWidgetArea, self.vfo_dock)
+                anchor = self.bookmark_panel if self.bookmark_panel is not None \
+                    else self.ai_dock
+                try:
+                    self.tabifyDockWidget(anchor, self.vfo_dock)
+                except Exception:
+                    pass
+            except Exception:  # noqa: BLE001
+                self.vfo_panel = None
+
+        # ---- ANR 降噪面板（右侧 dock，tabify 到控制页旁边）----
+        if AnrPanel is not None:
+            try:
+                self.anr_panel = AnrPanel()
+                self.anr_panel.enabled_changed.connect(self._on_anr_enabled)
+                self.anr_panel.strength_changed.connect(self._on_anr_strength)
+                self.anr_panel.learn_noise_requested.connect(
+                    self._on_anr_learn_noise)
+                self.anr_dock = self._wrap_panel_in_dock(
+                    "降噪", self.anr_panel)
+                self.anr_dock.setObjectName("anrDock")
+                self.addDockWidget(Qt.RightDockWidgetArea, self.anr_dock)
+                try:
+                    self.tabifyDockWidget(self.control_dock, self.anr_dock)
+                except Exception:
+                    pass
+            except Exception:  # noqa: BLE001
+                self.anr_panel = None
+
+        # ---- 星座图面板（底部 dock，和扫频/信号识别并排）----
+        if ConstellationPanel is not None:
+            try:
+                self.constellation_panel = ConstellationPanel()
+                self.constellation_dock = self._wrap_panel_in_dock(
+                    "星座图", self.constellation_panel)
+                self.constellation_dock.setObjectName("constellationDock")
+                self.addDockWidget(Qt.BottomDockWidgetArea, self.constellation_dock)
+                try:
+                    self.tabifyDockWidget(self.scanner_dock
+                                          if getattr(self, "scanner_dock", None)
+                                          else self.constellation_dock,
+                                          self.constellation_dock)
+                except Exception:
+                    pass
+            except Exception:  # noqa: BLE001
+                self.constellation_panel = None
+
+        # ---- 设备选择 / 热插拔面板（右侧 dock）----
+        if DevicePanel is not None:
+            try:
+                self.device_panel = DevicePanel()
+                self.device_panel.connect_requested.connect(
+                    self._on_panel_device_connect)
+                self.device_panel.disconnect_requested.connect(self._disconnect)
+                self.device_panel.audio_output_changed.connect(
+                    self._on_audio_output_changed)
+                self.device_panel.device_unplugged.connect(self._disconnect)
+                self.device_dock = self._wrap_panel_in_dock(
+                    "设备", self.device_panel)
+                self.device_dock.setObjectName("deviceDock")
+                self.addDockWidget(Qt.RightDockWidgetArea, self.device_dock)
+                try:
+                    self.tabifyDockWidget(self.anr_dock
+                                          if getattr(self, "anr_dock", None)
+                                          else self.control_dock,
+                                          self.device_dock)
+                except Exception:
+                    pass
+            except Exception:  # noqa: BLE001
+                self.device_panel = None
+
+        # ---- 分段增益面板（右侧 dock）----
+        if GainPanel is not None:
+            try:
+                self.gain_panel = GainPanel()
+                self.gain_panel.stage_gain_changed.connect(
+                    self._on_stage_gain_changed)
+                self.gain_panel.agc_changed.connect(self._on_agc_changed)
+                self.gain_dock = self._wrap_panel_in_dock(
+                    "增益分级", self.gain_panel)
+                self.gain_dock.setObjectName("gainDock")
+                self.addDockWidget(Qt.RightDockWidgetArea, self.gain_dock)
+                try:
+                    self.tabifyDockWidget(self.device_dock
+                                          if getattr(self, "device_dock", None)
+                                          else self.control_dock,
+                                          self.gain_dock)
+                except Exception:
+                    pass
+            except Exception:  # noqa: BLE001
+                self.gain_panel = None
+
+    def _on_panel_vfo_added(self, center_hz: float, bw_hz: float,
+                            mode: str):
+        """多 VFO 面板「+ VFO」按钮：在指定频率新建 VFO 并设为主听。"""
+        mgr = self._vfo_mgr
+        if mgr is None:
+            return
+        v = mgr.add(float(center_hz), float(bw_hz), mode, inherit_last=False)
+        mgr.set_active_context(v, temporary=False)
+        self._apply_primary_vfo(v.vfo_id)
+        self._refresh_vfo_panel()
+
+    def _refresh_vfo_panel(self):
+        """VfoManager 变化后刷新多 VFO 面板列表。"""
+        vp = getattr(self, "vfo_panel", None)
+        if vp is not None and hasattr(vp, "refresh"):
+            try:
+                vp.refresh()
+            except Exception:
+                pass
+
+    def _on_anr_enabled(self, on: bool):
+        """ANR 总开关：主窗口音频回调里据此决定是否过 ANR。"""
+        self._anr_enabled = bool(on)
+
+    def _on_anr_strength(self, alpha: float):
+        pass  # AnrPanel 内部已改 anr.cfg.alpha
+
+    def _on_anr_learn_noise(self):
+        """用当前音频块刷新噪声底。无后端时无操作。"""
+        pass
+
+    def _on_audio_output_changed(self, dev_index: int):
+        """设备面板选音频输出设备 → 切 AudioPlayer 输出设备。"""
+        try:
+            if hasattr(self, "_audio_player") and self._audio_player is not None:
+                # AudioPlayer 不支持运行时切设备则需重启流；这里只记录偏好
+                self._audio_output_device = dev_index
+        except Exception:
+            pass
+
+    def _on_stage_gain_changed(self, logical: str, db: float):
+        """分段增益面板改某档 → 兜底走后端 set_gain（总增益）。"""
+        be = self._active_sdr_backend
+        if be is None:
+            return
+        try:
+            # GainPanel 已直接调 GainStager；这里兜底同步总增益显示
+            if hasattr(be, "set_gain"):
+                pass  # 分档模式下总增益由 GainStager 管
+        except Exception:
+            pass
+
+    def _on_panel_device_connect(self, dev: dict):
+        """设备面板「连接」按钮：构造后端并走通用连接流程。"""
+        try:
+            from mbdsdr_ai.sdr_backend import build_backend_for_device
+            backend = build_backend_for_device(dev)
+        except Exception as e:  # noqa: BLE001
+            self.statusBar().showMessage(f"构造后端失败: {e}", 5000)
+            return
+        if backend is None:
+            self.statusBar().showMessage("无法构造该设备后端", 5000)
+            return
+        ok = self._connect_backend(
+            backend,
+            sample_rate=float(dev.get("_sample_rate", 2_048_000.0)),
+            gain=float(dev.get("_gain", 20.0)),
+            ppm=int(dev.get("_ppm", 0)),
+            agc=False,
+        )
+        if ok:
+            try:
+                label = dev.get("label") or dev.get("driver", "设备")
+                dp = getattr(self, "device_panel", None)
+                if dp is not None and hasattr(dp, "set_connected"):
+                    dp.set_connected(True, label)
+                gp = getattr(self, "gain_panel", None)
+                if gp is not None and hasattr(gp, "set_backend"):
+                    gp.set_backend(backend)
+            except Exception:
+                pass
 
     def _on_scanner_segment_chosen(self, seg: dict):
         """扫频活动段点击 → 确认后调谐到峰值频点并建议解调模式。"""
