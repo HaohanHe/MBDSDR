@@ -243,7 +243,8 @@ class MainWindow(QMainWindow):
         self._vfo = None  # type: Optional[object]
         self._vfo_in_sr: float = 0.0
         self._vfo_out_sr: float = 48000.0
-        self._vfo_bw: float = 12000.0
+        # 默认 VFO 带宽 12.5 kHz（NBFM 语音档，与 control_panel.MODE_VFO_BANDWIDTH["FM"] 对齐）
+        self._vfo_bw: float = 12_500.0
         # 调试/测试断言用：记录 _demod_and_play 本次实际使用的解调模式
         self._last_demod_mode: str = "FM"
 
@@ -1744,8 +1745,8 @@ class MainWindow(QMainWindow):
         - backend.set_demod(mode) 同步下发硬件解调模式；
         - _demod_cfg.mode 更新后，后台解调 worker 下一帧即按新模式解调，
           声卡流不重建、不中断（对标 SDR++ 切模式音频无缝）；
-        - VFO 带宽按 MODE_VFO_BANDWIDTH 逐模式套用（CW 500Hz / SSB 3k /
-          AM 6k / NBFM 12k / WFM 180k），推到已绑定的 DDC。
+        - VFO 带宽按 MODE_VFO_BANDWIDTH 逐模式套用（CW 500Hz / SSB 2.4k /
+          AM 6k / NBFM 12.5k / WFM 180k），推到已绑定的 DDC。
         """
         # 真实 SDR 后端：下发解调模式
         if self._active_sdr_backend is not None:
@@ -2380,10 +2381,13 @@ class MainWindow(QMainWindow):
     def _compute_vfo_rssi_dbfs(self) -> Optional[float]:
         """从频谱 FFT 数据计算当前 VFO 带宽内的信号功率 (dBFS)。
 
-        优先用 FFT worker 已算好的频谱（generator.spectrum，dBFS/bin），
-        取 VFO 中心 ± bw/2 对应的 bin 范围，dBFS→线性求和→dBFS，
-        得到"当前 VFO 处"的信号强度。无 FFT 数据 / VFO 超出带宽时返回 None，
-        由调用方回退到全带宽 IQ 功率。绝不造假值。
+        RSSI 真从 VFO 带宽内 FFT bin 功率求和：取 generator.spectrum（dBFS/bin）中
+        [vfo_center - bw/2, vfo_center + bw/2] 对应的 bin 区间，逐 bin dBFS→线性功率
+        求和→再转 dBFS，得到"当前 VFO 收听带宽内"的总功率。这不是全带宽平均，
+        也不是峰值，而是 VFO 信道带宽内的积分功率。
+
+        无 FFT 数据 / FFT 全 NaN / VFO 中心超出当前 FFT 带宽时返回 None，
+        由调用方 _update_rssi_from_iq 回退到全带宽 IQ 平均功率。绝不造假值。
         """
         try:
             gen = getattr(self.spectrum, "generator", None)
@@ -2402,7 +2406,7 @@ class MainWindow(QMainWindow):
                 return None
             # VFO 中心频率与带宽
             vfo_center = float(self._vfo_center_hz) if self._vfo_center_hz > 0 else cf
-            bw = float(self._vfo_bw) if self._vfo_bw > 0 else 12000.0
+            bw = float(self._vfo_bw) if self._vfo_bw > 0 else 12_500.0
             # VFO 完全落在当前 FFT 带宽外？回退全带宽
             f_lo = cf - sr / 2.0
             f_hi = cf + sr / 2.0
@@ -2513,14 +2517,23 @@ class MainWindow(QMainWindow):
         if iq.size < 16:
             return
 
-        # 1) 读取当前解调模式（后端为 None / 未连接时默认 FM，绝不崩）
+        # 1) 读取当前解调模式：优先 UI 共享配置 _demod_cfg.mode（用户在控制面板选的模式，
+        #    回放期间后端可能仍连着，但回放应按用户选的模式解调，而不是后端 status 里的
+        #    硬件解调模式）；回退到 backend.status.demod_mode；再回退到 FM。绝不崩。
         try:
-            mode = "FM"
-            be = self._active_sdr_backend
-            if be is not None and getattr(be, "status", None) is not None:
-                m = getattr(be.status, "demod_mode", None)
+            mode = None
+            if self._demod_cfg is not None:
+                m = getattr(self._demod_cfg, "mode", None)
                 if m:
                     mode = str(m).upper()
+            if not mode:
+                be = self._active_sdr_backend
+                if be is not None and getattr(be, "status", None) is not None:
+                    m = getattr(be.status, "demod_mode", None)
+                    if m:
+                        mode = str(m).upper()
+            if not mode:
+                mode = "FM"
         except Exception:
             mode = "FM"
         # 调试/测试断言用：记录本次实际使用的解调模式
@@ -3007,6 +3020,14 @@ class MainWindow(QMainWindow):
         self._replay_resume_poll = self._iq_poll_timer is not None and \
             self._iq_poll_timer.isActive()
         self._stop_iq_streams()
+        # _stop_iq_streams 会关掉声卡；回放本身要出声，这里重新拉起声卡
+        # （AudioPlayer.start 幂等：已启动直接返回 True）。回放结束 _stop_replay
+        # 不关声卡：实时后端仍连着时由 _start_iq_streams 继续管理。
+        if self._audio_player is not None:
+            try:
+                self._audio_player.start()
+            except Exception:
+                pass
         try:
             self.spectrum.set_connected(True)
         except Exception:
@@ -3028,7 +3049,14 @@ class MainWindow(QMainWindow):
             f"0.0/{self._replay_total/sr:.1f}s", 0)
 
     def _replay_tick(self):
-        """回放定时器：按采样率把下一块真实 IQ 推给频谱，更新进度。"""
+        """回放定时器：按采样率把下一块真实 IQ 推给频谱 + 解调链出声。
+
+        每块回放 IQ 同时做两件事：
+          1. spectrum.update_iq() 做离线 FFT 频谱；
+          2. self._demod_and_play(seg, sr) 走 VFO DDC → 按当前模式解调 → 声卡输出。
+        解调模式优先取 self._demod_cfg.mode（用户在控制面板选的模式），
+        回放期间后端可能仍连着，但不应被后端 status.demod_mode 覆盖。
+        """
         if self._replay_iq is None or self._replay_timer is None:
             self._stop_replay()
             return
@@ -3037,6 +3065,11 @@ class MainWindow(QMainWindow):
         if seg.size >= 64:
             try:
                 self.spectrum.update_iq(seg, self._replay_center_hz, self._replay_sr)
+            except Exception:
+                pass
+            # 真送解调链：VFO DDC → 按 _demod_cfg.mode 解调 → 声卡（带静噪门控）
+            try:
+                self._demod_and_play(seg, self._replay_sr)
             except Exception:
                 pass
         self._replay_pos += n
@@ -3050,7 +3083,12 @@ class MainWindow(QMainWindow):
                 f"回放完成（{tot_s:.1f}s）", 5000)
 
     def _stop_replay(self):
-        """停止回放并恢复实时状态。"""
+        """停止回放并恢复实时状态。
+
+        注意：这里不主动关声卡。回放期间声卡是回放启动时拉起的；若实时后端仍连着，
+        下面 _start_iq_streams() 会继续复用同一条 OutputStream（start 幂等）；
+        若后端未连接，声卡留空跑也无害（无数据入队即静音）。
+        """
         if self._replay_timer is not None:
             try:
                 self._replay_timer.stop()

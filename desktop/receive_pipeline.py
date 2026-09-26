@@ -173,8 +173,14 @@ class DemodWorker(QThread):
     复用 dsp 包的模式映射（与原 _demod_at_48k 一致）。WFM 广播走特殊路径：
     跳过 VFO，直接对全带宽原生 IQ 鉴频（内部已重采样到 48k）。
 
-    audio_enabled=False 时仍完整跑 DDC+解调（验证并行链路），但不写声卡——
-    供第二 VFO 静音并行解调使用。
+    静噪门控位置：
+      - 窄带模式（FM/NFM/AM/USB/LSB/CW）：先 VFO.process 取出 48k 信道 IQ，
+        对 vfo_out 算功率 dBFS 做门控——真在收听带宽内判信号，不被邻道杂散误触发。
+      - WFM：信道就是全带宽，对原始 IQ 算功率做门控。
+      - AudioPlayer 内部 5ms ramp 消咔哒。
+
+    audio_enabled=False 时仍完整跑 DDC+解调（验证并行链路），但不写声卡、
+    不做静噪门控——供第二 VFO 静音并行解调使用。
     """
 
     def __init__(self, in_stream: PingPongStream,
@@ -240,26 +246,25 @@ class DemodWorker(QThread):
             if mode in ("RAW", "DIG"):
                 continue
 
-            # 静噪门控：信号太弱时静音（AudioPlayer 内部 5ms ramp 消咔哒）
-            try:
-                p = float(np.mean(np.abs(iq) ** 2))
-                dbfs = 10.0 * np.log10(p + 1e-12)
+            # ===== WFM 广播路径：信道就是全带宽，静噪/鉴频都在原生率 IQ 上做 =====
+            if mode == "WFM":
+                # 静噪门控：WFM 信道 = 全带宽，对原始全带宽 IQ 算功率
                 if player_ok:
-                    player.set_muted(dbfs < self._cfg.squelch_db)
-            except Exception:
-                pass
-
-            if not player_ok:
-                # 无设备 / 静音 VFO：仍跑 DDC 证明链路活着，只是不写声卡
-                if self._vfo is not None and mode != "WFM":
                     try:
-                        self._vfo.process(iq)
+                        p = float(np.mean(np.abs(iq) ** 2))
+                        dbfs = 10.0 * np.log10(p + 1e-12)
+                        # AudioPlayer 内部 5ms ramp 消咔哒
+                        player.set_muted(dbfs < self._cfg.squelch_db)
                     except Exception:
                         pass
-                continue
-
-            # WFM 广播特殊路径：跳过 VFO，直接对全带宽原生 IQ 鉴频
-            if mode == "WFM":
+                if not player_ok:
+                    # 无设备 / 静音 VFO：仍跑鉴频验证链路，但不写声卡、不做静噪门控
+                    try:
+                        _dsp.wfm_broadcast_demod(iq, sample_rate=self._sr,
+                                                 audio_sr=48000)
+                    except Exception:
+                        pass
+                    continue
                 try:
                     audio = _dsp.wfm_broadcast_demod(iq, sample_rate=self._sr,
                                                      audio_sr=48000)
@@ -269,16 +274,41 @@ class DemodWorker(QThread):
                     pass
                 continue
 
-            # 主路径：VFO 信道 DDC（offset 由 UI 经 VfoManager 推过来）→ 48k 解调
-            if self._vfo is not None:
+            # ===== 窄带路径（FM/NFM/AM/USB/LSB/CW）=====
+            # 先 VFO DDC（NCO 搬频 + 有理重采样 + Nuttall LPF）取出 48k 信道 IQ，
+            # 静噪门控在 VFO 信道输出上算——真在收听带宽内判信号，而不是被全带宽
+            # 邻道噪声/杂散误触发。
+            if self._vfo is None:
+                # VFO 不可用：窄带无法解调，跳过（不造假音频）
+                continue
+            try:
+                vfo_out = self._vfo.process(iq)
+            except Exception:
+                continue
+            if vfo_out is None or len(vfo_out) <= 16:
+                continue
+
+            # 静噪门控：对 VFO 信道输出（48k 窄带 IQ）算功率 dBFS，
+            # 低于门限则 player.set_muted(True)，信号回来后 set_muted(False)。
+            if player_ok:
                 try:
-                    vfo_out = self._vfo.process(iq)
-                    if vfo_out is not None and len(vfo_out) > 16:
-                        audio = self._demod_48k(_dsp, mode, vfo_out)
-                        if audio is not None and audio.size > 0:
-                            player.write(audio)
+                    p = float(np.mean(np.abs(vfo_out) ** 2))
+                    dbfs = 10.0 * np.log10(p + 1e-12)
+                    player.set_muted(dbfs < self._cfg.squelch_db)
                 except Exception:
                     pass
+
+            if not player_ok:
+                # 无设备 / 静音 VFO：上面已跑完 VFO.process 验证 DDC 链路，
+                # 这里不写声卡、也不做静噪门控。
+                continue
+
+            try:
+                audio = self._demod_48k(_dsp, mode, vfo_out)
+                if audio is not None and audio.size > 0:
+                    player.write(audio)
+            except Exception:
+                pass
         self._running = False
 
     def shutdown(self):

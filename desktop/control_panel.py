@@ -68,13 +68,16 @@ SDR_BAND_PRESETS = [
     ("28.000", "10m 业余", "USB"),
 ]
 
-# 模式 → 默认 VFO 带宽（Hz）。对标 GQRX/SDR++ 各解调方式的典型中频带宽。
+# 模式 → 默认 VFO 带宽（Hz）。对标 SDR++ / GQRX 各解调方式的典型中频带宽：
+#   WFM 广播调频立体声 180 kHz；NBFM/FM 语音 12.5 kHz（25 kHz 信道间隔，
+#   语音占用约 12.5 kHz）；AM 6 kHz；SSB（USB/LSB）语音 2.4 kHz；CW 500 Hz。
 MODE_VFO_BANDWIDTH = {
-    "FM": 12_000,    # NBFM 语音
     "WFM": 180_000,  # 广播调频立体声
+    "NFM": 12_500,   # 窄带调频语音
+    "FM": 12_500,    # NBFM 语音（与 NFM 同档）
     "AM": 6_000,
-    "USB": 3_000,
-    "LSB": 3_000,
+    "USB": 2_400,    # 上边带语音
+    "LSB": 2_400,    # 下边带语音
     "CW": 500,
 }
 
@@ -340,11 +343,13 @@ class ControlPanel(QWidget):
         self.vfo_bw_label.setFixedWidth(40)
         bw_row.addWidget(self.vfo_bw_label)
         self.vfo_bw_combo = QComboBox()
-        for txt, hz in [("500Hz (CW)", 500.0), ("3kHz (SSB)", 3_000.0),
-                        ("6kHz (AM)", 6_000.0), ("12kHz (NBFM)", 12_000.0),
+        # 档位与 MODE_VFO_BANDWIDTH 对齐：2.4 kHz(SSB) / 12.5 kHz(NBFM) 必须在列，
+        # 避免切到 USB/LSB/NFM 时 findData 落空、回退到错误带宽。
+        for txt, hz in [("500Hz (CW)", 500.0), ("2.4kHz (SSB)", 2_400.0),
+                        ("6kHz (AM)", 6_000.0), ("12.5kHz (NBFM)", 12_500.0),
                         ("180kHz (WFM)", 180_000.0)]:
             self.vfo_bw_combo.addItem(txt, hz)
-        # FM 默认 12kHz
+        # FM 默认 12.5 kHz
         _def_bw = self.vfo_bw_combo.findData(MODE_VFO_BANDWIDTH["FM"])
         self.vfo_bw_combo.setCurrentIndex(_def_bw if _def_bw >= 0 else 3)
         self.vfo_bw_combo.currentIndexChanged.connect(self._on_vfo_bw_changed)
