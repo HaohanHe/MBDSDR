@@ -15,3 +15,7 @@ websockets>=12.0
 
 # 可选：matplotlib（频谱渲染降级，当前使用 QPainter，不需要）
 # matplotlib>=3.7.0
+
+# SDR 硬件接收（Windows 用户 pip install -r desktop/requirements.txt 后即可接 RTL-SDR 棒）
+pyrtlsdr==0.2.93
+sounddevice>=0.4.6
