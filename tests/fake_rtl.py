@@ -1,0 +1,122 @@
+"""FakeRtlSdr — 可注入的 RTL-SDR 测试双棒（仅 tests/ 使用，不进运行路径）。
+
+模拟 pyrtlsdr.RtlSdr 的最小接口：center_freq / sample_rate / gain / read_samples()。
+生成一个中心频率处的 FM 调制信号（默认 98.5 MHz 广播），用于端到端链路测试。
+
+硬红线：本模块只允许被 tests/ 下的测试文件 import。mbdsdr_ai/ 与 desktop/
+的生产代码绝不引用本类——对照 tests/test_no_sim_regression.py 的 AST 守卫
+（生产代码禁止 SimDataGenerator / MockSDRBackend / mock 降级链）。
+
+信号模型（与 tests/test_audio_chain.py::make_fm_signal 同一条数学）：
+    真实 RTL-SDR  tune 到 98.5 MHz 后，read_samples 返回的是下变频到
+    基带（baseband）的复 IQ，电台载波落在 DC。我们直接吐基带 IQ：
+
+        IQ(t) = exp(j * -(deviation/mod_freq) * cos(2π*mod_freq*t))
+
+    瞬时频偏 = deviation·sin(2π·mod_freq·t)，经正交鉴频（dsp.fm_demod）
+    后输出应忠实复现 mod_freq 的正弦音。再加一点点复高斯噪声当底噪。
+"""
+
+import numpy as np
+
+
+class FakeRtlSdr:
+    """pyrtlsdr.RtlSdr 的最小可注入替身。
+
+    只实现 RTLSDRBackend 真正用到的属性/方法：
+      - center_freq / sample_rate / gain：可读写（pyrtlsdr 是 property）
+      - tuner_type：int（R820T = 5，与 sdr_backend.py:580 枚举一致）
+      - read_samples(n) -> np.complex64 一维数组
+      - set_manual_gain_mode(mode) / reset_buffer() / close()
+
+    参数与真实棒一致：
+      center_freq=98.5 MHz（FM 广播段，一上来就有"台"），
+      sample_rate=2.048 MS/s（RTLSDRBackend.DEFAULT_SAMPLE_RATE），
+      gain=20 dB，调制音 1 kHz，频偏 75 kHz（广播 FM 标准）。
+    """
+
+    def __init__(self, device_index: int = 0,
+                 fm_carrier_hz: float = 98.5e6,
+                 mod_freq: float = 1000.0,
+                 deviation: float = 75000.0,
+                 noise_amplitude: float = 0.01,
+                 seed: int = 20260926):
+        # 与 pyrtlsdr.RtlSdr 同名同语义：写进去的是 RF 中心频率，
+        # read_samples 返回的是它下变频后的基带 IQ（载波在 DC）。
+        self.center_freq = int(fm_carrier_hz)
+        self.sample_rate: float = 2_048_000.0
+        self.gain = 20.0
+        # pyrtlsdr RtlSdr.tuner_type：5 = R820T（RTLSDRBackend._TUNER_NAMES[5]）
+        self.tuner_type = 5
+
+        self._mod_freq = float(mod_freq)
+        self._deviation = float(deviation)
+        self._noise_amp = float(noise_amplitude)
+        # 固定种子：同一支棒每次吐的信号可复现，测试不抖动
+        self._rng = np.random.default_rng(seed)
+        # 全局样本计数器：让跨次 read_samples 的相位严格连续，
+        # 不会在块边界打出相位跳变 click（对照 make_fm_signal 用绝对 t）。
+        self._global_idx = 0
+        self._closed = False
+        # 真实棒属性占位（RTLSDRBackend 探测时可能读）
+        self.direct_sampling = 0
+        self._offset_tuning = False
+
+    # ------------------------------------------------------------------
+    # 数据面：吐基带 FM IQ
+    # ------------------------------------------------------------------
+    def read_samples(self, num_samples: int) -> np.ndarray:
+        """返回 num_samples 个复基带 IQ，dtype=complex64。
+
+        积分相位法生成 FM：
+            瞬时角频偏 Δω(t) = 2π·deviation·sin(2π·mod_freq·t)
+            相位      φ(t)  = ∫Δω dt = -(deviation/mod_freq)·cos(2π·mod_freq·t)
+            IQ(t)           = exp(j·φ(t))
+        载波在 DC（已下变频），再加少量复高斯底噪。
+        """
+        if self._closed:
+            raise OSError("FakeRtlSdr: device closed")
+        n = int(num_samples)
+        sr = float(self.sample_rate)
+        t = (self._global_idx + np.arange(n)) / sr
+        self._global_idx += n
+
+        phase = -(self._deviation / self._mod_freq) * np.cos(
+            2.0 * np.pi * self._mod_freq * t)
+        iq = np.exp(1j * phase)
+
+        # 复高斯底噪：I/Q 各一份，幅度 noise_amp
+        noise = self._noise_amp * (
+            self._rng.standard_normal(n) + 1j * self._rng.standard_normal(n))
+        return (iq + noise).astype(np.complex64)
+
+    # ------------------------------------------------------------------
+    # 控制面：与 pyrtlsdr.RtlSdr 同名的 no-op / 记录方法
+    # ------------------------------------------------------------------
+    def set_manual_gain_mode(self, mode):
+        """pyrtlsdr：1=手动增益，0=AGC。这里只记不报错。"""
+        self._manual_gain_mode = bool(mode)
+
+    def reset_buffer(self):
+        """丢弃内部缓冲（真实棒用于清 USB 残留）。我们无缓冲，空操作。"""
+        return None
+
+    def set_offset_tuning(self, enabled: bool):
+        self._offset_tuning = bool(enabled)
+        return True
+
+    def set_bias_tee(self, enabled: bool):
+        return True
+
+    def close(self):
+        self._closed = True
+
+    # 方便测试断言
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    def __repr__(self) -> str:  # pragma: no cover - 调试用
+        return (f"FakeRtlSdr(center_freq={self.center_freq/1e6:.1f}MHz, "
+                f"sr={self.sample_rate/1e3:.0f}k, gain={self.gain}dB, "
+                f"closed={self._closed})")

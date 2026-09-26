@@ -703,7 +703,12 @@ class RTLSDRBackend(SDRBackend):
                     pass
                 out.append({"index": i, "serial": serials.get(i, ""), "tuner": tuner})
             return out
-        except Exception:
+        except ImportError as e:
+            # 缺 pyrtlsdr 库：必须 log 出来，不能和"无设备"静默混为一谈
+            logger.warning("pyrtlsdr 未安装，无法枚举 RTL-SDR 设备: %s", e)
+            return []
+        except Exception as e:
+            logger.warning("枚举 RTL-SDR 设备失败: %s", e)
             return []
 
     def connect(self) -> bool:
@@ -764,8 +769,27 @@ class RTLSDRBackend(SDRBackend):
                 logger.warning(f"RTL-SDR 启动环形缓冲生产者失败: {e}")
                 self._ring_reader = None
             return True
-        except Exception:
+        except Exception as e:
+            # 绝不静默吞异常：把真实原因写进 status.error，UI（main_window.py）会读到并展示。
+            # 无 pyrtlsdr / USB 权限 / 设备被占用等都要冒到用户，绝不伪造 IQ 假装已连接。
             self.status.connected = False
+            msg = str(e)
+            low = msg.lower()
+            if isinstance(e, ImportError) and ("rtlsdr" in low or "no module named" in low):
+                self.status.error = (
+                    "未安装 pyrtlsdr/librtlsdr：pip install pyrtlsdr"
+                    "（Windows 还需安装 librtlsdr DLL）"
+                )
+            elif any(k in low for k in (
+                "permission", "busy", "resource", "access denied", "0bda", "2838", "device",
+            )):
+                # USB 权限/设备被占用类：保留原始异常消息，让用户看到 permission denied 等关键字
+                self.status.error = f"RTL-SDR 连接失败: {type(e).__name__}: {msg}"
+            else:
+                self.status.error = f"RTL-SDR 连接失败: {type(e).__name__}: {msg}"
+            logger.warning(
+                "RTL-SDR 连接失败: %s: %s", type(e).__name__, e, exc_info=True
+            )
             return False
 
     def disconnect(self):
@@ -2718,8 +2742,9 @@ class SDRBackendManager:
             sdr.close()
             rtl = RTLSDRBackend(0)
             self.backends[rtl.device.device_id] = rtl
-        except Exception:
-            pass  # 没有 RTL-SDR
+        except Exception as e:
+            # 无硬件/缺 pyrtlsdr 环境下启动是正常的；用 debug 记录原因，不静默也不弹错
+            logger.debug(f"RTL-SDR 发现失败(忽略，无硬件环境正常): {e}")
 
         # 尝试发现 HackRF
         try:

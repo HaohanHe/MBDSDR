@@ -25,5 +25,5 @@ Pillow>=9.0.0           # 图像处理(NOAA APT/SSTV 解码输出 PNG)
 # SoapySDR             # SDR硬件统一接入（系统级安装）
 # 固定 0.2.93：0.3.4+/0.5 需要 rtlsdr_set_dithering（仅 rtlsdr-blog 分支 DLL 提供），
 # 与官方 osmocom librtlsdr Windows DLL 不兼容，import 即崩。
-pyrtlsdr==0.2.93        # RTL-SDR (RTL2832U) 接收；缺失时自动降级到 mock 后端
-sounddevice>=0.4.6      # 实时音频播放（解调后声音输出到默认声卡）；缺失时自动降级为无音频播放（AudioPlayer.available=False）
+pyrtlsdr==0.2.93        # RTL-SDR 硬件接收必需；未安装时 connect() 报明确错误（status.error），绝不降级模拟 IQ
+sounddevice>=0.4.6      # 解调后实时音频输出到默认声卡必需；未安装时无声（AudioPlayer.available=False），不影响也不伪造 IQ 接收

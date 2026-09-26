@@ -918,11 +918,20 @@ class MainWindow(QMainWindow):
                 raw_err = backend.get_status().error or ""
             except Exception:
                 pass
-            friendly = self._humanize_error(raw_err)
-            QMessageBox.critical(
-                self, "连接失败",
-                f"无法连接到 {backend.device.name}：\n{friendly}\n\n"
-                f"（未切换到模拟模式，请检查硬件后重试）")
+            if raw_err:
+                friendly = self._humanize_error(raw_err)
+                # 非空错误：人话 + 原始错误都展示，避免吞掉后端线索
+                msg = f"连接失败：{friendly}\n\n底层错误：{raw_err}"
+            else:
+                # connect() 返回 False 但 status.error 为空（后端未填错误），
+                # 给出明确的人话排查清单，不再显示模糊的"未知错误"。
+                friendly = ("设备无响应：请检查 USB 棒、librtlsdr 驱动、"
+                            "以及设备是否被 SDR#/GQRX 占用。")
+                msg = ("连接失败：设备无响应。请检查："
+                       "1) RTL-SDR 棒已插入 USB 口；"
+                       "2) 已安装 librtlsdr 驱动（Windows 需 zadig 替换驱动）；"
+                       "3) 设备未被其他软件（SDR#/GQRX）占用。")
+            QMessageBox.critical(self, "连接失败", msg)
             self.statusBar().showMessage(f"连接失败：{friendly}", 6000)
             try:
                 backend.disconnect()
@@ -962,6 +971,23 @@ class MainWindow(QMainWindow):
             backend.set_sample_rate(chosen_sr)
         except Exception as e:
             self.statusBar().showMessage(f"采样率应用失败: {e}", 4000)
+        # 连接后立即下发默认中心频率（FM 广播段），
+        # 否则硬件停在出厂默认频率（0Hz/上次频率），用户调谐前收不到东西。
+        default_freq = 98_500_000.0
+        if hasattr(self.control_panel, "get_frequency_hz"):
+            try:
+                default_freq = float(self.control_panel.get_frequency_hz())
+            except Exception:
+                default_freq = 98_500_000.0
+        elif hasattr(self.control_panel, "_freq_hz"):
+            try:
+                default_freq = float(self.control_panel._freq_hz)
+            except Exception:
+                default_freq = 98_500_000.0
+        try:
+            backend.set_frequency(default_freq)
+        except Exception as e:
+            self.statusBar().showMessage(f"初始频率下发失败: {e}", 4000)
         try:
             backend.set_ppm(chosen_ppm)
         except Exception:
@@ -993,23 +1019,32 @@ class MainWindow(QMainWindow):
         绝不因为翻译而吞掉错误——原始信息作为附注保留。
         """
         if not raw_err:
-            return "未知错误（设备被占用/无权限/驱动缺失）"
+            return "设备无响应（请检查 USB 棒、驱动与设备占用）"
         low = raw_err.lower()
-        # 设备被占用（另一 SDR 软件/rtl_tcp 仍开着）
-        if any(k in low for k in ("busy", "already in use", "could not open",
-                                  "errno", "device is used", "占用")):
-            return ("设备正被其他程序占用，请关闭其他 SDR 软件"
-                    "（或 rtl_tcp/GQRX/SDR#）后重试。")
-        # 驱动缺失（librtlsdr/SoapySDR 未安装）
-        if any(k in low for k in ("no such file", "not found", "no module",
-                                  "soapy", "librtlsdr", "dll", "driver",
-                                  "驱动", "未找到", "no backend")):
-            return ("未找到设备驱动，请安装 librtlsdr / SoapySDR 驱动"
-                    "（Linux: sudo apt install librtlsdr0 soapy-sdk）。")
-        # 权限不足（udev 规则 / 需要 root）
+        # Python 库缺失（pyrtlsdr 未安装）
+        if any(k in low for k in ("no module named", "importerror", "no module")):
+            return "未安装 Python 库：pip install pyrtlsdr"
+        # 权限不足（udev 规则 / 需要 root / WinUSB 驱动）
         if any(k in low for k in ("permission", "access denied", "errno 13",
                                   "uid", "root", "权限")):
-            return ("USB 设备权限不足，请检查 udev 规则，或暂时以管理员身份运行。")
+            return ("USB 权限不足：Linux 执行 sudo cp rtl-sdr.rules "
+                    "/etc/udev/rules.d/ 并重插；Windows 用 zadig 安装 WinUSB 驱动。")
+        # 设备被占用（另一 SDR 软件/rtl_tcp 仍开着）
+        if any(k in low for k in ("busy", "resource", "already in use",
+                                  "could not open", "errno", "device is used",
+                                  "占用")):
+            return "设备被其他软件占用，请关闭 SDR#/GQRX/HDSDR 后重试。"
+        # 未检测到 RTL-SDR 硬件（USB VID/PID 找不到）
+        if any(k in low for k in ("0bda", "2838", "no device", "no devices",
+                                  "找不到", "cannot find device")):
+            return ("未检测到 RTL-SDR 硬件，请确认 USB 棒已插入并识别"
+                    "（设备管理器中应为 RTL2838UHIDIR）。")
+        # 驱动缺失（librtlsdr/SoapySDR 未安装）
+        if any(k in low for k in ("no such file", "not found", "soapy",
+                                  "librtlsdr", "dll", "driver", "驱动",
+                                  "未找到", "no backend")):
+            return ("未找到设备驱动，请安装 librtlsdr / SoapySDR 驱动"
+                    "（Linux: sudo apt install librtlsdr0 soapy-sdk）。")
         # 设备拔插 / USB 断开
         if any(k in low for k in ("disconnect", "lost", "usb", "stall",
                                   "epipe", "no such device", "断开")):
