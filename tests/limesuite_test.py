@@ -197,17 +197,12 @@ class TestBackendNoDeviceNoCrash(unittest.TestCase):
 class TestSdrBackendIntegration(unittest.TestCase):
     """sdr_backend.enumerate_all_sdr_devices 必须列出 LimeSDR。"""
 
-    def test_enumerate_includes_limesdr(self):
+    def test_enumerate_absent_without_hardware(self):
+        # 无真实 LimeSDR 时枚举不得包含 limesdr 条目（不再无条件列出假设备）
         from mbdsdr_ai.sdr_backend import enumerate_all_sdr_devices
         devs = enumerate_all_sdr_devices()
-        limesdrs = [d for d in devs if d.get("driver") == "limesdr"]
-        self.assertEqual(len(limesdrs), 1)
-        d = limesdrs[0]
-        self.assertEqual(d["freq_range"], (1e5, 3.8e9))
-        self.assertEqual(d["sample_rate_range"], (1e5, 61.44e6))
-        self.assertEqual(d["gain_range"], (0.0, 73.0))
-        self.assertEqual(d["lna_gain_range"], (0.0, 30.0))
-        self.assertEqual(d["tia_gain_range"], (0.0, 12.0))
+        self.assertEqual(
+            [d for d in devs if d.get("driver") == "limesdr"], [])
 
 
 if __name__ == "__main__":

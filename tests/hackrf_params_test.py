@@ -159,16 +159,12 @@ class TestSdrBackendIntegration(unittest.TestCase):
         self.assertEqual(b.device.sample_rate_range,
                          (hp.HACKRF_MIN_SAMPLE_RATE_HZ, hp.HACKRF_MAX_SAMPLE_RATE_HZ))
 
-    def test_enumerate_includes_hackrf(self):
+    def test_enumerate_absent_without_hardware(self):
+        # 无真实 HackRF 时枚举不得包含 hackrf 条目（不再无条件列出假设备）
         from mbdsdr_ai.sdr_backend import enumerate_all_sdr_devices
         devs = enumerate_all_sdr_devices()
-        hackrfs = [d for d in devs if d.get("driver") == "hackrf"]
-        self.assertEqual(len(hackrfs), 1)
-        d = hackrfs[0]
-        self.assertEqual(d["freq_range"], (1e6, 6e9))
-        self.assertEqual(d["sample_rate_range"], (2e6, 20e6))
-        self.assertEqual(d["vga_gain_range"], (0.0, 62.0))
-        self.assertEqual(d["txvga_gain_range"], (0.0, 47.0))
+        self.assertEqual(
+            [d for d in devs if d.get("driver") == "hackrf"], [])
 
 
 if __name__ == "__main__":
