@@ -332,7 +332,6 @@ QDockWidget::title {{
     border-top-left-radius: {r['card_lg']}px;
     border-top-right-radius: {r['card_lg']}px;
     padding: 6px 12px;
-    margin: {gap//4}px;
 }}
 QDockWidget[floating="true"] {{
     background-color: rgba(31,31,31,0.96);
