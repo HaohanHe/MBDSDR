@@ -191,6 +191,11 @@ def compute_moon(jd: float) -> PlanetPos:
     lon = _norm360(math.degrees(Lp) + dlon * 1e-6)
     lat = dlat * 1e-6
 
+    # Meeus ch.47 给出的是"当天平春分点"下的黄经；换算到 J2000 平春分点需
+    # 扣除自 J2000 以来的岁差（IAU 2006 黄经总岁差主项）。
+    precession_deg = (5028.79619 * T + 1.112 * T * T - 0.000114 * T ** 3) / 3600.0
+    lon = _norm360(lon - precession_deg)
+
     dist_km = 385000.56 - 20905.355 * math.cos(Mp) - 3699.111 * math.cos(2 * D - Mp)
     dist_au = dist_km / 149597870.7
 
