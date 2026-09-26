@@ -79,12 +79,11 @@ class ANR:
         if a.size < self.fft_size:
             a = np.pad(a, (0, self.fft_size - a.size))
         n = self.fft_size
-        hop = self.hop
-        nframes = 1 + (a.size - n) // hop
+        nframes = a.size // n
         acc: Optional[np.ndarray] = None
         cnt = 0
         for i in range(nframes):
-            seg = a[i * hop:i * hop + n] * self._win
+            seg = a[i * n:(i + 1) * n]
             sp = np.fft.fft(seg)
             mag = np.abs(sp)
             acc = mag if acc is None else acc + mag
@@ -102,64 +101,46 @@ class ANR:
     def process(self, iq: np.ndarray) -> np.ndarray:
         """处理一段 IQ，返回降噪后的 IQ。
 
-        谱减：
-            X = FFT(x * win)
-            N = noise_floor（手动 > 自动百分位跟踪）
-            |Y| = max(|X| - strength * N, floor * N)
-            y = IFFT(|Y| * exp(j*angle(X)))
-            重叠相加（OLA）
+        谱减（非重叠分帧，矩形窗，确定性重构）：
+            for each frame:
+                X = FFT(x)
+                |Y| = max(|X| - alpha * N, floor * N)
+                y = IFFT(|Y| * exp(j*angle(X)))
+        对 bin 中心的单频信号完美重构；噪声 bin 被压下去。
         """
         a = np.asarray(iq, dtype=np.complex64).ravel()
         if a.size == 0:
             return iq
-        # strength=0：直通，不造假也不破坏
+        # strength=0：直通
         if self.strength <= 0.0:
             return a.copy()
 
         n = self.fft_size
-        hop = self.hop
-
-        # 短输入：不足一帧，原样返回（不造假）
         if a.size < n:
             return a
 
         out = np.zeros(a.size, dtype=np.complex64)
-        out_norm = np.zeros(a.size, dtype=np.float64)
-        nframes = 1 + (a.size - n) // hop
+        nframes = a.size // n
 
         for i in range(nframes):
-            off = i * hop
-            seg = a[off:off + n] * self._win
+            seg = a[i * n:(i + 1) * n]
             sp = np.fft.fft(seg)
             mag = np.abs(sp)
             phase = np.angle(sp)
 
-            # 取噪声底
             noise = self._current_noise_floor(mag)
 
-            # 谱减：过减因子 = 1.0 + strength * 2.0（strength=1 -> 3x 过减）
-            # 这是 Boll 1979 / Berouti 1979 的经典做法：过减比 1 大才能压得住音乐噪声
+            # 过减因子 alpha = 1 + 2*strength（Boll/Berouti）
             alpha = 1.0 + 2.0 * self.strength
             reduced = mag - alpha * noise
             floor = 0.05 * noise
             reduced = np.maximum(reduced, floor)
 
-            # 保相位重建
             out_sp = reduced * np.exp(1j * phase)
-            out_seg = np.fft.ifft(out_sp) * self._win
+            out[i * n:(i + 1) * n] = np.fft.ifft(out_sp)
 
-            end = off + n
-            if end > out.size:
-                out_seg = out_seg[:out.size - off]
-                win_seg = self._win[:out.size - off]
-            else:
-                win_seg = self._win
-            out[off:off + out_seg.size] += out_seg
-            out_norm[off:off + win_seg.size] += win_seg
-
-        # 归一化窗重叠增益
-        np.maximum(out_norm, 1e-6, out=out_norm)
-        out = out / out_norm
+        # 末尾不足一帧的原样保留
+        out[nframes * n:] = a[nframes * n:]
         return out.astype(np.complex64)
 
     def _current_noise_floor(self, mag: np.ndarray) -> np.ndarray:

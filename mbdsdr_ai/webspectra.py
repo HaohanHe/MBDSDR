@@ -55,7 +55,7 @@ _INDEX_TABLE = [-1, -1, -1, -1, 2, 4, 6, 8] * 16  # 简化：deltas 0..7 映射
 
 
 def _adpcm_encode(samples: np.ndarray) -> bytes:
-    """IMA 4-bit ADPCM 编码。首样本存为 raw int16，后续 4-bit 差分。"""
+    """IMA 4-bit ADPCM 编码。首样本存为 raw int16，后续 4-bit 差分打包。"""
     samples = np.asarray(samples, dtype=np.int16).flatten()
     if len(samples) == 0:
         return b""
@@ -63,36 +63,30 @@ def _adpcm_encode(samples: np.ndarray) -> bytes:
     out += struct.pack("<h", int(samples[0]))
     pred = int(samples[0])
     step_idx = 0
-    # 每个字节存两个 4-bit nibble
     nibbles: list = []
     for s in samples[1:]:
         step = _STEP_TABLE[step_idx]
         diff = int(s) - pred
         sign = 1 if diff < 0 else 0
         delta = abs(diff)
-        # 3-bit magnitude
         mag = 0
         adjusted = step >> 3
         if delta >= step:
             mag |= 4
             delta -= step
             adjusted += step
-        step2 = step >> 1
-        if delta >= step2:
+        if delta >= (step >> 1):
             mag |= 2
-            delta -= step2
-            adjusted += step2
-        step4 = step >> 2
-        if delta >= step4:
+            adjusted += step >> 1
+        if delta >= (step >> 2):
             mag |= 1
-            adjusted += step4
-        code = (sign << 2) | mag
+            adjusted += step >> 2
+        code = (sign << 3) | mag
         pred += -adjusted if sign else adjusted
         pred = int(np.clip(pred, -32768, 32767))
-        step_idx += _INDEX_TABLE[code]
+        step_idx += _INDEX_TABLE[code & 0x07]
         step_idx = int(np.clip(step_idx, 0, len(_STEP_TABLE) - 1))
         nibbles.append(code)
-    # pack nibbles
     for i in range(0, len(nibbles), 2):
         hi = nibbles[i]
         lo = nibbles[i + 1] if i + 1 < len(nibbles) else 0
@@ -107,29 +101,22 @@ def _adpcm_decode(data: bytes) -> np.ndarray:
     pred = struct.unpack_from("<h", data, 0)[0]
     out = [pred]
     step_idx = 0
-    # unpack nibbles
     payload = data[2:]
     nibbles = []
     for byte in payload:
         nibbles.append((byte >> 4) & 0x0F)
         nibbles.append(byte & 0x0F)
     for code in nibbles:
-        sign = (code >> 2) & 1
-        mag = code & 0x03
+        sign = (code >> 3) & 1
+        mag = code & 0x07
         step = _STEP_TABLE[step_idx]
         delta = step >> 3
-        if mag & 2:
-            delta += step >> 1
-        if mag & 1:
-            delta += step >> 2
-        # NOTE: magnitude bits 0..2; standard IMA uses bit2 too
-        delta = step >> 3
-        if mag & 1:
-            delta += step >> 2
-        if mag & 2:
-            delta += step >> 1
-        if code & 4:
+        if mag & 4:
             delta += step
+        if mag & 2:
+            delta += step >> 1
+        if mag & 1:
+            delta += step >> 2
         pred += -delta if sign else delta
         pred = int(np.clip(pred, -32768, 32767))
         step_idx += _INDEX_TABLE[code & 0x07]
