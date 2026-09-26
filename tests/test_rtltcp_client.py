@@ -165,24 +165,25 @@ def test_command_packets():
         assert c.set_gain(200) is True           # 200 = 20.0 dB（0.1dB 单位）
         assert c.set_freq_correction(10) is True  # ppm
 
-        # 等 server 记录到全部 4 条
-        assert srv.wait_cmds(4, timeout=2.0), \
+        # 等 server 记录到全部 5 条（set_gain 会先 0x03=gain_mode(1) 再 0x04=gain）
+        assert srv.wait_cmds(5, timeout=2.0), \
             f"server 只收到 {len(srv.received_cmds)} 条命令: {srv.received_cmds}"
 
         with srv._lock:
             cmds = list(srv.received_cmds)
             raw = list(srv.received_raw)
 
-        # 语义断言：解析后的 (cmd, param) 正确
+        # 语义断言：解析后的 (cmd, param) 正确（真实 osmocom rtl_tcp opcode）
         assert (1, 100_000_000) in cmds, f"缺 set_freq: {cmds}"
         assert (2, 2_048_000) in cmds, f"缺 set_sample_rate: {cmds}"
-        assert (3, 200) in cmds, f"缺 set_gain: {cmds}"
-        assert (4, 10) in cmds, f"缺 set_freq_correction: {cmds}"
+        assert (3, 1) in cmds, f"缺 gain_mode=1(manual): {cmds}"
+        assert (4, 200) in cmds, f"缺 set_gain(0.1dB): {cmds}"
+        assert (5, 10) in cmds, f"缺 set_freq_correction(ppm): {cmds}"
 
         # 字节序断言：原始 5 字节帧必须是大端 struct.pack(">BI", ...)
         assert struct.pack(">BI", 1, 100_000_000) in raw, \
             f"set_freq 帧不是大端: {[r.hex() for r in raw]}"
-        assert struct.pack(">BI", 4, 10) in raw, \
+        assert struct.pack(">BI", 5, 10) in raw, \
             f"set_ppm 帧不是大端: {[r.hex() for r in raw]}"
         c.close()
     finally:
