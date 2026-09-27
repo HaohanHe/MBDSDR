@@ -70,12 +70,14 @@ MainWindow::MainWindow(QWidget* parent)
     auto* batteryTrack = new QFrame(topBar);
     batteryTrack->setFixedSize(tokens::kBatteryW, tokens::kBatteryH);
     batteryTrack->setStyleSheet(
-        QString("background: rgba(217,217,217,0.2); border-radius: %1px;")
+        QString("background: %1; border-radius: %2px;")
+            .arg(QString::fromUtf8(tokens::kBatteryTrack))
             .arg(tokens::kRadiusBattery));
     auto* batteryFill = new QFrame(batteryTrack);
     batteryFill->setGeometry(0, 0, 92, tokens::kBatteryH);
     batteryFill->setStyleSheet(
-        QString("background: #939393; border-radius: %1px;")
+        QString("background: %1; border-radius: %2px;")
+            .arg(QString::fromUtf8(tokens::kBatteryFill))
             .arg(tokens::kRadiusBattery));
     topLay->addWidget(batteryTrack);
 
@@ -189,7 +191,10 @@ MainWindow::MainWindow(QWidget* parent)
     song->setObjectName("songTitle");
     auto* prog = new QFrame(np);
     prog->setFixedHeight(4);
-    prog->setStyleSheet("background: rgba(255,255,255,0.3); border-radius: 2px;");
+    prog->setStyleSheet(
+        QString("background: %1; border-radius: %2px;")
+            .arg(QString::fromUtf8(tokens::kProgressBg))
+            .arg(tokens::kRadiusProgress));
     npMid->addWidget(song);
     npMid->addWidget(prog);
     npLay->addLayout(npMid, 1);

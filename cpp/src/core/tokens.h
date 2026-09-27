@@ -49,8 +49,12 @@ inline QString splitterHandleRgba() { return QString("rgba(217, 217, 217, 0.3)")
 inline constexpr const char* kSuccess     = "#5fd08a";
 inline constexpr const char* kWarning      = "#e0b35a";
 inline constexpr const char* kTestWarn    = "#e0b35a";
+inline constexpr const char* kBatteryFill = "#939393";
+inline constexpr const char* kBatteryTrack = "rgba(217, 217, 217, 0.2)";
 inline constexpr const char* kNowPlayingCoverFrom = "#6a6a6a";
 inline constexpr const char* kNowPlayingCoverTo   = "#2c2c2c";
+inline constexpr const char* kProgressBg   = "rgba(255, 255, 255, 0.3)";
+inline constexpr int kRadiusProgress = 2;
 
 // =====================================================================
 // Corner radii (SCSS authoritative)
