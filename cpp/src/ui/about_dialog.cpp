@@ -13,7 +13,7 @@ AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
 
     auto* lay = new QVBoxLayout(this);
     lay->addWidget(new QLabel("<h2>MBDSDR C++</h2>", this));
-    lay->addWidget(new QLabel("版本: 0.1.0 (Phase 9)", this));
+    lay->addWidget(new QLabel("版本: 0.1.0", this));
     lay->addWidget(new QLabel("", this));
     lay->addWidget(new QLabel("<b>依赖</b>", this));
     lay->addWidget(new QLabel("Qt 6.2.4 · librtlsdr 0.6.0 · CMake · C++17", this));
