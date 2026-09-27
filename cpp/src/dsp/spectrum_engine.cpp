@@ -88,6 +88,28 @@ double SpectrumEngine::scanBand(double lowHz, double highHz, double stepHz) {
     }
     return peakDb;
 }
+
+bool SpectrumEngine::tryConnectRtl() {
+    if (source_) source_->stop();
+    auto rtl = std::make_unique<RtlSdrSource>();
+    if (rtl->start()) {
+        source_ = std::move(rtl);
+        emit sourceChanged("RTL-SDR", true);
+        return true;
+    }
+    source_ = std::make_unique<TestSignalSource>();
+    source_->start();
+    emit sourceChanged("Test Signal", false);
+    return false;
+}
+
+void SpectrumEngine::disconnectSource() {
+    if (source_) source_->stop();
+    source_ = std::make_unique<TestSignalSource>();
+    source_->start();
+    emit sourceChanged("Test Signal", false);
+}
+
 void SpectrumEngine::setBandwidth(double hz) {
     bandwidth_ = hz;
     if (demod_) demod_->setBandwidth(hz);

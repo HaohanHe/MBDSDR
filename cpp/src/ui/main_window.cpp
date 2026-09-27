@@ -428,6 +428,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         aiInput_->returnPressed();
     });
 
+    // Connect/disconnect button
+    connect(connectBtn_, &QPushButton::clicked, this, [this]() {
+        if (connectBtn_->text() == "连接") {
+            bool ok = engine_->tryConnectRtl();
+            connectBtn_->setText(ok ? "断开" : "连接");
+        } else {
+            engine_->disconnectSource();
+            connectBtn_->setText("连接");
+        }
+    });
+
     engine_->start();
 }
 
@@ -451,6 +462,7 @@ void MainWindow::restoreUiState() {
 void MainWindow::onSourceChanged(const QString& name, bool connected) {
     statusLabel_->setText(connected ? QString("● %1").arg(name)
                                     : QString("● %1 (test)").arg(name));
+    if (connectBtn_) connectBtn_->setText(connected ? "断开" : "连接");
     setControlsEnabled(connected);
 }
 
