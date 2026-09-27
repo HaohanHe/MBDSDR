@@ -7,6 +7,7 @@
 #include <QDebug>
 #include <QDateTime>
 #include <QDir>
+#include <QFileInfo>
 #include <chrono>
 #include <thread>
 
@@ -203,14 +204,19 @@ bool SpectrumEngine::startRecording() {
                                      source_->name())) {
             return false;
         }
-        emit recordingStateChanged(true, recorder_.currentFilePath());
+        recCurrentPath_ = recorder_.currentFilePath();
+        emit recordingStateChanged(true, recCurrentPath_);
     } else {
         const int channels = recStereo_ ? 2 : 1;
         if (!wavWriter_.start(base + ".wav", 48000.0, channels)) {
             return false;
         }
-        emit recordingStateChanged(true, wavWriter_.currentFilePath());
+        recCurrentPath_ = wavWriter_.currentFilePath();
+        emit recordingStateChanged(true, recCurrentPath_);
     }
+    // Start the wall-clock used for the 1 Hz REC progress tick.
+    recClock_.restart();
+    lastRecSecond_ = -1;
     return true;
 }
 
@@ -348,10 +354,30 @@ void SpectrumEngine::run() {
         gatedRec_.feed(out, gate);
 
         // Continuous audio (WAV) recording for the main record button. When
-        // recIgnoreSquelch_ is false we only capture while the gate is open
-        // (like the gated recorder, but into one continuous file).
-        if (wavWriter_.isRecording() && (recIgnoreSquelch_ || gate)) {
-            wavWriter_.write(out);
+        // recIgnoreSquelch_ is false we normally only capture while the gate is
+        // open -- BUT skipping the closed-gate frames would shrink the WAV
+        // shorter than the wall-clock recording time. Instead, write a silent
+        // frame of the same length as `out` so the 48 kHz sample stream stays
+        // continuous and the file duration matches the time spent recording.
+        // (Baseband IQ recording above is unaffected: it always writes real IQ.)
+        if (wavWriter_.isRecording()) {
+            if (recIgnoreSquelch_ || gate) {
+                wavWriter_.write(out);
+            } else {
+                std::vector<float> silence(out.size(), 0.0f);
+                wavWriter_.write(silence);
+            }
+        }
+
+        // 1 Hz REC progress tick: elapsed wall-clock seconds + current file
+        // size, so the UI can render "● REC: name (MM:SS, NN KB)".
+        if (wavWriter_.isRecording() || recorder_.isRecording()) {
+            const int secs = static_cast<int>(recClock_.elapsed() / 1000);
+            if (secs != lastRecSecond_) {
+                lastRecSecond_ = secs;
+                emit recordingProgress(recCurrentPath_, secs,
+                                       QFileInfo(recCurrentPath_).size());
+            }
         }
 
         // CW decode

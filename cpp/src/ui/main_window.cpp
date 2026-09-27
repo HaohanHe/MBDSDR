@@ -26,6 +26,10 @@
 #include <QTimer>
 #include <QDialog>
 #include <QFormLayout>
+#include <QDir>
+#include <QFileInfo>
+#include <QUrl>
+#include <QDesktopServices>
 
 #include <cmath>
 #include <algorithm>
@@ -220,9 +224,13 @@ MainWindow::MainWindow(QWidget* parent)
     gRecLay->addWidget(recIgnoreSqlChk_);
     gatedCheck_ = new QCheckBox("触发式分段录制", gRec);
     gRecLay->addWidget(gatedCheck_);
+    auto* openRecDirBtn = new QPushButton("打开录制目录", gRec);
+    openRecDirBtn->setToolTip("在系统文件管理器中打开 recordings/ 目录");
+    gRecLay->addWidget(openRecDirBtn);
     recordBtn_ = new QPushButton("● 录制", gRec);
     gRecLay->addWidget(recordBtn_);
     recStatus_ = new QLabel("空闲", gRec);
+    recStatus_->setWordWrap(true);
     gRecLay->addWidget(recStatus_);
     leftLay->addWidget(gRec);
 
@@ -321,6 +329,8 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onSquelchState);
     connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
             this, &MainWindow::onRecordingState);
+    connect(engine_, &dsp::SpectrumEngine::recordingProgress,
+            this, &MainWindow::onRecordingProgress);
     connect(engine_, &dsp::SpectrumEngine::cwDecoded,
             this, &MainWindow::onCwDecoded);
     connect(engine_, &dsp::SpectrumEngine::adsbAircraft,
@@ -391,6 +401,12 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this](bool on) { engine_->setRecStereo(on); });
     connect(recIgnoreSqlChk_, &QCheckBox::toggled,
             this, [this](bool on) { engine_->setRecIgnoreSquelch(on); });
+
+    // Open the on-disk recordings folder in the system file manager.
+    connect(openRecDirBtn, &QPushButton::clicked, this, []() {
+        QDesktopServices::openUrl(
+            QUrl::fromLocalFile(QDir::currentPath() + "/recordings"));
+    });
 
     // ---- Advanced RTL-SDR front-end options (forwarded to the source) ----
     connect(dsCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -475,37 +491,44 @@ MainWindow::MainWindow(QWidget* parent)
         engine_->onSetCenterFreq(hz);
     });
 
-    // ---- Immediate persistence: every key control saves on change ----
+    // ---- Debounced persistence: high-frequency signals (zoom/pan every frame,
+    // slider/spinbox drags) arm a 500 ms one-shot timer instead of hitting the
+    // disk on every event. The timer flushes the real QSettings write. ----
+    saveTimer_ = new QTimer(this);
+    saveTimer_->setSingleShot(true);
+    saveTimer_->setInterval(500);
+    connect(saveTimer_, &QTimer::timeout, this, &MainWindow::saveSettings);
+
     connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &MainWindow::saveSettings);
+            this, &MainWindow::scheduleSave);
     connect(srCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &MainWindow::saveSettings);
+            this, &MainWindow::scheduleSave);
     connect(demodCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &MainWindow::saveSettings);
+            this, &MainWindow::scheduleSave);
     connect(bwCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &MainWindow::saveSettings);
-    connect(gainSlider_, &QSlider::valueChanged, this, &MainWindow::saveSettings);
-    connect(squelchSlider_, &QSlider::valueChanged, this, &MainWindow::saveSettings);
-    connect(squelchCheck_, &QCheckBox::stateChanged, this, &MainWindow::saveSettings);
+            this, &MainWindow::scheduleSave);
+    connect(gainSlider_, &QSlider::valueChanged, this, &MainWindow::scheduleSave);
+    connect(squelchSlider_, &QSlider::valueChanged, this, &MainWindow::scheduleSave);
+    connect(squelchCheck_, &QCheckBox::stateChanged, this, &MainWindow::scheduleSave);
     connect(ppmSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, &MainWindow::saveSettings);
+            this, &MainWindow::scheduleSave);
     connect(dsCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &MainWindow::saveSettings);
-    connect(offsetChk_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
-    connect(rtlAgcChk_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
-    connect(tunerAgcChk_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
-    connect(biasTeeChk_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
+            this, &MainWindow::scheduleSave);
+    connect(offsetChk_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
+    connect(rtlAgcChk_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
+    connect(tunerAgcChk_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
+    connect(biasTeeChk_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
     connect(recTargetCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &MainWindow::saveSettings);
-    connect(recTemplateEdit_, &QLineEdit::textEdited, this, &MainWindow::saveSettings);
-    connect(recStereoCheck_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
-    connect(recIgnoreSqlChk_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
-    connect(rightTabs_, &QTabWidget::currentChanged, this, &MainWindow::saveSettings);
-    connect(centerTabs_, &QTabWidget::currentChanged, this, &MainWindow::saveSettings);
-    connect(mainSplitter_, &QSplitter::splitterMoved, this, &MainWindow::saveSettings);
-    connect(spectrum_, &ui::SpectrumWidget::viewChanged, this, &MainWindow::saveSettings);
+            this, &MainWindow::scheduleSave);
+    connect(recTemplateEdit_, &QLineEdit::textEdited, this, &MainWindow::scheduleSave);
+    connect(recStereoCheck_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
+    connect(recIgnoreSqlChk_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
+    connect(rightTabs_, &QTabWidget::currentChanged, this, &MainWindow::scheduleSave);
+    connect(centerTabs_, &QTabWidget::currentChanged, this, &MainWindow::scheduleSave);
+    connect(mainSplitter_, &QSplitter::splitterMoved, this, &MainWindow::scheduleSave);
+    connect(spectrum_, &ui::SpectrumWidget::viewChanged, this, &MainWindow::scheduleSave);
     connect(spectrum_, &ui::SpectrumWidget::visibleRangeChanged,
-            this, [this](double, double) { saveSettings(); });
+            this, [this](double, double) { scheduleSave(); });
 
     setControlsEnabled(false);
     restoreUiState();
@@ -513,6 +536,11 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 MainWindow::~MainWindow() {
+    // Flush any pending debounced save so the last 500 ms of tweaks are not lost.
+    if (saveTimer_ && saveTimer_->isActive()) {
+        saveTimer_->stop();
+        saveSettings();
+    }
     saveUiState();
     if (engine_) { engine_->shutdown(); engine_->wait(); }
 }
@@ -568,6 +596,12 @@ void MainWindow::saveUiState() {
 void MainWindow::saveSettings() {
     // Thin alias: immediate persistence on every control change.
     saveUiState();
+}
+
+void MainWindow::scheduleSave() {
+    // Re-arm the single-shot timer; repeated events within 500 ms collapse into
+    // a single disk write when it finally fires.
+    if (saveTimer_) saveTimer_->start();
 }
 
 void MainWindow::restoreUiState() {
@@ -745,8 +779,30 @@ void MainWindow::onSquelchState(bool open) {
 }
 
 void MainWindow::onRecordingState(bool recording, const QString& path) {
-    recStatus_->setText(recording ? "● REC: " + path : "空闲");
+    if (recording) {
+        recStatus_->setText("● REC: " + QFileInfo(path).fileName());
+    } else {
+        recStatus_->setText("空闲");
+    }
     recordBtn_->setText(recording ? "■ 停止" : "● 录制");
+    // Lock the recording target / stereo switch while a file is open --
+    // changing them mid-capture would corrupt the in-progress file. The
+    // stereo checkbox is re-enabled only for the audio target on stop.
+    recTargetCombo_->setEnabled(!recording);
+    recStereoCheck_->setEnabled(!recording && (recTargetCombo_->currentIndex() == 1));
+}
+
+void MainWindow::onRecordingProgress(const QString& path, int seconds, qint64 bytes) {
+    if (!recStatus_) return;
+    const int mm = seconds / 60;
+    const int ss = seconds % 60;
+    const double kb = bytes / 1024.0;
+    recStatus_->setText(
+        QString("● REC: %1 (%2:%3, %4 KB)")
+            .arg(QFileInfo(path).fileName())
+            .arg(mm, 2, 10, QLatin1Char('0'))
+            .arg(ss, 2, 10, QLatin1Char('0'))
+            .arg(kb, 0, 'f', 1));
 }
 
 void MainWindow::onRecordClicked() {
