@@ -2,14 +2,17 @@
 // Offline test IQ source implementing ISource.
 //
 // *** TEST DATA -- NOT HARDWARE ***
-// isConnected() always returns false. The UI MUST show this as a
-// non-hardware source.
+// Supports three modulation modes for verifying the demod chain:
+//   "tone" -- dual-tone spectrum signal (default, for FFT display)
+//   "am"   -- carrier + 1kHz AM modulation (for AM demod test)
+//   "fm"   -- carrier + 1kHz FM modulation (for NFM/WFM demod test)
 #pragma once
 
 #include "source.h"
 #include <cstdint>
 #include <complex>
 #include <vector>
+#include <QString>
 
 namespace mbdsdr {
 namespace dsp {
@@ -34,11 +37,15 @@ public:
     QString name() const override { return QStringLiteral("Test Signal"); }
     bool isConnected() const override { return false; }
 
+    void setModulation(const QString& m) { modulation_ = m; }
+    QString modulation() const { return modulation_; }
+
 private:
     double fs_;
     double f0_;
     double gainDb_ = 20.0;
     std::uint64_t counter_ = 0;
+    QString modulation_ = "tone";
 
     bool   haveSpare_ = false;
     float  spare_ = 0.0f;
