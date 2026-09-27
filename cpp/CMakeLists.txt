@@ -126,6 +126,11 @@ target_include_directories(test_agent PRIVATE src)
 target_link_libraries(test_agent PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME agent COMMAND test_agent)
 
+# GUI-dependent tests run on the offscreen platform so ctest works on
+# headless/CI machines without a display.
+set_tests_properties(recorder decoder agent PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 message(STATUS "MBDSDR C++ build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Qt6 version: ${Qt6Core_VERSION}")
 message(STATUS "Target: mbdsdr (dynamic Qt6 linking -- system Qt6 is shared)")
