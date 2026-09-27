@@ -14,7 +14,6 @@ class QPlainTextEdit;
 class QTableWidget;
 class QLineEdit;
 class QStackedWidget;
-class QPushButton;
 
 namespace mbdsdr {
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; }
@@ -35,18 +34,24 @@ private slots:
     void onRecordingState(bool recording, const QString& path);
     void onRecordClicked();
     void onCwDecoded(const QString& text, double wpm);
-    void onAdsbAircraft(const mbdsdr::dsp::AircraftInfo& info);
+    void onAdsbAircraft(const dsp::AircraftInfo& info);
 
 private:
     dsp::SpectrumEngine* engine_   = nullptr;
     ui::SpectrumWidget* spectrum_ = nullptr;
+    ui::SkyView*     skyView_   = nullptr;
+    ui::WorldView*   worldView_ = nullptr;
+    QStackedWidget* centerStack_ = nullptr;
 
+    // Left panel controls
     QDoubleSpinBox* freqSpin_   = nullptr;
     QComboBox*      srCombo_    = nullptr;
     QSlider*        gainSlider_ = nullptr;
     QLabel*         gainValue_  = nullptr;
     QLabel*         sourceBanner_ = nullptr;
     QLabel*         statusLabel_ = nullptr;
+    QPushButton*    connectBtn_ = nullptr;
+    QLabel*         rssiLabel_  = nullptr;
 
     QComboBox*      demodCombo_  = nullptr;
     QComboBox*      bwCombo_     = nullptr;
@@ -58,24 +63,19 @@ private:
     QPushButton*    recordBtn_   = nullptr;
     QCheckBox*      gatedCheck_   = nullptr;
     QLabel*         recStatus_   = nullptr;
+    QLabel*         levelBar_   = nullptr;
 
+    // Right tabs
     QTabWidget*     rightTabs_   = nullptr;
     QPlainTextEdit* cwText_      = nullptr;
     QLabel*         cwWpm_       = nullptr;
     QTableWidget*   adsbTable_   = nullptr;
 
+    // AI
     ai::Agent*      agent_       = nullptr;
     QPlainTextEdit* aiChat_      = nullptr;
     QLineEdit*      aiInput_     = nullptr;
     QLabel*         aiStatus_   = nullptr;
-
-    // Phase 7: new views
-    ui::SkyView*     skyView_   = nullptr;
-    ui::WorldView*   worldView_ = nullptr;
-    QStackedWidget* centerStack_ = nullptr;
-    QLabel*         levelBar_   = nullptr;
-    QLabel*         rssiLabel_  = nullptr;
-    QPushButton*    connectBtn_ = nullptr;
 
     void setControlsEnabled(bool hardwareConnected);
     void saveUiState();

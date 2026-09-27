@@ -28,7 +28,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     outer->setSpacing(4);
 
     auto* topRow = new QHBoxLayout();
-    testLabel_ = new QLabel("TEST SIGNAL — 非硬件实时数据 / NOT HARDWARE", this);
+    testLabel_ = new QLabel("", this);
     testLabel_->setObjectName("testBanner");
     topRow->addWidget(testLabel_);
     topRow->addStretch();
@@ -59,12 +59,12 @@ void SpectrumWidget::setSpectrum(const SpectrumFrame& frame) {
     frame_ = frame;
     const double fs  = frame.sampleRateHz;
     const double f0  = frame.centerFreqHz;
-    infoLabel_->setText(QString("[%1] Fs=%2 MHz  F0=%3 MHz  N=%4%5")
+    testLabel_->setText(frame.isTestSignal ? "测试信号（非硬件）" : "");
+    infoLabel_->setText(QString("%1  Fs=%2 MHz  F0=%3 MHz  N=%4")
                         .arg(frame.sourceName.isEmpty() ? "?" : frame.sourceName)
                         .arg(fs / 1e6, 0, 'f', 1)
                         .arg(f0 / 1e6, 0, 'f', 1)
-                        .arg(frame.fftSize)
-                        .arg(frame.isTestSignal ? "  [TEST]" : ""));
+                        .arg(frame.fftSize));
     update();
 }
 
@@ -136,11 +136,6 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
         p.drawPath(path);
     }
 
-    // Watermark: TEST SIGNAL (warning amber from tokens)
-    p.setPen(QColor(QString::fromUtf8(tokens::kTestWarn)));
-    QFont wf = font();
-    wf.setBold(true);
-    p.setFont(wf);
     // VFO center line
     QPen vfoPen(QColor(tokens::kAccent));
     vfoPen.setWidthF(1.5);
@@ -156,8 +151,6 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
         double freq = frame_.centerFreqHz + (xRatio - 0.5) * frame_.sampleRateHz;
         p.drawText(hoverPos_ + QPointF(8, -8), QString("%1 MHz").arg(freq / 1e6, 0, 'f', 3));
     }
-
-    p.drawText(mL + 8, mT + 16, "TEST SIGNAL - NOT HARDWARE");
 }
 
 void SpectrumWidget::mousePressEvent(QMouseEvent* e) {

@@ -21,342 +21,241 @@
 #include <QStackedWidget>
 #include <QSettings>
 #include <QShortcut>
+#include <QScrollArea>
+#include <QDateTime>
+#include <QTimer>
+#include <QDialog>
+#include <QFormLayout>
+
+#include "core/tokens.h"
+#include "core/spectrum_frame.h"
+#include "dsp/spectrum_engine.h"
+#include "dsp/adsb_decoder.h"
 #include "ai/agent.h"
+#include "ai/ai_config.h"
 #include "ui/sky_view.h"
 #include "ui/world_view.h"
 #include "ui/settings_dialog.h"
 #include "ui/about_dialog.h"
-#include "ai/ai_config.h"
-
-#include "core/tokens.h"
-#include "dsp/spectrum_engine.h"
 
 namespace mbdsdr {
 
-static QFrame* makePanelCard(const QString& title, QWidget* parent) {
-    auto* card = new QFrame(parent);
-    card->setObjectName("panelCard");
-    auto* lay = new QVBoxLayout(card);
-    lay->setContentsMargins(tokens::kPanelPadLeft, tokens::kPanelPadTop,
-                            tokens::kPanelPadLeft, tokens::kPanelPadTop);
-    lay->setSpacing(12);
-    auto* t = new QLabel(title, card);
-    t->setObjectName("panelTitle");
-    lay->addWidget(t);
-    return card;
-}
+MainWindow::MainWindow(QWidget* parent)
+    : QMainWindow(parent)
+{
+    setWindowTitle("MBDSDR");
+    resize(tokens::scaled(1280), tokens::scaled(800));
+    setStyleSheet(tokens::buildDarkQss());
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
-    setWindowTitle("MBDSDR C++");
-    resize(1280, 800);
-
-    auto* central = new QWidget(this);
-    setCentralWidget(central);
-    auto* vbox = new QVBoxLayout(central);
-    vbox->setContentsMargins(0, 0, 0, 0);
-    vbox->setSpacing(0);
-
-    // ---- Top bar ----
-    auto* topBar = new QWidget();
+    // ---- Top bar (real elements only) ----
+    auto* topBar = new QFrame;
     topBar->setObjectName("topBar");
-    topBar->setFixedHeight(tokens::kTopbarH);
+    topBar->setFixedHeight(tokens::scaled(tokens::kTopbarH));
     auto* topLay = new QHBoxLayout(topBar);
-    topLay->setContentsMargins(tokens::kTopbarPadLeft, tokens::kTopbarPadTop,
-                               tokens::kTopbarPadRight, tokens::kTopbarPadBottom);
-    topLay->setSpacing(20);
-    auto* clock = new QLabel("12:30", topBar);
-    clock->setObjectName("clockLabel");
-    topLay->addWidget(clock);
-    auto* mileBox = new QVBoxLayout();
-    auto* mile = new QLabel("468km", topBar); mile->setObjectName("mileageLabel");
-    auto* mileSub = new QLabel("预估", topBar); mileSub->setObjectName("mileageSub");
-    mileBox->addWidget(mile); mileBox->addWidget(mileSub);
-    topLay->addLayout(mileBox);
-    auto* batteryTrack = new QFrame(topBar);
-    batteryTrack->setFixedSize(tokens::kBatteryW, tokens::kBatteryH);
-    batteryTrack->setStyleSheet(
-        QString("background: %1; border-radius: %2px;")
-            .arg(QString::fromUtf8(tokens::kBatteryTrack))
-            .arg(tokens::kRadiusBattery));
-    auto* batteryFill = new QFrame(batteryTrack);
-    batteryFill->setGeometry(0, 0, 92, tokens::kBatteryH);
-    batteryFill->setStyleSheet(
-        QString("background: %1; border-radius: %2px;")
-            .arg(QString::fromUtf8(tokens::kBatteryFill))
-            .arg(tokens::kRadiusBattery));
-    topLay->addWidget(batteryTrack);
-    topLay->addSpacing(67);
-    topLay->addWidget(new QLabel("P R N D", topBar));
+    topLay->setContentsMargins(tokens::scaled(16), 0, tokens::scaled(16), 0);
+
+    auto* titleLabel = new QLabel("MBDSDR", topBar);
+    QFont tf = titleLabel->font();
+    tf.setBold(true);
+    titleLabel->setFont(tf);
+    topLay->addWidget(titleLabel);
+
+    statusLabel_ = new QLabel("● Test Signal", topBar);
+    topLay->addWidget(statusLabel_);
     topLay->addStretch();
+
+    auto* clockLabel = new QLabel(topBar);
+    clockLabel->setObjectName("monoInfo");
+    auto* clockTimer = new QTimer(this);
+    connect(clockTimer, &QTimer::timeout, clockLabel, [clockLabel]() {
+        clockLabel->setText(QDateTime::currentDateTimeUtc().toString("HH:mm:ss UTC"));
+    });
+    clockTimer->start(1000);
+    clockLabel->setText(QDateTime::currentDateTimeUtc().toString("HH:mm:ss UTC"));
+    topLay->addWidget(clockLabel);
+
     auto* aboutBtn = new QPushButton("关于", topBar);
     auto* settingsBtn = new QPushButton("⚙", topBar);
     topLay->addWidget(aboutBtn);
     topLay->addWidget(settingsBtn);
-    statusLabel_ = new QLabel("● --", topBar);
-    statusLabel_->setObjectName("statusBanner");
-    topLay->addWidget(statusLabel_);
-    vbox->addWidget(topBar);
 
-    // ---- Splitter ----
-    auto* splitter = new QSplitter(Qt::Horizontal, central);
+    // ---- Central splitter (3 columns) ----
+    auto* central = new QWidget;
+    auto* centralLay = new QVBoxLayout(central);
+    centralLay->setContentsMargins(0, 0, 0, 0);
+    centralLay->setSpacing(0);
+    centralLay->addWidget(topBar);
 
-    // Left panel: real controls
-    auto* leftCard = makePanelCard("控制面板", splitter);
-    auto* leftLay = qobject_cast<QVBoxLayout*>(leftCard->layout());
+    auto* splitter = new QSplitter(Qt::Horizontal);
+    splitter->setChildrenCollapsible(false);
 
-    sourceBanner_ = new QLabel("RTL-SDR 未连接，使用测试信号", leftCard);
+    // ---- Left panel: scrollable controls ----
+    auto* leftScroll = new QScrollArea;
+    leftScroll->setWidgetResizable(true);
+    leftScroll->setFrameShape(QFrame::NoFrame);
+    auto* leftCard = new QFrame;
+    leftCard->setObjectName("panelCard");
+    auto* leftLay = new QVBoxLayout(leftCard);
+    leftLay->setContentsMargins(tokens::scaled(12), tokens::scaled(12), tokens::scaled(12), tokens::scaled(12));
+    leftLay->setSpacing(tokens::scaled(8));
+
+    auto* gSrc = new QGroupBox("源与连接", leftCard);
+    auto* gSrcLay = new QVBoxLayout(gSrc);
+    sourceBanner_ = new QLabel("RTL-SDR 未连接，使用测试信号", gSrc);
     sourceBanner_->setObjectName("dockHint");
     sourceBanner_->setWordWrap(true);
-    leftLay->addWidget(sourceBanner_);
+    gSrcLay->addWidget(sourceBanner_);
+    connectBtn_ = new QPushButton("连接", gSrc);
+    gSrcLay->addWidget(connectBtn_);
+    rssiLabel_ = new QLabel("RSSI: -- dBFS", gSrc);
+    gSrcLay->addWidget(rssiLabel_);
+    leftLay->addWidget(gSrc);
 
-    // Connect button
-    connectBtn_ = new QPushButton("连接", leftCard);
-    leftLay->addWidget(connectBtn_);
-
-    // RSSI
-    rssiLabel_ = new QLabel("RSSI: -- dBFS", leftCard);
-    leftLay->addWidget(rssiLabel_);
-
-    // Frequency
-    leftLay->addWidget(new QLabel("中心频率", leftCard));
-    freqSpin_ = new QDoubleSpinBox(leftCard);
+    auto* gFreq = new QGroupBox("频率", leftCard);
+    auto* gFreqLay = new QFormLayout(gFreq);
+    freqSpin_ = new QDoubleSpinBox(gFreq);
     freqSpin_->setRange(tokens::kFreqMinHz / 1e6, tokens::kFreqMaxHz / 1e6);
-    freqSpin_->setSingleStep(tokens::kFreqStepHz / 1e6);
+    freqSpin_->setValue(98.5);
     freqSpin_->setDecimals(3);
     freqSpin_->setSuffix(" MHz");
-    freqSpin_->setValue(98.5);
-    leftLay->addWidget(freqSpin_);
+    gFreqLay->addRow("中心频率", freqSpin_);
+    leftLay->addWidget(gFreq);
 
-    // Sample rate
-    leftLay->addWidget(new QLabel("采样率", leftCard));
-    srCombo_ = new QComboBox(leftCard);
-    for (double sr : tokens::kSampleRatesHz) srCombo_->addItem(QString("%1 MS/s").arg(sr/1e6, 0, 'f', 2));
-    srCombo_->setCurrentIndex(2); // 2.4 MS/s
-    leftLay->addWidget(srCombo_);
-
-    // Gain
-    leftLay->addWidget(new QLabel("增益", leftCard));
-    auto* gainRow = new QHBoxLayout();
-    gainSlider_ = new QSlider(Qt::Horizontal, leftCard);
-    gainSlider_->setRange(static_cast<int>(tokens::kGainMinDb * 10),
-                          static_cast<int>(tokens::kGainMaxDb * 10));
-    gainSlider_->setValue(200); // 20 dB
-    gainValue_ = new QLabel("20.0 dB", leftCard);
-    gainValue_->setObjectName("monoInfo");
-    gainRow->addWidget(gainSlider_, 1);
+    auto* gRx = new QGroupBox("接收参数", leftCard);
+    auto* gRxLay = new QFormLayout(gRx);
+    srCombo_ = new QComboBox(gRx);
+    srCombo_->addItems({"1.024 MS/s", "2.048 MS/s", "2.4 MS/s", "3.2 MS/s"});
+    srCombo_->setCurrentIndex(2);
+    gRxLay->addRow("采样率", srCombo_);
+    gainSlider_ = new QSlider(Qt::Horizontal, gRx);
+    gainSlider_->setRange(0, 50);
+    gainValue_ = new QLabel("0 dB", gRx);
+    auto* gainRow = new QHBoxLayout;
+    gainRow->addWidget(gainSlider_);
     gainRow->addWidget(gainValue_);
-    leftLay->addLayout(gainRow);
+    gRxLay->addRow("增益", gainRow);
+    demodCombo_ = new QComboBox(gRx);
+    demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW"});
+    gRxLay->addRow("解调", demodCombo_);
+    bwCombo_ = new QComboBox(gRx);
+    bwCombo_->addItems({"8 kHz", "12.5 kHz", "200 kHz", "2.4 kHz", "500 Hz"});
+    gRxLay->addRow("带宽", bwCombo_);
+    leftLay->addWidget(gRx);
 
-    // Demod mode
-    leftLay->addWidget(new QLabel("解调模式", leftCard));
-    demodCombo_ = new QComboBox(leftCard);
-    demodCombo_->addItems({"NFM", "WFM", "AM", "USB", "LSB", "CW", "ADS-B"});
-    leftLay->addWidget(demodCombo_);
-
-    // Bandwidth
-    leftLay->addWidget(new QLabel("带宽", leftCard));
-    bwCombo_ = new QComboBox(leftCard);
-    bwCombo_->addItems({"8 kHz", "12.5 kHz", "200 kHz", "2.4 kHz"});
-    bwCombo_->setCurrentIndex(1); // NFM default
-    leftLay->addWidget(bwCombo_);
-
-    // Squelch — off by default so audio passes straight through.
-    squelchCheck_ = new QCheckBox("启用静噪", leftCard);
-    squelchCheck_->setChecked(false);
-    leftLay->addWidget(squelchCheck_);
-
-    leftLay->addWidget(new QLabel("静噪门限", leftCard));
-    auto* sqRow = new QHBoxLayout();
-    squelchSlider_ = new QSlider(Qt::Horizontal, leftCard);
+    auto* gSql = new QGroupBox("静噪", leftCard);
+    auto* gSqlLay = new QVBoxLayout(gSql);
+    squelchCheck_ = new QCheckBox("启用静噪", gSql);
+    gSqlLay->addWidget(squelchCheck_);
+    auto* sqlRow = new QHBoxLayout;
+    squelchSlider_ = new QSlider(Qt::Horizontal, gSql);
     squelchSlider_->setRange(-100, -20);
     squelchSlider_->setValue(-50);
-    squelchSlider_->setEnabled(false);
-    squelchValue_ = new QLabel("-50 dB", leftCard);
-    squelchValue_->setObjectName("monoInfo");
-    squelchValue_->setEnabled(false);
-    sqRow->addWidget(squelchSlider_, 1);
-    sqRow->addWidget(squelchValue_);
-    leftLay->addLayout(sqRow);
+    squelchValue_ = new QLabel("-50 dB", gSql);
+    sqlRow->addWidget(squelchSlider_);
+    sqlRow->addWidget(squelchValue_);
+    gSqlLay->addLayout(sqlRow);
+    squelchState_ = new QLabel("状态: CLOSED", gSql);
+    gSqlLay->addWidget(squelchState_);
+    leftLay->addWidget(gSql);
 
-    // Squelch state + audio level
-    squelchState_ = new QLabel("静噪: 关闭", leftCard);
-    squelchState_->setObjectName("monoInfo");
-    leftLay->addWidget(squelchState_);
-    levelLabel_ = new QLabel("电平: -- dBFS", leftCard);
-    levelLabel_->setObjectName("monoInfo");
-    leftLay->addWidget(levelLabel_);
+    auto* gAud = new QGroupBox("音频", leftCard);
+    auto* gAudLay = new QVBoxLayout(gAud);
+    levelLabel_ = new QLabel("电平: -- dBFS", gAud);
+    gAudLay->addWidget(levelLabel_);
+    levelBar_ = new QLabel("", gAud);
+    levelBar_->setFixedHeight(tokens::scaled(16));
+    gAudLay->addWidget(levelBar_);
+    leftLay->addWidget(gAud);
 
-    // Recording
-    recordBtn_ = new QPushButton("● REC", leftCard);
-    leftLay->addWidget(recordBtn_);
-    gatedCheck_ = new QCheckBox("触发录制（按通话分段）", leftCard);
-    leftLay->addWidget(gatedCheck_);
-    recStatus_ = new QLabel("录制: 空闲", leftCard);
-    recStatus_->setObjectName("monoInfo");
-    leftLay->addWidget(recStatus_);
-
-    // Level bar
-    leftLay->addWidget(new QLabel("音频电平", leftCard));
-    levelBar_ = new QLabel("---", leftCard);
-    levelBar_->setFixedHeight(20);
-    levelBar_->setStyleSheet(QString("background: %1; border-radius: 4px;").arg(tokens::kCard1));
-    leftLay->addWidget(levelBar_);
-
-    // Sky view
-    skyView_ = new ui::SkyView(leftCard);
-    leftLay->addWidget(skyView_);
+    auto* gRec = new QGroupBox("录制", leftCard);
+    auto* gRecLay = new QVBoxLayout(gRec);
+    recordBtn_ = new QPushButton("● 录制", gRec);
+    gRecLay->addWidget(recordBtn_);
+    gatedCheck_ = new QCheckBox("触发式录制", gRec);
+    gRecLay->addWidget(gatedCheck_);
+    recStatus_ = new QLabel("空闲", gRec);
+    gRecLay->addWidget(recStatus_);
+    leftLay->addWidget(gRec);
 
     leftLay->addStretch();
-    splitter->addWidget(leftCard);
+    leftScroll->setWidget(leftCard);
+    splitter->addWidget(leftScroll);
 
-    // Center: stacked spectrum + world view
-    auto* centerCard = new QFrame(splitter);
+    // ---- Center: stacked spectrum / world ----
+    auto* centerCard = new QFrame;
     centerCard->setObjectName("panelCard");
     auto* centerLay = new QVBoxLayout(centerCard);
-    centerLay->setContentsMargins(0,0,0,0);
-
+    centerLay->setContentsMargins(0, 0, 0, 0);
     centerStack_ = new QStackedWidget(centerCard);
     spectrum_ = new ui::SpectrumWidget(centerCard);
     centerStack_->addWidget(spectrum_);
     worldView_ = new ui::WorldView(centerCard);
     centerStack_->addWidget(worldView_);
     centerLay->addWidget(centerStack_);
-
-    // Toggle buttons
-    auto* toggleRow = new QHBoxLayout();
+    auto* toggleRow = new QHBoxLayout;
     auto* specBtn = new QPushButton("频谱", centerCard);
     auto* worldBtn = new QPushButton("世界", centerCard);
     toggleRow->addWidget(specBtn);
     toggleRow->addWidget(worldBtn);
     centerLay->addLayout(toggleRow);
-    connect(specBtn, &QPushButton::clicked, this, [this]() { centerStack_->setCurrentWidget(spectrum_); });
-    connect(worldBtn, &QPushButton::clicked, this, [this]() { centerStack_->setCurrentWidget(worldView_); });
-
     splitter->addWidget(centerCard);
 
-    // Right panel: tabs
-    auto* rightCard = makePanelCard("面板", splitter);
+    // ---- Right panel: tabs ----
+    auto* rightCard = new QFrame;
+    rightCard->setObjectName("panelCard");
+    auto* rightLay = new QVBoxLayout(rightCard);
     rightTabs_ = new QTabWidget(rightCard);
-    rightTabs_->setTabPosition(QTabWidget::North);
 
-    auto* taskWidget = new QWidget();
-    auto* taskLay = new QVBoxLayout(taskWidget);
-    taskLay->addWidget(new QLabel("AI Agent / 任务列表\n（Phase 6 接入）", taskWidget));
-    taskLay->addStretch();
-    rightTabs_->addTab(taskWidget, "任务");
-
-    auto* cwWidget = new QWidget();
-    auto* cwLay = new QVBoxLayout(cwWidget);
-    cwLay->addWidget(new QLabel("CW 摩尔斯解码（800Hz BFO）", cwWidget));
-    cwWpm_ = new QLabel("WPM: --", cwWidget);
+    auto* cwPage = new QWidget;
+    auto* cwLay = new QVBoxLayout(cwPage);
+    cwWpm_ = new QLabel("WPM: --", cwPage);
     cwLay->addWidget(cwWpm_);
-    cwText_ = new QPlainTextEdit(cwWidget);
+    cwText_ = new QPlainTextEdit(cwPage);
     cwText_->setReadOnly(true);
-    cwText_->setPlaceholderText("无 CW 信号时此处为空");
     cwLay->addWidget(cwText_);
-    rightTabs_->addTab(cwWidget, "CW");
+    rightTabs_->addTab(cwPage, "CW");
 
-    auto* adsbWidget = new QWidget();
-    auto* adsbLay = new QVBoxLayout(adsbWidget);
-    adsbLay->addWidget(new QLabel("ADS-B 1090MHz\n需 1090MHz 专用天线，FC0012 可能不支持", adsbWidget));
-    adsbTable_ = new QTableWidget(0, 4, adsbWidget);
-    adsbTable_->setHorizontalHeaderLabels({"ICAO", "呼号", "高度(ft)", "最后出现"});
-    adsbTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    auto* adsbPage = new QWidget;
+    auto* adsbLay = new QVBoxLayout(adsbPage);
+    adsbLay->addWidget(new QLabel("ADS-B 1090MHz — 需专用天线", adsbPage));
+    adsbTable_ = new QTableWidget(0, 4, adsbPage);
+    adsbTable_->setHorizontalHeaderLabels({"ICAO", "呼号", "高度", "时间"});
     adsbLay->addWidget(adsbTable_);
-    rightTabs_->addTab(adsbWidget, "ADS-B");
+    rightTabs_->addTab(adsbPage, "ADS-B");
 
-    // AI tab
-    auto* aiWidget = new QWidget();
-    auto* aiLay = new QVBoxLayout(aiWidget);
-    aiStatus_ = new QLabel("未配置 API Key — 仅本地指令", aiWidget);
+    skyView_ = new ui::SkyView(adsbPage);
+    rightTabs_->addTab(skyView_, "天空");
+
+    auto* aiPage = new QWidget;
+    auto* aiLay = new QVBoxLayout(aiPage);
+    aiStatus_ = new QLabel("未配置 API Key — 仅本地指令", aiPage);
     aiLay->addWidget(aiStatus_);
-    aiChat_ = new QPlainTextEdit(aiWidget);
+    aiChat_ = new QPlainTextEdit(aiPage);
     aiChat_->setReadOnly(true);
     aiLay->addWidget(aiChat_);
-    auto* aiRow = new QHBoxLayout();
-    aiInput_ = new QLineEdit(aiWidget);
-    aiInput_->setPlaceholderText("输入指令，如 98.5 或 am 或 record");
-    aiRow->addWidget(aiInput_, 1);
-    auto* sendBtn = new QPushButton("发送", aiWidget);
-    aiRow->addWidget(sendBtn);
-    aiLay->addLayout(aiRow);
-    rightTabs_->addTab(aiWidget, "AI 助手");
+    aiInput_ = new QLineEdit(aiPage);
+    aiInput_->setPlaceholderText("输入频率/模式/指令...");
+    aiLay->addWidget(aiInput_);
+    auto* sendBtn = new QPushButton("发送", aiPage);
+    aiLay->addWidget(sendBtn);
+    rightTabs_->addTab(aiPage, "AI 助手");
 
-    qobject_cast<QVBoxLayout*>(rightCard->layout())->addWidget(rightTabs_);
+    rightLay->addWidget(rightTabs_);
     splitter->addWidget(rightCard);
 
     splitter->setStretchFactor(0, 1);
-    splitter->setStretchFactor(1, 4);
+    splitter->setStretchFactor(1, 3);
     splitter->setStretchFactor(2, 1);
-    splitter->setSizes({280, 720, 280});
-    vbox->addWidget(splitter, 1);
+    splitter->setSizes({tokens::scaled(280), tokens::scaled(800), tokens::scaled(280)});
 
-    // ---- Bottom dock ----
-    auto* dock = new QFrame();
-    dock->setObjectName("bottomDock");
-    dock->setFixedHeight(tokens::kDockH);
-    auto* dockLay = new QHBoxLayout(dock);
-    dockLay->setContentsMargins(tokens::kDockPadX, tokens::kDockPadY,
-                                tokens::kDockPadX, tokens::kDockPadY);
-    dockLay->setSpacing(tokens::kDockIconGap);
-    auto* home = new QPushButton("⌂", dock); home->setObjectName("homeBtn");
-    dockLay->addWidget(home);
-    auto* tempBox = new QHBoxLayout(); tempBox->setSpacing(8);
-    auto* la = new QLabel("‹", dock); la->setObjectName("tempArrow");
-    auto* tv = new QLabel("23.5°", dock); tv->setObjectName("tempLabel");
-    auto* ra = new QLabel("›", dock); ra->setObjectName("tempArrow");
-    tempBox->addWidget(la); tempBox->addWidget(tv); tempBox->addWidget(ra);
-    dockLay->addLayout(tempBox);
-    for (int i = 0; i < 5; ++i) {
-        auto* ic = new QPushButton(dock);
-        ic->setObjectName(i == 0 ? "dockIconSelected" : "dockIcon");
-        dockLay->addWidget(ic);
-    }
-    auto* np = new QFrame(dock);
-    np->setFixedWidth(tokens::kNowPlayingW);
-    np->setStyleSheet("background: transparent;");
-    auto* npLay = new QHBoxLayout(np);
-    npLay->setContentsMargins(0,0,0,0); npLay->setSpacing(10);
-    auto* cover = new QFrame(np);
-    cover->setFixedSize(tokens::kNowPlayingCover, tokens::kNowPlayingCover);
-    cover->setStyleSheet(
-        QString("background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %1, stop:1 %2); border-radius: %3px;")
-            .arg(QString::fromUtf8(tokens::kNowPlayingCoverFrom),
-                 QString::fromUtf8(tokens::kNowPlayingCoverTo),
-                 QString::number(tokens::kRadiusAlbumSm)));
-    npLay->addWidget(cover);
-    auto* npMid = new QVBoxLayout();
-    auto* song = new QLabel("Starboy", np); song->setObjectName("songTitle");
-    auto* prog = new QFrame(np);
-    prog->setFixedHeight(4);
-    prog->setStyleSheet(
-        QString("background: %1; border-radius: %2px;")
-            .arg(QString::fromUtf8(tokens::kProgressBg))
-            .arg(tokens::kRadiusProgress));
-    npMid->addWidget(song); npMid->addWidget(prog);
-    npLay->addLayout(npMid, 1);
-    auto* play = new QPushButton("▶", np); play->setObjectName("playBtn");
-    auto* next = new QPushButton("⏭", np); next->setObjectName("nextBtn");
-    npLay->addWidget(play); npLay->addWidget(next);
-    dockLay->addWidget(np);
-    auto* tempBox2 = new QHBoxLayout(); tempBox2->setSpacing(8);
-    auto* l2 = new QLabel("‹", dock); l2->setObjectName("tempArrow");
-    auto* t2 = new QLabel("23.5°", dock); t2->setObjectName("tempLabel");
-    auto* r2 = new QLabel("›", dock); r2->setObjectName("tempArrow");
-    tempBox2->addWidget(l2); tempBox2->addWidget(t2); tempBox2->addWidget(r2);
-    dockLay->addLayout(tempBox2);
-    auto* vol = new QPushButton("♪", dock); vol->setObjectName("volBtn");
-    dockLay->addWidget(vol);
-    vbox->addWidget(dock);
+    centralLay->addWidget(splitter);
+    setCentralWidget(central);
+    statusBar()->showMessage("MBDSDR C++");
 
-    statusBar()->showMessage("MBDSDR C++ Phase 2 -- 统一信号源 + RTL-SDR 接入层");
-
-    // ---- Wire engine ----
+    // ---- Engine ----
     engine_ = new dsp::SpectrumEngine(this);
     connect(engine_, &dsp::SpectrumEngine::spectrumReady,
-            spectrum_, &ui::SpectrumWidget::setSpectrum, Qt::QueuedConnection);
-    connect(spectrum_, &ui::SpectrumWidget::fftSizeRequested,
-            engine_, &dsp::SpectrumEngine::setFftSize);
+            spectrum_, &ui::SpectrumWidget::setSpectrum);
     connect(engine_, &dsp::SpectrumEngine::sourceChanged,
             this, &MainWindow::onSourceChanged);
     connect(engine_, &dsp::SpectrumEngine::audioLevel,
@@ -365,14 +264,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             this, &MainWindow::onRssiLevel);
     connect(engine_, &dsp::SpectrumEngine::squelchState,
             this, &MainWindow::onSquelchState);
+    connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
+            this, &MainWindow::onRecordingState);
+    connect(engine_, &dsp::SpectrumEngine::cwDecoded,
+            this, &MainWindow::onCwDecoded);
+    connect(engine_, &dsp::SpectrumEngine::adsbAircraft,
+            this, &MainWindow::onAdsbAircraft);
 
-    // Control signals -> engine
+    connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double mhz) { engine_->onSetCenterFreq(mhz * 1e6); });
+    connect(gainSlider_, &QSlider::valueChanged,
+            this, [this](int v) {
+                gainValue_->setText(QString("%1 dB").arg(v));
+                engine_->onSetGain(v);
+            });
     connect(demodCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) {
                 engine_->setDemodMode(demodCombo_->currentText());
-                // Auto-set default bandwidth per mode
                 static const QMap<QString, int> bwIdx = {
-                    {"AM", 0}, {"NFM", 1}, {"WFM", 2}, {"USB", 3}, {"LSB", 3}, {"CW", 1}
+                    {"AM", 0}, {"NFM", 1}, {"WFM", 2}, {"USB", 3}, {"LSB", 3}, {"CW", 4}
                 };
                 auto it = bwIdx.find(demodCombo_->currentText());
                 if (it != bwIdx.end()) {
@@ -384,71 +294,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(squelchSlider_, &QSlider::valueChanged,
             this, [this](int v) {
                 squelchValue_->setText(QString("%1 dB").arg(v));
-                engine_->setSquelchThreshold(static_cast<float>(v));
-            });
-    connect(squelchCheck_, &QCheckBox::toggled, this, [this](bool on) {
-        engine_->setSquelchEnabled(on);
-        squelchSlider_->setEnabled(on);
-        squelchValue_->setEnabled(on);
-        if (!on) squelchState_->setText("静噪: 关闭");
-    });
-
-    connect(bwCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int idx) {
-                static const double bw[] = {8000, 12500, 200000, 2400};
-                engine_->setBandwidth(bw[idx]);
             });
     connect(recordBtn_, &QPushButton::clicked, this, &MainWindow::onRecordClicked);
-    connect(gatedCheck_, &QCheckBox::toggled,
-            this, [this](bool e) { engine_->setGatedRecordingEnabled(e); });
-    connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
-            this, &MainWindow::onRecordingState);
 
-    // Control signals -> engine
-    connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, [this](double mhz) { engine_->onSetCenterFreq(mhz * 1e6); });
-    connect(srCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int idx) {
-                double sr = tokens::kSampleRatesHz.begin()[idx];
-                engine_->onSetSampleRate(sr);
-            });
-    connect(gainSlider_, &QSlider::valueChanged,
-            this, [this](int v) {
-                double db = v / 10.0;
-                gainValue_->setText(QString("%1 dB").arg(db, 0, 'f', 1));
-                engine_->onSetGain(db);
-            });
-
-    connect(engine_, &dsp::SpectrumEngine::cwDecoded,
-            this, &MainWindow::onCwDecoded);
-    connect(engine_, &dsp::SpectrumEngine::adsbAircraft,
-            this, &MainWindow::onAdsbAircraft);
-
-    // AI agent
-    agent_ = new ai::Agent(this);
-    agent_->setEngine(engine_);
-    agent_->configureFromConfig();
-    connect(agent_, &ai::Agent::responseReady, this, [this](const QString& r) {
-        aiChat_->appendPlainText("AI: " + r);
-    });
-    connect(agent_, &ai::Agent::toolCalled, this, [this](const QString& t, const QString& r) {
-        aiChat_->appendPlainText(QString("[工具] %1 → %2").arg(t, r));
-    });
-    connect(agent_, &ai::Agent::statusChanged, this, [this](const QString& s) {
-        aiStatus_->setText(s);
-    });
-    connect(aiInput_, &QLineEdit::returnPressed, this, [this]() {
-        QString text = aiInput_->text();
-        if (text.isEmpty()) return;
-        aiChat_->appendPlainText("你: " + text);
-        aiInput_->clear();
-        agent_->sendMessage(text);
-    });
-    connect(sendBtn, &QPushButton::clicked, this, [this]() {
-        aiInput_->returnPressed();
-    });
-
-    // Connect/disconnect button
     connect(connectBtn_, &QPushButton::clicked, this, [this]() {
         if (connectBtn_->text() == "连接") {
             bool ok = engine_->tryConnectRtl();
@@ -459,38 +307,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         }
     });
 
-    // Keyboard shortcuts
-    new QShortcut(QKeySequence(Qt::Key_Right), this, this, [this]() {
-        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 + 10000);  // +10kHz
-    });
-    new QShortcut(QKeySequence(Qt::Key_Left), this, this, [this]() {
-        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 - 10000);
-    });
-    new QShortcut(QKeySequence(Qt::Key_Up), this, this, [this]() {
-        engine_->onSetGain(gainSlider_->value() + 1);
-    });
-    new QShortcut(QKeySequence(Qt::Key_Down), this, this, [this]() {
-        engine_->onSetGain(gainSlider_->value() - 1);
-    });
-    new QShortcut(QKeySequence("Ctrl+R"), this, this, [this]() {
-        recordBtn_->click();
-    });
-    static bool muted = false;
-    new QShortcut(QKeySequence(Qt::Key_Space), this, this, [this]() {
-        muted = !muted;
-        engine_->setMuted(muted);
-        statusLabel_->setText(muted ? "已静音" : "");
-    });
+    connect(specBtn, &QPushButton::clicked, this, [this]() { centerStack_->setCurrentWidget(spectrum_); });
+    connect(worldBtn, &QPushButton::clicked, this, [this]() { centerStack_->setCurrentWidget(worldView_); });
 
-    // Spectrum drag tuning
-    connect(spectrum_, &ui::SpectrumWidget::frequencyChanged, this, [this](double hz) {
-        freqSpin_->blockSignals(true);
-        freqSpin_->setValue(hz / 1e6);
-        freqSpin_->blockSignals(false);
-        engine_->onSetCenterFreq(hz);
-    });
-
-    // About / settings buttons
     connect(aboutBtn, &QPushButton::clicked, this, [this]() {
         ui::AboutDialog dlg(this);
         dlg.exec();
@@ -507,6 +326,48 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         }
     });
 
+    agent_ = new ai::Agent(this);
+    connect(agent_, &ai::Agent::responseReady, this, [this](const QString& t) {
+        aiChat_->appendPlainText("AI: " + t);
+    });
+    connect(sendBtn, &QPushButton::clicked, this, [this]() {
+        QString t = aiInput_->text().trimmed();
+        if (t.isEmpty()) return;
+        aiChat_->appendPlainText("You: " + t);
+        agent_->sendMessage(t);
+        aiInput_->clear();
+    });
+    connect(aiInput_, &QLineEdit::returnPressed, sendBtn, &QPushButton::click);
+
+    new QShortcut(QKeySequence(Qt::Key_Right), this, this, [this]() {
+        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 + 10000);
+    });
+    new QShortcut(QKeySequence(Qt::Key_Left), this, this, [this]() {
+        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 - 10000);
+    });
+    new QShortcut(QKeySequence(Qt::Key_Up), this, this, [this]() {
+        engine_->onSetGain(gainSlider_->value() + 1);
+    });
+    new QShortcut(QKeySequence(Qt::Key_Down), this, this, [this]() {
+        engine_->onSetGain(gainSlider_->value() - 1);
+    });
+    new QShortcut(QKeySequence("Ctrl+R"), this, this, [this]() { recordBtn_->click(); });
+    static bool muted = false;
+    new QShortcut(QKeySequence(Qt::Key_Space), this, this, [this]() {
+        muted = !muted;
+        engine_->setMuted(muted);
+        statusBar()->showMessage(muted ? "已静音" : "");
+    });
+
+    connect(spectrum_, &ui::SpectrumWidget::frequencyChanged, this, [this](double hz) {
+        freqSpin_->blockSignals(true);
+        freqSpin_->setValue(hz / 1e6);
+        freqSpin_->blockSignals(false);
+        engine_->onSetCenterFreq(hz);
+    });
+
+    setControlsEnabled(false);
+    restoreUiState();
     engine_->start();
 }
 
@@ -518,29 +379,17 @@ MainWindow::~MainWindow() {
 void MainWindow::saveUiState() {
     QSettings s("MBDSDR", "MBDSDR");
     s.setValue("geometry", saveGeometry());
-    s.setValue("windowState", saveState());
 }
 
 void MainWindow::restoreUiState() {
     QSettings s("MBDSDR", "MBDSDR");
     restoreGeometry(s.value("geometry").toByteArray());
-    restoreState(s.value("windowState").toByteArray());
 }
 
 void MainWindow::onSourceChanged(const QString& name, bool connected) {
-    statusLabel_->setText(connected ? QString("● %1").arg(name)
-                                    : QString("● %1 (test)").arg(name));
+    statusLabel_->setText(connected ? QString("● %1").arg(name) : QString("● %1 (test)").arg(name));
     if (connectBtn_) connectBtn_->setText(connected ? "断开" : "连接");
     setControlsEnabled(connected);
-}
-
-void MainWindow::setControlsEnabled(bool hw) {
-    freqSpin_->setEnabled(hw);
-    srCombo_->setEnabled(hw);
-    gainSlider_->setEnabled(hw);
-    sourceBanner_->setText(hw ? QString() :
-        QStringLiteral("RTL-SDR 未连接，使用测试信号（频率/增益不生效）"));
-    sourceBanner_->setVisible(!hw);
 }
 
 void MainWindow::onAudioLevel(float dbfs) {
@@ -557,25 +406,15 @@ void MainWindow::onRssiLevel(float dbfs) {
 }
 
 void MainWindow::onSquelchState(bool open) {
-    if (squelchCheck_ && !squelchCheck_->isChecked()) {
-        squelchState_->setText("静噪: 关闭");
-        return;
-    }
-    squelchState_->setText(open ? "静噪: OPEN" : "静噪: CLOSED");
-}
-
-void MainWindow::onRecordClicked() {
-    if (!engine_) return;
-    if (recordBtn_->text().contains("REC")) {
-        engine_->startRecording();
-    } else {
-        engine_->stopRecording();
-    }
+    squelchState_->setText(open ? "状态: OPEN" : "状态: CLOSED");
 }
 
 void MainWindow::onRecordingState(bool recording, const QString& path) {
-    recordBtn_->setText(recording ? "■ STOP" : "● REC");
-    recStatus_->setText(recording ? QString("录制: %1").arg(path) : "录制: 空闲");
+    recStatus_->setText(recording ? "● REC: " + path : "空闲");
+    recordBtn_->setText(recording ? "■ 停止" : "● 录制");
+}
+
+void MainWindow::onRecordClicked() {
 }
 
 void MainWindow::onCwDecoded(const QString& text, double wpm) {
@@ -583,23 +422,19 @@ void MainWindow::onCwDecoded(const QString& text, double wpm) {
     cwWpm_->setText(QString("WPM: %1").arg(wpm, 0, 'f', 1));
 }
 
-void MainWindow::onAdsbAircraft(const mbdsdr::dsp::AircraftInfo& info) {
+void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {
     int row = adsbTable_->rowCount();
-    for (int i = 0; i < row; ++i) {
-        if (adsbTable_->item(i, 0)->text() == info.icao) {
-            adsbTable_->item(i, 1)->setText(info.callsign);
-            adsbTable_->item(i, 2)->setText(info.altitudeFt > 0 ?
-                QString::number(info.altitudeFt) : "--");
-            adsbTable_->item(i, 3)->setText(info.lastSeen.toString("HH:mm:ss"));
-            return;
-        }
-    }
     adsbTable_->insertRow(row);
     adsbTable_->setItem(row, 0, new QTableWidgetItem(info.icao));
     adsbTable_->setItem(row, 1, new QTableWidgetItem(info.callsign));
-    adsbTable_->setItem(row, 2, new QTableWidgetItem(info.altitudeFt > 0 ?
-        QString::number(info.altitudeFt) : "--"));
-    adsbTable_->setItem(row, 3, new QTableWidgetItem(info.lastSeen.toString("HH:mm:ss")));
+    adsbTable_->setItem(row, 2, new QTableWidgetItem(info.altitudeFt > 0 ? QString::number(info.altitudeFt) : "--"));
+    adsbTable_->setItem(row, 3, new QTableWidgetItem(QDateTime::currentDateTime().toString("HH:mm:ss")));
+}
+
+void MainWindow::setControlsEnabled(bool hw) {
+    freqSpin_->setEnabled(hw);
+    srCombo_->setEnabled(hw);
+    gainSlider_->setEnabled(hw);
 }
 
 } // namespace mbdsdr
