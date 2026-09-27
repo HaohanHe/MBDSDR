@@ -98,6 +98,7 @@ class ControlPanel(QWidget):
     mode_changed = Signal(str)            # 模式改变
     gain_changed = Signal(int)             # 硬件增益 (dB, RTL-SDR LNA 0~49)
     squelch_changed = Signal(float)        # 静噪门限 (dBFS, -120~0)
+    auto_squelch_toggled = Signal(bool)  # 自动静噪开关
     sample_rate_changed = Signal(float)    # 采样率改变 (Hz)
 
     # ===== 新增信号 =====
@@ -455,6 +456,10 @@ class ControlPanel(QWidget):
         self.squelch_val = QLabel("-80")
         self.squelch_val.setFixedWidth(44)
         sq_row.addWidget(self.squelch_val)
+        self.auto_squelch_check = QCheckBox("Auto")
+        self.auto_squelch_check.setChecked(True)
+        self.auto_squelch_check.toggled.connect(self._on_auto_squelch_toggled)
+        sq_row.addWidget(self.auto_squelch_check)
         rx_layout.addLayout(sq_row)
 
         layout.addWidget(rx_group)
@@ -690,6 +695,11 @@ class ControlPanel(QWidget):
     def _on_squelch_changed(self, dbfs: int):
         self.squelch_val.setText(str(dbfs))
         self.squelch_changed.emit(float(dbfs))
+
+    def _on_auto_squelch_toggled(self, on: bool):
+        # Auto 关闭时滑块门限生效；打开时由内核自动跟踪噪声底
+        self.squelch_slider.setEnabled(not bool(on))
+        self.auto_squelch_toggled.emit(bool(on))
 
     @Slot(bool)
     def _on_agc_changed(self, checked: bool):

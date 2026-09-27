@@ -790,6 +790,8 @@ class MainWindow(QMainWindow):
         self.control_panel.mode_changed.connect(self._on_mode_changed)
         self.control_panel.gain_changed.connect(self._on_gain_changed)
         self.control_panel.squelch_changed.connect(self._on_squelch_changed)
+        self.control_panel.auto_squelch_toggled.connect(
+            self._on_auto_squelch_toggled)
         self.control_panel.tune_sdr_requested.connect(self._on_tune_sdr)
         self.control_panel.sample_rate_changed.connect(self._on_sample_rate_changed)
         # —— Agent A 新增控件信号（用 hasattr 守卫，并行开发时不崩）——
