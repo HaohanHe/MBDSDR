@@ -141,6 +141,12 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
     QFont wf = font();
     wf.setBold(true);
     p.setFont(wf);
+    // VFO center line
+    QPen vfoPen(QColor(tokens::kAccent));
+    vfoPen.setWidthF(1.5);
+    p.setPen(vfoPen);
+    p.drawLine(width() / 2, mT, width() / 2, mB);
+
     p.drawText(mL + 8, mT + 16, "TEST SIGNAL - NOT HARDWARE");
 }
 

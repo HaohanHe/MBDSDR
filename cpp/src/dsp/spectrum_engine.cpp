@@ -110,6 +110,10 @@ void SpectrumEngine::disconnectSource() {
     emit sourceChanged("Test Signal", false);
 }
 
+void SpectrumEngine::setMuted(bool m) {
+    if (audioOut_) audioOut_->setMuted(m);
+}
+
 void SpectrumEngine::setBandwidth(double hz) {
     bandwidth_ = hz;
     if (demod_) demod_->setBandwidth(hz);

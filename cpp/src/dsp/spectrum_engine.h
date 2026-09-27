@@ -33,7 +33,8 @@ public:
     void shutdown();
     double scanBand(double lowHz, double highHz, double stepHz);
     bool tryConnectRtl();
-    void disconnectSource();  // returns peak dBFS
+    void disconnectSource();
+    void setMuted(bool m);  // returns peak dBFS
 
 public slots:
     void onSetCenterFreq(double freqHz);
