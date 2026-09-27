@@ -59,17 +59,27 @@ void SpectrumEngine::setFftSize(int n) {
 }
 void SpectrumEngine::shutdown() { running_.store(false); }
 
-void SpectrumEngine::onSetCenterFreq(double f) { if (source_) source_->setCenterFreq(f); }
-void SpectrumEngine::onSetSampleRate(double r) { if (source_) source_->setSampleRate(r); }
-void SpectrumEngine::onSetGain(double g) { if (source_) source_->setGain(g); }
+void SpectrumEngine::onSetCenterFreq(double f) {
+    QMutexLocker lk(&sourceMutex_);
+    if (source_) source_->setCenterFreq(f);
+}
+void SpectrumEngine::onSetSampleRate(double r) {
+    QMutexLocker lk(&sourceMutex_);
+    if (source_) source_->setSampleRate(r);
+}
+void SpectrumEngine::onSetGain(double g) {
+    QMutexLocker lk(&sourceMutex_);
+    if (source_) source_->setGain(g);
+}
 void SpectrumEngine::setDemodMode(const QString& m) {
+    QMutexLocker lk(&sourceMutex_);
     demodMode_ = m;
     if (m == "AM") bandwidth_ = 8000;
     else if (m == "NFM") bandwidth_ = 12500;
     else if (m == "WFM") bandwidth_ = 200000;
     else if (m == "CW") bandwidth_ = 500;
     else bandwidth_ = 2400;
-    needDemodReset_ = true;
+    needDemodReset_.store(true);
 }
 void SpectrumEngine::setSquelchThreshold(float db) { squelch_.setThresholdDb(db); }
 void SpectrumEngine::setSquelchEnabled(bool e) { squelch_.setEnabled(e); }
@@ -77,10 +87,13 @@ void SpectrumEngine::setSquelchEnabled(bool e) { squelch_.setEnabled(e); }
 double SpectrumEngine::scanBand(double lowHz, double highHz, double stepHz) {
     double peakDb = -200.0;
     for (double f = lowHz; f <= highHz; f += stepHz) {
-        source_->setCenterFreq(f);
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
         std::vector<std::complex<float>> iq(1024);
-        source_->readIQ(iq);
+        {
+            QMutexLocker lk(&sourceMutex_);
+            source_->setCenterFreq(f);
+            source_->readIQ(iq);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
         double rms = 0;
         for (auto c : iq) rms += std::norm(c);
         rms = 10 * std::log10(rms / iq.size() + 1e-10);
@@ -90,6 +103,7 @@ double SpectrumEngine::scanBand(double lowHz, double highHz, double stepHz) {
 }
 
 bool SpectrumEngine::tryConnectRtl() {
+    QMutexLocker lk(&sourceMutex_);
     if (source_) source_->stop();
     auto rtl = std::make_unique<RtlSdrSource>();
     if (rtl->start()) {
@@ -104,6 +118,7 @@ bool SpectrumEngine::tryConnectRtl() {
 }
 
 void SpectrumEngine::disconnectSource() {
+    QMutexLocker lk(&sourceMutex_);
     if (source_) source_->stop();
     source_ = std::make_unique<TestSignalSource>();
     source_->start();
@@ -142,12 +157,15 @@ void SpectrumEngine::run() {
 
     while (running_.load()) {
         int n = fftSize_.load();
-        if (static_cast<int>(iq.size()) != n) iq.resize(static_cast<std::size_t>(n));
+        if (static_cast<int>(iq.size()) != n) iq.resize(static_cast<size_t>(n));
 
-        if (needDemodReset_) { rebuildDemod(); needDemodReset_ = false; }
+        QMutexLocker lk(&sourceMutex_);
+
+        if (needDemodReset_.load()) { rebuildDemod(); needDemodReset_.store(false); }
 
         std::size_t got = source_->readIQ(iq);
         if (got == 0) {
+            lk.unlock();
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
         }
@@ -201,6 +219,7 @@ void SpectrumEngine::run() {
                 emit adsbAircraft(ac);
         }
 
+        lk.unlock();
         std::this_thread::sleep_for(std::chrono::milliseconds(33));
     }
 }

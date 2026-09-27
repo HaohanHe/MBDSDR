@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QThread>
+#include <QMutex>
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -75,9 +76,13 @@ private:
 
     std::atomic<int> fftSize_{2048};
     std::atomic<bool> running_{true};
+    std::atomic<bool> needDemodReset_{false};
     QString demodMode_ = "NFM";
     double bandwidth_ = 12500.0;
-    bool needDemodReset_ = false;
+
+    // Guards source_/demod_/demodMode_/bandwidth_ against concurrent access
+    // between the engine run() thread and UI-thread connect/disconnect calls.
+    QMutex sourceMutex_;
 
     void rebuildDemod();
 };
