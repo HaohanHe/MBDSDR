@@ -105,14 +105,12 @@ class DecimatingFIR:
             return np.empty(0, dtype=x.dtype)
 
         idx = np.asarray(out_indices)
-        # 构造卷积矩阵：第 k 个输出用 full[idx[k] : idx[k]+n_taps]
-        # （full 下标 0..n_taps-2 是历史，n_taps-1.. 是本块输入）
-        starts = idx  # full 中的起点
-        mat = np.stack([full[s:s + n_taps] for s in starts], axis=0)
-        if np.iscomplexobj(x):
-            y = (mat.real @ self._taps) + 1j * (mat.imag @ self._taps)
-        else:
-            y = mat @ self._taps
+        # FFT 相关（与逐点 FIR 卷积数值等价，复杂度 O(N log N)）：
+        # valid[p] = sum_n full[p+n]*taps[n]，长度 = count；再按抽取相位取
+        # valid[idx]。省去 np.stack 逐输出切片的巨大开销。
+        from scipy.signal import correlate
+        valid = correlate(full, self._taps, mode="valid", method="fft")
+        y = valid[idx]
 
         # 保存本块末尾 (n_taps-1) 个样本作下次历史（fir.h:80 memmove）
         self._history = full[count:count + n_taps - 1].copy() if n_taps > 1 \

@@ -326,24 +326,37 @@ class SpectrumDataGenerator:
                    max_peaks: int = 8) -> List[Tuple[float, float]]:
         """检测高于"噪声底 + rel_threshold_db"的局部极大值。
 
-        返回 [(freq_hz, power_db), ...]，按功率降序。无数据返回 []。
-        """
+        返回 [(freq_hz, power_db), ...]，按功率降序。为不在 GUI 线程每帧
+        扫描全谱，结果按约 10 帧（~2Hz）节流复用。"""
         if not self._has_real_data:
             return []
         s = self.spectrum
         if len(s) < 3:
             return []
-        floor = float(np.nanmedian(s))
-        thresh = floor + rel_threshold_db
-        peaks: List[Tuple[float, float]] = []
-        for i in range(1, len(s) - 1):
-            v = s[i]
-            if not np.isfinite(v):
-                continue
-            if v >= s[i - 1] and v > s[i + 1] and v >= thresh:
-                peaks.append((self.bin_to_freq(i), float(v)))
-        peaks.sort(key=lambda p: p[1], reverse=True)
-        return peaks[:max_peaks]
+        tick = int(self.wf_rows_written // 10)
+        pcache = getattr(self, '_peak_cache', None)
+        if (pcache is not None and pcache[0] == tick
+                and abs(pcache[1] - float(rel_threshold_db)) < 1e-9):
+            return pcache[2]
+        finite = np.isfinite(s)
+        ss = s[finite]
+        if ss.size < 3:
+            return []
+        floor = float(np.median(ss))     # 已有限，median 快于 nanmedian
+        thresh = floor + float(rel_threshold_db)
+        left = np.empty_like(s)
+        right = np.empty_like(s)
+        left[0] = s[0]
+        left[1:] = s[:-1]
+        right[-1] = s[-1]
+        right[:-1] = s[1:]
+        mask = finite & (s >= left) & (s > right) & (s >= thresh)
+        idxs = np.nonzero(mask)[0]
+        peaks = [(self.bin_to_freq(int(i)), float(s[i])) for i in idxs]
+        peaks.sort(key=lambda q: q[1], reverse=True)
+        peaks = peaks[:max_peaks]
+        self._peak_cache = (tick, float(rel_threshold_db), peaks)
+        return peaks
 
 
 # ============================================================================
@@ -662,37 +675,39 @@ def _db_to_y(rect, db, db_min, db_max):
 
 
 def _draw_spectrum(painter, state, rect, line_color):
+    """向量化画频谱折线 + 渐变填充。numpy 一次算完全部 x/y，QPolygonF
+    单次 drawPolyline/drawPolygon，避免逐 bin 函数调用与路径拼接。"""
     gen = state.panel.generator
     spec = gen.spectrum
     n = len(spec)
     if n == 0:
         return
-    w = rect.width()
+    rx0, rw = rect.x(), rect.width()
+    ry0, rh = rect.y(), rect.height()
     view_center = _view_center_hz(state)
     span = gen.sample_rate_hz
-    path = QPainterPath()
-    fill = QPainterPath()
-    fill.moveTo(rect.x(), rect.y() + rect.height())
-    for i in range(n):
-        x = _freq_to_x(rect, view_center, span, gen.bin_to_freq(i))
-        db = spec[i]
-        if not np.isfinite(db):
-            db = state.db_min
-        y = _db_to_y(rect, db, state.db_min, state.db_max)
-        if i == 0:
-            path.moveTo(x, y)
-        else:
-            path.lineTo(x, y)
-        fill.lineTo(x, y)
-    fill.lineTo(rect.x() + w, rect.y() + rect.height())
-    fill.closeSubpath()
+    f_left = view_center - span / 2.0
+    ii = np.arange(n, dtype=np.float64)
+    freq = (gen.center_freq_hz - gen.sample_rate_hz / 2.0
+            + gen.sample_rate_hz * (ii + 0.5) / n)
+    db = np.where(np.isfinite(spec), spec, state.db_min)
+    x = rx0 + (freq - f_left) / span * rw
+    ratio = np.clip((db - state.db_min) / (state.db_max - state.db_min),
+                    0.0, 1.0)
+    y = ry0 + rh - ratio * rh * 0.92
+    poly = QPolygonF([QPointF(float(a), float(b))
+                      for a, b in zip(x, y)])
     # 低饱和橙渐变填充
-    grad = QLinearGradient(0, rect.y(), 0, rect.y() + rect.height())
+    fillpoly = QPolygonF()
+    fillpoly.append(QPointF(rx0, ry0 + rh))
+    fillpoly += poly
+    fillpoly.append(QPointF(rx0 + rw, ry0 + rh))
+    grad = QLinearGradient(0, ry0, 0, ry0 + rh)
     grad.setColorAt(0.0, QColor(PAL_LINE).lighter(130))
     grad.setColorAt(1.0, QColor(PAL_LINE).darker(160))
-    painter.fillPath(fill, QBrush(grad))
+    painter.fillPolygon(fillpoly, grad)
     painter.setPen(QPen(line_color, 2))
-    painter.drawPath(path)
+    painter.drawPolyline(poly)
 
 
 def _draw_center_cursor(painter, rect, color):
@@ -863,11 +878,13 @@ def _draw_waterfall(painter, rect, state):
                 _wf_paint_row_into(state, rows[i], buf[h - m + i])
             state._wf_consumed = total
         else:
-            # 增量：旧内容上移一行（SDR++ memmove 语义），新行写底部。
-            rows = gen.wf_latest_rows(pending)
-            for row in rows:
-                buf[0:h - 1, :, :] = buf[1:h, :, :]
-                _wf_paint_row_into(state, row, buf[h - 1, :, :])
+            # 增量：旧内容一次上移 k 行（一次 memmove），再把 k 个新行
+            # （旧→新）依次写底部，避免逐行整图复制。
+            k = int(pending)
+            rows = gen.wf_latest_rows(k)
+            buf[0:h - k, :, :] = buf[k:h, :, :]
+            for j, row in enumerate(rows):
+                _wf_paint_row_into(state, row, buf[h - k + j, :, :])
             state._wf_consumed = total
 
     painter.drawImage(rect, state._wf_canvas)

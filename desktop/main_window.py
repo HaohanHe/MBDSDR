@@ -8,6 +8,7 @@ MBDSDR 桌面端主窗口
 import os
 import sys
 import math
+import time
 import tempfile
 from datetime import datetime
 from typing import Optional
@@ -2443,8 +2444,10 @@ class MainWindow(QMainWindow):
                         "无音频输出设备（声卡已禁用，不影响频谱/录制）", 5000)
             except Exception:
                 pass
-        # 路C（DSP 流）后端若自带 start_audio()，一并调用（hasattr 守卫，缺失不崩）
-        self._backend_audio_hook("start_audio")
+        # 注意：桌面端不在此调用 backend.start_audio()。后端自带的 ReceiveChain +
+        # 独立声卡是 headless/CLI/MCP 的出声路径；桌面端由下面的 ReceivePipeline
+        # 独占解调并写入上面这一个 AudioPlayer。两套同时启动会导致三路解调、
+        # 两个声卡同时播放（混音成噪声）且 CPU 被烧满。
         # (A) 启动多线程流水线：IQ reader → splitter → FFT/demod/record 各 worker
         self._build_pipeline()
 
@@ -2474,7 +2477,7 @@ class MainWindow(QMainWindow):
         - 创建主 VFO + 第二 VFO 的 dsp.VFO，经 VfoManager.bind_dsp 绑定，
           offset 由 _update_main_vfo_offset 真搬频。
         """
-        read, sr = self._active_read_samples()
+        read, sr = self._active_read_samples("pipeline")
         if read is None:
             return
         # IQ 前端校正链（DC 去除 / IQ 平衡 / 抗混叠抽取）：在 reader 线程中逐块处理
@@ -2508,10 +2511,10 @@ class MainWindow(QMainWindow):
         try:
             main_vfo = VFO(in_samplerate=sr, out_samplerate=self._vfo_out_sr,
                            bandwidth=self._vfo_bw, offset=0.0)
-            vfo2 = VFO(in_samplerate=sr, out_samplerate=self._vfo_out_sr,
-                       bandwidth=self._vfo_bw, offset=0.0)
         except Exception:
-            main_vfo, vfo2 = None, None
+            main_vfo = None
+        # 第二 VFO 尚未在 UI 开放：默认不创建，避免重复 DDC 空耗 CPU。
+        vfo2 = None
         self._vfo = main_vfo          # 兼容旧引用（_on_mode_changed 等仍可触达）
         self._vfo_in_sr = float(sr)
 
@@ -2524,10 +2527,8 @@ class MainWindow(QMainWindow):
             self._vfo_mgr.bind_dsp(s1.vfo_id, main_vfo,
                                    output_stream=self._audio_player)
             self._main_vfo_id = s1.vfo_id
-            s2 = self._vfo_mgr.add(self._vfo_center_hz, self._vfo_bw,
-                                   self._demod_cfg.mode)
-            self._vfo_mgr.bind_dsp(s2.vfo_id, vfo2, output_stream=None)
-            self._vfo2_id = s2.vfo_id
+            # 第二 VFO 未开放：只登记/绑定主 VFO。
+            self._vfo2_id = None
             # 首建：s1（主 VFO）为默认主听
             self._vfo_mgr.set_active_context(s1, temporary=False)
 
@@ -2554,7 +2555,6 @@ class MainWindow(QMainWindow):
         # 登记 vfo_id → demod worker（主听切换时切换哪一路写声卡）
         self._vfo_workers = {
             self._main_vfo_id: pipe._demod1,
-            self._vfo2_id: pipe._demod2,
         }
         # 首帧：把 offset（= vfo_center - backend_center）推给 DDC
         self._update_main_vfo_offset()
@@ -2692,12 +2692,12 @@ class MainWindow(QMainWindow):
 
         重活（窗×FFT×fftshift×dBFS×IIR）已在 FftWorker 线程完成，这里绝不做 FFT。
         """
-        # 频谱 repaint（generator 内部状态已被 worker 更新）
+        # 频谱状态文字（重绘由 30fps 定时器统一驱动，避免逐帧重画）
         try:
             self.spectrum._refresh_status_labels()
-            self.spectrum._plot.update()
         except Exception:
             pass
+        self._ensure_repaint_timer()
 
         # 多普勒定轨面板 tap：feed_iq 碰 Qt 控件（定时器/刷新门），必须在 UI 线程
         try:
@@ -2724,8 +2724,11 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # RSSI（从 IQ 功率估计，16384 样本开销极小）
-        self._update_rssi_from_iq(iq)
+        # RSSI（节流 ~10Hz；S-meter 无需逐帧刷新）
+        now = time.perf_counter()
+        if now - getattr(self, '_rssi_last_t', 0.0) >= 0.1:
+            self._rssi_last_t = now
+            self._update_rssi_from_iq(iq)
 
         # 节流：约每 10 帧（500ms）回读后端状态刷新底部状态栏 + status_panel
         self._backend_status_tick += 1
@@ -2738,6 +2741,24 @@ class MainWindow(QMainWindow):
                     sp.update_from_backend(self._active_sdr_backend)
             except Exception:
                 pass
+
+    def _ensure_repaint_timer(self):
+        """30fps 统一重绘定时器（随流水线数据启动），替代每帧 update()。"""
+        t = getattr(self, '_repaint_timer', None)
+        if t is None:
+            from PySide6.QtCore import QTimer
+            t = QTimer(self)
+            t.setInterval(33)
+            t.timeout.connect(self._repaint_plot)
+            self._repaint_timer = t
+        if not t.isActive():
+            t.start()
+
+    def _repaint_plot(self):
+        try:
+            self.spectrum._plot.update()
+        except Exception:
+            pass
 
     def _on_pipeline_record_iq(self, iq: np.ndarray):
         """录制 tap：RecordTap 线程把每帧 IQ（已是独立副本）交给 UI 累积。"""
@@ -2757,6 +2778,13 @@ class MainWindow(QMainWindow):
         try:
             if self._iq_poll_timer is not None:
                 self._iq_poll_timer.stop()
+        except Exception:
+            pass
+        # 停 30fps 重绘定时器
+        try:
+            t = getattr(self, '_repaint_timer', None)
+            if t is not None:
+                t.stop()
         except Exception:
             pass
         # 停流水线（reader + splitter + FFT/demod/record workers），join 回收
@@ -2788,8 +2816,11 @@ class MainWindow(QMainWindow):
         # 路C 后端若自带 stop_audio()，一并调用（hasattr 守卫，缺失不崩）
         self._backend_audio_hook("stop_audio")
 
-    def _active_read_samples(self):
-        """防御性拿到 (read_samples_fn, sample_rate)。无后端/无方法返 (None, None)。"""
+    def _active_read_samples(self, sub_name: str = "spectrum"):
+        """防御性拿到 (read_fn, sample_rate)。无后端/无方法返 (None, None)。
+
+        sub_name 指定 fan-out 命名订阅者（频谱/流水线各自独立游标，互不抢样）；
+        后端不支持 fan-out 时回退到 read_samples。"""
         backend = self._active_sdr_backend
         if backend is None:
             return None, None
@@ -2800,7 +2831,16 @@ class MainWindow(QMainWindow):
                 return None, None
         except Exception:
             pass
-        read = getattr(backend, "read_samples", None)
+        read = None
+        if sub_name and hasattr(backend, "subscribe_iq"):
+            try:
+                sub = backend.subscribe_iq(sub_name)
+                if sub is not None:
+                    read = getattr(sub, "read", None)
+            except Exception:
+                read = None
+        if not callable(read):
+            read = getattr(backend, "read_samples", None)
         if not callable(read):
             return None, None
         try:
@@ -2880,8 +2920,14 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-        # (C) FM 鉴频解调 → 声卡输出（带静噪门控）
-        self._demod_and_play(iq, sr)
+        # (C) 音频：后端若已用 ReceiveChain 出声，不在 GUI 重复播放（避免双音频）；
+        # 仅对不自带音频的后端走 GUI 鉴频声卡通路。
+        _be = self._active_sdr_backend
+        _be_audio = (_be is not None
+                     and getattr(_be, "_audio_thread", None) is not None
+                     and _be._audio_thread.is_alive())
+        if not _be_audio:
+            self._demod_and_play(iq, sr)
 
     def _compute_vfo_rssi_dbfs(self) -> Optional[float]:
         """从频谱 FFT 数据计算当前 VFO 带宽内的信号功率 (dBFS)。

@@ -199,6 +199,8 @@ class DemodWorker(QThread):
         self._running = False
         # 记录本次实际用的解调模式（调试/测试断言）
         self.last_demod_mode: str = "FM"
+        # 有状态 WFM 接收器（WFM 模式下懒创建一次）
+        self._wfm_rx = None
 
     def set_audio_enabled(self, on: bool) -> None:
         """运行时切换本 VFO 是否把解调结果写声卡（主听/次听切换）。
@@ -248,6 +250,9 @@ class DemodWorker(QThread):
 
             # ===== WFM 广播路径：信道就是全带宽，静噪/鉴频都在原生率 IQ 上做 =====
             if mode == "WFM":
+                if self._wfm_rx is None:
+                    self._wfm_rx = _dsp.WFMReceiver(
+                        sample_rate=self._sr, audio_sr=48000)
                 # 静噪门控：WFM 信道 = 全带宽，对原始全带宽 IQ 算功率
                 if player_ok:
                     try:
@@ -260,14 +265,12 @@ class DemodWorker(QThread):
                 if not player_ok:
                     # 无设备 / 静音 VFO：仍跑鉴频验证链路，但不写声卡、不做静噪门控
                     try:
-                        _dsp.wfm_broadcast_demod(iq, sample_rate=self._sr,
-                                                 audio_sr=48000)
+                        self._wfm_rx.process(iq)
                     except Exception:
                         pass
                     continue
                 try:
-                    audio = _dsp.wfm_broadcast_demod(iq, sample_rate=self._sr,
-                                                     audio_sr=48000)
+                    audio = self._wfm_rx.process(iq)
                     if audio is not None and audio.size > 0:
                         player.write(audio)
                 except Exception:
@@ -411,7 +414,8 @@ class ReceivePipeline(QObject):
         # 各路下游独立乒乓流
         self._spectrum_stream = PingPongStream(np.complex64, READ_BLOCK_SAMPLES * 4)
         self._vfo1_stream = PingPongStream(np.complex64, READ_BLOCK_SAMPLES * 4)
-        self._vfo2_stream = PingPongStream(np.complex64, READ_BLOCK_SAMPLES * 4)
+        self._vfo2_stream = (PingPongStream(np.complex64, READ_BLOCK_SAMPLES * 4)
+                             if vfo2_dsp is not None else None)
         self._record_stream = PingPongStream(np.complex64, READ_BLOCK_SAMPLES * 4)
 
         self._reader = IqReaderThread(read_fn, self._input, READ_BLOCK_SAMPLES)
@@ -419,8 +423,9 @@ class ReceivePipeline(QObject):
         self._fft.frame_ready.connect(self._on_fft_frame)
         self._demod1 = DemodWorker(self._vfo1_stream, main_vfo_dsp, player,
                                    config, self._sr, audio_enabled=True)
-        self._demod2 = DemodWorker(self._vfo2_stream, vfo2_dsp, player,
-                                   config, self._sr, audio_enabled=False)
+        self._demod2 = (DemodWorker(self._vfo2_stream, vfo2_dsp, player,
+                                    config, self._sr, audio_enabled=False)
+                        if vfo2_dsp is not None else None)
         self._record = RecordTap(self._record_stream, on_record_iq)
 
         self._started = False
@@ -436,12 +441,14 @@ class ReceivePipeline(QObject):
         # 先绑下游，再启动 splitter，最后启动 reader（数据自顶向下流）
         self._splitter.bind(self._spectrum_stream)
         self._splitter.bind(self._vfo1_stream)
-        self._splitter.bind(self._vfo2_stream)
+        if self._vfo2_stream is not None:
+            self._splitter.bind(self._vfo2_stream)
         self._splitter.bind(self._record_stream)
         self._splitter.start()
         self._fft.start()
         self._demod1.start()
-        self._demod2.start()
+        if self._demod2 is not None:
+            self._demod2.start()
         self._record.start()
         self._reader.start()
         self._started = True
@@ -463,20 +470,23 @@ class ReceivePipeline(QObject):
         except Exception:
             pass
         # 3) 停各下游消费者（唤醒各自 read()）
-        for w in (self._fft, self._demod1, self._demod2, self._record):
+        for w in (x for x in (self._fft, self._demod1, self._demod2,
+                              self._record) if x is not None):
             try:
                 w.shutdown()
             except Exception:
                 pass
         # 4) join 所有线程
-        for t in (self._reader, self._fft, self._demod1, self._demod2, self._record):
+        for t in (x for x in (self._reader, self._fft, self._demod1,
+                              self._demod2, self._record) if x is not None):
             try:
                 t.wait(2000)
             except Exception:
                 pass
         # 5) 清停止标志，便于下次重建流水线时复用对象（我们这里每次都新建，防御性调用）
-        for s in (self._input, self._spectrum_stream, self._vfo1_stream,
-                  self._vfo2_stream, self._record_stream):
+        for s in (x for x in (self._input, self._spectrum_stream,
+                              self._vfo1_stream, self._vfo2_stream,
+                              self._record_stream) if x is not None):
             try:
                 s.stop_reader()
                 s.stop_writer()

@@ -74,6 +74,7 @@ class DevicePanel(QWidget):
         self._devices: List[Dict] = []
         self._connected = False
         self._current_dev_key: Optional[str] = None
+        self._current_dev_locator: Optional[tuple] = None
         self._build_ui()
         self.refresh_devices()
 
@@ -183,10 +184,14 @@ class DevicePanel(QWidget):
             return
         now_keys = {self._key_of(d) for d in now}
         old_keys = {self._key_of(d) for d in self._devices}
+        now_locs = {self._locator_of(d) for d in now}
 
-        # 拔出
+        # 拔出：设备打开（占用）后再次枚举读不到 USB 字符串，serial 会变空、
+        # tuner 变 Unknown，key 随之改变，但这并不代表拔出。因此连接中的设备
+        # 同时用稳定的 (driver, index) 判在位：key 与 locator 都消失才算真拔出。
         if self._connected and self._current_dev_key and \
-                self._current_dev_key not in now_keys:
+                self._current_dev_key not in now_keys and \
+                self._current_dev_locator not in now_locs:
             self.status_label.setText("设备已拔出")
             self.device_unplugged.emit()
             self.set_connected(False)
@@ -205,20 +210,32 @@ class DevicePanel(QWidget):
     def _key_of(d: Dict) -> str:
         return d.get("serial") or d.get("label") or d.get("driver", "?")
 
+    @staticmethod
+    def _locator_of(d: Dict) -> tuple:
+        args = d.get("device_args") or {}
+        try:
+            idx = int(args.get("index", -1))
+        except Exception:
+            idx = -1
+        return (d.get("driver") or "", idx)
+
     # ------------------------------------------------------------------ 状态
     def set_connected(self, connected: bool, dev_label: str = "") -> None:
         """主窗口连接成功/断开后调用。"""
         self._connected = bool(connected)
         if connected:
             self._current_dev_key = None
+            self._current_dev_locator = None
             idx = self.dev_combo.currentIndex()
             if 0 <= idx < len(self._devices):
                 self._current_dev_key = self._key_of(self._devices[idx])
+                self._current_dev_locator = self._locator_of(self._devices[idx])
             self.connect_btn.setEnabled(False)
             self.disconnect_btn.setEnabled(True)
             self.status_label.setText(f"已连接: {dev_label or '设备'}")
         else:
             self._current_dev_key = None
+            self._current_dev_locator = None
             self.connect_btn.setEnabled(bool(self._devices))
             self.disconnect_btn.setEnabled(False)
             if self.status_label.text() != "设备已拔出":

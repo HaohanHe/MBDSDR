@@ -202,6 +202,7 @@ class SDRController:
         self._player: Any = None
         self._audio_dev_manager: Any = None
         self._audio_running: bool = False
+        self._audio_backend_owned: bool = False
         self._volume_db: float = 0.0
         self._muted: bool = False
         self._audio_stop = threading.Event()
@@ -481,18 +482,30 @@ class SDRController:
         return self._player
 
     def start_audio(self) -> bool:
-        """启动音频播放泵（解调后送声卡）。
+        """启动音频播放（解调后送声卡）。
 
-        Returns
-        -------
-        bool
-            是否成功启动。无音频硬件 / sounddevice 不可用返回 False（不崩）。
+        真实设备：委托 OpenDevice 的 ReceiveChain 实时线程（信道滤波、立体声、
+        去加重）；调试源等无完整链后端才回退到本地极简鉴频泵。无音频硬件 /
+        sounddevice 不可用返回 False（不崩）。
         """
+        if self._audio_running:
+            return True
+        backend = self._backend if self._connected else None
+        bstart = getattr(backend, "start_audio", None)
+        if callable(bstart):
+            try:
+                ok = bool(bstart(self._demod))
+            except Exception:
+                ok = False
+            if ok:
+                self._audio_running = True
+                self._audio_backend_owned = True
+                return True
+        # 回退：本地泵 + 极简鉴频（调试源）
+        self._audio_backend_owned = False
         player = self._ensure_player()
         if not player or not getattr(player, "available", False):
             return False
-        if self._audio_running:
-            return True
         ok = player.start()
         if not ok:
             return False
@@ -519,6 +532,14 @@ class SDRController:
 
     def stop_audio(self) -> None:
         """停止音频播放。可重复调用。"""
+        if getattr(self, "_audio_backend_owned", False) and self._backend is not None:
+            bstop = getattr(self._backend, "stop_audio", None)
+            if callable(bstop):
+                try:
+                    bstop()
+                except Exception:
+                    pass
+        self._audio_backend_owned = False
         self._audio_stop.set()
         t = self._audio_thread
         if t is not None:
@@ -613,7 +634,21 @@ class SDRController:
         return audio.astype(np.float32)
 
     def read_audio(self, n: int = 1024) -> Optional[np.ndarray]:
-        """读 n 个解调后音频样本（float32）。未连接返回 None。"""
+        """读 n 个解调后音频样本（float32，48kHz）。未连接返回 None。
+
+        优先委托 OpenDevice 的 ReceiveChain（信道滤波/立体声/去加重）；
+        调试源等无完整链后端才回退极简鉴频 _demod_to_audio。
+        """
+        if not self._connected or self._backend is None:
+            return None
+        bread = getattr(self._backend, "read_audio", None)
+        if callable(bread):
+            try:
+                a = bread(int(n), self._demod)
+            except Exception:
+                a = None
+            if a is not None and getattr(a, "size", 0):
+                return np.asarray(a, dtype=np.float32)
         iq = self._read_raw_iq(int(n) * 4)
         if iq is None:
             return None

@@ -377,6 +377,16 @@ class ReceiveChain:
         # 8) 数字增益
         if self._gain_db != 0.0 and out.size:
             out = out * (10.0 ** (self._gain_db / 20.0))
+        # 9) 软限幅：阈值以下完全线性（不染色正常电平），超过阈值用 tanh
+        # 软压到 ±1 以内，避免广播高峰被声卡硬削波产生刺耳失真。
+        if out.size:
+            thr = 0.9
+            mag = np.abs(out)
+            hard = mag > thr
+            if hard.any():
+                comp = thr + (1.0 - thr) * np.tanh((mag - thr) / (1.0 - thr))
+                out = np.where(hard, np.sign(out) * comp, out)
+            out = np.clip(out, -1.0, 1.0).astype(np.float32)
         return out
 
 
