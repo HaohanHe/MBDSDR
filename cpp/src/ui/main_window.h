@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QList>
 
 class QLabel;
 class QDoubleSpinBox;
@@ -18,7 +19,7 @@ class QSplitter;
 class QTimer;
 
 namespace mbdsdr {
-namespace dsp  { class SpectrumEngine; struct AircraftInfo; }
+namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; }
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class WaterfallWidget; }
 namespace ai   { class Agent; }
 
@@ -40,6 +41,9 @@ private slots:
     void onAdsbAircraft(const dsp::AircraftInfo& info);
     void saveSettings();   // immediate persistence (writes QSettings)
     void scheduleSave();   // debounced persistence: arms the 500 ms save timer
+    void onPassesReady(QList<dsp::SatPass> passes);
+    void onTleFetchFailed(const QString& reason);
+    void onPassRowClicked(int row);
 
 private:
     dsp::SpectrumEngine* engine_   = nullptr;
@@ -47,6 +51,13 @@ private:
     ui::SkyView*     skyView_   = nullptr;
     ui::WorldView*   worldView_ = nullptr;
     ui::WaterfallWidget* waterfall_ = nullptr;
+
+    // Satellite pass forecast (sky tab).
+    dsp::TleClient* tleClient_   = nullptr;
+    QTableWidget*   passTable_   = nullptr;
+    QList<dsp::SatPass> passes_;
+    QTimer*         tleTimer_    = nullptr;
+    bool            tleFetchActive_ = false;
     QTabWidget* centerTabs_ = nullptr;
 
     // Left panel controls
@@ -104,6 +115,7 @@ private:
     void setControlsEnabled(bool hardwareConnected);
     void saveUiState();
     void restoreUiState();
+    void fillPassTable();
 
     // Debounced QSettings writer: high-frequency signals (zoom/pan, slider
     // drags, spinbox edits) call scheduleSave() which (re)arms this one-shot
