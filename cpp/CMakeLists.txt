@@ -40,6 +40,8 @@ set(SOURCES
     src/dsp/recorder.cpp
     src/dsp/file_source.cpp
     src/dsp/gated_recorder.cpp
+    src/dsp/cw_decoder.cpp
+    src/dsp/adsb_decoder.cpp
 )
 
 set(HEADERS
@@ -96,6 +98,12 @@ add_executable(test_recorder tests/test_recorder.cpp
 target_include_directories(test_recorder PRIVATE src)
 target_link_libraries(test_recorder PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME recorder COMMAND test_recorder)
+
+add_executable(test_decoder tests/test_decoder.cpp
+    src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp)
+target_include_directories(test_decoder PRIVATE src)
+target_link_libraries(test_decoder PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME decoder COMMAND test_decoder)
 
 message(STATUS "MBDSDR C++ build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Qt6 version: ${Qt6Core_VERSION}")

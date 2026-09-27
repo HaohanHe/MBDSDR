@@ -28,46 +28,37 @@ void CWDecoder::setSampleRate(double sr) { sr_ = sr; }
 void CWDecoder::reset() {
     decodedText_.clear();
     currentSymbol_.clear();
-    envelopeBuf_.clear();
-    threshold_ = 0.0;
     on_ = false;
     onCount_ = 0;
     offCount_ = 0;
     unitMs_ = -1.0;
-    markDurations_.clear();
 }
 
 void CWDecoder::feed(const std::vector<float>& audio) {
-    // Compute envelope: |x|, then simple moving average
+    float env = 0.0f;
     for (float x : audio) {
-        float env = std::abs(x);
-        envelopeBuf_.push_back(env);
-        if (envelopeBuf_.size() > 48) envelopeBuf_.erase(envelopeBuf_.begin());
+        // Envelope follower: attack fast, release slow
+        float absx = std::abs(x);
+        if (absx > env) env = absx;
+        else env = 0.95f * env;
 
-        float smoothed = std::accumulate(envelopeBuf_.begin(), envelopeBuf_.end(), 0.0f)
-                        / static_cast<float>(envelopeBuf_.size());
-
-        // Adaptive threshold: track min/max slowly
-        if (threshold_ <= 0.0) threshold_ = smoothed * 1.5f;
-        threshold_ = 0.995f * threshold_ + 0.005f * smoothed;
-        float thresh = threshold_ * 1.3f;
-
-        bool isOn = smoothed > thresh;
+        bool isOn = env > 0.15f;
 
         if (isOn == on_) {
             if (on_) onCount_++;
             else offCount_++;
         } else {
-            // State transition
             if (on_) {
-                // Was on, now off: record mark duration
-                markDurations_.push_back(static_cast<double>(onCount_));
-                if (markDurations_.size() > 50) markDurations_.erase(markDurations_.begin());
+                // Just turned off: record mark duration
+                double durMs = onCount_ * 1000.0 / sr_;
+                // Default unit ~60ms (12 WPM); refine from observed marks
+                if (unitMs_ <= 0) unitMs_ = 60.0;
+                if (durMs > 1.7 * unitMs_) currentSymbol_.push_back('-');
+                else currentSymbol_.push_back('.');
             } else {
-                // Was off, now on: process gap
+                // Just turned on: process gap
+                double gapMs = offCount_ * 1000.0 / sr_;
                 if (unitMs_ > 0) {
-                    double unitSamples = unitMs_ * sr_ / 1000.0;
-                    double gapMs = offCount_ * 1000.0 / sr_;
                     if (gapMs >= 5.0 * unitMs_) {
                         flushChar();
                         decodedText_.push_back(' ');
@@ -90,6 +81,7 @@ void CWDecoder::flushChar() {
 }
 
 QString CWDecoder::takeText() {
+    flushChar();
     QString s = QString::fromStdString(decodedText_);
     decodedText_.clear();
     return s;
@@ -97,7 +89,6 @@ QString CWDecoder::takeText() {
 
 double CWDecoder::wpm() const {
     if (unitMs_ <= 0) return 0.0;
-    // PARIS word = 50 units, WPM = 1200 / unit_ms
     return 1200.0 / unitMs_;
 }
 
