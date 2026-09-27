@@ -20,7 +20,7 @@ public:
     explicit Agent(QObject* parent = nullptr);
     ~Agent();
 
-    void setEngine(dsp::SpectrumEngine* e) { engine_ = e; }
+    void setEngine(dsp::SpectrumEngine* e);
     void configureFromConfig();
 
 public slots:
