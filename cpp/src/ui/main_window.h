@@ -13,11 +13,12 @@ class QTabWidget;
 class QPlainTextEdit;
 class QTableWidget;
 class QLineEdit;
+class QStackedWidget;
 class QPushButton;
 
 namespace mbdsdr {
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; }
-namespace ui   { class SpectrumWidget; }
+namespace ui   { class SpectrumWidget; class SkyView; class WorldView; }
 namespace ai   { class Agent; }
 
 class MainWindow : public QMainWindow {
@@ -66,7 +67,15 @@ private:
     QLineEdit*      aiInput_     = nullptr;
     QLabel*         aiStatus_   = nullptr;
 
+    // Phase 7: new views
+    ui::SkyView*     skyView_   = nullptr;
+    ui::WorldView*   worldView_ = nullptr;
+    QStackedWidget* centerStack_ = nullptr;
+    QLabel*         levelBar_   = nullptr;
+
     void setControlsEnabled(bool hardwareConnected);
+    void saveUiState();
+    void restoreUiState();
 };
 
 } // namespace mbdsdr
