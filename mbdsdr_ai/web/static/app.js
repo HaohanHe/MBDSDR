@@ -144,15 +144,18 @@
     toastTimer = setTimeout(() => (toastEl.textContent = ""), 2000);
   }
 
-  // ---- 颜色映射 jet / grayscale ------------------------------------------- //
-  function jetColor(v) { // v: 0..255
-    const t = v / 255;
+  // ---- 颜色映射 jet / grayscale（预计算 256 项 LUT） ----------------------- //
+  const JET_LUT = (() => {
     const clip = (x) => Math.max(0, Math.min(1, x));
-    const r = Math.round(255 * clip(1.5 - Math.abs(4 * t - 3)));
-    const g = Math.round(255 * clip(1.5 - Math.abs(4 * t - 2)));
-    const b = Math.round(255 * clip(1.5 - Math.abs(4 * t - 1)));
-    return [r, g, b];
-  }
+    const lut = new Uint8Array(256 * 3);
+    for (let v = 0; v < 256; v++) {
+      const t = v / 255;
+      lut[v * 3] = Math.round(255 * clip(1.5 - Math.abs(4 * t - 3)));
+      lut[v * 3 + 1] = Math.round(255 * clip(1.5 - Math.abs(4 * t - 2)));
+      lut[v * 3 + 2] = Math.round(255 * clip(1.5 - Math.abs(4 * t - 1)));
+    }
+    return lut;
+  })();
 
   // ---- 绘制循环 ----------------------------------------------------------- //
   function drawSpectrum() {
@@ -208,11 +211,15 @@
       const row = (newest - Math.floor(y / rowH) + WF_ROWS * 2) % WF_ROWS;
       for (let x = 0; x < w; x++) {
         const v = wfImage[row * n + Math.floor((x / w) * n)];
-        let c;
-        if (useJet) c = jetColor(v);
-        else c = [v, v, v];
         const o = (y * w + x) * 4;
-        out.data[o] = c[0]; out.data[o + 1] = c[1]; out.data[o + 2] = c[2]; out.data[o + 3] = 255;
+        if (useJet) {
+          out.data[o] = JET_LUT[v * 3];
+          out.data[o + 1] = JET_LUT[v * 3 + 1];
+          out.data[o + 2] = JET_LUT[v * 3 + 2];
+        } else {
+          out.data[o] = v; out.data[o + 1] = v; out.data[o + 2] = v;
+        }
+        out.data[o + 3] = 255;
       }
     }
     wctx.putImageData(out, 0, 0);

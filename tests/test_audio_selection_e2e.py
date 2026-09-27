@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 
 from mbdsdr_ai import audio_out as audio_out_mod
-from mbdsdr_ai import startup_sequence as ss_mod
 from mbdsdr_ai.error_handler import NoAudioOutputError, format_error
 from mbdsdr_ai.startup_sequence import StartupSequence, list_audio_outputs
 

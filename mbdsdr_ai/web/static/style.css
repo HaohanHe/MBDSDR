@@ -45,6 +45,7 @@ html, body {
 
 main { padding: 10px 14px; max-width: 1400px; margin: 0 auto; }
 .panel {
+  position: relative;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -66,12 +67,14 @@ canvas {
   cursor: crosshair;
 }
 
-/* 无数据覆盖层 */
+/* 无数据覆盖层：绝对定位盖在频谱画布上，不影响布局 */
 .waiting {
-  position: relative;
-  margin-top: -252px;
-  height: 0;
-  text-align: center;
+  position: absolute;
+  left: 8px; right: 8px; top: 30px; bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   color: var(--dim);
   pointer-events: none;
 }
