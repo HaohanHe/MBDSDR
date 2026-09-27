@@ -18,7 +18,11 @@
 #include <QPlainTextEdit>
 #include <QTableWidget>
 #include <QLineEdit>
+#include <QStackedWidget>
+#include <QSettings>
 #include "ai/agent.h"
+#include "ui/sky_view.h"
+#include "ui/world_view.h"
 
 #include "core/tokens.h"
 #include "dsp/spectrum_engine.h"
@@ -169,16 +173,43 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     recStatus_->setObjectName("monoInfo");
     leftLay->addWidget(recStatus_);
 
+    // Level bar
+    leftLay->addWidget(new QLabel("音频电平", leftCard));
+    levelBar_ = new QLabel("---", leftCard);
+    levelBar_->setFixedHeight(20);
+    levelBar_->setStyleSheet(QString("background: %1; border-radius: 4px;").arg(tokens::kCard1));
+    leftLay->addWidget(levelBar_);
+
+    // Sky view
+    skyView_ = new ui::SkyView(leftCard);
+    leftLay->addWidget(skyView_);
+
     leftLay->addStretch();
     splitter->addWidget(leftCard);
 
-    // Center: spectrum
+    // Center: stacked spectrum + world view
     auto* centerCard = new QFrame(splitter);
     centerCard->setObjectName("panelCard");
     auto* centerLay = new QVBoxLayout(centerCard);
     centerLay->setContentsMargins(0,0,0,0);
+
+    centerStack_ = new QStackedWidget(centerCard);
     spectrum_ = new ui::SpectrumWidget(centerCard);
-    centerLay->addWidget(spectrum_);
+    centerStack_->addWidget(spectrum_);
+    worldView_ = new ui::WorldView(centerCard);
+    centerStack_->addWidget(worldView_);
+    centerLay->addWidget(centerStack_);
+
+    // Toggle buttons
+    auto* toggleRow = new QHBoxLayout();
+    auto* specBtn = new QPushButton("频谱", centerCard);
+    auto* worldBtn = new QPushButton("世界", centerCard);
+    toggleRow->addWidget(specBtn);
+    toggleRow->addWidget(worldBtn);
+    centerLay->addLayout(toggleRow);
+    connect(specBtn, &QPushButton::clicked, this, [this]() { centerStack_->setCurrentWidget(spectrum_); });
+    connect(worldBtn, &QPushButton::clicked, this, [this]() { centerStack_->setCurrentWidget(worldView_); });
+
     splitter->addWidget(centerCard);
 
     // Right panel: tabs
@@ -379,7 +410,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
+    saveUiState();
     if (engine_) { engine_->shutdown(); engine_->wait(); }
+}
+
+void MainWindow::saveUiState() {
+    QSettings s("MBDSDR", "MBDSDR");
+    s.setValue("geometry", saveGeometry());
+    s.setValue("windowState", saveState());
+}
+
+void MainWindow::restoreUiState() {
+    QSettings s("MBDSDR", "MBDSDR");
+    restoreGeometry(s.value("geometry").toByteArray());
+    restoreState(s.value("windowState").toByteArray());
 }
 
 void MainWindow::onSourceChanged(const QString& name, bool connected) {
@@ -399,6 +443,11 @@ void MainWindow::setControlsEnabled(bool hw) {
 
 void MainWindow::onAudioLevel(float dbfs) {
     levelLabel_->setText(QString("电平: %1 dBFS").arg(dbfs, 0, 'f', 1));
+    if (levelBar_) {
+        int pct = qBound(0, static_cast<int>((dbfs + 60) / 60 * 100), 100);
+        levelBar_->setStyleSheet(QString("background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %1, stop:1 %2); border-radius: 4px;").arg(tokens::kCard1, tokens::kAccent));
+        levelBar_->setText(QString("%1%").arg(pct));
+    }
 }
 
 void MainWindow::onSquelchState(bool open) {
