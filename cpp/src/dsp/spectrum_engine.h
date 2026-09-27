@@ -3,6 +3,8 @@
 
 #include <QThread>
 #include <QMutex>
+#include <QElapsedTimer>
+#include <QString>
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -86,6 +88,9 @@ signals:
     void rssiLevel(float dbfs);
     void squelchState(bool open);
     void recordingStateChanged(bool recording, const QString& path);
+    // 1 Hz tick while recording: current file path, elapsed wall-clock seconds,
+    // and on-disk byte count. Lets the UI show a live REC timer / size.
+    void recordingProgress(const QString& path, int seconds, qint64 bytes);
     void cwDecoded(const QString& text, double wpm);
     void adsbAircraft(const AircraftInfo& info);
 
@@ -123,6 +128,12 @@ private:
     QString expandRecTemplate() const;
     // True when a live data producer exists (real HW or the test signal).
     bool hasData() const;
+
+    // Live REC progress bookkeeping (reset in startRecording, sampled at 1 Hz
+    // in run()). recCurrentPath_ is the file currently being written.
+    QElapsedTimer recClock_;
+    QString recCurrentPath_;
+    int lastRecSecond_ = -1;
 
     // Guards source_/demod_/demodMode_/bandwidth_ against concurrent access
     // between the engine run() thread and UI-thread connect/disconnect calls.

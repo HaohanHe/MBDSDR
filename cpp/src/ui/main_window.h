@@ -15,6 +15,7 @@ class QTableWidget;
 class QLineEdit;
 class QStackedWidget;
 class QSplitter;
+class QTimer;
 
 namespace mbdsdr {
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; }
@@ -33,10 +34,12 @@ private slots:
     void onRssiLevel(float dbfs);
     void onSquelchState(bool open);
     void onRecordingState(bool recording, const QString& path);
+    void onRecordingProgress(const QString& path, int seconds, qint64 bytes);
     void onRecordClicked();
     void onCwDecoded(const QString& text, double wpm);
     void onAdsbAircraft(const dsp::AircraftInfo& info);
     void saveSettings();   // immediate persistence (writes QSettings)
+    void scheduleSave();   // debounced persistence: arms the 500 ms save timer
 
 private:
     dsp::SpectrumEngine* engine_   = nullptr;
@@ -98,6 +101,11 @@ private:
     void setControlsEnabled(bool hardwareConnected);
     void saveUiState();
     void restoreUiState();
+
+    // Debounced QSettings writer: high-frequency signals (zoom/pan, slider
+    // drags, spinbox edits) call scheduleSave() which (re)arms this one-shot
+    // timer; the actual disk write happens 500 ms after the last change.
+    QTimer* saveTimer_ = nullptr;
 };
 
 } // namespace mbdsdr
