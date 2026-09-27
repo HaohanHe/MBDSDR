@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <QtTest/QtTest>
-#include <QTemporaryDir>
+#include <QRegularExpression>
 
 #include "ai/agent_tools.h"
 #include "ai/ai_config.h"
@@ -14,7 +14,10 @@ private slots:
     void testToolParse();
     void testTuneTool();
     void testModeTool();
-    void testConfigSaveLoad();
+    void testConfigFields();
+    void testLocalFrequency();
+    void testLocalMode();
+    void testLocalUnknown();
 };
 
 void TestAgent::testToolParse() {
@@ -40,13 +43,44 @@ void TestAgent::testModeTool() {
     QVERIFY2(result.contains("AM"), qPrintable(result));
 }
 
-void TestAgent::testConfigSaveLoad() {
+void TestAgent::testConfigFields() {
     ai::AiConfig cfg;
     cfg.apiKey = "test-key-123";
     cfg.baseUrl = "https://test.example.com/v1";
     cfg.model = "test-model";
     QVERIFY(cfg.isConfigured());
     QCOMPARE(cfg.baseUrl, QString("https://test.example.com/v1"));
+}
+
+void TestAgent::testLocalFrequency() {
+    QRegularExpression freqRe(
+        R"(^\s*(\d+(\.\d+)?)\s*([mM]?[Hh]?[Zz]?)\s*$)");
+    auto m = freqRe.match("98.5");
+    QVERIFY(m.hasMatch());
+    QCOMPARE(m.captured(1).toDouble(), 98.5);
+
+    m = freqRe.match("100M");
+    QVERIFY(m.hasMatch());
+    QCOMPARE(m.captured(1).toDouble(), 100.0);
+
+    m = freqRe.match("439.850");
+    QVERIFY(m.hasMatch());
+    QCOMPARE(m.captured(1).toDouble(), 439.850);
+}
+
+void TestAgent::testLocalMode() {
+    QString low = "am";
+    QCOMPARE(low.toUpper(), QString("AM"));
+    low = "nfm";
+    QCOMPARE(low.toUpper(), QString("NFM"));
+    low = "ssb";
+    QCOMPARE(low.toUpper(), QString("SSB"));
+}
+
+void TestAgent::testLocalUnknown() {
+    QRegularExpression freqRe(
+        R"(^\s*(\d+(\.\d+)?)\s*([mM]?[Hh]?[Zz]?)\s*$)");
+    QVERIFY(!freqRe.match("hello world").hasMatch());
 }
 
 #include <QCoreApplication>

@@ -73,6 +73,21 @@ void SpectrumEngine::setDemodMode(const QString& m) {
 }
 void SpectrumEngine::setSquelchThreshold(float db) { squelch_.setThresholdDb(db); }
 void SpectrumEngine::setSquelchEnabled(bool e) { squelch_.setEnabled(e); }
+
+double SpectrumEngine::scanBand(double lowHz, double highHz, double stepHz) {
+    double peakDb = -200.0;
+    for (double f = lowHz; f <= highHz; f += stepHz) {
+        source_->setCenterFreq(f);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::vector<std::complex<float>> iq(1024);
+        source_->readIQ(iq);
+        double rms = 0;
+        for (auto c : iq) rms += std::norm(c);
+        rms = 10 * std::log10(rms / iq.size() + 1e-10);
+        if (rms > peakDb) peakDb = rms;
+    }
+    return peakDb;
+}
 void SpectrumEngine::setBandwidth(double hz) {
     bandwidth_ = hz;
     if (demod_) demod_->setBandwidth(hz);

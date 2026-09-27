@@ -355,7 +355,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     agent_ = new ai::Agent(this);
     agent_->setEngine(engine_);
     agent_->configureFromConfig();
-    connect(agent_, &ai::Agent::reply, this, [this](const QString& r) {
+    connect(agent_, &ai::Agent::responseReady, this, [this](const QString& r) {
         aiChat_->appendPlainText("AI: " + r);
     });
     connect(agent_, &ai::Agent::toolCalled, this, [this](const QString& t, const QString& r) {
@@ -369,7 +369,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         if (text.isEmpty()) return;
         aiChat_->appendPlainText("你: " + text);
         aiInput_->clear();
-        agent_->chat(text);
+        agent_->sendMessage(text);
     });
     connect(sendBtn, &QPushButton::clicked, this, [this]() {
         aiInput_->returnPressed();

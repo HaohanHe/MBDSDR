@@ -1,30 +1,25 @@
-# MBDSDR C++ — 原生 SDR 桌面应用（Phase 1）
+# MBDSDR C++ — Native SDR Desktop Application
 
-这是一个**全新的原生 C++ 应用**，不是 Python 版本的移植。
-旧 Python 工程（`desktop/`、`mbdsdr_ai/`）仅作算法与参数参考，**运行时不依赖任何 Python 运行时**。
+统一架构原生 C++ SDR 接收应用。UI 与 DSP 引擎同进程、同数据模型，QThread 引擎 → Qt 信号槽 → QPainter 直连，**不依赖 Python 运行时**。
 
-## 架构定位
-
-UI 与 DSP 引擎**同进程、同数据模型**：
+## 架构
 
 ```
 SpectrumEngine (QThread)
-   │  TestSignalGenerator → PowerSpectrum (Hann+FFT+fftshift+dBFS)
-   ▼  spectrumReady(SpectrumFrame)  [Qt 信号槽, 跨线程 queued]
-SpectrumWidget::setSpectrum(frame) → QPainter 绘制
+  TestSignalSource / RtlSdrSource / FileSource (ISource)
+    → IQFrontend (DC blocker + IQ balance)
+    → PowerSpectrum (Hann+FFT+fftshift+dBFS)  → spectrumReady signal
+    → Demod (AM/NFM/WFM/SSB/CW) → Squelch → AGC → QAudioSink
+    → CWDecoder / ADSBDecoder → decoded signals
+SpectrumWidget::setSpectrum(frame) → QPainter
 ```
-
-没有两层胶水、没有中间数据模型、没有"先摆假数据以后再接"。
-这条闭环从 Phase 1 就是真的：测试信号 → C++ FFT → 频谱控件实时绘制。
-
-> **当前数据源是离线测试信号（TEST SIGNAL），不是硬件实时数据。**
-> UI 顶栏、频谱角落水印、状态栏均有明确标注。
 
 ## 依赖
 
-- CMake ≥ 3.16
-- C++17 编译器（g++ 11+）
-- Qt6 Base（Core / Gui / Widgets），Ubuntu 22.04 可 `apt install qt6-base-dev qt6-base-dev-tools`
+Ubuntu 22.04:
+```bash
+sudo apt-get install -y qt6-base-dev qt6-base-dev-tools qt6-multimedia-dev librtlsdr-dev cmake build-essential
+```
 
 ## 构建
 
@@ -32,49 +27,33 @@ SpectrumWidget::setSpectrum(frame) → QPainter 绘制
 cd cpp
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
+./build/mbdsdr
 ```
 
-产物：单个可执行文件 `build/mbdsdr`（动态链接系统 Qt6，因为系统 Qt6 本身是动态库）。
-
-## 运行
+## 测试
 
 ```bash
-./build/mbdsdr                              # 启动 GUI
-./build/mbdsdr --help                       # 打印帮助
-QT_QPA_PLATFORM=offscreen ./build/mbdsdr    # 无显示环境验证
+ctest --test-dir build --output-on-failure
 ```
 
-## 当前状态（Phase 1）
+5 个测试套件：fft / demod / recorder / decoder / agent。
 
-- CMake + Qt6 Widgets 工程骨架
-- 三栏平行视界主壳（顶栏 56px / 中 Splitter / 底 Dock 64px）
-- 原生 C++ radix-2 FFT（不依赖 FFTW）
-- 功率谱：Hann 窗 + FFT + fftshift + dBFS
-- 测试信号引擎线程 → Qt 信号槽 → 频谱 QPainter 实时绘制（30fps）
-- FFT size 切换：1024 / 2048 / 4096
-- 设计 tokens 从 `desktop/tokens.py` 1:1 翻译为 C++ 常量 + 深色 QSS
+## AI 配置
 
-**未接硬件。** Phase 2 将把 `TestSignalGenerator` 替换为 librtlsdr / SoapySDR 源，UI 侧无需改动。
+- 配置文件：`~/.config/MBDSDR/ai_config.json`
+- 字段：`api_key`, `base_url`（默认 `https://api.siliconflow.cn/v1`）, `model`
+- 环境变量 `MBDSDR_API_KEY` 优先级高于配置文件
+- 无 key 时走本地指令（频率 / 模式 / 录制）
 
-## 目录
+## 面板
 
-```
-cpp/
-├── CMakeLists.txt
-├── README.md
-├── ARCHITECTURE.md
-└── src/
-    ├── main.cpp
-    ├── core/
-    │   ├── tokens.h            # 设计 tokens + QSS 生成
-    │   └── spectrum_frame.h     # 统一频谱数据结构
-    ├── dsp/
-    │   ├── fft.{h,cpp}          # radix-2 Cooley-Tukey FFT
-    │   ├── iq_buffer.{h,cpp}   # 环形 IQ 缓冲
-    │   ├── power_spectrum.{h,cpp}
-    │   ├── test_signal.{h,cpp} # 离线测试信号（非硬件）
-    │   └── spectrum_engine.{h,cpp}  # QThread 引擎
-    └── ui/
-        ├── main_window.{h,cpp}
-        └── spectrum_widget.{h,cpp}
-```
+- **左面板**：频率 / 采样率 / 增益控制、解调模式、带宽、录制
+- **中面板**：实时频谱（FFT 热路径，QPainter 绘制）
+- **右面板 QTabWidget**：任务 / AI 助手对话 / CW 解码 / ADS-B 飞机列表
+- **底坞**：Home / 温控 / 应用坞 / NowPlaying / 音量
+
+## 当前状态
+
+Phase 1-6 完成：工程骨架 + RTL-SDR 接入 + 解调链（AM/NFM/WFM/SSB/CW）+ 静噪 + AGC + IQ 前端校正 + SigMF 录制/回放 + 触发式 WAV 分段 + CW 摩尔斯解码 + ADS-B 1090 解码 + AI Agent 层。
+
+无硬件时自动降级为测试信号（TEST SIGNAL — NOT HARDWARE）。
