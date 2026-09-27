@@ -15,38 +15,33 @@ namespace {
 constexpr int kDepthRows = 512;
 constexpr float kDbMin = -100.0f;
 constexpr float kDbMax = 0.0f;
-
-struct Stop { float t; int r, g, b; };
-// black -> deep blue -> blue -> cyan -> green -> yellow -> orange -> red
-const Stop kStops[] = {
-    {0.00f,   0,   0,   0},
-    {0.12f,   0,   0,  90},
-    {0.25f,   0,  40, 200},
-    {0.42f,   0, 200, 235},
-    {0.58f,  40, 220,  90},
-    {0.75f, 255, 235,  60},
-    {0.88f, 255, 120,   0},
-    {1.00f, 255,  40,  30},
-};
 } // namespace
 
 WaterfallWidget::WaterfallWidget(QWidget* parent)
     : QWidget(parent)
 {
     setAutoFillBackground(true);
-    setMinimumHeight(tokens::scaled(48));
+    setMinimumHeight(tokens::scaled(tokens::kWaterfallMinH));
     buildLut();
 }
 
 void WaterfallWidget::buildLut() {
     lut_.resize(256);
-    const int nStops = static_cast<int>(sizeof(kStops) / sizeof(kStops[0]));
+    // Pre-resolve each hex stop to RGB once.
+    struct RgbStop { float t; int r, g, b; };
+    const auto& stops = tokens::kWaterfallStops;
+    RgbStop rgb[sizeof(tokens::kWaterfallStops) / sizeof(tokens::kWaterfallStops[0])];
+    const int nStops = static_cast<int>(sizeof(rgb) / sizeof(rgb[0]));
+    for (int i = 0; i < nStops; ++i) {
+        QColor c(QString::fromUtf8(stops[i].hex));
+        rgb[i] = {stops[i].t, c.red(), c.green(), c.blue()};
+    }
     for (int i = 0; i < 256; ++i) {
         const float t = i / 255.0f;
         int s = 0;
-        while (s < nStops - 2 && kStops[s + 1].t < t) ++s;
-        const Stop& a = kStops[s];
-        const Stop& b = kStops[s + 1];
+        while (s < nStops - 2 && rgb[s + 1].t < t) ++s;
+        const RgbStop& a = rgb[s];
+        const RgbStop& b = rgb[s + 1];
         const float f = (t - a.t) / (b.t - a.t);
         const int r = static_cast<int>(a.r + (b.r - a.r) * f);
         const int g = static_cast<int>(a.g + (b.g - a.g) * f);

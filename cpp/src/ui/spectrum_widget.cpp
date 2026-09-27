@@ -20,12 +20,16 @@ namespace ui {
 SpectrumWidget::SpectrumWidget(QWidget* parent)
     : QWidget(parent)
 {
-    setMinimumSize(480, 320);
+    setMinimumSize(tokens::scaled(tokens::kSpectrumMinW),
+                   tokens::scaled(tokens::kSpectrumMinH));
     setAutoFillBackground(true);
 
     auto* outer = new QVBoxLayout(this);
-    outer->setContentsMargins(8, 8, 8, 8);
-    outer->setSpacing(4);
+    outer->setContentsMargins(tokens::scaled(tokens::kSpectrumPad),
+                              tokens::scaled(tokens::kSpectrumPad),
+                              tokens::scaled(tokens::kSpectrumPad),
+                              tokens::scaled(tokens::kSpectrumPad));
+    outer->setSpacing(tokens::scaled(tokens::kSpectrumSpacing));
 
     auto* topRow = new QHBoxLayout();
     testLabel_ = new QLabel("", this);
@@ -97,7 +101,10 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
         int y = mT + static_cast<int>(plotH * (1.0f - (db - yMin) / (yMax - yMin)));
         p.drawLine(mL, y, w - mR, y);
         p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
-        p.drawText(0, y - 6, mL - 4, 12, Qt::AlignRight | Qt::AlignVCenter,
+        p.drawText(0, y - tokens::scaled(tokens::kDbLabelOffsetY),
+                   mL - tokens::scaled(tokens::kDbLabelPadR),
+                   tokens::scaled(tokens::kDbLabelH),
+                   Qt::AlignRight | Qt::AlignVCenter,
                    QString("%1").arg(db, 0, 'f', 0));
         p.setPen(gridPen);
     }
@@ -110,8 +117,12 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
         p.drawLine(x, mT, x, mT + plotH);
         double freq = f0 - fs / 2.0 + fs * i / 4.0;
         p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
-        p.drawText(x - 40, mT + plotH + 4, 80, 16,
-                   Qt::AlignCenter, QString("%1M").arg(freq / 1e6, 0, 'f', 1));
+        p.drawText(x - tokens::scaled(tokens::kFreqLabelHalfW),
+                   mT + plotH + tokens::scaled(tokens::kFreqLabelOffsetY),
+                   tokens::scaled(tokens::kFreqLabelW),
+                   tokens::scaled(tokens::kFreqLabelH),
+                   Qt::AlignCenter,
+                   QString("%1M").arg(freq / 1e6, 0, 'f', 1));
         p.setPen(gridPen);
     }
 
@@ -138,7 +149,7 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
 
     // VFO center line
     QPen vfoPen(QColor(tokens::kAccent));
-    vfoPen.setWidthF(1.5);
+    vfoPen.setWidthF(tokens::kVfoLineWidth);
     p.setPen(vfoPen);
     p.drawLine(width() / 2, mT, width() / 2, mB);
 
@@ -149,7 +160,8 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
         p.drawLine(mL, hoverPos_.y(), mR, hoverPos_.y());
         double xRatio = static_cast<double>(hoverPos_.x()) / width();
         double freq = frame_.centerFreqHz + (xRatio - 0.5) * frame_.sampleRateHz;
-        p.drawText(hoverPos_ + QPointF(8, -8), QString("%1 MHz").arg(freq / 1e6, 0, 'f', 3));
+        p.drawText(hoverPos_ + QPointF(tokens::kTooltipOffset, -tokens::kTooltipOffset),
+                   QString("%1 MHz").arg(freq / 1e6, 0, 'f', 3));
     }
 }
 
