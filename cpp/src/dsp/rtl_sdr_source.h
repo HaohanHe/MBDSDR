@@ -31,12 +31,28 @@ public:
     void setSampleRate(double rateHz) override;
     void setGain(double gainDb) override;
 
+#ifdef HAVE_RTLSDR
+    // Hardware-specific tuning overrides -- only compiled with the real backend.
+    // The !HAVE_RTLSDR stub intentionally does NOT override these: it inherits
+    // the empty ISource defaults, so toggling them in the UI is a safe no-op.
+    void setDirectSampling(int mode) override;
+    void setOffsetTuning(bool on) override;
+    void setRtlAgc(bool on) override;
+    void setTunerAgc(bool on) override;
+    void setBiasTee(bool on) override;
+    void setPpm(double ppm) override;
+#endif
+
     double centerFreq() const override { return f0_; }
     double sampleRate() const override { return fs_; }
     double gain() const override { return gainDb_; }
 
     QString name() const override;
     bool isConnected() const override;
+
+    /// Human-readable summary of the front-end options, e.g.
+    /// "DS=off AGC=off TunerAGC=manual BiasT=off PPM=0.0". Purely diagnostic.
+    QString rtlOptionsSummary() const;
 
 private:
 #ifdef HAVE_RTLSDR
@@ -46,6 +62,15 @@ private:
     double fs_ = 2.4e6;
     double gainDb_ = 20.0;
     bool   running_ = false;
+
+    // Tuning state -- always stored, then (re)applied to the device on start()
+    // and pushed live whenever the device is already open.
+    int    directSampling_ = 0;   // 0=off, 1=I, 2=Q
+    bool   offsetTuning_   = false;
+    bool   rtlAgc_         = false;
+    bool   tunerAgc_       = false;   // true => tuner gain automatic
+    bool   biasTee_        = false;
+    double ppm_            = 0.0;
 };
 
 } // namespace dsp

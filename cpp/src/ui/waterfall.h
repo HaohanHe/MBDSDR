@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QImage>
 #include <QVector>
+#include <QElapsedTimer>
 #include "core/spectrum_frame.h"
 
 namespace mbdsdr {
@@ -31,6 +32,13 @@ private:
     int bins_ = 0;
     bool haveFrame_ = false;
     QVector<QRgb> lut_;        // dB -> color lookup table
+
+    // Time axis: derive elapsed seconds from the real frame count x smoothed
+    // frame period (no hard-coded clock).
+    QElapsedTimer frameClock_;
+    int    frameCount_ = 0;
+    qint64 lastElapsedMs_ = 0;
+    double frameIntervalMs_ = 0.0;   // exponential moving average of period
 };
 
 } // namespace ui

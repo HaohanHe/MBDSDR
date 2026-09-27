@@ -54,6 +54,16 @@ private:
     QPushButton*    connectBtn_ = nullptr;
     QLabel*         rssiLabel_  = nullptr;
 
+    // Collapsible advanced front-end options (RTL-SDR only; disabled w/o HW)
+    QPushButton*    advToggle_   = nullptr;
+    QWidget*        advPanel_    = nullptr;
+    QComboBox*      dsCombo_     = nullptr;
+    QCheckBox*      offsetChk_   = nullptr;
+    QCheckBox*      rtlAgcChk_   = nullptr;
+    QCheckBox*      tunerAgcChk_ = nullptr;
+    QCheckBox*      biasTeeChk_  = nullptr;
+    QDoubleSpinBox* ppmSpin_     = nullptr;
+
     QComboBox*      demodCombo_  = nullptr;
     QComboBox*      bwCombo_     = nullptr;
     QSlider*        squelchSlider_ = nullptr;

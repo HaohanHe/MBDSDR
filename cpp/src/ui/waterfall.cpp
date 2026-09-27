@@ -76,6 +76,25 @@ void WaterfallWidget::setSpectrum(const SpectrumFrame& frame) {
     for (int i = 0; i < bins; ++i) top[i] = colorForDb(frame.dbfs[i]);
 
     haveFrame_ = true;
+
+    // Time bookkeeping: the axis is derived from the real frame count and a
+    // smoothed per-frame period, never a hard-coded value.
+    if (frameCount_ == 0) {
+        frameClock_.start();
+        lastElapsedMs_ = 0;
+        frameIntervalMs_ = 0.0;
+    } else {
+        const qint64 now = frameClock_.elapsed();
+        const double dt = double(now - lastElapsedMs_);
+        if (dt > 0.0) {
+            frameIntervalMs_ = (frameIntervalMs_ <= 0.0)
+                ? dt
+                : 0.9 * frameIntervalMs_ + 0.1 * dt;   // light smoothing
+        }
+        lastElapsedMs_ = now;
+    }
+    ++frameCount_;
+
     update();
 }
 
@@ -97,6 +116,30 @@ void WaterfallWidget::paintEvent(QPaintEvent*) {
     if (plotW <= 10) return;
     p.setRenderHint(QPainter::SmoothPixmapTransform, false);
     p.drawImage(QRectF(mL, 0, plotW, height()), history_);
+
+    // Time axis in the left margin: top (y=0) is the newest frame (0s),
+    // bottom is the oldest (total elapsed). Only once we have >=2 frames and
+    // a measured period; otherwise the empty-state text already covers it.
+    if (frameCount_ > 1 && frameIntervalMs_ > 0.0) {
+        const double totalSec = frameCount_ * frameIntervalMs_ / 1000.0;
+        const int labelW = tokens::scaled(tokens::kTimeLabelW);
+        const int labelH = tokens::scaled(tokens::kTimeLabelH);
+        const int padY = tokens::scaled(tokens::kTimeLabelPadY);
+        p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
+        auto drawT = [&](int y, const QString& txt) {
+            p.drawText(0, y - labelH / 2, labelW, labelH,
+                       Qt::AlignHCenter | Qt::AlignVCenter, txt);
+        };
+        drawT(padY + labelH / 2, QStringLiteral("0s"));
+        drawT(height() - padY - labelH / 2,
+              QString("%1s").arg(totalSec, 0, 'f', 1));
+        for (int k = 1; k <= tokens::kTimeTickCount; ++k) {
+            const double frac = double(k) / (tokens::kTimeTickCount + 1);
+            const int y = static_cast<int>(height() * frac);
+            const double age = totalSec * (1.0 - frac);
+            drawT(y, QString("%1s").arg(age, 0, 'f', 1));
+        }
+    }
 }
 
 } // namespace ui
