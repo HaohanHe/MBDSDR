@@ -121,6 +121,32 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     gainRow->addWidget(gainValue_);
     leftLay->addLayout(gainRow);
 
+    // Demod mode
+    leftLay->addWidget(new QLabel("解调模式", leftCard));
+    demodCombo_ = new QComboBox(leftCard);
+    demodCombo_->addItems({"NFM", "WFM", "AM", "USB", "LSB"});
+    leftLay->addWidget(demodCombo_);
+
+    // Squelch
+    leftLay->addWidget(new QLabel("静噪门限", leftCard));
+    auto* sqRow = new QHBoxLayout();
+    squelchSlider_ = new QSlider(Qt::Horizontal, leftCard);
+    squelchSlider_->setRange(-100, -20);
+    squelchSlider_->setValue(-50);
+    squelchValue_ = new QLabel("-50 dB", leftCard);
+    squelchValue_->setObjectName("monoInfo");
+    sqRow->addWidget(squelchSlider_, 1);
+    sqRow->addWidget(squelchValue_);
+    leftLay->addLayout(sqRow);
+
+    // Squelch state + audio level
+    squelchState_ = new QLabel("静噪: --", leftCard);
+    squelchState_->setObjectName("monoInfo");
+    leftLay->addWidget(squelchState_);
+    levelLabel_ = new QLabel("电平: -- dBFS", leftCard);
+    levelLabel_->setObjectName("monoInfo");
+    leftLay->addWidget(levelLabel_);
+
     leftLay->addStretch();
     splitter->addWidget(leftCard);
 
@@ -214,6 +240,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             engine_, &dsp::SpectrumEngine::setFftSize);
     connect(engine_, &dsp::SpectrumEngine::sourceChanged,
             this, &MainWindow::onSourceChanged);
+    connect(engine_, &dsp::SpectrumEngine::audioLevel,
+            this, &MainWindow::onAudioLevel);
+    connect(engine_, &dsp::SpectrumEngine::squelchState,
+            this, &MainWindow::onSquelchState);
+
+    // Control signals -> engine
+    connect(demodCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) { engine_->setDemodMode(demodCombo_->currentText()); });
+    connect(squelchSlider_, &QSlider::valueChanged,
+            this, [this](int v) {
+                squelchValue_->setText(QString("%1 dB").arg(v));
+                engine_->setSquelchThreshold(static_cast<float>(v));
+            });
 
     // Control signals -> engine
     connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
@@ -250,6 +289,14 @@ void MainWindow::setControlsEnabled(bool hw) {
     sourceBanner_->setText(hw ? QString() :
         QStringLiteral("RTL-SDR 未连接，使用测试信号（频率/增益不生效）"));
     sourceBanner_->setVisible(!hw);
+}
+
+void MainWindow::onAudioLevel(float dbfs) {
+    levelLabel_->setText(QString("电平: %1 dBFS").arg(dbfs, 0, 'f', 1));
+}
+
+void MainWindow::onSquelchState(bool open) {
+    squelchState_->setText(open ? "静噪: OPEN" : "静噪: CLOSED");
 }
 
 } // namespace mbdsdr

@@ -20,18 +20,26 @@ public:
 
 private slots:
     void onSourceChanged(const QString& name, bool connected);
+    void onAudioLevel(float dbfs);
+    void onSquelchState(bool open);
 
 private:
     dsp::SpectrumEngine* engine_   = nullptr;
     ui::SpectrumWidget* spectrum_ = nullptr;
 
-    // Left-panel controls
     QDoubleSpinBox* freqSpin_   = nullptr;
     QComboBox*      srCombo_    = nullptr;
     QSlider*        gainSlider_ = nullptr;
     QLabel*         gainValue_  = nullptr;
     QLabel*         sourceBanner_ = nullptr;
     QLabel*         statusLabel_ = nullptr;
+
+    // Demod / squelch controls
+    QComboBox*      demodCombo_  = nullptr;
+    QSlider*        squelchSlider_ = nullptr;
+    QLabel*         squelchValue_ = nullptr;
+    QLabel*         levelLabel_   = nullptr;
+    QLabel*         squelchState_ = nullptr;
 
     void setControlsEnabled(bool hardwareConnected);
 };
