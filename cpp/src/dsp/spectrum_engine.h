@@ -14,6 +14,8 @@
 #include "dsp/squelch.h"
 #include "dsp/agc.h"
 #include "dsp/audio_output.h"
+#include "dsp/recorder.h"
+#include "dsp/gated_recorder.h"
 
 namespace mbdsdr {
 namespace dsp {
@@ -35,12 +37,17 @@ public slots:
     void setDemodMode(const QString& mode);
     void setSquelchThreshold(float db);
     void setSquelchEnabled(bool e);
+    void setBandwidth(double hz);
+    void startRecording();
+    void stopRecording();
+    void setGatedRecordingEnabled(bool e);
 
 signals:
     void spectrumReady(const SpectrumFrame& frame);
     void sourceChanged(const QString& name, bool connected);
     void audioLevel(float dbfs);
     void squelchState(bool open);
+    void recordingStateChanged(bool recording, const QString& path);
 
 protected:
     void run() override;
@@ -52,10 +59,13 @@ private:
     Squelch squelch_;
     Agc agc_;
     AudioOutput* audioOut_ = nullptr;
+    Recorder recorder_;
+    GatedRecorder gatedRec_;
 
     std::atomic<int> fftSize_{2048};
     std::atomic<bool> running_{true};
     QString demodMode_ = "NFM";
+    double bandwidth_ = 12500.0;
     bool needDemodReset_ = false;
 
     void rebuildDemod();

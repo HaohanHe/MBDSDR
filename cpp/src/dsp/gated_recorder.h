@@ -50,6 +50,7 @@ private:
     QString outDir_ = "recordings";
     QString currentMode_ = "NFM";
     double currentFreq_ = 98.5e6;
+    QString lastSavedPath_;
 
     void startSegment();
     void endSegment();

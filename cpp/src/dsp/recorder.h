@@ -4,6 +4,7 @@
 
 #include <QString>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <fstream>
 #include <complex>
 #include <vector>

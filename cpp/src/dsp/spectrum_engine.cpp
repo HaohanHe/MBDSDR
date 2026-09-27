@@ -22,26 +22,28 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
     emit sourceChanged(source_->name(), source_->isConnected());
 
     audioOut_ = new AudioOutput(this);
+    gatedRec_.setOutputDir("recordings");
     rebuildDemod();
 }
 
 SpectrumEngine::~SpectrumEngine() {
     shutdown();
     wait();
+    if (recorder_.isRecording()) recorder_.stop();
+    gatedRec_.flush();
     if (source_) source_->stop();
 }
 
 void SpectrumEngine::rebuildDemod() {
-    if (demodMode_ == "AM")  demod_ = std::make_unique<DemodAM>();
+    if (demodMode_ == "AM")  demod_ = std::make_unique<DemodAM>(48000, bandwidth_);
     else if (demodMode_ == "WFM") demod_ = std::make_unique<DemodWFM>();
-    else if (demodMode_ == "USB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::USB);
-    else if (demodMode_ == "LSB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB);
-    else demod_ = std::make_unique<DemodNFM>();  // default NFM
+    else if (demodMode_ == "USB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::USB, 48000, bandwidth_);
+    else if (demodMode_ == "LSB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, 48000, bandwidth_);
+    else demod_ = std::make_unique<DemodNFM>(48000, bandwidth_);
     frontend_.reset();
     squelch_.reset();
     agc_.reset();
 
-    // Tell test source which modulation to emit
     if (auto* ts = dynamic_cast<TestSignalSource*>(source_.get())) {
         if (demodMode_ == "AM") ts->setModulation("am");
         else if (demodMode_ == "NFM" || demodMode_ == "WFM") ts->setModulation("fm");
@@ -59,10 +61,36 @@ void SpectrumEngine::onSetSampleRate(double r) { if (source_) source_->setSample
 void SpectrumEngine::onSetGain(double g) { if (source_) source_->setGain(g); }
 void SpectrumEngine::setDemodMode(const QString& m) {
     demodMode_ = m;
+    // Default bandwidth per mode
+    if (m == "AM") bandwidth_ = 8000;
+    else if (m == "NFM") bandwidth_ = 12500;
+    else if (m == "WFM") bandwidth_ = 200000;
+    else bandwidth_ = 2400;
     needDemodReset_ = true;
 }
 void SpectrumEngine::setSquelchThreshold(float db) { squelch_.setThresholdDb(db); }
 void SpectrumEngine::setSquelchEnabled(bool e) { squelch_.setEnabled(e); }
+void SpectrumEngine::setBandwidth(double hz) {
+    bandwidth_ = hz;
+    if (demod_) demod_->setBandwidth(hz);
+}
+
+void SpectrumEngine::startRecording() {
+    if (recorder_.isRecording()) return;
+    if (recorder_.start("recordings", source_->sampleRate(),
+                        source_->centerFreq(), source_->gain(),
+                        source_->name())) {
+        emit recordingStateChanged(true, recorder_.currentFilePath());
+    }
+}
+void SpectrumEngine::stopRecording() {
+    if (!recorder_.isRecording()) return;
+    recorder_.stop();
+    emit recordingStateChanged(false, "");
+}
+void SpectrumEngine::setGatedRecordingEnabled(bool e) {
+    gatedRec_.setEnabled(e);
+}
 
 void SpectrumEngine::run() {
     std::vector<std::complex<float>> iq;
@@ -80,10 +108,12 @@ void SpectrumEngine::run() {
             continue;
         }
 
-        // 1. IQ front-end correction
         frontend_.process(iq);
 
-        // 2. Spectrum
+        // Record raw IQ if recording
+        if (recorder_.isRecording()) recorder_.writeIQ(iq);
+
+        // Spectrum
         SpectrumFrame frame;
         frame.dbfs.resize(static_cast<std::size_t>(n));
         powerSpectrumDbfs(iq, frame.dbfs);
@@ -94,14 +124,18 @@ void SpectrumEngine::run() {
         frame.sourceName = source_->name();
         emit spectrumReady(frame);
 
-        // 3. Demod -> squelch -> AGC -> audio
+        // Demod chain
         auto audio = demod_->process(iq);
         float rms = rmsDbfs(audio);
+        bool gate = squelch_.open();
         auto gated = squelch_.apply(audio, rms);
-        emit squelchState(squelch_.open());
+        emit squelchState(gate);
         auto out = agc_.process(gated);
         emit audioLevel(agc_.currentLevelDb());
         audioOut_->write(out, demod_->outputSampleRate());
+
+        // Gated recording
+        gatedRec_.feed(out, gate);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(33));
     }

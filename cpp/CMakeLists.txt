@@ -10,7 +10,6 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 
-# Qt6
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
@@ -18,7 +17,6 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia Test)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
-# ---- Optional RTL-SDR support ----
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
     pkg_check_modules(RTLSDR librtlsdr)
@@ -39,6 +37,9 @@ set(SOURCES
     src/dsp/squelch.cpp
     src/dsp/agc.cpp
     src/dsp/audio_output.cpp
+    src/dsp/recorder.cpp
+    src/dsp/file_source.cpp
+    src/dsp/gated_recorder.cpp
 )
 
 set(HEADERS
@@ -58,6 +59,9 @@ set(HEADERS
     src/dsp/squelch.h
     src/dsp/agc.h
     src/dsp/audio_output.h
+    src/dsp/recorder.h
+    src/dsp/file_source.h
+    src/dsp/gated_recorder.h
 )
 
 add_executable(mbdsdr ${SOURCES} ${HEADERS})
@@ -85,6 +89,13 @@ add_executable(test_demod tests/test_demod.cpp
 target_include_directories(test_demod PRIVATE src)
 target_link_libraries(test_demod PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME demod COMMAND test_demod)
+
+add_executable(test_recorder tests/test_recorder.cpp
+    src/dsp/recorder.cpp src/dsp/file_source.cpp src/dsp/gated_recorder.cpp
+    src/dsp/demod.cpp)
+target_include_directories(test_recorder PRIVATE src)
+target_link_libraries(test_recorder PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME recorder COMMAND test_recorder)
 
 message(STATUS "MBDSDR C++ build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Qt6 version: ${Qt6Core_VERSION}")
