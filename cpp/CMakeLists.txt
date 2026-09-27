@@ -5,6 +5,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Expose M_PI etc. from <cmath> on Windows toolchains (MSVC/MinGW);
+# harmless on Linux where these are already defined.
+add_compile_definitions(_USE_MATH_DEFINES)
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
