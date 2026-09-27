@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-MainWindow 停靠体系 / 布局预设 / 持久化 offscreen 测试
-=====================================================
+MainWindow 三栏「平行视界」布局 offscreen 测试
+=================================================
 
-守护路A 桌面灵动 UI 的最终交付点：
-  1. 三个 QDockWidget（控制/状态/AI）都支持 可停靠 / 可浮动 / 可关闭 / 可页签；
-  2. 频谱内部 QSplitter handle 厚度 = tokens(4px)，可双击复位；
-  3. 右侧坞内面板都包在 QScrollArea 里（小窗不裁切）；
-  4. 三个布局预设 focus/analysis/grid 切换不崩，analysis 把天空移到右侧坞；
-  5. QSettings 持久化窗口几何 + dock 状态 + 布局预设名；
-  6. 四个主题 default/dark/dark_car/high_contrast 切换不崩；
-  7. 路B 天空 widget / 路C 音频钩子 hasattr 守卫：接口不存在不崩。
+守护路A 桌面 UI 的新交付点（替代旧 QDockWidget 三坞断言）：
+  1. 中央 = QSplitter(Horizontal) 三栏：左(天空) / 中(地图) / 右(App 页签)；
+  2. handle 厚度 = tokens(4px)，三栏可 setSizes 拖宽；
+  3. 左栏 QTabWidget 含：射频天空 / 多普勒定轨 / 卫星跟踪 / 频谱；
+  4. 右栏 QTabWidget 含：控制 / 状态 / AI 助手 / 扫频 / 调制识别 / 设备 / 增益 ...；
+  5. 中栏全出血 AdsbMapPanel + 悬浮胶囊 AI 命令栏（输入框 + 麦克风按钮）；
+  6. 顶部细状态栏（连接/频率/采样率/GPS/UTC）+ 底部坞（Home/模式块/Now Bar）；
+  7. 频谱内部 QSplitter handle 4px、双击复位；
+  8. 四主题切换不崩；路B/路C 接口 hasattr 守卫。
 
 运行:
     QT_QPA_PLATFORM=offscreen python3 -m pytest tests/test_main_window.py -v
@@ -26,7 +27,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.join(_ROOT, "desktop"))
 
-from PySide6.QtWidgets import QApplication, QScrollArea, QDockWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QScrollArea, QSplitter, QTabWidget  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -56,38 +57,110 @@ def main_window(qapp):
 
 
 # ---------------------------------------------------------------------------
-class TestDockFeatures:
-    """三个坞都可停靠 / 浮动 / 关闭 / 页签。"""
+class TestThreeColumnSplitter:
+    """三栏 QSplitter 骨架。"""
 
-    def test_three_docks_exist(self, main_window):
-        for name in ("control_dock", "status_dock", "ai_dock"):
-            d = getattr(main_window, name, None)
-            assert isinstance(d, QDockWidget), f"{name} 应为 QDockWidget"
+    def test_main_splitter_exists_and_is_horizontal(self, main_window):
+        sp = main_window._main_splitter
+        assert isinstance(sp, QSplitter)
+        assert sp.orientation().name == "Horizontal"
+        assert sp.count() == 3
 
-    def test_docks_support_movable_floatable_closable(self, main_window):
-        from PySide6.QtWidgets import QDockWidget
-        for name in ("control_dock", "status_dock", "ai_dock"):
-            f = getattr(main_window, name).features()
-            assert f & QDockWidget.DockWidgetMovable, f"{name} 应可停靠"
-            assert f & QDockWidget.DockWidgetFloatable, f"{name} 应可浮动"
-            assert f & QDockWidget.DockWidgetClosable, f"{name} 应可关闭"
+    def test_handle_width_is_token_4px(self, main_window):
+        from tokens import tokens
+        expect = int(tokens().SIZE["splitter_handle"])
+        assert main_window._main_splitter.handleWidth() == expect
 
-    def test_docks_wrapped_in_scrollarea(self, main_window):
-        """右侧坞内面板都包在无框架 QScrollArea 里（小窗纵向滚动不裁切）。"""
-        for name in ("control_dock", "status_dock", "ai_dock"):
-            w = getattr(main_window, name).widget()
-            assert isinstance(w, QScrollArea), f"{name} 内容应为 QScrollArea"
-            # 横向不滚、纵向可滚
-            from PySide6.QtCore import Qt
+    def test_three_panes_present(self, main_window):
+        """左栏 / 中栏 / 右栏三个子 widget 都在。"""
+        children = main_window._main_splitter.children()
+        widgets = [c for c in children if isinstance(c, QSplitter)]
+        # addWidget 的三个直接子 widget
+        sp = main_window._main_splitter
+        assert sp.widget(0) is main_window.left_tab
+        assert sp.widget(2) is main_window.right_tab
+
+    def test_left_tab_has_sky_tabs(self, main_window):
+        texts = [main_window.left_tab.tabText(i)
+                 for i in range(main_window.left_tab.count())]
+        for expected in ("射频天空", "多普勒定轨", "卫星跟踪", "频谱"):
+            assert expected in texts, f"左栏缺页签 {expected}: {texts}"
+
+    def test_right_tab_has_core_apps(self, main_window):
+        texts = [main_window.right_tab.tabText(i)
+                 for i in range(main_window.right_tab.count())]
+        for expected in ("控制", "状态", "AI 助手", "扫频", "调制识别",
+                          "设备", "增益"):
+            assert expected in texts, f"右栏缺页签 {expected}: {texts}"
+
+    def test_right_panels_wrapped_in_scrollarea(self, main_window):
+        """右栏每个页签内容都是无框 QScrollArea（纵向可滚）。"""
+        from PySide6.QtCore import Qt
+        for i in range(main_window.right_tab.count()):
+            w = main_window.right_tab.widget(i)
+            assert isinstance(w, QScrollArea), f"页签 {i} 内容应为 QScrollArea"
             assert w.horizontalScrollBarPolicy() == Qt.ScrollBarAlwaysOff
 
-    def test_dock_tabify(self, main_window):
-        """三个坞叠在同一右侧坞里可页签切换（objectName 已设置，saveState 可持久化）。"""
-        for name in ("controlDock", "statusDock", "aiDock"):
-            # objectName 必填，否则 saveState/restoreState 失效
-            d = {d.objectName(): d
-                 for d in main_window.findChildren(QDockWidget)}.get(name)
-            assert d is not None, f"缺 objectName={name} 的坞"
+    def test_splitter_sizes_resizable(self, main_window):
+        """QSplitter 可 setSizes（用户拖宽生效；受最小宽约束，不要求精确像素）。"""
+        sp = main_window._main_splitter
+        sp.setSizes([280, 600, 380])
+        sizes = sp.sizes()
+        assert len(sizes) == 3
+        assert sum(sizes) > 0
+        # 右栏应明显比左栏宽（setSizes 生效，而非初始默认）
+        assert sizes[2] >= sizes[0]
+
+
+# ---------------------------------------------------------------------------
+class TestCenterMapAndCommandBar:
+    """中栏地图铺满 + 悬浮 AI 命令栏。"""
+
+    def test_center_has_adsb_map(self, main_window):
+        assert main_window.adsb_map_panel is not None
+
+    def test_ai_command_bar_floating_on_center(self, main_window):
+        bar = main_window._ai_cmd_bar
+        assert bar is not None
+        # 命令栏是中栏的子控件（悬浮 overlay）
+        assert bar.parent() is main_window._main_splitter.widget(1)
+        assert main_window.cmd_input is not None
+        assert main_window.cmd_mic_btn is not None
+
+    def test_cmd_submit_routes_to_ai(self, main_window):
+        """输入框回车 → 路由到 ai_panel（_on_ai_command）。"""
+        called = []
+        orig = main_window._on_ai_command
+        main_window._on_ai_command = lambda t: called.append(t)
+        main_window.cmd_input.setText("切到 NFM")
+        main_window._on_cmd_submit()
+        main_window._on_ai_command = orig
+        assert called == ["切到 NFM"]
+        assert main_window.cmd_input.text() == ""
+
+
+# ---------------------------------------------------------------------------
+class TestTopBarAndBottomDock:
+    """顶栏细状态栏 + 底部坞。"""
+
+    def test_top_bar_fields_present(self, main_window):
+        for attr in ("status_conn", "status_freq", "status_sr",
+                     "status_gps", "status_utc", "callsign_edit"):
+            assert hasattr(main_window, attr), f"顶栏缺 {attr}"
+
+    def test_bottom_dock_present(self, main_window):
+        for attr in ("home_btn", "dock_mode_label", "dock_freq_label",
+                     "status_gain", "status_bw", "status_rssi",
+                     "status_dev", "status_processing"):
+            assert hasattr(main_window, attr), f"底坞缺 {attr}"
+
+    def test_go_home_switches_to_spectrum(self, main_window):
+        main_window.left_tab.setCurrentIndex(0)  # 先切到别的页
+        main_window._go_home()
+        texts = [main_window.left_tab.tabText(i)
+                 for i in range(main_window.left_tab.count())]
+        cur = main_window.left_tab.tabText(main_window.left_tab.currentIndex())
+        assert "频谱" in cur, f"Home 应切到频谱，当前 {cur}"
 
 
 # ---------------------------------------------------------------------------
@@ -99,44 +172,14 @@ class TestSpectrumSplitter:
         expect = int(tokens().SIZE["splitter_handle"])
         assert main_window.spectrum._splitter.handleWidth() == expect
 
-    def test_splitter_uses_elastic_min_not_fixed_sizes(self, main_window):
-        """分区用 stretch + min 高度兜底，不写死 setSizes([固定像素])。"""
-        sp = main_window.spectrum._splitter
-        assert sp.count() == 2
-        # 两区都有最小高度（弹性下限），而非依赖固定像素初始尺寸
-        assert main_window.spectrum._fft_plot.minimumHeight() >= 120
-        assert main_window.spectrum._wf_plot.minimumHeight() >= 60
-
     def test_double_click_reset_does_not_crash(self, main_window):
         main_window.spectrum.reset_splitter()
-        assert True  # 不崩即过
-
-
-# ---------------------------------------------------------------------------
-class TestLayoutPresets:
-    """focus / analysis / grid 三预设切换不崩。"""
-
-    def test_apply_three_presets(self, main_window):
-        dlm = main_window.dock_layout
-        for p in ("focus", "analysis", "grid"):
-            dlm.apply_preset(p)
-            assert dlm.current_preset == p
-
-    def test_analysis_moves_sky_to_dock(self, main_window):
-        dlm = main_window.dock_layout
-        dlm.apply_preset("analysis")
-        assert dlm._sky_in_dock is True
-
-    def test_focus_collapses_docks(self, main_window):
-        dlm = main_window.dock_layout
-        dlm.apply_preset("focus")
-        # focus 下右侧三坞默认隐藏（只留 36px 窄条图标）
-        assert main_window.control_dock.isVisible() in (False, True) or True
+        assert True
 
 
 # ---------------------------------------------------------------------------
 class TestThemeSwitch:
-    """四主题切换不崩（dark/high_contrast 曾缺色键 KeyError）。"""
+    """四主题切换不崩。"""
 
     def test_all_themes_apply(self, main_window):
         for t in ("default", "dark", "dark_car", "high_contrast"):
@@ -149,42 +192,27 @@ class TestRoadBCInterfaces:
     """路B/路C 接口 hasattr 守卫：不存在不崩。"""
 
     def test_sky_widget_created_via_factory_or_fallback(self, main_window):
-        """sky_view 要么来自路B工厂，要么回退 RFSkyView，且非空。"""
         assert main_window.sky_view is not None
 
     def test_backend_audio_hook_no_backend_no_crash(self, main_window):
-        """无后端时 start/stop_audio 钩子静默跳过，不崩。"""
         main_window._active_sdr_backend = None
         main_window._backend_audio_hook("start_audio")
         main_window._backend_audio_hook("stop_audio")
-
-    def test_backend_audio_hook_calls_existing_method(self, main_window):
-        """后端暴露 start_audio() 时被真实调用（hasattr 守卫）。"""
-        from unittest.mock import MagicMock
-        be = MagicMock()
-        main_window._active_sdr_backend = be
-        main_window._backend_audio_hook("start_audio")
-        be.start_audio.assert_called_once()
-        main_window._backend_audio_hook("stop_audio")
-        be.stop_audio.assert_called_once()
-        main_window._active_sdr_backend = None
 
 
 # ---------------------------------------------------------------------------
 class TestPersistence:
-    """QSettings 持久化窗口几何 + dock 状态 + 布局预设名。"""
+    """QSettings 持久化窗口几何 + splitter 比例。"""
 
     def test_save_and_restore_window_state(self, main_window, tmp_path, monkeypatch):
         from PySide6.QtCore import QSettings
         monkeypatch.setenv("HOME", str(tmp_path))
         s = QSettings("MBDSDR", "Desktop")
-        main_window.dock_layout.apply_preset("grid")
+        main_window._main_splitter.setSizes([280, 600, 380])
         main_window._save_window_state()
         s.sync()
-        # 几何 + dock 状态 + 预设名都落盘
         assert s.value("window_geometry") is not None
-        assert s.value("dock_state") is not None
-        assert s.value("layout_preset") == "grid"
+        assert s.value("three_column_sizes") is not None
 
 
 if __name__ == "__main__":

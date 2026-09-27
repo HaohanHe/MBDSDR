@@ -186,6 +186,7 @@ class ModulePanel(QWidget):
     tune_requested = Signal(float)   # 改了频率
     demod_mode_changed = Signal(str) # 改了解调模式
     sink_changed = Signal(str)
+    node_selected = Signal(str, str)  # 信号流图节点被点选 (name, type)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -333,6 +334,7 @@ class ModulePanel(QWidget):
     def _on_node_selected(self, name: str, ntype: str):
         self.flow.selected = name
         self.device_info.setText(f"选中模块:\n{name}\n类型: {ntype}")
+        self.node_selected.emit(name, ntype)
 
     def _refresh_flow(self):
         """画一张默认信号流：Source → WFM → Audio Sink。"""

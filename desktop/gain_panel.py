@@ -114,6 +114,8 @@ class GainPanel(QWidget):
 
     stage_gain_changed = Signal(str, float)
     agc_changed = Signal(bool)
+    # 向上层 re-emit 原始滑杆值（logical, db），供主窗口同步后端/状态栏。
+    value_changed = Signal(str, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -208,6 +210,7 @@ class GainPanel(QWidget):
             except Exception:  # noqa: BLE001
                 pass
         self.stage_gain_changed.emit(logical, db)
+        self.value_changed.emit(logical, db)
         self._update_total()
 
     def _update_total(self):

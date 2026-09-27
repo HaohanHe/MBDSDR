@@ -158,6 +158,10 @@ class ScannerPanel(QWidget):
     segment_chosen = Signal(dict)   # 用户点击活动段
     scan_began = Signal()           # 主窗口据此停共享 IQ 轮询
     scan_ended = Signal()           # 主窗口据此恢复（若仍连接）
+    # 向上层 re-emit 扫频进度/结果，供主窗口状态栏回显（面板内部自绘进度条/列表）。
+    progress = Signal(float, float)   # (0..1 进度, 当前中心 Hz)
+    done = Signal(list)               # list[dict] 活动段
+    failed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -212,10 +216,10 @@ class ScannerPanel(QWidget):
         row.addWidget(self.cancel_btn)
         root.addLayout(row)
 
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        root.addWidget(self.progress)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        root.addWidget(self.progress_bar)
 
         self.status_label = QLabel("未连接")
         self.status_label.setObjectName("hintLabel")
@@ -269,7 +273,7 @@ class ScannerPanel(QWidget):
             return
         self.result_list.clear()
         self._segments = []
-        self.progress.setValue(0)
+        self.progress_bar.setValue(0)
         self.scan_began.emit()
         self._worker = _ScanWorker(
             self._backend, f0, f1, step, self.thr_sp.value(), parent=self)
@@ -286,8 +290,9 @@ class ScannerPanel(QWidget):
             self.status_label.setText("正在取消…")
 
     def _on_progress(self, frac: float, center_hz: float):
-        self.progress.setValue(int(frac * 100))
+        self.progress_bar.setValue(int(frac * 100))
         self.status_label.setText(f"扫描中… {center_hz / 1e6:.3f} MHz")
+        self.progress.emit(float(frac), float(center_hz))
 
     def _on_done(self, segments: list):
         self._segments = segments or []
@@ -302,9 +307,11 @@ class ScannerPanel(QWidget):
             item.setData(Qt.UserRole, seg)
             self.result_list.addItem(item)
         self.status_label.setText(f"完成：{len(self._segments)} 个活动段")
+        self.done.emit(self._segments)
 
     def _on_failed(self, msg: str):
         self.status_label.setText(msg)
+        self.failed.emit(msg)
         QMessageBox.warning(self, "扫频", msg)
 
     def _on_worker_finished(self):

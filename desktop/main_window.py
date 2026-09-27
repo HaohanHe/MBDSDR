@@ -661,49 +661,73 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.replay_btn)
 
     def _build_central_widget(self):
-        """构建中央组件。
+        """构建「平行视界」三栏固定 QSplitter 布局。
 
-        中央区 = left_tab（频谱/射频天空/模块信号流/气象云图/多普勒定轨/
-        卫星跟踪/新时空/ADS-B 航路 共 8 个页签）直接作为 QMainWindow 的 central
-        widget；右侧控制/状态/AI 三个面板改为 QDockWidget 停靠体系（可拖动/浮动/
-        关闭/叠页签），由 QMainWindow 自动管理，不再用 QSplitter 包裹。
+        布局（行：顶栏 / 三栏 / 底坞）：
+          * 顶栏：细状态栏（连接/频率/采样率/GPS/UTC），见 _build_top_bar；
+          * 左栏（~300px）：沉浸天空/轨道极坐标——QTabWidget 页签
+            （射频天空 / 多普勒定轨 / 卫星跟踪 / 频谱）；
+          * 中栏（flex）：暗色地图世界铺满（AdsbMapPanel 全出血），上方悬浮
+            胶囊形 AI 命令栏（半透明毛玻璃，输入框 + 麦克风，路由到 ai_panel）；
+          * 右栏（~360px）：当前 App——QTabWidget 页签
+            （控制/状态/AI/模块/气象/新时空/扫频/调制识别/...），原 QDockWidget
+            里的面板全部搬进来；
+          * 底坞（~74px）：Home + 模式块 + Now Bar，见 _build_bottom_dock。
+        三栏用 QSplitter(Horizontal) 连接，handle 厚度 4px（tokens），可拖宽。
+        现有所有 panel 实例与信号连接保持原样，只换容器。
         """
-        # 左侧：频谱显示 + 射频天空视图（Tab 切换）
+        # ------------------------------------------------------------------
+        # 左栏：天空 / 轨道 / 频谱 页签
+        # ------------------------------------------------------------------
         left_tab = QTabWidget()
         left_tab.setTabPosition(QTabWidget.North)
+        left_tab.setMinimumWidth(260)  # 左栏沉浸天空最小宽（tokens 无此键，弹性下限）
 
-        # Tab 1: 频谱显示
+        # Tab: 射频天空（主）
+        self.sky_view = self._create_sky_widget()
+        if hasattr(self.sky_view, "object_clicked"):
+            self.sky_view.object_clicked.connect(self._on_sky_object_clicked)
+        left_tab.addTab(self.sky_view, "射频天空")
+
+        # Tab: 多普勒定轨
+        self.doppler_panel = DopplerPanel()
+        # —— 孤儿接通：定轨 finished/progress/failed → 状态栏回显 ——
+        self.doppler_panel.finished.connect(self._on_doppler_finished)
+        self.doppler_panel.progress.connect(self._on_doppler_progress)
+        self.doppler_panel.failed.connect(self._on_doppler_failed)
+        left_tab.addTab(self.doppler_panel, "多普勒定轨")
+
+        # Tab: 卫星闭环自动跟踪
+        self.sat_track_panel = SatTrackPanel()
+        left_tab.addTab(self.sat_track_panel, "卫星跟踪")
+        self.sat_track_panel.track_requested.connect(self._start_satellite_tracking)
+        self.sat_track_panel.stop_requested.connect(self._stop_satellite_tracking)
+        self.sat_track_panel.update_tle_requested.connect(self._on_update_sat_tle)
+        self.sat_track_panel.satellite_changed.connect(self._on_sat_combo_changed)
+        self._init_loop_sat_catalog()
+
+        # Tab: 频谱显示（左栏页签之一；拖宽 splitter 获得更宽 FFT/瀑布）
         spectrum_widget = QWidget()
         spectrum_layout = QVBoxLayout(spectrum_widget)
         spectrum_layout.setContentsMargins(0, 0, 0, 0)
         spectrum_layout.setSpacing(4)
-
-        # 频谱标题栏
         spectrum_header = QFrame()
         spectrum_header.setObjectName("card")
-        # 弹性：最小高度兜底，内容可随行高流体（不写死为固定值）
         spectrum_header.setMinimumHeight(tokens().SIZE["topbar_h"] - 20)
         header_layout = QHBoxLayout(spectrum_header)
         header_layout.setContentsMargins(12, 4, 12, 4)
-
         self.spectrum_title = QLabel("频谱显示")
         self.spectrum_title.setObjectName("sectionTitle")
         header_layout.addWidget(self.spectrum_title)
-
         header_layout.addStretch()
-
         self.freq_label = QLabel("-- MHz")
         self.freq_label.setObjectName("statusValue")
         header_layout.addWidget(self.freq_label)
-
         self.rssi_label = QLabel("RSSI: --")
         self.rssi_label.setObjectName("statusValue")
         header_layout.addWidget(self.rssi_label)
-
         spectrum_layout.addWidget(spectrum_header)
 
-        # 无设备引导提示横幅（未连接时显示；连接后隐藏；自动枚举失败时由
-        # _show_no_rtl_hint 覆写为具体排查信息）
         self._no_device_hint = QLabel(
             "  正在枚举 SDR 设备…若未自动连接，请点击工具栏「连接」或按 Ctrl+C  ")
         self._no_device_hint.setObjectName("hintLabel")
@@ -715,73 +739,41 @@ class MainWindow(QMainWindow):
             f" padding:4px; border-radius:3px; font-size:9pt; }}")
         spectrum_layout.addWidget(self._no_device_hint)
 
-        # 频谱组件
-        self.spectrum = create_spectrum_widget(prefer_opengl=False)  # QOpenGLWidget fails to composite on some Windows GPUs; QPainter is equivalent here
+        self.spectrum = create_spectrum_widget(prefer_opengl=False)
         self.spectrum.freq_changed.connect(self._on_spectrum_freq_changed)
-        # 共享同一个 VfoManager：频谱绘制/拖拽 与 DSP 绑定/主听切换 操作同一份数据
         if self._vfo_mgr is not None:
             self.spectrum.vfo_manager = self._vfo_mgr
-        # 多 VFO 交互信号接线
         self.spectrum.vfo_created.connect(self._on_vfo_created)
         self.spectrum.vfo_moved.connect(self._on_vfo_moved)
         self.spectrum.vfo_bw_changed.connect(self._on_vfo_bw_changed_ui)
         self.spectrum.vfo_selected.connect(self._on_vfo_selected)
         self.spectrum.vfo_removed.connect(self._on_vfo_removed)
-        # Ctrl+Tab 循环切换主听 VFO
         QShortcut(QKeySequence("Ctrl+Tab"), self, self._on_cycle_vfo)
         spectrum_layout.addWidget(self.spectrum, stretch=1)
-
         left_tab.addTab(spectrum_widget, "频谱")
 
-        # Tab 2: 射频天空视图（借鉴 Stellarium）
-        # 路B（星空组）会产出自包含天空 widget 并暴露工厂 create_sky_widget()；
-        # 这里工厂优先、缺失时回退内置 RFSkyView——接口未就绪绝不崩。
-        self.sky_view = self._create_sky_widget()
-        if hasattr(self.sky_view, "object_clicked"):
-            self.sky_view.object_clicked.connect(self._on_sky_object_clicked)
-        left_tab.addTab(self.sky_view, "射频天空")
-
-        # Tab 3: SDR++ 式模块面板（源设备选择 + 信号流图 + 参数 + sink）
-        # 来源: SDR++ core/src/core.cpp:138-157 的 Source/Radio/Sinks 菜单结构
-        self.module_panel = ModulePanel()
-        self.module_panel.tune_requested.connect(self._on_module_tune)
-        left_tab.addTab(self.module_panel, "模块 / 信号流")
-
-        # Tab 4: 气象卫星云图面板（GK-2A/FY-4/FY-3/GOES/NOAA）
-        self.weather_panel = WeatherPanel()
-        left_tab.addTab(self.weather_panel, "气象云图")
-
-        # Tab 5: 多普勒定轨面板（LRO / Iridium / 自定义 TLE，EKF/RLS）
-        self.doppler_panel = DopplerPanel()
-        left_tab.addTab(self.doppler_panel, "多普勒定轨")
-
-        # Tab 6: 卫星闭环自动跟踪（选星->实时 az/el/多普勒->自动调谐 SDR）
-        self.sat_track_panel = SatTrackPanel()
-        left_tab.addTab(self.sat_track_panel, "卫星跟踪")
-        self.sat_track_panel.track_requested.connect(self._start_satellite_tracking)
-        self.sat_track_panel.stop_requested.connect(self._stop_satellite_tracking)
-        self.sat_track_panel.update_tle_requested.connect(self._on_update_sat_tle)
-        self.sat_track_panel.satellite_changed.connect(self._on_sat_combo_changed)
-        # 初始化卫星目录（无观测者位置也能列出 TLE 供选择）
-        self._init_loop_sat_catalog()
-
-        # Tab 7: 新时空（AMR 实时识别 + 卫星过境时间线 + 授时 + 频率轨道图）
-        self.new_spacetime_panel = NewSpacetimePanel()
-        left_tab.addTab(self.new_spacetime_panel, "新时空")
-
-        # Tab 8: ADS-B 航路图（1090MHz 飞机实时位置）
-        self.adsb_map_panel = AdsbMapPanel()
-        left_tab.addTab(self.adsb_map_panel, "ADS-B 航路")
-
-        # 初始化天空视图演示数据
-        self._init_sky_view()
-
-        # 中央区 = left_tab（8 个页签）；右侧控制/状态/AI 改 QDockWidget 停靠体系
-        # 存为属性：DockLayoutManager / 布局预设需要切页、搬面板
         self.left_tab = left_tab
-        self.setCentralWidget(left_tab)
 
-        # 右侧坞 1: 控制面板
+        # ------------------------------------------------------------------
+        # 中栏：暗色地图铺满 + 悬浮 AI 命令栏
+        # ------------------------------------------------------------------
+        center_widget = QWidget()
+        center_widget.setObjectName("centerPane")
+        center_lay = QVBoxLayout(center_widget)
+        center_lay.setContentsMargins(0, 0, 0, 0)
+        self.adsb_map_panel = AdsbMapPanel()
+        center_lay.addWidget(self.adsb_map_panel)
+        self._build_ai_command_bar(center_widget)
+
+        # ------------------------------------------------------------------
+        # 右栏：当前 App 页签（原 QDockWidget 面板全部搬进来）
+        # ------------------------------------------------------------------
+        right_tab = QTabWidget()
+        right_tab.setTabPosition(QTabWidget.North)
+        right_tab.setMinimumWidth(tokens().SIZE.get("min_dock_w", 320))
+        self.right_tab = right_tab
+
+        # 控制面板
         self.control_panel = ControlPanel()
         self.control_panel.tune_fm_requested.connect(self._on_tune_fm)
         self.control_panel.tune_am_requested.connect(self._on_tune_am)
@@ -794,7 +786,6 @@ class MainWindow(QMainWindow):
             self._on_auto_squelch_toggled)
         self.control_panel.tune_sdr_requested.connect(self._on_tune_sdr)
         self.control_panel.sample_rate_changed.connect(self._on_sample_rate_changed)
-        # —— Agent A 新增控件信号（用 hasattr 守卫，并行开发时不崩）——
         if hasattr(self.control_panel, "agc_changed"):
             self.control_panel.agc_changed.connect(self._on_agc_changed)
         if hasattr(self.control_panel, "ppm_changed"):
@@ -815,7 +806,6 @@ class MainWindow(QMainWindow):
         if hasattr(self.control_panel, "iq_balance_changed"):
             self.control_panel.iq_balance_changed.connect(
                 self._on_iq_balance_changed)
-        # 从 FrequencyManager 加载书签（内置标准频率库 + 用户自定义持久化书签）
         try:
             if self._freq_mgr is not None and hasattr(
                     self.control_panel, "load_bookmarks_from_list"):
@@ -824,47 +814,72 @@ class MainWindow(QMainWindow):
                 self.control_panel.load_bookmarks_from_list(bm_list)
         except Exception:
             pass
+        self._add_right_tab("控制", self.control_panel, "control_dock")
 
-        # 右侧坞 2: 状态面板
+        # 状态面板
         self.status_panel = StatusPanel()
+        self._add_right_tab("状态", self.status_panel, "status_dock")
 
-        # 右侧坞 3: AI 助手面板
+        # AI 助手面板
         self.ai_panel = AIPanel()
         self.ai_panel.tool_call_requested.connect(self._on_ai_tool_call)
         self.ai_panel.command_submitted.connect(self._on_ai_command)
-        # 启动即从 ~/.mbdsdr/config.json 初始化 agent，否则永远走规则降级
         self._init_ai_agent_from_config()
+        self._add_right_tab("AI 助手", self.ai_panel, "ai_dock")
 
-        # ---- QDockWidget 停靠体系（可拖动 / 浮动 / 关闭，右侧叠页签切换）----
-        self.control_dock = self._wrap_panel_in_dock("控制", self.control_panel)
-        self.status_dock = self._wrap_panel_in_dock("状态", self.status_panel)
-        self.ai_dock = self._wrap_panel_in_dock("AI 助手", self.ai_panel)
-        # objectName 必填：QMainWindow.saveState/restoreState 靠它持久化坞布局
-        self.control_dock.setObjectName("controlDock")
-        self.status_dock.setObjectName("statusDock")
-        self.ai_dock.setObjectName("aiDock")
+        # 模块 / 信号流（原中央页签 → 右栏 App）
+        self.module_panel = ModulePanel()
+        self.module_panel.tune_requested.connect(self._on_module_tune)
+        # —— 孤儿接通：选设备 / 解调模式 / sink / 节点 ——
+        self.module_panel.device_selected.connect(self._on_module_device_selected)
+        self.module_panel.demod_mode_changed.connect(
+            self._on_module_demod_mode_changed)
+        self.module_panel.sink_changed.connect(self._on_module_sink_changed)
+        self.module_panel.node_selected.connect(self._on_module_node_selected)
+        self._add_right_tab("模块", self.module_panel, "module_dock")
 
-        for d in (self.control_dock, self.status_dock, self.ai_dock):
-            d.setFeatures(QDockWidget.DockWidgetMovable
-                          | QDockWidget.DockWidgetFloatable
-                          | QDockWidget.DockWidgetClosable)
-            d.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-            self.addDockWidget(Qt.RightDockWidgetArea, d)
+        # 气象云图（原中央页签 → 右栏 App）
+        self.weather_panel = WeatherPanel()
+        self._add_right_tab("气象云图", self.weather_panel, "weather_dock")
 
-        # 三个坞叠在同一个右侧坞里，可页签切换
-        self.tabifyDockWidget(self.control_dock, self.status_dock)
-        self.tabifyDockWidget(self.status_dock, self.ai_dock)
-        # 默认显示控制页
-        self.control_dock.show()
-        self.control_dock.raise_()
+        # 新时空（原中央页签 → 右栏 App）
+        self.new_spacetime_panel = NewSpacetimePanel()
+        self._add_right_tab("新时空", self.new_spacetime_panel, "new_spacetime_dock")
 
-        # ---- 内核能力面板：扫频 / 自动调制识别（底部坞）+ 书签 / 服务设置（右侧）----
+        # ------------------------------------------------------------------
+        # 三栏 QSplitter（handle 4px，可拖宽）
+        # ------------------------------------------------------------------
+        self._main_splitter = QSplitter(Qt.Horizontal)
+        self._main_splitter.setHandleWidth(tokens().SIZE["splitter_handle"])
+        self._main_splitter.setChildrenCollapsible(False)
+        self._main_splitter.addWidget(left_tab)
+        self._main_splitter.addWidget(center_widget)
+        self._main_splitter.addWidget(right_tab)
+        self._main_splitter.setStretchFactor(0, 0)
+        self._main_splitter.setStretchFactor(1, 1)
+        self._main_splitter.setStretchFactor(2, 0)
+        # 初始比例：左 300 / 中 flex / 右 360（可拖，用户拖动后持久化）
+        self._main_splitter.setSizes([300, 540, 360])
+
+        # ------------------------------------------------------------------
+        # root：顶栏 + 三栏 + 底坞
+        # ------------------------------------------------------------------
+        root = QWidget()
+        root_lay = QVBoxLayout(root)
+        root_lay.setContentsMargins(0, 0, 0, 0)
+        root_lay.setSpacing(0)
+        self._build_top_bar(root_lay)
+        root_lay.addWidget(self._main_splitter, stretch=1)
+        self._build_bottom_dock(root_lay)
+        self.setCentralWidget(root)
+
+        # ---- 内核能力面板：扫频 / 自动调制识别 / 书签 / 服务设置（右栏页签）----
         self.scanner_panel = None
         self.modulation_panel = None
         self.bookmark_panel = None
         self.service_settings_panel = None
         self._build_kernel_panels()
-        # 新增面板：多 VFO / ANR / 星座图 / 设备选择 / 分段增益
+        # 多 VFO / ANR / 星座图 / 设备 / 分段增益（右栏页签）
         self.vfo_panel = None
         self.anr_panel = None
         self.constellation_panel = None
@@ -873,14 +888,13 @@ class MainWindow(QMainWindow):
         self._anr_enabled = False
         self._audio_output_device = -1
         self._build_extended_panels()
-        # 数字信号解码面板：ADS-B 航路图 / APRS 包 / 卫星云图
+        # 数字信号解码面板：ADS-B 列表 / APRS / 卫星云图（右栏页签）
         self.digital_adsb_panel = None
         self.digital_aprs_panel = None
         self.digital_sat_image_panel = None
         self._build_digital_decode_panels()
 
-        # ---- CarWith 设计体系：面板注册表挂载 + Dock 布局管理器 ----
-        # 把实际创建的控件挂进注册表（注册表只存引用，不拥有生命周期）
+        # ---- CarWith 面板注册表挂载 ----
         reg = registry()
         reg.attach_widget("spectrum", self.spectrum)
         reg.attach_widget("rf_sky", self.sky_view)
@@ -894,96 +908,202 @@ class MainWindow(QMainWindow):
         reg.attach_widget("status", self.status_panel)
         reg.attach_widget("ai", self.ai_panel)
 
-        # Dock 布局管理器：管理停靠/悬浮/折叠窄条/三预设。
-        # 初始不立即 apply_preset（保留既有 tabify 状态）；由 _restore_window_state
-        # 或用户从顶栏预设下拉选择时切换。这里只建好引用与折叠窄条。
+        # 自由浮窗管理器已弃用（用户否决）；保留类实例避免 import / 预设 combo 崩。
         self.dock_layout = DockLayoutManager(self)
-        # 停靠面板最小宽用 token（弹性下限，不是死值）
-        for d in (self.control_dock, self.status_dock, self.ai_dock):
-            d.setMinimumWidth(tokens().SIZE["min_dock_w"])
 
-    def _build_status_bar(self):
-        """构建状态栏。
+    # ------------------------------------------------------------------
+    # 右栏页签辅助：面板包进无框 QScrollArea 加入 right_tab，并记录
+    # <attr_name>_dock = scroll（数据 tap 用 isVisible() 守卫：非当前页签时
+    # QStackedWidget 自动隐藏，天然零开销）。
+    # ------------------------------------------------------------------
+    def _add_right_tab(self, title: str, panel: QWidget,
+                       attr_name: Optional[str] = None) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(panel)
+        self.right_tab.addTab(scroll, title)
+        if attr_name:
+            setattr(self, attr_name, scroll)
+        return scroll
 
-        信息密度对标 SDR++ 底部状态栏：连接状态 / 中心频率 / 采样率 / VFO 带宽 /
-        增益 / 设备名 / 信号电平(dBFS) / GPS / UTC 时间。
-        无后端时所有射频字段显 "--"，绝不展示假数据。
-        """
-        status_bar = QStatusBar()
-        self.setStatusBar(status_bar)
+    # ------------------------------------------------------------------
+    # 中栏悬浮 AI 命令栏（胶囊形半透明毛玻璃）
+    # ------------------------------------------------------------------
+    def _build_ai_command_bar(self, parent: QWidget) -> None:
+        bar = QFrame(parent)
+        bar.setObjectName("aiCommandBar")
+        bar.setFixedHeight(48)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(18, 0, 12, 0)
+        lay.setSpacing(8)
+        self.cmd_input = QLineEdit()
+        self.cmd_input.setPlaceholderText("问 AI… 频率 / 模式 / 解调 / 搜索")
+        self.cmd_input.returnPressed.connect(self._on_cmd_submit)
+        lay.addWidget(self.cmd_input, stretch=1)
+        self.cmd_mic_btn = QPushButton("🎤")
+        self.cmd_mic_btn.setObjectName("iconButton")
+        self.cmd_mic_btn.setFixedSize(36, 36)
+        self.cmd_mic_btn.setToolTip("语音输入（未连接麦克风时无操作）")
+        self.cmd_mic_btn.clicked.connect(self._on_cmd_mic)
+        lay.addWidget(self.cmd_mic_btn)
+        # 胶囊形半透明深色底（毛玻璃用半透明模拟；QSS 不支持 backdrop-filter）
+        bar.setStyleSheet(
+            "QFrame#aiCommandBar {"
+            " background-color: rgba(18,19,22,0.82);"
+            f" border: 1px solid {self._tok('gray_400', '#585c63')};"
+            f" border-radius: {tokens().RADIUS['circle_sm']}px;"
+            "}"
+            "QFrame#aiCommandBar QLineEdit {"
+            " background: transparent; border: none;"
+            " color: rgba(255,255,255,0.9);"
+            "}"
+        )
+        bar.adjustSize()
+        self._ai_cmd_bar = bar
+        self._ai_cmd_parent = parent
+        parent.installEventFilter(self)
+        self._position_ai_cmd_bar()
+
+    def _position_ai_cmd_bar(self) -> None:
+        """把胶囊命令栏定位到中栏顶部居中。"""
+        bar = getattr(self, "_ai_cmd_bar", None)
+        parent = getattr(self, "_ai_cmd_parent", None)
+        if bar is None or parent is None:
+            return
+        w = min(parent.width() - 40, 560)
+        bar.setFixedWidth(max(w, 280))
+        bar.move((parent.width() - bar.width()) // 2, 16)
+        bar.raise_()
+
+    def eventFilter(self, obj, event):  # noqa: N802 (Qt 命名)
+        from PySide6.QtCore import QEvent
+        if obj is getattr(self, "_ai_cmd_parent", None) \
+                and event.type() == QEvent.Resize:
+            self._position_ai_cmd_bar()
+        return super().eventFilter(obj, event)
+
+    def _on_cmd_submit(self) -> None:
+        text = self.cmd_input.text().strip()
+        if not text:
+            return
+        self._on_ai_command(text)
+        self.cmd_input.clear()
+
+    def _on_cmd_mic(self) -> None:
+        """麦克风按钮：无语音识别后端时仅提示，不造假。"""
+        self.statusBar().showMessage("语音输入未配置（接麦克风后可用）", 3000)
+
+    # ------------------------------------------------------------------
+    # 顶栏（细状态栏）/ 底坞（Home + 模式块 + Now Bar）
+    # ------------------------------------------------------------------
+    def _build_top_bar(self, parent_layout: QVBoxLayout) -> None:
+        """顶部细状态栏：连接 / 频率 / 采样率 / GPS / UTC（精简自原 QStatusBar）。"""
+        bar = QWidget()
+        bar.setObjectName("topBar")
+        bar.setFixedHeight(tokens().SIZE["topbar_h"])
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(16, 0, 16, 0)
+        lay.setSpacing(12)
 
         self.status_conn = QLabel("未连接")
-        status_bar.addWidget(self.status_conn)
-
-        status_bar.addWidget(QLabel(" | "))
-
+        lay.addWidget(self.status_conn)
+        lay.addWidget(self._vsep())
         self.status_freq = QLabel("频率: --")
-        status_bar.addWidget(self.status_freq)
-
-        status_bar.addWidget(QLabel(" | "))
-
+        self.status_freq.setObjectName("statusValue")
+        lay.addWidget(self.status_freq)
+        lay.addWidget(self._vsep())
         self.status_sr = QLabel("采样率: --")
-        status_bar.addWidget(self.status_sr)
-
-        status_bar.addWidget(QLabel(" | "))
-
-        self.status_bw = QLabel("带宽: --")
-        status_bar.addWidget(self.status_bw)
-
-        status_bar.addWidget(QLabel(" | "))
-
-        self.status_gain = QLabel("增益: --")
-        status_bar.addWidget(self.status_gain)
-
-        status_bar.addWidget(QLabel(" | "))
-
-        self.status_dev = QLabel("设备: --")
-        status_bar.addWidget(self.status_dev)
-
-        status_bar.addWidget(QLabel(" | "))
-
-        self.status_rssi = QLabel("信号: --")
-        status_bar.addWidget(self.status_rssi)
-
-        status_bar.addWidget(QLabel(" | "))
-
+        self.status_sr.setObjectName("statusValue")
+        lay.addWidget(self.status_sr)
+        lay.addWidget(self._vsep())
         self.status_gps = QLabel("GNSS: 未连接")
-        status_bar.addWidget(self.status_gps)
+        self.status_gps.setObjectName("statusValue")
+        lay.addWidget(self.status_gps)
+        lay.addStretch(1)
 
-        status_bar.addWidget(QLabel(" | "))
-
-        # 呼号：全局可编辑（placeholder 提示），值持久化到 desktop_settings.json，
-        # 同时驱动射频天空图角标显示。空串 = 未设置。
-        status_bar.addWidget(QLabel("呼号:"))
+        # 呼号（全局可编辑，持久化）
+        lay.addWidget(QLabel("呼号:"))
         self.callsign_edit = QLineEdit()
         self.callsign_edit.setPlaceholderText("输入你的呼号")
         self.callsign_edit.setMaxLength(16)
         self.callsign_edit.setFixedWidth(130)
         self.callsign_edit.setToolTip("业余无线电呼号（落盘保存，显示在射频天空图）")
         self.callsign_edit.editingFinished.connect(self._on_callsign_edited)
-        status_bar.addWidget(self.callsign_edit)
+        lay.addWidget(self.callsign_edit)
+        lay.addWidget(self._vsep())
+        self.status_utc = QLabel("UTC: --:--:--")
+        self.status_utc.setObjectName("statusValue")
+        lay.addWidget(self.status_utc)
+        parent_layout.addWidget(bar)
 
-        # CarWith 底 Dock 增强：主页按钮（回频谱）+ 正在播放/处理任务指示。
-        # 无设备时置灰，不造数（processing 文本由录制/回放/流水线真实状态驱动）。
+    def _build_bottom_dock(self, parent_layout: QVBoxLayout) -> None:
+        """底部坞（~74px）：Home 按钮 + 当前解调模式大字号块 + Now Bar。"""
+        dock = QWidget()
+        dock.setObjectName("bottomDock")
+        dock.setFixedHeight(tokens().SIZE["dock_h"] + 10)
+        lay = QHBoxLayout(dock)
+        lay.setContentsMargins(16, 0, 16, 0)
+        lay.setSpacing(16)
+
+        # Home 按钮（回频谱页）
         self.home_btn = QPushButton("⌂")
         self.home_btn.setObjectName("iconButton")
-        self.home_btn.setFixedWidth(32)
+        self.home_btn.setFixedSize(36, 36)
         self.home_btn.setToolTip("回到频谱主页")
         self.home_btn.clicked.connect(self._go_home)
-        status_bar.addPermanentWidget(self.home_btn)
+        lay.addWidget(self.home_btn)
 
+        # 模式块：当前解调模式大字号
+        self.dock_mode_label = QLabel("FM")
+        self.dock_mode_label.setObjectName("dockMode")
+        self.dock_mode_label.setToolTip("当前解调模式")
+        lay.addWidget(self.dock_mode_label)
+
+        lay.addWidget(self._vsep())
+
+        # Now Bar：频率 / 增益 / 带宽 / 录音状态 / 处理指示
+        self.dock_freq_label = QLabel("-- MHz")
+        self.dock_freq_label.setObjectName("dockNow")
+        lay.addWidget(self.dock_freq_label)
+        lay.addWidget(self._vsep())
+        self.status_gain = QLabel("增益: --")
+        self.status_gain.setObjectName("statusValue")
+        lay.addWidget(self.status_gain)
+        lay.addWidget(self._vsep())
+        self.status_bw = QLabel("带宽: --")
+        self.status_bw.setObjectName("statusValue")
+        lay.addWidget(self.status_bw)
+        lay.addWidget(self._vsep())
+        self.status_dev = QLabel("设备: --")
+        self.status_dev.setObjectName("statusValue")
+        lay.addWidget(self.status_dev)
+        lay.addWidget(self._vsep())
+        self.status_rssi = QLabel("信号: --")
+        self.status_rssi.setObjectName("statusValue")
+        lay.addWidget(self.status_rssi)
+        lay.addStretch(1)
         self.status_processing = QLabel("待机")
         self.status_processing.setObjectName("dockHint")
-        self.status_processing.setToolTip("正在播放 / 处理任务状态（无设备时置灰）")
-        status_bar.addPermanentWidget(self.status_processing)
-        status_bar.addPermanentWidget(QLabel(" | "))
+        lay.addWidget(self.status_processing)
+        parent_layout.addWidget(dock)
 
-        # 永久右侧：UTC 时钟 + 版本
-        self.status_utc = QLabel("UTC: --:--:--")
-        self.status_utc.setStyleSheet(f"color:{self._tok('light_text', '#5B7B8C')};")
-        status_bar.addPermanentWidget(self.status_utc)
-        status_bar.addPermanentWidget(QLabel(" | "))
-        status_bar.addPermanentWidget(QLabel("MBDSDR v0.1 | GPL-3.0"))
+    def _vsep(self) -> QLabel:
+        sep = QLabel("|")
+        sep.setObjectName("dockHint")
+        return sep
+
+    def _build_status_bar(self):
+        """构建底部 QStatusBar——仅用于瞬态消息（showMessage）。
+
+        常驻射频字段（连接/频率/采样率/带宽/增益/设备/信号/GPS/UTC/呼号/
+        Home/模式块/Now Bar）已搬到顶栏 _build_top_bar 与底坞 _build_bottom_dock。
+        这里只保留一个极薄的 QStatusBar 供各处 self.statusBar().showMessage() 使用，
+        不展示假数据。
+        """
+        status_bar = QStatusBar()
+        self.setStatusBar(status_bar)
 
     def _go_home(self):
         """主页按钮：切回频谱 Tab。"""
@@ -1106,6 +1226,11 @@ class MainWindow(QMainWindow):
         # 顶栏大字号频率显示同步（与底部状态栏同源，均来自 backend.get_frequency()）
         try:
             self.toolbar_freq_label.setText(f"{f_hz / 1e6:.3f} MHz")
+        except Exception:
+            pass
+        # 底坞 Now Bar 频率同步
+        try:
+            self.dock_freq_label.setText(f"{f_hz / 1e6:.3f} MHz")
         except Exception:
             pass
         # 顶栏解调模式下拉同步（blockSignals 防回环；后端未上报则不动，不编造）
@@ -2209,6 +2334,11 @@ class MainWindow(QMainWindow):
         # 持久化：解调模式
         try:
             self.settings.set("demod_mode", str(mode))
+        except Exception:
+            pass
+        # 底坞模式块大字号同步
+        try:
+            self.dock_mode_label.setText(str(mode).upper())
         except Exception:
             pass
 
@@ -3481,33 +3611,31 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # 右侧 QDockWidget 停靠体系（控制 / 状态 / AI 助手）
     # ------------------------------------------------------------------
-    def _wrap_panel_in_dock(self, title: str, panel: QWidget) -> QDockWidget:
-        """把面板包进无框架 QScrollArea 再放进 QDockWidget（横向不滚、可纵向滚）。
+    def _wrap_panel_in_dock(self, title: str, panel: QWidget) -> QScrollArea:
+        """兼容旧接口：把面板包进无框 QScrollArea（不再用 QDockWidget）。
 
-        弹性尺寸：最小宽来自 tokens（下限兜底），不设固定宽；面板随窗口流体缩放。
+        三栏重构后所有面板都进 right_tab 页签；此方法仅为兼容保留，
+        新代码请直接用 _add_right_tab。
         """
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setWidget(panel)
-        dock = QDockWidget(title, self)
-        dock.setWidget(scroll)
-        dock.setMinimumWidth(tokens().SIZE["min_dock_w"])
-        return dock
+        return scroll
 
     def _toggle_right_docks(self):
-        """☰ 按钮：一键显示 / 隐藏右侧三个坞面板。"""
-        visible = not self.control_dock.isVisible()
-        for d in (self.control_dock, self.status_dock, self.ai_dock):
-            d.setVisible(visible)
+        """☰ 按钮：一键显示 / 隐藏右栏 App 区。"""
+        rt = getattr(self, "right_tab", None)
+        if rt is None:
+            return
+        rt.setVisible(not rt.isVisible())
 
     # ------------------------------------------------------------------ #
     # 内核能力面板：扫频 / 自动调制识别 / 书签 / 远程服务设置
     # ------------------------------------------------------------------ #
     def _build_kernel_panels(self):
-        """把内核能力面板接成可停靠坞（缺面板类时 hasattr 守卫，不崩）。"""
-        # 底部坞：扫频 + 自动调制识别
+        """把内核能力面板接入右栏页签（缺面板类时 hasattr 守卫，不崩）。"""
         if ScannerPanel is not None:
             try:
                 self.scanner_panel = ScannerPanel()
@@ -3515,10 +3643,12 @@ class MainWindow(QMainWindow):
                     self._on_scanner_segment_chosen)
                 self.scanner_panel.scan_began.connect(self._on_panel_scan_began)
                 self.scanner_panel.scan_ended.connect(self._on_panel_scan_ended)
-                self.scanner_dock = self._wrap_panel_in_dock(
-                    "扫频", self.scanner_panel)
-                self.scanner_dock.setObjectName("scannerDock")
-                self.addDockWidget(Qt.BottomDockWidgetArea, self.scanner_dock)
+                # —— 孤儿接通：扫频进度/结果/失败回显到状态栏 ——
+                self.scanner_panel.progress.connect(self._on_scanner_progress)
+                self.scanner_panel.done.connect(self._on_scanner_done)
+                self.scanner_panel.failed.connect(self._on_scanner_failed)
+                self.scanner_dock = self._add_right_tab(
+                    "扫频", self.scanner_panel, "scanner_dock")
             except Exception:  # noqa: BLE001
                 self.scanner_panel = None
         if ModulationPanel is not None:
@@ -3526,19 +3656,14 @@ class MainWindow(QMainWindow):
                 self.modulation_panel = ModulationPanel()
                 self.modulation_panel.apply_demod_requested.connect(
                     self._on_apply_demod_requested)
-                self.modulation_dock = self._wrap_panel_in_dock(
-                    "信号识别", self.modulation_panel)
-                self.modulation_dock.setObjectName("modulationDock")
-                self.addDockWidget(Qt.BottomDockWidgetArea, self.modulation_dock)
-                # 扫频/识别两个底部坞上下叠
-                try:
-                    self.tabifyDockWidget(self.scanner_dock, self.modulation_dock)
-                except Exception:
-                    pass
+                # —— 孤儿接通：识别完成/失败回显，完成后可选自动切模式 ——
+                self.modulation_panel.done.connect(self._on_modulation_done)
+                self.modulation_panel.failed.connect(self._on_modulation_failed)
+                self.modulation_dock = self._add_right_tab(
+                    "调制识别", self.modulation_panel, "modulation_dock")
             except Exception:  # noqa: BLE001
                 self.modulation_panel = None
 
-        # 右侧坞：书签管理 + 服务设置（叠到控制/状态/AI 旁边）
         if BookmarkPanel is not None:
             try:
                 self.bookmark_panel = BookmarkPanel()
@@ -3546,24 +3671,16 @@ class MainWindow(QMainWindow):
                     self._on_bookmark_tune_requested)
                 self.bookmark_panel.set_current_freq_provider(
                     self._safe_center_hz)
-                self.bookmark_dock = self._wrap_panel_in_dock(
-                    "书签", self.bookmark_panel)
-                self.bookmark_dock.setObjectName("bookmarkDock")
-                self.addDockWidget(Qt.RightDockWidgetArea, self.bookmark_dock)
-                self.tabifyDockWidget(self.ai_dock, self.bookmark_dock)
+                self.bookmark_dock = self._add_right_tab(
+                    "书签", self.bookmark_panel, "bookmark_dock")
             except Exception:  # noqa: BLE001
                 self.bookmark_panel = None
         if ServiceSettingsPanel is not None:
             try:
                 self.service_settings_panel = ServiceSettingsPanel()
-                self.service_settings_dock = self._wrap_panel_in_dock(
-                    "服务设置", self.service_settings_panel)
-                self.service_settings_dock.setObjectName("serviceSettingsDock")
-                self.addDockWidget(Qt.RightDockWidgetArea, self.service_settings_dock)
-                self.tabifyDockWidget(self.bookmark_dock
-                                      if self.bookmark_panel is not None
-                                      else self.ai_dock,
-                                      self.service_settings_dock)
+                self.service_settings_dock = self._add_right_tab(
+                    "服务设置", self.service_settings_panel,
+                    "service_settings_dock")
             except Exception:  # noqa: BLE001
                 self.service_settings_panel = None
 
@@ -3580,8 +3697,8 @@ class MainWindow(QMainWindow):
     # 新增面板：多 VFO / ANR / 星座图 / 设备选择 / 分段增益
     # ------------------------------------------------------------------ #
     def _build_extended_panels(self):
-        """把 SDR++/GQRX 对标面板接成 dock；全部 hasattr/try 守卫，缺类不崩。"""
-        # ---- 多 VFO 面板（右侧 dock，tabify 到书签旁边）----
+        """把 SDR++/GQRX 对标面板接入右栏页签；全部 hasattr/try 守卫，缺类不崩。"""
+        # ---- 多 VFO 面板 ----
         if VfoPanel is not None:
             try:
                 self.vfo_panel = VfoPanel(vfo_manager=self._vfo_mgr)
@@ -3591,20 +3708,12 @@ class MainWindow(QMainWindow):
                 self.vfo_panel.vfo_removed.connect(self._on_vfo_removed)
                 self.vfo_panel.primary_changed.connect(self._on_vfo_selected)
                 self.vfo_panel.cycle_primary.connect(self._on_cycle_vfo)
-                self.vfo_dock = self._wrap_panel_in_dock(
-                    "多 VFO", self.vfo_panel)
-                self.vfo_dock.setObjectName("vfoDock")
-                self.addDockWidget(Qt.RightDockWidgetArea, self.vfo_dock)
-                anchor = self.bookmark_panel if self.bookmark_panel is not None \
-                    else self.ai_dock
-                try:
-                    self.tabifyDockWidget(anchor, self.vfo_dock)
-                except Exception:
-                    pass
+                self.vfo_dock = self._add_right_tab(
+                    "VFO", self.vfo_panel, "vfo_dock")
             except Exception:  # noqa: BLE001
                 self.vfo_panel = None
 
-        # ---- ANR 降噪面板（右侧 dock，tabify 到控制页旁边）----
+        # ---- ANR 降噪面板 ----
         if AnrPanel is not None:
             try:
                 self.anr_panel = AnrPanel()
@@ -3612,36 +3721,26 @@ class MainWindow(QMainWindow):
                 self.anr_panel.strength_changed.connect(self._on_anr_strength)
                 self.anr_panel.learn_noise_requested.connect(
                     self._on_anr_learn_noise)
-                self.anr_dock = self._wrap_panel_in_dock(
-                    "降噪", self.anr_panel)
-                self.anr_dock.setObjectName("anrDock")
-                self.addDockWidget(Qt.RightDockWidgetArea, self.anr_dock)
-                try:
-                    self.tabifyDockWidget(self.control_dock, self.anr_dock)
-                except Exception:
-                    pass
+                # —— 孤儿接通：ANR 降噪模式切换（谱减/门限等）——
+                self.anr_panel.mode_changed.connect(self._on_anr_mode_changed)
+                self.anr_dock = self._add_right_tab(
+                    "ANR", self.anr_panel, "anr_dock")
             except Exception:  # noqa: BLE001
                 self.anr_panel = None
 
-        # ---- 星座图面板（底部 dock，和扫频/信号识别并排）----
+        # ---- 星座图面板 ----
         if ConstellationPanel is not None:
             try:
                 self.constellation_panel = ConstellationPanel()
-                self.constellation_dock = self._wrap_panel_in_dock(
-                    "星座图", self.constellation_panel)
-                self.constellation_dock.setObjectName("constellationDock")
-                self.addDockWidget(Qt.BottomDockWidgetArea, self.constellation_dock)
-                try:
-                    self.tabifyDockWidget(self.scanner_dock
-                                          if getattr(self, "scanner_dock", None)
-                                          else self.constellation_dock,
-                                          self.constellation_dock)
-                except Exception:
-                    pass
+                # —— 孤儿接通：清空星座图时重置主窗口统计 ——
+                self.constellation_panel.cleared.connect(
+                    self._on_constellation_cleared)
+                self.constellation_dock = self._add_right_tab(
+                    "星座图", self.constellation_panel, "constellation_dock")
             except Exception:  # noqa: BLE001
                 self.constellation_panel = None
 
-        # ---- 设备选择 / 热插拔面板（右侧 dock）----
+        # ---- 设备选择 / 热插拔面板 ----
         if DevicePanel is not None:
             try:
                 self.device_panel = DevicePanel()
@@ -3651,104 +3750,216 @@ class MainWindow(QMainWindow):
                 self.device_panel.audio_output_changed.connect(
                     self._on_audio_output_changed)
                 self.device_panel.device_unplugged.connect(self._disconnect)
-                self.device_dock = self._wrap_panel_in_dock(
-                    "设备", self.device_panel)
-                self.device_dock.setObjectName("deviceDock")
-                self.addDockWidget(Qt.RightDockWidgetArea, self.device_dock)
-                try:
-                    self.tabifyDockWidget(self.anr_dock
-                                          if getattr(self, "anr_dock", None)
-                                          else self.control_dock,
-                                          self.device_dock)
-                except Exception:
-                    pass
+                # —— 孤儿接通：设备热插入 → 状态栏提示 + 刷新列表 ——
+                self.device_panel.device_plugged.connect(
+                    self._on_device_plugged)
+                self.device_dock = self._add_right_tab(
+                    "设备", self.device_panel, "device_dock")
             except Exception:  # noqa: BLE001
                 self.device_panel = None
 
-        # ---- 分段增益面板（右侧 dock）----
+        # ---- 分段增益面板 ----
         if GainPanel is not None:
             try:
                 self.gain_panel = GainPanel()
                 self.gain_panel.stage_gain_changed.connect(
                     self._on_stage_gain_changed)
                 self.gain_panel.agc_changed.connect(self._on_agc_changed)
-                self.gain_dock = self._wrap_panel_in_dock(
-                    "增益分级", self.gain_panel)
-                self.gain_dock.setObjectName("gainDock")
-                self.addDockWidget(Qt.RightDockWidgetArea, self.gain_dock)
-                try:
-                    self.tabifyDockWidget(self.device_dock
-                                          if getattr(self, "device_dock", None)
-                                          else self.control_dock,
-                                          self.gain_dock)
-                except Exception:
-                    pass
+                # —— 孤儿接通：增益滑杆实时值 → 同步后端/状态栏 ——
+                self.gain_panel.value_changed.connect(self._on_gain_value_changed)
+                self.gain_dock = self._add_right_tab(
+                    "增益", self.gain_panel, "gain_dock")
             except Exception:  # noqa: BLE001
                 self.gain_panel = None
 
     # ------------------------------------------------------------------ #
-    # 数字信号解码面板：ADS-B 航路图 / APRS 包 / 卫星云图
+    # 数字信号解码面板：ADS-B 列表 / APRS 包 / 卫星云图
     # ------------------------------------------------------------------ #
     def _build_digital_decode_panels(self):
-        """把数字解码面板接成 dock；全部 hasattr/try 守卫，缺类不崩。
+        """把数字解码面板接入右栏页签；全部 hasattr/try 守卫，缺类不崩。
 
-        布局约定：
-          - ADS-B 航路图：底部 dock（与扫频/星座图同区）；
-          - APRS 包：右侧 dock，tabify 到 AI 助手旁边；
-          - 卫星云图：底部 dock，tabify 到星座图旁边。
-        面板数据由 _poll_sdr_iq 喂入；无后端时各面板自带“等待数据/未连接”空态。
+        中栏全出血地图 = self.adsb_map_panel（AdsbMapPanel）；这里的 ADS-B 文本
+        列表面板（AdsbPanel）作为右栏页签。面板数据由 _poll_sdr_iq 喂入；
+        无后端时各面板自带“等待数据/未连接”空态。
         """
-        # ---- ADS-B 航路图（底部 dock）----
+        # ---- ADS-B 文本列表（右栏页签）----
         if AdsbPanel is not None:
             try:
                 self.digital_adsb_panel = AdsbPanel()
-                self.adsb_dock = self._wrap_panel_in_dock(
-                    "ADS-B 航路", self.digital_adsb_panel)
-                self.adsb_dock.setObjectName("digitalAdsbDock")
-                self.addDockWidget(Qt.BottomDockWidgetArea, self.adsb_dock)
-                try:
-                    self.tabifyDockWidget(
-                        getattr(self, "scanner_dock", self.adsb_dock),
-                        self.adsb_dock)
-                except Exception:
-                    pass
+                self.adsb_dock = self._add_right_tab(
+                    "ADS-B", self.digital_adsb_panel, "adsb_dock")
             except Exception:  # noqa: BLE001
                 self.digital_adsb_panel = None
 
-        # ---- APRS 数据包（右侧 dock，tabify 到 AI/书签旁）----
+        # ---- APRS 数据包（右栏页签）----
         if AprsPanel is not None:
             try:
                 self.digital_aprs_panel = AprsPanel()
-                self.aprs_dock = self._wrap_panel_in_dock(
-                    "APRS 包", self.digital_aprs_panel)
-                self.aprs_dock.setObjectName("digitalAprsDock")
-                self.addDockWidget(Qt.RightDockWidgetArea, self.aprs_dock)
-                anchor = (getattr(self, "bookmark_dock", None)
-                          or getattr(self, "ai_dock", None))
-                try:
-                    self.tabifyDockWidget(anchor, self.aprs_dock)
-                except Exception:
-                    pass
+                self.aprs_dock = self._add_right_tab(
+                    "APRS", self.digital_aprs_panel, "aprs_dock")
             except Exception:  # noqa: BLE001
                 self.digital_aprs_panel = None
 
-        # ---- 卫星云图（底部 dock，tabify 到星座图旁）----
+        # ---- 卫星云图（右栏页签）----
         if SatelliteImagePanel is not None:
             try:
                 self.digital_sat_image_panel = SatelliteImagePanel()
-                self.sat_image_dock = self._wrap_panel_in_dock(
-                    "卫星云图", self.digital_sat_image_panel)
-                self.sat_image_dock.setObjectName("digitalSatImageDock")
-                self.addDockWidget(Qt.BottomDockWidgetArea, self.sat_image_dock)
-                anchor = (getattr(self, "constellation_dock", None)
-                          or getattr(self, "scanner_dock", None)
-                          or self.sat_image_dock)
-                try:
-                    self.tabifyDockWidget(anchor, self.sat_image_dock)
-                except Exception:
-                    pass
+                self.sat_image_dock = self._add_right_tab(
+                    "卫星云图", self.digital_sat_image_panel, "sat_image_dock")
             except Exception:  # noqa: BLE001
                 self.digital_sat_image_panel = None
+
+    # ------------------------------------------------------------------ #
+    # 孤儿信号接通：handler（真吃数据；面板不可见时零开销）
+    # ------------------------------------------------------------------ #
+    def _panel_active(self, panel: QWidget) -> bool:
+        """面板当前是否可见（在右栏/左栏的当前页签里）。offscreen 单测用
+        monkeypatch 覆盖面板 isVisible，这里直接读 panel.isVisible()。"""
+        try:
+            return bool(panel.isVisible())
+        except Exception:
+            return False
+
+    # —— 1. 多普勒定轨 finished/progress/failed ——
+    def _on_doppler_finished(self, result: dict):
+        """定轨完成：状态栏回显残差/收敛（面板自身已绘曲线）。"""
+        if not self._panel_active(getattr(self, "doppler_panel", None)):
+            return
+        try:
+            rms = result.get("fd_rms_hz")
+            conv = result.get("converged")
+            msg = f"定轨完成 {result.get('estimator','?')} N={result.get('n_obs',0)}"
+            if rms is not None:
+                msg += f" 残差RMS {rms:.1f} Hz"
+            if conv is True:
+                msg += "（已收敛）"
+            self.statusBar().showMessage(msg, 5000)
+        except Exception:
+            pass
+
+    def _on_doppler_progress(self, text: str):
+        if not self._panel_active(getattr(self, "doppler_panel", None)):
+            return
+        try:
+            self.statusBar().showMessage(text, 2000)
+        except Exception:
+            pass
+
+    def _on_doppler_failed(self, text: str):
+        try:
+            self.statusBar().showMessage(f"定轨失败: {text.splitlines()[0]}", 6000)
+        except Exception:
+            pass
+
+    # —— 2. 自动调制识别 done/failed ——
+    def _on_modulation_done(self, result):
+        """识别完成：状态栏回显调制方式 + 置信度（不自动切模式，等用户点应用）。"""
+        try:
+            mod = getattr(result, "modulation", None) or (
+                result.get("modulation") if isinstance(result, dict) else None)
+            conf = float(getattr(result, "confidence", 0.0) or (
+                result.get("confidence", 0.0) if isinstance(result, dict) else 0.0))
+            self.statusBar().showMessage(
+                f"识别完成：{mod}（置信度 {conf*100:.0f}%）", 5000)
+        except Exception:
+            pass
+
+    def _on_modulation_failed(self, msg: str):
+        try:
+            self.statusBar().showMessage(f"识别失败: {msg}", 5000)
+        except Exception:
+            pass
+
+    # —— 3. 扫频 progress/done/failed ——
+    def _on_scanner_progress(self, frac: float, center_hz: float):
+        if not self._panel_active(getattr(self, "scanner_panel", None)):
+            return
+        try:
+            self.statusBar().showMessage(
+                f"扫频中 {int(frac*100)}% @ {center_hz/1e6:.3f} MHz", 1500)
+        except Exception:
+            pass
+
+    def _on_scanner_done(self, segments: list):
+        try:
+            self.statusBar().showMessage(
+                f"扫频完成：{len(segments or [])} 个活动段", 5000)
+        except Exception:
+            pass
+
+    def _on_scanner_failed(self, msg: str):
+        try:
+            self.statusBar().showMessage(f"扫频失败: {msg}", 6000)
+        except Exception:
+            pass
+
+    # —— 4. 模块/信号流 node_selected/device_selected/demod_mode_changed/sink_changed ——
+    def _on_module_device_selected(self, dev: dict):
+        """模块面板选设备 → 走通用连接流程（与设备面板连接按钮同 handler）。"""
+        try:
+            self._on_panel_device_connect(dev)
+        except Exception:
+            pass
+
+    def _on_module_demod_mode_changed(self, mode: str):
+        """模块面板改解调模式 → 同步后端（与控制面板模式下拉同链）。"""
+        try:
+            self._on_mode_changed(mode)
+        except Exception:
+            pass
+
+    def _on_module_sink_changed(self, sink: str):
+        try:
+            self.statusBar().showMessage(f"输出 sink: {sink}", 3000)
+        except Exception:
+            pass
+
+    def _on_module_node_selected(self, name: str, ntype: str):
+        try:
+            self.statusBar().showMessage(f"模块节点: {name} ({ntype})", 2000)
+        except Exception:
+            pass
+
+    # —— 5. 分段增益 value_changed → 同步后端/状态栏 ——
+    def _on_gain_value_changed(self, logical: str, db: float):
+        try:
+            be = getattr(self, "_active_sdr_backend", None)
+            if be is not None and hasattr(be, "set_gain"):
+                # GainPanel 已通过 GainStager 真实下发分档；这里仅回贴状态栏总增益。
+                pass
+            self.status_gain.setText(f"增益: {logical} {db:.1f} dB")
+        except Exception:
+            pass
+
+    # —— 6. ANR mode_changed → 切换降噪模式 ——
+    def _on_anr_mode_changed(self, mode: str):
+        try:
+            anr_p = getattr(self, "anr_panel", None)
+            anr = getattr(anr_p, "anr", None) if anr_p is not None else None
+            if anr is not None and hasattr(anr, "set_mode"):
+                anr.set_mode(mode)
+            self.statusBar().showMessage(f"降噪模式: {mode}", 3000)
+        except Exception:
+            pass
+
+    # —— 7. 星座图 cleared → 重置统计 ——
+    def _on_constellation_cleared(self):
+        try:
+            self._last_dbfs = 0.0
+            self.status_rssi.setText("信号: --")
+            self.statusBar().showMessage("星座图已清空，统计已重置", 2000)
+        except Exception:
+            pass
+
+    # —— 8. 设备 device_plugged → 热插拔刷新列表 ——
+    def _on_device_plugged(self, label: str):
+        try:
+            dp = getattr(self, "device_panel", None)
+            if dp is not None and hasattr(dp, "refresh_devices"):
+                dp.refresh_devices()
+            self.statusBar().showMessage(f"检测到新设备: {label}", 5000)
+        except Exception:
+            pass
 
     def _on_panel_vfo_added(self, center_hz: float, bw_hz: float,
                             mode: str):
@@ -3972,32 +4183,25 @@ class MainWindow(QMainWindow):
         geom = s.value("window_geometry")
         if geom is not None:
             self.restoreGeometry(geom)
-        state = s.value("dock_state")
-        if state is not None:
-            self.restoreState(state)
-        # CarWith 布局预设：恢复上次的预设名并应用（失败静默退回当前布局）
-        dlm = getattr(self, "dock_layout", None)
-        if dlm is not None:
-            preset = s.value("layout_preset")
-            if preset in dlm.PRESETS:
-                try:
-                    dlm.apply_preset(preset)
-                    idx = self.layout_combo.findData(preset)
-                    if idx >= 0:
-                        self.layout_combo.blockSignals(True)
-                        self.layout_combo.setCurrentIndex(idx)
-                        self.layout_combo.blockSignals(False)
-                except Exception:
-                    pass
+        # 三栏固定 QSplitter 布局后，QDockWidget 停靠体系与布局预设已弃用：
+        # 不再 restoreState / apply_preset（否则旧 preset 会把天空页签搬进已
+        # 弃用的浮窗 dock）。仅恢复窗口几何。
+        # splitter 比例也持久化一份（供下次启动复位初始比例）。
+        sizes = s.value("three_column_sizes")
+        if sizes is not None and getattr(self, "_main_splitter", None) is not None:
+            try:
+                self._main_splitter.restoreState(sizes)
+            except Exception:
+                pass
 
     def _save_window_state(self):
         s = QSettings("MBDSDR", "Desktop")
         s.setValue("window_geometry", self.saveGeometry())
-        s.setValue("dock_state", self.saveState())
-        dlm = getattr(self, "dock_layout", None)
-        if dlm is not None:
+        # 三栏 splitter 比例持久化（替代旧 dock_state）
+        if getattr(self, "_main_splitter", None) is not None:
             try:
-                dlm.save_state()
+                s.setValue("three_column_sizes",
+                           self._main_splitter.saveState())
             except Exception:
                 pass
 

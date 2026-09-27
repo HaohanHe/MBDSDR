@@ -92,6 +92,9 @@ class ModulationPanel(QWidget):
     """自动调制识别结果卡片。"""
 
     apply_demod_requested = Signal(str, float)  # (mode, bandwidth_hz)
+    # 向上层 re-emit 识别结果，供主窗口状态栏回显 / 可选自动切模式。
+    done = Signal(object)    # ModulationResult 或 dict
+    failed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -210,10 +213,12 @@ class ModulationPanel(QWidget):
             self.suggest_list.addItem(QListWidgetItem(str(s)))
         self.apply_btn.setEnabled(True)
         self.status_label.setText("识别完成")
+        self.done.emit(result)
 
     def _on_failed(self, msg: str):
         self.status_label.setText(msg)
         self.apply_btn.setEnabled(False)
+        self.failed.emit(msg)
 
     def _on_apply_clicked(self, *_):
         if self._last is None:
