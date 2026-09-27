@@ -1,44 +1,45 @@
 // SPDX-License-Identifier: MIT
-// OFFLINE test IQ signal generator.
+// Offline test IQ source implementing ISource.
 //
 // *** TEST DATA -- NOT HARDWARE ***
-// This class generates synthetic complex IQ samples for development and
-// visual verification of the spectrum path. It is NOT connected to any
-// SDR hardware. All UI surfaces MUST label data as "TEST SIGNAL".
+// isConnected() always returns false. The UI MUST show this as a
+// non-hardware source.
 #pragma once
 
+#include "source.h"
+#include <cstdint>
 #include <complex>
 #include <vector>
-#include <cstddef>
-#include <cstdint>
 
 namespace mbdsdr {
 namespace dsp {
 
-class TestSignalGenerator {
+class TestSignalSource : public ISource {
 public:
-    /// @param sampleRate_hz  IQ sample rate (Hz), default 2.4 MHz.
-    /// @param centerFreq_hz  RF center frequency (Hz), default 98.5 MHz.
-    /// Two tones at baseband offsets +/-200 kHz and +/-500 kHz, plus
-    /// additive Gaussian white noise, are synthesized.
-    TestSignalGenerator(double sampleRate_hz = 2.4e6,
-                        double centerFreq_hz = 98.5e6);
+    explicit TestSignalSource(double sampleRateHz = 2.4e6,
+                              double centerFreqHz = 98.5e6);
 
-    /// Fill `out` with the next `n` samples (continuing from internal phase).
-    void next(std::vector<std::complex<float>>& out, std::size_t n);
+    bool start() override;
+    void stop() override;
+    std::size_t readIQ(std::vector<std::complex<float>>& out) override;
 
-    double sampleRate() const { return fs_; }
-    double centerFreq() const { return f0_; }
+    void setCenterFreq(double freqHz) override;
+    void setSampleRate(double rateHz) override;
+    void setGain(double gainDb) override;
 
-    /// Convenience: baseband tone offsets (Hz) this generator emits.
-    static std::vector<double> toneOffsetsHz() { return {-200e3, -500e3, 200e3, 500e3}; }
+    double centerFreq() const override { return f0_; }
+    double sampleRate() const override { return fs_; }
+    double gain() const override { return gainDb_; }
+
+    QString name() const override { return QStringLiteral("Test Signal"); }
+    bool isConnected() const override { return false; }
 
 private:
     double fs_;
     double f0_;
+    double gainDb_ = 20.0;
     std::uint64_t counter_ = 0;
 
-    // Gaussian noise via Box-Muller (cached second value)
     bool   haveSpare_ = false;
     float  spare_ = 0.0f;
     float  nextGaussian();

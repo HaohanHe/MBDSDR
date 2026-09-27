@@ -58,7 +58,8 @@ void SpectrumWidget::setSpectrum(const SpectrumFrame& frame) {
     frame_ = frame;
     const double fs  = frame.sampleRateHz;
     const double f0  = frame.centerFreqHz;
-    infoLabel_->setText(QString("Fs=%1 MHz  F0=%2 MHz  N=%3%4")
+    infoLabel_->setText(QString("[%1] Fs=%2 MHz  F0=%3 MHz  N=%4%5")
+                        .arg(frame.sourceName.isEmpty() ? "?" : frame.sourceName)
                         .arg(fs / 1e6, 0, 'f', 1)
                         .arg(f0 / 1e6, 0, 'f', 1)
                         .arg(frame.fftSize)

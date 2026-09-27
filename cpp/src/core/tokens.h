@@ -103,6 +103,15 @@ inline constexpr int kSystemIconAreaW = 160;
 inline constexpr int kPanelPadLeft   = 53;
 inline constexpr int kPanelPadTop    = 40;
 
+// Hardware ranges (RTL-SDR spec)
+inline constexpr double kFreqMinHz = 24e6;
+inline constexpr double kFreqMaxHz = 1700e6;
+inline constexpr double kFreqStepHz = 100e3;
+inline constexpr double kGainMinDb = 0.0;
+inline constexpr double kGainMaxDb = 49.6;
+inline constexpr double kGainStepDb = 0.6;
+inline const std::initializer_list<double> kSampleRatesHz = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
+
 // Spectrum plot margins (kept here to avoid magic numbers in paintEvent)
 inline constexpr int kPlotMarginL = 50;
 inline constexpr int kPlotMarginR = 12;
