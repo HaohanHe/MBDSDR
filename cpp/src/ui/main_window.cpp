@@ -30,6 +30,8 @@
 #include <QFileInfo>
 #include <QUrl>
 #include <QDesktopServices>
+#include <QMediaDevices>
+#include <QAudioDevice>
 
 #include <cmath>
 #include <algorithm>
@@ -47,6 +49,19 @@
 #include "ui/about_dialog.h"
 
 namespace mbdsdr {
+
+namespace {
+// Tuning step combo (index -> Hz). Must stay in sync with the items added in
+// the frequency group: 1 Hz / 10 Hz / 100 Hz / 1 kHz / 10 kHz / 100 kHz / 1 MHz.
+constexpr int kStepValuesHz[] = {1, 10, 100, 1000, 10000, 100000, 1000000};
+constexpr int kStepCount = sizeof(kStepValuesHz) / sizeof(kStepValuesHz[0]);
+
+// Bandwidth presets indexed by bwCombo_ order: 8k / 12.5k / 200k / 2.4k / 500Hz.
+// Up/Down keyboard nudge doubles/halves the *current* bandwidth and clamps to
+// [1k, 200k]; we then snap bwCombo_ to the nearest preset.
+constexpr double kBwMinHz = 1000.0;
+constexpr double kBwMaxHz = 200000.0;
+} // namespace
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -157,6 +172,11 @@ MainWindow::MainWindow(QWidget* parent)
     freqSpin_->setDecimals(3);
     freqSpin_->setSuffix(" MHz");
     gFreqLay->addRow("中心频率", freqSpin_);
+    stepCombo_ = new QComboBox(gFreq);
+    stepCombo_->addItems({"1 Hz", "10 Hz", "100 Hz", "1 kHz",
+                          "10 kHz", "100 kHz", "1 MHz"});
+    stepCombo_->setCurrentIndex(4);   // 10 kHz default
+    gFreqLay->addRow("步进", stepCombo_);
     leftLay->addWidget(gFreq);
 
     auto* gRx = new QGroupBox("接收参数", leftCard);
@@ -343,6 +363,19 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, [this](double mhz) { engine_->onSetCenterFreq(mhz * 1e6); });
+    // Step combo: set currentStepHz_ and make the spinbox up/down arrows walk
+    // by the same step (spinbox unit is MHz).
+    auto applyStep = [this](int idx) {
+        if (idx < 0 || idx >= kStepCount) return;
+        currentStepHz_ = kStepValuesHz[idx];
+        freqSpin_->setSingleStep(static_cast<double>(currentStepHz_) / 1e6);
+    };
+    applyStep(stepCombo_->currentIndex());
+    connect(stepCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, applyStep](int idx) {
+        applyStep(idx);
+        scheduleSave();
+    });
     connect(gainSlider_, &QSlider::valueChanged,
             this, [this](int v) {
                 gainValue_->setText(QString("%1 dB").arg(v));
@@ -379,7 +412,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(bwCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
                 static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
-                if (idx >= 0 && idx <= 4) engine_->setBandwidth(kBws[idx]);
+                if (idx >= 0 && idx <= 4) {
+                    currentBwHz_ = kBws[idx];
+                    engine_->setBandwidth(kBws[idx]);
+                }
             });
     connect(gatedCheck_, &QCheckBox::stateChanged, this, [this](int st) {
         engine_->setGatedRecordingEnabled(st != Qt::Unchecked);
@@ -443,11 +479,26 @@ MainWindow::MainWindow(QWidget* parent)
         ui::SettingsDialog dlg(this);
         ai::AiConfig cfg;
         cfg.load();
+        const QString oldAudioDev = cfg.audioDevice;
         dlg.loadFromConfig(cfg);
         if (dlg.exec() == QDialog::Accepted) {
             dlg.saveToConfig(cfg);
             cfg.save();
             worldView_->setStation(cfg.stationLat, cfg.stationLon);
+            // Hot-restart audio on the newly-selected output device, if changed.
+            if (cfg.audioDevice != oldAudioDev && engine_->audioOutput()) {
+                if (cfg.audioDevice == QStringLiteral("default")) {
+                    engine_->audioOutput()->setDevice(QAudioDevice());  // null = default
+                } else {
+                    const auto devs = QMediaDevices::audioOutputs();
+                    for (const auto& d : devs) {
+                        if (d.description() == cfg.audioDevice) {
+                            engine_->audioOutput()->setDevice(d);
+                            break;
+                        }
+                    }
+                }
+            }
         }
     });
 
@@ -464,18 +515,41 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(aiInput_, &QLineEdit::returnPressed, sendBtn, &QPushButton::click);
 
+    // ---- Keyboard tuning ----
+    // Left/Right: nudge center frequency by currentStepHz_ (set in the freq
+    // group). Shift+Left/Right: fine tune at currentStepHz_/10.
     new QShortcut(QKeySequence(Qt::Key_Right), this, this, [this]() {
-        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 + tokens::kFreqFineStepHz);
+        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 + currentStepHz_);
     });
     new QShortcut(QKeySequence(Qt::Key_Left), this, this, [this]() {
-        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 - tokens::kFreqFineStepHz);
+        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 - currentStepHz_);
     });
-    new QShortcut(QKeySequence(Qt::Key_Up), this, this, [this]() {
-        engine_->onSetGain(gainSlider_->value() + 1);
+    new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Right), this, this, [this]() {
+        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 + currentStepHz_ / 10);
     });
-    new QShortcut(QKeySequence(Qt::Key_Down), this, this, [this]() {
-        engine_->onSetGain(gainSlider_->value() - 1);
+    new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Left), this, this, [this]() {
+        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 - currentStepHz_ / 10);
     });
+    // Up/Down: widen/narrow the IF bandwidth (×2 / ÷2, clamped to [1k, 200k]).
+    // The bwCombo_ is then snapped to the nearest preset for display.
+    auto nudgeBandwidth = [this](double factor) {
+        double newBw = currentBwHz_ * factor;
+        newBw = std::clamp(newBw, kBwMinHz, kBwMaxHz);
+        currentBwHz_ = newBw;
+        engine_->setBandwidth(newBw);
+        static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
+        int best = 0; double bestDiff = 1e18;
+        for (int i = 0; i < 5; ++i) {
+            double d = std::abs(kBws[i] - newBw);
+            if (d < bestDiff) { bestDiff = d; best = i; }
+        }
+        bwCombo_->blockSignals(true);
+        bwCombo_->setCurrentIndex(best);
+        bwCombo_->blockSignals(false);
+        statusBar()->showMessage(QString("带宽: %1 Hz").arg(newBw, 0, 'f', 0));
+    };
+    new QShortcut(QKeySequence(Qt::Key_Up), this, this, [nudgeBandwidth]() { nudgeBandwidth(2.0); });
+    new QShortcut(QKeySequence(Qt::Key_Down), this, this, [nudgeBandwidth]() { nudgeBandwidth(0.5); });
     new QShortcut(QKeySequence("Ctrl+R"), this, this, [this]() { recordBtn_->click(); });
     static bool muted = false;
     new QShortcut(QKeySequence(Qt::Key_Space), this, this, [this]() {
@@ -500,6 +574,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(saveTimer_, &QTimer::timeout, this, &MainWindow::saveSettings);
 
     connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::scheduleSave);
+    connect(stepCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::scheduleSave);
     connect(srCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &MainWindow::scheduleSave);
@@ -533,6 +609,23 @@ MainWindow::MainWindow(QWidget* parent)
     setControlsEnabled(false);
     restoreUiState();
     engine_->start();
+
+    // Startup: honour the saved audio output device (if the user picked a
+    // non-default one). On headless boxes the device list is empty, so this is
+    // a no-op and the audioOut_ stays disabled.
+    {
+        ai::AiConfig cfg;
+        cfg.load();
+        if (cfg.audioDevice != QStringLiteral("default") && engine_->audioOutput()) {
+            const auto devs = QMediaDevices::audioOutputs();
+            for (const auto& d : devs) {
+                if (d.description() == cfg.audioDevice) {
+                    engine_->audioOutput()->setDevice(d);
+                    break;
+                }
+            }
+        }
+    }
 }
 
 MainWindow::~MainWindow() {
@@ -551,6 +644,7 @@ void MainWindow::saveUiState() {
 
     // ---- RX state (Hz / dB as stored) ----
     s.setValue("rx/centerFreq", freqSpin_->value() * 1e6);
+    s.setValue("rx/tuningStep", currentStepHz_);
     {
         static const double kRates[] = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
         int idx = srCombo_->currentIndex();
@@ -612,6 +706,7 @@ void MainWindow::restoreUiState() {
     // engine explicitly below so each setting is applied exactly once.
     freqSpin_->blockSignals(true);
     srCombo_->blockSignals(true);
+    stepCombo_->blockSignals(true);
     demodCombo_->blockSignals(true);
     bwCombo_->blockSignals(true);
     gainSlider_->blockSignals(true);
@@ -631,6 +726,15 @@ void MainWindow::restoreUiState() {
     // ---- RX ----
     const double centerHz = s.value("rx/centerFreq", 98.5e6).toDouble();
     freqSpin_->setValue(centerHz / 1e6);
+
+    const int savedStep = s.value("rx/tuningStep", 10000).toInt();
+    int stepIdx = 4;  // 10 kHz default
+    for (int i = 0; i < kStepCount; ++i) {
+        if (kStepValuesHz[i] == savedStep) { stepIdx = i; break; }
+    }
+    stepCombo_->setCurrentIndex(stepIdx);
+    currentStepHz_ = kStepValuesHz[stepIdx];
+    freqSpin_->setSingleStep(static_cast<double>(currentStepHz_) / 1e6);
 
     static const double kRates[] = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
     const double rateHz = s.value("rx/sampleRate", 2.4e6).toDouble();
@@ -699,6 +803,7 @@ void MainWindow::restoreUiState() {
     // Unblock.
     freqSpin_->blockSignals(false);
     srCombo_->blockSignals(false);
+    stepCombo_->blockSignals(false);
     demodCombo_->blockSignals(false);
     bwCombo_->blockSignals(false);
     gainSlider_->blockSignals(false);
@@ -720,6 +825,7 @@ void MainWindow::restoreUiState() {
     engine_->onSetCenterFreq(centerHz);
     engine_->onSetSampleRate(kRates[srIdx]);
     engine_->setDemodMode(demodCombo_->currentText());
+    currentBwHz_ = kBws[bwIdx];
     engine_->setBandwidth(kBws[bwIdx]);
     engine_->onSetGain(static_cast<double>(gainSlider_->value()));
     engine_->setSquelchEnabled(sqlEn);

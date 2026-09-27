@@ -41,6 +41,9 @@ public:
     void setFftSize(int n);
     int  fftSize() const { return fftSize_.load(); }
     void shutdown();
+    // Owned audio sink (UI-thread affinity). Exposed so the settings dialog can
+    // hot-restart playback on a user-selected output device.
+    AudioOutput* audioOutput() const { return audioOut_; }
     double scanBand(double lowHz, double highHz, double stepHz);
     bool tryConnectRtl();
     void disconnectSource();

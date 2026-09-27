@@ -29,6 +29,7 @@ bool AiConfig::load() {
         if (!envKey.isEmpty()) apiKey = obj["api_key"].toString();
         if (obj.contains("base_url")) baseUrl = obj["base_url"].toString();
         if (obj.contains("model")) model = obj["model"].toString();
+        if (obj.contains("audio_device")) audioDevice = obj["audio_device"].toString();
         f.close();
     }
     return isConfigured();
@@ -39,6 +40,7 @@ bool AiConfig::save() const {
     obj["api_key"] = apiKey;
     obj["base_url"] = baseUrl;
     obj["model"] = model;
+    obj["audio_device"] = audioDevice;
     QFile f(configPath());
     if (!f.open(QIODevice::WriteOnly)) return false;
     f.write(QJsonDocument(obj).toJson());

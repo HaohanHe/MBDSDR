@@ -14,6 +14,8 @@ struct AiConfig {
     double stationLat = std::numeric_limits<double>::quiet_NaN();
     double stationLon = std::numeric_limits<double>::quiet_NaN();
     bool stationSet = false;
+    // Audio output device description, or "default" for the system default.
+    QString audioDevice = "default";
 
     bool load();
     bool save() const;

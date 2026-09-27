@@ -51,6 +51,8 @@ private:
 
     // Left panel controls
     QDoubleSpinBox* freqSpin_   = nullptr;
+    QComboBox*      stepCombo_  = nullptr;
+    int             currentStepHz_ = 10000;   // tuning nudge / spinbox step
     QComboBox*      srCombo_    = nullptr;
     QSlider*        gainSlider_ = nullptr;
     QLabel*         gainValue_  = nullptr;
@@ -71,6 +73,7 @@ private:
 
     QComboBox*      demodCombo_  = nullptr;
     QComboBox*      bwCombo_     = nullptr;
+    double          currentBwHz_ = 12500.0;   // live RF bandwidth (Up/Down nudge)
     QSlider*        squelchSlider_ = nullptr;
     QCheckBox*      squelchCheck_ = nullptr;
     QLabel*         squelchValue_ = nullptr;
