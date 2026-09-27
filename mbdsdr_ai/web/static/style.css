@@ -1,0 +1,107 @@
+/* MBDSDR Web — 深色主题（与桌面 dark_car 一致的近黑底 + 青绿频谱） */
+:root {
+  --bg: #0b0e11;
+  --panel: #13171c;
+  --line: #232a32;
+  --fg: #c9d1d9;
+  --dim: #7d8791;
+  --accent: #3fd0c9;
+  --warn: #e5534b;
+  --ok: #46c55a;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.brand { font-weight: 700; letter-spacing: .5px; color: var(--accent); }
+
+.conn {
+  padding: 2px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  border: 1px solid transparent;
+}
+.conn-off { color: var(--warn); border-color: var(--warn); }
+.conn-on  { color: var(--ok);   border-color: var(--ok); }
+
+.readout { display: flex; align-items: baseline; gap: 4px; }
+.ro-label { color: var(--dim); font-size: 11px; }
+#ro-freq, #ro-sr { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 15px; }
+.ro-unit { color: var(--dim); font-size: 11px; }
+
+main { padding: 10px 14px; max-width: 1400px; margin: 0 auto; }
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin-bottom: 10px;
+  padding: 8px;
+}
+.panel-title {
+  display: flex; justify-content: space-between; align-items: center;
+  color: var(--dim); font-size: 12px; margin-bottom: 6px;
+}
+.hint { color: var(--dim); font-weight: normal; }
+.cmap { color: var(--fg); }
+
+canvas {
+  display: block;
+  width: 100%;
+  background: #000;
+  border-radius: 4px;
+  cursor: crosshair;
+}
+
+/* 无数据覆盖层 */
+.waiting {
+  position: relative;
+  margin-top: -252px;
+  height: 0;
+  text-align: center;
+  color: var(--dim);
+  pointer-events: none;
+}
+.waiting.hidden { display: none; }
+.waiting small { color: var(--dim); }
+
+.controls {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 8px 12px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.controls button {
+  background: #1c232b; color: var(--fg);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 4px 12px; cursor: pointer;
+}
+.controls button:hover { border-color: var(--accent); }
+.controls input[type=number] {
+  width: 130px; background: #0b0e11; color: var(--fg);
+  border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px;
+}
+#toast { color: var(--accent); min-width: 80px; }
+
+.recs { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow: auto; }
+.recs li { padding: 2px 0; }
+.recs a { color: var(--accent); text-decoration: none; font-family: ui-monospace, monospace; }
+.recs .size { color: var(--dim); margin-left: 8px; font-size: 11px; }
+.recs .empty { color: var(--dim); }
+
+@media (max-width: 720px) {
+  #topbar { gap: 10px; }
+  .readout { font-size: 12px; }
+}

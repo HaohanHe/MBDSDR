@@ -93,6 +93,20 @@ try:
     from gain_panel import GainPanel
 except Exception:  # pragma: no cover
     GainPanel = None  # type: ignore
+# 数字信号解码面板：ADS-B 航路图 / APRS 包 / 卫星云图。
+# try/except 守卫：面板文件缺失时主窗口不崩，对应 dock 不建。
+try:
+    from adsb_panel import AdsbPanel
+except Exception:  # pragma: no cover
+    AdsbPanel = None  # type: ignore
+try:
+    from aprs_panel import AprsPanel
+except Exception:  # pragma: no cover
+    AprsPanel = None  # type: ignore
+try:
+    from satellite_image_panel import SatelliteImagePanel
+except Exception:  # pragma: no cover
+    SatelliteImagePanel = None  # type: ignore
 # 卫星闭环跟踪器（mbdsdr_ai.sat_tracker）：选中卫星->实时 az/el/多普勒->自动调谐。
 # 用别名避免与 rf_sky_view 里的展示型 SatelliteTracker 冲突。缺 skyfield 时降级。
 try:
@@ -856,6 +870,11 @@ class MainWindow(QMainWindow):
         self._anr_enabled = False
         self._audio_output_device = -1
         self._build_extended_panels()
+        # 数字信号解码面板：ADS-B 航路图 / APRS 包 / 卫星云图
+        self.digital_adsb_panel = None
+        self.digital_aprs_panel = None
+        self.digital_sat_image_panel = None
+        self._build_digital_decode_panels()
 
         # ---- CarWith 设计体系：面板注册表挂载 + Dock 布局管理器 ----
         # 把实际创建的控件挂进注册表（注册表只存引用，不拥有生命周期）
@@ -1788,6 +1807,15 @@ class MainWindow(QMainWindow):
             if panel is not None:
                 try:
                     panel.set_sdr_connected(connected)
+                except Exception:
+                    pass
+        # 数字解码面板（ADS-B / APRS / 卫星云图）随连接状态切换空态文案
+        for pname in ("digital_adsb_panel", "digital_aprs_panel",
+                      "digital_sat_image_panel"):
+            p = getattr(self, pname, None)
+            if p is not None:
+                try:
+                    p.set_sdr_connected(connected)
                 except Exception:
                     pass
         # 控制面板：调谐/音量/模式/录音
@@ -2818,6 +2846,17 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # ADS-B 航路图面板：tap 同一块 IQ（1090MHz 时面板内部做前导码/PPM/CRC）。
+        # 面板不可见时跳过解码，零开销；无数据时面板自显“等待 1090MHz 数据”。
+        try:
+            ap = getattr(self, "digital_adsb_panel", None)
+            if (ap is not None and hasattr(ap, "feed_iq")
+                    and getattr(self, "adsb_dock", None) is not None
+                    and self.adsb_dock.isVisible()):
+                ap.feed_iq(iq, sr)
+        except Exception:
+            pass
+
         # 更新 RSSI 显示（从后端状态或 IQ 功率估计）
         self._update_rssi_from_iq(iq)
 
@@ -3481,6 +3520,70 @@ class MainWindow(QMainWindow):
                     pass
             except Exception:  # noqa: BLE001
                 self.gain_panel = None
+
+    # ------------------------------------------------------------------ #
+    # 数字信号解码面板：ADS-B 航路图 / APRS 包 / 卫星云图
+    # ------------------------------------------------------------------ #
+    def _build_digital_decode_panels(self):
+        """把数字解码面板接成 dock；全部 hasattr/try 守卫，缺类不崩。
+
+        布局约定：
+          - ADS-B 航路图：底部 dock（与扫频/星座图同区）；
+          - APRS 包：右侧 dock，tabify 到 AI 助手旁边；
+          - 卫星云图：底部 dock，tabify 到星座图旁边。
+        面板数据由 _poll_sdr_iq 喂入；无后端时各面板自带“等待数据/未连接”空态。
+        """
+        # ---- ADS-B 航路图（底部 dock）----
+        if AdsbPanel is not None:
+            try:
+                self.digital_adsb_panel = AdsbPanel()
+                self.adsb_dock = self._wrap_panel_in_dock(
+                    "ADS-B 航路", self.digital_adsb_panel)
+                self.adsb_dock.setObjectName("digitalAdsbDock")
+                self.addDockWidget(Qt.BottomDockWidgetArea, self.adsb_dock)
+                try:
+                    self.tabifyDockWidget(
+                        getattr(self, "scanner_dock", self.adsb_dock),
+                        self.adsb_dock)
+                except Exception:
+                    pass
+            except Exception:  # noqa: BLE001
+                self.digital_adsb_panel = None
+
+        # ---- APRS 数据包（右侧 dock，tabify 到 AI/书签旁）----
+        if AprsPanel is not None:
+            try:
+                self.digital_aprs_panel = AprsPanel()
+                self.aprs_dock = self._wrap_panel_in_dock(
+                    "APRS 包", self.digital_aprs_panel)
+                self.aprs_dock.setObjectName("digitalAprsDock")
+                self.addDockWidget(Qt.RightDockWidgetArea, self.aprs_dock)
+                anchor = (getattr(self, "bookmark_dock", None)
+                          or getattr(self, "ai_dock", None))
+                try:
+                    self.tabifyDockWidget(anchor, self.aprs_dock)
+                except Exception:
+                    pass
+            except Exception:  # noqa: BLE001
+                self.digital_aprs_panel = None
+
+        # ---- 卫星云图（底部 dock，tabify 到星座图旁）----
+        if SatelliteImagePanel is not None:
+            try:
+                self.digital_sat_image_panel = SatelliteImagePanel()
+                self.sat_image_dock = self._wrap_panel_in_dock(
+                    "卫星云图", self.digital_sat_image_panel)
+                self.sat_image_dock.setObjectName("digitalSatImageDock")
+                self.addDockWidget(Qt.BottomDockWidgetArea, self.sat_image_dock)
+                anchor = (getattr(self, "constellation_dock", None)
+                          or getattr(self, "scanner_dock", None)
+                          or self.sat_image_dock)
+                try:
+                    self.tabifyDockWidget(anchor, self.sat_image_dock)
+                except Exception:
+                    pass
+            except Exception:  # noqa: BLE001
+                self.digital_sat_image_panel = None
 
     def _on_panel_vfo_added(self, center_hz: float, bw_hz: float,
                             mode: str):
