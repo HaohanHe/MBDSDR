@@ -99,6 +99,16 @@ private:
     // between the engine run() thread and UI-thread connect/disconnect calls.
     QMutex sourceMutex_;
 
+    // Cached RTL front-end options. The pass-through slots update these AND
+    // forward to the live source_. On reconnect (tryConnectRtl) the cache is
+    // re-applied to the freshly-opened device so options survive reconnects.
+    int    cachedDirectSampling_ = 0;
+    bool   cachedOffsetTuning_  = false;
+    bool   cachedRtlAgc_        = false;
+    bool   cachedTunerAgc_       = false;
+    bool   cachedBiasTee_        = false;   // default OFF
+    double cachedPpm_            = 0.0;
+
     void rebuildDemod();
 };
 

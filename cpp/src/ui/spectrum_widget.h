@@ -21,12 +21,22 @@ public slots:
     void setSpectrum(const SpectrumFrame& frame);
     /// Adjust the vertical (dB) scale. Clamped internally.
     void setDbRange(float minDb, float maxDb);
-    /// Reset horizontal zoom back to the full capture span.
+    /// Reset horizontal zoom back to the full capture span, re-centered on f0.
     void resetZoom();
+    /// Restore a persisted zoom factor (1.0 = full span). Clamped internally.
+    void setZoomFactor(double z);
+    double zoomFactor() const { return zoomFactor_; }
+
+    /// Read/write the dB spinboxes (used by MainWindow for QSettings).
+    int  dbMinValue() const;
+    int  dbMaxValue() const;
+    void setDbSpinValues(int lo, int hi);
 
 signals:
     void fftSizeRequested(int n);
     void frequencyChanged(double newFreqHz);
+    /// Emitted whenever the visible frequency window changes (zoom/pan/reset).
+    void visibleRangeChanged(double fLoHz, double fHiHz);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -39,8 +49,9 @@ protected:
     void leaveEvent(QEvent* event) override;
 
 private:
-    // Visible frequency window derived from zoomFactor_ around center f0.
+    // Visible frequency window derived from zoomFactor_ around viewCenterHz_.
     void visibleRange(double& fLo, double& fHi, double& spanVis) const;
+    void emitVisibleRange();
 
     SpectrumFrame frame_;
     QComboBox* fftCombo_   = nullptr;
@@ -49,12 +60,15 @@ private:
     QLabel*    testLabel_  = nullptr;
     QLabel*    infoLabel_  = nullptr;
     bool dragging_ = false;
+    bool panning_ = false;          // Shift+drag: pan view, do not retune f0
     double vfoFreq_ = 0;
     QPoint hoverPos_ = QPoint(-1, -1);
+    QPoint lastPanPos_ = QPoint(-1, -1);
 
     float  dbMin_ = -100.0f;   // vertical scale bounds
     float  dbMax_ = 0.0f;
     double zoomFactor_ = 1.0;  // 1 = full span, kZoomMax = max zoom-in
+    double viewCenterHz_ = 0.0; // visible-window center; pans away from f0
 };
 
 } // namespace ui

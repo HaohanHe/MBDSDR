@@ -19,6 +19,9 @@ public:
 
 public slots:
     void setSpectrum(const SpectrumFrame& frame);
+    /// Crop the display to a visible frequency window (zoomed/panned spectrum).
+    /// Pass fLo>fHi or call with hasVisRange=false to revert to full span.
+    void setVisibleRange(double fLoHz, double fHiHz);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -32,6 +35,14 @@ private:
     int bins_ = 0;
     bool haveFrame_ = false;
     QVector<QRgb> lut_;        // dB -> color lookup table
+
+    // Current visible frequency window (from the spectrum widget). When set,
+    // only the columns whose bin frequency falls in [visLo_, visHi_] are drawn,
+    // stretched to the plot width. !hasVisRange_ => draw full span (legacy).
+    double visLo_ = 0.0, visHi_ = 0.0;
+    bool hasVisRange_ = false;
+    double frameF0_ = 0.0;     // center freq of the latest frame (for bin map)
+    double frameFs_ = 0.0;     // sample rate of the latest frame
 
     // Time axis: derive elapsed seconds from the real frame count x smoothed
     // frame period (no hard-coded clock).

@@ -68,6 +68,9 @@ void WaterfallWidget::setSpectrum(const SpectrumFrame& frame) {
     if (bins < 2) return;
     if (bins != bins_ || history_.isNull()) rebuildImage(bins);
 
+    frameF0_ = frame.centerFreqHz;
+    frameFs_ = frame.sampleRateHz;
+
     // Scroll existing rows down by one (single block move), then write new top row.
     const std::size_t rowBytes = static_cast<std::size_t>(history_.bytesPerLine());
     std::memmove(history_.scanLine(1), history_.constScanLine(0),
@@ -98,6 +101,17 @@ void WaterfallWidget::setSpectrum(const SpectrumFrame& frame) {
     update();
 }
 
+void WaterfallWidget::setVisibleRange(double fLoHz, double fHiHz) {
+    if (fHiHz <= fLoHz) {
+        hasVisRange_ = false;
+    } else {
+        visLo_ = fLoHz;
+        visHi_ = fHiHz;
+        hasVisRange_ = true;
+    }
+    update();
+}
+
 void WaterfallWidget::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.fillRect(rect(), QColor(QString::fromUtf8(tokens::kCard1)));
@@ -115,7 +129,23 @@ void WaterfallWidget::paintEvent(QPaintEvent*) {
     const int plotW = width() - mL - mR;
     if (plotW <= 10) return;
     p.setRenderHint(QPainter::SmoothPixmapTransform, false);
-    p.drawImage(QRectF(mL, 0, plotW, height()), history_);
+    const QRectF dest(mL, 0, plotW, height());
+    if (hasVisRange_ && bins_ > 1 && frameFs_ > 0.0) {
+        // Map the visible frequency window to source columns in history_.
+        // Column i corresponds to f = f0 - fs/2 + i*fs/(bins-1).
+        const double fLowEdge = frameF0_ - frameFs_ / 2.0;
+        double iLoF = (visLo_ - fLowEdge) / frameFs_ * (bins_ - 1);
+        double iHiF = (visHi_ - fLowEdge) / frameFs_ * (bins_ - 1);
+        int iLo = static_cast<int>(std::floor(iLoF));
+        int iHi = static_cast<int>(std::ceil(iHiF));
+        iLo = std::max(0, std::min(bins_ - 1, iLo));
+        iHi = std::max(0, std::min(bins_ - 1, iHi));
+        if (iHi > iLo) {
+            p.drawImage(dest, history_, QRectF(iLo, 0, iHi - iLo + 1, kDepthRows));
+        }
+    } else {
+        p.drawImage(dest, history_);
+    }
 
     // Time axis in the left margin: top (y=0) is the newest frame (0s),
     // bottom is the oldest (total elapsed). Only once we have >=2 frames and
