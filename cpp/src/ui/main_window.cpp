@@ -17,6 +17,7 @@
 #include <QTabWidget>
 #include <QPlainTextEdit>
 #include <QTableWidget>
+#include <QHeaderView>
 #include <QLineEdit>
 #include <QStackedWidget>
 #include <QSettings>
@@ -40,6 +41,7 @@
 #include "core/spectrum_frame.h"
 #include "dsp/spectrum_engine.h"
 #include "dsp/adsb_decoder.h"
+#include "dsp/tle_client.h"
 #include "ai/agent.h"
 #include "ai/ai_config.h"
 #include "ui/sky_view.h"
@@ -304,8 +306,24 @@ MainWindow::MainWindow(QWidget* parent)
     adsbLay->addWidget(adsbTable_);
     rightTabs_->addTab(adsbPage, "ADS-B");
 
+    // Sky tab: polar view on top, pass list below.
+    auto* skyPage = new QWidget;
+    auto* skyLay = new QVBoxLayout(skyPage);
+    skyLay->setContentsMargins(0, 0, 0, 0);
     skyView_ = new ui::SkyView();
-    rightTabs_->addTab(skyView_, "天空");
+    skyLay->addWidget(skyView_, 2);
+    passTable_ = new QTableWidget(0, 4, skyPage);
+    passTable_->setHorizontalHeaderLabels({"卫星", "过境开始", "最大仰角", "结束"});
+    passTable_->horizontalHeader()->setStretchLastSection(true);
+    passTable_->verticalHeader()->setVisible(false);
+    passTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    passTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    passTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    skyLay->addWidget(passTable_, 1);
+    rightTabs_->addTab(skyPage, "天空");
+
+    connect(passTable_, &QTableWidget::cellClicked,
+            this, [this](int row, int) { onPassRowClicked(row); });
 
     auto* aiPage = new QWidget;
     auto* aiLay = new QVBoxLayout(aiPage);
@@ -626,6 +644,40 @@ MainWindow::MainWindow(QWidget* parent)
             }
         }
     }
+
+    // ---- Satellite pass forecast (real TLE from celestrak.org) ----
+    tleClient_ = new dsp::TleClient(this);
+    connect(tleClient_, &dsp::TleClient::passesReady,
+            this, &MainWindow::onPassesReady);
+    connect(tleClient_, &dsp::TleClient::fetchFailed,
+            this, &MainWindow::onTleFetchFailed);
+
+    {
+        ai::AiConfig cfg;
+        cfg.load();
+        if (cfg.stationSet) {
+            tleFetchActive_ = true;
+            tleClient_->fetch(cfg.stationLat, cfg.stationLon);
+        } else {
+            skyView_->setEmptyText("无过境数据——请在设置中填写本站位置");
+        }
+    }
+
+    // Local expiry filter: every 60s drop passes whose LOS already passed.
+    tleTimer_ = new QTimer(this);
+    tleTimer_->setInterval(60000);
+    connect(tleTimer_, &QTimer::timeout, this, [this]() {
+        if (passes_.isEmpty()) return;
+        QDateTime now = QDateTime::currentDateTimeUtc();
+        QList<dsp::SatPass> keep;
+        for (const auto& p : passes_)
+            if (p.los > now) keep.append(p);
+        if (keep.size() != passes_.size()) {
+            passes_ = keep;
+            fillPassTable();
+        }
+    });
+    tleTimer_->start();
 }
 
 MainWindow::~MainWindow() {
@@ -936,6 +988,58 @@ void MainWindow::setControlsEnabled(bool hw) {
     // Manual gain slider only when hardware connected AND tuner in manual mode.
     gainSlider_->setEnabled(hw && !(tunerAgcChk_ && tunerAgcChk_->isChecked()));
     if (advPanel_) advPanel_->setEnabled(hw);
+}
+
+void MainWindow::onPassesReady(QList<dsp::SatPass> passes) {
+    passes_ = std::move(passes);
+    tleFetchActive_ = false;
+    if (passes_.isEmpty()) {
+        skyView_->setEmptyText("未来 24h 无过境");
+    }
+    fillPassTable();
+}
+
+void MainWindow::onTleFetchFailed(const QString& reason) {
+    passes_.clear();
+    tleFetchActive_ = false;
+    passTable_->setRowCount(0);
+    skyView_->setPasses({});
+    skyView_->setEmptyText("无过境数据——TLE 拉取失败");
+    statusBar()->showMessage("TLE 拉取失败：" + reason);
+}
+
+void MainWindow::fillPassTable() {
+    passTable_->setRowCount(0);
+    QList<ui::PassArc> arcs;
+    for (const auto& p : passes_) {
+        int row = passTable_->rowCount();
+        passTable_->insertRow(row);
+        passTable_->setItem(row, 0, new QTableWidgetItem(p.name));
+        passTable_->setItem(row, 1, new QTableWidgetItem(
+            p.aos.toLocalTime().toString("MM-dd HH:mm")));
+        passTable_->setItem(row, 2, new QTableWidgetItem(
+            QString::number(p.maxEl, 'f', 1) + QStringLiteral("°")));
+        passTable_->setItem(row, 3, new QTableWidgetItem(
+            p.los.toLocalTime().toString("MM-dd HH:mm")));
+
+        ui::PassArc arc;
+        arc.name = p.name;
+        arc.track = p.track;
+        arcs.append(arc);
+    }
+    skyView_->setPasses(arcs);
+}
+
+void MainWindow::onPassRowClicked(int row) {
+    if (row < 0 || row >= passes_.size()) return;
+    skyView_->setHighlightedPass(row);
+    const dsp::SatPass& p = passes_[row];
+    // Report the max-elevation point's az/el from the track.
+    double az = p.azAos, el = p.maxEl;
+    for (const auto& pt : p.track)
+        if (pt.second > el) { el = pt.second; az = pt.first; }
+    statusBar()->showMessage(QString("%1 方位=%2° 仰角=%3°")
+                                .arg(p.name).arg(az, 0, 'f', 0).arg(el, 0, 'f', 1));
 }
 
 } // namespace mbdsdr
