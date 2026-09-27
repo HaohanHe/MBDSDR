@@ -92,3 +92,7 @@ sigutils/
 
 # Figma/APK reverse-engineering reference (not our code)
 docs/design_ref/
+
+# throwaway headless Chromium profiles / scratch
+tmp_stel/
+tmp_*.py
