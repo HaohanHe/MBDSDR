@@ -51,7 +51,7 @@ MUTED = QColor(_t.COLORS["gray_300"])     # 占位/次要文字
 
 # 模块节点按类型上色（source/processing/decoder/sink）
 _TYPE_COLORS = {
-    "source": QColor("#7E9BA8"),     # 偏青：源（功能标识色，保留）
+    "source": QColor(_t.COLORS["source_node"]),     # 偏青：源（功能标识色）
     "processing": STEEL,              # 青灰：解调
     "decoder": QColor(_t.COLORS["success"]),  # 偏绿：解码
     "sink": OCHRE,                    # 强调：sink

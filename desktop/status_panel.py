@@ -172,7 +172,9 @@ class StatusPanel(QWidget):
         self.level_bar.setRange(0, int(_LEVEL_MAX - _LEVEL_MIN))  # 0..120
         self.level_bar.setValue(0)
         self.level_bar.setTextVisible(False)
-        self.level_bar.setFixedHeight(10)
+        # 电平条高度弹性：最小 6 / 最大 16，窗口缩放时跟随
+        self.level_bar.setMinimumHeight(6)
+        self.level_bar.setMaximumHeight(16)
         self._set_level_bar_color(tokens().COLORS["gray_300"])  # 灰色（无信号）
         signal_layout.addWidget(self.level_bar, 2, 3)
 

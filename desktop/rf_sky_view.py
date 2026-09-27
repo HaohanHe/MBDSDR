@@ -478,9 +478,9 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         self._gnss_fix_type: int = 0
         self._gnss_colors: Dict[str, QColor] = {
             "GPS": QColor(_t.COLORS["accent"]),         # 蓝灰（token accent）
-            "BeiDou": QColor("#C4845C"),                # 橙（星座标识色，保留）
+            "BeiDou": QColor(_t.COLORS["light_accent"]),  # 橙（星座标识色）
             "GLONASS": QColor(_t.COLORS["success"]),    # 柔和绿（token success）
-            "Galileo": QColor("#8C6B5B"),               # 柔和紫棕（星座标识色，保留）
+            "Galileo": QColor(_t.COLORS["constellation_galileo"]),  # 柔和紫棕
             "未知": QColor(_t.COLORS["gray_300"]),      # 灰
         }
 
@@ -494,10 +494,10 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         # 颜色（CarWith dark_car 设计 token；天文天空渐变保留功能性配色）
         self._colors = {
             "paper": QColor(_t.COLORS["card_1"]),
-            "day_zenith": QColor("#DCE7EC"),
-            "day_horizon": QColor("#F5F3EF"),
-            "night_zenith": QColor("#0E1622"),
-            "night_horizon": QColor("#1B2A3A"),
+            "day_zenith": QColor(_t.COLORS["sky_day_zenith"]),
+            "day_horizon": QColor(_t.COLORS["light_bg"]),
+            "night_zenith": QColor(_t.COLORS["sky_night_zenith"]),
+            "night_horizon": QColor(_t.COLORS["sky_night_horizon"]),
             "primary": QColor(_t.COLORS["gray_200"]),
             "accent": QColor(_t.COLORS["accent"]),
             "good": QColor(_t.COLORS["success"]),        # 绿：真实数据
@@ -507,17 +507,17 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             "horizon_day": QColor(_t.COLORS["gray_300"]),
             "horizon_night": QColor(_t.COLORS["gray_200"]),
             "sat_weather": QColor(_t.COLORS["accent"]),
-            "sat_amateur": QColor("#C4845C"),            # 橙：业余星标识，保留
+            "sat_amateur": QColor(_t.COLORS["light_accent"]),  # 橙：业余星标识
             "signal": QColor(_t.COLORS["accent"]),
             "interferer": QColor(_t.COLORS["danger"]),
             "custom": QColor(_t.COLORS["success"]),
-            "sun": QColor("#D9A441"),                    # 天文天体色，保留
-            "moon": QColor("#9AA7B4"),                   # 天文天体色，保留
+            "sun": QColor(_t.COLORS["celestial_sun"]),    # 天文天体色
+            "moon": QColor(_t.COLORS["celestial_moon"]),  # 天文天体色
             "antenna": QColor(_t.COLORS["accent"]),
             "antenna_beam": QColor(145, 156, 172, 36),   # accent #919cac 带 alpha
-            "heatmap_low": QColor("#3E5A4A"),            # 热力图色阶，保留
-            "heatmap_mid": QColor("#8A7A3A"),
-            "heatmap_high": QColor("#8A4A3A"),
+            "heatmap_low": QColor(_t.COLORS["heatmap_low"]),
+            "heatmap_mid": QColor(_t.COLORS["heatmap_mid"]),
+            "heatmap_high": QColor(_t.COLORS["heatmap_high"]),
         }
 
         # 字体
@@ -559,7 +559,8 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         self._QListWidget = QListWidget
         self._search_edit = QLineEdit(self)
         self._search_edit.setPlaceholderText("搜索天体: ISS / Vega / NOAA…")
-        self._search_edit.setFixedHeight(26)
+        self._search_edit.setMinimumHeight(22)
+        self._search_edit.setMaximumHeight(32)
         self._search_edit.textChanged.connect(self._on_search_text)
         self._search_popup = QListWidget(self)
         self._search_popup.setWindowFlags(Qt.Popup)
@@ -885,7 +886,9 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             item = self._QListWidgetItem(f"{icon}  {r['label']}   —   {r['sub']}")
             self._search_popup.addItem(item)
         if self._search_results:
-            self._search_popup.setFixedWidth(self._search_edit.width())
+            # 下拉弹窗跟随搜索框宽度（弹性，不写死像素）
+            self._search_popup.setMinimumWidth(self._search_edit.width())
+            self._search_popup.setMaximumWidth(max(self._search_edit.width(), 200))
             pos = self._search_edit.mapTo(self, self._search_edit.rect().bottomLeft())
             self._search_popup.move(pos)
             self._search_popup.show()
@@ -1134,7 +1137,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         b = self._sky_brightness
         _t = tokens()
         night = QColor(_t.COLORS["gray_100"])
-        day = QColor("#3A4550")
+        day = QColor(_t.COLORS["sky_day_ink"])
         r = int(night.red() * (1 - b) + day.red() * b)
         g = int(night.green() * (1 - b) + day.green() * b)
         bl = int(night.blue() * (1 - b) + day.blue() * b)
@@ -1199,8 +1202,11 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             )
 
         # 夜: 天顶深蓝 -> 地平线微亮; 昼: 浅蓝 -> 米白
-        zenith = mix(QColor("#070D18"), QColor("#7FA8C8"), b)
-        horizon = mix(QColor("#16233A"), QColor("#DCE7EC"), b)
+        _t = tokens()
+        zenith = mix(QColor(_t.COLORS["sky_night_zenith_deep"]),
+                     QColor(_t.COLORS["sky_day_horizon_glow"]), b)
+        horizon = mix(QColor(_t.COLORS["sky_night_horizon_deep"]),
+                      QColor(_t.COLORS["sky_day_zenith"]), b)
         painter.save()
         painter.setPen(Qt.NoPen)
         grad = QLinearGradient(0, 0, 0, self.height())
@@ -1264,8 +1270,10 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             return
         painter.save()
         painter.setPen(Qt.NoPen)
-        col = QColor("#0A0F18") if self._sky_brightness < 0.5 \
-            else QColor("#3A4A5A")
+        _t = tokens()
+        col = (QColor(_t.COLORS["ground_shadow_night"])
+               if self._sky_brightness < 0.5
+               else QColor(_t.COLORS["ground_shadow_day"]))
         painter.setBrush(QBrush(col))
         path = QPainterPath()
         # 取地平线附近 y 的代表位置做轮廓 (透视下地平线在画面中下部)
@@ -2093,7 +2101,9 @@ class RFSkyViewPanel(QFrame):
         from PySide6.QtWidgets import QHBoxLayout, QPushButton, QFrame
         control_bar = QFrame()
         control_bar.setObjectName("skyControlBar")
-        control_bar.setFixedHeight(36)
+        # 控制条高度弹性：最小 28 / 最大 44
+        control_bar.setMinimumHeight(28)
+        control_bar.setMaximumHeight(44)
         _t = tokens()
         control_bar.setStyleSheet(
             "QFrame#skyControlBar { background: " + _t.COLORS["card_1"] + ";"
@@ -2383,7 +2393,7 @@ class SatelliteTracker:
 
             connected += 1
             _t = tokens()
-            color = ("#C4845C" if kind == "amateur" else _t.COLORS["accent"])
+            color = (_t.COLORS["light_accent"] if kind == "amateur" else _t.COLORS["accent"])
             objs.append(SkyObject(
                 name=name,
                 azimuth_deg=az_d,

@@ -66,18 +66,23 @@ except ImportError:  # pragma: no cover - 直接以脚本方式运行时
     )
 
 
+from tokens import tokens
+
 # ---------------------------------------------------------------------------
-# 默认主题色值（与 themes.py DEFAULT_LIGHT 对齐）
+# 默认主题色值（从 tokens.py 语义化取色，与 light 主题对齐）
 # ---------------------------------------------------------------------------
-COLOR_BG = "#F5F3EF"           # 主背景
-COLOR_CARD = "#FFFFFF"         # 卡片
-COLOR_TEXT = "#5B7B8C"         # 文字主色
-COLOR_TEXT_SEC = "#8A9BA8"     # 文字次色
-COLOR_BORDER = "#C8C0B4"       # 边框
-COLOR_PRIMARY = "#C4845C"      # 强调
-COLOR_SUCCESS = "#6BA89A"      # 同步 / 成功
-COLOR_DANGER = "#B85C5C"       # 未同步 / 警示
-COLOR_GRID = "#D8D2C8"         # 网格
+_t = tokens()
+COLOR_BG = _t.COLORS["light_bg"]           # 主背景
+COLOR_CARD = _t.COLORS["light_card"]       # 卡片
+COLOR_TEXT = _t.COLORS["light_text"]       # 文字主色
+COLOR_TEXT_SEC = _t.COLORS["light_text_sub"]  # 文字次色
+COLOR_BORDER = _t.COLORS["light_border"]   # 边框
+COLOR_PRIMARY = _t.COLORS["light_accent"]  # 强调
+COLOR_SUCCESS = _t.COLORS["success"]       # 同步 / 成功
+COLOR_DANGER = _t.COLORS["danger"]         # 未同步 / 警示
+COLOR_GRID = _t.COLORS["light_grid"]       # 网格
+COLOR_HOVER = _t.COLORS["light_hover"]     # 按钮 hover
+COLOR_BG_ALT = _t.COLORS["light_bg_alt"]   # 次级背景
 
 _NO_SIGNAL_TEXT = "未检测到信号"
 _NA = "--"
@@ -388,7 +393,7 @@ class NewSpacetimePanel(QWidget):
                 border: 1px solid {COLOR_BORDER}; border-radius: 6px;
                 padding: 6px 14px;
             }}
-            QPushButton:hover {{ background: #F0EDE8; }}
+            QPushButton:hover {{ background: {COLOR_HOVER}; }}
             QPushButton:checked {{
                 background: {COLOR_PRIMARY}; color: {COLOR_CARD};
                 border-color: {COLOR_PRIMARY};
@@ -409,7 +414,7 @@ class NewSpacetimePanel(QWidget):
                 gridline-color: {COLOR_GRID};
             }}
             QHeaderView::section {{
-                background: #FAF8F5; color: {COLOR_TEXT};
+                background: {COLOR_BG_ALT}; color: {COLOR_TEXT};
                 border: none; border-bottom: 1px solid {COLOR_BORDER};
                 padding: 4px 6px; font-weight: 600;
             }}

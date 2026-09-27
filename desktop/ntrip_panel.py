@@ -38,11 +38,13 @@ if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
 from mbdsdr_ai.rtklib_adapter import NTRIPManager, NTRIP_DEFAULT_PORT  # noqa: E402
+from tokens import tokens
 
-# 默认低饱和主题里的指示灯颜色（与 themes.py spectrum_colors 对齐，不重色）
-_COLOR_IDLE = "#B85C5C"     # 低饱和红 = 未连接/未配置
-_COLOR_BUSY = "#C4B85C"     # 低饱和黄 = 连接中
-_COLOR_OK = "#6BA89A"       # 低饱和青绿 = 已连接
+# 默认低饱和主题里的指示灯颜色（从 tokens.py 语义化取色）
+_t = tokens()
+_COLOR_IDLE = _t.COLORS["danger"]          # 低饱和红 = 未连接/未配置
+_COLOR_BUSY = _t.COLORS["status_busy"]     # 低饱和黄 = 连接中
+_COLOR_OK = _t.COLORS["success"]           # 低饱和青绿 = 已连接
 
 
 def _make_dot(color_hex: str, size: int = 12) -> QPixmap:
@@ -128,7 +130,8 @@ class NtripConfigDialog(QDialog):
         # ---- 状态行：颜色圆点 + 文字 ----
         status_row = QHBoxLayout()
         self._dot_label = QLabel()
-        self._dot_label.setFixedWidth(18)
+        self._dot_label.setMinimumWidth(14)
+        self._dot_label.setMaximumWidth(24)
         self._state_label = QLabel("未连接")
         self._state_label.setStyleSheet("font-weight: 600;")
         status_row.addWidget(self._dot_label)

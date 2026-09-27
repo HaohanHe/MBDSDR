@@ -82,6 +82,52 @@ class DesignTokens:
             "light_hint_bg":   "#F0E8DC",      # 无设备引导横幅底色
             "light_hint_text": "#8A6D4A",      # 无设备引导横幅文字
             "disabled_gray":   "#999999",      # 次要置灰文字/指示
+            # ---- 新增语义 token（控制面板/各面板收口用）----
+            "light_grid":       "#D8D2C8",      # 浅色主题网格线/分隔线
+            "light_hover":      "#F0EDE8",      # 浅色主题按钮 hover 底色
+            "status_busy":      "#C4B85C",      # 连接中/忙碌状态指示（低饱和黄）
+            "source_node":      "#7E9BA8",      # 信号流图 source 节点标识色
+            # ---- AI 对话面板（浅色方向补充：气泡/输入框/按钮）----
+            "light_text_strong":    "#3D3D3D",   # 浅色方向主文字（深灰近黑）
+            "light_text_secondary": "#5A5A5A",   # 浅色方向次文字
+            "light_panel_bg":       "#FAFAF8",   # 对话区底色
+            "light_log_bg":         "#F5F3F0",   # 工具日志底色
+            "light_border_subtle":  "#E0DDD8",   # 浅分隔边框
+            "light_border_strong": "#DDD8D0",   # 快捷按钮边框
+            "light_border_input":   "#D0CCC4",   # 输入框边框
+            "light_hover_bg_strong":"#E8E4DE",   # 按钮 hover 加深
+            "light_accent_border":  "#B8A88A",   # 输入框 focus 边框
+            "light_user_bubble":    "#EDE8E0",   # 用户气泡底
+            "light_user_label":     "#6B5B45",   # 用户气泡标签字
+            "light_ai_label":       "#4A7A4A",   # AI 气泡标签字
+            "light_system_bg":      "#FFF8E8",   # 系统/提示消息底
+            "accent_warm":          "#8B7355",   # 发送按钮暖棕
+            "accent_warm_hover":    "#7A6449",   # 发送按钮 hover
+            # ---- 面板状态指示色 ----
+            "status_success":       "#5A8A5A",   # AI 在线/工具成功绿
+            "status_warning":       "#C8A040",   # 未配置/警告琥珀
+            "status_danger":        "#C05050",   # 错误/不可用红
+            # ---- 通用辅助色 ----
+            "text_muted":           "#888888",   # 弱化说明文字
+            "image_placeholder_bg": "#1b1b1b",   # 图像占位底（近黑卡片）
+            # ---- ADS-B 接收站标记 ----
+            "station_blue":         "#4F7CAC",   # 接收站标记蓝
+            # ---- 射频天空（天文/星座/热力图功能性配色）----
+            "constellation_galileo":"#8C6B5B",   # Galileo 星座标识紫棕
+            "sky_day_zenith":       "#DCE7EC",   # 白天天顶浅蓝
+            "sky_day_ink":          "#3A4550",   # 白天前景文字/网格
+            "sky_night_zenith":     "#0E1622",   # 夜晚天顶深蓝
+            "sky_night_horizon":    "#1B2A3A",   # 夜晚地平线
+            "sky_night_zenith_deep":"#070D18",   # 夜晚天顶最深
+            "sky_day_horizon_glow": "#7FA8C8",   # 白天地平线亮蓝
+            "sky_night_horizon_deep":"#16233A",  # 夜晚地平线深
+            "ground_shadow_night":  "#0A0F18",   # 夜天地剪影
+            "ground_shadow_day":    "#3A4A5A",   # 昼天地剪影
+            "celestial_sun":        "#D9A441",   # 太阳
+            "celestial_moon":       "#9AA7B4",   # 月亮
+            "heatmap_low":          "#3E5A4A",   # 热力图低
+            "heatmap_mid":          "#8A7A3A",   # 热力图中
+            "heatmap_high":         "#8A4A3A",   # 热力图高
         }
 
         # ---- 文字 alpha 层级（叠加在白字上）----

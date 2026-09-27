@@ -27,6 +27,8 @@ try:
 except ImportError:
     AI_CORE_AVAILABLE = False
 
+from tokens import tokens as _tok  # noqa: E402
+
 
 # 快捷指令（这些是提示用户可以说什么，不是直接执行的功能按钮）
 QUICK_COMMANDS = [
@@ -121,20 +123,24 @@ class AIPanel(QWidget):
 
         # 标题栏
         title_bar = QHBoxLayout()
+        _t = _tok()
         title_label = QLabel("AI 智能体")
-        title_label.setStyleSheet("font-size: 11pt; font-weight: 600; color: #3D3D3D;")
+        title_label.setStyleSheet(
+            f"font-size: 11pt; font-weight: 600; color: {_t.COLORS['light_text_strong']};")
         title_bar.addWidget(title_label)
         title_bar.addStretch()
 
         # AI 内核状态指示
         self.ai_status_label = QLabel()
-        self.ai_status_label.setStyleSheet("font-size: 8pt; color: #888;")
+        self.ai_status_label.setStyleSheet(
+            f"font-size: 8pt; color: {_t.COLORS['text_muted']};")
         self._update_ai_status()
         title_bar.addWidget(self.ai_status_label)
 
         # API Key 配置按钮
         self.config_btn = QPushButton("配置")
-        self.config_btn.setFixedHeight(24)
+        self.config_btn.setMinimumHeight(24)
+        self.config_btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.config_btn.setStyleSheet("font-size: 8pt; padding: 2px 8px;")
         self.config_btn.clicked.connect(self._show_config)
         title_bar.addWidget(self.config_btn)
@@ -144,38 +150,41 @@ class AIPanel(QWidget):
         # 对话历史
         self.conversation_view = QTextEdit()
         self.conversation_view.setReadOnly(True)
-        self.conversation_view.setStyleSheet("""
-            QTextEdit {
-                background: #FAFAF8;
-                border: 1px solid #E0DDD8;
+        self.conversation_view.setStyleSheet(f"""
+            QTextEdit {{
+                background: {_t.COLORS['light_panel_bg']};
+                border: 1px solid {_t.COLORS['light_border_subtle']};
                 border-radius: 6px;
                 padding: 8px;
                 font-size: 9pt;
-                color: #3D3D3D;
-            }
+                color: {_t.COLORS['light_text_strong']};
+            }}
         """)
         self.conversation_view.setMinimumHeight(150)
         layout.addWidget(self.conversation_view, 1)
 
         # 快捷指令
         quick_group = QGroupBox("快捷指令（点击发送）")
-        quick_group.setStyleSheet("QGroupBox { font-size: 8pt; color: #888; border: none; margin-top: 4px; }")
+        quick_group.setStyleSheet(
+            f"QGroupBox {{ font-size: 8pt; color: {_t.COLORS['text_muted']}; "
+            f"border: none; margin-top: 4px; }}")
         quick_layout = QHBoxLayout()
         quick_layout.setSpacing(4)
         quick_layout.setContentsMargins(0, 4, 0, 0)
         for cmd in QUICK_COMMANDS[:4]:
             btn = QPushButton(cmd)
-            btn.setFixedHeight(26)
-            btn.setStyleSheet("""
-                QPushButton {
+            btn.setMinimumHeight(24)
+            btn.setMaximumHeight(32)
+            btn.setStyleSheet(f"""
+                QPushButton {{
                     font-size: 8pt;
                     padding: 2px 8px;
-                    background: #F0EDE8;
-                    border: 1px solid #DDD8D0;
+                    background: {_t.COLORS['light_hover']};
+                    border: 1px solid {_t.COLORS['light_border_strong']};
                     border-radius: 4px;
-                    color: #5A5A5A;
-                }
-                QPushButton:hover { background: #E8E4DE; }
+                    color: {_t.COLORS['light_text_secondary']};
+                }}
+                QPushButton:hover {{ background: {_t.COLORS['light_hover_bg_strong']}; }}
             """)
             btn.clicked.connect(lambda checked, c=cmd: self._send_quick_command(c))
             quick_layout.addWidget(btn)
@@ -189,33 +198,35 @@ class AIPanel(QWidget):
 
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("对 AI 说点什么...（如：扫频找台、调谐、录音）")
-        self.input_field.setStyleSheet("""
-            QLineEdit {
+        self.input_field.setMinimumHeight(22)
+        self.input_field.setStyleSheet(f"""
+            QLineEdit {{
                 padding: 6px 10px;
-                border: 1px solid #D0CCC4;
+                border: 1px solid {_t.COLORS['light_border_input']};
                 border-radius: 6px;
                 font-size: 9pt;
-                background: #FFF;
-            }
-            QLineEdit:focus { border-color: #B8A88A; }
+                background: {_t.COLORS['light_card']};
+            }}
+            QLineEdit:focus {{ border-color: {_t.COLORS['light_accent_border']}; }}
         """)
         self.input_field.returnPressed.connect(self._on_submit)
         input_bar.addWidget(self.input_field, 1)
 
         self.send_btn = QPushButton("发送")
-        self.send_btn.setFixedHeight(32)
-        self.send_btn.setStyleSheet("""
-            QPushButton {
+        self.send_btn.setMinimumHeight(28)
+        self.send_btn.setMaximumHeight(40)
+        self.send_btn.setStyleSheet(f"""
+            QPushButton {{
                 padding: 4px 16px;
-                background: #8B7355;
+                background: {_t.COLORS['accent_warm']};
                 color: white;
                 border: none;
                 border-radius: 6px;
                 font-size: 9pt;
                 font-weight: 500;
-            }
-            QPushButton:hover { background: #7A6449; }
-            QPushButton:disabled { background: #CCC; }
+            }}
+            QPushButton:hover {{ background: {_t.COLORS['accent_warm_hover']}; }}
+            QPushButton:disabled {{ background: {_t.COLORS['disabled_gray']}; }}
         """)
         self.send_btn.clicked.connect(self._on_submit)
         input_bar.addWidget(self.send_btn)
@@ -224,22 +235,24 @@ class AIPanel(QWidget):
 
         # 工具调用日志（可折叠）
         self.tool_log_group = QGroupBox("工具调用日志")
-        self.tool_log_group.setStyleSheet("QGroupBox { font-size: 8pt; color: #888; border: none; margin-top: 4px; }")
+        self.tool_log_group.setStyleSheet(
+            f"QGroupBox {{ font-size: 8pt; color: {_t.COLORS['text_muted']}; "
+            f"border: none; margin-top: 4px; }}")
         tool_log_layout = QVBoxLayout()
         tool_log_layout.setContentsMargins(0, 4, 0, 0)
         self.tool_log_view = QTextEdit()
         self.tool_log_view.setReadOnly(True)
         self.tool_log_view.setMaximumHeight(100)
-        self.tool_log_view.setStyleSheet("""
-            QTextEdit {
-                background: #F5F3F0;
-                border: 1px solid #E0DDD8;
+        self.tool_log_view.setStyleSheet(f"""
+            QTextEdit {{
+                background: {_t.COLORS['light_log_bg']};
+                border: 1px solid {_t.COLORS['light_border_subtle']};
                 border-radius: 4px;
                 padding: 4px;
                 font-size: 8pt;
-                color: #666;
+                color: {_t.COLORS['gray_300']};
                 font-family: monospace;
-            }
+            }}
         """)
         tool_log_layout.addWidget(self.tool_log_view)
         self.tool_log_group.setLayout(tool_log_layout)
@@ -248,8 +261,10 @@ class AIPanel(QWidget):
 
         # 切换日志显示按钮
         self.toggle_log_btn = QPushButton("显示工具日志")
-        self.toggle_log_btn.setFixedHeight(20)
-        self.toggle_log_btn.setStyleSheet("font-size: 8pt; color: #999; border: none;")
+        self.toggle_log_btn.setMinimumHeight(20)
+        self.toggle_log_btn.setMaximumHeight(28)
+        self.toggle_log_btn.setStyleSheet(
+            f"font-size: 8pt; color: {_t.COLORS['disabled_gray']}; border: none;")
         self.toggle_log_btn.clicked.connect(self._toggle_log)
         layout.addWidget(self.toggle_log_btn)
 
@@ -271,13 +286,16 @@ class AIPanel(QWidget):
             except Exception:
                 pass
             self.ai_status_label.setText(f"LLM: {model.split('/')[-1]}{ctx_info}")
-            self.ai_status_label.setStyleSheet("font-size: 8pt; color: #5A8A5A;")
+            self.ai_status_label.setStyleSheet(
+                f"font-size: 8pt; color: {_tok().COLORS['status_success']};")
         elif AI_CORE_AVAILABLE:
             self.ai_status_label.setText("未配置 API")
-            self.ai_status_label.setStyleSheet("font-size: 8pt; color: #C8A040;")
+            self.ai_status_label.setStyleSheet(
+                f"font-size: 8pt; color: {_tok().COLORS['status_warning']};")
         else:
             self.ai_status_label.setText("AI 内核不可用")
-            self.ai_status_label.setStyleSheet("font-size: 8pt; color: #C05050;")
+            self.ai_status_label.setStyleSheet(
+                f"font-size: 8pt; color: {_tok().COLORS['status_danger']};")
 
     def _show_config(self):
         """显示 API 配置对话框。"""
@@ -412,16 +430,29 @@ class AIPanel(QWidget):
 
     def _add_user_message(self, text: str):
         self._conversation.append({"role": "user", "content": text, "time": datetime.now()})
-        self._append_to_view(f'<div style="margin: 6px 0; padding: 8px; background: #EDE8E0; border-radius: 6px; border-left: 3px solid #8B7355;"><span style="color: #6B5B45; font-size: 8pt;">你</span><br><span style="color: #3D3D3D;">{text}</span></div>')
+        _t = _tok().COLORS
+        self._append_to_view(
+            f'<div style="margin: 6px 0; padding: 8px; background: {_t["light_user_bubble"]};'
+            f' border-radius: 6px; border-left: 3px solid {_t["accent_warm"]};'
+            f'"><span style="color: {_t["light_user_label"]}; font-size: 8pt;">你</span><br>'
+            f'<span style="color: {_t["light_text_strong"]};">{text}</span></div>')
 
     def _add_ai_message(self, text: str):
         self._conversation.append({"role": "assistant", "content": text, "time": datetime.now()})
         # 简单的换行处理
         safe_text = text.replace("\n", "<br>")
-        self._append_to_view(f'<div style="margin: 6px 0; padding: 8px; background: #F5F3F0; border-radius: 6px; border-left: 3px solid #5A8A5A;"><span style="color: #4A7A4A; font-size: 8pt;">AI</span><br><span style="color: #3D3D3D;">{safe_text}</span></div>')
+        _t = _tok().COLORS
+        self._append_to_view(
+            f'<div style="margin: 6px 0; padding: 8px; background: {_t["light_log_bg"]};'
+            f' border-radius: 6px; border-left: 3px solid {_t["status_success"]};'
+            f'"><span style="color: {_t["light_ai_label"]}; font-size: 8pt;">AI</span><br>'
+            f'<span style="color: {_t["light_text_strong"]};">{safe_text}</span></div>')
 
     def _add_system_message(self, text: str):
-        self._append_to_view(f'<div style="margin: 4px 0; padding: 4px 8px; background: #FFF8E8; border-radius: 4px; font-size: 8pt; color: #8B7355;">{text}</div>')
+        _t = _tok().COLORS
+        self._append_to_view(
+            f'<div style="margin: 4px 0; padding: 4px 8px; background: {_t["light_system_bg"]};'
+            f' border-radius: 4px; font-size: 8pt; color: {_t["accent_warm"]};">{text}</div>')
 
     def _add_tool_log(self, tool_name: str, args: Dict, success: bool, result: str, latency: float):
         entry = {
@@ -434,12 +465,13 @@ class AIPanel(QWidget):
         }
         self._tool_log.append(entry)
         status = "OK" if success else "FAIL"
-        color = "#5A8A5A" if success else "#C05050"
+        _t = _tok().COLORS
+        color = _t["status_success"] if success else _t["status_danger"]
         self.tool_log_view.append(
             f'<span style="color:{color};">{status}</span> '
-            f'<span style="color:#888;">{entry["time"]}</span> '
+            f'<span style="color:{_t["text_muted"]};">{entry["time"]}</span> '
             f'<b>{tool_name}</b>({json.dumps(args, ensure_ascii=False)[:80]}) '
-            f'<span style="color:#999;">{latency:.0f}ms</span>'
+            f'<span style="color:{_t["disabled_gray"]};">{latency:.0f}ms</span>'
         )
 
     @Slot(str, dict)
@@ -524,10 +556,11 @@ class AIPanel(QWidget):
         # 新建一条空 AI 消息用于流式追加
         self._stream_html = ""
         self._streamed_any = False  # 标记是否收到过流式增量，避免 finished 时重复追加
+        _t = _tok().COLORS
         self._append_to_view(
-            '<div style="margin: 6px 0; padding: 8px; background: #F5F3F0; '
-            'border-radius: 6px; border-left: 3px solid #5A8A5A;">'
-            '<span style="color: #4A7A4A; font-size: 8pt;">AI</span><br>')
+            f'<div style="margin: 6px 0; padding: 8px; background: {_t["light_log_bg"]}; '
+            f'border-radius: 6px; border-left: 3px solid {_t["status_success"]};">'
+            f'<span style="color: {_t["light_ai_label"]}; font-size: 8pt;">AI</span><br>')
 
         self._worker_thread.start()
 
