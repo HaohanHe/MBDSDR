@@ -19,7 +19,7 @@ public:
     /// Gate the audio block; returns gated copy (silent when closed).
     std::vector<float> apply(const std::vector<float>& audio, float rmsDb);
 private:
-    bool enabled_ = true;
+    bool enabled_ = false;
     bool open_ = false;
     float thresholdDb_ = -50.0f;
     float smoothDb_ = -150.0f;
