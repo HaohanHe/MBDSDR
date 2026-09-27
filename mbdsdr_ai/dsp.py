@@ -1198,7 +1198,10 @@ class VFO:
         if self._filter_needed and self._taps is not None:
             try:
                 from scipy.signal import lfilter, lfilter_zi
-                if self._lpf_zi is None or len(self._lpf_zi) != len(self._taps):
+                # lfilter/lfilter_zi 的 zi 长度 = len(taps)-1；守卫必须与之比较，
+                # 否则每块返回的 zf(len-1) 都被误判而重置，在块边界注入周期瞬态
+                _nzi = len(self._taps) - 1
+                if self._lpf_zi is None or len(self._lpf_zi) != _nzi:
                     self._lpf_zi = lfilter_zi(self._taps, 1.0)
                 x, self._lpf_zi = lfilter(self._taps, 1.0, x, zi=self._lpf_zi)
             except ImportError:
