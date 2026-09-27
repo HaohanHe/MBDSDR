@@ -7,12 +7,28 @@
 #include <QSplitter>
 #include <QFrame>
 #include <QLabel>
+#include <QPushButton>
 #include <QStatusBar>
+#include <QBoxLayout>
 
 #include "core/tokens.h"
 #include "dsp/spectrum_engine.h"
 
 namespace mbdsdr {
+
+// Helper: build a standard panel card with title
+static QFrame* makePanelCard(const QString& title, QWidget* parent) {
+    auto* card = new QFrame(parent);
+    card->setObjectName("panelCard");
+    auto* lay = new QVBoxLayout(card);
+    lay->setContentsMargins(tokens::kPanelPadLeft, tokens::kPanelPadTop,
+                            tokens::kPanelPadLeft, tokens::kPanelPadTop);
+    lay->setSpacing(12);
+    auto* t = new QLabel(title, card);
+    t->setObjectName("panelTitle");
+    lay->addWidget(t);
+    return card;
+}
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -26,67 +42,179 @@ MainWindow::MainWindow(QWidget* parent)
     vbox->setContentsMargins(0, 0, 0, 0);
     vbox->setSpacing(0);
 
-    // ---- Top bar (height from tokens) ----
+    // ======================= TOP BAR (pure black) =======================
     auto* topBar = new QWidget();
     topBar->setObjectName("topBar");
     topBar->setFixedHeight(tokens::kTopbarH);
-    auto* topLayout = new QHBoxLayout(topBar);
-    topLayout->setContentsMargins(20, 0, 20, 0);
-    auto* title = new QLabel("MBDSDR C++", topBar);
-    title->setObjectName("windowTitle");
-    topLayout->addWidget(title);
-    topLayout->addStretch();
-    statusLabel_ = new QLabel("TEST SIGNAL ENGINE -- 非硬件 / NOT HARDWARE", topBar);
-    statusLabel_->setObjectName("statusBanner");
-    topLayout->addWidget(statusLabel_);
+    auto* topLay = new QHBoxLayout(topBar);
+    topLay->setContentsMargins(tokens::kTopbarPadLeft, tokens::kTopbarPadTop,
+                               tokens::kTopbarPadRight, tokens::kTopbarPadBottom);
+    topLay->setSpacing(20);
+
+    // Left: clock
+    auto* clock = new QLabel("12:30", topBar);
+    clock->setObjectName("clockLabel");
+    topLay->addWidget(clock);
+
+    // Mileage group
+    auto* mileBox = new QVBoxLayout();
+    auto* mile = new QLabel("468km", topBar);
+    mile->setObjectName("mileageLabel");
+    auto* mileSub = new QLabel("预估", topBar);
+    mileSub->setObjectName("mileageSub");
+    mileBox->addWidget(mile);
+    mileBox->addWidget(mileSub);
+    topLay->addLayout(mileBox);
+
+    // Battery bar (placeholder: background track + fill)
+    auto* batteryTrack = new QFrame(topBar);
+    batteryTrack->setFixedSize(tokens::kBatteryW, tokens::kBatteryH);
+    batteryTrack->setStyleSheet(
+        QString("background: rgba(217,217,217,0.2); border-radius: %1px;")
+            .arg(tokens::kRadiusBattery));
+    auto* batteryFill = new QFrame(batteryTrack);
+    batteryFill->setGeometry(0, 0, 92, tokens::kBatteryH);
+    batteryFill->setStyleSheet(
+        QString("background: #939393; border-radius: %1px;")
+            .arg(tokens::kRadiusBattery));
+    topLay->addWidget(batteryTrack);
+
+    topLay->addSpacing(67); // PRND gap
+    topLay->addWidget(new QLabel("P R N D", topBar));
+
+    topLay->addStretch();
+
+    // Right: system icon area (placeholder)
+    auto* sysArea = new QWidget(topBar);
+    sysArea->setFixedWidth(tokens::kSystemIconAreaW);
+    auto* sysLay = new QHBoxLayout(sysArea);
+    sysLay->setContentsMargins(0, 0, 0, 0);
+    sysLay->setSpacing(12);
+    for (int i = 0; i < 3; ++i) {
+        auto* ic = new QPushButton(sysArea);
+        ic->setFixedSize(tokens::kSystemIconSize, tokens::kSystemIconSize);
+        ic->setStyleSheet("background: transparent; border: none;");
+        sysLay->addWidget(ic);
+    }
+    topLay->addWidget(sysArea);
+
     vbox->addWidget(topBar);
 
-    // ---- Horizontal splitter: left | center | right ----
+    // ======================= THREE-COLUMN SPLITTER =======================
     auto* splitter = new QSplitter(Qt::Horizontal, central);
 
-    auto* leftCard = new QFrame();
-    leftCard->setObjectName("card");
-    auto* leftLayout = new QVBoxLayout(leftCard);
-    leftLayout->setContentsMargins(20, 20, 20, 20);
-    auto* leftTitle = new QLabel("控制面板", leftCard);
-    leftTitle->setObjectName("sectionTitle");
-    leftLayout->addWidget(leftTitle);
-    leftLayout->addWidget(new QLabel("占位面板\n（Phase 2 接入增益/解调/带宽控件）", leftCard));
-    leftLayout->addStretch();
+    // Left panel: sky track placeholder
+    auto* leftCard = makePanelCard("天空轨道", splitter);
+    qobject_cast<QVBoxLayout*>(leftCard->layout())->addWidget(
+        new QLabel("占位：卫星 / 射频天空视图\n（Phase 5 接入）", leftCard));
+    qobject_cast<QVBoxLayout*>(leftCard->layout())->addStretch();
     splitter->addWidget(leftCard);
 
-    spectrum_ = new ui::SpectrumWidget(splitter);
-    splitter->addWidget(spectrum_);
+    // Center: spectrum widget embedded in a panel card
+    auto* centerCard = new QFrame(splitter);
+    centerCard->setObjectName("panelCard");
+    auto* centerLay = new QVBoxLayout(centerCard);
+    centerLay->setContentsMargins(0, 0, 0, 0);
+    centerLay->setSpacing(0);
+    spectrum_ = new ui::SpectrumWidget(centerCard);
+    centerLay->addWidget(spectrum_);
+    splitter->addWidget(centerCard);
 
-    auto* rightCard = new QFrame();
-    rightCard->setObjectName("card");
-    auto* rightLayout = new QVBoxLayout(rightCard);
-    rightLayout->setContentsMargins(20, 20, 20, 20);
-    auto* rightTitle = new QLabel("任务 / AI", rightCard);
-    rightTitle->setObjectName("sectionTitle");
-    rightLayout->addWidget(rightTitle);
-    rightLayout->addWidget(new QLabel("占位面板\n（Phase 6 接入 AI Agent / MCP）", rightCard));
-    rightLayout->addStretch();
+    // Right panel: current task
+    auto* rightCard = makePanelCard("当前任务", splitter);
+    qobject_cast<QVBoxLayout*>(rightCard->layout())->addWidget(
+        new QLabel("占位：AI Agent / 任务列表\n（Phase 6 接入）", rightCard));
+    qobject_cast<QVBoxLayout*>(rightCard->layout())->addStretch();
     splitter->addWidget(rightCard);
 
-    // Proportions from tokens: 0.19 : 0.62 : 0.19
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 4);
     splitter->setStretchFactor(2, 1);
     splitter->setSizes({240, 780, 240});
     vbox->addWidget(splitter, 1);
 
-    // ---- Bottom dock (height from tokens) ----
+    // ======================= BOTTOM DOCK (pure black) =======================
     auto* dock = new QFrame();
     dock->setObjectName("bottomDock");
     dock->setFixedHeight(tokens::kDockH);
-    auto* dockLayout = new QHBoxLayout(dock);
-    dockLayout->setContentsMargins(20, 0, 20, 0);
-    dockLayout->addWidget(new QLabel("Dock 占位：录制 / 回放 / VFO 选择", dock));
-    dockLayout->addStretch();
-    auto* hint = new QLabel("TEST SIGNAL -- 无硬件连接", dock);
-    hint->setObjectName("dockHint");
-    dockLayout->addWidget(hint);
+    auto* dockLay = new QHBoxLayout(dock);
+    dockLay->setContentsMargins(tokens::kDockPadX, tokens::kDockPadY,
+                                tokens::kDockPadX, tokens::kDockPadY);
+    dockLay->setSpacing(tokens::kDockIconGap);
+
+    // 1. Home button
+    auto* home = new QPushButton("⌂", dock);
+    home->setObjectName("homeBtn");
+    dockLay->addWidget(home);
+
+    // 2. Temp control group
+    auto* tempBox = new QHBoxLayout();
+    tempBox->setSpacing(8);
+    auto* leftArrow = new QLabel("‹", dock);
+    leftArrow->setObjectName("tempArrow");
+    auto* tempVal = new QLabel("23.5°", dock);
+    tempVal->setObjectName("tempLabel");
+    auto* rightArrow = new QLabel("›", dock);
+    rightArrow->setObjectName("tempArrow");
+    tempBox->addWidget(leftArrow);
+    tempBox->addWidget(tempVal);
+    tempBox->addWidget(rightArrow);
+    dockLay->addLayout(tempBox);
+
+    // 3. App dock: 5 icons
+    for (int i = 0; i < 5; ++i) {
+        auto* ic = new QPushButton(dock);
+        ic->setObjectName(i == 0 ? "dockIconSelected" : "dockIcon");
+        dockLay->addWidget(ic);
+    }
+
+    // 4. NowPlaying bar
+    auto* np = new QFrame(dock);
+    np->setFixedWidth(tokens::kNowPlayingW);
+    np->setStyleSheet("background: transparent;");
+    auto* npLay = new QHBoxLayout(np);
+    npLay->setContentsMargins(0, 0, 0, 0);
+    npLay->setSpacing(10);
+    auto* cover = new QFrame(np);
+    cover->setFixedSize(tokens::kNowPlayingCover, tokens::kNowPlayingCover);
+    cover->setStyleSheet(
+        QString("background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 %1, stop:1 %2);"
+                "border-radius: %3px;")
+            .arg(QString::fromUtf8(tokens::kNowPlayingCoverFrom),
+                 QString::fromUtf8(tokens::kNowPlayingCoverTo),
+                 QString::number(tokens::kRadiusAlbumSm)));
+    npLay->addWidget(cover);
+    auto* npMid = new QVBoxLayout();
+    auto* song = new QLabel("Starboy", np);
+    song->setObjectName("songTitle");
+    auto* prog = new QFrame(np);
+    prog->setFixedHeight(4);
+    prog->setStyleSheet("background: rgba(255,255,255,0.3); border-radius: 2px;");
+    npMid->addWidget(song);
+    npMid->addWidget(prog);
+    npLay->addLayout(npMid, 1);
+    auto* play = new QPushButton("▶", np);
+    play->setObjectName("playBtn");
+    auto* next = new QPushButton("⏭", np);
+    next->setObjectName("nextBtn");
+    npLay->addWidget(play);
+    npLay->addWidget(next);
+    dockLay->addWidget(np);
+
+    // 5. Second temp control group (mirror)
+    auto* tempBox2 = new QHBoxLayout();
+    tempBox2->setSpacing(8);
+    auto* l2 = new QLabel("‹", dock); l2->setObjectName("tempArrow");
+    auto* t2 = new QLabel("23.5°", dock); t2->setObjectName("tempLabel");
+    auto* r2 = new QLabel("›", dock); r2->setObjectName("tempArrow");
+    tempBox2->addWidget(l2); tempBox2->addWidget(t2); tempBox2->addWidget(r2);
+    dockLay->addLayout(tempBox2);
+
+    // 6. Volume button
+    auto* vol = new QPushButton("♪", dock);
+    vol->setObjectName("volBtn");
+    dockLay->addWidget(vol);
+
     vbox->addWidget(dock);
 
     statusBar()->showMessage("MBDSDR C++ Phase 1 -- 统一架构骨架 + FFT 频谱热路径（测试数据）");
