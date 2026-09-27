@@ -130,6 +130,14 @@ bool SpectrumEngine::tryConnectRtl() {
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->stop();
     auto rtl = std::make_unique<RtlSdrSource>();
+    // Replay cached front-end options onto the fresh device BEFORE start().
+    // start() applies stored members to the hardware in the correct order.
+    rtl->setDirectSampling(cachedDirectSampling_);
+    rtl->setOffsetTuning(cachedOffsetTuning_);
+    rtl->setRtlAgc(cachedRtlAgc_);
+    rtl->setTunerAgc(cachedTunerAgc_);
+    rtl->setBiasTee(cachedBiasTee_);
+    rtl->setPpm(cachedPpm_);
     if (rtl->start()) {
         source_ = std::move(rtl);
         emit sourceChanged("RTL-SDR", true);
@@ -177,26 +185,32 @@ void SpectrumEngine::setGatedRecordingEnabled(bool e) {
 }
 
 void SpectrumEngine::setDirectSampling(int mode) {
+    cachedDirectSampling_ = mode;
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->setDirectSampling(mode);
 }
 void SpectrumEngine::setOffsetTuning(bool on) {
+    cachedOffsetTuning_ = on;
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->setOffsetTuning(on);
 }
 void SpectrumEngine::setRtlAgc(bool on) {
+    cachedRtlAgc_ = on;
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->setRtlAgc(on);
 }
 void SpectrumEngine::setTunerAgc(bool on) {
+    cachedTunerAgc_ = on;
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->setTunerAgc(on);
 }
 void SpectrumEngine::setBiasTee(bool on) {
+    cachedBiasTee_ = on;
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->setBiasTee(on);
 }
 void SpectrumEngine::setPpm(double ppm) {
+    cachedPpm_ = ppm;
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->setPpm(ppm);
 }

@@ -27,6 +27,9 @@
 #include <QDialog>
 #include <QFormLayout>
 
+#include <cmath>
+#include <algorithm>
+
 #include "core/tokens.h"
 #include "core/spectrum_frame.h"
 #include "dsp/spectrum_engine.h"
@@ -308,6 +311,9 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onAdsbAircraft);
     connect(spectrum_, &ui::SpectrumWidget::fftSizeRequested,
             engine_, &dsp::SpectrumEngine::setFftSize);
+    // Zoom/pan the spectrum and waterfall stay in lockstep.
+    connect(spectrum_, &ui::SpectrumWidget::visibleRangeChanged,
+            waterfall_, &ui::WaterfallWidget::setVisibleRange);
 
     connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, [this](double mhz) { engine_->onSetCenterFreq(mhz * 1e6); });
@@ -450,11 +456,146 @@ MainWindow::~MainWindow() {
 void MainWindow::saveUiState() {
     QSettings s("MBDSDR", "MBDSDR");
     s.setValue("geometry", saveGeometry());
+
+    // ---- RX state (Hz / dB as stored) ----
+    s.setValue("rx/centerFreq", freqSpin_->value() * 1e6);
+    {
+        static const double kRates[] = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
+        int idx = srCombo_->currentIndex();
+        if (idx >= 0 && idx <= 3) s.setValue("rx/sampleRate", kRates[idx]);
+    }
+    s.setValue("rx/demodMode", demodCombo_->currentText());
+    {
+        static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
+        int idx = bwCombo_->currentIndex();
+        if (idx >= 0 && idx <= 4) s.setValue("rx/bandwidth", kBws[idx]);
+    }
+    s.setValue("rx/gain", static_cast<double>(gainSlider_->value()));
+    s.setValue("rx/squelchEnabled", squelchCheck_->isChecked());
+    s.setValue("rx/squelchThreshold", static_cast<float>(squelchSlider_->value()));
+    s.setValue("rx/dbMin", static_cast<float>(spectrum_->dbMinValue()));
+    s.setValue("rx/dbMax", static_cast<float>(spectrum_->dbMaxValue()));
+
+    // ---- RTL front-end ----
+    s.setValue("rtl/ppm", ppmSpin_->value());
+    s.setValue("rtl/directSampling", dsCombo_->currentIndex());
+    s.setValue("rtl/rtlAgc", rtlAgcChk_->isChecked());
+    s.setValue("rtl/tunerAgc", tunerAgcChk_->isChecked());
+    s.setValue("rtl/offsetTuning", offsetChk_->isChecked());
+    s.setValue("rtl/biasTee", biasTeeChk_->isChecked());   // default false
+
+    // ---- View ----
+    s.setValue("view/zoomFactor", spectrum_->zoomFactor());
+    s.sync();
 }
 
 void MainWindow::restoreUiState() {
     QSettings s("MBDSDR", "MBDSDR");
     restoreGeometry(s.value("geometry").toByteArray());
+
+    // Block widget signals while we repopulate controls; we dispatch to the
+    // engine explicitly below so each setting is applied exactly once.
+    freqSpin_->blockSignals(true);
+    srCombo_->blockSignals(true);
+    demodCombo_->blockSignals(true);
+    bwCombo_->blockSignals(true);
+    gainSlider_->blockSignals(true);
+    squelchSlider_->blockSignals(true);
+    squelchCheck_->blockSignals(true);
+    dsCombo_->blockSignals(true);
+    offsetChk_->blockSignals(true);
+    rtlAgcChk_->blockSignals(true);
+    tunerAgcChk_->blockSignals(true);
+    biasTeeChk_->blockSignals(true);
+    ppmSpin_->blockSignals(true);
+
+    // ---- RX ----
+    const double centerHz = s.value("rx/centerFreq", 98.5e6).toDouble();
+    freqSpin_->setValue(centerHz / 1e6);
+
+    static const double kRates[] = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
+    const double rateHz = s.value("rx/sampleRate", 2.4e6).toDouble();
+    int srIdx = 2;
+    for (int i = 0; i < 4; ++i) if (std::abs(kRates[i] - rateHz) < 1e3) srIdx = i;
+    srCombo_->setCurrentIndex(srIdx);
+
+    const QString demod = s.value("rx/demodMode", "NFM").toString();
+    int dIdx = demodCombo_->findText(demod);
+    if (dIdx < 0) dIdx = 1;  // NFM
+    demodCombo_->setCurrentIndex(dIdx);
+
+    static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
+    const double bwHz = s.value("rx/bandwidth", 12500.0).toDouble();
+    int bwIdx = 1;
+    for (int i = 0; i < 5; ++i) if (std::abs(kBws[i] - bwHz) < 500.0) bwIdx = i;
+    bwCombo_->setCurrentIndex(bwIdx);
+
+    const double gainDb = s.value("rx/gain", 0.0).toDouble();
+    gainSlider_->setValue(static_cast<int>(std::round(gainDb)));
+    gainValue_->setText(QString("%1 dB").arg(gainSlider_->value()));
+
+    const bool sqlEn = s.value("rx/squelchEnabled", false).toBool();
+    squelchCheck_->setChecked(sqlEn);
+    const float sqlThr = s.value("rx/squelchThreshold", -50.0f).toFloat();
+    squelchSlider_->setValue(static_cast<int>(std::round(sqlThr)));
+    squelchValue_->setText(QString("%1 dB").arg(squelchSlider_->value()));
+
+    const float dbMin = s.value("rx/dbMin", static_cast<float>(tokens::kDbLowerDefault)).toFloat();
+    const float dbMax = s.value("rx/dbMax", static_cast<float>(tokens::kDbUpperDefault)).toFloat();
+    spectrum_->setDbSpinValues(static_cast<int>(std::round(dbMin)),
+                               static_cast<int>(std::round(dbMax)));
+
+    // ---- RTL ----
+    const double ppm = s.value("rtl/ppm", 0.0).toDouble();
+    ppmSpin_->setValue(ppm);
+    const int ds = s.value("rtl/directSampling", 0).toInt();
+    dsCombo_->setCurrentIndex(std::clamp(ds, 0, 2));
+    rtlAgcChk_->setChecked(s.value("rtl/rtlAgc", false).toBool());
+    tunerAgcChk_->setChecked(s.value("rtl/tunerAgc", false).toBool());
+    offsetChk_->setChecked(s.value("rtl/offsetTuning", false).toBool());
+    biasTeeChk_->setChecked(s.value("rtl/biasTee", false).toBool());   // default false
+
+    // ---- View ----
+    const double zoom = s.value("view/zoomFactor", 1.0).toDouble();
+    spectrum_->setZoomFactor(zoom);
+
+    // Unblock.
+    freqSpin_->blockSignals(false);
+    srCombo_->blockSignals(false);
+    demodCombo_->blockSignals(false);
+    bwCombo_->blockSignals(false);
+    gainSlider_->blockSignals(false);
+    squelchSlider_->blockSignals(false);
+    squelchCheck_->blockSignals(false);
+    dsCombo_->blockSignals(false);
+    offsetChk_->blockSignals(false);
+    rtlAgcChk_->blockSignals(false);
+    tunerAgcChk_->blockSignals(false);
+    biasTeeChk_->blockSignals(false);
+    ppmSpin_->blockSignals(false);
+
+    // ---- Dispatch restored values to the engine (UI controls already show
+    // the right state; push the same values into the running pipeline). ----
+    engine_->onSetCenterFreq(centerHz);
+    engine_->onSetSampleRate(kRates[srIdx]);
+    engine_->setDemodMode(demodCombo_->currentText());
+    engine_->setBandwidth(kBws[bwIdx]);
+    engine_->onSetGain(static_cast<double>(gainSlider_->value()));
+    engine_->setSquelchEnabled(sqlEn);
+    engine_->setSquelchThreshold(static_cast<float>(squelchSlider_->value()));
+
+    engine_->setDirectSampling(dsCombo_->currentIndex());
+    engine_->setOffsetTuning(offsetChk_->isChecked());
+    engine_->setRtlAgc(rtlAgcChk_->isChecked());
+    engine_->setTunerAgc(tunerAgcChk_->isChecked());
+    engine_->setBiasTee(biasTeeChk_->isChecked());
+    engine_->setPpm(ppmSpin_->value());
+
+    // Manual gain slider only matters in manual tuner-gain mode.
+    gainSlider_->setEnabled(!tunerAgcChk_->isChecked());
+    // Note: setZoomFactor() above already emitted visibleRangeChanged; the
+    // first arriving spectrum frame will re-emit with viewCenterHz_ anchored
+    // to the real f0, which is what syncs the waterfall.
 }
 
 void MainWindow::onSourceChanged(const QString& name, bool connected) {
