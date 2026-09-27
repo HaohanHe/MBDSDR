@@ -19,7 +19,9 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
         source_ = std::make_unique<TestSignalSource>();
         source_->start();
     }
-    emit sourceChanged(source_->name(), source_->isConnected());
+    // NOTE: do NOT emit sourceChanged() here. The engine is being constructed
+    // before MainWindow's connect() calls exist, so the signal would be lost.
+    // The initial state is emitted once in run(), after connections are wired.
 
     audioOut_ = new AudioOutput(this);
     gatedRec_.setOutputDir("recordings");
@@ -154,6 +156,12 @@ void SpectrumEngine::setGatedRecordingEnabled(bool e) {
 void SpectrumEngine::run() {
     std::vector<std::complex<float>> iq;
     iq.resize(static_cast<std::size_t>(fftSize_.load()));
+
+    // Connections now exist on the UI side; report the real source state.
+    {
+        QMutexLocker lk(&sourceMutex_);
+        emit sourceChanged(source_->name(), source_->isConnected());
+    }
 
     while (running_.load()) {
         int n = fftSize_.load();

@@ -1,4 +1,5 @@
 build/
+build_win/
 *.o
 *.a
 compile_commands.json

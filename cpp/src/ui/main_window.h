@@ -41,7 +41,7 @@ private:
     ui::SpectrumWidget* spectrum_ = nullptr;
     ui::SkyView*     skyView_   = nullptr;
     ui::WorldView*   worldView_ = nullptr;
-    QStackedWidget* centerStack_ = nullptr;
+    QTabWidget* centerTabs_ = nullptr;
 
     // Left panel controls
     QDoubleSpinBox* freqSpin_   = nullptr;

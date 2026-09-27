@@ -186,18 +186,12 @@ MainWindow::MainWindow(QWidget* parent)
     centerCard->setObjectName("panelCard");
     auto* centerLay = new QVBoxLayout(centerCard);
     centerLay->setContentsMargins(0, 0, 0, 0);
-    centerStack_ = new QStackedWidget(centerCard);
+    centerTabs_ = new QTabWidget(centerCard);
     spectrum_ = new ui::SpectrumWidget(centerCard);
-    centerStack_->addWidget(spectrum_);
     worldView_ = new ui::WorldView(centerCard);
-    centerStack_->addWidget(worldView_);
-    centerLay->addWidget(centerStack_);
-    auto* toggleRow = new QHBoxLayout;
-    auto* specBtn = new QPushButton("频谱", centerCard);
-    auto* worldBtn = new QPushButton("世界", centerCard);
-    toggleRow->addWidget(specBtn);
-    toggleRow->addWidget(worldBtn);
-    centerLay->addLayout(toggleRow);
+    centerTabs_->addTab(spectrum_, "频谱");
+    centerTabs_->addTab(worldView_, "世界");
+    centerLay->addWidget(centerTabs_);
     splitter->addWidget(centerCard);
 
     // ---- Right panel: tabs ----
@@ -270,6 +264,8 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onCwDecoded);
     connect(engine_, &dsp::SpectrumEngine::adsbAircraft,
             this, &MainWindow::onAdsbAircraft);
+    connect(spectrum_, &ui::SpectrumWidget::fftSizeRequested,
+            engine_, &dsp::SpectrumEngine::setFftSize);
 
     connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, [this](double mhz) { engine_->onSetCenterFreq(mhz * 1e6); });
@@ -294,7 +290,26 @@ MainWindow::MainWindow(QWidget* parent)
     connect(squelchSlider_, &QSlider::valueChanged,
             this, [this](int v) {
                 squelchValue_->setText(QString("%1 dB").arg(v));
+                engine_->setSquelchThreshold(static_cast<float>(v));
             });
+    connect(squelchCheck_, &QCheckBox::stateChanged, this, [this](int st) {
+        bool en = (st != Qt::Unchecked);
+        engine_->setSquelchEnabled(en);
+        if (!en) squelchState_->setText("状态: CLOSED");
+    });
+    connect(srCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+                static const double kRates[] = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
+                if (idx >= 0 && idx <= 3) engine_->onSetSampleRate(kRates[idx]);
+            });
+    connect(bwCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+                static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
+                if (idx >= 0 && idx <= 4) engine_->setBandwidth(kBws[idx]);
+            });
+    connect(gatedCheck_, &QCheckBox::stateChanged, this, [this](int st) {
+        engine_->setGatedRecordingEnabled(st != Qt::Unchecked);
+    });
     connect(recordBtn_, &QPushButton::clicked, this, &MainWindow::onRecordClicked);
 
     connect(connectBtn_, &QPushButton::clicked, this, [this]() {
@@ -306,9 +321,6 @@ MainWindow::MainWindow(QWidget* parent)
             connectBtn_->setText("连接");
         }
     });
-
-    connect(specBtn, &QPushButton::clicked, this, [this]() { centerStack_->setCurrentWidget(spectrum_); });
-    connect(worldBtn, &QPushButton::clicked, this, [this]() { centerStack_->setCurrentWidget(worldView_); });
 
     connect(aboutBtn, &QPushButton::clicked, this, [this]() {
         ui::AboutDialog dlg(this);
@@ -389,6 +401,9 @@ void MainWindow::restoreUiState() {
 void MainWindow::onSourceChanged(const QString& name, bool connected) {
     statusLabel_->setText(connected ? QString("● %1").arg(name) : QString("● %1 (test)").arg(name));
     if (connectBtn_) connectBtn_->setText(connected ? "断开" : "连接");
+    if (sourceBanner_) sourceBanner_->setText(connected
+        ? QString("%1 已连接（真实硬件）").arg(name)
+        : QStringLiteral("RTL-SDR 未连接，使用测试信号"));
     setControlsEnabled(connected);
 }
 
@@ -415,6 +430,8 @@ void MainWindow::onRecordingState(bool recording, const QString& path) {
 }
 
 void MainWindow::onRecordClicked() {
+    if (recordBtn_->text().contains("停止")) engine_->stopRecording();
+    else engine_->startRecording();
 }
 
 void MainWindow::onCwDecoded(const QString& text, double wpm) {
