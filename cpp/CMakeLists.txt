@@ -32,6 +32,7 @@ set(SOURCES
     src/ui/spectrum_widget.cpp
     src/ui/sky_view.cpp
     src/ui/world_view.cpp
+    src/ui/waterfall.cpp
     src/ui/settings_dialog.cpp
     src/ui/about_dialog.cpp
     src/dsp/fft.cpp
@@ -63,6 +64,7 @@ set(HEADERS
     src/core/spectrum_frame.h
     src/ui/main_window.h
     src/ui/spectrum_widget.h
+    src/ui/waterfall.h
     src/dsp/source.h
     src/dsp/fft.h
     src/dsp/iq_buffer.h
@@ -87,6 +89,7 @@ target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multim
 if(RTLSDR_FOUND)
     target_compile_definitions(mbdsdr PRIVATE HAVE_RTLSDR=1)
     target_include_directories(mbdsdr PRIVATE ${RTLSDR_INCLUDE_DIRS})
+    target_link_directories(mbdsdr PRIVATE ${RTLSDR_LIBRARY_DIRS})
     target_link_libraries(mbdsdr PRIVATE ${RTLSDR_LIBRARIES})
     message(STATUS "RTL-SDR support: ENABLED (librtlsdr ${RTLSDR_VERSION})")
 else()

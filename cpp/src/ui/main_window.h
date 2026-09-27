@@ -17,7 +17,7 @@ class QStackedWidget;
 
 namespace mbdsdr {
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; }
-namespace ui   { class SpectrumWidget; class SkyView; class WorldView; }
+namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class WaterfallWidget; }
 namespace ai   { class Agent; }
 
 class MainWindow : public QMainWindow {
@@ -41,6 +41,7 @@ private:
     ui::SpectrumWidget* spectrum_ = nullptr;
     ui::SkyView*     skyView_   = nullptr;
     ui::WorldView*   worldView_ = nullptr;
+    ui::WaterfallWidget* waterfall_ = nullptr;
     QTabWidget* centerTabs_ = nullptr;
 
     // Left panel controls

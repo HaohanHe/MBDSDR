@@ -35,6 +35,7 @@
 #include "ai/ai_config.h"
 #include "ui/sky_view.h"
 #include "ui/world_view.h"
+#include "ui/waterfall.h"
 #include "ui/settings_dialog.h"
 #include "ui/about_dialog.h"
 
@@ -189,7 +190,17 @@ MainWindow::MainWindow(QWidget* parent)
     centerTabs_ = new QTabWidget(centerCard);
     spectrum_ = new ui::SpectrumWidget(centerCard);
     worldView_ = new ui::WorldView(centerCard);
-    centerTabs_->addTab(spectrum_, "频谱");
+    waterfall_ = new ui::WaterfallWidget(centerCard);
+
+    // Spectrum tab: line spectrum on top, scrolling waterfall below (SDR++ style).
+    auto* specSplit = new QSplitter(Qt::Vertical, centerCard);
+    specSplit->setChildrenCollapsible(false);
+    specSplit->addWidget(spectrum_);
+    specSplit->addWidget(waterfall_);
+    specSplit->setStretchFactor(0, 3);
+    specSplit->setStretchFactor(1, 2);
+
+    centerTabs_->addTab(specSplit, "频谱");
     centerTabs_->addTab(worldView_, "世界");
     centerLay->addWidget(centerTabs_);
     splitter->addWidget(centerCard);
@@ -250,6 +261,8 @@ MainWindow::MainWindow(QWidget* parent)
     engine_ = new dsp::SpectrumEngine(this);
     connect(engine_, &dsp::SpectrumEngine::spectrumReady,
             spectrum_, &ui::SpectrumWidget::setSpectrum);
+    connect(engine_, &dsp::SpectrumEngine::spectrumReady,
+            waterfall_, &ui::WaterfallWidget::setSpectrum);
     connect(engine_, &dsp::SpectrumEngine::sourceChanged,
             this, &MainWindow::onSourceChanged);
     connect(engine_, &dsp::SpectrumEngine::audioLevel,
