@@ -33,12 +33,25 @@ def ctrl(tmp_path_factory):
 
 
 def test_no_qt_imported():
-    """core 包导入后，sys.modules 里不得有任何 Qt 绑定。"""
-    qt_mods = [
-        m for m in sys.modules
-        if m.startswith(("PySide", "PyQt", "shiboken"))
-    ]
-    assert not qt_mods, f"core 不应引入 Qt，却加载了: {qt_mods}"
+    """core 包本身不得引入 Qt。
+
+    在独立子进程里验证（套件中其它 GUI 测试会把 PySide6 加载进本进程的
+    sys.modules，全局检查会被污染），这是 headless 架构的硬验收标准。
+    """
+    import subprocess
+    import sys
+
+    code = (
+        "import sys;"
+        "import mbdsdr_ai.core;"
+        "qt=[m for m in sys.modules if m.startswith(('PySide','PyQt','shiboken'))];"
+        "print('QT:'+','.join(qt) if qt else 'QT:NONE')"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True, timeout=60, check=True,
+    ).stdout.strip()
+    assert out.endswith("QT:NONE"), f"core 引入了 Qt 绑定: {out}"
 
 
 def test_no_backend_degrades_safely():

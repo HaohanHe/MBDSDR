@@ -212,10 +212,10 @@ class SDRController:
         self._vfos: Any = None
         self._anr: Any = None
 
-        # ---- 地面站 ----
-        self._gs_lat: float = 39.9042    # 北京默认
-        self._gs_lon: float = 116.4074
-        self._gs_alt: float = 50.0
+        # ---- 地面站（默认 0,0,0；卫星功能前须显式 set_ground_station）----
+        self._gs_lat: float = 0.0
+        self._gs_lon: float = 0.0
+        self._gs_alt: float = 0.0
 
         # ---- 扫描 / 解码 / 录制句柄 ----
         self._scans: Dict[str, Dict[str, Any]] = {}
