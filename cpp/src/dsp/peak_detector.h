@@ -29,10 +29,14 @@ struct PeakInfo {
 /// Detect peaks in an fft-shifted dBFS frame (bin 0 = f0 - fs/2).
 /// sampleRateHz / centerFreqHz map bin index -> absolute frequency.
 /// thresholdDb is the offset ABOVE the spectral median (noise floor).
+/// absFloorDbfs is an absolute dBFS floor: a candidate must exceed BOTH the
+/// relative gate and this floor, suppressing sidelobes / numerical noise that
+/// sit far below any real received signal.
 QList<PeakInfo> detectPeaks(const std::vector<float>& dbfs,
                             double sampleRateHz,
                             double centerFreqHz,
-                            double thresholdDb);
+                            double thresholdDb,
+                            double absFloorDbfs = -100.0);
 
 } // namespace dsp
 } // namespace mbdsdr

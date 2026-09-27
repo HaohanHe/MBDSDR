@@ -110,6 +110,11 @@ target_include_directories(test_fft PRIVATE src)
 target_link_libraries(test_fft PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME fft COMMAND test_fft)
 
+add_executable(test_peak_detector tests/test_peak_detector.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_peak_detector PRIVATE src)
+target_link_libraries(test_peak_detector PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME peak_detector COMMAND test_peak_detector)
+
 add_executable(test_channelizer tests/test_channelizer.cpp
     src/dsp/channelizer.cpp src/dsp/fft.cpp)
 target_include_directories(test_channelizer PRIVATE src)

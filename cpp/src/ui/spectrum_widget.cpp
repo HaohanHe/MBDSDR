@@ -13,6 +13,7 @@
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QTableWidgetItem>
+#include <QSettings>
 
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -95,12 +96,22 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     topRow->addWidget(new QLabel("门限", this));
     peakThreshSpin_ = new QSpinBox(this);
     peakThreshSpin_->setRange(tokens::kPeakThresholdMin, tokens::kPeakThresholdMax);
-    peakThreshSpin_->setValue(static_cast<int>(tokens::kPeakThresholdDefault));
     peakThreshSpin_->setSuffix(" dB");
-    peakThresholdDb_ = static_cast<float>(tokens::kPeakThresholdDefault);
+    // Restore a persisted threshold; fall back to the token default.
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        int saved = s.value("rx/peakThresholdDb",
+                            static_cast<int>(tokens::kPeakThresholdDefault)).toInt();
+        saved = std::clamp(saved, tokens::kPeakThresholdMin, tokens::kPeakThresholdMax);
+        peakThreshSpin_->setValue(saved);
+        peakThresholdDb_ = static_cast<float>(saved);
+    }
     connect(peakThreshSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
             this, [this](int v) {
         peakThresholdDb_ = static_cast<float>(v);
+        // Persist immediately (cheap single-value write; no need for the
+        // debounced save timer MainWindow uses for high-frequency events).
+        QSettings("MBDSDR", "MBDSDR").setValue("rx/peakThresholdDb", v);
         detectPeaks();          // re-run immediately on threshold change
         update();
     });
@@ -129,6 +140,14 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         bool ok = false;
         const double mhz = item->data(Qt::UserRole).toDouble(&ok);
         if (ok) emit frequencyChanged(mhz * 1e6);
+    });
+    // Single click (select row) -> highlight that peak's marker on the plot,
+    // but do NOT retune. The highlighted index indexes into peaks_ (which is
+    // sorted loudest-first, same order as the table rows).
+    connect(peakTable_, &QTableWidget::currentCellChanged,
+            this, [this](int row, int, int, int) {
+        highlightedPeak_ = (row >= 0 && row < peaks_.size()) ? row : -1;
+        update();
     });
     outer->addWidget(peakTable_);
 
@@ -223,7 +242,8 @@ void SpectrumWidget::setSpectrum(const SpectrumFrame& frame) {
 
 void SpectrumWidget::detectPeaks() {
     peaks_ = dsp::detectPeaks(frame_.dbfs, frame_.sampleRateHz,
-                              frame_.centerFreqHz, peakThresholdDb_);
+                              frame_.centerFreqHz, peakThresholdDb_,
+                              tokens::kPeakAbsFloorDbfs);
 
     // Throttle table rebuilds: only touch the widget when the set of rounded
     // peak frequencies actually changes (avoids a QTableWidget rebuild every
@@ -234,8 +254,8 @@ void SpectrumWidget::detectPeaks() {
     if (sig == lastPeakSignature_) return;
     lastPeakSignature_ = sig;
 
-    const bool wasSpan = peakTable_->rowCount() == 1
-                         && peakTable_->columnSpan(0, 0) == 3;
+    // The row set changed -> drop any previous row highlight.
+    highlightedPeak_ = -1;
     peakTable_->clearSpans();
     peakTable_->setRowCount(0);
 
@@ -260,7 +280,6 @@ void SpectrumWidget::detectPeaks() {
         peakTable_->setItem(row, 2,
             new QTableWidgetItem(QString("%1").arg(pk.bandwidthHz / 1e3, 0, 'f', 2)));
     }
-    (void)wasSpan;
 }
 
 void SpectrumWidget::paintEvent(QPaintEvent*) {
@@ -364,15 +383,21 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
         p.drawLine(vfoX, mT, vfoX, mT + plotH);
     }
 
-    // Detected peak markers: small filled triangles along the top edge, only
-    // for peaks that fall inside the current visible window.
+    // Detected peak markers: filled triangles along the top edge, only for
+    // peaks inside the current visible window. The row currently selected in
+    // the table (highlightedPeak_) is drawn larger, in kAccent.
     {
-        const int mhw = tokens::scaled(tokens::kPeakMarkerHalfW);
-        const int mh  = tokens::scaled(tokens::kPeakMarkerH);
         p.setPen(Qt::NoPen);
-        p.setBrush(QColor(QString::fromUtf8(tokens::kSuccess)));
-        for (const auto& pk : peaks_) {
+        for (int pi = 0; pi < peaks_.size(); ++pi) {
+            const auto& pk = peaks_[pi];
             if (pk.freqHz < fLo || pk.freqHz > fHi) continue;
+            const bool selected = (pi == highlightedPeak_);
+            const int mhw = tokens::scaled(selected ? tokens::kPeakMarkerHiHalfW
+                                                   : tokens::kPeakMarkerHalfW);
+            const int mh  = tokens::scaled(selected ? tokens::kPeakMarkerHiH
+                                                    : tokens::kPeakMarkerH);
+            p.setBrush(QColor(QString::fromUtf8(selected ? tokens::kAccent
+                                                         : tokens::kSuccess)));
             const int x = mL + static_cast<int>(plotW * (pk.freqHz - fLo) / spanVis);
             QPolygon tri;
             tri << QPoint(x - mhw, mT) << QPoint(x + mhw, mT) << QPoint(x, mT + mh);
