@@ -14,7 +14,14 @@ Agent::Agent(QObject* parent) : QObject(parent) {
     workerThread_ = new QThread(this);
     worker_ = new LLMWorker();
     worker_->moveToThread(workerThread_);
+    connect(worker_, &LLMWorker::chatFinished, this, &Agent::responseReady);
+    connect(worker_, &LLMWorker::toolCalled, this, &Agent::toolCalled);
     workerThread_->start();
+}
+
+void Agent::setEngine(dsp::SpectrumEngine* e) {
+    engine_ = e;
+    worker_->setEngine(e);
 }
 
 Agent::~Agent() {
@@ -24,6 +31,9 @@ Agent::~Agent() {
 }
 
 void Agent::configureFromConfig() {
+    worker_->setApiKey(config_.apiKey);
+    worker_->setBaseUrl(config_.baseUrl);
+    worker_->setModel(config_.model);
     emit statusChanged(config_.isConfigured() ? "LLM 已配置" : "未配置 API Key — 仅本地指令");
 }
 
@@ -66,9 +76,15 @@ void Agent::sendMessage(const QString& userInput) {
         return;
     }
 
-    // Async LLM call via worker thread. For now, simplified: just emit a status.
-    // Full async tool-calling loop is TODO; local commands work immediately.
-    emit responseReady("LLM 模式已配置，但完整异步工具循环待实现。当前可使用本地指令（频率/模式/录制）。");
+    // Async: invoke worker thread to do LLM chat with tool loop
+    QList<ChatMessage> msgs;
+    msgs.append(ChatMessage{"system", "你是 SDR 接收控制助手。可以调谐频率、切换解调模式、控制录制、扫描频段。回答简洁。"});
+    msgs.append(history_);
+    auto tools = toolDefs();
+
+    QMetaObject::invokeMethod(worker_, [this, msgs, tools]() {
+        worker_->doChat(msgs, tools);
+    }, Qt::QueuedConnection);
 }
 
 } // namespace ai
