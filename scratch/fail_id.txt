@@ -1,0 +1,67 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.11, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/user/Doubao/chats/38438160041798146
+plugins: anyio-4.15.1, libtmux-0.62.0
+collected 1204 items
+
+tests/acars_test.py ...............                                      [  1%]
+tests/goes_lrit_test.py ..................                               [  2%]
+tests/limesuite_test.py ..................                               [  4%]
+tests/minimodem_test.py .......                                          [  4%]
+tests/rtlsdr_params_test.py ................                             [  6%]
+tests/test_adsb_map.py .........                                         [  6%]
+tests/test_adsb_map_extras.py .....                                      [  7%]
+tests/test_agent_context.py ...........                                  [  8%]
+tests/test_anr.py .....                                                  [  8%]
+tests/test_apt_decoder.py ......                                         [  9%]
+tests/test_astronomy.py ..............                                   [ 10%]
+tests/test_audio_chain.py ....................                           [ 11%]
+tests/test_audio_device_manager.py ..........                            [ 12%]
+tests/test_audio_selection_e2e.py ......                                 [ 13%]
+tests/test_background_decoder.py ......                                  [ 13%]
+tests/test_benchmark_essence_defaults.py .............                   [ 14%]
+tests/test_block_stream.py .......                                       [ 15%]
+tests/test_bookmark_manager.py ............                              [ 16%]
+tests/test_channel_analyzer.py ....                                      [ 16%]
+tests/test_channelizer_fix.py ........                                   [ 17%]
+tests/test_cli.py .....                                                  [ 17%]
+tests/test_clock_recovery.py .....                                       [ 18%]
+tests/test_coarse_sync.py .....                                          [ 18%]
+tests/test_debug_source.py ..........                                    [ 19%]
+tests/test_desktop_panels.py ..........                                  [ 20%]
+tests/test_desktop_ui_responsiveness.py ....................             [ 22%]
+tests/test_device_manager.py .....                                       [ 22%]
+tests/test_digital_decode_ui.py .............                            [ 23%]
+tests/test_dso.py ......                                                 [ 24%]
+tests/test_dsp_agc.py ..                                                 [ 24%]
+tests/test_dsp_backend_audio_player.py ........                          [ 24%]
+tests/test_dsp_backend_gain_staging.py .....                             [ 25%]
+tests/test_dsp_backend_recorder.py ....                                  [ 25%]
+tests/test_dsp_backend_resampler.py .....                                [ 25%]
+tests/test_dsp_backend_squelch.py .....                                  [ 26%]
+tests/test_dsp_backend_vfo_frequency.py .........                        [ 27%]
+tests/test_dsp_demod_channelizer.py ....                                 [ 27%]
+tests/test_dsp_demod_modes.py .......                                    [ 28%]
+tests/test_dsp_frontend_dc_blocker.py ...                                [ 28%]
+tests/test_dsp_frontend_decimating_fir.py ...                            [ 28%]
+tests/test_dsp_frontend_fir_taps.py .....                                [ 28%]
+tests/test_dsp_frontend_iq_correction.py ...                             [ 29%]
+tests/test_dsp_frontend_polyphase_resampler.py ...                       [ 29%]
+tests/test_dsp_stream.py .................                               [ 30%]
+tests/test_fake_rtl_chain.py ....
+=== FakeRtl 端到端链路数据量摘要 ===
+  采样率            : 2048.0 kHz
+  IQ 样本数         : 204800  shape=(204800,)  complex64
+  FFT 点数          : 204800
+  WFM 音频样本数    : 204799  float32
+  重采样 48k 样本数 : 4800
+  音频队列样本数    : 4800（1 块）
+=== 每一步都有真数据流到下一步：插上即通 ===
+.F.......FFF.                           [ 32%]
+tests/test_fec.py ...........                                            [ 33%]
+tests/test_fengyun.py ....                                               [ 33%]
+tests/test_fengyun_dvbs2.py ........                                     [ 34%]
+tests/test_flowgraph_runtime.py ......                                   [ 34%]
+tests/test_frequency_manager_v2.py ......                                [ 35%]
+tests/test_ft8_modes_benchmark.py ......                                 [ 35%]
+tests/test_full_integration.py ..........................
