@@ -456,6 +456,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     new QShortcut(QKeySequence("Ctrl+R"), this, this, [this]() {
         recordBtn_->click();
     });
+    static bool muted = false;
+    new QShortcut(QKeySequence(Qt::Key_Space), this, this, [this]() {
+        muted = !muted;
+        engine_->setMuted(muted);
+        statusLabel_->setText(muted ? "已静音" : "");
+    });
 
     // Spectrum drag tuning
     connect(spectrum_, &ui::SpectrumWidget::frequencyChanged, this, [this](double hz) {

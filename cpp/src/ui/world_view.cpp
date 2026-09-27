@@ -3,6 +3,7 @@
 #include "core/tokens.h"
 
 #include <QPainter>
+#include <cmath>
 
 namespace mbdsdr {
 namespace ui {
@@ -61,12 +62,17 @@ void WorldView::paintEvent(QPaintEvent*) {
                latLonToPx(-35, 50).x() - latLonToPx(35, -20).x(),
                latLonToPx(-35, 50).y() - latLonToPx(35, -20).y());
 
-    // Station marker (Beijing 116.4E, 39.9N)
-    QPointF station = latLonToPx(39.9, 116.4);
-    p.setPen(QPen(QColor(tokens::kSuccess), 2));
-    p.setBrush(QColor(tokens::kSuccess));
-    p.drawEllipse(station, 5, 5);
-    p.drawText(station + QPointF(8, -8), "本站");
+    // Station marker
+    if (!std::isnan(stationLat_) && !std::isnan(stationLon_)) {
+        QPointF station = latLonToPx(stationLat_, stationLon_);
+        p.setPen(QPen(QColor(tokens::kSuccess), 2));
+        p.setBrush(QColor(tokens::kSuccess));
+        p.drawEllipse(station, 5, 5);
+        p.drawText(station + QPointF(8, -8), "本站");
+    } else {
+        p.setPen(QColor(tokens::kAccent));
+        p.drawText(rect(), Qt::AlignCenter, "未设置本站位置");
+    }
 
     // Aircraft
     p.setPen(QPen(QColor(tokens::kAccent), 2));
