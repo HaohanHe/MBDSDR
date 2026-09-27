@@ -31,6 +31,7 @@ public:
     void setFftSize(int n);
     int  fftSize() const { return fftSize_.load(); }
     void shutdown();
+    double scanBand(double lowHz, double highHz, double stepHz);  // returns peak dBFS
 
 public slots:
     void onSetCenterFreq(double freqHz);
