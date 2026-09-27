@@ -41,6 +41,8 @@ except Exception:  # pragma: no cover
     _apt = None
     _HAS_APT = False
 
+from tokens import tokens as _tok  # noqa: E402
+
 # 空态文案（测试据此断言面板进入“无数据”状态）。
 SAT_WAIT_TEXT = "等待卫星下行信号"
 
@@ -77,7 +79,10 @@ class SatelliteImagePanel(QWidget):
         ll.setContentsMargins(0, 0, 0, 0)
         self.image_label = QLabel(SAT_WAIT_TEXT)
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setStyleSheet("background: #1b1b1b; color: #bbb;")
+        _t = _tok()
+        self.image_label.setStyleSheet(
+            f"background: {_t.COLORS['image_placeholder_bg']}; "
+            f"color: {_t.text('tertiary')};")
         self.image_label.setMinimumSize(320, 240)
         ll.addWidget(self.image_label, 1)
         self.stats_label = QLabel("行数: 0  | 同步: --  | 信号质量: --")

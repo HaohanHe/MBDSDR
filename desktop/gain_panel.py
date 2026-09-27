@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QFormLayout,
 )
 
+from tokens import tokens
+
 try:  # pragma: no cover
     from mbdsdr_ai.gain_staging import GainStager
     _GAIN_OK = True
@@ -59,7 +61,8 @@ class _StageSlider(QWidget):
         lay.addWidget(self.slider)
 
         self.range_label = QLabel("范围: --")
-        self.range_label.setStyleSheet("color:#888; font-size:8pt;")
+        self.range_label.setStyleSheet(
+            "color:" + tokens().COLORS["disabled_gray"] + "; font-size:8pt;")
         lay.addWidget(self.range_label)
 
         self._min = 0.0

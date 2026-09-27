@@ -535,8 +535,9 @@ class MainWindow(QMainWindow):
 
         # 坞面板折叠按钮（汉堡菜单）：一键显示/隐藏右侧控制/状态/AI 坞
         self.toggle_docks_btn = QPushButton("☰")
-        self.toggle_docks_btn.setFixedWidth(36)
-        self.toggle_docks_btn.setFixedHeight(32)
+        self.toggle_docks_btn.setMinimumWidth(28)
+        self.toggle_docks_btn.setMaximumWidth(48)
+        self.toggle_docks_btn.setMinimumHeight(28)
         self.toggle_docks_btn.setToolTip("显示 / 隐藏右侧面板坞")
         self.toggle_docks_btn.clicked.connect(self._toggle_right_docks)
         toolbar.addWidget(self.toggle_docks_btn)
@@ -550,13 +551,13 @@ class MainWindow(QMainWindow):
 
         # 连接按钮（未连接时高亮引导用户点击；连接成功后取消高亮）
         self.connect_btn = QPushButton("连接")
-        self.connect_btn.setFixedHeight(32)
+        self.connect_btn.setMinimumHeight(28)
         self.connect_btn.setStyleSheet(self._connect_button_qss())
         self.connect_btn.clicked.connect(self._connect_dialog)
         toolbar.addWidget(self.connect_btn)
 
         self.disconnect_btn = QPushButton("断开")
-        self.disconnect_btn.setFixedHeight(32)
+        self.disconnect_btn.setMinimumHeight(28)
         self.disconnect_btn.clicked.connect(self._disconnect)
         self.disconnect_btn.setEnabled(False)
         toolbar.addWidget(self.disconnect_btn)
@@ -574,7 +575,7 @@ class MainWindow(QMainWindow):
         # 解调模式下拉（与控制面板 mode_combo 同源：改它走既有信号链切解调）
         self.toolbar_mode_combo = QComboBox()
         self.toolbar_mode_combo.addItems(["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"])
-        self.toolbar_mode_combo.setFixedHeight(32)
+        self.toolbar_mode_combo.setMinimumHeight(28)
         self.toolbar_mode_combo.setToolTip("解调模式")
         self.toolbar_mode_combo.currentTextChanged.connect(
             self._on_toolbar_mode_selected)
@@ -587,35 +588,47 @@ class MainWindow(QMainWindow):
         self.theme_combo = QComboBox()
         for name, theme in THEMES.items():
             self.theme_combo.addItem(theme.display_name, name)
-        self.theme_combo.setFixedHeight(32)
+        self.theme_combo.setMinimumHeight(28)
         self.theme_combo.currentIndexChanged.connect(self._on_theme_combo_changed)
         toolbar.addWidget(self.theme_combo)
 
         toolbar.addSeparator()
 
-        # 布局预设切换（focus 专注 / analysis 分析 / grid 网格）
+        # 布局预设切换（动态：内置 专注/分析/网格 + 用户自定义，启动时填充）
         toolbar.addWidget(QLabel(" 布局: "))
         self.layout_combo = QComboBox()
-        self.layout_combo.addItem("专注", "focus")
-        self.layout_combo.addItem("分析", "analysis")
-        self.layout_combo.addItem("网格", "grid")
-        self.layout_combo.setFixedHeight(32)
+        self.layout_combo.setMinimumHeight(28)
+        self.layout_combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.layout_combo.setToolTip("切换布局预设（可自由拖动，自动持久化）")
         self.layout_combo.currentIndexChanged.connect(self._on_layout_preset_changed)
         toolbar.addWidget(self.layout_combo)
+
+        # 保存当前布局为自定义预设
+        self.layout_save_btn = QPushButton("保存")
+        self.layout_save_btn.setMinimumHeight(28)
+        self.layout_save_btn.setToolTip("把当前布局（页签顺序/三栏比例/面板可见性）存为自定义预设")
+        self.layout_save_btn.clicked.connect(self._on_save_layout)
+        toolbar.addWidget(self.layout_save_btn)
+
+        # 删除当前用户预设（内置预设置灰）
+        self.layout_delete_btn = QPushButton("删除")
+        self.layout_delete_btn.setMinimumHeight(28)
+        self.layout_delete_btn.setToolTip("删除当前选中的自定义布局（内置布局不可删）")
+        self.layout_delete_btn.clicked.connect(self._on_delete_layout)
+        toolbar.addWidget(self.layout_delete_btn)
 
         toolbar.addSeparator()
 
         # 多 VFO：新建 VFO 按钮（在当前频谱中心建一个次听 VFO）
         self.new_vfo_btn = QPushButton("+ VFO")
-        self.new_vfo_btn.setFixedHeight(32)
+        self.new_vfo_btn.setMinimumHeight(28)
         self.new_vfo_btn.setToolTip("在当前频谱中心新建一个 VFO（次听）")
         self.new_vfo_btn.clicked.connect(self._on_new_vfo_button)
         toolbar.addWidget(self.new_vfo_btn)
 
         # 主听/次听循环切换按钮（Ctrl+Tab）
         self.cycle_vfo_btn = QPushButton("切换主听")
-        self.cycle_vfo_btn.setFixedHeight(32)
+        self.cycle_vfo_btn.setMinimumHeight(28)
         self.cycle_vfo_btn.setToolTip("在 VFO 之间循环切换主听（Ctrl+Tab）")
         self.cycle_vfo_btn.clicked.connect(self._on_cycle_vfo)
         toolbar.addWidget(self.cycle_vfo_btn)
@@ -625,8 +638,10 @@ class MainWindow(QMainWindow):
         # 音量滑块（0-100 映射到控制面板 volume_slider 0-63，走既有音量链）
         self.toolbar_volume = QSlider(Qt.Horizontal)
         self.toolbar_volume.setRange(0, 100)
-        self.toolbar_volume.setFixedWidth(100)
-        self.toolbar_volume.setFixedHeight(32)
+        self.toolbar_volume.setMinimumWidth(60)
+        self.toolbar_volume.setMaximumWidth(200)
+        self.toolbar_volume.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.toolbar_volume.setMinimumHeight(28)
         self.toolbar_volume.setToolTip("音量（映射到控制面板 0-63）")
         self._toolbar_vol_prev = 48
         self.toolbar_volume.setValue(48)  # 先定值再接线，避免构造期误触发
@@ -635,7 +650,7 @@ class MainWindow(QMainWindow):
 
         # 静音按钮（checkable：按下静音到 0，再按恢复到上次音量）
         self.toolbar_mute_btn = QPushButton("静音")
-        self.toolbar_mute_btn.setFixedHeight(32)
+        self.toolbar_mute_btn.setMinimumHeight(28)
         self.toolbar_mute_btn.setCheckable(True)
         self.toolbar_mute_btn.toggled.connect(self._on_toolbar_mute_toggled)
         toolbar.addWidget(self.toolbar_mute_btn)
@@ -648,14 +663,14 @@ class MainWindow(QMainWindow):
         # 录音按钮
         self.record_btn = QPushButton("录音")
         self.record_btn.setObjectName("recordButton")
-        self.record_btn.setFixedHeight(32)
+        self.record_btn.setMinimumHeight(28)
         self.record_btn.setCheckable(True)
         self.record_btn.toggled.connect(self._toggle_record)
         toolbar.addWidget(self.record_btn)
 
         # 回放按钮（占位：选择 .iq 录音文件，baseband_io 支持时才真正回放）
         self.replay_btn = QPushButton("回放")
-        self.replay_btn.setFixedHeight(32)
+        self.replay_btn.setMinimumHeight(28)
         self.replay_btn.setToolTip("选择已录制的 .iq 文件进行离线回放")
         self.replay_btn.clicked.connect(self._replay_recording)
         toolbar.addWidget(self.replay_btn)
@@ -911,6 +926,21 @@ class MainWindow(QMainWindow):
         # 自由浮窗管理器已弃用（用户否决）；保留类实例避免 import / 预设 combo 崩。
         self.dock_layout = DockLayoutManager(self)
 
+        # ---- 用户自定义布局：面板菜单 + 动态下拉 + 启动恢复上次 active 布局 ----
+        self._build_panel_menu()
+        self._restore_user_layout()
+
+    def _restore_user_layout(self) -> None:
+        """启动时：填充布局下拉、恢复上次 active 布局的页签顺序/比例/可见性。"""
+        try:
+            self.dock_layout.restore_state()
+        except Exception:
+            pass
+        try:
+            self._refresh_layout_combo()
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # 右栏页签辅助：面板包进无框 QScrollArea 加入 right_tab，并记录
     # <attr_name>_dock = scroll（数据 tap 用 isVisible() 守卫：非当前页签时
@@ -934,7 +964,8 @@ class MainWindow(QMainWindow):
     def _build_ai_command_bar(self, parent: QWidget) -> None:
         bar = QFrame(parent)
         bar.setObjectName("aiCommandBar")
-        bar.setFixedHeight(48)
+        bar.setMinimumHeight(36)
+        bar.setMaximumHeight(64)
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(18, 0, 12, 0)
         lay.setSpacing(8)
@@ -944,7 +975,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.cmd_input, stretch=1)
         self.cmd_mic_btn = QPushButton("🎤")
         self.cmd_mic_btn.setObjectName("iconButton")
-        self.cmd_mic_btn.setFixedSize(36, 36)
+        self.cmd_mic_btn.setMinimumSize(28, 28)
+        self.cmd_mic_btn.setMaximumSize(48, 48)
         self.cmd_mic_btn.setToolTip("语音输入（未连接麦克风时无操作）")
         self.cmd_mic_btn.clicked.connect(self._on_cmd_mic)
         lay.addWidget(self.cmd_mic_btn)
@@ -1028,7 +1060,9 @@ class MainWindow(QMainWindow):
         self.callsign_edit = QLineEdit()
         self.callsign_edit.setPlaceholderText("输入你的呼号")
         self.callsign_edit.setMaxLength(16)
-        self.callsign_edit.setFixedWidth(130)
+        self.callsign_edit.setMinimumWidth(80)
+        self.callsign_edit.setMaximumWidth(200)
+        self.callsign_edit.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.callsign_edit.setToolTip("业余无线电呼号（落盘保存，显示在射频天空图）")
         self.callsign_edit.editingFinished.connect(self._on_callsign_edited)
         lay.addWidget(self.callsign_edit)
@@ -1050,7 +1084,8 @@ class MainWindow(QMainWindow):
         # Home 按钮（回频谱页）
         self.home_btn = QPushButton("⌂")
         self.home_btn.setObjectName("iconButton")
-        self.home_btn.setFixedSize(36, 36)
+        self.home_btn.setMinimumSize(28, 28)
+        self.home_btn.setMaximumSize(48, 48)
         self.home_btn.setToolTip("回到频谱主页")
         self.home_btn.clicked.connect(self._go_home)
         lay.addWidget(self.home_btn)
@@ -1130,8 +1165,9 @@ class MainWindow(QMainWindow):
         """主操作（连接）按钮高亮 QSS——强调色取自 tokens，不硬编码 hex。"""
         accent = self._tok("light_accent", "#C4845C")
         hover = self._tok("light_accent_hover", "#D4946C")
+        fg = self._tok("text_primary", "#FFFFFF")
         return (
-            f"QPushButton {{ background-color:{accent}; color:#FFFFFF;"
+            f"QPushButton {{ background-color:{accent}; color:{fg};"
             f" font-weight:600; padding:0 14px; }}"
             f"QPushButton:hover {{ background-color:{hover}; }}")
 
@@ -1308,7 +1344,7 @@ class MainWindow(QMainWindow):
             self._apply_theme(theme_name)
 
     def _on_layout_preset_changed(self, index: int):
-        """顶栏布局预设下拉：切换 focus / analysis / grid。"""
+        """顶栏布局下拉：切换内置 / 用户自定义布局。"""
         name = self.layout_combo.itemData(index)
         if not name:
             return
@@ -1316,6 +1352,173 @@ class MainWindow(QMainWindow):
         if dlm is not None:
             dlm.apply_preset(name)
             dlm.save_state()
+        self._update_layout_delete_btn()
+
+    # ------------------------------------------------------------------
+    # 布局下拉 / 保存 / 删除 / 恢复出厂
+    # ------------------------------------------------------------------
+    def _refresh_layout_combo(self) -> None:
+        """从 dock_layout.list_layouts() 动态填充下拉，并选中当前 active 布局。"""
+        dlm = getattr(self, "dock_layout", None)
+        combo = getattr(self, "layout_combo", None)
+        if dlm is None or combo is None:
+            return
+        names = dlm.list_layouts()
+        active = dlm.current_preset
+        combo.blockSignals(True)
+        combo.clear()
+        for n in names:
+            combo.addItem(n, n)
+        idx = combo.findData(active)
+        if idx < 0:
+            idx = 0
+        combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
+        self._update_layout_delete_btn()
+
+    def _update_layout_delete_btn(self) -> None:
+        """内置布局不可删：删除按钮仅对用户自定义布局可用。"""
+        dlm = getattr(self, "dock_layout", None)
+        btn = getattr(self, "layout_delete_btn", None)
+        combo = getattr(self, "layout_combo", None)
+        if dlm is None or btn is None or combo is None:
+            return
+        name = combo.currentData()
+        btn.setEnabled(bool(name) and not dlm.is_builtin(name))
+
+    def _on_save_layout(self) -> None:
+        """弹出输入框，把当前布局存为自定义预设。"""
+        dlm = getattr(self, "dock_layout", None)
+        if dlm is None:
+            return
+        name, ok = QInputDialog.getText(self, "保存布局", "布局名称:")
+        if not ok:
+            return
+        name = (name or "").strip()
+        if not name:
+            return
+        if dlm.save_user_layout(name):
+            self._refresh_layout_combo()
+            idx = self.layout_combo.findData(name)
+            if idx >= 0:
+                self.layout_combo.blockSignals(True)
+                self.layout_combo.setCurrentIndex(idx)
+                self.layout_combo.blockSignals(False)
+            self._update_layout_delete_btn()
+            self.statusBar().showMessage(f"已保存布局「{name}」", 3000)
+        else:
+            QMessageBox.warning(self, "保存失败", "无法保存布局，请重试。")
+
+    def _on_delete_layout(self) -> None:
+        """删除当前选中的用户布局（内置不可删）。"""
+        dlm = getattr(self, "dock_layout", None)
+        if dlm is None:
+            return
+        name = self.layout_combo.currentData()
+        if not name or dlm.is_builtin(name):
+            return
+        ret = QMessageBox.question(
+            self, "删除布局", f"删除自定义布局「{name}」？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ret != QMessageBox.Yes:
+            return
+        if dlm.delete_user_layout(name):
+            self._refresh_layout_combo()
+            # 删除后应用当前下拉选中项
+            cur = self.layout_combo.currentData()
+            if cur:
+                dlm.apply_preset(cur)
+                dlm.save_state()
+
+    def _on_reset_layout(self) -> None:
+        """恢复出厂布局：清除所有用户预设，回到首个内置。"""
+        dlm = getattr(self, "dock_layout", None)
+        if dlm is None:
+            return
+        ret = QMessageBox.question(
+            self, "恢复出厂布局",
+            "清除所有自定义布局并恢复到默认「专注」布局？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ret != QMessageBox.Yes:
+            return
+        dlm.reset_to_factory()
+        self._refresh_layout_combo()
+        self._rebuild_panel_menu_checks()
+
+    # ------------------------------------------------------------------
+    # 「面板」菜单：列出所有注册面板，checkable 控制页签显示/隐藏
+    # ------------------------------------------------------------------
+    def _find_panel_tab(self, spec):
+        """按注册表 spec.name 在前/右栏 QTabWidget 里找对应页签。返回 (tab, idx)。"""
+        for tab in (getattr(self, "left_tab", None),
+                    getattr(self, "right_tab", None)):
+            if tab is None:
+                continue
+            for i in range(tab.count()):
+                t = tab.tabText(i)
+                if t == spec.name or spec.name in t or t in spec.name:
+                    return tab, i
+        return None
+
+    def _build_panel_menu(self) -> None:
+        """在菜单栏加「面板」菜单：checkable 勾选控制各面板页签显示/隐藏。"""
+        menubar = self.menuBar()
+        panel_menu = menubar.addMenu("面板(&P)")
+        self._panel_menu = panel_menu
+        self._panel_actions: dict = {}
+        for spec in registry().list():
+            if not spec.closable:
+                continue
+            act = QAction(spec.name, self)
+            act.setCheckable(True)
+            loc = self._find_panel_tab(spec)
+            checked = True
+            if loc is not None:
+                tab, idx = loc
+                try:
+                    checked = bool(tab.isTabVisible(idx))
+                except Exception:
+                    checked = True
+            act.setChecked(checked)
+            act.triggered.connect(lambda checked, s=spec: self._toggle_panel(s, checked))
+            panel_menu.addAction(act)
+            self._panel_actions[spec.id] = act
+        panel_menu.addSeparator()
+        reset_act = QAction("恢复出厂布局", self)
+        reset_act.setToolTip("清除所有自定义布局并回到默认布局")
+        reset_act.triggered.connect(self._on_reset_layout)
+        panel_menu.addAction(reset_act)
+
+    def _toggle_panel(self, spec, checked: bool) -> None:
+        """面板菜单项勾选/取消：显示/隐藏对应页签（不删除控件，可随时再开）。"""
+        loc = self._find_panel_tab(spec)
+        if loc is None:
+            return
+        tab, idx = loc
+        try:
+            tab.setTabVisible(idx, bool(checked))
+        except Exception:
+            pass
+
+    def _rebuild_panel_menu_checks(self) -> None:
+        """重建面板菜单勾选态（恢复出厂 / 切换布局后调用）。"""
+        if not getattr(self, "_panel_actions", None):
+            return
+        for pid, act in self._panel_actions.items():
+            spec = registry().get(pid)
+            if spec is None:
+                continue
+            loc = self._find_panel_tab(spec)
+            checked = True
+            if loc is not None:
+                tab, idx = loc
+                try:
+                    checked = bool(tab.isTabVisible(idx))
+                except Exception:
+                    checked = True
+            act.blockSignals(True)
+            act.setChecked(checked)
+            act.blockSignals(False)
 
     # ========================================================================
     # 运行参数持久化（desktop_settings.json）
@@ -3534,7 +3737,7 @@ class MainWindow(QMainWindow):
         self.record_btn.setText("停止中")
         self.record_btn.setStyleSheet(
             f"background-color:{self._tok('danger', '#B85C5C')};"
-            " color:#FFFFFF; font-weight:600;")
+            f" color:{self._tok('text_primary', '#FFFFFF')}; font-weight:600;")
         try:
             self.control_panel.record_button.setText("停止录音")
             self.control_panel.record_status.setText("录音中... 00:00")

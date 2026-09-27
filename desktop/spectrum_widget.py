@@ -53,8 +53,8 @@ except Exception:  # pragma: no cover
 if _tokens is not None:
     _c = _tokens().COLORS
 else:  # pragma: no cover - tokens 缺失时的兜底深色值
-    _c = {"card_1": "#1f1f1f", "gray_400": "#585c63", "accent": "#919cac",
-          "success": "#6BA89A", "danger": "#B85C5C"}
+    _c = {"card_1": "#1f1f1f", "gray_400": "#585c63", "gray_200": "#939393",
+          "accent": "#919cac", "success": "#6BA89A", "danger": "#B85C5C"}
 
 PAL_BG = _c["card_1"]         # 画布背景（深卡片色）
 PAL_GRID = _c["gray_400"]     # 网格/文字
@@ -1074,7 +1074,7 @@ class SpectrumPanel(QWidget):
         # 对标 SDR++ main_window.cpp 顶部频率读数；这里只读展示，由 _refresh_status_labels 刷新。
         self._freq_label = QLabel("--")
         self._span_label = QLabel("--")
-        _lbl_color = _c["gray_200"] if _tokens is not None else "#939393"
+        _lbl_color = _c["gray_200"]
         self._freq_label.setStyleSheet(f"color:{_lbl_color};")
         self._span_label.setStyleSheet(f"color:{_lbl_color};")
         bar.addWidget(self._freq_label)

@@ -36,6 +36,9 @@ app = QApplication.instance() or QApplication(sys.argv)
     ("control_panel", "ControlPanel", {}),
     ("status_panel", "StatusPanel", {}),
     ("doppler_panel", "DopplerPanel", {}),
+    ("ai_panel", "AIPanel", {}),
+    ("adsb_panel", "AdsbPanel", {}),
+    ("satellite_image_panel", "SatelliteImagePanel", {}),
 ])
 def test_panel_instantiates_and_paints(module_name, class_name, kwargs):
     """每个修改过的面板类可实例化并触发重绘（grab），不崩。"""

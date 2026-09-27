@@ -205,15 +205,18 @@ class VfoPanel(QWidget):
             ol.setSpacing(2)
             primary_btn = QPushButton("主听" if not is_primary else "✓")
             primary_btn.setCheckable(False)
-            primary_btn.setFixedHeight(22)
+            primary_btn.setMinimumHeight(20)
+            primary_btn.setMaximumHeight(28)
             primary_btn.clicked.connect(
                 lambda _=False, vid=v.vfo_id: self.vfo_selected.emit(vid))
             mute_btn = QPushButton("静音" if not v.muted else "取消静音")
-            mute_btn.setFixedHeight(22)
+            mute_btn.setMinimumHeight(20)
+            mute_btn.setMaximumHeight(28)
             mute_btn.clicked.connect(
                 lambda _=False, vid=v.vfo_id: self._on_toggle_mute(vid))
             del_btn = QPushButton("删")
-            del_btn.setFixedHeight(22)
+            del_btn.setMinimumHeight(20)
+            del_btn.setMaximumHeight(28)
             del_btn.setStyleSheet("color:" + tokens().COLORS["danger"] + ";")
             del_btn.clicked.connect(
                 lambda _=False, vid=v.vfo_id: self.vfo_removed.emit(vid))

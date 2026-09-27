@@ -162,7 +162,9 @@ class AdsbMapPanel(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionMode(QTableWidget.NoSelection)
-        self.table.setFixedWidth(220)
+        # 右侧飞机列表：给弹性宽度范围，窗口缩放时跟随
+        self.table.setMinimumWidth(160)
+        self.table.setMaximumWidth(320)
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.Stretch)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)

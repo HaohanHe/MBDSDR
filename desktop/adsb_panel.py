@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 from mbdsdr_ai.adsb_map import AircraftTracker  # noqa: E402
+from tokens import tokens as _tok  # noqa: E402
 
 try:
     from mbdsdr_ai import adsb_lite as _adsb_lite
@@ -50,12 +51,13 @@ except Exception:  # pragma: no cover - 内核解码器缺失时面板降级
     _adsb_lite = None
     _HAS_ADSB = False
 
-# 与现有 adsb_map_panel 一致的米白三色系。
-_BG = QColor("#F5F3EF")
-_TEXT = QColor("#5B7B8C")
-_ACCENT = QColor("#C4845C")
-_GRID = QColor("#D8D2C8")
-_STATION = QColor("#4F7CAC")
+# 与现有 adsb_map_panel 一致的米白三色系（从 tokens 取色，主题联动）。
+_t = _tok()
+_BG = QColor(_t.COLORS["light_bg"])
+_TEXT = QColor(_t.COLORS["light_text"])
+_ACCENT = QColor(_t.COLORS["light_accent"])
+_GRID = QColor(_t.COLORS["light_grid"])
+_STATION = QColor(_t.COLORS["station_blue"])
 
 # 空态文案（测试据此断言面板进入“无数据”状态）。
 ADSB_WAIT_TEXT = "等待 1090MHz 数据"
