@@ -228,7 +228,7 @@ MainWindow::MainWindow(QWidget* parent)
     adsbLay->addWidget(adsbTable_);
     rightTabs_->addTab(adsbPage, "ADS-B");
 
-    skyView_ = new ui::SkyView(adsbPage);
+    skyView_ = new ui::SkyView();
     rightTabs_->addTab(skyView_, "天空");
 
     auto* aiPage = new QWidget;
@@ -365,10 +365,10 @@ MainWindow::MainWindow(QWidget* parent)
     connect(aiInput_, &QLineEdit::returnPressed, sendBtn, &QPushButton::click);
 
     new QShortcut(QKeySequence(Qt::Key_Right), this, this, [this]() {
-        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 + 10000);
+        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 + tokens::kFreqFineStepHz);
     });
     new QShortcut(QKeySequence(Qt::Key_Left), this, this, [this]() {
-        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 - 10000);
+        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 - tokens::kFreqFineStepHz);
     });
     new QShortcut(QKeySequence(Qt::Key_Up), this, this, [this]() {
         engine_->onSetGain(gainSlider_->value() + 1);
@@ -424,7 +424,9 @@ void MainWindow::onAudioLevel(float dbfs) {
     levelLabel_->setText(QString("电平: %1 dBFS").arg(dbfs, 0, 'f', 1));
     if (levelBar_) {
         int pct = qBound(0, static_cast<int>((dbfs + 60) / 60 * 100), 100);
-        levelBar_->setStyleSheet(QString("background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %1, stop:1 %2); border-radius: 4px;").arg(tokens::kCard1, tokens::kAccent));
+        levelBar_->setStyleSheet(QString("background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %1, stop:1 %2); border-radius: %3px;")
+            .arg(tokens::kCard1, tokens::kAccent)
+            .arg(tokens::kRadiusSmall));
         levelBar_->setText(QString("%1%").arg(pct));
     }
 }

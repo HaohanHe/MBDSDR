@@ -17,7 +17,7 @@ namespace ui {
 
 SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle("设置");
-    setMinimumWidth(420);
+    setMinimumWidth(tokens::scaled(tokens::kSettingsMinW));
 
     auto* tabs = new QTabWidget(this);
 

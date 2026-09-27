@@ -73,6 +73,7 @@ inline constexpr int kRadiusPanel     = 24;
 inline constexpr int kRadiusDockIcon   = 13;
 inline constexpr int kRadiusSearch     = 8;
 inline constexpr int kRadiusSplitter   = 10;
+inline constexpr int kRadiusSmall      = 4;
 inline constexpr const char* kRadiusCircle = "50%";
 
 // =====================================================================
@@ -99,6 +100,60 @@ inline constexpr int kPlotMarginL = 50;
 inline constexpr int kPlotMarginR = 12;
 inline constexpr int kPlotMarginT = 24;
 inline constexpr int kPlotMarginB = 28;
+
+// =====================================================================
+// Waterfall palette -- the single source of colors (hex only here)
+// =====================================================================
+struct WaterfallStop { float t; const char* hex; };
+inline constexpr WaterfallStop kWaterfallStops[] = {
+    {0.00f, "#000000"},
+    {0.12f, "#00005A"},
+    {0.25f, "#0028C8"},
+    {0.42f, "#00C8EB"},
+    {0.58f, "#28DC5A"},
+    {0.75f, "#FFEB3C"},
+    {0.88f, "#FF7800"},
+    {1.00f, "#FF281E"},
+};
+inline constexpr int kWaterfallMinH = 48;
+
+// =====================================================================
+// Spectrum widget sizes / offsets
+// =====================================================================
+inline constexpr int kSpectrumMinW     = 480;
+inline constexpr int kSpectrumMinH     = 320;
+inline constexpr int kSpectrumPad      = 8;
+inline constexpr int kSpectrumSpacing = 4;
+
+// dB axis label geometry
+inline constexpr int kDbLabelOffsetY = 6;
+inline constexpr int kDbLabelPadR     = 4;
+inline constexpr int kDbLabelH       = 12;
+
+// Frequency axis label geometry
+inline constexpr int kFreqLabelHalfW   = 40;
+inline constexpr int kFreqLabelOffsetY = 4;
+inline constexpr int kFreqLabelW       = 80;
+inline constexpr int kFreqLabelH       = 16;
+
+inline constexpr double kVfoLineWidth  = 1.5;
+inline constexpr int    kTooltipOffset = 8;
+
+// Settings dialog
+inline constexpr int kSettingsMinW = 420;
+
+// Fine tuning step (keyboard nudge)
+inline constexpr double kFreqFineStepHz = 10000.0;
+
+// QSS internal padding/margin (base px, scaled at generation time)
+inline constexpr int kBtnPadV         = 4;
+inline constexpr int kBtnPadH         = 12;
+inline constexpr int kSplitterMarginV = 8;
+inline constexpr int kSplitterMarginH = 2;
+inline constexpr int kComboPadV       = 4;
+inline constexpr int kComboPadH       = 10;
+inline constexpr int kGroupMarginTop  = 12;
+inline constexpr int kGroupPadTop    = 10;
 
 // =====================================================================
 // Ratios
@@ -130,6 +185,14 @@ inline QString buildDarkQss() {
     int radiusSearch = static_cast<int>(kRadiusSearch * f);
     int splitterW = static_cast<int>(kSplitterWidth * f);
     int radiusSplitter = static_cast<int>(kRadiusSplitter * f);
+    int btnPadV = static_cast<int>(kBtnPadV * f);
+    int btnPadH = static_cast<int>(kBtnPadH * f);
+    int splitterMarginV = static_cast<int>(kSplitterMarginV * f);
+    int splitterMarginH = static_cast<int>(kSplitterMarginH * f);
+    int comboPadV = static_cast<int>(kComboPadV * f);
+    int comboPadH = static_cast<int>(kComboPadH * f);
+    int groupMarginTop = static_cast<int>(kGroupMarginTop * f);
+    int groupPadTop = static_cast<int>(kGroupPadTop * f);
 
     return QStringLiteral(R"(
 QMainWindow, QWidget {
@@ -158,7 +221,7 @@ QPushButton {
     border-radius: %15px;
     font-size: %11pt;
     min-height: %16px;
-    padding: 4px 12px;
+    padding: %21px %22px;
 }
 QPushButton:hover  { background-color: %6; }
 QPushButton:pressed{ background-color: %4; }
@@ -167,7 +230,7 @@ QSplitter::handle:horizontal {
     width: %17px;
     background: %18;
     border-radius: %19px;
-    margin: 8px 2px;
+    margin: %23px %24px;
 }
 QStatusBar { background: %4; color: %10; border-top: 1px solid %5; }
 QComboBox {
@@ -175,7 +238,7 @@ QComboBox {
     color: %2;
     border: none;
     border-radius: %15px;
-    padding: 4px 10px;
+    padding: %25px %26px;
     min-height: %16px;
 }
 QComboBox QAbstractItemView {
@@ -188,8 +251,8 @@ QComboBox QAbstractItemView {
 QGroupBox {
     border: 1px solid %5;
     border-radius: %15px;
-    margin-top: 12px;
-    padding-top: 10px;
+    margin-top: %27px;
+    padding-top: %28px;
     color: %8;
     font-weight: 600;
 }
@@ -220,7 +283,15 @@ QPlainTextEdit, QTableWidget {
              QString::number(splitterW),
              splitterHandleRgba(),
              QString::number(radiusSplitter),
-             QString::fromUtf8(kAccent));
+             QString::fromUtf8(kAccent),
+             QString::number(btnPadV),
+             QString::number(btnPadH),
+             QString::number(splitterMarginV),
+             QString::number(splitterMarginH),
+             QString::number(comboPadV),
+             QString::number(comboPadH),
+             QString::number(groupMarginTop),
+             QString::number(groupPadTop));
 }
 
 } // namespace tokens
