@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QPushButton, QProgressBar, QGroupBox, QMessageBox,
 )
 
+from tokens import tokens
+
 # 过境结束阈值（与 sat_tracker.DEFAULT_MIN_ELEVATION_DEG 一致）。
 _MIN_ELEVATION_DEG = 5.0
 
@@ -50,7 +52,7 @@ class SatTrackPanel(QFrame):
         self.setFrameShape(QFrame.StyledPanel)
         self._tracking = False
         self._build_ui()
-        self._apply_styles()
+        # 面板级 setStyleSheet 已删除，由全局 dark_car QSS 接管按钮/分组框/标签样式。
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
@@ -59,11 +61,13 @@ class SatTrackPanel(QFrame):
         root.setSpacing(8)
 
         title = QLabel("卫星闭环自动跟踪")
-        title.setStyleSheet("font-size: 11pt; font-weight: 600; color: #5B7B8C;")
+        title.setStyleSheet("font-size: 11pt; font-weight: 600; color: "
+                            + tokens().text("secondary") + ";")
         root.addWidget(title)
 
         self.tle_date_label = QLabel("TLE 日期: --")
-        self.tle_date_label.setStyleSheet("color: #8a9aa5; font-size: 8.5pt;")
+        self.tle_date_label.setStyleSheet("color: " + tokens().text("tertiary")
+                                         + "; font-size: 8.5pt;")
         root.addWidget(self.tle_date_label)
 
         # ---- 卫星选择 + 下行频率 ----
@@ -129,19 +133,6 @@ class SatTrackPanel(QFrame):
 
         root.addStretch(1)
 
-    def _apply_styles(self):
-        self.setStyleSheet("""
-            QFrame#satTrackPanel { background: #F5F3EF; border: 1px solid #d8d2c8; }
-            QGroupBox { color: #5B7B8C; font-weight: 600; border: 1px solid #d8d2c8;
-                border-radius: 4px; margin-top: 8px; padding-top: 6px; }
-            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
-            QPushButton { background: #5B7B8C; color: #F5F3EF; border: none;
-                border-radius: 3px; padding: 4px 10px; font-size: 9pt; }
-            QPushButton:hover { background: #C4845C; }
-            QPushButton:disabled { background: #b9c2c7; color: #e6e6e6; }
-            QLabel { color: #3d4a52; }
-        """)
-
     # ------------------------------------------------------------ 对外接口
     def populate_satellites(self, names):
         """填充卫星下拉框；保持当前选中项尽量不变。"""
@@ -167,7 +158,8 @@ class SatTrackPanel(QFrame):
         self.freq_spin.setEnabled(not tracking)
         if not tracking:
             self.state_label.setText("已停止")
-            self.state_label.setStyleSheet("color: #8a9aa5; font-weight:600;")
+            self.state_label.setStyleSheet("color: " + tokens().text("tertiary")
+                                           + "; font-weight:600;")
 
     def set_observer_ready(self, ready: bool):
         """观测者位置是否就绪；未就绪时开始按钮置灰并提示。"""
@@ -185,7 +177,7 @@ class SatTrackPanel(QFrame):
             self.corr_label.setText("--")
             self.range_label.setText("--")
             self.el_bar.setValue(0)
-            self._set_el_color("#b9c2c7")
+            self._set_el_color(tokens().COLORS["gray_300"])
             return
 
         az = float(pos["azimuth"])
@@ -206,18 +198,25 @@ class SatTrackPanel(QFrame):
 
         if el < _MIN_ELEVATION_DEG:
             # 仰角 < 5°：变红 + 提示过境结束
-            self._set_el_color("#B85C5C")
+            _t = tokens()
+            self._set_el_color(_t.COLORS["danger"])
             self.state_label.setText("过境结束 (仰角<5°)")
-            self.state_label.setStyleSheet("color:#B85C5C; font-weight:600;")
+            self.state_label.setStyleSheet("color:" + _t.COLORS["danger"]
+                                           + "; font-weight:600;")
         else:
-            self._set_el_color("#6BA89A")
+            _t = tokens()
+            self._set_el_color(_t.COLORS["success"])
             self.state_label.setText("跟踪中")
-            self.state_label.setStyleSheet("color:#6BA89A; font-weight:600;")
+            self.state_label.setStyleSheet("color:" + _t.COLORS["success"]
+                                           + "; font-weight:600;")
 
     def _set_el_color(self, hex_color: str):
+        _t = tokens()
         self.el_bar.setStyleSheet(
-            f"QProgressBar {{ border:1px solid #d8d2c8; border-radius:3px; "
-            f"text-align:center; background:#eceae4; color:#3d4a52; }}"
+            f"QProgressBar {{ border:1px solid {_t.COLORS['gray_400']}; "
+            f"border-radius:3px; text-align:center; "
+            f"background:{_t.COLORS['card_2']}; "
+            f"color:{_t.text('secondary')}; }}"
             f"QProgressBar::chunk {{ background:{hex_color}; }}"
         )
 

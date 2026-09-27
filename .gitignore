@@ -96,3 +96,5 @@ docs/design_ref/
 # throwaway headless Chromium profiles / scratch
 tmp_stel/
 tmp_*.py
+.figma_work/
+mbdsdr-ui-mockup/_backup/

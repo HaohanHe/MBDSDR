@@ -2724,6 +2724,15 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # 新时空面板 tap：可见时喂 IQ 做 AMR 实时识别（节流 ~5Hz；不可见零开销）
+        try:
+            self._nst_tick = getattr(self, "_nst_tick", 0) + 1
+            if self._nst_tick >= 4:
+                self._nst_tick = 0
+                self._tap_new_spacetime_iq(iq, sr)
+        except Exception:
+            pass
+
         # VFO 面板列表刷新（节流：约每 10 帧）
         try:
             self._vfo_refresh_tick = getattr(self, "_vfo_refresh_tick", 0) + 1
@@ -2858,6 +2867,36 @@ class MainWindow(QMainWindow):
             sr = 2_400_000.0
         return read, sr
 
+    def _tap_new_spacetime_iq(self, iq: np.ndarray, sr: float) -> None:
+        """新时空面板 tap：面板可见时喂一段复基带 IQ 做 AMR 识别。
+
+        不可见（非当前 Tab）时零开销。中心频率优先取后端 get_frequency()，
+        回退 self._backend_center_hz。全程 try/except，绝不崩。无信号时面板
+        内部 analyzer 自会显示“未检测到信号”，绝不伪造数值。
+        """
+        p = getattr(self, "new_spacetime_panel", None)
+        if p is None or not hasattr(p, "update_iq"):
+            return
+        try:
+            if not p.isVisible():
+                return
+        except Exception:
+            return
+        try:
+            cf = float(self._backend_center_hz)
+        except Exception:
+            cf = 0.0
+        be = getattr(self, "_active_sdr_backend", None)
+        if be is not None and hasattr(be, "get_frequency"):
+            try:
+                cf = float(be.get_frequency())
+            except Exception:
+                pass
+        try:
+            p.update_iq(iq, float(sr), cf)
+        except Exception:
+            pass
+
     def _poll_sdr_iq(self):
         """每 50ms 从真实后端读一块 IQ，分发给频谱 / 录制 / FM 解调声卡。
 
@@ -2903,6 +2942,15 @@ class MainWindow(QMainWindow):
                     and getattr(self, "adsb_dock", None) is not None
                     and self.adsb_dock.isVisible()):
                 ap.feed_iq(iq, sr)
+        except Exception:
+            pass
+
+        # 新时空面板 tap：可见时喂 IQ 做 AMR 实时识别（节流 ~5Hz；不可见零开销）
+        try:
+            self._nst_poll_tick = getattr(self, "_nst_poll_tick", 0) + 1
+            if self._nst_poll_tick >= 4:
+                self._nst_poll_tick = 0
+                self._tap_new_spacetime_iq(iq, sr)
         except Exception:
             pass
 
@@ -3124,7 +3172,7 @@ class MainWindow(QMainWindow):
             try:
                 audio = _dsp.wfm_broadcast_demod(iq, sample_rate=sr, audio_sr=48000)
                 if audio is not None and audio.size > 0:
-                    player.write(audio)
+                    player.write(self._tap_demod_audio(audio))
             except Exception:
                 pass
             return
@@ -3137,7 +3185,7 @@ class MainWindow(QMainWindow):
                 if vfo_out is not None and len(vfo_out) > 16:
                     audio = self._demod_at_48k(_dsp, mode, vfo_out)
                     if audio is not None and audio.size > 0:
-                        player.write(audio)
+                        player.write(self._tap_demod_audio(audio))
                         vfo_ok = True
         except Exception:
             vfo_ok = False
@@ -3150,9 +3198,71 @@ class MainWindow(QMainWindow):
             audio = self._demod_at_native_sr(_dsp, mode, iq, sr)
             if audio is None or audio.size == 0:
                 return
-            player.write(audio)
+            player.write(self._tap_demod_audio(audio))
         except Exception:
             pass
+
+    def _tap_demod_audio(self, audio: np.ndarray) -> np.ndarray:
+        """解调后音频的统一后处理 / 分发：ANR 降噪 → tap 给 APRS / 卫星云图面板。
+
+        所有分支 try/except，绝不因 tap 失败影响声卡输出：
+          * 先把本块音频存为 ``self._last_demod_audio``，供「采样噪声底」按钮学习；
+          * ANR 开启时用 ``anr_panel.anr`` 谱减降噪（失败旁路原音频），节流回贴 SNR 改善；
+          * APRS 包 dock 可见时喂 48k 音频做 AFSK 解码（不可见零开销）；
+          * 卫星云图 dock 可见时喂 48k 音频做 APT 累积（面板内部点「开始解码」后才累积）。
+        返回（可能被 ANR 处理过的）音频，供 ``player.write``。
+        """
+        if audio is None or len(audio) == 0:
+            return audio
+        # 存最近一块音频，供「采样噪声底」按钮在无信号段学习
+        try:
+            self._last_demod_audio = np.asarray(audio, dtype=np.float32)
+        except Exception:
+            self._last_demod_audio = audio
+
+        out = audio
+        # 1) ANR 谱减降噪（开启才处理；失败旁路原音频）
+        try:
+            if getattr(self, "_anr_enabled", False):
+                anr_p = getattr(self, "anr_panel", None)
+                anr = getattr(anr_p, "anr", None) if anr_p is not None else None
+                if anr is not None and getattr(anr, "enabled", False):
+                    processed = anr.process(audio)
+                    if processed is not None and len(processed) == len(audio):
+                        # 节流回贴 SNR 改善（~2Hz，按 50ms/帧 ≈ 40 帧一次）
+                        self._anr_snr_tick = getattr(self, "_anr_snr_tick", 0) + 1
+                        if self._anr_snr_tick >= 40:
+                            self._anr_snr_tick = 0
+                            try:
+                                db = anr.snr_improvement_db(audio, processed)
+                                anr_p.set_snr_improvement(db)
+                            except Exception:
+                                pass
+                        out = processed
+        except Exception:
+            out = audio
+
+        # 2) APRS 包面板 tap（dock 可见才喂，避免不可见时白跑解码）
+        try:
+            ap = getattr(self, "digital_aprs_panel", None)
+            if (ap is not None and hasattr(ap, "feed_audio")
+                    and getattr(self, "aprs_dock", None) is not None
+                    and self.aprs_dock.isVisible()):
+                ap.feed_audio(out, 48000)
+        except Exception:
+            pass
+
+        # 3) 卫星云图面板 tap（dock 可见才喂；面板内部 start 后才累积）
+        try:
+            sp = getattr(self, "digital_sat_image_panel", None)
+            if (sp is not None and hasattr(sp, "feed_audio")
+                    and getattr(self, "sat_image_dock", None) is not None
+                    and self.sat_image_dock.isVisible()):
+                sp.feed_audio(out, 48000)
+        except Exception:
+            pass
+
+        return out
 
     @staticmethod
     def _demod_at_48k(dsp, mode: str, vfo_out: np.ndarray) -> np.ndarray:
@@ -3668,8 +3778,17 @@ class MainWindow(QMainWindow):
         pass  # AnrPanel 内部已改 anr.cfg.alpha
 
     def _on_anr_learn_noise(self):
-        """用当前音频块刷新噪声底。无后端时无操作。"""
-        pass
+        """用最近一块解调音频刷新噪声底。无音频 / 无 ANR 实例时无操作。"""
+        try:
+            audio = getattr(self, "_last_demod_audio", None)
+            if audio is None or len(audio) == 0:
+                return
+            anr_p = getattr(self, "anr_panel", None)
+            anr = getattr(anr_p, "anr", None) if anr_p is not None else None
+            if anr is not None and hasattr(anr, "learn_noise"):
+                anr.learn_noise(np.asarray(audio, dtype=np.float64))
+        except Exception:
+            pass
 
     def _on_audio_output_changed(self, dev_index: int):
         """设备面板选音频输出设备 → 切 AudioPlayer 输出设备。"""

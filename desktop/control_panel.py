@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont, QIntValidator, QDoubleValidator
 
+from tokens import tokens
+
 
 # 预设电台（FM，MHz）
 # 不预存地区性广播台：FM 频率随城市/地区不同，硬编码其他城市的电台没有意义。
@@ -626,7 +628,8 @@ class ControlPanel(QWidget):
             freq_hz = self._parse_freq_text(text)
         except (ValueError, OSError):
             # 解析失败：输入框变红，稍后恢复原值，绝不崩溃
-            self.freq_input.setStyleSheet("background-color:#d98a8a;")
+            self.freq_input.setStyleSheet(
+                "background-color:" + tokens().COLORS["danger"] + ";")
             QTimer.singleShot(700, self._restore_freq_input)
             return
         self.freq_input.setStyleSheet("")

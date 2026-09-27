@@ -99,6 +99,8 @@ from mbdsdr_ai.skyengine import stars as _stars
 from mbdsdr_ai.skyengine import satellites as _sats
 from mbdsdr_ai.skyengine import jtime as _jtime
 
+from tokens import tokens
+
 
 # ============================================================================
 # 数据类型
@@ -449,14 +451,18 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         self._tune_btn.setToolTip("按实时多普勒校正调谐到该卫星下行频率")
         self._tune_btn.clicked.connect(self._on_tune_satellite)
         self._doppler_label = QLabel("多普勒 --", self)
+        _t = tokens()
         self._doppler_label.setStyleSheet(
-            "QLabel { background: rgba(245,243,239,210); color:#3a5a6a;"
+            "QLabel { background: " + _t.COLORS["card_2"] + "; color: "
+            + _t.text("secondary") + ";"
             " padding:2px 6px; border-radius:3px; font-size:9pt; }")
         self._tune_btn.setStyleSheet(
-            "QPushButton { background: rgba(91,123,140,220); color:#F5F3EF;"
+            "QPushButton { background: " + _t.COLORS["accent"] + "; color: "
+            + _t.COLORS["bg_dark"] + ";"
             " border:none; padding:4px 10px; border-radius:3px; }"
-            "QPushButton:hover { background: rgba(196,132,92,220); }"
-            "QPushButton:disabled { background: rgba(150,150,150,120); }")
+            "QPushButton:hover { background: " + _t.COLORS["card_hover"] + "; }"
+            "QPushButton:disabled { background: " + _t.COLORS["card_1"] + "; color: "
+            + _t.text("disabled") + "; }")
         self._tune_btn.hide()
         self._doppler_label.hide()
         # 选中卫星名（None=未选卫星）；定时器刷新多普勒读数
@@ -471,11 +477,11 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         self._gnss_connected: bool = False
         self._gnss_fix_type: int = 0
         self._gnss_colors: Dict[str, QColor] = {
-            "GPS": QColor("#5B7B8C"),       # 蓝灰
-            "BeiDou": QColor("#C4845C"),    # 橙
-            "GLONASS": QColor("#6BA89A"),   # 柔和绿
-            "Galileo": QColor("#8C6B5B"),   # 柔和紫棕
-            "未知": QColor("#B0B0B0"),      # 灰
+            "GPS": QColor(_t.COLORS["accent"]),         # 蓝灰（token accent）
+            "BeiDou": QColor("#C4845C"),                # 橙（星座标识色，保留）
+            "GLONASS": QColor(_t.COLORS["success"]),    # 柔和绿（token success）
+            "Galileo": QColor("#8C6B5B"),               # 柔和紫棕（星座标识色，保留）
+            "未知": QColor(_t.COLORS["gray_300"]),      # 灰
         }
 
         # 交互状态
@@ -485,31 +491,31 @@ class RFSkyView(QWidget, SkyInteractionHandler):
 
         self._proj = self.projection
 
-        # 颜色（低饱和米白纸面配色）
+        # 颜色（CarWith dark_car 设计 token；天文天空渐变保留功能性配色）
         self._colors = {
-            "paper": QColor("#F5F3EF"),
+            "paper": QColor(_t.COLORS["card_1"]),
             "day_zenith": QColor("#DCE7EC"),
             "day_horizon": QColor("#F5F3EF"),
             "night_zenith": QColor("#0E1622"),
             "night_horizon": QColor("#1B2A3A"),
-            "primary": QColor("#5B7B8C"),
-            "accent": QColor("#C4845C"),
-            "good": QColor("#6BA89A"),        # 绿：真实数据
-            "warning": QColor("#B85C5C"),     # 红：警告/未连接
-            "grid_day": QColor(120, 140, 150, 90),
-            "grid_night": QColor(90, 110, 130, 120),
-            "horizon_day": QColor("#5B7B8C"),
-            "horizon_night": QColor("#7E97A8"),
-            "sat_weather": QColor("#5B7B8C"),
-            "sat_amateur": QColor("#C4845C"),
-            "signal": QColor("#C4845C"),
-            "interferer": QColor("#B85C5C"),
-            "custom": QColor("#6BA89A"),
-            "sun": QColor("#D9A441"),
-            "moon": QColor("#9AA7B4"),
-            "antenna": QColor("#C4845C"),
-            "antenna_beam": QColor(196, 132, 92, 36),
-            "heatmap_low": QColor("#3E5A4A"),
+            "primary": QColor(_t.COLORS["gray_200"]),
+            "accent": QColor(_t.COLORS["accent"]),
+            "good": QColor(_t.COLORS["success"]),        # 绿：真实数据
+            "warning": QColor(_t.COLORS["danger"]),      # 红：警告/未连接
+            "grid_day": QColor(88, 92, 99, 90),          # gray_400 带 alpha
+            "grid_night": QColor(88, 92, 99, 140),
+            "horizon_day": QColor(_t.COLORS["gray_300"]),
+            "horizon_night": QColor(_t.COLORS["gray_200"]),
+            "sat_weather": QColor(_t.COLORS["accent"]),
+            "sat_amateur": QColor("#C4845C"),            # 橙：业余星标识，保留
+            "signal": QColor(_t.COLORS["accent"]),
+            "interferer": QColor(_t.COLORS["danger"]),
+            "custom": QColor(_t.COLORS["success"]),
+            "sun": QColor("#D9A441"),                    # 天文天体色，保留
+            "moon": QColor("#9AA7B4"),                   # 天文天体色，保留
+            "antenna": QColor(_t.COLORS["accent"]),
+            "antenna_beam": QColor(145, 156, 172, 36),   # accent #919cac 带 alpha
+            "heatmap_low": QColor("#3E5A4A"),            # 热力图色阶，保留
             "heatmap_mid": QColor("#8A7A3A"),
             "heatmap_high": QColor("#8A4A3A"),
         }
@@ -1126,7 +1132,8 @@ class RFSkyView(QWidget, SkyInteractionHandler):
     def _ink(self) -> QColor:
         """根据昼夜亮度返回前景文字/网格色。"""
         b = self._sky_brightness
-        night = QColor("#D8DEE6")
+        _t = tokens()
+        night = QColor(_t.COLORS["gray_100"])
         day = QColor("#3A4550")
         r = int(night.red() * (1 - b) + day.red() * b)
         g = int(night.green() * (1 - b) + day.green() * b)
@@ -1283,7 +1290,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
     # ------------------------------------------------------------------ #
     def _draw_az_grid(self, painter: QPainter):
         painter.save()
-        grid_col = QColor(120, 150, 170, 70)
+        grid_col = QColor(88, 92, 99, 90)  # gray_400 带 alpha
         painter.setPen(QPen(grid_col, 1, Qt.DashLine))
         # 等方位射线 (每 30°), 从地平 alt=0 向天顶 alt=90
         for az in range(0, 360, 30):
@@ -1325,7 +1332,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             return
         jd = self._current_jd()
         painter.save()
-        grid_col = QColor(150, 120, 170, 60)
+        grid_col = QColor(88, 92, 99, 70)  # gray_400 带 alpha（赤道网格）
         painter.setPen(QPen(grid_col, 1, Qt.DotLine))
         # 赤纬圈: 每 30°, RA 扫一圈
         for dec in range(-60, 91, 30):
@@ -1376,10 +1383,11 @@ class RFSkyView(QWidget, SkyInteractionHandler):
     # ------------------------------------------------------------------ #
     def _draw_fov(self, painter: QPainter):
         painter.save()
+        _t = tokens()
         f = QFont(self._mono_font)
         f.setPointSize(9)
         painter.setFont(f)
-        painter.setPen(QColor(200, 210, 225, 220))
+        painter.setPen(QColor(_t.COLORS["gray_100"]))
         painter.drawText(self.width() - 92, 18,
                          f"FOV {self.view_state.fov_deg:4.1f}°")
         painter.restore()
@@ -1396,7 +1404,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         f.setBold(True)
         f.setPointSize(12)
         painter.setFont(f)
-        for az, label, col in ((0, "N", QColor("#D05A5A")),
+        for az, label, col in ((0, "N", QColor(tokens().COLORS["danger"])),
                                 (90, "E", self._ink()),
                                 (180, "S", self._ink()),
                                 (270, "W", self._ink())):
@@ -1520,6 +1528,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         painter.restore()
 
         info = self._selected_info or {}
+        _t = tokens()
         norad = info.get("norad")
         title = f"NORAD {norad}" if norad else obj.name
         kind_label = info.get("kind_label", "Satellite")
@@ -1565,7 +1574,8 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         box_h = len(lines) * 17 + 18
         box_x = 14
         box_y = 40
-        bg = QColor(20, 28, 38, 235)
+        bg = QColor(_t.COLORS["card_1"])
+        bg.setAlpha(235)
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(self._colors["accent"], 1))
         painter.drawRoundedRect(box_x, box_y, box_w, box_h, 6, 6)
@@ -1574,7 +1584,8 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             f = QFont(self._font)
             f.setBold(bold)
             painter.setFont(f)
-            painter.setPen(QColor(232, 238, 245) if not bold else QColor(255, 200, 140))
+            painter.setPen(QColor(_t.COLORS["text_primary"]) if not bold
+                           else QColor(_t.COLORS["accent"]))
             painter.drawText(box_x + 12, ty, text)
             ty += 17
         painter.restore()
@@ -1716,21 +1727,19 @@ class RFSkyView(QWidget, SkyInteractionHandler):
     def _draw_info_overlay(self, painter: QPainter):
         """左下角信息卡片。"""
         painter.save()
+        _t = tokens()
         card_w, card_h = 240, 150
         card_x, card_y = 12, self.height() - card_h - 12
-        bg = QColor(245, 243, 239, 220) if self._sky_brightness > 0.5 \
-            else QColor(20, 28, 38, 210)
-        border = QColor("#5B7B8C") if self._sky_brightness > 0.5 \
-            else QColor("#3A4A5A")
+        bg = QColor(_t.COLORS["card_2"])
+        bg.setAlpha(220)
+        border = QColor(_t.COLORS["gray_400"])
         painter.setBrush(QBrush(bg))
         painter.setPen(QPen(border, 1))
         painter.drawRoundedRect(card_x, card_y, card_w, card_h, 6, 6)
 
         ink = self._ink()
-        dim = QColor("#7A8694") if self._sky_brightness > 0.5 \
-            else QColor("#8A96A4")
-        label_col = QColor("#3A4550") if self._sky_brightness > 0.5 \
-            else QColor("#C8D0DA")
+        dim = QColor(_t.COLORS["gray_300"])
+        label_col = QColor(_t.COLORS["gray_100"])
 
         y = card_y + 20
         painter.setPen(label_col)
@@ -1794,21 +1803,21 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         if not self._upcoming_passes:
             return
         painter.save()
+        _t = tokens()
         rows = self._upcoming_passes[:8]
         row_h = 18
         panel_w = 190
         panel_h = 26 + len(rows) * row_h
         panel_x = self.width() - panel_w - 12
         panel_y = 56
-        bg = QColor(245, 243, 239, 220) if self._sky_brightness > 0.5 \
-            else QColor(20, 28, 38, 210)
+        bg = QColor(_t.COLORS["card_2"])
+        bg.setAlpha(220)
         painter.setBrush(QBrush(bg))
-        painter.setPen(QPen(QColor("#5B7B8C"), 1))
+        painter.setPen(QPen(QColor(_t.COLORS["gray_400"]), 1))
         painter.drawRoundedRect(panel_x, panel_y, panel_w, panel_h, 6, 6)
 
         ink = self._ink()
-        dim = QColor("#7A8694") if self._sky_brightness > 0.5 \
-            else QColor("#8A96A4")
+        dim = QColor(_t.COLORS["gray_300"])
         painter.setFont(self._font)
         painter.setPen(ink)
         painter.drawText(panel_x + 10, panel_y + 16, "未来过境 (24h)")
@@ -1871,6 +1880,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
     def _draw_gnss_overlay(self, painter: QPainter):
         """GNSS 状态与图例。"""
         painter.save()
+        _t = tokens()
         # 无地面站坐标时，中心区域由 _draw_data_source_overlay 的
         # "地面站未设置"空状态独占；这里不再绘制任何 GNSS 文字/图例，
         # 避免与居中的空状态文字重叠。
@@ -1882,7 +1892,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             f = QFont(self._font)
             f.setPointSize(11)
             painter.setFont(f)
-            painter.setPen(QColor("#9AA0A6"))
+            painter.setPen(QColor(_t.COLORS["gray_300"]))
             painter.drawText(QRectF(0, self.height() * 0.30, self.width(), 60),
                              Qt.AlignHCenter | Qt.AlignVCenter, "GNSS 未连接")
             painter.restore()
@@ -1903,10 +1913,10 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         card_h = 26 + row_h * (1 + len(rows))
         x0, y0 = 12.0, 12.0
 
-        bg = QColor(245, 243, 239, 225) if self._sky_brightness > 0.5 \
-            else QColor(20, 28, 38, 215)
+        bg = QColor(_t.COLORS["card_2"])
+        bg.setAlpha(225)
         painter.setBrush(QBrush(bg))
-        painter.setPen(QPen(QColor("#5B7B8C"), 1))
+        painter.setPen(QPen(QColor(_t.COLORS["gray_400"]), 1))
         painter.drawRoundedRect(QRectF(x0, y0, card_w, card_h), 6, 6)
 
         painter.setFont(self._font)
@@ -1933,6 +1943,7 @@ class RFSkyView(QWidget, SkyInteractionHandler):
           2. 有观测站但无 TLE -> "无 TLE 数据"（红色警告）
         """
         painter.save()
+        _t = tokens()
 
         if self._data_source == "none" or self._observer is None:
             # 空状态：地面站未设置（最高优先级，独占中心区域）
@@ -1952,8 +1963,8 @@ class RFSkyView(QWidget, SkyInteractionHandler):
             card_x = self.width() / 2.0 - card_w / 2.0
             card_y = self.height() / 2.0 - card_h / 2.0
 
-            card_bg = QColor(245, 243, 239, 220) if self._sky_brightness > 0.5 \
-                else QColor(20, 28, 38, 215)
+            card_bg = QColor(_t.COLORS["card_2"])
+            card_bg.setAlpha(220)
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(card_bg))
             painter.drawRoundedRect(QRectF(card_x, card_y, card_w, card_h),
@@ -2083,15 +2094,17 @@ class RFSkyViewPanel(QFrame):
         control_bar = QFrame()
         control_bar.setObjectName("skyControlBar")
         control_bar.setFixedHeight(36)
-        control_bar.setStyleSheet("""
-            QFrame#skyControlBar { background: rgba(245,243,239,200);
-                border-top: 1px solid rgba(91,123,140,80); }
-            QPushButton { background: rgba(91,123,140,150); color: #F5F3EF;
-                border: 1px solid rgba(91,123,140,120); border-radius: 3px;
-                padding: 2px 8px; font-size: 9pt; min-width: 40px; }
-            QPushButton:hover { background: rgba(196,132,92,200); }
-            QLabel { color: #5B7B8C; font-size: 9pt; padding: 0 8px; }
-        """)
+        _t = tokens()
+        control_bar.setStyleSheet(
+            "QFrame#skyControlBar { background: " + _t.COLORS["card_1"] + ";"
+            " border-top: 1px solid " + _t.COLORS["gray_400"] + "; }"
+            "QPushButton { background: " + _t.COLORS["card_3"] + "; color: "
+            + _t.text("secondary") + ";"
+            " border: none; border-radius: 3px;"
+            " padding: 2px 8px; font-size: 9pt; min-width: 40px; }"
+            "QPushButton:hover { background: " + _t.COLORS["card_hover"] + "; }"
+            "QLabel { color: " + _t.text("tertiary") + "; font-size: 9pt; padding: 0 8px; }"
+        )
         bar = QHBoxLayout(control_bar)
         bar.setContentsMargins(8, 2, 8, 2)
         bar.setSpacing(4)
@@ -2369,7 +2382,8 @@ class SatelliteTracker:
             range_rate = float(state.get("range_rate_kms", 0.0))
 
             connected += 1
-            color = ("#C4845C" if kind == "amateur" else "#5B7B8C")
+            _t = tokens()
+            color = ("#C4845C" if kind == "amateur" else _t.COLORS["accent"])
             objs.append(SkyObject(
                 name=name,
                 azimuth_deg=az_d,

@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QBrush, QColor
 
+from tokens import tokens
+
 try:  # pragma: no cover - 内核缺失时面板降级
     from mbdsdr_ai.vfo_manager import VfoManager
     _VFO_MGR_OK = True
@@ -170,23 +172,28 @@ class VfoPanel(QWidget):
             self.table.insertRow(row)
             # VFO id
             id_item = QTableWidgetItem(v.vfo_id)
-            # 主听行高亮（浅底色），其他半透明
+            _t = tokens()
+            # 主听行高亮（accent 半透明底），其他半透明
             is_primary = (v.vfo_id == primary_id)
             if is_primary:
-                brush = QBrush(QColor(120, 200, 120, 90))
-                id_item.setForeground(QBrush(QColor(20, 120, 20)))
+                _hl = QColor(_t.COLORS["accent"])
+                _hl.setAlpha(60)
+                brush = QBrush(_hl)
+                id_item.setForeground(QBrush(QColor(_t.COLORS["text_primary"])))
                 f = id_item.font()
                 f.setBold(True)
                 id_item.setFont(f)
             else:
-                brush = QBrush(QColor(200, 200, 200, 40))
+                _dim = QColor(_t.COLORS["card_2"])
+                _dim.setAlpha(40)
+                brush = QBrush(_dim)
             for col in range(5):
                 self.table.setItem(row, col, QTableWidgetItem(""))
             for col in range(5):
                 it = self.table.item(row, col)
                 it.setBackground(brush)
                 if not is_primary:
-                    it.setForeground(QBrush(QColor(120, 120, 120)))
+                    it.setForeground(QBrush(QColor(_t.COLORS["gray_200"])))
             self.table.setItem(row, 0, id_item)
             self.table.item(row, 1).setText(_fmt_freq_hz(v.center_hz))
             self.table.item(row, 2).setText(v.mode)
@@ -207,7 +214,7 @@ class VfoPanel(QWidget):
                 lambda _=False, vid=v.vfo_id: self._on_toggle_mute(vid))
             del_btn = QPushButton("删")
             del_btn.setFixedHeight(22)
-            del_btn.setStyleSheet("color:#c0392b;")
+            del_btn.setStyleSheet("color:" + tokens().COLORS["danger"] + ";")
             del_btn.clicked.connect(
                 lambda _=False, vid=v.vfo_id: self.vfo_removed.emit(vid))
             ol.addWidget(primary_btn)

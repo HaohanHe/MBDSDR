@@ -46,6 +46,8 @@ from PySide6.QtWidgets import (  # noqa: E402
 
 from themes import get_theme, DEFAULT_THEME  # noqa: E402
 
+from tokens import tokens as _tok  # noqa: E402
+
 from mbdsdr_ai.adsb_map import (  # noqa: E402
     WORLD_LAND_POLYGONS,
     AircraftTracker,
@@ -53,12 +55,13 @@ from mbdsdr_ai.adsb_map import (  # noqa: E402
     project_equirectangular,
 )
 
-# 直接硬编码三色系（与 themes.DEFAULT_LIGHT.colors 取值一致）。
-_BG = QColor("#F5F3EF")
-_TEXT = QColor("#5B7B8C")
-_ACCENT = QColor("#C4845C")
-_GRID = QColor("#D8D2C8")
-_LAND_FILL = QColor("#E8E4DD")
+_t = _tok()
+# CarWith dark_car 画布配色（地图底/文字/强调/网格/陆地填充）
+_BG = QColor(_t.COLORS["card_1"])
+_TEXT = QColor(_t.COLORS["gray_100"])
+_ACCENT = QColor(_t.COLORS["accent"])
+_GRID = QColor(_t.COLORS["gray_400"])
+_LAND_FILL = QColor(_t.COLORS["card_2"])
 
 # 空态提示文案（测试据此断言画布进入“无数据”状态）。
 ADSB_EMPTY_TEXT = "无 ADS-B 飞机（需 1090MHz）"
