@@ -55,7 +55,10 @@ class DemodWFM:
         self.deviation = self.bandwidth / 2.0  # wfm.h:78 bandwidth/2
         self._gain = 1.0 / (2.0 * np.pi * self.deviation / self.if_sr)
         self._phase = 0.0
-        self.deemph = DeemphasisIIR(deemph_tau, self.if_sr)
+        # L/R 各自独立的去加重状态：立体声两路应分别保持连续 IIR 状态，
+        # 不能共用一个对象再在中间 reset（那样会让右声道每块从零起振、左右响应不一致）。
+        self.deemph_l = DeemphasisIIR(deemph_tau, self.if_sr)
+        self.deemph_r = DeemphasisIIR(deemph_tau, self.if_sr)
 
         nyq = self.if_sr / 2.0
         # pilot 带通（broadcast_fm.h:43）
@@ -75,7 +78,8 @@ class DemodWFM:
 
     def reset(self) -> None:
         self._phase = 0.0
-        self.deemph.reset()
+        self.deemph_l.reset()
+        self.deemph_r.reset()
         if self._mpx_delay is not None:
             self._mpx_delay[:] = 0.0
 
@@ -134,8 +138,7 @@ class DemodWFM:
                 L = M + D
                 R = M - D
 
-        # 8) 去加重 50μs（broadcast_fm 后级，radio_module.h:110）
-        L = self.deemph.process(L)
-        self.deemph.reset()  # 立体声两路共享 tau，右声道用新状态
-        R = self.deemph.process(R)
+        # 8) 去加重 50μs（broadcast_fm 后级，radio_module.h:110）；L/R 独立状态
+        L = self.deemph_l.process(L)
+        R = self.deemph_r.process(R)
         return (L.astype(np.float32), R.astype(np.float32))
