@@ -8,6 +8,12 @@
 #include <QRegularExpression>
 #include <QtConcurrent>
 #include <QFutureWatcher>
+#include <QStandardPaths>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QFile>
+#include <QDir>
 
 #include <cmath>
 #include <vector>
@@ -237,28 +243,85 @@ void TleClient::fetch(double stationLatDeg, double stationLonDeg, int hoursAhead
                 delete sh;
                 return;
             }
-            // Offload the 24h x 30s propagation sweep to the thread pool so
-            // the UI stays responsive; the entries list + station params are
-            // copied into the worker lambda so there is no concurrent access
-            // to member state.
+            // Persist to disk, then offload the propagation sweep.
             QList<TleEntry> entries = sh->entries;
             double lat = stationLatDeg, lon = stationLonDeg;
             int hrs = hoursAhead;
-            TleClient* self = this;
             delete sh;
-            auto* watcher = new QFutureWatcher<QList<SatPass>>(this);
-            connect(watcher, &QFutureWatcher<QList<SatPass>>::finished,
-                    this, [this, watcher]() {
-                QList<SatPass> passes = watcher->result();
-                watcher->deleteLater();
-                emit passesReady(passes);
-            });
-            watcher->setFuture(QtConcurrent::run([self, entries, lat, lon, hrs]() {
-                return self->computePasses(entries, lat, lon,
-                                            QDateTime::currentDateTimeUtc(), hrs);
-            }));
+            writeCache(entries);
+            offloadCompute(entries, lat, lon, hrs);
         });
     }
+}
+
+void TleClient::offloadCompute(QList<TleEntry> entries, double latDeg,
+                               double lonDeg, int hoursAhead) {
+    TleClient* self = this;
+    auto* watcher = new QFutureWatcher<QList<SatPass>>(this);
+    connect(watcher, &QFutureWatcher<QList<SatPass>>::finished,
+            this, [this, watcher]() {
+        QList<SatPass> passes = watcher->result();
+        watcher->deleteLater();
+        emit passesReady(passes);
+    });
+    watcher->setFuture(QtConcurrent::run([self, entries, latDeg, lonDeg, hoursAhead]() {
+        return self->computePasses(entries, latDeg, lonDeg,
+                                    QDateTime::currentDateTimeUtc(), hoursAhead);
+    }));
+}
+
+void TleClient::computeFromEntries(const QList<TleEntry>& entries,
+                                   double latDeg, double lonDeg, int hoursAhead) {
+    if (entries.isEmpty()) return;
+    offloadCompute(entries, latDeg, lonDeg, hoursAhead);
+}
+
+static QString tleCachePath() {
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(dir);
+    return dir + QStringLiteral("/tle_cache.json");
+}
+
+void TleClient::writeCache(const QList<TleEntry>& entries) {
+    QJsonArray arr;
+    for (const TleEntry& e : entries) {
+        QJsonObject o;
+        o[QStringLiteral("name")] = e.name;
+        o[QStringLiteral("line1")] = e.line1;
+        o[QStringLiteral("line2")] = e.line2;
+        arr.append(o);
+    }
+    QJsonObject root;
+    root[QStringLiteral("fetchedAt")] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    root[QStringLiteral("satellites")] = arr;
+    QFile f(tleCachePath());
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    }
+}
+
+TleCache TleClient::cachedTle() const {
+    TleCache out;
+    QFile f(tleCachePath());
+    if (!f.open(QIODevice::ReadOnly)) return out;
+    QJsonParseError pe;
+    QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &pe);
+    if (pe.error != QJsonParseError::NoError || !doc.isObject()) return out;
+    QJsonObject root = doc.object();
+    out.fetchedAt = QDateTime::fromString(root.value(QStringLiteral("fetchedAt")).toString(),
+                                          Qt::ISODate);
+    out.fetchedAt.setTimeSpec(Qt::UTC);
+    const QJsonArray arr = root.value(QStringLiteral("satellites")).toArray();
+    for (const auto& v : arr) {
+        QJsonObject o = v.toObject();
+        TleEntry e;
+        e.name = o.value(QStringLiteral("name")).toString();
+        e.line1 = o.value(QStringLiteral("line1")).toString();
+        e.line2 = o.value(QStringLiteral("line2")).toString();
+        if (!e.name.isEmpty()) out.entries.append(e);
+    }
+    out.valid = out.fetchedAt.isValid() && !out.entries.isEmpty();
+    return out;
 }
 
 QList<SatPass> TleClient::computePasses(const QList<TleEntry>& entries,

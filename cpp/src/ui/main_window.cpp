@@ -680,6 +680,15 @@ MainWindow::MainWindow(QWidget* parent)
     });
     tleTimer_->start();
 
+    // Periodic background refresh: re-pull fresh TLE every 30 minutes without
+    // disturbing the currently-displayed passes.
+    QTimer* refreshTimer = new QTimer(this);
+    refreshTimer->setInterval(30 * 60 * 1000);
+    connect(refreshTimer, &QTimer::timeout, this, [this]() {
+        if (stationSet_) tleClient_->fetch(stationLat_, stationLon_);
+    });
+    refreshTimer->start();
+
     // Live satellite position: re-propagate the selected pass every second
     // while it is actually visible.
     liveTimer_ = new QTimer(this);
@@ -1009,10 +1018,20 @@ void MainWindow::refetchTle() {
         skyView_->setEmptyText("无过境数据——请在设置中填写本站位置");
         return;
     }
-    tleFetchActive_ = true;
-    skyView_->setEmptyText("正在拉取 TLE 并计算过境...");
-    passTable_->setRowCount(0);
-    tleClient_->fetch(stationLat_, stationLon_);
+    // Cache-first: if we have a recent (<48h) TLE cache, show it immediately
+    // and refresh in the background rather than blocking on the network.
+    dsp::TleCache cache = tleClient_->cachedTle();
+    const qint64 ageSec = cache.valid
+        ? cache.fetchedAt.secsTo(QDateTime::currentDateTimeUtc()) : -1;
+    if (cache.valid && ageSec >= 0 && ageSec < 48 * 3600) {
+        tleClient_->computeFromEntries(cache.entries, stationLat_, stationLon_);
+        tleClient_->fetch(stationLat_, stationLon_);   // background refresh
+    } else {
+        tleFetchActive_ = true;
+        skyView_->setEmptyText("正在拉取 TLE...");
+        passTable_->setRowCount(0);
+        tleClient_->fetch(stationLat_, stationLon_);
+    }
 }
 
 void MainWindow::onPassesReady(QList<dsp::SatPass> passes) {
@@ -1027,8 +1046,17 @@ void MainWindow::onPassesReady(QList<dsp::SatPass> passes) {
 }
 
 void MainWindow::onTleFetchFailed(const QString& reason) {
-    passes_.clear();
     tleFetchActive_ = false;
+    // Network failed: fall back to whatever cache we have (even if stale),
+    // rather than dropping to an empty sky.
+    dsp::TleCache cache = tleClient_->cachedTle();
+    if (cache.valid && !cache.entries.isEmpty()) {
+        tleClient_->computeFromEntries(cache.entries, stationLat_, stationLon_);
+        statusBar()->showMessage("TLE 已过期（缓存时间 " +
+            cache.fetchedAt.toLocalTime().toString("MM-dd HH:mm") + "）：" + reason);
+        return;
+    }
+    passes_.clear();
     liveRow_ = -1;
     skyView_->clearLiveSatellite();
     passTable_->setRowCount(0);
@@ -1040,16 +1068,27 @@ void MainWindow::onTleFetchFailed(const QString& reason) {
 void MainWindow::fillPassTable() {
     passTable_->setRowCount(0);
     QList<ui::PassArc> arcs;
+    QDateTime now = QDateTime::currentDateTimeUtc();
+    int firstActive = -1;
     for (const auto& p : passes_) {
         int row = passTable_->rowCount();
         passTable_->insertRow(row);
-        passTable_->setItem(row, 0, new QTableWidgetItem(p.name));
+        const bool active = now >= p.aos && now <= p.los;
+        if (active && firstActive < 0) firstActive = row;
+        // Prefix the satellite name with a marker for the in-progress pass.
+        passTable_->setItem(row, 0, new QTableWidgetItem(
+            (active ? QStringLiteral("● ") : QString()) + p.name));
         passTable_->setItem(row, 1, new QTableWidgetItem(
             p.aos.toLocalTime().toString("MM-dd HH:mm")));
         passTable_->setItem(row, 2, new QTableWidgetItem(
             QString::number(p.maxEl, 'f', 1) + QStringLiteral("°")));
         passTable_->setItem(row, 3, new QTableWidgetItem(
             p.los.toLocalTime().toString("MM-dd HH:mm")));
+        if (active) {
+            QBrush hi(QColor(tokens::kSuccess));
+            for (int c = 0; c < 4; ++c)
+                passTable_->item(row, c)->setBackground(hi);
+        }
 
         ui::PassArc arc;
         arc.name = p.name;
@@ -1057,6 +1096,11 @@ void MainWindow::fillPassTable() {
         arcs.append(arc);
     }
     skyView_->setPasses(arcs);
+    // Auto-start tracking the first pass currently in view.
+    if (firstActive >= 0) {
+        passTable_->selectRow(firstActive);
+        onPassRowClicked(firstActive);
+    }
 }
 
 void MainWindow::onPassRowClicked(int row) {
@@ -1067,6 +1111,12 @@ void MainWindow::onPassRowClicked(int row) {
     updateLiveSatellite();   // paint immediately rather than waiting 1s
 }
 
+static QString formatRange(double km) {
+    if (km >= 10000.0)
+        return QStringLiteral("%1 万 km").arg(km / 10000.0, 0, 'f', 1);
+    return QStringLiteral("%1 km").arg(km, 0, 'f', 0);
+}
+
 void MainWindow::updateLiveSatellite() {
     if (liveRow_ < 0 || liveRow_ >= passes_.size() || !stationSet_) {
         skyView_->clearLiveSatellite();
@@ -1074,20 +1124,28 @@ void MainWindow::updateLiveSatellite() {
     }
     const dsp::SatPass& p = passes_[liveRow_];
     QDateTime now = QDateTime::currentDateTimeUtc();
-    // Outside the visible window: no live dot.
+    // Outside the visible window.
     if (now < p.aos || now > p.los) {
         skyView_->clearLiveSatellite();
-        if (now > p.los) {           // pass ended: stop live tracking
+        if (now > p.los) {           // pass ended: move on to the next one
             liveRow_ = -1;
+            skyView_->setHighlightedPass(-1);
+            for (int i = 0; i < passes_.size(); ++i) {
+                if (passes_[i].aos <= now && now <= passes_[i].los) {
+                    passTable_->selectRow(i);
+                    onPassRowClicked(i);
+                    return;
+                }
+            }
             liveTimer_->stop();
         }
         return;
     }
     dsp::Topocentric t = tleClient_->propagateAt(now, p.tle, stationLat_, stationLon_);
     skyView_->setLiveSatellite(t.az, t.el, p.name);
-    statusBar()->showMessage(QString("%1 方位=%2° 仰角=%3° 距离=%4 km")
+    statusBar()->showMessage(QString("%1 方位=%2° 仰角=%3° 距离=%4")
         .arg(p.name).arg(t.az, 0, 'f', 0).arg(t.el, 0, 'f', 1)
-        .arg(t.range, 0, 'f', 0));
+        .arg(formatRange(t.range)));
 }
 
 } // namespace mbdsdr

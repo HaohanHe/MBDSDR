@@ -37,6 +37,13 @@ struct Topocentric {
     double range = 0.0;  // km
 };
 
+// On-disk TLE cache record.
+struct TleCache {
+    bool valid = false;
+    QDateTime fetchedAt;
+    QList<TleEntry> entries;
+};
+
 // Real TLE fetch from celestrak.org + LEO orbit propagation.
 //
 // Propagation note: this is a J2-perturbed *mean-element* propagator, not the
@@ -65,6 +72,15 @@ public:
     Topocentric propagateAt(const QDateTime& timeUtc, const TleEntry& tle,
                              double stationLatDeg, double stationLonDeg) const;
 
+    // Read the on-disk TLE cache (valid==false if absent/unreadable).
+    TleCache cachedTle() const;
+
+    // Compute passes from an already-known TLE list (e.g. cache) on the thread
+    // pool and emit passesReady when done.
+    void computeFromEntries(const QList<TleEntry>& entries,
+                            double stationLatDeg, double stationLonDeg,
+                            int hoursAhead = 24);
+
 signals:
     // Passes computed successfully. May be empty (24h window has no passes).
     void passesReady(QList<SatPass> passes);
@@ -74,6 +90,13 @@ signals:
 private:
     // Parse a celestrak TLE text blob into 3-line records.
     static QList<TleEntry> parseTle(const QByteArray& blob);
+
+    // Persist the freshly-fetched TLE list to the on-disk cache.
+    void writeCache(const QList<TleEntry>& entries);
+
+    // Offload computePasses to the thread pool, emit passesReady on finish.
+    void offloadCompute(QList<TleEntry> entries, double latDeg, double lonDeg,
+                        int hoursAhead);
 
     // Propagate all TLEs and find passes visible from the station. Runs on a
     // worker thread via QtConcurrent.
