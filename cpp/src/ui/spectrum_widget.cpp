@@ -54,6 +54,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
                     case 1: emit fftSizeRequested(2048); break;
                     case 2: emit fftSizeRequested(4096); break;
                 }
+                emit viewChanged();
             });
     topRow->addWidget(fftCombo_);
 
@@ -81,6 +82,11 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     };
     connect(dbMinSpin_, QOverload<int>::of(&QSpinBox::valueChanged), this, applyDb);
     connect(dbMaxSpin_, QOverload<int>::of(&QSpinBox::valueChanged), this, applyDb);
+    // Persist dB range immediately whenever it actually settles.
+    connect(dbMinSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, &SpectrumWidget::viewChanged);
+    connect(dbMaxSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, &SpectrumWidget::viewChanged);
 
     infoLabel_ = new QLabel(this);
     infoLabel_->setObjectName("monoInfo");
@@ -110,6 +116,19 @@ int SpectrumWidget::dbMinValue() const {
 }
 int SpectrumWidget::dbMaxValue() const {
     return dbMaxSpin_ ? dbMaxSpin_->value() : static_cast<int>(dbMax_);
+}
+
+int SpectrumWidget::fftSizeValue() const {
+    static const int kSizes[] = {1024, 2048, 4096};
+    const int idx = fftCombo_ ? fftCombo_->currentIndex() : 1;
+    return kSizes[(idx >= 0 && idx <= 2) ? idx : 1];
+}
+
+void SpectrumWidget::setFftSizeValue(int n) {
+    static const int kSizes[] = {1024, 2048, 4096};
+    int idx = 1;
+    for (int i = 0; i < 3; ++i) if (kSizes[i] == n) idx = i;
+    if (fftCombo_) fftCombo_->setCurrentIndex(idx);
 }
 
 void SpectrumWidget::setZoomFactor(double z) {

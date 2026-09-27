@@ -19,11 +19,16 @@
 #include "dsp/audio_output.h"
 #include "dsp/recorder.h"
 #include "dsp/gated_recorder.h"
+#include "dsp/wav_writer.h"
 #include "dsp/cw_decoder.h"
 #include "dsp/adsb_decoder.h"
 
 namespace mbdsdr {
 namespace dsp {
+
+// What the main record button captures: raw baseband IQ (SigMF) or the
+// demodulated audio out (continuous WAV).
+enum class RecTarget { BasebandIQ, DemodAudio };
 
 class SpectrumEngine : public QThread {
     Q_OBJECT
@@ -47,9 +52,21 @@ public slots:
     void setSquelchThreshold(float db);
     void setSquelchEnabled(bool e);
     void setBandwidth(double hz);
-    void startRecording();
+    bool startRecording();
     void stopRecording();
     void setGatedRecordingEnabled(bool e);
+
+    // ---- Recording options (SDR++-aligned) ----
+    void setRecTarget(RecTarget t) { recTarget_ = t; }
+    RecTarget recTarget() const { return recTarget_; }
+    // Filename template with {time} {freq} {mode} placeholders.
+    void setRecFilenameTemplate(const QString& tpl) { recTemplate_ = tpl; }
+    QString recFilenameTemplate() const { return recTemplate_; }
+    void setRecStereo(bool s) { recStereo_ = s; }
+    bool recStereo() const { return recStereo_; }
+    // Audio recording: keep writing during squelch-closed gaps.
+    void setRecIgnoreSquelch(bool ignore) { recIgnoreSquelch_ = ignore; }
+    bool recIgnoreSquelch() const { return recIgnoreSquelch_; }
 
     // ---- RTL-SDR front-end tuning passthroughs ----
     // These forward straight to the current ISource (a no-op on test/file
@@ -86,6 +103,7 @@ private:
     AudioOutput* audioOut_ = nullptr;
     Recorder recorder_;
     GatedRecorder gatedRec_;
+    WavWriter wavWriter_;
     CWDecoder cwDecoder_;
     ADSBDecoder adsbDecoder_;
 
@@ -94,6 +112,17 @@ private:
     std::atomic<bool> needDemodReset_{false};
     QString demodMode_ = "NFM";
     double bandwidth_ = 12500.0;
+
+    // Recording options (see setRec* above).
+    RecTarget recTarget_ = RecTarget::BasebandIQ;
+    QString recTemplate_ = "{time}_{freq}_{mode}";
+    bool recStereo_ = false;
+    bool recIgnoreSquelch_ = false;
+
+    // Expand recTemplate_ against the current source/demod state.
+    QString expandRecTemplate() const;
+    // True when a live data producer exists (real HW or the test signal).
+    bool hasData() const;
 
     // Guards source_/demod_/demodMode_/bandwidth_ against concurrent access
     // between the engine run() thread and UI-thread connect/disconnect calls.

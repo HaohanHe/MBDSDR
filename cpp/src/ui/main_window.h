@@ -14,6 +14,7 @@ class QPlainTextEdit;
 class QTableWidget;
 class QLineEdit;
 class QStackedWidget;
+class QSplitter;
 
 namespace mbdsdr {
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; }
@@ -35,6 +36,7 @@ private slots:
     void onRecordClicked();
     void onCwDecoded(const QString& text, double wpm);
     void onAdsbAircraft(const dsp::AircraftInfo& info);
+    void saveSettings();   // immediate persistence (writes QSettings)
 
 private:
     dsp::SpectrumEngine* engine_   = nullptr;
@@ -74,10 +76,15 @@ private:
     QPushButton*    recordBtn_   = nullptr;
     QCheckBox*      gatedCheck_   = nullptr;
     QLabel*         recStatus_   = nullptr;
+    QComboBox*      recTargetCombo_ = nullptr;
+    QLineEdit*      recTemplateEdit_ = nullptr;
+    QCheckBox*      recStereoCheck_ = nullptr;
+    QCheckBox*      recIgnoreSqlChk_ = nullptr;
     QLabel*         levelBar_   = nullptr;
 
     // Right tabs
     QTabWidget*     rightTabs_   = nullptr;
+    QSplitter*      mainSplitter_ = nullptr;
     QPlainTextEdit* cwText_      = nullptr;
     QLabel*         cwWpm_       = nullptr;
     QTableWidget*   adsbTable_   = nullptr;

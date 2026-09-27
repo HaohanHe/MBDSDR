@@ -32,11 +32,18 @@ public slots:
     int  dbMaxValue() const;
     void setDbSpinValues(int lo, int hi);
 
+    /// Read/write the selected FFT size (points) for QSettings persistence.
+    int  fftSizeValue() const;
+    void setFftSizeValue(int n);
+
 signals:
     void fftSizeRequested(int n);
     void frequencyChanged(double newFreqHz);
     /// Emitted whenever the visible frequency window changes (zoom/pan/reset).
     void visibleRangeChanged(double fLoHz, double fHiHz);
+    /// Emitted when an internal control (dB spinboxes, FFT combo) changes so
+    /// MainWindow can persist settings immediately.
+    void viewChanged();
 
 protected:
     void paintEvent(QPaintEvent* event) override;

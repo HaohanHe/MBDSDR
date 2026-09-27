@@ -91,6 +91,7 @@ MainWindow::MainWindow(QWidget* parent)
     centralLay->addWidget(topBar);
 
     auto* splitter = new QSplitter(Qt::Horizontal);
+    mainSplitter_ = splitter;
     splitter->setChildrenCollapsible(false);
 
     // ---- Left panel: scrollable controls ----
@@ -202,10 +203,25 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* gRec = new QGroupBox("录制", leftCard);
     auto* gRecLay = new QVBoxLayout(gRec);
+    auto* recForm = new QFormLayout;
+    recTargetCombo_ = new QComboBox(gRec);
+    recTargetCombo_->addItems({"基带 IQ (SigMF)", "解调音频 (WAV)"});
+    recTargetCombo_->setMinimumWidth(tokens::scaled(tokens::kRecComboMinW));
+    recForm->addRow("录制对象", recTargetCombo_);
+    recTemplateEdit_ = new QLineEdit("{time}_{freq}_{mode}", gRec);
+    recTemplateEdit_->setMinimumWidth(tokens::scaled(tokens::kRecTemplateMinW));
+    recTemplateEdit_->setToolTip("文件名占位符: {time}=时间戳, {freq}=MHz, {mode}=解调模式");
+    recForm->addRow("文件名模板", recTemplateEdit_);
+    gRecLay->addLayout(recForm);
+    recStereoCheck_ = new QCheckBox("立体声 (音频)", gRec);
+    recStereoCheck_->setToolTip("仅对解调音频 (WAV) 录制有效");
+    gRecLay->addWidget(recStereoCheck_);
+    recIgnoreSqlChk_ = new QCheckBox("忽略静噪 (持续录制)", gRec);
+    gRecLay->addWidget(recIgnoreSqlChk_);
+    gatedCheck_ = new QCheckBox("触发式分段录制", gRec);
+    gRecLay->addWidget(gatedCheck_);
     recordBtn_ = new QPushButton("● 录制", gRec);
     gRecLay->addWidget(recordBtn_);
-    gatedCheck_ = new QCheckBox("触发式录制", gRec);
-    gRecLay->addWidget(gatedCheck_);
     recStatus_ = new QLabel("空闲", gRec);
     gRecLay->addWidget(recStatus_);
     leftLay->addWidget(gRec);
@@ -360,6 +376,22 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(recordBtn_, &QPushButton::clicked, this, &MainWindow::onRecordClicked);
 
+    // ---- Recording options (SDR++-aligned) ----
+    connect(recTargetCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+        engine_->setRecTarget(idx == 1 ? dsp::RecTarget::DemodAudio
+                                       : dsp::RecTarget::BasebandIQ);
+        // Stereo only applies to audio WAV recording.
+        recStereoCheck_->setEnabled(idx == 1);
+    });
+    connect(recTemplateEdit_, &QLineEdit::editingFinished, this, [this]() {
+        engine_->setRecFilenameTemplate(recTemplateEdit_->text());
+    });
+    connect(recStereoCheck_, &QCheckBox::toggled,
+            this, [this](bool on) { engine_->setRecStereo(on); });
+    connect(recIgnoreSqlChk_, &QCheckBox::toggled,
+            this, [this](bool on) { engine_->setRecIgnoreSquelch(on); });
+
     // ---- Advanced RTL-SDR front-end options (forwarded to the source) ----
     connect(dsCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) { engine_->setDirectSampling(idx); });
@@ -443,6 +475,38 @@ MainWindow::MainWindow(QWidget* parent)
         engine_->onSetCenterFreq(hz);
     });
 
+    // ---- Immediate persistence: every key control saves on change ----
+    connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::saveSettings);
+    connect(srCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::saveSettings);
+    connect(demodCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::saveSettings);
+    connect(bwCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::saveSettings);
+    connect(gainSlider_, &QSlider::valueChanged, this, &MainWindow::saveSettings);
+    connect(squelchSlider_, &QSlider::valueChanged, this, &MainWindow::saveSettings);
+    connect(squelchCheck_, &QCheckBox::stateChanged, this, &MainWindow::saveSettings);
+    connect(ppmSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::saveSettings);
+    connect(dsCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::saveSettings);
+    connect(offsetChk_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
+    connect(rtlAgcChk_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
+    connect(tunerAgcChk_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
+    connect(biasTeeChk_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
+    connect(recTargetCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::saveSettings);
+    connect(recTemplateEdit_, &QLineEdit::textEdited, this, &MainWindow::saveSettings);
+    connect(recStereoCheck_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
+    connect(recIgnoreSqlChk_, &QCheckBox::toggled, this, &MainWindow::saveSettings);
+    connect(rightTabs_, &QTabWidget::currentChanged, this, &MainWindow::saveSettings);
+    connect(centerTabs_, &QTabWidget::currentChanged, this, &MainWindow::saveSettings);
+    connect(mainSplitter_, &QSplitter::splitterMoved, this, &MainWindow::saveSettings);
+    connect(spectrum_, &ui::SpectrumWidget::viewChanged, this, &MainWindow::saveSettings);
+    connect(spectrum_, &ui::SpectrumWidget::visibleRangeChanged,
+            this, [this](double, double) { saveSettings(); });
+
     setControlsEnabled(false);
     restoreUiState();
     engine_->start();
@@ -486,7 +550,24 @@ void MainWindow::saveUiState() {
 
     // ---- View ----
     s.setValue("view/zoomFactor", spectrum_->zoomFactor());
+
+    // ---- Recording options ----
+    s.setValue("rec/target", recTargetCombo_->currentIndex());
+    s.setValue("rec/template", recTemplateEdit_->text());
+    s.setValue("rec/stereo", recStereoCheck_->isChecked());
+    s.setValue("rec/ignoreSquelch", recIgnoreSqlChk_->isChecked());
+
+    // ---- Layout / tabs / FFT ----
+    s.setValue("ui/rightTabIndex", rightTabs_->currentIndex());
+    s.setValue("ui/centerTabIndex", centerTabs_->currentIndex());
+    if (mainSplitter_) s.setValue("ui/splitterSizes", mainSplitter_->saveState());
+    s.setValue("rx/fftSize", spectrum_->fftSizeValue());
     s.sync();
+}
+
+void MainWindow::saveSettings() {
+    // Thin alias: immediate persistence on every control change.
+    saveUiState();
 }
 
 void MainWindow::restoreUiState() {
@@ -508,6 +589,10 @@ void MainWindow::restoreUiState() {
     tunerAgcChk_->blockSignals(true);
     biasTeeChk_->blockSignals(true);
     ppmSpin_->blockSignals(true);
+    recTargetCombo_->blockSignals(true);
+    recTemplateEdit_->blockSignals(true);
+    recStereoCheck_->blockSignals(true);
+    recIgnoreSqlChk_->blockSignals(true);
 
     // ---- RX ----
     const double centerHz = s.value("rx/centerFreq", 98.5e6).toDouble();
@@ -559,6 +644,24 @@ void MainWindow::restoreUiState() {
     const double zoom = s.value("view/zoomFactor", 1.0).toDouble();
     spectrum_->setZoomFactor(zoom);
 
+    // ---- Recording options ----
+    const int recTarget = s.value("rec/target", 0).toInt();
+    recTargetCombo_->setCurrentIndex(std::clamp(recTarget, 0, 1));
+    recTemplateEdit_->setText(s.value("rec/template", "{time}_{freq}_{mode}").toString());
+    recStereoCheck_->setChecked(s.value("rec/stereo", false).toBool());
+    recIgnoreSqlChk_->setChecked(s.value("rec/ignoreSquelch", false).toBool());
+    // Stereo only applies in audio mode.
+    recStereoCheck_->setEnabled(recTargetCombo_->currentIndex() == 1);
+
+    // ---- Layout / tabs / FFT ----
+    rightTabs_->setCurrentIndex(std::clamp(s.value("ui/rightTabIndex", 0).toInt(),
+                                           0, rightTabs_->count() - 1));
+    centerTabs_->setCurrentIndex(std::clamp(s.value("ui/centerTabIndex", 0).toInt(),
+                                            0, centerTabs_->count() - 1));
+    const QByteArray splitterState = s.value("ui/splitterSizes").toByteArray();
+    if (mainSplitter_ && !splitterState.isEmpty()) mainSplitter_->restoreState(splitterState);
+    spectrum_->setFftSizeValue(s.value("rx/fftSize", 2048).toInt());
+
     // Unblock.
     freqSpin_->blockSignals(false);
     srCombo_->blockSignals(false);
@@ -573,6 +676,10 @@ void MainWindow::restoreUiState() {
     tunerAgcChk_->blockSignals(false);
     biasTeeChk_->blockSignals(false);
     ppmSpin_->blockSignals(false);
+    recTargetCombo_->blockSignals(false);
+    recTemplateEdit_->blockSignals(false);
+    recStereoCheck_->blockSignals(false);
+    recIgnoreSqlChk_->blockSignals(false);
 
     // ---- Dispatch restored values to the engine (UI controls already show
     // the right state; push the same values into the running pipeline). ----
@@ -591,6 +698,14 @@ void MainWindow::restoreUiState() {
     engine_->setBiasTee(biasTeeChk_->isChecked());
     engine_->setPpm(ppmSpin_->value());
 
+    // Recording options
+    engine_->setRecTarget(recTargetCombo_->currentIndex() == 1
+                          ? dsp::RecTarget::DemodAudio : dsp::RecTarget::BasebandIQ);
+    engine_->setRecFilenameTemplate(recTemplateEdit_->text());
+    engine_->setRecStereo(recStereoCheck_->isChecked());
+    engine_->setRecIgnoreSquelch(recIgnoreSqlChk_->isChecked());
+    engine_->setFftSize(spectrum_->fftSizeValue());
+
     // Manual gain slider only matters in manual tuner-gain mode.
     gainSlider_->setEnabled(!tunerAgcChk_->isChecked());
     // Note: setZoomFactor() above already emitted visibleRangeChanged; the
@@ -604,6 +719,9 @@ void MainWindow::onSourceChanged(const QString& name, bool connected) {
     if (sourceBanner_) sourceBanner_->setText(connected
         ? QString("%1 已连接（真实硬件）").arg(name)
         : QStringLiteral("RTL-SDR 未连接，使用测试信号"));
+    // Recording needs a live data producer -- hardware OR the offline test
+    // signal (which still synthesizes IQ/audio). The engine guards the rest.
+    if (recordBtn_) recordBtn_->setEnabled(true);
     setControlsEnabled(connected);
 }
 
