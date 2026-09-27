@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QWidget>
+#include <QPoint>
 #include "core/spectrum_frame.h"
 
 class QComboBox;
@@ -27,6 +28,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private:
     SpectrumFrame frame_;
@@ -35,6 +37,7 @@ private:
     QLabel*    infoLabel_  = nullptr;
     bool dragging_ = false;
     double vfoFreq_ = 0;
+    QPoint hoverPos_ = QPoint(-1, -1);
 };
 
 } // namespace ui

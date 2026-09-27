@@ -147,6 +147,16 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
     p.setPen(vfoPen);
     p.drawLine(width() / 2, mT, width() / 2, mB);
 
+    // Crosshair tooltip
+    if (hoverPos_.x() >= 0) {
+        p.setPen(QPen(QColor(tokens::kAccent), 1, Qt::DashLine));
+        p.drawLine(hoverPos_.x(), mT, hoverPos_.x(), mB);
+        p.drawLine(mL, hoverPos_.y(), mR, hoverPos_.y());
+        double xRatio = static_cast<double>(hoverPos_.x()) / width();
+        double freq = frame_.centerFreqHz + (xRatio - 0.5) * frame_.sampleRateHz;
+        p.drawText(hoverPos_ + QPointF(8, -8), QString("%1 MHz").arg(freq / 1e6, 0, 'f', 3));
+    }
+
     p.drawText(mL + 8, mT + 16, "TEST SIGNAL - NOT HARDWARE");
 }
 
@@ -156,7 +166,8 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* e) {
 }
 
 void SpectrumWidget::mouseMoveEvent(QMouseEvent* e) {
-    if (!dragging_ || frame_.sampleRateHz <= 0) return;
+    hoverPos_ = e->pos();
+    if (!dragging_ || frame_.sampleRateHz <= 0) { update(); return; }
     double xRatio = static_cast<double>(e->position().x()) / width();
     double freq = frame_.centerFreqHz + (xRatio - 0.5) * frame_.sampleRateHz;
     vfoFreq_ = freq;
@@ -166,6 +177,11 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* e) {
 
 void SpectrumWidget::mouseReleaseEvent(QMouseEvent*) {
     dragging_ = false;
+}
+
+void SpectrumWidget::leaveEvent(QEvent*) {
+    hoverPos_ = QPoint(-1, -1);
+    update();
 }
 
 } // namespace ui
