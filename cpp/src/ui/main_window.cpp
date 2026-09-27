@@ -20,6 +20,7 @@
 #include <QLineEdit>
 #include <QStackedWidget>
 #include <QSettings>
+#include <QShortcut>
 #include "ai/agent.h"
 #include "ui/sky_view.h"
 #include "ui/world_view.h"
@@ -437,6 +438,31 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             engine_->disconnectSource();
             connectBtn_->setText("连接");
         }
+    });
+
+    // Keyboard shortcuts
+    new QShortcut(QKeySequence(Qt::Key_Right), this, this, [this]() {
+        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 + 10000);  // +10kHz
+    });
+    new QShortcut(QKeySequence(Qt::Key_Left), this, this, [this]() {
+        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 - 10000);
+    });
+    new QShortcut(QKeySequence(Qt::Key_Up), this, this, [this]() {
+        engine_->onSetGain(gainSlider_->value() + 1);
+    });
+    new QShortcut(QKeySequence(Qt::Key_Down), this, this, [this]() {
+        engine_->onSetGain(gainSlider_->value() - 1);
+    });
+    new QShortcut(QKeySequence("Ctrl+R"), this, this, [this]() {
+        recordBtn_->click();
+    });
+
+    // Spectrum drag tuning
+    connect(spectrum_, &ui::SpectrumWidget::frequencyChanged, this, [this](double hz) {
+        freqSpin_->blockSignals(true);
+        freqSpin_->setValue(hz / 1e6);
+        freqSpin_->blockSignals(false);
+        engine_->onSetCenterFreq(hz);
     });
 
     engine_->start();

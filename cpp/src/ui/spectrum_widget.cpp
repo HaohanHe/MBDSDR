@@ -9,6 +9,7 @@
 #include <QPen>
 #include <QPainterPath>
 
+#include <QMouseEvent>
 #include "core/tokens.h"
 
 #include <cmath>
@@ -141,6 +142,24 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
     wf.setBold(true);
     p.setFont(wf);
     p.drawText(mL + 8, mT + 16, "TEST SIGNAL - NOT HARDWARE");
+}
+
+void SpectrumWidget::mousePressEvent(QMouseEvent* e) {
+    dragging_ = true;
+    mouseMoveEvent(e);
+}
+
+void SpectrumWidget::mouseMoveEvent(QMouseEvent* e) {
+    if (!dragging_ || frame_.sampleRateHz <= 0) return;
+    double xRatio = static_cast<double>(e->position().x()) / width();
+    double freq = frame_.centerFreqHz + (xRatio - 0.5) * frame_.sampleRateHz;
+    vfoFreq_ = freq;
+    emit frequencyChanged(freq);
+    update();
+}
+
+void SpectrumWidget::mouseReleaseEvent(QMouseEvent*) {
+    dragging_ = false;
 }
 
 } // namespace ui

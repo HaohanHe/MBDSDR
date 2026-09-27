@@ -44,6 +44,7 @@ set(SOURCES
     src/dsp/gated_recorder.cpp
     src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp
+    src/dsp/tle_client.cpp
     src/ai/llm_client.cpp
     src/ai/llm_worker.cpp
     src/ai/ai_config.cpp
