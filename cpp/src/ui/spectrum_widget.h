@@ -3,11 +3,14 @@
 
 #include <QWidget>
 #include <QPoint>
+#include <QList>
 #include "core/spectrum_frame.h"
+#include "dsp/peak_detector.h"
 
 class QComboBox;
 class QLabel;
 class QSpinBox;
+class QTableWidget;
 
 namespace mbdsdr {
 namespace ui {
@@ -59,11 +62,15 @@ private:
     // Visible frequency window derived from zoomFactor_ around viewCenterHz_.
     void visibleRange(double& fLo, double& fHi, double& spanVis) const;
     void emitVisibleRange();
+    // Run peak detection on the latest frame and refresh the list + markers.
+    void detectPeaks();
 
     SpectrumFrame frame_;
     QComboBox* fftCombo_   = nullptr;
     QSpinBox*  dbMinSpin_ = nullptr;
     QSpinBox*  dbMaxSpin_ = nullptr;
+    QSpinBox*  peakThreshSpin_ = nullptr;
+    QTableWidget* peakTable_ = nullptr;
     QLabel*    testLabel_  = nullptr;
     QLabel*    infoLabel_  = nullptr;
     bool dragging_ = false;
@@ -76,6 +83,10 @@ private:
     float  dbMax_ = 0.0f;
     double zoomFactor_ = 1.0;  // 1 = full span, kZoomMax = max zoom-in
     double viewCenterHz_ = 0.0; // visible-window center; pans away from f0
+
+    QList<mbdsdr::dsp::PeakInfo> peaks_;   // latest detected peaks
+    float peakThresholdDb_ = 15.0f;        // dB above median (set from tokens in ctor)
+    QString lastPeakSignature_;            // cheap throttle for table rebuild
 };
 
 } // namespace ui

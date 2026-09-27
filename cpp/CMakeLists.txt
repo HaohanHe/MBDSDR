@@ -38,6 +38,7 @@ set(SOURCES
     src/dsp/fft.cpp
     src/dsp/iq_buffer.cpp
     src/dsp/power_spectrum.cpp
+    src/dsp/peak_detector.cpp
     src/dsp/test_signal.cpp
     src/dsp/rtl_sdr_source.cpp
     src/dsp/spectrum_engine.cpp

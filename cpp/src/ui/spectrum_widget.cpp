@@ -10,6 +10,9 @@
 #include <QPen>
 #include <QPainterPath>
 #include <QMenu>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QTableWidgetItem>
 
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -88,11 +91,47 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     connect(dbMaxSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
             this, &SpectrumWidget::viewChanged);
 
+    // Peak detection threshold (dB above the measured noise floor / median).
+    topRow->addWidget(new QLabel("门限", this));
+    peakThreshSpin_ = new QSpinBox(this);
+    peakThreshSpin_->setRange(tokens::kPeakThresholdMin, tokens::kPeakThresholdMax);
+    peakThreshSpin_->setValue(static_cast<int>(tokens::kPeakThresholdDefault));
+    peakThreshSpin_->setSuffix(" dB");
+    peakThresholdDb_ = static_cast<float>(tokens::kPeakThresholdDefault);
+    connect(peakThreshSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
+            this, [this](int v) {
+        peakThresholdDb_ = static_cast<float>(v);
+        detectPeaks();          // re-run immediately on threshold change
+        update();
+    });
+    topRow->addWidget(peakThreshSpin_);
+
     infoLabel_ = new QLabel(this);
     infoLabel_->setObjectName("monoInfo");
     topRow->addWidget(infoLabel_);
 
     outer->addLayout(topRow);
+
+    // Peak list below the plot: frequency / level / -3 dB bandwidth.
+    peakTable_ = new QTableWidget(0, 3, this);
+    peakTable_->setHorizontalHeaderLabels({"频率(MHz)", "强度(dBFS)", "带宽(kHz)"});
+    peakTable_->horizontalHeader()->setStretchLastSection(true);
+    peakTable_->verticalHeader()->setVisible(false);
+    peakTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    peakTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    peakTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    peakTable_->setFixedHeight(tokens::scaled(tokens::kPeakTableH));
+    // Double-click a row -> retune the VFO to that peak.
+    connect(peakTable_, &QTableWidget::cellDoubleClicked,
+            this, [this](int row, int) {
+        auto* item = peakTable_->item(row, 0);
+        if (!item) return;
+        bool ok = false;
+        const double mhz = item->data(Qt::UserRole).toDouble(&ok);
+        if (ok) emit frequencyChanged(mhz * 1e6);
+    });
+    outer->addWidget(peakTable_);
+
     outer->addStretch();
 }
 
@@ -178,7 +217,50 @@ void SpectrumWidget::setSpectrum(const SpectrumFrame& frame) {
                         .arg(fs / 1e6, 0, 'f', 1)
                         .arg(f0 / 1e6, 0, 'f', 1)
                         .arg(frame.fftSize));
+    detectPeaks();
     update();
+}
+
+void SpectrumWidget::detectPeaks() {
+    peaks_ = dsp::detectPeaks(frame_.dbfs, frame_.sampleRateHz,
+                              frame_.centerFreqHz, peakThresholdDb_);
+
+    // Throttle table rebuilds: only touch the widget when the set of rounded
+    // peak frequencies actually changes (avoids a QTableWidget rebuild every
+    // ~30 ms frame and the flicker that would cause).
+    QString sig;
+    for (const auto& pk : peaks_)
+        sig += QString::number(pk.freqHz / 1e6, 'f', 3) + "|";
+    if (sig == lastPeakSignature_) return;
+    lastPeakSignature_ = sig;
+
+    const bool wasSpan = peakTable_->rowCount() == 1
+                         && peakTable_->columnSpan(0, 0) == 3;
+    peakTable_->clearSpans();
+    peakTable_->setRowCount(0);
+
+    if (peaks_.isEmpty()) {
+        // Honest empty state -- no synthetic peaks.
+        peakTable_->setRowCount(1);
+        peakTable_->setSpan(0, 0, 1, 3);
+        auto* it = new QTableWidgetItem(QStringLiteral("未检测到信号"));
+        it->setFlags(Qt::NoItemFlags);
+        peakTable_->setItem(0, 0, it);
+        return;
+    }
+
+    for (const auto& pk : peaks_) {
+        const int row = peakTable_->rowCount();
+        peakTable_->insertRow(row);
+        auto* fItem = new QTableWidgetItem(QString("%1").arg(pk.freqHz / 1e6, 0, 'f', 3));
+        fItem->setData(Qt::UserRole, pk.freqHz / 1e6);   // absolute MHz for dbl-click
+        peakTable_->setItem(row, 0, fItem);
+        peakTable_->setItem(row, 1,
+            new QTableWidgetItem(QString("%1").arg(pk.dbfs, 0, 'f', 1)));
+        peakTable_->setItem(row, 2,
+            new QTableWidgetItem(QString("%1").arg(pk.bandwidthHz / 1e3, 0, 'f', 2)));
+    }
+    (void)wasSpan;
 }
 
 void SpectrumWidget::paintEvent(QPaintEvent*) {
@@ -194,8 +276,11 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
     const int mR = tokens::kPlotMarginR;
     const int mT = tokens::kPlotMarginT;
     const int mB = tokens::kPlotMarginB;
+    // Reserve the compact peak list at the bottom of the widget.
+    const int tableH = (peakTable_ && peakTable_->isVisible()) ? peakTable_->height() : 0;
+    const int plotBottom = h - tableH;
     const int plotW = w - mL - mR;
-    const int plotH = h - mT - mB;
+    const int plotH = plotBottom - mT - mB;
     if (plotW <= 10 || plotH <= 10) return;
 
     // Grid: kCardEdge
@@ -277,6 +362,24 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
         vfoPen.setWidthF(tokens::kVfoLineWidth);
         p.setPen(vfoPen);
         p.drawLine(vfoX, mT, vfoX, mT + plotH);
+    }
+
+    // Detected peak markers: small filled triangles along the top edge, only
+    // for peaks that fall inside the current visible window.
+    {
+        const int mhw = tokens::scaled(tokens::kPeakMarkerHalfW);
+        const int mh  = tokens::scaled(tokens::kPeakMarkerH);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(QString::fromUtf8(tokens::kSuccess)));
+        for (const auto& pk : peaks_) {
+            if (pk.freqHz < fLo || pk.freqHz > fHi) continue;
+            const int x = mL + static_cast<int>(plotW * (pk.freqHz - fLo) / spanVis);
+            QPolygon tri;
+            tri << QPoint(x - mhw, mT) << QPoint(x + mhw, mT) << QPoint(x, mT + mh);
+            p.drawPolygon(tri);
+        }
+        p.setPen(QPen());
+        p.setBrush(Qt::NoBrush);
     }
 
     // Crosshair tooltip
