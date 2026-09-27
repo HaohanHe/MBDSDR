@@ -3213,11 +3213,17 @@ class SDRBackendManager:
         ]
 
     def connect(self, device_id: str = None) -> bool:
-        """连接设备。无设备可选时返回 False（显式未连接）。"""
+        """连接设备。无设备可选时返回 False（显式未连接）。
+
+        未指定 device_id 且当前没有激活后端时，若已枚举到真实设备，自动连接
+        第一个（首启只有一根棒的常见情形）；多设备时应显式传 device_id。
+        """
         if device_id and device_id in self.backends:
             backend = self.backends[device_id]
         else:
             backend = self.active_backend
+            if backend is None and self.backends:
+                backend = next(iter(self.backends.values()))
 
         if backend is None:
             logger.warning("connect: 无可用后端（未发现真实硬件），保持未连接")
