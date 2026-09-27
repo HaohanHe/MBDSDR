@@ -48,6 +48,13 @@ from themes import get_theme, DEFAULT_THEME  # noqa: E402
 
 from tokens import tokens as _tok  # noqa: E402
 
+# 触屏手势：双指捏合缩放 + 单指拖动平移地图（Surface/平板）。
+try:  # noqa: E402
+    from touch_helpers import PinchZoomMixin, enable_touch_events
+except Exception:  # pragma: no cover
+    PinchZoomMixin = object  # type: ignore
+    enable_touch_events = lambda w: None  # noqa: E731
+
 from mbdsdr_ai.adsb_map import (  # noqa: E402
     WORLD_LAND_POLYGONS,
     AircraftTracker,
@@ -67,14 +74,46 @@ _LAND_FILL = QColor(_t.COLORS["card_2"])
 ADSB_EMPTY_TEXT = "无 ADS-B 飞机（需 1090MHz）"
 
 
-class _MapCanvas(QWidget):
-    """纯 QPainter 绘制的等距圆柱投影地图画布。"""
+class _MapCanvas(PinchZoomMixin, QWidget):
+    """纯 QPainter 绘制的等距圆柱投影地图画布。
+
+    触屏（Surface/平板）：PinchZoomMixin 双指捏合缩放地图、单指拖动平移。
+    缩放/平移通过 QPainter 变换矩阵实现，不改动 project_equirectangular 投影；
+    鼠标模式（无手势）完全不变。
+    """
 
     def __init__(self, tracker: AircraftTracker, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._tracker = tracker
         self.setMinimumSize(360, 240)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # 触屏缩放/平移状态（QPainter 变换：以画布中心为锚点 scale + translate）
+        self._map_zoom: float = 1.0
+        self._map_pan_x: float = 0.0
+        self._map_pan_y: float = 0.0
+        if PinchZoomMixin is not object and hasattr(self, "init_pinch_zoom"):
+            self.init_pinch_zoom()
+            try:
+                self.pinch_scale_changed.connect(self._on_touch_pinch)
+                self.pan_changed.connect(self._on_touch_pan)
+            except Exception:
+                pass
+
+    # ---- 触屏手势：缩放/平移（仅改变换矩阵，不造假飞机点）----
+    def _on_touch_pinch(self, scale_factor: float, center_pos: QPointF) -> None:
+        try:
+            self._map_zoom = max(1.0, min(12.0, self._map_zoom * scale_factor))
+            self.update()
+        except Exception:
+            pass
+
+    def _on_touch_pan(self, dx: float, dy: float) -> None:
+        try:
+            self._map_pan_x += dx
+            self._map_pan_y += dy
+            self.update()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ #
     def _displayed(self) -> list:
@@ -87,6 +126,25 @@ class _MapCanvas(QWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
         w, h = self.width(), self.height()
         p.fillRect(self.rect(), _BG)
+
+        acs = self._displayed()
+        if not acs:
+            # 空态：居中提示，不画任何假点（不施加缩放变换）。
+            p.setPen(QPen(_TEXT))
+            f = QFont()
+            f.setPointSize(12)
+            p.setFont(f)
+            p.drawText(QRectF(self.rect()), Qt.AlignCenter, ADSB_EMPTY_TEXT)
+            p.end()
+            return
+
+        # 触屏缩放/平移：以画布中心为锚点做 scale+translate 变换。
+        # 经纬网/大陆轮廓/飞机点都在变换后的坐标系里绘制，整体一起缩放。
+        if self._map_zoom != 1.0 or self._map_pan_x or self._map_pan_y:
+            cx, cy = w / 2.0, h / 2.0
+            p.translate(cx + self._map_pan_x, cy + self._map_pan_y)
+            p.scale(self._map_zoom, self._map_zoom)
+            p.translate(-cx, -cy)
 
         # 30° 间隔经纬网格（浅米灰细线）。
         p.setPen(QPen(_GRID, 1))
@@ -109,17 +167,6 @@ class _MapCanvas(QWidget):
             p.setPen(outline_pen)
             p.setBrush(QBrush(_LAND_FILL))
             p.drawPolygon(qp)
-
-        acs = self._displayed()
-        if not acs:
-            # 空态：居中提示，不画任何假点。
-            p.setPen(QPen(_TEXT))
-            f = QFont()
-            f.setPointSize(12)
-            p.setFont(f)
-            p.drawText(QRectF(self.rect()), Qt.AlignCenter, ADSB_EMPTY_TEXT)
-            p.end()
-            return
 
         # 飞机点：橙色实心圆 + 呼号文字；有航向时画一小段航向线。
         dot_pen = QPen(_ACCENT, 1)
@@ -162,6 +209,14 @@ class AdsbMapPanel(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionMode(QTableWidget.NoSelection)
+        # 触屏友好：开启触屏事件 + 按像素滚动（手指拖动列表行）
+        enable_touch_events(self.table)
+        try:
+            from PySide6.QtWidgets import QAbstractItemView
+            self.table.setVerticalScrollMode(
+                QAbstractItemView.ScrollMode.ScrollPerPixel)
+        except Exception:
+            pass
         # 右侧飞机列表：给弹性宽度范围，窗口缩放时跟随
         self.table.setMinimumWidth(160)
         self.table.setMaximumWidth(320)

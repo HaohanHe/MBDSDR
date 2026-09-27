@@ -36,6 +36,7 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 from mbdsdr_ai.dsp_stream import PingPongStream
 from mbdsdr_ai.dsp import StreamSplitter
 from mbdsdr_ai.squelch import AutoSquelch, NoiseSquelch
+from mode_registry import get as get_mode, demodulate
 
 log = logging.getLogger(__name__)
 
@@ -229,19 +230,16 @@ class DemodWorker(QThread):
         self._audio_enabled = bool(on)
 
     def _demod_48k(self, dsp, mode: str, vfo_out: np.ndarray) -> np.ndarray:
-        """VFO 输出已是 48k complex IQ，按模式解调（沿用原 main_window 映射）。"""
-        if mode == "NFM":
-            return dsp.fm_demod(vfo_out, deviation=5000.0, sample_rate=48000)
-        if mode == "FM":
-            return dsp.fm_demod(vfo_out, deviation=75000.0, sample_rate=48000)
-        if mode == "AM":
-            return dsp.am_demod(vfo_out)
-        if mode == "USB":
-            return dsp.ssb_demod(vfo_out, mode="USB", sample_rate=48000)
-        if mode == "LSB":
-            return dsp.ssb_demod(vfo_out, mode="LSB", sample_rate=48000)
-        if mode == "CW":
-            return dsp.cw_demod(vfo_out, tone_freq=700.0, sample_rate=48000)
+        """VFO 输出已是 48k complex IQ，按模式解调。
+
+        模式→函数映射已收口到 mode_registry（与 main_window._demod_at_48k 同源）。
+        WFM 在 run() 里走专用广播路径并 continue，不会进到这里。
+        """
+        desc = get_mode(mode)
+        if desc is not None and desc.outputs_audio:
+            result = demodulate(mode, vfo_out, sample_rate=48000)
+            if result is not None:
+                return result
         return dsp.fm_demod(vfo_out, deviation=75000.0, sample_rate=48000)
 
     def run(self):

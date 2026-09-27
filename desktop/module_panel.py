@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from tokens import tokens as _tok
+from mode_registry import get as _get_mode
 
 _t = _tok()
 
@@ -226,7 +227,11 @@ class ModulePanel(QWidget):
         # 解调模式选择（SDR++ Radio 模块的 demod 选择）
         lv.addWidget(QLabel("解调模式"))
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["WFM 广播", "NFM 窄带", "AM", "USB", "LSB"])
+        # 解调模式显示名来自 mode_registry；本面板只暴露模拟语音/广播子集，
+        # 顺序保持原 UI（WFM/NFM/AM/USB/LSB），未注册的模式自动剔除。
+        self.mode_combo.addItems(
+            [_get_mode(m).display_name for m in ["WFM", "NFM", "AM", "USB", "LSB"]
+             if _get_mode(m)])
         self.mode_combo.currentTextChanged.connect(
             lambda t: self.demod_mode_changed.emit(t))
         lv.addWidget(self.mode_combo)
