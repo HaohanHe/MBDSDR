@@ -38,6 +38,11 @@ DemodAM::DemodAM(double sr, double bw) : ifSr_(sr), bw_(bw),
 
 void DemodAM::reset() { dcPrev_ = 0; lpf_.reset(); }
 
+void DemodAM::setBandwidth(double hz) {
+    bw_ = hz;
+    lpf_ = FirLowpass(bw_ / 2.0 / ifSr_, 63);
+}
+
 std::vector<float> DemodAM::process(const std::vector<std::complex<float>>& iq) {
     std::vector<float> env(iq.size());
     const float R = static_cast<float>(1.0 - 100.0 / ifSr_);
@@ -117,6 +122,13 @@ QString DemodSSB::name() const {
 }
 
 void DemodSSB::reset() { phase_ = 0; lpf_.reset(); }
+
+void DemodSSB::setBandwidth(double hz) {
+    bw_ = hz;
+    const double translation = (sb_ == Sideband::USB) ? bw_/2.0 : -bw_/2.0;
+    dPhi_ = static_cast<float>(2 * M_PI * translation / ifSr_);
+    lpf_ = FirLowpass(bw_ / 2.0 / ifSr_, 63);
+}
 
 std::vector<float> DemodSSB::process(const std::vector<std::complex<float>>& iq) {
     std::vector<float> mixed(iq.size());

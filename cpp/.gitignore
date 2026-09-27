@@ -2,3 +2,7 @@ build/
 *.o
 *.a
 compile_commands.json
+build/
+recordings/
+test_tmp_rec/
+test_tmp_wav/

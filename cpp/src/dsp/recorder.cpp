@@ -32,27 +32,28 @@ bool Recorder::start(const QString& dir, double sr, double freq, double gainDb,
     centerFreq_ = freq;
     sampleCount_ = 0;
 
-    meta_ = QJsonObject{
-        {"global", QJsonObject{
-            {"core:datatype", "cf32_le"},
-            {"core:sample_rate", sr},
-            {"core:version", "1.0.0"},
-            {"core:num_channels", 1},
-            {"core:frequency", freq},
-            {"core:hw", hardware},
-            {"core:author", "MBDSDR"},
-            {"core:num_samples", 0}
-        }},
-        {"captures", QJsonArray{
-            QJsonObject{
-                {"core:sample_start", 0},
-                {"core:frequency", freq},
-                {"core:datetime", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
-                {"mbdsdr:gain_db", gainDb}
-            }
-        }},
-        {"annotations", QJsonArray{}}
-    };
+    QJsonObject global;
+    global["core:datatype"] = "cf32_le";
+    global["core:sample_rate"] = sr;
+    global["core:version"] = "1.0.0";
+    global["core:num_channels"] = 1;
+    global["core:frequency"] = freq;
+    global["core:hw"] = hardware;
+    global["core:author"] = "MBDSDR";
+    global["core:num_samples"] = 0;
+
+    QJsonObject capture;
+    capture["core:sample_start"] = 0;
+    capture["core:frequency"] = freq;
+    capture["core:datetime"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    capture["mbdsdr:gain_db"] = gainDb;
+    QJsonArray captures;
+    captures.append(capture);
+
+    meta_ = QJsonObject();
+    meta_["global"] = global;
+    meta_["captures"] = captures;
+    meta_["annotations"] = QJsonArray();
 
     recording_ = true;
     qInfo() << "[Recorder] started" << currentDataPath_;

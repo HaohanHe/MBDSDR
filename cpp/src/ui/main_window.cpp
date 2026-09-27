@@ -12,6 +12,7 @@
 #include <QDoubleSpinBox>
 #include <QComboBox>
 #include <QSlider>
+#include <QCheckBox>
 #include <QGroupBox>
 
 #include "core/tokens.h"
@@ -127,6 +128,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     demodCombo_->addItems({"NFM", "WFM", "AM", "USB", "LSB"});
     leftLay->addWidget(demodCombo_);
 
+    // Bandwidth
+    leftLay->addWidget(new QLabel("带宽", leftCard));
+    bwCombo_ = new QComboBox(leftCard);
+    bwCombo_->addItems({"8 kHz", "12.5 kHz", "200 kHz", "2.4 kHz"});
+    bwCombo_->setCurrentIndex(1); // NFM default
+    leftLay->addWidget(bwCombo_);
+
     // Squelch
     leftLay->addWidget(new QLabel("静噪门限", leftCard));
     auto* sqRow = new QHBoxLayout();
@@ -146,6 +154,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     levelLabel_ = new QLabel("电平: -- dBFS", leftCard);
     levelLabel_->setObjectName("monoInfo");
     leftLay->addWidget(levelLabel_);
+
+    // Recording
+    recordBtn_ = new QPushButton("● REC", leftCard);
+    leftLay->addWidget(recordBtn_);
+    gatedCheck_ = new QCheckBox("触发录制（按通话分段）", leftCard);
+    leftLay->addWidget(gatedCheck_);
+    recStatus_ = new QLabel("录制: 空闲", leftCard);
+    recStatus_->setObjectName("monoInfo");
+    leftLay->addWidget(recStatus_);
 
     leftLay->addStretch();
     splitter->addWidget(leftCard);
@@ -254,6 +271,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 engine_->setSquelchThreshold(static_cast<float>(v));
             });
 
+    connect(bwCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+                static const double bw[] = {8000, 12500, 200000, 2400};
+                engine_->setBandwidth(bw[idx]);
+            });
+    connect(recordBtn_, &QPushButton::clicked, this, &MainWindow::onRecordClicked);
+    connect(gatedCheck_, &QCheckBox::toggled,
+            this, [this](bool e) { engine_->setGatedRecordingEnabled(e); });
+    connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
+            this, &MainWindow::onRecordingState);
+
     // Control signals -> engine
     connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, [this](double mhz) { engine_->onSetCenterFreq(mhz * 1e6); });
@@ -297,6 +325,20 @@ void MainWindow::onAudioLevel(float dbfs) {
 
 void MainWindow::onSquelchState(bool open) {
     squelchState_->setText(open ? "静噪: OPEN" : "静噪: CLOSED");
+}
+
+void MainWindow::onRecordClicked() {
+    if (!engine_) return;
+    if (recordBtn_->text().contains("REC")) {
+        engine_->startRecording();
+    } else {
+        engine_->stopRecording();
+    }
+}
+
+void MainWindow::onRecordingState(bool recording, const QString& path) {
+    recordBtn_->setText(recording ? "■ STOP" : "● REC");
+    recStatus_->setText(recording ? QString("录制: %1").arg(path) : "录制: 空闲");
 }
 
 } // namespace mbdsdr

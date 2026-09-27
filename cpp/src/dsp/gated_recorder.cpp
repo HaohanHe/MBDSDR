@@ -5,6 +5,8 @@
 #include <QDateTime>
 #include <QFile>
 #include <QDataStream>
+#include <QtGlobal>
+#include <cstdint>
 #include <cmath>
 #include <algorithm>
 
@@ -14,7 +16,6 @@ namespace dsp {
 GatedRecorder::GatedRecorder(double sr) : sr_(sr) {
     attackAlpha_  = static_cast<float>(1.0 - std::exp(-10.0 / (sr_ * 10e-3)));
     releaseAlpha_ = static_cast<float>(1.0 - std::exp(-10.0 / (sr_ * 60e-3)));
-    preRoll_.set_capacity(static_cast<std::size_t>(sr_ * kPreRollMs / 1000.0));
 }
 
 void GatedRecorder::startSegment() {
@@ -33,7 +34,6 @@ void GatedRecorder::endSegment() {
         segmentBuf_.clear();
         return;
     }
-    // Trim trailing silence (below 1% of peak)
     float peak = 0;
     for (float s : segmentBuf_) peak = std::max(peak, std::abs(s));
     if (peak < 1e-4) { state_ = State::IDLE; segmentBuf_.clear(); return; }
@@ -42,7 +42,6 @@ void GatedRecorder::endSegment() {
     while (end > 0 && std::abs(segmentBuf_[end-1]) < threshold) --end;
     segmentBuf_.resize(end);
 
-    // Gentle normalize to 0.9 peak, max gain 8x
     float newPeak = 0;
     for (float s : segmentBuf_) newPeak = std::max(newPeak, std::abs(s));
     if (newPeak > 1e-4) {
@@ -50,7 +49,7 @@ void GatedRecorder::endSegment() {
         for (auto& s : segmentBuf_) s *= g;
     }
 
-    writeWav(segmentBuf_, currentMode_, currentFreq_);
+    lastSavedPath_ = writeWav(segmentBuf_, currentMode_, currentFreq_);
     state_ = State::IDLE;
     segmentBuf_.clear();
 }
@@ -62,9 +61,10 @@ std::vector<QString> GatedRecorder::feed(const std::vector<float>& audio, bool g
     const double blockMs = audio.size() * 1000.0 / sr_;
 
     // Always push to pre-roll
+    const std::size_t maxPreRoll = static_cast<std::size_t>(sr_ * kPreRollMs / 1000.0);
     for (float s : audio) {
         preRoll_.push_back(s);
-        if (preRoll_.size() > preRoll_.capacity()) preRoll_.pop_front();
+        if (preRoll_.size() > maxPreRoll) preRoll_.pop_front();
     }
 
     if (state_ == State::IDLE) {
@@ -90,6 +90,7 @@ std::vector<QString> GatedRecorder::feed(const std::vector<float>& audio, bool g
 
     if (hangLeftMs_ <= 0 || segmentLenMs_ >= kMaxSegMs) {
         endSegment();
+        if (!lastSavedPath_.isEmpty()) saved.push_back(lastSavedPath_);
     }
     return saved;
 }
@@ -108,10 +109,10 @@ QString GatedRecorder::writeWav(const std::vector<float>& samples,
                              .arg(static_cast<qint64>(freq));
 
     // Convert float [-1,1] to int16
-    std::vector<qint16_t> pcm(samples.size());
+    std::vector<std::int16_t> pcm(samples.size());
     for (std::size_t i = 0; i < samples.size(); ++i) {
         float v = std::clamp(samples[i], -1.0f, 1.0f);
-        pcm[i] = static_cast<qint16_t>(v * 32767.0f);
+        pcm[i] = static_cast<std::int16_t>(v * 32767.0f);
     }
 
     QFile f(path);
@@ -119,20 +120,20 @@ QString GatedRecorder::writeWav(const std::vector<float>& samples,
     QDataStream ds(&f);
     ds.setByteOrder(QDataStream::LittleEndian);
 
-    const qint32 dataBytes = static_cast<qint32>(pcm.size() * sizeof(qint16_t));
+    const std::int32_t dataBytes = static_cast<std::int32_t>(pcm.size() * sizeof(std::int16_t));
     // RIFF header
     ds.writeRawData("RIFF", 4);
     ds << static_cast<quint32>(36 + dataBytes);
     ds.writeRawData("WAVE", 4);
     // fmt chunk
     ds.writeRawData("fmt ", 4);
-    ds << static_cast<quint32>(16);           // chunk size
-    ds << static_cast<quint16>(1);            // PCM
-    ds << static_cast<quint16>(1);            // mono
+    ds << static_cast<quint32>(16);
+    ds << static_cast<quint16>(1);
+    ds << static_cast<quint16>(1);
     ds << static_cast<quint32>(static_cast<quint32>(sr_));
-    ds << static_cast<quint32>(static_cast<quint32>(sr_ * 2)); // byte rate
-    ds << static_cast<quint16>(2);            // block align
-    ds << static_cast<quint16>(16);           // bits per sample
+    ds << static_cast<quint32>(static_cast<quint32>(sr_ * 2));
+    ds << static_cast<quint16>(2);
+    ds << static_cast<quint16>(16);
     // data chunk
     ds.writeRawData("data", 4);
     ds << dataBytes;
