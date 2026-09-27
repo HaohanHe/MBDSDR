@@ -3388,7 +3388,29 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"gr-osmosdr 枚举异常: {e}")
 
-    return list(merged.values())
+    # 6) 去重收尾：osmosdr 的 "rtl" 条目与原生 RTLSDR 走同一根 librtlsdr，
+    #    同一根棒会出现两次（一条带真实增益/频率范围的 rtl_native，一条 osmosdr
+    #    的空参数 rtl 条目）。原生条目信息更全，优先保留；同 index 时丢 osmosdr 条目。
+    native_rtl_idx = {
+        int(d.get("device_args", {}).get("index", -1))
+        for d in merged.values() if d.get("source") == "rtl_native"
+    }
+    out: List[Dict[str, Any]] = []
+    for d in merged.values():
+        # bytes 标签统一 decode（ctypes char* 可能返回 bytes）
+        if isinstance(d.get("label"), bytes):
+            d["label"] = d["label"].decode("utf-8", "replace")
+        if d.get("driver") == "rtl" and d.get("source") is None:
+            _s = str(d.get("device_args", {}).get("osmosdr_string", "rtl=0"))
+            try:
+                _idx = int(_s.split("=", 1)[-1])
+            except ValueError:
+                _idx = 0
+            if _idx in native_rtl_idx:
+                continue  # 原生条目已覆盖同一根 RTL 棒
+        out.append(d)
+
+    return out
 
 
 def build_backend_for_device(dev: Dict[str, Any]) -> Optional[SDRBackend]:

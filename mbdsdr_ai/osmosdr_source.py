@@ -521,13 +521,21 @@ class DeviceEnumerator:
             for i in range(int(n)):
                 try:
                     name = rtlsdr.librtlsdr.rtlsdr_get_device_name(i)
+                    if isinstance(name, bytes):  # ctypes char* → bytes，必须 decode
+                        name = name.decode("utf-8", "replace")
                 except Exception:
                     name = "RTL-SDR"
+                try:
+                    serial = rtlsdr.librtlsdr.rtlsdr_get_device_serial(i)
+                    if isinstance(serial, bytes):
+                        serial = serial.decode("utf-8", "replace")
+                except Exception:
+                    serial = ""
                 devices.append({
                     "driver": "rtl",
                     "index": i,
                     "label": f"RTL-SDR #{i} {name}".strip(),
-                    "serial": "",
+                    "serial": serial,
                     "device_string": f"rtl={i}",
                 })
         except Exception as e:  # 无 pyrtlsdr / 无设备
