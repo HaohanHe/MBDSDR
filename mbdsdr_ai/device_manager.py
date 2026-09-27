@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import collections
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -91,6 +92,17 @@ class OpenDevice:
         self._backend = backend  # 具体驱动对象（rtlsdr.RtlSdr / SoapySDR.Device / ...）
         self._closed = False
         self._lock = threading.Lock()
+        # ── ReceiveChain 实时音频（信道滤波/立体声/去加重 → 声卡）──
+        self._sample_rate_hz: Optional[float] = None
+        self._chain: Any = None
+        self._chain_mode: str = "WFM"
+        self._audio_player: Any = None
+        self._audio_thread: Optional[threading.Thread] = None
+        self._reader_thread: Optional[threading.Thread] = None
+        self._raw_q: Any = None
+        self._audio_stop = threading.Event()
+        self._audio_out_q: "collections.deque" = collections.deque()
+        self._audio_lock = threading.Lock()
 
     # -- 配置 ---------------------------------------------------------------
     def set_sample_rate(self, rate_hz: float) -> None:
@@ -100,6 +112,9 @@ class OpenDevice:
             self._backend.sample_rate = float(rate_hz)
         except OSError as e:
             raise DeviceDisconnectedError(f"设置采样率失败: {e}") from e
+        self._sample_rate_hz = float(rate_hz)
+        # 链按旧采样率构建，速率变了必须重建
+        self._chain = None
 
     def set_frequency(self, freq_hz: float) -> None:
         if self._closed:
@@ -155,10 +170,157 @@ class OpenDevice:
                 np.complex64
             )
 
+    # -- 实时音频（ReceiveChain → 声卡）-------------------------------------
+    def _ensure_chain(self, mode: str) -> Any:
+        mode = (mode or "WFM").upper()
+        if self._chain is None or self._chain_mode != mode:
+            if self._sample_rate_hz is None:
+                return None
+            try:
+                from .receive_chain import ReceiveChain
+                self._chain = ReceiveChain(fs_in=self._sample_rate_hz, mode=mode)
+                self._chain_mode = mode
+            except Exception:
+                self._chain = None
+        return self._chain
+
+    def start_audio(self, mode: str = "WFM") -> bool:
+        """启动 ReceiveChain 实时播放线程。已在跑返回 True；无法建链返回 False。"""
+        if self._audio_thread is not None and self._audio_thread.is_alive():
+            return True
+        chain = self._ensure_chain(mode)
+        if chain is None:
+            return False
+        try:
+            from .audio_out import AudioPlayer
+            channels = 2 if chain.is_stereo else 1
+            self._audio_player = AudioPlayer(sample_rate=48000, channels=channels)
+            try:
+                self._audio_player.start()
+            except Exception:
+                pass  # 无声卡时降级为只缓冲，不崩
+        except Exception:
+            self._audio_player = None
+        import queue as _queue
+        self._raw_q = _queue.Queue(maxsize=8)
+        self._audio_stop.clear()
+        with self._audio_lock:
+            self._audio_out_q.clear()
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop, name="dev-reader", daemon=True)
+        self._audio_thread = threading.Thread(
+            target=self._audio_loop, name="dev-dsp", daemon=True)
+        self._reader_thread.start()
+        self._audio_thread.start()
+        return True
+
+    def _reader_loop(self) -> None:
+        READ_BLOCK = 16384
+        while not self._audio_stop.is_set():
+            try:
+                iq = self.read_samples(READ_BLOCK)
+            except Exception:
+                self._audio_stop.wait(0.02)
+                continue
+            if iq is None or len(iq) == 0:
+                self._audio_stop.wait(0.01)
+                continue
+            # 有界投递：DSP 跟不上时阻塞形成背压，不占内存
+            while not self._audio_stop.is_set():
+                try:
+                    self._raw_q.put(iq, timeout=0.1)
+                    break
+                except Exception:
+                    continue
+
+    def _audio_loop(self) -> None:
+        while not self._audio_stop.is_set():
+            try:
+                iq = self._raw_q.get(timeout=0.1)
+            except Exception:
+                continue
+            try:
+                audio = self._chain.process(iq)
+            except Exception:
+                continue
+            if audio is None or len(audio) == 0:
+                continue
+            if self._audio_player is not None:
+                try:
+                    self._audio_player.write(audio)
+                except Exception:
+                    pass
+            with self._audio_lock:
+                self._audio_out_q.append(audio)
+                total = sum(b.shape[0] if hasattr(b, "shape") else len(b)
+                            for b in self._audio_out_q)
+                while total > 240000 and self._audio_out_q:
+                    old = self._audio_out_q.popleft()
+                    total -= old.shape[0] if hasattr(old, "shape") else len(old)
+
+    def read_audio(self, num_samples: int, mode: str = "WFM"):
+        """取 num_samples 个 48k 音频（float32）。线程在跑从队列取，否则跑一块。"""
+        num_samples = int(num_samples)
+        if num_samples <= 0:
+            return np.zeros(0, dtype=np.float32)
+        if self._audio_thread is not None and self._audio_thread.is_alive():
+            collected, got = [], 0
+            deadline = time.time() + 1.0
+            while got < num_samples and time.time() < deadline:
+                with self._audio_lock:
+                    blk = self._audio_out_q.popleft() if self._audio_out_q else None
+                if blk is None:
+                    time.sleep(0.002)
+                    continue
+                collected.append(blk)
+                got += blk.shape[0] if hasattr(blk, "shape") else len(blk)
+            if not collected:
+                return None
+            out = np.concatenate(collected, axis=0)
+            return out[:num_samples].astype(np.float32)
+        chain = self._ensure_chain(mode)
+        if chain is None:
+            return None
+        try:
+            iq = self.read_samples(max(num_samples * 4, 8192))
+        except Exception:
+            return None
+        if iq is None or len(iq) == 0:
+            return None
+        try:
+            audio = chain.process(iq)
+        except Exception:
+            return None
+        if audio is None or len(audio) == 0:
+            return None
+        return audio[:num_samples].astype(np.float32)
+
+    def stop_audio(self) -> None:
+        """停止实时音频线程与声卡。可重复调用。"""
+        self._audio_stop.set()
+        rt = getattr(self, "_reader_thread", None)
+        if rt is not None:
+            rt.join(timeout=1.0)
+        self._reader_thread = None
+        t = self._audio_thread
+        if t is not None:
+            t.join(timeout=1.0)
+        self._audio_thread = None
+        if self._audio_player is not None:
+            try:
+                self._audio_player.stop()
+            except Exception:
+                pass
+        self._audio_player = None
+
     # -- 关闭 ---------------------------------------------------------------
     def close(self) -> None:
         if self._closed:
             return
+        try:
+            self.stop_audio()
+        except Exception:
+            pass
         self._closed = True
         try:
             self._backend.close()

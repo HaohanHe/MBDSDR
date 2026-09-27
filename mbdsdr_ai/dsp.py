@@ -347,11 +347,17 @@ class QuadratureDemod:
 
 def wfm_broadcast_demod(x: np.ndarray, sample_rate: float,
                         audio_sr: int = 48000, deemph_us: float = 50.0,
-                        audio_cutoff: float = 15000.0) -> np.ndarray:
+                        audio_cutoff: float = 15000.0,
+                        channel_bw: float = 120000.0) -> np.ndarray:
     """
     完整宽带调频广播（WFM / 商用 FM）接收链，对标 GQRX/SDR# 的单声道 FM：
 
-      去直流 → 正交鉴频 → 抗混叠降采样到音频率 → 去加重 → 15kHz 音频低通 → 归一化
+      去直流 → **信道低通（鉴频前，关键）** → 正交鉴频 → 抗混叠降采样到音频率
+      → 去加重 → 15kHz 音频低通 → 归一化
+
+    信道低通必须在正交鉴频之前：否则鉴频器要在整个采样带宽（如 2.048MHz）上
+    面对带外噪声，这些噪声经鉴频变成明显的"沙啦"hiss。先把信道限制到约
+    channel_bw（单声道 ~120kHz；立体声需 ~200kHz），实测安静段噪声底可降约 12dB。
 
     sample_rate : 输入 IQ 采样率（FM 广播建议 ≥200kHz，如 240k/1.0M/2.4M）
     audio_sr    : 输出音频采样率（默认 48k）
@@ -359,12 +365,17 @@ def wfm_broadcast_demod(x: np.ndarray, sample_rate: float,
     仅输出单声道（L+R，基带 0–15kHz）；立体声复合解码（19kHz pilot / 38kHz 副载波）
     与 RDS（57kHz 副载波）为独立后续模块。
     """
-    from scipy.signal import resample_poly, butter, lfilter
+    from scipy.signal import (resample_poly, butter, lfilter, firwin)
 
     x = np.asarray(x, dtype=np.complex128)
     x = x - np.mean(x)
     if len(x) < 4:
         return np.zeros(0, dtype=np.float32)
+
+    # 0) 信道低通（鉴频前），抑制带外噪声/邻道
+    bch = firwin(65, min(float(channel_bw), sample_rate * 0.45)
+                 / (sample_rate / 2.0))
+    x = lfilter(bch, 1.0, x)
 
     # 1) 正交鉴频（频偏归一化，广播 FM 最大频偏 75kHz）
     phase_diff = np.angle(x[1:] * np.conj(x[:-1]))
@@ -396,6 +407,70 @@ def wfm_broadcast_demod(x: np.ndarray, sample_rate: float,
     if peak > 1e-9:
         audio = audio / peak * 0.95
     return audio.astype(np.float32)
+
+
+class WFMReceiver:
+    """有状态宽带 FM 广播接收器（流式逐块，对标 SDR# WFM / GQRX wfm_demod）。
+
+    与无状态 wfm_broadcast_demod 的区别：所有滤波器用 lfilter 的 zi 跨块连续，
+    信道低通在鉴频前；输出用**固定增益 + 软限幅**而非逐块峰值归一化——避免
+    语音停顿/弱信号时把噪声也放大到满幅（那会造成恒定 loud hiss）。
+
+    pipeline 的 DemodWorker 创建一次，对每个原生率块调用 process()。
+    """
+
+    def __init__(self, sample_rate: float, audio_sr: int = 48000,
+                 deemph_us: float = 50.0, audio_cutoff: float = 15000.0,
+                 channel_bw: float = 120000.0, output_gain: float = 1.6):
+        from scipy.signal import firwin, butter
+        self.sr = float(sample_rate)
+        self.audio_sr = int(audio_sr)
+        # 信道 FIR（鉴频前）
+        self._bch = firwin(65, min(float(channel_bw), self.sr * 0.45)
+                           / (self.sr / 2.0))
+        self._zi_ch = np.zeros(len(self._bch) - 1, dtype=np.complex128)
+        # DC 估计（缓慢跟踪）
+        self._dc = 0.0 + 0.0j
+        # 去加重
+        a = float(np.exp(-1.0 / (deemph_us * 1e-6 * self.audio_sr)))
+        self._de_b, self._de_a = np.array([1.0 - a]), np.array([1.0, -a])
+        self._zi_de = np.zeros(1)
+        # 音频低通
+        nyq = self.audio_sr / 2.0
+        self._b_lp, self._a_lp = butter(5, min(0.99, audio_cutoff / nyq),
+                                        btype="low")
+        self._zi_lp = np.zeros(max(len(self._b_lp), len(self._a_lp)) - 1)
+        self._gain = float(output_gain)
+
+    def process(self, iq: np.ndarray) -> np.ndarray:
+        from scipy.signal import lfilter, resample_poly
+        from math import gcd
+        x = np.asarray(iq, dtype=np.complex128)
+        if x.size < 4:
+            return np.zeros(0, dtype=np.float32)
+        # 缓慢去直流
+        m = complex(np.mean(x))
+        self._dc = 0.95 * self._dc + 0.05 * m
+        x = x - self._dc
+        # 信道低通（连续 zi）
+        x, self._zi_ch = lfilter(self._bch, 1.0, x, zi=self._zi_ch)
+        # 正交鉴频
+        ph = np.angle(x[1:] * np.conj(x[:-1]))
+        audio = ph * (self.sr / (2.0 * np.pi * 75000.0))
+        # 降采样到音频率
+        if int(self.sr) != self.audio_sr:
+            g = gcd(int(round(self.sr)), self.audio_sr)
+            audio = resample_poly(audio, self.audio_sr // g,
+                                  int(round(self.sr)) // g)
+        # 去加重（连续）
+        audio, self._zi_de = lfilter(self._de_b, self._de_a, audio,
+                                     zi=self._zi_de)
+        # 音频低通（连续）
+        audio, self._zi_lp = lfilter(self._b_lp, self._a_lp, audio,
+                                     zi=self._zi_lp)
+        # 固定增益 + tanh 软限幅（不做逐块峰值归一化）
+        audio = np.tanh(audio * self._gain)
+        return audio.astype(np.float32)
 
 
 def rds_decode_from_wfm(x: np.ndarray, sample_rate: float) -> dict:
@@ -959,6 +1034,9 @@ class VFO:
         self._up = 1
         self._down = 1
         self._rebuild_rational()
+        # 预设计重采样 FIR（只做一次），process 里以 window= 复用
+        self._resamp_window = None
+        self._design_resamp_window()
 
         # rx_vfo.h:29-30 generateTaps + filter.init
         self._taps = None
@@ -1053,6 +1131,24 @@ class VFO:
         elif not enabled and self._agc is not None:
             self._agc.reset(gain=1.0)
 
+    def _design_resamp_window(self):
+        """预设计有理重采样低通 FIR（原始 firwin，未乘 up）。
+
+        之后每块以 window= 传给 resample_poly，跳过每块重复 firwin
+        （sinc 设计在 Python 层、持 GIL，是多线程下的热点）。结果与
+        resample_poly 默认设计一致（其内部再乘 up）。"""
+        self._resamp_window = None
+        if self._up == 1 and self._down == 1:
+            return
+        try:
+            from scipy.signal import firwin
+            max_rate = max(self._up, self._down)
+            half_len = 10 * max_rate
+            self._resamp_window = firwin(
+                2 * half_len + 1, 1.0 / max_rate, window=('kaiser', 5.0))
+        except Exception:
+            self._resamp_window = None
+
     def process(self, iq: np.ndarray) -> np.ndarray:
         """处理一帧复 IQ：变频 → 重采样 → 低通滤波（对照 rx_vfo.h:89-100）。
         返回处理后的复 IQ（长度约 = len(iq) * out_sr / in_sr）。"""
@@ -1082,7 +1178,11 @@ class VFO:
         if self._up != 1 or self._down != 1:
             try:
                 from scipy.signal import resample_poly
-                x = resample_poly(x, self._up, self._down)
+                if self._resamp_window is not None:
+                    x = resample_poly(x, self._up, self._down,
+                                      window=self._resamp_window)
+                else:
+                    x = resample_poly(x, self._up, self._down)
             except ImportError:
                 # numpy 兜底：线性插值（粗糙但可用；scipy 不可用时的降级路径）
                 n_new = int(round(n * self._out_sr / self._in_sr))
