@@ -42,6 +42,8 @@ set(SOURCES
     src/dsp/rtl_sdr_source.cpp
     src/dsp/spectrum_engine.cpp
     src/dsp/iq_frontend.cpp
+    src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp
     src/dsp/squelch.cpp
     src/dsp/agc.cpp
@@ -73,6 +75,8 @@ set(HEADERS
     src/dsp/rtl_sdr_source.h
     src/dsp/spectrum_engine.h
     src/dsp/iq_frontend.h
+    src/dsp/channelizer.h
+    src/dsp/audio_resampler.h
     src/dsp/demod.h
     src/dsp/squelch.h
     src/dsp/agc.h
@@ -102,6 +106,19 @@ add_executable(test_fft tests/test_fft.cpp src/dsp/fft.cpp)
 target_include_directories(test_fft PRIVATE src)
 target_link_libraries(test_fft PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME fft COMMAND test_fft)
+
+add_executable(test_channelizer tests/test_channelizer.cpp
+    src/dsp/channelizer.cpp src/dsp/fft.cpp)
+target_include_directories(test_channelizer PRIVATE src)
+target_link_libraries(test_channelizer PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME channelizer COMMAND test_channelizer)
+
+add_executable(test_chain tests/test_chain.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
+    src/dsp/demod.cpp src/dsp/fft.cpp)
+target_include_directories(test_chain PRIVATE src)
+target_link_libraries(test_chain PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME chain COMMAND test_chain)
 
 add_executable(test_demod tests/test_demod.cpp
     src/dsp/fft.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp)

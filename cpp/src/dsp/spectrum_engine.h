@@ -11,6 +11,8 @@
 #include "core/spectrum_frame.h"
 #include "dsp/source.h"
 #include "dsp/iq_frontend.h"
+#include "dsp/channelizer.h"
+#include "dsp/audio_resampler.h"
 #include "dsp/demod.h"
 #include "dsp/squelch.h"
 #include "dsp/agc.h"
@@ -66,6 +68,8 @@ private:
     std::unique_ptr<ISource> source_;
     std::unique_ptr<IDemod> demod_;
     IQFrontend frontend_;
+    Channelizer channelizer_;
+    AudioResampler audioRes_;
     Squelch squelch_;
     Agc agc_;
     AudioOutput* audioOut_ = nullptr;
