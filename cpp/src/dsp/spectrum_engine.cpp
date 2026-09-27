@@ -39,10 +39,13 @@ void SpectrumEngine::rebuildDemod() {
     else if (demodMode_ == "WFM") demod_ = std::make_unique<DemodWFM>();
     else if (demodMode_ == "USB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::USB, 48000, bandwidth_);
     else if (demodMode_ == "LSB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, 48000, bandwidth_);
+    else if (demodMode_ == "CW") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, 48000, bandwidth_);
     else demod_ = std::make_unique<DemodNFM>(48000, bandwidth_);
     frontend_.reset();
     squelch_.reset();
     agc_.reset();
+    cwDecoder_.reset();
+    adsbDecoder_.reset();
 
     if (auto* ts = dynamic_cast<TestSignalSource*>(source_.get())) {
         if (demodMode_ == "AM") ts->setModulation("am");
@@ -61,10 +64,10 @@ void SpectrumEngine::onSetSampleRate(double r) { if (source_) source_->setSample
 void SpectrumEngine::onSetGain(double g) { if (source_) source_->setGain(g); }
 void SpectrumEngine::setDemodMode(const QString& m) {
     demodMode_ = m;
-    // Default bandwidth per mode
     if (m == "AM") bandwidth_ = 8000;
     else if (m == "NFM") bandwidth_ = 12500;
     else if (m == "WFM") bandwidth_ = 200000;
+    else if (m == "CW") bandwidth_ = 500;
     else bandwidth_ = 2400;
     needDemodReset_ = true;
 }
@@ -136,6 +139,20 @@ void SpectrumEngine::run() {
 
         // Gated recording
         gatedRec_.feed(out, gate);
+
+        // CW decode
+        if (demodMode_ == "CW") {
+            cwDecoder_.feed(out);
+            QString text = cwDecoder_.takeText();
+            if (!text.isEmpty()) emit cwDecoded(text, cwDecoder_.wpm());
+        }
+
+        // ADS-B decode
+        if (demodMode_ == "ADS-B") {
+            adsbDecoder_.feed(iq);
+            for (const auto& ac : adsbDecoder_.takeNewAircraft())
+                emit adsbAircraft(ac);
+        }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(33));
     }

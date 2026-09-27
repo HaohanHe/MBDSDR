@@ -16,6 +16,8 @@
 #include "dsp/audio_output.h"
 #include "dsp/recorder.h"
 #include "dsp/gated_recorder.h"
+#include "dsp/cw_decoder.h"
+#include "dsp/adsb_decoder.h"
 
 namespace mbdsdr {
 namespace dsp {
@@ -48,6 +50,8 @@ signals:
     void audioLevel(float dbfs);
     void squelchState(bool open);
     void recordingStateChanged(bool recording, const QString& path);
+    void cwDecoded(const QString& text, double wpm);
+    void adsbAircraft(const AircraftInfo& info);
 
 protected:
     void run() override;
@@ -61,6 +65,8 @@ private:
     AudioOutput* audioOut_ = nullptr;
     Recorder recorder_;
     GatedRecorder gatedRec_;
+    CWDecoder cwDecoder_;
+    ADSBDecoder adsbDecoder_;
 
     std::atomic<int> fftSize_{2048};
     std::atomic<bool> running_{true};

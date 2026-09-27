@@ -9,9 +9,12 @@ class QComboBox;
 class QSlider;
 class QPushButton;
 class QCheckBox;
+class QTabWidget;
+class QPlainTextEdit;
+class QTableWidget;
 
 namespace mbdsdr {
-namespace dsp  { class SpectrumEngine; }
+namespace dsp  { class SpectrumEngine; struct AircraftInfo; }
 namespace ui   { class SpectrumWidget; }
 
 class MainWindow : public QMainWindow {
@@ -26,6 +29,8 @@ private slots:
     void onSquelchState(bool open);
     void onRecordingState(bool recording, const QString& path);
     void onRecordClicked();
+    void onCwDecoded(const QString& text, double wpm);
+    void onAdsbAircraft(const mbdsdr::dsp::AircraftInfo& info);
 
 private:
     dsp::SpectrumEngine* engine_   = nullptr;
@@ -47,6 +52,11 @@ private:
     QPushButton*    recordBtn_   = nullptr;
     QCheckBox*      gatedCheck_   = nullptr;
     QLabel*         recStatus_   = nullptr;
+
+    QTabWidget*     rightTabs_   = nullptr;
+    QPlainTextEdit* cwText_      = nullptr;
+    QLabel*         cwWpm_       = nullptr;
+    QTableWidget*   adsbTable_   = nullptr;
 
     void setControlsEnabled(bool hardwareConnected);
 };

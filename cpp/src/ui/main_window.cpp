@@ -14,6 +14,9 @@
 #include <QSlider>
 #include <QCheckBox>
 #include <QGroupBox>
+#include <QTabWidget>
+#include <QPlainTextEdit>
+#include <QTableWidget>
 
 #include "core/tokens.h"
 #include "dsp/spectrum_engine.h"
@@ -125,7 +128,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // Demod mode
     leftLay->addWidget(new QLabel("解调模式", leftCard));
     demodCombo_ = new QComboBox(leftCard);
-    demodCombo_->addItems({"NFM", "WFM", "AM", "USB", "LSB"});
+    demodCombo_->addItems({"NFM", "WFM", "AM", "USB", "LSB", "CW", "ADS-B"});
     leftLay->addWidget(demodCombo_);
 
     // Bandwidth
@@ -176,11 +179,38 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     centerLay->addWidget(spectrum_);
     splitter->addWidget(centerCard);
 
-    // Right panel
-    auto* rightCard = makePanelCard("当前任务", splitter);
-    qobject_cast<QVBoxLayout*>(rightCard->layout())->addWidget(
-        new QLabel("占位：AI Agent / 任务列表\n（Phase 6 接入）", rightCard));
-    qobject_cast<QVBoxLayout*>(rightCard->layout())->addStretch();
+    // Right panel: tabs
+    auto* rightCard = makePanelCard("面板", splitter);
+    rightTabs_ = new QTabWidget(rightCard);
+    rightTabs_->setTabPosition(QTabWidget::North);
+
+    auto* taskWidget = new QWidget();
+    auto* taskLay = new QVBoxLayout(taskWidget);
+    taskLay->addWidget(new QLabel("AI Agent / 任务列表\n（Phase 6 接入）", taskWidget));
+    taskLay->addStretch();
+    rightTabs_->addTab(taskWidget, "任务");
+
+    auto* cwWidget = new QWidget();
+    auto* cwLay = new QVBoxLayout(cwWidget);
+    cwLay->addWidget(new QLabel("CW 摩尔斯解码（800Hz BFO）", cwWidget));
+    cwWpm_ = new QLabel("WPM: --", cwWidget);
+    cwLay->addWidget(cwWpm_);
+    cwText_ = new QPlainTextEdit(cwWidget);
+    cwText_->setReadOnly(true);
+    cwText_->setPlaceholderText("无 CW 信号时此处为空");
+    cwLay->addWidget(cwText_);
+    rightTabs_->addTab(cwWidget, "CW");
+
+    auto* adsbWidget = new QWidget();
+    auto* adsbLay = new QVBoxLayout(adsbWidget);
+    adsbLay->addWidget(new QLabel("ADS-B 1090MHz\n需 1090MHz 专用天线，FC0012 可能不支持", adsbWidget));
+    adsbTable_ = new QTableWidget(0, 4, adsbWidget);
+    adsbTable_->setHorizontalHeaderLabels({"ICAO", "呼号", "高度(ft)", "最后出现"});
+    adsbTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    adsbLay->addWidget(adsbTable_);
+    rightTabs_->addTab(adsbWidget, "ADS-B");
+
+    qobject_cast<QVBoxLayout*>(rightCard->layout())->addWidget(rightTabs_);
     splitter->addWidget(rightCard);
 
     splitter->setStretchFactor(0, 1);
@@ -297,6 +327,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 engine_->onSetGain(db);
             });
 
+    connect(engine_, &dsp::SpectrumEngine::cwDecoded,
+            this, &MainWindow::onCwDecoded);
+    connect(engine_, &dsp::SpectrumEngine::adsbAircraft,
+            this, &MainWindow::onAdsbAircraft);
+
     engine_->start();
 }
 
@@ -339,6 +374,30 @@ void MainWindow::onRecordClicked() {
 void MainWindow::onRecordingState(bool recording, const QString& path) {
     recordBtn_->setText(recording ? "■ STOP" : "● REC");
     recStatus_->setText(recording ? QString("录制: %1").arg(path) : "录制: 空闲");
+}
+
+void MainWindow::onCwDecoded(const QString& text, double wpm) {
+    cwText_->appendPlainText(text);
+    cwWpm_->setText(QString("WPM: %1").arg(wpm, 0, 'f', 1));
+}
+
+void MainWindow::onAdsbAircraft(const mbdsdr::dsp::AircraftInfo& info) {
+    int row = adsbTable_->rowCount();
+    for (int i = 0; i < row; ++i) {
+        if (adsbTable_->item(i, 0)->text() == info.icao) {
+            adsbTable_->item(i, 1)->setText(info.callsign);
+            adsbTable_->item(i, 2)->setText(info.altitudeFt > 0 ?
+                QString::number(info.altitudeFt) : "--");
+            adsbTable_->item(i, 3)->setText(info.lastSeen.toString("HH:mm:ss"));
+            return;
+        }
+    }
+    adsbTable_->insertRow(row);
+    adsbTable_->setItem(row, 0, new QTableWidgetItem(info.icao));
+    adsbTable_->setItem(row, 1, new QTableWidgetItem(info.callsign));
+    adsbTable_->setItem(row, 2, new QTableWidgetItem(info.altitudeFt > 0 ?
+        QString::number(info.altitudeFt) : "--"));
+    adsbTable_->setItem(row, 3, new QTableWidgetItem(info.lastSeen.toString("HH:mm:ss")));
 }
 
 } // namespace mbdsdr
