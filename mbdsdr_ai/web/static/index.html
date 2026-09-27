@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MBDSDR Web — 频谱流</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">MBDSDR&nbsp;Web</div>
+
+    <!-- 连接状态指示（红线：未连接时显式红色，不造假频谱） -->
+    <div id="conn" class="conn conn-off" title="WebSocket 连接状态">未连接</div>
+
+    <div class="readout">
+      <span class="ro-label">频率</span>
+      <span id="ro-freq">--</span>
+      <span class="ro-unit">Hz</span>
+    </div>
+    <div class="readout">
+      <span class="ro-label">带宽</span>
+      <span id="ro-sr">--</span>
+      <span class="ro-unit">Hz</span>
+    </div>
+    <div class="readout">
+      <span class="ro-label">模式</span>
+      <span id="ro-mode">--</span>
+    </div>
+    <div class="readout">
+      <span class="ro-label">增益</span>
+      <span id="ro-gain">--</span>
+      <span class="ro-unit">dB</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- 频谱图：点击调谐 / 滚轮缩放 -->
+    <section class="panel">
+      <div class="panel-title">频谱 Spectrum
+        <span class="hint">点击=调谐 · 滚轮=缩放带宽</span>
+      </div>
+      <canvas id="spectrum" width="1200" height="240"></canvas>
+      <!-- 无数据覆盖层：显"等待数据"，绝不画假频谱 -->
+      <div id="waiting" class="waiting">等待数据…<br><small>未收到后端 IQ 帧</small></div>
+    </section>
+
+    <!-- 瀑布图：滚动 -->
+    <section class="panel">
+      <div class="panel-title">瀑布 Waterfall
+        <label class="cmap"><input type="checkbox" id="cmap-jet" checked> jet</label>
+      </div>
+      <canvas id="waterfall" width="1200" height="260"></canvas>
+    </section>
+
+    <!-- 控制条 -->
+    <section class="controls">
+      <label>频率
+        <input id="ctl-freq" type="number" step="100000" value="98000000">
+      </label>
+      <button data-mode="WFM">WFM</button>
+      <button data-mode="NFM">NFM</button>
+      <button data-mode="AM">AM</button>
+      <button data-mode="CW">CW</button>
+      <label>增益 <input id="ctl-gain" type="range" min="0" max="50" step="1" value="30"></label>
+      <span id="toast"></span>
+    </section>
+
+    <!-- 录制文件浏览 -->
+    <section class="panel">
+      <div class="panel-title">录制文件 <a href="/api/recordings" target="_blank">/api/recordings</a></div>
+      <ul id="recordings" class="recs"><li>加载中…</li></ul>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

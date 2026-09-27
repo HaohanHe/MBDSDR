@@ -8,11 +8,19 @@ mbdsdr_ai/web/server.py — 轻量 HTTP + WebSocket 服务器
   - owrx/connection.py:116 OpenWebRxReceiverClient —— 多客户端共享一个后端
 
 端点：
-  GET  /                简单状态页
-  GET  /api/status      JSON 状态；无后端 -> {"connected": false}
-  GET  /api/spectrum    最近一帧 FFT JSON；无数据 -> {"connected": false}
-  GET  /ws/spectrum     WebSocket 瀑布流（二进制，0x01 头）
-  GET  /ws/audio        WebSocket 音频流（二进制，0x02 头）
+  GET  /                 浏览器前端（static/index.html）
+  GET  /app.js /style.css /static/...   静态资源（白名单，防穿越）
+  GET  /api/status       JSON 状态；无后端 -> {"connected": false}
+  GET  /api/spectrum     最近一帧 FFT JSON；无数据 -> {"connected": false}
+  GET  /api/recordings   列出 ~/.mbdsdr/recordings/ 下的录制文件
+  GET  /api/recordings/<file>  下载录制文件
+  WS   /ws/spectrum       二进制频谱流（下行）+ 文本 JSON 命令（上行）
+  GET  /ws/audio         WebSocket 音频流（二进制，0x02 头）
+
+WebSocket 上行命令（文本帧 JSON）：
+  {cmd:"set_frequency", value:hz} / {cmd:"set_mode", value:"WFM"} /
+  {cmd:"set_gain", value:db}      / {cmd:"get_status"}
+  无后端 -> 回复 {type:"error", error:"not_connected"}。
 
 红线：后端为 None 或未连接时，所有端点显式报告未连接，绝不返回假数据。
 """
@@ -23,12 +31,15 @@ import base64
 import hashlib
 import json
 import logging
+import mimetypes
+import os
 import queue
 import struct
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 from .streamer import AudioStreamer, SpectrumStreamer
 
@@ -55,7 +66,8 @@ class _WebSocket:
     def __init__(self, handler, streamer):
         self.handler = handler
         self.streamer = streamer
-        self.out: "queue.Queue[bytes]" = queue.Queue(maxsize=64)
+        # 出站项为 (opcode, payload) 元组：二进制频谱帧 / 文本命令响应
+        self.out: "queue.Queue[tuple[int, bytes]]" = queue.Queue(maxsize=64)
         self.open = True
         self.socket_error = False
 
@@ -95,10 +107,18 @@ class _WebSocket:
             header += struct.pack(">Q", n)
         return bytes(header) + payload
 
-    # -- 供 streamer 调用 ------------------------------------------------ #
+    # -- 供 streamer / 控制层调用 ----------------------------------------- #
     def send(self, data: bytes) -> None:
+        """下行二进制频谱帧（streamer 调用）。"""
+        self._enqueue(_OPCODE_BINARY, data)
+
+    def send_text(self, obj: Dict[str, Any]) -> None:
+        """下行文本 JSON（命令响应 / 状态）。"""
+        self._enqueue(_OPCODE_TEXT, json.dumps(obj, allow_nan=False).encode("utf-8"))
+
+    def _enqueue(self, opcode: int, payload: bytes) -> None:
         try:
-            self.out.put_nowait(data)
+            self.out.put_nowait((opcode, payload))
         except queue.Full:
             self.close()
 
@@ -108,6 +128,12 @@ class _WebSocket:
     # -- 主循环 ---------------------------------------------------------- #
     def run(self) -> None:
         self.streamer.add_subscriber(self)
+        # 新连接立即下发一次状态，前端据此显"已连接/未连接"（不造假）
+        try:
+            webserver = self.handler.server.webserver  # type: ignore[attr-defined]
+            self.send_text({"type": "status", **webserver.status()})
+        except Exception:  # pragma: no cover - 防御性
+            pass
         sender = threading.Thread(target=self._send_loop, name="ws-sender", daemon=True)
         sender.start()
         try:
@@ -127,11 +153,17 @@ class _WebSocket:
     def _send_loop(self) -> None:
         while self.open:
             try:
-                data = self.out.get(timeout=0.5)
+                item = self.out.get(timeout=0.5)
             except queue.Empty:
                 continue
+            # 兼容两种入队项：streamer 广播的裸 bytes（二进制帧）
+            # 与本类 send_text 入队的 (opcode, payload) 元组
+            if isinstance(item, tuple):
+                opcode, data = item
+            else:
+                opcode, data = _OPCODE_BINARY, item
             try:
-                self.handler.wfile.write(self._frame(_OPCODE_BINARY, data))
+                self.handler.wfile.write(self._frame(opcode, data))
                 self.handler.wfile.flush()
             except OSError:
                 self.socket_error = True
@@ -174,7 +206,15 @@ class _WebSocket:
                     self.handler.wfile.flush()
                 except OSError:
                     return
-            # text / pong: ignore (we are server->client streaming only)
+            elif opcode == _OPCODE_TEXT:
+                # 上行控制命令（JSON）-> 派发给 WebServer，文本回复
+                try:
+                    msg = json.loads(payload.decode("utf-8"))
+                    webserver = self.handler.server.webserver  # type: ignore[attr-defined]
+                    reply = webserver.handle_command(msg)
+                except (ValueError, KeyError, TypeError) as e:
+                    reply = {"type": "error", "error": "bad_command", "detail": str(e)}
+                self.send_text(reply)
 
 
 # --------------------------------------------------------------------------- #
@@ -191,6 +231,17 @@ _INDEX_HTML = """<!doctype html><html><head><meta charset="utf-8">
 </ul><div id="s"></div>
 <script>fetch('/api/status').then(r=>r.json()).then(d=>{document.getElementById('s').textContent=JSON.stringify(d,null,2)})</script>
 </body></html>"""
+
+# 浏览器前端静态资源目录（mbdsdr_ai/web/static/）
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+# 白名单：只允许这些相对路径，杜绝路径穿越
+_STATIC_FILES = {
+    "/": "index.html",
+    "/index.html": "index.html",
+    "/app.js": "app.js",
+    "/style.css": "style.css",
+}
+_RECORDING_EXTS = {".wav", ".cf32", ".raw", ".bin", ".iq", ".csv"}
 
 
 class _RequestHandler(BaseHTTPRequestHandler):
@@ -216,23 +267,53 @@ class _RequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_bytes(self, code: int, body: bytes, ctype: str) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     # -- routes ---------------------------------------------------------- #
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         ws: WebServer = self.server.webserver  # type: ignore[attr-defined]
 
-        if path == "/":
-            self._send_html(200, _INDEX_HTML)
+        if path in _STATIC_FILES:
+            self._serve_static(_STATIC_FILES[path])
         elif path == "/api/status":
             self._send_json(200, ws.status())
         elif path == "/api/spectrum":
             self._send_json(200, ws.spectrum_json())
+        elif path == "/api/recordings":
+            self._send_json(200, {"recordings": ws.list_recordings()})
+        elif path.startswith("/api/recordings/"):
+            fname = unquote(path[len("/api/recordings/"):])
+            self._serve_recording(ws, fname)
         elif path == "/ws/spectrum":
             self._serve_ws(ws.spectrum_streamer)
         elif path == "/ws/audio":
             self._serve_ws(ws.audio_streamer)
         else:
             self._send_json(404, {"error": "not found", "path": path})
+
+    def _serve_static(self, rel: str) -> None:
+        fp = (_STATIC_DIR / rel).resolve()
+        # 二次保险：resolve 后必须仍在 static 目录内
+        if _STATIC_DIR.resolve() not in fp.parents or not fp.is_file():
+            # 前端文件缺失 -> 退回极简状态页，不 500
+            self._send_html(200, _INDEX_HTML)
+            return
+        ctype = mimetypes.guess_type(str(fp))[0] or "application/octet-stream"
+        self._send_bytes(200, fp.read_bytes(), ctype + "; charset=utf-8")
+
+    def _serve_recording(self, ws: "WebServer", fname: str) -> None:
+        info = ws.recording_path(fname)
+        if info is None:
+            self._send_json(404, {"error": "not found", "file": fname})
+            return
+        fp, _size = info
+        self._send_bytes(200, fp.read_bytes(), "application/octet-stream")
 
     def _serve_ws(self, streamer) -> None:
         try:
@@ -323,10 +404,19 @@ class WebServer:
 
     def status(self) -> Dict[str, Any]:
         connected = self._backend_connected()
+        # 后端若暴露当前频率/模式/增益属性，一并上报（鸭型，缺失则不报）
+        be = self.backend
+        freq = getattr(be, "frequency", None) or getattr(be, "center_freq", None)
+        gain = getattr(be, "gain", None)
+        mode = getattr(be, "mode", None)
         return {
             "service": "mbdsdr_ai.web",
             "version": "0.1.0",
             "connected": connected,
+            "center_freq_hz": float(freq) if isinstance(freq, (int, float)) else None,
+            "mode": mode if isinstance(mode, str) else None,
+            "gain_db": float(gain) if isinstance(gain, (int, float)) else None,
+            "annotations": self.spectrum_streamer.annotations(),
             "clients": {
                 "spectrum": self.spectrum_streamer.subscriber_count(),
                 "audio": self.audio_streamer.subscriber_count(),
@@ -334,6 +424,76 @@ class WebServer:
             "fft_fps": self.spectrum_streamer.fps,
             "fft_size": self.spectrum_streamer.fft_size,
         }
+
+    # -- WebSocket 远程控制命令 ------------------------------------------- #
+    def handle_command(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """处理浏览器上行 JSON 命令。无后端安全降级为 {error:"not_connected"}。"""
+        if not isinstance(msg, dict):
+            return {"type": "error", "error": "bad_command"}
+        cmd = msg.get("cmd")
+        value = msg.get("value")
+
+        if cmd == "get_status":
+            return {"type": "status", **self.status()}
+
+        # 红线：无后端 -> 所有 set_* 命令拒绝，不造假成功
+        if not self._backend_connected():
+            return {"type": "error", "cmd": cmd, "error": "not_connected"}
+
+        be = self.backend
+        if cmd == "set_frequency":
+            fn = getattr(be, "set_frequency", None)
+            if not callable(fn):
+                return {"type": "error", "error": "unsupported"}
+            fn(float(value))
+            return {"type": "ack", "cmd": cmd, "value": value}
+        if cmd == "set_gain":
+            fn = getattr(be, "set_gain", None)
+            if not callable(fn):
+                return {"type": "error", "error": "unsupported"}
+            fn(float(value))
+            return {"type": "ack", "cmd": cmd, "value": value}
+        if cmd == "set_mode":
+            fn = getattr(be, "set_mode", None)
+            if not callable(fn):
+                return {"type": "error", "error": "unsupported"}
+            fn(str(value))
+            return {"type": "ack", "cmd": cmd, "value": value}
+        return {"type": "error", "cmd": cmd, "error": "unknown_command"}
+
+    # -- 录制文件浏览 ----------------------------------------------------- #
+    @staticmethod
+    def _recordings_dir() -> Path:
+        return Path.home() / ".mbdsdr" / "recordings"
+
+    def list_recordings(self) -> list:
+        """列出 ~/.mbdsdr/recordings/ 下的录制文件；目录不存在/无文件 -> []。"""
+        d = self._recordings_dir()
+        if not d.is_dir():
+            return []
+        out = []
+        for p in sorted(d.iterdir()):
+            if not p.is_file():
+                continue
+            if p.suffix.lower() not in _RECORDING_EXTS:
+                continue
+            st = p.stat()
+            out.append({
+                "name": p.name,
+                "size_bytes": st.st_size,
+                "mtime": st.st_mtime,
+            })
+        return out
+
+    def recording_path(self, fname: str):
+        """校验并返回录制文件绝对路径；非法/不存在 -> None。"""
+        d = self._recordings_dir()
+        if not fname or "/" in fname or "\\" in fname or fname.startswith(".."):
+            return None
+        fp = (d / fname).resolve()
+        if d.resolve() not in fp.parents or not fp.is_file():
+            return None
+        return fp, fp.stat().st_size
 
     def spectrum_json(self) -> Dict[str, Any]:
         if not self._backend_connected():
