@@ -260,3 +260,141 @@ class TestFakeBackendEntry:
         iq = backend.read_samples(8192)
         assert iq is not None and len(iq) == 8192
         assert iq.dtype == np.complex64
+
+
+# ---------------------------------------------------------------------------
+# 7. 本轮新接通的 8 个孤儿信号：信号发射 → handler 被调用 → 面板/状态栏更新
+# ---------------------------------------------------------------------------
+class _StatusSpy:
+    """捕获 QStatusBar.showMessage 调用。"""
+
+    def __init__(self, mw):
+        self.mw = mw
+        self.messages = []
+        self._orig = mw.statusBar().showMessage
+        mw.statusBar().showMessage = self._capture
+
+    def _capture(self, msg, timeout=0):
+        self.messages.append(str(msg))
+
+    def release(self):
+        self.mw.statusBar().showMessage = self._orig
+
+
+class TestNewOrphanWiring:
+    """逐个验证新接通的 8 个信号真的连到了 handler。"""
+
+    def test_doppler_finished(self, mw):
+        spy = _StatusSpy(mw)
+        try:
+            mw.doppler_panel.isVisible = lambda: True
+            mw.doppler_panel.finished.emit({
+                "estimator": "EKF", "n_obs": 20,
+                "fd_rms_hz": 5.0, "converged": True})
+            assert any("定轨完成" in m for m in spy.messages), spy.messages
+        finally:
+            spy.release()
+
+    def test_doppler_progress_and_failed(self, mw):
+        spy = _StatusSpy(mw)
+        try:
+            mw.doppler_panel.isVisible = lambda: True
+            mw.doppler_panel.progress.emit("运行 EKF ...")
+            assert any("EKF" in m for m in spy.messages)
+            mw.doppler_panel.failed.emit("Boom: 观测不足")
+            assert any("定轨失败" in m for m in spy.messages)
+        finally:
+            spy.release()
+
+    def test_modulation_done(self, mw):
+        class R:
+            modulation = "FSK"
+            confidence = 0.87
+            bandwidth = 12500.0
+            symbol_rate_hint = 1200.0
+            suggestions = ["AFSK"]
+        spy = _StatusSpy(mw)
+        try:
+            mw.modulation_panel.done.emit(R())
+            assert any("FSK" in m and "87" in m for m in spy.messages), spy.messages
+        finally:
+            spy.release()
+
+    def test_modulation_failed(self, mw):
+        spy = _StatusSpy(mw)
+        try:
+            mw.modulation_panel.failed.emit("读取 IQ 失败: timeout")
+            assert any("识别失败" in m for m in spy.messages)
+        finally:
+            spy.release()
+
+    def test_scanner_progress_done_failed(self, mw):
+        spy = _StatusSpy(mw)
+        try:
+            mw.scanner_panel.isVisible = lambda: True
+            mw.scanner_panel.progress.emit(0.5, 100e6)
+            assert any("扫频中" in m for m in spy.messages)
+            mw.scanner_panel.done.emit([{"peak_freq": 100e6}])
+            assert any("扫频完成" in m for m in spy.messages)
+            mw.scanner_panel.failed.emit("canceled")
+            assert any("扫频失败" in m for m in spy.messages)
+        finally:
+            spy.release()
+
+    def test_module_demod_mode_changed(self, mw):
+        """模块面板改解调模式 → 真的走到 _on_mode_changed（blockSignals 不炸）。"""
+        calls = []
+        orig = mw._on_mode_changed
+        mw._on_mode_changed = lambda m: calls.append(m)
+        mw.module_panel.demod_mode_changed.emit("NFM")
+        mw._on_mode_changed = orig
+        assert calls == ["NFM"]
+
+    def test_module_device_selected(self, mw):
+        calls = []
+        orig = mw._on_panel_device_connect
+        mw._on_panel_device_connect = lambda d: calls.append(d)
+        dev = {"label": "FakeSDR", "driver": "fake"}
+        mw.module_panel.device_selected.emit(dev)
+        mw._on_panel_device_connect = orig
+        assert calls == [dev]
+
+    def test_module_sink_and_node(self, mw):
+        spy = _StatusSpy(mw)
+        try:
+            mw.module_panel.sink_changed.emit("声卡")
+            mw.module_panel.node_selected.emit("WFM Demod", "processing")
+            assert any("sink" in m.lower() or "声卡" in m for m in spy.messages)
+        finally:
+            spy.release()
+
+    def test_gain_value_changed_updates_status(self, mw):
+        mw.gain_panel.value_changed.emit("LNA", 20.0)
+        assert "LNA" in mw.status_gain.text() or "20" in mw.status_gain.text()
+
+    def test_anr_mode_changed(self, mw):
+        spy = _StatusSpy(mw)
+        try:
+            mw.anr_panel.mode_changed.emit("anr")
+            assert any("降噪模式" in m for m in spy.messages)
+        finally:
+            spy.release()
+
+    def test_constellation_cleared_resets_stats(self, mw):
+        mw.status_rssi.setText("信号: -10 dBFS")
+        mw.constellation_panel.cleared.emit()
+        assert mw.status_rssi.text() == "信号: --"
+
+    def test_device_plugged(self, mw):
+        spy = _StatusSpy(mw)
+        refreshed = []
+        orig = mw.device_panel.refresh_devices
+        mw.device_panel.refresh_devices = lambda: refreshed.append(1)
+        try:
+            mw.device_panel.device_plugged.emit("新 RTL-SDR")
+            assert any("新设备" in m for m in spy.messages)
+            assert refreshed, "热插入应触发 refresh_devices"
+        finally:
+            spy.release()
+            mw.device_panel.refresh_devices = orig
+

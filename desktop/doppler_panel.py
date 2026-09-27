@@ -302,6 +302,11 @@ class OrbitCanvas(FigureCanvasQTAgg):
 # 面板主体
 # ======================================================================
 class DopplerPanel(QWidget):
+    # 向上层（主窗口）re-emit 定轨结果，供状态栏/AI 日志回显；面板内部仍自绘曲线。
+    finished = Signal(dict)   # 定轨完成（结果字典）
+    progress = Signal(str)    # 进度文本
+    failed = Signal(str)      # 错误文本
+
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._c = _theme_colors()
@@ -683,9 +688,11 @@ class DopplerPanel(QWidget):
 
     def _on_progress(self, text: str):
         self.status_label.setText(text)
+        self.progress.emit(text)
 
     def _on_failed(self, text: str):
         self.status_label.setText(f"错误: {text.splitlines()[0]}")
+        self.failed.emit(text)
         QMessageBox.critical(self, "定轨错误", text)
 
     def _on_result(self, d: Dict):
@@ -698,6 +705,7 @@ class DopplerPanel(QWidget):
         parts.append("收敛: " + ("已收敛" if conv is True else
                                 ("未收敛" if conv is False else "--")))
         self.status_label.setText(" | ".join(parts))
+        self.finished.emit(d)
 
 
 if __name__ == "__main__":
