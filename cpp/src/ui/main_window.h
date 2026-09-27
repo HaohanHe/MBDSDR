@@ -56,6 +56,7 @@ private:
     // Satellite pass forecast (sky tab).
     dsp::TleClient* tleClient_   = nullptr;
     QTableWidget*   passTable_   = nullptr;
+    QLabel*         tleBadge_    = nullptr;
     QList<dsp::SatPass> passes_;
     QTimer*         tleTimer_    = nullptr;
     bool            tleFetchActive_ = false;
@@ -124,6 +125,8 @@ private:
     void saveUiState();
     void restoreUiState();
     void fillPassTable();
+    void refreshCountdowns();       // 1s: update the "距今" column
+    void updateTleBadge();          // freshness label above the table
     void refetchTle();              // re-fetch TLE for the current station
     void updateLiveSatellite();     // 1s timer: propagate selected pass live
 

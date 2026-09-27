@@ -306,15 +306,20 @@ MainWindow::MainWindow(QWidget* parent)
     adsbLay->addWidget(adsbTable_);
     rightTabs_->addTab(adsbPage, "ADS-B");
 
-    // Sky tab: polar view on top, pass list below.
+    // Sky tab: polar view on top, TLE freshness badge, pass list below.
     auto* skyPage = new QWidget;
     auto* skyLay = new QVBoxLayout(skyPage);
     skyLay->setContentsMargins(0, 0, 0, 0);
     skyView_ = new ui::SkyView();
     skyLay->addWidget(skyView_, 2);
-    passTable_ = new QTableWidget(0, 4, skyPage);
-    passTable_->setHorizontalHeaderLabels({"卫星", "过境开始", "最大仰角", "结束"});
+    tleBadge_ = new QLabel(skyPage);
+    tleBadge_->setObjectName("dockHint");
+    skyLay->addWidget(tleBadge_);
+    passTable_ = new QTableWidget(0, 5, skyPage);
+    passTable_->setHorizontalHeaderLabels({"卫星", "AOS", "最大仰角", "LOS", "距今"});
     passTable_->horizontalHeader()->setStretchLastSection(true);
+    passTable_->horizontalHeader()->setSectionsClickable(true);
+    passTable_->setSortingEnabled(true);
     passTable_->verticalHeader()->setVisible(false);
     passTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     passTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -1065,30 +1070,62 @@ void MainWindow::onTleFetchFailed(const QString& reason) {
     statusBar()->showMessage("TLE 拉取失败：" + reason);
 }
 
+static QString countdownText(const dsp::SatPass& p, const QDateTime& now) {
+    if (now >= p.aos && now <= p.los) return QStringLiteral("进行中");
+    if (now < p.aos) {
+        qint64 secs = now.secsTo(p.aos);
+        if (secs < 3600) return QStringLiteral("%1 分后").arg(secs / 60);
+        return QStringLiteral("%1 小时后").arg(secs / 3600.0, 0, 'f', 1);
+    }
+    return QStringLiteral("已结束");
+}
+
 void MainWindow::fillPassTable() {
+    // Sorting would shuffle rows mid-population; build unsorted then enable.
+    passTable_->setSortingEnabled(false);
     passTable_->setRowCount(0);
     QList<ui::PassArc> arcs;
     QDateTime now = QDateTime::currentDateTimeUtc();
-    int firstActive = -1;
-    for (const auto& p : passes_) {
+
+    QSettings s;
+    QString wanted = s.value("ui/selectedSatellite").toString();
+    int wantedRow = -1, firstActive = -1;
+
+    for (int i = 0; i < passes_.size(); ++i) {
+        const auto& p = passes_[i];
         int row = passTable_->rowCount();
         passTable_->insertRow(row);
         const bool active = now >= p.aos && now <= p.los;
         if (active && firstActive < 0) firstActive = row;
-        // Prefix the satellite name with a marker for the in-progress pass.
-        passTable_->setItem(row, 0, new QTableWidgetItem(
-            (active ? QStringLiteral("● ") : QString()) + p.name));
-        passTable_->setItem(row, 1, new QTableWidgetItem(
-            p.aos.toLocalTime().toString("MM-dd HH:mm")));
-        passTable_->setItem(row, 2, new QTableWidgetItem(
-            QString::number(p.maxEl, 'f', 1) + QStringLiteral("°")));
-        passTable_->setItem(row, 3, new QTableWidgetItem(
-            p.los.toLocalTime().toString("MM-dd HH:mm")));
+
+        auto* nameItem = new QTableWidgetItem(
+            (active ? QStringLiteral("● ") : QString()) + p.name);
+        nameItem->setData(Qt::UserRole, i);   // visual row -> passes_ index
+        passTable_->setItem(row, 0, nameItem);
+
+        auto* aosItem = new QTableWidgetItem(p.aos.toLocalTime().toString("MM-dd HH:mm"));
+        aosItem->setData(Qt::UserRole, p.aos.toMSecsSinceEpoch());
+        passTable_->setItem(row, 1, aosItem);
+
+        auto* elItem = new QTableWidgetItem(
+            QString::number(p.maxEl, 'f', 1) + QStringLiteral("°"));
+        elItem->setData(Qt::UserRole, p.maxEl);
+        passTable_->setItem(row, 2, elItem);
+
+        auto* losItem = new QTableWidgetItem(p.los.toLocalTime().toString("MM-dd HH:mm"));
+        losItem->setData(Qt::UserRole, p.los.toMSecsSinceEpoch());
+        passTable_->setItem(row, 3, losItem);
+
+        auto* cdItem = new QTableWidgetItem(countdownText(p, now));
+        cdItem->setData(Qt::UserRole, now.secsTo(p.aos));
+        passTable_->setItem(row, 4, cdItem);
+
         if (active) {
             QBrush hi(QColor(tokens::kSuccess));
-            for (int c = 0; c < 4; ++c)
+            for (int c = 0; c < 5; ++c)
                 passTable_->item(row, c)->setBackground(hi);
         }
+        if (!wanted.isEmpty() && p.name == wanted && wantedRow < 0) wantedRow = row;
 
         ui::PassArc arc;
         arc.name = p.name;
@@ -1096,18 +1133,57 @@ void MainWindow::fillPassTable() {
         arcs.append(arc);
     }
     skyView_->setPasses(arcs);
-    // Auto-start tracking the first pass currently in view.
-    if (firstActive >= 0) {
-        passTable_->selectRow(firstActive);
-        onPassRowClicked(firstActive);
+
+    // Default sort: AOS ascending.
+    passTable_->setSortingEnabled(true);
+    passTable_->sortByColumn(1, Qt::AscendingOrder);
+
+    updateTleBadge();
+
+    // Prefer the remembered satellite, else the first pass currently in view.
+    int pick = (wantedRow >= 0) ? wantedRow : firstActive;
+    if (pick >= 0) {
+        passTable_->selectRow(pick);
+        onPassRowClicked(pick);
     }
 }
 
+void MainWindow::refreshCountdowns() {
+    if (passTable_->rowCount() == 0) return;
+    QDateTime now = QDateTime::currentDateTimeUtc();
+    for (int row = 0; row < passTable_->rowCount(); ++row) {
+        QTableWidgetItem* idxItem = passTable_->item(row, 0);
+        if (!idxItem) continue;
+        int i = idxItem->data(Qt::UserRole).toInt();
+        if (i < 0 || i >= passes_.size()) continue;
+        passTable_->item(row, 4)->setText(countdownText(passes_[i], now));
+    }
+}
+
+void MainWindow::updateTleBadge() {
+    if (!tleBadge_) return;
+    dsp::TleCache cache = tleClient_->cachedTle();
+    if (!cache.valid) { tleBadge_->clear(); return; }
+    qint64 ageH = cache.fetchedAt.secsTo(QDateTime::currentDateTimeUtc()) / 3600;
+    bool stale = ageH >= 48;
+    tleBadge_->setText(QString("TLE 更新于 %1（%2）")
+        .arg(cache.fetchedAt.toLocalTime().toString("MM-dd HH:mm"),
+             stale ? QStringLiteral("过期") : QStringLiteral("新鲜")));
+    tleBadge_->setStyleSheet(QString("color: %1;")
+        .arg(stale ? tokens::kWarning : tokens::textRgba(tokens::kTextAlphaTertiary)));
+}
+
 void MainWindow::onPassRowClicked(int row) {
-    if (row < 0 || row >= passes_.size()) return;
-    skyView_->setHighlightedPass(row);
-    liveRow_ = row;
+    if (row < 0 || row >= passTable_->rowCount()) return;
+    QTableWidgetItem* idxItem = passTable_->item(row, 0);
+    if (!idxItem) return;
+    int idx = idxItem->data(Qt::UserRole).toInt();
+    if (idx < 0 || idx >= passes_.size()) return;
+    skyView_->setHighlightedPass(idx);
+    liveRow_ = idx;
     liveTimer_->start();
+    // Persist the user's choice.
+    QSettings().setValue("ui/selectedSatellite", passes_[idx].name);
     updateLiveSatellite();   // paint immediately rather than waiting 1s
 }
 
@@ -1118,6 +1194,7 @@ static QString formatRange(double km) {
 }
 
 void MainWindow::updateLiveSatellite() {
+    refreshCountdowns();
     if (liveRow_ < 0 || liveRow_ >= passes_.size() || !stationSet_) {
         skyView_->clearLiveSatellite();
         return;
@@ -1130,10 +1207,14 @@ void MainWindow::updateLiveSatellite() {
         if (now > p.los) {           // pass ended: move on to the next one
             liveRow_ = -1;
             skyView_->setHighlightedPass(-1);
-            for (int i = 0; i < passes_.size(); ++i) {
-                if (passes_[i].aos <= now && now <= passes_[i].los) {
-                    passTable_->selectRow(i);
-                    onPassRowClicked(i);
+            for (int row = 0; row < passTable_->rowCount(); ++row) {
+                QTableWidgetItem* it = passTable_->item(row, 0);
+                if (!it) continue;
+                int i = it->data(Qt::UserRole).toInt();
+                if (i >= 0 && i < passes_.size() &&
+                    passes_[i].aos <= now && now <= passes_[i].los) {
+                    passTable_->selectRow(row);
+                    onPassRowClicked(row);
                     return;
                 }
             }
