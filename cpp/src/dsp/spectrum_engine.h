@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: MIT
-// SpectrumEngine: runs in a dedicated QThread. Owns an ISource (RTL-SDR if
-// available, otherwise TestSignalSource), reads IQ, computes power spectrum,
-// and emits SpectrumFrame to the UI.
 #pragma once
 
 #include <QThread>
@@ -12,6 +9,11 @@
 
 #include "core/spectrum_frame.h"
 #include "dsp/source.h"
+#include "dsp/iq_frontend.h"
+#include "dsp/demod.h"
+#include "dsp/squelch.h"
+#include "dsp/agc.h"
+#include "dsp/audio_output.h"
 
 namespace mbdsdr {
 namespace dsp {
@@ -24,26 +26,39 @@ public:
 
     void setFftSize(int n);
     int  fftSize() const { return fftSize_.load(); }
-
     void shutdown();
 
 public slots:
     void onSetCenterFreq(double freqHz);
     void onSetSampleRate(double rateHz);
     void onSetGain(double gainDb);
+    void setDemodMode(const QString& mode);
+    void setSquelchThreshold(float db);
+    void setSquelchEnabled(bool e);
 
 signals:
     void spectrumReady(const SpectrumFrame& frame);
-    /// Emitted when the active source changes (at startup, or on user switch).
     void sourceChanged(const QString& name, bool connected);
+    void audioLevel(float dbfs);
+    void squelchState(bool open);
 
 protected:
     void run() override;
 
 private:
     std::unique_ptr<ISource> source_;
+    std::unique_ptr<IDemod> demod_;
+    IQFrontend frontend_;
+    Squelch squelch_;
+    Agc agc_;
+    AudioOutput* audioOut_ = nullptr;
+
     std::atomic<int> fftSize_{2048};
     std::atomic<bool> running_{true};
+    QString demodMode_ = "NFM";
+    bool needDemodReset_ = false;
+
+    void rebuildDemod();
 };
 
 } // namespace dsp
