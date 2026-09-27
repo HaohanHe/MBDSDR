@@ -17,7 +17,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia Network Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia Network Concurrent Test)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
@@ -90,7 +90,7 @@ set(HEADERS
 
 add_executable(mbdsdr ${SOURCES} ${HEADERS})
 target_include_directories(mbdsdr PRIVATE src)
-target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network)
+target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
 if(RTLSDR_FOUND)
     target_compile_definitions(mbdsdr PRIVATE HAVE_RTLSDR=1)

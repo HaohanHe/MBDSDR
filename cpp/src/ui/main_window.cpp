@@ -503,6 +503,9 @@ MainWindow::MainWindow(QWidget* parent)
             dlg.saveToConfig(cfg);
             cfg.save();
             worldView_->setStation(cfg.stationLat, cfg.stationLon);
+            // Hot-update satellite forecast: re-fetch + re-propagate without
+            // restarting, whenever the station location changed.
+            refetchTle();
             // Hot-restart audio on the newly-selected output device, if changed.
             if (cfg.audioDevice != oldAudioDev && engine_->audioOutput()) {
                 if (cfg.audioDevice == QStringLiteral("default")) {
@@ -655,12 +658,10 @@ MainWindow::MainWindow(QWidget* parent)
     {
         ai::AiConfig cfg;
         cfg.load();
-        if (cfg.stationSet) {
-            tleFetchActive_ = true;
-            tleClient_->fetch(cfg.stationLat, cfg.stationLon);
-        } else {
-            skyView_->setEmptyText("无过境数据——请在设置中填写本站位置");
-        }
+        stationLat_ = cfg.stationLat;
+        stationLon_ = cfg.stationLon;
+        stationSet_ = cfg.stationSet;
+        refetchTle();
     }
 
     // Local expiry filter: every 60s drop passes whose LOS already passed.
@@ -678,6 +679,12 @@ MainWindow::MainWindow(QWidget* parent)
         }
     });
     tleTimer_->start();
+
+    // Live satellite position: re-propagate the selected pass every second
+    // while it is actually visible.
+    liveTimer_ = new QTimer(this);
+    liveTimer_->setInterval(1000);
+    connect(liveTimer_, &QTimer::timeout, this, &MainWindow::updateLiveSatellite);
 }
 
 MainWindow::~MainWindow() {
@@ -990,9 +997,29 @@ void MainWindow::setControlsEnabled(bool hw) {
     if (advPanel_) advPanel_->setEnabled(hw);
 }
 
+void MainWindow::refetchTle() {
+    // Pull fresh TLE + recompute passes for the currently-configured station.
+    // No station -> honest empty state, never a network call.
+    liveRow_ = -1;
+    skyView_->clearLiveSatellite();
+    if (!stationSet_ || !std::isfinite(stationLat_) || !std::isfinite(stationLon_)) {
+        passes_.clear();
+        passTable_->setRowCount(0);
+        skyView_->setPasses({});
+        skyView_->setEmptyText("无过境数据——请在设置中填写本站位置");
+        return;
+    }
+    tleFetchActive_ = true;
+    skyView_->setEmptyText("正在拉取 TLE 并计算过境...");
+    passTable_->setRowCount(0);
+    tleClient_->fetch(stationLat_, stationLon_);
+}
+
 void MainWindow::onPassesReady(QList<dsp::SatPass> passes) {
     passes_ = std::move(passes);
     tleFetchActive_ = false;
+    liveRow_ = -1;
+    skyView_->clearLiveSatellite();
     if (passes_.isEmpty()) {
         skyView_->setEmptyText("未来 24h 无过境");
     }
@@ -1002,6 +1029,8 @@ void MainWindow::onPassesReady(QList<dsp::SatPass> passes) {
 void MainWindow::onTleFetchFailed(const QString& reason) {
     passes_.clear();
     tleFetchActive_ = false;
+    liveRow_ = -1;
+    skyView_->clearLiveSatellite();
     passTable_->setRowCount(0);
     skyView_->setPasses({});
     skyView_->setEmptyText("无过境数据——TLE 拉取失败");
@@ -1033,13 +1062,32 @@ void MainWindow::fillPassTable() {
 void MainWindow::onPassRowClicked(int row) {
     if (row < 0 || row >= passes_.size()) return;
     skyView_->setHighlightedPass(row);
-    const dsp::SatPass& p = passes_[row];
-    // Report the max-elevation point's az/el from the track.
-    double az = p.azAos, el = p.maxEl;
-    for (const auto& pt : p.track)
-        if (pt.second > el) { el = pt.second; az = pt.first; }
-    statusBar()->showMessage(QString("%1 方位=%2° 仰角=%3°")
-                                .arg(p.name).arg(az, 0, 'f', 0).arg(el, 0, 'f', 1));
+    liveRow_ = row;
+    liveTimer_->start();
+    updateLiveSatellite();   // paint immediately rather than waiting 1s
+}
+
+void MainWindow::updateLiveSatellite() {
+    if (liveRow_ < 0 || liveRow_ >= passes_.size() || !stationSet_) {
+        skyView_->clearLiveSatellite();
+        return;
+    }
+    const dsp::SatPass& p = passes_[liveRow_];
+    QDateTime now = QDateTime::currentDateTimeUtc();
+    // Outside the visible window: no live dot.
+    if (now < p.aos || now > p.los) {
+        skyView_->clearLiveSatellite();
+        if (now > p.los) {           // pass ended: stop live tracking
+            liveRow_ = -1;
+            liveTimer_->stop();
+        }
+        return;
+    }
+    dsp::Topocentric t = tleClient_->propagateAt(now, p.tle, stationLat_, stationLon_);
+    skyView_->setLiveSatellite(t.az, t.el, p.name);
+    statusBar()->showMessage(QString("%1 方位=%2° 仰角=%3° 距离=%4 km")
+        .arg(p.name).arg(t.az, 0, 'f', 0).arg(t.el, 0, 'f', 1)
+        .arg(t.range, 0, 'f', 0));
 }
 
 } // namespace mbdsdr

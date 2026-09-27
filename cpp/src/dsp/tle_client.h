@@ -27,6 +27,14 @@ struct SatPass {
     double azAos = 0.0;                // azimuth at AOS, degrees
     double azLos = 0.0;                // azimuth at LOS, degrees
     QList<QPair<double,double>> track; // sampled (az, el) over the pass, degrees
+    TleEntry tle;                      // raw TLE used, for live re-propagation
+};
+
+// Topocentric look angles at one instant.
+struct Topocentric {
+    double az = 0.0;     // degrees, 0=N clockwise
+    double el = 0.0;     // degrees, +90=zenith
+    double range = 0.0;  // km
 };
 
 // Real TLE fetch from celestrak.org + LEO orbit propagation.
@@ -47,9 +55,15 @@ public:
     explicit TleClient(QObject* parent = nullptr);
 
     // Async: fetch TLE groups from celestrak.org, then compute passes over the
-    // given station for the next hoursAhead hours.  Does nothing if lat/lon
-    // are not finite (caller must gate on stationSet).
+    // given station for the next hoursAhead hours (computation runs on the
+    // thread pool, UI stays responsive).  Does nothing if lat/lon are not
+    // finite.
     void fetch(double stationLatDeg, double stationLonDeg, int hoursAhead = 24);
+
+    // Propagate one TLE to an arbitrary instant and return station-relative
+    // az/el/range. Pure, thread-safe w.r.t. UI (only reads its arguments).
+    Topocentric propagateAt(const QDateTime& timeUtc, const TleEntry& tle,
+                             double stationLatDeg, double stationLonDeg) const;
 
 signals:
     // Passes computed successfully. May be empty (24h window has no passes).
@@ -61,10 +75,11 @@ private:
     // Parse a celestrak TLE text blob into 3-line records.
     static QList<TleEntry> parseTle(const QByteArray& blob);
 
-    // Propagate all TLEs and find passes visible from the station.
+    // Propagate all TLEs and find passes visible from the station. Runs on a
+    // worker thread via QtConcurrent.
     QList<SatPass> computePasses(const QList<TleEntry>& entries,
                                  double stationLatDeg, double stationLonDeg,
-                                 const QDateTime& startTimeUtc, int hoursAhead);
+                                 const QDateTime& startTimeUtc, int hoursAhead) const;
 
     QNetworkAccessManager* nam_ = nullptr;
 };

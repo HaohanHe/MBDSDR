@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 #include <QList>
+#include <limits>
 
 class QLabel;
 class QDoubleSpinBox;
@@ -58,6 +59,13 @@ private:
     QList<dsp::SatPass> passes_;
     QTimer*         tleTimer_    = nullptr;
     bool            tleFetchActive_ = false;
+    // Current station position (degrees), refreshed on startup and when the
+    // settings dialog is accepted.
+    double          stationLat_ = std::numeric_limits<double>::quiet_NaN();
+    double          stationLon_ = std::numeric_limits<double>::quiet_NaN();
+    bool            stationSet_ = false;
+    QTimer*         liveTimer_   = nullptr;
+    int             liveRow_     = -1;   // selected row tracked live, or -1
     QTabWidget* centerTabs_ = nullptr;
 
     // Left panel controls
@@ -116,6 +124,8 @@ private:
     void saveUiState();
     void restoreUiState();
     void fillPassTable();
+    void refetchTle();              // re-fetch TLE for the current station
+    void updateLiveSatellite();     // 1s timer: propagate selected pass live
 
     // Debounced QSettings writer: high-frequency signals (zoom/pan, slider
     // drags, spinbox edits) call scheduleSave() which (re)arms this one-shot

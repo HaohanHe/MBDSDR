@@ -6,6 +6,8 @@
 #include <QNetworkReply>
 #include <QUrl>
 #include <QRegularExpression>
+#include <QtConcurrent>
+#include <QFutureWatcher>
 
 #include <cmath>
 #include <vector>
@@ -232,20 +234,36 @@ void TleClient::fetch(double stationLatDeg, double stationLonDeg, int hoursAhead
                 emit fetchFailed(sh->firstError.isEmpty()
                                      ? QStringLiteral("TLE parse: no satellites")
                                      : sh->firstError);
-            } else {
-                QList<SatPass> passes = computePasses(
-                    sh->entries, stationLatDeg, stationLonDeg,
-                    QDateTime::currentDateTimeUtc(), hoursAhead);
-                emit passesReady(passes);
+                delete sh;
+                return;
             }
+            // Offload the 24h x 30s propagation sweep to the thread pool so
+            // the UI stays responsive; the entries list + station params are
+            // copied into the worker lambda so there is no concurrent access
+            // to member state.
+            QList<TleEntry> entries = sh->entries;
+            double lat = stationLatDeg, lon = stationLonDeg;
+            int hrs = hoursAhead;
+            TleClient* self = this;
             delete sh;
+            auto* watcher = new QFutureWatcher<QList<SatPass>>(this);
+            connect(watcher, &QFutureWatcher<QList<SatPass>>::finished,
+                    this, [this, watcher]() {
+                QList<SatPass> passes = watcher->result();
+                watcher->deleteLater();
+                emit passesReady(passes);
+            });
+            watcher->setFuture(QtConcurrent::run([self, entries, lat, lon, hrs]() {
+                return self->computePasses(entries, lat, lon,
+                                            QDateTime::currentDateTimeUtc(), hrs);
+            }));
         });
     }
 }
 
 QList<SatPass> TleClient::computePasses(const QList<TleEntry>& entries,
                                          double stationLatDeg, double stationLonDeg,
-                                         const QDateTime& startUtc, int hoursAhead) {
+                                         const QDateTime& startUtc, int hoursAhead) const {
     QList<SatPass> result;
     double sta[3];
     stationEcef(stationLatDeg, stationLonDeg, sta);
@@ -293,6 +311,7 @@ QList<SatPass> TleClient::computePasses(const QList<TleEntry>& entries,
                     inPass = true;
                     cur = SatPass();
                     cur.name = e.name;
+                    cur.tle = e;
                     cur.aos = t;
                     cur.azAos = az;
                     maxEl = el;
@@ -321,6 +340,39 @@ QList<SatPass> TleClient::computePasses(const QList<TleEntry>& entries,
     std::sort(result.begin(), result.end(),
               [](const SatPass& a, const SatPass& b) { return a.aos < b.aos; });
     return result;
+}
+
+Topocentric TleClient::propagateAt(const QDateTime& timeUtc, const TleEntry& e,
+                                   double stationLatDeg, double stationLonDeg) const {
+    Topocentric out;
+    Orbit o;
+    if (!buildOrbit(e, o)) return out;
+
+    double sta[3];
+    stationEcef(stationLatDeg, stationLonDeg, sta);
+    double phi = stationLatDeg * kDeg2Rad;
+    double lam = stationLonDeg * kDeg2Rad;
+    double sPhi = std::sin(phi), cPhi = std::cos(phi);
+    double sLam = std::sin(lam), cLam = std::cos(lam);
+
+    QDateTime t = timeUtc.toUTC();
+    double dt = o.epoch.secsTo(t);
+    double eci[3], ecef[3];
+    propagateEci(o, dt, eci);
+    eciToEcef(eci, t, ecef);
+
+    double dx = ecef[0] - sta[0];
+    double dy = ecef[1] - sta[1];
+    double dz = ecef[2] - sta[2];
+    double east  = -sLam * dx + cLam * dy;
+    double north = -sPhi * cLam * dx - sPhi * sLam * dy + cPhi * dz;
+    double up    =  cPhi * cLam * dx + cPhi * sLam * dy + sPhi * dz;
+    double rho = std::sqrt(east*east + north*north + up*up);
+    if (rho < 1e-6) return out;
+    out.range = rho;
+    out.el = std::asin(up / rho) * kRad2Deg;
+    out.az = std::fmod(std::atan2(east, north) * kRad2Deg + 360.0, 360.0);
+    return out;
 }
 
 } // namespace dsp
