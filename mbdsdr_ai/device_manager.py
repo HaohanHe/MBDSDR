@@ -213,40 +213,28 @@ class DeviceManager:
 
     # -- 枚举 ---------------------------------------------------------------
     def _probe_rtlsdr(self) -> List[DeviceInfo]:
-        """通过 pyrtlsdr 枚举 RTL-SDR 棒。导入失败/无设备返回 []。"""
+        """通过 pyrtlsdr 枚举本机 USB RTL-SDR；导入失败/无设备返回 []。"""
         try:
-            import rtlsdr  # type: ignore
+            from .sdr_backend import RTLSDRBackend
+            items = RTLSDRBackend.list_devices()
         except Exception as e:
-            logger.debug("pyrtlsdr 不可用，跳过 RTL-SDR 枚举: %s", e)
-            return []
-        try:
-            n = rtlsdr.librtlsdr.rsdr_get_device_count()
-        except Exception as e:
-            logger.debug("rtlsdr_get_device_count 失败: %s", e)
+            logger.debug("RTLSDRBackend 枚举不可用，跳过 RTL-SDR: %s", e)
             return []
         out: List[DeviceInfo] = []
-        for i in range(int(n)):
-            try:
-                # rtlsdr.librtlsdr 提供 get_device_name / get_device_serial
-                try:
-                    name = rtlsdr.librtlsdr.rsdr_get_device_name(i)
-                except Exception:
-                    name = f"RTL-SDR #{i}"
-                try:
-                    serial = rtlsdr.librtlsdr.rsdr_get_device_serial(i)
-                except Exception:
-                    serial = f"rtl-{i}"
-                out.append(
-                    DeviceInfo(
-                        name=name,
-                        driver="rtlsdr",
-                        serial=serial,
-                        sample_rates=self._RTL_SRATES,
-                        gains=self._RTL_GAINS,
-                    )
+        for it in items:
+            idx = it.get("index", 0)
+            tuner = it.get("tuner", "")
+            serial = it.get("serial", "") or ("rtl-%d" % idx)
+            label = ("RTL-SDR #%d (%s)" % (idx, tuner)) if tuner else ("RTL-SDR #%d" % idx)
+            out.append(
+                DeviceInfo(
+                    name=label,
+                    driver="rtlsdr",
+                    serial=serial,
+                    sample_rates=self._RTL_SRATES,
+                    gains=self._RTL_GAINS,
                 )
-            except Exception as e:
-                logger.warning("枚举 RTL-SDR #%d 失败: %s", i, e)
+            )
         return out
 
     def _probe_soapysdr(self) -> List[DeviceInfo]:

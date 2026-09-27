@@ -953,22 +953,31 @@ class RTLSDRBackend(SDRBackend):
     def list_devices() -> list:
         """枚举本机 USB RTL-SDR，返回 [{index, serial, tuner}]，无库/无设备返回 []。"""
         try:
+            # Windows: guide rtlsdr/libusb DLLs (incl. SDR++/SDR# extracted dirs)
+            try:
+                from .windows_setup import setup_rtlsdr_windows
+                setup_rtlsdr_windows(import_test=False)
+            except Exception:
+                pass
+            import rtlsdr as _rtlsdr
             from rtlsdr import RtlSdr
             out = []
-            n = RtlSdr.get_device_count()
+            # pyrtlsdr 0.2.93 has no get_device_count(); use the ctypes binding
+            n = int(_rtlsdr.librtlsdr.rtlsdr_get_device_count())
             try:
-                serials = RtlSdr.get_device_serial_addresses()
+                serials = RtlSdr.get_device_serial_addresses()  # list, not dict
             except Exception:
-                serials = {}
+                serials = []
             for i in range(n):
                 tuner = "Unknown"
+                serial = serials[i] if i < len(serials) else ""
                 try:
                     probe = RtlSdr(i)
                     tuner = RTLSDRBackend._TUNER_NAMES.get(int(probe.tuner_type), "Unknown")
                     probe.close()
                 except Exception:
                     pass
-                out.append({"index": i, "serial": serials.get(i, ""), "tuner": tuner})
+                out.append({"index": i, "serial": serial, "tuner": tuner})
             return out
         except ImportError as e:
             # 缺 pyrtlsdr 库：必须 log 出来，不能和"无设备"静默混为一谈
@@ -984,6 +993,11 @@ class RTLSDRBackend(SDRBackend):
                 from rtlsdr import RtlSdrTcpClient
                 self._sdr = RtlSdrTcpClient(hostname=self._host, port=self._port)
             else:
+                try:
+                    from .windows_setup import setup_rtlsdr_windows
+                    setup_rtlsdr_windows(import_test=False)
+                except Exception:
+                    pass
                 from rtlsdr import RtlSdr
                 self._sdr = RtlSdr(self._device_index)
             # 调谐器型号
