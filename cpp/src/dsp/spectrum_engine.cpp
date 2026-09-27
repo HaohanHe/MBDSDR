@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "spectrum_engine.h"
+#include "rtl_sdr_source.h"
+#include "test_signal.h"
+#include "power_spectrum.h"
 
 #include <QDebug>
 #include <chrono>
@@ -8,27 +11,43 @@
 namespace mbdsdr {
 namespace dsp {
 
-SpectrumEngine::SpectrumEngine(QObject* parent)
-    : QThread(parent), generator_(2.4e6, 98.5e6) {}
+SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
+    // Try RTL-SDR first; if it fails (no device / no lib), fall back.
+    auto rtl = std::make_unique<RtlSdrSource>();
+    if (rtl->start()) {
+        source_ = std::move(rtl);
+        qInfo() << "[SpectrumEngine] using hardware source:" << source_->name();
+    } else {
+        qInfo() << "[SpectrumEngine] RTL-SDR unavailable; falling back to Test Signal";
+        source_ = std::make_unique<TestSignalSource>();
+        source_->start();
+    }
+    emit sourceChanged(source_->name(), source_->isConnected());
+}
 
 SpectrumEngine::~SpectrumEngine() {
     shutdown();
     wait();
+    if (source_) source_->stop();
 }
 
 void SpectrumEngine::setFftSize(int n) {
-    // Only accept power-of-two FFT sizes; engine applies on next loop.
-    if (n == 1024 || n == 2048 || n == 4096) {
-        fftSize_.store(n);
-    }
+    if (n == 1024 || n == 2048 || n == 4096) fftSize_.store(n);
 }
 
-void SpectrumEngine::shutdown() {
-    running_.store(false);
+void SpectrumEngine::shutdown() { running_.store(false); }
+
+void SpectrumEngine::onSetCenterFreq(double f) {
+    if (source_) source_->setCenterFreq(f);
+}
+void SpectrumEngine::onSetSampleRate(double r) {
+    if (source_) source_->setSampleRate(r);
+}
+void SpectrumEngine::onSetGain(double g) {
+    if (source_) source_->setGain(g);
 }
 
 void SpectrumEngine::run() {
-    // Working buffers (thread-local to this engine loop)
     std::vector<std::complex<float>> iq;
     iq.resize(static_cast<std::size_t>(fftSize_.load()));
 
@@ -36,23 +55,22 @@ void SpectrumEngine::run() {
         int n = fftSize_.load();
         if (static_cast<int>(iq.size()) != n) iq.resize(static_cast<std::size_t>(n));
 
-        // 1. Pull one frame of IQ from the (offline) test generator.
-        //    *** TEST SIGNAL -- NOT HARDWARE ***
-        generator_.next(iq, static_cast<std::size_t>(n));
+        std::size_t got = source_->readIQ(iq);
+        if (got == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
 
-        // 2. Compute power spectrum (Hann window + FFT + fftshift + dBFS).
         SpectrumFrame frame;
         frame.dbfs.resize(static_cast<std::size_t>(n));
         powerSpectrumDbfs(iq, frame.dbfs);
-        frame.centerFreqHz = generator_.centerFreq();
-        frame.sampleRateHz  = generator_.sampleRate();
-        frame.fftSize       = n;
-        frame.isTestSignal  = true;   // Phase 1: always test data
+        frame.centerFreqHz = source_->centerFreq();
+        frame.sampleRateHz = source_->sampleRate();
+        frame.fftSize = n;
+        frame.isTestSignal = !source_->isConnected();
+        frame.sourceName = source_->name();
 
-        // 3. Emit to UI (queued connection to the GUI thread).
         emit spectrumReady(frame);
-
-        // ~30 fps pacing (engine loop pace, independent of UI repaint).
         std::this_thread::sleep_for(std::chrono::milliseconds(33));
     }
 }

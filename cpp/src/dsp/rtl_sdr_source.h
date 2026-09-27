@@ -1,23 +1,27 @@
 // SPDX-License-Identifier: MIT
-// Offline test IQ source implementing ISource.
+// RTL-SDR source implementing ISource via librtlsdr C API.
 //
-// *** TEST DATA -- NOT HARDWARE ***
-// isConnected() always returns false. The UI MUST show this as a
-// non-hardware source.
+// Compiled only when HAVE_RTLSDR is defined (CMake detects librtlsdr).
+// Without the macro, this file provides a stub whose start() always fails,
+// so the engine falls back to TestSignalSource gracefully.
 #pragma once
 
 #include "source.h"
-#include <cstdint>
 #include <complex>
 #include <vector>
+#include <cstddef>
+
+#ifdef HAVE_RTLSDR
+#include <rtl-sdr.h>
+#endif
 
 namespace mbdsdr {
 namespace dsp {
 
-class TestSignalSource : public ISource {
+class RtlSdrSource : public ISource {
 public:
-    explicit TestSignalSource(double sampleRateHz = 2.4e6,
-                              double centerFreqHz = 98.5e6);
+    RtlSdrSource();
+    ~RtlSdrSource() override;
 
     bool start() override;
     void stop() override;
@@ -31,18 +35,17 @@ public:
     double sampleRate() const override { return fs_; }
     double gain() const override { return gainDb_; }
 
-    QString name() const override { return QStringLiteral("Test Signal"); }
-    bool isConnected() const override { return false; }
+    QString name() const override;
+    bool isConnected() const override;
 
 private:
-    double fs_;
-    double f0_;
+#ifdef HAVE_RTLSDR
+    rtlsdr_dev_t* dev_ = nullptr;
+#endif
+    double f0_ = 98.5e6;
+    double fs_ = 2.4e6;
     double gainDb_ = 20.0;
-    std::uint64_t counter_ = 0;
-
-    bool   haveSpare_ = false;
-    float  spare_ = 0.0f;
-    float  nextGaussian();
+    bool   running_ = false;
 };
 
 } // namespace dsp
