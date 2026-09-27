@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MBDSDR · 新时空无线电工作台</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='9' fill='none' stroke='%23919cac' stroke-width='2'/></svg>">
+<style>
+:root{
+  --bg:#000000; --card:rgba(28,29,32,.72); --card2:rgba(45,46,50,.6);
+  --stroke:rgba(255,255,255,.08); --text:#fff; --t2:#9a9da3; --t3:#6b6e75;
+  --accent:#9aa6b6; --ok:#5fd08a; --warn:#e0b35a;
+  --font:"MiSans",Inter,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg)}
+body{font-family:var(--font);color:var(--text);overflow:hidden;-webkit-font-smoothing:antialiased}
+.app{display:grid;grid-template-rows:54px 1fr 74px;height:100vh}
+
+/* ===== top status bar ===== */
+.top{display:flex;align-items:center;justify-content:space-between;padding:0 26px}
+.top .left{display:flex;align-items:baseline;gap:16px}
+.top .time{font-size:26px;font-weight:600;letter-spacing:.5px}
+.top .range{font-size:13px;color:var(--t2)}
+.top .range b{color:var(--text)}
+.top .gear{color:var(--t3);letter-spacing:6px;font-size:13px;margin-left:18px}
+.top .right{display:flex;gap:20px;color:var(--t2)}
+.top .right svg{width:19px;height:19px;stroke:var(--t2);fill:none;stroke-width:1.6}
+
+/* ===== 平行视界：三栏世界 ===== */
+.world{position:relative;display:flex;min-height:0;padding:0 14px}
+.pane{position:relative;min-height:0;overflow:hidden;border-radius:18px}
+.pane.left{width:300px;flex:0 0 auto;border:1px solid var(--stroke);background:var(--card);backdrop-filter:blur(20px)}
+.pane.center{flex:1 1 auto;margin:0 8px;border:1px solid var(--stroke);background:#0a0c0e}
+.pane.right{width:360px;flex:0 0 auto;border:1px solid var(--stroke);background:var(--card);backdrop-filter:blur(20px)}
+.grab{width:6px;flex:0 0 auto;cursor:col-resize;margin:0 1px;border-radius:3px;background:rgba(255,255,255,.06)}
+.grab:hover{background:rgba(154,166,182,.4)}
+
+/* floating command bar over the world */
+.cmd{position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:5;
+  display:flex;align-items:center;gap:12px;background:rgba(18,19,22,.82);
+  backdrop-filter:blur(20px);border:1px solid var(--stroke);border-radius:42px;
+  padding:11px 20px;min-width:min(520px,70%)}
+.cmd svg{width:18px;height:18px;stroke:var(--t2);fill:none;stroke-width:1.8}
+.cmd input{flex:1;background:transparent;border:0;outline:0;color:#fff;font-size:15px;font-family:var(--font)}
+.cmd input::placeholder{color:var(--t3)}
+.cmd .mic{width:34px;height:34px;border-radius:50%;background:rgba(154,166,182,.18);
+  display:flex;align-items:center;justify-content:center;cursor:pointer}
+.cmd .mic svg{stroke:var(--text)}
+
+/* center map */
+.map{position:absolute;inset:0}
+.map svg{width:100%;height:100%}
+.fab-bottom{position:absolute;left:18px;bottom:18px;z-index:5;display:flex;gap:10px;align-items:center}
+.exit{background:rgba(18,19,22,.85);border:1px solid var(--stroke);border-radius:14px;
+  padding:10px 16px;font-size:13px;color:#fff;cursor:pointer;backdrop-filter:blur(20px);
+  display:flex;align-items:center;gap:8px;font-family:var(--font)}
+.exit svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:1.8}
+
+/* pane headers */
+.phead{position:absolute;top:14px;left:16px;right:16px;display:flex;justify-content:space-between;
+  font-size:11px;letter-spacing:1px;color:var(--t2);z-index:4}
+.phead .more{width:26px;height:4px;border-radius:2px;background:rgba(255,255,255,.25)}
+
+/* left sky */
+.sky{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding-top:24px}
+.sky svg{width:88%;height:88%}
+.sky .legend{position:absolute;bottom:16px;left:16px;right:16px;font-size:11px;color:var(--t3);line-height:1.8}
+
+/* right app pane */
+.apppane{position:absolute;inset:0;display:flex;flex-direction:column;padding:16px;gap:12px}
+.apppane h2{font-size:15px;font-weight:600}
+.nowart{height:150px;border-radius:14px;background:linear-gradient(135deg,#1c1e22,#0c0d10);
+  border:1px solid var(--stroke);display:flex;align-items:center;justify-content:center;
+  color:var(--t3);font-size:12px;flex-direction:column;gap:8px}
+.nowart svg{width:34px;height:34px;stroke:var(--accent);fill:none;stroke-width:1.4}
+.nowtitle{font-size:22px;font-weight:600}
+.nowsub{font-size:13px;color:var(--t2)}
+.chat{flex:1;overflow:auto;display:flex;flex-direction:column;gap:8px;padding-top:6px}
+.msg{font-size:13px;line-height:1.55;padding:9px 12px;border-radius:12px;max-width:92%}
+.msg.bot{background:rgba(154,166,182,.12);align-self:flex-start}
+.msg.me{background:rgba(255,255,255,.08);align-self:flex-end}
+.prog{height:4px;background:rgba(255,255,255,.1);border-radius:4px;margin-top:8px;overflow:hidden}
+.prog i{display:block;height:100%;width:42%;background:var(--accent)}
+.ctrls{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
+.cbtn{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.06);cursor:pointer}
+.cbtn.rec{background:rgba(224,90,90,.18)}
+.cbtn svg{width:19px;height:19px;stroke:#fff;fill:none;stroke-width:1.8}
+.cbtn.rec svg{stroke:#e06a6a}
+
+/* ===== bottom dock ===== */
+.dock{display:flex;align-items:center;gap:20px;padding:0 24px}
+.home{width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,.08);
+  display:flex;align-items:center;justify-content:center;cursor:pointer}
+.home svg{width:22px;height:22px;stroke:#fff;fill:none;stroke-width:1.8}
+.clim{display:flex;align-items:center;gap:10px;color:var(--t2);font-size:15px}
+.clim svg{width:16px;height:16px;stroke:var(--t2);fill:none}
+.tiles{display:flex;gap:16px;flex:1;justify-content:center}
+.tile{width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,.08);cursor:pointer}
+.tile.on{background:var(--text)}
+.nowbar{display:flex;align-items:center;gap:14px;min-width:240px}
+.nowbar .nm{font-size:13px;flex:1}
+.nowbar .nm small{display:block;color:var(--t3);font-size:11px}
+.play{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.1);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.play svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:2}
+.vol{width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center}
+.vol svg{width:18px;height:18px;stroke:var(--t2);fill:none;stroke-width:1.6}
+
+.toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:rgba(20,22,26,.95);
+  border:1px solid var(--stroke);padding:10px 20px;border-radius:42px;font-size:13px;opacity:0;transition:.2s;z-index:99}
+.toast.show{opacity:1}
+@media(max-width:1100px){.pane.right{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- top -->
+  <div class="top">
+    <div class="left">
+      <span class="time">20:36</span>
+      <span class="range">调谐 <b>103.300 MHz</b> WFM</span>
+      <span class="gear">RX · FC0012</span>
+    </div>
+    <div class="right">
+      <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 109 9M21 12a9 9 0 00-9-9"/><path d="M8 12l3 3 5-6"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M5 12a7 7 0 0114 0M2 12a14 14 0 0120 0M12 20v1"/></svg>
+      <svg viewBox="0 0 24 24"><path d="M9 12a3 3 0 106 0 3 3 0 00-6 0"/><path d="M4 9a11 11 0 0116 0M2 12a14 14 0 0120 0"/></svg>
+    </div>
+  </div>
+
+  <!-- world -->
+  <div class="world">
+    <!-- LEFT: immersive sky/orbit -->
+    <div class="pane left">
+      <div class="phead"><span>天空 · 轨道世界</span><span class="more"></span></div>
+      <div class="sky">
+        <svg viewBox="0 0 200 200">
+          <circle cx="100" cy="100" r="88" fill="none" stroke="rgba(255,255,255,.12)"/>
+          <circle cx="100" cy="100" r="60" fill="none" stroke="rgba(255,255,255,.08)"/>
+          <circle cx="100" cy="100" r="32" fill="none" stroke="rgba(255,255,255,.06)"/>
+          <line x1="12" y1="100" x2="188" y2="100" stroke="rgba(255,255,255,.07)"/>
+          <line x1="100" y1="12" x2="100" y2="188" stroke="rgba(255,255,255,.07)"/>
+          <text x="100" y="10" fill="#6b6e75" font-size="9" text-anchor="middle">N</text>
+          <text x="194" y="103" fill="#6b6e75" font-size="9">E</text>
+          <circle cx="140" cy="70" r="3.5" fill="#9aa6b6"/><text x="146" y="66" fill="#9a9da3" font-size="7">NOAA-19</text>
+          <circle cx="70" cy="130" r="3" fill="#fff"/><text x="40" y="146" fill="#9a9da3" font-size="7">ISS</text>
+          <circle cx="120" cy="150" r="2.5" fill="#e0b35a"/><text x="124" y="162" fill="#9a9da3" font-size="7">FY-4A</text>
+          <circle cx="60" cy="60" r="2" fill="#5fd08a"/>
+          <circle cx="100" cy="100" r="4" fill="#fff"/>
+        </svg>
+      </div>
+      <div class="legend">中心＝本站。实时 TLE 传播，过境弧线与仰角。<br>无轨道数据时显示空态，不画假星。</div>
+    </div>
+
+    <div class="grab" data-dir="left"></div>
+
+    <!-- CENTER: the living world / map -->
+    <div class="pane center">
+      <div class="map">
+        <svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice">
+          <rect width="800" height="500" fill="#0a0c0e"/>
+          <g stroke="rgba(255,255,255,.07)" stroke-width="1.4" fill="none">
+            <path d="M0 120 Q200 100 400 160 T800 140"/>
+            <path d="M0 300 Q250 280 500 330 T800 300"/>
+            <path d="M0 420 Q300 400 600 440 T800 420"/>
+            <path d="M120 0 Q140 200 100 500"/>
+            <path d="M360 0 Q340 250 380 500"/>
+            <path d="M600 0 Q620 200 580 500"/>
+            <path d="M200 80 Q300 250 260 480"/>
+            <path d="M700 60 Q680 260 720 460"/>
+          </g>
+          <g fill="#55585e" font-size="11">
+            <text x="150" y="110">净月</text><text x="380" y="300">长春</text>
+            <text x="600" y="150">龙嘉</text><text x="200" y="430">双阳</text>
+          </g>
+          <path d="M120 60 C300 180 500 260 720 430" stroke="rgba(224,179,90,.5)" stroke-width="1.5" stroke-dasharray="5 6" fill="none"/>
+          <path d="M300 430 C360 360 420 320 470 290" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round"/>
+          <g transform="translate(470,290) rotate(35)"><path d="M0 -16 L10 14 L0 8 L-10 14 Z" fill="#fff"/></g>
+          <g fill="#5fd08a"><circle cx="600" cy="200" r="4"/><circle cx="240" cy="250" r="3"/></g>
+        </svg>
+      </div>
+
+      <div class="cmd">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+        <input id="cmd" placeholder="你想收什么？说频段 / 电台 / 卫星，我来调谐、解调、守听…">
+        <div class="mic" onclick="toast('语音输入（演示）')">
+          <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/></svg>
+        </div>
+      </div>
+
+      <div class="fab-bottom">
+        <div class="exit" onclick="toast('世界视图已为你铺满')">
+          <svg viewBox="0 0 24 24"><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/></svg>
+          铺满世界
+        </div>
+      </div>
+    </div>
+
+    <div class="grab" data-dir="right"></div>
+
+    <!-- RIGHT: current app (AI / decoder / recorder) -->
+    <div class="pane right">
+      <div class="phead"><span>当前任务 · AI 解码</span><span class="more"></span></div>
+      <div class="apppane">
+        <div class="nowart">
+          <svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+          实时频谱 · 200kHz
+        </div>
+        <div>
+          <div class="nowtitle">103.300 MHz · WFM</div>
+          <div class="nowsub" id="sub">等待载波…（无信号时不显示假台名）</div>
+          <div class="prog"><i></i></div>
+        </div>
+        <div class="chat">
+          <div class="msg bot">已在 88–108MHz 扫到 4 个可懂台，当前停在 103.3。要我切到哪个？</div>
+          <div class="msg me">守听龙嘉塔台，有通话自动录下来</div>
+          <div class="msg bot">已切 119.450 AM，信号触发守听就绪，开门即录。</div>
+        </div>
+        <div class="ctrls">
+          <div class="cbtn" onclick="toast('上一个频点')"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></div>
+          <div class="cbtn rec" onclick="toast('值守录音：有信号才录')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/></svg></div>
+          <div class="cbtn" onclick="toast('下一个频点')"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- bottom dock -->
+  <div class="dock">
+    <div class="home" onclick="toast('回世界主页')"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 8M6 10v10h12V10"/></svg></div>
+    <div class="clim">
+      <svg viewBox="0 0 24 24"><path d="M12 3v10M8 7l4-4 4 4"/></svg>
+      <span>SNR —</span>
+    </div>
+    <div class="tiles">
+      <div class="tile" title="WFM"></div><div class="tile on" title="NFM"></div>
+      <div class="tile" title="AM"></div><div class="tile" title="SSB"></div>
+      <div class="tile" title="数字"></div>
+    </div>
+    <div class="nowbar">
+      <div class="play" onclick="toast('播放/暂停音频')"><svg viewBox="0 0 24 24"><path d="M7 5l12 7-12 7z"/></svg></div>
+      <div class="nm">119.450 MHz<small>AM · 守听中</small></div>
+    </div>
+    <div class="vol"><svg viewBox="0 0 24 24"><path d="M4 9v6h4l6 5V4L8 9H4z"/><path d="M17 9a4 4 0 010 6"/></svg></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('show');clearTimeout(e._t);e._t=setTimeout(function(){e.classList.remove('show')},1500);}
+document.getElementById('cmd').addEventListener('keydown',function(e){if(e.key==='Enter'){toast('Agent 已接收：“'+this.value+'”（演示）');this.value='';}});
+document.querySelectorAll('.tile').forEach(function(t,i){t.addEventListener('click',function(){document.querySelectorAll('.tile').forEach(function(x){x.classList.remove('on')});t.classList.add('on');});});
+document.querySelectorAll('.grab').forEach(function(g){
+  var dir=g.dataset.dir;
+  g.addEventListener('mousedown',function(e){
+    e.preventDefault();
+    var left=document.querySelector('.pane.left'),right=document.querySelector('.pane.right');
+    function move(ev){
+      if(dir==='left'){var w=Math.max(200,Math.min(520,ev.clientX-40));left.style.width=w+'px';}
+      else{var w2=Math.max(240,Math.min(620,window.innerWidth-ev.clientX-46));right.style.width=w2+'px';}
+    }
+    function up(){document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',up);}
+    document.addEventListener('mousemove',move);document.addEventListener('mouseup',up);
+  });
+});
+</script>
+</body>
+</html>

@@ -38,19 +38,23 @@ from PySide6.QtWidgets import (
     QLabel, QDoubleSpinBox, QSlider, QGroupBox, QMessageBox, QFrame,
 )
 
-# 低饱和浅色配色（默认主题）
-PAPER = QColor("#F5F3EF")     # 纸底
-STEEL = QColor("#5B7B8C")     # 青灰（主结构/连线）
-OCHRE = QColor("#C4845C")     # 赭石（强调/选中/sink）
-INK = QColor("#3A3A3A")
-MUTED = QColor("#9A9A9A")
+from tokens import tokens as _tok
 
-# 模块节点按类型上色（对应 SDR++ source/decoder/sink 三类模块目录）
+_t = _tok()
+
+# CarWith dark_car 配色（画布底色/连线/文字从 tokens 取）
+PAPER = QColor(_t.COLORS["card_1"])       # 画布底
+STEEL = QColor(_t.COLORS["gray_200"])     # 连线/主结构
+OCHRE = QColor(_t.COLORS["accent"])       # 强调/选中/sink
+INK = QColor(_t.COLORS["text_primary"])   # 节点文字
+MUTED = QColor(_t.COLORS["gray_300"])     # 占位/次要文字
+
+# 模块节点按类型上色（source/processing/decoder/sink）
 _TYPE_COLORS = {
-    "source": QColor("#7E9BA8"),     # 偏青：源
-    "processing": STEEL,             # 青灰：解调
-    "decoder": QColor("#8FA88E"),    # 偏绿：解码
-    "sink": OCHRE,                   # 赭石：sink
+    "source": QColor("#7E9BA8"),     # 偏青：源（功能标识色，保留）
+    "processing": STEEL,              # 青灰：解调
+    "decoder": QColor(_t.COLORS["success"]),  # 偏绿：解码
+    "sink": OCHRE,                    # 强调：sink
 }
 
 

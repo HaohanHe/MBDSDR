@@ -46,14 +46,21 @@ except Exception:  # pragma: no cover
 
 
 # ============================================================================
-# 默认低饱和配色（米白 / 蓝灰 / 橙）
+# CarWith dark_car 配色（画布背景/网格/谱线/峰值/离线）
+# 浅米白旧值已废弃；深色画布统一从 tokens 取色。
 # ============================================================================
 
-PAL_BG = "#F5F3EF"          # 米白背景
-PAL_GRID = "#5B7B8C"        # 蓝灰 网格/文字
-PAL_LINE = "#C4845C"        # 橙   谱线/游标
-PAL_PEAK = "#6BA89A"        # 绿   峰值标注
-PAL_OFFLINE = "#B85C5C"     # 红   未连接提示
+if _tokens is not None:
+    _c = _tokens().COLORS
+else:  # pragma: no cover - tokens 缺失时的兜底深色值
+    _c = {"card_1": "#1f1f1f", "gray_400": "#585c63", "accent": "#919cac",
+          "success": "#6BA89A", "danger": "#B85C5C"}
+
+PAL_BG = _c["card_1"]         # 画布背景（深卡片色）
+PAL_GRID = _c["gray_400"]     # 网格/文字
+PAL_LINE = _c["accent"]       # 谱线/游标（冷蓝灰）
+PAL_PEAK = _c["success"]      # 峰值标注
+PAL_OFFLINE = _c["danger"]    # 未连接提示
 
 # 瀑布图色带（低饱和，从冷到暖）
 WATERFALL_COLORS = [
@@ -1067,8 +1074,9 @@ class SpectrumPanel(QWidget):
         # 对标 SDR++ main_window.cpp 顶部频率读数；这里只读展示，由 _refresh_status_labels 刷新。
         self._freq_label = QLabel("--")
         self._span_label = QLabel("--")
-        self._freq_label.setStyleSheet(f"color:{PAL_GRID};")
-        self._span_label.setStyleSheet(f"color:{PAL_GRID};")
+        _lbl_color = _c["gray_200"] if _tokens is not None else "#939393"
+        self._freq_label.setStyleSheet(f"color:{_lbl_color};")
+        self._span_label.setStyleSheet(f"color:{_lbl_color};")
         bar.addWidget(self._freq_label)
         bar.addSpacing(12)
         bar.addWidget(self._span_label)

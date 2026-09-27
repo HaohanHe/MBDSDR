@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont
 
+from tokens import tokens
+
 
 # ---------------------------------------------------------------------------
 # S-meter 校准参考（业余无线电通用约定）
@@ -117,7 +119,8 @@ class StatusPanel(QWidget):
         conn_layout = QHBoxLayout(conn_group)
 
         self.conn_indicator = QLabel("OFF")
-        self.conn_indicator.setStyleSheet("color: #B85C5C; font-size: 16pt;")
+        self.conn_indicator.setStyleSheet(
+            "color: " + tokens().COLORS["danger"] + "; font-size: 16pt;")
         conn_layout.addWidget(self.conn_indicator)
 
         self.conn_status = QLabel("未连接")
@@ -127,7 +130,8 @@ class StatusPanel(QWidget):
 
         # UTC 时钟（对标 SDR++ / GQRX 顶栏 UTC 显示）
         self.utc_label = QLabel("UTC: --:--:--")
-        self.utc_label.setStyleSheet("color: #5B7B8C; font-family: monospace;")
+        self.utc_label.setStyleSheet(
+            "color: " + tokens().text("tertiary") + "; font-family: monospace;")
         conn_layout.addWidget(self.utc_label)
 
         layout.addWidget(conn_group)
@@ -169,7 +173,7 @@ class StatusPanel(QWidget):
         self.level_bar.setValue(0)
         self.level_bar.setTextVisible(False)
         self.level_bar.setFixedHeight(10)
-        self._set_level_bar_color("#9AA5AC")  # 灰色（无信号）
+        self._set_level_bar_color(tokens().COLORS["gray_300"])  # 灰色（无信号）
         signal_layout.addWidget(self.level_bar, 2, 3)
 
         layout.addWidget(self.signal_group)
@@ -238,7 +242,7 @@ class StatusPanel(QWidget):
         gps_layout.addWidget(QLabel("定位:"), 0, 0)
         self.gps_fix = QLabel("未连接")
         self.gps_fix.setObjectName("statusValue")
-        self.gps_fix.setStyleSheet("color: #999999;")
+        self.gps_fix.setStyleSheet("color: " + tokens().text("tertiary") + ";")
         gps_layout.addWidget(self.gps_fix, 0, 1)
 
         gps_layout.addWidget(QLabel("卫星:"), 0, 2)
@@ -560,7 +564,7 @@ class StatusPanel(QWidget):
             self.rssi_value.setText("--")
             self.smeter_value.setText("--")
             self.level_bar.setValue(0)
-            self._set_level_bar_color("#9AA5AC")
+            self._set_level_bar_color(tokens().COLORS["gray_300"])
             return
         try:
             dbfs = float(dbfs)
@@ -568,7 +572,7 @@ class StatusPanel(QWidget):
             self.rssi_value.setText("--")
             self.smeter_value.setText("--")
             self.level_bar.setValue(0)
-            self._set_level_bar_color("#9AA5AC")
+            self._set_level_bar_color(tokens().COLORS["gray_300"])
             return
 
         self.rssi_value.setText(f"{dbfs:.1f} dBFS")
@@ -579,21 +583,22 @@ class StatusPanel(QWidget):
         pct = int((clamped - _LEVEL_MIN) / (_LEVEL_MAX - _LEVEL_MIN) * 100)
         self.level_bar.setValue(pct)
 
-        # 颜色：弱=灰橙，中=橙，强=绿
+        _t = tokens()
+        # 颜色：弱=灰，中=强调，强=绿
         if dbfs > -40:
-            self._set_level_bar_color("#6BA89A")      # 强-绿
+            self._set_level_bar_color(_t.COLORS["success"])      # 强-绿
         elif dbfs > -70:
-            self._set_level_bar_color("#C4845C")      # 中-橙
+            self._set_level_bar_color(_t.COLORS["accent"])       # 中-强调
         else:
-            self._set_level_bar_color("#9AA5AC")      # 弱-灰
+            self._set_level_bar_color(_t.COLORS["gray_300"])      # 弱-灰
 
         # RSSI 文字颜色同步
         if dbfs > -40:
-            self.rssi_value.setStyleSheet("color: #6BA89A;")
+            self.rssi_value.setStyleSheet("color: " + _t.COLORS["success"] + ";")
         elif dbfs > -70:
-            self.rssi_value.setStyleSheet("color: #C4845C;")
+            self.rssi_value.setStyleSheet("color: " + _t.COLORS["accent"] + ";")
         else:
-            self.rssi_value.setStyleSheet("color: #B85C5C;")
+            self.rssi_value.setStyleSheet("color: " + _t.COLORS["danger"] + ";")
 
     def set_sdr_connected(self, connected: bool):
         """连接状态切换：连接时正常显示；断开时把 SDR 相关字段全部 "--" 并整组置灰。"""
@@ -649,7 +654,8 @@ class StatusPanel(QWidget):
         if enabled:
             card.setStyleSheet("")
         else:
-            card.setStyleSheet("QGroupBox::title { color: #9AA0A6; }")
+            card.setStyleSheet(
+                "QGroupBox::title { color: " + tokens().text("disabled") + "; }")
 
     # ========================================================================
     # 内部工具
@@ -667,9 +673,10 @@ class StatusPanel(QWidget):
 
     def _set_level_bar_color(self, hex_color: str):
         """用 stylesheet 设置 QProgressBar 高亮色（保留默认底色）。"""
+        _t = tokens()
         self.level_bar.setStyleSheet(
-            f"QProgressBar {{ border: 1px solid #CBD5D9; border-radius: 5px;"
-            f" background: #ECEAE4; }} "
+            f"QProgressBar {{ border: 1px solid {_t.COLORS['gray_400']}; "
+            f"border-radius: 5px; background: {_t.COLORS['card_2']}; }} "
             f"QProgressBar::chunk {{ background: {hex_color}; border-radius: 4px; }}"
         )
 
@@ -681,11 +688,15 @@ class StatusPanel(QWidget):
     def on_connection_changed(self, connected: bool, message: str):
         """连接状态改变。"""
         if connected:
-            self.conn_indicator.setStyleSheet("color: #6BA89A; font-size: 12pt; font-weight: 600;")
+            self.conn_indicator.setStyleSheet(
+                "color: " + tokens().COLORS["success"]
+                + "; font-size: 12pt; font-weight: 600;")
             self.conn_indicator.setText("ON")
             self.conn_status.setText(message)
         else:
-            self.conn_indicator.setStyleSheet("color: #B85C5C; font-size: 12pt; font-weight: 600;")
+            self.conn_indicator.setStyleSheet(
+                "color: " + tokens().COLORS["danger"]
+                + "; font-size: 12pt; font-weight: 600;")
             self.conn_indicator.setText("OFF")
             self.conn_status.setText(message)
 
@@ -727,12 +738,16 @@ class StatusPanel(QWidget):
         # RSSI 颜色指示（rssi 为 None 时不染色，保持默认）
         if rssi is not None:
             try:
+                _t = tokens()
                 if rssi > -50:
-                    self.rssi_value.setStyleSheet("color: #6BA89A;")  # 强信号-绿
+                    self.rssi_value.setStyleSheet(
+                        "color: " + _t.COLORS["success"] + ";")  # 强信号-绿
                 elif rssi > -70:
-                    self.rssi_value.setStyleSheet("color: #C4845C;")  # 中等-橙
+                    self.rssi_value.setStyleSheet(
+                        "color: " + _t.COLORS["accent"] + ";")    # 中等-强调
                 else:
-                    self.rssi_value.setStyleSheet("color: #B85C5C;")  # 弱-红
+                    self.rssi_value.setStyleSheet(
+                        "color: " + _t.COLORS["danger"] + ";")   # 弱-红
             except TypeError:
                 pass
 
@@ -752,7 +767,7 @@ class StatusPanel(QWidget):
         if source == "none" or not fix:
             # 未连接 / 未定位：灰色，全部 "--"
             self.gps_fix.setText("未连接")
-            self.gps_fix.setStyleSheet("color: #999999;")
+            self.gps_fix.setStyleSheet("color: " + tokens().text("tertiary") + ";")
             self.gps_sats.setText("--")
             self.gps_lat.setText("--")
             self.gps_lon.setText("--")
@@ -762,7 +777,7 @@ class StatusPanel(QWidget):
         else:
             # source=="real" 且 fix==True：绿色"已定位"，真实坐标
             self.gps_fix.setText("已定位")
-            self.gps_fix.setStyleSheet("color: #6BA89A;")
+            self.gps_fix.setStyleSheet("color: " + tokens().COLORS["success"] + ";")
             self.gps_group.setTitle("GPS / 北斗")
             lat = gps.get("lat")
             lon = gps.get("lon")
@@ -793,7 +808,7 @@ class StatusPanel(QWidget):
         if source != "real":
             # 未连接 / 无定位：灰色，坐标一律空，绝不保留旧值
             self.gps_fix.setText("未连接")
-            self.gps_fix.setStyleSheet("color: #999999;")
+            self.gps_fix.setStyleSheet("color: " + tokens().text("tertiary") + ";")
             self.gps_sats.setText("--")
             self.gps_lat.setText("--")
             self.gps_lon.setText("--")
@@ -803,9 +818,9 @@ class StatusPanel(QWidget):
             self.gps_group.setTitle("GPS / 北斗")
             return
 
-        # 已定位：绿色 #6BA89A
+        # 已定位：绿色（token success）
         self.gps_fix.setText("已定位")
-        self.gps_fix.setStyleSheet("color: #6BA89A;")
+        self.gps_fix.setStyleSheet("color: " + tokens().COLORS["success"] + ";")
         self.gps_group.setTitle("GPS / 北斗")
         lat = fix_dict.get("latitude")
         lon = fix_dict.get("longitude")

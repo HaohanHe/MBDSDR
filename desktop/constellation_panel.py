@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QFormLayout, QSpinBox, QSizePolicy,
 )
 
+from tokens import tokens
+
 
 # 星座模板：{name: [(i, q), ...]} 单位圆归一化坐标
 _TEMPLATES = {
@@ -95,25 +97,26 @@ class _ConstellationView(QWidget):
         r = min(w, h) / 2.0 - 16.0
 
         # 背景
-        p.fillRect(0, 0, w, h, QColor(20, 24, 30))
+        _t = tokens()
+        p.fillRect(0, 0, w, h, QColor(_t.COLORS["card_1"]))
 
         if not self._has_data:
-            p.setPen(QPen(QColor(150, 160, 170)))
+            p.setPen(QPen(QColor(_t.COLORS["gray_200"])))
             p.drawText(self.rect(), Qt.AlignCenter, self._wait_text)
             p.end()
             return
 
         # 网格 + 坐标轴
         if self._show_grid:
-            p.setPen(QPen(QColor(60, 70, 80), 1, Qt.DashLine))
+            p.setPen(QPen(QColor(_t.COLORS["gray_400"]), 1, Qt.DashLine))
             for f in (-0.5, 0.5):
                 p.drawLine(cx + f * r * 2, cy - r, cx + f * r * 2, cy + r)
                 p.drawLine(cx - r, cy + f * r * 2, cx + r, cy + f * r * 2)
-        p.setPen(QPen(QColor(110, 120, 130), 1))
+        p.setPen(QPen(QColor(_t.COLORS["gray_300"]), 1))
         p.drawLine(cx - r, cy, cx + r, cy)
         p.drawLine(cx, cy - r, cx, cy + r)
         # 单位圆
-        p.setPen(QPen(QColor(80, 90, 100), 1, Qt.DashLine))
+        p.setPen(QPen(QColor(_t.COLORS["gray_400"]), 1, Qt.DashLine))
         p.drawEllipse(int(cx - r), int(cy - r), int(r * 2), int(r * 2))
 
         # 归一化系数：把散点包络压到半径 r 内
@@ -127,10 +130,12 @@ class _ConstellationView(QWidget):
 
         # 散点（半透明叠加）
         p.setPen(Qt.NoPen)
+        _scatter = QColor(_t.COLORS["success"])
+        _scatter.setAlpha(140)
         for (i, q) in self._points:
             x = cx + i * scale
             y = cy - q * scale
-            p.setBrush(QBrush(QColor(80, 200, 120, 110)))
+            p.setBrush(QBrush(_scatter))
             p.drawEllipse(int(x - 1.5), int(y - 1.5), 3, 3)
 
         # 模板叠加（虚线叉）
