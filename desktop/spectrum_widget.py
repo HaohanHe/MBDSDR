@@ -44,6 +44,12 @@ try:
 except Exception:  # pragma: no cover
     _tokens = None  # type: ignore
 
+# 触屏手势：双指捏合缩放 + 单指拖动平移（Surface/平板）。鼠标模式下零旁路。
+try:
+    from touch_helpers import PinchZoomMixin
+except Exception:  # pragma: no cover
+    PinchZoomMixin = object  # type: ignore
+
 
 # ============================================================================
 # CarWith dark_car 配色（画布背景/网格/谱线/峰值/离线）
@@ -1738,16 +1744,59 @@ class _TuningPlotMixin:
 # 绘图表面：上方 FFT 频谱曲线 widget（承载全部调谐 / VFO 拖拽交互）
 # ============================================================================
 
-class SpectrumCurveWidget(_TuningPlotMixin, QWidget):
-    """上方 FFT 频谱曲线。整个 widget 即谱面，鼠标 / 滚轮 / 键盘交互全在此。"""
+class SpectrumCurveWidget(PinchZoomMixin, _TuningPlotMixin, QWidget):
+    """上方 FFT 频谱曲线。整个 widget 即谱面，鼠标 / 滚轮 / 键盘交互全在此。
+
+    触屏（Surface/平板）：PinchZoomMixin 提供双指捏合缩放（复用 Ctrl+滚轮的
+    锚点缩放数学）+ 单指拖动平移（复用 mouseMoveEvent 的中心频率平移）。
+    鼠标模式下 wheelEvent / mousePressEvent 等原有逻辑完全不变。
+    """
 
     def __init__(self, state: _PlotState, parent=None):
         super().__init__(parent)
         self.state = state
         self._tuning_common_init()
+        # 触屏手势：开启 WA_AcceptTouchEvents + 抓取 Pinch/Pan 手势。
+        # PinchZoomMixin 兜底为 object 时跳过连接，鼠标模式不受影响。
+        if PinchZoomMixin is not object and hasattr(self, "init_pinch_zoom"):
+            self.init_pinch_zoom()
+            try:
+                self.pinch_scale_changed.connect(self._on_touch_pinch_zoom)
+                self.pan_changed.connect(self._on_touch_pan)
+            except Exception:
+                pass
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.update)
         self._timer.start(50)
+
+    # ---- 触屏手势回调：复用既有 wheel 缩放 / mouseMove 平移数学 ----
+    def _on_touch_pinch_zoom(self, scale_factor: float, center_pos: QPointF) -> None:
+        """双指捏合：以捏合中心为锚点缩放频率 span（与 Ctrl+滚轮同数学）。
+
+        QPinchGesture.scaleFactor>1 = 双指张开 = 内容放大 = 收窄 span（看更细）。
+        """
+        gen = self.state.panel.generator
+        span = gen.sample_rate_hz
+        # 捏合张开(scale>1) → span 缩小；捏合收拢(scale<1) → span 放大。
+        new_span = span / max(0.2, min(5.0, scale_factor))
+        new_span = max(48_000.0, min(20_000_000.0, new_span))
+        r = center_pos.x() / max(1, self.width())
+        view_center = _view_center_hz(self.state)
+        anchor_freq = view_center + (r - 0.5) * span
+        new_view_center = anchor_freq - (r - 0.5) * new_span
+        gen.sample_rate_hz = new_span
+        gen.center_freq_hz = new_view_center - self.state.view_offset_hz
+        self._emit_tuned(gen.center_freq_hz)
+        self.update()
+
+    def _on_touch_pan(self, dx: float, dy: float) -> None:
+        """单指拖动：平移中心频率（与 mouseMoveEvent 普通拖动同数学）。"""
+        gen = self.state.panel.generator
+        shift = -dx / max(1, self.width()) * gen.sample_rate_hz
+        gen.center_freq_hz += shift
+        snapped = self._snap_center()
+        self._emit_tuned(snapped)
+        self.update()
 
     def _spectrum_height(self) -> int:
         # 瀑布已拆到下方独立 widget，本 widget 整块都是谱面。

@@ -37,7 +37,13 @@ if _REPO_ROOT not in sys.path:
 
 from themes import get_theme, THEMES, DEFAULT_THEME
 from spectrum_widget import create_spectrum_widget, HAS_OPENGL
-from control_panel import ControlPanel, MODE_VFO_BANDWIDTH
+from control_panel import ControlPanel
+from mode_registry import (
+    default_bandwidth,
+    audio_cutoff,
+    demodulate,
+    get as get_mode,
+)
 from status_panel import StatusPanel
 from ai_panel import AIPanel
 from mcp_worker import MCPWorkerManager
@@ -116,6 +122,10 @@ except Exception:  # pragma: no cover
     LoopSatTracker = None  # type: ignore
 # 运行参数持久化（频率/增益/模式/带宽/采样率/呼号/AGC/主题 落 JSON，退出不丢）
 from settings import DesktopSettings
+# 触屏/Surface/平板二合一适配：单例管理器 + 触控目标/手势辅助。
+from touch_manager import touch_manager
+from touch_helpers import (enable_touch_events, apply_touch_target,
+                           apply_touch_targets)
 
 # 真实 baseband 存盘 + 声卡实时输出（可选依赖，导入失败也不拖垮 GUI）
 try:
@@ -238,6 +248,12 @@ class MainWindow(QMainWindow):
         # 已读回的主题；控件由专用 setters（内部 blockSignals）回填，不触发 save。
         self._restoring_settings = True
         self.settings = DesktopSettings.load()
+        # ---- 触屏/Surface/平板适配：从设置读 touch_mode(auto/on/off) 并应用 ----
+        # 在构建 UI 之前完成：控件构造期 apply_touch_target 即可按当前模式决定
+        # 最小高度；之后模式切换由 _on_touch_mode_changed 重新适配。
+        touch_manager().set_from_settings(
+            str(self.settings.get("touch_mode", "auto")))
+        touch_manager().touch_mode_changed.connect(self._on_touch_mode_changed)
         self._worker_manager = MCPWorkerManager()
         self._worker: Optional[object] = None
         self._record_timer: Optional[QTimer] = None
@@ -421,6 +437,105 @@ class MainWindow(QMainWindow):
         self._utc_timer.start()
         self._update_utc_clock()
 
+        # ---- 触屏适配：UI 全部构建完成后，统一开启触控事件 / 放大触控目标 /
+        # 加宽 splitter 手柄与滚动条。鼠标模式下这些操作零副作用（helper 内部判断）。
+        self._apply_touch_adaptation()
+
+    # ========================================================================
+    # 触屏 / Surface / 平板适配
+    # ========================================================================
+    def _apply_touch_adaptation(self) -> None:
+        """按当前 touch_mode 重新适配整窗触控尺寸与手势热区。
+
+        鼠标模式下：apply_touch_target 直接 return、splitter 恢复 tokens 默认 4px、
+        不加触控 QSS——桌面手感与之前完全一致。触屏模式下：
+          * 主窗口 / 中央 Tab / DockWidget 开启 WA_AcceptTouchEvents；
+          * 递归把所有 QPushButton/QComboBox/QLineEdit/QSpinBox 最小高度提到 ≥44px；
+          * 三栏 splitter 与频谱内 splitter 手柄加宽到 10px；
+          * 追加触控 QSS（滚动条 14px / slider handle ≥20px / :pressed 反馈）。
+        """
+        tm = touch_manager()
+        # 1) 全局触屏事件接受
+        enable_touch_events(self)
+        for tab in (getattr(self, "left_tab", None),
+                    getattr(self, "right_tab", None)):
+            if tab is not None:
+                enable_touch_events(tab)
+        try:
+            for dock in self.findChildren(QDockWidget):
+                enable_touch_events(dock)
+        except Exception:
+            pass
+
+        # 2) 递归放大所有可交互控件的触控目标（内部按 is_touch_mode 旁路）
+        apply_touch_targets(self)
+
+        # 3) Splitter 手柄加宽（触屏 10px / 鼠标 4px = tokens 默认）
+        handle_w = tm.splitter_handle()
+        for splitter in self.findChildren(QSplitter):
+            try:
+                splitter.setHandleWidth(handle_w)
+            except Exception:
+                pass
+
+        # 4) 长列表触屏滚动：QComboBox 下拉视图按像素滚动 + 触屏行高
+        try:
+            from PySide6.QtWidgets import QListView, QAbstractItemView
+            row_h = tm.list_row_height()
+            for combo in self.findChildren(QComboBox):
+                view = combo.view()
+                if view is not None:
+                    view.setVerticalScrollMode(
+                        QAbstractItemView.ScrollMode.ScrollPerPixel)
+                    if row_h > 0:
+                        view.setStyleSheet(
+                            f"QListView::item {{ height: {row_h}px; }}")
+        except Exception:
+            pass
+
+        # 5) 触控 QSS（滚动条加宽 / slider handle 加大 / pressed 反馈）
+        self._apply_touch_stylesheet()
+
+    def _apply_touch_stylesheet(self) -> None:
+        """追加/移除触屏模式专属 QSS。鼠标模式下追加空串（恢复主题默认）。"""
+        tm = touch_manager()
+        extra = ""
+        if tm.is_touch_mode():
+            sb_w = tm.scrollbar_width()       # 触屏 14 / 鼠标 10
+            extra = (
+                f"QScrollBar:vertical {{ width: {sb_w}px; }}"
+                f"QScrollBar:horizontal {{ height: {sb_w}px; }}"
+                "QScrollBar::handle:vertical { min-height: 44px; }"
+                "QScrollBar::handle:horizontal { min-width: 44px; }"
+                "QSlider::handle:horizontal {"
+                " width: 24px; height: 24px; margin: -8px 0; }"
+                "QSlider::handle:vertical {"
+                " height: 24px; width: 24px; margin: 0 -8px; }"
+                "QPushButton#iconButton:pressed {"
+                " background-color: rgba(255,255,255,0.25); }"
+                "QPushButton#iconButton:checked {"
+                " background-color: rgba(145,156,172,0.5); }"
+                "QPushButton:pressed {"
+                " background-color: rgba(0,0,0,0.18); }"
+            )
+        # 追加到当前 app 级 QSS 之上；_apply_theme 设置的基础 QSS 保持不变。
+        try:
+            from PySide6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app is not None:
+                base = getattr(self, "_theme_qss", "")
+                app.setStyleSheet(base + extra)
+        except Exception:
+            pass
+
+    def _on_touch_mode_changed(self, on: bool) -> None:
+        """touch_manager.touch_mode_changed 槽：模式切换后重新适配全窗触控尺寸。
+
+        注意：这里不回写 settings——auto 模式下检测结果变化不应把用户的
+        "auto" 偏好覆盖成 "on"/"off"；持久化由设置面板的显式选择负责。
+        """
+        self._apply_touch_adaptation()
+
     # ========================================================================
     # UI 构建
     # ========================================================================
@@ -574,7 +689,8 @@ class MainWindow(QMainWindow):
 
         # 解调模式下拉（与控制面板 mode_combo 同源：改它走既有信号链切解调）
         self.toolbar_mode_combo = QComboBox()
-        self.toolbar_mode_combo.addItems(["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"])
+        self.toolbar_mode_combo.addItems(
+            [m for m in ["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"] if get_mode(m)])
         self.toolbar_mode_combo.setMinimumHeight(28)
         self.toolbar_mode_combo.setToolTip("解调模式")
         self.toolbar_mode_combo.currentTextChanged.connect(
@@ -1312,7 +1428,15 @@ class MainWindow(QMainWindow):
         """应用主题。"""
         self._current_theme = theme_name
         theme = get_theme(theme_name)
-        theme.apply(self.app if hasattr(self, 'app') else QApplication.instance())
+        _app = self.app if hasattr(self, 'app') else QApplication.instance()
+        theme.apply(_app)
+        # 记录主题基础 QSS，触屏模式下 _apply_touch_stylesheet 在其后追加触控规则
+        # （theme.apply 会整体替换 stylesheet，故这里必须重新捕获并叠加）。
+        try:
+            self._theme_qss = _app.styleSheet() if _app is not None else ""
+        except Exception:
+            self._theme_qss = ""
+        self._apply_touch_stylesheet()
 
         # 更新频谱组件颜色
         self.spectrum.set_theme_colors(
@@ -2514,7 +2638,7 @@ class MainWindow(QMainWindow):
         # 根据模式套用典型 VFO 带宽（MODE_VFO_BANDWIDTH，逐模式精确值）
         try:
             m = (mode or "FM").upper()
-            bw = float(MODE_VFO_BANDWIDTH.get(m, MODE_VFO_BANDWIDTH["FM"]))
+            bw = float(default_bandwidth(m))
             self._vfo_bw = bw
             # 推到已绑定的主/次 VFO DSP（VfoManager.push_bandwidth → set_bandwidth）
             if self._vfo_mgr is not None:
@@ -3601,58 +3725,28 @@ class MainWindow(QMainWindow):
     def _demod_at_48k(dsp, mode: str, vfo_out: np.ndarray) -> np.ndarray:
         """VFO 输出已是 48k complex IQ，按模式解调后直接可写声卡（不再重采样）。
 
-        模式→函数映射：
-          NFM  -> dsp.fm_demod(vfo_out, deviation=5000.0,  sample_rate=48000)
-          FM   -> dsp.fm_demod(vfo_out, deviation=75000.0, sample_rate=48000)
-          AM   -> dsp.am_demod(vfo_out)
-          USB  -> dsp.ssb_demod(vfo_out, mode="USB", sample_rate=48000)
-          LSB  -> dsp.ssb_demod(vfo_out, mode="LSB", sample_rate=48000)
-          CW   -> dsp.cw_demod(vfo_out, tone_freq=700.0, sample_rate=48000)
+        模式→函数映射已收口到 mode_registry：DemodMode.demod_func / demod_kwargs
+        逐模式声明（NFM 频偏 5k / FM 75k / AM 包络 / USB/LSB Weaver / CW 700Hz）。
+        WFM 在调用方已特殊处理并 return，不会走到这里。
         """
-        if mode == "NFM":
-            return dsp.fm_demod(vfo_out, deviation=5000.0, sample_rate=48000)
-        if mode == "FM":
-            return dsp.fm_demod(vfo_out, deviation=75000.0, sample_rate=48000)
-        if mode == "AM":
-            return dsp.am_demod(vfo_out)
-        if mode == "USB":
-            return dsp.ssb_demod(vfo_out, mode="USB", sample_rate=48000)
-        if mode == "LSB":
-            return dsp.ssb_demod(vfo_out, mode="LSB", sample_rate=48000)
-        if mode == "CW":
-            return dsp.cw_demod(vfo_out, tone_freq=700.0, sample_rate=48000)
-        # 兜底（RAW/DIG/WFM 不应走到这里）
+        desc = get_mode(mode)
+        if desc is not None and desc.outputs_audio:
+            result = demodulate(mode, vfo_out, sample_rate=48000)
+            if result is not None:
+                return result
+        # 兜底（RAW/DIG/未知模式不应走到这里）
         return dsp.fm_demod(vfo_out, deviation=75000.0, sample_rate=48000)
 
     @staticmethod
     def _demod_at_native_sr(dsp, mode: str, iq: np.ndarray, sr: float) -> np.ndarray:
         """回退路径：对原始全带宽 IQ（采样率 sr）按模式解调，再按模式音频带宽重采样到 48k。
 
-        各模式音频带宽 cutoff_hz（对应 audio_to_playback 的低通截止）：
+        音频截止 cutoff_hz 与模式→函数映射均来自 mode_registry（DemodMode）：
           WFM=15000, NFM=3000, FM=15000, AM=4000, USB=3000, LSB=3000, CW=1000
         """
-        cutoff = {
-            "WFM": 15000.0,
-            "NFM": 3000.0,
-            "FM": 15000.0,
-            "AM": 4000.0,
-            "USB": 3000.0,
-            "LSB": 3000.0,
-            "CW": 1000.0,
-        }.get(mode, 4000.0)
-        if mode == "NFM":
-            audio = dsp.fm_demod(iq, deviation=5000.0, sample_rate=sr)
-        elif mode == "FM":
-            audio = dsp.fm_demod(iq, deviation=75000.0, sample_rate=sr)
-        elif mode == "AM":
-            audio = dsp.am_demod(iq)
-        elif mode == "USB":
-            audio = dsp.ssb_demod(iq, mode="USB", sample_rate=sr)
-        elif mode == "LSB":
-            audio = dsp.ssb_demod(iq, mode="LSB", sample_rate=sr)
-        elif mode == "CW":
-            audio = dsp.cw_demod(iq, tone_freq=700.0, sample_rate=sr)
-        else:
+        cutoff = audio_cutoff(mode)
+        audio = demodulate(mode, iq, sample_rate=sr)
+        if audio is None:
             audio = dsp.fm_demod(iq, deviation=75000.0, sample_rate=sr)
         return dsp.audio_to_playback(audio, in_sr=sr, cutoff_hz=cutoff, out_sr=48000)
 

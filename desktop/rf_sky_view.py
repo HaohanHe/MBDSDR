@@ -101,6 +101,12 @@ from mbdsdr_ai.skyengine import jtime as _jtime
 
 from tokens import tokens
 
+# 触屏手势：双指捏合缩放 FOV + 单指拖动平移视角（Surface/平板）。
+try:
+    from touch_helpers import PinchZoomMixin
+except Exception:  # pragma: no cover
+    PinchZoomMixin = object  # type: ignore
+
 
 # ============================================================================
 # 数据类型
@@ -349,7 +355,7 @@ def _load_celestrak_tle_catalog() -> List[Dict[str, object]]:
 # ============================================================================
 
 
-class RFSkyView(QWidget, SkyInteractionHandler):
+class RFSkyView(PinchZoomMixin, QWidget, SkyInteractionHandler):
     """
     射频天空视图：方位角等距投影的天空图（天顶居中，地平线为边缘圆）。
 
@@ -358,6 +364,8 @@ class RFSkyView(QWidget, SkyInteractionHandler):
       - 滚轮：指数缩放 FOV（30..180°）
       - 左键点击：角距拾取天体
       - 双击：goto 居中到点击方向
+    触屏（Surface/平板）：PinchZoomMixin 双指捏合缩放 FOV + 单指拖动平移，
+    复用 SkyInteractionHandler 的 view_state.zoom/pan；鼠标模式不变。
 
     信号：
         object_clicked(SkyObject) - 点击天空对象
@@ -396,6 +404,15 @@ class RFSkyView(QWidget, SkyInteractionHandler):
         self.projection = PerspectiveProjection()
         self.sky_objects = self._objects
         SkyInteractionHandler.__init__(self)
+
+        # 触屏手势：双指捏合缩放 FOV + 单指拖动平移（PinchZoomMixin 兜底 object 时跳过）
+        if PinchZoomMixin is not object and hasattr(self, "init_pinch_zoom"):
+            self.init_pinch_zoom()
+            try:
+                self.pinch_scale_changed.connect(self._on_touch_pinch_zoom)
+                self.pan_changed.connect(self._on_touch_pan)
+            except Exception:
+                pass
 
         # 图层开关 (Stellarium core.lines / landscapes / atmosphere)
         self._show_atmosphere: bool = True
@@ -2029,6 +2046,42 @@ class RFSkyView(QWidget, SkyInteractionHandler):
 
     def wheelEvent(self, event: QWheelEvent):
         SkyInteractionHandler.wheelEvent(self, event)
+
+    # ------------------------------------------------------------------ 触屏手势
+    def _on_touch_pinch_zoom(self, scale_factor: float, center_pos: QPointF) -> None:
+        """双指捏合缩放 FOV：复用 view_state.zoom 的指数缩放（与滚轮同手感）。
+
+        scale_factor>1 = 双指张开 = 放大（FOV 变小）→ num_steps>0。
+        """
+        try:
+            num_steps = math.log(max(0.2, min(5.0, scale_factor))) * 2.0
+            self.view_state.zoom(num_steps)
+            self.on_view_changed()
+        except Exception:
+            pass
+
+    def _on_touch_pan(self, dx: float, dy: float) -> None:
+        """单指拖动平移：复用 SkyInteractionHandler 的 screen_to_sky 反投影平移。"""
+        try:
+            last = getattr(self, "_pan_last_pos", None)
+            if last is None:
+                return
+            size = (float(self.width()), float(self.height()))
+            az1, alt1 = screen_to_sky(last.x(), last.y(), self.view_state,
+                                      self.projection, size)
+            nx, ny = last.x() + dx, last.y() + dy
+            az2, alt2 = screen_to_sky(nx, ny, self.view_state,
+                                      self.projection, size)
+            daz = az2 - az1
+            if daz > 180.0:
+                daz -= 360.0
+            elif daz < -180.0:
+                daz += 360.0
+            dalt = alt1 - alt2
+            self.view_state.pan(daz, dalt)
+            self.on_view_changed()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ 钩子
     def on_view_changed(self) -> None:

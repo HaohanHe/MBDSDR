@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QComboBox, QFormLayout,
 )
 
+from mode_registry import get as _get_mode
+
 try:  # pragma: no cover
     from mbdsdr_ai.bookmark_manager import BookmarkManager, Bookmark
     _KERNEL_AVAILABLE = True
@@ -232,7 +234,9 @@ class BookmarkPanel(QWidget):
             return
         mode, ok = QInputDialog.getItem(
             self, "添加书签", "解调模式：",
-            ["NFM", "WFM", "AM", "USB", "LSB", "CW", "DIG"], 0, False)
+            # 可选模式来自 mode_registry；保持原 UX 顺序，未注册的自动剔除
+            [m for m in ["NFM", "WFM", "AM", "USB", "LSB", "CW", "DIG"] if _get_mode(m)],
+            0, False)
         if not ok:
             return
         bm = Bookmark(

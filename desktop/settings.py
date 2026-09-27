@@ -35,6 +35,9 @@ DEFAULTS: Dict[str, Any] = {
     "gnss_baudrate": 9600,          # GNSS 串口波特率
     "agc_enabled": True,            # 自动增益开关
     "theme": "default",             # 主题名
+    # 触屏/Surface/平板二合一适配："auto"=自动检测 QTouchDevice，
+    # "on"=强制触屏模式（放大触控目标/手势），"off"=强制鼠标模式。
+    "touch_mode": "auto",
 }
 
 #: 数值字段（写盘前做类型归一，防止 JSON 里混入字符串导致下游类型错误）

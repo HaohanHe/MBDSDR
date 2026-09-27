@@ -330,12 +330,15 @@ QPushButton#iconButton {{
     padding: 6px;
 }}
 QPushButton#iconButton:hover {{ background-color: {c['card_3']}; }}
+QPushButton#iconButton:pressed {{ background-color: {c['card_hover']}; }}
+QPushButton#iconButton:checked {{ background-color: {c['accent']}; }}
 QPushButton#recordButton {{
     background-color: {c['accent']};
     color: {c['bg_dark']};
     border: none;
     font-weight: 600;
 }}
+QPushButton#recordButton:pressed {{ background-color: {c['gray_200']}; }}
 QPushButton#recordButton:checked {{ background-color: {c['danger']}; color: white; }}
 QPushButton#recordButton:disabled {{
     background-color: {c['card_1']};

@@ -19,6 +19,15 @@ from PySide6.QtGui import QFont, QIntValidator, QDoubleValidator
 
 from tokens import tokens
 
+# 解调模式元数据（默认带宽/显示名/解调函数）已收口到 mode_registry。
+# 这里只取查询函数；旧字典 MODE_VFO_BANDWIDTH 作为向后兼容别名在下方导出。
+from mode_registry import (
+    default_bandwidth,
+    mode_names,
+    to_bandwidth_dict,
+    get as get_mode,
+)
+
 
 # 预设电台（FM，MHz）
 # 不预存地区性广播台：FM 频率随城市/地区不同，硬编码其他城市的电台没有意义。
@@ -70,18 +79,13 @@ SDR_BAND_PRESETS = [
     ("28.000", "10m 业余", "USB"),
 ]
 
-# 模式 → 默认 VFO 带宽（Hz）。对标 SDR++ / GQRX 各解调方式的典型中频带宽：
-#   WFM 广播调频立体声 180 kHz；NBFM/FM 语音 12.5 kHz（25 kHz 信道间隔，
-#   语音占用约 12.5 kHz）；AM 6 kHz；SSB（USB/LSB）语音 2.4 kHz；CW 500 Hz。
-MODE_VFO_BANDWIDTH = {
-    "WFM": 180_000,  # 广播调频立体声
-    "NFM": 12_500,   # 窄带调频语音
-    "FM": 12_500,    # NBFM 语音（与 NFM 同档）
-    "AM": 6_000,
-    "USB": 2_400,    # 上边带语音
-    "LSB": 2_400,    # 下边带语音
-    "CW": 500,
-}
+# 模式 → 默认 VFO 带宽（Hz）已收口到 desktop/mode_registry.py 的 DemodMode 描述符。
+# 这里仅保留向后兼容别名：旧代码 `from control_panel import MODE_VFO_BANDWIDTH` 仍可用。
+MODE_VFO_BANDWIDTH = to_bandwidth_dict()
+
+# 面板模式下拉的展示顺序（业务 UX 顺序，与注册表内置顺序 WFM/NFM/FM/... 不同）。
+# 用注册表过滤：仅展示已注册的模式，未注册的自动剔除。
+_PANEL_MODE_ORDER = ["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"]
 
 # 合法频率范围：10 kHz ~ 6 GHz（SDR 全频段，不再硬编码 FM/AM 广播段）
 FREQ_MIN_HZ = 10_000.0
@@ -141,6 +145,42 @@ class ControlPanel(QWidget):
         self._update_freq_display()
         # 默认未连接 SDR：调谐/音量/模式/录音控件全部置灰，绝不暴露假可控状态
         self.set_sdr_connected(False)
+        self._apply_touch_targets()
+
+    def _apply_touch_targets(self) -> None:
+        """触屏模式下把调谐/收藏/录音等按钮与下拉/输入框最小高度提到 ≥44px。
+
+        apply_touch_target 内部检查 TouchManager.is_touch_mode()，鼠标模式零旁路；
+        主窗口还会递归 apply_touch_targets(self) 二次覆盖，这里自包含一遍便于
+        ControlPanel 单独使用。
+        """
+        try:
+            from touch_helpers import apply_touch_target
+        except Exception:
+            return
+        for name in ("tune_button", "bookmark_add_btn", "bookmark_del_btn",
+                     "record_button"):
+            w = getattr(self, name, None)
+            if w is not None:
+                apply_touch_target(w)
+        for name in ("mode_combo", "band_combo", "preset_combo", "step_combo",
+                     "sample_rate_combo", "vfo_bw_combo", "bookmark_combo"):
+            w = getattr(self, name, None)
+            if w is not None:
+                apply_touch_target(w)
+                # 下拉列表触屏可按像素滚动
+                try:
+                    from PySide6.QtWidgets import QAbstractItemView
+                    view = w.view()
+                    if view is not None:
+                        view.setVerticalScrollMode(
+                            QAbstractItemView.ScrollMode.ScrollPerPixel)
+                except Exception:
+                    pass
+        for name in ("freq_input",):
+            w = getattr(self, name, None)
+            if w is not None:
+                apply_touch_target(w)
 
     def set_sdr_connected(self, connected: bool):
         """无真实 SDR 时禁用调谐/音量/模式/录音等操作控件。
@@ -221,7 +261,7 @@ class ControlPanel(QWidget):
         mode_freq_row = QHBoxLayout()
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["FM", "WFM", "NFM", "AM", "USB", "LSB", "CW"])
+        self.mode_combo.addItems([m for m in _PANEL_MODE_ORDER if get_mode(m)])
         self.mode_combo.setMinimumWidth(60)
         self.mode_combo.setMaximumWidth(140)
         _mp_sp = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -395,7 +435,7 @@ class ControlPanel(QWidget):
                         ("180kHz (WFM)", 180_000.0)]:
             self.vfo_bw_combo.addItem(txt, hz)
         # FM 默认 12.5 kHz
-        _def_bw = self.vfo_bw_combo.findData(MODE_VFO_BANDWIDTH["FM"])
+        _def_bw = self.vfo_bw_combo.findData(default_bandwidth("FM"))
         self.vfo_bw_combo.setCurrentIndex(_def_bw if _def_bw >= 0 else 3)
         self.vfo_bw_combo.currentIndexChanged.connect(self._on_vfo_bw_changed)
         bw_row.addWidget(self.vfo_bw_combo, 1)
@@ -627,7 +667,7 @@ class ControlPanel(QWidget):
         self._populate_presets(mode)
         self._update_freq_display()
         # 切换模式时自动套用该模式的典型 VFO 带宽，并 emit vfo_bandwidth_changed
-        bw = MODE_VFO_BANDWIDTH.get(mode, MODE_VFO_BANDWIDTH["FM"])
+        bw = default_bandwidth(mode)
         self.vfo_bw_combo.blockSignals(True)
         idx = self.vfo_bw_combo.findData(float(bw))
         if idx >= 0:
@@ -911,7 +951,7 @@ class ControlPanel(QWidget):
         if self._sdr_connected:
             self._update_freq_display()
         # 同步带宽下拉到该模式典型带宽（blockSignals，不 emit）
-        bw = MODE_VFO_BANDWIDTH.get(mode, MODE_VFO_BANDWIDTH["FM"])
+        bw = default_bandwidth(mode)
         self.vfo_bw_combo.blockSignals(True)
         idx = self.vfo_bw_combo.findData(float(bw))
         if idx >= 0:
