@@ -29,6 +29,8 @@ static void printHelp() {
 }
 
 int main(int argc, char** argv) {
+    QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
     // Parse simple CLI flags
     for (int i = 1; i < argc; ++i) {
         QString a = QString::fromLatin1(argv[i]);

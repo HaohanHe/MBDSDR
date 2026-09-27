@@ -30,6 +30,7 @@ public:
 private slots:
     void onSourceChanged(const QString& name, bool connected);
     void onAudioLevel(float dbfs);
+    void onRssiLevel(float dbfs);
     void onSquelchState(bool open);
     void onRecordingState(bool recording, const QString& path);
     void onRecordClicked();
@@ -72,6 +73,8 @@ private:
     ui::WorldView*   worldView_ = nullptr;
     QStackedWidget* centerStack_ = nullptr;
     QLabel*         levelBar_   = nullptr;
+    QLabel*         rssiLabel_  = nullptr;
+    QPushButton*    connectBtn_ = nullptr;
 
     void setControlsEnabled(bool hardwareConnected);
     void saveUiState();

@@ -49,6 +49,7 @@ signals:
     void spectrumReady(const SpectrumFrame& frame);
     void sourceChanged(const QString& name, bool connected);
     void audioLevel(float dbfs);
+    void rssiLevel(float dbfs);
     void squelchState(bool open);
     void recordingStateChanged(bool recording, const QString& path);
     void cwDecoded(const QString& text, double wpm);
