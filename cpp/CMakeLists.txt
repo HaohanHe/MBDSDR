@@ -28,6 +28,8 @@ set(SOURCES
     src/ui/spectrum_widget.cpp
     src/ui/sky_view.cpp
     src/ui/world_view.cpp
+    src/ui/settings_dialog.cpp
+    src/ui/about_dialog.cpp
     src/dsp/fft.cpp
     src/dsp/iq_buffer.cpp
     src/dsp/power_spectrum.cpp

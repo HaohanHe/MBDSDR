@@ -24,6 +24,9 @@
 #include "ai/agent.h"
 #include "ui/sky_view.h"
 #include "ui/world_view.h"
+#include "ui/settings_dialog.h"
+#include "ui/about_dialog.h"
+#include "ai/ai_config.h"
 
 #include "core/tokens.h"
 #include "dsp/spectrum_engine.h"
@@ -85,6 +88,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     topLay->addSpacing(67);
     topLay->addWidget(new QLabel("P R N D", topBar));
     topLay->addStretch();
+    auto* aboutBtn = new QPushButton("关于", topBar);
+    auto* settingsBtn = new QPushButton("⚙", topBar);
+    topLay->addWidget(aboutBtn);
+    topLay->addWidget(settingsBtn);
     statusLabel_ = new QLabel("● --", topBar);
     statusLabel_->setObjectName("statusBanner");
     topLay->addWidget(statusLabel_);
@@ -469,6 +476,23 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         freqSpin_->setValue(hz / 1e6);
         freqSpin_->blockSignals(false);
         engine_->onSetCenterFreq(hz);
+    });
+
+    // About / settings buttons
+    connect(aboutBtn, &QPushButton::clicked, this, [this]() {
+        ui::AboutDialog dlg(this);
+        dlg.exec();
+    });
+    connect(settingsBtn, &QPushButton::clicked, this, [this]() {
+        ui::SettingsDialog dlg(this);
+        ai::AiConfig cfg;
+        cfg.load();
+        dlg.loadFromConfig(cfg);
+        if (dlg.exec() == QDialog::Accepted) {
+            dlg.saveToConfig(cfg);
+            cfg.save();
+            worldView_->setStation(cfg.stationLat, cfg.stationLon);
+        }
     });
 
     engine_->start();
