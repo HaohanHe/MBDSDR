@@ -122,14 +122,17 @@ void WaterfallWidget::paintEvent(QPaintEvent*) {
         return;
     }
 
-    // Align horizontally with the line spectrum's plot area so frequencies line up;
-    // fill the full height. Nearest-neighbour keeps the bands crisp.
+    // Align horizontally with the line spectrum's plot area so frequencies line up.
+    // Reserve a strip at the bottom for the frequency axis. Nearest-neighbour keeps
+    // the bands crisp.
     const int mL = tokens::kPlotMarginL;
     const int mR = tokens::kPlotMarginR;
     const int plotW = width() - mL - mR;
     if (plotW <= 10) return;
+    const int bottomPad = tokens::scaled(tokens::kWaterfallBottomPad);
+    const int plotH = std::max(1, height() - bottomPad);
     p.setRenderHint(QPainter::SmoothPixmapTransform, false);
-    const QRectF dest(mL, 0, plotW, height());
+    const QRectF dest(mL, 0, plotW, plotH);
     if (hasVisRange_ && bins_ > 1 && frameFs_ > 0.0) {
         // Map the visible frequency window to source columns in history_.
         // Column i corresponds to f = f0 - fs/2 + i*fs/(bins-1).
@@ -147,6 +150,25 @@ void WaterfallWidget::paintEvent(QPaintEvent*) {
         p.drawImage(dest, history_);
     }
 
+    // Bottom frequency axis: only once a visible range is known (legacy no-range
+    // behaviour leaves the strip blank). Ticks/span match the line spectrum.
+    if (hasVisRange_) {
+        const int n = tokens::kWaterfallFreqTicks;
+        const int tickH = tokens::scaled(tokens::kWaterfallTickH);
+        const int labelH = tokens::scaled(tokens::kFreqLabelH);
+        const int labelW = tokens::scaled(tokens::kFreqLabelW);
+        p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
+        for (int i = 0; i < n; ++i) {
+            const double frac = double(i) / (n - 1);
+            const int x = mL + static_cast<int>(plotW * frac);
+            p.drawLine(x, plotH, x, plotH + tickH);
+            const double freq = visLo_ + (visHi_ - visLo_) * frac;
+            p.drawText(x - labelW / 2, plotH + tickH, labelW, labelH,
+                       Qt::AlignCenter,
+                       QString("%1M").arg(freq / 1e6, 0, 'f', 1));
+        }
+    }
+
     // Time axis in the left margin: top (y=0) is the newest frame (0s),
     // bottom is the oldest (total elapsed). Only once we have >=2 frames and
     // a measured period; otherwise the empty-state text already covers it.
@@ -161,11 +183,11 @@ void WaterfallWidget::paintEvent(QPaintEvent*) {
                        Qt::AlignHCenter | Qt::AlignVCenter, txt);
         };
         drawT(padY + labelH / 2, QStringLiteral("0s"));
-        drawT(height() - padY - labelH / 2,
+        drawT(plotH - padY - labelH / 2,
               QString("%1s").arg(totalSec, 0, 'f', 1));
         for (int k = 1; k <= tokens::kTimeTickCount; ++k) {
             const double frac = double(k) / (tokens::kTimeTickCount + 1);
-            const int y = static_cast<int>(height() * frac);
+            const int y = static_cast<int>(plotH * frac);
             const double age = totalSec * (1.0 - frac);
             drawT(y, QString("%1s").arg(age, 0, 'f', 1));
         }

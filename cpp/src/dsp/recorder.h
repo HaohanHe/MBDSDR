@@ -20,6 +20,11 @@ public:
 
     bool start(const QString& dir, double sampleRate, double centerFreq,
                double gainDb, const QString& hardware);
+    /// Start with an explicit output base path (no extension). The engine
+    /// expands the user filename template into `basePath`; the .sigmf-data /
+    /// .sigmf-meta sidecars are derived from it.
+    bool startWithBase(const QString& basePath, double sampleRate, double centerFreq,
+                       double gainDb, const QString& hardware);
     void stop();
     bool isRecording() const { return recording_; }
     void writeIQ(const std::vector<std::complex<float>>& data);

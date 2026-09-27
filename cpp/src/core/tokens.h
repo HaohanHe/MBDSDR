@@ -119,6 +119,11 @@ inline constexpr int kTimeLabelH = 12;
 inline constexpr int kTimeLabelPadY = 2;
 inline constexpr int kTimeTickCount = 3;          // interior ticks (excl. top/bottom)
 
+// Waterfall bottom frequency scale (drawn under the plot area)
+inline constexpr int kWaterfallBottomPad = 22;     // reserved strip height
+inline constexpr int kWaterfallFreqTicks = 5;      // tick labels across the span
+inline constexpr int kWaterfallTickH     = 4;      // tick mark length
+
 // Spectrum plot margins
 inline constexpr int kPlotMarginL = 50;
 inline constexpr int kPlotMarginR = 12;
@@ -165,6 +170,10 @@ inline constexpr int    kTooltipOffset = 8;
 
 // Settings dialog
 inline constexpr int kSettingsMinW = 420;
+
+// Recording group (left panel)
+inline constexpr int kRecComboMinW = 150;
+inline constexpr int kRecTemplateMinW = 140;
 
 // Fine tuning step (keyboard nudge)
 inline constexpr double kFreqFineStepHz = 10000.0;

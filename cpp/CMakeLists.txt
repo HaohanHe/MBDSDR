@@ -49,6 +49,7 @@ set(SOURCES
     src/dsp/agc.cpp
     src/dsp/audio_output.cpp
     src/dsp/recorder.cpp
+    src/dsp/wav_writer.cpp
     src/dsp/file_source.cpp
     src/dsp/gated_recorder.cpp
     src/dsp/cw_decoder.cpp
@@ -82,6 +83,7 @@ set(HEADERS
     src/dsp/agc.h
     src/dsp/audio_output.h
     src/dsp/recorder.h
+    src/dsp/wav_writer.h
     src/dsp/file_source.h
     src/dsp/gated_recorder.h
 )
@@ -145,7 +147,7 @@ add_executable(test_agent tests/test_agent.cpp
     src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
-    src/dsp/recorder.cpp src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp
+    src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp src/dsp/fft.cpp src/dsp/power_spectrum.cpp)
 target_include_directories(test_agent PRIVATE src)
 target_link_libraries(test_agent PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)

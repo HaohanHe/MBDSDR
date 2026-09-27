@@ -19,6 +19,12 @@ bool Recorder::start(const QString& dir, double sr, double freq, double gainDb,
     const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
     const QString base = QString("%1/%2_%3Hz").arg(dir, stamp).arg(
         static_cast<qint64>(freq));
+    return startWithBase(base, sr, freq, gainDb, hardware);
+}
+
+bool Recorder::startWithBase(const QString& base, double sr, double freq,
+                             double gainDb, const QString& hardware) {
+    if (recording_) return false;
     currentDataPath_ = base + ".sigmf-data";
     currentMetaPath_ = base + ".sigmf-meta";
 

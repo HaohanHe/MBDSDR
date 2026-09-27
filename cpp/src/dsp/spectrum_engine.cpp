@@ -5,6 +5,8 @@
 #include "power_spectrum.h"
 
 #include <QDebug>
+#include <QDateTime>
+#include <QDir>
 #include <chrono>
 #include <thread>
 
@@ -32,6 +34,7 @@ SpectrumEngine::~SpectrumEngine() {
     shutdown();
     wait();
     if (recorder_.isRecording()) recorder_.stop();
+    if (wavWriter_.isRecording()) wavWriter_.stop();
     gatedRec_.flush();
     if (source_) source_->stop();
 }
@@ -167,18 +170,60 @@ void SpectrumEngine::setBandwidth(double hz) {
     needDemodReset_.store(true);
 }
 
-void SpectrumEngine::startRecording() {
-    if (recorder_.isRecording()) return;
-    if (recorder_.start("recordings", source_->sampleRate(),
-                        source_->centerFreq(), source_->gain(),
-                        source_->name())) {
-        emit recordingStateChanged(true, recorder_.currentFilePath());
-    }
+QString SpectrumEngine::expandRecTemplate() const {
+    // Called with sourceMutex_ held (source_/demodMode_ stable).
+    const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+    const double freqMhz = source_ ? source_->centerFreq() / 1e6 : 0.0;
+    const QString freqStr = QString::number(freqMhz, 'f', 3);
+    return QString(recTemplate_)
+        .replace("{time}", stamp)
+        .replace("{freq}", freqStr)
+        .replace("{mode}", demodMode_);
 }
+
+bool SpectrumEngine::hasData() const {
+    // A live producer exists iff source_ is set AND it is either real hardware
+    // or the offline test-signal source (which synthesizes its own IQ).
+    if (!source_) return false;
+    if (source_->isConnected()) return true;
+    return dynamic_cast<TestSignalSource*>(source_.get()) != nullptr;
+}
+
+bool SpectrumEngine::startRecording() {
+    if (recorder_.isRecording() || wavWriter_.isRecording()) return false;
+    QMutexLocker lk(&sourceMutex_);
+    if (!hasData()) return false;
+
+    QDir().mkpath("recordings");
+    const QString base = "recordings/" + expandRecTemplate();
+
+    if (recTarget_ == RecTarget::BasebandIQ) {
+        if (!recorder_.startWithBase(base, source_->sampleRate(),
+                                     source_->centerFreq(), source_->gain(),
+                                     source_->name())) {
+            return false;
+        }
+        emit recordingStateChanged(true, recorder_.currentFilePath());
+    } else {
+        const int channels = recStereo_ ? 2 : 1;
+        if (!wavWriter_.start(base + ".wav", 48000.0, channels)) {
+            return false;
+        }
+        emit recordingStateChanged(true, wavWriter_.currentFilePath());
+    }
+    return true;
+}
+
 void SpectrumEngine::stopRecording() {
-    if (!recorder_.isRecording()) return;
-    recorder_.stop();
-    emit recordingStateChanged(false, "");
+    if (recorder_.isRecording()) {
+        const QString path = recorder_.currentFilePath();
+        recorder_.stop();
+        emit recordingStateChanged(false, path);
+    } else if (wavWriter_.isRecording()) {
+        const QString path = wavWriter_.currentFilePath();
+        wavWriter_.stop();
+        emit recordingStateChanged(false, path);
+    }
 }
 void SpectrumEngine::setGatedRecordingEnabled(bool e) {
     gatedRec_.setEnabled(e);
@@ -301,6 +346,13 @@ void SpectrumEngine::run() {
 
         // Gated recording
         gatedRec_.feed(out, gate);
+
+        // Continuous audio (WAV) recording for the main record button. When
+        // recIgnoreSquelch_ is false we only capture while the gate is open
+        // (like the gated recorder, but into one continuous file).
+        if (wavWriter_.isRecording() && (recIgnoreSquelch_ || gate)) {
+            wavWriter_.write(out);
+        }
 
         // CW decode
         if (demodMode_ == "CW") {
