@@ -2,11 +2,13 @@
 #include "settings_dialog.h"
 #include "ai/ai_config.h"
 #include "core/tokens.h"
+#include "dsp/audio_output.h"
 
 #include <QFormLayout>
 #include <QLineEdit>
 #include <QDoubleSpinBox>
 #include <QComboBox>
+#include <QLabel>
 #include <QDialogButtonBox>
 #include <QTabWidget>
 #include <QVBoxLayout>
@@ -54,6 +56,23 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     rxForm->addRow("采样率", srCombo_);
     tabs->addTab(rxPage, "接收");
 
+    // Audio tab: pick the output device. Index 0 = system default.
+    auto* audioPage = new QWidget;
+    auto* audioForm = new QFormLayout(audioPage);
+    audioDeviceCombo_ = new QComboBox;
+    audioDeviceCombo_->addItem("系统默认");   // index 0 -> "default"
+    const QStringList devs = dsp::AudioOutput::availableDevices();
+    audioDeviceCombo_->addItems(devs);
+    audioNoDevLabel_ = new QLabel("无可用音频输出设备");
+    audioNoDevLabel_->setObjectName("dockHint");
+    audioNoDevLabel_->setVisible(devs.isEmpty());
+    // On headless boxes there is no hardware at all -- the combo still shows the
+    // "system default" row but is disabled so the user cannot pick a phantom.
+    audioDeviceCombo_->setEnabled(!devs.isEmpty());
+    audioForm->addRow("输出设备", audioDeviceCombo_);
+    audioForm->addRow("", audioNoDevLabel_);
+    tabs->addTab(audioPage, "音频");
+
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -69,6 +88,13 @@ void SettingsDialog::loadFromConfig(const ai::AiConfig& cfg) {
     apiKeyEdit_->setText(cfg.apiKey);
     baseUrlEdit_->setText(cfg.baseUrl);
     modelEdit_->setText(cfg.model);
+    // Audio device: "default" -> index 0, otherwise match the stored description.
+    if (cfg.audioDevice.isEmpty() || cfg.audioDevice == QStringLiteral("default")) {
+        audioDeviceCombo_->setCurrentIndex(0);
+    } else {
+        int idx = audioDeviceCombo_->findText(cfg.audioDevice);
+        audioDeviceCombo_->setCurrentIndex(idx < 0 ? 0 : idx);
+    }
 }
 
 void SettingsDialog::saveToConfig(ai::AiConfig& cfg) {
@@ -78,6 +104,9 @@ void SettingsDialog::saveToConfig(ai::AiConfig& cfg) {
     cfg.apiKey = apiKeyEdit_->text();
     cfg.baseUrl = baseUrlEdit_->text();
     cfg.model = modelEdit_->text();
+    const int idx = audioDeviceCombo_->currentIndex();
+    cfg.audioDevice = (idx <= 0) ? QStringLiteral("default")
+                                 : audioDeviceCombo_->currentText();
 }
 
 } // namespace ui

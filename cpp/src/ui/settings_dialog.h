@@ -6,6 +6,7 @@
 class QDoubleSpinBox;
 class QLineEdit;
 class QComboBox;
+class QLabel;
 
 namespace mbdsdr {
 namespace ai { struct AiConfig; }
@@ -26,6 +27,8 @@ private:
     QLineEdit* baseUrlEdit_  = nullptr;
     QLineEdit* modelEdit_    = nullptr;
     QComboBox* srCombo_      = nullptr;
+    QComboBox* audioDeviceCombo_ = nullptr;
+    QLabel*    audioNoDevLabel_ = nullptr;
 };
 
 } // namespace ui

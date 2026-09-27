@@ -22,10 +22,31 @@ float clampUnit(float v) {
 } // namespace
 
 AudioOutput::AudioOutput(QObject* parent) : QObject(parent) {
-    const QAudioDevice dev = QMediaDevices::defaultAudioOutput();
+    // currentDev_ stays null => "system default". Resolve it now so the sink
+    // is built against a concrete device; on headless boxes defaultAudioOutput()
+    // is null and buildSink() degrades gracefully.
+    buildSink(QMediaDevices::defaultAudioOutput());
+}
+
+AudioOutput::~AudioOutput() {
+    teardownSink();
+}
+
+void AudioOutput::teardownSink() {
+    if (sink_) {
+        sink_->stop();
+        sink_.reset();
+    }
+    io_ = nullptr;
+    available_ = false;
+}
+
+void AudioOutput::buildSink(const QAudioDevice& dev) {
+    teardownSink();
+    currentDev_ = dev;
+
     if (dev.isNull()) {
         qWarning() << "[AudioOutput] no audio output device; audio disabled";
-        available_ = false;
         return;
     }
 
@@ -48,23 +69,42 @@ AudioOutput::AudioOutput(QObject* parent) : QObject(parent) {
     sink_ = std::make_unique<QAudioSink>(dev, fmt);
     QObject::connect(sink_.get(), &QAudioSink::stateChanged,
         this, [this](QAudio::State s) {
-            if (s == QAudio::StoppedState && sink_->error() != QAudio::NoError)
+            if (s == QAudio::StoppedState && sink_ && sink_->error() != QAudio::NoError)
                 qWarning() << "[AudioOutput] error:" << sink_->error();
         });
     io_ = sink_->start();
     if (!io_) {
         qWarning() << "[AudioOutput] failed to start; audio disabled";
-        available_ = false;
         sink_.reset();
         return;
     }
     fmt_ = fmt;
     available_ = true;
-    qInfo() << "[AudioOutput] ready:" << fmt;
+    qInfo() << "[AudioOutput] ready on" << dev.description() << ":" << fmt;
 }
 
-AudioOutput::~AudioOutput() {
-    if (sink_) sink_->stop();
+void AudioOutput::setDevice(const QAudioDevice& dev) {
+    // Hot-restart: tear down the old sink and rebuild against the new device.
+    // If the requested device is null, fall back to the system default.
+    QAudioDevice target = dev;
+    if (target.isNull()) target = QMediaDevices::defaultAudioOutput();
+    qInfo() << "[AudioOutput] switching device to"
+            << (target.isNull() ? QStringLiteral("default (none)")
+                                : target.description());
+    buildSink(target);
+}
+
+QStringList AudioOutput::availableDevices() {
+    QStringList names;
+    const auto devs = QMediaDevices::audioOutputs();
+    names.reserve(devs.size());
+    for (const auto& d : devs) names << d.description();
+    return names;
+}
+
+QString AudioOutput::currentDeviceName() const {
+    if (currentDev_.isNull()) return QStringLiteral("default");
+    return currentDev_.description();
 }
 
 void AudioOutput::write(const std::vector<float>& audio, double sourceRateHz) {
