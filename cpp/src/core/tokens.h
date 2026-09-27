@@ -113,6 +113,14 @@ inline constexpr int    kDbGridStep = 20;         // dB gridline spacing
 inline constexpr double kZoomMin = 1.0;
 inline constexpr double kZoomMax = 16.0;
 
+// Peak detection (relative to the spectral median / noise floor)
+inline constexpr double kPeakThresholdDefault = 15.0; // dB above median
+inline constexpr int    kPeakThresholdMin = 5;
+inline constexpr int    kPeakThresholdMax = 40;
+inline constexpr int    kPeakTableH = 96;             // compact list height (base px)
+inline constexpr int    kPeakMarkerHalfW = 5;         // triangle marker half-width
+inline constexpr int    kPeakMarkerH = 6;             // triangle marker height
+
 // Waterfall time-axis labels (inside the left margin)
 inline constexpr int kTimeLabelW = 44;
 inline constexpr int kTimeLabelH = 12;
