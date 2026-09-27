@@ -218,9 +218,8 @@ def run(argv: Optional[Sequence[str]] = None,
                     time.sleep(1.0)
             except KeyboardInterrupt:
                 pass
-            finally:
-                ctrl.shutdown()
-                return 0
+            ctrl.shutdown()
+            return 0
 
         ctrl.shutdown()
         return 0

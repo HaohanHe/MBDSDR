@@ -32,6 +32,7 @@ MBDSDR AI - Windows DLL 自动加载
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import sys
@@ -51,6 +52,59 @@ if os.name == "nt":  # pragma: no cover - 仅 Windows 生效
 else:
     _PATH_SEP = ":"
 
+#: 有限深度遍历时跳过的目录（体量巨大/与 SDR 无关），避免卡顿
+_SKIP_DIRS = {
+    "windows", "$recycle.bin", "system32", "syswow64", "node_modules",
+    ".git", "__pycache__", "appdata",
+}
+
+
+@functools.lru_cache(maxsize=1)
+def discover_dll_dirs_windows(max_depth: int = 3) -> tuple:
+    """在常见用户/程序目录里做**有限深度**搜索，返回含 ``rtlsdr.dll`` 的目录。
+
+    SDR++/SDR# 常被解压到 Downloads 或 Desktop，路径不固定，因此这里在
+    Downloads / Desktop / Documents / Program Files / LOCALAPPDATA 下最多
+    向下 ``max_depth`` 层查找。只在 Windows 执行；任何异常都不抛出。
+    """
+    if sys.platform != "win32":
+        return ()
+
+    roots: List[str] = []
+    userprofile = os.environ.get("USERPROFILE", "")
+    if userprofile:
+        roots += [
+            os.path.join(userprofile, "Downloads"),
+            os.path.join(userprofile, "Desktop"),
+            os.path.join(userprofile, "Documents"),
+        ]
+    for key in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        val = os.environ.get(key)
+        if val:
+            roots.append(val)
+
+    found: List[str] = []
+    seen: set = set()
+    for root in roots:
+        if not root or not os.path.isdir(root):
+            continue
+        root = os.path.abspath(root)
+        base_depth = root.rstrip(os.sep).count(os.sep)
+        try:
+            for dirpath, dirnames, filenames in os.walk(root):
+                depth = dirpath.count(os.sep) - base_depth
+                if depth >= max_depth:
+                    dirnames[:] = []
+                dirnames[:] = [d for d in dirnames if d.lower() not in _SKIP_DIRS]
+                if RTLSDR_DLL_NAME in filenames and dirpath not in seen:
+                    seen.add(dirpath)
+                    found.append(dirpath)
+        except Exception as exc:  # 某个根不可访问不应中断整体搜索
+            logger.debug("遍历 %s 失败: %s", root, exc)
+            continue
+    return tuple(found)
+
+
 
 def default_candidate_dirs() -> List[str]:
     """返回 DLL 搜索候选目录（顺序敏感，去重保留首次出现）。
@@ -64,6 +118,11 @@ def default_candidate_dirs() -> List[str]:
     - ``%USERPROFILE%\\rtl-sdr\\bin``
     """
     dirs: List[str] = []
+
+    # 用户显式指定的 DLL 目录（环境变量），优先级最高
+    override = os.environ.get("MBDSDR_RTLSDR_DIR", "").strip()
+    if override:
+        dirs.append(override)
 
     # 当前工作目录
     try:
@@ -92,6 +151,13 @@ def default_candidate_dirs() -> List[str]:
     userprofile = os.environ.get("USERPROFILE", "")
     if userprofile:
         dirs.append(os.path.join(userprofile, "rtl-sdr", "bin"))
+
+    # SDR++/SDR# 等解压到 Downloads/Desktop 的情况：有限深度自动发现
+    if sys.platform == "win32":
+        try:
+            dirs.extend(discover_dll_dirs_windows())
+        except Exception as exc:
+            logger.debug("自动发现 DLL 目录失败: %s", exc)
 
     # 去重、保序
     seen = set()
@@ -127,13 +193,13 @@ def _search_dll(
     for d in candidate_dirs:
         if not d:
             continue
-        candidate = os.path.join(d, filename)
+        candidate = os.path.normpath(os.path.join(d, filename))
         try:
             if exists(candidate):
                 return candidate
         except Exception as exc:  # 某个目录不可访问不应中断搜索
             logger.debug("检查 %s 失败: %s", candidate, exc)
-            continue
+        continue
     return None
 
 
