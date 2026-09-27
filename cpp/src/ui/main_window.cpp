@@ -160,20 +160,26 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     bwCombo_->setCurrentIndex(1); // NFM default
     leftLay->addWidget(bwCombo_);
 
-    // Squelch
+    // Squelch — off by default so audio passes straight through.
+    squelchCheck_ = new QCheckBox("启用静噪", leftCard);
+    squelchCheck_->setChecked(false);
+    leftLay->addWidget(squelchCheck_);
+
     leftLay->addWidget(new QLabel("静噪门限", leftCard));
     auto* sqRow = new QHBoxLayout();
     squelchSlider_ = new QSlider(Qt::Horizontal, leftCard);
     squelchSlider_->setRange(-100, -20);
     squelchSlider_->setValue(-50);
+    squelchSlider_->setEnabled(false);
     squelchValue_ = new QLabel("-50 dB", leftCard);
     squelchValue_->setObjectName("monoInfo");
+    squelchValue_->setEnabled(false);
     sqRow->addWidget(squelchSlider_, 1);
     sqRow->addWidget(squelchValue_);
     leftLay->addLayout(sqRow);
 
     // Squelch state + audio level
-    squelchState_ = new QLabel("静噪: --", leftCard);
+    squelchState_ = new QLabel("静噪: 关闭", leftCard);
     squelchState_->setObjectName("monoInfo");
     leftLay->addWidget(squelchState_);
     levelLabel_ = new QLabel("电平: -- dBFS", leftCard);
@@ -380,6 +386,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 squelchValue_->setText(QString("%1 dB").arg(v));
                 engine_->setSquelchThreshold(static_cast<float>(v));
             });
+    connect(squelchCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        engine_->setSquelchEnabled(on);
+        squelchSlider_->setEnabled(on);
+        squelchValue_->setEnabled(on);
+        if (!on) squelchState_->setText("静噪: 关闭");
+    });
 
     connect(bwCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
@@ -545,6 +557,10 @@ void MainWindow::onRssiLevel(float dbfs) {
 }
 
 void MainWindow::onSquelchState(bool open) {
+    if (squelchCheck_ && !squelchCheck_->isChecked()) {
+        squelchState_->setText("静噪: 关闭");
+        return;
+    }
     squelchState_->setText(open ? "静噪: OPEN" : "静噪: CLOSED");
 }
 

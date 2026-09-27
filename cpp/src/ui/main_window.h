@@ -51,6 +51,7 @@ private:
     QComboBox*      demodCombo_  = nullptr;
     QComboBox*      bwCombo_     = nullptr;
     QSlider*        squelchSlider_ = nullptr;
+    QCheckBox*      squelchCheck_ = nullptr;
     QLabel*         squelchValue_ = nullptr;
     QLabel*         levelLabel_   = nullptr;
     QLabel*         squelchState_ = nullptr;
