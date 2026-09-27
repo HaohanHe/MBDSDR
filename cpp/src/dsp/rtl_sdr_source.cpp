@@ -15,6 +15,17 @@ RtlSdrSource::~RtlSdrSource() {
 
 #ifdef HAVE_RTLSDR
 
+namespace {
+// librtlsdr returns negative/nonzero codes on failure (e.g. FC0013 tuner does
+// not implement offset tuning / bias-tee). Log a warning but keep running --
+// the unsupported feature is simply ignored, never a crash.
+void checkRtl(const char* what, int rc) {
+    if (rc != 0)
+        qWarning() << "[RtlSdrSource]" << what << "rc=" << rc
+                   << "(tuner may not support it; option ignored)";
+}
+} // namespace
+
 bool RtlSdrSource::start() {
     int r = rtlsdr_open(&dev_, 0);
     if (r < 0) {
@@ -23,13 +34,22 @@ bool RtlSdrSource::start() {
         dev_ = nullptr;
         return false;
     }
-    rtlsdr_set_center_freq(dev_, static_cast<uint32_t>(f0_));
-    rtlsdr_set_sample_rate(dev_, static_cast<uint32_t>(fs_));
-    rtlsdr_set_tuner_gain_mode(dev_, 1);  // manual gain
-    rtlsdr_set_tuner_gain(dev_, static_cast<int>(gainDb_ * 10.0));  // tenths of dB
+    // Order matters: center freq / sample rate first, then tuner mode, then
+    // the optional front-end features, finally reset the endpoint buffer.
+    checkRtl("set_center_freq", rtlsdr_set_center_freq(dev_, static_cast<uint32_t>(f0_)));
+    checkRtl("set_sample_rate", rtlsdr_set_sample_rate(dev_, static_cast<uint32_t>(fs_)));
+    checkRtl("set_tuner_gain_mode", rtlsdr_set_tuner_gain_mode(dev_, tunerAgc_ ? 0 : 1));
+    if (!tunerAgc_)
+        checkRtl("set_tuner_gain", rtlsdr_set_tuner_gain(dev_, static_cast<int>(gainDb_ * 10.0)));
+    checkRtl("set_agc_mode", rtlsdr_set_agc_mode(dev_, rtlAgc_ ? 1 : 0));
+    checkRtl("set_direct_sampling", rtlsdr_set_direct_sampling(dev_, directSampling_));
+    checkRtl("set_offset_tuning", rtlsdr_set_offset_tuning(dev_, offsetTuning_ ? 1 : 0));
+    checkRtl("set_bias_tee", rtlsdr_set_bias_tee(dev_, biasTee_ ? 1 : 0));
+    checkRtl("set_freq_correction", rtlsdr_set_freq_correction(dev_, static_cast<int>(ppm_)));
     rtlsdr_reset_buffer(dev_);
     running_ = true;
-    qInfo() << "[RtlSdrSource] opened device 0, freq=" << f0_ << "Hz sr=" << fs_ << "Hz";
+    qInfo() << "[RtlSdrSource] opened device 0, freq=" << f0_ << "Hz sr=" << fs_ << "Hz"
+            << rtlOptionsSummary();
     return true;
 }
 
@@ -72,7 +92,42 @@ void RtlSdrSource::setSampleRate(double rateHz) {
 }
 void RtlSdrSource::setGain(double gainDb) {
     gainDb_ = gainDb;
-    if (dev_) rtlsdr_set_tuner_gain(dev_, static_cast<int>(gainDb_ * 10.0));
+    // In automatic tuner-gain mode the chip picks its own gain; pushing a
+    // manual value would either be rejected or fight the AGC, so only store.
+    if (dev_ && !tunerAgc_)
+        checkRtl("set_tuner_gain", rtlsdr_set_tuner_gain(dev_, static_cast<int>(gainDb * 10.0)));
+}
+
+void RtlSdrSource::setDirectSampling(int mode) {
+    directSampling_ = mode;
+    if (dev_) checkRtl("set_direct_sampling", rtlsdr_set_direct_sampling(dev_, mode));
+}
+void RtlSdrSource::setOffsetTuning(bool on) {
+    offsetTuning_ = on;
+    if (dev_) checkRtl("set_offset_tuning", rtlsdr_set_offset_tuning(dev_, on ? 1 : 0));
+}
+void RtlSdrSource::setRtlAgc(bool on) {
+    rtlAgc_ = on;
+    if (dev_) checkRtl("set_agc_mode", rtlsdr_set_agc_mode(dev_, on ? 1 : 0));
+}
+void RtlSdrSource::setTunerAgc(bool on) {
+    tunerAgc_ = on;
+    if (dev_) {
+        // 0 = automatic tuner gain, 1 = manual. Switching to manual reapplies
+        // the stored gain so the slider takes effect immediately.
+        checkRtl("set_tuner_gain_mode", rtlsdr_set_tuner_gain_mode(dev_, on ? 0 : 1));
+        if (!on)
+            checkRtl("set_tuner_gain", rtlsdr_set_tuner_gain(dev_, static_cast<int>(gainDb_ * 10.0)));
+    }
+}
+void RtlSdrSource::setBiasTee(bool on) {
+    biasTee_ = on;
+    if (dev_) checkRtl("set_bias_tee", rtlsdr_set_bias_tee(dev_, on ? 1 : 0));
+}
+void RtlSdrSource::setPpm(double ppm) {
+    ppm_ = ppm;
+    if (dev_) checkRtl("set_freq_correction",
+                       rtlsdr_set_freq_correction(dev_, static_cast<int>(ppm)));
 }
 
 QString RtlSdrSource::name() const {
@@ -95,6 +150,16 @@ QString RtlSdrSource::name() const { return QStringLiteral("RTL-SDR (unsupported
 bool RtlSdrSource::isConnected() const { return false; }
 
 #endif
+
+QString RtlSdrSource::rtlOptionsSummary() const {
+    const char* ds = directSampling_ == 1 ? "I" : directSampling_ == 2 ? "Q" : "off";
+    return QString("DS=%1 AGC=%2 TunerAGC=%3 BiasT=%4 PPM=%5")
+        .arg(QString::fromLatin1(ds))
+        .arg(rtlAgc_ ? "on" : "off")
+        .arg(tunerAgc_ ? "auto" : "manual")
+        .arg(biasTee_ ? "on" : "off")
+        .arg(ppm_, 0, 'f', 1);
+}
 
 } // namespace dsp
 } // namespace mbdsdr

@@ -95,6 +95,30 @@ inline constexpr double kGainMaxDb = 49.6;
 inline constexpr double kGainStepDb = 0.6;
 inline const std::initializer_list<double> kSampleRatesHz = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
 
+// RTL-SDR front-end tuning (advanced panel)
+inline constexpr double kPpmMin = -100.0;
+inline constexpr double kPpmMax = 100.0;
+inline constexpr double kPpmStep = 0.1;
+
+// Spectrum dB range (adjustable via spinboxes)
+inline constexpr int    kDbSpinLowerMin = -120;   // lower spinbox allowed min
+inline constexpr int    kDbSpinLowerMax = -20;    // lower spinbox allowed max
+inline constexpr int    kDbSpinUpperMin = -40;    // upper spinbox allowed min
+inline constexpr int    kDbSpinUpperMax = 20;     // upper spinbox allowed max
+inline constexpr int    kDbLowerDefault = -100;
+inline constexpr int    kDbUpperDefault = 0;
+inline constexpr int    kDbGridStep = 20;         // dB gridline spacing
+
+// Horizontal zoom (display-only, does not touch the engine)
+inline constexpr double kZoomMin = 1.0;
+inline constexpr double kZoomMax = 16.0;
+
+// Waterfall time-axis labels (inside the left margin)
+inline constexpr int kTimeLabelW = 44;
+inline constexpr int kTimeLabelH = 12;
+inline constexpr int kTimeLabelPadY = 2;
+inline constexpr int kTimeTickCount = 3;          // interior ticks (excl. top/bottom)
+
 // Spectrum plot margins
 inline constexpr int kPlotMarginL = 50;
 inline constexpr int kPlotMarginR = 12;

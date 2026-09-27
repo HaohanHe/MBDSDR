@@ -28,6 +28,23 @@ public:
     virtual void setSampleRate(double rateHz) = 0;
     virtual void setGain(double gainDb) = 0;
 
+    // ---- Optional RF front-end tuning (empty default = unsupported) ----
+    // Only hardware with a tuner/ADC front-end (RTL-SDR, ...) overrides these.
+    // TestSignalSource / FileSource inherit the no-op defaults, so the engine
+    // can forward UI requests blindly without knowing the concrete backend.
+    /// Direct ADC sampling: 0=off, 1=I branch, 2=Q branch.
+    virtual void setDirectSampling(int mode) { (void)mode; }
+    /// Offset tuning (PLL offset from center) for tuners that support it.
+    virtual void setOffsetTuning(bool on) { (void)on; }
+    /// RTL2832 baseband chip AGC.
+    virtual void setRtlAgc(bool on) { (void)on; }
+    /// Tuner gain AGC: true => automatic (manual gain ignored), false => manual.
+    virtual void setTunerAgc(bool on) { (void)on; }
+    /// Bias-T tee power on the antenna port.
+    virtual void setBiasTee(bool on) { (void)on; }
+    /// Frequency correction in PPM.
+    virtual void setPpm(double ppm) { (void)ppm; }
+
     virtual double centerFreq() const = 0;
     virtual double sampleRate() const = 0;
     virtual double gain() const = 0;

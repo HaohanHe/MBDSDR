@@ -176,6 +176,31 @@ void SpectrumEngine::setGatedRecordingEnabled(bool e) {
     gatedRec_.setEnabled(e);
 }
 
+void SpectrumEngine::setDirectSampling(int mode) {
+    QMutexLocker lk(&sourceMutex_);
+    if (source_) source_->setDirectSampling(mode);
+}
+void SpectrumEngine::setOffsetTuning(bool on) {
+    QMutexLocker lk(&sourceMutex_);
+    if (source_) source_->setOffsetTuning(on);
+}
+void SpectrumEngine::setRtlAgc(bool on) {
+    QMutexLocker lk(&sourceMutex_);
+    if (source_) source_->setRtlAgc(on);
+}
+void SpectrumEngine::setTunerAgc(bool on) {
+    QMutexLocker lk(&sourceMutex_);
+    if (source_) source_->setTunerAgc(on);
+}
+void SpectrumEngine::setBiasTee(bool on) {
+    QMutexLocker lk(&sourceMutex_);
+    if (source_) source_->setBiasTee(on);
+}
+void SpectrumEngine::setPpm(double ppm) {
+    QMutexLocker lk(&sourceMutex_);
+    if (source_) source_->setPpm(ppm);
+}
+
 void SpectrumEngine::run() {
     std::vector<std::complex<float>> iq;
     iq.resize(static_cast<std::size_t>(fftSize_.load()));

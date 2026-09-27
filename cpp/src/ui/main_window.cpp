@@ -110,6 +110,35 @@ MainWindow::MainWindow(QWidget* parent)
     gSrcLay->addWidget(connectBtn_);
     rssiLabel_ = new QLabel("RSSI: -- dBFS", gSrc);
     gSrcLay->addWidget(rssiLabel_);
+
+    // ---- Collapsible advanced RF front-end options (RTL-SDR only) ----
+    advToggle_ = new QPushButton("高级 ▶", gSrc);
+    gSrcLay->addWidget(advToggle_);
+    advPanel_ = new QWidget(gSrc);
+    auto* advLay = new QFormLayout(advPanel_);
+    dsCombo_ = new QComboBox(advPanel_);
+    dsCombo_->addItems({"关闭", "I 支路", "Q 支路"});
+    advLay->addRow("直采", dsCombo_);
+    offsetChk_ = new QCheckBox("偏移调谐", advPanel_);
+    advLay->addRow(offsetChk_);
+    rtlAgcChk_ = new QCheckBox("RTL AGC", advPanel_);
+    advLay->addRow(rtlAgcChk_);
+    tunerAgcChk_ = new QCheckBox("Tuner AGC", advPanel_);
+    advLay->addRow(tunerAgcChk_);
+    biasTeeChk_ = new QCheckBox("Bias-T", advPanel_);
+    advLay->addRow(biasTeeChk_);
+    ppmSpin_ = new QDoubleSpinBox(advPanel_);
+    ppmSpin_->setRange(tokens::kPpmMin, tokens::kPpmMax);
+    ppmSpin_->setSingleStep(tokens::kPpmStep);
+    ppmSpin_->setSuffix(" ppm");
+    advLay->addRow("PPM", ppmSpin_);
+    advPanel_->setVisible(false);
+    gSrcLay->addWidget(advPanel_);
+    connect(advToggle_, &QPushButton::clicked, this, [this]() {
+        const bool show = !advPanel_->isVisible();
+        advPanel_->setVisible(show);
+        advToggle_->setText(show ? "高级 ▼" : "高级 ▶");
+    });
     leftLay->addWidget(gSrc);
 
     auto* gFreq = new QGroupBox("频率", leftCard);
@@ -325,6 +354,23 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(recordBtn_, &QPushButton::clicked, this, &MainWindow::onRecordClicked);
 
+    // ---- Advanced RTL-SDR front-end options (forwarded to the source) ----
+    connect(dsCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) { engine_->setDirectSampling(idx); });
+    connect(offsetChk_, &QCheckBox::toggled,
+            this, [this](bool on) { engine_->setOffsetTuning(on); });
+    connect(rtlAgcChk_, &QCheckBox::toggled,
+            this, [this](bool on) { engine_->setRtlAgc(on); });
+    connect(tunerAgcChk_, &QCheckBox::toggled, this, [this](bool on) {
+        engine_->setTunerAgc(on);
+        // Manual gain slider only matters in manual tuner-gain mode.
+        gainSlider_->setEnabled(!on);
+    });
+    connect(biasTeeChk_, &QCheckBox::toggled,
+            this, [this](bool on) { engine_->setBiasTee(on); });
+    connect(ppmSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double v) { engine_->setPpm(v); });
+
     connect(connectBtn_, &QPushButton::clicked, this, [this]() {
         if (connectBtn_->text() == "连接") {
             bool ok = engine_->tryConnectRtl();
@@ -466,7 +512,9 @@ void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {
 void MainWindow::setControlsEnabled(bool hw) {
     freqSpin_->setEnabled(hw);
     srCombo_->setEnabled(hw);
-    gainSlider_->setEnabled(hw);
+    // Manual gain slider only when hardware connected AND tuner in manual mode.
+    gainSlider_->setEnabled(hw && !(tunerAgcChk_ && tunerAgcChk_->isChecked()));
+    if (advPanel_) advPanel_->setEnabled(hw);
 }
 
 } // namespace mbdsdr

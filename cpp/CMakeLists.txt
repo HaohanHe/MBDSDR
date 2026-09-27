@@ -143,6 +143,7 @@ add_executable(test_agent tests/test_agent.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
     src/ai/agent_tools.cpp src/ai/agent.cpp src/dsp/spectrum_engine.cpp
     src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
     src/dsp/recorder.cpp src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp src/dsp/fft.cpp src/dsp/power_spectrum.cpp)

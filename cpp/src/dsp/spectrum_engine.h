@@ -51,6 +51,17 @@ public slots:
     void stopRecording();
     void setGatedRecordingEnabled(bool e);
 
+    // ---- RTL-SDR front-end tuning passthroughs ----
+    // These forward straight to the current ISource (a no-op on test/file
+    // sources, which inherit the empty ISource defaults). The UI owns the
+    // enable/disable state of the gain slider based on setTunerAgc.
+    void setDirectSampling(int mode);
+    void setOffsetTuning(bool on);
+    void setRtlAgc(bool on);
+    void setTunerAgc(bool on);
+    void setBiasTee(bool on);
+    void setPpm(double ppm);
+
 signals:
     void spectrumReady(const SpectrumFrame& frame);
     void sourceChanged(const QString& name, bool connected);
