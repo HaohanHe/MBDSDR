@@ -12,10 +12,13 @@ class QCheckBox;
 class QTabWidget;
 class QPlainTextEdit;
 class QTableWidget;
+class QLineEdit;
+class QPushButton;
 
 namespace mbdsdr {
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; }
 namespace ui   { class SpectrumWidget; }
+namespace ai   { class Agent; }
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -57,6 +60,11 @@ private:
     QPlainTextEdit* cwText_      = nullptr;
     QLabel*         cwWpm_       = nullptr;
     QTableWidget*   adsbTable_   = nullptr;
+
+    ai::Agent*      agent_       = nullptr;
+    QPlainTextEdit* aiChat_      = nullptr;
+    QLineEdit*      aiInput_     = nullptr;
+    QLabel*         aiStatus_   = nullptr;
 
     void setControlsEnabled(bool hardwareConnected);
 };

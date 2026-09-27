@@ -13,7 +13,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O2")
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia Network Test)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
@@ -42,6 +42,10 @@ set(SOURCES
     src/dsp/gated_recorder.cpp
     src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp
+    src/ai/llm_client.cpp
+    src/ai/ai_config.cpp
+    src/ai/agent_tools.cpp
+    src/ai/agent.cpp
 )
 
 set(HEADERS
@@ -68,7 +72,7 @@ set(HEADERS
 
 add_executable(mbdsdr ${SOURCES} ${HEADERS})
 target_include_directories(mbdsdr PRIVATE src)
-target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia)
+target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network)
 
 if(RTLSDR_FOUND)
     target_compile_definitions(mbdsdr PRIVATE HAVE_RTLSDR=1)
@@ -104,6 +108,17 @@ add_executable(test_decoder tests/test_decoder.cpp
 target_include_directories(test_decoder PRIVATE src)
 target_link_libraries(test_decoder PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME decoder COMMAND test_decoder)
+
+add_executable(test_agent tests/test_agent.cpp
+    src/ai/llm_client.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp
+    src/ai/agent.cpp src/dsp/spectrum_engine.cpp
+    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
+    src/dsp/recorder.cpp src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp
+    src/dsp/adsb_decoder.cpp src/dsp/fft.cpp src/dsp/power_spectrum.cpp)
+target_include_directories(test_agent PRIVATE src)
+target_link_libraries(test_agent PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME agent COMMAND test_agent)
 
 message(STATUS "MBDSDR C++ build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Qt6 version: ${Qt6Core_VERSION}")

@@ -17,6 +17,8 @@
 #include <QTabWidget>
 #include <QPlainTextEdit>
 #include <QTableWidget>
+#include <QLineEdit>
+#include "ai/agent.h"
 
 #include "core/tokens.h"
 #include "dsp/spectrum_engine.h"
@@ -210,6 +212,23 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     adsbLay->addWidget(adsbTable_);
     rightTabs_->addTab(adsbWidget, "ADS-B");
 
+    // AI tab
+    auto* aiWidget = new QWidget();
+    auto* aiLay = new QVBoxLayout(aiWidget);
+    aiStatus_ = new QLabel("未配置 API Key — 仅本地指令", aiWidget);
+    aiLay->addWidget(aiStatus_);
+    aiChat_ = new QPlainTextEdit(aiWidget);
+    aiChat_->setReadOnly(true);
+    aiLay->addWidget(aiChat_);
+    auto* aiRow = new QHBoxLayout();
+    aiInput_ = new QLineEdit(aiWidget);
+    aiInput_->setPlaceholderText("输入指令，如 98.5 或 am 或 record");
+    aiRow->addWidget(aiInput_, 1);
+    auto* sendBtn = new QPushButton("发送", aiWidget);
+    aiRow->addWidget(sendBtn);
+    aiLay->addLayout(aiRow);
+    rightTabs_->addTab(aiWidget, "AI 助手");
+
     qobject_cast<QVBoxLayout*>(rightCard->layout())->addWidget(rightTabs_);
     splitter->addWidget(rightCard);
 
@@ -331,6 +350,30 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             this, &MainWindow::onCwDecoded);
     connect(engine_, &dsp::SpectrumEngine::adsbAircraft,
             this, &MainWindow::onAdsbAircraft);
+
+    // AI agent
+    agent_ = new ai::Agent(this);
+    agent_->setEngine(engine_);
+    agent_->configureFromConfig();
+    connect(agent_, &ai::Agent::reply, this, [this](const QString& r) {
+        aiChat_->appendPlainText("AI: " + r);
+    });
+    connect(agent_, &ai::Agent::toolCalled, this, [this](const QString& t, const QString& r) {
+        aiChat_->appendPlainText(QString("[工具] %1 → %2").arg(t, r));
+    });
+    connect(agent_, &ai::Agent::statusChanged, this, [this](const QString& s) {
+        aiStatus_->setText(s);
+    });
+    connect(aiInput_, &QLineEdit::returnPressed, this, [this]() {
+        QString text = aiInput_->text();
+        if (text.isEmpty()) return;
+        aiChat_->appendPlainText("你: " + text);
+        aiInput_->clear();
+        agent_->chat(text);
+    });
+    connect(sendBtn, &QPushButton::clicked, this, [this]() {
+        aiInput_->returnPressed();
+    });
 
     engine_->start();
 }
