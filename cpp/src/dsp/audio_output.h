@@ -5,6 +5,7 @@
 
 #include <QObject>
 #include <QAudioSink>
+#include <QAudioFormat>
 #include <QIODevice>
 #include <vector>
 #include <memory>
@@ -28,9 +29,9 @@ public:
 private:
     std::unique_ptr<QAudioSink> sink_;
     QIODevice* io_ = nullptr;
+    QAudioFormat fmt_;
     bool available_ = false;
     bool muted_ = false;
-    std::vector<float> resampleBuf_;
 };
 
 } // namespace dsp
