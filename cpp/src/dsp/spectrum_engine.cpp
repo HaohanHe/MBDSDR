@@ -37,13 +37,35 @@ SpectrumEngine::~SpectrumEngine() {
 }
 
 void SpectrumEngine::rebuildDemod() {
-    if (demodMode_ == "AM")  demod_ = std::make_unique<DemodAM>(48000, bandwidth_);
-    else if (demodMode_ == "WFM") demod_ = std::make_unique<DemodWFM>();
-    else if (demodMode_ == "USB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::USB, 48000, bandwidth_);
-    else if (demodMode_ == "LSB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, 48000, bandwidth_);
-    else if (demodMode_ == "CW") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, 48000, bandwidth_);
-    else demod_ = std::make_unique<DemodNFM>(48000, bandwidth_);
+    // SDR++ style channelization: the wide source IQ is shifted to baseband,
+    // band-limited by a channel filter and decimated to a per-mode IF rate,
+    // THEN demodulated. Demods must never see the full-rate source block.
+    const double sr = source_ ? source_->sampleRate() : 2.4e6;
+
+    double ifTarget = 48000.0;   // narrowband modes
+    double chBw = bandwidth_;
+    if (demodMode_ == "WFM") {
+        ifTarget = 240000.0;     // keeps +/-75 kHz deviation
+        chBw = 200000.0;
+    }
+    if (sr < ifTarget) ifTarget = sr;
+
+    channelizer_.configure(sr, ifTarget, chBw, 31);
+    const double ifRate = channelizer_.effectiveOutputRateHz();
+
+    if (demodMode_ == "AM")  demod_ = std::make_unique<DemodAM>(ifRate, bandwidth_);
+    else if (demodMode_ == "WFM") demod_ = std::make_unique<DemodWFM>(ifRate, chBw);
+    else if (demodMode_ == "USB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::USB, ifRate, bandwidth_);
+    else if (demodMode_ == "LSB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, ifRate, bandwidth_);
+    else if (demodMode_ == "CW") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, ifRate, bandwidth_);
+    else demod_ = std::make_unique<DemodNFM>(ifRate, bandwidth_);
+
+    // Final audio is always presented at a fixed rate.
+    audioRes_.configure(ifRate, 48000.0, 31);
+
     frontend_.reset();
+    channelizer_.reset();
+    audioRes_.reset();
     squelch_.reset();
     agc_.reset();
     cwDecoder_.reset();
@@ -133,7 +155,8 @@ void SpectrumEngine::setMuted(bool m) {
 
 void SpectrumEngine::setBandwidth(double hz) {
     bandwidth_ = hz;
-    if (demod_) demod_->setBandwidth(hz);
+    // The channel filter cutoff depends on bandwidth; rebuild the whole chain.
+    needDemodReset_.store(true);
 }
 
 void SpectrumEngine::startRecording() {
@@ -165,37 +188,64 @@ void SpectrumEngine::run() {
 
     while (running_.load()) {
         int n = fftSize_.load();
-        if (static_cast<int>(iq.size()) != n) iq.resize(static_cast<size_t>(n));
 
         QMutexLocker lk(&sourceMutex_);
 
         if (needDemodReset_.load()) { rebuildDemod(); needDemodReset_.store(false); }
 
+        const bool real = source_->isConnected();
+        const double sr = source_->sampleRate();
+        const int D = std::max(1, channelizer_.decimation());
+
+        // Real sources: read ~25 ms per iteration (rounded to a whole number
+        // of decimation branches) so the blocking read paces the loop to real
+        // time and the audio sink gets ~25 ms buffers. Synthetic sources have
+        // no clock; read one FFT and sleep instead.
+        std::size_t wantN;
+        if (real) {
+            long want = static_cast<long>(std::round(sr * 0.025));
+            want = ((want + D - 1) / D) * D;
+            wantN = static_cast<std::size_t>(std::max<long>(want, n));
+        } else {
+            wantN = static_cast<std::size_t>(n);
+        }
+        if (iq.size() != wantN) iq.resize(wantN);
+
         std::size_t got = source_->readIQ(iq);
         if (got == 0) {
             lk.unlock();
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
             continue;
         }
+        if (got < iq.size()) iq.resize(got);
 
         frontend_.process(iq);
 
         // Record raw IQ if recording
         if (recorder_.isRecording()) recorder_.writeIQ(iq);
 
-        // Spectrum
+        // Spectrum (computed from an FFT-sized window of the block).
+        std::size_t specN = std::min<std::size_t>(n, iq.size());
+        std::vector<std::complex<float>> spec(iq.begin(), iq.begin() + specN);
         SpectrumFrame frame;
-        frame.dbfs.resize(static_cast<std::size_t>(n));
-        powerSpectrumDbfs(iq, frame.dbfs);
+        frame.dbfs.resize(specN);
+        powerSpectrumDbfs(spec, frame.dbfs);
         frame.centerFreqHz = source_->centerFreq();
         frame.sampleRateHz = source_->sampleRate();
-        frame.fftSize = n;
-        frame.isTestSignal = !source_->isConnected();
+        frame.fftSize = static_cast<int>(specN);
+        frame.isTestSignal = !real;
         frame.sourceName = source_->name();
         emit spectrumReady(frame);
 
-        // Demod chain
-        auto audio = demod_->process(iq);
+        // Channelize (VFO currently tracks source center -> offset 0), then
+        // demodulate at the true IF rate, then resample audio to a fixed rate.
+        auto baseband = channelizer_.process(iq);
+        std::vector<float> audio;
+        if (!baseband.empty()) {
+            auto aif = demod_->process(baseband);
+            audio = audioRes_.process(aif);
+        }
+
         float rms = rmsDbfs(audio);
         bool gate = squelch_.open();
         auto gated = squelch_.apply(audio, rms);
@@ -208,7 +258,7 @@ void SpectrumEngine::run() {
         rssi = 10 * std::log10(rssi / iq.size() + 1e-10);
         emit rssiLevel(static_cast<float>(rssi));
 
-        audioOut_->write(out, demod_->outputSampleRate());
+        audioOut_->write(out, 48000.0);
 
         // Gated recording
         gatedRec_.feed(out, gate);
@@ -220,7 +270,7 @@ void SpectrumEngine::run() {
             if (!text.isEmpty()) emit cwDecoded(text, cwDecoder_.wpm());
         }
 
-        // ADS-B decode
+        // ADS-B decode (operates on full-rate raw IQ)
         if (demodMode_ == "ADS-B") {
             adsbDecoder_.feed(iq);
             for (const auto& ac : adsbDecoder_.takeNewAircraft())
@@ -228,7 +278,9 @@ void SpectrumEngine::run() {
         }
 
         lk.unlock();
-        std::this_thread::sleep_for(std::chrono::milliseconds(33));
+        // Synthetic sources have no hardware clock; pace them manually. Real
+        // blocking reads already run at wall-clock speed and must not sleep.
+        if (!real) std::this_thread::sleep_for(std::chrono::milliseconds(33));
     }
 }
 
