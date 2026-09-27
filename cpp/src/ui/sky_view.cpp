@@ -3,6 +3,7 @@
 #include "core/tokens.h"
 
 #include <QPainter>
+#include <QRadialGradient>
 #include <cmath>
 
 namespace mbdsdr {
@@ -25,6 +26,19 @@ void SkyView::setHighlightedPass(int index) {
 
 void SkyView::setEmptyText(const QString& text) {
     emptyText_ = text;
+    update();
+}
+
+void SkyView::setLiveSatellite(double az, double el, const QString& name) {
+    liveValid_ = true;
+    liveAz_ = az;
+    liveEl_ = el;
+    liveName_ = name;
+    update();
+}
+
+void SkyView::clearLiveSatellite() {
+    liveValid_ = false;
     update();
 }
 
@@ -104,6 +118,22 @@ void SkyView::paintEvent(QPaintEvent*) {
                         : QPen(QColor(tokens::kTextWhite)));
             p.drawText(m + QPointF(8, -8), pass.name);
         }
+    }
+
+    // Live satellite position: glowing green dot + label, drawn on top.
+    if (liveValid_ && liveEl_ >= 0.0) {
+        QPointF lp = polarToCart(liveAz_, liveEl_, radius, center);
+        double r = tokens::scaled(5);
+        QRadialGradient glow(lp, r * 3.0);
+        glow.setColorAt(0.0, QColor(tokens::kSuccess));
+        glow.setColorAt(1.0, QColor(tokens::kSuccess).lighter());
+        p.setBrush(QBrush(glow));
+        p.setPen(Qt::NoPen);
+        p.drawEllipse(lp, r * 1.6, r * 1.6);
+        p.setBrush(QColor(tokens::kSuccess));
+        p.drawEllipse(lp, r, r);
+        p.setPen(QPen(QColor(tokens::kSuccess)));
+        p.drawText(lp + QPointF(r + 4, -r - 2), liveName_);
     }
 
     if (passes_.isEmpty()) {
