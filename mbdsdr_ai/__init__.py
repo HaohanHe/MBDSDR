@@ -24,6 +24,17 @@ AI 定义无线电的智能体内核，对照 Kilo Code/Hermes/Mimo/OpenCode 设
     response = agent.chat("调谐到 FM 98.5 并录 30 秒")
 """
 
+# Windows：导入任何子模块（含 SDRBackendManager 发现）前，先引导 librtlsdr DLL。
+# 父包 __init__ 在所有子模块之前执行，因此这一处覆盖 agent/GUI/MCP/CLI 全部入口，
+# 不依赖调用方手动 setup；非 Windows 或引导失败时静默跳过，绝不影响导入。
+try:
+    import sys as _sys
+    if _sys.platform == "win32":
+        from .windows_setup import setup_rtlsdr_windows as _setup_rtl
+        _setup_rtl(import_test=False)
+except Exception:
+    pass
+
 from .config import AgentConfig, load_config, save_config
 from .context_manager import ContextManager, ContextStats
 from .model_manager import ModelManager, ModelInfo

@@ -35,6 +35,7 @@ from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 from mbdsdr_ai.dsp_stream import PingPongStream
 from mbdsdr_ai.dsp import StreamSplitter
+from mbdsdr_ai.squelch import AutoSquelch, NoiseSquelch
 
 log = logging.getLogger(__name__)
 
@@ -50,9 +51,12 @@ class SharedDemodConfig:
     这里不加锁：最坏情况是某一帧读到刚跨边界的旧/新值，听感无差。
     """
 
-    def __init__(self, mode: str = "FM", squelch_db: float = -80.0):
+    def __init__(self, mode: str = "FM", squelch_db: float = -80.0,
+                 auto_squelch: bool = True):
         self.mode: str = str(mode).upper()
         self.squelch_db: float = float(squelch_db)
+        # 自动静噪：相对实测噪声底门控，无载波时静音；False 时用固定 squelch_db。
+        self.auto_squelch: bool = bool(auto_squelch)
 
 
 # ======================================================================
@@ -201,6 +205,19 @@ class DemodWorker(QThread):
         self.last_demod_mode: str = "FM"
         # 有状态 WFM 接收器（WFM 模式下懒创建一次）
         self._wfm_rx = None
+        # 自动静噪：窄带在 48k 信道功率上判，WFM 在原生率全带宽功率上判
+        self._auto_nfm = AutoSquelch(margin_db=8.0, hang_ms=250.0,
+                                     sample_rate=48000.0)
+        self._auto_wfm = AutoSquelch(margin_db=5.0, hang_ms=300.0,
+                                     sample_rate=self._sr)
+        # WFM 连续载波改用解调后噪声静噪（输入为 48k 单声道音频）
+        self._noise_wfm = NoiseSquelch(sample_rate=48000.0)
+
+    def _gate_open(self, auto, power_db: float, n: int) -> bool:
+        """按当前配置返回静噪门是否打开：auto 走 AutoSquelch，否则固定门限。"""
+        if self._cfg.auto_squelch:
+            return bool(auto.update(power_db, n))
+        return power_db >= self._cfg.squelch_db
 
     def set_audio_enabled(self, on: bool) -> None:
         """运行时切换本 VFO 是否把解调结果写声卡（主听/次听切换）。
@@ -244,24 +261,20 @@ class DemodWorker(QThread):
             self._in.flush()
 
             mode = self._cfg.mode
+            if mode != self.last_demod_mode:
+                # 切模式：清空噪声底估计，避免旧模式功率污染门限
+                self._auto_nfm.reset()
+                self._auto_wfm.reset()
+                self._noise_wfm.reset()
             self.last_demod_mode = mode
             if mode in ("RAW", "DIG"):
                 continue
 
-            # ===== WFM 广播路径：信道就是全带宽，静噪/鉴频都在原生率 IQ 上做 =====
+            # ===== WFM 广播路径：信道就是全带宽，先鉴频解调，再据音频形态静噪 =====
             if mode == "WFM":
                 if self._wfm_rx is None:
                     self._wfm_rx = _dsp.WFMReceiver(
                         sample_rate=self._sr, audio_sr=48000)
-                # 静噪门控：WFM 信道 = 全带宽，对原始全带宽 IQ 算功率
-                if player_ok:
-                    try:
-                        p = float(np.mean(np.abs(iq) ** 2))
-                        dbfs = 10.0 * np.log10(p + 1e-12)
-                        # AudioPlayer 内部 5ms ramp 消咔哒
-                        player.set_muted(dbfs < self._cfg.squelch_db)
-                    except Exception:
-                        pass
                 if not player_ok:
                     # 无设备 / 静音 VFO：仍跑鉴频验证链路，但不写声卡、不做静噪门控
                     try:
@@ -271,8 +284,29 @@ class DemodWorker(QThread):
                     continue
                 try:
                     audio = self._wfm_rx.process(iq)
-                    if audio is not None and audio.size > 0:
-                        player.write(audio)
+                except Exception:
+                    audio = None
+                if audio is None or audio.size == 0:
+                    continue
+                # 静噪门控：
+                #  auto → 解调后噪声静噪（连续载波可靠，开机即落在电台上也能开）；
+                #  固定 → 对原始全带宽 IQ 算功率，与 squelch_db 比较。
+                try:
+                    if self._cfg.auto_squelch:
+                        mono = (audio.mean(axis=1) if audio.ndim == 2
+                                else audio)
+                        open_g = bool(self._noise_wfm.process_audio(mono))
+                    else:
+                        p = float(np.mean(np.abs(iq) ** 2))
+                        dbfs = 10.0 * np.log10(p + 1e-12)
+                        open_g = self._gate_open(self._auto_wfm, dbfs,
+                                                 int(iq.size))
+                    # AudioPlayer 内部 5ms ramp 消咔哒
+                    player.set_muted(not open_g)
+                except Exception:
+                    pass
+                try:
+                    player.write(audio)
                 except Exception:
                     pass
                 continue
@@ -297,7 +331,9 @@ class DemodWorker(QThread):
                 try:
                     p = float(np.mean(np.abs(vfo_out) ** 2))
                     dbfs = 10.0 * np.log10(p + 1e-12)
-                    player.set_muted(dbfs < self._cfg.squelch_db)
+                    open_g = self._gate_open(self._auto_nfm, dbfs,
+                                             int(vfo_out.size))
+                    player.set_muted(not open_g)
                 except Exception:
                     pass
 

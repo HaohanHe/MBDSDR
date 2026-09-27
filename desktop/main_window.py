@@ -2121,9 +2121,16 @@ class MainWindow(QMainWindow):
 
     def _on_squelch_changed(self, dbfs: float):
         # 本地声卡门控：信号低于此 dBFS 时静音（不下发硬件）
+        # 用户手动拖动门限即切到固定门限，关闭自动静噪
         self._squelch_db = float(dbfs)
         if self._demod_cfg is not None:
             self._demod_cfg.squelch_db = float(dbfs)
+            self._demod_cfg.auto_squelch = False
+
+    def _on_auto_squelch_toggled(self, on: bool):
+        """切换自动/固定静噪。"""
+        if self._demod_cfg is not None:
+            self._demod_cfg.auto_squelch = bool(on)
 
     def _on_volume_changed(self, volume: int):
         if self._worker:

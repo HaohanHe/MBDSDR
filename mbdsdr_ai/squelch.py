@@ -192,3 +192,191 @@ class Squelch:
     @property
     def is_open(self) -> bool:
         return self.state.gate_open
+
+
+class AutoSquelch:
+    """相对噪声底的自动静噪（不依赖固定 dBFS 门限）。
+
+    固定门限在不同增益/采样率/电台下会失准：信道噪声功率本身可能高于门限，
+    于是无信号时门也常开，持续放鉴频嘶声。本类持续估计信道噪声功率底，
+    只有当功率高出噪声底 ``margin_db`` 以上才判定有载波并开门。
+
+    噪声底用非对称一阶 IIR 跟踪：
+      - 功率低于当前底（纯噪声段）→ 快速下拉（``floor_down``）；
+      - 功率高于当前底（可能是信号）→ 极慢上抬（``floor_up``），避免把
+        持续信号误学进噪声底。
+    带 hang：载波消失后保持开门 ``hang_ms``，避免语音字间隙门反复咔哒。
+
+    用法::
+
+        ax = AutoSquelch(margin_db=8.0, sample_rate=48000.0)
+        for block in channel_stream:
+            p_db = rms_dbfs(block)
+            if ax.update(p_db, len(block)):
+                play(block)        # 门开
+            # 门关 → 静音
+    """
+
+    def __init__(self,
+                 margin_db: float = 8.0,
+                 hang_ms: float = 250.0,
+                 sample_rate: float = 48000.0,
+                 floor_down: float = 0.25,
+                 floor_up: float = 0.003,
+                 init_db: Optional[float] = None) -> None:
+        self.margin_db = float(margin_db)
+        self.hang_ms = float(hang_ms)
+        self.sample_rate = float(sample_rate)
+        self._floor_down = float(floor_down)
+        self._floor_up = float(floor_up)
+        self._floor_db: Optional[float] = (None if init_db is None
+                                           else float(init_db))
+        self._open: bool = False
+        self._hang_remaining_ms: float = 0.0
+
+    def reset(self) -> None:
+        """复位噪声底估计与门状态（切频率/切 VFO 后调用）。"""
+        self._floor_db = None
+        self._open = False
+        self._hang_remaining_ms = 0.0
+
+    def update(self, power_db: float, block_samples: int) -> bool:
+        """喂入一块信道功率 dBFS，返回该块门是否打开。"""
+        power_db = float(power_db)
+        if self._floor_db is None:
+            # 首块直接以当前功率为底（开机即落在噪声上）
+            self._floor_db = power_db
+        elif not self._open:
+            # 仅在门关闭（判定为噪声）时学习噪声底；门开着（有载波）时冻结，
+            # 否则连续信号会被慢速上抬的底噪"学"进去，最终把门顶关。
+            if power_db < self._floor_db:
+                self._floor_db += self._floor_down * (power_db - self._floor_db)
+            else:
+                self._floor_db += self._floor_up * (power_db - self._floor_db)
+
+        threshold = self._floor_db + self.margin_db
+        block_ms = 1000.0 * block_samples / max(self.sample_rate, 1e-9)
+        if power_db >= threshold:
+            self._open = True
+            self._hang_remaining_ms = self.hang_ms
+        elif self._open:
+            self._hang_remaining_ms -= block_ms
+            if self._hang_remaining_ms <= 0.0:
+                self._open = False
+        return self._open
+
+    @property
+    def is_open(self) -> bool:
+        return self._open
+
+    @property
+    def floor_db(self) -> Optional[float]:
+        return self._floor_db
+
+    @property
+    def threshold_db(self) -> Optional[float]:
+        return (self._floor_db + self.margin_db) if self._floor_db is not None else None
+
+
+class NoiseSquelch:
+    """解调后噪声静噪（适用于广播 WFM 这类连续载波）。
+
+    连续载波用"功率高于噪声底"判据会失败：一开机就落在电台上，或底噪慢跟踪
+    会把持续电台学进噪声底。改从**解调后音频**的频谱形态判断：
+      - 无电台 → 鉴频嘶声，高频(6–12k)能量与语音带(0.3–3k)相当，频谱平坦
+        （平坦度接近 1）；
+      - 有电台 → 能量集中在语音/音乐带，高频嘶声被压制，频谱呈低平坦度。
+    判据（满足其一即有信号）：中/高能带比 ≥ ``ratio_thr``，或平坦度 ≤ ``flat_thr``。
+
+    实测门限（FC0012 @2.048M，0.5s 窗）：空频 ratio≈2.8/flat≈0.47，
+    电台 ratio≈23~100/flat≈0.05~0.15，故 ratio_thr=6、flat_thr=0.30 留足余量。
+    带 hang 避免节目短暂停顿关门。
+    """
+
+    def __init__(self,
+                 sample_rate: float = 48000.0,
+                 win_ms: float = 500.0,
+                 ratio_thr: float = 6.0,
+                 flat_thr: float = 0.30,
+                 hang_ms: float = 400.0,
+                 warmup_ms: float = 500.0) -> None:
+        self.sample_rate = float(sample_rate)
+        self.win_len = max(64, int(round(sample_rate * win_ms / 1000.0)))
+        self.ratio_thr = float(ratio_thr)
+        self.flat_thr = float(flat_thr)
+        self.hang_ms = float(hang_ms)
+        self.warmup_len = int(round(sample_rate * warmup_ms / 1000.0))
+        self._ring = np.zeros(self.win_len, dtype=np.float64)
+        self._filled = 0
+        self._open = False
+        self._hang_remaining_ms = 0.0
+
+    def reset(self) -> None:
+        self._ring[:] = 0.0
+        self._filled = 0
+        self._open = False
+        self._hang_remaining_ms = 0.0
+
+    @staticmethod
+    def _band_energy(x: np.ndarray, sr: float, lo: float, hi: float) -> float:
+        n = len(x)
+        if n < 16:
+            return 0.0
+        X = np.abs(np.fft.rfft(x * np.hanning(n)))
+        f = np.fft.rfftfreq(n, 1.0 / sr)
+        hi = min(hi, sr / 2.0 - 1.0)
+        m = (f >= lo) & (f <= hi)
+        if not m.any():
+            return 0.0
+        return float(np.sum(X[m] ** 2) / n)
+
+    @staticmethod
+    def _flatness(x: np.ndarray, sr: float, lo: float = 300.0,
+                  hi: float = 8000.0) -> float:
+        n = len(x)
+        if n < 16:
+            return 1.0
+        X = np.abs(np.fft.rfft(x * np.hanning(n)))
+        f = np.fft.rfftfreq(n, 1.0 / sr)
+        hi = min(hi, sr / 2.0 - 1.0)
+        m = (f >= lo) & (f <= hi)
+        if not m.any():
+            return 1.0
+        P = X[m] ** 2 + 1e-12
+        return float(np.exp(np.mean(np.log(P))) / np.mean(P))
+
+    def process_audio(self, mono_block: np.ndarray) -> bool:
+        """喂入一块单声道解调音频，返回门是否打开。"""
+        m = np.asarray(mono_block, dtype=np.float64).ravel()
+        L = len(m)
+        if L == 0:
+            return self._open
+        if L >= self.win_len:
+            self._ring[:] = m[-self.win_len:]
+            self._filled = self.win_len
+        else:
+            self._ring = np.roll(self._ring, -L)
+            self._ring[-L:] = m
+            self._filled = min(self.win_len, self._filled + L)
+
+        block_ms = 1000.0 * L / max(self.sample_rate, 1e-9)
+        if self._filled < self.warmup_len:
+            return self._open
+        seg = self._ring if self._filled >= self.win_len else self._ring[:self._filled]
+        e_mid = self._band_energy(seg, self.sample_rate, 300.0, 3000.0)
+        e_hi = self._band_energy(seg, self.sample_rate, 6000.0, 12000.0)
+        ratio = e_mid / (e_hi + 1e-9)
+        fl = self._flatness(seg, self.sample_rate)
+        is_signal = (ratio >= self.ratio_thr) or (fl <= self.flat_thr)
+        if is_signal:
+            self._open = True
+            self._hang_remaining_ms = self.hang_ms
+        elif self._open:
+            self._hang_remaining_ms -= block_ms
+            if self._hang_remaining_ms <= 0.0:
+                self._open = False
+        return self._open
+
+    @property
+    def is_open(self) -> bool:
+        return self._open
