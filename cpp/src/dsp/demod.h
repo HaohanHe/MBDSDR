@@ -17,6 +17,7 @@ public:
     virtual void reset() = 0;
     virtual QString name() const = 0;
     virtual double outputSampleRate() const = 0;
+    virtual void setBandwidth(double /*hz*/) {}
 };
 
 // ---- FIR lowpass with tail state (overlap-save style) ----
@@ -39,6 +40,7 @@ public:
     void reset() override;
     QString name() const override { return QStringLiteral("AM"); }
     double outputSampleRate() const override { return ifSr_; }
+    void setBandwidth(double hz) override;
 private:
     double ifSr_, bw_;
     float dcPrev_ = 0;
@@ -88,6 +90,7 @@ public:
     void reset() override;
     QString name() const override;
     double outputSampleRate() const override { return ifSr_; }
+    void setBandwidth(double hz) override;
 private:
     Sideband sb_;
     double ifSr_, bw_;
