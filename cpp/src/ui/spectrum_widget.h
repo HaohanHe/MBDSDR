@@ -86,6 +86,7 @@ private:
 
     QList<mbdsdr::dsp::PeakInfo> peaks_;   // latest detected peaks
     float peakThresholdDb_ = 15.0f;        // dB above median (set from tokens in ctor)
+    int   highlightedPeak_ = -1;           // selected table row -> peak index (-1 none)
     QString lastPeakSignature_;            // cheap throttle for table rebuild
 };
 

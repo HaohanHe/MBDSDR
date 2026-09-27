@@ -11,7 +11,8 @@ namespace dsp {
 QList<PeakInfo> detectPeaks(const std::vector<float>& dbfs,
                             double sampleRateHz,
                             double centerFreqHz,
-                            double thresholdDb) {
+                            double thresholdDb,
+                            double absFloorDbfs) {
     QList<PeakInfo> out;
     const std::size_t n = dbfs.size();
     if (n < 5 || sampleRateHz <= 0.0) return out;
@@ -21,6 +22,9 @@ QList<PeakInfo> detectPeaks(const std::vector<float>& dbfs,
     std::sort(sorted.begin(), sorted.end());
     const float median = sorted[n / 2];
     const float levelGate = median + static_cast<float>(thresholdDb);
+    // Absolute floor: even if the relative gate is very low (near-silent test
+    // signal), nothing below this counts as a real signal.
+    const float absFloor = static_cast<float>(absFloorDbfs);
 
     // Bin -> frequency: bin 0 sits at centerFreq - fs/2 (already fft-shifted).
     const double binHz = sampleRateHz / static_cast<double>(n - 1);
@@ -33,7 +37,8 @@ QList<PeakInfo> detectPeaks(const std::vector<float>& dbfs,
     cands.reserve(64);
     for (std::size_t i = 1; i + 1 < n; ++i) {
         const float v = dbfs[i];
-        if (v > dbfs[i - 1] && v >= dbfs[i + 1] && v > levelGate)
+        if (v > dbfs[i - 1] && v >= dbfs[i + 1]
+            && v > levelGate && v > absFloor)
             cands.push_back({i, v});
     }
     if (cands.empty()) return out;

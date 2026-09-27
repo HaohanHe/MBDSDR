@@ -117,9 +117,12 @@ inline constexpr double kZoomMax = 16.0;
 inline constexpr double kPeakThresholdDefault = 15.0; // dB above median
 inline constexpr int    kPeakThresholdMin = 5;
 inline constexpr int    kPeakThresholdMax = 40;
+inline constexpr float  kPeakAbsFloorDbfs = -100.0f;  // absolute dBFS floor
 inline constexpr int    kPeakTableH = 96;             // compact list height (base px)
 inline constexpr int    kPeakMarkerHalfW = 5;         // triangle marker half-width
 inline constexpr int    kPeakMarkerH = 6;             // triangle marker height
+inline constexpr int    kPeakMarkerHiHalfW = 7;       // selected marker half-width
+inline constexpr int    kPeakMarkerHiH = 9;           // selected marker height
 
 // Waterfall time-axis labels (inside the left margin)
 inline constexpr int kTimeLabelW = 44;
