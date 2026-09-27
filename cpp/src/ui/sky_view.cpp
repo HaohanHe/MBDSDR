@@ -133,7 +133,13 @@ void SkyView::paintEvent(QPaintEvent*) {
         p.setBrush(QColor(tokens::kSuccess));
         p.drawEllipse(lp, r, r);
         p.setPen(QPen(QColor(tokens::kSuccess)));
+        QFont small = font();
+        small.setPointSize(tokens::kFontAuxPt);
+        p.setFont(small);
         p.drawText(lp + QPointF(r + 4, -r - 2), liveName_);
+        p.drawText(lp + QPointF(r + 4, -r + 12),
+                   QString("az=%1° el=%2°")
+                       .arg(liveAz_, 0, 'f', 0).arg(liveEl_, 0, 'f', 1));
     }
 
     if (passes_.isEmpty()) {
