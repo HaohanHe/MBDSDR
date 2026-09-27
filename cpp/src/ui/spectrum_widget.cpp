@@ -83,8 +83,8 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
     const int plotH = h - mT - mB;
     if (plotW <= 10 || plotH <= 10) return;
 
-    // Grid: kDivider
-    QPen gridPen(QColor(QString::fromUtf8(tokens::kDivider)), 1, Qt::DotLine);
+    // Grid: kCardEdge
+    QPen gridPen(QColor(QString::fromUtf8(tokens::kCardEdge)), 1, Qt::DotLine);
     p.setPen(gridPen);
 
     // dBFS range -- physical/algorithm constant, documented:
@@ -94,7 +94,7 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
     for (float db = -20.0f; db >= yMin; db -= 20.0f) {
         int y = mT + static_cast<int>(plotH * (1.0f - (db - yMin) / (yMax - yMin)));
         p.drawLine(mL, y, w - mR, y);
-        p.setPen(QColor(QString::fromUtf8(tokens::kTextWeak)));
+        p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
         p.drawText(0, y - 6, mL - 4, 12, Qt::AlignRight | Qt::AlignVCenter,
                    QString("%1").arg(db, 0, 'f', 0));
         p.setPen(gridPen);
@@ -107,13 +107,13 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
         int x = mL + static_cast<int>(plotW * i / 4.0);
         p.drawLine(x, mT, x, mT + plotH);
         double freq = f0 - fs / 2.0 + fs * i / 4.0;
-        p.setPen(QColor(QString::fromUtf8(tokens::kTextWeak)));
+        p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
         p.drawText(x - 40, mT + plotH + 4, 80, 16,
                    Qt::AlignCenter, QString("%1M").arg(freq / 1e6, 0, 'f', 1));
         p.setPen(gridPen);
     }
 
-    p.setPen(QPen(QColor(QString::fromUtf8(tokens::kDivider)), 1));
+    p.setPen(QPen(QColor(QString::fromUtf8(tokens::kCardEdge)), 1));
     p.drawRect(mL, mT, plotW, plotH);
 
     // Spectrum trace: kAccent

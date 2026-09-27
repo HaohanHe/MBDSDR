@@ -1,201 +1,295 @@
 // SPDX-License-Identifier: MIT
 // MBDSDR C++ -- THE single source of design tokens.
 //
-// Per cpp/DESIGN_RULES.md section 3: every color / size / radius / spacing /
-// font size lives here. Business code (main_window.cpp, spectrum_widget.cpp,
-// ...) must reference these named constants -- no raw #hex, no raw pixels.
-//
-// Exception (per DESIGN_RULES.md): algorithm/physical constants that change
-// behavior (FFT size, filter taps, demod bandwidth, dB range) live next to
-// the algorithm with a comment citing the reference.
+// Values extracted from Figma frames (284_566 / 284_410 / 284_456 / 284_75)
+// and the accompanying SCSS. SCSS values override DESIGN_RULES.md summaries.
+// Per cpp/DESIGN_RULES.md section 3: business code references these named
+// constants only -- no raw #hex, no raw pixels.
 #pragma once
 
 #include <QString>
-#include <QStringList>
 
 namespace mbdsdr {
 namespace tokens {
 
 // =====================================================================
-// Colors (DESIGN_RULES.md section 2 -- overrides old Python tokens.py)
+// Colors -- backgrounds
 // =====================================================================
+inline constexpr const char* kBgMain    = "#080a0c";   // window background (284_566)
+inline constexpr const char* kBgBar      = "#000000";   // top bar / bottom dock
+inline constexpr const char* kCard1      = "#1f1f1f";   // panel card
+inline constexpr const char* kCard2      = "#2b2c2f";   // secondary card
+inline constexpr const char* kCard3      = "#35373c";   // tertiary card
+inline constexpr const char* kCard4      = "#36383a";   // quaternary card
 
-// Backgrounds (two depths)
-inline constexpr const char* kBg0   = "#000000";   // window base
-inline constexpr const char* kBg1   = "#080a0c";   // raised/near-bg layer
-
-// Cards
-inline constexpr const char* kCard1 = "#1f1f1f";   // deepest card
-inline constexpr const char* kCard2 = "#2b2c2f";   // mid card
-
-// Divider (low-alpha white)
-inline constexpr const char* kDivider = "rgba(255, 255, 255, 0.08)";
-
-// Text -- solid colors, not alpha-over-white
-inline constexpr const char* kTextPrimary   = "#ffffff";
-inline constexpr const char* kTextSecondary = "#939393";
-inline constexpr const char* kTextWeak      = "#6b727c";
-inline constexpr const char* kTextWeaker    = "#4f5359";
-
-// Accent / status
-inline constexpr const char* kAccent   = "#919cac";  // cool blue-grey
-inline constexpr const char* kSuccess  = "#5fd08a";
-inline constexpr const char* kWarning  = "#e0b35a";
-
-// TEST-SIGNAL watermark (still a warning red; kept as named token)
-inline constexpr const char* kTestWarn = "#e0b35a";  // use warning amber, not alarming red
+// Edge light on floating cards (simulates SCMS gradient overlay)
+inline constexpr const char* kCardEdge  = "rgba(255, 255, 255, 0.08)";
 
 // =====================================================================
-// Corner radii (DESIGN_RULES.md section 2)
+// Colors -- text (white with opacity levels, per SCSS)
 // =====================================================================
-inline constexpr int kRadiusCard    = 13;   // cards (NOT 12)
-inline constexpr int kRadiusPillSm  = 42;  // pill button small
-inline constexpr int kRadiusPillLg = 84;  // pill button large
+inline constexpr const char* kTextWhite = "#ffffff";
+inline QString textRgba(double a) {
+    return QString("rgba(255, 255, 255, %1)").arg(a);
+}
+inline constexpr double kTextAlphaPrimary   = 1.0;
+inline constexpr double kTextAlphaSecondary = 0.78;
+inline constexpr double kTextAlphaTertiary2 = 0.67;
+inline constexpr double kTextAlphaTertiary  = 0.5;
+inline constexpr double kTextAlphaQuaternary = 0.3;
+inline constexpr double kTextAlphaFaint     = 0.23;
+inline constexpr double kTextAlphaDisabled  = 0.2;
+
+// =====================================================================
+// Colors -- accents / status
+// =====================================================================
+inline constexpr const char* kAccent      = "#919cac";
+inline constexpr const char* kSplitterHandle = "#d9d9d9"; // base color
+inline QString splitterHandleRgba() { return QString("rgba(217, 217, 217, 0.3)"); }
+inline constexpr const char* kSuccess     = "#5fd08a";
+inline constexpr const char* kWarning      = "#e0b35a";
+inline constexpr const char* kTestWarn    = "#e0b35a";
+inline constexpr const char* kNowPlayingCoverFrom = "#6a6a6a";
+inline constexpr const char* kNowPlayingCoverTo   = "#2c2c2c";
+
+// =====================================================================
+// Corner radii (SCSS authoritative)
+// =====================================================================
+inline constexpr int kRadiusPanel     = 24;   // main three-column cards
+inline constexpr int kRadiusDockIcon   = 13;   // bottom dock app icons
+inline constexpr int kRadiusSearch     = 8;    // search bar / floating card
+inline constexpr int kRadiusAlbumSm   = 3;    // NowPlaying small cover
+inline constexpr int kRadiusAlbumLg    = 12;   // right-panel large cover
+inline constexpr int kRadiusBattery   = 8;    // battery bar
+inline constexpr int kRadiusSplitter   = 10;   // splitter handle pill
 inline constexpr const char* kRadiusCircle = "50%";
-
-// =====================================================================
-// Font sizes (QSS uses pt; px * 0.75 = pt)
-//   DESIGN_RULES.md: 大数字 42/39/48px; 次级 20/24px; 正文 13-14px; 辅助 11-12px
-// =====================================================================
-inline constexpr double kFontHeroPt    = 31.5;  // 42 px
-inline constexpr double kFontTitleLgPt = 29.25; // 39 px
-inline constexpr double kFontTitlePt   = 36.0;  // 48 px
-inline constexpr double kFontSecSmPt   = 15.0;  // 20 px
-inline constexpr double kFontSecLgPt   = 18.0;  // 24 px
-inline constexpr double kFontBodyPt   = 10.5;  // 14 px
-inline constexpr double kFontAuxPt     = 8.5;   // 11-12 px
 
 // =====================================================================
 // Sizes (px)
 // =====================================================================
-inline constexpr int kTopbarH         = 56;
-inline constexpr int kDockH           = 64;
-inline constexpr int kSplitterHandle  = 4;
-inline constexpr int kTouchMin        = 44;   // min touch target (DESIGN_RULES §4)
+inline constexpr int kTopbarH          = 56;
+inline constexpr int kDockH            = 64;
+inline constexpr int kSplitterWidth    = 8;    // NOT 4 -- SCSS is 8
+inline constexpr int kTouchMin         = 44;
 
-// Spectrum plot margins (px) -- kept here so paintEvent has no magic numbers
+// Top bar padding (SCSS: 23px 40px 25px 36px)
+inline constexpr int kTopbarPadTop    = 23;
+inline constexpr int kTopbarPadRight  = 40;
+inline constexpr int kTopbarPadBottom = 25;
+inline constexpr int kTopbarPadLeft   = 36;
+
+// Bottom dock padding (SCSS: 14px 40px)
+inline constexpr int kDockPadY        = 14;
+inline constexpr int kDockPadX       = 40;
+
+// Bottom dock element sizes (SCSS)
+inline constexpr int kHomeBtnSize     = 72;
+inline constexpr int kVolBtnSize     = 72;
+inline constexpr int kDockIconSize   = 63;
+inline constexpr int kDockIconGap    = 54;
+inline constexpr int kNowPlayingW    = 277;
+inline constexpr int kNowPlayingCover = 67;
+inline constexpr int kNowPlayingBtn   = 56;
+inline constexpr int kBatteryW       = 136;
+inline constexpr int kBatteryH      = 8;
+inline constexpr int kSystemIconSize  = 48;
+inline constexpr int kSystemIconAreaW = 160;
+
+// Panel content padding (SCSS: ~53 left, 40 top)
+inline constexpr int kPanelPadLeft   = 53;
+inline constexpr int kPanelPadTop    = 40;
+
+// Spectrum plot margins (kept here to avoid magic numbers in paintEvent)
 inline constexpr int kPlotMarginL = 50;
 inline constexpr int kPlotMarginR = 12;
 inline constexpr int kPlotMarginT = 24;
 inline constexpr int kPlotMarginB = 28;
 
 // =====================================================================
-// Ratios (three-pane parallel view)
+// Ratios (three-column parallel view)
 // =====================================================================
 inline constexpr double kRatioLeft   = 0.19;
-inline constexpr double kRatioCenter  = 0.62;
+inline constexpr double kRatioCenter = 0.62;
 inline constexpr double kRatioRight  = 0.19;
 
 // =====================================================================
+// Fonts
+// =====================================================================
+inline constexpr const char* kFontFamily =
+    "MiSans, \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", SimHei, Arial, Helvetica, sans-serif";
+inline constexpr const char* kFontMono =
+    "\"JetBrains Mono\", \"Fira Code\", \"Inter\", \"PingFang SC\", monospace";
+
+// Font sizes in pt (px * 0.75 = pt), per SCSS / Figma
+inline constexpr double kFontClockPt      = 29.25; // 39 px (top-left clock)
+inline constexpr double kFontMileagePt     = 15.0;  // 20 px
+inline constexpr double kFontPanelTitlePt  = 27.0;  // 36 px (panel title, opacity 0.67)
+inline constexpr double kFontTempPt        = 31.5;  // 42 px (temperature)
+inline constexpr double kFontSongPt       = 18.0;  // 24 px (NowPlaying title)
+inline constexpr double kFontBodyPt       = 10.5;  // 14 px
+inline constexpr double kFontAuxPt        = 8.5;   // 11-12 px
+
+// =====================================================================
 // Dark QSS generator -- the ONLY place stylesheet strings are assembled.
-// Business code calls tokens::buildDarkQss(); it must NOT concatenate QSS.
 // =====================================================================
 inline QString buildDarkQss() {
     return QStringLiteral(R"(
-/* ===== MBDSDR dark QSS (generated from tokens.h; do not hand-edit) ===== */
+/* ===== MBDSDR dark QSS (Figma 284_566 + SCSS) ===== */
 QMainWindow, QWidget {
     background-color: %1;
     color: %2;
-    font-family: "MiSans", "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-family: %3;
 }
 QWidget#topBar {
-    background-color: %1;
+    background-color: %4;
     border: none;
-    border-bottom: 1px solid %3;
+    border-bottom: 1px solid %5;
 }
 QFrame#bottomDock {
     background-color: %4;
     border: none;
-    border-top: 1px solid %3;
+    border-top: 1px solid %5;
 }
-QFrame#card {
-    background-color: %5;
-    border: none;
-    border-radius: %6px;
+QFrame#panelCard {
+    background-color: %6;
+    border: 1px solid %5;
+    border-radius: %7px;
 }
-QLabel { color: %2; }
-QLabel#sectionTitle {
-    color: %7;
-    font-size: %8pt;
-    font-weight: 600;
+QLabel { color: %2; background: transparent; }
+QLabel#clockLabel {
+    color: %8; font-size: %9pt; font-weight: 600;
 }
-QLabel#windowTitle {
-    color: %7;
-    font-size: %16pt;
-    font-weight: 600;
+QLabel#mileageLabel {
+    color: %8; font-size: %10pt; font-weight: 500;
+}
+QLabel#mileageSub {
+    color: %11; font-size: %10pt;
+}
+QLabel#panelTitle {
+    color: %12; font-size: %13pt; font-weight: 600;
+}
+QLabel#tempLabel {
+    color: %8; font-size: %14pt; font-weight: 500;
+    font-family: %15;
+}
+QLabel#tempArrow {
+    color: %16; font-size: %14pt;
+}
+QLabel#songTitle {
+    color: %17; font-size: %18pt; font-weight: 500;
+}
+QLabel#dockHint {
+    color: %19; font-size: %20pt;
 }
 QLabel#statusBanner, QLabel#testBanner {
-    color: %17;
-    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
+    color: %21;
+    font-family: %15;
     font-weight: 600;
 }
 QLabel#monoInfo {
-    color: %18;
-    font-family: "JetBrains Mono", "Fira Code", "Consolas", monospace;
-    font-size: %10pt;
-}
-QLabel#dockHint {
-    color: %9;
-    font-size: %10pt;
+    color: %22;
+    font-family: %15;
+    font-size: %20pt;
 }
 QPushButton {
-    background-color: %4;
-    color: %7;
+    background-color: %23;
+    color: %8;
     border: none;
-    border-radius: %11px;
-    padding: 8px 18px;
-    font-size: %12pt;
-    font-weight: 500;
-    min-height: %13px;
+    border-radius: %24px;
+    font-size: %10pt;
+    min-height: %25px;
 }
-QPushButton:hover   { background-color: %5; }
-QPushButton:pressed { background-color: %4; }
-QPushButton:disabled {
-    color: %9;
-    background-color: %1;
+QPushButton:hover  { background-color: %6; }
+QPushButton:pressed{ background-color: %4; }
+QPushButton#homeBtn, QPushButton#volBtn {
+    background-color: %23;
+    border-radius: %26px;
+    min-width: %25px; min-height: %25px;
 }
-QSplitter::handle { background-color: %1; }
-QSplitter::handle:horizontal { width: %14px; }
-QSplitter::handle:vertical   { height: %14px; }
+QPushButton#dockIcon {
+    background-color: %27;
+    border-radius: %28px;
+    min-width: %29px; min-height: %29px;
+}
+QPushButton#dockIconSelected {
+    background-color: %30;
+    border-radius: %28px;
+    min-width: %29px; min-height: %29px;
+}
+QPushButton#playBtn, QPushButton#nextBtn {
+    background-color: transparent;
+    border-radius: %26px;
+    min-width: %31px; min-height: %31px;
+}
+QSplitter::handle { background: transparent; }
+QSplitter::handle:horizontal {
+    width: %32px;
+    background: %33;
+    border-radius: %34px;
+    margin: 8px 2px;
+}
+QSplitter::handle:vertical {
+    height: %32px;
+    background: %33;
+    border-radius: %34px;
+}
 QStatusBar {
     background: %4;
-    color: %9;
-    border-top: 1px solid %3;
+    color: %19;
+    border-top: 1px solid %5;
 }
 QComboBox {
-    background-color: %5;
-    color: %7;
+    background-color: %6;
+    color: %8;
     border: none;
-    border-radius: %6px;
+    border-radius: %35px;
     padding: 4px 10px;
-    min-height: %13px;
+    min-height: %25px;
 }
 QComboBox QAbstractItemView {
-    background-color: %4;
-    color: %7;
-    selection-background-color: %15;
-    selection-color: %1;
+    background-color: %23;
+    color: %8;
+    selection-background-color: %36;
+    selection-color: %4;
     border: none;
 }
 )")
-        .arg(QString::fromUtf8(kBg0),
-             QString::fromUtf8(kTextSecondary),
-             QString::fromUtf8(kDivider),
+        .arg(QString::fromUtf8(kBgMain),
+             textRgba(kTextAlphaSecondary),
+             QString::fromUtf8(kFontFamily),
+             QString::fromUtf8(kBgBar),
+             QString::fromUtf8(kCardEdge),
              QString::fromUtf8(kCard1),
-             QString::fromUtf8(kCard2),
-             QString::number(kRadiusCard),
-             QString::fromUtf8(kTextPrimary),
-             QString::number(kFontSecLgPt),
-             QString::fromUtf8(kTextWeaker),
+             QString::number(kRadiusPanel),
+             QString::fromUtf8(kTextWhite),
+             QString::number(kFontClockPt),
+             QString::number(kFontMileagePt),
+             textRgba(kTextAlphaTertiary),
+             textRgba(kTextAlphaTertiary2),
+             QString::number(kFontPanelTitlePt),
+             QString::number(kFontTempPt),
+             QString::fromUtf8(kFontMono),
+             textRgba(kTextAlphaQuaternary),
+             textRgba(kTextAlphaSecondary),
+             QString::number(kFontSongPt),
+             textRgba(kTextAlphaDisabled),
              QString::number(kFontAuxPt),
-             QString::number(kRadiusPillSm),
-             QString::number(kFontBodyPt),
-             QString::number(kTouchMin),
-             QString::number(kSplitterHandle),
-             QString::fromUtf8(kAccent),
-             QString::number(kFontSecLgPt),
              QString::fromUtf8(kTestWarn),
-             QString::fromUtf8(kTextWeak));
+             textRgba(kTextAlphaTertiary),
+             QString::fromUtf8(kCard2),
+             QString::number(kRadiusSearch),
+             QString::number(kTouchMin),
+             QString::number(kRadiusSplitter),
+             textRgba(kTextAlphaFaint),
+             QString::number(kRadiusDockIcon),
+             QString::number(kDockIconSize),
+             QString::fromUtf8(kCard3),
+             QString::number(kNowPlayingBtn),
+             QString::number(kSplitterWidth),
+             splitterHandleRgba(),
+             QString::number(kRadiusSplitter),
+             QString::number(kRadiusSearch),
+             QString::fromUtf8(kAccent));
 }
 
 } // namespace tokens
