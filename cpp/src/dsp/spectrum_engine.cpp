@@ -150,6 +150,12 @@ void SpectrumEngine::run() {
         emit squelchState(gate);
         auto out = agc_.process(gated);
         emit audioLevel(agc_.currentLevelDb());
+
+        double rssi = 0;
+        for (auto c : iq) rssi += std::norm(c);
+        rssi = 10 * std::log10(rssi / iq.size() + 1e-10);
+        emit rssiLevel(static_cast<float>(rssi));
+
         audioOut_->write(out, demod_->outputSampleRate());
 
         // Gated recording

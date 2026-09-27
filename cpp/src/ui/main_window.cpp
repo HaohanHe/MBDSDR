@@ -101,6 +101,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     sourceBanner_->setWordWrap(true);
     leftLay->addWidget(sourceBanner_);
 
+    // Connect button
+    connectBtn_ = new QPushButton("连接", leftCard);
+    leftLay->addWidget(connectBtn_);
+
+    // RSSI
+    rssiLabel_ = new QLabel("RSSI: -- dBFS", leftCard);
+    leftLay->addWidget(rssiLabel_);
+
     // Frequency
     leftLay->addWidget(new QLabel("中心频率", leftCard));
     freqSpin_ = new QDoubleSpinBox(leftCard);
@@ -339,12 +347,26 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             this, &MainWindow::onSourceChanged);
     connect(engine_, &dsp::SpectrumEngine::audioLevel,
             this, &MainWindow::onAudioLevel);
+    connect(engine_, &dsp::SpectrumEngine::rssiLevel,
+            this, &MainWindow::onRssiLevel);
     connect(engine_, &dsp::SpectrumEngine::squelchState,
             this, &MainWindow::onSquelchState);
 
     // Control signals -> engine
     connect(demodCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [this](int) { engine_->setDemodMode(demodCombo_->currentText()); });
+            this, [this](int) {
+                engine_->setDemodMode(demodCombo_->currentText());
+                // Auto-set default bandwidth per mode
+                static const QMap<QString, int> bwIdx = {
+                    {"AM", 0}, {"NFM", 1}, {"WFM", 2}, {"USB", 3}, {"LSB", 3}, {"CW", 1}
+                };
+                auto it = bwIdx.find(demodCombo_->currentText());
+                if (it != bwIdx.end()) {
+                    bwCombo_->blockSignals(true);
+                    bwCombo_->setCurrentIndex(it.value());
+                    bwCombo_->blockSignals(false);
+                }
+            });
     connect(squelchSlider_, &QSlider::valueChanged,
             this, [this](int v) {
                 squelchValue_->setText(QString("%1 dB").arg(v));
@@ -448,6 +470,10 @@ void MainWindow::onAudioLevel(float dbfs) {
         levelBar_->setStyleSheet(QString("background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 %1, stop:1 %2); border-radius: 4px;").arg(tokens::kCard1, tokens::kAccent));
         levelBar_->setText(QString("%1%").arg(pct));
     }
+}
+
+void MainWindow::onRssiLevel(float dbfs) {
+    if (rssiLabel_) rssiLabel_->setText(QString("RSSI: %1 dBFS").arg(dbfs, 0, 'f', 1));
 }
 
 void MainWindow::onSquelchState(bool open) {
