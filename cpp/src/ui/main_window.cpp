@@ -67,6 +67,7 @@
 #include "ui/spectrum_widget.h"
 #include "ui/settings_dialog.h"
 #include "ui/about_dialog.h"
+#include "ui/radio_panel.h"
 
 namespace mbdsdr {
 
@@ -642,6 +643,9 @@ MainWindow::MainWindow(QWidget* parent)
             : "AI 助手将在这里接入（需在设置中配置 API Key）");
     }
     rightTabs_->addTab(aiPage, "AI 助手");
+
+    // Radio / transmit panel: serial CAT, CW, AX.25/KISS, SoapySDR TX.
+    rightTabs_->addTab(new ui::RadioPanel(rightCard), "电台");
 
     rightLay->addWidget(rightTabs_);
     splitter->addWidget(rightCard);
