@@ -17,6 +17,23 @@ void WorldView::setAircraft(QList<AircraftPoint> ac) {
     update();
 }
 
+void WorldView::addAircraft(const QString& icao, double lat, double lon) {
+    for (auto& ac : aircraft_) if (ac.icao == icao) { ac.lat = lat; ac.lon = lon; update(); return; }
+    aircraft_.append({icao, "", lat, lon});
+    update();
+}
+
+void WorldView::setSatellites(QList<SatellitePoint> sat) {
+    satellites_ = std::move(sat);
+    update();
+}
+
+void WorldView::addSatellite(const QString& name, double lat, double lon) {
+    for (auto& s : satellites_) if (s.name == name) { s.lat = lat; s.lon = lon; update(); return; }
+    satellites_.append({name, lat, lon});
+    update();
+}
+
 QPointF WorldView::latLonToPx(double lat, double lon) {
     double x = (lon + 180.0) / 360.0 * width();
     double y = (90.0 - lat) / 180.0 * height();
@@ -72,6 +89,14 @@ void WorldView::paintEvent(QPaintEvent*) {
         QPointF pos = latLonToPx(ac.lat, ac.lon);
         p.drawEllipse(pos, 3, 3);
         p.drawText(pos + QPointF(6, 6), ac.callsign);
+    }
+
+    // Satellites (small tertiary dots, no labels to avoid clutter).
+    p.setPen(QPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)), 1));
+    p.setBrush(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
+    for (const auto& s : satellites_) {
+        QPointF pos = latLonToPx(s.lat, s.lon);
+        p.drawEllipse(pos, 2, 2);
     }
 
     // At most ONE centered hint, so labels can never overlap into garble.

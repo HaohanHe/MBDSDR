@@ -544,13 +544,6 @@ MainWindow::MainWindow(QWidget* parent)
             ? "已配置 API Key — AI 功能接入中"
             : "AI 助手将在这里接入（需在设置中配置 API Key）");
     }
-    connect(sendBtn, &QPushButton::clicked, this, [this]() {
-        const QString txt = aiInput_->text().trimmed();
-        if (txt.isEmpty()) return;
-        aiChat_->appendPlainText("> " + txt);
-        aiInput_->clear();
-        aiChat_->appendPlainText("AI 功能接入中...");   // honest placeholder, no fake reply
-    });
     rightTabs_->addTab(aiPage, "AI 助手");
 
     rightLay->addWidget(rightTabs_);
@@ -786,12 +779,18 @@ MainWindow::MainWindow(QWidget* parent)
             if (aiStatus_) aiStatus_->setText(hasKey
                 ? "已配置 API Key — AI 功能接入中"
                 : "AI 助手将在这里接入（需在设置中配置 API Key）");
+            if (agent_) agent_->configureFromConfig();
         }
     });
 
     agent_ = new ai::Agent(this);
+    agent_->setEngine(engine_);
+    agent_->configureFromConfig();
     connect(agent_, &ai::Agent::responseReady, this, [this](const QString& t) {
         aiChat_->appendPlainText("AI: " + t);
+    });
+    connect(agent_, &ai::Agent::toolCalled, this, [this](const QString& tool, const QString& result) {
+        aiChat_->appendPlainText(QString("[调用工具: %1 — %2]").arg(tool, result));
     });
     connect(sendBtn, &QPushButton::clicked, this, [this]() {
         QString t = aiInput_->text().trimmed();
