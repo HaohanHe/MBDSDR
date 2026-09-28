@@ -132,7 +132,7 @@ void WaterfallWidget::setVisibleRange(double fLoHz, double fHiHz) {
 
 void WaterfallWidget::paintEvent(QPaintEvent*) {
     QPainter p(this);
-    p.fillRect(rect(), QColor(QString::fromUtf8(tokens::kCard1)));
+    p.fillRect(rect(), QColor(10, 12, 14));
 
     if (!haveFrame_ || history_.isNull()) {
         p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaSecondary)));

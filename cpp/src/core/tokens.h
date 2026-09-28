@@ -82,6 +82,13 @@ inline constexpr int kRadiusPanel     = 24;
 inline constexpr int kRadiusDockIcon   = 13;
 inline constexpr int kRadiusSearch     = 8;
 inline constexpr int kRadiusCard       = 10;
+
+// Motion timing (ms) -- Material Motion scaled down for desktop.
+inline constexpr int kAnimShort1  = 120;  // micro feedback
+inline constexpr int kAnimShort2  = 160;  // button/list press
+inline constexpr int kAnimMedium1 = 220;  // tab/panel switch
+inline constexpr int kAnimMedium2 = 280;  // dialog
+inline constexpr int kAnimLong1   = 350;  // overlay
 inline constexpr int kRadiusSplitter   = 10;
 inline constexpr int kRadiusSmall      = 4;
 inline constexpr const char* kRadiusCircle = "50%";
@@ -322,14 +329,17 @@ QSplitter::handle:horizontal {
 }
 QStatusBar { background: %bgBar%; color: %textSec%; border-top: 1px solid %edge%; }
 QComboBox, QSpinBox, QDoubleSpinBox {
-    background-color: %card1%;
+    background-color: rgba(255,255,255,0.03);
     color: %textPri%;
-    border: 1px solid %edge%;
+    border: 1px solid transparent;
     border-radius: %radCard%px;
     padding: %padSV%px %padMV%px;
     min-height: %ctlH%px;
 }
-QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover { border: 1px solid %accent%; }
+QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {
+    background-color: %card2%;
+    border: 1px solid %edge%;
+}
 QComboBox QAbstractItemView {
     background-color: %card1%;
     color: %textPri%;
