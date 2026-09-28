@@ -44,9 +44,9 @@ set(SOURCES
     src/main.cpp
     src/ui/main_window.cpp
     src/ui/spectrum_widget.cpp
+    src/ui/spectrum_display.cpp
     src/ui/sky_view.cpp
     src/ui/world_view.cpp
-    src/ui/waterfall.cpp
     src/ui/settings_dialog.cpp
     src/ui/about_dialog.cpp
     src/dsp/fft.cpp
@@ -86,7 +86,7 @@ set(HEADERS
     src/core/spectrum_frame.h
     src/ui/main_window.h
     src/ui/spectrum_widget.h
-    src/ui/waterfall.h
+    src/ui/spectrum_display.h
     src/dsp/source.h
     src/dsp/fft.h
     src/dsp/iq_buffer.h
@@ -169,15 +169,16 @@ target_link_libraries(test_bookmark PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME bookmark COMMAND test_bookmark)
 
 add_executable(test_spectrum_interaction tests/test_spectrum_interaction.cpp
-    src/ui/spectrum_widget.cpp src/dsp/peak_detector.cpp)
+    src/ui/spectrum_widget.cpp src/ui/spectrum_display.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_spectrum_interaction PRIVATE src)
 target_link_libraries(test_spectrum_interaction PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME spectrum_interaction COMMAND test_spectrum_interaction)
 
-add_executable(test_waterfall tests/test_waterfall.cpp src/ui/waterfall.cpp)
-target_include_directories(test_waterfall PRIVATE src)
-target_link_libraries(test_waterfall PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
-add_test(NAME waterfall COMMAND test_waterfall)
+add_executable(test_spectrum_display tests/test_spectrum_display.cpp
+    src/ui/spectrum_display.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_spectrum_display PRIVATE src)
+target_link_libraries(test_spectrum_display PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME spectrum_display COMMAND test_spectrum_display)
 
 # AI integration test: SKIPs without MBDSDR_AI_KEY env (never FAILs offline).
 add_executable(test_ai_integration tests/test_ai_integration.cpp src/ai/llm_client.cpp src/ai/ai_config.cpp)

@@ -55,7 +55,7 @@
 #include <QApplication>
 #include <QInputDialog>
 #include "ui/world_view.h"
-#include "ui/waterfall.h"
+#include "ui/spectrum_widget.h"
 #include "ui/settings_dialog.h"
 #include "ui/about_dialog.h"
 
@@ -312,36 +312,12 @@ MainWindow::MainWindow(QWidget* parent)
     centerTabs_ = new QTabWidget(centerCard);
     spectrum_ = new ui::SpectrumWidget(centerCard);
     worldView_ = new ui::WorldView(centerCard);
-    waterfall_ = new ui::WaterfallWidget(centerCard);
 
-    // Spectrum tab: line spectrum on top, scrolling waterfall below (SDR++ style).
-    auto* specSplit = new QSplitter(Qt::Vertical, centerCard);
-    specSplit->setChildrenCollapsible(false);
-    specSplit->addWidget(spectrum_);
-    // Waterfall control strip: scroll speed + palette.
-    auto* wfBar = new QWidget(centerCard);
-    auto* wfLay = new QHBoxLayout(wfBar);
-    wfLay->setContentsMargins(tokens::scaled(tokens::kSpacingS), 0,
-                              tokens::scaled(tokens::kSpacingS), 0);
-    wfLay->setSpacing(tokens::scaled(tokens::kSpacingS));
-    wfLay->addWidget(new QLabel("瀑布", wfBar));
-    auto* spdCombo = new QComboBox(wfBar);
-    spdCombo->addItems({"1x", "2x", "4x"});
-    connect(spdCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            waterfall_, [this](int i){ waterfall_->setScrollSpeed(i == 0 ? 1 : (i == 1 ? 2 : 4)); });
-    wfLay->addWidget(spdCombo);
-    auto* palCombo = new QComboBox(wfBar);
-    palCombo->addItems({"经典", "单色"});
-    connect(palCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            waterfall_, &ui::WaterfallWidget::setPalette);
-    wfLay->addWidget(palCombo);
-    wfLay->addStretch();
-    specSplit->addWidget(wfBar);
-    specSplit->addWidget(waterfall_);
-    specSplit->setStretchFactor(0, 3);
-    specSplit->setStretchFactor(1, 2);
-
-    centerTabs_->addTab(specSplit, "频谱");
+    // Spectrum tab: one unified canvas draws the line spectrum, the shared
+    // frequency strip and the scrolling waterfall with a single geometry, so
+    // the frequency axes align by construction. The scroll-speed / palette
+    // controls live in the container's tool strip.
+    centerTabs_->addTab(spectrum_, "频谱");
     centerTabs_->addTab(worldView_, "世界");
     centerLay->addWidget(centerTabs_);
     splitter->addWidget(centerCard);
@@ -584,8 +560,6 @@ MainWindow::MainWindow(QWidget* parent)
     }
     connect(engine_, &dsp::SpectrumEngine::spectrumReady,
             spectrum_, &ui::SpectrumWidget::setSpectrum);
-    connect(engine_, &dsp::SpectrumEngine::spectrumReady,
-            waterfall_, &ui::WaterfallWidget::setSpectrum);
     connect(engine_, &dsp::SpectrumEngine::sourceChanged,
             this, &MainWindow::onSourceChanged);
     connect(engine_, &dsp::SpectrumEngine::audioLevel,
@@ -608,9 +582,8 @@ MainWindow::MainWindow(QWidget* parent)
             engine_, &dsp::SpectrumEngine::setWindowType);
     connect(spectrum_, &ui::SpectrumWidget::averageModeRequested,
             engine_, &dsp::SpectrumEngine::setAverageMode);
-    // Zoom/pan the spectrum and waterfall stay in lockstep.
-    connect(spectrum_, &ui::SpectrumWidget::visibleRangeChanged,
-            waterfall_, &ui::WaterfallWidget::setVisibleRange);
+    // Zoom/pan lockstep between the trace and the waterfall is now intrinsic:
+    // both are drawn by the same canvas from one visible window.
 
     connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, [this](double mhz) {

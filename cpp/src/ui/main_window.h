@@ -26,7 +26,7 @@ class QSpinBox;
 namespace mbdsdr {
 namespace ui { class BookmarkManager; }
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; }
-namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class WaterfallWidget; }
+namespace ui   { class SpectrumWidget; class SkyView; class WorldView; }
 namespace ai   { class Agent; }
 
 class MainWindow : public QMainWindow {
@@ -56,7 +56,6 @@ private:
     ui::SpectrumWidget* spectrum_ = nullptr;
     ui::SkyView*     skyView_   = nullptr;
     ui::WorldView*   worldView_ = nullptr;
-    ui::WaterfallWidget* waterfall_ = nullptr;
 
     // Satellite pass forecast (sky tab).
     dsp::TleClient* tleClient_   = nullptr;
