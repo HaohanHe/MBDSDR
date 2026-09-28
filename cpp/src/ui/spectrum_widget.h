@@ -64,6 +64,9 @@ private:
     void emitVisibleRange();
     // Run peak detection on the latest frame and refresh the list + markers.
     void detectPeaks();
+    // Retune to hz; if hz is outside the current visible window, pan the view
+    // so it is centered (keeping zoomFactor_), then notify the waterfall.
+    void tuneAndCenter(double hz);
 
     SpectrumFrame frame_;
     QComboBox* fftCombo_   = nullptr;
@@ -84,10 +87,24 @@ private:
     double zoomFactor_ = 1.0;  // 1 = full span, kZoomMax = max zoom-in
     double viewCenterHz_ = 0.0; // visible-window center; pans away from f0
 
-    QList<mbdsdr::dsp::PeakInfo> peaks_;   // latest detected peaks
+    QList<mbdsdr::dsp::PeakInfo> peaks_;   // displayed peaks (tracked, matured)
     float peakThresholdDb_ = 15.0f;        // dB above median (set from tokens in ctor)
     int   highlightedPeak_ = -1;           // selected table row -> peak index (-1 none)
     QString lastPeakSignature_;            // cheap throttle for table rebuild
+
+    // Cross-frame peak tracking: a detected peak that survives N frames gets a
+    // stable ID and only then shows up, so the list stops jittering.
+    struct TrackedPeak {
+        int    id = 0;
+        double freqHz = 0;
+        float  dbfs = 0;
+        double bandwidthHz = 0;
+        int    seenFrames = 0;
+        int    missFrames = 0;
+        bool   matchedThisFrame = false;
+    };
+    QList<TrackedPeak> tracked_;
+    int nextPeakId_ = 1;
 };
 
 } // namespace ui

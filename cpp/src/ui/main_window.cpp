@@ -1015,7 +1015,7 @@ void MainWindow::refetchTle() {
     // Pull fresh TLE + recompute passes for the currently-configured station.
     // No station -> honest empty state, never a network call.
     liveRow_ = -1;
-    skyView_->clearLiveSatellite();
+    skyView_->clearLiveSatellites();
     if (!stationSet_ || !std::isfinite(stationLat_) || !std::isfinite(stationLon_)) {
         passes_.clear();
         passTable_->setRowCount(0);
@@ -1043,7 +1043,7 @@ void MainWindow::onPassesReady(QList<dsp::SatPass> passes) {
     passes_ = std::move(passes);
     tleFetchActive_ = false;
     liveRow_ = -1;
-    skyView_->clearLiveSatellite();
+    skyView_->clearLiveSatellites();
     if (passes_.isEmpty()) {
         skyView_->setEmptyText("未来 24h 无过境");
     }
@@ -1063,7 +1063,7 @@ void MainWindow::onTleFetchFailed(const QString& reason) {
     }
     passes_.clear();
     liveRow_ = -1;
-    skyView_->clearLiveSatellite();
+    skyView_->clearLiveSatellites();
     passTable_->setRowCount(0);
     skyView_->setPasses({});
     skyView_->setEmptyText("无过境数据——TLE 拉取失败");
@@ -1074,6 +1074,7 @@ static QString countdownText(const dsp::SatPass& p, const QDateTime& now) {
     if (now >= p.aos && now <= p.los) return QStringLiteral("进行中");
     if (now < p.aos) {
         qint64 secs = now.secsTo(p.aos);
+        if (secs <= 120) return QStringLiteral("即将过顶");
         if (secs < 3600) return QStringLiteral("%1 分后").arg(secs / 60);
         return QStringLiteral("%1 小时后").arg(secs / 3600.0, 0, 'f', 1);
     }
@@ -1158,6 +1159,16 @@ void MainWindow::refreshCountdowns() {
         if (i < 0 || i >= passes_.size()) continue;
         passTable_->item(row, 4)->setText(countdownText(passes_[i], now));
     }
+    // Quiet pre-AOS reminder for the selected satellite: within 2 minutes,
+    // no system notification, just the status bar.
+    if (liveRow_ >= 0 && liveRow_ < passes_.size()) {
+        const dsp::SatPass& p = passes_[liveRow_];
+        qint64 secs = now.secsTo(p.aos);
+        if (secs > 0 && secs <= 120) {
+            statusBar()->showMessage(
+                QStringLiteral("%1 即将过顶（%2 秒）").arg(p.name).arg(secs));
+        }
+    }
 }
 
 void MainWindow::updateTleBadge() {
@@ -1195,38 +1206,51 @@ static QString formatRange(double km) {
 
 void MainWindow::updateLiveSatellite() {
     refreshCountdowns();
-    if (liveRow_ < 0 || liveRow_ >= passes_.size() || !stationSet_) {
-        skyView_->clearLiveSatellite();
+    if (!stationSet_) {
+        skyView_->clearLiveSatellites();
         return;
     }
-    const dsp::SatPass& p = passes_[liveRow_];
     QDateTime now = QDateTime::currentDateTimeUtc();
-    // Outside the visible window.
-    if (now < p.aos || now > p.los) {
-        skyView_->clearLiveSatellite();
-        if (now > p.los) {           // pass ended: move on to the next one
-            liveRow_ = -1;
-            skyView_->setHighlightedPass(-1);
-            for (int row = 0; row < passTable_->rowCount(); ++row) {
-                QTableWidgetItem* it = passTable_->item(row, 0);
-                if (!it) continue;
-                int i = it->data(Qt::UserRole).toInt();
-                if (i >= 0 && i < passes_.size() &&
-                    passes_[i].aos <= now && now <= passes_[i].los) {
-                    passTable_->selectRow(row);
-                    onPassRowClicked(row);
-                    return;
-                }
+
+    // If the selected pass just ended, advance to the next one in view.
+    if (liveRow_ >= 0 && liveRow_ < passes_.size() && now > passes_[liveRow_].los) {
+        liveRow_ = -1;
+        skyView_->setHighlightedPass(-1);
+        for (int row = 0; row < passTable_->rowCount(); ++row) {
+            QTableWidgetItem* it = passTable_->item(row, 0);
+            if (!it) continue;
+            int i = it->data(Qt::UserRole).toInt();
+            if (i >= 0 && i < passes_.size() &&
+                passes_[i].aos <= now && now <= passes_[i].los) {
+                passTable_->selectRow(row);
+                onPassRowClicked(row);   // recurses once via updateLiveSatellite
+                return;
             }
-            liveTimer_->stop();
         }
-        return;
+        liveTimer_->stop();
     }
-    dsp::Topocentric t = tleClient_->propagateAt(now, p.tle, stationLat_, stationLon_);
-    skyView_->setLiveSatellite(t.az, t.el, p.name);
-    statusBar()->showMessage(QString("%1 方位=%2° 仰角=%3° 距离=%4")
-        .arg(p.name).arg(t.az, 0, 'f', 0).arg(t.el, 0, 'f', 1)
-        .arg(formatRange(t.range)));
+
+    // Draw every satellite currently in view; mark the selected one.
+    QList<ui::LiveSat> sats;
+    for (int i = 0; i < passes_.size(); ++i) {
+        const dsp::SatPass& p = passes_[i];
+        if (now < p.aos || now > p.los) continue;   // past LOS / pre-AOS: skip
+        dsp::Topocentric t = tleClient_->propagateAt(now, p.tle,
+                                                     stationLat_, stationLon_);
+        ui::LiveSat ls;
+        ls.az = t.az;
+        ls.el = t.el;
+        ls.name = p.name;
+        ls.selected = (i == liveRow_);
+        sats.append(ls);
+
+        if (ls.selected) {
+            statusBar()->showMessage(QString("%1 方位=%2° 仰角=%3° 距离=%4")
+                .arg(p.name).arg(t.az, 0, 'f', 0).arg(t.el, 0, 'f', 1)
+                .arg(formatRange(t.range)));
+        }
+    }
+    skyView_->setLiveSatellites(sats);
 }
 
 } // namespace mbdsdr

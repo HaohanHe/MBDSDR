@@ -14,6 +14,8 @@
 #include <QHeaderView>
 #include <QTableWidgetItem>
 #include <QSettings>
+#include <algorithm>
+#include <cmath>
 
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -132,14 +134,15 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     peakTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     peakTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     peakTable_->setFixedHeight(tokens::scaled(tokens::kPeakTableH));
-    // Double-click a row -> retune the VFO to that peak.
+    // Double-click a row -> retune the VFO to that peak, and recenter the view
+    // on it if it fell outside the current zoom window.
     connect(peakTable_, &QTableWidget::cellDoubleClicked,
             this, [this](int row, int) {
         auto* item = peakTable_->item(row, 0);
         if (!item) return;
         bool ok = false;
         const double mhz = item->data(Qt::UserRole).toDouble(&ok);
-        if (ok) emit frequencyChanged(mhz * 1e6);
+        if (ok) tuneAndCenter(mhz * 1e6);
     });
     // Single click (select row) -> highlight that peak's marker on the plot,
     // but do NOT retune. The highlighted index indexes into peaks_ (which is
@@ -217,6 +220,16 @@ void SpectrumWidget::emitVisibleRange() {
     emit visibleRangeChanged(fLo, fHi);
 }
 
+void SpectrumWidget::tuneAndCenter(double hz) {
+    double fLo, fHi, spanVis;
+    visibleRange(fLo, fHi, spanVis);
+    // Only pan if the target is outside the current window; keep zoomFactor_.
+    if (hz < fLo || hz > fHi) viewCenterHz_ = hz;
+    emit frequencyChanged(hz);
+    update();
+    emitVisibleRange();
+}
+
 void SpectrumWidget::setSpectrum(const SpectrumFrame& frame) {
     // On the very first frame (or if f0 changed while we were NOT panned
     // away), anchor the view center to f0.
@@ -241,9 +254,50 @@ void SpectrumWidget::setSpectrum(const SpectrumFrame& frame) {
 }
 
 void SpectrumWidget::detectPeaks() {
-    peaks_ = dsp::detectPeaks(frame_.dbfs, frame_.sampleRateHz,
-                              frame_.centerFreqHz, peakThresholdDb_,
-                              tokens::kPeakAbsFloorDbfs);
+    const QList<dsp::PeakInfo> raw = dsp::detectPeaks(frame_.dbfs, frame_.sampleRateHz,
+                                  frame_.centerFreqHz, peakThresholdDb_,
+                                  tokens::kPeakAbsFloorDbfs);
+
+    // --- Cross-frame tracking ------------------------------------------------
+    const std::size_t n = frame_.dbfs.size();
+    const double binHz = (n > 1) ? frame_.sampleRateHz / (n - 1) : 1.0;
+    const double matchDist = binHz * tokens::kPeakMatchBins;
+
+    for (auto& t : tracked_) t.matchedThisFrame = false;
+
+    for (const auto& rp : raw) {
+        TrackedPeak* best = nullptr;
+        double bestD = matchDist;
+        for (auto& t : tracked_) {
+            const double d = std::abs(rp.freqHz - t.freqHz);
+            if (d < bestD) { bestD = d; best = &t; }
+        }
+        if (best) {
+            best->freqHz = rp.freqHz;
+            best->dbfs = rp.dbfs;
+            best->bandwidthHz = rp.bandwidthHz;
+            best->seenFrames++;
+            best->missFrames = 0;
+            best->matchedThisFrame = true;
+        } else {
+            tracked_.push_back({nextPeakId_++, rp.freqHz, rp.dbfs,
+                                rp.bandwidthHz, 1, 0, true});
+        }
+    }
+    for (auto& t : tracked_)
+        if (!t.matchedThisFrame) t.missFrames++;
+    // Forget peaks that disappeared more than kPeakMaxMissFrames ago.
+    tracked_.erase(std::remove_if(tracked_.begin(), tracked_.end(),
+        [](const TrackedPeak& t) { return t.missFrames > tokens::kPeakMaxMissFrames; }),
+        tracked_.end());
+
+    // Displayed list = tracked peaks that have persisted long enough, loudest first.
+    peaks_.clear();
+    for (const auto& t : tracked_)
+        if (t.seenFrames >= tokens::kPeakMinSeenFrames)
+            peaks_.append({t.freqHz, t.dbfs, t.bandwidthHz});
+    std::sort(peaks_.begin(), peaks_.end(),
+              [](const dsp::PeakInfo& a, const dsp::PeakInfo& b) { return a.dbfs > b.dbfs; });
 
     // Throttle table rebuilds: only touch the widget when the set of rounded
     // peak frequencies actually changes (avoids a QTableWidget rebuild every
