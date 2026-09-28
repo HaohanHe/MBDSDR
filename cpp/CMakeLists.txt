@@ -78,6 +78,13 @@ set(SOURCES
     src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp
     src/dsp/tle_client.cpp
+    src/dsp/sgp4.cpp
+    src/gnss/serial_transport.cpp
+    src/gnss/stream_transport.cpp
+    src/gnss/nmea_parser.cpp
+    src/gnss/gnss_receiver.cpp
+    src/ui/elevation_plot.cpp
+    src/ui/map_projection.cpp
     src/ai/llm_client.cpp
     src/ai/llm_worker.cpp
     src/ai/ai_config.cpp
@@ -109,6 +116,18 @@ set(HEADERS
     src/dsp/wav_writer.h
     src/dsp/file_source.h
     src/dsp/gated_recorder.h
+    src/dsp/sgp4.h
+    src/ui/sky_view.h
+    src/ui/world_view.h
+    src/ui/map_projection.h
+    src/ui/coastline_data.h
+    src/ui/elevation_plot.h
+    src/gnss/gnss_types.h
+    src/gnss/i_transport.h
+    src/gnss/serial_transport.h
+    src/gnss/stream_transport.h
+    src/gnss/nmea_parser.h
+    src/gnss/gnss_receiver.h
 )
 
 add_executable(mbdsdr ${SOURCES} ${HEADERS})
@@ -232,7 +251,7 @@ target_include_directories(test_shortcuts PRIVATE src build/test_shortcuts_autog
 target_link_libraries(test_shortcuts PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 add_test(NAME shortcuts COMMAND test_shortcuts)
 
-add_executable(test_geo tests/test_geo.cpp src/dsp/tle_client.cpp)
+add_executable(test_geo tests/test_geo.cpp src/dsp/tle_client.cpp src/dsp/sgp4.cpp)
 target_include_directories(test_geo PRIVATE src)
 target_link_libraries(test_geo PRIVATE Qt6::Network Qt6::Concurrent Qt6::Core)
 add_test(NAME geo COMMAND test_geo)
@@ -335,6 +354,46 @@ add_test(NAME agent COMMAND test_agent)
 # GUI-dependent tests run on the offscreen platform so ctest works on
 # headless/CI machines without a display.
 set_tests_properties(recorder decoder agent PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# ---- GNSS / SGP4 / offline map / sky-view integration tests -------------
+# NMEA 0183 parser: pure Qt Core, no event loop / GUI.
+add_executable(test_nmea_parser tests/test_nmea_parser.cpp src/gnss/nmea_parser.cpp)
+target_include_directories(test_nmea_parser PRIVATE src)
+target_link_libraries(test_nmea_parser PRIVATE Qt6::Core)
+add_test(NAME nmea_parser COMMAND test_nmea_parser)
+
+# Transport backends (serial/file/memory) + GnssReceiver smoke test.
+# GnssReceiver is a QThread (Q_OBJECT) -> needs AUTOMOC (global ON).
+add_executable(test_transport tests/test_transport.cpp
+    src/gnss/serial_transport.cpp src/gnss/stream_transport.cpp
+    src/gnss/nmea_parser.cpp src/gnss/gnss_receiver.cpp)
+target_include_directories(test_transport PRIVATE src)
+target_link_libraries(test_transport PRIVATE Qt6::Core)
+add_test(NAME transport COMMAND test_transport)
+
+# Original near-earth SGP4 validated vs the published Vallado tforver.out set.
+# No Qt dependency at all.
+add_executable(test_sgp4 tests/test_sgp4.cpp src/dsp/sgp4.cpp)
+target_include_directories(test_sgp4 PRIVATE src)
+add_test(NAME sgp4 COMMAND test_sgp4)
+
+# Offline world map + equirectangular projection GUI test (offscreen).
+add_executable(test_map_view tests/test_map_view.cpp
+    src/ui/world_view.cpp src/ui/map_projection.cpp)
+target_include_directories(test_map_view PRIVATE src)
+target_link_libraries(test_map_view PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME map_view COMMAND test_map_view)
+
+# Polar sky view + elevation-vs-time plot GUI test (offscreen).
+add_executable(test_sky_view tests/test_sky_view.cpp
+    src/ui/sky_view.cpp src/ui/elevation_plot.cpp)
+target_include_directories(test_sky_view PRIVATE src)
+target_link_libraries(test_sky_view PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME sky_view COMMAND test_sky_view)
+
+# New GUI tests must run headless (no display on CI / this build host).
+set_tests_properties(map_view sky_view PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 message(STATUS "MBDSDR C++ build type: ${CMAKE_BUILD_TYPE}")

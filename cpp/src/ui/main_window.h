@@ -5,6 +5,9 @@
 #include <QList>
 #include <limits>
 
+// GnssFix is a value member (lastGnssFix_), so its layout must be visible here.
+#include "gnss/gnss_types.h"
+
 class QLabel;
 class QDoubleSpinBox;
 class QComboBox;
@@ -26,8 +29,10 @@ class QSpinBox;
 namespace mbdsdr {
 namespace ui { class BookmarkManager; }
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct VfoMarker; }
-namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView; }
+namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
+                 class ElevationPlot; struct AircraftPoint; }
 namespace ai   { class Agent; }
+namespace gnss { class GnssReceiver; struct GnssFix; }
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -50,6 +55,13 @@ private slots:
     void onPassesReady(QList<dsp::SatPass> passes);
     void onTleFetchFailed(const QString& reason);
     void onPassRowClicked(int row);
+    // ---- GNSS serial receiver ----
+    void onNewFix(gnss::GnssFix fix);
+    void onGnssConnectionChanged(bool connected, QString description);
+    void onGnssConnectClicked();
+    // ---- bidirectional satellite selection sync (no re-emit loop) ----
+    void selectSatelliteByName(const QString& name);
+    void copyClockBias();
 
 private:
     dsp::SpectrumEngine* engine_   = nullptr;
@@ -57,6 +69,28 @@ private:
     ui::SkyView*     skyView_   = nullptr;
     ui::WorldView*   worldView_ = nullptr;
     ui::ConstellationView* constellationView_ = nullptr;
+    ui::ElevationPlot* elevationPlot_ = nullptr;
+
+    // ---- GNSS serial receiver + compact toolbar (world tab) ----
+    gnss::GnssReceiver* gnssRx_      = nullptr;
+    QLineEdit*   gnssDeviceEdit_  = nullptr;
+    QComboBox*   gnssBaudCombo_   = nullptr;
+    QPushButton* gnssConnectBtn_   = nullptr;
+    QLabel*      gnssStatusLabel_ = nullptr;
+    QLabel*      gnssFixLabel_     = nullptr;
+    QCheckBox*   layerGnssChk_     = nullptr;
+    QCheckBox*   layerAdsbChk_     = nullptr;
+    QCheckBox*   layerSatChk_      = nullptr;
+    // Sky-tab clock-bias readout + copy button.
+    QLabel*      clockInfoLabel_ = nullptr;
+    QPushButton* copyClockBtn_   = nullptr;
+    // Rich ADS-B points keyed by ICAO (tail streak maintained per aircraft).
+    QMap<QString, ui::AircraftPoint>* adsbMap_ = nullptr;
+    gnss::GnssFix lastGnssFix_;
+    bool   gnssHasFix_ = false;
+    double lastGnssAppliedLat_ = std::numeric_limits<double>::quiet_NaN();
+    double lastGnssAppliedLon_ = std::numeric_limits<double>::quiet_NaN();
+    double clockBiasSec_ = 0.0;
 
     // Satellite pass forecast (sky tab).
     dsp::TleClient* tleClient_   = nullptr;
@@ -170,6 +204,8 @@ private:
     void updateTleBadge();          // freshness label above the table
     void refetchTle();              // re-fetch TLE for the current station
     void updateLiveSatellite();     // 1s timer: propagate selected pass live
+    void updateElevationPlotFor(const dsp::SatPass& p); // el-vs-time samples
+    void updateClockBiasLabel();    // 1s: GNSS/system/local time + bias
 
     // Debounced QSettings writer: high-frequency signals (zoom/pan, slider
     // drags, spinbox edits) call scheduleSave() which (re)arms this one-shot

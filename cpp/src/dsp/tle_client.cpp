@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "tle_client.h"
+#include "sgp4.h"
 
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
@@ -43,6 +44,12 @@ struct Orbit {
     double argpDot = 0.0;    // perigee precession, rad/s
     double a = 0.0;          // semi-major axis, km
     QDateTime epoch;         // TLE epoch (UTC)
+
+    // Real SGP4 near-earth propagator (period < 225 min).  When useSgp4 is
+    // true the ECI position below comes from SGP4; otherwise we fall back to
+    // the J2-secular mean-element path above (deep-space fallback, see header).
+    Sgp4   sgp4;
+    bool   useSgp4 = false;
 };
 
 double julianDay(const QDateTime& dt) {
@@ -117,6 +124,11 @@ bool buildOrbit(const TleEntry& e, Orbit& out) {
     qint64 base = QDateTime(d0.addDays(dayInt), QTime(0, 0, 0)).toMSecsSinceEpoch();
     out.epoch = QDateTime::fromMSecsSinceEpoch(base + static_cast<qint64>(secs * 1000.0),
                                                Qt::UTC);
+
+    // Try to attach the real near-earth SGP4 propagator.  Deep-space targets
+    // (period >= 225 min) self-flag and are left on the J2 fallback path.
+    if (out.sgp4.loadTle(e.line1.toStdString(), e.line2.toStdString()))
+        out.useSgp4 = !out.sgp4.isDeepSpace();
     return true;
 }
 
@@ -155,6 +167,19 @@ void propagateEci(const Orbit& o, double tSec, double pos[3]) {
     pos[0] = r * (cu * cO - su * ci * sO);
     pos[1] = r * (cu * sO + su * ci * cO);
     pos[2] = r * (su * si);
+}
+
+// ECI position (km) at t seconds after epoch, dispatching on propagator.
+//  - near-earth (period < 225 min): real SGP4 (TEME).
+//  - deep-space / SGP4 failure:      honest J2-secular fallback.
+void computeEci(const Orbit& o, double tSec, double pos[3]) {
+    if (o.useSgp4) {
+        double vel[3] = {0.0, 0.0, 0.0};
+        if (o.sgp4.propagate(tSec / 60.0, pos, vel) == 0)
+            return;   // SGP4 succeeded.
+        // Decay / bad-state: fall through to the J2 path for this sample.
+    }
+    propagateEci(o, tSec, pos);
 }
 
 // ECI -> ECEF (km) by rotating around z by GMST.
@@ -354,7 +379,7 @@ QList<SatPass> TleClient::computePasses(const QList<TleEntry>& entries,
             QDateTime t = t0.addMSecs(static_cast<qint64>(s * 1000.0));
             double dt = o.epoch.secsTo(t);   // seconds since epoch
             double eci[3], ecef[3];
-            propagateEci(o, dt, eci);
+            computeEci(o, dt, eci);
             eciToEcef(eci, t, ecef);
 
             double dx = ecef[0] - sta[0];
@@ -421,7 +446,7 @@ Topocentric TleClient::propagateAt(const QDateTime& timeUtc, const TleEntry& e,
     QDateTime t = timeUtc.toUTC();
     double dt = o.epoch.secsTo(t);
     double eci[3], ecef[3];
-    propagateEci(o, dt, eci);
+    computeEci(o, dt, eci);
     eciToEcef(eci, t, ecef);
 
     double dx = ecef[0] - sta[0];
@@ -459,7 +484,7 @@ TleClient::GeoCoord TleClient::propagateLatLon(const QDateTime& timeUtc, const T
     QDateTime t = timeUtc.toUTC();
     double dt = o.epoch.secsTo(t);
     double eci[3], ecef[3];
-    propagateEci(o, dt, eci);
+    computeEci(o, dt, eci);
     eciToEcef(eci, t, ecef);
     return ecefToLatLon(ecef[0], ecef[1], ecef[2]);
 }

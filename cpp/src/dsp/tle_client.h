@@ -44,18 +44,30 @@ struct TleCache {
     QList<TleEntry> entries;
 };
 
-// Real TLE fetch from celestrak.org + LEO orbit propagation.
+// Real TLE fetch from celestrak.org + orbit propagation.
 //
-// Propagation note: this is a J2-perturbed *mean-element* propagator, not the
-// full Hoots/Schloop SGP4 with all drag/long-period terms.  We propagate the
-// TLE mean elements (inclination, RAAN, eccentricity, argument of perigee,
-// mean anomaly) forward in time with the analytic J2 secular rates for RAAN
-// regression and perigee precession, then solve Kepler's equation to get the
-// instantaneous position.  This is genuine orbital mechanics (not a uniform
-// circular orbit); for LEO weather/space-station satellites it predicts
-// AOS/LOS times to well under a minute, which is more than enough for a sky
-// view.  ECI->ECEF uses GMST; ECEF->topocentric uses WGS84 geodetic station
-// coordinates.
+// Propagation (read this carefully -- we do not claim more than we do):
+//
+//   * NEAR-EARTH targets (orbital period < 225 min): a genuine original SGP4
+//     (Hoots/Roeber, Spacetrack Report #3, as revised by Vallado et al.,
+//     AIAA 2006-6753).  We parse the TLE mean elements and B* drag term,
+//     apply the Brouwer-style secular rates, atmospheric drag, and short/
+//     long-periodic terms, and solve Kepler's equation to produce the
+//     instantaneous inertial (TEME) position in km.  This is the standard
+//     operational TLE model, validated against the published Vallado
+//     verification ephemerides to ~1e-3 km position / ~1e-4 km/s velocity.
+//
+//   * DEEP-SPACE targets (period >= 225 min, e.g. Molniya/GEO class): we do
+//     NOT implement SDP4.  These honestly fall back to the older J2-secular
+//     mean-element propagator (RAAN regression + perigee precession +
+//     Kepler solve).  That is an approximation -- good enough for a sky-view
+//     pass finder but NOT true deep-space SGP4/SDP4.  It is kept so that the
+//     fetch pipeline still returns *something* for deep-space TLEs instead of
+//     crashing, and the limitation is documented here rather than hidden.
+//
+// In both cases ECI->ECEF uses Greenwich Mean Sidereal Time (the standard
+// TLE approximation; no polar motion), and ECEF->topocentric uses WGS84
+// geodetic station coordinates.
 class TleClient : public QObject {
     Q_OBJECT
 public:
