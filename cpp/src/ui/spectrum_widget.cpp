@@ -126,9 +126,10 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     outer->addLayout(topRow);
 
     // Peak list below the plot: frequency / level / -3 dB bandwidth.
-    peakTable_ = new QTableWidget(0, 3, this);
-    peakTable_->setHorizontalHeaderLabels({"频率(MHz)", "强度(dBFS)", "带宽(kHz)"});
+    peakTable_ = new QTableWidget(0, 4, this);
+    peakTable_->setHorizontalHeaderLabels({"#", "频率(MHz)", "强度(dBFS)", "带宽(kHz)"});
     peakTable_->horizontalHeader()->setStretchLastSection(true);
+    peakTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     peakTable_->verticalHeader()->setVisible(false);
     peakTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     peakTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
@@ -138,7 +139,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     // on it if it fell outside the current zoom window.
     connect(peakTable_, &QTableWidget::cellDoubleClicked,
             this, [this](int row, int) {
-        auto* item = peakTable_->item(row, 0);
+        auto* item = peakTable_->item(row, 1);
         if (!item) return;
         bool ok = false;
         const double mhz = item->data(Qt::UserRole).toDouble(&ok);
@@ -293,11 +294,20 @@ void SpectrumWidget::detectPeaks() {
 
     // Displayed list = tracked peaks that have persisted long enough, loudest first.
     peaks_.clear();
+    peakIds_.clear();
+    // Build (peak, id) pairs then sort loudest-first for stable row order.
+    QList<QPair<dsp::PeakInfo,int>> mature;
     for (const auto& t : tracked_)
         if (t.seenFrames >= tokens::kPeakMinSeenFrames)
-            peaks_.append({t.freqHz, t.dbfs, t.bandwidthHz});
-    std::sort(peaks_.begin(), peaks_.end(),
-              [](const dsp::PeakInfo& a, const dsp::PeakInfo& b) { return a.dbfs > b.dbfs; });
+            mature.append({{t.freqHz, t.dbfs, t.bandwidthHz}, t.id});
+    std::sort(mature.begin(), mature.end(),
+              [](const QPair<dsp::PeakInfo,int>& a, const QPair<dsp::PeakInfo,int>& b) {
+                  return a.first.dbfs > b.first.dbfs;
+              });
+    for (const auto& m : mature) {
+        peaks_.append(m.first);
+        peakIds_.append(m.second);
+    }
 
     // Throttle table rebuilds: only touch the widget when the set of rounded
     // peak frequencies actually changes (avoids a QTableWidget rebuild every
@@ -316,22 +326,25 @@ void SpectrumWidget::detectPeaks() {
     if (peaks_.isEmpty()) {
         // Honest empty state -- no synthetic peaks.
         peakTable_->setRowCount(1);
-        peakTable_->setSpan(0, 0, 1, 3);
+        peakTable_->setSpan(0, 0, 1, 4);
         auto* it = new QTableWidgetItem(QStringLiteral("未检测到信号"));
         it->setFlags(Qt::NoItemFlags);
         peakTable_->setItem(0, 0, it);
         return;
     }
 
-    for (const auto& pk : peaks_) {
+    for (int k = 0; k < peaks_.size(); ++k) {
+        const auto& pk = peaks_[k];
         const int row = peakTable_->rowCount();
         peakTable_->insertRow(row);
+        auto* idItem = new QTableWidgetItem(QString::number(peakIds_.value(k, -1)));
+        peakTable_->setItem(row, 0, idItem);
         auto* fItem = new QTableWidgetItem(QString("%1").arg(pk.freqHz / 1e6, 0, 'f', 3));
         fItem->setData(Qt::UserRole, pk.freqHz / 1e6);   // absolute MHz for dbl-click
-        peakTable_->setItem(row, 0, fItem);
-        peakTable_->setItem(row, 1,
-            new QTableWidgetItem(QString("%1").arg(pk.dbfs, 0, 'f', 1)));
+        peakTable_->setItem(row, 1, fItem);
         peakTable_->setItem(row, 2,
+            new QTableWidgetItem(QString("%1").arg(pk.dbfs, 0, 'f', 1)));
+        peakTable_->setItem(row, 3,
             new QTableWidgetItem(QString("%1").arg(pk.bandwidthHz / 1e3, 0, 'f', 2)));
     }
 }

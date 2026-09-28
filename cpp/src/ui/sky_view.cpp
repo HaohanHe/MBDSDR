@@ -4,6 +4,7 @@
 
 #include <QPainter>
 #include <QRadialGradient>
+#include <QFontMetrics>
 #include <cmath>
 
 namespace mbdsdr {
@@ -117,18 +118,21 @@ void SkyView::paintEvent(QPaintEvent*) {
         }
     }
 
-    // Live satellite positions: non-selected sats are small tertiary dots; the
-    // selected one gets an accent glow + name/az-el label, drawn on top.
+    // Live satellite positions. The selected sat always gets an accent glow +
+    // name/az-el label. Other sats are small tertiary dots; their name labels
+    // are only drawn when they do not collide with an already-placed label, so
+    // several satellites in view never produce overlapping text.
+    QFont small = font();
+    small.setPointSize(tokens::kFontAuxPt);
+    p.setFont(small);
+    QFontMetrics fm(small);
+    const qreal gap = tokens::scaled(4);
+    QList<QRectF> occupied;
+
+    // Draw the selected satellite's label first so it always wins space.
     for (const auto& ls : liveSats_) {
-        if (ls.el < 0.0) continue;
+        if (!ls.selected || ls.el < 0.0) continue;
         QPointF lp = polarToCart(ls.az, ls.el, radius, center);
-        if (!ls.selected) {
-            // Small, unobtrusive tertiary dot.
-            p.setBrush(QColor(tokens::kTextAlphaTertiary));
-            p.setPen(Qt::NoPen);
-            p.drawEllipse(lp, tokens::scaled(2.5), tokens::scaled(2.5));
-            continue;
-        }
         double r = tokens::scaled(5);
         QRadialGradient glow(lp, r * 3.0);
         glow.setColorAt(0.0, QColor(tokens::kAccent));
@@ -139,13 +143,32 @@ void SkyView::paintEvent(QPaintEvent*) {
         p.setBrush(QColor(tokens::kAccent));
         p.drawEllipse(lp, r, r);
         p.setPen(QPen(QColor(tokens::kAccent)));
-        QFont small = font();
-        small.setPointSize(tokens::kFontAuxPt);
-        p.setFont(small);
-        p.drawText(lp + QPointF(r + 4, -r - 2), ls.name);
-        p.drawText(lp + QPointF(r + 4, -r + 12),
-                   QString("az=%1° el=%2°")
-                       .arg(ls.az, 0, 'f', 0).arg(ls.el, 0, 'f', 1));
+        const QPointF namePos = lp + QPointF(r + gap, -r - 2);
+        const QString ae = QString("az=%1° el=%2°")
+                               .arg(ls.az, 0, 'f', 0).arg(ls.el, 0, 'f', 1);
+        p.drawText(namePos, ls.name);
+        p.drawText(lp + QPointF(r + gap, -r + 12), ae);
+        occupied << QRectF(namePos, QSizeF(fm.horizontalAdvance(ls.name), fm.height()));
+    }
+
+    // Remaining sats: dot always, label only if it fits.
+    for (const auto& ls : liveSats_) {
+        if (ls.selected || ls.el < 0.0) continue;
+        QPointF lp = polarToCart(ls.az, ls.el, radius, center);
+        p.setBrush(QColor(tokens::kTextAlphaTertiary));
+        p.setPen(Qt::NoPen);
+        p.drawEllipse(lp, tokens::scaled(2.5), tokens::scaled(2.5));
+
+        const QPointF namePos = lp + QPointF(gap, -gap);
+        QRectF rect(namePos, QSizeF(fm.horizontalAdvance(ls.name), fm.height()));
+        bool collision = false;
+        for (const QRectF& o : occupied)
+            if (rect.adjusted(-gap, -gap, gap, gap).intersects(o)) { collision = true; break; }
+        if (!collision) {
+            p.setPen(QPen(QColor(tokens::kTextAlphaTertiary)));
+            p.drawText(namePos, ls.name);
+            occupied << rect;
+        }
     }
 
     if (passes_.isEmpty()) {
