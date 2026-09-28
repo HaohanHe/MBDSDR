@@ -49,6 +49,9 @@
 #include "ui/sky_view.h"
 #include "ui/bookmark_manager.h"
 #include <QListWidget>
+#include <QLineEdit>
+#include <QSpinBox>
+#include <QInputDialog>
 #include "ui/world_view.h"
 #include "ui/waterfall.h"
 #include "ui/settings_dialog.h"
@@ -137,6 +140,28 @@ MainWindow::MainWindow(QWidget* parent)
     sourceBanner_->setObjectName("dockHint");
     sourceBanner_->setWordWrap(true);
     gSrcLay->addWidget(sourceBanner_);
+
+    // Source type selector: local RTL-SDR vs rtl_tcp remote.
+    srcTypeCombo_ = new QComboBox(gSrc);
+    srcTypeCombo_->addItems({"本地 RTL-SDR", "rtl_tcp 远程"});
+    gSrcLay->addWidget(srcTypeCombo_);
+    tcpHostEdit_ = new QLineEdit("127.0.0.1", gSrc);
+    tcpHostEdit_->setPlaceholderText("host");
+    gSrcLay->addWidget(tcpHostEdit_);
+    tcpPortSpin_ = new QSpinBox(gSrc);
+    tcpPortSpin_->setRange(1, 65535);
+    tcpPortSpin_->setValue(1234);
+    gSrcLay->addWidget(tcpPortSpin_);
+    // host/port only relevant for rtl_tcp mode.
+    tcpHostEdit_->setVisible(false);
+    tcpPortSpin_->setVisible(false);
+    connect(srcTypeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+        const bool tcp = (idx == 1);
+        tcpHostEdit_->setVisible(tcp);
+        tcpPortSpin_->setVisible(tcp);
+    });
+
     connectBtn_ = new QPushButton("连接", gSrc);
     gSrcLay->addWidget(connectBtn_);
     rssiLabel_ = new QLabel("RSSI: -- dBFS", gSrc);
@@ -317,6 +342,8 @@ MainWindow::MainWindow(QWidget* parent)
     rightCard->setObjectName("panelCard");
     auto* rightLay = new QVBoxLayout(rightCard);
     rightTabs_ = new QTabWidget(rightCard);
+    rightTabs_->setUsesScrollButtons(true);
+    rightTabs_->setElideMode(Qt::ElideRight);
 
     auto* cwPage = new QWidget;
     auto* cwLay = new QVBoxLayout(cwPage);
@@ -378,13 +405,18 @@ MainWindow::MainWindow(QWidget* parent)
     bmLay->addLayout(bmRow);
     auto refreshBm = [this]() {
         bmList_->clear();
-        for (const auto& b : bookmarkManager_->list())
-            bmList_->addItem(QString("%1 MHz — %2")
-                .arg(b.freqHz / 1e6, 0, 'f', 3).arg(b.note));
+        for (const auto& b : bookmarkManager_->list()) {
+            const QString f = QString("%1 MHz").arg(b.freqHz / 1e6, 0, 'f', 3);
+            bmList_->addItem(b.note.isEmpty() ? f : f + " — " + b.note);
+        }
     };
     refreshBm();
     connect(bmSave, &QPushButton::clicked, this, [this, refreshBm]() {
-        bookmarkManager_->add(freqSpin_->value() * 1e6, "");
+        bool ok = false;
+        const QString note = QInputDialog::getText(this, "存为书签",
+            "备注（可留空）:", QLineEdit::Normal, "", &ok);
+        if (!ok) return;
+        bookmarkManager_->add(freqSpin_->value() * 1e6, note.trimmed());
         refreshBm();
     });
     connect(bmDel, &QPushButton::clicked, this, [this, refreshBm]() {
@@ -396,6 +428,71 @@ MainWindow::MainWindow(QWidget* parent)
         if (row >= 0 && row < bookmarkManager_->list().size())
             engine_->onSetCenterFreq(bookmarkManager_->list()[row].freqHz);
     });
+
+    // ---- Band scanner: step frequencies on a QTimer, record RSSI peaks ----
+    auto* scanBox = new QGroupBox("频段扫描", bmPage);
+    auto* scanLay = new QVBoxLayout(scanBox);
+    auto* scanForm = new QFormLayout;
+    scanStartSpin_ = new QDoubleSpinBox(scanBox);
+    scanStartSpin_->setRange(0.1, 2200); scanStartSpin_->setValue(88);
+    scanStartSpin_->setSuffix(" MHz");
+    scanStopSpin_ = new QDoubleSpinBox(scanBox);
+    scanStopSpin_->setRange(0.1, 2200); scanStopSpin_->setValue(108);
+    scanStopSpin_->setSuffix(" MHz");
+    scanStepCombo_ = new QComboBox(scanBox);
+    scanStepCombo_->addItems({"10 kHz", "100 kHz", "1 MHz"});
+    scanForm->addRow("起", scanStartSpin_);
+    scanForm->addRow("止", scanStopSpin_);
+    scanForm->addRow("步进", scanStepCombo_);
+    scanLay->addLayout(scanForm);
+    auto* scanBtns = new QHBoxLayout;
+    scanStartBtn_ = new QPushButton("开始扫描", scanBox);
+    scanStopBtn_ = new QPushButton("停止", scanBox);
+    scanStopBtn_->setEnabled(false);
+    scanBtns->addWidget(scanStartBtn_);
+    scanBtns->addWidget(scanStopBtn_);
+    scanLay->addLayout(scanBtns);
+    scanResultList_ = new QListWidget(scanBox);
+    scanResultList_->setToolTip("双击直跳");
+    scanLay->addWidget(scanResultList_, 1);
+    bmLay->addWidget(scanBox, 1);
+
+    scanTimer_ = new QTimer(this);
+    scanTimer_->setInterval(200);
+    connect(scanTimer_, &QTimer::timeout, this, [this]() {
+        if (scanFreq_ > scanStopSpin_->value() * 1e6) {
+            scanTimer_->stop();
+            scanStartBtn_->setEnabled(true);
+            scanStopBtn_->setEnabled(false);
+            return;
+        }
+        engine_->onSetCenterFreq(scanFreq_);
+        // RSSI is updated async; record the latest known level.
+        scanResultList_->addItem(QString("%1 MHz — %2 dBFS")
+            .arg(scanFreq_ / 1e6, 0, 'f', 3).arg(lastRssi_, 0, 'f', 1));
+        const double step = scanStepCombo_->currentIndex() == 0 ? 10e3
+                          : scanStepCombo_->currentIndex() == 1 ? 100e3 : 1e6;
+        scanFreq_ += step;
+    });
+    connect(scanStartBtn_, &QPushButton::clicked, this, [this]() {
+        scanResultList_->clear();
+        scanFreq_ = scanStartSpin_->value() * 1e6;
+        scanStartBtn_->setEnabled(false);
+        scanStopBtn_->setEnabled(true);
+        scanTimer_->start();
+    });
+    connect(scanStopBtn_, &QPushButton::clicked, this, [this]() {
+        scanTimer_->stop();
+        scanStartBtn_->setEnabled(true);
+        scanStopBtn_->setEnabled(false);
+    });
+    connect(scanResultList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* it) {
+        // Parse the "NN.NNN MHz —" prefix back to Hz and jump.
+        bool ok = false;
+        const double mhz = it->text().section(' ', 0, 0).toDouble(&ok);
+        if (ok) engine_->onSetCenterFreq(mhz * 1e6);
+    });
+
     rightTabs_->addTab(bmPage, "书签");
 
     connect(passTable_, &QTableWidget::cellClicked,
@@ -561,7 +658,17 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(connectBtn_, &QPushButton::clicked, this, [this]() {
         if (connectBtn_->text() == "连接") {
-            bool ok = engine_->tryConnectRtl();
+            bool ok;
+            if (srcTypeCombo_->currentIndex() == 1) {
+                ok = engine_->connectRtlTcp(tcpHostEdit_->text().trimmed(),
+                                            static_cast<quint16>(tcpPortSpin_->value()));
+                statusBar()->showMessage(ok
+                    ? QString("已连接 rtl_tcp %1:%2").arg(tcpHostEdit_->text()).arg(tcpPortSpin_->value())
+                    : QString("rtl_tcp 连接失败：%1:%2（使用测试信号）")
+                        .arg(tcpHostEdit_->text()).arg(tcpPortSpin_->value()));
+            } else {
+                ok = engine_->tryConnectRtl();
+            }
             connectBtn_->setText(ok ? "断开" : "连接");
         } else {
             engine_->disconnectSource();
@@ -1043,6 +1150,7 @@ void MainWindow::onAudioLevel(float dbfs) {
 }
 
 void MainWindow::onRssiLevel(float dbfs) {
+    lastRssi_ = dbfs;
     if (rssiLabel_) rssiLabel_->setText(QString("RSSI: %1 dBFS").arg(dbfs, 0, 'f', 1));
 }
 

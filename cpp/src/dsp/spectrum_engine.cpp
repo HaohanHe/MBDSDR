@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "spectrum_engine.h"
 #include "rtl_sdr_source.h"
+#include "rtl_tcp_source.h"
 #include "test_signal.h"
 #include "power_spectrum.h"
 #include "noise_blanker.h"
@@ -160,6 +161,22 @@ void SpectrumEngine::disconnectSource() {
     source_ = std::make_unique<TestSignalSource>();
     source_->start();
     emit sourceChanged("Test Signal", false);
+}
+
+bool SpectrumEngine::connectRtlTcp(const QString& host, quint16 port) {
+    QMutexLocker lk(&sourceMutex_);
+    if (source_) source_->stop();
+    auto tcp = std::make_unique<RtlTcpSource>(host, port);
+    if (tcp->start()) {
+        source_ = std::move(tcp);
+        emit sourceChanged(QString("rtl_tcp %1:%2").arg(host).arg(port), true);
+        return true;
+    }
+    // Honest failure: fall back to test signal, no fake IQ over the wire.
+    source_ = std::make_unique<TestSignalSource>();
+    source_->start();
+    emit sourceChanged("Test Signal", false);
+    return false;
 }
 
 void SpectrumEngine::setMuted(bool m) {
