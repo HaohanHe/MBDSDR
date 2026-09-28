@@ -46,6 +46,12 @@ void TestEngineIntegration::statePropagates() {
     // Squelch threshold/enabled no-op-crash.
     eng.setSquelchThreshold(-30.0f);
     eng.setSquelchEnabled(true);
+
+    // Adversarial: bogus sample rate / bandwidth must not crash rebuildDemod.
+    eng.onSetSampleRate(0);     // was divide-by-zero in channelizer
+    eng.onSetSampleRate(2.4e6);
+    eng.setBandwidth(0);        // zero bandwidth
+    eng.setBandwidth(8000.0);   // restore
 }
 
 QTEST_MAIN(TestEngineIntegration)
