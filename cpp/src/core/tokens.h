@@ -5,6 +5,7 @@
 #pragma once
 
 #include <QString>
+#include <QColor>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QtGlobal>
@@ -55,6 +56,15 @@ inline constexpr const char* kTextSecondary = "#B9B6B1";   // warm mid-gray
 inline QString textRgba(double a) {
     return QString("rgba(255, 255, 255, %1)").arg(a);
 }
+// QPainter-safe QColor built numerically. QColor(QString) cannot parse the
+// "rgba(...)" CSS functional string in this Qt build (it silently yields an
+// invalid / black color), so widget painting must go through these instead of
+// QColor(textRgba(...)). The kCard* strings remain for the QSS generator.
+inline QColor rgbaA(double a, int r = 255, int g = 255, int b = 255) {
+    return QColor(r, g, b, int(std::clamp(a, 0.0, 1.0) * 255.0 + 0.5));
+}
+inline QColor card1()     { return rgbaA(0.045); }
+inline QColor cardEdge()  { return rgbaA(0.06); }
 inline constexpr double kTextAlphaPrimary   = 1.0;
 inline constexpr double kTextAlphaSecondary = 0.78;
 inline constexpr double kTextAlphaTertiary2 = 0.67;
@@ -168,6 +178,48 @@ inline constexpr int kPlotMarginL = 50;
 inline constexpr int kPlotMarginR = 12;
 inline constexpr int kPlotMarginT = 24;
 inline constexpr int kPlotMarginB = 28;
+
+// =====================================================================
+// Offline GIS map / polar sky / elevation plot -- "默认" instrument theme.
+// Restrained, readable, soft: no loud fills, no culture symbols. Every size
+// here is base px and goes through scaled(); widgets must not invent pixels.
+// =====================================================================
+// Subdued map linework on the near-black ocean (kBgMain).
+inline constexpr double kCoastlineAlpha  = 0.34;  // coastline vector
+inline constexpr double kGraticuleAlpha  = 0.08;  // graticule hairline
+inline constexpr double kTickLabelAlpha  = 0.30;  // lat/lon tick captions
+inline constexpr double kLeaderLineAlpha = 0.32;  // point -> label leader
+
+// Map edge gutters (base px): faint lat/lon tick labels sit inside, never
+// touching the frame or the data.
+inline constexpr int kMapGutterL  = 30;
+inline constexpr int kMapGutterB  = 18;
+
+// Map data-point markers (base px, scaled()).
+inline constexpr int kMapSatDotR    = 3;   // ordinary orbit star
+inline constexpr int kMapSatSelR     = 5;   // selected orbit star
+inline constexpr int kMapGnssOuterR  = 6;   // GNSS fix outer ring
+inline constexpr int kMapGnssInnerR = 2;   // GNSS fix inner dot
+inline constexpr int kMapStationHalf = 3;  // station square half-size
+inline constexpr int kMapAcHalf      = 4;   // aircraft triangle half
+
+// Collision-free label placement.
+inline constexpr int kLabelOffset   = 10;   // gap marker -> label
+inline constexpr int kLabelMinInset = 6;    // label min inset from widget edge
+
+// Polar sky chart.
+inline constexpr int    kSkyGutter       = 28;  // compassRadius inset for az captions
+inline constexpr int    kSkyRingDotR     = 2;   // pass-arc time tick dot
+inline constexpr double  kArcWidth       = 1.4;
+inline constexpr double  kArcSelWidth   = 2.2;
+
+// Elevation-vs-time plot margins (separate from spectrum kPlotMargin* so the
+// spectrum widget is untouched). Enough room for axis titles + tick captions
+// on all four sides so nothing is clipped.
+inline constexpr int kElevMarginL = 46;
+inline constexpr int kElevMarginR = 22;
+inline constexpr int kElevMarginT = 26;
+inline constexpr int kElevMarginB = 50;
 
 // Waterfall (spectrogram) widget
 // 5-stop dBFS palette, mapped linearly over [-100, 0] dBFS:

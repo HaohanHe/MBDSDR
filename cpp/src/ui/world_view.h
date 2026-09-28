@@ -134,6 +134,7 @@ private:
     void drawGnss(QPainter& p);
     void drawAircraft(QPainter& p);
     void drawSatellites(QPainter& p);
+    void drawLabels(QPainter& p);
     void drawStatusChips(QPainter& p);
     void applySelectionFlags();
 
