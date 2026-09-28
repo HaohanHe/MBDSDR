@@ -37,11 +37,13 @@ inline int scaled(int px) {
 // =====================================================================
 inline constexpr const char* kBgMain    = "#080a0c";
 inline constexpr const char* kBgBar      = "#000000";
-inline constexpr const char* kCard1      = "#151a1f";
-inline constexpr const char* kCard2      = "#1e242b";
-inline constexpr const char* kCard3      = "#283038";
+// Cards float on the background as subtle white overlays (CarWith 8% surface),
+// not solid filled panels. Adjusted for our #080a0c base.
+inline constexpr const char* kCard1      = "rgba(255,255,255,0.045)";
+inline constexpr const char* kCard2      = "rgba(255,255,255,0.075)";
+inline constexpr const char* kCard3      = "rgba(255,255,255,0.10)";
 
-inline constexpr const char* kCardEdge  = "rgba(255, 255, 255, 0.07)";
+inline constexpr const char* kCardEdge  = "rgba(255, 255, 255, 0.06)";
 
 // =====================================================================
 // Colors -- text (warm neutral, not dead gray)
@@ -308,7 +310,7 @@ QPushButton {
     cursor: pointer;
 }
 QPushButton:hover  { background-color: %card2%; }
-QPushButton:pressed{ background-color: %accentP%; color: #06121c; border-color: transparent; }
+QPushButton:pressed{ background-color: rgba(0,0,0,0.12); border-color: transparent; }
 QPushButton:disabled { color: rgba(255,255,255,0.3); background-color: transparent; }
 QPushButton[recording="true"] { background-color: #c0392b; color: #ffffff; border-color: #e74c3c; }
 QSplitter::handle { background: transparent; }
