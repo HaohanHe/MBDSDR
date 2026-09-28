@@ -11,7 +11,7 @@ void NoiseBlanker::process(std::vector<std::complex<float>>& iq) {
     if (!enabled_ || iq.empty()) return;
     const std::size_t n = iq.size();
     // Windowed statistic on the instantaneous |IQ| magnitude.
-    const int W = 32;              // sliding window (samples)
+    const int W = winSamples_;       // sliding window (samples)
     const double kSigma = 3.5;     // threshold = mean + 3.5*std
     std::vector<float> mag(n);
     for (std::size_t i = 0; i < n; ++i) mag[i] = std::abs(iq[i]);

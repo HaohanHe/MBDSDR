@@ -413,7 +413,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
         .replace(QStringLiteral("%fontBody%"), QString::number(kFontBodyPt))
         .replace(QStringLiteral("%fontAux%"), QString::number(kFontAuxPt))
         .replace(QStringLiteral("%touch%"), S(kTouchMin))
-        .replace(QStringLiteral("%ctlH%"), S(30))
+        .replace(QStringLiteral("%ctlH%"), S(26))
         .replace(QStringLiteral("%sbW%"), S(6))
         .replace(QStringLiteral("%sbR%"), S(3))
         .replace(QStringLiteral("%radCard%"), S(kRadiusCard))
