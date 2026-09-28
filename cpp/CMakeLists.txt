@@ -124,6 +124,17 @@ target_include_directories(test_noise_blanker PRIVATE src)
 target_link_libraries(test_noise_blanker PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME noise_blanker COMMAND test_noise_blanker)
 
+add_executable(test_engine_integration tests/test_engine_integration.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_engine_integration PRIVATE src)
+target_link_libraries(test_engine_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME engine_integration COMMAND test_engine_integration)
+
 add_executable(test_bookmark tests/test_bookmark.cpp src/ui/bookmark_manager.cpp)
 target_include_directories(test_bookmark PRIVATE src)
 target_link_libraries(test_bookmark PRIVATE Qt6::Test Qt6::Core)

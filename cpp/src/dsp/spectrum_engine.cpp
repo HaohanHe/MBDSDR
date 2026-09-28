@@ -96,6 +96,8 @@ void SpectrumEngine::onSetCenterFreq(double f) {
 void SpectrumEngine::onSetSampleRate(double r) {
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->setSampleRate(r);
+    // Sample rate feeds the channelizer + demod chain; rebuild on next loop.
+    needDemodReset_.store(true);
 }
 void SpectrumEngine::onSetGain(double g) {
     QMutexLocker lk(&sourceMutex_);
@@ -295,6 +297,10 @@ void SpectrumEngine::setAverageMode(int a) {
 void SpectrumEngine::setNoiseBlanker(bool on) {
     noiseBlanker_.setEnabled(on);
 }
+
+bool SpectrumEngine::noiseBlankerEnabled() const { return noiseBlanker_.enabled(); }
+int SpectrumEngine::windowType() const { return static_cast<int>(powerSpectrum_.window()); }
+int SpectrumEngine::averageMode() const { return static_cast<int>(powerSpectrum_.average()); }
 
 void SpectrumEngine::run() {
     std::vector<std::complex<float>> iq;
