@@ -57,6 +57,7 @@ private:
     dsp::TleClient* tleClient_   = nullptr;
     QTableWidget*   passTable_   = nullptr;
     QLabel*         tleBadge_    = nullptr;
+    QLabel*         skyEmptyLabel_ = nullptr;
     QList<dsp::SatPass> passes_;
     QTimer*         tleTimer_    = nullptr;
     bool            tleFetchActive_ = false;

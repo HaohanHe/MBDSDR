@@ -121,6 +121,8 @@ MainWindow::MainWindow(QWidget* parent)
     auto* leftScroll = new QScrollArea;
     leftScroll->setWidgetResizable(true);
     leftScroll->setFrameShape(QFrame::NoFrame);
+    leftScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    leftScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     auto* leftCard = new QFrame;
     leftCard->setObjectName("panelCard");
     auto* leftLay = new QVBoxLayout(leftCard);
@@ -314,6 +316,13 @@ MainWindow::MainWindow(QWidget* parent)
     skyLay->setContentsMargins(0, 0, 0, 0);
     skyView_ = new ui::SkyView();
     skyLay->addWidget(skyView_, 2);
+    // Empty-state caption lives in a layout row BELOW the polar plot (not
+    // painted over the compass), so it never collides with N/E/S/W labels.
+    skyEmptyLabel_ = new QLabel(skyPage);
+    skyEmptyLabel_->setObjectName("statusHint");
+    skyEmptyLabel_->setAlignment(Qt::AlignCenter);
+    skyEmptyLabel_->setWordWrap(true);
+    skyLay->addWidget(skyEmptyLabel_);
     tleBadge_ = new QLabel(skyPage);
     tleBadge_->setObjectName("dockHint");
     skyLay->addWidget(tleBadge_);
@@ -1040,7 +1049,8 @@ void MainWindow::refetchTle() {
         passes_.clear();
         passTable_->setRowCount(0);
         skyView_->setPasses({});
-        skyView_->setEmptyText("无过境数据——请在设置中填写本站位置");
+        skyEmptyLabel_->setText("无过境数据——请在设置中填写本站位置");
+        skyEmptyLabel_->show();
         return;
     }
     // Cache-first: if we have a recent (<48h) TLE cache, show it immediately
@@ -1053,7 +1063,8 @@ void MainWindow::refetchTle() {
         tleClient_->fetch(stationLat_, stationLon_);   // background refresh
     } else {
         tleFetchActive_ = true;
-        skyView_->setEmptyText("正在拉取 TLE...");
+        skyEmptyLabel_->setText("正在拉取 TLE...");
+        skyEmptyLabel_->show();
         passTable_->setRowCount(0);
         tleClient_->fetch(stationLat_, stationLon_);
     }
@@ -1065,7 +1076,10 @@ void MainWindow::onPassesReady(QList<dsp::SatPass> passes) {
     liveRow_ = -1;
     skyView_->clearLiveSatellites();
     if (passes_.isEmpty()) {
-        skyView_->setEmptyText("未来 24h 无过境");
+        skyEmptyLabel_->setText("未来 24h 无过境");
+        skyEmptyLabel_->show();
+    } else {
+        skyEmptyLabel_->hide();
     }
     fillPassTable();
 }
@@ -1086,7 +1100,8 @@ void MainWindow::onTleFetchFailed(const QString& reason) {
     skyView_->clearLiveSatellites();
     passTable_->setRowCount(0);
     skyView_->setPasses({});
-    skyView_->setEmptyText("无过境数据——TLE 拉取失败");
+    skyEmptyLabel_->setText("无过境数据——TLE 拉取失败");
+    skyEmptyLabel_->show();
     statusBar()->showMessage("TLE 拉取失败：" + reason);
 }
 
