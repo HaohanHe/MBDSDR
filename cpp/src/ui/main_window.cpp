@@ -379,7 +379,7 @@ MainWindow::MainWindow(QWidget* parent)
     adsbEmpty_->setWordWrap(true);
     adsbLay->addWidget(adsbEmpty_);
     adsbTable_ = new QTableWidget(0, 6, adsbPage);
-    adsbTable_->setHorizontalHeaderLabels({"ICAO", "呼号", "高度(ft)", "速度(kt)", "航向(°)", "距离(km)", "时间"});
+    adsbTable_->setHorizontalHeaderLabels({"ICAO", "呼号", "高度(ft)", "速度(kt)", "航向(°)", "垂直(fpm)", "距离(km)", "时间"});
     adsbTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     adsbLay->addWidget(adsbTable_);
     rightTabs_->addTab(adsbPage, "ADS-B");
@@ -1310,8 +1310,9 @@ void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {
     set(2, info.altitudeFt > 0 ? QString::number(info.altitudeFt) : "--");
     set(3, info.hasVelocity ? QString::number(info.groundspeedKt, 'f', 0) : "--");
     set(4, info.hasVelocity ? QString::number(info.headingDeg, 'f', 0) : "--");
-    set(5, "--");   // distance needs station + aircraft position
-    set(6, QDateTime::currentDateTime().toString("HH:mm:ss"));
+    set(5, info.hasVerticalRate ? QString::number(info.verticalRateFpm) : "--");
+    set(6, "--");   // distance needs station + aircraft position
+    set(7, QDateTime::currentDateTime().toString("HH:mm:ss"));
     if (info.hasPosition && worldView_) {
         worldView_->addAircraft(info.icao, info.lat, info.lon);
         worldView_->update();

@@ -116,13 +116,22 @@ void WorldView::paintEvent(QPaintEvent*) {
         p.drawText(station + QPointF(8, -8), "本站");
     }
 
-    // Aircraft
+    // Aircraft: pass 1 = points; pass 2 = non-overlapping callsign labels.
     p.setPen(QPen(QColor(tokens::kAccent), 2));
     p.setBrush(QColor(tokens::kAccent));
     for (const auto& ac : aircraft_) {
         QPointF pos = latLonToPx(ac.lat, ac.lon);
         p.drawEllipse(pos, 3, 3);
-        p.drawText(pos + QPointF(6, 6), ac.callsign);
+    }
+    QList<QRectF> used;
+    QFontMetrics fm(p.font());
+    for (const auto& ac : aircraft_) {
+        if (ac.callsign.isEmpty()) continue;
+        QPointF pos = latLonToPx(ac.lat, ac.lon);
+        QRectF r(pos + QPointF(6, -10), QSizeF(fm.horizontalAdvance(ac.callsign), 12));
+        bool overlap = false;
+        for (const auto& u : used) if (u.intersects(r.adjusted(-4,-4,4,4))) { overlap=true; break; }
+        if (!overlap) { p.drawText(r.bottomLeft(), ac.callsign); used.append(r); }
     }
 
     // Satellites (small tertiary dots, no labels to avoid clutter).

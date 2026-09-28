@@ -190,6 +190,16 @@ bool ADSBDecoder::decodeFrame(std::size_t start, std::size_t totalBits, Aircraft
                 out.groundspeedKt = std::sqrt(ns*ns + ew*ew);
                 out.headingDeg = std::fmod(std::atan2(ew, ns)*180.0/M_PI + 360.0, 360.0);
                 out.hasVelocity = true;
+                // Vertical rate: bits 35..45 of the 48-bit ME field.
+                uint64_t me48 = ((uint64_t)me[0]<<40) | ((uint64_t)me[1]<<32) |
+                                ((uint64_t)me[2]<<24) | ((uint64_t)me[3]<<16) |
+                                ((uint64_t)me[4]<<8) | me[5];
+                int vrateSign = (me48 >> 11) & 1;   // bit 36
+                int vrateMag  = (me48 >> 2) & 0x1FF; // bits 37..45
+                if (vrateMag > 0) {
+                    out.verticalRateFpm = (vrateSign ? -1 : 1) * (vrateMag - 1) * 64;
+                    out.hasVerticalRate = true;
+                }
             }
         }
     }
