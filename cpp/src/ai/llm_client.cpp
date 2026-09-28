@@ -31,6 +31,22 @@ LLMResponse LLMClient::chat(const QList<ChatMessage>& messages,
         QJsonObject mo;
         mo["role"] = m.role;
         mo["content"] = m.content;
+        if (m.role == "tool" && !m.toolCallId.isEmpty())
+            mo["tool_call_id"] = m.toolCallId;
+        if (!m.toolCalls.isEmpty()) {
+            QJsonArray tcArr;
+            for (const auto& tc : m.toolCalls) {
+                QJsonObject o;
+                o["id"] = tc.id;
+                o["type"] = "function";
+                QJsonObject fn;
+                fn["name"] = tc.name;
+                fn["arguments"] = QString::fromUtf8(QJsonDocument(tc.arguments).toJson(QJsonDocument::Compact));
+                o["function"] = fn;
+                tcArr.append(o);
+            }
+            mo["tool_calls"] = tcArr;
+        }
         msgs.append(mo);
     }
     root["messages"] = msgs;
@@ -87,8 +103,10 @@ LLMResponse LLMClient::chat(const QList<ChatMessage>& messages,
 
     auto toolCalls = msg["tool_calls"].toArray();
     for (const auto& tc : toolCalls) {
-        auto fn = tc.toObject()["function"].toObject();
+        auto tcObj = tc.toObject();
+        auto fn = tcObj["function"].toObject();
         ToolCall call;
+        call.id = tcObj["id"].toString();
         call.name = fn["name"].toString();
         QString argsStr = fn["arguments"].toString();
         QJsonParseError pe;

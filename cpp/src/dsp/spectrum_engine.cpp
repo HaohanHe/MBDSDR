@@ -91,6 +91,11 @@ void SpectrumEngine::setFftSize(int n) {
 }
 void SpectrumEngine::shutdown() { running_.store(false); }
 
+double SpectrumEngine::centerFreq() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return source_ ? source_->centerFreq() : 0.0;
+}
+
 void SpectrumEngine::onSetCenterFreq(double f) {
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->setCenterFreq(f);

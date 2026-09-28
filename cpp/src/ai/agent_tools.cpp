@@ -64,6 +64,27 @@ QList<ToolDef> toolDefs() {
     };
     tools.append(scan);
 
+    ToolDef bw;
+    bw.name = "set_bandwidth";
+    bw.description = "Set channel filter bandwidth in Hz.";
+    bw.parameters = QJsonObject{
+        {"type", "object"},
+        {"properties", QJsonObject{
+            {"bandwidth_hz", QJsonObject{
+                {"type", "number"},
+                {"description", "Filter bandwidth in Hz, e.g. 8000 for AM, 12500 for NFM, 200000 for WFM"}
+            }}
+        }},
+        {"required", QJsonArray{"bandwidth_hz"}}
+    };
+    tools.append(bw);
+
+    ToolDef st;
+    st.name = "get_status";
+    st.description = "Return current receiver state: frequency, mode, bandwidth, sample rate.";
+    st.parameters = QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}};
+    tools.append(st);
+
     return tools;
 }
 
@@ -96,6 +117,17 @@ QString executeTool(const QString& name, const QJsonObject& args,
         double peak = engine->scanBand(low, high, step);
         return QString("扫描 %1-%2 MHz，峰值 %3 dBFS")
             .arg(low/1e6, 0, 'f', 1).arg(high/1e6, 0, 'f', 1).arg(peak, 0, 'f', 1);
+    }
+    if (name == "set_bandwidth") {
+        double bw = args["bandwidth_hz"].toDouble();
+        engine->setBandwidth(bw);
+        return QString("带宽设为 %1 Hz").arg(bw, 0, 'f', 0);
+    }
+    if (name == "get_status") {
+        return QString("频率=%1MHz 模式=%2 带宽=%3Hz")
+            .arg(engine->centerFreq()/1e6, 0, 'f', 3)
+            .arg(engine->demodMode())
+            .arg(engine->bandwidth(), 0, 'f', 0);
     }
     return "未知工具: " + name;
 }

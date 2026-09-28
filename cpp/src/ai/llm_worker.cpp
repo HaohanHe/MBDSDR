@@ -24,11 +24,21 @@ void LLMWorker::doChat(const QList<ChatMessage>& messages,
             return;
         }
 
+        // Append the assistant message (carrying tool_calls) once per round.
+        ChatMessage asst;
+        asst.role = "assistant";
+        asst.content = resp.content;
+        asst.toolCalls = resp.toolCalls;
+        msgs.append(asst);
+
         for (const auto& tc : resp.toolCalls) {
             QString result = executeTool(tc.name, tc.arguments, engine_);
             emit toolCalled(tc.name, result);
-            msgs.append(ChatMessage{"assistant", resp.content});
-            msgs.append(ChatMessage{"user", result});
+            ChatMessage tr;
+            tr.role = "tool";
+            tr.toolCallId = tc.id;
+            tr.content = result;
+            msgs.append(tr);
         }
     }
 
