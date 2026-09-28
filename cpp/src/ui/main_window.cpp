@@ -1311,6 +1311,10 @@ void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {
     set(3, "--");   // speed not in AircraftInfo
     set(4, "--");   // distance needs station + aircraft position
     set(5, QDateTime::currentDateTime().toString("HH:mm:ss"));
+    if (info.hasPosition && worldView_) {
+        worldView_->addAircraft(info.icao, info.lat, info.lon);
+        worldView_->update();
+    }
 }
 
 void MainWindow::setControlsEnabled(bool hw) {
@@ -1574,7 +1578,7 @@ void MainWindow::updateLiveSatellite() {
         const dsp::SatPass& p = passes_[i];
         if (now < p.aos || now > p.los) continue;
         auto geo = tleClient_->propagateLatLon(now, p.tle);
-        wpts.append({p.name, geo.latDeg, geo.lonDeg});
+        wpts.append({p.name, geo.latDeg, geo.lonDeg, (i == liveRow_)});
     }
     worldView_->setSatellites(wpts);
 }

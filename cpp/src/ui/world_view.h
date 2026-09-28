@@ -21,6 +21,7 @@ struct SatellitePoint {
     QString name;
     double lat;
     double lon;
+    bool selected = false;
 };
 
 class WorldView : public QWidget {
