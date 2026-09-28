@@ -562,7 +562,9 @@ MainWindow::MainWindow(QWidget* parent)
     sbSr_   = new QLabel("--", this);
     sbVfo_  = new QLabel("--", this);
     sbSdr_  = new QLabel("Test Signal", this);
-    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbSdr_}) {
+    sbRec_  = new QLabel("", this);
+    sbRec_->setStyleSheet("color:#e74c3c; font-weight:600;");
+    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbSdr_, sbRec_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
     }
@@ -1252,6 +1254,7 @@ void MainWindow::onRecordingState(bool recording, const QString& path) {
         recStatus_->setText("● REC: " + QFileInfo(path).fileName());
     } else {
         recStatus_->setText("空闲");
+        if (sbRec_) sbRec_->setText("");
     }
     recordBtn_->setText(recording ? "■ 停止" : "● 录制");
     recordBtn_->setProperty("recording", recording);
@@ -1275,6 +1278,7 @@ void MainWindow::onRecordingProgress(const QString& path, int seconds, qint64 by
             .arg(mm, 2, 10, QLatin1Char('0'))
             .arg(ss, 2, 10, QLatin1Char('0'))
             .arg(kb, 0, 'f', 1));
+    if (sbRec_) sbRec_->setText(QString("● REC %1:%2").arg(mm,2,10,QLatin1Char('0')).arg(ss,2,10,QLatin1Char('0')));
 }
 
 void MainWindow::onRecordClicked() {

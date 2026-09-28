@@ -144,6 +144,7 @@ private:
     QLabel*         sbSr_   = nullptr;
     QLabel*         sbVfo_  = nullptr;
     QLabel*         sbSdr_  = nullptr;
+    QLabel*         sbRec_  = nullptr;
 
     // AI
     ai::Agent*      agent_       = nullptr;
