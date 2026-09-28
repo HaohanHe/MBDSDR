@@ -15,6 +15,8 @@
 #include <QCheckBox>
 #include <QGroupBox>
 #include <QTabWidget>
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
 #include <QPlainTextEdit>
 #include <QTableWidget>
 #include <QHeaderView>
@@ -627,6 +629,24 @@ MainWindow::MainWindow(QWidget* parent)
     connect(recIgnoreSqlChk_, &QCheckBox::toggled, this, &MainWindow::scheduleSave);
     connect(rightTabs_, &QTabWidget::currentChanged, this, &MainWindow::scheduleSave);
     connect(centerTabs_, &QTabWidget::currentChanged, this, &MainWindow::scheduleSave);
+
+    // Gentle fade-in when switching tabs (150ms). Real-time spectrum/waterfall
+    // are untouched; this only dresses the tab content swap.
+    auto fadeIn = [](QWidget* w) {
+        if (!w) return;
+        auto* eff = new QGraphicsOpacityEffect(w);
+        eff->setOpacity(0.0);
+        w->setGraphicsEffect(eff);
+        auto* anim = new QPropertyAnimation(eff, "opacity", eff);
+        anim->setDuration(150);
+        anim->setStartValue(0.0);
+        anim->setEndValue(1.0);
+        anim->start(QAbstractAnimation::DeleteWhenStopped);
+    };
+    connect(centerTabs_, &QTabWidget::currentChanged, this,
+            [=](int) { fadeIn(centerTabs_->currentWidget()); });
+    connect(rightTabs_, &QTabWidget::currentChanged, this,
+            [=](int) { fadeIn(rightTabs_->currentWidget()); });
     connect(mainSplitter_, &QSplitter::splitterMoved, this, &MainWindow::scheduleSave);
     connect(spectrum_, &ui::SpectrumWidget::viewChanged, this, &MainWindow::scheduleSave);
     connect(spectrum_, &ui::SpectrumWidget::visibleRangeChanged,

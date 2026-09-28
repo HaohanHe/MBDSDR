@@ -37,16 +37,18 @@ inline int scaled(int px) {
 // =====================================================================
 inline constexpr const char* kBgMain    = "#080a0c";
 inline constexpr const char* kBgBar      = "#000000";
-inline constexpr const char* kCard1      = "#1f1f1f";
-inline constexpr const char* kCard2      = "#2b2c2f";
-inline constexpr const char* kCard3      = "#35373c";
+inline constexpr const char* kCard1      = "#151a1f";
+inline constexpr const char* kCard2      = "#1e242b";
+inline constexpr const char* kCard3      = "#283038";
 
-inline constexpr const char* kCardEdge  = "rgba(255, 255, 255, 0.08)";
+inline constexpr const char* kCardEdge  = "rgba(255, 255, 255, 0.07)";
 
 // =====================================================================
-// Colors -- text
+// Colors -- text (warm neutral, not dead gray)
 // =====================================================================
 inline constexpr const char* kTextWhite = "#ffffff";
+inline constexpr const char* kTextPrimary   = "#ECEAE6";   // warm near-white
+inline constexpr const char* kTextSecondary = "#B9B6B1";   // warm mid-gray
 inline QString textRgba(double a) {
     return QString("rgba(255, 255, 255, %1)").arg(a);
 }
@@ -61,8 +63,12 @@ inline constexpr double kTextAlphaDisabled  = 0.2;
 // =====================================================================
 // Colors -- accents
 // =====================================================================
-inline constexpr const char* kAccent      = "#919cac";
-inline QString splitterHandleRgba() { return QString("rgba(217, 217, 217, 0.3)"); }
+// Clean, confident system blue: bright enough to read on #080a0c without
+// being neon. Hover lifts lighter, pressed drops ~20% luminance.
+inline constexpr const char* kAccent       = "#7CC4FF";
+inline constexpr const char* kAccentHover  = "#9FD4FF";
+inline constexpr const char* kAccentPress  = "#5AA8F0";
+inline QString splitterHandleRgba() { return QString("rgba(124, 196, 255, 0.35)"); }
 inline constexpr const char* kSuccess     = "#5fd08a";
 inline constexpr const char* kWarning      = "#e0b35a";
 
@@ -72,9 +78,17 @@ inline constexpr const char* kWarning      = "#e0b35a";
 inline constexpr int kRadiusPanel     = 24;
 inline constexpr int kRadiusDockIcon   = 13;
 inline constexpr int kRadiusSearch     = 8;
+inline constexpr int kRadiusCard       = 10;
 inline constexpr int kRadiusSplitter   = 10;
 inline constexpr int kRadiusSmall      = 4;
 inline constexpr const char* kRadiusCircle = "50%";
+
+// =====================================================================
+// Spacing rhythm (base px, scaled at runtime): S=4 M=8 L=16
+// =====================================================================
+inline constexpr int kSpacingS = 4;
+inline constexpr int kSpacingM = 8;
+inline constexpr int kSpacingL = 16;
 
 // =====================================================================
 // Sizes (base px, multiply by scaled() at runtime)
@@ -192,15 +206,16 @@ inline constexpr int kRecTemplateMinW = 140;
 // Fine tuning step (keyboard nudge)
 inline constexpr double kFreqFineStepHz = 10000.0;
 
-// QSS internal padding/margin (base px, scaled at generation time)
-inline constexpr int kBtnPadV         = 4;
-inline constexpr int kBtnPadH         = 12;
+// QSS internal padding/margin (base px, scaled at generation time).
+// Vertical padding = kSpacingM, horizontal = kSpacingL, per the rhythm.
+inline constexpr int kBtnPadV         = kSpacingM;
+inline constexpr int kBtnPadH         = kSpacingL;
 inline constexpr int kSplitterMarginV = 8;
 inline constexpr int kSplitterMarginH = 2;
-inline constexpr int kComboPadV       = 4;
-inline constexpr int kComboPadH       = 10;
-inline constexpr int kGroupMarginTop  = 12;
-inline constexpr int kGroupPadTop    = 10;
+inline constexpr int kComboPadV       = kSpacingM;
+inline constexpr int kComboPadH       = kSpacingL;
+inline constexpr int kGroupMarginTop  = kSpacingL;
+inline constexpr int kGroupPadTop      = kSpacingM;
 
 // =====================================================================
 // Ratios
@@ -217,9 +232,11 @@ inline constexpr const char* kFontFamily =
 inline constexpr const char* kFontMono =
     "\"JetBrains Mono\", \"Fira Code\", \"Inter\", \"PingFang SC\", monospace";
 
-inline constexpr double kFontPanelTitlePt  = 18.0;
-inline constexpr double kFontBodyPt       = 10.5;
-inline constexpr double kFontAuxPt        = 8.5;
+inline constexpr double kFontTitlePt  = 14.0;   // group / panel titles, bold
+inline constexpr double kFontBodyPt   = 11.0;   // controls / labels
+inline constexpr double kFontAuxPt     = 9.5;   // status / hints / mono info
+// Legacy alias kept so existing code compiles.
+inline constexpr double kFontPanelTitlePt = kFontTitlePt;
 
 // =====================================================================
 // Dark QSS generator -- simplified, only what we use.
@@ -227,118 +244,154 @@ inline constexpr double kFontAuxPt        = 8.5;
 // =====================================================================
 inline QString buildDarkQss() {
     double f = scaleFactor();
-    int touchMin = static_cast<int>(kTouchMin * f);
-    int radiusPanel = static_cast<int>(kRadiusPanel * f);
-    int radiusSearch = static_cast<int>(kRadiusSearch * f);
-    int splitterW = static_cast<int>(kSplitterWidth * f);
-    int radiusSplitter = static_cast<int>(kRadiusSplitter * f);
-    int btnPadV = static_cast<int>(kBtnPadV * f);
-    int btnPadH = static_cast<int>(kBtnPadH * f);
-    int splitterMarginV = static_cast<int>(kSplitterMarginV * f);
-    int splitterMarginH = static_cast<int>(kSplitterMarginH * f);
-    int comboPadV = static_cast<int>(kComboPadV * f);
-    int comboPadH = static_cast<int>(kComboPadH * f);
-    int groupMarginTop = static_cast<int>(kGroupMarginTop * f);
-    int groupPadTop = static_cast<int>(kGroupPadTop * f);
+    auto S = [&](int px) { return QString::number(static_cast<int>(px * f)); };
+
+    const QString bg      = QString::fromUtf8(kBgMain);
+    const QString bgBar   = QString::fromUtf8(kBgBar);
+    const QString card1   = QString::fromUtf8(kCard1);
+    const QString card2   = QString::fromUtf8(kCard2);
+    const QString edge    = QString::fromUtf8(kCardEdge);
+    const QString textPri = QString::fromUtf8(kTextPrimary);
+    const QString textSec = QString::fromUtf8(kTextSecondary);
+    const QString accent  = QString::fromUtf8(kAccent);
+    const QString accentH = QString::fromUtf8(kAccentHover);
+    const QString accentP = QString::fromUtf8(kAccentPress);
 
     return QStringLiteral(R"(
 QMainWindow, QWidget {
-    background-color: %1;
-    color: %2;
-    font-family: %3;
+    background-color: %bg%;
+    color: %textPri%;
+    font-family: %font%;
 }
 QWidget#topBar {
-    background-color: %4;
+    background-color: %bgBar%;
     border: none;
-    border-bottom: 1px solid %5;
+    border-bottom: 1px solid %edge%;
 }
 QFrame#panelCard {
-    background-color: %6;
-    border: 1px solid %5;
-    border-radius: %7px;
+    background-color: %card1%;
+    border: 1px solid %edge%;
+    border-radius: %radCard%px;
 }
-QLabel { color: %2; background: transparent; }
-QLabel#panelTitle { color: %8; font-size: %9pt; font-weight: 600; }
-QLabel#dockHint { color: %10; font-size: %11pt; }
-QLabel#monoInfo { color: %12; font-family: %13; font-size: %11pt; }
-QPushButton {
-    background-color: %14;
-    color: %2;
+QLabel { color: %textPri%; background: transparent; }
+QLabel#panelTitle { color: %textPri%; font-size: %fontTitle%pt; font-weight: 600; }
+QLabel#dockHint, QLabel#statusHint { color: %textSec%; font-size: %fontAux%pt; }
+QLabel#monoInfo { color: %textSec%; font-family: %mono%; font-size: %fontAux%pt; }
+QTabBar::tab {
+    background: transparent;
+    color: %textSec%;
+    padding: %padMV%px %padLH%px;
     border: none;
-    border-radius: %15px;
-    font-size: %11pt;
-    min-height: %16px;
-    padding: %21px %22px;
+    border-radius: %radSmall%px;
+    cursor: pointer;
 }
-QPushButton:hover  { background-color: %6; }
-QPushButton:pressed{ background-color: %4; }
+QTabBar::tab:selected { color: %accent%; font-weight: 600; }
+QTabBar::tab:hover { color: %textPri%; }
+QPushButton {
+    background-color: %card2%;
+    color: %textPri%;
+    border: 1px solid transparent;
+    border-radius: %radCard%px;
+    font-size: %fontBody%pt;
+    min-height: %touch%px;
+    padding: %padMV%px %padLH%px;
+    cursor: pointer;
+}
+QPushButton:hover  { background-color: %card3%; border: 1px solid %edge%; }
+QPushButton:pressed{ background-color: %accentP%; color: #06121c; }
+QPushButton:disabled { color: rgba(255,255,255,0.3); background-color: %card1%; }
 QSplitter::handle { background: transparent; }
 QSplitter::handle:horizontal {
-    width: %17px;
-    background: %18;
-    border-radius: %19px;
-    margin: %23px %24px;
+    width: %splW%px;
+    background: %splitterRgba%;
+    border-radius: %radSpl%px;
+    margin: %splMV%px %splMH%px;
 }
-QStatusBar { background: %4; color: %10; border-top: 1px solid %5; }
-QComboBox {
-    background-color: %6;
-    color: %2;
-    border: none;
-    border-radius: %15px;
-    padding: %25px %26px;
-    min-height: %16px;
+QStatusBar { background: %bgBar%; color: %textSec%; border-top: 1px solid %edge%; }
+QComboBox, QSpinBox, QDoubleSpinBox {
+    background-color: %card2%;
+    color: %textPri%;
+    border: 1px solid %edge%;
+    border-radius: %radCard%px;
+    padding: %padMV%px %padLH%px;
+    min-height: %touch%px;
 }
+QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover { border: 1px solid %accent%; }
 QComboBox QAbstractItemView {
-    background-color: %14;
-    color: %2;
-    selection-background-color: %20;
-    selection-color: %4;
-    border: none;
+    background-color: %card1%;
+    color: %textPri%;
+    selection-background-color: %accent%;
+    selection-color: #06121c;
+    border: 1px solid %edge%;
+    outline: none;
 }
 QGroupBox {
-    border: 1px solid %5;
-    border-radius: %15px;
-    margin-top: %27px;
-    padding-top: %28px;
-    color: %8;
+    border: 1px solid %edge%;
+    border-radius: %radCard%px;
+    margin-top: %groupTop%px;
+    padding-top: %groupPad%px;
+    color: %textPri%;
     font-weight: 600;
+    font-size: %fontBody%pt;
+    background-color: %card1%;
 }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; }
-QPlainTextEdit, QTableWidget {
-    background-color: %14;
-    border: 1px solid %5;
-    border-radius: %15px;
-    color: %2;
+QGroupBox::title { subcontrol-origin: margin; left: %groupPad%px; padding: 0 %padSV%px; }
+QPlainTextEdit, QTableWidget, QListWidget {
+    background-color: %card1%;
+    border: 1px solid %edge%;
+    border-radius: %radCard%px;
+    color: %textPri%;
+    gridline-color: rgba(255,255,255,0.05);
+}
+QTableWidget::item, QListWidget::item { padding: %padSV%px %padMV%px; }
+QTableWidget::item:hover, QListWidget::item:hover { background-color: %card2%; }
+QTableWidget::item:selected, QListWidget::item:selected {
+    background-color: %accent%;
+    color: #06121c;
+}
+QHeaderView::section {
+    background-color: %card2%;
+    color: %textSec%;
+    border: none;
+    border-right: 1px solid %edge%;
+    padding: %padSV%px %padMV%px;
+}
+QCheckBox { color: %textPri%; spacing: %padMV%px; }
+QToolTip {
+    background-color: %card1%;
+    color: %textPri%;
+    border: 1px solid %accent%;
+    padding: %padSV%px %padMV%px;
 }
 )")
-        .arg(QString::fromUtf8(kBgMain),
-             textRgba(kTextAlphaSecondary),
-             QString::fromUtf8(kFontFamily),
-             QString::fromUtf8(kBgBar),
-             QString::fromUtf8(kCardEdge),
-             QString::fromUtf8(kCard1),
-             QString::number(radiusPanel),
-             textRgba(kTextAlphaTertiary2),
-             QString::number(kFontPanelTitlePt),
-             textRgba(kTextAlphaDisabled),
-             QString::number(kFontAuxPt),
-             textRgba(kTextAlphaTertiary),
-             QString::fromUtf8(kFontMono),
-             QString::fromUtf8(kCard2),
-             QString::number(radiusSearch),
-             QString::number(touchMin),
-             QString::number(splitterW),
-             splitterHandleRgba(),
-             QString::number(radiusSplitter),
-             QString::fromUtf8(kAccent),
-             QString::number(btnPadV),
-             QString::number(btnPadH),
-             QString::number(splitterMarginV),
-             QString::number(splitterMarginH),
-             QString::number(comboPadV),
-             QString::number(comboPadH),
-             QString::number(groupMarginTop),
-             QString::number(groupPadTop));
+        .replace(QStringLiteral("%bg%"), bg)
+        .replace(QStringLiteral("%bgBar%"), bgBar)
+        .replace(QStringLiteral("%card1%"), card1)
+        .replace(QStringLiteral("%card2%"), card2)
+        .replace(QStringLiteral("%card3%"), QString::fromUtf8(kCard3))
+        .replace(QStringLiteral("%edge%"), edge)
+        .replace(QStringLiteral("%textPri%"), textPri)
+        .replace(QStringLiteral("%textSec%"), textSec)
+        .replace(QStringLiteral("%accent%"), accent)
+        .replace(QStringLiteral("%accentP%"), accentP)
+        .replace(QStringLiteral("%font%"), QString::fromUtf8(kFontFamily))
+        .replace(QStringLiteral("%mono%"), QString::fromUtf8(kFontMono))
+        .replace(QStringLiteral("%fontTitle%"), QString::number(kFontTitlePt))
+        .replace(QStringLiteral("%fontBody%"), QString::number(kFontBodyPt))
+        .replace(QStringLiteral("%fontAux%"), QString::number(kFontAuxPt))
+        .replace(QStringLiteral("%touch%"), S(kTouchMin))
+        .replace(QStringLiteral("%radCard%"), S(kRadiusCard))
+        .replace(QStringLiteral("%radSmall%"), S(kRadiusSmall))
+        .replace(QStringLiteral("%radSpl%"), S(kRadiusSplitter))
+        .replace(QStringLiteral("%splW%"), S(kSplitterWidth))
+        .replace(QStringLiteral("%splitterRgba%"), splitterHandleRgba())
+        .replace(QStringLiteral("%splMV%"), S(kSplitterMarginV))
+        .replace(QStringLiteral("%splMH%"), S(kSplitterMarginH))
+        .replace(QStringLiteral("%padSV%"), S(kSpacingS))
+        .replace(QStringLiteral("%padMV%"), S(kSpacingM))
+        .replace(QStringLiteral("%padLH%"), S(kSpacingL))
+        .replace(QStringLiteral("%groupTop%"), S(kGroupMarginTop))
+        .replace(QStringLiteral("%groupPad%"), S(kGroupPadTop));
 }
 
 } // namespace tokens
