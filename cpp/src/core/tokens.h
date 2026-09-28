@@ -71,6 +71,7 @@ inline constexpr const char* kAccentPress  = "#5AA8F0";
 inline QString splitterHandleRgba() { return QString("rgba(124, 196, 255, 0.35)"); }
 inline constexpr const char* kSuccess     = "#5fd08a";
 inline constexpr const char* kWarning      = "#e0b35a";
+inline constexpr const char* kDanger       = "#e74c3c";
 
 // =====================================================================
 // Corner radii

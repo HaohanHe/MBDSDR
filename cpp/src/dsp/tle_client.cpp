@@ -438,5 +438,31 @@ Topocentric TleClient::propagateAt(const QDateTime& timeUtc, const TleEntry& e,
     return out;
 }
 
+TleClient::GeoCoord TleClient::ecefToLatLon(double x, double y, double z) {
+    // WGS84 ellipsoid, Bowring iteration.
+    const double a = kEarthRadiusKm;
+    const double e2 = kEartFlatE2;
+    double lon = std::atan2(y, x) * kRad2Deg;
+    double p = std::sqrt(x*x + y*y);
+    double lat = std::atan2(z, p * (1.0 - e2));  // initial guess
+    for (int i = 0; i < 6; ++i) {
+        double s = std::sin(lat);
+        double N = a / std::sqrt(1.0 - e2*s*s);
+        lat = std::atan2(z + e2*N*s, p);
+    }
+    return {lat * kRad2Deg, lon};
+}
+
+TleClient::GeoCoord TleClient::propagateLatLon(const QDateTime& timeUtc, const TleEntry& e) const {
+    Orbit o;
+    if (!buildOrbit(e, o)) return {};
+    QDateTime t = timeUtc.toUTC();
+    double dt = o.epoch.secsTo(t);
+    double eci[3], ecef[3];
+    propagateEci(o, dt, eci);
+    eciToEcef(eci, t, ecef);
+    return ecefToLatLon(ecef[0], ecef[1], ecef[2]);
+}
+
 } // namespace dsp
 } // namespace mbdsdr

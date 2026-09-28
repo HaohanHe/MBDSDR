@@ -72,6 +72,13 @@ public:
     Topocentric propagateAt(const QDateTime& timeUtc, const TleEntry& tle,
                              double stationLatDeg, double stationLonDeg) const;
 
+    /// Satellite sub-point (latitude/longitude in degrees) at timeUtc.
+    struct GeoCoord { double latDeg = 0, lonDeg = 0; };
+    GeoCoord propagateLatLon(const QDateTime& timeUtc, const TleEntry& tle) const;
+
+    /// ECEF (x,y,z km) -> WGS84 lat/lon. Exposed for unit tests.
+    static GeoCoord ecefToLatLon(double x, double y, double z);
+
     // Read the on-disk TLE cache (valid==false if absent/unreadable).
     TleCache cachedTle() const;
 
