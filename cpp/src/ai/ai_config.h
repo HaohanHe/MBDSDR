@@ -13,6 +13,7 @@ struct AiConfig {
     QString model = "Qwen/Qwen2.5-7B-Instruct";
     double stationLat = std::numeric_limits<double>::quiet_NaN();
     double stationLon = std::numeric_limits<double>::quiet_NaN();
+    double stationAlt = 0.0;   // metres
     bool stationSet = false;
     // Audio output device description, or "default" for the system default.
     QString audioDevice = "default";

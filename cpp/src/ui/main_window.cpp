@@ -51,6 +51,7 @@
 #include <QListWidget>
 #include <QLineEdit>
 #include <QSpinBox>
+#include <QApplication>
 #include <QInputDialog>
 #include "ui/world_view.h"
 #include "ui/waterfall.h"
@@ -574,6 +575,11 @@ MainWindow::MainWindow(QWidget* parent)
 
     // ---- Engine ----
     engine_ = new dsp::SpectrumEngine(this);
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        if (engine_->audioOutput())
+            engine_->audioOutput()->setVolume(s.value("rx/volume", 80).toInt() / 100.0);
+    }
     connect(engine_, &dsp::SpectrumEngine::spectrumReady,
             spectrum_, &ui::SpectrumWidget::setSpectrum);
     connect(engine_, &dsp::SpectrumEngine::spectrumReady,
@@ -760,6 +766,18 @@ MainWindow::MainWindow(QWidget* parent)
                     }
                 }
             }
+            // Apply volume live (0..100 -> 0..1).
+            if (engine_->audioOutput())
+                engine_->audioOutput()->setVolume(dlg.volume() / 100.0);
+            // Apply UI scale live: re-tokenize + restyle immediately.
+            tokens::setUserScale(dlg.userScale());
+            static_cast<QApplication*>(qApp)->setStyleSheet(tokens::buildDarkQss());
+            // Re-evaluate AI tab now that the key may have changed.
+            const bool hasKey = cfg.isConfigured();
+            if (aiInput_) aiInput_->setEnabled(hasKey);
+            if (aiStatus_) aiStatus_->setText(hasKey
+                ? "已配置 API Key — AI 功能接入中"
+                : "AI 助手将在这里接入（需在设置中配置 API Key）");
         }
     });
 
