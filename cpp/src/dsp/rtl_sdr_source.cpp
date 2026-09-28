@@ -132,7 +132,11 @@ bool RtlSdrSource::start() {
     checkRtl("set_direct_sampling", rtlsdr_set_direct_sampling(dev_, directSampling_));
     checkRtl("set_offset_tuning", rtlsdr_set_offset_tuning(dev_, offsetTuning_ ? 1 : 0));
     checkRtl("set_bias_tee", rtlsdr_set_bias_tee(dev_, biasTee_ ? 1 : 0));
-    checkRtl("set_freq_correction", rtlsdr_set_freq_correction(dev_, static_cast<int>(ppm_)));
+    // Zero correction is the default and needs no call (FC0012 returns -2
+    // here even though nothing is being corrected). Non-zero ppm is applied
+    // live by setPpm() and its result is reported honestly.
+    if (ppm_ != 0)
+        checkRtl("set_freq_correction", rtlsdr_set_freq_correction(dev_, static_cast<int>(ppm_)));
     rtlsdr_reset_buffer(dev_);
     running_ = true;
     qInfo() << "[RtlSdrSource] opened device 0, freq=" << f0_ << "Hz sr=" << fs_ << "Hz"
