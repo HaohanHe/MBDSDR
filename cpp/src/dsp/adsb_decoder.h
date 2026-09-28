@@ -26,6 +26,9 @@ struct AircraftInfo {
     double groundspeedKt = -1;
     double headingDeg = -1;
     bool hasVelocity = false;
+    int verticalRateFpm = 0;
+    bool hasVerticalRate = false;
+    QDateTime positionTime;
 };
 
 // CPR global position decode (even/odd pair). Public for unit tests.
