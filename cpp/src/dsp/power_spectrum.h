@@ -24,6 +24,8 @@ public:
 
     void setWindow(Window w);
     void setAverage(Average a);
+    Window window() const { return win_; }
+    Average average() const { return avg_; }
     // input: complex IQ (power-of-two length); output: dBFS, fft-shifted.
     void process(const std::vector<std::complex<float>>& input,
                  std::vector<float>& output);
