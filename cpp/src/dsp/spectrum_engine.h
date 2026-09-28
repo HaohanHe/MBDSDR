@@ -71,6 +71,7 @@ public slots:
     // source falls back to TestSignalSource (no fake data) and emits sourceChanged.
     bool connectRtlTcp(const QString& host, quint16 port);
     void setGatedRecordingEnabled(bool e);
+    void setAdsbReferencePosition(double latDeg, double lonDeg) { adsbDecoder_.setReferencePosition(latDeg, lonDeg); }
 
     // ---- Recording options (SDR++-aligned) ----
     void setRecTarget(RecTarget t) { recTarget_ = t; }

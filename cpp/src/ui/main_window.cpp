@@ -1339,6 +1339,8 @@ void MainWindow::refetchTle() {
         skyEmptyLabel_->show();
         return;
     }
+    // Feed station position to ADS-B decoder for CPR local decode (single-frame fix).
+    engine_->setAdsbReferencePosition(stationLat_, stationLon_);
     // Cache-first: if we have a recent (<48h) TLE cache, show it immediately
     // and refresh in the background rather than blocking on the network.
     dsp::TleCache cache = tleClient_->cachedTle();
