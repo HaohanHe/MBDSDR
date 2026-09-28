@@ -563,7 +563,7 @@ MainWindow::MainWindow(QWidget* parent)
     sbVfo_  = new QLabel("--", this);
     sbSdr_  = new QLabel("Test Signal", this);
     sbRec_  = new QLabel("", this);
-    sbRec_->setStyleSheet("color:#e74c3c; font-weight:600;");
+    sbRec_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kDanger));
     for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbSdr_, sbRec_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
@@ -1567,6 +1567,16 @@ void MainWindow::updateLiveSatellite() {
         }
     }
     skyView_->setLiveSatellites(sats);
+
+    // Drop the same satellites onto the world map as lat/lon sub-points.
+    QList<ui::SatellitePoint> wpts;
+    for (int i = 0; i < passes_.size(); ++i) {
+        const dsp::SatPass& p = passes_[i];
+        if (now < p.aos || now > p.los) continue;
+        auto geo = tleClient_->propagateLatLon(now, p.tle);
+        wpts.append({p.name, geo.latDeg, geo.lonDeg});
+    }
+    worldView_->setSatellites(wpts);
 }
 
 } // namespace mbdsdr

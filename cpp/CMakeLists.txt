@@ -168,6 +168,11 @@ target_include_directories(test_shortcuts PRIVATE src build/test_shortcuts_autog
 target_link_libraries(test_shortcuts PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 add_test(NAME shortcuts COMMAND test_shortcuts)
 
+add_executable(test_geo tests/test_geo.cpp src/dsp/tle_client.cpp)
+target_include_directories(test_geo PRIVATE src)
+target_link_libraries(test_geo PRIVATE Qt6::Network Qt6::Concurrent Qt6::Core)
+add_test(NAME geo COMMAND test_geo)
+
 add_executable(test_channelizer tests/test_channelizer.cpp
     src/dsp/channelizer.cpp src/dsp/fft.cpp)
 target_include_directories(test_channelizer PRIVATE src)
