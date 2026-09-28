@@ -29,16 +29,13 @@ void SkyView::setEmptyText(const QString& text) {
     update();
 }
 
-void SkyView::setLiveSatellite(double az, double el, const QString& name) {
-    liveValid_ = true;
-    liveAz_ = az;
-    liveEl_ = el;
-    liveName_ = name;
+void SkyView::setLiveSatellites(QList<LiveSat> sats) {
+    liveSats_ = std::move(sats);
     update();
 }
 
-void SkyView::clearLiveSatellite() {
-    liveValid_ = false;
+void SkyView::clearLiveSatellites() {
+    liveSats_.clear();
     update();
 }
 
@@ -120,26 +117,35 @@ void SkyView::paintEvent(QPaintEvent*) {
         }
     }
 
-    // Live satellite position: glowing green dot + label, drawn on top.
-    if (liveValid_ && liveEl_ >= 0.0) {
-        QPointF lp = polarToCart(liveAz_, liveEl_, radius, center);
+    // Live satellite positions: non-selected sats are small tertiary dots; the
+    // selected one gets an accent glow + name/az-el label, drawn on top.
+    for (const auto& ls : liveSats_) {
+        if (ls.el < 0.0) continue;
+        QPointF lp = polarToCart(ls.az, ls.el, radius, center);
+        if (!ls.selected) {
+            // Small, unobtrusive tertiary dot.
+            p.setBrush(QColor(tokens::kTextAlphaTertiary));
+            p.setPen(Qt::NoPen);
+            p.drawEllipse(lp, tokens::scaled(2.5), tokens::scaled(2.5));
+            continue;
+        }
         double r = tokens::scaled(5);
         QRadialGradient glow(lp, r * 3.0);
-        glow.setColorAt(0.0, QColor(tokens::kSuccess));
-        glow.setColorAt(1.0, QColor(tokens::kSuccess).lighter());
+        glow.setColorAt(0.0, QColor(tokens::kAccent));
+        glow.setColorAt(1.0, QColor(tokens::kAccent).lighter());
         p.setBrush(QBrush(glow));
         p.setPen(Qt::NoPen);
         p.drawEllipse(lp, r * 1.6, r * 1.6);
-        p.setBrush(QColor(tokens::kSuccess));
+        p.setBrush(QColor(tokens::kAccent));
         p.drawEllipse(lp, r, r);
-        p.setPen(QPen(QColor(tokens::kSuccess)));
+        p.setPen(QPen(QColor(tokens::kAccent)));
         QFont small = font();
         small.setPointSize(tokens::kFontAuxPt);
         p.setFont(small);
-        p.drawText(lp + QPointF(r + 4, -r - 2), liveName_);
+        p.drawText(lp + QPointF(r + 4, -r - 2), ls.name);
         p.drawText(lp + QPointF(r + 4, -r + 12),
                    QString("az=%1° el=%2°")
-                       .arg(liveAz_, 0, 'f', 0).arg(liveEl_, 0, 'f', 1));
+                       .arg(ls.az, 0, 'f', 0).arg(ls.el, 0, 'f', 1));
     }
 
     if (passes_.isEmpty()) {
