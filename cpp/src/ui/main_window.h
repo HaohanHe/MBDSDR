@@ -134,7 +134,16 @@ private:
     QSplitter*      mainSplitter_ = nullptr;
     QPlainTextEdit* cwText_      = nullptr;
     QLabel*         cwWpm_       = nullptr;
+    QLabel*         cwEmpty_     = nullptr;
     QTableWidget*   adsbTable_   = nullptr;
+    QLabel*         adsbEmpty_   = nullptr;
+    QMap<QString,int> adsbRow_;
+
+    // Permanent status strip.
+    QLabel*         sbMode_ = nullptr;
+    QLabel*         sbSr_   = nullptr;
+    QLabel*         sbVfo_  = nullptr;
+    QLabel*         sbSdr_  = nullptr;
 
     // AI
     ai::Agent*      agent_       = nullptr;

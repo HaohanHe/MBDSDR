@@ -347,8 +347,20 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* cwPage = new QWidget;
     auto* cwLay = new QVBoxLayout(cwPage);
+    auto* cwTop = new QHBoxLayout;
     cwWpm_ = new QLabel("WPM: --", cwPage);
-    cwLay->addWidget(cwWpm_);
+    cwTop->addWidget(cwWpm_);
+    cwTop->addStretch();
+    auto* cwClear = new QPushButton("清空", cwPage);
+    connect(cwClear, &QPushButton::clicked, this, [this]() {
+        cwText_->clear();
+    });
+    cwTop->addWidget(cwClear);
+    cwLay->addLayout(cwTop);
+    cwEmpty_ = new QLabel("切换到 CW 模式开始解码", cwPage);
+    cwEmpty_->setObjectName("statusHint");
+    cwEmpty_->setAlignment(Qt::AlignCenter);
+    cwLay->addWidget(cwEmpty_);
     cwText_ = new QPlainTextEdit(cwPage);
     cwText_->setReadOnly(true);
     cwLay->addWidget(cwText_);
@@ -356,9 +368,14 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* adsbPage = new QWidget;
     auto* adsbLay = new QVBoxLayout(adsbPage);
-    adsbLay->addWidget(new QLabel("ADS-B 1090MHz — 需专用天线", adsbPage));
-    adsbTable_ = new QTableWidget(0, 4, adsbPage);
-    adsbTable_->setHorizontalHeaderLabels({"ICAO", "呼号", "高度", "时间"});
+    adsbEmpty_ = new QLabel("1090MHz 无飞机\n（FC0012 一般收不到 1090，留作支持）", adsbPage);
+    adsbEmpty_->setObjectName("statusHint");
+    adsbEmpty_->setAlignment(Qt::AlignCenter);
+    adsbEmpty_->setWordWrap(true);
+    adsbLay->addWidget(adsbEmpty_);
+    adsbTable_ = new QTableWidget(0, 6, adsbPage);
+    adsbTable_->setHorizontalHeaderLabels({"ICAO", "呼号", "高度(ft)", "速度(kt)", "距离(km)", "时间"});
+    adsbTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     adsbLay->addWidget(adsbTable_);
     rightTabs_->addTab(adsbPage, "ADS-B");
 
@@ -500,7 +517,8 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* aiPage = new QWidget;
     auto* aiLay = new QVBoxLayout(aiPage);
-    aiStatus_ = new QLabel("未配置 API Key — 仅本地指令", aiPage);
+    aiStatus_ = new QLabel("AI 助手将在这里接入（需在设置中配置 API Key）", aiPage);
+    aiStatus_->setWordWrap(true);
     aiLay->addWidget(aiStatus_);
     aiChat_ = new QPlainTextEdit(aiPage);
     aiChat_->setReadOnly(true);
@@ -510,6 +528,24 @@ MainWindow::MainWindow(QWidget* parent)
     aiLay->addWidget(aiInput_);
     auto* sendBtn = new QPushButton("发送", aiPage);
     aiLay->addWidget(sendBtn);
+    // No fake replies: input only enabled when a key is configured.
+    {
+        mbdsdr::ai::AiConfig cfg;
+        cfg.load();
+        const bool hasKey = cfg.isConfigured();
+        aiInput_->setEnabled(hasKey);
+        sendBtn->setEnabled(hasKey);
+        aiStatus_->setText(hasKey
+            ? "已配置 API Key — AI 功能接入中"
+            : "AI 助手将在这里接入（需在设置中配置 API Key）");
+    }
+    connect(sendBtn, &QPushButton::clicked, this, [this]() {
+        const QString txt = aiInput_->text().trimmed();
+        if (txt.isEmpty()) return;
+        aiChat_->appendPlainText("> " + txt);
+        aiInput_->clear();
+        aiChat_->appendPlainText("AI 功能接入中...");   // honest placeholder, no fake reply
+    });
     rightTabs_->addTab(aiPage, "AI 助手");
 
     rightLay->addWidget(rightTabs_);
@@ -523,6 +559,18 @@ MainWindow::MainWindow(QWidget* parent)
     centralLay->addWidget(splitter);
     setCentralWidget(central);
     statusBar()->showMessage("MBDSDR C++");
+    // Permanent status strip: mode | sample rate | VFO | source.
+    sbMode_ = new QLabel("--", this);
+    sbSr_   = new QLabel("--", this);
+    sbVfo_  = new QLabel("--", this);
+    sbSdr_  = new QLabel("Test Signal", this);
+    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbSdr_}) {
+        l->setObjectName("dockHint");
+        statusBar()->addPermanentWidget(l);
+    }
+    sbMode_->setText(demodCombo_->currentText());
+    sbSr_->setText(srCombo_->currentText());
+    sbVfo_->setText(QString("%1 MHz").arg(freqSpin_->value(), 0, 'f', 3));
 
     // ---- Engine ----
     engine_ = new dsp::SpectrumEngine(this);
@@ -557,7 +605,10 @@ MainWindow::MainWindow(QWidget* parent)
             waterfall_, &ui::WaterfallWidget::setVisibleRange);
 
     connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
-            this, [this](double mhz) { engine_->onSetCenterFreq(mhz * 1e6); });
+            this, [this](double mhz) {
+                engine_->onSetCenterFreq(mhz * 1e6);
+                sbVfo_->setText(QString("%1 MHz").arg(mhz, 0, 'f', 3));
+            });
     // Step combo: set currentStepHz_ and make the spinbox up/down arrows walk
     // by the same step (spinbox unit is MHz).
     auto applyStep = [this](int idx) {
@@ -579,6 +630,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(demodCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) {
                 engine_->setDemodMode(demodCombo_->currentText());
+                sbMode_->setText(demodCombo_->currentText());
                 static const QMap<QString, int> bwIdx = {
                     {"AM", 0}, {"NFM", 1}, {"WFM", 2}, {"USB", 3}, {"LSB", 3}, {"CW", 4}
                 };
@@ -603,6 +655,7 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this](int idx) {
                 static const double kRates[] = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
                 if (idx >= 0 && idx <= 3) engine_->onSetSampleRate(kRates[idx]);
+                sbSr_->setText(srCombo_->currentText());
             });
     connect(bwCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
@@ -1135,6 +1188,7 @@ void MainWindow::onSourceChanged(const QString& name, bool connected) {
     // Recording needs a live data producer -- hardware OR the offline test
     // signal (which still synthesizes IQ/audio). The engine guards the rest.
     if (recordBtn_) recordBtn_->setEnabled(true);
+    sbSdr_->setText(name + (connected ? "" : " (test)"));
     setControlsEnabled(connected);
 }
 
@@ -1191,17 +1245,30 @@ void MainWindow::onRecordClicked() {
 }
 
 void MainWindow::onCwDecoded(const QString& text, double wpm) {
+    if (cwEmpty_) cwEmpty_->hide();
     cwText_->appendPlainText(text);
     cwWpm_->setText(QString("WPM: %1").arg(wpm, 0, 'f', 1));
 }
 
 void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {
-    int row = adsbTable_->rowCount();
-    adsbTable_->insertRow(row);
-    adsbTable_->setItem(row, 0, new QTableWidgetItem(info.icao));
-    adsbTable_->setItem(row, 1, new QTableWidgetItem(info.callsign));
-    adsbTable_->setItem(row, 2, new QTableWidgetItem(info.altitudeFt > 0 ? QString::number(info.altitudeFt) : "--"));
-    adsbTable_->setItem(row, 3, new QTableWidgetItem(QDateTime::currentDateTime().toString("HH:mm:ss")));
+    if (adsbEmpty_) adsbEmpty_->hide();
+    int row = adsbRow_.value(info.icao, -1);
+    if (row < 0) {
+        row = adsbTable_->rowCount();
+        adsbTable_->insertRow(row);
+        adsbRow_[info.icao] = row;
+    }
+    const auto set = [&](int col, const QString& s) {
+        auto* it = adsbTable_->item(row, col);
+        if (!it) { adsbTable_->setItem(row, col, new QTableWidgetItem(s)); }
+        else it->setText(s);
+    };
+    set(0, info.icao);
+    set(1, info.callsign.isEmpty() ? "--" : info.callsign);
+    set(2, info.altitudeFt > 0 ? QString::number(info.altitudeFt) : "--");
+    set(3, "--");   // speed not in AircraftInfo
+    set(4, "--");   // distance needs station + aircraft position
+    set(5, QDateTime::currentDateTime().toString("HH:mm:ss"));
 }
 
 void MainWindow::setControlsEnabled(bool hw) {
