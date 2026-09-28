@@ -1,198 +1,337 @@
+// 频谱页：头部控制区 + 统一频谱/瀑布显示。
+//
+// 诚实原则：未连接 rtl_tcp 时绝不画模拟峰，只给空态文案 + 连接按钮。
+// 构造契约固定：SpectrumPage({controller, rtlHost, rtlPort, onOpenSettings})。
+library;
+
 import 'package:flutter/material.dart';
-import '../connection.dart';
-import '../theme.dart';
 
-// ============================================================================
-// 实时频谱页面
-// ----------------------------------------------------------------------------
-// 订阅 ConnectionService.fftStream 拿到 FFT 幅度数组，用 CustomPainter 逐 bin
-// 画柱状频谱；顶部显示中心频率 / 带宽 / 连接状态；底部为频率轴（左低右高）。
-// 新帧与上一帧做 alpha=0.3 的指数滑动平均，避免高频闪烁。
-// ============================================================================
+import '../app/tokens.dart';
+import '../dsp/fft_processor.dart';
+import '../models/radio_state.dart';
+import '../services/radio_controller.dart';
+import '../widgets/spectrum_display.dart';
 
-class SpectrumPage extends StatefulWidget {
-  /// 直接传入连接服务引用（不经过 Provider）。
-  final ConnectionService connection;
+class SpectrumPage extends StatelessWidget {
+  /// 收音机接口（运行时为 ChangeNotifier，用于监听状态）。
+  final RadioApi controller;
 
-  const SpectrumPage({super.key, required this.connection});
+  /// rtl_tcp 主机（空串表示未配置，引导去设置页）。
+  final String rtlHost;
 
-  @override
-  State<SpectrumPage> createState() => _SpectrumPageState();
-}
+  /// rtl_tcp 端口。
+  final int rtlPort;
 
-class _SpectrumPageState extends State<SpectrumPage> {
-  /// 新帧权重（旧帧占 1 - alpha）。
-  static const double _smoothAlpha = 0.3;
+  /// 空 host 时引导用户去设置页。
+  final VoidCallback? onOpenSettings;
 
-  /// 平滑后的最近一帧（长度变化时重置）。
-  List<double> _smoothed = const [];
-
-  /// 把原始帧与缓存帧做一阶低通混合，结果写回 _smoothed。
-  void _blendInto(List<double> raw) {
-    if (raw.isEmpty) return;
-    if (_smoothed.length != raw.length) {
-      _smoothed = List<double>.unmodifiable(raw);
-      return;
-    }
-    final next = List<double>.generate(
-      raw.length,
-      (i) => _smoothed[i] * (1 - _smoothAlpha) + raw[i] * _smoothAlpha,
-      growable: false,
-    );
-    _smoothed = List<double>.unmodifiable(next);
-  }
+  const SpectrumPage({
+    super.key,
+    required this.controller,
+    required this.rtlHost,
+    required this.rtlPort,
+    this.onOpenSettings,
+  });
 
   @override
   Widget build(BuildContext context) {
-    // 外层监听 conn（ChangeNotifier），保证连接状态变化时顶部信息条刷新。
-    return AnimatedBuilder(
-      animation: widget.connection,
+    return ListenableBuilder(
+      listenable: controller as Listenable,
       builder: (context, _) {
-        final conn = widget.connection;
-        final lowFreq = conn.centerFreqMhz - conn.spanMhz / 2;
-        final highFreq = conn.centerFreqMhz + conn.spanMhz / 2;
-
-        return Container(
-          color: const Color(0xFF1A1A1A),
-          child: SafeArea(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildHeader(conn),
-                Expanded(
-                  child: StreamBuilder<List<double>>(
-                    stream: conn.fftStream,
-                    builder: (context, snap) {
-                      final hasFrame = snap.hasData && snap.data!.isNotEmpty;
-                      if (hasFrame) _blendInto(snap.data!);
-
-                      return Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          // 频谱主体（未连接时给出占位提示）
-                          if (!hasFrame && !conn.isConnected)
-                            const Center(
-                              child: Text(
-                                '等待电脑端频谱数据...',
-                                style: TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 15,
-                                  letterSpacing: 1.2,
-                                ),
-                              ),
-                            )
-                          else
-                            CustomPaint(
-                              size: Size.infinite,
-                              painter: _SpectrumPainter(
-                                bins: _smoothed,
-                                barBottomPadding: 26,
-                                primary: AppTheme.primary,
-                                accent: AppTheme.accent,
-                              ),
-                            ),
-
-                          // 底部频率轴：左低频 / 右高频
-                          Positioned(
-                            left: 12,
-                            right: 12,
-                            bottom: 6,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  '${lowFreq.toStringAsFixed(1)} MHz',
-                                  style: const TextStyle(
-                                    color: Colors.white38,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                                Text(
-                                  '${highFreq.toStringAsFixed(1)} MHz',
-                                  style: const TextStyle(
-                                    color: Colors.white38,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      );
-                    },
+        final isLandscape =
+            MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
+        final body = isLandscape
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(
+                    width: 320,
+                    child: _ControlPanel(
+                      controller: controller,
+                      rtlHost: rtlHost,
+                      rtlPort: rtlPort,
+                      onOpenSettings: onOpenSettings,
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
+                  Expanded(child: _DisplayArea(controller: controller)),
+                ],
+              )
+            : Column(
+                children: [
+                  _ControlPanel(
+                    controller: controller,
+                    rtlHost: rtlHost,
+                    rtlPort: rtlPort,
+                    onOpenSettings: onOpenSettings,
+                  ),
+                  Expanded(child: _DisplayArea(controller: controller)),
+                ],
+              );
+        return Scaffold(
+          backgroundColor: AppTokens.bgMain,
+          body: SafeArea(child: body),
         );
       },
     );
   }
+}
 
-  Widget _buildHeader(ConnectionService conn) {
-    final connected = conn.isConnected;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.white12, width: 0.5)),
+/// 显示区：根据连接状态给空态 / 转圈 / 真实频谱。
+class _DisplayArea extends StatelessWidget {
+  final RadioApi controller;
+  const _DisplayArea({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    switch (controller.status) {
+      case ConnectionStatus.disconnected:
+      case ConnectionStatus.error:
+        return _EmptyState(
+          message: controller.status == ConnectionStatus.error
+              ? '连接错误：${controller.errorMessage ?? '未知错误'}\n未连接 rtl_tcp，当前无实时 IQ。'
+              : '未连接 rtl_tcp：当前无实时 IQ，不显示模拟数据。',
+        );
+      case ConnectionStatus.connecting:
+        return const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: AppTokens.spacingM),
+              Text('正在连接 rtl_tcp…', style: AppTokens.auxiliary),
+            ],
+          ),
+        );
+      case ConnectionStatus.connected:
+        return StreamBuilder<SpectrumFrame>(
+          stream: controller.spectrumStream,
+          builder: (context, snap) {
+            return SpectrumDisplay(
+              frame: snap.data,
+              channelBandwidthHz: controller.mode == DemodMode.nfm
+                  ? 12500
+                  : 200000,
+              onTapFrequency: (hz) => controller.setFrequencyHz(hz.round()),
+            );
+          },
+        );
+    }
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  final String message;
+  const _EmptyState({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(AppTokens.spacingL),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.waterfall_chart_outlined,
+                size: 40, color: AppTokens.textSecondary),
+            const SizedBox(height: AppTokens.spacingM),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: AppTokens.auxiliary,
+            ),
+          ],
+        ),
       ),
-      child: Row(
+    );
+  }
+}
+
+/// 头部控制区。
+class _ControlPanel extends StatelessWidget {
+  final RadioApi controller;
+  final String rtlHost;
+  final int rtlPort;
+  final VoidCallback? onOpenSettings;
+
+  const _ControlPanel({
+    required this.controller,
+    required this.rtlHost,
+    required this.rtlPort,
+    this.onOpenSettings,
+  });
+
+  bool get _hasHost => rtlHost.trim().isNotEmpty;
+
+  Future<void> _connectOrDisconnect(BuildContext context) async {
+    if (controller.status == ConnectionStatus.connected ||
+        controller.status == ConnectionStatus.connecting) {
+      await controller.disconnect();
+    } else {
+      await controller.connect(rtlHost.trim(), rtlPort);
+    }
+  }
+
+  Future<void> _promptFrequency(BuildContext context) async {
+    final ctrl = TextEditingController(
+      text: (controller.freqHz / 1e6).toStringAsFixed(4),
+    );
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTokens.bgBar,
+        title: const Text('输入频率 (MHz)', style: AppTokens.sectionTitle),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: AppTokens.mono,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+    final mhz = double.tryParse(result.trim());
+    if (mhz != null) {
+      await controller.setFrequencyHz((mhz * 1e6).round());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final connected = controller.status == ConnectionStatus.connected;
+    return Container(
+      margin: const EdgeInsets.all(AppTokens.spacingM),
+      padding: const EdgeInsets.all(AppTokens.spacingM),
+      decoration: AppTokens.cardDecoration(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 中心频率 / 带宽
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '中心频率  ${conn.centerFreqMhz.toStringAsFixed(1)} MHz',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
+          // 大频率读数 + 点按输入。
+          Center(
+            child: GestureDetector(
+              onTap: () => _promptFrequency(context),
+              child: Text(
+                '${(controller.freqHz / 1e6).toStringAsFixed(4)} MHz',
+                style: const TextStyle(
+                  fontSize: 26,
+                  fontWeight: FontWeight.w600,
+                  color: AppTokens.textPrimary,
+                  fontFamilyFallback: AppTokens.monoFallback,
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  '带宽  ${conn.spanMhz.toStringAsFixed(1)} MHz',
-                  style: const TextStyle(
-                    color: Colors.white60,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
-          // 连接状态
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: (connected ? AppTheme.success : AppTheme.danger)
-                  .withOpacity(0.15),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 7,
-                  height: 7,
-                  decoration: BoxDecoration(
-                    color: connected ? AppTheme.success : AppTheme.danger,
-                    shape: BoxShape.circle,
-                  ),
+          const SizedBox(height: AppTokens.spacingS),
+          // NFM/WFM 分段。
+          SegmentedButton<DemodMode>(
+            segments: const [
+              ButtonSegment(value: DemodMode.nfm, label: Text('NFM')),
+              ButtonSegment(value: DemodMode.wfm, label: Text('WFM')),
+            ],
+            selected: {controller.mode},
+            onSelectionChanged: (s) => controller.setMode(s.first),
+          ),
+          const SizedBox(height: AppTokens.spacingS),
+          // 频率步进。
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _StepButton(
+                  label: '-1M',
+                  onTap: () =>
+                      controller.setFrequencyHz(controller.freqHz - 1000000)),
+              _StepButton(
+                  label: '-100k',
+                  onTap: () =>
+                      controller.setFrequencyHz(controller.freqHz - 100000)),
+              _StepButton(
+                  label: '+100k',
+                  onTap: () =>
+                      controller.setFrequencyHz(controller.freqHz + 100000)),
+              _StepButton(
+                  label: '+1M',
+                  onTap: () =>
+                      controller.setFrequencyHz(controller.freqHz + 1000000)),
+            ],
+          ),
+          const SizedBox(height: AppTokens.spacingS),
+          // 采样率下拉。
+          Row(
+            children: [
+              const Text('采样率', style: AppTokens.auxiliary),
+              const SizedBox(width: AppTokens.spacingM),
+              Expanded(
+                child: DropdownButton<double>(
+                  value: AppTokens.sampleRatesHz.contains(controller.sampleRateHz)
+                      ? controller.sampleRateHz
+                      : AppTokens.sampleRatesHz.first,
+                  isExpanded: true,
+                  dropdownColor: AppTokens.bgBar,
+                  style: AppTokens.mono,
+                  items: AppTokens.sampleRatesHz
+                      .map((r) => DropdownMenuItem(
+                            value: r,
+                            child: Text('${(r / 1e6).toStringAsFixed(2)} Msps'),
+                          ))
+                      .toList(),
+                  onChanged: (v) =>
+                      v == null ? null : controller.setSampleRateHz(v),
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  connected ? '已连接' : '未连接',
-                  style: TextStyle(
-                    color:
-                        connected ? AppTheme.success : AppTheme.danger,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                  ),
+              ),
+            ],
+          ),
+          // 自动增益开关。
+          Row(
+            children: [
+              const Text('自动增益', style: AppTokens.auxiliary),
+              const Spacer(),
+              Switch(
+                value: controller.autoGain,
+                onChanged: (v) => controller.setAutoGain(v),
+              ),
+            ],
+          ),
+          // 增益滑杆。
+          Row(
+            children: [
+              const Text('增益', style: AppTokens.auxiliary),
+              Expanded(
+                child: Slider(
+                  min: AppTokens.gainMinDb,
+                  max: AppTokens.gainMaxDb,
+                  value: controller.gainDb
+                      .clamp(AppTokens.gainMinDb, AppTokens.gainMaxDb),
+                  onChanged: controller.autoGain
+                      ? null
+                      : (v) => controller.setGainDb(v),
                 ),
-              ],
+              ),
+              Text('${controller.gainDb.toStringAsFixed(1)} dB',
+                  style: AppTokens.mono),
+            ],
+          ),
+          const SizedBox(height: AppTokens.spacingS),
+          // 连接 / 断开。
+          FilledButton.icon(
+            onPressed: _hasHost
+                ? () => _connectOrDisconnect(context)
+                : onOpenSettings,
+            icon: Icon(connected ? Icons.link_off : Icons.rss_feed),
+            label: Text(
+              !_hasHost
+                  ? '设置 rtl_tcp 地址'
+                  : connected
+                      ? '断开'
+                      : '连接 ${rtlHost.trim()}:$rtlPort',
             ),
           ),
         ],
@@ -201,90 +340,16 @@ class _SpectrumPageState extends State<SpectrumPage> {
   }
 }
 
-// ============================================================================
-// 频谱柱状图 Painter
-// ----------------------------------------------------------------------------
-// 每根柱子对应一个 FFT bin，柱宽自适应可用宽度，柱间留 1px 间隙；
-// 柱体从底部向上，颜色由 primary（底）渐变到 accent（顶）。
-// ============================================================================
-class _SpectrumPainter extends CustomPainter {
-  final List<double> bins;
-
-  /// 距画布底部预留高度（给频率轴文字让位）。
-  final double barBottomPadding;
-
-  final Color primary;
-  final Color accent;
-
-  _SpectrumPainter({
-    required this.bins,
-    required this.barBottomPadding,
-    required this.primary,
-    required this.accent,
-  });
+class _StepButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _StepButton({required this.label, required this.onTap});
 
   @override
-  void paint(Canvas canvas, Size size) {
-    if (bins.isEmpty) return;
-
-    // ---- 1. 归一化到 [0,1]（兼容 0~1 与带负号的 dB 量纲）----
-    double minV = bins.first;
-    double maxV = bins.first;
-    for (final v in bins) {
-      if (v < minV) minV = v;
-      if (v > maxV) maxV = v;
-    }
-    double range = maxV - minV;
-    if (range <= 0) range = 1;
-
-    // ---- 2. 淡色水平参考线（1/4、1/2、3/4 高度）----
-    final gridPaint = Paint()
-      ..color = Colors.white.withOpacity(0.08)
-      ..strokeWidth = 0.5;
-    for (final f in const [0.25, 0.5, 0.75]) {
-      final y = size.height * f;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-    }
-
-    // ---- 3. 逐 bin 画柱子 ----
-    const gap = 1.0;
-    final n = bins.length;
-    final bw = (size.width - gap * (n - 1)) / n;
-    if (bw <= 0) return;
-
-    final double baseline = size.height - barBottomPadding;
-
-    for (var i = 0; i < n; i++) {
-      var t = (bins[i] - minV) / range;
-      if (t < 0) t = 0;
-      if (t > 1) t = 1;
-
-      final h = t * baseline;
-      if (h < 0.5) continue;
-
-      final left = i * (bw + gap);
-      final top = baseline - h;
-
-      final rect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(left, top, bw, h),
-        const Radius.circular(1),
-      );
-
-      final paint = Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.bottomCenter,
-          end: Alignment.topCenter,
-          colors: [primary, accent],
-        ).createShader(Rect.fromLTWH(left, top, bw, h));
-
-      canvas.drawRRect(rect, paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _SpectrumPainter old) {
-    return !identical(old.bins, bins) ||
-        old.primary != primary ||
-        old.accent != accent;
+  Widget build(BuildContext context) {
+    return TextButton(
+      onPressed: onTap,
+      child: Text(label, style: AppTokens.mono),
+    );
   }
 }

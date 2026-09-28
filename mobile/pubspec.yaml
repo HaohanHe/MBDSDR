@@ -1,24 +1,27 @@
 name: mbdsdr_mobile
-description: MBDSDR 原生手机端（Flutter）——AI 指挥人架手机转天线对星。
+description: MBDSDR 原生手机端（Flutter）——AI 指挥、人架手机转天线对星的随身 SDR 终端。
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
-  sdk: '>=3.3.0 <4.0.0'
+  sdk: '>=3.9.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
-  web_socket_channel: ^3.0.0   # 连电脑端 MBDSDR WebSocket 服务
-  geolocator: ^13.0.0          # GPS 定位（AI 据此算卫星仰角/指向）
-  flutter_compass: ^0.8.0      # 指南针（手机朝向，AI 据此指挥转天线）
-  sensors_plus: ^6.0.0         # IMU 加速度/陀螺仪
-  provider: ^6.1.0
-  intl: ^0.19.0
+  provider: ^6.1.5            # 状态管理
+  fftea: ^1.5.0               # 真实 FFT（rtl_tcp IQ -> 频谱）
+  geolocator: ^14.1.1         # 真实 GPS 定位
+  flutter_compass: ^0.8.1     # 真实罗盘朝向
+  sensors_plus: ^7.1.0        # 真实 IMU
+  shared_preferences: ^2.5.5  # 设置持久化
+  flutter_secure_storage: ^11.2.0  # API key 安全存储（加密、不落仓库）
+  intl: ^0.20.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true

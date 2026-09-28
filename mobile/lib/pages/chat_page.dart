@@ -1,167 +1,368 @@
+// ============================================================================
+// ChatPage —— 流式聊天 UI
+// ----------------------------------------------------------------------------
+// * 未配置 key：诚实空态 + 去设置按钮，输入框禁用；
+// * 已配置：用户气泡（accent）、assistant 气泡（card1 叠加）、内联工具 chip、
+//   SelectableText 流式渲染、HH:mm 时间戳、错误气泡可重试；
+// * 全部弹性布局，横屏可用；只用 AppTokens 常量。
+// ============================================================================
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
-import '../connection.dart';
-import '../theme.dart';
+import '../app/tokens.dart';
+import '../models/chat_message.dart';
+import '../services/ai_client.dart';
 
-// ---------------------------------------------------------------------------
-// 消息模型
-// ---------------------------------------------------------------------------
-class ChatMessage {
-  final String text;
-  final bool isUser;
+/// UI 层的工具调用 chip。
+class _UiToolCall {
+  final String name;
+  final String argumentsPreview;
+  String result = '';
+  bool done = false;
+
+  _UiToolCall({
+    required this.name,
+    required this.argumentsPreview,
+  });
+}
+
+/// UI 层的一条气泡消息。
+class _UiMessage {
+  final ChatRole role;
+  String text;
   final DateTime time;
+  bool streaming = false;
+  String? error;
+  final List<_UiToolCall> toolCalls = <_UiToolCall>[];
 
-  ChatMessage({
+  _UiMessage({
+    required this.role,
     required this.text,
-    required this.isUser,
     required this.time,
   });
 }
 
-// ---------------------------------------------------------------------------
-// AI 对话页面
-// ---------------------------------------------------------------------------
 class ChatPage extends StatefulWidget {
-  final ConnectionService connection;
+  const ChatPage({
+    super.key,
+    required this.clientFactory,
+    required this.isConfigured,
+    this.onOpenSettings,
+  });
 
-  const ChatPage({super.key, required this.connection});
+  /// 每次发送时构造一个新的 AiClient（外壳注入 key / 工具）。
+  final AiClient Function() clientFactory;
+
+  /// 是否已配置 API key；false 时展示诚实空态并禁用输入。
+  final bool isConfigured;
+
+  /// 点击「去设置」回调。
+  final VoidCallback? onOpenSettings;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
 
 class _ChatPageState extends State<ChatPage> {
-  final List<ChatMessage> _messages = <ChatMessage>[];
-  final TextEditingController _inputCtrl = TextEditingController();
-  final ScrollController _scrollCtrl = ScrollController();
-  late final StreamSubscription<String> _aiSub;
+  final TextEditingController _controller = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final List<_UiMessage> _messages = <_UiMessage>[];
+  final List<ChatMessage> _history = <ChatMessage>[];
 
-  static final DateFormat _timeFmt = DateFormat('HH:mm');
-
-  @override
-  void initState() {
-    super.initState();
-    _aiSub = widget.connection.aiCommandStream.listen(_onAiReply);
-  }
+  StreamSubscription<ChatStreamEvent>? _sub;
+  bool _busy = false;
 
   @override
   void dispose() {
-    _aiSub.cancel();
-    _inputCtrl.dispose();
-    _scrollCtrl.dispose();
+    _sub?.cancel();
+    _controller.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
-  void _onAiReply(String text) {
-    if (!mounted || text.trim().isEmpty) return;
+  // ------------------------------------------------------------- 发送 / 重试
+  Future<void> _send() async {
+    final String text = _controller.text.trim();
+    if (text.isEmpty || _busy || !widget.isConfigured) return;
+
+    final DateTime now = DateTime.now();
+    final _UiMessage userMsg = _UiMessage(
+      role: ChatRole.user,
+      text: text,
+      time: now,
+    );
+    final _UiMessage assistantMsg = _UiMessage(
+      role: ChatRole.assistant,
+      text: '',
+      time: DateTime.now(),
+    )..streaming = true;
+
     setState(() {
-      _messages.add(ChatMessage(
-        text: text,
-        isUser: false,
-        time: DateTime.now(),
+      _messages.add(userMsg);
+      _history.add(ChatMessage(
+        role: ChatRole.user,
+        content: text,
+        time: now,
       ));
+      _messages.add(assistantMsg);
+      _busy = true;
+      _controller.clear();
     });
     _scrollToBottom();
+
+    final AiClient client = widget.clientFactory();
+    _sub = client.complete(history: List<ChatMessage>.from(_history)).listen(
+      (ChatStreamEvent event) {
+        if (!mounted) return;
+        setState(() => _handleEvent(event, assistantMsg));
+        _scrollToBottom();
+      },
+      onError: (Object e) {
+        if (!mounted) return;
+        setState(() {
+          assistantMsg.streaming = false;
+          assistantMsg.error = _errText(e);
+          _busy = false;
+        });
+      },
+      onDone: () {
+        if (!mounted) return;
+        setState(() {
+          assistantMsg.streaming = false;
+          if (assistantMsg.error == null && assistantMsg.text.isNotEmpty) {
+            _history.add(ChatMessage(
+              role: ChatRole.assistant,
+              content: assistantMsg.text,
+              time: assistantMsg.time,
+            ));
+          }
+          _busy = false;
+        });
+      },
+    );
   }
 
-  void _handleSend() {
-    final text = _inputCtrl.text.trim();
-    if (text.isEmpty) return;
-    widget.connection.sendChat(text);
+  Future<void> _retry() async {
+    if (_busy) return;
+    // 找到最后一条 assistant 错误气泡，删掉后重跑当前 history。
+    int idx = _messages.length - 1;
+    while (idx >= 0 && _messages[idx].error == null) {
+      idx--;
+    }
+    if (idx < 0) return;
+    final _UiMessage failed = _messages[idx];
     setState(() {
-      _messages.add(ChatMessage(
-        text: text,
-        isUser: true,
-        time: DateTime.now(),
-      ));
-      _inputCtrl.clear();
+      _messages.removeAt(idx);
+      failed.error = null;
+      failed.text = '';
+      failed.streaming = true;
+      failed.toolCalls.clear();
+      _messages.add(failed);
+      _busy = true;
     });
     _scrollToBottom();
+
+    final AiClient client = widget.clientFactory();
+    _sub = client.complete(history: List<ChatMessage>.from(_history)).listen(
+      (ChatStreamEvent event) {
+        if (!mounted) return;
+        setState(() => _handleEvent(event, failed));
+        _scrollToBottom();
+      },
+      onError: (Object e) {
+        if (!mounted) return;
+        setState(() {
+          failed.streaming = false;
+          failed.error = _errText(e);
+          _busy = false;
+        });
+      },
+      onDone: () {
+        if (!mounted) return;
+        setState(() {
+          failed.streaming = false;
+          if (failed.error == null && failed.text.isNotEmpty) {
+            _history.add(ChatMessage(
+              role: ChatRole.assistant,
+              content: failed.text,
+              time: failed.time,
+            ));
+          }
+          _busy = false;
+        });
+      },
+    );
   }
+
+  void _handleEvent(ChatStreamEvent event, _UiMessage assistantMsg) {
+    switch (event) {
+      case ChatTextEvent(:final String delta):
+        assistantMsg.text += delta;
+      case ToolCallStartedEvent(:final String name, :final String argumentsPreview):
+        assistantMsg.toolCalls.add(
+          _UiToolCall(name: name, argumentsPreview: argumentsPreview),
+        );
+      case ToolCallFinishedEvent(:final String name, :final String result):
+        for (int i = assistantMsg.toolCalls.length - 1; i >= 0; i--) {
+          final _UiToolCall c = assistantMsg.toolCalls[i];
+          if (!c.done && c.name == name) {
+            c.result = result;
+            c.done = true;
+            break;
+          }
+        }
+      case AssistantTurnDoneEvent():
+        assistantMsg.streaming = false;
+      case AiErrorEvent(:final String message):
+        assistantMsg.streaming = false;
+        assistantMsg.error = message;
+    }
+  }
+
+  String _errText(Object e) =>
+      e is AiException ? e.message : 'Network error: $e';
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollCtrl.hasClients) return;
-      _scrollCtrl.animateTo(
-        _scrollCtrl.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 200),
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: AppTokens.animShort,
         curve: Curves.easeOut,
       );
     });
   }
 
+  // ------------------------------------------------------------- 构建
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Expanded(child: _buildMessageList()),
-        _buildInputArea(),
-      ],
+    if (!widget.isConfigured) {
+      return _buildUnconfigured();
+    }
+    return Scaffold(
+      backgroundColor: AppTokens.bgMain,
+      body: SafeArea(
+        child: Column(
+          children: <Widget>[
+            Expanded(child: _buildList()),
+            _buildInputBar(),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildMessageList() {
-    if (_messages.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: Text(
-            '和 AI 对话，指挥 SDR 操作...',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 15,
+  Widget _buildUnconfigured() {
+    return Scaffold(
+      backgroundColor: AppTokens.bgMain,
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  Icons.key_outlined,
+                  size: 48,
+                  color: AppTokens.textAt(AppTokens.textAlphaFaint),
+                ),
+                const SizedBox(height: AppTokens.spacingL),
+                const Text('尚未配置 AI API key', style: AppTokens.sectionTitle),
+                const SizedBox(height: AppTokens.spacingS),
+                const Text(
+                  '配置硅基流动 API key 后即可开始对话',
+                  textAlign: TextAlign.center,
+                  style: AppTokens.auxiliary,
+                ),
+                const SizedBox(height: AppTokens.spacingL),
+                TextButton(
+                  onPressed: widget.onOpenSettings,
+                  child: const Text('去设置'),
+                ),
+              ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildList() {
+    if (_messages.isEmpty) {
+      return Center(
+        child: Text(
+          '开始一段对话吧',
+          style: AppTokens.auxiliary
+              .copyWith(color: AppTokens.textAt(AppTokens.textAlphaTertiary)),
         ),
       );
     }
     return ListView.builder(
-      controller: _scrollCtrl,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      controller: _scrollController,
+      padding: const EdgeInsets.symmetric(vertical: AppTokens.spacingL),
       itemCount: _messages.length,
-      itemBuilder: (_, i) => _buildBubble(_messages[i]),
+      itemBuilder: (BuildContext context, int i) => _buildBubble(_messages[i]),
     );
   }
 
-  Widget _buildBubble(ChatMessage m) {
-    final isUser = m.isUser;
-    final bgColor = isUser ? AppTheme.accent : AppTheme.card;
-    final fgColor = isUser ? Colors.white : AppTheme.text;
-    final alignment =
-        isUser ? Alignment.centerRight : Alignment.centerLeft;
+  Widget _buildBubble(_UiMessage m) {
+    final bool isUser = m.role == ChatRole.user;
+    final bool isError = m.error != null;
+    final double maxW = MediaQuery.of(context).size.width * 0.78;
 
     return Align(
-      alignment: alignment,
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        margin: const EdgeInsets.symmetric(
+          vertical: AppTokens.spacingS,
+          horizontal: AppTokens.spacingL,
         ),
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(16),
-          border: isUser
-              ? null
-              : Border.all(color: AppTheme.border),
-        ),
+        constraints: BoxConstraints(maxWidth: maxW),
+        padding: const EdgeInsets.all(AppTokens.spacingL),
+        decoration: isUser
+            ? BoxDecoration(
+                color: AppTokens.accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(AppTokens.radiusCard),
+                border: Border.all(
+                  color: AppTokens.accent.withValues(alpha: 0.30),
+                ),
+              )
+            : AppTokens.cardDecoration(),
         child: Column(
-          crossAxisAlignment:
-              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            Text(m.text, style: TextStyle(color: fgColor, fontSize: 15)),
-            const SizedBox(height: 4),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (isError)
+              _buildErrorBody(m)
+            else if (isUser)
+              SelectableText(m.text, style: AppTokens.body)
+            else ...<Widget>[
+                if (m.toolCalls.isNotEmpty) ...<Widget>[
+                  ...m.toolCalls.map(_buildToolChip),
+                  const SizedBox(height: AppTokens.spacingS),
+                ],
+                SelectableText.rich(
+                  TextSpan(
+                    children: <InlineSpan>[
+                      TextSpan(text: m.text, style: AppTokens.body),
+                      if (m.streaming && m.text.isNotEmpty)
+                        TextSpan(
+                          text: ' ▋',
+                          style: AppTokens.body.copyWith(color: AppTokens.accent),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            const SizedBox(height: AppTokens.spacingS),
             Text(
-              _timeFmt.format(m.time),
-              style: TextStyle(
-                color: isUser
-                    ? Colors.white.withOpacity(0.7)
-                    : AppTheme.textSecondary,
-                fontSize: 11,
+              _formatTime(m.time),
+              style: AppTokens.auxiliary.copyWith(
+                fontSize: 10,
+                color: AppTokens.textAt(AppTokens.textAlphaTertiary),
               ),
             ),
           ],
@@ -170,39 +371,138 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  Widget _buildInputArea() {
-    final connected = widget.connection.isConnected;
-    return Container(
-      padding: EdgeInsets.fromLTRB(
-        12,
-        8,
-        12,
-        8 + MediaQuery.of(context).viewInsets.bottom,
-      ),
-      color: AppTheme.bg,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _inputCtrl,
-              minLines: 1,
-              maxLines: 4,
-              enabled: connected,
-              textInputAction: TextInputAction.newline,
-              decoration: InputDecoration(
-                hintText: connected ? '输入消息...' : '未连接',
-                isDense: true,
+  Widget _buildErrorBody(_UiMessage m) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            const Icon(Icons.error_outline,
+                size: 14, color: AppTokens.danger),
+            const SizedBox(width: AppTokens.spacingS),
+            Expanded(
+              child: Text(
+                m.error!,
+                style: AppTokens.auxiliary.copyWith(color: AppTokens.danger),
               ),
             ),
+          ],
+        ),
+        const SizedBox(height: AppTokens.spacingS),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: _busy ? null : _retry,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppTokens.spacingM,
+                vertical: AppTokens.spacingS,
+              ),
+              minimumSize: const Size(0, 28),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('重试'),
           ),
-          const SizedBox(width: 8),
-          IconButton.filled(
-            onPressed: connected ? _handleSend : null,
-            icon: const Icon(Icons.send),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildToolChip(_UiToolCall c) {
+    final Color color = c.done ? AppTokens.success : AppTokens.warning;
+    final String label = c.done
+        ? '✓ ${_shortResult(c.result)}'
+        : '调用 ${c.name} …';
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppTokens.spacingS),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.spacingM,
+        vertical: AppTokens.spacingS,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(AppTokens.radiusSmall),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(c.done ? Icons.check : Icons.autorenew,
+              size: 12, color: color),
+          const SizedBox(width: AppTokens.spacingS),
+          Flexible(
+            child: Text(
+              label,
+              style: AppTokens.auxiliary.copyWith(fontSize: 11, color: color),
+            ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildInputBar() {
+    return Container(
+      padding: const EdgeInsets.all(AppTokens.spacingM),
+      decoration: const BoxDecoration(
+        color: AppTokens.bgBar,
+        border: Border(
+          top: BorderSide(color: AppTokens.cardEdge),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: <Widget>[
+            Expanded(
+              child: Container(
+                constraints: const BoxConstraints(minHeight: AppTokens.touchMin),
+                decoration: AppTokens.cardDecoration(),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppTokens.spacingM,
+                ),
+                alignment: Alignment.center,
+                child: TextField(
+                  controller: _controller,
+                  enabled: widget.isConfigured && !_busy,
+                  minLines: 1,
+                  maxLines: 5,
+                  textInputAction: TextInputAction.newline,
+                  style: AppTokens.body,
+                  cursorColor: AppTokens.accent,
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    hintText: '输入消息…',
+                    hintStyle: TextStyle(color: AppTokens.textSecondary),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: AppTokens.spacingM),
+            IconButton(
+              onPressed: (widget.isConfigured && !_busy && _controller.text.trim().isNotEmpty)
+                  ? () => unawaited(_send())
+                  : null,
+              icon: const Icon(Icons.send),
+              color: AppTokens.accent,
+              disabledColor: AppTokens.textAt(AppTokens.textAlphaFaint),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _shortResult(String r) {
+    final String s = r.trim();
+    return s.length > 40 ? '${s.substring(0, 40)}…' : s;
+  }
+
+  String _formatTime(DateTime t) {
+    final String h = t.hour.toString().padLeft(2, '0');
+    final String m = t.minute.toString().padLeft(2, '0');
+    return '$h:$m';
   }
 }
