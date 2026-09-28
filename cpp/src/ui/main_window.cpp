@@ -77,9 +77,13 @@ constexpr double kBwMaxHz = 200000.0;
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
-    setWindowTitle("MBDSDR");
+        setWindowTitle("MBDSDR");
     resize(tokens::scaled(1280), tokens::scaled(800));
     setStyleSheet(tokens::buildDarkQss());
+
+    // Engine must exist before UI construction: many widgets connect their
+    // signals directly to engine slots while the panels are being built.
+    engine_ = new dsp::SpectrumEngine(this);
 
     // ---- Top bar (real elements only) ----
     auto* topBar = new QFrame;
@@ -572,8 +576,7 @@ MainWindow::MainWindow(QWidget* parent)
     sbSr_->setText(srCombo_->currentText());
     sbVfo_->setText(QString("%1 MHz").arg(freqSpin_->value(), 0, 'f', 3));
 
-    // ---- Engine ----
-    engine_ = new dsp::SpectrumEngine(this);
+    // ---- Engine wiring (engine_ created before UI construction) ----
     {
         QSettings s("MBDSDR", "MBDSDR");
         if (engine_->audioOutput())

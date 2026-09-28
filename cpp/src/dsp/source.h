@@ -54,6 +54,11 @@ public:
     /// True only when a real hardware device is actually connected.
     /// Test sources must return false.
     virtual bool isConnected() const = 0;
+
+    // ---- Optional multi-stage gain (default no-op) ----
+    /// Multi-stage gain: stage 0 = LNA, 1 = MIX, 2 = VGA (RTL2832U+E4000/R820T).
+    /// Single-gain sources can map this to setGain().
+    virtual void setGainStage(int /*stage*/, double /*gainDb*/) {}
 };
 
 } // namespace dsp

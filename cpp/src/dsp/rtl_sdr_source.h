@@ -35,12 +35,13 @@ public:
     // Hardware-specific tuning overrides -- only compiled with the real backend.
     // The !HAVE_RTLSDR stub intentionally does NOT override these: it inherits
     // the empty ISource defaults, so toggling them in the UI is a safe no-op.
-    void setDirectSampling(int mode) override;
+    void setDirectSampling(int mode) override;   // 0=off, 1=I-ADC, 2=Q-ADC
     void setOffsetTuning(bool on) override;
-    void setRtlAgc(bool on) override;
-    void setTunerAgc(bool on) override;
+    void setRtlAgc(bool on) override;            // RTL2832 internal AGC
+    void setTunerAgc(bool on) override;          // tuner AGC (auto) vs manual
     void setBiasTee(bool on) override;
     void setPpm(double ppm) override;
+    void setGainStage(int stage, double gainDb) override;
 #endif
 
     double centerFreq() const override { return f0_; }

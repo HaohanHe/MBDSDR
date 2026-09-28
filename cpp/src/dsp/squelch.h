@@ -11,15 +11,24 @@ float rmsDbfs(const std::vector<float>& x);
 
 class Squelch {
 public:
+    enum class Mode {
+        Off,         // squelch disabled: pass audio through, mark open
+        AlwaysOpen,  // explicitly open: pass audio through, no gating
+        Gate         // RMS gate: mute when smoothed RMS is below threshold
+    };
+
     explicit Squelch(double blockDurMs = 20.0);
     void setThresholdDb(float db) { thresholdDb_ = db; }
-    void setEnabled(bool e) { enabled_ = e; }
+    // Legacy compatibility wrapper: true -> Gate, false -> Off.
+    void setEnabled(bool e) { setMode(e ? Mode::Gate : Mode::Off); }
+    void setMode(Mode m) { mode_ = m; }
+    Mode mode() const { return mode_; }
     bool open() const { return open_; }
     void reset();
     /// Gate the audio block; returns gated copy (silent when closed).
     std::vector<float> apply(const std::vector<float>& audio, float rmsDb);
 private:
-    bool enabled_ = false;
+    Mode mode_ = Mode::Off;
     bool open_ = false;
     float thresholdDb_ = -50.0f;
     float smoothDb_ = -150.0f;

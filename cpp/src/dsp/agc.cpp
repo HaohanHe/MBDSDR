@@ -6,9 +6,31 @@
 namespace mbdsdr {
 namespace dsp {
 
-Agc::Agc(double blockDurMs) {
-    attackAlpha_ = static_cast<float>(1.0 - std::exp(-blockDurMs / attackTauMs_));
-    decayAlpha_   = static_cast<float>(1.0 - std::exp(-blockDurMs / decayTauMs_));
+Agc::Agc(double blockDurMs) : blockDurMs_(blockDurMs) {
+    attackAlpha_ = static_cast<float>(1.0 - std::exp(-blockDurMs_ / attackTauMs_));
+    decayAlpha_   = static_cast<float>(1.0 - std::exp(-blockDurMs_ / decayTauMs_));
+}
+
+void Agc::setAttackMs(double ms) {
+    if (ms <= 0) return;
+    attackTauMs_ = ms;
+    attackAlpha_ = static_cast<float>(1.0 - std::exp(-blockDurMs_ / attackTauMs_));
+}
+
+void Agc::setDecayMs(double ms) {
+    if (ms <= 0) return;
+    decayTauMs_ = ms;
+    decayAlpha_ = static_cast<float>(1.0 - std::exp(-blockDurMs_ / decayTauMs_));
+}
+
+void Agc::setCarrierAgc(bool on) {
+    if (on) {
+        setTarget(CarrierTarget);
+        setAttackMs(CarrierAttackMs);
+    } else {
+        setTarget(DefaultTarget);
+        setAttackMs(DefaultAttackMs);
+    }
 }
 
 void Agc::reset() { env_ = 0; }

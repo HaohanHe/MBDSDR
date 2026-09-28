@@ -22,14 +22,38 @@ float clampUnit(float v) {
 } // namespace
 
 AudioOutput::AudioOutput(QObject* parent) : QObject(parent) {
-    // currentDev_ stays null => "system default". Resolve it now so the sink
-    // is built against a concrete device; on headless boxes defaultAudioOutput()
-    // is null and buildSink() degrades gracefully.
-    buildSink(QMediaDevices::defaultAudioOutput());
+    // Sink is built lazily on the DSP worker thread (see ensureReady()).
 }
 
 AudioOutput::~AudioOutput() {
     teardownSink();
+}
+
+void AudioOutput::setDevice(const QAudioDevice& dev) {
+    // Called from the UI thread: just queue the request. The worker rebuilds
+    // the sink in ensureReady(), keeping QAudioSink creation on its own thread.
+    {
+        QMutexLocker lk(&pendingMutex_);
+        pendingDev_ = dev;
+    }
+    pendingRebuild_.store(true);
+}
+
+void AudioOutput::ensureReady() {
+    QAudioDevice requested;
+    bool havePending = false;
+    if (pendingRebuild_.exchange(false)) {
+        QMutexLocker lk(&pendingMutex_);
+        requested = pendingDev_;
+        pendingDev_ = QAudioDevice();
+        havePending = true;
+    }
+
+    if (havePending) {
+        buildSink(requested);
+    } else if (!sink_) {
+        buildSink(QAudioDevice());   // null -> system default
+    }
 }
 
 void AudioOutput::teardownSink() {
@@ -38,14 +62,18 @@ void AudioOutput::teardownSink() {
         sink_.reset();
     }
     io_ = nullptr;
-    available_ = false;
+    available_.store(false);
 }
 
 void AudioOutput::buildSink(const QAudioDevice& dev) {
     teardownSink();
-    currentDev_ = dev;
 
-    if (dev.isNull()) {
+    // Null means system default.
+    QAudioDevice d = dev;
+    if (d.isNull()) d = QMediaDevices::defaultAudioOutput();
+    currentDev_ = d;
+
+    if (d.isNull()) {
         qWarning() << "[AudioOutput] no audio output device; audio disabled";
         return;
     }
@@ -59,14 +87,14 @@ void AudioOutput::buildSink(const QAudioDevice& dev) {
     // Windows FFmpeg backend and rejects formats that would actually play,
     // so fall back to the device's preferred format instead of giving up.
     QAudioFormat fmt = desired;
-    if (!dev.isFormatSupported(fmt)) {
-        fmt = dev.preferredFormat();
+    if (!d.isFormatSupported(fmt)) {
+        fmt = d.preferredFormat();
         QAudioFormat mono = fmt;
         mono.setChannelCount(1);
-        if (dev.isFormatSupported(mono)) fmt = mono;
+        if (d.isFormatSupported(mono)) fmt = mono;
     }
 
-    sink_ = std::make_unique<QAudioSink>(dev, fmt);
+    sink_ = std::make_unique<QAudioSink>(d, fmt);
     QObject::connect(sink_.get(), &QAudioSink::stateChanged,
         this, [this](QAudio::State s) {
             if (s == QAudio::StoppedState && sink_ && sink_->error() != QAudio::NoError)
@@ -79,19 +107,9 @@ void AudioOutput::buildSink(const QAudioDevice& dev) {
         return;
     }
     fmt_ = fmt;
-    available_ = true;
-    qInfo() << "[AudioOutput] ready on" << dev.description() << ":" << fmt;
-}
-
-void AudioOutput::setDevice(const QAudioDevice& dev) {
-    // Hot-restart: tear down the old sink and rebuild against the new device.
-    // If the requested device is null, fall back to the system default.
-    QAudioDevice target = dev;
-    if (target.isNull()) target = QMediaDevices::defaultAudioOutput();
-    qInfo() << "[AudioOutput] switching device to"
-            << (target.isNull() ? QStringLiteral("default (none)")
-                                : target.description());
-    buildSink(target);
+    sink_->setVolume(volume_.load());
+    available_.store(true);
+    qInfo() << "[AudioOutput] ready on" << d.description() << ":" << fmt;
 }
 
 QStringList AudioOutput::availableDevices() {
@@ -108,7 +126,10 @@ QString AudioOutput::currentDeviceName() const {
 }
 
 void AudioOutput::write(const std::vector<float>& audio, double sourceRateHz) {
-    if (!available_ || muted_ || audio.empty() || !io_) return;
+    ensureReady();
+    if (!available_.load() || muted_.load() || audio.empty() || !io_) return;
+
+    if (sink_) sink_->setVolume(volume_.load());
 
     const int outRate = fmt_.sampleRate();
     const int channels = std::max(1, fmt_.channelCount());
