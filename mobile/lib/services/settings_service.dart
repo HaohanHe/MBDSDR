@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/radio_state.dart';
+
 // ============================================================================
 // 设置持久化
 // ----------------------------------------------------------------------------
@@ -27,6 +29,10 @@ abstract interface class KvStore {
   int? getInt(String key);
 
   Future<void> setInt(String key, int value);
+
+  bool? getBool(String key);
+
+  Future<void> setBool(String key, bool value);
 
   Future<void> remove(String key);
 }
@@ -71,6 +77,14 @@ class SharedPreferencesKvStore implements KvStore {
   }
 
   @override
+  bool? getBool(String key) => _prefs.getBool(key);
+
+  @override
+  Future<void> setBool(String key, bool value) async {
+    await _prefs.setBool(key, value);
+  }
+
+  @override
   Future<void> remove(String key) async {
     await _prefs.remove(key);
   }
@@ -105,6 +119,17 @@ const String _kApiModel = 'apiModel';
 const String _kStationLat = 'stationLat';
 const String _kStationLon = 'stationLon';
 const String _kStationAlt = 'stationAlt';
+const String _kLastFreqHz = 'lastFreqHz';
+const String _kDemodMode = 'demodMode';
+const String _kVolume = 'volume';
+const String _kMuted = 'muted';
+
+/// 上次调谐频率（Hz）默认值：144 MHz（2 m 业余段）。
+const int kDefaultLastFreqHz = 144000000;
+
+/// 解调模式持久化字符串合法取值。
+const String _kDemodNfm = 'nfm';
+const String _kDemodWfm = 'wfm';
 
 /// 应用设置：读写即持久化，UI 通过 ChangeNotifier 订阅。
 class SettingsService extends ChangeNotifier {
@@ -122,6 +147,10 @@ class SettingsService extends ChangeNotifier {
   double? _stationLat;
   double? _stationLon;
   double? _stationAlt;
+  int _lastFreqHz = kDefaultLastFreqHz;
+  String _demodMode = _kDemodNfm;
+  double _volume = 1.0;
+  bool _muted = false;
 
   /// rtl_tcp 主机（已 trim）。
   String get rtlHost => _rtlHost;
@@ -201,11 +230,52 @@ class SettingsService extends ChangeNotifier {
   /// 外观主题名；当前唯一可选即「默认」（深色）。
   String get themeName => kDefaultThemeName;
 
+  /// 上次调谐频率（Hz）。
+  int get lastFreqHz => _lastFreqHz;
+  set lastFreqHz(int value) {
+    _lastFreqHz = value;
+    unawaited(_kv.setInt(_kLastFreqHz, value));
+    notifyListeners();
+  }
+
+  /// 解调模式持久化字符串（'nfm' / 'wfm'）。
+  ///
+  /// 未知写法在落盘前归一为 'nfm'，不抛异常。
+  String get demodMode => _demodMode;
+  set demodMode(String value) {
+    final String v = value.trim().toLowerCase();
+    _demodMode = v == _kDemodWfm ? _kDemodWfm : _kDemodNfm;
+    unawaited(_kv.setString(_kDemodMode, _demodMode));
+    notifyListeners();
+  }
+
+  /// 解调模式枚举便捷视图（始终合法）。
+  DemodMode get demodModeEnum =>
+      _demodMode == _kDemodWfm ? DemodMode.wfm : DemodMode.nfm;
+
+  /// 音量，范围 [0,1]，越界在 setter 内 clamp。
+  double get volume => _volume;
+  set volume(double value) {
+    _volume = value.clamp(0.0, 1.0);
+    unawaited(_kv.setDouble(_kVolume, _volume));
+    notifyListeners();
+  }
+
+  /// 是否静音。
+  bool get muted => _muted;
+  set muted(bool value) {
+    _muted = value;
+    unawaited(_kv.setBool(_kMuted, value));
+    notifyListeners();
+  }
+
   /// 三坐标是否齐全（用于决定是否把手动站点交给天空页）。
   bool get hasManualStation =>
       _stationLat != null && _stationLon != null && _stationAlt != null;
 
   /// 启动时从存储中读回全部设置。
+  ///
+  /// 非法/越界/未知写法一律回退默认值，绝不抛异常导致启动崩溃。
   Future<void> load() async {
     _rtlHost = _kv.getString(_kRtlHost) ?? '';
     _rtlPort = _kv.getInt(_kRtlPort) ?? 1234;
@@ -214,6 +284,21 @@ class SettingsService extends ChangeNotifier {
     _stationLon = _kv.getDouble(_kStationLon);
     _stationAlt = _kv.getDouble(_kStationAlt);
     _apiKey = await _secure.get(_kApiKey) ?? '';
+
+    // 频率：缺失或非正数时回退默认。
+    final int? freq = _kv.getInt(_kLastFreqHz);
+    _lastFreqHz = (freq == null || freq <= 0) ? kDefaultLastFreqHz : freq;
+
+    // 解调模式：仅接受 nfm/wfm，其余（含拼写错误）回退 nfm。
+    final String? mode = _kv.getString(_kDemodMode)?.trim().toLowerCase();
+    _demodMode = (mode == _kDemodWfm) ? _kDemodWfm : _kDemodNfm;
+
+    // 音量：缺失回退 1.0，越界 clamp 到 [0,1]。
+    final double? vol = _kv.getDouble(_kVolume);
+    _volume = (vol ?? 1.0).clamp(0.0, 1.0);
+
+    _muted = _kv.getBool(_kMuted) ?? false;
+
     notifyListeners();
   }
 }

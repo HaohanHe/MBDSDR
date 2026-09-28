@@ -1,8 +1,12 @@
-// 频谱页：头部控制区 + 统一频谱/瀑布显示。
+// 频谱页：头部控制区 + 紧凑仪器状态栏 + 统一频谱/瀑布显示。
 //
-// 诚实原则：未连接 rtl_tcp 时绝不画模拟峰，只给空态文案 + 连接按钮。
+// 诚实原则：未连接 rtl_tcp 时绝不画模拟峰，只给空态（复用 EmptyState）+ 连接按钮。
+// 状态栏信息全部来自真实 controller / 最新帧：RSSI 取最新帧峰值 dBFS（真实测量）；
+// 静噪（SQ）当前链路未实现，诚实显示「—」，不造假开/关读数。
 // 构造契约固定：SpectrumPage({controller, rtlHost, rtlPort, onOpenSettings})。
 library;
+
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
@@ -10,6 +14,7 @@ import '../app/tokens.dart';
 import '../dsp/fft_processor.dart';
 import '../models/radio_state.dart';
 import '../services/radio_controller.dart';
+import '../widgets/empty_state.dart';
 import '../widgets/spectrum_display.dart';
 
 class SpectrumPage extends StatelessWidget {
@@ -38,38 +43,43 @@ class SpectrumPage extends StatelessWidget {
     return ListenableBuilder(
       listenable: controller as Listenable,
       builder: (context, _) {
-        final isLandscape =
-            MediaQuery.sizeOf(context).width > MediaQuery.sizeOf(context).height;
-        final body = isLandscape
-            ? Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    width: 320,
-                    child: _ControlPanel(
-                      controller: controller,
-                      rtlHost: rtlHost,
-                      rtlPort: rtlPort,
-                      onOpenSettings: onOpenSettings,
-                    ),
-                  ),
-                  Expanded(child: _DisplayArea(controller: controller)),
-                ],
-              )
-            : Column(
-                children: [
-                  _ControlPanel(
-                    controller: controller,
-                    rtlHost: rtlHost,
-                    rtlPort: rtlPort,
-                    onOpenSettings: onOpenSettings,
-                  ),
-                  Expanded(child: _DisplayArea(controller: controller)),
-                ],
-              );
         return Scaffold(
           backgroundColor: AppTokens.bgMain,
-          body: SafeArea(child: body),
+          body: SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // 宽屏（横屏/平板）：控制区在左，显示区在右；否则竖排。
+                final wide = constraints.maxWidth >= 600;
+                final panelW =
+                    (constraints.maxWidth * 0.30).clamp(240.0, 340.0);
+                final panel = _ControlPanel(
+                  controller: controller,
+                  rtlHost: rtlHost,
+                  rtlPort: rtlPort,
+                  onOpenSettings: onOpenSettings,
+                );
+                final display = _DisplayArea(
+                  controller: controller,
+                  rtlHost: rtlHost,
+                  onOpenSettings: onOpenSettings,
+                );
+                return wide
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          SizedBox(width: panelW, child: panel),
+                          Expanded(child: display),
+                        ],
+                      )
+                    : Column(
+                        children: [
+                          panel,
+                          Expanded(child: display),
+                        ],
+                      );
+              },
+            ),
+          ),
         );
       },
     );
@@ -79,68 +89,166 @@ class SpectrumPage extends StatelessWidget {
 /// 显示区：根据连接状态给空态 / 转圈 / 真实频谱。
 class _DisplayArea extends StatelessWidget {
   final RadioApi controller;
-  const _DisplayArea({required this.controller});
+  final String rtlHost;
+  final VoidCallback? onOpenSettings;
+
+  const _DisplayArea({
+    required this.controller,
+    required this.rtlHost,
+    required this.onOpenSettings,
+  });
 
   @override
   Widget build(BuildContext context) {
     switch (controller.status) {
       case ConnectionStatus.disconnected:
       case ConnectionStatus.error:
-        return _EmptyState(
+        final hasHost = rtlHost.trim().isNotEmpty;
+        return EmptyState(
+          icon: Icons.waterfall_chart_outlined,
+          title: controller.status == ConnectionStatus.error
+              ? '连接错误'
+              : '未连接 rtl_tcp',
           message: controller.status == ConnectionStatus.error
-              ? '连接错误：${controller.errorMessage ?? '未知错误'}\n未连接 rtl_tcp，当前无实时 IQ。'
-              : '未连接 rtl_tcp：当前无实时 IQ，不显示模拟数据。',
+              ? '${controller.errorMessage ?? '未知错误'}\n当前无实时 IQ，不显示模拟数据。'
+              : '当前无实时 IQ，不显示模拟数据。',
+          actionLabel: hasHost ? null : '设置 rtl_tcp 地址',
+          onAction: hasHost ? null : onOpenSettings,
         );
       case ConnectionStatus.connecting:
-        return const Center(
+      case ConnectionStatus.reconnecting:
+        return Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(),
-              SizedBox(height: AppTokens.spacingM),
-              Text('正在连接 rtl_tcp…', style: AppTokens.auxiliary),
+              const CircularProgressIndicator(),
+              const SizedBox(height: AppTokens.spacingM),
+              Text(
+                controller.status == ConnectionStatus.reconnecting
+                    ? '信号中断，正在重连…'
+                    : '正在连接 rtl_tcp…',
+                style: AppTokens.auxiliary,
+              ),
             ],
           ),
         );
       case ConnectionStatus.connected:
-        return StreamBuilder<SpectrumFrame>(
-          stream: controller.spectrumStream,
-          builder: (context, snap) {
-            return SpectrumDisplay(
-              frame: snap.data,
-              channelBandwidthHz: controller.mode == DemodMode.nfm
-                  ? 12500
-                  : 200000,
-              onTapFrequency: (hz) => controller.setFrequencyHz(hz.round()),
-            );
-          },
-        );
+        return _ConnectedBody(controller: controller);
     }
   }
 }
 
-class _EmptyState extends StatelessWidget {
-  final String message;
-  const _EmptyState({required this.message});
+/// 已连接：持有最新一帧，同时喂给状态栏（RSSI）与频谱显示。
+class _ConnectedBody extends StatefulWidget {
+  final RadioApi controller;
+  const _ConnectedBody({required this.controller});
+
+  @override
+  State<_ConnectedBody> createState() => _ConnectedBodyState();
+}
+
+class _ConnectedBodyState extends State<_ConnectedBody> {
+  StreamSubscription<SpectrumFrame>? _sub;
+  SpectrumFrame? _frame;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = widget.controller.spectrumStream.listen((f) {
+      if (mounted) setState(() => _frame = f);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppTokens.spacingL),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.waterfall_chart_outlined,
-                size: 40, color: AppTokens.textSecondary),
-            const SizedBox(height: AppTokens.spacingM),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: AppTokens.auxiliary,
-            ),
-          ],
+    return Column(
+      children: [
+        _StatusBar(controller: widget.controller, frame: _frame),
+        Expanded(
+          child: SpectrumDisplay(
+            frame: _frame,
+            channelBandwidthHz: widget.controller.mode == DemodMode.nfm
+                ? 12500
+                : 200000,
+            onTapFrequency: (hz) =>
+                widget.controller.setFrequencyHz(hz.round()),
+          ),
         ),
+      ],
+    );
+  }
+}
+
+/// 紧凑仪器状态栏：频率(mono) / 模式 / RSSI / 静噪 / 采样率 / 增益。
+/// 信息诚实：无帧时 RSSI 显示 --；静噪未实现显示 —。
+class _StatusBar extends StatelessWidget {
+  final RadioApi controller;
+  final SpectrumFrame? frame;
+  const _StatusBar({required this.controller, required this.frame});
+
+  /// RSSI = 最新帧峰值 dBFS（真实测量）。
+  double? get _rssiDb {
+    final f = frame;
+    if (f == null) return null;
+    var m = AppTokens.dbLowerDefault;
+    for (final v in f.db) {
+      if (v > m) m = v;
+    }
+    return m;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rssi = _rssiDb;
+    return Container(
+      width: double.infinity,
+      color: AppTokens.bgBar,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.spacingM,
+        vertical: AppTokens.spacingS,
+      ),
+      child: Wrap(
+        spacing: AppTokens.spacingM,
+        runSpacing: AppTokens.spacingS,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          _StatusChip(
+            '${(controller.freqHz / 1e6).toStringAsFixed(4)} MHz',
+            primary: true,
+          ),
+          _StatusChip(controller.mode.label),
+          _StatusChip(
+            rssi == null ? 'RSSI --' : 'RSSI ${rssi.toStringAsFixed(0)} dB',
+          ),
+          const _StatusChip('SQ —'), // 静噪未实现，诚实占位
+          _StatusChip('${(controller.sampleRateHz / 1e6).toStringAsFixed(2)}Msps'),
+          _StatusChip(
+            controller.autoGain ? 'AGC' : 'G ${controller.gainDb.toStringAsFixed(1)}dB',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  final String text;
+  final bool primary;
+  const _StatusChip(this.text, {this.primary = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: AppTokens.mono.copyWith(
+        color: primary ? AppTokens.textPrimary : AppTokens.textSecondary,
+        fontWeight: primary ? FontWeight.w600 : FontWeight.w500,
       ),
     );
   }
@@ -207,134 +315,158 @@ class _ControlPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final connected = controller.status == ConnectionStatus.connected;
-    return Container(
-      margin: const EdgeInsets.all(AppTokens.spacingM),
-      padding: const EdgeInsets.all(AppTokens.spacingM),
-      decoration: AppTokens.cardDecoration(),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // 大频率读数 + 点按输入。
-          Center(
-            child: GestureDetector(
-              onTap: () => _promptFrequency(context),
-              child: Text(
-                '${(controller.freqHz / 1e6).toStringAsFixed(4)} MHz',
-                style: const TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w600,
-                  color: AppTokens.textPrimary,
-                  fontFamilyFallback: AppTokens.monoFallback,
+    return SingleChildScrollView(
+      child: Container(
+        margin: const EdgeInsets.all(AppTokens.spacingM),
+        padding: const EdgeInsets.all(AppTokens.spacingM),
+        decoration: AppTokens.cardDecoration(),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 大频率读数 + 点按输入。
+            Center(
+              child: GestureDetector(
+                onTap: () => _promptFrequency(context),
+                child: Text(
+                  '${(controller.freqHz / 1e6).toStringAsFixed(4)} MHz',
+                  style: const TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w600,
+                    color: AppTokens.textPrimary,
+                    fontFamilyFallback: AppTokens.monoFallback,
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: AppTokens.spacingS),
-          // NFM/WFM 分段。
-          SegmentedButton<DemodMode>(
-            segments: const [
-              ButtonSegment(value: DemodMode.nfm, label: Text('NFM')),
-              ButtonSegment(value: DemodMode.wfm, label: Text('WFM')),
-            ],
-            selected: {controller.mode},
-            onSelectionChanged: (s) => controller.setMode(s.first),
-          ),
-          const SizedBox(height: AppTokens.spacingS),
-          // 频率步进。
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _StepButton(
-                  label: '-1M',
-                  onTap: () =>
-                      controller.setFrequencyHz(controller.freqHz - 1000000)),
-              _StepButton(
-                  label: '-100k',
-                  onTap: () =>
-                      controller.setFrequencyHz(controller.freqHz - 100000)),
-              _StepButton(
-                  label: '+100k',
-                  onTap: () =>
-                      controller.setFrequencyHz(controller.freqHz + 100000)),
-              _StepButton(
-                  label: '+1M',
-                  onTap: () =>
-                      controller.setFrequencyHz(controller.freqHz + 1000000)),
-            ],
-          ),
-          const SizedBox(height: AppTokens.spacingS),
-          // 采样率下拉。
-          Row(
-            children: [
-              const Text('采样率', style: AppTokens.auxiliary),
-              const SizedBox(width: AppTokens.spacingM),
-              Expanded(
-                child: DropdownButton<double>(
-                  value: AppTokens.sampleRatesHz.contains(controller.sampleRateHz)
-                      ? controller.sampleRateHz
-                      : AppTokens.sampleRatesHz.first,
-                  isExpanded: true,
-                  dropdownColor: AppTokens.bgBar,
+            const SizedBox(height: AppTokens.spacingS),
+            // NFM/WFM 分段。
+            SegmentedButton<DemodMode>(
+              segments: const [
+                ButtonSegment(value: DemodMode.nfm, label: Text('NFM')),
+                ButtonSegment(value: DemodMode.wfm, label: Text('WFM')),
+              ],
+              selected: {controller.mode},
+              onSelectionChanged: (s) => controller.setMode(s.first),
+            ),
+            const SizedBox(height: AppTokens.spacingS),
+            // 频率步进。
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                for (final b in [
+                  ('-1M', controller.freqHz - 1000000),
+                  ('-100k', controller.freqHz - 100000),
+                  ('+100k', controller.freqHz + 100000),
+                  ('+1M', controller.freqHz + 1000000),
+                ])
+                  Flexible(
+                    child: _StepButton(
+                      label: b.$1,
+                      onTap: () => controller.setFrequencyHz(b.$2),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: AppTokens.spacingS),
+            // 采样率下拉。
+            Row(
+              children: [
+                const Text('采样率', style: AppTokens.auxiliary),
+                const SizedBox(width: AppTokens.spacingM),
+                Expanded(
+                  child: DropdownButton<double>(
+                    value: AppTokens.sampleRatesHz.contains(controller.sampleRateHz)
+                        ? controller.sampleRateHz
+                        : AppTokens.sampleRatesHz.first,
+                    isExpanded: true,
+                    dropdownColor: AppTokens.bgBar,
+                    style: AppTokens.mono,
+                    items: AppTokens.sampleRatesHz
+                        .map((r) => DropdownMenuItem(
+                              value: r,
+                              child: Text('${(r / 1e6).toStringAsFixed(2)} Msps'),
+                            ))
+                        .toList(),
+                    onChanged: (v) =>
+                        v == null ? null : controller.setSampleRateHz(v),
+                  ),
+                ),
+              ],
+            ),
+            // 自动增益开关。
+            Row(
+              children: [
+                const Text('自动增益', style: AppTokens.auxiliary),
+                const Spacer(),
+                Switch(
+                  value: controller.autoGain,
+                  onChanged: (v) => controller.setAutoGain(v),
+                ),
+              ],
+            ),
+            // 增益滑杆。
+            Row(
+              children: [
+                const Text('增益', style: AppTokens.auxiliary),
+                Expanded(
+                  child: Slider(
+                    min: AppTokens.gainMinDb,
+                    max: AppTokens.gainMaxDb,
+                    value: controller.gainDb
+                        .clamp(AppTokens.gainMinDb, AppTokens.gainMaxDb),
+                    onChanged: controller.autoGain
+                        ? null
+                        : (v) => controller.setGainDb(v),
+                  ),
+                ),
+                Text('${controller.gainDb.toStringAsFixed(1)} dB',
+                    style: AppTokens.mono),
+              ],
+            ),
+            // 音频快捷控制：静音 toggle + 紧凑音量滑块（未连接时置灰）。
+            Row(
+              children: [
+                IconButton(
+                  tooltip: controller.muted ? '取消静音' : '静音',
+                  icon: Icon(
+                    controller.muted ? Icons.volume_off : Icons.volume_up,
+                  ),
+                  onPressed: connected
+                      ? () => controller.setMuted(!controller.muted)
+                      : null,
+                ),
+                Expanded(
+                  child: Slider(
+                    min: 0,
+                    max: 1,
+                    value: controller.volume.clamp(0.0, 1.0),
+                    onChanged: connected ? (v) => controller.setVolume(v) : null,
+                  ),
+                ),
+                Text(
+                  '${(controller.volume.clamp(0.0, 1.0) * 100).round()}',
                   style: AppTokens.mono,
-                  items: AppTokens.sampleRatesHz
-                      .map((r) => DropdownMenuItem(
-                            value: r,
-                            child: Text('${(r / 1e6).toStringAsFixed(2)} Msps'),
-                          ))
-                      .toList(),
-                  onChanged: (v) =>
-                      v == null ? null : controller.setSampleRateHz(v),
                 ),
-              ),
-            ],
-          ),
-          // 自动增益开关。
-          Row(
-            children: [
-              const Text('自动增益', style: AppTokens.auxiliary),
-              const Spacer(),
-              Switch(
-                value: controller.autoGain,
-                onChanged: (v) => controller.setAutoGain(v),
-              ),
-            ],
-          ),
-          // 增益滑杆。
-          Row(
-            children: [
-              const Text('增益', style: AppTokens.auxiliary),
-              Expanded(
-                child: Slider(
-                  min: AppTokens.gainMinDb,
-                  max: AppTokens.gainMaxDb,
-                  value: controller.gainDb
-                      .clamp(AppTokens.gainMinDb, AppTokens.gainMaxDb),
-                  onChanged: controller.autoGain
-                      ? null
-                      : (v) => controller.setGainDb(v),
-                ),
-              ),
-              Text('${controller.gainDb.toStringAsFixed(1)} dB',
-                  style: AppTokens.mono),
-            ],
-          ),
-          const SizedBox(height: AppTokens.spacingS),
-          // 连接 / 断开。
-          FilledButton.icon(
-            onPressed: _hasHost
-                ? () => _connectOrDisconnect(context)
-                : onOpenSettings,
-            icon: Icon(connected ? Icons.link_off : Icons.rss_feed),
-            label: Text(
-              !_hasHost
-                  ? '设置 rtl_tcp 地址'
-                  : connected
-                      ? '断开'
-                      : '连接 ${rtlHost.trim()}:$rtlPort',
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: AppTokens.spacingS),
+            // 连接 / 断开。
+            FilledButton.icon(
+              onPressed: _hasHost
+                  ? () => _connectOrDisconnect(context)
+                  : onOpenSettings,
+              icon: Icon(connected ? Icons.link_off : Icons.rss_feed),
+              label: Text(
+                !_hasHost
+                    ? '设置 rtl_tcp 地址'
+                    : connected
+                        ? '断开'
+                        : '连接 ${rtlHost.trim()}:$rtlPort',
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

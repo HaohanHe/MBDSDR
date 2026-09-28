@@ -92,13 +92,17 @@ class _HomeShellState extends State<HomeShell> {
           const SizedBox(width: AppTokens.spacingM),
           Consumer<RadioController>(
             builder: (BuildContext context, RadioController radio, _) {
-              final bool connected =
-                  radio.status == ConnectionStatus.connected;
+              final Color chipColor = switch (radio.status) {
+                ConnectionStatus.connected => AppTokens.success,
+                ConnectionStatus.reconnecting => AppTokens.warning,
+                _ => AppTokens.danger,
+              };
               return StatusChip(
-                color: connected ? AppTokens.success : AppTokens.danger,
+                color: chipColor,
                 text: switch (radio.status) {
                   ConnectionStatus.connected => 'rtl_tcp 已连接',
                   ConnectionStatus.connecting => '连接中…',
+                  ConnectionStatus.reconnecting => '重连中…',
                   ConnectionStatus.error => '连接失败',
                   ConnectionStatus.disconnected => 'rtl_tcp 未连接',
                 },

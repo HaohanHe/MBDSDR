@@ -19,13 +19,16 @@ class SkyController extends ChangeNotifier {
     required LocationService locationService,
     required OrientationService orientationService,
     this.manualStation,
+    DateTime Function()? clock,
   })  : _tle = tleClient,
         _loc = locationService,
-        _ori = orientationService;
+        _ori = orientationService,
+        _clock = clock ?? DateTime.now;
 
   final TleClient _tle;
   final LocationService _loc;
   final OrientationService _ori;
+  final DateTime Function() _clock;
 
   /// 外壳手填本站位置（非 null 时跳过定位）。
   final Station? manualStation;
@@ -44,6 +47,7 @@ class SkyController extends ChangeNotifier {
   bool _refreshing = false;
   String? _error;
   DateTime? _lastUpdated;
+  DateTime? _geometryTime;
 
   // ---- 只读状态 ----
   TleGroup get group => _group;
@@ -56,6 +60,9 @@ class SkyController extends ChangeNotifier {
   bool get refreshing => _refreshing;
   String? get error => _error;
   DateTime? get lastUpdated => _lastUpdated;
+
+  /// 几何计算所依据的时刻（UTC）；与极坐标图上的点/弧同源。
+  DateTime? get geometryTime => _geometryTime;
 
   /// 当前选中的卫星几何。
   SatVisibility? get selectedVisibility {
@@ -124,7 +131,8 @@ class SkyController extends ChangeNotifier {
   void _recomputeGeometry() {
     final st = _station;
     if (st == null || _tles.isEmpty) return;
-    final now = DateTime.now().toUtc();
+    final now = _clock().toUtc();
+    _geometryTime = now;
     _visible = visibleAt(now, _tles, st);
     _passes = predictPasses(_tles, st, hours: 24, stepSeconds: 60, startTime: now);
     // 选中失效则清空。
@@ -155,14 +163,17 @@ class SkyPage extends StatefulWidget {
     @visibleForTesting TleClient? tleClient,
     @visibleForTesting LocationService? locationService,
     @visibleForTesting OrientationService? orientationService,
+    @visibleForTesting DateTime Function()? clock,
   })  : _tleClient = tleClient,
         _locationService = locationService,
-        _orientationService = orientationService;
+        _orientationService = orientationService,
+        _clock = clock;
 
   final Station? manualStation;
   final TleClient? _tleClient;
   final LocationService? _locationService;
   final OrientationService? _orientationService;
+  final DateTime Function()? _clock;
 
   @override
   State<SkyPage> createState() => _SkyPageState();
@@ -170,6 +181,8 @@ class SkyPage extends StatefulWidget {
 
 class _SkyPageState extends State<SkyPage> {
   late final SkyController _c;
+  Timer? _clockTicker;
+  DateTime _wallClock = DateTime.now();
 
   @override
   void initState() {
@@ -181,9 +194,14 @@ class _SkyPageState extends State<SkyPage> {
       orientationService:
           widget._orientationService ?? ImuOrientationService(),
       manualStation: widget.manualStation,
+      clock: widget._clock,
     );
     _c.start();
     _c.addListener(_onChange);
+    // 诚实时钟：始终显示设备真实本地时间，秒级刷新。
+    _clockTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _wallClock = DateTime.now());
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _c.refresh());
   }
 
@@ -193,6 +211,7 @@ class _SkyPageState extends State<SkyPage> {
 
   @override
   void dispose() {
+    _clockTicker?.cancel();
     _c.removeListener(_onChange);
     _c.dispose();
     super.dispose();
@@ -228,10 +247,11 @@ class _SkyPageState extends State<SkyPage> {
     final isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
     final radar = SkyRadar(
-      heading: _c.orientation.heading,
       visible: _c.visible,
       selectedName: _c.selectedName,
       onSelect: _c.select,
+      station: _c.station,
+      now: _c.geometryTime,
     );
     final side = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -249,19 +269,66 @@ class _SkyPageState extends State<SkyPage> {
         Expanded(flex: 2, child: _PassList(passes: _c.passes, controller: _c)),
       ],
     );
-    if (isLandscape) {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(flex: 3, child: Center(child: radar)),
-          Expanded(flex: 2, child: side),
-        ],
-      );
-    }
+    final body = isLandscape
+        ? Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(flex: 3, child: Center(child: radar)),
+              Expanded(flex: 2, child: side),
+            ],
+          )
+        : Column(children: [
+            Expanded(flex: 3, child: radar),
+            Expanded(flex: 4, child: side),
+          ]);
     return Column(children: [
-      Expanded(flex: 3, child: radar),
-      Expanded(flex: 4, child: side),
+      _StatusBar(clock: _wallClock, station: _c.station),
+      Expanded(child: body),
     ]);
+  }
+}
+
+/// 诚实时态条：左侧设备真实本地时钟（秒级刷新），右侧本站位置。
+/// 无定位/无手填坐标时如实显示「未定位」，绝不编造经纬度。
+class _StatusBar extends StatelessWidget {
+  const _StatusBar({required this.clock, required this.station});
+
+  final DateTime clock;
+  final Station? station;
+
+  String _two(int n) => n.toString().padLeft(2, '0');
+
+  @override
+  Widget build(BuildContext context) {
+    final t = clock.toLocal();
+    final timeText =
+        '${_two(t.hour)}:${_two(t.minute)}:${_two(t.second)}';
+    final stationText = station == null
+        ? '未定位'
+        : '本站 ${station!.lat}, ${station!.lon}';
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppTokens.spacingM, vertical: AppTokens.spacingS),
+      decoration: const BoxDecoration(
+        color: AppTokens.card1,
+        border: Border(bottom: BorderSide(color: AppTokens.cardEdge)),
+      ),
+      child: Row(children: [
+        const Icon(Icons.schedule, size: 14, color: AppTokens.textSecondary),
+        const SizedBox(width: AppTokens.spacingS),
+        Text(timeText, style: AppTokens.mono),
+        const Spacer(),
+        const Icon(Icons.place, size: 14, color: AppTokens.textSecondary),
+        const SizedBox(width: AppTokens.spacingS),
+        Flexible(
+          child: Text(
+            stationText,
+            style: AppTokens.auxiliary,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ]),
+    );
   }
 }
 
