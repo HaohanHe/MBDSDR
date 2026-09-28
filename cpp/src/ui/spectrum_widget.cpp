@@ -401,7 +401,7 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
     p.setRenderHint(QPainter::Antialiasing, false);
 
     // Near-solid plot backdrop so grid lines have contrast (cards above are alpha overlays).
-    p.fillRect(rect(), QColor(10, 12, 14));
+    p.fillRect(rect(), QColor(QString::fromUtf8(tokens::kSpectrumBg)));
 
     const int w = width();
     const int h = height();

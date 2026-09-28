@@ -37,6 +37,7 @@ inline int scaled(int px) {
 // =====================================================================
 inline constexpr const char* kBgMain    = "#080a0c";
 inline constexpr const char* kBgBar      = "#000000";
+inline constexpr const char* kSpectrumBg = "#0a0c0e";
 // Cards float on the background as subtle white overlays (CarWith 8% surface),
 // not solid filled panels. Adjusted for our #080a0c base.
 inline constexpr const char* kCard1      = "rgba(255,255,255,0.045)";
