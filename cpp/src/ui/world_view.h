@@ -36,6 +36,11 @@ public:
 
 protected:
     void paintEvent(QPaintEvent*) override;
+    void mousePressEvent(QMouseEvent* e) override;
+    void mouseMoveEvent(QMouseEvent* e) override;
+    void mouseReleaseEvent(QMouseEvent*) override;
+    void wheelEvent(QWheelEvent* e) override;
+    void contextMenuEvent(QContextMenuEvent* e) override;
 
 private:
     QList<AircraftPoint> aircraft_;
@@ -43,6 +48,11 @@ private:
     double stationLat_ = std::numeric_limits<double>::quiet_NaN();
     double stationLon_ = std::numeric_limits<double>::quiet_NaN();
     QPointF latLonToPx(double lat, double lon);
+    double zoom_ = 1.0;
+    double panLat_ = 0.0;
+    double panLon_ = 0.0;
+    bool panning_ = false;
+    QPoint lastPan_;
 };
 
 } // namespace ui

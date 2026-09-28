@@ -3,6 +3,9 @@
 #include "core/tokens.h"
 
 #include <QPainter>
+#include <QMouseEvent>
+#include <QWheelEvent>
+#include <QMenu>
 #include <cmath>
 
 namespace mbdsdr {
@@ -35,9 +38,40 @@ void WorldView::addSatellite(const QString& name, double lat, double lon) {
 }
 
 QPointF WorldView::latLonToPx(double lat, double lon) {
-    double x = (lon + 180.0) / 360.0 * width();
-    double y = (90.0 - lat) / 180.0 * height();
+    // Zoom about the map center; pan shifts the visible window in degrees.
+    const double z = zoom_;
+    double lonC = panLon_;
+    double latC = panLat_;
+    double spanLon = 360.0 / z;
+    double spanLat = 180.0 / z;
+    double x = (lon - (lonC - spanLon/2)) / spanLon * width();
+    double y = (latC + spanLat/2 - lat) / spanLat * height();
     return QPointF(x, y);
+}
+
+void WorldView::mousePressEvent(QMouseEvent* e) {
+    panning_ = true;
+    lastPan_ = e->pos();
+}
+void WorldView::mouseMoveEvent(QMouseEvent* e) {
+    if (!panning_) return;
+    const double dx = e->position().x() - lastPan_.x();
+    const double dy = e->position().y() - lastPan_.y();
+    lastPan_ = e->pos();
+    // Drag right -> view shifts left (we see higher lon), so panLon decreases.
+    panLon_ -= dx / width() * (360.0 / zoom_);
+    panLat_ += dy / height() * (180.0 / zoom_);
+    panLat_ = std::clamp(panLat_, -90.0, 90.0);
+    update();
+}
+void WorldView::mouseReleaseEvent(QMouseEvent*) { panning_ = false; }
+void WorldView::wheelEvent(QWheelEvent* e) {
+    const double steps = e->angleDelta().y() / 120.0;
+    zoom_ = std::clamp(zoom_ * std::pow(1.25, steps), 1.0, 8.0);
+    update();
+}
+void WorldView::contextMenuEvent(QContextMenuEvent*) {
+    zoom_ = 1.0; panLat_ = 0.0; panLon_ = 0.0; update();
 }
 
 void WorldView::paintEvent(QPaintEvent*) {
