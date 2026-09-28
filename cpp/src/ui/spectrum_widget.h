@@ -88,6 +88,7 @@ private:
     double viewCenterHz_ = 0.0; // visible-window center; pans away from f0
 
     QList<mbdsdr::dsp::PeakInfo> peaks_;   // displayed peaks (tracked, matured)
+    QList<int> peakIds_;                    // parallel stable tracker IDs for peaks_
     float peakThresholdDb_ = 15.0f;        // dB above median (set from tokens in ctor)
     int   highlightedPeak_ = -1;           // selected table row -> peak index (-1 none)
     QString lastPeakSignature_;            // cheap throttle for table rebuild
