@@ -95,6 +95,13 @@ set(HEADERS
 
 add_executable(mbdsdr ${SOURCES} ${HEADERS})
 target_include_directories(mbdsdr PRIVATE src)
+
+# Offscreen screenshot tool (reuses all sources except main.cpp).
+set(SHOT_SRCS ${SOURCES})
+list(REMOVE_ITEM SHOT_SRCS src/main.cpp)
+add_executable(ui_shot_r27 tests/ui_screenshot_r14.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_r27 PRIVATE src build/ui_shot_r27_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_r27 PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
 if(RTLSDR_FOUND)
@@ -146,6 +153,12 @@ add_executable(test_bookmark tests/test_bookmark.cpp src/ui/bookmark_manager.cpp
 target_include_directories(test_bookmark PRIVATE src)
 target_link_libraries(test_bookmark PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME bookmark COMMAND test_bookmark)
+
+add_executable(test_spectrum_interaction tests/test_spectrum_interaction.cpp
+    src/ui/spectrum_widget.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_spectrum_interaction PRIVATE src)
+target_link_libraries(test_spectrum_interaction PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME spectrum_interaction COMMAND test_spectrum_interaction)
 
 add_executable(test_channelizer tests/test_channelizer.cpp
     src/dsp/channelizer.cpp src/dsp/fft.cpp)

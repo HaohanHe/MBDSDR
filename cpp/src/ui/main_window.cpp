@@ -666,7 +666,16 @@ MainWindow::MainWindow(QWidget* parent)
                 if (idx >= 0 && idx <= 4) {
                     currentBwHz_ = kBws[idx];
                     engine_->setBandwidth(kBws[idx]);
+                    if (spectrum_) spectrum_->setBandwidthHz(kBws[idx]);
                 }
+            });
+    // Drag a VFO band edge on the spectrum -> update bandwidth (snap to preset).
+    connect(spectrum_, &ui::SpectrumWidget::bandwidthChanged,
+            this, [this](double hz) {
+                static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
+                int best = 0; double bd = 1e18;
+                for (int i=0;i<5;++i){ double d=std::abs(kBws[i]-hz); if(d<bd){bd=d;best=i;} }
+                bwCombo_->setCurrentIndex(best);   // -> engine.setBandwidth via above
             });
     connect(gatedCheck_, &QCheckBox::stateChanged, this, [this](int st) {
         engine_->setGatedRecordingEnabled(st != Qt::Unchecked);
