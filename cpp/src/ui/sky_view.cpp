@@ -72,7 +72,7 @@ void SkyView::paintEvent(QPaintEvent*) {
     QFont f = font();
     f.setPointSize(tokens::kFontAuxPt);
     p.setFont(f);
-    p.setPen(QPen(QColor(tokens::kAccent), 1));
+    p.setPen(QPen(QColor(tokens::kTextSecondary), 1));
     const char* dirs[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
     for (int i = 0; i < 8; ++i) {
         double az = i * 45.0;
@@ -80,7 +80,7 @@ void SkyView::paintEvent(QPaintEvent*) {
         QPointF pos = center + QPointF((radius + 12) * sin(a), -(radius + 12) * cos(a));
         p.drawText(QRectF(pos.x()-15, pos.y()-10, 30, 20), Qt::AlignCenter, dirs[i]);
     }
-    p.setPen(QPen(QColor(tokens::kAccent), 2));
+    p.setPen(QPen(QColor(tokens::kTextSecondary), 2));
     p.drawPoint(center);
 
     // Draw each pass as a polyline through its sampled (az,el) track.
@@ -171,10 +171,8 @@ void SkyView::paintEvent(QPaintEvent*) {
         }
     }
 
-    if (passes_.isEmpty()) {
-        p.setPen(QColor(tokens::kTextWhite));
-        p.drawText(rect(), Qt::AlignCenter, emptyText_);
-    }
+    // Empty-state caption is now a QLabel in the page layout (see MainWindow),
+    // so it never paints over the polar compass / azimuth labels.
 }
 
 } // namespace ui

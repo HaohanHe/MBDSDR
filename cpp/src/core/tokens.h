@@ -288,18 +288,18 @@ QTabBar::tab {
 QTabBar::tab:selected { color: %accent%; font-weight: 600; }
 QTabBar::tab:hover { color: %textPri%; }
 QPushButton {
-    background-color: %card2%;
+    background-color: transparent;
     color: %textPri%;
-    border: 1px solid transparent;
+    border: 1px solid %edge%;
     border-radius: %radCard%px;
     font-size: %fontBody%pt;
-    min-height: %touch%px;
-    padding: %padMV%px %padLH%px;
+    min-height: %ctlH%px;
+    padding: %padSV%px %padMV%px;
     cursor: pointer;
 }
-QPushButton:hover  { background-color: %card3%; border: 1px solid %edge%; }
-QPushButton:pressed{ background-color: %accentP%; color: #06121c; }
-QPushButton:disabled { color: rgba(255,255,255,0.3); background-color: %card1%; }
+QPushButton:hover  { background-color: %card2%; }
+QPushButton:pressed{ background-color: %accentP%; color: #06121c; border-color: transparent; }
+QPushButton:disabled { color: rgba(255,255,255,0.3); background-color: transparent; }
 QSplitter::handle { background: transparent; }
 QSplitter::handle:horizontal {
     width: %splW%px;
@@ -309,12 +309,12 @@ QSplitter::handle:horizontal {
 }
 QStatusBar { background: %bgBar%; color: %textSec%; border-top: 1px solid %edge%; }
 QComboBox, QSpinBox, QDoubleSpinBox {
-    background-color: %card2%;
+    background-color: %card1%;
     color: %textPri%;
     border: 1px solid %edge%;
     border-radius: %radCard%px;
-    padding: %padMV%px %padLH%px;
-    min-height: %touch%px;
+    padding: %padSV%px %padMV%px;
+    min-height: %ctlH%px;
 }
 QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover { border: 1px solid %accent%; }
 QComboBox QAbstractItemView {
@@ -330,7 +330,7 @@ QGroupBox {
     border-radius: %radCard%px;
     margin-top: %groupTop%px;
     padding-top: %groupPad%px;
-    color: %textPri%;
+    color: %textSec%;
     font-weight: 600;
     font-size: %fontBody%pt;
     background-color: %card1%;
@@ -363,6 +363,30 @@ QToolTip {
     border: 1px solid %accent%;
     padding: %padSV%px %padMV%px;
 }
+QScrollBar:vertical {
+    background: transparent;
+    width: %sbW%px;
+    margin: %padSV%px 0;
+}
+QScrollBar::handle:vertical {
+    background: rgba(255,255,255,0.15);
+    border-radius: %sbR%px;
+    min-height: %touch%px;
+}
+QScrollBar::handle:vertical:hover { background: rgba(255,255,255,0.3); }
+QScrollBar:horizontal {
+    background: transparent;
+    height: %sbW%px;
+    margin: 0 %padSV%px;
+}
+QScrollBar::handle:horizontal {
+    background: rgba(255,255,255,0.15);
+    border-radius: %sbR%px;
+    min-width: %touch%px;
+}
+QScrollBar::handle:horizontal:hover { background: rgba(255,255,255,0.3); }
+QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 )")
         .replace(QStringLiteral("%bg%"), bg)
         .replace(QStringLiteral("%bgBar%"), bgBar)
@@ -380,6 +404,9 @@ QToolTip {
         .replace(QStringLiteral("%fontBody%"), QString::number(kFontBodyPt))
         .replace(QStringLiteral("%fontAux%"), QString::number(kFontAuxPt))
         .replace(QStringLiteral("%touch%"), S(kTouchMin))
+        .replace(QStringLiteral("%ctlH%"), S(30))
+        .replace(QStringLiteral("%sbW%"), S(6))
+        .replace(QStringLiteral("%sbR%"), S(3))
         .replace(QStringLiteral("%radCard%"), S(kRadiusCard))
         .replace(QStringLiteral("%radSmall%"), S(kRadiusSmall))
         .replace(QStringLiteral("%radSpl%"), S(kRadiusSplitter))
