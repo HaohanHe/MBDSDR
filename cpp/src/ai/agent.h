@@ -22,6 +22,8 @@ public:
 
     void setEngine(dsp::SpectrumEngine* e);
     void configureFromConfig();
+    /// Set config directly (for tests / programmatic setup). Applies to worker.
+    void setConfig(const AiConfig& c) { config_ = c; configureFromConfig(); }
 
 public slots:
     void sendMessage(const QString& userInput);
