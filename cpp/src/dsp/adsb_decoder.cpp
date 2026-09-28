@@ -9,6 +9,38 @@ namespace dsp {
 
 static const uint32_t CRC24_POLY = 0xFFF409;
 
+// NL(lat): number of longitude zones at given latitude.
+static int cprNL(double latDeg) {
+    static const int nl[] = {
+      59,59,59,58,58,58,57,57,56,56,55,55,54,54,53,53,52,52,51,51,
+      50,50,49,49,48,48,47,47,46,46,45,45,44,44,43,43,42,42,41,41,
+      40,40,39,39,38,38,37,37,36,36,35,35,34,34,33,33,32,32,31,31,
+      30,30,29,29,28,28,27,27,26,26,25,25,24,24,23,23,22,22,21,21,
+      20,20,19,19,18,18,17,17,16,16,15,15,14,14,13,13,12,12,11,11,
+      10,10, 9, 9, 8, 7, 6
+    };
+    int i = std::abs((int)std::floor(latDeg * 4.0));
+    if (i >= 104) return 1;
+    return nl[i];
+}
+
+bool cprGlobalDecode(const CprPair& p, double& latOut, double& lonOut) {
+    if (!p.haveEven || !p.haveOdd) return false;
+    double j = std::floor((59.0*p.latEven - 60.0*p.latOdd)/131072.0 + 0.5);
+    double latEven = (360.0/60.0) * (std::fmod((int)j,60) + p.latEven/131072.0);
+    double latOdd  = (360.0/59.0) * (std::fmod((int)j,59) + p.latOdd/131072.0);
+    if (latEven >= 270.0) latEven -= 360.0;
+    if (latOdd  >= 270.0) latOdd  -= 360.0;
+    if (std::abs(latEven) > 90) return false;
+    int n = cprNL(latEven);
+    int m = (int)std::floor(((double)p.lonEven*(n-1) - (double)p.lonOdd*n)/131072.0 + 0.5);
+    int nEven = (n >= 1) ? n : 1;
+    double lon = (360.0/nEven) * (std::fmod((int)m, nEven) + p.lonEven/131072.0);
+    if (lon >= 360.0) lon -= 360.0;
+    latOut = latEven; lonOut = lon;
+    return true;
+}
+
 ADSBDecoder::ADSBDecoder() = default;
 
 void ADSBDecoder::setSampleRate(double sr) { sr_ = sr; }
@@ -99,6 +131,19 @@ bool ADSBDecoder::decodeFrame(std::size_t start, std::size_t totalBits, Aircraft
             if (mBit) n = ((ac & 0x0FE0) >> 1) | (ac & 0x000F);
             else n = ((ac & 0x0FF0) >> 1) | (ac & 0x000F);
             out.altitudeFt = n * 25 - 1000;
+
+            // CPR airborne position: ME bytes frameBytes[4..10].
+            const uint8_t* me = &frameBytes[4];
+            int cprFmt = (me[2] >> 4) & 1;         // 0=even, 1=odd
+            int cprLat = ((me[2] & 0x0F) << 13) | (me[3] << 5) | (me[4] >> 3);
+            int cprLon = ((me[4] & 0x07) << 14) | (me[5] << 6) | (me[6] >> 2);
+            CprPair& st = cprByIcao_[out.icao];
+            if (cprFmt == 0) { st.latEven=cprLat; st.lonEven=cprLon; st.haveEven=true; }
+            else             { st.latOdd=cprLat;  st.lonOdd=cprLon;  st.haveOdd=true; }
+            double la, lo;
+            if (cprGlobalDecode(st, la, lo)) {
+                out.hasPosition = true; out.lat = la; out.lon = lo;
+            }
         }
     }
 
@@ -124,6 +169,7 @@ void ADSBDecoder::feed(const std::vector<std::complex<float>>& iq) {
                         ac.lastSeen = info.lastSeen;
                         if (!info.callsign.isEmpty()) ac.callsign = info.callsign;
                         if (info.altitudeFt > 0) ac.altitudeFt = info.altitudeFt;
+                        if (info.hasPosition) { ac.hasPosition=true; ac.lat=info.lat; ac.lon=info.lon; }
                         found = true;
                         newAircraft_.push_back(ac);
                         break;

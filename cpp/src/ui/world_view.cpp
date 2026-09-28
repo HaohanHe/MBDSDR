@@ -130,7 +130,16 @@ void WorldView::paintEvent(QPaintEvent*) {
     p.setBrush(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
     for (const auto& s : satellites_) {
         QPointF pos = latLonToPx(s.lat, s.lon);
-        p.drawEllipse(pos, 2, 2);
+        if (s.selected) {
+            p.setPen(QPen(QColor(tokens::kAccent), 2));
+            p.setBrush(QColor(tokens::kAccent));
+            p.drawEllipse(pos, 6, 6);
+            p.drawText(pos + QPointF(8, -8), s.name);
+        } else {
+            p.setPen(QPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)), 1));
+            p.setBrush(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
+            p.drawEllipse(pos, 3, 3);
+        }
     }
 
     // At most ONE centered hint, so labels can never overlap into garble.

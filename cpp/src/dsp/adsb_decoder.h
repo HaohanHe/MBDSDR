@@ -6,6 +6,8 @@
 #include <vector>
 #include <complex>
 #include <array>
+#include <QHash>
+#include <limits>
 
 namespace mbdsdr {
 namespace dsp {
@@ -18,7 +20,18 @@ struct AircraftInfo {
     bool crcOk = false;
     QDateTime firstSeen;
     QDateTime lastSeen;
+    double lat = std::numeric_limits<double>::quiet_NaN();
+    double lon = std::numeric_limits<double>::quiet_NaN();
+    bool hasPosition = false;
 };
+
+// CPR global position decode (even/odd pair). Public for unit tests.
+struct CprPair {
+    int latEven = 0, lonEven = 0;
+    int latOdd  = 0, lonOdd  = 0;
+    bool haveEven = false, haveOdd = false;
+};
+bool cprGlobalDecode(const CprPair& p, double& latOut, double& lonOut);
 
 class ADSBDecoder {
 public:
@@ -40,6 +53,8 @@ private:
     bool checkPreamble(std::size_t idx) const;
     bool decodeFrame(std::size_t start, std::size_t totalBits, AircraftInfo& out);
     static QString decodeCallsign(const uint8_t* me);
+
+    QHash<QString, CprPair> cprByIcao_;   // per-aircraft CPR even/odd state
 };
 
 } // namespace dsp
