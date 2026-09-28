@@ -3,6 +3,7 @@
 #include "rtl_sdr_source.h"
 #include "test_signal.h"
 #include "power_spectrum.h"
+#include "noise_blanker.h"
 
 #include <QDebug>
 #include <QDateTime>
@@ -266,6 +267,18 @@ void SpectrumEngine::setPpm(double ppm) {
     if (source_) source_->setPpm(ppm);
 }
 
+void SpectrumEngine::setWindowType(int w) {
+    powerSpectrum_.setWindow(static_cast<PowerSpectrum::Window>(
+        std::clamp(w, 0, 2)));
+}
+void SpectrumEngine::setAverageMode(int a) {
+    powerSpectrum_.setAverage(static_cast<PowerSpectrum::Average>(
+        std::clamp(a, 0, 2)));
+}
+void SpectrumEngine::setNoiseBlanker(bool on) {
+    noiseBlanker_.setEnabled(on);
+}
+
 void SpectrumEngine::run() {
     std::vector<std::complex<float>> iq;
     iq.resize(static_cast<std::size_t>(fftSize_.load()));
@@ -309,6 +322,7 @@ void SpectrumEngine::run() {
         }
         if (got < iq.size()) iq.resize(got);
 
+        noiseBlanker_.process(iq);
         frontend_.process(iq);
 
         // Record raw IQ if recording
@@ -319,7 +333,7 @@ void SpectrumEngine::run() {
         std::vector<std::complex<float>> spec(iq.begin(), iq.begin() + specN);
         SpectrumFrame frame;
         frame.dbfs.resize(specN);
-        powerSpectrumDbfs(spec, frame.dbfs);
+        powerSpectrum_.process(spec, frame.dbfs);
         frame.centerFreqHz = source_->centerFreq();
         frame.sampleRateHz = source_->sampleRate();
         frame.fftSize = static_cast<int>(specN);

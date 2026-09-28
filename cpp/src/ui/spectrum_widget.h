@@ -41,6 +41,8 @@ public slots:
 
 signals:
     void fftSizeRequested(int n);
+    void windowTypeRequested(int w);   // 0 Hann / 1 Flattop / 2 Blackman
+    void averageModeRequested(int a); // 0 Off / 1 Slow / 2 Fast
     void frequencyChanged(double newFreqHz);
     /// Emitted whenever the visible frequency window changes (zoom/pan/reset).
     void visibleRangeChanged(double fLoHz, double fHiHz);
@@ -106,6 +108,16 @@ private:
     };
     QList<TrackedPeak> tracked_;
     int nextPeakId_ = 1;
+
+    // Max-hold envelope: per-bin historical maximum of the live spectrum.
+    std::vector<float> maxHold_;
+    bool maxHoldEnabled_ = false;
+public slots:
+    void setMaxHoldEnabled(bool on) {
+        maxHoldEnabled_ = on;
+        if (!on) maxHold_.clear();
+        update();
+    }
 };
 
 } // namespace ui

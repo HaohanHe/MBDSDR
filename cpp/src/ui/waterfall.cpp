@@ -25,13 +25,26 @@ WaterfallWidget::WaterfallWidget(QWidget* parent)
     buildLut();
 }
 
+void WaterfallWidget::setScrollSpeed(int n) {
+    scrollEvery_ = (n >= 1 && n <= 4) ? n : 1;
+}
+
+void WaterfallWidget::setPalette(int p) {
+    palette_ = (p == 1) ? 1 : 0;
+    buildLut();
+    update();
+}
+
 void WaterfallWidget::buildLut() {
     lut_.resize(256);
     // Pre-resolve each hex stop to RGB once.
     struct RgbStop { float t; int r, g, b; };
-    const auto& stops = tokens::kWaterfallStops;
-    RgbStop rgb[sizeof(tokens::kWaterfallStops) / sizeof(tokens::kWaterfallStops[0])];
-    const int nStops = static_cast<int>(sizeof(rgb) / sizeof(rgb[0]));
+    const bool mono = (palette_ == 1);
+    const auto& stops = mono ? tokens::kWaterfallStopsMono : tokens::kWaterfallStops;
+    const int nStops = mono
+        ? static_cast<int>(sizeof(tokens::kWaterfallStopsMono)/sizeof(tokens::kWaterfallStopsMono[0]))
+        : static_cast<int>(sizeof(tokens::kWaterfallStops)/sizeof(tokens::kWaterfallStops[0]));
+    QVector<RgbStop> rgb(nStops);
     for (int i = 0; i < nStops; ++i) {
         QColor c(QString::fromUtf8(stops[i].hex));
         rgb[i] = {stops[i].t, c.red(), c.green(), c.blue()};
@@ -70,6 +83,10 @@ void WaterfallWidget::setSpectrum(const SpectrumFrame& frame) {
 
     frameF0_ = frame.centerFreqHz;
     frameFs_ = frame.sampleRateHz;
+
+    // Honor scroll speed: only push a new row every N frames.
+    frameMod_ = (frameMod_ + 1) % scrollEvery_;
+    if (frameMod_ != 0) { haveFrame_ = true; update(); return; }
 
     // Scroll existing rows down by one (single block move), then write new top row.
     const std::size_t rowBytes = static_cast<std::size_t>(history_.bytesPerLine());

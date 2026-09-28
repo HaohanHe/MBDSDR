@@ -39,6 +39,7 @@ set(SOURCES
     src/dsp/iq_buffer.cpp
     src/dsp/power_spectrum.cpp
     src/dsp/peak_detector.cpp
+    src/dsp/noise_blanker.cpp
     src/dsp/test_signal.cpp
     src/dsp/rtl_sdr_source.cpp
     src/dsp/spectrum_engine.cpp
@@ -115,6 +116,11 @@ target_include_directories(test_peak_detector PRIVATE src)
 target_link_libraries(test_peak_detector PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME peak_detector COMMAND test_peak_detector)
 
+add_executable(test_noise_blanker tests/test_noise_blanker.cpp src/dsp/noise_blanker.cpp)
+target_include_directories(test_noise_blanker PRIVATE src)
+target_link_libraries(test_noise_blanker PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME noise_blanker COMMAND test_noise_blanker)
+
 add_executable(test_channelizer tests/test_channelizer.cpp
     src/dsp/channelizer.cpp src/dsp/fft.cpp)
 target_include_directories(test_channelizer PRIVATE src)
@@ -154,7 +160,8 @@ add_executable(test_agent tests/test_agent.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp
-    src/dsp/adsb_decoder.cpp src/dsp/fft.cpp src/dsp/power_spectrum.cpp)
+    src/dsp/adsb_decoder.cpp src/dsp/fft.cpp src/dsp/power_spectrum.cpp
+    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_agent PRIVATE src)
 target_link_libraries(test_agent PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME agent COMMAND test_agent)

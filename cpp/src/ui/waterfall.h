@@ -22,6 +22,10 @@ public slots:
     /// Crop the display to a visible frequency window (zoomed/panned spectrum).
     /// Pass fLo>fHi or call with hasVisRange=false to revert to full span.
     void setVisibleRange(double fLoHz, double fHiHz);
+    /// Scroll speed: write a new row every N frames (1/2/4).
+    void setScrollSpeed(int linesPerFrame);
+    /// Palette: 0 = classic color, 1 = monochrome blue-scale.
+    void setPalette(int p);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -35,6 +39,9 @@ private:
     int bins_ = 0;
     bool haveFrame_ = false;
     QVector<QRgb> lut_;        // dB -> color lookup table
+    int scrollEvery_ = 1;       // write a row every N frames
+    int frameMod_ = 0;
+    int palette_ = 0;           // 0 classic, 1 mono
 
     // Current visible frequency window (from the spectrum widget). When set,
     // only the columns whose bin frequency falls in [visLo_, visHi_] are drawn,
