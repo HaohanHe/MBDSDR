@@ -204,6 +204,37 @@ inline constexpr WaterfallStop kWaterfallStopsMono[] = {
 };
 
 // =====================================================================
+// Unified SpectrumDisplay geometry
+// Geometry model ported from SDR++ ImGui::WaterFall and re-expressed with
+// QPainter + scaled tokens: the spectrum trace, the shared frequency strip
+// and the waterfall all start at the same left x and share one width, so the
+// frequency axes align by construction (not by coincidence).
+// Layout (top -> bottom): top inset | spectrum trace | 1px gap | shared
+// frequency strip | draggable divider | waterfall | bottom inset.
+// =====================================================================
+inline constexpr int kDispLeftInset    = 50;   // dB label gutter (base px)
+inline constexpr int kDispRightInset   = 12;
+inline constexpr int kDispTopInset     = 9;
+inline constexpr int kDispBottomInset  = 8;
+inline constexpr int kDispFreqStripH   = 30;   // shared tick + label strip
+inline constexpr int kDispAreaGap      = 1;    // hairline between trace and strip
+inline constexpr int kDividerHitHalfH  = 4;    // draggable divider hit half-height
+inline constexpr int kSpecAreaMinH     = 120;  // min trace height (base px)
+inline constexpr int kWfAreaMinH       = 60;   // min waterfall height (base px)
+// Default share of the (trace + waterfall) height given to the trace.
+// 0.5 => spectrum and waterfall are roughly equal, both substantial.
+inline constexpr double kDefaultSpecFraction = 0.5;
+inline constexpr const char* kSettingsKeySpecFraction = "view/specFraction";
+inline constexpr const char* kSettingsKeyScrollSpeed  = "view/wfScrollSpeed";
+inline constexpr const char* kSettingsKeyPalette      = "view/wfPalette";
+
+// Small painted details inside the unified canvas (base px, scaled() at runtime).
+inline constexpr int kDispTickProtrusion = 3;   // freq tick pokes up/down into panels
+inline constexpr int kVfoHandleHalfW     = 4;   // VFO band-edge drag handle half-width
+inline constexpr int kVfoHandleH         = 6;   // VFO band-edge drag handle triangle height
+inline constexpr int kBandEdgeHitTol     = 12;  // mouse hit tolerance around a VFO edge
+
+// =====================================================================
 // Spectrum widget sizes / offsets
 // =====================================================================
 inline constexpr int kSpectrumMinW     = 480;

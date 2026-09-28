@@ -31,10 +31,9 @@ public:
     void setSampleRate(double rateHz) override;
     void setGain(double gainDb) override;
 
-#ifdef HAVE_RTLSDR
-    // Hardware-specific tuning overrides -- only compiled with the real backend.
-    // The !HAVE_RTLSDR stub intentionally does NOT override these: it inherits
-    // the empty ISource defaults, so toggling them in the UI is a safe no-op.
+    // Hardware-specific tuning overrides. These always store their value; the
+    // librtlsdr push is compiled in only under HAVE_RTLSDR (see .cpp), so an
+    // off-stub build keeps them as safe no-ops that inherit ISource's defaults.
     void setDirectSampling(int mode) override;   // 0=off, 1=I-ADC, 2=Q-ADC
     void setOffsetTuning(bool on) override;
     void setRtlAgc(bool on) override;            // RTL2832 internal AGC
@@ -42,7 +41,6 @@ public:
     void setBiasTee(bool on) override;
     void setPpm(double ppm) override;
     void setGainStage(int stage, double gainDb) override;
-#endif
 
     double centerFreq() const override { return f0_; }
     double sampleRate() const override { return fs_; }

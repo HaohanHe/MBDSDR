@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
-// Offscreen mouse-interaction test for SpectrumWidget: drag retune + wheel zoom.
+// Offscreen interaction test for the SpectrumWidget container: drag retune +
+// wheel zoom are injected into the embedded canvas, while we assert on the
+// container's forwarded signals (proving the wiring survives the refactor).
 #include <QtTest/QtTest>
 #include <QApplication>
 #include <QWheelEvent>
 #include "ui/spectrum_widget.h"
+#include "ui/spectrum_display.h"
 #include "core/spectrum_frame.h"
 
 class TestSpectrumInteraction : public QObject {
@@ -23,21 +26,28 @@ static mbdsdr::SpectrumFrame fakeFrame() {
 void TestSpectrumInteraction::dragRetunes() {
     mbdsdr::ui::SpectrumWidget w; w.resize(800, 400); w.show();
     w.setSpectrum(fakeFrame());
+    mbdsdr::ui::SpectrumDisplay* canvas = w.displayCanvas();
+    QVERIFY(canvas);
     QSignalSpy spy(&w, &mbdsdr::ui::SpectrumWidget::frequencyChanged);
-    QTest::mousePress(&w, Qt::LeftButton, Qt::NoModifier, QPoint(400, 200));
-    QTest::mouseMove(&w, QPoint(500, 200));
-    QTest::mouseRelease(&w, Qt::LeftButton, Qt::NoModifier, QPoint(500, 200));
+    const QPoint c = canvas->rect().center();
+    QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, c);
+    QTest::mouseMove(canvas, c + QPoint(80, 0));
+    QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, c + QPoint(80, 0));
     QVERIFY(spy.count() >= 1);
 }
 
 void TestSpectrumInteraction::wheelZooms() {
     mbdsdr::ui::SpectrumWidget w; w.resize(800, 400); w.show();
     w.setSpectrum(fakeFrame());
+    mbdsdr::ui::SpectrumDisplay* canvas = w.displayCanvas();
+    QVERIFY(canvas);
     const double before = w.zoomFactor();
-    QWheelEvent ev(QPointF(400,200), QPointF(400,200), QPoint(120,0),
+    const QPoint pc = canvas->rect().center();
+    const QPointF pf(pc);
+    QWheelEvent ev(pf, pf, QPoint(120,0),
                    QPoint(0,120), Qt::NoButton, Qt::NoModifier,
                    Qt::NoScrollPhase, false);
-    w.wheelEvent(&ev);
+    canvas->wheelEvent(&ev);
     QVERIFY(w.zoomFactor() > before);
 }
 
