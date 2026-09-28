@@ -16,6 +16,8 @@ Agent::Agent(QObject* parent) : QObject(parent) {
     worker_->moveToThread(workerThread_);
     connect(worker_, &LLMWorker::chatFinished, this, &Agent::responseReady);
     connect(worker_, &LLMWorker::toolCalled, this, &Agent::toolCalled);
+    // Drop the worker's NAM on the worker thread before we delete the worker.
+    connect(workerThread_, &QThread::finished, worker_, &LLMWorker::cleanup);
     workerThread_->start();
 }
 

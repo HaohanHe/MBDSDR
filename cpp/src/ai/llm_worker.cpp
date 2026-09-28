@@ -8,12 +8,28 @@ namespace ai {
 
 LLMWorker::LLMWorker(QObject* parent) : QObject(parent) {}
 
+LLMWorker::~LLMWorker() {
+    if (client_) { delete client_; client_ = nullptr; }
+}
+
+void LLMWorker::cleanup() {
+    if (client_) { client_->deleteLater(); client_ = nullptr; }
+}
+
 void LLMWorker::doChat(const QList<ChatMessage>& messages,
                          const QList<ToolDef>& tools) {
+    // Lazily create the client on THIS (worker) thread so the
+    // QNetworkAccessManager lives here and no cross-thread child warnings fire.
+    if (!client_) {
+        client_ = new LLMClient();
+        client_->setApiKey(apiKey_);
+        client_->setBaseUrl(baseUrl_);
+        client_->setModel(model_);
+    }
     QList<ChatMessage> msgs = messages;
 
     for (int round = 0; round < 3; ++round) {
-        LLMResponse resp = client_.chat(msgs, tools);
+        LLMResponse resp = client_->chat(msgs, tools);
         if (!resp.error.isEmpty()) {
             emit chatFinished("LLM 错误: " + resp.error);
             return;
@@ -24,7 +40,6 @@ void LLMWorker::doChat(const QList<ChatMessage>& messages,
             return;
         }
 
-        // Append the assistant message (carrying tool_calls) once per round.
         ChatMessage asst;
         asst.role = "assistant";
         asst.content = resp.content;
