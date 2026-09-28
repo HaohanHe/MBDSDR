@@ -90,6 +90,16 @@ set(SOURCES
     src/ai/ai_config.cpp
     src/ai/agent_tools.cpp
     src/ai/agent.cpp
+    src/tx/modulator.cpp
+    src/tx/loopback_backend.cpp
+    src/tx/tx_controller.cpp
+    src/tx/soapy_tx_backend.cpp
+    src/radio/ax25.cpp
+    src/radio/kiss.cpp
+    src/radio/radio_link.cpp
+    src/radio/cat_client.cpp
+    src/radio/cw_keyer.cpp
+    src/ui/radio_panel.cpp
 )
 
 set(HEADERS
@@ -128,6 +138,17 @@ set(HEADERS
     src/gnss/stream_transport.h
     src/gnss/nmea_parser.h
     src/gnss/gnss_receiver.h
+    src/tx/modulator.h
+    src/tx/itx_backend.h
+    src/tx/loopback_backend.h
+    src/tx/tx_controller.h
+    src/tx/soapy_tx_backend.h
+    src/radio/ax25.h
+    src/radio/kiss.h
+    src/radio/radio_link.h
+    src/radio/cat_client.h
+    src/radio/cw_keyer.h
+    src/ui/radio_panel.h
 )
 
 add_executable(mbdsdr ${SOURCES} ${HEADERS})
@@ -149,7 +170,7 @@ target_link_libraries(ui_shot_mvfo PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Net
 add_executable(ui_shot_cst tests/ui_screenshot_constellation.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_cst PRIVATE src build/ui_shot_cst_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_cst PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
-target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent ${CMAKE_DL_LIBS})
 
 if(RTLSDR_FOUND)
     target_compile_definitions(mbdsdr PRIVATE HAVE_RTLSDR=1)
@@ -279,6 +300,40 @@ add_executable(test_demod tests/test_demod.cpp
 target_include_directories(test_demod PRIVATE src)
 target_link_libraries(test_demod PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME demod COMMAND test_demod)
+
+# TX modulator -> demodulator loopback (AM/NFM/WFM/SSB/CW), not hardware.
+add_executable(test_modulator tests/test_modulator.cpp
+    src/tx/modulator.cpp src/dsp/demod.cpp)
+target_include_directories(test_modulator PRIVATE src)
+target_link_libraries(test_modulator PRIVATE Qt6::Core)
+add_test(NAME modulator COMMAND test_modulator)
+
+# AX.25/KISS TNC framing round-trip (not hardware).
+add_executable(test_ax25 tests/test_ax25.cpp
+    src/radio/ax25.cpp src/radio/kiss.cpp)
+target_include_directories(test_ax25 PRIVATE src)
+target_link_libraries(test_ax25 PRIVATE Qt6::Core)
+add_test(NAME ax25 COMMAND test_ax25)
+
+# TX interlock + PTT watchdog (not hardware).
+add_executable(test_tx tests/test_tx.cpp
+    src/tx/loopback_backend.cpp src/tx/tx_controller.cpp src/tx/modulator.cpp)
+target_include_directories(test_tx PRIVATE src)
+target_link_libraries(test_tx PRIVATE Qt6::Core)
+add_test(NAME tx COMMAND test_tx)
+
+# CAT (CI-V/Kenwood) + CW keyer (not hardware).
+add_executable(test_radio tests/test_radio.cpp
+    src/radio/cat_client.cpp src/radio/cw_keyer.cpp src/radio/radio_link.cpp)
+target_include_directories(test_radio PRIVATE src)
+target_link_libraries(test_radio PRIVATE Qt6::Core)
+add_test(NAME radio COMMAND test_radio)
+
+# SoapySDR TX backend honest error path (no Soapy required).
+add_executable(test_soapy_tx tests/test_soapy_tx.cpp src/tx/soapy_tx_backend.cpp)
+target_include_directories(test_soapy_tx PRIVATE src)
+target_link_libraries(test_soapy_tx PRIVATE Qt6::Core ${CMAKE_DL_LIBS})
+add_test(NAME soapy_tx COMMAND test_soapy_tx)
 
 add_executable(test_recorder tests/test_recorder.cpp
     src/dsp/recorder.cpp src/dsp/file_source.cpp src/dsp/gated_recorder.cpp
