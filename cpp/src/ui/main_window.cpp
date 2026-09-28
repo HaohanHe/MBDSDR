@@ -58,8 +58,12 @@
 #include <QLineEdit>
 #include <QSpinBox>
 #include <QApplication>
+#include <QClipboard>
 #include <QInputDialog>
 #include "ui/world_view.h"
+#include "ui/elevation_plot.h"
+#include "gnss/gnss_receiver.h"
+#include "gnss/gnss_types.h"
 #include "ui/spectrum_widget.h"
 #include "ui/settings_dialog.h"
 #include "ui/about_dialog.h"
@@ -353,14 +357,56 @@ MainWindow::MainWindow(QWidget* parent)
     centerLay->setContentsMargins(0, 0, 0, 0);
     centerTabs_ = new QTabWidget(centerCard);
     spectrum_ = new ui::SpectrumWidget(centerCard);
-    worldView_ = new ui::WorldView(centerCard);
+
+    // World tab: a compact GNSS/serial toolbar on top, the offline map below.
+    // Real data only: the receiver point appears only after a valid fix; with
+    // no fix the map keeps the hand-entered station and states "GNSS 无定位".
+    adsbMap_ = new QMap<QString, ui::AircraftPoint>();
+    auto* worldPage = new QWidget(centerCard);
+    auto* worldPageLay = new QVBoxLayout(worldPage);
+    worldPageLay->setContentsMargins(0, 0, 0, 0);
+    worldPageLay->setSpacing(0);
+
+    auto* gnssBar = new QFrame(worldPage);
+    gnssBar->setObjectName("panelCard");
+    auto* gnssBarLay = new QHBoxLayout(gnssBar);
+    gnssBarLay->setContentsMargins(tokens::scaled(8), tokens::scaled(3),
+                                  tokens::scaled(8), tokens::scaled(3));
+    gnssBarLay->setSpacing(tokens::scaled(6));
+    gnssBarLay->addWidget(new QLabel("GNSS 串口", gnssBar));
+    gnssDeviceEdit_ = new QLineEdit(gnssBar);
+    gnssDeviceEdit_->setPlaceholderText("/dev/ttyUSB0");
+    gnssDeviceEdit_->setToolTip("NMEA 0183 串口设备路径（如 /dev/ttyUSB0）");
+    gnssBarLay->addWidget(gnssDeviceEdit_, 1);
+    gnssBaudCombo_ = new QComboBox(gnssBar);
+    gnssBaudCombo_->addItems({"9600", "38400", "115200"});
+    gnssBarLay->addWidget(gnssBaudCombo_);
+    gnssConnectBtn_ = new QPushButton("连接", gnssBar);
+    gnssBarLay->addWidget(gnssConnectBtn_);
+    gnssStatusLabel_ = new QLabel("未连接", gnssBar);
+    gnssBarLay->addWidget(gnssStatusLabel_);
+    gnssBarLay->addSpacing(tokens::scaled(8));
+    layerGnssChk_ = new QCheckBox("GNSS", gnssBar);  layerGnssChk_->setChecked(true);
+    layerAdsbChk_ = new QCheckBox("ADS-B", gnssBar); layerAdsbChk_->setChecked(true);
+    layerSatChk_  = new QCheckBox("卫星", gnssBar);  layerSatChk_->setChecked(true);
+    gnssBarLay->addWidget(layerGnssChk_);
+    gnssBarLay->addWidget(layerAdsbChk_);
+    gnssBarLay->addWidget(layerSatChk_);
+    gnssBarLay->addStretch();
+    gnssFixLabel_ = new QLabel("GNSS 无定位", gnssBar);
+    gnssFixLabel_->setObjectName("monoInfo");
+    gnssBarLay->addWidget(gnssFixLabel_);
+    worldPageLay->addWidget(gnssBar);
+
+    worldView_ = new ui::WorldView(worldPage);
+    worldPageLay->addWidget(worldView_, 1);
 
     // Spectrum tab: one unified canvas draws the line spectrum, the shared
     // frequency strip and the scrolling waterfall with a single geometry, so
     // the frequency axes align by construction. The scroll-speed / palette
     // controls live in the container's tool strip.
     centerTabs_->addTab(spectrum_, "频谱");
-    centerTabs_->addTab(worldView_, "世界");
+    centerTabs_->addTab(worldPage, "世界");
     centerLay->addWidget(centerTabs_);
     splitter->addWidget(centerCard);
 
@@ -422,6 +468,25 @@ MainWindow::MainWindow(QWidget* parent)
     skyLay->setContentsMargins(0, 0, 0, 0);
     skyView_ = new ui::SkyView();
     skyLay->addWidget(skyView_, 2);
+    // Elevation-vs-time curve for the selected pass (AOS..LOS on the x axis).
+    elevationPlot_ = new ui::ElevationPlot(skyPage);
+    elevationPlot_->setMinimumHeight(tokens::scaled(120));
+    elevationPlot_->setMaximumHeight(tokens::scaled(160));
+    skyLay->addWidget(elevationPlot_);
+    // Clock-bias readout: GNSS UTC vs system UTC vs local, plus a copy button.
+    // We only DISPLAY the bias -- the app never sets the system clock.
+    {
+        auto* clockBar = new QHBoxLayout;
+        clockBar->setContentsMargins(tokens::scaled(6), 0, tokens::scaled(6), 0);
+        clockInfoLabel_ = new QLabel(skyPage);
+        clockInfoLabel_->setObjectName("monoInfo");
+        clockBar->addWidget(clockInfoLabel_, 1);
+        copyClockBtn_ = new QPushButton("复制时钟偏差", skyPage);
+        copyClockBtn_->setToolTip("把（系统 UTC − GNSS UTC）偏差秒数复制到剪贴板；\n"
+                                  "本程序不修改系统时钟，真正校时需 root / CAP_SYS_TIME 特权");
+        clockBar->addWidget(copyClockBtn_);
+        skyLay->addLayout(clockBar);
+    }
     // Empty-state caption lives in a layout row BELOW the polar plot (not
     // painted over the compass), so it never collides with N/E/S/W labels.
     skyEmptyLabel_ = new QLabel(skyPage);
@@ -1036,8 +1101,35 @@ MainWindow::MainWindow(QWidget* parent)
         stationLat_ = cfg.stationLat;
         stationLon_ = cfg.stationLon;
         stationSet_ = cfg.stationSet;
+        // Draw the hand-entered station on the map (NaN => no station marker).
+        worldView_->setStation(stationLat_, stationLon_);
         refetchTle();
     }
+
+    // ---- GNSS serial receiver (real NMEA device only) ---------------------
+    gnssRx_ = new gnss::GnssReceiver(this);
+    connect(gnssRx_, &gnss::GnssReceiver::newFix,
+            this, &MainWindow::onNewFix);
+    connect(gnssRx_, &gnss::GnssReceiver::connectionChanged,
+            this, &MainWindow::onGnssConnectionChanged);
+    connect(gnssConnectBtn_, &QPushButton::clicked,
+            this, &MainWindow::onGnssConnectClicked);
+    connect(copyClockBtn_, &QPushButton::clicked,
+            this, &MainWindow::copyClockBias);
+    // Layer visibility toggles -> WorldView, persisted (debounced).
+    connect(layerGnssChk_, &QCheckBox::toggled, this, [this](bool on) {
+        worldView_->setLayerVisible(ui::MapLayer::Gnss, on); scheduleSave(); });
+    connect(layerAdsbChk_, &QCheckBox::toggled, this, [this](bool on) {
+        worldView_->setLayerVisible(ui::MapLayer::Aircraft, on); scheduleSave(); });
+    connect(layerSatChk_, &QCheckBox::toggled, this, [this](bool on) {
+        worldView_->setLayerVisible(ui::MapLayer::Satellite, on); scheduleSave(); });
+    // Bidirectional selection sync: a click on either view drives the other,
+    // the elevation plot, and the highlighted pass-table row. The widget slots
+    // setSelectedSatellite() do NOT re-emit satelliteSelected, so no loop.
+    connect(worldView_, &ui::WorldView::satelliteSelected,
+            this, &MainWindow::selectSatelliteByName);
+    connect(skyView_, &ui::SkyView::satelliteSelected,
+            this, &MainWindow::selectSatelliteByName);
 
     // Local expiry filter: every 60s drop passes whose LOS already passed.
     tleTimer_ = new QTimer(this);
@@ -1069,9 +1161,14 @@ MainWindow::MainWindow(QWidget* parent)
     liveTimer_ = new QTimer(this);
     liveTimer_->setInterval(1000);
     connect(liveTimer_, &QTimer::timeout, this, &MainWindow::updateLiveSatellite);
+    // Always tick: this also drives the sky clock readout + setCurrentTime,
+    // independent of whether a satellite pass is currently selected.
+    liveTimer_->start();
 }
 
 MainWindow::~MainWindow() {
+    // Stop the GNSS receiver thread first so no late newFix lands mid-teardown.
+    if (gnssRx_) { gnssRx_->stop(); gnssRx_->wait(2000); }
     // Flush any pending debounced save so the last 500 ms of tweaks are not lost.
     if (saveTimer_ && saveTimer_->isActive()) {
         saveTimer_->stop();
@@ -1079,6 +1176,7 @@ MainWindow::~MainWindow() {
     }
     saveUiState();
     if (engine_) { engine_->shutdown(); engine_->wait(); }
+    delete adsbMap_; adsbMap_ = nullptr;
 }
 
 void MainWindow::refreshVfoUi() {
@@ -1200,6 +1298,19 @@ void MainWindow::saveUiState() {
         s.setValue(QString("vfo/%1/bw").arg(i), m.bandwidthHz);
         s.setValue(QString("vfo/%1/color").arg(i), m.color.name());
         s.setValue(QString("vfo/%1/selected").arg(i), m.selected);
+    }
+
+    // ---- GNSS serial device + world-map layers / view state ----
+    if (gnssDeviceEdit_) s.setValue("gnss/device", gnssDeviceEdit_->text());
+    if (gnssBaudCombo_)  s.setValue("gnss/baud", gnssBaudCombo_->currentText());
+    if (layerGnssChk_)  s.setValue("map/layerGnss", layerGnssChk_->isChecked());
+    if (layerAdsbChk_)  s.setValue("map/layerAdsb", layerAdsbChk_->isChecked());
+    if (layerSatChk_)   s.setValue("map/layerSat", layerSatChk_->isChecked());
+    if (worldView_) {
+        const auto vs = worldView_->viewState();
+        s.setValue("map/viewLat", vs.lat);
+        s.setValue("map/viewLon", vs.lon);
+        s.setValue("map/viewZoom", vs.zoom);
     }
     s.sync();
 }
@@ -1394,6 +1505,28 @@ void MainWindow::restoreUiState() {
         }
     }
 
+    // ---- GNSS serial device + world-map layers / view state restore -------
+    if (gnssDeviceEdit_)
+        gnssDeviceEdit_->setText(s.value("gnss/device", "").toString());
+    if (gnssBaudCombo_) {
+        const QString baud = s.value("gnss/baud", "9600").toString();
+        const int bi = gnssBaudCombo_->findText(baud);
+        if (bi >= 0) gnssBaudCombo_->setCurrentIndex(bi);
+    }
+    if (layerGnssChk_) layerGnssChk_->setChecked(s.value("map/layerGnss", true).toBool());
+    if (layerAdsbChk_) layerAdsbChk_->setChecked(s.value("map/layerAdsb", true).toBool());
+    if (layerSatChk_)  layerSatChk_->setChecked(s.value("map/layerSat", true).toBool());
+    if (worldView_) {
+        worldView_->setLayerVisible(ui::MapLayer::Gnss, layerGnssChk_->isChecked());
+        worldView_->setLayerVisible(ui::MapLayer::Aircraft, layerAdsbChk_->isChecked());
+        worldView_->setLayerVisible(ui::MapLayer::Satellite, layerSatChk_->isChecked());
+        ui::MapProjection::ViewState vs;
+        vs.lat  = s.value("map/viewLat", 0.0).toDouble();
+        vs.lon  = s.value("map/viewLon", 0.0).toDouble();
+        vs.zoom = s.value("map/viewZoom", 1.0).toDouble();
+        worldView_->setViewState(vs);
+    }
+
     // Manual gain slider only matters in manual tuner-gain mode.
     gainSlider_->setEnabled(!tunerAgcChk_->isChecked());
     // Note: setZoomFactor() above already emitted visibleRangeChanged; the
@@ -1498,9 +1631,26 @@ void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {
     set(5, info.hasVerticalRate ? QString::number(info.verticalRateFpm) : "--");
     set(6, "--");   // distance needs station + aircraft position
     set(7, QDateTime::currentDateTime().toString("HH:mm:ss"));
-    if (info.hasPosition && worldView_) {
-        worldView_->addAircraft(info.icao, info.lat, info.lon);
-        worldView_->update();
+    if (worldView_) {
+        // Upsert the rich aircraft point by ICAO, keeping a short tail streak.
+        // Only fields actually carried by this ADS-B message are overwritten;
+        // absent fields keep their last value (never a fabricated default).
+        ui::AircraftPoint& ap = (*adsbMap_)[info.icao];
+        ap.icao = info.icao;
+        if (!info.callsign.isEmpty()) ap.callsign = info.callsign;
+        if (info.altitudeFt > 0) ap.altitudeFt = info.altitudeFt;
+        if (info.hasVelocity) ap.headingDeg = info.headingDeg;
+        if (info.hasPosition) {
+            ap.lat = info.lat;
+            ap.lon = info.lon;
+            ap.track.append({info.lat, info.lon});
+            while (ap.track.size() > 12) ap.track.removeFirst();
+        }
+        QList<ui::AircraftPoint> list;
+        list.reserve(adsbMap_->size());
+        for (auto it = adsbMap_->cbegin(); it != adsbMap_->cend(); ++it)
+            list.append(it.value());
+        worldView_->setAircraft(list);
     }
 }
 
@@ -1640,6 +1790,9 @@ void MainWindow::fillPassTable() {
         ui::PassArc arc;
         arc.name = p.name;
         arc.track = p.track;
+        arc.aosUtc = p.aos;   // honest AOS/LOS/max-elevation carried into the sky view
+        arc.losUtc = p.los;
+        arc.maxEl  = p.maxEl;
         arcs.append(arc);
     }
     skyView_->setPasses(arcs);
@@ -1699,11 +1852,15 @@ void MainWindow::onPassRowClicked(int row) {
     if (!idxItem) return;
     int idx = idxItem->data(Qt::UserRole).toInt();
     if (idx < 0 || idx >= passes_.size()) return;
-    skyView_->setHighlightedPass(idx);
     liveRow_ = idx;
     liveTimer_->start();
     // Persist the user's choice.
-    QSettings().setValue("ui/selectedSatellite", passes_[idx].name);
+    const QString name = passes_[idx].name;
+    QSettings("MBDSDR", "MBDSDR").setValue("ui/selectedSatellite", name);
+    // Drive both views + elevation plot from the TLE name (slots don't re-emit).
+    worldView_->setSelectedSatellite(name);
+    skyView_->setSelectedSatellite(name);
+    updateElevationPlotFor(passes_[idx]);
     updateLiveSatellite();   // paint immediately rather than waiting 1s
 }
 
@@ -1715,16 +1872,21 @@ static QString formatRange(double km) {
 
 void MainWindow::updateLiveSatellite() {
     refreshCountdowns();
+    // 1 Hz wall clock: drive the polar plot's UTC marker and the clock-bias
+    // readout regardless of whether a station / pass exists.
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    skyView_->setCurrentTime(now);
+    updateClockBiasLabel();
+
     if (!stationSet_) {
         skyView_->clearLiveSatellites();
         return;
     }
-    QDateTime now = QDateTime::currentDateTimeUtc();
 
     // If the selected pass just ended, advance to the next one in view.
     if (liveRow_ >= 0 && liveRow_ < passes_.size() && now > passes_[liveRow_].los) {
         liveRow_ = -1;
-        skyView_->setHighlightedPass(-1);
+        skyView_->setSelectedSatellite("");
         for (int row = 0; row < passTable_->rowCount(); ++row) {
             QTableWidgetItem* it = passTable_->item(row, 0);
             if (!it) continue;
@@ -1761,15 +1923,210 @@ void MainWindow::updateLiveSatellite() {
     }
     skyView_->setLiveSatellites(sats);
 
-    // Drop the same satellites onto the world map as lat/lon sub-points.
+    // Drop the same satellites onto the world map as lat/lon sub-points, each
+    // with a forward ground-track polyline (now -> LOS, ~2 min steps).
     QList<ui::SatellitePoint> wpts;
     for (int i = 0; i < passes_.size(); ++i) {
         const dsp::SatPass& p = passes_[i];
         if (now < p.aos || now > p.los) continue;
         auto geo = tleClient_->propagateLatLon(now, p.tle);
-        wpts.append({p.name, geo.latDeg, geo.lonDeg, (i == liveRow_)});
+        ui::SatellitePoint sp;
+        sp.name = p.name;
+        sp.lat = geo.latDeg;
+        sp.lon = geo.lonDeg;
+        sp.selected = (i == liveRow_);
+        // Future ground track: sample sub-points every ~2 minutes until LOS.
+        const qint64 spanSec = now.secsTo(p.los);
+        if (spanSec > 0) {
+            const int steps = std::min<qint64>(30, std::max<qint64>(2, spanSec / 120));
+            for (int k = 0; k <= steps; ++k) {
+                const QDateTime t = now.addMSecs(
+                    qint64(double(now.msecsTo(p.los)) * k / steps));
+                auto g = tleClient_->propagateLatLon(t, p.tle);
+                sp.track.append({g.latDeg, g.lonDeg});
+            }
+        }
+        wpts.append(sp);
     }
     worldView_->setSatellites(wpts);
+}
+
+void MainWindow::updateElevationPlotFor(const dsp::SatPass& p) {
+    // Build (UTC, elevation) samples across the pass. SatPass.track carries
+    // sampled (az, el) but no per-sample timestamps, so we distribute them
+    // linearly across AOS..LOS -- the elevation SHAPE is real, the time axis
+    // is a uniform resampling of the already-propagated track.
+    QList<QPair<QDateTime, double>> samples;
+    const int n = p.track.size();
+    if (n > 0) {
+        const qint64 totalMs = p.aos.msecsTo(p.los);
+        for (int k = 0; k < n; ++k) {
+            const QDateTime t = p.aos.addMSecs(n > 1 ? qint64(double(totalMs) * k / (n - 1)) : 0);
+            samples.append({t, p.track[k].second});
+        }
+    }
+    elevationPlot_->setPass(p.name, samples);
+}
+
+void MainWindow::updateClockBiasLabel() {
+    if (!clockInfoLabel_) return;
+    const QDateTime sysUtc = QDateTime::currentDateTimeUtc();
+    const QDateTime local = QDateTime::currentDateTime();
+    if (lastGnssFix_.hasUtc && gnssHasFix_) {
+        // bias = system UTC - GNSS UTC (seconds, sub-second via msecs).
+        const double biasSec = lastGnssFix_.utc.msecsTo(sysUtc) / 1000.0;
+        clockBiasSec_ = biasSec;
+        clockInfoLabel_->setText(
+            QString("GNSS UTC %1   系统 UTC %2   本地 %3   偏差 %4 s（系统−GNSS，未改钟）")
+                .arg(lastGnssFix_.utc.toString("HH:mm:ss.zzz"))
+                .arg(sysUtc.toString("HH:mm:ss.zzz"))
+                .arg(local.toString("HH:mm:ss"))
+                .arg(biasSec, 0, 'f', 3));
+    } else {
+        clockBiasSec_ = 0.0;
+        clockInfoLabel_->setText(
+            QString("GNSS UTC --   系统 UTC %1   本地 %2   偏差 --（GNSS 无定位）")
+                .arg(sysUtc.toString("HH:mm:ss"))
+                .arg(local.toString("HH:mm:ss")));
+    }
+}
+
+void MainWindow::onNewFix(gnss::GnssFix fix) {
+    lastGnssFix_ = fix;
+    if (fix.hasUtc) updateClockBiasLabel();
+
+    if (!fix.isValid()) {
+        // No position: never paint a fake receiver point. Keep the manual
+        // station and the honest "GNSS 无定位" state.
+        return;
+    }
+
+    gnssHasFix_ = true;
+    // Only treat the station as moved when the fix shifts by more than ~100 m,
+    // so a stationary receiver does not thrash the TLE fetch every sentence.
+    const bool stationMoved =
+        !std::isfinite(lastGnssAppliedLat_) || !std::isfinite(lastGnssAppliedLon_) ||
+        std::fabs(fix.latitude - lastGnssAppliedLat_) > 1e-3 ||
+        std::fabs(fix.longitude - lastGnssAppliedLon_) > 1e-3;
+    if (stationMoved) {
+        lastGnssAppliedLat_ = fix.latitude;
+        lastGnssAppliedLon_ = fix.longitude;
+        stationLat_ = fix.latitude;
+        stationLon_ = fix.longitude;
+        stationSet_ = true;
+        worldView_->setStation(fix.latitude, fix.longitude);
+        engine_->setAdsbReferencePosition(fix.latitude, fix.longitude);
+        refetchTle();   // cache-first; re-propagate passes for the real station
+    }
+
+    worldView_->setGnssFix(true, fix.latitude, fix.longitude,
+                           fix.satellitesInUse, fix.hdop);
+
+    // Fix status: quality / satellites in use / HDOP.
+    gnssFixLabel_->setText(
+        QString("%1 %2  星%3  HDOP %4")
+            .arg(gnss::fixQualityToString(fix.fixQuality))
+            .arg(QString::number(fix.latitude, 'f', 5) + "," +
+                 QString::number(fix.longitude, 'f', 5))
+            .arg(fix.satellitesInUse)
+            .arg(fix.hdop, 0, 'f', 1));
+
+    // Bridge GSV visible satellites onto the sky polar view as diamonds.
+    QList<ui::GnssSkySat> gs;
+    gs.reserve(fix.visibleSatellites.size());
+    for (const auto& s : fix.visibleSatellites) {
+        ui::GnssSkySat g;
+        g.prn = "G" + QString::number(s.prn);
+        g.az = s.azimuth;
+        g.el = s.elevation;
+        g.snr = s.snr;
+        g.used = s.used;
+        gs.append(g);
+    }
+    skyView_->setGnssSatellites(gs);
+}
+
+void MainWindow::onGnssConnectionChanged(bool connected, QString description) {
+    gnssConnectBtn_->setText(connected ? "断开" : "连接");
+    gnssStatusLabel_->setText(connected ? "已连接" : "未连接");
+    if (!connected) {
+        // Connection dropped / EOF: clear the fix and fall back to the manual
+        // AiConfig station. We never persist or show a stale fake position.
+        gnssHasFix_ = false;
+        lastGnssFix_ = gnss::GnssFix();
+        worldView_->setGnssFix(false, 0, 0, 0, 0);
+        skyView_->clearGnssSatellites();
+        gnssFixLabel_->setText("GNSS 无定位");
+        updateClockBiasLabel();
+        // Restore the hand-entered station (if any) as the reference.
+        ai::AiConfig cfg; cfg.load();
+        stationLat_ = cfg.stationLat; stationLon_ = cfg.stationLon;
+        stationSet_ = cfg.stationSet;
+        worldView_->setStation(stationLat_, stationLon_);
+        refetchTle();
+    }
+    if (!description.isEmpty()) statusBar()->showMessage("GNSS: " + description);
+}
+
+void MainWindow::onGnssConnectClicked() {
+    if (gnssRx_->isRunning()) {
+        gnssRx_->stop();   // connectionChanged(false) updates the UI
+        return;
+    }
+    const QString path = gnssDeviceEdit_->text().trimmed();
+    if (path.isEmpty()) {
+        statusBar()->showMessage("GNSS: 请先填写串口设备路径");
+        return;
+    }
+    bool baudOk = false;
+    const int baud = gnssBaudCombo_->currentText().toInt(&baudOk);
+    QSettings("MBDSDR", "MBDSDR").setValue("gnss/device", path);
+    QSettings("MBDSDR", "MBDSDR").setValue("gnss/baud", gnssBaudCombo_->currentText());
+    gnssConnectBtn_->setText("连接中…");
+    gnssRx_->setDevice(path, baudOk ? baud : 9600);
+    gnssRx_->start();
+}
+
+void MainWindow::selectSatelliteByName(const QString& name) {
+    // Single source of truth for "which TLE satellite is selected". Drive both
+    // views from the name; their setSelectedSatellite() slots do not re-emit.
+    worldView_->setSelectedSatellite(name);
+    skyView_->setSelectedSatellite(name);
+    QSettings("MBDSDR", "MBDSDR").setValue("ui/selectedSatellite", name);
+
+    int idx = -1;
+    for (int i = 0; i < passes_.size(); ++i)
+        if (passes_[i].name == name) { idx = i; break; }
+
+    if (idx >= 0) {
+        liveRow_ = idx;
+        liveTimer_->start();
+        updateElevationPlotFor(passes_[idx]);
+        // Highlight the matching table row without re-entering onPassRowClicked.
+        for (int row = 0; row < passTable_->rowCount(); ++row) {
+            QTableWidgetItem* it = passTable_->item(row, 0);
+            if (it && it->data(Qt::UserRole).toInt() == idx) {
+                if (passTable_->currentRow() != row) passTable_->selectRow(row);
+                break;
+            }
+        }
+        updateLiveSatellite();
+    } else {
+        elevationPlot_->clear();
+    }
+}
+
+void MainWindow::copyClockBias() {
+    if (!lastGnssFix_.hasUtc || !gnssHasFix_) {
+        statusBar()->showMessage("无 GNSS 定位，无法复制时钟偏差");
+        return;
+    }
+    QApplication::clipboard()->setText(
+        QString::number(clockBiasSec_, 'f', 3) + " s");
+    statusBar()->showMessage(
+        "时钟偏差已复制（系统 UTC − GNSS UTC = " +
+        QString::number(clockBiasSec_, 'f', 3) +
+        " s）。本程序不修改系统时钟；真正校时需 root / CAP_SYS_TIME 特权。");
 }
 
 } // namespace mbdsdr

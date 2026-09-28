@@ -43,3 +43,25 @@ GUI 上在瀑布/频谱为每个 VFO 绘制半透明带宽框。对应的 SDR++ 
 `repos/sdrpp/core/src/dsp/channel/rx_vfo.h`。本项目未逐行移植其 C++ 代码，
 而是按该模型用 Qt6 / 自有 DSP 块重新实现；共享下游（静噪 / AGC / 音频输出 / 门录）
 仅作用于选中 VFO 的音频，以保持单 VFO 路径与旧单信道接收机一致。
+
+## GNSS 接入 / SGP4 轨道 / 离线地图 / 天空图（本批新增模块）
+
+本批新增的子系统均为 MBDSDR 原创实现（SPDX: MIT），**未引用任何 GPL 代码**：
+
+- `src/gnss/*`（NMEA 0183 解析、串口/文件/内存传输、接收线程）：原创。
+- `src/dsp/sgp4.{h,cpp}`：近地轨道 SGP4  propagator 为原创实现，依据公版
+  **Spacetrack Report #3**（Hoots & Roeber）及其公开修订
+  Vallado, Crawford, Hujsak & Kelso, *Revisiting Spacetrack Report #3*,
+  AIAA 2006-6753。验证用参考星历取自 CelesTrak 公开发布的 `tforver.out`：
+  https://celestrak.org/publications/AIAA/2006-6753/ 。
+  本仓库未复制其源码，仅按公开算法公式重新实现并对照公开星历验证精度。
+- `src/ui/coastline_data.h`：离线世界海岸线矢量数据来自 **Natural Earth**
+  （https://www.naturalearthdata.com/ ）110m 陆地/海岸线，属 **公有领域（Public Domain）**，
+  以数组形式内嵌，无需联网、无 API key。
+- `src/ui/map_projection.{h,cpp}`：等距圆柱（plate carrée / equirectangular）投影，
+  属无版权的通用数学投影，未使用任何第三方投影库。
+
+> 说明：以上新增模块本身不含 GPL 代码。历史模块 `src/ui/spectrum_display.*`
+> （见上方 SDR++ 章节）仍以 GPL-3.0-or-later 分发，与本节无关；本文件不改变根目录
+> `LICENSE` 中 MBDSDR 自有代码的 MIT 许可声明。
+
