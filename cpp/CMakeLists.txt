@@ -135,6 +135,13 @@ target_include_directories(test_engine_integration PRIVATE src)
 target_link_libraries(test_engine_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_integration COMMAND test_engine_integration)
 
+add_executable(test_demod_e2e tests/test_demod_e2e.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp
+    src/dsp/agc.cpp src/dsp/squelch.cpp src/dsp/fft.cpp)
+target_include_directories(test_demod_e2e PRIVATE src)
+target_link_libraries(test_demod_e2e PRIVATE Qt6::Core)
+add_test(NAME demod_e2e COMMAND test_demod_e2e)
+
 add_executable(test_bookmark tests/test_bookmark.cpp src/ui/bookmark_manager.cpp)
 target_include_directories(test_bookmark PRIVATE src)
 target_link_libraries(test_bookmark PRIVATE Qt6::Test Qt6::Core)
