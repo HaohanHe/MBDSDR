@@ -42,6 +42,7 @@ set(SOURCES
     src/dsp/noise_blanker.cpp
     src/dsp/rtl_tcp_source.cpp
     src/ui/bookmark_manager.cpp
+    src/ui/shortcuts_dialog.cpp
     src/dsp/test_signal.cpp
     src/dsp/rtl_sdr_source.cpp
     src/dsp/spectrum_engine.cpp
