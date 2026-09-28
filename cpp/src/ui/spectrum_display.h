@@ -30,6 +30,7 @@
 
 #include "core/spectrum_frame.h"
 #include "dsp/peak_detector.h"
+#include "dsp/vfo_manager.h"
 
 namespace mbdsdr {
 namespace ui {
@@ -77,6 +78,11 @@ public slots:
     void setPeakThresholdDb(float db) { peakThresholdDb_ = db; detectPeaks(); update(); }
     void tuneAndCenter(double hz);
 
+    // Multi-VFO: replace the on-screen band boxes. When non-empty, these markers
+    // replace the legacy single-VFO box; the legacy single-box path is kept for
+    // back-compat tests.
+    void setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers);
+
 signals:
     void frequencyChanged(double newFreqHz);
     void bandwidthChanged(double newBandwidthHz);
@@ -85,6 +91,11 @@ signals:
     void peaksUpdated(QList<mbdsdr::dsp::PeakInfo> peaks, QList<int> ids);
     /// Emitted when a view-changing control settles so the container can persist.
     void viewChanged();
+
+    // Multi-VFO interaction.
+    void vfoMarkerSelected(int id);
+    void vfoMarkerCenterTuned(int id, double freqHz);
+    void vfoMarkerBandwidthChanged(int id, double bwHz);
 
 protected:
     void resizeEvent(QResizeEvent* event) override;
@@ -145,6 +156,12 @@ private:
     double bwHz_ = 12500.0;
     double stepHz_ = 1000.0;
     double vfoFreq_ = 0.0;
+
+    // Multi-VFO band boxes. When non-empty these supersede the legacy single box.
+    QVector<mbdsdr::dsp::VfoMarker> markers_;
+    int dragVfoId_ = -1;   // marker currently being dragged, -1 = legacy/root
+    // Hit-test a marker at pixel x (data area) -> index into markers_, or -1.
+    int hitVfoMarker(double x, double fLo, double spanVis) const;
 
     float  dbMin_ = -100.0f;
     float  dbMax_ = 0.0f;

@@ -256,6 +256,22 @@ inline constexpr int kFreqLabelH       = 16;
 inline constexpr double kVfoLineWidth  = 1.5;
 inline constexpr int    kTooltipOffset = 8;
 
+// ---- Multi-VFO band boxes (SDR++-style translucent overlays) -------------
+// Each VFO draws a translucent band box on the spectrum AND waterfall data
+// areas: colored fill, two edge lines, a center line, and a name label. Alpha
+// is a float 0..1 so the per-VFO color shows through without opaque blocks.
+inline constexpr double kVfoBoxFillAlpha         = 0.10;  // unselected fill
+inline constexpr double kVfoBoxSelFillAlpha     = 0.20;  // selected fill
+inline constexpr double kVfoBoxEdgeAlpha         = 0.55;  // unselected edges
+inline constexpr double kVfoBoxSelEdgeAlpha      = 0.95;  // selected edges
+inline constexpr double kVfoBoxCenterAlpha       = 0.90;  // center tuning line
+inline constexpr double kVfoBoxLabelAlpha        = 0.85;  // name label text
+inline constexpr int    kVfoBoxLabelH            = 12;    // base px, scaled()
+inline constexpr double kVfoBoxLineWidth         = 1.2;   // edge/center line
+inline constexpr double kVfoBoxSelLineWidth      = 1.8;   // selected line
+inline constexpr int    kVfoMinBandwidthHz       = 100;
+inline constexpr int    kVfoMaxBandwidthHz       = 500000;
+
 // Settings dialog
 inline constexpr int kSettingsMinW = 420;
 

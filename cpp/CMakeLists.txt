@@ -61,9 +61,13 @@ set(SOURCES
     src/dsp/rtl_sdr_source.cpp
     src/dsp/spectrum_engine.cpp
     src/dsp/iq_frontend.cpp
+    src/dsp/vfo_manager.cpp
     src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp
+    src/dsp/digital_demod.cpp
+    src/dsp/anr.cpp
+    src/ui/constellation_view.cpp
     src/dsp/squelch.cpp
     src/dsp/agc.cpp
     src/dsp/audio_output.cpp
@@ -116,6 +120,16 @@ list(REMOVE_ITEM SHOT_SRCS src/main.cpp)
 add_executable(ui_shot_r27 tests/ui_screenshot_r14.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_r27 PRIVATE src build/ui_shot_r27_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_r27 PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# Multi-VFO band-box screenshot (offscreen; not in ctest).
+add_executable(ui_shot_mvfo tests/ui_screenshot_multi_vfo.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_mvfo PRIVATE src build/ui_shot_mvfo_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_mvfo PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# Constellation + multi-VFO screenshot (offscreen; not in ctest).
+add_executable(ui_shot_cst tests/ui_screenshot_constellation.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_cst PRIVATE src build/ui_shot_cst_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_cst PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
 if(RTLSDR_FOUND)
@@ -147,7 +161,7 @@ add_test(NAME noise_blanker COMMAND test_noise_blanker)
 
 add_executable(test_engine_integration tests/test_engine_integration.cpp
     src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
-    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/channelizer.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp
@@ -189,7 +203,7 @@ add_test(NAME ai_integration COMMAND test_ai_integration)
 # WAV roundtrip: record demod audio to disk, read header back.
 add_executable(test_wav_roundtrip tests/test_wav_roundtrip.cpp
     src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
-    src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/channelizer.cpp
+    src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp
@@ -200,7 +214,7 @@ add_test(NAME wav_roundtrip COMMAND test_wav_roundtrip)
 
 add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
     src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
-    src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/channelizer.cpp
+    src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp
@@ -254,6 +268,50 @@ target_include_directories(test_recorder PRIVATE src)
 target_link_libraries(test_recorder PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME recorder COMMAND test_recorder)
 
+# Multi-VFO fan-out: two synthesized carriers decoded independently.
+add_executable(test_multi_vfo tests/test_multi_vfo.cpp
+    src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
+    src/dsp/demod.cpp)
+target_include_directories(test_multi_vfo PRIVATE src)
+target_link_libraries(test_multi_vfo PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME multi_vfo COMMAND test_multi_vfo)
+
+# Squelch gate + gated recorder linkage (filenames, no dead leading silence).
+add_executable(test_squelch_gate tests/test_squelch_gate.cpp
+    src/dsp/squelch.cpp src/dsp/gated_recorder.cpp)
+target_include_directories(test_squelch_gate PRIVATE src)
+target_link_libraries(test_squelch_gate PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME squelch_gate COMMAND test_squelch_gate)
+
+# Bare-C++ digital demod test (BPSK/QPSK round-trip through Costas + diff codec).
+add_executable(test_digital_demod tests/test_digital_demod.cpp
+    src/dsp/digital_demod.cpp)
+target_include_directories(test_digital_demod PRIVATE src)
+target_link_libraries(test_digital_demod PRIVATE Qt6::Test)
+add_test(NAME digital_demod COMMAND test_digital_demod)
+
+# ANR: identity when off, measurable attenuation when on.
+add_executable(test_anr tests/test_anr.cpp src/dsp/anr.cpp)
+target_include_directories(test_anr PRIVATE src)
+target_link_libraries(test_anr PRIVATE Qt6::Test)
+add_test(NAME anr COMMAND test_anr)
+
+# Constellation panel (QtTest + offscreen).
+add_executable(test_constellation_view tests/test_constellation_view.cpp
+    src/ui/constellation_view.cpp src/dsp/digital_demod.cpp)
+target_include_directories(test_constellation_view PRIVATE src)
+target_link_libraries(test_constellation_view PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui)
+add_test(NAME constellation_view COMMAND test_constellation_view)
+
+# End-to-end: TestSignalSource digital IQ -> real channelizer -> DigitalDemod lock.
+add_executable(test_digital_e2e tests/test_digital_e2e.cpp
+    src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp
+    src/dsp/test_signal.cpp src/dsp/noise_blanker.cpp src/dsp/iq_frontend.cpp)
+target_include_directories(test_digital_e2e PRIVATE src)
+target_link_libraries(test_digital_e2e PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME digital_e2e COMMAND test_digital_e2e)
+
 add_executable(test_decoder tests/test_decoder.cpp
     src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp)
 target_include_directories(test_decoder PRIVATE src)
@@ -264,6 +322,7 @@ add_executable(test_agent tests/test_agent.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
     src/ai/agent_tools.cpp src/ai/agent.cpp src/dsp/spectrum_engine.cpp
     src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp

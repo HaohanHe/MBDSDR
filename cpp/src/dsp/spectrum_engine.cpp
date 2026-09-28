@@ -30,6 +30,10 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
 
     audioOut_ = new AudioOutput(this);
     gatedRec_.setOutputDir("recordings");
+    // Single default VFO at the source center, NFM 12.5 kHz -- identical to
+    // the legacy single-channel receiver on first boot.
+    vfoManager_.initDefault(source_->sampleRate(), source_->centerFreq(),
+                            demodMode_, bandwidth_);
     rebuildDemod();
 }
 
@@ -43,41 +47,24 @@ SpectrumEngine::~SpectrumEngine() {
 }
 
 void SpectrumEngine::rebuildDemod() {
-    // SDR++ style channelization: the wide source IQ is shifted to baseband,
-    // band-limited by a channel filter and decimated to a per-mode IF rate,
-    // THEN demodulated. Demods must never see the full-rate source block.
-    double sr = source_ ? source_->sampleRate() : 2.4e6;
-    if (sr < 24000.0) sr = 24000.0;   // guard against unconnected source reporting 0
-
-    double ifTarget = 48000.0;   // narrowband modes
-    double chBw = bandwidth_;
-    if (demodMode_ == "WFM") {
-        ifTarget = 240000.0;     // keeps +/-75 kHz deviation
-        chBw = 200000.0;
-    }
-    if (sr < ifTarget) ifTarget = sr;
-    if (chBw <= 0.0) chBw = ifTarget * 0.8;
-
-    channelizer_.configure(sr, ifTarget, chBw, 31);
-    const double ifRate = channelizer_.effectiveOutputRateHz();
-
-    if (demodMode_ == "AM")  demod_ = std::make_unique<DemodAM>(ifRate, bandwidth_);
-    else if (demodMode_ == "WFM") demod_ = std::make_unique<DemodWFM>(ifRate, chBw);
-    else if (demodMode_ == "USB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::USB, ifRate, bandwidth_);
-    else if (demodMode_ == "LSB") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, ifRate, bandwidth_);
-    else if (demodMode_ == "CW") demod_ = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, ifRate, bandwidth_);
-    else demod_ = std::make_unique<DemodNFM>(ifRate, bandwidth_);
-
-    // Final audio is always presented at a fixed rate.
-    audioRes_.configure(ifRate, 48000.0, 31);
+    // Per-channel channelizer/demod/resampler are owned and rebuilt lazily by
+    // vfoManager_ (one channel per VFO, mirroring the legacy single-channel
+    // chain). Here we only reset the SHARED downstream blocks and re-sync the
+    // cached mode used for the test-signal generator + recording template.
+    vfoManager_.sourceRateChanged();   // input rate may have changed -> all channels rebuild
 
     frontend_.reset();
-    channelizer_.reset();
-    audioRes_.reset();
     squelch_.reset();
     agc_.reset();
     cwDecoder_.reset();
     adsbDecoder_.reset();
+
+    // Keep the cached mode/bandwidth in lock-step with the selected VFO so the
+    // legacy demodMode()/bandwidth() getters and expandRecTemplate() are correct.
+    if (const VfoChannel* sel = vfoManager_.selected()) {
+        demodMode_ = sel->mode;
+        bandwidth_ = sel->bandwidthHz;
+    }
 
     if (auto* ts = dynamic_cast<TestSignalSource*>(source_.get())) {
         if (demodMode_ == "AM") ts->setModulation("am");
@@ -99,11 +86,19 @@ double SpectrumEngine::centerFreq() const {
 void SpectrumEngine::onSetCenterFreq(double f) {
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->setCenterFreq(f);
+    // Tuning the receiver moves the SELECTED VFO with it (kept at offset 0),
+    // exactly like the legacy single-channel receiver. Other VFOs keep their
+    // absolute frequencies and just see a different relative offset.
+    if (VfoChannel* sel = vfoManager_.selected()) {
+        sel->freqHz = f;
+    }
+    emit vfoListChanged();
 }
 void SpectrumEngine::onSetSampleRate(double r) {
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->setSampleRate(r);
-    // Sample rate feeds the channelizer + demod chain; rebuild on next loop.
+    // Sample rate feeds every channelizer; rebuild all channels on next loop.
+    vfoManager_.sourceRateChanged();
     needDemodReset_.store(true);
 }
 void SpectrumEngine::onSetGain(double g) {
@@ -112,13 +107,15 @@ void SpectrumEngine::onSetGain(double g) {
 }
 void SpectrumEngine::setDemodMode(const QString& m) {
     QMutexLocker lk(&sourceMutex_);
-    demodMode_ = m;
-    if (m == "AM") bandwidth_ = 8000;
-    else if (m == "NFM") bandwidth_ = 12500;
-    else if (m == "WFM") bandwidth_ = 200000;
-    else if (m == "CW") bandwidth_ = 500;
-    else bandwidth_ = 2400;
+    // Drive the SELECTED VFO's mode (which also resets its bandwidth to the
+    // mode default), keeping the legacy demodMode_/bandwidth_ caches in sync.
+    vfoManager_.setMode(vfoManager_.selectedId(), m);
+    if (const VfoChannel* sel = vfoManager_.selected()) {
+        demodMode_ = sel->mode;
+        bandwidth_ = sel->bandwidthHz;
+    }
     needDemodReset_.store(true);
+    emit vfoListChanged();
 }
 void SpectrumEngine::setSquelchThreshold(float db) { squelch_.setThresholdDb(db); }
 void SpectrumEngine::setSquelchEnabled(bool e) { squelch_.setEnabled(e); }
@@ -193,20 +190,30 @@ void SpectrumEngine::setMuted(bool m) {
 }
 
 void SpectrumEngine::setBandwidth(double hz) {
+    QMutexLocker lk(&sourceMutex_);
     bandwidth_ = hz;
-    // The channel filter cutoff depends on bandwidth; rebuild the whole chain.
+    vfoManager_.setBandwidth(vfoManager_.selectedId(), hz);
+    // The channel filter cutoff depends on bandwidth; rebuild on next loop.
     needDemodReset_.store(true);
+    emit vfoListChanged();
 }
 
 QString SpectrumEngine::expandRecTemplate() const {
-    // Called with sourceMutex_ held (source_/demodMode_ stable).
+    // Called with sourceMutex_ held (source_/VFO state stable).
     const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
-    const double freqMhz = source_ ? source_->centerFreq() / 1e6 : 0.0;
+    // Tag the recording with the SELECTED VFO's absolute frequency + mode.
+    double freqHz = source_ ? source_->centerFreq() : 0.0;
+    QString mode = demodMode_;
+    if (const VfoChannel* sel = vfoManager_.selected()) {
+        freqHz = sel->freqHz;
+        mode = sel->mode;
+    }
+    const double freqMhz = freqHz / 1e6;
     const QString freqStr = QString::number(freqMhz, 'f', 3);
     return QString(recTemplate_)
         .replace("{time}", stamp)
         .replace("{freq}", freqStr)
-        .replace("{mode}", demodMode_);
+        .replace("{mode}", mode);
 }
 
 bool SpectrumEngine::hasData() const {
@@ -260,6 +267,89 @@ void SpectrumEngine::stopRecording() {
 }
 void SpectrumEngine::setGatedRecordingEnabled(bool e) {
     gatedRec_.setEnabled(e);
+}
+
+// ---- Multi-VFO management --------------------------------------------------
+void SpectrumEngine::vfoAdd() {
+    QMutexLocker lk(&sourceMutex_);
+    const double center = source_ ? source_->centerFreq() : 0.0;
+    const int id = vfoManager_.addVfo(center);
+    if (const VfoChannel* sel = vfoManager_.selected()) {
+        demodMode_ = sel->mode;
+        bandwidth_ = sel->bandwidthHz;
+    }
+    emit vfoListChanged();
+    (void)id;
+}
+
+void SpectrumEngine::vfoRemove(int id) {
+    QMutexLocker lk(&sourceMutex_);
+    vfoManager_.removeVfo(id);
+    if (const VfoChannel* sel = vfoManager_.selected()) {
+        demodMode_ = sel->mode;
+        bandwidth_ = sel->bandwidthHz;
+    }
+    emit vfoListChanged();
+}
+
+void SpectrumEngine::vfoSelect(int id) {
+    QMutexLocker lk(&sourceMutex_);
+    if (vfoManager_.selectVfo(id)) {
+        if (const VfoChannel* sel = vfoManager_.selected()) {
+            demodMode_ = sel->mode;
+            bandwidth_ = sel->bandwidthHz;
+        }
+        emit vfoListChanged();
+    }
+}
+
+void SpectrumEngine::vfoSetFreq(int id, double hz) {
+    QMutexLocker lk(&sourceMutex_);
+    vfoManager_.setFreq(id, hz);
+    emit vfoListChanged();
+}
+
+void SpectrumEngine::vfoSetBandwidth(int id, double hz) {
+    QMutexLocker lk(&sourceMutex_);
+    vfoManager_.setBandwidth(id, hz);
+    if (vfoManager_.selectedId() == id) bandwidth_ = hz;
+    emit vfoListChanged();
+}
+
+void SpectrumEngine::vfoSetMode(int id, const QString& mode) {
+    QMutexLocker lk(&sourceMutex_);
+    vfoManager_.setMode(id, mode);
+    if (vfoManager_.selectedId() == id) {
+        demodMode_ = mode;
+        if (const VfoChannel* sel = vfoManager_.selected()) bandwidth_ = sel->bandwidthHz;
+    }
+    emit vfoListChanged();
+}
+
+void SpectrumEngine::vfoSetColor(int id, const QColor& c) {
+    QMutexLocker lk(&sourceMutex_);
+    vfoManager_.setColor(id, c);
+    emit vfoListChanged();
+}
+
+void SpectrumEngine::setAnrEnabled(bool on) {
+    QMutexLocker lk(&sourceMutex_);
+    anr_.setEnabled(on);
+}
+
+void SpectrumEngine::setAnrStrength(float s) {
+    QMutexLocker lk(&sourceMutex_);
+    anr_.setStrength(s);
+}
+
+QVector<VfoMarker> SpectrumEngine::vfoMarkers() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return vfoManager_.markers();
+}
+
+int SpectrumEngine::selectedVfoId() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return vfoManager_.selectedId();
 }
 
 void SpectrumEngine::setDirectSampling(int mode) {
@@ -328,21 +418,22 @@ void SpectrumEngine::run() {
 
         const bool real = source_->isConnected();
         const double sr = source_->sampleRate();
-        const int D = std::max(1, channelizer_.decimation());
+        const int D = std::max(1, vfoManager_.maxDecimation());
 
-        // Real sources: read ~25 ms per iteration (rounded to a whole number
-        // of decimation branches) so the blocking read paces the loop to real
-        // time and the audio sink gets ~25 ms buffers. Synthetic sources have
-        // no clock; read one FFT and sleep instead.
+        // Real sources: blocking reads pace to wall-clock. Synthetic sources have
+        // no hardware clock, but we still read ~25 ms of simulated time per loop
+        // (aligned to a whole number of decimation branches) so the offline
+        // demod chain advances at near wall-clock speed and loops like the
+        // Costas/timing PLL converge within a few seconds instead of needing
+        // tens of seconds of wall-clock for ~1.3 s of simulated audio. The 33 ms
+        // sleep below still paces the loop. The spectrum FFT always uses only
+        // the first n samples (unchanged).
         std::size_t wantN;
-        if (real) {
+        {
             long want = static_cast<long>(std::round(sr * 0.025));
             want = ((want + D - 1) / D) * D;
             wantN = static_cast<std::size_t>(std::max<long>(want, n));
-        } else {
-            wantN = static_cast<std::size_t>(n);
-        }
-        if (iq.size() != wantN) iq.resize(wantN);
+        }        if (iq.size() != wantN) iq.resize(wantN);
 
         std::size_t got = source_->readIQ(iq);
         if (got == 0) {
@@ -371,31 +462,79 @@ void SpectrumEngine::run() {
         frame.sourceName = source_->name();
         emit spectrumReady(frame);
 
-        // Channelize (VFO currently tracks source center -> offset 0), then
-        // demodulate at the true IF rate, then resample audio to a fixed rate.
-        auto baseband = channelizer_.process(iq);
-        std::vector<float> audio;
-        if (!baseband.empty()) {
-            auto aif = demod_->process(baseband);
-            audio = audioRes_.process(aif);
+        // Fan the source IQ out to every VFO channel (each with its own
+        // channelizer + demod + resampler state), then take the SELECTED VFO's
+        // 48 kHz audio into the shared downstream.
+        const double centerNow = source_->centerFreq();
+        const std::vector<float>& raw = vfoManager_.process(iq, sr, centerNow);
+        const VfoChannel* sel = vfoManager_.selected();
+        const QString selMode = sel ? sel->mode : demodMode_;
+        const bool digital = VfoChannel::modeIsDigital(selMode);
+
+        // Keep the offline test source emitting the right kind of IQ for the
+        // selected VFO (am/fm/tone/bpsk/qpsk). Real hardware ignores this.
+        if (auto* ts = dynamic_cast<TestSignalSource*>(source_.get())) {
+            QString want;
+            if (selMode == "AM") want = "am";
+            else if (selMode == "NFM" || selMode == "WFM") want = "fm";
+            else if (selMode == "BPSK") want = "bpsk";
+            else if (selMode == "QPSK") want = "qpsk";
+            else want = "tone";
+            if (want != ts->modulation()) ts->setModulation(want);
         }
 
-        float rms = rmsDbfs(audio);
-        bool gate = squelch_.open();
-        auto gated = squelch_.apply(audio, rms);
-        emit squelchState(gate);
-        auto out = agc_.process(gated);
-        emit audioLevel(agc_.currentLevelDb());
-
+        // RSSI is always reported from raw capture energy.
         double rssi = 0;
         for (auto c : iq) rssi += std::norm(c);
         rssi = 10 * std::log10(rssi / iq.size() + 1e-10);
         emit rssiLevel(static_cast<float>(rssi));
 
+        if (digital) {
+            // ---- Digital VFO: no analog audio; push constellation symbols ----
+            if (sel && !sel->recoveredSymbols.empty())
+                emit constellationSymbols(sel->recoveredSymbols, source_->isConnected());
+            if (!wasDigital_) wasDigital_ = true;   // entering digital (panel setMode in UI)
+            std::vector<float> silence;
+            silence.resize(raw.size(), 0.0f);
+            audioOut_->write(silence, 48000.0);
+            emit squelchState(true);
+            emit audioLevel(-60.0f);
+            // Gated/wav recording: keep the audio stream continuous but silent.
+            if (wavWriter_.isRecording()) wavWriter_.write(silence);
+            lk.unlock();
+            if (!real) std::this_thread::sleep_for(std::chrono::milliseconds(33));
+            continue;
+        }
+
+        // Leaving digital mode: tell the panel to return to its empty state once.
+        if (wasDigital_) {
+            wasDigital_ = false;
+            emit constellationCleared();
+        }
+
+        // ANR sits AFTER the per-VFO resampler and BEFORE squelch/AGC/gated
+        // recorder. Disabled by default -> identity (bit-exact legacy chain).
+        const std::vector<float> audio = anr_.process(raw);
+
+        // Squelch decision FIRST (updates smoothing/hangover, does not mute),
+        // then AGC always sees the REAL audio (it tracks the noise floor while
+        // closed instead of decaying away on zero blocks). We mute only the
+        // speaker path. The gated recorder receives the real, un-muted audio so
+        // its pre-roll captures the true signal onset.
+        const float rms = rmsDbfs(audio);
+        const bool gate = squelch_.decide(audio, rms);
+        auto leveled = agc_.process(audio);
+        std::vector<float> out = leveled;
+        if (!gate) std::fill(out.begin(), out.end(), 0.0f);
+        emit squelchState(gate);
+        emit audioLevel(agc_.currentLevelDb());
+
         audioOut_->write(out, 48000.0);
 
-        // Gated recording
-        gatedRec_.feed(out, gate);
+        // Gated recording: label the segment with the selected VFO, and feed
+        // the REAL (un-muted) audio so pre-roll captures the onset.
+        gatedRec_.setContext(selMode, sel ? sel->freqHz : centerNow);
+        gatedRec_.feed(leveled, gate);
 
         // Continuous audio (WAV) recording for the main record button. When
         // recIgnoreSquelch_ is false we normally only capture while the gate is
@@ -424,15 +563,15 @@ void SpectrumEngine::run() {
             }
         }
 
-        // CW decode
-        if (demodMode_ == "CW") {
+        // CW decode (follows the selected VFO mode)
+        if (selMode == "CW") {
             cwDecoder_.feed(out);
             QString text = cwDecoder_.takeText();
             if (!text.isEmpty()) emit cwDecoded(text, cwDecoder_.wpm());
         }
 
         // ADS-B decode (operates on full-rate raw IQ)
-        if (demodMode_ == "ADS-B") {
+        if (selMode == "ADS-B") {
             adsbDecoder_.feed(iq);
             for (const auto& ac : adsbDecoder_.takeNewAircraft())
                 emit adsbAircraft(ac);

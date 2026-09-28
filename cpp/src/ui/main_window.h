@@ -25,8 +25,8 @@ class QSpinBox;
 
 namespace mbdsdr {
 namespace ui { class BookmarkManager; }
-namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; }
-namespace ui   { class SpectrumWidget; class SkyView; class WorldView; }
+namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct VfoMarker; }
+namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView; }
 namespace ai   { class Agent; }
 
 class MainWindow : public QMainWindow {
@@ -56,6 +56,7 @@ private:
     ui::SpectrumWidget* spectrum_ = nullptr;
     ui::SkyView*     skyView_   = nullptr;
     ui::WorldView*   worldView_ = nullptr;
+    ui::ConstellationView* constellationView_ = nullptr;
 
     // Satellite pass forecast (sky tab).
     dsp::TleClient* tleClient_   = nullptr;
@@ -114,11 +115,21 @@ private:
     QComboBox*      demodCombo_  = nullptr;
     QComboBox*      bwCombo_     = nullptr;
     double          currentBwHz_ = 12500.0;   // live RF bandwidth (Up/Down nudge)
+
+    // Multi-VFO management panel (left rail).
+    QListWidget*    vfoList_     = nullptr;
+    QPushButton*    vfoAddBtn_   = nullptr;
+    QPushButton*    vfoDelBtn_   = nullptr;
+    QVector<mbdsdr::dsp::VfoMarker> vfoMarkers_;  // last snapshot from engine
+    void refreshVfoUi();                          // rebuild list + push band boxes
     QSlider*        squelchSlider_ = nullptr;
     QCheckBox*      squelchCheck_ = nullptr;
     QLabel*         squelchValue_ = nullptr;
     QLabel*         levelLabel_   = nullptr;
     QLabel*         squelchState_ = nullptr;
+    QCheckBox*      anrCheck_   = nullptr;
+    QSlider*        anrSlider_  = nullptr;
+    QLabel*         anrValue_   = nullptr;
     QPushButton*    recordBtn_   = nullptr;
     QCheckBox*      gatedCheck_   = nullptr;
     QLabel*         recStatus_   = nullptr;

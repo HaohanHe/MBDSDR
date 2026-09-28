@@ -3,9 +3,27 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <random>
 
 namespace mbdsdr {
 namespace dsp {
+
+// Build a repeating frame of differentially encoded BPSK/QPSK symbols.
+// *** SYNTHETIC TEST DATA -- NOT HARDWARE ***
+void TestSignalSource::rebuildDigitalSymbols() {
+    const DigMode dm = (modulation_ == "qpsk") ? DigMode::QPSK : DigMode::BPSK;
+    // A fixed pseudo-random bit pattern (deterministic across runs).
+    std::vector<int> bits;
+    std::uint32_t s = 0x12345678u;
+    const int nBits = (dm == DigMode::QPSK) ? 200 : 100;
+    for (int i = 0; i < nBits; ++i) {
+        s = s * 1664525u + 1013904223u;
+        bits.push_back((s >> 16) & 1);
+    }
+    digSymbols_ = DigitalDemod::diffEncode(bits, dm);
+    digSymIdx_ = 0;
+    digFrac_ = 0.0;
+}
 
 TestSignalSource::TestSignalSource(double sampleRateHz, double centerFreqHz)
     : fs_(sampleRateHz), f0_(centerFreqHz) {}
@@ -57,6 +75,28 @@ std::size_t TestSignalSource::readIQ(std::vector<std::complex<float>>& out) {
             phase += 2*M_PI*fdev/fs_ * std::sin(2*M_PI*faudio*t/fs_);
             out[i] = std::complex<float>(static_cast<float>(std::cos(phase)),
                                          static_cast<float>(std::sin(phase))) * gainLin * 0.5f;
+        }
+    } else if (modulation_ == "bpsk" || modulation_ == "qpsk") {
+        // *** OFFLINE SYNTHETIC DIGITAL SIGNAL -- NOT HARDWARE ***
+        // Rectangular differentially-encoded BPSK/QPSK symbols modulated onto a
+        // small (+3 kHz) IF offset so the source DC blocker does not remove the
+        // carrier at baseband center. The downstream Costas loop pulls the
+        // residual offset in. sps = fs_/symbolRate; channelizer + DigitalDemod.
+        if (digSymbols_.empty()) rebuildDigitalSymbols();
+        const double sps = fs_ / digSymbolRate_;
+        const float amp = 0.4f * gainLin;
+        const double digCarrierHz = 200.0;   // avoid DC notch, within Costas pull-in
+        const double dph = 2.0 * M_PI * digCarrierHz / fs_;
+        static double digPh_ = 0.0;
+        for (std::size_t i = 0; i < n; ++i) {
+            std::complex<float> osc(std::cos(digPh_), std::sin(digPh_));
+            out[i] = digSymbols_[digSymIdx_] * amp * osc;
+            digPh_ += dph;
+            digFrac_ += 1.0;
+            if (digFrac_ >= sps) {
+                digFrac_ -= sps;
+                digSymIdx_ = (digSymIdx_ + 1) % digSymbols_.size();
+            }
         }
     } else {
         // "tone": dual tones + noise (default for spectrum display)

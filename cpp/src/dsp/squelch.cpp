@@ -22,13 +22,14 @@ void Squelch::reset() {
     open_ = false; smoothDb_ = -150.0f; hangLeftMs_ = 0;
 }
 
-std::vector<float> Squelch::apply(const std::vector<float>& audio, float rmsDb) {
-    // Off / AlwaysOpen: pass audio through ungated.
+bool Squelch::decide(const std::vector<float>& audio, float rmsDb) {
+    (void)audio;
+    // Off / AlwaysOpen: always pass.
     if (mode_ != Mode::Gate) {
         open_ = true;
-        return audio;
+        return true;
     }
-    // Gate mode: smooth RMS, fast attack, slow decay
+    // Gate mode: smooth RMS, fast attack, slow decay.
     const float a = (rmsDb > smoothDb_) ? attackAlpha_ : decayAlpha_;
     smoothDb_ += a * (rmsDb - smoothDb_);
 
@@ -39,11 +40,12 @@ std::vector<float> Squelch::apply(const std::vector<float>& audio, float rmsDb) 
         hangLeftMs_ -= blockMs_;
         if (hangLeftMs_ <= 0) open_ = false;
     }
+    return open_;
+}
 
-    if (!open_) {
-        std::vector<float> silent(audio.size(), 0.0f);
-        return silent;
-    }
+std::vector<float> Squelch::apply(const std::vector<float>& audio, float rmsDb) {
+    const bool open = decide(audio, rmsDb);
+    if (!open) return std::vector<float>(audio.size(), 0.0f);
     return audio;
 }
 

@@ -188,6 +188,12 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
                         const QList<int>& ids) {
         rebuildPeakTable(peaks, ids);
     });
+    connect(canvas_, &SpectrumDisplay::vfoMarkerSelected,
+            this, &SpectrumWidget::vfoMarkerSelected);
+    connect(canvas_, &SpectrumDisplay::vfoMarkerCenterTuned,
+            this, &SpectrumWidget::vfoMarkerCenterTuned);
+    connect(canvas_, &SpectrumDisplay::vfoMarkerBandwidthChanged,
+            this, &SpectrumWidget::vfoMarkerBandwidthChanged);
 
     // ---- Bottom peak table -------------------------------------------------
     peakTable_ = new QTableWidget(0, 4, this);
@@ -314,6 +320,10 @@ void SpectrumWidget::setScrollSpeed(int linesPerFrame) {
 }
 void SpectrumWidget::setPalette(int p) {
     if (canvas_) canvas_->setPalette(p);
+}
+
+void SpectrumWidget::setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers) {
+    if (canvas_) canvas_->setVfoMarkers(markers);
 }
 
 } // namespace ui

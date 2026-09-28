@@ -19,6 +19,14 @@ public:
     bool enabled() const { return enabled_; }
     bool isRecording() const { return state_ == State::REC; }
 
+    // Filename context: the selected VFO's mode and absolute frequency. The
+    // engine calls this every loop so saved talk-spurts are labelled with the
+    // channel that actually produced them (instead of hard-coded NFM/98.5M).
+    void setContext(const QString& mode, double freqHz) {
+        currentMode_ = mode;
+        currentFreq_ = freqHz;
+    }
+
     /// Feed one audio block + gate state. Returns list of saved file paths.
     std::vector<QString> feed(const std::vector<float>& audio, bool gate);
 

@@ -14,6 +14,8 @@
 #include <vector>
 #include <QString>
 
+#include "dsp/digital_demod.h"
+
 namespace mbdsdr {
 namespace dsp {
 
@@ -37,7 +39,7 @@ public:
     QString name() const override { return QStringLiteral("Test Signal"); }
     bool isConnected() const override { return false; }
 
-    void setModulation(const QString& m) { modulation_ = m; }
+    void setModulation(const QString& m) { modulation_ = m; digSymbols_.clear(); }
     QString modulation() const { return modulation_; }
 
 private:
@@ -50,6 +52,15 @@ private:
     bool   haveSpare_ = false;
     float  spare_ = 0.0f;
     float  nextGaussian();
+
+    // --- Offline digital (BPSK/QPSK) transmit fixture -----------------------
+    // Precomputed differential symbols (via DigitalDemod::diffEncode) played as
+    // rectangular pulses at fs_/symbolRate SPS. *** SYNTHETIC -- NOT HARDWARE ***
+    std::vector<std::complex<float>> digSymbols_;
+    std::size_t digSymIdx_ = 0;
+    double digFrac_ = 0.0;     // fractional sample within current symbol
+    double digSymbolRate_ = 2400.0;
+    void rebuildDigitalSymbols();
 };
 
 } // namespace dsp

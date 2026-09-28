@@ -5,6 +5,7 @@
 #include <QMutex>
 #include <QElapsedTimer>
 #include <QString>
+#include <QColor>
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -15,11 +16,12 @@
 #include "dsp/power_spectrum.h"
 #include "dsp/noise_blanker.h"
 #include "dsp/iq_frontend.h"
-#include "dsp/channelizer.h"
+#include "dsp/vfo_manager.h"
 #include "dsp/audio_resampler.h"
 #include "dsp/demod.h"
 #include "dsp/squelch.h"
 #include "dsp/agc.h"
+#include "dsp/anr.h"
 #include "dsp/audio_output.h"
 #include "dsp/recorder.h"
 #include "dsp/gated_recorder.h"
@@ -75,6 +77,25 @@ public slots:
     void setGatedRecordingEnabled(bool e);
     void setAdsbReferencePosition(double latDeg, double lonDeg) { adsbDecoder_.setReferencePosition(latDeg, lonDeg); }
 
+    // ---- Multi-VFO management (all take sourceMutex_) ---------------------
+    // Add a VFO at the current source center; remove (keeps >=1); select; and
+    // retune an arbitrary VFO to an absolute frequency WITHOUT moving the
+    // source tuner (used when dragging a non-selected band box on the panadapter).
+    void vfoAdd();
+    void vfoRemove(int id);
+    void vfoSelect(int id);
+    void vfoSetFreq(int id, double hz);
+    void vfoSetBandwidth(int id, double hz);
+    void vfoSetMode(int id, const QString& mode);
+    void vfoSetColor(int id, const QColor& c);
+    // Snapshot for the UI (VFO list + band boxes). Blocks on sourceMutex_.
+    QVector<VfoMarker> vfoMarkers() const;
+    int selectedVfoId() const;
+
+    // ---- ANR (audio noise reduction on the selected VFO's audio) -------
+    void setAnrEnabled(bool on);
+    void setAnrStrength(float s);
+
     // ---- Recording options (SDR++-aligned) ----
     void setRecTarget(RecTarget t) { recTarget_ = t; }
     RecTarget recTarget() const { return recTarget_; }
@@ -114,16 +135,22 @@ signals:
     void recordingProgress(const QString& path, int seconds, qint64 bytes);
     void cwDecoded(const QString& text, double wpm);
     void adsbAircraft(const AircraftInfo& info);
+    // VFO set / selection / parameters changed: the UI should re-pull
+    // vfoMarkers() and refresh the list + band boxes.
+    void vfoListChanged();
+    // Recovered constellation symbols from the selected digital VFO, pushed at
+    // the engine cadence. isHardware = real RF (true) vs offline/test (false).
+    void constellationSymbols(const std::vector<std::complex<float>>& symbols, bool isHardware);
+    // Selected VFO left digital mode (or no lock): UI should clear the panel.
+    void constellationCleared();
 
 protected:
     void run() override;
 
 private:
     std::unique_ptr<ISource> source_;
-    std::unique_ptr<IDemod> demod_;
     IQFrontend frontend_;
-    Channelizer channelizer_;
-    AudioResampler audioRes_;
+    VfoManager vfoManager_;
     Squelch squelch_;
     Agc agc_;
     AudioOutput* audioOut_ = nullptr;
@@ -132,6 +159,7 @@ private:
     WavWriter wavWriter_;
     PowerSpectrum powerSpectrum_;
     NoiseBlanker noiseBlanker_;
+    AudioNoiseReduction anr_;
     CWDecoder cwDecoder_;
     ADSBDecoder adsbDecoder_;
 
@@ -140,6 +168,7 @@ private:
     std::atomic<bool> needDemodReset_{false};
     QString demodMode_ = "NFM";
     double bandwidth_ = 12500.0;
+    bool wasDigital_ = false;   // last loop's selected-VFO digital-ness (edge trigger)
 
     // Recording options (see setRec* above).
     RecTarget recTarget_ = RecTarget::BasebandIQ;
