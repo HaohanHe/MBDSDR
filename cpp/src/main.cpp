@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
 
     QApplication app(argc, argv);
     QApplication::setApplicationName("mbdsdr");
-    QApplication::setApplicationVersion("0.1.0-phase1");
+    QApplication::setApplicationVersion("0.2.0");
 
     // Apply dark QSS translated from desktop/tokens.py
     app.setStyleSheet(mbdsdr::tokens::buildDarkQss());
