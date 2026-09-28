@@ -20,6 +20,8 @@ class QSplitter;
 class QTimer;
 class QListWidget;
 class QListWidgetItem;
+class QLineEdit;
+class QSpinBox;
 
 namespace mbdsdr {
 namespace ui { class BookmarkManager; }
@@ -63,6 +65,16 @@ private:
     QLabel*         skyEmptyLabel_ = nullptr;
     ui::BookmarkManager* bookmarkManager_ = nullptr;
     QListWidget*    bmList_      = nullptr;
+    // Band scanner state.
+    QDoubleSpinBox* scanStartSpin_ = nullptr;
+    QDoubleSpinBox* scanStopSpin_  = nullptr;
+    QComboBox*      scanStepCombo_ = nullptr;
+    QPushButton*    scanStartBtn_  = nullptr;
+    QPushButton*    scanStopBtn_   = nullptr;
+    QListWidget*    scanResultList_= nullptr;
+    QTimer*         scanTimer_     = nullptr;
+    double          scanFreq_      = 0.0;
+    float           lastRssi_      = -200.0f;
     QList<dsp::SatPass> passes_;
     QTimer*         tleTimer_    = nullptr;
     bool            tleFetchActive_ = false;
@@ -85,6 +97,9 @@ private:
     QLabel*         sourceBanner_ = nullptr;
     QLabel*         statusLabel_ = nullptr;
     QPushButton*    connectBtn_ = nullptr;
+    QComboBox*      srcTypeCombo_ = nullptr;
+    QLineEdit*      tcpHostEdit_ = nullptr;
+    QSpinBox*       tcpPortSpin_ = nullptr;
     QLabel*         rssiLabel_  = nullptr;
 
     // Collapsible advanced front-end options (RTL-SDR only; disabled w/o HW)

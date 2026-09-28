@@ -61,6 +61,9 @@ public slots:
     void setBandwidth(double hz);
     bool startRecording();
     void stopRecording();
+    // Connect to an rtl_tcp server. Returns true on success. On failure the
+    // source falls back to TestSignalSource (no fake data) and emits sourceChanged.
+    bool connectRtlTcp(const QString& host, quint16 port);
     void setGatedRecordingEnabled(bool e);
 
     // ---- Recording options (SDR++-aligned) ----
