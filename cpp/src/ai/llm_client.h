@@ -13,9 +13,12 @@ namespace ai {
 struct ChatMessage {
     QString role;
     QString content;
+    QString toolCallId;              // set when role == "tool"
+    QList<struct ToolCall> toolCalls; // assistant message with pending calls
 };
 
 struct ToolCall {
+    QString id;
     QString name;
     QJsonObject arguments;
 };

@@ -46,6 +46,7 @@ public:
     // Read-only state getters for integration tests / status display.
     QString demodMode() const { return demodMode_; }
     double bandwidth() const { return bandwidth_; }
+    double centerFreq() const;
     bool noiseBlankerEnabled() const;
     int windowType() const;
     int averageMode() const;
