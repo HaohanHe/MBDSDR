@@ -12,6 +12,8 @@
 
 #include "core/spectrum_frame.h"
 #include "dsp/source.h"
+#include "dsp/power_spectrum.h"
+#include "dsp/noise_blanker.h"
 #include "dsp/iq_frontend.h"
 #include "dsp/channelizer.h"
 #include "dsp/audio_resampler.h"
@@ -83,6 +85,10 @@ public slots:
     void setTunerAgc(bool on);
     void setBiasTee(bool on);
     void setPpm(double ppm);
+    // Signal-processing options (window / average / noise blanker).
+    void setWindowType(int w);     // 0=Hann 1=Flattop 2=Blackman
+    void setAverageMode(int a);    // 0=Off 1=Slow 2=Fast
+    void setNoiseBlanker(bool on);
 
 signals:
     void spectrumReady(const SpectrumFrame& frame);
@@ -112,6 +118,8 @@ private:
     Recorder recorder_;
     GatedRecorder gatedRec_;
     WavWriter wavWriter_;
+    PowerSpectrum powerSpectrum_;
+    NoiseBlanker noiseBlanker_;
     CWDecoder cwDecoder_;
     ADSBDecoder adsbDecoder_;
 

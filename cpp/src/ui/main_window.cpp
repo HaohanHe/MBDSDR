@@ -224,6 +224,10 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* gAud = new QGroupBox("音频", leftCard);
     auto* gAudLay = new QVBoxLayout(gAud);
+    auto* nbChk = new QCheckBox("噪声抑制 (Noise Blanker)", gAud);
+    connect(nbChk, &QCheckBox::toggled,
+            engine_, &dsp::SpectrumEngine::setNoiseBlanker);
+    gAudLay->addWidget(nbChk);
     levelLabel_ = new QLabel("电平: -- dBFS", gAud);
     gAudLay->addWidget(levelLabel_);
     levelBar_ = new QLabel("", gAud);
@@ -278,6 +282,25 @@ MainWindow::MainWindow(QWidget* parent)
     auto* specSplit = new QSplitter(Qt::Vertical, centerCard);
     specSplit->setChildrenCollapsible(false);
     specSplit->addWidget(spectrum_);
+    // Waterfall control strip: scroll speed + palette.
+    auto* wfBar = new QWidget(centerCard);
+    auto* wfLay = new QHBoxLayout(wfBar);
+    wfLay->setContentsMargins(tokens::scaled(tokens::kSpacingS), 0,
+                              tokens::scaled(tokens::kSpacingS), 0);
+    wfLay->setSpacing(tokens::scaled(tokens::kSpacingS));
+    wfLay->addWidget(new QLabel("瀑布", wfBar));
+    auto* spdCombo = new QComboBox(wfBar);
+    spdCombo->addItems({"1x", "2x", "4x"});
+    connect(spdCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            waterfall_, [this](int i){ waterfall_->setScrollSpeed(i == 0 ? 1 : (i == 1 ? 2 : 4)); });
+    wfLay->addWidget(spdCombo);
+    auto* palCombo = new QComboBox(wfBar);
+    palCombo->addItems({"经典", "单色"});
+    connect(palCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            waterfall_, &ui::WaterfallWidget::setPalette);
+    wfLay->addWidget(palCombo);
+    wfLay->addStretch();
+    specSplit->addWidget(wfBar);
     specSplit->addWidget(waterfall_);
     specSplit->setStretchFactor(0, 3);
     specSplit->setStretchFactor(1, 2);
@@ -391,6 +414,10 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onAdsbAircraft);
     connect(spectrum_, &ui::SpectrumWidget::fftSizeRequested,
             engine_, &dsp::SpectrumEngine::setFftSize);
+    connect(spectrum_, &ui::SpectrumWidget::windowTypeRequested,
+            engine_, &dsp::SpectrumEngine::setWindowType);
+    connect(spectrum_, &ui::SpectrumWidget::averageModeRequested,
+            engine_, &dsp::SpectrumEngine::setAverageMode);
     // Zoom/pan the spectrum and waterfall stay in lockstep.
     connect(spectrum_, &ui::SpectrumWidget::visibleRangeChanged,
             waterfall_, &ui::WaterfallWidget::setVisibleRange);

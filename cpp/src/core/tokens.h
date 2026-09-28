@@ -174,6 +174,15 @@ inline constexpr WaterfallStop kWaterfallStops[] = {
 };
 inline constexpr int kWaterfallMinH = 48;
 
+// Monochrome (blue-scale) alternative palette.
+inline constexpr WaterfallStop kWaterfallStopsMono[] = {
+    {0.00f, "#000000"},
+    {0.30f, "#0a1a2a"},
+    {0.60f, "#1a4a6a"},
+    {0.85f, "#5aa8d8"},
+    {1.00f, "#dcefff"},
+};
+
 // =====================================================================
 // Spectrum widget sizes / offsets
 // =====================================================================

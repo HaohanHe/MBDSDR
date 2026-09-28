@@ -13,6 +13,7 @@
 #include <QTableWidget>
 #include <QHeaderView>
 #include <QTableWidgetItem>
+#include <QCheckBox>
 #include <QSettings>
 #include <algorithm>
 #include <cmath>
@@ -43,13 +44,11 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
                               tokens::scaled(tokens::kSpectrumPad));
     outer->setSpacing(tokens::scaled(tokens::kSpectrumSpacing));
 
+    // Row 1: compact tool strip. Row 2: source banner (test signal / name).
     auto* topRow = new QHBoxLayout();
-    testLabel_ = new QLabel("", this);
-    testLabel_->setObjectName("testBanner");
-    topRow->addWidget(testLabel_);
-    topRow->addStretch();
+    topRow->setSpacing(tokens::scaled(tokens::kSpacingS));
 
-    topRow->addWidget(new QLabel("FFT:", this));
+    topRow->addWidget(new QLabel("FFT", this));
     fftCombo_ = new QComboBox(this);
     fftCombo_->addItems({"1024", "2048", "4096"});
     fftCombo_->setCurrentIndex(1);
@@ -63,6 +62,26 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
                 emit viewChanged();
             });
     topRow->addWidget(fftCombo_);
+
+    topRow->addWidget(new QLabel("窗", this));
+    auto* winCombo = new QComboBox(this);
+    winCombo->addItems({"Hann", "FlatTop", "Blackman"});
+    connect(winCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) { emit windowTypeRequested(idx); });
+    topRow->addWidget(winCombo);
+
+    topRow->addWidget(new QLabel("平均", this));
+    auto* avgCombo = new QComboBox(this);
+    avgCombo->addItems({"Off", "Slow", "Fast"});
+    connect(avgCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) { emit averageModeRequested(idx); });
+    topRow->addWidget(avgCombo);
+
+    auto* maxHoldChk = new QCheckBox("Max", this);
+    connect(maxHoldChk, &QCheckBox::toggled,
+            this, &SpectrumWidget::setMaxHoldEnabled);
+    topRow->addWidget(maxHoldChk);
+    topRow->addSpacing(tokens::scaled(tokens::kSpacingM));
 
     // Adjustable dB range (vertical scale).
     topRow->addWidget(new QLabel("dB", this));
@@ -124,6 +143,14 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     topRow->addWidget(infoLabel_);
 
     outer->addLayout(topRow);
+
+    // Row 2: source banner + info (kept off the tool strip so controls breathe).
+    auto* bannerRow = new QHBoxLayout();
+    testLabel_ = new QLabel("", this);
+    testLabel_->setObjectName("testBanner");
+    bannerRow->addWidget(testLabel_);
+    bannerRow->addStretch();
+    outer->addLayout(bannerRow);
 
     // Peak list below the plot: frequency / level / -3 dB bandwidth.
     peakTable_ = new QTableWidget(0, 4, this);
@@ -236,6 +263,13 @@ void SpectrumWidget::setSpectrum(const SpectrumFrame& frame) {
     // away), anchor the view center to f0.
     const bool firstFrame = (frame_.sampleRateHz <= 0.0);
     frame_ = frame;
+    // Max-hold envelope: per-bin historical peak.
+    if (maxHoldEnabled_) {
+        if (static_cast<int>(maxHold_.size()) != frame.dbfs.size())
+            maxHold_.assign(frame.dbfs.size(), -1000.0f);
+        for (std::size_t i = 0; i < frame.dbfs.size(); ++i)
+            if (frame.dbfs[i] > maxHold_[i]) maxHold_[i] = frame.dbfs[i];
+    }
     const double fs  = frame.sampleRateHz;
     const double f0  = frame.centerFreqHz;
     if (firstFrame) {
@@ -424,6 +458,24 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
         iLo = std::max(0, std::min(static_cast<int>(n) - 1, iLo));
         iHi = std::max(0, std::min(static_cast<int>(n) - 1, iHi));
 
+        // Max-hold envelope: pale, thinner, under the live trace.
+        if (maxHoldEnabled_ && maxHold_.size() == n) {
+            QPen holdPen(QColor(QString::fromUtf8(tokens::kTextSecondary)), 1, Qt::DotLine);
+            p.setPen(holdPen);
+            QPainterPath hpath;
+            for (int i = iLo; i <= iHi; ++i) {
+                const double fi = fLowEdge + fs * i / (n - 1);
+                int x = mL + static_cast<int>(plotW * (fi - fLo) / spanVis);
+                float v = maxHold_[i];
+                if (v < yMin) v = yMin;
+                if (v > yMax) v = yMax;
+                int y = mT + static_cast<int>(plotH * (1.0f - (v - yMin) / (yMax - yMin)));
+                if (i == iLo) hpath.moveTo(x, y);
+                else hpath.lineTo(x, y);
+            }
+            p.drawPath(hpath);
+        }
+
         QPen tracePen(QColor(QString::fromUtf8(tokens::kAccent)), 1);
         p.setPen(tracePen);
         QPainterPath path;
@@ -474,15 +526,29 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
         p.setBrush(Qt::NoBrush);
     }
 
-    // Crosshair tooltip
-    if (hoverPos_.x() >= 0) {
+    // Crosshair readout: frequency + dBFS at the cursor, on a translucent card.
+    if (hoverPos_.x() >= 0 && hoverPos_.y() >= mT && hoverPos_.y() <= mT + plotH) {
         p.setPen(QPen(QColor(tokens::kAccent), 1, Qt::DashLine));
         p.drawLine(hoverPos_.x(), mT, hoverPos_.x(), mT + plotH);
         p.drawLine(mL, hoverPos_.y(), w - mR, hoverPos_.y());
         const double frac = (hoverPos_.x() - mL) / static_cast<double>(plotW);
         const double freq = fLo + frac * spanVis;
-        p.drawText(hoverPos_ + QPointF(tokens::kTooltipOffset, -tokens::kTooltipOffset),
-                   QString("%1 MHz").arg(freq / 1e6, 0, 'f', 3));
+        const double dbFrac = (hoverPos_.y() - mT) / static_cast<double>(plotH);
+        const double dbfs = dbMax_ - dbFrac * (dbMax_ - dbMin_);
+        const QString txt = QString("%1 MHz  %2 dBFS")
+                                .arg(freq / 1e6, 0, 'f', 3).arg(dbfs, 0, 'f', 1);
+        QFont f = font(); f.setPointSize(tokens::kFontAuxPt); p.setFont(f);
+        QFontMetrics fm(f);
+        QRectF box(hoverPos_ + QPointF(tokens::kTooltipOffset, -tokens::kTooltipOffset),
+                   QSizeF(fm.horizontalAdvance(txt) + tokens::scaled(tokens::kSpacingM),
+                          fm.height() + tokens::scaled(tokens::kSpacingS)));
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(QString::fromUtf8(tokens::kCard2)));
+        p.drawRoundedRect(box, tokens::scaled(tokens::kRadiusSmall),
+                          tokens::scaled(tokens::kRadiusSmall));
+        p.setPen(QPen(QColor(QString::fromUtf8(tokens::kTextPrimary))));
+        p.drawText(box.adjusted(tokens::scaled(tokens::kSpacingS), 0, 0, 0),
+                   Qt::AlignVCenter, txt);
     }
 }
 
