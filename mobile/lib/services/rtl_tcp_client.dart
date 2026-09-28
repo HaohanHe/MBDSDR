@@ -123,10 +123,16 @@ class RtlTcpClient {
           _iqCtrl.addError(e, st);
         },
         onDone: () {
-          // 服务端关闭：若非主动 disconnect，视为断开。
+          // 服务端关闭：若非主动 disconnect，视为传输中断。主动 disconnect()
+          // 会先 cancel 本订阅，不会走到这里。向下游（控制器）发一个 error，
+          // 让上层据此进入自动重连。
           if (_status == ConnectionStatus.connected ||
               _status == ConnectionStatus.connecting) {
             _setStatus(ConnectionStatus.disconnected);
+            _iqCtrl.addError(
+              StateError('rtl_tcp 对端关闭了连接'),
+              StackTrace.current,
+            );
           }
         },
         cancelOnError: false,

@@ -168,6 +168,62 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  // ------------------------------------------------------------ 音频
+  Widget _audioRow(SettingsService s) {
+    final bool muted = s.muted;
+    final double shown = muted ? 0.0 : s.volume;
+    return Row(
+      children: <Widget>[
+        IconButton(
+          tooltip: muted ? '取消静音' : '静音',
+          icon: Icon(
+            muted || s.volume == 0
+                ? Icons.volume_off_outlined
+                : Icons.volume_up_outlined,
+          ),
+          onPressed: () => setState(() => s.muted = !muted),
+        ),
+        Expanded(
+          child: Slider(
+            value: shown,
+            min: 0,
+            max: 1,
+            divisions: 20,
+            label: '${(shown * 100).round()}%',
+            onChanged: (double v) {
+              setState(() {
+                if (muted && v > 0) s.muted = false;
+                s.volume = v;
+              });
+            },
+          ),
+        ),
+        SizedBox(
+          width: 44,
+          child: Text(
+            '${(shown * 100).round()}%',
+            style: AppTokens.auxiliary,
+            textAlign: TextAlign.right,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _muteSwitch(SettingsService s) {
+    return Row(
+      children: <Widget>[
+        const Expanded(
+          child: Text('静音', style: AppTokens.body),
+        ),
+        Switch(
+          value: s.muted,
+          onChanged: (bool v) => setState(() => s.muted = v),
+        ),
+      ],
+    );
+  }
+
   // ------------------------------------------------------------ 外观
   String get _coordinateText {
     final SettingsService s = widget.settings;
@@ -235,6 +291,21 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: AppTokens.spacingS),
             const Text(
               '在电脑或树莓派上运行：rtl_tcp -a 0.0.0.0',
+              style: AppTokens.auxiliary,
+            ),
+          ],
+        ),
+
+        // ---------------------------------------------------- 音频
+        _section(
+          title: '音频',
+          children: <Widget>[
+            _audioRow(widget.settings),
+            const SizedBox(height: AppTokens.spacingS),
+            _muteSwitch(widget.settings),
+            const SizedBox(height: AppTokens.spacingS),
+            const Text(
+              '音量与静音仅作用于本机播放，不随 rtl_tcp 上送。',
               style: AppTokens.auxiliary,
             ),
           ],

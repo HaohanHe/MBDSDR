@@ -14,6 +14,9 @@ enum ConnectionStatus {
   /// 已连接并开始接收 IQ 流。
   connected,
 
+  /// 曾连接过，但 IQ 流异常或对端断开，正在按指数退避自动重连。
+  reconnecting,
+
   /// 连接或传输出错（详见 errorMessage）。
   error,
 }

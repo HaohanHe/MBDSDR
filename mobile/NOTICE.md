@@ -29,5 +29,9 @@
 - [geolocator](https://pub.dev/packages/geolocator)（MIT）
 - [flutter_compass](https://pub.dev/packages/flutter_compass)（MIT）
 - [sensors_plus](https://pub.dev/packages/sensors_plus)（BSD-3）
+- [intl](https://pub.dev/packages/intl)（BSD-3）
+
+仅测试期使用：
+- [fake_async](https://pub.dev/packages/fake_async)（BSD-3）——驱动重连退避状态机的虚拟时钟。
 
 上述插件各自保留其原始许可证与版权声明。
