@@ -14,6 +14,7 @@
 #include <QHeaderView>
 #include <QTableWidgetItem>
 #include <QCheckBox>
+#include <QPushButton>
 #include <QSettings>
 #include <algorithm>
 #include <cmath>
@@ -81,6 +82,12 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     connect(maxHoldChk, &QCheckBox::toggled,
             this, &SpectrumWidget::setMaxHoldEnabled);
     topRow->addWidget(maxHoldChk);
+    auto* maxRst = new QPushButton("Rst", this);
+    connect(maxRst, &QPushButton::clicked, this, [this]() {
+        maxHold_.clear();
+        update();
+    });
+    topRow->addWidget(maxRst);
     topRow->addSpacing(tokens::scaled(tokens::kSpacingM));
 
     // Adjustable dB range (vertical scale).
@@ -140,7 +147,8 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
 
     infoLabel_ = new QLabel(this);
     infoLabel_->setObjectName("monoInfo");
-    topRow->addWidget(infoLabel_);
+    infoLabel_->setText(" ");
+    topRow->addWidget(infoLabel_, 1);
 
     outer->addLayout(topRow);
 
@@ -279,11 +287,15 @@ void SpectrumWidget::setSpectrum(const SpectrumFrame& frame) {
         emitVisibleRange();
     }
     testLabel_->setText(frame.isTestSignal ? "测试信号（非硬件）" : "");
-    infoLabel_->setText(QString("%1  Fs=%2 MHz  F0=%3 MHz  N=%4")
+    const QString info = QString("%1  Fs=%2 MHz  F0=%3 MHz  N=%4")
                         .arg(frame.sourceName.isEmpty() ? "?" : frame.sourceName)
                         .arg(fs / 1e6, 0, 'f', 1)
                         .arg(f0 / 1e6, 0, 'f', 1)
-                        .arg(frame.fftSize));
+                        .arg(frame.fftSize);
+    // Elide long source names so they never overflow the right edge.
+    QFontMetrics fm(infoLabel_->font());
+    infoLabel_->setText(fm.elidedText(info, Qt::ElideRight,
+                                      qMax(50, infoLabel_->width())));
     detectPeaks();
     update();
 }

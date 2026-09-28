@@ -47,6 +47,8 @@
 #include "ai/agent.h"
 #include "ai/ai_config.h"
 #include "ui/sky_view.h"
+#include "ui/bookmark_manager.h"
+#include <QListWidget>
 #include "ui/world_view.h"
 #include "ui/waterfall.h"
 #include "ui/settings_dialog.h"
@@ -360,6 +362,41 @@ MainWindow::MainWindow(QWidget* parent)
     passTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     skyLay->addWidget(passTable_, 1);
     rightTabs_->addTab(skyPage, "天空");
+
+    // ---- Bookmarks tab: user-saved frequencies, jump on click ----
+    bookmarkManager_ = new ui::BookmarkManager();
+    bookmarkManager_->load();
+    auto* bmPage = new QWidget;
+    auto* bmLay = new QVBoxLayout(bmPage);
+    bmList_ = new QListWidget(bmPage);
+    bmLay->addWidget(bmList_, 1);
+    auto* bmRow = new QHBoxLayout;
+    auto* bmSave = new QPushButton("存为书签", bmPage);
+    auto* bmDel = new QPushButton("删除", bmPage);
+    bmRow->addWidget(bmSave);
+    bmRow->addWidget(bmDel);
+    bmLay->addLayout(bmRow);
+    auto refreshBm = [this]() {
+        bmList_->clear();
+        for (const auto& b : bookmarkManager_->list())
+            bmList_->addItem(QString("%1 MHz — %2")
+                .arg(b.freqHz / 1e6, 0, 'f', 3).arg(b.note));
+    };
+    refreshBm();
+    connect(bmSave, &QPushButton::clicked, this, [this, refreshBm]() {
+        bookmarkManager_->add(freqSpin_->value() * 1e6, "");
+        refreshBm();
+    });
+    connect(bmDel, &QPushButton::clicked, this, [this, refreshBm]() {
+        int row = bmList_->currentRow();
+        if (row >= 0) { bookmarkManager_->remove(row); refreshBm(); }
+    });
+    connect(bmList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* it) {
+        int row = bmList_->row(it);
+        if (row >= 0 && row < bookmarkManager_->list().size())
+            engine_->onSetCenterFreq(bookmarkManager_->list()[row].freqHz);
+    });
+    rightTabs_->addTab(bmPage, "书签");
 
     connect(passTable_, &QTableWidget::cellClicked,
             this, [this](int row, int) { onPassRowClicked(row); });

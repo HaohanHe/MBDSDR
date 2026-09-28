@@ -13,10 +13,12 @@ class NoiseBlanker {
 public:
     void setEnabled(bool on) { enabled_ = on; }
     bool enabled() const { return enabled_; }
+    void setSampleRate(double hz) { winSamples_ = std::max(16, static_cast<int>(hz / 1000.0)); }
     void process(std::vector<std::complex<float>>& iq);
 
 private:
     bool enabled_ = false;
+    int winSamples_ = 32;
 };
 
 } // namespace dsp

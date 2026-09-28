@@ -18,8 +18,11 @@ class QLineEdit;
 class QStackedWidget;
 class QSplitter;
 class QTimer;
+class QListWidget;
+class QListWidgetItem;
 
 namespace mbdsdr {
+namespace ui { class BookmarkManager; }
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; }
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class WaterfallWidget; }
 namespace ai   { class Agent; }
@@ -58,6 +61,8 @@ private:
     QTableWidget*   passTable_   = nullptr;
     QLabel*         tleBadge_    = nullptr;
     QLabel*         skyEmptyLabel_ = nullptr;
+    ui::BookmarkManager* bookmarkManager_ = nullptr;
+    QListWidget*    bmList_      = nullptr;
     QList<dsp::SatPass> passes_;
     QTimer*         tleTimer_    = nullptr;
     bool            tleFetchActive_ = false;

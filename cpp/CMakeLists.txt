@@ -40,6 +40,8 @@ set(SOURCES
     src/dsp/power_spectrum.cpp
     src/dsp/peak_detector.cpp
     src/dsp/noise_blanker.cpp
+    src/dsp/rtl_tcp_source.cpp
+    src/ui/bookmark_manager.cpp
     src/dsp/test_signal.cpp
     src/dsp/rtl_sdr_source.cpp
     src/dsp/spectrum_engine.cpp
@@ -120,6 +122,11 @@ add_executable(test_noise_blanker tests/test_noise_blanker.cpp src/dsp/noise_bla
 target_include_directories(test_noise_blanker PRIVATE src)
 target_link_libraries(test_noise_blanker PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME noise_blanker COMMAND test_noise_blanker)
+
+add_executable(test_bookmark tests/test_bookmark.cpp src/ui/bookmark_manager.cpp)
+target_include_directories(test_bookmark PRIVATE src)
+target_link_libraries(test_bookmark PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME bookmark COMMAND test_bookmark)
 
 add_executable(test_channelizer tests/test_channelizer.cpp
     src/dsp/channelizer.cpp src/dsp/fft.cpp)
