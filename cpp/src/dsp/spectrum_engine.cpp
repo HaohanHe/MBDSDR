@@ -46,7 +46,8 @@ void SpectrumEngine::rebuildDemod() {
     // SDR++ style channelization: the wide source IQ is shifted to baseband,
     // band-limited by a channel filter and decimated to a per-mode IF rate,
     // THEN demodulated. Demods must never see the full-rate source block.
-    const double sr = source_ ? source_->sampleRate() : 2.4e6;
+    double sr = source_ ? source_->sampleRate() : 2.4e6;
+    if (sr < 24000.0) sr = 24000.0;   // guard against unconnected source reporting 0
 
     double ifTarget = 48000.0;   // narrowband modes
     double chBw = bandwidth_;
@@ -55,6 +56,7 @@ void SpectrumEngine::rebuildDemod() {
         chBw = 200000.0;
     }
     if (sr < ifTarget) ifTarget = sr;
+    if (chBw <= 0.0) chBw = ifTarget * 0.8;
 
     channelizer_.configure(sr, ifTarget, chBw, 31);
     const double ifRate = channelizer_.effectiveOutputRateHz();
