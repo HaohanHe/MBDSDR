@@ -169,6 +169,15 @@ inline constexpr int kPlotMarginR = 12;
 inline constexpr int kPlotMarginT = 24;
 inline constexpr int kPlotMarginB = 28;
 
+// Waterfall (spectrogram) widget
+// 5-stop dBFS palette, mapped linearly over [-100, 0] dBFS:
+//   #000033 (noise floor) -> #0000ff -> #00ffff -> #ffff00 -> #ff0000 (0 dBFS)
+inline constexpr const char* kWaterfallColors[5] = {
+    "#000033", "#0000ff", "#00ffff", "#ffff00", "#ff0000"
+};
+inline constexpr int kWaterfallHeight = 220;      // minimum widget height (base px, scaled())
+inline constexpr int kWaterfallHistoryLines = 256; // rolling depth, rows
+
 // =====================================================================
 // Waterfall palette -- the single source of colors (hex only here)
 // =====================================================================
@@ -303,7 +312,6 @@ QTabBar::tab {
     padding: %padMV%px %padLH%px;
     border: none;
     border-radius: %radSmall%px;
-    cursor: pointer;
 }
 QTabBar::tab:selected { color: %accent%; font-weight: 600; }
 QTabBar::tab:hover { color: %textPri%; }
@@ -315,7 +323,6 @@ QPushButton {
     font-size: %fontBody%pt;
     min-height: %ctlH%px;
     padding: %padSV%px %padMV%px;
-    cursor: pointer;
 }
 QPushButton:hover  { background-color: %card2%; }
 QPushButton:pressed{ background-color: rgba(0,0,0,0.12); border-color: transparent; }

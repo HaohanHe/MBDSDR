@@ -6,6 +6,38 @@
 namespace mbdsdr {
 namespace dsp {
 
+void HighpassFilter::setSampleRate(double sr) {
+    sampleRate_ = sr;
+    recomputeAlpha();
+}
+
+void HighpassFilter::setCutoff(double hz) {
+    cutoffHz_ = hz;
+    recomputeAlpha();
+}
+
+void HighpassFilter::recomputeAlpha() {
+    if (cutoffHz_ > 0.0 && sampleRate_ > 0.0) {
+        const double dt = 1.0 / sampleRate_;
+        const double RC = 1.0 / (2.0 * M_PI * cutoffHz_);
+        alpha_ = static_cast<float>(RC / (RC + dt));
+    } else {
+        alpha_ = 0.0f; // bypass
+    }
+}
+
+void HighpassFilter::process(std::vector<std::complex<float>>& io) {
+    if (alpha_ <= 0.0f || alpha_ >= 1.0f) return; // cutoff<=0 or no rate: bypass
+    for (auto& s : io) {
+        const float xi = s.real(), xq = s.imag();
+        const float yi = alpha_ * (yPrevI_ + xi - xPrevI_);
+        const float yq = alpha_ * (yPrevQ_ + xq - xPrevQ_);
+        s = {yi, yq};
+        xPrevI_ = xi; xPrevQ_ = xq;
+        yPrevI_ = yi; yPrevQ_ = yq;
+    }
+}
+
 void DCBlocker::process(std::vector<std::complex<float>>& io) {
     for (auto& s : io) {
         const float xi = s.real(), xq = s.imag();
@@ -30,17 +62,30 @@ void IQBalanceCorrector::reset() {
 
 void IQBalanceCorrector::process(std::vector<std::complex<float>>& io) {
     if (!enabled_) return;
-    if (!fitted_) {
-        for (auto s : io) {
-            buf_.push_back(s);
-            if (buf_.size() > kMaxFit) buf_.erase(buf_.begin(), buf_.begin() + io.size());
-        }
-        if (buf_.size() >= kMinFit) estimate();
-    }
-    if (!fitted_) return;
 
-    // Re-fit every N blocks
-    if (++blocksSinceFit_ >= kRefitEvery) { blocksSinceFit_ = 0; estimate(); }
+    // Maintain a rolling window of the most recent kMaxFit samples. A single
+    // real-time block can be larger than kMaxFit (e.g. ~60k samples at 2.4M
+    // S/s), so we must never erase more elements than the buffer actually
+    // holds (the previous code erased io.size() from a smaller buffer -> OOB
+    // iterator -> SIGSEGV).
+    if (io.size() >= kMaxFit) {
+        buf_.assign(io.end() - static_cast<long>(kMaxFit), io.end());
+    } else {
+        buf_.insert(buf_.end(), io.begin(), io.end());
+        if (buf_.size() > kMaxFit) {
+            const auto drop = buf_.size() - kMaxFit;
+            buf_.erase(buf_.begin(), buf_.begin() + static_cast<long>(drop));
+        }
+    }
+
+    if (!fitted_) {
+        if (buf_.size() >= kMinFit) estimate();
+    } else if (++blocksSinceFit_ >= kRefitEvery) {
+        // Re-fit on the recent rolling window.
+        blocksSinceFit_ = 0;
+        estimate();
+    }
+    if (!fitted_) return;   // pass-through until the first valid fit
 
     for (auto& s : io) {
         const float i = s.real(), q = s.imag();

@@ -26,6 +26,20 @@ if(PkgConfig_FOUND)
     pkg_check_modules(RTLSDR librtlsdr)
 endif()
 
+# Fallback when pkg-config is unavailable (e.g. plain MinGW on Windows):
+# locate the rtl-sdr header and import library directly via CMAKE_PREFIX_PATH.
+if(NOT RTLSDR_FOUND)
+    find_path(RTLSDR_INCLUDE_DIR NAMES rtl-sdr.h)
+    find_library(RTLSDR_LIBRARY NAMES librtlsdr rtlsdr librtlsdr.dll.a)
+    if(RTLSDR_INCLUDE_DIR AND RTLSDR_LIBRARY)
+        set(RTLSDR_FOUND TRUE)
+        set(RTLSDR_INCLUDE_DIRS "${RTLSDR_INCLUDE_DIR}")
+        set(RTLSDR_LIBRARIES "${RTLSDR_LIBRARY}")
+        get_filename_component(RTLSDR_LIB_DIR "${RTLSDR_LIBRARY}" DIRECTORY)
+        set(RTLSDR_LIBRARY_DIRS "${RTLSDR_LIB_DIR}")
+    endif()
+endif()
+
 set(SOURCES
     src/main.cpp
     src/ui/main_window.cpp
