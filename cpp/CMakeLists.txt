@@ -183,6 +183,18 @@ target_include_directories(test_wav_roundtrip PRIVATE src)
 target_link_libraries(test_wav_roundtrip PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME wav_roundtrip COMMAND test_wav_roundtrip)
 
+add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
+    src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/agent.cpp src/ai/agent_tools.cpp src/ai/ai_config.cpp)
+target_include_directories(test_ai_function_calling PRIVATE src)
+target_link_libraries(test_ai_function_calling PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME ai_function_calling COMMAND test_ai_function_calling)
+
 # Shortcut smoke test: builds the full MainWindow (all sources, minus main.cpp).
 set(TESTAPP_SRCS ${SOURCES})
 list(REMOVE_ITEM TESTAPP_SRCS src/main.cpp)
