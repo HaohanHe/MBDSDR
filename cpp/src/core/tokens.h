@@ -309,6 +309,7 @@ QPushButton {
 QPushButton:hover  { background-color: %card2%; }
 QPushButton:pressed{ background-color: %accentP%; color: #06121c; border-color: transparent; }
 QPushButton:disabled { color: rgba(255,255,255,0.3); background-color: transparent; }
+QPushButton[recording="true"] { background-color: #c0392b; color: #ffffff; border-color: #e74c3c; }
 QSplitter::handle { background: transparent; }
 QSplitter::handle:horizontal {
     width: %splW%px;

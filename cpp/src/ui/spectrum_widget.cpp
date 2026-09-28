@@ -596,7 +596,7 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* e) {
     auto xOf = [&](double f) { return mL + static_cast<int>(plotW * (f - fLo) / spanVis); };
     const int cx = xOf(vfoFreq_);
     const int halfW = static_cast<int>(plotW * (bwHz_ / 2) / spanVis);
-    const int tol = tokens::scaled(6);
+    const int tol = tokens::scaled(12);  // generous hit target for thin handles
     const int ex = e->position().x();
     if (std::abs(ex - (cx - halfW)) <= tol) dragMode_ = DragMode::BandL;
     else if (std::abs(ex - (cx + halfW)) <= tol) dragMode_ = DragMode::BandR;
@@ -644,7 +644,9 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* e) {
     double fLo, fHi, spanVis;
     visibleRange(fLo, fHi, spanVis);
     const double frac = (e->position().x() - mL) / plotW;
-    const double freq = fLo + frac * spanVis;
+    double freq = fLo + frac * spanVis;
+    // Snap to the nearest tuning step so dragging doesn't produce零碎频率.
+    if (stepHz_ > 0) freq = std::round(freq / stepHz_) * stepHz_;
     vfoFreq_ = freq;
     viewCenterHz_ = freq;
     emit frequencyChanged(freq);

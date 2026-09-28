@@ -30,6 +30,8 @@ public slots:
     /// Current demod bandwidth (Hz), for drawing the VFO band box.
     void setBandwidthHz(double hz) { bwHz_ = hz; update(); }
     double bandwidthHz() const { return bwHz_; }
+    /// Center-tuning step (Hz); drag-tune snaps to multiples of this.
+    void setStepHz(double hz) { stepHz_ = hz; }
     /// Restore a persisted zoom factor (1.0 = full span). Clamped internally.
     void setZoomFactor(double z);
     double zoomFactor() const { return zoomFactor_; }
@@ -91,6 +93,7 @@ private:
     enum class DragMode { None, Tune, Pan, BandL, BandR };
     DragMode dragMode_ = DragMode::None;
     double bwHz_ = 12500.0;         // current demod bandwidth for the VFO box
+    double stepHz_ = 1000.0;        // drag-tune snapping step
     double vfoFreq_ = 0;
     QPoint hoverPos_ = QPoint(-1, -1);
     QPoint lastPanPos_ = QPoint(-1, -1);

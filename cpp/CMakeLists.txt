@@ -160,6 +160,14 @@ target_include_directories(test_spectrum_interaction PRIVATE src)
 target_link_libraries(test_spectrum_interaction PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME spectrum_interaction COMMAND test_spectrum_interaction)
 
+# Shortcut smoke test: builds the full MainWindow (all sources, minus main.cpp).
+set(TESTAPP_SRCS ${SOURCES})
+list(REMOVE_ITEM TESTAPP_SRCS src/main.cpp)
+add_executable(test_shortcuts tests/test_shortcuts.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_shortcuts PRIVATE src build/test_shortcuts_autogen/include)
+target_link_libraries(test_shortcuts PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME shortcuts COMMAND test_shortcuts)
+
 add_executable(test_channelizer tests/test_channelizer.cpp
     src/dsp/channelizer.cpp src/dsp/fft.cpp)
 target_include_directories(test_channelizer PRIVATE src)
