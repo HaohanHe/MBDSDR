@@ -35,6 +35,11 @@
 #include <QDesktopServices>
 #include <QMediaDevices>
 #include <QAudioDevice>
+#include <QListWidget>
+#include <QListWidgetItem>
+
+#include "dsp/vfo_manager.h"
+#include "ui/constellation_view.h"
 
 #include <cmath>
 #include <algorithm>
@@ -209,6 +214,7 @@ MainWindow::MainWindow(QWidget* parent)
     auto* gFreq = new QGroupBox("频率", leftCard);
     auto* gFreqLay = new QFormLayout(gFreq);
     freqSpin_ = new QDoubleSpinBox(gFreq);
+    freqSpin_->setObjectName("freqSpin");
     freqSpin_->setRange(tokens::kFreqMinHz / 1e6, tokens::kFreqMaxHz / 1e6);
     freqSpin_->setValue(98.5);
     freqSpin_->setDecimals(3);
@@ -235,12 +241,31 @@ MainWindow::MainWindow(QWidget* parent)
     gainRow->addWidget(gainValue_);
     gRxLay->addRow("增益", gainRow);
     demodCombo_ = new QComboBox(gRx);
-    demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW"});
+    demodCombo_->setObjectName("demodCombo");
+    demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW", "BPSK", "QPSK"});
     gRxLay->addRow("解调", demodCombo_);
     bwCombo_ = new QComboBox(gRx);
     bwCombo_->addItems({"8 kHz", "12.5 kHz", "200 kHz", "2.4 kHz", "500 Hz"});
     gRxLay->addRow("带宽", bwCombo_);
     leftLay->addWidget(gRx);
+
+    // ---- Multi-VFO panel ---------------------------------------------------
+    auto* gVfo = new QGroupBox("多 VFO", leftCard);
+    auto* gVfoLay = new QVBoxLayout(gVfo);
+    vfoList_ = new QListWidget(gVfo);
+    vfoList_->setObjectName("vfoList");
+    vfoList_->setMaximumHeight(tokens::scaled(96));
+    vfoList_->setSelectionMode(QAbstractItemView::SingleSelection);
+    gVfoLay->addWidget(vfoList_);
+    auto* vfoBtnRow = new QHBoxLayout;
+    vfoAddBtn_ = new QPushButton("＋ 添加 VFO", gVfo);
+    vfoDelBtn_ = new QPushButton("－ 删除", gVfo);
+    vfoAddBtn_->setObjectName("vfoAddBtn");
+    vfoDelBtn_->setObjectName("vfoDelBtn");
+    vfoBtnRow->addWidget(vfoAddBtn_);
+    vfoBtnRow->addWidget(vfoDelBtn_);
+    gVfoLay->addLayout(vfoBtnRow);
+    leftLay->addWidget(gVfo);
 
     auto* gSql = new QGroupBox("静噪", leftCard);
     auto* gSqlLay = new QVBoxLayout(gSql);
@@ -257,6 +282,23 @@ MainWindow::MainWindow(QWidget* parent)
     squelchState_ = new QLabel("状态: CLOSED", gSql);
     gSqlLay->addWidget(squelchState_);
     leftLay->addWidget(gSql);
+
+    // ---- ANR (audio noise reduction) group ----
+    auto* gAnr = new QGroupBox("音频降噪 (ANR)", leftCard);
+    auto* gAnrLay = new QVBoxLayout(gAnr);
+    anrCheck_ = new QCheckBox("启用 ANR", gAnr);
+    anrCheck_->setObjectName("anrCheck");
+    gAnrLay->addWidget(anrCheck_);
+    auto* anrRow = new QHBoxLayout;
+    anrSlider_ = new QSlider(Qt::Horizontal, gAnr);
+    anrSlider_->setRange(0, 100);
+    anrSlider_->setValue(50);
+    anrSlider_->setObjectName("anrSlider");
+    anrValue_ = new QLabel("50%", gAnr);
+    anrRow->addWidget(anrSlider_);
+    anrRow->addWidget(anrValue_);
+    gAnrLay->addLayout(anrRow);
+    leftLay->addWidget(gAnr);
 
     auto* gAud = new QGroupBox("音频", leftCard);
     auto* gAudLay = new QVBoxLayout(gAud);
@@ -363,6 +405,16 @@ MainWindow::MainWindow(QWidget* parent)
     adsbTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     adsbLay->addWidget(adsbTable_);
     rightTabs_->addTab(adsbPage, "ADS-B");
+
+    // Constellation tab: live BPSK/QPSK symbol scatter from the selected digital VFO.
+    {
+        auto* cstPage = new QWidget;
+        auto* cstLay = new QVBoxLayout(cstPage);
+        cstLay->setContentsMargins(0, 0, 0, 0);
+        constellationView_ = new ui::ConstellationView(cstPage);
+        cstLay->addWidget(constellationView_);
+        rightTabs_->addTab(cstPage, "星座");
+    }
 
     // Sky tab: polar view on top, TLE freshness badge, pass list below.
     auto* skyPage = new QWidget;
@@ -661,6 +713,56 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(recordBtn_, &QPushButton::clicked, this, &MainWindow::onRecordClicked);
 
+    // ---- Multi-VFO wiring -------------------------------------------------
+    connect(engine_, &dsp::SpectrumEngine::vfoListChanged,
+            this, [this]() { refreshVfoUi(); scheduleSave(); },
+            Qt::QueuedConnection);
+    connect(vfoAddBtn_, &QPushButton::clicked, this, [this]() { engine_->vfoAdd(); });
+    connect(vfoDelBtn_, &QPushButton::clicked, this, [this]() {
+        const int sel = engine_->selectedVfoId();
+        if (sel > 0) engine_->vfoRemove(sel);
+    });
+    connect(vfoList_, &QListWidget::currentItemChanged,
+            this, [this](QListWidgetItem* cur, QListWidgetItem*) {
+        if (!cur) return;
+        bool ok = false;
+        const int id = cur->data(Qt::UserRole).toInt(&ok);
+        if (ok && id > 0) engine_->vfoSelect(id);
+    });
+    // Spectrum band-box interaction <-> engine.
+    connect(spectrum_, &ui::SpectrumWidget::vfoMarkerSelected,
+            this, [this](int id) { engine_->vfoSelect(id); });
+    connect(spectrum_, &ui::SpectrumWidget::vfoMarkerCenterTuned,
+            this, [this](int id, double hz) {
+        // Dragging the ACTIVE VFO retunes the receiver (source center follows,
+        // keeping it at offset 0 -- the legacy single-VFO sweep). Dragging an
+        // inactive VFO just moves its offset within the current capture.
+        if (id == engine_->selectedVfoId()) engine_->onSetCenterFreq(hz);
+        else engine_->vfoSetFreq(id, hz);
+    });
+    connect(spectrum_, &ui::SpectrumWidget::vfoMarkerBandwidthChanged,
+            this, [this](int id, double hz) { engine_->vfoSetBandwidth(id, hz); });
+
+    // ---- Constellation panel (cross-thread: queued) ----------------------
+    connect(engine_, &dsp::SpectrumEngine::constellationSymbols,
+            this, [this](const std::vector<std::complex<float>>& syms, bool hw) {
+        if (constellationView_) constellationView_->feedSymbols(syms, hw);
+    }, Qt::QueuedConnection);
+    connect(engine_, &dsp::SpectrumEngine::constellationCleared,
+            this, [this]() { if (constellationView_) constellationView_->clear(); },
+            Qt::QueuedConnection);
+
+    // ---- ANR controls ----
+    connect(anrCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        engine_->setAnrEnabled(on);
+        scheduleSave();
+    });
+    connect(anrSlider_, &QSlider::valueChanged, this, [this](int v) {
+        anrValue_->setText(QString("%1%").arg(v));
+        engine_->setAnrStrength(v / 100.0f);
+        scheduleSave();
+    });
+
     // ---- Recording options (SDR++-aligned) ----
     connect(recTargetCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
@@ -902,6 +1004,7 @@ MainWindow::MainWindow(QWidget* parent)
     setControlsEnabled(false);
     restoreUiState();
     engine_->start();
+    refreshVfoUi();   // populate the VFO list + band boxes from the engine
 
     // Startup: honour the saved audio output device (if the user picked a
     // non-default one). On headless boxes the device list is empty, so this is
@@ -978,6 +1081,67 @@ MainWindow::~MainWindow() {
     if (engine_) { engine_->shutdown(); engine_->wait(); }
 }
 
+void MainWindow::refreshVfoUi() {
+    vfoMarkers_ = engine_->vfoMarkers();
+    spectrum_->setVfoMarkers(vfoMarkers_);
+
+    // Rebuild the VFO list (color dot + name + freq + mode).
+    vfoList_->blockSignals(true);
+    vfoList_->clear();
+    int selRow = -1;
+    for (int i = 0; i < vfoMarkers_.size(); ++i) {
+        const auto& m = vfoMarkers_[i];
+        auto* it = new QListWidgetItem(
+            QString("%1   %2 MHz   %3")
+                .arg(m.name, -8, QChar(' '))
+                .arg(m.freqHz / 1e6, 0, 'f', 3)
+                .arg(m.mode));
+        QColor c = m.color.isValid() ? m.color : QColor(QString::fromUtf8(tokens::kAccent));
+        it->setForeground(c);
+        it->setData(Qt::UserRole, m.id);
+        vfoList_->addItem(it);
+        if (m.selected) selRow = i;
+    }
+    if (selRow >= 0) vfoList_->setCurrentRow(selRow);
+    vfoList_->blockSignals(false);
+
+    // Backfill the single-channel controls from the selected VFO.
+    const dsp::VfoMarker* sel = nullptr;
+    for (const auto& m : vfoMarkers_) if (m.selected) { sel = &m; break; }
+    if (sel) {
+        freqSpin_->blockSignals(true);
+        freqSpin_->setValue(sel->freqHz / 1e6);
+        freqSpin_->blockSignals(false);
+
+        demodCombo_->blockSignals(true);
+        int dIdx = demodCombo_->findText(sel->mode);
+        if (dIdx >= 0) demodCombo_->setCurrentIndex(dIdx);
+        demodCombo_->blockSignals(false);
+
+        static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
+        int bwIdx = 1; double bd = 1e18;
+        for (int i = 0; i < 5; ++i) { double d = std::abs(kBws[i] - sel->bandwidthHz); if (d < bd) { bd = d; bwIdx = i; } }
+        bwCombo_->blockSignals(true);
+        bwCombo_->setCurrentIndex(bwIdx);
+        bwCombo_->blockSignals(false);
+
+        currentBwHz_ = sel->bandwidthHz;
+        sbMode_->setText(sel->mode);
+        sbVfo_->setText(QString("%1  %2 MHz").arg(sel->name).arg(sel->freqHz / 1e6, 0, 'f', 3));
+
+        // Constellation panel: follow the selected VFO's digital mode.
+        if (constellationView_) {
+            if (sel->mode == "QPSK") {
+                constellationView_->setMode(dsp::DigMode::QPSK);
+                rightTabs_->setCurrentWidget(constellationView_->parentWidget());
+            } else if (sel->mode == "BPSK") {
+                constellationView_->setMode(dsp::DigMode::BPSK);
+                rightTabs_->setCurrentWidget(constellationView_->parentWidget());
+            }
+        }
+    }
+}
+
 void MainWindow::saveUiState() {
     QSettings s("MBDSDR", "MBDSDR");
     s.setValue("geometry", saveGeometry());
@@ -1018,12 +1182,25 @@ void MainWindow::saveUiState() {
     s.setValue("rec/template", recTemplateEdit_->text());
     s.setValue("rec/stereo", recStereoCheck_->isChecked());
     s.setValue("rec/ignoreSquelch", recIgnoreSqlChk_->isChecked());
+    s.setValue("anr/enabled", anrCheck_->isChecked());
+    s.setValue("anr/strength", anrSlider_->value());
 
     // ---- Layout / tabs / FFT ----
     s.setValue("ui/rightTabIndex", rightTabs_->currentIndex());
     s.setValue("ui/centerTabIndex", centerTabs_->currentIndex());
     if (mainSplitter_) s.setValue("ui/splitterSizes", mainSplitter_->saveState());
     s.setValue("rx/fftSize", spectrum_->fftSizeValue());
+
+    // ---- Multi-VFO set (count + per-channel params + selection) ----
+    s.setValue("vfo/count", vfoMarkers_.size());
+    for (int i = 0; i < vfoMarkers_.size(); ++i) {
+        const auto& m = vfoMarkers_[i];
+        s.setValue(QString("vfo/%1/freq").arg(i), m.freqHz);
+        s.setValue(QString("vfo/%1/mode").arg(i), m.mode);
+        s.setValue(QString("vfo/%1/bw").arg(i), m.bandwidthHz);
+        s.setValue(QString("vfo/%1/color").arg(i), m.color.name());
+        s.setValue(QString("vfo/%1/selected").arg(i), m.selected);
+    }
     s.sync();
 }
 
@@ -1128,6 +1305,10 @@ void MainWindow::restoreUiState() {
     recTemplateEdit_->setText(s.value("rec/template", "{time}_{freq}_{mode}").toString());
     recStereoCheck_->setChecked(s.value("rec/stereo", false).toBool());
     recIgnoreSqlChk_->setChecked(s.value("rec/ignoreSquelch", false).toBool());
+    anrCheck_->setChecked(s.value("anr/enabled", false).toBool());
+    anrSlider_->setValue(s.value("anr/strength", 50).toInt());
+    engine_->setAnrEnabled(anrCheck_->isChecked());
+    engine_->setAnrStrength(anrSlider_->value() / 100.0f);
     // Stereo only applies in audio mode.
     recStereoCheck_->setEnabled(recTargetCombo_->currentIndex() == 1);
 
@@ -1185,6 +1366,33 @@ void MainWindow::restoreUiState() {
     engine_->setRecStereo(recStereoCheck_->isChecked());
     engine_->setRecIgnoreSquelch(recIgnoreSqlChk_->isChecked());
     engine_->setFftSize(spectrum_->fftSizeValue());
+
+    // ---- Multi-VFO set restore (engine starts with one default VFO) -------
+    {
+        const int vfoCount = s.value("vfo/count", 1).toInt();
+        if (vfoCount >= 1) {
+            QVector<int> ids;
+            ids.push_back(engine_->selectedVfoId());   // existing default VFO
+            for (int i = 1; i < vfoCount; ++i) {
+                engine_->vfoAdd();                    // auto-selects the new one
+                ids.push_back(engine_->selectedVfoId());
+            }
+            int selId = ids.value(0, 0);
+            for (int i = 0; i < vfoCount && i < ids.size(); ++i) {
+                const int id = ids[i];
+                const double freq = s.value(QString("vfo/%1/freq").arg(i), 98.5e6).toDouble();
+                const QString mode = s.value(QString("vfo/%1/mode").arg(i), "NFM").toString();
+                const double bw = s.value(QString("vfo/%1/bw").arg(i), 12500.0).toDouble();
+                const QString colName = s.value(QString("vfo/%1/color").arg(i), "#7CC4FF").toString();
+                engine_->vfoSetMode(id, mode);
+                engine_->vfoSetBandwidth(id, bw);
+                engine_->vfoSetColor(id, QColor(colName));
+                engine_->vfoSetFreq(id, freq);
+                if (s.value(QString("vfo/%1/selected").arg(i), false).toBool()) selId = id;
+            }
+            engine_->vfoSelect(selId);
+        }
+    }
 
     // Manual gain slider only matters in manual tuner-gain mode.
     gainSlider_->setEnabled(!tunerAgcChk_->isChecked());

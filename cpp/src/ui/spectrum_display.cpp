@@ -144,6 +144,33 @@ void SpectrumDisplay::tuneAndCenter(double hz) {
     emitVisibleRange();
 }
 
+void SpectrumDisplay::setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers) {
+    markers_ = markers;
+    // Mirror the selected marker into the legacy single-VFO state so any
+    // back-compat path reading vfoFreq_/bwHz_ still sees something sane.
+    for (const auto& m : markers_) {
+        if (m.selected) { vfoFreq_ = m.freqHz; bwHz_ = m.bandwidthHz; break; }
+    }
+    update();
+}
+
+int SpectrumDisplay::hitVfoMarker(double x, double fLo, double spanVis) const {
+    const int tol = tokens::scaled(tokens::kBandEdgeHitTol);
+    // Prefer the selected marker, then the topmost (last drawn = list tail).
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int i = markers_.size() - 1; i >= 0; --i) {
+            const auto& m = markers_[i];
+            if (pass == 0 && !m.selected) continue;
+            if (pass == 1 && m.selected) continue;
+            const double half = m.bandwidthHz / 2.0;
+            const int bx0 = xOfFreq(m.freqHz - half, fLo, spanVis);
+            const int bx1 = xOfFreq(m.freqHz + half, fLo, spanVis);
+            if (x >= bx0 - tol && x <= bx1 + tol) return i;
+        }
+    }
+    return -1;
+}
+
 void SpectrumDisplay::setDbRange(float minDb, float maxDb) {
     if (maxDb <= minDb) maxDb = minDb + 1.0f;
     dbMin_ = minDb;
@@ -471,8 +498,55 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         p.drawPath(path);
     }
 
-    // --- VFO line + demod band box -----------------------------------------
-    if (f0 >= fLo && f0 <= fHi) {
+    // --- VFO band boxes (multi-VFO, drawn over spectrum + waterfall) -------
+    if (!markers_.isEmpty()) {
+        const int bandTop = spT;
+        const int bandBottom = static_cast<int>(wf.bottom());
+        QFont lblFont = p.font();
+        lblFont.setPointSize(tokens::kFontAuxPt);
+        p.setFont(lblFont);
+        const int lblH = tokens::scaled(tokens::kVfoBoxLabelH);
+        for (const auto& m : markers_) {
+            if (m.freqHz < fLo - m.bandwidthHz || m.freqHz > fHi + m.bandwidthHz) continue;
+            const double half = m.bandwidthHz / 2.0;
+            const int bx0 = xOfFreq(m.freqHz - half, fLo, spanVis);
+            const int bx1 = xOfFreq(m.freqHz + half, fLo, spanVis);
+            const int vx = xOfFreq(m.freqHz, fLo, spanVis);
+            QColor c = m.color.isValid() ? m.color : QColor(QString::fromUtf8(tokens::kAccent));
+
+            // Translucent fill over the whole data column (trace + waterfall).
+            QColor fill = c;
+            fill.setAlphaF(m.selected ? tokens::kVfoBoxSelFillAlpha
+                                      : tokens::kVfoBoxFillAlpha);
+            p.fillRect(QRect(bx0, bandTop, bx1 - bx0, bandBottom - bandTop), fill);
+
+            // Edge lines + center line.
+            QColor edge = c;
+            edge.setAlphaF(m.selected ? tokens::kVfoBoxSelEdgeAlpha
+                                     : tokens::kVfoBoxEdgeAlpha);
+            QPen ep(edge);
+            ep.setWidthF(m.selected ? tokens::kVfoBoxSelLineWidth
+                                    : tokens::kVfoBoxLineWidth);
+            p.setPen(ep);
+            p.drawLine(bx0, bandTop, bx0, bandBottom);
+            p.drawLine(bx1, bandTop, bx1, bandBottom);
+            QColor cc = c; cc.setAlphaF(tokens::kVfoBoxCenterAlpha);
+            QPen cp(cc);
+            cp.setWidthF(m.selected ? tokens::kVfoBoxSelLineWidth
+                                    : tokens::kVfoBoxLineWidth);
+            p.setPen(cp);
+            p.drawLine(vx, bandTop, vx, bandBottom);
+
+            // Name label pinned to the top of the trace.
+            QColor tc = c; tc.setAlphaF(tokens::kVfoBoxLabelAlpha);
+            p.setPen(tc);
+            const QString lbl = m.name.isEmpty() ? QString::number(m.freqHz, 'f', 0)
+                                                : m.name;
+            p.drawText(QRect(bx0, spT, std::max(20, bx1 - bx0), lblH),
+                       Qt::AlignHCenter | Qt::AlignVCenter, lbl);
+        }
+    } else if (f0 >= fLo && f0 <= fHi) {
+        // Legacy single-VFO box (kept for back-compat tests / before markers arrive).
         const int vfoX = xOfFreq(vfoFreq_, fLo, spanVis);
         const double halfHz = bwHz_ / 2.0;
         const int bx0 = xOfFreq(vfoFreq_ - halfHz, fLo, spanVis);
@@ -598,8 +672,35 @@ void SpectrumDisplay::mousePressEvent(QMouseEvent* e) {
     dragging_ = true;
     panning_ = (e->modifiers() & Qt::ShiftModifier);
     lastPanPos_ = pos;
+    dragVfoId_ = -1;
 
     double fLo, fHi, spanVis; visibleRange(fLo, fHi, spanVis);
+
+    // Multi-VFO: hit-test band boxes first.
+    if (!markers_.isEmpty()) {
+        const int hit = hitVfoMarker(ex, fLo, spanVis);
+        if (hit >= 0) {
+            const auto& m = markers_[hit];
+            const double half = m.bandwidthHz / 2.0;
+            const int bx0 = xOfFreq(m.freqHz - half, fLo, spanVis);
+            const int bx1 = xOfFreq(m.freqHz + half, fLo, spanVis);
+            const int tol = tokens::scaled(tokens::kBandEdgeHitTol);
+            dragVfoId_ = m.id;
+            if (std::abs(ex - bx0) <= tol) dragMode_ = DragMode::BandL;
+            else if (std::abs(ex - bx1) <= tol) dragMode_ = DragMode::BandR;
+            else dragMode_ = DragMode::Tune;
+            if (!m.selected) emit vfoMarkerSelected(m.id);
+            if (dragMode_ == DragMode::Tune) mouseMoveEvent(e);
+            e->accept();
+            return;
+        }
+        // Missed every box: panning only (don't retune by clicking empty space).
+        dragMode_ = panning_ ? DragMode::Pan : DragMode::None;
+        e->accept();
+        return;
+    }
+
+    // Legacy single-VFO drag.
     const int cx = xOfFreq(vfoFreq_, fLo, spanVis);
     const int halfW = static_cast<int>(g_.dataWidth * (bwHz_ / 2.0) / spanVis);
     const int tol = tokens::scaled(tokens::kBandEdgeHitTol);
@@ -640,6 +741,32 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
     if (!dragging_ || frame_.sampleRateHz <= 0) { update(); return; }
 
     double fLo, fHi, spanVis; visibleRange(fLo, fHi, spanVis);
+
+    // Multi-VFO box drag: retune / resize the hit marker.
+    if (dragVfoId_ >= 0) {
+        int idx = -1;
+        for (int i = 0; i < markers_.size(); ++i)
+            if (markers_[i].id == dragVfoId_) { idx = i; break; }
+        if (idx < 0) { dragging_ = false; return; }
+        auto& m = markers_[idx];
+        const double frac = (pos.x() - g_.x0) / static_cast<double>(g_.dataWidth);
+        const double edgeF = fLo + frac * spanVis;
+        if (dragMode_ == DragMode::BandL || dragMode_ == DragMode::BandR) {
+            double half = std::abs(edgeF - m.freqHz);
+            half = std::clamp(half * 2.0,
+                              static_cast<double>(tokens::kVfoMinBandwidthHz),
+                              static_cast<double>(tokens::kVfoMaxBandwidthHz));
+            m.bandwidthHz = half;
+            emit vfoMarkerBandwidthChanged(m.id, half);
+        } else if (dragMode_ == DragMode::Tune) {
+            double freq = edgeF;
+            if (stepHz_ > 0) freq = std::round(freq / stepHz_) * stepHz_;
+            m.freqHz = freq;
+            emit vfoMarkerCenterTuned(m.id, freq);
+        }
+        update();
+        return;
+    }
 
     if (dragMode_ == DragMode::BandL || dragMode_ == DragMode::BandR) {
         const double frac = (pos.x() - g_.x0) / static_cast<double>(g_.dataWidth);
@@ -684,6 +811,7 @@ void SpectrumDisplay::mouseReleaseEvent(QMouseEvent*) {
     dragging_ = false;
     panning_ = false;
     dragMode_ = DragMode::None;
+    dragVfoId_ = -1;
 }
 
 void SpectrumDisplay::mouseDoubleClickEvent(QMouseEvent*) {

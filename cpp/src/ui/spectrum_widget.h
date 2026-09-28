@@ -5,6 +5,7 @@
 #include <QList>
 #include "core/spectrum_frame.h"
 #include "dsp/peak_detector.h"
+#include "dsp/vfo_manager.h"
 
 class QComboBox;
 class QLabel;
@@ -54,6 +55,9 @@ public slots:
     void setScrollSpeed(int linesPerFrame);
     void setPalette(int p);
 
+    // Multi-VFO band boxes.
+    void setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers);
+
 signals:
     void fftSizeRequested(int n);
     void windowTypeRequested(int w);
@@ -62,6 +66,11 @@ signals:
     void bandwidthChanged(double newBandwidthHz);
     void visibleRangeChanged(double fLoHz, double fHiHz);
     void viewChanged();
+
+    // Multi-VFO interaction.
+    void vfoMarkerSelected(int id);
+    void vfoMarkerCenterTuned(int id, double freqHz);
+    void vfoMarkerBandwidthChanged(int id, double bwHz);
 
 private:
     SpectrumDisplay* canvas_ = nullptr;

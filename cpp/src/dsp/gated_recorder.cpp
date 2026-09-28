@@ -38,9 +38,26 @@ void GatedRecorder::endSegment() {
     for (float s : segmentBuf_) peak = std::max(peak, std::abs(s));
     if (peak < 1e-4) { state_ = State::IDLE; segmentBuf_.clear(); return; }
     const float threshold = peak * 0.01f;
+
+    // Head trim (symmetric with the tail trim): drop leading quiet samples so
+    // the segment starts at the real signal onset instead of ~130 ms of dead
+    // pre-roll silence. The pre-roll now carries the un-gated audio fed by the
+    // engine, so it holds the genuine onset.
+    std::size_t begin = 0;
+    while (begin < segmentBuf_.size() && std::abs(segmentBuf_[begin]) < threshold) ++begin;
     std::size_t end = segmentBuf_.size();
-    while (end > 0 && std::abs(segmentBuf_[end-1]) < threshold) --end;
-    segmentBuf_.resize(end);
+    while (end > begin && std::abs(segmentBuf_[end-1]) < threshold) --end;
+    if (end <= begin) { state_ = State::IDLE; segmentBuf_.clear(); return; }
+    segmentBuf_.erase(segmentBuf_.begin(), segmentBuf_.begin() + begin);
+    segmentBuf_.resize(end - begin);
+
+    // Short fade-in at the new head so the trimmed onset does not click.
+    {
+        const std::size_t fadeN = std::min<std::size_t>(
+            static_cast<std::size_t>(sr_ * 10e-3), segmentBuf_.size());
+        for (std::size_t i = 0; i < fadeN; ++i)
+            segmentBuf_[i] *= static_cast<float>(i + 1) / static_cast<float>(fadeN);
+    }
 
     float newPeak = 0;
     for (float s : segmentBuf_) newPeak = std::max(newPeak, std::abs(s));
@@ -98,6 +115,7 @@ std::vector<QString> GatedRecorder::feed(const std::vector<float>& audio, bool g
 std::vector<QString> GatedRecorder::flush() {
     std::vector<QString> saved;
     if (state_ == State::REC) endSegment();
+    if (!lastSavedPath_.isEmpty()) saved.push_back(lastSavedPath_);
     return saved;
 }
 

@@ -27,6 +27,11 @@ public:
     void reset();
     /// Gate the audio block; returns gated copy (silent when closed).
     std::vector<float> apply(const std::vector<float>& audio, float rmsDb);
+    /// Update the smoothing / hangover state and return whether the gate is
+    /// open for THIS block, WITHOUT muting the audio. Lets the engine feed the
+    /// real (un-gated) audio to AGC / the gated recorder while muting only the
+    /// speaker path. apply() is implemented on top of decide().
+    bool decide(const std::vector<float>& audio, float rmsDb);
 private:
     Mode mode_ = Mode::Off;
     bool open_ = false;
