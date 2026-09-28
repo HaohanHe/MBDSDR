@@ -24,6 +24,9 @@ public:
     int volume() const;
     double userScale() const;
 
+protected:
+    void showEvent(QShowEvent* e) override;
+
 private:
     QDoubleSpinBox* latSpin_ = nullptr;
     QDoubleSpinBox* lonSpin_ = nullptr;

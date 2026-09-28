@@ -13,6 +13,9 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QSlider>
+#include <QShowEvent>
+#include <QPropertyAnimation>
+#include <QGraphicsOpacityEffect>
 #include <QSettings>
 #include <limits>
 
@@ -153,6 +156,16 @@ double SettingsDialog::userScale() const {
         case 0: return 0.7; case 2: return 1.25; case 3: return 1.5;
         default: return 1.0;
     }
+}
+
+void SettingsDialog::showEvent(QShowEvent* e) {
+    QDialog::showEvent(e);
+    setWindowOpacity(0.0);
+    auto* a = new QPropertyAnimation(this, "windowOpacity", this);
+    a->setDuration(tokens::kAnimMedium1);
+    a->setEasingCurve(QEasingCurve::OutCubic);
+    a->setStartValue(0.0); a->setEndValue(1.0);
+    a->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 } // namespace ui
