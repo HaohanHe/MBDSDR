@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QPoint>
 #include <QList>
+#include <QPainter>
 #include "core/spectrum_frame.h"
 #include "dsp/peak_detector.h"
 
@@ -26,6 +27,9 @@ public slots:
     void setDbRange(float minDb, float maxDb);
     /// Reset horizontal zoom back to the full capture span, re-centered on f0.
     void resetZoom();
+    /// Current demod bandwidth (Hz), for drawing the VFO band box.
+    void setBandwidthHz(double hz) { bwHz_ = hz; update(); }
+    double bandwidthHz() const { return bwHz_; }
     /// Restore a persisted zoom factor (1.0 = full span). Clamped internally.
     void setZoomFactor(double z);
     double zoomFactor() const { return zoomFactor_; }
@@ -44,6 +48,8 @@ signals:
     void windowTypeRequested(int w);   // 0 Hann / 1 Flattop / 2 Blackman
     void averageModeRequested(int a); // 0 Off / 1 Slow / 2 Fast
     void frequencyChanged(double newFreqHz);
+    /// Emitted when the user drags a VFO band edge handle.
+    void bandwidthChanged(double newBandwidthHz);
     /// Emitted whenever the visible frequency window changes (zoom/pan/reset).
     void visibleRangeChanged(double fLoHz, double fHiHz);
     /// Emitted when an internal control (dB spinboxes, FFT combo) changes so
@@ -56,7 +62,9 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
-    void wheelEvent(QWheelEvent* event) override;
+public:
+    void wheelEvent(QWheelEvent* event) override;  // public for offscreen tests
+protected:
     void contextMenuEvent(QContextMenuEvent* event) override;
     void leaveEvent(QEvent* event) override;
 
@@ -80,6 +88,9 @@ private:
     QLabel*    infoLabel_  = nullptr;
     bool dragging_ = false;
     bool panning_ = false;          // Shift+drag: pan view, do not retune f0
+    enum class DragMode { None, Tune, Pan, BandL, BandR };
+    DragMode dragMode_ = DragMode::None;
+    double bwHz_ = 12500.0;         // current demod bandwidth for the VFO box
     double vfoFreq_ = 0;
     QPoint hoverPos_ = QPoint(-1, -1);
     QPoint lastPanPos_ = QPoint(-1, -1);

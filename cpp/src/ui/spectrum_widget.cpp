@@ -21,6 +21,7 @@
 
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <QPolygonF>
 #include <QContextMenuEvent>
 #include <QtGlobal>
 #include "core/tokens.h"
@@ -504,14 +505,32 @@ void SpectrumWidget::paintEvent(QPaintEvent*) {
         p.drawPath(path);
     }
 
-    // VFO line: drawn at f0's x position within the visible window. If f0 has
-    // been panned outside the window, we skip drawing it.
+    // VFO line + demod band box: [f0-bw/2, f0+bw/2].
     if (f0 >= fLo && f0 <= fHi) {
         const int vfoX = mL + static_cast<int>(plotW * (f0 - fLo) / spanVis);
+        const double halfHz = bwHz_ / 2.0;
+        const int bx0 = mL + static_cast<int>(plotW * (f0 - halfHz - fLo) / spanVis);
+        const int bx1 = mL + static_cast<int>(plotW * (f0 + halfHz - fLo) / spanVis);
+        // Translucent fill across the demod passband.
+        QColor fill(tokens::kAccent); fill.setAlphaF(0.08);
+        p.fillRect(QRect(bx0, mT, bx1 - bx0, plotH), fill);
+        // Edge lines.
+        QColor edgeC(tokens::kAccent); edgeC.setAlphaF(0.6);
+        QPen edge(edgeC);
+        edge.setWidthF(1.0);
+        p.setPen(edge);
+        p.drawLine(bx0, mT, bx0, mT + plotH);
+        p.drawLine(bx1, mT, bx1, mT + plotH);
+        // VFO center line.
         QPen vfoPen(QColor(tokens::kAccent));
         vfoPen.setWidthF(tokens::kVfoLineWidth);
         p.setPen(vfoPen);
         p.drawLine(vfoX, mT, vfoX, mT + plotH);
+        // Small draggable handle triangles on the top edge.
+        p.setBrush(QColor(tokens::kAccent));
+        p.setPen(Qt::NoPen);
+        p.drawPolygon(QPolygonF({QPointF(bx0-4, mT), QPointF(bx0+4, mT), QPointF(bx0, mT+6)}));
+        p.drawPolygon(QPolygonF({QPointF(bx1-4, mT), QPointF(bx1+4, mT), QPointF(bx1, mT+6)}));
     }
 
     // Detected peak markers: filled triangles along the top edge, only for
@@ -568,7 +587,23 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* e) {
     dragging_ = true;
     panning_ = (e->modifiers() & Qt::ShiftModifier);
     lastPanPos_ = e->pos();
-    if (!panning_) mouseMoveEvent(e);
+
+    // Hit-test VFO band edges first: near left/right edge of the demod box.
+    const int mL = tokens::kPlotMarginL;
+    const int mR = tokens::kPlotMarginR;
+    const int plotW = width() - mL - mR;
+    double fLo, fHi, spanVis; visibleRange(fLo, fHi, spanVis);
+    auto xOf = [&](double f) { return mL + static_cast<int>(plotW * (f - fLo) / spanVis); };
+    const int cx = xOf(vfoFreq_);
+    const int halfW = static_cast<int>(plotW * (bwHz_ / 2) / spanVis);
+    const int tol = tokens::scaled(6);
+    const int ex = e->position().x();
+    if (std::abs(ex - (cx - halfW)) <= tol) dragMode_ = DragMode::BandL;
+    else if (std::abs(ex - (cx + halfW)) <= tol) dragMode_ = DragMode::BandR;
+    else if (panning_) dragMode_ = DragMode::Pan;
+    else dragMode_ = DragMode::Tune;
+
+    if (dragMode_ == DragMode::Tune) mouseMoveEvent(e);
 }
 
 void SpectrumWidget::mouseMoveEvent(QMouseEvent* e) {
@@ -579,13 +614,24 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* e) {
     const int plotW = width() - mL - mR;
     if (plotW <= 10) { update(); return; }
 
-    if (panning_) {
+    if (dragMode_ == DragMode::BandL || dragMode_ == DragMode::BandR) {
+        double fLo, fHi, spanVis; visibleRange(fLo, fHi, spanVis);
+        const double frac = (e->position().x() - mL) / plotW;
+        const double edgeF = fLo + frac * spanVis;
+        // Distance from VFO center is the new half-bandwidth.
+        double half = std::abs(edgeF - vfoFreq_);
+        half = std::clamp(half * 2.0, 100.0, 500000.0);
+        bwHz_ = half;
+        emit bandwidthChanged(bwHz_);
+        update();
+        return;
+    }
+
+    if (dragMode_ == DragMode::Pan) {
         // Shift+drag: pan the view window without retuning f0.
         const double fs = frame_.sampleRateHz;
         const double spanVis = fs / zoomFactor_;
         const double dx = e->position().x() - lastPanPos_.x();
-        // Dragging right should move the view right (see lower frequencies),
-        // i.e. viewCenterHz decreases.
         viewCenterHz_ -= (dx / plotW) * spanVis;
         lastPanPos_ = e->pos();
         update();
@@ -608,6 +654,7 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* e) {
 void SpectrumWidget::mouseReleaseEvent(QMouseEvent*) {
     dragging_ = false;
     panning_ = false;
+    dragMode_ = DragMode::None;
 }
 
 void SpectrumWidget::mouseDoubleClickEvent(QMouseEvent*) {
