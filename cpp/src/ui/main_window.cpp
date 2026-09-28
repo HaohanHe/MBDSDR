@@ -618,6 +618,7 @@ MainWindow::MainWindow(QWidget* parent)
         if (idx < 0 || idx >= kStepCount) return;
         currentStepHz_ = kStepValuesHz[idx];
         freqSpin_->setSingleStep(static_cast<double>(currentStepHz_) / 1e6);
+        if (spectrum_) spectrum_->setStepHz(currentStepHz_);
     };
     applyStep(stepCombo_->currentIndex());
     connect(stepCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -1253,6 +1254,9 @@ void MainWindow::onRecordingState(bool recording, const QString& path) {
         recStatus_->setText("空闲");
     }
     recordBtn_->setText(recording ? "■ 停止" : "● 录制");
+    recordBtn_->setProperty("recording", recording);
+    recordBtn_->style()->unpolish(recordBtn_);
+    recordBtn_->style()->polish(recordBtn_);
     // Lock the recording target / stereo switch while a file is open --
     // changing them mid-capture would corrupt the in-progress file. The
     // stereo checkbox is re-enabled only for the audio target on stop.
