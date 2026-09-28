@@ -1,93 +1,78 @@
 # MBDSDR 手机端（Flutter）
 
 原生 App（Android / iOS 一套代码），不是 WebView 壳。
-
-## 定位
-把手机变成 AI 的"眼睛和手臂"：
-- GPS → 位置，AI 据此算卫星仰角/方位角
-- 指南针 → 手机朝向，AI 指挥你把天线/手机转到正对卫星
-- IMU → 姿态，辅助云台/手持指向
-- 实时频谱 → 手机屏当外接频谱显示器
-- AI 对话 → 手机端直接和电脑端 AI 交互，指挥 SDR 操作
-
-## 功能页面
-
-底部导航三个标签页：
-
-### 1. 频谱（Spectrum）
-- 从电脑端 WebSocket 接收 FFT 幅度数组，`CustomPainter` 逐 bin 画柱状频谱
-- 柱体蓝灰→橙色渐变，深色背景，三条水平参考线
-- 顶部显示中心频率 / 带宽，底部频率轴（左低右高）
-- 帧间 alpha=0.3 指数平滑，避免闪烁
-- 未连接时显示占位提示
-
-### 2. 指向（Sky Pointing）
-- 顶部罗盘圆环：N/E/S/W 方位刻度，每 30° 一格
-- 双箭头：红色=当前手机朝向（固定指上），橙色=目标卫星方位（相对偏移）
-- 文字引导：`左转 X°` / `右转 Y°` / `方位已对准 ✓`，偏差 < 5° 判定对准
-- 俯仰角只读滑块（0–90°），实时显示目标仰角
-- 卫星过境列表：显示卫星名、最高仰角、方位、升起时间，点击选中高亮
-
-### 3. AI 对话（Chat）
-- 气泡式对话：用户消息右侧橙色气泡，AI 回复左侧白色卡片气泡
-- 每条消息带时间戳（HH:mm），自动滚动到底部
-- 底部输入框（支持多行），发送按钮调用 `connection.sendChat()`
-- 未连接时输入框禁用
-- 订阅电脑端 `ai_command` 流，AI 回复实时追加
+定位：把手机变成 AI 的「眼睛和手臂」——GPS 给位置、罗盘给朝向、AI 据此算出
+卫星仰角/方位角，反向指挥人把天线/手机转到正对卫星；同时通过 rtl_tcp
+直连一台外置 RTL-SDR，让 AI 用 function calling 真正完成调谐。
 
 ## 架构
 
 ```
-mobile/lib/
-├── main.dart              # 入口 + Provider + 底部导航 + 连接设置弹窗
-├── connection.dart        # WebSocket 客户端（自动重连 / 心跳 / 传感器采集 / 广播流）
-├── theme.dart             # 日式低饱和主题（米白 #F5F3EF / 蓝灰 #5B7B8C / 橙 #C4845C）
-└── pages/
-    ├── spectrum_page.dart # 实时频谱
-    ├── sky_page.dart      # 卫星指向引导
-    └── chat_page.dart     # AI 对话
+lib/
+├── app/                    # 外壳层
+│   ├── tokens.dart         # 唯一设计 token（颜色/圆角/字体/硬件范围），冻结
+│   ├── theme.dart          # 深色 Material3 主题（主题名「默认」）
+│   ├── home_shell.dart     # 响应式导航：宽屏 NavigationRail / 窄屏 BottomNavigationBar
+│   └── ai_tools.dart       # 把 RadioApi 包装成 AI 可调用的工具集
+├── models/                 # 纯数据模型：radio_state、satellite、chat_message
+├── services/               # 服务层
+│   ├── rtl_tcp_client.dart# 依公开协议用 Dart 重写的 rtl_tcp 客户端（Socket + IQ 流）
+│   ├── radio_controller.dart # rtl_tcp + FFT + NFM/WFM 解调的统一控制器（ChangeNotifier）
+│   ├── ai_client.dart      # 硅基流动（OpenAI 兼容）流式 + function-calling 客户端
+│   └── settings_service.dart # 设置持久化（KvStore / SecureStore 缝）
+├── dsp/                    # 信号处理：IQ 类型、FFT（fftea）、滤波、NFM/WFM 解调
+├── astro/                  # TLE 拉取（Celestrak）、SGP4、坐标换算
+├── pages/                  # 四个页面：频谱 / 天空 / AI / 设置
+└── widgets/                # 通用件：EmptyState、StatusChip、频谱显示
 ```
 
-`ConnectionService`（`ChangeNotifier`）统一管理：
-- WebSocket 连接，断线后每 3 秒自动重连
-- 心跳 ping/pong（15 秒间隔，5 秒超时触发重连）
-- GPS / 指南针 / IMU 采集与周期上报
-- 通过 `Stream` 广播：`fftStream` / `passesStream` / `pointingStream` / `aiCommandStream`
+状态管理用 [provider](https://pub.dev/packages/provider)：
+启动时构造 `SettingsService` 与 `RadioController` 两个 `ChangeNotifier`，
+经 `MultiProvider` 注入；设置写入即落盘并通知，射频状态变化驱动 UI 刷新。
+
+## 四个页面
+
+### 1. 频谱（Spectrum）
+- rtl_tcp 直连真实 IQ 流 → `FftProcessor`（fftea）做真实 FFT；
+- 实时频谱柱状图 + 瀑布图，NFM / WFM 解调模式可切；
+- 顶部 AppBar 的 StatusChip 实时显示 rtl_tcp 连接状态（已连接/连接中/失败/未连接）。
+
+### 2. 天空（Sky Pointing）
+- Celestrak 拉 TLE，SGP4 算卫星位置，坐标换算到本站（手动三坐标或 GPS）；
+- 罗盘 + 传感器给手机朝向，引导人把天线转到目标卫星方位/仰角。
+
+### 3. AI 对话（Chat）
+- 硅基流动 OpenAI 兼容接口，SSE 流式输出；
+- 注册的工具是**真正调谐**而不是演戏：
+  - `set_frequency`（frequency_hz / frequency_mhz 二选一，范围 24–1700 MHz）
+  - `set_mode`（nfm / wfm）
+  - `set_gain`（auto 或手动 0–49.6 dB）
+  - `set_sample_rate`（限定支持的采样率档位）
+  - `get_status`（读回连接/频率/模式/增益/采样率）
+- 参数缺失或越界统一返回 `{ok:false,error:...}`，不让会话崩掉。
+
+### 4. 设置（Settings）
+- rtl_tcp 主机/端口（端口校验 1–65535）；
+- AI API key **只写系统安全存储**（Keystore / Keychain），普通 KV 里没有该键；
+- 模型名、本站经纬度/海拔（可一键自动定位）、外观（当前仅「默认」深色）。
 
 ## 构建
 
 ```bash
-cd mobile
 flutter pub get
-# 插手机（开 USB 调试）或起模拟器
+flutter analyze
+flutter test
 flutter run
 ```
 
-需要：Flutter SDK >=3.3、Android SDK（本地 Android Studio 装齐即可）。
+## 已知限制（诚实声明）
 
-## 协议
+- **本仓库云端没有 Android/iOS 构建工具链**，本版未做真机构建，只保证 Dart 侧
+  编译与单元测试通过；真机表现需在本地开发机验证。
+- 解调音频本版只产出 Float32 音频流，**尚未接扬声器**（音频路由/采样率匹配
+  留待后续）。
+- SGP4 为公开参考实现移植，**忽略章动与极移**，对低仰角指向有约 0.1° 量级误差。
+- 指向精度取决于手机罗盘/加速度计校准质量，强干扰环境下需手动修正。
+- 不内置任何 FM 电台频率、地理位置或密钥；所有连接参数与 key 都由用户自己填写。
 
-WebSocket 连电脑端（默认 `ws://<电脑IP>:8765`），点击右上角"连接设置"输入地址。
-
-### 上行（手机 → 电脑）
-
-| type | 说明 | payload |
-|------|------|---------|
-| `handshake` | 上线握手 | `{device, capabilities:[gps,compass,imu,camera]}` |
-| `telemetry` | 传感器上报 | `kind: fix/heading/imu` + 对应数据 |
-| `chat` | 用户发送文本 | `{text}` |
-| `ping` | 心跳 | — |
-
-### 下行（电脑 → 手机）
-
-| type | 说明 | payload |
-|------|------|---------|
-| `fft` | 频谱数据 | `{bins:[...], center_freq_mhz, span_mhz}` |
-| `satellite_passes` | 卫星过境列表 | `{passes:[{name,max_el,azimuth,rise_time}]}` |
-| `pointing` | 指向目标 | `{satellite, azimuth, elevation}` |
-| `ai_command` | AI 回复/指令 | `{text}` |
-| `pong` | 心跳响应 | — |
-
-## 电脑端待补
-
-电脑侧 WebSocket server 需在 `mbdsdr_ai` 中实现：接收手机 telemetry，结合 TLE 算过境，推送 `fft` / `satellite_passes` / `pointing` / `ai_command`。当前移动端已按上述协议就绪，可独立编译运行（未连接时各页面显示占位状态）。
+许可证见根目录 LICENSE（GPL-3.0-or-later），第三方归属见 NOTICE.md。
