@@ -187,17 +187,53 @@ WorldView::Hit WorldView::hitTest(const QPointF& pos) const {
 }
 
 // ---------------------------------------------------------------- painting
+namespace {
+// Collision-free single-line label placement. Tries the 8 compass offsets
+// around `point` and returns the first candidate that (a) fits wholly inside
+// `bounds` with `inset` margin and (b) does not intersect any already occupied
+// rect (markers + earlier labels). Returns false when no clean spot exists --
+// the caller drops the label (= priority thinning), the marker is still drawn.
+bool placeMapLabel(const QPointF& point, const QString& text, const QFontMetrics& fm,
+                   const QList<QRectF>& occupied, const QRectF& bounds,
+                   int offset, int inset, QRectF& out) {
+    const QSize ts = fm.size(Qt::TextSingleLine, text);
+    const QRectF bb = bounds.adjusted(inset, inset, -inset, -inset);
+    // Label top-left offset relative to the point, for 8 directions.
+    const QPointF c[8] = {
+        QPointF( offset,             -ts.height() * 0.5),            // E
+        QPointF( offset,             -ts.height() - offset * 0.4),   // NE
+        QPointF(-ts.width() * 0.5,   -ts.height() - offset),         // N
+        QPointF(-ts.width() - offset, -ts.height() - offset * 0.4), // NW
+        QPointF(-ts.width() - offset, -ts.height() * 0.5),          // W
+        QPointF(-ts.width() - offset,  offset * 0.4),              // SW
+        QPointF(-ts.width() * 0.5,    offset),                     // S
+        QPointF( offset,              offset * 0.4),              // SE
+    };
+    for (int i = 0; i < 8; ++i) {
+        QRectF r(point + c[i], ts);
+        if (!bb.contains(r)) continue;
+        bool clash = false;
+        for (const QRectF& o : occupied)
+            if (o.intersects(r)) { clash = true; break; }
+        if (!clash) { out = r; return true; }
+    }
+    return false;
+}
+} // namespace
+
 void WorldView::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
     p.fillRect(rect(), QColor(tokens::kBgMain));
 
-    if (layerVisible(MapLayer::Graticule)) drawGraticule(p);
+    if (layerVisible(MapLayer::Graticule))  drawGraticule(p);
     if (layerVisible(MapLayer::Coastline)) drawCoastline(p);
     if (layerVisible(MapLayer::Station))   drawStation(p);
-    if (layerVisible(MapLayer::Gnss))       drawGnss(p);
-    if (layerVisible(MapLayer::Aircraft))   drawAircraft(p);
-    if (layerVisible(MapLayer::Satellite))  drawSatellites(p);
+    if (layerVisible(MapLayer::Gnss))      drawGnss(p);
+    if (layerVisible(MapLayer::Aircraft))  drawAircraft(p);
+    if (layerVisible(MapLayer::Satellite)) drawSatellites(p);
+    drawLabels(p);
     drawStatusChips(p);
 }
 
@@ -208,28 +244,47 @@ void WorldView::drawGraticule(QPainter& p) {
     const double top   = proj_.centerLat() + proj_.latSpan() / 2.0;
     const double bot   = proj_.centerLat() - proj_.latSpan() / 2.0;
 
-    QPen grid(QColor(tokens::kCardEdge));
+    QPen grid(tokens::rgbaA(tokens::kGraticuleAlpha));
     grid.setWidthF(1.0);
     p.setPen(grid);
-    p.setFont(QFont(QString::fromUtf8(tokens::kFontFamily), tokens::scaled(8)));
-
     for (double lon = std::ceil(left / step) * step; lon <= right; lon += step) {
         QLineF l(proj_.project(top, lon), proj_.project(bot, lon));
         p.drawLine(l);
-        p.drawText(QPointF(l.x1() + 2, height() - 4),
-                   QString::number(std::lround(lon)) + QLatin1String("°"));
     }
     for (double lat = std::ceil(bot / step) * step; lat <= top; lat += step) {
         QLineF l(proj_.project(lat, left), proj_.project(lat, right));
         p.drawLine(l);
-        p.drawText(QPointF(2, l.y1() - 2),
-                   QString::number(std::lround(lat)) + QLatin1String("°"));
+    }
+
+    // Faint tick captions inside the edge gutters -- never clipped, never loud.
+    QFont f = p.font(); f.setPointSizeF(tokens::kFontAuxPt); p.setFont(f);
+    const QFontMetrics fm(f);
+    p.setPen(tokens::rgbaA(tokens::kTickLabelAlpha));
+    const qreal inset = tokens::scaled(tokens::kLabelMinInset);
+    const qreal gxB = tokens::scaled(tokens::kMapGutterB);
+    const qreal gxL = tokens::scaled(tokens::kMapGutterL);
+
+    for (double lon = std::ceil(left / step) * step; lon <= right; lon += step) {
+        const QPointF x = proj_.project(bot, lon);
+        const QString s = QString::number(std::lround(lon)) + QChar(0xB0);
+        QRectF r(x.x() - tokens::scaled(20), height() - gxB, tokens::scaled(40), fm.height());
+        r.moveLeft(std::clamp(r.left(), inset, qreal(width()) - inset - r.width()));
+        p.drawText(r, Qt::AlignHCenter | Qt::AlignBottom, s);
+    }
+    for (double lat = std::ceil(bot / step) * step; lat <= top; lat += step) {
+        const QPointF y = proj_.project(lat, left);
+        const QString s = QString::number(std::lround(lat)) + QChar(0xB0);
+        QRectF r(inset, y.y() - fm.height() / 2.0, gxL - tokens::scaled(4), fm.height());
+        r.moveTop(std::clamp(r.top(), inset, qreal(height()) - inset - r.height()));
+        p.drawText(r, Qt::AlignRight | Qt::AlignVCenter, s);
     }
 }
 
 void WorldView::drawCoastline(QPainter& p) {
-    QPen coast(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
-    coast.setWidthF(1.2);
+    QPen coast(tokens::rgbaA(tokens::kCoastlineAlpha));
+    coast.setWidthF(1.0);
+    coast.setJoinStyle(Qt::RoundJoin);
+    coast.setCapStyle(Qt::RoundCap);
     p.setPen(coast);
     p.setBrush(Qt::NoBrush);
     for (int i = 0; i < kCoastlineLineCount; ++i) {
@@ -249,130 +304,191 @@ void WorldView::drawCoastline(QPainter& p) {
 void WorldView::drawStation(QPainter& p) {
     if (std::isnan(stationLat_) || std::isnan(stationLon_)) return;
     QPointF pos = proj_.project(stationLat_, stationLon_);
-    const int r = tokens::scaled(5);
-    p.setPen(QPen(QColor(tokens::kSuccess), 2));
+    const int h = tokens::scaled(tokens::kMapStationHalf);
+    p.setPen(Qt::NoPen);
     p.setBrush(QColor(tokens::kSuccess));
-    p.drawEllipse(pos, r, r);
-    p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaSecondary)));
-    p.drawText(pos + QPointF(r + 3, -r - 2), QString::fromUtf8("本站"));
+    p.drawRect(QRectF(pos.x() - h, pos.y() - h, 2.0 * h, 2.0 * h));
 }
 
 void WorldView::drawGnss(QPainter& p) {
     if (!gnssValid_) return;   // honest: no dot without a fix
     QPointF pos = proj_.project(gnssLat_, gnssLon_);
-    const int r = tokens::scaled(6);
-    p.setPen(QPen(QColor(tokens::kAccent), 2));
+    const int ro = tokens::scaled(tokens::kMapGnssOuterR);
+    p.setPen(QPen(QColor(tokens::kAccent), 1.4));
     p.setBrush(Qt::NoBrush);
-    p.drawEllipse(pos, r, r);
-    p.setPen(QPen(QColor(tokens::kAccent), 1));
+    p.drawEllipse(pos, ro, ro);
+    p.setPen(Qt::NoPen);
     p.setBrush(QColor(tokens::kAccent));
-    p.drawEllipse(pos, tokens::scaled(2), tokens::scaled(2));
+    p.drawEllipse(pos, tokens::scaled(tokens::kMapGnssInnerR), tokens::scaled(tokens::kMapGnssInnerR));
 }
 
 void WorldView::drawAircraft(QPainter& p) {
-    // ground-track tails first, faint.
-    p.setPen(QPen(QColor(tokens::textRgba(tokens::kTextAlphaFaint)), 1.0));
+    // Fading ground track: oldest tail faint -> current clearer (segment ramp).
     for (const auto& ac : aircraft_) {
         if (ac.track.size() < 2) continue;
         QPolygonF poly;
         for (auto [lat, lon] : ac.track) poly << proj_.project(lat, lon);
         poly << proj_.project(ac.lat, ac.lon);
-        p.drawPolyline(poly);
-    }
-    p.setPen(QPen(QColor(tokens::kWarning), 2));
-    p.setBrush(QColor(tokens::kWarning));
-    QFontMetrics fm(p.font());
-    for (const auto& ac : aircraft_) {
-        QPointF pos = proj_.project(ac.lat, ac.lon);
-        p.drawEllipse(pos, tokens::scaled(3), tokens::scaled(3));
-        if (!ac.callsign.isEmpty()) {
-            p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaSecondary)));
-            p.drawText(pos + QPointF(tokens::scaled(6), -tokens::scaled(4)), ac.callsign);
-            p.setPen(QPen(QColor(tokens::kWarning), 2));
+        for (int i = 1; i < poly.size(); ++i) {
+            const double u = double(i) / double(poly.size() - 1);
+            p.setPen(QPen(tokens::rgbaA(0.10 + 0.28 * u), 1.0));
+            p.drawLine(poly[i - 1], poly[i]);
         }
     }
-    (void)fm;
+    // Amber triangle markers.
+    const int h = tokens::scaled(tokens::kMapAcHalf);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(tokens::kWarning));
+    for (const auto& ac : aircraft_) {
+        QPointF pos = proj_.project(ac.lat, ac.lon);
+        QPolygonF tri;
+        tri << QPointF(pos.x(), pos.y() - h)
+            << QPointF(pos.x() + h * 0.9, pos.y() + h * 0.7)
+            << QPointF(pos.x() - h * 0.9, pos.y() + h * 0.7);
+        p.drawPolygon(tri);
+    }
 }
 
 void WorldView::drawSatellites(QPainter& p) {
-    // ground tracks, very faint.
-    p.setPen(QPen(QColor(tokens::textRgba(tokens::kTextAlphaDisabled)), 1.0));
+    // Faint ground track.
     for (const auto& s : satellites_) {
         if (s.track.size() < 2) continue;
         QPolygonF poly;
         for (auto [lat, lon] : s.track) poly << proj_.project(lat, lon);
         poly << proj_.project(s.lat, s.lon);
-        p.drawPolyline(poly);
+        for (int i = 1; i < poly.size(); ++i) {
+            const double u = double(i) / double(poly.size() - 1);
+            p.setPen(QPen(tokens::rgbaA(0.06 + 0.18 * u), 1.0));
+            p.drawLine(poly[i - 1], poly[i]);
+        }
     }
     for (const auto& s : satellites_) {
         QPointF pos = proj_.project(s.lat, s.lon);
         if (s.selected) {
-            p.setPen(QPen(QColor(tokens::kAccent), 2));
+            p.setPen(QPen(QColor(tokens::kAccent), 1.4));
             p.setBrush(QColor(tokens::kAccent));
-            p.drawEllipse(pos, tokens::scaled(6), tokens::scaled(6));
-            p.setPen(QColor(tokens::kTextPrimary));
-            p.drawText(pos + QPointF(tokens::scaled(9), -tokens::scaled(6)), s.name);
+            p.drawEllipse(pos, tokens::scaled(tokens::kMapSatSelR), tokens::scaled(tokens::kMapSatSelR));
         } else {
-            p.setPen(QPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)), 1));
-            p.setBrush(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
-            p.drawEllipse(pos, tokens::scaled(3), tokens::scaled(3));
+            p.setPen(Qt::NoPen);
+            p.setBrush(tokens::rgbaA(tokens::kTextAlphaTertiary));
+            p.drawEllipse(pos, tokens::scaled(tokens::kMapSatDotR), tokens::scaled(tokens::kMapSatDotR));
         }
     }
 }
 
-void WorldView::drawStatusChips(QPainter& p) {
-    const int pad = tokens::scaled(tokens::kSpacingM);
-    const int h = tokens::scaled(20);
-    int y = tokens::scaled(tokens::kSpacingM);
+void WorldView::drawLabels(QPainter& p) {
+    QFont f = p.font(); f.setPointSizeF(tokens::kFontAuxPt); p.setFont(f);
+    const QFontMetrics fm(f);
 
-    auto chip = [&](const QString& text, const QColor& color) {
-        QFont f = p.font(); f.setPointSizeF(tokens::kFontAuxPt); p.setFont(f);
-        QFontMetrics fm(f);
-        QRectF r(tokens::scaled(tokens::kSpacingM), y,
-                 fm.horizontalAdvance(text) + 2 * pad, h);
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(QString::fromUtf8(tokens::kCard2)));
-        p.drawRoundedRect(r, tokens::scaled(tokens::kRadiusSmall),
-                          tokens::scaled(tokens::kRadiusSmall));
-        p.setPen(color);
-        p.drawText(r, Qt::AlignCenter, text);
-        y += h + tokens::scaled(tokens::kSpacingS);
+    struct Item { QPointF pos; QString text; QColor color; int prio; };
+    QList<Item> items;
+    if (layerVisible(MapLayer::Satellite))
+        for (const auto& s : satellites_)
+            if (s.selected)
+                items.push_back({proj_.project(s.lat, s.lon), s.name,
+                                 QColor(tokens::kTextPrimary), 1});
+    if (layerVisible(MapLayer::Gnss) && gnssValid_)
+        items.push_back({proj_.project(gnssLat_, gnssLon_), QString::fromUtf8("GNSS"),
+                         QColor(tokens::kTextSecondary), 2});
+    if (layerVisible(MapLayer::Station) && !std::isnan(stationLat_))
+        items.push_back({proj_.project(stationLat_, stationLon_), QString::fromUtf8("本站"),
+                         QColor(tokens::kTextSecondary), 3});
+    if (layerVisible(MapLayer::Aircraft))
+        for (const auto& ac : aircraft_)
+            if (!ac.callsign.isEmpty())
+                items.push_back({proj_.project(ac.lat, ac.lon), ac.callsign,
+                                 tokens::rgbaA(tokens::kTextAlphaSecondary), 4});
+
+    // Priority: selected satellite > GNSS > station > aircraft.
+    std::sort(items.begin(), items.end(),
+              [](const Item& a, const Item& b) { return a.prio < b.prio; });
+
+    QList<QRectF> occupied;
+    const int inset = tokens::scaled(tokens::kLabelMinInset);
+    const int off   = tokens::scaled(tokens::kLabelOffset);
+    for (const auto& it : items)
+        occupied.append(QRectF(it.pos.x() - tokens::scaled(6), it.pos.y() - tokens::scaled(6),
+                               tokens::scaled(12), tokens::scaled(12)));
+
+    p.setBrush(Qt::NoBrush);
+    for (const auto& it : items) {
+        QRectF r;
+        if (!placeMapLabel(it.pos, it.text, fm, occupied, rect(), off, inset, r))
+            continue;   // no clean spot -> drop this label (thinning)
+        occupied.append(r);
+        // Thin leader line from the marker EDGE to the label's nearest edge,
+        // so the marker's own centre pixels are never overwritten.
+        const QPointF edge(std::clamp(it.pos.x(), r.left(), r.right()),
+                           std::clamp(it.pos.y(), r.top(), r.bottom()));
+        QPointF dir = edge - it.pos;
+        const double len = std::hypot(dir.x(), dir.y());
+        if (len > tokens::scaled(6)) {
+            dir /= len;
+            p.setPen(QPen(tokens::rgbaA(tokens::kLeaderLineAlpha), 1.0));
+            p.drawLine(it.pos + dir * tokens::scaled(6), edge);
+        }
+        p.setPen(it.color);
+        p.drawText(r, Qt::AlignVCenter | Qt::AlignLeft, it.text);
+    }
+}
+
+void WorldView::drawStatusChips(QPainter& p) {
+    const int padX = tokens::scaled(tokens::kSpacingM);
+    const int padY = tokens::scaled(tokens::kSpacingS);
+    QFont f = p.font(); f.setPointSizeF(tokens::kFontAuxPt); p.setFont(f);
+    const QFontMetrics fm(f);
+    const int chipH = fm.height() + 2 * padY;
+
+    // One restrained chip style: faint card fill, 1px hairline edge, secondary
+    // text, optional 4px status dot. No solid mustard sticker.
+    auto chip = [&](int x, int y, const QString& text, const QColor& dot) {
+        const int dotW = dot.isValid() ? tokens::scaled(6) + tokens::scaled(4) : 0;
+        const int w = fm.horizontalAdvance(text) + 2 * padX + dotW;
+        QRectF r(x, y, w, chipH);
+        p.setPen(QPen(tokens::cardEdge(), 1.0));
+        p.setBrush(tokens::card1());
+        p.drawRoundedRect(r, tokens::scaled(tokens::kRadiusSmall), tokens::scaled(tokens::kRadiusSmall));
+        int tx = x + padX;
+        if (dot.isValid()) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(dot);
+            const int d = tokens::scaled(4);
+            p.drawEllipse(QPointF(x + padX + d / 2.0, y + chipH / 2.0), d / 2.0, d / 2.0);
+            tx = x + padX + d + tokens::scaled(6);
+        }
+        p.setPen(tokens::rgbaA(tokens::kTextAlphaSecondary));
+        p.drawText(QRectF(tx, y, w - (tx - x), chipH), Qt::AlignVCenter | Qt::AlignLeft, text);
     };
 
-    // GNSS status chip (always, when layer visible).
+    int y = tokens::scaled(tokens::kSpacingM);
     if (layerVisible(MapLayer::Gnss)) {
-        if (gnssValid_) {
-            chip(QString::fromUtf8("GNSS 定位 · %1 星 · HDOP %2")
+        if (gnssValid_)
+            chip(tokens::scaled(tokens::kSpacingM), y,
+                 QString::fromUtf8("GNSS 定位 · %1 星 · HDOP %2")
                      .arg(gnssSats_).arg(gnssHdop_, 0, 'f', 1),
                  QColor(tokens::kSuccess));
-        } else {
-            chip(QString::fromUtf8("GNSS 无定位"),
-                 QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
-        }
+        else
+            chip(tokens::scaled(tokens::kSpacingM), y,
+                 QString::fromUtf8("GNSS 无定位"),
+                 tokens::rgbaA(tokens::kTextAlphaDisabled));
+        y += chipH + tokens::scaled(tokens::kSpacingS);
     }
-    if (std::isnan(stationLat_)) {
-        chip(QString::fromUtf8("未设置本站位置"),
-             QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
-    }
-    if (aircraft_.isEmpty() && layerVisible(MapLayer::Aircraft)) {
-        chip(QString::fromUtf8("等待 ADS-B 位置数据"),
-             QColor(tokens::textRgba(tokens::kTextAlphaFaint)));
-    }
+    if (std::isnan(stationLat_))
+        chip(tokens::scaled(tokens::kSpacingM), y,
+             QString::fromUtf8("未设置本站位置"),
+             tokens::rgbaA(tokens::kTextAlphaDisabled));
 
-    // Synthetic / non-hardware tag, top-right.
+    // Synthetic / non-hardware tag: a quiet instrument corner badge, top-right.
     if (synthetic_) {
-        QString tag = QString::fromUtf8("非硬件 NOT HARDWARE");
-        QFont f = p.font(); f.setPointSizeF(tokens::kFontAuxPt); f.setBold(true);
-        p.setFont(f);
-        QFontMetrics fm(f);
-        QRectF r(width() - fm.horizontalAdvance(tag) - 2 * pad - tokens::scaled(tokens::kSpacingM),
-                 tokens::scaled(tokens::kSpacingM),
-                 fm.horizontalAdvance(tag) + 2 * pad, h);
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(QString::fromUtf8(tokens::kWarning)));
+        const QString tag = QString::fromUtf8("非硬件 · NOT HARDWARE");
+        const int w = fm.horizontalAdvance(tag) + 2 * padX;
+        QRectF r(width() - w - tokens::scaled(tokens::kSpacingM),
+                 tokens::scaled(tokens::kSpacingM), w, chipH);
+        p.setPen(QPen(tokens::cardEdge(), 1.0));
+        p.setBrush(tokens::card1());
         p.drawRoundedRect(r, tokens::scaled(tokens::kRadiusSmall),
                           tokens::scaled(tokens::kRadiusSmall));
-        p.setPen(QColor(tokens::kBgBar));
+        p.setPen(tokens::rgbaA(tokens::kTextAlphaQuaternary));
         p.drawText(r, Qt::AlignCenter, tag);
     }
 }
