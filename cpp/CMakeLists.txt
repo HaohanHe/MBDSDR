@@ -173,6 +173,11 @@ target_include_directories(test_geo PRIVATE src)
 target_link_libraries(test_geo PRIVATE Qt6::Network Qt6::Concurrent Qt6::Core)
 add_test(NAME geo COMMAND test_geo)
 
+add_executable(test_adsb_cpr tests/test_adsb_cpr.cpp src/dsp/adsb_decoder.cpp)
+target_include_directories(test_adsb_cpr PRIVATE src)
+target_link_libraries(test_adsb_cpr PRIVATE Qt6::Core)
+add_test(NAME adsb_cpr COMMAND test_adsb_cpr)
+
 add_executable(test_channelizer tests/test_channelizer.cpp
     src/dsp/channelizer.cpp src/dsp/fft.cpp)
 target_include_directories(test_channelizer PRIVATE src)
