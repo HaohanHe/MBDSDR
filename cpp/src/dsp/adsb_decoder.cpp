@@ -25,6 +25,30 @@ int cprNL(double latDeg) {
     return r < 1 ? 1 : r;
 }
 
+bool cprLocalDecode(int cprLat, int cprLon, bool isOdd,
+                    double refLat, double refLon,
+                    double& latOut, double& lonOut) {
+    double dlat = isOdd ? 360.0/59.0 : 360.0/60.0;
+    double rlat = std::fmod(refLat, dlat);
+    if (rlat < 0) rlat += dlat;
+    int j = (int)std::floor(refLat/dlat) +
+            (int)std::floor(0.5 + rlat/dlat - cprLat/131072.0);
+    double lat = dlat * (j + cprLat/131072.0);
+    if (lat > 270.0) lat -= 360.0;
+    if (lat < -90.0 || lat > 90.0) return false;
+    int nl = cprNL(lat);
+    double dlon = (nl <= 1) ? 360.0 : 360.0/(nl - (isOdd?1:0));
+    double rlon = std::fmod(refLon, dlon);
+    if (rlon < 0) rlon += dlon;
+    int m = (int)std::floor(refLon/dlon) +
+            (int)std::floor(0.5 + rlon/dlon - cprLon/131072.0);
+    double lon = dlon * (m + cprLon/131072.0);
+    if (lon >= 360.0) lon -= 360.0;
+    if (lon > 180.0) lon -= 360.0;
+    latOut = lat; lonOut = lon;
+    return true;
+}
+
 bool cprGlobalDecode(const CprPair& p, double& latOut, double& lonOut) {
     if (!p.haveEven || !p.haveOdd) return false;
     double j = std::floor((59.0*p.latEven - 60.0*p.latOdd)/131072.0 + 0.5);
@@ -144,6 +168,28 @@ bool ADSBDecoder::decodeFrame(std::size_t start, std::size_t totalBits, Aircraft
             double la, lo;
             if (cprGlobalDecode(st, la, lo)) {
                 out.hasPosition = true; out.lat = la; out.lon = lo;
+            } else if (haveRef_) {
+                // Fallback: local decode against station position.
+                double la2, lo2;
+                if (cprLocalDecode(cprLat, cprLon, cprFmt==1, refLat_, refLon_, la2, lo2)) {
+                    out.hasPosition = true; out.lat = la2; out.lon = lo2;
+                }
+            }
+        } else if (tc == 19) {
+            // Airborne velocity: me[1..6] = 48 bits.
+            // subtype = me[0] low 3 bits, ns sign/mag, ew sign/mag.
+            const uint8_t* me = &frameBytes[4];
+            int subtype = me[0] & 0x07;
+            if (subtype == 1 || subtype == 2) {
+                int nsRaw = ((me[1] & 0x3F) << 4) | (me[2] >> 4);
+                int ewRaw = ((me[2] & 0x0F) << 6) | (me[3] >> 2);
+                int nsSign = (me[1] >> 7) & 1;
+                int ewSign = (me[2] >> 3) & 1;
+                double ns = (nsSign ? -1 : 1) * (nsRaw - 1);
+                double ew = (ewSign ? -1 : 1) * (ewRaw - 1);
+                out.groundspeedKt = std::sqrt(ns*ns + ew*ew);
+                out.headingDeg = std::fmod(std::atan2(ew, ns)*180.0/M_PI + 360.0, 360.0);
+                out.hasVelocity = true;
             }
         }
     }
@@ -171,6 +217,7 @@ void ADSBDecoder::feed(const std::vector<std::complex<float>>& iq) {
                         if (!info.callsign.isEmpty()) ac.callsign = info.callsign;
                         if (info.altitudeFt > 0) ac.altitudeFt = info.altitudeFt;
                         if (info.hasPosition) { ac.hasPosition=true; ac.lat=info.lat; ac.lon=info.lon; }
+                        if (info.hasVelocity) { ac.hasVelocity=true; ac.groundspeedKt=info.groundspeedKt; ac.headingDeg=info.headingDeg; }
                         found = true;
                         newAircraft_.push_back(ac);
                         break;

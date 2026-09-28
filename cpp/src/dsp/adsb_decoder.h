@@ -23,6 +23,9 @@ struct AircraftInfo {
     double lat = std::numeric_limits<double>::quiet_NaN();
     double lon = std::numeric_limits<double>::quiet_NaN();
     bool hasPosition = false;
+    double groundspeedKt = -1;
+    double headingDeg = -1;
+    bool hasVelocity = false;
 };
 
 // CPR global position decode (even/odd pair). Public for unit tests.
@@ -33,6 +36,10 @@ struct CprPair {
 };
 bool cprGlobalDecode(const CprPair& p, double& latOut, double& lonOut);
 int  cprNL(double latDeg);
+/// Local decode using a reference (station) position -- single frame, ~10 km error.
+bool cprLocalDecode(int cprLat, int cprLon, bool isOdd,
+                    double refLat, double refLon,
+                    double& latOut, double& lonOut);
 
 class ADSBDecoder {
 public:
@@ -42,6 +49,10 @@ public:
     void feed(const std::vector<std::complex<float>>& iq);
     std::vector<AircraftInfo> takeNewAircraft();
     void reset();
+    /// Reference (station) position for CPR local decode.
+    void setReferencePosition(double latDeg, double lonDeg) {
+        refLat_ = latDeg; refLon_ = lonDeg; haveRef_ = true;
+    }
 
     static uint32_t crc24(const uint8_t* data, int len);
 
@@ -56,6 +67,8 @@ private:
     static QString decodeCallsign(const uint8_t* me);
 
     QHash<QString, CprPair> cprByIcao_;   // per-aircraft CPR even/odd state
+    double refLat_ = 0, refLon_ = 0;
+    bool haveRef_ = false;
 };
 
 } // namespace dsp

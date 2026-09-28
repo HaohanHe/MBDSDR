@@ -41,6 +41,20 @@ int main() {
     roundTrip(40.0, -74.0);
     roundTrip(-33.0, 151.0);
 
+    // Local decode: encode even CPR slot at lat=10,lon=20, decode with station
+    // reference at lat=10.2, lon=20.3 (nearby, ~20 km away).
+    {
+        int nl = cprNL(10.0);
+        int latE = (int)std::floor(std::fmod(10.0,360.0)/6.0 * 131072.0);
+        int lonE = (int)std::floor(std::fmod(20.0,360.0)/(360.0/nl) * 131072.0);
+        double la, lo;
+        bool ok = cprLocalDecode(latE, lonE, false, 10.2, 20.3, la, lo);
+        std::printf("local: decoded lat=%.4f lon=%.4f\n", la, lo);
+        check(ok, "local decode returned true");
+        check(std::abs(la-10.0) < 0.1, "local lat within 0.1 deg");
+        check(std::abs(lo-20.0) < 0.1, "local lon within 0.1 deg");
+    }
+
     if (failures==0) std::printf("test_adsb_cpr: ALL PASS\n");
     else std::printf("test_adsb_cpr: %d FAILURE(S)\n", failures);
     return failures?1:0;
