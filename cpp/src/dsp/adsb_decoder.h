@@ -32,6 +32,7 @@ struct CprPair {
     bool haveEven = false, haveOdd = false;
 };
 bool cprGlobalDecode(const CprPair& p, double& latOut, double& lonOut);
+int  cprNL(double latDeg);
 
 class ADSBDecoder {
 public:

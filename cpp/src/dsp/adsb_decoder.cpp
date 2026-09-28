@@ -9,19 +9,20 @@ namespace dsp {
 
 static const uint32_t CRC24_POLY = 0xFFF409;
 
-// NL(lat): number of longitude zones at given latitude.
-static int cprNL(double latDeg) {
-    static const int nl[] = {
-      59,59,59,58,58,58,57,57,56,56,55,55,54,54,53,53,52,52,51,51,
-      50,50,49,49,48,48,47,47,46,46,45,45,44,44,43,43,42,42,41,41,
-      40,40,39,39,38,38,37,37,36,36,35,35,34,34,33,33,32,32,31,31,
-      30,30,29,29,28,28,27,27,26,26,25,25,24,24,23,23,22,22,21,21,
-      20,20,19,19,18,18,17,17,16,16,15,15,14,14,13,13,12,12,11,11,
-      10,10, 9, 9, 8, 7, 6
-    };
-    int i = std::abs((int)std::floor(latDeg * 4.0));
-    if (i >= 104) return 1;
-    return nl[i];
+// NL(lat): number of longitude zones at given latitude (standard formula).
+int cprNL(double latDeg) {
+    double a = std::abs(latDeg);
+    if (a >= 87.0) return 1;
+    constexpr double NZ = 15.0;
+    double cosLat = std::cos(a * M_PI / 180.0);
+    double denom = cosLat * cosLat;
+    if (denom < 1e-12) return 1;
+    double val = 1.0 - (1.0 - std::cos(M_PI / (2.0 * NZ))) / denom;
+    if (val < -1.0) val = -1.0;
+    if (val > 1.0) val = 1.0;
+    double nl = 2.0 * M_PI / std::acos(val);
+    int r = (int)std::floor(nl);
+    return r < 1 ? 1 : r;
 }
 
 bool cprGlobalDecode(const CprPair& p, double& latOut, double& lonOut) {
