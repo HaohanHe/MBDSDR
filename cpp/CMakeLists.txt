@@ -160,6 +160,11 @@ target_include_directories(test_spectrum_interaction PRIVATE src)
 target_link_libraries(test_spectrum_interaction PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME spectrum_interaction COMMAND test_spectrum_interaction)
 
+add_executable(test_waterfall tests/test_waterfall.cpp src/ui/waterfall.cpp)
+target_include_directories(test_waterfall PRIVATE src)
+target_link_libraries(test_waterfall PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME waterfall COMMAND test_waterfall)
+
 # Shortcut smoke test: builds the full MainWindow (all sources, minus main.cpp).
 set(TESTAPP_SRCS ${SOURCES})
 list(REMOVE_ITEM TESTAPP_SRCS src/main.cpp)

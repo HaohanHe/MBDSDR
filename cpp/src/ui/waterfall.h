@@ -19,6 +19,9 @@ public:
 
 public slots:
     void setSpectrum(const SpectrumFrame& frame);
+    /// Read-only access to the internal history image (for tests / debugging).
+    const QImage& history() const { return history_; }
+    bool hasFrame() const { return haveFrame_; }
     /// Crop the display to a visible frequency window (zoomed/panned spectrum).
     /// Pass fLo>fHi or call with hasVisRange=false to revert to full span.
     void setVisibleRange(double fLoHz, double fHiHz);
