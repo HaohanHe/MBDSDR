@@ -908,7 +908,8 @@ MainWindow::MainWindow(QWidget* parent)
         eff->setOpacity(0.0);
         w->setGraphicsEffect(eff);
         auto* anim = new QPropertyAnimation(eff, "opacity", eff);
-        anim->setDuration(150);
+        anim->setDuration(tokens::kAnimMedium1);
+        anim->setEasingCurve(QEasingCurve::OutCubic);
         anim->setStartValue(0.0);
         anim->setEndValue(1.0);
         anim->start(QAbstractAnimation::DeleteWhenStopped);
