@@ -12,6 +12,8 @@
 #include <QDialogButtonBox>
 #include <QTabWidget>
 #include <QVBoxLayout>
+#include <QSlider>
+#include <QSettings>
 #include <limits>
 
 namespace mbdsdr {
@@ -28,12 +30,18 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     auto* stationForm = new QFormLayout(stationPage);
     latSpin_ = new QDoubleSpinBox;
     latSpin_->setRange(-90, 90);
-    latSpin_->setDecimals(4);
+    latSpin_->setDecimals(6);
+    latSpin_->setSuffix(" °");
     lonSpin_ = new QDoubleSpinBox;
     lonSpin_->setRange(-180, 180);
-    lonSpin_->setDecimals(4);
+    lonSpin_->setDecimals(6);
+    lonSpin_->setSuffix(" °");
+    altSpin_ = new QSpinBox;
+    altSpin_->setRange(-500, 9000);
+    altSpin_->setSuffix(" m");
     stationForm->addRow("本站纬度", latSpin_);
     stationForm->addRow("本站经度", lonSpin_);
+    stationForm->addRow("本站海拔", altSpin_);
     tabs->addTab(stationPage, "本站");
 
     // AI tab
@@ -71,7 +79,25 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
     audioDeviceCombo_->setEnabled(!devs.isEmpty());
     audioForm->addRow("输出设备", audioDeviceCombo_);
     audioForm->addRow("", audioNoDevLabel_);
+    volumeSlider_ = new QSlider(Qt::Horizontal);
+    volumeSlider_->setRange(0, 100);
+    volumeSlider_->setValue(80);
+    audioForm->addRow("主音量", volumeSlider_);
+    auto* fixedSr = new QLabel("音频输出采样率：48000 Hz（固定）");
+    fixedSr->setObjectName("dockHint");
+    audioForm->addRow("", fixedSr);
     tabs->addTab(audioPage, "音频");
+
+    // Appearance tab: UI scale (live) + read-only theme.
+    auto* appearancePage = new QWidget;
+    auto* appearanceForm = new QFormLayout(appearancePage);
+    scaleCombo_ = new QComboBox;
+    scaleCombo_->addItems({"0.7x", "1.0x", "1.25x", "1.5x"});
+    appearanceForm->addRow("UI 缩放", scaleCombo_);
+    auto* themeLbl = new QLabel("默认");
+    themeLbl->setObjectName("dockHint");
+    appearanceForm->addRow("主题", themeLbl);
+    tabs->addTab(appearancePage, "外观");
 
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -85,6 +111,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
 void SettingsDialog::loadFromConfig(const ai::AiConfig& cfg) {
     if (!std::isnan(cfg.stationLat)) latSpin_->setValue(cfg.stationLat);
     if (!std::isnan(cfg.stationLon)) lonSpin_->setValue(cfg.stationLon);
+    altSpin_->setValue(static_cast<int>(cfg.stationAlt));
     apiKeyEdit_->setText(cfg.apiKey);
     baseUrlEdit_->setText(cfg.baseUrl);
     modelEdit_->setText(cfg.model);
@@ -95,18 +122,37 @@ void SettingsDialog::loadFromConfig(const ai::AiConfig& cfg) {
         int idx = audioDeviceCombo_->findText(cfg.audioDevice);
         audioDeviceCombo_->setCurrentIndex(idx < 0 ? 0 : idx);
     }
+    QSettings s("MBDSDR", "MBDSDR");
+    volumeSlider_->setValue(s.value("rx/volume", 80).toInt());
+    const double sc = s.value("ui/scaleFactor", 1.0).toDouble();
+    const int sidx = sc <= 0.7 ? 0 : sc <= 1.0 ? 1 : sc <= 1.25 ? 2 : 3;
+    scaleCombo_->setCurrentIndex(sidx);
 }
 
 void SettingsDialog::saveToConfig(ai::AiConfig& cfg) {
     cfg.stationLat = latSpin_->value();
     cfg.stationLon = lonSpin_->value();
-    cfg.stationSet = true;
+    cfg.stationAlt = altSpin_->value();
+    // Zero/empty coordinates mean "no station" -> honest empty sky state.
+    cfg.stationSet = !(qFuzzyIsNull(cfg.stationLat) && qFuzzyIsNull(cfg.stationLon));
     cfg.apiKey = apiKeyEdit_->text();
     cfg.baseUrl = baseUrlEdit_->text();
     cfg.model = modelEdit_->text();
     const int idx = audioDeviceCombo_->currentIndex();
     cfg.audioDevice = (idx <= 0) ? QStringLiteral("default")
                                  : audioDeviceCombo_->currentText();
+    QSettings s("MBDSDR", "MBDSDR");
+    s.setValue("rx/volume", volumeSlider_->value());
+    s.setValue("ui/scaleFactor", userScale());
+}
+
+int SettingsDialog::volume() const { return volumeSlider_->value(); }
+
+double SettingsDialog::userScale() const {
+    switch (scaleCombo_->currentIndex()) {
+        case 0: return 0.7; case 2: return 1.25; case 3: return 1.5;
+        default: return 1.0;
+    }
 }
 
 } // namespace ui

@@ -27,6 +27,9 @@ public:
 
     bool isAvailable() const { return available_; }
     void setMuted(bool m) { muted_ = m; }
+    /// Volume 0.0..1.0. Applied to the QAudioSink live.
+    void setVolume(qreal v) { volume_ = v; if (sink_) sink_->setVolume(v); }
+    qreal volume() const { return volume_; }
 
     /// Hot-restart playback on the given output device. Pass a null QAudioDevice
     /// to fall back to the system default. Stops and discards the current sink_,
@@ -54,6 +57,7 @@ private:
     QAudioFormat fmt_;
     bool available_ = false;
     bool muted_ = false;
+    qreal volume_ = 0.8;
     QAudioDevice currentDev_;   // null == system default
 };
 

@@ -3,6 +3,7 @@
 // No Python runtime, no embeddings, no subprocesses.
 #include <QApplication>
 #include <QDebug>
+#include <QSettings>
 #include <QString>
 #include <QStringList>
 
@@ -50,6 +51,11 @@ int main(int argc, char** argv) {
     QApplication::setApplicationName("mbdsdr");
     QApplication::setApplicationVersion("0.2.0");
 
+    // Restore persisted UI scale before building the stylesheet.
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::tokens::setUserScale(s.value("ui/scaleFactor", 1.0).toDouble());
+    }
     // Apply dark QSS translated from desktop/tokens.py
     app.setStyleSheet(mbdsdr::tokens::buildDarkQss());
 
