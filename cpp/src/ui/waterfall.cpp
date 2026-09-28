@@ -2,6 +2,7 @@
 #include "waterfall.h"
 
 #include <QPainter>
+#include <QFont>
 #include <cstring>
 #include <cmath>
 #include "core/tokens.h"
@@ -174,6 +175,7 @@ void WaterfallWidget::paintEvent(QPaintEvent*) {
         const int tickH = tokens::scaled(tokens::kWaterfallTickH);
         const int labelH = tokens::scaled(tokens::kFreqLabelH);
         const int labelW = tokens::scaled(tokens::kFreqLabelW);
+        { QFont f = p.font(); f.setPointSize(tokens::kFontAuxPt); p.setFont(f); }
         p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
         for (int i = 0; i < n; ++i) {
             const double frac = double(i) / (n - 1);

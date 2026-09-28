@@ -48,6 +48,7 @@
 #include "ai/ai_config.h"
 #include "ui/sky_view.h"
 #include "ui/bookmark_manager.h"
+#include "ui/shortcuts_dialog.h"
 #include <QListWidget>
 #include <QLineEdit>
 #include <QSpinBox>
@@ -107,8 +108,11 @@ MainWindow::MainWindow(QWidget* parent)
     clockLabel->setText(QDateTime::currentDateTimeUtc().toString("HH:mm:ss UTC"));
     topLay->addWidget(clockLabel);
 
+    auto* helpBtn = new QPushButton("?", topBar);
+    helpBtn->setToolTip("快捷键");
     auto* aboutBtn = new QPushButton("关于", topBar);
     auto* settingsBtn = new QPushButton("⚙", topBar);
+    topLay->addWidget(helpBtn);
     topLay->addWidget(aboutBtn);
     topLay->addWidget(settingsBtn);
 
@@ -737,6 +741,10 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(aboutBtn, &QPushButton::clicked, this, [this]() {
         ui::AboutDialog dlg(this);
+        dlg.exec();
+    });
+    connect(helpBtn, &QPushButton::clicked, this, [this]() {
+        ui::ShortcutsDialog dlg(this);
         dlg.exec();
     });
     connect(settingsBtn, &QPushButton::clicked, this, [this]() {
