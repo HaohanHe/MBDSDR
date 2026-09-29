@@ -1,30 +1,16 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI 内核 - FIR 抽头生成器（窗函数法）
-============================================
+Window-method FIR tap design.
 
-逐行对照 SDR++ 的 taps 包（repos/sdrpp/core/src/dsp/taps/）与 window 包：
+Generates real-valued prototype FIR coefficients (low-pass, high-pass,
+band-pass, and root-raised-cosine pulse-shaping) with the standard
+windowed-sinc method.  The implementation depends only on NumPy.
 
-  - estimate_tap_count.h:4-6   estimateTapCount(transWidth, sr) = 3.8*sr/transWidth
-  - windowed_sinc.h:17-26      windowedSinc(count, omega, window)
-  - window/cosine.h:7-16       余弦窗通式（交替符号求和）
-  - window/nuttall.h:6         Nuttall 窗四系数
-  - window/hann.h / hamming.h  Hann / Hamming 窗
-  - taps/low_pass.h:7-11       lowPass(cutoff, transWidth, sr)
-  - taps/high_pass.h / band_pass.h
-  - taps/root_raised_cosine.h:8-29  RRC 脉冲成形
-
-本模块是纯 NumPy 实现，不依赖 SciPy（SciPy 仅在可选加速时使用）。
-所有抽头都是「原型低通/带通/脉冲成形」的实数 FIR 系数，供
-fir.h / decimating_fir.h / polyphase_resampler.h 直接卷积使用。
-
-设计约定与 SDR++ 完全一致：
-  - 抽头数 N = estimateTapCount(transWidth, sampleRate)，默认偶数；
-    需要 Type I 线性相位时取奇数（low_pass.h:9 oddTapCount 开关）。
-  - 窗函数自变量 n = i - N/2（关于 0 对称），窗在 ±N/2 处取值。
-  - windowedSinc 的增益归一 corr = omega/pi（windowed_sinc.h:15），
-    即直流增益 = 1（截止内通带平坦）。
-
-License: GPL-3.0-or-later
+Design conventions:
+  * The number of taps is estimated from the transition width; an odd tap count
+    selects a Type-I linear-phase filter.
+  * Windows are centred on zero (argument ``n = i - N/2``).
+  * The windowed sinc is scaled so the DC (pass-band) gain is unity.
 """
 
 from __future__ import annotations
@@ -44,14 +30,11 @@ __all__ = [
 ]
 
 
-# ─────────────────────────────────────────────────────────────────
-# 窗函数（对照 sdrpp/core/src/dsp/window/）
-# ─────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Windows
+# ---------------------------------------------------------------------------
 def _cosine_window(n: np.ndarray, N: float, coefs) -> np.ndarray:
-    """余弦窗通式：sum_i sign_i * coef_i * cos(i*2*pi*n/N)，符号交替。
-
-    对照 window/cosine.h:7-16。
-    """
+    """Generalised cosine window: alternating-sum cosine series."""
     win = np.zeros_like(n, dtype=np.float64)
     sign = 1.0
     for i, c in enumerate(coefs):
@@ -61,32 +44,28 @@ def _cosine_window(n: np.ndarray, N: float, coefs) -> np.ndarray:
 
 
 def nuttall(n: np.ndarray, N: float) -> np.ndarray:
-    """三阶 Nuttall 窗（连续导数为零的最优旁瓣窗）。
-
-    对照 window/nuttall.h:5-8，系数 0.355768/0.487396/0.144232/0.012604。
-    阻带衰减约 -93 dB，SDR++ lowPass 的默认窗。
-    """
+    """Third-order Nuttall window (very low side lobes, ~ -93 dB)."""
     return _cosine_window(n, N, (0.355768, 0.487396, 0.144232, 0.012604))
 
 
 def hann(n: np.ndarray, N: float) -> np.ndarray:
-    """Hann 窗。对照 window/hann.h（0.5 - 0.5*cos(2pi n/N)）。"""
+    """Hann window: 0.5 - 0.5*cos(2*pi*n/N)."""
     return _cosine_window(n, N, (0.5, 0.5))
 
 
 def hamming(n: np.ndarray, N: float) -> np.ndarray:
-    """Hamming 窗。对照 window/hamming.h（0.54 - 0.46*cos(2pi n/N)）。"""
+    """Hamming window: 0.54 - 0.46*cos(2*pi*n/N)."""
     return _cosine_window(n, N, (0.54, 0.46))
 
 
-# ─────────────────────────────────────────────────────────────────
-# 抽头数估计 + 窗函数 sinc
-# ─────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Tap-count estimate and windowed sinc
+# ---------------------------------------------------------------------------
 def estimate_tap_count(trans_width_hz: float, sample_rate_hz: float) -> int:
-    """按过渡带宽度估计所需 FIR 抽头数。
+    """Estimate the FIR tap count needed for a given transition width.
 
-    对照 taps/estimate_tap_count.h:4-6：return 3.8 * sampleRate / transWidth。
-    3.8 是 Nuttall 窗（~93dB 阻带）对应的经验常数。
+    The rule ``3.8 * sample_rate / transition_width`` is the well-known
+    empirical estimate for a Nuttall-windowed design (~93 dB stop band).
     """
     if trans_width_hz <= 0:
         raise ValueError(f"trans_width must be > 0, got {trans_width_hz}")
@@ -95,42 +74,36 @@ def estimate_tap_count(trans_width_hz: float, sample_rate_hz: float) -> int:
 
 def windowed_sinc(count: int, cutoff_hz: float, sample_rate_hz: float,
                   window=nuttall) -> np.ndarray:
-    """窗函数法 sinc FIR（实数低通原型）。
+    """Windowed-sinc real low-pass prototype FIR.
 
-    对照 taps/windowed_sinc.h:17-26：
-        half = count/2
-        corr = omega/pi          （omega = 2*pi*cutoff/sr，hz_to_rads）
-        t[i] = i - half + 0.5
-        taps[i] = sinc(t[i]*omega) * window(t[i]-half, count) * corr
+        omega = 2*pi*cutoff/sr
+        taps[i] = sinc(t[i]*omega/pi) * window(t[i]-half, count) * (omega/pi)
     """
     count = int(count)
     if count < 1:
         raise ValueError("count must be >= 1")
     half = count / 2.0
-    omega = 2.0 * np.pi * cutoff_hz / sample_rate_hz  # hz_to_rads, math/hz_to_rads.h
-    corr = omega / np.pi                              # windowed_sinc.h:15
+    omega = 2.0 * np.pi * cutoff_hz / sample_rate_hz
+    corr = omega / np.pi
 
     i = np.arange(count, dtype=np.float64)
-    t = i - half + 0.5                                # windowed_sinc.h:18
-    # math/sinc.h: sinc(x) = sin(x)/x；x=0 处取 1
+    t = i - half + 0.5
     with np.errstate(invalid="ignore", divide="ignore"):
-        s = np.sinc(t * omega / np.pi)  # np.sinc 已归一化（sin(pi x)/(pi x)）
-    # windowed_sinc.h:20: math::sinc(t*omega) —— math::sinc 定义为 sin(x)/x（未归一化）
-    # np.sinc(z) = sin(pi z)/(pi z)，所以 math::sinc(t*omega) = np.sinc(t*omega/pi)
-    w = window(t - half, count)                       # window(t-half,count)
+        s = np.sinc(t * omega / np.pi)
+    w = window(t - half, count)
     taps = s * w * corr
     return taps.astype(np.float64)
 
 
 def lowpass_taps(cutoff_hz: float, trans_width_hz: float, sample_rate_hz: float,
                  odd: bool = False, window=nuttall) -> np.ndarray:
-    """低通 FIR 抽头。对照 taps/low_pass.h:7-11。
+    """Low-pass FIR taps.
 
     Args:
-        cutoff_hz: -6dB 截止频率（Hz），必须 < sample_rate/2。
-        trans_width_hz: 过渡带宽度（Hz），决定抽头数。
-        sample_rate_hz: 采样率（Hz）。
-        odd: True 强制奇数抽头（Type I 线性相位），对照 low_pass.h:9。
+        cutoff_hz: -6 dB cutoff (Hz), must be < sample_rate/2.
+        trans_width_hz: transition-band width (Hz); sets the tap count.
+        sample_rate_hz: sample rate (Hz).
+        odd: force an odd tap count (Type-I linear phase).
     """
     count = estimate_tap_count(trans_width_hz, sample_rate_hz)
     if odd and count % 2 == 0:
@@ -142,10 +115,10 @@ def lowpass_taps(cutoff_hz: float, trans_width_hz: float, sample_rate_hz: float,
 
 def highpass_taps(cutoff_hz: float, trans_width_hz: float, sample_rate_hz: float,
                   window=nuttall) -> np.ndarray:
-    """高通 FIR 抽头 = 频移低通（i 倍调制到 ±Nyquist）。
+    """High-pass FIR = low-pass prototype modulated to +/- Nyquist.
 
-    对照 taps/high_pass.h：低通原型调制 exp(j*pi*n) 等效频率搬移 fs/2。
-    高通必须用奇数抽头（Type I，反对称到直流为零）。
+    High-pass filters must use an odd (Type-I) tap count so the DC value is
+    exactly zero.
     """
     count = estimate_tap_count(trans_width_hz, sample_rate_hz)
     if count % 2 == 0:
@@ -157,7 +130,7 @@ def highpass_taps(cutoff_hz: float, trans_width_hz: float, sample_rate_hz: float
 
 def bandpass_taps(low_cut_hz: float, high_cut_hz: float, trans_width_hz: float,
                   sample_rate_hz: float, window=nuttall) -> np.ndarray:
-    """带通 FIR 抽头 = 两个低通之差。对照 taps/band_pass.h。"""
+    """Band-pass FIR = difference of two low-pass prototypes."""
     count = estimate_tap_count(trans_width_hz, sample_rate_hz)
     if count % 2 == 0:
         count += 1
@@ -166,17 +139,15 @@ def bandpass_taps(low_cut_hz: float, high_cut_hz: float, trans_width_hz: float,
     return (lp_hi - lp_lo).astype(np.float64)
 
 
-# ─────────────────────────────────────────────────────────────────
-# Root Raised Cosine（RRC）脉冲成形
-# ─────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Root Raised Cosine (RRC) pulse shaping
+# ---------------------------------------------------------------------------
 def root_raised_cosine_taps(count: int, beta: float,
                             symbol_rate_hz: float, sample_rate_hz: float) -> np.ndarray:
-    """Root Raised Cosine 脉冲成形 FIR。
+    """Root-raised-cosine pulse-shaping FIR.
 
-    对照 taps/root_raised_cosine.h:8-34：
-        Ts = samplerate/symbolrate（每个符号的采样数）
-        t[i] = i - count/2 + 0.5
-        特殊点 t=0 与 t=±Ts/(4*beta) 给闭式；否则标准 RRC 公式。
+    ``Ts = sample_rate / symbol_rate`` samples per symbol; the standard closed
+    form is used, with the analytic limit at t=0 and at t=+/-Ts/(4*beta).
     """
     if not 0.0 < beta <= 1.0:
         raise ValueError(f"beta must be in (0,1], got {beta}")
@@ -192,17 +163,14 @@ def root_raised_cosine_taps(count: int, beta: float,
     for k in range(count):
         tk = t[k]
         if tk == 0.0:
-            # root_raised_cosine.h:18
             taps[k] = (1.0 + beta * (4.0 / np.pi - 1.0)) / Ts
         elif abs(tk - limit) < 1e-12 or abs(tk + limit) < 1e-12:
-            # root_raised_cosine.h:21
             taps[k] = (
                 ((1.0 + 2.0 / np.pi) * np.sin(np.pi / (4.0 * beta))
                  + (1.0 - 2.0 / np.pi) * np.cos(np.pi / (4.0 * beta)))
                 * beta / (Ts * np.sqrt(2.0))
             )
         else:
-            # root_raised_cosine.h:24
             x = 4.0 * beta * tk / Ts
             taps[k] = (
                 (np.sin((1.0 - beta) * np.pi * tk / Ts)

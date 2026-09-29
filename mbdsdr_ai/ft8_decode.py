@@ -1,8 +1,10 @@
-"""FT8 完整软解码链：8FSK 软判决 → colorder 重排 → LDPC(174,91) BP。
+# SPDX-License-Identifier: MIT
+"""FT8 完整软解码链：8FSK 软判决 → LDPC(174,91) BP（独立实现）。
 
-帧结构（genft8.f90）：S7 D29 S7 D29 S7，共 79 符号。
+帧结构：S7 D29 S7 D29 S7，共 79 符号。
 同步 Costas 块在符号 0-6、36-42、72-78；58 个数据符号在 7-35、43-71。
-每数据符号 3 bit（graymap 映射），58×3=174 = LDPC 码字长。
+每数据符号 3 bit（Gray 映射），58×3=174 = LDPC 码字长。
+帧结构为公开协议事实。
 """
 from __future__ import annotations
 

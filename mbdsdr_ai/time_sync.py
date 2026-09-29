@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 授时（纯 socket，无第三方依赖）
 ======================================

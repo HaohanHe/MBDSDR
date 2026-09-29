@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 tests/test_solar_system_ephemeris.py
 =====================================

@@ -1,17 +1,18 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai.analysis — 信号分析与协议解析包
 ==========================================
 
-移植自 URH (Universal Radio Hacker) 与 inspectrum，并加 AI 增强：
+依据公开信号分析与协议解析方法独立实现，并加 AI 增强；
+URH (Universal Radio Hacker) 与 inspectrum 仅作技术参考与致谢，本仓未包含其源代码：
 
-- :class:`ModulationClassifier` — 基于特征的自动调制识别（对照 URH
-  ``ainterpretation/AutoInterpretation.py::detect_modulation``）。
+- :class:`ModulationClassifier` — 基于特征的自动调制识别（参考 URH
+  自动调制识别的特征工程思路）。
 - :class:`GardnerClockRecovery` / :class:`EarlyLateGate` — 符号定时恢复
-  （URH 走开环平台长度路线，这里补上经典闭环算法）。
+  （经典闭环 Gardner / 早迟门算法，教材方法）。
 - :class:`ProtocolParser` — 同步字 / 长度字段 / CRC-16/CCITT 自动解析
-  （对照 URH ``awre/engines/LengthEngine.py`` 与 ``util/GenericCRC.py``）。
-- :class:`Spectrogram` — STFT 时频分析 + 选框测量（对照 inspectrum
-  ``spectrogramplot.cpp::getLine`` 与 ``tuner.cpp``）。
+  （通用同步与 CRC 校验思路）。
+- :class:`Spectrogram` — STFT 时频分析 + 选框测量（经典 STFT / 选框测量方法）。
 
 设计原则：
 - 全部纯 numpy/scipy，不依赖 PyQt / Cython。

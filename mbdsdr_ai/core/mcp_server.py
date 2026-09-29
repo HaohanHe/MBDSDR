@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR Core - MCP / JSON-RPC 2.0 接口
 =======================================

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 MainWindow 三栏「平行视界」布局 offscreen 测试
 =================================================

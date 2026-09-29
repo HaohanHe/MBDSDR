@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 自动调制识别（AMR）
 ====================================

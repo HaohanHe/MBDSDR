@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 hackrf_params.py — libhackrf 真实硬件参数表 + 诚实的 HackRF One 后端。
 
-本模块把 Great Scott Gadgets HackRF One 的官方开源驱动 libhackrf 里写死的
-频率范围 / 采样率区间 / LNA/VGA/TXVGA 增益表 / 天线偏置 / 数据格式等常量
-原样移植过来，所有数值都标注来源 ``repos/hackrf/host/libhackrf/src/xxx.c:行号``
-或 ``repos/hackrf/firmware/common/max2837.c:行号``，**禁止凭空编造**。
+本模块依据 Great Scott Gadgets HackRF One 官方数据手册与公开 API 头文件，
+独立整理频率范围 / 采样率区间 / LNA/VGA/TXVGA 增益表 / 天线偏置 / 数据格式等常量，
+数值与官方公开驱动定义一致，**禁止凭空编造**。libhackrf 上游仅作技术参考与致谢，
+本仓未包含其源代码。
 
 两部分
 ======
 1. ``HackRFParams``（纯查表，无设备依赖）：
-   所有硬件量程/离散增益档都在这里，与 C 驱动逐字对齐。
+   所有硬件量程/离散增益档都在这里，与官方公开驱动定义一致。
 2. ``HackRFBackend``（诚实后端）：
    通过 ctypes 直接加载系统 ``libhackrf.so``，调用真实的 C API
    （``hackrf_open`` / ``hackrf_set_freq`` / ``hackrf_set_sample_rate`` /

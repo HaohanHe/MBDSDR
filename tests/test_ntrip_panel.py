@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """NTRIP 配置面板 offscreen 测试
 ================================
 

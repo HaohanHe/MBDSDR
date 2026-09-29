@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - IQ 域自适应降噪（ANR）
 =========================================

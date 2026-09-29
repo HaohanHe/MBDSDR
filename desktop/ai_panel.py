@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 import os
 """
 MBDSDR AI 对话面板

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR - 解码器注册表
 ======================

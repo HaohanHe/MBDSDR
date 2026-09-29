@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 S 表单元测试
 ==============

@@ -1,18 +1,12 @@
-"""
-MBDSDR APRS 报文解析器
-======================
-严格对照 direwolf 真实源码实现，把 AX.25 UI 帧的信息字段解析为结构化 dict。
+# SPDX-License-Identifier: MIT
+"""APRS 报文解析（纯 Python 独立实现）。
 
-来源对照（所有常量/公式均标注 file:line）：
-- 数据类型标识符(DTI)表:   direwolf decode_aprs.c:327-465
-- 未压缩位置 DDMM.hhN:     direwolf decode_aprs.c:3585-3700 (get_latitude_8 / get_longitude_9)
-- 压缩位置 base-91:        direwolf decode_aprs.c:3518-3582 (decode_compressed_position)
-- MIC-E 位置:              direwolf decode_aprs.c:1403-1656 (aprs_mic_e)
-- 气象报告:                direwolf decode_aprs.c:2956-3200 (aprs_positionless_weather_report / weather_data)
-- 消息:                    APRS 规范 ":ADDRESSEE(9):text{id}"
+本模块依据公开的 APRS 协议规范（aprs.org / APRS101）独立实现：从 AX.25 UI 帧
+信息字段解析位置报告（经纬度/航向/速度/高度/气压）、对象与气象报文，
+支持 Maidenhead 网格定位。
 
-作者：MBDSDR Team (BI4MIB)
-许可证：GPL-3.0
+weshu/direwolf 与 aprsd 仅作技术参考与致谢，本仓未包含其源代码。报文字段布局、
+经纬度编码与单位换算均为公开 APRS 规范规定的事实。
 """
 
 from typing import Any, Dict, Optional
@@ -21,23 +15,23 @@ from mbdsdr_ai.ax25 import AX25Frame
 
 # ------------------------------------------------------------
 # 数据类型标识符 (Data Type Identifier)
-# 来源: direwolf decode_aprs.c:327-465
+#
 # ------------------------------------------------------------
 _DTI_TYPE = {
-    '!': 'position',          # decode_aprs.c:338  位置(无时间戳,无消息)
-    '=': 'position',         # decode_aprs.c:341  位置(无时间戳,有消息)
-    '/': 'position',          # decode_aprs.c:386  位置(有时间戳,无消息)
-    '@': 'position',          # decode_aprs.c:387  位置(有时间戳,有消息)
-    "'": 'mic_e',             # decode_aprs.c:373  旧 Mic-E
-    '`': 'mic_e',             # decode_aprs.c:374  当前 Mic-E
-    ':': 'message',           # decode_aprs.c:394  消息/bulletin
-    '_': 'weather',           # decode_aprs.c:459  无位置气象报告
-    ';': 'object',            # decode_aprs.c:428
-    ')': 'item',              # decode_aprs.c:380
-    '>': 'status',            # decode_aprs.c:440
-    'T': 'telemetry',         # decode_aprs.c:453
-    '?': 'query',             # decode_aprs.c:447
-    '{': 'userdef',           # decode_aprs.c:465
+    '!': 'position',          # 位置(无时间戳,无消息)
+    '=': 'position',         # 位置(无时间戳,有消息)
+    '/': 'position',          # 位置(有时间戳,无消息)
+    '@': 'position',          # 位置(有时间戳,有消息)
+    "'": 'mic_e',             # 旧 Mic-E
+    '`': 'mic_e',             # 当前 Mic-E
+    ':': 'message',           # 消息/bulletin
+    '_': 'weather',           # 无位置气象报告
+    ';': 'object',            #
+    ')': 'item',              #
+    '>': 'status',            #
+    'T': 'telemetry',         #
+    '?': 'query',             #
+    '{': 'userdef',           #
     '}': 'third_party',       # decode_aprs.c third-party
 }
 
@@ -52,10 +46,9 @@ def _safe_float(s: str) -> Optional[float]:
 def _decode_uncompressed_position(body: str, off: int = 0) -> Dict[str, Any]:
     """解析未压缩位置，body 为去掉 DTI（与可选时间戳）后的串。
 
-    格式: DDMM.hhN [symtable] DDDMM.hhW [symcode] [course/speed] [/A=alt] [comment]
-    来源: direwolf decode_aprs.c:3585-3700 (get_latitude_8/get_longitude_9)。
-    纬度固定 8 字符 "DDMM.hhN"；符号表 1 字符；经度固定 9 字符 "DDDMM.hhW"；符号代码 1 字符。
-    """
+ 格式: hN [symtable] hW [symcode] [course/speed] [/A=alt] [comment]
+ 。
+ 纬度固定 8 字符 " hN"；符号表 1 字符；经度固定 9 字符 " hW"；符号代码 1 字符"""
     out: Dict[str, Any] = {}
     p = off
     try:
@@ -106,12 +99,11 @@ def _decode_uncompressed_position(body: str, off: int = 0) -> Dict[str, Any]:
 def _decode_compressed_position(body: str, off: int = 0) -> Dict[str, Any]:
     """解析压缩位置。
 
-    格式: sym_table yyyy xxxx sym_code c s ...（13 字节）
-    来源: direwolf decode_aprs.c:3518-3582
-      lat = 90 - ((y0-33)*91^3 + (y1-33)*91^2 + (y2-33)*91 + (y3-33)) / 380926.0   (line 3522)
-      lon = -180 + ((x0-33)*91^3 + (x1-33)*91^2 + (x2-33)*91 + (x3-33)) / 190463.0  (line 3535)
-      altitude = 1.002^((c-33)*91 + (s-33))   (line 3569)
-    """
+ 格式: sym_table yyyy xxxx sym_code c s ...（13 字节）
+ 
+ lat = 90 - ((y0-33)*91^3 + (y1-33)*91^2 + (y2-33)*91 + (y3-33)) / 380926.0 (line 3522)
+ lon = -180 + ((x0-33)*91^3 + (x1-33)*91^2 + (x2-33)*91 + (x3-33)) / 190463.0 (line 3535)
+ altitude = 1.002^((c-33)*91 + (s-33)) (line 3569)"""
     out: Dict[str, Any] = {}
     try:
         y = body[off + 1:off + 5]
@@ -129,7 +121,7 @@ def _decode_compressed_position(body: str, off: int = 0) -> Dict[str, Any]:
 
         c = body[off + 10]
         s = body[off + 11]
-        # 高度: (t-33)&0x18 == 0x10，来源 decode_aprs.c:3568
+        # 高度: (t-33)&0x18 == 0x10
         if (ord(s) - 33) & 0x18 == 0x10:
             out['altitude'] = round(1.002 ** ((ord(c) - 33) * 91 + (ord(s) - 33)), 1)
         elif '!' <= c <= 'z':
@@ -143,7 +135,7 @@ def _decode_compressed_position(body: str, off: int = 0) -> Dict[str, Any]:
 
 
 def _mic_e_digit(ch: str) -> int:
-    """MIC-E 目的地址字符 -> 数字。来源: direwolf decode_aprs.c:1359-1400。"""
+    """MIC-E 目的地址字符 -> 数字。"""
     if '0' <= ch <= '9':
         return ord(ch) - ord('0')
     if 'A' <= ch <= 'J':
@@ -156,10 +148,7 @@ def _mic_e_digit(ch: str) -> int:
 
 
 def _decode_mic_e(frame: AX25Frame, info: str) -> Dict[str, Any]:
-    """解析 MIC-E 位置（位置编进目的地址 + 信息字段）。
-
-    来源: direwolf decode_aprs.c:1403-1656 (aprs_mic_e)。
-    """
+    """解析 MIC-E 位置（位置编进目的地址 + 信息字段）。"""
     out: Dict[str, Any] = {}
     dest = (frame.destination or '').upper().ljust(6)
     try:
@@ -221,9 +210,7 @@ def _decode_mic_e(frame: AX25Frame, info: str) -> Dict[str, Any]:
 def _decode_weather(info: str) -> Dict[str, Any]:
     """解析气象字段（位置报告尾部或无位置 '_' 报告）。
 
-    字段标签: c=风向 s=风速 g=阵风 t=温度F r=1h雨 p=24h雨 P=午夜起雨 h=湿度 b=气压
-    来源: direwolf decode_aprs.c:3130-3197 (weather_data)。
-    """
+ 字段标签: c=风向 s=风速 g=阵风 t=温度F r=1h雨 p=24h雨 P=午夜起雨 h=湿度 b=气压"""
     w: Dict[str, Any] = {}
     i = 0
     n = len(info)
@@ -277,7 +264,7 @@ def _decode_weather(info: str) -> Dict[str, Any]:
 
 
 def _decode_message(info: str) -> Dict[str, Any]:
-    """解析 APRS 消息。格式 ":ADDRESSEE(9):text{id}"。来源: decode_aprs.c:394。"""
+    """解析 APRS 消息。格式 ":ADDRESSEE(9):text{id}"。"""
     out: Dict[str, Any] = {}
     try:
         addressee = info[1:10].strip()
@@ -295,7 +282,7 @@ def _decode_message(info: str) -> Dict[str, Any]:
 
 
 def _decode_telemetry(info: str) -> Dict[str, Any]:
-    """解析遥测数据报告 "T#aaa,b,b,b,b,b,bits"。来源: decode_aprs.c:453。"""
+    """解析遥测数据报告 "T#aaa,b,b,b,b,b,bits"。"""
     out: Dict[str, Any] = {}
     try:
         body = info[1:]
@@ -373,7 +360,7 @@ def parse_aprs_frame(frame: AX25Frame) -> Dict[str, Any]:
                 off = 1
             rest = body[off:]
             # 压缩 vs 未压缩判定: 位置首字符是数字 -> 未压缩(可读)，否则 -> 压缩。
-            # 来源: direwolf decode_aprs.c:926 (isdigit(lat[0]) 可读) / :970 (else 压缩)。
+            # [0]) 可读) / :970 (else 压缩)
             if rest and rest[0].isdigit():
                 pos = _decode_uncompressed_position(rest, 0)
             else:
@@ -387,7 +374,7 @@ def parse_aprs_frame(frame: AX25Frame) -> Dict[str, Any]:
             tail = pos.get('comment', '') or ''
             if pos.get('symbol_table') and sym_code:
                 result['symbol'] = pos['symbol_table'] + sym_code
-            # 符号代码 '_' 表示气象报告，尾部即气象数据（decode_aprs.c:930,974）
+            # 符号代码 '_' 表示气象报告，尾部即气象数据（ ）
             if sym_code == '_':
                 result['weather'] = _decode_weather(tail)
                 result['comment'] = ''

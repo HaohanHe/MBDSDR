@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 录制回放：IQPlayback（complex64 raw + SigMF meta）+ PlaybackSource
 =====================================================================

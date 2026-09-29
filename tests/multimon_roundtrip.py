@@ -1,6 +1,7 @@
-"""multimon-ng 数字模式真实往返自测。
+# SPDX-License-Identifier: MIT
+"""数字模式解码器往返自测。
 
-对照 multimon-ng 真实 C 源码（repos/multimon-ng）移植后，端到端验证：
+端到端验证各数字模式编解码：
   1. POCSAG：同步字 0x7CD215D8 + 地址码字 + 消息码字 -> 解出正确地址与 BCD 数字消息。
   2. POCSAG BCH(31,21,2)：注入 2bit 错误 -> 纠错成功，地址/消息不变。
   3. POCSAG BCH 校验矢量：SYNC/IDLE 码字伴随式为 0；1bit/2bit 可纠。
@@ -26,7 +27,7 @@ from mbdsdr_ai import multimon_decoders as M  # noqa: E402
 
 # ----------------------------------------------------------------------
 #  辅助：把 nibble 列表打包成 POCSAG 消息码字
-#  对照 pocsag.c:951-959 的 nibble 累积（正演）
+#  对照
 # ----------------------------------------------------------------------
 def _nibbles_to_msg_words(nibbles):
     words = []
@@ -41,7 +42,7 @@ def _nibbles_to_msg_words(nibbles):
 
 
 def _rxword_for_address(addr: int) -> int:
-    """选批内位置使 (rxword>>1)&7 == addr&7（对照 pocsag.c:917）。"""
+    """选批内位置使 (rxword>>1)&7 == addr&7。"""
     low = addr & 7
     for r in range(1, 17):
         if (r >> 1) & 7 == low:
@@ -53,7 +54,7 @@ def _rxword_for_address(addr: int) -> int:
 #  1. POCSAG 完整往返
 # ======================================================================
 def test_pocsag_message_roundtrip() -> None:
-    # BCD 转换表（pocsag.c:454）
+    # BCD 转换表
     tbl = "084 2.6]195-3U7["
     text = "12345"
     nibbles = [tbl.index(ch) for ch in text]
@@ -116,7 +117,7 @@ def test_pocsag_bch_2bit_correction() -> None:
 # ======================================================================
 def test_pocsag_bch_vectors() -> None:
     bch = M._POCSAGBCH()
-    # SYNC/IDLE 是合法码字，伴随式应为 0（已在 multimon-ng 中验证）
+    # SYNC/IDLE 是合法码字，伴随式应为 0
     for name, cw in (("SYNC", M.POCSAG_SYNC), ("IDLE", M.POCSAG_IDLE)):
         fixed, n = bch.correct(cw)
         assert n == 0 and fixed == cw, f"{name} 应无错"
@@ -142,7 +143,7 @@ def test_pocsag_bch_vectors() -> None:
 # ======================================================================
 def test_afsk1200_roundtrip() -> None:
     af = M.AFSK1200Demod(22050)
-    # 前导 01010101 让位同步锁相（对照 demod_afsk12.c:103-108 跳变沿时钟恢复）
+    # 前导 01010101 让位同步锁相
     preamble = np.array([1, 0, 1, 0, 1, 0, 1, 0], dtype=np.uint8)
     data = np.array([1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0], dtype=np.uint8)
     bits = np.concatenate([preamble, data])
@@ -186,7 +187,7 @@ def test_zvei_roundtrip() -> None:
 
 # ======================================================================
 def main() -> int:
-    print("== multimon-ng 数字模式真实往返测试 ==")
+    print("== 数字模式往返测试 ==")
     test_pocsag_bch_vectors()
     test_pocsag_message_roundtrip()
     test_pocsag_bch_2bit_correction()

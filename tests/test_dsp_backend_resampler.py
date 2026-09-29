@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 音频重采样器确定性测试
 ======================

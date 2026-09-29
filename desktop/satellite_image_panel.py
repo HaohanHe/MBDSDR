@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 桌面端 - 卫星云图面板 (SatelliteImagePanel)
 ====================================================

@@ -1,15 +1,15 @@
+# SPDX-License-Identifier: MIT
 """DSDcc lite 往返测试。
 
 对应任务第二步：
-  - 4FSK：合成 4FSK 信号 -> 解调 -> 符号序列正确
-  - DMR：合成 DMR 帧(同步字+语音帧) -> 同步检测 -> 时隙/语音帧识别
-  - P25：合成 P25 帧 -> 同步检测 -> NID(NAC/DUID) 解析
-  - 根升余弦：滤波器脉冲响应正确（对照 DSDcc xcoeffs）
-  - 参数验证：符号率 4800、alpha=0.2
+ - 4FSK：合成 4FSK 信号 -> 解调 -> 符号序列正确
+ - DMR：合成 DMR 帧(同步字+语音帧) -> 同步检测 -> 时隙/语音帧识别
+ - P25：合成 P25 帧 -> 同步检测 -> NID(NAC/DUID) 解析
+ - 根升余弦：滤波器脉冲响应正确（对照 DSDcc xcoeffs）
+ - 参数验证：符号率 4800、alpha=0.2
 
-运行: python -m pytest tests/dsdcc_test.py -v
-来源: repos/DSDcc/dsd_{symbol,filters,sync,dmr}.cpp
-"""
+运行: python -m pytest -v
+{symbol,filters,sync,dmr}.cpp"""
 
 from __future__ import annotations
 
@@ -50,12 +50,12 @@ def signs_to_dibits(signs):
 # 参数验证
 # --------------------------------------------------------------------------- #
 def test_constants():
-    assert dl.SYMBOL_RATE_4800 == 4800.0          # dsd_symbol.cpp:41
-    assert dl.SPS_4800 == 10                       # dsd_symbol.cpp:52,370
-    assert dl.RRC_ALPHA_DMR == 0.2                 # dsd_filters.cpp:29
-    assert dl.DMR_TS_DIBITS == 144                 # dmr.h:26 288bit/2
-    assert dl.DMR_VOCODER_FRAME_LEN == 72          # dmr.h:34
-    assert dl.P25_IMBE_FRAME_BITS == 88            # dsd_mbe.cpp:61
+    assert dl.SYMBOL_RATE_4800 == 4800.0          #
+    assert dl.SPS_4800 == 10                       #
+    assert dl.RRC_ALPHA_DMR == 0.2                 #
+    assert dl.DMR_TS_DIBITS == 144                 # bit/2
+    assert dl.DMR_VOCODER_FRAME_LEN == 72          #
+    assert dl.P25_IMBE_FRAME_BITS == 88            #
 
 
 # --------------------------------------------------------------------------- #
@@ -63,7 +63,7 @@ def test_constants():
 # --------------------------------------------------------------------------- #
 def test_rrc_impulse_response():
     taps = dl.rrc_impulse_response(sps=10, alpha=0.2, span_symbols=6)
-    # 61 抽头 = NZEROS=60（dsd_filters.h:20）
+    # 61 抽头 = NZEROS=60（ ）
     assert len(taps) == 61
     # 主峰在中心
     peak_idx = int(np.argmax(np.abs(taps)))
@@ -71,7 +71,7 @@ def test_rrc_impulse_response():
     # 能量归一
     assert abs(np.sum(taps ** 2) - 1.0) < 1e-6
     # 与 DSDcc 真实 xcoeffs(alpha=0.2) 形状高度相关。
-    # 注：DSDcc xcoeffs 注释标称 Ts=6000 S/s（dsd_filters.cpp:29），与解析公式在
+    # 注：DSDcc xcoeffs 注释标称 Ts=6000 S/s（ ），与解析公式在
     # 48000/10 下的抽头间隔略有差异，故相关系数阈值取 0.90 而非 0.99。
     ref = np.array(dl.DMR_RRC_COEFFS_ALPHA02)
     corr = np.corrcoef(taps / np.max(np.abs(taps)), ref / np.max(np.abs(ref)))[0, 1]
@@ -110,7 +110,7 @@ def test_digitize_levels():
     demod._center = 0.0
     demod._umid = 2.0
     demod._lmid = -2.0
-    # dsd_symbol.cpp:423-450
+    #
     assert demod.digitize(+3.0) == 1   # > umid  -> +3
     assert demod.digitize(+1.0) == 0   # (center,umid) -> +1
     assert demod.digitize(-1.0) == 2   # (lmid,center) -> -1

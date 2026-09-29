@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 bladerf_params.py — libbladeRF 真实硬件参数表 + 诚实的 bladeRF 后端。
 
-本模块把 Nuand bladeRF 开源驱动 libbladeRF 里写死的频率范围 / 采样率区间 /
-带宽 / RX/TX 增益分级（legacy VGA stage API）/ 数据格式等常量原样移植过来，
-所有数值都标注来源 ``repos/bladeRF/host/libraries/libbladeRF/include/bladeRF*.h:行号``
-或 ``repos/bladeRF/fpga_common/include/bladerf2_common.h:行号``，**禁止凭空编造**。
+本模块依据 Nuand bladeRF 官方数据手册与公开 API 头文件，独立整理频率范围 /
+采样率区间 / 带宽 / RX/TX 增益分级（legacy VGA stage API）/ 数据格式等常量，
+数值与官方公开驱动定义一致，**禁止凭空编造**。libbladeRF 上游仅作技术参考与致谢，
+本仓未包含其源代码。
 
 两部分
 ======

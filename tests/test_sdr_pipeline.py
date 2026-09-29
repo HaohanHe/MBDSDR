@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 SDR 真实数据链路测试
 =====================

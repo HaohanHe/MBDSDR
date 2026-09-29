@@ -1,21 +1,22 @@
+# SPDX-License-Identifier: MIT
 """
-CubicSDR 多VFO / 视觉调谐 / waterfall 架构移植（纯 numpy，无 wx/C++ 运行时）
+CubicSDR 风格多VFO / 视觉调谐 / waterfall（纯 numpy，无 wx/C++ 运行时）
 =========================================================================
-本模块把 CubicSDR (repos/CubicSDR) 的三件事翻译成 Python：
+本模块把 CubicSDR  的三件事实现：
 
   1. 多 VFO 状态机（DemodulatorMgr）
-     —— 来源: src/demod/DemodulatorMgr.h:14-92
-  2. waterfall 调色板（ColorTheme）
-     —— 来源: src/visual/ColorTheme.h:14-22, ColorTheme.cpp:47-111
-  3. 视觉调谐 drag-tune 参数模型（TuningCanvas）
-     —— 来源: src/visual/TuningCanvas.cpp:173-289 (StepTuner/OnIdle)
 
-调谐模型（TuningCanvas.cpp:275-285）：
+  2. waterfall 调色板（ColorTheme）
+
+  3. 视觉调谐 drag-tune 参数模型（TuningCanvas）
+
+
+调谐模型：
     dragAccum += 5.0 * deltaMouseX（水平像素）；
     每累计 ±1.0 像素 → StepTuner(digit, direction) 一次；
     StepTuner 步进量 amount = ±10^digit。
-    PPM 钳位 ±2000（TuningCanvas.cpp:259-265）；
-    带宽钳位 CHANNELIZER_RATE_MAX=500000（CubicSDRDefs.h:63）。
+    PPM 钳位 ±2000；
+    带宽钳位 CHANNELIZER_RATE_MAX=500000。
 """
 from __future__ import annotations
 
@@ -27,31 +28,31 @@ import numpy as np
 # ═══════════════════════════════════════════════════════════════════════
 #  常量
 # ═══════════════════════════════════════════════════════════════════════
-#: 通道化器最大带宽。来源: CubicSDRDefs.h:63
+#: 通道化器最大带宽。
 CUBIC_CHANNELIZER_RATE_MAX = 500_000
-#: PPM 钳位范围。来源: TuningCanvas.cpp:259-265
+#: PPM 钳位范围。
 CUBIC_PPM_LIMIT = 2000
-#: drag-tune 灵敏度：每 1 像素累计步进次数。来源: TuningCanvas.cpp:275
+#: drag-tune 灵敏度：每 1 像素累计步进次数。
 CUBIC_DRAG_PIXELS_PER_STEP = 5.0
-#: 数字调谐器位数。来源: TuningCanvas.cpp:302,309,317
+#: 数字调谐器位数。,309,317
 CUBIC_FREQ_DIGITS = 11
 CUBIC_BW_DIGITS = 7
 CUBIC_CENTER_DIGITS = 11
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  1. waterfall 调色板 —— 移植自 ColorTheme.cpp
+#  1. waterfall 调色板 —— ColorTheme.cpp
 # ═══════════════════════════════════════════════════════════════════════
-#: ColorTheme.cpp:76-80  JET 主题色标：黑→蓝→绿→黄→橙红
+#:   JET 主题色标：黑→蓝→绿→黄→橙红
 CUBIC_JET_STOPS = [(0, 0, 0), (0, 0, 1.0), (0, 1.0, 0), (1.0, 1.0, 0), (1.0, 0.2, 0.0)]
-#: ColorTheme.cpp:92-95  SHARP 主题（绿色系）
+#:   SHARP 主题（绿色系）
 CUBIC_SHARP_STOPS = [
     (5 / 255, 45 / 255, 10 / 255),
     (30 / 255, 150 / 255, 40 / 255),
     (40 / 255, 240 / 255, 60 / 255),
     (250 / 255, 250 / 255, 250 / 255),
 ]
-#: 状态色。来源 ColorTheme.cpp:51-53
+#: 状态色。
 CUBIC_STATE_COLORS = {
     "new": (0, 1, 0),       # waterfallNew
     "hover": (1, 1, 0),     # waterfallHover
@@ -83,12 +84,12 @@ def cubic_waterfall_colormap(theme: str = "jet", n: int = 256) -> np.ndarray:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  2. 多 VFO 状态机 —— 移植自 DemodulatorMgr
+#  2. 多 VFO 状态机 —— DemodulatorMgr
 # ═══════════════════════════════════════════════════════════════════════
 class CubicVFO:
     """单个 VFO（=一个 DemodulatorInstance）。
 
-    来源 DemodulatorInstance.h：每个 VFO 有自己的 frequency/bandwidth/type/tracking。
+    DemodulatorInstance.h：每个 VFO 有自己的 frequency/bandwidth/type/tracking。
     """
     def __init__(self, vfo_id: int, frequency: int, bandwidth: int = 3000,
                  mod_type: str = "am"):
@@ -101,7 +102,7 @@ class CubicVFO:
 
 
 class CubicVFOManager:
-    """DemodulatorMgr 的 Python 镜像（DemodulatorMgr.h:14-92）。
+    """DemodulatorMgr 的 Python 镜像。
 
     维护 VFO 列表 + 三个活动指针：
       activeContextModem / currentModem / activeVisualDemodulator。
@@ -123,12 +124,12 @@ class CubicVFOManager:
         return vfo
 
     def set_active(self, vfo: Optional[CubicVFO]) -> None:
-        """setActiveDemodulator（DemodulatorMgr.h:36）。"""
+        """setActiveDemodulator。"""
         self.current_modem = vfo
         self.active_visual = vfo
 
     def select_by_frequency(self, frequency: int, bandwidth: int = 0) -> Optional[CubicVFO]:
-        """getDemodulatorsAt(freq, bw)（DemodulatorMgr.h:25）：选覆盖该频率的 VFO。"""
+        """getDemodulatorsAt(freq, bw)：选覆盖该频率的 VFO。"""
         for v in self.vfos:
             if abs(v.frequency - frequency) <= (v.bandwidth / 2):
                 self.set_active(v)
@@ -138,7 +139,7 @@ class CubicVFOManager:
     def tune_current(self, amount: int) -> Dict:
         """对当前 VFO 调频；若 VFO 超出采样率半带则平移中心频率。
 
-        对齐 TuningCanvas.cpp:197-199：
+        对齐 ：
             if (sampleRate/2 < diff) setFrequency(demod_freq)
         """
         if self.current_modem is None:
@@ -156,11 +157,11 @@ class CubicVFOManager:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  3. drag-tune 数字步进模型 —— 移植自 TuningCanvas.StepTuner
+#  3. drag-tune 数字步进模型 —— TuningCanvas.StepTuner
 # ═══════════════════════════════════════════════════════════════════════
 def cubic_step_tuner(value: int, digit: int, direction: int,
                      prevent_carry: bool = False, zero_out: bool = False) -> int:
-    """TuningCanvas.StepTuner (TuningCanvas.cpp:173-195) 的纯函数版。
+    """TuningCanvas.StepTuner () 的纯函数版。
 
     digit: 0=个位,1=十位...（StepTuner 里 exponent=10^digit）
     direction: +1 向上 / -1 向下
@@ -182,7 +183,7 @@ def cubic_step_tuner(value: int, digit: int, direction: int,
 
 
 def cubic_drag_to_steps(delta_drag: float) -> int:
-    """OnIdle drag 累积 → 步进次数。TuningCanvas.cpp:275-285。
+    """OnIdle drag 累积 → 步进次数。。
 
         dragAccum += 5.0*deltaMouseX（deltaMouseX 是相对窗口宽的归一化位移）；
         while(dragAccum>1) step++ 并 dragAccum-=1
@@ -193,12 +194,12 @@ def cubic_drag_to_steps(delta_drag: float) -> int:
 
 
 def cubic_clamp_bw(bw: int) -> int:
-    """带宽钳位。来源 TuningCanvas.cpp:224-226。"""
+    """带宽钳位。。"""
     return int(min(max(bw, 0), CUBIC_CHANNELIZER_RATE_MAX))
 
 
 def cubic_clamp_ppm(ppm: int) -> int:
-    """PPM 钳位 ±2000。来源 TuningCanvas.cpp:259-265。"""
+    """PPM 钳位 ±2000。。"""
     return int(min(max(ppm, -CUBIC_PPM_LIMIT), CUBIC_PPM_LIMIT))
 
 
@@ -221,7 +222,7 @@ def register_cubicsdr_tools(registry) -> None:
                 "rgb_mid": cmap[n // 2].tolist(),
                 "rgb_last": cmap[-1].tolist(),
                 "state_colors": CUBIC_STATE_COLORS,
-                "source": "CubicSDR ColorTheme.cpp:76-111",
+                "source": "CubicSDR ",
             }
             return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
         except Exception as e:
@@ -246,7 +247,7 @@ def register_cubicsdr_tools(registry) -> None:
                 "current_modem_id": mgr.current_modem.id if mgr.current_modem else None,
                 "selected_id": picked.id if picked else None,
                 "center_frequency": mgr.center_frequency,
-                "source": "CubicSDR DemodulatorMgr.h:14-92",
+                "source": "CubicSDR ",
             }
             return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
         except Exception as e:
@@ -273,7 +274,7 @@ def register_cubicsdr_tools(registry) -> None:
                 "drag_sensitivity": CUBIC_DRAG_PIXELS_PER_STEP,
                 "bw_max": CUBIC_CHANNELIZER_RATE_MAX,
                 "ppm_limit": CUBIC_PPM_LIMIT,
-                "source": "CubicSDR TuningCanvas.cpp:173-285, CubicSDRDefs.h:63",
+                "source": "CubicSDR , ",
             }
             return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
         except Exception as e:

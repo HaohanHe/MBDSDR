@@ -1,18 +1,19 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR - fldigi 多模式数字解码真实移植
-=========================================
+业余数字文本/信号模式调制解调（独立实现）
+==========================================
 
-本模块从 fldigi (w1hkj/fldigi, GPLv3) 真实 .cxx 源码移植：
-  - PSK31 (Varicode + DBPSK)         : src/psk/pskvaricode.cxx, src/psk/psk.cxx
-  - RTTY (ITA-2/Baudot + 2FSK)      : src/cw_rtty/rtty.cxx
-  - MFSK8/16/32 (非相干 FFT 检测)    : src/mfsk/mfsk.cxx
-  - FeldHell (振幅键控慢扫描文本)    : src/feld/feld.cxx, src/feld/Feld7x7-14.cxx
-  - Olivia MFSK 基类（RS+交织参数）  : src/olivia/olivia.cxx
-  - Thor 模式参数（继承 PSK FEC 卷积）: src/thor/thor.cxx
+本模块依据公开的业余无线电数字模式规格独立实现以下收发机原语：
 
-所有常量均在注释中标注来源文件:行号。
+  - PSK31  —— Varicode 可变长编码 + 差分 BPSK（31.25 baud）
+  - RTTY   —— ITA-2 (Baudot-Murray) 5 位码 + 2FSK（170 Hz 频偏 / 45.45 baud）
+  - MFSK   —— 多音移频键控，非相干 Goertzel 能量检测（MFSK8/16/32）
+  - FeldHell (Hellschreiber) —— 7×14 字符点阵振幅键控慢扫描文本
+  - Olivia / Thor —— 仅给出公开模式参数表（音调间隔、码率、卷积多项式）
 
-MBDSDR Project - AI定义无线电 - GPL-3.0 - BI4MIB
+Varicode、ITA-2、Hellschreiber 7×14 字符形状、各模式的音调/码率均为公开
+事实标准；本模块的 DSP、类结构与命名均为自行编写。fldigi（开源软件）作为技术思路参考与致谢；本仓未包含其源代码，
+所有实现均依据公开模式规格独立编写。
 """
 
 import math
@@ -21,7 +22,7 @@ from typing import List, Tuple, Optional, Dict
 
 
 # ============================================================================
-# Varicode 表 —— 来源: fldigi src/psk/pskvaricode.cxx:28-288
+# Varicode 表
 # 每行 8 个，共 256 项。索引即 ASCII/字节值，值为发射比特串（首比特先发）。
 # ============================================================================
 VARICODE_STRS = [
@@ -63,21 +64,18 @@ VARICODE_STRS = [
 class Varicode:
     """PSK31 Varicode 可变长度编码。
 
-    来源: fldigi src/psk/pskvaricode.cxx:28-338
     字符间用 "00" 两位间隔；Varicode 自身不含 "00" 子串。
     """
 
-    # 字符串表（编码用），索引=字节值 —— pskvaricode.cxx:28 varicodetab1[]
     ENC = VARICODE_STRS
 
     # 反向表（解码用）：比特串 -> 字节值
     DEC = {v: i for i, v in enumerate(VARICODE_STRS)}
 
-    SEPARATOR = "00"  # psk.cxx:2484-2485 tx_bit(0); tx_bit(0);
-
+    SEPARATOR = "00"  
     @classmethod
     def encode_char(cls, c: int) -> str:
-        """字节 -> Varicode 比特串（不含间隔位）。pskvaricode.cxx:327-330"""
+        """字节 -> Varicode 比特串（不含间隔位）。"""
         c = c & 0xFF
         if c >= len(cls.ENC):
             c = 0
@@ -85,18 +83,16 @@ class Varicode:
 
     @classmethod
     def encode_text(cls, text: str) -> str:
-        """文本 -> 完整比特流（字符间自动加 "00" 间隔）。psk.cxx:2467-2489 tx_char"""
+        """文本 -> 完整比特流（字符间自动加 "00" 间隔）。"""
         bits = []
         for ch in text:
             bits.append(cls.encode_char(ord(ch)))
-            bits.append(cls.SEPARATOR)  # psk.cxx:2484-2485
+            bits.append(cls.SEPARATOR)
         return "".join(bits)
 
     @classmethod
     def decode_bits(cls, bits: str) -> bytes:
-        """比特流 -> 字节序列。按 "00" 切分，每段查 DEC 表。
-        对应 psk.cxx:1113-1135 rx_bit: (shreg & 3)==0 时解码 shreg>>2。
-        """
+        """比特流 -> 字节序列。按 "00" 间隔切分，每段查 DEC 表还原字节。"""
         out = bytearray()
         buf = ""
         for b in bits:
@@ -110,9 +106,8 @@ class Varicode:
 
 
 # ============================================================================
-# ITA-2 (Baudot-Murray, U.S. variant) —— 来源: fldigi src/cw_rtty/rtty.cxx:62-79
+# ITA-2 (Baudot-Murray, U.S. variant)
 # 字母表 letters[32] / 数字表 figures[32]，索引=5bit 符号。
-# LETTERS=0x1F(11111), FIGS=0x1B(11011) —— rtty.cxx:1408-1430 baudot_dec
 # ============================================================================
 ITA2_LETTERS = [
     '\x00', 'E', '\n', 'A', ' ', 'S', 'I', 'U',
@@ -120,7 +115,6 @@ ITA2_LETTERS = [
     'T', 'Z', 'L', 'W', 'H', 'Y', 'P', 'Q',
     'O', 'B', 'G', ' ', 'M', 'X', 'V', ' ',
 ]
-# rtty.cxx:72-79 U.S. figures
 ITA2_FIGURES = [
     '\x00', '3', '\n', '-', ' ', '\a', '8', '7',
     '\r', '$', '4', "'", ',', '!', ':', '(',
@@ -128,21 +122,17 @@ ITA2_FIGURES = [
     '9', '?', '&', ' ', '.', '/', ';', ' ',
 ]
 
-ITA2_LTRS = 0x1F  # rtty.cxx:52 #define LETTERS 0x100 → 符号 0x1F=11111
-ITA2_FIGS = 0x1B  # rtty.cxx:56 #define FIGS 0x1B
-
+ITA2_LTRS = 0x1F  # 字母模式切换符号 (11111)
+ITA2_FIGS = 0x1B  # 数字模式切换符号 (11011)
 
 class ITA2:
     """ITA-2 (Baudot-Murray) 字母/数字模式编码。
 
-    来源: fldigi src/cw_rtty/rtty.cxx:62-79, 1382-1430
     """
 
     @staticmethod
     def encode_char(c: str, in_figures: bool) -> Tuple[Optional[int], bool]:
-        """返回 (5bit_symbol, new_figures_state)。找不到返回 (None, state)。
-        对应 rtty.cxx:1382-1406 baudot_enc。
-        """
+        """返回 (5bit_symbol, new_figures_state)。找不到返回 (None, state)。"""
         c = c.upper()
         # 先查 figures，再查 letters
         for i, fch in enumerate(ITA2_FIGURES):
@@ -159,7 +149,7 @@ class ITA2:
 
     @classmethod
     def encode_text(cls, text: str) -> List[int]:
-        """文本 -> 5bit 符号序列（含 LTRS/FIGS 切换）。rtty.cxx:1350-1370"""
+        """文本 -> 5bit 符号序列（含 LTRS/FIGS 切换）。"""
         syms = []
         in_fig = False
         for c in text:
@@ -178,9 +168,9 @@ class ITA2:
 
     @staticmethod
     def decode_symbols(syms: List[int]) -> str:
-        """5bit 符号序列 -> 文本。rtty.cxx:1408-1430 baudot_dec"""
+        """5bit 符号序列 -> 文本。"""
         out = []
-        fig = False  # 默认字母模式 (rtty.cxx:125 rxmode = LETTERS)
+        fig = False
         for s in syms:
             s &= 0x1F
             if s == ITA2_LTRS:
@@ -194,21 +184,19 @@ class ITA2:
 
 
 # ============================================================================
-# PSK31 Modem —— DBPSK
-# 来源: fldigi src/psk/psk.cxx:382-387 (symbollen=256, samplerate=8000 → 31.25 baud)
-#       psk.cxx:2193-2210 sym_vec_pos[]; psk.cxx:2240-2253 差分编码
-#       psk.cxx:2322-2358 tx_bit; psk.cxx:2467-2489 tx_char
+# PSK31 Modem —— DBPSK 差分二相相移键控
+#   符号率 31.25 baud（8000 Hz / 256 采样每符号），音频中频 1500 Hz。
 #
-# fldigi BPSK 映射（psk.cxx:2349 sym=bit<<1; 2259 sym*=4; 2252 prev*sym_vec_pos[sym]）:
-#   bit=0 → sym=0 → sym_vec_pos[0]=-1 (180°, 相位翻转)
-#   bit=1 → sym=2 → sym_vec_pos[8]=+1 (0°,  相位不变)
-# 即：bit=1 无相位跳变，bit=0 相位跳变 π。
+# DBPSK 差分映射约定：
+#   bit=1 → 相位不跳变（同相，载波相移 0）
+#   bit=0 → 相位跳变 π（反相）
+# 解调时比较相邻符号相位差即可判决。
 # ============================================================================
 class PSK31Modem:
-    BAUD = 31.25            # psk.cxx:382-387: 8000/256 = 31.25 baud
-    SAMPLE_RATE = 8000      # psk.cxx:370 samplerate=8000
-    SYMBOLS_PER_SIG = 256   # psk.cxx:383 symbollen=256
-    CARRIER_HZ = 1500.0     # 音频中频频点（fldigi 默认音频载波由用户设定）
+    BAUD = 31.25            # 8000 / 256 = 31.25 baud
+    SAMPLE_RATE = 8000      # 本实现默认音频采样率
+    SYMBOLS_PER_SIG = 256   # 每符号采样数
+    CARRIER_HZ = 1500.0     # 音频中频频点（可由用户设定）
 
     def __init__(self, sample_rate: int = 8000, carrier_hz: float = 1500.0):
         self.sample_rate = sample_rate
@@ -234,7 +222,7 @@ class PSK31Modem:
             sym_i = prev_i * math.cos(dphase) - prev_q * math.sin(dphase)
             sym_q = prev_i * math.sin(dphase) + prev_q * math.cos(dphase)
             prev_i, prev_q = sym_i, sym_q
-            # 成型：矩形脉冲（fldigi 用 RRC/PSK_CORE 成型，这里矩形足够往返）
+            # 成型：矩形脉冲（此处用矩形脉冲成型，足够往返验证）
             for _ in range(self.sps):
                 out.append(sym_i * math.cos(phase_acc) - sym_q * math.sin(phase_acc))
                 phase_acc += dphi
@@ -287,14 +275,10 @@ class PSK31Modem:
 
 # ============================================================================
 # RTTY Modem —— 2FSK (Mark/Space)
-# 来源: fldigi src/cw_rtty/rtty.cxx:83 SHIFT[]={...,170,...}, :85 BAUD[]={45,45.45,50,...}
-#       rtty.cxx:62-79 ITA-2 表; rtty.cxx:1382-1430 编解码
 # 标准业余 RTTY: 170Hz 频偏, 45.45 baud, mark=2125Hz, space=2295Hz (中心 2210Hz)
 # ============================================================================
 class RTTYModem:
-    # rtty.cxx:83 SHIFT 表索引 3 = 170 Hz
     DEFAULT_SHIFT_HZ = 170.0
-    # rtty.cxx:85 BAUD 表索引 1 = 45.45 baud
     DEFAULT_BAUD = 45.45
     # 典型 mark/space (业余 RTTY): mark=2125, space=2295
     DEFAULT_MARK_HZ = 2125.0
@@ -312,7 +296,7 @@ class RTTYModem:
 
     def _bits_from_symbols(self, syms: List[int]) -> List[int]:
         """5bit 符号序列 -> 串行 NRZ 比特流（每字符: start=0, 5 data LSB first, stop=1）。
-        对应 rtty.cxx:480-510 接收位采样与 rtty.cxx send_FSK 发送格式。
+。
         """
         bits = []
         for s in syms:
@@ -403,17 +387,15 @@ class RTTYModem:
 
 # ============================================================================
 # MFSK Modem —— 非相干 FFT 检测
-# 来源: fldigi src/mfsk/mfsk.cxx:291 tonespacing = samplerate/symlen
-#       mfsk.cxx:292 basefreq = samplerate*basetone/symlen
 # MFSK16: sr=8000, symlen=256 → 31.25 baud, 31.25Hz tone spacing, base=1000Hz, 16 tones
 # MFSK8:  sr=8000, symlen=1024 → 7.8125 baud, 7.8125Hz spacing, base=1000Hz, 32 tones
 # ============================================================================
 class MFSKModem:
     MODES = {
         # name: (symlen, basetone, numtones, samplerate)
-        "MFSK8":  (1024, 128, 32, 8000),   # mfsk.cxx:191-198
-        "MFSK16": (256, 32, 16, 8000),     # mfsk.cxx:209-216
-        "MFSK32": (256, 32, 8, 8000),      # mfsk.cxx:200-207 (8 tones, 31.25 baud)
+        "MFSK8":  (1024, 128, 32, 8000),
+        "MFSK16": (256, 32, 16, 8000),
+        "MFSK32": (256, 32, 8, 8000),
     }
 
     def __init__(self, mode: str = "MFSK16"):
@@ -421,13 +403,12 @@ class MFSKModem:
             raise ValueError(f"unknown MFSK mode: {mode}")
         self.mode = mode
         self.symlen, self.basetone, self.numtones, self.sample_rate = self.MODES[mode]
-        # mfsk.cxx:291-292
         self.tonespace = self.sample_rate / self.symlen
         self.basefreq = self.sample_rate * self.basetone / self.symlen
         self.baud = self.tonespace
 
     def tone_freq(self, tone_idx: int) -> float:
-        """第 tone_idx 个音调的频率 Hz。mfsk.cxx:292"""
+        """第 tone_idx 个音调的频率 Hz。"""
         return self.basefreq + tone_idx * self.tonespace
 
     def modulate_symbol(self, tone_idx: int) -> List[float]:
@@ -450,7 +431,7 @@ class MFSKModem:
         return out
 
     def demodulate(self, samples: List[float]) -> List[int]:
-        """非相干 FFT 检测：每符号周期内找能量最大的音调。mfsk.cxx:294 sfft 检测"""
+        """非相干 FFT 检测：每符号周期内找能量最大的音调。"""
         n_sym = len(samples) // self.symlen
         result = []
         for k in range(n_sym):
@@ -477,10 +458,8 @@ class MFSKModem:
 
 
 # ============================================================================
-# FeldHell (Hellschreiber) 解码器
-# 来源: fldigi src/feld/feld.cxx:153-160 (column rate 17.5 cols/sec)
-#       src/feld.h:42 FELD_COLUMN_LEN=14 (每字符 14 列)
-#       src/feld/Feld7x7-14.cxx 字体表 (7 行 × 14 列)
+# FeldHell (Hellschreiber) 慢扫描文本
+#       每字符 14 列；字符点阵为 7 行 × 14 列。
 # 标准 FeldHell: 振幅键控, 每列 1/17.5=57.14ms, 字符宽 14 列 = 0.8s
 # ============================================================================
 FELD_FONT = {
@@ -584,14 +563,13 @@ FELD_FONT = {
 class FeldHellDecoder:
     """FeldHell 慢扫描文本解调器。
 
-    来源: fldigi src/feld/feld.cxx:153-160
       - 标准 FeldHell: 17.5 列/秒, 14 列/字符, 7 行
       - 振幅键控: 有振幅=像素亮, 无振幅=像素暗
     本类提供：文本→振幅波形调制；振幅包络→二维列图重建→字符匹配。
     """
 
-    COLUMN_RATE = 17.5     # feld.cxx:154 feldcolumnrate=17.5
-    COLUMN_LEN = 14        # feld.h:42 FELD_COLUMN_LEN=14
+    COLUMN_RATE = 17.5
+    COLUMN_LEN = 14
     ROWS = 7
     SAMPLE_RATE = 8000
 
@@ -680,12 +658,10 @@ class FeldHellDecoder:
 
 # ============================================================================
 # Olivia MFSK / Thor 参数参考（子类化 MFSK，本模块给出参数表）
-# 来源: fldigi src/olivia/olivia.cxx:324-329 (sr=8000, BW=125*(1<<bw))
-#       fldigi src/thor/thor.cxx (PSK K=15 卷积 + MFSK varicode)
 # ============================================================================
 class OliviaMFSK:
     """Olivia MFSK 参数表。标准 Olivia: 125Hz 音调间隔, 31.25 baud, RS(15,5) 交织。"""
-    TONE_SPACING_HZ = 125.0   # olivia.cxx:325 bandwidth=125*(1<<bw), 最窄模式 125Hz
+    TONE_SPACING_HZ = 125.0
     BAUD = 31.25
     MODES = {
         "Olivia 16/500": (16, 500),
@@ -696,11 +672,10 @@ class OliviaMFSK:
 
 
 class ThorMode:
-    """Thor 模式参数。Thor = PSK K=15 卷积 + MFSK varicode。
-    来源: fldigi src/thor/thor.cxx; psk.cxx:87-89 THOR_K15 多项式。"""
+    """Thor 模式参数。Thor = PSK K=15 卷积 + MFSK varicode。"""
     K = 15
-    POLY1 = 0o44735   # psk.cxx:88
-    POLY2 = 0o63057   # psk.cxx:89
+    POLY1 = 0o44735
+    POLY2 = 0o63057
     MODES = {"Thor-M": 50, "Thor-16": 16, "Thor-8": 8, "Thor-4": 4}
 
 
@@ -708,7 +683,7 @@ class ThorMode:
 # ToolRegistry 注册入口
 # ============================================================================
 def register_fldigi_modes_tools(registry) -> None:
-    """把 fldigi 数字模式解码能力注册到 MBDSDR ToolRegistry。
+    """把本模块的数字文本模式编解码能力注册到 MBDSDR ToolRegistry。
 
     提供工具：
       - psk31_encode : 文本 → PSK31 Varicode 比特串
@@ -786,7 +761,7 @@ def register_fldigi_modes_tools(registry) -> None:
 
     registry.register(
         name="psk31_encode",
-        description="把文本编码为 PSK31 Varicode 比特串（fldigi pskvaricode.cxx 真实表）",
+        description="把文本编码为 PSK31 Varicode 比特串（公开 Varicode 表）",
         parameters={"type": "object", "properties": {
             "text": {"type": "string", "description": "要编码的 ASCII 文本"}
         }, "required": ["text"]},

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/mimo.py — 多设备 IQ 同步采集框架
 =============================================

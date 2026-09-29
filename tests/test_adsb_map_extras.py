@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 ADSB 地图/基带附加能力测试
 ===========================

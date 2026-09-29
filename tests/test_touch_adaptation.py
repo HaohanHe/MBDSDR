@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 桌面端触屏/Surface 适配 offscreen 测试
 =================================================

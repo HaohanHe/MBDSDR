@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
-"""
-tests/dab_plus_test.py — dablin 真实移植的往返验证
+"""DAB+ FIC/ETI 解析往返验证（合成向量，非硬件）。
 
+依据公开 ETSI EN 300 401 规范独立实现的往返测试。
 覆盖:
-  1. FIC CRC: 合成 FIB -> CRC 校验通过；破坏 1 bit -> 失败
-  2. FIG 1/0 (ensemble 标签): 合成 -> 解析出正确名称/短标签
-  3. FIG 0/1 (子信道配置): 合成 EEP-A 子信道 -> 起始 CU/长度/保护/比特率正确
-  4. ETI: 合成 6144 字节帧 -> FSYNC 同步 -> MNSC/STC/FIC 层解析正确
-  5. 传输模式 I 参数验证
+ 1. FIC CRC: 合成 FIB -> CRC 校验通过；破坏 1 bit -> 失败
+ 2. FIG 1/0 (ensemble 标签): 合成 -> 解析出正确名称/短标签
+ 3. FIG 0/1 (子信道配置): 合成 EEP-A 子信道 -> 起始 CU/长度/保护/比特率正确
+ 4. ETI: 合成 6144 字节帧 -> FSYNC 同步 -> MNSC/STC/FIC 层解析正确
+ 5. 传输模式 I 参数验证
 
-运行: python3 -m pytest tests/dab_plus_test.py -v   （或直接 python3 tests/dab_plus_test.py）
-"""
+运行: python3 -m pytest -v （或直接 python3 ）"""
 
 import os
 import sys
@@ -41,7 +41,7 @@ def build_fib(payload_bytes: bytes) -> bytes:
     fib = bytearray(32)
     fib[:len(payload_bytes)] = payload_bytes
     for i in range(len(payload_bytes), 30):
-        fib[i] = 0xFF  # 填充，让 FIB 解析循环提前结束 [fic_decoder.cpp:52]
+        fib[i] = 0xFF  # 填充，让 FIB 解析循环提前结束 [ ]
     crc = crc16_ccitt(bytes(fib[:30]))
     fib[30] = (crc >> 8) & 0xFF
     fib[31] = crc & 0xFF
@@ -51,14 +51,12 @@ def build_fib(payload_bytes: bytes) -> bytes:
 def build_fig1_ensemble_label(eid: int, label: str, short_mask: int) -> bytes:
     """合成 FIG 1/0 (ensemble 标签)。
 
-    FIB 布局:
-      [0]    FIG 长度字节: type=1, len = 1(header)+2(eid)+16(label)+2(mask) = 21
-      [1]    FIG1 头: charset=0<<4 | oe=0 | ext=0
-      [2..3] EId big-endian
-      [4..19] 16 字节标签
-      [20..21] 短标签掩码 big-endian
-    来源: fic_decoder.cpp:581-644
-    """
+ FIB 布局:
+ [0] FIG 长度字节: type=1, len = 1(header)+2(eid)+16(label)+2(mask) = 21
+ [1] FIG1 头: charset=0<<4 | oe=0 | ext=0
+ [2..3] EId big-endian
+ [4..19] 16 字节标签
+ [20..21] 短标签掩码 big-endian"""
     raw = label.encode("ascii")[:16].ljust(16, b" ")
     length = 1 + 2 + 16 + 2
     out = bytearray()
@@ -73,10 +71,9 @@ def build_fig1_ensemble_label(eid: int, label: str, short_mask: int) -> bytes:
 
 
 def build_fig0_1_subchannel(subchid: int, start_cu: int, size_cu: int) -> bytes:
-    """合成 FIG 0/1 (EEP-A 子信道)。来源 fic_decoder.cpp:149-206。
+    """合成 FIG 0/1 (EEP-A 子信道)。。
 
-    EEP-A option=000, pl=0 -> "EEP 1-A", bitrate = size/12*8。
-    """
+ EEP-A option=000, pl=0 -> "EEP 1-A", bitrate = size/12*8"""
     length = 1 + 4   # 1 字节 FIG0 头 + 4 字节长表单条
     out = bytearray()
     out.append((0 << 5) | length)     # type=0, len
@@ -106,20 +103,20 @@ def build_eti_frame(ficf: bool = True, mid: int = 1, nst: int = 1,
     fl = mst_crc_len // 4 + nst + 1
 
     frame = bytearray(6144)
-    # ERR + FSYNC [eti_player.cpp:25-36]
+    # ERR + FSYNC [ ]
     frame[0] = 0xFF
     fsync = PARAMS.fsync0
     frame[1] = (fsync >> 16) & 0xFF
     frame[2] = (fsync >> 8) & 0xFF
     frame[3] = fsync & 0xFF
 
-    # MNSC (4 字节) [eti_player.cpp:43-46]
+    # MNSC (4 字节) [ ]
     frame[4] = 0x00
     frame[5] = (0x80 if ficf else 0x00) | (nst & 0x7F)
     frame[6] = ((mid & 0x03) << 3) | ((fl >> 8) & 0x07)
     frame[7] = fl & 0xFF
 
-    # STC: nst 条 x 4 字节 [eti_player.cpp:83-85]
+    # STC: nst 条 x 4 字节 [ ]
     for i in range(nst):
         frame[8 + i * 4] = (scid << 2) & 0xFC
         frame[8 + i * 4 + 1] = 0x00

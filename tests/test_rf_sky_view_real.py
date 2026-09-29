@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 tests/test_rf_sky_view_real.py
 ==============================

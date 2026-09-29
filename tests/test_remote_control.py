@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """远程控制确定性测试。
 
 对照 mbdsdr_ai/remote_control.py（上游 gqrx/remote_control.cpp）。

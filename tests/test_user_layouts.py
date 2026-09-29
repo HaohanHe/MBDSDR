@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 MainWindow 用户自定义布局 offscreen 测试
 =========================================

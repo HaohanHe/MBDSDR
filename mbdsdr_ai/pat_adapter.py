@@ -1,19 +1,18 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/pat_adapter.py
 =========================
-pat (la5nta/pat) Winlink 电子邮件电台协议的 Python 学习移植。
+Winlink B2F（FBB-Forward / WL2K）电子邮件电台会话层消息格式的独立实现。
 
-本模块移植 pat 所使用的 Winlink B2F（FBB-Forward / WL2K）会话层消息格式与
-传输模式枚举。关键结构与常量在注释中标注「来源: pat <file>:<line>」。
+本模块依据 Winlink / FBB-Forward 转发协议的公开线格式，实现其会话层消息
+信封与传输模式枚举：
 
-移植内容：
-  - TransportMethod 枚举 —— 移植 app/app.go:41-47 的传输 scheme 常量
-  - B2FMessage          —— 移植 wl2k-go/fbb 消息信封
-                            （[from|to|subject|YYYYMMDDhhmmss] 头 + body）
-  - MID 消息列表行       —— 移植 app/exchange.go:121,141 的 "MID nnnnnn" 列表
-  - 附件/MIME 编码       —— 移植 app/attachment.go 的 BASE64 附件段
+  - TransportMethod 枚举 —— 无线电路由 URL scheme（ardop/telnet/pactor/varahf/varafm/ax25）
+  - B2FMessage          —— FBB 消息信封（[from|to|subject|YYYYMMDDhhmmss] 头 + body）
+  - MID 消息列表行       —— "M <n> <size> <flags> <subject>" 信箱列表帧
+  - 附件/MIME 编码       —— Begin-base64/End-base64 附件段
 
-参考：pat 上游 MIT/GPL，LA5NTA；wl2k-go/fbb 协议。本移植仅作学习用途。
+pat (la5nta/pat, LA5NTA) 与 wl2k-go/fbb 仅作技术参考与致谢，本仓未包含其源代码。
 """
 
 from __future__ import annotations
@@ -28,22 +27,22 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 # =====================================================================
-# 传输模式枚举 —— 移植 app/app.go:41-47
+# 传输模式枚举（无线电路由 URL scheme）
 # =====================================================================
 # pat 中各无线电路由的 URL scheme：
-#   MethodArdop  = "ardop"   (app/app.go:41)
-#   MethodTelnet = "telnet"  (app/app.go:42)
-#   MethodPactor = "pactor"  (app/app.go:43)
-#   MethodVaraHF = "varahf"  (app/app.go:44)
-#   MethodVaraFM = "varafm"  (app/app.go:45)
-#   MethodAX25   = "ax25"    (app/app.go:47)
+#   ardop  : ARDOP 数字电台
+#   telnet : Internet RMS 网关
+#   pactor : Pactor/Pactor-II
+#   varahf : VARA HF
+#   varafm : VARA FM (VHF)
+#   ax25   : AX.25 分组包 (VHF)
 #
-# 这些 scheme 在 app/connect.go:81-100 被分派到对应 TNC。
+# 这些 scheme 对应不同无线电路由。
 TRANSPORT_METHODS: Dict[str, Dict[str, Any]] = {
     "ardop": {
         "label": "ARDOP (数字电台 OFDM)",
         "medium": "hf",
-        "speeds": ["500", "2000"],   # ARDOP ARQ 带宽, cfg/config.go:211
+        "speeds": ["500", "2000"],   # ARDOP ARQ 带宽档位
     },
     "pactor": {
         "label": "Pactor/Pactor-II (SCS)",
@@ -74,7 +73,7 @@ TRANSPORT_METHODS: Dict[str, Dict[str, Any]] = {
 
 
 def list_transport_methods() -> List[Dict[str, Any]]:
-    """返回 pat 支持的全部传输模式（来源: app/app.go:41-47）。"""
+    """返回全部传输模式。"""
     out = []
     for scheme, meta in TRANSPORT_METHODS.items():
         out.append({"scheme": scheme, **meta})
@@ -88,7 +87,7 @@ def list_transport_methods() -> List[Dict[str, Any]]:
 #
 #   [<FROMCALL>|<TOCALL>|<SUBJECT>|<YYYYMMDDhhmmss>]
 #
-# 来源：wl2k-go/fbb Message.String() / pat app/exchange.go:336 字段映射
+# FBB 消息信封字段映射
 #       (MID, Subject, To, Via 等)。
 # 信封后可跟若干 :FBB: 路径行，最后是正文（RFC822 风格）。
 _B2F_ENVELOPE_RE = re.compile(
@@ -100,8 +99,7 @@ _B2F_ENVELOPE_RE = re.compile(
 class B2FAttachment:
     """一个 B2F 附件（BASE64 段）。
 
-    来源：pat app/attachment.go —— Winlink 附件在消息体中以
-    `Begin-base64 <filename>` / `End-base64` 包裹（wl2k-go/fbb 约定）。
+    Winlink 附件在消息体中以 `Begin-base64 <filename>` / `End-base64` 包裹（FBB 约定）。
     """
 
     filename: str
@@ -129,8 +127,8 @@ class B2FAttachment:
 class B2FMessage:
     """一条 Winlink B2F 邮件消息。
 
-    字段对应 wl2k-go/fbb.Message：
-      from     —— 发件人呼号/地址 (app/exchange.go:336 附近 From)
+    字段：
+      from     —— 发件人呼号/地址
       to       —— 收件人呼号/地址
       subject  —— 主题
       timestamp—— 发送时间 (UTC)
@@ -144,7 +142,7 @@ class B2FMessage:
     timestamp: datetime
     body: str = ""
     attachments: List[B2FAttachment] = field(default_factory=list)
-    mid: int = 0  # Message ID，RMS 分配（exchange.go:121 p.MID()）
+    mid: int = 0  # Message ID，RMS 分配
 
     # -----------------------------------------------------------------
     # 编码：结构 → B2F 字节流
@@ -153,7 +151,7 @@ class B2FMessage:
         ts = self.timestamp.strftime("%Y%m%d%H%M%S")
         hdr = f"[{self.fromcall}|{self.tocall}|{self.subject}|{ts}]\r\n"
         out = hdr.encode("ascii", "replace")
-        # :FBB: 路径行（学习用，单跳）
+        # :FBB: 路径行（单跳）
         out += f":FBB:Winlink B2F via mbdsdr\r\n".encode("ascii")
         out += b"\r\n"
         out += self.body.encode("utf-8", "replace")
@@ -216,12 +214,11 @@ class B2FMessage:
 
 
 # =====================================================================
-# MID 消息列表行 —— 移植 app/exchange.go:121,141
+# MID 消息列表行
 # =====================================================================
 # pat 在信箱列表里把每条待收消息渲染成一行：
 #   MID <n>  <size>  <flags>  <subject>
-# 来源：exchange.go:121 PromptOption{Value: p.MID(), ...}
-#       exchange.go:141 if p.MID() != val
+# B2F 列表行: M <mid> <size> <flags> <subject>
 # 真实 B2F 列表行形如：
 #   "M 12345678  1234 R Hello"
 _MID_LINE_RE = re.compile(
@@ -344,8 +341,7 @@ def register_pat_tools(registry) -> None:
 
     registry.register(
         name="pat_list_transports",
-        description="列出 pat Winlink 支持的传输模式 (ARDOP/Pactor/VARA-HF/VARA-FM/AX.25/Telnet)，"
-                    "来源: pat app/app.go:41-47。",
+        description="列出 Winlink 支持的传输模式 (ARDOP/Pactor/VARA-HF/VARA-FM/AX.25/Telnet)。",
         parameters={"type": "object", "properties": {}},
         handler=_list_methods,
         category="ham_modes",
@@ -374,8 +370,7 @@ def register_pat_tools(registry) -> None:
     )
     registry.register(
         name="pat_mid_list",
-        description="编码/解码 Winlink B2F 信箱消息列表 (MID <n> <size> <flags> <subject>)，"
-                    "来源: pat app/exchange.go:121,141。",
+        description="编码/解码 Winlink B2F 信箱消息列表 (M <n> <size> <flags> <subject>)。",
         parameters={"type": "object", "properties": {
             "entries": {"type": "array", "items": {"type": "object"}},
         }},

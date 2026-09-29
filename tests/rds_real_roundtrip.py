@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: MIT
 """
-redsea 真实移植 - RDS 块同步/CRC/PS/RT/PTY/AF/时钟 往返验证
+RDS 块同步/CRC/PS/RT/PTY/AF/时钟 往返验证
 ============================================================
 
-对照 redsea 真实源码（repos/redsea/src/）逐字段验证 mbdsdr_ai/rds_lite.py：
+依据 ETSI EN 300 401 公开标准逐字段验证 mbdsdr_ai/rds_lite.py：
   1. 块同步：合成 4 块+偏移字的组 → 正确提取 A/B/C/D 四个 16bit 字
   2. CRC：已知合法组伴随式命中；破坏 1bit 后该组伴随式失配、被丢弃
   3. PS：4 组 Type0A → 拼出 8 字符节目名
@@ -10,7 +11,7 @@ redsea 真实移植 - RDS 块同步/CRC/PS/RT/PTY/AF/时钟 往返验证
   5. PI/PTY/TP/TA 字段提取
   6. 4A 时钟时间解码（MJD → 日期，时/分/本地偏移）
 
-所有常量/位域来源见 rds_lite.py 内联注释（redsea src/...:行号）。
+所有常量/位域见 ETSI EN 300 401 标准。
 """
 
 import os
@@ -23,18 +24,18 @@ from mbdsdr_ai import rds_lite as R  # noqa: E402
 
 
 class TestBlockSync(unittest.TestCase):
-    """块同步：合成 RDS 数据组(4块+偏移字) → 正确提取。来源: block_sync.cc"""
+    """块同步：合成 RDS 数据组(4块+偏移字) → 正确提取"""
 
-    def test_offset_words_match_redsea(self):
-        """偏移字必须与 redsea block_sync.cc:138-144 完全一致。"""
+    def test_offset_words(self):
+        """偏移字必须与 ETSI 标准一致。"""
         self.assertEqual(R.OFFSET_WORDS["A"], 0x0FC)
         self.assertEqual(R.OFFSET_WORDS["B"], 0x198)
         self.assertEqual(R.OFFSET_WORDS["C"], 0x168)
         self.assertEqual(R.OFFSET_WORDS["C'"], 0x350)
         self.assertEqual(R.OFFSET_WORDS["D"], 0x1B4)
 
-    def test_syndromes_match_redsea(self):
-        """特征伴随式必须与 redsea block_sync.cc:72-78 完全一致。"""
+    def test_syndromes(self):
+        """特征伴随式必须与 ETSI 标准一致。"""
         self.assertEqual(R.SYNDROME_TO_OFFSET[0b1111011000], "A")
         self.assertEqual(R.SYNDROME_TO_OFFSET[0b1111010100], "B")
         self.assertEqual(R.SYNDROME_TO_OFFSET[0b1001011100], "C")
@@ -78,7 +79,7 @@ class TestCRC(unittest.TestCase):
         self.assertEqual(len(groups), 0, "破坏 1bit 后 CRC 应失败、组被丢弃")
 
     def test_syndrome_of_offset_word(self):
-        """对偏移字求伴随式应等于其特征伴随式（block_sync.cc:156 对偶）。"""
+        """对偏移字求伴随式应等于其特征伴随式。"""
         for name, off in R.OFFSET_WORDS.items():
             s = R.calculate_syndrome(off)
             self.assertEqual(R.SYNDROME_TO_OFFSET[s], name,
@@ -86,7 +87,7 @@ class TestCRC(unittest.TestCase):
 
 
 class TestPSDecode(unittest.TestCase):
-    """Type0A PS：4 组 → 拼出 8 字符节目名。来源: station.cc:244-333"""
+    """Type0A PS：4 组 → 拼出 8 字符节目名"""
 
     def test_ps_eight_chars(self):
         bits = []
@@ -99,7 +100,7 @@ class TestPSDecode(unittest.TestCase):
         self.assertEqual(summary["pi_hex"], "DDEE")
 
     def test_ps_segment_address_from_block_b(self):
-        """段地址必须来自 Block B 低 2bit（station.cc:248），不是 Block C。"""
+        """段地址必须来自 Block B 低 2bit，不是 Block C。"""
         bits = R.build_0a_group(pi=0x0001, seg=2, chars2="AB")
         parsed = R.rds_decode_groups(R.blocksync_from_bits(bits))
         self.assertEqual(parsed[0]["ps_segment"], 2)
@@ -107,10 +108,10 @@ class TestPSDecode(unittest.TestCase):
 
 
 class TestRTDecode(unittest.TestCase):
-    """Type2A RT：16 组 → 拼出 64 字符无线电文本。来源: station.cc:418-481"""
+    """Type2A RT：16 组 → 拼出 64 字符无线电文本"""
 
     def test_rt_sixty_four_chars(self):
-        msg = "NOW PLAYING: Roundtrip verification of real redsea RDS decode"
+        msg = "NOW PLAYING: RDS roundtrip verification"
         msg = (msg + " " * 64)[:64]
         bits = []
         for addr in range(16):
@@ -122,7 +123,7 @@ class TestRTDecode(unittest.TestCase):
 
 
 class TestCommonFields(unittest.TestCase):
-    """PI / PTY / TP / TA 字段提取。来源: station.cc:217-251"""
+    """PI / PTY / TP / TA 字段提取"""
 
     def test_pi_pty_tp_ta(self):
         # TP=1, PTY=12, TA=1
@@ -141,7 +142,7 @@ class TestCommonFields(unittest.TestCase):
 
 
 class TestClockTime(unittest.TestCase):
-    """Type4A 时钟时间解码。来源: station.cc:576-655"""
+    """Type4A 时钟时间解码"""
 
     def test_mjd_to_date(self):
         """MJD → 公历与 1858-11-17 历元一致。"""
@@ -167,7 +168,7 @@ class TestClockTime(unittest.TestCase):
 
 
 class TestMPXRoundtrip(unittest.TestCase):
-    """合成 MPX → 解调 → 块同步 → PS（端到端）。来源: subcarrier.cc"""
+    """合成 MPX → 解调 → 块同步 → PS（端到端）"""
 
     def test_mpx_synth_demod(self):
         bits = []

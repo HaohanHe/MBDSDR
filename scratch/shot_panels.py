@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """offscreen 自证截图：5 张 UI 面板截图。"""
 import os, sys, tempfile
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

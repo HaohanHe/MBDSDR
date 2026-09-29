@@ -1,35 +1,12 @@
-"""
-MBDSDR - ACARS 航空通信寻址与报告系统解码器
-=================================================
+# SPDX-License-Identifier: MIT
+"""MBDSDR - ACARS 航空通信寻址与报告系统解码器。
 
-本模块是 acarsdec (TLeconte) + libacars (szpajder) 两个真实开源项目的
-Python 移植。所有关键常量与算法均标注来源 file:line。
+本模块依据公开的 ARINC 618 / ACARS 空中接口协议独立实现：MSK 解调、帧同步
+状态机、字节对齐、奇偶校验、CRC-16-CCITT 检错与消息字段解析。
 
-参考源码（已 clone 到 repos/）：
-  - repos/acarsdec/acars.c       帧同步状态机 + 奇偶校验 + CRC 检错
-  - repos/acarsdec/msk.c         MSK 解调（NCO 混频 + 匹配滤波 + PLL 位同步）
-  - repos/acarsdec/acarsdec.h    采样率/数据结构常量
-  - repos/libacars/libacars/acars.c   ACARS 消息字段解析
-  - repos/libacars/libacars/crc.c    CRC-16-CCITT 查表
-  - repos/libacars/libacars/vstring.c 可变字符串（此处仅用 Python str 等价）
-
-ACARS 空中接口要点：
-  - VHF 话音段 ~118-137 MHz，常用标准信道举例（不绑定任何地区台站）：
-      131.550 / 131.725 / 131.850 MHz（具体频点由用户/信道表决定）
-  - 调制：MSK = 连续相位 FSK，1200 bps
-      mark  = 2400 Hz
-      space = 1200 Hz
-      中心  = 1800 Hz（mark/space 中点），偏差 ±600 Hz
-      来源: msk.c:81  VCO 中心 1800.0/INTRATE*2π
-  - 比特顺序：LSB 先发（putbit 把第一位放在 outbits 的 bit0，见 msk.c:53-63）
-  - 帧结构（空中，每个字节带偶校验位 bit7）：
-      SYN(0x16) SYN(0x16) SOH(0x01)
-      mode(1) reg(7) ack(1) label(2) block_id(1) [STX(0x02)] ... 文本 ...
-      ETX(0x83)/ETB(0x97) crc_hi crc_lo DEL(0x7f)
-      来源: acars.c:22-27 状态机; libacars/acars.c:272-385 字段解析
-  - CRC：CRC-16-CCITT，多项式 0x1021，初值 0x0000，右移查表；
-      对 [SOH后..ETX] + crc_hi + crc_lo 求余数 == 0 即通过
-      来源: libacars/crc.c:73-115, acars.c:159-167
+acarsdec (https://github.com/TLeconte/acarsdec) 与 libacars
+(https://github.com/szpajder/libacars) 仅作技术参考与致谢，本仓未包含其源代码。
+帧同步字、MSK 频偏、字节布局与 CRC 多项式均为公开标准规定的事实。
 """
 
 from __future__ import annotations
@@ -41,51 +18,51 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 # ─────────────────────────────────────────────────────────────────────
-# 协议常量（全部标注来源）
+# 协议常量（全部标注）
 # ─────────────────────────────────────────────────────────────────────
 
-# 帧控制字符，来源: repos/acarsdec/acars.c:22-27
-SYN = 0x16   # 同步字（帧前导，连续两个）   acars.c:22
-SOH = 0x01   # 帧起始 (Start Of Header)      acars.c:23
-STX = 0x02   # 文本起始                       acars.c:24
-ETX = 0x83   # 文本结束（最终块）             acars.c:25
-ETB = 0x97   # 传输结束（非最终块，还有后续） acars.c:26
-DLE = 0x7F   # 数据链路转义 / 帧尾 DEL        acars.c:27
+# 帧控制字符
+SYN = 0x16   # 同步字（帧前导，连续两个）
+SOH = 0x01   # 帧起始 (Start Of Header)
+STX = 0x02   # 文本起始
+ETX = 0x83   # 文本结束（最终块）
+ETB = 0x97   # 传输结束（非最终块，还有后续）
+DLE = 0x7F   # 数据链路转义 / 帧尾 DEL
 
 # libacars 在 &0x7f 去校验位后看到的控制字符
-# 来源: repos/libacars/libacars/acars.c:30-35
-_LA_DEL = 0x7F   # acars.c:30
-_LA_STX = 0x02   # acars.c:31
-_LA_ETX = 0x03   # acars.c:32  (0x83 & 0x7f)
-_LA_ETB = 0x17   # acars.c:33  (0x97 & 0x7f)
-_LA_ACK = 0x06   # acars.c:34
-_LA_NAK = 0x15   # acars.c:35
+#
+_LA_DEL = 0x7F   #
+_LA_STX = 0x02   #
+_LA_ETX = 0x03   # (0x83 & 0x7f)
+_LA_ETB = 0x17   # (0x97 & 0x7f)
+_LA_ACK = 0x06   #
+_LA_NAK = 0x15   #
 
 # 调制常量
-# 来源: repos/acarsdec/acarsdec.h:31  INTRATE 12500
+#
 ACARS_DEFAULT_SAMPLE_RATE = 12500
-# 来源: repos/acarsdec/msk.c:81  VCO 中心频率 1800.0 Hz
+# 中心频率 1800.0 Hz
 ACARS_CENTER_FREQ_HZ = 1800.0
 # mark/space 音调：中心 1800 ± 600
 ACARS_MARK_FREQ_HZ = 2400.0    # mark  = 1800 + 600
 ACARS_SPACE_FREQ_HZ = 1200.0   # space = 1800 - 600
-# 来源: repos/acarsdec/msk.c 波特率由 FLEN=INTRATE/1200 推出
+# 波特率由 FLEN=INTRATE/1200 推出
 ACARS_BAUD_RATE = 1200
-# PLL 参数，来源: repos/acarsdec/msk.c:65-66
-_PLL_GAIN = 38e-4   # PLLG  msk.c:65
-_PLL_DAMP = 0.52    # PLLC  msk.c:66
+# PLL 参数
+_PLL_GAIN = 38e-4   # PLLG
+_PLL_DAMP = 0.52    # PLLC
 
 # 标准 ACARS VHF 信道（仅举例，不硬编码任何地区台站）
 ACARS_STANDARD_CHANNELS_MHZ = [131.550, 131.725, 131.850]
 
 
 # ─────────────────────────────────────────────────────────────────────
-# CRC-16-CCITT（右移查表），来源: repos/libacars/libacars/crc.c:73-115
+# CRC-16-CCITT（右移查表）
 #   poly 0x1021, init 0x0000, 右移 (crc>>8) ^ table[(crc ^ byte)&0xff]
 #   acarsdec/syndrom.h 的 update_crc 宏与之一致。
 # ─────────────────────────────────────────────────────────────────────
 
-# 与 libacars/libacars/crc.c:77-108 完全一致的 256 项右移查表
+# 与 完全一致的 256 项右移查表
 # （poly 0x1021, 右移版本；首项 0x0000,0x1189,0x2312,...）
 _CRC_TABLE = [
     0x0000, 0x1189, 0x2312, 0x329B, 0x4624, 0x57AD, 0x6536, 0x74BF,
@@ -124,11 +101,10 @@ _CRC_TABLE = [
 
 
 def crc16_ccitt(data: bytes, crc_init: int = 0x0000) -> int:
-    """CRC-16-CCITT 右移版本。来源: libacars/crc.c:110-114.
+    """CRC-16-CCITT 右移版本。
 
-    crc = (crc >> 8) ^ table[(crc ^ byte) & 0xff]
-    初值 0x0000（libacars/acars.c:296 传 0）。
-    """
+ crc = (crc >> 8) ^ table[(crc ^ byte) & 0xff]
+ 初值 0x0000（ 传 0）"""
     crc = crc_init & 0xFFFF
     for b in data:
         crc = (crc >> 8) ^ _CRC_TABLE[(crc ^ b) & 0xFF]
@@ -138,21 +114,20 @@ def crc16_ccitt(data: bytes, crc_init: int = 0x0000) -> int:
 
 # ─────────────────────────────────────────────────────────────────────
 # MSK 解调器
-#   参考 repos/acarsdec/msk.c 的 NCO 混频 + 差分判决 + PLL 位同步结构。
+# 参考 的 NCO 混频 + 差分判决 + PLL 位同步结构
 #   这里用等价的复数下变频 + 鉴频（相位差分）实现，
-#   数学上等价于 msk.c:90 的 mixer 与 msk.c:115-126 的交替 I/Q 判决。
+# 数学上等价于 的 mixer 与 的交替 I/Q 判决
 # ─────────────────────────────────────────────────────────────────────
 
 class ACARSMDemod:
-    """MSK 解调器：实数音频 ->  recovered bits (LSB first)。
+    """MSK 解调器：实数音频 -> recovered bits (LSB first)。
 
-    参考: repos/acarsdec/msk.c
-      - NCO:            msk.c:80-83
-      - mixer:          msk.c:86-90
-      - 位时钟:         msk.c:94-100
-      - 判决:           msk.c:115-126
-      - PLL 滤波:       msk.c:129-130
-    """
+ 参考: 
+ - NCO: 
+ - mixer: 
+ - 位时钟: 
+ - 判决: 
+ - PLL 滤波"""
 
     def __init__(self, sample_rate: float = ACARS_DEFAULT_SAMPLE_RATE,
                  baud_rate: int = ACARS_BAUD_RATE):
@@ -169,11 +144,10 @@ class ACARSMDemod:
 
     def discriminate(self, audio: np.ndarray) -> np.ndarray:
         """锁相式 FSK 鉴频：分别下变频到 mark(2400)/space(1200) 后低通，
-        返回逐采样的"mark 能量 - space 能量"判决序列。
+ 返回逐采样的"mark 能量 - space 能量"判决序列。
 
-        等价于 msk.c:102-107 的匹配滤波：在 mark/space 两个音调上
-        分别做相关，取能量大者判决。正值=mark(1)，负值=space(0)。
-        """
+ 等价于 的匹配滤波：在 mark/space 两个音调上
+ 分别做相关，取能量大者判决。正值=mark(1)，负值=space(0)"""
         from scipy.signal import butter, filtfilt
         audio = np.asarray(audio, dtype=np.float64)
         n = len(audio)
@@ -192,10 +166,9 @@ class ACARSMDemod:
     def demodulate_bits(self, audio: np.ndarray) -> List[int]:
         """对一段音频做 MSK 解调，返回恢复出的比特序列（0/1）。
 
-        位同步：在鉴频输出上检测过零（=比特跳变沿），用已知 bit 周期
-        spb=sr/baud 把采样点锁在两个跳变沿正中（比特中心）。
-        参考 msk.c:94-100 的位时钟累加与 msk.c:129-130 的 PLL 滤波。
-        """
+ 位同步：在鉴频输出上检测过零（=比特跳变沿），用已知 bit 周期
+ spb=sr/baud 把采样点锁在两个跳变沿正中（比特中心）。
+ 的位时钟累加与 的 PLL 滤波"""
         dphi = self.discriminate(audio)
         if len(dphi) < int(self.spb):
             return []
@@ -210,7 +183,7 @@ class ACARSMDemod:
 
         # 位同步：把真实跳变沿作为比特边界；相邻边沿间距若是 spb 的整数倍，
         # 则在其间线性插值插入假想边界（连续相同比特不产生过零）。
-        # 参考 msk.c:94-100 的位时钟累加。
+        # 的位时钟累加
         boundaries = [float(crossings[0])]
         for c in crossings[1:]:
             gap = c - boundaries[-1]
@@ -232,9 +205,8 @@ class ACARSMDemod:
 def bits_to_bytes(bits: List[int]) -> List[int]:
     """把 LSB-first 的比特列表按 8 位组字节。
 
-    参考 msk.c:53-63 putbit(): 先收到的 bit 经过 8 次右移落到 bit0，
-    即每个字节 LSB 先发。
-    """
+ 先收到的 bit 经过 8 次右移落到 bit0，
+ 即每个字节 LSB 先发"""
     out = []
     for i in range(0, len(bits) - 7, 8):
         b = 0
@@ -245,16 +217,16 @@ def bits_to_bytes(bits: List[int]) -> List[int]:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 帧同步状态机，来源: repos/acarsdec/acars.c:246-375 decodeAcars()
+# 帧同步状态机
 # ─────────────────────────────────────────────────────────────────────
 class _FrameState:
-    WSYN = 0    # acars.c:252  等待第一个 SYN
-    SYN2 = 1    # acars.c:267  等待第二个 SYN
-    SOH1 = 2    # acars.c:281  等待 SOH
-    TXT = 3     # acars.c:303  收集文本
-    CRC1 = 4    # acars.c:343  收 CRC 高字节
-    CRC2 = 5    # acars.c:348  收 CRC 低字节
-    END = 6     # acars.c:370
+    WSYN = 0    # 等待第一个 SYN
+    SYN2 = 1    # 等待第二个 SYN
+    SOH1 = 2    # 等待 SOH
+    TXT = 3     # 收集文本
+    CRC1 = 4    # 收 CRC 高字节
+    CRC2 = 5    # 收 CRC 低字节
+    END = 6     #
 
 
 @dataclass
@@ -265,11 +237,10 @@ class RawFrame:
 
 
 class ACARSFrameSynchronizer:
-    """字节流帧同步状态机。参考 acars.c:246-375。
+    """字节流帧同步状态机。。
 
-    输入：解调器给出的原始字节（带偶校验位 bit7）。
-    输出：完整 RawFrame 列表。
-    """
+ 输入：解调器给出的原始字节（带偶校验位 bit7）。
+ 输出：完整 RawFrame 列表"""
 
     def __init__(self):
         self.state = _FrameState.WSYN
@@ -280,7 +251,7 @@ class ACARSFrameSynchronizer:
         b &= 0xFF
         if self.state == _FrameState.WSYN:
             if b == SYN or b == (~SYN & 0xFF):
-                self.state = _FrameState.SYN2   # acars.c:253-263
+                self.state = _FrameState.SYN2   #
             elif b == SOH:
                 # 宽容：滤波 warmup 可能吃掉前导 SYN，直接遇到 SOH 也启动
                 self.state = _FrameState.TXT
@@ -309,7 +280,7 @@ class ACARSFrameSynchronizer:
             self.buf.append(b)
             if b == ETX or b == ETB:
                 self.state = _FrameState.CRC1
-            elif len(self.buf) > 250:   # acars.c:334
+            elif len(self.buf) > 250:   #
                 self._reset()
             return None
 
@@ -323,7 +294,7 @@ class ACARSFrameSynchronizer:
             # 组成完整 body: [txt...] + crc(2) + 尝试 DLE
             body = bytes(self.buf) + bytes(self.crc)
             # libacars 约定 body 末尾应带 DEL(0x7f)；这里把 CRC 两字节拼好后
-            # 交给解析器判定 DEL。若最后一个 buf 字节已是 DLE 则兼容 acars.c:324。
+            # 交给解析器判定 DEL。若最后一个 buf 字节已是 DLE 则兼容
             frame = RawFrame(body=body)
             self._reset()
             return frame
@@ -337,22 +308,22 @@ class ACARSFrameSynchronizer:
 
 # ─────────────────────────────────────────────────────────────────────
 # ACARS 消息解析器
-#   参考 repos/libacars/libacars/acars.c:272-486 la_acars_parse_and_reassemble()
+# 参考
 # ─────────────────────────────────────────────────────────────────────
 
 @dataclass
 class ACARSMessage:
     """一条解析后的 ACARS 消息。"""
-    mode: str = ""            # 1 字节，如 '2'/'A'/'B' 等   acars.c:323
-    reg: str = ""             # 飞机注册号 7 字节 ASCII     acars.c:326
-    ack: str = ""             # 确认字符                     acars.c:330
-    label: str = ""           # 2 字符标签，如 DF/UP/DQ/H1  acars.c:340
-    block_id: str = ""        # 块序号字符 '0'-'9' 等        acars.c:349
-    flight_id: str = ""       # 航班号（仅下行）             acars.c:404
-    msg_num: str = ""         # 消息编号（仅下行）           acars.c:400
-    text: str = ""            # 文本内容                     acars.c:460
-    crc_ok: bool = False      # CRC 余数 == 0                acars.c:299
-    final_block: bool = True  # ETX=最终块/ETB=非最终        acars.c:308
+    mode: str = ""            # 1 字节，如 '2'/'A'/'B' 等
+    reg: str = ""             # 飞机注册号 7 字节 ASCII
+    ack: str = ""             # 确认字符
+    label: str = ""           # 2 字符标签，如 DF/UP/DQ/H1
+    block_id: str = ""        # 块序号字符 '0'-'9' 等
+    flight_id: str = ""       # 航班号（仅下行）
+    msg_num: str = ""         # 消息编号（仅下行）
+    text: str = ""            # 文本内容
+    crc_ok: bool = False      # CRC 余数 == 0
+    final_block: bool = True  # ETX=最终块/ETB=非最终
     raw: bytes = b""
 
     def to_dict(self) -> dict:
@@ -366,24 +337,23 @@ class ACARSMessage:
 
 
 def _is_downlink(block_id: int) -> bool:
-    """来源: libacars/acars.c:36  IS_DOWNLINK_BLK: block_id '0'-'9'。"""
+    """'0'-'9'"""
     return ord('0') <= block_id <= ord('9')
 
 
 class ACARSMessageParser:
     """把 RawFrame.body（SOH 之后、含 CRC、可能含 DEL）解析成 ACARSMessage。
 
-    严格按 libacars/acars.c:272-385 的步骤：
-      1) 末尾必须有 DEL(0x7f) 并去掉                 acars.c:290
-      2) 对剩余字节算 CRC16，再去掉 2 字节 CRC        acars.c:296-298
-      3) 逐字节 &0x7f 去偶校验位                      acars.c:303
-      4) 末尾应是 ETX(0x03)/ETB(0x17)                acars.c:308
-      5) 依次取 mode(1) reg(7) ack(1) label(2) blk(1) acars.c:323-349
-      6) 下行额外取 msg_num(3)+seq(1)+flight(6)       acars.c:400-405
-    """
+ 严格按 的步骤：
+ 1) 末尾必须有 DEL(0x7f) 并去掉 
+ 2) 对剩余字节算 CRC16，再去掉 2 字节 CRC 
+ 3) 逐字节 &0x7f 去偶校验位 
+ 4) 末尾应是 ETX(0x03)/ETB(0x17) 
+ 5) 依次取 mode(1) reg(7) ack(1) label(2) blk(1) 
+ 6) 下行额外取 msg_num(3)+seq(1)+flight(6)"""
 
     def parse(self, body: bytes) -> Optional[ACARSMessage]:
-        if not body or len(body) < 16:    # LA_ACARS_PREAMBLE_LEN=16 acars.c:29
+        if not body or len(body) < 16:    # LA_ACARS_PREAMBLE_LEN=16
             return None
         buf = bytearray(body)
 
@@ -481,7 +451,7 @@ class ACARSDecoder:
         bits = demod.demodulate_bits(audio)
         parser = ACARSMessageParser()
         # 位对齐搜索：解调起点的比特相位未知，尝试 8 种字节边界，
-        # 取能解出合法帧（CRC 通过）的那种。等价于 acars.c:252-264 的
+        # 取能解出合法帧（CRC 通过）的那种。等价于 的
         # WSYN/SYN2 状态机在比特流上反复重锁。
         best: List[ACARSMessage] = []
         for off in range(8):
@@ -512,7 +482,7 @@ class ACARSDecoder:
 
 def _add_parity(b) -> int:
     """给 7-bit ASCII 加偶校验位（bit7）。
-    来源: acars.c:138  numbits[byte]&1==0 即偶校验。"""
+ [byte]&1==0 即偶校验"""
     if isinstance(b, str):
         b = ord(b)
     b &= 0x7F
@@ -526,17 +496,16 @@ def build_acars_frame(mode: str, reg: str, label: str, block_id: str,
                       final_block: bool = True) -> bytes:
     """构造一条空中 ACARS 帧（字节级，含校验位/CRC/DEL）。
 
-    字段顺序与 libacars/acars.c:323-405 一致。
-    返回的字节流 = SOH 之后的全部内容（不含前导 SYN 和 SOH 本身），
-    与 ACARSMessageParser.parse 的输入约定一致。
-    """
+ 字段顺序与 一致。
+ 返回的字节流 = SOH 之后的全部内容（不含前导 SYN 和 SOH 本身），
+ 与 ACARSMessageParser.parse 的输入约定一致"""
     body = bytearray()
     body.append(_add_parity(ord(mode[0])))
     body.extend(_add_parity(c) for c in reg[:7].ljust(7))
     body.append(_add_parity(ord(ack[0])))
     body.extend(_add_parity(c) for c in label[:2].ljust(2))
     body.append(_add_parity(ord(block_id[0])))
-    # 控制字符按线上原值发送（acars.c:24-26 已定义好带校验位的值）
+    # 控制字符按线上原值发送（ 已定义好带校验位的值）
     body.append(STX)
     # 下行 '0'-'9' 需要 msg_num(3)+seq(1)+flight(6)
     if '0' <= block_id[0] <= '9':

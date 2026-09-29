@@ -1,13 +1,13 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/background_decoder.py — 后台解码调度
 ==============================================
 
-对照 OpenWebRX 后台解码服务（ADS-B/APRS 等在无 Web 客户端时持续解码）：
   * 解码器注册表：每个解码器声明频率/模式/周期；
   * 调度器按周期轮询调用解码器，结果持久化到 JSONL；
-  * 即使无 Web 用户也持续运行（对应 SdrClientClass.BACKGROUND）。
+  * 无客户端连接时也持续运行。
 
-我们的增强：
+增强：
   * :class:`AnomalyDetector` —— 对解码结果做异常检测（如 ADS-B 出现
     不可能的高度/速度、APRS callsign 缺失），触发告警。
 """

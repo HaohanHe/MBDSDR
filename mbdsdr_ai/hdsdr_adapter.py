@@ -1,13 +1,14 @@
+# SPDX-License-Identifier: MIT
 """
-HDSDR 传统 SDR UI / RF 前端架构移植（纯 numpy，无 Windows/ExtIO DLL）
+HDSDR 风格传统 SDR UI / RF 前端（纯 numpy，无 Windows/ExtIO DLL）
 ===================================================================
 HDSDR (www.hdsdr.de) 是闭源免费 Windows SDR 软件，无公开 git 仓库（见
-repos/hdsdr/NOTES.md）。本模块按其公开手册与 ExtIO DLL 接口约定，移植：
+）。本模块按 HDSDR 公开手册与 ExtIO DLL 接口约定，实现：
 
   1. RF 前端三级增益表（LNA / Mixer / VGA）
-     —— 来源: HDSDR ExtIO 标准接口；R820T 调谐器增益表（HDSDR RF/IF 滑块驱动）
+
   2. 解调模式参数表 + 带宽预设
-     —— 来源: HDSDR 手册 wnew.html；带宽滑块 (F6) 常用预设
+
 
 HDSDR 的 RF 前端通过 ExtIO DLL 暴露多级增益；经典 RTL-SDR(R820T) 链路为：
     LNA(低噪放) → Mixer(混频) → VGA/IF(中频可变增益)
@@ -23,18 +24,18 @@ import numpy as np
 # ═══════════════════════════════════════════════════════════════════════
 #  1. RF 前端三级增益表（R820T，HDSDR ExtIO 驱动）
 # ═══════════════════════════════════════════════════════════════════════
-#: LNA 增益档位（dB），index 0..15。来源: R820T 调谐器 LNA gain table
+#: LNA 增益档位（dB），index 0..15。R820T 调谐器 LNA gain table
 #: （HDSDR "RF" 滑块控制 LNA+Mixer 组合档位）
 HDSDR_LNA_GAIN_DB = [
     0.0, 0.9, 2.4, 3.4, 5.2, 7.0, 8.8, 10.7,
     11.9, 12.8, 13.8, 14.9, 16.0, 17.8, 19.8, 23.1,
 ]
-#: Mixer 增益档位（dB），index 0..15。来源: R820T mixer gain table
+#: Mixer 增益档位（dB），index 0..15。R820T mixer gain table
 HDSDR_MIXER_GAIN_DB = [
     -4.0, -1.0, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5,
     4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5,
 ]
-#: VGA / IF 增益档位（dB），index 0..15。来源: R820T VGA（HDSDR "IF" 滑块）
+#: VGA / IF 增益档位（dB），index 0..15。R820T VGA（HDSDR "IF" 滑块）
 HDSDR_VGA_GAIN_DB = [
     0.0, 1.6, 3.2, 4.8, 6.4, 8.0, 9.6, 11.2,
     12.8, 14.4, 16.0, 17.6, 19.2, 20.8, 22.4, 24.0,
@@ -68,7 +69,7 @@ def hdsdr_total_gain(lna_idx: int, mixer_idx: int, vga_idx: int) -> Dict:
 # ═══════════════════════════════════════════════════════════════════════
 #  2. 解调模式参数表 + 带宽预设
 # ═══════════════════════════════════════════════════════════════════════
-#: HDSDR 解调模式 → 典型带宽预设 (Hz)。来源: HDSDR 手册 / F6 带宽滑块常用档。
+#: HDSDR 解调模式 → 典型带宽预设 (Hz)。HDSDR 手册 / F6 带宽滑块常用档。
 HDSDR_BANDWIDTH_PRESETS = {
     "cw":   500,      # CW 窄带
     "usb":  2400,     # 上边带
@@ -77,7 +78,7 @@ HDSDR_BANDWIDTH_PRESETS = {
     "nfm":  12500,    # 窄带调频（对讲）
     "wfm":  120000,   # 宽带调频（广播）
 }
-#: 解调模式列表。来源: HDSDR wnew.html (SSB/AM/FM/CW TX/RX)
+#: 解调模式列表。HDSDR wnew.html (SSB/AM/FM/CW TX/RX)
 HDSDR_MODES = ("am", "fm", "nfm", "wfm", "usb", "lsb", "cw")
 
 
@@ -140,7 +141,7 @@ def register_hdsdr_tools(registry) -> None:
     registry.register(
         name="hdsdr_rf_gain",
         description=("HDSDR RF 前端三级增益：LNA/Mixer/VGA 档位(0..15)自动钳位，"
-                     "求和得总增益(dB)。移植 ExtIO R820T 增益表。"),
+                     "求和得总增益(dB)。ExtIO R820T 增益表。"),
         parameters={
             "type": "object",
             "properties": {

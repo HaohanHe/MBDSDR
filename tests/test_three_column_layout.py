@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 三栏「平行视界」offscreen 冒烟测试 (tests/test_three_column_layout.py)
 =====================================================================

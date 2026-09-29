@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 频谱处理器
 ============================

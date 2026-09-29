@@ -1,29 +1,23 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI 内核 - GNU Radio 风格 TPB 流图调度器
-=============================================
+A thread-per-block streaming flow-graph runtime.
 
-对照上游（见 docs/learn/sdrpp_gnuradio_port.md 第二节）：
+This runtime executes a graph of signal-processing blocks with one OS thread per
+block.  Blocks exchange samples through bounded ring buffers that apply
+back-pressure: a writer blocks when the buffer is full, a reader blocks when it
+is empty, and a ``stop()`` wakes everyone up so threads can exit cleanly.
 
-  - FlowGraph 拓扑排序 + 三色判环
-                     <-> gnuradio-runtime/lib/flowgraph.cc:384-453
-  - TPB 每块一个线程   <-> gnuradio-runtime/lib/scheduler_tpb.cc:75-89
-  - tpb_thread_body 主循环（READY/BLKD_IN/BLKD_OUT/DONE）
-                     <-> gnuradio-runtime/lib/tpb_thread_body.cc:63-137
-  - block_executor.run_one_iteration（forecast/general_work/consume/produce）
-                     <-> gnuradio-runtime/lib/block_executor.cc:261-722
-  - 环形缓冲           <-> gnuradio-runtime/lib/buffer.cc:57-143
-  - 块间 StreamBuffer 通信
-                     <-> 本项目 mbdsdr_ai/block_stream.py:121-210
+Components:
+  * :class:`TpbBuffer`   condition-variable bounded ring buffer (blocking I/O)
+  * :class:`TpbBlock`    processing unit with ``forecast``/``work`` hooks
+  * :class:`FlowGraph`   wiring, cycle/unconnected-port validation, and
+                         Kahn topological ordering; independent sub-graphs can
+                         be grouped with :meth:`FlowGraph.partition`
+  * :class:`Scheduler`   launches one thread per block and drives the
+                         forecast -> read input -> work -> write output loop
 
-我们的增强：
-  * 纯 Python 块（GNU Radio 块要 C++ 或 SWIG；这里直接子类化 TpbBlock 即可）；
-  * FlowGraph.partition() 自动把图拆成可并行子图（独立 source→sink 链）；
-  * 背压用 threading.Condition 实现：上游写满则等，下游读空则等。
-
-工作约定（与 block_executor.cc 一致）：
-  - 每块一个线程，循环：forecast → 等输入可用 → 等输出空间 → work() → produce/consume；
-  - source 块 ninputs=0；sink 块 noutputs=0；
-  - work(inputs, outputs) 返回 nproduced；块自己调 consume(i, n) 推进读指针。
+The runtime is written from scratch in Python (NumPy + ``threading``); blocks
+are plain Python objects.  It does not rely on any external project's code.
 """
 
 from __future__ import annotations
@@ -31,28 +25,23 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# 复用已有 StreamBuffer / StreamReader 的数据结构设计（block_stream.py:71-210）
-# 但 TPB 调度需要"阻塞写/阻塞读"语义，所以这里加一层带 Condition 的环形缓冲。
-
 
 # ---------------------------------------------------------------------------
-# 线程安全阻塞环形缓冲（TPB 版 StreamBuffer）
+# Thread-safe blocking ring buffer
 # ---------------------------------------------------------------------------
 class TpbBuffer:
-    """有界环形缓冲，写满阻塞、读空阻塞，对应 buffer.cc:57-143。
+    """Bounded ring buffer that blocks on a full write / empty read.
 
-    一个写者（上游块线程），一个或多个读者（下游块线程，fan-out）。
-    与 block_stream.StreamBuffer 的区别：
-      - 写满不抛 BufferError，而是 wait 在 not_full 条件上；
-      - 读空不抛 ValueError，而是 wait 在 not_empty 条件上；
-      - stop() 广播所有等待者退出。
+    One writer (an upstream block thread) and one or more readers (downstream
+    block threads).  Unlike a non-blocking queue, a full write waits on a
+    ``not_full`` condition and an empty read waits on ``not_empty``; ``stop()``
+    broadcasts both so all waiters can leave.
     """
 
     def __init__(self, capacity: int = 4096, dtype=np.complex64):
@@ -60,17 +49,20 @@ class TpbBuffer:
             raise ValueError("capacity must be >= 2")
         self.capacity = capacity
         self.data = np.zeros(capacity, dtype=dtype)
-        self._w = 0  # 写指针（环形下标）
-        self._r = 0  # 读指针（环形下标），单读者；fan-out 用多 reader 见下
-        self._count = 0  # 当前缓冲内样本数
+        self._w = 0            # ring write index
+        self._r = 0            # ring read index
+        self._count = 0        # number of samples currently buffered
         self._lock = threading.Lock()
         self._not_full = threading.Condition(self._lock)
         self._not_empty = threading.Condition(self._lock)
         self._stopped = False
 
-    # -- 单读者接口（TPB 最常见 1:1 连接）-----------------------------------
     def write(self, items: np.ndarray, timeout: Optional[float] = None) -> bool:
-        """写入 items；缓冲满则阻塞。返回 False 表示被 stop() 唤醒。"""
+        """Append ``items``; block while the buffer is full.
+
+        Returns ``False`` if woken by ``stop()`` rather than completing the
+        write.
+        """
         n = len(items)
         if n == 0:
             return True
@@ -86,7 +78,6 @@ class TpbBuffer:
                     return False
                 if self._stopped:
                     return False
-            # 写入（处理回绕）
             end = self._w + n
             if end <= self.capacity:
                 self.data[self._w:end] = items
@@ -100,7 +91,10 @@ class TpbBuffer:
             return True
 
     def read(self, n: int, timeout: Optional[float] = None) -> Optional[np.ndarray]:
-        """读最多 n 个样本；不足则阻塞等。返回 None 表示被 stop() 唤醒。"""
+        """Read up to ``n`` samples; block until they are available.
+
+        Returns ``None`` if woken by ``stop()``.
+        """
         if n <= 0:
             return np.empty(0, dtype=self.data.dtype)
         deadline = None if timeout is None else time.time() + timeout
@@ -110,7 +104,7 @@ class TpbBuffer:
                 if deadline is not None:
                     remaining = deadline - time.time()
                     if remaining <= 0:
-                        # 超时：能读多少读多少（不报错）
+                        # Time out: return whatever is buffered.
                         if self._count == 0:
                             return None if self._stopped else np.empty(0, dtype=self.data.dtype)
                         break
@@ -141,7 +135,7 @@ class TpbBuffer:
             return self.capacity - self._count
 
     def stop(self) -> None:
-        """唤醒所有等待者，让它们退出循环。"""
+        """Wake every waiter so its loop can exit."""
         with self._lock:
             self._stopped = True
             self._not_full.notify_all()
@@ -149,38 +143,37 @@ class TpbBuffer:
 
 
 # ---------------------------------------------------------------------------
-# TPB Block 基类
+# Block base class
 # ---------------------------------------------------------------------------
 class TpbBlock:
-    """信号处理块基类。子类覆写 work()。
+    """Base class for a processing block; subclasses override :meth:`work`.
 
-    生命周期（由 Scheduler 在每块自己的线程里驱动，对应 tpb_thread_body.cc:63-137）：
-      1. forecast(nout) -> list[int]：问每输入要多少样本；
-      2. 从每输入缓冲读够样本；
-      3. 检查每输出缓冲有空间；
-      4. work(inputs, outputs) -> nproduced；
-      5. 推进输入读指针（consume）。
+    Per-thread lifecycle (driven by :class:`Scheduler`):
+      1. ``forecast(nout)`` reports required input per port;
+      2. read enough samples from each input buffer;
+      3. run ``work(inputs, outputs)``;
+      4. write the produced samples into each output buffer (blocking on space).
     """
 
     def __init__(self, name: str, ninputs: int = 1, noutputs: int = 1):
         self.name = name
         self.ninputs = ninputs
         self.noutputs = noutputs
-        # 运行期接线（由 FlowGraph.setup 填充）
+        # Runtime wiring (filled by FlowGraph.setup).
         self._in_bufs: List[Optional[TpbBuffer]] = [None] * ninputs
         self._out_bufs: List[Optional[TpbBuffer]] = [None] * noutputs
-        # 统计
+        # Statistics.
         self.nitems_read = [0] * ninputs
         self.nitems_written = [0] * noutputs
         self._stop = threading.Event()
 
-    # -- 子类覆写 -----------------------------------------------------------
+    # -- subclass hooks ------------------------------------------------------
     def forecast(self, noutput_items: int) -> List[int]:
-        """要产 noutput_items 个样本，每输入要多少（block_executor.cc:523）。"""
+        """Samples needed on each input port to emit ``noutput_items``."""
         return [noutput_items] * self.ninputs
 
     def work(self, inputs: List[np.ndarray], outputs: List[np.ndarray]) -> int:
-        """处理数据。outputs 已预分配。返回实际产出数。"""
+        """Process data; ``outputs`` are pre-allocated. Return samples produced."""
         raise NotImplementedError
 
     def stop(self) -> None:
@@ -194,10 +187,10 @@ class TpbBlock:
 
 
 # ---------------------------------------------------------------------------
-# 几个内置参考块（确定性）
+# Built-in reference blocks (deterministic)
 # ---------------------------------------------------------------------------
 class VectorSource(TpbBlock):
-    """从给定数组循环吐样本的 source（ninputs=0）。"""
+    """A source (ninputs=0) that emits a fixed vector, repeating it."""
 
     def __init__(self, name: str, vector: np.ndarray, repeat: bool = True):
         super().__init__(name, ninputs=0, noutputs=1)
@@ -224,7 +217,7 @@ class VectorSource(TpbBlock):
 
 
 class VectorSink(TpbBlock):
-    """把收到的样本收集到 list 的 sink（noutputs=0）。"""
+    """A sink (noutputs=0) that collects samples into a list."""
 
     def __init__(self, name: str):
         super().__init__(name, ninputs=1, noutputs=0)
@@ -236,7 +229,7 @@ class VectorSink(TpbBlock):
 
 
 class MultiplyConst(TpbBlock):
-    """y = c * x（1:1）。"""
+    """y = c * x (1:1)."""
 
     def __init__(self, name: str, c: complex = 1.0 + 0j):
         super().__init__(name, ninputs=1, noutputs=1)
@@ -248,10 +241,10 @@ class MultiplyConst(TpbBlock):
 
 
 # ---------------------------------------------------------------------------
-# FlowGraph：连接 / 校验 / 分区
+# Flow graph: wiring / validation / ordering
 # ---------------------------------------------------------------------------
 class FlowGraph:
-    """块连接图。对应 flowgraph.cc:384-453。"""
+    """A graph of connected blocks."""
 
     def __init__(self, buffer_capacity: int = 4096, chunk: int = 1024):
         self.buffer_capacity = buffer_capacity
@@ -260,7 +253,7 @@ class FlowGraph:
         # edges: (src_block, src_port, dst_block, dst_port)
         self.edges: List[Tuple[TpbBlock, int, TpbBlock, int]] = []
 
-    # -- 连接 ---------------------------------------------------------------
+    # -- wiring --------------------------------------------------------------
     def add_block(self, blk: TpbBlock) -> None:
         if blk not in self.blocks:
             self.blocks.append(blk)
@@ -272,12 +265,12 @@ class FlowGraph:
             self.add_block(dst)
         self.edges.append((src, src_port, dst, dst_port))
 
-    # -- 校验 ---------------------------------------------------------------
+    # -- validation ----------------------------------------------------------
     def validate(self) -> None:
-        """检测环 + 未连接端口。对应 flowgraph.cc:428-453。"""
+        """Detect cycles and unconnected ports."""
         if not self.blocks:
             return
-        # 1) 三色 DFS 判环
+        # Three-colour DFS cycle detection.
         WHITE, GREY, BLACK = 0, 1, 2
         color = {b: WHITE for b in self.blocks}
         adj: Dict[TpbBlock, List[TpbBlock]] = {b: [] for b in self.blocks}
@@ -301,7 +294,7 @@ class FlowGraph:
             if color[b] == WHITE:
                 dfs(b)
 
-        # 2) 未连接端口检查
+        # Unconnected port check.
         connected_in = {(dst, dst_port) for _, _, dst, dst_port in self.edges}
         connected_out = {(src, src_port) for src, src_port, _, _ in self.edges}
         for b in self.blocks:
@@ -316,7 +309,7 @@ class FlowGraph:
                         f"block {b.name} output port {p} is not connected"
                     )
 
-    # -- 拓扑排序 -----------------------------------------------------------
+    # -- topological order ---------------------------------------------------
     def topological_sort(self) -> List[TpbBlock]:
         indeg: Dict[TpbBlock, int] = {b: 0 for b in self.blocks}
         adj: Dict[TpbBlock, List[TpbBlock]] = {b: [] for b in self.blocks}
@@ -336,13 +329,12 @@ class FlowGraph:
             raise RuntimeError("flow graph has loops!")
         return order
 
-    # -- 分区：找独立 source→sink 链（可并行子图）--------------------------
+    # -- split into independent connected components -------------------------
     def partition(self) -> List[List[TpbBlock]]:
-        """把图拆成若干连通分量（每个分量一个 source→sink 链）。
+        """Group blocks into connected components (independent source->sink chains).
 
-        对应 flat_flowgraph 的 partition 思想：独立分量可放不同线程组。
+        Independent components may run in separate thread groups.
         """
-        # 用并查集
         parent = {b: b for b in self.blocks}
 
         def find(x: TpbBlock) -> TpbBlock:
@@ -364,28 +356,26 @@ class FlowGraph:
             groups.setdefault(root, []).append(b)
         return list(groups.values())
 
-    # -- 装配：建缓冲 + 接线 ------------------------------------------------
+    # -- assembly: allocate buffers and wire ports ---------------------------
     def setup(self) -> None:
         self.validate()
-        # 给每个输出端口建一个 TpbBuffer
+        # One ring buffer per output port.
         for b in self.blocks:
             for p in range(b.noutputs):
                 b._out_bufs[p] = TpbBuffer(capacity=self.buffer_capacity)
-        # 边：上游 buffer 给下游读（1:1 直连；fan-out 暂时不支持多 reader）
+        # Each edge pairs the upstream output buffer with the downstream input.
         for src, src_port, dst, dst_port in self.edges:
             dst._in_bufs[dst_port] = src._out_bufs[src_port]
 
 
 # ---------------------------------------------------------------------------
-# Scheduler：TPB 每块一线程
+# Scheduler: one thread per block
 # ---------------------------------------------------------------------------
 class Scheduler:
-    """GNU Radio TPB 调度器的 Python 版。
+    """Runs the graph with one thread per block.
 
-    run() 给每块起一个线程，每块在自己线程里跑：
-        while not stop:
-            forecast -> 等输入 -> 等输出空间 -> work -> consume/produce
-    对应 tpb_thread_body.cc:63-137。
+    Each block thread loops: forecast -> wait for input -> work -> write output,
+    until stopped.
     """
 
     def __init__(self, fg: FlowGraph):
@@ -395,14 +385,13 @@ class Scheduler:
         self._exceptions: List[BaseException] = []
 
     def _block_thread(self, blk: TpbBlock) -> None:
-        """每块一个线程的主循环。"""
+        """Main loop of one block thread."""
         try:
             while not self._stop_evt.is_set() and not blk._stop.is_set():
-                # 1) source 不需要 forecast 输入
+                # 1) read required input (sources need no input)
                 if blk.ninputs > 0:
                     nout = self.fg.chunk
                     req = blk.forecast(nout)
-                    # 等输入可用
                     inputs: List[np.ndarray] = []
                     ok = True
                     for i, ibuf in enumerate(blk._in_bufs):
@@ -412,7 +401,6 @@ class Scheduler:
                             ok = False
                             break
                         if len(data) < req[i]:
-                            # 输入不够，等一下
                             time.sleep(0.001)
                             ok = False
                             break
@@ -424,17 +412,17 @@ class Scheduler:
                     req = []
                     inputs = []
 
-                # 2) 预分配输出
+                # 2) pre-allocate output
                 outputs = [
                     np.empty(nout, dtype=np.complex64) for _ in range(blk.noutputs)
                 ]
 
-                # 3) work
+                # 3) run the block
                 nproduced = blk.work(inputs, outputs)
                 if nproduced < 0:
                     nproduced = 0
 
-                # 4) 写输出缓冲（阻塞，对应 BLKD_OUT）
+                # 4) write output (blocks when downstream buffer is full)
                 for p in range(blk.noutputs):
                     obuf = blk._out_bufs[p]
                     assert obuf is not None
@@ -445,20 +433,19 @@ class Scheduler:
                             return  # stop
                     blk.nitems_written[p] += nproduced
 
-                # 5) 推进输入读指针（数据已经被 read() 取走，这里只记账）
+                # 5) bookkeeping for consumed input (read() already moved the pointer)
                 for i, n in enumerate(req):
                     blk.nitems_read[i] += n
         except Exception as e:
             self._exceptions.append(e)
-            logger.exception("块 %s 线程异常", blk.name)
+            logger.exception("block %s thread exception", blk.name)
         finally:
-            # 通知上下游本块结束
             for obuf in blk._out_bufs:
                 if obuf is not None:
                     obuf.stop()
 
     def run(self) -> None:
-        """启动所有块线程（非阻塞）。"""
+        """Launch all block threads (non-blocking)."""
         self.fg.setup()
         self._threads = []
         for blk in self.fg.blocks:
@@ -470,13 +457,13 @@ class Scheduler:
             t.start()
 
     def stop(self) -> None:
-        """请求停止所有块。"""
+        """Request that all blocks stop."""
         self._stop_evt.set()
         for blk in self.fg.blocks:
             blk.stop()
 
     def wait(self, timeout: Optional[float] = None) -> None:
-        """等待所有块线程结束。"""
+        """Wait for all block threads to finish."""
         for t in self._threads:
             t.join(timeout=timeout)
         if self._exceptions:

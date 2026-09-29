@@ -1,42 +1,15 @@
-"""
-MBDSDR - ACARS 协议编解码模块（自包含，不依赖 acars_decoder.py）
-=================================================================
+# SPDX-License-Identifier: MIT
+"""MBDSDR - ACARS 协议编解码模块（自包含，不依赖 acars_decoder.py）。
 
-本模块与已存在的 ``mbdsdr_ai/acars_decoder.py`` 并存，互不 import、互不耦合。
-它提供一对自包含的合成往返工具：
-
+本模块与 ``mbdsdr_ai/acars_decoder.py`` 并存，互不 import、互不耦合，依据公开
+ARINC 618/ACARS 空中接口协议提供一对自包含的合成往返工具：
     acars_encode(mode, reg, label, text, baud) -> np.ndarray
     acars_decode(audio, sample_rate, baud) -> List[dict]
 
-空中接口要点（参考 repos/ 下的 C 实现）：
-  - 调制：MSK = 连续相位 FSK，mark=2400 Hz, space=1200 Hz, 中心=1800 Hz
-      参考: repos/acarsdec/msk.c:81  VCO 中心 1800.0/INTRATE*2π
-            repos/acarsdec/msk.c:25  FLEN=(INTRATE/1200)+1
-  - 波特率：默认 2400 bps（空中标准），同时兼容 1200 bps
-  - 比特顺序：LSB 先发
-      参考: repos/acarsdec/msk.c:53-63  putbit() 右移把首比特放到 bit0
-  - 帧结构（空中字节流）：
-        SYN(0x16) SYN(0x16) SOH(0x01)
-        mode(1) reg(7) ack(1) label(2) block_id(1)
-        [STX(0x02)] text...
-        ETX(0x83) / ETB(0x97)
-        crc_lo crc_hi
-        DEL(0x7f)
-      参考: repos/acarsdec/acars.c:22-27  控制字符宏
-            repos/acarsdec/acars.c:246-375  帧同步状态机
-            repos/libacars/libacars/acars.c:272-385  字段解析
-  - 偶校验：每个 7-bit 数据字节的 bit7 置位，使 8 位中 1 的个数为偶数；
-      解码时与 0x7f 剥离
-      参考: repos/libacars/libacars/acars.c:302-304  buf[i] & 0x7f
-  - 块校验：CRC-16-CCITT（多项式 0x1021，初值 0x0000，右移查表），
-      对 [SOH 之后..ETX/ETB] + crc_lo + crc_hi 求余数 == 0 即通过
-      参考: repos/libacars/libacars/crc.c:73-115  查表
-            repos/acarsdec/syndrom.h:49  update_crc 宏
-            repos/libacars/libacars/acars.c:296-299  crc_ok = (crc == 0)
-
-注意：
-  - 本模块仅用于合成信号往返测试，不冒充任何真实空中接收数据。
-  - 测试用的注册号/标签均为虚构值，不对应任何真实航空器。
+acarsdec (https://github.com/TLeconte/acarsdec) 仅作技术参考与致谢，本仓未包含
+其源代码。空中接口要点（依据 ACARS 公开协议）：MSK 连续相位 FSK，mark=2400 Hz,
+space=1200 Hz, 中心=1800 Hz；默认 2400 bps，兼容 1200 bps；LSB 先发；
+帧结构 SYN(0x16)×2 SOH(0x01) + mode/reg/ack/label/block_id + [STX] text。
 """
 
 from __future__ import annotations
@@ -47,22 +20,22 @@ from typing import List, Optional
 import numpy as np
 
 # ─────────────────────────────────────────────────────────────────────
-# 协议常量（参考 repos/acarsdec/acars.c:22-27）
+# 协议常量（参考 ）
 # ─────────────────────────────────────────────────────────────────────
-SYN = 0x16   # 同步字（连续两个）           acars.c:22
-SOH = 0x01   # 帧起始                       acars.c:23
-STX = 0x02   # 文本起始                     acars.c:24
-ETX = 0x83   # 文本结束（最终块）           acars.c:25
-ETB = 0x97   # 传输结束（非最终块）          acars.c:26
-DEL = 0x7F   # 帧尾 DEL                     acars.c:27
+SYN = 0x16   # 同步字（连续两个）
+SOH = 0x01   # 帧起始
+STX = 0x02   # 文本起始
+ETX = 0x83   # 文本结束（最终块）
+ETB = 0x97   # 传输结束（非最终块）
+DEL = 0x7F   # 帧尾 DEL
 
-# 去校验位后看到的控制字符（参考 libacars/acars.c:30-35）
+# 去校验位后看到的控制字符（）
 _LA_STX = 0x02
 _LA_ETX = 0x03   # ETX & 0x7f
 _LA_ETB = 0x17   # ETB & 0x7f
 _LA_DEL = 0x7F
 
-# 调制音调（参考 repos/acarsdec/msk.c:81 中心 1800 Hz，±600 Hz）
+# 调制音调（参考 中心 1800 Hz，±600 Hz）
 CENTER_FREQ_HZ = 1800.0
 MARK_FREQ_HZ = 2400.0
 SPACE_FREQ_HZ = 1200.0
@@ -74,7 +47,7 @@ DEFAULT_BAUD = 2400
 
 # ─────────────────────────────────────────────────────────────────────
 # CRC-16-CCITT 右移查表
-#   参考 repos/libacars/libacars/crc.c:73-115
+# 参考
 #   poly=0x1021, init=0x0000, crc=(crc>>8)^table[(crc^byte)&0xff]
 # ─────────────────────────────────────────────────────────────────────
 _CRC_TABLE = [
@@ -114,7 +87,7 @@ _CRC_TABLE = [
 
 
 def crc16_ccitt(data: bytes, crc_init: int = 0x0000) -> int:
-    """CRC-16-CCITT 右移版本。参考 repos/libacars/libacars/crc.c:110-114."""
+    """CRC-16-CCITT 右移版本。参考"""
     crc = crc_init & 0xFFFF
     for b in data:
         crc = (crc >> 8) ^ _CRC_TABLE[(crc ^ b) & 0xFF]
@@ -128,8 +101,7 @@ def crc16_ccitt(data: bytes, crc_init: int = 0x0000) -> int:
 def _even_parity(byte7: int) -> int:
     """给 7-bit 数据字节加偶校验位 bit7，使 8 位中 1 的个数为偶数。
 
-    解码时与 0x7f 剥离（参考 libacars/acars.c:302-304）。
-    """
+ 解码时与 0x7f 剥离（）"""
     b = byte7 & 0x7F
     if bin(b).count('1') & 1:
         b |= 0x80
@@ -139,8 +111,7 @@ def _even_parity(byte7: int) -> int:
 def _bytes_to_bits_lsb(data: bytes) -> List[int]:
     """字节流展开为 LSB-first 比特序列（发送顺序）。
 
-    参考 repos/acarsdec/msk.c:53-63 putbit()：先收到的 bit 落在 bit0。
-    """
+ 参考 ：先收到的 bit 落在 bit0"""
     bits: List[int] = []
     for b in data:
         for j in range(8):
@@ -167,9 +138,8 @@ def build_frame_bytes(mode: str, reg: str, label: str, text: str,
                       final_block: bool = True) -> bytes:
     """构造完整空中字节流（含 SYN/SOH/STX/ETX/CRC/DEL）。
 
-    字段顺序参考 repos/libacars/libacars/acars.c:323-385。
-    数据字段加偶校验位；控制字符按线上原值发送。
-    """
+ 字段顺序参考 。
+ 数据字段加偶校验位；控制字符按线上原值发送"""
     body = bytearray()
     # mode
     body.append(_even_parity(ord(mode[0])))
@@ -204,7 +174,7 @@ def build_frame_bytes(mode: str, reg: str, label: str, text: str,
 # ─────────────────────────────────────────────────────────────────────
 # MSK 调制：比特 -> 连续相位 FSK 音频
 #   bit1 -> mark 2400 Hz, bit0 -> space 1200 Hz，相位连续
-#   参考 repos/acarsdec/msk.c:81 中心 1800 Hz
+# 参考 中心 1800 Hz
 # ─────────────────────────────────────────────────────────────────────
 def _msk_modulate(bits: List[int], sample_rate: float, baud: int,
                   amplitude: float = 0.8) -> np.ndarray:
@@ -260,12 +230,12 @@ def acars_encode(mode: str, reg: str, label: str, text: str,
 
 # ─────────────────────────────────────────────────────────────────────
 # MSK 解调：实数音频 -> 比特序列
-#   参考 repos/acarsdec/msk.c:86-126：
+# 参考
 #     mixer 下变频到中心 1800 Hz，匹配滤波后做 mark/space 判决。
 #   这里用纯 numpy 实现非相干 FSK 能量检测：
 #     分别与 mark(2400)/space(1200) 两个本振做相关，
 #     在一个比特窗口上取模，能量大者判决。
-#     等价于 msk.c:102-107 的匹配滤波（对 mark/space 各做一次相关）。
+# 等价于 的匹配滤波（对 mark/space 各做一次相关）
 # ─────────────────────────────────────────────────────────────────────
 def _fsk_discriminate(audio: np.ndarray, sample_rate: float,
                       baud: int) -> np.ndarray:
@@ -294,9 +264,8 @@ def _sample_bits(dphi: np.ndarray, sample_rate: float, baud: int,
                  phase_offset: float) -> List[int]:
     """在能量判决序列上按 bit 周期采样，返回比特列表。
 
-    phase_offset ∈ [0,1)：比特相位偏移，用于搜索最佳对齐。
-    采样点落在 bit 中心（半周期处），参考 msk.c:96-100 的位时钟判决。
-    """
+ phase_offset ∈ [0,1)：比特相位偏移，用于搜索最佳对齐。
+ 采样点落在 bit 中心（半周期处），的位时钟判决"""
     spb = sample_rate / float(baud)
     if len(dphi) < int(spb):
         return []
@@ -315,7 +284,7 @@ def _sample_bits(dphi: np.ndarray, sample_rate: float, baud: int,
 
 # ─────────────────────────────────────────────────────────────────────
 # 帧同步状态机（字节流）
-#   参考 repos/acarsdec/acars.c:246-375
+# 参考
 #   WSYN -> SYN2 -> SOH1 -> TXT -> CRC1 -> CRC2
 # ─────────────────────────────────────────────────────────────────────
 def _extract_frames(bytes_stream: List[int]) -> List[bytes]:
@@ -363,19 +332,18 @@ def _extract_frames(bytes_stream: List[int]) -> List[bytes]:
 
 # ─────────────────────────────────────────────────────────────────────
 # 字段解析
-#   参考 repos/libacars/libacars/acars.c:272-385
+# 参考
 # ─────────────────────────────────────────────────────────────────────
 def _parse_frame(body: bytes) -> Optional[dict]:
     """解析一帧 body（SOH 之后，含 ETX/ETB + crc + DEL）。
 
-    步骤（参考 libacars/acars.c:290-385）：
-      1) 去掉末尾 DEL
-      2) 对剩余字节（含 2 字节 CRC）求 CRC16，余数应为 0
-      3) 去掉 2 字节 CRC
-      4) 逐字节 &0x7f 去偶校验位
-      5) 末尾应是 ETX(0x03)/ETB(0x17)
-      6) 依次取 mode(1) reg(7) ack(1) label(2) block_id(1) [STX] text
-    """
+ 步骤（）：
+ 1) 去掉末尾 DEL
+ 2) 对剩余字节（含 2 字节 CRC）求 CRC16，余数应为 0
+ 3) 去掉 2 字节 CRC
+ 4) 逐字节 &0x7f 去偶校验位
+ 5) 末尾应是 ETX(0x03)/ETB(0x17)
+ 6) 依次取 mode(1) reg(7) ack(1) label(2) block_id(1) [STX] text"""
     if len(body) < 16:
         return None
     buf = bytearray(body)

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """桌面 GUI 真机端到端回归：枚举 -> 连接 -> fan-out -> 实时频谱 -> 音频。
 

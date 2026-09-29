@@ -1,6 +1,8 @@
-"""WebSpectra 瀑布编/解码单测（移植自 OpenWebRX FFT 链 + ADPCM）。
+# SPDX-License-Identifier: MIT
+"""WebSpectra 瀑布编/解码单测。
 
-上游对照：docs/learn/porting_2026_09_27.md §2
+依据公开 WebSpectra 协议格式（FFT 幅度流式 + ADPCM 编码）独立实现；
+OpenWebRX 仅作技术参考，未引用其代码。
 """
 import numpy as np
 

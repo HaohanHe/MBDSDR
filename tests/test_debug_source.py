@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """DebugSource 确定性测试：单音频率精度、噪声统计、扫频范围、接口兼容、Debug 标记。"""
 import numpy as np
 import pytest

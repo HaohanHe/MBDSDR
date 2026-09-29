@@ -1,21 +1,19 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI 内核 - 抗混叠抽取 FIR（Decimating FIR）
-===================================================
+Anti-aliasing decimating FIR.
 
-逐行对照 SDR++ repos/sdrpp/core/src/dsp/filter/：
+Decimation must be preceded by a low-pass anti-alias filter: blindly taking
+every ``D``-th sample (``x[::D]``) would fold any energy above the output
+Nyquist frequency ``fs_in/(2D)`` back into the base band.  This module first
+filters with a prototype low-pass FIR and then keeps every ``D``-th output.
 
-  - fir.h:62-83               标准 FIR：历史缓冲 (taps-1) 个样本 + 逐点点积
-  - decimating_fir.h:45-68    抽取 FIR：在卷积输出上每隔 decimation 取一个
-                              （先抗混叠低通，再抽取，正确顺序）
-
-关键正确性点（红线）：
-  1. 必须先做 FIR 低通抗混叠，再抽取。绝不能裸 x[::D]——否则 |f|>fs_out/2
-     的高频会折叠到基带。
-  2. 原型低通截止必须 ≤ 输出 Nyquist = fs_in/(2D)。抽头由 fir_taps.lowpass_taps
-     给出（Nuttall 窗，transWidth = 0.1*cutoff，对照 rational_resampler.h:156）。
-  3. 流式：跨块保留 (taps-1) 个历史样本与抽取相位 offset，逐块连续。
-
-License: GPL-3.0-or-later
+Correctness points:
+  1. Low-pass filtering always precedes decimation.
+  2. The prototype cutoff is at most the output Nyquist ``fs_in/(2D)``; taps are
+     produced by :mod:`mbdsdr_ai.fir_taps` (window method, transition width
+     about 10% of the cutoff).
+  3. Stateful: the last ``taps-1`` input samples and the decimation phase are
+     carried across calls so block-wise processing is continuous.
 """
 
 from __future__ import annotations
@@ -27,11 +25,10 @@ __all__ = ["DecimatingFIR", "design_decimation_taps"]
 
 def design_decimation_taps(decimation: int, input_sr_hz: float,
                            trans_width_hz: float | None = None) -> np.ndarray:
-    """为整数抽取设计抗混叠低通抽头。
+    """Design anti-alias low-pass taps for integer decimation.
 
-    截止 = 输出 Nyquist = input_sr/(2*decimation)。
-    对照 rational_resampler.h:155 tapBandwidth = min(in,out)/2；
-    transWidth = tapBandwidth*0.1（rational_resampler.h:156）。
+    The cutoff is the output Nyquist ``input_sr/(2*decimation)`` and the
+    transition width defaults to 10% of the cutoff.
     """
     from .fir_taps import lowpass_taps
     cutoff = input_sr_hz / (2.0 * decimation)
@@ -41,13 +38,11 @@ def design_decimation_taps(decimation: int, input_sr_hz: float,
 
 
 class DecimatingFIR:
-    """带状态抗混叠抽取 FIR。
-
-    对照 decimating_fir.h:13-16 init(in, taps, decimation) 与 :45-68 process。
+    """Stateful anti-aliasing decimating FIR.
 
     Parameters:
-        taps: 实数 FIR 低通系数（由 design_decimation_taps 生成）。
-        decimation: 整数抽取因子 D ≥ 1。
+        taps: real FIR low-pass coefficients (from :func:`design_decimation_taps`).
+        decimation: integer decimation factor D >= 1.
     """
 
     def __init__(self, taps: np.ndarray, decimation: int = 1) -> None:
@@ -58,9 +53,9 @@ class DecimatingFIR:
             raise ValueError("decimation must be >= 1")
         self._taps = taps
         self._D = int(decimation)
-        # 历史缓冲：上一块末尾 (N-1) 个样本（fir.h:25 bufStart = &buffer[N-1]）
+        # History: trailing (N-1) samples from the previous block.
         self._history = np.zeros(taps.size - 1, dtype=np.float64)
-        # 抽取相位（decimating_fir.h:86 offset，跨块累加后对 count 取余）
+        # Decimation phase carried across blocks.
         self._offset = 0
 
     @property
@@ -73,11 +68,7 @@ class DecimatingFIR:
         self._offset = 0
 
     def process(self, x: np.ndarray) -> np.ndarray:
-        """处理一段样本，返回抽取后样本（长度 ≈ len(x)/D）。
-
-        对照 decimating_fir.h:45-61：把输入接到历史后，在 offset, offset+D, ...
-        处做完整 FIR 卷积点积。
-        """
+        """Process a block; returns the decimated samples (length ~ len(x)/D)."""
         x = np.asarray(x)
         if x.size == 0:
             return x
@@ -85,7 +76,7 @@ class DecimatingFIR:
             return x
         n_taps = self._taps.size
 
-        # 拼上历史（fir.h:64 memcpy(bufStart, in, ...)）
+        # Prepend history so the first output of this block is continuous.
         if np.iscomplexobj(x):
             full = np.concatenate((self._history + 0j, x))
         else:
@@ -97,22 +88,19 @@ class DecimatingFIR:
         while off < count:
             out_indices.append(off)
             off += self._D
-        self._offset = off - count  # decimating_fir.h:62 offset -= count
+        self._offset = off - count
 
         if not out_indices:
-            # 本块没有可输出样本，仍要更新历史
             self._history = full[-(n_taps - 1):].copy() if n_taps > 1 else np.array([])
             return np.empty(0, dtype=x.dtype)
 
         idx = np.asarray(out_indices)
-        # FFT 相关（与逐点 FIR 卷积数值等价，复杂度 O(N log N)）：
-        # valid[p] = sum_n full[p+n]*taps[n]，长度 = count；再按抽取相位取
-        # valid[idx]。省去 np.stack 逐输出切片的巨大开销。
+        # Full valid correlation, then pick the decimation-phase outputs.
         from scipy.signal import correlate
         valid = correlate(full, self._taps, mode="valid", method="fft")
         y = valid[idx]
 
-        # 保存本块末尾 (n_taps-1) 个样本作下次历史（fir.h:80 memmove）
+        # Retain the trailing (n_taps-1) samples as next-block history.
         self._history = full[count:count + n_taps - 1].copy() if n_taps > 1 \
             else np.array([], dtype=np.float64)
         return y.astype(x.dtype)

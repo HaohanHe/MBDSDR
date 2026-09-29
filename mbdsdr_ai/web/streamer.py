@@ -1,17 +1,18 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/web/streamer.py — 频谱 / 音频流式推送
 ================================================
 
-移植自 OpenWebRX：
-  - owrx/fft.py:13   SpectrumThread —— 一份 FFT 全局只算一次
-  - owrx/connection.py:30 Client     —— 每连接一个出站队列，慢客户端背压被踢
-  - owrx/connection.py:372/375       —— 二进制帧首字节区分流类型（0x01=频谱, 0x02=音频）
+频谱 / 音频流式推送设计（OpenWebRX 仅作技术参考，本仓未包含其源代码）：
+  - 一份 FFT 全局只算一次，再扇出给所有订阅者
+  - 每连接一个出站队列，慢客户端背压被踢
+  - 二进制帧首字节区分流类型（0x01=频谱, 0x02=音频）
 
 设计原则（红线）：
   * 没有后端 / 没有数据时，`latest()` 返回 None，绝不造假频谱。
   * 一份 FFT 扇出给所有订阅者（多客户端共享同一个 SDR 后端）。
-  * 压缩用「块最大值降采样 + uint8 量化」：峰值频点不丢（对照 csdr/chain/fft.py 的 FftAdpcm，
-    但用确定性 numpy 实现，便于单测）。
+  * 压缩用「块最大值降采样 + uint8 量化」：峰值频点不丢
+    （用确定性 numpy 实现，便于单测）。
 
 二进制帧格式（小端/大端）：
   频谱帧: struct ">B I I f f" + uint8[target_bins]
@@ -63,7 +64,7 @@ class _Broadcaster:
     """订阅者扇出基类：维护订阅集合，push() 广播到每个订阅者的出站队列。
 
     订阅者必须提供 `.out: queue.Queue` 和 `.close()`。队列满说明该客户端读不动，
-    直接摘掉（对照 OpenWebRX owrx/connection.py:82 Full -> close(error=True)）。
+    直接摘掉（队列满即关闭该客户端连接）。
     """
 
     def __init__(self, max_queue: int = 64):
@@ -225,7 +226,7 @@ class SpectrumStreamer(_Broadcaster):
 class AudioStreamer(_Broadcaster):
     """音频块 → int16 PCM → WebSocket 二进制帧广播。
 
-    （对照 OpenWebRX owrx/connection.py:375 write_dsp_data —— 首字节 0x02。）
+    （二进制音频帧首字节为 0x02。）
     """
 
     def __init__(self, sample_rate: int = 48000, max_queue: int = 64):

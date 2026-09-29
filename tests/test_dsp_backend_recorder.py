@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 录制器测试：IQ complex64 raw + SigMF sidecar；音频 WAV 48k/16bit
 =============================================================

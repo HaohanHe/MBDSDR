@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 新时空时间线模块测试
 =====================

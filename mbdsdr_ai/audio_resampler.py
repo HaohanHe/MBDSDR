@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 音频有理重采样器（有状态、抗混叠 FIR）
 =========================================
@@ -5,16 +6,12 @@
 把解调后音频（典型 12 kHz / 24 kHz / 48 kHz 正交 IF）重采样到声卡原生率
 （通常 48 kHz），供 AudioPlayer 播放。
 
-移植自上游：
-- sdrpp/core/src/dsp/multirate/rational_resampler.h:120-165
-    reconfigure()：gcd 约分得到 interp/decim；多相 FIR 低通，
-    截止频率 = min(in_sr, out_sr)/2，过渡带 = 截止*0.1；
-    抽头整体乘以 interp（补偿插值插零的幅度损失）。
-- sdrpp/core/src/dsp/multirate/polyphase_resampler.h:20-90
-    多相滤波器组：按相位选择子滤波响应，保证块间无边界断裂。
-- gqrx/src/receivers/nbrx.cpp:62-70
-    audio_rr0 = make_resampler_ff(audio_rate / PREF_QUAD_RATE)，
-    PREF_QUAD_RATE=96000；解调器输出固定率，再有理数重采样到声卡率。
+实现依据（公开多速率 DSP 方法；SDR++/GQRX 仅作技术参考，本仓未包含其源代码）：
+- 有理重采样：gcd 约分得到 interp/decim；多相 FIR 低通，
+  截止频率 = min(in_sr, out_sr)/2，过渡带 = 截止*0.1；
+  抽头整体乘以 interp（补偿插值插零的幅度损失）。
+- 多相滤波器组：按相位选择子滤波响应，保证块间无边界断裂。
+- 典型用法：解调器输出固定率（96 kHz 正交 IF 量级），再有理数重采样到声卡率。
 
 与 audio_out.py 里临时用的 scipy.signal.resample_poly 的区别：
 那个是「无状态、逐块」调用——每块独立，块与块之间滤波器历史丢失，
@@ -37,11 +34,11 @@ def _design_lowpass_taps(in_sr: float, out_sr: float,
                           numtaps: int = 65) -> np.ndarray:
     """设计抗混叠低通 FIR 抽头。
 
-    对照 rational_resampler.h:154-159：
+    多相 FIR 低通设计（公开多速率 DSP 方法）：
         tapSamplerate  = intSamplerate * interp     （滤波在高率域做）
         tapBandwidth   = min(in,out)/2              （通带到奈奎斯特较小者）
         tapTransWidth  = tapBandwidth * 0.1
-        rtaps = taps::lowPass(tapBandwidth, tapTransWidth, tapSamplerate)
+        rtaps = lowPass(tapBandwidth, tapTransWidth, tapSamplerate)
         for i: rtaps[i] *= interp                   （插值插零补偿）
     """
     high_rate = float(in_sr) * up
@@ -97,7 +94,7 @@ class AudioResampler:
         self.in_sr = in_sr
         self.out_sr = out_sr
 
-        # 有理数约分（rational_resampler.h:136-138）
+        # 有理数约分（gcd 求 interp/decim）
         g = gcd(int(round(in_sr)), int(round(out_sr)))
         self.up = int(round(out_sr)) // g
         self.down = int(round(in_sr)) // g
@@ -109,7 +106,7 @@ class AudioResampler:
                                              self.up, self.down, numtaps)
 
         # ── 有状态：滤波延迟线 + 多相相位游标 ──
-        # 对照 polyphase_resampler.h 的 phase 寄存器与 history。
+        # 多相相位寄存器与滤波历史延迟线（跨块连续）。
         # 延迟线保存上一块尾部 taps_len-1 个「高率域」样本。
         self._filter_delay = np.zeros(len(self.taps) - 1, dtype=np.float64)
         # 多相相位：当前在 up 相中的位置 [0, up)。
@@ -140,8 +137,7 @@ class AudioResampler:
             return x.astype(np.float32)
 
         # ── 在高率域构造插值流：每个输入样本后插 up-1 个零 ──
-        # 对照 rational_resampler.h:82-96 BOTH/RESAMP_ONLY 路径：
-        # 先插值（插零）→ 低通滤波 → 抽取。
+        # 标准上采-滤波-下采路径：先插值（插零）→ 低通滤波 → 抽取。
         high = np.zeros(x.size * self.up, dtype=np.float64)
         high[0::self.up] = x
 
@@ -157,8 +153,7 @@ class AudioResampler:
         self._filter_delay = extended[-(n_taps - 1):].copy() if n_taps > 1 else np.zeros(0)
 
         # ── 抽取：按多相相位游标取输出样本 ──
-        # 对照 polyphase_resampler.h:40-70：相位从 self._phase 继续，
-        # 每 down 个高率样本出一个输出。
+        # 多相相位游标从 self._phase 继续，每 down 个高率样本出一个输出。
         out_indices = []
         # 当前相位在 filtered 数组里的起始位置
         pos = self._phase

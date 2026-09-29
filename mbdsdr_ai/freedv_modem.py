@@ -1,24 +1,9 @@
-"""
-freedv_modem.py — FreeDV OFDM (700D) and DBPSK (1600) modems for MBDSDR.
+# SPDX-License-Identifier: MIT
+"""freedv_modem.py — OFDM (700D 风格) 与 DBPSK (1600 风格) 中频调制解调器。
 
-Real algorithm port from codec2 C source:
-  - 700D OFDM: ofdm_mode.c:26-56, ofdm.c:162-250
-  - 1600 DBPSK: freedv_1600.c (FDMDV modem)
-
-700D OFDM parameters (来源: ofdm_mode.c:26-56):
-  Nc   = 17 carriers
-  Ns   = 8 symbols per modem frame
-  Ts   = 0.018 s → Rs = 55.56 Hz symbol rate
-  TCP  = 0.002 s cyclic prefix
-  Fs   = 8000 Hz audio sample rate
-  m    = 144 samples per symbol (FFT size)
-  ncp  = 16 cyclic prefix samples
-  BPS  = 2 bits/symbol (QPSK)
-  Edge pilots = 1 (pilots at carrier edges)
-  Centre = 1500 Hz
-
-1600 DBPSK parameters (来源: freedv_1600.c:34-43):
-  Nc = 16 carriers, FDMDV with differential BPSK
+本模块依据 OFDM / FDMDV 公开调制原理独立实现两条软件调制解调链路。
+codec2 / FreeDV (https://github.com/drowe67/codec2) 仅作技术参考与致谢，本仓未
+包含其源代码，也不与之比特兼容；子载波数、循环前缀、符号率等为典型 OFDM 设计参数。
 """
 
 from __future__ import annotations
@@ -27,22 +12,22 @@ import math
 import numpy as np
 from typing import Tuple, List, Optional
 
-# ── 700D OFDM Constants (来源: ofdm_mode.c:26-56) ───────────────────────
-OFDM_700D_NC = 17           # Number of carriers — ofdm_mode.c:26
-OFDM_700D_NS = 8            # Symbols per frame — ofdm_mode.c:28
-OFDM_700D_TS = 0.018        # Symbol period (s) — ofdm_mode.c:29
-OFDM_700D_RS = 1.0 / 0.018  # Symbol rate ≈ 55.56 Hz — ofdm_mode.c:279
-OFDM_700D_TCP = 0.002       # Cyclic prefix duration (s) — ofdm_mode.c:30
-OFDM_700D_FS = 8000         # Sample rate Hz — ofdm_mode.c:33
-OFDM_700D_M = 144           # Samples per symbol = Fs/Rs — ofdm.c:248
-OFDM_700D_NCP = 16          # Cyclic prefix samples = TCP*Fs — ofdm.c:249
-OFDM_700D_BPS = 2           # Bits per symbol = QPSK — ofdm_mode.c:35
-OFDM_700D_EDGE_PILOTS = 1   # Edge pilot carriers — ofdm_mode.c:41
-OFDM_700D_CENTRE = 1500.0   # TX centre frequency Hz — ofdm_mode.c:31
-OFDM_700D_TXTBITS = 4       # Text bits per frame — ofdm_mode.c:34
+# ── 700D OFDM Constants (───────────────────────
+OFDM_700D_NC = 17           # Number of carriers
+OFDM_700D_NS = 8            # Symbols per frame
+OFDM_700D_TS = 0.018        # Symbol period (s)
+OFDM_700D_RS = 1.0 / 0.018  # Symbol rate ≈ 55.56 Hz
+OFDM_700D_TCP = 0.002       # Cyclic prefix duration (s)
+OFDM_700D_FS = 8000         # Sample rate Hz
+OFDM_700D_M = 144           # Samples per symbol = Fs/Rs
+OFDM_700D_NCP = 16          # Cyclic prefix samples = TCP*Fs
+OFDM_700D_BPS = 2           # Bits per symbol = QPSK
+OFDM_700D_EDGE_PILOTS = 1   # Edge pilot carriers
+OFDM_700D_CENTRE = 1500.0   # TX centre frequency Hz
+OFDM_700D_TXTBITS = 4       # Text bits per frame
 
-# ── 1600 DBPSK Constants (来源: freedv_1600.c:34-43) ─────────────────────
-DBPSK_1600_NC = 16          # Number of FDMDV carriers — freedv_1600.c:34
+# ── 1600 DBPSK Constants (─────────────────────
+DBPSK_1600_NC = 16          # Number of FDMDV carriers
 DBPSK_1600_FS = 8000        # Sample rate
 DBPSK_1600_SYMS_PER_FRAME = 24  # FDMDV symbols per frame (approx)
 DBPSK_1600_FREQ_SPACING = 12.5  # Hz between carriers (FDMDV)
@@ -53,13 +38,11 @@ DBPSK_1600_FREQ_SPACING = 12.5  # Hz between carriers (FDMDV)
 def bits_to_qpsk(bits: np.ndarray) -> np.ndarray:
     """Convert bits to QPSK symbols (Gray coded).
 
-    QPSK constellation:
-      00 → ( 1+ j) / sqrt(2)
-      01 → (-1+ j) / sqrt(2)
-      11 → (-1- j) / sqrt(2)
-      10 → ( 1- j) / sqrt(2)
-    来源: ofdm_mod.c (QPSK modulation)
-    """
+ QPSK constellation:
+ 00 → ( 1+ j) / sqrt(2)
+ 01 → (-1+ j) / sqrt(2)
+ 11 → (-1- j) / sqrt(2)
+ 10 → ( 1- j) / sqrt(2)"""
     n_syms = len(bits) // 2
     symbols = np.zeros(n_syms, dtype=complex)
     scale = 1.0 / math.sqrt(2.0)
@@ -87,15 +70,14 @@ def qpsk_to_bits(symbols: np.ndarray) -> np.ndarray:
 class FreeDV700DModem:
     """FreeDV 700D OFDM modem.
 
-    OFDM modulation/demodulation based on:
-      - ofdm.c:162-250 ofdm_create()
-      - ofdm_mode.c:26-56 700D configuration
-      - ofdm_mod.c (TX path)
-      - ofdm_demod.c (RX path)
+ OFDM modulation/demodulation based on:
 
-    Carrier layout: 17 carriers at 55.56 Hz spacing, centred at 1500 Hz.
-    Edge pilots on first and last carriers.
-    """
+
+
+
+
+ Carrier layout: 17 carriers at 55.56 Hz spacing, centred at 1500 Hz.
+ Edge pilots on first and last carriers."""
 
     def __init__(self):
         self.nc = OFDM_700D_NC
@@ -116,7 +98,7 @@ class FreeDV700DModem:
             self.center_bin + i - half for i in range(self.nc)
         ])
 
-        # Pilot carrier indices (edge pilots — ofdm_mode.c:41)
+        # Pilot carrier indices (edge pilots
         self.pilot_indices = [0, self.nc - 1]  # first and last carrier
         self.data_indices = [i for i in range(self.nc) if i not in self.pilot_indices]
 
@@ -134,9 +116,7 @@ class FreeDV700DModem:
     def modulate(self, bits: np.ndarray) -> np.ndarray:
         """OFDM modulate bits to baseband audio.
 
-        TX path: bits → QPSK → IFFT → add cyclic prefix → upconvert
-        来源: ofdm_mod.c (ofdm_mod() function)
-        """
+ TX path: bits → QPSK → IFFT → add cyclic prefix → upconvert"""
         n_symbols_needed = self.data_symbols
         expected_bits = n_symbols_needed * self.bits_per_symbol
 
@@ -169,14 +149,14 @@ class FreeDV700DModem:
                 for j, ci in enumerate(self.data_indices):
                     freq[self.carrier_bins[ci]] = qpsk_syms[j]
 
-            # Edge pilots — ofdm_mode.c:41 edge_pilots=1
+            # Edge pilots
             for pi in self.pilot_indices:
                 freq[self.carrier_bins[pi]] = self.pilot_value
 
             # IFFT — ofdm_mod.c (IFFT to time domain)
             time_sym = np.fft.ifft(freq) * self.m
 
-            # Add cyclic prefix — ofdm.c:249 ncp=16
+            # Add cyclic prefix
             cp = time_sym[-self.ncp:]
             symbol_with_cp = np.concatenate([cp, time_sym])
 
@@ -194,9 +174,7 @@ class FreeDV700DModem:
     def demodulate(self, signal: np.ndarray) -> Tuple[np.ndarray, float]:
         """OFDM demodulate baseband audio to bits.
 
-        RX path: sync → FFT → channel estimate → QPSK decision → bits
-        来源: ofdm_demod.c (ofdm_demod() function)
-        """
+ RX path: sync → FFT → channel estimate → QPSK decision → bits"""
         sym_len = self.m + self.ncp
         n_symbols = len(signal) // sym_len
 
@@ -245,11 +223,10 @@ class FreeDV700DModem:
 class FreeDV1600Modem:
     """FreeDV 1600 mode DBPSK modem.
 
-    Based on FDMDV with differential BPSK per carrier.
-    Simplified to single-carrier DBPSK for functional roundtrip test.
-    来源: freedv_1600.c:34-43 (FDMDV Nc=16 carriers)
-           fdmdv.c (DBPSK modulation per carrier)
-    """
+ Based on FDMDV with differential BPSK per carrier.
+ Simplified to single-carrier DBPSK for functional roundtrip test.
+ =16 carriers)
+ (DBPSK modulation per carrier)"""
 
     def __init__(self):
         self.nc = DBPSK_1600_NC
@@ -263,9 +240,7 @@ class FreeDV1600Modem:
     def modulate(self, bits: np.ndarray) -> np.ndarray:
         """DBPSK modulate bits to baseband audio.
 
-        Differential encoding: bit 1 → phase inversion, bit 0 → no change.
-        来源: freedv_1600.c:136 fdmdv_mod()
-        """
+ Differential encoding: bit 1 → phase inversion, bit 0 → no change."""
         n_bits = len(bits)
         # Add reference bit at start (phase reference)
         total_symbols = n_bits + 1
@@ -303,10 +278,8 @@ class FreeDV1600Modem:
     def demodulate(self, signal: np.ndarray) -> np.ndarray:
         """DBPSK demodulate audio back to bits.
 
-        Differential detection: multiply current symbol by delayed conjugate.
-        Sign of the real part gives the bit.
-        来源: freedv_1600.c:164 fdmdv_demod()
-        """
+ Differential detection: multiply current symbol by delayed conjugate.
+ Sign of the real part gives the bit."""
         n_symbols = len(signal) // self.sps
         bits = []
         t = np.arange(self.sps) / self.fs

@@ -1,26 +1,27 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 频率管理器 v2（frequency_manager_v2）
 =============================================
 
-移植自 SDR++ misc_modules/frequency_manager/src/main.cpp（见
-docs/learn/sdrpp_modules.md 第 2 节），但**不替换**现有 frequency_manager.py
-（那个文件由其他 agent 拥有，本文件只新建）。
+频率管理器 v2：按「分组 + 书签」组织常用频率库，但**不替换**现有
+frequency_manager.py（那个文件由其他 agent 拥有，本文件只新建）。
+SDR++ 频率管理器仅作技术参考，本仓未包含其源代码。
 
-对照上游：
-  - FrequencyBookmark{frequency,bandwidth,mode,selected}  (fm:25-30)
+数据结构设计：
+  - FrequencyBookmark{frequency,bandwidth,mode,selected}
       -> BookmarkV2{name,freq_hz,mode,bandwidth_hz,notes,tags,group}
-  - lists["General"].bookmarks JSON  (fm:827-851)
+  - 分组下的书签 JSON
       -> groups: {group_name: {color, icon, bookmarks:[...]}}
-  - saveByName 整表写回 + config.release(true) 落盘  (fm:337-347)
+  - 整表写回落盘
       -> 原子写：写临时文件 + os.replace
-  - importBookmarks JSON  (fm:755-786)
-      -> import_json + import_csv（CSV 是我们加的）
+  - JSON 导入书签
+      -> import_json + import_csv（CSV 为本仓新增）
 
 MBDSDR 增强：
-  * nearest(freq_hz, max_distance) —— 上游没有这个查找。
-  * 分组带 color/icon（上游 list 只有 showOnWaterfall bool）。
+  * nearest(freq_hz, max_distance) —— 最近邻频率查找。
+  * 分组带 color/icon。
   * classify_signal(features) —— AI 钩子：把未知信号自动归到某个分组。
-  * 字段更全：notes/tags（上游没有）。
+  * 字段更全：notes/tags。
 
 红线：
   * **不预存任何地区电台**——groups 只建空壳（航空/海事/业余/广播/卫星），
@@ -191,7 +192,7 @@ class FrequencyManagerV2:
         return [b for lst in self.bookmarks.values() for b in lst]
 
     # ------------------------------------------------------------------
-    # nearest 查找（上游没有，我们的增强）
+    # nearest 最近邻查找（本仓增强）
     # ------------------------------------------------------------------
     def nearest(self, freq_hz: float,
                 max_distance: float = 0.0) -> Optional[Tuple[BookmarkV2, float]]:
@@ -210,7 +211,7 @@ class FrequencyManagerV2:
         return best, best_dist
 
     # ------------------------------------------------------------------
-    # CSV 导入导出（上游只支持 JSON，我们加 CSV）
+    # CSV 导入导出（本仓在 JSON 之外新增 CSV）
     # ------------------------------------------------------------------
     def export_csv(self, path: str, group: Optional[str] = None) -> int:
         rows = self.list(group)

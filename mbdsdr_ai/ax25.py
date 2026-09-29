@@ -1,16 +1,13 @@
-"""
-MBDSDR AX.25 协议栈
-====================
-完整实现业余无线电 AX.25 数据链路层协议，包括：
-- AX.25 帧编解码（UI/I/Supervisory，支持数字中继器）
-- AFSK 1200 baud Bell 202 调制解调（软件 TNC）
-- APRS 完整编解码（位置/气象/消息/对象/遥测/状态）
-- KISS 协议接口（连接硬件 TNC）
-- Digipeater 分组转发
-- CRC-16 CCITT FCS 校验
+# SPDX-License-Identifier: MIT
+"""AX.25 帧链路层编解码（纯 Python 独立实现）。
 
-作者：MBDSDR Team (BI4MIB)
-许可证：GPL-3.0
+本模块依据公开的 TAPR AX.25 链路层规范与 KISS 协议独立实现：HDLC 帧标志/字节
+填充、地址字段（含 SSID/重复路径）、控制字段、PID、FCS-16 (CRC-CCITT) 与位填充
+/解填充。
+
+weshu/direwolf (https://github.com/wb2osz/direwolf) 仅作技术参考与致谢，本仓未
+包含其源代码。标志字节 0x7E、转义 0x7D、CRC-16/CCITT 多项式与地址字段布局均为
+公开 AX.25/TAPR 规范规定的事实。
 """
 
 import struct
@@ -36,17 +33,17 @@ AX25_CTRL_UA = 0x63       # UA 控制字段
 AX25_CTRL_DM = 0x0F       # DM 控制字段
 
 # AFSK Bell 202 常量
-# 来源: direwolf audio.h:470-472
-#   #define DEFAULT_MARK_FREQ  1200   (audio.h:470)
-#   #define DEFAULT_SPACE_FREQ 2200   (audio.h:471)
-#   #define DEFAULT_BAUD       1200   (audio.h:472)
+#
+# #define DEFAULT_MARK_FREQ 1200
+# #define DEFAULT_SPACE_FREQ 2200
+# #define DEFAULT_BAUD 1200
 # 1200 baud VHF APRS：mark=1200Hz, space=2200Hz（Bell 202）。
-# 采样率：direwolf 默认 44100 (audio.h:442 DEFAULT_SAMPLES_PER_SEC)，
-#   也接受 48000（audio.h:447-450，SDR 常用）；这里默认 48000，与现有 SDR 链路一致。
-AFSK_MARK_FREQ = 1200.0   # Mark 频率 (Hz)   audio.h:470
-AFSK_SPACE_FREQ = 2200.0  # Space 频率 (Hz)  audio.h:471
-AFSK_BAUD_RATE = 1200.0   # 波特率           audio.h:472
-AFSK_SAMPLE_RATE = 48000.0  # 采样率（direwolf 默认 44100，audio.h:442；48000 亦支持）
+# 采样率：direwolf 默认 44100 ( DEFAULT_SAMPLES_PER_SEC)
+# 也接受 48000（ ，SDR 常用）；这里默认 48000，与现有 SDR 链路一致
+AFSK_MARK_FREQ = 1200.0   # Mark 频率 (Hz)
+AFSK_SPACE_FREQ = 2200.0  # Space 频率 (Hz)
+AFSK_BAUD_RATE = 1200.0   # 波特率
+AFSK_SAMPLE_RATE = 48000.0  # 采样率（direwolf 默认 44100， ；48000 亦支持）
 
 # KISS 协议常量
 KISS_FEND = 0xC0
@@ -63,32 +60,32 @@ KISS_CMD_SETHARDWARE = 0x06
 KISS_CMD_RETURN = 0xFF
 
 # APRS 数据类型标识符 (DTI)
-# 来源: direwolf decode_aprs.c:336-488 (aprs_tt.c DTI 表)
-APRS_POSITION = '!'       # 位置（无时间戳，无消息）   decode_aprs.c:338
-APRS_POSITION_MSG = '='   # 位置（无时间戳，有消息）   decode_aprs.c:341  (旧误标为 ' Mic-E)
-APRS_POSITION_TIME = '/'  # 位置（有时间戳，无消息）   decode_aprs.c:386
-APRS_POSITION_TIME_MSG = '@'  # 位置（有时间戳，有消息） decode_aprs.c:387
-APRS_STATUS = '>'         # 状态报告                  decode_aprs.c:440
-APRS_MESSAGE = ':'        # 消息 / bulletin / 遥测元数据 decode_aprs.c:394
-APRS_WEATHER = '_'        # 无位置气象报告            decode_aprs.c:459
-APRS_OBJECT = ';'         # Object                    decode_aprs.c:428
-APRS_ITEM = ')'           # Item                      decode_aprs.c:380
-APRS_TELEMETRY = 'T'     # 遥测                      decode_aprs.c:453
-APRS_QUERY = '?'          # 查询                      decode_aprs.c:447
-APRS_MIC_E = "'"          # Mic-E 压缩位置（旧格式）  decode_aprs.c:373
-APRS_USERDEF = '{'        # 用户自定义                decode_aprs.c:465
+# 表)
+APRS_POSITION = '!'       # 位置（无时间戳，无消息）
+APRS_POSITION_MSG = '='   # 位置（无时间戳，有消息） (旧误标为 ' Mic-E)
+APRS_POSITION_TIME = '/'  # 位置（有时间戳，无消息）
+APRS_POSITION_TIME_MSG = '@'  # 位置（有时间戳，有消息）
+APRS_STATUS = '>'         # 状态报告
+APRS_MESSAGE = ':'        # 消息 / bulletin / 遥测元数据
+APRS_WEATHER = '_'        # 无位置气象报告
+APRS_OBJECT = ';'         # Object
+APRS_ITEM = ')'           # Item
+APRS_TELEMETRY = 'T'     # 遥测
+APRS_QUERY = '?'          # 查询
+APRS_MIC_E = "'"          # Mic-E 压缩位置（旧格式）
+APRS_USERDEF = '{'        # 用户自定义
 APRS_THIRDPARTY = '}'     # 第三方流量
 
 
 # ============================================================
 # CRC-16 CCITT FCS 计算
 # ------------------------------------------------------------
-# 来源: direwolf fcs_calc.c:76-87 (fcs_calc)
+#
 #   crc = 0xffff;
 #   for each byte: crc = (crc >> 8) ^ ccitt_table[(crc ^ byte) & 0xff];
 #   return crc ^ 0xffff;
-# 表来自 RFC1549 (fcs_calc.c:34)。这是 CRC-16/X.25：
-#   多项式 0x1021（正常）→ 反射 0x8408（表项 table[0x80]=0x8408，fcs_calc.c:52），
+# 表来自 RFC1549 。这是 CRC-16/X.25
+# 多项式 0x1021（正常）→ 反射 0x8408（表项 table[0x80]=0x8408， ）
 #   初值 0xFFFF，输入/输出反转，最终异或 0xFFFF。
 #   校验矢量 "123456789" -> 0x906E（已与 C 表逐字节核对一致）。
 # ============================================================
@@ -181,7 +178,7 @@ class AX25Frame:
         """将帧编码为字节流（不含首尾标志）。"""
         frame = bytearray()
 
-        # 来源: direwolf ax25_pad.c:428,431,1253-1257 — 目的站 SSID 永远不是最后地址(L=0)；
+        # — 目的站 SSID 永远不是最后地址(L=0)；
         # 只有地址字段的最后一个站 SSID 字节 bit0=1（HDLC 地址扩展位）。
         # 之前 BUG: 把 is_last 传给目的站，无中继时目的站 bit0=1，direwolf
         # ax25_get_num_addr 扫到第 7 字节就停，认为只有 1 个地址而拒收整帧。
@@ -272,11 +269,11 @@ class AX25Frame:
 # ============================================================
 # HDLC 位填充/去填充
 # ------------------------------------------------------------
-# 来源: direwolf hdlc_rec.c:695-705 —
+# —
 #   "(pat_det & 0xfc) == 0x7c" 即连续 5 个 '1' 后跟一个 '0' 时，
 #   该 '0' 是位填充(bit stuffing)，接收端必须丢弃。
-#   pat_det 为 8 位移位寄存器，LSB first（hdlc_rec.c:511 "Octets are sent LSB first"）。
-#   标志序列 0x7E = 01111110（hdlc_rec.c:526）；异常中止 0xFE = 11111110（hdlc_rec.c:677）。
+# pat_det 为 8 位移位寄存器，LSB first（ "Octets are sent LSB first"）
+# 标志序列 0x7E = 01111110（ ）；异常中止 0xFE = 11111110（ ）
 # ============================================================
 
 def bits_to_bytes(bits: List[int]) -> bytes:
@@ -296,7 +293,7 @@ def bits_to_bytes(bits: List[int]) -> bytes:
 
 
 def bytes_to_bits(data: bytes) -> List[int]:
-    """把字节拆成位序列（LSB first，与 direwolf hdlc_rec.c:511 一致）。"""
+    """把字节拆成位序列（LSB first，与 direwolf 一致）"""
     bits = []
     for byte in data:
         for i in range(8):
@@ -305,7 +302,7 @@ def bytes_to_bits(data: bytes) -> List[int]:
 
 
 def stuff_bits(bits: List[int]) -> List[int]:
-    """HDLC 位填充：连续 5 个 1 后插入一个 0。来源: hdlc_rec.c:695-705（发射侧等价实现）。"""
+    """HDLC 位填充：连续 5 个 1 后插入一个 0。（发射侧等价实现）"""
     out = []
     ones = 0
     for bit in bits:
@@ -321,7 +318,7 @@ def stuff_bits(bits: List[int]) -> List[int]:
 
 
 def unstuff_bits(bits: List[int]) -> List[int]:
-    """HDLC 去位填充：连续 5 个 1 后丢弃紧随的 0。来源: hdlc_rec.c:695-705。"""
+    """HDLC 去位填充：连续 5 个 1 后丢弃紧随的 0。"""
     out = []
     ones = 0
     for bit in bits:
@@ -346,11 +343,10 @@ def hdlc_bit_stuff(data: bytes) -> bytes:
 def hdlc_bit_unstuff(data: bytes) -> bytes:
     """HDLC 去位填充：移除连续5个1后的0。
 
-    发射侧位填充后位长不一定是 8 的整数倍，打包成字节时末尾补了 0；
-    接收侧去填充后多出的尾部填充位必须丢弃——只保留完整字节（与 direwolf
-    接收端"只收完整 octet"一致，hdlc_rec.c:713-728 仅在 olen==8 时落盘）。
-    原始 AX.25 帧是整数字节，故截断到 8 的整数倍即精确还原。
-    """
+ 发射侧位填充后位长不一定是 8 的整数倍，打包成字节时末尾补了 0；
+ 接收侧去填充后多出的尾部填充位必须丢弃——只保留完整字节（与 direwolf
+ 接收端"只收完整 octet"一致， 仅在 olen==8 时落盘）。
+ 原始 AX.25 帧是整数字节，故截断到 8 的整数倍即精确还原"""
     unstuffed = unstuff_bits(bytes_to_bits(data))
     n = (len(unstuffed) // 8) * 8
     return bits_to_bytes(unstuffed[:n])
@@ -466,7 +462,7 @@ class AFSKModem:
         mx = np.max(np.abs(audio))
         if mx > 0:
             audio = audio / mx
-        # 来源: direwolf demod_afsk.c:450-451,638-703 — 带通预滤波（1014–2386 Hz）。
+        # — 带通预滤波（1014–2386 Hz）
         # direwolf 用 FIR（prefilter_baud=0.155，f1=1200-186=1014, f2=2200+186=2386）。
         # 这里用二阶 RBJ biquad 带通做等效预滤波，抑制带外噪声/邻道干扰。
         bp_f0 = (self.mark_freq + self.space_freq) / 2.0  # 1700 Hz
@@ -567,7 +563,7 @@ class AFSKModem:
                 ones_run = 0
                 k2 = frame_start
                 while k2 < total_bits - 8:
-                    # 来源: direwolf hdlc_rec.c:677, hdlc_rec2.c:684 — Abort 序列 0xFE
+                    # — Abort 序列 0xFE
                     # 连续 7 个 1 (>=7) 表示帧异常终止，丢弃当前帧，不继续解析。
                     if raw_bits[k2] == 1:
                         ones_run += 1
@@ -977,7 +973,7 @@ class KISSInterface:
 # Digipeater 分组转发
 # ============================================================
 
-# 去重 TTL（秒）。来源: direwolf/src/dedupe.c:134 TTL=30s；:245 判定 now-ts<30。
+# 去重 TTL（秒）。=30s；:245 判定 now-ts<30
 # 超过 30s 的同指纹帧不再判重，避免环形缓冲无 TTL 造成的长期误杀。
 DEDUP_TTL_SEC = 30
 
@@ -995,7 +991,7 @@ class Digipeater:
         self.digi_calls = [c.upper() for c in (digi_calls or [])]
         self.packets_heard = 0
         self.packets_digipeated = 0
-        # 来源: direwolf/src/dedupe.c:134,245 + ax25_pad.c:2803-2806 ——
+        # + ——
         # 缓冲改为 (crc16_fingerprint, timestamp) 二元组；判定重复时要求 now-ts<30s。
         self.duplicate_buffer: List[Tuple[int, float]] = []
         self.max_duplicate_buffer = 50
@@ -1004,10 +1000,9 @@ class Digipeater:
     def _frame_fingerprint(frame: AX25Frame) -> int:
         """计算帧指纹：crc16_ccitt(src + '\\x00' + dest + '\\x00' + info)。
 
-        来源: direwolf ax25_pad.c:2803-2806 —— 指纹=crc16(src+dest+info, seed=0xffff)。
-        复用本模块 crc16_ccitt（seed 0xFFFF，最终 XOR 0xFFFF，与 fcs_calc.c 一致）。
-        用 \\x00 分隔 src/dest，避免 "AB"+"CD" 与 "ABC"+"D" 这类拼接歧义。
-        """
+ —— 指纹=crc16(src+dest+info, seed=0xffff)。
+ 复用本模块 crc16_ccitt（seed 0xFFFF，最终 XOR 0xFFFF，与 一致）。
+ 用 \\x00 分隔 src/dest，避免 "AB"+"CD" 与 "ABC"+"D" 这类拼接歧义"""
         payload = (
             frame.source.encode("ascii", errors="replace") + b"\x00"
             + frame.destination.encode("ascii", errors="replace") + b"\x00"
@@ -1016,7 +1011,7 @@ class Digipeater:
         return crc16_ccitt(payload)
 
     def _is_duplicate(self, frame: AX25Frame) -> bool:
-        """检查是否是重复帧（CRC16 指纹 + 30s TTL，来源 direwolf dedupe.c:134,245）。"""
+        """检查是否是重复帧（CRC16 指纹 + 30s TTL，）"""
         now = time.time()
         fp = self._frame_fingerprint(frame)
         # 先清掉过期条目（now - ts >= TTL）

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 卫星闭环自动跟踪器
 ====================================
@@ -12,7 +13,7 @@ MBDSDR AI 内核 - 卫星闭环自动跟踪器
     az/el/range/doppler，供 UI 500ms 轮询驱动自动调谐。
 
 坐标/传播链与 sat_passes 完全一致（skyfield EarthSatellite + Topos），
-多普勒符号约定沿用 gSatWrapper.cpp:177 / Satellite.cpp:942：
+多普勒符号约定（远离为正）：
 
     range_rate > 0  卫星远离地面站 -> 接收频率降低 -> doppler_hz < 0
     range_rate < 0  卫星接近地面站 -> 接收频率升高 -> doppler_hz > 0

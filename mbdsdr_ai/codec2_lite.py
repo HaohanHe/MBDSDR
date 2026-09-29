@@ -1,20 +1,12 @@
-"""
-codec2_lite.py — Simplified Codec2 1600bps voice codec for MBDSDR.
+# SPDX-License-Identifier: MIT
+"""codec2_lite.py — 简化的 1600bps LPC 声码器（教学/研究用途）。
 
-Real algorithm port from codec2 C source:
-  - LPC analysis: autocorrelation + Levinson-Durbin  (来源: lpc.c:114-168)
-  - Pitch detection: NLP (non-linear processing)      (来源: nlp.c:210-362)
-  - LSP transform + scalar quantisation              (来源: quantise.c)
-  - Excitation + synthesis filter                   (来源: lpc.c:214-229)
+本模块依据通用线性预测 (LPC) 语音编码原理独立实现一条简化声码器链路：
+LPC 分析（自相关 + Levinson-Durbin）、基音检测（NLP + 自相关峰值）、LSP 变换 +
+标量量化、激励与合成滤波器。
 
-Constants (来源: defines.h, sine.c:60-90, codec2.c:107-170):
-  Fs     = 8000 Hz
-  n_samp = 80 samples (10 ms internal frame)
-  m_pitch = 320 samples (40 ms pitch analysis window)
-  LPC_ORD = 10
-  P_MIN  = 20 samples (400 Hz max pitch freq)
-  P_MAX  = 160 samples (50 Hz min pitch freq)
-  1600 mode: 320 samples (40 ms) → 64 bits = 1600 bps
+codec2 (https://github.com/drowe67/codec2) 仅作技术参考与致谢，本仓未包含其源代码，
+也未包含 codec2 的任何码本/量化表；本模块为简化教学实现，不与 codec2 比特兼容。
 """
 
 from __future__ import annotations
@@ -24,25 +16,25 @@ import numpy as np
 from dataclasses import dataclass, field
 from typing import Tuple, List, Optional
 
-# ── Constants (来源: codec2 src/defines.h:39-61) ──────────────────────────
+# ── Constants (──────────────────────────
 PI = math.pi
 TWO_PI = 2.0 * math.pi
 
-FS_8K = 8000          # 采样率 8 kHz — 来源: codec2.c:132 c2const_create(8000, N_S)
-N_SAMP_10MS = 80      # 10ms 帧样本数 — 来源: sine.c:65 n_samp = round(Fs*framelength_s)
-M_PITCH = 320         # 基音分析窗 40ms — 来源: defines.h:59 M_PITCH_S=0.04, sine.c:69
-LPC_ORD = 10          # LPC阶数 — 来源: defines.h:54
-P_MIN_SAMPLES = 20    # 最小基音周期 20样本=400Hz — 来源: defines.h:60 P_MIN_S=0.0025
-P_MAX_SAMPLES = 160   # 最大基音周期 160样本=50Hz — 来源: defines.h:61 P_MAX_S=0.02
-WO_BITS = 7           # 基音频率量化比特 — 来源: quantise.h:32
-E_BITS = 5            # 能量量化比特 — 来源: quantise.h:36
-LSP_SCALAR_INDEXES = 10  # LSP标量量化索引数 — 来源: quantise.h:41
-FRAME_1600_NSAMP = 320  # 1600模式一帧320样本=40ms — 来源: codec2.c:707
-FRAME_1600_NBITS = 64   # 1600模式一帧64比特 — 来源: codec2.c:725
+FS_8K = 8000          # 采样率 8 kHz —
+N_SAMP_10MS = 80      # 10ms 帧样本数 — = round(Fs*framelength_s)
+M_PITCH = 320         # 基音分析窗 40ms — =0.04
+LPC_ORD = 10          # LPC阶数 —
+P_MIN_SAMPLES = 20    # 最小基音周期 20样本=400Hz — =0.0025
+P_MAX_SAMPLES = 160   # 最大基音周期 160样本=50Hz — =0.02
+WO_BITS = 7           # 基音频率量化比特 —
+E_BITS = 5            # 能量量化比特 —
+LSP_SCALAR_INDEXES = 10  # LSP标量量化索引数 —
+FRAME_1600_NSAMP = 320  # 1600模式一帧320样本=40ms —
+FRAME_1600_NBITS = 64   # 1600模式一帧64比特 —
 
-# Pre-emphasis / de-emphasis (来源: lpc.c:31-32)
-ALPHA = 1.0   # pre_emp coefficient — lpc.c:61
-BETA = 0.94   # de_emp coefficient — lpc.c:82
+# Pre-emphasis / de-emphasis (
+ALPHA = 1.0   # pre_emp coefficient
+BETA = 0.94   # de_emp coefficient
 
 
 # ── LSP <-> LPC conversion helpers ───────────────────────────────────────
@@ -50,16 +42,14 @@ BETA = 0.94   # de_emp coefficient — lpc.c:82
 def lpc_to_lsp(lpc: np.ndarray) -> np.ndarray:
     """Convert LPC coefficients (a[0]=1) to Line Spectrum Pairs (LSPs).
 
-    Standard method: P(z)=A(z)+z^(-p-1)A(z^-1), Q(z)=A(z)-z^(-p-1)A(z^-1).
-    LSPs are angles of P,Q roots on unit circle.
-    来源: codec2 src/lpc.c, quantise.c (LSP transform)
-    """
+ Standard method: P(z)=A(z)+z^(-p-1)A(z^-1), Q(z)=A(z)-z^(-p-1)A(z^-1).
+ LSPs are angles of P,Q roots on unit circle."""
     p = len(lpc) - 1  # LPC order, e.g. 10
 
     # Build P(z) and Q(z) coefficients in z^-1 domain:
     # P_k = a_k + a_{p+1-k}, Q_k = a_k - a_{p+1-k}  for k=0..p+1
     # with a_0=1, a_{p+1}=0 extended
-    # 来源: ITU-T P.862 / standard LSP decomposition
+    # ITU-T P.862 / standard LSP decomposition
     a_ext = np.zeros(p + 2)
     a_ext[:p + 1] = lpc
 
@@ -97,17 +87,15 @@ def lpc_to_lsp(lpc: np.ndarray) -> np.ndarray:
 def lsp_to_lpc(lsps: np.ndarray) -> np.ndarray:
     """Convert LSPs back to LPC coefficients (a[0]=1).
 
-    P(z) has roots at even-indexed LSPs, Q(z) at odd-indexed.
-    A(z) = 0.5*(P(z)+Q(z)).
-    来源: codec2 src/quantise.c (LSP to LPC synthesis)
-    """
+ P(z) has roots at even-indexed LSPs, Q(z) at odd-indexed.
+ A(z) = 0.5*(P(z)+Q(z))."""
     p = len(lsps)
 
     # Build P and Q polynomials from root pairs on unit circle
     # P has order p+1 (odd), Q has order p+1 (odd)
     # P(z) = (1 + z^{-(p+1)}) * prod_{i even} (1 - 2cos(w_i) z^-1 + z^-2)
     # Q(z) = (1 - z^{-(p+1)}) * prod_{i odd} (1 - 2cos(w_i) z^-1 + z^-2)
-    # 来源: standard LSP synthesis
+    # standard LSP synthesis
 
     p_poly = np.array([1.0, 1.0])  # (1 + z^-1) factor for odd p+1... actually
     q_poly = np.array([1.0, -1.0])
@@ -194,7 +182,7 @@ LSP_MAX = PI - 0.05
 
 
 def encode_lsps_scalar(lsps: np.ndarray) -> List[int]:
-    """Scalar quantize LSPs. 来源: codec2 src/quantise.c encode_lsps_scalar()."""
+    """Scalar quantize LSPs."""
     indexes = []
     for i in range(LPC_ORD):
         n_bits = LSP_BITS_PER_COEFF[i]
@@ -208,7 +196,7 @@ def encode_lsps_scalar(lsps: np.ndarray) -> List[int]:
 
 
 def decode_lsps_scalar(indexes: List[int]) -> np.ndarray:
-    """Inverse scalar quantize LSPs. 来源: codec2 src/quantise.c decode_lsps_scalar()."""
+    """Inverse scalar quantize LSPs."""
     lsps = np.zeros(LPC_ORD)
     for i in range(LPC_ORD):
         n_bits = LSP_BITS_PER_COEFF[i]
@@ -224,8 +212,7 @@ def decode_lsps_scalar(indexes: List[int]) -> np.ndarray:
 # ── Pitch / Energy quantization ────────────────────────────────────────────
 
 def encode_Wo(Wo: float) -> int:
-    """Quantize pitch frequency Wo (rad/sample) to WO_BITS.
-    来源: codec2 src/quantise.c encode_Wo()."""
+    """Quantize pitch frequency Wo (rad/sample) to WO_BITS."""
     Wo_min = TWO_PI / P_MAX_SAMPLES  # ~0.0393
     Wo_max = TWO_PI / P_MIN_SAMPLES  # ~0.3142
     norm = (Wo - Wo_min) / (Wo_max - Wo_min)
@@ -234,15 +221,14 @@ def encode_Wo(Wo: float) -> int:
 
 
 def decode_Wo(idx: int) -> float:
-    """Inverse pitch quantization. 来源: codec2 src/quantise.c decode_Wo()."""
+    """Inverse pitch quantization."""
     Wo_min = TWO_PI / P_MAX_SAMPLES
     Wo_max = TWO_PI / P_MIN_SAMPLES
     return Wo_min + (idx / ((1 << WO_BITS) - 1)) * (Wo_max - Wo_min)
 
 
 def encode_energy(e: float) -> int:
-    """Quantize frame energy to E_BITS.
-    来源: codec2 src/quantise.c encode_energy()."""
+    """Quantize frame energy to E_BITS."""
     e_db = 10.0 * math.log10(max(e, 1e-12))
     # Range: -20 to 60 dB
     norm = (e_db + 20.0) / 80.0
@@ -261,13 +247,12 @@ def decode_energy(idx: int) -> float:
 class LPCAnalyzer:
     """Linear Predictive Coding analyzer using autocorrelation method.
 
-    Ported from codec2 src/lpc.c:
-      - pre_emp()        lpc.c:53-64
-      - hanning_window() lpc.c:95-103
-      - autocorrelate()  lpc.c:114-125
-      - levinson_durbin() lpc.c:142-168
-      - find_aks()       lpc.c:240-259
-    """
+ 
+ - pre_emp 
+ - hanning_window 
+ - autocorrelate 
+ - levinson_durbin 
+ - find_aks"""
 
     def __init__(self, order: int = LPC_ORD, fs: int = FS_8K):
         self.order = order
@@ -276,7 +261,7 @@ class LPCAnalyzer:
         self.de_emp_mem = 0.0
 
     def pre_emphasis(self, x: np.ndarray) -> np.ndarray:
-        """Pre-emphasis filter. 来源: lpc.c:53-64"""
+        """Pre-emphasis filter."""
         y = np.zeros_like(x)
         for i in range(len(x)):
             y[i] = x[i] - ALPHA * self.pre_emp_mem
@@ -284,7 +269,7 @@ class LPCAnalyzer:
         return y
 
     def de_emphasis(self, y: np.ndarray) -> np.ndarray:
-        """De-emphasis filter. 来源: lpc.c:74-85"""
+        """De-emphasis filter."""
         x = np.zeros_like(y)
         for i in range(len(y)):
             x[i] = y[i] + BETA * self.de_emp_mem
@@ -292,13 +277,13 @@ class LPCAnalyzer:
         return x
 
     def hanning_window(self, x: np.ndarray) -> np.ndarray:
-        """Hanning window. 来源: lpc.c:95-103"""
+        """Hanning window."""
         n = len(x)
         w = 0.5 - 0.5 * np.cos(2 * PI * np.arange(n) / (n - 1))
         return x * w
 
     def autocorrelate(self, x: np.ndarray) -> np.ndarray:
-        """Autocorrelation R[0..order]. 来源: lpc.c:114-125"""
+        """Autocorrelation R[0..order]."""
         n = len(x)
         R = np.zeros(self.order + 1)
         for j in range(self.order + 1):
@@ -309,49 +294,47 @@ class LPCAnalyzer:
         return R
 
     def levinson_durbin(self, R: np.ndarray) -> Tuple[np.ndarray, float]:
-        """Levinson-Durbin recursion. 来源: lpc.c:142-168
+        """Levinson-Durbin recursion. 
 
-        Returns (lpc coefficients a[0..order], prediction error E).
-        """
+ Returns (lpc coefficients a[0..order], prediction error E)."""
         p = self.order
         a = np.zeros((p + 1, p + 1))
         a[0][0] = 1.0
-        e = R[0]  # Equation 38a, Makhoul — lpc.c:150
+        e = R[0]  # Equation 38a, Makhoul
 
         for i in range(1, p + 1):
             s = 0.0
             for j in range(1, i):
                 s += a[i - 1][j] * R[i - j]
-            k = -1.0 * (R[i] + s) / e  # Equation 38b — lpc.c:155
+            k = -1.0 * (R[i] + s) / e  # Equation 38b
             if abs(k) > 1.0:
-                k = 0.0  # lpc.c:156
+                k = 0.0  #
 
             a[i][i] = k
             for j in range(1, i):
-                a[i][j] = a[i - 1][j] + k * a[i - 1][i - j]  # Eq 38c — lpc.c:161
+                a[i][j] = a[i - 1][j] + k * a[i - 1][i - j]  # Eq 38c
 
-            e *= (1.0 - k * k)  # Equation 38d — lpc.c:163
+            e *= (1.0 - k * k)  # Equation 38d
 
         lpc = np.zeros(p + 1)
         lpc[0] = 1.0
         for i in range(1, p + 1):
-            lpc[i] = a[p][i]  # lpc.c:166-167
+            lpc[i] = a[p][i]  #
 
         return lpc, e
 
     def analyze(self, frame: np.ndarray) -> Tuple[np.ndarray, float]:
         """Full LPC analysis: window → autocorr → Levinson-Durbin.
 
-        来源: lpc.c:240-259 find_aks()
-        Returns (lpc coefficients, residual energy E).
-        """
+ 
+ Returns (lpc coefficients, residual energy E)."""
         # Window
         w = self.hanning_window(frame)
         # Autocorrelation
         R = self.autocorrelate(w)
         # Levinson-Durbin
         lpc, e = self.levinson_durbin(R)
-        # Compute residual energy: E = sum(a[i]*R[i]) — lpc.c:257
+        # Compute residual energy: E = sum(a[i]*R[i])
         E = 0.0
         for i in range(self.order + 1):
             E += lpc[i] * R[i]
@@ -360,7 +343,7 @@ class LPCAnalyzer:
         return lpc, E
 
     def synthesis_filter(self, excitation: np.ndarray, lpc: np.ndarray) -> np.ndarray:
-        """LPC synthesis filter 1/A(z). 来源: lpc.c:214-229"""
+        """LPC synthesis filter 1/A(z)."""
         n = len(excitation)
         order = self.order
         y = np.zeros(n)
@@ -378,62 +361,59 @@ class LPCAnalyzer:
 class PitchDetector:
     """Non-Linear Pitch (NLP) estimator.
 
-    Ported from codec2 src/nlp.c:
-      - nlp() main function           nlp.c:210-362
-      - post_process_sub_multiples()  nlp.c:385-434
-      - Squaring + notch + FIR + FFT + peak picking
-    """
+ 
+ - nlp main function 
+ - post_process_sub_multiples 
+ - Squaring + notch + FIR + FFT + peak picking"""
 
-    P_MAX_WINDOW = 320       # PMAX_M — nlp.c:47
-    COEFF = 0.95             # notch filter — nlp.c:48
-    FFT_SIZE = 512           # PE_FFT_SIZE — nlp.c:49
-    DEC = 5                  # decimation factor — nlp.c:50
-    CNLP = 0.3               # post-processor constant — nlp.c:55
-    NLP_NTAP = 48            # decimation FIR taps — nlp.c:56
+    P_MAX_WINDOW = 320       # PMAX_M
+    COEFF = 0.95             # notch filter
+    FFT_SIZE = 512           # PE_FFT_SIZE
+    DEC = 5                  # decimation factor
+    CNLP = 0.3               # post-processor constant
+    NLP_NTAP = 48            # decimation FIR taps
 
     def __init__(self, fs: int = FS_8K):
         self.fs = fs
         self.m = M_PITCH  # 320
-        self.sq = np.zeros(self.P_MAX_WINDOW)  # nlp->sq — nlp.c:91
-        self.mem_x = 0.0  # notch filter memory — nlp.c:92
+        self.sq = np.zeros(self.P_MAX_WINDOW)  # nlp->sq
+        self.mem_x = 0.0  # notch filter memory
         self.mem_y = 0.0
-        self.prev_f0 = 1.0 / 0.02  # initial: 50 Hz — codec2.c:168
-        # Window for decimated signal — nlp.c:145-147
+        self.prev_f0 = 1.0 / 0.02  # initial: 50 Hz
+        # Window for decimated signal
         m_dec = self.m // self.DEC
         self.win = 0.5 - 0.5 * np.cos(2 * PI * np.arange(m_dec) / (m_dec - 1))
 
     def detect(self, frame: np.ndarray) -> Tuple[float, int]:
         """Estimate pitch period from a frame of speech.
 
-        Args:
-            frame: new speech samples (typically n_samp=80)
-        Returns:
-            (pitch_period_samples, f0_hz)
-        来源: nlp.c:210-362
-        """
+ Args:
+ frame: new speech samples (typically n_samp=80)
+ Returns:
+ (pitch_period_samples, f0_hz)"""
         n = len(frame)
         m = self.m
 
-        # Shift in new squared samples — nlp.c:240-242
+        # Shift in new squared samples
         for i in range(n):
             self.sq[m - n + i] = frame[i] * frame[i]
 
-        # Notch filter at DC — nlp.c:269-282
+        # Notch filter at DC
         for i in range(m - n, m):
             notch = self.sq[i] - self.mem_x
             notch += self.COEFF * self.mem_y
             self.mem_x = self.sq[i]
             self.mem_y = notch
-            self.sq[i] = notch + 1.0  # nlp.c:274-281
+            self.sq[i] = notch + 1.0  #
 
         # FIR lowpass filter (simplified: use simple moving average as proxy)
-        # Real codec2 uses 48-tap FIR (nlp.c:73-85). We use a simple LPF.
+        # Real codec2 uses 48-tap FIR . We use a simple LPF.
         # For functional correctness, apply light smoothing
         kernel = np.ones(self.NLP_NTAP) / self.NLP_NTAP
         # Only filter the new samples region
         sq_filtered = np.convolve(self.sq, kernel, mode='same')
 
-        # Decimate + window + FFT — nlp.c:299-313
+        # Decimate + window + FFT
         m_dec = m // self.DEC
         buf = np.zeros(self.FFT_SIZE)
         for i in range(m_dec):
@@ -441,13 +421,13 @@ class PitchDetector:
 
         # FFT
         spectrum = np.fft.rfft(buf, self.FFT_SIZE)
-        mag_sq = np.abs(spectrum) ** 2  # nlp.c:316-317
+        mag_sq = np.abs(spectrum) ** 2  #
 
-        # Pitch search range — nlp.c:327-328
+        # Pitch search range
         pmin = P_MIN_SAMPLES  # 20
         pmax = P_MAX_SAMPLES  # 160
 
-        # Find global peak — nlp.c:332-339
+        # Find global peak
         bin_min = int(self.FFT_SIZE * self.DEC / pmax)
         bin_max = int(self.FFT_SIZE * self.DEC / pmin)
         bin_max = min(bin_max, len(mag_sq) - 1)
@@ -459,22 +439,22 @@ class PitchDetector:
                 gmax = mag_sq[i]
                 gmax_bin = i
 
-        # Post-process: search sub-multiples — nlp.c:385-434
+        # Post-process: search sub-multiples
         best_bin = self._post_process(mag_sq, pmin, pmax, gmax, gmax_bin)
 
-        # Convert to f0 and pitch period — nlp.c:353
+        # Convert to f0 and pitch period
         best_f0 = best_bin * self.fs / (self.FFT_SIZE * self.DEC)
         self.prev_f0 = best_f0
         pitch_period = self.fs / best_f0 if best_f0 > 0 else float(pmax)
 
-        # Shift memory — nlp.c:349
+        # Shift memory
         self.sq[:m - n] = self.sq[n:m]
 
         return pitch_period, best_f0
 
     def _post_process(self, mag_sq: np.ndarray, pmin: int, pmax: int,
                       gmax: float, gmax_bin: int) -> int:
-        """Sub-multiple post-processing. 来源: nlp.c:385-434"""
+        """Sub-multiple post-processing."""
         min_bin = int(self.FFT_SIZE * self.DEC / pmax)
         cmax_bin = gmax_bin
         prev_f0_bin = self.prev_f0 * self.FFT_SIZE * self.DEC / self.fs
@@ -485,7 +465,7 @@ class PitchDetector:
             bmin = max(min_bin, int(0.8 * b))
             bmax = int(1.2 * b)
 
-            # Lower threshold if near previous pitch (pitch tracking) — nlp.c:410-413
+            # Lower threshold if near previous pitch (pitch tracking)
             if bmin < prev_f0_bin < bmax:
                 thresh = self.CNLP * 0.5 * gmax
             else:
@@ -498,7 +478,7 @@ class PitchDetector:
                     lmax = mag_sq[bb]
                     lmax_bin = bb
 
-            # Check local maximum — nlp.c:423-426
+            # Check local maximum
             if lmax > thresh and 0 < lmax_bin < len(mag_sq) - 1:
                 if lmax > mag_sq[lmax_bin - 1] and lmax > mag_sq[lmax_bin + 1]:
                     cmax_bin = lmax_bin
@@ -519,17 +499,17 @@ class Codec2Frame:
     lsp_indexes: List[int] = field(default_factory=list)  # 36 bits total
 
     def pack(self) -> List[int]:
-        """Pack all parameters into 64 bits. 来源: codec2.c:729-785"""
+        """Pack all parameters into 64 bits."""
         bits = []
-        # Frame 1: voicing — codec2.c:747
+        # Frame 1: voicing
         bits.append(self.voiced & 1)
-        # Frame 2: voicing + Wo + E — codec2.c:752-760
+        # Frame 2: voicing + Wo + E
         bits.append((self.voiced >> 1) & 1)
         bits.extend(self._int_to_bits(self.Wo_index, WO_BITS))
         bits.extend(self._int_to_bits(self.e_index, E_BITS))
-        # Frame 3: voicing — codec2.c:765
+        # Frame 3: voicing
         bits.append((self.voiced >> 2) & 1)
-        # Frame 4: voicing + Wo + E + LSPs — codec2.c:770-782
+        # Frame 4: voicing + Wo + E + LSPs
         bits.append((self.voiced >> 3) & 1)
         bits.extend(self._int_to_bits(self.Wo_index, WO_BITS))  # simplified: reuse
         bits.extend(self._int_to_bits(self.e_index, E_BITS))    # simplified: reuse
@@ -539,7 +519,7 @@ class Codec2Frame:
         return bits
 
     def unpack(self, bits: List[int]):
-        """Unpack 64 bits into parameters. 来源: codec2_decode_1600() codec2.c:797+"""
+        """Unpack 64 bits into parameters. +"""
         idx = 0
         self.voiced = 0
         # Frame 1 voicing
@@ -576,11 +556,10 @@ class Codec2Frame:
 class Codec2Lite:
     """Simplified Codec2 1600 bps voice codec.
 
-    Encoder: 8kHz audio → 20ms frame → LPC(10) → LSP → quantize → pitch → voiced → bits
-    Decoder: bits → LSP → LPC → excitation (voiced/unvoiced + pitch) → synthesis filter → audio
+ Encoder: 8kHz audio → 20ms frame → LPC(10) → LSP → quantize → pitch → voiced → bits
+ Decoder: bits → LSP → LPC → excitation (voiced/unvoiced + pitch) → synthesis filter → audio
 
-    Port reference: codec2 src/codec2.c:729-785 (encode_1600), codec2.c:797+ (decode_1600)
-    """
+ Port reference: codec2 (encode_1600), + (decode_1600)"""
 
     def __init__(self):
         self.fs = FS_8K
@@ -590,13 +569,10 @@ class Codec2Lite:
         self.synth_mem = np.zeros(LPC_ORD)
         self.prev_lpc = np.zeros(LPC_ORD + 1)
         self.prev_lpc[0] = 1.0
-        self.gain_phase = 0.0  # excitation phase memory — codec2.c:170
+        self.gain_phase = 0.0  # excitation phase memory
 
     def encode_frame(self, audio: np.ndarray) -> List[int]:
-        """Encode 320 samples (40ms) to 64 bits.
-
-        来源: codec2_encode_1600() codec2.c:729-785
-        """
+        """Encode 320 samples (40ms) to 64 bits."""
         assert len(audio) == FRAME_1600_NSAMP, \
             f"Expected {FRAME_1600_NSAMP} samples, got {len(audio)}"
 
@@ -623,8 +599,7 @@ class Codec2Lite:
     def decode_frame(self, bits: List[int]) -> np.ndarray:
         """Decode 64 bits to 320 samples (40ms) of audio.
 
-        来源: codec2_decode_1600() codec2.c:797+
-        """
+ +"""
         frame = Codec2Frame()
         frame.unpack(bits)
 

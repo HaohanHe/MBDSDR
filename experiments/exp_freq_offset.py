@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 实验：载波频偏（CFO）估计与校正性能（纯软件、可复现）。

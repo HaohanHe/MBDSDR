@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 实验2：AX.25/AFSK Bell202 解调性能（论文数据）。

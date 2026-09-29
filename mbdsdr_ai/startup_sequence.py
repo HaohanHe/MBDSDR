@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI - RTL-SDR 真机启动序列状态机
 ========================================

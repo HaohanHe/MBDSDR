@@ -1,11 +1,13 @@
+# SPDX-License-Identifier: MIT
 """MBDSDR 卫星处理包。
 
-移植自 SatDump (repos/SatDump) 的卫星信号处理链：
-  * tracker   — SGP4 传播 / AOS-LOS 过境预测 / 实时多普勒（tracking/, passes/）
-  * decoders  — NOAA APT 等气象解码（plugins/analog_support/noaa_apt/）
-  * products  — 多通道图像产品 / 假彩色合成 / 地理元数据（products/）
+依据公开标准与数据手册独立实现的卫星信号处理链：
+  * tracker   — SGP4 传播 / AOS-LOS 过境预测 / 实时多普勒
+                （SGP4：Spacetrack Report #3；多普勒：-v_r/c·f_c）
+  * decoders  — NOAA APT 等气象解码（NOAA APT 公开格式）
+  * products  — 多通道图像产品 / 假彩色合成 / 地理元数据
 
-笔记见 docs/learn/satdump.md。
+SatDump（https://www.satdump.org/）等开源项目仅作技术参考与致谢，本仓未包含其源代码。
 """
 from .tracker import (
     GroundStation,

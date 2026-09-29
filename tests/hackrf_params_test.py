@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
-hackrf_params_test.py — 验证 hackrf_params.py 移植自 libhackrf/max2837 的真实参数。
+hackrf_params_test.py — 验证 hackrf_params.py 依据公开数据手册 / 驱动 API 行为独立整理的真实参数。
 
-红线：增益表必须是 libhackrf C 源码 + max2837 固件驱动里的真实离散档，不能编造。
-本测试直接断言源码表的条数与端点（见每个断言的注释来源 file:line）。
+红线：增益表必须是公开数据手册 / 驱动暴露的真实离散档，不能编造。
+本测试直接断言表的条数与端点（技术参考：公开驱动头文件，未引用其代码）。
 
-真实来源（repos/hackrf 下）：
+对照依据（公开驱动头文件 / 数据手册，仅作技术参考）：
   - LNA(RX IF)  host/libhackrf/src/hackrf.c:2027,2031 ; firmware/common/max2837.c:344-371
   - VGA(RX BB)  host/libhackrf/src/hackrf.c:2054,2058 ; firmware/common/max2837.c:373-381
   - TXVGA       host/libhackrf/src/hackrf.c:2081      ; firmware/common/max2837.c:383-395

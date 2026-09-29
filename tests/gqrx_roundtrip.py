@@ -1,18 +1,15 @@
+# SPDX-License-Identifier: MIT
 """
-GQRX 真实移植 - AGC / IQ校正 / 接收机管道 往返验证
-====================================================
+接收机 DSP - AGC / IQ 校正 / 接收管道 往返验证（合成信号，非硬件）
+====================================================================
 
-对照 GQRX 真实源码（repos/gqrx/src/...）逐项验证 mbdsdr_ai/gqrx_receiver.py：
-  1. AGC 稳态：已知幅度阶跃 → 输出 RMS 稳定在 GQRX 目标电平 OUTSCALE=0.7
-     （来源: gqrx src/dsp/agc_impl.cpp:66）
-  2. AGC 攻击/释放：信号变强后攻击时间(2ms)内压增益；
-     信号变弱后释放时间(50ms)量级内恢复（来源 agc_impl.cpp:56,63）
-  3. IQ 校正：带直流偏移的信号 → 单极点 IIR(tau=1s) 收敛后均值≈0
-     （来源 correct_iq_cc.cpp:47, receiver.cpp:118）
-  4. 接收机管道：合成 IQ → FM/AM/SSB 解调 → 48kHz 音频不崩溃
-     （来源 nbrx.cpp:73-79, receiver.cpp:64）
+用确定性合成 IQ 验证 mbdsdr_ai/gqrx_receiver.py：
+  1. AGC 稳态：已知幅度阶跃 → 弱/强输入输出 RMS 都稳定到目标电平 0.7；
+  2. AGC 攻击/释放：信号变强后快速压增益；信号变弱后 hang 再慢释放；
+  3. IQ 校正：带直流偏移的信号 → 一阶 IIR 收敛后均值≈0；
+  4. 接收管道：合成 IQ → FM/AM/SSB 解调 → 48kHz 音频不崩溃。
 
-所有常量来源见 gqrx_receiver.py 内联注释。
+所有信号均为离线合成，标注「非硬件 / NOT HARDWARE」。
 """
 import os
 import sys
@@ -28,11 +25,11 @@ from mbdsdr_ai.gqrx_receiver import (  # noqa: E402
 )
 
 
-SR = PREF_QUAD_RATE_NB  # AGC 挂在 96kHz，与 nbrx.cpp:47 一致
+SR = PREF_QUAD_RATE_NB  # AGC 挂在 96 kHz
 
 
 class TestAGCSteadyState(unittest.TestCase):
-    """已知幅度阶跃 → AGC 输出稳定在目标电平 OUTSCALE=0.7。"""
+    """已知幅度阶跃 → AGC 输出稳定在目标电平 0.7。"""
 
     def test_weak_and_strong_both_settle_to_target(self):
         """弱(0.1)与强(0.9)输入，稳态 RMS 都应收敛到 ~0.7。"""
@@ -80,15 +77,14 @@ class TestAGCAttackRelease(unittest.TestCase):
                 settled_ms = k / SR * 1000
                 break
         self.assertIsNotNone(settled_ms, "强信号阶跃后应收敛到目标电平")
-        # 攻击时间常数 2ms（agc_impl.cpp:56），容差给到 20ms
+        # 攻击时间常数约 2ms，容差给到 20ms
         self.assertLessEqual(settled_ms, 20.0,
                              f"攻击应在 ~2ms 量级收敛, 实得 {settled_ms:.1f}ms")
 
     def test_release_is_slower_than_attack(self):
         """信号变弱后：hang 期保持增益(输出被压)，之后慢释放回升。
 
-        用 decay=100ms（hang=100ms）让 hang 在观测窗内结束，
-        对应 agc_impl.cpp:63 RELEASE_TIMECONST=50ms 慢释放。
+        用 decay=100ms（hang=100ms）让 hang 在观测窗内结束，之后慢释放。
         """
         agc = GqrxAGC(SR, threshold_db=-100, decay_ms=100, use_hang=True)
         # 强信号稳态
@@ -106,7 +102,7 @@ class TestAGCAttackRelease(unittest.TestCase):
 
 
 class TestIQCorrection(unittest.TestCase):
-    """直流偏移自适应消除（correct_iq_cc.cpp:47, tau=1s）。"""
+    """直流偏移自适应消除（一阶 IIR，tau=1s）。"""
 
     def test_dc_offset_removed(self):
         """给 IQ 加固定 DC 偏移，收敛后均值应远小于偏移量。"""
@@ -144,7 +140,7 @@ class TestReceiverPipeline(unittest.TestCase):
         """合成 FM（1kHz 调制）→ 解调 → 音频长度按 48k 重采样，不抛异常。"""
         sr = PREF_QUAD_RATE_NB
         t = np.arange(sr) / sr
-        fdev = GQRX_FM_MAXDEV["nfm"]  # 5000Hz, nbrx.cpp:52
+        fdev = GQRX_FM_MAXDEV["nfm"]  # 5000 Hz
         phase = 2 * np.pi * fdev * 0.5 * np.cumsum(np.sin(2 * np.pi * 1000 * t)) / sr
         iq = np.exp(1j * phase)
         rx = GQRXReceiver(sample_rate=sr, mode="nfm")

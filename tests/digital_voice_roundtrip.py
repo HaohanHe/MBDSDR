@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 tests/digital_voice_roundtrip.py — 数字语音/集群无线电往返测试。
 
@@ -34,7 +35,7 @@ from mbdsdr_ai.sdrtrunk_adapter import (
 #  1. M17 CRC16 往返
 # ═══════════════════════════════════════════════════════════════════════
 def test_m17_crc_known_vectors():
-    """已知向量来自 m17-cxx-demod tests/CRC16Test.cpp:27-47。"""
+    """已知向量来自 m17-cxx-demod"""
     assert m17_crc16(b"A") == 0x206E, f"'A' -> 0x{m17_crc16(b'A'):04X} != 0x206E"
     assert m17_crc16(b"123456789") == 0x772B, \
         f"'123456789' -> 0x{m17_crc16(b'123456789'):04X} != 0x772B"

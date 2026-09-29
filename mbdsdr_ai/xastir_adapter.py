@@ -1,20 +1,19 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/xastir_adapter.py
 =============================
-Xastir (xastir/xastir) APRS 地图/对象工作站的 Python 学习移植。
+APRS 对象/物品报文帧编解码与地理围栏的独立实现。
 
-移植内容：
+依据 APRS 协议规范（APRS 1.0 / aprs.org 公开格式）实现：
   - APRS 对象/物品 (Object/Item) 报文帧编解码
-      来源: xastir src/objects.c:Create_object_item_tx_string (objects.c:142)
       对象帧:  ';' + 9字符名 + 存活标志('*'活/'_'死) + 8字节纬度
                + 符号表 + 9字节经度 + 符号码 + 注释
       物品帧:  ')' + 最长9字符名(空格结尾) + 8字节纬度 + 符号表
                + 9字节经度 + 符号码 + 注释
-  - 未压缩位置编码 DDMM.hhN / DDDMM.hhW
-      来源: direwolf decode_aprs.c:3585-3700 (本仓库 aprs_parser.py 已引)
-  - 地理围栏 (geofence): 圆心+半径判定
+  - 未压缩位置编码 DDMM.hhN / DDDMM.hhW（APRS 未压缩经纬度字段）
+  - 地理围栏 (geofence): 圆心+半径(Haversine)判定
 
-参考：xastir GPL-2.0。本移植纯 Python，不依赖 X11/地图库。
+xastir 仅作技术参考与致谢，本仓未包含其源代码；纯 Python 实现，不依赖 X11/地图库。
 """
 
 from __future__ import annotations
@@ -28,8 +27,8 @@ from typing import Any, Dict, List, Optional, Tuple
 # =====================================================================
 # 位置编解码 —— 未压缩 APRS 经纬度
 # =====================================================================
-# 纬度 8 字节: DDMM.hhN  (direwolf decode_aprs.c:3585)
-# 经度 9 字节: DDDMM.hhW (direwolf decode_aprs.c:3620)
+# 纬度 8 字节: DDMM.hhN (APRS 未压缩位置字段)
+# 经度 9 字节: DDDMM.hhW (APRS 未压缩位置字段)
 def encode_latitude(lat: float) -> str:
     """纬度 -> 8 字节 'DDMM.hhN'。南纬 S，北纬 N。"""
     hemi = 'N' if lat >= 0 else 'S'
@@ -75,7 +74,7 @@ def decode_longitude(s: str) -> float:
 class APRSObject:
     """一个 APRS 对象（13 字节头: ';' + 9名 + 标志）。
 
-    来源: xastir src/objects.c:142 Create_object_item_tx_string。
+    APRS 对象帧 (13 字节头: ';' + 9名 + 标志)。
     """
 
     name: str                 # <= 9 字符
@@ -87,7 +86,7 @@ class APRSObject:
     comment: str = ""
 
     def encode(self) -> bytes:
-        # 9 字符名，空格补齐 (objects.c 用 call_sign 最长9)
+        # 9 字符名，空格补齐
         nm = self.name[:9].ljust(9)
         flag = '*' if self.live else '_'
         lat_s = encode_latitude(self.lat)     # 8 字节
@@ -101,7 +100,7 @@ class APRSObject:
 class APRSItem:
     """一个 APRS 物品（' ) ' 帧，名最长 9 字符，空格结尾）。
 
-    来源: xastir src/objects.c:184 (else 分支 = item)。
+    APRS 物品帧 (')' 帧，名最长 9 字符，空格结尾)。
     """
 
     name: str                 # <= 9 字符
@@ -175,8 +174,7 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 class GeoFence:
     """圆形地理围栏：圆心 + 半径。
 
-    来源：xastir 用 objects.c 的 area_object（矩形/走廊）；
-    这里学习实现最常用的圆形围栏。
+    圆形围栏：圆心 + 半径(Haversine)，最常用的围栏形态。
     """
 
     name: str
@@ -254,8 +252,7 @@ def register_xastir_tools(registry) -> None:
 
     registry.register(
         name="xastir_encode_object",
-        description="编码 APRS 对象帧 (';'+9名+* +未压缩经纬度+符号)。"
-                    "来源: xastir src/objects.c:142。",
+        description="编码 APRS 对象帧 (';'+9名+* +未压缩经纬度+符号)。",
         parameters={"type": "object", "properties": {
             "name": {"type": "string"}, "lat": {"type": "number"},
             "lon": {"type": "number"}, "live": {"type": "boolean"},

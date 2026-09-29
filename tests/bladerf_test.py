@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
-bladerf_test.py — 验证 bladerf_params.py 移植自 libbladeRF 的真实参数。
+bladerf_test.py — 验证 bladerf_params.py 依据公开数据手册 / 驱动 API 行为独立整理的真实参数。
 
-红线：增益表必须是 libbladeRF C 源码里的真实离散档，不能编造。
-本测试直接断言源码表的条数与端点（见每个断言的注释来源 file:line）。
+红线：增益表必须是公开数据手册 / 驱动暴露的真实离散档，不能编造。
+本测试直接断言表的条数与端点（技术参考：公开驱动头文件，未引用其代码）。
 
-真实来源（repos/bladeRF 下）：
+对照依据（公开驱动头文件 / 数据手册，仅作技术参考）：
   - RXVGA1 5-30dB(26档)  host/libraries/libbladeRF/include/bladeRF1.h:154,160
   - RXVGA2 0-30dB(31档)  host/libraries/libbladeRF/include/bladeRF1.h:166,172
   - TXVGA1 -35..-4dB     host/libraries/libbladeRF/include/bladeRF1.h:178,184

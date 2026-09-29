@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 CLI 确定性测试：验证 argparse 解析与命令分发。
 

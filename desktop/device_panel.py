@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 设备选择 / 热插拔面板（desktop/device_panel.py）
 =======================================================

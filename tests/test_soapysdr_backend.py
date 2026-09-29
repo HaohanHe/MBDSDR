@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 SoapySDRBackend 单元测试
 ========================

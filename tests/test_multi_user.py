@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """确定性单测：多用户调度 —— 引用计数、超时关闭、无设备安全。"""
 import pytest
 

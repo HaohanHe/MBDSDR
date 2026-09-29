@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI - 串口 GNSS 端到端测试
 ==================================
@@ -12,7 +13,7 @@ MBDSDR AI - 串口 GNSS 端到端测试
 - RealGNSSMonitor：用 fake reader 测试 get_position() 字段映射与无设备退化。
 
 红线：所有 NMEA 校验和由 nmea_checksum() 动态计算，不手写；
-测试坐标为合成已知向量，不代表真实定位。GPL-3.0。
+测试坐标为合成已知向量，不代表真实定位。
 """
 
 import os

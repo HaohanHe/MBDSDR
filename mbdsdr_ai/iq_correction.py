@@ -1,43 +1,38 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI 内核 - I/Q 不平衡参数化校正（增益 g + 相位 φ 校正矩阵）
-==================================================================
+Parametric I/Q imbalance correction (gain g + quadrature error phi).
 
-零中频（ZIF）接收机 I/Q 两路存在增益差与相位不正交，产生关于中心频
-对称的镜像（image）。本模块实现标准的参数化 2×2 校正矩阵，并从数据
-二阶矩估计 (g, φ)。
+A zero-IF receiver's in-phase and quadrature branches suffer from a gain
+mismatch and a quadrature-phase error, which produces an image symmetric about
+the centre frequency.  This module implements the standard parametric 2x2
+correction matrix and estimates (g, phi) from the signal's second-order
+statistics.
 
-不平衡模型（以 I 路为参考）::
+Imbalance model (I branch as reference)::
 
     I_m = I_i
-    Q_m = g * (cos φ * Q_i + sin φ * I_i)
+    Q_m = g * (cos(phi) * Q_i + sin(phi) * I_i)
 
-其中 (I_i, Q_i) 是理想正交等功率分量，g 为 Q 路增益比，φ 为相位误差。
+where (I_i, Q_i) are the ideal orthogonal equal-power components.
 
-反演（校正）::
+Inversion (correction)::
 
     I_c = I_m
-    Q_c = Q_m/(g·cos φ) - tan φ · I_m
+    Q_c = Q_m/(g*cos(phi)) - tan(phi) * I_m
 
-校正矩阵 C（作用于列向量 [I_m, Q_m]ᵀ）::
+Correction matrix C acting on the column vector [I_m, Q_m]^T::
 
-        [  1        0        ]
-    C = [ -tan φ   1/(g cos φ) ]
+        [  1            0          ]
+    C = [ -tan(phi)   1/(g cos phi) ]
 
-参数估计（假设信号在 I/Q 平面近似各向同性，E[I_i²]=E[Q_i²]=σ²，
-E[I_i Q_i]=0）::
+Parameter estimate (assumes an approximately isotropic signal,
+E[I_i^2] = E[Q_i^2] = sigma^2, E[I_i Q_i] = 0)::
 
     g      = sqrt(var_Q / var_I)
-    sin φ  = cov_IQ / sqrt(var_I · var_Q)
+    sin phi = cov_IQ / sqrt(var_I * var_Q)
 
-默认未校准时 C = 单位阵（g=1, φ=0）——绝不硬编码假校准参数。
-
-对照：
-  - SDR++ core/src/dsp/correction/ 只有 dc_blocker.h，无 IQ 不平衡块；
-    参数化 g/φ 校正取自零中频接收机经典模型（与 GNU Radio /gr-osmosdr
-    设备端 IQ 校正、KrakenSDR 等通用做法一致）。
-  - 协方差关系同 mbdsdr_ai/iq_frontend.py:281-289 的诊断估计。
-
-License: GPL-3.0-or-later
+With no calibration the matrix stays the identity (g=1, phi=0): it never
+hard-codes a fake calibration.
 """
 
 from __future__ import annotations

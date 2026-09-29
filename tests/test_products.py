@@ -1,4 +1,5 @@
-"""mbdsdr_ai.satellite.products 确定性单测。
+# SPDX-License-Identifier: MIT
+"""mbdsdr_ai.satellite.products 确定性单测。（合成向量，非硬件 / NOT HARDWARE）
 
 对照 SatDump src-core/products/image_product.*（docs/learn/satdump.md §11）：
   1. ImageProduct 通道存取 / shape；

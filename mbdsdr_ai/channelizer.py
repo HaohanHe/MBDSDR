@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: MIT
 """
 channelizer.py — Xlating FIR 数字下变频信道化（纯 numpy，状态化流式）。
 
-移植自 SDR++：
-  * core/src/dsp/channel/frequency_xlator.h:43-48  —— NCO 相位累加复指数混频
-  * core/src/dsp/channel/rx_vfo.h:89-100,117-121   —— 混频→重采样抽取→FIR 低通
-  * core/src/dsp/taps/low_pass.h:7-11               —— windowed-sinc + Nuttall 窗
+依据公开数字下变频（DDC）DSP 方法独立实现（SDR++ 仅作技术参考，本仓未包含其源代码）：
+  * NCO 相位累加复指数混频
+  * 混频 → 重采样抽取 → FIR 低通
+  * windowed-sinc + Nuttall 窗低通抽头设计
 
 管线（NCO → 多级整数抽取 → 有理重采样 → 信道 LPF）：
     1) NCO 混频：  y[n] = x[n] * e^{j φ[n]},  φ[n] = φ[n-1] + Δφ

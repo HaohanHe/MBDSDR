@@ -1,23 +1,27 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR 模拟音频解调（纯 numpy）
-================================
-IQ -> AM(包络) / FM(相位差分鉴频) / SSB(BFO 边带) 音频。
+Analogue audio demodulation (pure NumPy).
 
-GQRX 接收链拓扑对照（repos/gqrx/src/receivers/nbrx.cpp）：
+IQ -> AM (envelope) / FM (phase-difference discriminator) / SSB (BFO sideband).
 
-    输入 IQ → [VFO 数字 NCO 混频] → 信道带通 → 静噪(RMS 能量) → AGC → 解调 → 音频低通
+Receive-chain topology::
 
-关键拓扑决策（见 docs/learn/gqrx.md 第 3/4/5 节）：
-  * 静噪必须在 AGC 之前：否则无信号时 AGC 会把噪声底一路增益拉到满音量。
-  * VFO 小范围偏移用数字 NCO 混频实现，不调硬件中心频率；越界才重新调谐。
-  * 切模式时同时重设带宽 / BFO / 静噪门限。
+    input IQ -> [VFO digital NCO mixer] -> channel band-pass -> squelch (RMS)
+             -> AGC -> demodulate -> audio low-pass
+
+Key ordering rules:
+  * The squelch must come before the AGC; otherwise with no signal the AGC would
+    raise the noise floor to full volume.
+  * Small VFO offsets are done in the digital NCO mixer (not by retuning the
+    hardware centre frequency); retune only when out of range.
+  * Switching mode also resets bandwidth / BFO / squelch threshold.
 """
 from __future__ import annotations
 import numpy as np
 from typing import Dict, Callable, Optional
 
-# GQRX 真实 AGC / 音频率常量（来源: gqrx src/dsp/agc_impl.cpp, receiver.cpp:64）。
-# 本文件保留原有 SDR++ 去加重链，窄带 AGC 改用真实 CAgc 移植（见 mbdsdr_ai/gqrx_receiver.py）。
+# AGC and audio-rate constants.  The narrow-band AGC reuses the CAgc-style
+# implementation in gqrx_receiver.py.
 from mbdsdr_ai.gqrx_receiver import GqrxAGC, AUDIO_RATE as GQRX_AUDIO_RATE
 
 
@@ -29,50 +33,47 @@ def _lowpass(x: np.ndarray, sr: float, cutoff: float, taps: int = 63) -> np.ndar
     return np.convolve(x, h, mode="same")
 
 
-# ═══════════════════════════════════════════════════════════════════════
-#  SDR++ 校准常量（来源: repos/sdrpp/decoder_modules/radio/src/demodulators/*.h）
-#  与上面 GQRX 风格链路并存：切到对应模式时用 SDR++ 的 IF 采样率/带宽/去加重。
-# ═══════════════════════════════════════════════════════════════════════
+# ---------------------------------------------------------------------------
+# Standard receiver tuning constants (IF rate / bandwidth / de-emphasis per mode).
+# ---------------------------------------------------------------------------
 
-# 去加重时间常数表 —— 来源: radio_module.h:25-28 deempTaus
-#   {22us: 22e-6, 50us: 50e-6, 75us: 75e-6}
-# 50μs = 欧洲/中国 FM 广播；75μs = 美国 FM 广播。
+# De-emphasis time-constant table:
+#   {22 us, 50 us, 75 us}.  50 us = EU/CN FM broadcast; 75 us = US FM broadcast.
 SDRPP_DEEMP_TAU_US = {"none": 0.0, "22us": 22e-6, "50us": 50e-6, "75us": 75e-6}
 
-# 各解调模式的 IF 采样率 / 默认带宽 / 最小带宽
-#   WFM:  wfm.h:268/270/271   IF=250000  defaultBW=150000 minBW=50000
-#   NFM:  nfm.h:56/58/59      IF=50000   defaultBW=12500  minBW=1000
-#   AM:   am.h:76/78/79       IF=15000   defaultBW=10000  minBW=1000
-#   USB:  usb.h:70/72/73/74   IF=24000   defaultBW=2800   minBW=500 maxBW=IF/2=12000
+# Per-mode IF sample rate / default bandwidth / minimum bandwidth:
+#   WFM  IF=250000  defaultBW=150000 minBW=50000
+#   NFM  IF=50000   defaultBW=12500  minBW=1000
+#   AM   IF=15000   defaultBW=10000  minBW=1000
+#   USB  IF=24000   defaultBW=2800   minBW=500  maxBW=IF/2=12000
 SDRPP_MODE_PARAMS = {
     #        if_sr      default_bw  min_bw   default_deemph
-    "wfm":  (250_000.0, 150_000.0, 50_000.0, "50us"),   # wfm.h:278 默认 50μs
-    "nfm":  (50_000.0,  12_500.0,  1_000.0,  "none"),   # nfm.h:66  默认不去加重
-    "am":   (15_000.0,  10_000.0,  1_000.0,  "none"),   # am.h:84  不允许去加重
-    "usb":  (24_000.0,  2_800.0,   500.0,    "none"),   # usb.h:78
+    "wfm":  (250_000.0, 150_000.0, 50_000.0, "50us"),
+    "nfm":  (50_000.0,  12_500.0,  1_000.0,  "none"),
+    "am":   (15_000.0,  10_000.0,  1_000.0,  "none"),
+    "usb":  (24_000.0,  2_800.0,   500.0,    "none"),
 }
 
-# WFM 立体声/导频参数 —— 来源: core/src/dsp/demod/broadcast_fm.h
-#   导频 19kHz 带通 18750~19250 (broadcast_fm.h:43)
-#   音频低通 15kHz、过渡带 4kHz (broadcast_fm.h:49)
-#   RDS 副载波 57kHz、重采样到 5000Hz (broadcast_fm.h:52-53)
+# WFM stereo / pilot constants:
+#   pilot 19 kHz band-pass 18750..19250
+#   audio low-pass 15 kHz, transition 4 kHz
+#   RDS sub-carrier 57 kHz, resampled to 5000 Hz
 SDRPP_WFM_PILOT_BAND = (18_750.0, 19_250.0)
 SDRPP_WFM_AUDIO_LP = 15_000.0
 SDRPP_RDS_SUBCARRIER = 57_000.0
 SDRPP_RDS_RESAMPLE_RATE = 5_000.0
 
-# 音频（AF）输出采样率 —— 来源: radio_module.h:105 deemp.init(NULL,50e-6,48000.0)
-# SDR++ 解调后的音频链统一工作在 48000Hz。
+# Audio (AF) output sample rate: the post-demod audio chain runs at 48000 Hz.
 SDRPP_AUDIO_SR = 48_000.0
 
 
 class DeemphasisFilter:
-    """SDR++ 一阶 RC 去加重滤波器。
+    """First-order RC de-emphasis low-pass.
 
-    （来源: core/src/dsp/filter/deephasis.h:58-94）
         dt = 1/samplerate;  alpha = dt/(tau+dt);
         out[i] = alpha*in[i] + (1-alpha)*out[i-1]
-    tau: 75μs(美)/50μs(欧)/22μs。逐样本 IIR，状态跨块连续。
+    tau: 75 us (US) / 50 us (EU) / 22 us.  Sample-wise IIR, state kept across
+    blocks.
     """
 
     def __init__(self, tau: float, samplerate: float):
@@ -82,8 +83,8 @@ class DeemphasisFilter:
         self._update_alpha()
 
     def _update_alpha(self) -> None:
-        dt = 1.0 / self.sr                      # deephasis.h:92
-        self.alpha = dt / (self.tau + dt)       # deephasis.h:93
+        dt = 1.0 / self.sr
+        self.alpha = dt / (self.tau + dt)
 
     def set_tau(self, tau: float) -> None:
         self.tau = float(tau)
@@ -100,7 +101,7 @@ class DeemphasisFilter:
         out = np.empty_like(x)
         prev = self._last
         a = self.alpha
-        for i in range(len(x)):                 # deephasis.h:60-62
+        for i in range(len(x)):
             prev = a * x[i] + (1.0 - a) * prev
             out[i] = prev
         self._last = out[-1]
@@ -108,43 +109,42 @@ class DeemphasisFilter:
 
 
 
-# ═══════════════════════════════════════════════════════════════════════
-#  GQRX 风格窄带解调链（状态化，流式逐块处理）
-# ═══════════════════════════════════════════════════════════════════════
+# ---------------------------------------------------------------------------
+# Narrow-band demodulation chain (stateful, streaming).
+# ---------------------------------------------------------------------------
 
-# 来源: GQRX mainwindow.cpp:1308-1314 — 切模式时统一重设
-#   带通 low/high cut、CW BFO、静噪门限。这里给出各模式默认带宽/BFO/静噪。
+# Per-mode defaults for bandwidth / BFO / squelch threshold, applied together
+# when the mode changes.
 _MODE_DEFAULTS: Dict[str, Dict[str, float]] = {
     #           bw_hz    bfo_hz   squelch_dbfs
     "am":  dict(bw_hz=10_000.0, bfo_hz=0.0,   sql_db=-40.0),
     "fm":  dict(bw_hz=12_500.0, bfo_hz=0.0,   sql_db=-40.0),
-    # wfm 默认带宽 150kHz —— 来源: SDR++ wfm.h:270 getDefaultBandwidth()=150000
+    # wfm default bandwidth 150 kHz.
     "wfm": dict(bw_hz=150_000.0, bfo_hz=0.0,  sql_db=-30.0),
     "usb": dict(bw_hz=2_400.0,  bfo_hz=1_500.0, sql_db=-60.0),
     "lsb": dict(bw_hz=2_400.0,  bfo_hz=-1_500.0, sql_db=-60.0),
     "cw":  dict(bw_hz=500.0,    bfo_hz=700.0,  sql_db=-60.0),
 }
 
-# 数字下变频可用的最大 VFO 偏移：±sample_rate/4。
-# 来源: GQRX receiver.cpp:655-661 / docs/learn/gqrx.md §2.3 — 小偏移走 DDC 数字混频，
-# 超出这个范围才重新调谐硬件 center_freq（避免每次点击频谱都触发硬件重 tune 的几十 ms 延迟）。
+# Maximum VFO offset handled by the digital down-converter: +/- sample_rate/4.
+# Small offsets are done in the digital mixer; only larger offsets retune the
+# hardware centre frequency (avoiding the tens-of-ms hardware retune latency).
 _DDC_RANGE_FRAC = 0.25
 
 
-class _GqrxAGC:
-    """双时间常数 AGC + hang 模式（GQRX CAgc 的精简 numpy 版）。
+class _HangAGC:
+    """Two-time-constant AGC with a hold/hang mode.
 
-    来源: GQRX agc_impl.cpp:49-63, 124-190
-      ATTACK_RISE   = 0.002 s   (信号出现、需快速压增益)
-      DECAY         = ~几百 ms   (信号消失、缓慢放增益)
-      hang 模式     = 信号掉落后先保持增益，再慢释放（对话音 SSB 关键）
-      15 ms 延迟线 = 补偿信道滤波器群延迟（这里用块级增益平滑近似）。
+      ATTACK_RISE = 2 ms   (a signal appears; fast gain pull-down)
+      DECAY       = ~300 ms (signal gone; slow gain release)
+      hang mode   = after a signal drops, hold the gain then release slowly
+                    (important for SSB voice)
+      The channel filter group delay is approximated here by block-level gain
+      smoothing.
     """
 
-    # 来源: GQRX agc_impl.cpp:56-57 — attack 2ms；decay 取 300ms（语音档）
     ATTACK_S = 0.002
     DECAY_S = 0.300
-    # 来源: GQRX agc_impl.cpp:56-57,261-268 — hang 保持约 100ms 再释放
     HANG_S = 0.100
 
     def __init__(self, sample_rate: float, target_level: float = 0.5):
@@ -163,7 +163,7 @@ class _GqrxAGC:
         if n == 0:
             return iq
         if not gated:
-            # 来源: GQRX nbrx.cpp:78 — sql 关断后 AGC 输入被静音，不更新增益
+            # Squelch closed: keep the gain unchanged, return silence.
             return np.zeros_like(iq)
 
         level = float(np.sqrt(np.mean(np.abs(iq) ** 2))) + 1e-12
@@ -191,11 +191,12 @@ class _GqrxAGC:
 
 
 class NarrowbandReceiver:
-    """GQRX nbrx 风格的窄带解调链（状态化）。
+    """Stateful narrow-band demodulation chain.
 
-    拓扑（来源: GQRX nbrx.cpp:76-79）：
-        filter → meter/squelch → AGC → demod
-    本类在前面再串一级 VFO 数字 NCO 混频（来源: GQRX receiver.cpp:655-661）。
+    Topology::
+        channel filter -> meter/squelch -> AGC -> demodulate
+    A digital VFO NCO mixer is prepended to translate the tuned frequency to
+    baseband.
     """
 
     def __init__(self,
@@ -220,23 +221,20 @@ class NarrowbandReceiver:
         self.audio_bw = 3_000.0
         self.max_dev = 5_000.0
 
-        # 静噪状态（来源: GQRX nbrx.cpp:48 — 初始阈值 -150 dBFS = 全开）
+        # Squelch state: initial threshold -150 dBFS = open.
         self.squelch_db = -150.0
         self._sql_open = False
-        # 来源: GQRX nbrx.cpp:48 — simple_squelch_cc 的 alpha=0.001（逐样本包络平滑）
+        # Per-sample envelope smoothing alpha = 0.001.
         self._sql_alpha = 0.001
-        # 门控滞回：高于门限开，低于门限-3dB 才关（防抖动）
+        # Hysteresis: open above threshold, close only below threshold-3 dB.
         self._sql_hyst_db = 3.0
         self.last_signal_power_db = -150.0
 
-        # GQRX 真实 AGC（CAgc 移植）。默认参数与 nbrx.cpp:47 完全一致：
-        #   agc_on=true, use_hang=false, threshold=-100dB, manual_gain=0, slope=0, decay=500ms。
-        # 来源: gqrx src/dsp/agc_impl.cpp:197-317。
+        # Narrow-band AGC.
         self._agc = GqrxAGC(self.sample_rate, agc_on=True, use_hang=False,
                             threshold_db=-100, slope=0, decay_ms=500)
 
-        # SDR++ 去加重（来源: radio_module.h:105 deemp.init(NULL,50e-6,48000)）。
-        # 初始 tau=0（不去加重），set_mode 按模式默认档打开。
+        # De-emphasis (tau=0 = off until set_mode selects a profile).
         self.deemph = DeemphasisFilter(0.0, self.sample_rate)
 
         self.set_mode(mode)
@@ -245,11 +243,11 @@ class NarrowbandReceiver:
     #  VFO / 频率
     # ------------------------------------------------------------------
     def set_vfo_freq(self, vfo_hz: float) -> Dict:
-        """设置收听频率。
+        """Set the listening frequency.
 
-        来源: GQRX receiver.cpp:655-661, mainwindow.cpp:1028 —
-          若 |vfo - hw_center| ≤ sample_rate/4：只改数字 NCO 偏移，不调硬件；
-          否则重新调谐硬件 center_freq，数字偏移归零。
+        If |vfo - hw_center| <= sample_rate/4, only the digital NCO offset is
+        changed (no hardware retune); otherwise the hardware centre frequency is
+        retuned and the digital offset is cleared.
         """
         vfo_hz = float(vfo_hz)
         offset = vfo_hz - self.hardware_center_freq
@@ -284,11 +282,7 @@ class NarrowbandReceiver:
     #  模式切换（联动带宽 / BFO / 静噪）
     # ------------------------------------------------------------------
     def set_mode(self, mode: str) -> Dict:
-        """切换解调模式，并按 GQRX 惯例同时重设带宽/BFO/静噪门限。
-
-        来源: GQRX mainwindow.cpp:1308-1314 — 切模式 = 改解调块 + 重设带通
-          + 重设 CW BFO + 重设静噪门限（四件套）。
-        """
+        """Switch demodulation mode and reset bandwidth / BFO / squelch together."""
         mode = (mode or "fm").lower()
         if mode not in _MODE_DEFAULTS:
             raise ValueError(f"未知模式: {mode}（{list(_MODE_DEFAULTS)}）")
@@ -296,24 +290,23 @@ class NarrowbandReceiver:
         self.mode = mode
         self.bw_hz = d["bw_hz"]
         self.bfo_hz = d["bfo_hz"]
-        # 来源: GQRX mainwindow.cpp:1313 — 切模式后把静噪门限刷成当前档
+        # Reset the squelch threshold to the per-mode default.
         self.squelch_db = d["sql_db"]
         self.audio_bw = min(3_000.0, d["bw_hz"] * 0.4)
         if mode in ("fm", "nfm"):
             self.max_dev = 5_000.0
         elif mode == "wfm":
-            # WFM 最大频偏 = 带宽/2 —— 来源: wfm.h:78 demod.init(...,bandwidth/2.0,...)
+            # WFM peak deviation = bandwidth/2.
             self.max_dev = self.bw_hz / 2.0
-            self.audio_bw = SDRPP_WFM_AUDIO_LP   # 15kHz，broadcast_fm.h:49
+            self.audio_bw = SDRPP_WFM_AUDIO_LP   # 15 kHz
         elif mode == "am":
             self.max_dev = 0.0
 
-        # SDR++ 去加重档：按模式默认（wfm=50μs，nfm/am/ssb=none）
-        # 来源: radio_module.h:25-28 tau 表 + 各 demodulator getDefaultDeemphasisMode()
-        sdrpp_key = {"wfm": "wfm", "fm": "nfm", "nfm": "nfm",
-                     "am": "am", "usb": "usb", "lsb": "usb"}.get(mode)
-        if sdrpp_key and sdrpp_key in SDRPP_MODE_PARAMS:
-            deemp_name = SDRPP_MODE_PARAMS[sdrpp_key][3]
+        # De-emphasis profile per mode (wfm=50 us; nfm/am/ssb=none).
+        mode_key = {"wfm": "wfm", "fm": "nfm", "nfm": "nfm",
+                    "am": "am", "usb": "usb", "lsb": "usb"}.get(mode)
+        if mode_key and mode_key in SDRPP_MODE_PARAMS:
+            deemp_name = SDRPP_MODE_PARAMS[mode_key][3]
             self.deemph.set_tau(SDRPP_DEEMP_TAU_US[deemp_name])
             self.deemph.set_samplerate(self.sample_rate)
             self.deemph_region = deemp_name
@@ -329,10 +322,9 @@ class NarrowbandReceiver:
         self.squelch_db = float(db)
 
     def auto_squelch(self) -> float:
-        """自动静噪 = 当前噪声底 + 3 dB 裕量。
+        """Auto-squelch = current noise floor + 3 dB margin.
 
-        来源: GQRX mainwindow.cpp:1460-1468 —
-          level = 当前电平 + 3.0 dB；超过 -10 dBFS 时钳回（防 0 dBFS）。
+        Clamped so it never exceeds -10 dBFS (protecting against 0 dBFS).
         """
         level = self.last_signal_power_db + 3.0
         if level > -10.0:
@@ -357,8 +349,7 @@ class NarrowbandReceiver:
         # 2) 信道滤波：按模式带宽低通到 bw/2
         filt = _lowpass(mixed, self.sample_rate, self.bw_hz / 2.0)
 
-        # 3) 静噪（RMS 能量检测）——必须在 AGC 之前
-        #    来源: GQRX nbrx.cpp:77-78 — connect(filter, sql) → connect(sql, agc)
+        # 3) Squelch (RMS energy detection) -- must come before the AGC.
         power = float(np.mean(np.abs(filt) ** 2))
         inst_db = 10.0 * np.log10(power + 1e-12)
         # 逐样本 alpha=0.001 的包络平滑换算到本块（N 个样本）
@@ -373,8 +364,8 @@ class NarrowbandReceiver:
         sql_open = self._sql_open
         gated = filt if sql_open else np.zeros_like(filt)
 
-        # 4) AGC（静噪之后、解调之前）——来源: GQRX nbrx.cpp:78-79
-        #    静噪关闭时不更新 AGC（避免静音把增益抽风拉满），与真实 CAgc 一致。
+        # 4) AGC (after squelch, before demod).  When squelch is closed the AGC
+        #    is not updated (silence must not pump the gain up).
         if sql_open:
             agc_out = self._agc.process(gated)
         else:
@@ -386,16 +377,12 @@ class NarrowbandReceiver:
         # 6) 音频低通
         audio = _lowpass(audio, self.sample_rate, self.audio_bw) if len(audio) else audio
 
-        # 6b) SDR++ 去加重（来源: radio_module.h:110 afChain.addBlock(&deemp)）
-        #     一阶 RC IIR，tau=50μs(欧)/75μs(美)；tau=0 时直通。
-        #     与 GQRX NFM 的 75μs(nbrx.cpp:52) 一致；WFM 的 50μs 在立体声块里。
+        # 6b) De-emphasis (first-order RC IIR; tau=0 = passthrough).
         if len(audio) and getattr(self, "deemph", None) is not None \
                 and self.deemph.tau > 0:
             audio = self.deemph.process(audio)
 
-        # 6c) 音频重采样到 48kHz（GQRX 音频输出采样率）。
-        #     来源: gqrx receiver.cpp:64 d_audio_rate(48000)，
-        #           nbrx.cpp:68-69 audio_rr0 = resampler_ff(audio_rate/PREF_QUAD_RATE)。
+        # 6c) Resample audio to the 48 kHz output rate.
         from mbdsdr_ai.gqrx_receiver import _resample_to
         audio = _resample_to(audio, self.sample_rate, GQRX_AUDIO_RATE) if len(audio) else audio
 
@@ -413,10 +400,10 @@ class NarrowbandReceiver:
         }
 
     def _nco_mix(self, iq: np.ndarray) -> np.ndarray:
-        """数字下变频：把 +_nco_offset Hz 处的信号搬到基带。
+        """Digital down-conversion: move the signal at +_nco_offset Hz to baseband.
 
-        来源: GQRX receiver.cpp:658 — ddc->set_center_freq(offset)；
-        这里用复数混频 exp(-j*2π*offset*t) 等价实现，相位跨块连续。
+        Implemented as complex mixing by exp(-j*2*pi*offset*t), with the phase
+        kept continuous across blocks.
         """
         n = len(iq)
         if self._nco_offset == 0.0 or n == 0:
@@ -432,16 +419,16 @@ class NarrowbandReceiver:
             audio = np.abs(x)
             audio = audio - np.mean(audio)
         elif mode in ("fm", "nfm", "wfm"):
-            # 正交鉴频（来源: SDR++ core/src/dsp/demod/quadrature.h 的相位差分）
+            # Quadrature phase-difference discriminator.
             if len(x) < 2:
                 return np.zeros(len(x), dtype=np.float64)
             phase = np.angle(x[1:] * np.conj(x[:-1]))
-            # 来源: analog_demod 审计修复 — FM 鉴频后必须去直流，否则 CFO 残留成哼声
+            # Remove DC after discrimination, otherwise CFO residue becomes hum.
             audio = phase / (2 * np.pi * self.max_dev / self.sample_rate)
             audio = np.concatenate([audio, audio[-1:]])
             audio = audio - np.mean(audio)
         elif mode in ("usb", "lsb", "cw"):
-            # BFO 拍频：把被抑制载波搬到音频（来源: GQRX mainwindow.cpp:1282-1298）
+            # BFO beat: move the suppressed carrier into the audio band.
             n = len(x)
             t = np.arange(n) / self.sample_rate
             bfo = np.exp(1j * 2 * np.pi * self.bfo_hz * t)

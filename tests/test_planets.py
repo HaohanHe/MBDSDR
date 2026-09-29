@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """确定性单测：行星位置与 JPL de440s 星历对比（误差 < 0.1°）。"""
 import os
 import pytest

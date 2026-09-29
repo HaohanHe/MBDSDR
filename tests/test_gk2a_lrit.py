@@ -1,4 +1,5 @@
-"""
+# SPDX-License-Identifier: MIT
+"""（合成向量，非硬件 / NOT HARDWARE）
 GK-2A LRIT 全管道端到端往返测试
 ==================================
 

@@ -1,15 +1,13 @@
-"""气象产品生成（移植自 SatDump src-core/products/image_product.*）。
+# SPDX-License-Identifier: MIT
+"""气象产品生成（依据气象卫星产品惯例独立实现）。
 
-上游对照（docs/learn/satdump.md §11）：
-- src-core/products/image_product.h:42-85   ImageProduct + ImageHolder
-- image_product.h:110-115                   set_proj_cfg_tle_timestamps
-- plugins/.../module_noaa_apt_decoder.cpp:798-846  AVHRR 通道入产品
-
-本模块用 numpy + dataclass 镜像该结构：
+本模块用 numpy + dataclass 表示一个仪器产品：
   * ImageProduct — 多通道灰度图 + 地理元数据 + 投影配置
   * compose_rgb  — 通道合成（真彩色 / NOAA AVHRR 假彩色）
   * save_png     — 落盘 PNG
-  * estimate_geocorrection_offset — AI 估计图像行偏移（增强，占位但确定性）
+  * estimate_geocorrection_offset — 估计图像行偏移（确定性占位）
+
+SatDump 等开源项目仅作技术参考与致谢，本仓未包含其源代码。
 """
 from __future__ import annotations
 
@@ -27,17 +25,17 @@ import numpy as np
 class ImageProduct:
     """一个仪器产品：若干等尺寸灰度通道 + 地理元数据。
 
-    对照 SatDump ImageProduct::images (image_product.h:85)，每个 ImageHolder 含
-    channel_name / image / bit_depth / wavenumber。这里用 dict 简化。
+    每个通道为一张 2D 灰度图，附带 channel_name / bit_depth / wavenumber
+    等元数据（这里用 dict 简化存储）。
     """
     instrument_name: str = "unknown"
     satellite: str = ""
     channels: Dict[str, np.ndarray] = field(default_factory=dict)
-    #: 每行 UTC 时间戳（unix 秒），长度 = 行数；对照 decoder.cpp:969-973
+    #: 每行 UTC 时间戳（unix 秒），长度 = 行数
     timestamps: Optional[List[float]] = None
     #: 投影配置（tle / 投影类型 / GCP 间距等）
     projection: Dict[str, Any] = field(default_factory=dict)
-    #: 行时间步长（秒/行），APT=0.5；对照 decoder.cpp:971
+    #: 行时间步长（秒/行），APT=0.5（NOAA APT 行率 2 行/秒）
     line_period_s: float = 0.5
 
     def add_channel(self, name: str, image: np.ndarray) -> None:
@@ -54,7 +52,7 @@ class ImageProduct:
     def set_projection(self, tle: Tuple[str, str], timestamps: List[float],
                        proj_type: str = "noaa_apt_single_line",
                        gcp_spacing: int = 30) -> None:
-        """对照 image_product.h:110-115 set_proj_cfg_tle_timestamps。"""
+        """记录投影配置（TLE / 投影类型 / GCP 间距）与行时间戳。"""
         self.projection = {
             "type": proj_type,
             "tle": {"line1": tle[0], "line2": tle[1]},

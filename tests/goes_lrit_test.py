@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: MIT
 """
-goestools GOES LRIT/HRIT 移植验证测试
+GOES LRIT/HRIT 协议栈往返/已知向量测试（合成向量，非硬件 / NOT HARDWARE）
 =====================================
 
-验证 mbdsdr_ai/goes_lrit.py 真实复现 goestools 协议栈：
+验证 mbdsdr_ai/goes_lrit.py 的 CCSDS/LRIT 协议解析：
   - 同步字 0x1ACFFC1D 检测
   - VCDU 892B 字段解析（VCID/SCID/counter）
   - M_PDU 第一头指针 + CCSDS TP_PDU 切包
@@ -49,7 +50,7 @@ from mbdsdr_ai.goes_lrit import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 def build_lrit_primary(file_type: int, total_header_len: int, data_len_bits: int) -> bytes:
-    """构造 16 字节 LRIT PrimaryHeader。来源: goestools src/lrit/lrit.cc:164-172"""
+    """构造 16 字节 LRIT PrimaryHeader。"""
     out = bytearray()
     out.append(H_PRIMARY)              # headerType
     out += (16).to_bytes(2, "big")    # headerLength = 16
@@ -61,7 +62,7 @@ def build_lrit_primary(file_type: int, total_header_len: int, data_len_bits: int
 
 
 def build_annotation_header(text: str) -> bytes:
-    """构造 type=4 AnnotationHeader。来源: lrit.cc:214-220"""
+    """构造 type=4 AnnotationHeader。"""
     body = text.encode("ascii")
     out = bytearray()
     out.append(H_ANNOTATION)
@@ -84,7 +85,7 @@ def build_tpdu(apid: int, seq_flag: int, seq_count: int,
                user_data: bytes) -> bytes:
     """组装一个 CCSDS TP_PDU：6B 头 + user_data + 2B CRC。
 
-    CRC 覆盖 user_data。来源: transport_pdu.h:59-73, crc.cc:46-52
+    CRC 覆盖 user_data（CRC-16/CCITT）。
     """
     hdr = bytearray()
     hdr.append(((0 & 0x07) << 5) | ((0 & 0x01) << 4) | ((0 & 0x01) << 3) |
@@ -93,7 +94,7 @@ def build_tpdu(apid: int, seq_flag: int, seq_count: int,
     hdr.append(((seq_flag & 0x03) << 6) | ((seq_count >> 8) & 0x3F))
     hdr.append(seq_count & 0xFF)
     # 用户数据 = user_data + 2 字节 CRC；CCSDS length 字段 = 总字节数 - 1
-    # 来源: transport_pdu.h:59-68  length() = field + 1
+    # length() = field + 1（CCSDS 源包标准）
     payload = user_data
     crc = crc16_ccitt(payload)
     length_field = len(payload) + 2 - 1
@@ -106,7 +107,7 @@ def build_vcdu(vcid: int, counter: int, mpdu_payload: bytes,
     """组装一个 892 字节 VCDU。
 
     mpdu_payload: M_PDU 区（884B）中 FHP 之后的内容。FHP 指向 mpdu_payload
-    在 884B 区中的起点。来源: vcdu.h:17-39, virtual_channel.cc:44-48
+    在 884B 区中的起点（VCDU 头 6B 后为 M_PDU）。
     """
     data = bytearray(VCDU_LEN)
     # VCDU 头
@@ -127,7 +128,7 @@ def build_vcdu(vcid: int, counter: int, mpdu_payload: bytes,
 def make_single_packet_vcdu(file_buf: bytes, vcid: int = 10, counter: int = 0,
                             apid: int = 0x100) -> bytes:
     """把一个 LRIT 文件包成单个 seqFlag=3 的 TP_PDU，放进一个 VCDU。"""
-    # 第一个 TP_PDU 用户数据前 10 字节是垃圾。来源: session_pdu.cc:78-82
+    # 第一个 TP_PDU 用户数据前 10 字节是填充，跳过。
     user_data = b"\xAA" * 10 + file_buf
     tpdu = build_tpdu(apid, seq_flag=3, seq_count=0, user_data=user_data)
     return build_vcdu(vcid, counter, tpdu, fhp=0)

@@ -1,7 +1,8 @@
+# SPDX-License-Identifier: MIT
 """
 TimeEngine 测试
 ================
-验证 Stellarium 风格的时间穿梭真正影响卫星位置计算（修复"装饰条"问题）。
+验证时间穿梭真正影响卫星位置计算（修复"装饰条"问题）。
 
 关键测试：
 - 默认 rate=1 且未跳时：行为与系统时间一致（向后兼容）
@@ -190,19 +191,19 @@ class TestTimeTravelAffectsSatellitePositions(unittest.TestCase):
             )
 
 
-class TestStellariumSemantics(unittest.TestCase):
-    """对照 Stellarium 源码语义的单元测试。"""
+class TestTimeEngineSemantics(unittest.TestCase):
+    """时间引擎语义单元测试。"""
 
     def setUp(self):
         reset_time_engine()
 
     def test_jd_second_constant(self):
-        """Stellarium JD_SECOND = 1/86400 天/秒。"""
+        """JD_SECOND = 1/86400 天/秒。"""
         self.assertAlmostEqual(TimeEngine.JD_SECOND, 1.0 / 86400.0, places=12)
 
-    def test_tick_matches_stellarium_formula(self):
+    def test_tick_matches_time_formula(self):
         """
-        复现 StelCore.cpp:2307 的公式：
+        时间推进公式：
             JD.first = jdOfLastJDUpdate + real_elapsed * timeSpeed
         其中 timeSpeed = rate * JD_SECOND
         """

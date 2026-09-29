@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 tests/codec2_freedv_roundtrip.py — Roundtrip verification tests.
 

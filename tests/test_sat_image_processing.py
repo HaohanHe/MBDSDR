@@ -1,7 +1,7 @@
-"""气象卫星图像处理链测试。
+# SPDX-License-Identifier: MIT
+"""气象卫星图像处理链测试（合成向量，非硬件 / NOT HARDWARE）。
 
-对照 SatDump (github.com/altillimity/SatDump) src-core/image/ 与 projection/ 的
-numpy 移植实现做量化自检：
+对 mbdsdr_ai/sat_image_processing.py 的标准图像处理/投影量化自检：
   1. 中值滤波：椒盐噪声去除前后 PSNR 提升；
   2. 直方图均衡：低对比度图输出像素方差增大（动态范围拉开）；
   3. Kuwahara：平坦区方差降低、边缘梯度保持；

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 MBDSDR 工具批量体检：对全部已注册工具逐个真实调用，分类结果。

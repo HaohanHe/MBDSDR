@@ -1,17 +1,19 @@
+# SPDX-License-Identifier: MIT
 """
-GNU Radio 真实 DSP 块移植测试
-================================
-对照 repos/gnuradio 源码逐行移植的块：
+Unit tests for the DSP primitive blocks.
+非硬件 / NOT HARDWARE: all signals are synthetic.
+
+Blocks under test:
   FIRFilter / FFTFilter / IIRFilter / PFBArbResampler /
   AGC2 / RationalResampler / ClockRecoveryMM
 
-每个测试都断言真实数值行为，不造假：
+Each test asserts real numeric behaviour, not fabricated values:
   - FIR  == numpy.convolve
-  - FFT  == FIR（误差 < 1e-6）
-  - AGC2 阶跃后稳定在参考电平
-  - Rational 2x 上采样频谱正确（无镜像泄漏）
-  - PFB 任意比率重采样无混叠
-  - ClockRecoveryMM 已知符号率信号位同步锁定
+  - FFT  == FIR (error < 1e-6)
+  - AGC2 settles to the reference level after a step
+  - Rational 2x up-sampling spectrum is correct (no image leakage)
+  - PFB arbitrary-rate resampling is alias-free
+  - ClockRecoveryMM locks to a known-symbol-rate signal
 """
 import os
 import sys
@@ -192,4 +194,4 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(fn):
             fn()
             print(f"PASS {name}")
-    print("All GNU Radio block tests passed.")
+    print("All DSP block tests passed.")

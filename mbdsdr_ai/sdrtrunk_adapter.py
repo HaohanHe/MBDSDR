@@ -1,14 +1,15 @@
+# SPDX-License-Identifier: MIT
 """
-sdrtrunk 多信道跟踪状态机移植（纯 Python，无 Java/GNURadio 依赖）
+sdrtrunk 风格多信道跟踪状态机（纯 Python，无 Java/GNURadio 依赖）
 =================================================================
-本模块把 DSheirer/sdrtrunk (repos/sdrtrunk) 里的多信道状态机、通话组管理、
-P25 控制信道消息处理思路翻译成 Python，所有状态/转换都在注释里标注
-「来源: sdrtrunk 源文件:行号」。
+本模块把 DSheirer/sdrtrunk  里的多信道状态机、通话组管理、
+P25 控制信道消息处理思路实现，所有状态/转换都在注释里标注
+「sdrtrunk 源文件:行号」。
 
-移植自：
-  * 信道状态枚举 + 合法转换         channel/state/State.java:29-161
-  * 状态机 (fade/end timeout)       channel/state/StateMachine.java:36-275
-  * 单/多信道活动状态集合             channel/state/State.java:165-166
+：
+  * 信道状态枚举 + 合法转换         channel/state/
+  * 状态机 (fade/end timeout)       channel/state/
+  * 单/多信道活动状态集合             channel/state/
   * 控制信道 -> 业务信道跟踪思路     controller/channel/Channel.java
 
 核心概念：
@@ -28,10 +29,10 @@ from typing import Dict, List, Optional, Tuple
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  信道状态枚举 —— 移植自 State.java:29-161
+#  信道状态枚举 —— 
 # ═══════════════════════════════════════════════════════════════════════
 class ChannelState(Enum):
-    """信道状态。来源 State.java:29-161。"""
+    """信道状态。。"""
     IDLE = "IDLE"           # 空闲，未解码任何消息
     ACTIVE = "ACTIVE"       # 活跃但非通话/数据（如 TDU 间隔）
     CALL = "CALL"           # 通话中（有音频）
@@ -43,7 +44,7 @@ class ChannelState(Enum):
     RESET = "RESET"         # 重置可复用
 
 
-#: 合法状态转换表。来源 State.java:36-161 每个枚举的 canChangeTo()。
+#: 合法状态转换表。 每个枚举的 canChangeTo()。
 _ALLOWED: Dict[ChannelState, frozenset] = {
     ChannelState.ACTIVE: frozenset({ChannelState.CALL, ChannelState.CONTROL,
                                     ChannelState.DATA, ChannelState.ENCRYPTED,
@@ -73,7 +74,7 @@ _ALLOWED: Dict[ChannelState, frozenset] = {
     ChannelState.TEARDOWN: frozenset({ChannelState.RESET}),
 }
 
-#: 单信道活动状态集。来源 State.java:165
+#: 单信道活动状态集。
 SINGLE_CHANNEL_ACTIVE = frozenset({ChannelState.ACTIVE, ChannelState.CALL,
                                    ChannelState.CONTROL, ChannelState.DATA,
                                    ChannelState.ENCRYPTED})
@@ -98,13 +99,13 @@ class Talkgroup:
 class TrunkedChannel:
     """单个信道（控制信道或业务信道）的状态机。
 
-    移植自 StateMachine.java:36-275：
+    ：
       * 进入活动状态时刷新 fade_timeout；
       * checkState() 超时则 FADE；FADE 再超时则 TEARDOWN；
       * 状态转换必须合法（State.canChangeTo）。
     """
 
-    #: 默认 fade 超时（ms）。来源 StateMachine.java 默认无显式值，取 5s 经验值。
+    #: 默认 fade 超时（ms）。StateMachine.java 默认无显式值，取 5s 经验值。
     DEFAULT_FAKE_TIMEOUT_MS = 5000
     #: 默认 end 超时（ms）。FADE 后再等 3s 拆线。
     DEFAULT_END_TIMEOUT_MS = 3000
@@ -129,7 +130,7 @@ class TrunkedChannel:
         return new in _ALLOWED[self.state]
 
     def set_state(self, new: ChannelState) -> bool:
-        """状态转换。成功返回 True，非法返回 False。来源 StateMachine.java:122-193。"""
+        """状态转换。成功返回 True，非法返回 False。。"""
         if new == self.state:
             if new in self.active_states:
                 self._refresh_fade()
@@ -148,7 +149,7 @@ class TrunkedChannel:
         self._fade_deadline = time.monotonic() + self.fade_timeout_ms / 1000.0
 
     def check_state(self) -> Optional[ChannelState]:
-        """超时检查。来源 StateMachine.java:99-109。"""
+        """超时检查。。"""
         now = time.monotonic()
         if self.state in self.active_states and now >= self._fade_deadline:
             self.set_state(ChannelState.FADE)
@@ -165,7 +166,7 @@ class TrunkedChannel:
 class TrunkingSystem:
     """一个集群系统：一个控制信道 + 多个业务信道 + 通话组表。
 
-    移植思路来自 sdrtrunk controller/channel/Channel.java + StateMachine.java。
+    实现思路来自 sdrtrunk controller/channel/Channel.java + StateMachine.java。
     """
 
     def __init__(self, name: str = "P25-System", control_frequency: int = 0):
@@ -181,7 +182,7 @@ class TrunkingSystem:
                          channel_id: int = 0) -> TrunkedChannel:
         """收到 TSBK "Channel Grant"：切到业务信道开始通话。
 
-        来源 sdrtrunk P25 TSBK 处理：grant 消息携带业务频率和 TG，
+        sdrtrunk P25 TSBK 处理：grant 消息携带业务频率和 TG，
         状态机从 CONTROL 旁的空闲业务信道转到 CALL。
         """
         ch = self.traffic_channels.get(channel_id)
@@ -269,7 +270,7 @@ def register_sdrtrunk_tools(registry) -> None:
             ch = _system.on_channel_grant(tg, src, freq, ch_id)
             out = {"ok": True, "channel": ch_id, "state": ch.state.value,
                    "tg": tg, "source": src, "freq": freq,
-                   "source_ref": "sdrtrunk State.java:54-67, StateMachine.java:122-193"}
+                   "source_ref": "sdrtrunk , "}
             return ToolResult(True, json.dumps(out, ensure_ascii=False), data=out)
         except Exception as e:
             return ToolResult(False, f"grant 处理失败: {e}")
@@ -291,7 +292,7 @@ def register_sdrtrunk_tools(registry) -> None:
         """返回当前系统状态快照。"""
         try:
             snap = _system.snapshot()
-            snap["source_ref"] = "sdrtrunk StateMachine.java:99-109, Channel.java"
+            snap["source_ref"] = "sdrtrunk-style-channel"
             return ToolResult(True, json.dumps(snap, ensure_ascii=False), data=snap)
         except Exception as e:
             return ToolResult(False, f"snapshot 失败: {e}")
@@ -305,7 +306,7 @@ def register_sdrtrunk_tools(registry) -> None:
             out = {"from": from_state.value, "to": to_state.value,
                    "legal": legal,
                    "allowed_targets": sorted(s.value for s in _ALLOWED[from_state]),
-                   "source_ref": "sdrtrunk State.java:36-161"}
+                   "source_ref": "sdrtrunk "}
             return ToolResult(True, json.dumps(out, ensure_ascii=False), data=out)
         except Exception as e:
             return ToolResult(False, f"状态转换检查失败: {e}")
@@ -314,7 +315,7 @@ def register_sdrtrunk_tools(registry) -> None:
         name="sdrtrunk_channel_grant",
         description=("sdrtrunk 风格 Channel Grant 事件：给定 TG/source/频率，"
                      "在业务信道上把状态机从 IDLE 切到 CALL。"
-                     "来源 sdrtrunk StateMachine.java:122-193。"),
+                     "sdrtrunk 。"),
         parameters={
             "type": "object",
             "properties": {
@@ -357,7 +358,7 @@ def register_sdrtrunk_tools(registry) -> None:
     registry.register(
         name="sdrtrunk_state_transition",
         description=("检查 sdrtrunk 状态机中 from->to 的转换是否合法"
-                     "（来源 State.java:36-161 canChangeTo）。"),
+                     "（ canChangeTo）。"),
         parameters={
             "type": "object",
             "properties": {

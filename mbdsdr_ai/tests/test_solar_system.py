@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 solar_system.py 测试
 ====================

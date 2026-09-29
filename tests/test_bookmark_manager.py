@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """书签管理器确定性测试。
 
 对照 mbdsdr_ai/bookmark_manager.py（上游 gqrx/qtgui/bookmarks.cpp）。

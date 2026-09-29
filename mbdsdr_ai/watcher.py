@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 信号活动值守 / 触发录制（signal watch / trigger record）
 =======================================================

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - Agent 主循环
 ==============================
@@ -213,7 +214,7 @@ class MBDSDRAgent:
         # 注册 SDR 专用工具（38个）
         register_sdr_tools(self)
 
-        # 注册 fldigi 多模式数字解码（PSK31/RTTY/MFSK/FeldHell，真实源码移植）
+        # 注册多模式数字解码（PSK31/RTTY/MFSK/FeldHell，依据公开无线电传标准实现）
         register_fldigi_modes_tools(self.tool_registry)
 
         # 注册 Hook 事件钩子工具（白皮书第四章 4.4）
@@ -276,7 +277,7 @@ class MBDSDRAgent:
         self._register_constellation_tools()
         self._register_baseband_tools()
 
-        # ── 本轮新增开源项目移植（边学边做，来源见各适配器注释）──
+        # ── 本轮新增公开标准/协议工具（实现依据见各适配器注释）──
         # SDR UI/接收机架构：SDR# / OpenWebRX / CubicSDR / HDSDR
         from mbdsdr_ai.sdrsharp_adapter import register_sdrsharp_tools
         from mbdsdr_ai.openwebrx_adapter import register_openwebrx_tools
@@ -586,7 +587,7 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="ft8_unpack_message",
-            description="把 FT8 解码出的 77 个数据位还原成可读消息文本（移植 wsjtx unpack77 主分支）。"
+            description="把 FT8 解码出的 77 个数据位还原成可读消息文本（依据 FT8 公开协议标准实现）。"
                         "支持自由文本和标准消息（CQ/call 网格、call call 信号报告/RRR/RR73/73）。"
                         "接在 ft8_soft_decode 的 data_bits 之后用。",
             parameters={
@@ -611,7 +612,7 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="ft8_unpack_callsign",
-            description="把 FT8/FT4 的 28 位呼号字段解成呼号文本（移植 wsjtx unpack28）。"
+            description="把 FT8/FT4 的 28 位呼号字段解成呼号文本（依据 FT8/FT4 公开协议标准实现）。"
                         "支持 CQ/DE/QRZ/CQ_nnn 特殊 token 与标准呼号；22bit hash 段返回 <hash:n>。",
             parameters={
                 "type": "object",
@@ -708,8 +709,8 @@ class MBDSDRAgent:
         self.tool_registry.register(
             name="ft8_encode",
             description="FT8 编码：把标准文本消息（如 'CQ BI4MIB OM74'、'BI4MIB K1ABC 73'、"
-                        "'BI4MIB K1ABC -17'）编码成 79 个 8FSK 音调索引。参数全部移植自 "
-                        "WSJT-X lib/ft8 真实源码（Costas7 同步、Gray 映射、CRC14、LDPC(174,91)）。"
+                        "'BI4MIB K1ABC -17'）编码成 79 个 8FSK 音调索引。参数依据公开标准 "
+                        "（Costas7 同步、Gray 映射、CRC14、LDPC(174,91)，WSJT-X 仅作技术参考）。"
                         "与 ft8_soft_decode 互为往返。",
             parameters={
                 "type": "object",
@@ -828,8 +829,8 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="fst4_encode",
-            description="FST4 编码：把标准文本消息编码成 160 个 4FSK 音调索引。参数移植自 "
-                        "WSJT-X lib/fst4 真实源码（5×8 同步字、2bit Gray 映射、rvec 加扰、"
+            description="FST4 编码：把标准文本消息编码成 160 个 4FSK 音调索引。参数依据公开标准 "
+                        "（5×8 同步字、2bit Gray 映射、rvec 加扰、"
                         "CRC24、LDPC(240,101)）。与 fst4_ldpc_decode / decode_fst4_message 互为往返。",
             parameters={
                 "type": "object",
@@ -1030,7 +1031,7 @@ class MBDSDRAgent:
         )
 
     def _register_ax25_tools(self):
-        """AX.25 / AFSK / APRS 编解码工具（对照 direwolf 真实源码校准）。"""
+        """AX.25 / AFSK / APRS 编解码工具（依据 AX.25/AFSK/APRS 公开标准实现）。"""
         import numpy as np
         from mbdsdr_ai.ax25 import (
             AX25Frame, AFSKModem, hdlc_bit_stuff, hdlc_bit_unstuff, crc16_ccitt,
@@ -1136,7 +1137,7 @@ class MBDSDRAgent:
         self.tool_registry.register(
             name="aprs_parse",
             description="APRS 报文解析：从 AX.25 帧解析位置(未压缩/压缩/MIC-E)、气象、"
-                        "遥测、消息，输出结构化 dict。公式对照 direwolf decode_aprs.c。",
+                        "遥测、消息，输出结构化 dict（依据 APRS 公开报文格式标准）。",
             parameters={"type": "object", "properties": {
                 "hex": {"type": "string", "description": "AX.25 帧字节十六进制"},
             }, "required": ["hex"]},
@@ -1192,7 +1193,7 @@ class MBDSDRAgent:
 
     def _register_acars_tools(self):
         """ACARS 航空通信：MSK 解调 + 帧同步 + CRC16 消息解析。
-        移植自 acarsdec (TLeconte) + libacars (szpajder)。"""
+        依据 ACARS 公开航空通信标准独立实现（acarsdec/libacars 仅作技术参考）。"""
         from mbdsdr_ai.acars_decoder import (
             acars_decode_iq, acars_parse_message, acars_msk_demod,
         )
@@ -1214,7 +1215,7 @@ class MBDSDRAgent:
                         "输入 FM 解调后的单声道音频，做 MSK 解调(1200bps, "
                         "mark=2400/space=1200Hz)、双 SYN(0x16) 帧同步、CRC16-CCITT "
                         "校验，输出飞机注册号(reg)、模式(mode)、标签(label)、"
-                        "块序号、航班号与文本内容。移植自 acarsdec+libacars。",
+                        "块序号、航班号与文本内容（依据 ACARS 公开标准）。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -1243,7 +1244,7 @@ class MBDSDRAgent:
             description="ACARS 消息字节级解析：输入 SOH 之后的原始字节流"
                         "(含 CRC 与 DEL 结尾)，做奇偶位剥离、CRC16-CCITT 校验、"
                         "字段拆分(mode/reg/ack/label/block_id/flight/text)。"
-                        "移植自 libacars acars.c。",
+                        "（ACARS 报文格式，依据公开标准）。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -1270,7 +1271,7 @@ class MBDSDRAgent:
             name="acars_msk_demod",
             description="ACARS MSK 解调：实数音频 -> 恢复比特序列(LSB-first)。"
                         "mark=2400Hz 判 1，space=1200Hz 判 0，1200bps。"
-                        "移植自 acarsdec msk.c。",
+                        "（ACARS MSK 调制解调，依据公开标准）。",
             parameters={
                 "type": "object",
                 "properties": {

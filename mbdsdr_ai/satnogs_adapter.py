@@ -1,26 +1,26 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI - satnogs 地面站自动化移植
+MBDSDR 卫星地面站自动化编排
 ======================================
 
-本模块把 satnogs-client + gr-satnogs (AGPLv3, satnogs.org) 的地面站自动化流程移植为
-纯 NumPy/Python。轨道传播/多普勒直接复用 mbdsdr_ai/gpredict_adapter.py。
+本模块把卫星地面站自动化的观测调度/多普勒跟踪流程编排为纯 Python。
+轨道传播与多普勒直接复用 mbdsdr_ai/gpredict_adapter.py（自有 SGP4 实现）。
 
-移植来源（file:line 标注）::
+说明（相关概念与公开接口，仅作技术参考，本仓未包含其源代码）::
 
-  - satnogs-client satnogsclient/observers/observer.py
-        观测流程状态机: REQUEST_NEXT -> WAIT -> START OBS -> DOPPLER ->
-                        RECORD -> DECODE -> UPLOAD -> STOP
-  - satnogs-client satnogsclient/network/tasks.py
-        向 satnogs-network 请求下一观测:
+  - 观测流程状态机: REQUEST_NEXT -> WAIT -> START OBS -> DOPPLER ->
+                    RECORD -> DECODE -> UPLOAD -> STOP
+  - 网络调度接口:
         GET /api/observations/next/?ground_station=<id>
         返回 JSON: {id, start, end, observation_frequency, transmitter_uuid,
                     mode_id, baud, ...}
-  - gr-satnogs/lib/doppler_correction/doppler_correction_impl.cc
-        多普勒校正: 每 dt 秒根据 TLE 计算视线速度 v_r，
+  - 多普勒校正: 每 dt 秒根据 TLE 计算视线速度 v_r，
         NCO 把中心频率移到 f_rx = f_tx*(1 - v_r/c)
-  - gr-satnogs/grc 解调模式枚举:
+  - 解调模式枚举:
         CW (Morse), AFSK (1200/2200), FSK (9600), GMSK (9600/4800),
         LRPT (NOAA 66.67kHz subcarrier), Apt
+
+satnogs-client / gr-satnogs (satnogs.org) 仅作技术参考与致谢。
 """
 from __future__ import annotations
 
@@ -37,12 +37,12 @@ from .gpredict_adapter import (
 
 
 # =====================================================================
-# 解调模式枚举 —— 来源: gr-satnogs/grc + satnogs-network mode 表
+# 解调模式枚举（典型地面站模式）
 # =====================================================================
 class DemodMode(str, Enum):
     """satnogs 支持的解调模式。
 
-    来源: satnogs-network db/satnogs/transmitters/mode 定义 + gr-satnogs flow graph
+    典型地面站解调模式
     """
     CW = "CW"                 # 莫尔斯电报，带宽 ~50-500 Hz
     AFSK = "AFSK"             # 1200/2200 Hz 移频 (AX.25)
@@ -53,7 +53,7 @@ class DemodMode(str, Enum):
 
     @property
     def default_bandwidth_hz(self) -> float:
-        """典型解调带宽。来源: gr-satnogs grc 流图默认参数。"""
+        """典型解调带宽。"""
         return {
             DemodMode.CW: 500.0,
             DemodMode.AFSK: 3000.0,
@@ -65,7 +65,7 @@ class DemodMode(str, Enum):
 
     @property
     def default_baud(self) -> float:
-        """典型波特率。来源: satnogs-network mode 表。"""
+        """典型波特率。"""
         return {
             DemodMode.CW: 20.0,
             DemodMode.AFSK: 1200.0,
@@ -77,24 +77,23 @@ class DemodMode(str, Enum):
 
 
 # =====================================================================
-# 多普勒校正 —— 来源: gr-satnogs doppler_correction_impl.cc
+# 多普勒校正
 # =====================================================================
 @dataclass
 class DopplerPoint:
     """多普勒校正曲线的一个采样点。"""
     time_unix_s: float
-    rx_freq_hz: float          # gr-satnogs NCO 应把中心频率移到这里
+    rx_freq_hz: float          # NCO 应把中心频率移到这里
     doppler_hz: float          # 相对标称频率的频偏
     range_rate_kms: float
 
 
 class DopplerCorrector:
-    """gr-satnogs 多普勒校正器。
+    """多普勒校正器。
 
-    来源: gr-satnogs/lib/doppler_correction/doppler_correction_impl.cc
-        start(): 用 TLE + 地面站位置算整个过境的多普勒曲线
-        work(): 每 dt 秒根据当前时刻插值出应调中心频率，驱动 NCO
-        gr-satnogs 内部用 gpredict 的视线速度 (range_rate) 算 f_rx = f_tx*(1-v_r/c)
+    用 TLE + 地面站位置算整个过境的多普勒曲线；
+    每 dt 秒根据当前时刻插值出应调中心频率，驱动 NCO。
+    多普勒由视线速度(range_rate)算 f_rx = f_tx*(1-v_r/c)。
     """
 
     def __init__(self, tle: TLEData, station: GeoStation, tx_freq_hz: float,
@@ -146,13 +145,13 @@ class DopplerCorrector:
 
 
 # =====================================================================
-# 网络调度协议 —— 来源: satnogs-client network/tasks.py
+# 网络调度接口
 # =====================================================================
 @dataclass
 class SatnogsObservation:
     """satnogs-network 下发的一次观测任务。
 
-    来源: GET /api/observations/next/?ground_station=<id> 返回 JSON 字段
+    对应 GET /api/observations/next/?ground_station=<id> 返回 JSON 字段
     """
     id: int
     start_unix_s: float
@@ -182,7 +181,7 @@ class SatnogsObservation:
 class SatnogsNetworkClient:
     """模拟 satnogs 网络调度客户端（离线版）。
 
-    真实协议（来源: satnogsclient/network/tasks.py）:
+    调度接口约定:
         GET  {base}/api/observations/next/?ground_station=<id>
         -> 200 JSON: {id, start, end, observation_frequency, transmitter_uuid,
                       mode_id, transmitter__description, ...}
@@ -225,13 +224,13 @@ class SatnogsNetworkClient:
 
 
 # =====================================================================
-# 观测流程状态机 —— 来源: satnogs-client observer.py
+# 观测流程状态机
 # =====================================================================
 class ObservationPipeline:
-    """satnogs-client 观测流程：doppler→录制→解码→上传。
+    """地面站观测流程：doppler→录制→解码→上传。
 
-    状态机（来源: satnogsclient/observers/observer.py）:
-        IDLE -> RECEIVING (gr-satnogs flow graph 启动) ->
+    状态机:
+        IDLE -> RECEIVING (解调流图启动) ->
         DOPPLER_CORRECTING (NCO 跟踪) -> RECORDING (iq_file_sink) ->
         DECODING (fsk_demod / morse_decoder) -> UPLOADING -> DONE
     """
@@ -260,7 +259,7 @@ class ObservationPipeline:
     def start(self) -> Dict[str, Any]:
         """启动观测：构建多普勒曲线，进入 RECEIVING。"""
         self.state = self.STATE_RECEIVING
-        self.log.append(f"[{self.obs.id}] gr-satnogs flow graph started")
+        self.log.append(f"[{self.obs.id}] demod flow graph started")
         self.corrector.build_curve(self.obs.start_unix_s, self.obs.end_unix_s)
         self.state = self.STATE_DOPPLER
         self.log.append(
@@ -291,7 +290,7 @@ class ObservationPipeline:
                 self.log.append(f"[{self.obs.id}] decoding "
                                 f"({self.obs.mode}, {self.obs.baud} baud)")
         elif self.state == self.STATE_DECODING:
-            self.decoded_packets += 1   # 占位：真实解码由 gr-satnogs 块完成
+            self.decoded_packets += 1   # 占位：真实解码由解码器完成
             self.state = self.STATE_UPLOADING
             self.log.append(f"[{self.obs.id}] uploading to satnogs-network")
         elif self.state == self.STATE_UPLOADING:
@@ -304,7 +303,7 @@ class ObservationPipeline:
 # 工具入口
 # =====================================================================
 def tool_satnogs_doppler_plan(args: Dict[str, Any]) -> Dict[str, Any]:
-    """给定 TLE+站+过境时刻，输出 gr-satnogs 多普勒校正曲线。"""
+    """给定 TLE+站+过境时刻，输出多普勒校正曲线。"""
     tle = TLEParser.parse(args["sat_name"], args["line1"], args["line2"])
     st = GeoStation(float(args["lat_deg"]), float(args["lon_deg"]),
                     float(args.get("alt_km", 0.0)))
@@ -324,7 +323,7 @@ def tool_satnogs_doppler_plan(args: Dict[str, Any]) -> Dict[str, Any]:
             for p in curve[:: max(1, len(curve) // 20)]
         ],
         "max_doppler_hz": round(corr.max_doppler_hz, 2),
-        "method": "gr-satnogs-doppler_correction_impl",
+        "method": "doppler-correction",
     }
 
 
@@ -337,7 +336,7 @@ def tool_satnogs_modes(args: Dict[str, Any]) -> Dict[str, Any]:
              "baud": m.default_baud}
             for m in DemodMode
         ],
-        "method": "gr-satnogs-grc + satnogs-network mode table",
+        "method": "groundstation-modes",
     }
 
 
@@ -348,7 +347,7 @@ def register_satnogs_tools(registry) -> None:
     """把 satnogs 地面站自动化能力注册到 ToolRegistry。
 
     提供两个工具：
-      - satnogs_doppler_plan : 生成 gr-satnogs 多普勒校正频率曲线
+      - satnogs_doppler_plan : 生成多普勒校正频率曲线
       - satnogs_list_modes   : 列出解调模式(CW/AFSK/FSK/GMSK/LRPT/APT)
     """
     from .tool_registry import ToolResult
@@ -372,7 +371,7 @@ def register_satnogs_tools(registry) -> None:
 
     registry.register(
         name="satnogs_doppler_plan",
-        description="gr-satnogs 多普勒校正：根据 TLE+观测站+过境时间，输出 NCO 应跟踪的接收频率曲线",
+        description="多普勒校正：根据 TLE+观测站+过境时间，输出 NCO 应跟踪的接收频率曲线",
         parameters={
             "type": "object",
             "properties": {
@@ -393,7 +392,7 @@ def register_satnogs_tools(registry) -> None:
     )
     registry.register(
         name="satnogs_list_modes",
-        description="列出 satnogs/gr-satnogs 解调模式(CW/AFSK/FSK/GMSK/LRPT/APT)及典型带宽/波特率",
+        description="列出地面站解调模式(CW/AFSK/FSK/GMSK/LRPT/APT)及典型带宽/波特率",
         parameters={"type": "object", "properties": {}, "required": []},
         handler=_modes,
         category="sat_groundstation",

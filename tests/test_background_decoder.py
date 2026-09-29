@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """确定性单测：后台解码 —— 注册、调度、结果持久化、异常检测。"""
 import json
 import os

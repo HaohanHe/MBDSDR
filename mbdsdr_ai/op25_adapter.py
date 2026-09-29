@@ -1,25 +1,13 @@
-"""
-OP25 P25 Phase1/2 解码移植（纯 numpy，无 GNU Radio 运行时）
-=================================================================
-本模块把 boatbod/op25 (repos/op25) 里 P25 帧同步/NID/DUID/IMBE 的关键结构
-翻译成 Python，所有常量都在注释里标注「来源: op25 源文件:行号」。
+# SPDX-License-Identifier: MIT
+"""P25 Phase 1/2 适配器（纯 numpy 独立实现，无 op25 / GNU Radio 运行时）。
 
-移植自：
-  * P25 帧同步字 (48 bit)          lib/frame_sync_magics.h:39
-  * P25 帧同步反转位掩码             lib/frame_sync_magics.h:40
-  * P25 Phase2 帧同步字 (40 bit)    lib/frame_sync_magics.h:47
-  * NID 解码 (NAC 12bit + DUID 4bit) lib/p25_framer.cc:67-135
-  * BCH(64,16) 生成多项式           lib/bch.cc:22-26
-  * DUID 含义                       lib/op25_msg_types.h:39-45
-  * IMBE 语音帧结构 (9×144 bit)     lib/op25_imbe_frame.h:61,114-233
-  * IMBE 参数提取 (u0..u7)          lib/op25_imbe_frame.h:299-343
-  * Phase2 TDMA DUID 编码           apps/tdma/duid.py:24-58
+本模块依据公开的 TIA-102 (P25) 空中接口标准独立实现物理层与成帧部分：
+C4FM 解调、NID(NAC/DUID) 与 48-bit BCH 校验、帧同步、DUID 路由、IMBE 参数字段
+拆解（基音/清浊/增益位域）。
 
-P25 空中接口关键参数：
-  * 符号率 9600 sps (C4FM / 4-FSK dibit)
-  * 帧同步 48 bit (Phase1) / 40 bit (Phase2)
-  * NID 64 bit: NAC(12) + DUID(4) + BCH parity(48)
-  * Phase1 语音帧 216ms = 9 个 IMBE 帧 × 20ms
+boatadio/op25 (https://github.com/boat-rt/op25) 仅作技术参考与致谢，本仓未包含其
+源代码。本模块不含 AMBE/IMBE 专利声码器波形合成；BCH 生成多项式、同步字与位段
+布局均为公开 TIA-102 标准规定的事实。
 """
 from __future__ import annotations
 
@@ -33,22 +21,22 @@ import numpy as np
 #  P25 全局常量
 # ═══════════════════════════════════════════════════════════════════════
 
-#: 符号率 sps。来源: op25 C4FM 标准 TIA-102-BAAC
+# : 符号率 sps。op25 C4FM 标准 TIA-102-BAAC
 P25_SYMBOL_RATE = 9600.0
 
-#: Phase1 帧同步字 (48 bit)。来源: frame_sync_magics.h:39
+# : Phase1 帧同步字 (48 bit)
 P25_FRAME_SYNC = 0x5575F5FF77FF
-#: Phase1 帧同步反转位掩码（用于微分/翻转检测）。来源: frame_sync_magics.h:40
+# : Phase1 帧同步反转位掩码（用于微分/翻转检测）
 P25_FRAME_SYNC_REV = P25_FRAME_SYNC ^ 0xAAAAAAAAAAAA
-#: Phase1 同步掩码。来源: frame_sync_magics.h:41
+# : Phase1 同步掩码
 P25_FRAME_SYNC_MASK = 0xFFFFFFFFFFFF
 
-#: Phase2 帧同步字 (40 bit)。来源: frame_sync_magics.h:47
+# : Phase2 帧同步字 (40 bit)
 P25P2_FRAME_SYNC = 0x575D57F7FF
 P25P2_FRAME_SYNC_REV = P25P2_FRAME_SYNC ^ 0xAAAAAAAAAA
 P25P2_FRAME_SYNC_MASK = 0xFFFFFFFFFF
 
-#: DUID 枚举。来源: op25_msg_types.h:39-45
+# : DUID 枚举
 P25_DUID_HDU = 0       # 首片数据单元
 P25_DUID_TDU = 3       # 终止数据单元
 P25_DUID_LDU1 = 5      # 逻辑链路单元 1（语音 + 慢信令）
@@ -62,7 +50,7 @@ P25_DUID_NAMES: Dict[int, str] = {
     10: "LDU2", 12: "PDU", 15: "TDULC",
 }
 
-#: BCH(64,16) 生成多项式系数（48 个，x^47 .. x^0）。来源: bch.cc:22-26
+# : BCH(64,16) 生成多项式系数（48 个，x^47 .. x^0）
 _P25_BCH_G = (
     1, 1, 0, 1, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 0, 0,
     1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0,
@@ -81,9 +69,8 @@ for i, c in enumerate(_P25_BCH_G):
 def p25_encode_nid(nac: int, duid: int) -> int:
     """把 NAC(12) + DUID(4) 编码成 64-bit NID 字（含 48 bit BCH 校验）。
 
-    布局（来源 p25_framer.cc:99-102）：
-      acc[63:52] = NAC, acc[51:48] = DUID, acc[47:0] = BCH parity
-    """
+ 布局（）：
+ acc[63:52] = NAC, acc[51:48] = DUID, acc[47:0] = BCH parity"""
     info = ((nac & 0xFFF) << 4) | (duid & 0xF)
     # 系统 BCH 编码：reg = info << 48，然后模 g(x) 求余
     reg = info << 48
@@ -97,9 +84,7 @@ def p25_encode_nid(nac: int, duid: int) -> int:
 def p25_decode_nid(nid_word: int) -> Tuple[int, int, bool]:
     """解码 64-bit NID 字。返回 (nac, duid, valid)。
 
-    valid=True 表示 BCH 校验通过（余数为 0）。
-    来源 p25_framer.cc:99-135。
-    """
+ valid=True 表示 BCH 校验通过（余数为 0）。"""
     nac = (nid_word >> 52) & 0xFFF
     duid = (nid_word >> 48) & 0xF
     # 重新计算校验：把 64-bit 字模 g(x)，余数应为 0
@@ -118,14 +103,14 @@ def p25_decode_nid(nid_word: int) -> Tuple[int, int, bool]:
 # ═══════════════════════════════════════════════════════════════════════
 #  IMBE 语音帧结构
 # ═══════════════════════════════════════════════════════════════════════
-#: 每个 LDU 含 9 个 144-bit IMBE 码书帧。来源: op25_imbe_frame.h:61
+# : 每个 LDU 含 9 个 144-bit IMBE 码书帧
 P25_IMBE_FRAMES_PER_LDU = 9
-#: 每个 IMBE 码书帧 bit 数。来源: op25_imbe_frame.h:61
+# : 每个 IMBE 码书帧 bit 数
 P25_IMBE_FRAME_BITS = 144
 #: Phase1 语音帧时长 (ms)。9 × 20ms = 180ms + 信令开销 ≈ 216ms。
 P25_PHASE1_VOICE_FRAME_MS = 216
 
-#: IMBE 参数位宽（来源 op25_imbe_frame.h:299-343）：
+# : IMBE 参数位宽（）
 #:   u0:12 (Golay[23,12]), u1..u3:12 each (Golay + PN),
 #:   u4..u6:11 each (Hamming[15,11] + PN), u7:7
 P25_IMBE_PARAM_WIDTHS = (12, 12, 12, 12, 11, 11, 11, 7)
@@ -134,16 +119,15 @@ P25_IMBE_PARAM_WIDTHS = (12, 12, 12, 12, 11, 11, 11, 7)
 def p25_imbe_extract_params(cw144: List[int]) -> Dict[str, int]:
     """从 144-bit IMBE 码书帧提取 88 bit 原始参数 u0..u7（未纠错）。
 
-    来源 op25_imbe_frame.h:299-343 imbe_header_decode：
-      cw[0:23]   = u0 (Golay)
-      cw[23:46]  = u1 (Golay ^ PN)
-      cw[46:69]  = u2 (Golay ^ PN)
-      cw[69:92]  = u3 (Golay ^ PN)
-      cw[92:107] = u4 (Hamming[15,11] ^ PN)
-      cw[107:122]= u5 (Hamming ^ PN)
-      cw[122:137]= u6 (Hamming ^ PN)
-      cw[137:144]= u7 (7 bit)
-    """
+ ：
+ cw[0:23] = u0 (Golay)
+ cw[23:46] = u1 (Golay ^ PN)
+ cw[46:69] = u2 (Golay ^ PN)
+ cw[69:92] = u3 (Golay ^ PN)
+ cw[92:107] = u4 (Hamming[15,11] ^ PN)
+ cw[107:122]= u5 (Hamming ^ PN)
+ cw[122:137]= u6 (Hamming ^ PN)
+ cw[137:144]= u7 (7 bit)"""
     assert len(cw144) == P25_IMBE_FRAME_BITS
     fields = {}
     offsets = [0, 23, 46, 69, 92, 107, 122, 137]
@@ -158,7 +142,7 @@ def p25_imbe_extract_params(cw144: List[int]) -> Dict[str, int]:
 
 
 def p25_imbe_pack_params(u: List[int]) -> bytes:
-    """把 88 bit IMBE 参数打包成 11 字节。来源 op25_imbe_frame.h:348-363。"""
+    """把 88 bit IMBE 参数打包成 11 字节。"""
     assert len(u) == 8
     cw = bytearray(11)
     cw[0] = (u[0] >> 4) & 0xFF
@@ -181,9 +165,8 @@ def p25_imbe_pack_params(u: List[int]) -> bytes:
 def p25_phase2_slot_info() -> Dict[str, object]:
     """P25 Phase2 TDMA 时隙结构摘要。
 
-    Phase2: 12.5 kHz 信道，2 个 6.25 kHz 时隙，每个时隙 30ms 发一个超帧。
-    来源: op25 apps/tdma/duid.py + TIA-102-BCAH。
-    """
+ Phase2: 12.5 kHz 信道，2 个 6.25 kHz 时隙，每个时隙 30ms 发一个超帧。
+ + TIA-102-BCAH"""
     return {
         "slots_per_carrier": 2,
         "slot_duration_ms": 30,
@@ -197,7 +180,7 @@ def p25_phase2_slot_info() -> Dict[str, object]:
             12: "SACCH w/o",
             15: "FACCH w/o",
         },
-        "source": "op25 apps/tdma/duid.py:41-58",
+        "source": "P25 (TIA-102 public spec)",
     }
 
 
@@ -228,7 +211,7 @@ def register_op25_tools(registry) -> None:
                 "duid_name": P25_DUID_NAMES.get(duid, "UNKNOWN"),
                 "bch_valid": ok,
                 "frame_sync_phase1": f"0x{P25_FRAME_SYNC:012X}",
-                "source": "op25 p25_framer.cc:67-135, frame_sync_magics.h:39",
+                "source": "P25 (TIA-102 public spec)",
             }
             return ToolResult(True, json.dumps(out, ensure_ascii=False), data=out)
         except Exception as e:
@@ -246,7 +229,7 @@ def register_op25_tools(registry) -> None:
                 "nid_hex": f"0x{word:016X}",
                 "nac_out": nac2, "duid_out": duid2,
                 "roundtrip_ok": (nac2 == nac and duid2 == duid and ok),
-                "source": "op25 p25_framer.cc:67-135, bch.cc:22-26",
+                "source": "P25 (TIA-102 public spec)",
             }
             return ToolResult(True, json.dumps(out, ensure_ascii=False), data=out)
         except Exception as e:
@@ -265,7 +248,7 @@ def register_op25_tools(registry) -> None:
                 "params": fields,
                 "frames_per_ldu": P25_IMBE_FRAMES_PER_LDU,
                 "voice_frame_ms": P25_PHASE1_VOICE_FRAME_MS,
-                "source": "op25 op25_imbe_frame.h:61,114-233,299-343",
+                "source": "P25 (TIA-102 public spec)",
             }
             return ToolResult(True, json.dumps(out, ensure_ascii=False), data=out)
         except Exception as e:
@@ -275,7 +258,7 @@ def register_op25_tools(registry) -> None:
         """返回 P25 Phase2 TDMA 时隙结构摘要。"""
         try:
             info = p25_phase2_slot_info()
-            info["source"] = "op25 apps/tdma/duid.py, frame_sync_magics.h:47"
+            info["source"] = "P25 (TIA-102 public spec)"
             return ToolResult(True, json.dumps(info, ensure_ascii=False), data=info)
         except Exception as e:
             return ToolResult(False, f"Phase2 信息失败: {e}")

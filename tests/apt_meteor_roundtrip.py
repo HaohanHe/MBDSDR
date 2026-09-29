@@ -1,6 +1,7 @@
-"""APT / METEOR-LRPT 真实源码移植往返验证。
+# SPDX-License-Identifier: MIT
+"""APT / METEOR-LRPT 编解码往返验证（合成向量，非硬件 / NOT HARDWARE）。
 
-对照 noaa-apt（Rust）与 meteor_demod（C）源码移植后的自检：
+依据 NOAA APT 与 METEOR LRPT 公开格式的自检测试：
   1. APT 合成音频（同步序列 + 图像行）→ 解调 → 图像重建，验证行同步检测；
   2. APT 用真实录制 syn_robot36.wav 跑解码流程不崩溃（SSTV 文件应优雅返回 no_sync）；
   3. METEOR QPSK 调制 → 加噪 → Viterbi 解码 → 误码率（低噪应≈0）；

@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/astronomy/dso.py — 深空天体 (DSO) 目录
 ==================================================
 
-对照 Stellarium NGC/IC 目录（``nebulae/default/catalog.dat``）。
+依据公开 Messier/NGC 星表数据。
 内置真实数据精简子集：Messier 110 + 著名 NGC，J2000 坐标（RA 小时、Dec 度），
 V 星等，角大小角分。数据来源：Messier Catalog / NGC 公开星表值。
 

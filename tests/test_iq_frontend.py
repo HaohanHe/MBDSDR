@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
-IQ 前端校正链测试
-=================
+IQ front-end correction chain tests.
+非硬件 / NOT HARDWARE: synthetic signals.
 
-验证 mbdsdr_ai.iq_frontend 的三类校正真生效（数值降多少 dB）：
-  T1  DC 偏移去除：带 DC 的复数信号 → 中心 DC 分量显著下降
-  T2  I/Q 不平衡校正：IQ 不平衡信号 → 镜像功率下降（IRR 改善）
-  T3  抗混叠抽取：含超 Nyquist 高频信号 → 抽取后折叠分量被压制
-  T4  IQFrontend 链：三环节串联 + 开关切换
-  T5  流式多块：跨块状态连续，不出现瞬态断档
-  T6  边界：空输入 / factor=1 / 实数输入 / 重置
+Verifies that the three corrections in mbdsdr_ai.iq_frontend actually work
+(measured in dB):
+  T1  DC removal: DC-laden complex signal -> centre DC component drops
+  T2  I/Q imbalance correction: imbalanced IQ -> image power drops (IRR improves)
+  T3  Anti-alias decimation: > Nyquist content -> folded component suppressed
+  T4  IQFrontend chain: three stages in series + on/off switching
+  T5  Streaming across blocks: state is continuous, no transient gaps
+  T6  Edge cases: empty input / factor=1 / real input / reset
 
-所有断言用具体 dB 数说话，不接受"看起来差不多"。
+Every assertion uses concrete dB numbers.
 """
 
 import os

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 SigMF（Signal Metadata Format）元数据读写扩展
 =============================================

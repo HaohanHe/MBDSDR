@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR ANR / 自动降噪面板（desktop/anr_panel.py）
 ==================================================

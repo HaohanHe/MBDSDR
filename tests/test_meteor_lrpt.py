@@ -1,6 +1,7 @@
-"""METEOR LRPT 链单测（移植自 SatDump meteor_support）。
+# SPDX-License-Identifier: MIT
+"""METEOR LRPT 链单测（合成向量，非硬件 / NOT HARDWARE）。
 
-上游对照：docs/learn/porting_2026_09_27.md §4.4
+依据 METEOR LRPT 公开格式与 CCSDS 标准。
 """
 import numpy as np
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 深空追迹多普勒定轨系统
 ==========================================
@@ -24,8 +25,6 @@ MBDSDR AI 内核 - 深空追迹多普勒定轨系统
   f0 (LRO S 波段下行) = 2271e6 Hz
   GM_EARTH     = 398600.4418 km^3/s^2
   omega_earth  = 7.292115e-5 rad/s
-
-License: GPL-3.0
 """
 from __future__ import annotations
 

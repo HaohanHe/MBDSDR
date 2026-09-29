@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 全面端到端集成测试（v2）
 ============================================

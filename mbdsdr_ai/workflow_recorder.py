@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 工作流录制与复用（Record & Replay）
 =====================================================

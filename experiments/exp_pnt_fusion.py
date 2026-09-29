@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 实验1：泛在 PNT 多源融合精度蒙特卡洛（论文数据）。

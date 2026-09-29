@@ -1,13 +1,10 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI 内核 - 书签管理器（移植 GQRX bookmarks）
-====================================================
+MBDSDR AI 内核 - 书签管理器
+============================
 
-对照上游（见 docs/learn/gnuradio_gqrx.md）：
-
-  - 书签模型/分组/标签  <-> repos/gqrx/src/qtgui/bookmarks.cpp:37-64
-  - 频率区间二分查询     <-> bookmarks.cpp:210-232 getBookmarksInRange
-  - CSV 导入/导出       <-> bookmarks.cpp:72-208 load/save
-  - findOrAddTag        <-> bookmarks.cpp:234-250
+设计要点（书签模型/分组/标签、频率区间二分查询、CSV 导入导出、标签去重；
+GQRX 仅作技术参考，本仓未包含其源代码）：
 
 持久化到 ``~/.mbdsdr/bookmarks.json``。兼容导入 GQRX CSV：
 ``Frequency,Name,Modulation,Bandwidth,Color``（逗号分隔，5 列），
@@ -38,7 +35,7 @@ UNTAGGED = "Untagged"
 
 @dataclass(order=False)
 class Bookmark:
-    """一条书签（对照 GQRX BookmarkInfo）。
+    """一条书签记录。
 
     Attributes:
         frequency_hz: 中心频率（Hz，int）。
@@ -58,7 +55,7 @@ class Bookmark:
     tags: List[str] = field(default_factory=list)
     group: str = ""
 
-    def __lt__(self, other: "Bookmark") -> bool:  # bookmarks.cpp:62 stable_sort
+    def __lt__(self, other: "Bookmark") -> bool:  # 按频率排序
         return self.frequency_hz < other.frequency_hz
 
 
@@ -77,7 +74,7 @@ class BookmarkManager:
 
     # ------------------------------------------------------------------ CRUD
     def add(self, bm: Bookmark) -> None:
-        """追加书签并按频率有序插入（对照 bookmarks.cpp:59-64）。"""
+        """追加书签并按频率有序插入。"""
         bisect.insort(self._bookmarks, bm)
         for t in bm.tags:
             self.find_or_add_tag(t)
@@ -112,7 +109,7 @@ class BookmarkManager:
 
     # ------------------------------------------------------------ range/search
     def in_range(self, low_hz: int, high_hz: int) -> List[Bookmark]:
-        """返回 [low, high] 内的书签（二分，对照 bookmarks.cpp:210-232）。"""
+        """返回 [low, high] 内的书签（二分查找）。"""
         lo = bisect.bisect_left(self._bookmarks, Bookmark(frequency_hz=low_hz))
         hi = bisect.bisect_right(self._bookmarks, Bookmark(frequency_hz=high_hz))
         return list(self._bookmarks[lo:hi])
@@ -133,7 +130,7 @@ class BookmarkManager:
 
     # ------------------------------------------------------------------ tags
     def find_or_add_tag(self, tag: str) -> str:
-        """返回 tag 名（不存在则新建，对照 bookmarks.cpp:234-250）。"""
+        """返回 tag 名（不存在则新建）。"""
         tag = (tag or "").strip() or UNTAGGED
         if tag not in self._tag_colors:
             self._tag_colors[tag] = DEFAULT_COLOR
@@ -180,7 +177,7 @@ class BookmarkManager:
         支持两种列分隔：
           * 逗号（任务指定格式）：``Frequency,Name,Modulation,Bandwidth,Color``
           * 分号（GQRX 原生）：``Frequency;Name;Modulation;Bandwidth;Tags``
-        跳过 ``#`` 注释行与空行；列数不对的行忽略（对照 bookmarks.cpp:100-104）。
+        跳过 ``#`` 注释行与空行；列数不对的行忽略。
         """
         imported = 0
         for raw in text.splitlines():

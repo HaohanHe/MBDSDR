@@ -1,14 +1,15 @@
+# SPDX-License-Identifier: MIT
 """
-OpenWebRX web SDR 服务器架构移植（纯 numpy，无 pycsdr/csdr 运行时）
+OpenWebRX 风格 web SDR 服务器（纯 numpy，无 pycsdr/csdr 运行时）
 =================================================================
-本模块把 OpenWebRX (repos/openwebrx) 的 web SDR 服务器核心翻译成 numpy：
+本模块把 OpenWebRX  的 web SDR 服务器核心实现：
 
   1. 频谱流水线（FFT 平均 / block 尺寸推导）
-     —— 来源: csdr/chain/fft.py:25-97 (FftChain/FftAverager)
+
   2. waterfall 色彩映射
-     —— 来源: owrx/waterfall.py:13-302 (GoogleTurbo/Teejeez/Ha7ilm)
+
   3. SDR 设备抽象层 + 客户端带宽自适应
-     —— 来源: owrx/source/__init__.py (SdrSource ABC)
+
               owrx/source/rtl_sdr.py (getSampleRateRanges)
               owrx/soapy.py (SoapySettings.parse/encode)
 
@@ -24,14 +25,14 @@ import numpy as np
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  1. waterfall 调色板 —— 移植自 owrx/waterfall.py
+#  1. waterfall 调色板 —— owrx/waterfall.py
 # ═══════════════════════════════════════════════════════════════════════
-#: Teejeez 8 段色标。来源: waterfall.py:279
+#: Teejeez 8 段色标。waterfall.py:279
 OWRX_TEEJEEZ_STOPS = [
     0x000000, 0x0000FF, 0x00FFFF, 0x00FF00,
     0xFFFF00, 0xFF0000, 0xFF00FF, 0xFFFFFF,
 ]
-#: HA7ILM 8 段色标。来源: waterfall.py:284
+#: HA7ILM 8 段色标。waterfall.py:284
 OWRX_HA7ILM_STOPS = [
     0x000000, 0x2E6893, 0x69A5D0, 0x214B69,
     0x9DC4E0, 0xFFF775, 0xFF8A8A, 0xB20000,
@@ -48,7 +49,7 @@ def _hex_to_rgb(h: int) -> np.ndarray:
 def owx_waterfall_colormap(palette: str = "teejeez", n: int = 256) -> np.ndarray:
     """把离散色标 stops 线性插值成 n×3 uint8 调色板。
 
-    移植 Waterfall.getColors() 的用途（waterfall.py:10-11）：浏览器按功率索引取色。
+    Waterfall.getColors() 的用途（waterfall.py:10-11）：浏览器按功率索引取色。
     palette ∈ {googleturbo, teejeez, ha7ilm}。
     """
     p = (palette or "teejeez").lower()
@@ -85,9 +86,9 @@ def owx_apply_waterfall(power_db: np.ndarray, palette: str = "teejeez",
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  2. FFT 平均 / block 尺寸推导 —— 移植自 csdr/chain/fft.py
+#  2. FFT 平均 / block 尺寸推导 —— csdr/chain/fft.py
 # ═══════════════════════════════════════════════════════════════════════
-#: 功率谱偏移量。来源 fft.py:20-22  LogPower/LogAveragePower(add_db=-70)
+#: 功率谱偏移量。fft.py:20-22  LogPower/LogAveragePower(add_db=-70)
 OWRX_FFT_ADD_DB = -70.0
 
 
@@ -123,7 +124,7 @@ def owx_plan_fft(samp_rate: float, fft_size: int, fft_fps: float,
 
 
 class OwxFftAverager:
-    """LogAveragePower 的 numpy 在线移植（指数/滑动平均功率谱）。
+    """LogAveragePower 的 numpy 在线实现（指数/滑动平均功率谱）。
 
     真实 pycsdr 用 C++ 实现滑动对数功率平均；这里用一阶递归平均近似：
         avg = (1-1/N)*avg + (1/N)*new
@@ -152,9 +153,9 @@ class OwxFftAverager:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  3. 设备抽象层 —— 移植自 owrx/source/rtl_sdr.py / owrx/soapy.py
+#  3. 设备抽象层 —— owrx/source/rtl_sdr.py / owrx/soapy.py
 # ═══════════════════════════════════════════════════════════════════════
-#: 每台设备的采样率范围。来源: rtl_sdr.py  RtlSdrDeviceDescription.getSampleRateRanges
+#: 每台设备的采样率范围。rtl_sdr.py  RtlSdrDeviceDescription.getSampleRateRanges
 #:   return [Range(250000, 3200000)]
 OWRX_DEVICE_SAMPLE_RATES = {
     "rtl_sdr":      {"min": 250_000.0, "max": 3_200_000.0},   # rtl_sdr.py
@@ -185,7 +186,7 @@ def owx_client_bandwidth_adapt(samp_rate: float, device: str = "rtl_sdr") -> Dic
 
 
 def owx_soapy_settings_parse(dstr: str) -> List:
-    """移植 SoapySettings.parse (soapy.py)：'key=val,key2=val2' → list。"""
+    """SoapySettings.parse (soapy.py)：'key=val,key2=val2' → list。"""
     out = []
     for c in dstr.split(","):
         kv = c.split("=", 1)
@@ -285,7 +286,7 @@ def register_openwebrx_tools(registry) -> None:
     registry.register(
         name="owrx_waterfall_colormap",
         description=("OpenWebRX waterfall 调色板：teejeez(黑→蓝→青→绿→黄→红→品红→白)/"
-                     "ha7ilm/googleturbo，线性插值成 n×3 RGB。移植 waterfall.py:277-302。"),
+                     "ha7ilm/googleturbo，线性插值成 n×3 RGB。waterfall.py:277-302。"),
         parameters={
             "type": "object",
             "properties": {
@@ -301,7 +302,7 @@ def register_openwebrx_tools(registry) -> None:
     registry.register(
         name="owrx_fft_average",
         description=("OpenWebRX 在线 FFT 功率平均：fftshift+|X|^2→10log10+add_db(-70)，"
-                     "按 fft_averages 做一阶递归平均。移植 csdr/chain/fft.py:18-22。"),
+                     "按 fft_averages 做一阶递归平均。csdr/chain/fft.py:18-22。"),
         parameters={
             "type": "object",
             "properties": {

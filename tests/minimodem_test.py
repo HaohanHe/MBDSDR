@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 tests/minimodem_test.py
 =======================
-minimodem 真实移植 (mbdsdr_ai/minimodem_adapter.py) 的验证测试。
+minimodem 适配器 (mbdsdr_ai/minimodem_adapter.py) 的验证测试。
 
 覆盖：
   1. FSK 调制→加噪(10dB)→解调 往返，比特正确率 >95%
@@ -45,16 +46,16 @@ def add_noise(signal: np.ndarray, snr_db: float, rng: np.random.Generator) -> np
 
 
 # ---------------------------------------------------------------------
-# 6. 常量与源码一致（来源: minimodem/src/minimodem.c:900-921）
+# 6. 常量校验
 # ---------------------------------------------------------------------
 def test_constants_bell103_bell202():
     m103 = FSKModem(baud=300)
-    # Bell 103: mark=1270, space=1070  (minimodem.c:913,917,919)
+    # Bell 103: mark=1270, space=1070  (
     assert m103.f_mark == pytest.approx(1270.0)
     assert m103.f_space == pytest.approx(1070.0)
 
     m202 = FSKModem(baud=1200)
-    # Bell 202: mark=1200, space=2200 (minimodem.c:902,906,908)
+    # Bell 202: mark=1200, space=2200 (
     assert m202.f_mark == pytest.approx(1200.0)
     assert m202.f_space == pytest.approx(2200.0)
 
@@ -66,7 +67,7 @@ def test_ascii_frame_encode_decode():
     fr = ASCIIFrame()
     # 'A' = 0x41 → LSB first bits: 1,0,0,0,0,0,1,0
     frame = fr.encode_byte(0x41)
-    # start=0, b0..b7, stop=1  (minimodem.c:96,103,110)
+    # start=0, b0..b7, stop=1  (
     assert frame[0] == 0            # start bit = space
     assert frame[-1] == 1           # stop bit = mark
     assert frame[1:9] == [1, 0, 0, 0, 0, 0, 1, 0]

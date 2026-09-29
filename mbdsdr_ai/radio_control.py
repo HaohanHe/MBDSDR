@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI - Morse 编解码与 CW 生成 + 电台 CAT 控制
 ====================================================

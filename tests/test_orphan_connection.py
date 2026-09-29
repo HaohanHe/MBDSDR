@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 孤儿面板数据链路冒烟测试 (tests/test_orphan_connection.py)
 =========================================================

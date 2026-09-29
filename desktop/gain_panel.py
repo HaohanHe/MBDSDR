@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 分段增益面板（desktop/gain_panel.py）
 ==============================================

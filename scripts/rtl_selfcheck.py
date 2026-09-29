@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 RTL-SDR 一键硬件自检（MBDSDR）
 ================================

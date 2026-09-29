@@ -1,20 +1,19 @@
-"""
-ACARS 协议合成往返测试
+# SPDX-License-Identifier: MIT
+"""ACARS 协议合成往返测试
 ======================
 
 本测试不接收任何真实空中信号，仅在 tests/ 目录内合成 MSK 音频、
-加高斯噪声、再解码，验证 acars_protocol.py 的编解码自洽性。
+加高斯噪声、再解码，验证 的编解码自洽性。
 
 测试用注册号 BA1234、标签 H1 等均为虚构值，不对应任何真实航空器。
 
 参考：
-  - repos/acarsdec/acars.c:22-27      控制字符
-  - repos/acarsdec/acars.c:246-375    帧同步状态机
-  - repos/acarsdec/msk.c:53-63         LSB 先发
-  - repos/acarsdec/msk.c:81            中心 1800 Hz
-  - repos/libacars/libacars/acars.c:272-385  字段解析
-  - repos/libacars/libacars/crc.c:73-115      CRC-16-CCITT
-"""
+ - 控制字符
+ - 帧同步状态机
+ - 先发
+ - 中心 1800 Hz
+ - 字段解析
+ -"""
 
 from __future__ import annotations
 
@@ -136,9 +135,8 @@ def test_roundtrip_1200bps():
 def test_crc_self_consistency():
     """build_frame_bytes 产出的帧，对 [SOH后..ETX]+crc 求余数应为 0。
 
-    参考 libacars/acars.c:296-299：crc = la_crc16_ccitt(buf, len, 0);
-    crc_ok = (crc == 0)。
-    """
+ ：crc = la_crc16_ccitt(buf, len, 0);
+ crc_ok = (crc == 0)"""
     frame = build_frame_bytes(mode='2', reg='BA1234', label='H1',
                              text='CRC CHECK')
     # frame = SYN SYN SOH body
@@ -156,8 +154,7 @@ def test_crc_self_consistency():
 def test_frame_preamble_present():
     """编码产出的帧字节流应以 SYN SYN SOH 开头。
 
-    参考 repos/acarsdec/acars.c:22-24, 246-301 状态机。
-    """
+ 参考 状态机"""
     frame = build_frame_bytes(mode='2', reg='BA1234', label='H1', text='X')
     assert frame[0] == SYN
     assert frame[1] == SYN

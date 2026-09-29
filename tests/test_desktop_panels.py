@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 桌面端新面板冒烟测试
 ====================

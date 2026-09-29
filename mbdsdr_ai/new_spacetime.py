@@ -1,17 +1,9 @@
-"""
-MBDSDR 新时空模块
-==================
-AI + 无线电 + SDR + GNSS 新时空融合
+# SPDX-License-Identifier: MIT
+"""新时空融合层（NTP/GIS 投影/PNT 状态/卫星 pass 预测，纯 Python 独立实现）。
 
-功能：
-- 授时：NTP 客户端、GNSS 授时解析、时钟偏差计算、多系统时间比对
-- GIS：经纬度计算、距离/方位、墨卡托投影、APRS位置标记
-- PNT：泛在定位状态（GNSS/LEO/IMU/WiFi）、多源融合、PPP-RTK接口
-- 卫星Pass预测：升起/中天/落下时间、轨迹计算、可见性时间线
-- 可插拔数据源接口
-
-作者：MBDSDR Team (BI4MIB)
-许可证：GPL-3.0
+本模块整合：NTP 时间同步、WGS-84 地理投影、PNT 状态估计与卫星过境 (pass)
+几何预测。除标准天文/导航公式外，投影与状态机为通用实现，依据公开的 WGS-84
+与轨道几何模型。
 """
 
 import math
@@ -54,21 +46,21 @@ GNSS_SYSTEMS = {
 # ============================================================
 #
 # Stellarium 时间模型参考（C++ 源码）：
-#   - src/core/StelCore.hpp:1016
+#
 #       QPair<double,double> JD;  // JD.first=JD_UT, JD.second=DeltaT(秒)
 #       // getJDE() = TT = JD.first + JD.second/86400
-#   - src/core/StelCore.cpp:94
+#
 #       timeSpeed(JD_SECOND)   // 默认：真实速度（1 真实秒 / 真实秒）
-#   - src/core/StelCore.cpp:1243-1246
+#
 #       void StelCore::setJD(double newJD) {
 #           JD.first = newJD;
 #           JD.second = computeDeltaT(newJD);
 #       }
-#   - src/core/StelCore.cpp:1251-1253
+#
 #       double StelCore::getJD() const { return JD.first; }
-#   - src/core/StelCore.cpp:1386-1391
+#
 #       void StelCore::setTimeRate(double ts) { timeSpeed = ts; ... }
-#   - src/core/StelCore.cpp:2299-2308  (核心 tick)
+#
 #       void StelCore::updateTime(double deltaTime) {
 #           JD.first = jdOfLastJDUpdate
 #                    + (now_ms - last_ms)/1000.0 * timeSpeed;
@@ -155,7 +147,7 @@ class TimeEngine:
     # ---- 时间跳转（对应 StelCore::setJD） -------------------------------
     def set_jd(self, jd: float) -> None:
         """设置模拟儒略日（UT）。立即生效，下一帧所有计算用新 JD。
-        对应 StelCore::setJD() —— src/core/StelCore.cpp:1243。"""
+ 对应 StelCore::setJD"""
         self._sim_jd = float(jd)
         self._last_wall = time.time()
 
@@ -175,13 +167,12 @@ class TimeEngine:
     # ---- 时间速率（对应 StelCore::setTimeRate） ------------------------
     def set_rate(self, rate: float) -> None:
         """设置时间流速倍率。
-          rate=0   暂停
-          rate=1   实时（1 模拟秒/真实秒）
-          rate=N   N 倍加速
-          rate=-N  N 倍倒流
-        对应 StelCore::setTimeRate() —— src/core/StelCore.cpp:1386。
-        注意：Stellarium 内部 timeSpeed 单位是 天/真实秒，这里归一化为倍率。
-        """
+ rate=0 暂停
+ rate=1 实时（1 模拟秒/真实秒）
+ rate=N N 倍加速
+ rate=-N N 倍倒流
+ 对应 StelCore::setTimeRate
+ 注意：Stellarium 内部 timeSpeed 单位是 天/真实秒，这里归一化为倍率"""
         self._rate = float(rate)
         self._last_wall = time.time()
 
@@ -197,11 +188,10 @@ class TimeEngine:
     # ---- tick（对应 StelCore::updateTime） -----------------------------
     def tick(self, real_dt: Optional[float] = None) -> None:
         """推进模拟时钟。
-        对应 StelCore::updateTime() —— src/core/StelCore.cpp:2299:
-            JD.first = jdOfLastJDUpdate + real_elapsed_seconds * timeSpeed
-        其中 timeSpeed = rate * JD_SECOND（天/真实秒）。
-        real_dt: 距上次 tick 的真实秒数；None 则自动用墙钟差值。
-        """
+ 对应 StelCore::updateTime
+ JD.first = jdOfLastJDUpdate + real_elapsed_seconds * timeSpeed
+ 其中 timeSpeed = rate * JD_SECOND（天/真实秒）。
+ real_dt: 距上次 tick 的真实秒数；None 则自动用墙钟差值"""
         if real_dt is None:
             now = time.time()
             real_dt = 0.0 if self._last_wall is None else max(0.0, now - self._last_wall)
@@ -214,7 +204,7 @@ class TimeEngine:
 
     # ---- 当前模拟时间读取 ----------------------------------------------
     def now_jd(self) -> float:
-        """返回当前模拟儒略日（UT）。对应 StelCore::getJD() —— StelCore.cpp:1251。"""
+        """返回当前模拟儒略日（UT）。对应 StelCore::getJD"""
         if self._sim_jd is None:
             return time.time() / 86400.0 + _UNIX_EPOCH_JD
         return self._sim_jd
@@ -373,7 +363,7 @@ def parse_gnss_rmc(nmea_sentence: str) -> Optional[Dict[str, Any]]:
 
         if len(fields) < 10 or fields[0][0] != '$' or fields[0][3:] != 'RMC':
             return None
-        # 多星座 talker 前缀 GP/GL/GA/GB/BD/GN（来源 direwolf dwgpsnmea.c:38-42）
+        # 多星座 talker 前缀 GP/GL/GA/GB/BD/GN（）
         if fields[0][1:3] not in ('GP', 'GL', 'GA', 'GB', 'BD', 'GN'):
             return None
 
@@ -449,7 +439,7 @@ def parse_gnss_rmc(nmea_sentence: str) -> Optional[Dict[str, Any]]:
 
 # ------------------------------------------------------------
 # 扩展：全语句 NMEA 解析（多星座 GP/GL/GA/GB/BD/GN）
-# 来源：NMEA-0183 standard；talker ID 参考 direwolf dwgpsnmea.c:38-42
+# NMEA-0183 standard；talker ID
 # 与 mbdsdr_ai/serial_gnss.py NMEAParser 字段口径保持一致。
 # ------------------------------------------------------------
 
@@ -767,7 +757,7 @@ def predict_satellite_pass(satellite_name: str, observer_lat: float, observer_lo
 
     # 从全局 TimeEngine 取"模拟现在"，而非 datetime.now()。
     # 这是修复"装饰条"问题的核心：UI 拖动时间后，pass 预测起点随之改变。
-    # 对应 Stellarium：所有天体位置从 StelCore::getJD() 取时间 (StelCore.cpp:1251)。
+    # 对应 Stellarium：所有天体位置从 StelCore::getJD 取时间
     now = get_time_engine().now_utc()
     step = timedelta(seconds=30)
     total_steps = int(hours_ahead * 3600 / 30)
@@ -1091,9 +1081,8 @@ def compute_visible_satellite_count(observer_lat: float, observer_lon: float,
                                       min_elevation: float = 5.0) -> Dict[str, Any]:
     """计算当前可见卫星数量（新时空天空图用）。
 
-    时间来源：全局 TimeEngine.now_unix()，而非 time.time()。
-    对应 Stellarium：StelCore::getJD() 驱动所有天体位置计算 (StelCore.cpp:1251)。
-    """
+ 时间全局 TimeEngine.now_unix，而非 time.time。
+ 对应 Stellarium：StelCore::getJD 驱动所有天体位置计算"""
     try:
         from .decoders import list_visible_satellites
     except ImportError:

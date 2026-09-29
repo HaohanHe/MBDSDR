@@ -1,20 +1,21 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/js8call_adapter.py
 ==============================
-JS8Call (js8call/js8call, WSJT-X/FT8 衍生) 消息模式的 Python 学习移植。
+JS8Call (js8call/js8call, WSJT-X/FT8 衍生) 消息模式的 Python 实现。
 
-关键常量标注「来源: repos/js8call/<file>:<line>」：
-  - 采样率 12000 Hz            commons.h:15
-  - 每帧 79 个符号             commons.h:29  (JS8_NUM_SYMBOLS)
-  - 子模式符号采样             commons.h:36-49
+关键常量如下（JS8 子模式公开参数）：
+  - 采样率 12000 Hz            
+  - 每帧 79 个符号               (JS8_NUM_SYMBOLS)
+  - 子模式符号采样             
       JS8E(Slow)=3840, JS8A(Normal)=1920, JS8B(Fast)=1200, JS8C(Turbo)=600
-  - 音调间隔 = fs/symbolSamples JS8Submode.cpp:73
+  - 音调间隔 = fs/symbolSamples 
   - 8-FSK 音调（FT8 衍生）     任务约定 + FT8 物理层
 
 任务硬约束：默认 15.625 baud、8 个音调、77-bit 有效载荷。
 （注：JS8Call 官方 Normal=6.25baud；任务采用 FT8 衍生的 15.625baud 学习模型。）
 
-本移植纯 numpy，实现子模式参数表、呼号/网格编码、77-bit 消息打包。
+本实现纯 numpy，实现子模式参数表、呼号/网格编码、77-bit 消息打包。
 """
 
 from __future__ import annotations
@@ -30,12 +31,12 @@ import numpy as np
 # =====================================================================
 # JS8 子模式参数表
 # =====================================================================
-# commons.h:36-49 给出每个子模式的 symbolSamples；
-#   toneSpacing = JS8_RX_SAMPLE_RATE / symbolSamples (JS8Submode.cpp:73)
+#  给出每个子模式的 symbolSamples；
+#   toneSpacing = JS8_RX_SAMPLE_RATE / symbolSamples ()
 #   symbol rate = toneSpacing (MFSK 符号率 = 音调间隔)
 # 任务约定 baud 档位：15.625 / 31.25 / 62.5。
-JS8_SAMPLE_RATE = 12000.0          # commons.h:15
-JS8_NUM_SYMBOLS = 79               # commons.h:29
+JS8_SAMPLE_RATE = 12000.0          # 
+JS8_NUM_SYMBOLS = 79               # 
 JS8_N_TONES = 8                    # 8-FSK (FT8 衍生, 任务约定)
 JS8_PAYLOAD_BITS = 77              # 任务约定 77-bit 有效载荷
 JS8_TONE_SPACING = 6.25            # Hz (FT8 衍生)
@@ -50,7 +51,7 @@ class JS8Submode:
 
 
 # 子模式表（任务约定 baud；symbol_samples = fs/baud）
-#   Slow/Normal/Fast/Turbo 命名对应 JS8Submode.cpp:121-124
+#   Slow/Normal/Fast/Turbo 命名对应 
 JS8_SUBMODES: Dict[str, JS8Submode] = {
     "slow":   JS8Submode("SLOW",   15.625, int(JS8_SAMPLE_RATE / 15.625), 30),
     "normal": JS8Submode("NORMAL", 15.625, int(JS8_SAMPLE_RATE / 15.625), 15),
@@ -78,7 +79,7 @@ def list_submodes() -> List[Dict[str, Any]]:
 #   C2: 36 字符 (0-9+A-Z)
 #   C3: 10 字符 (0-9)
 #   C4: 27 字符 (空格+A-Z) x3
-# 来源: mbdsdr_ai/ft8_callsign.py:14-22 (wsjtx unpack28.f90)
+# mbdsdr_ai/ft8_callsign.py:14-22 (wsjtx unpack28.f90)
 _C1 = " 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _C2 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _C3 = "0123456789"
@@ -112,7 +113,7 @@ def unpack_callsign(n: int) -> str:
 def pack_grid(grid: str) -> int:
     """4 字符 Maidenhead 网格 -> 15bit 整数。
 
-    前两位 A-R (18)，后两位 0-9 (10)。来源: wsjtx decode_grid.f90。
+    前两位 A-R (18)，后两位 0-9 (10)。wsjtx decode_grid.f90。
     """
     g = grid.upper().strip()[:4]
     n = (ord(g[0]) - ord('A')) * 18 * 10 * 10 \
@@ -175,7 +176,7 @@ def message_to_tones(payload77: int) -> List[int]:
     """77-bit 载荷 -> 8-FSK 符号序列（每符号 3 bit，8 个音调）。
 
     返回长度 ceil(77/3)=26 的符号序列（0..7），对应 itone[] 数组。
-    来源: mainwindow.cpp:91 itone[JS8_NUM_SYMBOLS]。
+     itone[JS8_NUM_SYMBOLS]。
     """
     bits = [(payload77 >> i) & 1 for i in range(JS8_PAYLOAD_BITS)]
     bits = bits[::-1]  # MSB first
@@ -255,7 +256,7 @@ def register_js8call_tools(registry) -> None:
     registry.register(
         name="js8_submodes",
         description="列出 JS8Call 子模式参数 (Slow/Normal/Fast/Turbo: 15.625/15.625/31.25/62.5 baud, "
-                    "8-FSK, 77bit 载荷)。来源: commons.h:15-49, JS8Submode.cpp:121-124。",
+                    "8-FSK, 77bit 载荷)。, 。",
         parameters={"type": "object", "properties": {}},
         handler=_submodes,
         category="ham_modes",

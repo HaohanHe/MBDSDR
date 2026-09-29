@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """确定性集成测试：StartupSequence 8 步启动顺序 / 失败分类 / validate()。
 
 全部用注入的 mock 协作者，不碰真硬件、不依赖 sounddevice / pyrtlsdr。

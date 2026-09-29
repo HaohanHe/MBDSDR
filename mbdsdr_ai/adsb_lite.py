@@ -1,19 +1,13 @@
+# SPDX-License-Identifier: MIT
 """ADS-B / Mode S (1090 MHz) lite 解码器。
 
-定位：把最容易用 RTL-SDR 在城市里真实收到的数字航空链路做成 AI 可调用工具。
-本模块只依赖 numpy，纯函数、可离线复现，便于无棒环境用合成帧严格验证。
+依据 ICAO Annex 10 / RTCA DO-260B Mode S 规范独立实现，只依赖 numpy，纯函数、
+可离线复现。dump1090 (https://github.com/flightaware/dump1090) 仅作技术参考与致谢，
+本仓未包含其源代码。
 
-覆盖（对标 dump1090 的最小可用子集）：
-  - 8 µs preamble 检测（0/1/3.5/4.5 µs 四个 0.5 µs 脉冲，窗口能量判决，任意采样率 >=1 MHz）；
-  - 112 bit 长帧（DF17/18/…）与 56 bit 短帧（DF11/…）的 PPM 位判决；
-  - CRC-24（生成多项式 0xFFF409）校验，剔除噪声/损坏帧；
-  - DF/CA、ICAO 24bit 地址、DF17 type code 与消息类型分类；
-  - TC1-4 呼号（callsign）解码；CPR 经纬度具体位置标注 needs_cpr（后续）。
-
-不做：CPR 奇偶位置解算、MB 数据链（BDS）细分解码、前向纠错。这些留给完整
-dump1090 后端；本模块目标是“收到 → 知道有哪几架飞机、什么消息、CRC 是否可信”。
-
-参考：RTCA DO-260B / Mode S 标准；CRC 多项式与位序同 dump1090 modesChecksum。
+覆盖：8µs preamble 检测；112/56 bit PPM 位判决；CRC-24(多项式 0xFFF409) 校验；
+DF/CA、ICAO 24bit 地址、DF17 type code 分类；TC1-4 呼号解码。不做 CPR 奇偶位置解算、
+BDS 数据链细分解码与前向纠错。
 """
 
 from __future__ import annotations
@@ -23,7 +17,7 @@ from typing import List, Optional, Sequence
 
 import numpy as np
 
-# 来源: dump1090 crc.c:28 — Mode S CRC-24 生成多项式（省略最高位 x^24），
+# — Mode S CRC-24 生成多项式（省略最高位 x^24）
 # 正确值是 0xFFF409，不是网上常被误写的 0xFFFA04
 MODES_CRC_GENERATOR = 0xFFF409
 
@@ -34,7 +28,7 @@ DATA_START_US = 8.0
 BIT_US = 1.0
 HALF_US = 0.5
 
-# 来源: dump1090 ais_charset.c:4 — 完整 64 项 6bit 呼号字符表。
+# — 完整 64 项 6bit 呼号字符表
 # idx0=@(填充), 1-26=A-Z, 27=[, 28=\, 29=], 30=^, 31=_, 32=空格,
 # 33-47=!"#$%&'()*+,-./, 48-57=0-9, 58-63=:;<=>?
 _ADSB_CHAR = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_ !\"#$%&'()*+,-./0123456789:;<=>?"
@@ -266,7 +260,7 @@ def _me_gb(bits: Sequence[int], first: int, last: int) -> int:
 
 
 def decode_altitude_ac12(ac12: int) -> Optional[int]:
-    """来源: dump1090 mode_s.c:156 decodeAC12Field —— 12bit AC 高度（ft）。"""
+    """—— 12bit AC 高度（ft）"""
     if not (ac12 & 0x10):
         return None  # Gillham 编码，lite 不展开
     n = ((ac12 & 0x0FE0) >> 1) | (ac12 & 0x000F)
@@ -274,7 +268,7 @@ def decode_altitude_ac12(ac12: int) -> Optional[int]:
 
 
 def decode_velocity(bits: Sequence[int]) -> dict:
-    """来源: dump1090 mode_s.c:856 decodeESAirborneVelocity —— TC19。"""
+    """—— TC19"""
     import math
     sub = _me_gb(bits, 6, 8)
     out: dict = {"subtype": sub}
@@ -308,7 +302,7 @@ def decode_velocity(bits: Sequence[int]) -> dict:
 
 
 def extract_cpr(bits: Sequence[int]) -> dict:
-    """来源: dump1090 mode_s.c:1003 —— 抽出 CPR 偶/奇标志与 17bit lat/lon。"""
+    """—— 抽出 CPR 偶/奇标志与 17bit lat/lon"""
     odd = bool(bits[_ME0 + 21])  # ME bit22 = F 标志
     return {"cpr_odd": odd,
             "cpr_lat": _me_gb(bits, 23, 39),
@@ -342,12 +336,12 @@ def parse_frame(bits: Sequence[int], nbits: int, start_us: float,
         return None
     df = int("".join(str(b) for b in bits[0:5]), 2)
     crc_rem = crc24(bits, nbits)
-    # 来源: dump1090 mode_s.c:587-597 — DF20/DF21 用 Address/Parity：
+    # — DF20/DF21 用 Address/Parity
     # 发送方把 ICAO XOR 进 CRC，接收机算出的 syndrome 本身就是地址，不要求 ==0
     if df in (20, 21) and nbits == 112:
         icao = crc_rem
         crc_ok = True  # Address/Parity 模式，余数即地址
-    # 来源: dump1090 mode_s.c:574,624-626 — DF11 用 Parity/Interrogator：
+    # — DF11 用 Parity/Interrogator
     # ICAO 地址在明文 AA 域 bit8-32（不是从 syndrome 反推！）；
     # syndrome 高 17bit 必须为 0，低 7bit 是询问器 IID（允许非零）
     elif df == 11 and nbits == 56:
@@ -358,7 +352,7 @@ def parse_frame(bits: Sequence[int], nbits: int, start_us: float,
     elif crc_rem != 0:
         return None
     else:
-        # 来源: dump1090 mode_s.c:624-626 — DF17/DF18 等：ICAO 在明文 AA 域
+        # — DF17/DF18 等：ICAO 在明文 AA 域
         # bit8-32，II=0 时 syndrome==0 即 CRC 正确
         icao = int("".join(str(b) for b in bits[8:32]), 2)
         crc_ok = True

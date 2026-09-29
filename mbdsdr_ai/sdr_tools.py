@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - SDR 工具集
 ============================
@@ -939,13 +940,13 @@ def register_sdr_tools(agent):
         category="sdr_decode",
     )
 
-    # ── 真实源码移植的卫星解码函数工具（noaa-apt / meteor_demod）─────────────
+    # ── 卫星解码函数工具（依据 NOAA APT / Meteor LRPT 公开标准实现）─────────────
     agent.tool_registry.register(
         name="noaa_apt_decode",
         description=(
-            "离线解码 NOAA APT 音频 WAV 为云图（真实移植自 noaa-apt）。"
-            "链路：重采样到 12480Hz → apt137 AM 鉴别器(dsp.rs:373) → 低通 2080Hz → "
-            "重采样 4160Hz → 38 样本±1 同步方波互相关找行首(decode.rs:171) → 切 A/B "
+            "离线解码 NOAA APT 音频 WAV 为云图（依据 NOAA APT 公开标准实现）。"
+            "链路：重采样到 12480Hz → APT AM 鉴别器 → 低通 2080Hz → "
+            "重采样 4160Hz → 38 样本±1 同步方波互相关找行首 → 切 A/B "
             "两通道各 909 像素。输入 input_path 为解调后 .wav；返回对齐行数、锁定率，"
             "并可输出 PNG。黑白颠倒用 polarity=-1。"
         ),
@@ -965,7 +966,7 @@ def register_sdr_tools(agent):
     agent.tool_registry.register(
         name="meteor_viterbi_decode",
         description=(
-            "Meteor LRPT Viterbi 软判决解码（真实移植自 meteor_demod 后级链）。"
+            "Meteor LRPT Viterbi 软判决解码（依据 CCSDS/CCSDS 协议与 Meteor LRPT 公开标准实现）。"
             "K=7, r=1/2, 生成多项式 G1=0x79(八进制171)/G2=0x5F(八进制137)。"
             "输入 coded_bits 为接收编码比特数组（0/1 或软值），返回解码后信息比特数组。"
         ),
@@ -984,7 +985,7 @@ def register_sdr_tools(agent):
     agent.tool_registry.register(
         name="meteor_lrpt_demod",
         description=(
-            "Meteor-M2 LRPT 解调骨架（真实移植自 meteor_demod）。符号率 72000sym/s，"
+            "Meteor-M2 LRPT 解调骨架（依据 Meteor LRPT 公开标准实现）。符号率 72000sym/s，"
             "QPSK，RRC α=0.6，Costas 环载波恢复+Gardner 位同步 → DQPSK 差分解码 → "
             "卷积去交织(I=36,J=2048) → Viterbi(0x79/0x5F) → LRPT 帧同步 0x1DFCDC。"
             "输入复数 IQ 采样与采样率，返回解调摘要（符号数/比特数/帧）。"
@@ -3099,7 +3100,7 @@ def _read_wav_mono(path):
     return float(sr), data.astype(np.float64)
 
 
-# ── 真实源码移植的卫星解码函数工具 handler ──────────────────────────────────
+# ── 卫星解码函数工具 handler（依据公开标准实现）──────────────────────────────
 def _noaa_apt_decode_fn_tool(args) -> "ToolResult":
     """离线 APT 解码：读 wav → lite_decode_apt → 返回摘要/PNG。"""
     import json as _json

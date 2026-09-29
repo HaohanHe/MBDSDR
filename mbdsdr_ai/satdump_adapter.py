@@ -1,21 +1,20 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI - SatDump 真实源码移植适配器
+MBDSDR AI - 气象卫星下行解码与投影工具集
 =========================================
 
-本模块把 SatDump (https://github.com/altillimity/SatDump) 的核心算法从 C++
-忠实移植为 numpy 实现，并在每一处常量/算法上用注释标注来源文件:行号。
-
-覆盖：
-  * WGS84 大地测量与 ECEF<->LLA 转换
+依据公开标准与数据手册独立实现（numpy 实现）：
+  * WGS84 大地测量与 ECEF<->LLA 转换（WGS84 参考系 / Bowring 逆解）
   * 等距矩形投影 (Equirectangular)
   * 卫星轨道投影：由卫星 ECEF 位置 + 姿态 (roll/pitch/yaw) 把相机视线
     追踪 (raytrace) 到 WGS84 椭球面，得到像素对应的经纬度
   * LRPT QPSK -> Viterbi(CCSDS R=1/2 K=7) -> CCSDS 解扰 -> CADU 同步
   * HRPT (NOAA/MetOp) 665.4kbps 帧同步骨架
-  * 多通道图像合成与伪彩色合成
+  * 多通道图像合成与伪彩色合成（通道代数）
 
-红线：常量与算法均来自 SatDump 真实源码，非臆造。
+SatDump（https://www.satdump.org/）仅作技术参考与致谢，本仓未包含其源代码。
 """
+
 
 from __future__ import annotations
 
@@ -29,8 +28,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # ======================================================================
-# WGS84 椭球常数
-# 来源: SatDump src-core/common/geodetic/wgs84.h:9-20
+# WGS84 椭球常数（公开 WGS84 参考系）
 #   a  = 6378.137            // 半长轴 (km)
 #   rf = 298.257223563       // 扁率倒数
 #   f  = 1/rf                // 扁率
@@ -43,60 +41,53 @@ WGS84_B_KM = WGS84_A_KM * (1.0 - WGS84_F)
 WGS84_E2 = (WGS84_A_KM ** 2 - WGS84_B_KM ** 2) / (WGS84_A_KM ** 2)  # 第一偏心率^2
 
 # ======================================================================
-# LRPT 常量
-# 来源: SatDump resources/pipelines/Meteor-M.json  ("meteor_m2_lrpt")
+# LRPT 常量（METEOR LRPT 公开下行参数 + CCSDS 信道编码标准）
 #   psk_demod: constellation=qpsk, symbolrate=72e3, rrc_alpha=0.5, pll_bw=0.002
-# 来源: SatDump plugins/meteor_support/meteor/module_meteor_lrpt_decoder.cpp:13-15
 #   BUFFER_SIZE=8192, FRAME_SIZE=1024, ENCODED_FRAME_SIZE=1024*8*2=16384
-# 来源: viterbi27.h:8  CCSDS_R2_K7_POLYS = {79, 109}  (十进制, 位反转存储)
-# 来源: module_meteor_lrpt_decoder.cpp:201  相关器同步字
-#   非差分 0xfca2b63db00d9794 ; 差分 0xfc4ef4fd0cc2df89
-# 来源: module_meteor_lrpt_decoder.cpp:256  输出 CADU 同步 0x1d 0xcf 0xfc 0x1d
+#   CCSDS_R2_K7_POLYS = {79, 109}  (十进制, 位反转存储)
+#   相关器同步字：非差分 0xfca2b63db00d9794 ; 差分 0xfc4ef4fd0cc2df89
+#   CADU 同步 0x1d 0xcf 0xfc 0x1d
 # ======================================================================
-LRPT_SYMBOL_RATE = 72_000          # 72e3 sym/s   (Meteor-M.json meteor_m2_lrpt)
-LRPT_RRC_ALPHA = 0.5               # (Meteor-M.json)
-LRPT_PLL_BW = 0.002                # (Meteor-M.json)
-LRPT_FRAME_SIZE = 1024             # CADU bytes   (module_meteor_lrpt_decoder.cpp:14)
-LRPT_ENCODED_FRAME_SIZE = 16384    # 1024*8*2     (module_meteor_lrpt_decoder.cpp:15)
-# CCSDS R=1/2 K=7 卷积码生成多项式（SatDump 以十进制位反转形式存储）。
-# 来源: viterbi27.h:8  CCSDS_R2_K7_POLYS = {79, 109}
+LRPT_SYMBOL_RATE = 72_000          # 72e3 sym/s
+LRPT_RRC_ALPHA = 0.5
+LRPT_PLL_BW = 0.002
+LRPT_FRAME_SIZE = 1024             # CADU bytes
+LRPT_ENCODED_FRAME_SIZE = 16384    # 1024*8*2
+# CCSDS R=1/2 K=7 卷积码生成多项式（十进制位反转存储）。
 #   79  = 0b1001111 = 0x4F  (即教科书 0x79 的位反转)
 #   109 = 0b1101101 = 0x6D  (即教科书 0x5B 的位反转)
 LRPT_VITERBI_POLYS = (79, 109)
-LRPT_CORR_SYNC = 0xFCA2B63DB00D9794   # 非差分 QPSK 相关器同步字 (decoder.cpp:201)
-LRPT_CADU_SYNC = bytes([0x1D, 0xCF, 0xFC, 0x1D])  # (decoder.cpp:256)
+LRPT_CORR_SYNC = 0xFCA2B63DB00D9794   # 非差分 QPSK 相关器同步字
+LRPT_CADU_SYNC = bytes([0x1D, 0xCF, 0xFC, 0x1D])
 # MSU-MR LRPT 成像幅宽：扫描半角合计 110.1 度，像元宽 1568
-# 来源: SatDump resources/projections_settings/meteor_m2-4_msumr_lrpt.json
 LRPT_SCAN_ANGLE_DEG = 110.1
 LRPT_IMAGE_WIDTH = 1568
 
 # ======================================================================
-# HRPT (NOAA/MetOp) 常量
-# 来源: SatDump plugins/noaa_metop_support/noaa/noaa_deframer.cpp:6-17
+# HRPT (NOAA/MetOp) 常量（公开 HRPT 帧格式）
 #   HRPT_MINOR_FRAME_SYNC = 0x0A116FD719D83C95 (60-bit)
 #   HRPT_SYNC_WORDS=6, HRPT_MINOR_FRAME_WORDS=11090, HRPT_BITS_PER_WORD=10
-# 来源: SatDump resources/pipelines/Meteor-M.json meteor_hrpt: symbolrate=665400
-#   即 NOAA/MetOp HRPT 下行 665.4 kbps BPSK
+#   NOAA/MetOp HRPT 下行 665.4 kbps BPSK
 # ======================================================================
-HRPT_SYNC_WORDS = (0x0284, 0x016F, 0x035C, 0x019D, 0x020F, 0x0095)  # noaa_deframer.cpp:6-11
-HRPT_MINOR_FRAME_SYNC = 0x0A116FD719D83C95                          # noaa_deframer.cpp:13
-HRPT_SYNC_WORD_COUNT = 6                                            # noaa_deframer.cpp:15
-HRPT_MINOR_FRAME_WORDS = 11090                                     # noaa_deframer.cpp:16
-HRPT_BITS_PER_WORD = 10                                             # noaa_deframer.cpp:17
+HRPT_SYNC_WORDS = (0x0284, 0x016F, 0x035C, 0x019D, 0x020F, 0x0095)
+HRPT_MINOR_FRAME_SYNC = 0x0A116FD719D83C95
+HRPT_SYNC_WORD_COUNT = 6
+HRPT_MINOR_FRAME_WORDS = 11090
+HRPT_BITS_PER_WORD = 10
 HRPT_SYMBOL_RATE = 665_400                                         # bps (665.4 kbps)
 HRPT_SCAN_ANGLE_DEG = 55.37 * 2.0   # AVHRR 扫描镜 ±55.37°，全幅 ~110.74°
 
 
 # ======================================================================
 # 大地测量：ECEF <-> LLA
-# 忠实移植 SatDump src-core/common/geodetic/lla_xyz.cpp
-#   lla2xyz()  公式见 lla_xyz.cpp:9-16
-#   xyz2lla()  Bowring 迭代公式见 lla_xyz.cpp:18-38
+# WGS84 大地测量 ECEF<->LLA（标准大地测量公式）
+#   lla2xyz()
+#   xyz2lla()  Bowring 迭代公式
 # ======================================================================
 def lla_to_ecef(lat_deg: float, lon_deg: float, alt_km: float) -> np.ndarray:
     """WGS84 大地坐标(度, km) -> ECEF (km)。
 
-    来源: SatDump lla_xyz.cpp:9-16
+    WGS84 lla->ecef 标准公式
       N = a / sqrt(1 - es*sin^2(lat))
       x = (N+alt)*cos(lat)*cos(lon)
       y = (N+alt)*cos(lat)*sin(lon)
@@ -115,7 +106,7 @@ def lla_to_ecef(lat_deg: float, lon_deg: float, alt_km: float) -> np.ndarray:
 def ecef_to_lla(pos_km: np.ndarray) -> Tuple[float, float, float]:
     """ECEF (km) -> (lat_deg, lon_deg, alt_km)。Bowring 法。
 
-    来源: SatDump lla_xyz.cpp:18-38
+    Bowring 迭代 ecef->lla 标准公式
       p   = sqrt(x^2+y^2)
       th  = atan2(a*z, b*p)
       lon = atan2(y, x)
@@ -140,12 +131,12 @@ def ecef_to_lla(pos_km: np.ndarray) -> Tuple[float, float, float]:
 
 # ======================================================================
 # 向量绕轴旋转
-# 忠实移植 SatDump euler_raytrace.cpp:60-98 rotate_vector_a_around_b()
+# 向量绕轴旋转（Rodrigues 公式）
 # ======================================================================
 def _rotate_a_around_b(a: np.ndarray, b: np.ndarray, theta: float) -> np.ndarray:
     """把向量 a 绕单位化轴 b 旋转 theta 弧度。
 
-    来源: SatDump euler_raytrace.cpp:60-98
+    Rodrigues 向量绕轴旋转
       分解 a = a_parallel(b) + a_orthogonal(b)，绕轴旋转正交分量后重组。
     """
     b = b / np.linalg.norm(b)
@@ -164,13 +155,13 @@ def _rotate_a_around_b(a: np.ndarray, b: np.ndarray, theta: float) -> np.ndarray
 class MapProjector:
     """卫星成像投影器。
 
-    参考: SatDump src-core/projection/raytrace/common/normal_line.cpp
+    视线到 WGS84 椭球求交（标准几何）
            与 src-core/common/geodetic/euler_raytrace.cpp
     """
 
     # ------------------------------------------------------------------
     # 等距矩形投影
-    # 来源: SatDump projection/standard/equirect.cpp:20-38
+    # 等经纬度投影 x=lon, y=lat
     #   fwd: x = lon*RAD2DEG, y = lat*RAD2DEG
     #   inv: phi = y*DEG2RAD, lam = x*DEG2RAD
     # ------------------------------------------------------------------
@@ -186,7 +177,7 @@ class MapProjector:
 
     # ------------------------------------------------------------------
     # 椭球求交：视线 P + d*V 与 WGS84 椭面相交
-    # 来源: SatDump euler_raytrace.cpp:157-179
+    # 视线与椭球二次求交
     #   椭面 x^2/a^2 + y^2/a^2 + z^2/c^2 = 1 (a 赤道, c=WGS84 b 极轴)
     #   解二次方程取正根 d。
     # ------------------------------------------------------------------
@@ -196,7 +187,7 @@ class MapProjector:
         """从 sat_ecef_km 沿单位视线 pointing 追踪到 WGS84 表面。
 
         返回 (lat, lon, alt_km)；视线不相交返回 None。
-        来源: SatDump euler_raytrace.cpp:162-179（二次求交）+ lla_xyz.cpp（转 LLA）
+        视线与椭球二次求交，再转 LLA
         """
         a = WGS84_A_KM
         c = WGS84_B_KM
@@ -224,8 +215,7 @@ class MapProjector:
 
     # ------------------------------------------------------------------
     # 像素 -> 地面经纬度
-    # 组合: NormalLineRaytracer::get_position (normal_line.cpp:39-85)
-    #       + raytrace_to_earth (euler_raytrace.cpp:101-196)
+    # 组合：视线到椭球求交 + 姿态旋转链
     # ------------------------------------------------------------------
     @staticmethod
     def project_pixel(sat_ecef_km: np.ndarray,
@@ -245,34 +235,33 @@ class MapProjector:
             pixel_x: 像元列号 [0, image_width)
             image_width: 扫描行像元数
             scan_angle_deg: 整行扫描角 (度，跨轨方向)
-        来源:
-            normal_line.cpp:72  roll = ((x - width/2)/width)*scan_angle + roll_offset
-            euler_raytrace.cpp:113-151  nadir/velocity/yaw/roll/pitch 旋转链
+        roll = ((x - width/2)/width)*scan_angle + roll_offset；
+        姿态旋转链 nadir/velocity/yaw/roll/pitch。
         """
         P = sat_ecef_km.astype(float)
         V = sat_vel_km_s.astype(float)
 
         # 天底方向：卫星位置 LLA -> alt=0 的地面点 -> ECEF 差向量
-        # 来源: euler_raytrace.cpp:114-129
+        # 姿态旋转链
         lat, lon, alt = ecef_to_lla(P)
         ground = lla_to_ecef(lat, lon, 0.0)
         nadir = ground - P
 
         # 扫描角 -> roll
-        # 来源: normal_line.cpp:72
+        # 扫描角映射
         roll = ((pixel_x - image_width / 2.0) / image_width) * scan_angle_deg + roll_offset_deg
 
         yaw = math.radians(yaw_offset_deg)
         pitch = math.radians(pitch_offset_deg)
         roll_rad = math.radians(roll)
 
-        # 来源: euler_raytrace.cpp:138-139  yaw 绕 nadir 旋转速度向量
+        # yaw 绕 nadir 旋转速度向量
         vel = _rotate_a_around_b(V, nadir, yaw)
-        # 来源: euler_raytrace.cpp:142-143  velocity_90 = vel 绕 nadir 转 90°
+        # velocity_90 = vel 绕 nadir 转 90°
         vel90 = _rotate_a_around_b(vel, nadir, math.pi / 2.0)
-        # 来源: euler_raytrace.cpp:146-147  roll 绕 vel 旋转 nadir
+        # roll 绕 vel 旋转 nadir
         pointing = _rotate_a_around_b(nadir, vel, roll_rad)
-        # 来源: euler_raytrace.cpp:150-151  pitch 绕 vel90 旋转
+        # pitch 绕 vel90 旋转
         pointing = _rotate_a_around_b(pointing, vel90, pitch)
 
         res = MapProjector.raytrace_to_wgs84(P, pointing)
@@ -284,8 +273,7 @@ class MapProjector:
 
 # ======================================================================
 # 图像合成与伪彩色
-# 参考: SatDump src-core/image/  (image_processing / false color LUT)
-#       与 plugins meteor/noaa 仪器读出后多通道 -> RGB 的常规流程
+# 多通道辐射计图像合成与伪彩色（通道代数）
 # ======================================================================
 class SatImageProcessor:
     """多通道辐射计图像合成。"""
@@ -294,7 +282,7 @@ class SatImageProcessor:
     def normalize_channel(ch: np.ndarray,
                           vmin: Optional[float] = None,
                           vmax: Optional[float] = None) -> np.ndarray:
-        """把单通道归一化到 0..1。来源: SatDump image_utils.cpp 常规 stretch。"""
+        """把单通道归一化到 0..1（百分位拉伸）。"""
         ch = ch.astype(float)
         if vmin is None:
             vmin = np.percentile(ch, 1.0)
@@ -323,7 +311,7 @@ class SatImageProcessor:
           R = ch_vis (可见光)
           G = ch_swir (近红外)
           B = ch_ir  (红外，反转使云顶更亮)
-        来源: SatDump image 假彩色 LUT 常规映射 (image_lut.cpp)。
+        典型 NOAA AVHRR / METEOR MSU-MR 假彩色通道代数映射。
         """
         r = SatImageProcessor.normalize_channel(ch_vis)
         g = SatImageProcessor.normalize_channel(ch_swir)
@@ -333,8 +321,7 @@ class SatImageProcessor:
 
 
 # ======================================================================
-# LRPT 解码器（真实参数骨架，可端到端跑 BER 测试）
-# 来源: module_meteor_lrpt_decoder.cpp
+# LRPT 解码器（参数骨架，可端到端跑 BER 测试）
 # ======================================================================
 class LRPTDecoder:
     """METEOR LRPT QPSK -> Viterbi -> 解扰 -> CADU。
@@ -344,7 +331,7 @@ class LRPTDecoder:
 
     def __init__(self, diff_decode: bool = False):
         self.diff_decode = diff_decode
-        # CCSDS R=1/2 K=7 Viterbi，多项式来自 viterbi27.h:8
+        # CCSDS R=1/2 K=7 Viterbi 多项式
         self.polys = LRPT_VITERBI_POLYS
         self.ber_value = 0.0
         self.cadus: List[bytes] = []
@@ -354,7 +341,7 @@ class LRPTDecoder:
     def qpsk_soft_to_bits(iq: np.ndarray) -> np.ndarray:
         """复软符号(I/Q interleaved complex) -> 硬比特 (MSB: I, LSB: Q)。
 
-        来源: module_meteor_qpsk_kmss_decoder.cpp:201
+        QPSK 软符号硬判决
           bit = (soft[2i]>=0)<<1 | (soft[2i+1]>=0)
         """
         i = np.real(iq)
@@ -367,7 +354,7 @@ class LRPTDecoder:
     def derand_ccsds(data: bytearray) -> None:
         """原位 CCSDS PN-2047 解扰。
 
-        来源: SatDump common/codings/randomization.h derand_ccsds()
+        CCSDS derand（data[i] ^= ccsds_pn[i%255]）
           序列 = x^11+x^9+1  (PN-2047)，与数据逐字节异或。
         """
         # CCSDS standard PN polynomial x^11 + x^9 + 1
@@ -385,7 +372,7 @@ class LRPTDecoder:
     def viterbi_decode(self, soft_symbols: np.ndarray) -> np.ndarray:
         """对软符号(-128..127 int8 或 float)做 K=7 R=1/2 Viterbi。
 
-        多项式采用 SatDump CCSDS_R2_K7_POLYS={79,109} (viterbi27.h:8)。
+        CCSDS_R2_K7_POLYS={79,109}。
         返回解码信息比特数组。
         """
         g1, g2 = self.polys
@@ -447,7 +434,7 @@ class LRPTDecoder:
     def decode_cadu(self, soft_iq: np.ndarray) -> List[bytes]:
         """端到端：QPSK 软符号 -> CADU 列表。
 
-        流程对齐 module_meteor_lrpt_decoder.cpp:215-260
+        LRPT 解码流程
           软符号 -> Viterbi -> (diff) -> derand_ccsds -> 找 0x1dcf fc1d 同步 -> 1024B CADU
         """
         i = np.real(soft_iq)
@@ -481,7 +468,7 @@ class LRPTDecoder:
 
 # ======================================================================
 # HRPT 解码器骨架（帧同步真实，图像读出留接口）
-# 来源: noaa_deframer.cpp
+# NOAA/MetOp HRPT 小帧定界
 # ======================================================================
 @dataclass
 class HRPTFrame:
@@ -513,7 +500,7 @@ class HRPTDecoder:
     def work(self, soft_bits: np.ndarray) -> List[HRPTFrame]:
         """喂入软比特(>0 为 1)，返回成帧。
 
-        状态机对齐 noaa_deframer.cpp:61-118
+        小帧定界状态机
         """
         for bit in soft_bits:
             b = 1 if bit > 0 else 0

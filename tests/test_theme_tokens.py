@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 主题 Token 对齐冒烟测试
 ======================

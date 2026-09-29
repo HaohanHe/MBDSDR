@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
-rtklib_test.py — 验证 rtklib_adapter.py 移植自 RTKLIB 真实源码的算法。
+rtklib_test.py — 验证 rtklib_adapter.py 的 GNSS 时间/坐标/RINEX/SPP 算法。
 
 覆盖（对应任务第二步要求）：
   1. 时间转换：已知 GPS 周/秒 -> UTC 正确（含闰秒）
@@ -11,7 +12,7 @@ rtklib_test.py — 验证 rtklib_adapter.py 移植自 RTKLIB 真实源码的算�
   5. SPP：已知卫星位置 + 伪距 -> 解算位置（合成无噪测试）
   6. 常数验证：光速/GM/椭球参数与 RTKLIB C 源码逐位一致
 
-所有断言旁标注来源 RTKLIB src/<file>.c:<line>。
+所有用例均为合成/离线数据。
 """
 
 import math
@@ -30,22 +31,22 @@ class TestPhysicalConstants(unittest.TestCase):
     """物理常数必须与 RTKLIB 源码逐位一致。"""
 
     def test_constants_match_source(self):
-        # rtklib.h:59  CLIGHT 299792458.0
+        #   CLIGHT 299792458.0
         self.assertEqual(ra.CLIGHT, 299792458.0)
-        # rtklib.h:64  OMGE 7.2921151467E-5
+        #   OMGE 7.2921151467E-5
         self.assertEqual(ra.OMGE, 7.2921151467e-5)
-        # rtklib.h:66  RE_WGS84 6378137.0
+        #   RE_WGS84 6378137.0
         self.assertEqual(ra.RE_WGS84, 6378137.0)
-        # rtklib.h:67  FE_WGS84 1/298.257223563
+        #   FE_WGS84 1/298.257223563
         self.assertAlmostEqual(ra.FE_WGS84, 1.0 / 298.257223563, places=16)
-        # ephemeris.c:64  MU_GPS 3.9860050E14
+        #   MU_GPS 3.9860050E14
         self.assertEqual(ra.MU_GPS, 3.9860050e14)
-        # rtklib.h:56  PI
+        #   PI
         self.assertEqual(ra.PI, 3.1415926535897932)
 
 
 class TestTimeSystem(unittest.TestCase):
-    """时间系统 —— 来源 rtkcmn.c:1246/1261/1425/1442。"""
+    """时间系统转换。"""
 
     def test_gps_epoch_zero(self):
         """GPS 周0 周内秒0 = 1980-01-06 00:00:00 UTC（当时无闰秒）。"""
@@ -60,7 +61,7 @@ class TestTimeSystem(unittest.TestCase):
         self.assertEqual(out["leap_seconds"], 0)
 
     def test_modern_leap_seconds_18(self):
-        """2024 年 UTC-GPST = -18 s（rtkcmn.c:137 表首条 2017-01-01 起）。"""
+        """2024 年 UTC-GPST = -18 s（ 表首条 2017-01-01 起）。"""
         # 选一个 2024 中的 GPS 时刻，验证闰秒字段
         # 2024-01-01 00:00:00 UTC -> 反推 GPS 周/秒
         w, tow = ra.TimeSystem.utc_to_gps_time(2024, 1, 1, 0, 0, 0.0)
@@ -86,7 +87,7 @@ class TestTimeSystem(unittest.TestCase):
 
 
 class TestCoordinateConverter(unittest.TestCase):
-    """坐标转换 —— 来源 rtkcmn.c:1634/1655/1686/3218。"""
+    """坐标转换 (ECEF<->LLH<->ENU)。"""
 
     def test_equator_prime_meridian(self):
         """ECEF (a,0,0) -> lat=0,lon=0,h=0。"""
@@ -103,7 +104,7 @@ class TestCoordinateConverter(unittest.TestCase):
         self.assertAlmostEqual(h, 0.0, places=3)
 
     def test_llh_ecef_roundtrip_under_1cm(self):
-        """LLH->ECEF->LLH 往返误差 < 1cm。rtkcmn.c:1634/1655 互逆。"""
+        """LLH->ECEF->LLH 往返误差 < 1cm。/1655 互逆。"""
         for (lat_d, lon_d, h) in [(39.9042, 116.4074, 50.0),
                                   (-33.8688, 151.2093, 100.0),
                                   (0.0, 0.0, 0.0)]:
@@ -116,7 +117,7 @@ class TestCoordinateConverter(unittest.TestCase):
 
     def test_ecef_to_enu_north_up(self):
         """站心(赤道, lon=0)处：ECEF+Z = 北向，ECEF+X = 天向。
-        rtkcmn.c:1671 xyz2enu 在 lat=0,lon=0 给出 E=(0,1,0),N=(0,0,1),U=(1,0,0)。"""
+         xyz2enu 在 lat=0,lon=0 给出 E=(0,1,0),N=(0,0,1),U=(1,0,0)。"""
         e, n, u = ra.CoordinateConverter.ecef_to_enu(0.0, 0.0, 0.0, 0.0, 1.0)
         self.assertAlmostEqual(e, 0.0, places=9)
         self.assertAlmostEqual(n, 1.0, places=9)
@@ -126,7 +127,7 @@ class TestCoordinateConverter(unittest.TestCase):
 
     def test_azel_due_east(self):
         """站心(赤道,lon=0)，卫星在 ECEF +Y 方向 -> 正东：az=90°, el=0°。
-        rtkcmn.c:3218 satazel(): az=atan2(enu_e, enu_n)。"""
+         satazel(): az=atan2(enu_e, enu_n)。"""
         # 接收机在 (a,0,0)，卫星方向向量取单位 (0,1,0)（近似视线）
         e_vec = np.array([0.0, 1.0, 0.0])
         az, el = ra.CoordinateConverter.satazel(0.0, 0.0, e_vec)
@@ -141,12 +142,12 @@ class TestCoordinateConverter(unittest.TestCase):
 
 
 class TestRINEXParser(unittest.TestCase):
-    """RINEX 解析 —— 来源 rinex.c:1005/1187/1166。"""
+    """RINEX 导航文件解析。"""
 
     # 时钟行：PRN(col0-1) + col2 空格 + 19 字符日期(col3-21) + 3 个 19 字符钟差字段
-    # 对应 rinex.c:1212 prn=str2num(buff,0,2); sp=3; 钟差起于 buff+sp+19=col22
+    # 对应  prn=str2num(buff,0,2); sp=3; 钟差起于 buff+sp+19=col22
     _date = ("23 01 01 00 00  0.0").ljust(19)          # cols 3..21
-    # 28 个轨道参数（data[3..30]），顺序对应 rinex.c:1237-1238 每行4个19字符字段
+    # 28 个轨道参数（data[3..30]），顺序对应  每行4个19字符字段
     _orbit = [
         10.2, 120.0, 3e-8, 0.51,            # line2: IODE,Crs,Deln,M0
         2e-7, 1.23456e-3, 4e-8, 5.1536e7,   # line3: Cuc,e,Cus,sqrtA
@@ -170,15 +171,15 @@ class TestRINEXParser(unittest.TestCase):
         self.assertEqual(len(ephs), 1)
         e = ephs[0]
         self.assertEqual(e.sat, 1)
-        # data[10] = sqrt(A) = 5.1536e7 -> A = (sqrtA)^2  (rinex.c:1028)
+        # data[10] = sqrt(A) = 5.1536e7 -> A = (sqrtA)^2  ()
         self.assertAlmostEqual(math.sqrt(e.A), 5.1536e7, places=1)
-        # data[8] = e = 1.23456e-3  (rinex.c:1028)
+        # data[8] = e = 1.23456e-3  ()
         self.assertAlmostEqual(e.e, 1.23456e-3, places=8)
-        # data[11] = toe = 30240 s  (rinex.c:1036)
+        # data[11] = toe = 30240 s  ()
         self.assertAlmostEqual(e.toe_s, 30240.0, places=1)
-        # data[21] = week = 2048  (rinex.c:1037)
+        # data[21] = week = 2048  ()
         self.assertEqual(e.week, 2048)
-        # D->E 转换生效（rinex.c:1172）
+        # D->E 转换生效（）
         self.assertNotEqual(e.A, 0.0)
 
     def test_parse_obs_line(self):
@@ -190,7 +191,7 @@ class TestRINEXParser(unittest.TestCase):
 
 
 class TestSPPLocator(unittest.TestCase):
-    """SPP 单点定位 —— 来源 pntpos.c:250/253 残差与设计矩阵。
+    """SPP 单点定位（伪距残差与设计矩阵）。
 
     合成无噪数据：已知真实接收机位置 rr_true + 钟差 b_true，
     选 6 颗分布良好的卫星，伪距 P_i = |rs_i-rr_true| + b_true。
@@ -211,7 +212,7 @@ class TestSPPLocator(unittest.TestCase):
         for d in dirs:
             d = d / np.linalg.norm(d)
             rs = d * R
-            # 真值伪距用同一个 geodist（含 Sagnac，rtkcmn.c:3208）生成，保证自洽
+            # 真值伪距用同一个 geodist（含 Sagnac，）生成，保证自洽
             r, _ = ra.CoordinateConverter.geodist(rs, rr_true)
             rs_list.append(rs.tolist())
             dts_list.append(0.0)
@@ -251,7 +252,7 @@ class TestSPPLocator(unittest.TestCase):
 
 
 class TestNTRIPStream(unittest.TestCase):
-    """NTRIP 请求构造 —— 来源 stream.c:1299-1312（不实际连网）。"""
+    """NTRIP 请求构造（不实际连网）。"""
 
     def test_request_format(self):
         s = ra.NTRIPStream("www.ntrip.example", 2101, "MOUNT1",

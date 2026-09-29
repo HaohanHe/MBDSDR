@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """WFM 立体声/去加重 + RTL 枚举去重 回归测试。
 
 锁定此前两个真机发现的问题：

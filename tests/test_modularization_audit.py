@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 test_modularization_audit.py — 四张注册表开放度冒烟测试
 ======================================================

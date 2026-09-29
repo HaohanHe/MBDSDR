@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MCP 接口确定性测试。
 

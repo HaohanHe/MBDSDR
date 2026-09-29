@@ -1,33 +1,31 @@
+# SPDX-License-Identifier: MIT
 """
 sky_interaction.py — 桌面天空图交互控制模块
 ================================================
 
-交互模型参考 Stellarium (GPL-3.0), 独立重实现
+依据通用天球图交互模型独立实现
 ================================================
-本模块把 Stellarium 的视角控制 / 点选 / 反投影交互模型搬到我们的
-PySide6 极坐标天空图上, 全部数学独立重写, 不依赖 Stellarium 运行时。
+本模块实现视角控制 / 点选 / 反投影交互，作用于 PySide6 极坐标天空图，
+全部数学独立编写，不依赖任何外部天球软件运行时。
 
-参考的 Stellarium 源文件 (行号为本模块开发时检出的版本):
-  - 视角平移:   src/core/StelMovementMgr.cpp:1576  panView(deltaAz, deltaAlt)
-  - 拖拽反投影: src/core/StelMovementMgr.cpp:1659  dragView(x1,y1,x2,y2)
-  - 滚轮缩放:   src/core/StelMovementMgr.cpp:537   handleMouseWheel()
-  - goto 动画:   src/core/StelMovementMgr.cpp:1472  moveToAltAzi()
-  - FOV 夹取:   src/core/StelMovementMgr.hpp:466    setFov(f) [minFov..maxFov]
-  - 反投影:     src/core/StelProjector.cpp:604     unProject(x,y,v)
-  - 点选搜索半径: src/core/StelObjectMgr.cpp:36     searchRadiusPixel=25
-  - 点选算法:   src/core/StelObjectMgr.cpp:461     cleverFind(core,v)
-  - 点选入口:   src/core/StelObjectMgr.cpp:516     cleverFind(core,x,y)
-  - 脚本 API:   src/scripting/StelMainScriptAPI.hpp:442  moveToObject / :455 moveToAltAzi
+交互功能：
+  - 视角平移:   panView(deltaAz, deltaAlt)
+  - 拖拽反投影: dragView(x1,y1,x2,y2)
+  - 滚轮缩放:   handleMouseWheel()
+  - goto 动画:   moveToAltAzi()
+  - FOV 夹取:   setFov(f) [minFov..maxFov]
+  - 反投影:     unProject(x,y,v)
+  - 点选搜索半径与最近邻点选算法
 
 坐标约定 (与 desktop/rf_sky_view.py 完全一致, 与 celestial_geometry.py 一致):
   - az: 方位角, 度, 北=0, 东=90, 南=180, 西=270, 顺时针为正
   - alt: 仰角, 度, 地平线=0, 天顶=90
   - 屏幕: px 向右, py 向下 (Qt 约定); 北指向屏幕上方
 
-正/反投影使用 celestial_geometry.AzimuthalEquidistantProjection (Stellarium
-的 "Fish-eye" / 等距方位投影, src/core/StelProjectorClasses.cpp:363)。
-视图中心 (center_az, center_alt) 通过一个旋转矩阵 R_view 映射到屏幕中心,
-等价于 Stellarium StelProjector 里的 modelViewTransform (StelProjector.cpp:615)。
+正/反投影使用 celestial_geometry.AzimuthalEquidistantProjection（等距方位投影）。
+视图中心 (center_az, center_alt) 通过一个旋转矩阵 R_view 映射到屏幕中心。
+
+Stellarium 仅作为技术参考与致谢，本模块未包含其源代码。
 """
 
 from __future__ import annotations
@@ -63,22 +61,19 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------------
-# 交互参数 (对照 Stellarium 默认值)
-#   Stellarium minFov=0.001389° (5"), maxFov 默认 360° (StelMovementMgr.cpp:84,172)
+# 交互参数
 #   我们的天空图是 SDR 全天空图, 不需要望远镜级缩放: 限制在 30°..180°。
 # ---------------------------------------------------------------------------
 DEFAULT_MIN_FOV_DEG: float = 30.0
 DEFAULT_MAX_FOV_DEG: float = 180.0
-# Stellarium searchRadiusPixel=25 (StelObjectMgr.cpp:36), 按 FOV/屏宽换算成角距。
-# 我们直接用固定角距拾取半径 (度), 避免依赖像素缩放。
+# 点选搜索半径：按角距（度）给出，避免依赖像素缩放。
 DEFAULT_PICK_RADIUS_DEG: float = 2.0
 
 
 # ---------------------------------------------------------------------------
-# 视图状态: 对应 Stellarium StelMovementMgr 的 (viewDirection, currentFov)
-#   - viewDirection = 中心指向的 (az, alt)        -> center_az, center_alt
-#   - currentFov    = 视场角 (度)                 -> fov_deg
-# 参考 StelMovementMgr.hpp:504 currentFov, :506 minFov, :507 maxFov
+# 视图状态:
+#   - center_az/center_alt = 中心指向的 (az, alt)
+#   - fov_deg              = 视场角 (度)
 # ---------------------------------------------------------------------------
 @dataclass
 class ViewState:
@@ -96,7 +91,7 @@ class ViewState:
     fov_deg: float = 120.0            # 默认: 能看到天顶到地平线
     rotation: float = 0.0
 
-    # -- 夹取范围 (对照 StelMovementMgr.hpp:466 setFov 的 qBound) -----------
+    # -- 夹取范围 ----------------------------------------------------------------
     min_fov: float = DEFAULT_MIN_FOV_DEG
     max_fov: float = DEFAULT_MAX_FOV_DEG
 
@@ -105,34 +100,31 @@ class ViewState:
 
     def _clamp(self) -> None:
         self.fov_deg = max(self.min_fov, min(self.max_fov, self.fov_deg))
-        # alt 夹取到 ±(90°-ε), 与 StelMovementMgr.cpp:1634-1635 一致
-        # 避免天顶/天底处方位角奇异。
+        # alt 夹取到 ±(90°-ε), 避免天顶/天底处方位角奇异。
         eps = 1e-4
         self.center_alt = max(-90.0 + eps, min(90.0 - eps, self.center_alt))
         self.center_az = self.center_az % 360.0
         if self.center_az < 0:
             self.center_az += 360.0
 
-    # -- 平移: 对应 StelMovementMgr::panView (StelMovementMgr.cpp:1576) -----
+    # -- 平移 ------------------------------------------------------------------
     def pan(self, delta_az_deg: float, delta_alt_deg: float) -> None:
         """平移天球: delta_az>0 向东(右)拖动视角, delta_alt>0 向天顶拖动。
 
-        参考 panView (StelMovementMgr.cpp:1626-1636):
           azVision -= deltaAz;  altVision += deltaAlt;
           alt 夹取到 ±(90°-1e-6) 防止极点奇异。
-        注意方向: dragView 里调用的是 panView(az2-az1, alt1-alt2),
-        即屏幕 y 向上对应 alt 增加 (我们下面 screen_to_sky 已把 y 翻转)。
+        注意方向: 拖拽时调用 pan(az2-az1, alt1-alt2),
+        即屏幕 y 向上对应 alt 增加 (screen_to_sky 已把 y 翻转)。
         """
         self.center_az -= delta_az_deg
         self.center_alt += delta_alt_deg
         self._clamp()
 
-    # -- 缩放: 对应 handleMouseWheel (StelMovementMgr.cpp:580) --------------
+    # -- 缩放 ------------------------------------------------------------------
     def zoom(self, num_steps: float, zoom_speed: float = 30.0) -> None:
         """滚轮缩放。
 
-        Stellarium: zoomFactor = exp(-mouseZoomSpeed * numSteps/60)
-                    zoomTo(getAimFov()*zoomFactor, 0.2s)   (StelMovementMgr.cpp:580-582)
+          zoomFactor = exp(-zoomSpeed * numSteps/60);  fov *= zoomFactor
         num_steps>0 (滚轮上滚) -> FOV 变小 (放大); <0 -> FOV 变大 (缩小)。
         指数缩放保证不同 FOV 下滚轮手感一致 (对数缩放)。
         """
@@ -141,12 +133,12 @@ class ViewState:
         self._clamp()
 
     def zoom_to(self, fov_deg: float) -> None:
-        """直接设定 FOV (对应 zoomTo, StelMovementMgr.cpp:1756)。"""
+        """直接设定 FOV。"""
         self.fov_deg = fov_deg
         self._clamp()
 
     def look_at(self, az_deg: float, alt_deg: float) -> None:
-        """goto: 居中到指定 (az, alt)。对应 moveToAltAzi (StelMovementMgr.cpp:1472)。"""
+        """goto: 居中到指定 (az, alt)。"""
         self.center_az = az_deg
         self.center_alt = alt_deg
         self._clamp()
@@ -159,8 +151,7 @@ class ViewState:
 # ---------------------------------------------------------------------------
 # 视图旋转矩阵: 把 (center_az, center_alt) 方向旋转到屏幕中心 (天顶方向)。
 #
-# 这等价于 Stellarium StelProjector 的 modelViewTransform (StelProjector.cpp:615
-# 在 unProject 末尾调用 modelViewTransform->backward(v))。
+# 视图旋转把 (center_az, center_alt) 方向映射到屏幕中心。
 #
 # 地平系约定 (celestial_geometry.vec_from_azalt):
 #   v = (cos(alt)cos(az), cos(alt)sin(az), -sin(alt)), 屏幕中心 = (0,0,-1)
@@ -180,9 +171,7 @@ def build_view_rotation(view: ViewState) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# 像素缩放: 对应 Stellarium StelProjector::pixelPerRad
-#   StelProjector.cpp:172: pixelPerRad = 0.5*viewportFovDiameter / fovToViewScalingFactor(fov/2)
-# 对等距方位投影, fovToViewScalingFactor(fov/2) = fov/2 (弧度), 故:
+# 像素缩放: 对等距方位投影, 归一化坐标是角距离(弧度), 故:
 #   pixelPerRad = (min_dim/2) / deg2rad(fov/2) = min_dim / deg2rad(fov)
 # ---------------------------------------------------------------------------
 def _pixel_per_rad(view: ViewState, widget_size: Tuple[int, int],
@@ -205,9 +194,8 @@ def _widget_center(widget_size: Tuple[int, int]) -> Tuple[float, float]:
 
 # ---------------------------------------------------------------------------
 # 正投影: (az, alt) -> 屏幕像素
-#   步骤 (对照 Stellarium StelProjector::project, StelProjector.cpp:390-391):
 #     1. v = vec_from_azalt(az, alt)                      (地平系单位向量)
-#     2. v_view = R_view @ v                              (modelViewTransform->forward)
+#     2. v_view = R_view @ v                              (视图旋转)
 #     3. (x_n, y_n) = proj._forward(v_view)               (投影核心)
 #     4. px = cx + y_n*ppr;  py = cy - x_n*ppr            (北朝上, y 向下)
 # ---------------------------------------------------------------------------
@@ -258,10 +246,9 @@ def sky_to_screen(az_deg: float, alt_deg: float,
 
 # ---------------------------------------------------------------------------
 # 反投影: 屏幕像素 -> (az, alt)
-#   对照 Stellarium StelProjector::unProject (StelProjector.cpp:604-616):
 #     v[0] = (x - viewportCenter[0]) / pixelPerRad
 #     v[1] = (y - viewportCenter[1]) / pixelPerRad
-#     v[2] = 0;  backward(v);  modelViewTransform->backward(v)
+#     v[2] = 0;  backward(v);  再逆视图旋转
 # ---------------------------------------------------------------------------
 def screen_to_sky(screen_x: float, screen_y: float,
                   view: ViewState,
@@ -272,7 +259,6 @@ def screen_to_sky(screen_x: float, screen_y: float,
 
     这是点选/拖拽的核心: 屏幕坐标 -> 归一化坐标 -> 反投影到 3D 单位向量
     -> 旋转回地平系 -> (az, alt)。
-    对照 StelObjectMgr::cleverFind(core,x,y) (StelObjectMgr.cpp:516-532)。
     """
     if projection is None:
         projection = AzimuthalEquidistantProjection()
@@ -307,12 +293,10 @@ def screen_to_sky(screen_x: float, screen_y: float,
 
 # ---------------------------------------------------------------------------
 # 角距离与拾取
-#   对照 StelObjectMgr::cleverFind (StelObjectMgr.cpp:461-508):
-#     1. 由当前 FOV/屏宽把像素搜索半径换算成角距 fov_around
-#     2. 遍历各模块 searchAround(v, fov_around)
-#     3. 在候选里选 pixel_distance + priority 最小者
-# 我们的简化版: 直接遍历天空对象, 找点击位置角距离最近的, 若在
-# pick_radius_deg 内则选中。
+#     1. 由拾取角半径给出搜索范围
+#     2. 遍历天空对象, 计算角距离
+#     3. 在范围内选角距离最近者
+# 直接遍历天空对象, 找点击位置角距离最近的, 若在 pick_radius_deg 内则选中。
 # ---------------------------------------------------------------------------
 def angular_distance_deg(az1: float, alt1: float,
                          az2: float, alt2: float) -> float:
@@ -337,8 +321,7 @@ def pick_object(az_deg: float, alt_deg: float,
         az_deg, alt_deg: 点击位置的地平坐标 (由 screen_to_sky 得到)。
         sky_objects: 可迭代对象, 每个元素需有 azimuth_deg / elevation_deg
                      属性 (与 rf_sky_view.SkyObject 一致)。
-        pick_radius_deg: 拾取角半径 (度)。Stellarium 用 25px 像素半径
-                         (StelObjectMgr.cpp:36), 这里用角距更直观。
+        pick_radius_deg: 拾取角半径 (度)。用角距给出，与像素缩放无关。
 
     Returns:
         最近的 SkyObject, 或 None (无对象在半径内)。
@@ -358,12 +341,10 @@ def pick_object(az_deg: float, alt_deg: float,
 
 # ---------------------------------------------------------------------------
 # Qt 交互混入类
-#   对照 Stellarium 的事件分发:
-#     - StelMovementMgr::handleMouseClicks (StelMovementMgr.cpp:614)
-#         左键按下开始拖拽追踪; 释放时若位移 < dragTriggerDistance(4px,
-#         StelMovementMgr.cpp:130) 则视为点击 -> findAndSelect (:714)
-#     - StelMovementMgr::handleMouseWheel (StelMovementMgr.cpp:537)
-#     - StelMovementMgr::dragView (StelMovementMgr.cpp:1659)
+#   事件分发:
+#     - 左键按下开始拖拽追踪; 释放时若位移 < dragTriggerDistance(4px) 则视为点击
+#     - 滚轮缩放
+#     - 拖拽平移
 #
 # 用法 (在你的 QWidget 里多继承):
 #     class RFSkyView(QWidget, SkyInteractionHandler):
@@ -393,7 +374,7 @@ class SkyInteractionHandler:
         on_drag_state_changed(dragging) — 拖拽状态切换
     """
 
-    # 拖拽判定阈值 (像素), 对照 StelMovementMgr.cpp:130 dragTriggerDistance=4
+    # 拖拽判定阈值 (像素)
     DRAG_THRESHOLD_PX: float = 4.0
 
     def __init__(self) -> None:
@@ -426,10 +407,7 @@ class SkyInteractionHandler:
 
     # -- 事件处理 ----------------------------------------------------------
     def mousePressEvent(self, event) -> None:
-        """左键按下: 记录拖拽起点。
-
-        对照 StelMovementMgr.cpp:614 handleMouseClicks 的按下分支:
-        记录 previousX/previousY, 进入可能的拖拽状态。
+        """左键按下: 记录拖拽起点，进入可能的拖拽状态。
         """
         # 兼容 QMouseEvent 与纯 (x,y) 元组测试桩
         px, py = self._event_xy(event)
@@ -442,10 +420,8 @@ class SkyInteractionHandler:
     def mouseMoveEvent(self, event) -> None:
         """左键拖拽: 平移视角。
 
-        对照 StelMovementMgr::dragView (StelMovementMgr.cpp:1659-1688):
-          unProject(x1,y1) -> v1; unProject(x2,y2) -> v2
-          rectToSphe -> (az1,alt1),(az2,alt2)
-          panView(az2-az1, alt1-alt2)
+          unProject(x1,y1) -> (az1,alt1); unProject(x2,y2) -> (az2,alt2)
+          pan(az2-az1, alt1-alt2)
         这里直接用 screen_to_sky 把前后两点反投影, 求角位移, 调 view_state.pan。
         """
         if self._drag_last_px is None:
@@ -453,7 +429,7 @@ class SkyInteractionHandler:
         px, py = self._event_xy(event)
         last = self._drag_last_px
 
-        # 位移超过阈值才认为是拖拽 (对照 dragTriggerDistance=4px)
+        # 位移超过阈值才认为是拖拽
         dx = px - last[0]
         dy = py - last[1]
         if not self._dragging:
@@ -471,7 +447,6 @@ class SkyInteractionHandler:
                                   self.projection, size)
 
         # pan 的方向: 拖动屏幕点, 让该点下的天空跟手指走。
-        # Stellarium: panView(az2-az1, alt1-alt2) (dragView:1684)
         #   deltaAz = az2-az1, deltaAlt = alt1-alt2
         daz = az2 - az1
         if daz > 180.0:
@@ -486,9 +461,6 @@ class SkyInteractionHandler:
 
     def mouseReleaseEvent(self, event) -> None:
         """左键释放: 若未拖拽则视为点击 -> 点选天体。
-
-        对照 StelMovementMgr.cpp:700-717:
-          if (!hasDragged) objectMgr->findAndSelect(core, x, y, ...)
         """
         was_dragging = self._dragging
         px, py = self._event_xy(event)
@@ -511,10 +483,9 @@ class SkyInteractionHandler:
     def wheelEvent(self, event) -> None:
         """滚轮缩放 FOV。
 
-        对照 StelMovementMgr::handleMouseWheel (StelMovementMgr.cpp:537-584):
           numSteps = angleDelta / 120
-          zoomFactor = exp(-mouseZoomSpeed * numSteps / 60)
-          zoomTo(aimFov * zoomFactor, 0.2)
+          zoomFactor = exp(-zoomSpeed * numSteps / 60)
+          fov *= zoomFactor
         """
         # QWheelEvent: angleDelta().y() 上下滚; 纯桩给 (delta,) 元组
         delta = self._event_wheel_delta(event)
@@ -525,8 +496,7 @@ class SkyInteractionHandler:
     def mouseDoubleClickEvent(self, event) -> None:
         """双击: 居中到点击位置 (goto)。
 
-        对照 Stellarium: 中键点击已选对象 -> moveToObject (StelMovementMgr.cpp:735);
-        这里映射为双击任意处 -> 居中到该天球方向 (moveToAltAzi, :1472)。
+        映射为双击任意处 -> 居中到该天球方向。
         """
         px, py = self._event_xy(event)
         size = self._widget_size()

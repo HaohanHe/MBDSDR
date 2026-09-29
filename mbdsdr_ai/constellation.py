@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR 星座图 / EVM 统计（纯 numpy）
-====================================
-IQ 符号 -> 理想星座点聚类 -> EVM（误差向量幅度）。
-GNU Radio constellation sink 的 AI 诊断版。
+Constellation / EVM statistics (pure NumPy).
+
+Clusters received I/Q symbols around their ideal constellation points and
+computes the error-vector magnitude (EVM) as a modulation-quality diagnostic.
 """
 from __future__ import annotations
 import numpy as np

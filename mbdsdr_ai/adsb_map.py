@@ -1,21 +1,15 @@
-"""
-ADS-B 地图投影与航空器跟踪（纯 Python，无 Qt 依赖）
-====================================================
+# SPDX-License-Identifier: MIT
+"""ADS-B 地图投影与航空器跟踪（纯 Python，无 Qt 依赖）。
 
 本模块只做几何与数据归并，不画界面、不联网取瓦片：
+  * project_equirectangular 等距圆柱投影，把 (lat, lon) 映射到画布像素；
+  * haversine_km 大圆距离（公里）；
+  * Aircraft 单架航空器的状态记录；
+  * AircraftTracker 按 ICAO 十六进制码归并多帧信息；
+  * WORLD_LAND_POLYGONS 离线简化大陆轮廓（等距圆柱投影底图），仅用于低精度示意。
 
-  * ``project_equirectangular``  等距圆柱投影，把 (lat, lon) 映射到画布像素。
-  * ``haversine_km``             大圆距离（公里）。
-  * ``Aircraft``                 单架航空器的状态记录。
-  * ``AircraftTracker``          按 ICAO 十六进制码归并多帧信息：呼号、
-                                 气压高度、地速/航向可能来自不同帧，位置
-                                 (lat/lon) 以最新一次配对成功的 CPR 位置覆盖。
-  * ``WORLD_LAND_POLYGONS``      离线简化大陆轮廓（等距圆柱投影底图），
-                                 仅用于低精度示意，不替代任何测绘数据。
-
-数据来源约定：``update(frame_dict)`` 接收 ``mbdsdr_ai.adsb.ADSBDecoder.handle``
-返回的 dict，字段包括 ``icao``(hex)、``callsign``、``altitude_ft``、
-``velocity``(含 ``groundspeed_kt``/``track_deg``) 以及配对成功后才出现的
+update(frame_dict) 接收 ``mbdsdr_ai.adsb.ADSBDecoder.handle`` 返回的 dict，
+字段包括 ``icao``(hex)、``callsign``、``altitude_ft``、``velocity``、
 ``lat``/``lon``。没有位置帧时不臆造坐标，``lat``/``lon`` 保持 None。
 """
 

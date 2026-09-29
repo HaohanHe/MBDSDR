@@ -1,7 +1,6 @@
-"""多相有理重采样测试。
-
-对照 mbdsdr_ai/polyphase_resampler.py（sdrpp multirate/rational_resampler.h:120-165）。
-"""
+# SPDX-License-Identifier: MIT
+"""Polyphase rational resampler tests.
+非硬件 / NOT HARDWARE: synthetic signals."""
 import numpy as np
 from mbdsdr_ai.polyphase_resampler import PolyphaseResampler
 

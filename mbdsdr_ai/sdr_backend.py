@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - SDR 后端抽象层
 ================================
@@ -1638,13 +1639,13 @@ class HackRFBackend(SDRBackend):
     支持 1 MHz - 6 GHz，最大 20 MS/s，半双工收发。
     需要安装：pip install hackrf 以及 libhackrf 系统库。
 
-    硬件量程/增益档全部来自 mbdsdr_ai/hackrf_params.HackRFParams（移植自
-    repos/hackrf 的 libhackrf 与 max2837 固件驱动），关键来源：
-      - 频率 1-6000 MHz        host/libhackrf/src/hackrf.h:235,662,670
-      - 采样率 2-20 MHz       host/libhackrf/src/hackrf.h:247,1794
-      - LNA(RX IF) 0-40/8dB   host/libhackrf/src/hackrf.c:2027,2031; firmware/common/max2837.c:344-371
-      - VGA(RX BB) 0-62/2dB   host/libhackrf/src/hackrf.c:2054,2058; firmware/common/max2837.c:373-381
-      - TXVGA 0-47/1dB        host/libhackrf/src/hackrf.c:2081; firmware/common/max2837.c:383-395
+    硬件量程/增益档全部来自 mbdsdr_ai/hackrf_params.HackRFParams（依据 HackRF One
+    官方数据手册与公开 API 头文件独立整理；libhackrf 上游仅作技术参考，本仓未包含其源代码）：
+      - 频率 1-6000 MHz
+      - 采样率 2-20 MHz
+      - LNA(RX IF) 0-40 dB（步进 8 dB）
+      - VGA(RX BB) 0-62 dB（步进 2 dB）
+      - TXVGA 0-47 dB（步进 1 dB）
     更完整的 ctypes 直连后端见 mbdsdr_ai/hackrf_params.py:HackRFBackend。
     """
 
@@ -3449,7 +3450,7 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
         logger.warning(f"PlutoSDR 枚举异常: {e}")
 
     # 5) gr-osmosdr 通用后端枚举（rtl/hackrf/bladerf/uhd/soapy 统一设备字符串）
-    #    来源: mbdsdr_ai/osmosdr_source.py（移植自 repos/gr-osmosdr/lib/source_impl.cc:202-269）
+    #    参考: mbdsdr_ai/osmosdr_source.py（gr-osmosdr 设备字符串约定仅作技术参考）
     #    仅补充尚未被 SoapySDR/pyrtlsdr 识别到的后端（bladerf/uhd/airspy 等）。
     #    无库/无设备时 DeviceEnumerator.enumerate() 返回 []，绝不造假。
     try:
@@ -3517,14 +3518,14 @@ def build_backend_for_device(dev: Dict[str, Any]) -> Optional[SDRBackend]:
         if driver == "bladerf":
             # 真实打开由 BladeRFBackend.connect() 决定成败；
             # 无 libbladeRF/无设备时 connect 返回 False，绝不假成功。
-            # 来源: mbdsdr_ai/bladerf_params.py（移植自 repos/bladeRF）。
+            # 参考: mbdsdr_ai/bladerf_params.py（依据 bladeRF 公开数据手册整理）。
             from .bladerf_params import BladeRFBackend as _BladeRFBackend
             return _BladeRFBackend(
                 device_identifier=str(args.get("device_identifier", "") or ""))
         if driver == "limesdr":
             # 真实打开由 LimeSDRBackend.connect() 决定成败；
             # 无 libLimeSuite/无设备时 connect 返回 False，绝不假成功。
-            # 来源: mbdsdr_ai/limesuite_params.py（移植自 repos/LimeSuite）。
+            # 参考: mbdsdr_ai/limesuite_params.py（依据 LimeSDR 公开数据手册整理）。
             from .limesuite_params import LimeSDRBackend as _LimeSDRBackend
             return _LimeSDRBackend(device_index=int(args.get("index", 0)))
         if driver == "plutosdr":

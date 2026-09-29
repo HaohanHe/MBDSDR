@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 桌面端 CarWith 设计体系 Token 单例
 ==========================================

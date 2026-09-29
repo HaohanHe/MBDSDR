@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 频谱累加器单元测试
 ====================

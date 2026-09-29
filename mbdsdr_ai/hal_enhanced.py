@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI - HAL 增强：统一设备健康检查
 ==========================================

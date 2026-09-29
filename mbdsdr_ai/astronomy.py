@@ -1,7 +1,8 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 天文计算模块
 ==============================
-Astronomy：借鉴 Stellarium/Stellarium Web Engine 的天文计算能力。
+Astronomy：通用天文计算能力。
 
 核心能力：
 - 坐标系统转换：J2000 赤道 ↔ 地平（Alt/Az）↔ 银道
@@ -11,12 +12,8 @@ Astronomy：借鉴 Stellarium/Stellarium Web Engine 的天文计算能力。
 - 天线/望远镜参数：口径、增益、波束宽度、视场
 - 卫星过境预测：升起/中天/落下时间、最大仰角
 
-对照 Stellarium Web Engine：
-- frames.h → 坐标框架转换
-- observer.h → 观测者模型
-- algos/refraction.c → 大气折射
-- telescope.h → 望远镜/天线参数
-- navigation.h → 导航/指向
+依据公开球面天文与观测天文方法独立实现；Stellarium / Stellarium Web Engine
+仅作为技术参考与致谢，本模块未包含其源代码。
 """
 
 import math
@@ -58,7 +55,7 @@ class FrameType(str, Enum):
 @dataclass
 class Observer:
     """
-    观测者模型（对照 Stellarium observer_t）。
+    观测者模型（位置/气象参数）。
 
     包含位置信息和气象参数，用于坐标转换和大气折射计算。
     """
@@ -129,7 +126,7 @@ class AltAzCoord:
 @dataclass
 class AntennaParams:
     """
-    天线/望远镜参数（对照 Stellarium telescope_t）。
+    天线/望远镜参数。
 
     用于计算天线增益、波束宽度、视场等。
     """
@@ -379,7 +376,7 @@ def compute_refraction(
     计算大气折射修正量（度）。
 
     基于 Saemundsson/Bennett 公式，适用于仰角 > -2 度。
-    对照 Stellarium algos/refraction.c。
+    大气折射修正（Saemundsson 公式）。
 
     参数：
         alt_deg: 真实仰角（度，未修正折射）
@@ -489,15 +486,15 @@ def _sat_elaz_at_unix(sat: "Satrec", t_unix: float,
                       ) -> Optional[Tuple[float, float]]:
     """真坐标变换：TEME -> ECEF(绕 z 转 -GMST) -> ENU -> (仰角, 方位角)。
 
-    来源: gpredict repos/gpredict/src/predict-tools.c:82 + sgp_obs.c:110-122。
-    椭球用 WGS-72（与 SGP4 内核 xkmper=6378.135 一致，见 sgp4sdp4.h:211,216），
+    TEME→ECEF→站心 ENU 坐标变换。
+    椭球用 WGS-72（与 SGP4 内核赤道半径 6378.135 km 一致），
     避免轨道 WGS-72 / 站心 WGS-84 混用的米级系统差。
     """
-    # WGS-72 椭球（与 orbit.py 一致；sgp4sdp4.h:211 xkmper=6378.135, :216 f=1/298.26）
+    # WGS-72 椭球（与 orbit.py 一致；赤道半径 6378.135 km，扁率 1/298.26）
     a = 6378.135
     f = 1.0 / 298.26
     e2 = f * (2.0 - f)
-    omega_e = 7.292115e-5  # sgp4sdp4.h:250 mfactor
+    omega_e = 7.292115e-5  # rad/s, 地球自转角速度 (WGS-72)
 
     jd_utc = t_unix / 86400.0 + 2440587.5
     jd = int(jd_utc)
@@ -549,7 +546,7 @@ def predict_satellite_pass(
     预测卫星过境（使用 sgp4 真传播 + ECI→ECEF→ENU 真坐标变换）。
 
     算法：粗扫 time_step_s 定位仰角跨越 min_alt_deg 的区间，再二分法把 AOS/LOS
-    收敛到 ~0.25s 精度（对照 gpredict predict-tools.c:129-314 的粗/细扫）。
+    收敛到 ~0.25s 精度（粗扫+二分细扫）。
     若 sgp4 库不可用，返回空列表。
     """
     try:

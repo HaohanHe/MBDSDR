@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: MIT
 """
-rtl_433 真实移植 - 往返验证测试
+ISM 设备解码器 - 往返验证测试
 =================================
 
-验证 mbdsdr_ai/rtl433_decoder.py 的每一级都真实可用：
+验证 mbdsdr_ai/rtl433_decoder.py 的每一级都可用：
   1. 每个设备解码器：已知合法比特/字节流 → 解出正确物理量
   2. 曼彻斯特编码 → 解码 往返一致
   3. OOK 脉冲检测：合成包络 → 正确提取 pulse/gap
@@ -22,7 +23,7 @@ from mbdsdr_ai import rtl433_decoder as R  # noqa: E402
 
 class TestManchesterRoundtrip(unittest.TestCase):
     def test_encode_decode_roundtrip(self):
-        """曼彻斯特编码→解码往返。来源: src/bitbuffer.c:255-280"""
+        """曼彻斯特编码→解码往返"""
         data = [1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0]
         enc = R.manchester_encode_bits(data)
         # 编码后每个数据位变 2 位
@@ -31,7 +32,7 @@ class TestManchesterRoundtrip(unittest.TestCase):
         self.assertEqual(dec, data)
 
     def test_manchester_pair_rule(self):
-        """'10'→0，'01'→1，'00'/'11' 非法停止。来源: src/bitbuffer.c:266-277"""
+        """'10'→0，'01'→1，'00'/'11' 非法停止"""
         self.assertEqual(R.manchester_decode_bits([1, 0]), [0])
         self.assertEqual(R.manchester_decode_bits([0, 1]), [1])
         # '00' 非法，停止
@@ -46,7 +47,7 @@ class TestManchesterRoundtrip(unittest.TestCase):
 class TestPulseDemodulator(unittest.TestCase):
     def test_synthetic_ook_pulses_extracted(self):
         """合成 OOK 包络 → 正确提取脉冲/间隔时长。
-        阈值/迟滞状态机来源: src/pulse_detect.c:300-430。"""
+        阈值/迟滞状态机。"""
         sr = 250_000
         us = 1e6 / sr  # 4 us/sample
         noise, high = 100.0, 1000.0
@@ -68,7 +69,7 @@ class TestPulseDemodulator(unittest.TestCase):
             self.assertAlmostEqual(p.gap_us, gap_samp * us, delta=gap_samp * us * 0.15 + us)
 
     def test_ppm_slicer(self):
-        """PPM: 短间隔=0, 长间隔=1。来源: src/pulse_slicer.c:310-318"""
+        """PPM: 短间隔=0, 长间隔=1"""
         cfg = R.DeviceConfig("Nexus", R.OOK_PULSE_PPM, short_width=1000, long_width=2000)
         pulses = [R.Pulse(500, 1000), R.Pulse(500, 2000), R.Pulse(500, 2000), R.Pulse(500, 1000)]
         self.assertEqual(R.slice_ppm(pulses, cfg), [0, 1, 1, 0])
@@ -78,7 +79,7 @@ class TestDeviceDecoders(unittest.TestCase):
     """每个设备一条已知合法消息 → 正确物理量。"""
 
     def test_nexus(self):
-        """Nexus: id=0x45, ch1, bat OK, 22.5°C, 45%RH。来源: devices/nexus.c:90-96"""
+        """Nexus: id=0x45, ch1, bat OK, 22.5°C, 45%RH"""
         out = R.NexusDecoder().decode_message(bytes.fromhex("4580E1F2D0"))
         self.assertIsNotNone(out)
         self.assertEqual(out["id"], 0x45)
@@ -89,7 +90,7 @@ class TestDeviceDecoders(unittest.TestCase):
 
     def test_acurite_5n1(self):
         """Acurite 5n1 temp/hum 帧。输入为切片原始比特，解码器内部做 bitbuffer_invert。
-        来源: devices/acurite.c:1349,607,649,658"""
+        """
         v = bytes([0xC1, 0x23, 0x78, 0x00, 0x09, 0x00, 0xB7, 0x1C])
         raw = bytes([~x & 0xFF for x in v])  # 还原成切片原始输出
         out = R.Acurite5n1Decoder().decode_message(raw)
@@ -103,7 +104,7 @@ class TestDeviceDecoders(unittest.TestCase):
         self.assertIsNone(R.Acurite5n1Decoder().decode_message(bad))
 
     def test_ambient_weather(self):
-        """Ambient F007TH: id=0x37, ch1, 20.0°C, 48%RH。来源: devices/ambient_weather.c:59-64"""
+        """Ambient F007TH: id=0x37, ch1, 20.0°C, 48%RH"""
         body = bytes([0x05, 0x37, 0x04, 0x38, 0x30])
         b5 = R.lfsr_digest8(body, 0x98, 0x3e) ^ 0x64
         out = R.AmbientWeatherTHDecoder().decode_message(body + bytes([b5]))
@@ -114,7 +115,7 @@ class TestDeviceDecoders(unittest.TestCase):
         self.assertEqual(out["humidity"], 48)
 
     def test_lacrosse_tx(self):
-        """LaCrosse TX: id=21, 22.5°C。来源: devices/lacrosse.c:121-138"""
+        """LaCrosse TX: id=21, 22.5°C"""
         out = R.LaCrosseTXDecoder().decode_message(bytes.fromhex("0A02A72572D0"))
         self.assertIsNotNone(out)
         self.assertEqual(out["id"], 21)
@@ -123,7 +124,7 @@ class TestDeviceDecoders(unittest.TestCase):
     def test_oregon_thgr122n(self):
         """Oregon THGR122N: id=0x35, ch1, 22.5°C, 45%RH。
         先构造 reflect 后的 msg 域字节，再 reflect_nibbles 还原成输入。
-        来源: devices/oregon_scientific.c:52-87,233,240-243"""
+        """
         # msg(post-reflect) = [1D 20 <ch<<4|id_lo> <id_hi<<4|battery> 52 20 54 ...]
         # device_id = (msg2&0x0F)|(msg3&0xF0) = 0x35 → msg2 low=0x5, msg3 high=0x3
         msg = bytearray([0x1D, 0x20, 0x05, 0x30, 0x52, 0x20, 0x54, 0x00, 0x00])
@@ -142,7 +143,7 @@ class TestDeviceDecoders(unittest.TestCase):
         self.assertEqual(out["humidity"], 45)
 
     def test_tpms_citroen(self):
-        """Citroen TPMS: id=deadbeef, ~220kPa, 25°C。来源: devices/tpms_citroen.c:58-85"""
+        """Citroen TPMS: id=deadbeef, ~220kPa, 25°C"""
         b = bytearray([0x00, 0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0xA1, 0x4B, 0x01])
         crc = 0
         for x in b[1:]:
@@ -154,7 +155,7 @@ class TestDeviceDecoders(unittest.TestCase):
         self.assertAlmostEqual(out["temperature_c"], 25.0, places=1)
 
     def test_tpms_elantra(self):
-        """Elantra2012 TPMS: id=01020304, 240kPa, 27°C。来源: devices/tpms_elantra2012.c:63-72"""
+        """Elantra2012 TPMS: id=01020304, 240kPa, 27°C"""
         b = bytearray([180, 77, 1, 2, 3, 4, 0x40, 0])
         b[7] = R.crc8(bytes(b[:7]), 0x07, 0x00)
         out = R.TpmsElantraDecoder().decode_message(bytes(b))

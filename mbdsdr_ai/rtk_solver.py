@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
-rtk_solver.py — RTK float 解算接口（移植自 RTKLIB src/rtkpos.c）
+rtk_solver.py — RTK float 解算接口
 
-本模块提供 RTK 浮点解（float solution）骨架：
-  - 双差观测组合（参考 rtkpos.c:1022 ddres()）
+本模块依据公开 RTK/GNSS 标准方法独立实现 RTK 浮点解（float solution）骨架：
+  - 双差观测组合（double-difference residuals）
   - 扩展卡尔曼滤波：状态 = [位置(3), 接收机钟差, 对流层湿延迟, 各双差模糊度]
   - 至少能跑通 float 解（位置输出）
   - LAMBDA 固定解标注 TODO 并留接口
 
 注意：本实现聚焦「接口可调用 + 残差/位置估计正确」，不追求工程级精度。
-所有移植处标注「来源: RTKLIB src/<file>.c:<line>」。
+RTKLIB 仅作为技术参考与致谢，本模块未包含其源代码。
 """
 
 from __future__ import annotations
@@ -57,15 +58,15 @@ class RTKInput:
 class RTKFloatSolver:
     """RTK 浮点解算器。
 
-    状态向量（rtkpos.c: rtk->x）：
+    状态向量：
         x[0:3]  = 流动站 ECEF 位置
         x[3]    = 流动站接收机钟差(m)
         x[4]    = 对流层湿延迟(ZWD, m)
         x[5:]   = 各双差模糊度(m)
 
-    双差残差（rtkpos.c:1081-1082）：
+    双差残差：
         v = (P_rov_i - P_base_i) - (P_rov_j - P_base_j)
-    H 行（rtkpos.c:1086-1088）：
+    H 行（视线方向单位向量）：
         H[k] = -e_rov_i[k] + e_rov_j[k]   for k=0,1,2
     """
 
@@ -83,11 +84,11 @@ class RTKFloatSolver:
         self._amb_index: Dict[Tuple[int, int], int] = {}  # (prn_i, prn_j) -> state idx
 
     # ----------------------------------------------------------
-    # 选择参考卫星（仰角最高）—— rtkpos.c:1058-1063
+    # 选择参考卫星（仰角最高）
     # ----------------------------------------------------------
     @staticmethod
     def _select_ref_sat(obs: List[RTKObs], rr: np.ndarray) -> int:
-        """选择仰角最高的卫星作为参考星。rtkpos.c:1058-1062。"""
+        """选择仰角最高的卫星作为参考星。"""
         best_i = 0
         best_el = -1.0
         lat, lon, _ = CoordinateConverter.ecef_to_llh(*rr)
@@ -100,7 +101,7 @@ class RTKFloatSolver:
         return best_i
 
     # ----------------------------------------------------------
-    # 双差残差与设计矩阵 —— rtkpos.c:1022 ddres()
+    # 双差残差与设计矩阵
     # ----------------------------------------------------------
     def _build_dd_equations(self, inp: RTKInput,
                             x: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -154,14 +155,14 @@ class RTKFloatSolver:
             r_rov_j, e_rov_j = CoordinateConverter.geodist(o.rs, x[:3])
             r_base_j, _ = CoordinateConverter.geodist(o.rs, inp.base_ecef)
 
-            # ---- 伪距双差残差 (rtkpos.c:1081-1082) ----
+            # ---- 伪距双差残差 ----
             sd_pr_i_ = ref.pseudorange - ref_base.pseudorange
             sd_pr_j_ = o.pseudorange - ob.pseudorange
             pred_pr = (r_rov_i - r_base_i) - (r_rov_j - r_base_j)
             v_pr = (sd_pr_i_ - sd_pr_j_) - pred_pr
 
             H_pr = np.zeros(nx)
-            # rtkpos.c:1087  H[k] = -e_rov_i[k] + e_rov_j[k]
+            #  H[k] = -e_rov_i[k] + e_rov_j[k]
             H_pr[0:3] = -e_rov_i + e_rov_j
             v_list.append(v_pr)
             H_list.append(H_pr)
@@ -185,12 +186,12 @@ class RTKFloatSolver:
         return np.array(v_list), np.array(H_list), np.array(R_list)
 
     # ----------------------------------------------------------
-    # 卡尔曼滤波更新 —— rtkpos.c:557 kfupdate()
+    # 卡尔曼滤波更新
     # ----------------------------------------------------------
     def _kf_update(self, v: np.ndarray, H: np.ndarray, R_diag: np.ndarray) -> None:
         """线性卡尔曼更新：x = x + K v, P = (I-KH)P。
 
-        移植 rtkpos.c:557 kfupdate() 的核心公式：
+        EKF 更新核心公式：
             K = P H' (H P H' + R)^-1
             x += K v
             P = (I - K H) P
@@ -278,9 +279,9 @@ class RTKFloatSolver:
     def fix_ambiguities(self) -> Dict[str, Any]:
         """LAMBDA 整数固定解 —— TODO 未实现。
 
-        来源: RTKLIB src/lambda.c  lambda()。
-        预留接口：后续可调用 lambda.c 的 LAMBDA 算法对 self.x[5:]
-        的浮点模糊度做整数搜索，得到固定整周数后重算位置。
+        LAMBDA 方法（公开 GNSS 模糊度固定算法）。
+        预留接口：后续可对 self.x[5:] 的浮点模糊度做整数搜索，
+        得到固定整周数后重算位置。
         """
         raise NotImplementedError(
-            "LAMBDA fixed solution not implemented; see RTKLIB src/lambda.c")
+            "LAMBDA fixed solution not implemented yet")

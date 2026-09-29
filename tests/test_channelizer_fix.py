@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 test_channelizer_fix.py — 窄带模式单块输出修复的确定性单测。
 

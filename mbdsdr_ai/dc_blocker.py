@@ -1,27 +1,18 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI 内核 - 一阶 IIR DC 阻断器（DC blocker）
-==================================================
+First-order high-pass DC blocker.
 
-两种等价形式，对照上游真实实现：
+Removes the DC component of a real or complex signal with a one-pole
+high-pass difference equation
 
-1. SDR++ 泄漏积分器形式
-   repos/sdrpp/core/src/dsp/correction/dc_blocker.h:54-60
-       out[i] = in[i] - offset;
-       offset += out[i] * _rate;
-   对复数 I/Q 两路独立（offset 是 complex_t，逐分量运算，无串扰）。
+    y[n] = x[n] - x[n-1] + R * y[n-1]
 
-2. 经典一阶差分 IIR（本模块默认形式，任务规格指定）
-       y[n] = x[n] - x[n-1] + R * y[n-1]
-   这是上一形式在小步长下的等价闭环：令 a = 1/(1+rate)，SDR++ 形式的
-   传递函数 H(z) = (1/(1+rate)) * (1 - z^-1)/(1 - a*z^-1)。
-   忽略 1/(1+rate)≈1 的标量增益，极点即 R = a = 1/(1+rate)。
-
-- R 越接近 1，高通截止频率越低，对带内信号损伤越小，但跟踪直流慢漂越慢。
-- 对复数 IQ：I 路与 Q 路各自维持独立状态（无串扰），对照 SDR++
-  dc_blocker.h:20-22（offset 为 complex_t，逐分量加减）。
-- 流式：process() 跨块连续状态，O(1)，无需整段已知。
-
-License: GPL-3.0-or-later
+which realises the transfer function ``H(z) = (1 - z^-1) / (1 - R z^-1)``.
+As R approaches 1 the corner frequency drops (less in-band attenuation) at
+the cost of slower tracking of slow DC drift.  For complex I/Q the in-phase
+and quadrature channels are filtered independently, so there is no crosstalk.
+Filter state is carried across calls, making block-wise processing continuous
+and O(1) per sample.
 """
 
 from __future__ import annotations
@@ -61,13 +52,11 @@ def _first_order_iir(x: np.ndarray, r: float,
 
 
 class DCBlocker:
-    """一阶 IIR 直流阻断器：y[n] = x[n] - x[n-1] + R*y[n-1]。
-
-    对照 sdrpp/core/src/dsp/correction/dc_blocker.h:54-60（等价形式）。
+    """First-order IIR DC blocker: ``y[n] = x[n] - x[n-1] + R*y[n-1]``.
 
     Parameters:
-        r: 极点位置 R ∈ [0,1)，默认 0.999（任务规格）。
-           0.995 跟踪更快，0.9995 对信号损伤更小。
+        r: pole location R in [0, 1), default 0.999.
+           0.995 tracks faster; 0.9995 distorts the passband less.
     """
 
     def __init__(self, r: float = 0.999) -> None:
@@ -80,10 +69,7 @@ class DCBlocker:
         self._real = (0.0, 0.0)
 
     def process(self, x: np.ndarray) -> np.ndarray:
-        """处理一段样本；复数输入时 I/Q 两路独立各做一次 IIR。
-
-        对照 dc_blocker.h:55-58：对 complex_t 逐分量处理（I、Q 无串扰）。
-        """
+        """Process a block; complex input is filtered independently per I/Q."""
         x = np.asarray(x)
         if x.size == 0:
             return x

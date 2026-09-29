@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 tests/test_rtcm3.py — RTCM3 解析 + 多星座 SPP + RTK float 接口测试

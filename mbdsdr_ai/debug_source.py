@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 调试信号源 DebugSource：合成基带测试信号，接口兼容 SDRBackend
 ================================================================

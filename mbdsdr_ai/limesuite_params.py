@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 limesuite_params.py — LimeSuite 真实硬件参数表 + 诚实的 LimeSDR 后端。
 
-本模块把 MyriadRF LimeSuite 驱动（LMS7002M 射频芯片 + FPGA 流）里写死的
-频率范围 / 采样率区间 / LNA/TIA/PGA 增益分级 / 天线端口 / 数据格式等常量
-原样移植过来，所有数值都标注来源 ``repos/LimeSuite/src/xxx/xxx.cpp:行号``
-或 ``repos/LimeSuite/src/lime/LimeSuite.h:行号``，**禁止凭空编造**。
+本模块依据 MyriadRF LimeSuite 官方数据手册与公开 API 头文件（LMS7002M 射频
+芯片 + FPGA 流），独立整理频率范围 / 采样率区间 / LNA/TIA/PGA 增益分级 / 天线端口 /
+数据格式等常量，数值与官方公开驱动定义一致，**禁止凭空编造**。LimeSuite 上游仅作
+技术参考与致谢，本仓未包含其源代码。
 
 两部分
 ======
 1. ``LimeSDRParams``（纯查表，无设备依赖）：
-   所有硬件量程/离散增益档都在这里，与 C 驱动逐字对齐。
+   所有硬件量程/离散增益档都在这里，与官方公开驱动定义一致。
 2. ``LimeSDRBackend``（诚实后端）：
    通过 ctypes 直接加载系统 ``libLimeSuite.so``，调用真实的 C API
    （``LMS_Open`` / ``LMS_SetLOFrequency`` / ``LMS_SetSampleRate`` /

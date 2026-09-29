@@ -1,27 +1,14 @@
-"""
-MBDSDR AI 内核 - URH 式三层协议解码框架
-==========================================
-protocol_stack.py
+# SPDX-License-Identifier: MIT
+"""MBDSDR AI 内核 - 三层协议解码框架（位层 → 符号层 → 协议层）。
 
-把 MBDSDR 现有的一堆"一把梭"解码器（adsb / aprs / ax25 / acars / pocsag …）
-统一成 Universal Radio Hacker (URH) 的「位层 → 符号层 → 协议层」分层框架。
+把 MBDSDR 现有解码器（adsb / aprs / ax25 / acars / pocsag …）统一成分层框架：
+IQ 样本 --正交解调--> 基带 --脉冲切片--> bits --同步字/分组--> symbols --协议解析--> messages。
 
-设计借鉴
---------
-URH (https://github.com/jopohl/urh) 在 UI 上把一次解码显式拆成三段：
-  1. Signal（IQ 样本） --quadrature demod-->  QAD (quadrature audio demod)
-  2. QAD --grab_pulse_lens / digitize-->      bits（位层判决）
-  3. bits --sync word / grouping-->          symbols（符号层）
-  4. symbols --ProtocolAnalyzer-->           messages（协议层）
+本模块只定义抽象基类与注册表，不强制修改任何现有解码器文件；现有解码器通过
+register_protocol_layer(name, cls) 以适配器形式（可选）挂入。纯 numpy，无 GUI 依赖。
 
-对应源码：
-  * urh/src/urh/cythonext/signal_functions.pyx:333  afp_demod()  —— 正交解调
-  * urh/src/urh/cythonext/signal_functions.pyx:392  grab_pulse_lens() —— 位/符号切片
-  * urh/src/urh/signalprocessing/ProtocolAnalyzer.py —— 协议字段解析
-
-本模块只定义抽象基类与注册表，**不强制修改任何现有解码器文件**：
-现有解码器通过 ``register_protocol_layer(name, cls)`` 以适配器形式（可选）挂进来。
-纯 numpy，不引入 URH 的 PyQt 运行时。
+Universal Radio Hacker (URH, https://github.com/jopohl/urh) 的分层思路仅作技术
+参考与致谢，本仓未包含其源代码。
 """
 
 from __future__ import annotations
@@ -184,7 +171,7 @@ class FunctionProtocolAdapter(ProtocolLayer):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 内置：一个通用 OOK/ASK 位层（URH afp_demod + grab_pulse_lens 的 numpy 移植）
+# 内置：一个通用 OOK/ASK 位层（URH afp_demod + grab_pulse_lens 的 numpy ）
 # ═══════════════════════════════════════════════════════════════════════
 class ASKBitLayer(BitLayer):
     """OOK/ASK 位层。

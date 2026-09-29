@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """路A 桌面 UI offscreen 截图自证。
 
 生成 6 张：

@@ -1,69 +1,68 @@
+# SPDX-License-Identifier: MIT
 """
-receive_chain.py — 实时接收管线（ReceiveChain）
-=================================================
+receive_chain.py — real-time receive pipeline.
 
-把 15 个已单测通过的 DSP 模块端到端串成一条状态化、可动态调参的实时
-接收链。一个 :class:`ReceiveChain` 实例 = 一个 VFO；多个 VFO 各持一条链，
-共享同一份前端 IQ，互不干扰。
+Wires together the unit-tested DSP blocks into one stateful, dynamically
+tunable receive chain.  One :class:`ReceiveChain` instance is one VFO; several
+VFOs may share the same front-end I/Q without interfering.
 
-管线（数据流，左→右）::
+Pipeline (data flow, left to right)::
 
     device IQ (complex64, fs_in)
       │
-      ├─ DCBlocker        I/Q 独立一阶 IIR 去直流（dc_blocker.DCBlocker）
-      ├─ IQCorrector      g/φ 校正矩阵，默认单位阵（iq_correction.IQCorrector）
-      ├─ DecimatingFIR    抗混叠整数抽取 fs_in → fs_stage（decimating_fir）
-      ├─ XlatingFIR       NCO 频移(±offset) → 有理重采样 → 信道 LPF
-      │                   输出复基带（complex128, if_sr）（channelizer.XlatingFIR）
-      ├─ Squelch          RMS 门控（attack/decay/hang），AGC/解调前（squelch.Squelch）
-      ├─ Demodulator      AM / USB / LSB / NFM / WFM(立体声) / CW
-      │                   输出 float32 单声道，WFM 输出 (L, R) 双通道（if_sr）
-      ├─ AudioResampler   有状态多相 FIR 重采样 if_sr → 48 kHz（audio_resampler）
-      └─ 输出 float32（单声道 (N,) 或立体声 (N, 2)），采样率 48000 Hz
+      ├─ DCBlocker        independent I/Q first-order IIR DC removal
+      ├─ IQCorrector      g/phi correction matrix, identity by default
+      ├─ DecimatingFIR    anti-alias integer decimation fs_in -> fs_stage
+      ├─ XlatingFIR       NCO shift (+/-offset) -> rational resample -> LPF
+      │                   output complex baseband (complex128, if_sr)
+      ├─ Squelch          RMS gate (attack/decay/hang), before AGC/demod
+      ├─ Demodulator      AM / USB / LSB / NFM / WFM(stereo) / CW
+      │                   output float32 mono; WFM outputs (L, R)
+      ├─ AudioResampler   stateful polyphase FIR resample if_sr -> 48 kHz
+      └─ float32 output (mono (N,) or stereo (N,2)), sample rate 48000 Hz
 
-阶段与默认参数（随模式切换，见 ``_MODE_TABLE``）：
+Stage defaults per mode (see ``_MODE_TABLE``)::
 
-    模式   if_sr(Hz)  信道BW(Hz)  kind   输出
-    AM     15000     10000       am     单声道包络
-    FM/NFM 50000     12500       nfm    单声道相位鉴频+去加重
-    WFM    250000    150000      wfm    立体声 pilot19k→38k 再生
-    USB    24000     2800        usb    乘积检波（+BW/2）
-    LSB    24000     2800        lsb    乘积检波（-BW/2）
-    CW     3000      200         cw     BFO 800Hz 差拍
+    mode   if_sr(Hz)  channel BW(Hz)  kind   output
+    AM     15000     10000           am     mono envelope
+    FM/NFM 50000     12500           nfm    mono discriminator + de-emphasis
+    WFM    250000    150000          wfm    stereo (19k pilot -> 38k re-gen)
+    USB    24000     2800            usb    product detection (+BW/2)
+    LSB    24000     2800            lsb    product detection (-BW/2)
+    CW     3000      200             cw     800 Hz BFO beat
 
-────────────────────────────────────────────────────────────────────────
-接口契约（供 UI / 录音 / 声卡消费，红线）
-────────────────────────────────────────────────────────────────────────
+Interface contract (for UI / recording / sound-card consumers)
+------------------------------------------------------------------
 
-输入
-    ``process(iq_chunk)``：
-      * iq_chunk : complex64/complex128 ndarray，shape (N,)，N≥0。
-        设备未连接 / 无新样本时调用方应传 ``None`` 或空数组。
-      * 本模块**绝不伪造数据**：输入为空/None 时返回空 float32，不补零假象。
+Input
+    ``process(iq_chunk)``:
+      * iq_chunk : complex64/complex128 ndarray shape (N,), N >= 0.
+        When the device is disconnected or has no new samples, pass ``None``
+        or an empty array.
+      * This module never fabricates data: empty/None input yields an empty
+        float32 output.
 
-输出
-      * 单声道模式：np.float32，shape (N,)。
-      * WFM 立体声：np.float32，shape (N, 2)（左/右交错为列）。
-      * 输出采样率恒为 ``audio_out_sr``（默认 48000 Hz）。
-      * 块长度随重采样比例逐块变化（不固定），消费方不得假设定长。
+Output
+      * Mono modes: np.float32 shape (N,).
+      * WFM stereo: np.float32 shape (N, 2) (left/right as columns).
+      * Output sample rate is always ``audio_out_sr`` (default 48000 Hz).
+      * Block length varies with the resampling ratio; consumers must not
+        assume a fixed length.
 
-状态
-      * 所有滤波器/相位累加器/门控状态跨块连续，**不**在每块之间重置。
-      * 仅当调用 ``set_mode / set_frequency_offset / set_bandwidth / reset``
-        等真正改变物理配置时才重建并清空状态（避免旧频/旧模式串音）。
+State
+      * All filter / phase-accumulator / gate state is continuous across blocks.
+      * State is rebuilt (and cleared) only when ``set_mode`` /
+        ``set_frequency_offset`` / ``set_bandwidth`` / ``reset`` actually changes
+        the physical configuration.
 
-线程安全
-      * ``process()`` 本身**非线程安全**：应在单条音频消费线程里顺序调用。
-      * ``set_*()`` 是控制面操作；与 ``process()`` 并发时，控制面可能在
-        块边界重建滤波器——最坏情况是一次瞬态，不会崩溃。实时消费线程
-        应由调用方（SDRBackend 音频线程）独占驱动 ``process``。
+Thread safety
+      * ``process()`` is not thread-safe: call it sequentially from one audio
+        consumer thread.  ``set_*()`` calls may rebuild filters at a block
+        boundary, which is at worst a one-off transient.
 
-无设备行为
-      * ReceiveChain 本身不碰硬件。无 IQ 输入时 process 返回空数组。
-      * 配合 SDRBackend：未连接时 ``read_audio()`` 返回 None、
-        ``start_audio()`` 返回 False（见 sdr_backend.py）。
-
-License: GPL-3.0-or-later
+No-device behaviour
+      * ReceiveChain itself touches no hardware.  With no IQ input it returns an
+        empty array.
 """
 
 from __future__ import annotations
@@ -80,7 +79,7 @@ from .channelizer import XlatingFIR
 from .squelch import Squelch
 from .audio_resampler import AudioResampler
 
-# 解调器（保持与各自构造器默认值一致）
+# Demodulators (constructed with their own defaults)
 from .demod_am import DemodAM
 from .demod_ssb import DemodSSB
 from .demod_nfm import DemodNFM
@@ -92,10 +91,11 @@ logger = logging.getLogger(__name__)
 Array1d = np.ndarray
 
 
-# ─────────────────────────────────────────────────────────────────────────
-# 模式 → (if_sr, 信道双边带宽, 解调类型)。带宽对齐 SDR++ getDefaultBandwidth：
-#   WFM=150k, NFM=12.5k, AM=10k, USB/LSB=2.8k, CW=200。
-# ─────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# mode -> (if_sr, channel pass-bandwidth, demod kind).
+# Default channel bandwidths follow common receiver practice:
+# WFM=150k, NFM=12.5k, AM=10k, USB/LSB=2.8k, CW=200.
+# ---------------------------------------------------------------------------
 _MODE_TABLE = {
     "AM":  dict(if_sr=15000.0,  bandwidth=10000.0, kind="am"),
     "FM":  dict(if_sr=50000.0,  bandwidth=12500.0, kind="nfm"),

@@ -1,7 +1,6 @@
-"""抗混叠抽取 FIR 测试。
-
-对照 mbdsdr_ai/decimating_fir.py（sdrpp filter/decimating_fir.h:45-68）。
-"""
+# SPDX-License-Identifier: MIT
+"""Anti-alias decimating FIR tests.
+非硬件 / NOT HARDWARE: synthetic signals."""
 import numpy as np
 from mbdsdr_ai.decimating_fir import DecimatingFIR, design_decimation_taps
 

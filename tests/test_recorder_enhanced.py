@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """recorder_enhanced 确定性测试：命名模板、电平表、时长。"""
 import os
 from datetime import datetime

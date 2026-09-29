@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 多 VFO 管理器单元测试
 ======================

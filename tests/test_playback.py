@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """录制回放确定性测试：IQPlayback + PlaybackSource。
 
 用 recorder.IQRecorder 真实录一段 complex64 + SigMF meta，再用 playback 重放，

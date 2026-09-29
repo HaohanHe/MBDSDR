@@ -1,7 +1,6 @@
-"""FIR 抽头生成器测试。
-
-对照 mbdsdr_ai/fir_taps.py（sdrpp taps/low_pass.h, windowed_sinc.h, estimate_tap_count.h）。
-"""
+# SPDX-License-Identifier: MIT
+"""FIR tap-generator tests.
+非硬件 / NOT HARDWARE: synthetic responses."""
 import numpy as np
 from mbdsdr_ai.fir_taps import (
     lowpass_taps, estimate_tap_count, nuttall, windowed_sinc,
@@ -40,13 +39,13 @@ def test_fir_taps_unity_gain_at_dc():
     assert abs(np.sum(taps) - 1.0) < 1e-6
 
 
-def test_estimate_tap_count_matches_sdrpp():
-    """对照 estimate_tap_count.h:5：3.8*sr/transWidth。"""
+def test_estimate_tap_count():
+    """Tap estimate: 3.8*sr/transWidth."""
     assert estimate_tap_count(20_000.0, 1_000_000.0) == int(round(3.8 * 1e6 / 2e4))
 
 
 def test_nuttall_window_shape():
-    """Nuttall 窗：n=N/2 处峰值=1，n=0/N 处≈0（对照 nuttall.h:6 系数）。"""
+    """Nuttall window: peak = 1 at n=N/2, ~0 at n=0/N."""
     N = 200.0
     w_center = nuttall(np.array([N / 2.0]), N)
     assert abs(w_center[0] - 1.0) < 1e-6

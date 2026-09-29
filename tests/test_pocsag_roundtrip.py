@@ -1,11 +1,12 @@
+# SPDX-License-Identifier: MIT
 """POCSAG 编码-解码往返测试。
 
 对 512 / 1200 / 2400 三种速率各做一次：构造已知地址+消息 → pocsag_encode
 生成 FSK 音频 → 加高斯噪声(SNR~15dB) → pocsag_decode → 断言解出的
 address 和 message 与原文一致。
 
-参考: repos/multimon-ng/pocsag.c（状态机）, bch.c（BCH 纠错）,
-      gen_pocsag.c（帧结构）
+依据 CCIR Radiopaging Code No.1 公开标准：
+帧结构/BCH(31,21) 纠错/状态机。
 """
 from __future__ import annotations
 

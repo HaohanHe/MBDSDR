@@ -1,4 +1,5 @@
-"""mbdsdr_ai.satellite.tracker 确定性单测。
+# SPDX-License-Identifier: MIT
+"""mbdsdr_ai.satellite.tracker 确定性单测。（合成向量，非硬件 / NOT HARDWARE）
 
 对照 SatDump tracking/ + passes/（docs/learn/satdump.md §8-§9）：
   1. SGP4 传播：用固定 TLE + 固定时刻，卫星位置与 skyfield 参考解误差 <1km；

@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 rtlsdr_params.py — librtlsdr 真实硬件参数表（纯查表，无设备依赖）。
 
-本模块把 librtlsdr 官方驱动里写死的增益表 / 频率范围 / 采样率区间 / AGC /
-ppm / 直采模式 / 异步读取回调等常量原样移植过来，所有数值都标注来源
-`librtlsdr src/xxx.c:行号`，禁止凭空编造。
+本模块依据 librtlsdr 公开 API 头文件与器件数据手册，独立整理增益表 / 频率范围 /
+采样率区间 / AGC / ppm / 直采模式 / 异步读取回调等常量，数值与官方公开驱动定义一致，
+禁止凭空编造。librtlsdr 上游仅作技术参考与致谢，本仓未包含其源代码。
 
 数据单位约定
 ------------
 librtlsdr 的 C API 一律用「0.1 dB」（tenths of a dB）表示增益，
-例如 115 == 11.5 dB（来源: librtlsdr include/rtl-sdr.h:197,213）。
+例如 115 == 11.5 dB（librtlsdr 公开 API 的 0.1 dB 约定）。
 本模块对外统一用 **dB 浮点**，表内同时保留原始 0.1dB 整数便于对账。
 
 注意：rtlsdr_get_tuner_gains() 返回的是「驱动实际暴露的离散增益档」，
@@ -226,7 +227,7 @@ def is_valid_sample_rate(rate_hz: float) -> bool:
 def nearest_gain(tuner_type: str, target_db: float) -> Optional[float]:
     """在驱动暴露的离散增益档里找最接近 target_db 的一档。
 
-    移植自 convenience.c:116-141 nearest_gain()：遍历增益表，取 |err| 最小者。
+    在离散增益档里取与 target_db 绝对误差最小的一档（最近邻查表，通用做法）。
     """
     table = get_gain_table(tuner_type)
     if not table:

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/anr.py — 自适应噪声抑制（ANR, Spectral Subtraction）
 =============================================================

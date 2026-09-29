@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 AudioPlayer 无设备安全降级测试
 ==============================

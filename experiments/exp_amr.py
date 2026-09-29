@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 实验四：自动调制识别（AMR）的信噪比鲁棒性与混淆结构（纯软件、可复现）。

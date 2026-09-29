@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """``python -m mbdsdr`` 入口：转发到 core.cli。"""
 
 import sys

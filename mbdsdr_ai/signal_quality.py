@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR 信号质量 / 星座统计（纯 numpy）
-=====================================
-IQ -> DC 偏移、I/Q 不平衡、峰均比、星座散布、RMS。
-GNU Radio 的 constellation/sink 诊断能力的 AI 工具版。
+Signal quality / constellation statistics (pure NumPy).
+
+Summarises a block of complex I/Q: DC offset, I/Q imbalance, peak-to-average
+ratio, constellation spread, and RMS level.
 """
 from __future__ import annotations
 import numpy as np

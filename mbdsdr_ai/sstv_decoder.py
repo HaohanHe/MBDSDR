@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 SSTV 慢扫描电视解码器（Martin M1 / Scottie S1 / Robot 36）。
 
@@ -34,14 +35,14 @@ except ImportError:
 # SSTV 模式定义（时序单位：毫秒，频率单位：Hz）
 SSTV_MODES = {
     "Martin M1": {
-        "vis_code": 0x2C,  # pysstv 权威 VIS（旧表误写 0x5C）
+        "vis_code": 0x2C,
         "width": 320,
         "height": 256,
         "sync_freq": 1200,
         "sync_ms": 4.862,
         "sep_freq": 1500,
         "sep_ms": 0.572,
-        "channel_order": ["G", "B", "R"],  # pysstv MartinM1 COLOR_SEQ=(green,blue,red)
+        "channel_order": ["G", "B", "R"],
         "pixel_ms": 0.4576,  # SCAN 146.432ms / 320，单通道像素时钟
     },
     "Scottie S1": {
@@ -56,18 +57,18 @@ SSTV_MODES = {
         "pixel_ms": 0.2308,  # 73.83ms / 320
     },
     "Martin M2": {
-        "vis_code": 0x28,  # pysstv 权威 VIS
+        "vis_code": 0x28,
         "width": 160,
         "height": 256,
         "sync_freq": 1200,
         "sync_ms": 4.862,
         "sep_freq": 1500,
         "sep_ms": 0.572,
-        "channel_order": ["G", "B", "R"],  # pysstv MartinM2 COLOR_SEQ=(green,blue,red)
+        "channel_order": ["G", "B", "R"],
         "pixel_ms": 0.4576,  # SCAN 73.216ms / 160
     },
     "Scottie S2": {
-        "vis_code": 0x38,  # pysstv 权威 VIS
+        "vis_code": 0x38,
         "width": 160,
         "height": 256,
         "sync_freq": 1200,
@@ -78,7 +79,7 @@ SSTV_MODES = {
         "pixel_ms": 0.5410,  # SCAN 86.564ms / 160
     },
     "Scottie DX": {
-        "vis_code": 0x4C,  # pysstv 权威 VIS
+        "vis_code": 0x4C,
         "width": 320,
         "height": 256,
         "sync_freq": 1200,
@@ -113,7 +114,7 @@ SSTV_MODES = {
     },
     # ---- PD 系列（G3PLX，两行组：Y0 / Cb(两行平均) / Cr(两行平均) / Y1）----
     # 通用：SYNC=20ms、PORCH=2.08ms、无通道间隔；色度为相邻两行平均。
-    # 参数来自 pysstv 权威实现。像素时钟解码时按实测组周期反推，不硬编码。
+    # 模式时序参数。像素时钟解码时按实测组周期反推，不硬编码。
     "PD90":  {"vis_code": 0x63, "width": 320, "height": 256, "sync_ms": 20.0,
               "porch_ms": 2.08, "pixel_ms": 0.532, "family": "pd"},
     "PD120": {"vis_code": 0x5F, "width": 640, "height": 496, "sync_ms": 20.0,
@@ -405,7 +406,7 @@ def _identify_sstv_mode(freq: np.ndarray, sr: int, data_start: int,
     """基于同步时序特征识别 SSTV 制式。
 
     返回 (mode_name, info_dict)。Robot36 同步脉宽约 9ms，存在两种发送变体：
-    逐行式（pysstv，每 150ms 一个同步）与组首式（多数空中实现，每两行一个
+    逐行式（每 150ms 一个同步）与组首式（每两行一个
     同步，约 288~300ms）。Martin/Scottie 家族同步脉宽约 4.862ms 或 9ms、
     间隔显著不同。
     """
@@ -512,7 +513,7 @@ def _decode_robot36(freq: np.ndarray, sr: int, data_start: int,
 
     像素时钟不硬编码，而由实测同步周期反推（发射/录音链路时基偏差可达 4%），
     以消除累积水平错位。兼容逐行式（~150ms/同步）与组首式（~300ms/同步）。
-    经 pysstv 合成闭环验证：偶数行色差为 Cb(B-Y)、奇数行为 Cr(R-Y)。
+    偶数行色差为 Cb(B-Y)、奇数行为 Cr(R-Y)。
 
     色差直流恢复：真实 over-the-air 录音常削波/带频偏，使 Cb/Cr 中值偏离
     中性电平 128 而整幅偏色；按全帧色差中值对齐 128 校正（自然图像色差中值
@@ -701,7 +702,7 @@ def _decode_pd(freq: np.ndarray, sr: int, data_start: int,
     一组两行：SYNC(20ms) + PORCH(2.08ms) + Y0(width) + Cb(两行平均)
     + Cr(两行平均) + Y1(width)，无通道间隔。色度为相邻两行共享平均。
     像素时钟由实测组周期反推（不硬编码 PIXEL），消除时基偏差累积错位。
-    经 pysstv PD 合成闭环验证。
+
     """
     mdef = SSTV_MODES[mode]
     width, height = mdef["width"], mdef["height"]
@@ -733,7 +734,7 @@ def _decode_pd(freq: np.ndarray, sr: int, data_start: int,
         if r0 + 1 >= height or s + o_y1 + seg >= len(fr):
             break
         Y0 = _freq_to_pixel_series(fr, s + o_y0, px_samples, width, 0.4)
-        # pysstv PD 顺序：Y0 / Cr(两行平均,p[2]) / Cb(两行平均,p[1]) / Y1
+
         # （PIL YCbCr=(Y,Cb,Cr)，index2=Cr、index1=Cb）——勿写反，否则红蓝互换
         Cr = _freq_to_pixel_series(fr, s + o_cb, px_samples, width, 0.4)
         Cb = _freq_to_pixel_series(fr, s + o_cr, px_samples, width, 0.4)
@@ -974,7 +975,7 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
         if pos + channel_samples * 3 >= len(freq):
             break
 
-        # 采样三个通道（pysstv Martin：每通道后都有 INTER_CH_GAP 黑电平间隔）
+        # 采样三个通道（每通道后都有通道间黑电平间隔）
         channel_data = {}
         for ch_name in mdef["channel_order"]:
             if pos + channel_samples >= len(freq):

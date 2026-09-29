@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """RemoteControlV2 确定性测试：GQRX 完整命令集 + 无后端安全降级。"""
 import pytest
 

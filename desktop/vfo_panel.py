@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 多 VFO 面板（desktop/vfo_panel.py）
 ============================================

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 MBDSDR MCP Client & stdio MCP Server Bridge
 ==============================================
@@ -26,7 +27,7 @@ MBDSDR MCP Client & stdio MCP Server Bridge
 依赖: pip install websocket-client
 (标准库 json / sys / time / argparse / threading 无需安装)
 
-MBDSDR Project - AI定义无线电 - 全开源 GPL-3.0 - 呼号 BI4MIB
+MBDSDR Project - AI定义无线电 - MIT License（干净室独立实现）
 """
 
 import json

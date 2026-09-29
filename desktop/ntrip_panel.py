@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 NTRIP 图形化配置面板
 =====================

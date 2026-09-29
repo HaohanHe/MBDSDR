@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 RadioCAT 单元测试
 =================

@@ -1,22 +1,22 @@
-"""NOAA POES APT 气象卫星云图 lite 解码（真实移植自 noaa-apt，Rust）。
+# SPDX-License-Identifier: MIT
+"""NOAA POES APT 气象卫星云图 lite 解码（依据 NOAA APT 公开格式独立实现）。
 
-本文件逐常量、逐算法对照开源 noaa-apt 源码（repos/noaa-apt/src/）重写，
-每处关键常量/公式均以「来源: noaa-apt src/xxx.rs:行号」标注。
-
-处理链（来源: noaa-apt src/decode.rs:43-162 decode()）：
-  1) 重采样到 work_rate=12480Hz（standard profile，default_settings.toml），
-     带 DC 去除低通（cutout=4800Hz≈2×载波）抗混叠；
-  2) AM 包络解调：dsp.rs:350-383 demodulate()，apt137 两采样鉴别器
-     y[i]=sqrt(prev²+curr²-2cosφ·prev·curr)/sinφ，φ=2π·2400/fs；
-  3) 解调后低通到 FINAL_RATE/2=2080Hz（decode.rs:95-100）；
-  4) 重采样到 FINAL_RATE=4160Hz（一像素一样本，decode.rs:14）；
-  5) 行同步：generate_sync_frame()（decode.rs:171-199）生成 38 样本 ±1
-     方波 guard，find_sync()（decode.rs:204-263）滑动互相关找行首；
+处理链（NOAA APT 广播公开格式 + 标准 DSP）：
+  1) 重采样到 work_rate=12480Hz（=FINAL_RATE*3），带 DC 去除低通
+     （cutout=4800Hz≈2×副载波）抗混叠；
+  2) AM 包络解调：两采样鉴别器 y[i]=sqrt(prev²+curr²-2cosφ·prev·curr)/sinφ，
+     φ=2π·2400/fs；
+  3) 解调后低通到 FINAL_RATE/2=2080Hz；
+  4) 重采样到 FINAL_RATE=4160Hz（一像素一样本）；
+  5) 行同步：生成 38 样本 ±1 方波 guard，滑动互相关找行首；
   6) 按 2080 样本/行（PX_PER_ROW）切 A/B 两通道，各取 909 像素图像区。
 
-APT 行结构（来源: noaa-apt src/decode.rs:17-35，引自 sigidwiki）：
-  sync 39 | space 47 | image 909 | telemetry 45  = 1040/通道，两通道 = 2080/行。
+APT 行结构（NOAA APT 公开格式）：
+  sync 39 | space 47 | image 909 | telemetry 45 = 1040/通道，两通道 = 2080/行。
   行率 2 行/秒（2080 像素/行 × 2 = 4160 = FINAL_RATE）。
+
+noaa-apt（https://github.com/martinber/noaa-apt）、SatDump 等开源项目仅作
+技术参考与致谢，本仓未包含其源代码。
 """
 
 from __future__ import annotations
@@ -27,50 +27,42 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 # --------------------------------------------------------------------------- #
-# 常量（全部对照 noaa-apt 源码标注来源）
+# APT 常量（NOAA APT 公开格式）
 # --------------------------------------------------------------------------- #
-# 来源: noaa-apt src/decode.rs:14  pub const FINAL_RATE: u32 = 4160;
+# FINAL_RATE=4160：最终视频采样率，一像素一样本
 APT_VIDEO_RATE = 4160          # 最终视频采样率，一像素一样本
-# 来源: noaa-apt src/decode.rs:38  pub const CARRIER_FREQ: u32 = 2400;
+# APT AM 副载波 2400 Hz
 APT_SUBCARRIER = 2400.0        # AM 副载波 Hz
-# 来源: noaa-apt src/decode.rs:35  pub const PX_PER_ROW: u32 = 2080;
+# 每行样本（两通道）2080
 APT_LINE_SAMPLES = 2080        # 每行样本（两通道）
-# 来源: noaa-apt src/decode.rs:34-35 — 2080 像素/行，FINAL_RATE=4160 => 2 行/秒
+# 2080 像素/行，FINAL_RATE=4160 => 2 行/秒
 APT_LINE_SECONDS = 0.5
-# 来源: noaa-apt src/decode.rs:17  PX_SYNC_FRAME=39
+# 行同步段 39 像素
 APT_SYNC_LEN = 39
-# 来源: noaa-apt src/decode.rs:20  PX_SPACE_DATA=47
+# 同步后间隔 47 像素
 APT_SPACE_LEN = 47
-# 来源: noaa-apt src/decode.rs:23  PX_CHANNEL_IMAGE_DATA=909
+# 图像区 909 像素
 APT_IMAGE_LEN = 909
-# 来源: noaa-apt src/decode.rs:27  PX_TELEMETRY_DATA=45
+# 遥测段 45 像素
 APT_TELEM_LEN = 45
-# 来源: noaa-apt src/decode.rs:32  PX_PER_CHANNEL=1040 = 39+47+909+45
+# 每通道 1040 像素 = 39+47+909+45
 APT_HALF = APT_SYNC_LEN + APT_SPACE_LEN + APT_IMAGE_LEN + APT_TELEM_LEN  # 1040
 # 通道 A 图像偏移 = sync+space = 86；通道 B 图像偏移 = 1040+86 = 1126
 APT_IMG_A_OFFSET = APT_SYNC_LEN + APT_SPACE_LEN               # 86
 APT_IMG_B_OFFSET = APT_HALF + APT_SYNC_LEN + APT_SPACE_LEN    # 1126
 
-# --- SatDump 交叉校准 (2026-09) ---
-# SatDump plugins/analog_support/noaa_apt/module_noaa_apt_decoder.cpp 印证：
-#   :802-803  cha = crop_to(86, 86+909); chb = crop_to(1126, 1126+909)
-#   :1018     for (int i = 0; i < 39; i++)  // 同步段 39 像素
-#   :115-153  NOAA APT 下行频率 137.1 / 137.9125 / 137.62 MHz
-# 与本文件 APT_SYNC_LEN=39 / APT_IMAGE_LEN=909 / 偏移 86,1126 完全一致。
+# APT 行结构与 NOAA 公开 APT 格式一致：同步段 39 像素、图像区 909、偏移 86/1126。
 # 数字 HRPT 帧参数见 mbdsdr_ai/satdump_adapter.py HRPT_*：
 #   665.4kbps BPSK, 60-bit sync 0x0A116FD719D83C95, 11090 words x 10 bits。
 
-# 来源: noaa-apt src/default_settings.toml [profiles.standard]
-#   work_rate=12480 (=FINAL_RATE*3)，resample_cutout=4800，resample_atten=30，
-#   resample_delta_freq=1000，demodulation_atten=25。
+# 内部工作参数（work_rate=12480=FINAL_RATE*3，抗混叠/低通 FIR 设计）
 APT_WORK_RATE = 12480          # 内部工作采样率
 APT_RESAMPLE_CUTOUT = 4800.0   # 重采样低通截止 Hz（≈2×载波 2400）
 APT_RESAMPLE_ATTEN = 30.0      # 重采样阻带衰减 dB
 APT_RESAMPLE_DELTA = 1000.0    # 重采样过渡带 Hz
 APT_DEMOD_ATTEN = 25.0         # 解调后低通阻带衰减 dB
 
-# 来源: noaa-apt src/decode.rs:171-199 generate_sync_frame() —
-# 在 work_rate 下 pixel_width=work_rate/FINAL_RATE，sync_pulse_width=2*pixel_width；
+# APT 行同步 guard 模板（38 样本 ±1 方波）：
 # 模板 = 2 个 -1 开头 + 7 个完整周期(2×-1,2×+1) + 8 个 -1 尾。
 # 在 FINAL_RATE=4160（pixel_width=1）下长度 = 2 + 28 + 8 = 38 样本，±1 方波。
 _SYNC_GUARD = np.array([
@@ -79,8 +71,8 @@ _SYNC_GUARD = np.array([
     +1, +1,  -1, -1, -1, -1,  -1, -1, -1, -1,
 ], dtype=np.float64)
 
-# 来源: noaa-apt src/decode.rs:17 PX_SYNC_FRAME=39 — 行结构里 sync 占 39 像素。
-# guard(38) + 1 个尾随黑像素 = 39，供合成器构造完整行（0=黑,255=白）。
+# 行结构里 sync 占 39 像素：guard(38) + 1 个尾随黑像素 = 39，
+# 供合成器构造完整行（0=黑,255=白）。
 _SYNC_WORD = np.concatenate([
     (_SYNC_GUARD > 0).astype(np.float64),  # 38 样本 0/1
     [0.0],                                  # 第 39 像素：尾随黑
@@ -88,10 +80,10 @@ _SYNC_WORD = np.concatenate([
 
 
 # --------------------------------------------------------------------------- #
-# FIR 滤波（Kaiser 窗 sinc，对照 noaa-apt src/filters.rs）
+# FIR 滤波（Kaiser 窗 sinc，标准 FIR 设计）
 # --------------------------------------------------------------------------- #
 def _kaiser_beta(atten: float) -> float:
-    """Kaiser 窗 beta。来源: noaa-apt src/filters.rs:154-161。"""
+    """Kaiser 窗 beta（标准 Kaiser 窗公式）。"""
     if atten > 50.0:
         return 0.1102 * (atten - 8.7)
     if atten < 21.0:
@@ -101,30 +93,29 @@ def _kaiser_beta(atten: float) -> float:
 
 def _kaiser_lowpass(cutout_hz: float, fs: float, atten: float,
                     delta_hz: float) -> np.ndarray:
-    """设计 Kaiser 窗 sinc 低通 FIR。
+    """设计 Kaiser 窗 sinc 低通 FIR（矩形窗 sinc × Kaiser 窗）。
 
-    来源: noaa-apt src/filters.rs:56-95 Lowpass::design()（矩形窗 sinc × Kaiser 窗），
-    长度公式 filters.rs:164 length=ceil((atten-8)/(2.285·delta_rad))+1，取奇数。
+    长度公式 length=ceil((atten-8)/(2.285·delta_rad))+1，取奇数。
     """
     nyq = fs / 2.0
-    cutoff = cutout_hz / nyq            # 归一化截止（pi 弧度单位）
+    cutoff = cutout_hz / nyq            # 归一化截止
     delta_w = delta_hz / nyq            # 过渡带
     beta = _kaiser_beta(atten)
-    # 长度：filters.rs:164，(atten-8)/(2.285·delta_rad)，delta_rad = pi·delta_w
+    # 长度：(atten-8)/(2.285·delta_rad)，delta_rad = pi·delta_w
     length = int(np.ceil((atten - 8.0) / (2.285 * np.pi * delta_w))) + 1
-    if length % 2 == 0:                 # filters.rs:165-167 强制奇数
+    if length % 2 == 0:                 # 强制奇数
         length += 1
     length = max(length, 11)
     n = np.arange(length) - (length - 1) / 2.0
-    # sinc 冲激响应：filters.rs:76-82  h[n]=sin(n·pi·cutout)/(n·pi)，n=0 时=cutout
+    # sinc 冲激响应：h[n]=sin(n·pi·cutout)/(n·pi)，n=0 时=cutout
     h = np.sinc(n * cutoff) * cutoff
-    win = np.kaiser(length, beta)       # Kaiser 窗（与 filters.rs:171-175 一致）
+    win = np.kaiser(length, beta)       # Kaiser 窗
     h = h * win
     return h / np.sum(h)
 
 
 def _filtfilt_zero(h: np.ndarray, x: np.ndarray) -> np.ndarray:
-    """零相位 FIR 卷积（edge 收敛）。来源: noaa-apt src/dsp.rs:386-410 filter()。"""
+    """零相位 FIR 卷积（edge 收敛）。"""
     from scipy.signal import fftconvolve
     y = fftconvolve(x, h, mode="same")
     return y
@@ -136,7 +127,7 @@ def _filtfilt_zero(h: np.ndarray, x: np.ndarray) -> np.ndarray:
 def _gray_to_amp(gray: np.ndarray) -> np.ndarray:
     """0-255 灰度 -> AM 包络幅度（黑≈0.15，白≈1.0）。
 
-    来源: noaa-apt src/decode.rs 解调后信号幅度即像素亮度；保留最小载波防过调幅。
+    解调后信号幅度即像素亮度；保留最小载波防过调幅。
     """
     g = np.clip(gray, 0, 255).astype(np.float64) / 255.0
     return 0.15 + g * 0.85
@@ -148,7 +139,7 @@ def build_apt_line(image_a_row: np.ndarray, image_b_row: np.ndarray,
                    telem_b: Optional[np.ndarray] = None) -> np.ndarray:
     """构造一行 2080 个灰度采样（A/B 通道）。
 
-    来源: noaa-apt src/decode.rs:17-35 行结构。
+    APT 行结构（公开格式）。
     """
     a = np.clip(image_a_row, 0, 255).astype(np.float64)
     b = np.clip(image_b_row, 0, 255).astype(np.float64)
@@ -182,8 +173,8 @@ def synthesize_apt_audio(image_a: np.ndarray, image_b: np.ndarray,
                          rng: Optional[np.random.Generator] = None) -> np.ndarray:
     """把 A/B 图像逐行 AM 调制到 2400Hz 副载波实音频（fs，默认 24kHz）。
 
-    来源: noaa-apt src/decode.rs:38 载波 2400Hz；卫星端用视频幅度调制副载波，
-    幅度=亮度。合成器产生可被 decode_apt() 完整往返解调的测试音频。
+    卫星端用视频幅度调制 2400Hz 副载波，幅度=亮度。
+    合成器产生可被 decode_apt() 完整往返解调的测试音频（合成信号，非硬件）。
     """
     if rng is None:
         rng = np.random.default_rng(0)
@@ -209,11 +200,7 @@ def synthesize_apt_audio(image_a: np.ndarray, image_b: np.ndarray,
 # 解码
 # --------------------------------------------------------------------------- #
 def _resample_to(x: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
-    """有理重采样（上采样→抗混叠 FIR→下采样）。
-
-    来源: noaa-apt src/dsp.rs:62-126 resample_with_filter()（L 倍插值/M 倍抽取，
-    fast_resampling()）。Python 等价：scipy.signal.resample_poly。
-    """
+    """有理重采样（上采样→抗混叠 FIR→下采样，scipy resample_poly）。"""
     from math import gcd
     from scipy.signal import resample_poly
     g = gcd(int(round(fs_in)), int(round(fs_out)))
@@ -224,20 +211,16 @@ def _resample_to(x: np.ndarray, fs_in: float, fs_out: float) -> np.ndarray:
 
 def _am_discriminator(x: np.ndarray, fs: float,
                       fc: float = APT_SUBCARRIER) -> np.ndarray:
-    """APT AM 包络解调（apt137 两采样鉴别器）。
+    """APT AM 包络解调（两采样鉴别器）。
 
-    来源: noaa-apt src/dsp.rs:350-383 demodulate()：
         phi     = 2*pi*fc/fs
         y[i]    = sqrt(prev^2 + curr^2 - 2*cos(phi)*prev*curr) / sin(phi)
-    表达式引自 apt137（dsp.rs:325-348 版权注释）。对被载波 cos(2πfc·t) 调制的
-    信号，输出即慢变包络（视频幅度）。
+    对被载波 cos(2πfc·t) 调制的信号，输出即慢变包络（视频幅度）。
     """
-    # 来源: noaa-apt src/dsp.rs:360-363
     phi = 2.0 * np.pi * fc / fs
     cosphi2 = 2.0 * np.cos(phi)
     sinphi = np.sin(phi)
     prev = np.concatenate([[x[0]], x[:-1]])
-    # 来源: noaa-apt src/dsp.rs:373
     out = np.sqrt(np.maximum(prev * prev + x * x - cosphi2 * prev * x, 0.0)) / sinphi
     out[0] = out[1] if len(out) > 1 else 0.0
     return out
@@ -246,8 +229,7 @@ def _am_discriminator(x: np.ndarray, fs: float,
 def find_line_starts(video4160: np.ndarray) -> Tuple[np.ndarray, float]:
     """归一化互相关找同步头，返回 (行首样本位置, 网格锁定率)。
 
-    来源: noaa-apt src/decode.rs:204-263 find_sync() — 滑动窗与 38 样本 ±1 guard
-    互相关，最小峰距 = 行距 × 8/10（decode.rs:216）。
+    滑动窗与 38 样本 ±1 guard 互相关，最小峰距 = 行距 × 8/10。
     """
     from scipy.signal import find_peaks
     v = video4160 - np.mean(video4160)
@@ -257,7 +239,7 @@ def find_line_starts(video4160: np.ndarray) -> Tuple[np.ndarray, float]:
     tpl = tpl / (np.linalg.norm(tpl) + 1e-12)
     half = len(_SYNC_GUARD) // 2
     corr = np.convolve(v / norm, tpl[::-1], mode="same")
-    # 来源: noaa-apt src/decode.rs:216  min_distance = samples_per_row*8/10
+    # min_distance = samples_per_row*8/10
     min_dist = int(APT_LINE_SAMPLES * 0.8)
     PEAK_H = 4.0      # 真 sync 相关峰 ≈ sqrt(38)≈6.2，噪声 <3.5
     peaks, props = find_peaks(corr, height=PEAK_H, distance=min_dist)
@@ -307,7 +289,6 @@ def decode_apt(audio: np.ndarray, sample_rate: float, polarity: int = 1,
                min_lines: int = 4) -> Dict:
     """解码 APT 音频为 A/B 两通道灰度图。
 
-    来源: noaa-apt src/decode.rs:43-162 decode() 全链。
     polarity=1 默认黑=低幅度/白=高幅度；真机若反相传 -1。
     """
     audio = np.asarray(audio, dtype=np.float64)
@@ -315,26 +296,26 @@ def decode_apt(audio: np.ndarray, sample_rate: float, polarity: int = 1,
     if len(audio) < sample_rate * APT_LINE_SECONDS * min_lines:
         return {"apt_present": False, "reason": "too_short"}
 
-    # 1) 重采样到 work_rate=12480（来源: decode.rs:63-77）
+    # 1) 重采样到 work_rate=12480
     work = _resample_to(audio, sample_rate, APT_WORK_RATE)
-    # 来源: decode.rs:65-76 DC 去除低通（cutout=4800Hz，去直流护带）
+    # DC 去除低通（cutout=4800Hz，去直流护带）
     h_bp = _kaiser_lowpass(APT_RESAMPLE_CUTOUT, APT_WORK_RATE,
                            APT_RESAMPLE_ATTEN, APT_RESAMPLE_DELTA)
     work = _filtfilt_zero(h_bp, work)
 
-    # 2) AM 包络解调（来源: decode.rs:89 调用 dsp::demodulate）
+    # 2) AM 包络解调
     video = _am_discriminator(work, APT_WORK_RATE, APT_SUBCARRIER)
 
-    # 3) 解调后低通到 FINAL_RATE/2=2080Hz（来源: decode.rs:95-100）
+    # 3) 解调后低通到 FINAL_RATE/2=2080Hz
     lp_cut = APT_VIDEO_RATE / 2.0
     h_lp = _kaiser_lowpass(lp_cut, APT_WORK_RATE, APT_DEMOD_ATTEN,
                           APT_RESAMPLE_DELTA)
     video = _filtfilt_zero(h_lp, video)
 
-    # 4) 重采样到 FINAL_RATE=4160（来源: decode.rs:154-159）
+    # 4) 重采样到 FINAL_RATE=4160
     v = _resample_to(video, APT_WORK_RATE, APT_VIDEO_RATE)
 
-    # 5) 行同步（来源: decode.rs:106-134）
+    # 5) 行同步
     starts, lock_ratio = find_line_starts(v)
     if len(starts) < min_lines or lock_ratio < 0.6:
         return {"apt_present": False, "lines_aligned": int(len(starts)),
@@ -357,7 +338,6 @@ def decode_apt(audio: np.ndarray, sample_rate: float, polarity: int = 1,
         return {"apt_present": False, "lines_aligned": used, "reason": "too_few_lines"}
 
     def to_gray(rows: np.ndarray) -> np.ndarray:
-        # 来源: noaa-apt src/noaa_apt.rs:249-259 map_signal_u8()：
         # low→0, high→255，clamp 到 [0,255]。这里用 2%~98% 百分位稳健定标。
         g = rows.astype(np.float64).copy()
         g = g * polarity

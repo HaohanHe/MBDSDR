@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 MBDSDR 冒烟测试（smoke test）——一键验证核心链路非空壳。

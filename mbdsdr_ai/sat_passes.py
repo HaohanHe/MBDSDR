@@ -1,43 +1,37 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 真实卫星过境(pass)预测模块
 ============================================
-算法参考 Stellarium Satellites plugin (GPL-3.0), 独立重实现
-------------------------------------------------------------
-本模块独立重实现 Stellarium ``plugins/Satellites`` 的核心几何与预测思想，
-使用 Python ``sgp4==2.27`` 做轨道传播、``skyfield==1.55`` 做时间系统与
-ECI→站心地平坐标(az/alt)变换。不链接 Stellarium/gpredict 任何二进制。
+依据公开 SGP4/SDP4 标准与站心几何独立实现
+--------------------------------------------
+本模块实现卫星过境几何与预测，使用 Python ``sgp4`` 库做轨道传播、
+``skyfield`` 做时间系统与 ECI→站心地平坐标(az/alt)变换。不链接任何外部
+卫星预测软件二进制。
 
-与 Stellarium 的对应关系（源码引用见各函数注释，路径相对
-``repos/stellarium/plugins/Satellites/src/``）：
+公开标准与方法：
 
 1. TLE 解析 + SGP4 传播
-   - gSatTEME.cpp:66  twoline2rv(line1, line2, ...) 解析两行元素并初始化 satrec
-   - gSatTEME.cpp:80  sgp4(...) 按距历元分钟数传播得 TEME 位置/速度
-   本模块用 skyfield.EarthSatellite(内部即 sgp4.api.Satrec.twoline2rv + sgp4())。
+   - 按 Spacetrack Report #3（Hoots & Roeber）及 Vallado 等 2006 修订的
+     SGP4/SDP4 标准；本模块用 skyfield.EarthSatellite（内部即
+     sgp4.api.Satrec.twoline2rv + sgp4()）。
 
 2. ECI(TEME) → 地面站地平坐标(az/alt)
-   - gSatWrapper.cpp:106-131  calcObserverECIPosition：站大地坐标→ECI 位置/速度
-   - gSatWrapper.cpp:133-165  getAltAz：slantRange = satECI - obsECI，再旋转到
-     站心 topocentric (S/E/Z)。topo[2]=Up>0 即仰角方向。
-   本模块用 skyfield ``(sat - topo).at(t).altaz()`` 完成等价变换
-   （Topos 即站心，altaz() 返回高度/方位/距离）。
+   - 站心 topocentric (S/E/Z) 变换：slantRange = satECI - obsECI，再旋转到站心；
+     高度分量>0 即仰角方向。本模块用 skyfield ``(sat - topo).at(t).altaz()``。
 
 3. 可见性 / 地影
-   - gSatWrapper.cpp:205-249 getVisibilityPredict：先判 topo[2]>0（在地平线上，:209），
-     再判太阳高度(:213)，最后按 Vallado 锥几何(:227-244)判本影/半影/食。
+   - 先判仰角>0（在地平线上），再判太阳高度，最后按 Vallado 锥几何判本影/半影/食。
    本模块默认只做几何可见性(仰角>min_alt)；可选 ``require_sunlit`` 走几何地影判断。
 
 4. 过境扫描（rise/set/中天）
-   Stellarium 本身是实时显示，不做未来过境扫描；它在
-   Satellite.cpp:1285-1305 computeOrbitPoints 里用固定时间步长
-   (orbitLineSegmentDuration=20s, Satellite.cpp:52) 在“当前时刻前后”采样轨道点。
-   本模块沿用“时间轴步长采样仰角曲线”这一思想，叠加 gpredict 式粗扫+二分过零：
+   - 沿时间轴步长采样仰角曲线，叠加粗扫+二分过零：
      a) 粗扫 60s 步长定位仰角跨越 min_alt 的区间；
      b) 二分法精确定位 rise(AOS)/set(LOS) 时刻；
      c) pass 内 2s 细采样找最大仰角(中天)时刻与方位。
 
-5. trail 轨迹点采样：见 :func:`sample_trail`，对应
-   Satellite.cpp:1298-1305 的“从起始时刻起按固定间隔逐 setEpoch+getAltAz 采样”。
+5. trail 轨迹点采样：见 :func:`sample_trail`，按固定间隔逐时刻采样仰角。
+
+Stellarium Satellites 插件与 gpredict 仅作为技术参考与致谢，本模块未包含其源代码。
 """
 from __future__ import annotations
 
@@ -58,19 +52,16 @@ __all__ = [
     "predict_upcoming_passes",
 ]
 
-# 光速 m/s（与 Stellarium StelUtils.hpp:41 SPEED_OF_LIGHT=299792.458 km/s 一致，
-# 本模块统一用 m/s：c = 299792.458 * 1000 = 299792458 m/s）。
+# 光速 m/s（c = 299792458 m/s，国际定义）。
 C_LIGHT_MPS = 299792458.0
 
 # AU/km 换算（skyfield position.au 为 AU，需转 km 做点积）。
 _AU_KM = 149597870.700
 
-# 与 Stellarium gSatTEME.cpp:46-49 一致的传播模式：WGS-84 引力常数、'c'=current 模式。
-# Python sgp4 库默认即 WGS-72 legacy；skyfield EarthSatellite 默认 legacy mode，
-# 与 Stellarium 的 WGS-84 常数差异对 LEO 过境时刻影响在秒级以内，满足 SDR 预报需求。
+# SGP4 传播：Python sgp4 库默认 WGS-72 legacy 模式；对 LEO 过境时刻影响在
+# 秒级以内，满足 SDR 预报需求。
 
-# 粗扫/细扫步长（秒）。粗扫量级对照 gpredict predict-tools.c 与
-# Stellarium computeOrbitPoints 的固定间隔采样(Satellite.cpp:1287)。
+# 粗扫/细扫步长（秒）。粗扫按固定间隔采样仰角曲线。
 _COARSE_STEP_S = 60.0     # 粗扫：60s 定位过境区间
 _FINE_STEP_S = 2.0        # pass 内细采样：找中天/最大仰角
 _BISECT_TOL_S = 0.5       # 二分收敛容差（秒），LEO 仰角变化 ~0.5°/s ⇒ ~0.25° 精度
@@ -87,8 +78,7 @@ def make_timescale():
 class GroundStation:
     """地面站（观测者）位置。
 
-    对应 Stellarium StelLocation（纬度/经度/海拔），见
-    gSatWrapper.cpp:110-124 calcObserverECIPosition 中 loc.getLatitude()/getLongitude()。
+    地面站纬度/经度/海拔。
     """
     lat_deg: float
     lon_deg: float
@@ -130,8 +120,7 @@ def _parse_tle(tle_lines: Sequence[str]) -> Optional[Tuple[str, str, str]]:
       - 列表里混有空行/注释；自动跳过。
     解析失败（无有效 1/2 行）返回 None —— 调用方据此返回空列表，不造假。
 
-    对应 Stellarium gSatWrapper.cpp:43-58 构造函数：拷贝并截断 t1/t2 后交给
-    gSatTEME → twoline2rv（gSatTEME.cpp:66）。
+    按 Spacetrack Report #3 的 TLE 列布局解析。
     """
     lines = [l.strip() for l in tle_lines if l and l.strip()]
     if len(lines) < 2:
@@ -156,8 +145,7 @@ def _parse_tle(tle_lines: Sequence[str]) -> Optional[Tuple[str, str, str]]:
 def _alt_az(diff, t: Time) -> Optional[Tuple[float, float]]:
     """在时刻 t 计算 (仰角°, 方位角°)；传播失败返回 None。
 
-    对应 gSatWrapper.cpp:133-165 getAltAz：slantRange = satECI - obsECI，
-    再旋转到站心 Up/East/North，Up 分量给出仰角。
+    slantRange = satECI - obsECI，再旋转到站心 Up/East/North，Up 分量给出仰角。
     skyfield 的 ``(sat - topo).at(t).altaz()`` 是同一变换的官方实现。
     """
     try:
@@ -172,9 +160,7 @@ def _bisect_cross(el_fn, lo: float, hi: float, target: float,
                   tol: float = _BISECT_TOL_S) -> float:
     """在 [lo, hi]（秒，相对 t0）之间二分求仰角=target 的时刻。
 
-    调用方保证两端仰角在 target 异侧。对照 gpredict predict-tools.c 的过零细化；
-    Stellarium 不做未来扫描，但其 Satellite.cpp:1298-1305 逐时刻 setEpoch+getAltAz
-    的采样思想是本函数的基础。
+    调用方保证两端仰角在 target 异侧；逐时刻采样仰角曲线后二分过零。
     """
     flo = el_fn(lo)
     fhi = el_fn(hi)
@@ -219,8 +205,8 @@ def predict_passes(
     min_alt:
         过境最低仰角阈值（度），默认 10°。
     require_sunlit:
-        若 True，仅保留过境中点卫星被太阳照亮的事件（几何地影，
-        对应 gSatWrapper.cpp:227-244 的 Vallado 锥判断）。默认 False。
+        若 True，仅保留过境中点卫星被太阳照亮的事件（Vallado 锥几何地影判断）。
+        默认 False。
 
     返回
     ----
@@ -235,13 +221,13 @@ def predict_passes(
     if start_time is None:
         start_time = ts.now()
 
-    # gSatTEME.cpp:66 twoline2rv + gSatTEME.cpp:80 sgp4 传播器
+    # twoline2rv + SGP4 传播器
     try:
         sat = EarthSatellite(line1, line2, name, ts)
     except Exception:
         return []
 
-    # 站心：gSatWrapper.cpp:106-131 calcObserverECIPosition 的 skyfield 等价
+    # 站心 Topos（skyfield 等价于站心 ECI 变换）
     topo = Topos(latitude_degrees=ground_station.lat_deg,
                  longitude_degrees=ground_station.lon_deg,
                  elevation_m=ground_station.alt_m)
@@ -260,7 +246,6 @@ def predict_passes(
     n_steps = int(total_s / _COARSE_STEP_S) + 1
 
     # a) 粗扫：60s 步长记录 (sec, el)。
-    #    对应 Satellite.cpp:1298-1305 固定间隔采样轨道点的思想。
     coarse: List[Tuple[float, Optional[float]]] = []
     for k in range(n_steps + 1):
         sec = min(k * _COARSE_STEP_S, total_s)
@@ -339,10 +324,8 @@ def sample_trail(
 ) -> List[Tuple[Time, float, float]]:
     """采样过去/未来轨迹点（trail），返回 [(Time, az_deg, alt_deg), ...]。
 
-    对应 Stellarium Satellite.cpp:1285-1305 computeOrbitPoints：
-    以当前时刻为中心，从 ``t_center - before_s`` 起按固定 ``step_s`` 逐
-    setEpoch + getAltAz 采样（Stellarium 默认 orbitLineSegmentDuration=20s，
-    见 Satellite.cpp:52）。无效点跳过。
+    以当前时刻为中心，从 ``t_center - before_s`` 起按固定 ``step_s`` 逐时刻
+    采样。无效点跳过。
     """
     parsed = _parse_tle(tle_lines)
     if parsed is None:
@@ -369,14 +352,13 @@ def sample_trail(
 
 
 # ---------------------------------------------------------------------------
-# 几何地影判断（可选）—— 对照 gSatWrapper.cpp:227-244
+# 几何地影判断（可选，Vallado 锥几何）
 # ---------------------------------------------------------------------------
 def _sun_eci_unit(t: Time) -> Tuple[float, float, float]:
     """低精度太阳方向单位矢量（TEME/ECI，无量纲）。
 
-    Stellarium 用 SolarSystem 模块取太阳 ECI 位置(gSatWrapper.cpp:181-191)；
-    这里用 NOAA/Spherical Astronomy 低精度太阳黄经→春分点赤道坐标，
-    误差 ~0.1°，对 LEO 地影边界判定足够。
+    用 NOAA/球面天文低精度太阳黄经→春分点赤道坐标，误差 ~0.1°，
+    对 LEO 地影边界判定足够。
     """
     jd = t.tt
     n = jd - 2451545.0
@@ -394,7 +376,7 @@ def _sun_eci_unit(t: Time) -> Tuple[float, float, float]:
 def _is_sunlit_geometric(sat: EarthSatellite, t: Time) -> bool:
     """几何地影判断：卫星是否被太阳照亮（不在地球本影内）。
 
-    对照 gSatWrapper.cpp:227-244 的 Vallado 锥几何：
+    Vallado 锥几何：
       theta_e = asin(R_earth / r_sat)   地球视半径角
       theta_s = asin(R_sun  / r_sun)    太阳视半径角
       theta   = 卫星-地心-太阳 夹角
@@ -431,22 +413,15 @@ def _is_sunlit_geometric(sat: EarthSatellite, t: Time) -> bool:
 # 多普勒频移预测（SDR 接收用）
 # ===========================================================================
 #
-# Stellarium 中的多普勒参考：
-#   - plugins/Satellites/src/gSatWrapper.cpp:167-177  getSlantRange()
-#       slantRange       = satECIPos - observerECIPos      (位置差向量, km)
-#       slantRangeVel    = satECIVel - observerECIVel      (速度差向量, km/s)
-#       ao_slantRange    = slantRange.norm()               (斜距, km)
-#       ao_slantRangeRate= slantRange.dot(slantRangeVel)/slantRange.norm()
-#         ^^^ 径向速度（km/s），远离为正。这就是多普勒计算的核心。
-#   - plugins/Satellites/src/Satellite.cpp:850  update() 中调用
-#       pSatWrapper->getSlantRange(range, rangeRate) 把 range/rangeRate 存为成员。
-#   - plugins/Satellites/src/Satellite.cpp:940-943  getDoppler(double freq) const
-#       return -freq*((rangeRate*1000.0)/SPEED_OF_LIGHT);
-#       即 f_d = -f_0 * v_r / c。Stellarium 中 freq 单位 MHz、返回值 kHz
-#       （见 Satellite.cpp:496,505 显示为 kHz）；本模块统一用 Hz，c 用 m/s。
-#   - src/core/StelUtils.hpp:41  #define SPEED_OF_LIGHT 299792.458 (km/s)
+# 多普勒参考（公开轨道力学）：
+#   slantRange       = satECIPos - observerECIPos      (位置差向量, km)
+#   slantRangeVel    = satECIVel - observerECIVel      (速度差向量, km/s)
+#   range            = |slantRange|                    (斜距, km)
+#   rangeRate        = slantRange.dot(slantRangeVel)/|slantRange|
+#     ^^^ 径向速度（km/s），远离为正。这就是多普勒计算的核心。
+#   多普勒频移 f_d = -f_0 * v_r / c；本模块统一用 Hz，c 用 m/s。
 #
-# 物理符号约定（与 gSatWrapper.cpp:177 rangeRate 一致）：
+# 物理符号约定（rangeRate 远离为正）：
 #   range_rate > 0 → 卫星远离地面站 → 接收频率降低 → f_d < 0
 #   range_rate < 0 → 卫星接近地面站 → 接收频率升高 → f_d > 0
 #   AOS（升起）时卫星朝向观测者飞来 ⇒ v_r<0 ⇒ f_d>0（正偏移）
@@ -459,14 +434,13 @@ def _is_sunlit_geometric(sat: EarthSatellite, t: Time) -> bool:
 class DopplerPoint:
     """过境过程中某一时刻的多普勒状态采样点。
 
-    字段对应 Stellarium Satellite.cpp:361-363 信息行中的
-    Range / Range rate / Altitude，外加 az/el/多普勒频率与变化率。
+    含 Range / Range rate / Altitude，外加 az/el/多普勒频率与变化率。
     """
     time: Time                # 采样时刻（UTC, skyfield Time）
     azimuth: float            # 方位角（度，北=0，东=90）
     elevation: float          # 仰角（度）
     range_km: float           # 斜距（km）
-    range_rate_km_s: float    # 径向速度（km/s），远离为正（gSatWrapper.cpp:177）
+    range_rate_km_s: float    # 径向速度（km/s），远离为正
     doppler_hz: float         # 多普勒频移（Hz），f_d = -v_r/c * f_0
     doppler_rate_hz_s: float  # 多普勒变化率（Hz/s），SDR AFC 跟踪用
 
@@ -474,7 +448,6 @@ class DopplerPoint:
 def _range_and_rate(diff, t: Time) -> Optional[Tuple[float, float, float, float, float]]:
     """在时刻 t 计算 (az_deg, el_deg, range_km, range_rate_km_s, unused)。
 
-    算法对照 gSatWrapper.cpp:167-177 getSlantRange：
       slantRange       = satECIPos - observerECIPos
       slantRangeVel   = satECIVel - observerECIVel
       range           = |slantRange|
@@ -491,7 +464,7 @@ def _range_and_rate(diff, t: Time) -> Optional[Tuple[float, float, float, float,
         rng = math.sqrt(sum(x * x for x in pos_km))
         if rng <= 0:
             return None
-        # gSatWrapper.cpp:177: rangeRate = dot(slantRange, slantRangeVel)/|slantRange|
+        # rangeRate = dot(slantRange, slantRangeVel)/|slantRange|
         rr = sum(p * v for p, v in zip(pos_km, vel_kms)) / rng
         return float(az.degrees), float(alt.degrees), float(rng), float(rr), 0.0
     except Exception:
@@ -526,10 +499,9 @@ def compute_doppler_curve(
 
     算法
     ----
-    对每个采样时刻调用 :func:`_range_and_rate`（等价于
-    gSatWrapper.cpp:167-177 getSlantRange），然后：
+    对每个采样时刻调用 :func:`_range_and_rate`，然后：
         f_d = -range_rate_mps / c * freq_hz
-    其中 c = 299792458 m/s（Stellarium StelUtils.hpp:41，单位换算后）。
+    其中 c = 299792458 m/s。
     多普勒变化率 doppler_rate_hz_s 用相邻点中心差分：
         df_d/dt ≈ (f_d[i+1] - f_d[i-1]) / (t[i+1] - t[i-1])
     端点用前向/后向差分。
@@ -562,8 +534,7 @@ def compute_doppler_curve(
         if r is None:
             continue
         az, el, rng, rr, _ = r
-        # Satellite.cpp:942: f_d = -freq * (rangeRate_mps / SPEED_OF_LIGHT_mps)
-        # range_rate_km_s → m/s 乘 1000
+        # f_d = -freq * (rangeRate_mps / c)；range_rate_km_s → m/s 乘 1000
         dop = -rr * 1000.0 / C_LIGHT_MPS * freq_hz
         raw.append((t, az, el, rng, rr))
 
@@ -609,10 +580,8 @@ def predict_upcoming_passes(
 ) -> List[Dict]:
     """多颗卫星的未来过境事件列表，按 AOS 时间排序。
 
-    对应 Stellarium Satellites 插件的"未来过境"概念：Stellarium 本身是
-    实时天球显示，不做未来过境扫描；但 Satellite.cpp:1298-1305 的固定步长
-    采样轨道点思想，叠加 gpredict 式粗扫+二分过零（见本模块 predict_passes
-    注释），构成多星事件列表。
+    多颗卫星未来过境事件列表：沿时间轴固定步长采样仰角曲线，叠加
+    粗扫+二分过零（见本模块 predict_passes 注释），构成多星事件列表。
 
     参数
     ----------

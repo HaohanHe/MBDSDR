@@ -1,7 +1,6 @@
-"""DC blocker 确定性测试。
-
-对照 mbdsdr_ai/dc_blocker.py（上游 sdrpp correction/dc_blocker.h:54-60）。
-"""
+# SPDX-License-Identifier: MIT
+"""DC blocker deterministic tests.
+非硬件 / NOT HARDWARE: synthetic signals."""
 import numpy as np
 from mbdsdr_ai.dc_blocker import DCBlocker
 

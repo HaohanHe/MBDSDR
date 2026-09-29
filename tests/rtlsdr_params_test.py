@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
-rtlsdr_params_test.py — 验证 rtlsdr_params.py 移植自 librtlsdr 的真实参数。
+rtlsdr_params_test.py — 验证 rtlsdr_params.py 依据公开数据手册 / 驱动 API 行为独立整理的真实参数。
 
-红线：增益表必须是 librtlsdr C 源码里的真实离散档，不能编造。
-本测试直接断言源码表的条数与端点（见每个断言的注释来源）。
+红线：增益表必须是公开数据手册 / 驱动暴露的真实离散档，不能编造。
+本测试直接断言表的条数与端点（技术参考：公开驱动头文件，未引用其代码）。
 
 注意：rtlsdr_get_tuner_gains() 返回的是「驱动暴露的离散档」，不是把物理
 量程线性铺开。因此：

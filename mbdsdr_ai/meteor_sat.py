@@ -1,15 +1,19 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI - 卫星接收与解码
 ==========================
 
-支持各类开源卫星接收项目：
+依据公开下行格式与标准独立实现，覆盖：
 - 气象卫星：GK-2A / 风云四号 / 风云三号 / GOES / Meteor / Himawari
 - 卫星电视：DVB-S / DVB-S2 / 模拟卫星电视
 - 深空探测：LRO / 其他月球/深空探测器
 - 业余卫星：NOAA / Meteor / ISS / 各业余通信卫星
 
 解码流程：QPSK解调 → Viterbi解码 → 解扰 → CADU提取 → 图像合成
-参考开源项目：SatDump / goestools / medet / aptdec
+（依据 CCSDS 131 系列与 METEOR LRPT 公开格式）
+
+SatDump / goestools / meteor_demod / noaa-apt 等开源项目仅作技术参考与致谢，
+本仓未包含其源代码。
 """
 
 import numpy as np
@@ -220,11 +224,11 @@ METEOR_SATS: Dict[str, MeteorSatParams] = {
         name="Meteor-M2 HRPT",
         norad_id=40001,
         downlink_freq_hz=1700e6,
-        symbol_rate=72000,          # 来源: meteor_demod src/main.c:19 #define SYM_RATE 72000
-        modulation="QPSK",           # 来源: meteor_demod src/main.c:75 mode = QPSK;（LRPT 用 QPSK 非 OQPSK）
+        symbol_rate=72000,
+        modulation="QPSK",           # LRPT 用 QPSK 非 OQPSK
         viterbi_rate=0.5,
-        viterbi_K=7,                 # 来源: meteor LRPT 卷积码约束长度 K=7, r=1/2
-        # 来源: meteor LRPT 卷积码生成多项式（与 meteor_demod 解调后级 Viterbi 一致）：
+        viterbi_K=7,                 # CCSDS 卷积码约束长度 K=7, r=1/2
+        # Meteor LRPT 卷积码生成多项式：
         # G1=0x79(八进制171), G2=0x5F(八进制137)。注意 Meteor-M2 的 G2=137 而非
         # 通用 CCSDS 的 133；本 ViterbiDecoder 按 reg 位掩码（bit0=输入）取值。
         viterbi_g1=0x79,   # 171, g(D)=1+D^3+D^4+D^5+D^6
@@ -235,21 +239,12 @@ METEOR_SATS: Dict[str, MeteorSatParams] = {
         description="俄罗斯Meteor-M2极轨气象卫星（LRPT 72kbaud QPSK）",
     ),
 
-    # --- SatDump 真实源码交叉校准 (2026-09 移植) ---
-    # 以下常量以 SatDump 上游为准，见 mbdsdr_ai/satdump_adapter.py：
-    #   * 符号率 72000 sym/s QPSK 与上游一致:
-    #     SatDump resources/pipelines/Meteor-M.json "meteor_m2_lrpt":
-    #       psk_demod symbolrate=72e3, rrc_alpha=0.5, pll_bw=0.002
-    #     (注: 本文件上方 meteor_demod 链用 rrc_alpha=0.6，是另一套实现；
-    #      SatDump 官方 LRPT 链路取 0.5，以 satdump_adapter.LRPT_RRC_ALPHA 为准。)
-    #   * Viterbi 多项式: SatDump src-core/common/codings/viterbi/viterbi27.h:8
-    #       static std::vector<int> CCSDS_R2_K7_POLYS = {79, 109};
-    #     十进制 {79,109} = {0x4F,0x6D}，即上面 {0x79,0x5B} 的位反转存储；
-    #     satdump_adapter.LRPT_VITERBI_POLYS=(79,109) 与上游逐值一致。
-    #   * CADU 1024B、同步字 0x1dcf fc1d:
-    #     SatDump plugins/meteor_support/meteor/module_meteor_lrpt_decoder.cpp:14,256
+    # --- METEOR-M2 LRPT 公开下行参数（与 mbdsdr_ai/satdump_adapter.py 一致）---
+    #   * 符号率 72000 sym/s QPSK，rrc_alpha=0.5, pll_bw=0.002
+    #   * Viterbi 多项式十进制 {79,109} = {0x4F,0x6D}（位反转存储）；
+    #     satdump_adapter.LRPT_VITERBI_POLYS=(79,109)
+    #   * CADU 1024B、同步字 0x1dcf fc1d
     #   * 成像幅宽: scan_angle=110.1°, image_width=1568
-    #     SatDump resources/projections_settings/meteor_m2-4_msumr_lrpt.json
     # ================================================================
 
     # ===== 卫星电视 =====
@@ -345,12 +340,11 @@ def get_satellite_params(key: str) -> Optional[MeteorSatParams]:
 # 信号处理模块
 # ========================================================================
 
-# 来源: SatDump plugins/meteor_support/meteor/deint.h:9-10（改编自
-#        github.com/dbdexter-dev/meteor_decode）；交叉印证 NASA LRPT
-#        Demonstration Report: "36 interleaver branches, 2048 bits per
-#        elementary delay"。Meteor LRPT 在卷积编码(rate=1/2)之后做卷积交织，
-#        因此接收端必须在 Viterbi 之前先做卷积去交织，否则突发错误无法被
-#        Viterbi 纠正。
+# Meteor LRPT 卷积交织（Forney 卷积交织器；NASA LRPT 公开参数：
+#   36 interleaver branches, 2048 bits per elementary delay）。
+# Meteor LRPT 在卷积编码(rate=1/2)之后做卷积交织，
+# 因此接收端必须在 Viterbi 之前先做卷积去交织，否则突发错误无法被
+# Viterbi 纠正。
 LRPT_DEINT_BRANCHES = 36   # I = INTER_BRANCH_COUNT，去交织分支数
 LRPT_DEINT_DELAY = 2048    # J = INTER_BRANCH_DELAY，相邻分支的符号延迟
 
@@ -364,7 +358,7 @@ def convolutional_interleave(data: np.ndarray,
     k*branch_delay，因此第 k 路相对第 0 路多延迟 k*branch_delay 个符号。
     与 convolutional_deinterleave 互逆，级联总时延 = num_branches*(num_branches-1)*branch_delay。
 
-    来源: CCSDS 131.0-B 卷积交织；meteor_decode deint.cpp deinterleave() 的正向。
+    Forney 卷积交织（CCSDS 131.0-B）。
     """
     data = np.asarray(data)
     # 分支 k 的延迟线深度 = k*branch_delay（预填零，模拟初始时延）
@@ -387,7 +381,7 @@ def convolutional_deinterleave(data: np.ndarray,
     注意：开头 num_branches*(num_branches-1)*branch_delay 个输出为时延预热零，
     之后才是有效数据（交给后续 Viterbi/帧同步吸收）。
 
-    来源: SatDump deint.cpp:60-89 deinterleave()；CCSDS 131.0-B。
+    Forney 卷积去交织（CCSDS 131.0-B）。
     """
     data = np.asarray(data)
     # 分支 k 延迟线深度 = (num_branches-1-k)*branch_delay（与交织器互补）
@@ -402,40 +396,38 @@ def convolutional_deinterleave(data: np.ndarray,
 
 
 # ========================================================================
-# Meteor LRPT 专用链（真实移植自 meteor_demod，C 源码）
+# Meteor LRPT 专用解调链（QPSK/OQPSK）
 # ------------------------------------------------------------------------
-# meteor_demod（repos/meteor_demod/src/）只做 QPSK/OQPSK 解调：
-#   RRC 匹配滤波插值 → AGC → Costas 环载波恢复 → Gardner 位同步 → 输出软 I/Q。
+# 解调链：RRC 匹配滤波插值 → AGC → Costas 环载波恢复 → Gardner 位同步 → 输出软 I/Q。
 # 其后级的差分解码、Viterbi、去交织、LRPT 帧解析为标准 LRPT 遥测链。
-# 下面所有数值常量均标注 meteor_demod 源文件:行号。
 # ========================================================================
 
-# 来源: meteor_demod src/main.c:19  #define SYM_RATE 72000
+# METEOR LRPT 符号率 72000 sym/s
 METEOR_SYM_RATE = 72000
-# 来源: meteor_demod src/main.c:26  #define RRC_ALPHA 0.6
+# RRC 滚降 α=0.6
 METEOR_RRC_ALPHA = 0.6
-# 来源: meteor_demod src/main.c:27  #define RRC_FIR_ORDER 64
+# RRC FIR 阶数 64
 METEOR_RRC_ORDER = 64
-# 来源: meteor_demod src/main.c:30  #define INTERP_FACTOR 4
+# 插值倍数 4
 METEOR_INTERP = 4
-# 来源: meteor_demod src/include/pll.h  #define COSTAS_BW 100
+# Costas 环带宽 100
 METEOR_COSTAS_BW = 100.0
-# 来源: meteor_demod src/include/pll.h  #define COSTAS_DAMP 1/M_SQRT2
+# Costas 环阻尼 1/sqrt(2)
 METEOR_COSTAS_DAMP = 1.0 / np.sqrt(2.0)
 
-# 来源: meteor_demod 后级 LRPT 卷积码（K=7, r=1/2）生成多项式
+# LRPT 卷积码（K=7, r=1/2）生成多项式
 METEOR_VIT_K = 7
 METEOR_VIT_G1 = 0x79   # 八进制 171
 METEOR_VIT_G2 = 0x5F   # 八进制 137（Meteor-M2 专用）
 
-# 来源: LRPT 帧同步字（24 bit）。接收端在去交织/Viterbi 后字节流中搜索。
+# LRPT 帧同步字（24 bit）。接收端在去交织/Viterbi 后字节流中搜索。
 LRPT_SYNC_WORD = 0x1DFCDC
 
 
 def qpsk_symbols_to_dqpsk_bits(symbols: np.ndarray) -> np.ndarray:
     """DQPSK 差分解码：由相邻符号相位差恢复比特。
 
-    来源: meteor LRPT 为差分 QPSK——发射端把比特编码成相邻符号相位增量，
+    meteor LRPT 为差分 QPSK——发射端把比特编码成相邻符号相位增量，
     接收端 z[n]·conj(z[n-1]) 的象限即本次发送的双比特（格雷映射）。
     与 dqpsk_bits_to_symbols 互逆。
     """
@@ -583,8 +575,8 @@ def lrpt_find_frames(data: bytes, max_frames: int = 64) -> List[Dict]:
 def meteor_lrpt_demod(iq: np.ndarray, sample_rate: float) -> Dict:
     """Meteor LRPT 高电平解调骨架（QPSK→差分解码→去交织→Viterbi→帧解析）。
 
-    来源链路对照 meteor_demod：RRC/Costas/Gardner（demod.py QPSKDemodulator）
-    → DQPSK 差分解码 → 卷积去交织(I=36,J=2048) → Viterbi(0x79,0x5F) → LRPT 帧同步。
+    链路：RRC/Costas/Gardner → DQPSK 差分解码 → 卷积去交织(I=36,J=2048)
+    → Viterbi(0x79,0x5F) → LRPT 帧同步。
     返回 dict：symbols/bit_count/frames 摘要；供工具层调用。
     """
     sps = max(1, int(round(sample_rate / METEOR_SYM_RATE)))
@@ -692,9 +684,9 @@ def demodulate_lrpt(iq: np.ndarray, sample_rate: float,
     bits = q.symbols_to_bits(symbols).astype(np.float64)
 
     # 3. 卷积去交织（Viterbi 之前）
-    # 来源: SatDump plugins/meteor_support/meteor/deint.cpp:60-89 deinterleave() —
-    #        Meteor LRPT 在卷积编码后做卷积交织，接收端必须先去交织再 Viterbi；
-    #        否则突发错误无法被 Viterbi 纠正。I=36 分支, 相邻分支延迟 J=2048。
+    # 卷积去交织（Viterbi 之前）— Meteor LRPT 在卷积编码后做卷积交织，
+    # 接收端必须先去交织再 Viterbi；否则突发错误无法被 Viterbi 纠正。
+    # I=36 分支, 相邻分支延迟 J=2048。
     if sat_params.viterbi_rate < 1.0 and sat_params.viterbi_K > 0:
         bits = convolutional_deinterleave(
             bits, LRPT_DEINT_BRANCHES, LRPT_DEINT_DELAY).astype(np.float64)

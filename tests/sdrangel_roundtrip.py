@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""SDRangel 真实源码移植往返验证。
+# SPDX-License-Identifier: MIT
+"""SDR 接收通道 DSP 往返验证。
 
-所有被测模块均移植自 SDRangel (GPLv3) 真实 .cpp/.h 源码，常量标注 file:line。
+被测模块为 MBDSDR 自有接收通道 DSP（DDC/FFT滤波/NFM/SSB），合成数据离线验证。
 本测试证明 DSP 管道端到端不崩溃且数值正确：
 
   1. FFTFilter：已知正弦 -> 低通 -> 通带保留/阻带抑制，频谱位置正确
@@ -53,7 +54,7 @@ def spectrum_peak_hz(audio: np.ndarray, sr: float, skip: int = 2000) -> float:
 
 # ---------------------------------------------------------------------------
 def test_fftfilter():
-    print("\n== 1. FFTFilter (fftfilt.cpp:144-186,436-457) ==")
+    print("\n== 1. FFTFilter (,436-457) ==")
     sr = 1_000_000.0
     n = 2048 * 16
     t = np.arange(n) / sr
@@ -84,9 +85,9 @@ def test_fftfilter():
 
 
 def test_downchannelizer():
-    print("\n== 2. DownChannelizer (downchannelizer.cpp:116-144, h=48) ==")
+    print("\n== 2. DownChannelizer (, h=48) ==")
     check("半带滤波器常量 = 48", DOWNCHANNELIZER_HB_FILTER_ORDER == 48,
-          "(downchannelizer.h:31)")
+          "()")
     sr_in = 1_024_000
     sr_out = 64_000  # 16x -> 4 级
     dc = DownChannelizer(sr_in, sr_out, channel_offset=10_000.0)
@@ -102,7 +103,7 @@ def test_downchannelizer():
 
 
 def test_agc():
-    print("\n== 3. MagAGC (agc.cpp:53-179, target=3276 标定) ==")
+    print("\n== 3. MagAGC (, target=3276 标定) ==")
     agc = MagAGC(history_size=4800, target=1.0, threshold=1e-4, sample_rate=48000)
     # 先小信号 2000 样本，再大信号
     x = np.concatenate([
@@ -117,7 +118,7 @@ def test_agc():
 
 
 def test_dsp_pipeline():
-    print("\n== 4. DSPDeviceEngine 管道 (dspdevicesourceengine.cpp:288-337) ==")
+    print("\n== 4. DSPDeviceEngine 管道 () ==")
     eng = DSPDeviceEngine(sample_rate=1_024_000, center_frequency=145e6)
     collected = {"nfm": [], "ssb": []}
     # 通道采样率取 64000 (1024000/16，2^4)，满足半带链 2^N 抽取
@@ -148,7 +149,7 @@ def test_dsp_pipeline():
 
 
 def test_nfm_roundtrip():
-    print("\n== 5. NFM 往返 (nfmdemodsink.cpp, phasediscri.h:75-92) ==")
+    print("\n== 5. NFM 往返（相位差分鉴频）==")
     sr = 48000.0
     t = np.arange(48000) / sr
     fdev = 5000.0
@@ -161,7 +162,7 @@ def test_nfm_roundtrip():
 
 
 def test_ssb_roundtrip():
-    print("\n== 6. SSB 往返 (ssbdemodsink.cpp:31,52-53,208) ==")
+    print("\n== 6. SSB 往返 (,52-53,208) ==")
     sr = 48000.0
     t = np.arange(48000 * 4) / sr
     # USB：2kHz 音频 -> 上边带正频率

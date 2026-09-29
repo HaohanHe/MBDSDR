@@ -1,11 +1,12 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/web/server.py — 轻量 HTTP + WebSocket 服务器
 ======================================================
 
-移植自 OpenWebRX：
-  - owrx/http.py:179   RequestHandler(BaseHTTPRequestHandler) 路由
-  - owrx/websocket.py:47 WebSocketConnection —— 握手 + 帧编解码（server 不掩码）
-  - owrx/connection.py:116 OpenWebRxReceiverClient —— 多客户端共享一个后端
+轻量 HTTP + WebSocket 服务器设计（OpenWebRX 仅作技术参考，本仓未包含其源代码）：
+  - RequestHandler(BaseHTTPRequestHandler) 路由
+  - WebSocket 握手 + 帧编解码（server 端不掩码）
+  - 多客户端共享一个后端
 
 端点：
   GET  /                 浏览器前端（static/index.html）
@@ -54,7 +55,7 @@ _OPCODE_PONG = 0xA
 
 
 # --------------------------------------------------------------------------- #
-# 极简 WebSocket（移植 owrx/websocket.py，裁剪到 server->client 扇出所需）
+# 极简 WebSocket（裁剪到 server->client 扇出所需）
 # --------------------------------------------------------------------------- #
 class _WebSocket:
     """在一个已经完成 HTTP 升级的连接上跑收发循环。

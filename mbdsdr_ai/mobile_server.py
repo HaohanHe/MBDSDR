@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """MBDSDR 电脑端手机 WebSocket 服务。
 
 接 Flutter 手机端：

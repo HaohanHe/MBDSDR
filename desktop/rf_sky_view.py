@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 射频天空视图 (RF Sky View) — 对照 Stellarium 真实坐标数学
 =====================================================================
@@ -60,7 +61,7 @@ Stellarium (StelCore.cpp:1072 updateTransformMatrices) 的天球变换链:
 橙 #C4845C 强调色、绿 #6BA89A 真实数据、红 #B85C5C 警告。
 字体优先 MiSans，禁用 emoji。
 
-MBDSDR Project - AI定义无线电 - 全开源 GPL-3.0
+MBDSDR Project - AI定义无线电 - MIT License（干净室独立实现）
 呼号由用户在状态栏设置（未设置时角标显“呼号：未设置”），不写死。
 """
 

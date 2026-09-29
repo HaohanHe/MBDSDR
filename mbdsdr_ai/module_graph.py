@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI - SDR++ 式模块图（Module Graph）
 =============================================
@@ -45,13 +46,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
 # ======================================================================
-# 模块类型枚举（对应 SDR++ 里 source_modules/ decoder_modules/ sink_modules/ 目录划分）
+# 模块类型枚举（source / processing / decoder / sink 四类划分）
 # ======================================================================
 class ModuleType:
-    SOURCE = "source"          # source_modules/  (来源: repos/sdrpp/source_modules/)
+    SOURCE = "source"          # 信号源模块
     PROCESSING = "processing"  # 信道化/解调链中间块
-    DECODER = "decoder"        # decoder_modules/ (来源: repos/sdrpp/decoder_modules/)
-    SINK = "sink"              # sink_modules/    (来源: repos/sdrpp/sink_modules/)
+    DECODER = "decoder"        # 解码模块
+    SINK = "sink"              # 输出/落盘模块
 
 
 @dataclass

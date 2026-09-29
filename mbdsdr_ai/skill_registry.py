@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """MBDSDR 技能（Skills）注册表。
 
 借鉴 DeepSeek harness 的 skill 子系统：
