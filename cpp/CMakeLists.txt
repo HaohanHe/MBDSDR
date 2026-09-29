@@ -79,6 +79,7 @@ set(SOURCES
     src/dsp/wav_writer.cpp
     src/dsp/file_source.cpp
     src/dsp/gated_recorder.cpp
+    src/dsp/signal_watch.cpp
     src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp
     src/dsp/rds_decoder.cpp
@@ -135,6 +136,7 @@ set(HEADERS
     src/dsp/wav_writer.h
     src/dsp/file_source.h
     src/dsp/gated_recorder.h
+    src/dsp/signal_watch.h
     src/dsp/sgp4.h
     src/ui/sky_view.h
     src/ui/world_view.h
@@ -181,6 +183,7 @@ target_link_libraries(ui_shot_mvfo PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Net
 add_executable(ui_shot_cst tests/ui_screenshot_constellation.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_cst PRIVATE src build/ui_shot_cst_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_cst PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
 target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent ${CMAKE_DL_LIBS})
 
 if(RTLSDR_FOUND)
@@ -215,7 +218,7 @@ add_executable(test_engine_integration tests/test_engine_integration.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_engine_integration PRIVATE src)
 target_link_libraries(test_engine_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
@@ -228,7 +231,7 @@ add_executable(test_audio_sink tests/test_audio_sink.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_audio_sink PRIVATE src)
 target_link_libraries(test_audio_sink PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
@@ -271,7 +274,7 @@ add_executable(test_wav_roundtrip tests/test_wav_roundtrip.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_wav_roundtrip PRIVATE src)
 target_link_libraries(test_wav_roundtrip PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
@@ -282,7 +285,7 @@ add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/agent.cpp src/ai/agent_tools.cpp src/ai/ai_config.cpp)
 target_include_directories(test_ai_function_calling PRIVATE src)
@@ -398,6 +401,15 @@ target_include_directories(test_squelch_gate PRIVATE src)
 target_link_libraries(test_squelch_gate PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME squelch_gate COMMAND test_squelch_gate)
 
+# Unattended signal-triggered watch recording (detector + pre-roll + per-burst
+# WAV/JSON sidecar; NOT HARDWARE, fully synthesized).
+add_executable(test_watch_record tests/test_watch_record.cpp
+    src/dsp/signal_watch.cpp src/dsp/gated_recorder.cpp src/dsp/squelch.cpp)
+target_include_directories(test_watch_record PRIVATE src)
+target_link_libraries(test_watch_record PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME watch_record COMMAND test_watch_record)
+set_tests_properties(watch_record PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # Bare-C++ digital demod test (BPSK/QPSK round-trip through Costas + diff codec).
 add_executable(test_digital_demod tests/test_digital_demod.cpp
     src/dsp/digital_demod.cpp)
@@ -473,7 +485,7 @@ add_executable(test_agent tests/test_agent.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
     src/dsp/qt_audio_sink.cpp
-    src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp
+    src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp
     src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)

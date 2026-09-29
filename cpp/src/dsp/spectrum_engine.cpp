@@ -12,6 +12,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSettings>
 #include <algorithm>
 #include <cmath>
 #include <chrono>
@@ -43,7 +44,13 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
 
     audioOut_ = new AudioOutput(this);
     audioSink_ = audioOut_;   // default: real device playback
-    gatedRec_.setOutputDir("recordings");
+    // Shared output directory (user-configurable, program-dir "record").
+    {
+        QSettings rs("MBDSDR", "MBDSDR");
+        recDir_ = rs.value("rec/dir", QStringLiteral("record")).toString();
+        if (recDir_.isEmpty()) recDir_ = QStringLiteral("record");
+    }
+    gatedRec_.setOutputDir(recDir_);
     telemetryClock_.start();
     aptEmitClock_.start();
     // Single default VFO at the source center, NFM 12.5 kHz -- identical to
@@ -255,8 +262,8 @@ bool SpectrumEngine::startRecording() {
     QMutexLocker lk(&sourceMutex_);
     if (!hasData()) return false;
 
-    QDir().mkpath("recordings");
-    const QString base = "recordings/" + expandRecTemplate();
+    QDir().mkpath(recDir_);
+    const QString base = recDir_ + QLatin1Char('/') + expandRecTemplate();
 
     if (recTarget_ == RecTarget::BasebandIQ) {
         if (!recorder_.startWithBase(base, source_->sampleRate(),
@@ -317,7 +324,28 @@ void SpectrumEngine::stopRecording() {
     }
 }
 void SpectrumEngine::setGatedRecordingEnabled(bool e) {
-    gatedRec_.setEnabled(e);
+    gatedEnabled_ = e;
+    // The single gated recorder is active when either mode is armed.
+    gatedRec_.setEnabled(gatedEnabled_ || watchEnabled_.load());
+}
+
+void SpectrumEngine::setWatchEnabled(bool e) {
+    if (e == watchEnabled_.load()) return;
+    watchEnabled_.store(e);
+    if (!e) watch_.reset();
+    gatedRec_.setEnabled(gatedEnabled_ || e);
+    emit watchStateChanged(e, gatedRec_.isRecording(),
+                           gatedRec_.segmentCount());
+}
+
+void SpectrumEngine::setRecordingDir(const QString& dir) {
+    QString d = dir;
+    while (d.size() > 1 && d.endsWith(QLatin1Char('/'))) d.chop(1);
+    if (d.isEmpty()) d = QStringLiteral("record");
+    recDir_ = d;
+    gatedRec_.setOutputDir(recDir_);
+    QSettings rs("MBDSDR", "MBDSDR");
+    rs.setValue("rec/dir", recDir_);
 }
 
 // ---- Multi-VFO management --------------------------------------------------
@@ -586,6 +614,12 @@ void SpectrumEngine::run() {
         rssi = 10 * std::log10(rssi / iq.size() + 1e-10);
         emit rssiLevel(static_cast<float>(rssi));
 
+        // Real-RSSI trigger for the unattended watch. The block duration is
+        // the selected VFO's 48 kHz audio block; detection runs on the REAL
+        // capture energy, never on fabricated levels.
+        watch_.setBlockMs(raw.size() * 1000.0 / 48000.0);
+        const bool watchGate = watch_.update(static_cast<float>(rssi));
+
         // Real measured noise floor -> SNR. The median per-bin level of the power
         // spectrum is the noise density (peaks don't lift the median); Parseval
         // scales it to the total-power domain used by RSSI. A slow exponential
@@ -662,10 +696,36 @@ void SpectrumEngine::run() {
 
         audioSink_->write(out);
 
-        // Gated recording: label the segment with the selected VFO, and feed
-        // the REAL (un-muted) audio so pre-roll captures the onset.
-        gatedRec_.setContext(selMode, sel ? sel->freqHz : centerNow);
-        gatedRec_.feed(leveled, gate);
+        // Gated recording: the single segment writer serves both the
+        // squelch-gated mode and the watch mode. It is fed the REAL
+        // (un-muted) audio so pre-roll captures the true onset, and a gate
+        // that is the OR of whichever modes are armed.
+        {
+            SegmentContext ctx;
+            ctx.mode = selMode;
+            ctx.channelFreqHz = sel ? sel->freqHz : centerNow;
+            ctx.centerFreqHz = centerNow;
+            ctx.gainDb = source_->gain();
+            ctx.triggerThresholdDb = watch_.thresholdDb();
+            ctx.hardware = source_->name();
+            ctx.hardwareConnected = real;
+            gatedRec_.setContext(ctx);
+
+            bool recGate = false;
+            if (gatedEnabled_) recGate = recGate || gate;
+            if (watchEnabled_.load()) recGate = recGate || watchGate;
+
+            const std::vector<QString> saved = gatedRec_.feed(leveled, recGate);
+            const bool nowRecording = gatedRec_.isRecording();
+            if (!saved.empty())
+                emit watchStateChanged(watchEnabled_.load(), nowRecording,
+                                       gatedRec_.segmentCount());
+            if (nowRecording != gatedWasRecording_) {
+                gatedWasRecording_ = nowRecording;
+                emit watchStateChanged(watchEnabled_.load(), nowRecording,
+                                       gatedRec_.segmentCount());
+            }
+        }
 
         // Continuous audio (WAV) recording for the main record button. When
         // recIgnoreSquelch_ is false we normally only capture while the gate is

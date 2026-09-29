@@ -183,6 +183,18 @@ private:
     QLabel*         anrValue_   = nullptr;
     QPushButton*    recordBtn_   = nullptr;
     QCheckBox*      gatedCheck_   = nullptr;
+    // Unattended signal-triggered watch recording.
+    QCheckBox*      watchCheck_ = nullptr;
+    QSlider*        watchThrSlider_ = nullptr;
+    QLabel*         watchThrValue_ = nullptr;
+    QLabel*         watchLevel_ = nullptr;
+    QDoubleSpinBox* watchPrerollSpin_ = nullptr;
+    QDoubleSpinBox* watchHangSpin_ = nullptr;
+    QLabel*         watchStatus_ = nullptr;
+    QWidget*        watchForm_ = nullptr;
+    // User-configurable recording directory.
+    QLineEdit*      recDirEdit_ = nullptr;
+    QPushButton*    recDirBrowseBtn_ = nullptr;
     QLabel*         recStatus_   = nullptr;
     QComboBox*      recTargetCombo_ = nullptr;
     QLineEdit*      recTemplateEdit_ = nullptr;
@@ -207,6 +219,7 @@ private:
     QLabel*         sbRds_  = nullptr;   // RDS PS/PTY/RadioText; empty until real data
     QLabel*         sbSdr_  = nullptr;
     QLabel*         sbGain_ = nullptr;
+    QLabel*         sbWatch_ = nullptr;
     QLabel*         sbRec_  = nullptr;
 
     // AI

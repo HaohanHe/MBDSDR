@@ -38,6 +38,7 @@
 #include <QAudioDevice>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QFileDialog>
 
 #include "dsp/vfo_manager.h"
 #include "ui/constellation_view.h"
@@ -323,6 +324,20 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* gRec = new QGroupBox("录制", leftCard);
     auto* gRecLay = new QVBoxLayout(gRec);
+
+    // User-configurable output directory (default program dir "record").
+    auto* recDirForm = new QFormLayout;
+    auto* recDirRow = new QWidget(gRec);
+    auto* recDirLay = new QHBoxLayout(recDirRow);
+    recDirLay->setContentsMargins(0, 0, 0, 0);
+    recDirEdit_ = new QLineEdit("record", recDirRow);
+    recDirEdit_->setMinimumWidth(tokens::scaled(80));
+    recDirBrowseBtn_ = new QPushButton("浏览…", recDirRow);
+    recDirLay->addWidget(recDirEdit_);
+    recDirLay->addWidget(recDirBrowseBtn_);
+    recDirForm->addRow("录制目录", recDirRow);
+    gRecLay->addLayout(recDirForm);
+
     auto* recForm = new QFormLayout;
     recTargetCombo_ = new QComboBox(gRec);
     recTargetCombo_->addItems({"基带 IQ (SigMF)", "解调音频 (WAV)"});
@@ -340,8 +355,54 @@ MainWindow::MainWindow(QWidget* parent)
     gRecLay->addWidget(recIgnoreSqlChk_);
     gatedCheck_ = new QCheckBox("触发式分段录制", gRec);
     gRecLay->addWidget(gatedCheck_);
+
+    // ---- Unattended signal-triggered watch recording ----
+    watchCheck_ = new QCheckBox("值守录制（信号触发）", gRec);
+    watchCheck_->setToolTip(
+        "持续监听 RSSI，仅当真实信号超过触发门限时才开始录制（带前滚）；"
+        "信号消失并经过结束延时后自动停止并落盘，每段一个文件");
+    gRecLay->addWidget(watchCheck_);
+
+    watchForm_ = new QWidget(gRec);
+    auto* watchLay = new QVBoxLayout(watchForm_);
+    watchLay->setContentsMargins(0, 0, 0, 0);
+    auto* watchFormLay = new QFormLayout;
+    auto* thrRowW = new QWidget(watchForm_);
+    auto* thrLay = new QHBoxLayout(thrRowW);
+    thrLay->setContentsMargins(0, 0, 0, 0);
+    watchThrSlider_ = new QSlider(Qt::Horizontal, thrRowW);
+    watchThrSlider_->setRange(-100, -20);
+    watchThrSlider_->setValue(-50);
+    watchThrValue_ = new QLabel("-50 dB", thrRowW);
+    thrLay->addWidget(watchThrSlider_);
+    thrLay->addWidget(watchThrValue_);
+    watchFormLay->addRow("触发门限", thrRowW);
+    watchLevel_ = new QLabel("电平: -- dBFS", watchForm_);
+    watchLevel_->setObjectName("dockHint");
+    watchFormLay->addRow("", watchLevel_);
+    watchPrerollSpin_ = new QDoubleSpinBox(watchForm_);
+    watchPrerollSpin_->setRange(0.1, 2.0);
+    watchPrerollSpin_->setSingleStep(0.05);
+    watchPrerollSpin_->setDecimals(2);
+    watchPrerollSpin_->setSuffix(" s");
+    watchPrerollSpin_->setValue(0.4);
+    watchFormLay->addRow("前滚", watchPrerollSpin_);
+    watchHangSpin_ = new QDoubleSpinBox(watchForm_);
+    watchHangSpin_->setRange(0.3, 10.0);
+    watchHangSpin_->setSingleStep(0.1);
+    watchHangSpin_->setDecimals(1);
+    watchHangSpin_->setSuffix(" s");
+    watchHangSpin_->setValue(1.5);
+    watchFormLay->addRow("结束延时", watchHangSpin_);
+    watchLay->addLayout(watchFormLay);
+    watchStatus_ = new QLabel("值守: 关", watchForm_);
+    watchStatus_->setWordWrap(true);
+    watchLay->addWidget(watchStatus_);
+    watchForm_->setEnabled(false);
+    gRecLay->addWidget(watchForm_);
+
     auto* openRecDirBtn = new QPushButton("打开录制目录", gRec);
-    openRecDirBtn->setToolTip("在系统文件管理器中打开 recordings/ 目录");
+    openRecDirBtn->setToolTip("在系统文件管理器中打开当前录制目录");
     gRecLay->addWidget(openRecDirBtn);
     recordBtn_ = new QPushButton("● 录制", gRec);
     gRecLay->addWidget(recordBtn_);
@@ -690,9 +751,11 @@ MainWindow::MainWindow(QWidget* parent)
     sbRds_  = new QLabel("", this);
     sbGain_ = new QLabel("--", this);
     sbSdr_  = new QLabel("Test Signal", this);
+    sbWatch_ = new QLabel("", this);
+    sbWatch_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kAccent));
     sbRec_  = new QLabel("", this);
     sbRec_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kDanger));
-    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbRec_}) {
+    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbWatch_, sbRec_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
     }
@@ -825,6 +888,67 @@ MainWindow::MainWindow(QWidget* parent)
     connect(gatedCheck_, &QCheckBox::stateChanged, this, [this](int st) {
         engine_->setGatedRecordingEnabled(st != Qt::Unchecked);
     });
+
+    // ---- Watch mode controls ----
+    connect(watchCheck_, &QCheckBox::stateChanged, this, [this](int st) {
+        const bool on = (st != Qt::Unchecked);
+        engine_->setWatchEnabled(on);
+        watchForm_->setEnabled(on);
+        scheduleSave();
+    });
+    connect(watchThrSlider_, &QSlider::valueChanged, this, [this](int v) {
+        watchThrValue_->setText(QString("%1 dB").arg(v));
+        engine_->setWatchThresholdDb(static_cast<float>(v));
+        scheduleSave();
+    });
+    connect(watchPrerollSpin_,
+            QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double v) {
+                engine_->setWatchPrerollMs(v * 1000.0);
+                scheduleSave();
+            });
+    connect(watchHangSpin_,
+            QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double v) {
+                engine_->setWatchHangMs(v * 1000.0);
+                scheduleSave();
+            });
+    // Live watch status (cross-thread, queued).
+    connect(engine_, &dsp::SpectrumEngine::watchStateChanged,
+            this, [this](bool enabled, bool recording, int segments) {
+                if (!enabled) {
+                    if (watchStatus_) watchStatus_->setText("值守: 关");
+                    if (sbWatch_) sbWatch_->setText("");
+                    return;
+                }
+                const QString tail = QString("已录 %1 段").arg(segments);
+                if (watchStatus_)
+                    watchStatus_->setText(recording
+                        ? QString("值守: ● 录制中 · %1").arg(tail)
+                        : QString("值守: 监听中 · %1").arg(tail));
+                if (sbWatch_)
+                    sbWatch_->setText(recording
+                        ? QString("● 值守录制 · %1").arg(tail)
+                        : QString("值守监听 · %1").arg(tail));
+            }, Qt::QueuedConnection);
+
+    // ---- Recording directory ----
+    connect(recDirBrowseBtn_, &QPushButton::clicked, this, [this]() {
+        const QString start = recDirEdit_->text().isEmpty()
+                                  ? QStringLiteral("record") : recDirEdit_->text();
+        const QString dir = QFileDialog::getExistingDirectory(
+            this, "选择录制目录", start);
+        if (!dir.isEmpty()) {
+            recDirEdit_->setText(dir);
+            engine_->setRecordingDir(dir);
+            scheduleSave();
+        }
+    });
+    connect(recDirEdit_, &QLineEdit::editingFinished, this, [this]() {
+        engine_->setRecordingDir(recDirEdit_->text());
+        scheduleSave();
+    });
+
     connect(recordBtn_, &QPushButton::clicked, this, &MainWindow::onRecordClicked);
 
     // ---- Multi-VFO wiring -------------------------------------------------
@@ -921,9 +1045,12 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this](bool on) { engine_->setRecIgnoreSquelch(on); });
 
     // Open the on-disk recordings folder in the system file manager.
-    connect(openRecDirBtn, &QPushButton::clicked, this, []() {
-        QDesktopServices::openUrl(
-            QUrl::fromLocalFile(QDir::currentPath() + "/recordings"));
+    connect(openRecDirBtn, &QPushButton::clicked, this, [this]() {
+        QString dir = engine_->recordingDir();
+        QDir().mkpath(dir);
+        if (QDir(dir).isRelative())
+            dir = QDir::currentPath() + QLatin1Char('/') + dir;
+        QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
     });
 
     // ---- Advanced RTL-SDR front-end options (forwarded to the source) ----
@@ -1362,6 +1489,11 @@ void MainWindow::saveUiState() {
     s.setValue("rec/template", recTemplateEdit_->text());
     s.setValue("rec/stereo", recStereoCheck_->isChecked());
     s.setValue("rec/ignoreSquelch", recIgnoreSqlChk_->isChecked());
+    s.setValue("rec/dir", recDirEdit_->text());
+    s.setValue("watch/enabled", watchCheck_->isChecked());
+    s.setValue("watch/threshold", static_cast<float>(watchThrSlider_->value()));
+    s.setValue("watch/prerollMs", watchPrerollSpin_->value() * 1000.0);
+    s.setValue("watch/hangMs", watchHangSpin_->value() * 1000.0);
     s.setValue("anr/enabled", anrCheck_->isChecked());
     s.setValue("anr/strength", anrSlider_->value());
 
@@ -1498,6 +1630,19 @@ void MainWindow::restoreUiState() {
     recTemplateEdit_->setText(s.value("rec/template", "{time}_{freq}_{mode}").toString());
     recStereoCheck_->setChecked(s.value("rec/stereo", false).toBool());
     recIgnoreSqlChk_->setChecked(s.value("rec/ignoreSquelch", false).toBool());
+
+    // ---- Watch + directory restore (params before arming) ----
+    recDirEdit_->setText(s.value("rec/dir", QStringLiteral("record")).toString());
+    engine_->setRecordingDir(recDirEdit_->text());
+    watchThrSlider_->setValue(static_cast<int>(std::round(
+        s.value("watch/threshold", -50.0f).toFloat())));
+    watchThrValue_->setText(QString("%1 dB").arg(watchThrSlider_->value()));
+    watchPrerollSpin_->setValue(
+        s.value("watch/prerollMs", 400.0).toDouble() / 1000.0);
+    watchHangSpin_->setValue(
+        s.value("watch/hangMs", 1500.0).toDouble() / 1000.0);
+    watchCheck_->setChecked(s.value("watch/enabled", false).toBool());
+
     anrCheck_->setChecked(s.value("anr/enabled", false).toBool());
     anrSlider_->setValue(s.value("anr/strength", 50).toInt());
     engine_->setAnrEnabled(anrCheck_->isChecked());
@@ -1645,6 +1790,11 @@ void MainWindow::onRssiLevel(float dbfs) {
     if (rssiLabel_)
         rssiLabel_->setText(QString("RSSI: %1 dBFS · SNR: %2 dB")
                             .arg(dbfs, 0, 'f', 1).arg(lastSnr_, 0, 'f', 1));
+    // Watch threshold meter: live RSSI against the configured threshold.
+    if (watchLevel_)
+        watchLevel_->setText(QString("电平 %1 dBFS · 门限 %2")
+                             .arg(dbfs, 0, 'f', 1)
+                             .arg(watchThrSlider_ ? watchThrSlider_->value() : -50));
 }
 
 void MainWindow::onSnrLevel(float snrDb) {
