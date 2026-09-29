@@ -2,6 +2,7 @@
 // Integration test: every UI control that calls an engine setter must actually
 // land in the DSP state. Uses TestSignalSource (no hardware, no network).
 #include <QtTest/QtTest>
+#include <cmath>
 #include "dsp/spectrum_engine.h"
 
 using namespace mbdsdr::dsp;
@@ -10,6 +11,7 @@ class TestEngineIntegration : public QObject {
     Q_OBJECT
 private slots:
     void statePropagates();
+    void vfoOffsetInBandNoRetuneUntilEdge();
 };
 
 void TestEngineIntegration::statePropagates() {
@@ -52,6 +54,54 @@ void TestEngineIntegration::statePropagates() {
     eng.onSetSampleRate(2.4e6);
     eng.setBandwidth(0);        // zero bandwidth
     eng.setBandwidth(8000.0);   // restore
+}
+
+// *** NOT HARDWARE / 非硬件合成 ***
+// In-band IF-offset move for the active VFO (SDR++-style). Dragging the
+// selected VFO inside the capture band must retune ONLY the channelizer NCO
+// offset and leave the RTL tuner parked; only when the target crosses the band
+// edge do we genuinely retune the source. Runs against the offline
+// TestSignalSource (synthetic IQ): center=98.5 MHz, sr=2.4 MHz, so the usable
+// half-band = 2.4e6*0.5*0.85 = 1.02 MHz.
+void TestEngineIntegration::vfoOffsetInBandNoRetuneUntilEdge() {
+    SpectrumEngine eng;
+    eng.onSetSampleRate(2.4e6);
+    eng.onSetCenterFreq(98.5e6);
+    QCOMPARE(eng.centerFreq(), 98.5e6);
+    const int id = eng.selectedVfoId();
+    QVERIFY(id != 0);
+
+    // 1) In-band move to +500 kHz: |500k| < 1.02 MHz -> tuner stays parked.
+    const bool r1 = eng.vfoSetOffset(id, 98.5e6 + 500e3);
+    QVERIFY(!r1);
+    QCOMPARE(eng.centerFreq(), 98.5e6);          // tuner NOT retuned
+    auto mk1 = eng.vfoMarkers();
+    bool found = false;
+    for (const auto& m : mk1) {
+        if (m.id == id) {
+            found = true;
+            QVERIFY2(std::abs(m.centerOffsetHz - 500000.0) < 1.0,
+                     "in-band offset must be +500 kHz");
+            QCOMPARE(m.referenceHz, 98.5e6);
+        }
+    }
+    QVERIFY(found);
+
+    // 2) Move to +1.5 MHz: |1.5 MHz| > 1.02 MHz -> genuine retune to target.
+    const bool r2 = eng.vfoSetOffset(id, 98.5e6 + 1.5e6);
+    QVERIFY(r2);
+    QCOMPARE(eng.centerFreq(), 100.0e6);         // tuner retuned to the target
+    auto mk2 = eng.vfoMarkers();
+    found = false;
+    for (const auto& m : mk2) {
+        if (m.id == id) {
+            found = true;
+            QVERIFY2(std::abs(m.centerOffsetHz - 0.0) < 1.0,
+                     "after retune the VFO should sit back at offset ~0");
+            QCOMPARE(m.referenceHz, 100.0e6);
+        }
+    }
+    QVERIFY(found);
 }
 
 QTEST_MAIN(TestEngineIntegration)

@@ -37,6 +37,7 @@ private slots:
     void twoVfosDecodeOwnTones();
     void addRemoveSelect();
     void singleVfoDefaultIsNfmc();
+    void retuneKeepsOtherVfoAbsolute();
 };
 
 // Build a wideband IQ with two FM carriers:
@@ -158,6 +159,70 @@ void TestMultiVfo::singleVfoDefaultIsNfmc() {
     auto iq = makeWidebandIq(2.4e6, 8192);
     mgr.process(iq, 2.4e6, 98.5e6);
     QVERIFY(!sel->audio48k.empty());
+}
+
+// *** NOT HARDWARE / 非硬件合成 ***
+// When one VFO is dragged out of the capture band and forces a genuine tuner
+// retune (the vfoSetOffset edge path: source center jumps to 100.0 MHz), the
+// OTHER VFO must keep its ABSOLUTE frequency unchanged; only its channelizer IF
+// offset is recomputed against the new source center. This mirrors exactly what
+// SpectrumEngine::vfoSetOffset() does -- source_->setCenterFreq(target) then
+// vfoManager_.setFreq(id, target), with run()/process() re-deriving every other
+// channel's offset as (freqHz - newCenter). Pure synthetic IQ, no radio/file.
+//   start: center=98.5 MHz, sr=2.4 MHz; VFO A@98.5, VFO B@98.8 (+300 kHz).
+//   after retune to 100.0 MHz: B stays 98.8 MHz but offset = 98.8-100.0 = -1.2e6.
+void TestMultiVfo::retuneKeepsOtherVfoAbsolute() {
+    VfoManager mgr;
+    mgr.initDefault(2.4e6, 98.5e6, "NFM", 12500.0);   // VFO A at 98.5 MHz
+    const int idA = mgr.selectedId();
+    const int idB = mgr.addVfo(98.8e6);               // VFO B at 98.8 MHz (+300k)
+    mgr.selectVfo(idA);
+
+    // Warm up at the original capture center 98.5 MHz.
+    for (int blk = 0; blk < 5; ++blk) {
+        auto iq = makeWidebandIq(2.4e6, 8192);
+        mgr.process(iq, 2.4e6, 98.5e6);
+    }
+    QCOMPARE(mgr.channel(idB)->freqHz, 98.8e6);   // B absolute before retune
+
+    // ---- Simulate the vfoSetOffset edge retune (tuner center -> 100.0 MHz) ---
+    // Engine does: source_->setCenterFreq(100.0e6); vfoManager_.setFreq(A,100.0e6).
+    // Here we mirror that: retune A's absolute target to 100.0e6 and feed the
+    // next frames at the NEW center, exactly as run() does via centerNow.
+    mgr.setFreq(idA, 100.0e6);
+    for (int blk = 0; blk < 5; ++blk) {
+        auto iq = makeWidebandIq(2.4e6, 8192);
+        mgr.process(iq, 2.4e6, 100.0e6);
+    }
+
+    // B's ABSOLUTE frequency survives the tuner move unchanged...
+    const VfoChannel* b = mgr.channel(idB);
+    QVERIFY(b);
+    QCOMPARE(b->freqHz, 98.8e6);
+
+    // ...but its IF offset is recomputed against the NEW center. This is the same
+    // backfill SpectrumEngine::vfoMarkers() performs:
+    //   centerOffsetHz = freqHz - referenceHz = 98.8e6 - 100.0e6 = -1.2e6.
+    const double newCenter = 100.0e6;
+    auto markers = mgr.markers();
+    bool foundB = false, foundA = false;
+    for (const auto& m : markers) {
+        if (m.id == idB) {
+            foundB = true;
+            QCOMPARE(m.freqHz, 98.8e6);                  // absolute freq kept
+            const double off = m.freqHz - newCenter;     // engine's backfill
+            QVERIFY2(std::abs(off - (-1200000.0)) < 1.0,
+                     "B offset must be recomputed to -1.2 MHz vs new center");
+        } else if (m.id == idA) {
+            foundA = true;
+            QCOMPARE(m.freqHz, 100.0e6);                // A retuned to new center
+            const double off = m.freqHz - newCenter;
+            QVERIFY2(std::abs(off - 0.0) < 1.0,
+                     "A should sit back at offset ~0 after retune");
+        }
+    }
+    QVERIFY(foundB);
+    QVERIFY(foundA);
 }
 
 QTEST_MAIN(TestMultiVfo)

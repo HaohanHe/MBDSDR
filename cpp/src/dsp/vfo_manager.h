@@ -45,6 +45,17 @@ struct VfoMarker {
     QColor  color;
     QString name;
     bool    selected = false;
+    // Signed IF offset of this VFO relative to the source's capture center:
+    //   centerOffsetHz = freqHz - referenceHz.
+    // This is what the channelizer NCO actually tunes. During an in-band
+    // (SDR++-style) move the tuner stays parked and ONLY this offset rides; when
+    // the tuner itself moves, freqHz is unchanged and this value is recomputed
+    // against the new center on the next snapshot.
+    double  centerOffsetHz = 0.0;
+    // The source capture center this snapshot was taken against (reference
+    // frequency). Lets the UI draw the capture window / band edges without a
+    // second source-center read.
+    double  referenceHz = 0.0;
 };
 
 // One receive channel: independent channelizer + demod + resampler.

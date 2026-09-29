@@ -91,6 +91,15 @@ public slots:
     void vfoRemove(int id);
     void vfoSelect(int id);
     void vfoSetFreq(int id, double hz);
+    // SDR++-style in-band IF-offset move: retune VFO `id` to an ABSOLUTE target.
+    // While the target stays inside the usable central fraction of the current
+    // capture band, ONLY the channelizer NCO offset changes -- the RTL tuner
+    // stays parked so other VFOs keep listening uninterrupted. If the target
+    // would cross the band edge, the source tuner is genuinely retuned to the
+    // target (the VFO lands back near offset ~0); other VFOs keep their
+    // absolute frequencies and see their offsets recomputed on the next frame.
+    // Returns true iff the source tuner was actually retuned.
+    bool vfoSetOffset(int id, double targetHz);
     void vfoSetBandwidth(int id, double hz);
     void vfoSetMode(int id, const QString& mode);
     void vfoSetColor(int id, const QColor& c);
