@@ -15,6 +15,7 @@ static double defaultBandwidthForMode(const QString& mode) {
     if (mode == "CW")   return 500.0;
     if (mode == "NFM")  return 12500.0;
     if (mode == "BPSK" || mode == "QPSK") return 3000.0;
+    if (mode == "ADS-B") return 2000000.0;   // wideband 1090 MHz capture
     return 2400.0; // USB / LSB / anything else
 }
 
@@ -50,6 +51,23 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
         rds.reset();            // RDS rides the WFM analog path only
         resampler.configure(ifRate, 48000.0, 31);
         recoveredSymbols.clear();
+        lastSr = sr;
+        needsRebuild = false;
+        return;
+    }
+
+    // ADS-B (1090 MHz Mode S): no analog demod, no RDS, no digital symbols.
+    // The engine feeds full-rate IQ to its own ADSBDecoder on a separate path;
+    // this VFO channel only keeps the channelizer configured (wideband
+    // passthrough) so process() never crashes, and emits NO audio.
+    if (mode == "ADS-B") {
+        channelizer.configure(sr, sr, 2000000.0, 31);
+        channelizer.setVfoOffsetHz(freqHz - sourceCenterHz);
+        demod.reset();          // no analog demod
+        digitalDemod.reset();
+        rds.reset();
+        recoveredSymbols.clear();
+        resampler.configure(sr, 48000.0, 31);
         lastSr = sr;
         needsRebuild = false;
         return;
@@ -207,6 +225,12 @@ const std::vector<float>& VfoManager::process(
         } else {
             // Cheap continuous-phase NCO retune for frequency / center moves.
             ch.channelizer.setVfoOffsetHz(ch.freqHz - sourceCenterHz);
+        }
+        if (ch.mode == "ADS-B") {
+            // ADS-B has no audio: full-rate IQ is decoded by the engine's own
+            // ADSBDecoder (separate path). This channel stays silent.
+            ch.audio48k.clear();
+            continue;
         }
         auto baseband = ch.channelizer.process(iq);
         if (ch.isDigital()) {

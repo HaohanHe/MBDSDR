@@ -62,6 +62,7 @@
 #include <QClipboard>
 #include <QInputDialog>
 #include "ui/world_view.h"
+#include "ui/aircraft_tracker.h"
 #include "ui/elevation_plot.h"
 #include "gnss/gnss_receiver.h"
 #include "gnss/gnss_types.h"
@@ -248,7 +249,7 @@ MainWindow::MainWindow(QWidget* parent)
     gRxLay->addRow("增益", gainRow);
     demodCombo_ = new QComboBox(gRx);
     demodCombo_->setObjectName("demodCombo");
-    demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW", "BPSK", "QPSK"});
+    demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW", "BPSK", "QPSK", "ADS-B"});
     gRxLay->addRow("解调", demodCombo_);
     bwCombo_ = new QComboBox(gRx);
     bwCombo_->addItems({"8 kHz", "12.5 kHz", "200 kHz", "2.4 kHz", "500 Hz"});
@@ -363,7 +364,7 @@ MainWindow::MainWindow(QWidget* parent)
     // World tab: a compact GNSS/serial toolbar on top, the offline map below.
     // Real data only: the receiver point appears only after a valid fix; with
     // no fix the map keeps the hand-entered station and states "GNSS 无定位".
-    adsbMap_ = new QMap<QString, ui::AircraftPoint>();
+    adsbTracker_ = new ui::AircraftTracker();
     auto* worldPage = new QWidget(centerCard);
     auto* worldPageLay = new QVBoxLayout(worldPage);
     worldPageLay->setContentsMargins(0, 0, 0, 0);
@@ -443,16 +444,22 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* adsbPage = new QWidget;
     auto* adsbLay = new QVBoxLayout(adsbPage);
-    adsbEmpty_ = new QLabel("1090MHz 无飞机\n（FC0012 一般收不到 1090，留作支持）", adsbPage);
+    adsbEmpty_ = new QLabel("1090MHz 暂无飞机\n请在解调选择 ADS-B，真实收到 1090MHz 帧后显示", adsbPage);
     adsbEmpty_->setObjectName("statusHint");
     adsbEmpty_->setAlignment(Qt::AlignCenter);
     adsbEmpty_->setWordWrap(true);
     adsbLay->addWidget(adsbEmpty_);
-    adsbTable_ = new QTableWidget(0, 6, adsbPage);
+    adsbTable_ = new QTableWidget(0, 8, adsbPage);
     adsbTable_->setHorizontalHeaderLabels({"ICAO", "呼号", "高度(ft)", "速度(kt)", "航向(°)", "垂直(fpm)", "距离(km)", "时间"});
     adsbTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     adsbLay->addWidget(adsbTable_);
     rightTabs_->addTab(adsbPage, "ADS-B");
+
+    // 1 s TTL-prune tick: expires silent aircraft and refreshes the table/map.
+    adsbTimer_ = new QTimer(this);
+    adsbTimer_->setInterval(1000);
+    connect(adsbTimer_, &QTimer::timeout, this, &MainWindow::onAdsbPrune);
+    adsbTimer_->start();
 
     // Constellation tab: live BPSK/QPSK symbol scatter from the selected digital VFO.
     {
@@ -744,6 +751,20 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this](int) {
                 engine_->setDemodMode(demodCombo_->currentText());
                 sbMode_->setText(demodCombo_->currentText());
+                // ADS-B (1090 MHz Mode S): walk the receiver to the band. These
+                // are reversible -- the user may retune/change rate afterwards.
+                if (demodCombo_->currentText() == "ADS-B") {
+                    // Park the tuner on 1090 MHz and mirror it into the spinbox
+                    // without re-entering the freqChanged signal loop.
+                    engine_->onSetCenterFreq(1090.0e6);
+                    freqSpin_->blockSignals(true);
+                    freqSpin_->setValue(1090.0);
+                    freqSpin_->blockSignals(false);
+                    // 1.024 MS/s is too narrow for 1090 MHz; step up to 2.4 MS/s
+                    // if we're on the slowest rate. >=2.048 MS/s is fine.
+                    if (srCombo_->currentIndex() == 0)
+                        srCombo_->setCurrentIndex(2);   // handler sets 2.4e6
+                }
                 static const QMap<QString, int> bwIdx = {
                     {"AM", 0}, {"NFM", 1}, {"WFM", 2}, {"USB", 3}, {"LSB", 3}, {"CW", 4}
                 };
@@ -920,6 +941,7 @@ MainWindow::MainWindow(QWidget* parent)
             dlg.saveToConfig(cfg);
             cfg.save();
             worldView_->setStation(cfg.stationLat, cfg.stationLon);
+            if (adsbTracker_) adsbTracker_->setStation(cfg.stationLat, cfg.stationLon);
             // Hot-update satellite forecast: re-fetch + re-propagate without
             // restarting, whenever the station location changed.
             refetchTle();
@@ -1121,6 +1143,7 @@ MainWindow::MainWindow(QWidget* parent)
         stationSet_ = cfg.stationSet;
         // Draw the hand-entered station on the map (NaN => no station marker).
         worldView_->setStation(stationLat_, stationLon_);
+        if (adsbTracker_) adsbTracker_->setStation(stationLat_, stationLon_);
         refetchTle();
     }
 
@@ -1194,7 +1217,8 @@ MainWindow::~MainWindow() {
     }
     saveUiState();
     if (engine_) { engine_->shutdown(); engine_->wait(); }
-    delete adsbMap_; adsbMap_ = nullptr;
+    if (adsbTimer_) adsbTimer_->stop();
+    delete adsbTracker_; adsbTracker_ = nullptr;
 }
 
 void MainWindow::refreshVfoUi() {
@@ -1681,47 +1705,57 @@ void MainWindow::onRdsUpdated(const QString& ps, int pty,
 }
 
 void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {
-    if (adsbEmpty_) adsbEmpty_->hide();
-    int row = adsbRow_.value(info.icao, -1);
-    if (row < 0) {
-        row = adsbTable_->rowCount();
+    if (!adsbTracker_) return;
+    // Merge into the tracker (keyed by ICAO, field-honest, bounded tail).
+    adsbTracker_->upsert(info, QDateTime::currentDateTime());
+    refreshAdsbTable();
+}
+
+void MainWindow::refreshAdsbTable() {
+    if (!adsbTracker_ || !adsbTable_) return;
+    // Rebuild the table rows from the tracker's merged snapshots (fix or not).
+    auto ac = adsbTracker_->aircraft();
+    adsbTable_->setRowCount(0);
+    adsbRow_.clear();
+    for (const auto& a : ac) {
+        int row = adsbTable_->rowCount();
         adsbTable_->insertRow(row);
-        adsbRow_[info.icao] = row;
+        adsbRow_[a.icao] = row;
+        const auto set = [&](int col, const QString& s) {
+            adsbTable_->setItem(row, col, new QTableWidgetItem(s));
+        };
+        set(0, a.icao);
+        set(1, a.callsign.isEmpty() ? "--" : a.callsign);
+        set(2, a.altitudeFt > 0 ? QString::number(a.altitudeFt) : "--");
+        set(3, a.hasVelocity ? QString::number(a.groundspeedKt, 'f', 0) : "--");
+        set(4, a.hasVelocity ? QString::number(a.headingDeg, 'f', 0) : "--");
+        set(5, a.hasVerticalRate ? QString::number(a.verticalRateFpm) : "--");
+        // Distance column: finite haversine when station + aircraft position both
+        // known; otherwise an honest "--" (never a fabricated number).
+        double d = adsbTracker_->distanceKm(a.icao);
+        set(6, std::isfinite(d) ? QString::number(d, 'f', 1) : "--");
+        set(7, a.lastSeen.toString("HH:mm:ss"));
     }
-    const auto set = [&](int col, const QString& s) {
-        auto* it = adsbTable_->item(row, col);
-        if (!it) { adsbTable_->setItem(row, col, new QTableWidgetItem(s)); }
-        else it->setText(s);
-    };
-    set(0, info.icao);
-    set(1, info.callsign.isEmpty() ? "--" : info.callsign);
-    set(2, info.altitudeFt > 0 ? QString::number(info.altitudeFt) : "--");
-    set(3, info.hasVelocity ? QString::number(info.groundspeedKt, 'f', 0) : "--");
-    set(4, info.hasVelocity ? QString::number(info.headingDeg, 'f', 0) : "--");
-    set(5, info.hasVerticalRate ? QString::number(info.verticalRateFpm) : "--");
-    set(6, "--");   // distance needs station + aircraft position
-    set(7, QDateTime::currentDateTime().toString("HH:mm:ss"));
-    if (worldView_) {
-        // Upsert the rich aircraft point by ICAO, keeping a short tail streak.
-        // Only fields actually carried by this ADS-B message are overwritten;
-        // absent fields keep their last value (never a fabricated default).
-        ui::AircraftPoint& ap = (*adsbMap_)[info.icao];
-        ap.icao = info.icao;
-        if (!info.callsign.isEmpty()) ap.callsign = info.callsign;
-        if (info.altitudeFt > 0) ap.altitudeFt = info.altitudeFt;
-        if (info.hasVelocity) ap.headingDeg = info.headingDeg;
-        if (info.hasPosition) {
-            ap.lat = info.lat;
-            ap.lon = info.lon;
-            ap.track.append({info.lat, info.lon});
-            while (ap.track.size() > 12) ap.track.removeFirst();
-        }
-        QList<ui::AircraftPoint> list;
-        list.reserve(adsbMap_->size());
-        for (auto it = adsbMap_->cbegin(); it != adsbMap_->cend(); ++it)
-            list.append(it.value());
-        worldView_->setAircraft(list);
+    // Map: points() only contains aircraft with a real decoded position --
+    // callsign-only rows never produce a fake map dot.
+    if (worldView_) worldView_->setAircraft(adsbTracker_->points());
+    // Honest empty state.
+    if (adsbTracker_->isEmpty()) {
+        if (adsbEmpty_) adsbEmpty_->show();
+        if (worldView_) worldView_->setAircraft({});
+    } else {
+        if (adsbEmpty_) adsbEmpty_->hide();
     }
+}
+
+void MainWindow::onAdsbPrune() {
+    if (!adsbTracker_) return;
+    QDateTime now = QDateTime::currentDateTime();
+    QStringList removed = adsbTracker_->prune(now);
+    // Rebuild only when something actually expired, or the list drained to empty
+    // (so the empty-state label reappears). Steady state stays untouched.
+    if (!removed.isEmpty() || adsbTracker_->isEmpty())
+        refreshAdsbTable();
 }
 
 void MainWindow::setControlsEnabled(bool hw) {
@@ -2085,6 +2119,7 @@ void MainWindow::onNewFix(gnss::GnssFix fix) {
         stationLon_ = fix.longitude;
         stationSet_ = true;
         worldView_->setStation(fix.latitude, fix.longitude);
+        if (adsbTracker_) adsbTracker_->setStation(fix.latitude, fix.longitude);
         engine_->setAdsbReferencePosition(fix.latitude, fix.longitude);
         refetchTle();   // cache-first; re-propagate passes for the real station
     }
@@ -2133,6 +2168,7 @@ void MainWindow::onGnssConnectionChanged(bool connected, QString description) {
         stationLat_ = cfg.stationLat; stationLon_ = cfg.stationLon;
         stationSet_ = cfg.stationSet;
         worldView_->setStation(stationLat_, stationLon_);
+        if (adsbTracker_) adsbTracker_->setStation(stationLat_, stationLon_);
         refetchTle();
     }
     if (!description.isEmpty()) statusBar()->showMessage("GNSS: " + description);

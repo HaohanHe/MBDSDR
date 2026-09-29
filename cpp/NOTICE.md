@@ -82,4 +82,27 @@ GUI 上在瀑布/频谱为每个 VFO 绘制半透明带宽框。对应的 SDR++ 
   端到端已知向量钉死。
 - 本轮未实现（代码内留 TODO）：type 4 时钟（CT）、type 8 TMC、0B/2B 组版本回退。
 
+## 1090 MHz Mode S / ADS-B 解码器（本批新增模块）
+
+- 标准依据：ICAO Annex 10 Vol. IV（1090 ES / Mode S 链路）、DF17 扩展 Squitter 格式。
+- 版权参考（仅算法、常数与位段布局参考，**未复制其源码**）：
+  - 本地只读参考 `repos/dump1090/`（FlightAware / mutability 版 dump1090，
+    GPL-2.0-or-later；源自 Salvatore Sanfilippo / antirez 的 dump1090，后经
+    Malcolm Robb、Oliver Jowett 等持续维护）。对照参考文件：
+    `crc.c`（24 位校验多项式与 CRC 奇偶表）、`cpr.c`（CPR 全局/本地位置解码与
+    NL 经度带断点表）、`mode_s.c`（DF17 下行格式位段拆解、呼号 6-bit 字符表）、
+    `demod_2400.c`（8 µs 前导检测与 PPM 比特判决思路）、`ais_charset.c`
+    （Mode S 呼号字符集映射）。
+  - Junzi Sun, *The 1090 Megahertz Riddle*（https://mode-s.org ）：CPR 坐标与
+    DF 字段语义说明的教学参考。
+- 实现文件 `src/dsp/adsb_decoder.{h,cpp}` 与 `src/ui/aircraft_tracker.{h,cpp}` 为
+  MBDSDR 原创实现（SPDX: MIT），按上述标准干净重写：速率自适应前导匹配 + PPM
+  采样判决、CRC-24 校验（多项式 0xFFF409）、DF17 位置（CPR 全局/本地）、呼号与
+  速度消息拆解；`aircraft_tracker` 按 ICAO 合并帧、按字段诚实覆盖（缺失字段不被
+  假默认覆盖）、位置尾迹定长截断、TTL 过期清理，并只对真实定位飞机输出地图点。
+  未逐行移植 dump1090 的 C 源码，也未随产品分发其源代码或二进制原件；CRC 多项式、
+  NL 断点表、CPR 公式、呼号 6-bit 布局与前导/PPM 时序仅作公开算法对照，端到端
+  已知向量由 `tests/test_adsb_cpr.cpp`、`tests/test_adsb_decode.cpp`、
+  `tests/test_aircraft_tracker.cpp` 钉死。
+
 
