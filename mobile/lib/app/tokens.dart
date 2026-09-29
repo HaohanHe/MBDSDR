@@ -143,6 +143,19 @@ abstract final class AppTokens {
     height: 1.35,
   );
 
+  /// 仪器微标注字号：dB gutter / 频率刻度 / 测量读数盒 / NF 标注等画布内小字。
+  /// 画布 CustomPainter 内统一引用此常量，避免散落裸 fontSize。
+  static const double annotationFontSize = 10.0;
+
+  /// 频谱页大频率读数（中央 MHz 显示）。
+  static const TextStyle freqReadout = TextStyle(
+    fontSize: 26,
+    fontWeight: FontWeight.w600,
+    color: textPrimary,
+    fontFamilyFallback: monoFallback,
+    height: 1.1,
+  );
+
   /// 白色叠加卡片装饰（car-HMI surface）。
   static BoxDecoration cardDecoration({
     double radius = radiusCard,

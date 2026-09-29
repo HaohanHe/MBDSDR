@@ -223,7 +223,7 @@ class _LeftDbGutterPainter extends CustomPainter {
       tp.text = TextSpan(
         text: '${db.toInt()}',
         style: AppTokens.mono.copyWith(
-          fontSize: 10,
+          fontSize: AppTokens.annotationFontSize,
           color: AppTokens.textSecondary,
         ),
       );
@@ -297,6 +297,23 @@ class _SpectrumPainter extends CustomPainter {
     final n = db.length;
     double yFor(double v) => _dbToY(v, size.height);
 
+    // ---- 真实测量（全部由本帧 db 直接计算；frame 为 null 时本 painter 不运行）----
+    // 峰值 = 全局最大 bin；噪声底 = db 中位数（稳健估计，不随单根尖峰偏移）；
+    // SNR = 峰值 dBFS − 噪声底。无独立测量数据源时，这些就是最诚实的呈现。
+    var peakBin = 0;
+    var peakDb = db[0];
+    for (var i = 1; i < n; i++) {
+      if (db[i] > peakDb) {
+        peakDb = db[i];
+        peakBin = i;
+      }
+    }
+    final sorted = db.toList()..sort();
+    final noiseFloor = sorted[n ~/ 2];
+    final snr = peakDb - noiseFloor;
+    final peakX = peakBin / (n - 1) * size.width;
+    final peakY = yFor(peakDb);
+
     // 解调信道带宽竖带（居中 ±bw/2）。
     final halfBw = channelBandwidthHz / 2;
     final binHz = frame.binWidthHz;
@@ -365,12 +382,101 @@ class _SpectrumPainter extends CustomPainter {
     tp.text = TextSpan(
       text: 'BW ${(frame.sampleRateHz / 1e6).toStringAsFixed(3)}M',
       style: AppTokens.mono.copyWith(
-        fontSize: 10,
+        fontSize: AppTokens.annotationFontSize,
         color: AppTokens.textAt(0.65),
       ),
     );
     tp.layout();
     tp.paint(canvas, Offset(size.width - tp.width - 6, 4));
+
+    // ------------------------------------------------ 噪声底线（暖琥珀虚线 + NF 标注）
+    final nfY = yFor(noiseFloor);
+    final nfPaint = Paint()
+      ..color = AppTokens.warning.withValues(alpha: 0.32)
+      ..strokeWidth = 1;
+    const dashW = 5.0;
+    const gapW = 4.0;
+    for (var dx = 0.0; dx < size.width; dx += dashW + gapW) {
+      canvas.drawLine(
+        Offset(dx, nfY),
+        Offset((dx + dashW).clamp(0.0, size.width), nfY),
+        nfPaint,
+      );
+    }
+    final nfTp = TextPainter(textDirection: TextDirection.ltr)
+      ..text = TextSpan(
+        text: 'NF ${noiseFloor.toStringAsFixed(0)}',
+        style: AppTokens.mono.copyWith(
+          fontSize: AppTokens.annotationFontSize,
+          color: AppTokens.warning.withValues(alpha: 0.7),
+        ),
+      )
+      ..layout();
+    nfTp.paint(
+      canvas,
+      Offset(size.width - nfTp.width - 4, (nfY - nfTp.height - 2).clamp(4.0, size.height - nfTp.height - 2)),
+    );
+
+    // ------------------------------------------------ 峰值三角标注（accent，指到峰值顶点）
+    const triHalf = 5.0;
+    final peakTri = Path()
+      ..moveTo(peakX - triHalf, peakY - triHalf * 2)
+      ..lineTo(peakX + triHalf, peakY - triHalf * 2)
+      ..lineTo(peakX, peakY - 2)
+      ..close();
+    canvas.drawPath(
+      peakTri,
+      Paint()..color = AppTokens.accent.withValues(alpha: 0.85),
+    );
+
+    // ------------------------------------------------ 测量读数盒（深底 + 细边，两行小字）
+    final peakMHz = frame.binToHz(peakBin) / 1e6;
+    final boxTp = TextPainter(
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.left,
+    )..text = TextSpan(
+      children: [
+        TextSpan(
+          text: 'PK ${peakMHz.toStringAsFixed(3)} MHz',
+          style: AppTokens.mono.copyWith(
+            fontSize: AppTokens.annotationFontSize,
+            color: AppTokens.textPrimary,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const TextSpan(text: '\n'),
+        TextSpan(
+          text: '${peakDb.toStringAsFixed(0)} dBFS · SNR ${snr.toStringAsFixed(0)} dB',
+          style: AppTokens.mono.copyWith(
+            fontSize: AppTokens.annotationFontSize,
+            color: AppTokens.textSecondary,
+          ),
+        ),
+      ],
+    )..layout();
+    const boxPadX = AppTokens.spacingS;
+    const boxPadY = AppTokens.spacingS;
+    final boxRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(
+        4,
+        4,
+        boxTp.width + boxPadX * 2,
+        boxTp.height + boxPadY * 2,
+      ),
+      const Radius.circular(AppTokens.radiusSmall),
+    );
+    canvas.drawRRect(
+      boxRect,
+      Paint()..color = AppTokens.bgBar.withValues(alpha: 0.85),
+    );
+    canvas.drawRRect(
+      boxRect,
+      Paint()
+        ..color = AppTokens.cardEdge
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1,
+    );
+    boxTp.paint(canvas, const Offset(4 + boxPadX, 4 + boxPadY));
   }
 
   @override
@@ -436,7 +542,7 @@ class _FreqStripPainter extends CustomPainter {
       tp.text = TextSpan(
         text: (tickF / 1e6).toStringAsFixed(decimals),
         style: AppTokens.mono.copyWith(
-          fontSize: 10,
+          fontSize: AppTokens.annotationFontSize,
           color: AppTokens.textAt(0.60),
         ),
       );
@@ -459,7 +565,7 @@ class _FreqStripPainter extends CustomPainter {
     tp.text = TextSpan(
       text: (center / 1e6).toStringAsFixed(decimals),
       style: AppTokens.mono.copyWith(
-        fontSize: 10,
+        fontSize: AppTokens.annotationFontSize,
         color: AppTokens.accent,
         fontWeight: FontWeight.w600,
       ),

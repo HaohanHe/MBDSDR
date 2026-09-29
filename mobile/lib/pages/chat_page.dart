@@ -361,7 +361,7 @@ class _ChatPageState extends State<ChatPage> {
             Text(
               _formatTime(m.time),
               style: AppTokens.auxiliary.copyWith(
-                fontSize: 10,
+                fontSize: AppTokens.annotationFontSize,
                 color: AppTokens.textAt(AppTokens.textAlphaTertiary),
               ),
             ),
@@ -434,7 +434,10 @@ class _ChatPageState extends State<ChatPage> {
           Flexible(
             child: Text(
               label,
-              style: AppTokens.auxiliary.copyWith(fontSize: 11, color: color),
+              style: AppTokens.auxiliary.copyWith(
+                fontSize: AppTokens.annotationFontSize + 1,
+                color: color,
+              ),
             ),
           ),
         ],

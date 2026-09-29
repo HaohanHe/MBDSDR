@@ -18,7 +18,11 @@ class StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      // 药丸紧凑内边距：横向 spacingM，纵向约 spacingS*0.75（半格微收）。
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.spacingM,
+        vertical: AppTokens.spacingS * 0.75,
+      ),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(AppTokens.radiusSmall),
@@ -28,16 +32,16 @@ class StatusChip extends StatelessWidget {
         children: <Widget>[
           if (dot) ...[
             Container(
-              width: 8,
-              height: 8,
+              width: AppTokens.spacingM,
+              height: AppTokens.spacingM,
               decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             ),
-            const SizedBox(width: 6),
+            const SizedBox(width: AppTokens.spacingS * 1.5),
           ],
           Text(
             text,
-            style: TextStyle(
-              fontSize: 11,
+            style: AppTokens.auxiliary.copyWith(
+              fontSize: AppTokens.annotationFontSize + 1,
               fontWeight: FontWeight.w500,
               color: color,
             ),
