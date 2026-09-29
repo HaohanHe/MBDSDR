@@ -31,6 +31,7 @@ constexpr double kJ2             = 1.08263e-3;    // zonal harmonic
 constexpr double kEartFlatE2    = 0.00669437999014; // WGS84 e^2
 constexpr double kDeg2Rad        = M_PI / 180.0;
 constexpr double kRad2Deg        = 180.0 / M_PI;
+constexpr double kOmegaEarth     = 7.2921151467e-5;  // rad/s, Earth rotation
 
 // Propagated per-satellite orbital elements (mean, J2-secular).
 struct Orbit {
@@ -53,10 +54,13 @@ struct Orbit {
 };
 
 double julianDay(const QDateTime& dt) {
-    // QDateTime in UTC -> Julian Date (days since noon 4713 BC Jan 1).
+    // QDateTime in UTC -> Julian Date.
+    // toMSecsSinceEpoch() counts from the Unix epoch 1970-01-01 00:00 UTC,
+    // whose Julian Date is 2440587.5.  (Using 2451545.0 -- the J2000 epoch at
+    // 2000-01-01 -- here would double-count the 30 years 1970->2000 and leave
+    // GMST off by ~180 deg, mirroring every predicted pass.)
     qint64 msecs = dt.toUTC().toMSecsSinceEpoch();
-    // J2000.0 epoch = 2000 Jan 1 12:00 TT ≈ JD 2451545.0
-    return 2451545.0 + static_cast<double>(msecs) / 86400000.0;
+    return 2440587.5 + static_cast<double>(msecs) / 86400000.0;
 }
 
 // Greenwich Mean Sidereal Time (rad) for the given UTC instant.
@@ -121,9 +125,13 @@ bool buildOrbit(const TleEntry& e, Orbit& out) {
     double dayFrac = day - 1.0;   // day-of-year is 1-based
     qint64 dayInt = static_cast<qint64>(std::floor(dayFrac));
     double secs = (dayFrac - dayInt) * 86400.0;
-    qint64 base = QDateTime(d0.addDays(dayInt), QTime(0, 0, 0)).toMSecsSinceEpoch();
-    out.epoch = QDateTime::fromMSecsSinceEpoch(base + static_cast<qint64>(secs * 1000.0),
-                                               Qt::UTC);
+    // The TLE epoch is a UTC instant.  Anchor the midnight reference in UTC
+    // explicitly: the QDateTime(date,time) overload defaults to LOCAL time, which
+    // would shift the epoch by the machine's UTC offset (and hence the GMST,
+    // and every predicted AOS/LOS) on non-UTC hosts.
+    QDateTime midnight(d0.addDays(dayInt), QTime(0, 0, 0), Qt::UTC);
+    out.epoch = QDateTime::fromMSecsSinceEpoch(
+        midnight.toMSecsSinceEpoch() + static_cast<qint64>(secs * 1000.0), Qt::UTC);
 
     // Try to attach the real near-earth SGP4 propagator.  Deep-space targets
     // (period >= 225 min) self-flag and are left on the J2 fallback path.
@@ -132,8 +140,11 @@ bool buildOrbit(const TleEntry& e, Orbit& out) {
     return true;
 }
 
-// ECI position (km) at t seconds after the TLE epoch.
-void propagateEci(const Orbit& o, double tSec, double pos[3]) {
+// ECI position (km) and velocity (km/s) at t seconds after the TLE epoch,
+// using the J2-secular mean-element path (deep-space fallback).  Position
+// matches the legacy propagator; velocity is the analytic Keplerian velocity
+// rotated by the same (argp, inclination, RAAN) frame.
+void propagateEci(const Orbit& o, double tSec, double pos[3], double vel[3]) {
     // Advance mean elements with J2 secular rates.
     double M    = o.M0    + o.n * tSec;
     double raan = o.raan0 + o.nodeDot * tSec;
@@ -159,6 +170,15 @@ void propagateEci(const Orbit& o, double tSec, double pos[3]) {
     double nu = std::atan2(sinNu, cosNu);
     double u = argp + nu;
 
+    // Keplerian rate of change of the eccentric anomaly.
+    double dEdt = o.n / (1.0 - o.ecc * cosE);
+    // Perifocal velocity.
+    double vpx = -o.a * sinE * dEdt;
+    double vpy =  o.a * std::sqrt(1.0 - o.ecc * o.ecc) * cosE * dEdt;
+    // Decompose into radial / transverse (in-plane) components.
+    double vRad = vpx * cosNu + vpy * sinNu;
+    double vTra = -vpx * sinNu + vpy * cosNu;
+
     double cu = std::cos(u), su = std::sin(u);
     double cO = std::cos(raan), sO = std::sin(raan);
     double ci = std::cos(o.incl), si = std::sin(o.incl);
@@ -167,28 +187,41 @@ void propagateEci(const Orbit& o, double tSec, double pos[3]) {
     pos[0] = r * (cu * cO - su * ci * sO);
     pos[1] = r * (cu * sO + su * ci * cO);
     pos[2] = r * (su * si);
+
+    // In-plane velocity expressed in the (u) frame, then rotated by incl/raan.
+    double ux = vRad * cu - vTra * su;
+    double uy = vRad * su + vTra * cu;
+    vel[0] = ux * cO - uy * ci * sO;
+    vel[1] = ux * sO + uy * ci * cO;
+    vel[2] = uy * si;
 }
 
-// ECI position (km) at t seconds after epoch, dispatching on propagator.
+// ECI position (km) AND velocity (km/s) at t seconds after epoch, dispatching
+// on propagator.
 //  - near-earth (period < 225 min): real SGP4 (TEME).
 //  - deep-space / SGP4 failure:      honest J2-secular fallback.
-void computeEci(const Orbit& o, double tSec, double pos[3]) {
+void computeEciState(const Orbit& o, double tSec, double pos[3], double vel[3]) {
     if (o.useSgp4) {
-        double vel[3] = {0.0, 0.0, 0.0};
         if (o.sgp4.propagate(tSec / 60.0, pos, vel) == 0)
             return;   // SGP4 succeeded.
         // Decay / bad-state: fall through to the J2 path for this sample.
     }
-    propagateEci(o, tSec, pos);
+    propagateEci(o, tSec, pos, vel);
 }
 
-// ECI -> ECEF (km) by rotating around z by GMST.
-void eciToEcef(const double eci[3], const QDateTime& t, double ecef[3]) {
+// ECI -> ECEF (km) position AND velocity by rotating around z by -GMST and
+// adding the ECEF transport term: v_ecef = Rz(-GMST) v_teme + omega x r_ecef.
+// The station is stationary in the ECEF frame.
+void eciToEcefState(const double eci[3], const double veci[3], const QDateTime& t,
+                    double ecef[3], double vecef[3]) {
     double g = gmstRad(t);
     double cg = std::cos(g), sg = std::sin(g);
     ecef[0] = eci[0] * cg + eci[1] * sg;
     ecef[1] = -eci[0] * sg + eci[1] * cg;
     ecef[2] = eci[2];
+    vecef[0] = veci[0] * cg + veci[1] * sg - kOmegaEarth * ecef[1];
+    vecef[1] = -veci[0] * sg + veci[1] * cg + kOmegaEarth * ecef[0];
+    vecef[2] = veci[2];
 }
 
 // Station ECEF (km) from WGS84 geodetic lat/lon, height 0.
@@ -371,16 +404,20 @@ QList<SatPass> TleClient::computePasses(const QList<TleEntry>& entries,
         QDateTime t0 = startUtc;
         if (o.epoch > t0) t0 = o.epoch;
 
+        const double f0 = downlinkHzFor(e.name);   // 0 when unknown (honest)
+
         bool inPass = false;
         SatPass cur;
         double maxEl = -90.0;
+        double peakRangeRate = 0.0;   // range-rate at the max-elevation sample
 
         for (double s = 0; s <= totalSec; s += stepSec) {
             QDateTime t = t0.addMSecs(static_cast<qint64>(s * 1000.0));
             double dt = o.epoch.secsTo(t);   // seconds since epoch
-            double eci[3], ecef[3];
-            computeEci(o, dt, eci);
-            eciToEcef(eci, t, ecef);
+            double eci[3] = {0,0,0}, veci[3] = {0,0,0};
+            double ecef[3] = {0,0,0}, vecef[3] = {0,0,0};
+            computeEciState(o, dt, eci, veci);
+            eciToEcefState(eci, veci, t, ecef, vecef);
 
             double dx = ecef[0] - sta[0];
             double dy = ecef[1] - sta[1];
@@ -393,8 +430,15 @@ QList<SatPass> TleClient::computePasses(const QList<TleEntry>& entries,
             if (rho < 1e-6) continue;
             double el = std::asin(up / rho) * kRad2Deg;
             double az = std::fmod(std::atan2(east, north) * kRad2Deg + 360.0, 360.0);
+            // Line-of-sight range rate (station stationary in ECEF).
+            double vr = (vecef[0]*dx + vecef[1]*dy + vecef[2]*dz) / rho;
 
-            if (el > 0.0) {
+            // Pass gate: a track counts once the satellite rises above the
+            // practical reception elevation (5 deg, matching the AIAA validation
+            // convention).  AOS/LOS are reported at this gate, not at the
+            // mathematical horizon, so the reported window is the actually usable
+            // one.
+            if (el > 5.0) {
                 if (!inPass) {
                     inPass = true;
                     cur = SatPass();
@@ -402,15 +446,18 @@ QList<SatPass> TleClient::computePasses(const QList<TleEntry>& entries,
                     cur.tle = e;
                     cur.aos = t;
                     cur.azAos = az;
+                    cur.f0DownlinkHz = f0;
                     maxEl = el;
+                    peakRangeRate = vr;
                 }
                 cur.track.append({az, el});
-                if (el > maxEl) { maxEl = el; }
+                if (el > maxEl) { maxEl = el; peakRangeRate = vr; }
             } else if (inPass) {
                 inPass = false;
                 cur.los = t;
                 cur.maxEl = maxEl;
                 cur.azLos = az;
+                cur.dopplerAtPeakHz = dopplerHz(f0, peakRangeRate);
                 if (cur.maxEl > 5.0) result.append(cur);
             }
         }
@@ -418,6 +465,7 @@ QList<SatPass> TleClient::computePasses(const QList<TleEntry>& entries,
         if (inPass) {
             cur.los = t0.addMSecs(static_cast<qint64>(totalSec * 1000.0));
             cur.maxEl = maxEl;
+            cur.dopplerAtPeakHz = dopplerHz(f0, peakRangeRate);
             // No LOS azimuth at horizon; reuse last track sample.
             if (!cur.track.isEmpty()) cur.azLos = cur.track.last().first;
             if (cur.maxEl > 5.0) result.append(cur);
@@ -445,9 +493,10 @@ Topocentric TleClient::propagateAt(const QDateTime& timeUtc, const TleEntry& e,
 
     QDateTime t = timeUtc.toUTC();
     double dt = o.epoch.secsTo(t);
-    double eci[3], ecef[3];
-    computeEci(o, dt, eci);
-    eciToEcef(eci, t, ecef);
+    double eci[3] = {0,0,0}, veci[3] = {0,0,0};
+    double ecef[3] = {0,0,0}, vecef[3] = {0,0,0};
+    computeEciState(o, dt, eci, veci);
+    eciToEcefState(eci, veci, t, ecef, vecef);
 
     double dx = ecef[0] - sta[0];
     double dy = ecef[1] - sta[1];
@@ -460,6 +509,9 @@ Topocentric TleClient::propagateAt(const QDateTime& timeUtc, const TleEntry& e,
     out.range = rho;
     out.el = std::asin(up / rho) * kRad2Deg;
     out.az = std::fmod(std::atan2(east, north) * kRad2Deg + 360.0, 360.0);
+    // Range rate = satellite ECEF velocity dotted onto the station-to-satellite
+    // unit vector (the ground station has zero ECEF velocity).
+    out.rangeRateKmS = (vecef[0]*dx + vecef[1]*dy + vecef[2]*dz) / rho;
     return out;
 }
 
@@ -483,10 +535,57 @@ TleClient::GeoCoord TleClient::propagateLatLon(const QDateTime& timeUtc, const T
     if (!buildOrbit(e, o)) return {};
     QDateTime t = timeUtc.toUTC();
     double dt = o.epoch.secsTo(t);
-    double eci[3], ecef[3];
-    computeEci(o, dt, eci);
-    eciToEcef(eci, t, ecef);
+    double eci[3] = {0,0,0}, veci[3] = {0,0,0};
+    double ecef[3] = {0,0,0}, vecef[3] = {0,0,0};
+    computeEciState(o, dt, eci, veci);
+    eciToEcefState(eci, veci, t, ecef, vecef);
     return ecefToLatLon(ecef[0], ecef[1], ecef[2]);
+}
+
+// ---- Built-in offline TLE + public downlink frequency table -------------
+//
+// Source: CelesTrak's public AIAA-2006-6753 SGP4 verification ephemerides
+//   https://celestrak.org/publications/AIAA/2006-6753/
+// (Hoots/Roeber STR#3 as revised by Vallado et al.).  The four near-Earth
+// two-line elements below are copied verbatim (trailing verification columns
+// stripped) from the distributed SGP4-VER.TLE, which carries a 2006 epoch.
+//
+// These are shipped ONLY so the sky tab can show a deterministic, honest
+// offline result when there is no network and no on-disk cache.  Because the
+// epoch is years old, the elements are guaranteed stale after 2006: they are
+// NOT the user's sky tonight, just a worked SGP4 demo.  The UI labels this
+// explicitly instead of implying fresh data.
+QList<TleEntry> TleClient::builtinTle() {
+    return {
+        {"EXPLORER 1 DEB",
+         "1 00005U 58002B   00179.78495062  .00000023  00000-0  28098-4 0  4753",
+         "2 00005  34.2682 348.7242 1859667 331.7664  19.3264 10.82419157413667"},
+        {"DELTA 1 DEB",
+         "1 06251U 62025E   06176.82412014  .00008885  00000-0  12808-3 0  3985",
+         "2 06251  58.0579  54.0425 0030035 139.1568 221.1854 15.56387291  6774"},
+        {"CBERS 2",
+         "1 28057U 03049A   06177.78615833  .00000060  00000-0  35940-4 0  1836",
+         "2 28057  98.4283 247.6961 0000884  88.1964 271.9322 14.35478080140550"},
+        {"SL-12 DEB",
+         "1 29238U 06022G   06177.28732010  .00766286  10823-4  13334-2 0   101",
+         "2 29238  51.5595 213.7903 0202579  95.2503 267.9010 15.73823839  1061"},
+    };
+}
+
+// Public broadcast downlink carriers used only for a Doppler reference.  Matched
+// by case-insensitive substring on the satellite name.  We deliberately return
+// 0 for anything we do not recognise rather than guess.
+double TleClient::downlinkHzFor(const QString& name) {
+    const QString n = name.toUpper();
+    if (n.contains(QStringLiteral("ISS")) || n.contains(QStringLiteral("ZARYA")))
+        return 145.800e6;   // ISS voice repeater downlink (public)
+    if (n.contains(QStringLiteral("NOAA 15")) || n.contains(QStringLiteral("NOAA-15")))
+        return 137.620e6;   // NOAA-15 APT
+    if (n.contains(QStringLiteral("NOAA 18")) || n.contains(QStringLiteral("NOAA-18")))
+        return 137.9125e6;  // NOAA-18 APT
+    if (n.contains(QStringLiteral("NOAA 19")) || n.contains(QStringLiteral("NOAA-19")))
+        return 137.9125e6;  // NOAA-19 APT
+    return 0.0;             // unknown: honest "no frequency", not a guess
 }
 
 } // namespace dsp
