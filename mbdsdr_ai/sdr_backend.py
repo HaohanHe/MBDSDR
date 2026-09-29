@@ -783,6 +783,13 @@ class _ThreadedRingReader:
         self._write_idx = 0       # 下一个写入位置（0..R-1）
         self._produced = 0        # 已写入的绝对样点总数
         self._subs: Dict[str, _FanOutSub] = {}
+        # 对照 SDR++ ring_buffer.h:131-160 write() 的丢旧保新语义（监控用）：
+        #   _count   = 当前环形缓冲里"默认消费者视角"未读的样点数（backlog）；
+        #   _dropped = 累计因缓冲写满而丢弃的样点数（换频 clear() 不清零，供监控）。
+        # 这是 SDR++ 单消费者语义的读者级统计；多订阅者各自的落后丢样仍由
+        # 各 _FanOutSub.dropped 独立记录（见 subscriber_dropped()）。
+        self._count = 0
+        self._dropped = 0
 
     # -------------------------------------------------- 订阅
     def subscribe(self, name: str) -> _FanOutSub:
@@ -841,6 +848,12 @@ class _ThreadedRingReader:
                 self._buf[0:n - first] = chunk[first:]
             self._write_idx = (self._write_idx + n) % R
             self._produced = new_produced
+            # SDR++ ring_buffer.h:131-160 write() 丢旧保新：backlog 超过 R 时，
+            # 溢出的样点即被丢弃（老数据被覆盖），累计到 _dropped；_count 钳在 R。
+            self._count += n
+            if self._count > R:
+                self._dropped += self._count - R
+                self._count = R
             self._cond.notify_all()
 
     # -------------------------------------------------- 默认订阅者（向后兼容）
@@ -848,7 +861,12 @@ class _ThreadedRingReader:
         return self.subscribe("default")
 
     def read(self, n: int, timeout: float = 1.0):
-        return self._default_sub().read(n, timeout)
+        out = self._default_sub().read(n, timeout)
+        # 默认消费者实际取走 out 个样点，释放对应 backlog（保持 _count 真实）。
+        if out is not None and len(out):
+            with self._lock:
+                self._count = max(0, self._count - len(out))
+        return out
 
     def available(self) -> int:
         return self._default_sub().available()
@@ -858,6 +876,8 @@ class _ThreadedRingReader:
         with self._lock:
             for sub in self._subs.values():
                 sub.read_seq = self._produced
+            # 清空当前 backlog；历史丢包计数 _dropped 保留（监控用，不清零）。
+            self._count = 0
 
     def producer_alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
@@ -1049,8 +1069,13 @@ class RTLSDRBackend(SDRBackend):
     def connect(self) -> bool:
         try:
             if self._host is not None:
-                from rtlsdr import RtlSdrTcpClient
-                self._sdr = RtlSdrTcpClient(hostname=self._host, port=self._port)
+                # rtl_tcp 网络模式统一走本仓库自研、MIT、无 GPL 的 RtlTcpClient
+                # （rtltcp_client.py），不再依赖 pyrtlsdr 的 RtlSdrTcpClient。
+                # RtlTcpDeviceAdapter 把它适配成 pyrtlsdr RtlSdr 风格对象，使下面的
+                # SDR++ 初始化序列无需分支即可工作。
+                from .rtltcp_client import RtlTcpDeviceAdapter
+                self._sdr = RtlTcpDeviceAdapter(
+                    host=self._host, port=self._port, ppm=self._ppm)
             else:
                 try:
                     from .windows_setup import setup_rtlsdr_windows
@@ -1059,8 +1084,13 @@ class RTLSDRBackend(SDRBackend):
                     pass
                 from rtlsdr import RtlSdr
                 self._sdr = RtlSdr(self._device_index)
-            # 调谐器型号：ctypes 句柄探测（AIO 类无 tuner_type）
-            tcode = self._probe_tuner_type(self._device_index)
+            # 调谐器型号：本地 USB 走 ctypes 句柄探测（AIO 类无 tuner_type）；
+            # rtl_tcp 网络模式用握手包带回的 tuner_type（rtl_tcp.c:623），
+            # 不再去 ctypes 打开本地 USB 棒。
+            if self._host is not None:
+                tcode = int(getattr(self._sdr, "tuner_type", 0) or 0)
+            else:
+                tcode = self._probe_tuner_type(self._device_index)
             self.tuner_name = self._TUNER_NAMES.get(tcode, "Unknown")
             # 来源: librtlsdr src/librtlsdr.c:956-1008 rtlsdr_get_tuner_gains ——
             # 按探测到的调谐器型号载入真实离散增益表（dB）。
@@ -1149,8 +1179,10 @@ class RTLSDRBackend(SDRBackend):
             low = msg.lower()
             if isinstance(e, ImportError) and ("rtlsdr" in low or "no module named" in low):
                 self.status.error = (
-                    "未安装 pyrtlsdr/librtlsdr：pip install pyrtlsdr"
-                    "（Windows 还需安装 librtlsdr DLL）"
+                    "未安装 pyrtlsdr（可选 GPL-3.0 原生 USB 后端）。本机 RTL-SDR USB "
+                    "默认请用 SoapySDR：pip install SoapySDR 并装 SoapyRTLSDR 驱动；"
+                    "或用 rtl_tcp 网络源（自研客户端，无需本机 librtlsdr）。"
+                    "若坚持走 pyrtlsdr：pip install pyrtlsdr（Windows 还需 librtlsdr DLL）"
                 )
             elif any(k in low for k in (
                 "permission", "busy", "resource", "access denied", "0bda", "2838", "device",
@@ -1321,18 +1353,29 @@ class RTLSDRBackend(SDRBackend):
             logger.warning("RTL-SDR 不支持参数回读")
         return got > 0
 
+    # 调谐器型号探测失败（ctypes 句柄拿不到 / 沙箱 / 旧 DLL）时，退回市场最常见的
+    # R820T/R828D 系增益表中点档：librtlsdr.c:966-969 r82xx_gains[] 共 29 档，
+    # 中点索引 14 = 254 tenths = 25.4 dB。绝不停在 0 dB（"聋棒"）。
+    _UNKNOWN_TUNER_FALLBACK_GAIN_DB = 25.4
+
     def _maybe_apply_first_gain_midpoint(self) -> None:
         """首启增益自动拉到增益表中点（来源 gqrx mainwindow.cpp:571-579）。
 
-        仅在回读后 gain_db 仍为 0.0（用户从未手动设过增益）且离散增益表已加载时触发；
-        用户已手动设过非零增益时不覆盖。
+        仅在回读后 gain_db 仍为 0.0（用户从未手动设过增益）时触发；用户已手动
+        设过非零增益时不覆盖。调谐器已知时用真实离散增益表中点；调谐器探测失败
+        （ctypes 句柄拿不到 / 沙箱 / 旧 DLL）时退回 R820T 系安全中点，确保首启
+        绝不留 0 dB 聋棒（对齐 SDR++ 初始化序列，源自提交 8a83877）。
         """
-        if self.status.gain_db == 0.0 and self._gain_table_db:
+        if self.status.gain_db != 0.0:
+            return
+        if self._gain_table_db:
             mid_gain = float(self._gain_table_db[len(self._gain_table_db) // 2])
-            if self._apply_gain(mid_gain):
-                self.status.gain_db = mid_gain
-                logger.info("RTL-SDR 首启自动增益: 0 dB -> %.1f dB（增益表中点，"
-                            "来源 gqrx mainwindow.cpp:571-579）", mid_gain)
+        else:
+            mid_gain = self._UNKNOWN_TUNER_FALLBACK_GAIN_DB
+        if self._apply_gain(mid_gain):
+            self.status.gain_db = mid_gain
+            logger.info("RTL-SDR 首启自动增益: 0 dB -> %.1f dB（增益表中点，"
+                        "来源 gqrx mainwindow.cpp:571-579）", mid_gain)
 
     def set_agc(self, enabled: bool) -> bool:
         if not super().set_agc(enabled):
@@ -1370,21 +1413,35 @@ class RTLSDRBackend(SDRBackend):
         return True
 
     def set_ppm(self, ppm: int) -> bool:
-        """设置晶振频偏校正（ppm）。廉价棒典型 20~50ppm。"""
+        """设置晶振频偏校正（ppm）。廉价棒典型 20~50ppm。
+
+        对齐 SDR++ main.cpp:309：打开设备后始终下发 freq_correction（含 0），
+        避免上一次运行的频偏残留在棒上。注意 librtlsdr.c:922-923 规定
+        「请求 ppm == 当前 corr 时返回 -2」——刚打开的棒 corr 默认就是 0，
+        写 ppm=0 必然返回 -2。pyrtlsdr 把任何 <0 都当硬错并 close() 设备
+        （rtlsdr.py:239-242），所以这里优先走低层 ctypes 调用、把 -2 视作
+        "无需改动"的成功；低层句柄不可用（如测试 FakeRtlSdr 注入）时退回
+        Python 属性赋值。
+        """
         self._ppm = int(ppm)
-        if self._sdr:
-            # ppm=0 时不下发：部分 rtlsdr.dll（如 SDR++ 随附构建）对
-            # rtlsdr_set_freq_correction(0) 返回 -2，pyrtlsdr 据此 close() 设备，
-            # 导致后续读取全部 access violation。新打开设备频偏默认即 0，跳过；
-            # 非 0 才真正下发（这些构建对非 0 返回 0）。
-            if int(ppm) == 0:
+        if not self._sdr:
+            return True
+        # 路径 A：低层 ctypes 直接下发，容忍 -2（与 _reset_rtl_buffer 同手法）。
+        try:
+            from rtlsdr.librtlsdr import librtlsdr
+            dev_p = getattr(self._sdr, "dev_p", None)
+            if dev_p is not None:
+                # 返回值（含 -2 "already set"）仅记录、不抛错、不 close。
+                librtlsdr.rtlsdr_set_freq_correction(dev_p, int(ppm))
                 return True
-            try:
-                self._sdr.freq_correction = int(ppm)
-                return True
-            except Exception:
-                return False
-        return True
+        except Exception:
+            pass
+        # 路径 B：无 ctypes 句柄（FakeRtlSdr / RtlSdrAio 无 dev_p）——走属性赋值。
+        try:
+            self._sdr.freq_correction = int(ppm)
+            return True
+        except Exception:
+            return False
 
     def set_direct_sampling(self, branch: str = "q") -> bool:
         """HF 短波直采：branch='q'/'i' 开启，'off' 关闭。需调谐器支持（RTL2832 原生）。"""

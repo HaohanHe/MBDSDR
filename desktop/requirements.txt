@@ -21,8 +21,13 @@ websocket-client>=1.6.0
 websockets>=12.0
 
 # SDR 硬件接收
-pyrtlsdr==0.2.93
-sounddevice>=0.4.6
-
-# 可选：SoapySDR（HackRF/Pluto/Airspy/SDRplay，需系统驱动）
+# --- RTL-SDR 默认 USB 路径：SoapySDR + SoapyRTLSDR（推荐，无 GPL 传染）---
+# 本机 RTL-SDR USB 棒默认走 SoapySDR；pip 可能失败，通常需系统级安装：
+#   pip install SoapySDR   并装 SoapyRTLSDR 驱动模块
+# 远端共享棒：desktop 直接用自研 RtlTcpBackend 连 rtl_tcp，无需任何硬件库。
 # SoapySDR
+
+# --- 可选：pyrtlsdr（GPL-3.0，用户自行安装，不随包强制）---
+# pyrtlsdr==0.2.93     # 仅当你想走 pyrtlsdr 原生 USB 直连时才需要；GPL-3.0，
+#                       # 默认不装。未装时本机 USB 自动改用上面的 SoapySDR 路径。
+sounddevice>=0.4.6

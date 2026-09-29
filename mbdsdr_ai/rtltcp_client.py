@@ -246,6 +246,117 @@ class RtlTcpClient:
             self._sock = None
 
 
+class RtlTcpDeviceAdapter:
+    """把自研 RtlTcpClient 适配成 pyrtlsdr RtlSdr 风格对象。
+
+    背景：RTLSDRBackend.connect() 的统一初始化序列（center_freq / sample_rate /
+    gain / set_manual_gain_mode / set_agc_mode / set_direct_sampling / set_bias_tee /
+    read_samples）是按 pyrtlsdr RtlSdr 的属性/方法接口写的。本适配器让
+    RTLSDRBackend(host=...) 的 rtl_tcp 网络模式走本仓库自研、MIT、无 GPL 依赖的
+    RtlTcpClient，而不必再装 pyrtlsdr 的 RtlSdrTcpClient。
+
+    rtl_tcp 协议（rtl_tcp.c:316-375）只暴露 5 个命令：频率 / 采样率 / 增益模式 /
+    增益 / 频偏校正。直采(direct sampling)、偏置供电(bias tee)、RTL 数字 AGC、
+    tuner bandwidth 在协议里没有对应命令，这里显式映射为 no-op（记录调用但不下发），
+    保持与本地 USB 路径相同的方法签名，上层无需分支。
+    """
+
+    def __init__(self, host: str, port: int = 1234, ppm: int = 0):
+        self._client = RtlTcpClient(host, port)
+        if not self._client.connect():
+            # 与 pyrtlsdr 行为对齐：连不上就抛 OSError，由 RTLSDRBackend.connect()
+            # 的 except 捕获并写进 status.error（含"连接失败"），绝不伪造 IQ。
+            raise OSError(self._client.error or f"rtl_tcp 连接失败 {host}:{port}")
+        # 本地缓存最近一次下发值，供 readback_hw_state 回读（rtl_tcp 无查询命令）。
+        self._center_freq = 0
+        self._sample_rate = 0.0
+        self._gain = 0.0
+        self._freq_correction = int(ppm)
+        # 握手拿到的调谐器类型（rtl_tcp.c:623 htonl），供 _probe_tuner_type 之外的展示。
+        self.tuner_type = self._client.tuner_type
+        if ppm:
+            self._client.set_freq_correction(int(ppm))
+
+    # ── pyrtlsdr 风格可读写属性 ──────────────────────────────────────────
+    @property
+    def center_freq(self) -> int:
+        return self._center_freq
+
+    @center_freq.setter
+    def center_freq(self, value):
+        self._client.set_frequency(int(value))
+        self._center_freq = int(value)
+
+    @property
+    def sample_rate(self) -> float:
+        return self._sample_rate
+
+    @sample_rate.setter
+    def sample_rate(self, value):
+        self._client.set_sample_rate(int(value))
+        self._sample_rate = float(value)
+
+    @property
+    def gain(self) -> float:
+        return self._gain
+
+    @gain.setter
+    def gain(self, value):
+        # dB 浮点 → 0.1dB 整数（RtlTcpClient.set_gain 内部先发 gain_mode=1 再发增益）
+        self._client.set_gain(int(round(float(value) * 10)))
+        self._gain = float(value)
+
+    @property
+    def freq_correction(self) -> int:
+        return self._freq_correction
+
+    @freq_correction.setter
+    def freq_correction(self, value):
+        self._client.set_freq_correction(int(value))
+        self._freq_correction = int(value)
+
+    # rtl_tcp 无 bandwidth 命令：接收端由 librtlsdr 按采样率自选模拟滤波器。
+    @property
+    def bandwidth(self) -> int:
+        return 0
+
+    @bandwidth.setter
+    def bandwidth(self, value):
+        return None
+
+    # ── pyrtlsdr 风格方法（协议不支持的显式 no-op）──────────────────────
+    def set_manual_gain_mode(self, mode):
+        # 增益模式由 RtlTcpClient.set_gain 内部切 1=manual；AGC(0) 走 0x03=0。
+        if not mode:
+            self._client._send_cmd(RtlTcpClient.CMD_SET_GAIN_MODE, 0)
+        return True
+
+    def set_agc_mode(self, enabled):
+        # rtl_tcp 无独立的 RTL2832 数字 AGC 命令，显式 no-op。
+        return True
+
+    def set_direct_sampling(self, mode):
+        # rtl_tcp 协议无直采命令，显式 no-op。
+        return True
+
+    def set_bias_tee(self, enabled):
+        # rtl_tcp 协议无偏置供电命令，显式 no-op。
+        return True
+
+    def set_offset_tuning(self, enabled):
+        return True
+
+    def reset_buffer(self):
+        return None
+
+    # ── 数据面 ──────────────────────────────────────────────────────────
+    def read_samples(self, num_samples: int):
+        return self._client.read_samples(num_samples)
+
+    def close(self):
+        self._client.close()
+
+
 class RtlTcpBackend(SDRBackend):
     """rtl_tcp 网络源统一后端封装：继承 SDRBackend，与本地 USB 后端同接口。
 

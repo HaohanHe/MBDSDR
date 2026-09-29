@@ -1763,8 +1763,11 @@ class MainWindow(QMainWindow):
 
         chosen = rtl_dev or other_dev
         if chosen is None:
-            # 真的没设备：明确提示，不弹对话框、不造假
-            self._show_no_rtl_hint("未找到 RTL-SDR，检查 Zadig WinUSB 驱动 / pip install pyrtlsdr")
+            # 真的没设备：明确提示，不弹对话框、不造假。
+            # 默认 USB 走 SoapySDR（无 GPL）；pyrtlsdr 仅可选自装。
+            self._show_no_rtl_hint(
+                "未找到 RTL-SDR：检查 Zadig WinUSB 驱动，或装 SoapySDR(SoapyRTLSDR)；"
+                "远端棒用 rtl_tcp。pyrtlsdr 为可选 GPL-3.0，用户自装")
             return
 
         # 构造后端并连接（默认参数：2.048MS/s、AGC 开、PPM 0、offset 关）
@@ -1774,7 +1777,9 @@ class MainWindow(QMainWindow):
             self._show_no_rtl_hint(f"构造后端失败：{e}")
             return
         if backend is None:
-            self._show_no_rtl_hint("未找到 RTL-SDR，检查 Zadig WinUSB 驱动 / pip install pyrtlsdr")
+            self._show_no_rtl_hint(
+                "未找到 RTL-SDR：检查 Zadig WinUSB 驱动，或装 SoapySDR(SoapyRTLSDR)；"
+                "远端棒用 rtl_tcp。pyrtlsdr 为可选 GPL-3.0，用户自装")
             return
 
         ok = self._connect_backend(
@@ -1788,7 +1793,7 @@ class MainWindow(QMainWindow):
         if not ok:
             # 连接失败：状态栏已由 _connect_backend 写了错误；补充无设备引导
             self._show_no_rtl_hint(
-                "RTL-SDR 连接失败，检查 Zadig WinUSB 驱动 / pip install pyrtlsdr")
+                "RTL-SDR 连接失败：检查 Zadig WinUSB 驱动 / SoapySDR 驱动 / 设备是否被占用")
 
     def _show_no_rtl_hint(self, message: str):
         """无设备 / 枚举失败时：状态栏 + 频谱上方横幅同时显示明确提示。
@@ -2176,9 +2181,10 @@ class MainWindow(QMainWindow):
         if not raw_err:
             return "设备无响应（请检查 USB 棒、驱动与设备占用）"
         low = raw_err.lower()
-        # Python 库缺失（pyrtlsdr 未安装）
+        # Python 库缺失（SoapySDR 未装；pyrtlsdr 为可选 GPL-3.0）
         if any(k in low for k in ("no module named", "importerror", "no module")):
-            return "未安装 Python 库：pip install pyrtlsdr"
+            return ("未安装 SDR Python 库：本机 USB 默认装 SoapySDR(SoapyRTLSDR)；"
+                    "pyrtlsdr 为可选 GPL-3.0，按需自装")
         # 网络连接失败（远程 rtl_tcp 源连不上）。
         # 注意必须排在"设备被占用"分支之前：socket 错误常带 "[Errno 111] Connection refused"，
         # 里面的 "errno" 会被占用分支的裸词误命中。
