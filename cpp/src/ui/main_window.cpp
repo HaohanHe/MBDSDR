@@ -39,6 +39,8 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QFileDialog>
+#include <QElapsedTimer>
+#include <QDialogButtonBox>
 
 #include "dsp/vfo_manager.h"
 #include "ui/constellation_view.h"
@@ -55,6 +57,7 @@
 #include "ai/ai_config.h"
 #include "ui/sky_view.h"
 #include "ui/bookmark_manager.h"
+#include "dsp/frequency_scanner.h"
 #include "ui/shortcuts_dialog.h"
 #include <QListWidget>
 #include <QLineEdit>
@@ -593,110 +596,269 @@ MainWindow::MainWindow(QWidget* parent)
     skyLay->addWidget(passTable_, 1);
     rightTabs_->addTab(skyPage, "天空");
 
-    // ---- Bookmarks tab: user-saved frequencies, jump on click ----
+    // ---- Bookmarks / Scanner tab (SDR++-style "扫描/书签" panel) ----
     bookmarkManager_ = new ui::BookmarkManager();
     bookmarkManager_->load();
+    scanner_ = new dsp::FrequencyScanner();
     auto* bmPage = new QWidget;
     auto* bmLay = new QVBoxLayout(bmPage);
-    bmList_ = new QListWidget(bmPage);
-    bmLay->addWidget(bmList_, 1);
-    auto* bmRow = new QHBoxLayout;
-    auto* bmSave = new QPushButton("存为书签", bmPage);
-    auto* bmDel = new QPushButton("删除", bmPage);
-    bmRow->addWidget(bmSave);
-    bmRow->addWidget(bmDel);
-    bmLay->addLayout(bmRow);
-    auto refreshBm = [this]() {
-        bmList_->clear();
-        for (const auto& b : bookmarkManager_->list()) {
-            const QString f = QString("%1 MHz").arg(b.freqHz / 1e6, 0, 'f', 3);
-            bmList_->addItem(b.note.isEmpty() ? f : f + " — " + b.note);
-        }
-    };
-    refreshBm();
-    connect(bmSave, &QPushButton::clicked, this, [this, refreshBm]() {
-        bool ok = false;
-        const QString note = QInputDialog::getText(this, "存为书签",
-            "备注（可留空）:", QLineEdit::Normal, "", &ok);
-        if (!ok) return;
-        bookmarkManager_->add(freqSpin_->value() * 1e6, note.trimmed());
-        refreshBm();
-    });
-    connect(bmDel, &QPushButton::clicked, this, [this, refreshBm]() {
-        int row = bmList_->currentRow();
-        if (row >= 0) { bookmarkManager_->remove(row); refreshBm(); }
-    });
-    connect(bmList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* it) {
-        int row = bmList_->row(it);
-        if (row >= 0 && row < bookmarkManager_->list().size())
-            engine_->onSetCenterFreq(bookmarkManager_->list()[row].freqHz);
-    });
+    bmLay->setContentsMargins(tokens::kSpacingM, tokens::kSpacingM,
+                              tokens::kSpacingM, tokens::kSpacingM);
+    bmLay->setSpacing(tokens::kSpacingM);
 
-    // ---- Band scanner: step frequencies on a QTimer, record RSSI peaks ----
-    auto* scanBox = new QGroupBox("频段扫描", bmPage);
-    auto* scanLay = new QVBoxLayout(scanBox);
+    // ===== A. 频率扫描 control group =====
+    auto* scanBox = new QGroupBox("频率扫描", bmPage);
+    auto* scanBoxLay = new QVBoxLayout(scanBox);
+    scanBoxLay->setSpacing(tokens::kSpacingS);
     auto* scanForm = new QFormLayout;
-    scanStartSpin_ = new QDoubleSpinBox(scanBox);
-    scanStartSpin_->setRange(0.1, 2200); scanStartSpin_->setValue(88);
-    scanStartSpin_->setSuffix(" MHz");
-    scanStopSpin_ = new QDoubleSpinBox(scanBox);
-    scanStopSpin_->setRange(0.1, 2200); scanStopSpin_->setValue(108);
-    scanStopSpin_->setSuffix(" MHz");
-    scanStepCombo_ = new QComboBox(scanBox);
-    scanStepCombo_->addItems({"10 kHz", "100 kHz", "1 MHz"});
-    scanForm->addRow("起", scanStartSpin_);
-    scanForm->addRow("止", scanStopSpin_);
-    scanForm->addRow("步进", scanStepCombo_);
-    scanLay->addLayout(scanForm);
-    auto* scanBtns = new QHBoxLayout;
-    scanStartBtn_ = new QPushButton("开始扫描", scanBox);
-    scanStopBtn_ = new QPushButton("停止", scanBox);
-    scanStopBtn_->setEnabled(false);
-    scanBtns->addWidget(scanStartBtn_);
-    scanBtns->addWidget(scanStopBtn_);
-    scanLay->addLayout(scanBtns);
-    scanResultList_ = new QListWidget(scanBox);
-    scanResultList_->setToolTip("双击直跳");
-    scanLay->addWidget(scanResultList_, 1);
-    bmLay->addWidget(scanBox, 1);
+    scanForm->setLabelAlignment(Qt::AlignRight);
 
-    scanTimer_ = new QTimer(this);
-    scanTimer_->setInterval(200);
-    connect(scanTimer_, &QTimer::timeout, this, [this]() {
-        if (scanFreq_ > scanStopSpin_->value() * 1e6) {
-            scanTimer_->stop();
-            scanStartBtn_->setEnabled(true);
-            scanStopBtn_->setEnabled(false);
-            return;
+    scanStartSpin_ = new QDoubleSpinBox(scanBox);
+    scanStartSpin_->setRange(0.1, 2200);
+    scanStartSpin_->setDecimals(3);
+    scanStartSpin_->setValue(88);
+    scanStartSpin_->setSuffix(" MHz");
+    scanForm->addRow("起始", scanStartSpin_);
+
+    scanStopSpin_ = new QDoubleSpinBox(scanBox);
+    scanStopSpin_->setRange(0.1, 2200);
+    scanStopSpin_->setDecimals(3);
+    scanStopSpin_->setValue(108);
+    scanStopSpin_->setSuffix(" MHz");
+    scanForm->addRow("终止", scanStopSpin_);
+
+    scanStepCombo_ = new QComboBox(scanBox);
+    scanStepCombo_->addItems({"10 kHz", "12.5 kHz", "100 kHz", "1 MHz"});
+    scanStepCombo_->setCurrentIndex(2);   // 默认 100 kHz
+    scanForm->addRow("步进", scanStepCombo_);
+
+    scanDwellSpin_ = new QSpinBox(scanBox);
+    scanDwellSpin_->setRange(100, 2000);
+    scanDwellSpin_->setSingleStep(50);
+    scanDwellSpin_->setValue(300);        // 默认驻留 300 ms
+    scanDwellSpin_->setSuffix(" ms");
+    scanForm->addRow("驻留", scanDwellSpin_);
+
+    scanThrSpin_ = new QDoubleSpinBox(scanBox);
+    scanThrSpin_->setRange(-120, 0);
+    scanThrSpin_->setSingleStep(1);
+    scanThrSpin_->setValue(-50);         // 默认门限 -50 dBFS
+    scanThrSpin_->setSuffix(" dBFS");
+    scanForm->addRow("门限", scanThrSpin_);
+
+    scanDirCombo_ = new QComboBox(scanBox);
+    scanDirCombo_->addItems({"向上", "向下", "来回"});
+    scanForm->addRow("方向", scanDirCombo_);
+
+    scanHoldCombo_ = new QComboBox(scanBox);
+    scanHoldCombo_->addItems({"直到信号消失", "固定时长"});
+    scanForm->addRow("命中停留", scanHoldCombo_);
+
+    scanLingerSpin_ = new QSpinBox(scanBox);
+    scanLingerSpin_->setRange(0, 60000);
+    scanLingerSpin_->setValue(1000);     // lingerMs，直到信号消失时
+    scanLingerSpin_->setSuffix(" ms");
+    scanForm->addRow("消失延时", scanLingerSpin_);
+
+    scanHoldMsSpin_ = new QSpinBox(scanBox);
+    scanHoldMsSpin_->setRange(0, 60000);
+    scanHoldMsSpin_->setValue(2000);     // holdMs，固定时长时
+    scanHoldMsSpin_->setSuffix(" ms");
+    scanForm->addRow("固定停留", scanHoldMsSpin_);
+
+    scanBmOnlyChk_ = new QCheckBox("只扫书签", scanBox);
+    scanForm->addRow("", scanBmOnlyChk_);
+
+    scanBoxLay->addLayout(scanForm);
+
+    // linger vs hold spinbox enabledness follows the hold-mode combo.
+    auto syncHoldDependent = [this]() {
+        const bool fixed = scanHoldCombo_->currentIndex() == 1;
+        scanLingerSpin_->setEnabled(!fixed);
+        scanHoldMsSpin_->setEnabled(fixed);
+    };
+    connect(scanHoldCombo_, &QComboBox::currentIndexChanged,
+            this, [syncHoldDependent]() { syncHoldDependent(); });
+    syncHoldDependent();
+
+    auto* scanBtnRow = new QHBoxLayout;
+    scanStartBtn_ = new QPushButton("开始", scanBox);
+    scanPauseBtn_ = new QPushButton("暂停", scanBox);
+    scanPauseBtn_->setEnabled(false);
+    scanStopBtn_  = new QPushButton("停止", scanBox);
+    scanStopBtn_->setEnabled(false);
+    scanBtnRow->addWidget(scanStartBtn_);
+    scanBtnRow->addWidget(scanPauseBtn_);
+    scanBtnRow->addWidget(scanStopBtn_);
+    scanBoxLay->addLayout(scanBtnRow);
+
+    scanFreqLabel_ = new QLabel("当前 --.-- MHz", scanBox);
+    scanFreqLabel_->setObjectName("monoInfo");
+    scanBoxLay->addWidget(scanFreqLabel_);
+    scanStateLabel_ = new QLabel("空闲", scanBox);
+    scanStateLabel_->setObjectName("dockHint");
+    scanBoxLay->addWidget(scanStateLabel_);
+    bmLay->addWidget(scanBox);
+
+    // ===== B. 频率书签 table group =====
+    auto* bmBox = new QGroupBox("频率书签", bmPage);
+    auto* bmBoxLay = new QVBoxLayout(bmBox);
+    bmBoxLay->setSpacing(tokens::kSpacingS);
+    bmTable_ = new QTableWidget(0, 5, bmBox);
+    bmTable_->setHorizontalHeaderLabels({"名称", "频率(MHz)", "模式", "带宽(kHz)", "分组"});
+    bmTable_->verticalHeader()->setVisible(false);
+    bmTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    bmTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    bmTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+    bmTable_->horizontalHeader()->setStretchLastSection(true);
+    bmBoxLay->addWidget(bmTable_, 1);
+    auto* bmBtnRow = new QHBoxLayout;
+    bmAddBtn_  = new QPushButton("添加", bmBox);
+    bmEditBtn_ = new QPushButton("编辑", bmBox);
+    bmDelBtn_  = new QPushButton("删除", bmBox);
+    bmBtnRow->addWidget(bmAddBtn_);
+    bmBtnRow->addWidget(bmEditBtn_);
+    bmBtnRow->addWidget(bmDelBtn_);
+    bmBoxLay->addLayout(bmBtnRow);
+    bmLay->addWidget(bmBox, 1);
+
+    // Modal add/edit dialog.  prefill.frequencyHz<=0 means "add": the dialog
+    // seeds frequency/mode/bandwidth from the live engine.  Returns true on OK.
+    auto bmDialog = [this](const ui::Bookmark& prefill, ui::Bookmark& outBm) -> bool {
+        QDialog dlg(this);
+        dlg.setWindowTitle(prefill.frequencyHz > 0.0 ? "编辑书签" : "添加书签");
+        auto* form = new QFormLayout(&dlg);
+        QLineEdit* nameEdit = new QLineEdit(prefill.name, &dlg);
+        QDoubleSpinBox* freqMhz = new QDoubleSpinBox(&dlg);
+        freqMhz->setRange(0.1, 2200);
+        freqMhz->setDecimals(3);
+        freqMhz->setSuffix(" MHz");
+        freqMhz->setValue(prefill.frequencyHz > 0.0
+                          ? prefill.frequencyHz / 1e6 : freqSpin_->value());
+        QComboBox* modeCombo = new QComboBox(&dlg);
+        modeCombo->addItems({"NFM", "WFM", "AM", "LSB", "USB"});
+        modeCombo->setCurrentText(prefill.mode.isEmpty() ? demodCombo_->currentText()
+                                                         : prefill.mode);
+        QDoubleSpinBox* bwKhz = new QDoubleSpinBox(&dlg);
+        bwKhz->setRange(0, 10000);
+        bwKhz->setDecimals(1);
+        bwKhz->setSingleStep(1);
+        bwKhz->setSuffix(" kHz");
+        const double bwHz = prefill.bandwidthHz > 0.0 ? prefill.bandwidthHz : currentBwHz_;
+        bwKhz->setValue(bwHz / 1e3);
+        QLineEdit* groupEdit = new QLineEdit(prefill.group, &dlg);
+        form->addRow("名称", nameEdit);
+        form->addRow("频率", freqMhz);
+        form->addRow("模式", modeCombo);
+        form->addRow("带宽", bwKhz);
+        form->addRow("分组", groupEdit);
+        auto* btns = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+        form->addRow(btns);
+        connect(btns, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+        connect(btns, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+        if (dlg.exec() != QDialog::Accepted) return false;
+        outBm.name = nameEdit->text().trimmed();
+        outBm.frequencyHz = freqMhz->value() * 1e6;
+        outBm.mode = modeCombo->currentText();
+        outBm.bandwidthHz = bwKhz->value() * 1e3;
+        outBm.group = groupEdit->text().trimmed();
+        return true;
+    };
+
+    // After any bookmark mutation, resync the scanner's bookmark-frequency list
+    // while "只扫书签" is configured.
+    auto resyncScanBookmarks = [this]() {
+        if (scanBmOnlyChk_->isChecked())
+            scanner_->setBookmarkFrequencies(bookmarkManager_->frequencies());
+    };
+
+    connect(bmAddBtn_, &QPushButton::clicked, this, [this, bmDialog, resyncScanBookmarks]() {
+        ui::Bookmark bm;   // empty -> dialog seeds from live engine freq/mode/bw
+        if (bmDialog(bm, bm)) {
+            bookmarkManager_->add(bm);
+            refreshBmTable();
+            resyncScanBookmarks();
         }
-        engine_->onSetCenterFreq(scanFreq_);
-        // RSSI is updated async; record the latest known level.
-        scanResultList_->addItem(QString("%1 MHz — %2 dBFS")
-            .arg(scanFreq_ / 1e6, 0, 'f', 3).arg(lastRssi_, 0, 'f', 1));
-        const double step = scanStepCombo_->currentIndex() == 0 ? 10e3
-                          : scanStepCombo_->currentIndex() == 1 ? 100e3 : 1e6;
-        scanFreq_ += step;
     });
+    connect(bmEditBtn_, &QPushButton::clicked, this, [this, bmDialog, resyncScanBookmarks]() {
+        int row = bmTable_->currentRow();
+        if (row < 0 || row >= bookmarkManager_->list().size()) return;
+        ui::Bookmark bm = bookmarkManager_->list().at(row);
+        if (bmDialog(bm, bm)) {
+            bookmarkManager_->update(row, bm);
+            refreshBmTable();
+            resyncScanBookmarks();
+        }
+    });
+    connect(bmDelBtn_, &QPushButton::clicked, this, [this, resyncScanBookmarks]() {
+        int row = bmTable_->currentRow();
+        if (row < 0) return;
+        bookmarkManager_->removeAt(row);
+        refreshBmTable();
+        resyncScanBookmarks();
+    });
+    // Double-click row = jump directly (no edit dialog).
+    connect(bmTable_, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
+        if (row < 0 || row >= bookmarkManager_->list().size()) return;
+        const ui::Bookmark& b = bookmarkManager_->list().at(row);
+        engine_->onSetCenterFreq(b.frequencyHz);
+        if (!b.mode.isEmpty()) engine_->setDemodMode(b.mode);
+        if (b.bandwidthHz > 0) engine_->setBandwidth(b.bandwidthHz);
+    });
+    refreshBmTable();
+
+    // ===== C. Drive the headless scanner state machine on a 50 ms timer =====
+    scanTimer_ = new QTimer(this);
+    scanTimer_->setInterval(50);
+    scanTickClock_ = new QElapsedTimer();
+    connect(scanTimer_, &QTimer::timeout, this, &MainWindow::scanTimerTick);
+
     connect(scanStartBtn_, &QPushButton::clicked, this, [this]() {
-        scanResultList_->clear();
-        scanFreq_ = scanStartSpin_->value() * 1e6;
-        scanStartBtn_->setEnabled(false);
-        scanStopBtn_->setEnabled(true);
+        dsp::ScanConfig cfg;
+        cfg.startHz = scanStartSpin_->value() * 1e6;
+        cfg.stopHz  = scanStopSpin_->value() * 1e6;
+        switch (scanStepCombo_->currentIndex()) {
+            case 0:  cfg.stepHz = 10e3;   break;
+            case 1:  cfg.stepHz = 12.5e3; break;
+            case 3:  cfg.stepHz = 1e6;    break;
+            default: cfg.stepHz = 100e3;  break;
+        }
+        cfg.dwellMs = scanDwellSpin_->value();
+        cfg.thresholdDb = static_cast<float>(scanThrSpin_->value());
+        cfg.direction = scanDirCombo_->currentIndex() == 0 ? dsp::ScanDirection::Up
+                      : scanDirCombo_->currentIndex() == 1 ? dsp::ScanDirection::Down
+                                                           : dsp::ScanDirection::PingPong;
+        cfg.holdMode = scanHoldCombo_->currentIndex() == 1
+                       ? dsp::HitHoldMode::FixedMs : dsp::HitHoldMode::UntilSignalGone;
+        cfg.lingerMs = scanLingerSpin_->value();
+        cfg.holdMs   = scanHoldMsSpin_->value();
+        if (scanBmOnlyChk_->isChecked()) {
+            cfg.source = dsp::ScanSource::Bookmarks;
+            scanner_->setBookmarkFrequencies(bookmarkManager_->frequencies());
+        } else {
+            cfg.source = dsp::ScanSource::Range;
+        }
+        scanner_->setConfig(cfg);
+        scanTickClock_->start();
+        scanner_->start();
         scanTimer_->start();
+        updateScanStatus();
+    });
+    connect(scanPauseBtn_, &QPushButton::clicked, this, [this]() {
+        const dsp::ScanState st = scanner_->state();
+        if (st == dsp::ScanState::Scanning || st == dsp::ScanState::Hit)
+            scanner_->pause();
+        else if (st == dsp::ScanState::Paused)
+            scanner_->resume();
+        updateScanStatus();
     });
     connect(scanStopBtn_, &QPushButton::clicked, this, [this]() {
-        scanTimer_->stop();
-        scanStartBtn_->setEnabled(true);
-        scanStopBtn_->setEnabled(false);
+        scanner_->stop();
+        updateScanStatus();
     });
-    connect(scanResultList_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem* it) {
-        // Parse the "NN.NNN MHz —" prefix back to Hz and jump.
-        bool ok = false;
-        const double mhz = it->text().section(' ', 0, 0).toDouble(&ok);
-        if (ok) engine_->onSetCenterFreq(mhz * 1e6);
-    });
+    updateScanStatus();
 
-    rightTabs_->addTab(bmPage, "书签");
+    rightTabs_->addTab(bmPage, "扫描/书签");
 
     connect(passTable_, &QTableWidget::cellClicked,
             this, [this](int row, int) { onPassRowClicked(row); });
@@ -753,9 +915,11 @@ MainWindow::MainWindow(QWidget* parent)
     sbSdr_  = new QLabel("Test Signal", this);
     sbWatch_ = new QLabel("", this);
     sbWatch_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kAccent));
+    sbScan_ = new QLabel("", this);
+    sbScan_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kAccent));
     sbRec_  = new QLabel("", this);
     sbRec_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kDanger));
-    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbWatch_, sbRec_}) {
+    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbWatch_, sbScan_, sbRec_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
     }
@@ -1386,6 +1550,97 @@ MainWindow::~MainWindow() {
     if (engine_) { engine_->shutdown(); engine_->wait(); }
     if (adsbTimer_) adsbTimer_->stop();
     delete adsbTracker_; adsbTracker_ = nullptr;
+    // Headless scanner + its elapsed-time clock are plain (non-QObject) objects.
+    if (scanTimer_) scanTimer_->stop();
+    delete scanner_; scanner_ = nullptr;
+    delete scanTickClock_; scanTickClock_ = nullptr;
+}
+
+void MainWindow::refreshBmTable() {
+    if (!bmTable_) return;
+    bmTable_->setRowCount(0);
+    const auto& items = bookmarkManager_->list();
+    for (const auto& b : items) {
+        const int row = bmTable_->rowCount();
+        bmTable_->insertRow(row);
+        auto set = [&](int col, const QString& text) {
+            bmTable_->setItem(row, col, new QTableWidgetItem(text));
+        };
+        set(0, b.name);
+        set(1, QString::number(b.frequencyHz / 1e6, 'f', 3));
+        set(2, b.mode);
+        set(3, b.bandwidthHz > 0.0 ? QString::number(b.bandwidthHz / 1e3, 'f', 1)
+                                   : QString(""));
+        // Group column: empty storage renders as "默认" in the table only.
+        set(4, b.group.isEmpty() ? QString("默认") : b.group);
+    }
+}
+
+void MainWindow::scanTimerTick() {
+    if (!scanner_) return;
+    // First tick after start(): assume one full period; thereafter measure the
+    // real elapsed time since the previous tick.
+    int elapsed = 50;
+    if (scanTickClock_->isValid())
+        elapsed = static_cast<int>(scanTickClock_->restart());
+    else
+        scanTickClock_->start();
+    bool needTune = false;
+    // lastRssi_ is the REAL engine-measured RSSI (onRssiLevel); no fabricated
+    // hits here.
+    const double target = scanner_->tick(elapsed, lastRssi_, &needTune);
+    if (needTune && engine_)
+        engine_->onSetCenterFreq(target);
+    updateScanStatus();
+}
+
+void MainWindow::updateScanStatus() {
+    if (!scanner_) return;
+    const dsp::ScanState st = scanner_->state();
+    if (scanFreqLabel_)
+        scanFreqLabel_->setText(QString("当前 %1 MHz")
+                                .arg(scanner_->currentFrequency() / 1e6, 0, 'f', 3));
+    QString stateText;
+    if (st == dsp::ScanState::Scanning)      stateText = "扫描中";
+    else if (st == dsp::ScanState::Paused)   stateText = "已暂停";
+    else if (st == dsp::ScanState::Hit)
+        stateText = QString("命中 %1 MHz · %2 dBFS")
+                    .arg(scanner_->hitFrequency() / 1e6, 0, 'f', 3)
+                    .arg(scanner_->lastLevelDb(), 0, 'f', 1);
+    else                                     stateText = "空闲";
+    if (scanStateLabel_) scanStateLabel_->setText(stateText);
+
+    // Permanent status strip label.
+    if (sbScan_) {
+        if (st == dsp::ScanState::Scanning) {
+            sbScan_->setText("扫描中…");
+            sbScan_->setStyleSheet(QString("color:%1; font-weight:600;")
+                                   .arg(tokens::kAccent));
+        } else if (st == dsp::ScanState::Hit) {
+            sbScan_->setText(QString("● 命中 %1 MHz")
+                             .arg(scanner_->hitFrequency() / 1e6, 0, 'f', 3));
+            sbScan_->setStyleSheet(QString("color:%1; font-weight:600;")
+                                   .arg(tokens::kSuccess));
+        } else if (st == dsp::ScanState::Paused) {
+            sbScan_->setText("已暂停");
+            sbScan_->setStyleSheet(QString("color:%1; font-weight:600;")
+                                   .arg(tokens::kAccent));
+        } else {
+            sbScan_->setText("");
+        }
+    }
+
+    // Button enables / pause-resume label follow the live scanner state.
+    if (scanStartBtn_)  scanStartBtn_->setEnabled(st == dsp::ScanState::Idle);
+    if (scanStopBtn_)   scanStopBtn_->setEnabled(st != dsp::ScanState::Idle);
+    if (scanPauseBtn_) {
+        scanPauseBtn_->setEnabled(st == dsp::ScanState::Scanning ||
+                                  st == dsp::ScanState::Hit ||
+                                  st == dsp::ScanState::Paused);
+        scanPauseBtn_->setText(st == dsp::ScanState::Paused ? "继续" : "暂停");
+    }
+    // "只扫书签" only selectable while Idle.
+    if (scanBmOnlyChk_) scanBmOnlyChk_->setEnabled(st == dsp::ScanState::Idle);
 }
 
 void MainWindow::refreshVfoUi() {

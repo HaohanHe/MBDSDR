@@ -144,5 +144,32 @@ GUI 上在瀑布/频谱为每个 VFO 绘制半透明带宽框。对应的 SDR++ 
 - 本仓库未随产品分发任何私有星历或订阅数据；星历与频率均为公开信息，代码内已按上
   述来源标注。本小节不改变根目录 `LICENSE` 的许可声明。
 
+## 频率扫描器与频率管理器（设计参考）
+
+- 版权所有：Copyright (C) Alexandre Rouma / Ryzerth（SDR++）
+- 项目主页：https://github.com/AlexandreRouma/SDRPlusPlus
+- 许可证：GNU General Public License v3.0 或任何更高版本（GPL-3.0-or-later）
+
+`src/dsp/frequency_scanner.{h,cpp}` 与 `src/ui/bookmark_manager.{h,cpp}` 为 MBDSDR
+原创实现（SPDX: MIT），但在行为与架构上参考了 SDR++ 的 scanner / frequency_manager
+杂项模块：
+
+- **频率扫描器**：按「起始/终止/步进」逐频调谐，每步驻留固定 dwell（先经短暂
+  settle 忽略调谐残留电平），命中判定复用基于真实 RSSI 的 `SignalWatch` 门限；命中后
+  停留——「直到信号消失并持续一段 linger」或「固定时长」两种可配，支持向上 / 向下 /
+  来回方向与暂停 / 继续 / 停止；书签扫描只在书签频率间跳转、不访问中间频率。对应
+  只读参考 `repos/sdrpp/misc_modules/scanner/src/main.cpp`（start/stop/interval、
+  tuning time、linger time、level、scanUp/reverseLock 等行为）。
+- **频率管理器**：书签字段 name / frequency / mode / bandwidth，按分组（list）组织、
+  按 (分组, 频率) 排序，JSON 持久化、启动恢复；**默认书签列表为空、绝不内置任何
+  FM/广播电台**。对应只读参考
+  `repos/sdrpp/misc_modules/frequency_manager/src/main.cpp`（`FrequencyBookmark`
+  字段与 lists 组织、JSON 持久化）。
+
+本项目未逐行移植其 C++ 代码，而是按上述行为用 Qt6 / 自有 DSP 块重新实现；命中电平
+始终来自真实 RSSI（离线测试夹具明确标注 FIXTURE/SYNTHETIC -- NOT HARDWARE），不造假
+命中、不造假频率；扫描/书签的端到端行为由 `tests/test_scanner.cpp`、
+`tests/test_bookmark.cpp` 钉死。本小节不改变根目录 `LICENSE` 的许可声明。
+
 
 

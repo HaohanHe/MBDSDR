@@ -80,6 +80,7 @@ set(SOURCES
     src/dsp/file_source.cpp
     src/dsp/gated_recorder.cpp
     src/dsp/signal_watch.cpp
+    src/dsp/frequency_scanner.cpp
     src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp
     src/dsp/rds_decoder.cpp
@@ -137,6 +138,7 @@ set(HEADERS
     src/dsp/file_source.h
     src/dsp/gated_recorder.h
     src/dsp/signal_watch.h
+    src/dsp/frequency_scanner.h
     src/dsp/sgp4.h
     src/ui/sky_view.h
     src/ui/world_view.h
@@ -249,6 +251,11 @@ add_executable(test_bookmark tests/test_bookmark.cpp src/ui/bookmark_manager.cpp
 target_include_directories(test_bookmark PRIVATE src)
 target_link_libraries(test_bookmark PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME bookmark COMMAND test_bookmark)
+
+add_executable(test_scanner tests/test_scanner.cpp src/dsp/frequency_scanner.cpp src/dsp/signal_watch.cpp)
+target_include_directories(test_scanner PRIVATE src)
+target_link_libraries(test_scanner PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME scanner COMMAND test_scanner)
 
 add_executable(test_spectrum_interaction tests/test_spectrum_interaction.cpp
     src/ui/spectrum_widget.cpp src/ui/spectrum_display.cpp src/dsp/peak_detector.cpp)

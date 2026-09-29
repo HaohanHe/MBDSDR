@@ -21,6 +21,7 @@ class QLineEdit;
 class QStackedWidget;
 class QSplitter;
 class QTimer;
+class QElapsedTimer;
 class QListWidget;
 class QListWidgetItem;
 class QLineEdit;
@@ -28,7 +29,7 @@ class QSpinBox;
 
 namespace mbdsdr {
 namespace ui { class BookmarkManager; }
-namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct VfoMarker; }
+namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct VfoMarker; class FrequencyScanner; }
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class WeatherSatPanel; }
@@ -111,17 +112,34 @@ private:
     QLabel*         tleBadge_    = nullptr;
     QLabel*         skyEmptyLabel_ = nullptr;
     ui::BookmarkManager* bookmarkManager_ = nullptr;
-    QListWidget*    bmList_      = nullptr;
-    // Band scanner state.
-    QDoubleSpinBox* scanStartSpin_ = nullptr;
-    QDoubleSpinBox* scanStopSpin_  = nullptr;
-    QComboBox*      scanStepCombo_ = nullptr;
-    QPushButton*    scanStartBtn_  = nullptr;
-    QPushButton*    scanStopBtn_   = nullptr;
-    QListWidget*    scanResultList_= nullptr;
-    QTimer*         scanTimer_     = nullptr;
-    double          scanFreq_      = 0.0;
-    float           lastRssi_      = -200.0f;
+    // ---- SDR++-style scan / bookmark panel (right "书签" tab) ----
+    // Headless state machine + the QTimer that drives it.  Hits come only from
+    // the REAL engine RSSI (lastRssi_); the scanner fabricates nothing.
+    dsp::FrequencyScanner* scanner_     = nullptr;
+    QTimer*         scanTimer_         = nullptr;
+    QElapsedTimer*  scanTickClock_     = nullptr;  // per-tick elapsed ms clock
+    float           lastRssi_          = -200.0f;
+    // Scan-control group "频率扫描".
+    QDoubleSpinBox* scanStartSpin_      = nullptr;  // MHz
+    QDoubleSpinBox* scanStopSpin_       = nullptr;  // MHz
+    QComboBox*      scanStepCombo_      = nullptr;  // 10k/12.5k/100k/1M
+    QSpinBox*       scanDwellSpin_      = nullptr;  // ms per step
+    QDoubleSpinBox* scanThrSpin_        = nullptr;  // dBFS hit gate
+    QComboBox*      scanDirCombo_       = nullptr;  // Up/Down/PingPong
+    QComboBox*      scanHoldCombo_      = nullptr;  // UntilSignalGone/FixedMs
+    QSpinBox*       scanLingerSpin_     = nullptr;  // ms (UntilSignalGone)
+    QSpinBox*       scanHoldMsSpin_     = nullptr;  // ms (FixedMs)
+    QCheckBox*      scanBmOnlyChk_     = nullptr;  // scan bookmark freqs only
+    QPushButton*    scanStartBtn_       = nullptr;
+    QPushButton*    scanPauseBtn_      = nullptr;  // pause / resume (same btn)
+    QPushButton*    scanStopBtn_        = nullptr;
+    QLabel*         scanFreqLabel_      = nullptr;  // monoInfo current freq
+    QLabel*         scanStateLabel_     = nullptr;  // idle/scanning/hit text
+    // Bookmark table group "频率书签".
+    QTableWidget*   bmTable_            = nullptr;
+    QPushButton*    bmAddBtn_           = nullptr;
+    QPushButton*    bmEditBtn_          = nullptr;
+    QPushButton*    bmDelBtn_           = nullptr;
     float           lastSnr_       = 0.0f;
     QList<dsp::SatPass> passes_;
     QTimer*         tleTimer_    = nullptr;
@@ -220,6 +238,7 @@ private:
     QLabel*         sbSdr_  = nullptr;
     QLabel*         sbGain_ = nullptr;
     QLabel*         sbWatch_ = nullptr;
+    QLabel*         sbScan_  = nullptr;   // scan / hit status (permanent strip)
     QLabel*         sbRec_  = nullptr;
 
     // AI
@@ -240,6 +259,11 @@ private:
     void updateClockBiasLabel();    // 1s: GNSS/system/local time + bias
     void onAdsbPrune();             // 1s: TTL-expire aircraft, refresh table/map
     void refreshAdsbTable();        // rebuild ADS-B table + map + empty state
+
+    // Scan / bookmark panel.
+    void refreshBmTable();          // refill bmTable_ from bookmarkManager_->list()
+    void scanTimerTick();           // 50 ms tick into the FrequencyScanner state machine
+    void updateScanStatus();        // refresh scan labels + sbScan_ + button enables
 
     // Debounced QSettings writer: high-frequency signals (zoom/pan, slider
     // drags, spinbox edits) call scheduleSave() which (re)arms this one-shot
