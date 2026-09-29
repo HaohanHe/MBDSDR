@@ -696,6 +696,27 @@ void SpectrumEngine::run() {
                 emit adsbAircraft(ac);
         }
 
+        // RDS (WFM only): pull the selected channel's accumulated PS/PTY/RadioText.
+        // The channel's RdsDecoder is already being fed inside vfoManager_.process();
+        // we only diff against the last pushed snapshot so the UI sees an event
+        // when the station name / PTY / RadioText changes, not a per-block flood.
+        if (selMode == "WFM" && sel && sel->rds) {
+            RdsInfo rds = sel->rds->info();
+            const bool locked = rds.haveAny;
+            const bool changed =
+                locked != lastRdsLocked_ ||
+                (locked && (rds.programService != lastRdsPs_ ||
+                            rds.pty != lastRdsPty_ ||
+                            rds.radioText != lastRdsRt_));
+            if (changed) {
+                lastRdsPs_    = rds.programService;
+                lastRdsPty_   = rds.pty;
+                lastRdsRt_    = rds.radioText;
+                lastRdsLocked_ = locked;
+                emit rdsUpdated(rds.programService, rds.pty, rds.radioText, locked);
+            }
+        }
+
         lk.unlock();
         // Synthetic sources have no hardware clock; pace them manually. Real
         // blocking reads already run at wall-clock speed and must not sleep.

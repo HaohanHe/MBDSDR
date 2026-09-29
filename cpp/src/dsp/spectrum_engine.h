@@ -161,6 +161,12 @@ signals:
     void recordingProgress(const QString& path, int seconds, qint64 bytes);
     void cwDecoded(const QString& text, double wpm);
     void adsbAircraft(const AircraftInfo& info);
+    // RDS station data from the SELECTED WFM channel's RdsDecoder, emitted only
+    // when the decoded PS/PTY/RadioText actually changed. locked=false means the
+    // decoder has no CRC-verified group yet (or the channel was rebuilt); the UI
+    // then clears its status-bar text and never shows a fabricated station.
+    void rdsUpdated(const QString& programService, int pty,
+                    const QString& radioText, bool locked);
     // VFO set / selection / parameters changed: the UI should re-pull
     // vfoMarkers() and refresh the list + band boxes.
     void vfoListChanged();
@@ -200,6 +206,14 @@ private:
     QString demodMode_ = "NFM";
     double bandwidth_ = 12500.0;
     bool wasDigital_ = false;   // last loop's selected-VFO digital-ness (edge trigger)
+
+    // Last RDS snapshot pushed to the UI. Used to emit rdsUpdated only on real
+    // changes. A rebuilt WFM channel comes back with haveAny=false; that honest
+    // "no data" edge is pushed too, but repeated identical states are not.
+    QString lastRdsPs_;
+    int     lastRdsPty_ = -999;
+    QString lastRdsRt_;
+    bool    lastRdsLocked_ = false;
 
     // Recording options (see setRec* above).
     RecTarget recTarget_ = RecTarget::BasebandIQ;

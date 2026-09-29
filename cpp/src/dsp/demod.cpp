@@ -90,10 +90,13 @@ DemodWFM::DemodWFM(double sr, double bw) : ifSr_(sr), bw_(bw) {
     deAlpha_ = static_cast<float>(dt / (tau + dt));
 }
 
-void DemodWFM::reset() { deState_ = 0; audioLpState_ = 0; prev_ = {1,0}; }
+void DemodWFM::reset() {
+    deState_ = 0; audioLpState_ = 0; prev_ = {1,0}; mpxBuf_.clear();
+}
 
 std::vector<float> DemodWFM::process(const std::vector<std::complex<float>>& iq) {
     std::vector<float> out(iq.size());
+    mpxBuf_.resize(iq.size());
     // 15 kHz audio LPF one-pole: alpha = dt/(RC+dt), RC = 1/(2*pi*15k)
     const float lpAlpha = static_cast<float>(
         (1.0/ifSr_) / (1.0/(2*M_PI*15000.0) + 1.0/ifSr_));
@@ -102,6 +105,9 @@ std::vector<float> DemodWFM::process(const std::vector<std::complex<float>>& iq)
         float angle = std::atan2(y.imag(), y.real());
         float demod = gain_ * angle;
         deState_ = deAlpha_ * demod + (1 - deAlpha_) * deState_;
+        // MPX tap: de-emphasized baseband, pre-15 kHz LPF (57 kHz RDS lives
+        // here). Pure observation -- does not touch the audio math below.
+        mpxBuf_[i] = deState_;
         audioLpState_ = lpAlpha * deState_ + (1 - lpAlpha) * audioLpState_;
         out[i] = audioLpState_;
         prev_ = iq[i];

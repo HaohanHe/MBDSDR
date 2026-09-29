@@ -31,6 +31,7 @@
 #include "dsp/audio_resampler.h"
 #include "dsp/demod.h"
 #include "dsp/digital_demod.h"
+#include "dsp/rds_decoder.h"
 
 namespace mbdsdr {
 namespace dsp {
@@ -90,6 +91,13 @@ struct VfoChannel {
     std::unique_ptr<DigitalDemod> digitalDemod;
     std::vector<std::complex<float>> recoveredSymbols;   // last block's post-Costas symbols
     DigitalLockStatus lockStatus{};
+
+    // RDS (EN 300 401) data-link decoder. Built ONLY for WFM channels, at the
+    // channel's IF rate (240 kHz); null on every other mode. Fed the de-
+    // emphasized MPX tap (DemodWFM::mpxOut()) after each block. Rebuilt together
+    // with the demod on rebuild(), so a mode/rate change naturally resets the
+    // decoder's block-sync and PS/PTY/RadioText state.
+    std::unique_ptr<RdsDecoder> rds;
 
     // True when this VFO runs a digital (rather than analog) demod.
     bool isDigital() const { return mode == "BPSK" || mode == "QPSK"; }

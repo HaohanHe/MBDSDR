@@ -47,6 +47,7 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
         cfg.timingBw = 0.005f;   // Gardner TED gain
         digitalDemod = std::make_unique<DigitalDemod>(cfg);
         demod.reset();          // no analog demod on digital channels
+        rds.reset();            // RDS rides the WFM analog path only
         resampler.configure(ifRate, 48000.0, 31);
         recoveredSymbols.clear();
         lastSr = sr;
@@ -54,6 +55,7 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
         return;
     }
     digitalDemod.reset();
+    rds.reset();   // re-created below only when this channel is WFM
 
     channelizer.configure(sr, ifTarget, chBw, 31);
     const double ifRate = channelizer.effectiveOutputRateHz();
@@ -62,7 +64,11 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
     channelizer.setVfoOffsetHz(freqHz - sourceCenterHz);
 
     if (mode == "AM")          demod = std::make_unique<DemodAM>(ifRate, bandwidthHz);
-    else if (mode == "WFM")    demod = std::make_unique<DemodWFM>(ifRate, chBw);
+    else if (mode == "WFM") {
+        demod = std::make_unique<DemodWFM>(ifRate, chBw);
+        // RDS subcarrier lives in the de-emphasized MPX; sample rate = IF rate.
+        rds = std::make_unique<RdsDecoder>(ifRate);
+    }
     else if (mode == "USB")     demod = std::make_unique<DemodSSB>(DemodSSB::Sideband::USB, ifRate, bandwidthHz);
     else if (mode == "LSB")     demod = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, ifRate, bandwidthHz);
     else if (mode == "CW")      demod = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, ifRate, bandwidthHz);
@@ -217,7 +223,16 @@ const std::vector<float>& VfoManager::process(
             continue;
         }
         std::vector<float> aif;
-        if (!baseband.empty() && ch.demod) aif = ch.demod->process(baseband);
+        if (!baseband.empty() && ch.demod) {
+            aif = ch.demod->process(baseband);
+            // WFM only: feed the de-emphasized MPX tap (57 kHz subcarrier still
+            // present) into the channel's RDS decoder. Scales with the block so
+            // block-sync converges exactly like a hardware receiver.
+            if (ch.rds) {
+                if (auto* wfm = dynamic_cast<DemodWFM*>(ch.demod.get()))
+                    ch.rds->feed(wfm->mpxOut());
+            }
+        }
         ch.audio48k = ch.resampler.process(aif);
     }
     static const std::vector<float> kEmpty;
