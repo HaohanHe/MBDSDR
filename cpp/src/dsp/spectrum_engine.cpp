@@ -45,6 +45,7 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
     audioSink_ = audioOut_;   // default: real device playback
     gatedRec_.setOutputDir("recordings");
     telemetryClock_.start();
+    aptEmitClock_.start();
     // Single default VFO at the source center, NFM 12.5 kHz -- identical to
     // the legacy single-channel receiver on first boot.
     vfoManager_.initDefault(source_->sampleRate(), source_->centerFreq(),
@@ -73,6 +74,8 @@ void SpectrumEngine::rebuildDemod() {
     agc_.reset();
     cwDecoder_.reset();
     adsbDecoder_.reset();
+    aptDecoder_.reset();
+    aptActive_ = false;
 
     // Keep the cached mode/bandwidth in lock-step with the selected VFO so the
     // legacy demodMode()/bandwidth() getters and expandRecTemplate() are correct.
@@ -418,6 +421,15 @@ void SpectrumEngine::setAnrStrength(float s) {
     anr_.setStrength(s);
 }
 
+void SpectrumEngine::resetAptDecoder() {
+    QMutexLocker lk(&sourceMutex_);
+    aptDecoder_.reset();
+    aptLastRows_ = 0;
+    aptLastLocked_ = false;
+    // Push a cleared frame so the panel drops the old image immediately.
+    emit aptImageReady(aptDecoder_.image(), false, 0, 0.0);
+}
+
 QVector<VfoMarker> SpectrumEngine::vfoMarkers() const {
     QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
     QVector<VfoMarker> out = vfoManager_.markers();
@@ -714,6 +726,56 @@ void SpectrumEngine::run() {
                 lastRdsRt_    = rds.radioText;
                 lastRdsLocked_ = locked;
                 emit rdsUpdated(rds.programService, rds.pty, rds.radioText, locked);
+            }
+        }
+
+        // NOAA APT (WFM only): feed the SELECTED VFO's demodulated 48 kHz audio
+        // into the streaming image decoder. We feed the pre-squelch `audio` (the
+        // APT sync loop wants a continuous stream; the speaker squelch is
+        // irrelevant to the decoder). When the user leaves WFM or retunes to a
+        // different satellite we reset the accumulator and push one cleared
+        // frame -- we never keep showing a stale cloud photo from another band.
+        {
+            const bool wfm = (selMode == "WFM");
+            const double aptFreq = sel ? sel->freqHz : centerNow;
+            if (wfm) {
+                const bool retuned = std::abs(aptFreq - aptLastFreqHz_) > 1.0;
+                if (!aptActive_ || retuned) {
+                    aptDecoder_.reset();
+                    aptLastRows_ = 0;
+                    aptLastLocked_ = false;
+                }
+                aptActive_ = true;
+                aptLastFreqHz_ = aptFreq;
+
+                aptDecoder_.feed(audio);
+
+                const int rows = aptDecoder_.rowCount();
+                const bool locked = aptDecoder_.isLocked();
+                const bool rowsChanged = (rows != aptLastRows_);
+                const bool lockChanged  = (locked != aptLastLocked_);
+                const qint64 nowApt = aptEmitClock_.elapsed();
+                // Lock-state changes go out immediately; row growth is throttled
+                // (~300 ms; APT lines arrive at 2/s, so this is about every line)
+                // to avoid flooding the UI thread with QImage copies.
+                const bool throttled =
+                        aptLastEmitMs_ < 0 || nowApt - aptLastEmitMs_ >= 300;
+                if (lockChanged || (rowsChanged && rows > 0 && throttled)) {
+                    aptLastRows_ = rows;
+                    aptLastLocked_ = locked;
+                    aptLastEmitMs_ = nowApt;
+                    emit aptImageReady(aptDecoder_.image(), locked, rows,
+                                       aptDecoder_.lastSyncCorrelation());
+                }
+            } else if (aptActive_) {
+                // Left WFM: stop feeding, drop the image, tell the panel to
+                // return to its honest empty state.
+                aptDecoder_.reset();
+                aptActive_ = false;
+                aptLastRows_ = 0;
+                aptLastLocked_ = false;
+                aptLastFreqHz_ = 0.0;
+                emit aptImageReady(aptDecoder_.image(), false, 0, 0.0);
             }
         }
 

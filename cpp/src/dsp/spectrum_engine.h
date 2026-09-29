@@ -29,6 +29,7 @@
 #include "dsp/wav_writer.h"
 #include "dsp/cw_decoder.h"
 #include "dsp/adsb_decoder.h"
+#include "dsp/apt_decoder.h"
 
 namespace mbdsdr {
 namespace dsp {
@@ -111,6 +112,11 @@ public slots:
     void setAnrEnabled(bool on);
     void setAnrStrength(float s);
 
+    // ---- NOAA APT weather satellite ----
+    // Throw away the accumulated image + sync state (panel "清除图像" button).
+    // The panel emits clearRequested(); this resets the engine-side decoder.
+    void resetAptDecoder();
+
     // ---- Recording options (SDR++-aligned) ----
     void setRecTarget(RecTarget t) { recTarget_ = t; }
     RecTarget recTarget() const { return recTarget_; }
@@ -175,6 +181,13 @@ signals:
     void constellationSymbols(const std::vector<std::complex<float>>& symbols, bool isHardware);
     // Selected VFO left digital mode (or no lock): UI should clear the panel.
     void constellationCleared();
+    // NOAA APT weather-satellite image progress from the SELECTED WFM channel.
+    // Emitted only while the selected VFO is WFM and (a) a new row was assembled
+    // or (b) the lock state changed -- throttled to a few Hz, never per-sample.
+    // `image` grows one 1818-px row at a time (Format_Grayscale8); when rows==0
+    // the image is null and the panel shows its honest empty state (never a
+    // fabricated cloud photo). Passed by value across a queued connection.
+    void aptImageReady(const QImage& image, bool locked, int rows, double syncCorr);
 
 protected:
     void run() override;
@@ -199,6 +212,10 @@ private:
     AudioNoiseReduction anr_;
     CWDecoder cwDecoder_;
     ADSBDecoder adsbDecoder_;
+    // NOAA APT image decoder. Fed the SELECTED VFO's 48 kHz demodulated baseband
+    // audio ONLY while that VFO is WFM. Constructed at the fixed 48 kHz audio
+    // rate (every VFO resampler output is 48000 Hz; see vfo_manager.cpp).
+    AptDecoder aptDecoder_{48000.0};
 
     std::atomic<int> fftSize_{2048};
     std::atomic<bool> running_{true};
@@ -214,6 +231,18 @@ private:
     int     lastRdsPty_ = -999;
     QString lastRdsRt_;
     bool    lastRdsLocked_ = false;
+
+    // APT streaming state (engine thread only). aptActive_ tracks whether the
+    // previous loop iteration was feeding the decoder; a transition out of WFM
+    // resets it and pushes one cleared frame so the panel drops the stale image.
+    // aptLastFreqHz_ detects retunes (user moved to a different satellite) and
+    // resets the accumulator so two passes never stitch into one photo.
+    bool    aptActive_ = false;
+    double  aptLastFreqHz_ = 0.0;
+    int     aptLastRows_ = -1;
+    bool    aptLastLocked_ = false;
+    QElapsedTimer aptEmitClock_;
+    qint64  aptLastEmitMs_ = -1;
 
     // Recording options (see setRec* above).
     RecTarget recTarget_ = RecTarget::BasebandIQ;

@@ -105,4 +105,27 @@ GUI 上在瀑布/频谱为每个 VFO 绘制半透明带宽框。对应的 SDR++ 
   已知向量由 `tests/test_adsb_cpr.cpp`、`tests/test_adsb_decode.cpp`、
   `tests/test_aircraft_tracker.cpp` 钉死。
 
+## NOAA APT 气象卫星解码（本批新增模块）
+
+- 标准依据：NOAA APT（Automatic Picture Transmission）广播格式；2400 Hz AM 副载波，
+  每行 2080 像素 = A/B 两通道各 1040 像素（同步帧 39 + 间隔 47 + 视频 909 +
+  遥测楔 45），像素率 4160 Hz，2 行/秒。
+- 版权参考（仅行布局常量与同步算法思路参考，**未复制其源码**）：
+  - **noaa-apt**（GPL-3.0-or-later，作者 Simone Margaritelli / etc.）：
+    本地只读参考 `repos/noaa-apt/`（`src/decode.rs`）。对照其 APT 行布局常量、
+    2400 Hz 副载波 AM 包络检波思路与 7 脉冲同步字滑动互相关的算法流程。
+  - **SatDump**（GPL-3.0）：本地只读参考 `repos/SatDump/`。对照其 APT 图像
+    组帧（A/B 视频带拼接为 1818 宽灰度图）与同步恢复的数据流思路。
+- 实现文件 `src/dsp/apt_decoder.{h,cpp}`、`src/ui/weather_panel.{h,cpp}` 与引擎
+  集成 `src/dsp/spectrum_engine.{h,cpp}` 为 MBDSDR 原创实现（SPDX: MIT），
+  **clean-room 按 APT 标准与上述算法常量重写**：2400 Hz 数字混频 I/Q 双臂 +
+  低通恢复视频包络、7 脉冲同步字滑动归一化互相关行锁定、4160 px/s 分数累加器
+  无漂移像素选通、A/B 视频带逐行拼成逐行增长的 `Format_Grayscale8` QImage。
+  未逐行移植 noaa-apt 的 Rust 源码或 SatDump 的 C++ 源码，也未随产品分发其
+  源代码或二进制原件；行布局常量（39/47/909/45/1040/2080、4160 Hz、2400 Hz）
+  与同步互相关算法仅作公开标准对照，端到端已知向量（无噪 Pearson 0.987 /
+  有噪 0.876）由 `tests/test_apt.cpp` 钉死。UI 面板 `weather_panel` 只绘制引擎
+  真实喂入的图像，无信号时显示诚实空态，从不伪造云图。
+
+
 
