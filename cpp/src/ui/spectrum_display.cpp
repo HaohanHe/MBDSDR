@@ -434,21 +434,6 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
                    QString::number(static_cast<int>(db)));
     }
 
-    // --- real measured noise-floor baseline (dashed) -----------------------
-    if (std::isfinite(noiseFloorDb_)) {
-        const int yNf = dbToY(noiseFloorDb_);
-        QColor nf(tokens::kNoiseFloorColor);
-        QColor nfLine = nf; nfLine.setAlphaF(tokens::kNoiseFloorLineAlpha);
-        QPen nfPen(nfLine, 1, Qt::DashLine);
-        p.setPen(nfPen);
-        p.drawLine(trace.left(), yNf, trace.right(), yNf);
-        QColor nfLab = nf; nfLab.setAlphaF(tokens::kNoiseFloorLabelAlpha);
-        p.setPen(nfLab);
-        p.drawText(trace.left() + tokens::scaled(tokens::kDbLabelPadR),
-                   yNf - tokens::scaled(2),
-                   QStringLiteral("NF"));
-    }
-
     // --- spectrum polyline -------------------------------------------------
     const int bins = bins_;
     if (haveFrame_ && bins > 0 && !frame_.dbfs.empty()) {
@@ -470,38 +455,6 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
             p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary2), 1.0));
             p.drawPolyline(holdLine);
         }
-    }
-
-    // --- matured peak markers: triangle on the trace + thin drop line ------
-    for (int i = 0; i < peaks_.size(); ++i) {
-        const mbdsdr::dsp::PeakInfo& pk = peaks_[i];
-        const int px = xForFreq(pk.freqHz, fLo, span);
-        if (px < trace.left() || px > trace.right()) continue;
-        const int apexY = dbToY(pk.dbfs);
-        const bool hi = (i == highlightedPeak_);
-        const int halfW = tokens::scaled(hi ? tokens::kPeakMarkerHiHalfW
-                                            : tokens::kPeakMarkerHalfW);
-        const int triH = tokens::scaled(hi ? tokens::kPeakMarkerHiH
-                                           : tokens::kPeakMarkerH);
-        // Thin drop line from the summit down to the trace baseline.
-        QColor drop = tokens::rgbaA(tokens::kPeakMarkerLineAlpha);
-        p.setPen(QPen(drop, 1));
-        p.drawLine(px, apexY, px, trace.bottom());
-        // Downward-pointing triangle: apex (point) rests on the trace summit.
-        QPolygon tri;
-        tri << QPoint(px, apexY)
-            << QPoint(px - halfW, apexY - triH)
-            << QPoint(px + halfW, apexY - triH);
-        if (hi) {
-            QColor hiFill(QString::fromUtf8(tokens::kAccent));
-            hiFill.setAlphaF(tokens::kPeakMarkerHiAlpha);
-            p.setPen(Qt::NoPen);
-            p.setBrush(hiFill);
-        } else {
-            p.setPen(Qt::NoPen);
-            p.setBrush(tokens::rgbaA(tokens::kPeakMarkerFillAlpha));
-        }
-        p.drawPolygon(tri);
     }
 
     // --- waterfall (crop the history snapshot to the visible window) --------
@@ -540,6 +493,54 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         p.setPen(QPen(ctr, tokens::kVfoBoxLineWidth));
         p.drawLine(vx, trace.top(), vx, trace.bottom());
         p.drawLine(vx, falls.top(), vx, falls.bottom());
+    }
+
+    // --- real measured noise-floor baseline (dashed) -----------------------
+    // Drawn above the translucent VFO band boxes so the annotation stays crisp.
+    if (std::isfinite(noiseFloorDb_)) {
+        const int yNf = dbToY(noiseFloorDb_);
+        QColor nf(tokens::kNoiseFloorColor);
+        QColor nfLine = nf; nfLine.setAlphaF(tokens::kNoiseFloorLineAlpha);
+        QPen nfPen(nfLine, 1, Qt::DashLine);
+        p.setPen(nfPen);
+        p.drawLine(trace.left(), yNf, trace.right(), yNf);
+        QColor nfLab = nf; nfLab.setAlphaF(tokens::kNoiseFloorLabelAlpha);
+        p.setPen(nfLab);
+        p.drawText(trace.left() + tokens::scaled(tokens::kDbLabelPadR),
+                   yNf - tokens::scaled(2),
+                   QStringLiteral("NF"));
+    }
+
+    // --- matured peak markers: triangle on the trace + thin drop line ------
+    for (int i = 0; i < peaks_.size(); ++i) {
+        const mbdsdr::dsp::PeakInfo& pk = peaks_[i];
+        const int px = xForFreq(pk.freqHz, fLo, span);
+        if (px < trace.left() || px > trace.right()) continue;
+        const int apexY = dbToY(pk.dbfs);
+        const bool hi = (i == highlightedPeak_);
+        const int halfW = tokens::scaled(hi ? tokens::kPeakMarkerHiHalfW
+                                            : tokens::kPeakMarkerHalfW);
+        const int triH = tokens::scaled(hi ? tokens::kPeakMarkerHiH
+                                           : tokens::kPeakMarkerH);
+        // Thin drop line from the summit down to the trace baseline.
+        QColor drop = tokens::rgbaA(tokens::kPeakMarkerLineAlpha);
+        p.setPen(QPen(drop, 1));
+        p.drawLine(px, apexY, px, trace.bottom());
+        // Downward-pointing triangle: apex (point) rests on the trace summit.
+        QPolygon tri;
+        tri << QPoint(px, apexY)
+            << QPoint(px - halfW, apexY - triH)
+            << QPoint(px + halfW, apexY - triH);
+        if (hi) {
+            QColor hiFill(QString::fromUtf8(tokens::kAccent));
+            hiFill.setAlphaF(tokens::kPeakMarkerHiAlpha);
+            p.setPen(Qt::NoPen);
+            p.setBrush(hiFill);
+        } else {
+            p.setPen(Qt::NoPen);
+            p.setBrush(tokens::rgbaA(tokens::kPeakMarkerFillAlpha));
+        }
+        p.drawPolygon(tri);
     }
 
     // --- frequency strip ----------------------------------------------------

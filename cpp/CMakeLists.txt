@@ -188,6 +188,17 @@ add_executable(ui_shot_cst tests/ui_screenshot_constellation.cpp ${SHOT_SRCS} ${
 target_include_directories(ui_shot_cst PRIVATE src build/ui_shot_cst_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_cst PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
+# Focus-mode / restrained-badge screenshot (offscreen; not in ctest).
+add_executable(ui_shot_focus tests/ui_screenshot_focus.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_focus PRIVATE src build/ui_shot_focus_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_focus PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# Measurement-features canvas screenshot: peak marker + noise floor + cursor
+# readout, driven by deterministic harness frames (offscreen; not in ctest).
+add_executable(ui_shot_measure tests/ui_screenshot_measure.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_measure PRIVATE src build/ui_shot_measure_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_measure PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
 target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent ${CMAKE_DL_LIBS})
 
 if(RTLSDR_FOUND)
