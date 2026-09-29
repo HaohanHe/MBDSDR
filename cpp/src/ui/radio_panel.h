@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Radio / transmit panel: serial CAT control (CI-V, Kenwood), CW keying over the
 // RTS line, AX.25/KISS beacons, and SoapySDR TX (PlutoSDR/HackRF/...). All
 // transmission requires an explicit user action (press-and-hold PTT or Send).

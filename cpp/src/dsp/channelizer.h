@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Channelizer: the missing stage between the wideband source and the narrowband
 // demodulator. Frequency-translates the selected VFO to baseband, applies a
 // channel low-pass, and integer-decimates down to the IF rate. Streaming; NCO

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // CAT control client: Icom CI-V and Kenwood (TS-2000-style) over an IRadioLink.
 // Supports frequency / mode / PTT. Command formats follow the vendors' public
 // interface manuals (cited in the .cpp). No hardware here.

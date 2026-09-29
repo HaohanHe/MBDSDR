@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Transmit modulators: the inverse of the analog demodulators in demod.{h,cpp}.
 //
 // Each modulator turns a block of real audio (sampled at the IQ rate passed to

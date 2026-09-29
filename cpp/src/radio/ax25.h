@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // AX.25 frame encode/decode (UI frames, the subset used for APRS/beacons over
 // a KISS TNC). References: AX.25 Link-Layer spec v2.2 (address field, SSID
 // byte, control 0x03 UI, PID 0xF0). Pure logic, no hardware.

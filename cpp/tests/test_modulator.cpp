@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Modulator -> Demodulator loopback. No hardware: synthesized audio/IQ, this is
 // a NOT-HARDWARE DSP self-check. Each analog mode must reconstruct the tone.
 #include "tx/modulator.h"

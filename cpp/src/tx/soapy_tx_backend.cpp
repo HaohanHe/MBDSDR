@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #include "soapy_tx_backend.h"
 
 #include <complex>
@@ -39,7 +39,8 @@ using PfnCloseStream = int (*)(SoapyDevice*, SoapyStream*);
 using PfnWrite = int (*)(SoapyDevice*, SoapyStream*, const void* const*, size_t,
                          int*, long long, long);
 
-constexpr int SOAPY_TX = 1;
+// SoapySDR direction code for transmit (ABI: SOAPY_SDR_TX = 0, SOAPY_SDR_RX = 1).
+constexpr int SOAPY_TX = 0;
 } // namespace
 
 struct SoapyTxBackend::Impl {

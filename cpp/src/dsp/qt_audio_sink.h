@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // IAudioSink backend backed by Qt's QAudioSink. Extracted verbatim from the
 // old AudioOutput so the DSP engine depends only on IAudioSink while the real

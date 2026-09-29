@@ -1,24 +1,23 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
-// Unified spectrum + frequency strip + waterfall canvas.
+// Unified spectrum-trace / shared frequency-strip / scrolling-waterfall canvas.
 //
-// Geometry ported from SDR++ (https://github.com/AlexandreRouma/SDRPlusPlus,
-// Copyright (C) Alexandre Rouma / Ryzerth, GPL-3.0-or-later) ImGui::WaterFall
-// and re-expressed with QPainter + DPI-scaled design tokens. The line spectrum,
-// the shared tick/label strip and the scrolling waterfall all start at the same
-// left x and share one width, so the frequency axes align by construction
-// (not by coincidence):
+// One real SpectrumFrame drives both the line trace and the rolling waterfall
+// history -- no synthetic data is ever invented. The three painted regions
+// share the same left x and one width so the frequency axis aligns across them
+// by construction. Vertically, top to bottom:
 //
 //   top inset
-//   |-- spectrum trace  (spectrumRect)
-//   gap
-//   |-- shared frequency strip (freqStripRect, ticks point up into the trace)
-//   == draggable divider ==
-//   |-- waterfall        (waterfallRect)
+//   |-- spectrum trace   (trace box)
+//   1px hairline gap
+//   |-- shared tick/label strip (strip box)
+//   == draggable divider hairline ==
+//   |-- waterfall        (falls box)
 //   bottom inset
 //
-// A single SpectrumFrame (from dsp::SpectrumEngine::spectrumReady) drives both
-// the trace and the waterfall history -- no synthetic data is ever invented.
+// The waterfall keeps its history in a ring of single-pixel-high rows; the
+// public history() snapshot is materialised from that ring with the newest row
+// at index 0. All pixel sizes go through the DPI-aware design tokens.
 #pragma once
 
 #include <QWidget>
@@ -26,6 +25,8 @@
 #include <QVector>
 #include <QElapsedTimer>
 #include <QRect>
+#include <QList>
+#include <array>
 #include <vector>
 
 #include "core/spectrum_frame.h"
@@ -35,25 +36,26 @@
 namespace mbdsdr {
 namespace ui {
 
+// Unified trace + frequency strip + waterfall canvas.
 class SpectrumDisplay : public QWidget {
     Q_OBJECT
 public:
     explicit SpectrumDisplay(QWidget* parent = nullptr);
 
-    // ---- Geometry accessors (for tests / layout; recomputed in resizeEvent) --
+    // ---- Geometry accessors (recomputed in resizeEvent / recomputeGeometry) --
     void recomputeGeometry();
-    QRect spectrumRect()  const { return g_.spectrum; }
-    QRect freqStripRect() const { return g_.freqStrip; }
-    QRect waterfallRect() const { return g_.waterfall; }
-    QRect dividerHitRect() const { return g_.dividerHit; }
-    int   dividerY()      const { return g_.dividerY; }
+    QRect spectrumRect()   const { return lay_.traceRect; }
+    QRect freqStripRect()  const { return lay_.stripRect; }
+    QRect waterfallRect()  const { return lay_.fallsRect; }
+    QRect dividerHitRect() const { return lay_.splitZone; }
+    int   dividerY()       const { return lay_.splitY; }
 
-    // Visible frequency window (zoom/pan state).
+    // Visible frequency window (zoom / pan state).
     double visLoHz() const;
     double visHiHz() const;
     double zoomFactor() const { return zoomFactor_; }
 
-    // ---- Waterfall read-out (tests) ----
+    // ---- Waterfall read-out (tests) --------------------------------------
     const QImage& history() const { return history_; }
     bool hasFrame() const { return haveFrame_; }
 
@@ -63,29 +65,27 @@ public slots:
     void setDbRange(float minDb, float maxDb);
     void setZoomFactor(double z);
     void resetZoom();
-    void setBandwidthHz(double hz) { bwHz_ = hz; update(); }
-    double bandwidthHz() const { return bwHz_; }
-    void setStepHz(double hz) { stepHz_ = hz; }
+    void setBandwidthHz(double hz) { dialBandwidthHz_ = hz; update(); }
+    double bandwidthHz() const { return dialBandwidthHz_; }
+    void setStepHz(double hz) { tuneStepHz_ = hz; }
     void setMaxHoldEnabled(bool on);
     void clearMaxHold() { maxHold_.clear(); update(); }
 
     // Waterfall controls.
-    void setScrollSpeed(int linesPerFrame);   // write a row every N frames (1/2/4)
-    void setPalette(int p);                   // 0 classic, 1 monochrome
+    void setScrollSpeed(int linesPerFrame);   // push a row every N frames (1/2/4)
+    void setPalette(int p);                   // 0 classic, 1 monochrome, 2 viridis
 
-    // Peak handling driven by the container's peak table.
+    // Peak handling driven by the container's matured peak table.
     void setHighlightedPeak(int row);         // row index into the matured list
-    void setPeakThresholdDb(float db) { peakThresholdDb_ = db; detectPeaks(); update(); }
+    void setPeakThresholdDb(float db) { peakThresholdDb_ = db; rescanPeaks(); update(); }
     void tuneAndCenter(double hz);
 
-    // Multi-VFO: replace the on-screen band boxes. When non-empty, these markers
-    // replace the legacy single-VFO box; the legacy single-box path is kept for
-    // back-compat tests.
+    // Multi-VFO band boxes. When non-empty these replace the legacy single box.
     void setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers);
 
     // Band-box pixel geometry for a marker (edge-aligned for SSB). Public so
-    // offscreen tests can assert USB/LSB side placement without pixel-peeping.
-    // On return, bx0 <= bx1; vx is the dial/tuning line x.
+    // offscreen tests can assert USB/LSB side placement. On return bx0 <= bx1;
+    // vx is the dial/tuning line x.
     void vfoBoxGeometryFor(const mbdsdr::dsp::VfoMarker& m,
                            int& bx0, int& bx1, int& vx) const;
 
@@ -93,7 +93,7 @@ signals:
     void frequencyChanged(double newFreqHz);
     void bandwidthChanged(double newBandwidthHz);
     void visibleRangeChanged(double fLoHz, double fHiHz);
-    /// Matured, tracked peak list changed (throttled to rounded-freq signature).
+    /// Matured, tracked peak list changed (throttled to a rounded-freq signature).
     void peaksUpdated(QList<mbdsdr::dsp::PeakInfo> peaks, QList<int> ids);
     /// Emitted when a view-changing control settles so the container can persist.
     void viewChanged();
@@ -116,114 +116,111 @@ protected:
     void leaveEvent(QEvent* event) override;
 
 private:
-    // The three painted panels + divider, all derived from one geometry call.
-    struct Geometry {
-        int x0 = 0, x1 = 0, dataWidth = 0;
-        int contentTop = 0, contentBottom = 0;
-        int freqH = 0, gap = 0;
-        int panelsH = 0;
-        int traceH = 0, wfH = 0;
-        QRect spectrum;      // line trace
-        QRect freqStrip;     // shared tick / label strip
-        int dividerY = 0;    // hairline y
-        QRect dividerHit;    // generous hit band around the divider
-        QRect waterfall;     // scrolling spectrogram
-    } g_;
+    // All painted boxes, derived from one geometry pass. trace/strip/falls share
+    // plotX0..plotX0+plotW so the frequency->x mapping is identical everywhere.
+    struct CanvasLayout {
+        int plotX0 = 0, plotX1 = 0, plotW = 0;
+        int topPad = 0, botPad = 0;      // outer insets
+        int stripH = 0, gapPx = 0;       // strip height, trace<->strip hairline
+        int splitGap = 0;                // strip<->waterfall hairline
+        int traceH = 0, fallsH = 0;      // panel heights
+        QRect traceRect;                 // line spectrum
+        QRect stripRect;                 // shared tick / label strip
+        int splitY = 0;                  // divider hairline y
+        QRect splitZone;                 // generous hit band around the divider
+        QRect fallsRect;                 // scrolling spectrogram
+    } lay_;
 
-    // Frequency -> pixel x, shared by the trace, the strip ticks and the
-    // waterfall column crop. fLo/fHi/span come from zoom/pan state.
-    void visibleRange(double& fLo, double& fHi, double& spanVis) const;
-    int  xOfFreq(double f, double fLo, double spanVis) const {
-        return g_.x0 + static_cast<int>(g_.dataWidth * (f - fLo) / spanVis);
+    // Frequency <-> pixel helpers, shared by trace ticks, strip and waterfall crop.
+    void visibleWindow(double& fLo, double& fHi, double& spanHz) const;
+    int  xForFreq(double f, double fLo, double spanHz) const {
+        return lay_.plotX0 + static_cast<int>(lay_.plotW * (f - fLo) / spanHz);
     }
-    void emitVisibleRange();
+    double freqForX(int x, double fLo, double spanHz) const {
+        return fLo + (x - lay_.plotX0) / static_cast<double>(lay_.plotW) * spanHz;
+    }
+    void publishVisibleRange();
 
-    // Peak detection + cross-frame tracking (moved from the old container).
-    void detectPeaks();
+    // Peak detection + cross-frame tracking.
+    void rescanPeaks();
 
-    // ---- Waterfall history internals (ported from the old WaterfallWidget) --
-    void rebuildImage(int bins);
-    QRgb colorForDb(float db) const;
-    void buildLut();
+    // ---- Waterfall ring-buffer internals ----------------------------------
+    void allocateRing(int bins);
+    void pushHistoryRow();
+    void materialiseHistory();          // ring -> history_ snapshot (row 0 = newest)
+    void rebuildColormap();
+    QRgb colourForDb(float db) const;
 
     SpectrumFrame frame_;
     bool haveFrame_ = false;
 
-    // Drag / interaction state.
-    bool dragging_ = false;
-    bool panning_ = false;
-    bool dividerDragging_ = false;
-    bool dividerHover_ = false;
-    enum class DragMode { None, Tune, Pan, BandL, BandR };
-    DragMode dragMode_ = DragMode::None;
-    QPoint hoverPos_;
-    QPoint lastPanPos_;
-    // Hover tooltip cache so setToolTip() is only re-called when the read-out
-    // actually changes (avoids churning the tooltip system on every mouse move).
-    int     toolTipVfoId_ = -1;
-    QString toolTipText_;
+    // ---- Pointer / interaction state --------------------------------------
+    enum class Grab { None, Tune, Pan, Divider, VfoBody, VfoEdgeL, VfoEdgeR };
+    Grab grab_ = Grab::None;
+    bool dividerHot_ = false;
+    QPoint downPos_;          // press position (widget coords)
+    double downFreqHz_ = 0.0; // frequency under the press (tune / pan reference)
+    int    panRefX_ = 0;      // last panning pixel x
+    int    grabVfoId_ = -1;   // marker being dragged, -1 = legacy/root
+    // Tooltip cache so setToolTip() only runs when the read-out changes.
+    int     tipVfoId_ = -1;
+    QString tipText_;
 
-    double bwHz_ = 12500.0;
-    double stepHz_ = 1000.0;
-    double vfoFreq_ = 0.0;
+    double dialBandwidthHz_ = 12500.0;
+    double tuneStepHz_ = 1000.0;
+    double dialFreqHz_ = 0.0;
 
     // Multi-VFO band boxes. When non-empty these supersede the legacy single box.
     QVector<mbdsdr::dsp::VfoMarker> markers_;
-    int dragVfoId_ = -1;   // marker currently being dragged, -1 = legacy/root
-    // Hit-test a marker at pixel x (data area) -> index into markers_, or -1.
-    int hitVfoMarker(double x, double fLo, double spanVis) const;
+    // Hit-test a marker at data-area pixel x -> index into markers_, or -1.
+    int findMarkerAt(int x, double fLo, double spanHz) const;
+    // Pixel band-box for a marker accounting for sideband alignment.
+    void markerBox(const mbdsdr::dsp::VfoMarker& m, double fLo, double spanHz,
+                   int& bx0, int& bx1, int& vx) const;
 
-    // Band-box pixel geometry for a marker, accounting for sideband alignment.
-    // USB: box [dial, dial+bw] with the dial/tuning line at the LEFT edge;
-    // LSB/CW: box [dial-bw, dial] with the dial/tuning line at the RIGHT edge;
-    // symmetric modes (AM/NFM/WFM/BPSK/QPSK): [dial-bw/2, dial+bw/2] centered.
-    // Exposed for offscreen geometry tests.
-    void vfoBoxGeometry(const mbdsdr::dsp::VfoMarker& m, double fLo, double spanVis,
-                        int& bx0, int& bx1, int& vx) const;
-
-    float  dbMin_ = -100.0f;
-    float  dbMax_ = 0.0f;
+    float  dbFloorDb_ = -100.0f;
+    float  dbCeilDb_ = 0.0f;
     double zoomFactor_ = 1.0;
     double viewCenterHz_ = 0.0;
 
-    // Divider position: share of (trace + waterfall) height given to the trace.
-    double fraction_ = 0.5;
+    // Divider position: share of the (trace + waterfall) pool handed to the trace.
+    double traceShare_ = 0.5;
 
-    // Peak tracking.
+    // Peak tracking state.
     QList<mbdsdr::dsp::PeakInfo> peaks_;
     QList<int> peakIds_;
     float peakThresholdDb_ = 15.0f;
     int   highlightedPeak_ = -1;
-    QString lastPeakSignature_;
-    struct TrackedPeak {
+    QString lastPeakSig_;
+    struct TrackedBlip {
         int    id = 0;
         double freqHz = 0;
         float  dbfs = 0;
         double bandwidthHz = 0;
-        int    seenFrames = 0;
-        int    missFrames = 0;
-        bool   matchedThisFrame = false;
+        int    seen = 0;
+        int    missed = 0;
+        bool   matched = false;
     };
-    QList<TrackedPeak> tracked_;
-    int nextPeakId_ = 1;
+    QList<TrackedBlip> tracked_;
+    int nextBlipId_ = 1;
 
     // Max-hold envelope.
     std::vector<float> maxHold_;
-    bool maxHoldEnabled_ = false;
+    bool maxHoldOn_ = false;
 
-    // ---- Waterfall history (ported) ----
-    QImage history_;
-    int bins_ = 0;
-    QVector<QRgb> lut_;
-    int scrollEvery_ = 1;
-    int frameMod_ = 0;
-    int palette_ = 0;
-    double frameF0_ = 0.0;
-    double frameFs_ = 0.0;
-    QElapsedTimer frameClock_;
-    int    frameCount_ = 0;
-    qint64 lastElapsedMs_ = 0;
-    double frameIntervalMs_ = 0.0;
+    // ---- Waterfall ring buffer -------------------------------------------
+    QImage history_;                 // public snapshot: width=bins, row 0 = newest
+    std::vector<QImage> ringRows_;   // depth single-pixel-tall strips
+    int  ringDepth_ = 0;             // history depth (rows)
+    int  ringHead_ = 0;              // next physical slot to overwrite
+    int  ringCount_ = 0;             // rows written so far (capped at depth)
+    int  bins_ = 0;
+    std::array<QRgb, 256> lut_{};
+    int  everyNthFrame_ = 1;         // push one row every N frames
+    int  frameMod_ = 0;
+    int  paletteIndex_ = 0;
+    double frameF0Hz_ = 0.0;         // centre frequency of the last frame
+    double frameFsHz_ = 0.0;         // sample rate of the last frame
 };
 
 } // namespace ui

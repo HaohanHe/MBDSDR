@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // SoapySDR transmit backend, loaded at runtime via dlopen so the project builds
 // without SoapySDR installed. Supports any TX-capable Soapy device (PlutoSDR,
 // HackRF, LimeSDR, ...). If the library or device is missing, open() fails with

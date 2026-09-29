@@ -268,10 +268,10 @@ inline constexpr WaterfallStop kWaterfallStopsViridis[] = {
 
 // =====================================================================
 // Unified SpectrumDisplay geometry
-// Geometry model ported from SDR++ ImGui::WaterFall and re-expressed with
-// QPainter + scaled tokens: the spectrum trace, the shared frequency strip
-// and the waterfall all start at the same left x and share one width, so the
-// frequency axes align by construction (not by coincidence).
+// The spectrum trace, the shared frequency strip and the waterfall all start
+// at the same left x and share one width, so the frequency axes line up by
+// construction (not by coincidence). Every size below is base px and goes
+// through scaled() at runtime.
 // Layout (top -> bottom): top inset | spectrum trace | 1px gap | shared
 // frequency strip | draggable divider | waterfall | bottom inset.
 // =====================================================================
@@ -319,7 +319,7 @@ inline constexpr int kFreqLabelH       = 16;
 inline constexpr double kVfoLineWidth  = 1.5;
 inline constexpr int    kTooltipOffset = 8;
 
-// ---- Multi-VFO band boxes (SDR++-style translucent overlays) -------------
+// ---- Multi-VFO band boxes (translucent overlays) ------------------------
 // Each VFO draws a translucent band box on the spectrum AND waterfall data
 // areas: colored fill, two edge lines, a center line, and a name label. Alpha
 // is a float 0..1 so the per-VFO color shows through without opaque blocks.

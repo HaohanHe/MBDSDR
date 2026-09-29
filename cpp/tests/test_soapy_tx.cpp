@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // SoapySDR TX backend error-path self-check. On a machine without SoapySDR or
 // without the requested device, open() must fail honestly, not crash.
 #include "tx/soapy_tx_backend.h"

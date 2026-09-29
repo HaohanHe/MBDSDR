@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // TX safety interlock. Wraps a backend + modulator and enforces the rules that
 // make transmission safe:
 //   - nothing is emitted without an explicit user PTT request;

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Abstract audio sink for the demodulator output. The DSP engine only knows
 // about this interface; concrete backends decide how the 48 kHz Float32

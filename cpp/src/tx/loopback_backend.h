@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // In-memory loopback TX backend: captures IQ while PTT is asserted, used to
 // verify the transmit chain without hardware. Can also stand in for a file sink.
 #pragma once

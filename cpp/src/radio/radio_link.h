@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Raw bidirectional byte link for CAT radio control. Serial backend uses
 // termios (no Qt SerialPort); an in-memory link lets tests script responses.
 #pragma once

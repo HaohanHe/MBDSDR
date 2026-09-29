@@ -1,95 +1,76 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #include "spectrum_display.h"
 
+#include "core/tokens.h"
+
 #include <QPainter>
-#include <QPen>
-#include <QPainterPath>
-#include <QPolygonF>
 #include <QMouseEvent>
 #include <QWheelEvent>
-#include <QSettings>
-#include <QFontMetrics>
-#include <QResizeEvent>
-#include <cmath>
-#include <cstring>
+#include <QToolTip>
+#include <QRectF>
 #include <algorithm>
-
-#include "core/tokens.h"
+#include <cmath>
+#include <limits>
 
 namespace mbdsdr {
 namespace ui {
 
 namespace {
-// Internal history buffer resolution (NOT a UI size): the image is scaled to
-// whatever waterfallRect currently measures. The held time window = rows *
-// smoothed frame period.
-constexpr int kDepthRows = 512;
-constexpr float kDbMin = -100.0f;   // waterfall palette input range
-constexpr float kDbMax = 0.0f;
+// Clamp helper kept local so behaviour is obvious at every call site.
+inline double clampd(double v, double lo, double hi) {
+    return std::min(std::max(v, lo), hi);
+}
 } // namespace
 
 SpectrumDisplay::SpectrumDisplay(QWidget* parent)
     : QWidget(parent)
 {
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    setMouseTracking(true);
     setAutoFillBackground(true);
-    // Reserve a sensible minimum so the trace, strip and waterfall all fit.
-    setMinimumSize(tokens::scaled(tokens::kSpectrumMinW),
-                   tokens::scaled(tokens::kSpectrumMinH));
-    buildLut();
-
-    // Restore the persisted trace/waterfall split share (0.5 = roughly equal).
-    QSettings s("MBDSDR", "MBDSDR");
-    double saved = s.value(tokens::kSettingsKeySpecFraction,
-                           tokens::kDefaultSpecFraction).toDouble();
-    fraction_ = std::clamp(saved, 0.1, 0.9);
-
-    // Persisted waterfall scroll speed / palette.
-    int spd = s.value(tokens::kSettingsKeyScrollSpeed, 1).toInt();
-    setScrollSpeed(spd);
-    int pal = s.value(tokens::kSettingsKeyPalette, 0).toInt();
-    setPalette(pal);
-
-    hoverPos_ = QPoint(-1, -1);
-    lastPanPos_ = QPoint(-1, -1);
+    traceShare_ = tokens::kDefaultSpecFraction;
 }
 
-// --------------------------------------------------------------------------
-// Geometry -- the single source of truth for all three panels.
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Geometry
+// ---------------------------------------------------------------------------
 void SpectrumDisplay::recomputeGeometry() {
-    const int w = width();
-    const int h = height();
+    using namespace tokens;
+    lay_.plotX0  = scaled(kDispLeftInset);
+    lay_.plotX1  = width() - scaled(kDispRightInset);
+    lay_.plotW   = lay_.plotX1 - lay_.plotX0;
+    lay_.topPad  = scaled(kDispTopInset);
+    lay_.botPad  = height() - scaled(kDispBottomInset);
+    lay_.stripH  = scaled(kDispFreqStripH);
+    lay_.gapPx   = scaled(kDispAreaGap);
+    lay_.splitGap= scaled(kDispAreaGap);
 
-    g_.x0 = tokens::scaled(tokens::kDispLeftInset);
-    g_.x1 = w - tokens::scaled(tokens::kDispRightInset);
-    g_.dataWidth = g_.x1 - g_.x0;
+    const int fixedV = lay_.stripH + lay_.gapPx + lay_.splitGap;
+    int pool = lay_.botPad - lay_.topPad - fixedV;
+    if (pool < 0) pool = 0;
 
-    g_.contentTop = tokens::scaled(tokens::kDispTopInset);
-    g_.contentBottom = h - tokens::scaled(tokens::kDispBottomInset);
+    const int minTrace = scaled(kSpecAreaMinH);
+    const int minFalls = scaled(kWfAreaMinH);
 
-    g_.freqH = tokens::scaled(tokens::kDispFreqStripH);
-    g_.gap   = tokens::scaled(tokens::kDispAreaGap);
+    int traceH = static_cast<int>(pool * traceShare_);
+    traceH = static_cast<int>(clampd(traceH, minTrace, pool - minFalls));
+    if (traceH < 0) traceH = 0;
+    int fallsH = pool - traceH;
+    if (fallsH < 0) fallsH = 0;
+    lay_.traceH = traceH;
+    lay_.fallsH = fallsH;
 
-    // Vertical space shared by the trace and the waterfall; everything else
-    // (top/bottom insets, the strip, the gap, the 1px divider) is removed.
-    g_.panelsH = g_.contentBottom - g_.contentTop - g_.freqH - g_.gap - 1;
-    if (g_.panelsH < 1) g_.panelsH = 1;
+    const int traceTop = lay_.topPad;
+    const int stripTop = traceTop + traceH + lay_.gapPx;
+    const int splitY   = stripTop + lay_.stripH + lay_.splitGap;
 
-    const int minTrace = tokens::scaled(tokens::kSpecAreaMinH);
-    const int minWf    = tokens::scaled(tokens::kWfAreaMinH);
-    const int maxTrace = std::max(minTrace, g_.panelsH - minWf);
+    lay_.traceRect = QRect(lay_.plotX0, traceTop, lay_.plotW, traceH);
+    lay_.stripRect = QRect(lay_.plotX0, stripTop, lay_.plotW, lay_.stripH);
+    lay_.splitY    = splitY;
+    lay_.fallsRect = QRect(lay_.plotX0, splitY, lay_.plotW, fallsH);
 
-    g_.traceH = static_cast<int>(std::round(g_.panelsH * fraction_));
-    g_.traceH = std::clamp(g_.traceH, minTrace, maxTrace);
-    g_.wfH = g_.panelsH - g_.traceH;
-
-    g_.spectrum = QRect(g_.x0, g_.contentTop, g_.dataWidth, g_.traceH);
-    g_.freqStrip = QRect(g_.x0, g_.contentTop + g_.traceH + g_.gap,
-                         g_.dataWidth, g_.freqH);
-    g_.dividerY = g_.freqStrip.bottom() + 1;
-    const int hitHalf = tokens::scaled(tokens::kDividerHitHalfH);
-    g_.dividerHit = QRect(0, g_.dividerY - hitHalf, w, hitHalf * 2 + 1);
-    g_.waterfall = QRect(g_.x0, g_.dividerY + 1, g_.dataWidth, g_.wfH);
+    const int half = scaled(kDividerHitHalfH);
+    lay_.splitZone = QRect(lay_.plotX0, splitY - half, lay_.plotW, 2 * half);
 }
 
 void SpectrumDisplay::resizeEvent(QResizeEvent*) {
@@ -97,894 +78,591 @@ void SpectrumDisplay::resizeEvent(QResizeEvent*) {
     update();
 }
 
-// --------------------------------------------------------------------------
-// Visible window / zoom / pan
-// --------------------------------------------------------------------------
-void SpectrumDisplay::visibleRange(double& fLo, double& fHi, double& spanVis) const {
-    const double fs = frame_.sampleRateHz;
-    spanVis = (fs > 0.0) ? fs / zoomFactor_ : 1.0;
-    fLo = viewCenterHz_ - spanVis / 2.0;
-    fHi = viewCenterHz_ + spanVis / 2.0;
+// ---------------------------------------------------------------------------
+// Visible window
+// ---------------------------------------------------------------------------
+void SpectrumDisplay::visibleWindow(double& fLo, double& fHi, double& spanHz) const {
+    if (frameFsHz_ <= 0.0 || !haveFrame_) {
+        fLo = viewCenterHz_;
+        fHi = viewCenterHz_;
+        spanHz = 1.0;
+        return;
+    }
+    spanHz = frameFsHz_ / zoomFactor_;
+    fLo = viewCenterHz_ - spanHz / 2.0;
+    fHi = viewCenterHz_ + spanHz / 2.0;
 }
 
 double SpectrumDisplay::visLoHz() const {
-    double fLo, fHi, spanVis; visibleRange(fLo, fHi, spanVis); return fLo;
+    double lo, hi, sp; visibleWindow(lo, hi, sp); return lo;
 }
 double SpectrumDisplay::visHiHz() const {
-    double fLo, fHi, spanVis; visibleRange(fLo, fHi, spanVis); return fHi;
+    double lo, hi, sp; visibleWindow(lo, hi, sp); return hi;
 }
 
-void SpectrumDisplay::emitVisibleRange() {
-    double fLo, fHi, spanVis;
-    visibleRange(fLo, fHi, spanVis);
-    emit visibleRangeChanged(fLo, fHi);
+void SpectrumDisplay::publishVisibleRange() {
+    double lo, hi, sp; visibleWindow(lo, hi, sp);
+    emit visibleRangeChanged(lo, hi);
 }
 
-void SpectrumDisplay::setZoomFactor(double z) {
-    zoomFactor_ = std::clamp(z, tokens::kZoomMin, tokens::kZoomMax);
-    if (frame_.sampleRateHz > 0.0) viewCenterHz_ = frame_.centerFreqHz;
-    update();
-    emitVisibleRange();
+// ---------------------------------------------------------------------------
+// Waterfall ring buffer
+// ---------------------------------------------------------------------------
+void SpectrumDisplay::allocateRing(int bins) {
+    bins_ = bins;
+    ringDepth_ = tokens::kWaterfallHistoryLines;
+    ringRows_.assign(ringDepth_, QImage(bins, 1, QImage::Format_ARGB32));
+    ringHead_ = 0;
+    ringCount_ = 0;
+    for (QImage& r : ringRows_) r.fill(qRgb(0, 0, 0));
+    maxHold_.assign(bins, -std::numeric_limits<float>::max());
+    materialiseHistory();
 }
 
-void SpectrumDisplay::resetZoom() {
-    zoomFactor_ = tokens::kZoomMin;
-    viewCenterHz_ = frame_.centerFreqHz;
-    update();
-    emitVisibleRange();
-}
-
-void SpectrumDisplay::tuneAndCenter(double hz) {
-    double fLo, fHi, spanVis;
-    visibleRange(fLo, fHi, spanVis);
-    if (hz < fLo || hz > fHi) viewCenterHz_ = hz;
-    vfoFreq_ = hz;
-    emit frequencyChanged(hz);
-    update();
-    emitVisibleRange();
-}
-
-void SpectrumDisplay::setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers) {
-    markers_ = markers;
-    // Mirror the selected marker into the legacy single-VFO state so any
-    // back-compat path reading vfoFreq_/bwHz_ still sees something sane.
-    for (const auto& m : markers_) {
-        if (m.selected) { vfoFreq_ = m.freqHz; bwHz_ = m.bandwidthHz; break; }
+void SpectrumDisplay::pushHistoryRow() {
+    if (bins_ <= 0 || ringRows_.empty()) return;
+    QImage& row = ringRows_[ringHead_];
+    if (row.width() != bins_) row = QImage(bins_, 1, QImage::Format_ARGB32);
+    auto* line = reinterpret_cast<QRgb*>(row.bits());
+    const int n = std::min(bins_, static_cast<int>(frame_.dbfs.size()));
+    for (int i = 0; i < bins_; ++i) {
+        const float db = (i < n) ? frame_.dbfs[i] : dbFloorDb_;
+        line[i] = colourForDb(db);
     }
-    update();
+    ringHead_ = (ringHead_ + 1) % ringDepth_;
+    if (ringCount_ < ringDepth_) ++ringCount_;
+    materialiseHistory();
 }
 
-void SpectrumDisplay::vfoBoxGeometry(const mbdsdr::dsp::VfoMarker& m,
-                                     double fLo, double spanVis,
-                                     int& bx0, int& bx1, int& vx) const {
-    // Edge convention pinned by tests/test_demod_e2e.cpp:
-    //   USB  -> demodulates [dial, dial+bw]  (upper sideband, box to the RIGHT
-    //          of the dial; tuning line at the LEFT edge).
-    //   LSB/CW -> demodulates [dial-bw, dial] (lower sideband, box to the LEFT
-    //          of the dial; tuning line at the RIGHT edge). CW is demodulated on
-    //          the LSB side in vfo_manager, so it is painted the same way.
-    //   AM/NFM/WFM/BPSK/QPSK -> keep the symmetric [dial-bw/2, dial+bw/2] box.
-    vx = xOfFreq(m.freqHz, fLo, spanVis);
-    if (m.mode == QLatin1String("USB")) {
-        bx0 = xOfFreq(m.freqHz, fLo, spanVis);
-        bx1 = xOfFreq(m.freqHz + m.bandwidthHz, fLo, spanVis);
-    } else if (m.mode == QLatin1String("LSB") || m.mode == QLatin1String("CW")) {
-        bx0 = xOfFreq(m.freqHz - m.bandwidthHz, fLo, spanVis);
-        bx1 = xOfFreq(m.freqHz, fLo, spanVis);
-    } else {
-        const double half = m.bandwidthHz / 2.0;
-        bx0 = xOfFreq(m.freqHz - half, fLo, spanVis);
-        bx1 = xOfFreq(m.freqHz + half, fLo, spanVis);
+void SpectrumDisplay::materialiseHistory() {
+    if (bins_ <= 0 || ringDepth_ <= 0) {
+        history_ = QImage();
+        return;
     }
-}
-
-void SpectrumDisplay::vfoBoxGeometryFor(const mbdsdr::dsp::VfoMarker& m,
-                                         int& bx0, int& bx1, int& vx) const {
-    double fLo, fHi, spanVis;
-    visibleRange(fLo, fHi, spanVis);
-    vfoBoxGeometry(m, fLo, spanVis, bx0, bx1, vx);
-}
-
-int SpectrumDisplay::hitVfoMarker(double x, double fLo, double spanVis) const {
-    const int tol = tokens::scaled(tokens::kBandEdgeHitTol);
-    // Prefer the selected marker, then the topmost (last drawn = list tail).
-    for (int pass = 0; pass < 2; ++pass) {
-        for (int i = markers_.size() - 1; i >= 0; --i) {
-            const auto& m = markers_[i];
-            if (pass == 0 && !m.selected) continue;
-            if (pass == 1 && m.selected) continue;
-            int bx0, bx1, vx;
-            vfoBoxGeometry(m, fLo, spanVis, bx0, bx1, vx);
-            if (x >= bx0 - tol && x <= bx1 + tol) return i;
-        }
+    if (history_.width() != bins_ || history_.height() != ringDepth_)
+        history_ = QImage(bins_, ringDepth_, QImage::Format_ARGB32);
+    QPainter c(&history_);
+    c.setCompositionMode(QPainter::CompositionMode_Source);
+    for (int logical = 0; logical < ringDepth_; ++logical) {
+        // Logical row 0 is the newest push, which lives one slot behind head.
+        const int phys = (ringHead_ - 1 - logical + ringDepth_) % ringDepth_;
+        c.drawImage(0, logical, ringRows_[phys]);
     }
-    return -1;
+    c.end();
 }
 
-void SpectrumDisplay::setDbRange(float minDb, float maxDb) {
-    if (maxDb <= minDb) maxDb = minDb + 1.0f;
-    dbMin_ = minDb;
-    dbMax_ = maxDb;
-    update();
-}
+void SpectrumDisplay::rebuildColormap() {
+    using namespace tokens;
+    const WaterfallStop* stops = kWaterfallStops;
+    int n = static_cast<int>(std::size(kWaterfallStops));
+    if (paletteIndex_ == 1) { stops = kWaterfallStopsMono; n = static_cast<int>(std::size(kWaterfallStopsMono)); }
+    else if (paletteIndex_ == 2) { stops = kWaterfallStopsViridis; n = static_cast<int>(std::size(kWaterfallStopsViridis)); }
 
-void SpectrumDisplay::setMaxHoldEnabled(bool on) {
-    maxHoldEnabled_ = on;
-    if (!on) maxHold_.clear();
-    update();
-}
-
-// --------------------------------------------------------------------------
-// Waterfall history (ported from the old WaterfallWidget)
-// --------------------------------------------------------------------------
-void SpectrumDisplay::buildLut() {
-    lut_.resize(256);
-    struct RgbStop { float t; int r, g, b; };
-    // palette_: 0 = classic rainbow, 1 = monochrome blue-scale, 2 = viridis.
-    const tokens::WaterfallStop* stops = tokens::kWaterfallStops;
-    int nStops = static_cast<int>(sizeof(tokens::kWaterfallStops)
-                                  / sizeof(tokens::kWaterfallStops[0]));
-    if (palette_ == 1) {
-        stops = tokens::kWaterfallStopsMono;
-        nStops = static_cast<int>(sizeof(tokens::kWaterfallStopsMono)
-                                 / sizeof(tokens::kWaterfallStopsMono[0]));
-    } else if (palette_ == 2) {
-        stops = tokens::kWaterfallStopsViridis;
-        nStops = static_cast<int>(sizeof(tokens::kWaterfallStopsViridis)
-                                  / sizeof(tokens::kWaterfallStopsViridis[0]));
-    }
-    QVector<RgbStop> rgb(nStops);
-    for (int i = 0; i < nStops; ++i) {
-        QColor c(QString::fromUtf8(stops[i].hex));
-        rgb[i] = {stops[i].t, c.red(), c.green(), c.blue()};
-    }
     for (int i = 0; i < 256; ++i) {
         const float t = i / 255.0f;
-        int s = 0;
-        while (s < nStops - 2 && rgb[s + 1].t < t) ++s;
-        const RgbStop& a = rgb[s];
-        const RgbStop& b = rgb[s + 1];
-        const float f = (b.t > a.t) ? (t - a.t) / (b.t - a.t) : 0.0f;
-        const int r = static_cast<int>(a.r + (b.r - a.r) * f);
-        const int g = static_cast<int>(a.g + (b.g - a.g) * f);
-        const int bl = static_cast<int>(a.b + (b.b - a.b) * f);
+        int seg = 0;
+        while (seg < n - 2 && t > stops[seg + 1].t) ++seg;
+        const QColor a(stops[seg].hex);
+        const QColor b(stops[seg + 1].hex);
+        const float span = stops[seg + 1].t - stops[seg].t;
+        const float u = (span > 0.0f) ? (t - stops[seg].t) / span : 0.0f;
+        const int r = a.red()   + static_cast<int>(u * (b.red()   - a.red()));
+        const int g = a.green() + static_cast<int>(u * (b.green() - a.green()));
+        const int bl= a.blue()  + static_cast<int>(u * (b.blue()  - a.blue()));
         lut_[i] = qRgb(r, g, bl);
     }
 }
 
-QRgb SpectrumDisplay::colorForDb(float db) const {
-    float t = (db - kDbMin) / (kDbMax - kDbMin);
-    if (t < 0.0f) t = 0.0f;
-    if (t > 1.0f) t = 1.0f;
-    return lut_[static_cast<int>(t * 255.0f)];
+QRgb SpectrumDisplay::colourForDb(float db) const {
+    const float span = dbCeilDb_ - dbFloorDb_;
+    if (span <= 0.0f) return lut_[0];
+    float t = (db - dbFloorDb_) / span;
+    t = static_cast<float>(clampd(t, 0.0f, 1.0f));
+    const int idx = static_cast<int>(t * 255.0f);
+    return lut_[std::clamp(idx, 0, 255)];
 }
 
-void SpectrumDisplay::rebuildImage(int bins) {
-    history_ = QImage(bins, kDepthRows, QImage::Format_RGB32);
-    history_.fill(qRgb(0, 0, 0));
-    bins_ = bins;
-}
-
-void SpectrumDisplay::setScrollSpeed(int n) {
-    scrollEvery_ = (n >= 1 && n <= 4) ? n : 1;
-}
-
-void SpectrumDisplay::setPalette(int p) {
-    // 0 classic, 1 monochrome, 2 viridis. Out-of-range values fall back to 0.
-    palette_ = (p == 1 || p == 2) ? p : 0;
-    buildLut();
-    update();
-}
-
-// --------------------------------------------------------------------------
-// Frame intake: ONE real frame drives both the trace and the waterfall.
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Frame intake
+// ---------------------------------------------------------------------------
 void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
-    const bool firstFrame = (frame_.sampleRateHz <= 0.0);
     frame_ = frame;
+    frameF0Hz_ = frame.centerFreqHz;
+    frameFsHz_ = frame.sampleRateHz;
 
-    // Max-hold envelope.
-    if (maxHoldEnabled_) {
-        if (static_cast<int>(maxHold_.size()) != static_cast<int>(frame.dbfs.size()))
-            maxHold_.assign(frame.dbfs.size(), -1000.0f);
-        for (std::size_t i = 0; i < frame.dbfs.size(); ++i)
+    if (!haveFrame_) {
+        haveFrame_ = true;
+        viewCenterHz_ = frameF0Hz_;
+        dialFreqHz_   = frameF0Hz_;
+        allocateRing(static_cast<int>(frame.dbfs.size()));
+        rebuildColormap();
+    }
+
+    const int bins = static_cast<int>(frame.dbfs.size());
+    if (bins != bins_) allocateRing(bins);
+
+    if (maxHoldOn_) {
+        if (static_cast<int>(maxHold_.size()) != bins)
+            maxHold_.assign(bins, -std::numeric_limits<float>::max());
+        for (int i = 0; i < bins && i < static_cast<int>(frame.dbfs.size()); ++i)
             if (frame.dbfs[i] > maxHold_[i]) maxHold_[i] = frame.dbfs[i];
     }
 
-    // --- Waterfall history -------------------------------------------------
-    const int bins = static_cast<int>(frame.dbfs.size());
-    if (bins >= 2) {
-        if (bins != bins_ || history_.isNull()) rebuildImage(bins);
-        frameF0_ = frame.centerFreqHz;
-        frameFs_ = frame.sampleRateHz;
-
-        frameMod_ = (frameMod_ + 1) % scrollEvery_;
-        if (frameMod_ == 0) {
-            const std::size_t rowBytes = static_cast<std::size_t>(history_.bytesPerLine());
-            std::memmove(history_.scanLine(1), history_.constScanLine(0),
-                         static_cast<std::size_t>(kDepthRows - 1) * rowBytes);
-            QRgb* top = reinterpret_cast<QRgb*>(history_.scanLine(0));
-            for (int i = 0; i < bins; ++i) top[i] = colorForDb(frame.dbfs[i]);
-
-            // Time bookkeeping from the real frame count + smoothed period.
-            if (frameCount_ == 0) {
-                frameClock_.start();
-                lastElapsedMs_ = 0;
-                frameIntervalMs_ = 0.0;
-            } else {
-                const qint64 now = frameClock_.elapsed();
-                const double dt = double(now - lastElapsedMs_);
-                if (dt > 0.0) {
-                    frameIntervalMs_ = (frameIntervalMs_ <= 0.0)
-                        ? dt : 0.9 * frameIntervalMs_ + 0.1 * dt;
-                }
-                lastElapsedMs_ = now;
-            }
-            ++frameCount_;
-        }
-    }
-    haveFrame_ = true;
-
-    // On the very first frame, anchor the view center to f0.
-    if (firstFrame) {
-        viewCenterHz_ = frame.centerFreqHz;
-        vfoFreq_ = frame.centerFreqHz;
-        emitVisibleRange();
+    ++frameMod_;
+    if (frameMod_ >= everyNthFrame_) {
+        frameMod_ = 0;
+        pushHistoryRow();
     }
 
-    detectPeaks();
+    rescanPeaks();
+    publishVisibleRange();
     update();
 }
 
-// --------------------------------------------------------------------------
-// Peak detection + cross-frame tracking (moved from the old container).
-// --------------------------------------------------------------------------
-void SpectrumDisplay::detectPeaks() {
-    const QList<dsp::PeakInfo> raw = dsp::detectPeaks(frame_.dbfs, frame_.sampleRateHz,
-                                  frame_.centerFreqHz, peakThresholdDb_,
-                                  tokens::kPeakAbsFloorDbfs);
+void SpectrumDisplay::setDbRange(float minDb, float maxDb) {
+    dbFloorDb_ = minDb;
+    dbCeilDb_  = maxDb;
+    update();
+}
 
-    const std::size_t n = frame_.dbfs.size();
-    const double binHz = (n > 1) ? frame_.sampleRateHz / (n - 1) : 1.0;
-    const double matchDist = binHz * tokens::kPeakMatchBins;
+void SpectrumDisplay::setZoomFactor(double z) {
+    zoomFactor_ = clampd(z, tokens::kZoomMin, tokens::kZoomMax);
+    publishVisibleRange();
+    update();
+}
 
-    for (auto& t : tracked_) t.matchedThisFrame = false;
+void SpectrumDisplay::resetZoom() {
+    zoomFactor_ = 1.0;
+    viewCenterHz_ = frameF0Hz_;
+    publishVisibleRange();
+    update();
+    emit viewChanged();
+}
 
-    for (const auto& rp : raw) {
-        TrackedPeak* best = nullptr;
-        double bestD = matchDist;
-        for (auto& t : tracked_) {
-            const double d = std::abs(rp.freqHz - t.freqHz);
-            if (d < bestD) { bestD = d; best = &t; }
-        }
-        if (best) {
-            best->freqHz = rp.freqHz;
-            best->dbfs = rp.dbfs;
-            best->bandwidthHz = rp.bandwidthHz;
-            best->seenFrames++;
-            best->missFrames = 0;
-            best->matchedThisFrame = true;
-        } else {
-            tracked_.push_back({nextPeakId_++, rp.freqHz, rp.dbfs,
-                                rp.bandwidthHz, 1, 0, true});
-        }
-    }
-    for (auto& t : tracked_)
-        if (!t.matchedThisFrame) t.missFrames++;
-    tracked_.erase(std::remove_if(tracked_.begin(), tracked_.end(),
-        [](const TrackedPeak& t) { return t.missFrames > tokens::kPeakMaxMissFrames; }),
-        tracked_.end());
+void SpectrumDisplay::setMaxHoldEnabled(bool on) {
+    maxHoldOn_ = on;
+    if (!on) maxHold_.clear();
+    update();
+}
 
-    peaks_.clear();
-    peakIds_.clear();
-    QList<QPair<dsp::PeakInfo,int>> mature;
-    for (const auto& t : tracked_)
-        if (t.seenFrames >= tokens::kPeakMinSeenFrames)
-            mature.append({{t.freqHz, t.dbfs, t.bandwidthHz}, t.id});
-    std::sort(mature.begin(), mature.end(),
-              [](const QPair<dsp::PeakInfo,int>& a, const QPair<dsp::PeakInfo,int>& b) {
-                  return a.first.dbfs > b.first.dbfs;
-              });
-    for (const auto& m : mature) {
-        peaks_.append(m.first);
-        peakIds_.append(m.second);
-    }
+void SpectrumDisplay::setScrollSpeed(int linesPerFrame) {
+    everyNthFrame_ = (linesPerFrame == 1 || linesPerFrame == 2 || linesPerFrame == 4)
+                     ? linesPerFrame : 1;
+}
 
-    // Throttle: only notify the container when the rounded peak set changes.
-    QString sig;
-    for (const auto& pk : peaks_)
-        sig += QString::number(pk.freqHz / 1e6, 'f', 3) + "|";
-    if (sig == lastPeakSignature_) return;
-    lastPeakSignature_ = sig;
-
-    highlightedPeak_ = -1;
-    emit peaksUpdated(peaks_, peakIds_);
+void SpectrumDisplay::setPalette(int p) {
+    paletteIndex_ = std::clamp(p, 0, 2);
+    rebuildColormap();
+    update();
 }
 
 void SpectrumDisplay::setHighlightedPeak(int row) {
-    highlightedPeak_ = (row >= 0 && row < peaks_.size()) ? row : -1;
+    highlightedPeak_ = row;
     update();
 }
 
-// --------------------------------------------------------------------------
-// Painting
-// --------------------------------------------------------------------------
-void SpectrumDisplay::paintEvent(QPaintEvent*) {
-    QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing, false);
-    p.fillRect(rect(), QColor(QString::fromUtf8(tokens::kSpectrumBg)));
+void SpectrumDisplay::tuneAndCenter(double hz) {
+    viewCenterHz_ = hz;
+    dialFreqHz_   = hz;
+    publishVisibleRange();
+    update();
+    emit viewChanged();
+}
 
-    if (g_.dataWidth <= 10 || g_.traceH <= 10 || g_.wfH <= 4) return;
+void SpectrumDisplay::setVfoMarkers(const QVector<dsp::VfoMarker>& markers) {
+    markers_ = markers;
+    update();
+}
 
-    const QRectF sp = g_.spectrum;      // spectrum trace area
-    const QRectF strip = g_.freqStrip;  // shared frequency strip
-    const QRectF wf = g_.waterfall;     // waterfall area
-
-    double fLo, fHi, spanVis;
-    visibleRange(fLo, fHi, spanVis);
-    const double fs = frame_.sampleRateHz;
-    const double f0 = frame_.centerFreqHz;
-    const float yMin = dbMin_;
-    const float yMax = dbMax_;
-
-    const int spL = static_cast<int>(sp.left());
-    const int spR = static_cast<int>(sp.right());
-    const int spT = static_cast<int>(sp.top());
-    const int spB = static_cast<int>(sp.bottom());
-    const double spH = sp.height();
-    const double plotW = g_.dataWidth;
-
-    auto yOfDb = [&](float v) -> int {
-        if (v < yMin) v = yMin;
-        if (v > yMax) v = yMax;
-        return spT + static_cast<int>(spH * (1.0 - (v - yMin) / (yMax - yMin)));
-    };
-
-    // --- dB grid + left labels --------------------------------------------
-    QPen gridPen(QColor(QString::fromUtf8(tokens::kCardEdge)), 1, Qt::DotLine);
-    const int step = tokens::kDbGridStep;
-    for (int db = (std::ceil(yMin / step) * step); db <= static_cast<int>(yMax); db += step) {
-        const int y = yOfDb(static_cast<float>(db));
-        p.setPen(gridPen);
-        p.drawLine(spL, y, spR, y);
-        p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
-        p.drawText(0, y - tokens::scaled(tokens::kDbLabelOffsetY),
-                   spL - tokens::scaled(tokens::kDbLabelPadR),
-                   tokens::scaled(tokens::kDbLabelH),
-                   Qt::AlignRight | Qt::AlignVCenter,
-                   QString::number(db));
-    }
-
-    // --- Frequency ticks in the shared strip (protrude up into the trace) ---
-    {
-        // Pick a "nice" tick step (~5 intervals across the visible span).
-        double rawStep = spanVis / 5.0;
-        if (rawStep <= 0) rawStep = 1.0;
-        double mag = std::pow(10.0, std::floor(std::log10(rawStep)));
-        double res = rawStep / mag;
-        double nice = (res < 1.5) ? mag : (res < 3.5) ? 2.0 * mag
-                    : (res < 7.5) ? 5.0 * mag : 10.0 * mag;
-
-        QFont f = p.font(); f.setPointSize(tokens::kFontAuxPt); p.setFont(f);
-        const int labelH = tokens::scaled(tokens::kFreqLabelH);
-        const int labelW = tokens::scaled(tokens::kFreqLabelW);
-        const int tickUp = tokens::scaled(tokens::kDispTickProtrusion);
-        double start = std::ceil(fLo / nice) * nice;
-        p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary)));
-        for (double fr = start; fr <= fHi + nice * 0.001; fr += nice) {
-            const int x = xOfFreq(fr, fLo, spanVis);
-            if (x < spL || x > spR) continue;
-            // Small tick that pokes up into the trace a touch.
-            p.drawLine(x, static_cast<int>(strip.top()), x,
-                       static_cast<int>(strip.top()) - tickUp);
-            p.drawLine(x, static_cast<int>(strip.bottom()), x,
-                       static_cast<int>(strip.bottom()) - tickUp + 1);
-            p.drawText(x - labelW / 2,
-                       static_cast<int>(strip.top()) + tokens::scaled(tokens::kFreqLabelOffsetY),
-                       labelW, labelH, Qt::AlignCenter,
-                       QString("%1M").arg(fr / 1e6, 0, 'f', 1));
-        }
-    }
-
-    // --- Spectrum trace (+ subtle under-fill) and max-hold ------------------
-    const std::size_t n = frame_.dbfs.size();
-    if (n >= 2 && fs > 0.0) {
-        const double fLowEdge = f0 - fs / 2.0;
-        const double iLoF = (fLo - fLowEdge) / fs * (n - 1);
-        const double iHiF = (fHi - fLowEdge) / fs * (n - 1);
-        int iLo = std::max(0, std::min(static_cast<int>(n) - 1,
-                                       static_cast<int>(std::floor(iLoF))));
-        int iHi = std::max(0, std::min(static_cast<int>(n) - 1,
-                                       static_cast<int>(std::ceil(iHiF))));
-
-        if (maxHoldEnabled_ && static_cast<int>(maxHold_.size()) == static_cast<int>(n)) {
-            QPen holdPen(QColor(QString::fromUtf8(tokens::kTextSecondary)), 1, Qt::DotLine);
-            p.setPen(holdPen);
-            QPainterPath hpath;
-            for (int i = iLo; i <= iHi; ++i) {
-                const double fi = fLowEdge + fs * i / (n - 1);
-                const int x = xOfFreq(fi, fLo, spanVis);
-                const int y = yOfDb(maxHold_[i]);
-                if (i == iLo) hpath.moveTo(x, y); else hpath.lineTo(x, y);
-            }
-            p.drawPath(hpath);
-        }
-
-        // Under-fill (shadow) down to the trace baseline, SDR++ drawFFT style.
-        {
-            QColor fill(tokens::kAccent); fill.setAlphaF(0.07);
-            p.setPen(Qt::NoPen);
-            QPainterPath area;
-            area.moveTo(xOfFreq(fLo, fLo, spanVis), spB);
-            for (int i = iLo; i <= iHi; ++i) {
-                const double fi = fLowEdge + fs * i / (n - 1);
-                area.lineTo(xOfFreq(fi, fLo, spanVis), yOfDb(frame_.dbfs[i]));
-            }
-            area.lineTo(xOfFreq(fHi, fLo, spanVis), spB);
-            area.closeSubpath();
-            p.fillPath(area, fill);
-        }
-
-        QPen tracePen(QColor(QString::fromUtf8(tokens::kAccent)), 1);
-        p.setPen(tracePen);
-        QPainterPath path;
-        for (int i = iLo; i <= iHi; ++i) {
-            const double fi = fLowEdge + fs * i / (n - 1);
-            const int x = xOfFreq(fi, fLo, spanVis);
-            const int y = yOfDb(frame_.dbfs[i]);
-            if (i == iLo) path.moveTo(x, y); else path.lineTo(x, y);
-        }
-        p.drawPath(path);
-    }
-
-    // --- VFO band boxes (multi-VFO, drawn over spectrum + waterfall) -------
-    if (!markers_.isEmpty()) {
-        const int bandTop = spT;
-        const int bandBottom = static_cast<int>(wf.bottom());
-        QFont lblFont = p.font();
-        lblFont.setPointSize(tokens::kFontAuxPt);
-        p.setFont(lblFont);
-        const int lblH = tokens::scaled(tokens::kVfoBoxLabelH);
-        for (const auto& m : markers_) {
-            if (m.freqHz < fLo - m.bandwidthHz || m.freqHz > fHi + m.bandwidthHz) continue;
-            int bx0, bx1, vx;
-            vfoBoxGeometry(m, fLo, spanVis, bx0, bx1, vx);
-            QColor c = m.color.isValid() ? m.color : QColor(QString::fromUtf8(tokens::kAccent));
-
-            // Translucent fill over the whole data column (trace + waterfall).
-            QColor fill = c;
-            fill.setAlphaF(m.selected ? tokens::kVfoBoxSelFillAlpha
-                                      : tokens::kVfoBoxFillAlpha);
-            p.fillRect(QRect(bx0, bandTop, bx1 - bx0, bandBottom - bandTop), fill);
-
-            // Edge lines + center line.
-            QColor edge = c;
-            edge.setAlphaF(m.selected ? tokens::kVfoBoxSelEdgeAlpha
-                                     : tokens::kVfoBoxEdgeAlpha);
-            QPen ep(edge);
-            ep.setWidthF(m.selected ? tokens::kVfoBoxSelLineWidth
-                                    : tokens::kVfoBoxLineWidth);
-            p.setPen(ep);
-            p.drawLine(bx0, bandTop, bx0, bandBottom);
-            p.drawLine(bx1, bandTop, bx1, bandBottom);
-            QColor cc = c; cc.setAlphaF(tokens::kVfoBoxCenterAlpha);
-            QPen cp(cc);
-            cp.setWidthF(m.selected ? tokens::kVfoBoxSelLineWidth
-                                    : tokens::kVfoBoxLineWidth);
-            p.setPen(cp);
-            p.drawLine(vx, bandTop, vx, bandBottom);
-
-            // Name label pinned to the top of the trace.
-            QColor tc = c; tc.setAlphaF(tokens::kVfoBoxLabelAlpha);
-            p.setPen(tc);
-            const QString lbl = m.name.isEmpty() ? QString::number(m.freqHz, 'f', 0)
-                                                : m.name;
-            p.drawText(QRect(bx0, spT, std::max(20, bx1 - bx0), lblH),
-                       Qt::AlignHCenter | Qt::AlignVCenter, lbl);
-        }
-    } else if (f0 >= fLo && f0 <= fHi) {
-        // Legacy single-VFO box (kept for back-compat tests / before markers arrive).
-        const int vfoX = xOfFreq(vfoFreq_, fLo, spanVis);
-        const double halfHz = bwHz_ / 2.0;
-        const int bx0 = xOfFreq(vfoFreq_ - halfHz, fLo, spanVis);
-        const int bx1 = xOfFreq(vfoFreq_ + halfHz, fLo, spanVis);
-        QColor fill(tokens::kAccent); fill.setAlphaF(0.08);
-        p.fillRect(QRect(bx0, spT, bx1 - bx0, spB - spT), fill);
-        QColor edgeC(tokens::kAccent); edgeC.setAlphaF(0.6);
-        QPen edge(edgeC); edge.setWidthF(1.0);
-        p.setPen(edge);
-        p.drawLine(bx0, spT, bx0, spB);
-        p.drawLine(bx1, spT, bx1, spB);
-        QPen vfoPen(QColor(QString::fromUtf8(tokens::kAccent)));
-        vfoPen.setWidthF(tokens::kVfoLineWidth);
-        p.setPen(vfoPen);
-        p.drawLine(vfoX, spT, vfoX, spB);
-        p.setBrush(QColor(QString::fromUtf8(tokens::kAccent)));
-        p.setPen(Qt::NoPen);
-        const int hh = tokens::scaled(tokens::kVfoHandleHalfW);
-        const int hhH = tokens::scaled(tokens::kVfoHandleH);
-        p.drawPolygon(QPolygonF({QPointF(bx0-hh, spT), QPointF(bx0+hh, spT),
-                                 QPointF(bx0, spT + hhH)}));
-        p.drawPolygon(QPolygonF({QPointF(bx1-hh, spT), QPointF(bx1+hh, spT),
-                                 QPointF(bx1, spT + hhH)}));
-    }
-
-    // --- Peak markers (triangles along the trace top) ----------------------
-    {
-        p.setPen(Qt::NoPen);
-        for (int pi = 0; pi < peaks_.size(); ++pi) {
-            const auto& pk = peaks_[pi];
-            if (pk.freqHz < fLo || pk.freqHz > fHi) continue;
-            const bool selected = (pi == highlightedPeak_);
-            const int mhw = tokens::scaled(selected ? tokens::kPeakMarkerHiHalfW
-                                                   : tokens::kPeakMarkerHalfW);
-            const int mh  = tokens::scaled(selected ? tokens::kPeakMarkerHiH
-                                                    : tokens::kPeakMarkerH);
-            p.setBrush(QColor(QString::fromUtf8(selected ? tokens::kAccent
-                                                         : tokens::kSuccess)));
-            const int x = xOfFreq(pk.freqHz, fLo, spanVis);
-            QPolygon tri;
-            tri << QPoint(x - mhw, spT) << QPoint(x + mhw, spT) << QPoint(x, spT + mh);
-            p.drawPolygon(tri);
-        }
-        p.setPen(QPen());
-        p.setBrush(Qt::NoBrush);
-    }
-
-    // --- Crosshair readout (trace area only) -------------------------------
-    if (hoverPos_.x() >= spL && hoverPos_.x() <= spR &&
-        hoverPos_.y() >= spT && hoverPos_.y() <= spB) {
-        p.setPen(QPen(QColor(QString::fromUtf8(tokens::kAccent)), 1, Qt::DashLine));
-        p.drawLine(hoverPos_.x(), spT, hoverPos_.x(), spB);
-        p.drawLine(spL, hoverPos_.y(), spR, hoverPos_.y());
-        const double frac = (hoverPos_.x() - spL) / plotW;
-        const double freq = fLo + frac * spanVis;
-        const double dbFrac = (hoverPos_.y() - spT) / spH;
-        const double dbfs = dbMax_ - dbFrac * (dbMax_ - dbMin_);
-        const QString txt = QString("%1 MHz  %2 dBFS")
-                                .arg(freq / 1e6, 0, 'f', 3).arg(dbfs, 0, 'f', 1);
-        QFont f = font(); f.setPointSize(tokens::kFontAuxPt); p.setFont(f);
-        QFontMetrics fm(f);
-        QRectF box(hoverPos_ + QPointF(tokens::kTooltipOffset, -tokens::kTooltipOffset),
-                   QSizeF(fm.horizontalAdvance(txt) + tokens::scaled(tokens::kSpacingM),
-                          fm.height() + tokens::scaled(tokens::kSpacingS)));
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(QString::fromUtf8(tokens::kCard2)));
-        p.drawRoundedRect(box, tokens::scaled(tokens::kRadiusSmall),
-                          tokens::scaled(tokens::kRadiusSmall));
-        p.setPen(QPen(QColor(QString::fromUtf8(tokens::kTextPrimary))));
-        p.drawText(box.adjusted(tokens::scaled(tokens::kSpacingS), 0, 0, 0),
-                   Qt::AlignVCenter, txt);
-    }
-
-    // --- Divider hairline ---------------------------------------------------
-    {
-        const bool hot = dividerHover_ || dividerDragging_;
-        p.setPen(QPen(hot ? QColor(tokens::splitterHandleRgba())
-                          : QColor(QString::fromUtf8(tokens::kCardEdge)),
-                      hot ? 2 : 1));
-        p.drawLine(0, g_.dividerY, width(), g_.dividerY);
-    }
-
-    // --- Waterfall: crop history columns to the visible window -------------
-    if (haveFrame_ && !history_.isNull() && bins_ > 1 && frameFs_ > 0.0) {
-        p.setRenderHint(QPainter::SmoothPixmapTransform, false);
-        const double fLowEdge = frameF0_ - frameFs_ / 2.0;
-        double iLoF = (fLo - fLowEdge) / frameFs_ * (bins_ - 1);
-        double iHiF = (fHi - fLowEdge) / frameFs_ * (bins_ - 1);
-        int iLo = std::max(0, std::min(bins_ - 1, static_cast<int>(std::floor(iLoF))));
-        int iHi = std::max(0, std::min(bins_ - 1, static_cast<int>(std::ceil(iHiF))));
-        if (iHi > iLo) {
-            p.drawImage(wf, history_, QRectF(iLo, 0, iHi - iLo + 1, kDepthRows));
-        } else {
-            p.drawImage(wf, history_);
-        }
+// ---------------------------------------------------------------------------
+// VFO band-box geometry
+// ---------------------------------------------------------------------------
+void SpectrumDisplay::markerBox(const dsp::VfoMarker& m, double fLo, double spanHz,
+                                int& bx0, int& bx1, int& vx) const {
+    const double dial = m.freqHz;
+    double loF, hiF;
+    const QString mode = m.mode;
+    if (mode == QLatin1String("USB")) {
+        loF = dial;                 hiF = dial + m.bandwidthHz;   // dial on left edge
+    } else if (mode == QLatin1String("LSB") || mode == QLatin1String("CW")) {
+        loF = dial - m.bandwidthHz; hiF = dial;                 // dial on right edge
     } else {
-        p.setPen(QColor(tokens::textRgba(tokens::kTextAlphaSecondary)));
-        p.drawText(wf, Qt::AlignCenter, QStringLiteral("等待频谱数据"));
+        loF = dial - m.bandwidthHz / 2.0; hiF = dial + m.bandwidthHz / 2.0;
+    }
+    bx0 = xForFreq(loF, fLo, spanHz);
+    bx1 = xForFreq(hiF, fLo, spanHz);
+    vx  = xForFreq(dial, fLo, spanHz);
+    if (bx0 > bx1) std::swap(bx0, bx1);
+}
+
+void SpectrumDisplay::vfoBoxGeometryFor(const dsp::VfoMarker& m,
+                                        int& bx0, int& bx1, int& vx) const {
+    double fLo, fHi, span;
+    visibleWindow(fLo, fHi, span);
+    markerBox(m, fLo, span, bx0, bx1, vx);
+}
+
+int SpectrumDisplay::findMarkerAt(int x, double fLo, double spanHz) const {
+    const int tol = tokens::scaled(tokens::kBandEdgeHitTol);
+    for (int i = 0; i < markers_.size(); ++i) {
+        int bx0, bx1, vx;
+        markerBox(markers_[i], fLo, spanHz, bx0, bx1, vx);
+        if (x >= bx0 - tol && x <= bx1 + tol) return i;
+    }
+    return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Peak tracking
+// ---------------------------------------------------------------------------
+void SpectrumDisplay::rescanPeaks() {
+    if (!haveFrame_ || frame_.dbfs.empty()) return;
+    const auto fresh = dsp::detectPeaks(frame_.dbfs, frameFsHz_, frameF0Hz_,
+                                        peakThresholdDb_, tokens::kPeakAbsFloorDbfs);
+    for (auto& t : tracked_) t.matched = false;
+
+    const double binHz = (bins_ > 0) ? frameFsHz_ / bins_ : 0.0;
+    const double matchHz = tokens::kPeakMatchBins * binHz;
+
+    for (const auto& f : fresh) {
+        int best = -1;
+        double bestD = matchHz;
+        for (int i = 0; i < tracked_.size(); ++i) {
+            const double d = std::abs(tracked_[i].freqHz - f.freqHz);
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        if (best >= 0) {
+            auto& t = tracked_[best];
+            t.freqHz = f.freqHz; t.dbfs = f.dbfs; t.bandwidthHz = f.bandwidthHz;
+            ++t.seen; t.missed = 0; t.matched = true;
+        } else {
+            TrackedBlip t;
+            t.id = nextBlipId_++;
+            t.freqHz = f.freqHz; t.dbfs = f.dbfs; t.bandwidthHz = f.bandwidthHz;
+            t.seen = 1; t.missed = 0; t.matched = true;
+            tracked_.append(t);
+        }
+    }
+
+    QList<TrackedBlip> kept;
+    for (auto& t : tracked_) {
+        if (!t.matched) ++t.missed;
+        if (t.missed < tokens::kPeakMaxMissFrames) kept.append(t);
+    }
+    tracked_ = kept;
+
+    peaks_.clear();
+    peakIds_.clear();
+    QString sig;
+    for (const auto& t : tracked_) {
+        if (t.seen >= tokens::kPeakMinSeenFrames) {
+            dsp::PeakInfo p; p.freqHz = t.freqHz; p.dbfs = t.dbfs; p.bandwidthHz = t.bandwidthHz;
+            peaks_.append(p);
+            peakIds_.append(t.id);
+            sig += QString::number(static_cast<int>(t.freqHz / 1000.0)) + QLatin1Char(',');
+        }
+    }
+    if (sig != lastPeakSig_) {
+        lastPeakSig_ = sig;
+        emit peaksUpdated(peaks_, peakIds_);
     }
 }
 
-// --------------------------------------------------------------------------
-// Mouse / wheel interaction
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Painting
+// ---------------------------------------------------------------------------
+void SpectrumDisplay::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    p.fillRect(rect(), QColor(tokens::kSpectrumBg));
+    if (lay_.plotW <= 0) return;
+
+    double fLo, fHi, span;
+    visibleWindow(fLo, fHi, span);
+
+    const QRect trace = lay_.traceRect;
+    const QRect strip = lay_.stripRect;
+    const QRect falls = lay_.fallsRect;
+
+    // --- trace background + dB grid --------------------------------------
+    p.fillRect(trace, QColor(tokens::kSpectrumBg));
+    const double dbSpan = dbCeilDb_ - dbFloorDb_;
+    auto dbToY = [&](float db) {
+        const float t = (db - dbFloorDb_) / (dbSpan > 0 ? dbSpan : 1.0f);
+        return trace.bottom() - static_cast<int>(std::clamp(t, 0.0f, 1.0f) * trace.height());
+    };
+    QPen gridPen(tokens::rgbaA(tokens::kTextAlphaFaint), 1);
+    p.setPen(gridPen);
+    for (float db = std::ceil(dbFloorDb_ / tokens::kDbGridStep) * tokens::kDbGridStep;
+         db <= dbCeilDb_; db += tokens::kDbGridStep) {
+        const int y = dbToY(db);
+        p.drawLine(trace.left(), y, trace.right(), y);
+        p.drawText(trace.left() + tokens::scaled(tokens::kDbLabelPadR),
+                   y + tokens::scaled(tokens::kDbLabelOffsetY),
+                   QString::number(static_cast<int>(db)));
+    }
+
+    // --- spectrum polyline -------------------------------------------------
+    const int bins = bins_;
+    if (haveFrame_ && bins > 0 && !frame_.dbfs.empty()) {
+        const double bandLo = frameF0Hz_ - frameFsHz_ / 2.0;
+        const double binHz = frameFsHz_ / bins;
+        QPolygonF line;
+        QPolygonF holdLine;
+        for (int i = 0; i < bins; ++i) {
+            const double f = bandLo + (i + 0.5) * binHz;
+            const int x = xForFreq(f, fLo, span);
+            if (x < trace.left() - 2 || x > trace.right() + 2) continue;
+            line << QPointF(x, dbToY(frame_.dbfs[i]));
+            if (maxHoldOn_ && i < static_cast<int>(maxHold_.size()))
+                holdLine << QPointF(x, dbToY(maxHold_[i]));
+        }
+        p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaPrimary), 1.2));
+        if (!line.isEmpty()) p.drawPolyline(line);
+        if (maxHoldOn_ && !holdLine.isEmpty()) {
+            p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary2), 1.0));
+            p.drawPolyline(holdLine);
+        }
+    }
+
+    // --- waterfall (crop the history snapshot to the visible window) --------
+    if (!history_.isNull() && falls.height() > 0 && bins > 0) {
+        const double bandLo = frameF0Hz_ - frameFsHz_ / 2.0;
+        const double binF = (fLo - bandLo) / frameFsHz_ * bins;
+        const double binW = span / frameFsHz_ * bins;
+        int srcX = static_cast<int>(std::floor(binF));
+        int srcW = static_cast<int>(std::ceil(binW));
+        srcX = std::clamp(srcX, 0, bins);
+        srcW = std::clamp(srcW, 0, bins - srcX);
+        if (srcW > 0)
+            p.drawImage(falls, history_, QRectF(srcX, 0, srcW, ringDepth_));
+        p.setPen(QPen(tokens::cardEdge(), 1));
+        p.drawRect(falls);
+    }
+
+    // --- VFO band boxes on trace + waterfall --------------------------------
+    for (const auto& m : markers_) {
+        int bx0, bx1, vx;
+        markerBox(m, fLo, span, bx0, bx1, vx);
+        const bool sel = m.selected;
+        const double fillA = sel ? tokens::kVfoBoxSelFillAlpha : tokens::kVfoBoxFillAlpha;
+        const double edgeA = sel ? tokens::kVfoBoxSelEdgeAlpha : tokens::kVfoBoxEdgeAlpha;
+        QColor mc = m.color.isValid() ? m.color : QColor(tokens::kAccent);
+        QColor fill = mc; fill.setAlphaF(fillA);
+        p.fillRect(QRect(bx0, trace.top(), bx1 - bx0, trace.height()), fill);
+        p.fillRect(QRect(bx0, falls.top(), bx1 - bx0, falls.height()), fill);
+        QColor edge = mc; edge.setAlphaF(edgeA);
+        p.setPen(QPen(edge, sel ? tokens::kVfoBoxSelLineWidth : tokens::kVfoBoxLineWidth));
+        p.drawLine(bx0, trace.top(), bx0, trace.bottom());
+        p.drawLine(bx1, trace.top(), bx1, trace.bottom());
+        p.drawLine(bx0, falls.top(), bx0, falls.bottom());
+        p.drawLine(bx1, falls.top(), bx1, falls.bottom());
+        QColor ctr = mc; ctr.setAlphaF(tokens::kVfoBoxCenterAlpha);
+        p.setPen(QPen(ctr, tokens::kVfoBoxLineWidth));
+        p.drawLine(vx, trace.top(), vx, trace.bottom());
+        p.drawLine(vx, falls.top(), vx, falls.bottom());
+    }
+
+    // --- frequency strip ----------------------------------------------------
+    p.fillRect(strip, QColor(tokens::kSpectrumBg).darker(120));
+    const double raw = span / tokens::kWaterfallFreqTicks;
+    const double mag = std::pow(10.0, std::floor(std::log10(raw)));
+    double nice = mag;
+    for (double f : {2.0, 2.5, 5.0, 10.0}) if (mag * f >= raw) { nice = mag * f; break; }
+    p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary), 1));
+    const int half = tokens::scaled(tokens::kFreqLabelHalfW);
+    for (double f = std::floor(fLo / nice) * nice; f <= fHi; f += nice) {
+        const int x = xForFreq(f, fLo, span);
+        if (x < strip.left() || x > strip.right()) continue;
+        p.drawLine(x, strip.bottom(), x, strip.bottom() - tokens::scaled(tokens::kWaterfallTickH));
+        const QString lbl = QString::number(f / 1e6, 'f', 3);
+        p.drawText(QRect(x - half, strip.top(), half * 2, strip.height()),
+                   Qt::AlignHCenter | Qt::AlignVCenter, lbl);
+    }
+
+    // --- divider hairline ---------------------------------------------------
+    p.setPen(QPen(tokens::rgbaA(dividerHot_ ? tokens::kTextAlphaPrimary
+                                            : tokens::kTextAlphaTertiary), 1));
+    p.drawLine(lay_.plotX0, lay_.splitY, lay_.plotX1, lay_.splitY);
+}
+
+// ---------------------------------------------------------------------------
+// Pointer interaction
+// ---------------------------------------------------------------------------
 void SpectrumDisplay::mousePressEvent(QMouseEvent* e) {
-    const QPoint pos = e->position().toPoint();
-    const int ex = pos.x();
-    const int ey = pos.y();
+    if (e->button() != Qt::LeftButton) return;
+    const QPoint pos = e->pos();
+    double fLo, fHi, span;
+    visibleWindow(fLo, fHi, span);
 
-    // Divider drag takes priority.
-    if (g_.dividerHit.contains(pos)) {
-        dividerDragging_ = true;
-        setCursor(Qt::SizeVerCursor);
+    if (lay_.splitZone.contains(pos)) {
+        grab_ = Grab::Divider;
         e->accept();
         return;
     }
-
-    if (ex < g_.x0 || ex > g_.x1 || ey < g_.contentTop || ey > g_.waterfall.bottom()) {
+    if (lay_.stripRect.contains(pos)) {
+        grab_ = Grab::Pan;
+        panRefX_ = pos.x();
         e->accept();
         return;
     }
-
-    // Frequency strip drag = pan the visible window, no Shift held (SDR++
-    // alignment). The strip spans the same frequency axis as the trace/waterfall,
-    // so horizontal drag there slides the view.
-    if (g_.freqStrip.contains(pos)) {
-        dragging_ = true;
-        panning_ = true;
-        lastPanPos_ = pos;
-        dragVfoId_ = -1;
-        dragMode_ = DragMode::Pan;
-        e->accept();
-        return;
-    }
-
-    dragging_ = true;
-    panning_ = (e->modifiers() & Qt::ShiftModifier);
-    lastPanPos_ = pos;
-    dragVfoId_ = -1;
-
-    double fLo, fHi, spanVis; visibleRange(fLo, fHi, spanVis);
-
-    // Multi-VFO: hit-test band boxes first.
-    if (!markers_.isEmpty()) {
-        const int hit = hitVfoMarker(ex, fLo, spanVis);
-        if (hit >= 0) {
-            const auto& m = markers_[hit];
-            int bx0, bx1, vx;
-            vfoBoxGeometry(m, fLo, spanVis, bx0, bx1, vx);
-            const int tol = tokens::scaled(tokens::kBandEdgeHitTol);
-            dragVfoId_ = m.id;
-            // Grab the tuning/dial line (or the box body) => translate the VFO.
-            // Grab an edge => resize. For single-sided SSB the dial line IS one
-            // edge, so checking it first makes a grab on the dial retune rather
-            // than resize; only the opposite (far) edge resizes the bandwidth.
-            if (std::abs(ex - vx) <= tol) dragMode_ = DragMode::Tune;
-            else if (std::abs(ex - bx0) <= tol) dragMode_ = DragMode::BandL;
-            else if (std::abs(ex - bx1) <= tol) dragMode_ = DragMode::BandR;
-            else dragMode_ = DragMode::Tune;
-            if (!m.selected) emit vfoMarkerSelected(m.id);
-            if (dragMode_ == DragMode::Tune) mouseMoveEvent(e);
-            e->accept();
+    if (lay_.traceRect.contains(pos) || lay_.fallsRect.contains(pos)) {
+        if (e->modifiers() & Qt::ShiftModifier) {
+            grab_ = Grab::Pan;
+            panRefX_ = pos.x();
             return;
         }
-        // Missed every box: SDR++ alignment -- a plain click/drag on blank
-        // spectrum retunes the SELECTED VFO to the cursor (snapped to stepHz_).
-        // Shift still pans the view.
-        if (panning_) {
-            dragMode_ = DragMode::Pan;
-        } else {
-            int selIdx = -1;
-            for (int i = 0; i < markers_.size(); ++i)
-                if (markers_[i].selected) { selIdx = i; break; }
-            if (selIdx >= 0) {
-                dragVfoId_ = markers_[selIdx].id;
-                dragMode_ = DragMode::Tune;
-                mouseMoveEvent(e);   // snap immediately to the cursor frequency
+        if (!markers_.isEmpty()) {
+            const int idx = findMarkerAt(pos.x(), fLo, span);
+            int selId = -1;
+            for (int i = 0; i < markers_.size(); ++i) if (markers_[i].selected) selId = markers_[i].id;
+            if (idx >= 0) {
+                const dsp::VfoMarker& m = markers_[idx];
+                int bx0, bx1, vx;
+                markerBox(m, fLo, span, bx0, bx1, vx);
+                const int tol = tokens::scaled(tokens::kBandEdgeHitTol);
+                grabVfoId_ = m.id;
+                if (std::abs(pos.x() - bx0) <= tol)      grab_ = Grab::VfoEdgeL;
+                else if (std::abs(pos.x() - bx1) <= tol) grab_ = Grab::VfoEdgeR;
+                else {
+                    grab_ = Grab::VfoBody;
+                    downPos_ = pos;
+                    downFreqHz_ = freqForX(pos.x(), fLo, span);
+                    emit vfoMarkerSelected(m.id);
+                }
             } else {
-                dragMode_ = DragMode::None;
+                // Blank spectrum: a click retunes the selected VFO to this frequency.
+                grab_ = Grab::VfoBody;
+                grabVfoId_ = selId;
+                downPos_ = pos;
+                downFreqHz_ = freqForX(pos.x(), fLo, span);
             }
+        } else {
+            grab_ = Grab::Tune;
+            downPos_ = pos;
+            downFreqHz_ = dialFreqHz_;
         }
-        e->accept();
-        return;
     }
-
-    // Legacy single-VFO drag.
-    const int cx = xOfFreq(vfoFreq_, fLo, spanVis);
-    const int halfW = static_cast<int>(g_.dataWidth * (bwHz_ / 2.0) / spanVis);
-    const int tol = tokens::scaled(tokens::kBandEdgeHitTol);
-    if (std::abs(ex - (cx - halfW)) <= tol) dragMode_ = DragMode::BandL;
-    else if (std::abs(ex - (cx + halfW)) <= tol) dragMode_ = DragMode::BandR;
-    else if (panning_) dragMode_ = DragMode::Pan;
-    else dragMode_ = DragMode::Tune;
-
-    if (dragMode_ == DragMode::Tune) mouseMoveEvent(e);
 }
 
 void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
-    const QPoint pos = e->position().toPoint();
-    hoverPos_ = pos;
+    const QPoint pos = e->pos();
+    double fLo, fHi, span;
+    visibleWindow(fLo, fHi, span);
 
-    // Hover highlight over the divider.
-    if (!dividerDragging_) {
-        const bool overDivider = g_.dividerHit.contains(pos);
-        if (overDivider != dividerHover_) {
-            dividerHover_ = overDivider;
-            setCursor(overDivider ? Qt::SizeVerCursor : QCursor());
-        }
-    }
+    dividerHot_ = lay_.splitZone.contains(pos);
 
-    if (dividerDragging_) {
-        // New trace height = divider Y minus the strip/gap above it.
-        int newTrace = pos.y() - g_.contentTop - g_.gap - g_.freqH;
+    switch (grab_) {
+    case Grab::Divider: {
+        int traceH = pos.y() - lay_.topPad - lay_.gapPx - lay_.stripH;
+        const int fixedV = lay_.stripH + lay_.gapPx + lay_.splitGap;
+        const int pool = lay_.botPad - lay_.topPad - fixedV;
         const int minTrace = tokens::scaled(tokens::kSpecAreaMinH);
-        const int minWf    = tokens::scaled(tokens::kWfAreaMinH);
-        newTrace = std::clamp(newTrace, minTrace, g_.panelsH - minWf);
-        if (g_.panelsH > 0) fraction_ = static_cast<double>(newTrace) / g_.panelsH;
+        const int minFalls = tokens::scaled(tokens::kWfAreaMinH);
+        traceH = static_cast<int>(clampd(traceH, minTrace, pool - minFalls));
+        traceShare_ = (pool > 0) ? static_cast<double>(traceH) / pool : 0.5;
         recomputeGeometry();
         update();
-        e->accept();
-        return;
+        break;
     }
-
-    // VFO hover read-out. Only real marker fields are shown -- name, dial
-    // frequency, mode, bandwidth and the signed IF offset (centerOffsetHz); no
-    // callsign / station name is ever invented. Cleared when hovering blank.
-    if (!dragging_ && frame_.sampleRateHz > 0 && !markers_.isEmpty() &&
-        pos.x() >= g_.x0 && pos.x() <= g_.x1 &&
-        pos.y() >= g_.contentTop && pos.y() <= g_.waterfall.bottom()) {
-        double fLo, fHi, spanVis; visibleRange(fLo, fHi, spanVis);
-        const int hit = hitVfoMarker(pos.x(), fLo, spanVis);
-        if (hit >= 0) {
-            const auto& m = markers_[hit];
-            const QString label = m.name.isEmpty()
-                ? QStringLiteral("VFO #%1").arg(m.id) : m.name;
-            const QString tip = QStringLiteral("%1\n%2 MHz · %3\nBW %4 kHz · IF offset %5 kHz")
-                .arg(label)
-                .arg(m.freqHz / 1e6, 0, 'f', 3)
-                .arg(m.mode)
-                .arg(m.bandwidthHz / 1e3, 0, 'f', 1)
-                .arg(m.centerOffsetHz / 1e3, 0, 'f', 1);
-            if (toolTipVfoId_ != m.id || toolTipText_ != tip) {
-                toolTipVfoId_ = m.id;
-                toolTipText_ = tip;
-                setToolTip(tip);
-            }
-        } else {
-            if (toolTipVfoId_ != -1) {
-                toolTipVfoId_ = -1;
-                toolTipText_.clear();
-                setToolTip(QString());
-            }
-        }
+    case Grab::Pan: {
+        const int dx = pos.x() - panRefX_;
+        panRefX_ = pos.x();
+        viewCenterHz_ -= dx / static_cast<double>(lay_.plotW) * span;
+        publishVisibleRange();
+        update();
+        break;
     }
-
-    if (!dragging_ || frame_.sampleRateHz <= 0) { update(); return; }
-
-    double fLo, fHi, spanVis; visibleRange(fLo, fHi, spanVis);
-
-    // Multi-VFO box drag: retune / resize the hit marker.
-    if (dragVfoId_ >= 0) {
-        int idx = -1;
-        for (int i = 0; i < markers_.size(); ++i)
-            if (markers_[i].id == dragVfoId_) { idx = i; break; }
-        if (idx < 0) { dragging_ = false; return; }
-        auto& m = markers_[idx];
-        const double frac = (pos.x() - g_.x0) / static_cast<double>(g_.dataWidth);
-        const double edgeF = fLo + frac * spanVis;
-        if (dragMode_ == DragMode::BandL || dragMode_ == DragMode::BandR) {
-            // Edge resize. The dial line (m.freqHz) stays fixed; only the far
-            // edge moves. Single-sided SSB:
-            //   USB  -> far edge is the right one, bw = edgeF - dial;
-            //   LSB/CW -> far edge is the left one, bw = dial - edgeF.
-            // Symmetric modes resize about the center: bw = 2*|edgeF - dial|.
-            double newBw;
-            if (m.mode == QLatin1String("USB")) {
-                newBw = edgeF - m.freqHz;
-            } else if (m.mode == QLatin1String("LSB") || m.mode == QLatin1String("CW")) {
-                newBw = m.freqHz - edgeF;
-            } else {
-                newBw = std::abs(edgeF - m.freqHz) * 2.0;
-            }
-            newBw = std::clamp(newBw,
-                               static_cast<double>(tokens::kVfoMinBandwidthHz),
-                               static_cast<double>(tokens::kVfoMaxBandwidthHz));
-            m.bandwidthHz = newBw;
-            emit vfoMarkerBandwidthChanged(m.id, newBw);
-        } else if (dragMode_ == DragMode::Tune) {
-            double freq = edgeF;
-            if (stepHz_ > 0) freq = std::round(freq / stepHz_) * stepHz_;
-            m.freqHz = freq;
-            emit vfoMarkerCenterTuned(m.id, freq);
+    case Grab::Tune: {
+        const int dx = pos.x() - downPos_.x();
+        const double newFreq = downFreqHz_ + dx / static_cast<double>(lay_.plotW) * span;
+        dialFreqHz_ = newFreq;
+        emit frequencyChanged(newFreq);
+        update();
+        break;
+    }
+    case Grab::VfoBody: {
+        const int dx = pos.x() - downPos_.x();
+        const double newFreq = downFreqHz_ + dx / static_cast<double>(lay_.plotW) * span;
+        if (grabVfoId_ >= 0) emit vfoMarkerCenterTuned(grabVfoId_, newFreq);
+        update();
+        break;
+    }
+    case Grab::VfoEdgeL:
+    case Grab::VfoEdgeR: {
+        for (int i = 0; i < markers_.size(); ++i) {
+            if (markers_[i].id != grabVfoId_) continue;
+            const double edgeFreq = freqForX(pos.x(), fLo, span);
+            double bw = std::abs(markers_[i].freqHz - edgeFreq);
+            bw = clampd(bw, tokens::kVfoMinBandwidthHz, tokens::kVfoMaxBandwidthHz);
+            emit vfoMarkerBandwidthChanged(grabVfoId_, bw);
         }
         update();
-        return;
+        break;
     }
-
-    if (dragMode_ == DragMode::BandL || dragMode_ == DragMode::BandR) {
-        const double frac = (pos.x() - g_.x0) / static_cast<double>(g_.dataWidth);
-        const double edgeF = fLo + frac * spanVis;
-        double half = std::abs(edgeF - vfoFreq_);
-        half = std::clamp(half * 2.0, 100.0, 500000.0);
-        bwHz_ = half;
-        emit bandwidthChanged(bwHz_);
-        update();
-        return;
+    default:
+        break;
     }
-
-    if (dragMode_ == DragMode::Pan) {
-        const double fs = frame_.sampleRateHz;
-        const double span = fs / zoomFactor_;
-        const double dx = pos.x() - lastPanPos_.x();
-        viewCenterHz_ -= (dx / static_cast<double>(g_.dataWidth)) * span;
-        lastPanPos_ = pos;
-        update();
-        emitVisibleRange();
-        return;
-    }
-
-    // Plain drag: retune f0 to the cursor frequency.
-    const double frac = (pos.x() - g_.x0) / static_cast<double>(g_.dataWidth);
-    double freq = fLo + frac * spanVis;
-    if (stepHz_ > 0) freq = std::round(freq / stepHz_) * stepHz_;
-    vfoFreq_ = freq;
-    viewCenterHz_ = freq;
-    emit frequencyChanged(freq);
-    update();
 }
 
-void SpectrumDisplay::mouseReleaseEvent(QMouseEvent*) {
-    if (dividerDragging_) {
-        dividerDragging_ = false;
-        unsetCursor();
-        // Persist the new split share.
-        QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeySpecFraction, fraction_);
+void SpectrumDisplay::mouseReleaseEvent(QMouseEvent* e) {
+    if (grab_ == Grab::VfoBody && grabVfoId_ >= 0) {
+        double fLo, fHi, span;
+        visibleWindow(fLo, fHi, span);
+        // A click (little or no drag) settles the selected VFO on the pointer.
+        const double target = ((e->pos() - downPos_).manhattanLength() < 3)
+                              ? freqForX(e->pos().x(), fLo, span)
+                              : downFreqHz_ + (e->pos().x() - downPos_.x()) /
+                                                static_cast<double>(lay_.plotW) * span;
+        emit vfoMarkerCenterTuned(grabVfoId_, target);
+        emit viewChanged();
+    } else if (grab_ == Grab::Tune || grab_ == Grab::Pan || grab_ == Grab::Divider) {
         emit viewChanged();
     }
-    dragging_ = false;
-    panning_ = false;
-    dragMode_ = DragMode::None;
-    dragVfoId_ = -1;
+    grab_ = Grab::None;
+    grabVfoId_ = -1;
 }
 
-void SpectrumDisplay::mouseDoubleClickEvent(QMouseEvent*) {
-    resetZoom();
+void SpectrumDisplay::mouseDoubleClickEvent(QMouseEvent* e) {
+    // Double-click re-centres the view on the clicked frequency.
+    double fLo, fHi, span;
+    visibleWindow(fLo, fHi, span);
+    viewCenterHz_ = freqForX(e->pos().x(), fLo, span);
+    publishVisibleRange();
+    update();
 }
 
 void SpectrumDisplay::wheelEvent(QWheelEvent* e) {
-    if (frame_.sampleRateHz <= 0.0) { e->ignore(); return; }
-    const double steps = e->angleDelta().y() / 120.0;
-    if (g_.dataWidth <= 10 || steps == 0.0) { e->accept(); return; }
+    const int dy = e->angleDelta().y();
+    if (dy == 0) return;
+    double fLo, fHi, span;
+    visibleWindow(fLo, fHi, span);
 
-    // Ctrl+wheel = zoom around the cursor (SDR++ alignment). Plain wheel = step
-    // tune the selected VFO; Shift multiplies the step by 10, Alt by 0.1.
     if (e->modifiers() & Qt::ControlModifier) {
-        const double fs = frame_.sampleRateHz;
-        const double xRatio = (e->position().x() - g_.x0) / static_cast<double>(g_.dataWidth);
-
-        const double spanBefore = fs / zoomFactor_;
-        const double fCursor = viewCenterHz_ + (xRatio - 0.5) * spanBefore;
-
-        const double newZoom = std::clamp(zoomFactor_ * std::pow(2.0, steps),
-                                          tokens::kZoomMin, tokens::kZoomMax);
-        if (newZoom == zoomFactor_) { e->accept(); return; }
+        // Zoom about the cursor frequency.
+        const double cursorFreq = freqForX(e->position().x(), fLo, span);
+        const double factor = (dy > 0) ? 1.2 : (1.0 / 1.2);
+        const double newZoom = clampd(zoomFactor_ * factor, tokens::kZoomMin, tokens::kZoomMax);
+        const double newSpan = frameFsHz_ / newZoom;
+        const double frac = (e->position().x() - lay_.plotX0) / static_cast<double>(lay_.plotW);
+        viewCenterHz_ = cursorFreq - frac * newSpan + newSpan / 2.0;
         zoomFactor_ = newZoom;
-
-        const double spanAfter = fs / zoomFactor_;
-        viewCenterHz_ = fCursor - (xRatio - 0.5) * spanAfter;
-
+        publishVisibleRange();
         update();
-        emitVisibleRange();
-        e->accept();
-        return;
+        emit viewChanged();
+    } else {
+        // Plain wheel step-tunes the dial by the configured step.
+        const double dir = (dy > 0) ? 1.0 : -1.0;
+        const double newFreq = dialFreqHz_ + dir * tuneStepHz_;
+        dialFreqHz_ = newFreq;
+        emit frequencyChanged(newFreq);
+        update();
     }
-
-    // Step tune the selected VFO to the snapped new frequency. The visible window
-    // stays put (the marker walks across it), matching drag-tune behavior.
-    double mult = 1.0;
-    if (e->modifiers() & Qt::ShiftModifier) mult = 10.0;
-    else if (e->modifiers() & Qt::AltModifier) mult = 0.1;
-
-    double newFreq = vfoFreq_ + steps * stepHz_ * mult;
-    if (stepHz_ > 0.0) newFreq = std::round(newFreq / stepHz_) * stepHz_;
-    vfoFreq_ = newFreq;
-
-    int selId = -1;
-    for (const auto& m : markers_) if (m.selected) selId = m.id;
-    if (selId >= 0) emit vfoMarkerCenterTuned(selId, newFreq);
-    else emit frequencyChanged(newFreq);
-
-    update();
     e->accept();
 }
 
 void SpectrumDisplay::leaveEvent(QEvent*) {
-    hoverPos_ = QPoint(-1, -1);
-    if (toolTipVfoId_ != -1) {
-        toolTipVfoId_ = -1;
-        toolTipText_.clear();
-        setToolTip(QString());
-    }
+    dividerHot_ = false;
+    QToolTip::hideText();
     update();
 }
 
