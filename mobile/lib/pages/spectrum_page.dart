@@ -330,12 +330,7 @@ class _ControlPanel extends StatelessWidget {
                 onTap: () => _promptFrequency(context),
                 child: Text(
                   '${(controller.freqHz / 1e6).toStringAsFixed(4)} MHz',
-                  style: const TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w600,
-                    color: AppTokens.textPrimary,
-                    fontFamilyFallback: AppTokens.monoFallback,
-                  ),
+                  style: AppTokens.freqReadout,
                 ),
               ),
             ),
