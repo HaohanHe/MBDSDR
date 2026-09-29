@@ -326,5 +326,9 @@ void SpectrumWidget::setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& marker
     if (canvas_) canvas_->setVfoMarkers(markers);
 }
 
+void SpectrumWidget::setNoiseFloorDb(float db) {
+    if (canvas_) canvas_->setNoiseFloorDb(db);
+}
+
 } // namespace ui
 } // namespace mbdsdr

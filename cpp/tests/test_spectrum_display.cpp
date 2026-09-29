@@ -14,6 +14,7 @@
 #include <QSettings>
 #include <QVariant>
 #include <QWheelEvent>
+#include <cmath>
 
 #include "ui/spectrum_display.h"
 #include "core/spectrum_frame.h"
@@ -32,6 +33,9 @@ private slots:
     void realFrameDrivesHistory();
     void zoomAndPanStayAligned();
     void ssbBoxEdgesAreAligned();
+    void maturedPeakMarkerGeometry();
+    void noiseFloorBaselineGeometry();
+    void cursorReadoutIsRealData();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -252,6 +256,89 @@ void TestSpectrumDisplay::ssbBoxEdgesAreAligned() {
     QCOMPARE(uv, lv);                       // same dial frequency -> same x
     QVERIFY2(u1 > lv && l0 < uv,
              "USB box right of dial, LSB box left of dial (not mirrored)");
+}
+
+// (a) Matured peak markers land exactly on the trace: triangle apex x tracks the
+//     peak frequency and its y sits on the peak's dBFS -- no synthetic offset.
+void TestSpectrumDisplay::maturedPeakMarkerGeometry() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+
+    const int bins = 512;
+    // Same frame (one carrier at bin 128) repeated until the peak matures.
+    for (int i = 0; i < tokens::kPeakMinSeenFrames; ++i)
+        w.setSpectrum(makeFrame(bins, 128, 0.0f, -100.0f));
+
+    QVERIFY2(!w.maturedPeaks().isEmpty(), "single carrier must mature into a peak");
+    const mbdsdr::dsp::PeakInfo pk = w.maturedPeaks().first();
+
+    // The tracked peak is the carrier we injected (bin 128 of 512, fs 2.4 MHz,
+    // f0 98.5 MHz): bandLo + (bin+0.5)*binHz.
+    const double fs = 2.4e6, f0 = 98.5e6;
+    const double expectF = (f0 - fs / 2.0) + (128 + 0.5) * (fs / bins);
+    QVERIFY2(std::abs(pk.freqHz - expectF) < fs / bins,
+             "tracked peak frequency must match the injected carrier bin");
+    QCOMPARE(pk.dbfs, 0.0f);
+
+    // Triangle apex sits exactly on the trace: x = frequency->x, y = dBFS->y.
+    const int ax = w.xForFrequency(pk.freqHz);
+    const int ay = w.yForDbfs(pk.dbfs);
+    QVERIFY2(ax >= w.spectrumRect().left() && ax <= w.spectrumRect().right(),
+             "peak marker x must lie inside the trace horizontal extent");
+    // dbfs=0 == dbCeil maps to the very top row (paintEvent's own dbToY, which
+    // can sit one pixel above the top edge by construction) -- allow that slack.
+    QVERIFY2(ay >= w.spectrumRect().top() - 2 && ay <= w.spectrumRect().bottom(),
+             "peak marker apex y must lie on the trace");
+}
+
+// (b) Noise-floor baseline: default NaN suppresses it; after injection the line
+//     y must equal dbToY(nf) on the trace axis.
+void TestSpectrumDisplay::noiseFloorBaselineGeometry() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    w.setSpectrum(makeFrame(512, 256, 0.0f, -100.0f));
+
+    QVERIFY2(std::isnan(w.noiseFloorDb()), "default noise floor must be NaN (off)");
+    w.setNoiseFloorDb(-80.0f);
+    QCOMPARE(w.noiseFloorDb(), -80.0f);
+    // The baseline y is exactly the trace mapping of the injected value, and it
+    // sits between the trace top and bottom (i.e. on the visible dB axis).
+    const int yNf = w.yForDbfs(-80.0f);
+    QVERIFY2(yNf > w.spectrumRect().top() && yNf < w.spectrumRect().bottom(),
+             "noise-floor baseline must plot within the trace vertical range");
+}
+
+// (c) Hover read-out is derived from the real frame (freq mapping + the bin's
+//     real dBFS), with SNR = dBFS - injected noise floor.
+void TestSpectrumDisplay::cursorReadoutIsRealData() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    // Center bin (256 of 512) is the 0 dB carrier; floor -100 dBFS.
+    w.setSpectrum(makeFrame(512, 256, 0.0f, -100.0f));
+    w.setNoiseFloorDb(-100.0f);
+
+    // Hover exactly on the carrier bin (bin 256 of 512): bandLo + (256.5)*binHz.
+    const double fs = 2.4e6, f0 = 98.5e6;
+    const int bins = 512;
+    const double carrierF = (f0 - fs / 2.0) + (256 + 0.5) * (fs / bins);
+    const QPoint atCarrier(w.xForFrequency(carrierF),
+                           w.spectrumRect().center().y());
+    const QString ro = w.cursorReadoutText(atCarrier);
+    QVERIFY2(!ro.isEmpty(), "read-out must be non-empty over the trace");
+    // Line 1 = the frequency under the cursor (within one bin of the carrier).
+    const QString fLine = ro.section(QLatin1Char('\n'), 0, 0);
+    QVERIFY2(fLine.endsWith("MHz"), "line 1 must report frequency in MHz");
+    const double mhz = fLine.left(fLine.indexOf(' ')).toDouble();
+    QVERIFY2(std::abs(mhz - carrierF / 1e6) < (fs / bins) / 1e6 + 0.001,
+             "cursor frequency must map to the carrier bin");
+    QVERIFY2(ro.contains("0.0 dBFS"), "line 2 must be the real carrier bin dBFS");
+    QVERIFY2(ro.contains("SNR 100.0 dB"), "SNR = carrier dBFS - injected noise floor");
+
+    // Outside the plot the read-out must be suppressed (no invented numbers).
+    QVERIFY(w.cursorReadoutText(QPoint(2, 2)).isEmpty());
 }
 
 QTEST_MAIN(TestSpectrumDisplay)

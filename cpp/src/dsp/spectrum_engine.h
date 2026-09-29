@@ -189,6 +189,11 @@ signals:
     // from the median of the per-bin power spectrum (Parseval-scaled to the
     // total-power domain). No synthetic numbers.
     void snrLevel(float snrDb);
+    // The slowly-tracked real noise floor itself (same domain as the SNR input),
+    // so the UI can draw a baseline and compute per-bin SNR read-outs. Emitted
+    // only once tracking has initialised. Purely additive -- existing behaviour
+    // is unchanged.
+    void noiseFloorLevel(float dbDbfs);
     void squelchState(bool open);
     void recordingStateChanged(bool recording, const QString& path);
     // Watch state: enabled = armed (listening), recording = a segment file is
