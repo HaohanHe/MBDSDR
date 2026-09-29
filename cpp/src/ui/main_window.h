@@ -30,7 +30,7 @@ namespace mbdsdr {
 namespace ui { class BookmarkManager; }
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct VfoMarker; }
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
-                 class ElevationPlot; struct AircraftPoint; }
+                 class ElevationPlot; struct AircraftPoint; class AircraftTracker; }
 namespace ai   { class Agent; }
 namespace gnss { class GnssReceiver; struct GnssFix; }
 
@@ -92,8 +92,11 @@ private:
     // Sky-tab clock-bias readout + copy button.
     QLabel*      clockInfoLabel_ = nullptr;
     QPushButton* copyClockBtn_   = nullptr;
-    // Rich ADS-B points keyed by ICAO (tail streak maintained per aircraft).
-    QMap<QString, ui::AircraftPoint>* adsbMap_ = nullptr;
+    // ADS-B aircraft tracker: merges decoded frames keyed by ICAO, applies TTL
+    // expiry, and emits only real-position points to the map. Lives on the UI
+    // thread; fed by onAdsbAircraft(), pruned by adsbTimer_ every second.
+    ui::AircraftTracker* adsbTracker_ = nullptr;
+    QTimer*             adsbTimer_  = nullptr;
     gnss::GnssFix lastGnssFix_;
     bool   gnssHasFix_ = false;
     double lastGnssAppliedLat_ = std::numeric_limits<double>::quiet_NaN();
@@ -217,6 +220,8 @@ private:
     void updateLiveSatellite();     // 1s timer: propagate selected pass live
     void updateElevationPlotFor(const dsp::SatPass& p); // el-vs-time samples
     void updateClockBiasLabel();    // 1s: GNSS/system/local time + bias
+    void onAdsbPrune();             // 1s: TTL-expire aircraft, refresh table/map
+    void refreshAdsbTable();        // rebuild ADS-B table + map + empty state
 
     // Debounced QSettings writer: high-frequency signals (zoom/pan, slider
     // drags, spinbox edits) call scheduleSave() which (re)arms this one-shot

@@ -47,6 +47,7 @@ set(SOURCES
     src/ui/spectrum_display.cpp
     src/ui/sky_view.cpp
     src/ui/world_view.cpp
+    src/ui/aircraft_tracker.cpp
     src/ui/settings_dialog.cpp
     src/ui/about_dialog.cpp
     src/dsp/fft.cpp
@@ -135,6 +136,7 @@ set(HEADERS
     src/dsp/sgp4.h
     src/ui/sky_view.h
     src/ui/world_view.h
+    src/ui/aircraft_tracker.h
     src/ui/map_projection.h
     src/ui/coastline_data.h
     src/ui/elevation_plot.h
@@ -301,6 +303,17 @@ add_executable(test_adsb_cpr tests/test_adsb_cpr.cpp src/dsp/adsb_decoder.cpp)
 target_include_directories(test_adsb_cpr PRIVATE src)
 target_link_libraries(test_adsb_cpr PRIVATE Qt6::Core)
 add_test(NAME adsb_cpr COMMAND test_adsb_cpr)
+
+add_executable(test_adsb_decode tests/test_adsb_decode.cpp src/dsp/adsb_decoder.cpp)
+target_include_directories(test_adsb_decode PRIVATE src)
+target_link_libraries(test_adsb_decode PRIVATE Qt6::Core)
+add_test(NAME adsb_decode COMMAND test_adsb_decode)
+
+add_executable(test_aircraft_tracker tests/test_aircraft_tracker.cpp src/ui/aircraft_tracker.cpp)
+target_include_directories(test_aircraft_tracker PRIVATE src)
+# aircraft_tracker.h pulls in world_view.h (AircraftPoint), which needs QtWidgets.
+target_link_libraries(test_aircraft_tracker PRIVATE Qt6::Core Qt6::Widgets)
+add_test(NAME aircraft_tracker COMMAND test_aircraft_tracker)
 
 add_executable(test_channelizer tests/test_channelizer.cpp
     src/dsp/channelizer.cpp src/dsp/fft.cpp)
