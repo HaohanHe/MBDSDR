@@ -178,9 +178,9 @@ void TestSpectrumDisplay::zoomAndPanStayAligned() {
     const double lo0 = w.visLoHz();
     const double hi0 = w.visHiHz();
 
-    // Wheel up = zoom in around the cursor.
+    // Ctrl+wheel = zoom around the cursor (plain wheel now step-tunes the VFO).
     QWheelEvent ev(QPointF(500,300), QPointF(500,300), QPoint(120,0),
-                   QPoint(0,120), Qt::NoButton, Qt::NoModifier,
+                   QPoint(0,120), Qt::NoButton, Qt::ControlModifier,
                    Qt::NoScrollPhase, false);
     w.wheelEvent(&ev);
     QVERIFY(w.visLoHz() != lo0 || w.visHiHz() != hi0);

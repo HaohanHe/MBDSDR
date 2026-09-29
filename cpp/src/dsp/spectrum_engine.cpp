@@ -10,6 +10,9 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <algorithm>
 #include <chrono>
 #include <thread>
 
@@ -31,6 +34,7 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
     audioOut_ = new AudioOutput(this);
     audioSink_ = audioOut_;   // default: real device playback
     gatedRec_.setOutputDir("recordings");
+    telemetryClock_.start();
     // Single default VFO at the source center, NFM 12.5 kHz -- identical to
     // the legacy single-channel receiver on first boot.
     vfoManager_.initDefault(source_->sampleRate(), source_->centerFreq(),
@@ -255,6 +259,14 @@ bool SpectrumEngine::startRecording() {
             return false;
         }
         recCurrentPath_ = wavWriter_.currentFilePath();
+        // Capture the readback metadata for the sidecar JSON written at stop.
+        // center/gain come from the live source (hardware actual values), not the
+        // UI requests. mode = selected VFO demod.
+        wavSidecarPath_ = base + ".json";
+        wavSidecarCenterHz_ = source_->centerFreq();
+        wavSidecarGainDb_ = source_->gain();
+        wavSidecarHardware_ = source_->name();
+        wavSidecarMode_ = demodMode_;
         emit recordingStateChanged(true, recCurrentPath_);
     }
     // Start the wall-clock used for the 1 Hz REC progress tick.
@@ -271,6 +283,23 @@ void SpectrumEngine::stopRecording() {
     } else if (wavWriter_.isRecording()) {
         const QString path = wavWriter_.currentFilePath();
         wavWriter_.stop();
+        // Write the sidecar metadata JSON now that the WAV is finalized. Fields
+        // mirror the SigMF recorder so demod-audio captures carry the same proof.
+        if (!wavSidecarPath_.isEmpty()) {
+            QJsonObject meta;
+            meta["type"] = "mbdsdr-audio-recording";
+            meta["sample_rate"] = 48000.0;
+            meta["center_freq"] = wavSidecarCenterHz_;
+            meta["gain"] = wavSidecarGainDb_;
+            meta["hardware"] = wavSidecarHardware_;
+            meta["mode"] = wavSidecarMode_;
+            meta["datetime"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+            QFile f(wavSidecarPath_);
+            if (f.open(QIODevice::WriteOnly)) {
+                f.write(QJsonDocument(meta).toJson(QJsonDocument::Indented));
+            }
+            wavSidecarPath_.clear();
+        }
         emit recordingStateChanged(false, path);
     }
 }
@@ -497,6 +526,40 @@ void SpectrumEngine::run() {
         for (auto c : iq) rssi += std::norm(c);
         rssi = 10 * std::log10(rssi / iq.size() + 1e-10);
         emit rssiLevel(static_cast<float>(rssi));
+
+        // Real measured noise floor -> SNR. The median per-bin level of the power
+        // spectrum is the noise density (peaks don't lift the median); Parseval
+        // scales it to the total-power domain used by RSSI. A slow exponential
+        // average tracks the floor so transients don't move it. All values come
+        // from the real frame.dbfs / real IQ -- nothing fabricated.
+        if (!frame.dbfs.empty()) {
+            std::vector<float> sorted = frame.dbfs;
+            std::sort(sorted.begin(), sorted.end());
+            const float medDb = sorted[sorted.size() / 2];
+            const double medLin = std::pow(10.0, medDb / 10.0);
+            // Per-bin scaled power summed over all bins ~= total capture power.
+            const double noiseTotalLin = medLin * static_cast<double>(sorted.size());
+            const double noiseTotalDb = 10.0 * std::log10(noiseTotalLin + 1e-12);
+            if (!noiseFloorInit_) {
+                noiseFloorTrackDb_ = noiseTotalDb;
+                noiseFloorInit_ = true;
+            } else {
+                noiseFloorTrackDb_ = 0.98 * noiseFloorTrackDb_ + 0.02 * noiseTotalDb;
+            }
+            emit snrLevel(static_cast<float>(rssi - noiseFloorTrackDb_));
+        }
+
+        // ~1 Hz readback of the ACTUAL source state to the status bar. These are
+        // the hardware readback values (gain is rounded by the driver), not the
+        // UI spinbox requests. The test source reports connected=false and the UI
+        // tags it "非硬件" -- never presented as real hardware.
+        const qint64 nowMs = telemetryClock_.elapsed();
+        if (lastTelemetryMs_ < 0 || nowMs - lastTelemetryMs_ >= 1000) {
+            lastTelemetryMs_ = nowMs;
+            emit sourceTelemetry(source_->name(), source_->isConnected(),
+                                 source_->centerFreq(), source_->sampleRate(),
+                                 source_->gain());
+        }
 
         if (digital) {
             // ---- Digital VFO: no analog audio; push constellation symbols ----

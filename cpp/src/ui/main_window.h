@@ -44,6 +44,10 @@ private slots:
     void onSourceChanged(const QString& name, bool connected);
     void onAudioLevel(float dbfs);
     void onRssiLevel(float dbfs);
+    void onSnrLevel(float snrDb);
+    // ~1 Hz hardware-readback refresh of the permanent status strip.
+    void onSourceTelemetry(const QString& name, bool connected,
+                           double centerHz, double sampleRateHz, double gainDb);
     void onSquelchState(bool open);
     void onRecordingState(bool recording, const QString& path);
     void onRecordingProgress(const QString& path, int seconds, qint64 bytes);
@@ -109,6 +113,7 @@ private:
     QTimer*         scanTimer_     = nullptr;
     double          scanFreq_      = 0.0;
     float           lastRssi_      = -200.0f;
+    float           lastSnr_       = 0.0f;
     QList<dsp::SatPass> passes_;
     QTimer*         tleTimer_    = nullptr;
     bool            tleFetchActive_ = false;
@@ -188,6 +193,7 @@ private:
     QLabel*         sbSr_   = nullptr;
     QLabel*         sbVfo_  = nullptr;
     QLabel*         sbSdr_  = nullptr;
+    QLabel*         sbGain_ = nullptr;
     QLabel*         sbRec_  = nullptr;
 
     // AI

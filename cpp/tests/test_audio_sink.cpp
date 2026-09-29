@@ -26,6 +26,8 @@ private slots:
     void memoryMuteSilences();
     void memoryIsHonestBackend();
     void engineRoutesDemodToInjectedSink();
+    void snrSignalEmitsRealMeasurement();
+    void closedSquelchMutesSpeakerPath();
 };
 
 void TestAudioSink::memoryCapturesSamples() {
@@ -116,6 +118,49 @@ void TestAudioSink::engineRoutesDemodToInjectedSink() {
     float peak = 0.0f;
     for (float s : mem->buffer()) peak = std::max(peak, std::fabs(s));
     QVERIFY2(peak > 1e-4f, "captured audio must not be silence");
+}
+
+void TestAudioSink::snrSignalEmitsRealMeasurement() {
+    // NOT HARDWARE: offline test source. The engine must push a real measured SNR
+    // (derived from the spectrum median noise floor), not a hard-coded number.
+    SpectrumEngine eng;
+    QSignalSpy spy(&eng, &SpectrumEngine::snrLevel);
+    eng.start();
+    QTest::qWait(600);
+    eng.shutdown();
+    eng.wait();
+
+    QVERIFY2(spy.count() >= 1, "engine must emit snrLevel every loop");
+    // Every emitted value is a finite dB number (no NaN/inf, no fake peak).
+    for (const auto& args : spy) {
+        const float v = qvariant_cast<float>(args.at(0));
+        QVERIFY2(std::isfinite(v), "SNR must be a finite measured dB value");
+    }
+}
+
+void TestAudioSink::closedSquelchMutesSpeakerPath() {
+    // With the squelch gate held CLOSED, the speaker/audio sink path must
+    // receive continuous 48 kHz silence (the gated recorder keeps the real
+    // audio for pre-roll, but the loudspeaker is muted).
+    SpectrumEngine eng;
+    auto* mem = new MemoryAudioSink();
+    eng.setTestAudioSink(std::unique_ptr<IAudioSink>(mem));
+    eng.setMuted(false);
+    // Threshold set above full scale: the offline test tone can never open the
+    // gate, so the loudspeaker path must be held continuously silent.
+    eng.setSquelchEnabled(true);
+    eng.setSquelchThreshold(20.0f);
+
+    eng.start();
+    QTest::qWait(700);
+    eng.shutdown();
+    eng.wait();
+
+    QVERIFY2(mem->frames() > 5000, "continuous 48k stream must still flow");
+    float peak = 0.0f;
+    for (float s : mem->buffer()) peak = std::max(peak, std::fabs(s));
+    QVERIFY2(peak < 1e-3f,
+             "closed squelch must fill the speaker path with silence");
 }
 
 QTEST_MAIN(TestAudioSink)

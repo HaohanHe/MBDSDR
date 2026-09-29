@@ -669,6 +669,19 @@ void SpectrumDisplay::mousePressEvent(QMouseEvent* e) {
         return;
     }
 
+    // Frequency strip drag = pan the visible window, no Shift held (SDR++
+    // alignment). The strip spans the same frequency axis as the trace/waterfall,
+    // so horizontal drag there slides the view.
+    if (g_.freqStrip.contains(pos)) {
+        dragging_ = true;
+        panning_ = true;
+        lastPanPos_ = pos;
+        dragVfoId_ = -1;
+        dragMode_ = DragMode::Pan;
+        e->accept();
+        return;
+    }
+
     dragging_ = true;
     panning_ = (e->modifiers() & Qt::ShiftModifier);
     lastPanPos_ = pos;
@@ -694,8 +707,23 @@ void SpectrumDisplay::mousePressEvent(QMouseEvent* e) {
             e->accept();
             return;
         }
-        // Missed every box: panning only (don't retune by clicking empty space).
-        dragMode_ = panning_ ? DragMode::Pan : DragMode::None;
+        // Missed every box: SDR++ alignment -- a plain click/drag on blank
+        // spectrum retunes the SELECTED VFO to the cursor (snapped to stepHz_).
+        // Shift still pans the view.
+        if (panning_) {
+            dragMode_ = DragMode::Pan;
+        } else {
+            int selIdx = -1;
+            for (int i = 0; i < markers_.size(); ++i)
+                if (markers_[i].selected) { selIdx = i; break; }
+            if (selIdx >= 0) {
+                dragVfoId_ = markers_[selIdx].id;
+                dragMode_ = DragMode::Tune;
+                mouseMoveEvent(e);   // snap immediately to the cursor frequency
+            } else {
+                dragMode_ = DragMode::None;
+            }
+        }
         e->accept();
         return;
     }
@@ -821,24 +849,47 @@ void SpectrumDisplay::mouseDoubleClickEvent(QMouseEvent*) {
 void SpectrumDisplay::wheelEvent(QWheelEvent* e) {
     if (frame_.sampleRateHz <= 0.0) { e->ignore(); return; }
     const double steps = e->angleDelta().y() / 120.0;
-    if (g_.dataWidth <= 10) { e->accept(); return; }
+    if (g_.dataWidth <= 10 || steps == 0.0) { e->accept(); return; }
 
-    const double fs = frame_.sampleRateHz;
-    const double xRatio = (e->position().x() - g_.x0) / static_cast<double>(g_.dataWidth);
+    // Ctrl+wheel = zoom around the cursor (SDR++ alignment). Plain wheel = step
+    // tune the selected VFO; Shift multiplies the step by 10, Alt by 0.1.
+    if (e->modifiers() & Qt::ControlModifier) {
+        const double fs = frame_.sampleRateHz;
+        const double xRatio = (e->position().x() - g_.x0) / static_cast<double>(g_.dataWidth);
 
-    const double spanBefore = fs / zoomFactor_;
-    const double fCursor = viewCenterHz_ + (xRatio - 0.5) * spanBefore;
+        const double spanBefore = fs / zoomFactor_;
+        const double fCursor = viewCenterHz_ + (xRatio - 0.5) * spanBefore;
 
-    const double newZoom = std::clamp(zoomFactor_ * std::pow(2.0, steps),
-                                      tokens::kZoomMin, tokens::kZoomMax);
-    if (newZoom == zoomFactor_) { e->accept(); return; }
-    zoomFactor_ = newZoom;
+        const double newZoom = std::clamp(zoomFactor_ * std::pow(2.0, steps),
+                                          tokens::kZoomMin, tokens::kZoomMax);
+        if (newZoom == zoomFactor_) { e->accept(); return; }
+        zoomFactor_ = newZoom;
 
-    const double spanAfter = fs / zoomFactor_;
-    viewCenterHz_ = fCursor - (xRatio - 0.5) * spanAfter;
+        const double spanAfter = fs / zoomFactor_;
+        viewCenterHz_ = fCursor - (xRatio - 0.5) * spanAfter;
+
+        update();
+        emitVisibleRange();
+        e->accept();
+        return;
+    }
+
+    // Step tune the selected VFO to the snapped new frequency. The visible window
+    // stays put (the marker walks across it), matching drag-tune behavior.
+    double mult = 1.0;
+    if (e->modifiers() & Qt::ShiftModifier) mult = 10.0;
+    else if (e->modifiers() & Qt::AltModifier) mult = 0.1;
+
+    double newFreq = vfoFreq_ + steps * stepHz_ * mult;
+    if (stepHz_ > 0.0) newFreq = std::round(newFreq / stepHz_) * stepHz_;
+    vfoFreq_ = newFreq;
+
+    int selId = -1;
+    for (const auto& m : markers_) if (m.selected) selId = m.id;
+    if (selId >= 0) emit vfoMarkerCenterTuned(selId, newFreq);
+    else emit frequencyChanged(newFreq);
 
     update();
-    emitVisibleRange();
     e->accept();
 }
 

@@ -134,6 +134,17 @@ signals:
     void sourceChanged(const QString& name, bool connected);
     void audioLevel(float dbfs);
     void rssiLevel(float dbfs);
+    // ~1 Hz readback of the ACTUAL source state (hardware values, not the UI
+    // requests): the RTL driver may round the requested gain to the nearest
+    // supported stage, so the UI must display these readback numbers. For the
+    // offline test source `connected` is false and the values are honest
+    // synthetic readbacks (labeled "非硬件" by the UI), never fake hardware.
+    void sourceTelemetry(const QString& name, bool connected,
+                         double centerHz, double sampleRateHz, double gainDb);
+    // Real measured SNR (dB): RSSI minus a slowly-tracked noise floor estimated
+    // from the median of the per-bin power spectrum (Parseval-scaled to the
+    // total-power domain). No synthetic numbers.
+    void snrLevel(float snrDb);
     void squelchState(bool open);
     void recordingStateChanged(bool recording, const QString& path);
     // 1 Hz tick while recording: current file path, elapsed wall-clock seconds,
@@ -197,6 +208,25 @@ private:
     QElapsedTimer recClock_;
     QString recCurrentPath_;
     int lastRecSecond_ = -1;
+
+    // ~1 Hz source telemetry throttle (hardware readback push to the status bar).
+    QElapsedTimer telemetryClock_;
+    qint64 lastTelemetryMs_ = -1;
+
+    // Real measured noise floor (total-power domain, dBFS), slowly tracked by an
+    // exponential average across frames so strong signals don't lift it. Used to
+    // derive snrLevel() = RSSI - noiseFloor.
+    double noiseFloorTrackDb_ = 0.0;
+    bool noiseFloorInit_ = false;
+
+    // Demod-audio WAV sidecar (.json): the metadata is captured at start and
+    // written when the WAV is closed, mirroring the SigMF recorder's stop-time
+    // sidecar write so it never references a truncated file.
+    QString wavSidecarPath_;
+    double wavSidecarCenterHz_ = 0.0;
+    double wavSidecarGainDb_ = 0.0;
+    QString wavSidecarHardware_;
+    QString wavSidecarMode_;
 
     // Guards source_/demod_/demodMode_/bandwidth_ against concurrent access
     // between the engine run() thread and UI-thread connect/disconnect calls.
