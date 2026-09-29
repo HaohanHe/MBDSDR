@@ -67,14 +67,47 @@ std::size_t TestSignalSource::readIQ(std::vector<std::complex<float>>& out) {
             out[i] = std::complex<float>(env*c, env*s) * gainLin * 0.5f;
         }
     } else if (modulation_ == "fm") {
-        // Carrier at center, FM-modulated by 1 kHz, deviation 3 kHz
+        // Carrier at center, FM-modulated by a 1 kHz, deviation 3 kHz.
         const double faudio = 1e3, fdev = 3e3;
         double phase = 0;
-        for (std::size_t i = 0; i < n; ++i) {
-            const double t = static_cast<double>(counter_++);
-            phase += 2*M_PI*fdev/fs_ * std::sin(2*M_PI*faudio*t/fs_);
-            out[i] = std::complex<float>(static_cast<float>(std::cos(phase)),
-                                         static_cast<float>(std::sin(phase))) * gainLin * 0.5f;
+        if (fmStereo_) {
+            // *** SYNTHETIC FM-STEREO COMPOSITE MPX -- NOT HARDWARE ***
+            // Frequency-modulate the carrier with a real broadcast-style composite
+            // baseband so DemodWFM's raw MPX tap carries:
+            //   M = 0.5*(L+R)   with L=cos(2pi*1k*t), R=cos(2pi*3k*t)
+            //   a 19 kHz pilot
+            //   S = 0.5*(L-R) DSB-modulated onto a 38 kHz suppressed carrier.
+            // The discriminator is gain = 1/(2pi*75k/fs), so driving the
+            // instantaneous frequency deviation with 75000*mpx(t) recovers exactly
+            // mpx(t) at rawMpxOut(). Amplitudes (mpx units) chosen so the recovered
+            // pilotQuality lands well above the decoder's HI threshold (0.34).
+            const double aM = 0.4, aP = 0.25, aS = 0.4;
+            const double fL = 1000.0, fR = 3000.0;
+            const double kDev = 75000.0;
+            const double d1 = 2*M_PI*fL/fs_;
+            const double d3 = 2*M_PI*fR/fs_;
+            const double dP = 2*M_PI*19000.0/fs_;
+            const double dC = 2*M_PI*38000.0/fs_;
+            const double kFm = 2*M_PI*kDev/fs_;
+            for (std::size_t i = 0; i < n; ++i) {
+                const double t = static_cast<double>(counter_++);
+                const double l = std::cos(d1*t);
+                const double r = std::cos(d3*t);
+                const double M = 0.5*(l + r);
+                const double S = 0.5*(l - r);
+                const double mpx = aM*M + aP*std::cos(dP*t) + aS*S*std::cos(dC*t);
+                fmStereoPhase_ += kFm * mpx;
+                out[i] = std::complex<float>(static_cast<float>(std::cos(fmStereoPhase_)),
+                                             static_cast<float>(std::sin(fmStereoPhase_)))
+                         * gainLin * 0.5f;
+            }
+        } else {
+            for (std::size_t i = 0; i < n; ++i) {
+                const double t = static_cast<double>(counter_++);
+                phase += 2*M_PI*fdev/fs_ * std::sin(2*M_PI*faudio*t/fs_);
+                out[i] = std::complex<float>(static_cast<float>(std::cos(phase)),
+                                             static_cast<float>(std::sin(phase))) * gainLin * 0.5f;
+            }
         }
     } else if (modulation_ == "bpsk" || modulation_ == "qpsk") {
         // *** OFFLINE SYNTHETIC DIGITAL SIGNAL -- NOT HARDWARE ***

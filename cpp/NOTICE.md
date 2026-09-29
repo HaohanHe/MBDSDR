@@ -171,5 +171,38 @@ GUI 上在瀑布/频谱为每个 VFO 绘制半透明带宽框。对应的 SDR++ 
 命中、不造假频率；扫描/书签的端到端行为由 `tests/test_scanner.cpp`、
 `tests/test_bookmark.cpp` 钉死。本小节不改变根目录 `LICENSE` 的许可声明。
 
+## WFM 立体声（FM Stereo）解码器（本批新增模块）
+
+- 标准依据：经典 FM 立体声复合基带（M=(L+R)/2 占 0–15 kHz、19 kHz 导频、
+  以 38 kHz 抑制载波双边带携带 S=(L−R)/2，23–53 kHz），恢复矩阵 L=M+S、R=M−S。
+- 版权参考（仅算法结构、环路形式与数据流思路参考，**未复制其代码**）：
+  - **SDR++**（GPL-3.0-or-later，Copyright (C) Alexandre Rouma / Ryzerth）：
+    本地只读参考 `repos/sdrpp/core/src/dsp/demod/broadcast_fm.h`。对照其导频带通 +
+    导频 PLL、对 PLL 输出取共轭并两次相乘把 38 kHz 双边带下变频、2× 幅度恢复与
+    和/差矩阵的数据流。
+  - **Gqrx**（GPLv3+，FM 立体声实现作者 **Alex Grinkov** a.grinkov(at)gmail.com，
+    Copyright 2012 Alexandru Csete OZ9AEC）：本地只读参考
+    `repos/gqrx/src/dsp/stereo_demod.cpp`。对照其和/差两路匹配低通、重采样、
+    矩阵后再分别去加重（L/R 各 50 µs）的处理顺序。
+  - **CubicSDR**（GPL-2.0-or-later，Copyright (c) Charles J. Cliffe）：本地只读参考
+    `repos/CubicSDR/src/modules/modem/analog/ModemFMStereo.cpp`。对照其 19 kHz
+    切比雪夫带通 + NCO 锁相环、两次 38 kHz mix-down 折叠 S、以及左右独立 50/75 µs
+    去加重的实现。
+  - **GNU Radio**（GPLv3+）：本地只读参考
+    `repos/gnuradio/gr-analog/python/analog/wfm_rcv_pll.py` 与
+    `repos/gnuradio/gr-analog/lib/fmdet_cf_impl.cc` 的 PLL 参考载波（pll_refout）
+    调频接收思路。
+- 实现文件 `src/dsp/wfm_stereo.{h,cpp}`、`src/dsp/demod.{h,cpp}` 中新增的鉴频后/
+  去加重前 raw MPX 抽头（`DemodWFM::rawMpxOut()`），以及音频通路立体声扩展
+  （`IAudioSink::writeStereo` 与 Memory/Qt 后端）均为 MBDSDR 原创实现（SPDX: MIT），
+  clean-room 按上述信号模型重写：19 kHz 二阶（比例+积分）导频锁相环（不使用导频
+  带通 FIR，避免导频路径群延迟）、倍频再生 38 kHz 副载波、下变频恢复 S，M 与 S
+  走【完全相同】的 15 kHz 线性相位 FIR 与 50 µs 去加重以保证样本对齐；立体声混合
+  系数随真实导频质量渐变，无导频 / 弱信号 / 失锁时平滑回退单声道。立体声状态完全
+  由真实恢复的导频决定，离线夹具明确标注 SYNTHETIC -- NOT HARDWARE，从不伪造立体声。
+  未逐行移植 SDR++ / Gqrx / CubicSDR / GNU Radio 的源码，也未随产品分发其源代码或
+  二进制原件；端到 end 已知向量（声道分离度、去导频回退、弱信号回退、中等导频渐变）
+  由 `tests/test_wfm_stereo.cpp` 钉死。本小节不改变根目录 `LICENSE` 的许可声明。
+
 
 

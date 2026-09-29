@@ -32,6 +32,7 @@
 #include "dsp/demod.h"
 #include "dsp/digital_demod.h"
 #include "dsp/rds_decoder.h"
+#include "dsp/wfm_stereo.h"
 
 namespace mbdsdr {
 namespace dsp {
@@ -98,6 +99,24 @@ struct VfoChannel {
     // with the demod on rebuild(), so a mode/rate change naturally resets the
     // decoder's block-sync and PS/PTY/RadioText state.
     std::unique_ptr<RdsDecoder> rds;
+
+    // WFM FM-stereo composite-baseband decoder. Built ONLY for WFM channels, at
+    // the channel's IF rate (240 kHz); null on every other mode. Fed the
+    // PRE-de-emphasis raw MPX tap (DemodWFM::rawMpxOut()) after each block, so
+    // the 19 kHz pilot / 38 kHz DSB are at full strength. Same lifecycle as rds
+    // (rebuilt together with the demod on rebuild()). It recovers M = (L+R)/2 and
+    // S = (L-R)/2, sample-aligned.
+    std::unique_ptr<WfmStereoDecoder> stereo;
+    // Independent ifRate->48 kHz resamplers for the recovered M and S. Configured
+    // with the SAME parameters as the mono audio resampler and fed the SAME number
+    // of IF samples each block, so stereoM48k/stereoS48k stay sample-aligned with
+    // the mono audio48k (and with each other).
+    AudioResampler stereoMResampler, stereoSResampler;
+    std::vector<float> stereoM48k, stereoS48k;   // last block's recovered M/S @48k
+    // Cached decoder state for the engine's throttled stereoState signal.
+    float stereoBlend = 0.0f;
+    float stereoPilot = 0.0f;   // pilotQuality, normalised 0..1
+    bool  stereoLock  = false;
 
     // True when this VFO runs a digital (rather than analog) demod.
     bool isDigital() const { return mode == "BPSK" || mode == "QPSK"; }

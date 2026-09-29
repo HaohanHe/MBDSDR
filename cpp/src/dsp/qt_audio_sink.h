@@ -34,8 +34,10 @@ public:
     QtAudioSink();
     ~QtAudioSink() override;
 
-    // ---- IAudioSink (48 kHz mono Float32 in [-1,1]) -----------------------
+    // ---- IAudioSink (48 kHz mono/stereo Float32 in [-1,1]) ---------------
     void write(const std::vector<float>& audio) override;
+    void writeStereo(const std::vector<float>& left,
+                     const std::vector<float>& right) override;
     void setVolume(float v) override { volume_.store(v); }
     void setMuted(bool m) override { muted_.store(m); }
     bool isAvailable() const override { return available_.load(); }
@@ -62,6 +64,9 @@ private:
     // A null dev resolves to the system default. On failure leaves available_
     // == false and sink_ == nullptr. Must run on the worker thread.
     void buildSink(const QAudioDevice& dev);
+    // Linearly resample one 48 kHz Float32 channel to the negotiated device
+    // rate (fmt_.sampleRate()). Worker-thread only; fmt_ is worker state.
+    std::vector<float> resampleToDevice(const std::vector<float>& in) const;
 
     std::unique_ptr<QAudioSink> sink_;
     QIODevice* io_ = nullptr;

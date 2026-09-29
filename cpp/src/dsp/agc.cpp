@@ -35,16 +35,24 @@ void Agc::setCarrierAgc(bool on) {
 
 void Agc::reset() { env_ = 0; }
 
-std::vector<float> Agc::process(const std::vector<float>& in) {
-    std::vector<float> out(in.size());
+void Agc::processWithGain(const std::vector<float>& in,
+                          std::vector<float>* out,
+                          std::vector<float>* gain) {
+    out->resize(in.size());
+    gain->resize(in.size());
     for (std::size_t i = 0; i < in.size(); ++i) {
         const float mag = std::abs(in[i]);
         const float a = (mag > env_) ? attackAlpha_ : decayAlpha_;
         env_ += a * (mag - env_);
-        const float gain = target_ / std::max(env_, 1e-4f);
-        float v = in[i] * gain;
-        out[i] = std::clamp(v, -1.0f, 1.0f);
+        const float g = target_ / std::max(env_, 1e-4f);
+        (*gain)[i] = g;
+        (*out)[i] = std::clamp(in[i] * g, -1.0f, 1.0f);
     }
+}
+
+std::vector<float> Agc::process(const std::vector<float>& in) {
+    std::vector<float> out, gain;
+    processWithGain(in, &out, &gain);
     return out;
 }
 

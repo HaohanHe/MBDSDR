@@ -66,6 +66,7 @@ set(SOURCES
     src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp
+    src/dsp/wfm_stereo.cpp
     src/dsp/digital_demod.cpp
     src/dsp/anr.cpp
     src/ui/constellation_view.cpp
@@ -127,6 +128,7 @@ set(HEADERS
     src/dsp/channelizer.h
     src/dsp/audio_resampler.h
     src/dsp/demod.h
+    src/dsp/wfm_stereo.h
     src/dsp/squelch.h
     src/dsp/agc.h
     src/dsp/audio_output.h
@@ -218,8 +220,8 @@ add_test(NAME noise_blanker COMMAND test_noise_blanker)
 add_executable(test_engine_integration tests/test_engine_integration.cpp
     src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
-    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
-    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_engine_integration PRIVATE src)
@@ -230,7 +232,7 @@ add_test(NAME engine_integration COMMAND test_engine_integration)
 add_executable(test_audio_sink tests/test_audio_sink.cpp
     src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
-    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
@@ -279,7 +281,7 @@ add_test(NAME ai_integration COMMAND test_ai_integration)
 add_executable(test_wav_roundtrip tests/test_wav_roundtrip.cpp
     src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
-    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
@@ -290,7 +292,7 @@ add_test(NAME wav_roundtrip COMMAND test_wav_roundtrip)
 add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
     src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
-    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
@@ -396,7 +398,7 @@ add_test(NAME recorder COMMAND test_recorder)
 # Multi-VFO fan-out: two synthesized carriers decoded independently.
 add_executable(test_multi_vfo tests/test_multi_vfo.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
-    src/dsp/demod.cpp src/dsp/rds_decoder.cpp)
+    src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/rds_decoder.cpp)
 target_include_directories(test_multi_vfo PRIVATE src)
 target_link_libraries(test_multi_vfo PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME multi_vfo COMMAND test_multi_vfo)
@@ -450,7 +452,7 @@ set_tests_properties(weather_panel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offsc
 # End-to-end: TestSignalSource digital IQ -> real channelizer -> DigitalDemod lock.
 add_executable(test_digital_e2e tests/test_digital_e2e.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
-    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp
     src/dsp/rds_decoder.cpp
     src/dsp/test_signal.cpp src/dsp/noise_blanker.cpp src/dsp/iq_frontend.cpp)
 target_include_directories(test_digital_e2e PRIVATE src)
@@ -477,6 +479,14 @@ target_include_directories(test_rds_chain PRIVATE src)
 target_link_libraries(test_rds_chain PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME rds_chain COMMAND test_rds_chain)
 
+# WFM stereo offline: synthesized FM IQ -> DemodWFM raw MPX -> WfmStereoDecoder.
+# No UI, no hardware; the composite MPX is built by hand in the test.
+add_executable(test_wfm_stereo tests/test_wfm_stereo.cpp
+    src/dsp/demod.cpp src/dsp/wfm_stereo.cpp)
+target_include_directories(test_wfm_stereo PRIVATE src)
+target_link_libraries(test_wfm_stereo PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME wfm_stereo COMMAND test_wfm_stereo)
+
 # NOAA APT image decoder: synthetic test pattern -> 2400 Hz AM baseband ->
 # streaming AptDecoder -> grayscale QImage. DSP core only, no UI.
 add_executable(test_apt tests/test_apt.cpp src/dsp/apt_decoder.cpp src/dsp/demod.cpp)
@@ -490,7 +500,7 @@ add_executable(test_agent tests/test_agent.cpp
     src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
-    src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
+    src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
     src/dsp/qt_audio_sink.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
@@ -548,3 +558,7 @@ set_tests_properties(map_view sky_view PROPERTIES
 message(STATUS "MBDSDR C++ build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Qt6 version: ${Qt6Core_VERSION}")
 message(STATUS "Target: mbdsdr (dynamic Qt6 linking -- system Qt6 is shared)")
+
+add_executable(ui_shot_wfm tests/ui_screenshot_wfm.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_wfm PRIVATE src build/ui_shot_wfm_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_wfm PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)

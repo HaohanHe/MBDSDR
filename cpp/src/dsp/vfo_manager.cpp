@@ -49,6 +49,7 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
         digitalDemod = std::make_unique<DigitalDemod>(cfg);
         demod.reset();          // no analog demod on digital channels
         rds.reset();            // RDS rides the WFM analog path only
+        stereo.reset();         // stereo rides the WFM analog path only
         resampler.configure(ifRate, 48000.0, 31);
         recoveredSymbols.clear();
         lastSr = sr;
@@ -66,6 +67,7 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
         demod.reset();          // no analog demod
         digitalDemod.reset();
         rds.reset();
+        stereo.reset();
         recoveredSymbols.clear();
         resampler.configure(sr, 48000.0, 31);
         lastSr = sr;
@@ -74,6 +76,7 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
     }
     digitalDemod.reset();
     rds.reset();   // re-created below only when this channel is WFM
+    stereo.reset(); // re-created below only when this channel is WFM
 
     channelizer.configure(sr, ifTarget, chBw, 31);
     const double ifRate = channelizer.effectiveOutputRateHz();
@@ -86,6 +89,9 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
         demod = std::make_unique<DemodWFM>(ifRate, chBw);
         // RDS subcarrier lives in the de-emphasized MPX; sample rate = IF rate.
         rds = std::make_unique<RdsDecoder>(ifRate);
+        // FM-stereo composite decoder consumes the PRE-de-emphasis raw MPX tap,
+        // sample rate = IF rate.
+        stereo = std::make_unique<WfmStereoDecoder>(ifRate);
     }
     else if (mode == "USB")     demod = std::make_unique<DemodSSB>(DemodSSB::Sideband::USB, ifRate, bandwidthHz);
     else if (mode == "LSB")     demod = std::make_unique<DemodSSB>(DemodSSB::Sideband::LSB, ifRate, bandwidthHz);
@@ -94,6 +100,11 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
 
     // Final audio is always presented at a fixed rate.
     resampler.configure(ifRate, 48000.0, 31);
+    // Stereo M/S share the same ifRate->48k parameters so they stay aligned with
+    // the mono stream. Only WFM builds the decoder; configuring empty resamplers
+    // on other modes is harmless (they are never fed).
+    stereoMResampler.configure(ifRate, 48000.0, 31);
+    stereoSResampler.configure(ifRate, 48000.0, 31);
 
     lastSr = sr;
     needsRebuild = false;
@@ -256,6 +267,29 @@ const std::vector<float>& VfoManager::process(
                 if (auto* wfm = dynamic_cast<DemodWFM*>(ch.demod.get()))
                     ch.rds->feed(wfm->mpxOut());
             }
+            // WFM only: feed the PRE-de-emphasis raw MPX tap to the stereo
+            // decoder, then resample its recovered M/S to 48 kHz. Cache the
+            // decoder's pilot-lock / blend state for the engine's stereoState
+            // signal. M and S share identical filters inside the decoder, so the
+            // pair stays sample-aligned; the two resamplers share parameters and
+            // get the same IF-block length, so they stay aligned with audio48k.
+            if (ch.stereo) {
+                if (auto* wfm = dynamic_cast<DemodWFM*>(ch.demod.get())) {
+                    ch.stereo->feed(wfm->rawMpxOut());
+                    ch.stereoM48k = ch.stereoMResampler.process(ch.stereo->monoOut());
+                    ch.stereoS48k = ch.stereoSResampler.process(ch.stereo->sideOut());
+                    ch.stereoBlend  = ch.stereo->blend();
+                    ch.stereoLock   = ch.stereo->locked();
+                    ch.stereoPilot  = ch.stereo->pilotQuality();
+                }
+            }
+        }
+        if (!ch.stereo) {
+            ch.stereoM48k.clear();
+            ch.stereoS48k.clear();
+            ch.stereoBlend = 0.0f;
+            ch.stereoLock = false;
+            ch.stereoPilot = 0.0f;
         }
         ch.audio48k = ch.resampler.process(aif);
     }
