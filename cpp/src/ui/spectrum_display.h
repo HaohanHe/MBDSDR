@@ -83,6 +83,12 @@ public slots:
     // back-compat tests.
     void setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers);
 
+    // Band-box pixel geometry for a marker (edge-aligned for SSB). Public so
+    // offscreen tests can assert USB/LSB side placement without pixel-peeping.
+    // On return, bx0 <= bx1; vx is the dial/tuning line x.
+    void vfoBoxGeometryFor(const mbdsdr::dsp::VfoMarker& m,
+                           int& bx0, int& bx1, int& vx) const;
+
 signals:
     void frequencyChanged(double newFreqHz);
     void bandwidthChanged(double newBandwidthHz);
@@ -152,6 +158,10 @@ private:
     DragMode dragMode_ = DragMode::None;
     QPoint hoverPos_;
     QPoint lastPanPos_;
+    // Hover tooltip cache so setToolTip() is only re-called when the read-out
+    // actually changes (avoids churning the tooltip system on every mouse move).
+    int     toolTipVfoId_ = -1;
+    QString toolTipText_;
 
     double bwHz_ = 12500.0;
     double stepHz_ = 1000.0;
@@ -162,6 +172,14 @@ private:
     int dragVfoId_ = -1;   // marker currently being dragged, -1 = legacy/root
     // Hit-test a marker at pixel x (data area) -> index into markers_, or -1.
     int hitVfoMarker(double x, double fLo, double spanVis) const;
+
+    // Band-box pixel geometry for a marker, accounting for sideband alignment.
+    // USB: box [dial, dial+bw] with the dial/tuning line at the LEFT edge;
+    // LSB/CW: box [dial-bw, dial] with the dial/tuning line at the RIGHT edge;
+    // symmetric modes (AM/NFM/WFM/BPSK/QPSK): [dial-bw/2, dial+bw/2] centered.
+    // Exposed for offscreen geometry tests.
+    void vfoBoxGeometry(const mbdsdr::dsp::VfoMarker& m, double fLo, double spanVis,
+                        int& bx0, int& bx1, int& vx) const;
 
     float  dbMin_ = -100.0f;
     float  dbMax_ = 0.0f;

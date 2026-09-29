@@ -255,6 +255,17 @@ inline constexpr WaterfallStop kWaterfallStopsMono[] = {
     {1.00f, "#dcefff"},
 };
 
+// Third palette: viridis (perceptually-uniform, color-vision-deficiency safe).
+// Dark purple noise floor -> blue -> teal -> green -> bright yellow peak.
+// Index 2 in SpectrumDisplay::setPalette(); persisted under kSettingsKeyPalette.
+inline constexpr WaterfallStop kWaterfallStopsViridis[] = {
+    {0.00f, "#440154"},
+    {0.25f, "#3b528b"},
+    {0.50f, "#21918c"},
+    {0.75f, "#5ec962"},
+    {1.00f, "#fde725"},
+};
+
 // =====================================================================
 // Unified SpectrumDisplay geometry
 // Geometry model ported from SDR++ ImGui::WaterFall and re-expressed with

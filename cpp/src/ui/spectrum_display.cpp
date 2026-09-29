@@ -154,6 +154,37 @@ void SpectrumDisplay::setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& marke
     update();
 }
 
+void SpectrumDisplay::vfoBoxGeometry(const mbdsdr::dsp::VfoMarker& m,
+                                     double fLo, double spanVis,
+                                     int& bx0, int& bx1, int& vx) const {
+    // Edge convention pinned by tests/test_demod_e2e.cpp:
+    //   USB  -> demodulates [dial, dial+bw]  (upper sideband, box to the RIGHT
+    //          of the dial; tuning line at the LEFT edge).
+    //   LSB/CW -> demodulates [dial-bw, dial] (lower sideband, box to the LEFT
+    //          of the dial; tuning line at the RIGHT edge). CW is demodulated on
+    //          the LSB side in vfo_manager, so it is painted the same way.
+    //   AM/NFM/WFM/BPSK/QPSK -> keep the symmetric [dial-bw/2, dial+bw/2] box.
+    vx = xOfFreq(m.freqHz, fLo, spanVis);
+    if (m.mode == QLatin1String("USB")) {
+        bx0 = xOfFreq(m.freqHz, fLo, spanVis);
+        bx1 = xOfFreq(m.freqHz + m.bandwidthHz, fLo, spanVis);
+    } else if (m.mode == QLatin1String("LSB") || m.mode == QLatin1String("CW")) {
+        bx0 = xOfFreq(m.freqHz - m.bandwidthHz, fLo, spanVis);
+        bx1 = xOfFreq(m.freqHz, fLo, spanVis);
+    } else {
+        const double half = m.bandwidthHz / 2.0;
+        bx0 = xOfFreq(m.freqHz - half, fLo, spanVis);
+        bx1 = xOfFreq(m.freqHz + half, fLo, spanVis);
+    }
+}
+
+void SpectrumDisplay::vfoBoxGeometryFor(const mbdsdr::dsp::VfoMarker& m,
+                                         int& bx0, int& bx1, int& vx) const {
+    double fLo, fHi, spanVis;
+    visibleRange(fLo, fHi, spanVis);
+    vfoBoxGeometry(m, fLo, spanVis, bx0, bx1, vx);
+}
+
 int SpectrumDisplay::hitVfoMarker(double x, double fLo, double spanVis) const {
     const int tol = tokens::scaled(tokens::kBandEdgeHitTol);
     // Prefer the selected marker, then the topmost (last drawn = list tail).
@@ -162,9 +193,8 @@ int SpectrumDisplay::hitVfoMarker(double x, double fLo, double spanVis) const {
             const auto& m = markers_[i];
             if (pass == 0 && !m.selected) continue;
             if (pass == 1 && m.selected) continue;
-            const double half = m.bandwidthHz / 2.0;
-            const int bx0 = xOfFreq(m.freqHz - half, fLo, spanVis);
-            const int bx1 = xOfFreq(m.freqHz + half, fLo, spanVis);
+            int bx0, bx1, vx;
+            vfoBoxGeometry(m, fLo, spanVis, bx0, bx1, vx);
             if (x >= bx0 - tol && x <= bx1 + tol) return i;
         }
     }
@@ -190,11 +220,19 @@ void SpectrumDisplay::setMaxHoldEnabled(bool on) {
 void SpectrumDisplay::buildLut() {
     lut_.resize(256);
     struct RgbStop { float t; int r, g, b; };
-    const bool mono = (palette_ == 1);
-    const auto& stops = mono ? tokens::kWaterfallStopsMono : tokens::kWaterfallStops;
-    const int nStops = mono
-        ? static_cast<int>(sizeof(tokens::kWaterfallStopsMono)/sizeof(tokens::kWaterfallStopsMono[0]))
-        : static_cast<int>(sizeof(tokens::kWaterfallStops)/sizeof(tokens::kWaterfallStops[0]));
+    // palette_: 0 = classic rainbow, 1 = monochrome blue-scale, 2 = viridis.
+    const tokens::WaterfallStop* stops = tokens::kWaterfallStops;
+    int nStops = static_cast<int>(sizeof(tokens::kWaterfallStops)
+                                  / sizeof(tokens::kWaterfallStops[0]));
+    if (palette_ == 1) {
+        stops = tokens::kWaterfallStopsMono;
+        nStops = static_cast<int>(sizeof(tokens::kWaterfallStopsMono)
+                                 / sizeof(tokens::kWaterfallStopsMono[0]));
+    } else if (palette_ == 2) {
+        stops = tokens::kWaterfallStopsViridis;
+        nStops = static_cast<int>(sizeof(tokens::kWaterfallStopsViridis)
+                                  / sizeof(tokens::kWaterfallStopsViridis[0]));
+    }
     QVector<RgbStop> rgb(nStops);
     for (int i = 0; i < nStops; ++i) {
         QColor c(QString::fromUtf8(stops[i].hex));
@@ -232,7 +270,8 @@ void SpectrumDisplay::setScrollSpeed(int n) {
 }
 
 void SpectrumDisplay::setPalette(int p) {
-    palette_ = (p == 1) ? 1 : 0;
+    // 0 classic, 1 monochrome, 2 viridis. Out-of-range values fall back to 0.
+    palette_ = (p == 1 || p == 2) ? p : 0;
     buildLut();
     update();
 }
@@ -508,10 +547,8 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         const int lblH = tokens::scaled(tokens::kVfoBoxLabelH);
         for (const auto& m : markers_) {
             if (m.freqHz < fLo - m.bandwidthHz || m.freqHz > fHi + m.bandwidthHz) continue;
-            const double half = m.bandwidthHz / 2.0;
-            const int bx0 = xOfFreq(m.freqHz - half, fLo, spanVis);
-            const int bx1 = xOfFreq(m.freqHz + half, fLo, spanVis);
-            const int vx = xOfFreq(m.freqHz, fLo, spanVis);
+            int bx0, bx1, vx;
+            vfoBoxGeometry(m, fLo, spanVis, bx0, bx1, vx);
             QColor c = m.color.isValid() ? m.color : QColor(QString::fromUtf8(tokens::kAccent));
 
             // Translucent fill over the whole data column (trace + waterfall).
@@ -694,12 +731,16 @@ void SpectrumDisplay::mousePressEvent(QMouseEvent* e) {
         const int hit = hitVfoMarker(ex, fLo, spanVis);
         if (hit >= 0) {
             const auto& m = markers_[hit];
-            const double half = m.bandwidthHz / 2.0;
-            const int bx0 = xOfFreq(m.freqHz - half, fLo, spanVis);
-            const int bx1 = xOfFreq(m.freqHz + half, fLo, spanVis);
+            int bx0, bx1, vx;
+            vfoBoxGeometry(m, fLo, spanVis, bx0, bx1, vx);
             const int tol = tokens::scaled(tokens::kBandEdgeHitTol);
             dragVfoId_ = m.id;
-            if (std::abs(ex - bx0) <= tol) dragMode_ = DragMode::BandL;
+            // Grab the tuning/dial line (or the box body) => translate the VFO.
+            // Grab an edge => resize. For single-sided SSB the dial line IS one
+            // edge, so checking it first makes a grab on the dial retune rather
+            // than resize; only the opposite (far) edge resizes the bandwidth.
+            if (std::abs(ex - vx) <= tol) dragMode_ = DragMode::Tune;
+            else if (std::abs(ex - bx0) <= tol) dragMode_ = DragMode::BandL;
             else if (std::abs(ex - bx1) <= tol) dragMode_ = DragMode::BandR;
             else dragMode_ = DragMode::Tune;
             if (!m.selected) emit vfoMarkerSelected(m.id);
@@ -766,6 +807,38 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
         return;
     }
 
+    // VFO hover read-out. Only real marker fields are shown -- name, dial
+    // frequency, mode, bandwidth and the signed IF offset (centerOffsetHz); no
+    // callsign / station name is ever invented. Cleared when hovering blank.
+    if (!dragging_ && frame_.sampleRateHz > 0 && !markers_.isEmpty() &&
+        pos.x() >= g_.x0 && pos.x() <= g_.x1 &&
+        pos.y() >= g_.contentTop && pos.y() <= g_.waterfall.bottom()) {
+        double fLo, fHi, spanVis; visibleRange(fLo, fHi, spanVis);
+        const int hit = hitVfoMarker(pos.x(), fLo, spanVis);
+        if (hit >= 0) {
+            const auto& m = markers_[hit];
+            const QString label = m.name.isEmpty()
+                ? QStringLiteral("VFO #%1").arg(m.id) : m.name;
+            const QString tip = QStringLiteral("%1\n%2 MHz · %3\nBW %4 kHz · IF offset %5 kHz")
+                .arg(label)
+                .arg(m.freqHz / 1e6, 0, 'f', 3)
+                .arg(m.mode)
+                .arg(m.bandwidthHz / 1e3, 0, 'f', 1)
+                .arg(m.centerOffsetHz / 1e3, 0, 'f', 1);
+            if (toolTipVfoId_ != m.id || toolTipText_ != tip) {
+                toolTipVfoId_ = m.id;
+                toolTipText_ = tip;
+                setToolTip(tip);
+            }
+        } else {
+            if (toolTipVfoId_ != -1) {
+                toolTipVfoId_ = -1;
+                toolTipText_.clear();
+                setToolTip(QString());
+            }
+        }
+    }
+
     if (!dragging_ || frame_.sampleRateHz <= 0) { update(); return; }
 
     double fLo, fHi, spanVis; visibleRange(fLo, fHi, spanVis);
@@ -780,12 +853,24 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
         const double frac = (pos.x() - g_.x0) / static_cast<double>(g_.dataWidth);
         const double edgeF = fLo + frac * spanVis;
         if (dragMode_ == DragMode::BandL || dragMode_ == DragMode::BandR) {
-            double half = std::abs(edgeF - m.freqHz);
-            half = std::clamp(half * 2.0,
-                              static_cast<double>(tokens::kVfoMinBandwidthHz),
-                              static_cast<double>(tokens::kVfoMaxBandwidthHz));
-            m.bandwidthHz = half;
-            emit vfoMarkerBandwidthChanged(m.id, half);
+            // Edge resize. The dial line (m.freqHz) stays fixed; only the far
+            // edge moves. Single-sided SSB:
+            //   USB  -> far edge is the right one, bw = edgeF - dial;
+            //   LSB/CW -> far edge is the left one, bw = dial - edgeF.
+            // Symmetric modes resize about the center: bw = 2*|edgeF - dial|.
+            double newBw;
+            if (m.mode == QLatin1String("USB")) {
+                newBw = edgeF - m.freqHz;
+            } else if (m.mode == QLatin1String("LSB") || m.mode == QLatin1String("CW")) {
+                newBw = m.freqHz - edgeF;
+            } else {
+                newBw = std::abs(edgeF - m.freqHz) * 2.0;
+            }
+            newBw = std::clamp(newBw,
+                               static_cast<double>(tokens::kVfoMinBandwidthHz),
+                               static_cast<double>(tokens::kVfoMaxBandwidthHz));
+            m.bandwidthHz = newBw;
+            emit vfoMarkerBandwidthChanged(m.id, newBw);
         } else if (dragMode_ == DragMode::Tune) {
             double freq = edgeF;
             if (stepHz_ > 0) freq = std::round(freq / stepHz_) * stepHz_;
@@ -895,6 +980,11 @@ void SpectrumDisplay::wheelEvent(QWheelEvent* e) {
 
 void SpectrumDisplay::leaveEvent(QEvent*) {
     hoverPos_ = QPoint(-1, -1);
+    if (toolTipVfoId_ != -1) {
+        toolTipVfoId_ = -1;
+        toolTipText_.clear();
+        setToolTip(QString());
+    }
     update();
 }
 

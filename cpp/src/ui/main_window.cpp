@@ -809,11 +809,12 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this](int id) { engine_->vfoSelect(id); });
     connect(spectrum_, &ui::SpectrumWidget::vfoMarkerCenterTuned,
             this, [this](int id, double hz) {
-        // Dragging the ACTIVE VFO retunes the receiver (source center follows,
-        // keeping it at offset 0 -- the legacy single-VFO sweep). Dragging an
-        // inactive VFO just moves its offset within the current capture.
-        if (id == engine_->selectedVfoId()) engine_->onSetCenterFreq(hz);
-        else engine_->vfoSetFreq(id, hz);
+        // Unified offset path: every point/drag/wheel tune goes through the
+        // engine's offset tuner. The engine decides whether the VFO merely
+        // slides its channelizer offset inside the current capture, or (only
+        // when it hits the capture edge) retunes the source local oscillator.
+        // No UI branch re-tunes the LO per selected VFO any more.
+        engine_->vfoSetOffset(id, hz);
     });
     connect(spectrum_, &ui::SpectrumWidget::vfoMarkerBandwidthChanged,
             this, [this](int id, double hz) { engine_->vfoSetBandwidth(id, hz); });
@@ -1013,7 +1014,10 @@ MainWindow::MainWindow(QWidget* parent)
         freqSpin_->blockSignals(true);
         freqSpin_->setValue(hz / 1e6);
         freqSpin_->blockSignals(false);
-        engine_->onSetCenterFreq(hz);
+        // The canvas drag-tunes the SELECTED VFO through the same offset path
+        // (in-band slide; LO retune only on capture edge, decided by engine).
+        const int sel = engine_->selectedVfoId();
+        if (sel >= 0) engine_->vfoSetOffset(sel, hz);
     });
 
     // ---- Debounced persistence: high-frequency signals (zoom/pan every frame,

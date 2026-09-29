@@ -13,11 +13,21 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <thread>
 
 namespace mbdsdr {
 namespace dsp {
+
+// Capture-band edge roll-off for the in-band IF-offset move. A VFO may ride on
+// the channelizer NCO (tuner left parked) only while it sits inside the central
+// fraction of the band; once it approaches the tuner edge (where the passband
+// rolls off) we genuinely retune the source to the target so the VFO lands back
+// near capture center (offset ~0).
+namespace {
+constexpr double kVfoEdgeFraction = 0.85;
+}
 
 SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
     auto rtl = std::make_unique<RtlSdrSource>();
@@ -347,6 +357,34 @@ void SpectrumEngine::vfoSetFreq(int id, double hz) {
     emit vfoListChanged();
 }
 
+bool SpectrumEngine::vfoSetOffset(int id, double targetHz) {
+    QMutexLocker lk(&sourceMutex_);
+    if (!source_) return false;
+    const double center = source_->centerFreq();
+    const double sr = source_->sampleRate();
+    // Usable half-bandwidth: central fraction of the capture before the tuner's
+    // edge roll-off. In-band moves stay inside +/-this and never touch the tuner.
+    const double usableHalf = sr * 0.5 * kVfoEdgeFraction;
+
+    bool retuned = false;
+    if (std::abs(targetHz - center) > usableHalf) {
+        // The target would fall outside the usable capture band. Genuinely move
+        // the source tuner to the target so this VFO lands back near offset 0.
+        // Every OTHER VFO keeps its absolute freqHz; their channelizer NCO
+        // offsets (= freqHz - new center) are recomputed continuously by
+        // VfoManager::process() on the next run() frame.
+        source_->setCenterFreq(targetHz);
+        retuned = true;
+    }
+    // In-band move (or just after a retune): only record this VFO's absolute
+    // frequency. The channelizer NCO offset is applied by process() as
+    // (freqHz - sourceCenterHz). This is the SDR++ in-band IF-offset path: the
+    // RTL tuner is NOT retuned while the VFO stays inside the capture band.
+    vfoManager_.setFreq(id, targetHz);
+    emit vfoListChanged();
+    return retuned;
+}
+
 void SpectrumEngine::vfoSetBandwidth(int id, double hz) {
     QMutexLocker lk(&sourceMutex_);
     vfoManager_.setBandwidth(id, hz);
@@ -382,7 +420,16 @@ void SpectrumEngine::setAnrStrength(float s) {
 
 QVector<VfoMarker> SpectrumEngine::vfoMarkers() const {
     QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
-    return vfoManager_.markers();
+    QVector<VfoMarker> out = vfoManager_.markers();
+    // Backfill the IF-offset bookkeeping against the CURRENT source capture
+    // center. This is the snapshot the UI draws: referenceHz = capture center,
+    // centerOffsetHz = this VFO's signed IF offset (freqHz - capture center).
+    const double center = source_ ? source_->centerFreq() : 0.0;
+    for (auto& m : out) {
+        m.referenceHz = center;
+        m.centerOffsetHz = m.freqHz - center;
+    }
+    return out;
 }
 
 int SpectrumEngine::selectedVfoId() const {

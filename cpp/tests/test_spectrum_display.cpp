@@ -31,6 +31,7 @@ private slots:
     void dividerDragIsClamped();
     void realFrameDrivesHistory();
     void zoomAndPanStayAligned();
+    void ssbBoxEdgesAreAligned();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -201,6 +202,56 @@ void TestSpectrumDisplay::zoomAndPanStayAligned() {
     QVERIFY(w.visLoHz() != lo1);
     QCOMPARE(w.spectrumRect().left(), w.waterfallRect().left());
     QCOMPARE(w.spectrumRect().right(), w.waterfallRect().right());
+}
+
+// SSB sideband alignment: the dial/tuning line must sit on the edge the
+// demodulator actually uses, and the bandwidth box must extend into the
+// demodulated sideband -- never mirrored to the wrong side.
+void TestSpectrumDisplay::ssbBoxEdgesAreAligned() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    w.setSpectrum(makeFrame(512, 256, 0.0f, -100.0f));   // fs=2.4MHz, f0=98.5MHz
+
+    const double dial = 98.5e6;
+    const double bw = 2700.0;
+
+    auto mk = [&](int id, const char* mode) {
+        mbdsdr::dsp::VfoMarker m;
+        m.id = id; m.freqHz = dial; m.bandwidthHz = bw;
+        m.mode = QLatin1String(mode);
+        return m;
+    };
+
+    int bx0, bx1, vx;
+
+    // USB: box [dial, dial+bw] -> tuning line on the LEFT edge, box to the RIGHT.
+    w.vfoBoxGeometryFor(mk(1, "USB"), bx0, bx1, vx);
+    QCOMPARE(vx, bx0);
+    QVERIFY2(bx1 > bx0, "USB box must extend to the right of the dial line");
+
+    // LSB: box [dial-bw, dial] -> tuning line on the RIGHT edge, box to the LEFT.
+    w.vfoBoxGeometryFor(mk(2, "LSB"), bx0, bx1, vx);
+    QCOMPARE(vx, bx1);
+    QVERIFY2(bx0 < bx1, "LSB box must extend to the left of the dial line");
+
+    // CW is demodulated on the LSB side in vfo_manager -> painted like LSB.
+    w.vfoBoxGeometryFor(mk(3, "CW"), bx0, bx1, vx);
+    QCOMPARE(vx, bx1);
+    QVERIFY2(bx0 < bx1, "CW box must sit to the left of the dial line (LSB side)");
+
+    // Symmetric mode (NFM) keeps the centered box: tuning line at the midpoint.
+    w.vfoBoxGeometryFor(mk(4, "NFM"), bx0, bx1, vx);
+    QVERIFY2(std::abs(vx - (bx0 + bx1) / 2) <= 1,
+             "NFM tuning line must be centered between the band edges");
+
+    // Sideband placement must actually be on OPPOSITE sides of the shared dial.
+    int u0, u1, uv, l0, l1, lv;
+    w.vfoBoxGeometryFor(mk(1, "USB"), u0, u1, uv);
+    w.vfoBoxGeometryFor(mk(2, "LSB"), l0, l1, lv);
+    QCOMPARE(uv, lv);                       // same dial frequency -> same x
+    QVERIFY2(u1 > lv && l0 < uv,
+             "USB box right of dial, LSB box left of dial (not mirrored)");
 }
 
 QTEST_MAIN(TestSpectrumDisplay)

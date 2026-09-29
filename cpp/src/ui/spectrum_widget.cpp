@@ -149,15 +149,15 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     wfRow->addWidget(scrollCombo_);
 
     paletteCombo_ = new QComboBox(this);
-    paletteCombo_->addItems({"经典", "单色"});
+    paletteCombo_->addItems({"经典", "单色", "Viridis"});
     {
         QSettings s("MBDSDR", "MBDSDR");
         int pal = s.value(tokens::kSettingsKeyPalette, 0).toInt();
-        paletteCombo_->setCurrentIndex(pal == 1 ? 1 : 0);
+        paletteCombo_->setCurrentIndex(std::clamp(pal, 0, 2));
     }
     connect(paletteCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
-        const int pal = (idx == 1) ? 1 : 0;
+        const int pal = std::clamp(idx, 0, 2);
         QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeyPalette, pal);
         if (canvas_) canvas_->setPalette(pal);
     });
