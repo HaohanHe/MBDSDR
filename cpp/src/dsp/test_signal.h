@@ -42,12 +42,24 @@ public:
     void setModulation(const QString& m) { modulation_ = m; digSymbols_.clear(); }
     QString modulation() const { return modulation_; }
 
+    // *** SYNTHETIC -- NOT HARDWARE *** Opt-in, DEFAULT OFF. When on AND the
+    // selected modulation is "fm", the carrier is frequency-modulated by a real
+    // FM-broadcast composite MPX: different L/R audio tones (1 kHz left, 3 kHz
+    // right) plus a 19 kHz pilot and a 38 kHz DSB subcarrier, so the downstream
+    // WfmStereoDecoder can lock and recover stereo end-to-end. Off by default so
+    // the plain "fm" path (and hence the honest default "单声道" badge) is
+    // unchanged.
+    void setFmStereo(bool on) { fmStereo_ = on; }
+    bool fmStereo() const { return fmStereo_; }
+
 private:
     double fs_;
     double f0_;
     double gainDb_ = 20.0;
     std::uint64_t counter_ = 0;
     QString modulation_ = "tone";
+    bool   fmStereo_ = false;      // *** TEST ONLY, not hardware ***
+    double fmStereoPhase_ = 0.0;   // persistent FM phase across blocks
 
     bool   haveSpare_ = false;
     float  spare_ = 0.0f;

@@ -259,6 +259,21 @@ MainWindow::MainWindow(QWidget* parent)
     bwCombo_ = new QComboBox(gRx);
     bwCombo_->addItems({"8 kHz", "12.5 kHz", "200 kHz", "2.4 kHz", "500 Hz"});
     gRxLay->addRow("带宽", bwCombo_);
+    // Channel-status badge: "立体声" only when the engine's real 19 kHz pilot is
+    // locked and the L/R matrix has engaged; otherwise honestly "单声道". Fully
+    // driven by onStereoState() -- never fabricated.
+    channelBadge_ = new QLabel("单声道", gRx);
+    channelBadge_->setObjectName("channelBadge");
+    channelBadge_->setAlignment(Qt::AlignCenter);
+    channelBadge_->setStyleSheet(
+        QString("QLabel#channelBadge { color: %1; }").arg(QString::fromUtf8(tokens::kTextSecondary)));
+    gRxLay->addRow("声道", channelBadge_);
+    // Force-mono: only meaningful / enabled on WFM. Toggling forwards to the
+    // engine which pins the stereo blend to 0.
+    forceMonoCheck_ = new QCheckBox("强制单声道", gRx);
+    forceMonoCheck_->setObjectName("forceMonoCheck");
+    forceMonoCheck_->setEnabled(false);
+    gRxLay->addRow("", forceMonoCheck_);
     leftLay->addWidget(gRx);
 
     // ---- Multi-VFO panel ---------------------------------------------------
@@ -955,6 +970,10 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onAdsbAircraft);
     connect(engine_, &dsp::SpectrumEngine::rdsUpdated,
             this, &MainWindow::onRdsUpdated);
+    connect(engine_, &dsp::SpectrumEngine::stereoState,
+            this, &MainWindow::onStereoState);
+    connect(forceMonoCheck_, &QCheckBox::toggled,
+            this, [this](bool on) { engine_->setForceMono(on); });
     connect(spectrum_, &ui::SpectrumWidget::fftSizeRequested,
             engine_, &dsp::SpectrumEngine::setFftSize);
     connect(spectrum_, &ui::SpectrumWidget::windowTypeRequested,
@@ -992,6 +1011,11 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this](int) {
                 engine_->setDemodMode(demodCombo_->currentText());
                 sbMode_->setText(demodCombo_->currentText());
+                // Force-mono only applies to WFM stereo; leave the badge honestly
+                // on "单声道" until the next real pilot-driven stereoState arrives.
+                const bool wfm = (demodCombo_->currentText() == "WFM");
+                forceMonoCheck_->setEnabled(wfm);
+                if (!wfm) onStereoState(false, 0.0f, 0.0f);
                 // ADS-B (1090 MHz Mode S): walk the receiver to the band. These
                 // are reversible -- the user may retune/change rate afterwards.
                 if (demodCombo_->currentText() == "ADS-B") {
@@ -2147,6 +2171,23 @@ void MainWindow::onRdsUpdated(const QString& ps, int pty,
     const QFontMetrics fm(sbRds_->font());
     sbRds_->setText(fm.elidedText(line, Qt::ElideRight, tokens::scaled(260)));
     sbRds_->setToolTip(rtText.isEmpty() ? name : rtText);
+}
+
+void MainWindow::onStereoState(bool stereo, float blend, float pilotQuality) {
+    if (!channelBadge_) return;
+    // Honest-pilot rule: the engine only reports stereo=true when the real 19 kHz
+    // pilot is locked and the matrix blend has actually come up. Everything else
+    // (weak/missing pilot, non-WFM mode, forced mono) shows "单声道".
+    const char* color = stereo ? tokens::kSuccess : tokens::kTextSecondary;
+    channelBadge_->setText(stereo ? QStringLiteral("立体声") : QStringLiteral("单声道"));
+    channelBadge_->setStyleSheet(
+        QString("QLabel#channelBadge { color: %1; }").arg(QString::fromUtf8(color)));
+    if (stereo)
+        channelBadge_->setToolTip(
+            QStringLiteral("导频锁定 · 混合 %.0f%% · 导频质量 %.2f")
+                .arg(blend * 100.0f, 0, 'f', 0).arg(pilotQuality));
+    else
+        channelBadge_->setToolTip(QStringLiteral("单声道（无锁定导频）"));
 }
 
 void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {

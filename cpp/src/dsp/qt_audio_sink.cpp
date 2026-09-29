@@ -4,6 +4,7 @@
 #include <QAudioDevice>
 #include <QAudioFormat>
 #include <QMediaDevices>
+#include <QByteArray>
 #include <QDebug>
 
 #include <algorithm>
@@ -15,14 +16,43 @@ namespace mbdsdr {
 namespace dsp {
 
 namespace {
-// The DSP engine always delivers 48 kHz mono Float32 to this sink. Resampling
-// below only adapts to a device whose native rate differs from 48 kHz.
+// The DSP engine always delivers 48 kHz Float32 (mono or stereo) to this sink.
+// Resampling below only adapts to a device whose native rate differs from 48 kHz.
 constexpr double kInputSampleRateHz = 48000.0;
 
 float clampUnit(float v) {
     if (v > 1.0f) return 1.0f;
     if (v < -1.0f) return -1.0f;
     return v;
+}
+
+// Append one unit-range sample, converted to the device's sample format, to bytes.
+void appendSample(QByteArray& bytes, const QAudioFormat& fmt, float s) {
+    s = clampUnit(s);
+    switch (fmt.sampleFormat()) {
+    case QAudioFormat::Float: {
+        float f = s;
+        bytes.append(reinterpret_cast<const char*>(&f), sizeof(float));
+        break;
+    }
+    case QAudioFormat::Int16: {
+        auto v = static_cast<int16_t>(std::lround(s * 32767.0f));
+        bytes.append(reinterpret_cast<const char*>(&v), sizeof(int16_t));
+        break;
+    }
+    case QAudioFormat::Int32: {
+        auto v = static_cast<int32_t>(std::llround(s * 2147483647.0f));
+        bytes.append(reinterpret_cast<const char*>(&v), sizeof(int32_t));
+        break;
+    }
+    case QAudioFormat::UInt8: {
+        auto v = static_cast<uint8_t>(std::lround((s * 0.5f + 0.5f) * 255.0f));
+        bytes.append(reinterpret_cast<const char*>(&v), 1);
+        break;
+    }
+    default:
+        break; // unknown format: nothing to write
+    }
 }
 } // namespace
 
@@ -85,18 +115,17 @@ void QtAudioSink::buildSink(const QAudioDevice& dev) {
 
     QAudioFormat desired;
     desired.setSampleRate(48000);
-    desired.setChannelCount(1);
+    desired.setChannelCount(2);   // prefer true stereo; mono is handled by mapping at write time
     desired.setSampleFormat(QAudioFormat::Float);
 
     // Negotiate a real format. isFormatSupported() is conservative on the
     // Windows FFmpeg backend and rejects formats that would actually play,
     // so fall back to the device's preferred format instead of giving up.
+    // The real channel count is read back from fmt_ at write time, so whether
+    // we land on stereo, mono, or multi-channel is decided by the device.
     QAudioFormat fmt = desired;
     if (!d.isFormatSupported(fmt)) {
         fmt = d.preferredFormat();
-        QAudioFormat mono = fmt;
-        mono.setChannelCount(1);
-        if (d.isFormatSupported(mono)) fmt = mono;
     }
 
     sink_ = std::make_unique<QAudioSink>(d, fmt);
@@ -137,69 +166,71 @@ QString QtAudioSink::currentDeviceName() const {
     return currentDev_.description();
 }
 
+std::vector<float> QtAudioSink::resampleToDevice(const std::vector<float>& in) const {
+    if (in.empty()) return {};
+    const int outRate = fmt_.sampleRate();
+    if (std::abs(kInputSampleRateHz - outRate) < 1.0) return in;
+
+    // Linear resample 48k -> device rate.
+    const double ratio = static_cast<double>(outRate) / kInputSampleRateHz;
+    const std::size_t n = static_cast<std::size_t>(in.size() * ratio);
+    std::vector<float> out(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        const double pos = i / ratio;
+        const std::size_t i0 = static_cast<std::size_t>(pos);
+        const std::size_t i1 = std::min(i0 + 1, in.size() - 1);
+        const double frac = pos - i0;
+        out[i] = static_cast<float>(in[i0] * (1.0 - frac) + in[i1] * frac);
+    }
+    return out;
+}
+
 void QtAudioSink::write(const std::vector<float>& audio) {
     ensureReady();
     if (!available_.load() || muted_.load() || audio.empty() || !io_) return;
 
     if (sink_) sink_->setVolume(volume_.load());
 
-    const int outRate = fmt_.sampleRate();
+    const int channels = std::max(1, fmt_.channelCount());
+    std::vector<float> mono = resampleToDevice(audio);
+
+    // Mono: duplicate the same sample onto every output channel (L == R).
+    QByteArray bytes;
+    bytes.reserve(static_cast<int>(mono.size() * channels * fmt_.bytesPerSample()));
+    for (float s : mono)
+        for (int c = 0; c < channels; ++c)
+            appendSample(bytes, fmt_, s);
+
+    if (!bytes.isEmpty()) io_->write(bytes.constData(), bytes.size());
+}
+
+void QtAudioSink::writeStereo(const std::vector<float>& left,
+                              const std::vector<float>& right) {
+    ensureReady();
+    if (!available_.load() || muted_.load() || left.empty() || right.empty() || !io_) return;
+
+    if (sink_) sink_->setVolume(volume_.load());
+
     const int channels = std::max(1, fmt_.channelCount());
 
-    // 1) Linear resample 48k mono to the device rate.
-    std::vector<float> mono;
-    if (std::abs(kInputSampleRateHz - outRate) < 1.0) {
-        mono = audio;
-    } else {
-        const double ratio = static_cast<double>(outRate) / kInputSampleRateHz;
-        const std::size_t n = static_cast<std::size_t>(audio.size() * ratio);
-        mono.resize(n);
-        for (std::size_t i = 0; i < n; ++i) {
-            const double pos = i / ratio;
-            const std::size_t i0 = static_cast<std::size_t>(pos);
-            const std::size_t i1 = std::min(i0 + 1, audio.size() - 1);
-            const double frac = pos - i0;
-            mono[i] = static_cast<float>(audio[i0] * (1.0 - frac)
-                                        + audio[i1] * frac);
-        }
-    }
+    // Resample each channel independently to the device rate, then interleave
+    // per frame. The two channels use the same ratio so their lengths match.
+    std::vector<float> L = resampleToDevice(left);
+    std::vector<float> R = resampleToDevice(right);
+    const std::size_t frames = std::min(L.size(), R.size());
 
-    // 2) Expand to the channel count and convert to the device sample format.
-    const std::size_t frames = mono.size();
     QByteArray bytes;
-    bytes.reserve(static_cast<int>(frames * channels
-                                   * fmt_.bytesPerSample()));
-
-    auto appendFrame = [&](float s) {
-        s = clampUnit(s);
-        switch (fmt_.sampleFormat()) {
-        case QAudioFormat::Float: {
-            float f = s;
-            bytes.append(reinterpret_cast<const char*>(&f), sizeof(float));
-            break;
+    bytes.reserve(static_cast<int>(frames * channels * fmt_.bytesPerSample()));
+    for (std::size_t i = 0; i < frames; ++i) {
+        const float l = L[i];
+        const float r = R[i];
+        for (int c = 0; c < channels; ++c) {
+            float s;
+            if (channels == 1)      s = (l + r) * 0.5f;   // mono device: downmix
+            else if (c == 0)        s = l;                // front-left
+            else                    s = r;                // front-right + extra channels
+            appendSample(bytes, fmt_, s);
         }
-        case QAudioFormat::Int16: {
-            auto v = static_cast<int16_t>(std::lround(s * 32767.0f));
-            bytes.append(reinterpret_cast<const char*>(&v), sizeof(int16_t));
-            break;
-        }
-        case QAudioFormat::Int32: {
-            auto v = static_cast<int32_t>(std::llround(s * 2147483647.0f));
-            bytes.append(reinterpret_cast<const char*>(&v), sizeof(int32_t));
-            break;
-        }
-        case QAudioFormat::UInt8: {
-            auto v = static_cast<uint8_t>(std::lround((s * 0.5f + 0.5f) * 255.0f));
-            bytes.append(reinterpret_cast<const char*>(&v), 1);
-            break;
-        }
-        default:
-            break; // unknown format: nothing to write
-        }
-    };
-
-    for (float s : mono) {
-        for (int c = 0; c < channels; ++c) appendFrame(s);
     }
 
     if (!bytes.isEmpty()) io_->write(bytes.constData(), bytes.size());

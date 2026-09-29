@@ -60,6 +60,9 @@ private slots:
     // locked=false clears the label to empty (never a placeholder station).
     void onRdsUpdated(const QString& programService, int pty,
                       const QString& radioText, bool locked);
+    // WFM stereo badge: driven ONLY by the engine's real recovered pilot.
+    // stereo=true -> "立体声" (success green), otherwise "单声道" (secondary).
+    void onStereoState(bool stereo, float blend, float pilotQuality);
     void saveSettings();   // immediate persistence (writes QSettings)
     void scheduleSave();   // debounced persistence: arms the 500 ms save timer
     void onPassesReady(QList<dsp::SatPass> passes);
@@ -183,6 +186,8 @@ private:
 
     QComboBox*      demodCombo_  = nullptr;
     QComboBox*      bwCombo_     = nullptr;
+    QLabel*         channelBadge_ = nullptr;   // 立体声/单声道, from real pilot
+    QCheckBox*      forceMonoCheck_ = nullptr;  // WFM-only, forces mono
     double          currentBwHz_ = 12500.0;   // live RF bandwidth (Up/Down nudge)
 
     // Multi-VFO management panel (left rail).

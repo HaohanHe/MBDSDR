@@ -127,6 +127,20 @@ public slots:
     void setAnrEnabled(bool on);
     void setAnrStrength(float s);
 
+    // ---- WFM FM-stereo ---------------------------------------------------
+    // Force the selected WFM channel's stereo decoder down to mono (blend=0).
+    // Non-WFM channels have no decoder; the flag is remembered and re-applied
+    // whenever a WFM channel is (re)built.
+public slots:
+    void setForceMono(bool on);
+
+public:
+    // *** TEST ONLY -- NOT HARDWARE *** opt-in switch on the offline
+    // TestSignalSource: when on AND the selected VFO is WFM, the synthetic IQ
+    // carries a real L/R split + 19 kHz pilot + 38 kHz DSB composite MPX so the
+    // stereo path can be exercised end-to-end. Default off (honest mono).
+    void setTestFmStereo(bool on);
+
     // ---- NOAA APT weather satellite ----
     // Throw away the accumulated image + sync state (panel "清除图像" button).
     // The panel emits clearRequested(); this resets the engine-side decoder.
@@ -207,6 +221,13 @@ signals:
     // the image is null and the panel shows its honest empty state (never a
     // fabricated cloud photo). Passed by value across a queued connection.
     void aptImageReady(const QImage& image, bool locked, int rows, double syncCorr);
+    // WFM stereo status from the SELECTED WFM channel's real recovered pilot,
+    // throttled to a few Hz. stereo=true ONLY when the pilot is genuinely locked
+    // and the smoothed blend has come up (L/R matrix engaged); otherwise false.
+    // Non-WFM modes emit (false, 0, 0) so the badge honestly shows "单声道".
+    // blend is the smoothed matrix coefficient 0..1; pilotQuality is the normalised
+    // pilot-to-audio ratio 0..1.
+    void stereoState(bool stereo, float blend, float pilotQuality);
 
 protected:
     void run() override;
@@ -271,6 +292,13 @@ private:
     bool    aptLastLocked_ = false;
     QElapsedTimer aptEmitClock_;
     qint64  aptLastEmitMs_ = -1;
+
+    // WFM stereo: user-forced mono flag (re-applied to the live WFM channel each
+    // block so rebuilds pick it up) and the throttled stereoState emitter clock.
+    bool    forceMono_ = false;
+    bool    testFmStereo_ = false;   // *** TEST ONLY, not hardware ***
+    QElapsedTimer stereoEmitClock_;
+    qint64 stereoLastEmitMs_ = -1;
 
     // Recording options (see setRec* above).
     RecTarget recTarget_ = RecTarget::BasebandIQ;

@@ -53,6 +53,7 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
     gatedRec_.setOutputDir(recDir_);
     telemetryClock_.start();
     aptEmitClock_.start();
+    stereoEmitClock_.start();
     // Single default VFO at the source center, NFM 12.5 kHz -- identical to
     // the legacy single-channel receiver on first boot.
     vfoManager_.initDefault(source_->sampleRate(), source_->centerFreq(),
@@ -449,6 +450,20 @@ void SpectrumEngine::setAnrStrength(float s) {
     anr_.setStrength(s);
 }
 
+void SpectrumEngine::setForceMono(bool on) {
+    QMutexLocker lk(&sourceMutex_);
+    forceMono_ = on;
+    // Apply immediately to the live WFM channel; the run loop re-applies the
+    // flag every block so a (re)built WFM channel inherits it too.
+    if (VfoChannel* sel = vfoManager_.selected())
+        if (sel->stereo) sel->stereo->setForceMono(on);
+}
+
+void SpectrumEngine::setTestFmStereo(bool on) {
+    QMutexLocker lk(&sourceMutex_);
+    testFmStereo_ = on;
+}
+
 void SpectrumEngine::resetAptDecoder() {
     QMutexLocker lk(&sourceMutex_);
     aptDecoder_.reset();
@@ -606,6 +621,8 @@ void SpectrumEngine::run() {
             else if (selMode == "QPSK") want = "qpsk";
             else want = "tone";
             if (want != ts->modulation()) ts->setModulation(want);
+            // *** TEST ONLY -- NOT HARDWARE *** opt-in synthetic FM-stereo MPX.
+            ts->setFmStereo(testFmStereo_);
         }
 
         // RSSI is always reported from raw capture energy.
@@ -688,13 +705,67 @@ void SpectrumEngine::run() {
         // its pre-roll captures the true signal onset.
         const float rms = rmsDbfs(audio);
         const bool gate = squelch_.decide(audio, rms);
-        auto leveled = agc_.process(audio);
+        // Detection/ANR/squelch/AGC all run on the legacy mono M. processWithGain
+        // exposes the per-sample linear gain so the stereo M/S matrix below reuses
+        // the EXACT same envelope (mono and L/R never level-mismatched).
+        std::vector<float> leveled, agcGain;
+        agc_.processWithGain(audio, &leveled, &agcGain);
         std::vector<float> out = leveled;
         if (!gate) std::fill(out.begin(), out.end(), 0.0f);
         emit squelchState(gate);
         emit audioLevel(agc_.currentLevelDb());
 
-        audioSink_->write(out);
+        // Speaker path. WFM with a live stereo decoder: rebuild L/R from the same
+        // mono M plus the recovered side S with the smoothed blend, applying the
+        // same AGC gain (zeroed when the squelch gate is closed). All other analog
+        // modes keep the legacy mono write. Recording below stays mono (`out`).
+        const bool wfmSel = (selMode == "WFM");
+        if (wfmSel && sel && sel->stereo) {
+            sel->stereo->setForceMono(forceMono_);   // survives channel rebuilds
+            const float blend = sel->stereoBlend;
+            const std::vector<float>& M = sel->stereoM48k;
+            const std::vector<float>& S = sel->stereoS48k;
+            const std::size_t n =
+                std::min({M.size(), S.size(), agcGain.size()});
+            std::vector<float> L(n), R(n);
+            // Use one block-constant AGC gain for both M and S. The per-sample
+            // `agcGain` envelope still ripple at audio beat rates (it tracks the
+            // mono envelope sample-by-sample); multiplying that ripple onto the
+            // side chain creates intermodulation sidebands that leak between L and
+            // R and destroy channel separation. Averaged over the ~20 ms block the
+            // gain is flat, so M and S share a single, common gain -- exactly how a
+            // real receiver applies AGC to the recovered audio. The legacy mono
+            // path / recording below still uses the per-sample `out` unchanged.
+            double gblk = 0.0;
+            for (std::size_t i = 0; i < n; ++i) gblk += agcGain[i];
+            const float g = gate && n > 0 ? static_cast<float>(gblk / n) : 0.0f;
+            for (std::size_t i = 0; i < n; ++i) {
+                const float m = M[i], s = S[i];
+                L[i] = std::clamp(g * (m + blend * s), -1.0f, 1.0f);
+                R[i] = std::clamp(g * (m - blend * s), -1.0f, 1.0f);
+            }
+            audioSink_->writeStereo(L, R);
+        } else {
+            audioSink_->write(out);
+        }
+
+        // Throttled (~5 Hz) honest stereo readout for the UI badge. Stereo means
+        // the real pilot is locked AND the blend has actually come up; anything
+        // else (or any non-WFM mode) reports mono.
+        {
+            bool isStereo = false;
+            float bl = 0.0f, pq = 0.0f;
+            if (wfmSel && sel && sel->stereo) {
+                isStereo = sel->stereoLock && sel->stereoBlend > 0.5f;
+                bl = sel->stereoBlend;
+                pq = sel->stereoPilot;
+            }
+            const qint64 nowSt = stereoEmitClock_.elapsed();
+            if (stereoLastEmitMs_ < 0 || nowSt - stereoLastEmitMs_ >= 200) {
+                stereoLastEmitMs_ = nowSt;
+                emit stereoState(isStereo, bl, pq);
+            }
+        }
 
         // Gated recording: the single segment writer serves both the
         // squelch-gated mode and the watch mode. It is fed the REAL

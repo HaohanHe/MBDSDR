@@ -28,6 +28,14 @@ public:
     double decayMs() const { return decayTauMs_; }
     void reset();
     std::vector<float> process(const std::vector<float>& in);
+    // Gain-exposing variant: identical envelope-follow math to process(), but
+    // also writes the per-sample LINEAR gain actually applied (target_/env) into
+    // `gain` and the leveled+clamped samples into `out`. Both are resized to
+    // in.size(). The stereo engine re-uses this exact same gain on the M/S matrix
+    // so mono and the L/R channels share one AGC envelope (no level mismatch).
+    void processWithGain(const std::vector<float>& in,
+                         std::vector<float>* out,
+                         std::vector<float>* gain);
     float currentLevelDb() const;
 private:
     float target_ = DefaultTarget;

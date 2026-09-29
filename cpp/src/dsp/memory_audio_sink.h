@@ -22,6 +22,8 @@ public:
 
     // ---- IAudioSink -------------------------------------------------------
     void write(const std::vector<float>& audio) override;
+    void writeStereo(const std::vector<float>& left,
+                     const std::vector<float>& right) override;
     void setVolume(float v) override;
     void setMuted(bool m) override;
     bool isAvailable() const override { return true; }
@@ -29,15 +31,22 @@ public:
     QString currentDeviceName() const override;
 
     // ---- Test accessors ---------------------------------------------------
-    /// Captured post-volume/post-mute samples ([-1,1]).
+    /// Captured post-volume/post-mute mono samples ([-1,1]) from write().
     const std::vector<float>& buffer() const { return buffer_; }
     std::size_t frames() const { return buffer_.size(); }
-    void clear() { buffer_.clear(); }
+    /// Captured post-volume/post-mute stereo samples ([-1,1]) from writeStereo().
+    /// left/right are captured independently and stay frame-aligned.
+    const std::vector<float>& stereoLeft() const { return stereoLeft_; }
+    const std::vector<float>& stereoRight() const { return stereoRight_; }
+    std::size_t stereoFrames() const { return stereoLeft_.size(); }
+    void clear() { buffer_.clear(); stereoLeft_.clear(); stereoRight_.clear(); }
     bool muted() const { return muted_.load(); }
     float volume() const { return volume_.load(); }
 
 private:
     std::vector<float> buffer_;
+    std::vector<float> stereoLeft_;
+    std::vector<float> stereoRight_;
     std::atomic<float> volume_{1.0f};
     std::atomic<bool> muted_{false};
 };

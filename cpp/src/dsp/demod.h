@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 // Demodulators: AM / NFM / WFM / SSB (USB/LSB). All streamable,
-// state persists across blocks. Mono only; stereo TODO for WFM.
+// state persists across blocks. WFM mono decoding lives here; the optional
+// stereo composite-baseband decoding is done downstream by WfmStereoDecoder
+// (see dsp/wfm_stereo.{h,cpp}), which consumes DemodWFM::rawMpxOut().
 #pragma once
 
 #include <complex>
@@ -78,6 +80,14 @@ public:
     // returned by process(). The audio output itself is unchanged sample by
     // sample; this is a tap only.
     const std::vector<float>& mpxOut() const { return mpxBuf_; }
+
+    // Raw composite MPX baseband from the LAST process() call: the stream
+    // BEFORE the 50 us de-emphasis one-pole (i.e. gain*angle straight from the
+    // quadrature discriminator). The 19 kHz pilot and 38 kHz stereo DSB are at
+    // full strength here, so this is the tap a downstream WfmStereoDecoder
+    // needs. Same length as the audio returned by process(). The audio output
+    // itself is unchanged sample by sample; this is a tap only.
+    const std::vector<float>& rawMpxOut() const { return rawMpxBuf_; }
 private:
     double ifSr_, bw_;
     float gain_;
@@ -86,6 +96,7 @@ private:
     float audioLpState_ = 0;
     std::complex<float> prev_ = {1,0};
     std::vector<float> mpxBuf_;
+    std::vector<float> rawMpxBuf_;
 };
 
 // ---- SSB: BFO shift + real part + LPF ----
