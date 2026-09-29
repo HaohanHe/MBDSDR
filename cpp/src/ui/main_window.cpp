@@ -64,6 +64,7 @@
 #include "ui/world_view.h"
 #include "ui/aircraft_tracker.h"
 #include "ui/elevation_plot.h"
+#include "ui/weather_panel.h"
 #include "gnss/gnss_receiver.h"
 #include "gnss/gnss_types.h"
 #include "ui/spectrum_widget.h"
@@ -410,6 +411,19 @@ MainWindow::MainWindow(QWidget* parent)
     // controls live in the container's tool strip.
     centerTabs_->addTab(spectrum_, "频谱");
     centerTabs_->addTab(worldPage, "世界");
+
+    // Weather-satellite (NOAA APT) tab: the decoded image is wide (1818 px),
+    // so it lives in the center stack alongside the spectrum / map rather than
+    // the narrow right rail. Fed by engine aptImageReady (queued).
+    {
+        auto* weatherPage = new QWidget;
+        auto* weatherLay = new QVBoxLayout(weatherPage);
+        weatherLay->setContentsMargins(0, 0, 0, 0);
+        weatherPanel_ = new ui::WeatherSatPanel(weatherPage);
+        weatherLay->addWidget(weatherPanel_);
+        centerTabs_->addTab(weatherPage, "气象");
+    }
+
     centerLay->addWidget(centerTabs_);
     splitter->addWidget(centerCard);
 
@@ -852,6 +866,32 @@ MainWindow::MainWindow(QWidget* parent)
     connect(engine_, &dsp::SpectrumEngine::constellationCleared,
             this, [this]() { if (constellationView_) constellationView_->clear(); },
             Qt::QueuedConnection);
+
+    // ---- NOAA APT weather panel (cross-thread: queued) -------------------
+    // The engine emits aptImageReady only while the selected VFO is WFM and a
+    // row grew or the lock state changed; never a per-sample flood.
+    connect(engine_, &dsp::SpectrumEngine::aptImageReady,
+            this, [this](const QImage& img, bool locked, int rows, double corr) {
+        if (weatherPanel_) weatherPanel_->setImage(img, locked, rows, corr);
+    }, Qt::QueuedConnection);
+    // Panel "清除图像" -> engine resets its decoder (next loop starts fresh).
+    if (weatherPanel_) {
+        connect(weatherPanel_, &ui::WeatherSatPanel::clearRequested,
+                this, [this]() { engine_->resetAptDecoder(); });
+        // One-tune NOAA presets: retune and force WFM so the APT decoder feeds.
+        connect(weatherPanel_, &ui::WeatherSatPanel::tuneRequested,
+                this, [this](double hz) {
+            engine_->onSetCenterFreq(hz);
+            freqSpin_->blockSignals(true);
+            freqSpin_->setValue(hz / 1e6);
+            freqSpin_->blockSignals(false);
+            sbVfo_->setText(QString("%1 MHz").arg(hz / 1e6, 0, 'f', 3));
+            if (demodCombo_->currentText() != "WFM") {
+                const int idx = demodCombo_->findText("WFM");
+                if (idx >= 0) demodCombo_->setCurrentIndex(idx);  // -> setDemodMode
+            }
+        });
+    }
 
     // ---- ANR controls ----
     connect(anrCheck_, &QCheckBox::toggled, this, [this](bool on) {

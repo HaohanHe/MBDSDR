@@ -30,7 +30,8 @@ namespace mbdsdr {
 namespace ui { class BookmarkManager; }
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct VfoMarker; }
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
-                 class ElevationPlot; struct AircraftPoint; class AircraftTracker; }
+                 class ElevationPlot; struct AircraftPoint; class AircraftTracker;
+                 class WeatherSatPanel; }
 namespace ai   { class Agent; }
 namespace gnss { class GnssReceiver; struct GnssFix; }
 
@@ -78,6 +79,7 @@ private:
     ui::WorldView*   worldView_ = nullptr;
     ui::ConstellationView* constellationView_ = nullptr;
     ui::ElevationPlot* elevationPlot_ = nullptr;
+    ui::WeatherSatPanel* weatherPanel_ = nullptr;
 
     // ---- GNSS serial receiver + compact toolbar (world tab) ----
     gnss::GnssReceiver* gnssRx_      = nullptr;

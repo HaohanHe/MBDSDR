@@ -69,6 +69,7 @@ set(SOURCES
     src/dsp/digital_demod.cpp
     src/dsp/anr.cpp
     src/ui/constellation_view.cpp
+    src/ui/weather_panel.cpp
     src/dsp/squelch.cpp
     src/dsp/agc.cpp
     src/dsp/audio_output.cpp
@@ -81,6 +82,7 @@ set(SOURCES
     src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp
     src/dsp/rds_decoder.cpp
+    src/dsp/apt_decoder.cpp
     src/dsp/tle_client.cpp
     src/dsp/sgp4.cpp
     src/gnss/serial_transport.cpp
@@ -137,6 +139,7 @@ set(HEADERS
     src/ui/sky_view.h
     src/ui/world_view.h
     src/ui/aircraft_tracker.h
+    src/ui/weather_panel.h
     src/ui/map_projection.h
     src/ui/coastline_data.h
     src/ui/elevation_plot.h
@@ -212,7 +215,7 @@ add_executable(test_engine_integration tests/test_engine_integration.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_engine_integration PRIVATE src)
 target_link_libraries(test_engine_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
@@ -225,7 +228,7 @@ add_executable(test_audio_sink tests/test_audio_sink.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_audio_sink PRIVATE src)
 target_link_libraries(test_audio_sink PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
@@ -268,7 +271,7 @@ add_executable(test_wav_roundtrip tests/test_wav_roundtrip.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_wav_roundtrip PRIVATE src)
 target_link_libraries(test_wav_roundtrip PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
@@ -279,7 +282,7 @@ add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/agent.cpp src/ai/agent_tools.cpp src/ai/ai_config.cpp)
 target_include_directories(test_ai_function_calling PRIVATE src)
@@ -410,6 +413,16 @@ target_include_directories(test_constellation_view PRIVATE src)
 target_link_libraries(test_constellation_view PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui)
 add_test(NAME constellation_view COMMAND test_constellation_view)
 
+# Weather-satellite (NOAA APT) panel: empty state / setImage / clear round-trip
+# (QtTest + offscreen). The QImage fed here is a hand-built test pattern,
+# NOT HARDWARE -- the panel must never invent a cloud photo.
+add_executable(test_weather_panel tests/test_weather_panel.cpp
+    src/ui/weather_panel.cpp)
+target_include_directories(test_weather_panel PRIVATE src)
+target_link_libraries(test_weather_panel PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui)
+add_test(NAME weather_panel COMMAND test_weather_panel)
+set_tests_properties(weather_panel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # End-to-end: TestSignalSource digital IQ -> real channelizer -> DigitalDemod lock.
 add_executable(test_digital_e2e tests/test_digital_e2e.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
@@ -440,6 +453,13 @@ target_include_directories(test_rds_chain PRIVATE src)
 target_link_libraries(test_rds_chain PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME rds_chain COMMAND test_rds_chain)
 
+# NOAA APT image decoder: synthetic test pattern -> 2400 Hz AM baseband ->
+# streaming AptDecoder -> grayscale QImage. DSP core only, no UI.
+add_executable(test_apt tests/test_apt.cpp src/dsp/apt_decoder.cpp src/dsp/demod.cpp)
+target_include_directories(test_apt PRIVATE src)
+target_link_libraries(test_apt PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME apt COMMAND test_apt)
+
 add_executable(test_agent tests/test_agent.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
     src/ai/agent_tools.cpp src/ai/agent.cpp src/dsp/spectrum_engine.cpp
@@ -449,7 +469,8 @@ add_executable(test_agent tests/test_agent.cpp
     src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
     src/dsp/qt_audio_sink.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp
-    src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/fft.cpp src/dsp/power_spectrum.cpp
+    src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp
     src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_agent PRIVATE src)
 target_link_libraries(test_agent PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
