@@ -26,6 +26,7 @@
 #include "dsp/iaudio_sink.h"
 #include "dsp/recorder.h"
 #include "dsp/gated_recorder.h"
+#include "dsp/signal_watch.h"
 #include "dsp/wav_writer.h"
 #include "dsp/cw_decoder.h"
 #include "dsp/adsb_decoder.h"
@@ -82,6 +83,20 @@ public slots:
     // source falls back to TestSignalSource (no fake data) and emits sourceChanged.
     bool connectRtlTcp(const QString& host, quint16 port);
     void setGatedRecordingEnabled(bool e);
+    // ---- Unattended signal-triggered watch recording ----
+    // Arm/disarm the watch (does not touch playback: listening is never
+    // interrupted). While armed, real RSSI above the threshold starts a
+    // segment; after the signal leaves and the end-delay passes, the file is
+    // finalised and the segment count increments.
+    void setWatchEnabled(bool e);
+    bool watchEnabled() const { return watchEnabled_.load(); }
+    void setWatchThresholdDb(float db) { watch_.setThresholdDb(db); }
+    void setWatchPrerollMs(double ms)  { gatedRec_.setPreRollMs(ms); }
+    void setWatchHangMs(double ms)     { gatedRec_.setHangMs(ms); }
+    int  watchSegmentCount() const     { return gatedRec_.segmentCount(); }
+    // User-configurable recording directory (default: program dir "record").
+    void setRecordingDir(const QString& dir);
+    QString recordingDir() const { return recDir_; }
     void setAdsbReferencePosition(double latDeg, double lonDeg) { adsbDecoder_.setReferencePosition(latDeg, lonDeg); }
 
     // ---- Multi-VFO management (all take sourceMutex_) ---------------------
@@ -162,6 +177,10 @@ signals:
     void snrLevel(float snrDb);
     void squelchState(bool open);
     void recordingStateChanged(bool recording, const QString& path);
+    // Watch state: enabled = armed (listening), recording = a segment file is
+    // open right now, segmentCount = total segments saved. Emitted on arm
+    // toggles, record start/stop edges and whenever a segment is finalised.
+    void watchStateChanged(bool enabled, bool recording, int segmentCount);
     // 1 Hz tick while recording: current file path, elapsed wall-clock seconds,
     // and on-disk byte count. Lets the UI show a live REC timer / size.
     void recordingProgress(const QString& path, int seconds, qint64 bytes);
@@ -206,6 +225,15 @@ private:
     std::unique_ptr<IAudioSink> testSink_;
     Recorder recorder_;
     GatedRecorder gatedRec_;
+    // Real-RSSI trigger for the unattended watch mode.
+    SignalWatch watch_;
+    std::atomic<bool> watchEnabled_{false};
+    bool gatedEnabled_ = false;
+    // Recording edge tracking for watchStateChanged emission.
+    bool gatedWasRecording_ = false;
+    // Output directory shared by the main record button and the gated/watch
+    // recorder. User-configurable; defaults to program-dir "record".
+    QString recDir_ = "record";
     WavWriter wavWriter_;
     PowerSpectrum powerSpectrum_;
     NoiseBlanker noiseBlanker_;

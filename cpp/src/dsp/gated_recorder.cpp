@@ -5,6 +5,9 @@
 #include <QDateTime>
 #include <QFile>
 #include <QDataStream>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTimeZone>
 #include <QtGlobal>
 #include <cstdint>
 #include <cmath>
@@ -13,41 +16,59 @@
 namespace mbdsdr {
 namespace dsp {
 
+namespace {
+// Defaults for unattended watch recording.
+constexpr double kDefaultPreRollMs = 400.0;   // 0.4 s before the trigger
+constexpr double kDefaultHangMs    = 1500.0;  // 1.5 s end-delay
+} // namespace
+
 GatedRecorder::GatedRecorder(double sr) : sr_(sr) {
+    preRollMs_ = kDefaultPreRollMs;
+    hangMs_ = kDefaultHangMs;
     attackAlpha_  = static_cast<float>(1.0 - std::exp(-10.0 / (sr_ * 10e-3)));
     releaseAlpha_ = static_cast<float>(1.0 - std::exp(-10.0 / (sr_ * 60e-3)));
+}
+
+void GatedRecorder::setPreRollMs(double ms) {
+    preRollMs_ = std::clamp(ms, kPreRollMinMs, kPreRollMaxMs);
+}
+
+void GatedRecorder::setHangMs(double ms) {
+    hangMs_ = std::clamp(ms, kHangMinMs, kHangMaxMs);
 }
 
 void GatedRecorder::startSegment() {
     segmentBuf_.clear();
     // Copy pre-roll
     for (float s : preRoll_) segmentBuf_.push_back(s);
-    segmentLenMs_ = kPreRollMs;
-    hangLeftMs_ = kHangMs;
+    segmentLenMs_ = preRollMs_;
+    hangLeftMs_ = hangMs_;
     env_ = 0;
+    triggerEpochMs_ = QDateTime::currentMSecsSinceEpoch();
     state_ = State::REC;
 }
 
-void GatedRecorder::endSegment() {
-    if (segmentLenMs_ < kMinSegMs) {
+bool GatedRecorder::endSegment() {
+    auto abandon = [&]() {
         state_ = State::IDLE;
         segmentBuf_.clear();
-        return;
-    }
+        return false;
+    };
+    if (segmentLenMs_ < kMinSegMs) return abandon();
+
     float peak = 0;
     for (float s : segmentBuf_) peak = std::max(peak, std::abs(s));
-    if (peak < 1e-4) { state_ = State::IDLE; segmentBuf_.clear(); return; }
+    if (peak < 1e-4) return abandon();
     const float threshold = peak * 0.01f;
 
     // Head trim (symmetric with the tail trim): drop leading quiet samples so
-    // the segment starts at the real signal onset instead of ~130 ms of dead
-    // pre-roll silence. The pre-roll now carries the un-gated audio fed by the
-    // engine, so it holds the genuine onset.
+    // the segment starts at the real signal onset. The pre-roll carries the
+    // un-gated audio fed by the engine, so genuine pre-onset floor is kept.
     std::size_t begin = 0;
     while (begin < segmentBuf_.size() && std::abs(segmentBuf_[begin]) < threshold) ++begin;
     std::size_t end = segmentBuf_.size();
     while (end > begin && std::abs(segmentBuf_[end-1]) < threshold) --end;
-    if (end <= begin) { state_ = State::IDLE; segmentBuf_.clear(); return; }
+    if (end <= begin) return abandon();
     segmentBuf_.erase(segmentBuf_.begin(), segmentBuf_.begin() + begin);
     segmentBuf_.resize(end - begin);
 
@@ -66,9 +87,20 @@ void GatedRecorder::endSegment() {
         for (auto& s : segmentBuf_) s *= g;
     }
 
-    lastSavedPath_ = writeWav(segmentBuf_, currentMode_, currentFreq_);
+    const QString base = uniqueBasePath();
+    if (base.isEmpty()) return abandon();
+    const qint64 endEpochMs = QDateTime::currentMSecsSinceEpoch();
+    // The file starts (pre-roll) this far before the trigger opened.
+    const qint64 startEpochMs = triggerEpochMs_ -
+            static_cast<qint64>(preRollMs_);
+
+    lastSavedPath_ = writeWav(segmentBuf_, base);
+    if (lastSavedPath_.isEmpty()) return abandon();
+    writeSidecar(lastSavedPath_, segmentBuf_, startEpochMs, endEpochMs);
+    ++segmentCount_;
     state_ = State::IDLE;
     segmentBuf_.clear();
+    return true;
 }
 
 std::vector<QString> GatedRecorder::feed(const std::vector<float>& audio, bool gate) {
@@ -78,7 +110,7 @@ std::vector<QString> GatedRecorder::feed(const std::vector<float>& audio, bool g
     const double blockMs = audio.size() * 1000.0 / sr_;
 
     // Always push to pre-roll
-    const std::size_t maxPreRoll = static_cast<std::size_t>(sr_ * kPreRollMs / 1000.0);
+    const std::size_t maxPreRoll = static_cast<std::size_t>(sr_ * preRollMs_ / 1000.0);
     for (float s : audio) {
         preRoll_.push_back(s);
         if (preRoll_.size() > maxPreRoll) preRoll_.pop_front();
@@ -100,31 +132,41 @@ std::vector<QString> GatedRecorder::feed(const std::vector<float>& audio, bool g
     segmentLenMs_ += blockMs;
 
     if (gate) {
-        hangLeftMs_ = kHangMs;
+        hangLeftMs_ = hangMs_;
     } else {
         hangLeftMs_ -= blockMs;
     }
 
     if (hangLeftMs_ <= 0 || segmentLenMs_ >= kMaxSegMs) {
-        endSegment();
-        if (!lastSavedPath_.isEmpty()) saved.push_back(lastSavedPath_);
+        if (endSegment()) saved.push_back(lastSavedPath_);
     }
     return saved;
 }
 
 std::vector<QString> GatedRecorder::flush() {
     std::vector<QString> saved;
-    if (state_ == State::REC) endSegment();
-    if (!lastSavedPath_.isEmpty()) saved.push_back(lastSavedPath_);
+    // Only report a path that is finalised here; never re-report a segment that
+    // feed() already returned (avoids double counting at shutdown).
+    if (state_ == State::REC && endSegment()) saved.push_back(lastSavedPath_);
     return saved;
 }
 
-QString GatedRecorder::writeWav(const std::vector<float>& samples,
-                                  const QString& mode, double freq) {
+QString GatedRecorder::uniqueBasePath() const {
     QDir().mkpath(outDir_);
     const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
-    const QString path = QString("%1/%2_%3_%4Hz.wav").arg(outDir_, stamp, mode)
-                             .arg(static_cast<qint64>(freq));
+    const QString first = QString("%1/%2_%3_%4Hz")
+                              .arg(outDir_, stamp, ctx_.mode)
+                              .arg(static_cast<qint64>(ctx_.channelFreqHz));
+    QString base = first;
+    for (int n = 2; n < 10000 && QFile::exists(base + ".wav"); ++n) {
+        base = first + QString("_%1").arg(n);
+    }
+    return base;
+}
+
+QString GatedRecorder::writeWav(const std::vector<float>& samples,
+                                  const QString& basePath) {
+    const QString path = basePath + ".wav";
 
     // Convert float [-1,1] to int16
     std::vector<std::int16_t> pcm(samples.size());
@@ -158,6 +200,43 @@ QString GatedRecorder::writeWav(const std::vector<float>& samples,
     ds.writeRawData(reinterpret_cast<const char*>(pcm.data()), dataBytes);
 
     return path;
+}
+
+void GatedRecorder::writeSidecar(const QString& wavPath,
+                                  const std::vector<float>& samples,
+                                  qint64 startEpochMs, qint64 endEpochMs) {
+    QJsonObject meta;
+    meta["type"] = "mbdsdr-watch-recording";
+    meta["sample_rate"] = sr_;
+    meta["samples"] = static_cast<qint64>(samples.size());
+    // Honest, measured duration from the actual written sample count.
+    const double durationS = samples.size() / sr_;
+    meta["duration_s"] = durationS;
+    meta["center_freq"] = ctx_.centerFreqHz;
+    meta["frequency"] = ctx_.channelFreqHz;
+    meta["gain_db"] = ctx_.gainDb;
+    meta["mode"] = ctx_.mode;
+    meta["trigger_threshold_db"] = ctx_.triggerThresholdDb;
+    meta["preroll_ms"] = preRollMs_;
+    meta["end_delay_ms"] = hangMs_;
+    meta["start_time"] =
+        QDateTime::fromMSecsSinceEpoch(startEpochMs, QTimeZone("UTC")).toString(Qt::ISODate);
+    meta["end_time"] =
+        QDateTime::fromMSecsSinceEpoch(endEpochMs, QTimeZone("UTC")).toString(Qt::ISODate);
+    meta["hardware"] = ctx_.hardware;
+    meta["is_hardware"] = ctx_.hardwareConnected;
+    if (ctx_.hardwareConnected) {
+        meta["note"] = QString("Real RF capture via %1").arg(ctx_.hardware);
+    } else {
+        // Offline / injected input must never be mistaken for a real capture.
+        meta["note"] = QStringLiteral(
+            "非硬件 / NOT HARDWARE -- offline synthesized or injected input");
+    }
+
+    const QString jsonPath = wavPath;
+    QFile f(jsonPath.chopped(4) + ".json");
+    if (f.open(QIODevice::WriteOnly))
+        f.write(QJsonDocument(meta).toJson(QJsonDocument::Indented));
 }
 
 } // namespace dsp
