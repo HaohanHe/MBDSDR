@@ -29,6 +29,7 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
     // The initial state is emitted once in run(), after connections are wired.
 
     audioOut_ = new AudioOutput(this);
+    audioSink_ = audioOut_;   // default: real device playback
     gatedRec_.setOutputDir("recordings");
     // Single default VFO at the source center, NFM 12.5 kHz -- identical to
     // the legacy single-channel receiver on first boot.
@@ -186,7 +187,15 @@ bool SpectrumEngine::connectRtlTcp(const QString& host, quint16 port) {
 }
 
 void SpectrumEngine::setMuted(bool m) {
-    if (audioOut_) audioOut_->setMuted(m);
+    if (audioSink_) audioSink_->setMuted(m);
+}
+
+void SpectrumEngine::setTestAudioSink(std::unique_ptr<IAudioSink> sink) {
+    // Swap the DSP write path. The settings-dialog handle (audioOut_) and its
+    // Qt device hot-swap are untouched; only where run() writes demod audio
+    // changes. nullptr restores the real device sink.
+    testSink_ = std::move(sink);
+    audioSink_ = testSink_ ? testSink_.get() : static_cast<IAudioSink*>(audioOut_);
 }
 
 void SpectrumEngine::setBandwidth(double hz) {
@@ -496,7 +505,7 @@ void SpectrumEngine::run() {
             if (!wasDigital_) wasDigital_ = true;   // entering digital (panel setMode in UI)
             std::vector<float> silence;
             silence.resize(raw.size(), 0.0f);
-            audioOut_->write(silence, 48000.0);
+            audioSink_->write(silence);
             emit squelchState(true);
             emit audioLevel(-60.0f);
             // Gated/wav recording: keep the audio stream continuous but silent.
@@ -529,7 +538,7 @@ void SpectrumEngine::run() {
         emit squelchState(gate);
         emit audioLevel(agc_.currentLevelDb());
 
-        audioOut_->write(out, 48000.0);
+        audioSink_->write(out);
 
         // Gated recording: label the segment with the selected VFO, and feed
         // the REAL (un-muted) audio so pre-roll captures the onset.

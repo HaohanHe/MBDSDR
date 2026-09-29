@@ -23,6 +23,7 @@
 #include "dsp/agc.h"
 #include "dsp/anr.h"
 #include "dsp/audio_output.h"
+#include "dsp/iaudio_sink.h"
 #include "dsp/recorder.h"
 #include "dsp/gated_recorder.h"
 #include "dsp/wav_writer.h"
@@ -55,6 +56,11 @@ public:
     // Owned audio sink (UI-thread affinity). Exposed so the settings dialog can
     // hot-restart playback on a user-selected output device.
     AudioOutput* audioOutput() const { return audioOut_; }
+    // Test injection (NOT HARDWARE): route the demodulated 48k audio stream to a
+    // caller-provided sink (e.g. MemoryAudioSink) instead of the real device.
+    // Pass nullptr to restore the default device sink. The engine takes
+    // ownership; the previous injected sink is destroyed.
+    void setTestAudioSink(std::unique_ptr<IAudioSink> sink);
     double scanBand(double lowHz, double highHz, double stepHz);
     bool tryConnectRtl();
     void disconnectSource();
@@ -154,6 +160,11 @@ private:
     Squelch squelch_;
     Agc agc_;
     AudioOutput* audioOut_ = nullptr;
+    // Active 48k write path. Defaults to audioOut_; an injected test sink
+    // (setTestAudioSink) redirects it without touching the settings-dialog
+    // handle above.
+    IAudioSink* audioSink_ = nullptr;
+    std::unique_ptr<IAudioSink> testSink_;
     Recorder recorder_;
     GatedRecorder gatedRec_;
     WavWriter wavWriter_;
