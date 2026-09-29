@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 #include "memory_audio_sink.h"
 
 #include <algorithm>

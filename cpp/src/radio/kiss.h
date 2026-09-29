@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // KISS TNC framing (the serial byte protocol that carries AX.25 frames to a
 // TNC). References: KISS spec (KISS protocol constants). Pure logic.
 #pragma once

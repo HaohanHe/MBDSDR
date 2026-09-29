@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // In-memory IAudioSink: every 48 kHz mono Float32 block written to it is
 // captured (after volume/mute, exactly as the speaker would have rendered it)

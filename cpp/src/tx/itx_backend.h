@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Transmit backend abstraction. Mirrors the receive source contract but for TX.
 // Implementations MUST emit nothing unless PTT is explicitly asserted.
 #pragma once

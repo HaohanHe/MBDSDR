@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Rational audio resampler to a fixed output rate: integer polyphase-style
 // decimation (windowed-sinc anti-alias) followed by a streaming linear
 // fractional resampler that lands exactly on the requested rate. The fractional

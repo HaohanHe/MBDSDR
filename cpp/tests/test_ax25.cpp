@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // AX.25 + KISS round-trip self-check (not hardware).
 #include "radio/ax25.h"
 #include "radio/kiss.h"

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // CW keyer: Morse encoder + timing. Unit length follows the PARIS standard
 // (unit = 60/(50*wpm) seconds). Produces a deterministic key schedule that can
 // drive any ICwKey (serial RTS line, CAT keying, or a sidetone generator).

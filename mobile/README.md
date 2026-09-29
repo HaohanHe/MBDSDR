@@ -75,4 +75,4 @@ flutter run
 - 指向精度取决于手机罗盘/加速度计校准质量，强干扰环境下需手动修正。
 - 不内置任何 FM 电台频率、地理位置或密钥；所有连接参数与 key 都由用户自己填写。
 
-许可证见根目录 LICENSE（GPL-3.0-or-later），第三方归属见 NOTICE.md。
+许可证见根目录 LICENSE（MIT），第三方归属见 NOTICE.md。

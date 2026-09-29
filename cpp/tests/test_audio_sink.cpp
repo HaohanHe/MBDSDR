@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Contract tests for the IAudioSink abstraction:
 //   * MemoryAudioSink captures samples, applies volume/mute, reports an honest

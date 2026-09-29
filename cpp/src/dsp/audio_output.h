@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 //
 // Qt-flavoured facade around QtAudioSink. It is intentionally thin: the real
 // QAudioSink logic lives in QtAudioSink (an IAudioSink), while this QObject

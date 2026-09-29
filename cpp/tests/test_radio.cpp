@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // CAT (CI-V + Kenwood) and CW keyer self-check (not hardware).
 #include "radio/cat_client.h"
 #include "radio/cw_keyer.h"

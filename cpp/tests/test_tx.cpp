@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // TX interlock / watchdog self-check (not hardware).
 #include "tx/loopback_backend.h"
 #include "tx/modulator.h"
