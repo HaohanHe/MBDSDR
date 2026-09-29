@@ -78,8 +78,10 @@ class DriverNotFoundError(SDRUserError):
 
     def _default_suggestion(self) -> str:
         return (
-            "请安装对应驱动：RTL-SDR 运行 `pip install pyrtlsdr`；"
-            "通用 SDR 运行 `pip install SoapySDR`；或用 --debug-source 以调试信号源模式运行。"
+            "请安装对应驱动：本机 RTL-SDR USB 默认走 SoapySDR"
+            "（pip install SoapySDR + SoapyRTLSDR，无 GPL 传染）；"
+            "pyrtlsdr 为可选 GPL-3.0 原生后端，按需 pip install pyrtlsdr；"
+            "远端棒用 rtl_tcp（自研客户端）；或用 --debug-source 以调试信号源模式运行。"
         )
 
 

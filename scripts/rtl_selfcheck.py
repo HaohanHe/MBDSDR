@@ -40,24 +40,16 @@ def fail(msg):
     print(f"  [FAIL] {msg}")
 
 
-def check_dependencies():
-    """阶段 0：依赖检测。"""
+def check_dependencies(args):
+    """阶段 0：依赖检测。
+
+    默认接收路径不依赖 pyrtlsdr（GPL-3.0）：本机 USB 走 SoapySDR，远端走 rtl_tcp。
+    pyrtlsdr 仅作为「可选原生直连后端」探测，缺失不 FAIL。
+    """
     step("阶段0  依赖检测")
     have = {}
-    try:
-        import rtlsdr  # noqa: F401
-        ver = getattr(rtlsdr, "__version__", "未知")
-        ok(f"pyrtlsdr 已安装（{ver}）")
-        have["pyrtlsdr"] = True
-    except Exception:
-        fail("未安装 pyrtlsdr。安装方法：")
-        print("        pip install pyrtlsdr numpy")
-        print("        还需系统库 librtlsdr：")
-        print("          Debian/Ubuntu : sudo apt install rtl-sdr librtlsdr-dev")
-        print("          macOS         : brew install librtlsdr")
-        print("          Windows       : 下载 librtlsdr 的 .dll 放到 PATH（或用 --tcp 走 rtl_tcp）")
-        have["pyrtlsdr"] = False
 
+    # numpy 是唯一硬依赖（FFT/分析都要它）
     try:
         import numpy  # noqa: F401
         ok(f"numpy 已安装（{numpy.__version__}）")
@@ -65,6 +57,31 @@ def check_dependencies():
     except Exception:
         fail("未安装 numpy：pip install numpy")
         have["numpy"] = False
+
+    # 本机 USB 默认路径：SoapySDR（无 GPL）。rtl_selfcheck --tcp 模式完全不需要它。
+    have["soapy"] = False
+    if not args.tcp:
+        try:
+            import SoapySDR  # noqa: F401
+            ok("SoapySDR 已安装（本机 RTL-SDR USB 默认后端）")
+            have["soapy"] = True
+        except Exception:
+            warn("未安装 SoapySDR：本机 USB 棒默认走它（pip install SoapySDR + SoapyRTLSDR）。"
+                 "若用 --tcp 走 rtl_tcp 可忽略本条。")
+
+    # pyrtlsdr：可选 GPL-3.0 原生后端，仅用户自装才生效，缺失不 FAIL。
+    try:
+        import rtlsdr  # noqa: F401
+        ver = getattr(rtlsdr, "__version__", "未知")
+        ok(f"pyrtlsdr 已安装（{ver}，可选 GPL-3.0 原生后端）")
+        have["pyrtlsdr"] = True
+    except Exception:
+        have["pyrtlsdr"] = False
+        print("        [INFO] 未安装 pyrtlsdr（可选 GPL-3.0 原生 USB 后端，不强制）。")
+        print("               本机 USB 默认用 SoapySDR；远端用 --tcp 走 rtl_tcp（自研客户端）。")
+        print("               仅当你需要 pyrtlsdr 原生直连时才装：pip install pyrtlsdr")
+        print("               （还需系统库 librtlsdr：Debian/Ubuntu sudo apt install rtl-sdr，")
+        print("                Windows 下载 librtlsdr 的 .dll 放 PATH，或直接用 --tcp）")
 
     have["matplotlib"] = False
     try:
@@ -78,44 +95,45 @@ def check_dependencies():
 
 def open_device(args):
     """阶段 1/2：枚举并打开设备。"""
-    from rtlsdr import RtlSdr, RtlSdrTcpClient
-    from mbdsdr_ai.sdr_backend import RTLSDRBackend
-
     step("阶段1  设备枚举")
     if args.tcp:
         host, _, port_s = args.tcp.partition(":")
         port = int(port_s or "1234")
-        print(f"  使用 rtl_tcp 网络模式 {host}:{port}（跳过本地 USB 枚举）")
-        backend = RTLSDRBackend(host=host, port=port, ppm=args.ppm)
+        print(f"  使用 rtl_tcp 网络模式 {host}:{port}（自研客户端，不依赖本机 librtlsdr）")
+        # rtl_tcp 统一走本仓库自研 RtlTcpBackend（MIT，无 GPL）
+        from mbdsdr_ai.rtltcp_client import RtlTcpBackend
+        backend = RtlTcpBackend(host=host, port=port, ppm=args.ppm)
     else:
-        devs = RTLSDRBackend.list_devices()
-        if not devs:
-            n = 0
-            try:
-                n = RtlSdr.get_device_count()
-            except Exception:
-                n = 0
-            if n == 0:
-                fail("未发现 RTL-SDR 设备。排查：")
-                print("        1) 棒是否插好、换一个 USB 口（优先 USB2.0 直连，勿用劣质 HUB）")
-                print("        2) Linux: lsusb 看是否有 Realtek Semiconductor Device 2838")
-                print("        3) Linux: 黑名单 dvb_usb_rtl28xxu 内核驱动，或装 udev 规则后重新插拔")
-                print("           echo 'blacklist dvb_usb_rtl28xxu' | sudo tee /etc/modprobe.d/rtl-sdr-blacklist.conf")
-                print("        4) Windows: 用 Zadig 给 RTL2832 设备安装 WinUSB 驱动")
-                print("        5) 是否被别的软件（GQRX/SDR#/rtl_fm）占用")
+        # 本机 USB：优先走统一枚举（SoapySDR 默认），不硬依赖 pyrtlsdr。
+        from mbdsdr_ai.sdr_backend import (
+            RTLSDRBackend, enumerate_all_sdr_devices, build_backend_for_device)
+        devs = enumerate_all_sdr_devices()
+        rtl_devs = [d for d in devs if (d.get("driver") or "").lower() == "rtlsdr"]
+        if not rtl_devs:
+            fail("未发现 RTL-SDR 设备。排查：")
+            print("        1) 棒是否插好、换一个 USB 口（优先 USB2.0 直连，勿用劣质 HUB）")
+            print("        2) Linux: lsusb 看是否有 Realtek Semiconductor Device 2838")
+            print("        3) Linux: 黑名单 dvb_usb_rtl28xxu 内核驱动，或装 udev 规则后重新插拔")
+            print("           echo 'blacklist dvb_usb_rtl28xxu' | sudo tee /etc/modprobe.d/rtl-sdr-blacklist.conf")
+            print("        4) Windows: 用 Zadig 给 RTL2832 设备安装 WinUSB 驱动")
+            print("        5) 默认后端是 SoapySDR：pip install SoapySDR + SoapyRTLSDR；"
+                  "pyrtlsdr 为可选 GPL-3.0（pip install pyrtlsdr）")
+            print("        6) 是否被别的软件（GQRX/SDR#/rtl_fm）占用")
             return None
-        for d in devs:
-            print(f"  发现设备 #{d['index']}  tuner={d['tuner']}  serial={d.get('serial') or '-'}")
-        idx = min(args.index, len(devs) - 1)
-        backend = RTLSDRBackend(device_index=idx, ppm=args.ppm)
+        for d in rtl_devs:
+            print(f"  发现设备：{d.get('label')}  source={d.get('source', '?')}")
+        chosen = rtl_devs[min(args.index, len(rtl_devs) - 1)]
+        backend = build_backend_for_device(chosen)
 
     step("阶段2  打开设备")
     if backend.connect():
-        ok(f"已打开：{backend.device.name}，调谐器={backend.tuner_name}")
-        if backend.tuner_name in ("Unknown",) and not args.tcp:
+        tuner = getattr(backend, "tuner_name", "SoapySDR")
+        ok(f"已打开：{backend.device.name}，调谐器={tuner}")
+        if tuner in ("Unknown",) and not args.tcp:
             warn("调谐器型号读不到（个别库/棒正常），不影响后续采样")
         return backend
-    fail("打开设备失败。常见原因：驱动未装(Zadig)、被占用、权限不足(udev)、librtlsdr 缺失。")
+    fail(f"打开设备失败：{getattr(backend.status, 'error', '')}"
+         " 常见原因：驱动未装(Zadig/SoapySDR)、被占用、权限不足(udev)、librtlsdr 缺失。")
     return None
 
 
@@ -239,9 +257,9 @@ def main():
     args = ap.parse_args()
 
     print("MBDSDR RTL-SDR 自检")
-    have = check_dependencies()
-    if not have.get("pyrtlsdr") or not have.get("numpy"):
-        print("\n依赖未齐，先按上面提示安装后重跑。")
+    have = check_dependencies(args)
+    if not have.get("numpy"):
+        print("\nnumpy 未安装，先按上面提示安装后重跑。")
         sys.exit(2)
 
     backend = open_device(args)
