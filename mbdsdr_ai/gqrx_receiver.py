@@ -124,7 +124,11 @@ class GqrxAGC:
         # hang 保持时长 ≈ 配置的 decay。
         self._hang_samples = int(sr * self.decay * 0.001)
 
-        self._level = self.TARGET_LEVEL
+        # 包络在 dB（20*log10）域跟踪，与 GQRX CAgc 一致：线性域里 50ms 释放
+        # 时间常数只把电平从 0.7 衰减到 ~0.26，仍高于 -20dBFS 突发(0.1)，
+        # 导致「突发 < 残留电平」误走慢释放路径、attack 不触发；dB 域里同一
+        # 50ms 衰减把电平拉到 ~-52dB(≈0.0026)，低于突发 -20dB，快速 attack 正常触发。
+        self._level_db = 20.0 * np.log10(self.TARGET_LEVEL)
         self._gain = 1.0
         self._hang_timer = 0
 
@@ -140,29 +144,31 @@ class GqrxAGC:
 
         out = np.empty(n, dtype=np.complex128)
         c = self._chunk
+        target_db = 20.0 * np.log10(self.TARGET_LEVEL)
         for start in range(0, n, c):
             stop = min(start + c, n)
             blk = iq[start:stop]
             rms = float(np.sqrt(np.mean(blk.real ** 2 + blk.imag ** 2)))
+            db = 20.0 * np.log10(rms + 1e-12)
 
-            rising = rms > self._level
+            rising = db > self._level_db
             if rising:
-                # 信号变强：包络与增益都快速跟踪。
-                self._level += self._a_attack * (rms - self._level)
+                # 信号变强：包络快速跟踪（attack）。
+                self._level_db += self._a_attack * (db - self._level_db)
                 self._hang_timer = 0
-                a = self._a_attack
             else:
-                # 信号变弱：可选 hang 期保持包络/增益，再缓慢释放。
+                # 信号变弱：可选 hang 期保持包络，再缓慢释放。
                 if self.use_hang and self._hang_timer < self._hang_samples:
                     self._hang_timer += (stop - start)
-                    a = 0.0
                 else:
-                    self._level += self._a_release * (rms - self._level)
-                    a = self._a_release
+                    self._level_db += self._a_release * (db - self._level_db)
 
-            desired = self.TARGET_LEVEL / (self._level + 1e-12)
-            if a > 0.0:
-                self._gain += a * (desired - self._gain)
+            # 目标线性增益：输出 RMS = rms * gain = TARGET_LEVEL
+            # => gain = 10^((target_db - level_db)/20)。
+            # 与 C++ Agc::processWithGain 的 g = target_/env_ 一致，直接由包络
+            # 计算增益，不再对增益本身做一阶平滑——那会额外引入一个时间常数，
+            # 使 post-burst 收敛被「增益平滑」主导而慢于 attack 时间常数。
+            self._gain = 10.0 ** ((target_db - self._level_db) / 20.0)
 
             out[start:stop] = blk * self._gain
 

@@ -95,8 +95,12 @@ def test_ws_spectrum_and_audio():
             t = np.arange(n) / 1_000_000.0
             iq = (0.5 * np.exp(2j * np.pi * -20_000.0 * t)).astype(np.complex64)
             srv.spectrum_streamer.push_iq(iq, 100_000.0, 1_000_000.0, force=True)
-            msg = ws.recv(timeout=5)
-            assert isinstance(msg, (bytes, bytearray))
+            # 服务器连接后立即下发一条 JSON status（server.py:135，前端据此显示
+            # 连接状态），其后才是二进制频谱帧；跳过文本 status 直到拿到二进制帧。
+            while True:
+                msg = ws.recv(timeout=5)
+                if isinstance(msg, (bytes, bytearray)):
+                    break
             assert msg[0] == SPECTRUM_MARKER
             decoded = decode_spectrum_frame(bytes(msg))
             assert len(decoded["bins"]) == 128
@@ -105,7 +109,11 @@ def test_ws_spectrum_and_audio():
         with connect(f"ws://127.0.0.1:{srv.port}/ws/audio", open_timeout=5) as ws:
             pcm = (np.ones(256, dtype=np.int16) * 1000)
             srv.audio_streamer.push_audio(pcm)
-            msg = ws.recv(timeout=5)
+            # 同 spectrum：连接后先收到 JSON status，跳过直到二进制 PCM 帧。
+            while True:
+                msg = ws.recv(timeout=5)
+                if isinstance(msg, (bytes, bytearray)):
+                    break
             assert msg[0] == AUDIO_MARKER
             assert len(msg) == 1 + 256 * 2
     finally:

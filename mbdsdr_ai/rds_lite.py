@@ -117,6 +117,7 @@ def encode_block(data16: int, offset_name: str) -> int:
 
 def decode_block(raw26: int) -> Tuple[Optional[str], int]:
     """对 26bit 块求 (块名, 16bit 信息)。块名为 None 表示伴随式未命中。"""
+    raw26 = int(raw26)  # 防御：_int_of 可能回 np.uint8，位累加不得被 numpy dtype 截断
     syn = calculate_syndrome(raw26)
     name = SYNDROME_TO_OFFSET.get(syn)
     data = (raw26 >> CHECKWORD_BITS) & 0xFFFF
@@ -133,7 +134,8 @@ def _bits_of(value: int, nbits: int) -> List[int]:
 def _int_of(bits: Sequence[int]) -> int:
     v = 0
     for b in bits:
-        v = (v << 1) | (b & 1)
+        v = (v << 1) | (int(b) & 1)  # int(b)：bits 可能是 np.uint8 位数组，
+        # numpy 标量 | 会把 v 压成 uint8，26bit 块在 8 位里被截断
     return v
 
 
