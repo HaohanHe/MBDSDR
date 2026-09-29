@@ -378,6 +378,40 @@ inline constexpr double kFontAuxPt     = 9.5;   // status / hints / mono info
 inline constexpr double kFontPanelTitlePt = kFontTitlePt;
 
 // =====================================================================
+// Measurement cursor (hover readout) -- drawn on the unified canvas only,
+// never invented pixels: everything here goes through scaled().
+// =====================================================================
+inline constexpr double kCursorLineAlpha       = 0.28;   // hairline across trace/waterfall
+inline constexpr double kCursorReadoutBgAlpha  = 0.85;   // readout box backdrop
+inline constexpr double kCursorReadoutEdge     = 0.35;   // readout box edge
+inline constexpr double kCursorReadoutText     = 0.92;   // readout text
+inline constexpr int    kCursorReadoutW        = 168;    // box width (base px)
+inline constexpr int    kCursorReadoutH        = 34;     // box height (base px)
+inline constexpr int    kCursorReadoutPad      = 4;      // inner padding
+inline constexpr int    kCursorReadoutGap      = 8;      // gap box <-> cursor
+inline constexpr const char* kCursorLineColor  = "#B9B6B1"; // warm neutral, not pure white
+
+// Noise floor baseline on the spectrum trace (real engine measurement, passed
+// in by the UI; the canvas only draws what it is given -- never estimates).
+inline constexpr double kNoiseFloorLineAlpha  = 0.45;   // dashed baseline
+inline constexpr double kNoiseFloorLabelAlpha = 0.55;   // "NF" caption next to the line
+inline constexpr const char* kNoiseFloorColor = "#e0b35a"; // subtle warm amber, low alpha
+
+// Peak markers on the trace (sizes already defined above: kPeakMarker*).
+inline constexpr double kPeakMarkerFillAlpha    = 0.9;   // small triangle
+inline constexpr double kPeakMarkerHiAlpha      = 1.0;   // highlighted triangle
+inline constexpr double kPeakMarkerLineAlpha    = 0.55;  // drop line marker -> trace
+
+// "非硬件/NOT HARDWARE" honest-data badge (restrained, neutral, small -- the
+// Figma principle: status is quiet information, not a sticker).
+inline constexpr double kBadgeBgAlpha    = 0.08;   // subtle pill fill
+inline constexpr double kBadgeTextAlpha  = 0.62;   // calm tertiary text
+
+// Focus mode: hide the side rails so the spectrum takes the full width
+// (CarWith driving-mode analog). Animation uses the existing kAnimMedium1.
+inline constexpr const char* kSettingsKeyFocusMode = "view/focusMode";
+
+// =====================================================================
 // Dark QSS generator -- simplified, only what we use.
 // Sizes are scaled at generation time.
 // =====================================================================
@@ -416,6 +450,14 @@ QLabel { color: %textPri%; background: transparent; }
 QLabel#panelTitle { color: %textPri%; font-size: %fontTitle%pt; font-weight: 600; }
 QLabel#dockHint, QLabel#statusHint { color: %textSec%; font-size: %fontAux%pt; }
 QLabel#monoInfo { color: %textSec%; font-family: %mono%; font-size: %fontAux%pt; }
+QLabel#testBanner {
+    color: rgba(255, 255, 255, 0.62);
+    font-size: %fontAux%pt;
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: %radSmall%px;
+    padding: 1px %padMV%px;
+}
 QTabBar::tab {
     background: transparent;
     color: %textSec%;
