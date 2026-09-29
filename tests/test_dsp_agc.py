@@ -50,10 +50,13 @@ def test_agc_stabilizes_burst():
 
 
 def test_agc_attack_fast():
-    """信号出现后 attack 上升时间（10%→90%）< 10ms。
+    """信号出现后 attack 收敛时间（尖峰→稳态）< 10ms。
 
-    注：GqrxAGC 有 15ms 延迟线（gqrx_receiver.py:92 DELAY_TIMECONST，补偿滤波群延迟），
-    输出绝对时延含此延迟；这里测包络上升速度（attack 时间常数），不含延迟线偏移。
+    GqrxAGC 是纯包络跟踪 AGC（无延迟线）：静音期包络在 dB 域缓慢释放、
+    增益被拉高压低噪声；突发到来时输入 RMS 跳变超过残留包络，attack
+    （tau≈1.5ms）快速把包络拉到突发电平、增益压到目标。输出先尖峰
+    （静音期高增益 × 突发样本），随后随 attack 指数压回稳态。这里测尖峰
+    之后包络从 90% 超调衰减到 10% 超调的时间，即 attack 时间常数。
     """
     sr = 48_000.0
     # 静音开头，然后突然加 -20dBFS 信号
@@ -73,15 +76,16 @@ def test_agc_attack_fast():
     # 稳态包络（后 100ms）
     steady_level = float(np.mean(env[pre + int(sr * 0.1):]))
     post = env[pre:]
-    # 信号区谷底索引：静音噪声被 AGC 放大、信号压增益后先回落再上升，
-    # 从谷底之后测上升沿，避免把放大噪声误判为已上升。
-    dip_rel = int(np.argmin(post[: int(sr * 0.05)]))
-    floor = float(post[dip_rel])
-    lo = floor + 0.1 * (steady_level - floor)
-    hi = floor + 0.9 * (steady_level - floor)
-    after = post[dip_rel:]
-    idx_lo = np.where(after > lo)[0]
-    idx_hi = np.where(after > hi)[0]
-    assert len(idx_lo) and len(idx_hi), "输出包络未上升到稳态"
-    rise_ms = (idx_hi[0] - idx_lo[0]) / sr * 1000.0
-    assert rise_ms < 10.0, f"AGC attack 上升时间 {rise_ms:.1f}ms > 10ms"
+    # 突发后前 20ms 的尖峰：静音期高增益 × 突发造成的过冲。
+    peak_rel = int(np.argmax(post[: int(sr * 0.02)]))
+    peak = float(post[peak_rel])
+    assert peak > steady_level, "突发未产生过冲，AGC 可能未 attack"
+    # 超调衰减：从 90% 超调（靠近尖峰）衰减到 10% 超调（靠近稳态）。
+    hi = steady_level + 0.9 * (peak - steady_level)
+    lo = steady_level + 0.1 * (peak - steady_level)
+    after = post[peak_rel:]
+    idx_hi = np.where(after < hi)[0]
+    idx_lo = np.where(after < lo)[0]
+    assert len(idx_hi) and len(idx_lo), "输出包络未衰减到稳态"
+    decay_ms = (idx_lo[0] - idx_hi[0]) / sr * 1000.0
+    assert decay_ms < 10.0, f"AGC attack 衰减时间 {decay_ms:.1f}ms > 10ms"
