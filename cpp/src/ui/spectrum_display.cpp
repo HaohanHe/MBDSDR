@@ -100,6 +100,44 @@ double SpectrumDisplay::visHiHz() const {
     double lo, hi, sp; visibleWindow(lo, hi, sp); return hi;
 }
 
+int SpectrumDisplay::dbToY(float db) const {
+    const double dbSpan = dbCeilDb_ - dbFloorDb_;
+    const float t = (db - dbFloorDb_) / (dbSpan > 0 ? dbSpan : 1.0f);
+    return lay_.traceRect.bottom()
+           - static_cast<int>(std::clamp(static_cast<double>(t), 0.0, 1.0)
+                              * lay_.traceRect.height());
+}
+
+int SpectrumDisplay::yForDbfs(float db) const { return dbToY(db); }
+
+int SpectrumDisplay::xForFrequency(double f) const {
+    double lo, hi, span; visibleWindow(lo, hi, span);
+    return xForFreq(f, lo, span);
+}
+
+QString SpectrumDisplay::cursorReadoutText(const QPoint& pos) const {
+    if (!haveFrame_ || bins_ <= 0 || frame_.dbfs.empty()) return QString();
+    if (!(lay_.traceRect.contains(pos) || lay_.fallsRect.contains(pos))) return QString();
+    double fLo, fHi, span; visibleWindow(fLo, fHi, span);
+    const double f = freqForX(pos.x(), fLo, span);
+    const double bandLo = frameF0Hz_ - frameFsHz_ / 2.0;
+    const double binHz = (bins_ > 0) ? frameFsHz_ / bins_ : 0.0;
+    int idx = (binHz > 0.0) ? static_cast<int>((f - bandLo) / binHz) : 0;
+    idx = std::clamp(idx, 0, bins_ - 1);
+    const float db = frame_.dbfs[idx];
+    QString s = QString("%1 MHz").arg(f / 1e6, 0, 'f', 3);
+    s += QLatin1Char('\n');
+    s += QString("%1 dBFS").arg(db, 0, 'f', 1);
+    if (std::isfinite(noiseFloorDb_))
+        s += QString("   SNR %1 dB").arg(db - noiseFloorDb_, 0, 'f', 1);
+    return s;
+}
+
+void SpectrumDisplay::setNoiseFloorDb(float db) {
+    noiseFloorDb_ = db;
+    update();
+}
+
 void SpectrumDisplay::publishVisibleRange() {
     double lo, hi, sp; visibleWindow(lo, hi, sp);
     emit visibleRangeChanged(lo, hi);
@@ -385,11 +423,6 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
 
     // --- trace background + dB grid --------------------------------------
     p.fillRect(trace, QColor(tokens::kSpectrumBg));
-    const double dbSpan = dbCeilDb_ - dbFloorDb_;
-    auto dbToY = [&](float db) {
-        const float t = (db - dbFloorDb_) / (dbSpan > 0 ? dbSpan : 1.0f);
-        return trace.bottom() - static_cast<int>(std::clamp(t, 0.0f, 1.0f) * trace.height());
-    };
     QPen gridPen(tokens::rgbaA(tokens::kTextAlphaFaint), 1);
     p.setPen(gridPen);
     for (float db = std::ceil(dbFloorDb_ / tokens::kDbGridStep) * tokens::kDbGridStep;
@@ -399,6 +432,21 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         p.drawText(trace.left() + tokens::scaled(tokens::kDbLabelPadR),
                    y + tokens::scaled(tokens::kDbLabelOffsetY),
                    QString::number(static_cast<int>(db)));
+    }
+
+    // --- real measured noise-floor baseline (dashed) -----------------------
+    if (std::isfinite(noiseFloorDb_)) {
+        const int yNf = dbToY(noiseFloorDb_);
+        QColor nf(tokens::kNoiseFloorColor);
+        QColor nfLine = nf; nfLine.setAlphaF(tokens::kNoiseFloorLineAlpha);
+        QPen nfPen(nfLine, 1, Qt::DashLine);
+        p.setPen(nfPen);
+        p.drawLine(trace.left(), yNf, trace.right(), yNf);
+        QColor nfLab = nf; nfLab.setAlphaF(tokens::kNoiseFloorLabelAlpha);
+        p.setPen(nfLab);
+        p.drawText(trace.left() + tokens::scaled(tokens::kDbLabelPadR),
+                   yNf - tokens::scaled(2),
+                   QStringLiteral("NF"));
     }
 
     // --- spectrum polyline -------------------------------------------------
@@ -422,6 +470,38 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
             p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary2), 1.0));
             p.drawPolyline(holdLine);
         }
+    }
+
+    // --- matured peak markers: triangle on the trace + thin drop line ------
+    for (int i = 0; i < peaks_.size(); ++i) {
+        const mbdsdr::dsp::PeakInfo& pk = peaks_[i];
+        const int px = xForFreq(pk.freqHz, fLo, span);
+        if (px < trace.left() || px > trace.right()) continue;
+        const int apexY = dbToY(pk.dbfs);
+        const bool hi = (i == highlightedPeak_);
+        const int halfW = tokens::scaled(hi ? tokens::kPeakMarkerHiHalfW
+                                            : tokens::kPeakMarkerHalfW);
+        const int triH = tokens::scaled(hi ? tokens::kPeakMarkerHiH
+                                           : tokens::kPeakMarkerH);
+        // Thin drop line from the summit down to the trace baseline.
+        QColor drop = tokens::rgbaA(tokens::kPeakMarkerLineAlpha);
+        p.setPen(QPen(drop, 1));
+        p.drawLine(px, apexY, px, trace.bottom());
+        // Downward-pointing triangle: apex (point) rests on the trace summit.
+        QPolygon tri;
+        tri << QPoint(px, apexY)
+            << QPoint(px - halfW, apexY - triH)
+            << QPoint(px + halfW, apexY - triH);
+        if (hi) {
+            QColor hiFill(QString::fromUtf8(tokens::kAccent));
+            hiFill.setAlphaF(tokens::kPeakMarkerHiAlpha);
+            p.setPen(Qt::NoPen);
+            p.setBrush(hiFill);
+        } else {
+            p.setPen(Qt::NoPen);
+            p.setBrush(tokens::rgbaA(tokens::kPeakMarkerFillAlpha));
+        }
+        p.drawPolygon(tri);
     }
 
     // --- waterfall (crop the history snapshot to the visible window) --------
@@ -483,6 +563,43 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
     p.setPen(QPen(tokens::rgbaA(dividerHot_ ? tokens::kTextAlphaPrimary
                                             : tokens::kTextAlphaTertiary), 1));
     p.drawLine(lay_.plotX0, lay_.splitY, lay_.plotX1, lay_.splitY);
+
+    // --- hover measurement cursor (hairline + read-out box) -----------------
+    if (cursorActive_ && grab_ == Grab::None) {
+        const QString readout = cursorReadoutText(cursorPos_);
+        if (!readout.isEmpty()) {
+            const int cx = cursorPos_.x();
+            QColor lineCol(QString::fromUtf8(tokens::kCursorLineColor));
+            lineCol.setAlphaF(tokens::kCursorLineAlpha);
+            p.setPen(QPen(lineCol, 1));
+            p.drawLine(cx, trace.top(), cx, falls.bottom());
+
+            const int boxW = tokens::scaled(tokens::kCursorReadoutW);
+            const int boxH = tokens::scaled(tokens::kCursorReadoutH);
+            const int gap  = tokens::scaled(tokens::kCursorReadoutGap);
+            const bool rightSide = (cx + gap + boxW <= width());
+            int boxX = rightSide ? cx + gap : cx - gap - boxW;
+            int boxY = cursorPos_.y() - boxH / 2;
+            boxY = static_cast<int>(clampd(boxY, 0.0, height() - boxH));
+            QRect box(boxX, boxY, boxW, boxH);
+
+            QColor bg = tokens::rgbaA(tokens::kCursorReadoutBgAlpha, 0, 0, 0);
+            p.setPen(Qt::NoPen);
+            p.setBrush(bg);
+            p.drawRoundedRect(box, tokens::scaled(tokens::kRadiusSmall),
+                              tokens::scaled(tokens::kRadiusSmall));
+            p.setPen(QPen(tokens::rgbaA(tokens::kCursorReadoutEdge), 1));
+            p.setBrush(Qt::NoBrush);
+            p.drawRoundedRect(box, tokens::scaled(tokens::kRadiusSmall),
+                              tokens::scaled(tokens::kRadiusSmall));
+
+            const int pad = tokens::scaled(tokens::kCursorReadoutPad);
+            p.setPen(tokens::rgbaA(tokens::kCursorReadoutText));
+            p.drawText(box.adjusted(pad, pad, -pad, -pad),
+                       Qt::AlignLeading | Qt::AlignVCenter | Qt::TextWordWrap,
+                       readout);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -599,8 +716,17 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
         update();
         break;
     }
-    default:
+    default: {
+        // No grab: this is the hover measurement cursor. Only track it over the
+        // trace / waterfall data areas; divider/VFO drags suppress it via the
+        // paintEvent (grab_ == None) gate.
+        const bool inPlot = lay_.traceRect.contains(pos) || lay_.fallsRect.contains(pos);
+        const bool was = cursorActive_;
+        cursorActive_ = inPlot;
+        cursorPos_ = pos;
+        if (inPlot != was || inPlot) update();
         break;
+    }
     }
 }
 
@@ -662,6 +788,7 @@ void SpectrumDisplay::wheelEvent(QWheelEvent* e) {
 
 void SpectrumDisplay::leaveEvent(QEvent*) {
     dividerHot_ = false;
+    cursorActive_ = false;
     QToolTip::hideText();
     update();
 }

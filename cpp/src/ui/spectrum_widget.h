@@ -58,6 +58,9 @@ public slots:
     // Multi-VFO band boxes.
     void setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers);
 
+    // Forward the real measured noise floor to the canvas baseline + cursor SNR.
+    void setNoiseFloorDb(float db);
+
 signals:
     void fftSizeRequested(int n);
     void windowTypeRequested(int w);

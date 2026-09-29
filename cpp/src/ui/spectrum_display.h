@@ -27,6 +27,7 @@
 #include <QRect>
 #include <QList>
 #include <array>
+#include <limits>
 #include <vector>
 
 #include "core/spectrum_frame.h"
@@ -80,6 +81,12 @@ public slots:
     void setPeakThresholdDb(float db) { peakThresholdDb_ = db; rescanPeaks(); update(); }
     void tuneAndCenter(double hz);
 
+    // Injected, real measured noise floor (dBFS on the trace axis). NaN = do not
+    // draw the baseline. The engine slowly tracks this; the integration layer
+    // forwards it here. Also feeds the cursor SNR read-out.
+    void setNoiseFloorDb(float db);
+    float noiseFloorDb() const { return noiseFloorDb_; }
+
     // Multi-VFO band boxes. When non-empty these replace the legacy single box.
     void setVfoMarkers(const QVector<mbdsdr::dsp::VfoMarker>& markers);
 
@@ -88,6 +95,16 @@ public slots:
     // vx is the dial/tuning line x.
     void vfoBoxGeometryFor(const mbdsdr::dsp::VfoMarker& m,
                            int& bx0, int& bx1, int& vx) const;
+
+    // ---- Offscreen-test-only read-only helpers (do not drive production) ---
+    // Exposed purely so the QTest offscreen suite can assert painted marker
+    // geometry and the hover read-out text against the real frame data, without
+    // inspecting pixels. They duplicate no logic: they reuse the very mappings
+    // paintEvent uses.
+    const QList<mbdsdr::dsp::PeakInfo>& maturedPeaks() const { return peaks_; }
+    int    yForDbfs(float db) const;                 // trace dBFS -> canvas y
+    int    xForFrequency(double f) const;            // absolute Hz -> canvas x
+    QString cursorReadoutText(const QPoint& pos) const; // hover F/dBFS/SNR lines
 
 signals:
     void frequencyChanged(double newFreqHz);
@@ -133,6 +150,7 @@ private:
 
     // Frequency <-> pixel helpers, shared by trace ticks, strip and waterfall crop.
     void visibleWindow(double& fLo, double& fHi, double& spanHz) const;
+    int  dbToY(float db) const;   // trace dBFS -> canvas y (shared by paint + tests)
     int  xForFreq(double f, double fLo, double spanHz) const {
         return lay_.plotX0 + static_cast<int>(lay_.plotW * (f - fLo) / spanHz);
     }
@@ -166,6 +184,11 @@ private:
     int     tipVfoId_ = -1;
     QString tipText_;
 
+    // Hover measurement cursor (mouseTracking on, no button pressed). Repainted
+    // from mouseMoveEvent; suppressed while a divider/VFO/tune grab is active.
+    bool    cursorActive_ = false;
+    QPoint  cursorPos_;
+
     double dialBandwidthHz_ = 12500.0;
     double tuneStepHz_ = 1000.0;
     double dialFreqHz_ = 0.0;
@@ -180,6 +203,9 @@ private:
 
     float  dbFloorDb_ = -100.0f;
     float  dbCeilDb_ = 0.0f;
+    // Real injected noise floor (NaN = baseline suppressed). Also drives the
+    // cursor SNR read-out.
+    float  noiseFloorDb_ = std::numeric_limits<float>::quiet_NaN();
     double zoomFactor_ = 1.0;
     double viewCenterHz_ = 0.0;
 

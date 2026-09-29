@@ -657,6 +657,7 @@ void SpectrumEngine::run() {
                 noiseFloorTrackDb_ = 0.98 * noiseFloorTrackDb_ + 0.02 * noiseTotalDb;
             }
             emit snrLevel(static_cast<float>(rssi - noiseFloorTrackDb_));
+            emit noiseFloorLevel(static_cast<float>(noiseFloorTrackDb_));
         }
 
         // ~1 Hz readback of the ACTUAL source state to the status bar. These are
