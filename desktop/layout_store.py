@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 桌面端用户布局持久化（JSON）
 =====================================

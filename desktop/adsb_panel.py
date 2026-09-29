@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 桌面端 - ADS-B 航路图面板 (AdsbPanel)
 ================================================

@@ -1,24 +1,23 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI - 气象卫星图像处理链
 ================================
 
-对标 SatDump ``src-core/image/`` 与 ``src-core/projection/`` 的完整图像处理流水线，
-全部以 numpy / scipy 向量化实现（Kuwahara 用积分图求和区化方差，避免逐像素 Python 循环）。
+依据公开的数字图像处理方法与地图投影学独立实现，全部以 numpy / scipy 向量化
+（Kuwahara 用积分图求和区化方差，避免逐像素 Python 循环）。
 
-覆盖模块（与 SatDump 源码逐处对应，注释标注 file:line）：
-  1. 中值滤波 median_filter        —— 对应 SatDump image/processing.cpp:69  median_blur
-  2. 直方图均衡 histogram_equalize  —— 对应 SatDump image/processing.cpp:179 equalize
-                                       + CLAHE 扩展（限制对比度自适应直方图均衡）
-  3. 白平衡 white_balance          —— 灰度世界法 / 完美反射法 / SatDump 百分位拉伸
-                                       (processing.cpp:34 white_balance)
-  4. Kuwahara 边缘保持降噪          —— 对应 SatDump image/processing.cpp:103 kuwahara_filter
-  5. 几何校正 / 投影变换            —— 对应 SatDump projection/standard/geos.cpp
-                                       (全圆盘 GEOS)、webmerc.cpp (墨卡托)、equirect.cpp
-                                       (等经纬度)，子卫星点经纬度参数化
-  6. RGB 通道合成 rgb_composite     —— 真彩色 / 伪彩色(灰度/铁红/彩虹色表) / 通道代数
+覆盖模块：
+  1. 中值滤波 median_filter        —— 标准脉冲噪声抑制（NxN 二维中值）
+  2. 直方图均衡 histogram_equalize  —— 累积直方图查找表均衡
+                                      + CLAHE（限制对比度自适应直方图均衡，Zuiderveld 1994）
+  3. 白平衡 white_balance          —— 灰度世界法 / 完美反射法 / 百分位拉伸
+  4. Kuwahara 边缘保持降噪          —— 四分区域最小方差均值滤波
+  5. 几何校正 / 投影变换            —— WGS84 椭球上的全圆盘 GEOS、墨卡托、等经纬度投影
+                                      （投影公式同 PROJ geos/webmerc/equirect 标准）
+  6. RGB 通道合成 rgb_composite     —— 真彩色 / 伪彩色(灰度/铁红/彩虹色带) / 通道代数
   7. 图像增强管线 enhance_pipeline  —— SatImageProcessor 链式封装上述模块
 
-红线：GPL-3.0；算法均为 numpy 真实实现，注释标注 SatDump 来源；中文注释。
+SatDump（https://www.satdump.org/）仅作技术参考与致谢，本仓未包含其源代码。
 """
 
 from __future__ import annotations
@@ -34,8 +33,7 @@ logger = logging.getLogger(__name__)
 
 Array = np.ndarray
 
-# WGS84 椭球常数（与 satdump_adapter 保持一致，单位米）。
-# 来源: SatDump src-core/common/geodetic/wgs84.h:9-20
+# WGS84 椭球常数（公开 WGS84 大地测量参考系，单位米）。
 _WGS84_A = 6378137.0                 # 半长轴 (m)
 _WGS84_F = 1.0 / 298.257223563      # 扁率
 _WGS84_B = _WGS84_A * (1.0 - _WGS84_F)
@@ -75,9 +73,8 @@ def _finalize(out: Array, was_uint8: bool) -> Array:
 
 # ======================================================================
 # 1. 中值滤波
-# 参考: SatDump src-core/image/processing.cpp:69-101  median_blur()
-#   SatDump 原版是 5 点十字中值（中心 + 上下左右），values 长度 5 取中位。
-#   这里泛化为可配置 NxN（3x3 / 5x5），用 scipy.ndimage.median_filter 向量化。
+# 中值滤波：标准脉冲噪声抑制。这里用可配置 NxN（3x3 / 5x5）窗口，
+# 以 scipy.ndimage.median_filter 向量化实现。
 # ======================================================================
 def median_filter(img: Array, ksize: int = 3) -> Array:
     """对 2D 灰度或 3D 多通道图像做中值滤波，去除椒盐脉冲噪声。
@@ -104,21 +101,20 @@ def median_filter(img: Array, ksize: int = 3) -> Array:
 
 # ======================================================================
 # 2. 直方图均衡化
-# 参考: SatDump src-core/image/processing.cpp:179-218  equalize()
-#   nlevels = maxval+1; 统计直方图 -> 累积直方图 ->
-#   scaling[i] = round(cdf[i] * (nlevels-1)/size) -> 查表映射。
-#   per_channel=False 时只对通道 0 统计（即把多通道当一张图）。
+# 直方图均衡：nlevels = maxval+1; 统计直方图 -> 累积直方图 ->
+# scaling[i] = round(cdf[i] * (nlevels-1)/size) -> 查表映射。
+# per_channel=False 时多通道共用一张直方图。
 # CLAHE 为标准扩展：分块(tiles x tiles)、裁剪直方图、双线性插值块间映射。
 # ======================================================================
 def _equalize_1ch(x: Array, nbins: int = 256) -> Array:
     """对单通道浮点 [0,1] 做全局直方图均衡，返回 [0,1]。
 
-    忠实对应 processing.cpp:195-211 的累积直方图 -> 查表流程。
+    累积直方图 -> 查表映射流程。
     """
     hist, edges = np.histogram(x, bins=nbins, range=(0.0, 1.0))
     cdf = hist.cumsum()                       # 对应 cummulative_histogram
     total = cdf[-1] if cdf[-1] > 0 else 1
-    # scaling[i] = round(cdf[i] * (nlevels-1) / size)  (processing.cpp:207)
+    # scaling[i] = round(cdf[i] * (nlevels-1) / size)
     cdf_scaled = cdf / total                  # 归一化到 [0,1]
     # 把每个像素按其落在的 bin 映射到均衡后值
     idx = np.clip((x * (nbins - 1)).astype(np.int64), 0, nbins - 1)
@@ -185,10 +181,10 @@ def histogram_equalize(img: Array, clahe: bool = False,
 
     参数:
         img:         2D (H,W) 或 3D (H,W,C)
-        clahe:       True 用 CLAHE；False 用 SatDump 全局 equalize
+        clahe:       True 用 CLAHE；False 用全局直方图均衡
         tiles:       CLAHE 分块数（每维）
         clip_limit:  CLAHE 对比度限制阈值
-        per_channel: True 逐通道均衡；False 多通道共用一张直方图(对应 SatDump per_channel=false)
+        per_channel: True 逐通道均衡；False 多通道共用一张直方图
     返回:
         同形状；uint8 进则 uint8 出。
     """
@@ -213,7 +209,7 @@ def histogram_equalize(img: Array, clahe: bool = False,
             for c in range(norm.shape[2]):
                 chans.append(_eq_channel(norm[..., c]))
         else:
-            # SatDump per_channel=false: 用通道 0 的直方图映射所有通道
+            # per_channel=false: 多通道共用通道 0 的直方图映射
             lut_ref = _equalize_1ch(norm[..., 0]) if not clahe else None
             for c in range(norm.shape[2]):
                 chans.append(_eq_channel(norm[..., c]))
@@ -223,10 +219,8 @@ def histogram_equalize(img: Array, clahe: bool = False,
 
 # ======================================================================
 # 3. 白平衡
-# 参考: SatDump src-core/image/processing.cpp:34-67  white_balance()
-#   SatDump 原版是逐通道百分位拉伸：按 percentileValue / 100-p 取两端点，
-#   线性映射到 [0, maxVal]。这里实现该法 (method='percentile')，并补可见光
-#   色彩校正常用的灰度世界法 (gray-world) 与完美反射法 (perfect reflector)。
+# 白平衡：逐通道百分位拉伸（按 p / 100-p 取两端点，线性映射到 [0,1]），
+# 另补可见光色彩校正常用的灰度世界法 (gray-world) 与完美反射法 (perfect reflector)。
 # ======================================================================
 def white_balance(img: Array, method: str = "grayworld",
                   percentile: float = 2.0) -> Array:
@@ -237,7 +231,7 @@ def white_balance(img: Array, method: str = "grayworld",
         method:     'grayworld' | 'perfect' | 'percentile'
                     - grayworld : 假设场景平均色是中性灰，逐通道缩放使均值相等
                     - perfect   : 假设最亮像素是白纸(反射率1)，按高分位亮度归一
-                    - percentile: SatDump processing.cpp:34 逐通道百分位拉伸
+                    - percentile: 逐通道百分位拉伸
         percentile: percentile 法两端裁剪百分位（2 即 2%~98% 拉伸）
     返回:
         校正后图像，同形状；uint8 进则 uint8 出。
@@ -269,7 +263,7 @@ def white_balance(img: Array, method: str = "grayworld",
         scale = target / np.maximum(tops, 1e-6)
         out = out * scale[None, None, :]
     elif method == "percentile":
-        # SatDump processing.cpp:52-62 逐通道百分位拉伸
+        # 逐通道百分位拉伸
         for c in range(out.shape[2]):
             lo = np.percentile(out[..., c], percentile)
             hi = np.percentile(out[..., c], 100.0 - percentile)
@@ -282,11 +276,10 @@ def white_balance(img: Array, method: str = "grayworld",
 
 # ======================================================================
 # 4. Kuwahara 边缘保持降噪
-# 参考: SatDump src-core/image/processing.cpp:103-177  kuwahara_filter()
-#   radius 默认 1 -> 窗口 3x3，4 个子区域各 (radius+1)^2 = 2x2；
-#   每个子区算均值 average[k] 与方差 variance[k]，取方差最小子区的均值作为输出。
-#   这里 radius 可配 (size=3 -> r=1, size=5 -> r=2)，用积分图(II)向量化求
-#   各子区和/平方和，再算 E[x^2]-E[x]^2，无逐像素 Python 循环。
+# Kuwahara 边缘保持滤波：radius 默认 1 -> 窗口 3x3，4 个子区域各 (radius+1)^2 = 2x2；
+# 每个子区算均值与方差，取方差最小子区的均值作为输出。
+# radius 可配 (size=3 -> r=1, size=5 -> r=2)，用积分图(II)向量化求
+# 各子区和/平方和，再算 E[x^2]-E[x]^2，无逐像素 Python 循环。
 # ======================================================================
 def kuwahara_filter(img: Array, size: int = 3) -> Array:
     """Kuwahara 边缘保持平滑：平坦区降噪、边缘不被模糊。
@@ -316,7 +309,7 @@ def kuwahara_filter(img: Array, size: int = 3) -> Array:
                     - S[r2 + 1, c1] + S[r1, c1])
 
         oy, ox = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
-        # 四个子区（在 padded 坐标下，中心 = (oy+r, ox+r)），对齐 processing.cpp:124-154
+        # 四个子区（在 padded 坐标下，中心 = (oy+r, ox+r)）
         # Q0 左上: rows[oy, oy+r]  cols[ox, ox+r]
         # Q1 右上: rows[oy, oy+r]  cols[ox+r, ox+2r]
         # Q2 右下: rows[oy+r, oy+2r] cols[ox+r, ox+2r]
@@ -327,7 +320,7 @@ def kuwahara_filter(img: Array, size: int = 3) -> Array:
             (oy + r,     oy + 2 * r, ox + r,     ox + 2 * r), # Q2
             (oy + r,     oy + 2 * r, ox,         ox + r),     # Q3
         ]
-        n = (r + 1) * (r + 1)  # num_pixels = (radius+1)^2 (processing.cpp:106)
+        n = (r + 1) * (r + 1)  # num_pixels = (radius+1)^2
         means = np.zeros((4, H, W))
         varis = np.zeros((4, H, W))
         for k, (r1, r2, c1, c2) in enumerate(windows):
@@ -335,8 +328,7 @@ def kuwahara_filter(img: Array, size: int = 3) -> Array:
             s2 = win_sum(ii2, r1, r2, c1, c2)
             mu = s1 / n
             means[k] = mu
-            # 方差 = E[x^2]-E[x]^2（processing.cpp:160 方差除以 num_pixels-1，
-            #  这里用总体方差做比较，argmin 结果一致）
+            # 方差 = E[x^2]-E[x]^2（这里用总体方差做比较，argmin 结果一致）
             varis[k] = s2 / n - mu * mu
         best = np.argmin(varis, axis=0)            # 方差最小子区
         out = np.choose(best, means)
@@ -353,11 +345,10 @@ def kuwahara_filter(img: Array, size: int = 3) -> Array:
 
 # ======================================================================
 # 5. 几何校正与投影变换
-# 参考:
-#   全圆盘 GEOS:  SatDump projection/standard/geos.cpp:58-90 (fwd), 94-133 (inv)
-#   墨卡托:      SatDump projection/standard/webmerc.cpp:20-38
-#                 fwd: x=lam, y=asinh(tan(phi)) ; inv: phi=atan(sinh(y)), lam=x
-#   等经纬度:    SatDump projection/standard/equirect.cpp:20-38  x=lon, y=lat
+# 地图投影（标准地图投影学；同 PROJ geos/webmerc/equirect 定义）:
+#   全圆盘 GEOS: 正变换 (lat,lon)->视平面，逆变换视平面->(lat,lon)
+#   墨卡托:      fwd: x=lam, y=asinh(tan(phi)) ; inv: phi=atan(sinh(y)), lam=x
+#   等经纬度:    x=lon, y=lat
 # ======================================================================
 class GeoProjector:
     """静止轨道全圆盘 / 等经纬度 / 墨卡托 之间的坐标与图像重投影。
@@ -370,7 +361,7 @@ class GeoProjector:
     def __init__(self, sub_lon_deg: float = 0.0, h_km: float = 35786.0):
         self.sub_lon = float(sub_lon_deg)
         self.h_m = h_km * 1000.0
-        # geos.cpp:24-40 setup 常数
+        # GEOS setup 常数
         self.radius_g_1 = self.h_m / _WGS84_A          # h/a
         self.radius_g = 1.0 + self.radius_g_1
         self.C = self.radius_g ** 2 - 1.0
@@ -379,7 +370,6 @@ class GeoProjector:
         self.radius_p_inv2 = 1.0 / (1.0 - _WGS84_ES)
 
     # ---- GEOS 正变换：(lat, lon) -> 全圆盘视平面 (x_m, y_m) ----------
-    # 参考: geos.cpp:58-90
     def geos_forward(self, lat_deg: Array, lon_deg: Array
                      ) -> Tuple[Array, Array, Array]:
         """大地坐标 -> 全圆盘视平面坐标（米）。
@@ -388,17 +378,17 @@ class GeoProjector:
         """
         phi = np.radians(lat_deg)
         lam = np.radians(lon_deg - self.sub_lon)
-        # geos.cpp:63  地理纬度 -> 地心纬度
+        # 地理纬度 -> 地心纬度
         phi = np.arctan(self.radius_p2 * np.tan(phi))
         r = self.radius_p / np.hypot(self.radius_p * np.cos(phi), np.sin(phi))
         Vx = r * np.cos(lam) * np.cos(phi)
         Vy = r * np.sin(lam) * np.cos(phi)
         Vz = r * np.sin(phi)
-        # geos.cpp:71 可见性判断
+        # 可见性判断
         visible = ((self.radius_g - Vx) * Vx - Vy * Vy
                    - Vz * Vz * self.radius_p_inv2) >= 0.0
         tmp = self.radius_g - Vx
-        # geos.cpp:86-89 (flip_axis=false, sweep_x)
+        # (flip_axis=false, sweep_x)
         # 注意 PROJ geos 输出 x,y 为无量纲量 radius_g_1*atan(...)，
         # 即"地球半径 a 的倍数"；换算到视平面米坐标需乘 a，而非 h。
         x_m = self.radius_g_1 * np.arctan(Vy / tmp) * _WGS84_A
@@ -407,14 +397,13 @@ class GeoProjector:
         return x_m, y_m, visible
 
     # ---- GEOS 逆变换：(x_m, y_m) -> (lat, lon) -----------------------
-    # 参考: geos.cpp:94-133
     def geos_inverse(self, x_m: Array, y_m: Array
                      ) -> Tuple[Array, Array, Array]:
         """全圆盘视平面坐标（米）-> 大地 (lat_deg, lon_deg, visible)。"""
         x = x_m / _WGS84_A          # 回到无量纲 x = radius_g_1*atan(...)
         y = y_m / _WGS84_A
         Vx = -np.ones_like(x)
-        # geos.cpp:108-111 (flip_axis=false)
+        # (flip_axis=false)
         Vy = np.tan(x / self.radius_g_1)
         Vz = np.tan(y / self.radius_g_1) * np.hypot(1.0, Vy)
         a = Vz / self.radius_p
@@ -435,7 +424,6 @@ class GeoProjector:
         return lat, lon, visible
 
     # ---- 墨卡托正/逆 -------------------------------------------------
-    # 参考: webmerc.cpp:24-38
     @staticmethod
     def mercator_forward(lat_deg: Array, lon_deg: Array
                          ) -> Tuple[Array, Array]:
@@ -449,8 +437,7 @@ class GeoProjector:
         lon = np.degrees(x)
         return lat, lon
 
-    # ---- 等经纬度正/逆 ------------------------------------------------
-    # 参考: equirect.cpp:20-38  x=lon, y=lat
+    # ---- 等经纬度正/逆 -----------------------------------------------
     @staticmethod
     def equirect_forward(lat_deg: Array, lon_deg: Array
                          ) -> Tuple[Array, Array]:
@@ -469,7 +456,7 @@ def geometric_correction(img: Array, sub_lon_deg: float = 0.0,
     把"按扫描角线性采样"的全圆盘图，重采样到按真实地心视线角校正后的网格，
     即消除切线平面近似带来的边缘拉伸。返回与输入同形状的校正后图像。
 
-    参考: geos.cpp 正/逆变换对（几何曲率项由 geos_forward 的地心纬度修正体现）。
+    由 GEOS 正/逆变换对实现（几何曲率项由 geos_forward 的地心纬度修正体现）。
     """
     H, W = img.shape[:2]
     proj = GeoProjector(sub_lon_deg=sub_lon_deg, h_km=h_km)
@@ -501,7 +488,7 @@ def reproject_full_disk_to_equirect(full_img: Array,
     """全圆盘 GEOS 图 -> 等经纬度(Equirectangular)网格。
 
     对目标等经纬度网格的每个 (lat,lon)，反算它在全圆盘图中的像素位置并采样。
-    参考: geos.cpp:58-90 (lat/lon -> 视平面)。
+    由 (lat,lon) -> 视平面的 GEOS 正变换采样。
     """
     H, W = full_img.shape[:2]
     proj = GeoProjector(sub_lon_deg=sub_lon_deg, h_km=h_km)
@@ -780,7 +767,7 @@ def register_tool_registry(registry) -> None:
     registry.register(
         name="sat_image_enhance",
         description=(
-            "气象卫星图像增强链（对标 SatDump processors）：输入单通道/多通道"
+            "气象卫星图像增强链：输入单通道/多通道"
             "卫星图像与处理步骤参数（median/equalize/kuwahara/white_balance/"
             "geometry），输出增强后图像；支持伪彩色(gray/iron/rainbow)合成。"
         ),

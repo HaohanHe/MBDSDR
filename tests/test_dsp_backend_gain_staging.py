@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 增益分级 LNA/Mixer/VGA 测试
 ===========================

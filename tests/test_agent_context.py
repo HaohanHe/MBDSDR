@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 MBDSDR Agent 层测试：上下文压缩、工具闭环、多轮对话。
 所有 LLM 调用均 mock，不依赖真实 API。

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 桌面端入口
 ==================
@@ -76,7 +77,7 @@ def main():
 
     print("=" * 60)
     print("  MBDSDR - AI 定义无线电桌面端")
-    print("  版本: 0.1.0 | GPL-3.0")
+    print("  版本: 0.1.0 | MIT License")
     print(f"  主题: {theme.display_name}")
     if args.host:
         print(f"  模式: 网络硬件 {args.host}:{args.port}")

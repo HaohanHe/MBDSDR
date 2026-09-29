@@ -1,6 +1,8 @@
-"""Costas 环 + Gardner 定时恢复单测（移植自 SDRangel ``costasloop.*``）。
+# SPDX-License-Identifier: MIT
+"""Costas 环 + Gardner 定时恢复单测。
 
-上游对照：docs/learn/porting_2026_09_27.md §1.1
+依据公开数字通信教科书模型（Costas 环 / Gardner 定时误差检测）独立实现；
+SDRangel 仅作技术参考，未引用其代码。
 """
 import numpy as np
 import pytest

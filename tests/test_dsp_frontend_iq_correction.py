@@ -1,7 +1,6 @@
-"""I/Q 不平衡参数化校正测试。
-
-对照 mbdsdr_ai/iq_correction.py（g 增益 + φ 相位校正矩阵）。
-"""
+# SPDX-License-Identifier: MIT
+"""Parametric I/Q imbalance correction tests (gain g + quadrature error phi).
+非硬件 / NOT HARDWARE: synthetic signals."""
 import numpy as np
 from mbdsdr_ai.iq_correction import (
     IQCorrector, inject_imbalance, estimate_imbalance,

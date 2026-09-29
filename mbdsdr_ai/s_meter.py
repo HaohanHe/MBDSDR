@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 S 表 / 信号强度计（S-meter）
 ===============================

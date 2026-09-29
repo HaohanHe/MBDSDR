@@ -1,12 +1,12 @@
+# SPDX-License-Identifier: MIT
 """
 时频分析（Spectrogram）
 =======================
 
-对照 inspectrum：
-- ``spectrogramplot.cpp:288-323`` — ``getLine()``：加窗 → FFT → fftshift → dB。
-- ``tuner.cpp:37-64`` — Tuner：中心频率 + deviation（半带宽）。
-- ``plotview.cpp:199-212`` — 选框时间段 → 持续时间 = sample_count / rate。
-- ``plotview.cpp:166-178`` — 导出选框样本。
+依据经典 STFT 时频分析方法独立实现（inspectrum 仅作技术参考，本仓未包含其源代码）：
+- 单帧谱：加窗 → FFT → fftshift → dB。
+- Tuner：中心频率 + deviation（半带宽）。
+- 选框测量：选框时间段 → 持续时间 = sample_count / rate；导出选框样本。
 
 本模块用 numpy 实现 STFT，提供：
 - :class:`Spectrogram` — 计算时频谱。
@@ -147,7 +147,7 @@ class Spectrogram:
         """选框测量。
 
         参数为秒和 Hz（相对基带中心）。返回 :class:`Selection`，内含
-        下变频后的 IQ 样本（对应 inspectrum ``plotview.cpp:166`` 的导出）。
+        下变频后的 IQ 样本（选框样本导出，通用时频分析做法）。
         """
         # 时间 → 样本索引
         s_start = int(max(0, t_start * self.sample_rate))

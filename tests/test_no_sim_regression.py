@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 防回潮静态守卫 + offscreen 无硬件 GUI 零假值核验
 =====================================================

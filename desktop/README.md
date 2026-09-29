@@ -1,6 +1,6 @@
 # MBDSDR 桌面端
 
-AI 定义无线电（MBDSDR）桌面客户端，基于 PySide6。呼号 BI4MIB。GPL-3.0。
+AI 定义无线电（MBDSDR）桌面客户端，基于 PySide6。MIT License（干净室独立实现）。
 
 ## 安装依赖
 

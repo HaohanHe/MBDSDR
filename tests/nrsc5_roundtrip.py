@@ -1,15 +1,8 @@
-"""theori-io/nrsc5 真实移植 - HD Radio OFDM 解调 + 帧解析 + HDC 骨架 往返验证
+# SPDX-License-Identifier: MIT
+"""HD Radio (NRSC-5) OFDM 解调 + 帧解析 + HDC 骨架 往返验证（合成向量，非硬件）。
 
-对照 nrsc5 真实源码（repos/nrsc5/src/）逐字段验证 mbdsdr_ai/nrsc5_lite.py：
-  1. 参数一致性：FFT=2048、CP=112、子载波布局、采样率与 defines.h / nrsc5.h 一致。
-  2. OFDM 往返：已知比特流 → QPSK → OFDM → 加噪(15dB) → OFDM 解调 → 比特还原，
-     BER < 1%。
-  3. 同步：合成 OFDM 符号带定时偏移 + 小频偏 → 粗+细同步检测到正确位置并恢复比特。
-  4. 帧解析：合成 HDLC/PSD 帧（0x7E 定界、0x7D 转义、FCS16）→ 解出节目名。
-  5. PCI：24bit 协议标识模糊匹配（容 4bit 错）命中 PCI_AUDIO。
-  6. HDC 骨架：解析 frame header 的 codec_mode/stream_id。
-
-所有常量/算法来源见 nrsc5_lite.py 内联注释（nrsc5 src/...:行号）。
+依据公开 NRSC-5 规范逐字段验证 mbdsdr_ai/nrsc5_lite.py。
+theori-io/nrsc5 (https://github.com/theori-io/nrsc5) 仅作技术参考与致谢，本仓未包含其源代码。
 """
 
 import os
@@ -27,24 +20,24 @@ class TestConstants(unittest.TestCase):
     """参数验证：必须与 nrsc5 defines.h / include/nrsc5.h 完全一致。"""
 
     def test_fft_cp_match_defines(self):
-        self.assertEqual(N.FFT_FM, 2048)          # defines.h:12
-        self.assertEqual(N.CP_FM, 112)             # defines.h:15
-        self.assertEqual(N.FFTCP_FM, 2160)        # defines.h:17
-        self.assertEqual(N.BLKSZ, 32)              # defines.h:20
+        self.assertEqual(N.FFT_FM, 2048)          #
+        self.assertEqual(N.CP_FM, 112)             #
+        self.assertEqual(N.FFTCP_FM, 2160)        #
+        self.assertEqual(N.BLKSZ, 32)              #
 
     def test_subcarrier_layout(self):
-        self.assertEqual(N.LB_START, 478)          # defines.h:24  1024-546
-        self.assertEqual(N.UB_END, 1570)           # defines.h:26  1024+546
-        self.assertEqual(N.PARTITION_WIDTH_FM, 19)   # defines.h:75
-        self.assertEqual(N.PARTITION_DATA_CARRIERS, 18)  # defines.h:77
-        self.assertEqual(N.PM_PARTITIONS, 10)      # defines.h:79
+        self.assertEqual(N.LB_START, 478)          #
+        self.assertEqual(N.UB_END, 1570)           # +546
+        self.assertEqual(N.PARTITION_WIDTH_FM, 19)   #
+        self.assertEqual(N.PARTITION_DATA_CARRIERS, 18)  #
+        self.assertEqual(N.PM_PARTITIONS, 10)      #
 
     def test_sample_rates(self):
-        self.assertEqual(N.NRSC5_SAMPLE_RATE_NATIVE_FM, 744187.5)  # nrsc5.h:54
-        self.assertEqual(N.NRSC5_SAMPLE_RATE_AUDIO, 44100.0)      # nrsc5.h:58
+        self.assertEqual(N.NRSC5_SAMPLE_RATE_NATIVE_FM, 744187.5)  #
+        self.assertEqual(N.NRSC5_SAMPLE_RATE_AUDIO, 44100.0)      #
 
     def test_conv_code(self):
-        self.assertEqual(N.CONV_K7_GEN, (0o133, 0o171, 0o165))  # decode.c:33-38
+        self.assertEqual(N.CONV_K7_GEN, (0o133, 0o171, 0o165))  #
 
     def test_ofdm_geometry(self):
         ofdm = N.HDRadioOFDM()
@@ -56,7 +49,7 @@ class TestConstants(unittest.TestCase):
 
 
 class TestQPSKRoundtrip(unittest.TestCase):
-    """QPSK 星座往返。来源: sync.c:75-78。"""
+    """QPSK 星座往返。"""
 
     def test_qpsk_modem(self):
         rng = np.random.default_rng(0)
@@ -128,7 +121,7 @@ class TestSyncWithOffsetAndCFO(unittest.TestCase):
 
 
 class TestFramePSD(unittest.TestCase):
-    """HDLC/PSD 帧解析。来源: frame.c:347-386。"""
+    """HDLC/PSD 帧解析。"""
 
     def test_psd_roundtrip(self):
         fr = N.HDRadioFrame()
@@ -151,7 +144,7 @@ class TestFramePSD(unittest.TestCase):
 
 
 class TestPCI(unittest.TestCase):
-    """24bit PCI 模糊匹配。来源: frame.c:24-44, 667-678。"""
+    """24bit PCI 模糊匹配。"""
 
     def test_pci_exact(self):
         fr = N.HDRadioFrame()
@@ -165,7 +158,7 @@ class TestPCI(unittest.TestCase):
 
 
 class TestHDCSkeleton(unittest.TestCase):
-    """HDC 骨架：frame header 参数提取。来源: frame.c:200-215。"""
+    """HDC 骨架：frame header 参数提取。"""
 
     def test_parse_header(self):
         h = N.HDCDecoder()

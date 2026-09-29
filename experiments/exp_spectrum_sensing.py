@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 实验：认知无线电频谱感知——能量检测器性能（纯软件、可复现，无需硬件）。

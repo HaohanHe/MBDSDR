@@ -1,31 +1,21 @@
-"""
-MBDSDR AI - SDR++ 解码器移植层
-=================================
+# SPDX-License-Identifier: MIT
+"""常用广播/卫星/寻呼解码器封装层（独立实现）。
 
-把 SDR++ decoder_modules/ 里的解码器以"参数对齐 SDR++、实现复用本仓 lite 版"的方式
-搬到 Python，并注册进 ToolRegistry（AI 可调用）。
+把本仓各 lite 解码器封装成统一接口并注册进 ToolRegistry（AI 可调用）。
 
-移植对照（每个常量都标了 SDR++ 源 file:line）：
+  RDS 解码器：1187.5 bit/s BPSK @ 57kHz 副载波，差分解码；
+      实现复用 mbdsdr_ai/rds_lite.py（EN 300 401 子集）。
 
-  RDS 解码器   ← decoder_modules/radio/src/rds_demod.h + rds.cpp
-      1187.5 bit/s BPSK @ 57kHz 副载波     (rds_demod.h:28, broadcast_fm.h:52)
-      输入重采样到 5000Hz                   (broadcast_fm.h:53)
-      带通 0~2375Hz                         (rds_demod.h:26)
-      差分解码 order=2                      (rds_demod.h:31)
-      实现复用 mbdsdr_ai/rds_lite.py（EN50067 子集）
+  气象卫星 APT：2400Hz AM 副载波 / 视频率 4160Hz / 行 0.5s；
+      实现复用 mbdsdr_ai/noaa_apt_lite.py。
 
-  气象卫星 APT ← decoder_modules/weather_sat_decoder/ + noaa-apt
-      2400Hz AM 副载波 / 视频率 4160Hz / 行 0.5s
-      实现复用 mbdsdr_ai/noaa_apt_lite.py
+  POCSAG 寻呼：FSK ±4.5kHz 频偏，帧同步 0x7CD215D8 / 每批 16×32bit；
+      实现复用本仓 POCSAG 解码器。
 
-  POCSAG 寻呼  ← decoder_modules/pager_decoder/src/pocsag/
-      FSK ±4.5kHz 频偏                      (pocsag/dsp.h:25)
-      10-tap 矩形平均                        (pocsag/dsp.h:26-27)
-      帧同步 0x7CD215D8 / 每批 16×32bit    (pocsag.cpp:6, pocsag.h:7)
+  ADS-B：1090MHz / 8µs preamble / PPM / CRC-24；
+      实现复用 mbdsdr_ai/adsb_lite.py。
 
-  ADS-B        ← (dump1090 体系，SDR++ 无独立模块；仓内 adsb_lite 对齐)
-      1090MHz / 8µs preamble / PPM / CRC-24
-      实现复用 mbdsdr_ai/adsb_lite.py
+以上参数均为公开标准事实。
 """
 from __future__ import annotations
 
@@ -34,39 +24,39 @@ import numpy as np
 
 
 # ======================================================================
-# SDR++ 校准常量（来源已在 docstring 标注）
+# 广播/卫星/寻呼解码器常量
 # ======================================================================
 class SDRPPConstants:
-    """集中放 SDR++ decoder 侧的常量，便于对照与单测。"""
+    """集中放各解码器常量，便于单测。"""
     # RDS
-    RDS_BIT_RATE = 1187.5          # rds_demod.h:28
-    RDS_SUBCARRIER_HZ = 57_000.0   # broadcast_fm.h:52
-    RDS_INTERNAL_FS = 5_000.0      # broadcast_fm.h:53
-    RDS_BANDPASS = (0.0, 2_375.0)   # rds_demod.h:26
+    RDS_BIT_RATE = 1187.5
+    RDS_SUBCARRIER_HZ = 57_000.0
+    RDS_INTERNAL_FS = 5_000.0
+    RDS_BANDPASS = (0.0, 2_375.0)
     # APT
     APT_SUBCARRIER_HZ = 2_400.0
     APT_VIDEO_RATE = 4_160.0
     APT_LINE_SECONDS = 0.5
     # POCSAG
-    POCSAG_FSK_SHIFT_HZ = 4_500.0   # pocsag/dsp.h:25
-    POCSAG_FRAME_SYNC = 0x7CD215D8  # pocsag.cpp:6
-    POCSAG_BATCH_CODEWORDS = 16     # pocsag.h:7
+    POCSAG_FSK_SHIFT_HZ = 4_500.0   #
+    POCSAG_FRAME_SYNC = 0x7CD215D8
+    POCSAG_BATCH_CODEWORDS = 16
     POCSAG_DEFAULT_BAUD = 1200.0
 
 
 # ======================================================================
-# 解码器封装（薄壳：参数对齐 SDR++，真正算法复用本仓 lite 实现）
+# 解码器封装（薄壳，真正算法复用本仓 lite 实现）
 # ======================================================================
 class RDSDecoder:
     """FM 广播 RDS 解码器。
 
-    （来源: decoder_modules/radio/src/rds_demod.h:12-41）DSP 链：
+DSP 链：
       FastAGC -> Costas<2> -> bandpass(0,2375) -> Costas<2> -> MM 时钟恢复 -> 差分解码。
     本壳把鉴频后的 MPX 基带交给 rds_lite.decode_rds（EN50067 块解码子集）。
     """
 
     def __init__(self, region: str = "eu"):
-        # 来源: wfm.h:10-13 RDS_REGION_EUROPE / NORTH_AMERICA
+
         self.region = region
         self.bit_rate = SDRPPConstants.RDS_BIT_RATE
 
@@ -83,7 +73,7 @@ class APTScanDecoder:
     """NOAA POES APT 云图扫描器。
 
     APT = 137MHz 宽带 FM 下行，2400Hz AM 副载波携带亮度；行长 0.5s。
-    （来源: weather_sat_decoder/src/main.cpp；参数同 noaa-apt 标准）
+
     """
 
     def decode(self, audio: np.ndarray, sample_rate: float,
@@ -112,14 +102,14 @@ class ADSBDecoder:
 class POCSAGDecoder:
     """POCSAG 寻呼解码器（最小同步子集）。
 
-    （来源: pager_decoder/src/pocsag/dsp.h:25-29 + pocsag.cpp:6-10）
+
       FSK 鉴频频偏 ±4.5kHz；10-tap 矩形平均；MM 时钟恢复 decim=sr/baud；
       帧同步码字 0x7CD215D8，允许 ≤4 bit 汉明距离；每批 16 个 32bit 码字。
-    本壳只做同步检测与批成帧，信息字符解码留待完整 pocsag.cpp 移植。
+    本壳只做同步检测与批成帧。
     """
 
     SYNC = SDRPPConstants.POCSAG_FRAME_SYNC
-    SYNC_DIST = 4  # pocsag.h:6 POCSAG_SYNC_DIST
+    SYNC_DIST = 4
 
     def __init__(self, baudrate: float = SDRPPConstants.POCSAG_DEFAULT_BAUD):
         self.baudrate = baudrate
@@ -130,7 +120,7 @@ class POCSAGDecoder:
     def sync_search(self, bits: np.ndarray) -> List[int]:
         """在比特流里找帧同步码字位置（容差 SYNC_DIST bit）。
 
-        来源: pocsag.cpp process() 里 syncSR 滑动窗口 + distance<=POCSAG_SYNC_DIST。
+。
         """
         positions = []
         sr = 0
@@ -145,10 +135,10 @@ class POCSAGDecoder:
 #  注册进 ToolRegistry
 # ======================================================================
 def register_sdrpp_decoders(registry) -> None:
-    """把 SDR++ 解码器注册成 AI 可调用工具。
+    """把各解码器注册成 AI 可调用工具。
 
-    （来源: ToolRegistry.register(name, description, parameters, handler, category)）
-    每个工具标 source=SDR++ 模块，便于审计。
+
+
     """
     rds = RDSDecoder()
     apt = APTScanDecoder()
@@ -157,8 +147,7 @@ def register_sdrpp_decoders(registry) -> None:
 
     registry.register(
         name="sdrpp_decode_rds",
-        description="SDR++ RDS 解码：从 FM 广播复合基带解出 PI 码/电台名(PS)/节目类型。"
-                    " 来源: SDR++ decoder_modules/radio (1187.5bps@57kHz)",
+        description="RDS 解码：从 FM 广播复合基带解出 PI 码/电台名(PS)/节目类型。",
         parameters={
             "type": "object",
             "properties": {
@@ -173,8 +162,7 @@ def register_sdrpp_decoders(registry) -> None:
 
     registry.register(
         name="sdrpp_decode_apt",
-        description="SDR++/noaa-apt APT 气象云图解码：从 NOAA 卫星音频解出 A/B 灰度图。"
-                    " 来源: SDR++ weather_sat_decoder (2400Hz副载波)",
+        description="APT 气象云图解码：从 NOAA 卫星音频解出 A/B 灰度图。",
         parameters={
             "type": "object",
             "properties": {
@@ -189,8 +177,7 @@ def register_sdrpp_decoders(registry) -> None:
 
     registry.register(
         name="sdrpp_decode_adsb",
-        description="SDR++ ADS-B 解码：从 1090MHz 复基带 IQ 解出 Mode S 帧/飞机呼号。"
-                    " 来源: dump1090 体系 (8us preamble, PPM, CRC-24)",
+        description="ADS-B 解码：从 1090MHz 复基带 IQ 解出 Mode S 帧/飞机呼号。",
         parameters={
             "type": "object",
             "properties": {
@@ -205,8 +192,7 @@ def register_sdrpp_decoders(registry) -> None:
 
     registry.register(
         name="sdrpp_pocsag_sync",
-        description="SDR++ POCSAG 同步检测：在比特流里找帧同步码字 0x7CD215D8。"
-                    " 来源: SDR++ pager_decoder (1200bps, FSK±4.5kHz)",
+        description="POCSAG 同步检测：在比特流里找帧同步码字 0x7CD215D8。",
         parameters={
             "type": "object",
             "properties": {

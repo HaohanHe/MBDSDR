@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """确定性单测：sounddevice 设备枚举/选择/测试音/无设备安全。
 
 全部用 FakeSD 注入，不触碰真实声卡。

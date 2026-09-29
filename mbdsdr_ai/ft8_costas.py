@@ -1,22 +1,19 @@
-"""MBDSDR FT8 真 Costas 频率/相位跟踪。
+# SPDX-License-Identifier: MIT
+"""FT8 Costas 频率/相位跟踪（独立实现）。
 
-移植 WSJT-X 三段同步法（与 wsjtx/lib/ft8/sync8.f90、sync8d.f90、ft8b.f90 对位）：
-
-  1. costas_sync —— 粗同步：
-       按符号长 FFT 建时频谱（sync8.f90:33-43），在 (频率 bin, 时间 lag)
-       二维网格上对 Costas7 序列 [3,1,4,0,6,5,2] 做匹配能量积累
-       （sync8.f90:54-85），输出多个候选 (center_hz, time_offset_s, sync_energy)。
+三段同步法：
+  1. costas_sync —— 粗同步：按符号长 FFT 建时频谱，在 (频率 bin, 时间 lag)
+       二维网格上对 Costas7 序列 [3,1,4,0,6,5,2] 做匹配能量积累，
+       输出多个候选 (center_hz, time_offset_s, sync_energy)。
   2. three_stage_sync —— 精同步：
-       第一段：复数匹配滤波器（sync8d.f90:33-47）在粗峰附近做 ±3Hz /
-              ±0.5 符号的局部细扫（ft8b.f90:111-134 的精调循环）。
+       第一段：复数匹配滤波器在粗峰附近做 ±3Hz / ±0.5 符号的局部细扫。
        第二段：用三个同步块（符号 0/36/72，间隔 5.76s）的复相关相位差
               估计残余频偏，mHz 级。
        第三段：用校正后的频率/时间积分 79×8 路符号能量矩阵，直接送
               ft8_decode.decode_ft8_payload。
 
-帧结构 S7 D29 S7 D29 S7（genft8.f90:32-35）：同步块符号位置 0-6、36-42、
-72-78；Costas7 序列 ICOS7（genft8.f90:14）。音调间隔 6.25Hz、符号 160ms
-（ft8_params.f90:6, ft8_encode.TONE_SPACING_HZ）。
+帧结构 S7 D29 S7 D29 S7：同步块符号位置 0-6、36-42、72-78；Costas7 序列
+ICOS7。音调间隔 6.25Hz、符号 160ms。以上均为公开协议事实。
 """
 from __future__ import annotations
 

@@ -1,6 +1,8 @@
-"""三层协议分析单测（移植自 URH AutoInterpretation + awre）。
+# SPDX-License-Identifier: MIT
+"""三层协议分析单测（位层→符号层→协议层，合成向量，非硬件）。
 
-上游对照：docs/learn/porting_2026_09_27.md §3
+Universal Radio Hacker (URH, https://github.com/jopohl/urh) 的分层思路仅作技术
+参考与致谢，本仓未包含其源代码。
 """
 import numpy as np
 

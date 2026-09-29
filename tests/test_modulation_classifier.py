@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """ModulationClassifier 单测。
 
 合成 AM/FM/ASK/OOK/FSK/PSK 信号，验证分类器准确率 > 90%。

@@ -1,37 +1,25 @@
-"""
-MBDSDR - POCSAG 寻呼解码器
-==============================
-
-本模块是 multimon-ng 中 POCSAG 协议栈的纯 Python+numpy 移植。
-所有关键常量与算法均标注来源 file:line。
-
-参考源码（已 clone 到 repos/）：
-  - repos/multimon-ng/pocsag.c        帧同步状态机 + 地址/消息解析
-  - repos/multimon-ng/bch.c            BCH(31,21) 编解码查表
-  - repos/multimon-ng/bch.h             POCSAG 码字位布局说明
-  - repos/multimon-ng/gen_pocsag.c      位流组装 + FSK 合成参考
-  - repos/multimon-ng/demod_poc12.c     位同步 PLL（early-late gate）
+# SPDX-License-Identifier: MIT
+"""POCSAG 寻呼解码器（独立实现，依据 CCIR Radiopaging Code No.1）。
 
 POCSAG 空中接口要点：
   - 调制：FSK，音频子载频中心 1800 Hz，两音调 1200 / 2400 Hz
       逻辑 0 = 高频/标记 (2400 Hz)，逻辑 1 = 低频/空号 (1200 Hz)
-      （来源: demod_poc12.c:37-44 隐含约定；与 ITU-R M.553 一致）
   - 线路编码：NRZ（每个码元周期内频率恒定，无归零）
-  - 帧结构：前置码 576 bit 交替 1010...（gen_pocsag.c:52,279-283）
-      每批 = 同步字(32bit) + 16 码字（8 帧 × 2 码字/帧）
-      同步字 0x7CD215D8（pocsag.c:57），空闲字 0x7A89C197（pocsag.c:58）
+  - 帧结构：前置码 576 bit 交替 1010...；每批 = 同步字(32bit) + 16 码字
+      （8 帧 × 2 码字/帧）。同步字 0x7CD215D8，空闲字 0x7A89C197。
   - 码字布局（32 bit，MSB 先发）：
-      bit31   = 消息标志（0=地址, 1=消息）  pocsag.c:63
+      bit31    = 消息标志（0=地址, 1=消息）
       bit30..11 = 20 bit 数据（含 bit31 共 21 bit 信息位）
       bit10..1  = BCH(31,21) 奇偶校验（10 bit）
-      bit0      = 整体偶校验
-      来源: bch.h:69-72, bch.c:201-206
+      bit0     = 整体偶校验
   - 地址码字：bit31=0，bit30..13 = 地址位 20..3（18 bit），
       bit12..11 = 功能位（2 bit）；地址低 3 位 = 帧号(0..7)
-      来源: gen_pocsag.c:95-100, pocsag.c:916-917
   - 消息码字：bit31=1，bit30..11 = 20 bit 载荷
-      数字模式：5 个 BCD 半字节/码字（pocsag.c:454 转换表）
-      字母模式：7-bit ASCII 位反转后按位流打包（pocsag.c:475-488）
+      数字模式：5 个 BCD 半字节/码字
+      字母模式：7-bit ASCII 位反转后按位流打包
+
+以上同步字、BCH 生成多项式、位布局均为公开标准事实；本模块 DSP、结构与
+命名自行编写。
 """
 
 from __future__ import annotations
@@ -42,37 +30,30 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 # ─────────────────────────────────────────────────────────────────────
-# 协议常量（全部标注来源）
+# POCSAG 协议常量（公开标准）
 # ─────────────────────────────────────────────────────────────────────
 
-# 同步字 / 空闲字，来源: repos/multimon-ng/pocsag.c:57-58
-POCSAG_SYNC = 0x7CD215D8   # pocsag.c:57
-POCSAG_IDLE = 0x7A89C197   # pocsag.c:58
-# 消息标志：bit31=1 表示消息码字，来源: pocsag.c:63
+POCSAG_SYNC = 0x7CD215D8
+POCSAG_IDLE = 0x7A89C197
 POCSAG_MESSAGE_FLAG = 0x80000000
 
-# 前置码长度，来源: gen_pocsag.c:52
 PREAMBLE_BITS = 576
 
 # FSK 音调（音频子载频）：中心 1800 Hz，偏差 ±600 Hz
-# 来源: demod_poc12.c:37-44 隐含约定（multimon 输入为 FM 鉴频后基带，
 # 本模块自行完成 FSK 鉴频，故给出实际音调）
 POCSAG_CENTER_FREQ = 1800.0
 POCSAG_MARK_FREQ = 2400.0    # 逻辑 0 = 高频/标记
 POCSAG_SPACE_FREQ = 1200.0   # 逻辑 1 = 低频/空号
 POCSAG_DEFAULT_SAMPLE_RATE = 22050.0
 
-# 支持的波特率，来源: demod_poc5.c / demod_poc12.c / demod_poc24.c
 SUPPORTED_BAUDS = (512, 1200, 2400)
 
 # BCH(31,21) 生成多项式 0x769（八进制 03551）
-# 来源: bch.c:54
 _POCSAG_POLY = 0x769
 _BCH_DATA_BITS = 21
 _BCH_PARITY_BITS = 10
 
-# 数字字符 → BCD 半字节映射（gen_pocsag.c:117-138）
-# 解码方向的反向查找表，来源: pocsag.c:454
+# 数字字符 → BCD 半字节映射
 _NUMERIC_TABLE = "084 2.6]195-3U7["
 _NUMERIC_ENCODE = {
     '0': 0, '1': 8, '2': 4, '3': 12, '4': 2,
@@ -82,17 +63,15 @@ _NUMERIC_ENCODE = {
 
 
 # ─────────────────────────────────────────────────────────────────────
-# BCH(31,21) 查表构建 —— 移植自 repos/multimon-ng/bch.c:402-476
 # ─────────────────────────────────────────────────────────────────────
 
 def _build_bch_tables() -> Tuple[List[int], List[int], List[int]]:
     """构建 POCSAG BCH 三张查找表。
 
     返回 (parity_tbl[21], syn_tbl[32], err_tbl[2048])。
-    算法逐行对应 bch.c:416-473。
     """
     # parity_tbl[databit]：仅第 databit 个数据位为 1 时的 10 bit 校验
-    # 来源: bch.c:416-424
+
     parity_tbl = [0] * _BCH_DATA_BITS
     for databit in range(_BCH_DATA_BITS):
         shreg = 1 << (databit + _BCH_PARITY_BITS)
@@ -102,7 +81,7 @@ def _build_bch_tables() -> Tuple[List[int], List[int], List[int]]:
         parity_tbl[databit] = shreg & 0x3FF
 
     # syn_tbl[bit]：31-bit BCH 域中第 bit 位出错时的 10 bit 伴随式
-    # 来源: bch.c:450-457
+
     syn_tbl = [0] * 32
     for bit in range(31):
         shreg = 1 << bit
@@ -112,7 +91,7 @@ def _build_bch_tables() -> Tuple[List[int], List[int], List[int]]:
         syn_tbl[bit] = shreg & 0x3FF
 
     # err_tbl[11bit_syndrome] → 32 bit 错误图案
-    # 来源: bch.c:461-473
+
     err_tbl = [0] * 2048
     # 单比特错误（bit 1..31；bit0 是偶校验位，单错必然翻转偶校验 → |0x400）
     for i in range(1, 32):
@@ -132,7 +111,7 @@ _PARITY_TBL, _SYN_TBL, _ERR_TBL = _build_bch_tables()
 
 
 def _parity32(x: int) -> int:
-    """32 bit 偶校验。来源: bch.c:93-105"""
+    """32 bit 偶校验。"""
     x ^= x >> 16
     x ^= x >> 8
     x ^= x >> 4
@@ -142,7 +121,7 @@ def _parity32(x: int) -> int:
 
 
 def bch_pocsag_encode(data21: int) -> int:
-    """21 bit 数据 → 32 bit POCSAG 码字。来源: bch.c:228-249"""
+    """21 bit 数据 → 32 bit POCSAG 码字。"""
     d = data21 & 0x1FFFFF
     parity = 0
     tmp = d
@@ -160,7 +139,6 @@ def bch_pocsag_correct(cw: int) -> Tuple[int, int]:
     """对 32 bit POCSAG 码字纠错。
 
     返回 (corrected_cw, n_errors)；n_errors=-1 表示不可纠。
-    来源: bch.c:251-268, bch.c:209-226
     """
     bits = cw >> 1
     syn = 0
@@ -179,23 +157,21 @@ def bch_pocsag_correct(cw: int) -> Tuple[int, int]:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 码字构造 —— 移植自 gen_pocsag.c:95-114
 # ─────────────────────────────────────────────────────────────────────
 
 def _build_address_codeword(address: int, function: int) -> int:
-    """构造地址码字。来源: gen_pocsag.c:95-100"""
+    """构造地址码字。"""
     data = ((address >> 3) << 2) | (function & 3)
     return bch_pocsag_encode(data)
 
 
 def _build_message_codeword(data20: int) -> int:
-    """构造消息码字（bit31=1）。来源: gen_pocsag.c:109-114"""
+    """构造消息码字（bit31=1）。"""
     data = (1 << 20) | (data20 & 0xFFFFF)
     return bch_pocsag_encode(data)
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 消息编码 —— 移植自 gen_pocsag.c:164-226
 # ─────────────────────────────────────────────────────────────────────
 
 def _detect_function(message: str) -> int:
@@ -207,7 +183,7 @@ def _detect_function(message: str) -> int:
 
 
 def _rev7(b: int) -> int:
-    """7 bit 位反转。来源: pocsag.c:481-488 / gen_pocsag.c:141-147"""
+    """7 bit 位反转。"""
     return (((b << 6) & 64) | ((b >> 6) & 1) |
             ((b << 4) & 32) | ((b >> 4) & 2) |
             ((b << 2) & 16) | ((b >> 2) & 4) |
@@ -215,11 +191,11 @@ def _rev7(b: int) -> int:
 
 
 def _encode_message(message: str, function: int) -> List[int]:
-    """把消息编码成若干消息码字。来源: gen_pocsag.c:164-226"""
+    """把消息编码成若干消息码字。"""
     cws: List[int] = []
     if function == 0:
         # 数字模式：每码字 5 个 BCD 半字节
-        # 来源: gen_pocsag.c:170-185
+
         i = 0
         n = len(message)
         while i < n:
@@ -233,7 +209,7 @@ def _encode_message(message: str, function: int) -> List[int]:
             cws.append(_build_message_codeword(data))
     else:
         # 字母模式：每字符 7 bit 位反转后 MSB 先打入位流，再按 4 bit 半字节打包
-        # 来源: gen_pocsag.c:187-222
+
         bit_stream: List[int] = []
         for ch in message:
             c = _rev7(ord(ch) & 0x7F)
@@ -289,18 +265,15 @@ def pocsag_encode(address: int,
 
     # ── 组装位流 ──
     bits: List[int] = []
-    # 前置码：1010... 起始于 1。来源: gen_pocsag.c:279-283
     for i in range(PREAMBLE_BITS):
         bits.append(1 if (i & 1) == 0 else 0)
 
     # 逐批填充：同步字 + 16 码字（8 帧 × 2）
-    # 地址放在 frame=address&7 的第 0 个码字槽。来源: gen_pocsag.c:241,301-322
     frame_pos = address & 7
     address_sent = False
     msg_idx = 0
     batch = 0
     while True:
-        # 同步字 MSB 先发。来源: gen_pocsag.c:291-298
         for i in range(31, -1, -1):
             bits.append((POCSAG_SYNC >> i) & 1)
         # 16 个码字槽
@@ -310,7 +283,6 @@ def pocsag_encode(address: int,
                     codeword = _build_address_codeword(address, function)
                     address_sent = True
                 elif address_sent and msg_idx < len(msg_cws):
-                    # 消息码字必须紧跟地址之后，来源: gen_pocsag.c:312
                     codeword = msg_cws[msg_idx]
                     msg_idx += 1
                 else:
@@ -383,7 +355,7 @@ def _bitsync_candidates(df: np.ndarray,
 
     遍历 [0, spb) 内多个候选相位，用运行累加器采样，
     收集所有能检出同步字的相位，按 BCH 干净程度排序。
-    参考 demod_poc12.c:67-84。
+    参考 。
     """
     spb = sample_rate / baud
     n = len(df)
@@ -484,7 +456,6 @@ def _bitsync_candidates(df: np.ndarray,
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 帧同步与状态机 —— 移植自 pocsag.c:800-985
 # ─────────────────────────────────────────────────────────────────────
 
 def _bits_to_word(bits: List[int], start: int) -> int:
@@ -496,14 +467,14 @@ def _bits_to_word(bits: List[int], start: int) -> int:
 
 
 def _get7(buf: bytes, n: int) -> int:
-    """取第 n 个 7 bit 字符。来源: pocsag.c:475-479"""
+    """取第 n 个 7 bit 字符。"""
     b0 = buf[(n * 7) // 8]
     b1 = buf[(n * 7 + 6) // 8] if (n * 7 + 6) // 8 < len(buf) else 0
     return ((b0 << 8 | b1) >> ((n + 1) % 8)) & 0x7F
 
 
 def _decode_numeric(buf: bytes, numnibbles: int) -> str:
-    """数字消息解码。来源: pocsag.c:452-473"""
+    """数字消息解码。"""
     chars = []
     for i in range(numnibbles):
         bi = i // 2
@@ -515,7 +486,7 @@ def _decode_numeric(buf: bytes, numnibbles: int) -> str:
 
 
 def _decode_alpha(buf: bytes, numnibbles: int) -> str:
-    """字母消息解码。来源: pocsag.c:490-523"""
+    """字母消息解码。"""
     n_chars = numnibbles * 4 // 7
     chars = []
     for i in range(n_chars):

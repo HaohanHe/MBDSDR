@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """确定性单测：Windows DLL 搜索逻辑与安全降级。
 
 不依赖真实 rtlsdr.dll / Windows：用临时目录 + 注入 exists 谓词验证搜索路径，

@@ -1,16 +1,16 @@
+# SPDX-License-Identifier: MIT
 """YSF/C4FM 数据层解调器合成信号往返测试。
 
 覆盖：
-  1. FEC 编解码往返（Viterbi K=5 / Golay(24,12,8) / CRC-CCITT16 / FICH / DCH）
-  2. 4FSK 基带解调符号正确率（加噪 >95%）
-  3. Data FR 帧端到端基带往返（SNR=15dB，解出 src/dst 呼号一致）
-  4. 复数 IQ 端到端往返
-  5. 同步字检测（随机前缀+帧+随机后缀中定位）
-  6. 无信号零假值（纯噪声/零信号/噪声基带均不解出帧）
+ 1. FEC 编解码往返（Viterbi K=5 / Golay(24,12,8) / CRC-CCITT16 / FICH / DCH）
+ 2. 4FSK 基带解调符号正确率（加噪 >95%）
+ 3. Data FR 帧端到端基带往返（SNR=15dB，解出 src/dst 呼号一致）
+ 4. 复数 IQ 端到端往返
+ 5. 同步字检测（随机前缀+帧+随机后缀中定位）
+ 6. 无信号零假值（纯噪声/零信号/噪声基带均不解出帧）
 
-参考: repos/MMDVMHost/YSF*.cpp, Golay24128.cpp, CRC.cpp；mbdsdr_ai/dmr_demod.py。
-本测试仅验证数据层（成帧/FICH/呼号），不涉及 AMBE/IMBE 语音声码器。
-"""
+参考: *.cpp, , ； 。
+本测试仅验证数据层（成帧/FICH/呼号），不涉及 AMBE/IMBE 语音声码器"""
 from __future__ import annotations
 
 import os

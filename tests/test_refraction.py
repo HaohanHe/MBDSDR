@@ -1,6 +1,7 @@
+# SPDX-License-Identifier: MIT
 """确定性单测：大气折射 —— 天顶≈0、地平线≈34'、已知高度校正值。
 
-参考 Stellarium src/tests/testRefraction.cpp:46-66（P=1010 hPa, T=10°C）。
+参考标准测试值（P=1010 hPa, T=10°C）。
 """
 import math
 import pytest
@@ -21,7 +22,7 @@ def test_horizon_refraction_about_34_arcmin():
 
 
 def test_known_altitude_correction_values():
-    # Stellarium testRefraction.cpp: true alt=5° → 9.674'
+    # true alt=5° → 9.674'
     r5 = refraction.saemundsson_arcmin(5.0, pressure_hpa=1010.0, temperature_c=10.0)
     assert abs(r5 - 9.674) < 0.2, f"alt=5° expected 9.674', got {r5:.3f}'"
     # true alt=45° → 1.013'

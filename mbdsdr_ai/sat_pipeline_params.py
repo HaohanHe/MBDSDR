@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """统一气象卫星 pipeline 参数表。
 
 本模块把 SatDump 各卫星 pipeline JSON（resources/pipelines/*.json）里经过实测的

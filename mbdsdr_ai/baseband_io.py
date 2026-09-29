@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR Baseband 录制 / 回放（纯 numpy + 二进制）
 ================================================

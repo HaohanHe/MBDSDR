@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """新时空面板 offscreen 测试
 ================================
 

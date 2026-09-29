@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Spectrogram 单测。
 
 验证 STFT 能量集中在正确频率，选框测量返回正确值。

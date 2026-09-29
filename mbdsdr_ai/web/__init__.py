@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai.web — Web 流式接口包
 ================================
 
-移植自 OpenWebRX（repos/openwebrx）：
-  - 多客户端共享一个 SDR 后端（owrx/connection.py）
-  - FFT/音频 WebSocket 扇出（owrx/fft.py, owrx/websocket.py）
+Web 流式接口（OpenWebRX 仅作技术参考，本仓未包含其源代码）：
+  - 多客户端共享一个 SDR 后端
+  - FFT/音频 WebSocket 扇出
 
 类：
   - WebServer          : HTTP + WebSocket 服务器（GET /, /api/status, /api/spectrum,

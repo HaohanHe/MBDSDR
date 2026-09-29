@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """确定性单测：USB 拔出检测 / 优雅停止 / 不崩溃 / 重新插入。"""
 import threading
 

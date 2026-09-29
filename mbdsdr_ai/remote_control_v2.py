@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 远程控制 v2：补齐 GQRX remote_control.cpp 完整命令集
 =====================================================

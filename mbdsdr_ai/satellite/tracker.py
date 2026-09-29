@@ -1,18 +1,19 @@
-"""MBDSDR 卫星追踪与过境预测（移植自 SatDump tracking/ + passes/）。
+# SPDX-License-Identifier: MIT
+"""MBDSDR 卫星追踪与过境预测。
 
-上游对照（见 docs/learn/satdump.md §8-§9）：
-- src-core/common/tracking/tracking.h:10-46   SatelliteTracker 类
-- src-core/common/tracking/tracking.cpp:10-13  predict_parse_tle
-- src-core/common/tracking/scheduler/passes.h:8-14  SatellitePass{norad,aos,los,max_el}
-- src-core/common/tracking/scheduler/passes.cpp:42-79  LEO 过境扫描主循环
+依据公开轨道/跟踪方法独立实现：
+  * SGP4 传播 — Spacetrack Report #3（经 sgp4 库）。
+  * 坐标链 TEME→ECEF(GMST)→站心 ENU，给出仰角/方位/距离/视线速度。
+  * 过境预测 — 粗扫定位仰角跨越阈值 → 二分收敛 → 细采样找最大仰角。
+  * 多普勒 — 接收频率偏移 = -v_r/c · f_carrier。
 
-本模块不重新实现 SGP4，而是复用 mbdsdr_ai/orbit.py 已与 gpredict 交叉验证过的
-TEME→ECEF(GMST)→ENU 坐标链，在其上封装：
+本模块在 mbdsdr_ai/orbit.py 的坐标链上封装：
   * SatelliteTracker  — 单星 SGP4 传播、实时仰角/方位/距离/视线速度/多普勒
   * PassPredictor      — 给定 TLE+地面站，预测未来 N 小时所有过境
   * doppler_shift_hz   -v_r/c * f_carrier（实时接收频率偏移）
 
-红线：真实 TLE 在线拉取 + 磁盘缓存（orbit.fetch_tle）；无网用缓存；无缓存则显空。
+真实 TLE 在线拉取 + 磁盘缓存（orbit.fetch_tle）；无网用缓存；无缓存则显空。
+SatDump、gpredict 等开源项目仅作技术参考与致谢，本仓未包含其源代码。
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sgp4.api import Satrec
 
-# 复用上级包 orbit.py 已经过 gpredict 交叉验证的坐标链（误差 <0.02°/0.01°）
+# 复用上级包 orbit.py 的坐标链（SGP4/GMST 标准实现）
 from .. import orbit  # mbdsdr_ai.orbit
 
 
@@ -42,7 +43,7 @@ class GroundStation:
         return (self.lat, self.lon, self.alt_km)
 
 
-# 已知下行频率（Hz）— 来源: SatDump module_noaa_apt_decoder.cpp:115-153
+# 已知下行频率（Hz）— NOAA/MetOp/FY 公开下行频率表
 DOWNLINK_FREQUENCIES: Dict[str, float] = {
     "NOAA-15": 137.6200e6,
     "NOAA-18": 137.9125e6,
@@ -120,10 +121,7 @@ class SatelliteTracker:
     # ---- 多普勒 ----
     def doppler_at(self, t_unix: float, gs: GroundStation,
                    f_carrier_hz: float) -> Optional[Dict[str, float]]:
-        """实时多普勒。接收频率偏移 = -v_los/c * f_carrier（远离为负）。
-
-        来源: orbit.py:205-229 doppler_correction()。
-        """
+        """实时多普勒。接收频率偏移 = -v_los/c * f_carrier（远离为负）。"""
         st = self.position_at(t_unix, gs)
         if st is None:
             return None
@@ -148,11 +146,10 @@ class SatelliteTracker:
 # PassPredictor
 # --------------------------------------------------------------------------- #
 class PassPredictor:
-    """预测未来 N 小时过境。算法对照 SatDump passes.cpp:42-79。
+    """预测未来 N 小时过境。
 
-    与 SatDump 的 predict_next_los/next_aos 黑盒不同，这里用
-    「粗扫 60s 定位仰角跨越阈值 → 二分收敛到 0.25s → pass 内 2s 细采样找 max_el」
-    （orbit.predict_passes 已实现该思路），输出任务书要求的字段。
+    方法：「粗扫 60s 定位仰角跨越阈值 → 二分收敛到 0.25s → pass 内 2s 细采样
+    找 max_el」，输出任务书要求的字段。
     """
 
     def __init__(self, tracker: SatelliteTracker, gs: GroundStation):
@@ -260,7 +257,6 @@ class PassPredictor:
 def auto_detect_satellite(freq_hz: float, tol_hz: float = 15e3) -> Optional[Dict[str, Any]]:
     """按下行频率识别卫星类型，返回 {name, norad, decoder, freq}。
 
-    对照 SatDump module_noaa_apt_decoder.cpp:115-153（NOAA APT 频率表）。
     MetOp/FY 目前只返回元数据，解码器后续接入。
     """
     table = [

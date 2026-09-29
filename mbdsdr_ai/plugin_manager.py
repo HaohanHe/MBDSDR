@@ -1,11 +1,12 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/plugin_manager.py — 插件系统
 =======================================
 
-移植自 SDRangel（repos/sdrangel/sdrbase/plugin/）：
-  - plugininterface.h:23  PluginDescriptor      → Plugin 基类 + plugin.json
-  - pluginmanager.cpp:222 loadPluginsDir      → PluginManager.discover/load
-  - 坏插件跳过、不致命                          → discover/load 捕获异常进 failed[]
+插件系统（参考 SDRangel 插件接口思想；SDRangel 仅作技术参考，本仓未包含其源代码）：
+  - 插件描述符 PluginDescriptor      → Plugin 基类 + plugin.json
+  - 插件目录扫描加载                 → PluginManager.discover/load
+  - 坏插件跳过、不致命                → discover/load 捕获异常进 failed[]
 
 插件描述文件 plugin.json：
   {
@@ -40,7 +41,7 @@ PLUGIN_TYPES = ("source", "channel", "demod", "tool")
 
 # --------------------------------------------------------------------------- #
 class Plugin:
-    """插件基类（对照 SDRangel PluginInterface）。"""
+    """插件基类。"""
 
     #: 插件类型，见 PLUGIN_TYPES
     kind: str = "tool"

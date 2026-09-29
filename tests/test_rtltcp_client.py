@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """rtl_tcp 网络接收源测试：用本地假 rtl_tcp server 自证协议实现正确。
 
 不依赖真实硬件 / 网络：起一个 localhost TCP 假 server（threading + socket），

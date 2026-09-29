@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 增益分级控制（LNA / Mixer / VGA 三档）
 ======================================
@@ -7,16 +8,15 @@
 - Mixer 混频器级增益（IF 第一级，常叫 "IF" / "Mixer"）
 - VGA   基带可变增益放大器（后端最后一级，常叫 "VGA" / "BB" / "Baseband"）
 
-移植自上游：
-- gqrx/src/receivers/nbrx.cpp:47-49
-    nbrx 信号链 filter → meter → sql → agc；增益分级在设备源（osmosdr）侧，
-    GQRX 通过 set_gain_stage(LNA/Mixer/VGA) 分别下发。
-- gr-osmosdr/lib/osmosdr_source_c.cc
-    set_gain_mode / set_gain(gain, name) —— name 即增益元素名。
-- SoapySDR include/SoapySDR/Device.hpp:
-    - listGains(direction, channel) -> vector<string>   （Device.hpp:695 附近）
-    - getGainRange(direction, channel, name) -> argRange (min,max,step)
-    - setGain(direction, channel, value, name)          （Device.hpp:725 附近）
+实现依据（通用 SDR 增益分级与 SoapySDR 公开 API；GQRX/gr-osmosdr 仅作技术参考，
+本仓未包含其源代码）：
+- 接收机信号链 filter → meter → sql → agc；增益分级在设备源侧，
+  通过 set_gain_stage(LNA/Mixer/VGA) 分别下发。
+- 增益元素命名：set_gain_mode / set_gain(gain, name)，name 即增益元素名。
+- SoapySDR 公开 API：
+    - listGains(direction, channel) -> 元素名列表
+    - getGainRange(direction, channel, name) -> (min, max, step)
+    - setGain(direction, channel, value, name)
 
 红线：
 - 增益范围**从设备查询**（getGainRange），绝不硬编码 LNA=0..40 之类。

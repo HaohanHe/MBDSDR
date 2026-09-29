@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 test_web_server.py — WebServer HTTP / WebSocket 确定性单测。
 

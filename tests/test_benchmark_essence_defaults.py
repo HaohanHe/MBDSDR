@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 标杆精髓默认参数回归测试
 ========================
-覆盖 GQRX / direwolf / dump1090 / rtl_433 标杆源码移植到 MBDSDR 内核的关键默认值：
+对照 GQRX / direwolf / dump1090 / rtl_433 等公开软件的常用默认值，独立实现 MBDSDR 内核关键默认值回归：
 
   T1  RTL-SDR 首启增益自动拉到离散增益表中点（gqrx mainwindow.cpp:571-579）
   T2  AX.25 去重升级为 CRC16 指纹 + 30s TTL（direwolf dedupe.c:134,245）

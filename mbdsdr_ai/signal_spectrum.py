@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 信号频谱分析（纯 numpy，不依赖硬件）
 ============================================

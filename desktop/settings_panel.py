@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 服务设置面板（desktop/settings_panel.py）
 ================================================

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 自动调制识别面板（desktop/modulation_panel.py）
 =====================================================

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 VFO 管理 + 频率管理器测试
 =========================

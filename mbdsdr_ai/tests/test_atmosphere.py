@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """atmosphere.py 测试：晨昏时刻 / 折射 / 空气质量 / 天空亮度。
 
 运行：python3 -m pytest mbdsdr_ai/tests/test_atmosphere.py -v
@@ -30,7 +31,7 @@ def _local_hm(dt: datetime) -> float:
 
 class TestRefraction:
     def test_horizon_refraction_about_half_degree(self):
-        """alt=0° 折射 ≈ 0.5°（Stellarium Saemundsson 给出 ~0.48°）。"""
+        """alt=0° 折射 ≈ 0.5°（Saemundsson 公式给出 ~0.48°）。"""
         r = atmospheric_refraction(0.0)
         assert 0.4 < r < 0.6, f"horizon refraction={r:.4f}°"
 

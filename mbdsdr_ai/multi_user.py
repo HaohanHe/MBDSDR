@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/multi_user.py — 多用户共享 SDR 调度
 ==============================================

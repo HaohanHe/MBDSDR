@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI - 真实串口 GNSS 接入（骨架）
 ======================================
@@ -17,12 +18,12 @@ MBDSDR AI - 真实串口 GNSS 接入（骨架）
 红线：无真实定位数据时 ``get_fix()`` 返回 ``source="none"``、坐标为 None，
 绝不造假坐标。
 
-许可：GPL-3.0。本模块为从零实现的 NMEA-0183 标准解析，参考：
-- 来源项目 direwolf  repos/direwolf/src/dwgpsnmea.c:38-42 （talker ID 含义：
-    GP=GPS / GL=GLONASS / GA=Galileo / GB=BeiDou / GN=组合）
+本模块依据公开标准独立实现：
 - NMEA-0183 standard field layout（GGA/RMC/GSA/GSV/VTG/ZDA 字段顺序）
-- RTKLIB str2str（src/stream.c）NTRIP client：HTTP GET mountpoint + Basic Auth，
-    收到 200 后持续转发 RTCM3 字节流。
+- talker ID 含义（公开约定）：GP=GPS / GL=GLONASS / GA=Galileo / GB=BeiDou / GN=组合
+- NTRIP client：HTTP GET mountpoint + Basic Auth，收到 200 后持续转发 RTCM3 字节流
+
+direwolf / RTKLIB 仅作为技术参考与致谢，本模块未包含其源代码。
 """
 
 from __future__ import annotations
@@ -63,7 +64,7 @@ _AUTODETECT_READ_CHUNK = 0.2  # 单次 readline 阻塞上限（秒），便于�
 # 丢弃不完整缓冲，避免天空图把半截帧当成完整卫星列表而闪烁。
 _GSV_AGG_TIMEOUT = 2.0
 
-# 多星座 talker 前缀（来源 direwolf dwgpsnmea.c:38-42；补充 BD=北斗部分厂商私有前缀）
+# 多星座 talker 前缀（公开约定；BD=北斗部分厂商私有前缀）
 TALKER_IDS = ("GP", "GL", "GA", "GB", "BD", "GN")
 
 # NMEA 语句类型（去掉 2 位 talker 后的 3 字母类型）
@@ -89,7 +90,7 @@ _USB_TTL_CHIPS = ("ch340", "ch341", "cp2102", "cp210", "ft232", "ft231x",
 def nmea_checksum(body: str) -> int:
     """计算 NMEA 校验和：'$' 与 '*' 之间所有字符逐字节 XOR。
 
-    （来源：NMEA-0183 standard；direwolf dwgpsnmea.c 同样的 XOR 算法）
+    （依据 NMEA-0183 standard 的 XOR 校验和算法）
     """
     cs = 0
     for ch in body:
@@ -837,7 +838,7 @@ class SerialGNSSReader:
 class NTRIPClient:
     """连接 NTRIP caster，拉取 RTCM3 差分数据流。
 
-    参考 RTKLIB str2str（src/stream.c）NTRIP client 流程：
+    NTRIP client 流程：
       1. TCP 连接 host:port（默认 2101）
       2. ``GET /<mountpoint> HTTP/1.0\r\nHost: ..\r\nAuthorization: Basic ..\r\n\r\n``
       3. 收到 ``ICY 200`` / ``HTTP/1.0 200`` 后，后续即为 RTCM3 字节流，

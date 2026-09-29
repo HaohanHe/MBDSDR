@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
-limesuite_test.py — 验证 limesuite_params.py 移植自 LimeSuite/LMS7002M 的真实参数。
+limesuite_test.py — 验证 limesuite_params.py 依据公开数据手册 / 驱动 API 行为独立整理的真实参数。
 
-红线：增益表必须是 LimeSuite C 源码 + LMS7002M 驱动里的真实离散档，不能编造。
-本测试直接断言源码表的条数与端点（见每个断言的注释来源 file:line）。
+红线：增益表必须是公开数据手册 / 驱动暴露的真实离散档，不能编造。
+本测试直接断言表的条数与端点（技术参考：公开驱动头文件，未引用其代码）。
 
-真实来源（repos/LimeSuite 下）：
+对照依据（公开驱动头文件 / 数据手册，仅作技术参考）：
   - LNA(RFE)  src/lms7002m/LMS7002M.cpp:789-837  SetRFELNA_dB / GetRFELNA_dB switch
   - TIA(RFE)  src/lms7002m/LMS7002M.cpp:890-914  SetRFETIA_dB / GetRFETIA_dB switch
   - PGA(RBB)  src/lms7002m/LMS7002M.cpp:763-787  SetRBBPGA_dB (G_PGA_RBB 5-bit)

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 频谱多 VFO 绘制 offscreen 冒烟测试
 ==================================

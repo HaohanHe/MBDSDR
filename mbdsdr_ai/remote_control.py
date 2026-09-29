@@ -1,13 +1,15 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI 内核 - 远程控制服务器（移植 GQRX remote_control）
-============================================================
+MBDSDR AI 内核 - 远程控制服务器
+================================
 
-对照上游（见 docs/learn/gnuradio_gqrx.md）：
+提供与 GQRX remote_control 兼容的行命令远程控制协议（GQRX 仅作技术参考，
+本仓未包含其源代码）：
 
-  - 默认端口 7356 / 仅 127.0.0.1  <-> remote_control.cpp:31-32
-  - 按行读、空格拆分命令            <-> remote_control.cpp:201-280 startRead
-  - 应答 RPRT 0 / RPRT 1           <-> remote_control.cpp:619/622/661
-  - q/Q 关闭连接                    <-> remote_control.cpp:263-270
+  - 默认端口 7356 / 仅 127.0.0.1
+  - 按行读、空格拆分命令
+  - 应答 RPRT 0 / RPRT 1
+  - q/Q 关闭连接
 
 支持命令（按本任务简化）：
   * ``f``          读频率（Hz）

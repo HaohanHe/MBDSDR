@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 6DOF 位姿融合与 AR 投影
 ==========================================

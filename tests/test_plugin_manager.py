@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 test_plugin_manager.py — PluginManager 注册/加载/枚举/热重载 单测。
 

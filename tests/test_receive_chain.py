@@ -1,8 +1,8 @@
+# SPDX-License-Identifier: MIT
 """
-test_receive_chain.py — ReceiveChain 端到端确定性单测。
-
-所有信号合成仅用于测试，绝不接到 UI 当真实读数。
-运行：python3 -m pytest tests/test_receive_chain.py -q
+test_receive_chain.py — end-to-end deterministic ReceiveChain unit tests.
+非硬件 / NOT HARDWARE: all signals are synthetic; never feed into the UI.
+Run: python3 -m pytest tests/test_receive_chain.py -q
 """
 import os
 import sys

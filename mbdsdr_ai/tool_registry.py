@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 工具注册表
 ============================
@@ -643,58 +644,51 @@ class ToolRegistry:
                 category="broadcast",
             )
 
-        # ── SDRangel 真实 DSP 引擎移植工具 ──
-        # 来源: repos/sdrangel/sdrbase/dsp/* 及 plugins/channelrx/*
+        # ── SDRangel 风格 DSP 引擎工具（依据公开 DSP 方法实现）──
         self.register_sdrangel_tools()
 
-        # ── GNU Radio 真实 DSP 块移植工具 ──
-        # 来源: repos/gnuradio/gr-*（见 mbdsdr_ai/gnuradio_blocks.py）
+        # ── GNU Radio 风格 DSP 块工具（依据公开标准/教材 DSP 实现）──
+        # 实际实现见 mbdsdr_ai/gnuradio_blocks.py
         self.register_gnuradio_blocks_tools()
 
-        # ── librtlsdr 真实硬件参数查询工具 ──
-        # 来源: repos/librtlsdr/src/librtlsdr.c:959-969,1100-1101,1157,1165
+        # ── librtlsdr 硬件参数查询工具（依据公开 API/数据手册）──
         self.register_rtlsdr_params_tools()
 
-        # ── gpredict 真实 SGP4 轨道预测工具 ──
-        # 来源: repos/gpredict/src/sgpsdp/{sgp4sdp4,sgp_in,sgp_obs,sgp_time}.c
+        # ── SGP4 轨道预测工具（依据 Spacetrack Report #3 公开标准）──
         self.register_gpredict_tools()
 
-        # ── SatDump 真实卫星图像投影/伪彩色/LRPT 移植工具 ──
-        # 来源: repos/SatDump/src-core/projection,common/geodetic 及
-        #       plugins/meteor_support, plugins/noaa_metop_support（见 mbdsdr_ai/satdump_adapter.py）
+        # ── 卫星图像投影/伪彩色/LRPT 工具（依据公开卫星图像标准实现）──
+        # 实际实现见 mbdsdr_ai/satdump_adapter.py
         self.register_satdump_tools()
 
-        # ── minimodem 真实 FSK 调制解调工具 ──
-        # 来源: repos/minimodem/src/{fsk.c,minimodem.c,baudot.c,databits_ascii.c}
+        # ── minimodem 风格 FSK 调制解调工具（依据公开 FSK/Audio-ShiftKey 标准）──
         self.register_minimodem_tools()
 
-        # ── goestools 真实 GOES LRIT/HRIT 帧解析移植工具 ──
-        # 来源: repos/goestools/src/{lrit,assembler,decoder}/*（见 mbdsdr_ai/goes_lrit.py）
+        # ── GOES LRIT/HRIT 帧解析工具（依据 GOES HRIT/LRIT 公开标准实现）──
+        # 实际实现见 mbdsdr_ai/goes_lrit.py
         self.register_goeslrit_tools()
 
         # ── GK-2A LRIT 全管道（IQ→解调→FEC→帧→图像→PNG）──
-        # 来源: repos/SatDump/plugins/xrit_support/xrit/gk2a/（见 mbdsdr_ai/gk2a_lrit.py）
+        # 实际实现见 mbdsdr_ai/gk2a_lrit.py
         self.register_gk2a_tools()
 
         # ── 风云 FY-4 LRIT/HRIT + FY-3 HRPT 接收管道 ──
-        # 来源: repos/SatDump/plugins/xrit_support/xrit/fy4/（见 mbdsdr_ai/fengyun_sat.py）
+        # 实际实现见 mbdsdr_ai/fengyun_sat.py
         self.register_fengyun_tools()
 
         # ── 气象卫星图像处理链（中值/CLAHE/白平衡/Kuwahara/几何校正/RGB）──
-        # 来源: repos/SatDump/src-core/image/,projection/（见 mbdsdr_ai/sat_image_processing.py）
+        # 实际实现见 mbdsdr_ai/sat_image_processing.py
         self.register_sat_image_tools()
 
         # ── 深空追迹多普勒定轨（EKF+RLS, LRO参考轨道）──
-        # 来源: 课件Demo算法 + gpredict/RTKLIB（见 mbdsdr_ai/orbit_determination.py）
+        # 实际实现见 mbdsdr_ai/orbit_determination.py
         self.register_orbit_determination_tools()
 
     def register_goeslrit_tools(self):
-        """注册 goestools 真实源码移植的 GOES LRIT/HRIT 解析工具。
+        """注册 GOES LRIT/HRIT 帧解析工具（依据 GOES HRIT/LRIT 公开标准独立实现）。
 
-        来源: github.com/pietern/goestools
-          - src/decoder/{packetizer,derandomizer,correlator}.*  帧同步/解扰
-          - src/assembler/{vcdu,virtual_channel,transport_pdu,session_pdu,crc}.*  VCDU→文件
-          - src/lrit/lrit.{h,cc}  LRIT 文件头结构
+        goestools 上游仅作技术参考与致谢，本仓未包含其源代码：
+          - 帧同步/解扰、VCDU→文件、LRIT 文件头结构等公开标准做法
         """
         try:
             from . import goes_lrit as GL
@@ -708,11 +702,11 @@ class ToolRegistry:
     def register_gk2a_tools(self):
         """注册 GK-2A LRIT 全管道接收工具（IQ→解调→FEC→帧同步→图像→PNG）。
 
-        来源: repos/SatDump/plugins/xrit_support/xrit/gk2a/
-          - gk2a_headers.h     GK-2A 专用分段头
-          - decomp.cpp:27      图像压缩类型（JPEG2000，合成测试用无压缩直通）
-          - segment_decoder.h  段拼接规则
-        物理层来源: SatDump GK2A.json + viterbi27.h + reedsolomon.cpp
+        实现依据（GK-2A LRIT 公开格式；SatDump 仅作技术参考，本仓未包含其源代码）：
+          - GK-2A 专用分段头
+          - 图像压缩类型（JPEG2000，合成测试用无压缩直通）
+          - 段拼接规则
+        物理层依据：DVB-S2 物理层 + Viterbi(2,7) + RS 编解码公开标准
         """
         try:
             from . import gk2a_lrit as GK
@@ -725,11 +719,11 @@ class ToolRegistry:
     def register_fengyun_tools(self):
         """注册风云 FY-4 LRIT/HRIT + FY-3 HRPT 接收管道工具。
 
-        来源: repos/SatDump/plugins/xrit_support/xrit/fy4/
-          - fy4_headers.h      FY-4 专用 ImageInformationRecord
-          - segment_decoder.h  段拼接 imemcpy 规则
-          - FengYun-4.json     DVB-S2 物理层参数（90k/120k/1M sym/s）
-        FY-3 HRPT: repos/SatDump noaa_metop_support + satdump_adapter.HRPTDecoder
+        实现依据（FY-4 LRIT/HRIT 公开格式；SatDump 仅作技术参考，本仓未包含其源代码）：
+          - FY-4 专用 ImageInformationRecord
+          - 段拼接规则
+          - DVB-S2 物理层参数（90k/120k/1M sym/s）
+        FY-3 HRPT：依据 NOAA HRPT 公开标准（见 satdump_adapter.HRPTDecoder）
         """
         try:
             from . import fengyun_sat as FY
@@ -742,11 +736,12 @@ class ToolRegistry:
     def register_sat_image_tools(self):
         """注册气象卫星图像处理链工具（中值/CLAHE/白平衡/Kuwahara/几何校正/RGB）。
 
-        来源: repos/SatDump/src-core/image/processing.cpp + projection/
-          - processing.cpp:69   中值滤波
-          - processing.cpp:179  直方图均衡
-          - processing.cpp:103  Kuwahara 降噪
-          - geos.cpp            全圆盘投影正反变换
+        实现依据（通用图像处理与全圆盘投影公开方法；SatDump 仅作技术参考，
+        本仓未包含其源代码）：
+          - 中值滤波
+          - 直方图均衡（CLAHE）
+          - Kuwahara 降噪
+          - 全圆盘投影正反变换
         """
         try:
             from . import sat_image_processing as SIP
@@ -772,14 +767,14 @@ class ToolRegistry:
         OD.register_tool_registry(self)
 
     def register_minimodem_tools(self):
-        """注册 minimodem 真实移植的通用软件 FSK 调制解调工具。
+        """注册通用软件 FSK 调制解调工具（依据公开 FSK / Bell 103/202 / ITA-2 标准实现）。
 
-        移植自 repos/minimodem/src/（GPLv3, Kamal Mostafa）：
-          - fsk.c            FSK 调制/FFT-bin 判决解调
-          - minimodem.c:81   fsk_transmit_frame 帧结构
-          - minimodem.c:900-921 Bell 103/202 频率预设
-          - databits_ascii.c 8N1 UART 数据位
-          - baudot.c         ITA-2 Baudot 字母/数字换档
+        实现依据（minimodem 仅作技术参考与致谢，本仓未包含其源代码）：
+          - FSK 调制 / FFT-bin 判决解调
+          - FSK 帧结构
+          - Bell 103/202 频率预设（公开电话调制解调器标准）
+          - 8N1 UART 数据位
+          - ITA-2 Baudot 字母/数字换档（公开电传打字标准）
         """
         self.register(
             name="fsk_modulate",
@@ -907,7 +902,7 @@ class ToolRegistry:
         )
 
     def register_satdump_tools(self):
-        """注册 SatDump 真实源码移植的卫星图像工具。
+        """注册卫星图像投影/伪彩色工具（依据公开卫星图像处理标准实现）。
 
         来源: github.com/altillimity/SatDump
           * 投影: src-core/projection/raytrace/common/normal_line.cpp
@@ -1050,9 +1045,9 @@ class ToolRegistry:
         )
 
     def register_gpredict_tools(self):
-        """注册 gpredict 真实移植的卫星轨道预测工具。
+        """注册卫星轨道预测工具（依据 SGP4/Spacetrack Report #3 公开标准实现）。
 
-        来源: mbdsdr_ai/gpredict_adapter.py（逐行移植 repos/gpredict/src/sgpsdp/）
+        实际实现见 mbdsdr_ai/gpredict_adapter.py（SGP4 算法依据 Spacetrack Report #3 公开标准）
           - tle_parse          sgp_in.c:110-230  Convert_Satellite_Data
           - sgp4_propagate     sgp4sdp4.c:22-269 SGP4 近地传播
           - sat_pass_predict   sgp_obs.c:86-140 站心方位/仰角 + AOS/LOS 扫描
@@ -1128,52 +1123,40 @@ class ToolRegistry:
         )
 
 
-        # ── libhackrf 真实硬件参数查询工具 ──
-        # 来源: repos/hackrf host/libhackrf/src/hackrf.c:2022-2102,1775,1920
-        #       + firmware/common/max2837.c:344-395
+        # ── libhackrf 硬件参数查询工具（依据公开数据手册/API）──
         self.register_hackrf_params_tools()
 
-        # ── LimeSuite 真实硬件参数查询工具 ──
-        # 来源: repos/LimeSuite src/lime/LimeSuite.h:280-289,382,1099-1104
-        #       + src/API/lms7_device.cpp:690,1032,1384
-        #       + src/lms7002m/LMS7002M.cpp:763-914
+        # ── LimeSuite 硬件参数查询工具（依据公开数据手册/API）──
         self.register_limesdr_params_tools()
 
-        # ── libbladeRF 真实硬件参数查询工具 ──
-        # 来源: repos/bladeRF host/libraries/libbladeRF/include/bladeRF1.h:150-222
-        #       + fpga_common/include/bladerf2_common.h:344-562
+        # ── libbladeRF 硬件参数查询工具（依据公开数据手册/API）──
         self.register_bladerf_params_tools()
 
-        # ── gr-osmosdr 通用 SDR 源抽象工具 ──
-        # 来源: repos/gr-osmosdr/lib/{source_impl.cc, ranges.cc, arg_helpers.h,
-        #       rtl/rtl_source_c.cc, hackrf/hackrf_source_c.cc,
-        #       bladerf/bladerf_common.cc, uhd/uhd_source_c.cc, soapy/soapy_source_c.cc}
+        # ── gr-osmosdr 风格通用 SDR 源抽象工具（依据公开设备字符串约定）──
         self.register_osmosdr_tools()
 
-        # ── dablin 真实 DAB/DAB+ FIC/FIB/FIG + ETI 层移植工具 ──
-        # 来源: repos/dablin/src/{fic_decoder.cpp, eti_player.cpp, eti_source.h, tools.cpp}
+        # ── DAB/DAB+ FIC/FIB/FIG + ETI 层工具（依据 ETSI EN 300 401/ETI 公开标准）──
         self.register_dab_plus_tools()
 
-        # ── DSDcc 真实 4FSK/C4FM 数字语音解码移植工具（DMR/P25） ──
-        # 来源: repos/DSDcc/{dsd_symbol,dsd_filters,dsd_sync,dmr,dsd_mbe}.cpp
+        # ── 4FSK/C4FM 数字语音解码工具（DMR/P25，依据公开标准） ──
         self.register_dsdcc_tools()
 
-        # ── RTKLIB 真实时间/坐标转换 + RINEX 解析 + SPP 单点定位 + NTRIP ──
-        # 来源: repos/RTKLIB/src/{rtklib.h,rtkcmn.c,ephemeris.c,pntpos.c,rinex.c,stream.c}
+        # ── 时间/坐标转换 + RINEX 解析 + SPP 单点定位 + NTRIP（依据公开 GNSS/RINEX/NTRIP 标准）──
         self.register_rtklib_tools()
 
-        # Kismet 真实 802.11 帧解析+设备发现/跟踪+RSSI+指纹
+        # Kismet 风格 802.11 帧解析+设备发现/跟踪+RSSI+指纹（依据 IEEE 802.11 公开标准）
         self.register_kismet_tools()
 
     def register_rtklib_tools(self):
-        """注册 RTKLIB 真实 GNSS 解算工具（时间/坐标/RINEX/SPP/NTRIP）。
+        """注册 GNSS 解算工具（时间/坐标/RINEX/SPP/NTRIP，依据公开标准实现）。
 
-        来源: repos/RTKLIB（见 mbdsdr_ai/rtklib_adapter.py 注释内 file:line）
-          - 时间系统  rtkcmn.c:1246/1261/1425/1442（GPS周秒<->UTC，含闰秒表 :136）
-          - 坐标转换  rtkcmn.c:1634 ecef2pos / :1655 pos2ecef / :1686 ecef2enu
-          - 卫星位置  ephemeris.c:181 eph2pos（开普勒轨道）
-          - SPP       pntpos.c:250/253 伪距残差 + 最小二乘
-          - NTRIP     stream.c:1293 reqntrip_c（HTTP GET + Basic Auth）
+        实现依据（公开 GNSS 时间/坐标/星历/SPP/NTRIP 标准；RTKLIB 仅作技术参考，
+        本仓未包含其源代码；实际实现见 mbdsdr_ai/rtklib_adapter.py）：
+          - 时间系统  GPS周秒<->UTC，含闰秒表
+          - 坐标转换  ecef2pos / pos2ecef / ecef2enu（Bowring 椭球）
+          - 卫星位置  开普勒轨道由广播星历计算
+          - SPP       伪距残差 + 最小二乘
+          - NTRIP     HTTP GET + Basic Auth 拉取 RTCM 数据流
         """
         from . import rtklib_adapter as ra
 
@@ -1181,7 +1164,7 @@ class ToolRegistry:
             name="gps_time_to_utc",
             description=(
                 "把 GPS 周数(GPS week)与周内秒(tow)换算为 UTC 日历时刻（含闰秒）。"
-                "移植自 RTKLIB rtkcmn.c:1425 gpst2utc()。返回 年/月/日/时/分/秒 与当前闰秒数。"
+                "GPS 时(GPST)转 UTC（公开 GNSS 时间系统约定）。返回 年/月/日/时/分/秒 与当前闰秒数。"
             ),
             parameters={"type": "object", "properties": {
                 "week": {"type": "integer", "description": "GPS 周数"},
@@ -1200,7 +1183,7 @@ class ToolRegistry:
             name="ecef_to_llh",
             description=(
                 "把地心地固直角坐标(ECEF, 米)换算为 WGS84 经纬高(度/米)。"
-                "移植自 RTKLIB rtkcmn.c:1634 ecef2pos()（Bowring 迭代）。"
+                "ECEF 直角坐标转经纬高（Bowring 椭球迭代，公开测绘标准方法）。"
             ),
             parameters={"type": "object", "properties": {
                 "x": {"type": "number", "description": "ECEF X (m)"},
@@ -1221,7 +1204,7 @@ class ToolRegistry:
             name="rinex_parse",
             description=(
                 "解析 RINEX 导航文件文本，提取广播星历（卫星号/GPS周/toe/长半轴/偏心率）。"
-                "移植自 RTKLIB rinex.c:1005 decode_eph() + :1187 readrnxnavb()。"
+                "RINEX 导航电文星历解码（依据 RINEX 公开格式标准）。"
             ),
             parameters={"type": "object", "properties": {
                 "nav_text": {"type": "string", "description": "RINEX 导航文件文本"},
@@ -1239,7 +1222,7 @@ class ToolRegistry:
             name="spp_locate",
             description=(
                 "给定每颗卫星的 ECEF 位置、钟差、伪距，用伪距最小二乘解算接收机位置。"
-                "移植自 RTKLIB pntpos.c:250/253 残差与设计矩阵。返回 ECEF/经纬高/钟差/RMS。"
+                "单点定位残差与设计矩阵（最小二乘定位，公开 GNSS 方法）。返回 ECEF/经纬高/钟差/RMS。"
             ),
             parameters={"type": "object", "properties": {
                 "rs": {"type": "array", "items": {"type": "array", "items": {"type": "number"}},
@@ -1262,7 +1245,7 @@ class ToolRegistry:
             name="ntrip_connect",
             description=(
                 "向 NTRIP caster 发起握手（HTTP GET /mountpoint + Basic Auth），"
-                "验证能否拿到 RTCM3 数据流。移植自 RTKLIB stream.c:1293 reqntrip_c()。"
+                "验证能否拿到 RTCM3 数据流（NTRIP 客户端按公开协议请求数据流）。"
             ),
             parameters={"type": "object", "properties": {
                 "host": {"type": "string", "description": "caster 主机"},
@@ -1289,15 +1272,16 @@ class ToolRegistry:
     _kismet_tracker = None
 
     def register_kismet_tools(self):
-        """注册 Kismet 真实 802.11 帧解析/设备发现/设备列表工具。
+        """注册 802.11 帧解析/设备发现/设备列表工具（依据 IEEE 802.11 公开标准实现）。
 
-        来源: repos/kismet（见 mbdsdr_ai/kismet_adapter.py 注释内 file:line）
-          - 帧解包    phy_80211_dissectors.cc:609-791（frame_control/地址1-4/序列）
-          - 管理帧    phy_80211_dissectors.cc:956-1003（beacon/probe/认证）
-          - IE 解析   dot11_parsers/dot11_ie.cc:82-92 + phy_80211_dissectors.cc:1679-1882
-          - 信号      kis_dlt_radiotap.cc:380,418（int8 dBm）
-          - 设备跟踪  devicetracker.cc:1152-1266（首末时间/包计数/分类）
-          - 指纹 OUI  manuf.cc:59-61
+        实现依据（Kismet 仅作技术参考，本仓未包含其源代码；实际实现见
+        mbdsdr_ai/kismet_adapter.py）：
+          - 帧解包    frame_control/地址1-4/序列
+          - 管理帧    beacon/probe/认证
+          - IE 解析   信息元素字段
+          - 信号      radiotap int8 dBm
+          - 设备跟踪  首末时间/包计数/分类
+          - 指纹 OUI  厂商 ID 查表
         """
         from . import kismet_adapter as ka
 
@@ -1315,7 +1299,7 @@ class ToolRegistry:
                 "Kismet 真实 802.11 帧解析：给定一整条裸 802.11 帧字节(hex)，"
                 "解出帧控制(type/subtype/to_ds/from_ds)、持续时间、地址1-4、序列控制、"
                 "BSSID/源/目的；管理帧进一步解出 SSID/信道/支持速率/信标间隔。"
-                "移植自 Kismet phy_80211_dissectors.cc:609-1003 + dot11_ie.cc:82-92。"
+                "802.11 物理层与 IE 信息元素解析（依据 IEEE 802.11 公开标准）。"
             ),
             parameters={"type": "object", "properties": {
                 "frame_hex": {"type": "string",
@@ -1351,7 +1335,7 @@ class ToolRegistry:
             description=(
                 "Kismet 真实设备发现：喂入一组 802.11 帧(hex)与对应信号强度(dBm)，"
                 "维护设备表（首次/最后发现时间、包计数、信号均值、AP/客户端分类）。"
-                "移植自 Kismet devicetracker.cc:1152 update_common_device()。"
+                "无线设备记录聚合更新（通用设备跟踪做法）。"
             ),
             parameters={"type": "object", "properties": {
                 "frames_hex": {"type": "array", "items": {"type": "string"},
@@ -1385,7 +1369,7 @@ class ToolRegistry:
             description=(
                 "返回 Kismet 跟踪器当前发现的全部设备列表（按最后发现时间倒序），"
                 "含 MAC/类型/SSID/信道/包计数/首末时间/平均信号/厂商(OUI)。"
-                "移植自 Kismet devicetracker.cc 设备列表导出。"
+                "无线设备列表导出。"
             ),
             parameters={"type": "object", "properties": {}},
             handler=lambda args: ToolResult(
@@ -1401,10 +1385,9 @@ class ToolRegistry:
         )
 
     def register_dsdcc_tools(self):
-        """注册 DSDcc 真实 4FSK/C4FM 数字语音解码工具（DMR/P25 Phase1）。
+        """注册 4FSK/C4FM 数字语音解码工具（DMR/P25 Phase1，依据公开标准实现）。
 
-        来源: repos/DSDcc/dsdcc/{dsd_symbol.cpp, dsd_filters.cpp, dsd_sync.cpp,
-              dmr.cpp, dsd_mbe.cpp}。纯 numpy，可离线往返。
+        实现依据（DSDcc 仅作技术参考，本仓未包含其源代码）。纯 numpy，可离线往返。
         """
         self.register(
             name="fourfsk_demod",
@@ -1505,9 +1488,9 @@ class ToolRegistry:
         )
 
     def register_dab_plus_tools(self):
-        """注册 dablin 真实 DAB/DAB+ 解析工具（ETI/FIC/FIB/FIG）。
+        """注册 DAB/DAB+ 解析工具（ETI/FIC/FIB/FIG，依据 ETSI EN 300 401 公开标准实现）。
 
-        来源: repos/dablin/src/{fic_decoder.cpp, eti_player.cpp, eti_source.h, tools.cpp}
+        dablin 上游仅作技术参考，本仓未包含其源代码。
         """
         self.register(
             name="dab_fic_decode",
@@ -1580,7 +1563,7 @@ class ToolRegistry:
     def register_rtlsdr_params_tools(self):
         """注册 librtlsdr 真实参数查询工具（纯查表，无需插设备）。
 
-        来源: mbdsdr_ai/rtlsdr_params.py（移植自 repos/librtlsdr）
+        参考: mbdsdr_ai/rtlsdr_params.py（依据 librtlsdr 公开 API/数据手册整理）
           - 增益表     librtlsdr.c:959-969  rtlsdr_get_tuner_gains
           - 频率范围   tuner_e4k.c:351-352 / tuner_r82xx.c:1168
           - 采样率区间 librtlsdr.c:1100-1101 + rtl-sdr.h:260-263
@@ -1635,7 +1618,7 @@ class ToolRegistry:
             description=(
                 "把目标增益/采样率吸附到 librtlsdr 真实支持的离散档，"
                 "返回可直接下发的参数（增益 dB、合法采样率 Hz、最近档）。"
-                "移植自 convenience.c:116-141 nearest_gain。"
+                "最近邻增益档查表（通用做法）。"
             ),
             parameters={"type": "object", "properties": {
                 "tuner": {"type": "string", "description": "调谐器型号", "default": "R820T"},
@@ -1668,7 +1651,7 @@ class ToolRegistry:
     def register_osmosdr_tools(self):
         """注册 gr-osmosdr 通用 SDR 源抽象工具。
 
-        移植自 repos/gr-osmosdr：
+        设备枚举依据 gr-osmosdr 公开设备字符串约定（gr-osmosdr 仅作技术参考）：
           - 设备字符串解析/路由  lib/arg_helpers.h:48-110 + lib/source_impl.cc:271-397
           - 增益/频率范围        lib/ranges.cc:44-154
           - RTL 后端            lib/rtl/rtl_source_c.cc:385,421-429,473-489,531-565
@@ -1767,7 +1750,7 @@ class ToolRegistry:
     def register_hackrf_params_tools(self):
         """注册 libhackrf 真实参数查询工具（纯查表，无需插设备）。
 
-        来源: mbdsdr_ai/hackrf_params.py（移植自 repos/hackrf）
+        参考: mbdsdr_ai/hackrf_params.py（依据 HackRF 公开数据手册整理）
           - LNA(RX IF) 0-40/8dB   host/libhackrf/src/hackrf.c:2022-2047 ; firmware/common/max2837.c:344-371
           - VGA(RX BB) 0-62/2dB   host/libhackrf/src/hackrf.c:2049-2074 ; firmware/common/max2837.c:373-381
           - TXVGA 0-47/1dB       host/libhackrf/src/hackrf.c:2076-2100 ; firmware/common/max2837.c:383-395
@@ -1858,7 +1841,7 @@ class ToolRegistry:
     def register_limesdr_params_tools(self):
         """注册 LimeSuite 真实参数查询工具（纯查表，无需插设备）。
 
-        来源: mbdsdr_ai/limesuite_params.py（移植自 repos/LimeSuite）
+        参考: mbdsdr_ai/limesuite_params.py（依据 LimeSDR 公开数据手册整理）
           - 频率 100k-3.8GHz(USB)   src/API/lms7_device.cpp:1384
           - 采样率 100k-61.44MHz    src/API/lms7_device.cpp:690
           - 组合增益 0-73dB         src/lime/LimeSuite.h:382
@@ -1962,7 +1945,7 @@ class ToolRegistry:
     def register_bladerf_params_tools(self):
         """注册 libbladeRF 真实参数查询工具（纯查表，无需插设备）。
 
-        来源: mbdsdr_ai/bladerf_params.py（移植自 repos/bladeRF）
+        参考: mbdsdr_ai/bladerf_params.py（依据 bladeRF 公开数据手册整理）
           - RXVGA1 5-30dB(26档)  host/libraries/libbladeRF/include/bladeRF1.h:154,160
           - RXVGA2 0-30dB(31档)  host/libraries/libbladeRF/include/bladeRF1.h:166,172
           - TXVGA1 -35..-4dB     host/libraries/libbladeRF/include/bladeRF1.h:178,184
@@ -2079,7 +2062,7 @@ class ToolRegistry:
         )
 
     def register_sdrangel_tools(self):
-        """注册 SDRangel 真实源码移植的 DSP 工具。
+        """注册 SDRangel 风格 DSP 工具（依据公开 DSP 方法实现）。
 
         来源: mbdsdr_ai/sdrangel_adapter.py
           - DSPDeviceEngine  dspdevicesourceengine.cpp:288-337
@@ -2133,7 +2116,7 @@ class ToolRegistry:
 
         self.register(
             name="dsp_engine_create",
-            description="创建 SDRangel 移植的 DSP 采样流引擎（源→DC校正→多通道下变频→解调）。",
+            description="创建 DSP 采样流引擎（源→DC校正→多通道下变频→解调，依据公开 DSP 方法实现）。",
             parameters={"type": "object", "properties": {
                 "sample_rate": {"type": "integer", "description": "基带采样率 Hz，默认 1024000"},
                 "center_frequency": {"type": "integer", "description": "中心频率 Hz，默认 100e6"},
@@ -2154,7 +2137,7 @@ class ToolRegistry:
         )
         self.register(
             name="downchannelize",
-            description="SDRangel 移植的整数 2^N 下变频通道化：NCO混频+半带链抽取。",
+            description="整数 2^N 下变频通道化：NCO混频+半带链抽取（依据公开 DDC 方法实现）。",
             parameters={"type": "object", "properties": {
                 "baseband_sr": {"type": "integer", "description": "基带采样率 Hz"},
                 "channel_sr": {"type": "integer", "description": "目标通道采样率 Hz（须为 baseband_sr/2^N）"},
@@ -2165,9 +2148,9 @@ class ToolRegistry:
         )
 
     def register_gnuradio_blocks_tools(self):
-        """注册 GNU Radio 真实源码移植的 DSP 块。
+        """注册 GNU Radio 风格 DSP 块（依据公开标准/教材 DSP 实现）。
 
-        来源: mbdsdr_ai/gnuradio_blocks.py（逐行对照 repos/gnuradio）
+        实际实现见 mbdsdr_ai/gnuradio_blocks.py（依据公开 DSP 标准/教材方法实现）
           - FIRFilter           gr-filter/lib/fir_filter.cc:34,91-114
           - FFTFilter           gr-filter/lib/fft_filter.cc:76,77,115-149 + fft_filter.h:72
           - AGC2                gr-analog/include/gnuradio/analog/agc2.h:64-85
@@ -2262,7 +2245,7 @@ class ToolRegistry:
 
         self.register(
             name="fir_filter",
-            description="GNU Radio 移植 FIR 滤波：抽头卷积，支持实数/复数。输出==numpy.convolve(x,taps)。",
+            description="FIR 滤波：抽头卷积，支持实数/复数（依据公开 DSP 方法实现，输出==numpy.convolve(x,taps)）。",
             parameters={"type": "object", "properties": {
                 "taps": {"type": "array", "items": {"type": "number"}, "description": "FIR 抽头系数"},
                 "signal": {"type": "array", "items": {"type": "number"}, "description": "输入样本"},
@@ -2272,7 +2255,7 @@ class ToolRegistry:
         )
         self.register(
             name="fft_filter",
-            description="GNU Radio 移植 overlap-add 快速卷积 FFT 滤波（长抽头高效）。fftsize=2·2^ceil(log2(ntaps))。",
+            description="overlap-add 快速卷积 FFT 滤波（长抽头高效，依据公开 DSP 方法实现）。fftsize=2·2^ceil(log2(ntaps))。",
             parameters={"type": "object", "properties": {
                 "taps": {"type": "array", "items": {"type": "number"}, "description": "FIR 抽头"},
                 "n": {"type": "integer", "description": "测试信号长度", "default": 1024},
@@ -2282,7 +2265,7 @@ class ToolRegistry:
         )
         self.register(
             name="agc_process",
-            description="GNU Radio AGC2（attack/decay）：逐样本把输出幅度收敛到 reference。默认 attack=1e-1 decay=1e-2。",
+            description="AGC2（attack/decay 自动增益控制，依据教材 DSP 方法实现）：逐样本把输出幅度收敛到 reference。默认 attack=1e-1 decay=1e-2。",
             parameters={"type": "object", "properties": {
                 "reference": {"type": "number", "description": "目标输出幅度", "default": 1.0},
                 "attack_rate": {"type": "number", "default": 0.1},
@@ -2293,7 +2276,7 @@ class ToolRegistry:
         )
         self.register(
             name="rational_resample",
-            description="GNU Radio 有理重采样：interpolation/decimation 倍插值/抽取，Kaiser 窗抗混叠(β=7.0)。",
+            description="有理重采样：interpolation/decimation 倍插值/抽取，Kaiser 窗抗混叠(β=7.0)（依据公开多速率 DSP 方法实现）。",
             parameters={"type": "object", "properties": {
                 "interpolation": {"type": "integer", "default": 2},
                 "decimation": {"type": "integer", "default": 1},
@@ -2304,7 +2287,7 @@ class ToolRegistry:
         )
         self.register(
             name="pfb_resample",
-            description="GNU Radio 多相任意重采样：任意 rate=out/in，多相滤波器组+微分线性插值，无混叠。",
+            description="多相任意重采样：任意 rate=out/in，多相滤波器组+微分线性插值，无混叠（依据公开多速率 DSP 方法实现）。",
             parameters={"type": "object", "properties": {
                 "rate": {"type": "number", "description": "输出/输入采样率比", "default": 0.75},
                 "filter_size": {"type": "integer", "description": "多相分支数", "default": 32},

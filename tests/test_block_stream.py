@@ -1,7 +1,6 @@
-"""块流式架构确定性测试。
-
-对照 mbdsdr_ai/block_stream.py（上游 gnuradio-runtime/lib/{block,buffer,flowgraph}.cc）。
-"""
+# SPDX-License-Identifier: MIT
+"""Deterministic tests for the block-stream architecture.
+非硬件 / NOT HARDWARE: all signals are synthetic."""
 import numpy as np
 import pytest
 
@@ -51,7 +50,7 @@ def test_topological_sort_order():
 
 
 def test_loop_detected():
-    """有环的图必须抛错（对应 flowgraph.cc:441）。"""
+    """A graph with a loop must raise."""
     a = Block("a", 1, 1)
     b = Block("b", 1, 1)
     fg = FlowGraph()

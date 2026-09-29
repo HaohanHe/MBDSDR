@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """GatedRecorder / ChannelDemod 离线测试：只在有信号时录干净分段。"""
 import os

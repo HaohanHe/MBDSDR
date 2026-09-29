@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai.sat_tracker 闭环跟踪器单元测试
 ==========================================

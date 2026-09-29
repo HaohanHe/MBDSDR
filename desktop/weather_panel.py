@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 桌面端 - 气象卫星云图面板 (WeatherPanel)
 ==================================================

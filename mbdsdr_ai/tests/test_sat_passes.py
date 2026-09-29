@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 sat_passes 模块自测：用已知 ISS TLE 预测一次过境，验证 rise/set/中天 与时长合理。
 

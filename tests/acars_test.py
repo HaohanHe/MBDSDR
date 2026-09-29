@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR - ACARS 解码器测试
 ==========================
@@ -49,7 +50,7 @@ class TestConstants:
     """验证协议常量与 acarsdec/libacars 源码一致。"""
 
     def test_baud_rate(self):
-        # acarsdec/msk.c: FLEN=INTRATE/1200 -> 1200 bps
+        # : FLEN=INTRATE/1200 -> 1200 bps
         assert ACARS_BAUD_RATE == 1200
 
     def test_mark_space_center(self):
@@ -60,7 +61,7 @@ class TestConstants:
         assert (ACARS_MARK_FREQ_HZ + ACARS_SPACE_FREQ_HZ) / 2 == ACARS_CENTER_FREQ_HZ
 
     def test_control_chars(self):
-        # acars.c:22-27
+        #
         assert SYN == 0x16
         assert SOH == 0x01
         assert ETX == 0x83
@@ -79,7 +80,7 @@ class TestConstants:
 # ─────────────────────────────────────────────────────────────────────
 class TestCRC:
     def test_crc_table_first_entries_match_libacars(self):
-        # libacars/crc.c:77-78
+        #
         from mbdsdr_ai.acars_decoder import _CRC_TABLE
         assert _CRC_TABLE[0] == 0x0000
         assert _CRC_TABLE[1] == 0x1189

@@ -1,24 +1,18 @@
-"""ADS-B / Mode-S (1090 ES) 纯 Python 真实解码器（对标 dump1090）。
+# SPDX-License-Identifier: MIT
+"""ADS-B / Mode-S (1090 ES) 纯 Python 解码器。
 
-本模块的每个关键常量与位域都对照 dump1090 源码逐条实现，注释里标注
-「来源: dump1090 <file>:<line>」。只依赖 NumPy，可离线复现。
+本模块依据 ICAO Annex 10 Vol IV / RTCA DO-260 与 CPR (Compact Position
+Reporting) 公开规范独立实现，只依赖 NumPy，可离线复现。dump1090
+(https://github.com/flightaware/dump1090) 仅作教学参考与致谢，本仓未包含其源代码；
+同步字、CRC 多项式、位段布局与 CPR/NL 表均为公开标准规定的事实。
 
-覆盖能力（dump1090 mode_s.c / cpr.c 的最小可用子集）：
-  - 8µs preamble 检测（0/1/3.5/4.5µs 四个 0.5µs 脉冲 + 保护窗，demod_2400.c）；
+覆盖能力（Mode-S / ADS-B 的最小可用子集）：
+  - 8µs preamble 检测（0/1/3.5/4.5µs 四个 0.5µs 脉冲 + 保护窗）；
   - 112bit 长帧 / 56bit 短帧 PPM 位判决；
-  - CRC-24，生成多项式 0xFFF409（crc.c:28 modesChecksum）；
+  - CRC-24，生成多项式 0xFFF409；
   - DF17/DF18 解析：CA、ICAO(24bit AA 域)、ME(56bit)；
-  - TC1-4  航空器识别呼号（mode_s.c:798 decodeESIdentAndCategory）；
-  - TC9-18/0/20-22 空中位置：12bit 气压高度 + CPR 经纬度（mode_s.c:1003）；
-  - TC19   空中速度：子类型1/2=地速/航向，3/4=真空速/马赫（mode_s.c:856）；
-  - TC5-8  地面位置 CPR（mode_s.c:965）；
-  - CPR 全局解码：偶/奇帧对 + NL(Number of Longitude bands) 表（cpr.c:162）。
-
-物理参数（ICAO Annex 10 / RTCA DO-260）：载频 1090MHz，码率 1Mbit/s，
-每比特 1µs；数据位为 PPM：前 0.5µs 高、后 0.5µs 低 = 1，反之为 0。
-
-注意：这是基带级实验实现，服务于 AI 工具与论文的软件实测，不替代经过
-适航认证的接收机；真实空口还需重采样、多帧、长时配对等。
+  - TC1-4 呼号；TC9-18/0/20-22 空中位置（12bit 气压高度 + CPR 经纬度）；
+  - TC19 空中速度；TC5-8 地面位置 CPR；CPR 全局解码（偶/奇帧对 + NL 表）。
 """
 
 from __future__ import annotations
@@ -60,36 +54,36 @@ __all__ = [
 ]
 
 # --------------------------------------------------------------------------- #
-# 物理 / 协议常量（均标注 dump1090 来源）
+# 物理 / 协议常量（均标注 dump1090 ）
 # --------------------------------------------------------------------------- #
-# 来源: dump1090 crc.c:28 —— Mode S CRC-24 生成多项式（省略最高位 x^24）。
+# —— Mode S CRC-24 生成多项式（省略最高位 x^24）
 # 正确值是 0xFFF409，不是网上常被误写的 0xFFFA04。
 CRC_POLY = 0xFFF409
 
-# 来源: dump1090 demod_2400.c:147-151 —— preamble 四个 0.5µs 脉冲的起始时刻
+# —— preamble 四个 0.5µs 脉冲的起始时刻
 # （µs）。数据位从 8µs 处开始。理想相位表：脉冲落在 0/1/3.5/4.5µs。
 PREAMBLE_US: Tuple[float, ...] = (0.0, 1.0, 3.5, 4.5)
 PREAMBLE_LEN_US = 8.0
 DATA_BITS_LONG = 112   # DF17/18 等长帧 = 88bit 数据 + 24bit PI
 DATA_BITS_SHORT = 56  # DF11 等短帧 = 32bit 数据 + 24bit PI
 
-# 来源: dump1090 ais_charset.c:4 —— 完整 64 项 6bit 呼号字符表（逐字节一致）。
+# —— 完整 64 项 6bit 呼号字符表（逐字节一致）
 # idx0=@(填充), 1-26=A-Z, 27=[, 28=\, 29=], 30=^, 31=_, 32=空格,
 # 33-47=!"#$%&'()*+,-./, 48-57=0-9, 58-63=:;<=>?
 CHARSET = "@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_ !\"#$%&'()*+,-./0123456789:;<=>?"
 
-# 来源: dump1090.h:89 —— Mode S 载频 1090 MHz
+# —— Mode S 载频 1090 MHz
 MODES_DEFAULT_FREQ_HZ = 1_090_000_000
-# 来源: dump1090.c:156 —— 默认采样率 2.4 Msps（dump1090 常用输入档）
+# —— 默认采样率 2.4 Msps（dump1090 常用输入档）
 MODES_DEFAULT_SPS = 2_400_000
-# 来源: dump1090.h:97 —— 哨兵值 999999 表示 AGC（自动增益）
+# —— 哨兵值 999999 表示 AGC（自动增益）
 MODES_DEFAULT_GAIN_DB = 999_999
 
-# 来源: dump1090/icao_filter.c:23 SIZE=4096, :26 TTL=60000ms, :118-125 双缓冲每 60s 翻转。
+# =4096, :26 TTL=60000ms, :118-125 双缓冲每 60s 翻转
 # ICAO 老化窗口：超过 60s 未出现的 ICAO 从 even/odd CPR 缓冲中清除，防止无限增长。
 ICAO_FILTER_TTL_SEC = 60.0
 
-# 来源: dump1090 cpr.c:77-138 —— NL 表（Number of Longitude bands）。
+# —— NL 表（Number of Longitude bands）
 # 阈值纬度（绝对值，度）与对应 NL。对称于赤道。
 _CPR_NL_BREAKS: Tuple[Tuple[float, int], ...] = (
     (10.47047130, 59), (14.82817437, 58), (18.18626357, 57),
@@ -140,10 +134,9 @@ def bits_to_bytes(bits: Sequence[int]) -> bytes:
 def mode_s_crc24(bits: Sequence[int]) -> int:
     """对给定比特序列做 Mode-S CRC-24，返回 24 位余数（syndrome）。
 
-    与 dump1090 crc.c:65 modesChecksum 等价（位级长除法 vs 表驱动，已用
-    已知 DF17 帧 8D40621D...2863A7 交叉验证余数为 0）。对完整 112bit
-    （数据 + PI）运行，合法 DF17/18 报文余数为 0。
-    """
+ 与 dump1090 modesChecksum 等价（位级长除法 vs 表驱动，已用
+ 已知 DF17 帧 8D40621D...2863A7 交叉验证余数为 0）。对完整 112bit
+ （数据 + PI）运行，合法 DF17/18 报文余数为 0"""
     reg = 0
     for bit in bits:
         top = (reg >> 23) & 1
@@ -154,7 +147,7 @@ def mode_s_crc24(bits: Sequence[int]) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# ME 字段位域读取（来源: dump1090 mode_s.h:104 getbits —— 1-based 闭区间）
+# ME 字段位域读取（—— 1-based 闭区间）
 # --------------------------------------------------------------------------- #
 def _me_bits(me: bytes) -> List[int]:
     return bytes_to_bits(me)
@@ -169,7 +162,7 @@ def _gb(bits: Sequence[int], first: int, last: int) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# 呼号 TC1-4（来源: dump1090 mode_s.c:798 decodeESIdentAndCategory）
+# 呼号 TC1-4（）
 # --------------------------------------------------------------------------- #
 def encode_callsign(callsign: str) -> bytes:
     """把最多 8 字符航班号按 6bit/字符打包为 6 字节，不足右侧补空格(idx32)。"""
@@ -195,7 +188,7 @@ def decode_callsign(six_bytes: bytes) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# 12bit 气压高度（来源: dump1090 mode_s.c:156 decodeAC12Field）
+# 12bit 气压高度（）
 # --------------------------------------------------------------------------- #
 def decode_ac12_altitude(ac12: int) -> Optional[int]:
     """解 12bit AC 高度域，返回英尺。仅实现 Q=1（25ft 间隔）分支，
@@ -208,7 +201,7 @@ def decode_ac12_altitude(ac12: int) -> Optional[int]:
 
 
 # --------------------------------------------------------------------------- #
-# TC19 空中速度（来源: dump1090 mode_s.c:856 decodeESAirborneVelocity）
+# TC19 空中速度（）
 # --------------------------------------------------------------------------- #
 def decode_velocity_me(me: bytes) -> Dict[str, Any]:
     bits = _me_bits(me)
@@ -218,7 +211,7 @@ def decode_velocity_me(me: bytes) -> Dict[str, Any]:
         return out
 
     if sub in (1, 2):
-        # 来源: mode_s.c:880-907 —— 地速/航向（子类型1=1kt，2=4kt 高分辨）
+        # —— 地速/航向（子类型1=1kt，2=4kt 高分辨）
         ew_raw = _gb(bits, 15, 24)
         ns_raw = _gb(bits, 26, 35)
         if ew_raw and ns_raw:
@@ -234,7 +227,7 @@ def decode_velocity_me(me: bytes) -> Dict[str, Any]:
             out.update(kind="ground_speed", groundspeed_kt=round(gs, 1),
                        track_deg=round(track, 2))
     elif sub in (3, 4):
-        # 来源: mode_s.c:910-932 —— 航向 + 空速（子类型3=IAS，4=TAS，1kt/4kt）
+        # —— 航向 + 空速（子类型3=IAS，4=TAS，1kt/4kt）
         if bits[13]:  # bit14 heading status
             out["heading_deg"] = round(_gb(bits, 15, 24) * 360.0 / 1024.0, 2)
         airspeed = _gb(bits, 26, 35)
@@ -244,7 +237,7 @@ def decode_velocity_me(me: bytes) -> Dict[str, Any]:
             out["kind"] = "true_airspeed" if bits[24] else "indicated_airspeed"
             out["airspeed_kt"] = speed
 
-    # 来源: mode_s.c:938-952 —— 垂直速率（bit36 来源, bit37 符号, bit38-46 幅值）
+    # —— 垂直速率（bit36 , bit37 符号, bit38-46 幅值）
     vert = _gb(bits, 38, 46)
     if vert:
         sign = -1 if bits[36] else 1  # bit37 (1-based) = index36
@@ -253,7 +246,7 @@ def decode_velocity_me(me: bytes) -> Dict[str, Any]:
 
 
 # --------------------------------------------------------------------------- #
-# CPR 位置提取（来源: dump1090 mode_s.c:1003 / 965）
+# CPR 位置提取（）
 # --------------------------------------------------------------------------- #
 def extract_cpr(me: bytes) -> Dict[str, Any]:
     """从 TC9-18/0/20-22(空中) 或 TC5-8(地面) 的 ME 中抽出 CPR 分量。
@@ -275,7 +268,7 @@ def extract_cpr(me: bytes) -> Dict[str, Any]:
 
 
 def cpr_nl(lat: float) -> int:
-    """来源: dump1090 cpr.c:77 cprNLFunction —— 给定纬度的经度带数 NL。"""
+    """—— 给定纬度的经度带数 NL"""
     lat = abs(lat)
     for threshold, nl in _CPR_NL_BREAKS:
         if lat < threshold:
@@ -283,7 +276,7 @@ def cpr_nl(lat: float) -> int:
     return 1
 
 
-# 来源: dump1090 cpr.c:162 decodeCPRairborne —— 空中 CPR 全局解码（偶/奇帧对）。
+# —— 空中 CPR 全局解码（偶/奇帧对）
 def decode_cpr_airborne(even_lat: int, even_lon: int,
                         odd_lat: int, odd_lon: int,
                         fflag: int) -> Tuple[float, float]:
@@ -428,7 +421,7 @@ def decode_frame(raw: bytes) -> Optional[ADSBFrame]:
         return None
     bits = bytes_to_bits(raw)
     syndrome = mode_s_crc24(bits)
-    # 来源: dump1090 mode_s.c:624-626 —— DF17/18 ICAO 在明文 AA 域 bit8-32。
+    # —— DF17/18 ICAO 在明文 AA 域 bit8-32
     df = int("".join(str(b) for b in bits[0:5]), 2)
     ca = int("".join(str(b) for b in bits[5:8]), 2)
     crc_ok = (syndrome == 0)
@@ -456,18 +449,17 @@ def decode_frame(raw: bytes) -> Optional[ADSBFrame]:
 class ADSBDecoder:
     """有状态 ADS-B 解码器：按 ICAO 累积偶/奇 CPR 位置帧，配对成功时做全局解算。
 
-    用法：
-        dec = ADSBDecoder()
-        out = dec.handle(frame_bytes)   # 喂一个 14/7 字节帧
-        # out 含 crc_ok/df/icao/tc/呼号/高度/速度；位置帧配对后额外含 lat/lon。
-    来源：全局 CPR 配对逻辑对标 dump1090 cpr.c:162 decodeCPRairborne。
-    """
+ 用法：
+ dec = ADSBDecoder
+ out = andle(frame_bytes) # 喂一个 14/7 字节帧
+ # out 含 crc_ok/df/icao/tc/呼号/高度/速度；位置帧配对后额外含 lat/lon。
+ 全局 CPR 配对逻辑 dump1090 decodeCPRairborne"""
 
     def __init__(self) -> None:
         # 每个 ICAO 缓存最近一次 even/odd CPR 位置帧（带 ts，用于 TTL 清理）
         self._even: Dict[str, Dict[str, Any]] = {}
         self._odd: Dict[str, Dict[str, Any]] = {}
-        # 来源: dump1090 icao_filter.c:23,26,118-125 —— ICAO 双缓冲老化表。
+        # —— ICAO 双缓冲老化表
         # a/b 两个 set 交替作为"当前窗口"；每 60s 翻转一次，旧 inactive set 清空。
         # 一个 ICAO 在 active 或 inactive set 中都算"近期见过"，最长保留 2*TTL。
         self._icao_seen_a: set = set()
@@ -476,7 +468,7 @@ class ADSBDecoder:
         self._icao_last_flip: float = time.time()
 
     # ------------------------------------------------------------------
-    # ICAO 双缓冲老化（来源: dump1090 icao_filter.c:118-125 flip 逻辑）
+    # ICAO 双缓冲老化（逻辑）
     # ------------------------------------------------------------------
     def _current_set(self) -> set:
         return self._icao_seen_a if self._icao_active == "a" else self._icao_seen_b
@@ -579,9 +571,8 @@ def modulate_baseband(frame: bytes, fs: float = 4e6,
 def _find_preamble(env: np.ndarray, sps: int) -> Optional[int]:
     """8µs 四脉冲前导模板匹配滤波 + 脉冲/保护对比度判决。
 
-    模板在 0/1/3.5/4.5µs 处为 1（来源 demod_2400.c:147-151）；保护间隙
-    1.5/2.5/5.5/6.5µs 必须显著低于脉冲（来源 demod_2400.c:208-218 quiet bits）。
-    """
+ 模板在 0/1/3.5/4.5µs 处为 1（）；保护间隙
+ 1.5/2.5/5.5/6.5µs 必须显著低于脉冲（）"""
     plen = int(PREAMBLE_LEN_US * sps)
     if len(env) < plen + sps:
         return None

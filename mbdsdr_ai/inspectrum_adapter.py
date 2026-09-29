@@ -1,17 +1,18 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI - inspectrum 真实源码移植适配器
+MBDSDR AI - inspectrum 适配器
 ==========================================
 inspectrum_adapter.py
 
 把 inspectrum (https://github.com/miek/inspectrum) 的频谱游标测量引擎从 C++/Qt
-移植为纯 numpy。inspectrum 的核心是「一对游标」：
+以纯 numpy。inspectrum 的核心是「一对游标」：
   * 垂直游标（时间轴）：两个样本位置 → 持续时间 / 周期 / 占空比
   * 水平游标（频率轴）：两个 bin 位置 → 频率差 / 带宽
 
 坐标换算（来源）：
-  * src/plotview.cpp:526-527  startTime = sampleRange.min / sampleRate
+  * src/  startTime = sampleRange.min / sampleRate
                                stopTime  = sampleRange.max / sampleRate
-  * src/spectrogramplot.cpp:94 bwPerPixel = sampleRate / plotHeight
+  * src/ bwPerPixel = sampleRate / plotHeight
                                （即每 bin 频率分辨率 = sampleRate / fft_size）
   * src/util.h  range_t.length() = maximum - minimum  （游标区间长度）
 
@@ -50,8 +51,8 @@ class CursorMeasurement:
 class InspectrumMeasurer:
     """inspectrum 风格频谱/时间游标测量引擎。
 
-    sample_rate : 采样率 Hz（plotview.cpp:526 time = sample / sampleRate）
-    fft_size    : FFT 点数（spectrogramplot.cpp:94 bin 分辨率 = sampleRate/fft_size）
+    sample_rate : 采样率 Hz（ time = sample / sampleRate）
+    fft_size    : FFT 点数（ bin 分辨率 = sampleRate/fft_size）
     """
 
     def __init__(self, sample_rate: float, fft_size: int = 1024):
@@ -60,7 +61,7 @@ class InspectrumMeasurer:
 
     # ── 频率轴：bin ↔ Hz ──────────────────────────────────────────────
     def bin_to_hz(self, bin_idx: float) -> float:
-        """bin 索引 → 频率偏移 Hz。spectrogramplot.cpp:94 bwPerPixel。"""
+        """bin 索引 → 频率偏移 Hz。 bwPerPixel。"""
         return (bin_idx - self.fft_size / 2.0) * (self.sample_rate / self.fft_size)
 
     def hz_to_bin(self, freq_offset: float) -> float:
@@ -68,7 +69,7 @@ class InspectrumMeasurer:
 
     # ── 时间轴：样本 ↔ 秒 ────────────────────────────────────────────
     def samples_to_seconds(self, n_samples: float) -> float:
-        """plotview.cpp:526  time = sampleRange / sampleRate。"""
+        """  time = sampleRange / sampleRate。"""
         return n_samples / self.sample_rate
 
     # ── 游标对 → 区间长度（util.h range_t.length()）──────────────────
@@ -175,7 +176,7 @@ def register_inspectrum_tools(registry) -> None:
             m = InspectrumMeasurer(sr, fft_size)
             out = m.measure_bandwidth_half_power(f, p, peak_bin,
                                                   level_db=float(args.get("level_db", -3.0)))
-            out["source"] = "inspectrum spectrogramplot.cpp:94 / plotview.cpp:526"
+            out["source"] = "inspectrum  / "
             return ToolResult(True, json.dumps(out, ensure_ascii=False), data=out)
         except Exception as e:
             return ToolResult(False, f"带宽测量失败: {e}")
@@ -189,7 +190,7 @@ def register_inspectrum_tools(registry) -> None:
         try:
             m = InspectrumMeasurer(sr)
             out = m.measure_period(starts)
-            out["source"] = "inspectrum plotview.cpp:526 垂直游标测周期"
+            out["source"] = "inspectrum  垂直游标测周期"
             return ToolResult(True, json.dumps(out, ensure_ascii=False), data=out)
         except Exception as e:
             return ToolResult(False, f"周期测量失败: {e}")

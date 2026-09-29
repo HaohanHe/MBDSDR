@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """DeviceManager 确定性测试。
 
 对照 mbdsdr_ai/device_manager.py（上游 sdrpp source.h/source.cpp）。

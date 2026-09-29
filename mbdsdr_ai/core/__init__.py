@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR Core —— Headless-first 纯 Python 控制面
 =================================================

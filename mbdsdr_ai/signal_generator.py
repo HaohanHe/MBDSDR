@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 测试信号发生器（Signal Generator / Noise Source）
 ====================================================

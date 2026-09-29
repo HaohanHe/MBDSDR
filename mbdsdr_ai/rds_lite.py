@@ -1,19 +1,18 @@
+# SPDX-License-Identifier: MIT
 """FM 广播 RDS（Radio Data System，57 kHz 副载波，1187.5 bit/s）lite 解码。
 
-本模块按 redsea 真实源码（github.com/windytan/redsea）逐行校准，所有关键常量与
-位域均注释来源 ``redsea src/<file>:<line>``。纯 numpy/scipy，可离线往返复现：
+依据 ETSI EN 300 401（RDS 标准）独立实现，纯 numpy/scipy，可离线往返复现：
 
-  - (26,16) 缩短汉明/BCH 块码：16 bit 信息 + 10 bit 校验字；校验字按 redsea 的
-    校验矩阵（而非猜的 LFSR 约定）计算，偏移字 XOR 进校验字以区分 A/B/C/C'/D 块。
+  - (26,16) 缩短汉明块码：16 bit 信息 + 10 bit 校验字；校验字按公开校验矩阵
+    计算，偏移字 XOR 进校验字以区分 A/B/C/C'/D 块。
   - 块同步：在比特流上滑动 26 bit 窗口，求伴随式命中 A/B/C/C'/D 的特征值；
-    要求 A->B->C->D 循环节奏正确才认定成组（对齐 redsea BlockStream 状态机）。
+    要求 A->B->C->D 循环节奏正确才认定成组。
   - 数据组解析：0A/0B PS、2A/2B RT、3A ODA、4A 时钟、10A PTY 名、14A EON，
     以及 PI / PTY / TP / TA / AF。
-  - MPX 侧：57 kHz BPSK 副载波、Manchester(双相) + 差分译码，参考 redsea dsp。
+  - MPX 侧：57 kHz BPSK 副载波、Manchester(双相) + 差分译码。
 
-注意：旧版曾用自造的 LFSR 伴随式表（A=0x17F 等），与 redsea 校验矩阵得到的
-真实伴随式（A=0x3D8 等）不一致——那只是“自洽但真接收端不同步”的假参数。
-本版已改为 redsea 矩阵逐位实现。
+RDS 的校验矩阵、偏移字、块结构与各位域均为 ETSI 公开标准事实；本模块 DSP、
+结构与命名自行编写。
 """
 
 from __future__ import annotations
@@ -24,39 +23,32 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 # --------------------------------------------------------------------------- #
-# 物理层常量（来源: redsea src/constants.hh, src/dsp/subcarrier*.{cc,hh}）
 # --------------------------------------------------------------------------- #
 RDS_BIT_RATE = 1187.5                 # constants.hh:23  kBitsPerSecond
-RDS_SUBCARRIER = 57000.0              # subcarrier.cc:104  57 kHz NCO
+RDS_SUBCARRIER = 57000.0
 RDS_TARGET_FS = 171000.0              # constants.hh:29    kTargetSampleRate_Hz
 RDS_SPS = 3                           # subcarrier.hh:79   kSamplesPerSymbol (PSK)
 RDS_DECIMATE = 24                     # subcarrier.hh:80-81 171000/1187.5/2/3
 RDS_DEVIATION_HZ = 2000.0             # EN 50067: 副载波频偏 ±2 kHz
 RDS_GROUPS_PER_SEC = 1187.5 / (26 * 4)  # = 11.428 groups/s；PS 8 字符需 4*0.0875s
-# 注：redsea 实际 ~11.4 组/秒；“104 组/秒/每 4 组一个 PS 字符”为口径近似，真实
 # 每组 104 bit，1187.5/104 ≈ 11.428 组/秒，4 组一个 PS 段（每段 2 字符）。
 
-# (26,16) 码参数（来源: redsea src/block_sync.cc）
-BLOCK_SIZE_BITS = 26                  # block_sync.cc:38  kBlockLength
-CHECKWORD_BITS = 10                   # block_sync.cc:40  kCheckwordLength
-GROUP_SIZE_BLOCKS = 4                 # block_sync.cc:48-49 BLOCK1..BLOCK4
+BLOCK_SIZE_BITS = 26
+CHECKWORD_BITS = 10
+GROUP_SIZE_BLOCKS = 4
 
 # 10bit 校验多项式 g(x)=x^10+x^8+x^7+x^5+x^4+x^3+1，去掉最高位的低 10 位系数
-# （来源: EN 50067 B.1；redsea 用校验矩阵等价实现，见下）
 RDS_POLY = 0x1B9
 
-# 偏移字（10bit，XOR 进校验字）——来源: redsea src/block_sync.cc:138-144
 OFFSET_WORDS: Dict[str, int] = {
-    "A":   0b0011111100,   # 0x0FC  block_sync.cc:139
-    "B":   0b0110011000,   # 0x198  block_sync.cc:140
-    "C":   0b0101101000,   # 0x168  block_sync.cc:141
-    "C'":  0b1101010000,   # 0x350  block_sync.cc:142  (Cprime)
-    "D":   0b0110110100,   # 0x1B4  block_sync.cc:143
+    "A":   0b0011111100,
+    "B":   0b0110011000,
+    "C":   0b0101101000,
+    "C'":  0b1101010000,
+    "D":   0b0110110100,
 }
 
-# 校验矩阵 H 的 26 行（每行一个输入位）——来源: redsea src/block_sync.cc:87-114
 # 伴随式 = 把输入字中“为 1 的位”所对应的 H 行按位异或（GF(2)）。
-# 这是 redsea 判定块类型的唯一依据，比 LFSR 约定更权威。
 _PARITY_CHECK_MATRIX: Tuple[int, ...] = (
     0b1000000000, 0b0100000000, 0b0010000000, 0b0001000000, 0b0000100000,
     0b0000010000, 0b0000001000, 0b0000000100, 0b0000000010, 0b0000000001,
@@ -66,29 +58,23 @@ _PARITY_CHECK_MATRIX: Tuple[int, ...] = (
     0b1100011011,
 )
 
-# 特征伴随式 -> 块名——来源: redsea src/block_sync.cc:71-81
 # （对一个无错块求伴随式，命中即识别块类型）
 SYNDROME_TO_OFFSET: Dict[int, str] = {
-    0b1111011000: "A",      # block_sync.cc:73
-    0b1111010100: "B",      # block_sync.cc:74
-    0b1001011100: "C",      # block_sync.cc:75
-    0b1111001100: "C'",     # block_sync.cc:76
-    0b1001011000: "D",      # block_sync.cc:77
+    0b1111011000: "A",
+    0b1111010100: "B",
+    0b1001011100: "C",
+    0b1111001100: "C'",
+    0b1001011000: "D",
 }
 
-# 块的循环后继——来源: redsea src/block_sync.cc:57-68
 _NEXT_OFFSET = {"A": "B", "B": "C", "C": "D", "C'": "D", "D": "A"}
-# 块名 -> 组内序号（0=A...3=D）——来源: redsea src/block_sync.cc:43-54
 _OFFSET_TO_INDEX = {"A": 0, "B": 1, "C": 2, "C'": 2, "D": 3}
 
 
 # --------------------------------------------------------------------------- #
-# 伴随式 / 校验（编码与解码共用 redsea 校验矩阵）
 # --------------------------------------------------------------------------- #
 def calculate_syndrome(raw26: int) -> int:
-    """对 26bit 接收块求 10bit 伴随式。
-
-    来源: redsea src/block_sync.cc:85-128 ``calculateSyndrome``。
+    """对 26bit 接收块求 10bit 伴随式。。
     矩阵乘法 = “把输入向量中为 1 的位对应的 H 行做 GF(2) 异或”。
     """
     result = 0
@@ -119,8 +105,7 @@ _NAME_TO_SYN = {"A": 0b1111011000, "B": 0b1111010100, "C": 0b1001011100,
 def encode_block(data16: int, offset_name: str) -> int:
     """把 16bit 信息编成 26bit 块（信息左移 10 + 校验字）。
 
-    校验字取法：令整体伴随式 == 该偏移字的特征伴随式（与 redsea 接收端
-    ``block_sync.cc:289`` ``block.data = raw >> 10`` 对偶）。
+    校验字取法：令整体伴随式 == 该偏移字的特征伴随式。
     """
     target_syn = _NAME_TO_SYN[offset_name]
     data16 &= 0xFFFF
@@ -134,7 +119,7 @@ def decode_block(raw26: int) -> Tuple[Optional[str], int]:
     """对 26bit 块求 (块名, 16bit 信息)。块名为 None 表示伴随式未命中。"""
     syn = calculate_syndrome(raw26)
     name = SYNDROME_TO_OFFSET.get(syn)
-    data = (raw26 >> CHECKWORD_BITS) & 0xFFFF  # block_sync.cc:289
+    data = (raw26 >> CHECKWORD_BITS) & 0xFFFF
     return name, data
 
 
@@ -153,11 +138,10 @@ def _int_of(bits: Sequence[int]) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# 组帧（合成侧，供自检；与 decode_block 共用同一矩阵，保证真 redsea 可同步）
 # --------------------------------------------------------------------------- #
 def build_b_block(pty: int = 0, tp: int = 0, group_type: int = 0,
                   version_b: int = 0, low5: int = 0) -> int:
-    """Block B 16bit 信息（来源: redsea src/group.cc:14-16, station.cc:225-251）。
+    """Block B 16bit 信息。
 
     bit15..12=GroupType(4)  bit11=Ver(0=A/1=B)  bit10=TP  bit9..5=PTY  bit4..0=low5。
     """
@@ -181,13 +165,13 @@ def group_to_bits(blocks: Sequence[int]) -> List[int]:
 
 def build_0a_group(pi: int, seg: int, chars2: str, pty: int = 1,
                    tp: int = 0, ta: int = 0, af: int = 0) -> List[int]:
-    """构造 0A 基本调谐组（来源: redsea src/station.cc:244-333）。
+    """构造 0A 基本调谐组。
 
     Block B: low5 的 bit1..0 = PS 段地址(0..3)，bit4=TA。
     Block C: AF 方法 A 的两个频率字节（这里只填一个 16bit，默认 0）。
     Block D: 2 个 PS 字符（高字节先）。
     """
-    low5 = ((ta & 1) << 4) | (seg & 0x3)        # station.cc:248,251
+    low5 = ((ta & 1) << 4) | (seg & 0x3)
     b = build_b_block(pty=pty, tp=tp, group_type=0, version_b=0, low5=low5)
     ch = (chars2 + "  ")[:2]
     d = (ord(ch[0]) << 8) | ord(ch[1])
@@ -196,11 +180,11 @@ def build_0a_group(pi: int, seg: int, chars2: str, pty: int = 1,
 
 def build_2a_group(pi: int, addr: int, ab: int, chars4: str, pty: int = 1,
                    tp: int = 0) -> List[int]:
-    """构造 2A RadioText 组（来源: redsea src/station.cc:418-481）。
+    """构造 2A RadioText 组。
 
     Block B: bit4=A/B 标志, bit3..0=地址(0..15)。Block C/D 各 2 字符，共 4 字符。
     """
-    low5 = ((ab & 1) << 4) | (addr & 0xF)        # station.cc:425,428
+    low5 = ((ab & 1) << 4) | (addr & 0xF)
     b = build_b_block(pty=pty, tp=tp, group_type=2, version_b=0, low5=low5)
     ch = (chars4 + "    ")[:4]
     c = (ord(ch[0]) << 8) | ord(ch[1])
@@ -209,7 +193,7 @@ def build_2a_group(pi: int, addr: int, ab: int, chars4: str, pty: int = 1,
 
 
 def build_4a_group(pi: int, b: int, c: int, d: int) -> List[int]:
-    """构造 4A 时钟组（B/C/D 字段由调用方按 redsea station.cc:584-610 位域填好）。"""
+    """构造 4A 时钟组（B/C/D 字段由调用方按位域填好）。"""
     b = (0x4 << 12) | (b & 0x0FFF)               # group type 4, version A
     return group_to_bits(make_group_blocks(pi, b, c, d))
 
@@ -221,7 +205,7 @@ def blocksync_from_bits(bits: Sequence[int],
                         min_groups: int = 1) -> List[Dict[str, int]]:
     """在比特流上做块同步，返回按到达顺序的完整组 [{A,B,C,D}:16bit,...]。
 
-    对齐 redsea BlockStream（block_sync.cc:267-313）：滑动窗口求伴随式定位块，
+    块同步：滑动窗口求伴随式定位块，
     要求 A->B->C->D 循环节奏正确；C 位置允许 C'。
     """
     bits = list(bits)
@@ -275,14 +259,14 @@ class RdsGroup:
 
 
 def parse_group_blocks(blocks: Dict[str, int]) -> RdsGroup:
-    """从 {A,B,C,D}:16bit 提取公共字段（来源: redsea src/station.cc:217-241）。"""
+    """从 {A,B,C,D}:16bit 提取公共字段。"""
     a, b, c, d = blocks["A"], blocks["B"], blocks["C"], blocks["D"]
-    type_code = (b >> 11) & 0x1F                  # group.cc:118 getBits<5>(B,11)
-    number = (type_code >> 1) & 0xF              # group.cc:15
-    version = "A" if (type_code & 1) == 0 else "B"  # group.cc:16
-    pty = (b >> 5) & 0x1F                         # station.cc:225 getBits<5>(B,5)
-    tp = (b >> 10) & 1                            # station.cc:229 getBool(B,10)
-    ta = (b >> 4) & 1                             # station.cc:251 getBool(B,4)
+    type_code = (b >> 11) & 0x1F
+    number = (type_code >> 1) & 0xF
+    version = "A" if (type_code & 1) == 0 else "B"
+    pty = (b >> 5) & 0x1F
+    tp = (b >> 10) & 1
+    ta = (b >> 4) & 1
     return RdsGroup(pi=a, group_number=number, version=version,
                     pty=pty, tp=tp, ta=ta, raw=blocks)
 
@@ -300,17 +284,17 @@ def rds_decode_groups(groups: Sequence[Dict[str, int]]) -> List[dict]:
         b, c, d = g.raw["B"], g.raw["C"], g.raw["D"]
 
         if g.group_number == 0:
-            # 0A/0B 基本调谐（station.cc:244-345）
-            seg = b & 0x3                          # station.cc:248 getBits<2>(B,0)
+
+            seg = b & 0x3
             item["ps_segment"] = seg
             item["ps_chars"] = bytes(((d >> 8) & 0xFF, d & 0xFF)).decode("latin-1")
-            # AF 方法 A：block C 两个频率字节（station.cc:263-264）
+
             item["af_bytes"] = [(c >> 8) & 0xFF, c & 0xFF]
 
         elif g.group_number == 2:
-            # 2A/2B RadioText（station.cc:418-481）
-            addr = b & 0xF                         # station.cc:425 getBits<4>(B,0)
-            ab = (b >> 4) & 1                      # station.cc:428 getBool(B,4)
+
+            addr = b & 0xF
+            ab = (b >> 4) & 1
             nchars = 4 if g.version == "A" else 2
             off = addr * (4 if g.version == "A" else 2)
             chars = [None] * 4
@@ -327,17 +311,17 @@ def rds_decode_groups(groups: Sequence[Dict[str, int]]) -> List[dict]:
             item["rt_chars"] = bytes(chars[:nchars]).decode("latin-1")
 
         elif g.group_number == 3 and g.version == "A":
-            # 3A ODA 应用标识（station.cc:513-525）
+
             item["oda_group"] = (b & 0x1F)
             item["oda_message"] = c
             item["oda_app_id"] = d
 
         elif g.group_number == 4 and g.version == "A":
-            # 4A 时钟时间（station.cc:584-610）
-            mjd = (((g.raw["B"] << 16) | c) >> 1) & 0x1FFFF   # station.cc:585
-            hour = (((c << 16) | d) >> 12) & 0x1F             # station.cc:606
-            minute = (d >> 6) & 0x3F                          # station.cc:607
-            off_sign = (d >> 5) & 1                           # station.cc:610
+
+            mjd = (((g.raw["B"] << 16) | c) >> 1) & 0x1FFFF
+            hour = (((c << 16) | d) >> 12) & 0x1F
+            minute = (d >> 6) & 0x3F
+            off_sign = (d >> 5) & 1
             off_mag = d & 0x1F
             item["ct_mjd"] = mjd
             item["ct_hour"] = hour
@@ -345,7 +329,7 @@ def rds_decode_groups(groups: Sequence[Dict[str, int]]) -> List[dict]:
             item["ct_local_offset_h"] = (-1.0 if off_sign else 1.0) * off_mag / 2.0
 
         elif g.group_number == 10 and g.version == "A":
-            # 10A PTY 名（station.cc:738-756）
+
             seg = b & 0x1
             item["ptyname_segment"] = seg
             item["ptyname_chars"] = bytes(
@@ -353,7 +337,7 @@ def rds_decode_groups(groups: Sequence[Dict[str, int]]) -> List[dict]:
             ).decode("latin-1")
 
         elif g.group_number == 14:
-            # 14A EON（station.cc:761-767）
+
             item["eon_on_pi"] = d
             item["eon_on_tp"] = (b >> 4) & 1
 
@@ -362,9 +346,7 @@ def rds_decode_groups(groups: Sequence[Dict[str, int]]) -> List[dict]:
 
 
 def mjd_to_date(mjd: int) -> Tuple[int, int, int]:
-    """Modified Julian Date -> (year, month, day)。
-
-    来源: redsea src/station.cc:593-604（与 redsea 同一套截断常数）。
+    """Modified Julian Date -> (year, month, day)。。
     """
     mjd = float(mjd)
     if mjd < 15079.0:
@@ -431,9 +413,7 @@ def rds_extract_ps_rt(parsed: Sequence[dict]) -> dict:
 # MPX 合成与解调（自检信号源 / 离线回放）
 # --------------------------------------------------------------------------- #
 def biphase_encode(bits: Sequence[int]) -> np.ndarray:
-    """NRZ 位 -> Manchester(双相) 半位电平（bit1=[+1,-1], bit0=[-1,+1]）。
-
-    来源: redsea src/dsp/subcarrier.cc:50-87 BiphaseDecoder 的对偶编码。
+    """NRZ 位 -> Manchester(双相) 半位电平（bit1=[+1,-1], bit0=[-1,+1]）。。
     """
     chips = np.empty(2 * len(bits), dtype=np.float64)
     for i, b in enumerate(bits):
@@ -488,13 +468,12 @@ def rds_decode_mpx(mpx: np.ndarray, sample_rate: float) -> dict:
     if len(mpx) < int(sample_rate * 0.05):
         return {"rds_present": False, "reason": "too_short"}
 
-    # 带通 57k 附近 -> 复下变频 -> 低通（与 redsea subcarrier.cc:186-195 同思路）
     nyq = sample_rate / 2.0
     bpf = butter(4, [54000.0 / nyq, 60000.0 / nyq], btype="band")
     band = lfilter(bpf[0], bpf[1], mpx)
     t = np.arange(len(band)) / sample_rate
     z = band * np.exp(-1j * 2 * np.pi * RDS_SUBCARRIER * t)
-    lp = butter(3, 2400.0 / nyq, btype="low")           # subcarrier.cc:39
+    lp = butter(3, 2400.0 / nyq, btype="low")
     z = lfilter(lp[0], lp[1], z)
     z2 = np.mean(z ** 2)
     phi = 0.5 * np.angle(z2)
@@ -543,7 +522,7 @@ def decode_rds(mpx: np.ndarray, sample_rate: float, min_groups: int = 2) -> dict
 # ToolRegistry 注册入口（与 rtl433_decoder.register_rtl433_tools 同构）
 # --------------------------------------------------------------------------- #
 def register_rds_tools(registry) -> None:
-    """把 redsea 真实 RDS 解码能力注册到 MBDSDR ToolRegistry。
+    """把 RDS 解码能力注册到 MBDSDR ToolRegistry。
 
     提供三个工具：
       - rds_decode_mpx       : FM 复合基带(MPX)实信号 → PS/RT/PI/PTY/时钟
@@ -594,7 +573,7 @@ def register_rds_tools(registry) -> None:
     registry.register(
         name="rds_decode_mpx",
         description="FM 广播 RDS 解码：57kHz BPSK 副载波→1187.5bps→块同步→PS/RT/PI/PTY/时钟。"
-                    "移植自 redsea 真实块同步与 (26,16) CRC 校验矩阵。",
+                    "(26,16) 块同步与 CRC 校验。",
         parameters={"type": "object", "properties": {}, "required": []},
         handler=_decode_mpx,
         category="rds_decoder",

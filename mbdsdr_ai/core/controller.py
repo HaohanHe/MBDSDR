@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR Core - 统一控制面 API（Headless-first）
 =================================================

@@ -1,8 +1,10 @@
+# SPDX-License-Identifier: MIT
 """
-test_dsp_demod_channelizer.py — Xlating FIR 信道化确定性单测。
+test_dsp_demod_channelizer.py — deterministic tests for the Xlating FIR channelizer.
+非硬件 / NOT HARDWARE: synthetic signal only.
 
-仅用合成信号验证：NCO 混频→低通→抽取 后，信号被搬到基带且带宽内能量保留。
-对应 mbdsdr_ai/channelizer.py（移植自 sdrpp core/src/dsp/channel/rx_vfo.h）。
+Verifies that NCO mix -> low-pass -> decimation moves a signal to baseband while
+keeping in-band energy.  Targets mbdsdr_ai/channelizer.py.
 """
 import os
 import sys

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 新时空差异化面板
 ==========================
@@ -65,6 +66,12 @@ except ImportError:  # pragma: no cover - 直接以脚本方式运行时
         TimeSyncStatus, FreqOrbitPoint,
     )
 
+
+# 以包方式从仓库根 import（如 import desktop.new_spacetime_panel）时本目录不在
+# sys.path 上，把 desktop/ 补进去，保证 tokens 等兄弟模块可解析（与 main.py 一致）。
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 
 from tokens import tokens
 

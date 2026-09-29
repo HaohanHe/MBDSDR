@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 信号触发式长守听录音机（gated / VOX recorder）
 ================================================

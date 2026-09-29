@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 调谐控制面板
 ====================
@@ -16,6 +17,15 @@ from PySide6.QtWidgets import (
     QCheckBox, QSpinBox, QProgressBar, QInputDialog,
 )
 from PySide6.QtGui import QFont, QIntValidator, QDoubleValidator
+
+# 本目录（desktop/）下的兄弟模块（tokens / mode_registry 等）在以包方式从
+# 仓库根 import（如 import desktop.control_panel）时不在 sys.path 上，
+# 这里把脚本所在目录补进 sys.path，与 main.py / main_window.py 的引导方式一致。
+import os as _os
+import sys as _sys
+_HERE = _os.path.dirname(_os.path.abspath(__file__))
+if _HERE not in _sys.path:
+    _sys.path.insert(0, _HERE)
 
 from tokens import tokens
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """卫星 pipeline 调度器骨架 + ETA 估算 + 进度回调。
 
 设计对照 SatDump：

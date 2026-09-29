@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """全量工具可调用性自检。
 
 在没有真实硬件（无 RTL-SDR 连接）的默认环境下，遍历全部已注册工具，

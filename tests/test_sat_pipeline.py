@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """sat_pipeline_params / sat_pipeline_runner 单元测试。
 
 纯 Python，无硬件依赖，不产生任何运行时模拟信号。

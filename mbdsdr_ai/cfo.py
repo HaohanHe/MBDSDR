@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 载波频率偏移（Carrier Frequency Offset, CFO）估计与校正。

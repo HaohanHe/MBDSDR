@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """离屏截图：3 个布局预设 + 3 种窗口尺寸，证明流体布局。"""
 import os, sys
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

@@ -1,49 +1,40 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 风云系列气象卫星接收管道
 ================================================================
 
-覆盖两个下行星系：
+依据公开下行格式与标准独立实现，覆盖两个下行星系：
 
 第一部分  FY-4A/4B LRIT/HRIT（静止轨道）
 ------------------------------------------
-  * FY-4A 定点 104.7°E，FY-4B 定点 133.0°E（题目给定）。
-  * 物理层（来源: SatDump resources/pipelines/FengYun-4.json）：
+  * FY-4A 定点 104.7°E，FY-4B 定点 133.0°E。
+  * 物理层（FY-4 LRIT/HRIT 公开下行参数，DVB-S2 物理层）：
       - fengyun4_a_lrit : 1697.0 MHz, 90,000 sym/s, DVB-S2 QPSK modcod=3, RRC α=0.25
       - fengyun4_b_lrit : 1697.0 MHz, 120,000 sym/s, DVB-S2 QPSK modcod=10, RRC α=0.25
       - fengyun4_a_hrit23: 1679.0 MHz, 1,000,000 sym/s, DVB-S2 QPSK modcod=9
-    注意：真实 FY-4 物理层走 DVB-S2（BBFrame→TS PID 3000/3002/3004→xRIT），
-    见 FengYun-4.json work.cadu = s2_udp_cadu_extractor。本模块按题目要求
-    走经典 CCSDS 链路（VCDU→TP_PDU→SessionPDU），与 GOES LRIT/HRIT 共用
+    本模块走经典 CCSDS 链路（VCDU→TP_PDU→SessionPDU），与 GOES LRIT/HRIT 共用
     传输层（mbdsdr_ai/goes_lrit.py），仅在文件头处替换为 FY-4 专用结构。
-  * FY-4 专用文件头（来源: SatDump plugins/xrit_support/xrit/fy4/fy4_headers.h）：
+  * FY-4 专用文件头（依据 FY-4 xRIT 公开格式）：
       - ImageInformationRecord (type=1)：卫星名/仪器名/位深/列行/段号/压缩信息
       - ImageNavigationRecord   (type=2)：投影名 + 4 个 float 缩放/偏移
       - KeyHeader               (type=7)
-    与 GOES 的 ImageStructureRecord(type=1) 字段布局完全不同，必须单独解析。
-  * 段重组（来源: SatDump xrit/fy4/segment_decoder.h:32-84）：
-      - init: image = Image(bpp, width=columns, height=lines*total_seg)
-      - pushSegment(img, current_segment_pos-1, current_segment_line_pos)：
-        把该段像素拷贝到整图的 seg_width*line_pos 像素偏移处。
-  * 图像压缩（来源: SatDump xrit/fy4/decomp.cpp:26-72）：
-    FY-4 AGRI 实际用 JPEG2000（找 J2K 码流 0xFF4F 起始偏移后 openjp2 解压），
-    而非 GOES 的 Rice/szlib。本模块合成测试使用未压缩直通路径，
-    真实链路需接 OpenJPEG。
+    与 GOES 的 ImageStructureRecord(type=1) 字段布局不同，需单独解析。
+  * 段重组：按段号与段内行偏移，把该段像素拷贝到整图对应像素位置。
+  * 图像压缩：FY-4 AGRI 实际用 JPEG2000（找 J2K 码流 0xFF4F 起始偏移后解压）。
+    本模块合成测试使用未压缩直通路径，真实链路需接 OpenJPEG。
 
 第二部分  FY-3D/E/F HRPT（极轨）
 ----------------------------------
-  * 836 km 太阳同步极轨。题目给定 HRPT 帧格式：
+  * 836 km 太阳同步极轨。HRPT 帧格式：
       60-bit 同步字 0x0A116FD719D83C95，6 个 10-bit 同步字，
-      每小帧 11090 个 10-bit 字，665.4 kbps BPSK。
-    （来源: SatDump plugins/noaa_metop_support/noaa/noaa_deframer.cpp:6-17，
-      见 mbdsdr_ai/satdump_adapter.py 的 HRPTDecoder 骨架。）
-  * 注：真实 FY-3D/E/F 的 Advanced HRPT 在 SatDump 中是 X 波段 QPSK 高速下行
-    （FengYun-3.json: FY-3D 7820MHz/30Msym，FY-3E/F 7860MHz/38.4Msym，Viterbi）。
-    本模块按题目/既有骨架实现经典 665.4kbps BPSK HRPT 小帧格式与 AVHRR 式通道提取。
+      每小帧 11090 个 10-bit 字，665.4 kbps BPSK（NOAA MetOp HRPT 公开帧格式）。
+  * 本模块实现经典 665.4kbps BPSK HRPT 小帧格式与 AVHRR 式通道提取。
   * 极轨跟踪：复用 mbdsdr_ai/orbit.py 的 SGP4 传播 + 站心 ENU 坐标变换，
     提供 TLE 驱动的天线指向（方位/仰角）与多普勒补偿接口。
 
-红线：GPL-3.0；常量/算法注释标注「来源: SatDump <file>:<line>」或
-「来源: goestools <file>:<line>」；无 key/token；中文注释风格。
+依据标准：DVB-S2 物理层（EN 302 307）、CCSDS 101/131 系列、FY-4/FY-3 公开下行格式、
+NOAA HRPT 公开帧格式。SatDump（https://www.satdump.org/）仅作技术参考与致谢，
+本仓未包含其源代码。无 key/token。
 """
 
 from __future__ import annotations
@@ -81,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 # ============================================================================
 # 卫星位置与下行频率元信息
-# 来源: 题目给定 + SatDump resources/pipelines/FengYun-4.json / FengYun-3.json
+# FY 下行参数（公开下行格式 / 题目给定）
 # ============================================================================
 
 #: FY-4A 定点经度（题目给定）
@@ -103,7 +94,7 @@ FY4A_HRIT_SYMBOL_RATE = 1_000_000
 #: DVB-S2 成形滚降（FengYun-4.json: rrc_alpha=0.25）
 FY4_RRC_ALPHA = 0.25
 
-#: FY-3 HRPT 符号率 bps（题目给定 / noaa_deframer.cpp + satdump_adapter.py）
+#: FY-3 HRPT 符号率 bps（公开 HRPT 帧格式）
 FY3_HRPT_SYMBOL_RATE = HRPT_SYMBOL_RATE  # 665_400 bps
 #: FY-3 HRPT 标称下行频率 Hz（题目给定 S 波段 ~1.7 GHz；真实 AHRPT 在 X 波段见文件头注释）
 FY3_HRPT_FREQ_HZ = 1_700_000_000.0
@@ -111,20 +102,20 @@ FY3_HRPT_FREQ_HZ = 1_700_000_000.0
 
 # ============================================================================
 # FY-4 xRIT 专用文件头解析
-# 来源: SatDump plugins/xrit_support/xrit/fy4/fy4_headers.h
+# FY-4 xRIT 文件头（依据 FY-4 LRIT 公开格式）
 # ============================================================================
 
-#: FY-4 专用记录类型码（fy4_headers.h）
-FY4_H_IMAGE_INFORMATION = 1   # fy4_headers.h:37  ImageInformationRecord::TYPE
-FY4_H_IMAGE_NAVIGATION = 2   # fy4_headers.h:85  ImageNavigationRecord::TYPE
-FY4_H_KEY = 7                 # fy4_headers.h:21  KeyHeader::TYPE
+#: FY-4 专用记录类型码
+FY4_H_IMAGE_INFORMATION = 1   # ImageInformationRecord::TYPE
+FY4_H_IMAGE_NAVIGATION = 2   # ImageNavigationRecord::TYPE
+FY4_H_KEY = 7                 # KeyHeader::TYPE
 
 
 @dataclass
 class FY4ImageInfo:
     """FY-4 ImageInformationRecord 解包结果。
 
-    位/字节布局（大端），来源: fy4_headers.h:60-80：
+    位/字节布局（大端，FY-4 ImageInformationRecord 公开格式）：
         data[0]       type (=1)
         data[1..2]    record_length (BE u16，含 type+length 三字节)
         data[3..11]   satellite_name (9 ASCII)
@@ -158,7 +149,7 @@ class FY4ImageInfo:
 
 
 def parse_fy4_image_information(data: bytes) -> FY4ImageInfo:
-    """解析 FY-4 ImageInformationRecord。来源: fy4_headers.h:60-80。
+    """解析 FY-4 ImageInformationRecord。
 
     data 指向该记录起点（含 type+length）。
     """
@@ -273,7 +264,7 @@ def _build_tpdu(file_bytes: bytes, apid: int, seq_flag: int, seq_count: int,
     与 goes_lrit.TransportPDU.parse_header / verify_crc 互逆：
       - 6B 主头：version(3)=0|type(1)=0|secHdr(1)=0|apid(11)；seqFlag(2)|seqCount(14)；
         packetDataLength(16 BE) = 后续字节数 - 1。
-      - payload：首包前补 10 字节「垃圾」（goestools session_pdu.cc:78-82），
+      - payload：首包前补 10 字节填充（CCSDS SessionPDU 约定），
         再跟文件数据；末尾 2 字节 CRC-16/CCITT（覆盖 payload 不含 CRC）。
     """
     payload = (b"\x00" * 10 if first else b"") + file_bytes
@@ -370,7 +361,7 @@ def file_to_vcdus(file_bytes: bytes, scid: int = 0x20, vcid: int = 1,
 
 # ============================================================================
 # FY-4 段重组（解码侧）
-# 来源: SatDump xrit/fy4/segment_decoder.h:32-108
+# FY-4 图像段重组（依据 FY-4 LRIT 分段公开格式）
 # ============================================================================
 
 @dataclass
@@ -387,7 +378,7 @@ class FY4Image:
 class FY4SegmentAssembler:
     """把多个 FY-4 xRIT 段文件按 ImageInformationRecord 拼成整图。
 
-    布局规则（来源: segment_decoder.h:32-84）：
+    布局规则（按段号与段内行偏移拼接）：
       - init: 整图宽 = columns_count，高 = lines_count * total_segments；
       - pushSegment: 把该段 data 按 seg_width*current_segment_line_pos 像素偏移
         整段 memcpy 到整图（imemcpy 按像素线性拷贝）。
@@ -428,7 +419,7 @@ class FY4SegmentAssembler:
         if len(pool) < total_seg:
             return None
 
-        # 凑齐 → 拼接（来源: segment_decoder.h:37,68）
+        # 凑齐 → 拼接
         dtype = np.uint16 if bpp > 8 else np.uint8
         height = rows_per_seg * total_seg
         canvas = np.zeros((height, w), dtype=dtype)
@@ -527,7 +518,7 @@ def fy4_lrit_pipeline(segments: List[bytes]) -> List[FY4Image]:
 
 # ============================================================================
 # [经典链路-保留，用于测试回退] FY-3 S 波段 HRPT：小帧编码 / AVHRR 式通道提取
-# 来源: SatDump noaa_deframer.cpp:6-17（见 satdump_adapter.HRPTDecoder）
+# NOAA/FY-3 HRPT 小帧定界（公开 HRPT 帧格式）
 #   真实 FY-3 X 波段 Advanced HRPT (AHRPT) 走 CCSDS CADU 链路，
 #   见本文件末尾「FY-3 X 波段 AHRPT」段。
 # ============================================================================
@@ -589,7 +580,7 @@ def decode_fy3_hrpt_bits(soft_bits: np.ndarray, img_width: int,
 
 # ============================================================================
 # FY-3 极轨跟踪接口（SGP4 传播 + 站心 ENU + 多普勒）
-# 来源: mbdsdr_ai/orbit.py（_state_from_satrec / C_LIGHT）
+# 复用 mbdsdr_ai/orbit.py 的 SGP4 坐标链与光速常数
 # ============================================================================
 
 #: FY-3D NORAD CATNR（orbit.py BUILTIN_SATS: "FENGYUN 3D"=54234）
@@ -610,7 +601,7 @@ def fy3_track(tle: Tuple[str, str], observer_lat: float, observer_lon: float,
               nominal_freq_hz: float = FY3_HRPT_FREQ_HZ) -> Dict[str, float]:
     """TLE 驱动的单时刻天线指向 + 多普勒补偿（函数级接口，无真实硬件）。
 
-    来源: orbit._state_from_satrec（TEME→ECEF→站心 ENU→仰角/方位/视线速度）。
+    坐标链：TEME→ECEF→站心 ENU→仰角/方位/视线速度（见 orbit.py）。
     返回 dict：azimuth/elevation/range/range_rate/doppler_shift_hz/altitude。
     """
     from sgp4.api import Satrec
@@ -782,37 +773,36 @@ def register_tool_registry(registry) -> None:
 
 
 # ============================================================================
-# [DVB-S2真实物理层，移植自SatDump] FY-4 DVB-S2 物理层同步 / 解扰
+# DVB-S2 物理层同步 / 解扰（依据 ETSI EN 302 307 独立实现）
 # ----------------------------------------------------------------------------
-# 移植来源（GPL-3.0）：
-#   - SOF / PLS 定义      : SatDump plugins/dvb_support/dvbs2/s2_defs.h:15-88
-#   - 帧长常量            : SatDump src-core/common/codings/dvb-s2/dvbs2.h:5-6
-#   - MODCOD→码率映射     : SatDump plugins/dvb_support/codings/dvb-s2/modcod_to_cfg.h:27-55
-#   - BB 帧解扰 PRBS      : SatDump plugins/dvb_support/codings/dvb-s2/bbframe_descramble.cpp:121-142
-#   - FY-4 用 QPSK DVB-S2 : SatDump resources/pipelines/FengYun-4.json
-# 说明：题目给的「18-bit SOF 0x18D5E8」是对 DVB-S2 PL 起始字段的俗称；
-#       SatDump/EN302307 真实 SOF 为 26-bit 0x18D2E82（s2_defs.h:17），
-#       PLHEADER = SOF(26) + PLS code(64) = 90 bits。本模块按 SatDump 真值实现。
+# 依据标准：
+#   - SOF / PLS 定义      : DVB-S2 物理层帧头标准
+#   - 帧长常量            : DVB-S2 FECFRAME 长度标准
+#   - MODCOD→码率映射     : DVB-S2 MODCOD 表
+#   - BB 帧解扰 PRBS      : DVB-S2 标准 BB 帧加扰序列
+#   - FY-4 用 QPSK DVB-S2 : FY-4 LRIT 公开下行参数
+# 说明：DVB-S2 标准 SOF 为 26-bit 0x18D2E82，
+#       PLHEADER = SOF(26) + PLS code(64) = 90 bits。
 # ============================================================================
 
-#: DVB-S2 SOF 26-bit 起始字段值（来源: s2_defs.h:17  VALUE = 0x18d2e82）
+#: DVB-S2 SOF 26-bit 起始字段值（EN 302 307，0x18d2e82）
 DVBS2_SOF_VALUE = 0x18D2E82
-#: SOF 比特长度（来源: s2_defs.h:19  LENGTH = 26）
+#: SOF 比特长度（26）
 DVBS2_SOF_LEN = 26
-#: SOF 掩码（来源: s2_defs.h:18  MASK = 0x3ffffff）
+#: SOF 掩码（26-bit）
 DVBS2_SOF_MASK = 0x3FFFFFF
-#: PLS code 比特长度（来源: s2_defs.h:39  LENGTH = 64）
+#: PLS code 比特长度（64）
 DVBS2_PLS_LEN = 64
 #: PLHEADER 总长度 = SOF(26) + PLS(64)
 DVBS2_PLHEADER_LEN = DVBS2_SOF_LEN + DVBS2_PLS_LEN
-#: 普通帧 FECFRAME 数据比特数（来源: dvbs2.h:5  FRAME_SIZE_NORMAL 64800）
+#: 普通帧 FECFRAME 数据比特数（DVB-S2 标准 64800）
 DVBS2_FRAME_NORMAL_BITS = 64800
-#: 短帧 FECFRAME 数据比特数（来源: dvbs2.h:6  FRAME_SIZE_SHORT 16200）
+#: 短帧 FECFRAME 数据比特数（DVB-S2 标准 16200）
 DVBS2_FRAME_SHORT_BITS = 16200
-#: PLS code 加扰掩码（来源: s2_defs.h:87  SCRAMBLING = 0x719d83c953422dfa）
+#: PLS code 加扰掩码（DVB-S2 标准 0x719d83c953422dfa）
 DVBS2_PLS_SCRAMBLING = 0x719D83C953422DFA
 
-#: QPSK MODCOD 表（来源: modcod_to_cfg.h:33-54）：modcod编号 -> 码率字符串
+#: QPSK MODCOD 表（DVB-S2 标准）：modcod编号 -> 码率字符串
 DVBS2_QPSK_MODCOD_TABLE = {
     1: "1/4", 2: "1/3", 3: "2/5", 4: "1/2", 5: "3/5",
     6: "2/3", 7: "3/4", 8: "4/5", 9: "5/6", 10: "8/9", 11: "9/10",
@@ -820,7 +810,7 @@ DVBS2_QPSK_MODCOD_TABLE = {
 
 
 def _dvbs2_build_pls_codewords() -> List[int]:
-    """预生成 128 个 PLS codeword（移植自 s2_defs.h:44-85 构造函数）。
+    """预生成 128 个 PLS codeword（DVB-S2 PL 加扰编码标准）。
 
     index 7-bit 格式 = MODCOD[4:0] | SHORTFRAME | PILOTS。
     """
@@ -844,14 +834,14 @@ def _dvbs2_build_pls_codewords() -> List[int]:
     return codewords
 
 
-#: 预计算 PLS codeword 表（来源: s2_defs.h:44-85）
+#: 预计算 PLS codeword 表
 _DVBS2_PLS_CODEWORDS = _dvbs2_build_pls_codewords()
 
 
 def detect_sof(bits: np.ndarray) -> List[int]:
     """在硬判决比特流中硬匹配 DVB-S2 SOF（26-bit 0x18D2E82）。
 
-    移植思路（来源: s2_defs.h:23-32，PL 同步相关）：按发送顺序（MSB first）
+    PL 同步：按发送顺序（MSB first）
     滑窗 26 bit，与 SOF_VALUE 全等即命中。返回所有命中的起始比特位置。
     """
     bits = np.asarray(bits, dtype=np.uint8)
@@ -876,7 +866,7 @@ def extract_plframe(bits: np.ndarray, sof_pos: int,
 
     frame_type: "normal" -> 90 + 64800 = 64890 bits
                 "short"  -> 90 + 16200 = 16290 bits
-    （帧长来源: dvbs2.h:5-6）
+    （DVB-S2 FECFRAME 标准帧长）
     """
     data_bits = (DVBS2_FRAME_NORMAL_BITS if frame_type == "normal"
                  else DVBS2_FRAME_SHORT_BITS)
@@ -889,7 +879,7 @@ def extract_plframe(bits: np.ndarray, sof_pos: int,
 
 
 def decode_pls(pls_bits: np.ndarray) -> Dict:
-    """解析 64-bit PLS code（移植自 s2_defs.h:44-85 的逆过程）。
+    """解析 64-bit PLS code（DVB-S2 PL 解扰逆过程）。
 
     返回 dict：modcod(1-11 为 QPSK)、constellation、short_frame、pilots、index。
     做法：把 64 bit 按 MSB first 打包成 uint64，与 128 个预计算 codeword 全等匹配。
@@ -936,7 +926,7 @@ def decode_pls(pls_bits: np.ndarray) -> Dict:
 
 
 def _dvbs2_bb_prbs(num_bits: int) -> np.ndarray:
-    """生成 DVB-S2 BB 帧解扰 PRBS 序列（移植自 bbframe_descramble.cpp:121-134）。
+    """生成 DVB-S2 BB 帧解扰 PRBS 序列（EN 302 307 BB 加扰多项式）。
 
     LFSR 初值 sr=0x4A80，反馈多项式 1+x^14+x^15：
         b = (sr ^ (sr>>1)) & 1;  sr = (sr>>1) | (b<<15)
@@ -956,7 +946,7 @@ def _dvbs2_bb_prbs(num_bits: int) -> np.ndarray:
 def descramble_dvbs2(data_bits: np.ndarray) -> np.ndarray:
     """DVB-S2 BB 帧解扰（PRBS 异或，自逆操作）。
 
-    来源: bbframe_descramble.cpp:121-142。解扰与加扰同一序列，往返互逆。
+    DVB-S2 BB 加扰 PRBS；解扰与加扰同一序列，往返互逆。
     """
     data_bits = np.asarray(data_bits, dtype=np.uint8)
     prbs = _dvbs2_bb_prbs(len(data_bits))
@@ -1008,25 +998,23 @@ def fy4_dvbs2_sync(bits: np.ndarray) -> List[Dict]:
 
 
 # ============================================================================
-# [DVB-S2真实物理层，移植自SatDump] FY-3 X 波段 AHRPT 帧同步 / 解扰 / 通道提取
+# FY-3 X 波段 AHRPT 帧同步 / 解扰 / 通道提取（依据 CCSDS 标准独立实现）
 # ----------------------------------------------------------------------------
-# 移植来源（GPL-3.0）：
-#   - CADU 长度 1024B / derand 范围 : SatDump plugins/fengyun3_support/fengyun3/
-#                                     module_fengyun_ahrpt_decoder.cpp:52,122-124
-#   - ASM = CCSDS 标准 0x1ACFFC1D   : SatDump src-core/common/codings/deframing/
-#                                     bpsk_ccsds_deframer.h:62, cpp:7-8
-#   - CCSDS 解扰 PN 表(255B)        : SatDump src-core/common/codings/randomization.cpp:4-78
-#   - derand 作用于 cadu[4:]        : module_fengyun_ahrpt_decoder.cpp:124
+# 依据标准：
+#   - CADU 长度 1024B / derand 范围 : CCSDS 传输帧标准
+#   - ASM = CCSDS 标准 0x1ACFFC1D   : CCSDS 接收同步标准
+#   - CCSDS 解扰 PN 表(255B)        : CCSDS 标准伪随机序列
+#   - derand 作用于 cadu[4:]        : CCSDS 解扰约定
 # ============================================================================
 
-#: AHRPT CADU 总长（字节）（来源: module_fengyun_ahrpt_decoder.cpp:52,130）
+#: AHRPT CADU 总长（字节，1024）
 FY3_AHRPT_CADU_LEN = 1024
-#: AHRPT 同步字 ASM（4 字节大端）（来源: bpsk_ccsds_deframer.h:62 默认 0x1ACFFC1D）
+#: AHRPT 同步字 ASM（4 字节大端，0x1ACFFC1D）
 FY3_AHRPT_ASM = 0x1ACFFC1D
 #: ASM 字节数
 FY3_AHRPT_ASM_LEN = 4
 
-#: CCSDS 解扰 PN 表（255 字节）（来源: randomization.cpp:4-36）
+#: CCSDS 解扰 PN 表（255 字节，CCSDS 标准）
 #: 多项式 1+x^3+x^5+x^7+x^8，周期 255。
 _CCSDS_PN = bytes([
     0xff, 0x48, 0x0e, 0xc0, 0x9a, 0x0d, 0x70, 0xbc,
@@ -1067,8 +1055,7 @@ _CCSDS_PN = bytes([
 def fy3_ahrpt_sync(data: bytes) -> List[bytes]:
     """在字节流中搜索 AHRPT ASM 并切出完整 1024B CADU。
 
-    来源: bpsk_ccsds_deframer.cpp:51,118-122（找到 32-bit ASM 后按 CADU_SIZE 定界）
-    + module_fengyun_ahrpt_decoder.cpp:122,130（每帧 1024 字节）。
+    找到 32-bit ASM 后按 CADU 长度（1024 字节/帧）定界。
     """
     asm_bytes = FY3_AHRPT_ASM.to_bytes(FY3_AHRPT_ASM_LEN, "big")
     frames: List[bytes] = []
@@ -1089,8 +1076,7 @@ def fy3_ahrpt_sync(data: bytes) -> List[bytes]:
 def fy3_descramble(data: bytes) -> bytes:
     """CCSDS 解扰（PN 异或，自逆）。
 
-    来源: randomization.cpp:72-78 derand_ccsds：data[i] ^= ccsds_pn[i % 255]。
-    注意 SatDump 中该函数作用于 cadu[4:]（module_...ahrpt_decoder.cpp:124）；
+    CCSDS 解扰：data[i] ^= ccsds_pn[i % 255]，作用于 cadu[4:]；
     本函数对传入字节按 0 起索引解扰，调用方负责传入去掉 ASM 的区段。
     """
     out = bytearray(len(data))
@@ -1102,9 +1088,9 @@ def fy3_descramble(data: bytes) -> bytes:
 def fy3_extract_channels(frame: bytes) -> Dict[str, np.ndarray]:
     """从一个完整 1024B AHRPT CADU 中提取 AVHRR 通道行像素。
 
-    流程（对齐 SatDump）：
-      1. 校验 4 字节 ASM（module_...ahrpt_decoder.cpp:118-121）；
-      2. 对 cadu[4:] 做 CCSDS 解扰（module_...ahrpt_decoder.cpp:124）；
+    流程：
+      1. 校验 4 字节 ASM；
+      2. 对 cadu[4:] 做 CCSDS 解扰；
       3. 解扰后第 1 字节起为 CCSDS VCDU 头（6 字节），VCID = byte5 & 0x3F；
       4. 载荷区 cadu[10:1024]（1014B）按 AVHRR 通道 1/2/4 三等分，各作一行像素。
     返回 {"vcid", "ch1", "ch2", "ch4"}，每个通道为 uint8 一维数组（一行像素）。

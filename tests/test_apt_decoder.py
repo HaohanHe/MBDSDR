@@ -1,4 +1,5 @@
-"""mbdsdr_ai.satellite.decoders 确定性单测。
+# SPDX-License-Identifier: MIT
+"""mbdsdr_ai.satellite.decoders 确定性单测。（合成向量，非硬件 / NOT HARDWARE）
 
 对照 SatDump plugins/analog_support/noaa_apt/（docs/learn/satdump.md §10）：
   1. 合成 APT 音频（已知 A/B 测试图）→ 解码 → 通道图像可还原；

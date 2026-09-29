@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 增益校准表（Gain Calibration Table）
 ======================================

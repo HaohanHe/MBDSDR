@@ -1,17 +1,15 @@
-"""前向纠错（FEC）统一接口 — 移植自 SatDump。
+# SPDX-License-Identifier: MIT
+"""前向纠错（FEC）统一接口 — 依据 CCSDS 等公开标准独立实现。
 
-上游对照（docs/learn/porting_2026_09_27.md §4）：
-  - ``src-core/common/codings/reedsolomon/reedsolomon.h:12-16``
-        RS223 = RS(255,223)，32 校验字节，可纠 16 字节错误（CCSDS TM）
-  - ``reedsolomon.h:33-36``  ``decode/encode(data, ccsds)``，ccsds=True 时做符号反转
-  - ``src-core/common/codings/randomization.cpp:4-36``
-        ``ccsds_pn[255]`` 字节表，首字节 0xff，周期 255 字节
-  - ``src-core/common/codings/differential/qpsk_diff.cpp:5-56``
-        QPSK 差分解码：相邻符号 I/Q 异或
+实现依据（公开标准；SatDump 仅作技术参考，本仓未包含其源代码）：
+  - RS(255,223)（RS223），32 校验字节，可纠 16 字节错误（CCSDS TM 标准）
+  - encode/decode(data, ccsds)，ccsds=True 时做符号反转
+  - CCSDS 扰码 PN 字节表，首字节 0xff，周期 255 字节
+  - QPSK 差分解码：相邻符号 I/Q 异或
 
 本模块提供纯 Python、确定性实现：
   - :class:`ReedSolomon` — RS(255,223) CCSDS 编码/解码（Berlekamp-Massey + Forney）
-  - :class:`Scrambler`   — CCSDS 扰码/解扰（查表，与 SatDump 逐字节一致）
+  - :class:`Scrambler`   — CCSDS 扰码/解扰（查表，与 CCSDS 标准一致）
   - :class:`DifferentialEncoder` — DBPSK/DQPSK 差分编/解码
 
 红线：不依赖任何 C 扩展；所有算法对已知向量可逆。

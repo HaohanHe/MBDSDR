@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """数字模式解码纯软件闭环实验（论文 VI.F）。
 
 不依赖 dump1090 / wsjtx / RTL-SDR，全部用产品代码在合成基带/音频上闭环：

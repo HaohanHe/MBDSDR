@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
-rtcm3_decoder.py — RTCM3 消息解析器（移植自 RTKLIB src/rtcm3.c / rtcm.c / rtkcmn.c）
+rtcm3_decoder.py — RTCM3 消息解析器（依据 RTCM Standard 10403.x 公开标准独立实现）
 
 设计目标：
   - 帧同步(0xD3)、长度(10-bit)、CRC24Q 校验（多项式 0x1864CFB）
@@ -9,8 +10,8 @@ rtcm3_decoder.py — RTCM3 消息解析器（移植自 RTKLIB src/rtcm3.c / rtcm
   - 解析 MSM7 系列：1077(GPS) / 1087(GLONASS) / 1097(Galileo) / 1127(BeiDou)
   - 输出结构化 dict，供 rtklib_adapter.SPPLocator / rtk_solver 直接消费
 
-所有移植处均标注「来源: RTKLIB src/<file>.c:<line>」。
 仅实现解算所需最小子集；其余消息类型返回 {"type":..., "supported":False}。
+RTKLIB 上游仅作技术参考与致谢，本仓未包含其源代码。
 """
 
 from __future__ import annotations
@@ -95,7 +96,7 @@ NAME_TO_SIG_TABLE = {
 
 
 # ============================================================
-# 位读取器 —— 移植 rtkcmn.c:610 getbitu / 617 getbits
+# 位读取器 —— MSB-first 无符号/有符号位域读取（RTCM3 帧体通用做法）
 # ============================================================
 class BitReader:
     """MSB-first 位流读取器。
@@ -135,7 +136,7 @@ class BitReader:
 
 
 # ============================================================
-# CRC24Q —— 移植 rtkcmn.c:674 rtk_crc24q
+# CRC24Q 校验（RTCM3 标准多项式 0x1864CFB，查表实现）
 # ============================================================
 # rtkcmn.c:130  #define POLYCRC24Q 0x1864CFBu
 _POLY_CRC24Q = 0x1864CFB
@@ -197,7 +198,7 @@ class RTCM3Decoder:
         # 或一次性：
         msgs = dec.feed_all(bytes_blob)
 
-    帧同步逻辑移植 rtcm.c:261 input_rtcm3()：
+    帧同步逻辑（RTCM3 标准：0xD3 前导 + 10-bit 长度 + CRC24Q）：
       - nbyte==0 时找 0xD3；
       - 收齐 3 字节后从 bit 14 读 10-bit 长度；
       - 收齐 payload+3 字节 CRC 后校验并解码。

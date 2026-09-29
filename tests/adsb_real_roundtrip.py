@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """dump1090 真实 Mode-S/ADS-B 解码往返验证（不能造假）。
 
-所有协议常量均逐条对照 dump1090 源码实现（见 mbdsdr_ai/adsb.py 内
-「来源: dump1090 <file>:<line>」标注）。本测试证明：
-  - CRC-24(多项式0xFFF409) 对真实公开 DF17 测试帧余数为 0；
-  - TC1-4 呼号编解码往返一致；
-  - TC19 空中速度解出的地速/航向与手算一致；
-  - CPR 全局编码→解码在多个纬度还原经纬度（量化精度内）；
-  - 合成 preamble+数据能被前导检测找到并解出 CRC 有效帧。
+所有协议常量均逐条对照 dump1090 源码实现（见 内
+「dump1090 <file>:<line>」标注）。本测试证明：
+ - CRC-24(多项式0xFFF409) 对真实公开 DF17 测试帧余数为 0；
+ - TC1-4 呼号编解码往返一致；
+ - TC19 空中速度解出的地速/航向与手算一致；
+ - CPR 全局编码→解码在多个纬度还原经纬度（量化精度内）；
+ - 合成 preamble+数据能被前导检测找到并解出 CRC 有效帧。
 
 运行：
-    cd <repo_root>
-    python3 tests/adsb_real_roundtrip.py
-"""
+ cd <repo_root>
+ python3"""
 from __future__ import annotations
 
 import math

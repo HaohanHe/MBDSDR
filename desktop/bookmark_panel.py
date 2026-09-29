@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 书签管理器面板（desktop/bookmark_panel.py）
 =================================================

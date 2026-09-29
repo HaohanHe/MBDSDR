@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """FakeRtlSdr — 可注入的 RTL-SDR 测试双棒（仅 tests/ 使用，不进运行路径）。
 
 模拟 pyrtlsdr.RtlSdr 的最小接口：center_freq / sample_rate / gain / read_samples()。

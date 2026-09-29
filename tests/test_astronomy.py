@@ -1,11 +1,12 @@
+# SPDX-License-Identifier: MIT
 """
-tests/test_astronomy.py — Stellarium 天球引擎移植验证
+tests/test_astronomy.py — 天文坐标变换验证
 ======================================================
 
 覆盖:
   1. 坐标往返 ICRF(J2000) <-> 地平, 误差 < 0.01° (celestial_geometry)
   2. GMST / 时间内核 (jtime) 正确性
-  3. 透视投影正反投影往返 (StelProjector pinhole)
+  3. 透视投影正反投影往返 (pinhole)
   4. TLE/SGP4 传播 (缓存真实 TLE, 已知时间位置可复现)
   5. 星等渲染 / COSPAR 解析
   6. RFSkyView 透视投影: 天顶->屏幕中心, 地平->屏幕下方

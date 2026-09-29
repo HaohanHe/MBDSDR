@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """确定性单测：信道分析器 —— 已知信号 → 正确带宽/功率测量。"""
 import numpy as np
 import pytest

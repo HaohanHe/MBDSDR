@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 实时接收机地基 offscreen / 合成信号测试
 =================================================

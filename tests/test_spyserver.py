@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """SpyServerClient 确定性测试。
 
 对照 mbdsdr_ai/spyserver_client.py（上游 sdrpp rtl_tcp_client.cpp）。

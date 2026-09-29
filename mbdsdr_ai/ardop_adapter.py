@@ -1,24 +1,21 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/ardop_adapter.py
 ===========================
-ARDOP (hamarituc/ardop, 源于 John Wiseman G8BPQ 的 ARDOP 调制解调器)
-数字电台调制物理层的 Python 学习移植。
+ARDOP 窄带 HF 数字调制解调器物理层的 numpy 仿真模型。
 
-关键常量与算法均标注「来源: repos/ardop/ARDOP2/<file>:<line>」：
-  - 采样率 12000 Hz        ALSASound.c:1300 / CalcTemplates.c:93
-  - 中心频率 1500 Hz        CalcTemplates.c:186 (index 5)
-  - 11 个载频表             CalcTemplates.c:186
-  - 10 载频数据模式排除中心  CalcTemplates.c:191 (中心 1500Hz 作导频)
-  - 双音前导 1475/1525 Hz   Modulate.c:48
-  - 50/100 baud 符号        CalcTemplates.c:207 (120 采样=100baud)
-  - 帧同步字 0x1A 0x59      (SendLeaderAndSYNC 后的 2 字节帧类型,
-                            Modulate.c:91-118; 0x1A = D4FSK_500_50_E
-                            ARDOPC.h:362)
-  - QAM 星座               Modulate.c:363-389 (16QAM 2 sym/byte),
-                            FrameInfo() ARDOPC.c:713-860
+依据 ARDOP 波形公开约定实现下列参数与算法（本仓未包含其源代码）：
+  - 采样率 12000 Hz
+  - 中心频率 1500 Hz
+  - 11 个等间隔载频表
+  - 数据模式排除中心载频（中心 1500Hz 作导频）
+  - 双音前导 1475 / 1525 Hz
+  - 50 / 100 baud 符号速率
+  - 帧同步字 0x1A 0x59（帧类型字）
+  - QAM 星座映射
 
-本移植纯 numpy，实现可测的 OFDM 帧结构 / QAM 星座 / 帧同步检测 /
-连接状态机，不追求与官方二进制逐样本一致。
+本模块纯 numpy，实现可测的 OFDM 帧结构 / QAM 星座 / 帧同步检测 /
+连接状态机，不追求与任何官方二进制逐样本一致。
 """
 
 from __future__ import annotations
@@ -33,27 +30,27 @@ import numpy as np
 
 
 # =====================================================================
-# 物理层常量 —— 来源 repos/ardop/ARDOP2/
+# 物理层常量
 # =====================================================================
-ARDOP_SAMPLE_RATE = 12000          # ALSASound.c:1300
-ARDOP_CENTER_FREQ = 1500.0         # CalcTemplates.c:186 index 5
+ARDOP_SAMPLE_RATE = 12000 # 
+ARDOP_CENTER_FREQ = 1500.0
 
-# 11 个载频 (Hz) —— CalcTemplates.c:186
+# 11 个载频 (Hz)
 ARDOP_CARRIERS = [600, 800, 1000, 1200, 1400, 1500, 1600, 1800, 2000, 2200, 2400]
 # 10 载频数据模式用 index 0..4,6..10，排除中心(index 5=1500Hz 作导频)
-#   来源: CalcTemplates.c:191
+# 数据载频排除中心导频
 ARDOP_PILOT_INDEX = 5
 ARDOP_DATA_CARRIERS_10 = [ARDOP_CARRIERS[i] for i in range(11) if i != ARDOP_PILOT_INDEX]
 
-# 双音前导 (leader) 音调 —— Modulate.c:48
+# 双音前导 (leader) 音调 —— 
 ARDOP_LEADER_F1 = 1475.0
 ARDOP_LEADER_F2 = 1525.0
 
-# 帧同步字（2 字节）—— 0x1A = D4FSK_500_50_E (ARDOPC.h:362)，
+# 帧同步字（2 字节）—— 0x1A = D4FSK_500_50_E ()，
 # 后接帧类型/会话 ID 第二字节。任务约定同步字 = 0x1A 0x59。
 ARDOP_SYNC_WORD = bytes([0x1A, 0x59])
 
-# 符号时长 —— CalcTemplates.c:207
+# 符号时长
 #   120 samples @12kHz = 10ms (100 baud); 240 samples = 20ms (50 baud)
 ARDOP_SPS_100BAUD = 120
 ARDOP_SPS_50BAUD = 240
@@ -61,19 +58,19 @@ ARDOP_SPS_50BAUD = 240
 ARDOP_FRAME_MS = 160
 ARDOP_FRAME_SYMBOLS = 16
 
-# FEC 类型 —— FrameInfo() ARDOPC.c:749-860
+# FEC 类型 —— FrameInfo() 
 #   IDFRAME: data=12, RS(16,12) ; ConReq: RS(8,6) ; 16QAM: RS(160,120)
 class ARDOPFEC(str, Enum):
     NONE = "none"
-    RS_16_12 = "rs(16,12)"   # IDFRAME  ARDOPC.c:749-750
-    RS_8_6 = "rs(8,6)"       # ConReq   ARDOPC.c:759-760
-    RS_160_120 = "rs(160,120)"  # 16QAM  ARDOPC.c:824-825
+    RS_16_12 = "rs(16,12)" # IDFRAME  
+    RS_8_6 = "rs(8,6)" # ConReq   
+    RS_160_120 = "rs(160,120)" # 16QAM  
 
 
 # =====================================================================
 # QAM 星座 —— Gray 编码
 # =====================================================================
-# Modulate.c:363 起：16QAM 每字节 2 符号 (l=2)；QPSK/4PSK 每字节 4 符号。
+#  起：16QAM 每字节 2 符号 (l=2)；QPSK/4PSK 每字节 4 符号。
 # 这里用标准 Gray 映射的复星座点（单位能量归一）。
 def _gray(bits: int, n: int) -> int:
     """n bit 二进制 -> Gray 码。"""
@@ -83,18 +80,18 @@ def _gray(bits: int, n: int) -> int:
 def qam_constellation(order: int) -> np.ndarray:
     """返回 order=4/16/64 的单位平均功率复星座点，索引=Gray 符号值。
 
-    4-QAM  = QPSK  (Modulate.c:828 4PSK)
-    16-QAM = Modulate.c:363 "16QAM"
+    4-QAM  = QPSK  ( 4PSK)
+    16-QAM =  "16QAM"
     64-QAM = 高阶模式（任务要求）
     """
     m = int(math.log2(order))
     nside = int(math.sqrt(order))
     levels = np.arange(nside) - (nside - 1) / 2.0
-    # Gray 排序：把 Gray 码值映射到 (I,Q) 网格
+ # Gray 排序：把 Gray 码值映射到 (I,Q) 网格
     sym = np.zeros(order, dtype=complex)
     avg = 0.0
     for g in range(order):
-        # Gray->binary
+ # Gray->binary
         b = g
         shift = g >> 1
         while shift:
@@ -119,7 +116,7 @@ QAM64 = qam_constellation(64)
 def bits_to_symbols(bits: np.ndarray, order: int) -> np.ndarray:
     """比特数组 -> Gray 符号索引数组。"""
     m = int(math.log2(order))
-    # 补齐到 m 的整数倍
+ # 补齐到 m 的整数倍
     pad = (-len(bits)) % m
     if pad:
         bits = np.concatenate([bits, np.zeros(pad, dtype=bits.dtype)])
@@ -146,7 +143,7 @@ def modulate_qam(sym: np.ndarray, order: int) -> np.ndarray:
 def demodulate_qam(tone: np.ndarray, order: int) -> np.ndarray:
     """软判决：每个复样本找最近星座点。"""
     const = {4: QAM4, 16: QAM16, 64: QAM64}[order]
-    # tone: (N,) complex; const: (M,)
+ # tone: (N,) complex; const: (M,)
     d = np.abs(tone[:, None] - const[None, :])
     return np.argmin(d, axis=1)
 
@@ -159,20 +156,20 @@ class ARDOFFrame:
     """一个 ARDOP 物理帧。
 
     布局（学习模型）：
-      leader   : 双音 1475/1525 Hz (Modulate.c:48)
+      leader   : 双音 1475/1525 Hz ()
       sync     : 0x1A 0x59 两字节同步字 (4FSK)
       payload  : data_carriers 上的 QAM 符号
     """
 
     payload_bits: np.ndarray
-    order: int = 16          # 4/16/64
-    n_carriers: int = 10     # 1/2/10
+    order: int = 16 # 4/16/64
+    n_carriers: int = 10 # 1/2/10
     fec: ARDOPFEC = ARDOPFEC.RS_160_120
 
 
 # ---- 4FSK 同步字节调制（同步字 0x1A 0x59） ----
 # SendLeaderAndSYNC: 每字节 4 符号 (3 数据 + 1 奇偶)，
-#   50baud 中心音调 1350/1450/1550/1650 Hz (Modulate.c:108-114)
+#   50baud 中心音调 1350/1450/1550/1650 Hz ()
 FSK_SYNC_TONES = [1350.0, 1450.0, 1550.0, 1650.0]
 
 
@@ -184,7 +181,7 @@ def _tone(freq: float, n: int, fs: float, phase0: float = 0.0) -> np.ndarray:
 def build_leader(n_symbols: int = 10, fs: float = ARDOP_SAMPLE_RATE) -> np.ndarray:
     """双音前导：50 baud (240 samples/sym) 1475/1525 Hz 交替。
 
-    来源: Modulate.c:45-70 GetTwoToneLeaderWithSync。
+    双音 leader + sync 字同步帧。
     """
     sps = ARDOP_SPS_50BAUD
     out = np.empty(n_symbols * sps, dtype=np.float64)
@@ -202,7 +199,7 @@ def build_sync_word(
 ) -> np.ndarray:
     """把 2 字节同步字编成 50baud 4FSK 波形。
 
-    每字节 4 个 2-bit 符号 (Modulate.c:97-117)，符号 k 选
+    每字节 4 个 2-bit 符号 ()，符号 k 选
     FSK_SYNC_TONES[k]。最后一个符号为奇偶位（学习模型取 bit0）。
     """
     sps = ARDOP_SPS_50BAUD
@@ -230,16 +227,16 @@ def build_ofdm_data(
     """
     carriers = ARDOP_DATA_CARRIERS_10[:n_carriers] if n_carriers == 10 else (
         [ARDOP_CENTER_FREQ] if n_carriers == 1 else [1400.0, 1600.0]
-    )
-    sps = ARDOP_SPS_100BAUD  # 100 baud
+ )
+    sps = ARDOP_SPS_100BAUD # 100 baud
     sym = bits_to_symbols(np.asarray(payload_bits), order)
-    # 需要的符号数 = frame_symbols * n_carriers
+ # 需要的符号数 = frame_symbols * n_carriers
     need = ARDOP_FRAME_SYMBOLS * len(carriers)
     if len(sym) < need:
         sym = np.concatenate([sym, np.zeros(need - len(sym), dtype=sym.dtype)])
     sym = sym[:need]
     qam = modulate_qam(sym, order)
-    # 逐符号叠加各载波
+ # 逐符号叠加各载波
     out = np.zeros(ARDOP_FRAME_SYMBOLS * sps, dtype=np.float64)
     t = np.arange(sps) / fs
     for s in range(ARDOP_FRAME_SYMBOLS):
@@ -278,13 +275,13 @@ def detect_sync_word(
     template = build_sync_word(fs=fs)
     if len(audio) < len(template):
         return None
-    # 归一化互相关（滑动）
+ # 归一化互相关（滑动）
     n = len(template)
     tpl = template - template.mean()
     tpl_norm = np.linalg.norm(tpl) + 1e-12
     best_off = 0
     best_score = -1e18
-    step = max(1, ARDOP_SPS_50BAUD // 2)  # 半符号步长搜索
+    step = max(1, ARDOP_SPS_50BAUD // 2) # 半符号步长搜索
     for off in range(0, len(audio) - n, step):
         seg = audio[off:off + n]
         if len(seg) < n:
@@ -294,28 +291,28 @@ def detect_sync_word(
         if score > best_score:
             best_score = score
             best_off = off
-    if best_score < 0.3:  # 相关阈值
+    if best_score < 0.3: # 相关阈值
         return None
     return int(best_off)
 
 
 # =====================================================================
-# 连接状态机 —— 移植 pktSession.c 的 ARQ 会话状态
+# ARQ 连接状态机
 # =====================================================================
 class ARDOPState(str, Enum):
     IDLE = "IDLE"
-    LISTENING = "LISTENING"           # SearchingForLeader (ofdm.c:986)
-    CONNECT_REQ = "CONNECT_REQ"       # ConReq200/500/2500 (ARDOPC.c:757)
-    CONNECTED = "CONNECTED"           # ConAck
-    DATA = "DATA"                     # PktFrameData
-    DISC = "DISC"                     # DISCFRAME
+    LISTENING = "LISTENING" # SearchingForLeader ()
+    CONNECT_REQ = "CONNECT_REQ" # ConReq200/500/2500 ()
+    CONNECTED = "CONNECTED" # ConAck
+    DATA = "DATA" # PktFrameData
+    DISC = "DISC" # DISCFRAME
 
 
 @dataclass
 class ARDOPSession:
     """ARDOP ARQ 连接状态机（学习模型）。
 
-    状态迁移对齐 pktSession.c / ofdm.c:986：
+    ARQ 状态迁移：
       LISTENING --(收到 leader+sync)--> CONNECT_REQ
       CONNECT_REQ --(ConAck)--> CONNECTED
       CONNECTED --(PktFrameData)--> DATA
@@ -387,7 +384,7 @@ def register_ardop_tools(registry) -> None:
                       "sample_rate": ARDOP_SAMPLE_RATE,
                       "center_hz": ARDOP_CENTER_FREQ,
                       "carriers": ARDOP_CARRIERS},
-            )
+ )
         except Exception as e:
             return ToolResult(False, f"constellation 失败: {e}")
 
@@ -407,7 +404,7 @@ def register_ardop_tools(registry) -> None:
                 data={"n_samples": len(audio), "sync_offset": off,
                       "order": order, "n_carriers": ncar,
                       "fec": ARDOPFEC.RS_160_120.value},
-            )
+ )
         except Exception as e:
             return ToolResult(False, f"build_frame 失败: {e}")
 
@@ -427,20 +424,20 @@ def register_ardop_tools(registry) -> None:
                 success=True,
                 content=f"ARDOP 状态机: {' -> '.join(t['state'] for t in trace)}",
                 data={"trace": trace, "events": s.events},
-            )
+ )
         except Exception as e:
             return ToolResult(False, f"state machine 失败: {e}")
 
     registry.register(
         name="ardop_constellation",
         description="列出 ARDOP 4/16/64-QAM Gray 编码星座点及载频表 "
-                    "(采样率12kHz, 中心1500Hz, 11载频)。来源: CalcTemplates.c:186, Modulate.c:363。",
+                    "(采样率12kHz, 中心1500Hz, 11载频)。",
         parameters={"type": "object", "properties": {
             "order": {"type": "integer", "enum": [4, 16, 64]},
         }},
         handler=_constellation,
         category="ham_modes",
-    )
+ )
     registry.register(
         name="ardop_build_frame",
         description="合成一个 ARDOP OFDM 帧 (双音leader+同步字0x1A0x59+QAM数据) 并检测同步字位置。",
@@ -452,11 +449,11 @@ def register_ardop_tools(registry) -> None:
         }},
         handler=_build_frame,
         category="ham_modes",
-    )
+ )
     registry.register(
         name="ardop_state_machine",
         description="跑一遍 ARDOP ARQ 连接状态机 (LISTENING->CONNECT_REQ->CONNECTED->DATA->DISC)。",
         parameters={"type": "object", "properties": {}},
         handler=_state_machine,
         category="ham_modes",
-    )
+ )

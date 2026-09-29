@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 桌面端 UI 跟手度 offscreen 测试
 ================================

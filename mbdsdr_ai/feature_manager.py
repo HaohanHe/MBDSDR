@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/feature_manager.py — 特性插件管理器
 =============================================

@@ -1,15 +1,17 @@
-"""METEOR-M2 LRPT 解调链（SatDump 风格精简版）。
+# SPDX-License-Identifier: MIT
+"""METEOR-M2 LRPT 解调链（依据 METEOR LRPT 公开格式独立实现）。
 
-上游对照（docs/learn/porting_2026_09_27.md §4.4）：
-  - ``plugins/meteor_support/meteor/module_meteor_lrpt_decoder.cpp:34``  Viterbi r=1/2 K=7
-  - ``:119`` ``ReedSolomon(RS223)``
-  - ``:172`` ``diff.decode_bits``（NRZ-M）
-  - ``:201`` QPSK 同步字：非差分 ``0xfca2b63db00d9794``，差分 ``0xfc4ef4fd0cc2df89``
-  - ``src-core/common/codings/randomization.cpp:4-36`` CCSDS PN 扰码表
+公开格式要点（METEOR-M2 LRPT）：
+  - QPSK 下行，格雷映射；可含 NRZ-M 差分编码。
+  - 信道编码：CCSDS 卷积码 r=1/2 K=7，级联 Reed-Solomon (255,223)。
+  - CCSDS 伪随机扰码（PN，255 字节周期）。
+  - QPSK 同步字：非差分 ``0xfca2b63db00d9794``（差分版为 ``0xfc4ef4fd0cc2df89``）。
 
 完整 LRPT 链是 QPSK→差分→Viterbi→解扰→RS→图像。本模块做确定性可测的
 硬判决版：QPSK 硬判决 → CCSDS 解扰 → RS(255,223) 解码 → 帧重组。
 Viterbi 软判决留接口（``soft_viterbi`` 参数），不强行实现 K=7 全译码器。
+
+SatDump、meteor_demod 等开源项目仅作技术参考与致谢，本仓未包含其源代码。
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ import numpy as np
 
 from ..fec import ReedSolomon, Scrambler, CCSDS_PN
 
-# 非差分 QPSK LRPT 同步字（SatDump module_meteor_lrpt_decoder.cpp:201）
+# METEOR-M2 LRPT 非差分 QPSK 同步字（公开 LRPT 格式规定）
 LRPT_ASYNC_WORD = bytes.fromhex("fca2b63db00d9794")
 
 

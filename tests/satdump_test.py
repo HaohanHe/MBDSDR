@@ -1,6 +1,7 @@
-"""SatDump 真实源码移植验证测试。
+# SPDX-License-Identifier: MIT
+"""气象卫星投影/LRPT/HRPT 已知向量与往返测试（合成向量，非硬件 / NOT HARDWARE）。
 
-对照 SatDump (github.com/altillimity/SatDump) C++ 源码逐行移植后的自检：
+对 mbdsdr_ai/satdump_adapter.py 的自检测试：
   1. 投影：已知卫星位置 + 像元 -> 地面经纬度（星下点应回到星下点，边缘应偏离）；
   2. 等距矩形投影往返；
   3. 图像合成：已知通道数据 -> RGB / 伪彩色不崩溃、形状正确；

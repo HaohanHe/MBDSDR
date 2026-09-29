@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: MIT
 """
-FY-4 DVB-S2 物理层 + FY-3 X 波段 AHRPT 测试
+FY-4 DVB-S2 物理层 + FY-3 X 波段 AHRPT 测试（合成向量，非硬件 / NOT HARDWARE）
 =============================================
 
-覆盖（移植自 SatDump GPL-3.0，来源标注见 fengyun_sat.py 各段注释）：
+覆盖（依据 ETSI EN 302 307 与 CCSDS 标准）：
   1. DVB-S2 SOF 26-bit 硬匹配检测
   2. PLFRAME 定界（normal=64890 bit / short=16290 bit）
   3. PLS code 编解码往返（modcod / short / pilots）

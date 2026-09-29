@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """时钟恢复单测。
 
 合成已知符号率的 FSK / BPSK / OOK 信号，验证 Gardner 与 EarlyLateGate

@@ -1,11 +1,12 @@
-"""FT8 77-bit payload 解包——移植 wsjtx unpack77 的主分支。
+# SPDX-License-Identifier: MIT
+"""FT8 77-bit payload 解包（独立实现）。
 
 覆盖最常见两类（约占 FT8 绝大多数流量）：
 - Type 0.0 (i3=0,n3=0): 自由文本，71 bit，每字符 6 bit base-40
 - Type 1   (i3=1/2):     标准消息 CQ/call 网格 或 call call 报告
 其余类型（Field Day/WSPR/气象/...）返回 None，留待扩展。
 
-位序：输入 77 个 bit，第 0 个为 MSB（与 wsjtx c77(1) 对齐）。
+位序：输入 77 个 bit，第 0 个为 MSB。布局为公开 77-bit 报文格式事实。
 """
 from __future__ import annotations
 

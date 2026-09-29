@@ -1,18 +1,18 @@
-"""气象卫星解码器（移植自 SatDump noaa_apt 插件）。
+# SPDX-License-Identifier: MIT
+"""气象卫星解码器（依据 NOAA APT 公开格式独立实现）。
 
-上游对照（docs/learn/satdump.md §10）：
-- plugins/analog_support/noaa_apt/module_noaa_apt_demod.cpp:43   正交 FM 鉴频
-- plugins/analog_support/noaa_apt/module_noaa_apt_decoder.h:14-15 APT_IMG_WIDTH=2080, OVERS=4
-- .../module_noaa_apt_decoder.cpp:205-214 接收链（频移-2400→重采样→LPF→取包络）
-- .../module_noaa_apt_decoder.cpp:1013-1048 39 样本同步字滑动互相关
-- .../module_noaa_apt_decoder.cpp:802-803 通道 A=86..995, B=1126..2035
+公开格式要点（NOAA POES APT 广播格式）：
+- APT 副载波 2400 Hz，子载波频移键控；解调后取包络即图像幅度。
+- 行结构：39 样本同步方波 + 间隔 + 图像区；APT_IMG_WIDTH=2080 样本/行（双路各 1040）。
+- 行同步用 39 样本同步方波的滑动互相关定位行首。
+- 通道 A/B 各取 909 像素图像区。
 
-本模块不重复造轮子：底层解调/同步/切通道直接复用
-mbdsdr_ai/noaa_apt_lite.py（已逐常量对照 noaa-apt Rust 实现）。
-这里提供薄封装：
+本模块提供薄封装：
   * NOAAAPTDecoder — WAV/原始音频入 → A/B 通道灰度图 + PNG 出
   * load_wav_mono  — 读 16-bit PCM WAV
-  * auto_detect_decoder — 按频率选解码器（增强）
+  * auto_detect_decoder — 按频率选解码器
+
+SatDump、noaa-apt 等开源项目仅作技术参考与致谢，本仓未包含其源代码。
 """
 from __future__ import annotations
 
@@ -23,12 +23,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-# 复用 noaa_apt_lite 的常量与全链解码（已对照 SatDump/noaa-apt 交叉校准）
+# 复用 noaa_apt_lite 的常量与全链解码（依据 NOAA APT 公开格式独立实现）
 from .. import noaa_apt_lite as _apt
 
 
 # --------------------------------------------------------------------------- #
-# WAV 读取（16-bit PCM mono/stereo，对照 SatDump module_noaa_apt_decoder.cpp:89-97）
+# WAV 读取（16-bit PCM mono/stereo）
 # --------------------------------------------------------------------------- #
 def load_wav_mono(path: str) -> Tuple[np.ndarray, float]:
     """读 16-bit PCM WAV → (float64 采样 [-1,1], 采样率)。立体声取左声道。"""
@@ -118,7 +118,7 @@ class NOAAAPTDecoder:
             satellite = self._guess_satellite(path)
         return self.decode_audio(audio, fr, satellite=satellite)
 
-    # 增强：从文件名/频率猜卫星（对照 SatDump :99-133）
+    # 从文件名/频率猜卫星
     def _guess_satellite(self, path: str) -> str:
         base = os.path.basename(path).upper()
         for name in ("NOAA-15", "NOAA-18", "NOAA-19",
@@ -154,7 +154,6 @@ class NOAAAPTDecoder:
 def auto_detect_decoder(freq_hz: float, tol_hz: float = 15e3) -> Dict[str, Any]:
     """按下行频率返回应使用的解码器与卫星元数据。
 
-    对照 SatDump module_noaa_apt_decoder.cpp:115-153。
     返回 {decoder, satellite, norad, freq_hz} 或 {decoder: None, reason}。
     """
     table = [

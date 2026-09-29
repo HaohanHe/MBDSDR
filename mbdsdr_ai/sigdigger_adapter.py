@@ -1,17 +1,18 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI - SigDigger / sigutils 真实源码移植适配器
+MBDSDR AI - SigDigger / sigutils 适配器
 =====================================================
 sigdigger_adapter.py
 
 把 SigDigger (https://github.com/BatchDrake/SigDigger) 的底层库 sigutils
 (https://github.com/BatchDrake/sigutils) 的「信号检测 + 自动调制识别」核心
-从 C 移植为纯 numpy。不依赖 libsigutils / suscan。
+从 C 以纯 numpy。不依赖 libsigutils / suscan。
 
 覆盖：
   1. 运行峰值检测器（滑动窗均值/方差，阈值用 sigma 倍数）
-     - src/sigutils/detect.c:48  su_peak_detector_feed
+     - src/sigutils/  su_peak_detector_feed
   2. 信道发现（能量检测 + SNR 门限 + 最小带宽）
-     - src/include/sigutils/detect.h:37-47  常量
+     - src/include/sigutils/  常量
        MIN_SNR=6dB, MIN_BW=10Hz, ALPHA=1e-2, BETA=1e-3, GAMMA=0.5,
        pd_thres=2(sigmas), pd_signif=10dB
   3. 自动调制识别（基于瞬时幅度/相位/频率特征的决策树）
@@ -31,18 +32,18 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# ── sigutils 信道检测器常量（detect.h:37-47）─────────────────────────────
-SU_CHANNEL_DETECTOR_MIN_SNR_DB = 6.0    # detect.h:38  SU_CHANNEL_DETECTOR_MIN_SNR
-SU_CHANNEL_DETECTOR_MIN_BW_HZ = 10.0    # detect.h:39  SU_CHANNEL_DETECTOR_MIN_BW
-SU_CHANNEL_DETECTOR_ALPHA = 1e-2        # detect.h:41  PSD 平均系数
-SU_CHANNEL_DETECTOR_BETA = 1e-3         # detect.h:42  spmax/spmin 平均系数
-SU_CHANNEL_DETECTOR_GAMMA = 0.5         # detect.h:43  峰值跟踪系数
-SU_PD_THRES_SIGMAS = 2.0               # detect.h:141 pd_thres = 2
-SU_PD_SIGNIF_DB = 10.0                 # detect.h:142 pd_signif = 10 dB
+# ── sigutils 信道检测器常量─────────────────────────────
+SU_CHANNEL_DETECTOR_MIN_SNR_DB = 6.0    #   SU_CHANNEL_DETECTOR_MIN_SNR
+SU_CHANNEL_DETECTOR_MIN_BW_HZ = 10.0    #   SU_CHANNEL_DETECTOR_MIN_BW
+SU_CHANNEL_DETECTOR_ALPHA = 1e-2        #   PSD 平均系数
+SU_CHANNEL_DETECTOR_BETA = 1e-3         #   spmax/spmin 平均系数
+SU_CHANNEL_DETECTOR_GAMMA = 0.5         #   峰值跟踪系数
+SU_PD_THRES_SIGMAS = 2.0               #  pd_thres = 2
+SU_PD_SIGNIF_DB = 10.0                 #  pd_signif = 10 dB
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 1. 运行峰值检测器 —— 移植 detect.c:48 su_peak_detector_feed
+# 1. 运行峰值检测器 ——  su_peak_detector_feed
 # ═══════════════════════════════════════════════════════════════════════
 @dataclass
 class SigutilsPeakDetector:
@@ -52,55 +53,55 @@ class SigutilsPeakDetector:
     用窗内均值/方差算 threshold = thr2 * variance（thr2 = thres^2），
     若 (x-mean)^2 > threshold 则判峰：x>mean → +1（上峰），否则 -1（下峰）。
 
-    移植 detect.c:48-100。
+    。
     """
 
     size: int = 10
     thres_sigmas: float = SU_PD_THRES_SIGMAS
 
     def __post_init__(self):
-        self.thr2 = self.thres_sigmas ** 2       # detect.c:38
+        self.thr2 = self.thres_sigmas ** 2       # 
         self.history = np.zeros(self.size, dtype=np.float64)
         self.p = 0
         self.count = 0
         self.accum = 0.0
-        self.inv_size = 1.0 / self.size          # detect.c:43
+        self.inv_size = 1.0 / self.size          # 
 
     def feed(self, x: float) -> int:
-        """喂入一个样本，返回 0（非峰）/ +1（上峰）/ -1（下峰）。detect.c:48。"""
+        """喂入一个样本，返回 0（非峰）/ +1（上峰）/ -1（下峰）。。"""
         if self.count < self.size:
-            # 填充阶段，不判决（detect.c:67-69）
+            # 填充阶段，不判决
             self.history[self.count] = x
             self.count += 1
             self.accum += x
             return 0
 
-        mean = self.inv_size * self.accum                 # detect.c:71
+        mean = self.inv_size * self.accum                 # 
         d = self.history - mean
-        variance = float(np.sum(d * d)) * self.inv_size    # detect.c:74-79
-        x2 = (x - mean) ** 2                               # detect.c:81-82
-        threshold = self.thr2 * variance                   # detect.c:83
+        variance = float(np.sum(d * d)) * self.inv_size    # 
+        x2 = (x - mean) ** 2                               # 
+        threshold = self.thr2 * variance                   # 
 
         peak = 0
-        if x2 > threshold:                                 # detect.c:85
-            peak = 1 if x > mean else -1                   # detect.c:86
+        if x2 > threshold:                                 # 
+            peak = 1 if x > mean else -1                   # 
 
         # 滑动：弹出最老样本，压入新样本
-        self.accum -= self.history[self.p]                 # detect.c:90
-        self.history[self.p] = x                           # detect.c:91
+        self.accum -= self.history[self.p]                 # 
+        self.history[self.p] = x                           # 
         self.p += 1
-        if self.p == self.size:                            # detect.c:93-94
+        if self.p == self.size:                            # 
             self.p = 0
-        self.accum += x                                    # detect.c:97
+        self.accum += x                                    # 
         return peak
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 2. 信道发现 —— 移植 detect.c 能量/SNR 检测
+# 2. 信道发现 —— detect.c 能量/SNR 检测
 # ═══════════════════════════════════════════════════════════════════════
 @dataclass
 class SigutilsChannel:
-    """一个检测到的信道。对应 sigutils_channel（detect.h:145）。"""
+    """一个检测到的信道。对应 sigutils_channel。"""
     fc_hz: float          # 中心频率
     f_lo_hz: float        # 下界
     f_hi_hz: float        # 上界
@@ -130,12 +131,12 @@ class SigutilsChannelDetector:
         if len(p) == 0:
             return []
 
-        # 噪声底：取最低 10% bin 的均值（detect.c:706-712 用最小值近似，这里更稳）
+        # 噪声底：取最低 10% bin 的均值（ 用最小值近似，这里更稳）
         sorted_p = np.sort(p)
         n_low = max(1, int(len(p) * 0.1))
         n0_db = float(np.mean(sorted_p[:n_low]))
 
-        # SNR 门限（detect.h:51  cp->snr > MIN_SNR）
+        # SNR 门限（  cp->snr > MIN_SNR）
         threshold_db = n0_db + self.min_snr_db
         above = p > threshold_db
 
@@ -218,7 +219,7 @@ def identify_modulation(samples: np.ndarray, sample_rate: float) -> Dict[str, An
         "freq_range_hz": freq_range,
         "spectral_flatness": flat,
         "sample_rate": sample_rate,
-        "source": "SigDigger UIMediator / sigutils detect.h:37-47",
+        "source": "SigDigger UIMediator / sigutils ",
     }
 
 
@@ -249,7 +250,7 @@ def register_sigdigger_tools(registry) -> None:
                 "num_channels": len(chans),
                 "defaults": {"min_snr_db": SU_CHANNEL_DETECTOR_MIN_SNR_DB,
                              "min_bw_hz": SU_CHANNEL_DETECTOR_MIN_BW_HZ},
-                "source": "sigutils detect.h:37-47 / detect.c DISCOVERY",
+                "source": "sigutils  / detect.c DISCOVERY",
             }
             return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
         except Exception as e:
@@ -283,7 +284,7 @@ def register_sigdigger_tools(registry) -> None:
                 if r != 0:
                     peaks.append({"index": i, "direction": "up" if r > 0 else "down"})
             data = {"peaks": peaks, "num_peaks": len(peaks),
-                    "source": "sigutils detect.c:48 su_peak_detector_feed"}
+                    "source": "sigutils  su_peak_detector_feed"}
             return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
         except Exception as e:
             return ToolResult(False, f"峰值检测失败: {e}")
@@ -323,7 +324,7 @@ def register_sigdigger_tools(registry) -> None:
     registry.register(
         name="sigutils_peak_detector",
         description=("sigutils 滑动窗峰值检测器：在功率序列上用 mean±2σ 找峰。"
-                     "移植 detect.c:48。"),
+                     "。"),
         parameters={
             "type": "object",
             "properties": {

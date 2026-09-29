@@ -1,35 +1,33 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR IQ 前端校正链
-====================
+IQ front-end correction chain.
 
-在 SDR 后端读取复数 IQ 之后、进 FFT / 解调之前，对零中频（ZIF）接收链
-做三类基础时域校正——SDR++ / GQRX 等成熟 SDR 软件均具备：
+Between reading complex I/Q from the SDR back-end and feeding the spectrum
+display / demodulator, this chain applies three standard time-domain corrections
+commonly found in software-defined radios:
 
-  1. DC 偏移去除：一阶 IIR DC blocker，跟踪随温度/时间慢漂的直流分量，
-     去掉后频谱中心频处不再有固定尖峰（DC spike）。
-  2. I/Q 不平衡校正：从数据估计 2×2 协方差并做白化，压制因 I/Q 两路
-     增益差与相位差产生的关于中心频对称的镜像（image）。
-  3. 抗混叠抽取：Kaiser 窗 FIR 低通（截止 = 输出 Nyquist，留过渡带）
-     之后再整数抽取，杜绝高频折叠混叠到基带。
+  1. DC offset removal: a first-order IIR DC blocker tracks the slowly drifting
+     DC component (temperature/time drift) so the centre frequency no longer
+     shows a fixed spike.
+  2. I/Q imbalance correction: estimate the 2x2 covariance and whiten the data,
+     suppressing the image caused by gain and quadrature errors between the
+     I and Q branches.
+  3. Anti-alias decimation: a Kaiser-windowed FIR low-pass (cutoff at the
+     output Nyquist, with a transition band) followed by integer decimation,
+     preventing high-frequency folding.
 
-设计要点
---------
-- 全部校正参数从真数据估计，不硬编码任何频点/增益/相位。
-- 流式友好：每个校正块维护跨块连续状态，可逐块 process()，
-  适配 receive_pipeline 的 IqReaderThread 逐块读取模式。
-- 可独立开关：IQFrontend.set_dc_removal() / set_iq_balance() /
-  set_decimation()，运行时切换不丢状态。
-- 纯 NumPy + 可选 SciPy（无 SciPy 时自动降级到 NumPy 实现），
-  不依赖 Qt，可在离线分析与实时链路共用。
+Design notes:
+  * All correction parameters are estimated from real data; no frequency, gain,
+    or phase is hard-coded.
+  * Streaming-friendly: each correction keeps continuous state across blocks.
+  * Independently switchable at run time without losing state.
+  * Pure NumPy with an optional SciPy fast path; no Qt dependency.
 
-抗混叠截止频率归一化说明（避免 2 倍错误）
-------------------------------------------
-scipy.signal.firwin 的 cutoff 以「输入 Nyquist = fs_in/2」为 1.0 归一化。
-抽取因子 D 后输出 Nyquist = fs_in/(2D)，对应归一化频率 1/D。
-因此低通 -6dB 截止应在 ~0.9/D（通带 0.8/D → 阻带 1/D），
-**不是** 0.5/D——后者把截止设到了输出 Nyquist 的一半，是常见 2 倍错误。
-
-License: GPL-3.0-or-later
+Anti-alias cutoff normalisation (avoiding the 2x error):
+  ``scipy.signal.firwin`` normalises cutoff to the input Nyquist = fs_in/2 as
+  1.0.  After decimation by D the output Nyquist is fs_in/(2D), i.e. 1/D in
+  that normalisation, so the low-pass -6 dB cutoff should be ~0.9/D -- not
+  0.5/D.
 """
 
 from __future__ import annotations
@@ -319,9 +317,9 @@ class AntiAliasDecimator:
     流程：Kaiser 窗 FIR 低通（截止 = 输出 Nyquist，留 ~20% 过渡带）
     → 每 factor 个样本取 1 个。输出采样率 = 输入采样率 / factor。
 
-    这是 DDC（数字下变频）的末级。对照 GNU Radio rational_resampler
-    的多相滤波结构：抽取前必须先把 |f| > fs_out/2 的分量滤掉，
-    否则高频会折叠混叠到基带，严重劣化解调质量。
+    This is the final stage of a DDC.  Before decimating, any content above
+    |f| > fs_out/2 must be filtered out, otherwise it folds into the baseband
+    and badly degrades demodulation.
 
     **截止频率归一化（关键，避免 2 倍错误）**：
     firwin 的 cutoff 以输入 Nyquist (fs_in/2) 为 1.0。

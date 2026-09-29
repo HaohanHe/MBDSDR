@@ -1,16 +1,13 @@
-"""三层一体协议分析（URH 风格，但自动化）。
+# SPDX-License-Identifier: MIT
+"""三层一体协议分析（自动化位层→符号层→协议层）。
 
-上游对照（docs/learn/porting_2026_09_27.md §3）：
-  - ``src/urh/ainterpretation/AutoInterpretation.py:151-207``  调制检测
-  - ``:344-370`` plateau 长度直方图估计符号率
-  - ``:373-440`` ``estimate()`` 全流程：噪声门限→分段→解调→采样→比特
-  - ``src/urh/awre/engines/LengthEngine.py``  长度字段聚类
-  - ``src/urh/awre/engines/ChecksumEngine.py:36-80``  CRC 猜测
+本模块把通用的无线电信号分析流程串成一键：
+  第一层 modulation_classifier 自动检测调制 + 符号率；
+  第二层 Gardner/包络采样 -> 硬判决比特 -> 同步字检测；
+  第三层 protocol_parser 切帧、CRC、字段推断。
 
-URH 需要 GUI 手动逐步；本模块把三层串成一键：
-  第一层 :mod:`~mbdsdr_ai.analysis.modulation_classifier` 自动检测调制 + 符号率
-  第二层 Gardner/包络采样 → 硬判决比特 → 同步字检测
-  第三层 :mod:`~mbdsdr_ai.analysis.protocol_parser` 切帧、CRC、字段推断
+Universal Radio Hacker (URH, https://github.com/jopohl/urh) 的分层思路仅作技术
+参考与致谢，本仓未包含其源代码。
 """
 
 from __future__ import annotations

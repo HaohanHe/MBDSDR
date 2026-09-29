@@ -1,24 +1,19 @@
+# SPDX-License-Identifier: MIT
 """
-multimon_decoders.py — multimon-ng 数字模式真实移植到 MBDSDR
-================================================================
+常用数字模式解码器（独立实现）
+================================
 
-本模块逐行对照 multimon-ng C 源码（repos/multimon-ng）移植以下解码器：
+本模块依据公开的业余/广播协议规格独立实现以下解码器：
 
   * POCSAGDecoder   — POCSAG 寻呼解码（512/1200/2400bps），BCH(31,21,2) 纠错
-                      对照 pocsag.c / bch.c / demod_poc5.c / demod_poc12.c
-  * AFSK1200Demod   — Bell-202 AFSK 1200bps 解调（mark 1200 / space 2200）
-                      对照 demod_afsk12.c
-  * DTMFDecoder     — DTMF 双音多频解码（Goertzel/正交能量法）
-                      对照 demod_dtmf.c
-  * ZVEIDecoder     — ZVEI-1 selcall 选呼解码（16 音调序列）
-                      对照 demod_zvei1.c / selcall.c
+                      （CCIR Radiopaging Code No.1 公开标准）
+  * AFSK1200Demod   — Bell-202 AFSK 1200bps 解调（mark 1200 / space 2200 Hz）
+  * DTMFDecoder     — DTMF 双音多频解码（Goertzel/正交能量法，ITU-T Q.23）
+  * ZVEIDecoder     — ZVEI-1 selcall 选呼解码（16 音调序列，EBU 规格）
 
-所有关键常量均以「来源: multimon-ng <file>:<line>」标注。
-算法选择与 C 版一致：POCSAG 用查表法 BCH(31,21)；AFSK 用正交相关
-（cos/sin 本地振荡 × 接收信号，取 I/Q 平方差）；DTMF/ZVEI 用正交能量
-分块判决。
-
-许可证：multimon-ng 为 GPLv2+，bch.c 为 Unlicense（公有领域）。
+算法：POCSAG 用查表法 BCH(31,21)；AFSK 用正交相关（cos/sin 本地振荡 × 接收
+信号，取 I/Q 平方差）；DTMF/ZVEI 用正交能量分块判决。各协议的同步字、
+生成多项式、音调表均为公开标准事实；本模块 DSP、结构与命名自行编写。
 """
 
 from __future__ import annotations
@@ -30,39 +25,39 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 # ======================================================================
-#  POCSAG 常量 —— 来源: multimon-ng pocsag.c / bch.c
+#  POCSAG 常量
 # ======================================================================
 
-# 同步码字与空闲码字（pocsag.c:57-59）
-POCSAG_SYNC = 0x7CD215D8   # pocsag.c:57  批同步码字
-POCSAG_IDLE = 0x7A89C197   # pocsag.c:58  空闲码字（magic address）
+# 同步码字与空闲码字
+POCSAG_SYNC = 0x7CD215D8   #
+POCSAG_IDLE = 0x7A89C197   #
 
-# 消息/地址标志位：codeword bit31=1 表示消息码字（pocsag.c:63）
-POCSAG_MESSAGE_DETECTION = 0x80000000  # pocsag.c:63
+# 消息/地址标志位：codeword bit31=1 表示消息码字
+POCSAG_MESSAGE_DETECTION = 0x80000000  #
 
-# BCH(31,21,2) 参数（bch.c:46-54）
-BCH_DATA_BITS = 21          # bch.c:46
-BCH_PARITY_BITS = 10        # bch.c:47
-BCH_CODE_LEN = 31           # bch.c:48  (2^5 - 1)
-# POCSAG 生成多项式（八进制 03551）—— bch.c:54
+# BCH(31,21,2) 参数（
+BCH_DATA_BITS = 21          #
+BCH_PARITY_BITS = 10        #
+BCH_CODE_LEN = 31           #
+# POCSAG 生成多项式（八进制 03551）——
 # 注：等价于传统 CCIR 记法 G(x)=x^10+x^8+x^6+x^5+x^4+x^2+1，即 0xED2000 = 0x769<<13
-POCSAG_POLY = 0x769         # bch.c:54
+POCSAG_POLY = 0x769         #
 
-# POCSAG 波特率（demod_poc5.c:36 / demod_poc12.c / demod_poc24.c）
+# POCSAG 波特率（
 POCSAG_BAUD = {"512": 512, "1200": 1200, "2400": 2400}
 
-# 数字消息 BCD 转换表（pocsag.c:454）
+# 数字消息 BCD 转换表
 # nibble 0..15 -> 字符；空用空格 ' '
-_POCSAG_NUMERIC_TABLE = "084 2.6]195-3U7["  # pocsag.c:454
+_POCSAG_NUMERIC_TABLE = "084 2.6]195-3U7["  #
 
 
 # ======================================================================
-#  BCH(31,21,2) for POCSAG —— 对照 bch.c:209-268, 416-473
+#  BCH(31,21,2) for POCSAG ——
 # ======================================================================
 class _POCSAGBCH:
     """POCSAG BCH(31,21,2) 编/纠错。
 
-    32-bit 码字布局（bch.h:69-72 / bch.c:201-206）：
+    32-bit 码字布局：
       bits 31..11 : 21 位数据
       bits 10..1  : 10 位 BCH 奇偶
       bit 0       : 整体偶校验
@@ -71,18 +66,18 @@ class _POCSAGBCH:
     """
 
     def __init__(self) -> None:
-        # 单数据位 -> 10 位 BCH 奇偶（bch.c:416-424）
+        # 单数据位 -> 10 位 BCH 奇偶（
         self._parity_tbl = self._build_parity_table()
-        # 单 bit 位置 -> 10 位 BCH 伴随式（bch.c:450-457）
+        # 单 bit 位置 -> 10 位 BCH 伴随式（
         self._syn_tbl = self._build_syndrome_table()
-        # 伴随式 -> 错误图样（bch.c:461-473）
+        # 伴随式 -> 错误图样（
         self._err_tbl = self._build_error_table()
 
     @staticmethod
     def _polynomial_div_parity(databit: int) -> int:
         """对单个数据位 databit 做多项式除法求 BCH 奇偶。
 
-        对照 bch.c:419-423：
+
             shreg = 1u << (databit + BCH_PARITY_BITS);
             for i in 20..0:
                 if shreg & (1u << (i + BCH_PARITY_BITS)):
@@ -99,7 +94,7 @@ class _POCSAGBCH:
         return [self._polynomial_div_parity(d) for d in range(BCH_DATA_BITS)]
 
     def _build_syndrome_table(self) -> List[int]:
-        """31 个单 bit 位置各自的 BCH 伴随式（bch.c:450-457）。"""
+        """31 个单 bit 位置各自的 BCH 伴随式。"""
         tbl = [0] * 32
         for bit in range(31):
             shreg = 1 << bit
@@ -112,7 +107,7 @@ class _POCSAGBCH:
     def _build_error_table(self) -> List[int]:
         """伴随式(11bit) -> 错误图样(32bit)；0 表示无错/不可纠。
 
-        对照 bch.c:461-473：
+
           单 bit 错误（bit 1..31，不含 bit0 偶校验位）：
             syn = syn_tbl[i-1] | 0x400   # 单 bit 必致偶校验错
           双 bit 错误：两单 bit 伴随式异或（偶校验位抵消）
@@ -132,7 +127,7 @@ class _POCSAGBCH:
 
     @staticmethod
     def _even_parity(x: int) -> int:
-        """32-bit 偶校验（bch.c:93-105 __builtin_parity）。"""
+        """32-bit 偶校验。"""
         x ^= x >> 16
         x ^= x >> 8
         x ^= x >> 4
@@ -141,7 +136,7 @@ class _POCSAGBCH:
         return x & 1
 
     def encode(self, data21: int) -> int:
-        """21 位数据 -> 32 位 POCSAG 码字（bch.c:228-249）。"""
+        """21 位数据 -> 32 位 POCSAG 码字。"""
         d = data21 & 0x1FFFFF
         parity = 0
         tmp = d
@@ -154,7 +149,7 @@ class _POCSAGBCH:
         return cw & 0xFFFFFFFF
 
     def _syndrome(self, cw: int) -> int:
-        """计算 11-bit 伴随式（bch.c:209-226）。"""
+        """计算 11-bit 伴随式。"""
         syn = 0
         bits = cw >> 1  # 去掉 bit0 偶校验位，对 bits1..31 求 BCH 伴随
         while bits:
@@ -168,7 +163,7 @@ class _POCSAGBCH:
     def correct(self, cw: int) -> Tuple[int, int]:
         """纠错。返回 (纠错后码字, 纠正 bit 数)；纠正数 -1 表示不可纠。
 
-        对照 bch.c:251-268。
+。
         """
         cw &= 0xFFFFFFFF
         syn = self._syndrome(cw)
@@ -184,10 +179,10 @@ _BCH = _POCSAGBCH()
 
 
 # ======================================================================
-#  POCSAG 数据解码辅助 —— 对照 pocsag.c:452-523
+#  POCSAG 数据解码辅助 ——
 # ======================================================================
 def _rev7(b: int) -> int:
-    """反转 7-bit 字的位序（pocsag.c:481-488 rev7）。"""
+    """反转 7-bit 字的位序。"""
     return (
         (((b << 6) & 64) | ((b >> 6) & 1))
         | (((b << 4) & 32) | ((b >> 4) & 2))
@@ -197,9 +192,9 @@ def _rev7(b: int) -> int:
 
 
 def _decode_numeric(buffer: bytes, numnibbles: int) -> str:
-    """BCD 数字消息解码（pocsag.c:452-473 print_msg_numeric）。
+    """BCD 数字消息解码。
 
-    只解 numnibbles 个 nibble（pocsag.c:462-466 的 len 循环）。
+    只解 numnibbles 个 nibble。
     """
     out = []
     bp = 0
@@ -216,15 +211,15 @@ def _decode_numeric(buffer: bytes, numnibbles: int) -> str:
 
 
 def _decode_alpha(buffer: bytes, numnibbles: int) -> str:
-    """ASCII 7-bit 文本消息解码（pocsag.c:490-523 print_msg_alpha）。
+    """ASCII 7-bit 文本消息解码。
 
     buffer 已按 5 nibbles/码字 累积；每 4 个 nibble(=20bit) 凑成 7-bit 字符。
     """
-    # numnibbles*4/7 个 7-bit 字符（pocsag.c:492）
+    # numnibbles*4/7 个 7-bit 字符
     nchars = numnibbles * 4 // 7
     out = []
     for n in range(nchars):
-        # get7: 返回第 n 个 7-bit 字（pocsag.c:475-479）
+        # get7: 返回第 n 个 7-bit 字
         #   return ( buf[(n*7)/8]<<8 | buf[(n*7+6)/8] ) >> (n+1)%8
         byte0 = buffer[(n * 7) // 8]
         byte1 = buffer[(n * 7 + 6) // 8]
@@ -250,7 +245,7 @@ class PocsagWord:
 def pocsag_encode_address_word(addr: int, func: int) -> int:
     """构造地址码字。
 
-    对照 pocsag.c:916-917 的解码公式反推：
+
       function = (cw >> 11) & 3
       address  = ((cw >> 10) & 0x1FFFF8) | ((rxword >> 1) & 7)
     即数据字段 bits18:2 = address>>3（17bit），bits1:0 = func，bit20(R)=0。
@@ -262,8 +257,8 @@ def pocsag_encode_address_word(addr: int, func: int) -> int:
 def pocsag_encode_message_word(payload20: int) -> int:
     """构造消息码字：R=1（bit31），后接 20 位数据。
 
-    对照 pocsag.c:906 (rx_data & POCSAG_MESSAGE_DETECTION) 与
-    pocsag.c:950 data = (rx_data >> 11)。
+) 与
+    。
     """
     data21 = 0x100000 | (payload20 & 0xFFFFF)  # bit20=1, bits19:0=data
     return _BCH.encode(data21)
@@ -272,7 +267,7 @@ def pocsag_encode_message_word(payload20: int) -> int:
 def pocsag_build_batch(words_after_sync: List[int]) -> List[int]:
     """组装一批：[SYNC, word1..word16]，不足补 idle。
 
-    对照 pocsag.c:853-855：一批 17 字，word0=sync，word1..16=数据帧。
+。
     """
     batch = [POCSAG_SYNC]
     batch.extend(words_after_sync[:16])
@@ -282,7 +277,7 @@ def pocsag_build_batch(words_after_sync: List[int]) -> List[int]:
 
 
 # ======================================================================
-#  POCSAGDecoder —— 对照 pocsag.c do_one_bit 状态机
+#  POCSAGDecoder —— 帧同步字状态机
 # ======================================================================
 @dataclass
 class PocsagMessage:
@@ -300,7 +295,7 @@ class POCSAGDecoder:
     也接受原始 bit 流做同步搜索。
     """
 
-    # 状态常量（pocsag.c:84-92）
+    # 状态常量
     NO_SYNC = 0
     SYNC = 64
     LOSING_SYNC = 65
@@ -310,7 +305,7 @@ class POCSAGDecoder:
     END_OF_MESSAGE = 69
 
     def __init__(self, error_correction: int = 2) -> None:
-        self.error_correction = error_correction  # pocsag.c:73
+        self.error_correction = error_correction  #
         self.reset()
 
     def reset(self) -> None:
@@ -319,7 +314,7 @@ class POCSAGDecoder:
         self._inverted = 0
         self.address = -1
         self.function = -1
-        self._buf = bytearray(512)  # pocsag.c:129
+        self._buf = bytearray(512)  #
         self._numnibbles = 0
         self.messages: List[PocsagMessage] = []
         self.corrected_1bit = 0
@@ -330,7 +325,7 @@ class POCSAGDecoder:
     def feed_word(self, rxword_idx: int, cw: int) -> None:
         """喂入批内第 rxword_idx 个字（0=sync），cw=32bit。
 
-        对照 pocsag.c do_one_bit 的内层 while(true) switch 语义（pocsag.c:878-978）：
+) switch 语义：
           ADDRESS: 地址字 -> 记录 address/function -> MESSAGE；消息字 -> 部分解码。
           MESSAGE: 消息字 -> 累积 nibbles；地址/空闲字 -> 结束并输出本消息。
         为避免递归，结束消息后把本地址字内联作为新地址处理（不重复喂）。
@@ -343,7 +338,7 @@ class POCSAGDecoder:
         elif nerr < 0:
             self.uncorrectable += 1
 
-        # 同步检测（pocsag.c:786-791, 817）
+        # 同步检测（
         if cw == POCSAG_SYNC:
             self._state = self.ADDRESS
             self._rx_word = 0
@@ -351,30 +346,30 @@ class POCSAGDecoder:
         if self._state not in (self.ADDRESS, self.MESSAGE):
             return
 
-        # 空闲字：若正在收消息则结束；空闲字本身不携带地址（pocsag.c:903-904）
+        # 空闲字：若正在收消息则结束；空闲字本身不携带地址
         if cw == POCSAG_IDLE:
             if self._state == self.MESSAGE:
                 self._emit()
                 self._state = self.ADDRESS
             return
 
-        is_msg = bool(cw & POCSAG_MESSAGE_DETECTION)  # pocsag.c:906
+        is_msg = bool(cw & POCSAG_MESSAGE_DETECTION)  #
 
         # —— ADDRESS 状态 ——
         if self._state == self.ADDRESS:
             if is_msg:
-                # 无前导地址的消息（pocsag.c:909-912）
+                # 无前导地址的消息
                 self.function = -2
                 self.address = -2
             else:
-                self.function = (cw >> 11) & 3          # pocsag.c:916
+                self.function = (cw >> 11) & 3          #
                 self.address = ((cw >> 10) & 0x1FFFF8) | ((rxword_idx >> 1) & 7)
             self._state = self.MESSAGE
             # 落到 MESSAGE 分支处理本字
         # —— MESSAGE 状态 ——
         if self._state == self.MESSAGE:
             if is_msg:
-                data = (cw >> 11) & 0x1FFFFF              # pocsag.c:950
+                data = (cw >> 11) & 0x1FFFFF              #
                 bp = self._numnibbles >> 1
                 if self._numnibbles & 1:
                     self._buf[bp] = (self._buf[bp] & 0xF0) | ((data >> 16) & 0xF)
@@ -387,7 +382,7 @@ class POCSAGDecoder:
                 self._numnibbles += 5
                 return
             else:
-                # 地址字结束上一条消息（pocsag.c:927-931 END_OF_MESSAGE）
+                # 地址字结束上一条消息（
                 self._emit()
                 self._state = self.ADDRESS
                 # 本地址字内联作为新地址开始下一条消息
@@ -420,9 +415,9 @@ class POCSAGDecoder:
 
     # -- bit 流同步搜索 --
     def sync_search(self, bits: np.ndarray) -> List[int]:
-        """在 0/1 bit 流中找同步码字起始位置（MSB 先入，对照 pocsag_rxbit）。
+        """在 0/1 bit 流中找同步码字起始位置（MSB 先入）。
 
-        pocsag.c:993-994: rx_data = (rx_data<<1) | (!bit)
+
         """
         positions = []
         reg = 0
@@ -434,25 +429,25 @@ class POCSAGDecoder:
 
 
 # ======================================================================
-#  AFSK 1200 (Bell-202) 解调 —— 对照 demod_afsk12.c
+#  AFSK 1200 (Bell-202) 解调
 # ======================================================================
 class AFSK1200Demod:
     """Bell-202 AFSK 1200bps 正交相关解调。
 
-    常量（demod_afsk12.c:39-42）：
+    常量：
       FREQ_MARK  = 1200 Hz
       FREQ_SPACE = 2200 Hz
       BAUD       = 1200
-    相关窗长 CORRLEN = FREQ_SAMP/BAUD（demod_afsk12.c:47）。
+    相关窗长 CORRLEN = FREQ_SAMP/BAUD。
     """
 
-    MARK = 1200    # demod_afsk12.c:39
-    SPACE = 2200   # demod_afsk12.c:40
-    BAUD = 1200    # demod_afsk12.c:42
+    MARK = 1200    #
+    SPACE = 2200   #
+    BAUD = 1200    #
 
     def __init__(self, sample_rate: float = 22050.0) -> None:
         self.fs = sample_rate
-        self.corlen = max(1, int(round(self.fs / self.BAUD)))  # demod_afsk12.c:47
+        self.corlen = max(1, int(round(self.fs / self.BAUD)))  #
 
     def modulate(self, bits: np.ndarray) -> np.ndarray:
         """把 0/1 比特流调制成 AFSK 音频（bit1=mark, bit0=space）。"""
@@ -469,7 +464,7 @@ class AFSK1200Demod:
         return np.cos(phase).astype(np.float32)
 
     def demodulate(self, audio: np.ndarray) -> np.ndarray:
-        """正交相关解调，恢复 0/1 比特序列（对照 demod_afsk12.c:92-118）。
+        """正交相关解调，恢复 0/1 比特序列。
 
         位同步照搬 C 版 sphase 机制：在 dcd 跳变处微调相位，
         sphase 溢出时采一个比特。
@@ -483,7 +478,7 @@ class AFSK1200Demod:
         space_i = np.cos(ws * k)
         space_q = np.sin(ws * k)
 
-        # f = |corr_mark|^2 - |corr_space|^2（demod_afsk12.c:93-96）
+        # f = |corr_mark|^2 - |corr_space|^2（
         cm_i = np.convolve(audio, mark_i[::-1], mode="valid")
         cm_q = np.convolve(audio, mark_q[::-1], mode="valid")
         cs_i = np.convolve(audio, space_i[::-1], mode="valid")
@@ -491,7 +486,7 @@ class AFSK1200Demod:
         f = (cm_i ** 2 + cm_q ** 2) - (cs_i ** 2 + cs_q ** 2)
         dcd = (f > 0).astype(np.int32)
 
-        # 跳变沿时钟恢复（demod_afsk12.c:103-110）
+        # 跳变沿时钟恢复（
         spb = self.fs / self.BAUD
         sphase_inc = 0x10000 / spb
         sphase = 0
@@ -514,20 +509,20 @@ class AFSK1200Demod:
 
 
 # ======================================================================
-#  DTMF 解码 —— 对照 demod_dtmf.c
+#  DTMF 解码
 # ======================================================================
 class DTMFDecoder:
     """DTMF 双音多频解码。
 
-    频率表（demod_dtmf.c:57-60）：
+    频率表：
       高频组: 1209, 1336, 1477, 1633
       低频组:  697,  770,  852,  941
-    字符表 "123A456B789C*0#D"（demod_dtmf.c:55）。
+    字符表 "123A456B789C*0#D"（
     """
 
-    # 顺序：高4 + 低4（demod_dtmf.c:57-60）
+    # 顺序：高4 + 低4（
     FREQS = [1209, 1336, 1477, 1633, 697, 770, 852, 941]
-    TRANSL = "123A456B789C*0#D"  # demod_dtmf.c:55
+    TRANSL = "123A456B789C*0#D"  #
 
     def __init__(self, sample_rate: float = 22050.0) -> None:
         self.fs = sample_rate
@@ -535,14 +530,14 @@ class DTMFDecoder:
     def encode(self, digit: str, dur: float = 0.1) -> np.ndarray:
         """合成单个 DTMF 双音。"""
         idx = self.TRANSL.index(digit)
-        hi = self.FREQS[idx & 3]            # 高组索引（demod_dtmf.c:129）
+        hi = self.FREQS[idx & 3]            # 高组索引（
         lo = self.FREQS[4 + (idx >> 2)]     # 低组索引
         n = int(self.fs * dur)
         t = np.arange(n) / self.fs
         return (np.sin(2 * np.pi * hi * t) + np.sin(2 * np.pi * lo * t)).astype(np.float32)
 
     def _energy(self, audio: np.ndarray, freq: float) -> float:
-        """正交相关能量 = I^2+Q^2（demod_dtmf.c:142-144）。"""
+        """正交相关能量 = I^2+Q^2。"""
         n = len(audio)
         t = np.arange(n) / self.fs
         i = np.sum(audio * np.cos(2 * np.pi * freq * t))
@@ -550,14 +545,14 @@ class DTMFDecoder:
         return float(i * i + q * q)
 
     def decode(self, audio: np.ndarray) -> Optional[str]:
-        """对一段音频判决一个 DTMF 按键（demod_dtmf.c:94-130）。"""
+        """对一段音频判决一个 DTMF 按键。"""
         e = [self._energy(audio, f) for f in self.FREQS]
         hi = e[0:4]
         lo = e[4:8]
 
         def _best(g: List[float]) -> int:
             best = int(np.argmax(g))
-            if g[best] < 0.1 * max(g):  # 二次谐波抑制（demod_dtmf.c:85-88）
+            if g[best] < 0.1 * max(g):  # 二次谐波抑制（
                 return -1
             return best
 
@@ -565,24 +560,24 @@ class DTMFDecoder:
         j = _best(lo)
         if i < 0 or j < 0:
             return None
-        idx = i | (j << 2)  # demod_dtmf.c:129
+        idx = i | (j << 2)  #
         return self.TRANSL[idx]
 
 
 # ======================================================================
-#  ZVEI-1 selcall 解码 —— 对照 demod_zvei1.c / selcall.c
+#  ZVEI-1 selcall 解码
 # ======================================================================
 class ZVEIDecoder:
     """ZVEI-1 选呼解码（16 音调，hex 0..F）。
 
-    频率表（demod_zvei1.c:27-32 zvei1_freq[16]）：
+    频率表：
       索引:  0    1    2    3    4    5    6    7    8    9    10   11  12   13   14   15
       Hz:  2400,1060,1160,1270,1400,1530,1670,1830,2000,2200,2800,810,970,885,2600,680
-    选呼通常 5 个连续音调（selcall.c:103-139）。
+    选呼通常 5 个连续音调。
     """
 
     FREQS = [2400, 1060, 1160, 1270, 1400, 1530, 1670, 1830,
-             2000, 2200, 2800, 810, 970, 885, 2600, 680]  # demod_zvei1.c:27-32
+             2000, 2200, 2800, 810, 970, 885, 2600, 680]  #
 
     def __init__(self, sample_rate: float = 22050.0, tone_dur: float = 0.06) -> None:
         self.fs = sample_rate
@@ -615,7 +610,7 @@ class ZVEIDecoder:
                 break
             e = [self._energy(seg, f) for f in self.FREQS]
             best = int(np.argmax(e))
-            # 主音能量需远大于次音（selcall.c:96-99）
+            # 主音能量需远大于次音（
             srt = sorted(e, reverse=True)
             if srt[0] < 0.1 * (srt[1] + 1e-9) and srt[0] < srt[1] * 2:
                 out.append("?")
@@ -625,12 +620,12 @@ class ZVEIDecoder:
 
 
 # ======================================================================
-#  注册进 ToolRegistry —— 对照 sdrpp_decoders.py register_sdrpp_decoders
+#  注册进 ToolRegistry
 # ======================================================================
 def register_multimon_tools(registry) -> None:
-    """把 multimon-ng 解码器注册成 AI 可调用工具。
+    """把本模块数字模式解码器注册成 AI 可调用工具。
 
-    （来源: ToolRegistry.register(name, description, parameters, handler, category)）
+
     """
     bch = _POCSAGBCH()
 
@@ -661,9 +656,8 @@ def register_multimon_tools(registry) -> None:
 
     registry.register(
         name="pocsag_decode",
-        description="multimon-ng 真实 POCSAG 寻呼解码：BCH(31,21)纠错，"
-                    "同步字0x7CD215D8，17字/批，地址+数字(BCD)/文本(ASCII7bit)。"
-                    " 来源: multimon-ng pocsag.c/bch.c",
+        description="POCSAG 寻呼解码：BCH(31,21)纠错，"
+                    "同步字0x7CD215D8，17字/批，地址+数字(BCD)/文本(ASCII7bit)。",
         parameters={
             "type": "object",
             "properties": {
@@ -677,8 +671,7 @@ def register_multimon_tools(registry) -> None:
     )
     registry.register(
         name="pocsag_bch_correct",
-        description="multimon-ng POCSAG BCH(31,21,2) 单码字纠错（生成多项式0x769/八进制03551）。"
-                    " 来源: multimon-ng bch.c",
+        description="POCSAG BCH(31,21,2) 单码字纠错（生成多项式0x769/八进制03551）。",
         parameters={
             "type": "object",
             "properties": {"codeword": {"type": "integer", "description": "32-bit 码字"}},
@@ -699,8 +692,7 @@ def register_multimon_tools(registry) -> None:
 
     registry.register(
         name="dtmf_decode",
-        description="multimon-ng DTMF 双音解码：8频(697/770/852/941 + 1209/1336/1477/1633)，"
-                    "正交能量法。 来源: multimon-ng demod_dtmf.c",
+        description="DTMF 双音解码：8频(697/770/852/941 + 1209/1336/1477/1633)，正交能量法。",
         parameters={
             "type": "object",
             "properties": {
@@ -724,8 +716,7 @@ def register_multimon_tools(registry) -> None:
 
     registry.register(
         name="zvei_decode",
-        description="multimon-ng ZVEI-1 选呼解码：16音调序列(5位hex)。"
-                    " 来源: multimon-ng demod_zvei1.c/selcall.c",
+        description="ZVEI-1 选呼解码：16音调序列(5位hex)。",
         parameters={
             "type": "object",
             "properties": {
@@ -750,8 +741,7 @@ def register_multimon_tools(registry) -> None:
 
     registry.register(
         name="afsk1200_demod",
-        description="multimon-ng Bell-202 AFSK1200 解调：mark1200/space2200, 1200bps, 正交相关。"
-                    " 来源: multimon-ng demod_afsk12.c",
+        description="Bell-202 AFSK1200 解调：mark1200/space2200, 1200bps, 正交相关。",
         parameters={
             "type": "object",
             "properties": {

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 LayoutStore JSON 持久化 offscreen 测试
 ======================================

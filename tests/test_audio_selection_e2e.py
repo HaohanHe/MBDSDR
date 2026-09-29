@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """端到端测试：音频设备枚举 / 选择 / 拔出安全降级 / 无设备错误提示 / 测试音。
 
 通过 monkeypatch 替换 ``mbdsdr_ai.audio_out.sd``（sounddevice），

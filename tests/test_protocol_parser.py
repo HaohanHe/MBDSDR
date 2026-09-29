@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """ProtocolParser 单测。
 
 合成含同步字 + 长度 + CRC-16/CCITT 的数据包，验证解析正确。

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 纯 Python CW（莫尔斯电报）解码器
 ========================================
@@ -10,9 +11,7 @@ MBDSDR 纯 Python CW（莫尔斯电报）解码器
 2. 检测电平跳变，得到 mark（按键）/space（停顿）段
 3. 用 mark 段中位数估计单位点长 unit（自适应），>2*unit 判为划(-)
 4. 用 space 长度切分（相对 unit）：<1.5=字符内，1.5~5=字符间，>=5=字间
-5. 莫尔斯表映射为文本
-
-MBDSDR Project - AI定义无线电 - GPL-3.0 - BI4MIB
+5. 莫尔斯表映射为文本（ITU 莫尔斯码，公开域）。
 """
 
 import math

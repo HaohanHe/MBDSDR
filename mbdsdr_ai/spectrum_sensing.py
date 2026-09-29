@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # -*- coding: utf-8 -*-
 """
 频谱感知（Spectrum Sensing）：认知无线电的能量检测器（Energy Detector）。

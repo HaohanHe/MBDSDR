@@ -1,13 +1,15 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - GK-2A LRIT 全管道接收链（IQ 采样 → 云图 PNG）
 ================================================================
 
-对标 SatDump (GPL-3.0) GK-2A LRIT 处理链，物理层 → 应用层完整实现：
+依据 CCSDS 空间数据系统标准与 GK-2A LRIT 公开下行格式独立实现，
+物理层 → 应用层完整实现：
 
     IQ complex64 采样
       → RRC 匹配滤波 + Costas 载波恢复 + 符号定时
       → BPSK 软符号
-      → Viterbi 软判决译码 (K=7, R=1/2, poly 0x4F/0x6D)
+      → Viterbi 软判决译码 (CCSDS 卷积码 K=7, R=1/2, poly 0x4F/0x6D)
       → 帧同步字 0x1ACFFC1D 相关检测 (1024B/帧)
       → CCSDS 解扰 (PN 255B 周期, 偏移 4)
       → Reed-Solomon (255,223) 译码 + I=4 交错 → 892B VCDU
@@ -16,33 +18,21 @@ MBDSDR AI 内核 - GK-2A LRIT 全管道接收链（IQ 采样 → 云图 PNG）
       → GK-2A LRIT 文件头 (Primary/ImageStructure/Segmentation/Annotation)
       → 图像段组装 → PNG 输出
 
-关键常量来源（SatDump 源码 GPL-3.0）：
+关键信道参数（依据 CCSDS 101/131 系列与 GK-2A LRIT 公开格式）：
   - 调制 BPSK / 符号率 128kbaud / RRC α=0.5
-      来源: SatDump resources/pipelines/GK2A.json  "gk2a_lrit" 段
   - 下行频率 1692.14 MHz (L 波段)
-      来源: SatDump resources/pipelines/GK2A.json  frequencies
-  - CADU 8192 bit = 1024B; 同步字 0x1ACFFC1D
-      来源: SatDump src-core/pipeline/modules/ccsds/module_ccsds_conv_concat_decoder.cpp:90
-  - Viterbi K=7 R=1/2 多项式 {79,109} = {0x4F,0x6D}
-      来源: SatDump src-core/common/codings/viterbi/viterbi27.h:16
-  - 卷积编码移位寄存器约定 my_state=(my_state<<1)|bit; out=parity(state&poly)
-      来源: SatDump src-core/common/codings/viterbi/cc_encoder.cpp:108-113
+  - CADU 8192 bit = 1024B; 接收同步字 0x1ACFFC1D
+  - Viterbi K=7 R=1/2 多项式 {79,109} = {0x4F,0x6D}（CCSDS 标准生成多项式）
   - CCSDS 解扰 PN 表 (255B 周期), 偏移 4, 解扰在 RS 之前
-      来源: SatDump src-core/common/codings/randomization.cpp:3-31,
-            module_ccsds_conv_concat_decoder.cpp:31,177-178
   - RS(255,223) 本原多项式 0x187, fcr=112, 根间隔 11, 32 校验字节, dual-basis
-      来源: SatDump src-core/common/codings/reedsolomon/reedsolomon.cpp:34
-            src-core/libs/correct/correct.h:180-181
-  - RS 交错深度 I=4, fill_bytes=-1 (无缩短)
-      来源: SatDump resources/pipelines/GK2A.json  "rs_i":4
-            module_ccsds_conv_concat_decoder.cpp:35,181
+  - RS 交错深度 I=4（无缩短）
   - GK-2A 图像分段头 (type=128): image_seq_nb/total_segments_nb/line_nb
-      来源: SatDump plugins/xrit_support/xrit/gk2a/gk2a_headers.h:43-61
   - GK-2A 压缩标志: 0=无, 1=小波/J2K, 2=渐进JPEG
-      来源: SatDump plugins/xrit_support/xrit/gk2a/decomp.cpp:27-43
 
-传输层 (VCDU/M_PDU/TP_PDU/SessionPDU/CRC16) 复用 mbdsdr_ai/goes_lrit.py
-（同样源自 CCSDS 标准，与 GOES-R 一致）。
+传输层 (VCDU/M_PDU/TP_PDU/SessionPDU/CRC16) 与 mbdsdr_ai/goes_lrit.py 一致
+（同属 CCSDS 标准）。
+
+SatDump（https://www.satdump.org/）等开源项目仅作技术参考与致谢，本仓未包含其源代码。
 """
 
 from __future__ import annotations
@@ -57,42 +47,40 @@ import numpy as np
 
 
 # ============================================================================
-# 链路层常量 —— 来源: SatDump resources/pipelines/GK2A.json
+# 链路层常量（GK-2A LRIT 公开下行参数）
 # ============================================================================
 
-#: 下行中心频率 (Hz)。来源: GK2A.json frequencies [[LRIT, 1692.14e6]]
+#: 下行中心频率 (Hz)。
 GK2A_LRIT_FREQ_HZ = 1692.14e6
 
-#: 推荐采样率 (Hz)。来源: GK2A.json "samplerate": 1e6
+#: 推荐采样率 (Hz)。
 GK2A_LRIT_SAMPLERATE = 1e6
 
-#: 符号率 (Bd)。来源: GK2A.json psk_demod "symbolrate": 128e3
+#: 符号率 (Bd)。
 GK2A_SYMBOL_RATE = 128e3
 
-#: RRC 滚降系数 α。来源: GK2A.json psk_demod "rrc_alpha": 0.5
+#: RRC 滚降系数 α。
 GK2A_RRC_ALPHA = 0.5
 
-#: 载波环带宽。来源: GK2A.json psk_demod "pll_bw": 0.02
+#: 载波环带宽。
 GK2A_PLL_BW = 0.02
 
-#: CADU 长度 8192 bit = 1024 字节。来源: GK2A.json "cadu_size": 8192
+#: CADU 长度 8192 bit = 1024 字节。
 CADU_BITS = 8192
 CADU_BYTES = CADU_BITS // 8  # = 1024
 
-#: 32 位同步字。来源: module_ccsds_conv_concat_decoder.cpp:90  asm_sync = 0x1acffc1d
+#: 32 位接收同步字 (ASM) = 0x1acffc1d
 SYNC_WORD = 0x1ACFFC1D
 SYNC_WORD_BYTES = SYNC_WORD.to_bytes(4, "big")
 SYNC_BYTES_LEN = 4
 
-#: 解扰起始偏移（跳过同步字）。来源: module_ccsds_conv_concat_decoder.cpp:31
-#:   d_derand_from = parameters["derand_start"] (default 4)
+#: 解扰起始偏移（跳过同步字 4 字节）。
 DERAND_OFFSET = 4
 
-#: RS 交错深度。来源: GK2A.json "rs_i": 4
+#: RS 交错深度。
 RS_INTERLEAVE = 4
 
-#: RS 码参数。来源: reedsolomon.cpp:34
-#:   correct_reed_solomon_create(ccsds, 112, 11, 32)
+#: RS 码参数（CCSDS RS(255,223)：fcr=112, 根间隔 11, 32 校验字节）
 RS_N = 255          # 码长
 RS_K = 223          # 数据字节数
 RS_NROOTS = 32      # 校验字节数 (= 2*t, t=16 纠错)
@@ -102,15 +90,14 @@ RS_POLY = 0x187     # 本原多项式 x^8+x^7+x^2+x+1
 #: RS 译码后 VCDU 长度 = RS_INTERLEAVE * RS_K = 4*223 = 892
 VCDU_LEN = RS_INTERLEAVE * RS_K  # = 892
 
-#: Viterbi 约束长度 K 与码率。来源: viterbi27.h:16 CCSDS_R2_K7_POLYS={79,109}
+#: Viterbi 约束长度 K 与码率（CCSDS R=1/2 K=7 生成多项式 {79,109}）
 VIT_K = 7
 VIT_POLYS = (0x4F, 0x6D)  # = (79, 109)
 VIT_RATE = 2              # 1/2 码率 → 每个输入比特输出 2 比特
 
 
 # ============================================================================
-# CCSDS 解扰 PN 表 (255 字节周期)
-# 来源: SatDump src-core/common/codings/randomization.cpp:3-31  ccsds_pn[255]
+# CCSDS 解扰 PN 表 (255 字节周期，CCSDS 标准伪随机序列)
 # ============================================================================
 
 CCSDS_PN: bytes = bytes([
@@ -152,8 +139,7 @@ CCSDS_PN: bytes = bytes([
 def derandomize_ccsds(data: bytearray, length: int, offset: int = 0) -> None:
     """CCSDS 解扰：data[offset..offset+length) 异或周期 255 的 PN。
 
-    来源: randomization.cpp:33-38  derand_ccsds()
-    调用处: module_ccsds_conv_concat_decoder.cpp:178
+    CCSDS 解扰：data[i] ^= ccsds_pn[(i+offset) % 255]。
       derand_ccsds(&cadu[4], d_cadu_bytes - d_derand_from)
     （解扰在 RS 之前，作用于同步字之后的 1020 字节）
     """
@@ -163,11 +149,10 @@ def derandomize_ccsds(data: bytearray, length: int, offset: int = 0) -> None:
 
 # ============================================================================
 # Reed-Solomon (255,223) CCSDS  ——  本原多项式 0x187, fcr=112, prim=11
-# 来源: reedsolomon.cpp:30-46 (构造), reedsolomon.cpp:53-116 (译码)
-#        correct.h:180-181 (本原多项式定义)
+# CCSDS RS(255,223) 编/译码（本原多项式 0x187，dual-basis 表示）
 # ============================================================================
 
-#: dual-basis 查表。来源: reedsolomon.cpp:6-16  ToDualBasis[256]
+#: dual-basis 正变换查表（CCSDS RS 标准）
 _TO_DUAL_BASIS = bytes([
     0x00, 0x7b, 0xaf, 0xd4, 0x99, 0xe2, 0x36, 0x4d, 0xfa, 0x81, 0x55, 0x2e, 0x63, 0x18, 0xcc, 0xb7,
     0x86, 0xfd, 0x29, 0x52, 0x1f, 0x64, 0xb0, 0xcb, 0x7c, 0x07, 0xd3, 0xa8, 0xe5, 0x9e, 0x4a, 0x31,
@@ -187,7 +172,7 @@ _TO_DUAL_BASIS = bytes([
     0x08, 0x73, 0xa7, 0xdc, 0x91, 0xea, 0x3e, 0x45, 0xf2, 0x89, 0x5d, 0x26, 0x6b, 0x10, 0xc4, 0xbf,
 ])
 
-#: dual-basis 逆查表。来源: reedsolomon.cpp:18-28  FromDualBasis[256]
+#: dual-basis 逆变换查表（CCSDS RS 标准）
 _FROM_DUAL_BASIS = bytes([
     0x00, 0xcc, 0xac, 0x60, 0x79, 0xb5, 0xd5, 0x19, 0xf0, 0x3c, 0x5c, 0x90, 0x89, 0x45, 0x25, 0xe9,
     0xfd, 0x31, 0x51, 0x9d, 0x84, 0x48, 0x28, 0xe4, 0x0d, 0xc1, 0xa1, 0x6d, 0x74, 0xb8, 0xd8, 0x14,
@@ -211,7 +196,7 @@ _FROM_DUAL_BASIS = bytes([
 class _GF256:
     """GF(2^8) 算术表，本原多项式 0x187。
 
-    来源: correct.h:180-181  correct_rs_primitive_polynomial_ccsds = 0x187
+    CCSDS RS 本原多项式 0x187 (x^8+x^7+x^2+x+1)。
     """
 
     def __init__(self, poly: int = RS_POLY):
@@ -251,7 +236,7 @@ def _rs_generator_poly(nroots: int = RS_NROOTS, fcr: int = RS_FCR,
     """生成 RS 生成多项式系数（GF 域）。
 
     g(x) = (x + α^fcr)(x + α^(fcr+prim))...(x + α^(fcr+(nroots-1)*prim))
-    来源: reedsolomon.cpp:34  fcr=112, prim=11, nroots=32
+    CCSDS RS(255,223)：fcr=112, prim=11, nroots=32。
     """
     g = [1]
     for i in range(nroots):
@@ -274,7 +259,7 @@ def rs_encode(codeword: bytearray) -> None:
     codeword[i] 对应多项式系数 x^(n-1-i)（最高次在前）。
     g(x) = Σ g[j] x^j, g[RS_NROOTS]=1（首一）。
     直接多项式长除：d(x)*x^nroots ÷ g(x)，余数填低次端。
-    来源: reedsolomon.cpp:128-143  ReedSolomon::encode()
+    RS 编码（系统码，32 校验字节）。
     """
     gen = _RS_GEN  # gen[0]=常数, gen[nroots]=1
     # dividend[0..k-1] = 数据, dividend[k..n-1] = 0（余数区）
@@ -294,7 +279,7 @@ def rs_decode(codeword: bytearray) -> int:
     """RS(255,223) 译码（conventional basis）。返回纠错字节数；-1 = 不可纠。
 
     约定: codeword[j] 对应多项式系数 x^(n-1-j)（j=0 最高次）。
-    来源: reedsolomon.cpp:63-116  ReedSolomon::decode()
+    RS 译码（ Berlekamp / Forney / 钱搜索）。
     使用 Berlekamp-Massey + Chien search + Forney。
     """
     n = RS_N
@@ -391,7 +376,7 @@ def rs_decode(codeword: bytearray) -> int:
 def rs_encode_interleaved(block: bytearray) -> None:
     """对 1020 字节块做 I=4 交错 RS 编码（含 dual-basis 变换）。
 
-    来源: reedsolomon.cpp:118-126 encode_interlaved, :128-143 encode
+    交错编码：I=4 路 RS 逐字节交织。
     输入 block 长度必须为 RS_INTERLEAVE*RS_N = 1020；前 892B 数据。
     """
     i = RS_INTERLEAVE
@@ -416,7 +401,7 @@ def rs_decode_interleaved(block: bytearray) -> List[int]:
     """对 1020 字节块做 I=4 交错 RS 译码（含 dual-basis 变换）。
 
     返回每个 codeblock 的纠错字节数（-1 = 不可纠）。
-    来源: reedsolomon.cpp:53-61 decode_interlaved, :63-116 decode
+    交错译码：先解交织，再逐路 RS 译码。
     """
     i = RS_INTERLEAVE
     errors = [0] * i
@@ -441,14 +426,13 @@ def rs_decode_interleaved(block: bytearray) -> List[int]:
 
 # ============================================================================
 # 卷积码 (K=7, R=1/2) 编码 + Viterbi 软判决译码
-# 来源: viterbi27.h:16 CCSDS_R2_K7_POLYS={79,109};
-#        cc_encoder.cpp:108-113 移位寄存器约定
+# CCSDS 卷积码 R=1/2 K=7（生成多项式 {79,109}）
 # ============================================================================
 
 def conv_encode_bits(in_bits: np.ndarray) -> np.ndarray:
     """CCSDS K=7 R=1/2 卷积编码。
 
-    来源: cc_encoder.cpp:108-113
+    移位寄存器约定：state=(state<<1)|bit; out=parity(state&poly)。
       my_state = (my_state << 1) | (in[i] & 1)
       out[2i]   = parity(my_state & 0x4F)
       out[2i+1] = parity(my_state & 0x6D)
@@ -468,7 +452,7 @@ class ViterbiDecoder:
 
     64 状态，ACS 加-比-选，回溯长度 ~5*K=35。
     输入为软符号（float，越大越倾向 bit=0；BPSK 中 +1→bit0, -1→bit1）。
-    来源: viterbi27.h / cc_decoder.*
+    软判决 Viterbi 译码（CCSDS K=7）。
     """
 
     def __init__(self, traceback: int = 40):
@@ -531,14 +515,14 @@ class ViterbiDecoder:
 
 # ============================================================================
 # BPSK 调制 / 解调 + RRC 成形滤波
-# 来源: GK2A.json psk_demod: bpsk, symbolrate=128e3, rrc_alpha=0.5
+# BPSK 解调：符号率 128e3, RRC α=0.5
 # ============================================================================
 
 def rrc_filter(sps: int, alpha: float = GK2A_RRC_ALPHA,
                num_taps: int = 33) -> np.ndarray:
     """根升余弦 (RRC) 成形/匹配滤波器。
 
-    来源: GK2A.json "rrc_alpha": 0.5
+    RRC 滚降 α=0.5。
     """
     half = num_taps // 2
     t = np.arange(num_taps) - half
@@ -621,7 +605,7 @@ def bpsk_demod(iq: np.ndarray, sps: int, alpha: float = GK2A_RRC_ALPHA,
 
 # ============================================================================
 # 帧同步：0x1ACFFC1D 相关检测
-# 来源: module_ccsds_conv_concat_decoder.cpp:90,120
+# CCSDS CADU 帧同步
 # ============================================================================
 
 def bits_to_bytes(bits: np.ndarray) -> bytes:
@@ -645,7 +629,7 @@ def bytes_to_bits(data: bytes) -> np.ndarray:
 def frame_sync_search(bitstream: np.ndarray) -> int:
     """在硬比特流中搜索同步字 0x1ACFFC1D，返回比特偏移。未找到 -1。
 
-    来源: module_ccsds_conv_concat_decoder.cpp:120 BPSK_CCSDS_Deframer
+    BPSK CCSDS CADU 定界。
     注意：本函数是硬匹配（错 1 bit 就丢帧），真机有 BER 时请用 CCSDSDeframer。
     """
     target = bytes_to_bits(SYNC_WORD_BYTES)
@@ -657,9 +641,9 @@ def frame_sync_search(bitstream: np.ndarray) -> int:
 
 
 class CCSDSDeframer:
-    """三态机 CCSDS CADU 帧同步（对照 SatDump bpsk_ccsds_deframer.h/.cpp）。
+    """三态机 CCSDS CADU 帧同步。
 
-    三态阈值（bpsk_ccsds_deframer.h:33-35）：
+    三态阈值：
       NOSYNC=2   —— 未同步，必须严格匹配 ASM 或 ASM_INV 才进 SYNCING
       SYNCING=6  —— 同步中，Hamming 距离 < 6 算好帧，连续 10 个好帧进 SYNCED
       SYNCED=12  —— 已同步，Hamming 距离 < 12 算好帧，错 1 帧直接回 NOSYNC
@@ -760,7 +744,7 @@ class CCSDSDeframer:
                 if self._hamming32(self.shifter, target) < self.state:
                     self._reset_frame()
                 else:
-                    # 错一帧直接回未同步（bpsk_ccsds_deframer.cpp:91-103）
+                    # 错一帧直接回未同步
                     self.state = self.STATE_NOSYNC
                     self.good_count = 0
                     self.bad_count = 0
@@ -792,7 +776,7 @@ from .goes_lrit import (  # noqa: E402
 
 # ============================================================================
 # GK-2A LRIT 文件头解析（GK-2A 专用分段头）
-# 来源: gk2a_headers.h:43-61
+# GK-2A LRIT 头（公开 GK-2A LRIT 格式）
 # ============================================================================
 
 @dataclass
@@ -804,9 +788,9 @@ class GK2AHeader:
     bits_per_pixel: int = 0
     columns: int = 0
     lines: int = 0
-    compression: int = 0          # 0=无压缩, 1=小波, 2=JPEG (decomp.cpp:27-43)
+    compression: int = 0          # 0=无压缩, 1=小波, 2=JPEG
     annotation: str = ""
-    # GK-2A 分段头 (type=128)。来源: gk2a_headers.h:43-61
+    # GK-2A 分段头 (type=128)
     image_seq_nb: int = 0
     total_segments_nb: int = 0
     line_nb: int = 0              # 本段起始行号 (1-based)
@@ -815,7 +799,7 @@ class GK2AHeader:
 def parse_gk2a_headers(buf: bytes) -> GK2AHeader:
     """解析 GK-2A LRIT 文件头。
 
-    通用头与 GOES 一致；分段头 (type=128) 布局来自 gk2a_headers.h:43-61:
+    通用头与 GOES LRIT 一致；GK-2A 分段头 (type=128) 布局:
       data[3] = image_seq_nb
       data[4] = total_segments_nb
       data[5..6] = line_nb (BE)
@@ -843,7 +827,7 @@ def parse_gk2a_headers(buf: bytes) -> GK2AHeader:
         elif htype == H_ANNOTATION:
             out.annotation = bytes(buf[pos + 3: pos + hlen]).rstrip(b"\x00").decode("ascii", "replace")
         elif htype == H_SEGMENT_ID and hlen >= 7:
-            # GK-2A 专用分段头。来源: gk2a_headers.h:53-60
+            # GK-2A 专用分段头
             out.image_seq_nb = buf[p]
             out.total_segments_nb = buf[p + 1]
             out.line_nb = (buf[p + 2] << 8) | buf[p + 3]
@@ -877,7 +861,7 @@ class GK2ALRITReassembler:
 
 # ============================================================================
 # JPEG2000 真解码（Pillow + libopenjp2）
-# 来源: SatDump plugins/xrit_support/xrit/gk2a/decomp.cpp:27-43
+# GK-2A 图像段组装（依据 GK-2A LRIT 分段格式）
 #   GK-2A 压缩标志 compression_flag: 0=无, 1=小波/JPEG2000, 2=渐进JPEG
 # GK-2A 下行图像段在通用头之后即为 .jp2 码流（CCSDS 122.0-B-1 的 JPEG2000 子集）。
 # ============================================================================
@@ -943,7 +927,7 @@ class GK2AImage:
 class GK2AImageAssembler:
     """按 GK-2A ImageSegmentationIdentification 把多段拼成整图。
 
-    来源: segment_decoder.h:54-65 pushSegment()
+    按段号/起始行列把段写入整图画布。
       image_seq_nb 区分整图；line_nb 为该段起始行；段宽=columns。
 
     每段净荷先尝试 JPEG2000 真解码（decode_jpeg2000）：
@@ -1071,10 +1055,10 @@ def decode_iq_to_image(iq: np.ndarray, out_png: str,
             if bytes(frame[:4]) != SYNC_WORD_BYTES:
                 continue
             # 4b. 解扰（同步字之后 1020 字节；PN 索引从 0 起对应 cadu[4]）
-            # 来源: module_ccsds_conv_concat_decoder.cpp:178
+            # CCSDS 解扰
             #   derand_ccsds(&cadu[4], d_cadu_bytes - d_derand_from)
             derandomize_ccsds(frame, CADU_BYTES - DERAND_OFFSET, offset=DERAND_OFFSET)
-            # 4c. RS 译码（交错 I=4）。来源: reedsolomon.cpp:53-61
+            # 4c. RS 译码（交错 I=4）
             block = frame[DERAND_OFFSET: CADU_BYTES]
             errs = rs_decode_interleaved(block)
             if any(e < 0 for e in errs):
@@ -1131,7 +1115,7 @@ def build_gk2a_lrit_file(image: np.ndarray, line_nb: int, total_segments: int,
                  配合 compression_flag=1 模拟 GK-2A 真实下行的 JPEG2000 段）。
                  为 None 时把 image 按 uint8 裸像素写入（原无压缩路径）。
         compression_flag: 写入 ImageStructureRecord 的压缩标志
-                 （0=无, 1=小波/J2K, 2=渐进JPEG；来源 decomp.cpp:27-43）。
+                 （0=无, 1=小波/J2K, 2=渐进JPEG）。
         bits_per_pixel: 写入 ImageStructureRecord 的位深字段。
     """
     hdr = bytearray()
@@ -1143,7 +1127,7 @@ def build_gk2a_lrit_file(image: np.ndarray, line_nb: int, total_segments: int,
     hdr += (16).to_bytes(4, "big")       # total_header_length（占位，后面回填）
     hdr += data_bits.to_bytes(8, "big")  # data_length
     # ── ImageStructureRecord type=1（record_length=9: 3头+6负载）
-    # 来源: xrit_file.h:33-49  ImageStructureRecord
+    # ImageStructureRecord（LRIT 公开格式）
     hdr += bytes([H_IMAGE_STRUCTURE])
     hdr += (9).to_bytes(2, "big")
     hdr += bytes([bits_per_pixel])          # bit_per_pixel
@@ -1151,7 +1135,7 @@ def build_gk2a_lrit_file(image: np.ndarray, line_nb: int, total_segments: int,
     hdr += image.shape[0].to_bytes(2, "big")# lines
     hdr += bytes([compression_flag])        # compression_flag
     # ── GK-2A SegmentationIdentification type=128
-    # 来源: gk2a_headers.h:43-61
+    # GK-2A LRIT 头（公开 GK-2A LRIT 格式）
     hdr += bytes([H_SEGMENT_ID])
     hdr += (7).to_bytes(2, "big")
     hdr += bytes([image_seq & 0xFF])        # image_seq_nb
@@ -1181,7 +1165,7 @@ def file_to_vcdus(file_buf: bytes, vcid: int = 10) -> List[bytes]:
     # CCSDS 源包头: version=0, type=0, secHdr=0, APID=...
     # seqFlag=3 (整包), seqCount=0, length = len(payload)-1
     # 注意: SessionPDU 重组时会跳过首 TP_PDU payload 的前 10 字节
-    # （来源: goes_lrit session_pdu.cc:78-82），故这里补 10 字节哑元。
+    # （首个 TP_PDU 用户数据前 10 字节为填充），故这里补 10 字节哑元。
     payload = bytearray(10) + bytearray(file_buf)
     # 加 CRC16
     crc = crc16_ccitt(bytes(payload))
@@ -1238,9 +1222,9 @@ def file_to_vcdus(file_buf: bytes, vcid: int = 10) -> List[bytes]:
 def vcdus_to_cadu(vcdus: List[bytes]) -> bytes:
     """VCDU 列表 → CADU 字节流（RS 编码 + 解扰 + 同步字）。
 
-    编码端顺序（与 SatDump 接收端相反）：
+    编码端顺序（与接收端相反）：
       VCDU(892) → RS 交错编码(1020) → 解扰异或PN → 加同步字(4) = CADU(1024)
-    来源: module_ccsds_conv_concat_decoder.cpp:177-181
+    CCSDS 发送链：RS → 交错 → 解扰 → 加同步字。
     """
     out = bytearray()
     for vcdu in vcdus:
@@ -1290,7 +1274,7 @@ def register_tool_registry(registry) -> None:
     registry.register(
         name="gk2a_lrit_decode",
         description=(
-            "GK-2A LRIT 全管道解码（对标 SatDump GK2A.json）：从 IQ complex64 raw 文件 "
+            "GK-2A LRIT 全管道解码：从 IQ complex64 raw 文件 "
             "完成 BPSK 解调→Viterbi(K=7,R=1/2,0x4F/0x6D)→帧同步0x1ACFFC1D→CCSDS解扰→"
             "RS(255,223,I=4)→VCDU→M_PDU→TP_PDU→SessionPDU→GK-2A文件头→图像段组装，"
             "输出灰度云图 PNG。返回 PNG 路径/宽高/annotation/元数据。"

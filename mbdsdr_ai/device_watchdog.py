@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 设备看门狗（DeviceWatchdog）
 =============================

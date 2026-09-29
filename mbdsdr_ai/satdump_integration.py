@@ -1,9 +1,11 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI - SatDump 集成层
-============================
+MBDSDR AI - SatDump 外部工具集成层
+=====================================
 
-通过子进程调用 SatDump 命令行工具，
-将气象卫星解码能力暴露为 MCP 工具。
+若本机安装了 SatDump 命令行工具，本模块通过子进程调用它，
+把气象卫星解码能力作为可选后端暴露为 MCP 工具。本模块只做进程封装，
+不包含 SatDump 的任何源代码；SatDump 仅作外部可执行技术参考。
 
 参考：https://www.satdump.org/
 """

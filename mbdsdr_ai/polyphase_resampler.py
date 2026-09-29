@@ -1,35 +1,16 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI 内核 - 多相有理重采样器（Polyphase Rational Resampler）
-=================================================================
+Polyphase rational resampler.
 
-逐行对照 SDR++：
+Converts a stream from ``in_sr`` to ``out_sr`` with an anti-alias FIR front-end.
+The prototype low-pass is decomposed into a polyphase filter bank: instead of
+up-sampling by the interpolation factor and convolving (which would cost
+``interp * taps`` multiply-accumulates per output), each output selects one
+short sub-filter.  The prototype cutoff is ``min(in, out)/2``, so both the image
+bands from up-sampling and aliases from down-sampling are rejected.
 
-  - multirate/rational_resampler.h:120-165  reconfigure()
-      · :136-138  gcd 化简：interp = OutSR/gcd, decim = IntSR/gcd
-      · :154      tapSamplerate = intSR * interp
-      · :155      tapBandwidth  = min(inSR, outSR)/2
-      · :156      tapTransWidth = tapBandwidth * 0.1
-      · :158      rtaps = lowPass(tapBandwidth, tapTransWidth, tapSamplerate)
-      · :159      rtaps *= interp（补偿插值的零值插补增益）
-  - multirate/polyphase_bank.h:15-48       buildPolyphaseBank
-      · :23       tapsPerPhase = ceil(N / M)
-      · :32       phases[(M-1)-(i%M)][i//M] = rtaps[i]
-  - multirate/polyphase_resampler.h:69-99  process()
-      · :78/:81   out = dot(buffer[offset], phases[phase], tapsPerPhase)
-      · :85       phase += decim
-      · :88       offset += phase // interp
-      · :91       phase %= interp
-
-为什么必须多相（而不是 scipy.signal.resample 的 FFT 重采样）：
-  - 多相结构把原型低通分解成 interp 个子滤波器，每输出点只做 tapsPerPhase
-    次乘加（不是 interp*taps），且天然带抗混叠：原型低通截止 = min(in,out)/2，
-    上镜频与下镜像都被原型 FIR 滤掉。
-  - 直接 FFT 重采样（无抗混叠）会让 > min(in,out)/2 的分量折叠，这是本任务
-    红线要杜绝的假"重采样"。
-
-流式：跨块保留历史 (tapsPerPhase-1) 个样本与 (phase, offset)，逐块连续。
-
-License: GPL-3.0-or-later
+Stateful: the trailing ``taps_per_phase-1`` input samples and the (phase,
+offset) position are carried across calls so block-wise processing is continuous.
 """
 
 from __future__ import annotations
@@ -41,17 +22,16 @@ __all__ = ["PolyphaseResampler"]
 
 
 def build_polyphase_bank(proto_taps: np.ndarray, num_phases: int):
-    """把原型低通抽头分解成 num_phases 个多相子滤波器。
+    """Split a prototype low-pass into ``num_phases`` polyphase sub-filters.
 
-    对照 polyphase_bank.h:15-48。返回 (phases, taps_per_phase)，
-    phases[p] 是第 p 相的实数抽头数组（长度 taps_per_phase，末尾补零）。
+    Returns ``(phases, taps_per_phase)`` where ``phases[p]`` is the p-th
+    sub-filter (length ``taps_per_phase``, zero-padded).
     """
     proto_taps = np.asarray(proto_taps, dtype=np.float64)
     M = int(num_phases)
     N = proto_taps.size
     taps_per_phase = (N + M - 1) // M
     phases = np.zeros((M, taps_per_phase), dtype=np.float64)
-    # polyphase_bank.h:32: phases[(M-1)-(i%M)][i//M] = taps[i]
     for i in range(N):
         phase = (M - 1) - (i % M)
         row = i // M
@@ -60,13 +40,11 @@ def build_polyphase_bank(proto_taps: np.ndarray, num_phases: int):
 
 
 class PolyphaseResampler:
-    """有理采样率变换：in_sr -> out_sr（先抗混叠 FIR，再插值/抽取）。
-
-    对照 rational_resampler.h:27-43 init + :120-165 reconfigure。
+    """Rational sample-rate conversion ``in_sr -> out_sr``.
 
     Parameters:
-        in_sr_hz: 输入采样率。
-        out_sr_hz: 目标采样率。
+        in_sr_hz: input sample rate.
+        out_sr_hz: desired output sample rate.
     """
 
     def __init__(self, in_sr_hz: float, out_sr_hz: float) -> None:
@@ -79,23 +57,24 @@ class PolyphaseResampler:
         in_sr = self._in_sr
         out_sr = self._out_sr
 
-        # rational_resampler.h:134-138 gcd 化简
+        # Reduce the rate ratio by the GCD.
         int_sr = int(round(in_sr))
         out_int = int(round(out_sr))
         g = gcd(int_sr, out_int)
         self._interp = out_int // g
         self._decim = int_sr // g
 
-        # rational_resampler.h:154-159 原型低通
+        # Prototype low-pass: cutoff at half the lower rate, narrow transition,
+        # scaled by the interpolation factor to compensate zero-stuffing.
         tap_sr = in_sr * self._interp
-        tap_bw = min(in_sr, out_sr) / 2.0          # :155
-        trans = tap_bw * 0.1                        # :156
+        tap_bw = min(in_sr, out_sr) / 2.0
+        trans = tap_bw * 0.1
         proto = lowpass_taps(tap_bw, trans, tap_sr, odd=False)
-        proto = proto * self._interp               # :159 补偿插值增益
+        proto = proto * self._interp
 
         self._phases, self._tpp = build_polyphase_bank(proto, self._interp)
 
-        # 流式状态：历史缓冲 (tpp-1) 样本 + (phase, offset)
+        # Streaming state.
         self._history = np.zeros(self._tpp - 1, dtype=np.float64)
         self._phase = 0
         self._offset = 0
@@ -109,16 +88,13 @@ class PolyphaseResampler:
         return self._interp, self._decim
 
     def reset(self) -> None:
-        """清空历史与相位（换源/换频时调用）。"""
+        """Clear history and phase."""
         self._history = np.zeros_like(self._history)
         self._phase = 0
         self._offset = 0
 
     def process(self, x: np.ndarray) -> np.ndarray:
-        """处理一段样本，返回重采样后样本。
-
-        对照 polyphase_resampler.h:69-99。
-        """
+        """Process a block and return the resampled samples."""
         x = np.asarray(x)
         if x.size == 0:
             return x
@@ -147,13 +123,13 @@ class PolyphaseResampler:
             else:
                 y = np.dot(win, taps)
             out_list.append(y)
-            ph += D                 # :85
-            off += ph // M          # :88
-            ph = ph % M             # :91
-        self._offset = off - count  # :93
+            ph += D
+            off += ph // M
+            ph = ph % M
+        self._offset = off - count
         self._phase = ph
 
-        # 保存历史（polyphase_resampler.h:96 memmove）
+        # Carry the trailing samples as next-block history.
         self._history = full[count:count + tpp - 1].copy() if tpp > 1 \
             else np.array([], dtype=np.float64)
 

@@ -1,8 +1,10 @@
+# SPDX-License-Identifier: MIT
 """
-test_dsp_demod_modes.py — 各模式解调确定性单测（合成信号，不接 UI/硬件）。
+test_dsp_demod_modes.py — deterministic per-mode demodulation tests.
+非硬件 / NOT HARDWARE: synthetic signals, no UI / hardware.
 
-覆盖：AM 包络、USB/LSB 真区分、NFM 鉴频+去加重、WFM 真立体声、CW BFO 差拍。
-对应 mbdsdr_ai/demod_{am,ssb,nfm,wfm,cw}.py（移植自 sdrpp decoder_modules/radio/...）。
+Covers: AM envelope, USB/LSB separation, NFM discriminator + de-emphasis,
+WFM stereo, CW BFO beat.  Targets mbdsdr_ai/demod_{am,ssb,nfm,wfm,cw}.py.
 """
 import os
 import sys
@@ -50,7 +52,8 @@ def test_demod_usb_vs_lsb_isolation():
     sr = 24_000.0
     bw = 2_800.0
     t = np.arange(int(sr * 1.0)) / sr
-    # SDR++ 几何（ssb.h:106-116）：USB 占用信道下半 [-BW/2,0]，LSB 占用上半 [0,BW/2]
+    # Sideband geometry: USB occupies the lower half [-BW/2,0],
+    # LSB occupies the upper half [0,BW/2].
     # USB 信号（音频 1kHz）：复音在 f_in = -BW/2 + 1000 = -400Hz
     usb_sig = np.exp(1j * 2 * np.pi * (-400) * t)
     # LSB 信号（音频 1kHz）：复音在 f_in = +BW/2 - 1000 = +400Hz
@@ -80,7 +83,7 @@ def test_demod_usb_vs_lsb_isolation():
 
 
 def test_demod_ssb_opposite_bfo_sign():
-    """USB 与 LSB 的 BFO 平移方向相反（ssb.h:106-116）。"""
+    """USB and LSB use the opposite BFO translation direction."""
     d_usb = DemodSSB("usb", if_sr=24000, bandwidth=2800)
     d_lsb = DemodSSB("lsb", if_sr=24000, bandwidth=2800)
     assert d_usb.translation == +2800.0 / 2.0

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """WFM 广播立体声复合解码（lite，纯 numpy/scipy）。
 
 商用 FM 广播复合基带（mpx，鉴频后、降采样前）标准结构：

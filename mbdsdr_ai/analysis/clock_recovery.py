@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 符号定时恢复（Clock Recovery）
 ==============================

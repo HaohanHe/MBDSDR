@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """SSTV 自动制式识别实验（论文 VI.F 核心创新点）。
 
 AI 定义无线电与传统 HAM 工具集的关键区别：用户不指定模式，系统从信号

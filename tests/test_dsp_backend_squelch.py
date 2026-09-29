@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 静噪门控测试
 ============

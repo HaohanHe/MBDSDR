@@ -1,16 +1,8 @@
-"""AX.25 / AFSK / APRS 真实往返自测。
+# SPDX-License-Identifier: MIT
+"""AX.25 / APRS 端到端往返验证（合成向量，非硬件）。
 
-对照 direwolf 真实源码（repos/direwolf/src）校准后，端到端验证：
-  1. AX.25 帧构建 -> CRC(FCS) -> 字节解帧 往返，FCS 校验通过。
-  2. HDLC 位填充/去填充 往返（任意字节模式，含连续 1）。
-  3. AFSK 调制 -> 加高斯白噪声(SNR=10dB) -> 解调 -> 帧提取，成功率 >80%。
-  4. APRS 未压缩位置：已知帧解析出正确经纬度。
-  5. APRS 压缩位置：base-91 解析（direwolf decode_aprs.c:3522,3535 公式）。
-  6. APRS 气象报告：位置内嵌 + 无位置 '_' 两种。
-  7. APRS 消息解析。
-
-运行:  python3 tests/ax25_aprs_roundtrip.py
-退出码 0 全部通过；非 0 有失败。
+依据公开 TAPR AX.25 与 APRS 规范独立实现，端到端验证编码->信道->解码往返。
+direwolf (https://github.com/wb2osz/direwolf) 仅作技术参考与致谢，本仓未包含其源代码。
 """
 from __future__ import annotations
 
@@ -86,7 +78,7 @@ def test_afsk_noisy_roundtrip() -> None:
 
 
 def test_uncompressed_position() -> None:
-    # direwolf decode_aprs.c:3017 样例
+    # direwolf 样例
     f = _mkframe(b"!4903.50N/07201.75W_220/004g005t077r000p000P000h50b09900wRSW")
     r = parse_aprs_frame(f)
     assert r["type"] == "position"
@@ -104,7 +96,7 @@ def test_uncompressed_position() -> None:
 
 
 def test_compressed_position() -> None:
-    # direwolf decode_aprs.c:3020 样例 /5L!!<*e7 = 49.5N / 72.75W
+    # direwolf 样例 /5L!!<*e7 = 49.5N / 72.75W
     f = _mkframe(b"=/5L!!<*e7_7P[g005t077r000p000P000h50b09900")
     r = parse_aprs_frame(f)
     assert r["type"] == "position"
@@ -114,7 +106,7 @@ def test_compressed_position() -> None:
 
 
 def test_positionless_weather() -> None:
-    # direwolf decode_aprs.c:3016 样例
+    # direwolf 样例
     f = _mkframe(b"_10090556c220s004g005t077r000p000P000h50b09900wRSW")
     r = parse_aprs_frame(f)
     assert r["type"] == "weather"

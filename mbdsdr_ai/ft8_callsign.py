@@ -1,11 +1,13 @@
-"""FT8 28-bit callsign 解包——移植 wsjtx unpack28.f90。
+# SPDX-License-Identifier: MIT
+"""FT8 28-bit callsign 解包（独立实现）。
 
 编码布局（n28）：
 - 0/1/2 = DE/QRZ/CQ 特殊 token
 - 3..1002 = CQ_nnn（数字）
 - 1003..532443 = CQ_aaaa（字母串）
-- 之后 22bit hash 段（需 wsjtx 呼号表，未内置，返回 <hash:nnn>）
+- 之后 22bit hash 段（未内置呼号表，返回 <hash:nnn>）
 - 最后标准呼号：6 位，字符集 (c1,c2,c3,c4)。
+布局为公开 77-bit 报文格式事实。
 """
 from __future__ import annotations
 

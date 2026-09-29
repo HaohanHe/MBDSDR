@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/skyengine/stars.py — 亮星星表子集与星等渲染
 ========================================================
@@ -5,17 +6,16 @@ mbdsdr_ai/skyengine/stars.py — 亮星星表子集与星等渲染
 星表为 Hipparcos 亮星 (目视星等 <= ~2.4) 的真实子集, 每颗带 J2000
 赤经/赤纬/V 星等/B-V 色指数。不造假星: 未收录的天体不画。
 
-渲染公式对照 Stellarium web engine:
-  - 照度 (core.c:696-708):
-        E(lux) = 10.7646e4 / R2AS^2 * 10^(-0.4*vmag)
-    其中 R2AS = 180/pi*3600 ~ 206265 角秒/弧度 (Pogson 定律, 等差 2.512x)。
-  - 点大小/亮度 (core.c:369-430 core_get_point_for_mag):
-        ld      = tonemapper_map(E)         # 人眼适应色调映射, 这里 gamma 近似
-        r       = s_linear * ld^(s_relative/2)
-  - 颜色 (stars.c:693 bv_to_rgb): B-V 色指数定色温。
+渲染公式（依据公开天文光度学）:
+  - 照度 E(lux) = 10.7646e4 / R2AS^2 * 10^(-0.4*vmag)
+    其中 R2AS = 180/pi*3600 ~ 206265 角秒/弧度 (Pogson 星等-照度定律, 等差 2.512x)。
+  - 点大小/亮度：按星等做 gamma 近似映射到屏幕半径与亮度（人眼适应的简化近似）。
+  - 颜色：B-V 色指数分段线性插值定色温（常用的黑体色温近似）。
 
 坐标: 恒星位置是 ICRF/J2000 赤道坐标, 经 celestial_geometry 坐标链
 (J2000 -> 岁差章动 -> 当前赤道 -> 地平) 投影到屏幕。
+
+Stellarium / Stellarium Web Engine 仅作为技术参考与致谢，本模块未包含其源代码。
 """
 
 from __future__ import annotations
@@ -95,15 +95,14 @@ BRIGHT_STARS: list[BrightStar] = [
 
 
 def mag_to_lux(vmag: float) -> float:
-    """照度 E(lux) = 10.7646e4/R2AS^2 * 10^(-0.4*vmag)。"""
+    """照度 E(lux) = 10.7646e4/R2AS^2 * 10^(-0.4*vmag)（Pogson 定律）。"""
     return 10.7646e4 / (R2AS * R2AS) * 10.0 ** (-0.4 * vmag)
 
 
 def star_draw(vmag: float, bortle: int = 3) -> tuple[float, float]:
     """返回 (屏幕半径 px, 亮度 0..1)。太暗的星 (vmag>6.5) 半径压到 0。
 
-    对照 core.c:375 s_linear 与 core.c:427-429 暗星压暗。
-    Pogson 定律 (core.c:696-708) 是照度比; 屏幕半径按
+    屏幕半径按极限星等与全天最亮星等做幂律映射：
         r = r_min + (r_max-r_min) * ((6.5-vmag)/8)^(s_relative/2)
     映射: 极限星等 6.5 -> 0.6px, 全天最亮 (mag -1.5) -> ~2.6px。
     bortle 越大 (光污染越重) 整体越小越暗。
@@ -119,7 +118,7 @@ def star_draw(vmag: float, bortle: int = 3) -> tuple[float, float]:
 
 
 def bv_to_rgb(bv: float) -> tuple[int, int, int]:
-    """B-V 色指数 -> (r,g,b) 0..255 (stars.c:693 简化)。"""
+    """B-V 色指数 -> (r,g,b) 0..255（黑体色温分段线性近似）。"""
     stops = [
         (-0.30, (155, 178, 255)),
         (0.00, (200, 214, 255)),

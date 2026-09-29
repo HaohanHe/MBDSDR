@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """确定性单测：设备健康检查 / 全零检测 / NaN 检测 / 系统信息。"""
 import numpy as np
 import pytest

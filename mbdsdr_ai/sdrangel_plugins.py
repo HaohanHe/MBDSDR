@@ -1,28 +1,24 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI - SDRangel 特色插件移植（OGN / FireDetector / RemoteControl）
+MBDSDR 特色插件能力（OGN/FLARM 帧解析 / 热点检测 / 远程控制信封）
 =========================================================================
 
-本模块**不修改** sdrangel_adapter.py，单独把 SDRangel 的三个特色 feature/channelrx
-插件移植为纯 NumPy/Python 离线实现。常量/位域对齐 SDRangel 真实源码：
+本模块为三个独立的离线工具，与 sdrangel_adapter.py 解耦，纯 NumPy/Python 实现：
 
-  - OGN (Open Glider Network) 接收器
-        真实 OGN 链路: 868.200 MHz, 2-FSK, 9600 baud (CC1101)。
-        本移植按任务书给定的 FLARM V6 帧位域解析:
+  - OGN (Open Glider Network) / FLARM V6 位置帧解析
+        OGN 链路: 868.200 MHz, 2-FSK, 9600 baud。
+        按 FLARM V6 位置报告位域解析:
           协议版本 4bit = 6
           飞机 ID 24bit (ICAO)
           纬度 17bit / 经度 17bit (有符号定点)
-        参考: SDRangel plugins/channelrx/demodogn (旧版本) 与
-              https://github.com/svr-system/ogn-rx 的 FLARM 帧结构。
+        FLARM/OGN 帧结构仅作技术参考，本仓未包含其源代码。
 
-  - FireDetector 森林火灾检测
-        来源: SDRangel plugins/feature/firedetector (旧版本, 已迁出主分支)
-        思路: 对热红外频谱/幅度图做阈值分割 -> 连通域(热点)聚类 ->
-              输出热点经纬度列表。本移植用简化 DBSCAN 距离聚类。
+  - FireDetector 森林火灾热点检测
+        思路: 对热红外温度网格做阈值分割 -> 距离聚类(单链) ->
+              输出热点经纬度/最高温列表。
 
-  - RemoteControl 远程控制协议
-        来源: plugins/feature/remotecontrol/remotecontrolsettings.h:28-90
-              (RemoteControlControl/RemoteControlSensor/RemoteControlDevice)
-        本移植实现一个 JSON 命令/状态信封: 命令带 id/device/command/args,
+  - RemoteControl 远程控制 JSON 信封
+        实现一个 JSON 命令/状态信封: 命令带 id/device/command/args,
         响应带 id/ok/status/error，做序列化往返。
 """
 from __future__ import annotations
@@ -170,7 +166,7 @@ def decode_flarm_frame(buf: bytes) -> FlarmPositionReport:
 # =====================================================================
 # FireDetector —— 阈值 + 热点聚类
 # =====================================================================
-# 来源: SDRangel plugins/feature/firedetector (旧版 feature)
+# 热点检测：阈值分割 + 距离聚类
 #   - 输入: 热成像网格 (lat, lon, temperature)
 #   - 阈值: temp >= T_HOTSPOT_K 认为是热点
 #   - 聚类: 距离 < cluster_km 的热点归为一个火灾点 (简化 DBSCAN)
@@ -205,7 +201,7 @@ class FireCluster:
 class FireDetector:
     """森林火灾热点检测器。
 
-    流程（来源: SDRangel firedetector feature）:
+    流程:
       1. 温度阈值: temp >= threshold_k 标记候选热点
       2. 聚类: 距离 < cluster_km 的候选合并为一个火灾簇
       3. 输出簇质心 + 最高温
@@ -250,11 +246,11 @@ class FireDetector:
 # =====================================================================
 # RemoteControl —— JSON 命令/状态往返
 # =====================================================================
-# 来源: plugins/feature/remotecontrol/remotecontrolsettings.h:28-90
+# 远程控制 JSON 命令/状态信封
 #   RemoteControlControl { m_id, m_labelLeft, m_labelRight }
 #   RemoteControlSensor  { m_id, m_labelLeft, m_labelRight, m_format, m_plot }
 #   RemoteControlDevice { m_protocol, m_label, controls[], sensors[] }
-# 命令/状态 JSON 信封仿照 SDRangel reverse API (QJsonObject):
+# 命令/状态 JSON 信封:
 #   命令: {"id":1, "device":"R0", "command":"set_center_frequency",
 #          "args": {"center_frequency": 145000000}}
 #   响应: {"id":1, "device":"R0", "ok": true,
@@ -271,7 +267,7 @@ REMOTE_CONTROL_COMMANDS = {
 
 @dataclass
 class RemoteDeviceState:
-    """SDRangel 设备当前状态（可被 RemoteControl 查询/修改）。"""
+    """设备当前状态（可被远程控制查询/修改）。"""
     device_id: str
     center_frequency_hz: int = 100_000_000
     sample_rate_hz: int = 1_024_000
@@ -289,7 +285,7 @@ class RemoteDeviceState:
 
 
 class RemoteControlProtocol:
-    """SDRangel RemoteControl JSON 协议往返。
+    """远程控制 JSON 命令/状态往返。
 
     命令 JSON -> 校验 -> 应用到设备状态 -> 状态 JSON 响应。
     """
@@ -347,7 +343,7 @@ def tool_ogn_decode_frame(args: Dict[str, Any]) -> Dict[str, Any]:
     frame = bytes.fromhex(args["frame_hex"])
     rep = decode_flarm_frame(frame)
     return {"report": rep.to_dict(), "freq_hz": OGN_DEFAULT_FREQ_HZ,
-            "method": "SDRangel-ogn FLARM v6"}
+            "method": "ogn-flarm-v6"}
 
 
 def tool_firedetector_detect(args: Dict[str, Any]) -> Dict[str, Any]:
@@ -364,7 +360,7 @@ def tool_firedetector_detect(args: Dict[str, Any]) -> Dict[str, Any]:
              "max_temp_k": round(c.max_temp_k, 2), "size": c.size}
             for c in clusters
         ],
-        "method": "SDRangel-firedetector",
+        "method": "firedetector",
     }
 
 
@@ -381,14 +377,14 @@ def tool_remotecontrol_roundtrip(args: Dict[str, Any]) -> Dict[str, Any]:
         out.append({"request": json.loads(wire),
                     "response": json.loads(resp)})
     return {"roundtrip": out,
-            "method": "SDRangel-remotecontrol QJsonObject"}
+            "method": "remotecontrol-json"}
 
 
 # =====================================================================
 # 注册
 # =====================================================================
 def register_sdrangel_plugins_tools(registry) -> None:
-    """把 OGN / FireDetector / RemoteControl 三个 SDRangel 插件注册到 ToolRegistry。
+    """把 OGN / FireDetector / RemoteControl 三个离线工具注册到 ToolRegistry。
 
     提供三个工具：
       - sdrangel_ogn_decode       : 解析 FLARM V6 位置帧
@@ -421,7 +417,7 @@ def register_sdrangel_plugins_tools(registry) -> None:
 
     registry.register(
         name="sdrangel_ogn_decode",
-        description="SDRangel OGN 接收器：解析 FLARM V6 位置帧(hex)，解出 24bit 飞机ID/经纬度/高度",
+        description="OGN/FLARM：解析 V6 位置帧(hex)，解出 24bit 飞机ID/经纬度/高度",
         parameters={
             "type": "object",
             "properties": {
@@ -434,7 +430,7 @@ def register_sdrangel_plugins_tools(registry) -> None:
     )
     registry.register(
         name="sdrangel_firedetector",
-        description="SDRangel FireDetector：对热红外热点(lat,lon,temp_K)做阈值分割+距离聚类",
+        description="热红外热点检测：对(lat,lon,temp_K)做阈值分割+距离聚类",
         parameters={
             "type": "object",
             "properties": {
@@ -459,7 +455,7 @@ def register_sdrangel_plugins_tools(registry) -> None:
     )
     registry.register(
         name="sdrangel_remotecontrol",
-        description="SDRangel RemoteControl：JSON 命令(设备/命令/参数)往返到设备状态",
+        description="远程控制：JSON 命令(设备/命令/参数)往返到设备状态",
         parameters={
             "type": "object",
             "properties": {

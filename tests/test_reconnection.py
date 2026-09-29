@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """确定性单测：断连重连 / 指数退避 / 设置恢复 / 回调。
 
 用 FakeBackend + 极短退避 + threading.Event 同步，避免真实等待。

@@ -1,8 +1,9 @@
+# SPDX-License-Identifier: MIT
 """
 test_streamer.py — SpectrumStreamer / AudioStreamer 确定性单测。
 
 验证：
-  * FFT 峰值落在已知正弦信号对应 bin 附近（移植自 owrx/fft.py）
+  * FFT 峰值落在已知正弦信号对应 bin 附近
   * 峰值保留降采样不丢关键频点
   * 无数据时 latest()=None（红线：不造假）
   * 音频帧首字节 = 0x02

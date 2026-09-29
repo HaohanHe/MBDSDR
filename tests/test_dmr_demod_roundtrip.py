@@ -1,15 +1,15 @@
+# SPDX-License-Identifier: MIT
 """DMR 解码器合成信号往返测试。
 
 覆盖：
-  1. FEC 编解码往返（Golay/QR/RS/BPTC/Hamming）+ 纠错能力
-  2. 4FSK 基带解调符号正确率
-  3. Voice LC Header 帧端到端（基带路径）：解出 src/dst/slot/cc/flco
-  4. 复数 IQ 端到端
-  5. 同步字检测（噪声+随机前缀中定位）
-  6. 无信号时不假装有呼号/ID
+ 1. FEC 编解码往返（Golay/QR/RS/BPTC/Hamming）+ 纠错能力
+ 2. 4FSK 基带解调符号正确率
+ 3. Voice LC Header 帧端到端（基带路径）：解出 src/dst/slot/cc/flco
+ 4. 复数 IQ 端到端
+ 5. 同步字检测（噪声+随机前缀中定位）
+ 6. 无信号时不假装有呼号/ID
 
-参考: repos/MMDVMHost/*.cpp（协议与 FEC）, op25 fsk4_demod_ff（解调管线）。
-"""
+参考: *.cpp（协议与 FEC）, op25 fsk4_demod_ff（解调管线）"""
 from __future__ import annotations
 
 import os

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """FT8 8FSK 解调往返自测。
 
 合成一个已知符号序列的 FT8 8FSK 音频（79 符号 × 256ms，8 音调间隔 6.25Hz），

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/mimo_v2.py — 多设备/MIMO 同步采集 v2
 ================================================

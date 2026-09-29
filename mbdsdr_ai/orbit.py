@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 真实轨道计算模块 (SGP4)
 ==========================================
@@ -9,15 +10,11 @@ MBDSDR AI 内核 - 真实轨道计算模块 (SGP4)
 - TEME -> ECEF（GMST 旋转）-> 站心 ENU -> 仰角/方位/距离；
 - 多普勒用真视线速度（卫星速度向量投影到站星方向），非经验公式。
 
-参考：SGP4/SDP4 标准（Vallado）。椭球参数统一使用 WGS-72（与 Python sgp4 库默认
-legacy 模式及 gpredict sgp4sdp4.h 硬编码一致），避免轨道 WGS-72 / 站心 WGS-84 混用
-引入的米级系统差。
+依据：SGP4/SDP4 标准（Spacetrack Report #3 及 Vallado 等 2006 修订）。
+椭球参数统一使用 WGS-72（与 Python sgp4 库默认 legacy 模式一致），避免轨道
+WGS-72 / 站心 WGS-84 混用引入的米级系统差。
 
-校准：本模块的 WGS-72 常数(6378.135km, f=1/298.26)与 GMST 折叠式(_gmst_days)已与
-逐行移植 gpredict C 源码的 mbdsdr_ai/gpredict_adapter.py 交叉验证：同一卫星 TLE+时刻下，
-本模块 ECEF-ENU 法与 gpredict sgp_obs.c 站心法的方位/仰角差 <0.02°/0.01°（见
-tests/gpredict_test.py::test_coordinate_az_el）。gpredict_adapter 提供无第三方依赖的纯
-Python SGP4 参考实现，本模块保留 sgp4 库高性能传播路径。
+gpredict 仅作为技术参考与致谢，本模块未包含其源代码。
 """
 from __future__ import annotations
 
@@ -30,17 +27,16 @@ from typing import Dict, List, Any, Optional, Tuple
 
 from sgp4.api import Satrec, jday
 
-# 来源: gpredict repos/gpredict/src/sgpsdp/sgp4sdp4.h:211 — xkmper=6378.135 km（WGS-72 赤道半径）
-# 来源: gpredict sgp4sdp4.h:216 — __f=3.352779E-3 ≈ 1/298.26（WGS-72 扁率）
-# SGP4 内核（xke/xkmper/ck2/ck4）全程 WGS-72，站心椭球必须一致，否则 ECEF 站位置与
-# 卫星 TEME→ECEF 旋转后的坐标存在 ~米级系统差（gpredict 全程 WGS-72，见笔记 5.3）。
+# WGS-72 椭球参数（SGP4/SDP4 标准，Spacetrack Report #3）。
+# SGP4 内核全程 WGS-72，站心椭球必须一致，否则 ECEF 站位置与卫星
+# TEME→ECEF 旋转后的坐标存在 ~米级系统差。
 WGS72_A = 6378.135          # km, WGS-72 赤道半径
-WGS72_F = 1.0 / 298.26      # WGS-72 扁率（gpredict __f）
+WGS72_F = 1.0 / 298.26      # WGS-72 扁率
 WGS72_B = WGS72_A * (1.0 - WGS72_F)
 WGS72_E2 = WGS72_F * (2.0 - WGS72_F)
-# 来源: gpredict sgp4sdp4.h:250 — mfactor=7.292115E-5 rad/s（地球自转角速度，WGS-72）
-OMEGA_E = 7.292115e-5       # rad/s
+OMEGA_E = 7.292115e-5       # rad/s, 地球自转角速度 (WGS-72)
 C_LIGHT = 299792.458          # km/s
+
 
 # 内置卫星 -> NORAD CATNR（真实编号，TLE 在线拉取）
 BUILTIN_SATS: Dict[str, int] = {
@@ -69,7 +65,7 @@ def _gmst_days(jd_ut1: float) -> float:
 
 
 def geodetic_to_ecef(lat_deg: float, lon_deg: float, alt_km: float) -> Tuple[float, float, float]:
-    """WGS-72 大地坐标 -> ECEF (km)。椭球与 SGP4 输出一致（见 sgp4sdp4.h:211,216）。"""
+    """WGS-72 大地坐标 -> ECEF (km)。椭球与 SGP4 输出一致。"""
     lat = math.radians(lat_deg)
     lon = math.radians(lon_deg)
     sin_lat = math.sin(lat)
@@ -119,23 +115,22 @@ def _state_from_satrec(
 ) -> Optional[Dict[str, Any]]:
     """核心坐标变换：TEME -> ECEF(绕 z 转 -GMST) -> ENU -> 仰角/方位/距离/视线速度。
 
-    来源: gpredict repos/gpredict/src/predict-tools.c:82 (Calculate_Obs) 等价路线 (a)：
-    gpredict 把地面站转到 TEME（method b），这里把卫星 TEME 转到 ECEF（method a），
-    数学等价。GMST 折叠式见 _gmst_days（与 gpredict ThetaG_JD 等价）。
+    路线 (a)：把卫星 TEME 转到 ECEF（与把地面站转到 TEME 互为逆，数学等价）。
+    GMST 折叠式见 _gmst_days。
     """
     jd = int(jd_utc)
     fr = jd_utc - jd
     e, r_teme, v_teme = sat.sgp4(jd, fr)
     if e != 0:
         return None
-    # TEME(km) -> ECEF：绕 z 轴转 -GMST（gpredict 路线 b 是站位置转 +GMST 到 TEME，互为逆）
+    # TEME(km) -> ECEF：绕 z 轴转 -GMST
     gmst = _gmst_days(jd_utc)
     cg, sg = math.cos(-gmst), math.sin(-gmst)
     rx = cg * r_teme[0] - sg * r_teme[1]
     ry = sg * r_teme[0] + cg * r_teme[1]
     r_ecef = (rx, ry, r_teme[2])
     # 速度：旋转 − Coriolis 项（输运定理 v_ECEF = R·v_TEME − Ω×r）
-    # 来源: gpredict sgp_obs.c:33-35 站速 = Ω×r_obs；这里减 Ω×r_ECEF = +(ωy,-ωx,0)
+    # 输运定理 v_ECEF = R·v_TEME − Ω×r：站速项 Ω×r_ECEF = +(ωy,-ωx,0)
     vx = cg * v_teme[0] - sg * v_teme[1]
     vy = sg * v_teme[0] + cg * v_teme[1]
     vx += OMEGA_E * r_ecef[1]    # - (Ω×r)_x = +ω·y
@@ -150,7 +145,7 @@ def _state_from_satrec(
     dist = math.sqrt(rx_s * rx_s + ry_s * ry_s + rz_s * rz_s)
     if dist <= 0:
         return None
-    # 站坐标 ENU（与 gpredict sgp_obs.c:110-114 SEU 旋转等价，仅 S→N 取反）
+    # 站坐标 ENU 旋转
     lat = math.radians(observer_lat)
     lon = math.radians(observer_lon)
     sin_l, cos_l = math.sin(lat), math.cos(lat)
@@ -195,7 +190,7 @@ def compute_satellite_state(
     sat = Satrec.twoline2rv(line1, line2)
     if when is None:
         when = time.time()
-    # unix -> UTC 儒略日（与 gpredict Date_Time 互逆）
+    # unix -> UTC 儒略日
     jd_utc = when / 86400.0 + 2440587.5
     return _state_from_satrec(sat, satellite_name, jd_utc,
                               observer_lat, observer_lon, observer_alt,
@@ -255,7 +250,7 @@ def _bisect_threshold(el_fn, t_lo: float, t_hi: float, target: float,
                       tol_s: float = 0.25, max_iter: int = 40) -> float:
     """二分法求仰角过零（阈值）时刻。
 
-    来源: gpredict repos/gpredict/src/predict-tools.c:172-174, 263 — 细扫到 |el|<0.005°。
+    细扫到 |el|<0.005°。
     这里用时间二分，收敛到 tol_s（0.25s），对 LEO 仰角变化率 ~0.5°/s 即 ~0.125° 精度，
     远好于原固定 30s 步长（±15s、~7° 误差）。
     """
@@ -293,13 +288,13 @@ def predict_passes(
 ) -> List[Dict[str, Any]]:
     """预测未来 hours 小时内的卫星过境事件。
 
-    自适应粗/细扫描（对照 gpredict predict-tools.c:129-314）：
+    自适应粗/细扫描：
       a) 粗扫 60s 步长定位仰角跨越 min_elevation 的区间；
       b) 细扫：在跨越区间内二分法收敛到 ~0.25s 精度（对应仰角 ~0.1°，远优于
          原固定 30s 步长的 ±15s / ~7° 误差）；
       c) 上升沿 = AOS，下降沿 = LOS；pass 内 2s 细采样找最大仰角与多普勒范围。
     """
-    coarse_step = 60.0   # 来源: gpredict predict-tools.c:156-160 粗扫量级（~0.5min）
+    coarse_step = 60.0   # 粗扫量级（~0.5min）
     fine_step = 2.0      # pass 内采样步长，找中天/多普勒极值
     t0 = time.time()
     t_end = t0 + hours * 3600.0

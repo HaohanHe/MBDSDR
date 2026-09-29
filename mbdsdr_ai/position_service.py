@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/position_service.py — 位置数据聚合 / 轨迹 / GeoJSON
 =============================================================

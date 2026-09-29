@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """端到端测试：USB 拔出 -> 看门狗检测 -> 停止音频 -> 指数退避重试 -> 插回恢复。
 
 用 mock 后端串起 USBWatchdog + ReconnectionManager + error_handler，

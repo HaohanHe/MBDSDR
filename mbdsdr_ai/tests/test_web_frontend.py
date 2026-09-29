@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Web 前端 / 协议确定性测试。
 
 覆盖：

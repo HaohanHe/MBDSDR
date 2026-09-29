@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/skyengine/satellites.py — 卫星元数据 / COSPAR / 升落预报
 ====================================================================

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """Offscreen test: AI panel unconfigured API behavior.
 
 Verifies:

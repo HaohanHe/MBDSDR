@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR Core - 命令行接口（argparse）
 ======================================

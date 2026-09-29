@@ -1,5 +1,5 @@
-"""
-MBDSDR VOR（VHF Omnidirectional Range，甚高频全向信标）编解码器
+# SPDX-License-Identifier: MIT
+"""MBDSDR VOR（VHF Omnidirectional Range，甚高频全向信标）编解码器
 =====================================================================
 
 本模块实现 VOR 复合基带信号（即 VOR 接收机鉴频/包络检波之后的音频）的
@@ -7,31 +7,15 @@ MBDSDR VOR（VHF Omnidirectional Range，甚高频全向信标）编解码器
 108–118 MHz 频段；射频载波不在本模块范围内，本模块处理的是解调之后的
 复合音频。
 
-信号构成（ICAO Annex 10 Vol I, 标准 VOR 信号格式）：
-  1) 30 Hz 可变信号（Variable）：对载波做 30% 调幅，其相位随飞机相对
-     台站的磁方位角旋转；
-  2) 30 Hz 基准信号（Reference）：先对 9960 Hz 副载波做 30 Hz 调频
-     （频偏 ±480 Hz，调制指数 16），再以约 30% 幅度叠加到载波上；基准
-     30 Hz 相位固定不随方位变化；
-  3) 莫尔斯识别音：1020 Hz 音调，以约 7–10 WPM 发送台站呼号，穿插在
-     调制间隙。
-
 方位角由两个 30 Hz 分量的相位差给出：
     磁方位角 = 相位(可变 30 Hz) - 相位(基准 30 Hz)   （0–360°）
 
-参考来源：
-  - ICAO Annex 10 Volume I, 2.1.3 节 VOR 信号格式（9960 Hz 副载波、
-    ±480 Hz 频偏、30 Hz 基准/可变分量）。
-  - 莫尔斯码表与点划时长比例参考 repos/direwolf/src/morse.c:61-120
-    （标准国际摩尔斯码，dit:dash:gap = 1:3:1/3/7）。
-  - 30 Hz 带通 + 鉴频 + 单频相位估计的整体思路参考 GNURadio 中
-    gr-analog 的 PLL/鉴频块（repos/gnuradio/gr-analog/python/analog/），
-    本实现用 numpy/scipy 直接做离线处理，不依赖 GNU Radio 运行时。
+依据标准独立实现：ICAO Annex 10 VOR 信号格式（9960 Hz 副载波、±480 Hz 频偏、
+30 Hz 基准/可变分量）；标准国际摩尔斯码（dit:dash:gap = 1:3:1/3/7）。
+本实现用 numpy 直接做离线处理，不依赖 GNU Radio 运行时。
 
-注意：本模块只处理合成/离线信号，不读取任何真实射频硬件，也不伪造
-真实接收数据。测试中的方位角与呼号均为虚构值。
-
-MBDSDR Project - AI定义无线电 - GPL-3.0
+注意：本模块只处理合成/离线信号，不读取任何真实射频硬件，也不伪造真实接收数据。
+测试中的方位角与呼号均为虚构值。
 """
 
 from __future__ import annotations
@@ -51,7 +35,7 @@ SUBCARRIER_DEVIATION = 480.0  # 副载波频偏 ±480 Hz
 MORSE_TONE_FREQ = 1020.0      # 莫尔斯识别音调 (Hz)
 DEFAULT_WPM = 12.0            # 默认莫尔斯发送速度（字/分）
 
-# 莫尔斯码表（与 repos/direwolf/src/morse.c:64-120 一致，仅保留大写字母+数字）
+# 莫尔斯码表（与 一致，仅保留大写字母+数字）
 MORSE_TABLE = {
     ".-": "A", "-...": "B", "-.-.": "C", "-..": "D", ".": "E",
     "..-.": "F", "--.": "G", "....": "H", "..": "I", ".---": "J",
@@ -111,9 +95,8 @@ def _wrap_deg(deg: float) -> float:
 def _morse_samples(morse_id: str, fs: float, wpm: float) -> np.ndarray:
     """把呼号字符串编码成 1020 Hz 音调的采样序列（含首尾静音）。
 
-    时长比例参考 repos/direwolf/src/morse.c:60 的 TIME_UNITS_TO_MS：
-    单位点长 unit_ms = 1200 / wpm。
-    """
+ 时长比例参考 的 TIME_UNITS_TO_MS：
+ 单位点长 unit_ms = 1200 / wpm"""
     unit = 1.0 / wpm * 1.2  # PARIS 字元模型：1 点 = 1.2/wpm 秒
     spb = int(round(unit * fs))  # 每单位采样数
 

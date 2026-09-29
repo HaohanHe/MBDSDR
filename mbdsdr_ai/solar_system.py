@@ -1,39 +1,28 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 真实日月行星位置模块
 =====================================
-算法参考 Stellarium SolarSystem (GPL-3.0), 用 skyfield/astropy 独立实现。
+依据公开天文历表与行星位置方法，用 skyfield/astropy 独立实现。
 
-Stellarium 算法要点（源码引用）：
-- src/core/planetsephems/EphemWrapper.cpp:290-295
-    get_sun_helio_coordsv() 直接返回 (0,0,0)——太阳在日心系原点；
-    地心太阳位置 = -地球日心位置。
-- src/core/planetsephems/EphemWrapper.cpp:162-165
-    行星日心坐标优先用 JPL DE430/431/440/441；若历表不在时间范围内，
-    fallback 到 GetVsop87Coor()（VSOP87 级数展开）。
-- src/core/planetsephems/EphemWrapper.cpp:344-352
-    地球位置 = EMB（地月质心） - 月球位置 * 0.0121505677733761
-    （mu_m/(1+mu_m)，mu_m=M_moon/M_earth≈0.01230002）。
-- src/core/planetsephems/EphemWrapper.cpp:458-459
-    月球 fallback 用 ELP2000-82B（GetElp82bCoor）；
-    并有子角秒修正：经度 +0.50"，纬度 -0.25"（EphemWrapper.cpp:468-474）。
-- src/core/modules/Planet.cpp:2525-2531
-    J2000 地心赤道矢量 = (planetHelio - observerHelio + aberrationPush)
-    再经 matVsop87ToJ2000 旋转矩阵转到 J2000。
-- src/core/modules/Planet.cpp:3092-3100
-    被照亮比例 = 0.5 * |1 + cos(相位角)|；
-    相位角 = acos((obsPlanetR² + planetR² - obsR²) / (2*sqrt(obsPlanetR²*planetR²)))
-    （Planet.cpp:3051-3058）。
-- src/core/modules/SolarSystem.cpp:1598-1611
-    光行时修正：迭代两轮，
-    lightTimeDays = 距离_AU / (光速_km/s * 86400)；
-    再按 t - lightTime 重算位置；光行差修正 aberrationPush = lightTime * 观测者速度。
+采用的公开天文要点：
+- 太阳在日心系原点；地心太阳位置 = -地球日心位置。
+- 行星位置优先用 JPL 数值星历（DE4xx 系列）；星历不可用时回退到
+  VSOP87 级数展开 / 月球简化理论。
+- 地球位置 = EMB（地月质心） - 月球位置 * mu_m/(1+mu_m)（mu_m≈0.0123）。
+- 月球位置可用 ELP2000-82B 理论。
+- J2000 地心赤道矢量 = (行星日心 - 观测者日心 + 光行差修正)。
+- 被照亮比例 = 0.5 * |1 + cos(相位角)|；相位角由三角形余弦定理给出。
+- 光行时修正：lightTimeDays = 距离_AU / (光速_km/s * 86400)，
+  再按 t - lightTime 重算位置；光行差修正 = lightTime * 观测者速度。
 
 本模块用 skyfield（JPL DE421 星历）作为首选后端——比手写 VSOP87 级数更可靠、
 精度更高；当 .bsp 星历不可用时，自动 fallback 到 astropy builtin
-（其内部正是 VSOP87 级数 + 月球简化理论，与 Stellarium 的 fallback 等价）。
+（其内部即 VSOP87 级数 + 月球简化理论）。
 
 时间参数兼容 new_spacetime.py TimeEngine：接受 skyfield Time、unix 时间戳、
 datetime 或 JD。
+
+Stellarium 仅作为技术参考与致谢，本模块未包含其源代码。
 """
 
 from __future__ import annotations
@@ -490,7 +479,6 @@ def _position_skyfield(body_key: str, t_unix: float,
     )
 
     # astrometric().apparent() 给出视位置（含光行差、章动、岁差）
-    # 对应 Stellarium Planet::getJ2000EquatorialPos() + aberrationPush
     astrometric = observer.at(t).observe(body)
     apparent = astrometric.apparent()
     ra_deg, dec_deg, distance_au = apparent.radec()
@@ -520,7 +508,7 @@ def _position_skyfield(body_key: str, t_unix: float,
 
 def _moon_phase_skyfield(t_unix: float, station: GroundStation,
                          moon_pos: BodyPosition) -> Tuple[float, float]:
-    """计算月相角和照亮比例（Stellarium Planet::getPhase, Planet.cpp:3092-3100）。"""
+    """计算月相角和照亮比例（被照亮比例 = 0.5*(1+cos_phase)）。"""
     be = _get_backend()
     from skyfield.api import Topos
     ts = be._sf_ts
@@ -783,8 +771,7 @@ def get_sun_position(time: Any, ground_station: Any) -> Optional[BodyPosition]:
     """
     获取太阳视位置。
 
-    Stellarium 对应：EphemWrapper.cpp:290-295（太阳日心=原点）+
-    Planet.cpp:2525-2531（地心= -地球日心 + 光行差）。
+    太阳日心系原点；地心太阳位置 = -地球日心位置 + 光行差修正。
 
     参数:
         time: unix 时间戳 / datetime / skyfield Time / JD
@@ -816,8 +803,7 @@ def get_moon_position(time: Any, ground_station: Any) -> Optional[BodyPosition]:
     """
     获取月球视位置（含相位、照度、角直径）。
 
-    Stellarium 对应：EphemWrapper.cpp:458-459（ELP2000-82B）+
-    Planet.cpp:3092-3100（被照亮比例 = 0.5*(1+cos_phase)）。
+    月球位置用 ELP2000-82B 理论；被照亮比例 = 0.5*(1+cos_phase)。
 
     返回:
         BodyPosition（含 phase_angle_deg, illumination, angular_diameter_deg）
@@ -849,8 +835,7 @@ def get_planet_position(planet_name: str, time: Any,
     """
     获取行星视位置。
 
-    Stellarium 对应：EphemWrapper.cpp:162-165（DE4xx 优先，VSOP87 fallback）+
-    SolarSystem.cpp:1598-1611（光行时迭代修正）。
+    优先 JPL DE4xx 星历，不可用时回退 VSOP87 级数；光行时迭代修正。
 
     参数:
         planet_name: mercury/venus/mars/jupiter/saturn（不区分大小写）
@@ -877,7 +862,7 @@ def get_planet_position(planet_name: str, time: Any,
 
     # 行星相位角：地心看行星，太阳-行星-地球 夹角
     # 简化：用 RA/Dec 差估算（精确值需三维矢量，这里给近似）
-    # Stellarium Planet.cpp:3051-3058 用日心矢量三角形
+    # 相位角由日心矢量三角形余弦定理给出
     try:
         sun_pos = get_sun_position(time, station)
         if sun_pos is not None and pos.distance_au and sun_pos.distance_au:

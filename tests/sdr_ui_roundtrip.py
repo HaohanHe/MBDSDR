@@ -1,13 +1,14 @@
+# SPDX-License-Identifier: MIT
 """
 4 个 SDR UI/接收机架构适配器 - 往返验证
 ==========================================
-对照各自开源仓库真实源码逐项验证：
+逐项验证各 adapter 的 UI/编排逻辑（合成/离线数据）：
   1. SDR#     : 设备枚举表非空；FFT 窗系数和校验；register 可调用
   2. OpenWebRX: FFT 平均/块尺寸公式；waterfall 调色板形状；设备带宽钳位
   3. CubicSDR : 多VFO 切换状态一致；drag-tune 步进；带宽/PPM 钳位
   4. HDSDR    : 增益档位钳位；总增益等于三级求和；带宽预设正确
 
-所有常量来源见各 adapter 内联注释（项目 源文件:行号）。
+
 """
 import os
 import sys
@@ -131,12 +132,12 @@ class TestCubicSDR(unittest.TestCase):
         self.assertEqual(mgr.active_visual.id, v0.id)
 
     def test_step_tuner_amount(self):
-        """StepTuner digit=4 步进 ±10000（TuningCanvas.cpp:174）。"""
+        """StepTuner digit=4 步进 ±10000（）。"""
         self.assertEqual(cubic_step_tuner(100_000_000, 4, 1), 100_010_000)
         self.assertEqual(cubic_step_tuner(100_000_000, 4, -1), 99_990_000)
 
     def test_drag_to_steps(self):
-        """5.0*normalized_delta=步进数：归一化拖拽 2.0 窗口宽 → 10 步（TuningCanvas.cpp:275）。"""
+        """5.0*normalized_delta=步进数：归一化拖拽 2.0 窗口宽 → 10 步（）。"""
         self.assertEqual(cubic_drag_to_steps(2.0), 10)
         self.assertEqual(cubic_drag_to_steps(-2.0), -10)
         self.assertEqual(cubic_drag_to_steps(0.1), 0)

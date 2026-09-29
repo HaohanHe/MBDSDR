@@ -1,10 +1,12 @@
+# SPDX-License-Identifier: MIT
 """
-test_dsp_agc.py — AGC attack/decay 确定性单测（合成信号）。
+test_dsp_agc.py — deterministic AGC attack/decay unit tests (synthetic signal).
+非硬件 / NOT HARDWARE.
 
-验证 GqrxAGC（移植自 gqrx src/dsp/agc_impl.cpp）：
-  * 突发信号后输出幅度稳定（变化 < 3dB）
-  * attack 时间 < 10ms
-对应 mbdsdr_ai/gqrx_receiver.py:GqrxAGC。
+Checks GqrxAGC:
+  * output level settles after a burst (variation < 3 dB)
+  * attack time < 10 ms
+Targets mbdsdr_ai/gqrx_receiver.py:GqrxAGC.
 """
 import os
 import sys

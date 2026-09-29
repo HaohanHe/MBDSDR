@@ -1,11 +1,11 @@
+# SPDX-License-Identifier: MIT
 """
 自动调制识别（AMR）
 ====================
 
-对照 URH ``src/urh/ainterpretation/AutoInterpretation.py::detect_modulation``
-（``:151-207``）与 ``Modulator.py:20`` 的调制类型枚举。
+参考 URH 自动调制识别的特征工程思路（URH 仅作技术参考，本仓未包含其源代码）。
 
-URH 的核心思路：
+公开 AMR 常用的特征判别思路：
 - 对 |z| 与 |z|/|z|（归一化）做 Haar 小波，比对方差 → 区分 ASK 与 FSK/PSK。
 - 对 FFT 看是否有两个峰 → FSK。
 - 中值滤波后方差骤降 → PSK（相位跳变是高频尖峰）。

@@ -1,29 +1,30 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 模块系统（module_system）
 ==================================
 
-移植自 SDR++ 的模块管理架构（见 docs/learn/sdrpp_modules.md 第 1 节）：
+模块管理架构（参考 SDR++ 的模块/实例分离思想；SDR++ 仅作技术参考，本仓未包含其源代码）：
 
-  SDR++ C++                              本模块 Python
+  概念                                   本模块 Python
   ------------------------------------   ------------------------------------
-  ModuleManager::Instance (module.h:43)   Module（ABC 基类）
-  ModuleInfo_t (module.h:33-41)          Module.metadata / __init_subclass__
-  ModuleManager::loadModule (module.cpp:5)  ModuleRegistry.register（动态 import 替代 dlopen）
-  ModuleManager::createInstance (:86)     ModuleRegistry.create
-  modules/instances map (:100-101)       ModuleRegistry._classes / _instances
-  dsp::stream<T> 双缓冲 (stream.h:24)    SignalGraph 同步 pull/push（numpy ndarray 块）
-  SourceHandler/SinkHandler (source.h)    ModuleType.source/sink/demod/tool + ports
+  模块单例注册表                          Module（ABC 基类）
+  模块元数据                              Module.metadata / __init_subclass__
+  动态加载模块                            ModuleRegistry.register（动态 import）
+  创建模块实例                            ModuleRegistry.create
+  模块类 / 实例表                         ModuleRegistry._classes / _instances
+  数据流双缓冲                            SignalGraph 同步 pull/push（numpy ndarray 块）
+  源/宿端口角色                           ModuleType.source/sink/demod/tool + ports
 
 设计要点：
-  * 模块"类"与"实例"分离：register 注册类，create 出实例（对齐 module.cpp:86-106）。
+  * 模块"类"与"实例"分离：register 注册类，create 出实例。
   * 模块不直接持有彼此指针，只通过 (module, port_name) 端点连接；connect 时校验端口。
-  * source 只有输出口，sink 只有输入口，demod/tool 两端都有（对齐 SDR++ 目录划分）。
+  * source 只有输出口，sink 只有输入口，demod/tool 两端都有。
   * 数据以 numpy ndarray 流式传递（默认 complex64 IQ 块）。
   * start/stop 沿图拓扑启停（先 source 后下游；停反向）。
 
-MBDSDR 增强（比 SDR++ 多的点）：
+MBDSDR 增强：
   * ModuleRegistry.recommend_chain(features)：根据信号特征（带宽/占空比/峰值 SNR/
-    频谱形状）建议解调模块链——SDR++ 没有这种自动推荐。
+    频谱形状）建议解调模块链——自动推荐解调链。
   * SignalGraph 支持多输入合并（mixer 节点）与多输出扇出。
 
 红线：
@@ -64,7 +65,7 @@ class Port:
 
 
 # ----------------------------------------------------------------------
-# 模块基类（对应 ModuleManager::Instance，module.h:43-50）
+# 模块基类（对应 ModuleManager::Instance）
 # ----------------------------------------------------------------------
 class Module(abc.ABC):
     """所有 MBDSDR 模块的基类。
@@ -73,7 +74,7 @@ class Module(abc.ABC):
       MODULE_NAME    : str   —— 类名（注册用），对应 SDRPP_MOD_INFO.name
       MODULE_TYPE    : str   —— ModuleType 之一
       MODULE_DESC    : str   —— 一句话描述
-      MAX_INSTANCES  : int   —— <=0 不限（对应 module.h:40 maxInstances）
+      MAX_INSTANCES  : int   —— <=0 不限（maxInstances）
     并实现 process()/start()/stop()。
     """
 
@@ -124,7 +125,7 @@ class Module(abc.ABC):
         self._running = False
 
     def post_init(self) -> None:
-        """对应 SDR++ Instance::postInit()（module.h:46）——所有实例构造完后统一调用。"""
+        """对应 SDR++ Instance::postInit()——所有实例构造完后统一调用。"""
 
     @property
     def running(self) -> bool:
@@ -137,14 +138,14 @@ class Module(abc.ABC):
 
 
 # ----------------------------------------------------------------------
-# 模块注册表（对应 ModuleManager，module.h:31-102）
+# 模块注册表（对应 ModuleManager）
 # ----------------------------------------------------------------------
 class ModuleRegistry:
     """模块类注册表 + 实例工厂。
 
-    - register(cls)：注册一个 Module 子类（对应 loadModule 后入 modules map，module.cpp:82）。
-    - create(instance_name, module_name)：实例化（对应 createInstance，module.cpp:86）。
-    - dynamic_load(module_path)：从 'pkg.mod:Cls' 字符串动态 import（对应 dlopen，module.cpp:34）。
+    - register(cls)：注册一个 Module 子类（对应 loadModule 后入 modules map）。
+    - create(instance_name, module_name)：实例化（对应 createInstance）。
+    - dynamic_load(module_path)：从 'pkg.mod:Cls' 字符串动态 import（对应 dlopen）。
     - recommend_chain(features)：【MBDSDR 增强】按信号特征推荐模块链。
     """
 
@@ -160,11 +161,11 @@ class ModuleRegistry:
         if not name:
             raise ValueError(f"{cls.__name__} 未设置 MODULE_NAME")
         if name in self._classes:
-            raise ValueError(f"模块类 '{name}' 已注册（重名，对应 module.cpp:71）")
+            raise ValueError(f"模块类 '{name}' 已注册（重名）")
         self._classes[name] = cls
 
     def dynamic_load(self, module_path: str) -> type:
-        """从 'pkg.module:ClassName' 动态加载并注册。对应 dlopen+dlsym(module.cpp:34-44)。"""
+        """从 'pkg.module:ClassName' 动态加载并注册。对应 dlopen+dlsym。"""
         if ":" not in module_path:
             raise ValueError("dynamic_load 需要 'pkg.module:ClassName' 形式")
         mod_path, cls_name = module_path.rsplit(":", 1)
@@ -192,19 +193,18 @@ class ModuleRegistry:
             })
         return out
 
-    # -- 实例工厂（对应 createInstance, module.cpp:86-106）-----------------
+    # -- 实例工厂（对应 createInstance）-----------------
     def create(self, instance_name: str, module_name: str,
                config: Optional[dict] = None) -> Module:
         cls = self.get(module_name)
         if instance_name in self._instances:
-            raise ValueError(f"实例 '{instance_name}' 已存在（对应 module.cpp:91）")
+            raise ValueError(f"实例 '{instance_name}' 已存在")
         if cls.MAX_INSTANCES > 0:
             count = sum(1 for m in self._instances.values()
                         if type(m).__name__ == cls.__name__)
             if count >= cls.MAX_INSTANCES:
                 raise ValueError(
-                    f"模块 '{module_name}' 实例数达上限 {cls.MAX_INSTANCES}"
-                    f"（对应 module.cpp:96）")
+                    f"模块 '{module_name}' 实例数达上限 {cls.MAX_INSTANCES}")
         inst = cls(instance_name, config)
         self._instances[instance_name] = inst
         return inst
@@ -221,7 +221,7 @@ class ModuleRegistry:
         return dict(self._instances)
 
     def post_init_all(self) -> None:
-        """对应 doPostInitAll（module.cpp:181-186）。"""
+        """对应 doPostInitAll。"""
         for inst in self._instances.values():
             inst.post_init()
 

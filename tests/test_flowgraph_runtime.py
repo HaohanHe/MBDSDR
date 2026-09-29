@@ -1,7 +1,6 @@
-"""TPB FlowGraph 调度器确定性测试。
-
-对照 mbdsdr_ai/flowgraph_runtime.py（上游 gnuradio flowgraph.cc/scheduler_tpb.cc）。
-"""
+# SPDX-License-Identifier: MIT
+"""Deterministic tests for the thread-per-block FlowGraph scheduler.
+非硬件 / NOT HARDWARE: all signals are synthetic."""
 import threading
 import time
 

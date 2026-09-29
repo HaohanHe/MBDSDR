@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """FakeRtl 端到端链路测试：设备打开→读 IQ→FFT→WFM 解调→音频输出队列。
 
 在云里没有真棒时，这是唯一能自证"插上就能出"的办法。

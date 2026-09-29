@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 桌面端 - APRS / AX.25 数据包面板 (AprsPanel)
 =====================================================

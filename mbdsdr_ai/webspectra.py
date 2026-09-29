@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """WebSpectra 瀑布流编码/解码（OpenWebRX 风格）。
 
 上游对照（docs/learn/porting_2026_09_27.md §2）：

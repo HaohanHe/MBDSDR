@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 宽带扫频与活动信号扫描（wideband sweep / activity scanner）
 =========================================================

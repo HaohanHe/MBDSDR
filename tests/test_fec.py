@@ -1,6 +1,8 @@
-"""FEC 单测（移植自 SatDump reedsolomon/randomization/differential）。
+# SPDX-License-Identifier: MIT
+"""FEC 单测。
 
-上游对照：docs/learn/porting_2026_09_27.md §4
+依据公开编码标准（Reed-Solomon / 随机化 / 差分编码）独立实现；
+SatDump 仅作技术参考，未引用其代码。
 """
 import numpy as np
 import pytest

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 频谱显示组件
 ====================
@@ -718,7 +719,10 @@ def _draw_spectrum(painter, state, rect, line_color):
     grad = QLinearGradient(0, ry0, 0, ry0 + rh)
     grad.setColorAt(0.0, QColor(PAL_LINE).lighter(130))
     grad.setColorAt(1.0, QColor(PAL_LINE).darker(160))
-    painter.fillPolygon(fillpoly, grad)
+    # PySide6 QPainter 无 fillPolygon(poly, brush)：把渐变设为当前 brush，
+    # drawPolygon 会按当前 brush 填充，语义与原 fillPolygon 一致。
+    painter.setBrush(QBrush(grad))
+    painter.drawPolygon(fillpoly)
     painter.setPen(QPen(line_color, 2))
     painter.drawPolyline(poly)
 
@@ -1744,7 +1748,13 @@ class _TuningPlotMixin:
 # 绘图表面：上方 FFT 频谱曲线 widget（承载全部调谐 / VFO 拖拽交互）
 # ============================================================================
 
-class SpectrumCurveWidget(PinchZoomMixin, _TuningPlotMixin, QWidget):
+# 触屏不可用时 PinchZoomMixin 兜底为 object；此时绝不能把 object 显式列在
+# QWidget 之前作为基类，否则 Python C3 线性化报 TypeError（object 必须排在
+# Qt 继承链末尾）。用条件基类元组在两种情况下都得到一致、合法的 MRO。
+_PinchBases = (PinchZoomMixin,) if PinchZoomMixin is not object else ()
+
+
+class SpectrumCurveWidget(*_PinchBases, _TuningPlotMixin, QWidget):
     """上方 FFT 频谱曲线。整个 widget 即谱面，鼠标 / 滚轮 / 键盘交互全在此。
 
     触屏（Surface/平板）：PinchZoomMixin 提供双指捏合缩放（复用 Ctrl+滚轮的

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 频率管理器 / 书签库（frequency manager）
 =======================================
@@ -301,8 +302,7 @@ class FrequencyManager:
         return out
 
 
-# ---- 数字模式默认参数表（对标 wsjtx widgets/mainwindow.cpp:10984-11008、
-# models/FrequencyList.cpp 各波段默认频点）----
+# ---- 数字模式默认参数表（依据 FT8/FT4 等公开协议标准；wsjtx 仅作技术参考）----
 MODE_PARAMS = {
     "FT8": {"tr_period_s": 15.0, "nsps": 6912, "ftol_hz": 50,
             "tone_spacing_hz": 6.25, "sample_rate": 12000},

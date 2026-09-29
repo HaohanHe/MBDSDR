@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 VFO offset 端到端 DDC 测试
 ==========================

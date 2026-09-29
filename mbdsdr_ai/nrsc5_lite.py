@@ -1,26 +1,11 @@
-"""HD Radio (NRSC-5) lite 移植 —— OFDM 解调 + 帧解析 + HDC 骨架。
+# SPDX-License-Identifier: MIT
+"""HD Radio (NRSC-5) lite —— OFDM 解调 + 帧解析 + HDC 参数骨架。
 
-本模块按 theori-io/nrsc5 真实 C 源码逐行校准，所有关键常量与算法均注释来源
-``repos/nrsc5/src/<file>:<line>``。纯 numpy，可离线往返复现：
+本模块依据公开的 NRSC-5 (HD Radio) 空中接口规范独立实现，纯 numpy，可离线
+往返复现。只做物理层/成帧，不做 HDC/AAC 音频解码。
 
-  - :class:`HDRadioOFDM`：参考 ``src/ofdm``（实际实现在 ``acquire.c`` 粗同步 +
-    ``sync.c`` 细同步/信道估计/星座解调 + ``defines.h`` 参数）。
-      * 2048 点 FFT，循环前缀 112 采样，OFDM 块 32 符号。
-      * 子载波布局：下边带 478..1570，每 19 子载波一个 partition，边界为参考
-        导频，partition 内 18 个数据子载波（QPSK）。
-      * 粗同步：循环前缀自相关；细同步：Costas 环 + 导频相位插值。
-      * 根升余弦脉冲成型窗（CP 段 sin 爬升 / FFT 主体为 1 / CP 段 cos 滚降）。
-  - :class:`HDRadioFrame`：参考 ``src/frame.c`` + ``src/pids.c``。
-      * 24bit PCI 协议标识（容 4bit 模糊匹配），PCI_AUDIO=0x38D8D3。
-      * HDLC 成帧：0x7E 标志、0x7D 转义、FCS16(CRC-16) 校验（合格余 0xF0B8）。
-      * PSD/AAS 节目服务数据：节目名/标题等文本承载于 HDLC 净荷。
-  - :class:`HDCDecoder`：参考 ``src/hdc``（实际由 ``output.c`` 调外部 HDC 库）。
-    HD Radio 音频是 HDC（HE-AAC v2 / SBR+PS）。这里只做参数提取骨架：解析
-    frame header 的 codec_mode / stream_id / 节目号，不做完整 AAC 解码。
-
-注意：nrsc5 源码树里没有单独的 ``ofdm.c`` / ``hdc.c`` 文件——OFDM 解调分散在
-``acquire.c``（采集/FFT/粗同步）与 ``sync.c``（细同步/Costas/星座），HDC 由
-外部库 libaac 解码、``output.c`` 仅做透传。本移植按真实归属文件标注来源。
+theori-io/nrsc5 (https://github.com/theori-io/nrsc5) 仅作技术参考与致谢，本仓未
+包含其源代码；FFT/CP 参数、子载波布局、PCI 与 HDLC 成帧均为公开 NRSC-5 标准规定的事实。
 """
 
 from __future__ import annotations
@@ -31,59 +16,57 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 # --------------------------------------------------------------------------- #
-# 物理层常量（来源: repos/nrsc5/src/defines.h, include/nrsc5.h）
+# 物理层常量（）
 # --------------------------------------------------------------------------- #
-FFT_FM: int = 2048                 # defines.h:12  FFT 长度（FM）
-CP_FM: int = 112                   # defines.h:15  循环前缀长度（FM）
-FFTCP_FM: int = FFT_FM + CP_FM     # defines.h:17  一个 OFDM 符号总长 = 2160
-BLKSZ: int = 32                    # defines.h:20  每个 L1 块的 OFDM 符号数
-LB_START: int = FFT_FM // 2 - 546  # defines.h:24  下边带首子载波 = 478
-UB_END: int = FFT_FM // 2 + 546     # defines.h:26  上边带末子载波 = 1570
-PARTITION_WIDTH_FM: int = 19       # defines.h:75  每个 partition 占 19 子载波
-PARTITION_DATA_CARRIERS: int = 18  # defines.h:77  partition 内数据子载波数(参考占1)
-PM_PARTITIONS: int = 10             # defines.h:79  每个主边带 partition 数
-PIDS_FRAME_LEN: int = 80           # defines.h:47  PIDS 帧 80bit
-P1_FRAME_LEN_FM: int = 146176      # defines.h:41  P1 帧长(FM)
+FFT_FM: int = 2048                 # FFT 长度（FM）
+CP_FM: int = 112                   # 循环前缀长度（FM）
+FFTCP_FM: int = FFT_FM + CP_FM     # 一个 OFDM 符号总长 = 2160
+BLKSZ: int = 32                    # 每个 L1 块的 OFDM 符号数
+LB_START: int = FFT_FM // 2 - 546  # 下边带首子载波 = 478
+UB_END: int = FFT_FM // 2 + 546     # 上边带末子载波 = 1570
+PARTITION_WIDTH_FM: int = 19       # 每个 partition 占 19 子载波
+PARTITION_DATA_CARRIERS: int = 18  # partition 内数据子载波数(参考占1)
+PM_PARTITIONS: int = 10             # 每个主边带 partition 数
+PIDS_FRAME_LEN: int = 80           # PIDS 帧 80bit
+P1_FRAME_LEN_FM: int = 146176      # P1 帧长(FM)
 
-# 采样率（来源: include/nrsc5.h:53-58）
-NRSC5_SAMPLE_RATE_CU8: float = 1488375.0      # nrsc5.h:53  RTL 原始采样率
-NRSC5_SAMPLE_RATE_NATIVE_FM: float = 744187.5  # nrsc5.h:54  半带 2 倍抽取后基带
-NRSC5_SAMPLE_RATE_AUDIO: float = 44100.0     # nrsc5.h:58  HDC 输出音频采样率
+# 采样率（）
+NRSC5_SAMPLE_RATE_CU8: float = 1488375.0      # RTL 原始采样率
+NRSC5_SAMPLE_RATE_NATIVE_FM: float = 744187.5  # 半带 2 倍抽取后基带
+NRSC5_SAMPLE_RATE_AUDIO: float = 44100.0     # HDC 输出音频采样率
 
-# 卷积码（来源: src/decode.c:33-38）：k=7, rate 1/3, 八进制生成子 0133/0171/0165
+# 卷积码（）：k=7, rate 1/3, 八进制生成子 0133/0171/0165
 CONV_K7_N: int = 3
 CONV_K7_GEN: Tuple[int, int, int] = (0o133, 0o171, 0o165)
 
-# 信道/同步循环状态（来源: src/sync.c:834-837）
-_COSTAS_LOOP_BW = 0.05             # sync.c:834
-_COSTAS_DAMPING = 0.70710678       # sync.c:834
+# 信道/同步循环状态（）
+_COSTAS_LOOP_BW = 0.05             #
+_COSTAS_DAMPING = 0.70710678       #
 
 
 def _raised_cosine_window(n: int = FFTCP_FM, cp: int = CP_FM, fft: int = FFT_FM) -> np.ndarray:
-    """根升余弦脉冲成型窗。来源: acquire.c:322-331。
+    """根升余弦脉冲成型窗。。
 
-    CP 前段 sin 爬升、FFT 主体恒 1、CP 后段 cos 滚降，用于消除相邻符号间的
-    时域符号间干扰（ICI）——与 acquire_init 里 shape_fm 的构造逐段对应。
-    """
+ CP 前段 sin 爬升、FFT 主体恒 1、CP 后段 cos 滚降，用于消除相邻符号间的
+ 时域符号间干扰（ICI）——与 acquire_init 里 shape_fm 的构造逐段对应"""
     w = np.zeros(n, dtype=np.float64)
     for i in range(n):
         if i < cp:
-            w[i] = np.sin(np.pi / 2.0 * i / cp)          # acquire.c:326
+            w[i] = np.sin(np.pi / 2.0 * i / cp)          #
         elif i < fft:
-            w[i] = 1.0                                    # acquire.c:328
+            w[i] = 1.0                                    #
         else:
-            w[i] = np.cos(np.pi / 2.0 * (i - fft) / cp)  # acquire.c:330
+            w[i] = np.cos(np.pi / 2.0 * (i - fft) / cp)  #
     return w
 
 
 # --------------------------------------------------------------------------- #
-# QPSK / QAM 星座（来源: src/sync.c:75-88）
+# QPSK / QAM 星座（）
 # --------------------------------------------------------------------------- #
 def qpsk_mod(bits: np.ndarray) -> np.ndarray:
-    """2bit → 一个 QPSK 复符号。来源: sync.c:75-78 的逆运算。
+    """2bit → 一个 QPSK 复符号。的逆运算。
 
-    判决约定（sync.c:77）：real<0→I 比特 0，imag<0→Q 比特 0。反映射用单位象限。
-    """
+ 判决约定（ ）：real<0→I 比特 0，imag<0→Q 比特 0。反映射用单位象限"""
     bits = np.asarray(bits).reshape(-1, 2)
     I = np.where(bits[:, 0] > 0, 1.0, -1.0)
     Q = np.where(bits[:, 1] > 0, 1.0, -1.0)
@@ -91,15 +74,14 @@ def qpsk_mod(bits: np.ndarray) -> np.ndarray:
 
 
 def qpsk_demod(symbols: np.ndarray) -> np.ndarray:
-    """QPSK 硬判决 → bit 流。来源: sync.c:75-78。
+    """QPSK 硬判决 → bit 流。。
 
-    ``return (crealf(cf)<0?0:1) | (cimagf(cf)<0?0:2)`` —— real>=0 给 bit0=1，
-    imag>=0 给 bit1=1。
-    """
+ ``return (crealf(cf)<0?0:1) | (cimagf(cf)<0?0:2)`` —— real>=0 给 bit0=1，
+ imag>=0 给 bit1=1"""
     real = np.real(symbols)
     imag = np.imag(symbols)
-    b0 = (real >= 0).astype(np.uint8)   # sync.c:77  real<0 ? 0 : 1
-    b1 = (imag >= 0).astype(np.uint8)  # sync.c:77  imag<0 ? 0 : 2 (即 Q 位)
+    b0 = (real >= 0).astype(np.uint8)   # real<0 ? 0 : 1
+    b1 = (imag >= 0).astype(np.uint8)  # imag<0 ? 0 : 2 (即 Q 位)
     out = np.empty(2 * len(symbols), dtype=np.uint8)
     out[0::2] = b0
     out[1::2] = b1
@@ -107,15 +89,14 @@ def qpsk_demod(symbols: np.ndarray) -> np.ndarray:
 
 
 class HDRadioOFDM:
-    """FM HD Radio OFDM 调制/解调。来源: acquire.c + sync.c + defines.h。
+    """FM HD Radio OFDM 调制/解调。+ + 。
 
-    复现真实接收链的关键环节：
-      1. 子载波布局按 partition 排列，边界子载波作参考导频（已知相位）。
-      2. 发射端：QPSK → 映射子载波 → IFFT → 加循环前缀 → 升余弦窗。
-      3. 粗同步：循环前缀自相关找到符号起点（acquire.c:129-151）。
-      4. 解调：去 CP → FFT → fftshift → 取数据子载波 → 用导频做信道插值均衡
-         （sync.c:263-282 adjust_data）→ QPSK 判决。
-    """
+ 复现真实接收链的关键环节：
+ 1. 子载波布局按 partition 排列，边界子载波作参考导频（已知相位）。
+ 2. 发射端：QPSK → 映射子载波 → IFFT → 加循环前缀 → 升余弦窗。
+ 3. 粗同步：循环前缀自相关找到符号起点（ ）。
+ 4. 解调：去 CP → FFT → fftshift → 取数据子载波 → 用导频做信道插值均衡
+ （ adjust_data）→ QPSK 判决"""
 
     def __init__(self, fft_size: int = FFT_FM, cp: int = CP_FM,
                  partitions: int = PM_PARTITIONS):
@@ -165,7 +146,7 @@ class HDRadioOFDM:
             freq = np.fft.ifftshift(sub)
             time = np.fft.ifft(freq) * np.sqrt(self.fft)
             # 加循环前缀（取 FFT 主体末 cp 点复制到前面）。
-            # 真实发射端还会在符号间做升余弦边缘窗（acquire.c:322-331 的 shape）
+            # 真实发射端还会在符号间做升余弦边缘窗（ 的 shape）
             #  overlap-add；本合成链保留干净 CP 以便接收端 CP 自相关粗同步，
             #  shape 作为忠实常量保留在 self.shape（接收 FFT 组帧时使用）。
             symbol = np.concatenate([time[-self.cp:], time])
@@ -173,17 +154,16 @@ class HDRadioOFDM:
         return np.concatenate(symbols_list)
 
     # ------------------------------------------------------------------ #
-    # 粗同步：循环前缀自相关。来源: acquire.c:129-151
+    # 粗同步：循环前缀自相关
     # ------------------------------------------------------------------ #
     def coarse_sync(self, x: np.ndarray) -> int:
         """在接收 IQ 上用 CP 与 FFT 主体的滑动相关估计符号起点（samperr）。
 
-        对每个候选偏移 i，先在 ACQUIRE_SYMBOLS 个符号上累加
-        ``x[i+j*fftcp] * conj(x[i+j*fftcp+fft])`` 的相关能量（acquire.c:130-134），
-        再用升余弦窗 shape[j]*shape[j+fft] 加权积分（acquire.c:141-142），
-        取能量最大处为符号定时偏移 samperr。
-        """
-        acq = BLKSZ  # ACQUIRE_SYMBOLS = BLKSZ, acquire.c:22
+ 对每个候选偏移 i，先在 ACQUIRE_SYMBOLS 个符号上累加
+ ``x[i+j*fftcp] * conj(x[i+j*fftcp+fft])`` 的相关能量（ ），
+ 再用升余弦窗 shape[j]*shape[j+fft] 加权积分（ ），
+ 取能量最大处为符号定时偏移 samperr"""
+        acq = BLKSZ  # ACQUIRE_SYMBOLS = BLKSZ
         need = self.fftcp * (acq + 1)
         if len(x) < need:
             return 0
@@ -225,7 +205,7 @@ class HDRadioOFDM:
 
     def _fine_align(self, x: np.ndarray, coarse: int) -> int:
         """粗同步后做 ±8 采样细对齐（对应 nrsc5 COARSE→FINE 状态切换，
-        sync.c:366-411）。选数据星座离 QPSK 最近（判决错误最小）的偏移。"""
+ ）。选数据星座离 QPSK 最近（判决错误最小）的偏移"""
         best_t = coarse
         best_score = np.inf
         for dt in range(-8, 9):
@@ -250,9 +230,8 @@ class HDRadioOFDM:
                    fine: bool = True) -> np.ndarray:
         """基带 IQ → bit 流。返回所有符号判决出的比特。
 
-        流程（acquire.c:237-256 + sync.c:77）：逐符号去 CP → FFT → fftshift →
-        取参考导频做信道插值均衡（sync.c:263-282 adjust_data）→ QPSK 判决。
-        """
+ 流程（ + ）：逐符号去 CP → FFT → fftshift →
+ 取参考导频做信道插值均衡（ adjust_data）→ QPSK 判决"""
         if sym_offset == 0:
             sym_offset = self.coarse_sync(x)
         if fine:
@@ -266,7 +245,7 @@ class HDRadioOFDM:
                 break
             # 信道估计：参考导频理想为 1.0+0j，实测 ref 即信道 H 在该子载波的估计。
             h_ref = freq[self.ref_idx]
-            # 线性插值到全部数据子载波（sync.c:263-282 adjust_data 的简化忠实版）
+            # 线性插值到全部数据子载波（ adjust_data 的简化忠实版）
             order = np.argsort(self.ref_idx)
             h_data = np.interp(self.data_idx, self.ref_idx[order], h_ref[order])
             eq = freq[self.data_idx] / h_data
@@ -277,24 +256,24 @@ class HDRadioOFDM:
 
 
 # --------------------------------------------------------------------------- #
-# HDLC / PSD 帧解析（来源: src/frame.c）
+# HDLC / PSD 帧解析（）
 # --------------------------------------------------------------------------- #
-# PCI 24bit 协议标识，模糊容 4bit 错误（frame.c:24-44, 667-678）
-PCI_AUDIO: int = 0x38D8D3            # frame.c:24
-PCI_AUDIO_OPP: int = 0xCE3634        # frame.c:25
-PCI_AUDIO_FIXED: int = 0xE3634C     # frame.c:26
-PCI_AUDIO_FIXED_OPP: int = 0x8D8D33  # frame.c:27
-PCI_FIXED: int = 0x3634CE           # frame.c:28
-PCI_MAX_ERRORS: int = 4             # frame.c:32
-HDLC_FLAG: int = 0x7E               # frame.c:393  帧定界符
-HDLC_ESCAPE: int = 0x7D             # frame.c:353  转义符
-FCS_GOOD: int = 0xF0B8              # frame.c:144  FCS16 校验合格余数
+# PCI 24bit 协议标识，模糊容 4bit 错误（ ）
+PCI_AUDIO: int = 0x38D8D3            #
+PCI_AUDIO_OPP: int = 0xCE3634        #
+PCI_AUDIO_FIXED: int = 0xE3634C     #
+PCI_AUDIO_FIXED_OPP: int = 0x8D8D33  #
+PCI_FIXED: int = 0x3634CE           #
+PCI_MAX_ERRORS: int = 4             #
+HDLC_FLAG: int = 0x7E               # 帧定界符
+HDLC_ESCAPE: int = 0x7D             # 转义符
+FCS_GOOD: int = 0xF0B8              # FCS16 校验合格余数
 
-# FCS-16 (CRC-16/HDLC) 查表实现（frame.c:108-141 fcs_tab）。这里用标准多项式
-# 0x1021 初值 0xFFFF、结果取反，等价于 nrsc5 的 fcs16()（frame.c:154-160）。
+# FCS-16 (CRC-16/HDLC) 查表实现（ fcs_tab）。这里用标准多项式
+# 0x1021 初值 0xFFFF、结果取反，等价于 nrsc5 的 fcs16（ ）
 def fcs16(data: bytes) -> int:
-    """HDLC FCS-16 校验。来源: frame.c:154-160。返回 16bit CRC（合格时与帧尾
-    两字节 CRC 合成得 VALIDFCS16=0xF0B8）。"""
+    """HDLC FCS-16 校验。。返回 16bit CRC（合格时与帧尾
+ 两字节 CRC 合成得 VALIDFCS16=0xF0B8）"""
     crc = 0xFFFF
     for b in data:
         crc ^= b
@@ -307,14 +286,14 @@ def fcs16(data: bytes) -> int:
 
 
 def hdlc_unescape(data: bytes) -> bytes:
-    """HDLC 转义还原。来源: frame.c:347-360（0x7D 后跟字节 XOR 0x20）。"""
+    """HDLC 转义还原。（0x7D 后跟字节 XOR 0x20）"""
     out = bytearray()
     i = 0
     while i < len(data):
         b = data[i]
         if b == HDLC_ESCAPE:
             i += 1
-            out.append(data[i] ^ 0x20)   # frame.c:354
+            out.append(data[i] ^ 0x20)   #
         else:
             out.append(b)
         i += 1
@@ -343,14 +322,13 @@ class PSDInfo:
 
 
 class HDRadioFrame:
-    """HD Radio 帧解析。来源: src/frame.c。
+    """HD Radio 帧解析。。
 
-    真实链路里 P1/P3 比特流经 Viterbi+解扰后成 L2 PDU；本 lite 直接面对已经
-    解扰好的字节流，做：PCI 识别 → HDLC 成帧 → FCS 校验 → 提取 PSD 文本。
-    """
+ 真实链路里 P1/P3 比特流经 Viterbi+解扰后成 L2 PDU；本 lite 直接面对已经
+ 解扰好的字节流，做：PCI 识别 → HDLC 成帧 → FCS 校验 → 提取 PSD 文本"""
 
     def fuzzy_pci(self, pci: int) -> Optional[int]:
-        """24bit PCI 模糊匹配（容 PCI_MAX_ERRORS 个 bit 错）。来源: frame.c:667-678。"""
+        """24bit PCI 模糊匹配（容 PCI_MAX_ERRORS 个 bit 错）。"""
         candidates = [PCI_AUDIO, PCI_AUDIO_OPP, PCI_AUDIO_FIXED, PCI_FIXED]
         best = None
         best_err = PCI_MAX_ERRORS + 1
@@ -362,10 +340,9 @@ class HDRadioFrame:
         return best if best_err <= PCI_MAX_ERRORS else None
 
     def parse_hdlc_frames(self, data: bytes) -> List[bytes]:
-        """从字节流切出 HDLC 帧（0x7E 定界）。来源: frame.c:388-410。
+        """从字节流切出 HDLC 帧（0x7E 定界）。。
 
-        返回每帧去掉标志字节、未转义的内容（含 FCS 两字节）。
-        """
+ 返回每帧去掉标志字节、未转义的内容（含 FCS 两字节）"""
         frames: List[bytes] = []
         buf = bytearray()
         started = False
@@ -380,21 +357,20 @@ class HDRadioFrame:
         return frames
 
     def extract_psd(self, data: bytes) -> List[PSDInfo]:
-        """从 HDLC 帧里提取 PSD/AAS 文本（节目名/标题）。来源: frame.c:362-386。
+        """从 HDLC 帧里提取 PSD/AAS 文本（节目名/标题）。。
 
-        合法 AAS 帧：HDLC 解转义后 FCS16 校验合格（合成余 0xF0B8），首字节
-        协议号 0x21，去掉 1 字节协议号 + 2 字节 FCS 后为文本净荷。
-        """
+ 合法 AAS 帧：HDLC 解转义后 FCS16 校验合格（合成余 0xF0B8），首字节
+ 协议号 0x21，去掉 1 字节协议号 + 2 字节 FCS 后为文本净荷"""
         out: List[PSDInfo] = []
         for frame in self.parse_hdlc_frames(data):
             if len(frame) < 4:
                 continue
             # 把 FCS 两字节一并送校验：data(含FCS) 的 fcs16 应为 0xF0B8
             if fcs16(frame) != FCS_GOOD:
-                continue                          # frame.c:372
+                continue                          #
             if frame[0] != 0x21:
-                continue                          # frame.c:377
-            payload = frame[1:-2]                 # frame.c:384 去掉协议号与FCS
+                continue                          #
+            payload = frame[1:-2]                 # 去掉协议号与FCS
             # PSD 文本通常以 NUL 或分段分隔；按可打印字符截取
             text = payload.split(b"\x00")[0].decode("latin-1", errors="replace")
             out.append(PSDInfo(title=text.strip(), raw=payload))
@@ -409,7 +385,7 @@ class HDRadioFrame:
         """
         payload = bytes([0x21]) + text.encode("latin-1", errors="replace")
         # HDLC FCS：发送补码（~crc），低字节在前；接收端 fcs16(body||fcs)=0xF0B8
-        crc = fcs16(payload) ^ 0xFFFF            # frame.c:144 VALIDFCS16=0xf0b8
+        crc = fcs16(payload) ^ 0xFFFF            # VALIDFCS16=0xf0b8
         frame_body = payload + bytes([crc & 0xFF, (crc >> 8) & 0xFF])
         # 重新验证
         assert fcs16(frame_body) == FCS_GOOD, "构造的 PSD 帧 FCS 必须合格"
@@ -417,39 +393,38 @@ class HDRadioFrame:
 
 
 # --------------------------------------------------------------------------- #
-# HDC 骨架（来源: src/hdc → output.c 透传外部 HDC/HE-AAC 库）
+# HDC 骨架（src/hdc → 透传外部 HDC/HE-AAC 库）
 # --------------------------------------------------------------------------- #
 @dataclass
 class HDCParams:
-    """从 frame header 提取的 HDC 音频参数。来源: frame.c:200-215 parse_header。"""
-    codec_mode: int = 0        # frame.c:202  buf[8]&0xf
-    stream_id: int = 0         # frame.c:203  (buf[8]>>4)&3
-    program: int = 0           # frame.c:582  HEF prog_num
-    pdu_seq: int = 0           # frame.c:204
-    sample_rate: float = NRSC5_SAMPLE_RATE_AUDIO  # nrsc5.h:58
+    """从 frame header 提取的 HDC 音频参数。"""
+    codec_mode: int = 0        # buf[8]&0xf
+    stream_id: int = 0         # (buf[8]>>4)&3
+    program: int = 0           # HEF prog_num
+    pdu_seq: int = 0           #
+    sample_rate: float = NRSC5_SAMPLE_RATE_AUDIO  #
 
 
 class HDCDecoder:
     """HDC（HE-AAC v2 + SBR/PS）解码骨架。
 
-    nrsc5 本身不含 HDC 解码器——它把解出的音频 RSPDU 通过 ``nrsc5_report_hdc``
-    （nrsc5.c:728）交给外部应用（如立益 HDC 库）解码成 44.1kHz PCM。
-    本骨架只解析 frame header（frame.c:200-215）抽取 codec_mode/stream_id/节目号，
-    并标明 HDC 流标识，不做完整 AAC 熵解码。
-    """
+ nrsc5 本身不含 HDC 解码器——它把解出的音频 RSPDU 通过 ``nrsc5_report_hdc``
+ （ ）交给外部应用（如立益 HDC 库）解码成 44.1kHz PCM。
+ 本骨架只解析 frame header（ ）抽取 codec_mode/stream_id/节目号，
+ 并标明 HDC 流标识，不做完整 AAC 熵解码"""
 
     def parse_header(self, buf: bytes) -> HDCParams:
-        """解析 14 字节音频帧头。来源: frame.c:200-215。"""
+        """解析 14 字节音频帧头。"""
         if len(buf) < 14:
             raise ValueError("HDC frame header 需要至少 14 字节")
         p = HDCParams()
-        p.codec_mode = buf[8] & 0xF            # frame.c:202
-        p.stream_id = (buf[8] >> 4) & 0x3      # frame.c:203
-        p.pdu_seq = (buf[8] >> 6) | ((buf[9] & 1) << 2)  # frame.c:204
+        p.codec_mode = buf[8] & 0xF            #
+        p.stream_id = (buf[8] >> 4) & 0x3      #
+        p.pdu_seq = (buf[8] >> 6) | ((buf[9] & 1) << 2)  #
         return p
 
     def identify_audio_stream(self, pci: int) -> bool:
-        """PCI 是否标识音频流。来源: frame.c:162-168 has_audio。"""
+        """PCI 是否标识音频流。"""
         return pci in (PCI_AUDIO, PCI_AUDIO_OPP, PCI_AUDIO_FIXED, PCI_AUDIO_FIXED_OPP)
 
     def describe(self, p: HDCParams) -> str:

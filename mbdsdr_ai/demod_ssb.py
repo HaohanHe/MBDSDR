@@ -1,28 +1,19 @@
-"""
-demod_ssb.py — SSB 单边带乘积检波解调（USB / LSB 真区分，纯 numpy 状态化）。
+# SPDX-License-Identifier: MIT
+"""SSB 单边带乘积检波解调（USB / LSB 真区分，纯 numpy 状态化）。
 
-移植自 SDR++：
-  * core/src/dsp/demod/ssb.h:77-92,106-116 —— SSB 解调与边带偏移
-  * decoder_modules/radio/src/demodulators/usb.h:34,70-74  —— USB: Mode::USB
-  * decoder_modules/radio/src/demodulators/lsb.h:33,69-76  —— LSB: Mode::LSB
-  * core/src/dsp/channel/frequency_xlator.h:43-48          —— NCO 相位累加混频
-
-算法（ssb.h:77-92 process）：
-    1) FrequencyXlator：把边带搬回基带 —— y[n] = z[n]·e^{j φ[n]}
-       其中 φ 逐样本累加 Δφ = 2π·translation/if_sr（频率_xlator.h:43-48）。
-    2) ComplexToReal：取实部 —— audio = Re{y}（ssb.h:82）。
+算法：
+    1) 把边带搬回基带 —— y[n] = z[n]·e^{j φ[n]}，φ 逐样本累加 Δφ=2π·translation/if_sr。
+    2) 取实部 —— audio = Re{y}。
     3) AGC（在接收链后级，这里不内置）。
 
-边带偏移（ssb.h:106-116 getTranslation）—— 这是 USB/LSB 真区分的核心：
-    USB:  translation = +bandwidth/2     （usb.h:34 Mode::USB）
-    LSB:  translation = -bandwidth/2     （lsb.h:33 Mode::LSB）
+边带偏移 —— 这是 USB/LSB 真区分的核心：
+    USB:  translation = +bandwidth/2
+    LSB:  translation = -bandwidth/2
     DSB:  translation = 0
 
 即 BFO（拍频本振）频率方向相反：USB 用 +BW/2 复指数，LSB 用 -BW/2。
-这不是「共用一套代码只改标签」——两个模式喂同样的复信号，输出落在
-音频带内的频率位置关于 0 镜像，错模式时音频被移到带宽外被低通滤除。
-
-IF=24kHz, BW=2.8kHz（usb.h:70,72 / lsb.h:69,71）。
+两个模式喂同样的复信号，输出落在音频带内的频率位置关于 0 镜像，错模式时
+音频被移到带宽外被低通滤除。IF=24kHz, BW=2.8kHz。
 """
 from __future__ import annotations
 import numpy as np
@@ -35,8 +26,8 @@ class DemodSSB:
     Parameters
     ----------
     mode : "usb" | "lsb" | "dsb"
-    if_sr : IF 复采样率 Hz（usb.h:70 = 24000）。
-    bandwidth : 双边带宽 Hz（usb.h:72 = 2800；BFO 偏移 = ±bandwidth/2）。
+    if_sr : IF 复采样率 Hz，默认 24000。
+    bandwidth : 双边带宽 Hz，默认 2800；BFO 偏移 = ±bandwidth/2。
     """
 
     def __init__(self, mode: str = "usb", if_sr: float = 24000.0,
@@ -45,7 +36,7 @@ class DemodSSB:
         self.if_sr = float(if_sr)
         self.bandwidth = float(bandwidth)
 
-        # ssb.h:106-116 getTranslation：USB=+BW/2, LSB=-BW/2, DSB=0
+
         if self.mode == "usb":
             self.translation = +self.bandwidth / 2.0
         elif self.mode == "lsb":
@@ -53,9 +44,9 @@ class DemodSSB:
         else:
             self.translation = 0.0
 
-        # NCO 相位增量（频率_xlator.h:17,28 phaseDelta = e^{j offset}）
+
         self._dphi = 2.0 * np.pi * self.translation / self.if_sr
-        self._phase = 0.0  # frequency_xlator.h:64
+        self._phase = 0.0
 
         # 音频低通（带宽内）—— 错模式时把搬出音频带的分量滤掉
         self._lpf = lowpass_taps(self.bandwidth / 2.0, self.bandwidth / 2.0 * 0.1,
@@ -73,12 +64,12 @@ class DemodSSB:
         if n == 0:
             return np.zeros(0, dtype=np.float32)
 
-        # 1) FrequencyXlator 乘积检波（ssb.h:79 xlator.process）
+        # 1) BFO 乘积检波
         phases = self._phase + self._dphi * np.arange(n)
         mixed = z * np.exp(1j * phases)
         self._phase = (self._phase + self._dphi * n) % (2.0 * np.pi)
 
-        # 2) ComplexToReal 取实部（ssb.h:82）
+        # 2) ComplexToReal 取实部
         audio = mixed.real
 
         # 3) 音频低通（保留带宽内，滤除错模式镜像分量）

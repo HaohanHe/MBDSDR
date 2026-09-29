@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 test_sdr_backend_audio.py — SDRBackend 实时音频集成（无硬件，合成 IQ）。
 

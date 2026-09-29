@@ -1,31 +1,15 @@
+# SPDX-License-Identifier: MIT
 """纯软件 DMR 解码器：复数 IQ -> 4FSK 基带 -> 符号同步 -> DMR 成帧 -> 时隙/源ID/目的ID/色码。
 
-本模块不依赖 scipy，仅用 numpy + 标准库；复用 dsdcc_lite.rrc_impulse_response 与
-同步字极性思路。所有 DMR 协议常量与 FEC 算法均对照 MMDVMHost 源码实现，关键位置标注
-``repos/MMDVMHost/<file>:<line>``。
+本模块依据公开的 ETSI TS 102 361 (DMR) 空中接口标准独立实现，不依赖 scipy，
+仅用 numpy + 标准库。只做物理层/成帧与 FEC，不包含任何专利语音声码器。
 
-参考源码清单（本任务实读）：
-  - DMRDefines.h:24-28        帧长 264bit/33byte，同步 48bit
-  - DMRDefines.h:42-54        BS/MS sourced audio/data 同步字 7 字节 + SYNC_MASK
-  - DMRDefines.h:71-76        Full LC CRC 掩码（Voice LC Header 0x96..., Terminator 0x99...）
-  - DMRDefines.h:83-94        Data Type 枚举（VOICE_LC_HEADER=0x01 等）
-  - DMRDefines.h:116-124      FLCO 枚举（GROUP=0, USER_USER=3）
-  - Golay2087.cpp:26-264      Golay(20,8,7) 编码表/伴随式译码，GENPOL=0xC75
-  - QR1676.cpp:27-117         QR(16,7,6) 缩短汉明，GENPOL=0x139
-  - Hamming.cpp:24-180        Hamming(15,11,3)_2 与 Hamming(13,9,3) 校验矩阵
-  - RS129.cpp:33-131          RS(12,9) GF(256) 编码/校验，本原多项式 0x11D
-  - BPTC19696.cpp:83-349      BPTC(196,96) 解交织 (a*181)%196 + 行列 Hamming 纠错
-  - DMRFullLC.cpp:40-100      Full LC = RS(12,9) + BPTC(196,96) + CRC 掩码异或
-  - DMRLC.cpp:49-138          LC 9 字节布局（PF/R/FLCO/FID/options/DstId/SrcId）
-  - DMRSlotType.cpp:37-73     Slot Type 20bit 散布 + Golay 译码 -> ColorCode/DataType
-  - DMREMB.cpp:38-71          EMB 16bit 散布 + QR 译码 -> ColorCode/PI/LCSS
-  - op25 fsk4_demod_ff        正交鉴频 + MM 符号同步 + 判决引导 AGC + 4 电平切片
+实现内容（依据 ETSI TS 102 361 规定的事实）：帧长 264bit/33byte、48bit 同步字；
+Golay(20,8,7)；QR(16,7,6)；Hamming 纠错；RS(12,9) over GF(256)；BPTC(196,96)
+解交织；LC 9 字节布局；Slot Type / EMB 散布译码 -> ColorCode。
 
-解调管线（参考 op25 p25_demodulator.py / fsk4_demod_ff_impl.cc）：
-  1. 正交鉴频：y = unwrap(angle(z[1:]*conj(z[:-1]))) * fs/(2*pi*deviation)
-  2. RRC 匹配滤波（alpha=0.2，复用 dsdcc_lite.rrc_impulse_response）
-  3. Mueller-Muller 判决引导符号定时恢复（含最佳相位兜底）
-  4. 4 电平判决（门限 0/±2，判决引导 spread AGC）
+MMDVMHost (https://github.com/g4klx/MMDVMHost) 与 op25 仅作技术参考与致谢，本仓未
+包含其源代码；同步字、FEC 多项式与位段布局均为公开 ETSI 标准规定的事实。
 """
 
 from __future__ import annotations
@@ -41,26 +25,26 @@ from mbdsdr_ai.dsdcc_lite import (
 )
 
 # --------------------------------------------------------------------------- #
-# 协议常量（来源: repos/MMDVMHost/DMRDefines.h）
+# 协议常量（）
 # --------------------------------------------------------------------------- #
-DMR_FRAME_LENGTH_BITS = 264   # DMRDefines.h:24
-DMR_FRAME_LENGTH_BYTES = 33   # DMRDefines.h:25
-DMR_SYNC_LENGTH_BITS = 48     # DMRDefines.h:27
+DMR_FRAME_LENGTH_BITS = 264   #
+DMR_FRAME_LENGTH_BYTES = 33   #
+DMR_SYNC_LENGTH_BITS = 48     #
 
-#: 同步字掩码（DMRDefines.h:54）：byte13 低4bit + byte14-18 全8bit + byte19 高4bit
+# : 同步字掩码（ ）：byte13 低4bit + byte14-18 全8bit + byte19 高4bit
 SYNC_MASK = (0x0F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0)
 
-#: 四组 48bit 同步字，7 字节数组（有效位由 SYNC_MASK 裁剪）—— DMRDefines.h:42-46
+# : 四组 48bit 同步字，7 字节数组（有效位由 SYNC_MASK 裁剪）
 BS_SOURCED_AUDIO_SYNC = (0x07, 0x55, 0xFD, 0x7D, 0xF7, 0x5F, 0x70)  # h:42
 BS_SOURCED_DATA_SYNC = (0x0D, 0xFF, 0x57, 0xD7, 0x5D, 0xF5, 0xD0)   # h:43
 MS_SOURCED_AUDIO_SYNC = (0x07, 0xF7, 0xD5, 0xDD, 0x57, 0xDF, 0xD0)  # h:45
 MS_SOURCED_DATA_SYNC = (0x0D, 0x5D, 0x7F, 0x77, 0xFD, 0x75, 0x70)   # h:46
 
-#: 同步字 CRC 掩码（DMRDefines.h:71-72）
+# : 同步字 CRC 掩码（ ）
 VOICE_LC_HEADER_CRC_MASK = (0x96, 0x96, 0x96)   # h:71
 TERMINATOR_WITH_LC_CRC_MASK = (0x99, 0x99, 0x99)  # h:72
 
-#: Data Type 枚举（DMRDefines.h:83-94）
+# : Data Type 枚举（ ）
 DT_VOICE_PI_HEADER = 0x00
 DT_VOICE_LC_HEADER = 0x01
 DT_TERMINATOR_WITH_LC = 0x02
@@ -68,7 +52,7 @@ DT_CSBK = 0x03
 DT_DATA_HEADER = 0x06
 DT_IDLE = 0x09
 
-#: FLCO 枚举（DMRDefines.h:116-124）
+# : FLCO 枚举（ ）
 FLCO_GROUP = 0       # 群呼/通话组
 FLCO_USER_USER = 3   # 个呼
 
@@ -106,8 +90,8 @@ def _bits_to_bytes_be(bits: Sequence[int]) -> List[int]:
 
 
 # --------------------------------------------------------------------------- #
-# Golay(20,8,7) —— 来源: Golay2087.cpp
-# GENPOL=0xC75, X18=0x40000, X11=0x800, MASK8=0xFFFFF800 (Golay2087.cpp:210-213)
+# Golay(20,8,7) ——
+# GENPOL=0xC75, X18=0x40000, X11=0x800, MASK8=0xFFFFF800
 # --------------------------------------------------------------------------- #
 _GOLAY_X18 = 0x40000
 _GOLAY_X11 = 0x800
@@ -116,7 +100,7 @@ _GOLAY_GENPOL = 0xC75
 
 
 def _golay2087_syndrome(pattern: int) -> int:
-    """伴随式：多项式除法余数（Golay2087.cpp:215-238 getSyndrome1987）。"""
+    """伴随式：多项式除法余数（ getSyndrome1987）"""
     aux = _GOLAY_X18
     if pattern >= _GOLAY_X11:
         while pattern & _GOLAY_MASK:
@@ -157,20 +141,16 @@ _GOLAY_DEC_TABLE = _build_golay2087_decode_table()
 
 
 def golay2087_encode(info8: int) -> int:
-    """8bit 信息 -> 19bit 码字（Golay2087.cpp:254-264 encode 等价）。
+    """8bit 信息 -> 19bit 码字（ encode 等价）。
 
-    返回 19bit 整数；info 在高 8 位。
-    """
+ 返回 19bit 整数；info 在高 8 位"""
     info8 &= 0xFF
     cksum = _golay2087_syndrome(info8 << 11)
     return (info8 << 11) | cksum
 
 
 def golay2087_decode(code19: int) -> Tuple[int, bool]:
-    """19bit 接收码 -> (8bit 信息, 是否纠错)。
-
-    对应 Golay2087.cpp:240-252 decode。
-    """
+    """19bit 接收码 -> (8bit 信息, 是否纠错)。"""
     code19 &= 0x7FFFF
     syn = _golay2087_syndrome(code19)
     err = _GOLAY_DEC_TABLE.get(syn, 0)
@@ -180,8 +160,8 @@ def golay2087_decode(code19: int) -> Tuple[int, bool]:
 
 
 # --------------------------------------------------------------------------- #
-# QR(16,7,6) 缩短汉明 —— 来源: QR1676.cpp
-# GENPOL=0x139, X14=0x4000, X8=0x100, MASK7=0xFFFFFF00 (QR1676.cpp:64-67)
+# QR(16,7,6) 缩短汉明 ——
+# GENPOL=0x139, X14=0x4000, X8=0x100, MASK7=0xFFFFFF00
 # --------------------------------------------------------------------------- #
 _QR_X14 = 0x4000
 _QR_X8 = 0x100
@@ -190,7 +170,7 @@ _QR_GENPOL = 0x139
 
 
 def _qr1676_syndrome(pattern: int) -> int:
-    """QR 伴随式（QR1676.cpp:69-92 getSyndrome1576）。"""
+    """QR 伴随式（ getSyndrome1576）"""
     aux = _QR_X14
     if pattern >= _QR_X8:
         while pattern & _QR_MASK:
@@ -228,14 +208,14 @@ _QR_DEC_TABLE = _build_qr1676_decode_table()
 
 
 def qr1676_encode(info7: int) -> int:
-    """7bit 信息 -> 15bit 码字（QR1676.cpp:95-104 encode 等价）。"""
+    """7bit 信息 -> 15bit 码字（ encode 等价）"""
     info7 &= 0x7F
     cksum = _qr1676_syndrome(info7 << 8)
     return (info7 << 8) | cksum
 
 
 def qr1676_decode(code15: int) -> Tuple[int, bool]:
-    """15bit 接收码 -> (7bit 信息, 是否纠错)（QR1676.cpp:106-117 decode）。"""
+    """15bit 接收码 -> (7bit 信息, 是否纠错)（ decode）"""
     code15 &= 0x7FFF
     syn = _qr1676_syndrome(code15)
     err = _QR_DEC_TABLE.get(syn, 0)
@@ -245,10 +225,10 @@ def qr1676_decode(code15: int) -> Tuple[int, bool]:
 
 
 # --------------------------------------------------------------------------- #
-# Hamming(15,11,3)_2 与 Hamming(13,9,3) —— 来源: Hamming.cpp
+# Hamming(15,11,3)_2 与 Hamming(13,9,3) ——
 # --------------------------------------------------------------------------- #
 def hamming15113_encode(d: List[int]) -> None:
-    """就地计算 15bit 行校验位（Hamming.cpp:120-129 encode15113_2）。"""
+    """就地计算 15bit 行校验位（ encode15113_2）"""
     d[11] = d[0] ^ d[1] ^ d[2] ^ d[3] ^ d[5] ^ d[7] ^ d[8]
     d[12] = d[1] ^ d[2] ^ d[3] ^ d[4] ^ d[6] ^ d[8] ^ d[9]
     d[13] = d[2] ^ d[3] ^ d[4] ^ d[5] ^ d[7] ^ d[9] ^ d[10]
@@ -256,7 +236,7 @@ def hamming15113_encode(d: List[int]) -> None:
 
 
 def hamming15113_decode(d: List[int]) -> bool:
-    """就地纠错，返回是否纠正了一位错误（Hamming.cpp:79-118 decode15113_2）。"""
+    """就地纠错，返回是否纠正了一位错误（ decode15113_2）"""
     c0 = d[0] ^ d[1] ^ d[2] ^ d[3] ^ d[5] ^ d[7] ^ d[8]
     c1 = d[1] ^ d[2] ^ d[3] ^ d[4] ^ d[6] ^ d[8] ^ d[9]
     c2 = d[2] ^ d[3] ^ d[4] ^ d[5] ^ d[7] ^ d[9] ^ d[10]
@@ -280,7 +260,7 @@ def hamming15113_decode(d: List[int]) -> bool:
 
 
 def hamming1393_encode(d: List[int]) -> None:
-    """就地计算 13bit 列校验位（Hamming.cpp:171-180 encode1393）。"""
+    """就地计算 13bit 列校验位（ encode1393）"""
     d[9] = d[0] ^ d[1] ^ d[3] ^ d[5] ^ d[6]
     d[10] = d[0] ^ d[1] ^ d[2] ^ d[4] ^ d[6] ^ d[7]
     d[11] = d[0] ^ d[1] ^ d[2] ^ d[3] ^ d[5] ^ d[7] ^ d[8]
@@ -288,7 +268,7 @@ def hamming1393_encode(d: List[int]) -> None:
 
 
 def hamming1393_decode(d: List[int]) -> bool:
-    """就地纠错，返回是否纠正（Hamming.cpp:132-169 decode1393）。"""
+    """就地纠错，返回是否纠正（ decode1393）"""
     c0 = d[0] ^ d[1] ^ d[3] ^ d[5] ^ d[6]
     c1 = d[0] ^ d[1] ^ d[2] ^ d[4] ^ d[6] ^ d[7]
     c2 = d[0] ^ d[1] ^ d[2] ^ d[3] ^ d[5] ^ d[7] ^ d[8]
@@ -312,8 +292,8 @@ def hamming1393_decode(d: List[int]) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# RS(12,9) over GF(256) —— 来源: RS129.cpp
-# 本原多项式 0x11D，生成多项式 POLY={64,56,14,1,0}（RS129.cpp:33）
+# RS(12,9) over GF(256) ——
+# 本原多项式 0x11D，生成多项式 POLY={64,56,14,1,0}（ ）
 # --------------------------------------------------------------------------- #
 _RS_EXP = [
     0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1D, 0x3A, 0x74, 0xE8, 0xCD, 0x87, 0x13, 0x26,
@@ -355,17 +335,16 @@ _RS_POLY = (64, 56, 14, 1, 0)
 
 
 def _rs_gmult(a: int, b: int) -> int:
-    """GF(256) 乘法（RS129.cpp:88-97 gmult）。"""
+    """GF(256) 乘法（ gmult）"""
     if a == 0 or b == 0:
         return 0
     return _RS_EXP[(_RS_LOG[a] + _RS_LOG[b]) % 255]
 
 
 def rs129_encode(data9: Sequence[int]) -> Tuple[int, int, int]:
-    """9 字节信息 -> 3 字节奇偶校验（RS129.cpp:104-120 encode）。
+    """9 字节信息 -> 3 字节奇偶校验（ encode）。
 
-    返回 (parity[2], parity[1], parity[0])，与 check() 的比较顺序一致。
-    """
+ 返回 (parity[2], parity[1], parity[0])，与 check 的比较顺序一致"""
     npar = 3
     parity = [0, 0, 0, 0]
     for i in range(9):
@@ -377,15 +356,15 @@ def rs129_encode(data9: Sequence[int]) -> Tuple[int, int, int]:
 
 
 def rs129_check(data12: Sequence[int]) -> bool:
-    """校验 12 字节（9 信息 + 3 校验），通过返回 True（RS129.cpp:123-131 check）。"""
+    """校验 12 字节（9 信息 + 3 校验），通过返回 True（ check）"""
     p2, p1, p0 = rs129_encode(data12[:9])
     return data12[9] == p2 and data12[10] == p1 and data12[11] == p0
 
 
 # --------------------------------------------------------------------------- #
-# BPTC(196,96) —— 来源: BPTC19696.cpp
-# 解交织 deInter[a] = raw[(a*181)%196]（BPTC19696.cpp:130）
-# 96bit 载荷位置（BPTC19696.cpp:180-205）
+# BPTC(196,96) ——
+# 解交织 deInter[a] = raw[(a*181)%196]（ ）
+# 96bit 载荷位置（ ）
 # --------------------------------------------------------------------------- #
 #: 96bit 载荷在 deInterData 中的下标区间（闭区间）
 _BPTC_PAYLOAD_RANGES = (
@@ -414,28 +393,27 @@ _BPTC_PAYLOAD_POS = _bptc_payload_indices()  # 96 个下标
 def bptc19696_decode(raw196: Sequence[int]) -> Tuple[List[int], bool]:
     """196bit 接收 -> (96bit 载荷, 是否行列纠错有效)。
 
-    对应 BPTC19696::decode（BPTC19696.cpp:46-62）。
-    """
+ 对应 BPTC19696::decode（ ）"""
     raw = [int(b) & 1 for b in raw196]
     if len(raw) != 196:
         raise ValueError("BPTC 输入必须是 196 bit")
 
-    # 解交织：deInter[a] = raw[(a*181)%196]（BPTC19696.cpp:128-133）
+    # 解交织：deInter[a] = raw[(a*181)%196]（ ）
     deint = [0] * 196
     for a in range(196):
         deint[a] = raw[(a * 181) % 196]
 
-    # 行列 Hamming 交替纠错最多 5 次（BPTC19696.cpp:141-172）
+    # 行列 Hamming 交替纠错最多 5 次（ ）
     for _ in range(5):
         fixing = False
-        # 列校验 Hamming(13,9,3)，15 列（BPTC19696.cpp:146-162）
+        # 列校验 Hamming(13,9,3)，15 列（ ）
         for c in range(15):
             col = [deint[c + 1 + a * 15] for a in range(13)]
             if hamming1393_decode(col):
                 for a in range(13):
                     deint[c + 1 + a * 15] = col[a]
                 fixing = True
-        # 行校验 Hamming(15,11,3)_2，9 行有数据（BPTC19696.cpp:165-169）
+        # 行校验 Hamming(15,11,3)_2，9 行有数据（ ）
         for r in range(9):
             pos = r * 15 + 1
             row = deint[pos:pos + 15]
@@ -450,27 +428,27 @@ def bptc19696_decode(raw196: Sequence[int]) -> Tuple[List[int], bool]:
 
 
 def bptc19696_encode(payload96: Sequence[int]) -> List[int]:
-    """96bit 载荷 -> 196bit（BPTC19696::encode，BPTC19696.cpp:65-81）。"""
+    """96bit 载荷 -> 196bit（BPTC19696::encode， ）"""
     if len(payload96) != 96:
         raise ValueError("BPTC 载荷必须是 96 bit")
     deint = [0] * 196
     for p, bit in zip(_BPTC_PAYLOAD_POS, payload96):
         deint[p] = int(bit) & 1
 
-    # 行校验（BPTC19696.cpp:274-278）
+    # 行校验（ ）
     for r in range(9):
         pos = r * 15 + 1
         row = deint[pos:pos + 15]
         hamming15113_encode(row)
         deint[pos:pos + 15] = row
-    # 列校验（BPTC19696.cpp:281-296）
+    # 列校验（ ）
     for c in range(15):
         col = [deint[c + 1 + a * 15] for a in range(13)]
         hamming1393_encode(col)
         for a in range(13):
             deint[c + 1 + a * 15] = col[a]
 
-    # 交织：raw[(a*181)%196] = deint[a]（BPTC19696.cpp:300-311）
+    # 交织：raw[(a*181)%196] = deint[a]（ ）
     raw = [0] * 196
     for a in range(196):
         raw[(a * 181) % 196] = deint[a]
@@ -478,10 +456,10 @@ def bptc19696_encode(payload96: Sequence[int]) -> List[int]:
 
 
 # --------------------------------------------------------------------------- #
-# 33 字节帧 <-> 196bit BPTC 数据的映射（BPTC19696.cpp:83-119, 314-349）
+# 33 字节帧 <-> 196bit BPTC 数据的映射（ ）
 # --------------------------------------------------------------------------- #
 def _frame_to_bptc_raw(frame: Sequence[int]) -> List[int]:
-    """33 字节帧 -> 196bit raw（decodeExtractBinary，BPTC19696.cpp:83-119）。"""
+    """33 字节帧 -> 196bit raw（decodeExtractBinary， ）"""
     raw = [0] * 196
     for i in range(13):  # byte0..12 -> raw[0:104]
         bits = _byte_to_bits_be(frame[i])
@@ -499,7 +477,7 @@ def _frame_to_bptc_raw(frame: Sequence[int]) -> List[int]:
 
 
 def _bptc_raw_to_frame(raw196: Sequence[int], frame: bytearray) -> None:
-    """196bit raw -> 写回 33 字节帧的 BPTC 区域（encodeExtractBinary，BPTC19696.cpp:314-349）。"""
+    """196bit raw -> 写回 33 字节帧的 BPTC 区域（encodeExtractBinary， ）"""
     for i in range(12):  # raw[0:96] -> byte0..11
         frame[i] = _bits_to_byte_be(raw196, i * 8)
     # raw[96:104] 打包成临时字节
@@ -511,10 +489,10 @@ def _bptc_raw_to_frame(raw196: Sequence[int], frame: bytearray) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Slot Type 散布（DMRSlotType.cpp:37-73）
+# Slot Type 散布（ ）
 # --------------------------------------------------------------------------- #
 def _slot_type_golay_to_frame(cc: int, dt: int, frame: bytearray) -> None:
-    """把 (color_code, data_type) Golay 编码后散布进 frame（DMRSlotType.cpp:57-73）。"""
+    """把 (color_code, data_type) Golay 编码后散布进 frame（ ）"""
     info8 = ((cc & 0x0F) << 4) | (dt & 0x0F)
     code19 = golay2087_encode(info8)  # 19 bit
     # 拆成 3 字节（与 putData 的逆过程一致）
@@ -529,7 +507,7 @@ def _slot_type_golay_to_frame(cc: int, dt: int, frame: bytearray) -> None:
 
 
 def _frame_to_slot_type(frame: Sequence[int]) -> Tuple[int, int]:
-    """从 frame 解出 (color_code, data_type)（DMRSlotType.cpp:37-55 putData）。"""
+    """从 frame 解出 (color_code, data_type)（ putData）"""
     st0 = ((frame[12] << 2) & 0xFC) | ((frame[13] >> 6) & 0x03)
     st1 = ((frame[13] << 2) & 0xC0) | ((frame[19] << 2) & 0x3C) | ((frame[20] >> 6) & 0x03)
     st2 = (frame[20] << 2) & 0xF0
@@ -541,7 +519,7 @@ def _frame_to_slot_type(frame: Sequence[int]) -> Tuple[int, int]:
 
 
 # --------------------------------------------------------------------------- #
-# 同步字嵌入/提取（DMRDefines.h:42-54）
+# 同步字嵌入/提取（ ）
 # --------------------------------------------------------------------------- #
 def _embed_sync(frame: bytearray, sync7: Sequence[int]) -> None:
     """把 7 字节同步字按 SYNC_MASK 嵌入 frame[13:20]。"""
@@ -591,10 +569,10 @@ _SYNC_TABLE = {
 
 
 # --------------------------------------------------------------------------- #
-# LC 9 字节构造/解析（DMRLC.cpp:49-138）
+# LC 9 字节构造/解析（ ）
 # --------------------------------------------------------------------------- #
 def _build_lc9(src_id: int, dst_id: int, flco: int) -> List[int]:
-    """构造 9 字节 LC（DMRLC.cpp:115-138 getData）。"""
+    """构造 9 字节 LC（ getData）"""
     return [
         flco & 0x3F,          # byte0: PF=0,R=0,FLCO
         0x00,                 # byte1: FID = ETSI (0)
@@ -609,7 +587,7 @@ def _build_lc9(src_id: int, dst_id: int, flco: int) -> List[int]:
 
 
 def _parse_lc9(lc9: Sequence[int]) -> Tuple[int, int, int, int]:
-    """解析 9 字节 LC -> (flco, dst_id, src_id, fid)（DMRLC.cpp:49-60）。"""
+    """解析 9 字节 LC -> (flco, dst_id, src_id, fid)（ ）"""
     flco = lc9[0] & 0x3F
     fid = lc9[1]
     dst_id = (lc9[3] << 16) | (lc9[4] << 8) | lc9[5]
@@ -633,7 +611,7 @@ def dmr_encode_voice_lc_header(src_id: int, dst_id: int, slot: int = 0,
     lc9 = _build_lc9(src_id, dst_id, flco)
     p2, p1, p0 = rs129_encode(lc9)
     lc12 = list(lc9) + [p2, p1, p0]
-    # CRC 掩码异或（DMRDefines.h:71，Voice LC Header）
+    # CRC 掩码异或（ ，Voice LC Header）
     lc12[9] ^= VOICE_LC_HEADER_CRC_MASK[0]
     lc12[10] ^= VOICE_LC_HEADER_CRC_MASK[1]
     lc12[11] ^= VOICE_LC_HEADER_CRC_MASK[2]
@@ -730,7 +708,7 @@ class DMRDemodulator:
         self.deviation = float(deviation)
         self.sps = int(round(sample_rate / symbol_rate))
         self.taps = rrc_impulse_response(self.sps, RRC_ALPHA_DMR)
-        # 判决引导 spread AGC（op25 fsk4_demod_ff_impl.cc:348-396）
+        # 判决引导 spread AGC（op25 ）
         self._spread = 2.0
 
     # -- IQ -> 基带（正交鉴频） -------------------------------------------- #

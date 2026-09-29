@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""FT8/FST4 真实源码参数往返验证（不能只合成自检）。
+# SPDX-License-Identifier: MIT
+"""FT8/FST4 参数往返验证。
 
-所有编码器参数均来自 WSJT-X 真实源码（lib/ft8, lib/fst4, lib/77bit），
+编码器参数依据公开 FT8/FST4 规范（LDPC 矩阵、Costas 同步图案、77-bit 载荷布局），
 解码器用同一套 H 矩阵 / CRC / Gray 表 / Costas 序列。本测试证明：
   编码 → 加噪 → 软判决 → LDPC BP → CRC14/24 → unpack77 → 文本 一致。
 

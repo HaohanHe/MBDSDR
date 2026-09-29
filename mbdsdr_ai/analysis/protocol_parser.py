@@ -1,12 +1,12 @@
+# SPDX-License-Identifier: MIT
 """
 协议解析
 ========
 
-对照 URH：
-- ``signalprocessing/FieldType.py:11-21`` — 字段类型枚举（PREAMBLE/SYNC/LENGTH/...）
-- ``util/GenericCRC.py:36-67`` — 标准 CRC 表，含 CRC-16/CCITT（poly=0x1021）
-- ``awre/engines/LengthEngine.py:21-48`` — 长度字段聚类检测
-- ``awre/engines/ChecksumEngine.py:36-80`` — CRC 猜测
+依据公开协议解析与 CRC 校验方法独立实现（URH 仅作技术参考，本仓未包含其源代码）：
+- 字段类型枚举（PREAMBLE/SYNC/LENGTH/...）——通用协议解析约定。
+- 标准 CRC 表，含 CRC-16/CCITT（poly=0x1021）——公开 CRC 参数。
+- 长度字段聚类检测、CRC 猜测——通用启发式。
 
 本模块提供：
 - :class:`ProtocolField` — 字段（name/bit_length/type/value）。
@@ -51,8 +51,7 @@ class FieldType(Enum):
 def crc16_ccitt(data: bytes, init: int = 0xFFFF, poly: int = 0x1021) -> int:
     """CRC-16/CCITT-FALSE。
 
-    对照 URH ``GenericCRC.py:49`` — ``("CRC16 CCITT", dict(polynomial="0x1021",
-    ref_in=True, ref_out=True))``。这里用最常见的 FALSE 变体（init=0xFFFF，
+    CRC-16/CCITT 公开参数：多项式 0x1021。这里用最常见的 FALSE 变体（init=0xFFFF，
     无反射），工业界最常用。
     """
     crc = init & 0xFFFF
@@ -324,7 +323,7 @@ def infer_field_boundaries(bits: np.ndarray, ngram: int = 8) -> List[Tuple[int, 
 
     返回 ``[(start_bit, end_bit, score), ...]``，score 越高越像字段边界。
 
-    思路（对照 URH ``LengthEngine.py`` 的「公共范围」思想）：
+    思路（长度字段聚类的「公共范围」思想，通用协议解析启发式）：
     - 把多条消息按 ngram 对齐，找在所有消息中都相同的比特位置 → 头部/同步。
     - 找变化大但局部聚集的比特位置 → 数据字段。
     - 找低熵位置 → 长度/地址等固定字段。

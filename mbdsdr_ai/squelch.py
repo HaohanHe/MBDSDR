@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 静噪门控（Squelch）—— 移动平均 RMS + attack/decay/hang
 =====================================================

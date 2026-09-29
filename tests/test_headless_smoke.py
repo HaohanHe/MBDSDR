@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 Headless 架构自检测试（验收标准）
 =====================================

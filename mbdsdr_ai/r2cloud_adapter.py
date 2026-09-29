@@ -1,20 +1,21 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI - r2cloud 卫星接收任务调度器移植
+MBDSDR AI - r2cloud 卫星接收任务调度器实现
 =============================================
 
 本模块把 r2cloud (Apache-2.0, dennasherbrezon) 的**调度/任务队列/观测站配置/录制元数据**
-概念移植为纯 NumPy/Python 实现。轨道传播直接复用 mbdsdr_ai/gpredict_adapter.py
+以概念独立实现为纯 NumPy/Python 实现。轨道传播直接复用 mbdsdr_ai/gpredict_adapter.py
 （SGP4/TLE），不重复实现。
 
-移植来源（file:line 标注于各常量/类处）::
+实现来源（file:line 标注于各常量/类处）::
 
-  - ObservationFactory.java:24-26   MAX/MIN_OBSERVATION_MILLIS 裁剪
-  - predict/MinElevationHandler.java:12-28 仰角穿越事件(AOS increasing / LOS decreasing)
+  -    MAX/MIN_OBSERVATION_MILLIS 裁剪
+  - predict/ 仰角穿越事件(AOS increasing / LOS decreasing)
   - model/ObservationRequest.java   任务字段: id/start/end/satelliteId/transmitterId/
                                      groundStation/frequency/centerBandFrequency
   - model/ObservationStatus.java    状态机: RECEIVING_DATA->RECEIVED->DECODED->UPLOADED
   - satellite/TimeSlot.java         频率+起止时间片段
-  - satellite/SequentialTimetable.java:11-56 非重叠时间槽按时间排序
+  - satellite/ 非重叠时间槽按时间排序
   - model/Observation.java          录制元数据: sampleRate/frequency/rawPath/sigmfMeta
 """
 from __future__ import annotations
@@ -32,10 +33,10 @@ from .gpredict_adapter import (
 
 
 # =====================================================================
-# 常量 —— 来源: r2cloud ObservationFactory.java:24-26
+# 常量
 # =====================================================================
-MAX_OBSERVATION_MILLIS = 15 * 60 * 1000   # ObservationFactory.java:24
-MIN_OBSERVATION_MILLIS = 4 * 60 * 1000    # ObservationFactory.java:25
+MAX_OBSERVATION_MILLIS = 15 * 60 * 1000   # 
+MIN_OBSERVATION_MILLIS = 4 * 60 * 1000    # 
 DEFAULT_MIN_ELEVATION_DEG = 0.0           # r2cloud 默认地平线 0°（用户可在天线配置里改）
 DEFAULT_SAMPLE_RATE_HZ = 1024000          # r2cloud RtlSdrDevice 默认 1.024 Msps
 
@@ -47,7 +48,7 @@ DEFAULT_SAMPLE_RATE_HZ = 1024000          # r2cloud RtlSdrDevice 默认 1.024 Ms
 class R2CloudStation:
     """r2cloud 观测站（天线配置）。
 
-    来源: ru.r2cloud.model.AntennaConfiguration + PredictOreKit.getPosition()
+    ru.r2cloud.model.AntennaConfiguration + PredictOreKit.getPosition()
         groundStation = new GeodeticPoint(lat, lon, alt)  (Orekit)
     """
     name: str = "default"
@@ -56,20 +57,20 @@ class R2CloudStation:
     alt_m: float = 0.0                 # 海拔（米，r2cloud GeodeticPoint 用米）
     min_elevation_deg: float = DEFAULT_MIN_ELEVATION_DEG
     # r2cloud 里每副天线绑定一个最小仰角（ElevationDetector(minElevation, station)）
-    # MinElevationHandler.java:14  increasing=true 记录 AOS, false 记录 LOS
+    #   increasing=true 记录 AOS, false 记录 LOS
 
     def to_geostation(self) -> GeoStation:
         return GeoStation(self.lat_deg, self.lon_deg, self.alt_m / 1000.0)
 
 
 # =====================================================================
-# 任务（观测请求） —— 来源: model/ObservationRequest.java
+# 任务（观测请求）
 # =====================================================================
 @dataclass
 class ObservationTask:
     """一次过境录制任务。字段对齐 r2cloud ObservationRequest.java。
 
-    来源: ObservationRequest.java:7-17
+    
         id / startTimeMillis / endTimeMillis / satelliteId / transmitterId /
         tle / groundStation / frequency / centerBandFrequency
     """
@@ -90,7 +91,7 @@ class ObservationTask:
 
     def __post_init__(self):
         if not self.task_id:
-            # ObservationFactory.java:75  id = startMillis + "-" + transmitterId
+            #   id = startMillis + "-" + transmitterId
             self.task_id = f"{int(self.start_unix_s * 1000)}-{self.transmitter_id}"
 
     @property
@@ -99,11 +100,11 @@ class ObservationTask:
 
 
 # =====================================================================
-# 时间槽（频段占用） —— 来源: satellite/TimeSlot.java
+# 时间槽（频段占用）
 # =====================================================================
 @dataclass
 class TimeSlot:
-    """一个被占用的频段时间片。来源: TimeSlot.java:5-20 (frequency/start/end)。"""
+    """一个被占用的频段时间片。 (frequency/start/end)。"""
     frequency_hz: int
     start_unix_s: float
     end_unix_s: float
@@ -114,12 +115,12 @@ class TimeSlot:
 
 
 # =====================================================================
-# 顺序时间表（非重叠任务队列） —— 来源: satellite/SequentialTimetable.java
+# 顺序时间表（非重叠任务队列）
 # =====================================================================
 class SequentialTimetable:
     """r2cloud SequentialTimetable：按时间排序、拒绝重叠的时间槽列表。
 
-    来源: SequentialTimetable.java:11-56
+    
         addFully(slot): 若 slot 与现有所有槽不重叠则插入并按时间排序，返回 True
         addPartially(slot): 与 tolerance 容差内的重叠做裁剪
     """
@@ -129,7 +130,7 @@ class SequentialTimetable:
         self._slots: List[TimeSlot] = []
 
     def add_fully(self, slot: TimeSlot) -> bool:
-        """完整加入；任何重叠则拒绝。来源: addFully() :20-46"""
+        """完整加入；任何重叠则拒绝。addFully() :20-46"""
         for cur in self._slots:
             if cur.overlaps(slot):
                 return False
@@ -138,7 +139,7 @@ class SequentialTimetable:
         return True
 
     def add_partially(self, slot: TimeSlot) -> Optional[TimeSlot]:
-        """重叠时裁剪为不重叠片段。来源: addPartially() :48+"""
+        """重叠时裁剪为不重叠片段。addPartially() :48+"""
         for cur in self._slots:
             if not cur.overlaps(slot):
                 continue
@@ -160,14 +161,14 @@ class SequentialTimetable:
 
 
 # =====================================================================
-# 录制元数据 —— 来源: model/Observation.java (sigmf 风格)
+# 录制元数据
 # =====================================================================
 def build_recording_metadata(task: ObservationTask, station: R2CloudStation,
                              sample_rate_hz: int = DEFAULT_SAMPLE_RATE_HZ,
                              modulation: str = "LSB") -> Dict[str, Any]:
     """生成 r2cloud 风格的录制元数据（SigMF-like）。
 
-    来源: Observation.java:18-46
+    
         sampleRate / frequency / rawPath / sigmfMetaURL / dataFormat /
         startTimeMillis / groundStation / tle / status
     r2cloud 录制原始 IQ 为 SigMF 打包（.sigmf-data + .sigmf-meta JSON）。
@@ -214,9 +215,9 @@ class R2CloudScheduler:
 
     流程（对应 r2cloud 启动后定时调用 ObservationFactory.createSchedule）:
       1. 对每个卫星/发射机，用 gpredict SatPassPredictor 扫 AOS/LOS
-         （MinElevationHandler.java:14 increasing=true -> AOS, false -> LOS）
+         （ increasing=true -> AOS, false -> LOS）
       2. 裁剪过长过境到 MAX_OBSERVATION_MILLIS=15min，丢弃短于
-         MIN_OBSERVATION_MILLIS=4min 的过境  (ObservationFactory.java:52-63)
+         MIN_OBSERVATION_MILLIS=4min 的过境  ()
       3. 用 SequentialTimetable 去重重叠时段（同一时刻只能录一个频点）
     """
 
@@ -240,13 +241,13 @@ class R2CloudScheduler:
         for p in passes:
             start = p.aos_unix
             end = p.los_unix
-            # ObservationFactory.java:52-58  过长过境切 15min 段
+            #   过长过境切 15min 段
             while (end - start) * 1000.0 > MAX_OBSERVATION_MILLIS:
                 seg_end = start + MAX_OBSERVATION_MILLIS / 1000.0
                 tasks.append(self._make_task(tle, transmitter_id, frequency_hz,
                                              center_band_hz, start, seg_end, p))
                 start = seg_end
-            # ObservationFactory.java:59-61  过短(<4min)丢弃
+            #   过短(<4min)丢弃
             if (end - start) * 1000.0 < MIN_OBSERVATION_MILLIS:
                 continue
             tasks.append(self._make_task(tle, transmitter_id, frequency_hz,
@@ -352,7 +353,7 @@ def tool_r2cloud_recording_meta(args: Dict[str, Any]) -> Dict[str, Any]:
                                     int(args.get("sample_rate_hz", DEFAULT_SAMPLE_RATE_HZ)),
                                     args.get("modulation", "LSB"))
     return {"metadata": meta,
-            "method": "r2cloud-Observation.java:sigmf"}
+            "method": "sigmf-metadata"}
 
 
 # =====================================================================

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """确定性单测：DSO 目录 —— 加载、按类型过滤、位置查询。"""
 import pytest
 

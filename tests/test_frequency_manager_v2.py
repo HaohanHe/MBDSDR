@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 frequency_manager_v2 单测：CRUD / 持久化 / nearest / CSV / 自动分类
 ====================================================================

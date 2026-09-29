@@ -1,9 +1,10 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/astronomy/planets.py — 太阳系行星/月球位置
 ======================================================
 
-对照 Stellarium ``src/core/modules/SolarSystem.cpp``（底层 VSOP87/ELP2000）。
-采用 Meeus《Astronomical Algorithms》第 31/32 章低精度 Kepler 元素表
+依据 Meeus《Astronomical Algorithms》（公开天文公式）独立实现。
+采用该书第 31/32 章低精度 Kepler 元素表
 （Table 31.A/B），1000–3000 AD 内精度约 0.01°（内行星）~0.1°（外行星）。
 
   - 八大行星：椭圆轨道六要素 + 每世纪速率，解 Kepler 方程得日心黄经，再

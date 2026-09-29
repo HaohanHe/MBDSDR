@@ -1,4 +1,5 @@
-"""
+# SPDX-License-Identifier: MIT
+"""（合成向量，非硬件 / NOT HARDWARE）
 GK-2A JPEG2000 真解码测试
 =========================
 

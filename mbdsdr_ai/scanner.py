@@ -1,24 +1,20 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 扫频器（scanner）
 =========================
 
-移植自 SDR++ misc_modules/scanner/src/main.cpp（见 docs/learn/sdrpp_modules.md
-第 3 节）。
+扫频器设计（SDR++ scanner 仅作技术参考，本仓未包含其源代码）：
+  - startFreq/stopFreq/interval 步进扫频
+  - 定频驻留 worker 循环 + tuningTime/lingerTime
+  - getMaxLevel: freq->bin 映射取窗内最大值
+  - findSignal: 按方向步进找超门限频点
 
-对照上游：
-  - startFreq/stopFreq/interval 步进扫频       (scanner:275-277)
-  - 10 Hz worker 循环 + tuningTime/lingerTime  (scanner:139-230)
-  - getMaxLevel: freq->bin 映射取窗内最大值     (scanner:258-268)
-  - findSignal: 按方向步进找超门限频点          (scanner:232-256)
-
-MBDSDR 增强（比 SDR++ 强的点）：
-  * 上游用**固定 dB 门限**（scanner:282 level=-50），不适应噪声底变化。
-    本扫频器用**噪声底中位数 + threshold_db** 自适应门限。
-  * 上游找到一个频点就跳过去（单频），不报告"活动段"。
-    本扫频器把连续超阈值 bin **合并为活动段**，输出
+MBDSDR 增强：
+  * 采用**噪声底中位数 + threshold_db** 自适应门限（而非固定 dB 门限），
+    适应噪声底变化。
+  * 把连续超阈值 bin **合并为活动段**，输出
     {start_freq, end_freq, peak_freq, peak_db, bandwidth}。
-  * 优先级队列：检测到活动段后可回调跳到该频点解调（类似 findSignal 命中后
-    receiving=true, current=freq, scanner:250-251，但我们按段排队）。
+  * 优先级队列：检测到活动段后可回调跳到该频点解调（按段排队）。
   * classify_segment() AI 钩子：按带宽/形状猜信号类型（FM/AM/数字）。
 
 红线：
@@ -70,7 +66,7 @@ def extract_active_segments(freqs_hz: np.ndarray,
     """从一条 PSD 曲线提取活动段。
 
     步骤（对齐任务描述）：
-      1. 噪声底 = psd_db 的中位数（自适应，替代上游固定 level）。
+      1. 噪声底 = psd_db 的中位数（自适应，替代固定 dB 门限）。
       2. 门限 = noise_floor + threshold_db。
       3. 找所有 psd_db >= 门限的连续 bin 区间。
       4. 每个区间内取峰值 freq/db；算 bandwidth。
@@ -172,11 +168,11 @@ class SweepScanner:
         scanner.psd_provider = lambda center_hz, bw: (freqs, psd_db)
         segments = scanner.sweep()
 
-    参数对照 scanner/main.cpp:
-      start_hz   <- startFreq   (:275)
-      stop_hz    <- stopFreq    (:276)
-      step_hz    <- interval    (:277)
-      dwell_samples 每步停留样点数（对应 linger/采样率，我们用样点数）
+    参数：
+      start_hz   <- 扫频起始频率
+      stop_hz    <- 扫频终止频率
+      step_hz    <- 步进间隔
+      dwell_samples 每步停留样点数（由 linger 时间 × 采样率折算）
       threshold_db    相对噪声底的 dB 余量（替代固定 level, :282）
     """
 

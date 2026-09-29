@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 test_mode_registry.py — 解调模式注册表 + 迁移后 UI/解调调度 offscreen 测试
 =========================================================================

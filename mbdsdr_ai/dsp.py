@@ -1,14 +1,11 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI 内核 - DSP 数字信号处理模块
-=====================================
-DSP Module：IQ 前端校正 + 真实解调算法 + 信号处理工具。
+MBDSDR DSP primitives: IQ front-end correction, real demodulators, utilities.
 
-对照白皮书第五章和专题 05 实现：
-1. IQ 前端校正（DC blocker + I/Q 平衡协方差白化 + 整数抽取）
-2. 真实解调算法（FM/AM/SSB/LSB/USB/CW）
-3. 信号处理工具（AGC、滤波、重采样）
-
-这是 SDR 软件最核心的基本功，之前完全是空壳。
+  1. IQ front-end correction (DC blocker + I/Q balance covariance whitening +
+     integer decimation)
+  2. Demodulation (FM / AM / SSB / LSB / USB / CW)
+  3. Signal-processing utilities (AGC, filtering, resampling)
 """
 
 import numpy as np
@@ -16,9 +13,9 @@ import numpy as np
 from typing import Tuple, Optional, Dict, Any
 
 
-# ═══════════════════════════════════════════════════════
-# 1. IQ 前端校正（对照专题 05）
-# ═══════════════════════════════════════════════════════
+# =====================================================================
+# 1. IQ front-end correction
+# =====================================================================
 
 class DCBlocker:
     """
@@ -178,11 +175,15 @@ def decimate(x: np.ndarray, factor: int) -> np.ndarray:
     """
     整数抽取：先抗混叠低通，再每 factor 取 1。
 
-    这是 DDC（数字下变频）的末级。对照 GNU Radio rational_resampler 的
-    多相滤波结构（gr-blocks/lib/rational_resampler_base_cc.cc）：
-    抽取前必须先把 |f| > fs_out/2 的分量滤掉，否则高频会折叠混叠到基带，
-    严重劣化解调质量。本实现用 Kaiser 窗 FIR 做抗混叠低通，截止 = fs_out/2，
-    留 ~20% 过渡带，抽头数取 kaiserord 与 32*factor 的较大者。
+    Integer decimation: anti-alias low-pass first, then keep every factor-th
+    sample.
+
+    This is the final stage of a DDC.  Before decimating, any content above the
+    output Nyquist (|f| > fs_out/2) must be filtered out, otherwise it folds
+    into the baseband and badly degrades demodulation.  This implementation uses
+    a Kaiser-windowed FIR as the anti-alias low-pass with cutoff = fs_out/2 and
+    a ~20% transition band; the tap count is the max of kaiserord and
+    32*factor.
     """
     if factor <= 1:
         return x
@@ -195,10 +196,10 @@ def decimate(x: np.ndarray, factor: int) -> np.ndarray:
     if n < 8 * factor:
         return x[::factor]
 
-    # 来源: GNU Radio rational_resampler_base_cc.cc:43-74 (design_resampler_filter)
-    # — 抽取前必须抗混叠低通：截止 = 输出 Nyquist = fs/(2*factor)，留 ~20% 过渡带
-    # 归一化频率单位：输入 Nyquist = 1.0；折叠频率 = 1/factor（输入 Nyquist 单位）
-    stopband_edge = 1.0 / factor          # 阻带边缘：从此处开始全部折叠，必须衰减
+    # Anti-alias low-pass before decimation: cutoff = output Nyquist = fs/(2*factor),
+    # with a ~20% transition band.
+    # Normalised to the input Nyquist = 1.0; the folding edge is 1/factor.
+    stopband_edge = 1.0 / factor          # folding edge: everything above aliases away
     trans = 0.2 / factor                  # 20% 过渡带
     passband_edge = stopband_edge - trans  # 通带边缘
     cutoff = (passband_edge + stopband_edge) / 2.0  # -6dB 截止
@@ -287,15 +288,15 @@ def fm_demod(x: np.ndarray, deviation: float = 75000.0,
 
     deviation: 最大频偏，广播 FM 75kHz，窄带 FM 5kHz
 
-    ── SDRangel NFM 真实参数（来源: plugins/channelrx/demodnfm/）──
-      - 默认 m_rfBandwidth = 12500 Hz   (nfmdemodsettings.cpp:57)
-      - 默认 m_afBandwidth = 3000 Hz    (nfmdemodsettings.cpp:58)
-      - 默认 m_fmDeviation = 5000 Hz    (nfmdemodsettings.cpp:59)
-      - RF 带通 [-dev,+dev]/channelSR   (nfmdemodsink.cpp:297-299)
-      - FM 缩放 = audioSR/fmDeviation   (nfmdemodsink.cpp:321,390)
-      - 相位差分鉴频 unwrap 到[-1,1]    (sdrbase/dsp/phasediscri.h:75-92)
-      - 音频带通 300Hz ~ afBandwidth    (nfmdemodsink.cpp:326)
-    精确实现见 mbdsdr_ai/sdrangel_adapter.py::NFMDemodSink。
+    Typical narrow-band FM channel settings:
+      - RF bandwidth = 12500 Hz
+      - AF bandwidth = 3000 Hz
+      - FM deviation = 5000 Hz
+      - RF band limited to [-dev, +dev] / channelSR
+      - FM scaling = audioSR / fmDeviation
+      - phase-difference discriminator unwrapped to [-1, 1]
+      - audio band-pass 300 Hz .. afBandwidth
+    A fuller stateful implementation lives in the receive chain.
     """
     if len(x) < 2:
         return np.zeros(len(x), dtype=np.float32)
@@ -313,12 +314,13 @@ def fm_demod(x: np.ndarray, deviation: float = 75000.0,
 
 
 class QuadratureDemod:
-    """有状态 FM 正交鉴频器（对照 GR quadrature_demod_cf_impl.cc:37 set_history(2)）。
+    """Stateful FM quadrature discriminator.
 
-    纯函数 fm_demod() 每块丢 1 个样本（块边界相位差断了），本类缓存上一块
-    末样本，跨帧连续。公式与 fm_demod 完全一致：
+    The functional ``fm_demod`` drops one sample at each block boundary (the
+    phase difference breaks across blocks); this class caches the last sample of
+    the previous block so it is continuous across frames.  The formula is:
         out = gain * arg(x[n] * conj(x[n-1]))
-        gain = sample_rate / (2π * deviation)
+        gain = sample_rate / (2*pi * deviation)
     """
 
     def __init__(self, sample_rate: float = 48000.0, deviation: float = 5000.0):
@@ -334,7 +336,7 @@ class QuadratureDemod:
         x = np.asarray(x, dtype=np.complex128)
         if len(x) < 2:
             return np.zeros(0, dtype=np.float32)
-        # 前置补上一块末样本（= GR set_history(2) 让调度器补的那个样本）
+        # Prepend the last sample of the previous block for a continuous diff.
         if self._last is not None:
             x = np.concatenate(([self._last], x))
         phase_diff = np.angle(x[1:] * np.conj(x[:-1]))
@@ -350,20 +352,23 @@ def wfm_broadcast_demod(x: np.ndarray, sample_rate: float,
                         audio_cutoff: float = 15000.0,
                         channel_bw: float = 120000.0) -> np.ndarray:
     """
-    完整宽带调频广播（WFM / 商用 FM）接收链，对标 GQRX/SDR# 的单声道 FM：
+    Complete broadcast FM (WFM / commercial FM) mono receive chain:
 
-      去直流 → **信道低通（鉴频前，关键）** → 正交鉴频 → 抗混叠降采样到音频率
-      → 去加重 → 15kHz 音频低通 → 归一化
+      DC removal -> channel low-pass (before discriminator, key) -> quadrature
+      discriminator -> anti-alias down-sample to audio rate -> de-emphasis ->
+      15 kHz audio low-pass -> normalisation.
 
-    信道低通必须在正交鉴频之前：否则鉴频器要在整个采样带宽（如 2.048MHz）上
-    面对带外噪声，这些噪声经鉴频变成明显的"沙啦"hiss。先把信道限制到约
-    channel_bw（单声道 ~120kHz；立体声需 ~200kHz），实测安静段噪声底可降约 12dB。
+    The channel low-pass must come before the discriminator: otherwise the
+    discriminator faces out-of-band noise over the whole sample rate (e.g.
+    2.048 MHz), and that noise becomes audible hiss after discrimination.
+    Limiting the channel to about ``channel_bw`` (mono ~120 kHz; stereo needs
+    ~200 kHz) lowers the noise floor in quiet passages.
 
-    sample_rate : 输入 IQ 采样率（FM 广播建议 ≥200kHz，如 240k/1.0M/2.4M）
-    audio_sr    : 输出音频采样率（默认 48k）
-    deemph_us   : 去加重时间常数，中国/欧洲/澳洲 50µs，美国/韩国 75µs
-    仅输出单声道（L+R，基带 0–15kHz）；立体声复合解码（19kHz pilot / 38kHz 副载波）
-    与 RDS（57kHz 副载波）为独立后续模块。
+    sample_rate : input IQ sample rate (FM broadcast建议 >= 200 kHz)
+    audio_sr    : output audio sample rate (default 48k)
+    deemph_us   : de-emphasis time constant, 50 us (CN/EU/AU), 75 us (US/KR)
+    Mono only (L+R, baseband 0-15 kHz); stereo composite decoding
+    (19 kHz pilot / 38 kHz subcarrier) and RDS (57 kHz) are separate modules.
     """
     from scipy.signal import (resample_poly, butter, lfilter, firwin)
 
@@ -410,13 +415,16 @@ def wfm_broadcast_demod(x: np.ndarray, sample_rate: float,
 
 
 class WFMReceiver:
-    """有状态宽带 FM 广播接收器（流式逐块，对标 SDR# WFM / GQRX wfm_demod）。
+    """Stateful broadcast-FM receiver (streaming, block by block).
 
-    与无状态 wfm_broadcast_demod 的区别：所有滤波器用 lfilter 的 zi 跨块连续，
-    信道低通在鉴频前；输出用**固定增益 + 软限幅**而非逐块峰值归一化——避免
-    语音停顿/弱信号时把噪声也放大到满幅（那会造成恒定 loud hiss）。
+    Unlike the stateless ``wfm_broadcast_demod``, every filter keeps its
+    ``lfilter`` zi state across blocks; the channel low-pass runs before the
+    discriminator.  Output uses a fixed gain + soft limiter instead of per-block
+    peak normalisation, so pauses / weak signals do not amplify the noise to
+    full scale.
 
-    pipeline 的 DemodWorker 创建一次，对每个原生率块调用 process()。
+    The pipeline creates one instance and calls ``process()`` on each native-rate
+    block.
     """
 
     def __init__(self, sample_rate: float, audio_sr: int = 48000,
@@ -545,21 +553,20 @@ def ssb_demod(x: np.ndarray, mode: str = "USB",
               carrier_offset: float = 1500.0,
               sample_rate: float = 2400000.0) -> np.ndarray:
     """
-    SSB 单边带解调（Weaver 法简化版）。
+    SSB single-sideband demodulation (simplified Weaver-style).
 
-    USB: 取上边带
-    LSB: 取下边带
+    USB: keep the upper sideband.
+    LSB: keep the lower sideband.
 
-    carrier_offset: 载波偏移频率（BFO），典型 1500Hz
+    carrier_offset: carrier offset (BFO), typically 1500 Hz.
 
-    ── SDRangel SSB 滤波器真实参数（来源: plugins/channelrx/demodssb/ssbdemodsink.cpp）──
-      - FFT 长度 m_ssbFftLen = 2048            (ssbdemodsink.cpp:31)
-      - 默认带宽 m_Bandwidth = 5000 Hz         (ssbdemodsink.cpp:52)
-      - 默认低截 m_LowCutoff = 300 Hz          (ssbdemodsink.cpp:53)
-      - 滤波器 f1=LowCutoff/audioSR, f2=Bandwidth/audioSR (ssbdemodsink.cpp:73,301)
-      - USB 保留正频率 bin / LSB 保留负 bin    (fftfilt.cpp:475-502)
-      - 检波 audio = (I+Q)*0.7                 (ssbdemodsink.cpp:208)
-    精确 overlap-add 边带滤波见 mbdsdr_ai/sdrangel_adapter.py::SSBFilter/SSBDemodSink。
+    Typical SSB channel settings:
+      - FFT / overlap-add length 2048
+      - default pass-bandwidth 5000 Hz
+      - low cutoff 300 Hz
+      - USB keeps the positive-frequency bins / LSB keeps the negative
+      - detected audio = (I+Q)*0.7
+    A fuller overlap-add sideband filter is implemented in the receive chain.
     """
     n = len(x)
     t = np.arange(n) / sample_rate
@@ -638,27 +645,25 @@ def demodulate(x: np.ndarray, mode: str = "FM",
 
 class AGC:
     """
-    自动增益控制（简化版）。
+    Automatic gain control (simplified).
 
-    维持输出信号幅度在目标水平。
+    Keeps the output signal level at a target.
 
-    ── SDRangel 真实参数校准（来源: sdrbase/dsp/agc.cpp:53-179 MagAGC）──
-      - historySize = 12000 样本     (ssbdemodsink.cpp:40  m_agc(12000, target, 1e-2))
-      - target (m_R) = 3276          (ssbdemodsink.cpp:32  -10dB 幅度, 32768/10)
-      - threshold = 1e-2 (magsq)     (agc.cpp:57)
-      - stepLength = min(2400, history/2)  (agc.cpp:60, @48kHz 最长 50ms 攻击/释放)
-      - stepDelta  = 1/stepLength    (agc.cpp:61)
-      - 增益 = target / sqrt(mean(|x|^2)) (agc.cpp:117)
-      - 硬限幅: 输出幅度不超过 1.0    (agc.cpp:104-111)
-    本类保持一阶 attack/release 结构；精确的滑动均值+smootherstep 包络见
-    mbdsdr_ai/sdrangel_adapter.py::MagAGC（与 SDRangel 逐行对齐）。
+    Reference sliding-envelope AGC settings:
+      - history window = 12000 samples
+      - target amplitude = 3276 (-10 dBFS on a 16-bit scale, 32768/10)
+      - magnitude-squared threshold = 1e-2
+      - step length = min(2400, history/2)  (~50 ms attack/release at 48 kHz)
+      - gain = target / sqrt(mean(|x|^2))
+      - hard limit: output magnitude <= 1.0
+    This class keeps a first-order attack/release structure.
     """
 
-    # SDRangel MagAGC 标定常量（供调用方参考/对齐）
-    SDRANGEL_HISTORY = 12000        # ssbdemodsink.cpp:40
-    SDRANGEL_TARGET_I16 = 3276      # ssbdemodsink.cpp:32
-    SDRANGEL_STEP_LEN_MAX = 2400    # agc.cpp:60  (@48kHz = 50ms)
-    SDRANGEL_THRESHOLD = 1e-2       # agc.cpp:57
+    # Reference AGC tuning constants.
+    AGC_HISTORY = 12000
+    AGC_TARGET_I16 = 3276
+    AGC_STEP_LEN_MAX = 2400     # ~50 ms at 48 kHz
+    AGC_THRESHOLD = 1e-2
 
     def __init__(self, target_level: float = 0.5, attack: float = 0.01,
                  release: float = 0.001, max_gain: float = 60.0):
@@ -695,45 +700,44 @@ class AGC:
         self._current_gain = 1.0
 
 
-# ── GNU Radio 真实 DSP 参数校准（来源: repos/gnuradio）─────────────
-# 与 mbdsdr_ai/gnuradio_blocks.py 逐行移植对齐。本常量块把现有
-# decimate()/AGC() 的工程经验值校准到 GNU Radio 内核真实默认值。
+# ---------------------------------------------------------------------------
+# Standard DSP design defaults used by the resampling / FFT-convolution / AGC2
+# primitives below.
 #
-# 1) 有理重采样 FIR 设计（gr-filter/lib/rational_resampler_impl.cc:43-74
-#    design_resampler_filter）：
-GR_RESAMPLER_KAISER_BETA = 7.0        # rational_resampler_impl.cc:55  float beta = 7.0;
-GR_RESAMPLER_FRACTIONAL_BW = 0.4      # rational_resampler_impl.cc:124/:142 默认 0.4
-GR_RESAMPLER_HALFBAND = 0.5           # rational_resampler_impl.cc:56
-#   → decimate() 的 Kaiser 阻带波纹 60dB 与 beta=7.0（≈75dB）一致，
-#     截止 mid_transition_band 与本文件 cutoff 取中点的做法对齐。
+# 1) Rational resampler FIR design (Kaiser window):
+RESAMPLER_KAISER_BETA = 7.0        # stop-band ~75 dB attenuation
+RESAMPLER_FRACTIONAL_BW = 0.4      # pass-band fraction of half the output band
+RESAMPLER_HALFBAND = 0.5
+#    -> decimate()'s 60 dB stop-band ripple and beta=7.0 (~75 dB) are consistent,
+#       and its cutoff is taken at the midpoint of the transition band.
 #
-# 2) FFT 快速卷积（gr-filter/lib/fft_filter.cc:76/77 + fft_filter.h:72）：
-GR_FFT_FILTER_FFTSIZE = lambda nt: int(2 * 2 ** np.ceil(np.log2(max(nt, 1))))
-#   fft_filter.cc:76  d_fftsize = 2*2^ceil(log2(ntaps))
-GR_FFT_FILTER_NSAMPLES = lambda nt, fs: fs - nt + 1   # fft_filter.cc:77
-GR_FFT_FILTER_TAILSIZE = lambda nt: nt - 1            # fft_filter.h:72
-#   fft_filter.cc:52  抽头先乘 scale=1/fftsize 再 FFT（吸收归一化）。
+# 2) FFT fast-convolution sizing:
+FFT_FILTER_FFTSIZE = lambda nt: int(2 * 2 ** np.ceil(np.log2(max(nt, 1))))
+FFT_FILTER_NSAMPLES = lambda nt, fs: fs - nt + 1
+FFT_FILTER_TAILSIZE = lambda nt: nt - 1
+#    taps are scaled by 1/fftsize before the FFT (absorbed normalisation).
 #
-# 3) AGC2（gr-analog/include/gnuradio/analog/agc2.h:41-45）默认值：
-GR_AGC2_ATTACK_RATE = 1e-1            # agc2.h:41
-GR_AGC2_DECAY_RATE = 1e-2             # agc2.h:42
-GR_AGC2_REFERENCE = 1.0               # agc2.h:43
-GR_AGC2_INIT_GAIN = 1.0               # agc2.h:44
-GR_AGC2_MAX_GAIN = 0.0                # agc2.h:45  0 = 不限
-GR_AGC2_GAIN_FLOOR = 10e-5            # agc2.h:79  gain<0 时钳到 1e-4
+# 3) Two-pole (attack/decay) AGC defaults:
+AGC2_ATTACK_RATE = 1e-1
+AGC2_DECAY_RATE = 1e-2
+AGC2_REFERENCE = 1.0
+AGC2_INIT_GAIN = 1.0
+AGC2_MAX_GAIN = 0.0                # 0 = unbounded
+AGC2_GAIN_FLOOR = 10e-5
 
 
-def make_gr_agc2(reference: float = GR_AGC2_REFERENCE,
-                 attack_rate: float = GR_AGC2_ATTACK_RATE,
-                 decay_rate: float = GR_AGC2_DECAY_RATE):
-    """构造与 GNU Radio agc2_cc 内核逐样本等价的 AGC2（agc2.h:64-85）。
+def make_agc2(reference: float = AGC2_REFERENCE,
+                 attack_rate: float = AGC2_ATTACK_RATE,
+                 decay_rate: float = AGC2_DECAY_RATE):
+    """Construct a two-pole attack/decay AGC2.
 
-    返回 mbdsdr_ai.gnuradio_blocks.AGC2 实例，可直接 .process(complex_iq)。
-    若需要 SDRangel 滑动包络 AGC，仍用上面的 AGC / sdrangel_adapter.MagAGC。
+    Returns a :class:`mbdsdr_ai.gnuradio_blocks.AGC2` instance, usable directly
+    via ``.process(complex_iq)``.  For a sliding-envelope AGC, use the ``AGC``
+    class above instead.
     """
     from .gnuradio_blocks import AGC2
     return AGC2(attack_rate=attack_rate, decay_rate=decay_rate,
-                reference=reference, gain=GR_AGC2_INIT_GAIN, max_gain=GR_AGC2_MAX_GAIN)
+                reference=reference, gain=AGC2_INIT_GAIN, max_gain=AGC2_MAX_GAIN)
 
 
 # ═══════════════════════════════════════════════════════
@@ -742,9 +746,8 @@ def make_gr_agc2(reference: float = GR_AGC2_REFERENCE,
 
 def write_cf32(x: np.ndarray, path: str):
     """
-    写 cf32 格式（交错 float32 小端 [I0,Q0,I1,Q1,...]）。
-
-    GNU Radio / SDR++ 默认格式。
+    Write cf32 format (interleaved little-endian float32 [I0,Q0,I1,Q1,...]).
+    This is the standard SDR baseband recording format.
     """
     # 转换为交错 float32
     interleaved = np.column_stack([x.real, x.imag]).flatten().astype(np.float32)
@@ -805,8 +808,8 @@ def write_csv(x: np.ndarray, path: str, decimation: int = 1):
     教学、表格审计用。建议配合大抽取。
     """
     if decimation > 1:
-        # 来源: GNU Radio rational_resampler_base_cc.cc — 降采样前必须抗混叠低通
-        # 不能裸 x[::decimation]，否则高频折叠到低频污染审计数据
+        # Anti-alias low-pass before down-sampling; a bare x[::decimation]
+        # would fold high frequencies into the audit data.
         x = decimate(x, decimation)
     with open(path, 'w') as f:
         f.write("I,Q\n")
@@ -986,94 +989,86 @@ def find_spectrum_peaks(x: np.ndarray, sample_rate: float = 2400000.0,
             "peak_count": len(peaks)}
 
 
-# ═══════════════════════════════════════════════════════
-# 6. SDR++ 风格接收 VFO（数字下变频通道）
-# ═══════════════════════════════════════════════════════
+# =====================================================================
+# 6. Receive VFO (digital down-conversion channel)
+# =====================================================================
 
 class VFO:
-    """SDR++ 风格接收 VFO：频率变频 → 有理重采样 → 低通滤波。
+    """Receive VFO: frequency translation -> rational resample -> low-pass filter.
 
-    逐行对照 SDR++ 源码（repos/sdrpp/core/src/dsp/channel/）：
-      - __init__     ↔ rx_vfo.h:19-33  init()
-      - set_offset   ↔ rx_vfo.h:72-77  setOffset()
-      - set_bandwidth ↔ rx_vfo.h:60-70 setBandwidth()
-      - process      ↔ rx_vfo.h:89-100 process()（xlator → resamp → filter）
-      - _generate_taps ↔ rx_vfo.h:117-121 generateTaps()
+    A VFO selects one channel out of the wideband input.  The frequency
+    translator multiplies by a complex oscillator to move the desired centre
+    (``offset`` Hz in the input spectrum) down to DC; a rational resampler then
+    changes the rate to ``out_samplerate``; finally a windowed-sinc low-pass
+    removes the translated neighbours.
 
-    频率变频（FrequencyXlator）对照 channel/frequency_xlator.h:
-      - :21-23 init(in, offset, samplerate) → math::hzToRads(offset, samplerate)
-      - :15-19 phase=1+0j, phaseDelta = cos(offset)+j*sin(offset)
-      - :43-50 volk 旋转器：out[i] = in[i]*phase; phase *= phaseDelta
-    关键：rx_vfo.h:27 调 xlator.init(NULL, -_offset, _inSamplerate) ——
-    传负 offset，目的是把用户指定的目标频率（在输入频谱上的位置）搬移到 DC。
+    The complex-rotator frequency is ``phaseDelta = exp(+j*2*pi*offset/sr)``;
+    the offset is negated relative to the user request so the user-specified
+    target frequency lands at DC.
 
-    低通抽头对照 taps/low_pass.h:7-11 + taps/estimate_tap_count.h:5：
-      count = 3.8 * samplerate / transWidth；windowed_sinc.h:17-26 窗函数 sinc。
-    rx_vfo.h:119-120: filterWidth = bandwidth/2.0；
-      lowPass(filterWidth, filterWidth*0.1, outSamplerate)
-    （即截止=bandwidth/2，过渡带=filterWidth*0.1=bandwidth*0.05；以源码为准。）
+    Low-pass taps: ``count = 3.8*samplerate/transWidth`` windowed sinc, with
+    cutoff = bandwidth/2 and transition = bandwidth*0.05.
     """
 
     def __init__(self, in_samplerate: float, out_samplerate: float,
                  bandwidth: float, offset: float = 0.0):
-        """in_samplerate: 输入采样率(Hz); out_samplerate: 输出采样率(Hz);
-        bandwidth: VFO 带宽(Hz); offset: 变频偏移(Hz)，正=把 +offset 处信号搬到 DC。"""
+        """in_samplerate: input rate (Hz); out_samplerate: output rate (Hz);
+        bandwidth: VFO bandwidth (Hz); offset: translation (Hz), positive moves
+        the signal at +offset down to DC."""
         self._in_sr = float(in_samplerate)
         self._out_sr = float(out_samplerate)
         self._bandwidth = float(bandwidth)
         self._offset = float(offset)
 
-        # rx_vfo.h:24 filterNeeded = (_bandwidth != _outSamplerate)
+        # Filter only if the bandwidth differs from the output rate.
         self._filter_needed = abs(self._bandwidth - self._out_sr) > 1e-6
 
-        # rx_vfo.h:27 xlator.init(NULL, -_offset, _inSamplerate)
+        # Rotator: translate -offset to baseband.
         self._phase = complex(1.0, 0.0)
         self._rebuild_xlator()
 
-        # rx_vfo.h:28 resamp.init(NULL, _inSamplerate, _outSamplerate)
+        # Rational resampler ratio in_sr -> out_sr.
         self._up = 1
         self._down = 1
         self._rebuild_rational()
-        # 预设计重采样 FIR（只做一次），process 里以 window= 复用
+        # Pre-design the resampling FIR once; reused via window= each block.
         self._resamp_window = None
         self._design_resamp_window()
 
-        # rx_vfo.h:29-30 generateTaps + filter.init
         self._taps = None
         if self._filter_needed:
             self._generate_taps()
 
-        # ── 块间状态持久化（对照 GR block.cc:97 forecast history + fir_filter_with_buffer.cc:71）──
-        # LPF 滤波器初始条件，跨帧传递，消除每块开头瞬态咔哒
+        # LPF initial conditions carried across frames to avoid a click at the
+        # start of every block.
         self._lpf_zi = None
-        # AGC2（对照 gr-analog agc2.h:64-85，已移植在 gnuradio_blocks.py:325）
-        # 默认关闭，UI 可开；开启后在变频后、重采样前对复 IQ 做逐样本 AGC
+        # Optional per-sample attack/decay AGC, applied after rotation and
+        # before resampling; off by default.
         self._agc = None
         self._agc_enabled = False
 
-    # ---------- 内部：频率变频 ----------
+    # ---------- internal: frequency translation ----------
     def _rebuild_xlator(self):
-        """frequency_xlator.h:21-23 hzToRads(offset, sr) = 2π*offset/sr。
-        rx_vfo.h:27/76 传给 xlator 的是 -_offset（把目标频率搬到 DC）。"""
+        """rotator step = 2*pi*offset/sr; the offset is negated so the target
+        frequency moves to DC."""
         self._d_theta = 2.0 * np.pi * (-self._offset) / self._in_sr
         self._phase_delta = complex(np.cos(self._d_theta), np.sin(self._d_theta))
 
-    # ---------- 内部：有理重采样系数 ----------
+    # ---------- internal: rational resampler coefficients ----------
     def _rebuild_rational(self):
         from math import gcd
         g = gcd(int(round(self._out_sr)), int(round(self._in_sr)))
         self._up = int(round(self._out_sr)) // g
         self._down = int(round(self._in_sr)) // g
 
-    # ---------- 内部：低通抽头 ----------
+    # ---------- internal: low-pass taps ----------
     def _generate_taps(self):
-        """rx_vfo.h:117-121 generateTaps()。"""
-        cutoff = self._bandwidth / 2.0          # rx_vfo.h:119
-        trans_width = cutoff * 0.1             # rx_vfo.h:120 lowPass(filterWidth, filterWidth*0.1, ...)
-        # estimate_tap_count.h:5: count = 3.8 * samplerate / transWidth
+        cutoff = self._bandwidth / 2.0
+        trans_width = cutoff * 0.1
+        # Windowed-sinc tap estimate: count = 3.8*samplerate/transition.
         count = int(round(3.8 * self._out_sr / trans_width))
         if count % 2 == 0:
-            count += 1  # 奇数抽头 = Type I 线性相位 FIR
+            count += 1  # odd length = Type I linear-phase FIR
         count = max(15, min(count, 4095))
 
         try:
@@ -1082,7 +1077,7 @@ class VFO:
             self._taps = firwin(count, cutoff / nyq, window='nuttall',
                                 scale=True).astype(np.float64)
         except ImportError:
-            # numpy 兜底：窗函数 sinc（windowed_sinc.h:17-26 的直译，Nuttall 窗）
+            # NumPy fallback: windowed sinc with a Nuttall window.
             t = np.arange(count) - (count - 1) / 2.0
             h = 2.0 * (cutoff / self._out_sr) * np.sinc(2.0 * (cutoff / self._out_sr) * t)
             n = np.arange(count)
@@ -1094,14 +1089,14 @@ class VFO:
             taps /= np.sum(taps)
             self._taps = taps.astype(np.float64)
 
-    # ---------- 公开接口 ----------
+    # ---------- public API ----------
     def set_offset(self, offset_hz: float):
-        """设置变频偏移（对照 rx_vfo.h:72-77 setOffset）。"""
+        """Set the frequency-translation offset (Hz)."""
         self._offset = float(offset_hz)
         self._rebuild_xlator()
 
     def set_bandwidth(self, bandwidth_hz: float):
-        """设置 VFO 带宽并重建低通滤波器（对照 rx_vfo.h:60-70 setBandwidth）。"""
+        """Set the VFO bandwidth (Hz) and rebuild the low-pass filter."""
         self._bandwidth = float(bandwidth_hz)
         self._filter_needed = abs(self._bandwidth - self._out_sr) > 1e-6
         if self._filter_needed:
@@ -1110,19 +1105,19 @@ class VFO:
             self._taps = None
 
     def reset(self):
-        """重置相位累加器（对照 frequency_xlator.h:35-41 reset）。"""
+        """Reset the phase accumulator (and LPF state / AGC gain)."""
         self._phase = complex(1.0, 0.0)
-        # 换频/换带宽后 LPF 状态也要清，否则旧频残留会串到新频
+        # Clear LPF state after a frequency/bandwidth change to avoid spillover.
         self._lpf_zi = None
         if self._agc is not None:
             self._agc.reset(gain=1.0)
 
     def set_agc(self, enabled: bool, attack_rate: float = 1e-1,
                 decay_rate: float = 1e-2, reference: float = 1.0):
-        """开关 VFO 内 AGC2（对照 agc2_cc_impl.cc:42-50 work 调 scaleN）。
+        """Enable/disable the in-VFO two-pole AGC.
 
-        默认参数 = GR agc2.h:41-45 默认值。开启后在变频后、重采样前对复 IQ
-        做逐样本 attack/decay AGC，状态跨帧保留。"""
+        When on, applies per-sample attack/decay AGC to the complex IQ after
+        rotation and before resampling; state is kept across frames."""
         self._agc_enabled = bool(enabled)
         if enabled and self._agc is None:
             from .gnuradio_blocks import AGC2
@@ -1150,31 +1145,31 @@ class VFO:
             self._resamp_window = None
 
     def process(self, iq: np.ndarray) -> np.ndarray:
-        """处理一帧复 IQ：变频 → 重采样 → 低通滤波（对照 rx_vfo.h:89-100）。
-        返回处理后的复 IQ（长度约 = len(iq) * out_sr / in_sr）。"""
+        """Process a frame of complex IQ: rotate -> resample -> low-pass.
+        Returns the processed complex IQ (length ~ len(iq)*out_sr/in_sr)."""
         n = len(iq)
         if n == 0:
             return iq
         x = np.asarray(iq)
         in_dtype = x.dtype
 
-        # 1) 频率变频（在 in_sr 上）—— rx_vfo.h:90 xlator.process
-        # frequency_xlator.h:43-50: out[i] = in[i]*phase; phase *= phaseDelta
-        # 向量化：phase_k = phase0 * exp(j * d_theta * k)，状态跨帧保持
+        # 1) Frequency translation at the input rate.
+        #    out[i] = in[i]*phase; phase *= phaseDelta.  Vectorised as
+        #    phase_k = phase0 * exp(j*d_theta*k), state carried across frames.
         k = np.arange(n, dtype=np.float64)
         mult = self._phase * np.exp(1j * self._d_theta * k)
         x = x * mult.astype(np.complex128 if x.dtype == np.complex128 else np.complex64)
-        # 推进相位累加器：phase *= phaseDelta^n
+        # Advance the phase accumulator: phase *= phaseDelta^n.
         self._phase = self._phase * np.exp(1j * self._d_theta * n)
         mag = abs(self._phase)
         if mag > 1e-12:
-            self._phase /= mag  # 防长期幅度漂移（volk rotator 同样有此问题）
+            self._phase /= mag  # keep the rotator magnitude bounded
 
-        # 1.5) 可选 AGC2（变频后、重采样前，对照 agc2_cc_impl.cc:42-50）
+        # 1.5) Optional per-sample AGC after rotation, before resampling.
         if self._agc_enabled and self._agc is not None:
             x = self._agc.process(x)
 
-        # 2) 有理重采样 in_sr → out_sr —— rx_vfo.h:92/94 resamp.process
+        # 2) Rational resample in_sr -> out_sr.
         if self._up != 1 or self._down != 1:
             try:
                 from scipy.signal import resample_poly
@@ -1184,17 +1179,16 @@ class VFO:
                 else:
                     x = resample_poly(x, self._up, self._down)
             except ImportError:
-                # numpy 兜底：线性插值（粗糙但可用；scipy 不可用时的降级路径）
+                # NumPy fallback: linear interpolation (coarse but usable).
                 n_new = int(round(n * self._out_sr / self._in_sr))
                 t_old = np.linspace(0.0, 1.0, n, endpoint=False)
                 t_new = np.linspace(0.0, 1.0, n_new, endpoint=False)
                 x = (np.interp(t_new, t_old, x.real)
                      + 1j * np.interp(t_new, t_old, x.imag))
-        # else: in_sr == out_sr，跳过重采样（rx_vfo.h:28 也允许）
+        # else: in_sr == out_sr, resampling skipped.
 
-        # 3) 低通滤波（在 out_sr 上）—— rx_vfo.h:97 filter.process
-        # 用 lfilter_zi 跨帧保持滤波器状态（对照 GR block.cc:97 history +
-        # fir_filter_with_buffer.cc:71-76 环形缓冲），消除每块开头瞬态咔哒
+        # 3) Low-pass filter at the output rate.  Keep lfilter_zi state across
+        #    frames to avoid a transient click at each block boundary.
         if self._filter_needed and self._taps is not None:
             try:
                 from scipy.signal import lfilter, lfilter_zi
@@ -1215,22 +1209,20 @@ class VFO:
 
 
 # ═══════════════════════════════════════════════════════
-# 7. SDR++ 风格 Stream 路由与 DSP 链
+# 7. Stream routing and DSP chain
 # ═══════════════════════════════════════════════════════
 
 from .dsp_stream import PingPongStream
 
 
 class StreamSplitter:
-    """一进 N 出流分配器。
+    """One-input, N-output stream fan-out.
 
-    对照 sdrpp/core/src/dsp/routing/splitter.h:46-61。
+    Reads one frame from ``input_stream``, copies it into every bound downstream
+    output stream and swaps, then flushes the input.  This lets several consumers
+    (e.g. a recorder and a spectrum scanner) share one producer without contention.
 
-    从 input_stream 读一帧，对每个绑定的下游 output_stream 拷贝数据并 swap，
-    然后 flush 输入流。解决"录音和 AI 扫频抢数据"的问题
-    （sdr_backend.py:315 vs sdr_tools.py:3283）。
-
-    用法：
+    Usage:
         splitter = StreamSplitter(input_stream)
         splitter.bind(recorder_stream)
         splitter.bind(spectrum_stream)
@@ -1245,47 +1237,38 @@ class StreamSplitter:
         self._running = False
 
     def bind(self, output_stream: PingPongStream) -> None:
-        """注册一个下游输出流。
-
-        对照 splitter.h:13-27 bindStream()。
-        """
+        """Register a downstream output stream."""
         with self._lock:
             if output_stream not in self._outputs:
                 self._outputs.append(output_stream)
 
     def unbind(self, output_stream: PingPongStream) -> None:
-        """移除一个下游输出流。
-
-        对照 splitter.h:29-44 unbindStream()。
-        """
+        """Remove a downstream output stream."""
         with self._lock:
             if output_stream in self._outputs:
                 self._outputs.remove(output_stream)
 
     def run_once(self) -> int:
-        """从输入读一帧，分发给所有下游。
-
-        对照 splitter.h:46-61 run()。
+        """Read one frame from the input and distribute it to all outputs.
 
         Returns:
-            本次分发的样本数；-1 表示输入流已停止。
+            number of samples distributed; -1 when the input stream stopped.
         """
         buf, n = self._input.read()
         if n < 0:
             return -1
 
-        # 拷贝给每个下游并 swap
         with self._lock:
             outputs_snapshot = list(self._outputs)
 
         for out_stream in outputs_snapshot:
             out_stream.write_buf[:n] = buf[:n]
             if not out_stream.swap(n):
-                # 下游停止，flush 输入流并退出
+                # A downstream stopped; flush the input and exit.
                 self._input.flush()
                 return -1
 
-        # 读完后 flush 输入，通知生产者可以写下一帧
+        # Flush the input so the producer can write the next frame.
         self._input.flush()
         return n
 
@@ -1313,16 +1296,14 @@ class StreamSplitter:
 
 
 class DSPChain:
-    """轻量 DSP 处理链：按启用顺序串联处理块。
+    """A lightweight chain of DSP processing blocks, applied in enable order.
 
-    对照 sdrpp/core/src/dsp/chain.h:62-90 enableBlock() / disableBlock()。
+    Blocks can be toggled on/off without restarting the thread: each block is an
+    object exposing ``.process(x) -> ndarray``, and ``set_block_enabled`` decides
+    whether a block runs or is bypassed.
 
-    SDR++ 的 chain 通过重连上下游 stream 指针实现块的动态启停，
-    不重启线程。这里用 Python 函数链的轻量方式实现：
-    每个 block 是一个有 .process(x) -> ndarray 的对象，
-    set_block_enabled 控制是否跳过该块。
-
-    先用在 front_end() 的 DCBlocker / IQCalibrator / decimate 可独立开关。
+    Used in ``front_end()`` so the DCBlocker / IQCalibrator / decimation can be
+    switched independently.
     """
 
     def __init__(self):
@@ -1330,12 +1311,12 @@ class DSPChain:
         self._block_map: dict = {}    # name -> index
 
     def add_block(self, name: str, block, enabled: bool = True) -> None:
-        """添加一个处理块。
+        """Add a processing block.
 
         Args:
-            name: 块名称（用于开关控制）。
-            block: 必须有 process(x: ndarray) -> ndarray 方法。
-            enabled: 是否默认启用。
+            name: block name (used for enable/disable control).
+            block: must expose ``process(x: ndarray) -> ndarray``.
+            enabled: whether it is on by default.
         """
         if name in self._block_map:
             raise ValueError(f"Block '{name}' already exists")
@@ -1344,11 +1325,7 @@ class DSPChain:
         self._block_map[name] = idx
 
     def set_block_enabled(self, name: str, enabled: bool) -> None:
-        """启用或禁用某个块。
-
-        对照 chain.h:121-128 setBlockEnabled()。
-        禁用的块在 process() 中被跳过，数据直通。
-        """
+        """Enable or disable a block.  Disabled blocks are bypassed in process()."""
         if name not in self._block_map:
             raise ValueError(f"Block '{name}' not found")
         idx = self._block_map[name]
@@ -1356,12 +1333,7 @@ class DSPChain:
         self._blocks[idx] = (name, block, enabled)
 
     def process(self, data: np.ndarray) -> np.ndarray:
-        """按启用顺序串联处理所有块。
-
-        对照 chain.h 的处理流：依次经过每个启用的 block.process()。
-        禁用的块被跳过，数据直通（等价于 SDR++ 的
-        after->setInput(before ? &before->out : _in)）。
-        """
+        """Run all enabled blocks in order; disabled blocks are bypassed."""
         result = data
         for name, block, enabled in self._blocks:
             if enabled and hasattr(block, 'process'):

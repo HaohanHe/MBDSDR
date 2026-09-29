@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 ADS-B 地图模块单元测试（offscreen，无显示器/无硬件）
 ====================================================

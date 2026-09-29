@@ -1,9 +1,7 @@
+# SPDX-License-Identifier: MIT
 """
-PingPongStream / StreamSplitter / DSPChain 单元测试
-====================================================
-
-纯 numpy 多线程测试，无硬件依赖。
-对照 SDR++ stream.h / splitter.h / chain.h 的语义验证。
+PingPongStream / StreamSplitter / DSPChain unit tests.
+非硬件 / NOT HARDWARE: pure-NumPy multi-threaded, no hardware.
 """
 
 import sys

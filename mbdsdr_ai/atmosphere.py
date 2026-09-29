@@ -1,53 +1,40 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR AI 内核 - 大气 / 晨昏 / 天空亮度计算模块
 ================================================
-算法参考 Stellarium Atmosphere (GPL-3.0), 独立重实现
-------------------------------------------------------------
+依据公开天文标准与常用大气模型独立实现
+--------------------------------------------
 
-本模块独立重实现 Stellarium 中与大气、晨昏、天空背景相关的核心算法，
-不链接 Stellarium 任何二进制。时间系统使用 skyfield，太阳位置在无 JPL
+本模块实现大气折射、大气质量、晨昏/日出日落时刻与天空背景亮度归一化。
+不链接任何外部天文软件二进制。时间系统使用 skyfield，太阳位置在无 JPL
 星历(bsp)时回退到 Meeus 低精度太阳理论（精度 ~0.01°，对日出日落时刻
 影响 < 30s）。
 
-Stellarium 源码引用（路径相对 ``repos/stellarium/src/``）：
+依据的公开公式与标准：
 
 1. 大气折射（几何高度 → 视高度）
-   - core/RefractionExtinction.cpp:172-173  Saemundsson 公式
-     ``r = press_temp_corr * (1.02/tan((h+10.3/(h+5.11))°) + 0.0019279)``
-   - core/RefractionExtinction.cpp:151       气压温度修正
-     ``press_temp_corr = P/1010 * 283/(273+T) / 60``（弧分→度）
-   - core/RefractionExtinction.cpp:214-215  反向（视高度→几何高度）用 Bennett
+   - Saemundsson 公式：``r = press_temp_corr * (1.02/tan((h+10.3/(h+5.11))°) + 0.0019279)``
+   - 气压温度修正：``press_temp_corr = P/1010 * 283/(273+T) / 60``（弧分→度）
+   - 反向（视高度→几何高度）用 Bennett 公式：
      ``r = press_temp_corr * (1/tan((h+7.31/(h+4.4))°) + 0.0013515)``
 
 2. 大气质量 (airmass)
-   - core/RefractionExtinction.cpp:52-53    Rozenberg 1966（视高度）：
-     ``m = 1/(cosZ + 0.025*exp(-11*cosZ))``
-   - core/RefractionExtinction.cpp:57-60    Young 1994（几何高度）多项式
-   - 本模块按任务要求使用 Kasten-Young 1989（更常用，地平线 m≈40）。
+   - 采用 Kasten-Young 1989（常用，地平线 m≈40）。
 
-3. 消光 (Beer-Lambert)
-   - core/RefractionExtinction.cpp:62-65    forward: ``mag += airmass * ext_coeff``
-   - core/modules/Skybright.cpp:75,79       Rozenberg airmass 在 Skybright 中复用
+3. 消光 (Beer-Lambert)：``mag += airmass * ext_coeff``。
 
 4. 晨昏分段与日出日落
-   - core/StelObject.cpp:151-311             getRTSTime：先解 hour-angle 近似，
-     再迭代到 10s 精度。本模块用 skyfield 太阳高度 + 二分法达到同等精度。
-   - core/StelObject.cpp:161-166             地平线折射修正 ≈ -34'（上边缘）
+   - 用太阳高度 + 二分法求穿越时刻（收敛到 1s 内）。
    - 标准约定：日出/日落 = 太阳上边缘视上地平线 ⇒ 太阳中心几何高度 = -0.833°
      （= 折射 34' + 太阳半径 16'，见 Meeus Astr.Alg. ch.15/16）
    - 民用晨昏 -6°、航海晨昏 -12°、天文晨昏 -18°（国际天文联合会标准定义）。
 
 5. 天空亮度（白天/黄昏/夜晚）
-   - core/modules/MilkyWay.cpp:350 与 core/StelToast.cpp:334
-     给出全天空平均亮度的经验值：
-       日落(sun≈0°)     ≈ 10 cd/m²
-       民用晨昏(-6°)    ≈ 3.3 cd/m²
-       航海晨昏(-12°)   ≈ 0.0145 cd/m²
-       天文晨昏(-18°)   ≈ 0.0004 cd/m²
-     本模块据此做分段线性归一化到 0(深夜)~1(白天)。
-   - core/modules/Skybright.cpp:91,122       Schaefer 全天空亮度模型
-     （twilight term: ``10^(-6.724 + 22.918*(π/2-acos(cosZ_sun)))``），
-     本模块不重绘全天空分布，只取太阳高度的一维包络。
+   - 全天空平均亮度随太阳高度的经验包络（日落≈10 cd/m²、民用晨昏≈3.3、
+     航海晨昏≈0.0145、天文晨昏≈0.0004），本模块据此做分段线性归一化到
+     0(深夜)~1(白天)。
+
+Stellarium 仅作为技术参考与致谢，本模块未包含其源代码。
 """
 from __future__ import annotations
 
@@ -83,7 +70,7 @@ __all__ = [
 #: 日出/日落：太阳上边缘 + 大气折射 ⇒ 中心几何高度 = -0.833°
 #: （折射 ≈ 34' = 0.5667° + 太阳半径 ≈ 16' = 0.2667°；Meeus ch.15）
 SUNSET_CENTER_ALT_DEG = -0.833
-#: 民用晨昏：太阳中心 -6°（Stellarium StelObject.cpp:939 twilightAltitude 默认）
+#: 民用晨昏：太阳中心 -6°（IAU/通用天文约定）
 CIVIL_TWILIGHT_ALT_DEG = -6.0
 #: 航海晨昏：太阳中心 -12°
 NAUTICAL_TWILIGHT_ALT_DEG = -12.0
@@ -149,8 +136,7 @@ def atmospheric_refraction(alt_deg: float,
                           temperature_c: float = 10.0) -> float:
     """大气折射修正角（度，正值 = 视高度比几何高度高）。
 
-    使用 Stellarium RefractionExtinction.cpp:172-173 的 Saemundsson 公式
-    （几何高度 → 视高度）：
+    使用 Saemundsson 公式（几何高度 → 视高度）：
 
         r = (P/1010) * (283/(273+T)) / 60
             * [ 1.02 / tan((h + 10.3/(h+5.11))°) + 0.0019279 ]
@@ -165,16 +151,12 @@ def atmospheric_refraction(alt_deg: float,
         temperature_c: 地面气温（摄氏度），默认 10
 
     返回：
-        折射修正角（度）。低于 -3.54° 返回 0（Stellarium 在此以下不修正，
-        见 RefractionExtinction.cpp:119,184）。
+        折射修正角（度）。低于 -3.54° 时公式不再可信，返回 0。
     """
-    # 与 Stellarium MIN_GEO_ALTITUDE_DEG = -3.54 对齐
     if alt_deg <= -3.54:
         return 0.0
     h = alt_deg
-    # press_temp_corr，见 RefractionExtinction.cpp:151
     press_temp_corr = pressure_hpa / 1010.0 * 283.0 / (273.0 + temperature_c) / 60.0
-    # Saemundsson，RefractionExtinction.cpp:173
     x = math.radians(h + 10.3 / (h + 5.11))
     r_arcmin = 1.02 / math.tan(x) + 0.0019279
     r_deg = press_temp_corr * r_arcmin
@@ -188,17 +170,15 @@ def atmospheric_refraction(alt_deg: float,
 def airmass(alt_deg: float) -> float:
     """大气质量 m（天顶 = 1）。
 
-    使用 Kasten-Young 1989 公式（任务指定）：
+    使用 Kasten-Young 1989 公式：
 
         m = 1 / ( sin(h) + 0.50572 * (h + 6.07995)^(-1.6364) )
 
     其中 h 为高度角（度）。这是最常用的空气质量公式，地平线 h=0 时 m≈40。
-    对照：Stellarium 用 Rozenberg 1966（RefractionExtinction.cpp:53），
-    ``m = 1/(cosZ + 0.025*exp(-11*cosZ))``，两者在 h>10° 一致到 1%。
+    与 Rozenberg 1966 公式 ``m = 1/(cosZ + 0.025*exp(-11*cosZ))`` 在 h>10° 一致到 1%。
 
     参数：
-        alt_deg: 高度角（度）。h <= -2° 返回 0（与 Stellarium
-                 UndergroundExtinctionZero 一致，RefractionExtinction.cpp:37,42）。
+        alt_deg: 高度角（度）。h <= -2° 返回 0（地平线以下不计算）。
     """
     if alt_deg <= -2.0:
         return 0.0
@@ -211,7 +191,7 @@ def airmass(alt_deg: float) -> float:
 
 
 # ── 天空亮度因子（0=深夜, 1=白天）─────────────────────────────
-# 断点来自 MilkyWay.cpp:350 / StelToast.cpp:334 的 cd/m² 经验值：
+# 全天空平均亮度随太阳高度的经验 cd/m² 断点：
 #   h=0°   → 10.0
 #   h=-6°  → 3.3
 #   h=-12° → 0.0145
@@ -230,8 +210,7 @@ _SKY_BRIGHT_BREAKS = [
 def sky_brightness_factor(sun_alt_deg: float) -> float:
     """根据太阳几何高度返回天空背景亮度因子，0.0(深夜)~1.0(白天)。
 
-    分段线性（断点见模块顶部注释，对照 Stellarium
-    ``MilkyWay.cpp:350`` 的 cd/m² 经验值）：
+    分段线性（断点见模块顶部注释，依据全天空平均亮度随太阳高度的经验值）：
       - sun <= -18°        → 0.0（天文夜）
       - -18° < sun <= -12° → 0 → 0.002
       - -12° < sun <= -6°  → 0.002 → 0.33
@@ -253,11 +232,7 @@ def sky_brightness_factor(sun_alt_deg: float) -> float:
 
 
 def is_night(sun_alt_deg: float) -> bool:
-    """是否为"夜"（太阳低于民用晨昏 -6°）。
-
-    对照 Stellarium StelCore.hpp:372："true if sun higher than about -6 degrees,
-    i.e. 'day' includes civil twilight" —— 即低于 -6° 为夜。
-    """
+    """是否为"夜"（太阳低于民用晨昏 -6°；即"白天"含民用晨昏段）。"""
     return sun_alt_deg < CIVIL_TWILIGHT_ALT_DEG
 
 

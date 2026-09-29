@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """mimo_v2.py 确定性测试：多设备管理 / 同步调谐 / 相位相干测量。
 
 红线验证：无设备时返回空、不造假 IQ。

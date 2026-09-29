@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 VFO 音频路由增强（VFO Mute Mutex / Primary Listen Priority）
 ===============================================================

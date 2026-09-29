@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
 """
 RTL-SDR 一键 FM 广播接收（MBDSDR）
 ==================================

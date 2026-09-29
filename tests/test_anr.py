@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """ANR (IQ 域) 确定性测试。
 
 对照 mbdsdr_ai/anr_iq.py。

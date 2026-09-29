@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """FT8 解码优化 + 模式默认参数表 + 书签区间查询基准测试。
 
 对标 WSJT-X / OpenWebRX 的工程结论，验证 MBDSDR 内核落地的六项改动：

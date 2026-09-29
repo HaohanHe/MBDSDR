@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 mbdsdr_ai/channel_analyzer.py — 信道分析器
 =============================================

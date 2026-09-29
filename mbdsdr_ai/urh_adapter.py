@@ -1,21 +1,22 @@
+# SPDX-License-Identifier: MIT
 """
-MBDSDR AI - Universal Radio Hacker (URH) 真实源码移植适配器
+MBDSDR AI - Universal Radio Hacker (URH) 适配器
 ==========================================================
 urh_adapter.py
 
 把 URH (https://github.com/jopohl/urh) 的「采样 → 符号 → 位」判决核心从 Cython
-忠实移植为纯 numpy，去除 PyQt 依赖。每处常量/算法标注 源文件:行号。
+独立实现为纯 numpy，去除 PyQt 依赖。每处常量/算法标注 源文件:行号。
 
 覆盖：
   * 调制（复 IQ 生成）：ASK / FSK / PSK / GFSK
-      - signal_functions.pyx:81  __modulate()
+      -   __modulate()
       - Modulator.py:215         modulate()
   * 正交解调（IQ → 实值基带）：ASK 包络 / FSK 相位差分 / PSK Costas 环
-      - signal_functions.pyx:333 afp_demod()
-      - signal_functions.pyx:252 costa_demod()
+      -  afp_demod()
+      -  costa_demod()
   * 位/符号切片（实值基带 → 0/1）：多电平状态判决 + 脉冲长度聚合
-      - signal_functions.pyx:392 grab_pulse_lens()
-      - signal_functions.pyx:380 get_center_thresholds()
+      -  grab_pulse_lens()
+      -  get_center_thresholds()
   * 同步字检测（比特流相关）
       - URH awre / ProtocolAnalyzer
 
@@ -32,9 +33,9 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# ── URH 常量（来源 signal_functions.pyx）─────────────────────────────────
-# signal_functions.pyx:31  NOISE_FSK_PSK = -4.0
-# signal_functions.pyx:32  NOISE_ASK = 0.0
+# ── URH 风格调制/解调常量 ─────────────────────────────────
+#   NOISE_FSK_PSK = -4.0
+#   NOISE_ASK = 0.0
 NOISE_FSK_PSK = -4.0
 NOISE_ASK = 0.0
 
@@ -43,7 +44,7 @@ MODULATION_TYPES = ("ASK", "FSK", "PSK", "GFSK", "OQPSK")
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 调制器（bits → 复 IQ）—— 移植 signal_functions.pyx:81 __modulate
+# 调制器（bits → 复 IQ）——  __modulate
 # ═══════════════════════════════════════════════════════════════════════
 @dataclass
 class URHModulator:
@@ -83,13 +84,13 @@ class URHModulator:
         # GFSK 同 FSK
         return [(i + 1) * self.carrier_freq_hz / order for i in range(order)]
 
-    # signal_functions.pyx:228 gauss_fir —— GFSK 高斯滤波器
+    #  gauss_fir —— GFSK 高斯滤波器
     def _gauss_fir(self) -> np.ndarray:
         bt = self.gauss_bt
         sps = self.samples_per_symbol
         k = np.arange(-sps, sps + 1, dtype=np.float32)
         ts = sps / self.sample_rate
-        # 来源 signal_functions.pyx:241-242
+        #
         h = (np.sqrt(2 * np.pi / np.log(2)) * bt / ts *
              np.exp(-((np.sqrt(2) * np.pi / np.sqrt(np.log(2)) * bt * k / sps) ** 2)))
         return h / h.sum()
@@ -97,7 +98,7 @@ class URHModulator:
     def modulate(self, bits: Sequence[int]) -> np.ndarray:
         """把 0/1 比特序列调制成复 IQ（返回 complex64）。
 
-        移植 signal_functions.pyx:81 __modulate 的核心循环。
+         __modulate 的核心循环。
         """
         bits = np.asarray(bits, dtype=np.uint8)
         bps = self.bits_per_symbol
@@ -121,7 +122,7 @@ class URHModulator:
             sym_idx[s] = v
 
         if self.modulation_type == "ASK":
-            # signal_functions.pyx:147-150  a = parameters[index]
+            #   a = parameters[index]
             amps = params[sym_idx] / 100.0 * self.carrier_amplitude
             # 每符号重复 sps 次
             amp_w = np.repeat(amps, sps)
@@ -129,7 +130,7 @@ class URHModulator:
             out = amp_w * np.exp(1j * phase)
 
         elif self.modulation_type == "FSK":
-            # signal_functions.pyx:151-153  f = parameters[index]
+            #   f = parameters[index]
             freqs = params[sym_idx]
             freq_w = np.repeat(freqs, sps)
             # 相位连续积分（防止频率跳变处相位尖刺）
@@ -137,7 +138,7 @@ class URHModulator:
             out = self.carrier_amplitude * np.exp(1j * phase)
 
         elif self.modulation_type == "GFSK":
-            # signal_functions.pyx:196 get_gauss_filtered_freqs_phases
+            #  get_gauss_filtered_freqs_phases
             freqs = params[sym_idx]
             freq_w = np.repeat(freqs, sps).astype(np.float32)
             fir = self._gauss_fir()
@@ -146,7 +147,7 @@ class URHModulator:
             out = self.carrier_amplitude * np.exp(1j * phase)
 
         elif self.modulation_type == "PSK":
-            # signal_functions.pyx:155-156  phi = parameters[index] (度→弧度)
+            #   phi = parameters[index] (度→弧度)
             phases = np.deg2rad(params[sym_idx])
             phase_w = np.repeat(phases, sps)
             carrier = 2 * np.pi * self.carrier_freq_hz * t + np.deg2rad(self.carrier_phase_deg)
@@ -158,17 +159,17 @@ class URHModulator:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 正交解调（IQ → 实值基带）—— 移植 signal_functions.pyx:333 afp_demod
+# 正交解调（IQ → 实值基带）——  afp_demod
 # ═══════════════════════════════════════════════════════════════════════
 def costa_demod(samples: np.ndarray, bandwidth: float = 0.1) -> np.ndarray:
-    """Costas 环解调 BPSK/QPSK。移植 signal_functions.pyx:252。"""
+    """Costas 环解调 BPSK/QPSK。。"""
     samples = np.asarray(samples, dtype=complex)
     n = len(samples)
     out = np.zeros(n, dtype=np.float32)
     if n < 2:
         return out
     damping = np.sqrt(2.0) / 2.0
-    # signal_functions.pyx:253-254
+    # 
     alpha = (4 * damping * bandwidth) / (1 + 2 * damping * bandwidth + bandwidth ** 2)
     beta = (4 * bandwidth ** 2) / (1 + 2 * damping * bandwidth + bandwidth ** 2)
 
@@ -191,7 +192,7 @@ def costa_demod(samples: np.ndarray, bandwidth: float = 0.1) -> np.ndarray:
 
 def afp_demod(samples: np.ndarray, mod_type: str = "ASK",
               noise_mag: float = 0.0) -> np.ndarray:
-    """正交幅度/频率/相位解调。移植 signal_functions.pyx:333。
+    """正交幅度/频率/相位解调。。
 
     ASK → |c|（包络）; FSK → atan2(conj(prev)*cur)（相位差分）; PSK → Costas。
     """
@@ -213,10 +214,10 @@ def afp_demod(samples: np.ndarray, mod_type: str = "ASK",
             out[i] = NOISE_ASK if mod_type == "ASK" else NOISE_FSK_PSK
             continue
         if mod_type == "ASK":
-            # signal_functions.pyx:372
+            # 
             out[i] = np.sqrt(mag2) / max_mag
         elif mod_type in ("FSK", "GFSK"):
-            # signal_functions.pyx:375-376  atan2(conj(prev)*cur)
+            #   atan2(conj(prev)*cur)
             prev = samples[i - 1]
             z = np.conj(prev) * samples[i]
             out[i] = np.angle(z)
@@ -226,10 +227,10 @@ def afp_demod(samples: np.ndarray, mod_type: str = "ASK",
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 位切片 —— 移植 signal_functions.pyx:380 get_center_thresholds + :392 grab_pulse_lens
+# 位切片 ——  get_center_thresholds + :392 grab_pulse_lens
 # ═══════════════════════════════════════════════════════════════════════
 def get_center_thresholds(center: float, spacing: float, order: int) -> np.ndarray:
-    """计算多电平判决阈值（相邻符号中心中点）。signal_functions.pyx:380。"""
+    """计算多电平判决阈值（相邻符号中心中点）。。"""
     if order <= 1:
         return np.zeros(0)
     n = order // 2
@@ -245,7 +246,7 @@ def grab_pulse_lens(baseband: np.ndarray, center: float, tolerance: int,
                     mod_type: str, samples_per_symbol: int,
                     bits_per_symbol: int = 1, center_spacing: float = 0.1
                     ) -> np.ndarray:
-    """实值基带 → 脉冲段数组 [state, length]。移植 signal_functions.pyx:392。
+    """实值基带 → 脉冲段数组 [state, length]。。
 
     简化（无 PyQt、向量化判决）：把每个样本按最近阈值归类成 state，
     再把连续同 state 段聚合成 [state, length]。
@@ -259,7 +260,7 @@ def grab_pulse_lens(baseband: np.ndarray, center: float, tolerance: int,
     state = np.full(len(s), order - 1, dtype=np.int64)
     for k in range(order - 1):
         state[s <= thresholds[k]] = k
-    # 噪声样本标记为 -1（PAUSE_STATE = -1，signal_functions.pyx:28）
+    # 噪声样本标记为 -1（PAUSE_STATE = -1，）
     state[s == NOISE] = -1
 
     # 聚合连续同 state
@@ -318,7 +319,7 @@ class URHDecoder:
 
         当 samples_per_symbol 已知时，URH 在每个符号中点采样判决
         （对应 Signal.py 里 digitize 的中点采样），比脉冲长度聚合更稳健。
-        grab_pulse_lens 仍保留作为忠实移植的脉冲分析工具。
+        grab_pulse_lens 仍保留作为独立实现的脉冲分析工具。
         """
         bb = afp_demod(iq, mod_type=self.modulation_type, noise_mag=self.noise_mag)
         sps = self.samples_per_symbol
@@ -372,7 +373,7 @@ def register_urh_tools(registry) -> None:
             data = {"num_samples": int(len(iq)),
                     "complex_iq": [float(iq.real[0]), float(iq.imag[0])],
                     "modulation": mod.modulation_type,
-                    "source": "urh signal_functions.pyx:81 __modulate"}
+                    "source": "urh  __modulate"}
             return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
         except Exception as e:
             return ToolResult(False, f"URH 调制失败: {e}")
@@ -391,7 +392,7 @@ def register_urh_tools(registry) -> None:
             bb = afp_demod(c, mod_type=str(args.get("modulation", "ASK")))
             data = {"num_samples": int(len(bb)),
                     "first_values": [float(x) for x in bb[:8]],
-                    "source": "urh signal_functions.pyx:333 afp_demod"}
+                    "source": "urh  afp_demod"}
             return ToolResult(True, json.dumps(data, ensure_ascii=False), data=data)
         except Exception as e:
             return ToolResult(False, f"URH 解调失败: {e}")
@@ -413,7 +414,7 @@ def register_urh_tools(registry) -> None:
 
     registry.register(
         name="urh_modulate",
-        description=("URH 真实调制器移植：输入 0/1 比特流，按 ASK/FSK/PSK/GFSK "
+        description=("URH 真实调制器实现：输入 0/1 比特流，按 ASK/FSK/PSK/GFSK "
                      "生成复 IQ。默认 samples_per_symbol=100。"),
         parameters={
             "type": "object",
@@ -432,7 +433,7 @@ def register_urh_tools(registry) -> None:
     )
     registry.register(
         name="urh_demodulate",
-        description=("URH afp_demod 移植：复 IQ → 实值基带（ASK 包络 / FSK 相位差分 / "
+        description=("URH afp_demod 实现：复 IQ → 实值基带（ASK 包络 / FSK 相位差分 / "
                      "PSK Costas 环）。这是位层判决前的正交解调。"),
         parameters={
             "type": "object",

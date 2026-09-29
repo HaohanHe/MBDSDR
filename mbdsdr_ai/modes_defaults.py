@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 模式默认接收带宽表（modes defaults）
 ====================================

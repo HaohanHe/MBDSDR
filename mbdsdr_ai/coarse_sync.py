@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """粗同步：Costas 载波恢复 + Gardner 定时恢复。
 
 上游对照（docs/learn/porting_2026_09_27.md §1）：

@@ -1,7 +1,8 @@
+# SPDX-License-Identifier: MIT
 """
-gpredict 真实移植验证测试
+gpredict SGP4 轨道预测验证测试
 ==========================
-对照 repos/gpredict/src/sgpsdp/ 真实 C 源码移植的 mbdsdr_ai/gpredict_adapter.py。
+验证 mbdsdr_ai/gpredict_adapter.py 的 SGP4/TLE/观测几何实现。
 
 验证项：
   1. TLE 解析：已知 ISS TLE -> 正确倾角/偏心率/平均运动/校验和
@@ -20,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from mbdsdr_ai import gpredict_adapter as G  # noqa: E402
 
-# 经典 Vallado ISS 测试 TLE（2008-264 epoch）。校验位已按 sgp_in.c:52-77 重算为合法。
+# 经典 Vallado ISS 测试 TLE（2008-264 epoch）。校验位已按  重算为合法。
 ISS_NAME = "ISS (ZARYA)"
 ISS_L1 = ("1 25544U 98067A   08264.51780074  .00016553  00000-0  10270-3 0  2897"
           ).ljust(69)
@@ -30,7 +31,7 @@ ISS_L2 = ("2 25544  51.6400 247.4627 0006703 130.5360 325.0288 15.72125391563530
 
 # ---------------------------------------------------------------------
 def test_tle_parse_iss():
-    """TLE 解析：ISS TLE 各根数与标称值一致。来源: sgp_in.c:110-230"""
+    """TLE 解析：ISS TLE 各根数与标称值一致。"""
     t = G.TLEParser.parse(ISS_NAME, ISS_L1, ISS_L2)
     assert t.catnr == 25544
     assert t.epoch_year == 2008
@@ -54,7 +55,7 @@ def test_tle_parse_iss():
 
 
 def test_tle_checksum():
-    """校验和验证：正确行通过，改错最后一位应失败。来源: sgp_in.c:52-77"""
+    """校验和验证：正确行通过，改错最后一位应失败。"""
     assert G.TLEParser.checksum_good(ISS_L1) is True
     assert G.TLEParser.checksum_good(ISS_L2) is True
     bad = ISS_L1[:68] + ("0" if ISS_L1[68] != "0" else "1")
@@ -64,7 +65,7 @@ def test_tle_checksum():
 def test_sgp4_propagate_matches_reference():
     """SGP4 传播：与 sgp4 参考库对比，ECI 位置误差在工程容差内。
 
-    本移植逐行对照 sgp4sdp4.c:SGP4。残差 1-2.5km 来自 gpredict 老常数表
+    对照独立 sgp4 参考实现；残差 1-2.5km 来自 SGP4 老常数表
     (xke=0.0743669161 截断值) 与 Vallado 精化常数 (0.074366916133...) 的末位差异，
     对应天球方位角误差 <0.02°（见 test_coordinate_az_el）。
     """
@@ -98,7 +99,7 @@ def test_sgp4_velocity_reasonable():
 def test_coordinate_az_el():
     """坐标转换：ECI->站心方位/仰角，与独立 ENU 法交叉验证 dAz<0.05°。
 
-    来源: sgp_obs.c:86-140 Calculate_Obs。
+    ECI->站心观测几何。
     """
     sgp4 = pytest.importorskip("sgp4")
     from sgp4.api import Satrec
@@ -135,7 +136,7 @@ def test_coordinate_az_el():
 def test_pass_prediction_reasonable():
     """过境预测：北京站未来24h 应有若干 LEO 过境，仰角/时长合理。
 
-    来源: sat-pass 扫描 AOS/LOS 逻辑。
+    过境 AOS/LOS 扫描逻辑。
     """
     t = G.TLEParser.parse(ISS_NAME, ISS_L1, ISS_L2)
     st = G.GeoStation(39.9, 116.4, 0.0)
@@ -157,7 +158,7 @@ def test_doppler_shift():
 
     构造已知视线速度：range_rate=+7.5 km/s 远离，145.9MHz 频移应≈-3640 Hz。
     """
-    # 直接构造 Observation 验证公式（来源: sgp_obs.c:126 range_rate）
+    # 直接构造 Observation 验证视线速度多普勒公式
     ob = G.Observation(az_deg=90.0, el_deg=30.0, range_km=500.0,
                        range_rate_kms=7.5)  # 远离
     f_src = 145.9e6
@@ -178,7 +179,7 @@ def test_doppler_approaching_positive():
 
 
 def test_geostationary_unreachable_note():
-    """深空(周期>=225min)卫星应抛 NotImplementedError（本移植当前 SGP4/LEO）。"""
+    """深空(周期>=225min)卫星应抛 NotImplementedError（当前仅覆盖 SGP4/LEO）。"""
     t = G.TLEParser.parse(ISS_NAME, ISS_L1, ISS_L2)
     t.deep_space = True
     with pytest.raises(NotImplementedError):

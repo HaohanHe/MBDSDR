@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 """
 MBDSDR 实时星座图面板（desktop/constellation_panel.py）
 =======================================================
