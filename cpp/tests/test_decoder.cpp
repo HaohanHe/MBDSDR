@@ -4,6 +4,7 @@
 #include <complex>
 #include <cmath>
 #include <cstring>
+#include <random>
 
 #include "dsp/cw_decoder.h"
 #include "dsp/adsb_decoder.h"
@@ -15,6 +16,9 @@ class TestDecoder : public QObject {
 private slots:
     void testCwDecodeSimple();
     void testCwDecodeFull();
+    void testCwDecodeSpeed12Wpm();
+    void testCwDecodeSpeed25Wpm();
+    void testCwDecodeNoisy();
     void testAdsbCrc();
     void testAdsbCallsign();
 };
@@ -66,6 +70,53 @@ void TestDecoder::testCwDecodeFull() {
     dec.feed(audio);
     QString text = dec.takeText();
     QVERIFY2(text.contains("SOS"), qPrintable("got: " + text));
+}
+
+// Morse for "CQ DE MBDSDR": C=-.-. Q=--.- (word) D=-.. E=. (word)
+// M=-- B=-... D=-.. S=... D=-.. R=.-.
+static const char* kCqMbdsdr = "-.-.|--.- |-..|. |--|-...|-..|...|-..|.-.";
+
+void TestDecoder::testCwDecodeSpeed12Wpm() {
+    CWDecoder dec;
+    dec.setSampleRate(48000);
+    // 12 WPM  =>  unit = 1200/12 = 100 ms
+    auto audio = makeCwAudio(kCqMbdsdr, 48000, 100.0);
+    dec.feed(audio);
+    QString text = dec.takeText();
+    QVERIFY2(text.contains("CQ"), qPrintable("got: " + text));
+    QVERIFY2(text.contains("DE"), qPrintable("got: " + text));
+    QVERIFY2(text.contains("MBDSDR"), qPrintable("got: " + text));
+    double w = dec.wpm();
+    QVERIFY2(w > 9.0 && w < 15.0, qPrintable(QString("wpm=%1").arg(w)));
+}
+
+void TestDecoder::testCwDecodeSpeed25Wpm() {
+    CWDecoder dec;
+    dec.setSampleRate(48000);
+    // 25 WPM  =>  unit = 1200/25 = 48 ms
+    auto audio = makeCwAudio(kCqMbdsdr, 48000, 48.0);
+    dec.feed(audio);
+    QString text = dec.takeText();
+    QVERIFY2(text.contains("CQ"), qPrintable("got: " + text));
+    QVERIFY2(text.contains("DE"), qPrintable("got: " + text));
+    QVERIFY2(text.contains("MBDSDR"), qPrintable("got: " + text));
+    double w = dec.wpm();
+    QVERIFY2(w > 22.0 && w < 28.0, qPrintable(QString("wpm=%1").arg(w)));
+}
+
+void TestDecoder::testCwDecodeNoisy() {
+    CWDecoder dec;
+    dec.setSampleRate(48000);
+    auto audio = makeCwAudio("...|---|...", 48000, 60.0);
+    // Add moderate white noise; the bandpass + adaptive threshold should
+    // still recover the short "SOS" string.
+    std::mt19937 rng(20260929u);
+    std::uniform_real_distribution<float> noise(-0.2f, 0.2f);
+    for (auto& v : audio) v += noise(rng);
+    dec.feed(audio);
+    QString text = dec.takeText();
+    QVERIFY2(text.contains("S"), qPrintable("got: " + text));
+    QVERIFY2(text.contains("O"), qPrintable("got: " + text));
 }
 
 void TestDecoder::testAdsbCrc() {

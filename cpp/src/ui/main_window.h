@@ -54,6 +54,10 @@ private slots:
     void onRecordClicked();
     void onCwDecoded(const QString& text, double wpm);
     void onAdsbAircraft(const dsp::AircraftInfo& info);
+    // RDS status strip: locked=true shows "RDS: <PS> · PTY <n> · <RT>";
+    // locked=false clears the label to empty (never a placeholder station).
+    void onRdsUpdated(const QString& programService, int pty,
+                      const QString& radioText, bool locked);
     void saveSettings();   // immediate persistence (writes QSettings)
     void scheduleSave();   // debounced persistence: arms the 500 ms save timer
     void onPassesReady(QList<dsp::SatPass> passes);
@@ -192,6 +196,7 @@ private:
     QLabel*         sbMode_ = nullptr;
     QLabel*         sbSr_   = nullptr;
     QLabel*         sbVfo_  = nullptr;
+    QLabel*         sbRds_  = nullptr;   // RDS PS/PTY/RadioText; empty until real data
     QLabel*         sbSdr_  = nullptr;
     QLabel*         sbGain_ = nullptr;
     QLabel*         sbRec_  = nullptr;

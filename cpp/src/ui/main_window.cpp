@@ -28,6 +28,7 @@
 #include <QDateTime>
 #include <QTimer>
 #include <QDialog>
+#include <QFontMetrics>
 #include <QFormLayout>
 #include <QDir>
 #include <QFileInfo>
@@ -665,11 +666,12 @@ MainWindow::MainWindow(QWidget* parent)
     sbMode_ = new QLabel("--", this);
     sbSr_   = new QLabel("--", this);
     sbVfo_  = new QLabel("--", this);
+    sbRds_  = new QLabel("", this);
     sbGain_ = new QLabel("--", this);
     sbSdr_  = new QLabel("Test Signal", this);
     sbRec_  = new QLabel("", this);
     sbRec_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kDanger));
-    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbGain_, sbSdr_, sbRec_}) {
+    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbRec_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
     }
@@ -703,6 +705,8 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onCwDecoded);
     connect(engine_, &dsp::SpectrumEngine::adsbAircraft,
             this, &MainWindow::onAdsbAircraft);
+    connect(engine_, &dsp::SpectrumEngine::rdsUpdated,
+            this, &MainWindow::onRdsUpdated);
     connect(spectrum_, &ui::SpectrumWidget::fftSizeRequested,
             engine_, &dsp::SpectrumEngine::setFftSize);
     connect(spectrum_, &ui::SpectrumWidget::windowTypeRequested,
@@ -1648,6 +1652,32 @@ void MainWindow::onCwDecoded(const QString& text, double wpm) {
     if (cwEmpty_) cwEmpty_->hide();
     cwText_->appendPlainText(text);
     cwWpm_->setText(QString("WPM: %1").arg(wpm, 0, 'f', 1));
+}
+
+void MainWindow::onRdsUpdated(const QString& ps, int pty,
+                              const QString& rt, bool locked) {
+    if (!sbRds_) return;
+    // Honest-data rule: no CRC-verified groups -> label stays EMPTY. We never
+    // invent a station name, and switching to a non-WFM mode simply stops
+    // emitting (the last real RDS readout stays sticky, like a real car radio).
+    if (!locked) {
+        sbRds_->setText("");
+        sbRds_->setToolTip("");
+        return;
+    }
+    const QString name   = ps.trimmed();
+    const QString rtText = rt.trimmed();
+    if (name.isEmpty() && rtText.isEmpty()) {
+        sbRds_->setText("");
+        sbRds_->setToolTip("");
+        return;
+    }
+    QString line = QString("RDS: %1 · PTY %2").arg(name).arg(pty);
+    if (!rtText.isEmpty()) line += QString(" · %1").arg(rtText);
+    // Long RadioText is elided in the strip; the full text goes to the tooltip.
+    const QFontMetrics fm(sbRds_->font());
+    sbRds_->setText(fm.elidedText(line, Qt::ElideRight, tokens::scaled(260)));
+    sbRds_->setToolTip(rtText.isEmpty() ? name : rtText);
 }
 
 void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {

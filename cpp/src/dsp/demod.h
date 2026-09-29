@@ -71,6 +71,13 @@ public:
     void reset() override;
     QString name() const override { return QStringLiteral("WFM"); }
     double outputSampleRate() const override { return ifSr_; }
+
+    // De-emphasized MPX baseband from the LAST process() call: the stream
+    // AFTER the 50 us de-emphasis one-pole but BEFORE the 15 kHz audio LPF,
+    // so the 57 kHz RDS subcarrier is still present. Same length as the audio
+    // returned by process(). The audio output itself is unchanged sample by
+    // sample; this is a tap only.
+    const std::vector<float>& mpxOut() const { return mpxBuf_; }
 private:
     double ifSr_, bw_;
     float gain_;
@@ -78,6 +85,7 @@ private:
     float deState_ = 0;
     float audioLpState_ = 0;
     std::complex<float> prev_ = {1,0};
+    std::vector<float> mpxBuf_;
 };
 
 // ---- SSB: BFO shift + real part + LPF ----

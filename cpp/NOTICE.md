@@ -65,3 +65,21 @@ GUI 上在瀑布/频谱为每个 VFO 绘制半透明带宽框。对应的 SDR++ 
 > （见上方 SDR++ 章节）仍以 GPL-3.0-or-later 分发，与本节无关；本文件不改变根目录
 > `LICENSE` 中 MBDSDR 自有代码的 MIT 许可声明。
 
+## FM RDS 数据链路解码器（本批新增模块）
+
+- 标准依据：ETSI EN 300 401 *Radio Data System (RDS)*。
+- 版权参考（仅算法与常数参考，**未复制其代码**）：
+  - `repos/gqrx/`（GPLv3+）：`src/dsp/rds/constants.h`（offset word / syndrome 常数表）、
+    `decoder_impl.cc`（块同步与 CRC 状态机）、`parser_impl.cc`（Block B 字段位段布局）。
+  - `repos/redsea/`（ISC）：`src/dsp/subcarrier.cc`（57 kHz 混频、低通、biphase/NRZ-I
+    符号恢复的数据流思路）。
+- 实现文件 `src/dsp/rds_decoder.{h,cpp}` 为 MBDSDR 原创实现（SPDX: MIT），
+  按 EN 300 401 标准干净重写：57 kHz 数字混频 + 低通、2375 sym/s biphase 差分译码、
+  26bit 块滑动同步（生成多项式 G(x)=x^10+x^8+x^7+x^5+x^4+x^3+1，poly 0x5B9）、
+  0A 节目名（PS）/ PTY / 2A 无线电文本（RT）解析。未逐行移植 gqrx 或 redsea 的
+  C++ 源码；常数（offset word {252,408,360,436,848}、对应 syndrome {383,14,303,663,748}）
+  与位段位置均对照上述只读参考文件核对，并以 `tests/test_rds.cpp` 内的参考编码器做
+  端到端已知向量钉死。
+- 本轮未实现（代码内留 TODO）：type 4 时钟（CT）、type 8 TMC、0B/2B 组版本回退。
+
+

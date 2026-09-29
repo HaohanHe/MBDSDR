@@ -79,6 +79,7 @@ set(SOURCES
     src/dsp/gated_recorder.cpp
     src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp
+    src/dsp/rds_decoder.cpp
     src/dsp/tle_client.cpp
     src/dsp/sgp4.cpp
     src/gnss/serial_transport.cpp
@@ -209,7 +210,7 @@ add_executable(test_engine_integration tests/test_engine_integration.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_engine_integration PRIVATE src)
 target_link_libraries(test_engine_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
@@ -222,7 +223,7 @@ add_executable(test_audio_sink tests/test_audio_sink.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_audio_sink PRIVATE src)
 target_link_libraries(test_audio_sink PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
@@ -265,7 +266,7 @@ add_executable(test_wav_roundtrip tests/test_wav_roundtrip.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_wav_roundtrip PRIVATE src)
 target_link_libraries(test_wav_roundtrip PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
@@ -276,7 +277,7 @@ add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
-    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp
+    src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/agent.cpp src/ai/agent_tools.cpp src/ai/ai_config.cpp)
 target_include_directories(test_ai_function_calling PRIVATE src)
@@ -364,7 +365,7 @@ add_test(NAME recorder COMMAND test_recorder)
 # Multi-VFO fan-out: two synthesized carriers decoded independently.
 add_executable(test_multi_vfo tests/test_multi_vfo.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
-    src/dsp/demod.cpp)
+    src/dsp/demod.cpp src/dsp/rds_decoder.cpp)
 target_include_directories(test_multi_vfo PRIVATE src)
 target_link_libraries(test_multi_vfo PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME multi_vfo COMMAND test_multi_vfo)
@@ -400,6 +401,7 @@ add_test(NAME constellation_view COMMAND test_constellation_view)
 add_executable(test_digital_e2e tests/test_digital_e2e.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp
+    src/dsp/rds_decoder.cpp
     src/dsp/test_signal.cpp src/dsp/noise_blanker.cpp src/dsp/iq_frontend.cpp)
 target_include_directories(test_digital_e2e PRIVATE src)
 target_link_libraries(test_digital_e2e PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
@@ -411,6 +413,20 @@ target_include_directories(test_decoder PRIVATE src)
 target_link_libraries(test_decoder PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME decoder COMMAND test_decoder)
 
+# RDS (EN 300 401) offline data-link decoder: reference encoder -> MPX -> decode.
+add_executable(test_rds tests/test_rds.cpp
+    src/dsp/rds_decoder.cpp src/dsp/demod.cpp)
+target_include_directories(test_rds PRIVATE src)
+target_link_libraries(test_rds PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME rds COMMAND test_rds)
+
+# RDS end-to-end: synthesized FM IQ -> DemodWFM MPX tap -> RdsDecoder.
+add_executable(test_rds_chain tests/test_rds_chain.cpp
+    src/dsp/rds_decoder.cpp src/dsp/demod.cpp)
+target_include_directories(test_rds_chain PRIVATE src)
+target_link_libraries(test_rds_chain PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME rds_chain COMMAND test_rds_chain)
+
 add_executable(test_agent tests/test_agent.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
     src/ai/agent_tools.cpp src/ai/agent.cpp src/dsp/spectrum_engine.cpp
@@ -420,7 +436,7 @@ add_executable(test_agent tests/test_agent.cpp
     src/dsp/demod.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
     src/dsp/qt_audio_sink.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/cw_decoder.cpp
-    src/dsp/adsb_decoder.cpp src/dsp/fft.cpp src/dsp/power_spectrum.cpp
+    src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/fft.cpp src/dsp/power_spectrum.cpp
     src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
 target_include_directories(test_agent PRIVATE src)
 target_link_libraries(test_agent PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
