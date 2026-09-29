@@ -971,6 +971,17 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onRssiLevel);
     connect(engine_, &dsp::SpectrumEngine::snrLevel,
             this, &MainWindow::onSnrLevel);
+    // Real noise floor -> the spectrum canvas baseline. The engine tracks the
+    // floor in the total-power (RSSI) domain; the canvas dB axis is per-bin
+    // dBFS, so undo the Parseval scaling exactly (median_bin = total −
+    // 10·log10(N)) -- the baseline then sits on the visible noise band.
+    connect(engine_, &dsp::SpectrumEngine::noiseFloorLevel,
+            this, [this](float totalDb) {
+        const int n = engine_ ? engine_->fftSize() : 2048;
+        const float perBinDb = totalDb
+            - 10.0f * std::log10(static_cast<float>(n));
+        if (spectrum_) spectrum_->setNoiseFloorDb(perBinDb);
+    });
     connect(engine_, &dsp::SpectrumEngine::sourceTelemetry,
             this, &MainWindow::onSourceTelemetry);
     connect(engine_, &dsp::SpectrumEngine::squelchState,
