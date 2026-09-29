@@ -520,8 +520,8 @@ MainWindow::MainWindow(QWidget* parent)
     tleBadge_ = new QLabel(skyPage);
     tleBadge_->setObjectName("dockHint");
     skyLay->addWidget(tleBadge_);
-    passTable_ = new QTableWidget(0, 5, skyPage);
-    passTable_->setHorizontalHeaderLabels({"卫星", "AOS", "最大仰角", "LOS", "距今"});
+    passTable_ = new QTableWidget(0, 6, skyPage);
+    passTable_->setHorizontalHeaderLabels({"卫星", "AOS", "LOS", "最大仰角", "预测多普勒", "距今"});
     passTable_->horizontalHeader()->setStretchLastSection(true);
     passTable_->horizontalHeader()->setSectionsClickable(true);
     passTable_->setSortingEnabled(true);
@@ -1827,13 +1827,18 @@ void MainWindow::refetchTle() {
     const qint64 ageSec = cache.valid
         ? cache.fetchedAt.secsTo(QDateTime::currentDateTimeUtc()) : -1;
     if (cache.valid && ageSec >= 0 && ageSec < 48 * 3600) {
+        usingBuiltinTle_ = false;
         tleClient_->computeFromEntries(cache.entries, stationLat_, stationLon_);
         tleClient_->fetch(stationLat_, stationLon_);   // background refresh
     } else {
+        // No fresh cache: show the built-in offline SGP4 verification snapshot
+        // immediately so the sky is never empty, then try to refresh from the
+        // network in the background.  We never present the 2006-era offline
+        // elements as fresh data -- the badge below says so explicitly.
+        usingBuiltinTle_ = true;
+        tleClient_->computeFromEntries(dsp::TleClient::builtinTle(),
+                                       stationLat_, stationLon_);
         tleFetchActive_ = true;
-        skyEmptyLabel_->setText("正在拉取 TLE...");
-        skyEmptyLabel_->show();
-        passTable_->setRowCount(0);
         tleClient_->fetch(stationLat_, stationLon_);
     }
 }
@@ -1858,9 +1863,18 @@ void MainWindow::onTleFetchFailed(const QString& reason) {
     // rather than dropping to an empty sky.
     dsp::TleCache cache = tleClient_->cachedTle();
     if (cache.valid && !cache.entries.isEmpty()) {
+        usingBuiltinTle_ = false;   // we have real (cached) elements now
         tleClient_->computeFromEntries(cache.entries, stationLat_, stationLon_);
         statusBar()->showMessage("TLE 已过期（缓存时间 " +
             cache.fetchedAt.toLocalTime().toString("MM-dd HH:mm") + "）：" + reason);
+        return;
+    }
+    // No cache at all.  If we already populated the table from the built-in
+    // offline snapshot, keep it and report the network failure honestly instead
+    // of wiping the sky to an empty state.
+    if (usingBuiltinTle_ && !passes_.isEmpty()) {
+        updateTleBadge();
+        statusBar()->showMessage("在线 TLE 拉取失败，当前为内置离线星历（可能已过期）：" + reason);
         return;
     }
     passes_.clear();
@@ -1911,22 +1925,36 @@ void MainWindow::fillPassTable() {
         aosItem->setData(Qt::UserRole, p.aos.toMSecsSinceEpoch());
         passTable_->setItem(row, 1, aosItem);
 
+        auto* losItem = new QTableWidgetItem(p.los.toLocalTime().toString("MM-dd HH:mm"));
+        losItem->setData(Qt::UserRole, p.los.toMSecsSinceEpoch());
+        passTable_->setItem(row, 2, losItem);
+
         auto* elItem = new QTableWidgetItem(
             QString::number(p.maxEl, 'f', 1) + QStringLiteral("°"));
         elItem->setData(Qt::UserRole, p.maxEl);
-        passTable_->setItem(row, 2, elItem);
+        passTable_->setItem(row, 3, elItem);
 
-        auto* losItem = new QTableWidgetItem(p.los.toLocalTime().toString("MM-dd HH:mm"));
-        losItem->setData(Qt::UserRole, p.los.toMSecsSinceEpoch());
-        passTable_->setItem(row, 3, losItem);
+        // Predicted receive Doppler at peak elevation, for the nominal downlink.
+        // Unknown carrier (f0==0) => honest em-dash, never a guessed number.
+        QString dopText = QStringLiteral("—");
+        if (p.f0DownlinkHz > 0.0) {
+            double kHz = p.dopplerAtPeakHz / 1000.0;
+            dopText = (kHz >= 0.0 ? QStringLiteral("+") : QStringLiteral("-"))
+                    + QString::number(std::fabs(kHz), 'f', 1)
+                    + QStringLiteral(" kHz");
+        }
+        auto* dopItem = new QTableWidgetItem(dopText);
+        dopItem->setData(Qt::TextAlignmentRole, Qt::AlignCenter);
+        dopItem->setData(Qt::UserRole, p.dopplerAtPeakHz);
+        passTable_->setItem(row, 4, dopItem);
 
         auto* cdItem = new QTableWidgetItem(countdownText(p, now));
         cdItem->setData(Qt::UserRole, now.secsTo(p.aos));
-        passTable_->setItem(row, 4, cdItem);
+        passTable_->setItem(row, 5, cdItem);
 
         if (active) {
             QBrush hi(QColor(tokens::kSuccess));
-            for (int c = 0; c < 5; ++c)
+            for (int c = 0; c < 6; ++c)
                 passTable_->item(row, c)->setBackground(hi);
         }
         if (!wanted.isEmpty() && p.name == wanted && wantedRow < 0) wantedRow = row;
@@ -1963,7 +1991,7 @@ void MainWindow::refreshCountdowns() {
         if (!idxItem) continue;
         int i = idxItem->data(Qt::UserRole).toInt();
         if (i < 0 || i >= passes_.size()) continue;
-        passTable_->item(row, 4)->setText(countdownText(passes_[i], now));
+        passTable_->item(row, 5)->setText(countdownText(passes_[i], now));
     }
     // Quiet pre-AOS reminder for the selected satellite: within 2 minutes,
     // no system notification, just the status bar.
@@ -1980,7 +2008,17 @@ void MainWindow::refreshCountdowns() {
 void MainWindow::updateTleBadge() {
     if (!tleBadge_) return;
     dsp::TleCache cache = tleClient_->cachedTle();
-    if (!cache.valid) { tleBadge_->clear(); return; }
+    if (!cache.valid) {
+        // Nothing fresh on disk.  If the table is showing the built-in offline
+        // snapshot, label it honestly; otherwise stay blank.
+        if (usingBuiltinTle_ && !passes_.isEmpty()) {
+            tleBadge_->setText(QStringLiteral("内置离线 TLE（公开星历快照，可能已过期）"));
+            tleBadge_->setStyleSheet(QString("color: %1;").arg(tokens::kWarning));
+        } else {
+            tleBadge_->clear();
+        }
+        return;
+    }
     qint64 ageH = cache.fetchedAt.secsTo(QDateTime::currentDateTimeUtc()) / 3600;
     bool stale = ageH >= 48;
     tleBadge_->setText(QString("TLE 更新于 %1（%2）")
@@ -2060,9 +2098,19 @@ void MainWindow::updateLiveSatellite() {
         sats.append(ls);
 
         if (ls.selected) {
-            statusBar()->showMessage(QString("%1 方位=%2° 仰角=%3° 距离=%4")
+            QString msg = QString("%1 方位=%2° 仰角=%3° 距离=%4")
                 .arg(p.name).arg(t.az, 0, 'f', 0).arg(t.el, 0, 'f', 1)
-                .arg(formatRange(t.range)));
+                .arg(formatRange(t.range));
+            // Live Doppler from the current range-rate, and the resulting
+            // suggested tuning frequency (only when a nominal downlink is known).
+            if (p.f0DownlinkHz > 0.0) {
+                const double fd = dsp::dopplerHz(p.f0DownlinkHz, t.rangeRateKmS);
+                const double tune = p.f0DownlinkHz + fd;
+                msg += QString(" · 预测多普勒 %1 kHz · 建议调谐 %2 MHz")
+                    .arg(fd / 1000.0, 0, 'f', 1)
+                    .arg(tune / 1.0e6, 0, 'f', 3);
+            }
+            statusBar()->showMessage(msg);
         }
     }
     skyView_->setLiveSatellites(sats);

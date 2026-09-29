@@ -126,6 +126,9 @@ private:
     QList<dsp::SatPass> passes_;
     QTimer*         tleTimer_    = nullptr;
     bool            tleFetchActive_ = false;
+    // True while the table is showing the built-in offline TLE snapshot (no
+    // network, no fresh cache).  The badge must say so honestly.
+    bool            usingBuiltinTle_ = false;
     // Current station position (degrees), refreshed on startup and when the
     // settings dialog is accepted.
     double          stationLat_ = std::numeric_limits<double>::quiet_NaN();

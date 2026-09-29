@@ -28,14 +28,31 @@ struct SatPass {
     double azLos = 0.0;                // azimuth at LOS, degrees
     QList<QPair<double,double>> track; // sampled (az, el) over the pass, degrees
     TleEntry tle;                      // raw TLE used, for live re-propagation
+    double f0DownlinkHz = 0.0;         // nominal downlink carrier (Hz); 0 = unknown
+    double dopplerAtPeakHz = 0.0;     // predicted receive Doppler at peak el, Hz
+                                       // (0 when f0DownlinkHz == 0)
 };
 
 // Topocentric look angles at one instant.
 struct Topocentric {
-    double az = 0.0;     // degrees, 0=N clockwise
-    double el = 0.0;     // degrees, +90=zenith
-    double range = 0.0;  // km
+    double az = 0.0;        // degrees, 0=N clockwise
+    double el = 0.0;        // degrees, +90=zenith
+    double range = 0.0;     // km
+    double rangeRateKmS = 0.0;  // d(range)/dt, km/s. >0 = satellite receding
+                                // from the station (range increasing).
 };
+
+// Vacuum light speed, km/s.
+inline constexpr double kLightSpeedKmS = 299792.458;
+
+// Predicted receive Doppler shift (Hz) for a downlink carrier f0Hz, given the
+// line-of-sight range-rate rangeRateKmS (positive = satellite receding).
+// Convention: rangeRateKmS < 0 (closing) => fd > 0 (received frequency higher);
+// recommended tuning frequency = f0Hz + fd.  Returns 0 when f0Hz is unknown.
+inline double dopplerHz(double f0Hz, double rangeRateKmS) {
+    if (f0Hz == 0.0) return 0.0;
+    return -f0Hz * rangeRateKmS / kLightSpeedKmS;
+}
 
 // On-disk TLE cache record.
 struct TleCache {
@@ -91,6 +108,21 @@ public:
     /// ECEF (x,y,z km) -> WGS84 lat/lon. Exposed for unit tests.
     static GeoCoord ecefToLatLon(double x, double y, double z);
 
+    // ---- Offline demo data (public, CelesTrak AIAA-2006-6753 snapshot) ----
+    // A small fixed set of near-Earth TLEs shipped verbatim from the published
+    // SGP4 verification ephemerides (2006 epoch).  These are ONLY an offline
+    // fallback so the sky tab can show *something* with no network and no
+    // cache: the epoch is years stale, so after 2006 the elements are
+    // guaranteed out of date.  Not a substitute for a fresh celestrak pull.
+    static QList<TleEntry> builtinTle();
+
+    // Nominal downlink broadcast carrier (Hz) for a satellite name, matched by
+    // case-insensitive substring against public amateur/weather-sat frequencies
+    // (NOAA APT, ISS voice relay).  Returns 0 when the name is unknown -- we
+    // never invent a frequency.  These are public broadcast frequencies kept
+    // for Doppler reference only.
+    static double downlinkHzFor(const QString& name);
+
     // Read the on-disk TLE cache (valid==false if absent/unreadable).
     TleCache cachedTle() const;
 
@@ -99,6 +131,13 @@ public:
     void computeFromEntries(const QList<TleEntry>& entries,
                             double stationLatDeg, double stationLonDeg,
                             int hoursAhead = 24);
+
+    // Propagate all TLEs and find passes visible from the station.  Pure const
+    // sweep (no signals) over the given window; exposed for the deterministic
+    // unit test and used internally by the live pipeline.
+    QList<SatPass> computePasses(const QList<TleEntry>& entries,
+                                 double stationLatDeg, double stationLonDeg,
+                                 const QDateTime& startTimeUtc, int hoursAhead) const;
 
 signals:
     // Passes computed successfully. May be empty (24h window has no passes).
@@ -116,12 +155,6 @@ private:
     // Offload computePasses to the thread pool, emit passesReady on finish.
     void offloadCompute(QList<TleEntry> entries, double latDeg, double lonDeg,
                         int hoursAhead);
-
-    // Propagate all TLEs and find passes visible from the station. Runs on a
-    // worker thread via QtConcurrent.
-    QList<SatPass> computePasses(const QList<TleEntry>& entries,
-                                 double stationLatDeg, double stationLonDeg,
-                                 const QDateTime& startTimeUtc, int hoursAhead) const;
 
     QNetworkAccessManager* nam_ = nullptr;
 };

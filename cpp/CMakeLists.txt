@@ -302,6 +302,11 @@ target_include_directories(test_geo PRIVATE src)
 target_link_libraries(test_geo PRIVATE Qt6::Network Qt6::Concurrent Qt6::Core)
 add_test(NAME geo COMMAND test_geo)
 
+add_executable(test_pass_doppler tests/test_pass_doppler.cpp src/dsp/tle_client.cpp src/dsp/sgp4.cpp)
+target_include_directories(test_pass_doppler PRIVATE src)
+target_link_libraries(test_pass_doppler PRIVATE Qt6::Network Qt6::Concurrent Qt6::Core)
+add_test(NAME pass_doppler COMMAND test_pass_doppler)
+
 add_executable(test_adsb_cpr tests/test_adsb_cpr.cpp src/dsp/adsb_decoder.cpp)
 target_include_directories(test_adsb_cpr PRIVATE src)
 target_link_libraries(test_adsb_cpr PRIVATE Qt6::Core)
