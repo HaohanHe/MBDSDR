@@ -25,6 +25,7 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QScrollArea>
+#include <QEvent>
 #include <QDateTime>
 #include <QTimer>
 #include <QDialog>
@@ -129,6 +130,15 @@ MainWindow::MainWindow(QWidget* parent)
     clockLabel->setText(QDateTime::currentDateTimeUtc().toString("HH:mm:ss UTC"));
     topLay->addWidget(clockLabel);
 
+    // Focus-mode toggle (CarWith driving-mode analog): collapses both side rails
+    // so the spectrum fills the width. Generic QPushButton QSS applies; the
+    // active state is painted accent-colored by setFocusMode() only on this btn.
+    focusBtn_ = new QPushButton("◉ 专注", topBar);
+    focusBtn_->setObjectName("focusBtn");
+    focusBtn_->setCheckable(true);
+    focusBtn_->setToolTip("专注模式：隐藏侧栏，频谱占满全宽");
+    topLay->addWidget(focusBtn_);
+
     auto* helpBtn = new QPushButton("?", topBar);
     helpBtn->setToolTip("快捷键");
     auto* aboutBtn = new QPushButton("关于", topBar);
@@ -231,11 +241,13 @@ MainWindow::MainWindow(QWidget* parent)
     freqSpin_->setValue(98.5);
     freqSpin_->setDecimals(3);
     freqSpin_->setSuffix(" MHz");
+    freqSpin_->setMinimumWidth(tokens::scaled(140));
     gFreqLay->addRow("中心频率", freqSpin_);
     stepCombo_ = new QComboBox(gFreq);
     stepCombo_->addItems({"1 Hz", "10 Hz", "100 Hz", "1 kHz",
                           "10 kHz", "100 kHz", "1 MHz"});
     stepCombo_->setCurrentIndex(4);   // 10 kHz default
+    stepCombo_->setMinimumWidth(tokens::scaled(120));
     gFreqLay->addRow("步进", stepCombo_);
     leftLay->addWidget(gFreq);
 
@@ -244,6 +256,7 @@ MainWindow::MainWindow(QWidget* parent)
     srCombo_ = new QComboBox(gRx);
     srCombo_->addItems({"1.024 MS/s", "2.048 MS/s", "2.4 MS/s", "3.2 MS/s"});
     srCombo_->setCurrentIndex(2);
+    srCombo_->setMinimumWidth(tokens::scaled(120));
     gRxLay->addRow("采样率", srCombo_);
     gainSlider_ = new QSlider(Qt::Horizontal, gRx);
     gainSlider_->setRange(0, 50);
@@ -255,9 +268,11 @@ MainWindow::MainWindow(QWidget* parent)
     demodCombo_ = new QComboBox(gRx);
     demodCombo_->setObjectName("demodCombo");
     demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW", "BPSK", "QPSK", "ADS-B"});
+    demodCombo_->setMinimumWidth(tokens::scaled(120));
     gRxLay->addRow("解调", demodCombo_);
     bwCombo_ = new QComboBox(gRx);
     bwCombo_->addItems({"8 kHz", "12.5 kHz", "200 kHz", "2.4 kHz", "500 Hz"});
+    bwCombo_->setMinimumWidth(tokens::scaled(120));
     gRxLay->addRow("带宽", bwCombo_);
     // Channel-status badge: "立体声" only when the engine's real 19 kHz pilot is
     // locked and the L/R matrix has engaged; otherwise honestly "单声道". Fully
@@ -1461,6 +1476,18 @@ MainWindow::MainWindow(QWidget* parent)
     connect(spectrum_, &ui::SpectrumWidget::visibleRangeChanged,
             this, [this](double, double) { scheduleSave(); });
 
+    // Focus-mode toggle: collapse/restore the side rails with a 220ms OutCubic.
+    connect(focusBtn_, &QPushButton::toggled, this,
+            [this](bool on) { setFocusMode(on, true); });
+
+    // Double-click a splitter handle to reset the 0.22/0.56/0.22 proportions
+    // (CarWith mini-map-card "drag to resize, double-click to reset"). Handles
+    // exist now that all three widgets have been added.
+    if (mainSplitter_) {
+        for (int i = 1; i < mainSplitter_->count(); ++i)
+            mainSplitter_->handle(i)->installEventFilter(this);
+    }
+
     setControlsEnabled(false);
     restoreUiState();
     engine_->start();
@@ -1780,6 +1807,7 @@ void MainWindow::saveUiState() {
     s.setValue("ui/rightTabIndex", rightTabs_->currentIndex());
     s.setValue("ui/centerTabIndex", centerTabs_->currentIndex());
     if (mainSplitter_) s.setValue("ui/splitterSizes", mainSplitter_->saveState());
+    s.setValue(tokens::kSettingsKeyFocusMode, focusMode_);
     s.setValue("rx/fftSize", spectrum_->fftSizeValue());
 
     // ---- Multi-VFO set (count + per-channel params + selection) ----
@@ -1817,6 +1845,116 @@ void MainWindow::scheduleSave() {
     // Re-arm the single-shot timer; repeated events within 500 ms collapse into
     // a single disk write when it finally fires.
     if (saveTimer_) saveTimer_->start();
+}
+
+void MainWindow::setFocusMode(bool on, bool animate) {
+    if (!mainSplitter_) return;
+    QWidget* left  = mainSplitter_->widget(0);   // leftScroll
+    QWidget* right = mainSplitter_->widget(2);   // rightCard
+    if (!left || !right) return;
+    focusMode_ = on;
+
+    // Stop any in-flight animation so rapid toggling never races.
+    if (focusAnimL_) focusAnimL_->stop();
+    if (focusAnimR_) focusAnimR_->stop();
+
+    // Paint the active state only on this button (accent text + border),
+    // leaving the shared QSS for every other button untouched.
+    if (focusBtn_) {
+        QSignalBlocker blk(focusBtn_);
+        focusBtn_->setChecked(on);
+        focusBtn_->setStyleSheet(on
+            ? QString("QPushButton { color: %1; border-color: %1; }").arg(tokens::kAccent)
+            : QString());
+    }
+
+    if (on) {
+        // Remember the rails' natural width before collapsing (only when they
+        // are currently visible / non-zero, i.e. a real user-driven collapse).
+        if (left->isVisibleTo(mainSplitter_)  && left->width()  > 0) leftRailW_  = left->width();
+        if (right->isVisibleTo(mainSplitter_) && right->width() > 0) rightRailW_ = right->width();
+
+        if (!animate) {
+            left->setMaximumWidth(0);
+            right->setMaximumWidth(0);
+            left->setVisible(false);
+            right->setVisible(false);
+        } else {
+            auto collapse = [this](QWidget* w, QPropertyAnimation*& anim, int from) {
+                if (!anim) {
+                    anim = new QPropertyAnimation(w, "maximumWidth", this);
+                    anim->setDuration(tokens::kAnimMedium1);
+                    anim->setEasingCurve(QEasingCurve::OutCubic);
+                }
+                anim->setTargetObject(w);
+                anim->setStartValue(from);
+                anim->setEndValue(0);
+                anim->start();
+            };
+            collapse(left,  focusAnimL_,  left->maximumWidth());
+            collapse(right, focusAnimR_, right->maximumWidth());
+            // Once the width hits 0, drop the widgets entirely so the center
+            // spectrum truly takes the full width.
+            QTimer::singleShot(tokens::kAnimMedium1, this, [this, left, right]() {
+                if (!focusMode_) return;   // user toggled back mid-animation
+                left->setVisible(false);
+                right->setVisible(false);
+            });
+        }
+    } else {
+        // Bring the rails back. Target the remembered widths; fall back to the
+        // frozen 0.22/0.22 ratios if we never recorded them (e.g. restored
+        // focus=on at first launch, then the user exits).
+        const int total = mainSplitter_->width();
+        int lw = leftRailW_  > 0 ? leftRailW_  : int(total * tokens::kRatioLeft);
+        int rw = rightRailW_ > 0 ? rightRailW_ : int(total * tokens::kRatioRight);
+
+        left->setVisible(true);
+        right->setVisible(true);
+        if (!animate) {
+            left->setMaximumWidth(lw);
+            right->setMaximumWidth(rw);
+        } else {
+            auto expand = [this](QWidget* w, QPropertyAnimation*& anim, int to) {
+                if (!anim) {
+                    anim = new QPropertyAnimation(w, "maximumWidth", this);
+                    anim->setDuration(tokens::kAnimMedium1);
+                    anim->setEasingCurve(QEasingCurve::OutCubic);
+                }
+                anim->setTargetObject(w);
+                anim->setStartValue(0);
+                anim->setEndValue(to);
+                anim->start();
+            };
+            expand(left,  focusAnimL_,  lw);
+            expand(right, focusAnimR_, rw);
+        }
+    }
+    scheduleSave();
+}
+
+void MainWindow::resetSplitterRatios() {
+    if (!mainSplitter_) return;
+    const int total = mainSplitter_->width();
+    if (total <= 0) return;
+    const int l = int(total * tokens::kRatioLeft);
+    const int r = int(total * tokens::kRatioRight);
+    const int c = total - l - r;
+    mainSplitter_->setSizes({l, c, r});
+}
+
+bool MainWindow::eventFilter(QObject* obj, QEvent* event) {
+    // Double-click on a splitter handle resets the three-column proportions.
+    // If focus mode is on, the first double-click exits focus (the rails are
+    // hidden and setSizes cannot resurrect them until they are visible again).
+    if (event->type() == QEvent::MouseButtonDblClick && mainSplitter_
+            && (obj == mainSplitter_->handle(1)
+                || (mainSplitter_->count() > 2 && obj == mainSplitter_->handle(2)))) {
+        if (focusMode_) setFocusMode(false, true);
+        else resetSplitterRatios();
+        return true;
+    }
+    return QMainWindow::eventFilter(obj, event);
 }
 
 void MainWindow::restoreUiState() {
@@ -1937,6 +2075,15 @@ void MainWindow::restoreUiState() {
     const QByteArray splitterState = s.value("ui/splitterSizes").toByteArray();
     if (mainSplitter_ && !splitterState.isEmpty()) mainSplitter_->restoreState(splitterState);
     spectrum_->setFftSizeValue(s.value("rx/fftSize", 2048).toInt());
+
+    // Restore focus mode last (no animation): collapse the rails instantly.
+    // Block the button's toggled signal so we don't double-toggle.
+    {
+        const bool focus = s.value(tokens::kSettingsKeyFocusMode, false).toBool();
+        if (focusBtn_) focusBtn_->blockSignals(true);
+        setFocusMode(focus, /*animate=*/false);
+        if (focusBtn_) focusBtn_->blockSignals(false);
+    }
 
     // Unblock.
     freqSpin_->blockSignals(false);

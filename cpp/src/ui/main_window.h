@@ -22,6 +22,8 @@ class QStackedWidget;
 class QSplitter;
 class QTimer;
 class QElapsedTimer;
+class QEvent;
+class QPropertyAnimation;
 class QListWidget;
 class QListWidgetItem;
 class QLineEdit;
@@ -228,6 +230,16 @@ private:
     // Right tabs
     QTabWidget*     rightTabs_   = nullptr;
     QSplitter*      mainSplitter_ = nullptr;
+
+    // Focus mode state: remembered natural widths of the two side rails (in
+    // splitter pixels) captured when collapsing, so toggling back restores the
+    // user's preferred proportions instead of a hard-coded guess.
+    QPushButton*    focusBtn_    = nullptr;
+    bool            focusMode_   = false;
+    int             leftRailW_   = 0;
+    int             rightRailW_  = 0;
+    QPropertyAnimation* focusAnimL_ = nullptr;
+    QPropertyAnimation* focusAnimR_ = nullptr;
     QPlainTextEdit* cwText_      = nullptr;
     QLabel*         cwWpm_       = nullptr;
     QLabel*         cwEmpty_     = nullptr;
@@ -255,6 +267,13 @@ private:
     void setControlsEnabled(bool hardwareConnected);
     void saveUiState();
     void restoreUiState();
+    // Focus mode (CarWith driving-mode analog): collapse the left scroll rail
+    // and the right tab rail to width 0 so the spectrum takes the full width.
+    // animate=false applies the state instantly (used at startup restore).
+    void setFocusMode(bool on, bool animate);
+    // Double-click on a splitter handle restores the 0.22/0.56/0.22 ratios.
+    void resetSplitterRatios();
+    bool eventFilter(QObject* obj, QEvent* event) override;
     void fillPassTable();
     void refreshCountdowns();       // 1s: update the "距今" column
     void updateTleBadge();          // freshness label above the table
