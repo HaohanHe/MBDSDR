@@ -6,6 +6,8 @@
 #include <QFile>
 #include <QDir>
 #include <QDataStream>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include "dsp/spectrum_engine.h"
 
 using namespace mbdsdr::dsp;
@@ -14,6 +16,7 @@ class TestWavRoundtrip : public QObject {
     Q_OBJECT
 private slots:
     void writesValidWav();
+    void writesSidecarJson();
 };
 
 static quint16 rd16(const uchar* p) { return quint16(p[0]) | (quint16(p[1])<<8); }
@@ -52,6 +55,53 @@ void TestWavRoundtrip::writesValidWav() {
     quint32 dataLen = rd32(reinterpret_cast<const uchar*>(h.data())+40);
     QVERIFY(dataLen > 0);
     f.remove();
+}
+
+void TestWavRoundtrip::writesSidecarJson() {
+    // Demod-audio recording must drop a sibling .json proof carrying the readback
+    // sample_rate / center_freq / gain (and hardware/mode). No hardware: the
+    // values are the honest test-source readbacks.
+    QDir().mkpath("recordings");
+    SpectrumEngine eng;
+    eng.setRecTarget(RecTarget::DemodAudio);
+    eng.setDemodMode("NFM");
+    eng.start();
+    QTest::qWait(400);
+
+    QVERIFY(eng.startRecording());
+    const QString wavPath = eng.recordingPath();
+    QTest::qWait(400);
+    eng.stopRecording();
+
+    QString jsonPath = wavPath;
+    QVERIFY(jsonPath.endsWith(".wav"));
+    jsonPath.chop(4);
+    jsonPath += ".json";
+
+    QFile jf(jsonPath);
+    QVERIFY2(jf.exists(), "a sidecar .json must sit next to the recorded WAV");
+    QVERIFY(jf.open(QIODevice::ReadOnly));
+    QJsonParseError perr{};
+    QJsonDocument doc = QJsonDocument::fromJson(jf.readAll(), &perr);
+    QCOMPARE(perr.error, QJsonParseError::NoError);
+    QVERIFY(doc.isObject());
+    const QJsonObject o = doc.object();
+
+    // The three required readback fields must be present and numeric.
+    QVERIFY(o.contains("sample_rate"));
+    QVERIFY(o.contains("center_freq"));
+    QVERIFY(o.contains("gain"));
+    QCOMPARE(o.value("sample_rate").toDouble(), 48000.0);
+    QVERIFY(o.value("center_freq").toDouble() > 0.0);
+    QVERIFY(o.value("gain").toDouble() >= 0.0);
+    // Hardware + mode provenance.
+    QVERIFY(o.contains("hardware"));
+    QCOMPARE(o.value("mode").toString(), QStringLiteral("NFM"));
+
+    eng.shutdown();
+    eng.wait(2000);
+    QFile::remove(wavPath);
+    QFile::remove(jsonPath);
 }
 
 QTEST_MAIN(TestWavRoundtrip)

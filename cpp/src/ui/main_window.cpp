@@ -658,20 +658,22 @@ MainWindow::MainWindow(QWidget* parent)
     centralLay->addWidget(splitter);
     setCentralWidget(central);
     statusBar()->showMessage("MBDSDR C++");
-    // Permanent status strip: mode | sample rate | VFO | source.
+    // Permanent status strip: mode | sample rate | VFO | gain | source.
+    // sr/vfo/gain are refreshed by the engine's ~1 Hz sourceTelemetry push with
+    // the ACTUAL hardware readback values (gain is rounded by the driver), not
+    // the UI spinbox requests.
     sbMode_ = new QLabel("--", this);
     sbSr_   = new QLabel("--", this);
     sbVfo_  = new QLabel("--", this);
+    sbGain_ = new QLabel("--", this);
     sbSdr_  = new QLabel("Test Signal", this);
     sbRec_  = new QLabel("", this);
     sbRec_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kDanger));
-    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbSdr_, sbRec_}) {
+    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbGain_, sbSdr_, sbRec_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
     }
     sbMode_->setText(demodCombo_->currentText());
-    sbSr_->setText(srCombo_->currentText());
-    sbVfo_->setText(QString("%1 MHz").arg(freqSpin_->value(), 0, 'f', 3));
 
     // ---- Engine wiring (engine_ created before UI construction) ----
     {
@@ -687,6 +689,10 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onAudioLevel);
     connect(engine_, &dsp::SpectrumEngine::rssiLevel,
             this, &MainWindow::onRssiLevel);
+    connect(engine_, &dsp::SpectrumEngine::snrLevel,
+            this, &MainWindow::onSnrLevel);
+    connect(engine_, &dsp::SpectrumEngine::sourceTelemetry,
+            this, &MainWindow::onSourceTelemetry);
     connect(engine_, &dsp::SpectrumEngine::squelchState,
             this, &MainWindow::onSquelchState);
     connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
@@ -1564,7 +1570,33 @@ void MainWindow::onAudioLevel(float dbfs) {
 
 void MainWindow::onRssiLevel(float dbfs) {
     lastRssi_ = dbfs;
-    if (rssiLabel_) rssiLabel_->setText(QString("RSSI: %1 dBFS").arg(dbfs, 0, 'f', 1));
+    if (rssiLabel_)
+        rssiLabel_->setText(QString("RSSI: %1 dBFS · SNR: %2 dB")
+                            .arg(dbfs, 0, 'f', 1).arg(lastSnr_, 0, 'f', 1));
+}
+
+void MainWindow::onSnrLevel(float snrDb) {
+    lastSnr_ = snrDb;
+    if (rssiLabel_)
+        rssiLabel_->setText(QString("RSSI: %1 dBFS · SNR: %2 dB")
+                            .arg(lastRssi_, 0, 'f', 1).arg(snrDb, 0, 'f', 1));
+}
+
+void MainWindow::onSourceTelemetry(const QString& name, bool connected,
+                                    double centerHz, double sampleRateHz, double gainDb) {
+    // Hardware readback values (not the UI requests). Offline test source:
+    // connected=false, values are honest synthetic readbacks tagged 非硬件.
+    if (sbSr_)
+        sbSr_->setText(sampleRateHz > 0.0
+            ? QString("%1 MS/s").arg(sampleRateHz / 1e6, 0, 'f', 3) : QString("--"));
+    if (sbVfo_)
+        sbVfo_->setText(centerHz > 0.0
+            ? QString("%1 MHz").arg(centerHz / 1e6, 0, 'f', 3) : QString("--"));
+    if (sbGain_)
+        sbGain_->setText(gainDb > 0.0
+            ? QString("增益 %1 dB").arg(gainDb, 0, 'f', 1) : QString("--"));
+    if (sbSdr_)
+        sbSdr_->setText(name + (connected ? QString() : QStringLiteral("（非硬件）")));
 }
 
 void MainWindow::onSquelchState(bool open) {
