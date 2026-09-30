@@ -6,6 +6,7 @@
 #include <QPainter>
 #include <QPaintEvent>
 #include <QResizeEvent>
+#include <QWheelEvent>
 #include <QFont>
 #include <QFontMetrics>
 
@@ -60,17 +61,56 @@ void ConstellationView::resizeEvent(QResizeEvent* /*e*/) {
 }
 
 int ConstellationView::xOfI(float i) const {
-    return static_cast<int>(center_.x() + i * radius_ / rmsRadius_);
+    return static_cast<int>(center_.x() + i * effRadius() / rmsRadius_);
 }
 int ConstellationView::yOfQ(float q) const {
     // Q positive upward -> screen y down.
-    return static_cast<int>(center_.y() - q * radius_ / rmsRadius_);
+    return static_cast<int>(center_.y() - q * effRadius() / rmsRadius_);
 }
 float ConstellationView::iOfX(int x) const {
-    return static_cast<float>((x - center_.x()) * rmsRadius_ / radius_);
+    return static_cast<float>((x - center_.x()) * rmsRadius_ / effRadius());
 }
 float ConstellationView::qOfY(int y) const {
-    return static_cast<float>((center_.y() - y) * rmsRadius_ / radius_);
+    return static_cast<float>((center_.y() - y) * rmsRadius_ / effRadius());
+}
+
+void ConstellationView::zoomIn() {
+    zoom_ = std::clamp(zoom_ * tokens::kCstZoomStep,
+                       tokens::kCstZoomMin, tokens::kCstZoomMax);
+    update();
+}
+void ConstellationView::zoomOut() {
+    zoom_ = std::clamp(zoom_ / tokens::kCstZoomStep,
+                       tokens::kCstZoomMin, tokens::kCstZoomMax);
+    update();
+}
+void ConstellationView::resetZoom() {
+    zoom_ = tokens::kCstZoomMin;
+    update();
+}
+void ConstellationView::setHistogramVisible(bool on) {
+    histogramOn_ = on;
+    update();
+}
+void ConstellationView::wheelEvent(QWheelEvent* e) {
+    if (e->angleDelta().y() > 0) zoomIn();
+    else if (e->angleDelta().y() < 0) zoomOut();
+    e->accept();
+}
+
+std::vector<int> ConstellationView::iHistogram() const {
+    std::vector<int> bins(tokens::kCstHistBins, 0);
+    if (!histogramOn_ || points_.empty()) return bins;
+    for (const auto& ap : points_) {
+        // Normalized I in [-1,1] (same domain as xOfI, pre-zoom).
+        float ni = ap.value.real() / rmsRadius_;
+        float t = (ni + 1.0f) * 0.5f;                 // -> [0,1]
+        int b = static_cast<int>(t * tokens::kCstHistBins);
+        if (b < 0) b = 0;
+        if (b >= tokens::kCstHistBins) b = tokens::kCstHistBins - 1;
+        bins[b]++;
+    }
+    return bins;
 }
 
 void ConstellationView::clear() {
@@ -79,6 +119,7 @@ void ConstellationView::clear() {
     evmPct_ = 0.0f;
     evmN_   = 0;
     rmsRadius_ = 1.0f;
+    lastFrameCount_ = 0;
     update();
 }
 
@@ -113,6 +154,7 @@ void ConstellationView::pushPoint(std::complex<float> p) {
 void ConstellationView::feedSymbols(const std::vector<std::complex<float>>& symbols,
                                     bool isHardware) {
     if (!isHardware) showNotHwTag_ = true;
+    lastFrameCount_ = static_cast<int>(symbols.size());
     for (auto s : symbols) pushPoint(s);
     update();
 }
@@ -133,15 +175,16 @@ void ConstellationView::paintEvent(QPaintEvent* /*event*/) {
     gridPen.setWidthF(1.0);
     p.setPen(gridPen);
 
-    // Axes through center
-    p.drawLine(static_cast<int>(center_.x() - radius_), static_cast<int>(center_.y()),
-               static_cast<int>(center_.x() + radius_), static_cast<int>(center_.y()));
-    p.drawLine(static_cast<int>(center_.x()), static_cast<int>(center_.y() - radius_),
-               static_cast<int>(center_.x()), static_cast<int>(center_.y() + radius_));
+    // Axes through center (scale with zoom so reference + points move together).
+    const double er = effRadius();
+    p.drawLine(static_cast<int>(center_.x() - er), static_cast<int>(center_.y()),
+               static_cast<int>(center_.x() + er), static_cast<int>(center_.y()));
+    p.drawLine(static_cast<int>(center_.x()), static_cast<int>(center_.y() - er),
+               static_cast<int>(center_.x()), static_cast<int>(center_.y() + er));
 
     // Concentric rings (unit circle highlighted)
     for (int k = 1; k <= kGridRings + 1; ++k) {
-        double r = radius_ * k / (kGridRings + 1);
+        double r = er * k / (kGridRings + 1);
         if (k == kGridRings + 1) {
             QPen unitPen(QColor(tokens::textRgba(tokens::kTextAlphaTertiary2)));
             unitPen.setWidthF(1.2);
@@ -192,6 +235,40 @@ void ConstellationView::paintEvent(QPaintEvent* /*event*/) {
         p.setPen(QColor(tokens::kTextSecondary));
         int pad = tokens::scaled(tokens::kSpacingS);
         p.drawText(pad, pad + tokens::scaled(10), evmText());
+
+        // Point density (克制小字, bottom): REAL symbols this frame + zoom,
+        // sitting ABOVE the optional histogram strip so the two never overlap.
+        QColor dim(tokens::textRgba(tokens::kTextAlphaQuaternary));
+        p.setPen(dim);
+        const QString density =
+            QString::asprintf("%d/帧 · %d 点 · ×%.1f",
+                              lastFrameCount_, pointCount(), zoom_);
+        const int stripH = histogramOn_ ? tokens::scaled(tokens::kCstHistStripH) : 0;
+        p.drawText(pad, height() - stripH - tokens::scaled(tokens::kSpacingS), density);
+    }
+
+    // Real I-histogram strip along the very bottom (toggleable). Bins the
+    // buffered points' normalized I parts -- a genuine statistic, not decoration.
+    if (histogramOn_ && !points_.empty()) {
+        std::vector<int> bins = iHistogram();
+        int mx = 1;
+        for (int c : bins) if (c > mx) mx = c;
+        int stripH = tokens::scaled(tokens::kCstHistStripH);
+        int baseY = height() - tokens::scaled(1);
+        int left  = tokens::scaled(kPadSide);
+        int right = width() - tokens::scaled(kPadSide);
+        int span  = std::max(1, right - left);
+        int binW  = span / tokens::kCstHistBins;
+        QColor hc(tokens::kAccent);
+        hc.setAlphaF(tokens::kCstHistBarAlpha);
+        p.setPen(Qt::NoPen);
+        p.setBrush(hc);
+        for (int i = 0; i < tokens::kCstHistBins; ++i) {
+            int bh = static_cast<int>(stripH * bins[i] / static_cast<double>(mx));
+            if (bh <= 0) continue;
+            p.drawRect(left + i * binW, baseY - bh,
+                       std::max(1, binW - tokens::scaled(1)), bh);
+        }
     }
 
     // NOT HARDWARE tag (top-right)

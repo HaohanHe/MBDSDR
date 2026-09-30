@@ -655,8 +655,58 @@ MainWindow::MainWindow(QWidget* parent)
         auto* cstPage = new QWidget;
         auto* cstLay = new QVBoxLayout(cstPage);
         cstLay->setContentsMargins(0, 0, 0, 0);
+        cstLay->setSpacing(0);
         constellationView_ = new ui::ConstellationView(cstPage);
-        cstLay->addWidget(constellationView_);
+        cstLay->addWidget(constellationView_, 1);
+
+        // Toolbar: display-only view controls over the REAL symbol scatter.
+        // Small text-only buttons get a 44px touch hit-area on top of the
+        // dense 26px visual height (tokens: kControlH visual / kTouchMinDim hit).
+        // Laid out in two compact rows so it survives the narrow right rail
+        // (~150 px) without clipping or overlapping labels.
+        auto* cstBar = new QVBoxLayout;
+        cstBar->setContentsMargins(tokens::scaled(tokens::kSpacingM), 0,
+                                   tokens::scaled(tokens::kSpacingM),
+                                   tokens::scaled(tokens::kSpacingS));
+        cstBar->setSpacing(tokens::scaled(tokens::kSpacingS));
+        auto* zoomRow = new QHBoxLayout;
+        zoomRow->setSpacing(tokens::scaled(tokens::kSpacingS));
+        auto* zoomOutBtn = new QPushButton(QStringLiteral("−"), cstPage);
+        zoomOutBtn->setObjectName("cstZoomOutBtn");
+        zoomOutBtn->setMinimumWidth(tokens::scaled(tokens::kTouchMinDim));
+        zoomOutBtn->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+        zoomOutBtn->setToolTip(QStringLiteral("缩小星座图"));
+        auto* zoomResetBtn = new QPushButton(QStringLiteral("1:1"), cstPage);
+        zoomResetBtn->setObjectName("cstZoomResetBtn");
+        zoomResetBtn->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+        zoomResetBtn->setToolTip(QStringLiteral("复位缩放"));
+        auto* zoomInBtn = new QPushButton(QStringLiteral("+"), cstPage);
+        zoomInBtn->setObjectName("cstZoomInBtn");
+        zoomInBtn->setMinimumWidth(tokens::scaled(tokens::kTouchMinDim));
+        zoomInBtn->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+        zoomInBtn->setToolTip(QStringLiteral("放大星座图"));
+        zoomRow->addWidget(zoomOutBtn);
+        zoomRow->addWidget(zoomResetBtn, 1);
+        zoomRow->addWidget(zoomInBtn);
+        cstBar->addLayout(zoomRow);
+
+        auto* histBtn = new QPushButton(QStringLiteral("I 直方图"), cstPage);
+        histBtn->setObjectName("cstHistBtn");
+        histBtn->setCheckable(true);
+        histBtn->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+        histBtn->setToolTip(QStringLiteral("叠加真实 I 统计直方图"));
+        cstBar->addWidget(histBtn);
+        cstLay->addLayout(cstBar);
+
+        connect(zoomOutBtn, &QPushButton::clicked,
+                constellationView_, &ui::ConstellationView::zoomOut);
+        connect(zoomResetBtn, &QPushButton::clicked,
+                constellationView_, &ui::ConstellationView::resetZoom);
+        connect(zoomInBtn, &QPushButton::clicked,
+                constellationView_, &ui::ConstellationView::zoomIn);
+        connect(histBtn, &QPushButton::toggled,
+                constellationView_, &ui::ConstellationView::setHistogramVisible);
+
         rightTabs_->addTab(cstPage, "星座");
     }
 
@@ -685,6 +735,8 @@ MainWindow::MainWindow(QWidget* parent)
         skyTimeSlider_->setObjectName("skyTimeSlider");
         skyTimeSlider_->setRange(-tokens::kSkyPreviewRangeMin, tokens::kSkyPreviewRangeMin);
         skyTimeSlider_->setValue(0);
+        // Touch: a wide grab strip, not a thin 26px line (tokens, scaled()).
+        skyTimeSlider_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
         skyTimeSlider_->setToolTip(
             QStringLiteral("拖拽预览过去/未来时刻（±%1 分钟）：\n"
                            "用真实 SGP4 重新传播全部可见卫星（拖拽中 ≤10Hz）。\n"
@@ -1124,6 +1176,9 @@ MainWindow::MainWindow(QWidget* parent)
         recLibCopyBtn_    = new QPushButton("复制路径", lBox);
         recLibDelBtn_     = new QPushButton("删除", lBox);
         recLibPlayBtn_    = new QPushButton("播放", lBox);
+        // Touch: every row action is a >=44px tap target (tokens, scaled()).
+        for (auto* b : {recLibRefreshBtn_, recLibCopyBtn_, recLibDelBtn_, recLibPlayBtn_})
+            b->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
         rBtnRow->addWidget(recLibRefreshBtn_);
         rBtnRow->addWidget(recLibCopyBtn_);
         rBtnRow->addWidget(recLibDelBtn_);
@@ -1190,20 +1245,25 @@ MainWindow::MainWindow(QWidget* parent)
     aiSessionCombo_ = new QComboBox(aiPage);
     aiSessionCombo_->setObjectName("aiSessionCombo");
     aiSessionCombo_->setMinimumWidth(120);
+    // Touch: the session switcher and its row buttons are >=44px tap targets.
+    aiSessionCombo_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
     sessRow->addWidget(aiSessionCombo_, /*stretch=*/1);
     aiNewSessionBtn_ = new QPushButton("新会话", aiPage);
     aiNewSessionBtn_->setObjectName("aiNewSessionBtn");
-    sessRow->addWidget(aiNewSessionBtn_);
     aiRenameSessionBtn_ = new QPushButton("重命名", aiPage);
     aiRenameSessionBtn_->setObjectName("aiRenameSessionBtn");
-    sessRow->addWidget(aiRenameSessionBtn_);
     aiDeleteSessionBtn_ = new QPushButton("删除", aiPage);
     aiDeleteSessionBtn_->setObjectName("aiDeleteSessionBtn");
+    for (auto* b : {aiNewSessionBtn_, aiRenameSessionBtn_, aiDeleteSessionBtn_})
+        b->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+    sessRow->addWidget(aiNewSessionBtn_);
+    sessRow->addWidget(aiRenameSessionBtn_);
     sessRow->addWidget(aiDeleteSessionBtn_);
     aiLay->addLayout(sessRow);
 
     aiCompactCtxBtn_ = new QPushButton("压缩上下文", aiPage);
     aiCompactCtxBtn_->setObjectName("aiCompactCtxBtn");
+    aiCompactCtxBtn_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
     aiCompactCtxBtn_->setToolTip("早期轮次超出上下文预算时会自动折叠为「已摘要」；也可手动触发。");
     aiLay->addWidget(aiCompactCtxBtn_);
 

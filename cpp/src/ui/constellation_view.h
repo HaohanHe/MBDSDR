@@ -16,6 +16,7 @@
 #include <QWidget>
 #include <QPointF>
 #include <QString>
+#include <QWheelEvent>
 #include <complex>
 #include <deque>
 #include <vector>
@@ -43,21 +44,30 @@ public slots:
     // Forget all buffered points and return to the empty state.
     void clear();
 
+    // View zoom (display-only, over the real points). Clamped to the token
+    // range; 1.0 = 1:1. zoomIn/zoomOut step by kCstZoomStep.
+    void zoomIn();
+    void zoomOut();
+    void resetZoom();
+    void setHistogramVisible(bool on);
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
 
 public:
     // ---- Geometry / mapping exposed for QtTest ----
     // Map normalized constellation coordinates (I in [-1,1], Q in [-1,1]) to
     // widget pixels. The plot is centered and scaled so that unit radius maps
-    // to `radius()` px.
+    // to radius()*zoom() px.
     int  xOfI(float i) const;
     int  yOfQ(float q) const;
     float iOfX(int x) const;
     float qOfY(int y) const;
     QPointF center() const { return center_; }
-    double  radius() const { return radius_; }
+    double  radius() const { return radius_; }     // base (unzoomed) plot radius
+    double  zoom() const { return zoom_; }
 
     // Read-outs for tests.
     bool    isEmpty() const { return points_.empty(); }
@@ -66,11 +76,19 @@ public:
     QString emptyHintText() const { return QString::fromUtf8("等待数字信号…"); }
     QString evmText() const;         // "EVM 12.3%" or "—" when empty
     float   evmPercent() const { return evmPct_; }
+    // Real symbol accounting (never fabricated).
+    int     pointCount() const { return static_cast<int>(points_.size()); }
+    int     lastFrameCount() const { return lastFrameCount_; }
+    bool    histogramVisible() const { return histogramOn_; }
+    // Per-bin counts of the buffered points' normalized I (real) parts,
+    // kCstHistBins bins over [-1,1]; empty when no points / histogram off.
+    std::vector<int> iHistogram() const;
 
 private:
     void recomputeLayout();
     void pushPoint(std::complex<float> p);
     float nearestIdealDist(std::complex<float> p) const;
+    double effRadius() const { return radius_ * zoom_; }
 
     struct AgePoint {
         std::complex<float> value;
@@ -83,6 +101,11 @@ private:
 
     QPointF center_{0.f, 0.f};
     double  radius_ = 1.0;
+
+    // Display zoom over the real points (1.0 = 1:1).
+    double zoom_ = 1.0;
+    bool   histogramOn_ = false;
+    int    lastFrameCount_ = 0;   // symbols in the most recent feedSymbols() call
 
     // Rolling RMS radius for auto-normalization to the unit circle.
     float rmsRadius_ = 1.0f;

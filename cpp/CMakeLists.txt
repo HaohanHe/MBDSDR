@@ -203,6 +203,17 @@ add_executable(ui_shot_cst tests/ui_screenshot_constellation.cpp ${SHOT_SRCS} ${
 target_include_directories(ui_shot_cst PRIVATE src build/ui_shot_cst_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_cst PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
+# Constellation WITH the new view controls: point density, one zoom notch, and
+# the real I-histogram overlay toggled on (offscreen; not in ctest).
+add_executable(ui_shot_cst2 tests/ui_screenshot_cst2.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_cst2 PRIVATE src build/ui_shot_cst2_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_cst2 PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# Narrow (820px) re-check of the new constellation toolbar (offscreen; not in ctest).
+add_executable(ui_shot_narrow2 tests/ui_screenshot_narrow2.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_narrow2 PRIVATE src build/ui_shot_narrow2_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_narrow2 PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
 # Focus-mode / restrained-badge screenshot (offscreen; not in ctest).
 add_executable(ui_shot_focus tests/ui_screenshot_focus.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_focus PRIVATE src build/ui_shot_focus_autogen/include build/mbdsdr_autogen/include)

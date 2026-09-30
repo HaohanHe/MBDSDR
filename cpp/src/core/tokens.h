@@ -262,6 +262,18 @@ inline constexpr int    kSkyTrajectorySamples  = 61;   // sample points across t
 inline constexpr double  kTrajLineAlpha       = 0.45;  // dashed trajectory overlay alpha
 inline constexpr double  kTrajLineWidth      = 1.2;
 
+// =====================================================================
+// Digital constellation panel (星座图). Display-only: it paints ONLY the
+// real post-Costas soft symbols fed via feedSymbols(). Zoom and the I/Q
+// histogram are pure view transforms over those real points -- no synthesis.
+// =====================================================================
+inline constexpr double  kCstZoomMin    = 1.0;    // 1:1 (no magnification)
+inline constexpr double  kCstZoomMax    = 8.0;    // max magnification
+inline constexpr double  kCstZoomStep   = 1.25;   // per wheel notch / button click
+inline constexpr int     kCstHistBins   = 24;     // I-histogram bins (real stat)
+inline constexpr int     kCstHistStripH = 18;     // bottom histogram strip height (base px, scaled)
+inline constexpr double  kCstHistBarAlpha = 0.35; // subdued histogram bars
+
 // Elevation-vs-time plot margins (separate from spectrum kPlotMargin* so the
 // spectrum widget is untouched). Enough room for axis titles + tick captions
 // on all four sides so nothing is clipped.
