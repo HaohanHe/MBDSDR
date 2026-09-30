@@ -1,0 +1,87 @@
+// SPDX-License-Identifier: MIT
+// Offscreen audit harness (Figma checklist self-check).
+// Captures the post-audit UI: main window with a visible keyboard FOCUS ring on
+// the frequency spinbox, then switches the right tab group through 录制库 /
+// AI 助手 / 天空 and opens the settings dialog. Every grab is saved under
+// scratch/ and Read back to confirm no overlap / clipping / sticker feel.
+//
+// Registered as ui_shot_audit in CMakeLists (SHOT_SRCS, not part of mbdsdr).
+// Env: MBD_W, MBD_H, MBD_OUTDIR.
+#include <QApplication>
+#include <QTimer>
+#include <QPixmap>
+#include <QTabWidget>
+#include <QDoubleSpinBox>
+#include <QDialog>
+#include <QList>
+#include <cstdlib>
+#include "core/tokens.h"
+#include "ui/main_window.h"
+#include "ui/settings_dialog.h"
+
+namespace {
+void grabLater(QWidget* w, const QString& path, int delayMs, QApplication& app) {
+    QTimer::singleShot(delayMs, [w, path, &app]() {
+        QPixmap pm = w->grab();
+        pm.save(path, "PNG");
+        qInfo("audit -> %s (%dx%d)", path.toLocal8Bit().constData(),
+              pm.width(), pm.height());
+    });
+}
+} // namespace
+
+int main(int argc, char** argv) {
+    QApplication app(argc, argv);
+    app.setStyleSheet(mbdsdr::tokens::buildDarkQss());
+
+    const int w = std::atoi(qgetenv("MBD_W").constData());
+    const int h = std::atoi(qgetenv("MBD_H").constData());
+    const QString dir = QString::fromLocal8Bit(
+        qgetenv("MBD_OUTDIR").isEmpty() ? "scratch" : qgetenv("MBD_OUTDIR"));
+
+    mbdsdr::MainWindow win;
+    win.resize(w > 0 ? w : 1280, h > 0 ? h : 800);
+    win.show();
+
+    // Collect the two tab widgets: [0]=center(频谱/世界/气象), [1]=right.
+    QList<QTabWidget*> tabs = win.findChildren<QTabWidget*>();
+    QTabWidget* right = tabs.size() >= 2 ? tabs[1] : nullptr;
+
+    // 1. Main window with focus ring on the frequency spinbox.
+    if (QDoubleSpinBox* f = win.findChild<QDoubleSpinBox*>("freqSpin"))
+        f->setFocus();
+    grabLater(&win, dir + "/ui_audit_main.png", 1200, app);
+
+    // 2. Right tab: 录制库.
+    if (right) {
+        for (int i = 0; i < right->count(); ++i)
+            if (right->tabText(i).contains("录制")) right->setCurrentIndex(i);
+        grabLater(&win, dir + "/ui_audit_reclib.png", 1900, app);
+
+        // 3. Right tab: AI 助手.
+        for (int i = 0; i < right->count(); ++i)
+            if (right->tabText(i).contains("AI")) right->setCurrentIndex(i);
+        grabLater(&win, dir + "/ui_audit_ai.png", 2600, app);
+
+        // 4. Right tab: 天空.
+        for (int i = 0; i < right->count(); ++i)
+            if (right->tabText(i).contains("天空")) right->setCurrentIndex(i);
+        grabLater(&win, dir + "/ui_audit_sky.png", 3300, app);
+    }
+
+    // 5. Settings dialog (modal-ish; show non-blocking and grab).
+    QTimer::singleShot(3600, [&]() {
+        mbdsdr::ui::SettingsDialog dlg(&win);
+        dlg.show();
+        QTimer::singleShot(500, [&]() {
+            QPixmap pm = dlg.grab();
+            pm.save(dir + "/ui_audit_settings.png", "PNG");
+            qInfo("audit -> %s (%dx%d)",
+                  qPrintable(dir + "/ui_audit_settings.png"),
+                  pm.width(), pm.height());
+            app.quit();
+        });
+    });
+
+    return app.exec();
+}

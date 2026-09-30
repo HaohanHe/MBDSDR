@@ -2034,6 +2034,48 @@ MainWindow::MainWindow(QWidget* parent)
         statusBar()->showMessage(muted ? "已静音" : "");
     });
 
+    // ---- Multi-VFO quick switch (SDR++-style) ----------------------------
+    // Ctrl+Tab / Ctrl+Shift+Tab cycle the VFO list; Ctrl+1..9 jump to the Nth
+    // VFO row. Selection goes through engine_->vfoSelect(id) (the same path as
+    // double-click) so the canvas follows the selected VFO.
+    auto selectVfoRow = [this](int row) {
+        if (!vfoList_ || row < 0 || row >= vfoList_->count()) return;
+        vfoList_->setCurrentRow(row);
+        QListWidgetItem* it = vfoList_->item(row);
+        bool ok = false;
+        const int id = it ? it->data(Qt::UserRole).toInt(&ok) : 0;
+        if (ok && id > 0 && engine_) engine_->vfoSelect(id);
+    };
+    new QShortcut(QKeySequence::NextChild, this, this, [this, selectVfoRow]() {
+        // Ctrl+Tab: cycle forward (wrap).
+        const int n = vfoList_->count();
+        if (n > 0) selectVfoRow((vfoList_->currentRow() + 1) % n);
+    });
+    new QShortcut(QKeySequence::PreviousChild, this, this, [this, selectVfoRow]() {
+        // Ctrl+Shift+Tab: cycle backward (wrap).
+        const int n = vfoList_->count();
+        if (n > 0) selectVfoRow((vfoList_->currentRow() - 1 + n) % n);
+    });
+    for (int i = 0; i < 9; ++i) {
+        const int row = i;
+        new QShortcut(QKeySequence(QString("Ctrl+%1").arg(i + 1)), this, this,
+                      [selectVfoRow, row]() { selectVfoRow(row); });
+    }
+
+    // ---- Direct frequency input (MHz): honest validation -----------------
+    // freqSpin_ is a QDoubleSpinBox, so format (numeric only) and range
+    // [kFreqMinHz, kFreqMaxHz] are already enforced; out-of-range / non-numeric
+    // entries are clamped/reverted (never written as an illegal value). On
+    // commit we echo the committed MHz in the status bar so the user gets honest
+    // feedback instead of a silent clamp.
+    connect(freqSpin_, &QDoubleSpinBox::editingFinished, this, [this]() {
+        statusBar()->showMessage(
+            QString("中心频率: %1 MHz（范围 %2–%3 MHz）")
+                .arg(freqSpin_->value(), 0, 'f', 3)
+                .arg(tokens::kFreqMinHz / 1e6)
+                .arg(tokens::kFreqMaxHz / 1e6));
+    });
+
     connect(spectrum_, &ui::SpectrumWidget::frequencyChanged, this, [this](double hz) {
         freqSpin_->blockSignals(true);
         freqSpin_->setValue(hz / 1e6);

@@ -264,6 +264,10 @@ add_executable(ui_shot_devices tests/ui_screenshot_devices.cpp ${SHOT_SRCS} ${HE
 target_include_directories(ui_shot_devices PRIVATE src build/ui_shot_devices_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_devices PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
+add_executable(ui_shot_audit tests/ui_screenshot_audit.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_audit PRIVATE src build/ui_shot_audit_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_audit PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
 target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent ${CMAKE_DL_LIBS})
 
 if(RTLSDR_FOUND)
@@ -605,6 +609,12 @@ target_include_directories(test_device_ui PRIVATE src build/test_device_ui_autog
 target_link_libraries(test_device_ui PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 add_test(NAME device_ui COMMAND test_device_ui)
 set_tests_properties(device_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_ui_audit tests/test_ui_audit.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_ui_audit PRIVATE src build/test_ui_audit_autogen/include)
+target_link_libraries(test_ui_audit PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME ui_audit COMMAND test_ui_audit)
+set_tests_properties(ui_audit PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Unattended signal-triggered watch recording (detector + pre-roll + per-burst
 # WAV/JSON sidecar; NOT HARDWARE, fully synthesized).
