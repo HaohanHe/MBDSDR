@@ -243,6 +243,16 @@ inline constexpr int kElevMarginR = 22;
 inline constexpr int kElevMarginT = 26;
 inline constexpr int kElevMarginB = 50;
 
+// =====================================================================
+// Satellite pass capture + live Doppler auto-compensation
+// =====================================================================
+// Max frequency correction (Hz) applied to the active VFO per 1 s live tick.
+// Real LEO Doppler at 137-437 MHz moves only tens of Hz/s, so a 2 kHz ceiling
+// lets the loop track the live f0+fd exactly while still smoothing a one-shot
+// jump (capture / AOS) into bounded, radar-style convergence steps -- never a
+// tuner slam or a dither.  Named token, read by core/sat_capture.h.
+inline constexpr double kDopplerMaxStepHz = 2000.0;
+
 // Waterfall (spectrogram) widget
 // 5-stop dBFS palette, mapped linearly over [-100, 0] dBFS:
 //   #000033 (noise floor) -> #0000ff -> #00ffff -> #ffff00 -> #ff0000 (0 dBFS)

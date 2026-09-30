@@ -7,6 +7,8 @@
 
 // GnssFix is a value member (lastGnssFix_), so its layout must be visible here.
 #include "gnss/gnss_types.h"
+// DopplerStepLimiter is a value member (small, header-only convergence throttle).
+#include "core/sat_capture.h"
 
 class QLabel;
 class QDoubleSpinBox;
@@ -181,6 +183,20 @@ private:
     QTimer*         liveTimer_   = nullptr;
     int             liveRow_     = -1;   // selected row tracked live, or -1
     QTabWidget* centerTabs_ = nullptr;
+
+    // ---- One-tap pass capture + Doppler auto-compensation (sky tab) ----
+    // capturePassBtn_ retunes the active VFO to the selected pass' downlink;
+    // dopplerCompChk_ (default off) then nudges that VFO every 1 s from the
+    // real propagated range-rate.  capturedIdx_ pins the pass we have actually
+    // captured (-1 = none); the limiter smooths the 1 Hz retune.
+    QPushButton*    capturePassBtn_      = nullptr;
+    QCheckBox*      dopplerCompChk_     = nullptr;
+    QLabel*         captureStatusLabel_  = nullptr;
+    int             capturedIdx_        = -1;  // passes_ index locked for capture/-comp
+    core::DopplerStepLimiter dopplerLimiter_{};
+    void onCapturePassClicked();          // retune active VFO to the selected pass
+    void onDopplerCompToggled(bool on);  // arm/disarm live Doppler tracking
+    void updateCaptureControls();         // enable/disable + status line from selection
 
     // Left panel controls
     QDoubleSpinBox* freqSpin_   = nullptr;

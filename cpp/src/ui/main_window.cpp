@@ -634,6 +634,44 @@ MainWindow::MainWindow(QWidget* parent)
     tleBadge_ = new QLabel(skyPage);
     tleBadge_->setObjectName("dockHint");
     skyLay->addWidget(tleBadge_);
+
+    // ---- One-tap capture + Doppler auto-compensation control bar ----------
+    // 捕获: retune the active VFO to the selected pass' downlink carrier
+    // (+ predicted peak Doppler) and apply the frequency-domain mode/bandwidth.
+    // Disabled until a row with a known downlink is selected.
+    // 多普勒自动补偿: while checked AND the captured pass is AOS..LOS, nudge the
+    // active VFO every 1 s from the real propagated range-rate (bounded steps).
+    {
+        auto* capBar = new QHBoxLayout;
+        capBar->setContentsMargins(tokens::scaled(6), 0, tokens::scaled(6), 0);
+        capBar->setSpacing(tokens::kSpacingM);
+
+        capturePassBtn_ = new QPushButton(QStringLiteral("捕获"), skyPage);
+        capturePassBtn_->setObjectName("capturePassBtn");
+        capturePassBtn_->setEnabled(false);   // no row selected yet
+        capturePassBtn_->setToolTip(
+            QStringLiteral("把活动 VFO 调到所选过境的下行频率（含峰值多普勒建议值），\n"
+                           "并按频段应用默认解调模式/带宽。\n"
+                           "未知下行频率的卫星无法捕获。"));
+        capBar->addWidget(capturePassBtn_);
+
+        dopplerCompChk_ = new QCheckBox(QStringLiteral("多普勒自动补偿"), skyPage);
+        dopplerCompChk_->setObjectName("dopplerCompChk");
+        dopplerCompChk_->setChecked(false);   // default off
+        dopplerCompChk_->setToolTip(
+            QStringLiteral("过境进行中时，每秒用真实轨道传播的距离变化率\n"
+                           "实时微调活动 VFO 频率（f0+fd），限幅步进防抖动。\n"
+                           "需先设置本站位置并捕获一个过境。"));
+        capBar->addWidget(dopplerCompChk_);
+
+        captureStatusLabel_ = new QLabel(skyPage);
+        captureStatusLabel_->setObjectName("captureStatusLabel");
+        captureStatusLabel_->setText(QStringLiteral("未锁定"));
+        capBar->addWidget(captureStatusLabel_, 1);
+
+        skyLay->addLayout(capBar);
+    }
+
     passTable_ = new QTableWidget(0, 6, skyPage);
     passTable_->setHorizontalHeaderLabels({"卫星", "AOS", "LOS", "最大仰角", "预测多普勒", "距今"});
     passTable_->horizontalHeader()->setStretchLastSection(true);
@@ -947,6 +985,10 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(passTable_, &QTableWidget::cellClicked,
             this, [this](int row, int) { onPassRowClicked(row); });
+    connect(capturePassBtn_, &QPushButton::clicked,
+            this, &MainWindow::onCapturePassClicked);
+    connect(dopplerCompChk_, &QCheckBox::toggled,
+            this, &MainWindow::onDopplerCompToggled);
 
     auto* aiPage = new QWidget;
     auto* aiLay = new QVBoxLayout(aiPage);
@@ -2576,6 +2618,10 @@ void MainWindow::refetchTle() {
     // Pull fresh TLE + recompute passes for the currently-configured station.
     // No station -> honest empty state, never a network call.
     liveRow_ = -1;
+    capturedIdx_ = -1;
+    dopplerLimiter_.disarm();
+    if (dopplerCompChk_ && dopplerCompChk_->isChecked())
+        dopplerCompChk_->setChecked(false);
     skyView_->clearLiveSatellites();
     if (!stationSet_ || !std::isfinite(stationLat_) || !std::isfinite(stationLon_)) {
         passes_.clear();
@@ -2613,6 +2659,12 @@ void MainWindow::onPassesReady(QList<dsp::SatPass> passes) {
     passes_ = std::move(passes);
     tleFetchActive_ = false;
     liveRow_ = -1;
+    // The whole pass list was recomputed: any prior capture points at stale
+    // indices, so release it and let fillPassTable re-pick + re-enable.
+    capturedIdx_ = -1;
+    dopplerLimiter_.disarm();
+    if (dopplerCompChk_ && dopplerCompChk_->isChecked())
+        dopplerCompChk_->setChecked(false);
     skyView_->clearLiveSatellites();
     if (passes_.isEmpty()) {
         skyEmptyLabel_->setText("未来 24h 无过境");
@@ -2802,6 +2854,12 @@ void MainWindow::onPassRowClicked(int row) {
     if (idx < 0 || idx >= passes_.size()) return;
     liveRow_ = idx;
     liveTimer_->start();
+    // A new selection releases any prior capture / Doppler lock (the lock is
+    // bound to exactly the row the user captured).
+    capturedIdx_ = -1;
+    dopplerLimiter_.disarm();
+    if (dopplerCompChk_ && dopplerCompChk_->isChecked())
+        dopplerCompChk_->setChecked(false);
     // Persist the user's choice.
     const QString name = passes_[idx].name;
     QSettings("MBDSDR", "MBDSDR").setValue("ui/selectedSatellite", name);
@@ -2809,7 +2867,112 @@ void MainWindow::onPassRowClicked(int row) {
     worldView_->setSelectedSatellite(name);
     skyView_->setSelectedSatellite(name);
     updateElevationPlotFor(passes_[idx]);
+    updateCaptureControls();
     updateLiveSatellite();   // paint immediately rather than waiting 1s
+}
+
+void MainWindow::onCapturePassClicked() {
+    if (liveRow_ < 0 || liveRow_ >= passes_.size()) return;
+    const dsp::SatPass& p = passes_[liveRow_];
+    // Honest refusal: no nominal downlink carrier, nothing to tune to.
+    if (p.f0DownlinkHz <= 0.0) {
+        captureStatusLabel_->setText(QStringLiteral("无下行频率数据，无法捕获"));
+        return;
+    }
+    // Retune target = nominal downlink + predicted peak-Doppler suggestion.
+    const double target = core::captureTargetHz(p.f0DownlinkHz, p.dopplerAtPeakHz);
+    const core::SatChannelMode ch = core::recommendSatelliteMode(p.f0DownlinkHz);
+
+    // Apply to the ACTIVE VFO through the real engine API (SDR++-style offset
+    // tuner: in-band slide, genuine LO retune only when the target crosses the
+    // capture edge). Mode/bandwidth from the frequency-domain recommendation.
+    const int selVfo = engine_->selectedVfoId();
+    if (selVfo >= 0) {
+        engine_->vfoSetOffset(selVfo, target);
+        engine_->vfoSetMode(selVfo, ch.mode);
+        engine_->vfoSetBandwidth(selVfo, ch.bandwidthHz);
+    }
+
+    capturedIdx_ = liveRow_;
+    dopplerLimiter_.reset(target);   // first live step continues from here
+
+    // Keep the left-panel readouts honest (mirrors the weather one-tune presets).
+    if (freqSpin_) {
+        freqSpin_->blockSignals(true);
+        freqSpin_->setValue(target / 1.0e6);
+        freqSpin_->blockSignals(false);
+    }
+    if (demodCombo_) {
+        demodCombo_->blockSignals(true);
+        const int dIdx = demodCombo_->findText(ch.mode);
+        if (dIdx >= 0) demodCombo_->setCurrentIndex(dIdx);
+        demodCombo_->blockSignals(false);
+    }
+    currentBwHz_ = ch.bandwidthHz;
+    if (sbVfo_) sbVfo_->setText(QString("%1 MHz").arg(target / 1.0e6, 0, 'f', 4));
+
+    captureStatusLabel_->setText(QStringLiteral("已捕获 · 调谐 %1 MHz · %2")
+        .arg(target / 1.0e6, 0, 'f', 4).arg(ch.mode));
+    updateCaptureControls();
+}
+
+void MainWindow::onDopplerCompToggled(bool on) {
+    if (on) {
+        // Honest preconditions: a station (for live propagation) and a capture.
+        if (!stationSet_) {
+            const QSignalBlocker block(dopplerCompChk_);
+            dopplerCompChk_->setChecked(false);
+            captureStatusLabel_->setText(QStringLiteral("需先设置本站位置"));
+            return;
+        }
+        if (capturedIdx_ < 0) {
+            const QSignalBlocker block(dopplerCompChk_);
+            dopplerCompChk_->setChecked(false);
+            captureStatusLabel_->setText(QStringLiteral("请先捕获一个过境"));
+            return;
+        }
+        // The 1 Hz loop (updateLiveSatellite) now drives dopplerLimiter_.advance()
+        // and retunes the active VFO; the label flips to "锁定中·多普勒补偿…".
+    } else {
+        dopplerLimiter_.disarm();
+        // Back to the captured (but not auto-tracking) state, or un-locked.
+        if (capturedIdx_ >= 0 && capturedIdx_ < passes_.size()) {
+            const dsp::SatPass& p = passes_[capturedIdx_];
+            const core::SatChannelMode ch = core::recommendSatelliteMode(p.f0DownlinkHz);
+            const double target = core::captureTargetHz(p.f0DownlinkHz, p.dopplerAtPeakHz);
+            captureStatusLabel_->setText(QStringLiteral("已捕获 · 调谐 %1 MHz · %2")
+                .arg(target / 1.0e6, 0, 'f', 4).arg(ch.mode));
+        } else {
+            captureStatusLabel_->setText(QStringLiteral("未锁定"));
+        }
+    }
+    updateCaptureControls();
+}
+
+void MainWindow::updateCaptureControls() {
+    if (!capturePassBtn_) return;
+    const bool hasSel = liveRow_ >= 0 && liveRow_ < passes_.size();
+    const double f0 = hasSel ? passes_[liveRow_].f0DownlinkHz : 0.0;
+    // Capture button: enabled only with a selected row that has a known carrier.
+    capturePassBtn_->setEnabled(hasSel && f0 > 0.0);
+    // The compensation checkbox needs a station AND a captured pass.
+    dopplerCompChk_->setEnabled(stationSet_ && capturedIdx_ >= 0);
+    if (!stationSet_) {
+        dopplerCompChk_->setToolTip(QStringLiteral("多普勒自动补偿需先在设置中填写本站位置"));
+    } else if (capturedIdx_ < 0) {
+        dopplerCompChk_->setToolTip(QStringLiteral("请先在过境列表中选中并「捕获」一个过境"));
+    } else {
+        dopplerCompChk_->setToolTip(QStringLiteral(
+            "过境进行中时，每秒用真实轨道传播的距离变化率\n"
+            "实时微调活动 VFO 频率（f0+fd），限幅步进防抖动。"));
+    }
+    // Status line for the not-yet-captured states (the 1 Hz loop owns the
+    // "已捕获…" / "锁定中…" strings while a lock is active).
+    if (capturedIdx_ < 0) {
+        if (!hasSel) captureStatusLabel_->setText(QStringLiteral("未锁定"));
+        else if (f0 <= 0.0) captureStatusLabel_->setText(QStringLiteral("无下行频率数据"));
+        else captureStatusLabel_->setText(QStringLiteral("未锁定"));
+    }
 }
 
 static QString formatRange(double km) {
@@ -2828,6 +2991,12 @@ void MainWindow::updateLiveSatellite() {
 
     if (!stationSet_) {
         skyView_->clearLiveSatellites();
+        // Without a station there is no live propagation: compensation cannot run.
+        capturedIdx_ = -1;
+        dopplerLimiter_.disarm();
+        if (dopplerCompChk_ && dopplerCompChk_->isChecked())
+            dopplerCompChk_->setChecked(false);
+        updateCaptureControls();
         return;
     }
 
@@ -2835,6 +3004,11 @@ void MainWindow::updateLiveSatellite() {
     if (liveRow_ >= 0 && liveRow_ < passes_.size() && now > passes_[liveRow_].los) {
         liveRow_ = -1;
         skyView_->setSelectedSatellite("");
+        // The captured pass is gone: stop Doppler compensation and release.
+        capturedIdx_ = -1;
+        dopplerLimiter_.disarm();
+        if (dopplerCompChk_ && dopplerCompChk_->isChecked())
+            dopplerCompChk_->setChecked(false);
         for (int row = 0; row < passTable_->rowCount(); ++row) {
             QTableWidgetItem* it = passTable_->item(row, 0);
             if (!it) continue;
@@ -2846,6 +3020,7 @@ void MainWindow::updateLiveSatellite() {
                 return;
             }
         }
+        updateCaptureControls();
         liveTimer_->stop();
     }
 
@@ -2869,14 +3044,34 @@ void MainWindow::updateLiveSatellite() {
                 .arg(formatRange(t.range));
             // Live Doppler from the current range-rate, and the resulting
             // suggested tuning frequency (only when a nominal downlink is known).
+            double liveFd = 0.0;
             if (p.f0DownlinkHz > 0.0) {
-                const double fd = dsp::dopplerHz(p.f0DownlinkHz, t.rangeRateKmS);
-                const double tune = p.f0DownlinkHz + fd;
+                liveFd = dsp::dopplerHz(p.f0DownlinkHz, t.rangeRateKmS);
+                const double tune = p.f0DownlinkHz + liveFd;
                 msg += QString(" · 预测多普勒 %1 kHz · 建议调谐 %2 MHz")
-                    .arg(fd / 1000.0, 0, 'f', 1)
+                    .arg(liveFd / 1000.0, 0, 'f', 1)
                     .arg(tune / 1.0e6, 0, 'f', 3);
             }
             statusBar()->showMessage(msg);
+
+            // ---- Live Doppler auto-compensation (real propagated range-rate) --
+            // Only while checked AND this exact pass is the one we captured AND
+            // it is within AOS..LOS.  The limiter bounds each 1 Hz retune so the
+            // tuner converges on f0+fd without dithering.
+            const bool compOn = dopplerCompChk_ && dopplerCompChk_->isChecked();
+            if (compOn && capturedIdx_ == i && p.f0DownlinkHz > 0.0) {
+                const double target = p.f0DownlinkHz + liveFd;
+                const double stepped = dopplerLimiter_.advance(target);
+                const int selVfo = engine_->selectedVfoId();
+                if (selVfo >= 0) engine_->vfoSetOffset(selVfo, stepped);
+                if (sbVfo_) sbVfo_->setText(
+                    QString("%1 MHz").arg(stepped / 1.0e6, 0, 'f', 4));
+                captureStatusLabel_->setText(
+                    QStringLiteral("锁定中·多普勒补偿 %1%2 Hz")
+                        .arg(liveFd >= 0.0 ? QStringLiteral("+")
+                                           : QStringLiteral("−"))
+                        .arg(std::llround(std::fabs(liveFd))));
+            }
         }
     }
     skyView_->setLiveSatellites(sats);
