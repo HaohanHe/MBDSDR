@@ -138,6 +138,10 @@ class _HomeShellState extends State<HomeShell> {
                 bandwidthHz: bw,
               ),
               onRemoveBookmark: (hz) => settings.removeBookmark(hz),
+              fixedMarksHz: settings.fixedMarksHz,
+              onAddFixedMark: () =>
+                  settings.addFixedMarkHz(radio.freqHz.toDouble()),
+              onRemoveFixedMark: (hz) => settings.removeFixedMarkHz(hz),
               onOpenSettings: _openSettings,
             ),
             SkyPage(manualStation: station, radio: radio),

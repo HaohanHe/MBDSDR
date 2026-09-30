@@ -131,6 +131,23 @@ abstract final class AppTokens {
   static const double dbUpperDefault = 0;
   static const double dbGridStep = 20;
 
+  // ---------------------------------------------------------------- 频谱余晖（persistence）
+  // 真实历史帧轨迹的指数渐隐叠加：每经过一帧，历史层整体乘 [persistenceDecay*]，
+  // 最贴近当前帧的一层起点 alpha = [persistenceBaseAlpha]。off 档不叠加。
+  // 全部衰减/层数为具名 token，禁在画布内裸写系数。
+
+  /// 余晖最多保留的历史层数（环形缓存上限），超出丢弃最旧帧。
+  static const int persistenceMaxLayers = 12;
+
+  /// 余晖低档位衰减系数：衰减快，残影短促。
+  static const double persistenceDecayLow = 0.70;
+
+  /// 余晖高档位衰减系数：衰减慢，残影绵长。
+  static const double persistenceDecayHigh = 0.88;
+
+  /// 最贴近当前帧的一层历史轨迹起点 alpha，再按 decay^k 逐帧衰减。
+  static const double persistenceBaseAlpha = 0.34;
+
   // ---------------------------------------------------------------- RTL-SDR 硬件范围
   static const double freqMinHz = 24e6;
   static const double freqMaxHz = 1700e6;
@@ -252,4 +269,21 @@ abstract final class AppTokens {
     final f = scaled - i;
     return Color.lerp(waterfallStops[i], waterfallStops[i + 1], f)!;
   }
+}
+
+/// 频谱余晖档位：关 / 低（短残影）/ 高（长残影）。
+enum SpectrumPersistence {
+  off,
+  low,
+  high;
+
+  /// 该档位对应的逐帧衰减系数（指数衰减）。off 不叠加历史。
+  double get decay => switch (this) {
+        SpectrumPersistence.off => 0.0,
+        SpectrumPersistence.low => AppTokens.persistenceDecayLow,
+        SpectrumPersistence.high => AppTokens.persistenceDecayHigh,
+      };
+
+  /// 是否真的叠加历史帧。
+  bool get isOn => this != SpectrumPersistence.off;
 }

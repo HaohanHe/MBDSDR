@@ -15,9 +15,11 @@
 // AppTokens.annotationFontSize，不散落裸字号。
 library;
 
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import '../app/tokens.dart';
@@ -33,11 +35,24 @@ class SpectrumDisplay extends StatefulWidget {
   /// 点按某个 bin 时回调其中心频率（Hz），用于真实改频率。
   final ValueChanged<double>? onTapFrequency;
 
+  /// 余晖档位：把真实历史帧轨迹按 decay^k 渐隐叠加在当前轨迹之下。
+  /// off（默认）不叠加，行为与历史一致。
+  final SpectrumPersistence persistence;
+
+  /// 余晖清除节拍：值变化即清空历史帧缓存（UI 点「清除余晖」时递增）。
+  final int persistenceClearTick;
+
+  /// 固定频率标记（Hz）：在频谱绘图区画细竖线，与 VFO/峰值区分。
+  final List<double> fixedMarksHz;
+
   const SpectrumDisplay({
     super.key,
     required this.frame,
     this.channelBandwidthHz = 12500,
     this.onTapFrequency,
+    this.persistence = SpectrumPersistence.off,
+    this.persistenceClearTick = 0,
+    this.fixedMarksHz = const <double>[],
   });
 
   @override
@@ -52,6 +67,10 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
   ui.Image? _image;
   SpectrumFrame? _lastFrame;
 
+  // 余晖：真实历史帧环形缓存（最旧在前，最新历史在后）。
+  // 每来一个新帧，把上一帧推入这里；只用于渐隐叠加，绝不造数据。
+  final List<SpectrumFrame> _history = <SpectrumFrame>[];
+
   // gutter / 频率条高度（由 token 间距派生，不写死魔法像素）。
   double get _leftGutterW => AppTokens.spacingL * 3.0;
   double get _rightGutterW => AppTokens.spacingL * 1.5;
@@ -60,8 +79,20 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
   @override
   void didUpdateWidget(covariant SpectrumDisplay oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 清除节拍变化 → 丢弃全部余晖历史。
+    if (widget.persistenceClearTick != oldWidget.persistenceClearTick) {
+      _history.clear();
+    }
     final f = widget.frame;
     if (f != null && !identical(f, _lastFrame)) {
+      final prev = _lastFrame;
+      if (prev != null) {
+        _history.add(prev);
+        const max = AppTokens.persistenceMaxLayers;
+        while (_history.length > max) {
+          _history.removeAt(0);
+        }
+      }
       _lastFrame = f;
       _ingestFrame(f);
     }
@@ -134,6 +165,9 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
                         painter: _SpectrumPainter(
                           frame: frame,
                           channelBandwidthHz: widget.channelBandwidthHz,
+                          history: _history,
+                          persistence: widget.persistence,
+                          fixedMarksHz: widget.fixedMarksHz,
                         ),
                       ),
                     );
@@ -210,6 +244,41 @@ double _dbToY(double db, double plotH) {
   return (1 - (c - lower) / (upper - lower)) * plotH;
 }
 
+/// 余晖第 age 层（age=1 为最新历史帧，越大越旧）的叠加 alpha。
+/// off 档或非法 age 返回 0。纯函数，便于注入帧序列断言渐隐行为。
+double persistenceLayerAlpha(SpectrumPersistence mode, int age) {
+  if (!mode.isOn || age < 1) return 0;
+  return AppTokens.persistenceBaseAlpha *
+      math.pow(mode.decay, age).toDouble();
+}
+
+/// 由一帧 db 构建频谱轨迹的描边 Path 与填充 Path（含 3-tap 轻量平滑）。
+/// 当前帧与余晖历史帧共用同一函数，保证历史叠加不破坏既有轨迹几何。
+({Path trace, Path fill}) _buildTrace(SpectrumFrame frame, Size size) {
+  final db = frame.db;
+  final n = db.length;
+  double yFor(double v) => _dbToY(v, size.height);
+  final samples = (size.width / 2).clamp(120.0, 500.0).round();
+  final xs = List<double>.generate(samples, (k) => k / (samples - 1) * size.width);
+  final ys = List<double>.generate(samples, (k) {
+    final bin = (k / (samples - 1) * (n - 1)).round().clamp(0, n - 1);
+    return yFor(db[bin]);
+  });
+  for (var k = 1; k < samples - 1; k++) {
+    ys[k] = (ys[k - 1] + ys[k] + ys[k + 1]) / 3;
+  }
+  final trace = Path()..moveTo(xs[0], ys[0]);
+  final fill = Path()..moveTo(xs[0], size.height);
+  for (var k = 0; k < samples; k++) {
+    trace.lineTo(xs[k], ys[k]);
+    fill.lineTo(xs[k], ys[k]);
+  }
+  fill
+    ..lineTo(size.width, size.height)
+    ..close();
+  return (trace: trace, fill: fill);
+}
+
 /// 左侧 dB gutter：每 dbGridStep 一条网格标签（mono、右对齐、淡）。
 class _LeftDbGutterPainter extends CustomPainter {
   const _LeftDbGutterPainter();
@@ -264,12 +333,28 @@ class _RightDbGutterPainter extends CustomPainter {
   bool shouldRepaint(covariant _RightDbGutterPainter oldDelegate) => false;
 }
 
-/// 频谱轨迹：背景 + dB 网格 + 中央信道带宽竖带 + 平滑轨迹 + VFO 竖线 + BW 角标。
+/// 频谱轨迹：背景 + dB 网格 + 固定标记竖线 + 余晖历史轨迹 + 中央信道带宽竖带
+/// + 平滑轨迹 + VFO 竖线 + BW 角标。
 class _SpectrumPainter extends CustomPainter {
   final SpectrumFrame frame;
   final double channelBandwidthHz;
 
-  _SpectrumPainter({required this.frame, required this.channelBandwidthHz});
+  /// 真实历史帧（最旧→最新），仅在 persistence.isOn 时渐隐叠加。
+  final List<SpectrumFrame> history;
+
+  /// 余晖档位（衰减系数取自 AppTokens 具名常量）。
+  final SpectrumPersistence persistence;
+
+  /// 固定频率标记（Hz），琥珀虚线竖线。
+  final List<double> fixedMarksHz;
+
+  _SpectrumPainter({
+    required this.frame,
+    required this.channelBandwidthHz,
+    this.history = const <SpectrumFrame>[],
+    this.persistence = SpectrumPersistence.off,
+    this.fixedMarksHz = const <double>[],
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -297,6 +382,51 @@ class _SpectrumPainter extends CustomPainter {
       Offset(size.width / 2, size.height),
       grid,
     );
+
+    // ---- 固定频率标记（琥珀细虚线竖线，仅落在当前扫宽内才画）----
+    // 与 VFO（accentHover 中央实线 + 三角）、峰值（accent 三角）刻意用不同色/线型区分。
+    {
+      final span = frame.sampleRateHz;
+      final leftF = frame.centerFreqHz - span / 2;
+      for (final f in fixedMarksHz) {
+        final x = (f - leftF) / span * size.width;
+        if (x < 0 || x > size.width) continue;
+        const dashW = 4.0;
+        const gapW = 3.0;
+        final mark = Paint()
+          ..color = AppTokens.warning.withValues(alpha: 0.55)
+          ..strokeWidth = 1;
+        for (var dy = 0.0; dy < size.height; dy += dashW + gapW) {
+          canvas.drawLine(
+            Offset(x, dy),
+            Offset(x, (dy + dashW).clamp(0.0, size.height)),
+            mark,
+          );
+        }
+      }
+    }
+
+    // ---- 余晖：真实历史帧轨迹渐隐叠加（off 档跳过；几何不一致帧不叠加）----
+    if (persistence.isOn) {
+      final m = history.length;
+      final curN = frame.db.length;
+      for (var i = 0; i < m; i++) {
+        final hf = history[i];
+        if (hf.db.length != curN) continue;
+        final age = m - i; // 最新历史 = 1，最旧 = m
+        final alpha = persistenceLayerAlpha(persistence, age);
+        if (alpha < 0.02) continue;
+        final t = _buildTrace(hf, size);
+        canvas.drawPath(
+          t.trace,
+          Paint()
+            ..color = AppTokens.accent.withValues(alpha: alpha)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.2
+            ..isAntiAlias = true,
+        );
+      }
+    }
 
     final db = frame.db;
     final n = db.length;
@@ -331,26 +461,10 @@ class _SpectrumPainter extends CustomPainter {
       Paint()..color = AppTokens.accent.withValues(alpha: 0.08),
     );
 
-    // ---- 采样到像素列 + 轻量平滑（3-tap 均值），去锯齿折线 ----
-    final samples = (size.width / 2).clamp(120.0, 500.0).round();
-    final xs = List<double>.generate(samples, (k) => k / (samples - 1) * size.width);
-    final ys = List<double>.generate(samples, (k) {
-      final bin = (k / (samples - 1) * (n - 1)).round().clamp(0, n - 1);
-      return yFor(db[bin]);
-    });
-    for (var k = 1; k < samples - 1; k++) {
-      ys[k] = (ys[k - 1] + ys[k] + ys[k + 1]) / 3;
-    }
-
-    final trace = Path()..moveTo(xs[0], ys[0]);
-    final fill = Path()..moveTo(xs[0], size.height);
-    for (var k = 0; k < samples; k++) {
-      trace.lineTo(xs[k], ys[k]);
-      fill.lineTo(xs[k], ys[k]);
-    }
-    fill
-      ..lineTo(size.width, size.height)
-      ..close();
+    // ---- 当前帧轨迹（与余晖历史帧共用 _buildTrace，几何一致）----
+    final tracePaths = _buildTrace(frame, size);
+    final trace = tracePaths.trace;
+    final fill = tracePaths.fill;
 
     canvas.drawPath(
       fill,
@@ -487,7 +601,10 @@ class _SpectrumPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _SpectrumPainter oldDelegate) =>
       !identical(oldDelegate.frame, frame) ||
-      oldDelegate.channelBandwidthHz != channelBandwidthHz;
+      oldDelegate.channelBandwidthHz != channelBandwidthHz ||
+      oldDelegate.persistence != persistence ||
+      oldDelegate.history.length != history.length ||
+      !listEquals(oldDelegate.fixedMarksHz, fixedMarksHz);
 }
 
 /// 频率刻度条：按可用宽度自适应选步长（100k/250k/500k/1M/2M/5M/10M），
