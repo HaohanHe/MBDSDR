@@ -157,7 +157,7 @@ class _HomeShellState extends State<HomeShell> {
               onOpenSettings: _openSettings,
             ),
             RecordingsPage(radio: radio, settings: settings),
-            SettingsPage(settings: settings),
+            SettingsPage(settings: settings, radio: radio),
           ],
         );
       },

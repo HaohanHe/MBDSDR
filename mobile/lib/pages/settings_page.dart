@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../app/tokens.dart';
+import '../services/radio_controller.dart';
 import '../services/settings_service.dart';
+import '../widgets/device_info_card.dart';
 
 // ============================================================================
 // 设置页：rtl_tcp / AI 助手 / 本站位置 / 外观
@@ -10,9 +12,12 @@ import '../services/settings_service.dart';
 // ============================================================================
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({required this.settings, super.key});
+  const SettingsPage({required this.settings, required this.radio, super.key});
 
   final SettingsService settings;
+
+  /// 收音机接口：用于「设备信息」分区真实回读连接态/采样率/频率。
+  final RadioApi radio;
 
   @override
   State<SettingsPage> createState() => _SettingsPageState();
@@ -293,6 +298,20 @@ class _SettingsPageState extends State<SettingsPage> {
             const Text(
               '在电脑或树莓派上运行：rtl_tcp -a 0.0.0.0',
               style: AppTokens.auxiliary,
+            ),
+          ],
+        ),
+
+        // ---------------------------------------------------- 设备信息（真实回读）
+        // 与桌面端「设备管理」对称：连接态/后端/采样率/当前频率全部来自 RadioApi，
+        // 未连接时诚实空态「—」。监听 RadioController(ChangeNotifier) 实时刷新。
+        _section(
+          title: '设备信息',
+          children: <Widget>[
+            ListenableBuilder(
+              listenable: widget.radio as Listenable,
+              builder: (BuildContext context, _) =>
+                  DeviceInfoCard(radio: widget.radio),
             ),
           ],
         ),
