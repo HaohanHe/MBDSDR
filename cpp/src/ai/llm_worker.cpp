@@ -8,6 +8,17 @@ namespace ai {
 
 LLMWorker::LLMWorker(QObject* parent) : QObject(parent) {}
 
+QString LLMWorker::dispatchToolCall(const QString& name, const QJsonObject& args,
+                                    dsp::SpectrumEngine* engine, bool manualMode) {
+    // Manual-mode gate: a write action must NOT reach the radio. Skip
+    // executeTool entirely (no engine touch) and hand back the gated result so it
+    // still enters the conversation context and surfaces via toolCalled().
+    if (manualMode && isWriteTool(name)) {
+        return gatedToolResult(name);
+    }
+    return executeTool(name, args, engine);
+}
+
 LLMWorker::~LLMWorker() {
     if (client_) { delete client_; client_ = nullptr; }
 }
@@ -47,7 +58,7 @@ void LLMWorker::doChat(const QList<ChatMessage>& messages,
         msgs.append(asst);
 
         for (const auto& tc : resp.toolCalls) {
-            QString result = executeTool(tc.name, tc.arguments, engine_);
+            QString result = dispatchToolCall(tc.name, tc.arguments, engine_, manualMode_);
             emit toolCalled(tc.name, result);
             ChatMessage tr;
             tr.role = "tool";

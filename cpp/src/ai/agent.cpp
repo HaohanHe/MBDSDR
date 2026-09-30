@@ -5,15 +5,26 @@
 #include "dsp/spectrum_engine.h"
 
 #include <QRegularExpression>
+#include <QSettings>
 
 namespace mbdsdr {
 namespace ai {
 
+namespace {
+const char* kManualModeKey = "aiManualMode";  // QSettings key, persisted
+}
+
 Agent::Agent(QObject* parent) : QObject(parent) {
     config_.load();
+    // Restore persisted manual mode (default false = AI takeover).
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        manualMode_ = s.value(kManualModeKey, false).toBool();
+    }
     workerThread_ = new QThread(this);
     worker_ = new LLMWorker();
     worker_->moveToThread(workerThread_);
+    worker_->setManualMode(manualMode_);
     connect(worker_, &LLMWorker::chatFinished, this, &Agent::responseReady);
     connect(worker_, &LLMWorker::toolCalled, this, &Agent::toolCalled);
     // Drop the worker's NAM on the worker thread before we delete the worker.
@@ -24,6 +35,12 @@ Agent::Agent(QObject* parent) : QObject(parent) {
 void Agent::setEngine(dsp::SpectrumEngine* e) {
     engine_ = e;
     worker_->setEngine(e);
+}
+
+void Agent::setManualMode(bool on) {
+    manualMode_ = on;
+    QSettings("MBDSDR", "MBDSDR").setValue(kManualModeKey, on);
+    worker_->setManualMode(on);
 }
 
 Agent::~Agent() {

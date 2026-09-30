@@ -25,6 +25,15 @@ public:
     /// Set config directly (for tests / programmatic setup). Applies to worker.
     void setConfig(const AiConfig& c) { config_ = c; configureFromConfig(); }
 
+    /// Manual mode ("AI 接管" off): write/state-changing tools are gated and
+    /// never drive the radio; read-only tools (get_status) still run. The value
+    /// is persisted via QSettings("MBDSDR","MBDSDR") under "aiManualMode"
+    /// (bool, default false = AI takeover) and re-read on construction.
+    /// Wiring for the UI toggle: call setManualMode() on toggle; observe
+    /// toolCalled()/statusChanged() for feedback. This is the entire backend.
+    void setManualMode(bool on);
+    bool manualMode() const { return manualMode_; }
+
 public slots:
     void sendMessage(const QString& userInput);
 
@@ -39,6 +48,7 @@ private:
     QList<ChatMessage> history_;
     QThread* workerThread_ = nullptr;
     LLMWorker* worker_ = nullptr;
+    bool manualMode_ = false;   // persisted; re-read from QSettings in ctor
 
     QString localCommand(const QString& input);
 };
