@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/bookmark.dart';
 import '../models/radio_state.dart';
+import '../models/recording.dart';
 
 // ============================================================================
 // 设置持久化
@@ -138,6 +139,12 @@ const String _kAiManualMode = 'aiManualMode';
 /// 每个数字升级为 `Bookmark(name:'', frequencyHz:该值, mode:'', bandwidthHz:0)`。
 /// 永不内置台名/位置，默认空列表。
 const String _kBookmarksHz = 'bookmarksHz';
+
+/// 录音元数据列表，JSON 数组字符串落盘（结构见 models/recording.dart）。
+///
+/// 诚实说明：移动端当前无真实文件录制路径，生产代码不会写入任何条目；
+/// 这里只是就绪的持久化槽位，列表在真机上恒为空态。
+const String _kRecordings = 'recordingsMeta';
 
 /// 上次调谐频率（Hz）默认值：144 MHz（2 m 业余段）。
 const int kDefaultLastFreqHz = 144000000;
@@ -351,6 +358,39 @@ class SettingsService extends ChangeNotifier {
   /// 兼容旧调用方。
   void removeBookmarkHz(int hz) => removeBookmark(hz);
 
+  // ------------------------------------------------ 录音元数据索引
+  List<RecordingMeta> _recordings = <RecordingMeta>[];
+
+  /// 录音元数据列表（按开始时间倒序，不可变视图）。
+  ///
+  /// 真机上恒为空——移动端尚无真实文件录制；此列表为就绪的持久化索引。
+  List<RecordingMeta> get recordings =>
+      List<RecordingMeta>.unmodifiable(_recordings);
+
+  void _persistRecordings() {
+    unawaited(_kv.setString(
+      _kRecordings,
+      jsonEncode(_recordings.map((r) => r.toJson()).toList()),
+    ));
+  }
+
+  /// 追加一条录音元数据（真实录制落地时由录制路径调用）。
+  void addRecording(RecordingMeta meta) {
+    _recordings = List<RecordingMeta>.of(_recordings)..add(meta);
+    // 新录制在前。
+    _recordings.sort((a, b) => b.startedAtEpochMs - a.startedAtEpochMs);
+    _persistRecordings();
+    notifyListeners();
+  }
+
+  /// 清空录音元数据索引。
+  void clearRecordings() {
+    if (_recordings.isEmpty) return;
+    _recordings = <RecordingMeta>[];
+    _persistRecordings();
+    notifyListeners();
+  }
+
   /// 三坐标是否齐全（用于决定是否把手动站点交给天空页）。
   bool get hasManualStation =>
       _stationLat != null && _stationLon != null && _stationAlt != null;
@@ -405,6 +445,24 @@ class SettingsService extends ChangeNotifier {
         }
       } on FormatException {
         _bookmarks = <Bookmark>[];
+      }
+    }
+
+    // 录音元数据：解析失败/空则回退空列表（真机本就为空）。
+    final String? rawRecordings = _kv.getString(_kRecordings);
+    if (rawRecordings != null && rawRecordings.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawRecordings);
+        if (decoded is List) {
+          _recordings = decoded
+              .map(RecordingMeta.fromJson)
+              .whereType<RecordingMeta>()
+              .toList();
+          _recordings
+              .sort((a, b) => b.startedAtEpochMs - a.startedAtEpochMs);
+        }
+      } on FormatException {
+        _recordings = <RecordingMeta>[];
       }
     }
 

@@ -10,6 +10,7 @@ import 'package:mbdsdr_mobile/models/satellite.dart';
 class Pass {
   const Pass({
     required this.name,
+    required this.catalogNumber,
     required this.riseTime,
     required this.riseAz,
     required this.setTime,
@@ -19,6 +20,9 @@ class Pass {
   });
 
   final String name;
+
+  /// NORAD 编目号（用于查下行频率目录）。
+  final int catalogNumber;
   final DateTime riseTime;
   final double riseAz;
   final DateTime setTime;
@@ -141,6 +145,7 @@ List<Pass> predictPasses(
         if (foundSet) {
           result.add(Pass(
             name: tle.name,
+            catalogNumber: tle.catalogNumber,
             riseTime: riseTime,
             riseAz: riseAz,
             setTime: setTime,

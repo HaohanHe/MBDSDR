@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/satellite.dart';
 import '../pages/chat_page.dart';
+import '../pages/recordings_page.dart';
 import '../pages/settings_page.dart';
 import '../pages/sky_page.dart';
 import '../pages/spectrum_page.dart';
@@ -48,6 +49,11 @@ class _HomeShellState extends State<HomeShell> {
       label: Text('AI'),
     ),
     NavigationRailDestination(
+      icon: Icon(Icons.fiber_manual_record_outlined),
+      selectedIcon: Icon(Icons.fiber_manual_record),
+      label: Text('录音'),
+    ),
+    NavigationRailDestination(
       icon: Icon(Icons.settings_outlined),
       selectedIcon: Icon(Icons.settings),
       label: Text('设置'),
@@ -72,6 +78,11 @@ class _HomeShellState extends State<HomeShell> {
       label: 'AI',
     ),
     BottomNavigationBarItem(
+      icon: Icon(Icons.fiber_manual_record_outlined),
+      activeIcon: Icon(Icons.fiber_manual_record),
+      label: '录音',
+    ),
+    BottomNavigationBarItem(
       icon: Icon(Icons.settings_outlined),
       activeIcon: Icon(Icons.settings),
       label: '设置',
@@ -79,7 +90,7 @@ class _HomeShellState extends State<HomeShell> {
   ];
 
   void _openSettings() {
-    setState(() => _index = 3);
+    setState(() => _index = 4);
   }
 
   AppBar _buildAppBar() {
@@ -129,7 +140,7 @@ class _HomeShellState extends State<HomeShell> {
               onRemoveBookmark: (hz) => settings.removeBookmark(hz),
               onOpenSettings: _openSettings,
             ),
-            SkyPage(manualStation: station),
+            SkyPage(manualStation: station, radio: radio),
             ChatPage(
               isConfigured: settings.apiKey.isNotEmpty,
               // 每次发送时新建 client：闭包实时读取当前 aiManualMode，
@@ -145,6 +156,7 @@ class _HomeShellState extends State<HomeShell> {
               manualMode: settings.aiManualMode,
               onOpenSettings: _openSettings,
             ),
+            RecordingsPage(radio: radio, settings: settings),
             SettingsPage(settings: settings),
           ],
         );
