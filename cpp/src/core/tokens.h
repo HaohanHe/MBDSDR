@@ -101,6 +101,25 @@ inline constexpr const char* kFocusRing   = "rgba(124, 196, 255, 0.45)";
 // Disabled control surface (we previously only dimmed disabled text).
 inline constexpr const char* kDisabledFill = "rgba(255, 255, 255, 0.04)";
 
+// ---- Spectrum persistence (余晖) ----------------------------------------
+// Per-frame retention of the ghost trace: each frame the held envelope decays by
+// (1 - kPersistDecay*) toward the floor, while a fresh rise refreshes it back up.
+// Low = short trails (fast fade), High = long trails (slow fade). Named so the
+// decay is never a magic number in the canvas.
+inline constexpr float kPersistDecayOff  = 0.0f;
+inline constexpr float kPersistDecayLow  = 0.78f;   // fast fade
+inline constexpr float kPersistDecayHigh = 0.93f;   // slow, long trails
+// Ghost trace paint alpha (over the live trace).
+inline constexpr float kPersistAlphaLow  = 0.35f;
+inline constexpr float kPersistAlphaHigh = 0.55f;
+
+// ---- Frontend software decimation (real anti-alias lowpass + integer D) --
+// Selectable integer decimation factors applied BEFORE channelization so narrow
+// modes (CW/FT8) run on a reduced-rate band with less compute. D=1 = off.
+inline constexpr int   kDecimMaxFactor = 8;
+// Lowpass corner as a fraction of the DECIMATED Nyquist (avoids aliasing).
+inline constexpr double kDecimLpfFrac = 0.80;
+
 // =====================================================================
 // Corner radii
 // =====================================================================

@@ -321,6 +321,12 @@ target_include_directories(test_bandwidth_preset PRIVATE src)
 target_link_libraries(test_bandwidth_preset PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME bandwidth_preset COMMAND test_bandwidth_preset)
 
+add_executable(test_decimation tests/test_decimation.cpp
+    src/dsp/channelizer.cpp src/dsp/fft.cpp)
+target_include_directories(test_decimation PRIVATE src)
+target_link_libraries(test_decimation PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME decimation COMMAND test_decimation)
+
 # Device hotplug event channel: drop detection, honest fallback, 2 s rtl_tcp
 # auto-reconnect, connect-failure reason (real TCP loopback, no mocks).
 add_executable(test_engine_hotplug tests/test_engine_hotplug.cpp
@@ -615,6 +621,12 @@ target_include_directories(test_ui_audit PRIVATE src build/test_ui_audit_autogen
 target_link_libraries(test_ui_audit PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 add_test(NAME ui_audit COMMAND test_ui_audit)
 set_tests_properties(ui_audit PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_soak tests/test_soak.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_soak PRIVATE src build/test_soak_autogen/include)
+target_link_libraries(test_soak PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME soak COMMAND test_soak)
+set_tests_properties(soak PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Unattended signal-triggered watch recording (detector + pre-roll + per-burst
 # WAV/JSON sidecar; NOT HARDWARE, fully synthesized).

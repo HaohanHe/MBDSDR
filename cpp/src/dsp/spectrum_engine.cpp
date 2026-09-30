@@ -636,6 +636,12 @@ void SpectrumEngine::setNoiseBlanker(bool on) {
     noiseBlanker_.setEnabled(on);
 }
 
+void SpectrumEngine::setFrontendDecimation(int D) {
+    const int d = std::clamp(D, 1, tokens::kDecimMaxFactor);
+    frontendDecimation_.store(d);
+    frontendDecimConfiguredSr_ = 0.0;   // force reconfigure on next loop
+}
+
 bool SpectrumEngine::noiseBlankerEnabled() const { return noiseBlanker_.enabled(); }
 int SpectrumEngine::windowType() const { return static_cast<int>(powerSpectrum_.window()); }
 int SpectrumEngine::averageMode() const { return static_cast<int>(powerSpectrum_.average()); }
@@ -720,6 +726,27 @@ void SpectrumEngine::run() {
         if (iqTapRequested_.load())
             emit iqTapReady(iq, sr, source_->centerFreq());
 
+        // ---- Frontend software decimation (real anti-alias low-pass + integer D)
+        // D=1 leaves iq/sr untouched (zero behavior change). D>1 narrows the band
+        // to +/-sr/(2D) and cuts wideband compute; the recorder/iqTap above already
+        // captured the RAW block, so recorded IQ stays at native rate.
+        double srEff = sr;
+        {
+            const int D = frontendDecimation_.load();
+            if (D > 1) {
+                if (frontendDecimConfiguredSr_ != sr) {
+                    // Cutoff = decimated-Nyquist * kDecimLpfFrac to stop aliasing.
+                    frontendDecim_.configure(sr, sr / D,
+                                            (sr / D / 2.0) * tokens::kDecimLpfFrac);
+                    frontendDecim_.setVfoOffsetHz(0.0);
+                    frontendDecimConfiguredSr_ = sr;
+                }
+                auto dec = frontendDecim_.process(iq);
+                iq.swap(dec);
+                srEff = sr / D;
+            }
+        }
+
         // Spectrum (computed from an FFT-sized window of the block). A real
         // source may deliver a PARTIAL block at start-up / underflow, so round
         // the window DOWN to the largest power of two -- otherwise a non-pow2
@@ -732,7 +759,7 @@ void SpectrumEngine::run() {
             frame.dbfs.resize(specN);
             powerSpectrum_.process(spec, frame.dbfs);
             frame.centerFreqHz = source_->centerFreq();
-            frame.sampleRateHz = source_->sampleRate();
+            frame.sampleRateHz = srEff;
             frame.fftSize = static_cast<int>(specN);
             frame.isTestSignal = !real;
             frame.sourceName = source_->name();
@@ -743,7 +770,14 @@ void SpectrumEngine::run() {
         // channelizer + demod + resampler state), then take the SELECTED VFO's
         // 48 kHz audio into the shared downstream.
         const double centerNow = source_->centerFreq();
-        const std::vector<float>& raw = vfoManager_.process(iq, sr, centerNow);
+        // If frontend decimation changed the effective rate, rebuild the VFO
+        // channelizers for it before fanning out. D=1 keeps srEff==sr so this is
+        // a no-op and channels are untouched (zero regression path).
+        if (srEff != lastEffSrForVfo_) {
+            vfoManager_.sourceRateChanged();
+            lastEffSrForVfo_ = srEff;
+        }
+        const std::vector<float>& raw = vfoManager_.process(iq, srEff, centerNow);
         const VfoChannel* sel = vfoManager_.selected();
         const QString selMode = sel ? sel->mode : demodMode_;
         const bool digital = VfoChannel::modeIsDigital(selMode);

@@ -187,6 +187,15 @@ public:
     void setAverageMode(int a);    // 0=Off 1=Slow 2=Fast
     void setNoiseBlanker(bool on);
 
+    // ---- Frontend software decimation -------------------------------------
+    // Integer factor D (1 = off) applied BEFORE channelization: a real decimating
+    // low-pass (reuses Channelizer, NCO offset 0) so no aliasing folds back. The
+    // wideband FFT and the VFO channels then run on the reduced rate sr/D, which
+    // narrows the displayed band and cuts wideband FFT / channelizer compute for
+    // narrow modes (CW/FT8). D=1 leaves the whole chain byte-identical to before.
+    void setFrontendDecimation(int D);
+    int  frontendDecimation() const { return frontendDecimation_.load(); }
+
     // ---- Device hotplug / liveness --------------------------------------
     // Auto-reconnect (rtl_tcp only): when ON and the last successful endpoint
     // is remembered, a dropped device is silently retried every 2 s until it
@@ -319,6 +328,11 @@ private:
     WavWriter wavWriter_;
     PowerSpectrum powerSpectrum_;
     NoiseBlanker noiseBlanker_;
+    // Frontend software decimator (real decimating low-pass, NCO offset 0).
+    Channelizer frontendDecim_;
+    std::atomic<int> frontendDecimation_{1};
+    double frontendDecimConfiguredSr_ = 0.0;   // rate the decimator was built for
+    double lastEffSrForVfo_ = 0.0;           // last rate handed to vfoManager_
     AudioNoiseReduction anr_;
     CWDecoder cwDecoder_;
     ADSBDecoder adsbDecoder_;

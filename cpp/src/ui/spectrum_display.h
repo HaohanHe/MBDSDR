@@ -43,6 +43,10 @@ class SpectrumDisplay : public QWidget {
 public:
     explicit SpectrumDisplay(QWidget* parent = nullptr);
 
+    // User-placed fixed marker (persisted by the container). Declared here,
+    // outside the slots section, so moc does not choke on a nested type.
+    struct FixedMarker { double freqHz = 0; QString name; };
+
     // ---- Geometry accessors (recomputed in resizeEvent / recomputeGeometry) --
     void recomputeGeometry();
     QRect spectrumRect()   const { return lay_.traceRect; }
@@ -55,6 +59,8 @@ public:
     double visLoHz() const;
     double visHiHz() const;
     double zoomFactor() const { return zoomFactor_; }
+    // Visible-window centre frequency (Hz) -- used to place fixed markers.
+    double viewCenterHz() const { return viewCenterHz_; }
 
     // ---- Waterfall read-out (tests) --------------------------------------
     const QImage& history() const { return history_; }
@@ -78,6 +84,23 @@ public slots:
     void setStepHz(double hz) { tuneStepHz_ = hz; }
     void setMaxHoldEnabled(bool on);
     void clearMaxHold() { maxHold_.clear(); update(); }
+
+    // ---- Spectrum persistence (余晖) -------------------------------------
+    // mode: 0 = off, 1 = low (short trails), 2 = high (long trails). The ghost
+    // envelope decays per-frame by the named tokens (kPersistDecay*); a fresh
+    // rise refreshes it. Cleared by clearPersistence().
+    void setPersistenceMode(int mode);
+    int  persistenceMode() const { return persistMode_; }
+    void clearPersistence() { persist_.clear(); update(); }
+
+    // ---- Fixed user markers (竖线+名称+频率) ----------------------------
+    // Distinct from the temporary auto peak table and the VFO band boxes: these
+    // are user-placed named lines persisted by the container.
+    void setFixedMarkers(const QVector<FixedMarker>& m);
+    const QVector<FixedMarker>& fixedMarkers() const { return fixedMarkers_; }
+    void addFixedMarker(double freqHz, const QString& name);
+    void removeFixedMarker(int index);
+    void clearFixedMarkers() { fixedMarkers_.clear(); update(); }
 
     // Waterfall controls.
     void setScrollSpeed(int linesPerFrame);   // push a row every N frames (1/2/4)
@@ -262,6 +285,14 @@ private:
     // Max-hold envelope.
     std::vector<float> maxHold_;
     bool maxHoldOn_ = false;
+
+    // Persistence (余晖) ghost envelope: decays per frame, refreshed by fresh
+    // rises. Same bin count as the trace; floor initialises to -inf.
+    std::vector<float> persist_;
+    int persistMode_ = 0;
+
+    // User fixed markers (persisted by the container).
+    QVector<FixedMarker> fixedMarkers_;
 
     // ---- Waterfall ring buffer -------------------------------------------
     QImage history_;                 // public snapshot: width=bins, row 0 = newest

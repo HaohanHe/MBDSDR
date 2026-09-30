@@ -12,12 +12,14 @@
 #include <QPixmap>
 #include <QTabWidget>
 #include <QDoubleSpinBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QList>
 #include <cstdlib>
 #include "core/tokens.h"
 #include "ui/main_window.h"
 #include "ui/settings_dialog.h"
+#include "ui/spectrum_display.h"
 
 namespace {
 void grabLater(QWidget* w, const QString& path, int delayMs, QApplication& app) {
@@ -51,6 +53,21 @@ int main(int argc, char** argv) {
     if (QDoubleSpinBox* f = win.findChild<QDoubleSpinBox*>("freqSpin"))
         f->setFocus();
     grabLater(&win, dir + "/ui_audit_main.png", 1200, app);
+
+    // --- Persistence / fixed markers / decimation audit shots --------------
+    if (mbdsdr::ui::SpectrumDisplay* cv = win.findChild<mbdsdr::ui::SpectrumDisplay*>()) {
+        QTimer::singleShot(1500, [cv]() {
+            cv->setPersistenceMode(2);   // high: ghost trail under live trace
+            cv->addFixedMarker(cv->viewCenterHz() - 200e3, "M1");
+            cv->addFixedMarker(cv->viewCenterHz() + 350e3, "M2");
+        });
+        grabLater(&win, dir + "/ui_persistence.png", 2600, app);
+        grabLater(&win, dir + "/ui_markers.png", 2900, app);
+    }
+    if (QComboBox* d = win.findChild<QComboBox*>("decimCombo")) {
+        QTimer::singleShot(1500, [d]() { d->setCurrentIndex(2); });  // x4
+        grabLater(&win, dir + "/ui_decimation.png", 3300, app);
+    }
 
     // 2. Right tab: 录制库.
     if (right) {

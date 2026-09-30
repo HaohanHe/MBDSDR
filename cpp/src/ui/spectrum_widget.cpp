@@ -79,6 +79,47 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     topRow->addWidget(maxRst);
     topRow->addSpacing(tokens::scaled(tokens::kSpacingM));
 
+    // ---- Persistence (余晖): 关/低/高 + clear ----------------------------
+    topRow->addWidget(new QLabel("余晖", this));
+    auto* persistCombo = new QComboBox(this);
+    persistCombo->setObjectName("persistCombo");
+    persistCombo->addItems({"关", "低", "高"});
+    connect(persistCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+        if (canvas_) canvas_->setPersistenceMode(idx);
+        QSettings("MBDSDR", "MBDSDR").setValue("view/persistMode", idx);
+        emit viewChanged();
+    });
+    topRow->addWidget(persistCombo);
+    auto* persistRst = new QPushButton("清", this);
+    persistRst->setToolTip("清除余晖轨迹");
+    connect(persistRst, &QPushButton::clicked, this, [this]() {
+        if (canvas_) canvas_->clearPersistence();
+    });
+    topRow->addWidget(persistRst);
+    topRow->addSpacing(tokens::scaled(tokens::kSpacingM));
+
+    // ---- Fixed marker: add a named vertical line at the visible center ----
+    auto* addMarkerBtn = new QPushButton("标记", this);
+    addMarkerBtn->setObjectName("addFixedMarkerBtn");
+    addMarkerBtn->setToolTip("在当前视窗中心加固定频率标记（可在 QSettings 持久化）");
+    connect(addMarkerBtn, &QPushButton::clicked, this, [this]() {
+        if (!canvas_) return;
+        const double f = canvas_->viewCenterHz();
+        int n = canvas_->fixedMarkers().size() + 1;
+        canvas_->addFixedMarker(f, QString("M%1").arg(n));
+        saveFixedMarkers();
+    });
+    auto* clearMarkerBtn = new QPushButton("清标记", this);
+    connect(clearMarkerBtn, &QPushButton::clicked, this, [this]() {
+        if (!canvas_) return;
+        canvas_->clearFixedMarkers();
+        saveFixedMarkers();
+    });
+    topRow->addWidget(addMarkerBtn);
+    topRow->addWidget(clearMarkerBtn);
+    topRow->addSpacing(tokens::scaled(tokens::kSpacingM));
+
     topRow->addWidget(new QLabel("dB", this));
     dbMinSpin_ = new QSpinBox(this);
     dbMinSpin_->setRange(tokens::kDbSpinLowerMin, tokens::kDbSpinLowerMax);
@@ -247,6 +288,39 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         if (canvas_) canvas_->setHighlightedPeak(row);
     });
     outer->addWidget(peakTable_);
+
+    // Restore persisted fixed markers (default empty) and the last persist mode.
+    loadFixedMarkers();
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        const int pm = s.value("view/persistMode", 0).toInt();
+        if (auto* c = findChild<QComboBox*>("persistCombo"))
+            c->setCurrentIndex(std::clamp(pm, 0, 2));
+    }
+}
+
+void SpectrumWidget::saveFixedMarkers() {
+    if (!canvas_) return;
+    QSettings s("MBDSDR", "MBDSDR");
+    QVariantList list;
+    for (const auto& m : canvas_->fixedMarkers())
+        list.append(QVariantMap{{"freqHz", m.freqHz}, {"name", m.name}});
+    s.setValue("view/fixedMarkers", list);
+}
+
+void SpectrumWidget::loadFixedMarkers() {
+    if (!canvas_) return;
+    QSettings s("MBDSDR", "MBDSDR");
+    const QVariantList list = s.value("view/fixedMarkers").toList();
+    QVector<SpectrumDisplay::FixedMarker> out;
+    for (const QVariant& v : list) {
+        const QVariantMap m = v.toMap();
+        SpectrumDisplay::FixedMarker fm;
+        fm.freqHz = m.value("freqHz").toDouble();
+        fm.name   = m.value("name").toString();
+        out.append(fm);
+    }
+    canvas_->setFixedMarkers(out);
 }
 
 void SpectrumWidget::rebuildPeakTable(const QList<mbdsdr::dsp::PeakInfo>& peaks,
