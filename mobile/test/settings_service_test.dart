@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/models/radio_state.dart';
 import 'package:mbdsdr_mobile/services/settings_service.dart';
@@ -254,5 +256,113 @@ void main() {
     final SettingsService s = SettingsService(kv: kv, secure: InMemorySecureStore());
     await s.load();
     expect(s.lastFreqHz, 144000000);
+  });
+
+  group('频点书签（名称/频率/模式/带宽）', () {
+    test('默认空列表，不预存任何台', () async {
+      final SettingsService s = SettingsService(
+        kv: InMemoryKvStore(),
+        secure: InMemorySecureStore(),
+      );
+      await s.load();
+      expect(s.bookmarks, isEmpty);
+      expect(s.bookmarksHz, isEmpty);
+    });
+
+    test('addBookmark 完整结构 round-trip：名称/频率/模式/带宽都读回', () async {
+      final InMemoryKvStore kv = InMemoryKvStore();
+      final SettingsService s = SettingsService(kv: kv, secure: InMemorySecureStore());
+      await s.load();
+
+      s.addBookmark(
+        name: '测试台',
+        frequencyHz: 146520000,
+        mode: 'wfm',
+        bandwidthHz: 200000,
+      );
+      expect(s.bookmarks, hasLength(1));
+      final b = s.bookmarks.single;
+      expect(b.name, '测试台');
+      expect(b.frequencyHz, 146520000);
+      expect(b.mode, 'wfm');
+      expect(b.bandwidthHz, 200000);
+      expect(b.modeEnum, DemodMode.wfm);
+
+      // 落盘是对象数组（不是纯数字）。
+      final raw = kv.data['bookmarksHz'] as String;
+      expect(raw, contains('"name"'));
+      expect(raw, contains('"frequencyHz"'));
+
+      final SettingsService s2 = SettingsService(kv: kv, secure: InMemorySecureStore());
+      await s2.load();
+      expect(s2.bookmarks.single.name, '测试台');
+      expect(s2.bookmarks.single.bandwidthHz, 200000);
+    });
+
+    test('同频率去重，removeBookmark 按频率删除', () async {
+      final SettingsService s = SettingsService(
+        kv: InMemoryKvStore(),
+        secure: InMemorySecureStore(),
+      );
+      await s.load();
+      expect(s.addBookmark(name: 'A', frequencyHz: 144000000), isTrue);
+      // 同频率再次加入被忽略（不覆盖）。
+      expect(s.addBookmark(name: 'B', frequencyHz: 144000000), isFalse);
+      expect(s.bookmarks, hasLength(1));
+      expect(s.bookmarks.single.name, 'A');
+
+      s.removeBookmark(144000000);
+      expect(s.bookmarks, isEmpty);
+    });
+
+    test('旧纯数字频率数组被只读迁移为无名书签', () async {
+      final InMemoryKvStore kv = InMemoryKvStore();
+      // 旧版只存频率数字数组。
+      kv.data['bookmarksHz'] = '[144000000, 145000000]';
+      final SettingsService s = SettingsService(kv: kv, secure: InMemorySecureStore());
+      await s.load();
+      expect(s.bookmarks, hasLength(2));
+      expect(s.bookmarks[0].frequencyHz, 144000000);
+      expect(s.bookmarks[1].frequencyHz, 145000000);
+      // 迁移后名称/模式/带宽为空。
+      expect(s.bookmarks.every((b) => b.name.isEmpty), isTrue);
+      expect(s.bookmarks.every((b) => b.mode.isEmpty), isTrue);
+      expect(s.bookmarks.every((b) => b.bandwidthHz == 0), isTrue);
+      // bookmarksHz 便捷视图仍给纯频率。
+      expect(s.bookmarksHz, <int>[144000000, 145000000]);
+    });
+
+    test('新对象格式解析 + 非法项静默丢弃', () async {
+      final InMemoryKvStore kv = InMemoryKvStore();
+      kv.data['bookmarksHz'] = jsonEncode(<Object?>[
+        <String, Object?>{
+          'name': 'X',
+          'frequencyHz': 98500000,
+          'mode': 'nfm',
+          'bandwidthHz': 12500,
+        },
+        'not-an-object',
+        <String, Object?>{'name': 'bad', 'frequencyHz': -5},
+      ]);
+      final SettingsService s = SettingsService(kv: kv, secure: InMemorySecureStore());
+      await s.load();
+      // 非法两项被丢弃，只剩合法的一个。
+      expect(s.bookmarks, hasLength(1));
+      expect(s.bookmarks.single.frequencyHz, 98500000);
+      expect(s.bookmarks.single.modeEnum, DemodMode.nfm);
+    });
+
+    test('兼容旧 addBookmarkHz / removeBookmarkHz', () async {
+      final SettingsService s = SettingsService(
+        kv: InMemoryKvStore(),
+        secure: InMemorySecureStore(),
+      );
+      await s.load();
+      s.addBookmarkHz(146000000);
+      expect(s.bookmarks.single.frequencyHz, 146000000);
+      expect(s.bookmarks.single.name, isEmpty);
+      s.removeBookmarkHz(146000000);
+      expect(s.bookmarks, isEmpty);
+    });
   });
 }

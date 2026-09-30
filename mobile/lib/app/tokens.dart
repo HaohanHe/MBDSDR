@@ -102,6 +102,24 @@ abstract final class AppTokens {
     3.2e6,
   ];
 
+  // ---------------------------------------------------------------- 静噪门限（dBFS，相对解调后音频 RMS）
+  // 与桌面端 cpp/src/dsp/squelch.h 对齐：门限越接近 0 越严（只有强信号才开门）。
+  /// 门限滑杆下限（dBFS）。
+  static const double squelchThresholdMinDb = -100;
+
+  /// 门限滑杆上限（dBFS）。
+  static const double squelchThresholdMaxDb = -20;
+
+  /// 安静信道上解调后音频的噪声底估计（dBFS）。默认门限设在它之上。
+  static const double squelchNoiseFloorDb = -60;
+
+  /// 默认门限高于噪声底的裕量（dB）：默认门限 = 噪声底 + 裕量。
+  static const double squelchDefaultAboveNoiseDb = 10;
+
+  /// 默认门限（dBFS）= [squelchNoiseFloorDb] + [squelchDefaultAboveNoiseDb]。
+  static double get squelchDefaultThresholdDb =>
+      squelchNoiseFloorDb + squelchDefaultAboveNoiseDb;
+
   // ---------------------------------------------------------------- 字体
   static const List<String> monoFallback = <String>[
     'JetBrains Mono',

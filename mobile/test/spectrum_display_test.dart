@@ -195,6 +195,24 @@ class _FakeRadio extends ChangeNotifier implements RadioApi {
   void setMuted(bool m) => muted = m;
 
   @override
+  bool squelchEnabled = false;
+
+  @override
+  double squelchThresholdDb = -50;
+
+  @override
+  bool squelchOpen = false;
+
+  @override
+  double squelchLevelDb = -120;
+
+  @override
+  void setSquelchEnabled(bool on) => squelchEnabled = on;
+
+  @override
+  void setSquelchThresholdDb(double db) => squelchThresholdDb = db;
+
+  @override
   Future<void> connect(String host, int port) async {}
 
   @override
@@ -262,6 +280,24 @@ class _FakeConnectedRadio extends ChangeNotifier implements RadioApi {
 
   @override
   void setMuted(bool m) => muted = m;
+
+  @override
+  bool squelchEnabled = false;
+
+  @override
+  double squelchThresholdDb = -50;
+
+  @override
+  bool squelchOpen = false;
+
+  @override
+  double squelchLevelDb = -120;
+
+  @override
+  void setSquelchEnabled(bool on) => squelchEnabled = on;
+
+  @override
+  void setSquelchThresholdDb(double db) => squelchThresholdDb = db;
 
   @override
   Future<void> connect(String host, int port) async {}
