@@ -238,6 +238,26 @@ private slots:
         QVERIFY(!img.isNull());
     }
 
+    // --- 7) selected-satellite real trajectory overlay stores its samples --
+    // The overlay is fed with real propagated (az,el); here we just assert the
+    // widget stores the sample count and paints without crashing. The numeric
+    // propagation is covered by test_sky_time (TleClient) / the MainWindow slider.
+    void selectedTrajectoryStored() {
+        QList<QPair<double,double>> traj;
+        for (int k = 0; k < 61; ++k)
+            traj.append({double(k * 6.0), 20.0 + 40.0 * std::sin(M_PI * k / 60.0)});
+        view_->setSelectedTrajectory(traj);
+        QCOMPARE(view_->selectedTrajectory().size(), 61);
+        // az spans 0..360, el within [0,90].
+        for (const auto& pt : view_->selectedTrajectory()) {
+            QVERIFY2(pt.second >= -5.0 && pt.second <= 95.0, "el out of plausible range");
+        }
+        QImage img = view_->grab().toImage();
+        QVERIFY(!img.isNull());
+        view_->setSelectedTrajectory({});   // clear
+        QCOMPARE(view_->selectedTrajectory().size(), 0);
+    }
+
     void cleanupTestCase() {
         delete view_;
         delete ep_;

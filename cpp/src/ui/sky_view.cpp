@@ -107,6 +107,11 @@ void SkyView::clearGnssSatellites() {
     update();
 }
 
+void SkyView::setSelectedTrajectory(QList<QPair<double,double>> azEl) {
+    selectedTraj_ = std::move(azEl);
+    update();
+}
+
 void SkyView::setCurrentTime(QDateTime utc) {
     nowUtc_ = utc;
     update();
@@ -343,6 +348,23 @@ void SkyView::paintEvent(QPaintEvent*) {
         QPointF m = polarToXY(pass.track[best].first, pass.track[best].second, R, c);
         labs.push_back({m, pass.name,
                         QColor(sel ? tokens::kSuccess : tokens::kTextPrimary), 2});
+    }
+
+    // --- Selected-satellite real trajectory overlay (dashed) -----------
+    // Real propagated az/el around the displayed moment, drawn UNDER the live
+    // markers so the current position dot still sits on top. Distinct from the
+    // predicted full pass arcs: this is the actual motion through ±kSkyTrajectoryWindowMin.
+    if (selectedTraj_.size() >= 2) {
+        QPen trajPen(tokens::rgbaA(tokens::kTrajLineAlpha));
+        trajPen.setWidthF(tokens::kTrajLineWidth);
+        trajPen.setStyle(Qt::DashLine);
+        p.setPen(trajPen);
+        QPolygonF traj;
+        for (const auto& pt : selectedTraj_) {
+            if (pt.second < -1.0 || pt.second > 95.0) continue; // drop below-horizon hops
+            traj << polarToXY(pt.first, std::clamp(pt.second, 0.0, 90.0), R, c);
+        }
+        if (traj.size() >= 2) p.drawPolyline(traj);
     }
 
     // --- Live orbit satellites ------------------------------------------

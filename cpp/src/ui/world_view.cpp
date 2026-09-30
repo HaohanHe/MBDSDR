@@ -54,11 +54,13 @@ void WorldView::setStation(double lat, double lon) {
     update();
 }
 
-void WorldView::setGnssFix(bool valid, double lat, double lon, int sats, double hdop) {
+void WorldView::setGnssFix(bool valid, double lat, double lon, int sats, double hdop,
+                           QDateTime fixTimeUtc) {
     gnssValid_ = valid;
     if (valid) { gnssLat_ = lat; gnssLon_ = lon; }
     gnssSats_ = sats;
     gnssHdop_ = hdop;
+    gnssFixTime_ = fixTimeUtc;
     update();
 }
 
@@ -167,9 +169,13 @@ WorldView::Hit WorldView::hitTest(const QPointF& pos) const {
         QPointF p = proj_.project(gnssLat_, gnssLon_);
         if (near(p)) {
             Hit h; h.type = Hit::Gnss; h.id = QStringLiteral("gnss");
-            h.tooltip = QString::fromUtf8("GNSS 定位 %1, %2\n%3 颗星 · HDOP %4")
+            const QString t = gnssFixTime_.isValid()
+                ? QString("定位时间 %1 UTC").arg(gnssFixTime_.toUTC().toString("yyyy-MM-dd HH:mm:ss"))
+                : QStringLiteral("定位时间 --:--:--");
+            h.tooltip = QString::fromUtf8("GNSS 定位\n%1, %2\n%3 颗星 · HDOP %4\n%5")
                             .arg(gnssLat_, 0, 'f', 4).arg(gnssLon_, 0, 'f', 4)
-                            .arg(gnssSats_).arg(gnssHdop_, 0, 'f', 1);
+                            .arg(gnssSats_).arg(gnssHdop_, 0, 'f', 1)
+                            .arg(t);
             return h;
         }
     }
@@ -235,6 +241,7 @@ void WorldView::paintEvent(QPaintEvent*) {
     if (layerVisible(MapLayer::Satellite)) drawSatellites(p);
     drawLabels(p);
     drawStatusChips(p);
+    drawLegend(p);
 }
 
 void WorldView::drawGraticule(QPainter& p) {
@@ -490,6 +497,64 @@ void WorldView::drawStatusChips(QPainter& p) {
                           tokens::scaled(tokens::kRadiusSmall));
         p.setPen(tokens::rgbaA(tokens::kTextAlphaQuaternary));
         p.drawText(r, Qt::AlignCenter, tag);
+    }
+}
+
+// Restrained corner legend: one tiny colored swatch + caption per layer, bottom
+// right. Colors are read straight from the same tokens the layers paint with,
+// so the legend can never drift from the actual markers. Faint, small, quiet.
+namespace {
+struct LegendRow { QColor color; QString text; };
+QList<LegendRow> legendRows() {
+    return {
+        { QColor(tokens::kAccent),  QStringLiteral("GNSS 定位点") },
+        { QColor(tokens::kWarning), QStringLiteral("ADS-B 飞机") },
+        { tokens::rgbaA(tokens::kTextAlphaTertiary), QStringLiteral("卫星星下点") },
+        { QColor(tokens::kSuccess), QStringLiteral("本站") },
+    };
+}
+} // namespace
+
+QStringList WorldView::legendItems() const {
+    QStringList out;
+    for (const auto& r : legendRows()) out << r.text;
+    return out;
+}
+
+void WorldView::drawLegend(QPainter& p) {
+    QFont f = p.font(); f.setPointSizeF(tokens::kFontAuxPt); p.setFont(f);
+    const QFontMetrics fm(f);
+    const int lineH = fm.height();
+    const int padX = tokens::scaled(tokens::kSpacingM);
+    const int padY = tokens::scaled(tokens::kSpacingS);
+    const int swatch = tokens::scaled(tokens::kMapSatDotR);
+
+    const QList<LegendRow> items = legendRows();
+
+    int maxW = 0;
+    for (const auto& it : items)
+        maxW = std::max(maxW, fm.horizontalAdvance(it.text));
+    const int boxW = swatch + tokens::scaled(tokens::kSpacingS) + maxW + 2 * padX;
+    const int boxH = int(items.size()) * lineH + 2 * padY;
+
+    QRectF box(width() - boxW - tokens::scaled(tokens::kSpacingM),
+               height() - boxH - tokens::scaled(tokens::kMapGutterB) - tokens::scaled(tokens::kSpacingM),
+               boxW, boxH);
+    p.setPen(QPen(tokens::cardEdge(), 1.0));
+    p.setBrush(tokens::card1());
+    p.drawRoundedRect(box, tokens::scaled(tokens::kRadiusSmall), tokens::scaled(tokens::kRadiusSmall));
+
+    int y = box.top() + padY;
+    for (const auto& it : items) {
+        const QPointF sc(box.left() + padX + swatch / 2.0, y + lineH / 2.0);
+        p.setPen(Qt::NoPen);
+        p.setBrush(it.color);
+        p.drawEllipse(sc, swatch / 2.0, swatch / 2.0);
+        p.setPen(tokens::rgbaA(tokens::kTextAlphaSecondary));
+        p.drawText(QRectF(box.left() + padX + swatch + tokens::scaled(tokens::kSpacingS),
+                          y, maxW, lineH),
+                   Qt::AlignVCenter | Qt::AlignLeft, it.text);
+        y += lineH;
     }
 }
 

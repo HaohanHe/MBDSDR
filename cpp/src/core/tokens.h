@@ -246,6 +246,22 @@ inline constexpr int    kSkyRingDotR     = 2;   // pass-arc time tick dot
 inline constexpr double  kArcWidth       = 1.4;
 inline constexpr double  kArcSelWidth   = 2.2;
 
+// =====================================================================
+// Sky "now / preview" time scrubber + selected-satellite trajectory.
+// The slider offsets the displayed UTC moment relative to wall-now; dragging
+// re-propagates ALL visible satellites with the REAL SGP4 propagator
+// (tleClient_->propagateAt). It is throttled so a fast drag never issues more
+// than kSkyPreviewMaxHz propagations/sec; release returns to live. The
+// trajectory overlays the selected satellite's real az/el around the displayed
+// moment (past + future window), distinct from the predicted pass arcs.
+// =====================================================================
+inline constexpr int    kSkyPreviewRangeMin   = 30;   // slider span: ±30 min around now
+inline constexpr int    kSkyPreviewThrottleMs = 100;  // drag recompute coalesce = 10 Hz max
+inline constexpr int    kSkyTrajectoryWindowMin = 10; // ±10 min around the displayed time
+inline constexpr int    kSkyTrajectorySamples  = 61;   // sample points across the 2*window
+inline constexpr double  kTrajLineAlpha       = 0.45;  // dashed trajectory overlay alpha
+inline constexpr double  kTrajLineWidth      = 1.2;
+
 // Elevation-vs-time plot margins (separate from spectrum kPlotMargin* so the
 // spectrum widget is untouched). Enough room for axis titles + tick captions
 // on all four sides so nothing is clipped.

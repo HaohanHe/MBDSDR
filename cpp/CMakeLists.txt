@@ -231,6 +231,12 @@ add_executable(ui_shot_statusstrip tests/ui_screenshot_status_strip.cpp ${SHOT_S
 target_include_directories(ui_shot_statusstrip PRIVATE src build/ui_shot_statusstrip_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_statusstrip PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
+# Sky time-scrubber preview + trajectory, GIS legend + GNSS fix, clock-domain readout.
+# Offscreen; not in ctest. Writes cpp/scratch/ui_sky_drag.png etc.
+add_executable(ui_shot_skytime tests/ui_screenshot_sky_time.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_skytime PRIVATE src build/ui_shot_skytime_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_skytime PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
 target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent ${CMAKE_DL_LIBS})
 
 if(RTLSDR_FOUND)
@@ -676,8 +682,21 @@ target_include_directories(test_sky_view PRIVATE src)
 target_link_libraries(test_sky_view PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME sky_view COMMAND test_sky_view)
 
+# Clock-domain Δt = GNSS − system (ms), pure header-only helper + throttle tokens.
+add_executable(test_clock_domain tests/test_clock_domain.cpp)
+target_include_directories(test_clock_domain PRIVATE src)
+target_link_libraries(test_clock_domain PRIVATE Qt6::Test Qt6::Gui Qt6::Core)
+add_test(NAME clock_domain COMMAND test_clock_domain)
+
+# Sky "now/preview" time scrubber: drag moves the sky clock to wall-now+offset
+# (throttled), release returns to live. Builds the full app (offscreen).
+add_executable(test_sky_time_slider tests/test_sky_time_slider.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_sky_time_slider PRIVATE src build/test_sky_time_slider_autogen/include)
+target_link_libraries(test_sky_time_slider PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME sky_time_slider COMMAND test_sky_time_slider)
+
 # New GUI tests must run headless (no display on CI / this build host).
-set_tests_properties(map_view sky_view PROPERTIES
+set_tests_properties(map_view sky_view sky_time_slider PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 message(STATUS "MBDSDR C++ build type: ${CMAKE_BUILD_TYPE}")

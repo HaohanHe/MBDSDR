@@ -99,6 +99,10 @@ private slots:
     // ---- bidirectional satellite selection sync (no re-emit loop) ----
     void selectSatelliteByName(const QString& name);
     void copyClockBias();
+    // ---- sky "now / preview" time scrubber ------------------------------
+    void onSkySliderChanged(int offsetMin);   // throttled: coalesce -> refreshSkyAt(preview)
+    void onSkySliderReleased();                // back to live, restore slider to center
+    void recomputePreview();                   // the throttled propagation at previewUtc_
 
 private:
     dsp::SpectrumEngine* engine_   = nullptr;
@@ -188,6 +192,14 @@ private:
     bool            stationSet_ = false;
     QTimer*         liveTimer_   = nullptr;
     int             liveRow_     = -1;   // selected row tracked live, or -1
+    // Sky time scrubber: center = live wall-now; dragging offsets the displayed
+    // UTC moment and re-propagates all visible satellites with the REAL SGP4
+    // propagator (throttled to <= kSkyPreviewThrottleMs). Release returns to live.
+    QSlider*        skyTimeSlider_ = nullptr;
+    QTimer*         skyPreviewTimer_ = nullptr;  // drag-coalesce (throttle)
+    bool            previewMode_ = false;        // scrubber active (not live)
+    QDateTime       previewUtc_;                 // the moment being previewed
+    int             pendingPreviewOffsetMin_ = 0; // latest scrubber offset, coalesced
     QTabWidget* centerTabs_ = nullptr;
 
     // ---- One-tap pass capture + Doppler auto-compensation (sky tab) ----
