@@ -60,6 +60,7 @@
 #include "core/spectrum_frame.h"
 #include "core/bandwidth_preset.h"
 #include "dsp/spectrum_engine.h"
+#include "dsp/spyserver_server.h"
 #include "dsp/adsb_decoder.h"
 #include "dsp/tle_client.h"
 #include "ai/agent.h"
@@ -270,6 +271,78 @@ MainWindow::MainWindow(QWidget* parent)
         advToggle_->setText(show ? "高级 ▼" : "高级 ▶");
     });
     leftLay->addWidget(gSrc);
+
+    // ---- SpyServer 远程 IQ 服务 (SDR++/Airspy 协议) ----
+    // A TCP listener that streams the engine's real IQ to a remote SDR++ /
+    // SDRangel client. Default OFF so it never grabs :5555 by accident. The
+    // port is persisted (net/spyPort); the enable state (net/spyEnabled) too,
+    // but the server is only (re)started from the checkbox toggle.
+    {
+        auto* gSpy = new QGroupBox("SpyServer 远程", leftCard);
+        auto* gSpyLay = new QVBoxLayout(gSpy);
+        spyserverChk_ = new QCheckBox("开启 SpyServer", gSpy);
+        spyserverChk_->setObjectName("spyserverChk");
+        gSpyLay->addWidget(spyserverChk_);
+
+        auto* portRow = new QHBoxLayout;
+        auto* portLbl = new QLabel("端口", gSpy);
+        spyserverPortSpin_ = new QSpinBox(gSpy);
+        spyserverPortSpin_->setObjectName("spyserverPortSpin");
+        spyserverPortSpin_->setRange(1024, 65535);
+        spyserverPortSpin_->setValue(5555);   // SpyServer default (note §2)
+        spyserverPortSpin_->setSuffix("");
+        portRow->addWidget(portLbl);
+        portRow->addWidget(spyserverPortSpin_);
+        gSpyLay->addLayout(portRow);
+
+        spyserverStatusLabel_ = new QLabel("未开启", gSpy);
+        spyserverStatusLabel_->setObjectName("spyserverStatusLabel");
+        gSpyLay->addWidget(spyserverStatusLabel_);
+
+        leftLay->addWidget(gSpy);
+
+        // Build the server once; it starts/stops on the checkbox.
+        spyServer_ = new dsp::SpyServerServer(this);
+        // Wire client-tunable parameters straight to the real engine slots.
+        dsp::SpyServerTuner tuner;
+        tuner.setCenterFreq = [this](double hz) {
+            QMetaObject::invokeMethod(engine_, [this, hz]() {
+                engine_->onSetCenterFreq(hz);
+            }, Qt::QueuedConnection);
+        };
+        tuner.setGain = [this](double db) {
+            QMetaObject::invokeMethod(engine_, [this, db]() {
+                engine_->onSetGain(db);
+            }, Qt::QueuedConnection);
+        };
+        tuner.queryInfo = [this](double& maxSr, double& minHz, double& maxHz,
+                                 double& centerHz, double& gainDb) {
+            // Honest live readback: sample rate / gain from the last engine
+            // telemetry (cached in onSourceTelemetry), frequency from the engine.
+            maxSr = lastSampleRateHz_;
+            minHz = tokens::kFreqMinHz;
+            maxHz = tokens::kFreqMaxHz;
+            centerHz = engine_->centerFreq();
+            gainDb = lastGainDb_;
+        };
+        spyServer_->setTuner(tuner);
+        // Push the engine's real IQ blocks to the server only while streaming.
+        connect(engine_, &dsp::SpectrumEngine::iqTapReady,
+                spyServer_, &dsp::SpyServerServer::feedIQ);
+        connect(spyServer_, &dsp::SpyServerServer::iqTapRequired,
+                engine_, &dsp::SpectrumEngine::setSpyServerTapRequested);
+        connect(spyServer_, &dsp::SpyServerServer::clientCountChanged,
+                this, [this](int) { updateSpyServerStatus(); });
+        connect(spyServer_, &dsp::SpyServerServer::listeningChanged,
+                this, [this](bool, quint16) { updateSpyServerStatus(); });
+        connect(spyserverChk_, &QCheckBox::toggled,
+                this, &MainWindow::onSpyServerToggled);
+        connect(spyserverPortSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
+                this, [this](int v) {
+            QSettings("MBDSDR", "MBDSDR").setValue("net/spyPort", v);
+            scheduleSave();
+        });
+    }
 
     auto* gFreq = new QGroupBox("频率", leftCard);
     auto* gFreqLay = new QFormLayout(gFreq);
@@ -2763,6 +2836,17 @@ void MainWindow::restoreUiState() {
     offsetChk_->setChecked(s.value("rtl/offsetTuning", false).toBool());
     biasTeeChk_->setChecked(s.value("rtl/biasTee", false).toBool());   // default false
 
+    // ---- SpyServer (default OFF; only binds when the box is checked) ----
+    spyserverPortSpin_->blockSignals(true);
+    spyserverChk_->blockSignals(true);
+    spyserverPortSpin_->setValue(s.value("net/spyPort", 5555).toInt());
+    spyserverChk_->setChecked(s.value("net/spyEnabled", false).toBool());
+    spyserverPortSpin_->blockSignals(false);
+    spyserverChk_->blockSignals(false);
+    // If it was left on, actually (re)start the listener now that the port is set.
+    if (spyserverChk_->isChecked()) onSpyServerToggled(true);
+    else updateSpyServerStatus();
+
     // ---- View ----
     const double zoom = s.value("view/zoomFactor", 1.0).toDouble();
     spectrum_->setZoomFactor(zoom);
@@ -3011,6 +3095,8 @@ void MainWindow::onSourceTelemetry(const QString& name, bool connected,
                                     double centerHz, double sampleRateHz, double gainDb) {
     // Hardware readback values (not the UI requests). Offline test source:
     // connected=false, values are honest synthetic readbacks tagged 非硬件.
+    if (sampleRateHz > 0.0) lastSampleRateHz_ = sampleRateHz;
+    lastGainDb_ = gainDb;
     if (sbSr_)
         sbSr_->setText(sampleRateHz > 0.0
             ? QString("%1 MS/s").arg(sampleRateHz / 1e6, 0, 'f', 3) : QString("--"));
@@ -3022,6 +3108,38 @@ void MainWindow::onSourceTelemetry(const QString& name, bool connected,
             ? QString("增益 %1 dB").arg(gainDb, 0, 'f', 1) : QString("--"));
     if (sbSdr_)
         sbSdr_->setText(name + (connected ? QString() : QStringLiteral("（非硬件）")));
+}
+
+void MainWindow::onSpyServerToggled(bool on) {
+    if (!spyServer_) return;
+    if (on) {
+        const quint16 port = static_cast<quint16>(spyserverPortSpin_->value());
+        if (!spyServer_->start(port)) {
+            // Bind failed (port taken / permission): reflect honestly and
+            // uncheck so the UI state matches reality -- never claim listening.
+            spyserverChk_->blockSignals(true);
+            spyserverChk_->setChecked(false);
+            spyserverChk_->blockSignals(false);
+            spyserverStatusLabel_->setText(QStringLiteral("监听失败（端口被占?）"));
+            return;
+        }
+    } else {
+        spyServer_->stop();
+    }
+    QSettings("MBDSDR", "MBDSDR").setValue("net/spyEnabled", on);
+    scheduleSave();
+    updateSpyServerStatus();
+}
+
+void MainWindow::updateSpyServerStatus() {
+    if (!spyserverStatusLabel_) return;
+    if (!spyServer_ || !spyServer_->isListening()) {
+        spyserverStatusLabel_->setText(QStringLiteral("未开启"));
+        return;
+    }
+    spyserverStatusLabel_->setText(
+        QStringLiteral("监听 %1 · %2 客户端")
+            .arg(spyServer_->port()).arg(spyServer_->clientCount()));
 }
 
 void MainWindow::onSquelchState(bool open) {

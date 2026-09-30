@@ -35,7 +35,7 @@ class QSpinBox;
 
 namespace mbdsdr {
 namespace ui { class BookmarkManager; }
-namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct VfoMarker; class FrequencyScanner; }
+namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct VfoMarker; class FrequencyScanner; class SpyServerServer; }
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class WeatherSatPanel; }
@@ -231,6 +231,17 @@ private:
     QSpinBox*       tcpPortSpin_ = nullptr;
     QLabel*         rssiLabel_  = nullptr;
 
+    // ---- SpyServer remote-IQ server (SDR++/Airspy wire protocol) ----------
+    // Off by default; binding is attempted only when the box is checked. The
+    // server streams the engine's REAL IQ (rtl_tcp source, or the honestly
+    // labelled offline test signal) -- never fabricated frames.
+    dsp::SpyServerServer* spyServer_ = nullptr;
+    QCheckBox*      spyserverChk_       = nullptr;
+    QSpinBox*       spyserverPortSpin_   = nullptr;
+    QLabel*         spyserverStatusLabel_ = nullptr;  // 监听端口/客户端数
+    void onSpyServerToggled(bool on);                // start/stop the listener
+    void updateSpyServerStatus();                    // refresh the status line
+
     // Collapsible advanced front-end options (RTL-SDR only; disabled w/o HW)
     QPushButton*    advToggle_   = nullptr;
     QWidget*        advPanel_    = nullptr;
@@ -360,6 +371,11 @@ private:
     QLabel*         sbSquelch_ = nullptr; // OPEN / CLOSED / OFF (squelchState + checkbox)
     QLabel*         sbGnss_  = nullptr;   // "GNSS 定位" once a real fix lands; else empty
     bool            squelchOn_ = false;    // mirrors 启用静噪 checkbox (for OFF state)
+    // Cached real engine readback (from sourceTelemetry) so the SpyServer
+    // handshake DEVICE_INFO reports the honest live sample rate / gain, not a
+    // hard-coded guess.
+    double          lastSampleRateHz_ = 2.4e6;
+    double          lastGainDb_ = 0.0;
 
     // AI
     ai::Agent*      agent_       = nullptr;

@@ -681,6 +681,12 @@ void SpectrumEngine::run() {
         // Record raw IQ if recording
         if (recorder_.isRecording()) recorder_.writeIQ(iq);
 
+        // SpyServer read-only tap: re-emit the SAME real block the recorder /
+        // downstream chain see, but only while a remote client is streaming.
+        // Queued copy to the UI thread (SpyServerServer lives there).
+        if (iqTapRequested_.load())
+            emit iqTapReady(iq, sr, source_->centerFreq());
+
         // Spectrum (computed from an FFT-sized window of the block).
         std::size_t specN = std::min<std::size_t>(n, iq.size());
         std::vector<std::complex<float>> spec(iq.begin(), iq.begin() + specN);
