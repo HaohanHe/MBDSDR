@@ -120,8 +120,15 @@ double SpectrumEngine::centerFreq() const {
 }
 
 DeviceCapabilities SpectrumEngine::sourceCapabilities() const {
-    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
-    return source_ ? source_->capabilities() : noDeviceCapabilities();
+    // Read ONLY the independent snapshot: never take sourceMutex_ here, or the
+    // UI thread starves against the tight real-source run loop.
+    QMutexLocker lk(&capsMutex_);
+    return capsSnapshot_;
+}
+
+void SpectrumEngine::updateCapsSnapshotLocked() {
+    QMutexLocker lk(&capsMutex_);
+    capsSnapshot_ = source_ ? source_->capabilities() : noDeviceCapabilities();
 }
 
 void SpectrumEngine::onSetCenterFreq(double f) {
@@ -194,12 +201,14 @@ bool SpectrumEngine::tryConnectRtl() {
     if (rtl->start()) {
         source_ = std::move(rtl);
         reconnectPending_ = false;   // manual action cancels any retry
+        updateCapsSnapshotLocked();
         emit sourceChanged("RTL-SDR", true);
         return true;
     }
     source_ = std::make_unique<TestSignalSource>();
     source_->start();
     reconnectPending_ = false;
+    updateCapsSnapshotLocked();
     emit sourceError(QStringLiteral("RTL-SDR 设备打开失败：未检测到硬件"));
     emit sourceChanged("Test Signal", false);
     return false;
@@ -216,6 +225,7 @@ void SpectrumEngine::disconnectSource() {
     realSourceActive_ = false;
     tcpHost_.clear();
     tcpPort_ = 0;
+    updateCapsSnapshotLocked();
     emit sourceChanged("Test Signal", false);
 }
 
@@ -229,6 +239,7 @@ bool SpectrumEngine::connectRtlTcp(const QString& host, quint16 port) {
         tcpPort_ = port;
         reconnectPending_ = false;   // manual action cancels any retry
         realSourceActive_ = true;
+        updateCapsSnapshotLocked();
         emit sourceChanged(QString("rtl_tcp %1:%2").arg(host).arg(port), true);
         return true;
     }
@@ -239,6 +250,7 @@ bool SpectrumEngine::connectRtlTcp(const QString& host, quint16 port) {
     source_->start();
     reconnectPending_ = false;
     realSourceActive_ = false;
+    updateCapsSnapshotLocked();
     emit sourceError(reason.isEmpty()
         ? QStringLiteral("rtl_tcp 连接失败") : reason);
     emit sourceChanged("Test Signal", false);
@@ -275,6 +287,7 @@ void SpectrumEngine::dropSourceLocked() {
     source_ = std::make_unique<TestSignalSource>();
     source_->start();
     realSourceActive_ = false;
+    updateCapsSnapshotLocked();
     if (autoReconnect_.load() && !tcpHost_.isEmpty() && tcpPort_ != 0) {
         reconnectPending_ = true;
         lastReconnectMs_ = reconnectClock_.elapsed();
@@ -770,6 +783,9 @@ void SpectrumEngine::run() {
         const qint64 nowMs = telemetryClock_.elapsed();
         if (lastTelemetryMs_ < 0 || nowMs - lastTelemetryMs_ >= 1000) {
             lastTelemetryMs_ = nowMs;
+            // Refresh the UI-facing capability snapshot ~1 Hz (we already hold
+            // sourceMutex_ here). UI reads capsMutex_, never sourceMutex_.
+            updateCapsSnapshotLocked();
             emit sourceTelemetry(source_->name(), source_->isConnected(),
                                  source_->centerFreq(), source_->sampleRate(),
                                  source_->gain());
