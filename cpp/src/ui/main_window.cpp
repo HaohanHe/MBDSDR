@@ -425,6 +425,25 @@ MainWindow::MainWindow(QWidget* parent)
     }
     bwCombo_->setMinimumWidth(tokens::scaled(120));
     gRxLay->addRow("带宽", bwCombo_);
+
+    // ---- Frontend software decimation (real anti-alias low-pass + integer D) --
+    // 关 = D1 (native). Higher factors narrow the wideband band and cut compute
+    // for narrow modes. Wired straight to the engine; readback via the engine.
+    QComboBox* decimCombo = new QComboBox(gRx);
+    decimCombo->setObjectName("decimCombo");
+    decimCombo->addItem(QStringLiteral("关"), 1);
+    decimCombo->addItem(QStringLiteral("×2"), 2);
+    decimCombo->addItem(QStringLiteral("×4"), 4);
+    decimCombo->addItem(QStringLiteral("×8"), 8);
+    decimCombo->setToolTip(QStringLiteral(
+        "前端软件抽取：真实低通+整数抽取（抗混叠），收窄宽带、降低窄带算力；关=原采样率。"));
+    connect(decimCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, decimCombo](int) {
+        const int d = decimCombo->currentData().toInt();
+        if (engine_) engine_->setFrontendDecimation(d);
+        QSettings("MBDSDR", "MBDSDR").setValue("rx/frontendDecimation", d);
+    });
+    gRxLay->addRow("抽取", decimCombo);
     // Channel-status badge: "立体声" only when the engine's real 19 kHz pilot is
     // locked and the L/R matrix has engaged; otherwise honestly "单声道". Fully
     // driven by onStereoState() -- never fabricated.

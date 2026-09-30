@@ -91,6 +91,9 @@ private:
     // Rebuild the peak table from the canvas's matured, tracked peak list.
     void rebuildPeakTable(const QList<mbdsdr::dsp::PeakInfo>& peaks,
                           const QList<int>& ids);
+    // Persist / restore the user's fixed markers (default empty) via QSettings.
+    void saveFixedMarkers();
+    void loadFixedMarkers();
 };
 
 } // namespace ui

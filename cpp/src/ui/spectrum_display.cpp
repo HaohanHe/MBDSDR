@@ -307,6 +307,19 @@ void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
             if (frame.dbfs[i] > maxHold_[i]) maxHold_[i] = frame.dbfs[i];
     }
 
+    // ---- Persistence (余晖): decay the ghost envelope, refresh on fresh rise --
+    if (persistMode_ > 0) {
+        const float decay = (persistMode_ == 2) ? tokens::kPersistDecayHigh
+                                                : tokens::kPersistDecayLow;
+        if (static_cast<int>(persist_.size()) != bins)
+            persist_.assign(bins, -std::numeric_limits<float>::max());
+        for (int i = 0; i < bins && i < static_cast<int>(frame.dbfs.size()); ++i) {
+            const float fresh = frame.dbfs[i];
+            const float aged  = persist_[i] * decay;   // -inf * 0 stays -inf
+            persist_[i] = std::isfinite(fresh) ? std::max(fresh, aged) : aged;
+        }
+    }
+
     ++frameMod_;
     if (frameMod_ >= everyNthFrame_) {
         frameMod_ = 0;
@@ -365,6 +378,29 @@ void SpectrumDisplay::setMaxHoldEnabled(bool on) {
     maxHoldOn_ = on;
     if (!on) maxHold_.clear();
     update();
+}
+
+void SpectrumDisplay::setPersistenceMode(int mode) {
+    persistMode_ = std::clamp(mode, 0, 2);
+    if (persistMode_ == 0) persist_.clear();
+    update();
+}
+
+void SpectrumDisplay::setFixedMarkers(const QVector<SpectrumDisplay::FixedMarker>& m) {
+    fixedMarkers_ = m;
+    update();
+}
+
+void SpectrumDisplay::addFixedMarker(double freqHz, const QString& name) {
+    fixedMarkers_.push_back(FixedMarker{freqHz, name});
+    update();
+}
+
+void SpectrumDisplay::removeFixedMarker(int index) {
+    if (index >= 0 && index < fixedMarkers_.size()) {
+        fixedMarkers_.removeAt(index);
+        update();
+    }
 }
 
 void SpectrumDisplay::setScrollSpeed(int linesPerFrame) {
@@ -525,6 +561,7 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         const double binHz = frameFsHz_ / bins;
         QPolygonF line;
         QPolygonF holdLine;
+        QPolygonF ghostLine;
         for (int i = 0; i < bins; ++i) {
             const double f = bandLo + (i + 0.5) * binHz;
             const int x = xForFreq(f, fLo, span);
@@ -532,12 +569,39 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
             line << QPointF(x, dbToY(frame_.dbfs[i]));
             if (maxHoldOn_ && i < static_cast<int>(maxHold_.size()))
                 holdLine << QPointF(x, dbToY(maxHold_[i]));
+            if (persistMode_ > 0 && i < static_cast<int>(persist_.size()) &&
+                std::isfinite(persist_[i]))
+                ghostLine << QPointF(x, dbToY(persist_[i]));
+        }
+        // Ghost (余晖) underlay: calm accent, drawn BEFORE the live trace.
+        if (persistMode_ > 0 && !ghostLine.isEmpty()) {
+            const float ga = (persistMode_ == 2) ? tokens::kPersistAlphaHigh
+                                                 : tokens::kPersistAlphaLow;
+            QColor ghost = QColor(tokens::kAccent); ghost.setAlphaF(ga);
+            p.setPen(QPen(ghost, 1.0));
+            p.drawPolyline(ghostLine);
         }
         p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaPrimary), 1.2));
         if (!line.isEmpty()) p.drawPolyline(line);
         if (maxHoldOn_ && !holdLine.isEmpty()) {
             p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary2), 1.0));
             p.drawPolyline(holdLine);
+        }
+    }
+
+    // --- Fixed user markers: vertical named lines on the trace ---------------
+    // Distinct from VFO band boxes and temporary auto peaks: thin quiet lines.
+    for (const auto& fm : fixedMarkers_) {
+        const int x = xForFreq(fm.freqHz, fLo, span);
+        if (x < trace.left() || x > trace.right()) continue;
+        QColor lc = QColor(tokens::kAccent);
+        lc.setAlphaF(tokens::kVfoBoxSelEdgeAlpha);
+        p.setPen(QPen(lc, tokens::kVfoBoxLineWidth));
+        p.drawLine(x, trace.top(), x, trace.bottom());
+        if (!fm.name.isEmpty()) {
+            p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary2), 1));
+            p.drawText(x + tokens::scaled(2), trace.top() + tokens::scaled(12),
+                       QString("%1 %2").arg(fm.name).arg(fm.freqHz / 1e6, 0, 'f', 3));
         }
     }
 
