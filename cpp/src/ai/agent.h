@@ -41,6 +41,14 @@ signals:
     void responseReady(const QString& text);
     void toolCalled(const QString& tool, const QString& result);
     void statusChanged(const QString& status);
+    // Streaming partial (accumulated content so far); UI replaces its transient
+    // line. Absent on the no-API-key local-command path.
+    void partialReady(const QString& accumulated);
+    // History was compacted into a summary entry; UI annotates 〔已摘要〕.
+    void contextCompacted(const QString& note);
+
+private slots:
+    void onChatFinished(const QString& text);
 
 private:
     AiConfig config_;

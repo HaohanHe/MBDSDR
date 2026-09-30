@@ -25,8 +25,10 @@ Agent::Agent(QObject* parent) : QObject(parent) {
     worker_ = new LLMWorker();
     worker_->moveToThread(workerThread_);
     worker_->setManualMode(manualMode_);
-    connect(worker_, &LLMWorker::chatFinished, this, &Agent::responseReady);
+    connect(worker_, &LLMWorker::chatFinished, this, &Agent::onChatFinished);
     connect(worker_, &LLMWorker::toolCalled, this, &Agent::toolCalled);
+    connect(worker_, &LLMWorker::partialReady, this, &Agent::partialReady);
+    connect(worker_, &LLMWorker::contextCompacted, this, &Agent::contextCompacted);
     // Drop the worker's NAM on the worker thread before we delete the worker.
     connect(workerThread_, &QThread::finished, worker_, &LLMWorker::cleanup);
     workerThread_->start();
@@ -104,6 +106,13 @@ void Agent::sendMessage(const QString& userInput) {
     QMetaObject::invokeMethod(worker_, [this, msgs, tools]() {
         worker_->doChat(msgs, tools);
     }, Qt::QueuedConnection);
+}
+
+void Agent::onChatFinished(const QString& text) {
+    // Record the assistant reply so the next request carries growing history
+    // (which is what makes context compaction kick in once the budget trips).
+    history_.append(ChatMessage{"assistant", text});
+    emit responseReady(text);
 }
 
 } // namespace ai
