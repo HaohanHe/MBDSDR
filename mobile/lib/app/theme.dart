@@ -86,6 +86,9 @@ abstract final class AppTheme {
       // 涟漪克制：低透明度淡入，不做高亮强闪。
       splashColor: AppTokens.accent.withValues(alpha: 0.08),
       highlightColor: AppTokens.accent.withValues(alpha: 0.04),
+      // 焦点环：键盘/可达控件聚焦时的可见反馈（低饱和 accent 环）。
+      focusColor: AppTokens.focusRing,
+      hoverColor: AppTokens.card2.withValues(alpha: 0.5),
     );
   }
 }

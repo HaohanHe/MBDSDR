@@ -446,7 +446,7 @@ class _SpectrumPainter extends CustomPainter {
           style: AppTokens.mono.copyWith(
             fontSize: AppTokens.annotationFontSize,
             color: AppTokens.textPrimary,
-            fontWeight: FontWeight.w600,
+            fontWeight: AppTokens.weightMedium,
           ),
         ),
         const TextSpan(text: '\n'),
@@ -532,9 +532,9 @@ class _FreqStripPainter extends CustomPainter {
     }
 
     final edge = Paint()
-      ..color = AppTokens.cardEdge
+      ..color = AppTokens.divider
       ..strokeWidth = 1;
-    // 顶部分隔线。
+    // 顶部分隔线（克制 1px 半透明白，不靠描边分界）。
     canvas.drawLine(const Offset(0, 0), Offset(size.width, 0), edge);
 
     final tp = TextPainter(textDirection: TextDirection.ltr);
@@ -572,7 +572,7 @@ class _FreqStripPainter extends CustomPainter {
       style: AppTokens.mono.copyWith(
         fontSize: AppTokens.annotationFontSize,
         color: AppTokens.accent,
-        fontWeight: FontWeight.w600,
+        fontWeight: AppTokens.weightMedium,
       ),
     );
     tp.layout();

@@ -274,7 +274,8 @@ class _StatusChip extends StatelessWidget {
       text,
       style: AppTokens.mono.copyWith(
         color: primary ? AppTokens.textPrimary : AppTokens.textSecondary,
-        fontWeight: primary ? FontWeight.w600 : FontWeight.w500,
+        // 主读数（频率）用 medium 500，其余安静小字；不通篇 600。
+        fontWeight: primary ? AppTokens.weightMedium : AppTokens.weightRegular,
       ),
     );
   }
@@ -388,14 +389,15 @@ class _ControlPanel extends StatelessWidget {
     final connected = controller.status == ConnectionStatus.connected;
     return SingleChildScrollView(
       child: Container(
+        // 卡片内 padding 16（内容不贴边），外边距 8（屏边节奏）。
         margin: const EdgeInsets.all(AppTokens.spacingM),
-        padding: const EdgeInsets.all(AppTokens.spacingM),
+        padding: const EdgeInsets.all(AppTokens.spacingL),
         decoration: AppTokens.cardDecoration(),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 大频率读数 + 点按输入。
+            // ---- 组 A：调谐（hero 读数 + 模式 + 步进）----
             Center(
               child: GestureDetector(
                 onTap: () => _promptFrequency(context),
@@ -405,9 +407,19 @@ class _ControlPanel extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: AppTokens.spacingS),
-            // NFM/WFM 分段。
+            const SizedBox(height: AppTokens.spacingM),
+            // NFM/WFM 分段：选中块用低饱和蓝灰底（selectedFill），不用亮 accent 铺满。
             SegmentedButton<DemodMode>(
+              style: ButtonStyle(
+                backgroundColor: WidgetStateProperty.resolveWith((states) =>
+                    states.contains(WidgetState.selected)
+                        ? AppTokens.selectedFill
+                        : Colors.transparent),
+                foregroundColor: WidgetStateProperty.all(AppTokens.textPrimary),
+                side: WidgetStateProperty.all(
+                  const BorderSide(color: AppTokens.divider),
+                ),
+              ),
               segments: const [
                 ButtonSegment(value: DemodMode.nfm, label: Text('NFM')),
                 ButtonSegment(value: DemodMode.wfm, label: Text('WFM')),
@@ -415,7 +427,7 @@ class _ControlPanel extends StatelessWidget {
               selected: {controller.mode},
               onSelectionChanged: (s) => controller.setMode(s.first),
             ),
-            const SizedBox(height: AppTokens.spacingS),
+            const SizedBox(height: AppTokens.spacingM),
             // 频率步进。
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -434,7 +446,8 @@ class _ControlPanel extends StatelessWidget {
                   ),
               ],
             ),
-            const SizedBox(height: AppTokens.spacingS),
+            // ---- 组间分段：接收链（采样率/AGC/增益/音量）----
+            const SizedBox(height: AppTokens.spacingL),
             // 采样率下拉。
             Row(
               children: [
@@ -460,6 +473,7 @@ class _ControlPanel extends StatelessWidget {
                 ),
               ],
             ),
+            const SizedBox(height: AppTokens.spacingM),
             // 自动增益开关。
             Row(
               children: [
@@ -471,6 +485,7 @@ class _ControlPanel extends StatelessWidget {
                 ),
               ],
             ),
+            const SizedBox(height: AppTokens.spacingM),
             // 增益滑杆。
             Row(
               children: [
@@ -490,6 +505,7 @@ class _ControlPanel extends StatelessWidget {
                     style: AppTokens.mono),
               ],
             ),
+            const SizedBox(height: AppTokens.spacingM),
             // 音频快捷控制：静音 toggle + 紧凑音量滑块（未连接时置灰）。
             Row(
               children: [
@@ -516,6 +532,8 @@ class _ControlPanel extends StatelessWidget {
                 ),
               ],
             ),
+            // ---- 组间分段：静噪门控 ----
+            const SizedBox(height: AppTokens.spacingL),
             // 静噪门控：开关 + 真实电平门限滑杆（走 AppTokens 区间）。
             // 门限越高（越接近 0）越严；未连接时置灰。
             Row(
@@ -528,6 +546,7 @@ class _ControlPanel extends StatelessWidget {
                 ),
               ],
             ),
+            const SizedBox(height: AppTokens.spacingM),
             Row(
               children: [
                 const Text('门限', style: AppTokens.auxiliary),
@@ -550,9 +569,18 @@ class _ControlPanel extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: AppTokens.spacingS),
+            // ---- 组间分段：主操作 ----
+            const SizedBox(height: AppTokens.spacingL),
             // 连接 / 断开。
             FilledButton.icon(
+              style: FilledButton.styleFrom(
+                // 主操作胶囊化，与 Chip/步进按钮同圆角层级。
+                shape: const StadiumBorder(),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppTokens.spacingL,
+                  vertical: AppTokens.spacingM,
+                ),
+              ),
               onPressed: _hasHost
                   ? () => _connectOrDisconnect(context)
                   : onOpenSettings,
@@ -568,7 +596,7 @@ class _ControlPanel extends StatelessWidget {
             // 收藏当前频点（命名弹窗）+ 已收藏列表：点击真实跳频并应用模式/带宽。
             // 书签默认空，不内置台名/位置。
             if (onAddBookmark != null) ...[
-              const SizedBox(height: AppTokens.spacingS),
+              const SizedBox(height: AppTokens.spacingL),
               Row(
                 children: [
                   IconButton(
