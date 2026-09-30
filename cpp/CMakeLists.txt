@@ -356,6 +356,16 @@ target_include_directories(test_pass_doppler PRIVATE src)
 target_link_libraries(test_pass_doppler PRIVATE Qt6::Network Qt6::Concurrent Qt6::Core)
 add_test(NAME pass_doppler COMMAND test_pass_doppler)
 
+# Satellite one-tap capture + Doppler auto-compensation decision logic
+# (mapping table, capture target, bounded step limiter, real SGP4 -> fd -> VFO).
+add_executable(test_sat_capture tests/test_sat_capture.cpp
+    src/dsp/tle_client.cpp src/dsp/sgp4.cpp
+    src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/rds_decoder.cpp)
+target_include_directories(test_sat_capture PRIVATE src)
+target_link_libraries(test_sat_capture PRIVATE Qt6::Network Qt6::Concurrent Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME sat_capture COMMAND test_sat_capture)
+
 add_executable(test_adsb_cpr tests/test_adsb_cpr.cpp src/dsp/adsb_decoder.cpp)
 target_include_directories(test_adsb_cpr PRIVATE src)
 target_link_libraries(test_adsb_cpr PRIVATE Qt6::Core)
@@ -631,3 +641,8 @@ target_link_libraries(ui_shot_sqlauto PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::
 add_executable(ui_shot_scanbm tests/ui_screenshot_scan_bm.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_scanbm PRIVATE src build/ui_shot_scanbm_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_scanbm PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# Satellite one-tap capture + Doppler lock offscreen screenshot (not in ctest).
+add_executable(ui_shot_satcap tests/ui_screenshot_sat_capture.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_satcap PRIVATE src build/ui_shot_satcap_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_satcap PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
