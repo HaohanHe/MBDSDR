@@ -13,6 +13,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
+#include <QTimer>
 #include <algorithm>
 #include <cmath>
 #include <chrono>
@@ -31,6 +32,14 @@ constexpr double kVfoEdgeFraction = 0.85;
 }
 
 SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
+    reconnectClock_.start();
+    // Auto-reconnect must touch QTcpSocket, and a QTcpSocket must live in a
+    // thread that runs an event loop. The run() loop is not one, so recovery
+    // is requested as a queued signal and performed here, on the engine's
+    // home thread (the UI thread in the app, the test thread in tests).
+    connect(this, &SpectrumEngine::reconnectRequested,
+            this, &SpectrumEngine::handleReconnectRequested,
+            Qt::QueuedConnection);
     auto rtl = std::make_unique<RtlSdrSource>();
     if (rtl->start()) {
         source_ = std::move(rtl);
@@ -178,11 +187,14 @@ bool SpectrumEngine::tryConnectRtl() {
     rtl->setPpm(cachedPpm_);
     if (rtl->start()) {
         source_ = std::move(rtl);
+        reconnectPending_ = false;   // manual action cancels any retry
         emit sourceChanged("RTL-SDR", true);
         return true;
     }
     source_ = std::make_unique<TestSignalSource>();
     source_->start();
+    reconnectPending_ = false;
+    emit sourceError(QStringLiteral("RTL-SDR 设备打开失败：未检测到硬件"));
     emit sourceChanged("Test Signal", false);
     return false;
 }
@@ -192,6 +204,12 @@ void SpectrumEngine::disconnectSource() {
     if (source_) source_->stop();
     source_ = std::make_unique<TestSignalSource>();
     source_->start();
+    // A manual disconnect is an explicit user action: cancel any pending
+    // auto-reconnect so the device does not silently re-attach later.
+    reconnectPending_ = false;
+    realSourceActive_ = false;
+    tcpHost_.clear();
+    tcpPort_ = 0;
     emit sourceChanged("Test Signal", false);
 }
 
@@ -201,14 +219,71 @@ bool SpectrumEngine::connectRtlTcp(const QString& host, quint16 port) {
     auto tcp = std::make_unique<RtlTcpSource>(host, port);
     if (tcp->start()) {
         source_ = std::move(tcp);
+        tcpHost_ = host;
+        tcpPort_ = port;
+        reconnectPending_ = false;   // manual action cancels any retry
+        realSourceActive_ = true;
         emit sourceChanged(QString("rtl_tcp %1:%2").arg(host).arg(port), true);
         return true;
     }
     // Honest failure: fall back to test signal, no fake IQ over the wire.
+    // Report the REAL socket reason (refused / timeout / ...).
+    const QString reason = tcp->lastError();
     source_ = std::make_unique<TestSignalSource>();
     source_->start();
+    reconnectPending_ = false;
+    realSourceActive_ = false;
+    emit sourceError(reason.isEmpty()
+        ? QStringLiteral("rtl_tcp 连接失败") : reason);
     emit sourceChanged("Test Signal", false);
     return false;
+}
+
+// Runs on the engine's home thread (queued from reconnectRequested, or a
+// QTimer retry). Blocking connect (worst case 2 s) is acceptable while the
+// device is absent; manual source operations cancel reconnectPending_ so a
+// retry already queued just no-ops.
+void SpectrumEngine::handleReconnectRequested() {
+    if (!reconnectPending_ || !autoReconnect_.load()) return;
+    const bool wasPending = reconnectPending_;
+    const bool ok = connectRtlTcp(tcpHost_, tcpPort_);
+    // connectRtlTcp carries manual semantics and clears reconnectPending_ on
+    // failure; as an auto-reconnect we want the retry chain to continue.
+    if (!ok && wasPending && autoReconnect_.load())
+        reconnectPending_ = true;
+    if (reconnectPending_ && autoReconnect_.load()) {
+        // Failed (device still absent): try again after the throttle window.
+        QTimer::singleShot(kReconnectIntervalMs, this,
+                           &SpectrumEngine::handleReconnectRequested);
+    }
+}
+
+// Called with sourceMutex_ held (from the run() loop). Swaps the dead device
+// out for the offline test source and reports the drop as an event. Note: no
+// isConnected() guard here -- after an RST the socket reads as unconnected
+// while the device is in fact gone, and this is exactly the state we must
+// fall back from.
+void SpectrumEngine::dropSourceLocked() {
+    if (!source_) return;
+    source_->stop();
+    source_ = std::make_unique<TestSignalSource>();
+    source_->start();
+    realSourceActive_ = false;
+    if (autoReconnect_.load() && !tcpHost_.isEmpty() && tcpPort_ != 0) {
+        reconnectPending_ = true;
+        lastReconnectMs_ = reconnectClock_.elapsed();
+    }
+    emit sourceDropped();
+    emit sourceChanged("Test Signal", false);
+}
+
+// Outside sourceMutex_ no longer needed: the retry loop lives in run().
+// Kept as a no-op stub is worse than nothing, so it was removed; the
+// declaration is gone from the header as well.
+
+bool SpectrumEngine::isTestSignalActive() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return !realSourceActive_;
 }
 
 void SpectrumEngine::setMuted(bool m) {
@@ -577,10 +652,26 @@ void SpectrumEngine::run() {
 
         std::size_t got = source_->readIQ(iq);
         if (got == 0) {
+            if (real || realSourceActive_) {
+                // A real device that stops delivering IQ for the grace period
+                // is dropped (unplugged / link lost). Honest fallback + event.
+                if (++zeroReadFrames_ >= kMaxZeroReadBeforeDrop) {
+                    dropSourceLocked();
+                    zeroReadFrames_ = 0;
+                    // Reconnect runs on the engine's home (UI) thread via a
+                    // queued signal: QTcpSocket must live in a thread with an
+                    // event loop, which the run() loop is not.
+                    if (reconnectPending_ && autoReconnect_.load())
+                        emit reconnectRequested();
+                }
+            } else {
+                zeroReadFrames_ = 0;
+            }
             lk.unlock();
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             continue;
         }
+        zeroReadFrames_ = 0;
         if (got < iq.size()) iq.resize(got);
 
         noiseBlanker_.process(iq);

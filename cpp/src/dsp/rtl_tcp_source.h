@@ -3,11 +3,18 @@
 // Protocol: 8-byte requests (1-byte command + 4-byte big-endian arg),
 // stream of 8-bit unsigned IQ (offset 127). Honest failure: if connect()
 // fails, isConnected() stays false and readIQ returns 0 -- no fake data.
+//
+// Transport is a native (POSIX) socket, NOT QTcpSocket: IQ is read from the
+// DSP engine's run() thread while connect happens on the UI thread, and
+// QTcpSocket must not be touched from a thread other than its creator
+// (QSocketNotifier is wired to the creator's event loop). A plain blocking
+// fd is safe to poll/recv from any thread and keeps the engine thread free
+// of Qt event-loop requirements.
 #pragma once
 
 #include "dsp/source.h"
-#include <QTcpSocket>
 #include <QString>
+#include <atomic>
 
 namespace mbdsdr {
 namespace dsp {
@@ -27,13 +34,22 @@ public:
     double sampleRate() const override { return rateHz_; }
     double gain() const override { return gainDb_; }
     QString name() const override { return QString("rtl_tcp %1:%2").arg(host_).arg(port_); }
+    // True while the native fd is open and the peer has not closed/reset.
+    // After an EOF/RST it flips false; the engine treats sustained zero
+    // reads as a drop (see realSourceActive_ in SpectrumEngine).
     bool isConnected() const override;
+    // Human-readable reason of the last failed start() (socket error string,
+    // "Connection refused", "timed out", ...). Empty when start() succeeded.
+    QString lastError() const { return lastError_; }
 
 private:
     void sendCmd(quint8 cmd, quint32 arg);
+    void setFdBlocking(bool blocking);
     QString host_;
     quint16 port_;
-    QTcpSocket* sock_ = nullptr;
+    std::atomic<int> fd_{-1};       // native fd; -1 = closed
+    std::atomic<bool> eof_{false};  // peer closed / reset detected
+    QString lastError_;
     double freqHz_ = 98.5e6;
     double rateHz_ = 2.4e6;
     double gainDb_ = 0.0;

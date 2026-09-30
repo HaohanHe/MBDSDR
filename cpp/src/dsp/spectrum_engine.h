@@ -133,6 +133,8 @@ public slots:
     // whenever a WFM channel is (re)built.
 public slots:
     void setForceMono(bool on);
+    // Reconnect handler (home-thread context). Public so QTimer can invoke it.
+    void handleReconnectRequested();
 
 public:
     // *** TEST ONLY -- NOT HARDWARE *** opt-in switch on the offline
@@ -173,9 +175,32 @@ public:
     void setAverageMode(int a);    // 0=Off 1=Slow 2=Fast
     void setNoiseBlanker(bool on);
 
+    // ---- Device hotplug / liveness --------------------------------------
+    // Auto-reconnect (rtl_tcp only): when ON and the last successful endpoint
+    // is remembered, a dropped device is silently retried every 2 s until it
+    // comes back or the user performs any manual source operation. Default ON
+    // (device re-plug recovers without touching the UI). Manual
+    // connect/disconnect calls always cancel the pending retry.
+    bool autoReconnectEnabled() const { return autoReconnect_.load(); }
+    void setAutoReconnectEnabled(bool on) { autoReconnect_.store(on); }
+    // True iff the engine currently feeds the offline test-signal fallback
+    // (i.e. NOT real hardware). Honest state for the UI / integration tests.
+    bool isTestSignalActive() const;
+
 signals:
     void spectrumReady(const SpectrumFrame& frame);
     void sourceChanged(const QString& name, bool connected);
+    // Device hotplug events (event channel, distinct from the 1 Hz telemetry
+    // poll): sourceDropped fires ONCE when the connected real device stops
+    // delivering IQ (unplugged / link lost) and the engine has already fallen
+    // back to the offline test source (honest "非硬件"); sourceError carries a
+    // real reason string when a connect attempt fails (socket error, no
+    // hardware, ...) -- never a fabricated cause.
+    void sourceDropped();
+    void sourceError(const QString& message);
+    // Queued from the run() loop after a drop: reconnects are performed on
+    // the engine's home thread (see handleReconnectRequested).
+    void reconnectRequested();
     void audioLevel(float dbfs);
     void rssiLevel(float dbfs);
     // ~1 Hz readback of the ACTUAL source state (hardware values, not the UI
@@ -344,6 +369,31 @@ private:
     // Guards source_/demod_/demodMode_/bandwidth_ against concurrent access
     // between the engine run() thread and UI-thread connect/disconnect calls.
     QMutex sourceMutex_;
+
+    // Device-liveness bookkeeping (engine thread only). A real source that
+    // returns zero IQ reads for a short grace period is treated as dropped:
+    // the engine falls back to the offline test source and fires sourceDropped.
+    // If auto-reconnect is ON and the last successful rtl_tcp endpoint is
+    // remembered, a 2 s retry loop silently reconnects until the device comes
+    // back or the user performs a manual source operation.
+    static constexpr int kMaxZeroReadBeforeDrop = 20;   // ~0.4 s of 20 ms loops
+    static constexpr qint64 kReconnectIntervalMs = 2000;
+    int zeroReadFrames_ = 0;
+    std::atomic<bool> autoReconnect_{true};
+    bool reconnectPending_ = false;
+    // "A real device source is currently expected to be active" -- set by a
+    // successful connectRtlTcp / auto-reconnect, cleared by a manual
+    // disconnect or by dropSourceLocked. Unlike ISource::isConnected() this
+    // survives an RST (Qt flips the socket to UnconnectedState on reset), so
+    // the zero-read drop detector keeps counting even after a hard drop.
+    bool realSourceActive_ = false;
+    QString tcpHost_;
+    quint16 tcpPort_ = 0;
+    QElapsedTimer reconnectClock_;
+    qint64 lastReconnectMs_ = 0;
+    // Caller must hold sourceMutex_. Swaps the live source to the offline test
+    // signal (honest fallback) and emits sourceDropped + sourceChanged.
+    void dropSourceLocked();
 
     // Cached RTL front-end options. The pass-through slots update these AND
     // forward to the live source_. On reconnect (tryConnectRtl) the cache is
