@@ -118,9 +118,15 @@ class _HomeShellState extends State<HomeShell> {
               controller: radio,
               rtlHost: settings.rtlHost,
               rtlPort: settings.rtlPort,
-              bookmarksHz: settings.bookmarksHz,
-              onAddBookmark: (hz) => settings.addBookmarkHz(hz),
-              onRemoveBookmark: (hz) => settings.removeBookmarkHz(hz),
+              bookmarks: settings.bookmarks,
+              onAddBookmark: (name, hz, mode, bw) =>
+                  settings.addBookmark(
+                name: name,
+                frequencyHz: hz,
+                mode: mode,
+                bandwidthHz: bw,
+              ),
+              onRemoveBookmark: (hz) => settings.removeBookmark(hz),
               onOpenSettings: _openSettings,
             ),
             SkyPage(manualStation: station),

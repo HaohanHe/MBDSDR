@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/bookmark.dart';
 import '../models/radio_state.dart';
 
 // ============================================================================
@@ -130,7 +131,12 @@ const String _kMuted = 'muted';
 ///   * true        = 手动：AI 仍可对话，但工具动作仅记录不执行。
 const String _kAiManualMode = 'aiManualMode';
 
-/// 收藏频率列表（Hz），JSON 数组字符串落盘。只存真实频率，不存台名/位置。
+/// 频点书签列表，JSON 数组字符串落盘。
+///
+/// 结构升级：旧版只存频率数字数组（如 `[144000000,145000000]`）；新版存对象数组
+/// `[{name,frequencyHz,mode,bandwidthHz}, ...]`。load() 时对旧的纯数字数组做只读迁移：
+/// 每个数字升级为 `Bookmark(name:'', frequencyHz:该值, mode:'', bandwidthHz:0)`。
+/// 永不内置台名/位置，默认空列表。
 const String _kBookmarksHz = 'bookmarksHz';
 
 /// 上次调谐频率（Hz）默认值：144 MHz（2 m 业余段）。
@@ -290,33 +296,60 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // ------------------------------------------------ 收藏频率（真实频率）
-  List<int> _bookmarksHz = <int>[];
+  // ------------------------------------------------ 频点书签（名称/频率/模式/带宽）
+  List<Bookmark> _bookmarks = <Bookmark>[];
 
-  /// 收藏的频率列表（Hz），按加入顺序。仅频率数值，无台名/位置。
-  List<int> get bookmarksHz => List<int>.unmodifiable(_bookmarksHz);
+  /// 书签列表（按加入顺序，不可变视图）。默认空，不预存任何台。
+  List<Bookmark> get bookmarks => List<Bookmark>.unmodifiable(_bookmarks);
+
+  /// 便捷视图：仅频率列表（Hz），供需要纯频率的旧调用方/扫描使用。
+  List<int> get bookmarksHz =>
+      _bookmarks.map((b) => b.frequencyHz).toList(growable: false);
 
   void _persistBookmarks() {
-    unawaited(_kv.setString(_kBookmarksHz, jsonEncode(_bookmarksHz)));
+    unawaited(_kv.setString(
+      _kBookmarksHz,
+      jsonEncode(_bookmarks.map((b) => b.toJson()).toList()),
+    ));
   }
 
-  /// 加入收藏；已存在则忽略。返回最终是否包含该频率。
-  bool addBookmarkHz(int hz) {
-    if (hz <= 0) return false;
-    if (_bookmarksHz.contains(hz)) return true;
-    _bookmarksHz = List<int>.of(_bookmarksHz)..add(hz);
+  /// 加入书签；同频率已存在则忽略（返回 false，不覆盖已有名称/模式）。
+  /// 返回最终是否真正新增。frequencyHz<=0 一律拒绝。
+  bool addBookmark({
+    required String name,
+    required int frequencyHz,
+    String mode = '',
+    int bandwidthHz = 0,
+  }) {
+    if (frequencyHz <= 0) return false;
+    if (_bookmarks.any((b) => b.frequencyHz == frequencyHz)) return false;
+    _bookmarks = List<Bookmark>.of(_bookmarks)
+      ..add(Bookmark(
+        name: name.trim(),
+        frequencyHz: frequencyHz,
+        mode: mode.trim().toLowerCase(),
+        bandwidthHz: bandwidthHz,
+      ));
     _persistBookmarks();
     notifyListeners();
     return true;
   }
 
-  /// 移除收藏。
-  void removeBookmarkHz(int hz) {
-    if (!_bookmarksHz.contains(hz)) return;
-    _bookmarksHz = List<int>.of(_bookmarksHz)..remove(hz);
+  /// 兼容旧调用方：只按频率加入（无名/无模式/无带宽）。
+  bool addBookmarkHz(int hz) =>
+      addBookmark(name: '', frequencyHz: hz);
+
+  /// 按频率移除书签。
+  void removeBookmark(int frequencyHz) {
+    if (!_bookmarks.any((b) => b.frequencyHz == frequencyHz)) return;
+    _bookmarks = List<Bookmark>.of(_bookmarks)
+      ..removeWhere((b) => b.frequencyHz == frequencyHz);
     _persistBookmarks();
     notifyListeners();
   }
+
+  /// 兼容旧调用方。
+  void removeBookmarkHz(int hz) => removeBookmark(hz);
 
   /// 三坐标是否齐全（用于决定是否把手动站点交给天空页）。
   bool get hasManualStation =>
@@ -351,20 +384,27 @@ class SettingsService extends ChangeNotifier {
     // AI 模式：缺失回退 false（AI 接管）。
     _aiManualMode = _kv.getBool(_kAiManualMode) ?? false;
 
-    // 收藏频率：JSON 数组解析失败/非法值一律回退空列表，不抛异常。
+    // 频点书签：兼容旧「纯频率数字数组」并迁移为完整 Bookmark 对象。
+    // 解析失败/非法项静默丢弃，回退空列表，绝不抛异常。
     final String? rawBookmarks = _kv.getString(_kBookmarksHz);
     if (rawBookmarks != null && rawBookmarks.isNotEmpty) {
       try {
         final decoded = jsonDecode(rawBookmarks);
         if (decoded is List) {
-          _bookmarksHz = decoded
-              .whereType<num>()
-              .map((n) => n.toInt())
-              .where((h) => h > 0)
-              .toList();
+          _bookmarks = decoded.map((item) {
+            // 旧格式：数字 → 迁移为无名书签。
+            if (item is num) {
+              final hz = item.toInt();
+              return hz > 0
+                  ? Bookmark(name: '', frequencyHz: hz)
+                  : null;
+            }
+            // 新格式：对象。
+            return Bookmark.fromJson(item);
+          }).whereType<Bookmark>().toList();
         }
       } on FormatException {
-        _bookmarksHz = <int>[];
+        _bookmarks = <Bookmark>[];
       }
     }
 

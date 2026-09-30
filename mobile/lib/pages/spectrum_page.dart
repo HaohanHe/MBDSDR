@@ -2,7 +2,7 @@
 //
 // 诚实原则：未连接 rtl_tcp 时绝不画模拟峰，只给空态（复用 EmptyState）+ 连接按钮。
 // 状态栏信息全部来自真实 controller / 最新帧：RSSI 取最新帧峰值 dBFS（真实测量）；
-// 静噪（SQ）当前链路未实现，诚实显示「—」，不造假开/关读数。
+// 静噪（SQ）基于解调音频真实 RMS 电平门控，显示 OPEN/CLOSED/OFF，不造假读数。
 // 构造契约固定：SpectrumPage({controller, rtlHost, rtlPort, onOpenSettings})。
 library;
 
@@ -12,10 +12,17 @@ import 'package:flutter/material.dart';
 
 import '../app/tokens.dart';
 import '../dsp/fft_processor.dart';
+import '../models/bookmark.dart';
 import '../models/radio_state.dart';
 import '../services/radio_controller.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/spectrum_display.dart';
+
+/// 由解调模式派生的信道带宽（Hz）。移动端带宽随模式而定，不单独控制。
+int bandwidthForMode(DemodMode mode) => switch (mode) {
+      DemodMode.nfm => 12500,
+      DemodMode.wfm => 200000,
+    };
 
 class SpectrumPage extends StatelessWidget {
   /// 收音机接口（运行时为 ChangeNotifier，用于监听状态）。
@@ -27,13 +34,14 @@ class SpectrumPage extends StatelessWidget {
   /// rtl_tcp 端口。
   final int rtlPort;
 
-  /// 收藏频率列表（Hz），来自真实持久化。
-  final List<int> bookmarksHz;
+  /// 书签列表（名称/频率/模式/带宽），来自真实持久化，默认空。
+  final List<Bookmark> bookmarks;
 
-  /// 把当前真实频率加入收藏。
-  final ValueChanged<int>? onAddBookmark;
+  /// 收藏当前频点：由页面收集名称后，连同真实频率/当前模式/带宽一起回调。
+  final void Function(String name, int frequencyHz, String mode, int bandwidthHz)?
+      onAddBookmark;
 
-  /// 移除收藏频率。
+  /// 按频率移除书签。
   final ValueChanged<int>? onRemoveBookmark;
 
   /// 空 host 时引导用户去设置页。
@@ -44,7 +52,7 @@ class SpectrumPage extends StatelessWidget {
     required this.controller,
     required this.rtlHost,
     required this.rtlPort,
-    this.bookmarksHz = const <int>[],
+    this.bookmarks = const <Bookmark>[],
     this.onAddBookmark,
     this.onRemoveBookmark,
     this.onOpenSettings,
@@ -68,7 +76,7 @@ class SpectrumPage extends StatelessWidget {
                   controller: controller,
                   rtlHost: rtlHost,
                   rtlPort: rtlPort,
-                  bookmarksHz: bookmarksHz,
+                  bookmarks: bookmarks,
                   onAddBookmark: onAddBookmark,
                   onRemoveBookmark: onRemoveBookmark,
                   onOpenSettings: onOpenSettings,
@@ -188,9 +196,7 @@ class _ConnectedBodyState extends State<_ConnectedBody> {
         Expanded(
           child: SpectrumDisplay(
             frame: _frame,
-            channelBandwidthHz: widget.controller.mode == DemodMode.nfm
-                ? 12500
-                : 200000,
+            channelBandwidthHz: bandwidthForMode(widget.controller.mode).toDouble(),
             onTapFrequency: (hz) =>
                 widget.controller.setFrequencyHz(hz.round()),
           ),
@@ -241,7 +247,12 @@ class _StatusBar extends StatelessWidget {
           _StatusChip(
             rssi == null ? 'RSSI --' : 'RSSI ${rssi.toStringAsFixed(0)} dB',
           ),
-          const _StatusChip('SQ —'), // 静噪未实现，诚实占位
+          // 静噪：基于解调音频真实 RMS 电平的门控开合，克制小字。
+          _StatusChip(
+            controller.squelchEnabled
+                ? (controller.squelchOpen ? 'SQ OPEN' : 'SQ CLOSED')
+                : 'SQ OFF',
+          ),
           _StatusChip('${(controller.sampleRateHz / 1e6).toStringAsFixed(2)}Msps'),
           _StatusChip(
             controller.autoGain ? 'AGC' : 'G ${controller.gainDb.toStringAsFixed(1)}dB',
@@ -274,8 +285,9 @@ class _ControlPanel extends StatelessWidget {
   final RadioApi controller;
   final String rtlHost;
   final int rtlPort;
-  final List<int> bookmarksHz;
-  final ValueChanged<int>? onAddBookmark;
+  final List<Bookmark> bookmarks;
+  final void Function(String name, int frequencyHz, String mode, int bandwidthHz)?
+      onAddBookmark;
   final ValueChanged<int>? onRemoveBookmark;
   final VoidCallback? onOpenSettings;
 
@@ -283,7 +295,7 @@ class _ControlPanel extends StatelessWidget {
     required this.controller,
     required this.rtlHost,
     required this.rtlPort,
-    required this.bookmarksHz,
+    required this.bookmarks,
     required this.onAddBookmark,
     required this.onRemoveBookmark,
     this.onOpenSettings,
@@ -331,6 +343,44 @@ class _ControlPanel extends StatelessWidget {
     if (mhz != null) {
       await controller.setFrequencyHz((mhz * 1e6).round());
     }
+  }
+
+  /// 收藏当前频点：弹窗让用户命名（默认用频率占位，可改；不留空则存无名书签）。
+  /// 自动带入真实当前频率 / 模式 / 带宽。绝不预存假台名。
+  Future<void> _promptAddBookmark(BuildContext context) async {
+    final preset = (controller.freqHz / 1e6).toStringAsFixed(4);
+    final nameCtrl = TextEditingController(text: preset);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTokens.bgBar,
+        title: const Text('收藏此频点', style: AppTokens.sectionTitle),
+        content: TextField(
+          controller: nameCtrl,
+          style: AppTokens.body,
+          decoration: const InputDecoration(
+            hintText: '名称（可留空，默认显示频率）',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, nameCtrl.text),
+            child: const Text('收藏'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+    onAddBookmark?.call(
+      result.trim(),
+      controller.freqHz,
+      controller.mode.name,
+      bandwidthForMode(controller.mode),
+    );
   }
 
   @override
@@ -466,6 +516,40 @@ class _ControlPanel extends StatelessWidget {
                 ),
               ],
             ),
+            // 静噪门控：开关 + 真实电平门限滑杆（走 AppTokens 区间）。
+            // 门限越高（越接近 0）越严；未连接时置灰。
+            Row(
+              children: [
+                const Text('静噪', style: AppTokens.auxiliary),
+                const Spacer(),
+                Switch(
+                  value: controller.squelchEnabled,
+                  onChanged: connected ? controller.setSquelchEnabled : null,
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                const Text('门限', style: AppTokens.auxiliary),
+                Expanded(
+                  child: Slider(
+                    min: AppTokens.squelchThresholdMinDb,
+                    max: AppTokens.squelchThresholdMaxDb,
+                    value: controller.squelchThresholdDb.clamp(
+                      AppTokens.squelchThresholdMinDb,
+                      AppTokens.squelchThresholdMaxDb,
+                    ),
+                    onChanged: (connected && controller.squelchEnabled)
+                        ? controller.setSquelchThresholdDb
+                        : null,
+                  ),
+                ),
+                Text(
+                  '${controller.squelchThresholdDb.toStringAsFixed(0)} dB',
+                  style: AppTokens.mono,
+                ),
+              ],
+            ),
             const SizedBox(height: AppTokens.spacingS),
             // 连接 / 断开。
             FilledButton.icon(
@@ -481,43 +565,48 @@ class _ControlPanel extends StatelessWidget {
                         : '连接 ${rtlHost.trim()}:$rtlPort',
               ),
             ),
-            // 收藏当前真实频率 + 已收藏列表（点击真实跳频，长按移除）。
-            // 只存频率数值，不内置台名/位置。
+            // 收藏当前频点（命名弹窗）+ 已收藏列表：点击真实跳频并应用模式/带宽。
+            // 书签默认空，不内置台名/位置。
             if (onAddBookmark != null) ...[
               const SizedBox(height: AppTokens.spacingS),
               Row(
                 children: [
                   IconButton(
-                    tooltip: '收藏当前频率',
+                    tooltip: '收藏此频点',
                     icon: const Icon(Icons.bookmark_add_outlined),
-                    onPressed: () => onAddBookmark!(controller.freqHz),
+                    onPressed: () => _promptAddBookmark(context),
                   ),
                   const SizedBox(width: AppTokens.spacingS),
                   Expanded(
                     child: Text(
-                      bookmarksHz.contains(controller.freqHz)
-                          ? '已收藏当前频率'
-                          : '收藏当前频率',
+                      bookmarks.any((b) => b.frequencyHz == controller.freqHz)
+                          ? '已收藏当前频点'
+                          : '收藏当前频点',
                       style: AppTokens.auxiliary,
                     ),
                   ),
                 ],
               ),
-              if (bookmarksHz.isNotEmpty)
+              if (bookmarks.isNotEmpty)
                 Wrap(
                   spacing: AppTokens.spacingS,
                   runSpacing: AppTokens.spacingS,
                   children: [
-                    for (final hz in bookmarksHz)
+                    for (final bm in bookmarks)
                       InputChip(
                         label: Text(
-                          '${(hz / 1e6).toStringAsFixed(4)} MHz',
+                          bm.displayLabel,
                           style: AppTokens.mono,
                         ),
-                        onPressed: () => controller.setFrequencyHz(hz),
+                        // 跳频 + 模式可用时一并应用（移动端带宽随模式派生）。
+                        onPressed: () {
+                          controller.setFrequencyHz(bm.frequencyHz);
+                          final m = bm.modeEnum;
+                          if (m != null) controller.setMode(m);
+                        },
                         onDeleted: onRemoveBookmark == null
                             ? null
-                            : () => onRemoveBookmark!(hz),
+                            : () => onRemoveBookmark!(bm.frequencyHz),
                       ),
                   ],
                 ),

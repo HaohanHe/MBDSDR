@@ -16,11 +16,13 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
+import '../app/tokens.dart';
 import '../audio/null_pcm_sink.dart';
 import '../audio/pcm_sink.dart';
 import '../dsp/demod.dart';
 import '../dsp/fft_processor.dart';
 import '../dsp/iq.dart';
+import '../dsp/squelch.dart';
 import '../models/radio_state.dart';
 import 'rtl_tcp_client.dart';
 
@@ -80,6 +82,24 @@ abstract interface class RadioApi {
   /// 设置静音：存字段、转发给 sink、通知 UI。
   void setMuted(bool m);
 
+  /// 是否启用静噪门控（基于解调后音频真实 RMS 电平）。
+  bool get squelchEnabled;
+
+  /// 静噪门限（dBFS）。
+  double get squelchThresholdDb;
+
+  /// 当前静噪门是否开门（true=送声，false=被门控静音）。
+  bool get squelchOpen;
+
+  /// 当前平滑后的真实解调电平（dBFS），无信号时为下限。
+  double get squelchLevelDb;
+
+  /// 开关静噪门控。
+  void setSquelchEnabled(bool on);
+
+  /// 设置静噪门限（dBFS），内部 clamp 到 AppTokens 区间。
+  void setSquelchThresholdDb(double db);
+
   /// 实时频谱帧流。
   Stream<SpectrumFrame> get spectrumStream;
 
@@ -92,8 +112,8 @@ class RadioController extends ChangeNotifier implements RadioApi {
   RadioController({PcmSink? sink, RtlTcpClient Function()? clientFactory})
       : _sink = sink ?? NoOpSink(),
         _clientFactory = clientFactory ?? RtlTcpClient.new {
-    // 订阅自己的解调音频流，逐帧喂入 PCM sink。
-    _audioSub = audioStream.listen(_sink.write);
+    // 订阅自己的解调音频流，逐帧过静噪门后喂入 PCM sink。
+    _audioSub = audioStream.listen(_onAudioFrame);
   }
 
   // ---------------------------------------------------- 依赖注入
@@ -132,6 +152,12 @@ class RadioController extends ChangeNotifier implements RadioApi {
   double _volume = 1.0;
   bool _muted = false;
 
+  /// 静噪门控：电平来自真实解调音频 RMS（见 dsp/squelch.dart）。
+  final SquelchGate _squelch = SquelchGate();
+
+  /// 关门时复用的静音帧缓冲（按当前块长度惰性增长，避免逐块分配）。
+  Float32List _silence = Float32List(0);
+
   late final FftProcessor _fft = FftProcessor(fftSize: 2048);
   FmDemod? _demod;
 
@@ -163,6 +189,14 @@ class RadioController extends ChangeNotifier implements RadioApi {
   double get volume => _volume;
   @override
   bool get muted => _muted;
+  @override
+  bool get squelchEnabled => _squelch.enabled;
+  @override
+  double get squelchThresholdDb => _squelch.thresholdDb;
+  @override
+  bool get squelchOpen => _squelch.open;
+  @override
+  double get squelchLevelDb => _squelch.levelDb;
   @override
   Stream<SpectrumFrame> get spectrumStream => _spectrumCtrl.stream;
   @override
@@ -296,6 +330,7 @@ class RadioController extends ChangeNotifier implements RadioApi {
     _recentI.clear();
     _recentQ.clear();
     _demod = null;
+    _squelch.reset();
   }
 
   FmDemod _buildDemod() => switch (_mode) {
@@ -343,6 +378,29 @@ class RadioController extends ChangeNotifier implements RadioApi {
         _audioCtrl.add(audio);
       }
     }
+  }
+
+  /// 解调音频逐帧处理：用真实 RMS 电平跑静噪门，开门送原帧、关门送等长静音。
+  ///
+  /// 这就是移动端静噪的真实静音落点——与手动静音/音量同走 Dart→原生 PCM 路径。
+  /// 注意：原生播放侧（PlatformPcmSink 的 MethodChannel 实现）目前「真机待验」，
+  /// 但门控本身在 Dart 侧是真实生效的：关门时送给 sink 的是全零帧而非原音频。
+  void _onAudioFrame(Float32List frame) {
+    final wasOpen = _squelch.open;
+    final open = _squelch.process(
+      frame,
+      audioSampleRateHz: audioSampleRateHz.toDouble(),
+    );
+    if (open) {
+      _sink.write(frame);
+    } else {
+      if (_silence.length != frame.length) {
+        _silence = Float32List(frame.length);
+      }
+      _sink.write(_silence);
+    }
+    // 仅在开门/关门跳变时通知 UI，避免每帧抖动 rebuild。
+    if (open != wasOpen) notifyListeners();
   }
 
   // ---------------------------------------------------- 会话恢复
@@ -433,6 +491,23 @@ class RadioController extends ChangeNotifier implements RadioApi {
   void setMuted(bool m) {
     _muted = m;
     _sink.setMuted(m);
+    notifyListeners();
+  }
+
+  @override
+  void setSquelchEnabled(bool on) {
+    _squelch.enabled = on;
+    // 重新开关后让门按当前电平立即判定，不沿用旧 hangover。
+    _squelch.reset();
+    notifyListeners();
+  }
+
+  @override
+  void setSquelchThresholdDb(double db) {
+    _squelch.thresholdDb = db.clamp(
+      AppTokens.squelchThresholdMinDb,
+      AppTokens.squelchThresholdMaxDb,
+    );
     notifyListeners();
   }
 
