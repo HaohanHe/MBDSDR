@@ -6,6 +6,7 @@
 
 #include <QString>
 #include <QColor>
+#include <QEasingCurve>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QtGlobal>
@@ -86,6 +87,20 @@ inline constexpr const char* kSuccess     = "#5fd08a";
 inline constexpr const char* kWarning      = "#e0b35a";
 inline constexpr const char* kDanger       = "#e74c3c";
 
+// ---- Restrained semantic layers (Figma audit checklist) ---------------
+// Hairline divider: 1px white at ~6%. Prefer whitespace+surface contrast;
+// when a line is unavoidable use this, never a heavy solid border.
+inline constexpr const char* kDivider      = "rgba(255, 255, 255, 0.06)";
+// Selected / active fill: LOW-saturation blue-gray (Figma #919cac), NOT the
+// bright accent. Use for list/nav selected blocks; keep accent for the
+// single interactive highlight only.
+inline constexpr const char* kSelectedFill = "rgba(145, 156, 172, 0.16)";
+inline constexpr const char* kSelectedText= "#d7dee8";
+// Keyboard focus ring: visible, calm accent ring. Missing before the audit.
+inline constexpr const char* kFocusRing   = "rgba(124, 196, 255, 0.45)";
+// Disabled control surface (we previously only dimmed disabled text).
+inline constexpr const char* kDisabledFill = "rgba(255, 255, 255, 0.04)";
+
 // =====================================================================
 // Corner radii
 // =====================================================================
@@ -100,16 +115,28 @@ inline constexpr int kAnimShort2  = 160;  // button/list press
 inline constexpr int kAnimMedium1 = 220;  // tab/panel switch
 inline constexpr int kAnimMedium2 = 280;  // dialog
 inline constexpr int kAnimLong1   = 350;  // overlay
+
+// Easing curves: standard = fast-out-slow-in (calm entry); exit = quick
+// fade-out (exit duration ~= half entry). Named so animation code does not
+// scatter raw QEasingCurve values.
+inline QEasingCurve easingStandard() { return QEasingCurve(QEasingCurve::OutCubic); }
+inline QEasingCurve easingExit()     { return QEasingCurve(QEasingCurve::InCubic); }
 inline constexpr int kRadiusSplitter   = 10;
 inline constexpr int kRadiusSmall      = 4;
 inline constexpr const char* kRadiusCircle = "50%";
+// Pill capsule: fully rounded ends (height/2). Search bar / pill button.
+inline constexpr int kRadiusPill      = 999;
 
 // =====================================================================
-// Spacing rhythm (base px, scaled at runtime): S=4 M=8 L=16
+// Spacing rhythm (base px, scaled at runtime): S=4 M=8 L=16 XL=24 XXL=32
+// 4pt grid. Page gutters / big block gaps use XL/XXL (Figma 64/69px @1920
+// scales down to ~24-32 desktop). Never invent off-grid pixels.
 // =====================================================================
 inline constexpr int kSpacingS = 4;
 inline constexpr int kSpacingM = 8;
 inline constexpr int kSpacingL = 16;
+inline constexpr int kSpacingXL  = 24;
+inline constexpr int kSpacingXXL = 32;
 
 // =====================================================================
 // Sizes (base px, multiply by scaled() at runtime)
@@ -449,8 +476,15 @@ inline constexpr const char* kFontMono =
 inline constexpr double kFontTitlePt  = 14.0;   // group / panel titles, bold
 inline constexpr double kFontBodyPt   = 11.0;   // controls / labels
 inline constexpr double kFontAuxPt     = 9.5;   // status / hints / mono info
+// Hero number: central frequency / signal readout (Figma 42-48px @1920).
+inline constexpr double kFontDisplayPt = 22.0;
 // Legacy alias kept so existing code compiles.
 inline constexpr double kFontPanelTitlePt = kFontTitlePt;
+
+// Font-weight semantic names (Figma uses only 400/500/600; never 700+).
+inline constexpr int kWeightRegular = 400;
+inline constexpr int kWeightMedium  = 500;
+inline constexpr int kWeightSemi    = 600;
 
 // =====================================================================
 // Measurement cursor (hover readout) -- drawn on the unified canvas only,
@@ -504,6 +538,13 @@ inline QString buildDarkQss() {
     const QString accent  = QString::fromUtf8(kAccent);
     const QString accentH = QString::fromUtf8(kAccentHover);
     const QString accentP = QString::fromUtf8(kAccentPress);
+    // Audit tokens (Figma checklist): restrained selected fill, visible focus
+    // ring, disabled surface, hairline divider.
+    const QString selFill = QString::fromUtf8(kSelectedFill);
+    const QString selText = QString::fromUtf8(kSelectedText);
+    const QString focus   = QString::fromUtf8(kFocusRing);
+    const QString disFill = QString::fromUtf8(kDisabledFill);
+    const QString divider = QString::fromUtf8(kDivider);
 
     return QStringLiteral(R"(
 QMainWindow, QWidget {
@@ -553,7 +594,8 @@ QPushButton {
 }
 QPushButton:hover  { background-color: %card2%; }
 QPushButton:pressed{ background-color: rgba(0,0,0,0.12); border-color: transparent; }
-QPushButton:disabled { color: rgba(255,255,255,0.3); background-color: transparent; }
+QPushButton:focus  { border: 1px solid %focus%; }
+QPushButton:disabled { color: rgba(255,255,255,0.3); background-color: %disFill%; }
 QPushButton[recording="true"] { background-color: #c0392b; color: #ffffff; border-color: #e74c3c; }
 QSplitter::handle { background: transparent; }
 QSplitter::handle:horizontal {
@@ -575,11 +617,22 @@ QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {
     background-color: %card2%;
     border: 1px solid %edge%;
 }
+QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QLineEdit:focus {
+    border: 1px solid %focus%;
+    background-color: %card2%;
+}
+QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {
+    color: rgba(255,255,255,0.3);
+    background-color: %disFill%;
+}
+QListWidget:focus, QTableWidget:focus {
+    border: 1px solid %focus%;
+}
 QComboBox QAbstractItemView {
     background-color: %card1%;
     color: %textPri%;
-    selection-background-color: %accent%;
-    selection-color: #06121c;
+    selection-background-color: %selFill%;
+    selection-color: %selText%;
     border: 1px solid %edge%;
     outline: none;
 }
@@ -604,8 +657,8 @@ QPlainTextEdit, QTableWidget, QListWidget {
 QTableWidget::item, QListWidget::item { padding: %padSV%px %padMV%px; }
 QTableWidget::item:hover, QListWidget::item:hover { background-color: %card2%; }
 QTableWidget::item:selected, QListWidget::item:selected {
-    background-color: %accent%;
-    color: #06121c;
+    background-color: %selFill%;
+    color: %selText%;
 }
 QHeaderView::section {
     background-color: %card2%;
@@ -656,6 +709,11 @@ QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
         .replace(QStringLiteral("%textSec%"), textSec)
         .replace(QStringLiteral("%accent%"), accent)
         .replace(QStringLiteral("%accentP%"), accentP)
+        .replace(QStringLiteral("%selFill%"), selFill)
+        .replace(QStringLiteral("%selText%"), selText)
+        .replace(QStringLiteral("%focus%"), focus)
+        .replace(QStringLiteral("%disFill%"), disFill)
+        .replace(QStringLiteral("%divider%"), divider)
         .replace(QStringLiteral("%font%"), QString::fromUtf8(kFontFamily))
         .replace(QStringLiteral("%mono%"), QString::fromUtf8(kFontMono))
         .replace(QStringLiteral("%fontTitle%"), QString::number(kFontTitlePt))
