@@ -27,6 +27,15 @@ class SpectrumPage extends StatelessWidget {
   /// rtl_tcp 端口。
   final int rtlPort;
 
+  /// 收藏频率列表（Hz），来自真实持久化。
+  final List<int> bookmarksHz;
+
+  /// 把当前真实频率加入收藏。
+  final ValueChanged<int>? onAddBookmark;
+
+  /// 移除收藏频率。
+  final ValueChanged<int>? onRemoveBookmark;
+
   /// 空 host 时引导用户去设置页。
   final VoidCallback? onOpenSettings;
 
@@ -35,6 +44,9 @@ class SpectrumPage extends StatelessWidget {
     required this.controller,
     required this.rtlHost,
     required this.rtlPort,
+    this.bookmarksHz = const <int>[],
+    this.onAddBookmark,
+    this.onRemoveBookmark,
     this.onOpenSettings,
   });
 
@@ -56,6 +68,9 @@ class SpectrumPage extends StatelessWidget {
                   controller: controller,
                   rtlHost: rtlHost,
                   rtlPort: rtlPort,
+                  bookmarksHz: bookmarksHz,
+                  onAddBookmark: onAddBookmark,
+                  onRemoveBookmark: onRemoveBookmark,
                   onOpenSettings: onOpenSettings,
                 );
                 final display = _DisplayArea(
@@ -125,7 +140,7 @@ class _DisplayArea extends StatelessWidget {
               const SizedBox(height: AppTokens.spacingM),
               Text(
                 controller.status == ConnectionStatus.reconnecting
-                    ? '信号中断，正在重连…'
+                    ? '设备断开，等待重插'
                     : '正在连接 rtl_tcp…',
                 style: AppTokens.auxiliary,
               ),
@@ -259,12 +274,18 @@ class _ControlPanel extends StatelessWidget {
   final RadioApi controller;
   final String rtlHost;
   final int rtlPort;
+  final List<int> bookmarksHz;
+  final ValueChanged<int>? onAddBookmark;
+  final ValueChanged<int>? onRemoveBookmark;
   final VoidCallback? onOpenSettings;
 
   const _ControlPanel({
     required this.controller,
     required this.rtlHost,
     required this.rtlPort,
+    required this.bookmarksHz,
+    required this.onAddBookmark,
+    required this.onRemoveBookmark,
     this.onOpenSettings,
   });
 
@@ -460,6 +481,47 @@ class _ControlPanel extends StatelessWidget {
                         : '连接 ${rtlHost.trim()}:$rtlPort',
               ),
             ),
+            // 收藏当前真实频率 + 已收藏列表（点击真实跳频，长按移除）。
+            // 只存频率数值，不内置台名/位置。
+            if (onAddBookmark != null) ...[
+              const SizedBox(height: AppTokens.spacingS),
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: '收藏当前频率',
+                    icon: const Icon(Icons.bookmark_add_outlined),
+                    onPressed: () => onAddBookmark!(controller.freqHz),
+                  ),
+                  const SizedBox(width: AppTokens.spacingS),
+                  Expanded(
+                    child: Text(
+                      bookmarksHz.contains(controller.freqHz)
+                          ? '已收藏当前频率'
+                          : '收藏当前频率',
+                      style: AppTokens.auxiliary,
+                    ),
+                  ),
+                ],
+              ),
+              if (bookmarksHz.isNotEmpty)
+                Wrap(
+                  spacing: AppTokens.spacingS,
+                  runSpacing: AppTokens.spacingS,
+                  children: [
+                    for (final hz in bookmarksHz)
+                      InputChip(
+                        label: Text(
+                          '${(hz / 1e6).toStringAsFixed(4)} MHz',
+                          style: AppTokens.mono,
+                        ),
+                        onPressed: () => controller.setFrequencyHz(hz),
+                        onDeleted: onRemoveBookmark == null
+                            ? null
+                            : () => onRemoveBookmark!(hz),
+                      ),
+                  ],
+                ),
+            ],
           ],
         ),
       ),

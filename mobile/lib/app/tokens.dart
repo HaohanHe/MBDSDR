@@ -54,6 +54,18 @@ abstract final class AppTokens {
   static const double touchMin = 44;
   static const double topBarH = 56;
 
+  /// 空态/未配置插画图标尺寸（chat 未配置、EmptyState 共用）。
+  static const double iconSizeEmpty = 48;
+
+  /// 行内小图标（错误提示、列表 leading 等 14px 档）。
+  static const double iconSizeInline = 14;
+
+  /// 行内中图标（18px 档）。
+  static const double iconSizeInlineLg = 18;
+
+  /// 空态卡片最大宽度（居中约束）。
+  static const double emptyStateMaxWidth = 360;
+
   // ---------------------------------------------------------------- 动效时长（ms）
   static const Duration animShort = Duration(milliseconds: 160);
   static const Duration animMedium = Duration(milliseconds: 220);

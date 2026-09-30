@@ -15,9 +15,23 @@ import 'tokens.dart';
 String _err(String message) =>
     jsonEncode(<String, dynamic>{'ok': false, 'error': message});
 
+/// 手动模式下被 gate 掉的动作统一回给模型的结果：不真正调谐，
+/// 仅声明「未执行」，让模型据此向用户解释当前是手动模式。
+String _gated(String toolName) => jsonEncode(<String, dynamic>{
+      'ok': false,
+      'gated': true,
+      'error': '手动模式：未执行 $toolName',
+      'hint': '当前为手动模式，AI 只对话不动作；切回「AI 接管」后才会真正调谐。',
+    });
+
 /// 由射频接口构造 AI 工具集。
-List<AiTool> buildRadioTools(RadioApi radio) {
-  return <AiTool>[
+///
+/// [manualMode] 为 true 时进入「手动模式」：所有**会改变接收机状态**的动作
+/// （set_frequency / set_mode / set_gain / set_sample_rate）不再真正下发，
+/// 而是返回 [_gated] 结果并出现在对话流里；只读的 get_status 保持可用
+/// （读取不构成动作）。AI 接管（false，默认）时行为与历史完全一致。
+List<AiTool> buildRadioTools(RadioApi radio, {bool manualMode = false}) {
+  final List<AiTool> tools = <AiTool>[
     AiTool(
       name: 'set_frequency',
       description: '把 RTL-SDR 接收机调到指定中心频率。'
@@ -188,4 +202,24 @@ List<AiTool> buildRadioTools(RadioApi radio) {
       },
     ),
   ];
+
+  if (!manualMode) return tools;
+
+  // 手动模式：只读 get_status 放行，其余动作包一层 gate——不调用 radio，
+  // 返回「手动模式：未执行」的 JSON（由对话层 chip 原样展示）。
+  const Set<String> mutatingTools = <String>{
+    'set_frequency',
+    'set_mode',
+    'set_gain',
+    'set_sample_rate',
+  };
+  return tools.map((AiTool t) {
+    if (!mutatingTools.contains(t.name)) return t;
+    return AiTool(
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+      execute: (Map<String, dynamic> args) => Future<String>.value(_gated(t.name)),
+    );
+  }).toList();
 }

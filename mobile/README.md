@@ -23,7 +23,7 @@ lib/
 ├── dsp/                    # 信号处理：IQ 类型、FFT（fftea）、滤波、NFM/WFM 解调
 ├── astro/                  # TLE 拉取（Celestrak）、SGP4、坐标换算
 ├── pages/                  # 四个页面：频谱 / 天空 / AI / 设置
-└── widgets/                # 通用件：EmptyState、StatusChip、频谱显示
+└── widgets/                # 通用件：EmptyState、ConnectionStatusLine、频谱显示
 ```
 
 状态管理用 [provider](https://pub.dev/packages/provider)：
@@ -35,7 +35,8 @@ lib/
 ### 1. 频谱（Spectrum）
 - rtl_tcp 直连真实 IQ 流 → `FftProcessor`（fftea）做真实 FFT；
 - 实时频谱柱状图 + 瀑布图，NFM / WFM 解调模式可切；
-- 顶部 AppBar 的 StatusChip 实时显示 rtl_tcp 连接状态（已连接/连接中/失败/未连接）。
+- 顶部 AppBar 的安静状态行实时显示 rtl_tcp 连接状态（已连接/连接中/掉线等待重插/真实失败原因）；
+  运行中掉线由控制器按指数退避**真实重连**（新建 Socket 握手），用户手动断开后停止重试。
 
 ### 2. 天空（Sky Pointing）
 - Celestrak 拉 TLE，SGP4 算卫星位置，坐标换算到本站（手动三坐标或 GPS）；
@@ -50,6 +51,8 @@ lib/
   - `set_sample_rate`（限定支持的采样率档位）
   - `get_status`（读回连接/频率/模式/增益/采样率）
 - 参数缺失或越界统一返回 `{ok:false,error:...}`，不让会话崩掉。
+- 设置页可切「AI 接管 / 手动」：AI 接管时上述工具真正执行；手动模式下
+  写动作仅返回「手动模式：未执行」并在对话流标注（只读 `get_status` 放行）。
 
 ### 4. 设置（Settings）
 - rtl_tcp 主机/端口（端口校验 1–65535）；

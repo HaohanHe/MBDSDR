@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../models/radio_state.dart';
 import '../models/satellite.dart';
 import '../pages/chat_page.dart';
 import '../pages/settings_page.dart';
@@ -10,7 +9,7 @@ import '../pages/spectrum_page.dart';
 import '../services/ai_client.dart';
 import '../services/radio_controller.dart';
 import '../services/settings_service.dart';
-import '../widgets/status_chip.dart';
+import '../widgets/connection_status_line.dart';
 import 'ai_tools.dart';
 import 'tokens.dart';
 
@@ -86,27 +85,14 @@ class _HomeShellState extends State<HomeShell> {
   AppBar _buildAppBar() {
     return AppBar(
       title: Row(
-        mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           const Text('MBDSDR'),
           const SizedBox(width: AppTokens.spacingM),
+          // 安静状态行：订阅 RadioController（ChangeNotifier），状态变化即
+          // 重建。连接中/已连接/掉线等待重插/真实失败原因，均为克制小字。
           Consumer<RadioController>(
             builder: (BuildContext context, RadioController radio, _) {
-              final Color chipColor = switch (radio.status) {
-                ConnectionStatus.connected => AppTokens.success,
-                ConnectionStatus.reconnecting => AppTokens.warning,
-                _ => AppTokens.danger,
-              };
-              return StatusChip(
-                color: chipColor,
-                text: switch (radio.status) {
-                  ConnectionStatus.connected => 'rtl_tcp 已连接',
-                  ConnectionStatus.connecting => '连接中…',
-                  ConnectionStatus.reconnecting => '重连中…',
-                  ConnectionStatus.error => '连接失败',
-                  ConnectionStatus.disconnected => 'rtl_tcp 未连接',
-                },
-              );
+              return ConnectionStatusLine(radio: radio);
             },
           ),
         ],
@@ -132,16 +118,25 @@ class _HomeShellState extends State<HomeShell> {
               controller: radio,
               rtlHost: settings.rtlHost,
               rtlPort: settings.rtlPort,
+              bookmarksHz: settings.bookmarksHz,
+              onAddBookmark: (hz) => settings.addBookmarkHz(hz),
+              onRemoveBookmark: (hz) => settings.removeBookmarkHz(hz),
               onOpenSettings: _openSettings,
             ),
             SkyPage(manualStation: station),
             ChatPage(
               isConfigured: settings.apiKey.isNotEmpty,
+              // 每次发送时新建 client：闭包实时读取当前 aiManualMode，
+              // 模式切换后下一轮对话立即生效。
               clientFactory: () => AiClient(
                 apiKey: settings.apiKey,
                 model: settings.apiModel,
-                tools: buildRadioTools(radio),
+                tools: buildRadioTools(
+                  radio,
+                  manualMode: settings.aiManualMode,
+                ),
               ),
+              manualMode: settings.aiManualMode,
               onOpenSettings: _openSettings,
             ),
             SettingsPage(settings: settings),

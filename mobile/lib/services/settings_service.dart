@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -124,6 +125,14 @@ const String _kDemodMode = 'demodMode';
 const String _kVolume = 'volume';
 const String _kMuted = 'muted';
 
+/// AI 助手运行模式：是否处于「手动模式」。
+///   * false（默认）= AI 接管：AI 的调谐/模式/增益等动作真正执行；
+///   * true        = 手动：AI 仍可对话，但工具动作仅记录不执行。
+const String _kAiManualMode = 'aiManualMode';
+
+/// 收藏频率列表（Hz），JSON 数组字符串落盘。只存真实频率，不存台名/位置。
+const String _kBookmarksHz = 'bookmarksHz';
+
 /// 上次调谐频率（Hz）默认值：144 MHz（2 m 业余段）。
 const int kDefaultLastFreqHz = 144000000;
 
@@ -151,6 +160,7 @@ class SettingsService extends ChangeNotifier {
   String _demodMode = _kDemodNfm;
   double _volume = 1.0;
   bool _muted = false;
+  bool _aiManualMode = false;
 
   /// rtl_tcp 主机（已 trim）。
   String get rtlHost => _rtlHost;
@@ -269,6 +279,45 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// AI 助手是否处于「手动模式」。
+  ///
+  /// false = AI 接管（工具动作真正执行）；true = 手动（工具仅记录不执行，
+  /// 在对话流里以「手动模式：未执行」标注）。读写即持久化。
+  bool get aiManualMode => _aiManualMode;
+  set aiManualMode(bool value) {
+    _aiManualMode = value;
+    unawaited(_kv.setBool(_kAiManualMode, value));
+    notifyListeners();
+  }
+
+  // ------------------------------------------------ 收藏频率（真实频率）
+  List<int> _bookmarksHz = <int>[];
+
+  /// 收藏的频率列表（Hz），按加入顺序。仅频率数值，无台名/位置。
+  List<int> get bookmarksHz => List<int>.unmodifiable(_bookmarksHz);
+
+  void _persistBookmarks() {
+    unawaited(_kv.setString(_kBookmarksHz, jsonEncode(_bookmarksHz)));
+  }
+
+  /// 加入收藏；已存在则忽略。返回最终是否包含该频率。
+  bool addBookmarkHz(int hz) {
+    if (hz <= 0) return false;
+    if (_bookmarksHz.contains(hz)) return true;
+    _bookmarksHz = List<int>.of(_bookmarksHz)..add(hz);
+    _persistBookmarks();
+    notifyListeners();
+    return true;
+  }
+
+  /// 移除收藏。
+  void removeBookmarkHz(int hz) {
+    if (!_bookmarksHz.contains(hz)) return;
+    _bookmarksHz = List<int>.of(_bookmarksHz)..remove(hz);
+    _persistBookmarks();
+    notifyListeners();
+  }
+
   /// 三坐标是否齐全（用于决定是否把手动站点交给天空页）。
   bool get hasManualStation =>
       _stationLat != null && _stationLon != null && _stationAlt != null;
@@ -298,6 +347,26 @@ class SettingsService extends ChangeNotifier {
     _volume = (vol ?? 1.0).clamp(0.0, 1.0);
 
     _muted = _kv.getBool(_kMuted) ?? false;
+
+    // AI 模式：缺失回退 false（AI 接管）。
+    _aiManualMode = _kv.getBool(_kAiManualMode) ?? false;
+
+    // 收藏频率：JSON 数组解析失败/非法值一律回退空列表，不抛异常。
+    final String? rawBookmarks = _kv.getString(_kBookmarksHz);
+    if (rawBookmarks != null && rawBookmarks.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawBookmarks);
+        if (decoded is List) {
+          _bookmarksHz = decoded
+              .whereType<num>()
+              .map((n) => n.toInt())
+              .where((h) => h > 0)
+              .toList();
+        }
+      } on FormatException {
+        _bookmarksHz = <int>[];
+      }
+    }
 
     notifyListeners();
   }

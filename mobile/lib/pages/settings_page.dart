@@ -198,6 +198,7 @@ class _SettingsPageState extends State<SettingsPage> {
             },
           ),
         ),
+        // 音量百分比定宽列：3 位数字右对齐所需宽度。
         SizedBox(
           width: 44,
           child: Text(
@@ -358,6 +359,29 @@ class _SettingsPageState extends State<SettingsPage> {
               onEditingComplete: _saveModel,
               onSubmitted: (_) => _saveModel(),
             ),
+            const SizedBox(height: AppTokens.spacingS),
+            // AI 接管 / 手动 二态开关。
+            //   * AI 接管（on）：AI 的调谐/模式/增益等动作真正下发接收机；
+            //   * 手动（off）：AI 仍可对话，工具动作仅记录不执行。
+            Row(
+              children: <Widget>[
+                const Expanded(
+                  child: Text('AI 接管', style: AppTokens.body),
+                ),
+                Switch(
+                  value: !widget.settings.aiManualMode,
+                  onChanged: (bool on) =>
+                      setState(() => widget.settings.aiManualMode = !on),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppTokens.spacingS),
+            Text(
+              widget.settings.aiManualMode
+                  ? '手动模式：AI 可对话，但调谐动作不会真正执行'
+                  : 'AI 接管：AI 的调谐/模式/增益动作会直接生效',
+              style: AppTokens.auxiliary,
+            ),
           ],
         ),
 
@@ -370,6 +394,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 FilledButton.icon(
                   onPressed: _locating ? null : _locate,
                   icon: _locating
+                      // 按钮内联 16px 发丝进度圈，与文字按钮等高。
                       ? const SizedBox(
                           width: 16,
                           height: 16,

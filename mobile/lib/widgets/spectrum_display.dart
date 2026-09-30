@@ -8,6 +8,11 @@
 //
 // 性能：瀑布用原始 RGBA 像素缓冲 + ui.Image 逐帧下移（底部最新帧），
 // 颜色由 AppTokens.waterfallColorFor 连续插值（非离散色块）。
+//
+// token 化审计说明：本文件 CustomPainter 内的 strokeWidth（1 / 1.2 / 1.4）
+// 与各处 alpha（0.08–0.85）是画布绘图原语/仪器表面透明度，对齐桌面端
+// SDR 画布质感，属于几何绘制常量（与 compass_dial 同类）；文字一律引用
+// AppTokens.annotationFontSize，不散落裸字号。
 library;
 
 import 'dart:typed_data';

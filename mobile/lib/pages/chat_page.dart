@@ -49,6 +49,7 @@ class ChatPage extends StatefulWidget {
     super.key,
     required this.clientFactory,
     required this.isConfigured,
+    this.manualMode = false,
     this.onOpenSettings,
   });
 
@@ -57,6 +58,10 @@ class ChatPage extends StatefulWidget {
 
   /// 是否已配置 API key；false 时展示诚实空态并禁用输入。
   final bool isConfigured;
+
+  /// 当前是否「手动模式」。true 时 AI 可对话但动作不执行，
+  /// 输入区上方安静标注，让用户诚实知道当前模式。
+  final bool manualMode;
 
   /// 点击「去设置」回调。
   final VoidCallback? onOpenSettings;
@@ -247,8 +252,32 @@ class _ChatPageState extends State<ChatPage> {
         child: Column(
           children: <Widget>[
             Expanded(child: _buildList()),
+            if (widget.manualMode) _buildModeStrip(),
             _buildInputBar(),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 手动模式安静标注：一行次要文字，不使用警示色。
+  Widget _buildModeStrip() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppTokens.spacingL,
+        vertical: AppTokens.spacingS,
+      ),
+      decoration: const BoxDecoration(
+        border: Border(
+          top: BorderSide(color: AppTokens.cardEdge),
+        ),
+      ),
+      child: Text(
+        '手动模式：AI 可对话，但调谐等动作不会真正执行',
+        style: AppTokens.auxiliary.copyWith(
+          fontSize: AppTokens.annotationFontSize,
+          color: AppTokens.textAt(AppTokens.textAlphaTertiary),
         ),
       ),
     );
@@ -260,13 +289,14 @@ class _ChatPageState extends State<ChatPage> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
+            // 未配置引导卡片宽度：单列空态布局约束（一次性布局参数）。
             constraints: const BoxConstraints(maxWidth: 320),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Icon(
                   Icons.key_outlined,
-                  size: 48,
+                  size: AppTokens.iconSizeEmpty,
                   color: AppTokens.textAt(AppTokens.textAlphaFaint),
                 ),
                 const SizedBox(height: AppTokens.spacingL),
@@ -311,6 +341,7 @@ class _ChatPageState extends State<ChatPage> {
   Widget _buildBubble(_UiMessage m) {
     final bool isUser = m.role == ChatRole.user;
     final bool isError = m.error != null;
+    // 气泡最大宽度占屏比：移动端聊天通用 0.78，避免长气泡撑满整行。
     final double maxW = MediaQuery.of(context).size.width * 0.78;
 
     return Align(
@@ -323,6 +354,7 @@ class _ChatPageState extends State<ChatPage> {
         constraints: BoxConstraints(maxWidth: maxW),
         padding: const EdgeInsets.all(AppTokens.spacingL),
         decoration: isUser
+            // 用户气泡：accent 12% 填充 / 30% 描边（对话层专属低饱和表面）。
             ? BoxDecoration(
                 color: AppTokens.accent.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(AppTokens.radiusCard),
@@ -379,7 +411,7 @@ class _ChatPageState extends State<ChatPage> {
         Row(
           children: <Widget>[
             const Icon(Icons.error_outline,
-                size: 14, color: AppTokens.danger),
+                size: AppTokens.iconSizeInline, color: AppTokens.danger),
             const SizedBox(width: AppTokens.spacingS),
             Expanded(
               child: Text(
@@ -399,6 +431,7 @@ class _ChatPageState extends State<ChatPage> {
                 horizontal: AppTokens.spacingM,
                 vertical: AppTokens.spacingS,
               ),
+              // 重试按钮紧凑高度：气泡内辅助操作，不占满 touchMin。
               minimumSize: const Size(0, 28),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
@@ -421,6 +454,7 @@ class _ChatPageState extends State<ChatPage> {
         vertical: AppTokens.spacingS,
       ),
       decoration: BoxDecoration(
+        // 工具 chip：10% 填充 / 30% 描边的低饱和表面。
         color: color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(AppTokens.radiusSmall),
         border: Border.all(color: color.withValues(alpha: 0.30)),
@@ -428,6 +462,7 @@ class _ChatPageState extends State<ChatPage> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
+          // chip 内 12px 微图标，与 annotationFontSize+1 的字号对齐。
           Icon(c.done ? Icons.check : Icons.autorenew,
               size: 12, color: color),
           const SizedBox(width: AppTokens.spacingS),
