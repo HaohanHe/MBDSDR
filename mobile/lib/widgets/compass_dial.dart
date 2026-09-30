@@ -50,6 +50,12 @@ class _PassArc {
   final List<({double az, double el})> samples;
 }
 
+/// 选中卫星轨迹：以当前几何时刻为中心，前后各采样的分钟数（真实传播）。
+const double kTrajectoryHalfWindowMinutes = 10;
+
+/// 选中轨迹采样步长（秒）。
+const int kTrajectoryStepSeconds = 30;
+
 /// 天空极坐标图。[station] 与 [now]（UTC）非空时，为每颗可见卫星绘制
 /// 未来一小段过境弧；缺失则只画当前点，绝不编造轨迹。
 class SkyRadar extends StatelessWidget {
@@ -93,16 +99,52 @@ class SkyRadar extends StatelessWidget {
     return out;
   }
 
+  /// 选中卫星的过境前后真实传播轨迹：[nowUtc] 前后各
+  /// [kTrajectoryHalfWindowMinutes] 分钟，按 [kTrajectoryStepSeconds] 采样。
+  /// 只保留仰角为正的点（落地即断段），绝不画假轨迹。
+  List<({double az, double el})> _sampleSelectedTrajectory(
+      Tle tle, DateTime nowUtc) {
+    final st = station;
+    if (st == null) return const [];
+    final List<({double az, double el})> out = [];
+    try {
+      final sat = Sgp4(tle);
+      final start = nowUtc.subtract(
+          Duration(minutes: kTrajectoryHalfWindowMinutes.round()));
+      final end = nowUtc.add(
+          Duration(minutes: kTrajectoryHalfWindowMinutes.round()));
+      var t = start;
+      while (!t.isAfter(end)) {
+        final a = azElAt(sat, t, st);
+        if (a.el > 0.0) out.add((az: a.az, el: a.el));
+        t = t.add(const Duration(seconds: kTrajectoryStepSeconds));
+      }
+    } on Sgp4Exception {
+      return const [];
+    }
+    return out;
+  }
+
   @override
   Widget build(BuildContext context) {
     final station = this.station;
     final nowUtc = now?.toUtc();
     final arcs = <_PassArc>[];
+    List<({double az, double el})> selectedTrajectory = const [];
     if (station != null && nowUtc != null) {
       for (final v in visible) {
         if (v.el <= 0.0) continue;
         final s = _sampleArc(v.tle, nowUtc);
         if (s.length >= 2) arcs.add(_PassArc(name: v.name, samples: s));
+      }
+      // 选中卫星：过境前后 ±10 分钟真实传播轨迹（独立采样，绿色高亮）。
+      if (selectedName != null) {
+        for (final v in visible) {
+          if (v.name == selectedName) {
+            selectedTrajectory = _sampleSelectedTrajectory(v.tle, nowUtc);
+            break;
+          }
+        }
       }
     }
 
@@ -117,6 +159,7 @@ class SkyRadar extends StatelessWidget {
               visible: visible,
               selectedName: selectedName,
               arcs: arcs,
+              selectedTrajectory: selectedTrajectory,
             ),
           ),
         );
@@ -150,11 +193,15 @@ class _PolarPainter extends CustomPainter {
     required this.visible,
     required this.selectedName,
     required this.arcs,
+    required this.selectedTrajectory,
   });
 
   final List<SatVisibility> visible;
   final String? selectedName;
   final List<_PassArc> arcs;
+
+  /// 选中卫星过境前后 ±10 分钟的真实传播轨迹（az/el 采样）。
+  final List<({double az, double el})> selectedTrajectory;
 
   /// 外圆之外留给方位字母/刻度的边距（含文字半高，保证不被裁切）。
   static const double outerMargin = 26;
@@ -170,6 +217,7 @@ class _PolarPainter extends CustomPainter {
 
     _paintGrid(canvas, c, R);
     _paintArcs(canvas, c, R);
+    _paintSelectedTrajectory(canvas, c, R);
     _paintSatellites(canvas, c, R, size);
   }
 
@@ -280,6 +328,37 @@ class _PolarPainter extends CustomPainter {
     }
   }
 
+  // ---- 选中卫星轨迹：真实传播采样，绿色高亮 -------------------------------
+  void _paintSelectedTrajectory(Canvas canvas, Offset c, double R) {
+    final samples = selectedTrajectory;
+    if (samples.length < 2) return;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6
+      ..color = AppTokens.success.withValues(alpha: 0.85)
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round;
+    final path = Path();
+    double? prevAz;
+    for (final s in samples) {
+      final p = polarPoint(c, R, s.az, s.el);
+      if (prevAz == null) {
+        path.moveTo(p.dx, p.dy);
+      } else {
+        var dAz = (s.az - prevAz).abs();
+        if (dAz > 180.0) dAz = 360.0 - dAz;
+        // 方位跳变过大则断开，避免横穿整圆。
+        if (dAz > 90.0) {
+          path.moveTo(p.dx, p.dy);
+        } else {
+          path.lineTo(p.dx, p.dy);
+        }
+      }
+      prevAz = s.az;
+    }
+    canvas.drawPath(path, paint);
+  }
+
   // ---- 卫星点 + 避让标签 --------------------------------------------------
   void _paintSatellites(Canvas canvas, Offset c, double R, Size size) {
     final items = visible.where((v) => v.el > 0.0).toList();
@@ -365,5 +444,6 @@ class _PolarPainter extends CustomPainter {
   bool shouldRepaint(covariant _PolarPainter old) =>
       old.selectedName != selectedName ||
       !identical(old.visible, visible) ||
-      !identical(old.arcs, arcs);
+      !identical(old.arcs, arcs) ||
+      !identical(old.selectedTrajectory, selectedTrajectory);
 }
