@@ -12,6 +12,7 @@
 #include <QTableWidgetItem>
 #include <QCheckBox>
 #include <QPushButton>
+#include <QToolButton>
 #include <QSettings>
 #include <algorithm>
 
@@ -104,6 +105,34 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
             this, &SpectrumWidget::viewChanged);
     connect(dbMaxSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
             this, &SpectrumWidget::viewChanged);
+
+    // dB axis auto-range: when checked the canvas drives its own ceiling from
+    // the real sliding peak (trace + waterfall colour scale share the mapping).
+    // Active state is marked with the accent colour; state is intentionally not
+    // persisted (kept simple, per contract).
+    auto* autoDbBtn = new QToolButton(this);
+    autoDbBtn->setObjectName("btnAutoDbRange");
+    autoDbBtn->setText("自动");
+    autoDbBtn->setCheckable(true);
+    autoDbBtn->setChecked(true);   // default on
+    autoDbBtn->setAutoRaise(true);
+    autoDbBtn->setToolTip("dB 轴自动量程（按真实峰值自适应）");
+    auto paintAutoBtn = [autoDbBtn]() {
+        if (autoDbBtn->isChecked()) {
+            autoDbBtn->setStyleSheet(
+                QStringLiteral("QToolButton{color:%1;} QToolButton:hover{color:%2;}")
+                    .arg(QString::fromUtf8(tokens::kAccent),
+                         QString::fromUtf8(tokens::kAccentHover)));
+        } else {
+            autoDbBtn->setStyleSheet(QString());
+        }
+    };
+    paintAutoBtn();
+    connect(autoDbBtn, &QToolButton::toggled, this, [this, paintAutoBtn](bool on) {
+        if (canvas_) canvas_->setAutoRangeOn(on);
+        paintAutoBtn();
+    });
+    topRow->addWidget(autoDbBtn);
 
     topRow->addWidget(new QLabel("门限", this));
     peakThreshSpin_ = new QSpinBox(this);
