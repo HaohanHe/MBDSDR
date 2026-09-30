@@ -183,6 +183,16 @@ add_executable(ui_shot_mvfo tests/ui_screenshot_multi_vfo.cpp ${SHOT_SRCS} ${HEA
 target_include_directories(ui_shot_mvfo PRIVATE src build/ui_shot_mvfo_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_mvfo PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
+# Upgraded multi-VFO management panel screenshot (offscreen; not in ctest).
+add_executable(ui_shot_vfopanel tests/ui_screenshot_vfo_panel.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_vfopanel PRIVATE src build/ui_shot_vfopanel_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_vfopanel PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# Narrow-window adaptation screenshot (offscreen; not in ctest).
+add_executable(ui_shot_narrow tests/ui_screenshot_narrow.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_narrow PRIVATE src build/ui_shot_narrow_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_narrow PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
 # Constellation + multi-VFO screenshot (offscreen; not in ctest).
 add_executable(ui_shot_cst tests/ui_screenshot_constellation.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_cst PRIVATE src build/ui_shot_cst_autogen/include build/mbdsdr_autogen/include)
