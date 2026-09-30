@@ -365,4 +365,72 @@ void main() {
       expect(s.bookmarks, isEmpty);
     });
   });
+
+  group('频谱固定频率标记（Hz，持久化默认空）', () {
+    test('默认空列表，不预存任何频点', () async {
+      final SettingsService s = SettingsService(
+        kv: InMemoryKvStore(),
+        secure: InMemorySecureStore(),
+      );
+      await s.load();
+      expect(s.fixedMarksHz, isEmpty);
+    });
+
+    test('add 后新实例 load 读回一致（真实落盘）', () async {
+      final InMemoryKvStore kv = InMemoryKvStore();
+      final SettingsService s = SettingsService(kv: kv, secure: InMemorySecureStore());
+      await s.load();
+      expect(s.addFixedMarkHz(145000000), isTrue);
+      expect(s.addFixedMarkHz(98500000), isTrue);
+      expect(s.fixedMarksHz, <double>[145000000, 98500000]);
+      // 落盘为数字数组字符串。
+      expect(kv.data['fixedMarksHz'], isA<String>());
+      expect(kv.data['fixedMarksHz'] as String, contains('145'));
+
+      final SettingsService s2 =
+          SettingsService(kv: kv, secure: InMemorySecureStore());
+      await s2.load();
+      expect(s2.fixedMarksHz, <double>[145000000, 98500000]);
+    });
+
+    test('同频率去重；非法频率拒绝；返回不可变视图', () {
+      final SettingsService s = SettingsService(
+        kv: InMemoryKvStore(),
+        secure: InMemorySecureStore(),
+      );
+      expect(s.addFixedMarkHz(-1), isFalse);
+      expect(s.addFixedMarkHz(0), isFalse);
+      expect(s.fixedMarksHz, isEmpty);
+      expect(s.addFixedMarkHz(100e6), isTrue);
+      expect(s.addFixedMarkHz(100e6), isFalse); // 容差内去重
+      expect(s.fixedMarksHz, hasLength(1));
+      expect(() => s.fixedMarksHz.add(1.0), throwsUnsupportedError);
+    });
+
+    test('remove 按频率删除；clear 清空并落盘', () async {
+      final InMemoryKvStore kv = InMemoryKvStore();
+      final SettingsService s = SettingsService(kv: kv, secure: InMemorySecureStore());
+      await s.load();
+      s.addFixedMarkHz(100e6);
+      s.addFixedMarkHz(200e6);
+      s.removeFixedMarkHz(100e6);
+      expect(s.fixedMarksHz, <double>[200000000.0]);
+      s.clearFixedMarks();
+      expect(s.fixedMarksHz, isEmpty);
+
+      final SettingsService s2 =
+          SettingsService(kv: kv, secure: InMemorySecureStore());
+      await s2.load();
+      expect(s2.fixedMarksHz, isEmpty);
+    });
+
+    test('损坏 JSON 静默回退空列表，不抛异常', () async {
+      final InMemoryKvStore kv = InMemoryKvStore()
+        ..data['fixedMarksHz'] = 'not-json';
+      final SettingsService s =
+          SettingsService(kv: kv, secure: InMemorySecureStore());
+      await s.load();
+      expect(s.fixedMarksHz, isEmpty);
+    });
+  });
 }

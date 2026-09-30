@@ -24,7 +24,7 @@ int bandwidthForMode(DemodMode mode) => switch (mode) {
       DemodMode.wfm => 200000,
     };
 
-class SpectrumPage extends StatelessWidget {
+class SpectrumPage extends StatefulWidget {
   /// 收音机接口（运行时为 ChangeNotifier，用于监听状态）。
   final RadioApi controller;
 
@@ -44,6 +44,15 @@ class SpectrumPage extends StatelessWidget {
   /// 按频率移除书签。
   final ValueChanged<int>? onRemoveBookmark;
 
+  /// 固定频率标记（Hz），来自真实持久化，默认空。
+  final List<double> fixedMarksHz;
+
+  /// 钉住当前频点为固定标记。
+  final VoidCallback? onAddFixedMark;
+
+  /// 按频率移除固定标记。
+  final ValueChanged<double>? onRemoveFixedMark;
+
   /// 空 host 时引导用户去设置页。
   final VoidCallback? onOpenSettings;
 
@@ -55,11 +64,24 @@ class SpectrumPage extends StatelessWidget {
     this.bookmarks = const <Bookmark>[],
     this.onAddBookmark,
     this.onRemoveBookmark,
+    this.fixedMarksHz = const <double>[],
+    this.onAddFixedMark,
+    this.onRemoveFixedMark,
     this.onOpenSettings,
   });
 
   @override
+  State<SpectrumPage> createState() => _SpectrumPageState();
+}
+
+class _SpectrumPageState extends State<SpectrumPage> {
+  // 余晖档位与清除节拍为页面本地状态（不落盘）；off 为默认，与历史行为一致。
+  SpectrumPersistence _persistence = SpectrumPersistence.off;
+  int _clearTick = 0;
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     return ListenableBuilder(
       listenable: controller as Listenable,
       builder: (context, _) {
@@ -74,17 +96,28 @@ class SpectrumPage extends StatelessWidget {
                     (constraints.maxWidth * 0.30).clamp(240.0, 340.0);
                 final panel = _ControlPanel(
                   controller: controller,
-                  rtlHost: rtlHost,
-                  rtlPort: rtlPort,
-                  bookmarks: bookmarks,
-                  onAddBookmark: onAddBookmark,
-                  onRemoveBookmark: onRemoveBookmark,
-                  onOpenSettings: onOpenSettings,
+                  rtlHost: widget.rtlHost,
+                  rtlPort: widget.rtlPort,
+                  bookmarks: widget.bookmarks,
+                  onAddBookmark: widget.onAddBookmark,
+                  onRemoveBookmark: widget.onRemoveBookmark,
+                  persistence: _persistence,
+                  onPersistenceChanged: (m) =>
+                      setState(() => _persistence = m),
+                  onClearPersistence: () =>
+                      setState(() => _clearTick += 1),
+                  fixedMarksHz: widget.fixedMarksHz,
+                  onAddFixedMark: widget.onAddFixedMark,
+                  onRemoveFixedMark: widget.onRemoveFixedMark,
+                  onOpenSettings: widget.onOpenSettings,
                 );
                 final display = _DisplayArea(
                   controller: controller,
-                  rtlHost: rtlHost,
-                  onOpenSettings: onOpenSettings,
+                  rtlHost: widget.rtlHost,
+                  persistence: _persistence,
+                  persistenceClearTick: _clearTick,
+                  fixedMarksHz: widget.fixedMarksHz,
+                  onOpenSettings: widget.onOpenSettings,
                 );
                 return wide
                     ? Row(
@@ -96,7 +129,9 @@ class SpectrumPage extends StatelessWidget {
                       )
                     : Column(
                         children: [
-                          panel,
+                          // 竖排：控制面板内容较高时内部滚动（loose），
+                          // 不撑破 Column；内容短时仍按自然高度。
+                          Flexible(child: panel),
                           Expanded(child: display),
                         ],
                       );
@@ -113,11 +148,17 @@ class SpectrumPage extends StatelessWidget {
 class _DisplayArea extends StatelessWidget {
   final RadioApi controller;
   final String rtlHost;
+  final SpectrumPersistence persistence;
+  final int persistenceClearTick;
+  final List<double> fixedMarksHz;
   final VoidCallback? onOpenSettings;
 
   const _DisplayArea({
     required this.controller,
     required this.rtlHost,
+    required this.persistence,
+    required this.persistenceClearTick,
+    required this.fixedMarksHz,
     required this.onOpenSettings,
   });
 
@@ -156,7 +197,12 @@ class _DisplayArea extends StatelessWidget {
           ),
         );
       case ConnectionStatus.connected:
-        return _ConnectedBody(controller: controller);
+        return _ConnectedBody(
+          controller: controller,
+          persistence: persistence,
+          persistenceClearTick: persistenceClearTick,
+          fixedMarksHz: fixedMarksHz,
+        );
     }
   }
 }
@@ -164,7 +210,15 @@ class _DisplayArea extends StatelessWidget {
 /// 已连接：持有最新一帧，同时喂给状态栏（RSSI）与频谱显示。
 class _ConnectedBody extends StatefulWidget {
   final RadioApi controller;
-  const _ConnectedBody({required this.controller});
+  final SpectrumPersistence persistence;
+  final int persistenceClearTick;
+  final List<double> fixedMarksHz;
+  const _ConnectedBody({
+    required this.controller,
+    required this.persistence,
+    required this.persistenceClearTick,
+    required this.fixedMarksHz,
+  });
 
   @override
   State<_ConnectedBody> createState() => _ConnectedBodyState();
@@ -199,6 +253,9 @@ class _ConnectedBodyState extends State<_ConnectedBody> {
             channelBandwidthHz: bandwidthForMode(widget.controller.mode).toDouble(),
             onTapFrequency: (hz) =>
                 widget.controller.setFrequencyHz(hz.round()),
+            persistence: widget.persistence,
+            persistenceClearTick: widget.persistenceClearTick,
+            fixedMarksHz: widget.fixedMarksHz,
           ),
         ),
       ],
@@ -290,6 +347,12 @@ class _ControlPanel extends StatelessWidget {
   final void Function(String name, int frequencyHz, String mode, int bandwidthHz)?
       onAddBookmark;
   final ValueChanged<int>? onRemoveBookmark;
+  final SpectrumPersistence persistence;
+  final ValueChanged<SpectrumPersistence> onPersistenceChanged;
+  final VoidCallback onClearPersistence;
+  final List<double> fixedMarksHz;
+  final VoidCallback? onAddFixedMark;
+  final ValueChanged<double>? onRemoveFixedMark;
   final VoidCallback? onOpenSettings;
 
   const _ControlPanel({
@@ -299,6 +362,12 @@ class _ControlPanel extends StatelessWidget {
     required this.bookmarks,
     required this.onAddBookmark,
     required this.onRemoveBookmark,
+    required this.persistence,
+    required this.onPersistenceChanged,
+    required this.onClearPersistence,
+    required this.fixedMarksHz,
+    required this.onAddFixedMark,
+    required this.onRemoveFixedMark,
     this.onOpenSettings,
   });
 
@@ -569,6 +638,40 @@ class _ControlPanel extends StatelessWidget {
                 ),
               ],
             ),
+            // ---- 组间分段：余晖（历史帧渐隐叠加）----
+            const SizedBox(height: AppTokens.spacingL),
+            Row(
+              children: [
+                const Text('余晖', style: AppTokens.auxiliary),
+                const Spacer(),
+                if (persistence.isOn)
+                  TextButton.icon(
+                    onPressed: onClearPersistence,
+                    icon: const Icon(Icons.layers_clear, size: AppTokens.iconSizeInline),
+                    label: const Text('清除', style: AppTokens.auxiliary),
+                  ),
+              ],
+            ),
+            const SizedBox(height: AppTokens.spacingS),
+            SegmentedButton<SpectrumPersistence>(
+              style: ButtonStyle(
+                backgroundColor: WidgetStateProperty.resolveWith((states) =>
+                    states.contains(WidgetState.selected)
+                        ? AppTokens.selectedFill
+                        : Colors.transparent),
+                foregroundColor: WidgetStateProperty.all(AppTokens.textPrimary),
+                side: WidgetStateProperty.all(
+                  const BorderSide(color: AppTokens.divider),
+                ),
+              ),
+              segments: const [
+                ButtonSegment(value: SpectrumPersistence.off, label: Text('关')),
+                ButtonSegment(value: SpectrumPersistence.low, label: Text('低')),
+                ButtonSegment(value: SpectrumPersistence.high, label: Text('高')),
+              ],
+              selected: {persistence},
+              onSelectionChanged: (s) => onPersistenceChanged(s.first),
+            ),
             // ---- 组间分段：主操作 ----
             const SizedBox(height: AppTokens.spacingL),
             // 连接 / 断开。
@@ -635,6 +738,48 @@ class _ControlPanel extends StatelessWidget {
                         onDeleted: onRemoveBookmark == null
                             ? null
                             : () => onRemoveBookmark!(bm.frequencyHz),
+                      ),
+                  ],
+                ),
+            ],
+            // 固定频率标记：钉住当前频点为琥珀虚线参考线（持久化，默认空）。
+            // 与书签（跳频）区分：标记只在画布画竖线，不改频率。
+            if (onAddFixedMark != null) ...[
+              const SizedBox(height: AppTokens.spacingL),
+              Row(
+                children: [
+                  IconButton(
+                    tooltip: '钉住此频点为固定标记',
+                    icon: const Icon(Icons.push_pin_outlined),
+                    onPressed: onAddFixedMark,
+                  ),
+                  const SizedBox(width: AppTokens.spacingS),
+                  Expanded(
+                    child: Text(
+                      fixedMarksHz.any(
+                              (f) => (f - controller.freqHz).abs() < 1.0)
+                          ? '已标记当前频点'
+                          : '钉住当前频点（画布琥珀虚线）',
+                      style: AppTokens.auxiliary,
+                    ),
+                  ),
+                ],
+              ),
+              if (fixedMarksHz.isNotEmpty)
+                Wrap(
+                  spacing: AppTokens.spacingS,
+                  runSpacing: AppTokens.spacingS,
+                  children: [
+                    for (final f in fixedMarksHz)
+                      InputChip(
+                        label: Text(
+                          '${(f / 1e6).toStringAsFixed(4)} MHz',
+                          style: AppTokens.mono,
+                        ),
+                        onPressed: () => controller.setFrequencyHz(f.round()),
+                        onDeleted: onRemoveFixedMark == null
+                            ? null
+                            : () => onRemoveFixedMark!(f),
                       ),
                   ],
                 ),

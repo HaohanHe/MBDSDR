@@ -146,6 +146,12 @@ const String _kBookmarksHz = 'bookmarksHz';
 /// 这里只是就绪的持久化槽位，列表在真机上恒为空态。
 const String _kRecordings = 'recordingsMeta';
 
+/// 频谱固定频率标记（Hz）列表，JSON 数字数组落盘。
+///
+/// 用户在频谱图上手动钉住的参考频点；默认空，不预存任何频点。
+/// 仅存频率数字（无名称），画布以琥珀虚线竖线呈现。
+const String _kFixedMarksHz = 'fixedMarksHz';
+
 /// 上次调谐频率（Hz）默认值：144 MHz（2 m 业余段）。
 const int kDefaultLastFreqHz = 144000000;
 
@@ -391,6 +397,44 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ------------------------------------------------ 频谱固定频率标记（Hz）
+  List<double> _fixedMarks = <double>[];
+
+  /// 固定频率标记列表（Hz，按加入顺序，不可变视图）。默认空，不预存任何频点。
+  List<double> get fixedMarksHz => List<double>.unmodifiable(_fixedMarks);
+
+  void _persistFixedMarks() {
+    unawaited(_kv.setString(_kFixedMarksHz, jsonEncode(_fixedMarks)));
+  }
+
+  /// 钉住一个固定频率标记（Hz）；频率 <=0 拒绝，已存在则忽略（返回 false）。
+  bool addFixedMarkHz(double hz) {
+    if (hz <= 0) return false;
+    if (_fixedMarks.any((f) => (f - hz).abs() < 1.0)) return false;
+    _fixedMarks = List<double>.of(_fixedMarks)..add(hz);
+    _persistFixedMarks();
+    notifyListeners();
+    return true;
+  }
+
+  /// 按频率移除固定标记（容差 1 Hz）。
+  void removeFixedMarkHz(double hz) {
+    final before = _fixedMarks.length;
+    _fixedMarks = List<double>.of(_fixedMarks)
+      ..removeWhere((f) => (f - hz).abs() < 1.0);
+    if (_fixedMarks.length == before) return;
+    _persistFixedMarks();
+    notifyListeners();
+  }
+
+  /// 清空全部固定标记。
+  void clearFixedMarks() {
+    if (_fixedMarks.isEmpty) return;
+    _fixedMarks = <double>[];
+    _persistFixedMarks();
+    notifyListeners();
+  }
+
   /// 三坐标是否齐全（用于决定是否把手动站点交给天空页）。
   bool get hasManualStation =>
       _stationLat != null && _stationLon != null && _stationAlt != null;
@@ -463,6 +507,23 @@ class SettingsService extends ChangeNotifier {
         }
       } on FormatException {
         _recordings = <RecordingMeta>[];
+      }
+    }
+
+    // 固定频率标记：JSON 数字数组；解析失败/非法项静默丢弃，回退空列表。
+    final String? rawMarks = _kv.getString(_kFixedMarksHz);
+    if (rawMarks != null && rawMarks.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawMarks);
+        if (decoded is List) {
+          _fixedMarks = decoded
+              .whereType<num>()
+              .map((n) => n.toDouble())
+              .where((f) => f > 0)
+              .toList();
+        }
+      } on FormatException {
+        _fixedMarks = <double>[];
       }
     }
 
