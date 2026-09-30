@@ -199,6 +199,12 @@ add_executable(ui_shot_measure tests/ui_screenshot_measure.cpp ${SHOT_SRCS} ${HE
 target_include_directories(ui_shot_measure PRIVATE src build/ui_shot_measure_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_measure PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
+# Hotplug event-channel screenshot: real loopback rtl_tcp server drives the
+# engine through connect -> drop (设备断开) -> auto-reconnect (recovered).
+add_executable(ui_shot_hotplug tests/ui_screenshot_hotplug.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_hotplug PRIVATE src build/ui_shot_hotplug_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_hotplug PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
 target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent ${CMAKE_DL_LIBS})
 
 if(RTLSDR_FOUND)

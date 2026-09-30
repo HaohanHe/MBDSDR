@@ -965,6 +965,10 @@ MainWindow::MainWindow(QWidget* parent)
             spectrum_, &ui::SpectrumWidget::setSpectrum);
     connect(engine_, &dsp::SpectrumEngine::sourceChanged,
             this, &MainWindow::onSourceChanged);
+    connect(engine_, &dsp::SpectrumEngine::sourceDropped,
+            this, &MainWindow::onSourceDropped);
+    connect(engine_, &dsp::SpectrumEngine::sourceError,
+            this, &MainWindow::onSourceError);
     connect(engine_, &dsp::SpectrumEngine::audioLevel,
             this, &MainWindow::onAudioLevel);
     connect(engine_, &dsp::SpectrumEngine::rssiLevel,
@@ -2199,6 +2203,15 @@ void MainWindow::restoreUiState() {
 }
 
 void MainWindow::onSourceChanged(const QString& name, bool connected) {
+    if (connected) {
+        hotplugDropped_ = false;
+        connectErrorShown_ = false;
+    } else if (hotplugDropped_ || connectErrorShown_) {
+        // The engine follows a drop / failed connect with the fallback
+        // sourceChanged(false); keep the drop / error banner visible instead
+        // of showing a plain "test signal" state.
+        return;
+    }
     statusLabel_->setText(connected ? QString("● %1").arg(name) : QString("● %1 (test)").arg(name));
     if (connectBtn_) connectBtn_->setText(connected ? "断开" : "连接");
     if (sourceBanner_) sourceBanner_->setText(connected
@@ -2209,6 +2222,37 @@ void MainWindow::onSourceChanged(const QString& name, bool connected) {
     if (recordBtn_) recordBtn_->setEnabled(true);
     sbSdr_->setText(name + (connected ? "" : " (test)"));
     setControlsEnabled(connected);
+}
+
+// Hotplug event channel (separate from the 1 Hz telemetry poll): the engine
+// detected that a previously connected real device stopped delivering IQ and
+// already fell back to the offline test source. Tell the user immediately --
+// quiet, neutral, no alarm styling (状态是安静信息).
+void MainWindow::onSourceDropped() {
+    hotplugDropped_ = true;
+    statusLabel_->setText(QStringLiteral("● 设备断开，等待重插"));
+    if (connectBtn_) connectBtn_->setText(QStringLiteral("连接"));
+    if (sourceBanner_)
+        sourceBanner_->setText(QStringLiteral("设备断开，正在等待重新连接…（真实数据流中断）"));
+    // Controls stay enabled: the offline test source is honest data (合成测试
+    // 信号), and the auto-reconnect may bring the device back at any moment.
+}
+
+// A connect attempt failed with a REAL socket reason (refused / timeout /
+// host lookup / ...). Never a fabricated cause.
+void MainWindow::onSourceError(const QString& message) {
+    if (hotplugDropped_) {
+        // The device is absent and a reconnect attempt just failed: keep the
+        // drop banner, append the real reason as quiet context.
+        if (sourceBanner_)
+            sourceBanner_->setText(
+                QStringLiteral("设备断开，正在等待重新连接…（%1）").arg(message));
+        return;
+    }
+    connectErrorShown_ = true;
+    statusLabel_->setText(QStringLiteral("● rtl_tcp 连接失败"));
+    if (sourceBanner_)
+        sourceBanner_->setText(QStringLiteral("连接失败：%1").arg(message));
 }
 
 void MainWindow::onAudioLevel(float dbfs) {

@@ -43,9 +43,14 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
+    // Programmatic entry point (CLI / screenshot harness / embedding): the
+    // engine behind the UI. GUI remains optional for every action.
+    dsp::SpectrumEngine* engine() { return engine_; }
 
 private slots:
     void onSourceChanged(const QString& name, bool connected);
+    void onSourceDropped();
+    void onSourceError(const QString& message);
     void onAudioLevel(float dbfs);
     void onRssiLevel(float dbfs);
     void onSnrLevel(float snrDb);
@@ -107,6 +112,12 @@ private:
     QTimer*             adsbTimer_  = nullptr;
     gnss::GnssFix lastGnssFix_;
     bool   gnssHasFix_ = false;
+    // Hotplug event flags: while set, the next sourceChanged(false) (which is
+    // the engine's fallback report right after a drop / failed connect) must
+    // not overwrite the drop / error banner. Cleared on any reconnect or by a
+    // manual source change (which does not set the flags).
+    bool   hotplugDropped_   = false;
+    bool   connectErrorShown_ = false;
     double lastGnssAppliedLat_ = std::numeric_limits<double>::quiet_NaN();
     double lastGnssAppliedLon_ = std::numeric_limits<double>::quiet_NaN();
     double clockBiasSec_ = 0.0;
