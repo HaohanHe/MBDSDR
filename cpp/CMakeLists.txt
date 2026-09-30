@@ -294,7 +294,7 @@ target_link_libraries(test_noise_blanker PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME noise_blanker COMMAND test_noise_blanker)
 
 add_executable(test_engine_integration tests/test_engine_integration.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -307,7 +307,7 @@ add_test(NAME engine_integration COMMAND test_engine_integration)
 # B3/B4: per-mode bandwidth table + coverage rule + engine real setBandwidth +
 # PowerSpectrum frame-average lock.
 add_executable(test_bandwidth_preset tests/test_bandwidth_preset.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -320,7 +320,7 @@ add_test(NAME bandwidth_preset COMMAND test_bandwidth_preset)
 # Device hotplug event channel: drop detection, honest fallback, 2 s rtl_tcp
 # auto-reconnect, connect-failure reason (real TCP loopback, no mocks).
 add_executable(test_engine_hotplug tests/test_engine_hotplug.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -334,7 +334,7 @@ add_test(NAME engine_hotplug COMMAND test_engine_hotplug)
 # documented wire format -- handshake, SET_SETTING, real IQ push, stop-keep-alive.
 add_executable(test_spyserver_server tests/test_spyserver_server.cpp
     src/dsp/spyserver_server.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -344,9 +344,25 @@ target_include_directories(test_spyserver_server PRIVATE src)
 target_link_libraries(test_spyserver_server PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME spyserver_server COMMAND test_spyserver_server)
 
+# Offscreen end-to-end smoke over a POSIX loopback rtl_tcp (NOT HARDWARE):
+# handshake + deterministic tone IQ -> engine frames flow, spectrum lights up,
+# settings read back, illegal freq/rate honestly ignored.
+add_executable(test_e2e_smoke tests/test_e2e_smoke.cpp
+    src/dsp/spyserver_server.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/dsp/fcch_detector.cpp)
+target_include_directories(test_e2e_smoke PRIVATE src)
+target_link_libraries(test_e2e_smoke PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME e2e_smoke COMMAND test_e2e_smoke)
+
 # IAudioSink contract: MemoryAudioSink capture/volume/mute + engine injection.
 add_executable(test_audio_sink tests/test_audio_sink.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp
@@ -402,7 +418,7 @@ add_test(NAME ai_integration COMMAND test_ai_integration)
 
 # WAV roundtrip: record demod audio to disk, read header back.
 add_executable(test_wav_roundtrip tests/test_wav_roundtrip.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -413,7 +429,7 @@ target_link_libraries(test_wav_roundtrip PRIVATE Qt6::Test Qt6::Core Qt6::Networ
 add_test(NAME wav_roundtrip COMMAND test_wav_roundtrip)
 
 add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -523,6 +539,7 @@ add_test(NAME soapy_tx COMMAND test_soapy_tx)
 
 add_executable(test_recorder tests/test_recorder.cpp
     src/dsp/recorder.cpp src/dsp/file_source.cpp src/dsp/gated_recorder.cpp
+    src/dsp/device_capabilities.cpp
     src/dsp/demod.cpp)
 target_include_directories(test_recorder PRIVATE src)
 target_link_libraries(test_recorder PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
@@ -546,7 +563,7 @@ add_test(NAME squelch_gate COMMAND test_squelch_gate)
 # Audio-RMS-domain squelch auto-gate backing: real tracked noise floor signal +
 # the proven gate mute path. Engine-only, offline test source.
 add_executable(test_squelch_autogate tests/test_squelch_autogate.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -642,7 +659,8 @@ add_executable(test_digital_e2e tests/test_digital_e2e.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp
     src/dsp/rds_decoder.cpp
-    src/dsp/test_signal.cpp src/dsp/noise_blanker.cpp src/dsp/iq_frontend.cpp)
+    src/dsp/test_signal.cpp src/dsp/noise_blanker.cpp src/dsp/iq_frontend.cpp
+    src/dsp/device_capabilities.cpp)
 target_include_directories(test_digital_e2e PRIVATE src)
 target_link_libraries(test_digital_e2e PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME digital_e2e COMMAND test_digital_e2e)
@@ -685,7 +703,7 @@ add_test(NAME apt COMMAND test_apt)
 add_executable(test_agent tests/test_agent.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
     src/ai/agent_tools.cpp src/ai/agent.cpp src/ai/ai_context.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
