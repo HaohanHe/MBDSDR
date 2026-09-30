@@ -2,8 +2,39 @@
 #include "agent_tools.h"
 #include "dsp/spectrum_engine.h"
 
+#include <QSet>
+#include <QJsonDocument>
+
 namespace mbdsdr {
 namespace ai {
+
+// Write/mutating tools -- the ONLY tools gated in manual mode. Kept in one place
+// next to toolDefs()/executeTool() so the gate list never drifts from the actual
+// registered tools. Everything not listed here (notably get_status) is treated as
+// read-only and always executes.
+static const QSet<QString>& writeTools() {
+    static const QSet<QString> kSet = {
+        "tune_frequency",   // changes center frequency
+        "set_mode",         // changes demodulation mode
+        "set_bandwidth",    // changes channel filter bandwidth
+        "start_recording",  // starts IQ recording
+        "stop_recording",   // stops IQ recording
+        "scan_band",        // sweeps the receiver across a band (mutates freq)
+    };
+    return kSet;
+}
+
+bool isWriteTool(const QString& name) {
+    return writeTools().contains(name);
+}
+
+QString gatedToolResult(const QString& toolName) {
+    QJsonObject o;
+    o["ok"] = false;
+    o["gated"] = true;
+    o["error"] = QString("手动模式：未执行 %1").arg(toolName);
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
 
 QList<ToolDef> toolDefs() {
     QList<ToolDef> tools;

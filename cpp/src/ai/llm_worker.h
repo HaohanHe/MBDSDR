@@ -23,6 +23,17 @@ public:
     void setApiKey(const QString& k) { apiKey_ = k; if (client_) client_->setApiKey(k); }
     void setBaseUrl(const QString& u) { baseUrl_ = u; if (client_) client_->setBaseUrl(u); }
     void setModel(const QString& m) { model_ = m; if (client_) client_->setModel(m); }
+    /// Toggle manual mode (write-tool gate). Cheap setter cached here; applied on
+    /// the next tool call. Default false = AI takeover.
+    void setManualMode(bool on) { manualMode_ = on; }
+
+    /// Run one tool call with the manual-mode write gate applied. Extracted as a
+    /// static, instance-free helper so the gate is unit-testable without an LLM:
+    /// in manual mode a write tool returns gatedToolResult() WITHOUT calling
+    /// executeTool / touching the engine; read-only tools always run. With
+    /// manualMode=false this is identical to executeTool().
+    static QString dispatchToolCall(const QString& name, const QJsonObject& args,
+                                     dsp::SpectrumEngine* engine, bool manualMode);
 
 public slots:
     void doChat(const QList<ChatMessage>& messages, const QList<ToolDef>& tools);
@@ -36,6 +47,7 @@ private:
     LLMClient* client_ = nullptr;   // created on worker thread
     QString apiKey_, baseUrl_, model_;
     dsp::SpectrumEngine* engine_ = nullptr;
+    bool manualMode_ = false;       // write tools gated when true
 };
 
 } // namespace ai
