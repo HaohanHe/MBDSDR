@@ -4,19 +4,17 @@
 #include <algorithm>
 #include <cmath>
 
+#include "core/bandwidth_preset.h"
+
 namespace mbdsdr {
 namespace dsp {
 
-// Default IF bandwidth for a mode when the user picks it from the combo. Kept
-// in lock-step with SpectrumEngine::setDemodMode() and MainWindow's bw presets.
+// Default IF bandwidth for a mode when the user picks it from the combo.
+// Single source of truth: core/bandwidth_preset.h (named constants, shared
+// with the UI preset + unit tests). Kept as a thin local wrapper so callers
+// don't each spell out the namespace.
 static double defaultBandwidthForMode(const QString& mode) {
-    if (mode == "AM")   return 8000.0;
-    if (mode == "WFM")  return 200000.0;
-    if (mode == "CW")   return 500.0;
-    if (mode == "NFM")  return 12500.0;
-    if (mode == "BPSK" || mode == "QPSK") return 3000.0;
-    if (mode == "ADS-B") return 2000000.0;   // wideband 1090 MHz capture
-    return 2400.0; // USB / LSB / anything else
+    return mbdsdr::core::defaultBandwidthHzForMode(mode);
 }
 
 void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
