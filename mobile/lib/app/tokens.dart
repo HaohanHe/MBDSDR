@@ -45,10 +45,47 @@ abstract final class AppTokens {
   static const double radiusCard = 10;
   static const double radiusSmall = 4;
 
-  // ---------------------------------------------------------------- 间距节奏
+  /// 胶囊（高的一半）：FilledButton / Chip / 步进按钮群全圆角。
+  /// 手机触控控件用胶囊，不再用直角或半圆混用。
+  static const double radiusPill = 999;
+
+  // ---------------------------------------------------------------- 间距节奏（4pt 栅格）
   static const double spacingS = 4;
   static const double spacingM = 8;
   static const double spacingL = 16;
+
+  /// 页面分块/卡片内大 padding（车机 64px 边距折到手机 ≈16–24）。
+  static const double spacingXL = 24;
+
+  /// 页面主边距/大分块之间。
+  static const double spacingXXL = 32;
+
+  // ---------------------------------------------------------------- 字重（语义化，禁裸写 FontWeight）
+  /// 正文常规。
+  static const FontWeight weightRegular = FontWeight.w400;
+
+  /// 主力字重：标题/hero 读数/选中态文字（Figma 实测 500 占绝大多数）。
+  static const FontWeight weightMedium = FontWeight.w500;
+
+  /// 仅 app 标题等极少数位置，不通篇 600。
+  static const FontWeight weightSemi = FontWeight.w600;
+
+  // ---------------------------------------------------------------- 分隔与状态层
+  /// 克制分隔线：1px 半透明白（≈6%）。面板之间优先留白+底色差，必须画线时用它。
+  static const Color divider = Color(0x0FFFFFFF);
+
+  /// 选中态填充：低饱和蓝灰（Figma #919cac @ 14%），
+  /// 用于 SegmentedButton/Chip/列表选中块，不用亮 accent 铺满。
+  static const Color selectedFill = Color(0x24919CAC);
+
+  /// 选中态文字：近白，落在 [selectedFill] 上。
+  static const Color selectedText = Color(0xFFECEAE6);
+
+  /// 焦点环：accent 45%。键盘可达控件（Tab/输入）聚焦时的可见环。
+  static const Color focusRing = Color(0x737CC4FF);
+
+  /// 禁用控件底：白叠层 4%（现仅有文字禁用 alpha，补控件底）。
+  static const Color disabledFill = Color(0x0AFFFFFF);
 
   // ---------------------------------------------------------------- 尺寸
   static const double touchMin = 44;
@@ -70,6 +107,12 @@ abstract final class AppTokens {
   static const Duration animShort = Duration(milliseconds: 160);
   static const Duration animMedium = Duration(milliseconds: 220);
   static const Duration animLong = Duration(milliseconds: 350);
+
+  /// 缓动：统一 OutCubic（先快后慢），反馈与转场都用它，不混用花哨曲线。
+  static const Curve easingStandard = Curves.easeOutCubic;
+
+  /// 退场缓动：InCubic，退场比入场快一半。
+  static const Curve easingExit = Curves.easeInCubic;
 
   // ---------------------------------------------------------------- 瀑布色板（与 cpp kWaterfallStops 一致）
   static const List<Color> waterfallStops = <Color>[
@@ -139,35 +182,35 @@ abstract final class AppTokens {
   // ---------------------------------------------------------------- 文本样式
   static const TextStyle appTitle = TextStyle(
     fontSize: 17,
-    fontWeight: FontWeight.w600,
+    fontWeight: weightSemi,
     color: textPrimary,
     height: 1.25,
   );
 
   static const TextStyle sectionTitle = TextStyle(
     fontSize: 14,
-    fontWeight: FontWeight.w600,
+    fontWeight: weightMedium,
     color: textPrimary,
     height: 1.3,
   );
 
   static const TextStyle body = TextStyle(
     fontSize: 13.5,
-    fontWeight: FontWeight.w400,
+    fontWeight: weightRegular,
     color: textPrimary,
     height: 1.45,
   );
 
   static const TextStyle auxiliary = TextStyle(
     fontSize: 12,
-    fontWeight: FontWeight.w400,
+    fontWeight: weightRegular,
     color: textSecondary,
     height: 1.4,
   );
 
   static const TextStyle mono = TextStyle(
     fontSize: 12.5,
-    fontWeight: FontWeight.w500,
+    fontWeight: weightMedium,
     color: textSecondary,
     fontFamilyFallback: monoFallback,
     height: 1.35,
@@ -177,10 +220,10 @@ abstract final class AppTokens {
   /// 画布 CustomPainter 内统一引用此常量，避免散落裸 fontSize。
   static const double annotationFontSize = 10.0;
 
-  /// 频谱页大频率读数（中央 MHz 显示）。
+  /// 频谱页大频率读数（中央 MHz 显示）。Figma hero 大数字用 500，不通篇粗黑。
   static const TextStyle freqReadout = TextStyle(
     fontSize: 26,
-    fontWeight: FontWeight.w600,
+    fontWeight: weightMedium,
     color: textPrimary,
     fontFamilyFallback: monoFallback,
     height: 1.1,
