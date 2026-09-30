@@ -117,6 +117,7 @@ set(SOURCES
 set(HEADERS
     src/core/tokens.h
     src/core/spectrum_frame.h
+    src/core/bandwidth_preset.h
     src/ui/main_window.h
     src/ui/spectrum_widget.h
     src/ui/spectrum_display.h
@@ -269,6 +270,19 @@ add_executable(test_engine_integration tests/test_engine_integration.cpp
 target_include_directories(test_engine_integration PRIVATE src)
 target_link_libraries(test_engine_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_integration COMMAND test_engine_integration)
+
+# B3/B4: per-mode bandwidth table + coverage rule + engine real setBandwidth +
+# PowerSpectrum frame-average lock.
+add_executable(test_bandwidth_preset tests/test_bandwidth_preset.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_bandwidth_preset PRIVATE src)
+target_link_libraries(test_bandwidth_preset PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME bandwidth_preset COMMAND test_bandwidth_preset)
 
 # Device hotplug event channel: drop detection, honest fallback, 2 s rtl_tcp
 # auto-reconnect, connect-failure reason (real TCP loopback, no mocks).
@@ -693,3 +707,8 @@ target_link_libraries(ui_shot_satcap PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::N
 add_executable(ui_shot_ai tests/ui_screenshot_ai.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_ai PRIVATE src build/ui_shot_ai_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_ai PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# FFT control strip + demod/bandwidth-preset row offscreen shot (not in ctest).
+add_executable(ui_shot_fftband tests/ui_screenshot_fft_band.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_fftband PRIVATE src build/ui_shot_fftband_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_fftband PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)

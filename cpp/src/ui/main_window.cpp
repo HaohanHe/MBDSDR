@@ -58,6 +58,7 @@
 
 #include "core/tokens.h"
 #include "core/spectrum_frame.h"
+#include "core/bandwidth_preset.h"
 #include "dsp/spectrum_engine.h"
 #include "dsp/adsb_decoder.h"
 #include "dsp/tle_client.h"
@@ -99,11 +100,32 @@ namespace {
 constexpr int kStepValuesHz[] = {1, 10, 100, 1000, 10000, 100000, 1000000};
 constexpr int kStepCount = sizeof(kStepValuesHz) / sizeof(kStepValuesHz[0]);
 
-// Bandwidth presets indexed by bwCombo_ order: 8k / 12.5k / 200k / 2.4k / 500Hz.
+// Bandwidth presets shown in bwCombo_, in display order. EVERY mode default
+// from core::defaultBandwidthHzForMode has a matching entry so the combo can
+// honestly represent NFM/WFM/AM/USB/LSB/CW/BPSK/QPSK/ADS-B (including the wide
+// 2 MHz ADS-B channel) instead of snapping a 2 MHz channel to the old 200 kHz
+// entry. Single source for the combo handler, the canvas band-edge snap, the
+// keyboard nudge and settings restore -- no scattered kBws arrays.
+constexpr double kBwComboPresetsHz[] = {
+    500.0, 2400.0, 9000.0, 12000.0, 12500.0, 200000.0, 2000000.0
+};
+constexpr int    kBwComboPresetCount =
+    sizeof(kBwComboPresetsHz) / sizeof(kBwComboPresetsHz[0]);
+// Bandwidth presets indexed by bwCombo_ order.
 // Up/Down keyboard nudge doubles/halves the *current* bandwidth and clamps to
-// [1k, 200k]; we then snap bwCombo_ to the nearest preset.
-constexpr double kBwMinHz = 1000.0;
-constexpr double kBwMaxHz = 200000.0;
+// [1k, 2M]; we then snap bwCombo_ to the nearest preset.
+constexpr double kBwMinHz = 100.0;
+constexpr double kBwMaxHz = 2000000.0;
+// Index of the combo preset nearest to `hz` (used to keep the combo display
+// consistent with the live bandwidth after a mode switch / nudge / VFO drag).
+inline int nearestBwPresetIndex(double hz) {
+    int best = 0; double bd = 1e18;
+    for (int i = 0; i < kBwComboPresetCount; ++i) {
+        double d = std::abs(kBwComboPresetsHz[i] - hz);
+        if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+}
 } // namespace
 
 MainWindow::MainWindow(QWidget* parent)
@@ -287,7 +309,17 @@ MainWindow::MainWindow(QWidget* parent)
     demodCombo_->setMinimumWidth(tokens::scaled(120));
     gRxLay->addRow("解调", demodCombo_);
     bwCombo_ = new QComboBox(gRx);
-    bwCombo_->addItems({"8 kHz", "12.5 kHz", "200 kHz", "2.4 kHz", "500 Hz"});
+    bwCombo_->setObjectName("bwCombo");
+    // Build the item list from the shared preset table so the combo order and
+    // the kBwComboPresetsHz array can never drift apart.
+    for (int i = 0; i < kBwComboPresetCount; ++i) {
+        const double hz = kBwComboPresetsHz[i];
+        QString lbl;
+        if (hz >= 1000000.0)      lbl = QString::number(hz / 1e6) + " MHz";
+        else if (hz >= 1000.0)    lbl = QString::number(hz / 1000.0) + " kHz";
+        else                       lbl = QString::number(hz, 'f', 0) + " Hz";
+        bwCombo_->addItem(lbl);
+    }
     bwCombo_->setMinimumWidth(tokens::scaled(120));
     gRxLay->addRow("带宽", bwCombo_);
     // Channel-status badge: "立体声" only when the engine's real 19 kHz pilot is
@@ -1293,16 +1325,21 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(demodCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) {
-                engine_->setDemodMode(demodCombo_->currentText());
-                sbMode_->setText(demodCombo_->currentText());
+                // Capture the PREVIOUS mode before setDemodMode flips the engine
+                // cache -- the coverage rule needs it to tell a natural mode walk
+                // from a user-tweaked bandwidth.
+                const QString oldMode = engine_->demodMode();
+                const QString newMode = demodCombo_->currentText();
+                engine_->setDemodMode(newMode);
+                sbMode_->setText(newMode);
                 // Force-mono only applies to WFM stereo; leave the badge honestly
                 // on "单声道" until the next real pilot-driven stereoState arrives.
-                const bool wfm = (demodCombo_->currentText() == "WFM");
+                const bool wfm = (newMode == "WFM");
                 forceMonoCheck_->setEnabled(wfm);
                 if (!wfm) onStereoState(false, 0.0f, 0.0f);
                 // ADS-B (1090 MHz Mode S): walk the receiver to the band. These
                 // are reversible -- the user may retune/change rate afterwards.
-                if (demodCombo_->currentText() == "ADS-B") {
+                if (newMode == "ADS-B") {
                     // Park the tuner on 1090 MHz and mirror it into the spinbox
                     // without re-entering the freqChanged signal loop.
                     engine_->onSetCenterFreq(1090.0e6);
@@ -1314,15 +1351,24 @@ MainWindow::MainWindow(QWidget* parent)
                     if (srCombo_->currentIndex() == 0)
                         srCombo_->setCurrentIndex(2);   // handler sets 2.4e6
                 }
-                static const QMap<QString, int> bwIdx = {
-                    {"AM", 0}, {"NFM", 1}, {"WFM", 2}, {"USB", 3}, {"LSB", 3}, {"CW", 4}
-                };
-                auto it = bwIdx.find(demodCombo_->currentText());
-                if (it != bwIdx.end()) {
-                    bwCombo_->blockSignals(true);
-                    bwCombo_->setCurrentIndex(it.value());
-                    bwCombo_->blockSignals(false);
-                }
+                // --- Per-mode default bandwidth preset (B4) -------------------
+                // setDemodMode() already resets the selected VFO's bandwidth to
+                // the new mode default internally; here we own the UI<->engine
+                // contract: land on the value the pure coverage rule picks
+                // (adopt new-mode default unless the user manually tuned away
+                // from the old-mode default), push it through the REAL
+                // engine setBandwidth API, then mirror it into currentBwHz_ and
+                // the spectrum band-edge display + combo.
+                const double wantBw =
+                    core::bandwidthOnModeSwitch(oldMode, newMode, currentBwHz_);
+                currentBwHz_ = wantBw;
+                engine_->setBandwidth(wantBw);
+                if (spectrum_) spectrum_->setBandwidthHz(wantBw);
+                bwCombo_->blockSignals(true);
+                bwCombo_->setCurrentIndex(nearestBwPresetIndex(wantBw));
+                bwCombo_->blockSignals(false);
+                statusBar()->showMessage(
+                    QStringLiteral("带宽预设: %1 -> %2 Hz").arg(oldMode, newMode));
             });
     connect(squelchSlider_, &QSlider::valueChanged,
             this, [this](int v) {
@@ -1371,20 +1417,16 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(bwCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
-                static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
-                if (idx >= 0 && idx <= 4) {
-                    currentBwHz_ = kBws[idx];
-                    engine_->setBandwidth(kBws[idx]);
-                    if (spectrum_) spectrum_->setBandwidthHz(kBws[idx]);
+                if (idx >= 0 && idx < kBwComboPresetCount) {
+                    currentBwHz_ = kBwComboPresetsHz[idx];
+                    engine_->setBandwidth(kBwComboPresetsHz[idx]);
+                    if (spectrum_) spectrum_->setBandwidthHz(kBwComboPresetsHz[idx]);
                 }
             });
     // Drag a VFO band edge on the spectrum -> update bandwidth (snap to preset).
     connect(spectrum_, &ui::SpectrumWidget::bandwidthChanged,
             this, [this](double hz) {
-                static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
-                int best = 0; double bd = 1e18;
-                for (int i=0;i<5;++i){ double d=std::abs(kBws[i]-hz); if(d<bd){bd=d;best=i;} }
-                bwCombo_->setCurrentIndex(best);   // -> engine.setBandwidth via above
+                bwCombo_->setCurrentIndex(nearestBwPresetIndex(hz));
             });
     connect(gatedCheck_, &QCheckBox::stateChanged, this, [this](int st) {
         engine_->setGatedRecordingEnabled(st != Qt::Unchecked);
@@ -1755,14 +1797,8 @@ MainWindow::MainWindow(QWidget* parent)
         newBw = std::clamp(newBw, kBwMinHz, kBwMaxHz);
         currentBwHz_ = newBw;
         engine_->setBandwidth(newBw);
-        static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
-        int best = 0; double bestDiff = 1e18;
-        for (int i = 0; i < 5; ++i) {
-            double d = std::abs(kBws[i] - newBw);
-            if (d < bestDiff) { bestDiff = d; best = i; }
-        }
         bwCombo_->blockSignals(true);
-        bwCombo_->setCurrentIndex(best);
+        bwCombo_->setCurrentIndex(nearestBwPresetIndex(newBw));
         bwCombo_->blockSignals(false);
         statusBar()->showMessage(QString("带宽: %1 Hz").arg(newBw, 0, 'f', 0));
     };
@@ -2211,11 +2247,8 @@ void MainWindow::refreshVfoUi() {
         if (dIdx >= 0) demodCombo_->setCurrentIndex(dIdx);
         demodCombo_->blockSignals(false);
 
-        static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
-        int bwIdx = 1; double bd = 1e18;
-        for (int i = 0; i < 5; ++i) { double d = std::abs(kBws[i] - sel->bandwidthHz); if (d < bd) { bd = d; bwIdx = i; } }
         bwCombo_->blockSignals(true);
-        bwCombo_->setCurrentIndex(bwIdx);
+        bwCombo_->setCurrentIndex(nearestBwPresetIndex(sel->bandwidthHz));
         bwCombo_->blockSignals(false);
 
         currentBwHz_ = sel->bandwidthHz;
@@ -2342,11 +2375,9 @@ void MainWindow::saveUiState() {
         if (idx >= 0 && idx <= 3) s.setValue("rx/sampleRate", kRates[idx]);
     }
     s.setValue("rx/demodMode", demodCombo_->currentText());
-    {
-        static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
-        int idx = bwCombo_->currentIndex();
-        if (idx >= 0 && idx <= 4) s.setValue("rx/bandwidth", kBws[idx]);
-    }
+    // Persist the live bandwidth (a keyboard nudge may have set a non-preset
+    // value); restore snaps the combo to the nearest preset for display.
+    s.setValue("rx/bandwidth", currentBwHz_);
     s.setValue("rx/gain", static_cast<double>(gainSlider_->value()));
     s.setValue("rx/squelchEnabled", squelchCheck_->isChecked());
     s.setValue("rx/squelchThreshold", static_cast<float>(squelchSlider_->value()));
@@ -2593,11 +2624,8 @@ void MainWindow::restoreUiState() {
     if (dIdx < 0) dIdx = 1;  // NFM
     demodCombo_->setCurrentIndex(dIdx);
 
-    static const double kBws[] = {8000.0, 12500.0, 200000.0, 2400.0, 500.0};
     const double bwHz = s.value("rx/bandwidth", 12500.0).toDouble();
-    int bwIdx = 1;
-    for (int i = 0; i < 5; ++i) if (std::abs(kBws[i] - bwHz) < 500.0) bwIdx = i;
-    bwCombo_->setCurrentIndex(bwIdx);
+    bwCombo_->setCurrentIndex(nearestBwPresetIndex(bwHz));
 
     const double gainDb = s.value("rx/gain", 0.0).toDouble();
     gainSlider_->setValue(static_cast<int>(std::round(gainDb)));
@@ -2701,8 +2729,8 @@ void MainWindow::restoreUiState() {
     engine_->onSetCenterFreq(centerHz);
     engine_->onSetSampleRate(kRates[srIdx]);
     engine_->setDemodMode(demodCombo_->currentText());
-    currentBwHz_ = kBws[bwIdx];
-    engine_->setBandwidth(kBws[bwIdx]);
+    currentBwHz_ = bwHz;
+    engine_->setBandwidth(bwHz);
     engine_->onSetGain(static_cast<double>(gainSlider_->value()));
     engine_->setSquelchEnabled(sqlEn);
     engine_->setSquelchThreshold(static_cast<float>(squelchSlider_->value()));
