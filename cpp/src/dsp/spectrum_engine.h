@@ -55,6 +55,12 @@ public:
     bool noiseBlankerEnabled() const;
     int windowType() const;
     int averageMode() const;
+    // Real noise floor in the AUDIO-BLOCK RMS dBFS domain (same domain the
+    // Squelch threshold lives in), asymmetrically tracked across demodulated
+    // audio blocks. This is the honest basis for the "auto threshold" button --
+    // it is NOT the IQ total-power / per-bin canvas noise floor. Valid once a
+    // few audio blocks have flowed; before that it reads back as ~-100 dBFS.
+    float audioNoiseFloorDbfs() const { return static_cast<float>(audioNfDbfs_); }
     // Owned audio sink (UI-thread affinity). Exposed so the settings dialog can
     // hot-restart playback on a user-selected output device.
     AudioOutput* audioOutput() const { return audioOut_; }
@@ -219,6 +225,10 @@ signals:
     // only once tracking has initialised. Purely additive -- existing behaviour
     // is unchanged.
     void noiseFloorLevel(float dbDbfs);
+    // Slowly-tracked audio-block RMS dBFS noise floor (SAME domain as the
+    // Squelch threshold), throttled to ~5 Hz so the UI can drive an auto
+    // gate = floor + margin. Emitted only after tracking has initialised.
+    void audioRmsNoiseFloor(float dbfs);
     void squelchState(bool open);
     void recordingStateChanged(bool recording, const QString& path);
     // Watch state: enabled = armed (listening), recording = a segment file is
@@ -356,6 +366,15 @@ private:
     // derive snrLevel() = RSSI - noiseFloor.
     double noiseFloorTrackDb_ = 0.0;
     bool noiseFloorInit_ = false;
+
+    // Audio-block RMS dBFS noise floor (SAME domain as the Squelch threshold),
+    // asymmetrically followed: fast toward quieter, slow toward louder so a
+    // real signal never lifts the floor. Used to derive the auto squelch gate.
+    // Engine-thread only; read back via audioNoiseFloorDbfs().
+    double audioNfDbfs_ = -100.0;
+    bool   audioNfInit_ = false;
+    QElapsedTimer audioNfEmitClock_;
+    qint64        audioNfLastEmitMs_ = -1;
 
     // Demod-audio WAV sidecar (.json): the metadata is captured at start and
     // written when the WAV is closed, mirroring the SigMF recorder's stop-time

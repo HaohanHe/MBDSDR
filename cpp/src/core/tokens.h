@@ -162,6 +162,28 @@ inline constexpr int    kPeakMarkerH = 6;             // triangle marker height
 inline constexpr int    kPeakMarkerHiHalfW = 7;       // selected marker half-width
 inline constexpr int    kPeakMarkerHiH = 9;           // selected marker height
 
+// =====================================================================
+// Squelch (静噪) -- thresholds in the AUDIO-BLOCK RMS dBFS domain.
+//
+// The Squelch gate compares each 48 kHz demodulated audio block's RMS
+// (dsp::rmsDbfs) against thresholdDb: audio passes (gate OPEN) only when
+// smoothed RMS >= thresholdDb. More-negative = more sensitive (opens on
+// quieter audio). These bounds mirror the slider range; the auto-threshold
+// derives thresholdDb from the SAME-domain tracked noise floor so it never
+// mixes the IQ total-power / per-bin canvas domains (see spectrum_engine).
+// =====================================================================
+inline constexpr int    kSquelchMinDb     = -100;   // slider lower bound (dBFS)
+inline constexpr int    kSquelchMaxDb     = -20;    // slider upper bound (dBFS)
+inline constexpr int    kSquelchDefaultDb  = -50;    // default threshold (dBFS)
+// Auto gate: threshold = tracked audio-RMS noise floor + this margin (dB).
+// Positive margin keeps the gate CLOSED on the noise itself yet opens for a
+// real signal ~ this many dB above the quiet background.
+inline constexpr double kSquelchAutoMarginDb = 8.0;
+// Asymmetric noise-floor follower time constants (per 20 ms audio block):
+// follow noise DOWN quickly, ignore upward transients (signals).
+inline constexpr double kSquelchNfAlphaDown  = 0.20;  // fast track toward quieter
+inline constexpr double kSquelchNfAlphaUp   = 0.005; // slow creep toward louder
+
 // Waterfall time-axis labels (inside the left margin)
 inline constexpr int kTimeLabelW = 44;
 inline constexpr int kTimeLabelH = 12;

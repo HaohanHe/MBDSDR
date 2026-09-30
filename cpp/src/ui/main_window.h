@@ -46,6 +46,15 @@ public:
     // Programmatic entry point (CLI / screenshot harness / embedding): the
     // engine behind the UI. GUI remains optional for every action.
     dsp::SpectrumEngine* engine() { return engine_; }
+    // Test / harness accessors (read-only handles to the headless controller +
+    // bookmark store). No radio is opened by these; they only expose what the UI
+    // already owns so offscreen tests can drive scan/bookmark state deterministically.
+    dsp::FrequencyScanner* scanner() { return scanner_; }
+    ui::BookmarkManager* bookmarkManager() { return bookmarkManager_; }
+    // Harness/programmatic refresh (offscreen screenshots / embedding): re-sync
+    // the scan button enables + state labels AND the bookmark table from the
+    // current headless state. No radio is touched.
+    void refreshScanBookmarksUi() { updateScanStatus(); refreshBmTable(); }
 
 private slots:
     void onSourceChanged(const QString& name, bool connected);
@@ -149,6 +158,7 @@ private:
     QPushButton*    scanStartBtn_       = nullptr;
     QPushButton*    scanPauseBtn_      = nullptr;  // pause / resume (same btn)
     QPushButton*    scanStopBtn_        = nullptr;
+    QPushButton*    scanSaveBmBtn_      = nullptr;  // Hit-state one-shot: save hit as bookmark
     QLabel*         scanFreqLabel_      = nullptr;  // monoInfo current freq
     QLabel*         scanStateLabel_     = nullptr;  // idle/scanning/hit text
     // Bookmark table group "频率书签".
@@ -211,6 +221,7 @@ private:
     void refreshVfoUi();                          // rebuild list + push band boxes
     QSlider*        squelchSlider_ = nullptr;
     QCheckBox*      squelchCheck_ = nullptr;
+    QPushButton*    squelchAutoBtn_ = nullptr;  // checkable: auto gate = audio NF + margin
     QLabel*         squelchValue_ = nullptr;
     QLabel*         levelLabel_   = nullptr;
     QLabel*         squelchState_ = nullptr;
@@ -271,6 +282,7 @@ private:
 
     // AI
     ai::Agent*      agent_       = nullptr;
+    QCheckBox*      aiManualCheck_ = nullptr;   // manual mode: AI suggests, never writes
     QPlainTextEdit* aiChat_      = nullptr;
     QLineEdit*      aiInput_     = nullptr;
     QLabel*         aiStatus_   = nullptr;

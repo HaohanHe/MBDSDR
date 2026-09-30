@@ -40,6 +40,8 @@
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QFileDialog>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QElapsedTimer>
 #include <QDialogButtonBox>
 
@@ -310,18 +312,36 @@ MainWindow::MainWindow(QWidget* parent)
     leftLay->addWidget(gVfo);
 
     auto* gSql = new QGroupBox("静噪", leftCard);
+    gSql->setObjectName("squelchGroup");
     auto* gSqlLay = new QVBoxLayout(gSql);
     squelchCheck_ = new QCheckBox("启用静噪", gSql);
+    squelchCheck_->setObjectName("squelchCheck");
     gSqlLay->addWidget(squelchCheck_);
     auto* sqlRow = new QHBoxLayout;
     squelchSlider_ = new QSlider(Qt::Horizontal, gSql);
-    squelchSlider_->setRange(-100, -20);
-    squelchSlider_->setValue(-50);
-    squelchValue_ = new QLabel("-50 dB", gSql);
+    squelchSlider_->setObjectName("squelchSlider");
+    // Range / default come from the audio-RMS-domain squelch tokens (no bare
+    // numbers): more-negative = more sensitive.
+    squelchSlider_->setRange(tokens::kSquelchMinDb, tokens::kSquelchMaxDb);
+    squelchSlider_->setValue(tokens::kSquelchDefaultDb);
+    squelchValue_ = new QLabel(
+        QString("%1 dB").arg(tokens::kSquelchDefaultDb), gSql);
+    squelchValue_->setObjectName("squelchValue");
     sqlRow->addWidget(squelchSlider_);
     sqlRow->addWidget(squelchValue_);
     gSqlLay->addLayout(sqlRow);
+    // "Auto gate": checkable. While on, the threshold follows the REAL tracked
+    // audio-RMS noise floor + margin (tokens::kSquelchAutoMarginDb). The floor
+    // comes from the engine in the SAME dBFS domain as the threshold -- never the
+    // IQ total-power / per-bin canvas floor.
+    squelchAutoBtn_ = new QPushButton("自动门限", gSql);
+    squelchAutoBtn_->setObjectName("squelchAutoBtn");
+    squelchAutoBtn_->setCheckable(true);
+    squelchAutoBtn_->setToolTip(
+        QString("门限 = 实测音频噪声底 + %1 dB（同域）").arg(tokens::kSquelchAutoMarginDb));
+    gSqlLay->addWidget(squelchAutoBtn_);
     squelchState_ = new QLabel("状态: CLOSED", gSql);
+    squelchState_->setObjectName("squelchState");
     gSqlLay->addWidget(squelchState_);
     leftLay->addWidget(gSql);
 
@@ -638,6 +658,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     // ===== A. 频率扫描 control group =====
     auto* scanBox = new QGroupBox("频率扫描", bmPage);
+    scanBox->setObjectName("scanGroup");
     auto* scanBoxLay = new QVBoxLayout(scanBox);
     scanBoxLay->setSpacing(tokens::kSpacingS);
     auto* scanForm = new QFormLayout;
@@ -670,6 +691,7 @@ MainWindow::MainWindow(QWidget* parent)
     scanForm->addRow("驻留", scanDwellSpin_);
 
     scanThrSpin_ = new QDoubleSpinBox(scanBox);
+    scanThrSpin_->setObjectName("scanThrSpin");
     scanThrSpin_->setRange(-120, 0);
     scanThrSpin_->setSingleStep(1);
     scanThrSpin_->setValue(-50);         // 默认门限 -50 dBFS
@@ -713,13 +735,22 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* scanBtnRow = new QHBoxLayout;
     scanStartBtn_ = new QPushButton("开始", scanBox);
+    scanStartBtn_->setObjectName("scanStartBtn");
     scanPauseBtn_ = new QPushButton("暂停", scanBox);
     scanPauseBtn_->setEnabled(false);
     scanStopBtn_  = new QPushButton("停止", scanBox);
     scanStopBtn_->setEnabled(false);
+    // One-shot "save the current hit as a bookmark". Enabled ONLY while the
+    // scanner is in ScanState::Hit (see updateScanStatus); carries the real
+    // hit frequency + live mode/bandwidth into the bookmark dialog.
+    scanSaveBmBtn_ = new QPushButton("存入书签", scanBox);
+    scanSaveBmBtn_->setObjectName("scanSaveBmBtn");
+    scanSaveBmBtn_->setEnabled(false);
+    scanSaveBmBtn_->setToolTip("把当前命中频率存为书签（仅命中时可用）");
     scanBtnRow->addWidget(scanStartBtn_);
     scanBtnRow->addWidget(scanPauseBtn_);
     scanBtnRow->addWidget(scanStopBtn_);
+    scanBtnRow->addWidget(scanSaveBmBtn_);
     scanBoxLay->addLayout(scanBtnRow);
 
     scanFreqLabel_ = new QLabel("当前 --.-- MHz", scanBox);
@@ -732,9 +763,11 @@ MainWindow::MainWindow(QWidget* parent)
 
     // ===== B. 频率书签 table group =====
     auto* bmBox = new QGroupBox("频率书签", bmPage);
+    bmBox->setObjectName("bmGroup");
     auto* bmBoxLay = new QVBoxLayout(bmBox);
     bmBoxLay->setSpacing(tokens::kSpacingS);
     bmTable_ = new QTableWidget(0, 5, bmBox);
+    bmTable_->setObjectName("bmTable");
     bmTable_->setHorizontalHeaderLabels({"名称", "频率(MHz)", "模式", "带宽(kHz)", "分组"});
     bmTable_->verticalHeader()->setVisible(false);
     bmTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -759,6 +792,11 @@ MainWindow::MainWindow(QWidget* parent)
         dlg.setWindowTitle(prefill.frequencyHz > 0.0 ? "编辑书签" : "添加书签");
         auto* form = new QFormLayout(&dlg);
         QLineEdit* nameEdit = new QLineEdit(prefill.name, &dlg);
+        // Empty name: hint with the (prefilled or live) frequency so the user has
+        // a sensible default to type over -- never a fabricated station name.
+        const double hintHz = prefill.frequencyHz > 0.0 ? prefill.frequencyHz
+                                                        : freqSpin_->value() * 1e6;
+        nameEdit->setPlaceholderText(QString("%1 MHz").arg(hintHz / 1e6, 0, 'f', 3));
         QDoubleSpinBox* freqMhz = new QDoubleSpinBox(&dlg);
         freqMhz->setRange(0.1, 2200);
         freqMhz->setDecimals(3);
@@ -826,6 +864,23 @@ MainWindow::MainWindow(QWidget* parent)
         bookmarkManager_->removeAt(row);
         refreshBmTable();
         resyncScanBookmarks();
+    });
+    // Scan-hit one-shot: capture the REAL hit frequency into the bookmark dialog,
+    // pre-filled with the live demod mode + bandwidth; the name stays empty so
+    // the user can label it. Button is only enabled in ScanState::Hit.
+    connect(scanSaveBmBtn_, &QPushButton::clicked, this,
+            [this, bmDialog, resyncScanBookmarks]() {
+        if (!scanner_ || scanner_->state() != dsp::ScanState::Hit) return;
+        ui::Bookmark bm;
+        bm.frequencyHz = scanner_->hitFrequency();
+        bm.mode = demodCombo_->currentText();
+        bm.bandwidthHz = currentBwHz_;
+        bm.name.clear();   // let the user name it; placeholder shows the freq
+        if (bmDialog(bm, bm)) {
+            bookmarkManager_->add(bm);
+            refreshBmTable();
+            resyncScanBookmarks();
+        }
     });
     // Double-click row = jump directly (no edit dialog).
     connect(bmTable_, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
@@ -898,7 +953,16 @@ MainWindow::MainWindow(QWidget* parent)
     aiStatus_ = new QLabel("AI 助手将在这里接入（需在设置中配置 API Key）", aiPage);
     aiStatus_->setWordWrap(true);
     aiLay->addWidget(aiStatus_);
+    // Manual-mode toggle: when checked, AI may only SUGGEST -- write tools
+    // (tune/mode/bandwidth/record/scan) are gated by the backend and never
+    // touch the radio. Initial state is wired after agent_ is constructed below
+    // (agent_->manualMode() reflects the persisted QSettings value).
+    aiManualCheck_ = new QCheckBox("手动模式（AI 只建议、不执行写操作）", aiPage);
+    aiManualCheck_->setObjectName("aiManualModeCheck");
+    aiManualCheck_->setToolTip("勾选后 AI 不会真正调谐/改模式/录制，只返回被拦截的建议。");
+    aiLay->addWidget(aiManualCheck_);
     aiChat_ = new QPlainTextEdit(aiPage);
+    aiChat_->setObjectName("aiChat");
     aiChat_->setReadOnly(true);
     aiLay->addWidget(aiChat_);
     aiInput_ = new QLineEdit(aiPage);
@@ -1079,6 +1143,32 @@ MainWindow::MainWindow(QWidget* parent)
         bool en = (st != Qt::Unchecked);
         engine_->setSquelchEnabled(en);
         if (!en) squelchState_->setText("状态: CLOSED");
+    });
+    // Auto gate: threshold = tracked audio-RMS noise floor + margin (same dBFS
+    // domain). applyAutoThreshold is read-back only; the slider valueChanged
+    // handler above pushes the result into the engine.
+    auto applyAutoThreshold = [this]() {
+        if (!engine_ || !squelchSlider_) return;
+        const double floor = engine_->audioNoiseFloorDbfs();
+        const double target = std::clamp(
+            floor + tokens::kSquelchAutoMarginDb,
+            double(tokens::kSquelchMinDb), double(tokens::kSquelchMaxDb));
+        squelchSlider_->setValue(static_cast<int>(std::round(target)));
+    };
+    connect(engine_, &dsp::SpectrumEngine::audioRmsNoiseFloor, this,
+            [this, applyAutoThreshold](float) {
+        if (squelchAutoBtn_ && squelchAutoBtn_->isChecked()) applyAutoThreshold();
+    });
+    connect(squelchAutoBtn_, &QPushButton::toggled, this,
+            [this, applyAutoThreshold](bool on) {
+        if (on) applyAutoThreshold();   // sample the current floor immediately
+        scheduleSave();
+    });
+    // Grabbing the slider = the user wants manual control: drop auto-follow so
+    // the engine floor can't fight their drag.
+    connect(squelchSlider_, &QSlider::sliderPressed, this, [this]() {
+        if (squelchAutoBtn_ && squelchAutoBtn_->isChecked())
+            squelchAutoBtn_->setChecked(false);
     });
     connect(srCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
@@ -1363,11 +1453,32 @@ MainWindow::MainWindow(QWidget* parent)
     agent_ = new ai::Agent(this);
     agent_->setEngine(engine_);
     agent_->configureFromConfig();
+    // Manual-mode toggle: initial state from the persisted backend value, then
+    // two-way wiring. Toggling pushes straight into agent_->setManualMode() which
+    // persists and forwards to the worker; no separate QSettings needed here.
+    if (aiManualCheck_) {
+        QSignalBlocker blk(aiManualCheck_);
+        aiManualCheck_->setChecked(agent_->manualMode());
+    }
+    connect(aiManualCheck_, &QCheckBox::toggled, this,
+            [this](bool on) { agent_->setManualMode(on); });
     connect(agent_, &ai::Agent::responseReady, this, [this](const QString& t) {
         aiChat_->appendPlainText("AI: " + t);
     });
     connect(agent_, &ai::Agent::toolCalled, this, [this](const QString& tool, const QString& result) {
-        aiChat_->appendPlainText(QString("[调用工具: %1 — %2]").arg(tool, result));
+        // A gated (manual-mode) write tool comes back as
+        // {"ok":false,"gated":true,"error":"手动模式：未执行 <tool>"}.
+        // Annotate it RESTRAINED (a quiet inline note, not a loud sticker);
+        // an executed tool keeps the original "调用工具" wording.
+        bool gated = false;
+        const QJsonDocument doc = QJsonDocument::fromJson(result.toUtf8());
+        if (doc.isObject() && doc.object().value("gated").toBool()) gated = true;
+        if (gated) {
+            aiChat_->appendPlainText(
+                QString("[已拦截·手动模式: %1]").arg(tool));
+        } else {
+            aiChat_->appendPlainText(QString("[调用工具: %1 — %2]").arg(tool, result));
+        }
     });
     connect(sendBtn, &QPushButton::clicked, this, [this]() {
         QString t = aiInput_->text().trimmed();
@@ -1707,6 +1818,8 @@ void MainWindow::updateScanStatus() {
     }
     // "只扫书签" only selectable while Idle.
     if (scanBmOnlyChk_) scanBmOnlyChk_->setEnabled(st == dsp::ScanState::Idle);
+    // "存入书签" only meaningful while a real hit is held.
+    if (scanSaveBmBtn_) scanSaveBmBtn_->setEnabled(st == dsp::ScanState::Hit);
 }
 
 void MainWindow::refreshVfoUi() {
@@ -1791,6 +1904,7 @@ void MainWindow::saveUiState() {
     s.setValue("rx/gain", static_cast<double>(gainSlider_->value()));
     s.setValue("rx/squelchEnabled", squelchCheck_->isChecked());
     s.setValue("rx/squelchThreshold", static_cast<float>(squelchSlider_->value()));
+    s.setValue("rx/squelchAuto", squelchAutoBtn_->isChecked());
     s.setValue("rx/dbMin", static_cast<float>(spectrum_->dbMinValue()));
     s.setValue("rx/dbMax", static_cast<float>(spectrum_->dbMaxValue()));
 
@@ -2033,9 +2147,13 @@ void MainWindow::restoreUiState() {
 
     const bool sqlEn = s.value("rx/squelchEnabled", false).toBool();
     squelchCheck_->setChecked(sqlEn);
-    const float sqlThr = s.value("rx/squelchThreshold", -50.0f).toFloat();
+    const float sqlThr = s.value("rx/squelchThreshold",
+                                static_cast<float>(tokens::kSquelchDefaultDb)).toFloat();
     squelchSlider_->setValue(static_cast<int>(std::round(sqlThr)));
     squelchValue_->setText(QString("%1 dB").arg(squelchSlider_->value()));
+    // Restore auto-gate arming. Checking it re-applies floor+margin via the
+    // toggled handler (once audio blocks have flowed the real floor is ready).
+    squelchAutoBtn_->setChecked(s.value("rx/squelchAuto", false).toBool());
 
     const float dbMin = s.value("rx/dbMin", static_cast<float>(tokens::kDbLowerDefault)).toFloat();
     const float dbMax = s.value("rx/dbMax", static_cast<float>(tokens::kDbUpperDefault)).toFloat();
