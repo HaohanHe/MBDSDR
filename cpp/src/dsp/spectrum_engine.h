@@ -413,6 +413,19 @@ private:
     // between the engine run() thread and UI-thread connect/disconnect calls.
     QMutex sourceMutex_;
 
+    // Lock-free-to-UI device-capability snapshot. The run() loop holds
+    // sourceMutex_ for a whole DSP block (readIQ through the chain), so a UI
+    // thread calling sourceCapabilities() and taking sourceMutex_ would starve
+    // against a tight real-source loop. Instead the engine refreshes this
+    // snapshot WHILE holding sourceMutex_, and UI reads go through capsMutex_
+    // only -- never contending with the read stream on sourceMutex_.
+    mutable QMutex capsMutex_;
+    DeviceCapabilities capsSnapshot_;
+    // Caller must hold sourceMutex_. Copies the live source's capabilities into
+    // capsSnapshot_ (guarded by capsMutex_). Cheap; called on source swap + once
+    // per loop iteration.
+    void updateCapsSnapshotLocked();
+
     // Device-liveness bookkeeping (engine thread only). A real source that
     // returns zero IQ reads for a short grace period is treated as dropped:
     // the engine falls back to the offline test source and fires sourceDropped.

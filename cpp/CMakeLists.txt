@@ -574,12 +574,11 @@ add_test(NAME device_capabilities COMMAND test_device_capabilities)
 
 # Offscreen device-info panel + dynamic sample-rate combo: honest empty state,
 # real loopback RTL0 handshake -> populated combo, device pull -> back to empty.
-# Built but NOT in ctest yet: the offscreen MainWindow starves the engine's
-# sourceMutex_ under processEvents (the unit coverage lives in
-# test_device_capabilities; the visual check is ui_shot_devices).
 add_executable(test_device_ui tests/test_device_ui.cpp ${TESTAPP_SRCS} ${HEADERS})
 target_include_directories(test_device_ui PRIVATE src build/test_device_ui_autogen/include)
 target_link_libraries(test_device_ui PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME device_ui COMMAND test_device_ui)
+set_tests_properties(device_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Unattended signal-triggered watch recording (detector + pre-roll + per-burst
 # WAV/JSON sidecar; NOT HARDWARE, fully synthesized).
