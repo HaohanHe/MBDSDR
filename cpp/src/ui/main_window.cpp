@@ -39,6 +39,8 @@
 #include <QAudioDevice>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QScroller>
+#include <QMap>
 #include <QFileDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -166,6 +168,8 @@ MainWindow::MainWindow(QWidget* parent)
     leftScroll->setFrameShape(QFrame::NoFrame);
     leftScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     leftScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    // Touch: flick-to-scroll on the control rail (mouse wheel keeps working).
+    QScroller::grabGesture(leftScroll->viewport(), QScroller::TouchGesture);
     auto* leftCard = new QFrame;
     leftCard->setObjectName("panelCard");
     auto* leftLay = new QVBoxLayout(leftCard);
@@ -295,18 +299,32 @@ MainWindow::MainWindow(QWidget* parent)
 
     // ---- Multi-VFO panel ---------------------------------------------------
     auto* gVfo = new QGroupBox("多 VFO", leftCard);
+    gVfo->setObjectName("vfoGroup");
     auto* gVfoLay = new QVBoxLayout(gVfo);
     vfoList_ = new QListWidget(gVfo);
     vfoList_->setObjectName("vfoList");
-    vfoList_->setMaximumHeight(tokens::scaled(96));
+    vfoList_->setMinimumHeight(tokens::scaled(tokens::kVfoListMinH));
+    vfoList_->setMaximumHeight(tokens::scaled(tokens::kVfoListMaxH));
     vfoList_->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Inline rename: each row is editable, but double-click ALSO activates.
+    vfoList_->setEditTriggers(QAbstractItemView::DoubleClicked |
+                              QAbstractItemView::EditKeyPressed);
+    // Touch: flick-scrolling on the list itself (mouse wheel keeps working).
+    vfoList_->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    QScroller::grabGesture(vfoList_->viewport(), QScroller::TouchGesture);
     gVfoLay->addWidget(vfoList_);
     auto* vfoBtnRow = new QHBoxLayout;
     vfoAddBtn_ = new QPushButton("＋ 添加 VFO", gVfo);
+    vfoCopyBtn_ = new QPushButton("复制", gVfo);
     vfoDelBtn_ = new QPushButton("－ 删除", gVfo);
     vfoAddBtn_->setObjectName("vfoAddBtn");
+    vfoCopyBtn_->setObjectName("vfoCopyBtn");
     vfoDelBtn_->setObjectName("vfoDelBtn");
+    // Text-only small buttons: enforce the named 44px touch minimum (scaled).
+    for (QPushButton* b : {vfoAddBtn_, vfoCopyBtn_, vfoDelBtn_})
+        b->setMinimumHeight(tokens::scaled(tokens::kTouchMin));
     vfoBtnRow->addWidget(vfoAddBtn_);
+    vfoBtnRow->addWidget(vfoCopyBtn_);
     vfoBtnRow->addWidget(vfoDelBtn_);
     gVfoLay->addLayout(vfoBtnRow);
     leftLay->addWidget(gVfo);
@@ -1306,6 +1324,7 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this]() { refreshVfoUi(); scheduleSave(); },
             Qt::QueuedConnection);
     connect(vfoAddBtn_, &QPushButton::clicked, this, [this]() { engine_->vfoAdd(); });
+    connect(vfoCopyBtn_, &QPushButton::clicked, this, &MainWindow::vfoCopyUi);
     connect(vfoDelBtn_, &QPushButton::clicked, this, [this]() {
         const int sel = engine_->selectedVfoId();
         if (sel > 0) engine_->vfoRemove(sel);
@@ -1317,6 +1336,13 @@ MainWindow::MainWindow(QWidget* parent)
         const int id = cur->data(Qt::UserRole).toInt(&ok);
         if (ok && id > 0) engine_->vfoSelect(id);
     });
+    // Double-click a row: explicitly switch the active VFO. Single-click row
+    // activation above is unchanged; this supplements the touch/keyboard gesture.
+    connect(vfoList_, &QListWidget::itemDoubleClicked,
+            this, &MainWindow::onVfoItemDoubleClicked);
+    // Inline rename commit: persist the user name to vfoNames_ + QSettings.
+    connect(vfoList_, &QListWidget::itemChanged,
+            this, &MainWindow::onVfoItemEdited);
     // Spectrum band-box interaction <-> engine.
     connect(spectrum_, &ui::SpectrumWidget::vfoMarkerSelected,
             this, [this](int id) { engine_->vfoSelect(id); });
@@ -1868,20 +1894,28 @@ void MainWindow::refreshVfoUi() {
     vfoMarkers_ = engine_->vfoMarkers();
     spectrum_->setVfoMarkers(vfoMarkers_);
 
-    // Rebuild the VFO list (color dot + name + freq + mode).
+    // Rebuild the VFO list: active dot + [user name] (id) + freq MHz + mode + bw.
     vfoList_->blockSignals(true);
     vfoList_->clear();
+    vfoList_->setUniformItemSizes(false);
+    const int rowH = tokens::scaled(tokens::kVfoRowH);
+    vfoList_->setIconSize(QSize(0, 0));
     int selRow = -1;
     for (int i = 0; i < vfoMarkers_.size(); ++i) {
         const auto& m = vfoMarkers_[i];
-        auto* it = new QListWidgetItem(
-            QString("%1   %2 MHz   %3")
-                .arg(m.name, -8, QChar(' '))
-                .arg(m.freqHz / 1e6, 0, 'f', 3)
-                .arg(m.mode));
+        auto* it = new QListWidgetItem;
         QColor c = m.color.isValid() ? m.color : QColor(QString::fromUtf8(tokens::kAccent));
         it->setForeground(c);
         it->setData(Qt::UserRole, m.id);
+        // Touch-sized rows (>=44 logical px tap target).
+        it->setSizeHint(QSize(0, rowH));
+        // Inline rename. The editor shows ONLY the raw user name (empty if
+        // unnamed), never the formatted display string; on commit
+        // onVfoItemEdited() maps it back to the engine id. Set DisplayRole LAST
+        // so the formatted text is never clobbered by the EditRole assignment.
+        it->setData(Qt::EditRole, vfoNames_.value(m.id, QString()));
+        it->setData(Qt::DisplayRole, vfoRowText(m));
+        it->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsEditable);
         vfoList_->addItem(it);
         if (m.selected) selRow = i;
     }
@@ -1923,6 +1957,100 @@ void MainWindow::refreshVfoUi() {
             }
         }
     }
+}
+
+QString MainWindow::vfoRowText(const dsp::VfoMarker& m) const {
+    // Active marker (restrained): a filled dot for the listened-to VFO, two
+    // spaces otherwise -- never loud. Identity: "名字 (id)" when the user gave
+    // a name, else just "#id". Then real freq (MHz), mode and IF bandwidth.
+    const QString dot = m.selected ? QString::fromUtf8("●") : QString::fromUtf8(" ");
+    const QString nm = vfoNames_.value(m.id).trimmed();
+    const QString idPart = nm.isEmpty()
+        ? QString("#%1").arg(m.id)
+        : QString("%1 (%2)").arg(nm, QString::number(m.id));
+    // Bandwidth in human units.
+    QString bw;
+    if (m.bandwidthHz >= 1e6)      bw = QString("%1 MHz").arg(m.bandwidthHz / 1e6, 0, 'f', 2);
+    else if (m.bandwidthHz >= 1e3) bw = QString("%1 kHz").arg(m.bandwidthHz / 1e3, 0, 'f', 1);
+    else                            bw = QString("%1 Hz").arg(int(m.bandwidthHz));
+    return QString("%1 %2  %3 MHz  %4  %5")
+        .arg(dot, idPart, QString::number(m.freqHz / 1e6, 'f', 3), m.mode, bw);
+}
+
+void MainWindow::vfoCopyUi() {
+    if (!engine_) return;
+    // Read a FRESH snapshot from the engine (not the throttled UI cache) so the
+    // copy always sees the active VFO's true freq/mode/bw.
+    const auto markers = engine_->vfoMarkers();
+    // Source = the active (selected) VFO; fall back to the currently highlighted
+    // row if the active marker isn't in the snapshot for any reason.
+    const dsp::VfoMarker* src = nullptr;
+    for (const auto& m : markers) if (m.selected) { src = &m; break; }
+    if (!src && vfoList_->currentItem()) {
+        bool ok = false;
+        const int id = vfoList_->currentItem()->data(Qt::UserRole).toInt(&ok);
+        if (ok) for (const auto& m : markers) if (m.id == id) { src = &m; break; }
+    }
+    if (!src) return;
+    const double f = src->freqHz, bw = src->bandwidthHz;
+    const QString mode = src->mode;
+    // Real engine API: add at center, then stamp the source's params onto it.
+    // setMode resets bandwidth to the mode default, so set bandwidth AFTER mode.
+    engine_->vfoAdd();
+    const int newId = engine_->selectedVfoId();   // vfoAdd selects the new VFO
+    if (newId > 0) {
+        engine_->vfoSetFreq(newId, f);
+        engine_->vfoSetMode(newId, mode);
+        engine_->vfoSetBandwidth(newId, bw);
+    }
+    // vfoListChanged arrives asynchronously and refreshes the list.
+}
+
+void MainWindow::onVfoItemDoubleClicked(QListWidgetItem* it) {
+    if (!it || !engine_) return;
+    bool ok = false;
+    const int id = it->data(Qt::UserRole).toInt(&ok);
+    if (ok && id > 0) engine_->vfoSelect(id);
+}
+
+void MainWindow::onVfoItemEdited(QListWidgetItem* it) {
+    if (!it) return;
+    bool ok = false;
+    const int id = it->data(Qt::UserRole).toInt(&ok);
+    if (!ok || id <= 0) return;
+    const QString name = it->data(Qt::EditRole).toString().trimmed();
+    if (name.isEmpty()) vfoNames_.remove(id);
+    else                vfoNames_[id] = name;
+    saveUiState();     // persist ui/vfoNames immediately
+    // Reformat ONLY this row's display text in place. We must NOT clear/rebuild
+    // the list here: setData(EditRole) fires this slot synchronously while the
+    // delegate still owns the item, and a full refreshVfoUi() would delete `it`
+    // out from under the in-flight edit.
+    const auto markers = engine_->vfoMarkers();
+    for (const auto& m : markers) {
+        if (m.id == id) {
+            // Temporarily block signals so reformatting doesn't recurse.
+            vfoList_->blockSignals(true);
+            // Set EditRole FIRST, DisplayRole LAST: assigning EditRole otherwise
+            // makes the view fall back to / clobber the displayed text.
+            it->setData(Qt::EditRole, name);
+            it->setData(Qt::DisplayRole, vfoRowText(m));
+            vfoList_->blockSignals(false);
+            break;
+        }
+    }
+}
+
+void MainWindow::loadVfoNames() {
+    QSettings s("MBDSDR", "MBDSDR");
+    vfoNames_.clear();
+    const QByteArray raw = s.value("ui/vfoNames").toByteArray();
+    if (raw.isEmpty()) return;   // default: empty map, no preset names
+    const QJsonDocument doc = QJsonDocument::fromJson(raw);
+    if (!doc.isObject()) return;
+    const QJsonObject obj = doc.object();
+    for (auto it = obj.begin(); it != obj.end(); ++it)
+        vfoNames_[it.key().toInt()] = it.value().toString();
 }
 
 void MainWindow::saveUiState() {
@@ -1990,6 +2118,15 @@ void MainWindow::saveUiState() {
         s.setValue(QString("vfo/%1/bw").arg(i), m.bandwidthHz);
         s.setValue(QString("vfo/%1/color").arg(i), m.color.name());
         s.setValue(QString("vfo/%1/selected").arg(i), m.selected);
+    }
+
+    // ---- User VFO display names (JSON map: "vfo id" -> name). Empty by default,
+    // never pre-seeded. Dropped ids simply never appear in the map. ----
+    {
+        QJsonObject obj;
+        for (auto it = vfoNames_.begin(); it != vfoNames_.end(); ++it)
+            obj[QString::number(it.key())] = it.value();
+        s.setValue("ui/vfoNames", QJsonDocument(obj).toJson(QJsonDocument::Compact));
     }
 
     // ---- GNSS serial device + world-map layers / view state ----
@@ -2131,6 +2268,9 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event) {
 void MainWindow::restoreUiState() {
     QSettings s("MBDSDR", "MBDSDR");
     restoreGeometry(s.value("geometry").toByteArray());
+
+    // User VFO display names (JSON by engine id); default empty, no presets.
+    loadVfoNames();
 
     // Block widget signals while we repopulate controls; we dispatch to the
     // engine explicitly below so each setting is applied exactly once.

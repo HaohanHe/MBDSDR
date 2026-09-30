@@ -233,8 +233,23 @@ private:
     QListWidget*    vfoList_     = nullptr;
     QPushButton*    vfoAddBtn_   = nullptr;
     QPushButton*    vfoDelBtn_   = nullptr;
+    QPushButton*    vfoCopyBtn_   = nullptr;   // copy active/selected VFO's params
     QVector<mbdsdr::dsp::VfoMarker> vfoMarkers_;  // last snapshot from engine
+    // User-assigned display names keyed by engine VFO id. Empty by default and
+    // persisted as JSON under QSettings key "ui/vfoNames". Never pre-seeded.
+    QMap<int,QString> vfoNames_;
     void refreshVfoUi();                          // rebuild list + push band boxes
+    // Copy the source (active, else selected row) VFO's freq/mode/bw into a brand
+    // new VFO via the real engine vfoAdd/vfoSet*/vfoSetBandwidth API.
+    void vfoCopyUi();
+    // Double-click a row: explicitly switch the active VFO to that row's id.
+    // (Single-click row activation already exists; this supplements it.)
+    void onVfoItemDoubleClicked(QListWidgetItem* it);
+    // Inline rename committed (itemChanged): persist to vfoNames_ + QSettings.
+    void onVfoItemEdited(QListWidgetItem* it);
+    // Build the list-row display string from a real marker + the optional user name.
+    QString vfoRowText(const mbdsdr::dsp::VfoMarker& m) const;
+    void loadVfoNames();                          // read ui/vfoNames JSON (default empty)
     QSlider*        squelchSlider_ = nullptr;
     QCheckBox*      squelchCheck_ = nullptr;
     QPushButton*    squelchAutoBtn_ = nullptr;  // checkable: auto gate = audio NF + margin

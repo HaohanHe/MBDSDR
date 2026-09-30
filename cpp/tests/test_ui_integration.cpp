@@ -24,7 +24,11 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QListWidgetItem>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
@@ -52,6 +56,10 @@ private slots:
     void aiManualToggleWiresAgentAndAnnotatesGated();
     void scanHitSaveBookmarkThenJump();
     void squelchAutoFollowsSameDomainFloor();
+    void vfoCopyDuplicatesSourceParams();
+    void vfoDoubleClickSwitchesActive();
+    void vfoNamingPersistsRoundTrip();
+    void vfoRemoveRefreshesList();
 };
 
 QString TestUiIntegration::tmpSettingsDir;
@@ -192,6 +200,178 @@ void TestUiIntegration::squelchAutoFollowsSameDomainFloor() {
         double(tokens::kSquelchMinDb), double(tokens::kSquelchMaxDb));
     QVERIFY2(std::abs(v - int(std::round(expected))) <= 2,
              "auto gate must set slider to floor(real audio-RMS domain) + margin");
+}
+
+// Wait until the engine's VFO snapshot has `n` channels. The UI refresh runs on
+// a queued vfoListChanged, so pump the event loop until markers stabilize.
+static void waitVfoCount(MainWindow& win, int n) {
+    QTRY_VERIFY_WITH_TIMEOUT(win.engine()->vfoMarkers().size() == n, 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        win.findChild<QListWidget*>("vfoList")->count() == n, 3000);
+}
+
+// Each MainWindow restores the persisted vfo/* set on launch. Tests share one
+// redirected QSettings dir, so wipe the VFO group (count + per-channel + names)
+// before each VFO test so a fresh window starts from the engine's default 1 VFO.
+static void clearVfoSettings() {
+    QSettings s("MBDSDR", "MBDSDR");
+    s.remove("vfo");
+    s.remove("ui/vfoNames");
+    s.sync();
+}
+
+void TestUiIntegration::vfoCopyDuplicatesSourceParams() {
+    clearVfoSettings();
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+
+    auto* copyBtn = win.findChild<QPushButton*>("vfoCopyBtn");
+    auto* list = win.findChild<QListWidget*>("vfoList");
+    QVERIFY(copyBtn);
+    QVERIFY(list);
+    auto* eng = win.engine();
+    QVERIFY(eng);
+
+    // Build a source VFO (id = selected after vfoAdd) with distinctive params.
+    eng->vfoAdd();
+    waitVfoCount(win, 2);
+    const int srcId = eng->selectedVfoId();
+    QVERIFY(srcId > 0);
+    eng->vfoSetFreq(srcId, 100.7e6);
+    eng->vfoSetMode(srcId, "AM");
+    eng->vfoSetBandwidth(srcId, 8000.0);
+    waitVfoCount(win, 2);
+
+    const int beforeCount = eng->vfoMarkers().size();
+    // The source must be the active VFO (vfoCopyUi copies the active one).
+    QCOMPARE(eng->selectedVfoId(), srcId);
+
+    copyBtn->click();
+    waitVfoCount(win, beforeCount + 1);
+
+    // The new (now-active) VFO must carry an exact copy of source params.
+    const int newId = eng->selectedVfoId();
+    QVERIFY2(newId != srcId, "copy must create a NEW vfo id");
+    auto markers = eng->vfoMarkers();
+    bool foundNew = false;
+    for (const auto& m : markers) {
+        if (m.id == newId) {
+            foundNew = true;
+            QVERIFY2(std::abs(m.freqHz - 100.7e6) < 1.0,
+                     "copied VFO frequency must equal source");
+            QCOMPARE(m.mode, QString("AM"));
+            QVERIFY2(std::abs(m.bandwidthHz - 8000.0) < 1.0,
+                     "copied VFO bandwidth must equal source");
+        }
+    }
+    QVERIFY2(foundNew, "the copied VFO must appear in the engine markers");
+}
+
+void TestUiIntegration::vfoDoubleClickSwitchesActive() {
+    clearVfoSettings();
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    auto* eng = win.engine();
+    auto* list = win.findChild<QListWidget*>("vfoList");
+    QVERIFY(eng && list);
+
+    // Three VFOs; remember the ids.
+    eng->vfoAdd();
+    eng->vfoAdd();
+    waitVfoCount(win, 3);
+    auto markers = eng->vfoMarkers();
+    QCOMPARE(markers.size(), 3);
+    // Target = the FIRST (oldest) channel; active after adds is the newest.
+    const int targetId = markers[0].id;
+    QVERIFY(eng->selectedVfoId() != targetId);
+
+    // Find the row item carrying targetId and emit itemDoubleClicked on it.
+    QListWidgetItem* targetItem = nullptr;
+    for (int i = 0; i < list->count(); ++i) {
+        auto* it = list->item(i);
+        if (it->data(Qt::UserRole).toInt() == targetId) targetItem = it;
+    }
+    QVERIFY(targetItem);
+    QMetaObject::invokeMethod(list, "itemDoubleClicked", Qt::DirectConnection,
+                              Q_ARG(QListWidgetItem*, targetItem));
+    QTRY_VERIFY_WITH_TIMEOUT(eng->selectedVfoId() == targetId, 2000);
+    QCOMPARE(eng->selectedVfoId(), targetId);
+}
+
+void TestUiIntegration::vfoNamingPersistsRoundTrip() {
+    clearVfoSettings();
+    // Fresh window in the redirected QSettings dir: no names preset.
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* eng = win.engine();
+        auto* list = win.findChild<QListWidget*>("vfoList");
+        QVERIFY(eng && list);
+        waitVfoCount(win, 1);
+        const int id = eng->selectedVfoId();
+
+        QSettings s("MBDSDR", "MBDSDR");
+        QVERIFY2(s.value("ui/vfoNames").toByteArray().isEmpty(),
+                 "ui/vfoNames must default to empty (no preset names)");
+
+        // Commit an inline rename for the only VFO via the real itemChanged path.
+        // setData(EditRole) fires onVfoItemEdited synchronously (persist + reformat).
+        QListWidgetItem* it = list->item(0);
+        it->setData(Qt::EditRole, QString::fromUtf8("气象预警"));
+        QApplication::processEvents();
+
+        // Persisted JSON must map this id -> the name.
+        QSettings s2("MBDSDR", "MBDSDR");
+        const QByteArray raw = s2.value("ui/vfoNames").toByteArray();
+        QVERIFY2(!raw.isEmpty(), "renaming must persist ui/vfoNames");
+        const QJsonObject obj = QJsonDocument::fromJson(raw).object();
+        QCOMPARE(obj.value(QString::number(id)).toString(),
+                 QString::fromUtf8("气象预警"));
+
+        // The list row now shows the name.
+        QVERIFY2(list->item(0)->text().contains(QString::fromUtf8("气象预警")),
+                 "row must render the user-assigned name");
+    }
+    // A SECOND window must load the persisted name back (round-trip).
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* list = win.findChild<QListWidget*>("vfoList");
+        QVERIFY(list);
+        waitVfoCount(win, 1);
+        QVERIFY2(list->item(0)->text().contains(QString::fromUtf8("气象预警")),
+                 "restored window must show the persisted VFO name");
+    }
+}
+
+void TestUiIntegration::vfoRemoveRefreshesList() {
+    clearVfoSettings();
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    auto* eng = win.engine();
+    auto* list = win.findChild<QListWidget*>("vfoList");
+    auto* delBtn = win.findChild<QPushButton*>("vfoDelBtn");
+    QVERIFY(eng && list && delBtn);
+
+    eng->vfoAdd();
+    waitVfoCount(win, 2);
+    const int activeId = eng->selectedVfoId();
+    QVERIFY(activeId > 0);
+    QCOMPARE(list->count(), 2);
+
+    delBtn->click();   // removes the active VFO (engine keeps >=1)
+    waitVfoCount(win, 1);
+    QCOMPARE(eng->vfoMarkers().size(), 1);
+    QCOMPARE(list->count(), 1);
+    // The removed (active) channel id must no longer be present.
+    bool stillThere = false;
+    for (const auto& m : eng->vfoMarkers()) if (m.id == activeId) stillThere = true;
+    QVERIFY2(!stillThere, "the removed VFO id must be gone after delete");
 }
 
 QTEST_MAIN(TestUiIntegration)

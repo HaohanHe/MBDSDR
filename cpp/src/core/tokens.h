@@ -117,6 +117,17 @@ inline constexpr int kSpacingL = 16;
 inline constexpr int kTopbarH          = 56;
 inline constexpr int kSplitterWidth    = 8;
 inline constexpr int kTouchMin         = 44;
+// Logical minimum touch-target dimension (Qt logical px, scaled at runtime).
+// Alias of kTouchMin kept under the name the UI audit references; primary
+// interactive controls (text-only buttons, list rows) must meet this.
+inline constexpr int kTouchMinDim      = kTouchMin;
+
+// Multi-VFO management list panel (left rail). Min height shows ~2 rows at the
+// 44px touch row pitch; max keeps the panel compact yet roomy enough for a few.
+inline constexpr int kVfoListMinH     = 96;
+inline constexpr int kVfoListMaxH     = 168;
+// Logical list-row height for touch: every row is a >=44px tap target.
+inline constexpr int kVfoRowH         = kTouchMinDim;
 
 inline constexpr int kPanelPadLeft   = 16;
 inline constexpr int kPanelPadTop    = 16;
@@ -381,6 +392,10 @@ inline constexpr double kFreqFineStepHz = 10000.0;
 // Vertical padding = kSpacingM, horizontal = kSpacingL, per the rhythm.
 inline constexpr int kBtnPadV         = kSpacingM;
 inline constexpr int kBtnPadH         = kSpacingL;
+// Visual (density) control height for buttons/combos/spinboxes. Distinct from
+// the 44px touch minimum: visually dense, but small text-only buttons get a
+// 44px hit area on top via setMinimumHeight(tokens::scaled(kTouchMin)).
+inline constexpr int kControlH        = 26;
 inline constexpr int kSplitterMarginV = 8;
 inline constexpr int kSplitterMarginH = 2;
 inline constexpr int kComboPadV       = kSpacingM;
@@ -619,7 +634,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
         .replace(QStringLiteral("%fontBody%"), QString::number(kFontBodyPt))
         .replace(QStringLiteral("%fontAux%"), QString::number(kFontAuxPt))
         .replace(QStringLiteral("%touch%"), S(kTouchMin))
-        .replace(QStringLiteral("%ctlH%"), S(26))
+        .replace(QStringLiteral("%ctlH%"), S(kControlH))
         .replace(QStringLiteral("%sbW%"), S(6))
         .replace(QStringLiteral("%sbR%"), S(3))
         .replace(QStringLiteral("%radCard%"), S(kRadiusCard))
