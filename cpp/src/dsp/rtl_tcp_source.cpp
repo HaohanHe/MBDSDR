@@ -91,6 +91,11 @@ bool RtlTcpSource::start() {
     eof_.store(false);
     lastError_.clear();
 
+    // Read the 12-byte "RTL0" dongle-info header the daemon sends immediately
+    // on accept (real tuner identity). Must happen BEFORE we issue commands /
+    // read IQ so the header is consumed and the IQ stream stays aligned.
+    readDongleInfo();
+
     sendCmd(0x02, static_cast<quint32>(rateHz_));   // set sample rate
     sendCmd(0x01, static_cast<quint32>(freqHz_));   // set center freq
     return true;
@@ -104,6 +109,65 @@ void RtlTcpSource::stop() {
 
 bool RtlTcpSource::isConnected() const {
     return fd_.load() >= 0 && !eof_.load();
+}
+
+void RtlTcpSource::readDongleInfo() {
+    tunerTypeRaw_ = -1;
+    tunerGainCount_ = 0;
+    headerKnown_ = false;
+    const int fd = fd_.load();
+    if (fd < 0) return;
+
+    // librtlsdr rtl_tcp.c:618-629 sends 12 bytes right after accept():
+    //   char magic[4] = "RTL0"; uint32 tuner_type (BE); uint32 gain_count (BE);
+    unsigned char buf[12];
+    std::size_t got = 0;
+    // Bound the wait: the real daemon replies instantly, but a mock/legacy
+    // server may send no header at all. First poll with no data -> stop (we
+    // must not stall connect()); if partial bytes arrived we keep draining up
+    // to 12.
+    for (int attempt = 0; attempt < 6 && got < sizeof(buf); ++attempt) {
+        pollfd p{fd, POLLIN, 0};
+        const int pr = ::poll(&p, 1, 50);
+        if (pr <= 0) { if (got == 0) break; else continue; }
+        if (!(p.revents & POLLIN)) break;
+        const ssize_t n = ::recv(fd, reinterpret_cast<char*>(buf) + got,
+                                 sizeof(buf) - got, 0);
+        if (n > 0) { got += static_cast<std::size_t>(n); continue; }
+        break;   // n == 0 / error: nothing more to read
+    }
+
+    if (got == sizeof(buf) && std::memcmp(buf, "RTL0", 4) == 0) {
+        tunerTypeRaw_ = (static_cast<int>(buf[4]) << 24) |
+                        (static_cast<int>(buf[5]) << 16) |
+                        (static_cast<int>(buf[6]) <<  8) |
+                        (static_cast<int>(buf[7]));
+        tunerGainCount_ = (static_cast<int>(buf[8])  << 24) |
+                          (static_cast<int>(buf[9])  << 16) |
+                          (static_cast<int>(buf[10]) <<  8) |
+                          (static_cast<int>(buf[11]));
+        headerKnown_ = true;
+    }
+    // else: no / unrecognised header -> tuner stays unknown (honest).
+}
+
+DeviceCapabilities RtlTcpSource::capabilities() const {
+    if (!isConnected()) return noDeviceCapabilities();
+    if (!headerKnown_) {
+        // Link up, but the server sent no parseable RTL0 header (mock / legacy).
+        // Report the connected link state with honest unknown ranges -- never a
+        // guessed tuner range.
+        DeviceCapabilities c;
+        c.connected = true;
+        c.deviceName = name();
+        c.provenance = QStringLiteral(
+            "rtl_tcp 已连接，但未收到 RTL0 握手（服务端未上报调谐器型号）；"
+            "调谐/采样率范围未知");
+        return c;
+    }
+    return rtlCapabilitiesFromHandshake(
+        tunerTypeRaw_, tunerGainCount_,
+        QString("%1:%2").arg(host_).arg(port_));
 }
 
 void RtlTcpSource::sendCmd(quint8 cmd, quint32 arg) {

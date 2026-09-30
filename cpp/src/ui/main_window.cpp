@@ -272,6 +272,29 @@ MainWindow::MainWindow(QWidget* parent)
     });
     leftLay->addWidget(gSrc);
 
+    // ---- Device info: real readback (rtl_tcp RTL0 handshake), honest empty
+    // state when no device. Ranges show "--" until the device actually reports
+    // them; nothing is fabricated.
+    {
+        auto* gDev = new QGroupBox("设备信息", leftCard);
+        auto* gDevLay = new QFormLayout(gDev);
+        devNameLabel_ = new QLabel(QStringLiteral("RTL-SDR 未连接"), gDev);
+        devNameLabel_->setObjectName("dockHint");
+        devNameLabel_->setWordWrap(true);
+        gDevLay->addRow(QStringLiteral("设备"), devNameLabel_);
+        devTunerRangeLabel_ = new QLabel(QStringLiteral("--"), gDev);
+        devTunerRangeLabel_->setWordWrap(true);
+        gDevLay->addRow(QStringLiteral("调谐范围"), devTunerRangeLabel_);
+        devSrRangeLabel_ = new QLabel(QStringLiteral("--"), gDev);
+        devSrRangeLabel_->setWordWrap(true);
+        gDevLay->addRow(QStringLiteral("采样率范围"), devSrRangeLabel_);
+        devProvenanceLabel_ = new QLabel(QString(), gDev);
+        devProvenanceLabel_->setObjectName("dockHint");
+        devProvenanceLabel_->setWordWrap(true);
+        gDevLay->addRow(QStringLiteral("来源"), devProvenanceLabel_);
+        leftLay->addWidget(gDev);
+    }
+
     // ---- SpyServer 远程 IQ 服务 (SDR++/Airspy 协议) ----
     // A TCP listener that streams the engine's real IQ to a remote SDR++ /
     // SDRangel client. Default OFF so it never grabs :5555 by accident. The
@@ -365,8 +388,9 @@ MainWindow::MainWindow(QWidget* parent)
     auto* gRx = new QGroupBox("接收参数", leftCard);
     auto* gRxLay = new QFormLayout(gRx);
     srCombo_ = new QComboBox(gRx);
-    srCombo_->addItems({"1.024 MS/s", "2.048 MS/s", "2.4 MS/s", "3.2 MS/s"});
-    srCombo_->setCurrentIndex(2);
+    // Populated dynamically from the connected device's real range by
+    // refreshDeviceCapabilities() -- no fixed device-independent menu. With no
+    // device the combo is empty + disabled (honest empty state).
     srCombo_->setMinimumWidth(tokens::scaled(120));
     gRxLay->addRow("采样率", srCombo_);
     gainSlider_ = new QSlider(Qt::Horizontal, gRx);
@@ -1446,6 +1470,9 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(engine_, &dsp::SpectrumEngine::sourceTelemetry,
             this, &MainWindow::onSourceTelemetry);
+    // Paint the honest no-device empty state immediately (don't wait for the
+    // first 1 Hz telemetry tick).
+    refreshDeviceCapabilities();
     connect(engine_, &dsp::SpectrumEngine::squelchState,
             this, &MainWindow::onSquelchState);
     connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
@@ -1583,8 +1610,12 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(srCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
-                static const double kRates[] = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
-                if (idx >= 0 && idx <= 3) engine_->onSetSampleRate(kRates[idx]);
+                // The Hz value lives in itemData (populated from the device's
+                // real range); no index->rate table that can drift.
+                if (idx >= 0) {
+                    const double hz = srCombo_->currentData().toDouble();
+                    if (hz > 0.0) engine_->onSetSampleRate(hz);
+                }
                 sbSr_->setText(srCombo_->currentText());
             });
     connect(bwCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -2550,9 +2581,11 @@ void MainWindow::saveUiState() {
     s.setValue("rx/centerFreq", freqSpin_->value() * 1e6);
     s.setValue("rx/tuningStep", currentStepHz_);
     {
-        static const double kRates[] = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
-        int idx = srCombo_->currentIndex();
-        if (idx >= 0 && idx <= 3) s.setValue("rx/sampleRate", kRates[idx]);
+        // Persist the live sample rate (Hz) straight from the selected item's
+        // data -- the combo options are device-derived, so there is no fixed
+        // index table to map. 0 (no selection / no device) is not persisted.
+        const double hz = srCombo_->currentData().toDouble();
+        if (hz > 0.0) s.setValue("rx/sampleRate", hz);
     }
     s.setValue("rx/demodMode", demodCombo_->currentText());
     // Persist the live bandwidth (a keyboard nudge may have set a non-preset
@@ -2793,11 +2826,13 @@ void MainWindow::restoreUiState() {
     currentStepHz_ = kStepValuesHz[stepIdx];
     freqSpin_->setSingleStep(static_cast<double>(currentStepHz_) / 1e6);
 
-    static const double kRates[] = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
+    // Sample rate: the combo is populated from the connected device's real
+    // range (refreshDeviceCapabilities). At startup no device is connected, so
+    // there is nothing to select yet; we remember the last rate as the
+    // preference (used to pick the nearest option once a device appears) and
+    // push it straight into the pipeline.
     const double rateHz = s.value("rx/sampleRate", 2.4e6).toDouble();
-    int srIdx = 2;
-    for (int i = 0; i < 4; ++i) if (std::abs(kRates[i] - rateHz) < 1e3) srIdx = i;
-    srCombo_->setCurrentIndex(srIdx);
+    lastSampleRateHz_ = rateHz;
 
     const QString demod = s.value("rx/demodMode", "NFM").toString();
     int dIdx = demodCombo_->findText(demod);
@@ -2918,7 +2953,7 @@ void MainWindow::restoreUiState() {
     // ---- Dispatch restored values to the engine (UI controls already show
     // the right state; push the same values into the running pipeline). ----
     engine_->onSetCenterFreq(centerHz);
-    engine_->onSetSampleRate(kRates[srIdx]);
+    engine_->onSetSampleRate(rateHz);
     engine_->setDemodMode(demodCombo_->currentText());
     currentBwHz_ = bwHz;
     engine_->setBandwidth(bwHz);
@@ -3017,6 +3052,11 @@ void MainWindow::onSourceChanged(const QString& name, bool connected) {
     if (recordBtn_) recordBtn_->setEnabled(true);
     sbSdr_->setText(name + (connected ? "" : " (test)"));
     setControlsEnabled(connected);
+    // Deferred: sourceChanged can be delivered INLINE while the engine still
+    // holds sourceMutex_ (connectRtlTcp emits it under that lock). Calling
+    // sourceCapabilities() here would re-enter the non-recursive mutex and
+    // deadlock. Refresh on the next UI turn when the engine lock is free.
+    QTimer::singleShot(0, this, [this]() { refreshDeviceCapabilities(); });
 }
 
 // Hotplug event channel (separate from the 1 Hz telemetry poll): the engine
@@ -3108,6 +3148,86 @@ void MainWindow::onSourceTelemetry(const QString& name, bool connected,
             ? QString("增益 %1 dB").arg(gainDb, 0, 'f', 1) : QString("--"));
     if (sbSdr_)
         sbSdr_->setText(name + (connected ? QString() : QStringLiteral("（非硬件）")));
+    // Deferred (same rationale as onSourceChanged): refresh on a turn where the
+    // engine lock is not held. Change-detector inside keeps this cheap.
+    QTimer::singleShot(0, this, [this]() { refreshDeviceCapabilities(); });
+}
+
+// Re-read the active source's REAL capabilities (rtl_tcp RTL0 handshake, or the
+// honest no-device state from the offline test source) and push them into the
+// device-info labels + the dynamic sample-rate combo.
+void MainWindow::refreshDeviceCapabilities() {
+    if (!engine_) return;
+    const dsp::DeviceCapabilities caps = engine_->sourceCapabilities();
+
+    auto fmtRange = [](double lo, double hi) -> QString {
+        if (!(hi > lo) || hi <= 0.0) return QStringLiteral("未知");
+        return QString(QStringLiteral("%1 – %2 MHz"))
+            .arg(lo / 1e6, 0, 'f', 1).arg(hi / 1e6, 0, 'f', 1);
+    };
+
+    if (devNameLabel_)
+        devNameLabel_->setText(caps.deviceName.isEmpty()
+            ? QStringLiteral("RTL-SDR 未连接") : caps.deviceName);
+    if (devTunerRangeLabel_)
+        devTunerRangeLabel_->setText(fmtRange(caps.tunableMinHz, caps.tunableMaxHz));
+    if (devSrRangeLabel_)
+        devSrRangeLabel_->setText(fmtRange(caps.sampleRateMinHz, caps.sampleRateMaxHz));
+    if (devProvenanceLabel_)
+        devProvenanceLabel_->setText(caps.provenance);
+
+    // Change detector: only rebuild the combo when the device identity / range
+    // actually changed. The 1 Hz telemetry poll otherwise re-enters this every
+    // second and would clobber the user's selection.
+    const QString key = QStringLiteral("%1|%2|%3|%4|%5")
+        .arg(caps.connected).arg(caps.deviceName)
+        .arg(caps.tunableMinHz).arg(caps.sampleRateMinHz).arg(caps.sampleRateMaxHz);
+    if (key == capsKey_) return;
+    capsKey_ = key;
+
+    const QSignalBlocker block(srCombo_);
+    srCombo_->clear();
+
+    const QList<double> rates = dsp::buildSampleRateOptions(caps);
+    const double preferred = lastSampleRateHz_ > 0.0 ? lastSampleRateHz_ : 2.4e6;
+    int bestIdx = -1;
+    double bestDiff = std::numeric_limits<double>::infinity();
+    for (double r : rates) {
+        srCombo_->addItem(QString(QStringLiteral("%1 MS/s")).arg(r / 1e6, 0, 'f', 3), r);
+        const double d = std::fabs(r - preferred);
+        if (d < bestDiff) { bestDiff = d; bestIdx = srCombo_->count() - 1; }
+    }
+
+    if (srCombo_->count() == 0) {
+        // Honest empty state: a single disabled placeholder, no fake options.
+        srCombo_->addItem(caps.connected
+            ? QStringLiteral("无可用采样率") : QStringLiteral("未连接"));
+    }
+    srCombo_->setEnabled(caps.connected && !rates.isEmpty());
+    if (bestIdx >= 0) srCombo_->setCurrentIndex(bestIdx);
+    sbSr_->setText(srCombo_->currentText());
+}
+
+QList<double> MainWindow::harnessSampleRateOptions() const {
+    QList<double> out;
+    if (!srCombo_) return out;
+    for (int i = 0; i < srCombo_->count(); ++i) {
+        const double hz = srCombo_->itemData(i).toDouble();
+        if (hz > 0.0) out.push_back(hz);   // placeholder rows (no data) skipped
+    }
+    return out;
+}
+
+bool MainWindow::harnessSampleRateEnabled() const {
+    return srCombo_ && srCombo_->isEnabled();
+}
+
+QString MainWindow::harnessDeviceName() const {
+    return devNameLabel_ ? devNameLabel_->text() : QString();
+}
+
+QString MainWindow::harnessTunerRangeText() const {
+    return devTunerRangeLabel_ ? devTunerRangeLabel_->text() : QString();
 }
 
 void MainWindow::onSpyServerToggled(bool on) {

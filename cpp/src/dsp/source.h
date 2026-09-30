@@ -4,6 +4,8 @@
 // std::unique_ptr<ISource> and never cares which concrete backend it is.
 #pragma once
 
+#include "dsp/device_capabilities.h"
+
 #include <QString>
 #include <complex>
 #include <vector>
@@ -54,6 +56,13 @@ public:
     /// True only when a real hardware device is actually connected.
     /// Test sources must return false.
     virtual bool isConnected() const = 0;
+
+    /// Real device capabilities (name, tuning / sample-rate range) for the UI
+    /// device-info panel and the dynamic sample-rate combo. The default returns
+    /// the honest empty state (no device); hardware backends that can read the
+    /// real identity (rtl_tcp handshake, Soapy probe) override this. A source
+    /// that cannot read a range reports 0 = "未知", never a guess.
+    virtual DeviceCapabilities capabilities() const { return noDeviceCapabilities(); }
 
     // ---- Optional multi-stage gain (default no-op) ----
     /// Multi-stage gain: stage 0 = LNA, 1 = MIX, 2 = VGA (RTL2832U+E4000/R820T).

@@ -64,6 +64,14 @@ public:
     // Harness/screenshot: rescan the recording library from engine_->recordingDir().
     void refreshRecordingLibrary() { refreshRecLib(); }
 
+    // ---- Device-info / dynamic sample-rate combo harness accessors ---------
+    // Read-only; no radio is touched. Lets offscreen tests + the screenshot
+    // harness assert the real readback panel and the device-derived combo.
+    QList<double> harnessSampleRateOptions() const;   // Hz values in srCombo_
+    bool          harnessSampleRateEnabled() const;
+    QString       harnessDeviceName() const;
+    QString       harnessTunerRangeText() const;
+
 private slots:
     void onSourceChanged(const QString& name, bool connected);
     void onSourceDropped();
@@ -230,6 +238,17 @@ private:
     QLineEdit*      tcpHostEdit_ = nullptr;
     QSpinBox*       tcpPortSpin_ = nullptr;
     QLabel*         rssiLabel_  = nullptr;
+
+    // ---- Device info panel (real readback; honest empty state) -----------
+    // Device name / tuning range / sample-rate range come from
+    // engine_->sourceCapabilities() (rtl_tcp RTL0 handshake or the honest
+    // no-device state). Never fabricated; ranges show "--" when unknown.
+    QLabel*         devNameLabel_ = nullptr;
+    QLabel*         devTunerRangeLabel_ = nullptr;
+    QLabel*         devSrRangeLabel_    = nullptr;
+    QLabel*         devProvenanceLabel_ = nullptr;
+    void            refreshDeviceCapabilities();     // re-read engine caps -> labels + dynamic srCombo_
+    QString         capsKey_;                        // change detector (1 Hz telemetry must not rebuild the combo)
 
     // ---- SpyServer remote-IQ server (SDR++/Airspy wire protocol) ----------
     // Off by default; binding is attempted only when the box is checked. The
