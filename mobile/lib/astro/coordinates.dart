@@ -100,3 +100,30 @@ AzEl azElAt(Sgp4 propagator, DateTime t, Station station) {
   final statEcef = ecefFromGeodetic(station);
   return ecefToAzEl(satEcef, statEcef, station);
 }
+
+/// 光速（km/s），用于把径向速度换算成多普勒频移。
+const double kSpeedOfLightKmS = 299792.458;
+
+/// 斜距变化率（径向速度，km/s）：正 = 卫星正在远离测站。
+///
+/// 用途：一次性预测多普勒建议值 f_d ≈ -f0 * v_r / c。
+///
+/// 诚实性说明：
+///   * 这是「调用瞬间」单点传播得到的径向速度，用于把接收机中心频率
+///     一次性偏置到预测载频附近；它**不是**实时多普勒跟踪——移动端没有
+///     随时间连续传播并不断改频的轨道 loop，过境中多普勒会持续漂移，
+///     本值只在捕获那一刻有效。
+///   * 忽略测站随地球自转的 ECEF 速度（量级 ~0.4 km/s，对 LEO 多普勒
+///     为二阶小量），注释在此明示，不假装高精度。
+double rangeRateAt(Sgp4 propagator, DateTime t, Station station) {
+  final pv = propagator.propagate(t);
+  final gst = Sgp4.gmst(Sgp4.julianDate(t.toUtc()));
+  final satEcef = temeToEcef(pv.r, gst);
+  final velEcef = temeToEcef(pv.v, gst);
+  final statEcef = ecefFromGeodetic(station);
+  final rho = satEcef - statEcef;
+  final range = rho.norm;
+  if (range <= 0.0) return 0.0;
+  return (velEcef.x * rho.x + velEcef.y * rho.y + velEcef.z * rho.z) /
+      range;
+}

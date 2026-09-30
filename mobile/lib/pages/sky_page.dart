@@ -6,8 +6,11 @@ import 'package:mbdsdr_mobile/app/tokens.dart';
 import 'package:mbdsdr_mobile/astro/passes.dart';
 import 'package:mbdsdr_mobile/astro/tle.dart';
 import 'package:mbdsdr_mobile/models/satellite.dart';
+import 'package:mbdsdr_mobile/models/satellite_downlink.dart';
 import 'package:mbdsdr_mobile/services/location_service.dart';
 import 'package:mbdsdr_mobile/services/orientation_service.dart';
+import 'package:mbdsdr_mobile/services/radio_controller.dart';
+import 'package:mbdsdr_mobile/services/satellite_capture.dart';
 import 'package:mbdsdr_mobile/services/tle_client.dart';
 import 'package:mbdsdr_mobile/widgets/compass_dial.dart';
 
@@ -19,6 +22,7 @@ class SkyController extends ChangeNotifier {
     required LocationService locationService,
     required OrientationService orientationService,
     this.manualStation,
+    this.radio,
     DateTime Function()? clock,
   })  : _tle = tleClient,
         _loc = locationService,
@@ -32,6 +36,10 @@ class SkyController extends ChangeNotifier {
 
   /// 外壳手填本站位置（非 null 时跳过定位）。
   final Station? manualStation;
+
+  /// 可选射频接口：非 null 时过境行可「捕获」真实调谐。
+  /// 测试注入 fake；缺省（null）时捕获入口退化为诚实提示。
+  final RadioApi? radio;
 
   StreamSubscription<Station>? _locSub;
   StreamSubscription<DeviceOrientation>? _oriSub;
@@ -89,6 +97,33 @@ class SkyController extends ChangeNotifier {
   void select(String name) {
     _selectedName = name;
     notifyListeners();
+  }
+
+  /// 该过境是否有真实下行频率（用于决定「捕获」按钮是否可用）。
+  bool hasDownlink(Pass p) => satelliteDownlink(p.catalogNumber) != null;
+
+  /// 捕获某过境：按真实下行频率 + 一次性预测多普勒调谐。
+  ///
+  /// 无射频接口 / 无下行频率时诚实返回不可用结果，绝不猜频率。
+  Future<CaptureOutcome> capture(Pass p) async {
+    final r = radio;
+    if (r == null) {
+      return const CaptureUnavailable(reason: '接收机未连接，无法捕获');
+    }
+    Tle? tle;
+    for (final t in _tles) {
+      if (t.catalogNumber == p.catalogNumber) {
+        tle = t;
+        break;
+      }
+    }
+    return capturePass(
+      radio: r,
+      pass: p,
+      tle: tle,
+      station: _station,
+      now: _clock(),
+    );
   }
 
   void setGroup(TleGroup g) {
@@ -163,6 +198,7 @@ class SkyPage extends StatefulWidget {
     @visibleForTesting TleClient? tleClient,
     @visibleForTesting LocationService? locationService,
     @visibleForTesting OrientationService? orientationService,
+    this.radio,
     @visibleForTesting DateTime Function()? clock,
   })  : _tleClient = tleClient,
         _locationService = locationService,
@@ -173,6 +209,9 @@ class SkyPage extends StatefulWidget {
   final TleClient? _tleClient;
   final LocationService? _locationService;
   final OrientationService? _orientationService;
+
+  /// 真实/测试注入的射频接口：用于过境「捕获」。生产由外壳传入。
+  final RadioApi? radio;
   final DateTime Function()? _clock;
 
   @override
@@ -194,6 +233,7 @@ class _SkyPageState extends State<SkyPage> {
       orientationService:
           widget._orientationService ?? ImuOrientationService(),
       manualStation: widget.manualStation,
+      radio: widget.radio,
       clock: widget._clock,
     );
     _c.start();
@@ -502,18 +542,45 @@ class _PassList extends StatelessWidget {
         final t = p.riseTime.toLocal();
         final hh = t.hour.toString().padLeft(2, '0');
         final mm = t.minute.toString().padLeft(2, '0');
+        final hasDl = controller.hasDownlink(p);
         return ListTile(
           dense: true,
-          leading: const Icon(Icons.flight, color: AppTokens.accent, size: AppTokens.iconSizeInlineLg),
+          leading: const Icon(Icons.flight,
+              color: AppTokens.accent, size: AppTokens.iconSizeInlineLg),
           title: Text(p.name, style: AppTokens.body),
           subtitle: Text(
             '$hh:$mm 升起 · 最高仰角 ${p.maxEl.toStringAsFixed(0)}° · '
             '持续 ${p.duration.inMinutes} 分 · 升起方位 ${p.riseAz.toStringAsFixed(0)}°',
             style: AppTokens.auxiliary,
           ),
+          // 有真实下行频率才可捕获；无频率者禁用并诚实提示。
+          trailing: hasDl
+              ? TextButton(
+                  onPressed: () => _onCapture(context, p),
+                  child: const Text('捕获'),
+                )
+              : const Tooltip(
+                  message: '无下行频率数据',
+                  child: Text(
+                    '无下行频率数据',
+                    style: AppTokens.auxiliary,
+                  ),
+                ),
           onTap: () => controller.select(p.name),
         );
       },
     );
+  }
+
+  Future<void> _onCapture(BuildContext context, Pass p) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final outcome = await controller.capture(p);
+    final String msg = switch (outcome) {
+      CaptureApplied() => outcome.describe(),
+      CaptureUnavailable() => outcome.reason,
+    };
+    messenger
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(msg, style: AppTokens.auxiliary)));
   }
 }
