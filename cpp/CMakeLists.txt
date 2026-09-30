@@ -447,6 +447,28 @@ target_include_directories(test_squelch_gate PRIVATE src)
 target_link_libraries(test_squelch_gate PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME squelch_gate COMMAND test_squelch_gate)
 
+# Audio-RMS-domain squelch auto-gate backing: real tracked noise floor signal +
+# the proven gate mute path. Engine-only, offline test source.
+add_executable(test_squelch_autogate tests/test_squelch_autogate.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_squelch_autogate PRIVATE src)
+target_link_libraries(test_squelch_autogate PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME squelch_autogate COMMAND test_squelch_autogate)
+set_tests_properties(squelch_autogate PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Offscreen MainWindow integration: AI manual gate annotation, scan-hit save
+# bookmark + jump, squelch auto-gate. Builds the full app minus main.cpp.
+add_executable(test_ui_integration tests/test_ui_integration.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_ui_integration PRIVATE src build/test_ui_integration_autogen/include)
+target_link_libraries(test_ui_integration PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME ui_integration COMMAND test_ui_integration)
+set_tests_properties(ui_integration PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # Unattended signal-triggered watch recording (detector + pre-roll + per-burst
 # WAV/JSON sidecar; NOT HARDWARE, fully synthesized).
 add_executable(test_watch_record tests/test_watch_record.cpp
@@ -599,3 +621,13 @@ message(STATUS "Target: mbdsdr (dynamic Qt6 linking -- system Qt6 is shared)")
 add_executable(ui_shot_wfm tests/ui_screenshot_wfm.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_wfm PRIVATE src build/ui_shot_wfm_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_wfm PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# Squelch auto-gate offscreen screenshot (not in ctest).
+add_executable(ui_shot_sqlauto tests/ui_screenshot_squelch_auto.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_sqlauto PRIVATE src build/ui_shot_sqlauto_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_sqlauto PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# Scan-hit save-bookmark offscreen screenshot (not in ctest).
+add_executable(ui_shot_scanbm tests/ui_screenshot_scan_bm.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_scanbm PRIVATE src build/ui_shot_scanbm_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_scanbm PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)

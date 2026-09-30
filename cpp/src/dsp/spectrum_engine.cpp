@@ -5,6 +5,7 @@
 #include "test_signal.h"
 #include "power_spectrum.h"
 #include "noise_blanker.h"
+#include "core/tokens.h"
 
 #include <QDebug>
 #include <QDateTime>
@@ -796,6 +797,31 @@ void SpectrumEngine::run() {
         // speaker path. The gated recorder receives the real, un-muted audio so
         // its pre-roll captures the true signal onset.
         const float rms = rmsDbfs(audio);
+        // Audio-RMS-domain noise floor (SAME domain as the Squelch threshold, so
+        // the auto gate = floor + margin is apples-to-apples). Asymmetric
+        // follower: track quieter backgrounds quickly, ignore loud transients
+        // (a real signal) so it never lifts the floor. Never reads the IQ
+        // total-power / per-bin canvas floor here -- that would cross domains.
+        if (!audioNfInit_) {
+            audioNfDbfs_ = rms;
+            audioNfInit_ = true;
+        } else if (rms < audioNfDbfs_) {
+            audioNfDbfs_ = (1.0 - tokens::kSquelchNfAlphaDown) * audioNfDbfs_
+                         + tokens::kSquelchNfAlphaDown * rms;
+        } else {
+            audioNfDbfs_ = (1.0 - tokens::kSquelchNfAlphaUp) * audioNfDbfs_
+                         + tokens::kSquelchNfAlphaUp * rms;
+        }
+        {
+            const qint64 nowNf = audioNfEmitClock_.elapsed();
+            if (audioNfLastEmitMs_ < 0) {
+                audioNfEmitClock_.start();
+                audioNfLastEmitMs_ = 0;
+            } else if (nowNf - audioNfLastEmitMs_ >= 200) {  // ~5 Hz
+                audioNfLastEmitMs_ = nowNf;
+                emit audioRmsNoiseFloor(static_cast<float>(audioNfDbfs_));
+            }
+        }
         const bool gate = squelch_.decide(audio, rms);
         // Detection/ANR/squelch/AGC all run on the legacy mono M. processWithGain
         // exposes the per-sample linear gain so the stereo M/S matrix below reuses
