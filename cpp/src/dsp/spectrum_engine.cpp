@@ -133,6 +133,10 @@ void SpectrumEngine::updateCapsSnapshotLocked() {
 
 void SpectrumEngine::onSetCenterFreq(double f) {
     QMutexLocker lk(&sourceMutex_);
+    // Honest guard: a non-positive / non-finite frequency would drive the
+    // tuner and every downstream mixer into NaN. Ignore it rather than emit
+    // a bogus tune (the caller keeps its previous value).
+    if (!(f > 0.0) || !std::isfinite(f)) return;
     if (source_) source_->setCenterFreq(f);
     // Tuning the receiver moves the SELECTED VFO with it (kept at offset 0),
     // exactly like the legacy single-channel receiver. Other VFOs keep their
@@ -144,6 +148,9 @@ void SpectrumEngine::onSetCenterFreq(double f) {
 }
 void SpectrumEngine::onSetSampleRate(double r) {
     QMutexLocker lk(&sourceMutex_);
+    // Guard against bogus rates (<=0 / NaN / absurdly high) reaching the
+    // channelizer and the rtl_tcp setSampleRate command.
+    if (!(r > 0.0) || !std::isfinite(r) || r > 32e6) return;
     if (source_) source_->setSampleRate(r);
     // Sample rate feeds every channelizer; rebuild all channels on next loop.
     vfoManager_.sourceRateChanged();
@@ -693,6 +700,14 @@ void SpectrumEngine::run() {
         zeroReadFrames_ = 0;
         if (got < iq.size()) iq.resize(got);
 
+        // Sanitize: a buggy source / bad block can deliver NaN/Inf which would
+        // poison every downstream log-magnitude and emit NaN frames to the UI.
+        // Clamp non-finite samples to 0 instead of propagating them.
+        for (auto& c : iq) {
+            if (!std::isfinite(c.real()) || !std::isfinite(c.imag()))
+                c = std::complex<float>(0.0f, 0.0f);
+        }
+
         noiseBlanker_.process(iq);
         frontend_.process(iq);
 
@@ -705,18 +720,24 @@ void SpectrumEngine::run() {
         if (iqTapRequested_.load())
             emit iqTapReady(iq, sr, source_->centerFreq());
 
-        // Spectrum (computed from an FFT-sized window of the block).
+        // Spectrum (computed from an FFT-sized window of the block). A real
+        // source may deliver a PARTIAL block at start-up / underflow, so round
+        // the window DOWN to the largest power of two -- otherwise a non-pow2
+        // size makes PowerSpectrum::process throw and terminate the engine.
         std::size_t specN = std::min<std::size_t>(n, iq.size());
-        std::vector<std::complex<float>> spec(iq.begin(), iq.begin() + specN);
+        while (specN > 1 && (specN & (specN - 1)) != 0) --specN;
         SpectrumFrame frame;
-        frame.dbfs.resize(specN);
-        powerSpectrum_.process(spec, frame.dbfs);
-        frame.centerFreqHz = source_->centerFreq();
-        frame.sampleRateHz = source_->sampleRate();
-        frame.fftSize = static_cast<int>(specN);
-        frame.isTestSignal = !real;
-        frame.sourceName = source_->name();
-        emit spectrumReady(frame);
+        if (specN >= 2) {
+            std::vector<std::complex<float>> spec(iq.begin(), iq.begin() + specN);
+            frame.dbfs.resize(specN);
+            powerSpectrum_.process(spec, frame.dbfs);
+            frame.centerFreqHz = source_->centerFreq();
+            frame.sampleRateHz = source_->sampleRate();
+            frame.fftSize = static_cast<int>(specN);
+            frame.isTestSignal = !real;
+            frame.sourceName = source_->name();
+            emit spectrumReady(frame);
+        }
 
         // Fan the source IQ out to every VFO channel (each with its own
         // channelizer + demod + resampler state), then take the SELECTED VFO's
