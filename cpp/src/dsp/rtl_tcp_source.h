@@ -38,12 +38,20 @@ public:
     // After an EOF/RST it flips false; the engine treats sustained zero
     // reads as a drop (see realSourceActive_ in SpectrumEngine).
     bool isConnected() const override;
+    // Real device identity read from the 12-byte "RTL0" handshake the daemon
+    // sends on accept (tuner type + gain count). No handshake parsed -> the
+    // ranges stay 0/未知 rather than guessed.
+    DeviceCapabilities capabilities() const override;
     // Human-readable reason of the last failed start() (socket error string,
     // "Connection refused", "timed out", ...). Empty when start() succeeded.
     QString lastError() const { return lastError_; }
 
 private:
     void sendCmd(quint8 cmd, quint32 arg);
+    // Read (and parse, if present) the 12-byte RTL0 dongle-info header the
+    // daemon sends immediately on accept. Tolerates a missing header (mock /
+    // legacy server) without stalling connect().
+    void readDongleInfo();
     void setFdBlocking(bool blocking);
     QString host_;
     quint16 port_;
@@ -53,6 +61,9 @@ private:
     double freqHz_ = 98.5e6;
     double rateHz_ = 2.4e6;
     double gainDb_ = 0.0;
+    int  tunerTypeRaw_ = -1;        // decoded from handshake; -1 = unknown
+    int  tunerGainCount_ = 0;       // decoded from handshake; 0 = not reported
+    bool headerKnown_ = false;      // parsed a real "RTL0" magic header
 };
 
 } // namespace dsp

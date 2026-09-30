@@ -119,6 +119,11 @@ double SpectrumEngine::centerFreq() const {
     return source_ ? source_->centerFreq() : 0.0;
 }
 
+DeviceCapabilities SpectrumEngine::sourceCapabilities() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return source_ ? source_->capabilities() : noDeviceCapabilities();
+}
+
 void SpectrumEngine::onSetCenterFreq(double f) {
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->setCenterFreq(f);

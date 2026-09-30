@@ -88,6 +88,12 @@ public slots:
     // Connect to an rtl_tcp server. Returns true on success. On failure the
     // source falls back to TestSignalSource (no fake data) and emits sourceChanged.
     bool connectRtlTcp(const QString& host, quint16 port);
+    // Real capabilities of the ACTIVE source (device name, tuning / sample-rate
+    // range) for the UI device-info panel and dynamic sample-rate combo. For the
+    // offline test-signal fallback this is the honest empty state (connected=
+    // false) -- the UI then shows "RTL-SDR 未连接". Thread-safe read of the
+    // active source's own accessor.
+    DeviceCapabilities sourceCapabilities() const;
     void setGatedRecordingEnabled(bool e);
     // ---- Unattended signal-triggered watch recording ----
     // Arm/disarm the watch (does not touch playback: listening is never

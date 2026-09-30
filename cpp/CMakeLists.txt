@@ -56,6 +56,7 @@ set(SOURCES
     src/dsp/peak_detector.cpp
     src/dsp/noise_blanker.cpp
     src/dsp/rtl_tcp_source.cpp
+    src/dsp/device_capabilities.cpp
     src/dsp/spyserver_server.cpp
     src/ui/bookmark_manager.cpp
     src/ui/shortcuts_dialog.cpp
@@ -123,6 +124,7 @@ set(HEADERS
     src/ui/spectrum_widget.h
     src/ui/spectrum_display.h
     src/dsp/source.h
+    src/dsp/device_capabilities.h
     src/dsp/fft.h
     src/dsp/iq_buffer.h
     src/dsp/power_spectrum.h
@@ -254,6 +256,12 @@ target_link_libraries(ui_shot_statusstrip PRIVATE Qt6::Widgets Qt6::Multimedia Q
 add_executable(ui_shot_skytime tests/ui_screenshot_sky_time.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_skytime PRIVATE src build/ui_shot_skytime_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_skytime PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# Device-info panel + dynamic sample-rate combo (real loopback RTL0 handshake).
+# Offscreen; not in ctest. Writes cpp/scratch/ui_devices.png + ui_devices_empty.png.
+add_executable(ui_shot_devices tests/ui_screenshot_devices.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_devices PRIVATE src build/ui_shot_devices_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_devices PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
 target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent ${CMAKE_DL_LIBS})
 
@@ -555,6 +563,23 @@ target_include_directories(test_ui_integration PRIVATE src build/test_ui_integra
 target_link_libraries(test_ui_integration PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 add_test(NAME ui_integration COMMAND test_ui_integration)
 set_tests_properties(ui_integration PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Device capability readback: rtl_tcp RTL0 handshake -> real tuner identity /
+# driver-known ranges, dynamic sample-rate options, honest no-device state.
+add_executable(test_device_capabilities tests/test_device_capabilities.cpp
+    src/dsp/device_capabilities.cpp)
+target_include_directories(test_device_capabilities PRIVATE src)
+target_link_libraries(test_device_capabilities PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME device_capabilities COMMAND test_device_capabilities)
+
+# Offscreen device-info panel + dynamic sample-rate combo: honest empty state,
+# real loopback RTL0 handshake -> populated combo, device pull -> back to empty.
+# Built but NOT in ctest yet: the offscreen MainWindow starves the engine's
+# sourceMutex_ under processEvents (the unit coverage lives in
+# test_device_capabilities; the visual check is ui_shot_devices).
+add_executable(test_device_ui tests/test_device_ui.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_device_ui PRIVATE src build/test_device_ui_autogen/include)
+target_link_libraries(test_device_ui PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
 # Unattended signal-triggered watch recording (detector + pre-roll + per-burst
 # WAV/JSON sidecar; NOT HARDWARE, fully synthesized).
