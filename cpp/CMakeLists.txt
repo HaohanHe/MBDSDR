@@ -111,6 +111,7 @@ set(SOURCES
     src/radio/cat_client.cpp
     src/radio/cw_keyer.cpp
     src/ui/radio_panel.cpp
+    src/ui/recording_library.cpp
 )
 
 set(HEADERS
@@ -168,6 +169,7 @@ set(HEADERS
     src/radio/cat_client.h
     src/radio/cw_keyer.h
     src/ui/radio_panel.h
+    src/ui/recording_library.h
 )
 
 add_executable(mbdsdr ${SOURCES} ${HEADERS})
@@ -216,6 +218,17 @@ target_link_libraries(ui_shot_measure PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::
 add_executable(ui_shot_hotplug tests/ui_screenshot_hotplug.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_hotplug PRIVATE src build/ui_shot_hotplug_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_hotplug PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# Recording-library panel screenshot (real WAV+sidecar in a throwaway dir, live
+# watch status). Offscreen; not in ctest.
+add_executable(ui_shot_reclib tests/ui_screenshot_rec_library.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_reclib PRIVATE src build/ui_shot_reclib_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_reclib PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# Enhanced status-strip screenshot (RSSI/SNR/squelch/GNSS readouts). Offscreen.
+add_executable(ui_shot_statusstrip tests/ui_screenshot_status_strip.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_statusstrip PRIVATE src build/ui_shot_statusstrip_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_statusstrip PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
 target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent ${CMAKE_DL_LIBS})
 
@@ -499,6 +512,15 @@ target_include_directories(test_watch_record PRIVATE src)
 target_link_libraries(test_watch_record PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME watch_record COMMAND test_watch_record)
 set_tests_properties(watch_record PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Recording-library core: scan real dir, sidecar metadata, empty state, delete,
+# WAV header probe, filename fallback. Pure QtCore -- no hardware / no audio.
+add_executable(test_recording_library tests/test_recording_library.cpp
+    src/ui/recording_library.cpp)
+target_include_directories(test_recording_library PRIVATE src)
+target_link_libraries(test_recording_library PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME recording_library COMMAND test_recording_library)
+set_tests_properties(recording_library PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Bare-C++ digital demod test (BPSK/QPSK round-trip through Costas + diff codec).
 add_executable(test_digital_demod tests/test_digital_demod.cpp

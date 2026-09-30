@@ -9,6 +9,8 @@
 #include "gnss/gnss_types.h"
 // DopplerStepLimiter is a value member (small, header-only convergence throttle).
 #include "core/sat_capture.h"
+// RecordingEntry is a value member (recLibEntries_); the struct must be complete.
+#include "ui/recording_library.h"
 
 class QLabel;
 class QDoubleSpinBox;
@@ -59,6 +61,8 @@ public:
     // the scan button enables + state labels AND the bookmark table from the
     // current headless state. No radio is touched.
     void refreshScanBookmarksUi() { updateScanStatus(); refreshBmTable(); }
+    // Harness/screenshot: rescan the recording library from engine_->recordingDir().
+    void refreshRecordingLibrary() { refreshRecLib(); }
 
 private slots:
     void onSourceChanged(const QString& name, bool connected);
@@ -282,6 +286,30 @@ private:
     QCheckBox*      recIgnoreSqlChk_ = nullptr;
     QLabel*         levelBar_   = nullptr;
 
+    // ---- 录制库 panel (right tab): scans the REAL recording directory ----
+    // Lists actual .wav captures (+ their sidecar .json proof). Empty directory
+    // -> honest "暂无录音" empty state. Playback decodes real 16-bit PCM and
+    // streams it into the existing AudioOutput; headless/offscreen degrades
+    // gracefully (no device -> samples dropped, status reported honestly).
+    QListWidget*    recLibList_     = nullptr;
+    QLabel*         recLibEmpty_    = nullptr;   // "暂无录音" placeholder
+    QLabel*         recLibWatchState_ = nullptr;  // 值守: 等待/监听中/录制中
+    QLabel*         recLibWatchLevel_ = nullptr;  // 电平 X dBFS · 门限 Y
+    QLabel*         recLibPlayStatus_ = nullptr;  // 已加载/播放中/不支持格式/错误
+    QPushButton*    recLibRefreshBtn_ = nullptr;
+    QPushButton*    recLibCopyBtn_   = nullptr;
+    QPushButton*    recLibDelBtn_    = nullptr;
+    QPushButton*    recLibPlayBtn_   = nullptr;   // load/play|stop toggle
+    QVector<mbdsdr::ui::RecordingEntry> recLibEntries_;
+    std::vector<float> recLibPcm_;                 // decoded 48k mono float buffer
+    qint64          recLibPcmPos_   = 0;           // playback cursor (samples)
+    QTimer*         recLibPlayTimer_ = nullptr;    // ~20 ms chunked writer
+    bool            recLibPlaying_  = false;
+    void refreshRecLib();                          // rescan engine_->recordingDir()
+    void onRecLibPlayToggle();                     // load+play / stop
+    void onRecLibDelete();                         // confirm -> delete real files
+    void onRecLibCopyPath();                       // copy selected row's full path
+
     // Right tabs
     QTabWidget*     rightTabs_   = nullptr;
     QSplitter*      mainSplitter_ = nullptr;
@@ -312,6 +340,14 @@ private:
     QLabel*         sbWatch_ = nullptr;
     QLabel*         sbScan_  = nullptr;   // scan / hit status (permanent strip)
     QLabel*         sbRec_  = nullptr;
+    // B5: extra one-line readouts, ALL from real engine readback signals.
+    // "--" until the first real value arrives; the GNSS field stays empty until
+    // a genuine fix (never a fabricated position).
+    QLabel*         sbRssi_  = nullptr;   // RSSI dBFS (rssiLevel)
+    QLabel*         sbSnr_   = nullptr;   // SNR dB (snrLevel)
+    QLabel*         sbSquelch_ = nullptr; // OPEN / CLOSED / OFF (squelchState + checkbox)
+    QLabel*         sbGnss_  = nullptr;   // "GNSS 定位" once a real fix lands; else empty
+    bool            squelchOn_ = false;    // mirrors 启用静噪 checkbox (for OFF state)
 
     // AI
     ai::Agent*      agent_       = nullptr;

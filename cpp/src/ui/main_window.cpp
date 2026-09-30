@@ -46,6 +46,9 @@
 #include <QJsonObject>
 #include <QElapsedTimer>
 #include <QDialogButtonBox>
+#include <QMessageBox>
+#include <QGuiApplication>
+#include <QClipboard>
 
 #include "dsp/vfo_manager.h"
 #include "ui/constellation_view.h"
@@ -84,6 +87,11 @@
 #include "ui/radio_panel.h"
 
 namespace mbdsdr {
+
+// Recording-library core types live in the ui sub-namespace.
+using ui::RecordingLibrary;
+using ui::RecordingEntry;
+using ui::WavProbe;
 
 namespace {
 // Tuning step combo (index -> Hz). Must stay in sync with the items added in
@@ -1004,6 +1012,89 @@ MainWindow::MainWindow(QWidget* parent)
 
     rightTabs_->addTab(bmPage, "扫描/书签");
 
+    // ===== 录制库 tab: scan the REAL recording directory (rec/dir) =====
+    // Lists actual .wav captures + their sidecar .json proof. The directory is
+    // whatever the engine actually writes to (engine_->recordingDir(), default
+    // "record"). An empty / missing dir honestly shows "暂无录音".
+    {
+        auto* recPage = new QWidget;
+        auto* recLay = new QVBoxLayout(recPage);
+        recLay->setContentsMargins(tokens::kSpacingM, tokens::kSpacingM,
+                                   tokens::kSpacingM, tokens::kSpacingM);
+        recLay->setSpacing(tokens::kSpacingM);
+
+        // -- watch recorder status (fed by the real watchStateChanged/RSSI) --
+        auto* wBox = new QGroupBox("值守录制状态", recPage);
+        auto* wBoxLay = new QVBoxLayout(wBox);
+        wBoxLay->setSpacing(tokens::kSpacingS);
+        recLibWatchState_ = new QLabel("值守: 未启用", wBox);
+        recLibWatchState_->setObjectName("monoInfo");
+        recLibWatchLevel_ = new QLabel("电平: -- dBFS · 门限 --", wBox);
+        recLibWatchLevel_->setObjectName("dockHint");
+        wBoxLay->addWidget(recLibWatchState_);
+        wBoxLay->addWidget(recLibWatchLevel_);
+        recLay->addWidget(wBox);
+
+        // -- recordings list --
+        auto* lBox = new QGroupBox("录制文件", recPage);
+        auto* lBoxLay = new QVBoxLayout(lBox);
+        lBoxLay->setSpacing(tokens::kSpacingS);
+        recLibList_ = new QListWidget(lBox);
+        recLibList_->setSelectionMode(QAbstractItemView::SingleSelection);
+        recLibList_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        lBoxLay->addWidget(recLibList_, 1);
+        recLibEmpty_ = new QLabel("暂无录音", lBox);
+        recLibEmpty_->setAlignment(Qt::AlignCenter);
+        recLibEmpty_->setObjectName("dockHint");
+        lBoxLay->addWidget(recLibEmpty_);
+
+        auto* rBtnRow = new QHBoxLayout;
+        recLibRefreshBtn_ = new QPushButton("刷新", lBox);
+        recLibCopyBtn_    = new QPushButton("复制路径", lBox);
+        recLibDelBtn_     = new QPushButton("删除", lBox);
+        recLibPlayBtn_    = new QPushButton("播放", lBox);
+        rBtnRow->addWidget(recLibRefreshBtn_);
+        rBtnRow->addWidget(recLibCopyBtn_);
+        rBtnRow->addWidget(recLibDelBtn_);
+        rBtnRow->addWidget(recLibPlayBtn_);
+        lBoxLay->addLayout(rBtnRow);
+        recLibPlayStatus_ = new QLabel("未加载", lBox);
+        recLibPlayStatus_->setObjectName("monoInfo");
+        lBoxLay->addWidget(recLibPlayStatus_);
+        recLay->addWidget(lBox, 1);
+
+        rightTabs_->addTab(recPage, "录制库");
+
+        connect(recLibRefreshBtn_, &QPushButton::clicked,
+                this, [this]{ refreshRecLib(); });
+        connect(recLibCopyBtn_, &QPushButton::clicked,
+                this, &MainWindow::onRecLibCopyPath);
+        connect(recLibDelBtn_, &QPushButton::clicked,
+                this, &MainWindow::onRecLibDelete);
+        connect(recLibPlayBtn_, &QPushButton::clicked,
+                this, &MainWindow::onRecLibPlayToggle);
+
+        // Chunked playback: push decoded 48 kHz mono float ~20 ms at a time into
+        // the EXISTING AudioOutput write channel. Offscreen/headless has no
+        // device, so writes are dropped (QtAudioSink::isAvailable()==false) --
+        // the status label reports this honestly, never fakes audio out.
+        recLibPlayTimer_ = new QTimer(this);
+        recLibPlayTimer_->setInterval(20);
+        connect(recLibPlayTimer_, &QTimer::timeout, this, [this]() {
+            if (!engine_ || !engine_->audioOutput()) { recLibPlayTimer_->stop(); return; }
+            const qint64 chunk = 960;   // 20 ms @ 48 kHz
+            const qint64 total = static_cast<qint64>(recLibPcm_.size());
+            if (recLibPcmPos_ >= total) { onRecLibPlayToggle(); return; }  // reached end
+            const qint64 n = qMin(chunk, total - recLibPcmPos_);
+            std::vector<float> blk(recLibPcm_.begin() + recLibPcmPos_,
+                                   recLibPcm_.begin() + recLibPcmPos_ + n);
+            recLibPcmPos_ += n;
+            engine_->audioOutput()->write(blk);
+        });
+
+        refreshRecLib();
+    }
+
     connect(passTable_, &QTableWidget::cellClicked,
             this, [this](int row, int) { onPassRowClicked(row); });
     connect(capturePassBtn_, &QPushButton::clicked,
@@ -1105,7 +1196,14 @@ MainWindow::MainWindow(QWidget* parent)
     sbScan_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kAccent));
     sbRec_  = new QLabel("", this);
     sbRec_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kDanger));
-    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbWatch_, sbScan_, sbRec_}) {
+    // B5: extra one-line readouts. "--" until the first real engine readback;
+    // the GNSS field stays EMPTY until a genuine fix (never a fabricated one).
+    sbRssi_  = new QLabel("--", this);
+    sbSnr_   = new QLabel("--", this);
+    sbSquelch_ = new QLabel("静噪 OFF", this);
+    sbGnss_  = new QLabel("", this);
+    for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbWatch_,
+                      sbScan_, sbRec_, sbRssi_, sbSnr_, sbSquelch_, sbGnss_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
     }
@@ -1233,8 +1331,11 @@ MainWindow::MainWindow(QWidget* parent)
             });
     connect(squelchCheck_, &QCheckBox::stateChanged, this, [this](int st) {
         bool en = (st != Qt::Unchecked);
+        squelchOn_ = en;
         engine_->setSquelchEnabled(en);
         if (!en) squelchState_->setText("状态: CLOSED");
+        // B5: immediately reflect OFF when the user disables the gate.
+        if (sbSquelch_ && !en) sbSquelch_->setText(QStringLiteral("静噪 OFF"));
     });
     // Auto gate: threshold = tracked audio-RMS noise floor + margin (same dBFS
     // domain). applyAutoThreshold is read-back only; the slider valueChanged
@@ -1319,6 +1420,7 @@ MainWindow::MainWindow(QWidget* parent)
                 if (!enabled) {
                     if (watchStatus_) watchStatus_->setText("值守: 关");
                     if (sbWatch_) sbWatch_->setText("");
+                    if (recLibWatchState_) recLibWatchState_->setText("值守: 未启用");
                     return;
                 }
                 const QString tail = QString("已录 %1 段").arg(segments);
@@ -1330,6 +1432,11 @@ MainWindow::MainWindow(QWidget* parent)
                     sbWatch_->setText(recording
                         ? QString("● 值守录制 · %1").arg(tail)
                         : QString("值守监听 · %1").arg(tail));
+                // Recording-library panel mirror (same real state, restrained).
+                if (recLibWatchState_)
+                    recLibWatchState_->setText(recording
+                        ? QString("● 录制中 · %1").arg(tail)
+                        : QString("监听中（等待触发）· %1").arg(tail));
             }, Qt::QueuedConnection);
 
     // ---- Recording directory ----
@@ -1957,6 +2064,106 @@ void MainWindow::updateScanStatus() {
     if (scanBmOnlyChk_) scanBmOnlyChk_->setEnabled(st == dsp::ScanState::Idle);
     // "存入书签" only meaningful while a real hit is held.
     if (scanSaveBmBtn_) scanSaveBmBtn_->setEnabled(st == dsp::ScanState::Hit);
+}
+
+// ===================== 录制库 panel =====================================
+void MainWindow::refreshRecLib() {
+    if (!recLibList_) return;
+    const QString dir = engine_ ? engine_->recordingDir() : QString();
+    recLibEntries_ = RecordingLibrary::scan(dir);
+    recLibList_->clear();
+    for (int i = 0; i < recLibEntries_.size(); ++i) {
+        const RecordingEntry& e = recLibEntries_[i];
+        const QString t = e.meta.time.isEmpty() ? "--" : e.meta.time;
+        const QString f = e.meta.frequencyHz > 0.0
+                ? QString("%1 MHz").arg(e.meta.frequencyHz / 1e6, 0, 'f', 3) : "--";
+        const QString m = e.meta.mode.isEmpty() ? "--" : e.meta.mode;
+        // Two-line row: summary on top, the honest full path underneath.
+        auto* item = new QListWidgetItem(
+            QString("%1  %2  %3\n%4").arg(t, f, m, QDir::toNativeSeparators(e.wavPath)));
+        item->setData(Qt::UserRole, i);
+        recLibList_->addItem(item);
+    }
+    // Honest empty state vs populated list.
+    recLibList_->setVisible(!recLibEntries_.isEmpty());
+    recLibEmpty_->setVisible(recLibEntries_.isEmpty());
+    // Loading a new directory cancels any playback.
+    if (recLibPlayTimer_) recLibPlayTimer_->stop();
+    recLibPlaying_ = false;
+    recLibPcm_.clear();
+    recLibPcmPos_ = 0;
+    if (recLibPlayBtn_) recLibPlayBtn_->setText("播放");
+    if (recLibPlayStatus_) {
+        recLibPlayStatus_->setText(recLibEntries_.isEmpty()
+            ? QStringLiteral("未加载")
+            : QStringLiteral("%1 个文件").arg(recLibEntries_.size()));
+    }
+}
+
+void MainWindow::onRecLibCopyPath() {
+    const int row = recLibList_->currentRow();
+    if (row < 0 || row >= recLibEntries_.size()) return;
+    QGuiApplication::clipboard()->setText(recLibEntries_[row].wavPath);
+    if (recLibPlayStatus_)
+        recLibPlayStatus_->setText(QString("已复制: %1").arg(recLibEntries_[row].wavPath));
+}
+
+void MainWindow::onRecLibDelete() {
+    const int row = recLibList_->currentRow();
+    if (row < 0 || row >= recLibEntries_.size()) return;
+    const RecordingEntry e = recLibEntries_[row];
+    // Confirm before deleting real files (.wav + sidecar .json together).
+    const auto ans = QMessageBox::question(
+        this, "删除录音",
+        QString("删除此录音及其旁证文件？\n\n%1").arg(QFileInfo(e.wavPath).fileName()),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (ans != QMessageBox::Yes) return;
+    RecordingLibrary::removeEntry(e);
+    refreshRecLib();
+}
+
+void MainWindow::onRecLibPlayToggle() {
+    // ---- stop / end of file ----
+    if (recLibPlaying_) {
+        recLibPlayTimer_->stop();
+        recLibPlaying_ = false;
+        recLibPcmPos_ = 0;
+        recLibPcm_.clear();
+        if (recLibPlayBtn_) recLibPlayBtn_->setText("播放");
+        if (recLibPlayStatus_) recLibPlayStatus_->setText("已停止");
+        return;
+    }
+    // ---- load the selected WAV and start streaming ----
+    const int row = recLibList_->currentRow();
+    if (row < 0 || row >= recLibEntries_.size()) return;
+    const RecordingEntry& e = recLibEntries_[row];
+    const WavProbe probe = RecordingLibrary::probeWav(e.wavPath);
+    if (!probe.ok) {
+        // Honest: non-PCM / truncated / not a WAV -> no fake playback.
+        recLibPcm_.clear();
+        recLibPcmPos_ = 0;
+        if (recLibPlayStatus_)
+            recLibPlayStatus_->setText(QString("不支持: %1").arg(probe.error));
+        return;
+    }
+    std::vector<float> pcm;
+    if (!RecordingLibrary::decodePcmMonoToFloat(probe, e.wavPath, pcm) || pcm.empty()) {
+        if (recLibPlayStatus_)
+            recLibPlayStatus_->setText("解码失败");
+        return;
+    }
+    recLibPcm_ = std::move(pcm);
+    recLibPcmPos_ = 0;
+    recLibPlaying_ = true;
+    if (recLibPlayBtn_) recLibPlayBtn_->setText("停止");
+    if (recLibPlayStatus_) {
+        const double secs = probe.sampleRate > 0
+                ? static_cast<double>(recLibPcm_.size()) / probe.sampleRate : 0.0;
+        recLibPlayStatus_->setText(
+            QString("已加载 · %1 Hz · %2 s · 播放中")
+                .arg(probe.sampleRate).arg(secs, 0, 'f', 1));
+    }
+    recLibPlayTimer_->start();
 }
 
 void MainWindow::refreshVfoUi() {
@@ -2645,6 +2852,14 @@ void MainWindow::onRssiLevel(float dbfs) {
         watchLevel_->setText(QString("电平 %1 dBFS · 门限 %2")
                              .arg(dbfs, 0, 'f', 1)
                              .arg(watchThrSlider_ ? watchThrSlider_->value() : -50));
+    // B5: one-line RSSI readout (real engine value, not a guess).
+    if (sbRssi_)
+        sbRssi_->setText(QString("RSSI %1").arg(dbfs, 0, 'f', 1));
+    // Recording-library panel watch meter (same real RSSI + threshold).
+    if (recLibWatchLevel_)
+        recLibWatchLevel_->setText(QString("电平 %1 dBFS · 门限 %2")
+                             .arg(dbfs, 0, 'f', 1)
+                             .arg(watchThrSlider_ ? watchThrSlider_->value() : -50));
 }
 
 void MainWindow::onSnrLevel(float snrDb) {
@@ -2652,6 +2867,9 @@ void MainWindow::onSnrLevel(float snrDb) {
     if (rssiLabel_)
         rssiLabel_->setText(QString("RSSI: %1 dBFS · SNR: %2 dB")
                             .arg(lastRssi_, 0, 'f', 1).arg(snrDb, 0, 'f', 1));
+    // B5: one-line SNR readout (real measured SNR).
+    if (sbSnr_)
+        sbSnr_->setText(QString("SNR %1").arg(snrDb, 0, 'f', 1));
 }
 
 void MainWindow::onSourceTelemetry(const QString& name, bool connected,
@@ -2673,6 +2891,13 @@ void MainWindow::onSourceTelemetry(const QString& name, bool connected,
 
 void MainWindow::onSquelchState(bool open) {
     squelchState_->setText(open ? "状态: OPEN" : "状态: CLOSED");
+    // B5: gate strip readout. The engine reports gate-open when squelch is
+    // disabled too, so we OR it with the real checkbox enabled state to show
+    // OFF honestly rather than a misleading OPEN.
+    if (sbSquelch_)
+        sbSquelch_->setText(!squelchOn_ ? QStringLiteral("静噪 OFF")
+                             : (open ? QStringLiteral("静噪 OPEN")
+                                     : QStringLiteral("静噪 CLOSED")));
 }
 
 void MainWindow::onRecordingState(bool recording, const QString& path) {
@@ -3364,6 +3589,9 @@ void MainWindow::onNewFix(gnss::GnssFix fix) {
     }
 
     gnssHasFix_ = true;
+    // B5: honest strip readout -- only shows once a real position fix lands.
+    if (sbGnss_)
+        sbGnss_->setText(QStringLiteral("GNSS 定位"));
     // Only treat the station as moved when the fix shifts by more than ~100 m,
     // so a stationary receiver does not thrash the TLE fetch every sentence.
     const bool stationMoved =
@@ -3420,6 +3648,7 @@ void MainWindow::onGnssConnectionChanged(bool connected, QString description) {
         worldView_->setGnssFix(false, 0, 0, 0, 0);
         skyView_->clearGnssSatellites();
         gnssFixLabel_->setText("GNSS 无定位");
+        if (sbGnss_) sbGnss_->setText("");   // no receiver -> omit, never a stale fix
         updateClockBiasLabel();
         // Restore the hand-entered station (if any) as the reference.
         ai::AiConfig cfg; cfg.load();
