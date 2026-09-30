@@ -20,6 +20,7 @@
 #include <QtTest/QtTest>
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -42,6 +43,7 @@
 #include "ui/main_window.h"
 #include "ui/bookmark_manager.h"
 #include "ai/agent.h"
+#include "ai/ai_session_store.h"
 #include "dsp/frequency_scanner.h"
 #include "dsp/spectrum_engine.h"
 
@@ -54,6 +56,8 @@ private:
 private slots:
     void initTestCase();
     void aiManualToggleWiresAgentAndAnnotatesGated();
+    void aiStreamingPartialReplacesTransientNoDup();
+    void aiSessionSwitcherCrud();
     void scanHitSaveBookmarkThenJump();
     void squelchAutoFollowsSameDomainFloor();
     void vfoCopyDuplicatesSourceParams();
@@ -71,6 +75,9 @@ void TestUiIntegration::initTestCase() {
     // Redirect all QSettings("MBDSDR","MBDSDR") storage to the throwaway dir so
     // the tests never pollute the real user config / bookmarks.
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, tmpSettingsDir);
+    // Redirect the AI session store to a throwaway dir too.
+    qputenv("MBDSDR_AI_SESSIONS_DIR",
+            (tmpSettingsDir + "/ai_sessions").toUtf8());
 }
 
 void TestUiIntegration::aiManualToggleWiresAgentAndAnnotatesGated() {
@@ -109,6 +116,84 @@ void TestUiIntegration::aiManualToggleWiresAgentAndAnnotatesGated() {
                               Q_ARG(QString, "频率=100MHz 模式=NFM"));
     QVERIFY2(chat->toPlainText().contains("[调用工具: get_status"),
              "executed tool keeps the original 调用工具 wording");
+}
+
+// Streaming: partial updates must REPLACE the single transient line; the final
+// reply must appear exactly once and the partial text must not linger.
+void TestUiIntegration::aiStreamingPartialReplacesTransientNoDup() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+
+    auto* agent = win.findChild<ai::Agent*>();
+    auto* chat = win.findChild<QPlainTextEdit*>("aiChat");
+    QVERIFY(agent);
+    QVERIFY(chat);
+
+    // First partial: transient line shows it.
+    QMetaObject::invokeMethod(agent, "partialReady", Qt::DirectConnection,
+                              Q_ARG(QString, QString::fromUtf8("部分思考")));
+    QVERIFY2(chat->toPlainText().contains(QString::fromUtf8("部分思考")),
+             "first partial must render in the transient line");
+    // Second partial REPLACES the transient (the shorter earlier text is gone).
+    QMetaObject::invokeMethod(agent, "partialReady", Qt::DirectConnection,
+                              Q_ARG(QString, QString::fromUtf8("部分思考：已经调谐到 98.5")));
+    QString mid = chat->toPlainText();
+    QVERIFY2(mid.contains(QString::fromUtf8("已经调谐到 98.5")),
+             "second partial must be rendered");
+    QVERIFY2(!mid.contains(QString::fromUtf8("AI: 部分思考\n")),
+             "the earlier partial must have been replaced, not appended");
+
+    // Final reply: transient cleared, final persisted exactly once.
+    QMetaObject::invokeMethod(agent, "responseReady", Qt::DirectConnection,
+                              Q_ARG(QString, QString::fromUtf8("最终回复完整内容XYZ")));
+    QString text = chat->toPlainText();
+    int count = 0, idx = 0;
+    while ((idx = text.indexOf(QString::fromUtf8("最终回复完整内容XYZ"), idx)) >= 0) {
+        ++count;
+        idx += 1;
+    }
+    QCOMPARE(count, 1);
+    QVERIFY2(!text.contains(QString::fromUtf8("部分思考")),
+             "transient partial text must be gone after the final reply");
+}
+
+// Session switcher: new / rename / delete round-trips through the store and
+// the combo, switching sessions shows the right persisted messages.
+void TestUiIntegration::aiSessionSwitcherCrud() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+
+    auto* combo = win.findChild<QComboBox*>("aiSessionCombo");
+    auto* newBtn = win.findChild<QPushButton*>("aiNewSessionBtn");
+    auto* delBtn = win.findChild<QPushButton*>("aiDeleteSessionBtn");
+    auto* chat = win.findChild<QPlainTextEdit*>("aiChat");
+    auto* store = win.aiSessionStore();
+    QVERIFY(combo && newBtn && delBtn && chat && store);
+
+    QCOMPARE(combo->count(), 1);                 // default one empty session
+
+    // New session -> combo grows, current switches to it.
+    newBtn->click();
+    QCOMPARE(combo->count(), 2);
+    QCOMPARE(store->currentId(), combo->currentData().toString());
+
+    // Drop a message into the current (new) session, then switch back to the
+    // first: the chat must show the FIRST session's (empty) view, not the new
+    // session's message.
+    store->appendMessage(store->currentId(),
+                         ai::SessionMessage{"user", QString::fromUtf8("在新会话里")});
+    QVERIFY(chat->toPlainText().contains(QString::fromUtf8("在新会话里")));
+
+    combo->setCurrentIndex(0);
+    QApplication::processEvents();
+    QVERIFY2(!chat->toPlainText().contains(QString::fromUtf8("在新会话里")),
+             "switching sessions must show the selected session's messages only");
+
+    // Delete the current (first) session: count drops back to 1.
+    delBtn->click();
+    QCOMPARE(combo->count(), 1);
 }
 
 void TestUiIntegration::scanHitSaveBookmarkThenJump() {

@@ -37,7 +37,7 @@ namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; str
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class WeatherSatPanel; }
-namespace ai   { class Agent; }
+namespace ai   { class Agent; class AiSessionStore; }
 namespace gnss { class GnssReceiver; struct GnssFix; }
 
 class MainWindow : public QMainWindow {
@@ -53,6 +53,8 @@ public:
     // already owns so offscreen tests can drive scan/bookmark state deterministically.
     dsp::FrequencyScanner* scanner() { return scanner_; }
     ui::BookmarkManager* bookmarkManager() { return bookmarkManager_; }
+    // AI multi-session store (harness/screenshot drive it offscreen).
+    ai::AiSessionStore* aiSessionStore() { return aiSessionStore_; }
     // Harness/programmatic refresh (offscreen screenshots / embedding): re-sync
     // the scan button enables + state labels AND the bookmark table from the
     // current headless state. No radio is touched.
@@ -313,10 +315,31 @@ private:
 
     // AI
     ai::Agent*      agent_       = nullptr;
+    ai::AiSessionStore* aiSessionStore_ = nullptr;
     QCheckBox*      aiManualCheck_ = nullptr;   // manual mode: AI suggests, never writes
     QPlainTextEdit* aiChat_      = nullptr;
     QLineEdit*      aiInput_     = nullptr;
     QLabel*         aiStatus_   = nullptr;
+    QComboBox*      aiSessionCombo_ = nullptr;  // session switcher
+    QPushButton*    aiNewSessionBtn_ = nullptr;
+    QPushButton*    aiRenameSessionBtn_ = nullptr;
+    QPushButton*    aiDeleteSessionBtn_ = nullptr;
+    QPushButton*    aiCompactCtxBtn_ = nullptr;
+
+    // Chat rendering model: persisted session messages + a single transient
+    // line. partialReady() overwrites the transient (never appends);
+    // responseReady() clears it and appends the final assistant message.
+    QString aiTransient_;            // current partial / "思考中…" text
+    QStringList aiToolNotes_;        // tool-call annotations shown for this turn
+    QString aiCurSessionId_;
+
+    void aiRenderChat();              // rebuild aiChat_ from store + notes + transient
+    void aiRefreshSessionCombo();
+    void onAiNewSession();
+    void onAiRenameSession();
+    void onAiDeleteSession();
+    void onAiSessionChanged(int idx);
+    void onAiCompactContext();
 
     void setControlsEnabled(bool hardwareConnected);
     void saveUiState();

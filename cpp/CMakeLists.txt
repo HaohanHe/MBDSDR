@@ -99,6 +99,8 @@ set(SOURCES
     src/ai/ai_config.cpp
     src/ai/agent_tools.cpp
     src/ai/agent.cpp
+    src/ai/ai_session_store.cpp
+    src/ai/ai_context.cpp
     src/tx/modulator.cpp
     src/tx/loopback_backend.cpp
     src/tx/tx_controller.cpp
@@ -343,7 +345,7 @@ add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
-    src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/agent.cpp src/ai/agent_tools.cpp src/ai/ai_config.cpp)
+    src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/agent.cpp src/ai/agent_tools.cpp src/ai/ai_config.cpp src/ai/ai_context.cpp)
 target_include_directories(test_ai_function_calling PRIVATE src)
 target_link_libraries(test_ai_function_calling PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME ai_function_calling COMMAND test_ai_function_calling)
@@ -575,8 +577,8 @@ add_test(NAME apt COMMAND test_apt)
 
 add_executable(test_agent tests/test_agent.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
-    src/ai/agent_tools.cpp src/ai/agent.cpp src/dsp/spectrum_engine.cpp
-    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
+    src/ai/agent_tools.cpp src/ai/agent.cpp src/ai/ai_context.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
@@ -588,6 +590,14 @@ add_executable(test_agent tests/test_agent.cpp
 target_include_directories(test_agent PRIVATE src)
 target_link_libraries(test_agent PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME agent COMMAND test_agent)
+
+# AI multi-session store (CRUD + JSON persistence) + pure context compaction.
+# No network / no GUI: links only the two new AI translation units.
+add_executable(test_ai_session tests/test_ai_session.cpp
+    src/ai/ai_session_store.cpp src/ai/ai_context.cpp)
+target_include_directories(test_ai_session PRIVATE src)
+target_link_libraries(test_ai_session PRIVATE Qt6::Test Qt6::Core Qt6::Network)
+add_test(NAME ai_session COMMAND test_ai_session)
 
 # GUI-dependent tests run on the offscreen platform so ctest works on
 # headless/CI machines without a display.
@@ -656,3 +666,8 @@ target_link_libraries(ui_shot_scanbm PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::N
 add_executable(ui_shot_satcap tests/ui_screenshot_sat_capture.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_satcap PRIVATE src build/ui_shot_satcap_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_satcap PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# AI multi-session + 已摘要 annotation + streaming transient offscreen shot.
+add_executable(ui_shot_ai tests/ui_screenshot_ai.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_ai PRIVATE src build/ui_shot_ai_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_ai PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)

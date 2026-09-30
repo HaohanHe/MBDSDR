@@ -42,6 +42,13 @@ public slots:
 signals:
     void chatFinished(const QString& text);
     void toolCalled(const QString& tool, const QString& result);
+    // Streaming: fired with the ACCUMULATED partial content on every SSE chunk
+    // (the UI replaces its single transient line with it). No network when the
+    // request is not streaming.
+    void partialReady(const QString& accumulated);
+    // Fired when the worker compacted old history into a summary entry, so the
+    // UI can annotate the chat with the restrained 〔已摘要〕 marker.
+    void contextCompacted(const QString& note);
 
 private:
     LLMClient* client_ = nullptr;   // created on worker thread

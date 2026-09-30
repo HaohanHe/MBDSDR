@@ -60,6 +60,8 @@
 #include "dsp/tle_client.h"
 #include "ai/agent.h"
 #include "ai/ai_config.h"
+#include "ai/ai_session_store.h"
+#include "ai/ai_context.h"
 #include "ui/sky_view.h"
 #include "ui/bookmark_manager.h"
 #include "dsp/frequency_scanner.h"
@@ -564,6 +566,7 @@ MainWindow::MainWindow(QWidget* parent)
     rightCard->setObjectName("panelCard");
     auto* rightLay = new QVBoxLayout(rightCard);
     rightTabs_ = new QTabWidget(rightCard);
+    rightTabs_->setObjectName("rightTabs");
     rightTabs_->setUsesScrollButtons(true);
     rightTabs_->setElideMode(Qt::ElideRight);
 
@@ -1013,6 +1016,35 @@ MainWindow::MainWindow(QWidget* parent)
     aiStatus_ = new QLabel("AI 助手将在这里接入（需在设置中配置 API Key）", aiPage);
     aiStatus_->setWordWrap(true);
     aiLay->addWidget(aiStatus_);
+
+    // ---- Multi-session switcher ----------------------------------------
+    // The store persists to AppDataLocation/ai_sessions (overridable by the
+    // MBDSDR_AI_SESSIONS_DIR env for tests/screenshots). First run creates
+    // exactly ONE empty session -- no seeded conversation.
+    aiSessionStore_ = new mbdsdr::ai::AiSessionStore(QString(), aiPage);
+    aiCurSessionId_ = aiSessionStore_->currentId();
+
+    auto* sessRow = new QHBoxLayout;
+    aiSessionCombo_ = new QComboBox(aiPage);
+    aiSessionCombo_->setObjectName("aiSessionCombo");
+    aiSessionCombo_->setMinimumWidth(120);
+    sessRow->addWidget(aiSessionCombo_, /*stretch=*/1);
+    aiNewSessionBtn_ = new QPushButton("新会话", aiPage);
+    aiNewSessionBtn_->setObjectName("aiNewSessionBtn");
+    sessRow->addWidget(aiNewSessionBtn_);
+    aiRenameSessionBtn_ = new QPushButton("重命名", aiPage);
+    aiRenameSessionBtn_->setObjectName("aiRenameSessionBtn");
+    sessRow->addWidget(aiRenameSessionBtn_);
+    aiDeleteSessionBtn_ = new QPushButton("删除", aiPage);
+    aiDeleteSessionBtn_->setObjectName("aiDeleteSessionBtn");
+    sessRow->addWidget(aiDeleteSessionBtn_);
+    aiLay->addLayout(sessRow);
+
+    aiCompactCtxBtn_ = new QPushButton("压缩上下文", aiPage);
+    aiCompactCtxBtn_->setObjectName("aiCompactCtxBtn");
+    aiCompactCtxBtn_->setToolTip("早期轮次超出上下文预算时会自动折叠为「已摘要」；也可手动触发。");
+    aiLay->addWidget(aiCompactCtxBtn_);
+
     // Manual-mode toggle: when checked, AI may only SUGGEST -- write tools
     // (tune/mode/bandwidth/record/scan) are gated by the backend and never
     // touch the radio. Initial state is wired after agent_ is constructed below
@@ -1530,32 +1562,69 @@ MainWindow::MainWindow(QWidget* parent)
     }
     connect(aiManualCheck_, &QCheckBox::toggled, this,
             [this](bool on) { agent_->setManualMode(on); });
+    // ---- Chat rendering: session messages + a SINGLE transient line --------
+    // partialReady() replaces the transient (never appends); responseReady()
+    // clears the transient + tool notes, appends the final assistant message to
+    // the persisted session, and re-renders -- so the final content shows up
+    // exactly once, even across many partial chunks.
     connect(agent_, &ai::Agent::responseReady, this, [this](const QString& t) {
-        aiChat_->appendPlainText("AI: " + t);
+        aiToolNotes_.clear();
+        aiTransient_.clear();
+        aiSessionStore_->appendMessage(aiCurSessionId_,
+            mbdsdr::ai::SessionMessage{"assistant", t});
+        aiRenderChat();
+    });
+    connect(agent_, &ai::Agent::partialReady, this, [this](const QString& acc) {
+        aiTransient_ = acc;          // replaces the previous transient, no dup
+        aiRenderChat();
+    });
+    connect(agent_, &ai::Agent::contextCompacted, this, [this](const QString& note) {
+        aiSessionStore_->appendMessage(aiCurSessionId_,
+            mbdsdr::ai::SessionMessage{"summary", note});
+        aiRenderChat();
     });
     connect(agent_, &ai::Agent::toolCalled, this, [this](const QString& tool, const QString& result) {
         // A gated (manual-mode) write tool comes back as
         // {"ok":false,"gated":true,"error":"手动模式：未执行 <tool>"}.
         // Annotate it RESTRAINED (a quiet inline note, not a loud sticker);
-        // an executed tool keeps the original "调用工具" wording.
+        // an executed tool keeps the original "调用工具" wording. These notes
+        // are transient for the current turn and cleared on the final reply.
         bool gated = false;
         const QJsonDocument doc = QJsonDocument::fromJson(result.toUtf8());
         if (doc.isObject() && doc.object().value("gated").toBool()) gated = true;
         if (gated) {
-            aiChat_->appendPlainText(
-                QString("[已拦截·手动模式: %1]").arg(tool));
+            aiToolNotes_.append(QString("[已拦截·手动模式: %1]").arg(tool));
         } else {
-            aiChat_->appendPlainText(QString("[调用工具: %1 — %2]").arg(tool, result));
+            aiToolNotes_.append(QString("[调用工具: %1 — %2]").arg(tool, result));
         }
+        aiRenderChat();
     });
     connect(sendBtn, &QPushButton::clicked, this, [this]() {
         QString t = aiInput_->text().trimmed();
         if (t.isEmpty()) return;
-        aiChat_->appendPlainText("You: " + t);
+        aiSessionStore_->appendMessage(aiCurSessionId_,
+            mbdsdr::ai::SessionMessage{"user", t});
+        aiToolNotes_.clear();
+        aiTransient_ = QString::fromUtf8("思考中…");
+        aiRenderChat();
         agent_->sendMessage(t);
         aiInput_->clear();
     });
     connect(aiInput_, &QLineEdit::returnPressed, sendBtn, &QPushButton::click);
+
+    // ---- Session management wiring ---------------------------------------
+    aiRefreshSessionCombo();
+    aiRenderChat();
+    connect(aiSessionCombo_, &QComboBox::currentIndexChanged,
+            this, &MainWindow::onAiSessionChanged);
+    connect(aiNewSessionBtn_, &QPushButton::clicked, this, &MainWindow::onAiNewSession);
+    connect(aiRenameSessionBtn_, &QPushButton::clicked, this, &MainWindow::onAiRenameSession);
+    connect(aiDeleteSessionBtn_, &QPushButton::clicked, this, &MainWindow::onAiDeleteSession);
+    connect(aiCompactCtxBtn_, &QPushButton::clicked, this, &MainWindow::onAiCompactContext);
+    connect(aiSessionStore_, &mbdsdr::ai::AiSessionStore::sessionsChanged,
+            this, [this]() { aiRefreshSessionCombo(); });
+    connect(aiSessionStore_, &mbdsdr::ai::AiSessionStore::currentSessionChanged,
+            this, [this]() { aiRenderChat(); });
 
     // ---- Keyboard tuning ----
     // Left/Right: nudge center frequency by currentStepHz_ (set in the freq
@@ -3422,6 +3491,113 @@ void MainWindow::copyClockBias() {
         "时钟偏差已复制（系统 UTC − GNSS UTC = " +
         QString::number(clockBiasSec_, 'f', 3) +
         " s）。本程序不修改系统时钟；真正校时需 root / CAP_SYS_TIME 特权。");
+}
+
+// ---- AI multi-session + context-compaction UI helpers -------------------
+
+void MainWindow::aiRenderChat() {
+    if (!aiChat_ || !aiSessionStore_) return;
+    aiChat_->clear();
+    const auto msgs = aiSessionStore_->messages(aiCurSessionId_);
+    for (const auto& m : msgs) {
+        if (m.role == QLatin1String("user")) {
+            aiChat_->appendPlainText("You: " + m.content);
+        } else if (m.role == QLatin1String("assistant")) {
+            aiChat_->appendPlainText("AI: " + m.content);
+        } else if (m.role == QLatin1String("summary")) {
+            // Restrained small annotation, not a loud sticker.
+            aiChat_->appendHtml(
+                QString("<div style='color:%1; font-size:9pt;'>〔已摘要〕 %2</div>")
+                    .arg(tokens::textRgba(tokens::kTextAlphaTertiary),
+                         m.content.toHtmlEscaped()));
+        }
+    }
+    for (const QString& note : aiToolNotes_)
+        aiChat_->appendPlainText(note);
+    if (!aiTransient_.isEmpty())
+        aiChat_->appendPlainText(QString("AI: %1 ▌").arg(aiTransient_));
+}
+
+void MainWindow::aiRefreshSessionCombo() {
+    if (!aiSessionCombo_ || !aiSessionStore_) return;
+    QSignalBlocker blk(aiSessionCombo_);
+    aiSessionCombo_->clear();
+    int sel = 0;
+    const auto list = aiSessionStore_->sessions();
+    for (int i = 0; i < list.size(); ++i) {
+        aiSessionCombo_->addItem(list[i].title, list[i].id);
+        if (list[i].id == aiCurSessionId_) sel = i;
+    }
+    aiSessionCombo_->setCurrentIndex(sel);
+}
+
+void MainWindow::onAiSessionChanged(int idx) {
+    if (!aiSessionCombo_ || idx < 0) return;
+    const QString id = aiSessionCombo_->itemData(idx).toString();
+    if (id.isEmpty() || id == aiCurSessionId_) return;
+    aiCurSessionId_ = id;
+    aiSessionStore_->setCurrent(id);
+    aiToolNotes_.clear();
+    aiTransient_.clear();
+    aiRenderChat();
+}
+
+void MainWindow::onAiNewSession() {
+    if (!aiSessionStore_) return;
+    aiCurSessionId_ = aiSessionStore_->createSession();
+    aiToolNotes_.clear();
+    aiTransient_.clear();
+    aiRefreshSessionCombo();
+    aiRenderChat();
+}
+
+void MainWindow::onAiRenameSession() {
+    if (!aiSessionStore_ || aiCurSessionId_.isEmpty()) return;
+    bool ok = false;
+    QString name = QInputDialog::getText(this,
+        QString::fromUtf8("重命名会话"), QString::fromUtf8("会话名称："),
+        QLineEdit::Normal,
+        aiSessionCombo_->currentText(), &ok);
+    if (!ok || name.trimmed().isEmpty()) return;
+    aiSessionStore_->renameSession(aiCurSessionId_, name.trimmed());
+    aiRefreshSessionCombo();
+}
+
+void MainWindow::onAiDeleteSession() {
+    if (!aiSessionStore_ || aiCurSessionId_.isEmpty()) return;
+    aiSessionStore_->deleteSession(aiCurSessionId_);
+    aiCurSessionId_ = aiSessionStore_->currentId();
+    aiToolNotes_.clear();
+    aiTransient_.clear();
+    aiRefreshSessionCombo();
+    aiRenderChat();
+}
+
+void MainWindow::onAiCompactContext() {
+    // Manual compaction: run the pure compaction over the current session's
+    // stored history (system prompt + recent rounds kept verbatim) and write
+    // the compacted list back, then render. Uses the rule-based summary when no
+    // LLM summary callback is wired from the UI thread (the worker thread does
+    // the real LLM summary on the next send).
+    if (!aiSessionStore_ || aiCurSessionId_.isEmpty()) return;
+    const QString systemPrompt =
+        QString::fromUtf8("你是 SDR 接收控制助手。可以调谐频率、切换解调模式、控制录制、扫描频段。回答简洁。");
+    QList<mbdsdr::ai::ChatMessage> hist;
+    for (const auto& m : aiSessionStore_->messages(aiCurSessionId_))
+        hist.append(mbdsdr::ai::ChatMessage{m.role, m.content});
+    auto out = mbdsdr::ai::compactContext(hist, systemPrompt);
+    // Strip the leading system message before persisting (the store never
+    // records a system entry; it only holds user/assistant/summary).
+    QList<mbdsdr::ai::SessionMessage> stored;
+    for (const auto& m : out.messages) {
+        if (m.role == QLatin1String("system")) continue;
+        stored.append(mbdsdr::ai::SessionMessage{m.role, m.content});
+    }
+    aiSessionStore_->setMessages(aiCurSessionId_, stored);
+    aiRenderChat();
+    if (out.didCompact)
+        aiStatus_->setText(QString::fromUtf8("已压缩上下文：折叠 %1 轮早期对话为「已摘要」")
+                               .arg(out.compressedRounds));
 }
 
 } // namespace mbdsdr
