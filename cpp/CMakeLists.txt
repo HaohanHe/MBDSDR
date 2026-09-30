@@ -57,6 +57,7 @@ set(SOURCES
     src/dsp/noise_blanker.cpp
     src/dsp/rtl_tcp_source.cpp
     src/dsp/device_capabilities.cpp
+    src/dsp/fcch_detector.cpp
     src/dsp/spyserver_server.cpp
     src/ui/bookmark_manager.cpp
     src/ui/shortcuts_dialog.cpp
@@ -571,6 +572,14 @@ add_executable(test_device_capabilities tests/test_device_capabilities.cpp
 target_include_directories(test_device_capabilities PRIVATE src)
 target_link_libraries(test_device_capabilities PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME device_capabilities COMMAND test_device_capabilities)
+
+# Offline GSM FCCH detector + clock-ppm estimator (NOT HARDWARE): synthetic
+# tone+noise IQ recovers the tone and the injected ppm; noise-only / too-short
+# honestly report not-detected.
+add_executable(test_fcch tests/test_fcch.cpp src/dsp/fcch_detector.cpp)
+target_include_directories(test_fcch PRIVATE src)
+target_link_libraries(test_fcch PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME fcch COMMAND test_fcch)
 
 # Offscreen device-info panel + dynamic sample-rate combo: honest empty state,
 # real loopback RTL0 handshake -> populated combo, device pull -> back to empty.

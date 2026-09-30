@@ -400,6 +400,12 @@ MainWindow::MainWindow(QWidget* parent)
     gainRow->addWidget(gainSlider_);
     gainRow->addWidget(gainValue_);
     gRxLay->addRow("增益", gainRow);
+    // RTL-SDR over rtl_tcp exposes only the tuner's overall gain index (the
+    // LNA/Mixer/VGA steps are internal accumulation in librtlsdr, not exposed
+    // per-stage). We honestly keep the single total-gain slider -- never fabricate
+    // segmented LNA/Mixer/VGA controls the link cannot set.
+    gainSlider_->setToolTip(QStringLiteral(
+        "RTL-SDR：总增益（驱动离散档吸附）。rtl_tcp 不暴露 LNA/Mixer/VGA 分段。"));
     demodCombo_ = new QComboBox(gRx);
     demodCombo_->setObjectName("demodCombo");
     demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW", "BPSK", "QPSK", "ADS-B"});
@@ -1832,18 +1838,31 @@ MainWindow::MainWindow(QWidget* parent)
 
     connect(connectBtn_, &QPushButton::clicked, this, [this]() {
         if (connectBtn_->text() == "连接") {
-            bool ok;
-            if (srcTypeCombo_->currentIndex() == 1) {
-                ok = engine_->connectRtlTcp(tcpHostEdit_->text().trimmed(),
-                                            static_cast<quint16>(tcpPortSpin_->value()));
-                statusBar()->showMessage(ok
-                    ? QString("已连接 rtl_tcp %1:%2").arg(tcpHostEdit_->text()).arg(tcpPortSpin_->value())
-                    : QString("rtl_tcp 连接失败：%1:%2（使用测试信号）")
-                        .arg(tcpHostEdit_->text()).arg(tcpPortSpin_->value()));
-            } else {
-                ok = engine_->tryConnectRtl();
-            }
-            connectBtn_->setText(ok ? "断开" : "连接");
+            const QString host = tcpHostEdit_->text().trimmed();
+            const quint16 port = static_cast<quint16>(tcpPortSpin_->value());
+            const bool rtlTcp = (srcTypeCombo_->currentIndex() == 1);
+            // Show "connecting" immediately (before the blocking socket call),
+            // then run the blocking connect on the next UI turn so the label
+            // actually paints. connectRtlTcp/tryConnectRtl report the REAL socket
+            // result; failures surface via onSourceError.
+            connectBtn_->setEnabled(false);
+            connectBtn_->setText(QStringLiteral("连接中…"));
+            statusBar()->showMessage(rtlTcp
+                ? QStringLiteral("正在连接 rtl_tcp %1:%2 …").arg(host).arg(port)
+                : QStringLiteral("正在探测本地 RTL-SDR 设备…"));
+            QTimer::singleShot(0, this, [this, host, port, rtlTcp]() {
+                bool ok;
+                if (rtlTcp) {
+                    ok = engine_->connectRtlTcp(host, port);
+                    statusBar()->showMessage(ok
+                        ? QStringLiteral("已连接 rtl_tcp %1:%2").arg(host).arg(port)
+                        : QStringLiteral("rtl_tcp 连接失败：%1:%2").arg(host).arg(port));
+                } else {
+                    ok = engine_->tryConnectRtl();
+                }
+                connectBtn_->setEnabled(true);
+                connectBtn_->setText(ok ? "断开" : "连接");
+            });
         } else {
             engine_->disconnectSource();
             connectBtn_->setText("连接");
