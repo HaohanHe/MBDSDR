@@ -20,6 +20,24 @@ namespace {
 inline double clampd(double v, double lo, double hi) {
     return std::min(std::max(v, lo), hi);
 }
+
+// --- dB axis auto-range tuning (instrument "auto scale") -------------------
+// Sliding window of real per-frame peaks (frame.dbfs max). 24 frames ~ 0.5 s
+// at the typical host rate, so a momentary blip cannot move the scale.
+constexpr int   kAutoWindowFrames   = 24;
+// Snap the desired ceiling to this coarse "sensitivity step" (dB), matching
+// the dB-grid cadence so ticks land on round numbers.
+constexpr float kAutoCeilSnapDb    = 10.0f;
+// Where the sliding peak should sit on the plot (0..1 from the bottom). We
+// aim for the upper ~80%: strong traces stop slamming the top border while
+// weak frames still get the scale pulled in around them.
+constexpr float kAutoTargetFrac    = 0.80f;
+// Anti-clip headroom: never let the target ceiling sit within this many dB of
+// the measured peak (which would fold the trace over the top edge).
+constexpr float kAutoPeakHeadroomDb = 4.0f;
+// Per-frame easing cap. Combined with a ~0.5s window this lands inside the
+// kAnimMedium1 (220 ms) feel: the scale glides instead of jumping.
+constexpr float kAutoEasePerFrameDb = 1.5f;
 } // namespace
 
 SpectrumDisplay::SpectrumDisplay(QWidget* parent)
@@ -239,6 +257,49 @@ void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
     const int bins = static_cast<int>(frame.dbfs.size());
     if (bins != bins_) allocateRing(bins);
 
+    // ---- dB axis auto-range: purely from the real sliding peak of dbfs ----
+    // No synthetic peak is invented; a test-signal frame drives this exactly
+    // like a hardware frame. The windowed peak decides the *target* ceiling;
+    // the on-screen ceiling then eases toward it by a bounded step so the grid
+    // and trace glide rather than jump.
+    {
+        float peak = -std::numeric_limits<float>::max();
+        for (const float v : frame_.dbfs) if (std::isfinite(v) && v > peak) peak = v;
+        peakWindow_.push_back(peak);
+        if (static_cast<int>(peakWindow_.size()) > kAutoWindowFrames)
+            peakWindow_.erase(peakWindow_.begin());
+
+        float goal = manualCeilDb_;
+        if (autoRangeOn_ && !peakWindow_.empty()) {
+            float pwin = -std::numeric_limits<float>::max();
+            for (const float v : peakWindow_) pwin = std::max(pwin, v);
+            if (std::isfinite(pwin)) {
+                // Place the peak at kAutoTargetFrac of the span above the floor.
+                float ceilDes = manualFloorDb_ + (pwin - manualFloorDb_) / kAutoTargetFrac;
+                // Snap to a coarse sensitivity step for calm, round-number ticks.
+                ceilDes = std::round(ceilDes / kAutoCeilSnapDb) * kAutoCeilSnapDb;
+                // Anti-clip: keep at least headroom above the real peak.
+                ceilDes = std::max(ceilDes, pwin + kAutoPeakHeadroomDb);
+                // Bounds: never above the manual top, never tighter than the
+                // spinbox's lowest allowed ceiling, and never above the floor.
+                ceilDes = static_cast<float>(clampd(ceilDes,
+                                                    tokens::kDbSpinUpperMin,
+                                                    tokens::kDbUpperDefault));
+                ceilDes = std::max(ceilDes, manualFloorDb_ + kAutoCeilSnapDb);
+                ceilTargetDb_ = ceilDes;
+                goal = ceilTargetDb_;
+            }
+        }
+        // Ease the on-screen ceiling toward the goal, one bounded step/frame.
+        const float diff = goal - dbCeilDb_;
+        const float step = static_cast<float>(clampd(diff, -kAutoEasePerFrameDb,
+                                                     kAutoEasePerFrameDb));
+        dbCeilDb_ += step;
+        dbCeilDb_ = static_cast<float>(clampd(dbCeilDb_, manualFloorDb_,
+                                               tokens::kDbUpperDefault));
+        dbFloorDb_ = manualFloorDb_;   // floor is the stable manual reference
+    }
+
     if (maxHoldOn_) {
         if (static_cast<int>(maxHold_.size()) != bins)
             maxHold_.assign(bins, -std::numeric_limits<float>::max());
@@ -258,9 +319,32 @@ void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
 }
 
 void SpectrumDisplay::setDbRange(float minDb, float maxDb) {
-    dbFloorDb_ = minDb;
-    dbCeilDb_  = maxDb;
+    manualFloorDb_ = minDb;
+    manualCeilDb_  = maxDb;
+    if (!autoRangeOn_) {
+        dbFloorDb_ = minDb;
+        dbCeilDb_  = maxDb;
+    }
     update();
+}
+
+void SpectrumDisplay::setAutoRangeOn(bool on) {
+    autoRangeOn_ = on;
+    if (!on) {
+        // Release the scale back to the manual bounds immediately (no glide on
+        // user override). While off, setDbRange() owns both ends again.
+        dbFloorDb_ = manualFloorDb_;
+        dbCeilDb_  = manualCeilDb_;
+    }
+    update();
+}
+
+int SpectrumDisplay::waterfallCropLeftBin() const {
+    if (frameFsHz_ <= 0.0 || bins_ <= 0 || !haveFrame_) return 0;
+    double fLo, fHi, span; visibleWindow(fLo, fHi, span);
+    const double bandLo = frameF0Hz_ - frameFsHz_ / 2.0;
+    const int binF = static_cast<int>(std::floor((fLo - bandLo) / frameFsHz_ * bins_));
+    return std::clamp(binF, 0, bins_);
 }
 
 void SpectrumDisplay::setZoomFactor(double z) {

@@ -64,6 +64,13 @@ public slots:
     // Drive both the trace and the waterfall from the SAME real frame.
     void setSpectrum(const SpectrumFrame& frame);
     void setDbRange(float minDb, float maxDb);
+    // Instrument auto-range for the trace (and, by the shared dbToY / colourForDb
+    // mapping, the waterfall colour scale). Driven purely by the real sliding
+    // peak of frame.dbfs -- no synthetic signals. On = the ceiling eases toward
+    // a target that keeps the recent peak in the upper ~80% of the plot without
+    // clipping; off = manual setDbRange() bounds are used verbatim.
+    void setAutoRangeOn(bool on);
+    bool autoRangeOn() const { return autoRangeOn_; }
     void setZoomFactor(double z);
     void resetZoom();
     void setBandwidthHz(double hz) { dialBandwidthHz_ = hz; update(); }
@@ -105,6 +112,19 @@ public slots:
     int    yForDbfs(float db) const;                 // trace dBFS -> canvas y
     int    xForFrequency(double f) const;            // absolute Hz -> canvas x
     QString cursorReadoutText(const QPoint& pos) const; // hover F/dBFS/SNR lines
+
+    // ---- Offscreen-test-only read-outs (do not drive production) ----------
+    // Current animated trace ceiling / floor the dB grid + trace + waterfall
+    // colour map all share. Lets the auto-range suite assert smoothing without
+    // inspecting pixels.
+    float currentDbCeil() const { return dbCeilDb_; }
+    float currentDbFloor() const { return dbFloorDb_; }
+    // Ceiling the auto-range is easing toward (0 when off / at rest).
+    float autoCeilTarget() const { return autoRangeOn_ ? ceilTargetDb_ : dbCeilDb_; }
+    // Source history column the waterfall crop starts at, mirroring paintEvent's
+    // binF computation. Exposed so the contract suite can prove the waterfall
+    // crop walks the SAME visible window as the trace (no offset / jump).
+    int    waterfallCropLeftBin() const;
 
 signals:
     void frequencyChanged(double newFreqHz);
@@ -203,6 +223,15 @@ private:
 
     float  dbFloorDb_ = -100.0f;
     float  dbCeilDb_ = 0.0f;
+    // Manual bounds (last setDbRange). Auto-range only eases dbCeilDb_ toward a
+    // data-driven target; the floor stays pinned to the manual value so the
+    // noise-floor reference / grid origin never moves unexpectedly.
+    float  manualFloorDb_ = -100.0f;
+    float  manualCeilDb_  = 0.0f;
+    // ---- dB axis auto-range (real frame.dbfs sliding peak) ----------------
+    bool   autoRangeOn_ = true;
+    std::vector<float> peakWindow_;   // recent per-frame max dBFS (sliding)
+    float  ceilTargetDb_ = 0.0f;      // desired ceiling the eased value tracks
     // Real injected noise floor (NaN = baseline suppressed). Also drives the
     // cursor SNR read-out.
     float  noiseFloorDb_ = std::numeric_limits<float>::quiet_NaN();

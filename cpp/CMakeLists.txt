@@ -239,6 +239,19 @@ target_include_directories(test_engine_integration PRIVATE src)
 target_link_libraries(test_engine_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_integration COMMAND test_engine_integration)
 
+# Device hotplug event channel: drop detection, honest fallback, 2 s rtl_tcp
+# auto-reconnect, connect-failure reason (real TCP loopback, no mocks).
+add_executable(test_engine_hotplug tests/test_engine_hotplug.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_engine_hotplug PRIVATE src)
+target_link_libraries(test_engine_hotplug PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME engine_hotplug COMMAND test_engine_hotplug)
+
 # IAudioSink contract: MemoryAudioSink capture/volume/mute + engine injection.
 add_executable(test_audio_sink tests/test_audio_sink.cpp
     src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
@@ -281,6 +294,13 @@ add_executable(test_spectrum_display tests/test_spectrum_display.cpp
 target_include_directories(test_spectrum_display PRIVATE src)
 target_link_libraries(test_spectrum_display PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME spectrum_display COMMAND test_spectrum_display)
+
+# dB axis auto-range + drag-tune/waterfall alignment contract (offscreen).
+add_executable(test_spectrum_autorange tests/test_spectrum_autorange.cpp
+    src/ui/spectrum_display.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_spectrum_autorange PRIVATE src)
+target_link_libraries(test_spectrum_autorange PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME spectrum_autorange COMMAND test_spectrum_autorange)
 
 # AI integration test: SKIPs without MBDSDR_AI_KEY env (never FAILs offline).
 add_executable(test_ai_integration tests/test_ai_integration.cpp src/ai/llm_client.cpp src/ai/ai_config.cpp)
