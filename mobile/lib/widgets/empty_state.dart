@@ -63,13 +63,13 @@ class EmptyState extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(AppTokens.spacingL * 2),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
+          constraints: const BoxConstraints(maxWidth: AppTokens.emptyStateMaxWidth),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Icon(
                 icon,
-                size: 48,
+                size: AppTokens.iconSizeEmpty,
                 color: AppTokens.textAt(AppTokens.textAlphaFaint),
               ),
               const SizedBox(height: AppTokens.spacingL),

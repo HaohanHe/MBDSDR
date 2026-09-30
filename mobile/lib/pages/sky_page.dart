@@ -262,6 +262,7 @@ class _SkyPageState extends State<SkyPage> {
           lastUpdated: _c.lastUpdated,
         ),
         if (_c.error != null) _ErrorBanner(error: _c.error!, onRetry: _c.refresh),
+        // 顶部刷新指示：2px 发丝进度条，不抢视觉。
         if (_c.refreshing)
           const LinearProgressIndicator(minHeight: 2, color: AppTokens.accent),
         if (_c.selectedVisibility != null)
@@ -314,11 +315,11 @@ class _StatusBar extends StatelessWidget {
         border: Border(bottom: BorderSide(color: AppTokens.cardEdge)),
       ),
       child: Row(children: [
-        const Icon(Icons.schedule, size: 14, color: AppTokens.textSecondary),
+        const Icon(Icons.schedule, size: AppTokens.iconSizeInline, color: AppTokens.textSecondary),
         const SizedBox(width: AppTokens.spacingS),
         Text(timeText, style: AppTokens.mono),
         const Spacer(),
-        const Icon(Icons.place, size: 14, color: AppTokens.textSecondary),
+        const Icon(Icons.place, size: AppTokens.iconSizeInline, color: AppTokens.textSecondary),
         const SizedBox(width: AppTokens.spacingS),
         Flexible(
           child: Text(
@@ -386,7 +387,7 @@ class _ErrorBanner extends StatelessWidget {
       padding: const EdgeInsets.all(AppTokens.spacingM),
       decoration: AppTokens.cardDecoration(color: AppTokens.danger.withValues(alpha: 0.12)),
       child: Row(children: [
-        const Icon(Icons.cloud_off, color: AppTokens.danger, size: 18),
+        const Icon(Icons.cloud_off, color: AppTokens.danger, size: AppTokens.iconSizeInlineLg),
         const SizedBox(width: AppTokens.spacingM),
         Expanded(child: Text(error, style: AppTokens.body)),
         TextButton(onPressed: onRetry, child: const Text('重试')),
@@ -412,6 +413,7 @@ class _LocationEmpty extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(AppTokens.spacingL),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
+          // 定位空态插画图标（40px 略小于通用空态 48px，保持单栏内克制）。
           const Icon(Icons.location_off, color: AppTokens.warning, size: 40),
           const SizedBox(height: AppTokens.spacingL),
           Text(msg, style: AppTokens.body, textAlign: TextAlign.center),
@@ -502,7 +504,7 @@ class _PassList extends StatelessWidget {
         final mm = t.minute.toString().padLeft(2, '0');
         return ListTile(
           dense: true,
-          leading: const Icon(Icons.flight, color: AppTokens.accent, size: 18),
+          leading: const Icon(Icons.flight, color: AppTokens.accent, size: AppTokens.iconSizeInlineLg),
           title: Text(p.name, style: AppTokens.body),
           subtitle: Text(
             '$hh:$mm 升起 · 最高仰角 ${p.maxEl.toStringAsFixed(0)}° · '
