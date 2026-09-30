@@ -56,6 +56,7 @@ set(SOURCES
     src/dsp/peak_detector.cpp
     src/dsp/noise_blanker.cpp
     src/dsp/rtl_tcp_source.cpp
+    src/dsp/spyserver_server.cpp
     src/ui/bookmark_manager.cpp
     src/ui/shortcuts_dialog.cpp
     src/dsp/test_signal.cpp
@@ -127,6 +128,7 @@ set(HEADERS
     src/dsp/power_spectrum.h
     src/dsp/test_signal.h
     src/dsp/rtl_sdr_source.h
+    src/dsp/spyserver_server.h
     src/dsp/spectrum_engine.h
     src/dsp/iq_frontend.h
     src/dsp/channelizer.h
@@ -213,6 +215,11 @@ target_link_libraries(ui_shot_cst2 PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Net
 add_executable(ui_shot_narrow2 tests/ui_screenshot_narrow2.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_narrow2 PRIVATE src build/ui_shot_narrow2_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_narrow2 PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# SpyServer remote-IQ control, enabled state (offscreen; not in ctest).
+add_executable(ui_shot_spyserver tests/ui_screenshot_spyserver.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_spyserver PRIVATE src build/ui_shot_spyserver_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_spyserver PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
 # Focus-mode / restrained-badge screenshot (offscreen; not in ctest).
 add_executable(ui_shot_focus tests/ui_screenshot_focus.cpp ${SHOT_SRCS} ${HEADERS})
@@ -313,6 +320,20 @@ add_executable(test_engine_hotplug tests/test_engine_hotplug.cpp
 target_include_directories(test_engine_hotplug PRIVATE src)
 target_link_libraries(test_engine_hotplug PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_hotplug COMMAND test_engine_hotplug)
+
+# SpyServer (SDR++/Airspy) server: real loopback TCP self-connect over the
+# documented wire format -- handshake, SET_SETTING, real IQ push, stop-keep-alive.
+add_executable(test_spyserver_server tests/test_spyserver_server.cpp
+    src/dsp/spyserver_server.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_spyserver_server PRIVATE src)
+target_link_libraries(test_spyserver_server PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME spyserver_server COMMAND test_spyserver_server)
 
 # IAudioSink contract: MemoryAudioSink capture/volume/mute + engine injection.
 add_executable(test_audio_sink tests/test_audio_sink.cpp

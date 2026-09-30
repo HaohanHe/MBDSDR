@@ -193,6 +193,15 @@ public:
     // (i.e. NOT real hardware). Honest state for the UI / integration tests.
     bool isTestSignalActive() const;
 
+    // ---- SpyServer IQ tap (read-only, push) --------------------------------
+    // When `on` is true the engine re-emits each freshly-read real IQ block
+    // (rtl_tcp source, or the honestly-labelled offline test signal) as the
+    // iqTapReady signal (queued, engine -> UI thread). The SpyServerServer
+    // consumes it to stream IQ to a remote client. Off by default so the idle
+    // path copies nothing. This is a READ-only tap: it never alters the block
+    // the downstream DSP chain sees.
+    void setSpyServerTapRequested(bool on) { iqTapRequested_.store(on); }
+
 signals:
     void spectrumReady(const SpectrumFrame& frame);
     void sourceChanged(const QString& name, bool connected);
@@ -268,6 +277,12 @@ signals:
     // blend is the smoothed matrix coefficient 0..1; pilotQuality is the normalised
     // pilot-to-audio ratio 0..1.
     void stereoState(bool stereo, float blend, float pilotQuality);
+    // Read-only tap of the raw engine IQ block, emitted only while a SpyServer
+    // client is streaming (setSpyServerTapRequested). Carries the REAL source
+    // block (complex float, native source rate); the server decimates/encodes
+    // it for the wire. Never fabricated.
+    void iqTapReady(const std::vector<std::complex<float>>& iq,
+                    double sampleRateHz, double centerFreqHz);
 
 protected:
     void run() override;
@@ -309,6 +324,9 @@ private:
     std::atomic<int> fftSize_{2048};
     std::atomic<bool> running_{true};
     std::atomic<bool> needDemodReset_{false};
+    // Set by the SpyServerServer via setSpyServerTapRequested: when true, each
+    // successfully-read IQ block is re-emitted as iqTapReady (queued copy).
+    std::atomic<bool> iqTapRequested_{false};
     QString demodMode_ = "NFM";
     double bandwidth_ = 12500.0;
     bool wasDigital_ = false;   // last loop's selected-VFO digital-ness (edge trigger)
