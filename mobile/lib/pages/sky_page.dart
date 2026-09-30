@@ -57,6 +57,19 @@ class SkyController extends ChangeNotifier {
   DateTime? _lastUpdated;
   DateTime? _geometryTime;
 
+  // ---- 时间预览滑条（具名常量）----
+  /// 允许在「实时」上向前/向后预览的分钟数窗口（±）。
+  static const double previewRangeMinutes = 30;
+
+  /// 拖拽期间几何重算的节流间隔：连续 onChanged 在此间隔内合并，
+  /// 只取最新偏移做一次真实 SGP4 重算（trailing 限频）。
+  static const Duration previewThrottle = Duration(milliseconds: 80);
+
+  /// 预览偏移（相对实时 now）；Duration.zero = 实时。
+  Duration _previewOffset = Duration.zero;
+  Duration _pendingOffset = Duration.zero;
+  Timer? _previewTimer;
+
   // ---- 只读状态 ----
   TleGroup get group => _group;
   Station? get station => _station;
@@ -71,6 +84,15 @@ class SkyController extends ChangeNotifier {
 
   /// 几何计算所依据的时刻（UTC）；与极坐标图上的点/弧同源。
   DateTime? get geometryTime => _geometryTime;
+
+  /// 是否处于拖拽预览态（非实时）。
+  bool get isPreview => _previewOffset != Duration.zero;
+
+  /// 当前预览偏移（负=过去，正=未来；实时为 zero）。
+  Duration get previewOffset => _previewOffset;
+
+  /// 是否已载入可用 TLE（决定时间滑条是否可用）。
+  bool get hasTle => _tles.isNotEmpty;
 
   /// 当前选中的卫星几何。
   SatVisibility? get selectedVisibility {
@@ -177,6 +199,56 @@ class SkyController extends ChangeNotifier {
     }
   }
 
+  /// 拖拽时间滑条：进入/更新预览时刻。
+  ///
+  /// 用移动端真实 SGP4 在「now + offset」重算全部可见卫星位置；
+  /// 连续拖拽按 [previewThrottle] 合并/限频（trailing），窗口内只取最新
+  /// 偏移做一次传播，避免每帧传播。仅重算可见星位，不重算 24h 过境表。
+  void seekPreview(Duration offset) {
+    final clamped = _clampPreview(offset);
+    _pendingOffset = clamped;
+    _previewTimer ??= Timer(previewThrottle, () {
+      _previewTimer = null;
+      _applyPreview(_pendingOffset);
+    });
+  }
+
+  Duration _clampPreview(Duration o) {
+    final max = Duration(minutes: previewRangeMinutes.round());
+    if (o > max) return max;
+    if (o < -max) return -max;
+    return o;
+  }
+
+  void _applyPreview(Duration offset) {
+    _previewOffset = offset;
+    final st = _station;
+    if (st == null || _tles.isEmpty) {
+      notifyListeners();
+      return;
+    }
+    final t = _clock().toUtc().add(offset);
+    _geometryTime = t;
+    _visible = visibleAt(t, _tles, st);
+    // 预览时刻选中星已落到地平线下则清空，不画假点。
+    if (_selectedName != null &&
+        !_visible.any((v) => v.name == _selectedName)) {
+      _selectedName = null;
+    }
+    notifyListeners();
+  }
+
+  /// 松手：退出预览，回到实时（完整重算可见星 + 24h 过境）。
+  void endPreview() {
+    _previewTimer?.cancel();
+    _previewTimer = null;
+    _pendingOffset = Duration.zero;
+    if (_previewOffset == Duration.zero) return;
+    _previewOffset = Duration.zero;
+    _recomputeGeometry();
+    notifyListeners();
+  }
+
   /// 请求系统定位（无权限空态按钮用）。
   Future<void> openLocationSettings() => _loc.openSettings();
 
@@ -184,6 +256,7 @@ class SkyController extends ChangeNotifier {
   void dispose() {
     _locSub?.cancel();
     _oriSub?.cancel();
+    _previewTimer?.cancel();
     super.dispose();
   }
 }
@@ -324,6 +397,13 @@ class _SkyPageState extends State<SkyPage> {
           ]);
     return Column(children: [
       _StatusBar(clock: _wallClock, station: _c.station),
+      _TimeScrubber(
+        enabled: _c.station != null && _c.hasTle,
+        geometryTime: _c.geometryTime,
+        isPreview: _c.isPreview,
+        onSeek: _c.seekPreview,
+        onEnd: _c.endPreview,
+      ),
       Expanded(child: body),
     ]);
   }
@@ -367,6 +447,131 @@ class _StatusBar extends StatelessWidget {
             style: AppTokens.auxiliary,
             overflow: TextOverflow.ellipsis,
           ),
+        ),
+      ]),
+    );
+  }
+}
+
+/// 时间预览滑条：默认实时；拖拽进入「预览」（真实 SGP4 重算星位）；松手回实时。
+/// 无本站/无 TLE 时禁用并诚实空态，绝不画假时间。
+class _TimeScrubber extends StatefulWidget {
+  const _TimeScrubber({
+    required this.enabled,
+    required this.geometryTime,
+    required this.isPreview,
+    required this.onSeek,
+    required this.onEnd,
+  });
+
+  final bool enabled;
+  final DateTime? geometryTime;
+  final bool isPreview;
+  final ValueChanged<Duration> onSeek;
+  final VoidCallback onEnd;
+
+  @override
+  State<_TimeScrubber> createState() => _TimeScrubberState();
+}
+
+class _TimeScrubberState extends State<_TimeScrubber> {
+  /// 本地拖拽值：手指拖动时立即跟随，避免受控 value 滞后把 thumb 拽回中心。
+  double _dragMin = 0;
+  bool _scrubbing = false;
+
+  String _two(int n) => n.toString().padLeft(2, '0');
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.enabled) {
+      return Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppTokens.spacingM, vertical: AppTokens.spacingS),
+        decoration: const BoxDecoration(
+          color: AppTokens.card1,
+          border: Border(bottom: BorderSide(color: AppTokens.cardEdge)),
+        ),
+        child: const Row(children: [
+          Icon(Icons.history,
+              size: AppTokens.iconSizeInline, color: AppTokens.textSecondary),
+          SizedBox(width: AppTokens.spacingS),
+          Expanded(
+            child: Text('需要本站与 TLE 后可拖拽预览时间',
+                style: AppTokens.auxiliary),
+          ),
+        ]),
+      );
+    }
+
+    final value = _scrubbing ? _dragMin : 0.0;
+    final t = widget.geometryTime?.toLocal();
+    final timeText = t == null
+        ? '--:--:--'
+        : '${_two(t.hour)}:${_two(t.minute)}:${_two(t.second)}';
+    final offsetMin = _scrubbing ? _dragMin.round() : 0;
+    final (String badge, Color badgeColor) = switch (offsetMin) {
+      0 => ('实时', AppTokens.textSecondary),
+      final m when m > 0 => ('预览 +$m 分', AppTokens.warning),
+      final m => ('预览 $m 分', AppTokens.warning),
+    };
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(AppTokens.spacingM,
+          AppTokens.spacingS, AppTokens.spacingM, AppTokens.spacingS),
+      decoration: const BoxDecoration(
+        color: AppTokens.card1,
+        border: Border(bottom: BorderSide(color: AppTokens.cardEdge)),
+      ),
+      child: Row(children: [
+        const Icon(Icons.history,
+            size: AppTokens.iconSizeInline, color: AppTokens.textSecondary),
+        const SizedBox(width: AppTokens.spacingS),
+        Expanded(
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 2,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+              activeTrackColor: AppTokens.accent,
+              inactiveTrackColor: AppTokens.textAt(0.15),
+              thumbColor: _scrubbing ? AppTokens.warning : AppTokens.accent,
+              overlayColor: AppTokens.accent.withValues(alpha: 0.2),
+            ),
+            child: Slider(
+              min: -SkyController.previewRangeMinutes,
+              max: SkyController.previewRangeMinutes,
+              divisions: (SkyController.previewRangeMinutes * 2).round(),
+              value: value.clamp(-SkyController.previewRangeMinutes,
+                  SkyController.previewRangeMinutes),
+              onChanged: (v) {
+                setState(() {
+                  _dragMin = v;
+                  _scrubbing = true;
+                });
+                widget.onSeek(Duration(minutes: v.round()));
+              },
+              onChangeEnd: (_) {
+                setState(() {
+                  _dragMin = 0;
+                  _scrubbing = false;
+                });
+                widget.onEnd();
+              },
+            ),
+          ),
+        ),
+        const SizedBox(width: AppTokens.spacingS),
+        Text(timeText, style: AppTokens.mono),
+        const SizedBox(width: AppTokens.spacingS),
+        Container(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppTokens.spacingS, vertical: 2),
+          decoration: BoxDecoration(
+            color: badgeColor.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(AppTokens.radiusSmall),
+          ),
+          child: Text(badge,
+              style: AppTokens.auxiliary.copyWith(color: badgeColor)),
         ),
       ]),
     );
