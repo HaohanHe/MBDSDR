@@ -666,6 +666,45 @@ MainWindow::MainWindow(QWidget* parent)
     skyLay->setContentsMargins(0, 0, 0, 0);
     skyView_ = new ui::SkyView();
     skyLay->addWidget(skyView_, 2);
+
+    // --- Time scrubber: "现在 / 预览" dual state -------------------------
+    // Center = live wall-now (实时). Dragging offsets the displayed UTC moment
+    // (±kSkyPreviewRangeMin minutes); the whole sky is re-propagated with the
+    // real SGP4 propagator, throttled to <=10 Hz. Release returns to live.
+    {
+        auto* timeBar = new QHBoxLayout;
+        timeBar->setContentsMargins(tokens::scaled(6), 0, tokens::scaled(6), 0);
+        QLabel* liveTag = new QLabel(QStringLiteral("实时"), skyPage);
+        liveTag->setObjectName("dockHint");
+        timeBar->addWidget(liveTag);
+        QLabel* backTag = new QLabel(QStringLiteral("-30分"), skyPage);
+        backTag->setObjectName("dockHint");
+        backTag->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        timeBar->addWidget(backTag);
+        skyTimeSlider_ = new QSlider(Qt::Horizontal, skyPage);
+        skyTimeSlider_->setObjectName("skyTimeSlider");
+        skyTimeSlider_->setRange(-tokens::kSkyPreviewRangeMin, tokens::kSkyPreviewRangeMin);
+        skyTimeSlider_->setValue(0);
+        skyTimeSlider_->setToolTip(
+            QStringLiteral("拖拽预览过去/未来时刻（±%1 分钟）：\n"
+                           "用真实 SGP4 重新传播全部可见卫星（拖拽中 ≤10Hz）。\n"
+                           "松开回到「现在」实时模式。")
+                .arg(tokens::kSkyPreviewRangeMin));
+        timeBar->addWidget(skyTimeSlider_, 1);
+        QLabel* fwdTag = new QLabel(QStringLiteral("+30分"), skyPage);
+        fwdTag->setObjectName("dockHint");
+        timeBar->addWidget(fwdTag);
+        skyLay->addLayout(timeBar);
+
+        // Drag-coalesce timer: valueChanged fires far faster than SGP4 needs;
+        // restart this short timer on every change and only propagate when it
+        // finally fires (=> <= 10 Hz while dragging).
+        skyPreviewTimer_ = new QTimer(this);
+        skyPreviewTimer_->setSingleShot(true);
+        skyPreviewTimer_->setInterval(tokens::kSkyPreviewThrottleMs);
+        connect(skyPreviewTimer_, &QTimer::timeout,
+                this, &MainWindow::recomputePreview);
+    }
     // Elevation-vs-time curve for the selected pass (AOS..LOS on the x axis).
     elevationPlot_ = new ui::ElevationPlot(skyPage);
     elevationPlot_->setMinimumHeight(tokens::scaled(120));
@@ -1993,6 +2032,14 @@ MainWindow::MainWindow(QWidget* parent)
     // Always tick: this also drives the sky clock readout + setCurrentTime,
     // independent of whether a satellite pass is currently selected.
     liveTimer_->start();
+
+    // Sky time scrubber: valueChanged -> throttled preview propagation; release
+    // -> back to live. During preview the 1 Hz live tick re-propagates the
+    // FROZEN preview moment instead of wall-now (see updateLiveSatellite).
+    connect(skyTimeSlider_, &QSlider::valueChanged,
+            this, &MainWindow::onSkySliderChanged);
+    connect(skyTimeSlider_, &QSlider::sliderReleased,
+            this, &MainWindow::onSkySliderReleased);
 }
 
 MainWindow::~MainWindow() {
@@ -3448,11 +3495,17 @@ void MainWindow::updateLiveSatellite() {
     // 1 Hz wall clock: drive the polar plot's UTC marker and the clock-bias
     // readout regardless of whether a station / pass exists.
     const QDateTime now = QDateTime::currentDateTimeUtc();
-    skyView_->setCurrentTime(now);
+    // Preview scrubber: when dragging, the sky shows the frozen preview moment
+    // instead of wall-now; every position below is propagated at viewT (real
+    // SGP4). Wall-`now` still drives pass-end housekeeping + Doppler only when
+    // live.
+    const QDateTime viewT = previewMode_ ? previewUtc_ : now;
+    skyView_->setCurrentTime(viewT);
     updateClockBiasLabel();
 
     if (!stationSet_) {
         skyView_->clearLiveSatellites();
+        skyView_->setSelectedTrajectory({});
         // Without a station there is no live propagation: compensation cannot run.
         capturedIdx_ = -1;
         dopplerLimiter_.disarm();
@@ -3463,7 +3516,8 @@ void MainWindow::updateLiveSatellite() {
     }
 
     // If the selected pass just ended, advance to the next one in view.
-    if (liveRow_ >= 0 && liveRow_ < passes_.size() && now > passes_[liveRow_].los) {
+    // Skipped while previewing (scrubbing past the end must not jump selection).
+    if (!previewMode_ && liveRow_ >= 0 && liveRow_ < passes_.size() && now > passes_[liveRow_].los) {
         liveRow_ = -1;
         skyView_->setSelectedSatellite("");
         // The captured pass is gone: stop Doppler compensation and release.
@@ -3486,12 +3540,13 @@ void MainWindow::updateLiveSatellite() {
         liveTimer_->stop();
     }
 
-    // Draw every satellite currently in view; mark the selected one.
+    // Draw every satellite visible at the displayed moment (viewT); mark the
+    // selected one. In preview mode viewT is the scrubbed time, not wall-now.
     QList<ui::LiveSat> sats;
     for (int i = 0; i < passes_.size(); ++i) {
         const dsp::SatPass& p = passes_[i];
-        if (now < p.aos || now > p.los) continue;   // past LOS / pre-AOS: skip
-        dsp::Topocentric t = tleClient_->propagateAt(now, p.tle,
+        if (viewT < p.aos || viewT > p.los) continue;   // past LOS / pre-AOS: skip
+        dsp::Topocentric t = tleClient_->propagateAt(viewT, p.tle,
                                                      stationLat_, stationLon_);
         ui::LiveSat ls;
         ls.az = t.az;
@@ -3500,7 +3555,9 @@ void MainWindow::updateLiveSatellite() {
         ls.selected = (i == liveRow_);
         sats.append(ls);
 
-        if (ls.selected) {
+        // Status-bar readout + live Doppler retune are LIVE only: scrubbing a
+        // past/future moment must not retune the tuner.
+        if (ls.selected && !previewMode_) {
             QString msg = QString("%1 方位=%2° 仰角=%3° 距离=%4")
                 .arg(p.name).arg(t.az, 0, 'f', 0).arg(t.el, 0, 'f', 1)
                 .arg(formatRange(t.range));
@@ -3538,25 +3595,44 @@ void MainWindow::updateLiveSatellite() {
     }
     skyView_->setLiveSatellites(sats);
 
+    // --- Selected-satellite real trajectory overlay ----------------------
+    // Propagate the SELECTED pass at viewT ± kSkyTrajectoryWindowMin (uniform
+    // samples), real SGP4 -> az/el. Drawn dashed on the polar chart, coexisting
+    // with the predicted pass arcs. Cleared when nothing is selected.
+    if (liveRow_ >= 0 && liveRow_ < passes_.size()) {
+        const dsp::SatPass& sel = passes_[liveRow_];
+        QList<QPair<double,double>> traj;
+        const qint64 spanMs = qint64(tokens::kSkyTrajectoryWindowMin) * 60 * 1000;
+        for (int k = 0; k < tokens::kSkyTrajectorySamples; ++k) {
+            const QDateTime t = viewT.addMSecs(qint64(double(2 * spanMs) * k /
+                                                      (tokens::kSkyTrajectorySamples - 1)) - spanMs);
+            dsp::Topocentric tp = tleClient_->propagateAt(t, sel.tle, stationLat_, stationLon_);
+            traj.append({tp.az, tp.el});
+        }
+        skyView_->setSelectedTrajectory(traj);
+    } else {
+        skyView_->setSelectedTrajectory({});
+    }
+
     // Drop the same satellites onto the world map as lat/lon sub-points, each
-    // with a forward ground-track polyline (now -> LOS, ~2 min steps).
+    // with a forward ground-track polyline (viewT -> LOS, ~2 min steps).
     QList<ui::SatellitePoint> wpts;
     for (int i = 0; i < passes_.size(); ++i) {
         const dsp::SatPass& p = passes_[i];
-        if (now < p.aos || now > p.los) continue;
-        auto geo = tleClient_->propagateLatLon(now, p.tle);
+        if (viewT < p.aos || viewT > p.los) continue;
+        auto geo = tleClient_->propagateLatLon(viewT, p.tle);
         ui::SatellitePoint sp;
         sp.name = p.name;
         sp.lat = geo.latDeg;
         sp.lon = geo.lonDeg;
         sp.selected = (i == liveRow_);
         // Future ground track: sample sub-points every ~2 minutes until LOS.
-        const qint64 spanSec = now.secsTo(p.los);
+        const qint64 spanSec = viewT.secsTo(p.los);
         if (spanSec > 0) {
             const int steps = std::min<qint64>(30, std::max<qint64>(2, spanSec / 120));
             for (int k = 0; k <= steps; ++k) {
-                const QDateTime t = now.addMSecs(
-                    qint64(double(now.msecsTo(p.los)) * k / steps));
+                const QDateTime t = viewT.addMSecs(
+                    qint64(double(viewT.msecsTo(p.los)) * k / steps));
                 auto g = tleClient_->propagateLatLon(t, p.tle);
                 sp.track.append({g.latDeg, g.lonDeg});
             }
@@ -3583,25 +3659,62 @@ void MainWindow::updateElevationPlotFor(const dsp::SatPass& p) {
     elevationPlot_->setPass(p.name, samples);
 }
 
+void MainWindow::onSkySliderChanged(int offsetMin) {
+    // valueChanged fires on every drag tick. We do NOT propagate per tick:
+    // record the latest offset and (re)start the single-shot throttle timer;
+    // recomputePreview() runs once it settles => <= 10 Hz while dragging.
+    pendingPreviewOffsetMin_ = offsetMin;
+    skyPreviewTimer_->start();   // restart = coalesce
+}
+
+void MainWindow::recomputePreview() {
+    // Throttle fired: adopt the preview moment and re-propagate the whole sky
+    // with the REAL SGP4 propagator. updateLiveSatellite() uses viewT = previewUtc_.
+    previewUtc_ = QDateTime::currentDateTimeUtc().addSecs(pendingPreviewOffsetMin_ * 60);
+    previewMode_ = true;
+    updateLiveSatellite();
+}
+
+void MainWindow::onSkySliderReleased() {
+    // Release (or the value settling) returns to live wall-now. Reset the slider
+    // to center without re-entering preview (block signals so valueChanged(0)
+    // does not immediately arm another preview).
+    previewMode_ = false;
+    if (skyTimeSlider_) {
+        const QSignalBlocker block(skyTimeSlider_);
+        skyTimeSlider_->setValue(0);
+    }
+    pendingPreviewOffsetMin_ = 0;
+    updateLiveSatellite();   // back to live now
+}
+
 void MainWindow::updateClockBiasLabel() {
     if (!clockInfoLabel_) return;
+    // Clock-domain readout: GNSS 授时时间 (real NMEA GGA/RMC/ZDA time) vs the
+    // host system clock, with Δt = GNSS − system in ms. We only DISPLAY the
+    // offset -- the app never sets the system clock.
     const QDateTime sysUtc = QDateTime::currentDateTimeUtc();
     const QDateTime local = QDateTime::currentDateTime();
-    if (lastGnssFix_.hasUtc && gnssHasFix_) {
-        // bias = system UTC - GNSS UTC (seconds, sub-second via msecs).
-        const double biasSec = lastGnssFix_.utc.msecsTo(sysUtc) / 1000.0;
-        clockBiasSec_ = biasSec;
+    // Time source is the parsed NMEA fix clock (hasUtc is set once GGA/RMC/ZDA
+    // carries a timestamp; ZDA is optional). Gate the offset on the time itself,
+    // not on a position fix: RMC/GGA may carry time even without a 2/3D fix.
+    if (lastGnssFix_.hasUtc && lastGnssFix_.utc.isValid()) {
+        const qint64 dtMs = gnss::clockOffsetMs(lastGnssFix_.utc, sysUtc); // GNSS − sys
+        clockBiasSec_ = dtMs / 1000.0;
+        const QChar sign = (dtMs >= 0) ? QChar('+') : QChar(0x2212); // −
         clockInfoLabel_->setText(
-            QString("GNSS UTC %1   系统 UTC %2   本地 %3   偏差 %4 s（系统−GNSS，未改钟）")
-                .arg(lastGnssFix_.utc.toString("HH:mm:ss.zzz"))
-                .arg(sysUtc.toString("HH:mm:ss.zzz"))
+            QString("时钟域  GNSS 授时 %1 UTC  授时源 NMEA(GGA/RMC)   系统 %2   本地 %3   "
+                    "Δt %4%5 ms（GNSS−系统，未改钟）")
+                .arg(lastGnssFix_.utc.toUTC().toString("HH:mm:ss.zzz"))
+                .arg(sysUtc.toUTC().toString("HH:mm:ss.zzz"))
                 .arg(local.toString("HH:mm:ss"))
-                .arg(biasSec, 0, 'f', 3));
+                .arg(sign).arg(std::llround(std::fabs(double(dtMs)))));
     } else {
+        // Honest empty state: no NMEA clock -> no fabricated offset.
         clockBiasSec_ = 0.0;
         clockInfoLabel_->setText(
-            QString("GNSS UTC --   系统 UTC %1   本地 %2   偏差 --（GNSS 无定位）")
-                .arg(sysUtc.toString("HH:mm:ss"))
+            QString("时钟域  GNSS 授时 --（无 GNSS 授时）   系统 %1   本地 %2   Δt --")
+                .arg(sysUtc.toUTC().toString("HH:mm:ss"))
                 .arg(local.toString("HH:mm:ss")));
     }
 }
@@ -3639,7 +3752,8 @@ void MainWindow::onNewFix(gnss::GnssFix fix) {
     }
 
     worldView_->setGnssFix(true, fix.latitude, fix.longitude,
-                           fix.satellitesInUse, fix.hdop);
+                           fix.satellitesInUse, fix.hdop,
+                           fix.hasUtc ? fix.utc : QDateTime());
 
     // Fix status: quality / satellites in use / HDOP.
     gnssFixLabel_->setText(

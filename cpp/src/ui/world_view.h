@@ -20,6 +20,7 @@
 #include <QString>
 #include <QPointF>
 #include <QPair>
+#include <QDateTime>
 #include <limits>
 
 #include "map_projection.h"
@@ -73,7 +74,10 @@ public:
     void addSatellite(const QString& name, double lat, double lon);
     void setStation(double lat, double lon);   // NaN to clear the station.
     // GNSS receiver fix. valid=false => no receiver dot, honest "GNSS 无定位".
-    void setGnssFix(bool valid, double lat, double lon, int sats, double hdop);
+    // fixTimeUtc is the real NMEA (GGA/RMC) fix timestamp; an invalid time is
+    // shown as "--" (never fabricated).
+    void setGnssFix(bool valid, double lat, double lon, int sats, double hdop,
+                    QDateTime fixTimeUtc = QDateTime());
 
     // Mark whether the current data is synthetic/offline (stamps the
     // "非硬件 NOT HARDWARE" tag). Default false.
@@ -99,6 +103,10 @@ public:
 
     // Test helper: whether a GNSS fix is currently accepted (no fix => no dot).
     bool gnssHasFixForTest() const { return gnssValid_; }
+
+    // Test / host readback: the legend row captions (colored swatch + label).
+    // Exposed so a test can assert the legend文案 exists without OCR-ing pixels.
+    QStringList legendItems() const;
 
     // ---- hit testing -----------------------------------------------------
     struct Hit {
@@ -136,6 +144,7 @@ private:
     void drawSatellites(QPainter& p);
     void drawLabels(QPainter& p);
     void drawStatusChips(QPainter& p);
+    void drawLegend(QPainter& p);
     void applySelectionFlags();
 
     MapProjection proj_;
@@ -149,6 +158,7 @@ private:
     double gnssLat_ = 0.0, gnssLon_ = 0.0;
     int    gnssSats_ = 0;
     double gnssHdop_ = 0.0;
+    QDateTime gnssFixTime_;   // real NMEA fix time (invalid => show "--")
 
     bool synthetic_ = false;
     bool layerOn_[6] = {true, true, true, true, true, true};

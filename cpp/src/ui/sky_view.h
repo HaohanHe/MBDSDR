@@ -62,6 +62,11 @@ public:
     void clearLiveSatellites();
     void setGnssSatellites(QList<GnssSkySat> sats);
     void clearGnssSatellites();
+    // Real propagated trajectory of the SELECTED satellite around the displayed
+    // moment: sampled (az, el) deg, drawn as a dashed overlay that coexists with
+    // the predicted pass arcs. Empty list clears the overlay.
+    void setSelectedTrajectory(QList<QPair<double,double>> azEl);
+    QList<QPair<double,double>> selectedTrajectory() const { return selectedTraj_; }
     // utc must be a UTC time; the view paints it alongside its local conversion.
     void setCurrentTime(QDateTime utc);
     void setEmptyText(const QString& text);
@@ -108,6 +113,7 @@ private:
     QString emptyText_ = QStringLiteral("无过境数据");
     QList<LiveSat> liveSats_;
     QList<GnssSkySat> gnss_;
+    QList<QPair<double,double>> selectedTraj_; // real propagated overlay (selected sat)
     QDateTime nowUtc_;
     QString selectedName_;
     bool nonHardware_ = false;

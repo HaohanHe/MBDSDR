@@ -12,6 +12,8 @@
 #include <QApplication>
 #include <QImage>
 #include <QSignalSpy>
+#include <QDateTime>
+#include <QStringList>
 #include <cmath>
 #include <cstdio>
 
@@ -224,6 +226,58 @@ private slots:
         z.save(shotDir() + "/map_zoom_nonhw.png");
 
         std::printf("  [shots] wrote map_layers_nonhw.png, map_zoom_nonhw.png\n");
+    }
+
+    // ------------------------------------------------ GNSS fix click panel
+    // Clicking the GNSS point shows the complete real fix: lat/lon / sats /
+    // HDOP / fix time. No fix time => the time line reads "--".
+    void gnssFixClickShowsCompleteInfo() {
+        WorldView v;
+        v.resize(800, 480);
+        v.show();
+        QTest::qWait(10);
+        v.setViewState({39.9, 116.4, 4.0});
+        v.setStation(NAN, NAN);
+
+        const QDateTime fixTime(QDate(2026, 9, 30), QTime(10, 20, 30), Qt::UTC);
+        v.setGnssFix(true, 39.91, 116.39, 14, 0.8, fixTime);
+        QVERIFY(v.gnssHasFixForTest());
+
+        QPointF px = v.project(39.91, 116.39);
+        WorldView::Hit h = v.hitTest(px);
+        QCOMPARE(h.type, WorldView::Hit::Gnss);
+        QVERIFY2(h.tooltip.contains("39.9100") || h.tooltip.contains("39.91"),
+                 "GNSS fix tooltip must show latitude");
+        QVERIFY2(h.tooltip.contains("116.39") || h.tooltip.contains("116.390"),
+                 "GNSS fix tooltip must show longitude");
+        QVERIFY2(h.tooltip.contains("14"), "GNSS fix tooltip must show satellite count");
+        QVERIFY2(h.tooltip.contains("HDOP"), "GNSS fix tooltip must show HDOP (精度)");
+        QVERIFY2(h.tooltip.contains("10:20:30"),
+                 "GNSS fix tooltip must show the real fix time");
+
+        // Honest: an invalid fix time shows "--" rather than a fabricated clock.
+        WorldView v2; v2.resize(800, 480); v2.show(); QTest::qWait(10);
+        v2.setViewState({39.9, 116.4, 4.0});
+        v2.setGnssFix(true, 39.91, 116.39, 14, 0.8);   // no time
+        WorldView::Hit h2 = v2.hitTest(v2.project(39.91, 116.39));
+        QVERIFY2(h2.tooltip.contains("--:--:--"),
+                 "missing fix time must render as --:--:-- (never fabricated)");
+    }
+
+    // Restrained corner legend lists every layer's marker meaning (real tokens).
+    void legendItemsExist() {
+        QStringList items = view_->legendItems();
+        QVERIFY2(items.contains(QStringLiteral("GNSS 定位点")),
+                 "legend must explain the GNSS point color");
+        QVERIFY2(items.contains(QStringLiteral("ADS-B 飞机")),
+                 "legend must explain the ADS-B marker");
+        QVERIFY2(items.contains(QStringLiteral("卫星星下点")),
+                 "legend must explain the sub-satellite point");
+        QVERIFY2(items.contains(QStringLiteral("本站")),
+                 "legend must explain the station marker");
+        // Painting the legend must not crash / clip.
+        QImage img = view_->grab().toImage();
+        QVERIFY(!img.isNull());
     }
 
     void cleanupTestCase() {

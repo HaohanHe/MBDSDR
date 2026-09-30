@@ -93,5 +93,14 @@ struct GnssFix {
 QString fixQualityToString(FixQuality q);
 QString fixTypeToString(FixType t);
 
+// Clock-domain offset in milliseconds: GNSS − system (UTC).
+// Positive => the receiver thinks it is AHEAD of the host clock; negative =>
+// behind. Returns 0 when either instant is invalid (caller must treat a
+// missing GNSS time as an honest empty state, never as "zero bias").
+inline qint64 clockOffsetMs(const QDateTime& gnssUtc, const QDateTime& sysUtc) {
+    if (!gnssUtc.isValid() || !sysUtc.isValid()) return 0;
+    return sysUtc.msecsTo(gnssUtc); // gnss − system
+}
+
 } // namespace gnss
 } // namespace mbdsdr
