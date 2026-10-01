@@ -31,7 +31,9 @@ class MainActivity : FlutterActivity() {
 
     private val AUDIO_CHANNEL = "mbdsdr/audio"
     private val USB_SERIAL_CHANNEL = "mbdsdr/usb_serial"
-    private val ACTION_USB_PERMISSION = "com.example.mbdsdr_mobile.USB_PERMISSION"
+    companion object {
+        const val ACTION_USB_PERMISSION = "com.example.mbdsdr_mobile.USB_PERMISSION"
+    }
 
     private lateinit var audioChannel: MethodChannel
     private lateinit var usbChannel: MethodChannel
@@ -262,7 +264,7 @@ private class UsbSerialHost(val act: MainActivity) {
             ?: return false
         if (!usbMgr.hasPermission(dev)) {
             val pi = PendingIntent.getBroadcast(
-                act, 0, Intent(act.ACTION_USB_PERMISSION),
+                act, 0, Intent(MainActivity.ACTION_USB_PERMISSION),
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
             )
             usbMgr.requestPermission(dev, pi)
@@ -272,9 +274,7 @@ private class UsbSerialHost(val act: MainActivity) {
         // TODO(真机待验): 按芯片 vid:pid 发 controlTransfer 设 baud（CP2102/CH340/FTDI）。
         reading = true
         readThread = thread(start = true) {
-            val endpoint = dev.interfaceCount.let { i ->
-                dev.getInterface(0).endpoint(0)
-            }
+            val endpoint = dev.getInterface(0).getEndpoint(0)
             val buf = ByteArray(64)
             while (reading) {
                 val n = conn?.bulkTransfer(endpoint, buf, buf.size, 200) ?: -1
