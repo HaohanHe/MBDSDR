@@ -36,7 +36,7 @@ class QLineEdit;
 class QSpinBox;
 
 namespace mbdsdr {
-namespace ui { class BookmarkManager; }
+namespace ui   { class BookmarkManager; class ActivityLog; }
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct TleEntry; struct VfoMarker; class FrequencyScanner; class SpyServerServer; }
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
@@ -454,6 +454,12 @@ private:
     ai::TaskRunner* aiRunner_ = nullptr;
     QList<mbdsdr::ai::StepResult> aiLiveSteps_;   // accumulated live steps (UI thread)
     void startRunnerPlan(const mbdsdr::ai::TaskPlan& plan);  // hand a plan to the worker
+
+    // AGC + automatic signal activity log (separate data from bookmarks).
+    QCheckBox*      aiAgcCheck_ = nullptr;
+    QPlainTextEdit* aiActivityView_ = nullptr;
+    ui::ActivityLog* activityLog_ = nullptr;
+    void refreshActivityView();
 
     // Chat rendering model: persisted session messages + a single transient
     // line. partialReady() overwrites the transient (never appends);

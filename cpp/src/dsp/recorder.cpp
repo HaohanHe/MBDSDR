@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QDebug>
 #include <cstring>
 
@@ -17,8 +18,15 @@ bool Recorder::start(const QString& dir, double sr, double freq, double gainDb,
                      const QString& hardware) {
     QDir().mkpath(dir);
     const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
-    const QString base = QString("%1/%2_%3Hz").arg(dir, stamp).arg(
+    QString base = QString("%1/%2_%3Hz").arg(dir, stamp).arg(
         static_cast<qint64>(freq));
+    // Second-resolution stamp: two recordings in the same second on the same
+    // frequency would collide.  Disambiguate with _2/_3... so a live stop/start
+    // NEVER truncates an in-flight or previous capture.
+    int n = 2;
+    while (QFile::exists(base + ".sigmf-data") && n < 10000) {
+        base = QString("%1_%2").arg(base).arg(n++);
+    }
     return startWithBase(base, sr, freq, gainDb, hardware);
 }
 

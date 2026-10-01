@@ -73,6 +73,7 @@
 #include "ai/plan_parser.h"
 #include "ai/sat_task_planner.h"
 #include "ui/task_steps_view.h"
+#include "ui/activity_log.h"
 #include "ui/sky_view.h"
 #include "ui/s_meter.h"
 #include "ui/bookmark_manager.h"
@@ -1596,6 +1597,21 @@ MainWindow::MainWindow(QWidget* parent)
     aiLay->addWidget(aiTaskHint_);
     aiLay->addWidget(aiTaskSteps_);
 
+    // ---- AGC + automatic signal activity log (separate from bookmarks) ----
+    aiAgcCheck_ = new QCheckBox(QString::fromUtf8("Tuner AGC（自动增益）"), aiPage);
+    aiAgcCheck_->setObjectName("aiAgcCheck");
+    aiAgcCheck_->setToolTip(QString::fromUtf8("真实下发到 rtl_tcp/RTL 源；不支持的后端保持禁用。"));
+    aiLay->addWidget(aiAgcCheck_);
+
+    auto* actHead = new QLabel(QString::fromUtf8("信号活动日志（自动记录，非书签）"), aiPage);
+    actHead->setObjectName("panelTitle");
+    aiLay->addWidget(actHead);
+    aiActivityView_ = new QPlainTextEdit(aiPage);
+    aiActivityView_->setObjectName("aiActivityView");
+    aiActivityView_->setReadOnly(true);
+    aiActivityView_->setMaximumHeight(tokens::scaled(140));
+    aiLay->addWidget(aiActivityView_);
+
     aiChat_ = new QPlainTextEdit(aiPage);
     aiChat_->setObjectName("aiChat");
     aiChat_->setReadOnly(true);
@@ -2181,11 +2197,43 @@ MainWindow::MainWindow(QWidget* parent)
         if (aiTaskSteps_) aiTaskSteps_->setRun(aiLiveSteps_, report);
         if (aiRunTaskBtn_)  aiRunTaskBtn_->setEnabled(true);
         if (aiStopTaskBtn_) aiStopTaskBtn_->setEnabled(false);
+        // Auto-log every real scan_band hit as an activity entry (NOT a bookmark).
+        if (activityLog_) {
+            for (const auto& s : aiLiveSteps_) {
+                if (s.tool != QLatin1String("scan_band")) continue;
+                const QJsonArray hits = s.resultJson.value("hits").toArray();
+                for (const auto& h : hits) {
+                    const QJsonObject ho = h.toObject();
+                    ui::SignalActivity a;
+                    a.timeUtc = QDateTime::currentDateTimeUtc();
+                    a.frequencyHz = ho.value("frequencyHz").toDouble();
+                    a.levelDbfs = ho.value("dbfs").toDouble();
+                    a.source = QString::fromLatin1("scan_band");
+                    activityLog_->append(a);
+                }
+            }
+            refreshActivityView();
+        }
         if (aiSessionStore_ && !aiCurSessionId_.isEmpty())
             aiSessionStore_->appendMessage(aiCurSessionId_,
                 mbdsdr::ai::SessionMessage{"assistant", report});
         aiRenderChat();
         if (bookmarkManager_) refreshBmTable();
+    });
+
+    // Automatic signal activity log (independent store, never merged into
+    // bookmarks). Loads persisted entries and renders them.
+    activityLog_ = new ui::ActivityLog();
+    activityLog_->load();
+    refreshActivityView();
+
+    // Tuner AGC: real command down to the source, state read back from engine.
+    if (aiAgcCheck_ && engine_) {
+        QSignalBlocker blk(aiAgcCheck_);
+        aiAgcCheck_->setChecked(engine_->tunerAgc());
+    }
+    connect(aiAgcCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        if (engine_) engine_->setTunerAgc(on);
     });
     // ---- Chat rendering: session messages + a SINGLE transient line --------
     // partialReady() replaces the transient (never appends); responseReady()
@@ -4823,8 +4871,22 @@ void MainWindow::onRunAutoTask() {
     startRunnerPlan(plan);
 }
 
-void MainWindow::startRunnerPlan(const mbdsdr::ai::TaskPlan& plan) {
-    if (!aiRunner_) return;
+void MainWindow::refreshActivityView() {
+    if (!aiActivityView_ || !activityLog_) return;
+    QStringList lines;
+    const int n = qMin(activityLog_->count(), 20);
+    for (int i = 0; i < n; ++i) {
+        const ui::SignalActivity& a = activityLog_->list().at(i);
+        lines << QString("%1  %2 Hz  %3 dBFS  [%4]")
+                     .arg(a.timeUtc.toUTC().toString("HH:mm:ss"))
+                     .arg(a.frequencyHz, 0, 'f', 0)
+                     .arg(a.levelDbfs, 0, 'f', 1)
+                     .arg(a.source);
+    }
+    aiActivityView_->setPlainText(lines.join("\n"));
+}
+
+void MainWindow::startRunnerPlan(const mbdsdr::ai::TaskPlan& plan) {    if (!aiRunner_) return;
     aiLiveSteps_.clear();
     if (aiTaskSteps_) aiTaskSteps_->clear();
     if (aiTaskHint_) aiTaskHint_->setVisible(false);

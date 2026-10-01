@@ -201,6 +201,9 @@ public:
     void setOffsetTuning(bool on);
     void setRtlAgc(bool on);
     void setTunerAgc(bool on);
+    // Readback of the cached requested AGC state (what we last commanded).
+    bool rtlAgc() const { return cachedRtlAgc_; }
+    bool tunerAgc() const { return cachedTunerAgc_; }
     void setBiasTee(bool on);
     void setPpm(double ppm);
     // Signal-processing options (window / average / noise blanker).
