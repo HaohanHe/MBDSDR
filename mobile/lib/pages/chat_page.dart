@@ -13,7 +13,9 @@ import 'package:flutter/material.dart';
 
 import '../app/tokens.dart';
 import '../models/chat_message.dart';
+import '../models/task_step.dart';
 import '../services/ai_client.dart';
+import '../widgets/task_progress.dart';
 
 /// UI 层的工具调用 chip。
 class _UiToolCall {
@@ -373,8 +375,16 @@ class _ChatPageState extends State<ChatPage> {
               SelectableText(m.text, style: AppTokens.body)
             else ...<Widget>[
                 if (m.toolCalls.isNotEmpty) ...<Widget>[
-                  ...m.toolCalls.map(_buildToolChip),
-                  const SizedBox(height: AppTokens.spacingS),
+                  TaskProgressView(
+                    steps: m.toolCalls
+                        .map((_UiToolCall c) => TaskStep.fromCall(
+                              tool: c.name,
+                              argumentsPreview: c.argumentsPreview,
+                              done: c.done,
+                              result: c.result,
+                            ))
+                        .toList(),
+                  ),
                 ],
                 SelectableText.rich(
                   TextSpan(
@@ -442,44 +452,6 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  Widget _buildToolChip(_UiToolCall c) {
-    final Color color = c.done ? AppTokens.success : AppTokens.warning;
-    final String label = c.done
-        ? '✓ ${_shortResult(c.result)}'
-        : '调用 ${c.name} …';
-    return Container(
-      margin: const EdgeInsets.only(bottom: AppTokens.spacingS),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppTokens.spacingM,
-        vertical: AppTokens.spacingS,
-      ),
-      decoration: BoxDecoration(
-        // 工具 chip：10% 填充 / 30% 描边的低饱和表面。
-        color: color.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(AppTokens.radiusSmall),
-        border: Border.all(color: color.withValues(alpha: 0.30)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          // chip 内 12px 微图标，与 annotationFontSize+1 的字号对齐。
-          Icon(c.done ? Icons.check : Icons.autorenew,
-              size: 12, color: color),
-          const SizedBox(width: AppTokens.spacingS),
-          Flexible(
-            child: Text(
-              label,
-              style: AppTokens.auxiliary.copyWith(
-                fontSize: AppTokens.annotationFontSize + 1,
-                color: color,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildInputBar() {
     return Container(
       padding: const EdgeInsets.all(AppTokens.spacingM),
@@ -531,11 +503,6 @@ class _ChatPageState extends State<ChatPage> {
         ),
       ),
     );
-  }
-
-  String _shortResult(String r) {
-    final String s = r.trim();
-    return s.length > 40 ? '${s.substring(0, 40)}…' : s;
   }
 
   String _formatTime(DateTime t) {
