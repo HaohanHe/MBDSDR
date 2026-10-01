@@ -16,6 +16,7 @@ import '../models/chat_message.dart';
 import '../models/task_step.dart';
 import '../services/ai_client.dart';
 import '../widgets/task_progress.dart';
+import '../widgets/task_templates_bar.dart';
 
 /// UI 层的工具调用 chip。
 class _UiToolCall {
@@ -90,6 +91,17 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   // ------------------------------------------------------------- 发送 / 重试
+  /// 模板入口：把草稿填入输入框（可编辑），不自动发送。
+  void _onPickTemplate(String draft) {
+    if (_busy) return;
+    setState(() {
+      _controller.text = draft;
+      _controller.selection = TextSelection.collapsed(
+        offset: _controller.text.length,
+      );
+    });
+  }
+
   Future<void> _send() async {
     final String text = _controller.text.trim();
     if (text.isEmpty || _busy || !widget.isConfigured) return;
@@ -255,6 +267,9 @@ class _ChatPageState extends State<ChatPage> {
           children: <Widget>[
             Expanded(child: _buildList()),
             if (widget.manualMode) _buildModeStrip(),
+            // 任务模板入口：空闲时显示；点击仅把可编辑草稿填入输入框，不自动发送。
+            if (!_busy)
+              TaskTemplatesBar(onSelect: _onPickTemplate),
             _buildInputBar(),
           ],
         ),
