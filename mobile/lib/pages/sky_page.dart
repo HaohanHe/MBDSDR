@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:mbdsdr_mobile/app/tokens.dart';
 import 'package:mbdsdr_mobile/astro/passes.dart';
 import 'package:mbdsdr_mobile/astro/tle.dart';
+import 'package:mbdsdr_mobile/astro/tle_freshness.dart';
 import 'package:mbdsdr_mobile/models/satellite.dart';
 import 'package:mbdsdr_mobile/models/satellite_downlink.dart';
 import 'package:mbdsdr_mobile/services/location_service.dart';
@@ -81,6 +82,16 @@ class SkyController extends ChangeNotifier {
   bool get refreshing => _refreshing;
   String? get error => _error;
   DateTime? get lastUpdated => _lastUpdated;
+
+  /// TLE 新鲜度标注（基于真实 epoch）；无 TLE 为 null（诚实空态）。
+  String? get freshnessLabel =>
+      tleFreshnessLabel(_tles, DateTime.now().toUtc());
+
+  /// 是否存在过期 TLE（用于状态着色）。
+  bool get tleStale {
+    final double? a = oldestTleAgeDaysUtc(_tles, DateTime.now().toUtc());
+    return a != null && isTleStaleAgeDays(a);
+  }
 
   /// 几何计算所依据的时刻（UTC）；与极坐标图上的点/弧同源。
   DateTime? get geometryTime => _geometryTime;
@@ -373,6 +384,8 @@ class _SkyPageState extends State<SkyPage> {
           group: _c.group,
           onChanged: _c.setGroup,
           lastUpdated: _c.lastUpdated,
+          freshnessLabel: _c.freshnessLabel,
+          stale: _c.tleStale,
         ),
         if (_c.error != null) _ErrorBanner(error: _c.error!, onRetry: _c.refresh),
         // 顶部刷新指示：2px 发丝进度条，不抢视觉。
@@ -583,10 +596,18 @@ class _GroupChips extends StatelessWidget {
     required this.group,
     required this.onChanged,
     required this.lastUpdated,
+    this.freshnessLabel,
+    this.stale = false,
   });
   final TleGroup group;
   final ValueChanged<TleGroup> onChanged;
   final DateTime? lastUpdated;
+
+  /// TLE 新鲜度标注（基于真实 epoch）；无 TLE 为 null。
+  final String? freshnessLabel;
+
+  /// 是否过期（warning 着色）。
+  final bool stale;
 
   @override
   Widget build(BuildContext context) {
@@ -606,12 +627,32 @@ class _GroupChips extends StatelessWidget {
                     ))
                 .toList(),
           ),
-          if (lastUpdated != null)
+          if (lastUpdated != null || freshnessLabel != null)
             Padding(
               padding: const EdgeInsets.only(top: AppTokens.spacingS),
-              child: Text(
-                '更新于 ${lastUpdated!.toLocal().toString().substring(11, 19)}',
-                style: AppTokens.auxiliary,
+              child: Wrap(
+                spacing: AppTokens.spacingM,
+                runSpacing: AppTokens.spacingS,
+                children: [
+                  if (lastUpdated != null)
+                    Text(
+                      '更新于 ${lastUpdated!.toLocal().toString().substring(11, 19)}',
+                      style: AppTokens.auxiliary.copyWith(
+                        fontSize: AppTokens.annotationFontSize,
+                        color: AppTokens.textAt(AppTokens.textAlphaTertiary),
+                      ),
+                    ),
+                  if (freshnessLabel != null)
+                    Text(
+                      freshnessLabel!,
+                      style: AppTokens.auxiliary.copyWith(
+                        fontSize: AppTokens.annotationFontSize,
+                        color: stale
+                            ? AppTokens.warning
+                            : AppTokens.textAt(AppTokens.textAlphaTertiary),
+                      ),
+                    ),
+                ],
               ),
             ),
         ],

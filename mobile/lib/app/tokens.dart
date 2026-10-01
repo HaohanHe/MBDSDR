@@ -160,6 +160,11 @@ abstract final class AppTokens {
   /// 峰值保持每秒回落的 dB 数（克制：慢回落、不抖动，信号掉落后缓慢衰减）。
   static const double sMeterPeakDecayDbPerSec = 4.0;
 
+  // ---------------------------------------------------------------- TLE 新鲜度
+  // TLE 随轨道摄动逐渐失准；超过该天数视为过期（仅供参考，不保证几何精度）。
+  /// TLE 视为新鲜的最大天数：epoch 距今超过即标「过期」。
+  static const double tleFreshMaxDays = 14.0;
+
   // ---------------------------------------------------------------- RTL-SDR 硬件范围
   static const double freqMinHz = 24e6;
   static const double freqMaxHz = 1700e6;
