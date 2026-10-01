@@ -590,16 +590,36 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
     }
 
     // --- Fixed user markers: vertical named lines on the trace ---------------
-    // Distinct from VFO band boxes and temporary auto peaks: thin quiet lines.
-    for (const auto& fm : fixedMarkers_) {
+    // Three-layer visual separation: auto peaks = accent triangles (peak table);
+    // VFO = colored band boxes / solid edges; fixed markers = thin quiet lines,
+    // SELECTED = amber dashed + handle dot (kFixedMarkerSelColor). Never blends
+    // with the VFO band fill.
+    for (int i = 0; i < fixedMarkers_.size(); ++i) {
+        const auto& fm = fixedMarkers_[i];
         const int x = xForFreq(fm.freqHz, fLo, span);
         if (x < trace.left() || x > trace.right()) continue;
-        QColor lc = QColor(tokens::kAccent);
-        lc.setAlphaF(tokens::kVfoBoxSelEdgeAlpha);
-        p.setPen(QPen(lc, tokens::kVfoBoxLineWidth));
+        const bool sel = (i == selectedFixedIdx_);
+        QPen linePen;
+        if (sel) {
+            QColor sc = QColor(tokens::kFixedMarkerSelColor);
+            linePen = QPen(sc, tokens::kFixedMarkerLineWidth + 1, Qt::DashLine);
+        } else {
+            QColor lc = QColor(tokens::kAccent);
+            lc.setAlphaF(tokens::kVfoBoxSelEdgeAlpha);
+            linePen = QPen(lc, tokens::kFixedMarkerLineWidth);
+        }
+        p.setPen(linePen);
         p.drawLine(x, trace.top(), x, trace.bottom());
+        // Handle dot at the trace top for the selected marker (touch target cue).
+        if (sel) {
+            QColor hc = QColor(tokens::kFixedMarkerSelColor);
+            p.setPen(Qt::NoPen); p.setBrush(hc);
+            const int r = tokens::scaled(3);
+            p.drawEllipse(QPointF(x, trace.top()), r, r);
+        }
         if (!fm.name.isEmpty()) {
-            p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary2), 1));
+            p.setPen(QPen(tokens::rgbaA(sel ? tokens::kTextAlphaPrimary
+                                           : tokens::kTextAlphaTertiary2), 1));
             p.drawText(x + tokens::scaled(2), trace.top() + tokens::scaled(12),
                        QString("%1 %2").arg(fm.name).arg(fm.freqHz / 1e6, 0, 'f', 3));
         }
@@ -777,6 +797,24 @@ void SpectrumDisplay::mousePressEvent(QMouseEvent* e) {
             panRefX_ = pos.x();
             return;
         }
+        // Fixed markers take priority: a click/tap near a line selects+drags it.
+        const int hitTol = tokens::scaled(tokens::kTouchMinDim) / 2;
+        int hitFixed = -1;
+        for (int i = 0; i < fixedMarkers_.size(); ++i) {
+            const int x = xForFreq(fixedMarkers_[i].freqHz, fLo, span);
+            if (std::abs(pos.x() - x) <= hitTol) { hitFixed = i; break; }
+        }
+        if (hitFixed >= 0) {
+            selectedFixedIdx_ = hitFixed;
+            dragFixedIdx_ = hitFixed;
+            grab_ = Grab::FixedMarker;
+            downFixedFreqHz_ = fixedMarkers_[hitFixed].freqHz;
+            update();
+            e->accept();
+            return;
+        }
+        // Click on empty plot deselects the current fixed marker.
+        selectedFixedIdx_ = -1;
         if (!markers_.isEmpty()) {
             const int idx = findMarkerAt(pos.x(), fLo, span);
             int selId = -1;
@@ -865,6 +903,13 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
         update();
         break;
     }
+    case Grab::FixedMarker: {
+        if (dragFixedIdx_ >= 0 && dragFixedIdx_ < fixedMarkers_.size()) {
+            fixedMarkers_[dragFixedIdx_].freqHz = freqForX(pos.x(), fLo, span);
+            update();
+        }
+        break;
+    }
     default: {
         // No grab: this is the hover measurement cursor. Only track it over the
         // trace / waterfall data areas; divider/VFO drags suppress it via the
@@ -880,7 +925,12 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
 }
 
 void SpectrumDisplay::mouseReleaseEvent(QMouseEvent* e) {
-    if (grab_ == Grab::VfoBody && grabVfoId_ >= 0) {
+    if (grab_ == Grab::FixedMarker) {
+        if (dragFixedIdx_ >= 0) {
+            dragFixedIdx_ = -1;
+            emit fixedMarkersEdited();   // persist the dragged marker
+        }
+    } else if (grab_ == Grab::VfoBody && grabVfoId_ >= 0) {
         double fLo, fHi, span;
         visibleWindow(fLo, fHi, span);
         // A click (little or no drag) settles the selected VFO on the pointer.
@@ -904,6 +954,28 @@ void SpectrumDisplay::mouseDoubleClickEvent(QMouseEvent* e) {
     viewCenterHz_ = freqForX(e->pos().x(), fLo, span);
     publishVisibleRange();
     update();
+}
+
+void SpectrumDisplay::keyPressEvent(QKeyEvent* e) {
+    if (selectedFixedIdx_ >= 0 && selectedFixedIdx_ < fixedMarkers_.size()) {
+        double fLo, fHi, span;
+        visibleWindow(fLo, fHi, span);
+        const double step = span / tokens::kFixedMarkerKeyStepDiv;  // 0.5% of view
+        if (e->key() == Qt::Key_Left) {
+            fixedMarkers_[selectedFixedIdx_].freqHz -= step;
+            update(); emit fixedMarkersEdited(); e->accept(); return;
+        }
+        if (e->key() == Qt::Key_Right) {
+            fixedMarkers_[selectedFixedIdx_].freqHz += step;
+            update(); emit fixedMarkersEdited(); e->accept(); return;
+        }
+        if (e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) {
+            fixedMarkers_.removeAt(selectedFixedIdx_);
+            selectedFixedIdx_ = -1;
+            update(); emit fixedMarkersEdited(); e->accept(); return;
+        }
+    }
+    QWidget::keyPressEvent(e);
 }
 
 void SpectrumDisplay::wheelEvent(QWheelEvent* e) {

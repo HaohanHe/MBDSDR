@@ -163,12 +163,16 @@ signals:
     void vfoMarkerCenterTuned(int id, double freqHz);
     void vfoMarkerBandwidthChanged(int id, double bwHz);
 
+    // Fixed markers edited (drag / keyboard nudge / delete) -- container persists.
+    void fixedMarkersEdited();
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
 public:
     void wheelEvent(QWheelEvent* event) override;  // public for offscreen tests
@@ -216,13 +220,18 @@ private:
     bool haveFrame_ = false;
 
     // ---- Pointer / interaction state --------------------------------------
-    enum class Grab { None, Tune, Pan, Divider, VfoBody, VfoEdgeL, VfoEdgeR };
+    enum class Grab { None, Tune, Pan, Divider, VfoBody, VfoEdgeL, VfoEdgeR, FixedMarker };
     Grab grab_ = Grab::None;
     bool dividerHot_ = false;
     QPoint downPos_;          // press position (widget coords)
     double downFreqHz_ = 0.0; // frequency under the press (tune / pan reference)
     int    panRefX_ = 0;      // last panning pixel x
     int    grabVfoId_ = -1;   // marker being dragged, -1 = legacy/root
+    // Fixed-marker interaction: selected index (-1 = none), dragged index, and
+    // the frequency the drag started from.
+    int selectedFixedIdx_ = -1;
+    int dragFixedIdx_ = -1;
+    double downFixedFreqHz_ = 0.0;
     // Tooltip cache so setToolTip() only runs when the read-out changes.
     int     tipVfoId_ = -1;
     QString tipText_;

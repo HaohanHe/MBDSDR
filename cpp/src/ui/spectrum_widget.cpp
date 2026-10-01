@@ -264,6 +264,10 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
             this, &SpectrumWidget::vfoMarkerCenterTuned);
     connect(canvas_, &SpectrumDisplay::vfoMarkerBandwidthChanged,
             this, &SpectrumWidget::vfoMarkerBandwidthChanged);
+    // Fixed-marker edits (drag / nudge / delete) persist immediately.
+    connect(canvas_, &SpectrumDisplay::fixedMarkersEdited,
+            this, &SpectrumWidget::saveFixedMarkers);
+    canvas_->setFocusPolicy(Qt::StrongFocus);
 
     // ---- Bottom peak table -------------------------------------------------
     peakTable_ = new QTableWidget(0, 4, this);
