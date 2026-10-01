@@ -176,8 +176,10 @@ void SpectrumEngine::setDemodMode(const QString& m) {
 void SpectrumEngine::setSquelchThreshold(float db) { squelch_.setThresholdDb(db); }
 void SpectrumEngine::setSquelchEnabled(bool e) { squelch_.setEnabled(e); }
 
-double SpectrumEngine::scanBand(double lowHz, double highHz, double stepHz) {
+double SpectrumEngine::scanBand(double lowHz, double highHz, double stepHz,
+                                  double* peakFreqHzOut) {
     double peakDb = -200.0;
+    double peakFreq = lowHz;
     for (double f = lowHz; f <= highHz; f += stepHz) {
         std::vector<std::complex<float>> iq(1024);
         {
@@ -189,8 +191,9 @@ double SpectrumEngine::scanBand(double lowHz, double highHz, double stepHz) {
         double rms = 0;
         for (auto c : iq) rms += std::norm(c);
         rms = 10 * std::log10(rms / iq.size() + 1e-10);
-        if (rms > peakDb) peakDb = rms;
+        if (rms > peakDb) { peakDb = rms; peakFreq = f; }
     }
+    if (peakFreqHzOut) *peakFreqHzOut = peakFreq;
     return peakDb;
 }
 

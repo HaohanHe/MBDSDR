@@ -69,7 +69,11 @@ public:
     // Pass nullptr to restore the default device sink. The engine takes
     // ownership; the previous injected sink is destroyed.
     void setTestAudioSink(std::unique_ptr<IAudioSink> sink);
-    double scanBand(double lowHz, double highHz, double stepHz);
+    // Sweep [lowHz, highHz] in stepHz, returning the peak RMS dBFS observed.
+    // When peakFreqHzOut is non-null it is filled with the frequency at which
+    // the peak occurred (so callers can retune to the hit).
+    double scanBand(double lowHz, double highHz, double stepHz,
+                    double* peakFreqHzOut = nullptr);
     bool tryConnectRtl();
     void disconnectSource();
     void setMuted(bool m);  // returns peak dBFS
