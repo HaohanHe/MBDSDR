@@ -70,6 +70,8 @@
 #include "ai/ai_context.h"
 #include "ai/task_orchestrator.h"
 #include "ai/task_runner.h"
+#include "ai/plan_parser.h"
+#include "ai/sat_task_planner.h"
 #include "ui/task_steps_view.h"
 #include "ui/sky_view.h"
 #include "ui/s_meter.h"
@@ -1511,6 +1513,7 @@ MainWindow::MainWindow(QWidget* parent)
     aiTemplateCombo_->addItem(QString::fromUtf8("扫频找信号并记录"), "sweep");
     aiTemplateCombo_->addItem(QString::fromUtf8("目标频率捕获"), "target");
     aiTemplateCombo_->addItem(QString::fromUtf8("固定频率录制"), "fixed");
+    aiTemplateCombo_->addItem(QString::fromUtf8("卫星过境接收"), "sat");
     aiLay->addWidget(aiTemplateCombo_);
 
     auto* paramRow = new QHBoxLayout;
@@ -1534,6 +1537,30 @@ MainWindow::MainWindow(QWidget* parent)
     paramRow->addWidget(aiParamHighHz_);
     paramRow->addWidget(aiParamMode_);
     aiLay->addLayout(paramRow);
+
+    // Satellite-pass params: station lat/lon + satellite name (substring match
+    // against offline TLEs). Neutral defaults, user-editable; no baked-in names.
+    auto* satRow = new QHBoxLayout;
+    aiParamLat_ = new QDoubleSpinBox(aiPage);
+    aiParamLat_->setObjectName("aiParamLat");
+    aiParamLat_->setRange(-90.0, 90.0);
+    aiParamLat_->setDecimals(2);
+    aiParamLat_->setSuffix(QString::fromUtf8("°lat"));
+    aiParamLat_->setValue(40.0);
+    aiParamLon_ = new QDoubleSpinBox(aiPage);
+    aiParamLon_->setObjectName("aiParamLon");
+    aiParamLon_->setRange(-180.0, 180.0);
+    aiParamLon_->setDecimals(2);
+    aiParamLon_->setSuffix(QString::fromUtf8("°lon"));
+    aiParamLon_->setValue(-100.0);
+    aiParamSatName_ = new QLineEdit(aiPage);
+    aiParamSatName_->setObjectName("aiParamSatName");
+    aiParamSatName_->setPlaceholderText(QString::fromUtf8("卫星名(如 CBERS)"));
+    aiParamSatName_->setText(QString::fromLatin1("CBERS"));
+    satRow->addWidget(aiParamLat_);
+    satRow->addWidget(aiParamLon_);
+    satRow->addWidget(aiParamSatName_, 1);
+    aiLay->addLayout(satRow);
 
     auto* runRow = new QHBoxLayout;
     aiRunTaskBtn_ = new QPushButton(QString::fromUtf8("运行任务"), aiPage);
@@ -1572,8 +1599,8 @@ MainWindow::MainWindow(QWidget* parent)
         aiInput_->setEnabled(hasKey);
         sendBtn->setEnabled(hasKey);
         aiStatus_->setText(hasKey
-            ? "已配置 API Key — AI 功能接入中"
-            : "AI 助手将在这里接入（需在设置中配置 API Key）");
+            ? QString::fromUtf8("已配置 API Key — AI 功能接入中")
+            : QString::fromUtf8("未配置模型：对话/LLM 规划不可用，可使用下方确定性自主任务模板"));
     }
     rightTabs_->addTab(aiPage, "AI 助手");
 
@@ -2157,6 +2184,19 @@ MainWindow::MainWindow(QWidget* parent)
         aiSessionStore_->appendMessage(aiCurSessionId_,
             mbdsdr::ai::SessionMessage{"assistant", t});
         aiRenderChat();
+        // Autonomous task bridge: if the model replied with a trusted JSON plan
+        // block, execute it for real on the worker thread.  If it did NOT parse
+        // (no plan block / unknown tool), the reply stays a normal chat message
+        // -- we never invent steps.
+        if (!aiRunner_ || aiRunner_->isRunning()) return;
+        ai::ParsedPlan pp = ai::parsePlanFromLlm(t);
+        if (pp.ok) {
+            aiSessionStore_->appendMessage(aiCurSessionId_,
+                mbdsdr::ai::SessionMessage{"assistant",
+                    QString::fromUtf8("已按规划执行 %1 步").arg(pp.plan.steps.size())});
+            aiRenderChat();
+            startRunnerPlan(pp.plan);
+        }
     });
     connect(agent_, &ai::Agent::partialReady, this, [this](const QString& acc) {
         aiTransient_ = acc;          // replaces the previous transient, no dup
@@ -4700,15 +4740,50 @@ void MainWindow::onRunAutoTask() {
     const QString mode   = aiParamMode_   ? aiParamMode_->currentText() : QStringLiteral("NFM");
 
     ai::TaskPlan plan;
-    if (kind == QLatin1String("target"))
+    if (kind == QLatin1String("target")) {
         plan = ai::planTargetCapture(highHz, mode);
-    else if (kind == QLatin1String("fixed"))
+    } else if (kind == QLatin1String("fixed")) {
         plan = ai::planFixedFrequencyRecord(lowHz, mode, 12500.0);
-    else
+    } else if (kind == QLatin1String("sat")) {
+        // Real SGP4 auto-tune from the offline TLE cache. No TLE / no pass /
+        // unknown downlink => honest message, never a fake frequency.
+        const double lat = aiParamLat_ ? aiParamLat_->value() : 40.0;
+        const double lon = aiParamLon_ ? aiParamLon_->value() : -100.0;
+        const QString satName = aiParamSatName_ ? aiParamSatName_->text().trimmed()
+                                                 : QStringLiteral("CBERS");
+        ai::SatTaskResult sr = ai::planSatelliteCapture(
+            satName, lat, lon, QDateTime::currentDateTimeUtc(), 12);
+        if (!sr.ok) {
+            const QString msg = QString::fromUtf8("卫星选频失败：%1").arg(sr.error);
+            if (aiStatus_) aiStatus_->setText(msg);
+            if (aiSessionStore_ && !aiCurSessionId_.isEmpty()) {
+                aiSessionStore_->appendMessage(aiCurSessionId_,
+                    mbdsdr::ai::SessionMessage{"assistant", msg});
+                aiRenderChat();
+            }
+            return;
+        }
+        plan = sr.plan;
+        const QString note = QString::fromUtf8(
+            "%1：AOS %2 UTC，最大仰角 %3°，捕获频率 %4 Hz")
+            .arg(sr.satName, sr.aosUtc.toUTC().toString("HH:mm"),
+                 QString::number(sr.maxElDeg, 'f', 1),
+                 QString::number(sr.captureFreqHz, 'f', 0));
+        if (aiSessionStore_ && !aiCurSessionId_.isEmpty()) {
+            aiSessionStore_->appendMessage(aiCurSessionId_,
+                mbdsdr::ai::SessionMessage{"assistant", note});
+            aiRenderChat();
+        }
+    } else {
         plan = ai::planSweepFindAndRecord(lowHz, highHz, 100e3, mode,
                                           QString::fromUtf8("自动命中"));
+    }
 
-    // UI-thread bookkeeping, then hand off to the worker thread (queued).
+    startRunnerPlan(plan);
+}
+
+void MainWindow::startRunnerPlan(const mbdsdr::ai::TaskPlan& plan) {
+    if (!aiRunner_) return;
     aiLiveSteps_.clear();
     if (aiTaskSteps_) aiTaskSteps_->clear();
     if (aiTaskHint_) aiTaskHint_->setVisible(false);
