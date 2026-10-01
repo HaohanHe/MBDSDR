@@ -148,6 +148,18 @@ abstract final class AppTokens {
   /// 最贴近当前帧的一层历史轨迹起点 alpha，再按 decay^k 逐帧衰减。
   static const double persistenceBaseAlpha = 0.34;
 
+  // ---------------------------------------------------------------- S-meter
+  // 诚实边界：RTL-SDR 无前端增益/路径校准，读数域为 dBFS（相对），
+  // 不冒充 dBm。S 单位按「相对噪声底每 6 dB 一档」的标准 S-meter 语义映射。
+  /// 标准 S-meter 每档对应的 dB 数：1 S = 6 dB。
+  static const double sMeterDbPerUnit = 6.0;
+
+  /// S-meter 满刻度 S 值（S0..S9 共 10 档）。
+  static const int sMeterMaxUnits = 9;
+
+  /// 峰值保持每秒回落的 dB 数（克制：慢回落、不抖动，信号掉落后缓慢衰减）。
+  static const double sMeterPeakDecayDbPerSec = 4.0;
+
   // ---------------------------------------------------------------- RTL-SDR 硬件范围
   static const double freqMinHz = 24e6;
   static const double freqMaxHz = 1700e6;

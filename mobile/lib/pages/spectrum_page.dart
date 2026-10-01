@@ -16,6 +16,7 @@ import '../models/bookmark.dart';
 import '../models/radio_state.dart';
 import '../services/radio_controller.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/s_meter.dart';
 import '../widgets/spectrum_display.dart';
 import '../widgets/timing_panel.dart';
 
@@ -261,9 +262,16 @@ class _ConnectedBodyState extends State<_ConnectedBody> {
 
   @override
   Widget build(BuildContext context) {
+    final lvl = _frame == null
+        ? null
+        : spectrumLevelFromFrame(_frame!);
     return Column(
       children: [
         _StatusBar(controller: widget.controller, frame: _frame),
+        SMeter(
+          signalDbfs: lvl?.signalDbfs,
+          noiseFloorDbfs: lvl?.noiseFloorDbfs,
+        ),
         Expanded(
           child: SpectrumDisplay(
             frame: _frame,
