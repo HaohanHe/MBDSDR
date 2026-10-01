@@ -132,6 +132,18 @@ public:
     // a malformed line (caller treats 0 as "unknown", never as a real sat).
     static int catalogNumber(const TleEntry& e);
 
+    // ---- Freshness (pure, UTC) ----------------------------------------
+    // Parse a TLE line-1 epoch (cols 19..32, YYDDD.DDDDD) into a UTC QDateTime.
+    // Returns an invalid QDateTime on a malformed line (never a fabricated date).
+    static QDateTime parseTleEpoch(const QString& line1);
+    // Whole days from `epoch` to `now` (>=0 if now is after epoch). Pure.
+    static double daysSinceEpoch(const QDateTime& epoch, const QDateTime& now);
+
+    // Point the celestrak fetcher at a different base URL (default: the real
+    // celestrak gp.php endpoint). Tests use a loopback QTcpServer here; production
+    // leaves the default. Must be set before fetch().
+    void setBaseUrl(const QString& baseUrl) { baseUrl_ = baseUrl; }
+
     // Read the on-disk TLE cache (valid==false if absent/unreadable).
     TleCache cachedTle() const;
 
@@ -166,6 +178,8 @@ private:
                         int hoursAhead);
 
     QNetworkAccessManager* nam_ = nullptr;
+    QString baseUrl_ =
+        QStringLiteral("https://celestrak.org/NORAD/elements/gp.php");
 };
 
 } // namespace dsp

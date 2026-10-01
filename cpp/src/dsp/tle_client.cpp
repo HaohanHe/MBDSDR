@@ -259,6 +259,27 @@ QList<TleEntry> TleClient::parseTle(const QByteArray& blob) {
     return out;
 }
 
+QDateTime TleClient::parseTleEpoch(const QString& line1) {
+    int yr = line1.mid(18, 2).trimmed().toInt();
+    bool ok = yr >= 0;
+    double day = line1.mid(20, 12).trimmed().toDouble(&ok);
+    if (!ok || yr < 0 || day <= 0.0) return QDateTime();
+    int year = (yr < 57) ? 2000 + yr : 1900 + yr;
+    QDate d0(year, 1, 1);
+    if (!d0.isValid()) return QDateTime();
+    double dayFrac = day - 1.0;
+    qint64 dayInt = static_cast<qint64>(std::floor(dayFrac));
+    double secs = (dayFrac - dayInt) * 86400.0;
+    QDateTime midnight(d0.addDays(dayInt), QTime(0, 0, 0), Qt::UTC);
+    return QDateTime::fromMSecsSinceEpoch(
+        midnight.toMSecsSinceEpoch() + static_cast<qint64>(secs * 1000.0), Qt::UTC);
+}
+
+double TleClient::daysSinceEpoch(const QDateTime& epoch, const QDateTime& now) {
+    if (!epoch.isValid() || !now.isValid()) return -1.0;
+    return epoch.secsTo(now) / 86400.0;
+}
+
 void TleClient::fetch(double stationLatDeg, double stationLonDeg, int hoursAhead) {
     if (!std::isfinite(stationLatDeg) || !std::isfinite(stationLonDeg)) {
         emit fetchFailed(QStringLiteral("no-station"));
@@ -278,11 +299,11 @@ void TleClient::fetch(double stationLatDeg, double stationLonDeg, int hoursAhead
     // panel has real orbit elements online. Offline it degrades honestly to the
     // builtin snapshot / cache (no nav sats -> empty state).
     const QStringList groups = {
-        QStringLiteral("stations"), QStringLiteral("weather"), QStringLiteral("gnss")};
+        QStringLiteral("stations"), QStringLiteral("weather"),
+        QStringLiteral("gnss"),     QStringLiteral("amateur")};
     sh->pending = groups.size();
     for (const QString& g : groups) {
-        QUrl url(QStringLiteral(
-            "https://celestrak.org/NORAD/elements/gp.php?GROUP=%1&FORMAT=tle").arg(g));
+        QUrl url(baseUrl_ + QStringLiteral("?GROUP=%1&FORMAT=tle").arg(g));
         QNetworkRequest req(url);
         req.setHeader(QNetworkRequest::UserAgentHeader,
                       QStringLiteral("MBDSDR/1.0 (+satellite pass viewer)"));

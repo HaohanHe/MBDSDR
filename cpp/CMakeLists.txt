@@ -281,6 +281,11 @@ add_executable(ui_shot_geo tests/ui_screenshot_geo.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_geo PRIVATE src build/ui_shot_geo_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_geo PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
+# TLE freshness panel screenshot. Offscreen; not in ctest.
+add_executable(ui_shot_tle tests/ui_screenshot_tle.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_tle PRIVATE src build/ui_shot_tle_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_tle PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
 # Device-info panel + dynamic sample-rate combo (real loopback RTL0 handshake).
 # Offscreen; not in ctest. Writes cpp/scratch/ui_devices.png + ui_devices_empty.png.
 add_executable(ui_shot_devices tests/ui_screenshot_devices.cpp ${SHOT_SRCS} ${HEADERS})
@@ -497,6 +502,13 @@ add_executable(test_nav_sats tests/test_nav_sats.cpp src/dsp/tle_client.cpp src/
 target_include_directories(test_nav_sats PRIVATE src)
 target_link_libraries(test_nav_sats PRIVATE Qt6::Test Qt6::Network Qt6::Concurrent Qt6::Core)
 add_test(NAME nav_sats COMMAND test_nav_sats)
+
+# TLE freshness: loopback HTTP pull -> cache w/ timestamp, epoch parse, offline
+# cache->builtin fallback, no duplicate per-group requests.
+add_executable(test_tle_fetch tests/test_tle_fetch.cpp src/dsp/tle_client.cpp src/dsp/sgp4.cpp)
+target_include_directories(test_tle_fetch PRIVATE src)
+target_link_libraries(test_tle_fetch PRIVATE Qt6::Test Qt6::Network Qt6::Concurrent Qt6::Core)
+add_test(NAME tle_fetch COMMAND test_tle_fetch)
 
 # LEO PNT geometry availability (pure, prediction-only) and S-meter mapping.
 add_executable(test_pnt_geometry tests/test_pnt_geometry.cpp)
