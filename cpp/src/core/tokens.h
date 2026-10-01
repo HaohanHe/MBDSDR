@@ -120,6 +120,14 @@ inline constexpr int   kDecimMaxFactor = 8;
 // Lowpass corner as a fraction of the DECIMATED Nyquist (avoids aliasing).
 inline constexpr double kDecimLpfFrac = 0.80;
 
+// ---- Fixed marker interaction -------------------------------------------
+// Keyboard nudge = visible-span / kFixedMarkerKeyStepDiv (one key step = 0.5%
+// of the view), so the granularity scales with zoom.
+inline constexpr int    kFixedMarkerKeyStepDiv = 200;
+// Selected fixed-marker line: amber dashed + handle dot. Unselected = quiet.
+inline constexpr const char* kFixedMarkerSelColor = "#e0b35a";
+inline constexpr int    kFixedMarkerLineWidth = 1;
+
 // =====================================================================
 // Corner radii
 // =====================================================================

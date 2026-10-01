@@ -13,6 +13,7 @@
 #include <QTabWidget>
 #include <QDoubleSpinBox>
 #include <QComboBox>
+#include <QMouseEvent>
 #include <QDialog>
 #include <QList>
 #include <cstdlib>
@@ -60,9 +61,16 @@ int main(int argc, char** argv) {
             cv->setPersistenceMode(2);   // high: ghost trail under live trace
             cv->addFixedMarker(cv->viewCenterHz() - 200e3, "M1");
             cv->addFixedMarker(cv->viewCenterHz() + 350e3, "M2");
+            // Select M1 so its amber dashed line + handle dot shows.
+            const int mx = cv->xForFrequency(cv->viewCenterHz() - 200e3);
+            QMouseEvent press(QEvent::MouseButtonPress,
+                              QPoint(mx, cv->height() / 3),
+                              Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(cv, &press);
         });
         grabLater(&win, dir + "/ui_persistence.png", 2600, app);
         grabLater(&win, dir + "/ui_markers.png", 2900, app);
+        grabLater(&win, dir + "/ui_markers_interact.png", 3100, app);
     }
     if (QComboBox* d = win.findChild<QComboBox*>("decimCombo")) {
         QTimer::singleShot(1500, [d]() { d->setCurrentIndex(2); });  // x4
