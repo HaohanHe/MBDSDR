@@ -349,6 +349,7 @@ private:
     QPushButton*    recLibCopyBtn_   = nullptr;
     QPushButton*    recLibDelBtn_    = nullptr;
     QPushButton*    recLibPlayBtn_   = nullptr;   // load/play|stop toggle
+    QPushButton*    recLibAnalyzeBtn_ = nullptr;   // 该行 -> 离线流式分析
     QVector<mbdsdr::ui::RecordingEntry> recLibEntries_;
     std::vector<float> recLibPcm_;                 // decoded 48k mono float buffer
     qint64          recLibPcmPos_   = 0;           // playback cursor (samples)
@@ -358,6 +359,22 @@ private:
     void onRecLibPlayToggle();                     // load+play / stop
     void onRecLibDelete();                         // confirm -> delete real files
     void onRecLibCopyPath();                       // copy selected row's full path
+    void onRecLibAnalyze();                        // 选中行 -> engine 离线分析
+
+    // ---- Offline file analysis (streaming through the real DSP chain) ------
+    // Opens a captured file (WAV/SigMF/raw) as the engine source; the SAME
+    // spectrum/waterfall/channelizer/demod chain processes the file in ~25 ms
+    // chunks. Pause / seek move the REAL file offset; offscreen has no audio
+    // device, so the demod output is shown honestly (no fake playback).
+    QLabel*         offAnaInfo_  = nullptr;        // path + 格式/参数
+    QPushButton*    offAnaOpenBtn_   = nullptr;
+    QPushButton*    offAnaPauseBtn_  = nullptr;
+    QSlider*        offAnaSeek_  = nullptr;       // 0..1000
+    QLabel*         offAnaPos_    = nullptr;      // 0.0s / 12.3s
+    QTimer*         offAnaTimer_  = nullptr;      // poll engine offlinePosition
+    bool            offAnaPaused_ = false;
+    void openOfflinePath(const QString& path);    // engine->openOfflineFile + UI
+
 
     // Right tabs
     QTabWidget*     rightTabs_   = nullptr;

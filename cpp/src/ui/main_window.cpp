@@ -1322,18 +1322,48 @@ MainWindow::MainWindow(QWidget* parent)
         recLibCopyBtn_    = new QPushButton("复制路径", lBox);
         recLibDelBtn_     = new QPushButton("删除", lBox);
         recLibPlayBtn_    = new QPushButton("播放", lBox);
+        recLibAnalyzeBtn_ = new QPushButton("分析", lBox);
         // Touch: every row action is a >=44px tap target (tokens, scaled()).
-        for (auto* b : {recLibRefreshBtn_, recLibCopyBtn_, recLibDelBtn_, recLibPlayBtn_})
+        for (auto* b : {recLibRefreshBtn_, recLibCopyBtn_, recLibDelBtn_,
+                        recLibPlayBtn_, recLibAnalyzeBtn_})
             b->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
         rBtnRow->addWidget(recLibRefreshBtn_);
         rBtnRow->addWidget(recLibCopyBtn_);
         rBtnRow->addWidget(recLibDelBtn_);
         rBtnRow->addWidget(recLibPlayBtn_);
+        rBtnRow->addWidget(recLibAnalyzeBtn_);
         lBoxLay->addLayout(rBtnRow);
         recLibPlayStatus_ = new QLabel("未加载", lBox);
         recLibPlayStatus_->setObjectName("monoInfo");
         lBoxLay->addWidget(recLibPlayStatus_);
         recLay->addWidget(lBox, 1);
+
+        // -- offline file analysis: stream the file through the real DSP chain --
+        auto* aBox = new QGroupBox("离线分析", recPage);
+        auto* aBoxLay = new QVBoxLayout(aBox);
+        aBoxLay->setSpacing(tokens::kSpacingS);
+        offAnaInfo_ = new QLabel(QStringLiteral("未打开文件"), aBox);
+        offAnaInfo_->setObjectName("monoInfo");
+        offAnaInfo_->setWordWrap(true);
+        aBoxLay->addWidget(offAnaInfo_);
+        auto* aBtnRow = new QHBoxLayout;
+        offAnaOpenBtn_   = new QPushButton("打开文件…", aBox);
+        offAnaPauseBtn_  = new QPushButton("暂停", aBox);
+        offAnaPauseBtn_->setEnabled(false);
+        offAnaOpenBtn_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+        offAnaPauseBtn_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+        aBtnRow->addWidget(offAnaOpenBtn_);
+        aBtnRow->addWidget(offAnaPauseBtn_);
+        aBoxLay->addLayout(aBtnRow);
+        offAnaSeek_ = new QSlider(Qt::Horizontal, aBox);
+        offAnaSeek_->setRange(0, 1000);
+        offAnaSeek_->setValue(0);
+        offAnaPos_ = new QLabel("-- / --", aBox);
+        offAnaPos_->setObjectName("dockHint");
+        aBoxLay->addWidget(offAnaSeek_);
+        aBoxLay->addWidget(offAnaPos_);
+        recLay->addWidget(aBox);
+
 
         rightTabs_->addTab(recPage, "录制库");
 
@@ -1345,6 +1375,8 @@ MainWindow::MainWindow(QWidget* parent)
                 this, &MainWindow::onRecLibDelete);
         connect(recLibPlayBtn_, &QPushButton::clicked,
                 this, &MainWindow::onRecLibPlayToggle);
+        connect(recLibAnalyzeBtn_, &QPushButton::clicked,
+                this, &MainWindow::onRecLibAnalyze);
 
         // Chunked playback: push decoded 48 kHz mono float ~20 ms at a time into
         // the EXISTING AudioOutput write channel. Offscreen/headless has no
@@ -1362,6 +1394,40 @@ MainWindow::MainWindow(QWidget* parent)
                                    recLibPcm_.begin() + recLibPcmPos_ + n);
             recLibPcmPos_ += n;
             engine_->audioOutput()->write(blk);
+        });
+
+        // Offline analysis controls: open (file dialog), pause/resume, real seek.
+        connect(offAnaOpenBtn_, &QPushButton::clicked, this, [this]() {
+            const QString dir = engine_ ? engine_->recordingDir() : QString();
+            const QString f = QFileDialog::getOpenFileName(
+                this, QStringLiteral("打开捕获文件"), dir,
+                QStringLiteral("捕获文件 (*.wav *.sigmf-data *.sigmf-meta);;"
+                               "SigMF IQ (*.sigmf-data *.sigmf-meta);;"
+                               "WAV 音频 (*.wav);;"
+                               "原始复数 (*)"));
+            if (!f.isEmpty()) openOfflinePath(f);
+        });
+        connect(offAnaPauseBtn_, &QPushButton::clicked, this, [this]() {
+            if (!engine_) return;
+            offAnaPaused_ = !offAnaPaused_;
+            engine_->setOfflinePaused(offAnaPaused_);
+            offAnaPauseBtn_->setText(offAnaPaused_ ? "继续" : "暂停");
+        });
+        // Seek only on release so we don't thrash the file cursor on every tick.
+        connect(offAnaSeek_, &QSlider::sliderReleased, this, [this]() {
+            if (engine_) engine_->seekOfflineFraction(offAnaSeek_->value() / 1000.0);
+        });
+        offAnaTimer_ = new QTimer(this);
+        offAnaTimer_->setInterval(200);
+        connect(offAnaTimer_, &QTimer::timeout, this, [this]() {
+            if (!engine_) return;
+            double cur = 0, total = 0;
+            if (!engine_->offlinePosition(cur, total)) { offAnaSeek_->setValue(0);
+                offAnaPos_->setText("-- / --"); return; }
+            offAnaPos_->setText(QString::number(cur, 'f', 1) + "s / " +
+                                QString::number(total, 'f', 1) + "s");
+            if (!offAnaSeek_->isSliderDown())
+                offAnaSeek_->setValue(static_cast<int>(cur / total * 1000.0));
         });
 
         refreshRecLib();
@@ -2473,6 +2539,33 @@ void MainWindow::onRecLibDelete() {
     refreshRecLib();
 }
 
+void MainWindow::onRecLibAnalyze() {
+    const int row = recLibList_->currentRow();
+    if (row < 0 || row >= recLibEntries_.size()) return;
+    openOfflinePath(recLibEntries_[row].wavPath);
+}
+
+void MainWindow::openOfflinePath(const QString& path) {
+    if (!engine_ || path.isEmpty()) return;
+    // WAV audio files need a real sample rate; SigMF carries its own. Raw files
+    // would need a user-supplied rate (out of scope for the library "分析" row,
+    // which always points at a real recorded WAV).
+    const bool ok = engine_->openOfflineFile(path);
+    if (ok) {
+        offAnaPaused_ = false;
+        offAnaPauseBtn_->setEnabled(true);
+        offAnaPauseBtn_->setText("暂停");
+        offAnaInfo_->setText(QStringLiteral("已加载: %1\n流式分析中（频谱/解调来自文件真实数据）")
+                                  .arg(QFileInfo(path).fileName()));
+        offAnaTimer_->start();
+        rightTabs_->setCurrentWidget(recLibList_->parentWidget()); // show panel
+    } else {
+        // engine emits sourceError with the real reason; reflect it honestly.
+        offAnaInfo_->setText(QStringLiteral("打开失败: %1").arg(path));
+    }
+}
+
+
 void MainWindow::onRecLibPlayToggle() {
     // ---- stop / end of file ----
     if (recLibPlaying_) {
@@ -3161,6 +3254,24 @@ void MainWindow::onSourceChanged(const QString& name, bool connected) {
     // sourceCapabilities() here would re-enter the non-recursive mutex and
     // deadlock. Refresh on the next UI turn when the engine lock is free.
     QTimer::singleShot(0, this, [this]() { refreshDeviceCapabilities(); });
+    // Reflect an offline file source in the 离线分析 panel, whatever opened it
+    // (the library "分析" row, the open-file dialog, or a direct engine call).
+    QTimer::singleShot(0, this, [this]() {
+        if (!engine_ || !offAnaInfo_) return;
+        if (engine_->isOfflineFileActive()) {
+            offAnaPaused_ = false;
+            offAnaPauseBtn_->setEnabled(true);
+            offAnaPauseBtn_->setText("暂停");
+            offAnaInfo_->setText(QStringLiteral("已加载文件 · 流式分析中\n频谱/解调来自文件真实数据"));
+            offAnaTimer_->start();
+        } else {
+            offAnaPauseBtn_->setEnabled(false);
+            offAnaInfo_->setText(QStringLiteral("未打开文件"));
+            offAnaTimer_->stop();
+            offAnaSeek_->setValue(0);
+            offAnaPos_->setText("-- / --");
+        }
+    });
 }
 
 // Hotplug event channel (separate from the 1 Hz telemetry poll): the engine
