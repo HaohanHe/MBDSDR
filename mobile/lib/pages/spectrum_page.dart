@@ -570,14 +570,16 @@ class _ControlPanel extends StatelessWidget {
               ],
             ),
             const SizedBox(height: AppTokens.spacingM),
-            // 自动增益开关。
+            // 自动增益开关：未连接时禁用（后端不可达，诚实置灰；连接成功后回读真实
+            // autoGain，并经 setGainMode(0x03)+setAgcMode(0x08) 真实下发）。
             Row(
               children: [
                 const Text('自动增益', style: AppTokens.auxiliary),
                 const Spacer(),
                 Switch(
                   value: controller.autoGain,
-                  onChanged: (v) => controller.setAutoGain(v),
+                  onChanged:
+                      connected ? (v) => controller.setAutoGain(v) : null,
                 ),
               ],
             ),
@@ -592,7 +594,7 @@ class _ControlPanel extends StatelessWidget {
                     max: AppTokens.gainMaxDb,
                     value: controller.gainDb
                         .clamp(AppTokens.gainMinDb, AppTokens.gainMaxDb),
-                    onChanged: controller.autoGain
+                    onChanged: (!connected || controller.autoGain)
                         ? null
                         : (v) => controller.setGainDb(v),
                   ),

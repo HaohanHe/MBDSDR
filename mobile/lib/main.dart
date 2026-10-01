@@ -32,6 +32,21 @@ Future<void> main() async {
   final PlatformPcmSink pcmSink = PlatformPcmSink();
   final RadioController radioController = RadioController(sink: pcmSink);
 
+  // 真实信号活动：静噪门开门（真实解调音频 RMS 过门限/出声）即记一条活动日志。
+  // 数据全部来自真实控制器回读（频率/模式/电平），无连接/无观察时不产生条目。
+  radioController.onSignalActivity = ({
+    required int frequencyHz,
+    required String mode,
+    required double levelDbfs,
+  }) {
+    settings.addActivity(
+      frequencyHz: frequencyHz,
+      mode: mode,
+      levelDbfs: levelDbfs,
+      source: 'squelch',
+    );
+  };
+
   // connect 之前恢复上次的调谐与音频设置。
   await radioController.applySession(
     freqHz: settings.lastFreqHz,

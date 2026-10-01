@@ -89,4 +89,70 @@ void main() {
     expect(find.textContaining('145.8000 MHz'), findsOneWidget);
     expect(find.textContaining('NOAA 19'), findsOneWidget);
   });
+
+  testWidgets('删除单条：带确认，确认后从索引移除并回到空态', (tester) async {
+    final settings = SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    settings.addRecording(RecordingMeta(
+      startedAtEpochMs: DateTime.utc(2024, 6, 1, 10, 30).millisecondsSinceEpoch,
+      frequencyHz: 145800000,
+      mode: 'wfm',
+    ));
+    await tester.pumpWidget(_wrap(RecordingsPage(
+      radio: _StatusRadio(),
+      settings: settings,
+    )));
+    expect(settings.recordings.length, 1);
+
+    // 点删除图标 → 确认对话框。
+    await tester.tap(find.byIcon(Icons.delete_outline));
+    await tester.pumpAndSettle();
+    expect(find.text('删除这条录音'), findsOneWidget);
+    // 取消不删。
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(settings.recordings.length, 1);
+
+    // 再删一次并确认。
+    await tester.tap(find.byIcon(Icons.delete_outline));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+    expect(settings.recordings, isEmpty);
+    expect(find.text('暂无录音'), findsOneWidget);
+  });
+
+  testWidgets('空态时清空按钮禁用；有条目时清空带确认', (tester) async {
+    final settings = SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    await tester.pumpWidget(_wrap(RecordingsPage(
+      radio: _StatusRadio(),
+      settings: settings,
+    )));
+    // 空态：清空按钮禁用。
+    expect(
+      tester
+          .widget<IconButton>(
+            find.widgetWithIcon(IconButton, Icons.delete_sweep_outlined),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    settings.addRecording(RecordingMeta(
+      startedAtEpochMs: DateTime.utc(2024, 6, 1, 10, 30).millisecondsSinceEpoch,
+      frequencyHz: 145800000,
+      mode: 'wfm',
+    ));
+    await tester.pumpWidget(_wrap(RecordingsPage(
+      radio: _StatusRadio(),
+      settings: settings,
+    )));
+    await tester.tap(find.byIcon(Icons.delete_sweep_outlined));
+    await tester.pumpAndSettle();
+    expect(find.text('清空录音索引'), findsOneWidget);
+    await tester.tap(find.text('清空'));
+    await tester.pumpAndSettle();
+    expect(settings.recordings, isEmpty);
+  });
 }
