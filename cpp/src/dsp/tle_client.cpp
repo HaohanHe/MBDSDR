@@ -273,9 +273,13 @@ void TleClient::fetch(double stationLatDeg, double stationLonDeg, int hoursAhead
         QString firstError;
     };
     auto* sh = new Shared;
-    sh->pending = 2;
-
-    auto groups = {QStringLiteral("stations"), QStringLiteral("weather")};
+    // Pull crewed stations, weather sats, AND the GNSS navigation constellations
+    // (GPS/GLONASS/Galileo/BeiDou) so the "visible nav satellites (predicted)"
+    // panel has real orbit elements online. Offline it degrades honestly to the
+    // builtin snapshot / cache (no nav sats -> empty state).
+    const QStringList groups = {
+        QStringLiteral("stations"), QStringLiteral("weather"), QStringLiteral("gnss")};
+    sh->pending = groups.size();
     for (const QString& g : groups) {
         QUrl url(QStringLiteral(
             "https://celestrak.org/NORAD/elements/gp.php?GROUP=%1&FORMAT=tle").arg(g));
@@ -292,7 +296,7 @@ void TleClient::fetch(double stationLatDeg, double stationLonDeg, int hoursAhead
             } else if (sh->firstError.isEmpty()) {
                 sh->firstError = reply->errorString();
             }
-            if (--sh->pending > 0) return;   // wait for the second group
+            if (--sh->pending > 0) return;   // wait for all groups to finish
 
             if (sh->entries.isEmpty()) {
                 emit fetchFailed(sh->firstError.isEmpty()
@@ -586,6 +590,33 @@ double TleClient::downlinkHzFor(const QString& name) {
     if (n.contains(QStringLiteral("NOAA 19")) || n.contains(QStringLiteral("NOAA-19")))
         return 137.9125e6;  // NOAA-19 APT
     return 0.0;             // unknown: honest "no frequency", not a guess
+}
+
+bool TleClient::isNavConstellation(const QString& tleName) {
+    // Standardized celestrak GNSS group names. We match by the public
+    // constellation designators rather than by guessing individual NORAD IDs
+    // (which overlap across operators). Real satellites only.
+    const QString n = tleName.toUpper();
+    return n.contains(QStringLiteral("NAVSTAR"))        // GPS (Navstar)
+        || n.contains(QStringLiteral("GPS II"))         // GPS Block IIA/IIR/IIF
+        || n.contains(QStringLiteral("GPS III"))
+        || n.contains(QStringLiteral("GPS BII"))
+        || n.contains(QStringLiteral("GLONASS"))
+        || n.contains(QStringLiteral("GALILEO"))
+        || n.contains(QStringLiteral("BEIDOU"))
+        || n.contains(QStringLiteral("BDS"))
+        || n.contains(QStringLiteral("COMPASS"))
+        || n.contains(QStringLiteral("NAVIC"))
+        || n.contains(QStringLiteral("IRNSS"));
+}
+
+int TleClient::catalogNumber(const TleEntry& e) {
+    // TLE line 1: "1 NNNNNC ..." -- catalog number is columns 3..7 (1-based).
+    const QString l1 = e.line1.trimmed();
+    if (!l1.startsWith('1') || l1.length() < 7) return 0;
+    bool ok = false;
+    const int cat = l1.mid(2, 5).toInt(&ok);
+    return ok ? cat : 0;
 }
 
 } // namespace dsp

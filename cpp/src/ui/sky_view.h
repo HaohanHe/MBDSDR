@@ -62,6 +62,11 @@ public:
     void clearLiveSatellites();
     void setGnssSatellites(QList<GnssSkySat> sats);
     void clearGnssSatellites();
+    // Predicted (TLE/SGP4) navigation satellites currently above the horizon.
+    // Distinct from real GSV diamonds: hollow rings, explicitly marked "预测" --
+    // we do NOT claim these are being received. Empty list clears.
+    void setPredictedNavSats(QList<LiveSat> sats);
+    QList<LiveSat> predictedNavSats() const { return predictedNav_; }
     // Real propagated trajectory of the SELECTED satellite around the displayed
     // moment: sampled (az, el) deg, drawn as a dashed overlay that coexists with
     // the predicted pass arcs. Empty list clears the overlay.
@@ -114,6 +119,7 @@ private:
     QList<LiveSat> liveSats_;
     QList<GnssSkySat> gnss_;
     QList<QPair<double,double>> selectedTraj_; // real propagated overlay (selected sat)
+    QList<LiveSat> predictedNav_;              // TLE-predicted nav sats (hollow)
     QDateTime nowUtc_;
     QString selectedName_;
     bool nonHardware_ = false;

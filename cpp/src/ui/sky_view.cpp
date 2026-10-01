@@ -112,6 +112,11 @@ void SkyView::setSelectedTrajectory(QList<QPair<double,double>> azEl) {
     update();
 }
 
+void SkyView::setPredictedNavSats(QList<LiveSat> sats) {
+    predictedNav_ = std::move(sats);
+    update();
+}
+
 void SkyView::setCurrentTime(QDateTime utc) {
     nowUtc_ = utc;
     update();
@@ -405,6 +410,20 @@ void SkyView::paintEvent(QPaintEvent*) {
                         : QPen(tokens::rgbaA(tokens::kTextAlphaTertiary)));
         p.drawPolygon(d);
         labs.push_back({q, g.prn, QColor(tokens::kTextSecondary), 4});
+    }
+
+    // --- Predicted navigation satellites: hollow rings, marked "预" -------
+    // TLE/SGP4-predicted GNSS sats above the horizon. NOT received signals --
+    // hollow open rings (vs filled orbit dots / amber GSV diamonds) and the
+    // "预" prefix make that distinction on the chart.
+    for (const LiveSat& s : predictedNav_) {
+        if (s.el < 0.0 || s.el > 90.0) continue;
+        QPointF q = polarToXY(s.az, std::clamp(s.el, 0.0, 90.0), R, c);
+        p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary), 1.0));
+        p.setBrush(Qt::NoBrush);
+        p.drawEllipse(q, tokens::scaled(4), tokens::scaled(4));
+        labs.push_back({q, QStringLiteral("预:") + s.name,
+                        tokens::rgbaA(tokens::kTextAlphaTertiary), 5});
     }
 
     // --- Place labels: reserve marker footprints, then priority order ---

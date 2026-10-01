@@ -19,6 +19,7 @@ private slots:
     void negativeOffsetWhenGnssBehind();
     void invalidInstantsGiveZero();
     void tokenThrottleIsAtMost10Hz();
+    void timingQualityThreeStates();
 };
 
 void TestClockDomain::offsetIsGnssMinusSystem() {
@@ -50,6 +51,20 @@ void TestClockDomain::tokenThrottleIsAtMost10Hz() {
              "preview drag throttle must coalesce to <=10 Hz (>=100 ms)");
     QCOMPARE(mbdsdr::tokens::kSkyTrajectorySamples, 61);
     QCOMPARE(mbdsdr::tokens::kSkyTrajectoryWindowMin, 10);
+}
+
+// Timing-service three-state: real judgment from link + NMEA clock + position.
+void TestClockDomain::timingQualityThreeStates() {
+    using mbdsdr::gnss::TimingQuality;
+    QCOMPARE(mbdsdr::gnss::timingQuality(false, false, false), TimingQuality::NoModule);
+    QCOMPARE(mbdsdr::gnss::timingQuality(false, true, true),    TimingQuality::NoModule);
+    QCOMPARE(mbdsdr::gnss::timingQuality(true, false, false), TimingQuality::NoFix);
+    QCOMPARE(mbdsdr::gnss::timingQuality(true, true, false),  TimingQuality::NoFix);
+    QCOMPARE(mbdsdr::gnss::timingQuality(true, true, true),   TimingQuality::HasFix);
+    QVERIFY(QString::fromUtf8(mbdsdr::gnss::timingQualityToString(TimingQuality::HasFix))
+                .contains(QStringLiteral("已定位")));
+    QVERIFY(QString::fromUtf8(mbdsdr::gnss::timingQualityToString(TimingQuality::NoModule))
+                .contains(QStringLiteral("无 GNSS")));
 }
 
 QTEST_MAIN(TestClockDomain)
