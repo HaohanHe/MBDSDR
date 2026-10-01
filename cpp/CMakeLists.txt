@@ -61,6 +61,7 @@ set(SOURCES
     src/dsp/fcch_detector.cpp
     src/dsp/spyserver_server.cpp
     src/ui/bookmark_manager.cpp
+    src/ui/activity_log.cpp
     src/ui/shortcuts_dialog.cpp
     src/dsp/test_signal.cpp
     src/dsp/rtl_sdr_source.cpp
@@ -887,6 +888,36 @@ add_executable(test_task_async tests/test_task_async.cpp
 target_include_directories(test_task_async PRIVATE src)
 target_link_libraries(test_task_async PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME task_async COMMAND test_task_async)
+
+# Tuner AGC: rtl_tcp real 0x03 command byte + engine readback.
+add_executable(test_agc tests/test_agc.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp
+    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
+    src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
+    src/dsp/qt_audio_sink.cpp
+    src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp
+    src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_agc PRIVATE src)
+target_link_libraries(test_agc PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME agc COMMAND test_agc)
+
+# Signal activity log: real scan result -> entry, export/clear/persist, separate
+# from bookmarks.
+add_executable(test_activity_log tests/test_activity_log.cpp
+    src/ui/activity_log.cpp src/ui/bookmark_manager.cpp)
+target_include_directories(test_activity_log PRIVATE src)
+target_link_libraries(test_activity_log PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets)
+add_test(NAME activity_log COMMAND test_activity_log)
+
+# Recorder naming: same-second captures do not overwrite each other.
+add_executable(test_recorder_naming tests/test_recorder_naming.cpp
+    src/dsp/recorder.cpp src/dsp/wav_writer.cpp)
+target_include_directories(test_recorder_naming PRIVATE src)
+target_link_libraries(test_recorder_naming PRIVATE Qt6::Test Qt6::Core Qt6::Widgets)
+add_test(NAME recorder_naming COMMAND test_recorder_naming)
 
 # AI multi-session store (CRUD + JSON persistence) + pure context compaction.
 # No network / no GUI: links only the two new AI translation units.

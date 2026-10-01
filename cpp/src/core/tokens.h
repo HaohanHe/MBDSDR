@@ -376,6 +376,9 @@ inline constexpr int    kTaskMaxSteps = 8;
 // A tool result longer than this is trimmed for the on-step summary (the full
 // text still goes to the conversation context).
 inline constexpr int    kTaskSummaryMaxChars = 160;
+// Cap on the automatic signal-activity log history (newest-first); a long scan
+// session must not grow storage unbounded.
+inline constexpr int    kActivityLogMaxEntries = 500;
 
 // Waterfall (spectrogram) widget
 // 5-stop dBFS palette, mapped linearly over [-100, 0] dBFS:

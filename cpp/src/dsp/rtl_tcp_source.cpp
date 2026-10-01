@@ -171,6 +171,7 @@ DeviceCapabilities RtlTcpSource::capabilities() const {
 }
 
 void RtlTcpSource::sendCmd(quint8 cmd, quint32 arg) {
+    commandLogged(cmd, arg);   // test seam (records even when fd is closed)
     const int fd = fd_.load();
     if (fd < 0 || eof_.load()) return;
     // rtl_tcp command: 1 byte cmd, 4 bytes big-endian arg.
@@ -244,6 +245,14 @@ void RtlTcpSource::setGain(double gainDb) {
     gainDb_ = gainDb;
     sendCmd(0x03, 0);                  // manual gain mode
     sendCmd(0x04, static_cast<quint32>(gainDb * 10));  // 0.1 dB units
+}
+void RtlTcpSource::setRtlAgc(bool on) {
+    // rtl_tcp has one gain-mode command (0x03); route the IF AGC to it.
+    sendCmd(0x03, on ? 1 : 0);
+}
+void RtlTcpSource::setTunerAgc(bool on) {
+    // 0x03 = gain mode: 1 = AGC, 0 = manual.
+    sendCmd(0x03, on ? 1 : 0);
 }
 
 } // namespace dsp

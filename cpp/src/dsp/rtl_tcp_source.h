@@ -30,6 +30,10 @@ public:
     void setCenterFreq(double freqHz) override;
     void setSampleRate(double rateHz) override;
     void setGain(double gainDb) override;
+    // rtl_tcp command 0x03 selects gain mode: 0 = manual, 1 = AGC.  The daemon
+    // exposes no separate RTL2832 IF-AGC command, so both map to 0x03.
+    void setRtlAgc(bool on) override;
+    void setTunerAgc(bool on) override;
     double centerFreq() const override { return freqHz_; }
     double sampleRate() const override { return rateHz_; }
     double gain() const override { return gainDb_; }
@@ -48,6 +52,11 @@ public:
 
 private:
     void sendCmd(quint8 cmd, quint32 arg);
+
+protected:
+    // Test seam: override to observe the (cmd, arg) frames that WOULD be sent
+    // (before the fd write).  The base implementation does nothing.
+    virtual void commandLogged(quint8 /*cmd*/, quint32 /*arg*/) {}
     // Read (and parse, if present) the 12-byte RTL0 dongle-info header the
     // daemon sends immediately on accept. Tolerates a missing header (mock /
     // legacy server) without stalling connect().
