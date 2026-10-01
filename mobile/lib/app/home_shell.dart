@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/satellite.dart';
+import '../pages/activity_log_page.dart';
 import '../pages/chat_page.dart';
 import '../pages/recordings_page.dart';
 import '../pages/settings_page.dart';
@@ -54,6 +55,11 @@ class _HomeShellState extends State<HomeShell> {
       label: Text('录音'),
     ),
     NavigationRailDestination(
+      icon: Icon(Icons.history_outlined),
+      selectedIcon: Icon(Icons.history),
+      label: Text('活动'),
+    ),
+    NavigationRailDestination(
       icon: Icon(Icons.settings_outlined),
       selectedIcon: Icon(Icons.settings),
       label: Text('设置'),
@@ -83,6 +89,11 @@ class _HomeShellState extends State<HomeShell> {
       label: '录音',
     ),
     BottomNavigationBarItem(
+      icon: Icon(Icons.history_outlined),
+      activeIcon: Icon(Icons.history),
+      label: '活动',
+    ),
+    BottomNavigationBarItem(
       icon: Icon(Icons.settings_outlined),
       activeIcon: Icon(Icons.settings),
       label: '设置',
@@ -90,7 +101,7 @@ class _HomeShellState extends State<HomeShell> {
   ];
 
   void _openSettings() {
-    setState(() => _index = 4);
+    setState(() => _index = 5);
   }
 
   AppBar _buildAppBar() {
@@ -166,6 +177,7 @@ class _HomeShellState extends State<HomeShell> {
               onOpenSettings: _openSettings,
             ),
             RecordingsPage(radio: radio, settings: settings),
+            const ActivityLogPage(),
             SettingsPage(settings: settings, radio: radio),
           ],
         );

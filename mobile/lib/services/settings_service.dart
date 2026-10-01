@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/activity_log.dart';
 import '../models/bookmark.dart';
 import '../models/radio_state.dart';
 import '../models/recording.dart';
@@ -145,6 +146,16 @@ const String _kBookmarksHz = 'bookmarksHz';
 /// 诚实说明：移动端当前无真实文件录制路径，生产代码不会写入任何条目；
 /// 这里只是就绪的持久化槽位，列表在真机上恒为空态。
 const String _kRecordings = 'recordingsMeta';
+
+/// 信号活动日志，JSON 数组字符串落盘（结构见 models/activity_log.dart）。
+///
+/// 与书签严格区分：书签=用户手工收藏；活动日志=系统自动追加的真实观察记录
+/// （值守静噪门开门/扫描命中）。newest-first，超过 [kActivityLogMaxEntries]
+/// 丢弃最旧，避免长会话撑爆存储。默认空，不内置任何假信号。
+const String _kActivityLog = 'activityLog';
+
+/// 活动日志最大保留条数（对齐桌面 ActivityLog::maxEntries 上限语义）。
+const int kActivityLogMaxEntries = 200;
 
 /// 频谱固定频率标记（Hz）列表，JSON 数字数组落盘。
 ///
@@ -397,6 +408,68 @@ class SettingsService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 删除单条录音元数据（按时刻+频率定位；未命中静默返回）。
+  void removeRecording(RecordingMeta meta) {
+    final before = _recordings.length;
+    _recordings = List<RecordingMeta>.of(_recordings)
+      ..removeWhere((r) =>
+          r.startedAtEpochMs == meta.startedAtEpochMs &&
+          r.frequencyHz == meta.frequencyHz);
+    if (_recordings.length == before) return;
+    _persistRecordings();
+    notifyListeners();
+  }
+
+  // ------------------------------------------------ 信号活动日志（自动观察，与书签分离）
+  List<ActivityEntry> _activities = <ActivityEntry>[];
+
+  /// 信号活动日志（按观察时刻倒序，不可变视图）。默认空，不内置假信号。
+  List<ActivityEntry> get activities =>
+      List<ActivityEntry>.unmodifiable(_activities);
+
+  void _persistActivities() {
+    unawaited(_kv.setString(
+      _kActivityLog,
+      jsonEncode(_activities.map((a) => a.toJson()).toList()),
+    ));
+  }
+
+  /// 追加一条真实观察记录（newest-first，超过上限丢最旧）。
+  /// frequencyHz<=0 一律拒绝（不记录假频点）。返回是否真正新增。
+  bool addActivity({
+    required int frequencyHz,
+    required double levelDbfs,
+    String mode = '',
+    String source = 'squelch',
+    int? epochMsUtc,
+  }) {
+    if (frequencyHz <= 0) return false;
+    final entry = ActivityEntry(
+      epochMsUtc: epochMsUtc ?? DateTime.now().millisecondsSinceEpoch,
+      frequencyHz: frequencyHz,
+      levelDbfs: levelDbfs,
+      mode: mode.trim().toLowerCase(),
+      source: source.trim().isEmpty ? 'squelch' : source.trim(),
+    );
+    _activities = List<ActivityEntry>.of(_activities)..insert(0, entry);
+    if (_activities.length > kActivityLogMaxEntries) {
+      _activities = _activities
+          .sublist(0, kActivityLogMaxEntries)
+          .toList(growable: true);
+    }
+    _persistActivities();
+    notifyListeners();
+    return true;
+  }
+
+  /// 清空活动日志。
+  void clearActivities() {
+    if (_activities.isEmpty) return;
+    _activities = <ActivityEntry>[];
+    _persistActivities();
+    notifyListeners();
+  }
+
   // ------------------------------------------------ 频谱固定频率标记（Hz）
   List<double> _fixedMarks = <double>[];
 
@@ -510,9 +583,26 @@ class SettingsService extends ChangeNotifier {
       }
     }
 
+    // 信号活动日志：JSON 对象数组；解析失败/非法项静默丢弃，回退空列表。
+    // newest-first：load 后按观察时刻倒序兜底排序。
+    final String? rawActivities = _kv.getString(_kActivityLog);
+    if (rawActivities != null && rawActivities.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawActivities);
+        if (decoded is List) {
+          _activities = decoded
+              .map(ActivityEntry.fromJson)
+              .whereType<ActivityEntry>()
+              .toList();
+          _activities.sort((a, b) => b.epochMsUtc - a.epochMsUtc);
+        }
+      } on FormatException {
+        _activities = <ActivityEntry>[];
+      }
+    }
+
     // 固定频率标记：JSON 数字数组；解析失败/非法项静默丢弃，回退空列表。
-    final String? rawMarks = _kv.getString(_kFixedMarksHz);
-    if (rawMarks != null && rawMarks.isNotEmpty) {
+    final String? rawMarks = _kv.getString(_kFixedMarksHz);    if (rawMarks != null && rawMarks.isNotEmpty) {
       try {
         final decoded = jsonDecode(rawMarks);
         if (decoded is List) {

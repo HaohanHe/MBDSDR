@@ -158,6 +158,14 @@ class RadioController extends ChangeNotifier implements RadioApi {
   /// 关门时复用的静音帧缓冲（按当前块长度惰性增长，避免逐块分配）。
   Float32List _silence = Float32List(0);
 
+  /// 信号活动回调：静噪门由关→开（真实有信号过声）时触发一次。
+  /// 由外壳（main.dart）注入，把真实观察写进信号活动日志；未连接/无观察时不触发。
+  void Function({
+    required int frequencyHz,
+    required String mode,
+    required double levelDbfs,
+  })? onSignalActivity;
+
   late final FftProcessor _fft = FftProcessor(fftSize: 2048);
   FmDemod? _demod;
 
@@ -255,9 +263,11 @@ class RadioController extends ChangeNotifier implements RadioApi {
       return false;
     }
 
-    // 连接成功后按约定顺序下发：采样率 → 增益模式 → 增益 → 频率。
+    // 连接成功后按约定顺序下发：采样率 → 增益模式 → 芯片AGC → 增益 → 频率。
     await client.setSampleRateHz(_sampleRateHz.round());
     await client.setGainMode(automatic: _autoGain);
+    // RTL2832 芯片数字 AGC（0x08）：与调谐器增益模式联动，开 AGC 时一并打开。
+    await client.setAgcMode(on: _autoGain);
     if (!_autoGain) {
       await client.setGainDb(_gainDb);
     }
@@ -400,7 +410,18 @@ class RadioController extends ChangeNotifier implements RadioApi {
       _sink.write(_silence);
     }
     // 仅在开门/关门跳变时通知 UI，避免每帧抖动 rebuild。
-    if (open != wasOpen) notifyListeners();
+    if (open != wasOpen) {
+      // 真实信号活动：静噪门由关→开（连接后首次出声 / 值守命中过门限）。
+      // 电平取静噪门平滑后的真实解调 RMS，频率/模式取当前真实调谐。
+      if (open) {
+        onSignalActivity?.call(
+          frequencyHz: _freqHz,
+          mode: _mode.name,
+          levelDbfs: _squelch.levelDb,
+        );
+      }
+      notifyListeners();
+    }
   }
 
   // ---------------------------------------------------- 会话恢复
@@ -468,6 +489,8 @@ class RadioController extends ChangeNotifier implements RadioApi {
     _autoGain = on;
     notifyListeners();
     await _client?.setGainMode(automatic: on);
+    // 同步 RTL2832 芯片数字 AGC（0x08）：开 AGC 时打开，切手动时关闭。
+    await _client?.setAgcMode(on: on);
   }
 
   @override
