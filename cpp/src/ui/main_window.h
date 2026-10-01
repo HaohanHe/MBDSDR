@@ -41,8 +41,8 @@ namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; str
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class SMeterWidget;
-                 class WeatherSatPanel; }
-namespace ai   { class Agent; class AiSessionStore; }
+                 class WeatherSatPanel; class TaskStepsView; }
+namespace ai   { class Agent; class AiSessionStore; class TaskOrchestrator; }
 namespace gnss { class GnssReceiver; struct GnssFix; }
 
 class MainWindow : public QMainWindow {
@@ -436,6 +436,11 @@ private:
     QPushButton*    aiRenameSessionBtn_ = nullptr;
     QPushButton*    aiDeleteSessionBtn_ = nullptr;
     QPushButton*    aiCompactCtxBtn_ = nullptr;
+    // Autonomous multi-step task: process-observable step list + orchestrator.
+    ui::TaskStepsView* aiTaskSteps_ = nullptr;
+    QLabel*         aiTaskHint_  = nullptr;
+    QPushButton*    aiRunTaskBtn_ = nullptr;
+    ai::TaskOrchestrator* aiOrch_ = nullptr;
 
     // Chat rendering model: persisted session messages + a single transient
     // line. partialReady() overwrites the transient (never appends);
@@ -451,6 +456,7 @@ private:
     void onAiDeleteSession();
     void onAiSessionChanged(int idx);
     void onAiCompactContext();
+    void onRunAutoTask();              // run a deterministic autonomous task template
 
     void setControlsEnabled(bool hardwareConnected);
     void saveUiState();
