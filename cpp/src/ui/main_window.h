@@ -11,6 +11,8 @@
 #include "core/sat_capture.h"
 // RecordingEntry is a value member (recLibEntries_); the struct must be complete.
 #include "ui/recording_library.h"
+// dsp::TleEntry is a value member (tleEntries_); include its header.
+#include "dsp/tle_client.h"
 
 class QLabel;
 class QDoubleSpinBox;
@@ -35,7 +37,7 @@ class QSpinBox;
 
 namespace mbdsdr {
 namespace ui { class BookmarkManager; }
-namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct VfoMarker; class FrequencyScanner; class SpyServerServer; }
+namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct TleEntry; struct VfoMarker; class FrequencyScanner; class SpyServerServer; }
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class WeatherSatPanel; }
@@ -134,6 +136,11 @@ private:
     // Sky-tab clock-bias readout + copy button.
     QLabel*      clockInfoLabel_ = nullptr;
     QPushButton* copyClockBtn_   = nullptr;
+    // Timing-service three-state chip (已定位授时/授时无定位/无 GNSS 授时).
+    QLabel*      timingStateLabel_ = nullptr;
+    // Visible-navigation-satellites panel (TLE/SGP4 PREDICTION, not received).
+    QTableWidget* navSatTable_ = nullptr;
+    QList<dsp::TleEntry> tleEntries_;   // raw TLEs backing the nav-sat filter
     // ADS-B aircraft tracker: merges decoded frames keyed by ICAO, applies TTL
     // expiry, and emits only real-position points to the map. Lives on the UI
     // thread; fed by onAdsbAircraft(), pruned by adsbTimer_ every second.
@@ -441,6 +448,7 @@ private:
     void updateLiveSatellite();     // 1s timer: propagate selected pass live
     void updateElevationPlotFor(const dsp::SatPass& p); // el-vs-time samples
     void updateClockBiasLabel();    // 1s: GNSS/system/local time + bias
+    void refreshNavSatellites();    // 1s: TLE-predicted visible GNSS sats (预测)
     void onAdsbPrune();             // 1s: TTL-expire aircraft, refresh table/map
     void refreshAdsbTable();        // rebuild ADS-B table + map + empty state
 

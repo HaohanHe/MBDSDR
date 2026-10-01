@@ -102,5 +102,29 @@ inline qint64 clockOffsetMs(const QDateTime& gnssUtc, const QDateTime& sysUtc) {
     return sysUtc.msecsTo(gnssUtc); // gnss − system
 }
 
+// Timing-service quality, a real three-state derived from the receiver link +
+// the parsed NMEA clock -- NOT a fabricated "locked" indicator:
+//   NoModule : receiver link down (no serial/transport) -> no GNSS at all.
+//   NoFix    : link up but no 2/3D position (time may still be present from
+//              GGA/RMC; we show Δt but never promise a position).
+//   HasFix   : link up AND a real position fix (hasUtc gates the clock readout).
+enum class TimingQuality { NoModule, NoFix, HasFix };
+
+inline TimingQuality timingQuality(bool connected, bool hasUtc, bool hasFix) {
+    if (!connected)            return TimingQuality::NoModule;
+    if (!hasUtc && !hasFix)    return TimingQuality::NoFix;   // up, no sentences yet
+    if (hasFix)                return TimingQuality::HasFix;
+    return TimingQuality::NoFix;                               // time but no fix
+}
+
+inline const char* timingQualityToString(TimingQuality q) {
+    switch (q) {
+    case TimingQuality::HasFix:   return "已定位授时";
+    case TimingQuality::NoFix:    return "授时无定位";
+    case TimingQuality::NoModule: return "无 GNSS 授时";
+    }
+    return "无 GNSS 授时";
+}
+
 } // namespace gnss
 } // namespace mbdsdr

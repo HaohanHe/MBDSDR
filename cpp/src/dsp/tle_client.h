@@ -123,6 +123,15 @@ public:
     // for Doppler reference only.
     static double downlinkHzFor(const QString& name);
 
+    // --- GNSS navigation constellation filtering (real public catalog) -----
+    // True when the TLE name is a recognized GNSS navigation satellite
+    // (NAVSTAR/GPS, GLONASS, GALILEO, BEIDOU/COMPASS, NAVIC/IRNSS). Matched on
+    // the standardized celestrak element-group naming -- we never invent a sat.
+    static bool isNavConstellation(const QString& tleName);
+    // NORAD catalog number from TLE line 1, field 2 (cols 3..7). Returns 0 on
+    // a malformed line (caller treats 0 as "unknown", never as a real sat).
+    static int catalogNumber(const TleEntry& e);
+
     // Read the on-disk TLE cache (valid==false if absent/unreadable).
     TleCache cachedTle() const;
 

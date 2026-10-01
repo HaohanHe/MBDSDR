@@ -889,6 +889,10 @@ MainWindow::MainWindow(QWidget* parent)
     {
         auto* clockBar = new QHBoxLayout;
         clockBar->setContentsMargins(tokens::scaled(6), 0, tokens::scaled(6), 0);
+        timingStateLabel_ = new QLabel(skyPage);
+        timingStateLabel_->setObjectName("timingState");
+        timingStateLabel_->setText(QStringLiteral("○ 授时: 无 GNSS 授时"));
+        clockBar->addWidget(timingStateLabel_);
         clockInfoLabel_ = new QLabel(skyPage);
         clockInfoLabel_->setObjectName("monoInfo");
         clockBar->addWidget(clockInfoLabel_, 1);
@@ -897,6 +901,26 @@ MainWindow::MainWindow(QWidget* parent)
                                   "本程序不修改系统时钟，真正校时需 root / CAP_SYS_TIME 特权");
         clockBar->addWidget(copyClockBtn_);
         skyLay->addLayout(clockBar);
+    }
+    // Visible navigation satellites: TLE/SGP4 PREDICTION (not received).
+    // Distinct from the GSV diamonds (real receiver). Honest empty state when
+    // no GNSS-constellation TLE is loaded (offline / no group fetched).
+    {
+        auto* navTitle = new QLabel(
+            QStringLiteral("在视导航卫星（预测 · SGP4 传播，非实时接收）"), skyPage);
+        navTitle->setObjectName("dockHint");
+        skyLay->addWidget(navTitle);
+        navSatTable_ = new QTableWidget(0, 5, skyPage);
+        navSatTable_->setObjectName("navSatTable");
+        navSatTable_->setHorizontalHeaderLabels(
+            {QStringLiteral("NORAD"), QStringLiteral("卫星"),
+             QStringLiteral("方位°"), QStringLiteral("仰角°"), QStringLiteral("距离km")});
+        navSatTable_->horizontalHeader()->setStretchLastSection(true);
+        navSatTable_->verticalHeader()->setVisible(false);
+        navSatTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        navSatTable_->setSelectionMode(QAbstractItemView::NoSelection);
+        navSatTable_->setMaximumHeight(tokens::scaled(120));
+        skyLay->addWidget(navSatTable_);
     }
     // Empty-state caption lives in a layout row BELOW the polar plot (not
     // painted over the compass), so it never collides with N/E/S/W labels.
@@ -3544,6 +3568,14 @@ void MainWindow::refetchTle() {
 
 void MainWindow::onPassesReady(QList<dsp::SatPass> passes) {
     passes_ = std::move(passes);
+    // Keep the raw TLEs backing the nav-sat filter (deduplicated by name).
+    tleEntries_.clear();
+    {
+        QStringList seen;
+        for (const dsp::SatPass& p : passes_) {
+            if (!seen.contains(p.tle.name)) { seen << p.tle.name; tleEntries_ << p.tle; }
+        }
+    }
     tleFetchActive_ = false;
     liveRow_ = -1;
     // The whole pass list was recomputed: any prior capture points at stale
@@ -4018,6 +4050,9 @@ void MainWindow::updateLiveSatellite() {
         wpts.append(sp);
     }
     worldView_->setSatellites(wpts);
+
+    // TLE-predicted visible GNSS constellation (hollow "预:" rings + list).
+    refreshNavSatellites();
 }
 
 void MainWindow::updateElevationPlotFor(const dsp::SatPass& p) {
@@ -4073,6 +4108,19 @@ void MainWindow::updateClockBiasLabel() {
     // offset -- the app never sets the system clock.
     const QDateTime sysUtc = QDateTime::currentDateTimeUtc();
     const QDateTime local = QDateTime::currentDateTime();
+    // Timing-service three-state: real judgment from the receiver link + the
+    // parsed NMEA clock, never a fabricated "locked" indicator.
+    const bool connected = gnssRx_ && gnssRx_->connected();
+    const gnss::TimingQuality q =
+        gnss::timingQuality(connected, lastGnssFix_.hasUtc, gnssHasFix_);
+    if (timingStateLabel_) {
+        const char* dot = (q == gnss::TimingQuality::HasFix)   ? "●"
+                        : (q == gnss::TimingQuality::NoFix)    ? "◐"
+                                                                : "○";
+        timingStateLabel_->setText(QString::fromUtf8("%1 授时: %2")
+                                       .arg(QString::fromUtf8(dot))
+                                       .arg(QString::fromUtf8(gnss::timingQualityToString(q))));
+    }
     // Time source is the parsed NMEA fix clock (hasUtc is set once GGA/RMC/ZDA
     // carries a timestamp; ZDA is optional). Gate the offset on the time itself,
     // not on a position fix: RMC/GGA may carry time even without a 2/3D fix.
@@ -4094,6 +4142,54 @@ void MainWindow::updateClockBiasLabel() {
             QString("时钟域  GNSS 授时 --（无 GNSS 授时）   系统 %1   本地 %2   Δt --")
                 .arg(sysUtc.toUTC().toString("HH:mm:ss"))
                 .arg(local.toString("HH:mm:ss")));
+    }
+}
+
+void MainWindow::refreshNavSatellites() {
+    if (!navSatTable_) return;
+    // Filter the loaded TLEs to GNSS constellation members, then propagate at
+    // wall-now with the SAME propagator used for pass capture (tleClient_). This
+    // is a PREDICTION from orbit elements -- NOT received signals; the UI labels
+    // it 预测 and the sky draws hollow "预:" rings. No pseudorange / position
+    // claim is made.
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    QList<ui::LiveSat> nav;
+    navSatTable_->setRowCount(0);
+
+    if (!stationSet_ || tleEntries_.isEmpty()) {
+        // Honest empty state: no reference station or no GNSS TLE loaded.
+        navSatTable_->setRowCount(1);
+        QTableWidgetItem* hint = new QTableWidgetItem(
+            QStringLiteral("无导航星历 · 需联网拉取 GNSS TLE（预测，非接收）"));
+        hint->setForeground(tokens::rgbaA(tokens::kTextAlphaQuaternary));
+        navSatTable_->setItem(0, 1, hint);
+        skyView_->setPredictedNavSats({});
+        return;
+    }
+
+    for (const dsp::TleEntry& e : tleEntries_) {
+        if (!dsp::TleClient::isNavConstellation(e.name)) continue;
+        dsp::Topocentric t = tleClient_->propagateAt(now, e, stationLat_, stationLon_);
+        if (t.el < 0.0) continue;   // below horizon: not "in view"
+        ui::LiveSat ls; ls.az = t.az; ls.el = t.el; ls.name = e.name; ls.selected = false;
+        nav.append(ls);
+
+        const int row = navSatTable_->rowCount();
+        navSatTable_->insertRow(row);
+        navSatTable_->setItem(row, 0, new QTableWidgetItem(
+            QString::number(dsp::TleClient::catalogNumber(e))));
+        navSatTable_->setItem(row, 1, new QTableWidgetItem(e.name));
+        navSatTable_->setItem(row, 2, new QTableWidgetItem(QString::number(t.az, 'f', 1)));
+        navSatTable_->setItem(row, 3, new QTableWidgetItem(QString::number(t.el, 'f', 1)));
+        navSatTable_->setItem(row, 4, new QTableWidgetItem(QString::number(t.range, 'f', 0)));
+    }
+    skyView_->setPredictedNavSats(nav);
+    if (nav.isEmpty()) {
+        navSatTable_->setRowCount(1);
+        QTableWidgetItem* hint = new QTableWidgetItem(
+            QStringLiteral("当前无在地平线上方的导航星 · 需 GNSS TLE"));
+        hint->setForeground(tokens::rgbaA(tokens::kTextAlphaQuaternary));
+        navSatTable_->setItem(0, 1, hint);
     }
 }
 

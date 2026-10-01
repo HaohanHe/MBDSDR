@@ -258,6 +258,12 @@ add_executable(ui_shot_skytime tests/ui_screenshot_sky_time.cpp ${SHOT_SRCS} ${H
 target_include_directories(ui_shot_skytime PRIVATE src build/ui_shot_skytime_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_skytime PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
+# Timing-panel three-state + visible-nav-satellites (prediction) screenshots.
+# Offscreen; not in ctest. Writes cpp/scratch/ui_timing_panel.png / ui_nav_sats.png.
+add_executable(ui_shot_timing tests/ui_screenshot_timing.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_timing PRIVATE src build/ui_shot_timing_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_timing PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
 # Device-info panel + dynamic sample-rate combo (real loopback RTL0 handshake).
 # Offscreen; not in ctest. Writes cpp/scratch/ui_devices.png + ui_devices_empty.png.
 add_executable(ui_shot_devices tests/ui_screenshot_devices.cpp ${SHOT_SRCS} ${HEADERS})
@@ -468,6 +474,13 @@ target_include_directories(test_pass_doppler PRIVATE src)
 target_link_libraries(test_pass_doppler PRIVATE Qt6::Network Qt6::Concurrent Qt6::Core)
 add_test(NAME pass_doppler COMMAND test_pass_doppler)
 
+# Visible navigation satellites (prediction): constellation filter, catalog
+# number parse, and MEO-scale propagation through the shared SGP4 path.
+add_executable(test_nav_sats tests/test_nav_sats.cpp src/dsp/tle_client.cpp src/dsp/sgp4.cpp)
+target_include_directories(test_nav_sats PRIVATE src)
+target_link_libraries(test_nav_sats PRIVATE Qt6::Test Qt6::Network Qt6::Concurrent Qt6::Core)
+add_test(NAME nav_sats COMMAND test_nav_sats)
+
 # Satellite one-tap capture + Doppler auto-compensation decision logic
 # (mapping table, capture target, bounded step limiter, real SGP4 -> fd -> VFO).
 add_executable(test_sat_capture tests/test_sat_capture.cpp
@@ -627,6 +640,12 @@ target_include_directories(test_soak PRIVATE src build/test_soak_autogen/include
 target_link_libraries(test_soak PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 add_test(NAME soak COMMAND test_soak)
 set_tests_properties(soak PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(test_fixed_marker tests/test_fixed_marker.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_fixed_marker PRIVATE src build/test_fixed_marker_autogen/include)
+target_link_libraries(test_fixed_marker PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME fixed_marker COMMAND test_fixed_marker)
+set_tests_properties(fixed_marker PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Unattended signal-triggered watch recording (detector + pre-roll + per-burst
 # WAV/JSON sidecar; NOT HARDWARE, fully synthesized).
