@@ -1612,6 +1612,17 @@ MainWindow::MainWindow(QWidget* parent)
     aiActivityView_->setMaximumHeight(tokens::scaled(140));
     aiLay->addWidget(aiActivityView_);
 
+    auto* actBtnRow = new QHBoxLayout;
+    auto* exportActBtn = new QPushButton(QString::fromUtf8("导出日志"), aiPage);
+    exportActBtn->setObjectName("aiActivityExportBtn");
+    exportActBtn->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+    auto* clearActBtn = new QPushButton(QString::fromUtf8("清空日志"), aiPage);
+    clearActBtn->setObjectName("aiActivityClearBtn");
+    clearActBtn->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+    actBtnRow->addWidget(exportActBtn);
+    actBtnRow->addWidget(clearActBtn);
+    aiLay->addLayout(actBtnRow);
+
     aiChat_ = new QPlainTextEdit(aiPage);
     aiChat_->setObjectName("aiChat");
     aiChat_->setReadOnly(true);
@@ -2234,6 +2245,34 @@ MainWindow::MainWindow(QWidget* parent)
     }
     connect(aiAgcCheck_, &QCheckBox::toggled, this, [this](bool on) {
         if (engine_) engine_->setTunerAgc(on);
+    });
+
+    // Activity log: export (real file dialog -> real write) + clear (honest
+    // confirm to avoid an accidental wipe).
+    connect(findChild<QPushButton*>("aiActivityExportBtn"), &QPushButton::clicked,
+            this, [this]() {
+        if (!activityLog_) return;
+        const QString path = QFileDialog::getSaveFileName(
+            this, QString::fromUtf8("导出活动日志"),
+            QStringLiteral("activity_log.json"),
+            QString::fromUtf8("JSON (*.json)"));
+        if (path.isEmpty()) return;
+        const bool ok = activityLog_->exportToFile(path);
+        if (aiStatus_)
+            aiStatus_->setText(ok ? QString::fromUtf8("活动日志已导出：%1").arg(path)
+                                  : QString::fromUtf8("导出失败：%1").arg(path));
+    });
+    connect(findChild<QPushButton*>("aiActivityClearBtn"), &QPushButton::clicked,
+            this, [this]() {
+        if (!activityLog_) return;
+        const auto btn = QMessageBox::question(
+            this, QString::fromUtf8("清空活动日志"),
+            QString::fromUtf8("确定清空全部 %1 条自动记录？此操作不可撤销。")
+                .arg(activityLog_->count()),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (btn != QMessageBox::Yes) return;
+        activityLog_->clear();
+        refreshActivityView();
     });
     // ---- Chat rendering: session messages + a SINGLE transient line --------
     // partialReady() replaces the transient (never appends); responseReady()
