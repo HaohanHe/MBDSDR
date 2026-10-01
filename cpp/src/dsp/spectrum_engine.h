@@ -88,6 +88,23 @@ public slots:
     // Connect to an rtl_tcp server. Returns true on success. On failure the
     // source falls back to TestSignalSource (no fake data) and emits sourceChanged.
     bool connectRtlTcp(const QString& host, quint16 port);
+
+    // ---- Offline file analysis (streaming, never loads the whole file) -----
+    // Open a captured file as the active source through the SAME source-swap
+    // path as rtl_tcp. Auto-detects SigMF (.sigmf-meta/.sigmf-data) and 16-bit
+    // PCM WAV; raw complex files need rawSampleRateHz>0 (honest "原始·用户指定
+    // 参数"). On failure falls back to TestSignalSource and emits sourceError
+    // with the real reason. The file streams in ~25 ms chunks.
+    bool openOfflineFile(const QString& path, double rawSampleRateHz = 0.0);
+    // Pause/resume offline playback (file offset frozen; live sources no-op).
+    void setOfflinePaused(bool paused);
+    // Seek offline playback to a 0..1 fraction of the capture.
+    void seekOfflineFraction(double f01);
+    // Offline playback position. Returns false when the active source is not a
+    // file (no offline progress to report).
+    bool offlinePosition(double& curSec, double& totalSec);
+    // True when the active source is the offline file player.
+    bool isOfflineFileActive() const;
     // Real capabilities of the ACTIVE source (device name, tuning / sample-rate
     // range) for the UI device-info panel and dynamic sample-rate combo. For the
     // offline test-signal fallback this is the honest empty state (connected=

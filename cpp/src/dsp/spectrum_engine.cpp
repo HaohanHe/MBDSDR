@@ -3,6 +3,7 @@
 #include "rtl_sdr_source.h"
 #include "rtl_tcp_source.h"
 #include "test_signal.h"
+#include "file_source.h"
 #include "power_spectrum.h"
 #include "noise_blanker.h"
 #include "core/tokens.h"
@@ -263,6 +264,95 @@ bool SpectrumEngine::connectRtlTcp(const QString& host, quint16 port) {
     emit sourceChanged("Test Signal", false);
     return false;
 }
+
+// Read a WAV's sibling sidecar .json for center_freq/mode (offline, no ui dep).
+static void readWavSidecarMeta(const QString& wavPath, double& centerHz,
+                               QString& mode) {
+    QString jp = wavPath;
+    jp.chop(4);
+    jp += ".json";
+    QFile jf(jp);
+    if (!jf.open(QIODevice::ReadOnly)) return;
+    QJsonParseError pe;
+    QJsonDocument doc = QJsonDocument::fromJson(jf.readAll(), &pe);
+    if (pe.error != QJsonParseError::NoError || !doc.isObject()) return;
+    const QJsonObject o = doc.object();
+    const double cf = o.value("center_freq").toDouble(-1.0);
+    const double ch = o.value("frequency").toDouble(-1.0);
+    if (ch > 0.0) centerHz = ch; else if (cf > 0.0) centerHz = cf;
+    mode = o.value("mode").toString();
+}
+
+bool SpectrumEngine::openOfflineFile(const QString& path, double rawSampleRateHz) {
+    QMutexLocker lk(&sourceMutex_);
+    if (source_) source_->stop();
+
+    auto fs = std::make_unique<FileSource>(QString());
+    bool ok = false;
+    QString p = path;
+    if (p.endsWith(".sigmf-data", Qt::CaseInsensitive)) {
+        p.chop(QString(".sigmf-data").size());
+        ok = fs->openSigmf(p);
+    } else if (p.endsWith(".sigmf-meta", Qt::CaseInsensitive)) {
+        p.chop(QString(".sigmf-meta").size());
+        ok = fs->openSigmf(p);
+    } else if (p.endsWith(".wav", Qt::CaseInsensitive)) {
+        double center = 0.0;
+        QString mode;
+        readWavSidecarMeta(p, center, mode);
+        ok = fs->openWav(p, center, mode);
+    } else {
+        // Raw cf32_le: sample rate must be supplied by the user.
+        ok = fs->openRaw(p, rawSampleRateHz);
+    }
+
+    if (ok) ok = fs->start();
+
+    if (ok) {
+        source_ = std::move(fs);
+        realSourceActive_ = false;     // offline file is NOT hardware
+        reconnectPending_ = false;
+        updateCapsSnapshotLocked();
+        needDemodReset_.store(true);   // reconfigure channelizer/decimator
+        emit sourceChanged(source_->name(), false);
+        return true;
+    }
+
+    // Honest failure: fall back to the offline test source, report the reason.
+    const QString why = fs->errorString();
+    source_ = std::make_unique<TestSignalSource>();
+    source_->start();
+    realSourceActive_ = false;
+    reconnectPending_ = false;
+    updateCapsSnapshotLocked();
+    emit sourceError(why.isEmpty() ? QStringLiteral("文件打开失败") : why);
+    emit sourceChanged("Test Signal", false);
+    return false;
+}
+
+bool SpectrumEngine::isOfflineFileActive() const {
+  return dynamic_cast<FileSource*>(source_.get()) != nullptr;
+}
+
+void SpectrumEngine::setOfflinePaused(bool paused) {
+    QMutexLocker lk(&sourceMutex_);
+    if (auto* fs = dynamic_cast<FileSource*>(source_.get())) fs->setPaused(paused);
+}
+
+void SpectrumEngine::seekOfflineFraction(double f01) {
+    QMutexLocker lk(&sourceMutex_);
+    if (auto* fs = dynamic_cast<FileSource*>(source_.get())) fs->seekFraction(f01);
+}
+
+bool SpectrumEngine::offlinePosition(double& curSec, double& totalSec) {
+    QMutexLocker lk(&sourceMutex_);
+    auto* fs = dynamic_cast<FileSource*>(source_.get());
+    if (!fs || fs->sampleRate() <= 0) return false;
+    curSec = fs->playedSamples() / fs->sampleRate();
+    totalSec = fs->totalSamples() / fs->sampleRate();
+    return true;
+}
+
 
 // Runs on the engine's home thread (queued from reconnectRequested, or a
 // QTimer retry). Blocking connect (worst case 2 s) is acceptable while the
