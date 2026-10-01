@@ -1,0 +1,173 @@
+平台简介
+快速上手
+对话模型
+开始使用
+流式输出
+推理模型
+Function Calling
+JSON 模式
+多模态输入
+前缀续写
+FIM 补全
+多模态生成
+图片生成
+视频生成
+语音合成
+功能特性
+模型微调
+批量推理
+Rate Limits
+常见问题
+实名认证
+API 请求错误排查
+模型问题排查
+财务相关
+发票相关
+账户相关
+文本系列
+创建对话请求（OpenAI） POST
+创建对话请求（Anthropic） POST
+创建快速决策请求（TypeSafe） POST
+创建嵌入请求 POST
+创建重排序请求 POST
+图像系列
+创建图片生成请求 POST
+语音系列
+上传参考音频 POST
+创建文本转语音请求 POST
+获取参考音频列表 GET
+删除参考音频 POST
+创建语音转文本请求 POST
+视频系列
+创建视频生成请求 POST
+获取视频生成链接请求 POST
+批量处理
+获取文件列表 GET
+上传文件 POST
+获取batch任务列表 GET
+创建batch任务 POST
+获取batch任务详情 GET
+取消batch任务 POST
+平台系列
+获取用户模型列表 GET
+更新公告
+更多
+SiliconFlow 平台SiliconFlow 官网预留实例企业级 MaaS 平台（私有化）私有化大模型服务网关AI 算力运营服务
+使用指南
+流式输出
+流式输出模式让模型响应实时返回，适用于聊天、长文本生成等需要即时反馈的场景。
+1. 在 python 中使用流式输出
+1.1 基于 OpenAI 库的流式输出
+在一般场景中，推荐您使用 OpenAI 的库进行流式输出。
+```
+from openai import OpenAI
+
+client = OpenAI(
+    base_url='https://api.siliconflow.cn/v1',
+    api_key='your-api-key'
+)
+
+# 发送带有流式输出的请求
+response = client.chat.completions.create(
+    model="Pro/zai-org/GLM-5.1",
+    messages=[
+        {"role": "user", "content": "SiliconFlow公测上线，每用户送3亿token 解锁开源大模型创新能力。对于整个大模型应用领域带来哪些改变？"}
+    ],
+    stream=True  # 启用流式输出
+)
+
+# 逐步接收并处理响应
+for chunk in response:
+    if not chunk.choices:
+        continue
+
+    delta = chunk.choices[0].delta
+
+    # 使用 getattr 安全获取属性，如果属性不存在则返回 None，避免报错
+    reasoning_content = getattr(delta, 'reasoning_content', None)
+    content = getattr(delta, 'content', None)
+
+    # 打印思考过程（如果存在）
+    if reasoning_content:
+        # \033[90m 和 \033[0m 是终端的灰色颜色代码，让思考过程呈现灰色，更易区分
+        print(f"\033[90m{reasoning_content}\033[0m", end="", flush=True)
+
+    # 打印正式回复（如果存在）
+    if content:
+        print(content, end="", flush=True)
+
+# 最后打印一个换行符，让命令行提示符在新的一行显示
+print()
+```
+1.2 基于 requests 库的流式输出
+如果您有非 openai 的场景，如您需要基于 request 库使用 SiliconFlow API，请您注意：
+除了 payload 中的 stream 需要设置外，request 请求的参数也需要设置stream = True, 才能正常按照 stream 模式进行返回。
+```
+from openai import OpenAI
+import requests
+import json
+   
+url = "https://api.siliconflow.cn/v1/chat/completions"
+   
+payload = {
+        "model": "Pro/zai-org/GLM-5.1", # 替换成你的模型
+        "messages": [
+            {
+                "role": "user",
+                "content": "SiliconFlow公测上线，每用户送3亿token 解锁开源大模型创新能力。对于整个大模型应用领域带来哪些改变？"
+            }
+        ],
+        "stream": True # 此处需要设置为stream模式
+}
+
+headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": "Bearer your-api-key"
+    }
+   
+response = requests.post(url, json=payload, headers=headers, stream=True) # 此处request需要指定stream模式
+# 打印流式返回信息
+if response.status_code == 200:
+    full_content = ""
+    full_reasoning_content = ""
+
+    for chunk in response.iter_lines():
+        if chunk:
+            chunk_str = chunk.decode('utf-8').replace('data: ', '')
+            if chunk_str != "[DONE]":
+                chunk_data = json.loads(chunk_str)
+                delta = chunk_data['choices'][0].get('delta', {})
+                content = delta.get('content', '')
+                reasoning_content = delta.get('reasoning_content', '')
+                if content:
+                    print(content, end="", flush=True)
+                    full_content += content
+                if reasoning_content:
+                    print(reasoning_content, end="", flush=True)
+                    full_reasoning_content += reasoning_content
+else:
+    print(f"请求失败，状态码：{response.status_code}")
+```
+2. curl 中使用流式输出
+curl 命令的处理机制默认情况下，curl 会缓冲输出流，所以即使服务器分块（chunk）发送数据，也需要等缓冲区填满或连接关闭后才看到内容。传入 -N（或 --no-buffer）选项，可以禁止此缓冲，让数据块立即打印到终端，从而实现流式输出。
+```
+curl -N -s \
+  --request POST \
+  --url https://api.siliconflow.cn/v1/chat/completions \
+  --header 'Authorization: Bearer token' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "model": "Qwen/Qwen2.5-72B-Instruct",
+    "messages": [
+      {"role":"user","content":"有诺贝尔数学奖吗？"}
+    ],
+    "stream": true
+}'
+```
+开始使用
+文本生成是 SiliconFlow 的核心能力，支持多种大语言模型的对话、创作和知识问答。
+推理模型
+推理模型通过思维链（Chain-of-Thought）解决数学、代码和复杂逻辑问题，支持 DeepSeek-R1 等模型。
+On this page
+1. 在 python 中使用流式输出1.1 基于 OpenAI 库的流式输出1.2 基于 requests 库的流式输出2. curl 中使用流式输出

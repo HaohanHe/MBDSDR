@@ -1,0 +1,303 @@
+Xiaomi MiMo Home
+
+MiMo-V2.6 series — 3 new models now live. Flagship performance, full modality, built for professional workflows. 
+
+Documentation
+
+Research
+ (https://mimo.xiaomi.com/)
+
+Models
+
+Updates
+
+Pricing
+
+Contact Us (https://platform.xiaomimimo.com/contact)
+
+English
+
+Console (https://platform.xiaomimimo.com/console/balance)
+
+Documentation
+
+Quick Start (/docs/en-US/quick-start/summary/welcome)API Reference (/docs/en-US/api/guidance/rate-limit)Pricing (/docs/en-US/price/pay-as-you-go)Token Plan (/docs/en-US/tokenplan/Token Plan/subscription)News (/docs/en-US/news/latest/v2-6)Update Log (/docs/en-US/updates/model)
+
+Token Plan (https://platform.xiaomimimo.com/token-plan)MiMo Claw (https://aistudio.xiaomimimo.com/open-apis/v1/genLoginUrl?currentPath=/?forcePage=claw)Chat with MiMo (https://aistudio.xiaomimimo.com/open-apis/v1/genLoginUrl?currentPath=/?forcePage=chat)
+
+Quick StartFAQAPI Integration
+
+Ctrl
+
+Overview
+
+Welcome (/docs/en-US/quick-start/summary/welcome)
+
+First API Call (/docs/en-US/quick-start/summary/first-api-call)
+
+Models (/docs/en-US/quick-start/summary/model)
+
+Usage Guide
+
+Text Generation
+
+Tool Calling
+
+Web Search (/docs/en-US/quick-start/usage-guide/text-generation/tool-calling/web-search)
+
+Deep Thinking (/docs/en-US/quick-start/usage-guide/text-generation/deep-thinking)
+
+Structured Output (/docs/en-US/quick-start/usage-guide/text-generation/structured-output)
+
+Batch Inference (Batch API) (/docs/en-US/quick-start/usage-guide/text-generation/batch-api)
+
+Multimodal Understanding
+
+Image Understanding (/docs/en-US/quick-start/usage-guide/multimodal-understanding/image-understanding)
+
+Audio Understanding (/docs/en-US/quick-start/usage-guide/multimodal-understanding/audio-understanding)
+
+Video Understanding (/docs/en-US/quick-start/usage-guide/multimodal-understanding/video-understanding)
+
+Audio
+
+Speech Recognition（MiMo-V2.5-ASR） (/docs/en-US/quick-start/usage-guide/audio/Speech-Recognition)
+
+Speech Synthesis (MiMo-V2.5-TTS Series) (/docs/en-US/quick-start/usage-guide/audio/speech-synthesis-v2.5)
+
+Promotions
+
+Refer & earn (/docs/en-US/quick-start/promotions/refer)
+
+FAQ
+
+Account and Authentication (/docs/en-US/quick-start/faq/account)
+
+Payment (/docs/en-US/quick-start/faq/payment)
+
+API Integration (/docs/en-US/quick-start/faq/api-integration)
+
+Token Plan
+
+Plans and Pricing (/docs/en-US/quick-start/faq/token-plan/Plans&Pricing)
+
+Validity and Expiry (/docs/en-US/quick-start/faq/token-plan/Validity&Expiry)
+
+Usage and Quota (/docs/en-US/quick-start/faq/token-plan/Usage&Quota)
+
+Team Edition Benefits Related (/docs/en-US/quick-start/faq/token-plan/Team-Benefits)
+
+Token Plan and Desktop Membership (/docs/en-US/quick-start/faq/token-plan/desktop-guide)
+
+Promotions (/docs/en-US/quick-start/faq/promotions)
+
+Others (/docs/en-US/quick-start/faq/others)
+
+Terms & Agreements
+
+Service Agreement (/docs/quick-start/terms/user-agreement)
+
+Privacy Policy (/docs/quick-start/terms/privacy-policy)
+
+Refer & earn
+
+# API Integration
+
+### How to obtain API Key?
+
+  - 
+API Key for Pay-as-you-go API Calls: After logging in to the Xiaomi MiMo API Open Platform, apply for an API Key on the Console - API Keys (https://platform.xiaomimimo.com/#/console/api-keys) page. When using the model via API, please include your API Key in the request header:`api-key: $MIMO_API_KEY` or `Authorization: Bearer $MIMO_API_KEY`.
+
+  - 
+API Key of Token Plan: After successful purchase, you can see the exclusive API Key on the Token Plan  (https://platform.xiaomimimo.com/#/console/plan-manage)page. Note: API Key is only visible and can be copied when created, please save it properly.
+
+  - 
+The API Key format for Token Plan is`tp-xxxxx`, which is only used for Token Plan subscription services; the API Key format for pay-as-you-go API calls is`sk-xxxxx`, used for pay-as-you-go billing. The two are independent of each other and cannot be mixed. The API Key for Token Plan is only available within the validity period of the Token Plan package you have subscribed to.
+
+### What if the API Key is lost or leaked?
+
+can be reset on the Token Plan (https://platform.xiaomimimo.com/#/console/plan-manage) page.
+
+### How can I obtain the Base URL of the Token Plan?
+
+The Base URL provided on the Token Plan page shall prevail: Two types of Base URLs are provided, one compatible with the OpenAI interface protocol and the other compatible with the Anthropic interface protocol, which can be copied and used as needed.
+
+### Which programming tools does Token Plan support?
+
+Supports mainstream programming tools and model frameworks, such as Claude Code, OpenClaw, OpenCode, Kilo Code, Cline, Hermes Agent, CodeBuddy Code, etc. For specific access methods, please refer to Overview of AI Tools (https://mimo.mi.com/#/docs/integration/tools-overview).
+
+### Can Token Plan be used in multiple programming tools at the same time?
+
+The same package can be used across all supported tools, but the quota is shared, and usage of all tools will consume the same package quota.
+
+### What's the difference between OpenAI and Anthropic interfaces?
+
+  - 
+OpenAI interface `/v1/chat/completions` follows OpenAI format, including developer/system/user/assistant roles
+
+  - 
+Anthropic interface `/anthropic/v1/messages` follows Claude format, with a separate system parameter
+
+### How to make multi-turn tool calls in thinking mode?
+
+During the multi-turn tool calls process in thinking mode, the model returns a `reasoning_content` field alongside `tool_calls`. To continue the conversation, it is recommended to keep all previous `reasoning_content` in the `messages` array for each subsequent request to achieve the best performance.
+
+The requested example is as follows:
+
+```
+curl --location --request POST 'https://api.xiaomimimo.com/v1/chat/completions' \
+--header "api-key: $MIMO_API_KEY" \
+--header "Content-Type: application/json" \
+--data-raw '{
+    "messages": [
+        {
+            "role": "assistant",
+            "content": "Hello! I am MiMo.",
+            "reasoning_content": "Okay, the user just asked me to introduce myself. That is a pretty straightforward request, but I should think about why they are asking this."
+        },
+        {
+            "role": "user",
+            "content": "What is the weather like in Hebei?"
+        }
+    ],
+    "model": "mimo-v2.6-pro",
+    "max_completion_tokens": 1024,
+    "temperature": 1.0,
+    "stream": false,
+    "tools": [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_current_weather",
+                "description": "Get the current weather in a given location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city and state, e.g. San Francisco, CA"
+                        },
+                        "unit": {
+                            "type": "string",
+                            "enum": [
+                                "celsius",
+                                "fahrenheit"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "location"
+                    ]
+                }
+            }
+        }
+    ],
+    "tool_choice": "auto"
+}'
+
+```
+
+### Why aretool_calls sometimes included in the reasoning_content field and sometimes in a separate tool_calls field?
+
+The appearance of `tool_calls` in the reasoning content indicates instability and incomplete output caused by the model having `thinking` enabled when calling `tool`. It is recommended to disable `thinking` when calling `tool` calls and to adjust the settings according to Model Hyperparameters (https://mimo.mi.com/#/docs/quick-start/model-hyperparameters) to achieve a more stable and better user experience.
+
+### What's the response speed?
+
+Response speed depends on:
+
+  - 
+Request length and complexity
+
+  - 
+Server load and geographic location
+
+  - 
+Whether streaming response is used
+
+### How to handle timeouts?
+
+Please implement reasonable timeout handling on the client side:
+
+  - 
+Set reasonable connection and read timeout times
+
+  - 
+Use exponential backoff for retries
+
+  - 
+For long responses, it's recommended to use streaming mode
+
+### What if the API returns inappropriate content?
+
+The platform has added content review for both user input and model output. If violations occur, the returned content will be automatically intercepted to ensure the content you receive is safe.
+
+### Why doesn’t the model perform a web search after enabling online search?
+
+There may be three reasons:
+
+  - 
+Cache: There is a 5-minute cache period after enabling / disabling online search. The online search switch will not take effect immediately within 5 minutes.
+
+  - 
+Model determines no need for search: The model judges that the current query does not involve real-time information and can be answered directly with its own knowledge. To force a search, set `forced_search: true`.
+
+  - 
+Only some models are supported: Currently only `mimo-v2.6-flash`, `mimo-v2.6-pro`, `mimo-v2.6-pro-ultraspeed`, `mimo-v2.5-pro` and `mimo-v2.5` supports web search.
+
+### Does it support local file upload?
+
+  - 
+Real-time Inference, local file upload is not supported at this time.
+
+  - 
+Batch Inference, supporting the upload of local files (in JSONL format).
+
+Update TimeSeptember 20, 2026
+
+Payment (/docs/en-US/quick-start/faq/payment)Plans and Pricing (/docs/en-US/quick-start/faq/token-plan/Plans&Pricing)
+
+### Table of Contents
+
+Scroll to top
+
+Official Account
+
+Open Platform WeChat
+
+Open Platform Feishu
+
+###### Products
+
+Xiaomi MiMo API (/docs/quick-start/summary/model)Xiaomi MiMo Desktop (https://mimo.xiaomimimo.com/desktop/)Xiaomi MiMo Claw (https://aistudio.xiaomimimo.com/open-apis/v1/genLoginUrl?currentPath=/?forcePage=claw)Xiaomi MiMo Studio (https://aistudio.xiaomimimo.com/open-apis/v1/genLoginUrl?currentPath=/?forcePage=chat)Xiaomi MiMo Code (https://mimo.xiaomi.com/mimocode)
+
+###### Open Platform
+
+Docs (/docs/welcome)FAQ (/docs/quick-start/faq/)API Pricing (/docs/price/pay-as-you-go)Token Plan (https://platform.xiaomimimo.com/token-plan)
+
+###### Updates
+
+News (/docs/en-US/news)Changelog (/docs/en-US/updates/model)MiMo Blog (https://mimo.xiaomi.com/)
+
+###### About Us
+
+Terms of Service (/docs/terms/user-agreement)Privacy Policy (/docs/terms/privacy-policy)
+
+###### Products
+
+Xiaomi MiMo API (/docs/quick-start/summary/model)Xiaomi MiMo Desktop (https://mimo.xiaomimimo.com/desktop/)Xiaomi MiMo Claw (https://aistudio.xiaomimimo.com/open-apis/v1/genLoginUrl?currentPath=/?forcePage=claw)Xiaomi MiMo Studio (https://aistudio.xiaomimimo.com/open-apis/v1/genLoginUrl?currentPath=/?forcePage=chat)Xiaomi MiMo Code (https://mimo.xiaomi.com/mimocode)
+
+###### Open Platform
+
+Docs (/docs/welcome)FAQ (/docs/quick-start/faq/)API Pricing (/docs/price/pay-as-you-go)Token Plan (https://platform.xiaomimimo.com/token-plan)
+
+###### Updates
+
+News (/docs/en-US/news)Changelog (/docs/en-US/updates/model)MiMo Blog (https://mimo.xiaomi.com/)
+
+###### About Us
+
+Terms of Service (/docs/terms/user-agreement)Privacy Policy (/docs/terms/privacy-policy)
+
+Copyright©2026 Xiaomi. All Rights Reserved
+
+Xiaomi Large Language Model:Beijing-XiaomiMiMo-202601050182 (https://mp.weixin.qq.com/s/67LmJeFdhi58UpPk9Wbssg)|Xiaomi Large Language Model Algorithm:Cyberspace Algorithm Filing No.110108916280901240011 (https://aistudio-cdn.xiaomimimo.com/xiaomimimo-static/document/%E5%85%AC%E7%A4%BA%E5%86%85%E5%AE%B9_%E7%BD%91%E4%BF%A1%E7%AE%97%E5%A4%87110108916280901240011%E5%8F%B7.pdf)|ICP Filing No.: JICPB No.17028681-55 (https://beian.miit.gov.cn/)

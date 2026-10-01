@@ -1,0 +1,440 @@
+[](https://www.siliconflow.cn)
+
+[](https://www.siliconflow.cn)
+
+搜索
+
+`⌘``K`
+
+使用指南
+
+[平台简介](/docs/userguide/introduction)[快速上手](/docs/userguide/quickstart)
+
+对话模型
+
+[开始使用](/docs/userguide/capabilities/text-generation)[流式输出](/docs/userguide/capabilities/stream-mode)[推理模型](/docs/userguide/capabilities/reasoning)[Function Calling](/docs/userguide/guides/function-calling)[JSON 模式](/docs/userguide/guides/json-mode)[多模态输入](/docs/userguide/capabilities/multimodal-vision)[前缀续写](/docs/userguide/guides/prefix)[FIM 补全](/docs/userguide/guides/fim)
+
+多模态生成
+
+[图片生成](/docs/userguide/capabilities/images)[视频生成](/docs/userguide/capabilities/video)[语音合成](/docs/userguide/capabilities/text-to-speech)
+
+功能特性
+
+[模型微调](/docs/userguide/guides/fine-tune)[批量推理](/docs/userguide/guides/batch)[Rate Limits](/docs/userguide/faqs/rate-limit-and-upgradation)
+
+常见问题
+
+[实名认证](/docs/userguide/faqs/authentication)[API 请求错误排查](/docs/userguide/faqs/error-code)[模型问题排查](/docs/userguide/faqs/misc)[财务相关](/docs/userguide/faqs/misc_finance)[发票相关](/docs/userguide/faqs/invoice)[账户相关](/docs/userguide/faqs/misc_use)
+
+场景示例
+
+API手册
+
+文本系列
+
+[创建对话请求（OpenAI） POST](/docs/api/chat-completions-post)[创建对话请求（Anthropic） POST](/docs/api/messages-post)[创建快速决策请求（TypeSafe） POST](/docs/api/systemone-post)[创建嵌入请求 POST](/docs/api/embeddings-post)[创建重排序请求 POST](/docs/api/rerank-post)
+
+图像系列
+
+[创建图片生成请求 POST](/docs/api/images-generations-post)
+
+语音系列
+
+[上传参考音频 POST](/docs/api/uploads-audio-voice-post)[创建文本转语音请求 POST](/docs/api/audio-speech-post)[获取参考音频列表 GET](/docs/api/audio-voice-list-get)[删除参考音频 POST](/docs/api/audio-voice-deletions-post)[创建语音转文本请求 POST](/docs/api/audio-transcriptions-post)
+
+视频系列
+
+[创建视频生成请求 POST](/docs/api/video-submit-post)[获取视频生成链接请求 POST](/docs/api/video-status-post)
+
+批量处理
+
+[获取文件列表 GET](/docs/api/files-get)[上传文件 POST](/docs/api/files-post)[获取batch任务列表 GET](/docs/api/batches-get)[创建batch任务 POST](/docs/api/batches-post)[获取batch任务详情 GET](/docs/api/batches-%7Bbatch_id%7D-get)[取消batch任务 POST](/docs/api/batches-%7Bbatch_id%7D-cancel-post)
+
+平台系列
+
+[获取用户模型列表 GET](/docs/api/models-get)
+
+条款与协议
+
+[更新公告](/docs/release-notes/overview)
+
+更多
+
+[SiliconFlow 平台](https://cloud.siliconflow.cn/)[SiliconFlow 官网](https://www.siliconflow.cn/)[预留实例](https://www.siliconflow.cn/reserved)[企业级 MaaS 平台（私有化）](https://www.siliconflow.cn/enterprise)[私有化大模型服务网关](https://www.siliconflow.cn/ai-gateway)[AI 算力运营服务](https://www.siliconflow.cn/token-factory)
+
+中文
+
+Function Calling
+
+使用指南
+
+# Function Calling
+
+Function Calling 功能指南，让模型调用外部工具扩展能力，解决知识时效性和幻觉问题。
+
+## 1\. 使用场景
+
+Function Calling 功能让模型能够调用外部工具，来增强自身能力。 该能力可以通过外部工具，通过大模型作为大脑调用外部工具（如搜索外部知识、查阅行程、或者某些特定领域工具），有效解决模型的幻觉、知识时效性等问题。
+
+## 2\. 使用方式
+
+### 2.1 通过 REST API 添加 tools 请求参数
+
+在请求体中添加
+    
+    
+    "tools": [
+        {
+            'type': 'function',
+            'function': {
+                'name': '对应到实际执行的函数名称',
+                'description': '此处是函数相关描述',
+                'parameters': {
+                    '_comments': '此处是函数参数相关描述'
+                },
+            }
+        },
+        {
+            '_comments': '其他函数相关说明'
+        }
+    ]
+
+比如完整的 payload 信息：
+    
+    
+    payload = {
+        "model": "Pro/zai-org/GLM-5.1",
+        "messages": [
+            {
+                "role": "user",
+                "content": "中国大模型行业2025年将会迎来哪些机遇和挑战"
+            }
+        ],
+        "tools": [
+        {
+            'type': 'function',
+            'function': {
+                'name': '对应到实际执行的函数名称',
+                'description': '此处是函数相关描述',
+                'parameters': {
+                    '_comments': '此处是函数参数相关描述'
+                },
+            }
+        },
+        {
+            '_comments': '其他函数相关说明'
+        }
+        ]
+        '_comments': '其他函数列表'
+    }
+
+### 2.2 通过 OpenAI 库请求
+
+该功能和 OpenAI 兼容，在使用 OpenAI 的库时，对应的请求参数中添加`tools=[对应的 tools]` 比如：
+    
+    
+    response = client.chat.completions.create(
+        model="Pro/zai-org/GLM-5.1",
+        messages = messages,
+        tools=[
+            {
+                'type': 'function',
+                'function': {
+                    'name': '对应到实际执行的函数名称',
+                    'description': '此处是函数相关描述',
+                    'parameters': {
+                        // 此处是函数参数相关描述
+                    },
+                }
+            },
+            {
+                // 其他函数相关说明
+            }
+        ]
+        // chat.completions 其他参数
+    )
+
+## 3\. 支持模型列表
+
+可以通过[模型广场](https://cloud.siliconflow.cn/models?tags=Tools)查看当前支持tools的模型。
+
+## 4\. 使用示例
+
+### 4.1. 示例 1：通过function calling 来扩展大语言模型的数值计算能力
+
+本代码输入 4 个函数，分别是数值的加、减、比较大小、字符串中重复字母计数四个函数 来演示通过function calling来解决大语言模型在tokens 预测不擅长的领域的执行问题。
+    
+    
+    from openai import OpenAI
+    
+    client = OpenAI(
+        api_key="您的 APIKEY", # 从https://cloud.siliconflow.cn/account/ak获取
+        base_url="https://api.siliconflow.cn/v1"
+    )
+    
+    def add(a: float, b: float):
+        return a + b
+    
+    def mul(a: float, b: float):
+        return a * b
+    
+    def compare(a: float, b: float):
+        if a > b:
+            return f'{a} is greater than {b}'
+        elif a < b:
+            return f'{b} is greater than {a}'
+        else:
+            return f'{a} is equal to {b}'
+    
+    def count_letter_in_string(a: str, b: str):
+        string = a.lower()
+        letter = b.lower()
+        
+        count = string.count(letter)
+        return(f"The letter '{letter}' appears {count} times in the string.")
+    
+    
+    tools = [
+    {
+        'type': 'function',
+        'function': {
+            'name': 'add',
+            'description': 'Compute the sum of two numbers',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'a': {
+                        'type': 'int',
+                        'description': 'A number',
+                    },
+                    'b': {
+                        'type': 'int',
+                        'description': 'A number',
+                    },
+                },
+                'required': ['a', 'b'],
+            },
+        }
+    }, 
+    {
+        'type': 'function',
+        'function': {
+            'name': 'mul',
+            'description': 'Calculate the product of two numbers',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'a': {
+                        'type': 'int',
+                        'description': 'A number',
+                    },
+                    'b': {
+                        'type': 'int',
+                        'description': 'A number',
+                    },
+                },
+                'required': ['a', 'b'],
+            },
+        }
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'count_letter_in_string',
+            'description': 'Count letter number in a string',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'a': {
+                        'type': 'str',
+                        'description': 'source string',
+                    },
+                    'b': {
+                        'type': 'str',
+                        'description': 'letter',
+                    },
+                },
+                'required': ['a', 'b'],
+            },
+        }
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'compare',
+            'description': 'Compare two number, which one is bigger',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'a': {
+                        'type': 'float',
+                        'description': 'A number',
+                    },
+                    'b': {
+                        'type': 'float',
+                        'description': 'A number',
+                    },
+                },
+                'required': ['a', 'b'],
+            },
+        }
+    }
+    ]
+    
+    def function_call_playground(prompt):
+        messages = [{'role': 'user', 'content': prompt}]
+        response = client.chat.completions.create(
+            model="Pro/zai-org/GLM-5.1",
+            messages = messages,
+            temperature=0.01,
+            top_p=0.95,
+            stream=False,
+            tools=tools)
+    
+        # print(response)
+        func1_name = response.choices[0].message.tool_calls[0].function.name
+        func1_args = response.choices[0].message.tool_calls[0].function.arguments
+        func1_out = eval(f'{func1_name}(**{func1_args})')
+        # print(func1_out)
+    
+        messages.append(response.choices[0].message)
+        messages.append({
+            'role': 'tool',
+            'content': f'{func1_out}',
+            'tool_call_id': response.choices[0].message.tool_calls[0].id
+        })
+        # print(messages)
+        response = client.chat.completions.create(
+            model="Pro/zai-org/GLM-5.1",
+            messages=messages,
+            temperature=0.01,
+            top_p=0.95,
+            stream=False,
+            tools=tools)
+        return response.choices[0].message.content
+      
+    prompts = [
+        "用中文回答：strawberry中有多少个r?", 
+        "用中文回答：9.11和9.9，哪个小?"
+    ]
+    
+    for prompt in prompts:
+        print(function_call_playground(prompt))
+
+模型将输出：
+    
+    
+    strawberry中有3个r。
+    9.11 比 9.9 小。
+
+### 4.2. 示例 2：通过function calling 来扩展大语言模型对外部环境的理解
+
+本代码输入 1 个函数，通过外部 API 来查询外部信息
+    
+    
+    import requests
+    from openai import OpenAI
+    
+    client = OpenAI(
+        api_key="您的 APIKEY", # 从https://cloud.siliconflow.cn/account/ak获取
+        base_url="https://api.siliconflow.cn/v1"
+    )
+    
+    # 使用 WeatherAPI 的天气查询函数
+    def get_weather(city: str):
+        # 使用 WeatherAPI 的 API 来获取天气信息
+        api_key = "您的WeatherAPI APIKEY"  # 替换为你自己的 WeatherAPI APIKEY
+        base_url = "http://api.weatherapi.com/v1/current.json"
+        params = {
+            'key': api_key,
+            'q': city,
+            'aqi': 'no'  # 不需要空气质量数据
+        }
+        
+        # 调用天气 API
+        response = requests.get(base_url, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            weather = data['current']['condition']['text']
+            temperature = data['current']['temp_c']
+            return f"The weather in {city} is {weather} with a temperature of {temperature}°C."
+        else:
+            return f"Could not retrieve weather information for {city}."
+    
+    # 定义 OpenAI 的 function calling tools
+    tools = [
+        {
+            'type': 'function',
+            'function': {
+                'name': 'get_weather',
+                'description': 'Get the current weather for a given city.',
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'city': {
+                            'type': 'string',
+                            'description': 'The name of the city to query weather for.',
+                        },
+                    },
+                    'required': ['city'],
+                },
+            }
+        }
+    ]
+    
+    # 发送请求并处理 function calling
+    def function_call_playground(prompt):
+        messages = [{'role': 'user', 'content': prompt}]
+        
+        # 发送请求到 OpenAI API
+        response = client.chat.completions.create(
+            model="Pro/zai-org/GLM-5.1",
+            messages=messages,
+            temperature=0.01,
+            top_p=0.95,
+            stream=False,
+            tools=tools
+        )
+    
+        # 处理 API 返回的工具调用请求
+        func1_name = response.choices[0].message.tool_calls[0].function.name
+        func1_args = response.choices[0].message.tool_calls[0].function.arguments
+        func1_out = eval(f'{func1_name}(**{func1_args})')
+    
+        # 将结果添加到对话中并返回
+        messages.append(response.choices[0].message)
+        messages.append({
+            'role': 'tool',
+            'content': f'{func1_out}',
+            'tool_call_id': response.choices[0].message.tool_calls[0].id
+        })
+        
+        # 返回模型响应
+        response = client.chat.completions.create(
+            model="Pro/zai-org/GLM-5.1",
+            messages=messages,
+            temperature=0.01,
+            top_p=0.95,
+            stream=False,
+            tools=tools
+        )
+        
+        return response.choices[0].message.content
+    
+    # 示例使用
+    prompt = "how is the weather today in beijing?"
+    print(function_call_playground(prompt))
+
+模型将输出：
+    
+    
+    The weather in Beijing today is sunny with a temperature of 21.4°C.
+
+[推理模型推理模型通过思维链（Chain-of-Thought）解决数学、代码和复杂逻辑问题，支持 DeepSeek-R1 等模型。](/docs/userguide/capabilities/reasoning)[JSON 模式JSON Mode 使用指南，让模型输出结构化 JSON 数据，便于程序解析和处理。](/docs/userguide/guides/json-mode)
+
+### On this page
+
+1\. 使用场景2\. 使用方式2.1 通过 REST API 添加 tools 请求参数2.2 通过 OpenAI 库请求3\. 支持模型列表4\. 使用示例4.1. 示例 1：通过function calling 来扩展大语言模型的数值计算能力4.2. 示例 2：通过function calling 来扩展大语言模型对外部环境的理解
+
+Function Calling

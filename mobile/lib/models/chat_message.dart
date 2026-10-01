@@ -58,6 +58,13 @@ class ChatMessage {
   /// role == assistant 且模型要求调工具时携带。
   final List<ToolCallRecord>? toolCalls;
 
+  /// role == assistant 时逐字保留的思维链（reasoning_content）。
+  ///
+  /// 开启 interleaved thinking 的模型（DeepSeek-V3.2 / GLM-4.7 / MiMo）会在
+  /// delta.reasoning_content 里分片吐思考过程；回传时必须逐字原样带上，
+  /// 禁止裁剪/清洗（MiMo 缺该字段直接 400，硅基流动会导致多步工具行为崩）。
+  final String reasoningContent;
+
   /// UI 层标记：assistant 气泡是否仍在流式接收。
   final bool streaming;
 
@@ -67,6 +74,7 @@ class ChatMessage {
     required this.time,
     this.toolCallId,
     this.toolCalls,
+    this.reasoningContent = '',
     this.streaming = false,
   });
 
@@ -82,28 +90,32 @@ class ChatMessage {
 
       case ChatRole.assistant:
         final List<ToolCallRecord>? calls = toolCalls;
-        if (calls != null && calls.isNotEmpty) {
-          return <String, dynamic>{
-            'role': role.apiValue,
-            'content': content,
-            'tool_calls': calls
-                .map(
-                  (ToolCallRecord t) => <String, dynamic>{
-                    'id': t.id,
-                    'type': 'function',
-                    'function': <String, dynamic>{
-                      'name': t.name,
-                      'arguments': t.argumentsJson,
-                    },
-                  },
-                )
-                .toList(),
-          };
+        final Map<String, dynamic> out = calls != null && calls.isNotEmpty
+            ? <String, dynamic>{
+                'role': role.apiValue,
+                'content': content,
+                'tool_calls': calls
+                    .map(
+                      (ToolCallRecord t) => <String, dynamic>{
+                        'id': t.id,
+                        'type': 'function',
+                        'function': <String, dynamic>{
+                          'name': t.name,
+                          'arguments': t.argumentsJson,
+                        },
+                      },
+                    )
+                    .toList(),
+              }
+            : <String, dynamic>{
+                'role': role.apiValue,
+                'content': content,
+              };
+        // 逐字回传思维链：非空才带这个键（关思考时响应里本就没有它）。
+        if (reasoningContent.isNotEmpty) {
+          out['reasoning_content'] = reasoningContent;
         }
-        return <String, dynamic>{
-          'role': role.apiValue,
-          'content': content,
-        };
+        return out;
 
       case ChatRole.tool:
         return <String, dynamic>{

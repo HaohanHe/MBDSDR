@@ -165,6 +165,13 @@ abstract final class AppTokens {
   /// TLE 视为新鲜的最大天数：epoch 距今超过即标「过期」。
   static const double tleFreshMaxDays = 14.0;
 
+  // ---------------------------------------------------------------- AI function-calling 循环
+  /// 工具调用循环最大轮次上限（防模型工具死循环）。与桌面端 kAiMaxToolRounds 对齐。
+  static const int kMaxToolRounds = 8;
+
+  /// 思考（thinking）思维链预算 token 数；OpenAI 兼容参数 thinking_budget，界 128..32768。
+  static const int kThinkingBudgetTokens = 4096;
+
   // ---------------------------------------------------------------- RTL-SDR 硬件范围
   static const double freqMinHz = 24e6;
   static const double freqMaxHz = 1700e6;

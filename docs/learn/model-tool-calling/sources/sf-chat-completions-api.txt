@@ -1,0 +1,545 @@
+API手册
+
+# 创建对话请求（OpenAI）
+
+根据给定的聊天对话创建模型响应。
+
+loading...
+
+POST
+
+/`chat`/`completions`
+
+Copy
+
+## Authorization
+
+AuthorizationBearer <token>required
+
+添加 Header 'Authorization: Bearer {账户 API Key}' 进行鉴权
+
+In: `header`
+
+## Header Parameters
+
+X-Trace-Idstring
+
+请求追踪 ID。可自定义传入用于标记本次请求；若不传入，平台将自动生成。排查问题时，提供该值或响应头中的 x-siliconcloud-trace-id 均可。
+
+traceparentstring
+
+W3C Trace Context 标准追踪头。传入时，平台取其中的 trace-id 作为本次请求的追踪标识。
+
+## Request Body
+
+LLMVLM
+
+modelstringrequired
+
+对应的模型名称。为更好地提升服务质量，我们会对本服务提供的模型进行定期变更，包括但不限于模型上下线和模型服务能力的调整。在可行的情况下，我们会通过公告或消息推送等适当方式通知您此类变更。**完整可用模型列表请查看[对话模型](<https://cloud.siliconflow.cn/models?types=chat>)**。
+
+Example`"deepseek-ai/DeepSeek-V4-Flash"`
+
+messagesarray<object>required
+
+对话消息列表
+
+Array Item
+
+streamboolean
+
+如果设置，token 将以 SSE（Server-Sent Events）的形式流式输出。流式传输通常以 `data: [DONE]` 结束
+
+Value in`false | true`
+
+max_tokensinteger
+
+要生成的最大 token 数量，不包含思维链部分。建议不要将 max_tokens 设置为窗口上限，为输入和系统开销预留约 10k token 的缓冲区。
+
+enable_thinkingboolean
+
+在推理模式与非推理模式之间切换。该字段适用于大多数[推理模型](<https://cloud.siliconflow.cn/me/models?tags=Reasoning>)。
+
+Value in`false | true`
+
+thinking_budgetinteger
+
+思维链输出的最大 token 数量。该字段适用于大多数[推理模型](<https://cloud.siliconflow.cn/me/models?tags=Reasoning>)。
+
+Range`128 <= value <= 32768`
+
+reasoning_effortstring
+
+该字段适用于 Pro/deepseek-ai/DeepSeek-V4、deepseek-ai/DeepSeek-V4-Flash 以及 Pro/zai-org/GLM-5.2。 在推理模式下，常规请求的默认 effort 为 high；对于某些复杂的智能体类型请求（如 Claude Code、OpenCode），effort 会自动设置为 max。 在推理模式下，为兼容起见，low 和 medium 会映射为 high，xhigh 会映射为 max。
+
+Value in`"high" | "max"`
+
+min_pnumber
+
+根据 token 概率动态调整的过滤阈值。该字段仅适用于 Qwen3。
+
+Format`float`
+
+Range`value <= 1`
+
+stoparray<string> | string | null
+
+API 将停止生成后续 token 的最多 4 个序列。 返回的文本不会包含停止序列。
+
+Example`"\n"`
+
+temperaturenumber
+
+使用的采样温度，取值范围在 0 到 2 之间。较高的值（如 0.8）会使输出更加随机，而较低的值（如 0.2）会使其更加集中和确定。
+
+Format`float`
+
+Range`value <= 2`
+
+Example`0.7`
+
+top_pnumber
+
+一种替代温度采样的方法，称为核采样（nucleus sampling），模型会考虑具有 top_p 概率质量的 token 的结果。因此 0.1 表示仅考虑构成前 10% 概率质量的 token。 我们通常建议调整此参数或温度，但不要同时调整两者。
+
+Format`float`
+
+Range`value <= 1`
+
+Example`0.7`
+
+top_knumber
+
+Format`float`
+
+Range`value <= 100`
+
+frequency_penaltynumber
+
+取值范围在 -2.0 到 2.0 之间。正值会根据新 token 在目前为止的文本中已有的频率对其进行惩罚，从而降低模型逐字重复同一行的可能性。
+
+Format`float`
+
+Range`-2 <= value <= 2`
+
+ninteger
+
+返回的生成结果数量。
+
+Example`1`
+
+response_formatText | JSON schema | JSON object
+
+指定模型必须输出的格式的对象。
+
+设置为 `{ "type": "json_schema", "json_schema": {...} }` 可启用结构化输出（Structured Outputs），确保模型匹配你提供的 JSON schema。
+
+设置为 `{ "type": "json_object" }` 可启用较早的 JSON 模式，确保模型生成的消息是有效的 JSON。对于支持 `json_schema` 的模型，建议优先使用 `json_schema`。
+
+TextJSON schemaJSON object
+
+默认响应格式。用于生成文本响应。
+
+typestringrequired
+
+响应格式的类型。始终为 `text`。
+
+Value in`"text"`
+
+JSON Schema 响应格式。用于生成结构化 JSON 响应。
+
+typestringrequired
+
+响应格式的类型。始终为 `json_schema`。
+
+Value in`"json_schema"`
+
+json_schemaJSON schemarequired
+
+结构化输出配置选项，包括 JSON Schema。
+
+Recursive
+
+JSON object 响应格式。一种较早的生成 JSON 响应的方法。 对于支持 `json_schema` 的模型，建议使用 `json_schema`。请注意，如果没有系统或用户消息指示模型生成 JSON，模型将不会生成 JSON。
+
+typestringrequired
+
+响应格式的类型。始终为 `json_object`。
+
+Value in`"json_object"`
+
+toolsarray<object>
+
+模型可能调用的工具列表。目前仅支持函数作为工具。 使用此参数提供模型可能为其生成 JSON 输入的函数列表。最多支持 128 个函数。
+
+Array Item
+
+modelstringrequired
+
+对应的模型名称。为更好地提升服务质量，我们会对本服务提供的模型进行定期变更，包括但不限于模型上下线和模型服务能力的调整。在可行的情况下，我们会通过公告或消息推送等适当方式通知您此类变更。**完整可用[视觉输入模型](<https://cloud.siliconflow.cn/me/models?tags=VLM>)列表请查看[模型广场](<https://cloud.siliconflow.cn/models>)**。
+
+Example`"moonshotai/Kimi-K2.7-Code"`
+
+messagesarray<object>required
+
+对话消息列表
+
+Array Item
+
+streamboolean
+
+如果设置，token 将以 SSE（Server-Sent Events）的形式流式输出。流式传输通常以 `data: [DONE]` 结束
+
+Value in`true | false`
+
+max_tokensinteger
+
+要生成的最大 token 数量，不包含思维链部分。建议不要将 max_tokens 设置为窗口上限，为输入和系统开销预留约 10k token 的缓冲区。
+
+stoparray<string> | string | null
+
+API 将停止生成后续 token 的最多 4 个序列。 返回的文本不会包含停止序列。
+
+Example`"\n"`
+
+temperaturenumber
+
+使用的采样温度，取值范围在 0 到 2 之间。较高的值（如 0.8）会使输出更加随机，而较低的值（如 0.2）会使其更加集中和确定。
+
+Default`0.7`
+
+Format`float`
+
+Example`0.7`
+
+top_pnumber
+
+一种替代温度采样的方法，称为核采样（nucleus sampling），模型会考虑具有 top_p 概率质量的 token 的结果。因此 0.1 表示仅考虑构成前 10% 概率质量的 token。 我们通常建议调整此参数或温度，但不要同时调整两者。
+
+Format`float`
+
+Example`0.7`
+
+top_knumber
+
+Default`50`
+
+Format`float`
+
+Example`50`
+
+frequency_penaltynumber
+
+取值范围在 -2.0 到 2.0 之间。正值会根据新 token 在目前为止的文本中已有的频率对其进行惩罚，从而降低模型逐字重复同一行的可能性。
+
+Default`0.5`
+
+Format`float`
+
+Example`0.5`
+
+ninteger
+
+返回的生成结果数量。
+
+Default`1`
+
+Example`1`
+
+response_formatText | JSON schema | JSON object
+
+指定模型必须输出的格式的对象。
+
+设置为 `{ "type": "json_schema", "json_schema": {...} }` 可启用结构化输出（Structured Outputs），确保模型匹配你提供的 JSON schema。
+
+设置为 `{ "type": "json_object" }` 可启用较早的 JSON 模式，确保模型生成的消息是有效的 JSON。对于支持 `json_schema` 的模型，建议优先使用 `json_schema`。
+
+TextJSON schemaJSON object
+
+默认响应格式。用于生成文本响应。
+
+typestringrequired
+
+响应格式的类型。始终为 `text`。
+
+Value in`"text"`
+
+JSON Schema 响应格式。用于生成结构化 JSON 响应。
+
+typestringrequired
+
+响应格式的类型。始终为 `json_schema`。
+
+Value in`"json_schema"`
+
+json_schemaJSON schemarequired
+
+结构化输出配置选项，包括 JSON Schema。
+
+Recursive
+
+JSON object 响应格式。一种较早的生成 JSON 响应的方法。 对于支持 `json_schema` 的模型，建议使用 `json_schema`。请注意，如果没有系统或用户消息指示模型生成 JSON，模型将不会生成 JSON。
+
+typestringrequired
+
+响应格式的类型。始终为 `json_object`。
+
+Value in`"json_object"`
+
+enable_thinkingboolean
+
+在推理模式与非推理模式之间切换。该字段适用于大多数[推理模型](<https://cloud.siliconflow.cn/me/models?tags=Reasoning>)。
+
+Value in`false | true`
+
+thinking_budgetinteger
+
+思维链输出的最大 token 数量。该字段适用于大多数[推理模型](<https://cloud.siliconflow.cn/me/models?tags=Reasoning>)。
+
+Range`128 <= value <= 32768`
+
+reasoning_effortstring
+
+该字段适用于 Pro/deepseek-ai/DeepSeek-V4、deepseek-ai/DeepSeek-V4-Flash 以及 Pro/zai-org/GLM-5.2。 在推理模式下，常规请求的默认 effort 为 high；对于某些复杂的智能体类型请求（如 Claude Code、OpenCode），effort 会自动设置为 max。 在推理模式下，为兼容起见，low 和 medium 会映射为 high，xhigh 会映射为 max。
+
+Value in`"high" | "max"`
+
+min_pnumber
+
+根据 token 概率动态调整的过滤阈值。该字段仅适用于 Qwen3。
+
+Format`float`
+
+Range`value <= 1`
+
+toolsarray<object>
+
+模型可能调用的工具列表。目前仅支持函数作为工具。 使用此参数提供模型可能为其生成 JSON 输入的函数列表。最多支持 128 个函数。
+
+Array Item
+
+## Response Body
+
+### 200
+
+模型响应。响应头中包含 x-siliconcloud-trace-id 字段，作为请求的唯一追踪标识，便于日志查询和问题排查；用户自定义传入的 X-Trace-Id 请求头（如有）也会以该字段原样返回。排查问题时，提供任一 trace ID 即可。
+
+TypeScript Definitions
+
+Use the response body type in TypeScript.
+
+Copy
+
+idstring
+
+choicesarray<object>
+
+Array Item
+
+usageobject
+
+Show Attributes
+
+createdinteger
+
+modelstring
+
+objectstring
+
+Value in`"chat.completion"`
+
+### 400
+
+### 401
+
+### 403
+
+### 404
+
+### 429
+
+### 503
+
+### 504
+
+cURLpythoncURL-Visionpython-Advanced
+
+
+    curl --request POST \
+      --url https://api.siliconflow.cn/v1/chat/completions \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer YOUR_API_KEY" \
+      -d '{
+        "model": "deepseek-ai/DeepSeek-V4-Flash",
+        "messages": [
+          {"role": "system", "content": "你是一个有用的助手"},
+          {"role": "user", "content": "你好，请介绍一下你自己"}
+        ]
+      }'
+
+
+
+    from openai import OpenAI
+
+    client = OpenAI(
+        api_key="YOUR_API_KEY",
+        base_url="https://api.siliconflow.cn/v1"
+    )
+
+    response = client.chat.completions.create(
+        model="deepseek-ai/DeepSeek-V4-Flash",
+        messages=[
+            {"role": "system", "content": "你是一个有用的助手"},
+            {"role": "user", "content": "你好，请介绍一下你自己"}
+        ]
+    )
+    print(response.choices[0].message.content)
+
+
+
+    curl --request POST \
+      --url https://api.siliconflow.cn/v1/chat/completions \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer ***" \
+      -d '{
+        "model": "moonshotai/Kimi-K2.7-Code",
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {"type": "text", "text": "描述这张图片"},
+              {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}}
+            ]
+          }
+        ],
+        "max_tokens": 4096
+      }'
+
+
+
+    from openai import OpenAI
+
+    client = OpenAI(
+        api_key="YOUR_API_KEY",
+        base_url="https://api.siliconflow.cn/v1"
+    )
+
+    tools = [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_current_weather",
+          "description": "Get the current weather in a given location",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+              },
+              "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+            },
+            "required": ["location"],
+          },
+        }
+      }
+    ]
+
+    messages = [
+        {"role": "system", "content": "你是一个有用的助手"},
+        {"role": "user", "content": "波士顿今天天气怎么样？"},
+        {"role": "assistant", "content": "波士顿今天晴，气温 20°C。"},
+        {"role": "user", "content": "那纽约呢？"}
+    ]
+
+    stream = client.chat.completions.create(
+        model="deepseek-ai/DeepSeek-V4-Flash",
+        messages=messages,
+        tools=tools,
+        tool_choice="auto",
+        stream=True,
+    )
+
+    for chunk in stream:
+        delta = chunk.choices[0].delta
+        if delta.content:
+            print(delta.content, end="", flush=True)
+        if delta.tool_calls:
+
+
+200400401403404429503504
+
+### Default
+
+
+    {
+      "id": "019bdaa55225ef854b320e9b838f77ce",
+      "object": "chat.completion",
+      "created": 1768899826,
+      "model": "deepseek-ai/DeepSeek-V4-Flash",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "你好！...",
+            "reasoning_content": "..."
+          },
+          "finish_reason": "stop"
+        }
+      ],
+      "usage": {
+        "prompt_tokens": 15,
+        "completion_tokens": 1540,
+        "total_tokens": 1555,
+        "completion_tokens_details": {
+          "reasoning_tokens": 1190
+        },
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 15
+      },
+      "system_fingerprint": ""
+    }
+
+### Streaming
+
+### Image input
+
+### Function
+
+
+    {
+      "code": 20012,
+      "message": "string",
+      "data": "string"
+    }
+
+
+    "Invalid token"
+
+
+    "Forbidden"
+
+
+    "404 page not found"
+
+
+    {
+      "message": "Request was rejected due to rate limiting. If you want more, please contact contact@siliconflow.cn. Details:TPM limit reached.",
+      "data": "string"
+    }
+
+
+    {
+      "code": 50505,
+      "message": "Model service overloaded. Please try again later.",
+      "data": "string"
+    }
+
+
+    "string"
+
+[社区场景与应用](</docs/usercases/awesome-user-cases>)[创建对话请求（Anthropic） POST根据给定的聊天对话创建模型响应。](</docs/api/messages-post>)

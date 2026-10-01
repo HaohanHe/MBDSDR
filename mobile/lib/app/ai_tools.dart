@@ -42,6 +42,8 @@ List<AiTool> buildRadioTools(RadioApi radio, {bool manualMode = false}) {
           'frequency_hz': <String, dynamic>{
             'type': 'integer',
             'description': '目标频率，单位 Hz，例如 109000000。',
+            'minimum': AppTokens.freqMinHz,
+            'maximum': AppTokens.freqMaxHz,
           },
           'frequency_mhz': <String, dynamic>{
             'type': 'number',
@@ -121,6 +123,8 @@ List<AiTool> buildRadioTools(RadioApi radio, {bool manualMode = false}) {
           'gain_db': <String, dynamic>{
             'type': 'number',
             'description': '手动增益，单位 dB，范围 0–49.6。',
+            'minimum': AppTokens.gainMinDb,
+            'maximum': AppTokens.gainMaxDb,
           },
         },
       },
@@ -156,6 +160,7 @@ List<AiTool> buildRadioTools(RadioApi radio, {bool manualMode = false}) {
           'sample_rate_hz': <String, dynamic>{
             'type': 'number',
             'description': '采样率，单位 Hz。',
+            'enum': AppTokens.sampleRatesHz,
           },
         },
         'required': <String>['sample_rate_hz'],

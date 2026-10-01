@@ -1,0 +1,211 @@
+# ============================================================
+# MiMo Anthropic Messages API 兼容 — 在线抓取正文落盘
+# 主来源: https://mimo.mi.com/docs/zh-CN/api/chat/anthropic-api
+# 抓取方式: web_fetch pagination(offset=0, limit=16000)，end_offset=2863 = total_length（字段表全文一次读完）
+# 抓取日期: 2026-10-01
+# 英文镜像: https://mimo.mi.com/docs/api/chat/anthropic-api 与 https://platform.xiaomimimo.com/docs/en-US/api/chat/anthropic-api
+#          （两镜像均已抓，内容结构相同；英文镜像更新时间 2026-05-12，中文页面 2026-09-22）
+# 完整度说明（重要）:
+#   - 本页是 SPA，"函数调用 / 流式响应 / 深度思考" 等 tab 的请求/响应示例 JSON 由前端 JS 切换渲染，
+#     web_fetch 只能拿到默认 tab（基础调用）的示例；下方【字段参考】部分为页面静态正文，已全文读完。
+#   - 字段表中 content 块仅以 "Text · object / Thinking · object / Tool use · object" 折叠形式出现，
+#     未展开 tool_use 块 {id,name,input}、tool_result 块 {tool_use_id,content}、thinking 块 {thinking,signature} 的子字段；
+#     这些子字段在本落盘原文中缺失，笔记中一律标注「推断（Anthropic 标准形状，MiMo 页面未逐字展开）」。
+# ============================================================
+
+# Anthropic Messages API 兼容
+
+## 请求地址
+
+https://api.xiaomimimo.com/anthropic/v1/messages
+
+## 请求头
+
+接口支持以下两种认证方式，请选择其中一种添加到请求头中：
+
+API Key 鉴权:
+api-key: $MIMO_API_KEY
+Content-Type: application/json
+
+Bearer 鉴权:
+Authorization: Bearer $MIMO_API_KEY
+Content-Type: application/json
+
+## 请求体（字段参考，静态正文全文）
+
+- messages array 必选
+输入消息列表。每个消息必须包含 role 和 content 字段。您可以指定单个用户角色消息，或包含多个用户和助手消息。
+如果最后一条消息使用助手角色，响应内容将直接从该消息的内容继续，这可以用来约束模型的响应。
+  - messages.role string 必选 — 消息的角色。可选值: user, assistant, system
+  - messages.content string | array 必选 — Text content(string) / Array of content parts(array)。消息的文本内容。
+
+- model string 必选 — 使用的模型名称。可选值: mimo-v2.6-flash, mimo-v2.6-pro, mimo-v2.6-pro-ultraspeed, mimo-v2.5-pro, mimo-v2.5
+
+- max_tokens integer — 停止前生成的最大 token 数。请注意，我们的模型可能在达到此最大值之前就停止。
+    - mimo-v2.6-flash 默认 131072；mimo-v2.6-pro 默认 131072；mimo-v2.6-pro-ultraspeed 默认 131072；
+      mimo-v2.5-pro 默认 131072；mimo-v2.5 默认 32768。所需范围: [1, 131072]
+
+- stop_sequences array — 使模型停止生成的自定义文本序列。
+    我们的模型通常会在自然完成一轮对话后停止，这将导致响应的 stop_reason 为 end_turn。
+    如果您希望模型在遇到自定义文本字符串时停止生成，可以使用 stop_sequences 参数。
+
+- stream boolean 默认 false — 是否以流式输出方式回复。
+
+- system string | array — 系统提示词是向模型提供上下文与指令的一种方式，例如为模型指定特定目标或角色。
+    Text content(string) / Array of content parts(array)。系统提示词的内容。
+
+- temperature number — 采样温度，控制模型生成文本的多样性。
+    在思考模式下，全部模型不支持自定义 temperature 参数。即使传入该参数，实际生效值也会被模型强制采用推荐默认值 1.0。
+    全部模型默认值为 1.0。所需范围: [0, 1.5]
+
+- thinking object — 启用模型扩展思维的配置。
+  注意：在思考模式下的多轮工具调用过程中，模型会在返回 tool_use 内容块的同时返回 thinking 内容块。
+  若要继续对话，建议在后续每次请求的 messages 数组中保留所有历史 thinking 内容块，以获得最佳表现。
+  在思考模式下，全部模型不支持自定义 temperature 和 top_p 参数。即使传入该参数，实际生效值也会被模型
+  强制采用其推荐默认值 1.0 和 0.95。
+    - thinking.type string 必选 — 全部模型默认值为 enabled。可选值: enabled, disabled
+
+- tool_choice object — 控制模型如何使用提供的工具。
+    - tool_choice.type string 必选 — auto 意味着模型将自动决定是否使用工具。
+      注意：当 type 传入非 auto 值时，后端会默认移除该字段，模型响应行为仍等同于 auto 模式（该逻辑保留调整的可能性）。
+      可选值: auto
+    - tool_choice.disable_parallel_tool_use boolean 默认 false — 是否禁用并行工具使用。
+      如果设置为 true：当类型为 auto 时，模型将输出至多一个工具使用。
+
+- tools array — 模型可能会使用的工具的定义。
+  如果在 API 请求中包含工具，则模型可能会返回 tool_use 内容块，表示模型对这些工具的使用。
+  您可以使用模型生成的工具输入运行这些工具，然后选择性地返回结果给模型，使用 tool_result 内容块。
+  注意：在思考模式下的多轮工具调用过程中，模型会在返回 tool_use 内容块的同时返回 thinking 内容块。
+  若要继续对话，建议在后续每次请求的 messages 数组中保留所有历史 thinking 内容块，以获得最佳表现。
+  工具定义包括: name（工具的名称）、description（可选，但强烈推荐填写工具描述）、
+  input_schema（工具输入形状的 JSON 模式，模型将在 tool_use 输出内容块中生成）。
+    - tools.name string 必选 — 工具名称。模型将通过它调用该工具，并是在 tool_use 块中使用的名称。
+    - tools.description string — 工具的描述。工具描述应尽可能详细。模型关于工具是什么以及如何使用的信息越多，
+      执行表现就越好。您可以使用自然语言描述来强化工具输入 JSON 模式中的重要信息。
+    - tools.type string — 可选值: custom
+    - tools.input_schema object 必选 — 工具输入形状的 JSON 模式，模型将在 tool_use 输出内容块中生成。
+        - tools.input_schema.type string 必选 — input_schema 的类型，仅为 object。可选值: object
+        - tools.input_schema.properties object | null — 工具输入的属性。
+        - tools.input_schema.required array | null — 工具输入中必须包含的属性列表。
+
+- top_p number 默认 0.95 — 启用核采样。请注意，你应仅调整 temperature 或 top_p 二者其一，不可同时修改。
+    在思考模式下，全部模型不支持自定义 top_p 参数。即使传入该参数，实际生效值也会被模型强制采用推荐默认值 0.95。
+    所需范围: [0.01, 1.0]
+
+## 非流式响应（字段参考）
+
+- id string — 该对话的唯一标识符。ID 的格式和长度可能会随时间而变化。
+- type string — 对象类型，对于 Messages 始终为 message。
+- role string — 生成消息的会话角色，始终为 assistant。
+- content array — 模型生成的内容，由多个内容块组成。每个内容块都有一个 type。
+    折叠块类型: Text · object / Thinking · object / Tool use · object
+    - content.text string — 文本内容。
+    - content.type string — 内容的类型。可选值: text
+- model string — 使用的模型名称。
+- stop_reason string — 消息完成的原因。取值可能为以下之一：
+    - end_turn: 模型达到自然停止点。
+    - max_tokens: 超过请求的 max_tokens 或模型的最大限制。
+    - tool_use: 模型调用了一个或多个工具。
+    - content_filter: 内容因触发过滤策略而被拦截。
+    - repetition_truncation: 模型检测到了复读。
+    可选值: end_turn, max_tokens, tool_use, content_filter, repetition_truncation
+- usage object — 计费和限流相关的使用量统计。
+    - usage.input_tokens integer — 使用的输入 token 数量。
+    - usage.output_tokens integer — 使用的输出 token 数量。
+    - usage.cache_read_input_tokens integer | null — 从缓存读取的输入 token 数量。
+
+## 流式响应（字段参考）
+
+- SSE.event string — 描述的事件类型标识的字符串。
+    可选值: message_start, content_block_start, content_block_delta, content_block_stop, message_delta, message_stop
+- type string — 每个服务器发送的事件包括一个命名事件类型和关联的 JSON 数据。（同上六种）
+- message object — 响应消息。
+    - message.id string — 消息 ID。
+    - message.type string — 可选值: message
+    - message.role string — 可选值: assistant
+    - message.model string — 模型名称。
+    - message.content array — 消息中的内容块数组。
+    - message.stop_reason string | null — 消息完成的原因。
+- index integer — 内容块在消息中的位置。
+- content_block object — 开始的内容块。折叠块类型: Text · object / Thinking · object / Tool use · object
+    - content_block.type string — 文本内容块的头部；实际文本通过后续 delta 事件到达。可选值: text
+    - content_block.text string — 开头通常为空字符串；文本通过 text_delta 类型的 content_block_delta 事件附加。
+- delta object — 实际响应内容。折叠块类型: Content block delta · object / Message delta · object。内容块的增量数据。
+    - delta.type string — 可选值: text_delta, thinking_delta, input_json_delta
+    - delta.text string — 增量数据的文本部分。
+    - delta.thinking string — 增量数据的思考部分。
+    - delta.partial_json string — JSON 片段字符串。按到达顺序连接片段以形成完整的输入 JSON，然后解析。
+- usage object | null — 计费和限流相关的使用量统计。
+    input_tokens / output_tokens / cache_read_input_tokens（同上）
+
+## 官方示例 — 基础调用（默认 tab，curl，逐字）
+
+curl --location --request POST 'https://api.xiaomimimo.com/anthropic/v1/messages' \
+--header "api-key: $MIMO_API_KEY" \
+--header "Content-Type: application/json" \
+--data-raw '{
+ "model": "mimo-v2.6-pro",
+ "max_tokens": 1024,
+ "system": "You are MiMo, an AI assistant developed by Xiaomi. Today is date: Tuesday, December 16, 2025. Your knowledge cutoff date is December 2024.",
+ "messages": [
+ {
+ "role": "user",
+ "content": [
+ {
+ "type": "text",
+ "text": "please introduce yourself"
+ }
+ ]
+ }
+ ],
+ "top_p": 0.95,
+ "stream": false,
+ "temperature": 1.0,
+ "stop_sequences": null,
+ "thinking": {
+ "type": "disabled"
+ }
+}'
+
+## 官方示例 — 基础调用响应（逐字）
+
+{
+    "id": "23894237-e793-4156-965e-56cea4295290_a43d65ad5fb048e7ba57e27e689b2bf8",
+    "type": "message",
+    "role": "assistant",
+    "model": "mimo-v2.6-pro",
+    "stop_reason": "end_turn",
+    "content": [
+        {
+            "type": "text",
+            "text": "Hey there! I'm MiMo, Xiaomi's AI assistant, here to help you with whatever you need—be it info, ideas, or just a chat. What's on your mind today?"
+        }
+    ],
+    "usage": {
+        "input_tokens": 57,
+        "output_tokens": 41
+    }
+}
+
+更新时间: 2026 年 09 月 22 日
+
+# ============================================================
+# 旁证（同站其他页面，用于交叉印证，非本页正文）
+# ============================================================
+
+# 旁证1: first-api-call（sources/mimo-quickstart.txt）
+#   - 平台同时兼容 OpenAI API 与 Anthropic API 两种格式
+#   - Anthropic BASE_URL = https://api.xiaomimimo.com/anthropic（实时推理）；Token Plan 为 https://token-plan-cn.xiaomimimo.com/anthropic
+#   - Anthropic SDK 示例: client.messages.create(model, max_tokens=1024, system="...",
+#       messages=[{"role":"user","content":[{"type":"text","text":"..."}]}], top_p=0.95, stream=False, temperature=1.0, stop_sequences=None)
+
+# 旁证2: FAQ api-integration（sources/mimo-faq.txt:133-139 / mimo-openai-api.txt:217-220）
+#   - OpenAI 接口 /v1/chat/completions 遵循 OpenAI 格式，含 developer/system/user/assistant 角色
+#   - Anthropic 接口 /anthropic/v1/messages 遵循 Claude 格式，有独立 system 参数
+#   - 请求头: api-key: $MIMO_API_KEY 或 Authorization: Bearer $MIMO_API_KEY
+#   - 多轮工具调用回传要求（OpenAI 侧原文明示，Anthropic 侧按字段表等价物为 thinking 内容块）：
+#     "历史 reasoning_content 一旦缺失…后续所有 assistant 如果包含了工具调用，必须完整回传，否则 API 将返回 400 错误"
+
+# 旁证3: passing-back-reasoning_content（mimo-openai-api.txt:233）
+#   - Anthropic 兼容协议受影响 Agent 产品: TRAE, GitHub Copilot CLI, AutoGen, Goose, OpenClaw, OpenCode, Kilo Code
+#     （即 Claude 生态工具链走 Anthropic 协议）

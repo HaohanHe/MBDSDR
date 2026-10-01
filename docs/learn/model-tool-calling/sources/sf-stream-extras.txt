@@ -1,0 +1,183 @@
+# ============================================================
+# SiliconFlow 英文站补抓（在线 web_fetch 落盘，2026-10-01）
+# 用途：本地 sf-stream-mode.txt 只覆盖 content/reasoning_content，缺
+#       delta.tool_calls 累加、reasoning_content 逐字回传红线、finish_reason
+#       流式收尾等细节；本文件补齐 SF 侧证据。
+# ============================================================
+
+# 来源1: https://docs.siliconflow.com/en/userguide/guides/interleaved-thinking
+# 抓取: web.fetch pagination offset=0, end_offset=2828 = total_length（全文读完）
+# 标题: Interleaved Thinking - SiliconFlow
+# 状态: 本地中文版 interleaved-thinking 页为 404 壳，真实文档在英文站。
+
+## On this page
+- Important Notice
+- Overview
+- 1. What is Interleaved Thinking?
+    - Diagram: Turn/Step structure with tool results
+- 2. Tool Calling: The Non-Negotiable Rule
+    - What must be preserved (including after tool results)
+    - What you must NOT do
+- 3. Client Handling Checklist (Recommended)
+- 4. Example: Interleaved Thinking + Tool Calling (DeepSeek V3.2)
+- 5. Using GLM-4.7 Instead
+- Summary
+
+# Interleaved Thinking
+
+## Important Notice
+⚠️ Some models introduce new Interleaved Thinking behaviors.
+On SiliconFlow, DeepSeek V3.2 and GLM-4.7 may emit Interleaved Thinking-related
+structured output when using the serverless model API—most commonly in tool-calling
+flows.
+
+## Overview
+On SiliconFlow, Interleaved Thinking is currently supported by:
+- DeepSeek V3.2
+- GLM-4.7
+
+## 1. What is Interleaved Thinking?
+With Interleaved Thinking, a model can:
+1. Decide whether it needs to call a tool
+2. Call a tool
+3. Receive tool results
+4. Continue from intermediate outputs
+5. Decide the next step (call another tool or produce a final answer)
+
+For correct tool-calling behavior, preserve and replay `reasoning_content` exactly
+as received across the entire sequence.
+
+## 2. Tool Calling: The Non-Negotiable Rule
+When using tool calling with DeepSeek V3.2 or GLM-4.7, the API may return additional
+structured output in a dedicated field: `reasoning_content`.
+✅ You must preserve `reasoning_content` exactly as received, and send it back
+unchanged in subsequent requests.
+
+### What must be preserved (including after tool results)
+To be explicit: preservation is required not only for `reasoning_content` produced
+after user messages, but also for `reasoning_content` produced after tool results.
+In tool-enabled flows, the model may produce reasoning:
+- before any tool call,
+- between multiple tool calls,
+- and after receiving tool results (i.e., after you send `role="tool"` messages
+  and the model continues).
+You must preserve and replay all such `reasoning_content` exactly as generated.
+This includes:
+- Content emitted before any tool calls
+- Content emitted between tool calls (multi-step tool chaining)
+- Content emitted after tool results
+- Any `reasoning_content` segments produced across turns (keep the original order)
+
+### What you must NOT do
+❌ Do NOT:
+- Modify the text
+- "Clean up" or post-process it
+- Merge or split segments
+- Reorder segments
+- Drop it while keeping only normal assistant text
+If you do, you may see:
+- Broken multi-step behavior around tools
+- Instability across tool calls
+- Reduced cache efficiency and degraded output quality
+
+## 3. Client Handling Checklist (Recommended)
+When receiving responses:
+- Accumulate normal assistant text from `content` (or `delta.content` if streaming)
+- Accumulate Interleaved Thinking text from `reasoning_content`
+  (or `delta.reasoning_content` if streaming)
+- Collect tool requests from `tool_calls` (or `delta.tool_calls` if streaming)
+
+When sending the assistant message back to the model, include all of them:
+- `content`
+- `reasoning_content` (verbatim, complete, in the exact original order)
+- `tool_calls` (as received)
+
+**Note:** This rule applies to both streaming and non-streaming. Streaming only
+affects how you *read* fields (`delta.*`), not what you must preserve.
+
+## 4. Example: Interleaved Thinking + Tool Calling (DeepSeek V3.2)
+（节选循环内累加逻辑，原文 Python）
+    reasoning_content = ""
+    content = ""
+    tool_calls = []
+    for chunk in response:
+        delta = chunk.choices[0].delta
+        if getattr(delta, "reasoning_content", None):
+            reasoning_content += delta.reasoning_content
+        if getattr(delta, "content", None):
+            content += delta.content
+        if getattr(delta, "tool_calls", None):
+            tool_calls.extend(delta.tool_calls)
+    # 🔑 Preserve reasoning_content verbatim (Round 1)
+    messages.append({
+        "role": "assistant",
+        "content": content,
+        "reasoning_content": reasoning_content,
+        "tool_calls": tool_calls
+    })
+    # Tool execution result
+    messages.append({
+        "role": "tool",
+        "tool_call_id": tool_calls[0]["id"],
+        "content": json.dumps({"weather": "Sunny", "temp": "25°C"})
+    })
+    # Round 2: model may produce NEW reasoning_content AFTER tool results（同样累加）
+
+## Summary
+1. Interleaved Thinking enables multi-step, tool-aware execution
+2. With tool calling, you must preserve and replay `reasoning_content` verbatim
+   —including any reasoning produced after tool results
+3. Never modify, drop, merge/split, or reorder `reasoning_content`
+
+# ============================================================
+# 来源2: https://docs.siliconflow.com/en/api-reference/chat-completions/chat-completions
+# 抓取: web.fetch pagination offset=0, end_offset=1942 = total_length（全文读完）
+# 标题: Chat completions - SiliconFlow
+# 注: 英文 API 参考页 200 示例只给了非流式 message 结构；流式 chunk 的
+#     index/id/function.name/function.arguments 增量细节 SF 本地页与英文页
+#     均未展开（sf-chat-completions-api.txt:463-468 的 for chunk 循环在
+#     `if delta.tool_calls:` 处截断）。该细节以 MiMo OpenAI 兼容文档为准
+#     （mimo-openai-api.txt:101-118）。
+# ============================================================
+
+POST /v1/chat/completions
+Headers: Authorization: Bearer <token>, Content-Type: application/json
+
+Body 关键字段:
+- model string required
+- messages object[] required (1-10 elements)
+- stream boolean — "If set, tokens are returned as Server-Sent Events as they
+  are made available. Stream terminates with `data: [DONE]`"
+- max_tokens integer — avoid setting to window upper bound; reserve ~10k tokens
+  as buffer for input and system overhead.
+- enable_thinking boolean (default True) — switches thinking/non-thinking;
+  for deepseek-ai/DeepSeek-V3.1 function calling must set enable_thinking=false.
+- thinking_budget integer default 4096, range 128 <= x <= 32768
+- stop string | string[] — up to 4 sequences; returned text does not contain
+  the stop sequence.
+- tools object[] — max 128 functions; only functions supported.
+
+200 响应（非流式示例）:
+{
+  "id": "<string>",
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": "<string>",
+      "reasoning_content": "<string>",
+      "tool_calls": [{
+        "id": "<string>",
+        "type": "function",
+        "function": { "name": "<string>", "arguments": "<string>" }
+      }]
+    },
+    "finish_reason": "stop"
+  }],
+  "usage": { "prompt_tokens": 123, "completion_tokens": 123, "total_tokens": 123 },
+  "created": 123, "model": "<string>", "object": "chat.completion"
+}
+
+错误码: 400 / 401 "Invalid token" / 404 "404 page not found" /
+429 "Request was rejected due to rate limiting ... Details:TPM limit reached." /
+503 {"code":50505,"message":"Model service overloaded. Please try again later."} /
+504 "string"

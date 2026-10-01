@@ -1,0 +1,241 @@
+# SiliconFlow 官方文档《Interleaved Thinking》纯文本（供引用）
+# ============================================================
+# 【来源与可靠性说明（重要）】
+# - 任务指定的本地 HTML：/home/user/Doubao/chats/38438160041798146/repos/model-docs/siliconflow/docs_userguide_guides_interleaved-thinking.html
+#   经逐字节核查 = 404 壳页（Next.js NOT_FOUND 边界）：
+#     * 尾部 flight payload 含 "This page could not be found." / "页面未找到" / "NEXT_HTTP_ERROR_FALLBACK;404"
+#     * 侧边栏目录树中不存在 interleaved-thinking.mdx 条目（仅有 function-calling.mdx、reasoning.mdx 等）
+#     * 可见 DOM 正文为空（python html.parser 提取可见文本仅 4 字符）
+# - 任务指定的在线对照源 https://api-docs.siliconflow.cn/docs/userguide/guides/interleaved-thinking 已 link dead（两次重试均失败）
+# - 站点已迁移：现行官方英文站 = https://docs.siliconflow.com/en/userguide/guides/interleaved-thinking
+#   （2026-10-01 web.fetch 抓取，total_length=2828，end_offset=2828，已读完整）
+# - 中文镜像 https://docs.siliconflow.com/zh/userguide/guides/interleaved-thinking 已 link dead
+# - 结论：本文件下方正文 = 现行官方英文站全文逐节转录；引用格式 sources/sf-interleaved-thinking.txt:<行号>
+# 关联旁证页（已抓取全文）：
+#   - Reasoning 概览页（thinking_budget / enable_thinking / reasoning_content 返回字段）
+#     https://docs.siliconflow.cn/docs/userguide/capabilities/reasoning
+#   - Function Calling 指南页（tools 参数 / tool 回传循环）
+#     https://api-docs.siliconflow.cn/docs/userguide/guides/function-calling
+# ============================================================
+
+# §On this page（目录）
+# - Important Notice
+# - Overview
+# - 1. What is Interleaved Thinking?
+#     - Diagram: Turn/Step structure with tool results
+# - 2. Tool Calling: The Non-Negotiable Rule
+#     - What must be preserved (including after tool results)
+#     - What you must NOT do
+# - 3. Client Handling Checklist (Recommended)
+# - 4. Example: Interleaved Thinking + Tool Calling (DeepSeek V3.2)
+# - 5. Using GLM-4.7 Instead
+# - Summary
+
+# §Title
+# Interleaved Thinking
+
+# §Important Notice
+⚠️ Some models introduce new Interleaved Thinking behaviors.
+On SiliconFlow, DeepSeek V3.2 and GLM-4.7 may emit Interleaved Thinking-related
+structured output when using the serverless model API—most commonly in
+tool-calling flows.
+To ensure correctness, stability, and optimal performance, please follow the
+guidelines below.
+
+# §Overview
+On SiliconFlow, Interleaved Thinking is currently supported by:
+- DeepSeek V3.2
+- GLM-4.7
+Interleaved Thinking is especially useful for:
+- Agent-style orchestration
+- Tool-calling scenarios
+- Coding and debugging
+- Multi-step tasks that benefit from intermediate tool outputs
+
+# §1. What is Interleaved Thinking?
+With Interleaved Thinking, a model can:
+1. Decide whether it needs to call a tool
+2. Call a tool
+3. Receive tool results
+4. Continue from intermediate outputs
+5. Decide the next step (call another tool or produce a final answer)
+This enables robust multi-step execution where tool outputs can influence
+subsequent steps.
+
+# §Diagram: Turn/Step structure with tool results
+The diagram below illustrates how a single Turn can contain multiple Steps, and
+how the model may continue producing `reasoning_content` after tool results
+(i.e., after you send role="tool" messages).
+For correct tool-calling behavior, preserve and replay `reasoning_content`
+exactly as received across the entire sequence.
+[图示文字（按图还原）]
+Turn 1 含 Step 1 / Step 2 / Step 3；Turn 2 含 Step 1。每个 Step 的 Input 侧堆叠：
+  System / User Message 1 → (已有) Reasoning → Tool call 1 / Tool result 1 →
+  Reasoning 2 → Tool call 2 / Tool result 2 → Reasoning 3 → Answer 1。
+Turn 2 Step 1 继续：Reasoning 4 → Tool call 3 / Tool result 3 → Reasoning 5 →
+  Tool call 4 / Tool result 4 → Reasoning 6 → Answer 1' → User Message 2。
+要点：reasoning_content 在每一轮工具结果之后都会再次出现。
+
+# §2. Tool Calling: The Non-Negotiable Rule
+When using tool calling with DeepSeek V3.2 or GLM-4.7, the API may return
+additional structured output in a dedicated field:
+- `reasoning_content`
+✅ You must preserve `reasoning_content` exactly as received, and send it back
+   unchanged in subsequent requests.
+
+## §2.1 What must be preserved (including after tool results)
+To be explicit: preservation is required not only for `reasoning_content`
+produced after user messages, but also for `reasoning_content` produced after
+tool results. In tool-enabled flows, the model may produce reasoning:
+- before any tool call,
+- between multiple tool calls,
+- and after receiving tool results (i.e., after you send role="tool" messages
+  and the model continues).
+You must preserve and replay all such `reasoning_content` exactly as generated.
+This includes:
+- Content emitted before any tool calls
+- Content emitted between tool calls (multi-step tool chaining)
+- Content emitted after tool results
+- Any `reasoning_content` segments produced across turns (keep the original
+  order)
+
+## §2.2 What you must NOT do
+❌ Do NOT:
+- Modify the text
+- "Clean up" or post-process it
+- Merge or split segments
+- Reorder segments
+- Drop it while keeping only normal assistant text
+If you do, you may see:
+- Broken multi-step behavior around tools
+- Instability across tool calls
+- Reduced cache efficiency and degraded output quality
+
+# §3. Client Handling Checklist (Recommended)
+When receiving responses:
+- Accumulate normal assistant text from `content` (or `delta.content` if
+  streaming)
+- Accumulate Interleaved Thinking text from `reasoning_content` (or
+  `delta.reasoning_content` if streaming)
+- Collect tool requests from `tool_calls` (or `delta.tool_calls` if streaming)
+When sending the assistant message back to the model, include all of them:
+- `content`
+- `reasoning_content` (verbatim, complete, in the exact original order)
+- `tool_calls` (as received)
+Note: This rule applies to both streaming and non-streaming. Streaming only
+affects how you read fields (delta.*), not what you must preserve.
+
+# §4. Example: Interleaved Thinking + Tool Calling (DeepSeek V3.2)
+This example demonstrates DeepSeek V3.2 on SiliconFlow.
+The same pattern also applies to GLM-4.7.
+```
+from openai import OpenAI
+import json
+
+client = OpenAI(
+    api_key="YOUR_API_KEY",
+    base_url="https://api.siliconflow.com/v1/"
+)
+
+tools = [{
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Get weather information",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string"}},
+            "required": ["city"]
+        }
+    }
+}]
+
+messages = [
+    {"role": "system", "content": "You are an assistant"},
+    {"role": "user", "content": "What's the weather like in America?"}
+]
+
+# Round 1: model reasons, then calls a tool
+response = client.chat.completions.create(
+    model="deepseek-ai/DeepSeek-V3.2",
+    messages=messages,
+    tools=tools,
+    stream=True   # optional; the same preservation rule applies to non-streaming
+)
+reasoning_content = ""
+content = ""
+tool_calls = []
+for chunk in response:
+    delta = chunk.choices[0].delta
+    if getattr(delta, "reasoning_content", None):
+        reasoning_content += delta.reasoning_content
+    if getattr(delta, "content", None):
+        content += delta.content
+    if getattr(delta, "tool_calls", None):
+        tool_calls.extend(delta.tool_calls)
+
+# 🔑 Preserve reasoning_content verbatim (Round 1)
+messages.append({
+    "role": "assistant",
+    "content": content,
+    "reasoning_content": reasoning_content,
+    "tool_calls": tool_calls
+})
+
+# Tool execution result (example)
+messages.append({
+    "role": "tool",
+    "tool_call_id": tool_calls[0]["id"],
+    "content": json.dumps({"weather": "Sunny", "temp": "25°C"})
+})
+
+# Round 2: model may produce NEW reasoning_content AFTER tool results
+response = client.chat.completions.create(
+    model="deepseek-ai/DeepSeek-V3.2",
+    messages=messages,
+    tools=tools,
+    stream=True   # optional
+)
+reasoning_content_2 = ""
+content_2 = ""
+tool_calls_2 = []
+for chunk in response:
+    delta = chunk.choices[0].delta
+    if getattr(delta, "reasoning_content", None):
+        reasoning_content_2 += delta.reasoning_content
+    if getattr(delta, "content", None):
+        content_2 += delta.content
+    if getattr(delta, "tool_calls", None):
+        tool_calls_2.extend(delta.tool_calls)
+
+# 🔑 Preserve reasoning_content verbatim (Round 2, i.e., after tool results)
+messages.append({
+    "role": "assistant",
+    "content": content_2,
+    "reasoning_content": reasoning_content_2,
+    "tool_calls": tool_calls_2
+})
+```
+
+# §5. Using GLM-4.7 Instead
+To switch the example to GLM-4.7, change:
+    model="deepseek-ai/DeepSeek-V3.2"
+to:
+    model="zai-org/GLM-4.7"
+All Interleaved Thinking preservation rules remain the same, including
+preserving `reasoning_content` after tool results.
+
+# §Summary
+For DeepSeek V3.2 and GLM-4.7 on SiliconFlow:
+1. Interleaved Thinking enables multi-step, tool-aware execution
+2. With tool calling, you must preserve and replay `reasoning_content`
+   verbatim—including any reasoning produced after tool results
+3. Never modify, drop, merge/split, or reorder `reasoning_content`
+Following these rules ensures stable tool use and consistent multi-step behavior.
+
+# §附：旁证页要点（Reasoning 概览页，非本页正文，仅交叉引用）
+# - reasoning_content 是与 content 同级的返回字段（Return parameters）。
+# - 思考开关参数：extra_body={"enable_thinking": true, "thinking_budget": 1024}。
+#   thinking_budget = 模型内部推理（CoT）使用的 token 数；达到预算时 Qwen3 系列会
+#   强制停止 CoT，其他推理模型可能继续输出思考内容。
+# - 流式累加：if chunk.choices[0].delta.reasoning_content: reasoning_content += ...

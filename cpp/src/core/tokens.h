@@ -798,5 +798,22 @@ QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
         .replace(QStringLiteral("%groupPad%"), S(kGroupPadTop));
 }
 
+// =====================================================================
+// AI tool-calling loop (M4) -- function-calling runtime constants.
+// Anchor: END of this header (impl-spec §6). No magic numbers at the call
+// sites; the loop watchdog, HTTP timeout and thinking budget all live here.
+// =====================================================================
+// Hard cap on tool-execution rounds in a single chat loop. A model that keeps
+// emitting tool_calls can never spin forever: after this many assistant turns
+// the loop force-stops with a "轮次用尽" terminal answer. Same order as
+// kTaskMaxSteps (the autonomous-task watchdog).
+inline constexpr int kAiMaxToolRounds = 8;
+// Per-request HTTP timeout (ms), replacing the previous hardcoded 30000 in
+// llm_client. The streaming pump uses a chunk-arrival timeout internally.
+inline constexpr int kAiRequestTimeoutMs = 30000;
+// Default chain-of-thought budget (tokens) interleaved-thinking models are
+// allowed to spend. Backend range is 128..32768 (SF chat-completions note).
+inline constexpr int kAiThinkingBudgetTokens = 4096;
+
 } // namespace tokens
 } // namespace mbdsdr

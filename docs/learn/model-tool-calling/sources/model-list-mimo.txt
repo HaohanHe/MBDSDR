@@ -1,0 +1,61 @@
+# ============================================================
+# 小米 MiMo 模型清单 — 在线抓取落盘
+# ============================================================
+# 主来源: https://mimo.mi.com/docs/en-US/quick-start/summary/model
+#   抓取于 2026-10-01, web.fetch pagination(offset=0, limit=8000), end_offset=939=total_length (全文读完)
+# 补充来源:
+#   - sources/mimo-openai-api.txt (model 可选值 + thinking/tool_choice/tools 字段定义)
+#   - sources/mimo-reasoning.txt (深度思考支持模型 + 回传红线)
+#   - sources/mimo-faq.txt (web search 支持模型 + 双协议)
+#   - sources/mimo-quickstart.txt (双 base_url + key 类型)
+# 完整性说明: 本文件 = 官方 Models 页全文逐字转录；文本生成模型 5 个 + ASR 1 个 + TTS 3 个，
+#            无遗漏 (官方页即全量清单)。
+# ============================================================
+
+# §一、Text Generation Model (文本生成，全部支持 FC + Deep Thinking)
+# 来源: mimo.mi.com/docs/en-US/quick-start/summary/model §Text Generation Model 表
+#
+# | Model ID | 能力支持 | Context Window | Max Output | 限流 |
+# |---|---|---|---|---|
+# | mimo-v2.6-pro              | Full-modal Understanding; Text Generation; Deep Thinking; Streaming Output; Function Call; Structured Output; Web Search | 1M | 128K | RPM 100 / TPM 10M |
+# | mimo-v2.6-flash            | (同上, rowspan) | 1M | 128K | RPM 100 / TPM 10M |
+# | mimo-v2.6-pro-ultraspeed   | (同上, rowspan) | 1M | 128K | 定制服务, 联系商务 |
+# | mimo-v2.5-pro (to be deprecated) | Text Generation; Full-modal Understanding; Deep Thinking; Streaming Output; Function Call; Structured Output; Web Search | 1M | 128K | RPM 100 / TPM 10M |
+# | mimo-v2.5 (to be deprecated)     | (与 v2.6 同组, rowspan) | 1M | 128K | RPM 100 / TPM 10M |
+#
+# 弃用警告 (原文):
+#   "mimo-v2.5-pro and mimo-v2.5 will be officially deprecated at 10:00 (Beijing time)
+#    on October 21, 2026. It is recommended to switch to the new version of the models."
+#
+# 快速选型 (原文 §Quick Selection Guide):
+#   - 复杂项目/长期任务/高价值/网络安全与科研 → mimo-v2.6-pro
+#   - 专业办公高频调用大规模任务 → mimo-v2.6-flash
+#   - 生产环境强实时交互/对响应速度敏感 → mimo-v2.6-pro-ultraspeed
+
+# §二、ASR / TTS 模型 (非 LLM，仅记录边界)
+# | mimo-v2.5-asr              | Speech Recognition | ctx 8k  | out 2k  | RPM 100 / TPM 10k |
+# | mimo-v2.5-tts              | Speech Synthesis   | ctx 8K  | out 8K  | RPM 100 / TPM 10M (三 TTS 共享) |
+# | mimo-v2.5-tts-voiceclone   | Speech Synthesis; Timbre Cloning | (同上) | (同上) | (同上) |
+# | mimo-v2.5-tts-voicedesign   | Speech Synthesis; Timbre Design   | (同上) | (同上) | (同上) |
+
+# §三、Base URL / Key 类型 (来源: mimo-quickstart.txt:21-25)
+#   按量付费 OpenAI 兼容:  https://api.xiaomimimo.com/v1            (sk-xxxxx)
+#   按量付费 Anthropic 兼容: https://api.xiaomimimo.com/anthropic      (sk-xxxxx)
+#   批量推理 OpenAI:        https://batch-api-cn.xiaomimimo.com/v1
+#   Token Plan OpenAI:     https://token-plan-cn.xiaomimimo.com/v1   (tp-xxxxx / ttp-xxxxx)
+#   Token Plan Anthropic:  https://token-plan-cn.xiaomimimo.com/anthropic
+#   → 全部 5 个文本模型同时支持 OpenAI 兼容协议与 Anthropic 兼容协议 (双协议)。
+
+# §四、关键字段边界 (来源: mimo-openai-api.txt)
+#   - model 可选值 (原文 §model string 必选):
+#       mimo-v2.6-flash, mimo-v2.6-pro, mimo-v2.6-pro-ultraspeed, mimo-v2.5-pro, mimo-v2.5
+#   - thinking: {type: "enabled"|"disabled"}, 默认 enabled (全部 5 个文本模型)
+#       思考模式下 temperature 强制 1.0、top_p 强制 0.95 (自定义值被忽略)
+#   - tool_choice: 仅 "auto" 生效；传非 auto 值后端会移除该字段，行为等同 auto
+#   - tools.function.name: [a-zA-Z0-9_-], 最大 64 字符
+#   - tools.function.strict: boolean, 默认 false
+#   - max_completion_tokens: v2.6 全系/v2.5-pro 默认 131072, v2.5 默认 32768; 范围 [1,131072]
+#     (注意: 该值 = 可见输出 + 推理 token 总数上限)
+#   - arguments 不保证合法 JSON，可能虚构 schema 外参数 (原文警告, mimo-openai-api.txt:88-89)
+#   - reasoning_content 缺失 → API 返回 400 (mimo-reasoning.txt:41-43)
+#   - finish_reason: stop / length / tool_calls / content_filter / repetition_truncation
