@@ -481,9 +481,11 @@ add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/agent.cpp src/ai/agent_tools.cpp src/ai/ai_config.cpp src/ai/ai_context.cpp
+    src/ai/sat_task_planner.cpp src/ai/task_orchestrator.cpp src/ui/bookmark_manager.cpp
+    src/dsp/tle_client.cpp src/dsp/sgp4.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp)
 target_include_directories(test_ai_function_calling PRIVATE src)
-target_link_libraries(test_ai_function_calling PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+target_link_libraries(test_ai_function_calling PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
 add_test(NAME ai_function_calling COMMAND test_ai_function_calling)
 
 # Shortcut smoke test: builds the full MainWindow (all sources, minus main.cpp).
@@ -822,9 +824,11 @@ add_executable(test_agent tests/test_agent.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp
-    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ai/sat_task_planner.cpp src/ai/task_orchestrator.cpp src/ui/bookmark_manager.cpp
+    src/dsp/tle_client.cpp src/dsp/sgp4.cpp)
 target_include_directories(test_agent PRIVATE src)
-target_link_libraries(test_agent PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+target_link_libraries(test_agent PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
 add_test(NAME agent COMMAND test_agent)
 
 # Autonomous multi-step task orchestrator: real engine through deterministic
@@ -841,9 +845,10 @@ add_executable(test_task_orchestrator tests/test_task_orchestrator.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp
-    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ai/sat_task_planner.cpp src/dsp/tle_client.cpp src/dsp/sgp4.cpp)
 target_include_directories(test_task_orchestrator PRIVATE src)
-target_link_libraries(test_task_orchestrator PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+target_link_libraries(test_task_orchestrator PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
 add_test(NAME task_orchestrator COMMAND test_task_orchestrator)
 
 # LLM plan parser: trustworthy parse + honest rejection/fallback.
@@ -860,9 +865,10 @@ add_executable(test_plan_parser tests/test_plan_parser.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp
-    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ai/sat_task_planner.cpp src/dsp/tle_client.cpp src/dsp/sgp4.cpp)
 target_include_directories(test_plan_parser PRIVATE src)
-target_link_libraries(test_plan_parser PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Gui Qt6::Widgets Qt6::Multimedia)
+target_link_libraries(test_plan_parser PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
 add_test(NAME plan_parser COMMAND test_plan_parser)
 
 # Satellite auto-tune task planner: real offline SGP4 -> capture frequency.
@@ -896,9 +902,10 @@ add_executable(test_task_async tests/test_task_async.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp
-    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ai/sat_task_planner.cpp src/dsp/tle_client.cpp src/dsp/sgp4.cpp)
 target_include_directories(test_task_async PRIVATE src)
-target_link_libraries(test_task_async PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+target_link_libraries(test_task_async PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
 add_test(NAME task_async COMMAND test_task_async)
 
 # Tuner AGC: rtl_tcp real 0x03 command byte + engine readback.
@@ -1071,7 +1078,32 @@ add_executable(test_ai_tool_loop tests/test_ai_tool_loop.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/agent_tools.cpp
     src/ai/ai_config.cpp src/ai/ai_context.cpp
+    src/ai/sat_task_planner.cpp src/ai/task_orchestrator.cpp src/ui/bookmark_manager.cpp
+    src/dsp/tle_client.cpp src/dsp/sgp4.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp)
 target_include_directories(test_ai_tool_loop PRIVATE src)
-target_link_libraries(test_ai_tool_loop PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+target_link_libraries(test_ai_tool_loop PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
 add_test(NAME ai_tool_loop COMMAND test_ai_tool_loop)
+
+# ---- W2d A4 real-link closed loop (offline, deterministic) ------------------
+# Source-disclosure honesty (test signal / not connected), scan_band synthetic
+# annotation, start_recording bool propagation, get_status alignment, and the
+# read-only predict_passes tool over the fresh-TLE-cache seam. No network / no
+# API key: the engine defaults to the offline test source and pass prediction
+# uses the pure predictPassesFromEntries seam with a fixed known TLE.
+add_executable(test_ai_real_link tests/test_ai_real_link.cpp
+    src/ai/sat_task_planner.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp
+    src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
+    src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
+    src/dsp/tle_client.cpp src/dsp/sgp4.cpp src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp
+    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp
+    src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp
+    src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp
+    src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp
+    src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp)
+target_include_directories(test_ai_real_link PRIVATE src)
+target_link_libraries(test_ai_real_link PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
+add_test(NAME ai_real_link COMMAND test_ai_real_link)

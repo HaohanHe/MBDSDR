@@ -41,7 +41,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 7);
+    QCOMPARE(specs.size(), 8);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -129,7 +129,7 @@ void TestToolSchema::noArgToolsHaveEmptyProperties() {
     }
 }
 
-// The 7 tool names + descriptions are verbatim copies of src/ai/agent_tools.cpp
+// The tool names + descriptions are verbatim copies of src/ai/agent_tools.cpp
 // toolDefs(); drifting them would break UI copy / golden expectations.
 void TestToolSchema::sevenToolsNameDescriptionMatch() {
     QList<ToolDef> defs = toolDefsFromSpecs(registeredToolSpecs());
@@ -142,6 +142,10 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"set_bandwidth", "Set channel filter bandwidth in Hz."},
         {"get_status",
          "Return current receiver state: frequency, mode, bandwidth, sample rate."},
+        {"predict_passes",
+         QString::fromUtf8(
+            "只读：用本地新鲜 TLE 缓存预测指定卫星未来的过境（升/降时刻、最高仰角、起止方位）。"
+            "无新鲜 TLE 时诚实返回空态，不使用陈旧内置数据。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {

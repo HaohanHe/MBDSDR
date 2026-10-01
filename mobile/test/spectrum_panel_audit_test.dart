@@ -140,6 +140,22 @@ void main() {
       expect(AppTokens.radiusPill, greaterThan(50));
     });
 
+    test('跨端选中态收敛：selectedFill alpha=0.16 / selectedText=#d7dee8', () {
+      // 与桌面 kSelectedFill(alpha 0.16) / kSelectedText(#d7dee8) 对齐。
+      expect(AppTokens.selectedFillAlpha, closeTo(0.16, 0.001));
+      expect(AppTokens.selectedFill, const Color(0x29919CAC));
+      expect(AppTokens.selectedText, const Color(0xFFD7DEE8));
+    });
+
+    test('主交互色收敛到低饱和蓝灰，亮蓝仅留仪器轨迹', () {
+      // P0-1：#7CC4FF 退役为主交互色 -> #919cac 三态。
+      expect(AppTokens.accent, const Color(0xFF919CAC));
+      expect(AppTokens.accentHover, const Color(0xFFAAB3C2));
+      expect(AppTokens.accentPress, const Color(0xFF7C8796));
+      // 亮蓝保留为仪器画布轨迹专用 token。
+      expect(AppTokens.traceColor, const Color(0xFF7CC4FF));
+    });
+
     test('hero 读数与正文走 medium/regular，不通篇 600', () {
       expect(AppTokens.freqReadout.fontWeight, AppTokens.weightMedium);
       expect(AppTokens.sectionTitle.fontWeight, AppTokens.weightMedium);
@@ -213,5 +229,35 @@ void main() {
     );
     expect(readout.style?.fontWeight, AppTokens.weightMedium);
     expect(readout.style?.fontSize, AppTokens.freqReadout.fontSize);
+  });
+
+  testWidgets('hero 频率读数触控热区 ≥ touchMin(44) 且可命中', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final radio = _PanelRadio();
+    await tester.pumpWidget(_wrap(radio));
+    await tester.pump();
+
+    final readout = find.textContaining('145.0000 MHz');
+    expect(readout, findsOneWidget);
+
+    // 包裹读数的 GestureDetector 即触控热区；其渲染高度应 ≥ 44。
+    final hit = find.ancestor(of: readout, matching: find.byType(GestureDetector));
+    expect(hit, findsWidgets);
+    double best = 0;
+    for (final el in tester.renderObjectList<RenderBox>(hit)) {
+      if (el.attached) best = best > el.size.height ? best : el.size.height;
+    }
+    expect(best, greaterThanOrEqualTo(AppTokens.touchMin - 0.01),
+        reason: 'hero 读数触控热区应补足到 44px');
+
+    // 命中测试：在读数垂直中心处点击，应落在 GestureDetector 上（不抛异常）。
+    final center = tester.getCenter(readout);
+    await tester.tapAt(center);
+    await tester.pump();
+    // 弹出频率输入对话框即视为热区响应（不崩溃、命中成功）。
+    expect(tester.takeException(), isNull);
   });
 }

@@ -33,9 +33,17 @@ abstract final class AppTokens {
   static const double textAlphaFaint = 0.23;
 
   // ---------------------------------------------------------------- 强调
-  static const Color accent = Color(0xFF7CC4FF);
-  static const Color accentHover = Color(0xFF9FD4FF);
-  static const Color accentPress = Color(0xFF5AA8F0);
+  // 主交互色 = 低饱和蓝灰（Figma #919cac）三态：hover 提亮 / press 压暗。
+  // 亮蓝 #7CC4FF 退役为主交互色，仅保留给仪器画布轨迹（见 traceColor）。
+  static const Color accent = Color(0xFF919CAC);
+  static const Color accentHover = Color(0xFFAAB3C2);
+  static const Color accentPress = Color(0xFF7C8796);
+
+  /// 仪器画布轨迹专用色（亮蓝）：频谱轨迹 / VFO 波段框 / S-meter 填充等
+  /// 示波器语义保留。UI 装饰（Tab 选中、激活态、焦点环）一律用 [accent]。
+  static const Color traceColor = Color(0xFF7CC4FF);
+  static const Color traceColorHover = Color(0xFF9FD4FF);
+
   static const Color success = Color(0xFF5FD08A);
   static const Color warning = Color(0xFFE0B35A);
   static const Color danger = Color(0xFFE74C3C);
@@ -74,15 +82,17 @@ abstract final class AppTokens {
   /// 克制分隔线：1px 半透明白（≈6%）。面板之间优先留白+底色差，必须画线时用它。
   static const Color divider = Color(0x0FFFFFFF);
 
-  /// 选中态填充：低饱和蓝灰（Figma #919cac @ 14%），
+  /// 选中态填充：低饱和蓝灰（Figma #919cac @ 16%），
   /// 用于 SegmentedButton/Chip/列表选中块，不用亮 accent 铺满。
-  static const Color selectedFill = Color(0x24919CAC);
+  /// alpha 与桌面 kSelectedFillAlpha 对齐（跨端同一数值）。
+  static const double selectedFillAlpha = 0.16;
+  static const Color selectedFill = Color(0x29919CAC);
 
-  /// 选中态文字：近白，落在 [selectedFill] 上。
-  static const Color selectedText = Color(0xFFECEAE6);
+  /// 选中态文字：近白蓝灰 #d7dee8，落在 [selectedFill] 上（与桌面 kSelectedText 一致）。
+  static const Color selectedText = Color(0xFFD7DEE8);
 
-  /// 焦点环：accent 45%。键盘可达控件（Tab/输入）聚焦时的可见环。
-  static const Color focusRing = Color(0x737CC4FF);
+  /// 焦点环：交互蓝灰 45%。键盘可达控件（Tab/输入）聚焦时的可见环。
+  static const Color focusRing = Color(0x73919CAC);
 
   /// 禁用控件底：白叠层 4%（现仅有文字禁用 alpha，补控件底）。
   static const Color disabledFill = Color(0x0AFFFFFF);

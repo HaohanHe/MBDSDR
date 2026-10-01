@@ -4,8 +4,11 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDebug>
+#include <QDir>
+#include <QLockFile>
 #include <QPixmap>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QString>
 #include <QStringList>
 #include <QTimer>
@@ -72,6 +75,28 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName("mbdsdr");
     QApplication::setApplicationVersion("0.2.0");
+
+    // Single-instance guard: a second launch must not open a second
+    // SpectrumEngine and fight over the same RTL-SDR handle/port. The lock is
+    // a stack object living for the whole process and is released automatically
+    // on exit (QLockFile unlocks in its destructor). Path comes from
+    // QStandardPaths, never a hardcoded temp path.
+    const QString lockDir =
+        QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    if (!lockDir.isEmpty()) QDir().mkpath(lockDir);
+    const QString lockPath = lockDir.isEmpty()
+        ? QStringLiteral("mbdsdr.lock")
+        : QDir(lockDir).filePath(QStringLiteral("mbdsdr.lock"));
+    QLockFile singleLock(lockPath);
+    // Default stale lock time (~30 s): a GRACEFUL exit releases the lock via
+    // the QLockFile destructor; a CRASHED/aborted instance whose PID is gone
+    // gets its lock reclaimed. A healthy first instance keeps a live PID and is
+    // never stolen. Never set staleLockTime(0) -- that would brick relaunch
+    // after a crash.
+    if (!singleLock.tryLock()) {
+        qWarning() << "[mbdsdr] another instance is already running; exiting.";
+        return 0;
+    }
 
     // Restore persisted UI scale before building the stylesheet; a --scale on
     // the command line wins for this run (automation hooks only, no write-back).

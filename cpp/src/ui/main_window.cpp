@@ -142,6 +142,10 @@ MainWindow::MainWindow(QWidget* parent)
 {
         setWindowTitle("MBDSDR");
     resize(tokens::scaled(1280), tokens::scaled(800));
+    // Tokenized floor: narrow windows stay readable (no horizontal overflow,
+    // no crushed center trace). Left rail already scrolls, right rail elides.
+    setMinimumSize(tokens::scaled(tokens::kMainMinW),
+                   tokens::scaled(tokens::kMainMinH));
     setStyleSheet(tokens::buildDarkQss());
 
     // Engine must exist before UI construction: many widgets connect their
@@ -1670,9 +1674,9 @@ MainWindow::MainWindow(QWidget* parent)
     sbGain_ = new QLabel("--", this);
     sbSdr_  = new QLabel("Test Signal", this);
     sbWatch_ = new QLabel("", this);
-    sbWatch_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kAccent));
+    sbWatch_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kInteract));
     sbScan_ = new QLabel("", this);
-    sbScan_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kAccent));
+    sbScan_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kInteract));
     sbRec_  = new QLabel("", this);
     sbRec_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kDanger));
     // B5: extra one-line readouts. "--" until the first real engine readback;
@@ -2698,7 +2702,7 @@ void MainWindow::updateScanStatus() {
         if (st == dsp::ScanState::Scanning) {
             sbScan_->setText("扫描中…");
             sbScan_->setStyleSheet(QString("color:%1; font-weight:600;")
-                                   .arg(tokens::kAccent));
+                                   .arg(tokens::kInteract));
         } else if (st == dsp::ScanState::Hit) {
             sbScan_->setText(QString("● 命中 %1 MHz")
                              .arg(scanner_->hitFrequency() / 1e6, 0, 'f', 3));
@@ -2707,7 +2711,7 @@ void MainWindow::updateScanStatus() {
         } else if (st == dsp::ScanState::Paused) {
             sbScan_->setText("已暂停");
             sbScan_->setStyleSheet(QString("color:%1; font-weight:600;")
-                                   .arg(tokens::kAccent));
+                                   .arg(tokens::kInteract));
         } else {
             sbScan_->setText("");
         }
@@ -3128,13 +3132,13 @@ void MainWindow::setFocusMode(bool on, bool animate) {
     if (focusAnimL_) focusAnimL_->stop();
     if (focusAnimR_) focusAnimR_->stop();
 
-    // Paint the active state only on this button (accent text + border),
-    // leaving the shared QSS for every other button untouched.
+    // Paint the active state only on this button (interactive blue-gray text +
+    // border), leaving the shared QSS for every other button untouched.
     if (focusBtn_) {
         QSignalBlocker blk(focusBtn_);
         focusBtn_->setChecked(on);
         focusBtn_->setStyleSheet(on
-            ? QString("QPushButton { color: %1; border-color: %1; }").arg(tokens::kAccent)
+            ? QString("QPushButton { color: %1; border-color: %1; }").arg(tokens::kInteract)
             : QString());
     }
 
@@ -3434,7 +3438,11 @@ void MainWindow::restoreUiState() {
                 const double freq = s.value(QString("vfo/%1/freq").arg(i), 98.5e6).toDouble();
                 const QString mode = s.value(QString("vfo/%1/mode").arg(i), "NFM").toString();
                 const double bw = s.value(QString("vfo/%1/bw").arg(i), 12500.0).toDouble();
-                const QString colName = s.value(QString("vfo/%1/color").arg(i), "#7CC4FF").toString();
+                // VFO band box = instrument-canvas overlay, so the default
+                // color is the bright trace blue (kAccent), referenced by
+                // token -- never a magic literal.
+                const QString colName = s.value(QString("vfo/%1/color").arg(i),
+                                                QString::fromUtf8(tokens::kAccent)).toString();
                 engine_->vfoSetMode(id, mode);
                 engine_->vfoSetBandwidth(id, bw);
                 engine_->vfoSetColor(id, QColor(colName));

@@ -22,9 +22,11 @@ class TestUiAudit : public QObject {
     Q_OBJECT
 private slots:
     void qssWiresAuditTokens();
+    void qssUsesRestrainedInteractiveBlue();
     void frequencyInputClampsOutOfRange();
     void bandwidthCoverageRulePreservesManualValue();
     void mainWindowHasFocusableFreqSpin();
+    void mainWindowHasTokenizedMinimumSize();
 };
 
 void TestUiAudit::qssWiresAuditTokens() {
@@ -38,6 +40,19 @@ void TestUiAudit::qssWiresAuditTokens() {
     // Disabled surface + hairline divider wired.
     QVERIFY(qss.contains(QString::fromUtf8(tokens::kDisabledFill)));
     QVERIFY(qss.contains(QString::fromUtf8(tokens::kDivider)));
+}
+
+void TestUiAudit::qssUsesRestrainedInteractiveBlue() {
+    const QString qss = tokens::buildDarkQss();
+    // UI interactive highlight converged to the restrained blue-gray (#919cac),
+    // not the bright instrument blue. Tab selected text + tooltip border use it.
+    QVERIFY(qss.contains(QString::fromUtf8(tokens::kInteract)));
+    QVERIFY(qss.contains("QTabBar::tab:selected"));
+    // The splitter handle must be blue-gray now, not bright blue.
+    QVERIFY(qss.contains("rgba(145, 156, 172, 0.35)"));
+    QVERIFY(!qss.contains("rgba(124, 196, 255"));
+    // kInteract feeds tab-selected + tooltip border (the old bright-blue UI
+    // decoration points). The bright kAccent is reserved for canvas traces.
 }
 
 void TestUiAudit::frequencyInputClampsOutOfRange() {
@@ -73,6 +88,18 @@ void TestUiAudit::mainWindowHasFocusableFreqSpin() {
     // focusWidget() (which needs an active top-level).
     QVERIFY(spin->focusPolicy() & Qt::StrongFocus);
     spin->setFocus();  // must not crash in offscreen.
+}
+
+void TestUiAudit::mainWindowHasTokenizedMinimumSize() {
+    // P0-2: the main window has a tokenized floor (no magic numbers) so a
+    // narrow window cannot crush the 3-column layout into horizontal overflow.
+    MainWindow win;
+    win.show();
+    const QSize expected(tokens::scaled(tokens::kMainMinW),
+                          tokens::scaled(tokens::kMainMinH));
+    QCOMPARE(win.minimumSize(), expected);
+    QVERIFY(win.minimumSize().width() > 0);
+    QVERIFY(win.minimumSize().height() > 0);
 }
 
 QTEST_MAIN(TestUiAudit)

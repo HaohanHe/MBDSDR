@@ -217,8 +217,10 @@ class MBDSDRAgent:
         # 注册多模式数字解码（PSK31/RTTY/MFSK/FeldHell，依据公开无线电传标准实现）
         register_fldigi_modes_tools(self.tool_registry)
 
-        # 注册 Hook 事件钩子工具（白皮书第四章 4.4）
-        self._register_hook_tools()
+        # Hook 事件钩子：按 A2(D2) 摘除 LLM 工具面。当前零生产事件源（grep 无 sdr.signal_detected
+        # 等事件发射点），hook_* 仅让 LLM 对着空气喊话。保留 HookManager 类（self.hook_manager）与
+        # hooks.py 事件总线供内部/未来接线；不再向 LLM 注册 hook_list/hook_trigger/hook_history/hook_stats。
+        # self._register_hook_tools()  # 已摘除（D2）
 
         # 注册 Subagents 子代理工具（白皮书第四章 4.5）
         self._register_subagent_tools()
@@ -232,8 +234,10 @@ class MBDSDRAgent:
         # 注册文件变更跟踪工具（白皮书第四章 4.6.6）
         self._register_file_tracker_tools()
 
-        # 注册插件系统工具（白皮书第九章 9.3）
-        self._register_plugin_tools()
+        # 插件系统：按 A2(D8) 摘除 LLM 工具面。plugins/ 为空目录、无插件生态，plugin_* 在空集上操作。
+        # 保留 PluginManager 类（self.plugin_manager）与其单测；不再向 LLM 注册
+        # plugin_list/plugin_load/plugin_enable/plugin_disable/plugin_stats/plugin_install。
+        # self._register_plugin_tools()  # 已摘除（D8）
 
         # 注册 LLM-as-Judge 工具（白皮书第四章 4.6.1）
         self._register_judge_tools()
@@ -241,8 +245,11 @@ class MBDSDRAgent:
         # 注册自学习工具（白皮书第四章 4.6.2）
         self._register_learning_tools()
 
-        # 注册智能编排器工具（白皮书第四章 4.6.3）
-        self._register_orchestrator_tools()
+        # 智能编排器：按 A2(D4) 摘除 LLM 工具面。orchestrator 是 workflow_engine 的劣化重写（无
+        # timeout/条件/模板），LLM 面对两个多步执行框架无所适从；统一走 workflow_engine。保留
+        # Orchestrator 类（self.orchestrator）供内部/单测；不再向 LLM 注册 orchestrator_* 六个工具。
+        # scheduler 不依赖本工具面（grep 零命中）。
+        # self._register_orchestrator_tools()  # 已摘除（D4）
 
         # 注册自编程工具（代码编辑器）
         self._register_code_editor_tools()
@@ -1840,10 +1847,20 @@ class MBDSDRAgent:
 
     def _workflow_tool_executor(self, tool_name: str, params: Dict[str, Any]) -> Any:
         """工作流引擎的工具执行器（桥接到 Agent 的工具注册表）。"""
+        t0 = time.time()
         result = self.tool_registry.call(tool_name, params)
-        # 录制工作流：记录本次工具调用
+        # 录制工作流：记录本次工具调用（D1 接真实）。
+        # 仅当 workflow_record_start 已开始录制时落步骤；未在录制时 record_tool_call 内部直接返回，
+        # 因此这是真实记录而非假数据。参数对照 workflow_recorder.py: record_tool_call(tool_name,
+        # parameters, result:str, success:bool, duration_ms)。
         try:
-            self.wr.record_tool_call(tool_name, params, result.success)
+            self.workflow_recorder.record_tool_call(
+                tool_name,
+                params,
+                str(result.content),
+                result.success,
+                duration_ms=(time.time() - t0) * 1000.0,
+            )
         except Exception:
             pass
         if result.success:
@@ -1972,7 +1989,7 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="evolution_propose",
-            description="提出一个自进化建议。可以改进系统提示词、工具描述、配置参数或代码算法。修改会在沙箱中验证，不会直接影响主系统。",
+            description="提出一个自进化建议（提案记录模式，不自动应用）。可以记录对系统提示词、工具描述、配置参数或代码算法的改进建议。仅把提案写入内存/版本库，不会改写运行时：当前没有 evolution_apply/confirm 工具，提案不会生效到 system_prompt/配置/代码。修改不会直接影响主系统。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -2010,7 +2027,7 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="evolution_commit",
-            description="提交一个进化建议为新版本（快照）。提交后可以应用或回滚。这是防幻觉变砖的关键：任何修改都有版本记录。",
+            description="把一个进化建议提交为新版本快照（仅版本记录，不自动应用）。这是防幻觉变砖的版本台账：任何修改都有记录、可回滚。注意：commit 只在 version_store 里建快照，当前没有 apply 工具把它回灌到 system_prompt/运行时，因此不会自动生效；可随时用 evolution_rollback 回退。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -2069,55 +2086,14 @@ class MBDSDRAgent:
         )
 
     def _register_hook_tools(self):
-        """注册 Hook 事件钩子工具（白皮书第四章 4.4）。"""
-        hm = self.hook_manager
+        """Hook LLM 工具面已按 A2(D2) 摘除（调用处见 __init__ 注释）。
 
-        self.tool_registry.register(
-            name="hook_list",
-            description="列出所有已注册的事件钩子。包括钩子 ID、监听的事件类型、描述、优先级、启用状态、触发次数。Hook 系统让 AI 可以监听和响应各种事件（信号检测、录制完成、设备连接等）。",
-            parameters={"type": "object", "properties": {"event_type": {"type": "string", "description": "按事件类型筛选（可选）"}}, "required": []},
-            handler=lambda args: ToolResult(success=True, content=json.dumps(hm.list_hooks(args.get("event_type")), ensure_ascii=False, indent=2)),
-            category="hook",
-        )
-
-        self.tool_registry.register(
-            name="hook_trigger",
-            description="手动触发一个事件。可以用来测试钩子系统，或者在工作流中主动发出事件。事件会被所有匹配的钩子监听到。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "event_type": {"type": "string", "description": "事件类型，如 sdr.signal_detected、sdr.record_complete"},
-                    "data": {"type": "object", "description": "事件数据"},
-                    "source": {"type": "string", "description": "事件来源", "default": "agent"},
-                },
-                "required": ["event_type"],
-            },
-            handler=lambda args: ToolResult(success=True, content=f"事件已触发: {args['event_type']}\n监听器响应数: {len(hm.trigger(Event(event_type=args['event_type'], data=args.get('data', {}), source=args.get('source', 'agent'))))}"),
-            category="hook",
-        )
-
-        self.tool_registry.register(
-            name="hook_history",
-            description="获取事件历史记录。可以查看最近发生了哪些事件，用于调试和审计。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "event_type": {"type": "string", "description": "按事件类型筛选（可选）"},
-                    "limit": {"type": "integer", "description": "返回条数，默认 50", "default": 50},
-                },
-                "required": [],
-            },
-            handler=lambda args: ToolResult(success=True, content=json.dumps([e.to_dict() for e in hm.get_history(args.get("event_type"), args.get("limit", 50))], ensure_ascii=False, indent=2)),
-            category="hook",
-        )
-
-        self.tool_registry.register(
-            name="hook_stats",
-            description="获取 Hook 系统统计信息。包括总钩子数、启用数、事件类型数、总触发次数、历史记录数。",
-            parameters={"type": "object", "properties": {}, "required": []},
-            handler=lambda args: ToolResult(success=True, content=json.dumps(hm.get_stats(), ensure_ascii=False, indent=2)),
-            category="hook",
-        )
+        背景：生产侧零事件源（grep 无 sdr.signal_detected / agent.tool_call 等事件发射点），
+        原先注册的 hook_list/hook_trigger/hook_history/hook_stats 只是让 LLM 对着空气喊话。
+        保留 HookManager 类（self.hook_manager）与 hooks.py 事件总线供内部/未来接线；本方法
+        不再向 LLM 工具面注册任何 hook_* 工具。
+        """
+        return
 
     def _register_subagent_tools(self):
         """注册 Subagents 子代理工具（白皮书第四章 4.5）。"""
@@ -2370,7 +2346,10 @@ class MBDSDRAgent:
                 },
                 "required": ["change_id"],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(ft.revert_to(args["change_id"], file_writer=lambda p,c: open(p,"w",encoding="utf-8").write(c)).to_dict() if ft.revert_to(args["change_id"], file_writer=lambda p,c: open(p,"w",encoding="utf-8").write(c)) else {"error": "变更不存在"}, ensure_ascii=False, indent=2)),
+            handler=lambda args: (lambda rec: ToolResult(
+                success=rec is not None,
+                content=json.dumps(rec.to_dict() if rec else {"error": f"变更不存在或已回滚: {args['change_id']}"}, ensure_ascii=False, indent=2),
+            ))(ft.revert_to(args["change_id"], file_writer=lambda p, c: open(p, "w", encoding="utf-8").write(c))),
             category="file_tracker",
         )
 
@@ -2397,81 +2376,14 @@ class MBDSDRAgent:
         )
 
     def _register_plugin_tools(self):
-        """注册模块化插件系统工具（白皮书第九章 9.3）。"""
-        pm = self.plugin_manager
+        """插件 LLM 工具面已按 A2(D8) 摘除（调用处见 __init__ 注释）。
 
-        self.tool_registry.register(
-            name="plugin_list",
-            description="列出所有已发现的插件及其状态。包括名称、版本、类型、状态、注册的工具/钩子/子代理数量。",
-            parameters={"type": "object", "properties": {}, "required": []},
-            handler=lambda args: ToolResult(success=True, content=json.dumps(pm.list_plugins(), ensure_ascii=False, indent=2)),
-            category="plugin",
-        )
-
-        self.tool_registry.register(
-            name="plugin_load",
-            description="加载一个插件（不启用）。加载后可以用 plugin_enable 启用。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "plugin_name": {"type": "string", "description": "插件名称"},
-                },
-                "required": ["plugin_name"],
-            },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(pm.load_plugin(args["plugin_name"]).to_dict(), ensure_ascii=False, indent=2)),
-            category="plugin",
-        )
-
-        self.tool_registry.register(
-            name="plugin_enable",
-            description="启用一个插件。启用后插件注册的工具、钩子、子代理会生效。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "plugin_name": {"type": "string", "description": "插件名称"},
-                },
-                "required": ["plugin_name"],
-            },
-            handler=lambda args: ToolResult(success=True, content=f"插件 {'已启用' if pm.enable_plugin(args['plugin_name']) else '启用失败'}: {args['plugin_name']}"),
-            category="plugin",
-        )
-
-        self.tool_registry.register(
-            name="plugin_disable",
-            description="禁用一个插件。禁用后插件注册的工具、钩子、子代理会失效。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "plugin_name": {"type": "string", "description": "插件名称"},
-                },
-                "required": ["plugin_name"],
-            },
-            handler=lambda args: ToolResult(success=True, content=f"插件 {'已禁用' if pm.disable_plugin(args['plugin_name']) else '禁用失败'}: {args['plugin_name']}"),
-            category="plugin",
-        )
-
-        self.tool_registry.register(
-            name="plugin_stats",
-            description="获取插件系统统计信息。包括总插件数、启用/禁用/错误数、注册的工具/钩子总数、按类型分类。",
-            parameters={"type": "object", "properties": {}, "required": []},
-            handler=lambda args: ToolResult(success=True, content=json.dumps(pm.get_stats(), ensure_ascii=False, indent=2)),
-            category="plugin",
-        )
-
-        self.tool_registry.register(
-            name="plugin_install",
-            description="从路径安装插件（复制到插件目录）。这是创意工坊玩法的核心：用户投稿 → 安装到本地 → 专家委员会审查 → 合入。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "source_path": {"type": "string", "description": "插件源路径"},
-                    "plugin_name": {"type": "string", "description": "插件名称（可选，自动取目录名）"},
-                },
-                "required": ["source_path"],
-            },
-            handler=lambda args: ToolResult(success=True, content=f"插件已安装: {pm.install_plugin_from_path(args['source_path'], args.get('plugin_name'))}"),
-            category="plugin",
-        )
+        背景：plugins/ 为空目录、无任何插件可加载/启用，原先注册的 plugin_list/plugin_load/
+        plugin_enable/plugin_disable/plugin_stats/plugin_install 都在空插件集上空转。保留
+        PluginManager 类（self.plugin_manager）与其单测（tests/test_plugin_manager.py）；
+        本方法不再向 LLM 工具面注册任何 plugin_* 工具。
+        """
+        return
 
     def _register_judge_tools(self):
         """注册 LLM-as-Judge 评判工具（白皮书第四章 4.6.1）。"""
@@ -2606,85 +2518,13 @@ class MBDSDRAgent:
         )
 
     def _register_orchestrator_tools(self):
-        """注册智能编排器工具（白皮书第四章 4.6.3）。"""
-        oc = self.orchestrator
+        """Orchestrator LLM 工具面已按 A2(D4) 摘除（调用处见 __init__ 注释）。
 
-        self.tool_registry.register(
-            name="orchestrator_add_task",
-            description="添加一个任务到编排器。任务可以有依赖关系、优先级、超时、重试。编排器会自动规划执行顺序。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "任务名称"},
-                    "description": {"type": "string", "description": "任务描述", "default": ""},
-                    "tool_name": {"type": "string", "description": "要调用的工具名", "default": ""},
-                    "tool_params": {"type": "object", "description": "工具参数", "default": {}},
-                    "dependencies": {"type": "array", "items": {"type": "string"}, "description": "依赖的任务 ID 列表", "default": []},
-                    "priority": {"type": "string", "description": "优先级: critical/high/medium/low", "default": "medium"},
-                    "timeout_s": {"type": "number", "description": "超时秒数", "default": 60},
-                    "max_retries": {"type": "integer", "description": "最大重试次数", "default": 2},
-                },
-                "required": ["name"],
-            },
-            handler=lambda args: ToolResult(success=True, content=f"任务已添加\nID: {oc.add_task(args['name'], args.get('description',''), args.get('tool_name',''), args.get('tool_params',{}), None, args.get('dependencies',[]), TaskPriority(args.get('priority','medium')), args.get('timeout_s',60), args.get('max_retries',2))}"),
-            category="orchestrator",
-        )
-
-        self.tool_registry.register(
-            name="orchestrator_plan",
-            description="规划任务执行顺序。基于依赖关系和优先级生成拓扑排序的执行顺序。在执行前调用，查看任务将如何被调度。",
-            parameters={"type": "object", "properties": {}, "required": []},
-            handler=lambda args: ToolResult(success=True, content=json.dumps(oc.plan(), ensure_ascii=False, indent=2)),
-            category="orchestrator",
-        )
-
-        self.tool_registry.register(
-            name="orchestrator_execute",
-            description="执行所有任务。按照规划的顺序执行，支持依赖管理、重试、错误恢复。返回执行结果统计。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "stop_on_failure": {"type": "boolean", "description": "失败时是否停止", "default": False},
-                },
-                "required": [],
-            },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(oc.execute(None, args.get("stop_on_failure", False)).to_dict(), ensure_ascii=False, indent=2)),
-            category="orchestrator",
-        )
-
-        self.tool_registry.register(
-            name="orchestrator_list",
-            description="列出所有任务及其状态。查看任务的依赖、优先级、状态、执行时间。",
-            parameters={"type": "object", "properties": {}, "required": []},
-            handler=lambda args: ToolResult(success=True, content=json.dumps(oc.list_tasks(), ensure_ascii=False, indent=2)),
-            category="orchestrator",
-        )
-
-        self.tool_registry.register(
-            name="orchestrator_stats",
-            description="获取编排器统计信息。包括总任务数、按状态/优先级分类、平均执行时间。",
-            parameters={"type": "object", "properties": {}, "required": []},
-            handler=lambda args: ToolResult(success=True, content=json.dumps(oc.get_stats(), ensure_ascii=False, indent=2)),
-            category="orchestrator",
-        )
-
-        self.tool_registry.register(
-            name="orchestrator_pipeline",
-            description="创建标准 SDR 处理流水线。一键生成完整的 SDR 处理任务：连接→设频→设采样率→设增益→频谱分析→找信号→解调→录制。这是智能编排的典型应用：复杂任务自动分解为有序步骤。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "frequency_hz": {"type": "integer", "description": "中心频率 Hz"},
-                    "sample_rate": {"type": "integer", "description": "采样率 Hz", "default": 2048000},
-                    "gain_db": {"type": "integer", "description": "增益 dB", "default": 40},
-                    "demod_mode": {"type": "string", "description": "解调模式: fm/am/usb/lsb/cw", "default": "fm"},
-                    "record_duration_s": {"type": "integer", "description": "录制时长秒", "default": 10},
-                },
-                "required": ["frequency_hz"],
-            },
-            handler=lambda args: ToolResult(success=True, content=f"SDR 流水线已创建\n任务数: {len(oc.create_sdr_pipeline(args['frequency_hz'], args.get('sample_rate',2048000), args.get('gain_db',40), args.get('demod_mode','fm'), args.get('record_duration_s',10)))}\n调用 orchestrator_plan 查看顺序，orchestrator_execute 执行"),
-            category="orchestrator",
-        )
+        背景：orchestrator 是 workflow_engine 的劣化重写（无 timeout/条件/模板），LLM 面对两个
+        多步执行框架不知该用哪个；统一走 workflow_engine。保留 Orchestrator 类（self.orchestrator）
+        供内部/单测；本方法不再向 LLM 工具面注册 orchestrator_add_task/plan/execute/list/stats/pipeline。
+        """
+        return
 
     def _register_code_editor_tools(self):
         """注册自编程工具（代码编辑器）。"""
@@ -2965,7 +2805,7 @@ class MBDSDRAgent:
                 },
                 "required": ["target_alt", "target_az", "current_alt", "current_az"],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(compute_pointing_guidance(AltAzCoord(args["target_alt"], args["target_az"]), AltAzCoord(args["current_alt"], args["current_az"]), AntennaParams(beamwidth_deg=args.get("beamwidth_deg",5)) if False else None), ensure_ascii=False, indent=2)),
+            handler=lambda args: ToolResult(success=True, content=json.dumps(compute_pointing_guidance(AltAzCoord(args["target_alt"], args["target_az"]), AltAzCoord(args["current_alt"], args["current_az"]), AntennaParams(beamwidth_deg=args.get("beamwidth_deg", 5))), ensure_ascii=False, indent=2)),
             category="astronomy",
         )
 
@@ -2987,12 +2827,12 @@ class MBDSDRAgent:
             parameters={
                 "type": "object",
                 "properties": {
-                    "iq_samples": {"type": "array", "items": {"type": "number"}, "description": "IQ 样本（实数列表，交替 I/Q），如 [I1,Q1,I2,Q2,...]。如果为空则使用模拟信号演示。", "default": []},
+                    "iq_samples": {"type": "array", "items": {"type": "number"}, "description": "IQ 样本（实数列表，交替 I/Q），如 [I1,Q1,I2,Q2,...]。必须提供真实样本；为空时返回错误，不使用模拟信号冒充输入。", "default": []},
                     "sample_rate": {"type": "number", "description": "采样率（Hz）", "default": 1.0},
                 },
                 "required": [],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(amr.classify_iq([complex(args["iq_samples"][i], args["iq_samples"][i+1]) for i in range(0, len(args["iq_samples"])-1, 2)] if args.get("iq_samples") else [complex(math.cos(2*math.pi*0.01*t), math.sin(2*math.pi*0.01*t)) for t in range(1000)], args.get("sample_rate", 1.0)).to_dict(), ensure_ascii=False, indent=2)),
+            handler=lambda args: (lambda raw: (lambda iq: ToolResult(success=True, content=json.dumps(amr.classify_iq(iq, args.get("sample_rate", 1.0)).to_dict(), ensure_ascii=False, indent=2)) if iq else ToolResult(success=False, content="错误：未提供足够的 IQ 样本（至少 2 个交替 I/Q 实数）。AMR 只对真实信号分类；为空时不会用正弦/模拟数据冒充输入，请从接收机或录制文件提供 iq_samples。"))([complex(raw[i], raw[i + 1]) for i in range(0, len(raw) - 1, 2)]))(args.get("iq_samples") or []),
             category="amr",
         )
 
@@ -3002,12 +2842,12 @@ class MBDSDRAgent:
             parameters={
                 "type": "object",
                 "properties": {
-                    "iq_samples": {"type": "array", "items": {"type": "number"}, "description": "IQ 样本（实数列表，交替 I/Q）", "default": []},
+                    "iq_samples": {"type": "array", "items": {"type": "number"}, "description": "IQ 样本（实数列表，交替 I/Q）。必须提供真实样本；为空时返回错误，不使用模拟信号冒充输入。", "default": []},
                     "sample_rate": {"type": "number", "description": "采样率（Hz）", "default": 1.0},
                 },
                 "required": [],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(amr.extract_features_from_iq([complex(args["iq_samples"][i], args["iq_samples"][i+1]) for i in range(0, len(args["iq_samples"])-1, 2)] if args.get("iq_samples") else [complex(math.cos(2*math.pi*0.01*t), math.sin(2*math.pi*0.01*t)) for t in range(1000)], args.get("sample_rate", 1.0)).to_dict(), ensure_ascii=False, indent=2)),
+            handler=lambda args: (lambda raw: (lambda iq: ToolResult(success=True, content=json.dumps(amr.extract_features_from_iq(iq, args.get("sample_rate", 1.0)).to_dict(), ensure_ascii=False, indent=2)) if iq else ToolResult(success=False, content="错误：未提供足够的 IQ 样本（至少 2 个交替 I/Q 实数）。为空时不会用正弦/模拟数据冒充输入，请提供真实 iq_samples。"))([complex(raw[i], raw[i + 1]) for i in range(0, len(raw) - 1, 2)]))(args.get("iq_samples") or []),
             category="amr",
         )
 

@@ -36,6 +36,9 @@ private slots:
     void maturedPeakMarkerGeometry();
     void noiseFloorBaselineGeometry();
     void cursorReadoutIsRealData();
+    void traceWaterfallBinCentreAlign();
+    void freqTickDecimalsAdaptive();
+    void defaultShareIsOneToOne();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -339,6 +342,61 @@ void TestSpectrumDisplay::cursorReadoutIsRealData() {
 
     // Outside the plot the read-out must be suppressed (no invented numbers).
     QVERIFY(w.cursorReadoutText(QPoint(2, 2)).isEmpty());
+}
+
+// W2a contract: the trace and the waterfall share the SAME bin-centre mapping, so
+// a peak bin's trace vertex and its waterfall colour column centre agree within
+// ~1px -- at BOTH zoom=1 and zoom=16 (the pre-fix floor/ceil drift grew to ~4px
+// at zoom=16). Uses the exposed waterfallSourceRect() rather than pixel reads.
+void TestSpectrumDisplay::traceWaterfallBinCentreAlign() {
+    const int bins = 512;
+    const double fs = 2.4e6, f0 = 98.5e6;
+    for (double zoom : {1.0, 16.0}) {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        w.setSpectrum(makeFrame(bins, 256, 0.0f, -100.0f));
+        w.setZoomFactor(zoom);
+
+        // Peak injected at bin 256 -> bin-centre frequency.
+        const double peakF = (f0 - fs / 2.0) + (256 + 0.5) * (fs / bins);
+        const int traceX = w.xForFrequency(peakF);
+
+        // Waterfall column 256 centre, mapped through the floating source rect.
+        const QRectF src = w.waterfallSourceRect();
+        const QRect falls = w.waterfallRect();
+        QVERIFY2(src.width() > 0, "waterfall source width must be positive");
+        const double colX = falls.left() +
+            falls.width() * ((256 + 0.5) - src.left()) / src.width();
+        QVERIFY2(std::abs(traceX - colX) <= 1.0,
+                 qPrintable(QString("zoom=%1: trace bin x=%2 vs waterfall col x=%3")
+                            .arg(zoom).arg(traceX).arg(colX)));
+    }
+}
+
+// W2a: strip label decimals adapt to the nice step (0/1/2 dp), not a hard 3 dp.
+void TestSpectrumDisplay::freqTickDecimalsAdaptive() {
+    QCOMPARE(ui::SpectrumDisplay::freqTickDecimals(5e6), 0);
+    QCOMPARE(ui::SpectrumDisplay::freqTickDecimals(10e6), 0);
+    QCOMPARE(ui::SpectrumDisplay::freqTickDecimals(1e6), 1);
+    QCOMPARE(ui::SpectrumDisplay::freqTickDecimals(2e6), 1);
+    QCOMPARE(ui::SpectrumDisplay::freqTickDecimals(2.5e5), 2);
+    QCOMPARE(ui::SpectrumDisplay::freqTickDecimals(5e5), 2);
+}
+
+// W2a: default traceShare_ = 0.5 -> trace and waterfall split 1:1 (the reported
+// "trace occupies too much" defect is a Flutter-only flex issue; desktop default
+// must stay balanced).
+void TestSpectrumDisplay::defaultShareIsOneToOne() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    w.setSpectrum(makeFrame(512, 256, 0.0f, -100.0f));
+    const int th = w.spectrumRect().height();
+    const int fh = w.waterfallRect().height();
+    QVERIFY2(std::abs(th - fh) <= 2,
+             qPrintable(QString("default 1:1 split: trace=%1 falls=%2")
+                        .arg(th).arg(fh)));
 }
 
 QTEST_MAIN(TestSpectrumDisplay)
