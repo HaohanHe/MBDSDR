@@ -16,6 +16,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/app/tokens.dart';
 import 'package:mbdsdr_mobile/dsp/fft_processor.dart';
 import 'package:mbdsdr_mobile/models/radio_state.dart';
+import 'package:mbdsdr_mobile/models/recording.dart';
 import 'package:mbdsdr_mobile/pages/spectrum_page.dart';
 import 'package:mbdsdr_mobile/services/radio_controller.dart';
 
@@ -98,6 +99,16 @@ class _PanelRadio extends ChangeNotifier implements RadioApi {
 
   @override
   Stream<Float32List> get audioStream => const Stream.empty();
+
+  // 只读渲染 fake：不支持真实录制。
+  @override
+  bool get recording => false;
+
+  @override
+  Future<void> startRecording() async {}
+
+  @override
+  Future<RecordingMeta?> stopRecording() async => null;
 }
 
 Widget _wrap(_PanelRadio radio) => MaterialApp(

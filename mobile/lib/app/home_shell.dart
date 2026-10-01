@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../audio/file_player.dart';
+import '../models/recording.dart';
 import '../models/satellite.dart';
 import '../pages/activity_log_page.dart';
 import '../pages/chat_page.dart';
@@ -10,6 +14,7 @@ import '../pages/sky_page.dart';
 import '../pages/spectrum_page.dart';
 import '../services/ai_client.dart';
 import '../services/radio_controller.dart';
+import '../services/recording_store.dart';
 import '../services/settings_service.dart';
 import '../widgets/connection_status_line.dart';
 import 'ai_tools.dart';
@@ -32,6 +37,37 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
+
+  /// 当前正在回放的录音（FilePlayer 状态镜像）；无回放/未注入时为 null。
+  RecordingMeta? _playing;
+  StreamSubscription<PlaybackState>? _playSub;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 订阅原生回放完成事件，播完即清播放态（未注入 FilePlayer 时静默跳过）。
+    _playSub?.cancel();
+    final FilePlayer? player = _maybeRead();
+    _playSub = player?.onState.listen((s) {
+      if (s.completed && mounted) setState(() => _playing = null);
+    });
+  }
+
+  @override
+  void dispose() {
+    _playSub?.cancel();
+    super.dispose();
+  }
+
+  /// 可选读取：未注入 RecordingStore/FilePlayer（如外壳导航单测）时退化为
+  /// null——录音页因此不渲染回放按钮，诚实空态、不假接。
+  T? _maybeRead<T>() {
+    try {
+      return context.read<T>();
+    } catch (_) {
+      return null;
+    }
+  }
 
   static const List<NavigationRailDestination> _railDestinations =
       <NavigationRailDestination>[
@@ -135,13 +171,18 @@ class _HomeShellState extends State<HomeShell> {
     return Consumer<SettingsService>(
       builder: (BuildContext context, SettingsService settings, _) {
         final RadioController radio = context.read<RadioController>();
-        final Station? station = settings.hasManualStation
-            ? Station(
-                lat: settings.stationLat!,
-                lon: settings.stationLon!,
-                alt: settings.stationAlt!,
-              )
-            : null;
+        // 回放注入：store 解析 wav 绝对路径，player 走 mbdsdr/audio 通道。
+        // 任一缺失（导航单测）→ onPlay/onStop 为 null，录音页不渲染假播放按钮。
+        final RecordingStore? store = _maybeRead<RecordingStore>();
+        final FilePlayer? player = _maybeRead<FilePlayer>();
+        Station? station;
+        if (settings.hasManualStation) {
+          station = Station(
+            lat: settings.stationLat!,
+            lon: settings.stationLon!,
+            alt: settings.stationAlt!,
+          );
+        }
         return IndexedStack(
           index: _index,
           children: <Widget>[
@@ -185,7 +226,38 @@ class _HomeShellState extends State<HomeShell> {
               manualMode: settings.aiManualMode,
               onOpenSettings: _openSettings,
             ),
-            RecordingsPage(radio: radio, settings: settings),
+            RecordingsPage(
+              radio: radio,
+              settings: settings,
+              // 有 wavFileName 的条目才渲染播放按钮；store/player 齐全才可点。
+              onPlay: (store != null && player != null)
+                  ? (RecordingMeta meta) async {
+                      final wav = meta.wavFileName;
+                      if (wav == null || wav.isEmpty) return;
+                      try {
+                        final dir = await store.recordingsDir();
+                        await player.startFile(
+                          path: '${dir.path}/$wav',
+                          sampleRate:
+                              meta.sampleRateHz ?? RadioController.audioSampleRateHz,
+                          channels: meta.channels ?? 1,
+                        );
+                        if (mounted) setState(() => _playing = meta);
+                      } catch (_) {
+                        // 原生回放未就绪/文件缺失：保持不播，不假出声。
+                      }
+                    }
+                  : null,
+              onStop: (player != null)
+                  ? () async {
+                      try {
+                        await player.stopFile();
+                      } catch (_) {}
+                      if (mounted) setState(() => _playing = null);
+                    }
+                  : null,
+              playing: _playing,
+            ),
             const ActivityLogPage(),
             SettingsPage(settings: settings, radio: radio),
           ],
