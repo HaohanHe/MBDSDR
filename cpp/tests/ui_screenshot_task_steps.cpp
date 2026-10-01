@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: MIT
-// Offscreen screenshot of the AI-panel task step list. Drives the REAL
-// TaskOrchestrator against a real SpectrumEngine (sweep -> hit -> bookmark ->
-// retune -> record), then feeds the real StepRecords into TaskStepsView.
-// Not in ctest. Env: MBD_OUT (png path).
+// Offscreen screenshot: the TaskStepsView EMBEDDED in the real MainWindow AI
+// panel. Opens the AI tab, runs the real autonomous task button (driving the
+// real orchestrator + engine + bookmark store), then grabs the AI tab page so
+// the step list is shown in panel context. Not in ctest. Env: MBD_OUT.
 #include <QApplication>
 #include <QTimer>
 #include <QPixmap>
 #include <QSettings>
 #include <QTemporaryDir>
+#include <QTabWidget>
+#include <QPushButton>
 
 #include "core/tokens.h"
-#include "ui/task_steps_view.h"
-#include "ai/task_orchestrator.h"
-#include "dsp/spectrum_engine.h"
-#include "ui/bookmark_manager.h"
+#include "ui/main_window.h"
 
 using namespace mbdsdr;
 
@@ -25,27 +24,38 @@ int main(int argc, char** argv) {
 
     const QString out = QString::fromLocal8Bit(qgetenv("MBD_OUT"));
 
-    dsp::SpectrumEngine engine;
-    ui::BookmarkManager bm;
-    bm.clear();
-
-    ai::TaskOrchestrator orch(&engine);
-    orch.setBookmarkManager(&bm);
-    ai::TaskPlan plan = ai::planSweepFindAndRecord(100e6, 100.3e6, 100e3, "NFM", "自动命中");
-    const QString report = orch.run(plan);
-
-    ui::TaskStepsView view;
-    view.setMinimumSize(480, 640);
-    view.setRun(orch.results(), report);
-    view.resize(480, 640);
-    view.show();
+    MainWindow win;
+    win.resize(1280, 800);
+    win.show();
     QApplication::processEvents();
 
-    QTimer::singleShot(150, [&]() {
-        QPixmap pm = view.grab();
+    // Open the AI tab.
+    auto* tabs = win.findChild<QTabWidget*>("rightTabs");
+    QWidget* aiPage = nullptr;
+    if (tabs) {
+        for (int i = 0; i < tabs->count(); ++i) {
+            if (tabs->tabText(i).contains(QString::fromUtf8("AI"))) {
+                tabs->setCurrentIndex(i);
+                aiPage = tabs->currentWidget();
+                break;
+            }
+        }
+    }
+    QApplication::processEvents();
+
+    // Run the real autonomous task through the wired button (synchronous).
+    if (auto* btn = win.findChild<QPushButton*>("aiRunTaskBtn"))
+        btn->click();
+    QApplication::processEvents();
+
+    QTimer::singleShot(200, [&]() {
+        QWidget* page = aiPage ? aiPage : &win;
+        page->resize(460, 860);
+        QApplication::processEvents();
+        QPixmap pm = page->grab();
         pm.save(out, "PNG");
-        qInfo("task steps screenshot saved to %s (%dx%d, %1 steps)",
-              out.toLocal8Bit().constData(), pm.width(), pm.height(), orch.results().size());
+        qInfo("embedded task-steps screenshot saved to %s (%dx%d)",
+              out.toLocal8Bit().constData(), pm.width(), pm.height());
         app.quit();
     });
     return app.exec();

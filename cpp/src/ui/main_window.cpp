@@ -68,6 +68,8 @@
 #include "ai/ai_config.h"
 #include "ai/ai_session_store.h"
 #include "ai/ai_context.h"
+#include "ai/task_orchestrator.h"
+#include "ui/task_steps_view.h"
 #include "ui/sky_view.h"
 #include "ui/s_meter.h"
 #include "ui/bookmark_manager.h"
@@ -1493,6 +1495,29 @@ MainWindow::MainWindow(QWidget* parent)
     aiManualCheck_->setObjectName("aiManualModeCheck");
     aiManualCheck_->setToolTip("勾选后 AI 不会真正调谐/改模式/录制，只返回被拦截的建议。");
     aiLay->addWidget(aiManualCheck_);
+
+    // ---- Autonomous multi-step task: process step list -----------------
+    // A compact panel above the chat. The step list (per-step tool/args/state/
+    // summary/elapsed) is visually separate from the natural-language report
+    // (which lives in aiChat_ / the view's bottom summary). Honest empty state
+    // before any run: no fake steps are drawn.
+    auto* taskHead = new QLabel(QString::fromUtf8("自主任务（过程）"), aiPage);
+    taskHead->setObjectName("panelTitle");
+    aiLay->addWidget(taskHead);
+    aiRunTaskBtn_ = new QPushButton(QString::fromUtf8("运行：扫频找信号并存档"), aiPage);
+    aiRunTaskBtn_->setObjectName("aiRunTaskBtn");
+    aiRunTaskBtn_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+    aiRunTaskBtn_->setToolTip(QString::fromUtf8(
+        "在离线回环信号上跑一遍确定性任务：扫频段→取峰值命中→存书签→转频→录制。"));
+    aiLay->addWidget(aiRunTaskBtn_);
+    aiTaskSteps_ = new ui::TaskStepsView(aiPage);
+    aiTaskSteps_->setMaximumHeight(tokens::scaled(360));
+    aiTaskSteps_->setObjectName("aiTaskSteps");
+    aiTaskHint_ = new QLabel(QString::fromUtf8("尚未运行自主任务"), aiPage);
+    aiTaskHint_->setObjectName("dockHint");
+    aiLay->addWidget(aiTaskHint_);
+    aiLay->addWidget(aiTaskSteps_);
+
     aiChat_ = new QPlainTextEdit(aiPage);
     aiChat_->setObjectName("aiChat");
     aiChat_->setReadOnly(true);
@@ -2050,7 +2075,17 @@ MainWindow::MainWindow(QWidget* parent)
         aiManualCheck_->setChecked(agent_->manualMode());
     }
     connect(aiManualCheck_, &QCheckBox::toggled, this,
-            [this](bool on) { agent_->setManualMode(on); });
+            [this](bool on) {
+                if (agent_) agent_->setManualMode(on);
+                if (aiOrch_) aiOrch_->setManualMode(on);   // gate the task runner too
+            });
+
+    // Autonomous task runner: real engine + real bookmark store. Manual-mode
+    // state mirrors the checkbox so a gated task reports honestly (no fake run).
+    aiOrch_ = new ai::TaskOrchestrator(engine_);
+    aiOrch_->setBookmarkManager(bookmarkManager_);
+    aiOrch_->setManualMode(aiManualCheck_ && aiManualCheck_->isChecked());
+    connect(aiRunTaskBtn_, &QPushButton::clicked, this, &MainWindow::onRunAutoTask);
     // ---- Chat rendering: session messages + a SINGLE transient line --------
     // partialReady() replaces the transient (never appends); responseReady()
     // clears the transient + tool notes, appends the final assistant message to
@@ -4590,6 +4625,25 @@ void MainWindow::onAiCompactContext() {
     if (out.didCompact)
         aiStatus_->setText(QString::fromUtf8("已压缩上下文：折叠 %1 轮早期对话为「已摘要」")
                                .arg(out.compressedRounds));
+}
+
+void MainWindow::onRunAutoTask() {
+    if (!aiOrch_ || !engine_) return;
+    // Neutral, call-supplied parameters -- no baked-in station / location.
+    const ai::TaskPlan plan = ai::planSweepFindAndRecord(
+        100e6, 100.3e6, 100e3, "NFM", QString::fromUtf8("自动命中"));
+    const QString report = aiOrch_->run(plan);   // synchronous, ~a few hundred ms
+    // Populate the process list; hide the honest empty-state hint after first run.
+    if (aiTaskHint_) aiTaskHint_->setVisible(false);
+    if (aiTaskSteps_) aiTaskSteps_->setRun(aiOrch_->results(), report);
+    // Also surface the honest summary as an assistant chat line, clearly separate
+    // from the per-step process list above.
+    if (aiSessionStore_ && !aiCurSessionId_.isEmpty()) {
+        aiSessionStore_->appendMessage(aiCurSessionId_,
+                                        mbdsdr::ai::SessionMessage{"assistant", report});
+        aiRenderChat();
+    }
+    if (bookmarkManager_) refreshBmTable();
 }
 
 } // namespace mbdsdr
