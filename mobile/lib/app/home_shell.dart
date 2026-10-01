@@ -17,9 +17,10 @@ import 'tokens.dart';
 
 // ============================================================================
 // App 外壳：响应式导航
-//   * 宽屏（≥720）左侧 NavigationRail（≥900 自动展开）；
-//   * 窄屏底部 BottomNavigationBar；
-//   * IndexedStack 保活四个页面：频谱 / 天空 / AI / 设置。
+//   * 宽屏（≥720）左侧 NavigationRail（≥900 自动展开）：6 个目的地全保留；
+//   * 窄屏底部 BottomNavigationBar：收敛为 5 个高频项，「活动记录」收进
+//     AppBar 历史入口（Material 3 建议底栏 ≤5）；
+//   * IndexedStack 保活全部子页：频谱 / 天空 / AI / 录音 / 活动 / 设置。
 // ============================================================================
 
 class HomeShell extends StatefulWidget {
@@ -66,38 +67,37 @@ class _HomeShellState extends State<HomeShell> {
     ),
   ];
 
-  static const List<BottomNavigationBarItem> _barItems =
-      <BottomNavigationBarItem>[
-    BottomNavigationBarItem(
+  /// 窄屏底栏目的地（≤5，Material 3 建议）。
+  /// 宽屏 NavigationRail 保留全部 6 项（Rail 不拥挤）；窄屏把「活动记录」
+  /// 收进 AppBar 的历史入口，底栏只放 5 个高频项，避免图标+标签被压窄。
+  /// [stackIndex] 指向 IndexedStack 子页下标，底栏位置与页下标解耦。
+  static const List<({BottomNavigationBarItem item, int stackIndex})> _barDestinations =
+      <({BottomNavigationBarItem item, int stackIndex})>[
+    (item: BottomNavigationBarItem(
       icon: Icon(Icons.waterfall_chart_outlined),
       activeIcon: Icon(Icons.waterfall_chart),
       label: '频谱',
-    ),
-    BottomNavigationBarItem(
+    ), stackIndex: 0),
+    (item: BottomNavigationBarItem(
       icon: Icon(Icons.public_outlined),
       activeIcon: Icon(Icons.public),
       label: '天空',
-    ),
-    BottomNavigationBarItem(
+    ), stackIndex: 1),
+    (item: BottomNavigationBarItem(
       icon: Icon(Icons.chat_bubble_outline),
       activeIcon: Icon(Icons.chat_bubble),
       label: 'AI',
-    ),
-    BottomNavigationBarItem(
+    ), stackIndex: 2),
+    (item: BottomNavigationBarItem(
       icon: Icon(Icons.fiber_manual_record_outlined),
       activeIcon: Icon(Icons.fiber_manual_record),
       label: '录音',
-    ),
-    BottomNavigationBarItem(
-      icon: Icon(Icons.history_outlined),
-      activeIcon: Icon(Icons.history),
-      label: '活动',
-    ),
-    BottomNavigationBarItem(
+    ), stackIndex: 3),
+    (item: BottomNavigationBarItem(
       icon: Icon(Icons.settings_outlined),
       activeIcon: Icon(Icons.settings),
       label: '设置',
-    ),
+    ), stackIndex: 5),
   ];
 
   void _openSettings() {
@@ -119,6 +119,15 @@ class _HomeShellState extends State<HomeShell> {
           ),
         ],
       ),
+      actions: <Widget>[
+        // 「活动记录」入口：窄屏底栏收敛到 5 项后它不在底栏里，从 AppBar 进入
+        // （宽屏 Rail 本就有该项，这里作为快捷入口，行为一致）。
+        IconButton(
+          icon: const Icon(Icons.history),
+          tooltip: '活动记录',
+          onPressed: () => setState(() => _index = 4),
+        ),
+      ],
     );
   }
 
@@ -217,9 +226,15 @@ class _HomeShellState extends State<HomeShell> {
           appBar: appBar,
           body: body,
           bottomNavigationBar: BottomNavigationBar(
-            currentIndex: _index,
-            onTap: (int i) => setState(() => _index = i),
-            items: _barItems,
+            // 底栏位置与 IndexedStack 页下标解耦；当前页不在底栏（活动记录）
+            // 时 indexWhere 返回 -1，不高亮任何项。
+            currentIndex:
+                _barDestinations.indexWhere((d) => d.stackIndex == _index),
+            onTap: (int i) =>
+                setState(() => _index = _barDestinations[i].stackIndex),
+            items: <BottomNavigationBarItem>[
+              for (final d in _barDestinations) d.item,
+            ],
           ),
         );
       },

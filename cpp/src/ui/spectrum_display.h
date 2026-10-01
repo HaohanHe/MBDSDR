@@ -25,6 +25,7 @@
 #include <QVector>
 #include <QElapsedTimer>
 #include <QRect>
+#include <QRectF>
 #include <QList>
 #include <array>
 #include <limits>
@@ -148,6 +149,15 @@ public slots:
     // binF computation. Exposed so the contract suite can prove the waterfall
     // crop walks the SAME visible window as the trace (no offset / jump).
     int    waterfallCropLeftBin() const;
+
+    // Floating source rectangle into history_ that the waterfall paints into
+    // falls, mirroring paintEvent's SHARED bin-centre mapping (no floor/ceil).
+    // Lets the offscreen suite prove waterfall column centres land exactly on the
+    // trace xForFrequency() positions, without inspecting pixels.
+    QRectF waterfallSourceRect() const;
+    // Decimals (0/1/2) for a frequency-strip tick label given the nice step, so
+    // the suite can assert the adaptive label precision without pixel reads.
+    static int freqTickDecimals(double stepHz);
 
 signals:
     void frequencyChanged(double newFreqHz);

@@ -360,6 +360,29 @@ int SpectrumDisplay::waterfallCropLeftBin() const {
     return std::clamp(binF, 0, bins_);
 }
 
+QRectF SpectrumDisplay::waterfallSourceRect() const {
+    if (frameFsHz_ <= 0.0 || bins_ <= 0 || !haveFrame_) return QRectF();
+    double fLo, fHi, span; visibleWindow(fLo, fHi, span);
+    const double bandLo = frameF0Hz_ - frameFsHz_ / 2.0;
+    // Bin-centre mapping shared with the trace: history column i sits at image x
+    // in [i,i+1), whose centre (i+0.5) is the bin-centre frequency. Map the visible
+    // window straight through -- no floor/ceil rounding.
+    const double srcL = clampd((fLo - bandLo) / frameFsHz_ * bins_, 0.0,
+                               static_cast<double>(bins_));
+    const double srcR = clampd((fHi - bandLo) / frameFsHz_ * bins_, 0.0,
+                               static_cast<double>(bins_));
+    return QRectF(srcL, 0, srcR - srcL, ringDepth_);
+}
+
+int SpectrumDisplay::freqTickDecimals(double stepHz) {
+    // Nice steps come in {1,2,2.5,5,10}*mag. In MHz: >=5 -> 0 dp, >=1 -> 1 dp,
+    // otherwise (0.1/0.2/0.25/0.5 MHz) -> 2 dp. Matches the Flutter strip table.
+    const double mhz = stepHz / 1e6;
+    if (mhz >= 5.0) return 0;
+    if (mhz >= 1.0) return 1;
+    return 2;
+}
+
 void SpectrumDisplay::setZoomFactor(double z) {
     zoomFactor_ = clampd(z, tokens::kZoomMin, tokens::kZoomMax);
     publishVisibleRange();
@@ -626,16 +649,21 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
     }
 
     // --- waterfall (crop the history snapshot to the visible window) --------
+    // Bin-centre mapping SHARED with the trace above: history column i sits at
+    // image x in [i, i+1), whose centre (i+0.5) is the bin-centre frequency
+    // bandLo+(i+0.5)*binHz. The visible window fLo..fHi maps straight through
+    // (f-bandLo)/binHz into image coordinates -- NO floor/ceil rounding -- so the
+    // waterfall column centres land EXACTLY on the trace bin x positions. The old
+    // floor/ceil introduced up to a ~4px offset at zoom=16 (the reported
+    // "trace peak sits right of the waterfall colour" defect).
     if (!history_.isNull() && falls.height() > 0 && bins > 0) {
         const double bandLo = frameF0Hz_ - frameFsHz_ / 2.0;
-        const double binF = (fLo - bandLo) / frameFsHz_ * bins;
-        const double binW = span / frameFsHz_ * bins;
-        int srcX = static_cast<int>(std::floor(binF));
-        int srcW = static_cast<int>(std::ceil(binW));
-        srcX = std::clamp(srcX, 0, bins);
-        srcW = std::clamp(srcW, 0, bins - srcX);
-        if (srcW > 0)
-            p.drawImage(falls, history_, QRectF(srcX, 0, srcW, ringDepth_));
+        const double srcL = clampd((fLo - bandLo) / frameFsHz_ * bins, 0.0,
+                                    static_cast<double>(bins_));
+        const double srcR = clampd((fHi - bandLo) / frameFsHz_ * bins, 0.0,
+                                    static_cast<double>(bins_));
+        if (srcR > srcL + 0.5)
+            p.drawImage(falls, history_, QRectF(srcL, 0, srcR - srcL, ringDepth_));
         p.setPen(QPen(tokens::cardEdge(), 1));
         p.drawRect(falls);
     }
@@ -717,15 +745,36 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
     const double mag = std::pow(10.0, std::floor(std::log10(raw)));
     double nice = mag;
     for (double f : {2.0, 2.5, 5.0, 10.0}) if (mag * f >= raw) { nice = mag * f; break; }
+    // Adaptive label precision by step (0/1/2 dp) -- the old hard-coded 3 dp drew
+    // a redundant ".000" on every tick. Ticks hang from the strip bottom (shared
+    // convention with the waterfall side).
+    const int decimals = freqTickDecimals(nice);
     p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary), 1));
     const int half = tokens::scaled(tokens::kFreqLabelHalfW);
     for (double f = std::floor(fLo / nice) * nice; f <= fHi; f += nice) {
         const int x = xForFreq(f, fLo, span);
         if (x < strip.left() || x > strip.right()) continue;
         p.drawLine(x, strip.bottom(), x, strip.bottom() - tokens::scaled(tokens::kWaterfallTickH));
-        const QString lbl = QString::number(f / 1e6, 'f', 3);
+        const QString lbl = QString::number(f / 1e6, 'f', decimals);
         p.drawText(QRect(x - half, strip.top(), half * 2, strip.height()),
                    Qt::AlignHCenter | Qt::AlignVCenter, lbl);
+    }
+
+    // Centre VFO highlight: a longer accent tick hanging from the strip bottom and
+    // a bold accent label at the visible-window centre (matches Flutter's
+    // _FreqStripPainter centre mark). View centre == viewCenterHz_ by construction.
+    {
+        const int cx = lay_.plotX0 + lay_.plotW / 2;
+        QColor accent(QString::fromUtf8(tokens::kAccent));
+        p.setPen(QPen(accent, 1.2));
+        p.drawLine(cx, strip.bottom(),
+                   cx, strip.bottom() - tokens::scaled(tokens::kWaterfallTickH) * 2);
+        const QFont savedFont = p.font();
+        QFont bold = savedFont; bold.setBold(true); p.setFont(bold);
+        p.drawText(QRect(cx - half, strip.top(), half * 2, strip.height()),
+                   Qt::AlignHCenter | Qt::AlignVCenter,
+                   QString::number(viewCenterHz_ / 1e6, 'f', decimals));
+        p.setFont(savedFont);
     }
 
     // --- divider hairline ---------------------------------------------------

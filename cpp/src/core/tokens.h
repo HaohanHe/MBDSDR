@@ -77,12 +77,22 @@ inline constexpr double kTextAlphaDisabled  = 0.2;
 // =====================================================================
 // Colors -- accents
 // =====================================================================
-// Clean, confident system blue: bright enough to read on #080a0c without
-// being neon. Hover lifts lighter, pressed drops ~20% luminance.
+// Instrument / trace blue (#7CC4FF): the bright blue's ONLY remaining role.
+// It paints oscilloscope-style canvas traces, VFO band boxes, S-meter fill and
+// map/sky instrument overlays, where it carries real signal semantics. It is
+// NO LONGER the UI interactive accent -- tab selected text, active buttons,
+// splitter handles and tooltip borders now use the restrained blue-gray below.
 inline constexpr const char* kAccent       = "#7CC4FF";
 inline constexpr const char* kAccentHover  = "#9FD4FF";
 inline constexpr const char* kAccentPress  = "#5AA8F0";
-inline QString splitterHandleRgba() { return QString("rgba(124, 196, 255, 0.35)"); }
+// Restrained interactive blue-gray (Figma #919cac): the new UI primary for
+// selected / active / focus states. Three low-saturation steps -- hover lifts
+// lighter, press drops darker -- never the bright instrument blue.
+inline constexpr const char* kInteract       = "#919cac";
+inline constexpr const char* kInteractHover  = "#aab3c2";
+inline constexpr const char* kInteractPress  = "#7c8796";
+// Splitter handle: same blue-gray hairline (was bright blue 0.35).
+inline QString splitterHandleRgba() { return QString("rgba(145, 156, 172, 0.35)"); }
 inline constexpr const char* kSuccess     = "#5fd08a";
 inline constexpr const char* kWarning      = "#e0b35a";
 inline constexpr const char* kDanger       = "#e74c3c";
@@ -93,11 +103,13 @@ inline constexpr const char* kDanger       = "#e74c3c";
 inline constexpr const char* kDivider      = "rgba(255, 255, 255, 0.06)";
 // Selected / active fill: LOW-saturation blue-gray (Figma #919cac), NOT the
 // bright accent. Use for list/nav selected blocks; keep accent for the
-// single interactive highlight only.
+// single interactive highlight only. Alpha is the cross-end contract (Flutter
+// selectedFill must match exactly, within rounding).
+inline constexpr double kSelectedFillAlpha = 0.16;
 inline constexpr const char* kSelectedFill = "rgba(145, 156, 172, 0.16)";
 inline constexpr const char* kSelectedText= "#d7dee8";
-// Keyboard focus ring: visible, calm accent ring. Missing before the audit.
-inline constexpr const char* kFocusRing   = "rgba(124, 196, 255, 0.45)";
+// Keyboard focus ring: visible, calm blue-gray ring (was bright accent).
+inline constexpr const char* kFocusRing   = "rgba(145, 156, 172, 0.45)";
 // Disabled control surface (we previously only dimmed disabled text).
 inline constexpr const char* kDisabledFill = "rgba(255, 255, 255, 0.04)";
 
@@ -171,6 +183,12 @@ inline constexpr int kSpacingXXL = 32;
 inline constexpr int kTopbarH          = 56;
 inline constexpr int kSplitterWidth    = 8;
 inline constexpr int kTouchMin         = 44;
+// Main-window floor (base px, scaled at runtime): keeps the 3-column layout
+// readable on narrow windows -- no horizontal overflow, no crushed center
+// trace. 4pt-grid values; the left rail already scrolls and the right rail
+// elides, so a minimum size is enough, no extra re-layout.
+inline constexpr int kMainMinW         = 960;
+inline constexpr int kMainMinH         = 600;
 // Logical minimum touch-target dimension (Qt logical px, scaled at runtime).
 // Alias of kTouchMin kept under the name the UI audit references; primary
 // interactive controls (text-only buttons, list rows) must meet this.
@@ -599,6 +617,8 @@ inline QString buildDarkQss() {
     const QString accent  = QString::fromUtf8(kAccent);
     const QString accentH = QString::fromUtf8(kAccentHover);
     const QString accentP = QString::fromUtf8(kAccentPress);
+    // Restrained interactive blue-gray (UI primary, NOT the instrument blue).
+    const QString interact = QString::fromUtf8(kInteract);
     // Audit tokens (Figma checklist): restrained selected fill, visible focus
     // ring, disabled surface, hairline divider.
     const QString selFill = QString::fromUtf8(kSelectedFill);
@@ -642,7 +662,7 @@ QTabBar::tab {
     border: none;
     border-radius: %radSmall%px;
 }
-QTabBar::tab:selected { color: %accent%; font-weight: 600; }
+QTabBar::tab:selected { color: %interact%; font-weight: 600; }
 QTabBar::tab:hover { color: %textPri%; }
 QPushButton {
     background-color: transparent;
@@ -732,7 +752,7 @@ QCheckBox { color: %textPri%; spacing: %padMV%px; }
 QToolTip {
     background-color: %card1%;
     color: %textPri%;
-    border: 1px solid %accent%;
+    border: 1px solid %interact%;
     padding: %padSV%px %padMV%px;
 }
 QScrollBar:vertical {
@@ -769,6 +789,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
         .replace(QStringLiteral("%textPri%"), textPri)
         .replace(QStringLiteral("%textSec%"), textSec)
         .replace(QStringLiteral("%accent%"), accent)
+        .replace(QStringLiteral("%interact%"), interact)
         .replace(QStringLiteral("%accentP%"), accentP)
         .replace(QStringLiteral("%selFill%"), selFill)
         .replace(QStringLiteral("%selText%"), selText)

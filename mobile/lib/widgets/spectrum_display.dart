@@ -2,7 +2,7 @@
 //
 // 设计目标：桌面级科研仪器质感（对齐 SDR++ / SDRConsole 的克制深色风）。
 // 几何（竖屏 Column，全部用 token 间距派生，不写死像素）：
-//   频谱 Expanded(flex:5) → 频率条(fixed) → 瀑布 Expanded(flex:4)
+//   频谱 Expanded(flex:1) → 频率条(fixed) → 瀑布 Expanded(flex:1)（1:1，对齐桌面 traceShare_=0.5）
 // 每一行 Row：[左 dB gutter 数字] [绘图区] [右 dB gutter 刻度线]，三行 gutter 对齐。
 // 无数据时本 widget 不画任何东西（由外层页面给诚实空态）。
 //
@@ -136,6 +136,11 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
     if (widget.persistenceClearTick != oldWidget.persistenceClearTick) {
       _history.clear();
     }
+    // 余晖从「开」切到「关」→ 立即丢弃历史残影（对齐桌面 setPersistenceMode(0)
+    // 清空 persist_ 的语义）；否则 off→on 会把旧残影突然画回来。
+    if (oldWidget.persistence.isOn && !widget.persistence.isOn) {
+      _history.clear();
+    }
     // 选中标记已不在列表（被删除）→ 清空选中态。
     final sel = _selectedMarkHz;
     if (sel != null && !widget.fixedMarksHz
@@ -262,7 +267,7 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
       children: [
         // ------------------------------------------------ 频谱轨迹
         Expanded(
-          flex: 5,
+          flex: 1,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -326,7 +331,7 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
         ),
         // ------------------------------------------------ 瀑布
         Expanded(
-          flex: 4,
+          flex: 1,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -337,7 +342,11 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
                     _ensureBuffer(constraints.biggest);
                     return CustomPaint(
                       size: constraints.biggest,
-                      painter: _WaterfallPainter(image: _image),
+                      painter: _WaterfallPainter(
+                        image: _image,
+                        frame: frame,
+                        channelBandwidthHz: widget.channelBandwidthHz,
+                      ),
                     );
                   },
                 ),
@@ -405,26 +414,44 @@ double adaptiveFreqStepHz(double spanHz, double plotWidthPx,
 double snapToFreqStep(double hz, double stepHz) =>
     stepHz <= 0 ? hz : (hz / stepHz).round() * stepHz;
 
-/// 由一帧 db 构建频谱轨迹的描边 Path 与填充 Path（含 3-tap 轻量平滑）。
-/// 当前帧与余晖历史帧共用同一函数，保证历史叠加不破坏既有轨迹几何。
+/// bin 中心频率 → 逻辑绘图 x（bin-center 映射）。
+///
+/// 与瀑布逐列写入（_ingestFrame 的 `bin=(x/_w*n).floor()`）共用同一映射：瀑布把
+/// 设备列 x_dpr 染成 bin=floor(x_dpr*n/_w)，bin i 占据列区间中心 x_dpr=(i+0.5)*_w/n，
+/// 折成逻辑坐标即 (i+0.5)/n*plotWidth。trace 逐 bin 取点到同一 x，dpr 高屏下不再
+/// 横向错位（旧 500 点重采样 + 三点平滑会把峰尖横向模糊 ~3px）。暴露为纯函数以便
+/// widget test 断言 trace 与瀑布 x 对齐。
+double binCentreX(int bin, int n, double plotWidth) =>
+    (bin + 0.5) / n * plotWidth;
+
+/// 信道带宽阴影带的左右逻辑 x（trace 与瀑布共用同一公式，保证双画严格对齐）。
+({double l, double r}) bandBandEdges({
+  required double channelBandwidthHz,
+  required double binWidthHz,
+  required int n,
+  required double plotWidth,
+}) {
+  final halfBins = ((channelBandwidthHz / 2) / binWidthHz).round();
+  final centerBin = n ~/ 2;
+  return (
+    l: (centerBin - halfBins) / n * plotWidth,
+    r: (centerBin + halfBins) / n * plotWidth,
+  );
+}
+
+/// 由一帧 db 构建频谱轨迹描边 Path 与填充 Path。
+/// 逐 bin 取点，x 用 binCentreX（与瀑布同一 bin-center 映射）；不再做 500 点重采样
+/// 或三点平滑。当前帧与余晖历史帧共用同一函数，几何一致。
 ({Path trace, Path fill}) _buildTrace(SpectrumFrame frame, Size size) {
   final db = frame.db;
   final n = db.length;
-  double yFor(double v) => _dbToY(v, size.height);
-  final samples = (size.width / 2).clamp(120.0, 500.0).round();
-  final xs = List<double>.generate(samples, (k) => k / (samples - 1) * size.width);
-  final ys = List<double>.generate(samples, (k) {
-    final bin = (k / (samples - 1) * (n - 1)).round().clamp(0, n - 1);
-    return yFor(db[bin]);
-  });
-  for (var k = 1; k < samples - 1; k++) {
-    ys[k] = (ys[k - 1] + ys[k] + ys[k + 1]) / 3;
-  }
-  final trace = Path()..moveTo(xs[0], ys[0]);
-  final fill = Path()..moveTo(xs[0], size.height);
-  for (var k = 0; k < samples; k++) {
-    trace.lineTo(xs[k], ys[k]);
-    fill.lineTo(xs[k], ys[k]);
+  final trace = Path()..moveTo(0, _dbToY(db.first, size.height));
+  final fill = Path()..moveTo(0, size.height);
+  for (var i = 0; i < n; i++) {
+    final x = binCentreX(i, n, size.width);
+    final y = _dbToY(db[i], size.height);
+    trace.lineTo(x, y);
+    fill.lineTo(x, y);
   }
   fill
     ..lineTo(size.width, size.height)
@@ -542,7 +569,7 @@ class _SpectrumPainter extends CustomPainter {
 
     // ---- 固定频率标记（仅落在当前扫宽内才画）----
     // 三层视觉：普通=琥珀细虚线；选中=琥珀实线+顶部手柄（高亮）；
-    // VFO=accentHover 中央实线+三角，峰值=accent 三角，刻意用色/线型区分。
+    // VFO=accentHover 中央实线+三角（中性参考色），峰值=traceColor 亮蓝三角，刻意用色/线型区分。
     {
       final span = frame.sampleRateHz;
       final leftF = frame.centerFreqHz - span / 2;
@@ -597,7 +624,7 @@ class _SpectrumPainter extends CustomPainter {
         canvas.drawPath(
           t.trace,
           Paint()
-            ..color = AppTokens.accent.withValues(alpha: alpha)
+            ..color = AppTokens.traceColor.withValues(alpha: alpha)
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.2
             ..isAntiAlias = true,
@@ -626,16 +653,16 @@ class _SpectrumPainter extends CustomPainter {
     final peakX = peakBin / (n - 1) * size.width;
     final peakY = yFor(peakDb);
 
-    // 解调信道带宽竖带（居中 ±bw/2）。
-    final halfBw = channelBandwidthHz / 2;
-    final binHz = frame.binWidthHz;
-    final halfBins = (halfBw / binHz).round();
-    final centerBin = n ~/ 2;
-    final bandL = (centerBin - halfBins) / n * size.width;
-    final bandR = (centerBin + halfBins) / n * size.width;
+    // 解调信道带宽竖带（居中 ±bw/2）。与瀑布共用 bandBandEdges 同一公式。
+    final band = bandBandEdges(
+      channelBandwidthHz: channelBandwidthHz,
+      binWidthHz: frame.binWidthHz,
+      n: n,
+      plotWidth: size.width,
+    );
     canvas.drawRect(
-      Rect.fromLTRB(bandL, 0, bandR, size.height),
-      Paint()..color = AppTokens.accent.withValues(alpha: 0.08),
+      Rect.fromLTRB(band.l, 0, band.r, size.height),
+      Paint()..color = AppTokens.traceColor.withValues(alpha: 0.08),
     );
 
     // ---- 当前帧轨迹（与余晖历史帧共用 _buildTrace，几何一致）----
@@ -645,12 +672,12 @@ class _SpectrumPainter extends CustomPainter {
 
     canvas.drawPath(
       fill,
-      Paint()..color = AppTokens.accent.withValues(alpha: 0.10),
+      Paint()..color = AppTokens.traceColor.withValues(alpha: 0.10),
     );
     canvas.drawPath(
       trace,
       Paint()
-        ..color = AppTokens.accent
+        ..color = AppTokens.traceColor
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.4
         ..isAntiAlias = true,
@@ -722,7 +749,7 @@ class _SpectrumPainter extends CustomPainter {
       ..close();
     canvas.drawPath(
       peakTri,
-      Paint()..color = AppTokens.accent.withValues(alpha: 0.85),
+      Paint()..color = AppTokens.traceColor.withValues(alpha: 0.85),
     );
 
     // ------------------------------------------------ 测量读数盒（深底 + 细边，两行小字）
@@ -834,11 +861,11 @@ class _FreqStripPainter extends CustomPainter {
 
     final tp = TextPainter(textDirection: TextDirection.ltr);
 
-    // 普通网格刻度。
+    // 普通网格刻度。刻度统一挂条底（与桌面 spectrum_display 一致，条下即瀑布）。
     var tickF = (left / step).ceil() * step;
     while (tickF <= right + 1) {
       final x = xFor(tickF);
-      canvas.drawLine(Offset(x, 0), Offset(x, 6), edge);
+      canvas.drawLine(Offset(x, size.height), Offset(x, size.height - 6), edge);
       tp.text = TextSpan(
         text: (tickF / 1e6).toStringAsFixed(decimals),
         style: AppTokens.mono.copyWith(
@@ -849,15 +876,15 @@ class _FreqStripPainter extends CustomPainter {
       tp.layout();
       var lx = x - tp.width / 2;
       lx = lx.clamp(0.0, size.width - tp.width); // 不裁切边缘标签
-      tp.paint(canvas, Offset(lx, size.height * 0.42));
+      tp.paint(canvas, Offset(lx, size.height * 0.30));
       tickF += step;
     }
 
-    // VFO 中心频率高亮刻度（中央）。
+    // VFO 中心频率高亮刻度（中央，长线挂底）。
     final cx = size.width / 2;
     canvas.drawLine(
-      Offset(cx, 0),
-      Offset(cx, 10),
+      Offset(cx, size.height),
+      Offset(cx, size.height - 10),
       Paint()
         ..color = AppTokens.accent
         ..strokeWidth = 1.2,
@@ -873,7 +900,7 @@ class _FreqStripPainter extends CustomPainter {
     tp.layout();
     var clx = cx - tp.width / 2;
     clx = clx.clamp(0.0, size.width - tp.width);
-    tp.paint(canvas, Offset(clx, size.height * 0.42));
+    tp.paint(canvas, Offset(clx, size.height * 0.30));
   }
 
   @override
@@ -882,9 +909,17 @@ class _FreqStripPainter extends CustomPainter {
 }
 
 /// 瀑布：把累积的 RGBA 像素缓冲画成一张逐帧下移的连续色带图。
+/// 与上方轨迹同一 x 域，故按同一 bandBandEdges 公式把 BW 阴影带 + 中心 VFO 线
+/// 双画在瀑布上（对齐桌面 VFO box 在 trace 与 falls 各 fillRect 一遍）。
 class _WaterfallPainter extends CustomPainter {
   final ui.Image? image;
-  _WaterfallPainter({required this.image});
+  final SpectrumFrame? frame;
+  final double channelBandwidthHz;
+  _WaterfallPainter({
+    required this.image,
+    this.frame,
+    this.channelBandwidthHz = 12500,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -892,23 +927,39 @@ class _WaterfallPainter extends CustomPainter {
       Offset.zero & size,
       Paint()..color = AppTokens.spectrumBg,
     );
-    // 中央 VFO 细线（与上方轨迹对齐）。
-    canvas.drawLine(
-      Offset(size.width / 2, 0),
-      Offset(size.width / 2, size.height),
-      Paint()..color = AppTokens.textAt(0.12),
-    );
     final img = image;
-    if (img == null) return;
-    canvas.drawImageRect(
-      img,
-      Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
-      Offset.zero & size,
-      Paint()..filterQuality = FilterQuality.low,
-    );
+    if (img != null) {
+      canvas.drawImageRect(
+        img,
+        Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
+        Offset.zero & size,
+        Paint()..filterQuality = FilterQuality.low,
+      );
+    }
+    // BW 阴影带 + 中心 VFO 线（与轨迹同一组公式，x 域一致）。
+    final f = frame;
+    if (f != null) {
+      final band = bandBandEdges(
+        channelBandwidthHz: channelBandwidthHz,
+        binWidthHz: f.binWidthHz,
+        n: f.db.length,
+        plotWidth: size.width,
+      );
+      canvas.drawRect(
+        Rect.fromLTRB(band.l, 0, band.r, size.height),
+        Paint()..color = AppTokens.traceColor.withValues(alpha: 0.08),
+      );
+      canvas.drawLine(
+        Offset(size.width / 2, 0),
+        Offset(size.width / 2, size.height),
+        Paint()..color = AppTokens.textAt(0.12),
+      );
+    }
   }
 
   @override
   bool shouldRepaint(covariant _WaterfallPainter oldDelegate) =>
-      !identical(oldDelegate.image, image);
+      !identical(oldDelegate.image, image) ||
+      !identical(oldDelegate.frame, frame) ||
+      oldDelegate.channelBandwidthHz != channelBandwidthHz;
 }

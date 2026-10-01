@@ -159,6 +159,42 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // predict_passes (read-only) ------------------------------------------
+    // Read-only satellite pass predictor. Uses the FRESH on-disk TLE cache only;
+    // no builtin/demo TLE is reported as a real pass. Honest empty state when
+    // there is no fresh cache. Kept out of the manual-mode write gate.
+    {
+        ToolSchemaSpec s;
+        s.name = "predict_passes";
+        s.description = QString::fromUtf8(
+            "只读：用本地新鲜 TLE 缓存预测指定卫星未来的过境（升/降时刻、最高仰角、起止方位）。"
+            "无新鲜 TLE 时诚实返回空态，不使用陈旧内置数据。");
+        ToolParamSpec sat;
+        sat.name = "satellite_name";
+        sat.type = "string";
+        sat.description = QString::fromUtf8("卫星名，大小写不敏感子串匹配，如 NOAA / ISS");
+        sat.required = true;
+        ToolParamSpec hrs;
+        hrs.name = "hours_ahead";
+        hrs.type = "number";
+        hrs.description = QString::fromUtf8("预测窗口小时数，默认 24");
+        hrs.hasMin = true; hrs.min = 1.0;
+        hrs.hasMax = true; hrs.max = 168.0;
+        hrs.required = false;
+        ToolParamSpec lat;
+        lat.name = "station_lat_deg";
+        lat.type = "number";
+        lat.description = QString::fromUtf8("本站纬度（度，-90..90）");
+        lat.required = false;
+        ToolParamSpec lon;
+        lon.name = "station_lon_deg";
+        lon.type = "number";
+        lon.description = QString::fromUtf8("本站经度（度，-180..180）");
+        lon.required = false;
+        s.params << sat << hrs << lat << lon;
+        out.append(s);
+    }
+
     return out;
 }
 

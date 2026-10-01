@@ -73,5 +73,88 @@ SatTaskResult planSatelliteCapture(const QString& satName,
     return out;
 }
 
+// ---------------------------------------------------------------------------
+// Read-only pass prediction (LLM predict_passes tool). See header for the
+// honesty contract: fresh cache only, never the stale builtin demo TLE.
+// ---------------------------------------------------------------------------
+SatPassListResult predictPassesFromEntries(const QList<dsp::TleEntry>& entries,
+                                           const QString& satName,
+                                           double stationLatDeg, double stationLonDeg,
+                                           const QDateTime& nowUtc, int hoursAhead) {
+    SatPassListResult out;
+    if (!qIsFinite(stationLatDeg) || !qIsFinite(stationLonDeg)) {
+        out.error = QString::fromUtf8("站点坐标无效");
+        return out;
+    }
+    if (satName.trimmed().isEmpty()) {
+        out.error = QString::fromUtf8("未指定卫星");
+        return out;
+    }
+
+    // Match by case-insensitive substring against the supplied (fresh) entries.
+    QList<dsp::TleEntry> matched;
+    for (const auto& e : entries)
+        if (e.name.contains(satName, Qt::CaseInsensitive))
+            matched.append(e);
+    if (matched.isEmpty()) {
+        out.error = QString::fromUtf8("TLE 缓存中找不到卫星「%1」").arg(satName);
+        return out;
+    }
+
+    dsp::TleClient client;
+    const QList<dsp::SatPass> passes =
+        client.computePasses(matched, stationLatDeg, stationLonDeg,
+                             nowUtc.toUTC(), hoursAhead);
+    if (passes.isEmpty()) {
+        out.error = QString::fromUtf8("未来 %1 小时内「%2」没有可见过境").arg(hoursAhead).arg(satName);
+        return out;
+    }
+
+    for (const dsp::SatPass& p : passes) {
+        SatPassEntry e;
+        e.name = p.name;
+        e.catalogNumber = dsp::TleClient::catalogNumber(p.tle);
+        e.aosUtc = p.aos;
+        e.azAos = p.azAos;
+        e.losUtc = p.los;
+        e.azLos = p.azLos;
+        e.maxEl = p.maxEl;
+        out.passes.append(e);
+    }
+    out.ok = true;
+    out.source = QString::fromUtf8("cached_tle");
+    return out;
+}
+
+SatPassListResult predictSatellitePasses(const QString& satName,
+                                         double stationLatDeg, double stationLonDeg,
+                                         const QDateTime& nowUtc, int hoursAhead) {
+    // Validate cheap inputs first so the model gets an honest reason without
+    // touching disk.
+    SatPassListResult bad;
+    if (!qIsFinite(stationLatDeg) || !qIsFinite(stationLonDeg) ||
+        stationLatDeg < -90.0 || stationLatDeg > 90.0 ||
+        stationLonDeg < -180.0 || stationLonDeg > 180.0) {
+        bad.error = QString::fromUtf8("站点坐标无效");
+        return bad;
+    }
+    if (satName.trimmed().isEmpty()) {
+        bad.error = QString::fromUtf8("未指定卫星");
+        return bad;
+    }
+
+    // Fresh on-disk cache ONLY. No builtinTle() fallback -- that 2006 snapshot
+    // is offline demo data and must never be reported as a real upcoming pass.
+    dsp::TleClient client;
+    const dsp::TleCache cache = client.cachedTle();
+    if (!cache.valid || cache.entries.isEmpty()) {
+        bad.error = QString::fromUtf8("无新鲜 TLE");
+        bad.source = QString::fromUtf8("none");
+        return bad;
+    }
+    return predictPassesFromEntries(cache.entries, satName, stationLatDeg,
+                                    stationLonDeg, nowUtc, hoursAhead);
+}
+
 } // namespace ai
 } // namespace mbdsdr

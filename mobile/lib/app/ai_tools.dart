@@ -1,8 +1,11 @@
 import 'dart:convert';
 
 import '../models/radio_state.dart';
+import '../models/satellite.dart';
 import '../services/ai_client.dart';
 import '../services/radio_controller.dart';
+import '../services/sat_passes_provider.dart';
+import '../services/tle_client.dart';
 import 'tokens.dart';
 
 // ============================================================================
@@ -14,6 +17,18 @@ import 'tokens.dart';
 
 String _err(String message) =>
     jsonEncode(<String, dynamic>{'ok': false, 'error': message});
+
+/// P0 断开诚实性：动作工具 execute 前判连接。未连接返回错误 JSON；
+/// 已连接返回 null（放行）。
+///
+/// 红线（A4 §4-P0）：断开时 RadioController 的写方法是空安全 no-op、不抛异常，
+/// 若不在此拦截就会一路回 ok:true，让模型误以为真调谐了接收机。
+String? _disconnectError(RadioApi radio, String tool) {
+  if (radio.status != ConnectionStatus.connected) {
+    return _err('接收机未连接，无法执行 $tool');
+  }
+  return null;
+}
 
 /// 手动模式下被 gate 掉的动作统一回给模型的结果：不真正调谐，
 /// 仅声明「未执行」，让模型据此向用户解释当前是手动模式。
@@ -30,7 +45,16 @@ String _gated(String toolName) => jsonEncode(<String, dynamic>{
 /// （set_frequency / set_mode / set_gain / set_sample_rate）不再真正下发，
 /// 而是返回 [_gated] 结果并出现在对话流里；只读的 get_status 保持可用
 /// （读取不构成动作）。AI 接管（false，默认）时行为与历史完全一致。
-List<AiTool> buildRadioTools(RadioApi radio, {bool manualMode = false}) {
+///
+/// [passesService] / [station] 为只读卫星过境工具 predict_passes 的数据源与
+/// 本站坐标；任一缺失时 predict_passes 回诚实空态（不编造过境）。二者均为
+/// 可选注入，缺省不影响其余射频工具。
+List<AiTool> buildRadioTools(
+  RadioApi radio, {
+  bool manualMode = false,
+  SatPassesService? passesService,
+  Station? station,
+}) {
   final List<AiTool> tools = <AiTool>[
     AiTool(
       name: 'set_frequency',
@@ -54,6 +78,8 @@ List<AiTool> buildRadioTools(RadioApi radio, {bool manualMode = false}) {
       },
       execute: (Map<String, dynamic> args) async {
         try {
+          final dc = _disconnectError(radio, 'set_frequency');
+          if (dc != null) return dc;
           final hzArg = args['frequency_hz'];
           final mhzArg = args['frequency_mhz'];
           double? hz;
@@ -94,6 +120,8 @@ List<AiTool> buildRadioTools(RadioApi radio, {bool manualMode = false}) {
       },
       execute: (Map<String, dynamic> args) async {
         try {
+          final dc = _disconnectError(radio, 'set_mode');
+          if (dc != null) return dc;
           final raw = args['mode'];
           if (raw is! String) return _err('缺少 mode 参数（nfm / wfm）');
           final DemodMode mode;
@@ -130,6 +158,8 @@ List<AiTool> buildRadioTools(RadioApi radio, {bool manualMode = false}) {
       },
       execute: (Map<String, dynamic> args) async {
         try {
+          final dc = _disconnectError(radio, 'set_gain');
+          if (dc != null) return dc;
           final auto = args['auto'];
           final db = args['gain_db'];
           if (auto is bool) {
@@ -167,6 +197,8 @@ List<AiTool> buildRadioTools(RadioApi radio, {bool manualMode = false}) {
       },
       execute: (Map<String, dynamic> args) async {
         try {
+          final dc = _disconnectError(radio, 'set_sample_rate');
+          if (dc != null) return dc;
           final raw = args['sample_rate_hz'];
           if (raw is! num) return _err('缺少 sample_rate_hz 参数');
           final rate = raw.toDouble();
@@ -203,6 +235,85 @@ List<AiTool> buildRadioTools(RadioApi radio, {bool manualMode = false}) {
           });
         } catch (e) {
           return _err('读取状态失败: $e');
+        }
+      },
+    ),
+    AiTool(
+      name: 'predict_passes',
+      description: '只读：预测某卫星未来数小时相对本站的过境（升/降时刻、'
+          '最大仰角、方位）。数据源为真实 Celestrak TLE + 本地 SGP4；'
+          '无 TLE / 无同名卫星 / 窗口内无过境时诚实返回空态，绝不编造。'
+          '本工具只读、不需要接收机连接。',
+      parameters: const <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{
+          'satellite_name': <String, dynamic>{
+            'type': 'string',
+            'description': '卫星名称（大小写不敏感，如 "NOAA 19"）。',
+          },
+          'hours': <String, dynamic>{
+            'type': 'number',
+            'description': '预测未来多少小时（默认 48，范围 1–168）。',
+            'minimum': 1,
+            'maximum': 168,
+          },
+        },
+        'required': <String>['satellite_name'],
+      },
+      execute: (Map<String, dynamic> args) async {
+        if (passesService == null) {
+          return _err('卫星过境预测未配置（缺少 TLE 数据源）');
+        }
+        if (station == null) {
+          return _err('未配置测站坐标，无法预测过境；请在设置中填写本站位置');
+        }
+        final rawName = args['satellite_name'];
+        if (rawName is! String || rawName.trim().isEmpty) {
+          return _err('缺少 satellite_name 参数');
+        }
+        var hours = 48.0;
+        final rawHours = args['hours'];
+        if (rawHours is num) {
+          hours = rawHours.toDouble();
+          if (hours < 1 || hours > 168) {
+            return _err('hours 须在 1–168 之间');
+          }
+        }
+        try {
+          final passes = await passesService.predict(
+            satelliteName: rawName.trim(),
+            station: station,
+            hours: hours,
+          );
+          if (passes.isEmpty) {
+            return _err('未来 ${hours.round()} 小时内无 ${rawName.trim()} 过境'
+                '（窗口内无过境数据，不编造）');
+          }
+          return jsonEncode(<String, dynamic>{
+            'ok': true,
+            'satellite': rawName.trim(),
+            'passes': passes
+                .map((PredictedPass p) => <String, dynamic>{
+                      'startUtc': p.startUtc.toUtc().toIso8601String(),
+                      'endUtc': p.endUtc.toUtc().toIso8601String(),
+                      'maxTimeUtc': p.maxTimeUtc.toUtc().toIso8601String(),
+                      'maxElevationDeg':
+                          double.parse(p.maxElevationDeg.toStringAsFixed(2)),
+                      'azimuthDeg':
+                          double.parse(p.azimuthDeg.toStringAsFixed(2)),
+                      'riseAzDeg':
+                          double.parse(p.riseAzDeg.toStringAsFixed(2)),
+                      'setAzDeg': double.parse(p.setAzDeg.toStringAsFixed(2)),
+                      'durationSec': p.durationSec,
+                    })
+                .toList(),
+          });
+        } on TleFetchException catch (e) {
+          return _err('无新鲜 TLE：$e');
+        } on SatPassesException catch (e) {
+          return _err(e.message);
+        } catch (e) {
+          return _err('过境预测失败: $e');
         }
       },
     ),

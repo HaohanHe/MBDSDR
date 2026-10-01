@@ -495,11 +495,20 @@ class _ControlPanel extends StatelessWidget {
           children: [
             // ---- 组 A：调谐（hero 读数 + 模式 + 步进）----
             Center(
+              // Hero 频率读数：触控热区补足到 ≥ touchMin(44)，文字在热区内
+              // 居中；opaque 让整块 44 高都可点，不只有文字自身包围盒。
               child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: () => _promptFrequency(context),
-                child: Text(
-                  '${(controller.freqHz / 1e6).toStringAsFixed(4)} MHz',
-                  style: AppTokens.freqReadout,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: AppTokens.touchMin),
+                  child: Center(
+                    widthFactor: 1.0,
+                    child: Text(
+                      '${(controller.freqHz / 1e6).toStringAsFixed(4)} MHz',
+                      style: AppTokens.freqReadout,
+                    ),
+                  ),
                 ),
               ),
             ),

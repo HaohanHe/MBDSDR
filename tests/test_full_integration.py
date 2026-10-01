@@ -165,6 +165,37 @@ def test_meta_tools(result: TestResult, agent: MBDSDRAgent):
             result.record(f"{tool_name} ({desc})", False, str(e))
 
 
+def test_fake_tool_face_removed(result: TestResult, agent: MBDSDRAgent):
+    """A2(D2/D4/D8)：假闭环工具面已从 LLM 注册表摘除，但后端类保留。"""
+    print("\n[2b] 假闭环工具面摘除断言（W2b）")
+    tr = agent.tool_registry
+
+    # 这些工具曾是空转/对空气喊话/空生态，现已从 LLM 工具面摘除
+    removed_tools = [
+        "hook_list", "hook_trigger", "hook_history", "hook_stats",            # D2
+        "orchestrator_add_task", "orchestrator_plan", "orchestrator_execute", # D4
+        "orchestrator_list", "orchestrator_stats", "orchestrator_pipeline",
+        "plugin_list", "plugin_load", "plugin_enable", "plugin_disable",      # D8
+        "plugin_stats", "plugin_install",
+    ]
+    still_present = [n for n in removed_tools if tr.has_tool(n)]
+    result.record("假闭环工具已摘除", not still_present, f"仍在注册表: {still_present}")
+
+    # 对应的 category 不应再出现在工具面
+    cats = {tr.tools[n].get("category") for n in tr.get_tool_names()}
+    result.record("hook/orchestrator/plugin 类别已下线",
+                  "hook" not in cats and "orchestrator" not in cats and "plugin" not in cats,
+                  f"剩余类别: {sorted(cats)}")
+
+    # 后端类/属性必须保留（只摘工具面，不删模块）
+    for attr in ("hook_manager", "plugin_manager", "orchestrator", "workflow_recorder"):
+        result.record(f"后端类保留 agent.{attr}", hasattr(agent, attr))
+
+    # D1：workflow_recorder 不是被摘除，而是接真实——工具仍在且能真实录制
+    for n in ("workflow_record_start", "workflow_record_stop"):
+        result.record(f"D1 录制工具仍注册 {n}", tr.has_tool(n))
+
+
 def test_sdr_tools(result: TestResult, agent: MBDSDRAgent):
     """测试 SDR 核心工具。"""
     print("\n[4] SDR 核心工具测试")
@@ -406,10 +437,10 @@ def test_hooks_module(result: TestResult, agent: MBDSDRAgent):
         hm.register(EventType.SDR_SIGNAL_DETECTED, hook, "测试日志钩子")
         result.record("注册 Hook", len(hm.list_hooks()) >= 1)
 
-        # 触发事件（Event 字段为 event_type/data）
+        # 触发事件（Event 字段为 event_type/data）：应真实触发已注册的日志钩子并返回其响应
         event = Event(event_type=EventType.SDR_SIGNAL_DETECTED, data={"frequency": 98.5})
-        hm.trigger(event)
-        result.record("触发事件", True)
+        responses = hm.trigger(event)
+        result.record("触发事件", isinstance(responses, list) and len(responses) >= 1)
 
         # 统计
         stats = hm.get_stats()
@@ -443,9 +474,9 @@ def test_subagents_module(result: TestResult, agent: MBDSDRAgent):
         stats = sm.get_stats()
         result.record("子代理统计", "total_subagents" in stats)
 
-        # 销毁子代理
+        # 销毁子代理：销毁后 get 应返回 None（真实摘除，而非恒真占位）
         sm.destroy(sub_id)
-        result.record("销毁子代理", True)
+        result.record("销毁子代理", sm.get(sub_id) is None)
 
     except Exception as e:
         result.record("SubagentManager", False, str(e))
@@ -637,7 +668,7 @@ def test_llm_judge_module(result: TestResult, agent: MBDSDRAgent):
 def test_self_learning_module(result: TestResult, agent: MBDSDRAgent):
     """测试自学习模块。"""
     print("\n[15] 自学习模块测试")
-    from mbdsdr_ai.self_learning import SelfLearningEngine, ExperienceType
+    from mbdsdr_ai.self_learning import SelfLearningEngine, ExperienceType, LearnedPattern
     import tempfile
 
     try:
@@ -659,9 +690,10 @@ def test_self_learning_module(result: TestResult, agent: MBDSDRAgent):
             patterns = sl.learn_batch(limit=10)
             result.record("批量学习", patterns is not None)
 
-            # 获取建议（经验不足时允许返回 None，只要接口可调用）
+            # 获取建议（经验不足时返回 None；有命中时返回 LearnedPattern。二者都是合法契约，
+            # 但断言返回类型必须为这二者之一，杜绝恒真占位）
             suggestion = sl.get_suggestion("调谐到 FM 98.5")
-            result.record("获取学习建议", suggestion is None or suggestion is not None)
+            result.record("获取学习建议", suggestion is None or isinstance(suggestion, LearnedPattern))
 
             # 统计
             stats = sl.get_stats()
@@ -1391,6 +1423,7 @@ def main():
     # 运行所有测试
     test_module_imports(result)
     test_agent_init(result, agent)
+    test_fake_tool_face_removed(result, agent)
     test_meta_tools(result, agent)
     test_sdr_tools(result, agent)
     test_dsp_module(result, agent)
