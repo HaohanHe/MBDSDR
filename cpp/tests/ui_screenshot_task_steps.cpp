@@ -10,6 +10,7 @@
 #include <QTemporaryDir>
 #include <QTabWidget>
 #include <QPushButton>
+#include <QComboBox>
 
 #include "core/tokens.h"
 #include "ui/main_window.h"
@@ -23,6 +24,7 @@ int main(int argc, char** argv) {
     app.setStyleSheet(tokens::buildDarkQss());
 
     const QString out = QString::fromLocal8Bit(qgetenv("MBD_OUT"));
+    const QString mode = QString::fromLocal8Bit(qgetenv("MBD_MODE"));  // "sat" or sweep
 
     MainWindow win;
     win.resize(1280, 800);
@@ -43,18 +45,25 @@ int main(int argc, char** argv) {
     }
     QApplication::processEvents();
 
-    // Run the real autonomous task through the wired button (synchronous).
+    // Optionally select the satellite template (lat/lon/sat-name inputs shown).
+    if (mode == QLatin1String("sat")) {
+        if (auto* combo = win.findChild<QComboBox*>("aiTemplateCombo"))
+            combo->setCurrentIndex(3);   // 卫星过境接收
+    }
+    QApplication::processEvents();
+
+    // Run the real autonomous task through the wired button.
     if (auto* btn = win.findChild<QPushButton*>("aiRunTaskBtn"))
         btn->click();
     QApplication::processEvents();
 
-    QTimer::singleShot(200, [&]() {
+    QTimer::singleShot(400, [&]() {
         QWidget* page = aiPage ? aiPage : &win;
         page->resize(460, 860);
         QApplication::processEvents();
         QPixmap pm = page->grab();
         pm.save(out, "PNG");
-        qInfo("embedded task-steps screenshot saved to %s (%dx%d)",
+        qInfo("task screenshot saved to %s (%dx%d)",
               out.toLocal8Bit().constData(), pm.width(), pm.height());
         app.quit();
     });

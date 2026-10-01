@@ -42,7 +42,7 @@ namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class Con
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class SMeterWidget;
                  class WeatherSatPanel; class TaskStepsView; }
-namespace ai   { class Agent; class AiSessionStore; class TaskRunner; struct StepResult; }
+namespace ai   { class Agent; class AiSessionStore; class TaskRunner; struct StepResult; struct TaskPlan; }
 namespace gnss { class GnssReceiver; struct GnssFix; }
 
 class MainWindow : public QMainWindow {
@@ -443,10 +443,14 @@ private:
     QDoubleSpinBox* aiParamLowHz_ = nullptr;      // sweep band low (Hz)
     QDoubleSpinBox* aiParamHighHz_ = nullptr;     // sweep band high / target (Hz)
     QComboBox*      aiParamMode_ = nullptr;       // demod mode override
+    QDoubleSpinBox* aiParamLat_  = nullptr;       // station latitude (satellite pass)
+    QDoubleSpinBox* aiParamLon_  = nullptr;       // station longitude
+    QLineEdit*      aiParamSatName_ = nullptr;     // satellite name (substring match)
     QPushButton*    aiRunTaskBtn_ = nullptr;
     QPushButton*    aiStopTaskBtn_ = nullptr;
     ai::TaskRunner* aiRunner_ = nullptr;
     QList<mbdsdr::ai::StepResult> aiLiveSteps_;   // accumulated live steps (UI thread)
+    void startRunnerPlan(const mbdsdr::ai::TaskPlan& plan);  // hand a plan to the worker
 
     // Chat rendering model: persisted session messages + a single transient
     // line. partialReady() overwrites the transient (never appends);
