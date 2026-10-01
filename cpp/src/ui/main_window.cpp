@@ -57,6 +57,7 @@
 #include <algorithm>
 
 #include "core/tokens.h"
+#include "core/pnt_geometry.h"
 #include "core/spectrum_frame.h"
 #include "core/bandwidth_preset.h"
 #include "dsp/spectrum_engine.h"
@@ -68,6 +69,7 @@
 #include "ai/ai_session_store.h"
 #include "ai/ai_context.h"
 #include "ui/sky_view.h"
+#include "ui/s_meter.h"
 #include "ui/bookmark_manager.h"
 #include "dsp/frequency_scanner.h"
 #include "ui/shortcuts_dialog.h"
@@ -921,6 +923,10 @@ MainWindow::MainWindow(QWidget* parent)
         navSatTable_->setSelectionMode(QAbstractItemView::NoSelection);
         navSatTable_->setMaximumHeight(tokens::scaled(120));
         skyLay->addWidget(navSatTable_);
+        // PNT geometry availability (PREDICTION from the same propagated az/el).
+        geoLabel_ = new QLabel(skyPage);
+        geoLabel_->setObjectName("geoReadout");
+        skyLay->addWidget(geoLabel_);
     }
     // Empty-state caption lives in a layout row BELOW the polar plot (not
     // painted over the compass), so it never collides with N/E/S/W labels.
@@ -1545,11 +1551,14 @@ MainWindow::MainWindow(QWidget* parent)
     sbSnr_   = new QLabel("--", this);
     sbSquelch_ = new QLabel("静噪 OFF", this);
     sbGnss_  = new QLabel("", this);
+    // SDR++-style S-meter: fed by the SAME real engine RSSI as sbRssi_.
+    sMeter_ = new ui::SMeterWidget(this);
     for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbWatch_,
                       sbScan_, sbRec_, sbRssi_, sbSnr_, sbSquelch_, sbGnss_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
     }
+    statusBar()->addPermanentWidget(sMeter_);
     sbMode_->setText(demodCombo_->currentText());
 
     // ---- Engine wiring (engine_ created before UI construction) ----
@@ -3329,6 +3338,11 @@ void MainWindow::onRssiLevel(float dbfs) {
     // B5: one-line RSSI readout (real engine value, not a guess).
     if (sbRssi_)
         sbRssi_->setText(QString("RSSI %1").arg(dbfs, 0, 'f', 1));
+    // S-meter uses the SAME real RSSI; noise reference from the engine floor.
+    if (sMeter_) {
+        sMeter_->setSignalDbfs(dbfs);
+        if (engine_) sMeter_->setNoiseFloorDbfs(engine_->audioNoiseFloorDbfs());
+    }
     // Recording-library panel watch meter (same real RSSI + threshold).
     if (recLibWatchLevel_)
         recLibWatchLevel_->setText(QString("电平 %1 dBFS · 门限 %2")
@@ -4164,6 +4178,7 @@ void MainWindow::updateLiveSatellite() {
 
     // TLE-predicted visible GNSS constellation (hollow "预:" rings + list).
     refreshNavSatellites();
+    if (sMeter_) sMeter_->tickDecay(1.0);   // slow peak-hold decay, 1 Hz
 }
 
 void MainWindow::updateElevationPlotFor(const dsp::SatPass& p) {
@@ -4295,12 +4310,33 @@ void MainWindow::refreshNavSatellites() {
         navSatTable_->setItem(row, 4, new QTableWidgetItem(QString::number(t.range, 'f', 0)));
     }
     skyView_->setPredictedNavSats(nav);
+
+    // --- Geometry availability from the SAME propagated az/el (no re-propagation) -
+    // This is a prediction of HOW GOOD the geometry would be, not a position fix.
+    if (geoLabel_) {
+        QList<double> els;
+        for (const ui::LiveSat& s : nav) els << s.el;
+        const double dop = geo::simplifiedDop(els, tokens::kGeoMinElevationDeg);
+        int usable = 0;
+        for (double el : els) if (el >= tokens::kGeoMinElevationDeg) ++usable;
+        const geo::GeoQuality q =
+            geo::classifyGeometry(usable, dop, tokens::kGeoGoodMinVisible,
+                                  tokens::kGeoDopGood, tokens::kGeoDopFair,
+                                  tokens::kGeoDopPoor);
+        geoLabel_->setText(
+            QStringLiteral("导航几何（预测，非定位）  可见 %1 颗 · 简化DOP %2 · 可用性 %3")
+                .arg(usable).arg(std::isfinite(dop) ? dop : -1.0, 0, 'f', 1)
+                .arg(QString::fromUtf8(geo::geoQualityToString(q))));
+    }
+
     if (nav.isEmpty()) {
         navSatTable_->setRowCount(1);
         QTableWidgetItem* hint = new QTableWidgetItem(
             QStringLiteral("当前无在地平线上方的导航星 · 需 GNSS TLE"));
         hint->setForeground(tokens::rgbaA(tokens::kTextAlphaQuaternary));
         navSatTable_->setItem(0, 1, hint);
+        if (geoLabel_)
+            geoLabel_->setText(QStringLiteral("导航几何（预测）  可见 0 颗 · 可用性 不足"));
     }
 }
 
