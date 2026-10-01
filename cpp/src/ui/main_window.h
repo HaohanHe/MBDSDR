@@ -40,6 +40,7 @@ namespace ui { class BookmarkManager; }
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct TleEntry; struct VfoMarker; class FrequencyScanner; class SpyServerServer; }
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
+                 class SMeterWidget;
                  class WeatherSatPanel; }
 namespace ai   { class Agent; class AiSessionStore; }
 namespace gnss { class GnssReceiver; struct GnssFix; }
@@ -141,6 +142,9 @@ private:
     // Visible-navigation-satellites panel (TLE/SGP4 PREDICTION, not received).
     QTableWidget* navSatTable_ = nullptr;
     QList<dsp::TleEntry> tleEntries_;   // raw TLEs backing the nav-sat filter
+    // LEO PNT geometry readout (prediction, not a fix) + S-meter widget.
+    QLabel* geoLabel_ = nullptr;
+    ui::SMeterWidget* sMeter_ = nullptr;
     // ADS-B aircraft tracker: merges decoded frames keyed by ICAO, applies TTL
     // expiry, and emits only real-position points to the map. Lives on the UI
     // thread; fed by onAdsbAircraft(), pruned by adsbTimer_ every second.

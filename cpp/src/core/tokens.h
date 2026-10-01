@@ -317,6 +317,21 @@ inline constexpr double  kTrajLineAlpha       = 0.45;  // dashed trajectory over
 inline constexpr double  kTrajLineWidth      = 1.2;
 
 // =====================================================================
+// LEO PNT geometry availability (PREDICTION, not a position fix) + S-meter.
+// =====================================================================
+// Geometry: elevation-weighted simplified DOP threshold gates.
+inline constexpr double  kGeoMinElevationDeg = 5.0;   // mask low-EL multipath
+inline constexpr int     kGeoGoodMinVisible  = 6;     // >=6 usable sats for 好
+inline constexpr double  kGeoDopGood        = 4.0;   // DOP <=4  => 好
+inline constexpr double  kGeoDopFair        = 6.0;   // DOP <=6  => 中
+inline constexpr double  kGeoDopPoor        = 8.0;   // DOP <=8  => 差; beyond => 不足
+// S-meter: standard S-unit scale. 1 S-unit = 6 dB (SDR++/fldigi convention),
+// S0..S9 range; peak-hold decays slowly toward the real level.
+inline constexpr double  kSMeterDbPerUnit   = 6.0;
+inline constexpr int     kSMeterMaxUnits    = 9;
+inline constexpr double  kSMeterPeakDecayDbPerSec = 12.0;
+
+// =====================================================================
 // Digital constellation panel (星座图). Display-only: it paints ONLY the
 // real post-Costas soft symbols fed via feedSymbols(). Zoom and the I/Q
 // histogram are pure view transforms over those real points -- no synthesis.

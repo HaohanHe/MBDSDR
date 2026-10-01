@@ -46,6 +46,7 @@ set(SOURCES
     src/ui/spectrum_widget.cpp
     src/ui/spectrum_display.cpp
     src/ui/sky_view.cpp
+    src/ui/s_meter.cpp
     src/ui/world_view.cpp
     src/ui/aircraft_tracker.cpp
     src/ui/settings_dialog.cpp
@@ -270,6 +271,11 @@ add_executable(ui_shot_timing tests/ui_screenshot_timing.cpp ${SHOT_SRCS} ${HEAD
 target_include_directories(ui_shot_timing PRIVATE src build/ui_shot_timing_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_timing PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
+# LEO geometry readout + S-meter screenshots. Offscreen; not in ctest.
+add_executable(ui_shot_geo tests/ui_screenshot_geo.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_geo PRIVATE src build/ui_shot_geo_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_geo PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
 # Device-info panel + dynamic sample-rate combo (real loopback RTL0 handshake).
 # Offscreen; not in ctest. Writes cpp/scratch/ui_devices.png + ui_devices_empty.png.
 add_executable(ui_shot_devices tests/ui_screenshot_devices.cpp ${SHOT_SRCS} ${HEADERS})
@@ -486,6 +492,24 @@ add_executable(test_nav_sats tests/test_nav_sats.cpp src/dsp/tle_client.cpp src/
 target_include_directories(test_nav_sats PRIVATE src)
 target_link_libraries(test_nav_sats PRIVATE Qt6::Test Qt6::Network Qt6::Concurrent Qt6::Core)
 add_test(NAME nav_sats COMMAND test_nav_sats)
+
+# LEO PNT geometry availability (pure, prediction-only) and S-meter mapping.
+add_executable(test_pnt_geometry tests/test_pnt_geometry.cpp)
+target_include_directories(test_pnt_geometry PRIVATE src)
+target_link_libraries(test_pnt_geometry PRIVATE Qt6::Test Qt6::Gui Qt6::Core)
+add_test(NAME pnt_geometry COMMAND test_pnt_geometry)
+
+add_executable(test_s_meter tests/test_s_meter.cpp src/ui/s_meter.cpp)
+target_include_directories(test_s_meter PRIVATE src)
+target_link_libraries(test_s_meter PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME s_meter COMMAND test_s_meter)
+
+# Pre-hardware loopback soak: connect->record->offline file replay (fixed chunks)
+# -> engine still healthy -> LEO geometry + S-meter over measured numbers.
+add_executable(test_leo_soak tests/test_leo_soak.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_leo_soak PRIVATE src build/test_leo_soak_autogen/include)
+target_link_libraries(test_leo_soak PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME leo_soak COMMAND test_leo_soak)
 
 # Satellite one-tap capture + Doppler auto-compensation decision logic
 # (mapping table, capture target, bounded step limiter, real SGP4 -> fd -> VFO).
