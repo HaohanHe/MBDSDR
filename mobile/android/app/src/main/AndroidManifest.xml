@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 外部 USB GNSS（USB-TTL 串口）。required=false：无 USB host 的设备仍可装。 -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <application
         android:label="mbdsdr_mobile"
         android:name="${applicationName}"

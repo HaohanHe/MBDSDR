@@ -21,11 +21,17 @@ RtlSdrSource::~RtlSdrSource() {
 // =====================================================================
 
 void RtlSdrSource::setGain(double gainDb) {
-    gainDb_ = gainDb;
+    // Snap the continuous UI request to the nearest legal discrete step when a
+    // table is known. With no table (stub / could not read it) this is an
+    // honest passthrough -- we never invent a step. The snapped value is what
+    // we store AND push to hardware, so gain() reports the real applied level.
+    const double snapped = gainTable_.snap(gainDb);
+    gainDb_ = snapped;
+    gainTable_.setActualGainDb(snapped);
 #ifdef HAVE_RTLSDR
     // Manual tuner gain is ignored while tuner AGC is on; just keep the value.
     if (dev_ && !tunerAgc_)
-        rtlsdr_set_tuner_gain(dev_, static_cast<int>(gainDb_ * 10.0));  // tenths of dB
+        rtlsdr_set_tuner_gain(dev_, static_cast<int>(snapped * 10.0));  // tenths of dB
 #endif
 }
 
@@ -56,7 +62,7 @@ void RtlSdrSource::setTunerAgc(bool on) {
     if (dev_) {
         // mode 0 = automatic tuner AGC, mode 1 = manual gain.
         rtlsdr_set_tuner_gain_mode(dev_, on ? 0 : 1);
-        // Leaving auto mode: restore the stored manual gain level.
+        // Leaving auto mode: restore the stored manual gain level (already snapped).
         if (!on) rtlsdr_set_tuner_gain(dev_, static_cast<int>(gainDb_ * 10.0));
     }
 #endif
@@ -100,6 +106,15 @@ QString RtlSdrSource::rtlOptionsSummary() const {
         .arg(ppm_, 0, 'f', 1);
 }
 
+// These two are device-independent: they read the snapped gain table that is
+// shared between the HAVE_RTLSDR and stub builds. With no table the reported
+// gain is just the stored (passthrough) value and availableGainsDb() is empty.
+double RtlSdrSource::gain() const { return gainDb_; }
+
+std::vector<double> RtlSdrSource::availableGainsDb() const {
+    return gainTable_.availableGainsDb();
+}
+
 #ifdef HAVE_RTLSDR
 
 namespace {
@@ -137,9 +152,53 @@ bool RtlSdrSource::start() {
     // live by setPpm() and its result is reported honestly.
     if (ppm_ != 0)
         checkRtl("set_freq_correction", rtlsdr_set_freq_correction(dev_, static_cast<int>(ppm_)));
+
+    // ---- Discrete gain table (learned from the driver) -------------------
+    // rtlsdr_get_tuner_gains(dev, NULL) returns the count; a second call with a
+    // buffer fills the legal steps in tenths of dB (R82xx 29, E4000 14, ...).
+    // We snap the stored continuous gain to the nearest legal step so the UI
+    // never shows "20 dB" while the driver actually parked at 19.7 dB.
+    // 「真机待验」: the real table comes from hardware; the snap logic itself is
+    // unit-tested offline with an injected table.
+    {
+        const int nGains = rtlsdr_get_tuner_gains(dev_, nullptr);
+        if (nGains > 0) {
+            std::vector<int> table(static_cast<std::size_t>(nGains), 0);
+            const int filled = rtlsdr_get_tuner_gains(dev_, table.data());
+            if (filled > 0) {
+                table.resize(static_cast<std::size_t>(filled));
+                gainTable_.setTable(std::move(table));
+                // Re-snap the stored gain now that the table is known, then push
+                // the real stepped value (read back below for honest reporting).
+                const double snapped = gainTable_.snap(gainDb_);
+                gainDb_ = snapped;
+                gainTable_.setActualGainDb(snapped);
+                if (!tunerAgc_)
+                    checkRtl("set_tuner_gain (snap)",
+                             rtlsdr_set_tuner_gain(dev_, static_cast<int>(snapped * 10.0)));
+                // Read back the level the driver actually accepted.
+                const int actualDb10 = rtlsdr_get_tuner_gain(dev_);
+                if (actualDb10 > 0) {
+                    const double actual = actualDb10 / 10.0;
+                    gainDb_ = actual;
+                    gainTable_.setActualGainDb(actual);
+                }
+            } else {
+                qWarning() << "[RtlSdrSource] rtlsdr_get_tuner_gains filled 0;"
+                              "gain table empty (passthrough)";
+            }
+        } else {
+            qWarning() << "[RtlSdrSource] rtlsdr_get_tuner_gains returned" << nGains
+                       << "; no discrete table (passthrough)";
+        }
+    }
+
     rtlsdr_reset_buffer(dev_);
     running_ = true;
+    readWatchdog_.reset();
     qInfo() << "[RtlSdrSource] opened device 0, freq=" << f0_ << "Hz sr=" << fs_ << "Hz"
+            << "gainTableSteps=" << gainTable_.size()
+            << "actualGainDb=" << gainTable_.actualGainDb()
             << rtlOptionsSummary();
     return true;
 }
@@ -151,6 +210,7 @@ void RtlSdrSource::stop() {
         dev_ = nullptr;
     }
     running_ = false;
+    readWatchdog_.reset();
 }
 
 std::size_t RtlSdrSource::readIQ(std::vector<std::complex<float>>& out) {
@@ -162,8 +222,24 @@ std::size_t RtlSdrSource::readIQ(std::vector<std::complex<float>>& out) {
     std::vector<unsigned char> raw(n * 2);
     int nRead = 0;
     int r = rtlsdr_read_sync(dev_, raw.data(), static_cast<int>(n * 2), &nRead);
-    if (r < 0 || nRead <= 0) return 0;
+    if (r < 0 || nRead <= 0) {
+        // Consecutive read failure: feed the watchdog. Once it latches DEAD we
+        // close the device so isConnected() flips false honestly (no more
+        // silent zero reads with a stale dev_). The engine's own zero-read
+        // detector sees the 0 return and falls back / attempts reconnect.
+        if (readWatchdog_.onRead(false)) {
+            qWarning() << "[RtlSdrSource] read stream dead after"
+                       << readWatchdog_.failureCount()
+                       << "consecutive failures; closing device (isConnected=false)";
+            rtlsdr_cancel_async(dev_);
+            rtlsdr_close(dev_);
+            dev_ = nullptr;
+            running_ = false;
+        }
+        return 0;
+    }
 
+    readWatchdog_.onRead(true);
     const std::size_t samples = static_cast<std::size_t>(nRead) / 2;
     for (std::size_t i = 0; i < samples; ++i) {
         const float I = (static_cast<float>(raw[2*i])     - 127.5f) / 127.5f;

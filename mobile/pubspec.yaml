@@ -16,6 +16,7 @@ dependencies:
   sensors_plus: ^7.1.0        # 真实 IMU
   shared_preferences: ^2.5.5  # 设置持久化
   flutter_secure_storage: ^11.2.0  # API key 安全存储（加密、不落仓库）
+  path_provider: ^2.1.0       # 应用文档目录（真实录音落盘落点）
   intl: ^0.20.3
 
 dev_dependencies:

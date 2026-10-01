@@ -68,6 +68,14 @@ public:
     /// Multi-stage gain: stage 0 = LNA, 1 = MIX, 2 = VGA (RTL2832U+E4000/R820T).
     /// Single-gain sources can map this to setGain().
     virtual void setGainStage(int /*stage*/, double /*gainDb*/) {}
+
+    // ---- Optional discrete gain table (default empty = passthrough) --------
+    /// Legal discrete tuner gain steps in dB, learned from the driver
+    /// (rtlsdr_get_tuner_gains). Returns EMPTY when the source has no discrete
+    /// info (test/file sources, or a hardware backend that could not read the
+    /// table) -- the UI then keeps a continuous slider and no step combo is
+    /// shown. Hardware backends that snapped setGain() report their real table.
+    virtual std::vector<double> availableGainsDb() const { return {}; }
 };
 
 } // namespace dsp

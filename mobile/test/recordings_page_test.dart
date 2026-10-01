@@ -66,7 +66,7 @@ void main() {
       settings: settings,
     )));
     expect(find.text('暂无录音'), findsOneWidget);
-    expect(find.textContaining('暂未实现真实文件录制'), findsOneWidget);
+    expect(find.textContaining('真实录制的 .wav 会保存在本机'), findsOneWidget);
     // 音频路由状态真实反映「未连接」。
     expect(find.textContaining('未连接'), findsOneWidget);
   });

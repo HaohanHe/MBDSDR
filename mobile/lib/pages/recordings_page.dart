@@ -8,17 +8,15 @@ import '../services/settings_service.dart';
 import '../widgets/empty_state.dart';
 
 // ============================================================================
-// 录音页：录音列表 + 真实删除。
+// 录音页：录音列表 + 真实删除 +（可选）文件回放。
 // ----------------------------------------------------------------------------
-// 诚实性说明：移动端目前没有真实文件录制路径——RecordingPcmSink 仅为
-// 单测内存件，不写盘；RadioController 也没有录制开关。因此本页：
-//   * 顶部只展示真实存在的「音频路由状态」（是否连上 rtl_tcp、静噪门是否
-//     开门、当前频率/模式），不假装正在录制；
-//   * 下方录音列表读取 SettingsService.recordings（就绪的持久化索引），
-//     真机上恒为空态「暂无录音」，并明确说明暂未实现真实文件录制；
-//   * 删除是真实的：从持久化索引移除单条 / 清空全部，均带确认；不提供假回放
-//     按钮（无录音文件、无文件播放器，回放暂不真实，故不渲染）。
-// 绝不预置假录音条目。
+// 诚实性说明：
+//   * 真实文件录制链路已就绪：FileRecordingSink 把解调音频量化为 16-bit 小端 PCM
+//     写成本机 .wav，并产出 sidecar JSON；录制结束由上层 addRecording 进本列表。
+//   * 无录制时列表恒为空态「暂无录音」，绝不预置假条目；
+//   * 删除是真实的：从索引 + RecordingStore 配对删 .wav/.json；
+//   * 回放：若注入了 [onPlay]/[onStop]/[playing]，每条可播放项显示播放/停止按钮；
+//     未注入时不渲染假播放按钮（原生 AudioTrack/AVAudioEngine 未真机验证前诚实空）。
 // ============================================================================
 
 class RecordingsPage extends StatelessWidget {
@@ -26,10 +24,20 @@ class RecordingsPage extends StatelessWidget {
     super.key,
     required this.radio,
     required this.settings,
+    this.onPlay,
+    this.onStop,
+    this.playing,
   });
 
   final RadioApi radio;
   final SettingsService settings;
+
+  /// 注入后：有 wavFileName 的条目可点播放；未注入则不渲染播放按钮。
+  final void Function(RecordingMeta meta)? onPlay;
+  final void Function()? onStop;
+
+  /// 当前正在播放的那条（用于切换图标）；未注入回放时为 null。
+  final RecordingMeta? playing;
 
   Future<void> _confirmDelete(BuildContext context, RecordingMeta meta) async {
     final ok = await showDialog<bool>(
@@ -107,12 +115,15 @@ class RecordingsPage extends StatelessWidget {
                     ? const EmptyState(
                         icon: Icons.fiber_manual_record_outlined,
                         title: '暂无录音',
-                        message: '移动端暂未实现真实文件录制（当前仅实时收听）。'
-                            '录制会话一旦产生，会按时间 / 频率 / 模式列在这里。',
+                        message: '真实录制的 .wav 会保存在本机；录制会话结束后，'
+                            '按时间 / 频率 / 模式列在这里。',
                       )
                     : _RecordingList(
                         recordings: recordings,
                         onDelete: (m) => _confirmDelete(context, m),
+                        onPlay: onPlay,
+                        onStop: onStop,
+                        playing: playing,
                       ),
               ),
             ],
@@ -168,10 +179,19 @@ class _AudioRoutingStatus extends StatelessWidget {
 }
 
 class _RecordingList extends StatelessWidget {
-  const _RecordingList({required this.recordings, required this.onDelete});
+  const _RecordingList({
+    required this.recordings,
+    required this.onDelete,
+    this.onPlay,
+    this.onStop,
+    this.playing,
+  });
 
   final List<RecordingMeta> recordings;
   final void Function(RecordingMeta meta) onDelete;
+  final void Function(RecordingMeta meta)? onPlay;
+  final void Function()? onStop;
+  final RecordingMeta? playing;
 
   String _fmtTime(DateTime t) {
     String two(int n) => n.toString().padLeft(2, '0');
@@ -186,14 +206,33 @@ class _RecordingList extends StatelessWidget {
       itemBuilder: (context, i) {
         final r = recordings[i];
         final mhz = (r.frequencyHz / 1e6).toStringAsFixed(4);
+        final canPlay = onPlay != null &&
+            onStop != null &&
+            r.wavFileName != null &&
+            r.wavFileName!.isNotEmpty;
+        final isPlaying = playing != null &&
+            playing!.startedAtEpochMs == r.startedAtEpochMs &&
+            playing!.frequencyHz == r.frequencyHz;
         return ListTile(
           dense: true,
-          leading: const Icon(Icons.audiotrack,
-              color: AppTokens.accent, size: AppTokens.iconSizeInlineLg),
+          leading: Icon(
+            canPlay
+                ? (isPlaying ? Icons.stop_circle_outlined : Icons.play_arrow)
+                : Icons.audiotrack,
+            color: canPlay ? AppTokens.success : AppTokens.accent,
+            size: AppTokens.iconSizeInlineLg,
+          ),
+          onTap: canPlay
+              ? () => isPlaying
+                  ? onStop!()
+                  : onPlay!(r)
+              : null,
           title: Text('$mhz MHz · ${r.mode.toUpperCase()}',
               style: AppTokens.body),
           subtitle: Text(
-            '${_fmtTime(r.startedAt)}${r.note.isEmpty ? '' : ' · ${r.note}'}',
+            '${_fmtTime(r.startedAt)}'
+            '${r.note.isEmpty ? '' : ' · ${r.note}'}'
+            '${r.durationMs != null ? ' · ${(r.durationMs! / 1000).round()}s' : ''}',
             style: AppTokens.auxiliary,
           ),
           trailing: IconButton(
