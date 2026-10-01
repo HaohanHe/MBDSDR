@@ -106,6 +106,9 @@ set(SOURCES
     src/ai/ai_session_store.cpp
     src/ai/ai_context.cpp
     src/ai/task_orchestrator.cpp
+    src/ai/task_runner.cpp
+    src/ai/plan_parser.cpp
+    src/ai/sat_task_planner.cpp
     src/tx/modulator.cpp
     src/tx/loopback_backend.cpp
     src/tx/tx_controller.cpp
@@ -820,6 +823,58 @@ add_executable(test_task_orchestrator tests/test_task_orchestrator.cpp
 target_include_directories(test_task_orchestrator PRIVATE src)
 target_link_libraries(test_task_orchestrator PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME task_orchestrator COMMAND test_task_orchestrator)
+
+# LLM plan parser: trustworthy parse + honest rejection/fallback.
+add_executable(test_plan_parser tests/test_plan_parser.cpp
+    src/ai/plan_parser.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp
+    src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
+    src/ui/bookmark_manager.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
+    src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
+    src/dsp/qt_audio_sink.cpp
+    src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp
+    src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp
+    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_plan_parser PRIVATE src)
+target_link_libraries(test_plan_parser PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Gui Qt6::Widgets Qt6::Multimedia)
+add_test(NAME plan_parser COMMAND test_plan_parser)
+
+# Satellite auto-tune task planner: real offline SGP4 -> capture frequency.
+add_executable(test_sat_task_planner tests/test_sat_task_planner.cpp
+    src/ai/sat_task_planner.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp
+    src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
+    src/dsp/tle_client.cpp src/dsp/sgp4.cpp src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp
+    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp
+    src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp
+    src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp
+    src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp
+    src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp)
+target_include_directories(test_sat_task_planner PRIVATE src)
+target_link_libraries(test_sat_task_planner PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
+add_test(NAME sat_task_planner COMMAND test_sat_task_planner)
+
+# Async task runner: worker QThread keeps UI responsive, queued steps, stop.
+add_executable(test_task_async tests/test_task_async.cpp
+    src/ai/task_runner.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp src/ai/llm_worker.cpp
+    src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp src/ui/bookmark_manager.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
+    src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
+    src/dsp/qt_audio_sink.cpp
+    src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp
+    src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp
+    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_task_async PRIVATE src)
+target_link_libraries(test_task_async PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME task_async COMMAND test_task_async)
 
 # AI multi-session store (CRUD + JSON persistence) + pure context compaction.
 # No network / no GUI: links only the two new AI translation units.

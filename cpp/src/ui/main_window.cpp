@@ -69,6 +69,7 @@
 #include "ai/ai_session_store.h"
 #include "ai/ai_context.h"
 #include "ai/task_orchestrator.h"
+#include "ai/task_runner.h"
 #include "ui/task_steps_view.h"
 #include "ui/sky_view.h"
 #include "ui/s_meter.h"
@@ -1496,7 +1497,7 @@ MainWindow::MainWindow(QWidget* parent)
     aiManualCheck_->setToolTip("勾选后 AI 不会真正调谐/改模式/录制，只返回被拦截的建议。");
     aiLay->addWidget(aiManualCheck_);
 
-    // ---- Autonomous multi-step task: process step list -----------------
+    // ---- Autonomous multi-step task: template + editable params ---------
     // A compact panel above the chat. The step list (per-step tool/args/state/
     // summary/elapsed) is visually separate from the natural-language report
     // (which lives in aiChat_ / the view's bottom summary). Honest empty state
@@ -1504,12 +1505,48 @@ MainWindow::MainWindow(QWidget* parent)
     auto* taskHead = new QLabel(QString::fromUtf8("自主任务（过程）"), aiPage);
     taskHead->setObjectName("panelTitle");
     aiLay->addWidget(taskHead);
-    aiRunTaskBtn_ = new QPushButton(QString::fromUtf8("运行：扫频找信号并存档"), aiPage);
+
+    aiTemplateCombo_ = new QComboBox(aiPage);
+    aiTemplateCombo_->setObjectName("aiTemplateCombo");
+    aiTemplateCombo_->addItem(QString::fromUtf8("扫频找信号并记录"), "sweep");
+    aiTemplateCombo_->addItem(QString::fromUtf8("目标频率捕获"), "target");
+    aiTemplateCombo_->addItem(QString::fromUtf8("固定频率录制"), "fixed");
+    aiLay->addWidget(aiTemplateCombo_);
+
+    auto* paramRow = new QHBoxLayout;
+    aiParamLowHz_ = new QDoubleSpinBox(aiPage);
+    aiParamLowHz_->setObjectName("aiParamLowHz");
+    aiParamLowHz_->setRange(100e3, 2000e6);
+    aiParamLowHz_->setDecimals(0);
+    aiParamLowHz_->setSuffix(QString::fromUtf8(" Hz"));
+    aiParamLowHz_->setValue(100e6);
+    aiParamHighHz_ = new QDoubleSpinBox(aiPage);
+    aiParamHighHz_->setObjectName("aiParamHighHz");
+    aiParamHighHz_->setRange(100e3, 2000e6);
+    aiParamHighHz_->setDecimals(0);
+    aiParamHighHz_->setSuffix(QString::fromUtf8(" Hz"));
+    aiParamHighHz_->setValue(100.3e6);
+    aiParamMode_ = new QComboBox(aiPage);
+    aiParamMode_->setObjectName("aiParamMode");
+    for (const char* m : {"NFM", "WFM", "BPSK", "USB"})
+        aiParamMode_->addItem(QString::fromLatin1(m));
+    paramRow->addWidget(aiParamLowHz_);
+    paramRow->addWidget(aiParamHighHz_);
+    paramRow->addWidget(aiParamMode_);
+    aiLay->addLayout(paramRow);
+
+    auto* runRow = new QHBoxLayout;
+    aiRunTaskBtn_ = new QPushButton(QString::fromUtf8("运行任务"), aiPage);
     aiRunTaskBtn_->setObjectName("aiRunTaskBtn");
     aiRunTaskBtn_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
-    aiRunTaskBtn_->setToolTip(QString::fromUtf8(
-        "在离线回环信号上跑一遍确定性任务：扫频段→取峰值命中→存书签→转频→录制。"));
-    aiLay->addWidget(aiRunTaskBtn_);
+    aiStopTaskBtn_ = new QPushButton(QString::fromUtf8("停止"), aiPage);
+    aiStopTaskBtn_->setObjectName("aiStopTaskBtn");
+    aiStopTaskBtn_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+    aiStopTaskBtn_->setEnabled(false);
+    runRow->addWidget(aiRunTaskBtn_, 1);
+    runRow->addWidget(aiStopTaskBtn_);
+    aiLay->addLayout(runRow);
+
     aiTaskSteps_ = new ui::TaskStepsView(aiPage);
     aiTaskSteps_->setMaximumHeight(tokens::scaled(360));
     aiTaskSteps_->setObjectName("aiTaskSteps");
@@ -2077,15 +2114,38 @@ MainWindow::MainWindow(QWidget* parent)
     connect(aiManualCheck_, &QCheckBox::toggled, this,
             [this](bool on) {
                 if (agent_) agent_->setManualMode(on);
-                if (aiOrch_) aiOrch_->setManualMode(on);   // gate the task runner too
+                if (aiRunner_) aiRunner_->setManualMode(on);   // gate the task runner too
             });
 
-    // Autonomous task runner: real engine + real bookmark store. Manual-mode
-    // state mirrors the checkbox so a gated task reports honestly (no fake run).
-    aiOrch_ = new ai::TaskOrchestrator(engine_);
-    aiOrch_->setBookmarkManager(bookmarkManager_);
-    aiOrch_->setManualMode(aiManualCheck_ && aiManualCheck_->isChecked());
+    // Autonomous task runner: a worker QThread (see task_runner.h).  Real engine
+    // + real bookmark store; queued step/finished signals update the UI. Manual-
+    // mode state mirrors the checkbox so a gated task reports honestly.
+    aiRunner_ = new ai::TaskRunner(engine_, bookmarkManager_, this);
+    aiRunner_->setManualMode(aiManualCheck_ && aiManualCheck_->isChecked());
+    aiRunner_->start();
     connect(aiRunTaskBtn_, &QPushButton::clicked, this, &MainWindow::onRunAutoTask);
+    connect(aiStopTaskBtn_, &QPushButton::clicked, this, [this]() {
+        if (aiRunner_) aiRunner_->requestStop();
+    });
+    connect(aiRunner_, &ai::TaskRunner::stepUpdated, this,
+            [this](const mbdsdr::ai::StepResult& s) {
+        // Delivered on the UI thread (queued). Accumulate live steps.
+        if (aiTaskHint_) aiTaskHint_->setVisible(false);
+        aiLiveSteps_.append(s);
+        if (aiTaskSteps_) aiTaskSteps_->setLiveSteps(aiLiveSteps_);
+    });
+    connect(aiRunner_, &ai::TaskRunner::finished, this,
+            [this](const QString& report) {
+        // UI-thread final refresh: render the full run + report.
+        if (aiTaskSteps_) aiTaskSteps_->setRun(aiLiveSteps_, report);
+        if (aiRunTaskBtn_)  aiRunTaskBtn_->setEnabled(true);
+        if (aiStopTaskBtn_) aiStopTaskBtn_->setEnabled(false);
+        if (aiSessionStore_ && !aiCurSessionId_.isEmpty())
+            aiSessionStore_->appendMessage(aiCurSessionId_,
+                mbdsdr::ai::SessionMessage{"assistant", report});
+        aiRenderChat();
+        if (bookmarkManager_) refreshBmTable();
+    });
     // ---- Chat rendering: session messages + a SINGLE transient line --------
     // partialReady() replaces the transient (never appends); responseReady()
     // clears the transient + tool notes, appends the final assistant message to
@@ -4628,22 +4688,35 @@ void MainWindow::onAiCompactContext() {
 }
 
 void MainWindow::onRunAutoTask() {
-    if (!aiOrch_ || !engine_) return;
-    // Neutral, call-supplied parameters -- no baked-in station / location.
-    const ai::TaskPlan plan = ai::planSweepFindAndRecord(
-        100e6, 100.3e6, 100e3, "NFM", QString::fromUtf8("自动命中"));
-    const QString report = aiOrch_->run(plan);   // synchronous, ~a few hundred ms
-    // Populate the process list; hide the honest empty-state hint after first run.
+    if (!aiRunner_ || !engine_) return;
+    if (aiRunner_->isRunning()) return;     // single-flight; button disabled while busy
+
+    // Build the plan from the SELECTED template + editable parameters.  All
+    // values are user-supplied (Hz), nothing baked-in.
+    const QString kind = aiTemplateCombo_ ? aiTemplateCombo_->currentData().toString()
+                                           : QStringLiteral("sweep");
+    const double lowHz   = aiParamLowHz_  ? aiParamLowHz_->value()  : 100e6;
+    const double highHz  = aiParamHighHz_ ? aiParamHighHz_->value() : 100.3e6;
+    const QString mode   = aiParamMode_   ? aiParamMode_->currentText() : QStringLiteral("NFM");
+
+    ai::TaskPlan plan;
+    if (kind == QLatin1String("target"))
+        plan = ai::planTargetCapture(highHz, mode);
+    else if (kind == QLatin1String("fixed"))
+        plan = ai::planFixedFrequencyRecord(lowHz, mode, 12500.0);
+    else
+        plan = ai::planSweepFindAndRecord(lowHz, highHz, 100e3, mode,
+                                          QString::fromUtf8("自动命中"));
+
+    // UI-thread bookkeeping, then hand off to the worker thread (queued).
+    aiLiveSteps_.clear();
+    if (aiTaskSteps_) aiTaskSteps_->clear();
     if (aiTaskHint_) aiTaskHint_->setVisible(false);
-    if (aiTaskSteps_) aiTaskSteps_->setRun(aiOrch_->results(), report);
-    // Also surface the honest summary as an assistant chat line, clearly separate
-    // from the per-step process list above.
-    if (aiSessionStore_ && !aiCurSessionId_.isEmpty()) {
-        aiSessionStore_->appendMessage(aiCurSessionId_,
-                                        mbdsdr::ai::SessionMessage{"assistant", report});
-        aiRenderChat();
-    }
-    if (bookmarkManager_) refreshBmTable();
+    if (aiRunTaskBtn_)  aiRunTaskBtn_->setEnabled(false);
+    if (aiStopTaskBtn_) aiStopTaskBtn_->setEnabled(true);
+
+    QMetaObject::invokeMethod(aiRunner_, "runPlan", Qt::QueuedConnection,
+                              Q_ARG(mbdsdr::ai::TaskPlan, plan));
 }
 
 } // namespace mbdsdr

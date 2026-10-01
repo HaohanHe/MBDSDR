@@ -42,7 +42,7 @@ namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class Con
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class SMeterWidget;
                  class WeatherSatPanel; class TaskStepsView; }
-namespace ai   { class Agent; class AiSessionStore; class TaskOrchestrator; }
+namespace ai   { class Agent; class AiSessionStore; class TaskRunner; struct StepResult; }
 namespace gnss { class GnssReceiver; struct GnssFix; }
 
 class MainWindow : public QMainWindow {
@@ -436,11 +436,17 @@ private:
     QPushButton*    aiRenameSessionBtn_ = nullptr;
     QPushButton*    aiDeleteSessionBtn_ = nullptr;
     QPushButton*    aiCompactCtxBtn_ = nullptr;
-    // Autonomous multi-step task: process-observable step list + orchestrator.
+    // Autonomous multi-step task: process-observable step list + async runner.
     ui::TaskStepsView* aiTaskSteps_ = nullptr;
     QLabel*         aiTaskHint_  = nullptr;
+    QComboBox*      aiTemplateCombo_ = nullptr;  // which deterministic task to run
+    QDoubleSpinBox* aiParamLowHz_ = nullptr;      // sweep band low (Hz)
+    QDoubleSpinBox* aiParamHighHz_ = nullptr;     // sweep band high / target (Hz)
+    QComboBox*      aiParamMode_ = nullptr;       // demod mode override
     QPushButton*    aiRunTaskBtn_ = nullptr;
-    ai::TaskOrchestrator* aiOrch_ = nullptr;
+    QPushButton*    aiStopTaskBtn_ = nullptr;
+    ai::TaskRunner* aiRunner_ = nullptr;
+    QList<mbdsdr::ai::StepResult> aiLiveSteps_;   // accumulated live steps (UI thread)
 
     // Chat rendering model: persisted session messages + a single transient
     // line. partialReady() overwrites the transient (never appends);

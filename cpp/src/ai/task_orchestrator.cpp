@@ -113,7 +113,7 @@ QJsonObject resolveArgs(const QJsonObject& in, const QList<StepResult>& prior,
 }
 } // namespace
 
-QString TaskOrchestrator::run(const TaskPlan& plan) {
+QString TaskOrchestrator::run(const TaskPlan& plan, StepCallback onStep) {
     results_.clear();
     stop_.store(false);
     const int cap = qMin(plan.steps.size(), static_cast<qsizetype>(maxSteps()));
@@ -139,6 +139,7 @@ QString TaskOrchestrator::run(const TaskPlan& plan) {
             r.error = rerr;
             r.summary = QString::fromUtf8("参数解析失败：%1").arg(rerr);
             results_.append(r);
+            if (onStep) onStep(results_.constLast());
             if (plan.abortOnFail) break;
             continue;
         }
@@ -186,6 +187,7 @@ QString TaskOrchestrator::run(const TaskPlan& plan) {
         }
         r.summary = r.resultText.left(tokens::kTaskSummaryMaxChars);
         results_.append(r);
+        if (onStep) onStep(results_.constLast());
 
         if (isErr && plan.abortOnFail) break;
     }

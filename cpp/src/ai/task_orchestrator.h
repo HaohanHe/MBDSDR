@@ -16,6 +16,7 @@
 #include <QJsonValue>
 #include <QList>
 #include <atomic>
+#include <functional>
 
 namespace mbdsdr {
 namespace dsp { class SpectrumEngine; }
@@ -66,7 +67,10 @@ public:
     // Run the whole plan synchronously, step by step. Honors max-steps token,
     // abortOnFail and requestStop(). Returns a final honest natural-language
     // summary (distinct from the per-step records in results()).
-    QString run(const TaskPlan& plan);
+    // Step callback invoked on the RUN thread as each step completes; used by the
+    // async TaskRunner to re-emit progress to the UI thread (queued). May be null.
+    using StepCallback = std::function<void(const StepResult&)>;
+    QString run(const TaskPlan& plan, StepCallback onStep = nullptr);
 
     // Atomic interrupt: no further step starts after this returns. Safe to call
     // from another thread while run() is in flight. No timers are owned, so
