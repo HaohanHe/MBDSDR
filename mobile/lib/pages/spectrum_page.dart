@@ -17,6 +17,7 @@ import '../models/radio_state.dart';
 import '../services/radio_controller.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/spectrum_display.dart';
+import '../widgets/timing_panel.dart';
 
 /// 由解调模式派生的信道带宽（Hz）。移动端带宽随模式而定，不单独控制。
 int bandwidthForMode(DemodMode mode) => switch (mode) {
@@ -53,6 +54,9 @@ class SpectrumPage extends StatefulWidget {
   /// 按频率移除固定标记。
   final ValueChanged<double>? onRemoveFixedMark;
 
+  /// 标记被拖动/键盘微调后回调 (旧Hz → 新Hz)，立即持久化。
+  final void Function(double oldHz, double newHz)? onMarkChanged;
+
   /// 空 host 时引导用户去设置页。
   final VoidCallback? onOpenSettings;
 
@@ -67,6 +71,7 @@ class SpectrumPage extends StatefulWidget {
     this.fixedMarksHz = const <double>[],
     this.onAddFixedMark,
     this.onRemoveFixedMark,
+    this.onMarkChanged,
     this.onOpenSettings,
   });
 
@@ -117,6 +122,8 @@ class _SpectrumPageState extends State<SpectrumPage> {
                   persistence: _persistence,
                   persistenceClearTick: _clearTick,
                   fixedMarksHz: widget.fixedMarksHz,
+                  onMarkChanged: widget.onMarkChanged,
+                  onRemoveFixedMark: widget.onRemoveFixedMark,
                   onOpenSettings: widget.onOpenSettings,
                 );
                 return wide
@@ -151,6 +158,8 @@ class _DisplayArea extends StatelessWidget {
   final SpectrumPersistence persistence;
   final int persistenceClearTick;
   final List<double> fixedMarksHz;
+  final void Function(double oldHz, double newHz)? onMarkChanged;
+  final ValueChanged<double>? onRemoveFixedMark;
   final VoidCallback? onOpenSettings;
 
   const _DisplayArea({
@@ -159,6 +168,8 @@ class _DisplayArea extends StatelessWidget {
     required this.persistence,
     required this.persistenceClearTick,
     required this.fixedMarksHz,
+    required this.onMarkChanged,
+    required this.onRemoveFixedMark,
     required this.onOpenSettings,
   });
 
@@ -202,6 +213,8 @@ class _DisplayArea extends StatelessWidget {
           persistence: persistence,
           persistenceClearTick: persistenceClearTick,
           fixedMarksHz: fixedMarksHz,
+          onMarkChanged: onMarkChanged,
+          onRemoveFixedMark: onRemoveFixedMark,
         );
     }
   }
@@ -213,11 +226,15 @@ class _ConnectedBody extends StatefulWidget {
   final SpectrumPersistence persistence;
   final int persistenceClearTick;
   final List<double> fixedMarksHz;
+  final void Function(double oldHz, double newHz)? onMarkChanged;
+  final ValueChanged<double>? onRemoveFixedMark;
   const _ConnectedBody({
     required this.controller,
     required this.persistence,
     required this.persistenceClearTick,
     required this.fixedMarksHz,
+    required this.onMarkChanged,
+    required this.onRemoveFixedMark,
   });
 
   @override
@@ -256,6 +273,8 @@ class _ConnectedBodyState extends State<_ConnectedBody> {
             persistence: widget.persistence,
             persistenceClearTick: widget.persistenceClearTick,
             fixedMarksHz: widget.fixedMarksHz,
+            onMarkChanged: widget.onMarkChanged,
+            onDeleteMark: widget.onRemoveFixedMark,
           ),
         ),
       ],
@@ -784,6 +803,9 @@ class _ControlPanel extends StatelessWidget {
                   ],
                 ),
             ],
+            // ---- 授时面板：真实系统钟 + GNSS 授时三态（无 NMEA 诚实空态）----
+            const SizedBox(height: AppTokens.spacingL),
+            const TimingPanel(),
           ],
         ),
       ),

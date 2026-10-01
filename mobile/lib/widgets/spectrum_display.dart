@@ -16,11 +16,11 @@
 library;
 
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app/tokens.dart';
 import '../dsp/fft_processor.dart';
@@ -45,6 +45,12 @@ class SpectrumDisplay extends StatefulWidget {
   /// 固定频率标记（Hz）：在频谱绘图区画细竖线，与 VFO/峰值区分。
   final List<double> fixedMarksHz;
 
+  /// 标记被拖动/微调后回调 (旧Hz → 新Hz)；立即持久化（remove+add）。
+  final void Function(double oldHz, double newHz)? onMarkChanged;
+
+  /// 标记被删除（选中 + Del/外部）时回调其 Hz，立即持久化。
+  final ValueChanged<double>? onDeleteMark;
+
   const SpectrumDisplay({
     super.key,
     required this.frame,
@@ -53,6 +59,8 @@ class SpectrumDisplay extends StatefulWidget {
     this.persistence = SpectrumPersistence.off,
     this.persistenceClearTick = 0,
     this.fixedMarksHz = const <double>[],
+    this.onMarkChanged,
+    this.onDeleteMark,
   });
 
   @override
@@ -71,6 +79,51 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
   // 每来一个新帧，把上一帧推入这里；只用于渐隐叠加，绝不造数据。
   final List<SpectrumFrame> _history = <SpectrumFrame>[];
 
+  // 固定标记交互：当前选中标记（Hz）；拖动中的标记用它连续微调。
+  double? _selectedMarkHz;
+  bool _draggingMark = false;
+  final FocusNode _plotFocus = FocusNode();
+
+  /// 绘图区局部 dx → 频率（Hz）。
+  double _dxToHz(double dx, Size size, SpectrumFrame frame) {
+    final span = frame.sampleRateHz;
+    final leftF = frame.centerFreqHz - span / 2;
+    return leftF + (dx / size.width).clamp(0.0, 1.0) * span;
+  }
+
+  /// 当前缩放粒度（自适应步长），拖动 snap 与键盘微调共用。
+  double _currentStep(Size size, SpectrumFrame frame) =>
+      adaptiveFreqStepHz(frame.sampleRateHz, size.width);
+
+  /// 在 [touchMin/2] 触达容差内找最近的标记；命中返回其 Hz，否则 null。
+  double? _hitMarkHz(double dx, Size size, SpectrumFrame frame) {
+    const tol = AppTokens.touchMin / 2.0;
+    final span = frame.sampleRateHz;
+    final leftF = frame.centerFreqHz - span / 2;
+    double bestDx = tol;
+    double? best;
+    for (final f in widget.fixedMarksHz) {
+      final x = (f - leftF) / span * size.width;
+      final d = (x - dx).abs();
+      if (d <= tol && d < bestDx) {
+        bestDx = d;
+        best = f;
+      }
+    }
+    return best;
+  }
+
+  /// 把选中标记移到 snap 后的新频率；变化即回调持久化。
+  void _nudgeSelectedMark(double newHz, Size size, SpectrumFrame frame) {
+    final old = _selectedMarkHz;
+    if (old == null || widget.onMarkChanged == null) return;
+    final step = _currentStep(size, frame);
+    final snapped = snapToFreqStep(newHz, step);
+    if ((snapped - old).abs() < 1e-6) return;
+    setState(() => _selectedMarkHz = snapped);
+    widget.onMarkChanged!(old, snapped);
+  }
+
   // gutter / 频率条高度（由 token 间距派生，不写死魔法像素）。
   double get _leftGutterW => AppTokens.spacingL * 3.0;
   double get _rightGutterW => AppTokens.spacingL * 1.5;
@@ -82,6 +135,12 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
     // 清除节拍变化 → 丢弃全部余晖历史。
     if (widget.persistenceClearTick != oldWidget.persistenceClearTick) {
       _history.clear();
+    }
+    // 选中标记已不在列表（被删除）→ 清空选中态。
+    final sel = _selectedMarkHz;
+    if (sel != null && !widget.fixedMarksHz
+        .any((f) => (f - sel).abs() < 1.0)) {
+      _selectedMarkHz = null;
     }
     final f = widget.frame;
     if (f != null && !identical(f, _lastFrame)) {
@@ -96,6 +155,12 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
       _lastFrame = f;
       _ingestFrame(f);
     }
+  }
+
+  @override
+  void dispose() {
+    _plotFocus.dispose();
+    super.dispose();
   }
 
   void _ingestFrame(SpectrumFrame frame) {
@@ -130,12 +195,62 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
     );
   }
 
-  void _onTapPlotTapUp(TapUpDetails d, Size plotSize, SpectrumFrame frame) {
-    final onTap = widget.onTapFrequency;
-    if (onTap == null) return;
-    final frac = (d.localPosition.dx / plotSize.width).clamp(0.0, 1.0);
-    final bin = (frac * frame.fftSize).floor();
-    onTap(frame.binToHz(bin));
+  void _onPlotTapUp(TapUpDetails d, Size size, SpectrumFrame frame) {
+    final hit = _hitMarkHz(d.localPosition.dx, size, frame);
+    if (hit != null) {
+      // 命中标记 → 选中高亮（吃键盘微调），不调 VFO。
+      _plotFocus.requestFocus();
+      setState(() => _selectedMarkHz = hit);
+      return;
+    }
+    // 未命中标记 → 既有行为：点哪根 bin 就把 VFO 调到哪。
+    widget.onTapFrequency?.call(_dxToHz(d.localPosition.dx, size, frame));
+  }
+
+  void _onDragStart(DragStartDetails d, Size size, SpectrumFrame frame) {
+    final hit = _hitMarkHz(d.localPosition.dx, size, frame);
+    if (hit != null) {
+      _draggingMark = true;
+      _plotFocus.requestFocus();
+      setState(() => _selectedMarkHz = hit);
+    } else {
+      _draggingMark = false;
+    }
+  }
+
+  void _onDragUpdate(DragUpdateDetails d, Size size, SpectrumFrame frame) {
+    if (!_draggingMark) return;
+    _nudgeSelectedMark(_dxToHz(d.localPosition.dx, size, frame), size, frame);
+  }
+
+  void _stepSelectedMark(double dir, Size size, SpectrumFrame frame) {
+    final old = _selectedMarkHz;
+    if (old == null || widget.onMarkChanged == null) return;
+    final next = old + dir * _currentStep(size, frame);
+    setState(() => _selectedMarkHz = next);
+    widget.onMarkChanged!(old, next);
+  }
+
+  KeyEventResult _handleKey(KeyEvent e, Size size, SpectrumFrame frame) {
+    final old = _selectedMarkHz;
+    if (old == null || e is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    if (e.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      _stepSelectedMark(-1, size, frame);
+      return KeyEventResult.handled;
+    }
+    if (e.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _stepSelectedMark(1, size, frame);
+      return KeyEventResult.handled;
+    }
+    if (e.logicalKey == LogicalKeyboardKey.delete ||
+        e.logicalKey == LogicalKeyboardKey.backspace) {
+      widget.onDeleteMark?.call(old);
+      setState(() => _selectedMarkHz = null);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
@@ -158,16 +273,28 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
               Expanded(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    return GestureDetector(
-                      onTapUp: (d) => _onTapPlotTapUp(d, constraints.biggest, frame),
-                      child: CustomPaint(
-                        size: constraints.biggest,
-                        painter: _SpectrumPainter(
-                          frame: frame,
-                          channelBandwidthHz: widget.channelBandwidthHz,
-                          history: _history,
-                          persistence: widget.persistence,
-                          fixedMarksHz: widget.fixedMarksHz,
+                    final plotSize = constraints.biggest;
+                    return KeyboardListener(
+                      focusNode: _plotFocus,
+                      onKeyEvent: (e) => _handleKey(e, plotSize, frame),
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTapUp: (d) => _onPlotTapUp(d, plotSize, frame),
+                        onHorizontalDragStart: (d) =>
+                            _onDragStart(d, plotSize, frame),
+                        onHorizontalDragUpdate: (d) =>
+                            _onDragUpdate(d, plotSize, frame),
+                        onHorizontalDragEnd: (d) => _draggingMark = false,
+                        child: CustomPaint(
+                          size: plotSize,
+                          painter: _SpectrumPainter(
+                            frame: frame,
+                            channelBandwidthHz: widget.channelBandwidthHz,
+                            history: _history,
+                            persistence: widget.persistence,
+                            fixedMarksHz: widget.fixedMarksHz,
+                            selectedMarkHz: _selectedMarkHz,
+                          ),
                         ),
                       ),
                     );
@@ -251,6 +378,32 @@ double persistenceLayerAlpha(SpectrumPersistence mode, int age) {
   return AppTokens.persistenceBaseAlpha *
       math.pow(mode.decay, age).toDouble();
 }
+
+/// 频率刻度自适应候选步长（Hz，从小到大）。频率刻度条与固定标记拖动/键盘
+/// 微调共用同一「当前缩放粒度」，保证标记对齐网格、步长可复算。
+const List<double> kFreqStepCandidatesHz = <double>[
+  1e5,
+  2.5e5,
+  5e5,
+  1e6,
+  2e6,
+  5e6,
+  1e7,
+];
+
+/// 给定扫宽与绘图宽度，选出相邻刻度间距 >= [minTickGapPx] 的最细步长（Hz）。
+/// 固定标记拖动 snap 与键盘 ←/→ 微调均取此值，实现「步进取当前缩放粒度」。
+double adaptiveFreqStepHz(double spanHz, double plotWidthPx,
+    {double minTickGapPx = 64.0}) {
+  for (final s in kFreqStepCandidatesHz) {
+    if (s / spanHz * plotWidthPx >= minTickGapPx) return s;
+  }
+  return kFreqStepCandidatesHz.last;
+}
+
+/// 把频率 snap 到最近的步长整数倍。
+double snapToFreqStep(double hz, double stepHz) =>
+    stepHz <= 0 ? hz : (hz / stepHz).round() * stepHz;
 
 /// 由一帧 db 构建频谱轨迹的描边 Path 与填充 Path（含 3-tap 轻量平滑）。
 /// 当前帧与余晖历史帧共用同一函数，保证历史叠加不破坏既有轨迹几何。
@@ -348,12 +501,16 @@ class _SpectrumPainter extends CustomPainter {
   /// 固定频率标记（Hz），琥珀虚线竖线。
   final List<double> fixedMarksHz;
 
+  /// 当前选中的标记（Hz）：实线高亮 + 顶部手柄，与普通虚线/ VFO/峰值区分。
+  final double? selectedMarkHz;
+
   _SpectrumPainter({
     required this.frame,
     required this.channelBandwidthHz,
     this.history = const <SpectrumFrame>[],
     this.persistence = SpectrumPersistence.off,
     this.fixedMarksHz = const <double>[],
+    this.selectedMarkHz,
   });
 
   @override
@@ -383,25 +540,45 @@ class _SpectrumPainter extends CustomPainter {
       grid,
     );
 
-    // ---- 固定频率标记（琥珀细虚线竖线，仅落在当前扫宽内才画）----
-    // 与 VFO（accentHover 中央实线 + 三角）、峰值（accent 三角）刻意用不同色/线型区分。
+    // ---- 固定频率标记（仅落在当前扫宽内才画）----
+    // 三层视觉：普通=琥珀细虚线；选中=琥珀实线+顶部手柄（高亮）；
+    // VFO=accentHover 中央实线+三角，峰值=accent 三角，刻意用色/线型区分。
     {
       final span = frame.sampleRateHz;
       final leftF = frame.centerFreqHz - span / 2;
       for (final f in fixedMarksHz) {
         final x = (f - leftF) / span * size.width;
         if (x < 0 || x > size.width) continue;
-        const dashW = 4.0;
-        const gapW = 3.0;
-        final mark = Paint()
-          ..color = AppTokens.warning.withValues(alpha: 0.55)
-          ..strokeWidth = 1;
-        for (var dy = 0.0; dy < size.height; dy += dashW + gapW) {
+        final selected =
+            selectedMarkHz != null && (f - selectedMarkHz!).abs() < 1.0;
+        if (selected) {
+          // 选中：实线 + 顶部小手柄，触达/视觉都更重。
           canvas.drawLine(
-            Offset(x, dy),
-            Offset(x, (dy + dashW).clamp(0.0, size.height)),
-            mark,
+            Offset(x, 0),
+            Offset(x, size.height),
+            Paint()
+              ..color = AppTokens.warning
+              ..strokeWidth = 1.6,
           );
+          final handle = Path()
+            ..moveTo(x - 4, 0)
+            ..lineTo(x + 4, 0)
+            ..lineTo(x, 7)
+            ..close();
+          canvas.drawPath(handle, Paint()..color = AppTokens.warning);
+        } else {
+          const dashW = 4.0;
+          const gapW = 3.0;
+          final mark = Paint()
+            ..color = AppTokens.warning.withValues(alpha: 0.55)
+            ..strokeWidth = 1;
+          for (var dy = 0.0; dy < size.height; dy += dashW + gapW) {
+            canvas.drawLine(
+              Offset(x, dy),
+              Offset(x, (dy + dashW).clamp(0.0, size.height)),
+              mark,
+            );
+          }
         }
       }
     }
@@ -604,6 +781,7 @@ class _SpectrumPainter extends CustomPainter {
       oldDelegate.channelBandwidthHz != channelBandwidthHz ||
       oldDelegate.persistence != persistence ||
       oldDelegate.history.length != history.length ||
+      oldDelegate.selectedMarkHz != selectedMarkHz ||
       !listEquals(oldDelegate.fixedMarksHz, fixedMarksHz);
 }
 
