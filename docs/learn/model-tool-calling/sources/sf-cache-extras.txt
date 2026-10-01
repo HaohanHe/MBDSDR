@@ -1,0 +1,91 @@
+# SiliconFlow 官方博客《Prompt Caching on SiliconFlow: How Cache Read Pricing Can Reduce Your API Bill》摘录（供引用）
+# ============================================================
+# 来源 URL: https://www.siliconflow.com/zh/blog/siliconflow-prompt-caching-api-costs
+# 发布日期: 2026-08-13（页面标注）
+# 抓取方式: web.fetch 在线抓取，pagination offset=0 limit=8000 续读 offset=7996 limit=8000，
+#          end_offset=10359 = total_length（全文一次读完，完整度 100%）
+# 抓取日期: 2026-10-01
+# 性质说明: 这是 SiliconFlow 官方博客（technical guide），不是 API 参考页；
+#          API 参考页对缓存计费字段的定义见 sf-chat-completions-api.txt:491-503。
+#          本文件下方为关键段落逐节转录/压缩，引用格式 sources/sf-cache-extras.txt:<行号>
+# ============================================================
+
+# §What Is Prompt Caching?
+# Prompt caching allows previously processed input to be reused when the same stable
+# context appears in later requests.（举例：客服 chatbot 10,000-token system prompt 每次都带，
+# 其中含 Response rules / Product policies / Tool definitions / Safety instructions / Formatting examples）
+# Prompt caching does NOT reuse a previous answer. The model still generates a new response.
+# Only eligible repeated input processing is reused.
+
+# §Standard Input / Cached Input / Output Tokens
+# Standard input tokens（全价）：新 user message、未命中的 system 指令、对话历史、检索文档、
+#   源代码、Tool results、变化或新增的上下文。
+# "Repeated text does not automatically receive cached-input pricing. Billing depends on
+#  whether the repeated section qualifies for and uses the available cache."（自动但需符合条件）
+# Cached input tokens = eligible input tokens processed through a prompt cache；
+#   模型页叫 "Cache Read"，定价页叫 "Cached Input"；cache read pricing is model-specific。
+# As of July 15, 2026 GLM-5.2 Serverless 价格（每 1M tokens）：
+#   Standard input $1.302；Cached input $0.26；Output $4.092。（Cached ≈ 标准输入的 80% 折扣）
+# Output tokens 始终按正常输出价计费，缓存不降输出价。
+
+# §Why Cache Hit Rate Matters
+# OpenRouter Effective Pricing 快照（2026-08-25）：SiliconFlow 在 GLM-5.2 提供商中
+#   one-day token share 42.5% 第一，cache hit rate 91.8%。
+# 另一处 Q2 提到 2026-07-30 快照 Kimi K2.7 Code cache hit rate 93.2%。
+# 缓存折扣 ≠ 账单降幅：账单还含首次处理、新增输入、cache miss、生成输出、重试、额外 Agent 步骤、
+#   Tool-call 响应。80% 的缓存折扣 ≠ 总账单降 80%。
+
+# §Where It Saves Most
+# 1) 重复 system prompt 的 chatbot（8,000 稳定指令 + 2,000 历史 + 100 新消息）：
+#    稳定前缀随对话推进仍可复用，最近消息继续按标准输入价。
+# 2) Coding Agent 重复项目上下文（repo 指令 / 架构笔记 / 编码规范 / 依赖 / 工具定义 /
+#    文件摘要 / 测试要求）：把稳定项目上下文放在 prompt 开头，当前任务、选中文件、终端输出、
+#    报错放在后面。上下文窗口大 ≠ Agent 更高效；每步塞整个 repo 只会加成本和噪声。
+# 3) 长文档 / 会话式 RAG：同一文档反复提问收益大；每次检索不同段落则收益小。
+
+# §How to Structure Prompts for Better Cache Reuse（前缀顺序设计，原文建议）
+# "Prompt stability is important. Frequent changes to the beginning of a request can reduce
+#  the amount of reusable context."
+# 推荐顺序（稳定在前、易变在后）：
+#   1. System instructions
+#   2. Tool definitions
+#   3. Fixed examples
+#   4. Persistent project or document context
+#   5. Recent conversation history
+#   6. Current user message
+#   7. Live data and tool output
+# 避免频繁改动：message order / tool definitions / instruction wording / example formatting /
+#   document ordering / whitespace and generated metadata。
+# 动态信息（timestamps / session variables / user IDs / search results / tool responses）放后面。
+# "Cache behavior can vary by model and workload. Test representative production requests
+#  instead of assuming that repeated text will always use the cache read rate."
+
+# §How to Estimate Savings（公式，原文）
+# 变量：N=请求数；R=每请求可复用输入 token；U=每请求新增/变化 token；O=每请求输出 token；
+#       Pi=标准输入价/M；Pc=缓存输入价/M；Po=输出价/M。
+# 无缓存总成本 = N × [(R + U) × Pi + O × Po] ÷ 1,000,000
+# 理想缓存估计 = [(R + U) × Pi + (N-1) × (R × Pc + U × Pi) + N × O × Po] ÷ 1,000,000
+# （假设首请求全价，后续请求的可复用部分全部命中缓存读价）
+# 节省 = (N-1) × R × (Pi - Pc) ÷ 1,000,000
+# 例（GLM-5.2，1000 请求，R=20000，U=1000，O=500）：
+#   全价 $29.39 → 理想缓存 $8.57 → 省 $20.82（总账单 -70.8%，因新输入+输出仍全价）。
+
+# §When It May Not Save Much
+# 短 system prompt / 一次性请求 / 低请求量 / 每请求 prompt 大改 / RAG 每次换文档 /
+# 工具定义频繁修改 / 低命中率 / 输出 token 主导的工作流。
+# 缓存不能修复低效的上下文选择：不相关文档按缓存价计费照样烧 token 且降质量。
+# 先删冗余上下文，再对真正需要跨请求保留的内容用缓存。
+
+# §Common Questions
+# Q2 "Does SiliconFlow Cache Every Repeated Prompt?" —— "No. Repeated text does not
+#     guarantee a cache hit. Results depend on the model, prompt structure, prefix
+#     stability, and cache eligibility."（无 TTL、无开关字段说明——本页未提）
+# Q3 "Are Output Tokens Included in Cache Read Pricing?" —— "No." 输出始终标准输出价。
+# Q5 实际节省为何低于缓存折扣：折扣只覆盖命中的输入；新输入、输出、首次处理、miss、重试、
+#    额外 Agent 调用都照常计费。
+
+# §全文未提及的内容（如实标注）
+# - 缓存 TTL（存活时间）：本页未给出任何数字。
+# - 是否需要客户端开关：本页未提供任何 request body 缓存开关字段；命中与否自动决定
+#   （"does not automatically receive cached-input pricing" 指计费资格自动判定，非客户端开关）。
+# - 错误码 / 重试 / 限流数值：本页未提。

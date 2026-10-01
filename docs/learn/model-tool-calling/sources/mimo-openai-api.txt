@@ -1,0 +1,276 @@
+# ============================================================
+# MiMo OpenAI Chat Completions API 兼容 — 在线抓取正文落盘
+# 主来源: https://mimo.mi.com/docs/api/chat/openai-api  (抓取于 2026-10-01, 全量 3811 字符)
+# 补充来源1: https://mimo.mi.com/docs/en-US/quick-start/faq/api-integration (函数调用示例 + thinking+tool 稳定性警告)
+# 补充来源2: https://mimo.mi.com/docs/zh-CN/usage-guide/passing-back-reasoning_content (role=tool 回传 + 多轮工具调用完整示例)
+# 本地壳文件: /home/user/Doubao/chats/38438160041798146/repos/model-docs/xiaomi-mimo/api_chat_openai-api.html (47行, SPA空壳, 无正文)
+# ============================================================
+
+# OpenAI Chat Completions API 兼容
+
+MiMo-TTS 系列模型的协议文档请参考 语音合成（MiMo-TTS 系列）- OpenAI API 兼容。
+
+## 请求地址
+
+https://api.xiaomimimo.com/v1/chat/completions
+
+## 请求头
+
+接口支持以下两种认证方式，请选择其中一种添加到请求头中：
+
+API Key 鉴权 Bearer 鉴权
+
+api-key: $MIMO_API_KEY
+Content-Type: application/json
+
+## 请求体
+
+- messages array 必选 — 对话的消息列表。
+  包含: Developer message / System message / User message / Assistant message / Tool message。
+  - messages.content string | array 必选 — 开发者消息的内容。
+  - messages.role string 必选 — 可选值: developer
+  - messages.name string — 参与者的可选名称。
+
+- model string 必选 — 可选值: mimo-v2.6-flash, mimo-v2.6-pro, mimo-v2.6-pro-ultraspeed, mimo-v2.5-pro, mimo-v2.5
+
+- frequency_penalty number | null 默认 0 — 范围 [-2.0, 2.0]
+
+- max_completion_tokens integer | null — 可见输出 + 推理 token 总数上限。
+  mimo-v2.6-flash/pro/ultraspeed/v2.5-pro 默认 131072; mimo-v2.5 默认 32768。范围 [1, 131072]
+
+- presence_penalty number | null 默认 0 — 范围 [-2.0, 2.0]
+
+- response_format object — 响应格式。response_format.type string 必选, 仅为 text。
+
+- stop string | array | null 默认 null — 最多 4 个停止序列。
+
+- stream boolean | null 默认 false — true 时通过 SSE 流式传输。
+
+- thinking object — 控制思维链。
+  注意：在思考模式下的多轮工具调用过程中，模型会在返回 tool_calls 字段的同时返回 reasoning_content 字段。
+  若要继续对话，建议在后续每次请求的 messages 数组中保留所有历史 reasoning_content，以获得最佳表现。
+  在思考模式下，上述全部模型不支持自定义 temperature 和 top_p 参数，强制 1.0 和 0.95。
+  - thinking.type string 必选 — 可选值: enabled, disabled。默认 enabled。
+
+- temperature number — 范围 [0, 1.5]。思考模式下强制 1.0。
+
+- tool_choice string — 控制模型如何选择工具。
+  注意：当 tool_choice 传入非 auto 值时，后端会默认移除该字段，模型响应行为仍等同于 auto 模式
+  （该逻辑保留调整的可能性）。可选值: auto。
+
+- tools array — 模型可能调用的工具列表。目前仅支持函数作为工具。
+  注意：在思考模式下的多轮工具调用过程中，模型会在返回 tool_calls 字段的同时返回 reasoning_content 字段。
+  若要继续对话，建议在后续每次请求的 messages 数组中保留所有历史 reasoning_content，以获得最佳表现。
+  - tools.type string 必选 — 工具类型，目前仅支持 function。
+  - tools.function object 必选
+    - tools.function.name string 必选 — 必须由 a-z/A-Z/0-9 组成，或含下划线(_)和连字符(-)，最大长度 64。
+    - tools.function.description string — 函数功能描述。
+    - tools.function.parameters object — JSON Schema 格式参数描述。省略则参数列表为空。
+    - tools.function.strict boolean 默认 false — 严格模式遵循。true 时仅支持 JSON Schema 子集。
+
+- top_p number 默认 0.95 — 范围 [0.01, 1.0]。思考模式下强制 0.95。
+
+## Chat 响应对象（非流式输出）
+
+- choices array
+  - choices.finish_reason string — stop / length / tool_calls / content_filter / repetition_truncation
+  - choices.index integer
+  - choices.message object
+    - choices.message.content string
+    - choices.message.reasoning_content string — 最终答案之前的推理内容
+    - choices.message.role string
+    - choices.message.tool_calls array — 函数调用启动后返回待调用工具及参数。可包含一个或多个。
+      - choices.message.tool_calls.id string — 工具调用 ID
+      - choices.message.tool_calls.type string — 仅支持 function
+      - choices.message.tool_calls.function object
+        - choices.message.tool_calls.function.name string — 函数名
+        - choices.message.tool_calls.function.arguments string — 调用参数，格式为 JSON。
+          【原文警告】请注意，模型生成的内容并非并非总能保证是有效的 JSON，且可能会虚构出函数模式中未定义的参数。
+          在调用函数之前，请在代码中对这些参数进行验证。
+    - choices.message.annotations array — 联网搜索引用网址注释
+
+- created integer — Unix 时间戳(秒)
+- id string — 响应唯一标识符
+- model string
+- object string — 仅为 chat.completion
+- usage object | null
+  - usage.completion_tokens / prompt_tokens / total_tokens
+  - usage.completion_tokens_details.reasoning_tokens
+  - usage.prompt_tokens_details.cached_tokens / audio_tokens / image_tokens / video_tokens
+
+## Chat 响应 chunk 对象（流式输出）
+
+- choices array
+  - choices.delta object
+    - choices.delta.content string
+    - choices.delta.reasoning_content string — 推理内容增量
+    - choices.delta.role string
+    - choices.delta.tool_calls array
+      - choices.delta.tool_calls.index integer — 在 tool_calls 列表中的索引，从 0 开始
+      - choices.delta.tool_calls.id string
+      - choices.delta.tool_calls.type string — 仅 function
+      - choices.delta.tool_calls.function object
+        - choices.delta.tool_calls.function.name string
+        - choices.delta.tool_calls.function.arguments string — 【同上警告】不保证有效 JSON，可能虚构 schema 外参数
+  - choices.finish_reason string | null
+  - choices.index integer
+- object string — 仅为 chat.completion.chunk
+- usage object | null (最后一个 chunk 携带)
+
+## 官方示例 — 基础调用（curl）
+
+curl --location --request POST 'https://api.xiaomimimo.com/v1/chat/completions' \
+--header "api-key: $MIMO_API_KEY" \
+--header "Content-Type: application/json" \
+--data-raw '{
+ "model": "mimo-v2.6-pro",
+ "messages": [
+   {"role": "system", "content": "You are MiMo, an AI assistant developed by Xiaomi. Today is date: Tuesday, December 16, 2025. Your knowledge cutoff date is December 2024."},
+   {"role": "user", "content": "please introduce yourself"}
+ ],
+ "max_completion_tokens": 1024,
+ "temperature": 1.0,
+ "top_p": 0.95,
+ "stream": false,
+ "stop": null,
+ "frequency_penalty": 0,
+ "presence_penalty": 0,
+ "thinking": {"type": "disabled"}
+}'
+
+## 官方示例 — 基础调用响应
+
+{
+    "id": "6272d55f-a84e-4664-9db1-8462899db7dc_abdfaf015d1a4623b2a4f9b99179c2f9",
+    "choices": [{
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+            "content": "Hi there! I'm MiMo, a friendly AI assistant created by the Xiaomi LLM Core Team. Nice to meet you! How can I help you today?",
+            "role": "assistant",
+            "tool_calls": null
+        }
+    }],
+    "created": 1790006669,
+    "model": "mimo-v2.6-pro",
+    "object": "chat.completion",
+    "usage": {
+        "completion_tokens": 34, "prompt_tokens": 57, "total_tokens": 91,
+        "completion_tokens_details": {"reasoning_tokens": 0},
+        "prompt_tokens_details": {"cached_tokens": 0}
+    }
+}
+
+更新时间: 2026 年 09 月 20 日
+
+# ============================================================
+# 补充来源1: FAQ api-integration — 函数调用请求示例 + 稳定性警告
+# URL: https://mimo.mi.com/docs/en-US/quick-start/faq/api-integration
+# ============================================================
+
+## 函数调用请求示例（FAQ 提供，主页面"函数调用"标签页内容未在静态HTML中）
+
+curl --location --request POST 'https://api.xiaomimimo.com/v1/chat/completions' \
+--header "api-key: $MIMO_API_KEY" \
+--header "Content-Type: application/json" \
+--data-raw '{
+ "messages": [
+   {"role": "assistant", "content": "Hello! I am MiMo.",
+    "reasoning_content": "Okay, the user just asked me to introduce myself. That is a pretty straightforward request, but I should think about why they are asking this."},
+   {"role": "user", "content": "What is the weather like in Hebei?"}
+ ],
+ "model": "mimo-v2.5-pro",
+ "max_completion_tokens": 1024,
+ "temperature": 1.0,
+ "stream": false,
+ "tools": [
+   {
+     "type": "function",
+     "function": {
+       "name": "get_current_weather",
+       "description": "Get the current weather in a given location",
+       "parameters": {
+         "type": "object",
+         "properties": {
+           "location": {"type": "string", "description": "The city and state, e.g. San Francisco, CA"},
+           "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
+         },
+         "required": ["location"]
+       }
+     }
+   }
+ ],
+ "tool_choice": "auto"
+}'
+
+## 【原文】tool_calls 混入 reasoning_content 的警告（FAQ）
+
+"The appearance of tool_calls in the reasoning content indicates instability and incomplete output
+caused by the model having thinking enabled when calling tool. It is recommended to disable thinking
+when calling tool calls and to adjust the settings according to Model Hyperparameters to achieve a
+more stable and better user experience."
+
+中文版（zh-CN FAQ）:
+"tool_calls 出现在 reasoning_content 是模型在调 tool 的时候开启 thinking 导致的不稳定，输出不完整；
+建议调用 tool calls 的时候关闭 thinking，并且参考 模型超参 进行设置，来获得更稳定且更好的使用体验。"
+
+## OpenAI vs Anthropic 接口差异（FAQ）
+
+- OpenAI 接口 /v1/chat/completions 遵循 OpenAI 格式，含 developer/system/user/assistant 角色
+- Anthropic 接口 /anthropic/v1/messages 遵循 Claude 格式，有独立 system 参数
+
+# ============================================================
+# 补充来源2: passing-back-reasoning_content — role=tool 回传 + 多轮工具调用完整示例
+# URL: https://mimo.mi.com/docs/zh-CN/usage-guide/passing-back-reasoning_content
+# ============================================================
+
+## 【原文】多轮对话回传要求（硬性）
+
+"在 Agent 类产品的多轮会话中开启深度思考，且历史会话中存在工具调用时，后续所有 user 交互轮次中
+回传的 assistant 如果包含了工具调用，必须完整回传 reasoning_content 字段，否则 API 将返回 400 错误。
+历史 reasoning_content 一旦缺失，模型上下文将不完整，可能表现出指令遵循下降，幻觉增多等现象。"
+
+受影响 Agent 产品: OpenAI 兼容协议 → TRAE, Cursor, Roo Code, Codex, GitHub Copilot CLI, Zed, AutoGen, Goose
+
+## 多轮工具调用完整循环示例（Python SDK）
+
+tools 定义两个函数: get_current_weather(location, unit) 和 get_time(timezone)。
+
+run_turn 循环:
+1. 调 client.chat.completions.create(model, messages, tools, extra_body={thinking:{type:enabled}})
+2. assistant_message = response.choices[0].message; messages.append(assistant_message)
+3. if not assistant_message.tool_calls: break  (最终答案)
+4. for tool_call in assistant_message.tool_calls:
+     func_name = tool_call.function.name
+     func_args = json.loads(tool_call.function.arguments)
+     result = TOOL_MAP[func_name](**func_args)
+     messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": result})
+
+## 并行工具调用行为（示例输出证实）
+
+第一轮 Request 1-1: 模型同时返回两个 tool_calls:
+  - get_current_weather(arguments='{"location": "Beijing"}', id='call_01e402113df94ebfb85e3056')
+  - get_time(arguments='{"timezone": "Asia/Shanghai"}', id='call_f2bf1ab9f73842baa64e93d3')
+模型 reasoning: "I can call both in parallel."
+
+即: tool_calls 数组可含多个对象，模型支持并行函数调用；客户端需逐个执行并各自以 role=tool + tool_call_id 回传。
+
+## role=tool 回传格式（示例逐字）
+
+messages.append({
+    "role": "tool",
+    "tool_call_id": tool_call.id,   // 必须与 assistant_message.tool_calls[i].id 严格匹配
+    "content": result               // 工具执行结果字符串
+})
+
+## 流式 reasoning_content 格式（SSE chunk）
+
+首先 delta.reasoning_content 逐步返回思考过程，思考完成后再 delta.content 逐步输出最终回答。
+首包 delta: {"content":"","role":"assistant","tool_calls":null,"reasoning_content":null}
+后续: {"content":null,"role":null,"tool_calls":null,"reasoning_content":"..."}
+最后: {"content":null,"reasoning_content":null,"finish_reason":"stop"}
+usage 在最后一个 chunk (choices:[]) 携带。
+
+## thinking 字段非 OpenAI 标准
+
+"thinking 字段并非 OpenAI 标准参数。通过 OpenAI Python SDK 传入思考相关参数时，需将其置于 extra_body 中传递。"

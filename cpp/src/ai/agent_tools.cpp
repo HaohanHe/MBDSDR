@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "agent_tools.h"
+#include "tool_schema.h"
 #include "dsp/spectrum_engine.h"
 
 #include <QSet>
@@ -37,86 +38,12 @@ QString gatedToolResult(const QString& toolName) {
 }
 
 QList<ToolDef> toolDefs() {
-    QList<ToolDef> tools;
-
-    ToolDef tune;
-    tune.name = "tune_frequency";
-    tune.description = "Tune the receiver to a center frequency in Hz.";
-    tune.parameters = QJsonObject{
-        {"type", "object"},
-        {"properties", QJsonObject{
-            {"freq_hz", QJsonObject{
-                {"type", "number"},
-                {"description", "Center frequency in Hz, e.g. 98500000 for 98.5 MHz"}
-            }}
-        }},
-        {"required", QJsonArray{"freq_hz"}}
-    };
-    tools.append(tune);
-
-    ToolDef mode;
-    mode.name = "set_mode";
-    mode.description = "Set demodulation mode.";
-    mode.parameters = QJsonObject{
-        {"type", "object"},
-        {"properties", QJsonObject{
-            {"mode", QJsonObject{
-                {"type", "string"},
-                {"enum", QJsonArray{"AM", "NFM", "WFM", "USB", "LSB", "CW"}}
-            }}
-        }},
-        {"required", QJsonArray{"mode"}}
-    };
-    tools.append(mode);
-
-    ToolDef rec;
-    rec.name = "start_recording";
-    rec.description = "Start recording raw IQ to SigMF file.";
-    rec.parameters = QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}};
-    tools.append(rec);
-
-    ToolDef stop;
-    stop.name = "stop_recording";
-    stop.description = "Stop recording.";
-    stop.parameters = QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}};
-    tools.append(stop);
-
-    ToolDef scan;
-    scan.name = "scan_band";
-    scan.description = "Scan a frequency band and return the peak signal.";
-    scan.parameters = QJsonObject{
-        {"type", "object"},
-        {"properties", QJsonObject{
-            {"low_hz", QJsonObject{{"type", "number"}, {"description", "Start frequency Hz"}}},
-            {"high_hz", QJsonObject{{"type", "number"}, {"description", "End frequency Hz"}}},
-            {"step_hz", QJsonObject{{"type", "number"}, {"description", "Step size Hz (default 200k)"}}}
-        }},
-        {"required", QJsonArray{"low_hz", "high_hz"}}
-    };
-    tools.append(scan);
-
-    ToolDef bw;
-    bw.name = "set_bandwidth";
-    bw.description = "Set channel filter bandwidth in Hz.";
-    bw.parameters = QJsonObject{
-        {"type", "object"},
-        {"properties", QJsonObject{
-            {"bandwidth_hz", QJsonObject{
-                {"type", "number"},
-                {"description", "Filter bandwidth in Hz, e.g. 8000 for AM, 12500 for NFM, 200000 for WFM"}
-            }}
-        }},
-        {"required", QJsonArray{"bandwidth_hz"}}
-    };
-    tools.append(bw);
-
-    ToolDef st;
-    st.name = "get_status";
-    st.description = "Return current receiver state: frequency, mode, bandwidth, sample rate.";
-    st.parameters = QJsonObject{{"type", "object"}, {"properties", QJsonObject{}}};
-    tools.append(st);
-
-    return tools;
+    // Single source of truth for the 7 SDR tools: the declarative registry
+    // (M1) renders the JSON Schema WITH numeric bounds (min/max from tokens.h)
+    // and enum members. Name/description pass through verbatim, so UI copy and
+    // existing golden expectations never drift. executeTool() below is unchanged;
+    // arguments validation now happens upstream in llm_worker before dispatch.
+    return toolDefsFromSpecs(registeredToolSpecs());
 }
 
 QString executeTool(const QString& name, const QJsonObject& args,

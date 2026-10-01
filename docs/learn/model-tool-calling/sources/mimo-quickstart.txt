@@ -1,0 +1,201 @@
+# 首次调用 API
+# 来源 URL: https://mimo.mi.com/docs/quick-start/first-api-call
+# 抓取方式: web_fetch pagination(offset=0, limit=8000)，end_offset=1424 = total_length（全文一次读完）
+# 抓取日期: 2026-10-01
+# 注: 本地壳 repos/model-docs/xiaomi-mimo/quick-start_first-api-call.html 为 13KB SPA 空壳（md5 c1000a79650eeee0895cb00ca78619b3，title 仅 "Xiaomi MiMo Home"），正文以下为在线抓取。
+
+## 支持的接口类型
+
+Xiaomi MiMo API 开放平台兼容 OpenAI API 、Anthropic API 两种主流 API 格式，您可以使用现有 SDK 来使用模型推理服务。
+
+## 调用前准备
+
+### 登录 Xiaomi MiMo API 开放平台
+
+目前平台仅提供个人账号登录方式，需使用小米账号登录，如已注册过小米账号，可直接登录；若无小米账号，可访问控制台进行注册，或在 id.mi.com 提前注册。
+
+### 获取凭证
+
+支持两种使用方式，但对应的凭证获取方式不同：
+
+| 使用方式 | 说明 | 计费 | 获取方式（BASE_URL 和 API Key 均为示例） |
+|---|---|---|---|
+| 按量付费 API 调用 | 按实际使用量计费，适合轻度使用 | 实时推理 | BASE_URL: OpenAI 兼容 `https://api.xiaomimimo.com/v1`；Anthropic 兼容 `https://api.xiaomimimo.com/anthropic`。API Key 格式 `sk-xxxxx`，前往 API Keys 创建 |
+| 按量付费 API 调用 | 同上 | 批量推理 | BASE_URL: OpenAI 兼容 `https://batch-api-cn.xiaomimimo.com/v1`。API Key 格式 `sk-xxxxx`，前往批量推理获取专属 Base URL |
+| Token Plan | 固定订阅费，按套餐限量调用 | 固定订阅 | BASE_URL: OpenAI 兼容 `https://token-plan-cn.xiaomimimo.com/v1`；Anthropic 兼容 `https://token-plan-cn.xiaomimimo.com/anthropic`。API Key 格式：个人版 `tp-xxxxx`，团队版 `ttp-xxxxx`。成功订阅后前往 Token Plan 获取专属 Base URL 和 API Key |
+
+请妥善保管您的 API Key，避免泄露造成额度被盗用，建议将 API Key 配置到环境变量。
+
+## 快速接入示例
+
+可复制以下 API 示例代码，并替换 API Key 的值，即可快速调用。如使用 Token Plan 需替换 BASE_URL，并使用专属 API Key。
+
+强烈建议使用以下系统提示词，请从英文和中文版本中选择。
+
+中文：
+```
+你是MiMo（中文名称也是MiMo），是小米公司研发的AI智能助手。
+今天的日期：{date} {week}，你的知识截止日期是2024年12月。
+```
+
+英文：
+```
+You are MiMo, an AI assistant developed by Xiaomi.
+Today's date: {date} {week}. Your knowledge cutoff date is December 2024.
+```
+
+### OpenAI Chat Completions API 兼容
+
+MiMo 模型兼容 OpenAI Chat Completions 接口，支持通过 Python SDK、Curl 两种方式发起调用。
+
+Python SDK:
+
+1. 安装 OpenAI Python SDK：
+```
+# 如果运行失败，您可以将pip替换成pip3再运行
+pip install -U openai
+```
+
+2. 调用 API：
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(
+ api_key=os.environ.get("MIMO_API_KEY"),
+ base_url="https://api.xiaomimimo.com/v1"
+)
+
+completion = client.chat.completions.create(
+ model="mimo-v2.6-pro",
+ messages=[
+        {
+            "role": "system",
+            "content": "You are MiMo, an AI assistant developed by Xiaomi. Today is date: Tuesday, December 16, 2025. Your knowledge cutoff date is December 2024."
+        },
+        {
+            "role": "user",
+            "content": "please introduce yourself"
+        }
+    ],
+ max_completion_tokens=1024,
+ temperature=1.0,
+ top_p=0.95,
+ stream=False,
+ stop=None,
+ frequency_penalty=0,
+ presence_penalty=0
+)
+
+print(completion.model_dump_json())
+```
+
+### Anthropic Messages API 兼容
+
+MiMo 模型兼容 Anthropic Messages 接口，支持通过 Python SDK、Curl 两种方式发起调用。
+
+1. 安装 Anthropic Python SDK：
+```
+# 如果运行失败，您可以将pip替换成pip3再运行
+pip install -U anthropic
+```
+
+2. 调用 API：
+```python
+import os
+from anthropic import Anthropic
+
+client = Anthropic(
+ api_key=os.environ.get("MIMO_API_KEY"),
+ base_url="https://api.xiaomimimo.com/anthropic"
+)
+
+message = client.messages.create(
+ model="mimo-v2.6-pro",
+ max_tokens=1024,
+ system="You are MiMo, an AI assistant developed by Xiaomi. Today is date: Tuesday, December 16, 2025. Your knowledge cutoff date is December 2024.",
+ messages=[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "please introduce yourself"
+                }
+            ]
+        }
+    ],
+ top_p=0.95,
+ stream=False,
+ temperature=1.0,
+ stop_sequences=None
+)
+
+print(message.content)
+```
+
+### 在思考模式下进行多轮工具调用
+
+在思考模式下的多轮工具调用过程中，模型会在返回 `tool_calls` 字段的同时返回 `reasoning_content` 字段。若要继续对话，建议在后续每次请求的 `messages` 数组中保留所有历史 `reasoning_content`，以获得最佳表现。
+
+请求示例如下：
+
+```
+curl --location --request POST 'https://api.xiaomimimo.com/v1/chat/completions' \
+--header "api-key: $MIMO_API_KEY" \
+--header "Content-Type: application/json" \
+--data-raw '{
+ "messages": [
+ {
+ "role": "assistant",
+ "content": "Hello! I am MiMo.",
+ "reasoning_content": "Okay, the user just asked me to introduce myself. That is a pretty straightforward request, but I should think about why they are asking this."
+ },
+ {
+ "role": "user",
+ "content": "What is the weather like in Hebei?"
+ }
+ ],
+ "model": "mimo-v2.6-pro",
+ "max_completion_tokens": 1024,
+ "temperature": 1.0,
+ "stream": false,
+ "tools": [
+ {
+ "type": "function",
+ "function": {
+ "name": "get_current_weather",
+ "description": "Get the current weather in a given location",
+ "parameters": {
+ "type": "object",
+ "properties": {
+ "location": {
+ "type": "string",
+ "description": "The city and state, e.g. San Francisco, CA"
+ },
+ "unit": {
+ "type": "string",
+ "enum": [
+ "celsius",
+ "fahrenheit"
+ ]
+ }
+ },
+ "required": [
+ "location"
+ ]
+ }
+ }
+ }
+ ],
+ "tool_choice": "auto"
+}'
+```
+
+## 查看用量信息
+
+在用量信息页面，您可以按照日期查看、导出账号的模型 Tokens 用量及请求次数详细数据。
+
+更新时间 2026 年 09 月 22 日
+
+相关链接：欢迎使用 / 模型列表

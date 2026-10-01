@@ -12,7 +12,9 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../app/tokens.dart';
 import '../models/chat_message.dart';
+import 'tool_arguments_validator.dart';
 
 /// 请求缝：给定 url / headers / body，返回一个「按行交付」的字符串流。
 /// 默认实现走 dart:io HttpClient；测试注入 fake 即可离线。
@@ -120,11 +122,15 @@ class ToolCallDelta {
 @immutable
 class ChatCompletionChunk {
   final String? contentDelta;
+
+  /// 思维链增量（delta.reasoning_content），与 contentDelta 物理隔离、逐字累积。
+  final String? reasoningDelta;
   final List<ToolCallDelta>? toolCallDeltas;
   final String? finishReason;
 
   const ChatCompletionChunk({
     this.contentDelta,
+    this.reasoningDelta,
     this.toolCallDeltas,
     this.finishReason,
   });
@@ -136,12 +142,16 @@ class ChatCompletionChunk {
     if (firstRaw is! Map<String, dynamic>) return null;
 
     String? content;
+    String? reasoning;
     List<ToolCallDelta>? toolDeltas;
 
     final Object? deltaRaw = firstRaw['delta'];
     if (deltaRaw is Map<String, dynamic>) {
       final Object? contentRaw = deltaRaw['content'];
       if (contentRaw is String) content = contentRaw;
+
+      final Object? reasoningRaw = deltaRaw['reasoning_content'];
+      if (reasoningRaw is String) reasoning = reasoningRaw;
 
       final Object? tcsRaw = deltaRaw['tool_calls'];
       if (tcsRaw is List) {
@@ -173,6 +183,7 @@ class ChatCompletionChunk {
 
     return ChatCompletionChunk(
       contentDelta: content,
+      reasoningDelta: reasoning,
       toolCallDeltas: toolDeltas,
       finishReason: finish,
     );
@@ -223,7 +234,6 @@ class AiClient {
   static const String defaultModel = 'Qwen/Qwen2.5-7B-Instruct';
   static const String _endpoint =
       'https://api.siliconflow.cn/v1/chat/completions';
-  static const int _maxToolRounds = 6;
 
   final String apiKey;
   final String model;
@@ -238,15 +248,46 @@ class AiClient {
   })  : model = model ?? defaultModel,
         _transport = transport ?? _defaultHttpClientTransport;
 
-  // ------------------------------------------------------------- 请求体
+  // ------------------------------------------------------------- thinking 配置映射
+  /// 按模型名决定本轮是否下发 OpenAI 兼容的 thinking 参数。
+  ///
+  /// 学习笔记结论（两家方向相反但底层共识一致）：
+  ///   * DeepSeek-V3.2 / GLM-4.7 = 官方 interleaved thinking 两模型，
+  ///     工具流里开着思考并逐字保留 reasoning_content 才是稳定特性 → 恒开；
+  ///   * MiMo v2.6 系：对话轮开思考，但「开着 thinking 调 tool」是官方点名的
+  ///     不稳定信号 → 工具轮（[toolRound]=true）关思考；
+  ///   * 其余（默认 Qwen 等）：不下发 thinking 参数，走服务端默认。
+  ///
+  /// 返回 (enabled, budget)；enabled=false 时调用方不应把 thinking 键写进请求体。
+  @visibleForTesting
+  static ({bool enabled, int budget}) thinkingConfigForModel(
+    String model, {
+    required bool toolRound,
+  }) {
+    const int budget = AppTokens.kThinkingBudgetTokens;
+    if (model.contains('DeepSeek-V3.2') || model.contains('GLM-4.7')) {
+      return (enabled: true, budget: budget);
+    }
+    if (model.contains('mimo-v2.6')) {
+      // 对话轮开、工具轮关。
+      return toolRound
+          ? (enabled: false, budget: budget)
+          : (enabled: true, budget: budget);
+    }
+    return (enabled: false, budget: budget);
+  }
+
+  // ------------------------------------------------------------- OpenAI 请求体
   @visibleForTesting
   static Map<String, dynamic> buildRequestJson({
     required List<ChatMessage> messages,
     required List<AiTool> tools,
     required bool stream,
     required String model,
+    bool thinkingEnabled = false,
+    int thinkingBudget = AppTokens.kThinkingBudgetTokens,
   }) {
-    return <String, dynamic>{
+    final Map<String, dynamic> body = <String, dynamic>{
       'model': model,
       'stream': stream,
       'messages': messages.map((ChatMessage m) => m.toApiJson()).toList(),
@@ -263,6 +304,105 @@ class AiClient {
           )
           .toList(),
     };
+    // 仅在显式开启时下发；关闭/默认模型不下发，走服务端默认。
+    if (thinkingEnabled) {
+      body['enable_thinking'] = true;
+      body['thinking_budget'] = thinkingBudget;
+    }
+    return body;
+  }
+
+  // ------------------------------------------------------------- Anthropic 请求体（接口层，不接网络）
+  /// Anthropic Messages 形状映射（MiMo /anthropic/v1）：system 提为顶层参数、
+  /// tools 用 `{type:"custom", input_schema}`、消息用内容块。
+  /// 仅做形状映射，不在默认网络路径启用；便于将来切 Anthropic 通道时复用。
+  @visibleForTesting
+  static Map<String, dynamic> buildAnthropicRequestJson({
+    required List<ChatMessage> messages,
+    required List<AiTool> tools,
+    required bool stream,
+    required String model,
+  }) {
+    final StringBuffer systemBuf = StringBuffer();
+    final List<Map<String, dynamic>> outMessages = <Map<String, dynamic>>[];
+
+    for (final ChatMessage m in messages) {
+      if (m.role == ChatRole.system) {
+        if (systemBuf.isNotEmpty) systemBuf.write('\n');
+        systemBuf.write(m.content);
+        continue;
+      }
+      switch (m.role) {
+        case ChatRole.user:
+          outMessages.add(<String, dynamic>{
+            'role': 'user',
+            'content': <Map<String, dynamic>>[
+              <String, dynamic>{'type': 'text', 'text': m.content},
+            ],
+          });
+        case ChatRole.assistant:
+          final List<Map<String, dynamic>> blocks = <Map<String, dynamic>>[];
+          if (m.content.isNotEmpty) {
+            blocks.add(<String, dynamic>{'type': 'text', 'text': m.content});
+          }
+          final List<ToolCallRecord>? calls = m.toolCalls;
+          if (calls != null) {
+            for (final ToolCallRecord t in calls) {
+              blocks.add(<String, dynamic>{
+                'type': 'tool_use',
+                'id': t.id,
+                'name': t.name,
+                'input': _safeParseObject(t.argumentsJson),
+              });
+            }
+          }
+          outMessages.add(<String, dynamic>{
+            'role': 'assistant',
+            'content': blocks,
+          });
+        case ChatRole.tool:
+          // 工具结果在 Anthropic 里归并进下一条 user 消息的 tool_result 块。
+          outMessages.add(<String, dynamic>{
+            'role': 'user',
+            'content': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'type': 'tool_result',
+                'tool_use_id': m.toolCallId,
+                'content': m.content,
+              },
+            ],
+          });
+        case ChatRole.system:
+          break;
+      }
+    }
+
+    return <String, dynamic>{
+      'model': model,
+      'stream': stream,
+      if (systemBuf.isNotEmpty) 'system': systemBuf.toString(),
+      'messages': outMessages,
+      'tools': tools
+          .map(
+            (AiTool t) => <String, dynamic>{
+              'type': 'custom',
+              'name': t.name,
+              'description': t.description,
+              'input_schema': t.parameters,
+            },
+          )
+          .toList(),
+    };
+  }
+
+  static Object? _safeParseObject(String json) {
+    try {
+      final Object? decoded = jsonDecode(json);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } on FormatException {
+      // 忽略：占位为空 map，不影响形状断言。
+    }
+    return const <String, dynamic>{};
   }
 
   // ------------------------------------------------------------- SSE 行解析
@@ -290,13 +430,18 @@ class AiClient {
     final List<ChatMessage> working = List<ChatMessage>.from(history);
     int round = 0;
 
-    while (round < _maxToolRounds) {
+    while (round < AppTokens.kMaxToolRounds) {
       round++;
 
       String assistantText = '';
+      final StringBuffer reasoningBuf = StringBuffer();
       final ToolCallAccumulator accumulator = ToolCallAccumulator();
+      String? finishReason;
 
-      // 1) 发起流式请求
+      // 1) 发起流式请求。
+      //    工具轮（round>1，刚把工具结果回灌）与对话轮按模型配置决定 thinking 开关。
+      final ({bool enabled, int budget}) thinking =
+          thinkingConfigForModel(model, toolRound: round > 1);
       final Stream<String> lines;
       try {
         final Map<String, dynamic> reqJson = buildRequestJson(
@@ -304,6 +449,8 @@ class AiClient {
           tools: tools,
           stream: true,
           model: model,
+          thinkingEnabled: thinking.enabled,
+          thinkingBudget: thinking.budget,
         );
         final String body = jsonEncode(reqJson);
         final Map<String, String> headers = <String, String>{
@@ -317,7 +464,7 @@ class AiClient {
         return;
       }
 
-      // 2) 消费 SSE 流
+      // 2) 消费 SSE 流：content / reasoning_content / tool_calls 三条流分别累积。
       try {
         await for (final String line in lines) {
           final ChatCompletionChunk? chunk = parseSseDataLine(line);
@@ -327,6 +474,11 @@ class AiClient {
             assistantText += c;
             yield ChatTextEvent(c);
           }
+          final String? r = chunk.reasoningDelta;
+          if (r != null && r.isNotEmpty) {
+            reasoningBuf.write(r); // 逐字原样，禁止加工。
+          }
+          if (chunk.finishReason != null) finishReason = chunk.finishReason;
           final List<ToolCallDelta>? tcs = chunk.toolCallDeltas;
           if (tcs != null && tcs.isNotEmpty) {
             accumulator.addDeltas(tcs);
@@ -337,24 +489,28 @@ class AiClient {
         return;
       }
 
-      // 3) 这一轮是否要求调工具？
+      final String reasoningContent = reasoningBuf.toString();
+
+      // 3) 这一轮是否要求调工具？finishReason=="stop" 视为正常收尾（与 records 空等价）。
       final List<ToolCallRecord> records = accumulator.buildRecords();
-      if (records.isEmpty) {
+      if (records.isEmpty || finishReason == 'stop') {
         yield const AssistantTurnDoneEvent();
         return;
       }
 
-      // 4) 把带 tool_calls 的 assistant 消息追加进工作列表
+      // 4) 把带 tool_calls 的 assistant 消息（含逐字 reasoning）追加进工作列表。
       working.add(
         ChatMessage(
           role: ChatRole.assistant,
           content: assistantText,
+          reasoningContent: reasoningContent,
           time: DateTime.now(),
           toolCalls: records,
         ),
       );
 
-      // 5) 逐个执行工具，把结果以 tool 角色回灌
+      // 5) 逐个执行工具，把结果以 tool 角色回灌。
+      //    执行前先按 schema 校验 arguments：失败不调用 execute，错误 JSON 直接回灌。
       for (final ToolCallRecord rec in records) {
         yield ToolCallStartedEvent(
           name: rec.name,
@@ -370,7 +526,13 @@ class AiClient {
           } else if (parsed is! Map<String, dynamic>) {
             result = 'Error: arguments is not a JSON object.';
           } else {
-            result = await tool.execute(parsed);
+            final ValidationResult v =
+                validateToolArguments(parsed, tool.parameters);
+            if (!v.ok) {
+              result = validationErrorToToolResult(rec.name, v);
+            } else {
+              result = await tool.execute(parsed);
+            }
           }
         } catch (e) {
           result = 'Error executing tool "${rec.name}": ${_friendlyError(e)}';
@@ -390,7 +552,7 @@ class AiClient {
     }
 
     yield const AiErrorEvent(
-        'Reached max tool-call rounds ($_maxToolRounds) without a final answer.');
+        'Reached max tool-call rounds (${AppTokens.kMaxToolRounds}) without a final answer.');
   }
 
   AiTool? _findTool(String name) {

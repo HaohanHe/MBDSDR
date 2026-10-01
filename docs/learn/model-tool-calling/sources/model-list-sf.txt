@@ -1,0 +1,168 @@
+# ============================================================
+# 硅基流动 (SiliconFlow) 模型清单 — 在线抓取落盘
+# ============================================================
+# 主来源: https://docs.siliconflow.com/cn/api-reference/chat-completions/chat-completions
+#   抓取于 2026-10-01, web.fetch pagination(offset=0, limit=10000), end_offset=1955=total_length (全文读完)
+#   该页 Body.model 字段为 enum<string>，列出全部可在 /v1/chat/completions 使用的 LLM 模型 ID。
+# 补充来源1: https://docs.siliconflow.com/en/userguide/capabilities/reasoning
+#   (2026-10-01 抓取, total_length=1686) — 推理模型清单 + 上下文/输出/思考长度表
+# 补充来源2: sources/sf-interleaved-thinking.txt (DeepSeek V3.2 / GLM-4.7 支持 interleaved thinking)
+# 补充来源3: sources/sf-chat-completions-api.txt (reasoning_effort 仅 V4/V4-Flash/GLM-5.2)
+# 完整性说明:
+#   - 本文件 = API 参考页 model enum 全文逐字转录 + reasoning 页长度表。
+#   - 「哪些模型支持 function calling」官方指引是模型广场 https://cloud.siliconflow.cn/models?tags=Tools
+#     (需登录控制台，本笔记未登录，无法逐模型确认 FC 开关)；FC 支持性以下文「旁证」列标注。
+#   - 「Pro/」前缀模型 (如 Pro/deepseek-ai/DeepSeek-V4, Pro/zai-org/GLM-5.2) 在 reasoning_effort 原文中出现，
+#     但不在本 enum 列表内，推断为 Pro 付费套餐专属别名，未列入下方 enum 清单。
+# ============================================================
+
+# §一、LLM 模型 enum (POST /v1/chat/completions 的 model 可选值，逐字转录)
+# 来源: docs.siliconflow.com/cn/api-reference/chat-completions/chat-completions §Body.model enum<string>
+#
+# deepseek-ai 系列:
+#   deepseek-ai/DeepSeek-R1
+#   deepseek-ai/DeepSeek-V3
+#   deepseek-ai/DeepSeek-V3.1
+#   deepseek-ai/DeepSeek-V3.1-Terminus
+#   deepseek-ai/DeepSeek-V3.2-Exp
+#   deepseek-ai/DeepSeek-V3.2
+#   deepseek-ai/deepseek-vl2          (VLM)
+#   deepseek-ai/DeepSeek-V4-Flash
+#   deepseek-ai/DeepSeek-V4-Pro
+# nex-agi:
+#   nex-agi/DeepSeek-V3.1-Nex-N1
+# baidu:
+#   baidu/ERNIE-4.5-300B-A47B
+# THUDM / zai-org (GLM 系列):
+#   THUDM/GLM-4-32B-0414
+#   THUDM/GLM-4-9B-0414
+#   zai-org/GLM-4.5
+#   zai-org/GLM-4.5-Air
+#   zai-org/GLM-4.5V                  (VLM)
+#   zai-org/GLM-5
+#   zai-org/GLM-5.1
+#   zai-org/GLM-4.7
+#   zai-org/GLM-4.6
+#   zai-org/GLM-4.6V                  (VLM)
+#   zai-org/GLM-5V-Turbo              (VLM)
+#   THUDM/GLM-Z1-32B-0414
+#   THUDM/GLM-Z1-9B-0414
+# tencent (混元):
+#   tencent/Hunyuan-A13B-Instruct
+#   tencent/Hunyuan-MT-7B
+#   tencent/Hy3-preview
+# moonshotai (Kimi):
+#   moonshotai/Kimi-K2.5
+#   moonshotai/Kimi-K2.6
+#   moonshotai/Kimi-K2-Instruct
+#   moonshotai/Kimi-K2-Instruct-0905
+#   moonshotai/Kimi-K2-Thinking
+# inclusionAI (Ling/Ring):
+#   inclusionAI/Ling-flash-2.0
+#   inclusionAI/Ling-mini-2.0
+#   inclusionAI/Ring-flash-2.0
+# meta-llama:
+#   meta-llama/Meta-Llama-3.1-8B-Instruct
+# MiniMaxAI:
+#   MiniMaxAI/MiniMax-M2.5
+#   MiniMaxAI/MiniMax-M2.1
+# Qwen 系列 (通义千问):
+#   Qwen/Qwen2.5-14B-Instruct
+#   Qwen/Qwen2.5-32B-Instruct
+#   Qwen/Qwen2.5-72B-Instruct
+#   Qwen/Qwen2.5-72B-Instruct-128K
+#   Qwen/Qwen2.5-7B-Instruct
+#   Qwen/Qwen2.5-VL-7B-Instruct       (VLM)
+#   Qwen/Qwen3-14B
+#   Qwen/Qwen3-235B-A22B
+#   Qwen/Qwen3-235B-A22B-Instruct-2507
+#   Qwen/Qwen3-235B-A22B-Thinking-2507
+#   Qwen/Qwen3-30B-A3B-Instruct-2507
+#   Qwen/Qwen3-30B-A3B-Thinking-2507
+#   Qwen/Qwen3-32B
+#   Qwen/Qwen3-8B
+#   Qwen/Qwen3-Coder-30B-A3B-Instruct
+#   Qwen/Qwen3-Coder-480B-A35B-Instruct
+#   Qwen/Qwen3-Next-80B-A3B-Instruct
+#   Qwen/Qwen3-Next-80B-A3B-Thinking
+#   Qwen/Qwen3-Omni-30B-A3B-Captioner
+#   Qwen/Qwen3-Omni-30B-A3B-Instruct
+#   Qwen/Qwen3-Omni-30B-A3B-Thinking
+#   Qwen/Qwen3.5-122B-A10B
+#   Qwen/Qwen3.5-27B
+#   Qwen/Qwen3.5-35B-A3B
+#   Qwen/Qwen3.5-397B-A17B
+#   Qwen/Qwen3.5-9B
+#   Qwen/Qwen3.6-27B
+#   Qwen/Qwen3.6-35B-A3B
+# ByteDance-Seed:
+#   ByteDance-Seed/Seed-OSS-36B-Instruct
+# google (Gemma):
+#   google/gemma-4-26B-A4B-it
+#   google/gemma-4-31B-it
+# openai (gpt-oss):
+#   openai/gpt-oss-120b
+#   openai/gpt-oss-20b
+
+# §二、enable_thinking 参数支持的模型 (原文逐字清单)
+# 来源: 同上页 §Body.enable_thinking
+# "Switches between thinking and non-thinking modes. Default is True. This field supports the following models:"
+#   - Qwen/Qwen3-8B
+#   - Qwen/Qwen3-14B
+#   - Qwen/Qwen3-32B
+#   - Qwen/Qwen3-30B-A3B            (原文拼写 "wen/Qwen3-30B-A3B"，疑为 Qwen/Qwen3-30B-A3B 系列)
+#   - Qwen/Qwen3-235B-A22B
+#   - tencent/Hunyuan-A13B-Instruct
+#   - zai-org/GLM-5V-Turbo
+#   - zai-org/GLM-4.6V
+#   - zai-org/GLM-4.5V
+#   - deepseek-ai/DeepSeek-V3.1
+#   - deepseek-ai/DeepSeek-V3.1-Terminus
+#   - deepseek-ai/DeepSeek-V3.2-Exp
+#   - deepseek-ai/DeepSeek-V3.2
+#
+# 原文关键警告:
+#   "If you want to use the function call feature for deepseek-ai/DeepSeek-V3.1,
+#    you need to set enable_thinking to false."
+#   → 即 DeepSeek-V3.1 做 FC 时必须关 thinking (与 MiMo 的 e 边界一致)。
+
+# §三、thinking_budget / reasoning_effort 适用范围
+# 来源: sf-chat-completions-api.txt:65-75, 301-305
+#   thinking_budget: integer, range 128..32768, default 4096,
+#     "applies to all Reasoning models" (英文页原文)
+#   reasoning_effort: enum "high"|"max", 仅适用于:
+#     Pro/deepseek-ai/DeepSeek-V4, deepseek-ai/DeepSeek-V4-Flash, Pro/zai-org/GLM-5.2
+#     (默认 high; Claude Code/OpenCode 类 agent 请求自动 max; low/medium 映射 high, xhigh 映射 max)
+
+# §四、推理模型长度表 (reasoning 页 §3.1.1)
+# 来源: docs.siliconflow.com/en/userguide/capabilities/reasoning
+# | Model | Max Response | Max Reasoning Chain | Max Context |
+# | DeepSeek-R1                | 16384 | 65536 | 163840 |
+# | DeepSeek-R1-Distill Series | 16384 | 32768 | 131072 |
+# | Qwen3 Series               | 8192  | 32768 | 131072 |
+# | QwQ-32B                    | 32768 | 16384 | 131072 |
+# | GLM-Z1 Series              | 16384 | 32768 | 131072 |
+# | MiniMax-M1-80k             | 40000 | 40000 | 80000  |
+# | Hunyuan-A13B-Instruct     | 8192  | 38912 | 131072 |
+# | GLM-4.1V-9B-Thinking       | 16384 | 32768 | 65536  |
+# 注: 该表为 reasoning 页列出的旧代推理模型；V3.2/V4/GLM-4.7 等新模型上下文未在该表，
+#     blog 提及 DeepSeek-V4-Pro 为 1M-token context (推断，未在 API enum 页证实)。
+
+# §五、Interleaved Thinking 支持模型
+# 来源: sf-interleaved-thinking.txt:46-48 (docs.siliconflow.com/en/userguide/guides/interleaved-thinking)
+#   - deepseek-ai/DeepSeek-V3.2
+#   - zai-org/GLM-4.7
+# 规则: 工具调用前后/之间的所有 reasoning_content 必须原样逐字保留并回传。
+
+# §六、Function Calling 支持性 (旁证，非逐模型官方开关表)
+# 官方指引页: https://cloud.siliconflow.cn/models?tags=Tools (需登录，未抓取)
+# 旁证:
+#   - sf-function-calling.txt:106,137,287,392 示例模型 = Pro/zai-org/GLM-5.1
+#   - sf-chat-completions-api.txt:41,373,456 示例模型 = deepseek-ai/DeepSeek-V4-Flash
+#   - 搜索 blog: DeepSeek-V4-Pro "supports both reasoning and tool calling"
+#     (siliconflow.com/zh/blog/deepseek-v4-pro-0813-now-live...)
+#   - 搜索 blog: Kimi K3 "Tool Calling: Supported"
+#   - 搜索 blog: Hy3 "Capabilities: Tool calls / Prefix continuation", Context 262K
+#   - 搜索 blog: Gemma 4 "Native function calling for autonomous agents"
+# 结论: FC 能力覆盖主流新模型 (DeepSeek V3.2/V4 系、GLM-4.5/4.6/4.7/5 系、Kimi K2 系、Qwen3 系、
+#       MiniMax M2 系、gpt-oss、gemma-4 等)；精确开关以模型广场 tags=Tools 筛选为准。

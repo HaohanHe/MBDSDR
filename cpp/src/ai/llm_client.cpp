@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-#include "llm_client.h"
+#include "ai/llm_client.h"
+#include "ai/llm_protocol.h"
+#include "core/tokens.h"
 
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -12,174 +14,184 @@
 namespace mbdsdr {
 namespace ai {
 
+// static process-wide test transport (null in production).
+LLMClient::TransportFn LLMClient::s_testTransport;
+
+void applyThinkingConfig(RequestOptions& opts, const QString& model, bool toolRound) {
+    opts.thinkingEnabled = false;
+    opts.thinkingBudget = 0;
+    const bool deepseekV32 = model.contains(QStringLiteral("DeepSeek-V3.2"), Qt::CaseInsensitive);
+    const bool glm47       = model.contains(QStringLiteral("GLM-4.7"),        Qt::CaseInsensitive);
+    const bool mimo        = model.contains(QStringLiteral("mimo"),            Qt::CaseInsensitive);
+    if (deepseekV32 || glm47) {
+        // SiliconFlow interleaved-thinking models: thinking always on.
+        opts.thinkingEnabled = true;
+        opts.thinkingBudget = tokens::kAiThinkingBudgetTokens;
+    } else if (mimo) {
+        // MiMo: thinking on for the conversational first turn, off on tool rounds.
+        opts.thinkingEnabled = !toolRound;
+        if (opts.thinkingEnabled)
+            opts.thinkingBudget = tokens::kAiThinkingBudgetTokens;
+    }
+    // Qwen / others: off.
+}
+
+// --- Shared SSE accumulator ------------------------------------------------
+// Three physically-separated channels (content / reasoning / tool_call toolSlots),
+// exactly per the streaming state machine (16-tool-loop-state-machine.md §4.2):
+// reasoning_content and content are NEVER merged; tool_calls are reassembled by
+// their `index` slot and arguments are parsed ONCE at stream end (never
+// mid-fragment, where a half-JSON slice is guaranteed invalid).
+struct StreamAccumulator {
+    QString content;
+    QString reasoning;
+    QString finishReason;
+    QMap<int, ToolCall> toolSlots;     // index -> partial tool call
+    QMap<int, QString>  args;      // index -> accumulated arguments JSON string
+
+    void feed(const StreamChunk& c, LLMClient::ChunkCallback onChunk) {
+        content  += c.contentDelta;
+        reasoning += c.reasoningDelta;
+        for (const ToolCallDelta& d : c.toolDeltas) {
+            while (toolSlots.size() <= d.index) toolSlots[d.index] = ToolCall{};
+            ToolCall& s = toolSlots[d.index];
+            if (!d.id.isEmpty())   s.id = d.id;
+            if (!d.name.isEmpty()) s.name = d.name;
+            args[d.index] += d.argumentsFragment;
+        }
+        if (!c.finishReason.isEmpty()) finishReason = c.finishReason;
+        if (onChunk) onChunk(content);
+    }
+
+    LLMResponse toResponse() const {
+        LLMResponse r;
+        r.content = content;
+        r.reasoningContent = reasoning;
+        r.finishReason = finishReason;
+        for (int i = 0; i < toolSlots.size(); ++i) {
+            ToolCall tc = toolSlots.value(i);
+            // Parse arguments ONCE here. A non-object / malformed slice yields an
+            // empty object; the arguments validator (M2) then rejects it on the
+            // next loop turn and feeds the errorJson back as role=tool -- we never
+            // silently swallow a bad arguments blob, but we also never abort the
+            // whole loop for it (impl-spec §4/§6).
+            QJsonDocument ad = QJsonDocument::fromJson(args.value(i).toUtf8());
+            tc.arguments = ad.isObject() ? ad.object() : QJsonObject();
+            r.toolCalls.append(tc);
+        }
+        return r;
+    }
+};
+
+void LLMClient::feedSseText(const QString& text, Protocol proto,
+                            StreamAccumulator& acc, ChunkCallback onChunk) {
+    int nl = 0;
+    QString s = text;
+    while ((nl = s.indexOf(QLatin1Char('\n'))) >= 0) {
+        QString line = s.left(nl).trimmed();
+        s.remove(0, nl + 1);
+        if (!line.startsWith(QStringLiteral("data:"))) continue;
+        QString data = line.mid(5).trimmed();
+        if (data.isEmpty() || data == QLatin1String("[DONE]")) continue;
+        acc.feed(parseStreamChunk(data.toUtf8(), proto), onChunk);
+    }
+    // trailing line without a newline
+    QString tail = s.trimmed();
+    if (tail.startsWith(QStringLiteral("data:"))) {
+        QString data = tail.mid(5).trimmed();
+        if (!data.isEmpty() && data != QLatin1String("[DONE]"))
+            acc.feed(parseStreamChunk(data.toUtf8(), proto), onChunk);
+    }
+}
+
 LLMClient::LLMClient(QObject* parent) : QObject(parent) {
     nam_ = new QNetworkAccessManager(this);
+    transport_ = s_testTransport;   // offline test seam (null in production)
 }
 
 LLMResponse LLMClient::chat(const QList<ChatMessage>& messages,
-                             const QList<ToolDef>& tools,
-                             ChunkCallback onChunk) {
+                            const QList<ToolDef>& tools,
+                            ChunkCallback onChunk,
+                            const RequestOptions& optsIn) {
     LLMResponse resp;
     if (apiKey_.isEmpty()) {
         resp.error = "API key not configured";
         return resp;
     }
 
-    QJsonObject root;
-    root["model"] = model_;
+    RequestOptions opts = optsIn;
+    if (opts.model.isEmpty()) opts.model = model_;
+    opts.stream = (onChunk != nullptr);
 
-    QJsonArray msgs;
-    for (const auto& m : messages) {
-        QJsonObject mo;
-        // The UI/context layer uses role "summary" for compacted history; the
-        // wire API only accepts system/user/assistant/tool, so surface it as a
-        // system note. Content is preserved verbatim.
-        const QString wireRole = (m.role == "summary") ? QStringLiteral("system") : m.role;
-        mo["role"] = wireRole;
-        mo["content"] = m.content;
-        if (m.role == "tool" && !m.toolCallId.isEmpty())
-            mo["tool_call_id"] = m.toolCallId;
-        if (!m.toolCalls.isEmpty()) {
-            QJsonArray tcArr;
-            for (const auto& tc : m.toolCalls) {
-                QJsonObject o;
-                o["id"] = tc.id;
-                o["type"] = "function";
-                QJsonObject fn;
-                fn["name"] = tc.name;
-                fn["arguments"] = QString::fromUtf8(QJsonDocument(tc.arguments).toJson(QJsonDocument::Compact));
-                o["function"] = fn;
-                tcArr.append(o);
-            }
-            mo["tool_calls"] = tcArr;
-        }
-        msgs.append(mo);
-    }
-    root["messages"] = msgs;
-
-    if (!tools.isEmpty()) {
-        QJsonArray toolArr;
-        for (const auto& t : tools) {
-            QJsonObject fn;
-            fn["name"] = t.name;
-            fn["description"] = t.description;
-            fn["parameters"] = t.parameters;
-            QJsonObject tool;
-            tool["type"] = "function";
-            tool["function"] = fn;
-            toolArr.append(tool);
-        }
-        root["tools"] = toolArr;
-        root["tool_choice"] = "auto";
+    // The UI/context layer uses role "summary" for compacted history; the wire
+    // API only accepts system/user/assistant/tool, so surface it as a system
+    // note. Content (and reasoning) is preserved verbatim.
+    QList<ChatMessage> wire;
+    wire.reserve(messages.size());
+    for (const ChatMessage& m : messages) {
+        ChatMessage mm = m;
+        if (mm.role == QLatin1String("summary")) mm.role = QStringLiteral("system");
+        wire.append(mm);
     }
 
-    if (onChunk) root["stream"] = true;
+    // Build the wire request through the M3 protocol layer (OpenAI / Anthropic).
+    QJsonObject root = buildChatRequest(wire, tools, opts);
+    QByteArray payload = QJsonDocument(root).toJson(QJsonDocument::Compact);
 
-    QNetworkRequest req(QUrl(baseUrl_ + "/chat/completions"));
+    QNetworkRequest req(QUrl(baseUrl_ + QStringLiteral("/chat/completions")));
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     req.setRawHeader("Authorization", ("Bearer " + apiKey_).toUtf8());
 
-    QNetworkReply* reply = nam_->post(req, QJsonDocument(root).toJson());
+    StreamAccumulator acc;
+    QByteArray raw;
 
-    // Shared bookkeeping for the SSE stream (tool_call deltas are fragmented
-    // across chunks and must be reassembled by their index).
-    QString accumulated;
-    QList<ToolCall> partialTools;
-    QMap<int, QString> toolArgs;   // index -> accumulated arguments JSON string
-    QString sseBuf;                // partial SSE line accumulator for this reply
+    if (transport_) {
+        // ---- Offline / injected transport: fully synchronous, no socket. ----
+        raw = transport_(req, payload);
+        if (onChunk) feedSseText(QString::fromUtf8(raw), opts.protocol, acc, onChunk);
+    } else {
+        // ---- Real QNAM POST (production). -----------------------------------
+        QNetworkReply* reply = nam_->post(req, payload);
+        QEventLoop loop;
+        QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        QTimer::singleShot(tokens::kAiRequestTimeoutMs, &loop, &QEventLoop::quit);
 
-    QEventLoop loop;
-    if (onChunk) {
-        // ---- Streaming (SSE) path: pump readyRead, emit accumulated content.
-        QObject::connect(reply, &QNetworkReply::readyRead, &loop, [&]() {
-            sseBuf += QString::fromUtf8(reply->readAll());
-            int nl = 0;
-            while ((nl = sseBuf.indexOf('\n')) >= 0) {
-                QString line = sseBuf.left(nl).trimmed();
-                sseBuf.remove(0, nl + 1);
-                if (!line.startsWith("data:")) continue;
-                QString data = line.mid(5).trimmed();
-                if (data == "[DONE]") continue;
-                QJsonParseError pe;
-                QJsonDocument d = QJsonDocument::fromJson(data.toUtf8(), &pe);
-                if (pe.error != QJsonParseError::NoError) continue;
-                auto choicesArr = d.object()["choices"].toArray();
-                if (choicesArr.isEmpty()) continue;
-                auto choice = choicesArr.at(0).toObject();
-                auto delta = choice["delta"].toObject();
-                QString dc = delta["content"].toString();
-                if (!dc.isEmpty()) {
-                    accumulated += dc;
-                    onChunk(accumulated);
+        QString sseBuf;
+        if (onChunk) {
+            QObject::connect(reply, &QNetworkReply::readyRead, &loop, [&]() {
+                sseBuf += QString::fromUtf8(reply->readAll());
+                int nl = 0;
+                while ((nl = sseBuf.indexOf(QLatin1Char('\n'))) >= 0) {
+                    QString line = sseBuf.left(nl).trimmed();
+                    sseBuf.remove(0, nl + 1);
+                    if (!line.startsWith(QStringLiteral("data:"))) continue;
+                    QString data = line.mid(5).trimmed();
+                    if (data.isEmpty() || data == QLatin1String("[DONE]")) continue;
+                    acc.feed(parseStreamChunk(data.toUtf8(), opts.protocol), onChunk);
                 }
-                for (const auto& v : delta["tool_calls"].toArray()) {
-                    auto o = v.toObject();
-                    int idx = o["index"].toInt();
-                    while (partialTools.size() <= idx) partialTools.append(ToolCall{});
-                    auto& pc = partialTools[idx];
-                    if (o.contains("id")) pc.id = o["id"].toString();
-                    auto fn = o["function"].toObject();
-                    if (fn.contains("name")) pc.name = fn["name"].toString();
-                    if (fn.contains("arguments"))
-                        toolArgs[idx] += fn["arguments"].toString();
-                }
-            }
-        });
-    }
-
-    QTimer::singleShot(30000, &loop, &QEventLoop::quit);
-    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    loop.exec();
-
-    reply->deleteLater();
-
-    if (reply->error() != QNetworkReply::NoError) {
-        resp.error = reply->errorString();
-        return resp;
-    }
-
-    if (onChunk) {
-        // Streaming result: accumulated content + reassembled tool calls.
-        resp.content = accumulated;
-        for (int i = 0; i < partialTools.size(); ++i) {
-            ToolCall call = partialTools[i];
-            QJsonParseError pe;
-            call.arguments = QJsonDocument::fromJson(
-                                    toolArgs.value(i).toUtf8(), &pe).object();
-            resp.toolCalls.append(call);
+            });
         }
-        return resp;
+        loop.exec();
+
+        if (reply->error() != QNetworkReply::NoError) {
+            resp.error = reply->errorString();
+            reply->deleteLater();
+            return resp;
+        }
+        if (onChunk) {
+            feedSseText(sseBuf, opts.protocol, acc, nullptr);   // flush trailing lines
+        } else {
+            raw = reply->readAll();
+        }
+        reply->deleteLater();
     }
 
-    QJsonParseError parseErr;
-    auto doc = QJsonDocument::fromJson(reply->readAll(), &parseErr);
-    if (parseErr.error != QJsonParseError::NoError) {
-        resp.error = "JSON parse error: " + parseErr.errorString();
-        return resp;
+    if (onChunk) return acc.toResponse();
+
+    QString err;
+    if (!parseChatResponse(raw, opts.protocol, &resp, &err)) {
+        resp.error = err.isEmpty() ? QStringLiteral("response parse error") : err;
     }
-
-    auto choices = doc.object()["choices"].toArray();
-    if (choices.isEmpty()) {
-        resp.error = "no choices in response";
-        return resp;
-    }
-
-    auto msg = choices[0].toObject()["message"].toObject();
-    resp.content = msg["content"].toString();
-
-    auto toolCalls = msg["tool_calls"].toArray();
-    for (const auto& tc : toolCalls) {
-        auto tcObj = tc.toObject();
-        auto fn = tcObj["function"].toObject();
-        ToolCall call;
-        call.id = tcObj["id"].toString();
-        call.name = fn["name"].toString();
-        QString argsStr = fn["arguments"].toString();
-        QJsonParseError pe;
-        call.arguments = QJsonDocument::fromJson(argsStr.toUtf8(), &pe).object();
-        resp.toolCalls.append(call);
-    }
-
     return resp;
 }
 

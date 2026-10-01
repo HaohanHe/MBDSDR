@@ -106,6 +106,9 @@ set(SOURCES
     src/ai/agent.cpp
     src/ai/ai_session_store.cpp
     src/ai/ai_context.cpp
+    src/ai/tool_schema.cpp
+    src/ai/arguments_validator.cpp
+    src/ai/llm_protocol.cpp
     src/ai/task_orchestrator.cpp
     src/ai/task_runner.cpp
     src/ai/plan_parser.cpp
@@ -450,9 +453,12 @@ target_link_libraries(test_spectrum_autorange PRIVATE Qt6::Test Qt6::Widgets Qt6
 add_test(NAME spectrum_autorange COMMAND test_spectrum_autorange)
 
 # AI integration test: SKIPs without MBDSDR_AI_KEY env (never FAILs offline).
-add_executable(test_ai_integration tests/test_ai_integration.cpp src/ai/llm_client.cpp src/ai/ai_config.cpp)
+# llm_client.cpp now calls the M3 protocol layer and includes core/tokens.h
+# (which pulls QtGui), so link llm_protocol.cpp + Qt6::Gui here.
+add_executable(test_ai_integration tests/test_ai_integration.cpp
+    src/ai/llm_client.cpp src/ai/llm_protocol.cpp src/ai/ai_config.cpp)
 target_include_directories(test_ai_integration PRIVATE src)
-target_link_libraries(test_ai_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network)
+target_link_libraries(test_ai_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Gui)
 add_test(NAME ai_integration COMMAND test_ai_integration)
 
 # WAV roundtrip: record demod audio to disk, read header back.
@@ -474,7 +480,8 @@ add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
     src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
-    src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/agent.cpp src/ai/agent_tools.cpp src/ai/ai_config.cpp src/ai/ai_context.cpp)
+    src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/agent.cpp src/ai/agent_tools.cpp src/ai/ai_config.cpp src/ai/ai_context.cpp
+    src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp)
 target_include_directories(test_ai_function_calling PRIVATE src)
 target_link_libraries(test_ai_function_calling PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME ai_function_calling COMMAND test_ai_function_calling)
@@ -806,6 +813,7 @@ add_test(NAME apt COMMAND test_apt)
 add_executable(test_agent tests/test_agent.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
     src/ai/agent_tools.cpp src/ai/agent.cpp src/ai/ai_context.cpp
+    src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
     src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
@@ -824,6 +832,7 @@ add_test(NAME agent COMMAND test_agent)
 add_executable(test_task_orchestrator tests/test_task_orchestrator.cpp
     src/ai/task_orchestrator.cpp src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
     src/ai/agent_tools.cpp src/ai/ai_context.cpp src/ui/bookmark_manager.cpp
+    src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
     src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
@@ -841,6 +850,7 @@ add_test(NAME task_orchestrator COMMAND test_task_orchestrator)
 add_executable(test_plan_parser tests/test_plan_parser.cpp
     src/ai/plan_parser.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp
     src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
+    src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
     src/ui/bookmark_manager.cpp
     src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
@@ -859,6 +869,7 @@ add_test(NAME plan_parser COMMAND test_plan_parser)
 add_executable(test_sat_task_planner tests/test_sat_task_planner.cpp
     src/ai/sat_task_planner.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp
     src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
+    src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
     src/dsp/tle_client.cpp src/dsp/sgp4.cpp src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp
     src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp
     src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
@@ -876,6 +887,7 @@ add_test(NAME sat_task_planner COMMAND test_sat_task_planner)
 add_executable(test_task_async tests/test_task_async.cpp
     src/ai/task_runner.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp src/ai/llm_worker.cpp
     src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp src/ui/bookmark_manager.cpp
+    src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
     src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
@@ -1022,3 +1034,44 @@ target_link_libraries(ui_shot_fftband PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::
 add_executable(ui_shot_task_steps tests/ui_screenshot_task_steps.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_task_steps PRIVATE src build/ui_shot_task_steps_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_task_steps PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# M3 dual-protocol layer (OpenAI + Anthropic). Pure functions, no network.
+add_executable(test_llm_protocol tests/test_llm_protocol.cpp src/ai/llm_protocol.cpp)
+target_include_directories(test_llm_protocol PRIVATE src)
+target_link_libraries(test_llm_protocol PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME llm_protocol COMMAND test_llm_protocol)
+
+# M2 arguments validator: pure-function JSON-Schema arg validation (offline).
+add_executable(test_arguments_validator tests/test_arguments_validator.cpp
+    src/ai/arguments_validator.cpp)
+target_include_directories(test_arguments_validator PRIVATE src)
+target_link_libraries(test_arguments_validator PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME arguments_validator COMMAND test_arguments_validator)
+
+# ---- M1: declarative tool JSON-Schema registry (pure, offline) ------------
+# tool_schema.cpp includes core/tokens.h (which unconditionally pulls QtGui
+# headers: QColor/QGuiApplication/QScreen) and ai/llm_client.h (QtNetwork header
+# for QNetworkAccessManager), so the offscreen test target links Gui+Network
+# purely for their interface include dirs. No network call is ever made.
+add_executable(test_tool_schema tests/test_tool_schema.cpp src/ai/tool_schema.cpp)
+target_include_directories(test_tool_schema PRIVATE src)
+target_link_libraries(test_tool_schema PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Network)
+add_test(NAME tool_schema COMMAND test_tool_schema)
+
+# ---- M4: real function-calling loop (transport-injected, fully offline) ------
+# Drives LLMWorker with a canned mock transport (setDefaultTransportForTests),
+# so no socket / no API key is ever needed. Mirrors the test_agent source set
+# (llm_client/llm_worker/agent_tools/ai_config/ai_context) plus the M1-M3 units.
+add_executable(test_ai_tool_loop tests/test_ai_tool_loop.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
+    src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/agent_tools.cpp
+    src/ai/ai_config.cpp src/ai/ai_context.cpp
+    src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp)
+target_include_directories(test_ai_tool_loop PRIVATE src)
+target_link_libraries(test_ai_tool_loop PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME ai_tool_loop COMMAND test_ai_tool_loop)

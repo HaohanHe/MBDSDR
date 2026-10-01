@@ -197,7 +197,12 @@ void main() {
       final AiTool fakeTool = AiTool(
         name: 'set_frequency',
         description: 'set',
-        parameters: const <String, dynamic>{},
+        parameters: const <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'frequency_hz': <String, dynamic>{'type': 'number'},
+          },
+        },
         execute: (Map<String, dynamic> args) async {
           capturedArgs = Map<String, dynamic>.from(args);
           return '{"ok":true,"frequency_hz":145000000}';
@@ -357,6 +362,317 @@ data: [DONE]''';
       final AiErrorEvent err = events.first as AiErrorEvent;
       expect(err.message, isNot(contains('sk-secret-key-12345')));
       expect(err.message, contains('401'));
+    });
+
+    test('reasoning_content 逐字累积并在下一轮 assistant 消息原样回传', () async {
+      int requestCount = 0;
+      final List<String> requestBodies = <String>[];
+
+      final AiTool fakeTool = AiTool(
+        name: 'set_frequency',
+        description: 'set',
+        parameters: const <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'frequency_hz': <String, dynamic>{'type': 'number'},
+          },
+        },
+        execute: (_) async => '{"ok":true}',
+      );
+
+      // 第 1 轮：先吐两段 reasoning_content，再吐 tool_calls。
+      const String sseRound1 = '''data: {"choices":[{"delta":{"reasoning_content":"我先想一下"}}]}
+data: {"choices":[{"delta":{"reasoning_content":"再调工具"}}]}
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_r","type":"function","function":{"name":"set_frequency","arguments":"{\\"frequency_hz\\":145000000}"}}]}}]}
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+data: [DONE]''';
+
+      const String sseRound2 = '''data: {"choices":[{"delta":{"content":"已调好。"}}]}
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+data: [DONE]''';
+
+      Future<Stream<String>> fakeTransport(
+        Uri url,
+        Map<String, String> headers,
+        String body,
+      ) async {
+        requestCount++;
+        requestBodies.add(body);
+        final String sse = requestCount == 1 ? sseRound1 : sseRound2;
+        return Stream<String>.fromIterable(sse.split('\n'));
+      }
+
+      final AiClient client = AiClient(
+        apiKey: 'sk-x',
+        model: 'deepseek-ai/DeepSeek-V3.2',
+        tools: <AiTool>[fakeTool],
+        transport: fakeTransport,
+      );
+
+      final List<ChatStreamEvent> events = <ChatStreamEvent>[];
+      await for (final ChatStreamEvent e in client.complete(
+        history: <ChatMessage>[
+          ChatMessage(role: ChatRole.user, content: '调谐', time: DateTime(2026)),
+        ],
+      )) {
+        events.add(e);
+      }
+
+      expect(requestCount, 2);
+
+      // 第 2 轮请求体里，带 tool_calls 的 assistant 消息必须逐字带 reasoning_content。
+      final Map<String, dynamic> secondReq =
+          jsonDecode(requestBodies[1]) as Map<String, dynamic>;
+      final List<dynamic> msgs = secondReq['messages']! as List<dynamic>;
+      final Map<String, dynamic> assistantWithCalls = msgs
+          .cast<Map<String, dynamic>>()
+          .firstWhere((Map<String, dynamic> m) =>
+              m['role'] == 'assistant' && m['tool_calls'] != null);
+      expect(assistantWithCalls['reasoning_content'], '我先想一下再调工具');
+      expect(events.whereType<AiErrorEvent>(), isEmpty);
+    });
+
+    test('非法参数（越界 + 幻觉键）不调用 execute，错误文本以 tool 回灌', () async {
+      int executeCalls = 0;
+      int requestCount = 0;
+      final List<String> requestBodies = <String>[];
+
+      final AiTool strictTool = AiTool(
+        name: 'set_frequency',
+        description: 'set',
+        parameters: const <String, dynamic>{
+          'type': 'object',
+          'properties': <String, dynamic>{
+            'frequency_hz': <String, dynamic>{
+              'type': 'number',
+              'minimum': 24000000,
+              'maximum': 1700000000,
+            },
+          },
+          'required': <String>['frequency_hz'],
+        },
+        execute: (_) async {
+          executeCalls++;
+          return '{"ok":true}';
+        },
+      );
+
+      // frequency_hz=3e99 越界，外加 schema 外键 ghost_key。
+      const String sseRound1 = '''data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_b","type":"function","function":{"name":"set_frequency","arguments":"{\\"frequency_hz\\":3e99,\\"ghost_key\\":1}"}}]}}]}
+data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}
+data: [DONE]''';
+
+      const String sseRound2 = '''data: {"choices":[{"delta":{"content":"参数不合法，我不能这么做。"}}]}
+data: [DONE]''';
+
+      Future<Stream<String>> fakeTransport(
+        Uri url,
+        Map<String, String> headers,
+        String body,
+      ) async {
+        requestCount++;
+        requestBodies.add(body);
+        final String sse = requestCount == 1 ? sseRound1 : sseRound2;
+        return Stream<String>.fromIterable(sse.split('\n'));
+      }
+
+      final AiClient client = AiClient(
+        apiKey: 'sk-x',
+        tools: <AiTool>[strictTool],
+        transport: fakeTransport,
+      );
+
+      final List<ChatStreamEvent> events = <ChatStreamEvent>[];
+      await for (final ChatStreamEvent e in client.complete(
+        history: <ChatMessage>[
+          ChatMessage(role: ChatRole.user, content: '调到 3e99', time: DateTime(2026)),
+        ],
+      )) {
+        events.add(e);
+      }
+
+      // execute 一次都没被调用。
+      expect(executeCalls, 0);
+      expect(requestCount, 2);
+
+      // 第 2 轮请求体里应有一条 role=tool 消息，内容是 ok:false 的校验错误。
+      final Map<String, dynamic> secondReq =
+          jsonDecode(requestBodies[1]) as Map<String, dynamic>;
+      final List<dynamic> msgs = secondReq['messages']! as List<dynamic>;
+      final Map<String, dynamic> toolMsg = msgs
+          .cast<Map<String, dynamic>>()
+          .firstWhere((Map<String, dynamic> m) => m['role'] == 'tool');
+      final Map<String, dynamic> toolContent =
+          jsonDecode(toolMsg['content']! as String) as Map<String, dynamic>;
+      expect(toolContent['ok'], isFalse);
+      expect((toolContent['reasons'] as List<dynamic>).join(' '), contains('最大值'));
+      expect((toolContent['reasons'] as List<dynamic>).join(' '), contains('未知参数'));
+
+      // 工具结束事件仍发出（携带错误结果），流程不中断。
+      expect(events.whereType<ToolCallFinishedEvent>().length, 1);
+      expect(events.whereType<AiErrorEvent>(), isEmpty);
+    });
+
+    test('第一轮 finish_reason==stop 直接收尾，只发一次请求', () async {
+      int requestCount = 0;
+      const String sseRound1 = '''data: {"choices":[{"delta":{"content":"不需要工具，直接回答。"}}]}
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+data: [DONE]''';
+
+      Future<Stream<String>> fakeTransport(
+        Uri url,
+        Map<String, String> headers,
+        String body,
+      ) async {
+        requestCount++;
+        return Stream<String>.fromIterable(sseRound1.split('\n'));
+      }
+
+      final AiClient client = AiClient(
+        apiKey: 'sk-x',
+        transport: fakeTransport,
+      );
+
+      final List<ChatStreamEvent> events = <ChatStreamEvent>[];
+      await for (final ChatStreamEvent e in client.complete(
+        history: <ChatMessage>[
+          ChatMessage(role: ChatRole.user, content: 'hi', time: DateTime(2026)),
+        ],
+      )) {
+        events.add(e);
+      }
+
+      expect(requestCount, 1);
+      expect(events.last, isA<AssistantTurnDoneEvent>());
+    });
+  });
+
+  group('thinking 参数下发（按模型配置）', () {
+    test('DeepSeek-V3.2 请求体含 enable_thinking + thinking_budget', () async {
+      Map<String, dynamic>? firstBody;
+
+      const String sseRound1 = '''data: {"choices":[{"delta":{"content":"直接答。"}}]}
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+data: [DONE]''';
+
+      Future<Stream<String>> fakeTransport(
+        Uri url,
+        Map<String, String> headers,
+        String body,
+      ) async {
+        firstBody ??= jsonDecode(body) as Map<String, dynamic>;
+        return Stream<String>.fromIterable(sseRound1.split('\n'));
+      }
+
+      final AiClient client = AiClient(
+        apiKey: 'sk-x',
+        model: 'deepseek-ai/DeepSeek-V3.2',
+        transport: fakeTransport,
+      );
+      await client
+          .complete(history: <ChatMessage>[
+            ChatMessage(role: ChatRole.user, content: 'hi', time: DateTime(2026)),
+          ])
+          .drain<void>();
+
+      expect(firstBody!['enable_thinking'], isTrue);
+      expect(firstBody!['thinking_budget'], 4096);
+    });
+
+    test('MiMo v2.6-pro 对话轮开 thinking、工具轮关 thinking', () async {
+      int requestCount = 0;
+      final List<Map<String, dynamic>> bodies = <Map<String, dynamic>>[];
+
+      final AiTool fakeTool = AiTool(
+        name: 'get_status',
+        description: 's',
+        parameters: const <String, dynamic>{'type': 'object', 'properties': <String, dynamic>{}},
+        execute: (_) async => '{"ok":true}',
+      );
+
+      const String sseRound1 = '''data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_m","type":"function","function":{"name":"get_status","arguments":"{}"}}]}}]}
+data: [DONE]''';
+      const String sseRound2 = '''data: {"choices":[{"delta":{"content":"读完了。"}}]}
+data: [DONE]''';
+
+      Future<Stream<String>> fakeTransport(
+        Uri url,
+        Map<String, String> headers,
+        String body,
+      ) async {
+        requestCount++;
+        bodies.add(jsonDecode(body) as Map<String, dynamic>);
+        final String sse = requestCount == 1 ? sseRound1 : sseRound2;
+        return Stream<String>.fromIterable(sse.split('\n'));
+      }
+
+      final AiClient client = AiClient(
+        apiKey: 'sk-x',
+        model: 'mimo-v2.6-pro',
+        tools: <AiTool>[fakeTool],
+        transport: fakeTransport,
+      );
+      await client
+          .complete(history: <ChatMessage>[
+            ChatMessage(role: ChatRole.user, content: '状态', time: DateTime(2026)),
+          ])
+          .drain<void>();
+
+      expect(requestCount, 2);
+      // 对话轮（第 1 次请求）开 thinking。
+      expect(bodies[0]['enable_thinking'], isTrue);
+      expect(bodies[0]['thinking_budget'], 4096);
+      // 工具轮（第 2 次请求，刚回灌 tool 结果）关 thinking：不下发该键。
+      expect(bodies[1].containsKey('enable_thinking'), isFalse);
+    });
+
+    test('thinkingConfigForModel 映射表：默认关、SF interleaved 开、MiMo 工具轮关', () {
+      expect(AiClient.thinkingConfigForModel('Qwen/Qwen2.5-7B-Instruct', toolRound: false).enabled, isFalse);
+      expect(AiClient.thinkingConfigForModel('deepseek-ai/DeepSeek-V3.2', toolRound: true).enabled, isTrue);
+      expect(AiClient.thinkingConfigForModel('zai-org/GLM-4.7', toolRound: true).enabled, isTrue);
+      expect(AiClient.thinkingConfigForModel('mimo-v2.6-pro', toolRound: false).enabled, isTrue);
+      expect(AiClient.thinkingConfigForModel('mimo-v2.6-pro', toolRound: true).enabled, isFalse);
+    });
+  });
+
+  group('buildAnthropicRequestJson（接口层形状）', () {
+    test('system 提为顶层、tools 用 type=custom + input_schema', () {
+      final List<ChatMessage> messages = <ChatMessage>[
+        ChatMessage(role: ChatRole.system, content: '你是 SDR 助手', time: DateTime(2026)),
+        ChatMessage(role: ChatRole.user, content: '调谐到 145M', time: DateTime(2026)),
+      ];
+      const Map<String, dynamic> params = <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{
+          'frequency_hz': <String, dynamic>{'type': 'integer'},
+        },
+      };
+      final AiTool tool = AiTool(
+        name: 'set_frequency',
+        description: '调谐',
+        parameters: params,
+        execute: (_) async => '',
+      );
+
+      final Map<String, dynamic> body = AiClient.buildAnthropicRequestJson(
+        messages: messages,
+        tools: <AiTool>[tool],
+        stream: false,
+        model: 'mimo-v2.6-pro',
+      );
+
+      expect(body['system'], '你是 SDR 助手');
+      expect(body['model'], 'mimo-v2.6-pro');
+      final List<dynamic> tools = body['tools']! as List<dynamic>;
+      final Map<String, dynamic> t0 = tools[0]! as Map<String, dynamic>;
+      expect(t0['type'], 'custom');
+      expect(t0['name'], 'set_frequency');
+      expect(t0['input_schema'], params);
+
+      // system 不进 messages。
+      final List<dynamic> msgs = body['messages']! as List<dynamic>;
+      expect(msgs.length, 1);
+      expect((msgs[0]! as Map<String, dynamic>)['role'], 'user');
     });
   });
 }
