@@ -145,9 +145,21 @@ QString executeTool(const QString& name, const QJsonObject& args,
         double low = args["low_hz"].toDouble();
         double high = args["high_hz"].toDouble();
         double step = args["step_hz"].toDouble(200000);
-        double peak = engine->scanBand(low, high, step);
-        return QString("扫描 %1-%2 MHz，峰值 %3 dBFS")
-            .arg(low/1e6, 0, 'f', 1).arg(high/1e6, 0, 'f', 1).arg(peak, 0, 'f', 1);
+        double peakFreq = 0.0;
+        double peak = engine->scanBand(low, high, step, &peakFreq);
+        // Structured result so downstream task steps can reference the real hit
+        // frequency via JSON path (hits[0].frequencyHz).
+        QJsonObject hit;
+        hit["frequencyHz"] = peakFreq;
+        hit["dbfs"] = peak;
+        QJsonObject o;
+        o["ok"] = true;
+        o["lowHz"] = low;
+        o["highHz"] = high;
+        o["stepHz"] = step;
+        o["peakDbfs"] = peak;
+        o["hits"] = QJsonArray{hit};
+        return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
     }
     if (name == "set_bandwidth") {
         double bw = args["bandwidth_hz"].toDouble();

@@ -105,6 +105,7 @@ set(SOURCES
     src/ai/agent.cpp
     src/ai/ai_session_store.cpp
     src/ai/ai_context.cpp
+    src/ai/task_orchestrator.cpp
     src/tx/modulator.cpp
     src/tx/loopback_backend.cpp
     src/tx/tx_controller.cpp
@@ -116,6 +117,7 @@ set(SOURCES
     src/radio/cw_keyer.cpp
     src/ui/radio_panel.cpp
     src/ui/recording_library.cpp
+    src/ui/task_steps_view.cpp
 )
 
 set(HEADERS
@@ -801,6 +803,24 @@ target_include_directories(test_agent PRIVATE src)
 target_link_libraries(test_agent PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME agent COMMAND test_agent)
 
+# Autonomous multi-step task orchestrator: real engine through deterministic
+# templates (sweep->hit->bookmark/record), interrupt, max-steps, gate report.
+add_executable(test_task_orchestrator tests/test_task_orchestrator.cpp
+    src/ai/task_orchestrator.cpp src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
+    src/ai/agent_tools.cpp src/ai/ai_context.cpp src/ui/bookmark_manager.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
+    src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
+    src/dsp/qt_audio_sink.cpp
+    src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp
+    src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp
+    src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_task_orchestrator PRIVATE src)
+target_link_libraries(test_task_orchestrator PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME task_orchestrator COMMAND test_task_orchestrator)
+
 # AI multi-session store (CRUD + JSON persistence) + pure context compaction.
 # No network / no GUI: links only the two new AI translation units.
 add_executable(test_ai_session tests/test_ai_session.cpp
@@ -899,3 +919,8 @@ target_link_libraries(ui_shot_ai PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Netwo
 add_executable(ui_shot_fftband tests/ui_screenshot_fft_band.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_fftband PRIVATE src build/ui_shot_fftband_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_fftband PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
+# AI-panel autonomous-task step list offscreen shot (not in ctest).
+add_executable(ui_shot_task_steps tests/ui_screenshot_task_steps.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_task_steps PRIVATE src build/ui_shot_task_steps_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_task_steps PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)

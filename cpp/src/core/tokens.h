@@ -361,6 +361,16 @@ inline constexpr int kElevMarginB = 50;
 // tuner slam or a dither.  Named token, read by core/sat_capture.h.
 inline constexpr double kDopplerMaxStepHz = 2000.0;
 
+// =====================================================================
+// Autonomous multi-step task orchestration (Agent 自主任务)
+// =====================================================================
+// Hard cap on steps a single task plan may execute, so a buggy/LLM-generated
+// plan can never loop forever. Deterministic templates stay well under this.
+inline constexpr int    kTaskMaxSteps = 8;
+// A tool result longer than this is trimmed for the on-step summary (the full
+// text still goes to the conversation context).
+inline constexpr int    kTaskSummaryMaxChars = 160;
+
 // Waterfall (spectrogram) widget
 // 5-stop dBFS palette, mapped linearly over [-100, 0] dBFS:
 //   #000033 (noise floor) -> #0000ff -> #00ffff -> #ffff00 -> #ff0000 (0 dBFS)
