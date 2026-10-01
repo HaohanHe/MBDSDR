@@ -331,6 +331,12 @@ inline constexpr double  kSMeterDbPerUnit   = 6.0;
 inline constexpr int     kSMeterMaxUnits    = 9;
 inline constexpr double  kSMeterPeakDecayDbPerSec = 12.0;
 
+// TLE freshness: orbit elements drift; an epoch older than kTleStaleDays is
+// labelled 过期 (still usable, flagged). kTleRefreshAgeHours = cache age after
+// which we block-refetch instead of cache-first. Real thresholds, not demo.
+inline constexpr double  kTleStaleDays          = 14.0;
+inline constexpr double  kTleFreshCacheHours    = 48.0;
+
 // =====================================================================
 // Digital constellation panel (星座图). Display-only: it paints ONLY the
 // real post-Costas soft symbols fed via feedSymbols(). Zoom and the I/Q

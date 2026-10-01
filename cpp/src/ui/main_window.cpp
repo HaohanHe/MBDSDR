@@ -944,6 +944,20 @@ MainWindow::MainWindow(QWidget* parent)
     tleBadge_->setObjectName("dockHint");
     skyLay->addWidget(tleBadge_);
 
+    // TLE freshness panel: category / newest epoch / days-since-epoch / status /
+    // manual refresh. Driven by the SAME on-disk cache every consumer reuses.
+    auto* freshRow = new QHBoxLayout;
+    freshRow->setContentsMargins(0, 0, 0, 0);
+    tleFreshLabel_ = new QLabel(skyPage);
+    tleFreshLabel_->setObjectName("tleFreshLabel");
+    freshRow->addWidget(tleFreshLabel_, 1);
+    refetchTleBtn_ = new QPushButton(QStringLiteral("刷新 TLE"), skyPage);
+    refetchTleBtn_->setObjectName("dockHint");
+    refetchTleBtn_->setCursor(Qt::PointingHandCursor);
+    freshRow->addWidget(refetchTleBtn_);
+    skyLay->addLayout(freshRow);
+    connect(refetchTleBtn_, &QPushButton::clicked, this, [this]() { refetchTle(); });
+
     // ---- One-tap capture + Doppler auto-compensation control bar ----------
     // 捕获: retune the active VFO to the selected pass' downlink carrier
     // (+ predicted peak Doppler) and apply the frequency-domain mode/bandwidth.
@@ -4023,6 +4037,33 @@ void MainWindow::updateTleBadge() {
              stale ? QStringLiteral("过期") : QStringLiteral("新鲜")));
     tleBadge_->setStyleSheet(QString("color: %1;")
         .arg(stale ? tokens::kWarning : tokens::textRgba(tokens::kTextAlphaTertiary)));
+
+    // Freshness panel: newest epoch across the SAME cached TLE set, days-since,
+    // and a stale verdict against the named token threshold.
+    if (tleFreshLabel_) {
+        QDateTime newest;
+        for (const dsp::TleEntry& e : cache.entries) {
+            QDateTime ep = dsp::TleClient::parseTleEpoch(e.line1);
+            if (ep.isValid() && (!newest.isValid() || ep > newest)) newest = ep;
+        }
+        const QString cat = QStringLiteral("GNSS/气象/空间站/业余");
+        if (newest.isValid()) {
+            const double days = dsp::TleClient::daysSinceEpoch(
+                newest, QDateTime::currentDateTimeUtc());
+            const bool old = days >= tokens::kTleStaleDays;
+            tleFreshLabel_->setText(
+                QStringLiteral("TLE 类别 %1 · 历元 %2 · %3 天前 · %4")
+                    .arg(cat, newest.toLocalTime().toString("yyyy-MM-dd"),
+                         QString::number(days, 'f', 0),
+                         old ? QStringLiteral("过期") : QStringLiteral("新鲜")));
+            tleFreshLabel_->setStyleSheet(QString("color: %1;")
+                .arg(old ? tokens::kWarning
+                         : tokens::textRgba(tokens::kTextAlphaTertiary)));
+        } else {
+            tleFreshLabel_->setText(QStringLiteral("TLE 类别 %1 · 无有效历元（离线·可能过期）").arg(cat));
+            tleFreshLabel_->setStyleSheet(QString("color: %1;").arg(tokens::kWarning));
+        }
+    }
 }
 
 void MainWindow::onPassRowClicked(int row) {

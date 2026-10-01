@@ -145,6 +145,9 @@ private:
     // LEO PNT geometry readout (prediction, not a fix) + S-meter widget.
     QLabel* geoLabel_ = nullptr;
     ui::SMeterWidget* sMeter_ = nullptr;
+    // TLE freshness panel (epoch/days/status/manual refresh).
+    QLabel* tleFreshLabel_ = nullptr;
+    QPushButton* refetchTleBtn_ = nullptr;
     // ADS-B aircraft tracker: merges decoded frames keyed by ICAO, applies TTL
     // expiry, and emits only real-position points to the map. Lives on the UI
     // thread; fed by onAdsbAircraft(), pruned by adsbTimer_ every second.
