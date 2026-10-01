@@ -14,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/app/tokens.dart';
 import 'package:mbdsdr_mobile/dsp/fft_processor.dart';
 import 'package:mbdsdr_mobile/models/radio_state.dart';
+import 'package:mbdsdr_mobile/models/recording.dart';
 import 'package:mbdsdr_mobile/pages/spectrum_page.dart';
 import 'package:mbdsdr_mobile/services/radio_controller.dart';
 import 'package:mbdsdr_mobile/widgets/spectrum_display.dart';
@@ -238,6 +239,16 @@ class _FakeRadio extends ChangeNotifier implements RadioApi {
 
   @override
   Stream<Float32List> get audioStream => const Stream.empty();
+
+  // 只读渲染 fake：不支持真实录制。
+  @override
+  bool get recording => false;
+
+  @override
+  Future<void> startRecording() async {}
+
+  @override
+  Future<RecordingMeta?> stopRecording() async => null;
 }
 
 /// 已连接 fake：持续吐合成频谱帧（测试专用，不进产品代码）。
@@ -325,6 +336,16 @@ class _FakeConnectedRadio extends ChangeNotifier implements RadioApi {
 
   @override
   Stream<Float32List> get audioStream => const Stream.empty();
+
+  // 只读渲染 fake：不支持真实录制。
+  @override
+  bool get recording => false;
+
+  @override
+  Future<void> startRecording() async {}
+
+  @override
+  Future<RecordingMeta?> stopRecording() async => null;
 
   @override
   void dispose() {

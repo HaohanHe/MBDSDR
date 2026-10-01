@@ -4,8 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/home_shell.dart';
 import 'app/theme.dart';
+import 'audio/file_player.dart';
 import 'audio/platform_pcm_sink.dart';
 import 'services/radio_controller.dart';
+import 'services/recording_store.dart';
 import 'services/settings_service.dart';
 
 // ============================================================================
@@ -30,7 +32,17 @@ Future<void> main() async {
 
   // 真机出声 sink：MethodChannel → 原生 AudioTrack/AVAudioEngine（原生端待验）。
   final PlatformPcmSink pcmSink = PlatformPcmSink();
-  final RadioController radioController = RadioController(sink: pcmSink);
+  // 录音文件库（应用文档目录/recordings/）与文件回放器（复用 mbdsdr/audio 通道）。
+  final RecordingStore recordingStore = RecordingStore();
+  final FilePlayer filePlayer = FilePlayer();
+  final RadioController radioController = RadioController(
+    sink: pcmSink,
+    recordingsDirProvider: () => recordingStore.recordingsDir(),
+  );
+
+  // 录制结束：把真实落盘的 .wav 元数据加进录音列表索引（真实录制才触发）。
+  radioController.onRecordingFinalized = (meta) =>
+      settings.addRecording(meta);
 
   // 真实信号活动：静噪门开门（真实解调音频 RMS 过门限/出声）即记一条活动日志。
   // 数据全部来自真实控制器回读（频率/模式/电平），无连接/无观察时不产生条目。
@@ -57,9 +69,11 @@ Future<void> main() async {
 
   runApp(
     MultiProvider(
-      providers: <ChangeNotifierProvider<ChangeNotifier>>[
+      providers: [
         ChangeNotifierProvider<SettingsService>.value(value: settings),
         ChangeNotifierProvider<RadioController>.value(value: radioController),
+        Provider<RecordingStore>.value(value: recordingStore),
+        Provider<FilePlayer>.value(value: filePlayer),
       ],
       child: const MbdsdrApp(),
     ),

@@ -27,6 +27,14 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from mbdsdr_ai.amr import AMRClassifier, synthesize_modulation_iq  # noqa: E402
+# 公共管线：混淆矩阵产物走统一口径（图 + CSV + manifest + 样本数 + CI）
+from experiments.common import runner, manifest  # noqa: E402
+from experiments.common import plot as eplot  # noqa: E402
+
+ORIGIN = "synthetic"
+OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       "paper", "experiments")
+FIG_DIR = os.path.join(OUT_DIR, "figures")
 
 MODS = ["AM", "FM", "CW", "FSK", "PSK", "QAM", "OFDM", "NOISE"]
 SNRS = [-5, 0, 5, 10, 15, 20, 25, 30]
@@ -91,6 +99,46 @@ def run(trials: int, fs: float, train_seed: int = TRAIN_SEED,
             row_sum = confusion[mi].sum()
             norm = confusion[mi] / row_sum if row_sum else confusion[mi]
             w.writerow([mod] + [f"{v:.4f}" for v in norm])
+
+    # --- 公共口径产物：混淆矩阵热图 + 带样本数/CI 的 CSV + manifest（synthetic）---
+    n_conf_samples = int(confusion.sum())
+    # 行归一化矩阵（行=真实，列=预测）
+    row_sums = confusion.sum(axis=1, keepdims=True)
+    norm_mat = confusion / np.where(row_sums == 0, 1, row_sums)
+    diag_cell = runner.BinomialCell(int(np.trace(confusion)), n_conf_samples)
+
+    p_conf = os.path.join(OUT_DIR, "amr_confusion_public.csv")
+    with open(p_conf, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow([f"# data_origin={ORIGIN}; conf_snr_db={CONF_SNR}; "
+                    f"n_samples={n_conf_samples}; "
+                    f"diag_acc={diag_cell.rate:.4f} "
+                    f"wilson95=[{diag_cell.wilson[0]:.4f},{diag_cell.wilson[1]:.4f}]"])
+        w.writerow(["true\\pred(normalized)"] + MODS)
+        for mi, mod in enumerate(MODS):
+            w.writerow([mod] + [f"{v:.4f}" for v in norm_mat[mi]])
+        w.writerow([])
+        w.writerow(["counts"] + MODS)
+        for mi, mod in enumerate(MODS):
+            w.writerow([mod] + [int(confusion[mi, j]) for j in range(len(MODS))])
+
+    fig_conf = eplot.plot_confusion_matrix(
+        norm_mat, MODS, origin=ORIGIN, n_samples=n_conf_samples,
+        out_dir=FIG_DIR, fname_prefix="amr_confusion_matrix",
+        title=f"AMR confusion matrix (SNR={CONF_SNR} dB, KNN k=5)")
+
+    mpath = manifest.write_manifest(
+        out_dir=OUT_DIR, script=__file__, seed=test_seed, data_origin=ORIGIN,
+        params={"mods": MODS, "conf_snr_db": CONF_SNR, "fs": fs,
+                "knn_k": 5, "train_seed": train_seed, "test_seed": test_seed,
+                "diag_acc": round(diag_cell.rate, 4),
+                "diag_wilson": [round(diag_cell.wilson[0], 4),
+                                round(diag_cell.wilson[1], 4)],
+                "csv_confusion": os.path.basename(p_conf),
+                "figure_confusion": os.path.basename(fig_conf)},
+        n_samples=n_conf_samples,
+        filename="manifest_amr.json")
+    print(f"[写公共口径] {p_conf}\n[写公共口径] {fig_conf}\n[写公共口径] {mpath}")
 
     # 汇总指标
     high = acc_by_snr[30].mean()

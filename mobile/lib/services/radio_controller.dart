@@ -12,11 +12,13 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
 import '../app/tokens.dart';
+import '../audio/file_recording_sink.dart';
 import '../audio/null_pcm_sink.dart';
 import '../audio/pcm_sink.dart';
 import '../dsp/demod.dart';
@@ -24,6 +26,7 @@ import '../dsp/fft_processor.dart';
 import '../dsp/iq.dart';
 import '../dsp/squelch.dart';
 import '../models/radio_state.dart';
+import '../models/recording.dart';
 import 'rtl_tcp_client.dart';
 
 /// 收音机对外接口（供外壳模块与测试 fake 实现）。
@@ -82,6 +85,17 @@ abstract interface class RadioApi {
   /// 设置静音：存字段、转发给 sink、通知 UI。
   void setMuted(bool m);
 
+  /// 当前是否正在把解调音频录制成本地 .wav（生产走 [FileRecordingSink]）。
+  bool get recording;
+
+  /// 开始录制：把当前解调音频量化成 16-bit 小端 WAV 落盘，并写 sidecar JSON。
+  /// 仅在已连接（有真实解调音频）时可用；未连接 / 未配置录音目录时抛 [StateError]。
+  Future<void> startRecording();
+
+  /// 停止录制：关 WAV、写 sidecar、产出 [RecordingMeta]（经 onRecordingFinalized 入索引）。
+  /// 未在录制时返回 null。
+  Future<RecordingMeta?> stopRecording();
+
   /// 是否启用静噪门控（基于解调后音频真实 RMS 电平）。
   bool get squelchEnabled;
 
@@ -109,9 +123,13 @@ abstract interface class RadioApi {
 
 /// 真实收音机控制器。
 class RadioController extends ChangeNotifier implements RadioApi {
-  RadioController({PcmSink? sink, RtlTcpClient Function()? clientFactory})
-      : _sink = sink ?? NoOpSink(),
-        _clientFactory = clientFactory ?? RtlTcpClient.new {
+  RadioController({
+    PcmSink? sink,
+    RtlTcpClient Function()? clientFactory,
+    Future<Directory> Function()? recordingsDirProvider,
+  })  : _sink = sink ?? NoOpSink(),
+        _clientFactory = clientFactory ?? RtlTcpClient.new,
+        _recordingsDirProvider = recordingsDirProvider {
     // 订阅自己的解调音频流，逐帧过静噪门后喂入 PCM sink。
     _audioSub = audioStream.listen(_onAudioFrame);
   }
@@ -119,6 +137,9 @@ class RadioController extends ChangeNotifier implements RadioApi {
   // ---------------------------------------------------- 依赖注入
   final PcmSink _sink;
   final RtlTcpClient Function() _clientFactory;
+
+  /// 录音目录提供者（生产：RecordingStore.recordingsDir()）。未注入则不能开始录制。
+  final Future<Directory> Function()? _recordingsDirProvider;
 
   /// 解调音频送给输出设备的名义采样率（Hz）。WFM 恰好 ~48k；NFM 约 51.2k，
   /// 重采样为已知限制。sink.start 统一用 48000 与原生 AudioTrack 对齐。
@@ -165,6 +186,18 @@ class RadioController extends ChangeNotifier implements RadioApi {
     required String mode,
     required double levelDbfs,
   })? onSignalActivity;
+
+  // ---------------------------------------------------- 真实文件录制
+  /// 当前录制会话（null = 未在录）。写盘走 [FileRecordingSink]（16-bit 小端 WAV）。
+  FileRecordingSink? _recSink;
+  bool _recording = false;
+
+  @override
+  bool get recording => _recording;
+
+  /// 录制结束回调：由外壳（main.dart）注入，把结果 meta 加进 SettingsService 索引。
+  /// 未注入时录制仍落盘、但不进列表（测试常用）。
+  void Function(RecordingMeta meta)? onRecordingFinalized;
 
   late final FftProcessor _fft = FftProcessor(fftSize: 2048);
   FmDemod? _demod;
@@ -401,14 +434,19 @@ class RadioController extends ChangeNotifier implements RadioApi {
       frame,
       audioSampleRateHz: audioSampleRateHz.toDouble(),
     );
+    // 过门后的帧（开门=原帧，关门=静音帧）：既送外放，也送录制——录"听到的"。
+    // 音量/静音只影响外放（PlatformPcmSink 内部量化），落盘永远是干净解调音频。
+    final Float32List out;
     if (open) {
-      _sink.write(frame);
+      out = frame;
     } else {
       if (_silence.length != frame.length) {
         _silence = Float32List(frame.length);
       }
-      _sink.write(_silence);
+      out = _silence;
     }
+    _sink.write(out);
+    _recSink?.write(out);
     // 仅在开门/关门跳变时通知 UI，避免每帧抖动 rebuild。
     if (open != wasOpen) {
       // 真实信号活动：静噪门由关→开（连接后首次出声 / 值守命中过门限）。
@@ -448,12 +486,65 @@ class RadioController extends ChangeNotifier implements RadioApi {
     notifyListeners();
   }
 
+  // ---------------------------------------------------- 录制（真实落盘 .wav）
+  @override
+  Future<void> startRecording() async {
+    if (_recSink != null) return; // 已在录：重复调用安全忽略。
+    if (_status != ConnectionStatus.connected) {
+      throw StateError('未连接 rtl_tcp：无真实解调音频可录制');
+    }
+    final provider = _recordingsDirProvider;
+    if (provider == null) {
+      throw StateError('未配置录音目录（RecordingStore）');
+    }
+    final dir = await provider();
+    // 固定一份开始时刻/频率/模式：FileRecordingSink 的 start 与 dispose 取同一份，
+    // 保证 sidecar 文件名与索引 startedAtEpochMs 一致（不两次取时钟造成错位）。
+    final started = RecordingMeta(
+      startedAtEpochMs: DateTime.now().millisecondsSinceEpoch,
+      frequencyHz: _freqHz,
+      mode: _mode.name,
+      deviceSource: RecordingSource.connected,
+    );
+    final rec = FileRecordingSink(dir: dir, metaFactory: () => started);
+    await rec.start(sampleRateHz: audioSampleRateHz, channels: 1);
+    _recSink = rec;
+    _recording = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<RecordingMeta?> stopRecording() async {
+    final rec = _recSink;
+    _recSink = null;
+    if (!_recording) {
+      _recording = false;
+      notifyListeners();
+      return null;
+    }
+    _recording = false;
+    RecordingMeta? meta;
+    if (rec != null) {
+      await rec.dispose();
+      meta = rec.result;
+      if (meta != null) onRecordingFinalized?.call(meta);
+    }
+    notifyListeners();
+    return meta;
+  }
+
   // ---------------------------------------------------- 断开 / 参数
   @override
   Future<void> disconnect() async {
     _userDisconnected = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    // 断连前若在录制，先收尾落盘（避免断流留下半写的 .wav）。
+    if (_recSink != null) {
+      try {
+        await stopRecording();
+      } catch (_) {/* 收尾失败不阻断断连 */}
+    }
     await _sink.dispose();
     _teardownClient();
     _setStatus(ConnectionStatus.disconnected);
@@ -540,6 +631,9 @@ class RadioController extends ChangeNotifier implements RadioApi {
     _reconnectTimer?.cancel();
     _audioSub.cancel();
     _spectrumTimer?.cancel();
+    if (_recSink != null) {
+      unawaited(stopRecording());
+    }
     unawaited(_sink.dispose());
     _teardownClient();
     unawaited(_spectrumCtrl.close());

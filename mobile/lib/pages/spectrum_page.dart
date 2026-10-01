@@ -734,6 +734,47 @@ class _ControlPanel extends StatelessWidget {
                         : '连接 ${rtlHost.trim()}:$rtlPort',
               ),
             ),
+            // ---- 录音开关：真实落盘 16-bit WAV + sidecar。仅在已连接（有真实解调
+            // 音频）时可开始；未连接/重连中诚实禁用并说明原因；录制中亮红点、可停。
+            const SizedBox(height: AppTokens.spacingM),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: controller.recording
+                      ? '停止录制并保存 .wav'
+                      : (connected
+                          ? '录制当前解调音频（落盘 .wav）'
+                          : '未连接 rtl_tcp：无真实解调音频可录制'),
+                  color: controller.recording
+                      ? AppTokens.danger
+                      : AppTokens.textAt(AppTokens.textAlphaFaint),
+                  icon: Icon(
+                    controller.recording
+                        ? Icons.fiber_manual_record
+                        : Icons.fiber_manual_record_outlined,
+                  ),
+                  // 录制中始终可停；否则仅已连接可开始。
+                  onPressed: (connected || controller.recording)
+                      ? () async {
+                          try {
+                            if (controller.recording) {
+                              await controller.stopRecording();
+                            } else {
+                              await controller.startRecording();
+                            }
+                          } catch (_) {
+                            // 开始失败（如未配目录）保持未录制；按钮态由 notify 回读。
+                          }
+                        }
+                      : null,
+                ),
+                Text(
+                  controller.recording ? '录制中…' : '录制',
+                  style: AppTokens.auxiliary,
+                ),
+              ],
+            ),
             // 收藏当前频点（命名弹窗）+ 已收藏列表：点击真实跳频并应用模式/带宽。
             // 书签默认空，不内置台名/位置。
             if (onAddBookmark != null) ...[

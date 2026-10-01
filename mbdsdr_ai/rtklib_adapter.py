@@ -982,11 +982,11 @@ class NTRIPManager:
                 user=cfg.user, password=cfg.password,
                 on_data=self._handle_rtcm,
             )
-            ok = onnect()
+            ok = stream.connect()
             if ok:
                 self._stream = stream
             else:
-                lose()
+                self._lose()
             return ok
 
     def stop(self) -> None:
@@ -1071,9 +1071,9 @@ def ntrip_connect(host: str, port: int = NTRIP_DEFAULT_PORT,
                   ) -> Dict[str, Any]:
     """构造 NTRIP 请求并尝试连接；返回握手是否成功（不阻塞）。"""
     stream = NTRIPStream(host, port, mountpoint, user, password)
-    ok = onnect()
+    ok = stream.connect()
     if ok:
-        lose() # 仅验证握手，长期接收由调用方持有实例
+        stream.close() # 仅验证握手，长期接收由调用方持有实例
     return {"host": host, "port": port, "mountpoint": mountpoint, "handshake_ok": ok}
 
 

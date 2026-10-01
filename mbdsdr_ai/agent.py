@@ -1845,8 +1845,13 @@ class MBDSDRAgent:
             category="memory",
         )
 
-    def _workflow_tool_executor(self, tool_name: str, params: Dict[str, Any]) -> Any:
-        """工作流引擎的工具执行器（桥接到 Agent 的工具注册表）。"""
+    def _workflow_tool_executor(self, tool_name: str, params: Dict[str, Any]) -> ToolResult:
+        """工作流引擎的工具执行器（桥接到 Agent 的工具注册表）。
+
+        D6 接真实：成功时返回 ToolResult 本体（而非 content 散文字符串），workflow_engine
+        据此读取 .content（人类可读结果）与 .data（结构化 sidecar 字典）做跨步 {{var}}
+        回填。失败抛异常，由 workflow_engine 走重试/失败分支。
+        """
         t0 = time.time()
         result = self.tool_registry.call(tool_name, params)
         # 录制工作流：记录本次工具调用（D1 接真实）。
@@ -1864,7 +1869,7 @@ class MBDSDRAgent:
         except Exception:
             pass
         if result.success:
-            return result.content
+            return result
         else:
             raise Exception(result.error or f"工具 {tool_name} 执行失败")
 
@@ -1952,8 +1957,9 @@ class MBDSDRAgent:
                     "task_type": {"type": "string", "description": "任务类型: workflow/tool", "default": "workflow"},
                     "target": {"type": "string", "description": "工作流名称或工具名称"},
                     "params": {"type": "object", "description": "任务参数"},
-                    "schedule_type": {"type": "string", "description": "调度类型: interval(间隔)/once(一次性)", "default": "interval"},
+                    "schedule_type": {"type": "string", "description": "调度类型: interval(间隔)/once(一次性)/cron(cron 表达式)", "default": "interval"},
                     "interval_seconds": {"type": "integer", "description": "间隔秒数（interval类型）", "default": 3600},
+                    "cron_expression": {"type": "string", "description": "cron 表达式（分 时 日 月 周，周 0=周日；如 '0 * * * *' 每小时整点），schedule_type=cron 时必填"},
                     "description": {"type": "string", "description": "任务描述"},
                 },
                 "required": ["name", "target"],
@@ -2101,11 +2107,17 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="subagent_create",
-            description="创建一个子代理。子代理是专门处理特定任务的 AI 助手，有自己的工具集和上下文。可用类型: spectrum_analyzer(频谱分析)、signal_decoder(信号解码)、satellite_tracker(卫星跟踪)、interference_hunter(干扰定位)、baseband_recorder(基带录制)、hardware_controller(硬件控制)、code_evolver(代码进化)。",
+            description=(
+                "创建一个子代理（同步工具执行器，非自主 AI 子代理：无 LLM 推理、无多步循环）。"
+                "有内置默认执行工具的类型：spectrum_analyzer(频谱分析)、satellite_tracker(卫星跟踪)、"
+                "baseband_recorder(基带录制)。其余类型（signal_decoder/interference_hunter/"
+                "hardware_controller/code_evolver）无内置默认工具，执行时必须在 input_data 中传 "
+                "tool_name 及参数走通用路径，否则报 NotImplementedError。"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "agent_type": {"type": "string", "description": "子代理类型: spectrum_analyzer/signal_decoder/satellite_tracker/interference_hunter/baseband_recorder/hardware_controller/code_evolver"},
+                    "agent_type": {"type": "string", "description": "子代理类型: spectrum_analyzer/satellite_tracker/baseband_recorder 有内置默认工具；其余类型需在 input_data 传 tool_name"},
                     "subagent_id": {"type": "string", "description": "自定义 ID（可选，自动生成）"},
                 },
                 "required": ["agent_type"],
@@ -2154,7 +2166,7 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="pose_get",
-            description="获取当前 6DOF 位姿。包括位置（经纬度/海拔）、姿态（横滚/俯仰/偏航）、四元数、速度、置信度。需要 IMU+磁力计+GNSS 数据更新后才有意义。",
+            description="获取当前 6DOF 位姿融合状态（位置/姿态/四元数/速度/置信度）。【诚实标注】该状态由手动喂入的 IMU/GNSS 数据累计融合而成；当前原型无硬件传感器实时推流，不反映设备真实姿态。",
             parameters={"type": "object", "properties": {}, "required": []},
             handler=lambda args: ToolResult(success=True, content=json.dumps(pf.get_pose().to_dict(), ensure_ascii=False, indent=2)),
             category="pose",
@@ -2162,7 +2174,13 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="pose_update_imu",
-            description="更新 IMU 数据（加速度计+陀螺仪+磁力计），更新位姿估计。这是 6DOF/9DOF 姿态估计的核心。数据来自 BMI260（6轴）+ TMAG5273（磁力计）。",
+            description=(
+                "手动喂入 IMU 数据（加速度计+陀螺仪+磁力计）到位姿融合器，更新 6DOF 姿态估计。"
+                "【诚实标注】当前原型无 BMI260/TMAG5273 硬件驱动，也无任何 I2C/SPI/串口传感器"
+                "实时推流通道：本工具不会自行读到任何传感器数据，传入的数值由调用方（LLM/脚本）"
+                "自行提供，仅用于位姿融合算法验证/仿真/演示，不代表真实硬件读数。接真实硬件需"
+                "HAL 侧补 IMU 驱动线程推流。"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -2184,7 +2202,12 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="pose_update_gps",
-            description="更新 GNSS 数据（北斗/GPS），融合位置和速度。数据来自 ATGM336H 模块。GNSS 提供绝对位置，IMU 提供相对姿态，两者融合得到完整 6DOF 位姿。",
+            description=(
+                "手动喂入 GNSS 位置（经纬度/海拔/速度/航向/卫星数）到位姿融合器，融合绝对位置。"
+                "【诚实标注】当前原型无 ATGM336H 等 GNSS 模块串口 NMEA 推流通道：本工具不会自动"
+                "读串口，传入的数值由调用方自行提供，仅用于融合算法验证/仿真，不代表真实定位。"
+                "接真实硬件需 serial_gnss/gnss_monitor 侧补 NMEA 推流线程。"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -2429,7 +2452,14 @@ class MBDSDRAgent:
         )
 
     def _register_learning_tools(self):
-        """注册自学习工具（白皮书第四章 4.6.2）。"""
+        """注册自学习工具（白皮书第四章 4.6.2）。
+
+        A2(D3) 摘除说明：learning_learn / learning_suggestion 两个 LLM 工具面已摘除——
+        learn_batch 只是循环 learn_from_experience、无聚合/无置信度更新；get_suggestion
+        词重叠匹配对中文失效且 pattern.applied 恒 False（学到的规律从不回灌主循环）。
+        保留 learning_record/experiences/patterns/stats（真实经验日志与只读统计）；
+        保留 SelfLearningEngine 类（self.self_learning）供内部/单测与未来接线。
+        """
         sl = self.self_learning
 
         self.tool_registry.register(
@@ -2451,33 +2481,9 @@ class MBDSDRAgent:
             category="learning",
         )
 
-        self.tool_registry.register(
-            name="learning_learn",
-            description="批量学习：从未学习的高分经验中提取规律。分析工具调用序列、错误恢复策略、任务模式，生成可复用的学习模式。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "limit": {"type": "integer", "description": "学习的经验数量，默认 100", "default": 100},
-                },
-                "required": [],
-            },
-            handler=lambda args: ToolResult(success=True, content=json.dumps([p.to_dict() for p in sl.learn_batch(args.get("limit", 100))], ensure_ascii=False, indent=2)),
-            category="learning",
-        )
-
-        self.tool_registry.register(
-            name="learning_suggestion",
-            description="根据问题获取学习建议。查找与问题相关的学习模式，给出工具调用建议。这是自学习闭环的应用阶段：用学到的规律指导新任务。",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "question": {"type": "string", "description": "用户问题"},
-                },
-                "required": ["question"],
-            },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(sl.get_suggestion(args["question"]).to_dict() if sl.get_suggestion(args["question"]) else {"message": "暂无相关学习建议"}, ensure_ascii=False, indent=2)),
-            category="learning",
-        )
+        # learning_learn / learning_suggestion：A2(D3) 已从 LLM 工具面摘除（假闭环）。
+        # 后端 SelfLearningEngine.learn_batch / get_suggestion 仍保留在 self.self_learning 上，
+        # 供单测与未来真接线（聚合/中文匹配/回灌主循环）使用。
 
         self.tool_registry.register(
             name="learning_experiences",
@@ -2673,6 +2679,18 @@ class MBDSDRAgent:
         """注册天文计算工具（借鉴 Stellarium）。"""
         obs = self.observer
 
+        def _astro_pointing_guidance(target, cur, beamwidth_deg):
+            # AntennaParams.beamwidth_deg 是按口径/频率推导的属性，不能当构造参数传；
+            # 用户显式给 beamwidth_deg 时，用其重算"是否在波束内"（A2 B2 残留 bug 修复）。
+            import math as _m
+            res = compute_pointing_guidance(target, cur, AntennaParams())
+            if beamwidth_deg:
+                ang = _m.sqrt((target.alt_deg - cur.alt_deg) ** 2 +
+                              (target.az_deg - cur.az_deg) ** 2)
+                res["beamwidth_deg_used"] = float(beamwidth_deg)
+                res["in_beam"] = ang < float(beamwidth_deg) / 2.0
+            return res
+
         self.tool_registry.register(
             name="astro_set_observer",
             description="设置观测者位置（经纬度/高度）和气象参数（气压/温度/湿度）。用于卫星指向、坐标转换、大气折射计算。获取 GPS 后应调用此工具更新位置。",
@@ -2805,7 +2823,13 @@ class MBDSDRAgent:
                 },
                 "required": ["target_alt", "target_az", "current_alt", "current_az"],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(compute_pointing_guidance(AltAzCoord(args["target_alt"], args["target_az"]), AltAzCoord(args["current_alt"], args["current_az"]), AntennaParams(beamwidth_deg=args.get("beamwidth_deg", 5))), ensure_ascii=False, indent=2)),
+            handler=lambda args: (lambda res: ToolResult(
+                success=True,
+                content=json.dumps(res, ensure_ascii=False, indent=2)))(
+                _astro_pointing_guidance(
+                    AltAzCoord(args["target_alt"], args["target_az"]),
+                    AltAzCoord(args["current_alt"], args["current_az"]),
+                    args.get("beamwidth_deg"))),
             category="astronomy",
         )
 

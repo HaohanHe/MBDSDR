@@ -81,6 +81,17 @@ def _get_ground_station_latlon() -> tuple:
     return (None, None)
 
 
+def _tr_pair(pair) -> ToolResult:
+    """把 (content_str, data_dict) 二元组包装成 ToolResult（D6 工作流 sidecar）。
+
+    关键工具（录制/干扰检测/多普勒/测向/扫描）在返回人类可读散文的同时，把工作流
+    跨步需要的结构化字段（recording_path / doppler_freq / interference_freq_hz /
+    rssi_by_azimuth 等）放在 data 里，供 workflow_engine 回填 {{var}} 模板。
+    """
+    content, data = pair
+    return ToolResult(success=True, content=content, data=data or {})
+
+
 def register_sdr_tools(agent):
     """
     把所有 SDR 工具注册到 Agent 中。
@@ -348,6 +359,17 @@ def register_sdr_tools(agent):
     # 2. 频率与采样率（4个）
     # ═══════════════════════════════════════════════════
 
+    def _set_frequency_h(args):
+        b = _get_backend(mgr)
+        if b is None:
+            return ToolResult(success=False,
+                              content="频率设置失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file")
+        # 只调一次 set_frequency（原实现 success 与 content 条件各调一次，重复副作用）
+        ok = b.set_frequency(args["frequency_hz"])
+        return ToolResult(success=bool(ok),
+                          content=(f"频率已设置: {args['frequency_hz']/1e6:.3f} MHz"
+                                   if ok else "频率设置失败（超出设备范围）"))
+
     agent.tool_registry.register(
         name="sdr_set_frequency",
         description="设置接收频率（中心频率）。单位 Hz。例如 FM 广播 98.5MHz = 98500000，航空波段 118MHz = 118000000，433MHz = 433000000。设置后自动开始接收。",
@@ -358,10 +380,7 @@ def register_sdr_tools(agent):
             },
             "required": ["frequency_hz"],
         },
-        handler=lambda args: ToolResult(
-            success=_get_backend(mgr).set_frequency(args["frequency_hz"]),
-            content=f"频率已设置: {args['frequency_hz']/1e6:.3f} MHz" if _get_backend(mgr).set_frequency(args["frequency_hz"]) else "频率设置失败（超出设备范围或未连接）",
-        ),
+        handler=_set_frequency_h,
         category="sdr_frequency",
     )
 
@@ -373,6 +392,16 @@ def register_sdr_tools(agent):
         category="sdr_frequency",
     )
 
+    def _set_sample_rate_h(args):
+        b = _get_backend(mgr)
+        if b is None:
+            return ToolResult(success=False,
+                              content="采样率设置失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file")
+        ok = b.set_sample_rate(args["sample_rate_hz"])
+        return ToolResult(success=bool(ok),
+                          content=(f"采样率已设置: {args['sample_rate_hz']/1e6:.3f} MHz"
+                                   if ok else "采样率设置失败"))
+
     agent.tool_registry.register(
         name="sdr_set_sample_rate",
         description="设置采样率。单位 Hz。常用值：2400000(2.4MHz), 1800000(1.8MHz), 1024000(1.024MHz), 250000(250kHz)。采样率越高带宽越宽，但 CPU 占用越大。",
@@ -383,12 +412,18 @@ def register_sdr_tools(agent):
             },
             "required": ["sample_rate_hz"],
         },
-        handler=lambda args: ToolResult(
-            success=_get_backend(mgr).set_sample_rate(args["sample_rate_hz"]),
-            content=f"采样率已设置: {args['sample_rate_hz']/1e6:.3f} MHz" if _get_backend(mgr).set_sample_rate(args["sample_rate_hz"]) else "采样率设置失败",
-        ),
+        handler=_set_sample_rate_h,
         category="sdr_frequency",
     )
+
+    def _guard_backend_set(method_name, value, ok_msg):
+        """无设备时诚实失败；有设备时调一次后端 setter（统一 None 保护）。"""
+        b = _get_backend(mgr)
+        if b is None:
+            return ToolResult(success=False,
+                              content="操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file")
+        ok = getattr(b, method_name)(value)
+        return ToolResult(success=bool(ok), content=ok_msg if ok else "操作失败")
 
     agent.tool_registry.register(
         name="sdr_set_bandwidth",
@@ -400,7 +435,7 @@ def register_sdr_tools(agent):
             },
             "required": ["bandwidth_hz"],
         },
-        handler=lambda args: ToolResult(success=_get_backend(mgr).set_bandwidth(args["bandwidth_hz"]), content=f"带宽已设置: {args['bandwidth_hz']} Hz"),
+        handler=lambda args: _guard_backend_set("set_bandwidth", args["bandwidth_hz"], f"带宽已设置: {args['bandwidth_hz']} Hz"),
         category="sdr_frequency",
     )
 
@@ -418,7 +453,7 @@ def register_sdr_tools(agent):
             },
             "required": ["gain_db"],
         },
-        handler=lambda args: ToolResult(success=_get_backend(mgr).set_gain(args["gain_db"]), content=f"增益已设置: {args['gain_db']} dB (AGC 已关闭)"),
+        handler=lambda args: _guard_backend_set("set_gain", args["gain_db"], f"增益已设置: {args['gain_db']} dB (AGC 已关闭)"),
         category="sdr_gain",
     )
 
@@ -432,13 +467,23 @@ def register_sdr_tools(agent):
             },
             "required": ["enabled"],
         },
-        handler=lambda args: ToolResult(success=_get_backend(mgr).set_agc(args["enabled"]), content=f"AGC 已{'开启' if args['enabled'] else '关闭'}"),
+        handler=lambda args: _guard_backend_set("set_agc", args["enabled"], f"AGC 已{'开启' if args['enabled'] else '关闭'}"),
         category="sdr_gain",
     )
 
     # ═══════════════════════════════════════════════════
     # 4. 解调与音频（3个）
     # ═══════════════════════════════════════════════════
+
+    def _set_demod_h(args):
+        b = _get_backend(mgr)
+        if b is None:
+            return ToolResult(success=False,
+                              content="解调模式设置失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file")
+        mode = args["mode"]
+        ok = b.set_demod(mode)
+        return ToolResult(success=bool(ok),
+                          content=f"解调模式已设置: {mode.upper()}" if ok else f"不支持的解调模式: {mode}")
 
     agent.tool_registry.register(
         name="sdr_set_demod",
@@ -450,7 +495,7 @@ def register_sdr_tools(agent):
             },
             "required": ["mode"],
         },
-        handler=lambda args: ToolResult(success=_get_backend(mgr).set_demod(args["mode"]), content=f"解调模式已设置: {args['mode'].upper()}" if _get_backend(mgr).set_demod(args["mode"]) else f"不支持的解调模式: {args['mode']}"),
+        handler=_set_demod_h,
         category="sdr_demod",
     )
 
@@ -464,7 +509,7 @@ def register_sdr_tools(agent):
             },
             "required": ["squelch_db"],
         },
-        handler=lambda args: ToolResult(success=_get_backend(mgr).set_squelch(args["squelch_db"]), content=f"静噪已设置: {args['squelch_db']} dB"),
+        handler=lambda args: _guard_backend_set("set_squelch", args["squelch_db"], f"静噪已设置: {args['squelch_db']} dB"),
         category="sdr_demod",
     )
 
@@ -478,7 +523,7 @@ def register_sdr_tools(agent):
             },
             "required": ["volume"],
         },
-        handler=lambda args: ToolResult(success=_get_backend(mgr).set_volume(args["volume"]), content=f"音量已设置: {args['volume']:.0%}"),
+        handler=lambda args: _guard_backend_set("set_volume", args["volume"], f"音量已设置: {args['volume']:.0%}"),
         category="sdr_demod",
     )
 
@@ -883,7 +928,7 @@ def register_sdr_tools(agent):
             },
             "required": [],
         },
-        handler=lambda args: ToolResult(success=True, content=_record_start(mgr, args)),
+        handler=lambda args: _tr_pair(_record_start(mgr, args)),
         category="sdr_record",
     )
 
@@ -891,7 +936,7 @@ def register_sdr_tools(agent):
         name="sdr_record_stop",
         description="停止当前录制。返回录制文件路径、时长、文件大小、采样率、中心频率等元数据。",
         parameters={"type": "object", "properties": {}, "required": []},
-        handler=lambda args: ToolResult(success=True, content=_record_stop(mgr)),
+        handler=lambda args: _tr_pair(_record_stop(mgr)),
         category="sdr_record",
     )
 
@@ -1136,7 +1181,7 @@ def register_sdr_tools(agent):
             },
             "required": ["satellite_name", "frequency_hz", "latitude", "longitude"],
         },
-        handler=lambda args: ToolResult(success=True, content=_satellite_doppler(args)),
+        handler=lambda args: _tr_pair(_satellite_doppler(args)),
         category="sdr_satellite",
     )
 
@@ -1527,7 +1572,7 @@ def register_sdr_tools(agent):
             "properties": {},
             "required": [],
         },
-        handler=lambda args: ToolResult(success=True, content=_signal_detect_interference(mgr, spec, args)),
+        handler=lambda args: _tr_pair(_signal_detect_interference(mgr, spec, args)),
         category="sdr_analysis",
     )
 
@@ -1905,7 +1950,7 @@ def register_sdr_tools(agent):
             },
             "required": ["rssi_by_azimuth"],
         },
-        handler=lambda args: ToolResult(success=True, content=_gnss_direction_find(args)),
+        handler=lambda args: _tr_pair(_gnss_direction_find(args)),
         category="gnss_monitor",
     )
 
@@ -2000,7 +2045,7 @@ def register_sdr_tools(agent):
             },
             "required": [],
         },
-        handler=lambda args: ToolResult(success=True, content=_gimbal_rssi_sweep(args, agent)),
+        handler=lambda args: _tr_pair(_gimbal_rssi_sweep(args, agent)),
         category="gimbal",
     )
 
@@ -3390,7 +3435,7 @@ def _spectrum_text(mgr, spec, args):
 def _record_start(mgr, args):
     backend = _get_backend(mgr)
     if not backend or not backend.status.connected:
-        return "错误: 设备未连接"
+        return "错误: 设备未连接", {}
     duration = args.get("duration", 0)
     fmt = args.get("format", "cf32")
     gain = args.get("gain", 1.0)
@@ -3401,15 +3446,20 @@ def _record_start(mgr, args):
     freq_mhz = int(backend.get_frequency() / 1e6)
     save_path = args.get("save_path") or os.path.join(save_dir, f"mbdsdr_{freq_mhz}MHz_{timestamp}.{fmt}")
     backend.start_recording(save_path, duration, fmt=fmt, gain=gain, decimation=decimation)
-    return f"开始录制\n格式: {fmt}\n路径: {save_path}\n时长: {'持续' if duration == 0 else f'{duration}秒'}\n频率: {backend.get_frequency()/1e6:.3f} MHz\n采样率: {backend.get_sample_rate()/1e6:.3f} MHz\n抽取: {decimation}x\n增益: {gain}"
+    text = (f"开始录制\n格式: {fmt}\n路径: {save_path}\n时长: {'持续' if duration == 0 else f'{duration}秒'}\n"
+            f"频率: {backend.get_frequency()/1e6:.3f} MHz\n采样率: {backend.get_sample_rate()/1e6:.3f} MHz\n"
+            f"抽取: {decimation}x\n增益: {gain}")
+    # D6 sidecar：把录制路径吐给工作流 {{recording_path}} 模板（解码步骤的 input_path）
+    return text, {"recording_path": save_path, "format": fmt, "duration": duration}
 
 def _record_stop(mgr):
     backend = _get_backend(mgr)
     if not backend or not backend.status.recording:
-        return "没有正在进行的录制"
+        return "没有正在进行的录制", {}
     path = backend.stop_recording()
     size = os.path.getsize(path) if os.path.exists(path) else 0
-    return f"录制已停止\n文件: {path}\n大小: {size/1024:.1f} KB"
+    text = f"录制已停止\n文件: {path}\n大小: {size/1024:.1f} KB"
+    return text, {"recording_path": path}
 
 def _recordings_list(args):
     save_dir = os.path.expanduser("~/.mbdsdr/recordings")
@@ -3708,7 +3758,7 @@ def _satellite_sky_view(args):
     return output
 
 def _satellite_doppler(args):
-    """卫星多普勒计算（真实实现）。"""
+    """卫星多普勒计算（真实实现）。返回 (散文, data) 二元组（D6 sidecar）。"""
     sat_name = args["satellite_name"]
     freq_hz = args["frequency_hz"]
     # 地面站坐标：优先用参数，否则从配置读取；都没有则报错
@@ -3717,7 +3767,7 @@ def _satellite_doppler(args):
     lon = args.get("longitude", cfg_lon)
     if lat is None or lon is None:
         return ("错误: 未配置地面站坐标。请在参数中传入 latitude/longitude，"
-                "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。")
+                "或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / ground_station_lon。"), {}
     lat = float(lat)
     lon = float(lon)
     alt = args.get("altitude", 0.0)
@@ -3726,7 +3776,7 @@ def _satellite_doppler(args):
 
     if "error" in result:
         return (f"多普勒计算失败: {result['error']}\n"
-                f"支持的卫星: {', '.join(orbit.BUILTIN_SATS.keys())}")
+                f"支持的卫星: {', '.join(orbit.BUILTIN_SATS.keys())}"), {}
 
     output = f"=== 卫星多普勒计算 (sgp4 真速度) ===\n"
     output += f"卫星: {result['satellite']}\n"
@@ -3737,7 +3787,14 @@ def _satellite_doppler(args):
     output += f"仰角: {result['elevation_deg']:.1f}°, 方位: {result['azimuth_deg']:.1f}°\n"
     output += f"距离: {result['range_km']:.0f} km\n"
     output += f"TLE epoch: {result.get('epoch','?')}\n"
-    return output
+    # D6 sidecar：doppler_freq(Hz) 供工作流 {{doppler_freq}} 直接喂 sdr_set_frequency
+    data = {
+        "doppler_freq": float(result['corrected_freq_mhz'] * 1e6),
+        "doppler_shift_hz": float(result['doppler_shift_hz']),
+        "elevation_deg": float(result['elevation_deg']),
+        "azimuth_deg": float(result['azimuth_deg']),
+    }
+    return output, data
 
 
 def _satellite_passes(args):
@@ -5176,7 +5233,7 @@ def _gnss_monitor_all(args):
 
 
 def _gnss_direction_find(args):
-    """干扰源方向估算。"""
+    """干扰源方向估算。返回 (散文, data) 二元组（D6 sidecar：estimated_direction_deg）。"""
     try:
         from mbdsdr_ai.gnss_monitor import interference_direction_finding
     except ImportError:
@@ -5187,11 +5244,11 @@ def _gnss_direction_find(args):
     if not rssi_dict or not isinstance(rssi_dict, dict):
         return ("错误: 需要提供 rssi_by_azimuth，即 {方位角度: RSSI(dBm)} 的映射，"
                 "例如 {\"0\": -82, \"30\": -75, \"60\": -68, \"90\": -74}。"
-                "请先用定向天线方位扫描工具（gimbal/gp 扫描）采集各方位 RSSI，再把结果交给本工具做质心定位。")
+                "请先用定向天线方位扫描工具（gimbal/gp 扫描）采集各方位 RSSI，再把结果交给本工具做质心定位。"), {}
 
     result = interference_direction_finding(rssi_dict)
     if not isinstance(result, dict) or "error" in result:
-        return f"无法估算干扰源方向: {result.get('error', '样本不足') if isinstance(result, dict) else '无效样本'}。请至少提供一组有效的 {方位: RSSI} 样本。"
+        return f"无法估算干扰源方向: {result.get('error', '样本不足') if isinstance(result, dict) else '无效样本'}。请至少提供一组有效的 {方位: RSSI} 样本。", {}
 
     lines = ["=== 干扰源方向估算（八木天线RSSI扫描）==="]
     lines.append(f"估算方向: {result['estimated_direction_deg']}°")
@@ -5200,7 +5257,9 @@ def _gnss_direction_find(args):
     lines.append(f"说明: {result['note']}")
     lines.append(f"验证: {result['symmetric_check']}")
 
-    return '\n'.join(lines)
+    # D6 sidecar：估算方位供工作流 {{interference_az}} 直接喂 gimbal_point
+    data = {"interference_az": float(result['estimated_direction_deg'])}
+    return '\n'.join(lines), data
 
 
 # ========================================================================
@@ -6133,15 +6192,19 @@ def _signal_extract_features(args):
 
 
 def _signal_detect_interference(mgr, spec, args):
-    """干扰源检测：从当前设备实时采集，在相对噪声底的频谱上识别窄带/宽带干扰。"""
+    """干扰源检测：从当前设备实时采集，在相对噪声底的频谱上识别窄带/宽带干扰。
+
+    返回 (散文, data) 二元组（D6 sidecar）：检测到干扰时把首个（最强）干扰中心频率
+    放在 data['interference_freq_hz']，供工作流 {{interference_freq_hz}} 调谐回填。
+    """
     from mbdsdr_ai.signal_analysis import detect_interference
 
     backend = _get_backend(mgr)
     if not backend or not getattr(backend.status, "connected", False):
-        return "错误: 设备未连接，请先调用 sdr_connect"
+        return "错误: 设备未连接，请先调用 sdr_connect", {}
     samples = backend.read_samples(4096)
     if samples is None:
-        return "错误: 该设备不支持 IQ 样本输出（如 SI4732 只输出解调后音频）"
+        return "错误: 该设备不支持 IQ 样本输出（如 SI4732 只输出解调后音频）", {}
 
     spectrum = spec.compute_spectrum(
         samples, backend.get_frequency(), backend.get_sample_rate(), fft_size=4096)
@@ -6162,7 +6225,12 @@ def _signal_detect_interference(mgr, spec, args):
         lines.append(f"    带宽: {intr['bandwidth_hz']/1e3:.1f} kHz")
         lines.append(f"    高出噪声底: {intr['power_db']:.1f} dB")
         lines.append(f"    置信度: {intr['confidence']*100:.0f}%")
-    return '\n'.join(lines)
+    # D6 sidecar：以首个（通常最强）干扰中心频率回填工作流调谐参数
+    data = {}
+    if interferences:
+        data["interference_freq_hz"] = float(interferences[0]["freq_hz"])
+        data["interference_bandwidth_hz"] = float(interferences[0]["bandwidth_hz"])
+    return '\n'.join(lines), data
 
 
 # ========================================================================
@@ -6404,6 +6472,7 @@ def _gimbal_stop(args):
 
 
 def _gimbal_rssi_sweep(args, agent=None):
+    """返回 (散文, data) 二元组（D6 sidecar）：rssi_by_azimuth / peak_az 供后续步骤回填。"""
     gc = _get_gimbal_controller()
 
     # 注入当前 SDR 后端的 RSSI 读数作为信号强度源
@@ -6450,7 +6519,19 @@ def _gimbal_rssi_sweep(args, agent=None):
                          "再用 gimbal_point 指向；精扫可把 step 调到 10°。")
         else:
             lines.append("未采到 RSSI（SDR 未连接或无读数）；可切 manual 模式人工测向。")
-    return "\n".join(lines)
+
+    # D6 sidecar：{方位: RSSI} 映射与峰值方位，供后续 {{rssi_by_azimuth}}/{{peak_az}} 回填
+    data = {}
+    rssi_map = {float(s["az"]): float(s["rssi"]) for s in r["samples"] if s["rssi"] is not None}
+    if rssi_map:
+        data["rssi_by_azimuth"] = rssi_map
+    if r["peak_az"] is not None:
+        peak = float(r["peak_az"])
+        data["peak_az"] = peak
+        # 预设工作流精扫步直接引用 ±20° 边界；此处由本工具自己的峰值算出，属真实派生数据
+        data["peak_az_minus_20"] = peak - 20.0
+        data["peak_az_plus_20"] = peak + 20.0
+    return "\n".join(lines), data
 
 
 

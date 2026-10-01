@@ -6,6 +6,363 @@
     },
     "snippet": "模型切换: 模型已切换: Qwen/Qwen3.6-35B-A3B -> test"
   },
+  "codec2_encode": {
+    "cat": "OK",
+    "args": {
+      "audio": []
+    },
+    "snippet": "Codec2 encoded 0 samples → 0 bits (0 bps)"
+  },
+  "codec2_decode": {
+    "cat": "OK",
+    "args": {
+      "bits": []
+    },
+    "snippet": "Codec2 decoded 0 bits → 0 audio samples"
+  },
+  "freedv_modulate": {
+    "cat": "OK",
+    "args": {
+      "bits": []
+    },
+    "snippet": "FreeDV 700D: modulated 0 bits → 1280 audio samples"
+  },
+  "freedv_demodulate": {
+    "cat": "OK",
+    "args": {
+      "signal": []
+    },
+    "snippet": "FreeDV 700D: demodulated 0 samples → 0 bits (SNR est: 0.0 dB)"
+  },
+  "hdradio_ofdm_demod": {
+    "cat": "OTHER",
+    "args": {
+      "iq": []
+    },
+    "snippet": "空 IQ 输入"
+  },
+  "hdradio_frame_parse": {
+    "cat": "OK",
+    "args": {
+      "data": []
+    },
+    "snippet": "HD Radio 帧: 提取 0 条 PSD 文本: []"
+  },
+  "hdradio_decode_iq": {
+    "cat": "OTHER",
+    "args": {
+      "iq": []
+    },
+    "snippet": "空 IQ 输入"
+  },
+  "fft_filter": {
+    "cat": "CRASH",
+    "args": {
+      "taps": []
+    },
+    "snippet": "工具 'fft_filter' 调用失败: ValueError: FFTFilter: need at least one tap。请检查参数是否正确，或参考工具说明。"
+  },
+  "downchannelize": {
+    "cat": "OK",
+    "args": {
+      "baseband_sr": 1,
+      "channel_sr": 1
+    },
+    "snippet": "DownChannelizer: 1->1 (0 级半带, offset=0.0Hz)"
+  },
+  "fir_filter": {
+    "cat": "NEED_RESOURCE",
+    "args": {
+      "taps": []
+    },
+    "snippet": "工具 'fir_filter' 调用失败: ValueError: a cannot be empty。请检查参数是否正确，或参考工具说明。"
+  },
+  "agc_process": {
+    "cat": "OK",
+    "args": {
+      "iq": []
+    },
+    "snippet": "{\"rms_before\": NaN, \"rms_after\": NaN, \"out_samples\": 0, \"source\": \"mbdsdr independent rece"
+  },
+  "pfb_resample": {
+    "cat": "OK",
+    "args": {
+      "rate": 1.0
+    },
+    "snippet": "PFBArbResampler rate=1.0: 4000 → 3992 点 (比率 0.998)"
+  },
+  "tle_parse": {
+    "cat": "CRASH",
+    "args": {
+      "name": "test",
+      "line1": "test",
+      "line2": "test"
+    },
+    "snippet": "工具 'tle_parse' 调用失败: ValueError: TLE 校验和失败: 'test' / 'test'。请检查参数是否正确，或参考工具说明。"
+  },
+  "sgp4_propagate": {
+    "cat": "CRASH",
+    "args": {
+      "name": "test",
+      "line1": "test",
+      "line2": "test"
+    },
+    "snippet": "工具 'sgp4_propagate' 调用失败: ValueError: TLE 校验和失败: 'test' / 'test'。请检查参数是否正确，或参考工具说明。"
+  },
+  "sat_pass_predict": {
+    "cat": "CRASH",
+    "args": {
+      "name": "test",
+      "line1": "test",
+      "line2": "test",
+      "lat_deg": 43.8868,
+      "lon_deg": 125.3245
+    },
+    "snippet": "工具 'sat_pass_predict' 调用失败: ValueError: TLE 校验和失败: 'test' / 'test'。请检查参数是否正确，或参考工具说明。"
+  },
+  "doppler_calc": {
+    "cat": "CRASH",
+    "args": {
+      "name": "test",
+      "line1": "test",
+      "line2": "test",
+      "lat_deg": 43.8868,
+      "lon_deg": 125.3245,
+      "freq_hz": 100000000
+    },
+    "snippet": "工具 'doppler_calc' 调用失败: ValueError: TLE 校验和失败: 'test' / 'test'。请检查参数是否正确，或参考工具说明。"
+  },
+  "osmosdr_create_source": {
+    "cat": "CRASH",
+    "args": {
+      "device_string": "test"
+    },
+    "snippet": "No supported devices found (check the connection and/or udev rules)."
+  },
+  "osmosdr_get_gain_ranges": {
+    "cat": "OK",
+    "args": {
+      "driver": "test"
+    },
+    "snippet": "{   \"driver\": \"test\",   \"label\": \"test\",   \"gain_names\": [],   \"gain_ranges\": {},   \"note\""
+  },
+  "dab_fic_decode": {
+    "cat": "OK",
+    "args": {
+      "fic_bytes": []
+    },
+    "snippet": "DAB FIC: ensemble '' (EId -0x001), 0 services, 0 subchannels, discarded FIBs=0"
+  },
+  "dab_eti_parse": {
+    "cat": "OTHER",
+    "args": {
+      "frame": []
+    },
+    "snippet": "ETI parse: ok=False, nst=0, ficl=0, subchannels={}"
+  },
+  "dab_decode_iq": {
+    "cat": "OTHER",
+    "args": {
+      "data": []
+    },
+    "snippet": "DAB decode: ok=False, sync_offset=None"
+  },
+  "fourfsk_demod": {
+    "cat": "CRASH",
+    "args": {
+      "samples": 10
+    },
+    "snippet": "工具 'fourfsk_demod' 调用失败: TypeError: 'int' object is not iterable。请检查参数是否正确，或参考工具说明。"
+  },
+  "dmr_decode": {
+    "cat": "OTHER",
+    "args": {
+      "slot_dibits": []
+    },
+    "snippet": "DMR: unknown slot-1 CC=-1 voice=False ambe_frames=0 sync_errs=99"
+  },
+  "p25_decode": {
+    "cat": "OTHER",
+    "args": {
+      "nid_dibits": []
+    },
+    "snippet": "P25 NID: NAC=-0x01 DUID=-1 voice=False"
+  },
+  "dsd_decode_iq": {
+    "cat": "CRASH",
+    "args": {
+      "samples": 10
+    },
+    "snippet": "工具 'dsd_decode_iq' 调用失败: TypeError: 'int' object is not iterable。请检查参数是否正确，或参考工具说明。"
+  },
+  "gps_time_to_utc": {
+    "cat": "OK",
+    "args": {
+      "week": 1,
+      "tow": 1.0
+    },
+    "snippet": "{   \"gps_week\": 1,   \"gps_tow\": 1.0,   \"year\": 1980,   \"month\": 1,   \"day\": 13,   \"hour\": "
+  },
+  "ecef_to_llh": {
+    "cat": "OK",
+    "args": {
+      "x": 1.0,
+      "y": 1.0,
+      "z": 1.0
+    },
+    "snippet": "{   \"lat_deg\": 89.99810868121708,   \"lon_deg\": 45.0,   \"height_m\": -6356751.3142218385,   "
+  },
+  "rinex_parse": {
+    "cat": "OK",
+    "args": {
+      "nav_text": "test"
+    },
+    "snippet": "{   \"n_eph\": 0,   \"satellites\": [] }"
+  },
+  "spp_locate": {
+    "cat": "OK",
+    "args": {
+      "rs": [],
+      "dts": [],
+      "pr": []
+    },
+    "snippet": "{   \"x\": 0.0,   \"y\": 0.0,   \"z\": 0.0,   \"b_m\": 0.0,   \"b_s\": 0.0,   \"lat_rad\": -1.57079632"
+  },
+  "ntrip_connect": {
+    "cat": "CRASH",
+    "args": {
+      "host": "test",
+      "mountpoint": "test"
+    },
+    "snippet": "工具 'ntrip_connect' 调用失败: NameError: name 'onnect' is not defined。请检查参数是否正确，或参考工具说明。"
+  },
+  "kismet_parse_dot11": {
+    "cat": "CRASH",
+    "args": {
+      "frame_hex": "test"
+    },
+    "snippet": "工具 'kismet_parse_dot11' 调用失败: ValueError: non-hexadecimal number found in fromhex() arg at"
+  },
+  "kismet_discover_devices": {
+    "cat": "OK",
+    "args": {
+      "frames_hex": []
+    },
+    "snippet": "{   \"device_count\": 0,   \"devices\": [] }"
+  },
+  "sat_project_image": {
+    "cat": "OTHER",
+    "args": {
+      "sat_pos_km": [],
+      "sat_vel_km_s": [],
+      "pixel_x": 1.0
+    },
+    "snippet": "参数错误：sat_pos_km 与 sat_vel_km_s 必须各含至少 3 个元素 [x,y,z]，当前 sat_pos=0, sat_vel=0"
+  },
+  "sat_compose_falsecolor": {
+    "cat": "CRASH",
+    "args": {
+      "ch_vis": [],
+      "ch_swir": [],
+      "ch_ir": [],
+      "height": 1,
+      "width": 1
+    },
+    "snippet": "工具 'sat_compose_falsecolor' 调用失败: ValueError: cannot reshape array of size 0 into shape (1"
+  },
+  "lrpt_decode_full": {
+    "cat": "OK",
+    "args": {
+      "iq": []
+    },
+    "snippet": "decoded"
+  },
+  "fsk_modulate": {
+    "cat": "OK",
+    "args": {
+      "bits": []
+    },
+    "snippet": "FSK 调制: 0 bits → 0 采样 (baud=300)"
+  },
+  "fsk_demodulate": {
+    "cat": "CRASH",
+    "args": {
+      "samples": 10
+    },
+    "snippet": "工具 'fsk_demodulate' 调用失败: TypeError: len() of unsized object。请检查参数是否正确，或参考工具说明。"
+  },
+  "baudot_encode": {
+    "cat": "OK",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "Baudot 编码: 'HELLO' → 5 个 5bit 字"
+  },
+  "baudot_decode": {
+    "cat": "OK",
+    "args": {
+      "words": []
+    },
+    "snippet": "Baudot 解码: ''"
+  },
+  "minimodem_decode_audio": {
+    "cat": "CRASH",
+    "args": {
+      "samples": 10
+    },
+    "snippet": "工具 'minimodem_decode_audio' 调用失败: TypeError: len() of unsized object。请检查参数是否正确，或参考工具说明。"
+  },
+  "goes_lrit_parse": {
+    "cat": "OK",
+    "args": {
+      "vcdus": []
+    },
+    "snippet": "{\"files\": [], \"symbol_rate\": 293883}"
+  },
+  "goes_hrit_parse": {
+    "cat": "OK",
+    "args": {
+      "vcdus": []
+    },
+    "snippet": "{\"files\": [], \"symbol_rate\": 927000}"
+  },
+  "goes_extract_image": {
+    "cat": "CRASH",
+    "args": {
+      "files": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "工具 'goes_extract_image' 调用失败: ValueError: non-hexadecimal number found in fromhex() arg at"
+  },
+  "gk2a_lrit_decode": {
+    "cat": "NEED_RESOURCE",
+    "args": {
+      "iq_path": "/tmp/mbdsdr_test.bin",
+      "out_png": "test"
+    },
+    "snippet": "工具 'gk2a_lrit_decode' 调用失败: FileNotFoundError: [Errno 2] No such file or directory: '/tmp/"
+  },
+  "fy4_lrit_decode": {
+    "cat": "OK",
+    "args": {
+      "vcdus": []
+    },
+    "snippet": "{\"images\": []}"
+  },
+  "fy3_hrpt_decode": {
+    "cat": "OK",
+    "args": {
+      "soft_bits": []
+    },
+    "snippet": "{\"rows\": 0, \"cols\": 64}"
+  },
+  "doppler_orbit_determine": {
+    "cat": "CRASH",
+    "args": {
+      "observations": [],
+      "init_state": []
+    },
+    "snippet": "未提供地面站坐标：请在设置里配置地面站，或传 rx_lat/rx_lon。"
+  },
   "memory_write": {
     "cat": "OK",
     "args": {
@@ -40,7 +397,7 @@
       "name": "test",
       "target": "TEST"
     },
-    "snippet": "定时任务已添加: test ID: task_1789785382_0023"
+    "snippet": "定时任务已添加: test ID: task_1790872128_0423"
   },
   "scheduler_enable": {
     "cat": "NEED_RESOURCE",
@@ -56,117 +413,285 @@
     },
     "snippet": "任务不存在"
   },
+  "evolution_propose": {
+    "cat": "CRASH",
+    "args": {
+      "target_type": "test",
+      "target_name": "test",
+      "description": "test",
+      "proposed_change": "test"
+    },
+    "snippet": "工具 'evolution_propose' 调用失败: ValueError: 未知的进化目标类型: test，可选: ['skill', 'tool_description',"
+  },
+  "evolution_evaluate": {
+    "cat": "NEED_RESOURCE",
+    "args": {
+      "proposal_id": "test"
+    },
+    "snippet": "{   \"error\": \"建议 test 不存在\" }"
+  },
+  "evolution_commit": {
+    "cat": "NEED_RESOURCE",
+    "args": {
+      "proposal_id": "test"
+    },
+    "snippet": "提案不存在：请先调用 evolution_propose 创建提案，再用其返回的 proposal_id 提交。"
+  },
+  "pocsag_decode": {
+    "cat": "CRASH",
+    "args": {
+      "codewords": "TEST"
+    },
+    "snippet": "工具 'pocsag_decode' 调用失败: ValueError: invalid literal for int() with base 10: 'T'。请检查参数是否正确"
+  },
+  "pocsag_bch_correct": {
+    "cat": "CRASH",
+    "args": {
+      "codeword": "TEST"
+    },
+    "snippet": "工具 'pocsag_bch_correct' 调用失败: ValueError: invalid literal for int() with base 10: 'TEST'。请"
+  },
+  "dtmf_decode": {
+    "cat": "CRASH",
+    "args": {
+      "samples": 10
+    },
+    "snippet": "工具 'dtmf_decode' 调用失败: TypeError: len() of unsized object。请检查参数是否正确，或参考工具说明。"
+  },
+  "zvei_decode": {
+    "cat": "CRASH",
+    "args": {
+      "samples": 10
+    },
+    "snippet": "工具 'zvei_decode' 调用失败: IndexError: too many indices for array: array is 0-dimensional, but"
+  },
+  "afsk1200_demod": {
+    "cat": "CRASH",
+    "args": {
+      "samples": 10
+    },
+    "snippet": "工具 'afsk1200_demod' 调用失败: TypeError: len() of unsized object。请检查参数是否正确，或参考工具说明。"
+  },
+  "sdr_plan": {
+    "cat": "OK",
+    "args": {
+      "goal": "扫描当前频段并报告最强信号",
+      "steps": []
+    },
+    "snippet": "计划已建立： 目标: 扫描当前频段并报告最强信号 步骤: "
+  },
+  "sdr_todo": {
+    "cat": "OK",
+    "args": {
+      "items": []
+    },
+    "snippet": "任务清单已更新（0/0 完成）： "
+  },
+  "sdr_spill_save": {
+    "cat": "OK",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "[spill] 已转存 5 字符到 spill_1790872128.txt。上下文不再保留全文；需要时用 sdr_spill_read('spill_1790872128') 读"
+  },
+  "sdr_spill_read": {
+    "cat": "OTHER",
+    "args": {
+      "locator": "test"
+    },
+    "snippet": "找不到 spill: test"
+  },
   "sdr_switch_device": {
     "cat": "OTHER",
     "args": {
       "device_id": "mock"
     },
-    "snippet": "已切换到: 模拟 SDR（开发测试用）"
+    "snippet": "切换失败"
+  },
+  "sdr_open_iq_file": {
+    "cat": "NEED_RESOURCE",
+    "args": {
+      "path": "/tmp/mbdsdr_test.bin"
+    },
+    "snippet": "IQ 文件不存在: /tmp/mbdsdr_test.bin"
   },
   "sdr_set_frequency": {
-    "cat": "OK",
+    "cat": "OTHER",
     "args": {
       "frequency_hz": 100000000
     },
-    "snippet": "频率已设置: 100.000 MHz"
+    "snippet": "频率设置失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file"
   },
   "sdr_set_sample_rate": {
-    "cat": "OK",
+    "cat": "OTHER",
     "args": {
       "sample_rate_hz": 1024000
     },
-    "snippet": "采样率已设置: 1.024 MHz"
+    "snippet": "采样率设置失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file"
   },
   "sdr_set_bandwidth": {
-    "cat": "OK",
+    "cat": "OTHER",
     "args": {
       "bandwidth_hz": 12500
     },
-    "snippet": "带宽已设置: 12500 Hz"
+    "snippet": "操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file"
   },
   "sdr_set_gain": {
-    "cat": "OK",
+    "cat": "OTHER",
     "args": {
       "gain_db": 20
     },
-    "snippet": "增益已设置: 20 dB (AGC 已关闭)"
+    "snippet": "操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file"
   },
   "sdr_set_agc": {
-    "cat": "OK",
+    "cat": "OTHER",
     "args": {
       "enabled": true
     },
-    "snippet": "AGC 已开启"
+    "snippet": "操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file"
   },
   "sdr_set_demod": {
-    "cat": "OK",
+    "cat": "OTHER",
     "args": {
       "mode": "NFM"
     },
-    "snippet": "解调模式已设置: NFM"
+    "snippet": "解调模式设置失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file"
   },
   "sdr_set_squelch": {
-    "cat": "OK",
+    "cat": "OTHER",
     "args": {
       "squelch_db": 1.0
     },
-    "snippet": "静噪已设置: 1.0 dB"
+    "snippet": "操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file"
   },
   "sdr_set_volume": {
-    "cat": "OK",
+    "cat": "OTHER",
     "args": {
       "volume": 1.0
     },
-    "snippet": "音量已设置: 100%"
+    "snippet": "操作失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file"
+  },
+  "sdr_play_audio": {
+    "cat": "OTHER",
+    "args": {
+      "action": "start"
+    },
+    "snippet": "音频播放启动失败：sounddevice 可用=False，采样率=48000 Hz，增益=1.0。请确认已 pip install sounddevice 且系统存在可用音频输出"
+  },
+  "vfo_add": {
+    "cat": "OK",
+    "args": {
+      "name": "test",
+      "frequency_hz": 100000000
+    },
+    "snippet": "已添加 VFO: id=vfo_1 名称=\"test\" 频率=100.000 MHz 解调=FM 带宽=12500 Hz"
+  },
+  "vfo_remove": {
+    "cat": "NEED_RESOURCE",
+    "args": {
+      "vfo_id": "test"
+    },
+    "snippet": "删除失败：未找到 VFO \"test\""
+  },
+  "vfo_select": {
+    "cat": "NEED_RESOURCE",
+    "args": {
+      "vfo_id": "test"
+    },
+    "snippet": "切换失败：未找到 VFO \"test\""
+  },
+  "sdr_sweep_scan": {
+    "cat": "NEED_HW",
+    "args": {
+      "f_start_mhz": 1.0,
+      "f_stop_mhz": 1.0
+    },
+    "snippet": "错误: 设备未连接，无法扫频"
+  },
+  "sdr_bookmark_goto": {
+    "cat": "NEED_HW",
+    "args": {
+      "target": "TEST"
+    },
+    "snippet": "错误: 设备未连接，无法跳转频率"
+  },
+  "sdr_bookmark_add": {
+    "cat": "OK",
+    "args": {
+      "name": "test",
+      "freq_mhz": 1.0
+    },
+    "snippet": "已保存书签：[自定义] test: 1.0000 MHz"
   },
   "sdr_spectrum_zoom": {
     "cat": "OK",
     "args": {
       "factor": 2.0
     },
-    "snippet": "频谱缩放: 2.0x 视图范围: 99.744 - 100.256 MHz"
+    "snippet": "频谱缩放: 2.0x"
   },
   "sdr_spectrum_pan": {
     "cat": "OK",
     "args": {
       "offset_hz": 1000
     },
-    "snippet": "频谱平移: 1.0 kHz 视图范围: 99.745 - 100.257 MHz"
+    "snippet": "频谱平移: 1.0 kHz"
   },
-  "sdr_decode_noaa_apt": {
+  "noaa_apt_decode": {
     "cat": "NEED_RESOURCE",
     "args": {
       "input_path": "/tmp/mbdsdr_test.bin"
     },
-    "snippet": "解码失败: 不支持的格式: .bin（支持 .wav/.cf32）"
+    "snippet": "错误: wav 不存在: /tmp/mbdsdr_test.bin"
+  },
+  "meteor_viterbi_decode": {
+    "cat": "CRASH",
+    "args": {
+      "coded_bits": "TEST"
+    },
+    "snippet": "工具 'meteor_viterbi_decode' 调用失败: ValueError: could not convert string to float: 'TEST'。请检查"
+  },
+  "meteor_lrpt_demod": {
+    "cat": "OK",
+    "args": {
+      "sample_rate": 1024000
+    },
+    "snippet": "{\"sym_rate\": 72000, \"note\": \"\\u63d0\\u4f9b iq_base64(float32 interleaved) \\u540e\\u8fd4\\u56d"
   },
   "sdr_decode_sstv": {
     "cat": "OK",
     "args": {
+      "input_path": "/home/user/Doubao/chats/38438160041798146/syn_robot36.wav"
+    },
+    "snippet": "=== SSTV 解码完成 === 输入: /home/user/Doubao/chats/38438160041798146/syn_robot36.wav 模式: Robot "
+  },
+  "sdr_decode_cw": {
+    "cat": "NEED_RESOURCE",
+    "args": {
       "input_path": "/tmp/mbdsdr_test.bin"
     },
-    "snippet": "解码失败: 读取文件失败: "
+    "snippet": "CW 解码失败: [Errno 2] No such file or directory: '/tmp/mbdsdr_test.bin'"
   },
   "sdr_decode_ft8": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
       "input_path": "/tmp/mbdsdr_test.bin"
     },
-    "snippet": "=== FT8 解码 === 输入: /tmp/mbdsdr_test.bin 文件大小: 0 字节 可用工具: [] 状态: 未检测到 FT8 解码工具，建议安装 wsjtx 说"
+    "snippet": "=== FT8 分析 === 输入: /tmp/mbdsdr_test.bin 内置分析异常: [Errno 2] No such file or directory: '/tmp"
   },
   "sdr_decode_aprs": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
       "input_path": "/tmp/mbdsdr_test.bin"
     },
-    "snippet": "=== APRS 解码 === 输入: /tmp/mbdsdr_test.bin 可用工具: [] 状态: 未检测到 APRS 解码工具，建议安装 direwolf 说明: 未检测"
+    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
   },
   "sdr_decode_adsb": {
-    "cat": "OK",
+    "cat": "NEED_RESOURCE",
     "args": {
       "input_path": "/tmp/mbdsdr_test.bin"
     },
-    "snippet": "=== ADS-B 解码 === 输入: /tmp/mbdsdr_test.bin 可用工具: [] 状态: 未检测到 ADS-B 解码工具，建议安装 dump1090 说明: 未"
+    "snippet": "解码失败: 输入文件不存在: /tmp/mbdsdr_test.bin"
   },
   "sdr_satellite_sky_view": {
     "cat": "OK",
@@ -174,7 +699,7 @@
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== 卫星天空视图 === 位置: 43.8868°N, 125.3245°E 最小仰角: 0.0° 类型: all  当前没有可见卫星（仰角 > 0.0°） 内置卫星: NOA"
+    "snippet": "=== 卫星天空视图 === 位置: 43.8868°N, 125.3245°E 最小仰角: 0.0° 类型: all 可见卫星数: 1  1. METEOR M2    仰角: "
   },
   "sdr_satellite_doppler": {
     "cat": "OK",
@@ -184,16 +709,32 @@
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== 卫星多普勒计算 === 卫星: NOAA 19 标称频率: 100.000000 MHz 修正频率: 100.000216 MHz 多普勒频移: 216.2 Hz 最大多普"
+    "snippet": "=== 卫星多普勒计算 (sgp4 真速度) === 卫星: NOAA 19 标称频率: 100.000000 MHz 修正频率: 99.999000 MHz 多普勒频移: -10"
+  },
+  "sdr_satellite_passes": {
+    "cat": "OK",
+    "args": {
+      "latitude": 43.8868,
+      "longitude": 125.3245
+    },
+    "snippet": "=== 未来 24.0h 卫星过境预测 (仰角>=10.0°) === 共 25 次  1. FENGYUN 3D    升: 00:49:23 (方位 29.1°)    中天:"
+  },
+  "sdr_satellite_doppler_track": {
+    "cat": "OTHER",
+    "args": {
+      "satellite_name": "NOAA 19",
+      "frequency_mhz": 1.0
+    },
+    "snippet": "错误: 未配置地面站坐标。请在参数中传入 latitude/longitude，或在 ~/.mbdsdr/config.json 中设置 ground_station_lat / "
   },
   "sdr_ai_sweep": {
-    "cat": "OK",
+    "cat": "NEED_HW",
     "args": {
       "freq_start_hz": 1.0,
       "freq_end_hz": 1.0,
       "step_hz": 1.0
     },
-    "snippet": "AI 扫频完成 范围: 0.0 - 0.0 MHz, 步进 0 kHz 扫描点数: 1 最强台: 0.000 MHz @ 38.7 dB 已自动调谐到最强台  扫描结果（前10个最"
+    "snippet": "错误: 设备未连接"
   },
   "openapi_weather": {
     "cat": "OK",
@@ -201,7 +742,7 @@
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== 天气预报 ===  位置: 43.8868°, 125.3245°  温度: 25.1°C 风速: 14.3 km/h 湿度: 43%  提示：风速影响天线指向稳定性   "
+    "snippet": "=== 天气预报 ===  位置: 43.8868°, 125.3245°  温度: 6.0°C 风速: 10.5 km/h 湿度: 62%  提示：风速影响天线指向稳定性    "
   },
   "openapi_aircraft_nearby": {
     "cat": "OK",
@@ -225,7 +766,7 @@
       "destination": "TEST",
       "info": "test"
     },
-    "snippet": "=== AX.25 帧编码 === 源: BI4MIB-0 目的: TEST-0 控制: 0x03 协议ID: 0xF0 信息: test FCS: 0x0736 帧长度: 22 "
+    "snippet": "=== AX.25 帧编码 === 源: BI4MIB-0 目的: TEST-0 控制: 0x03 协议ID: 0xF0 信息: test FCS: 0xFF02 帧长度: 22 "
   },
   "sdr_aprs_encode": {
     "cat": "OK",
@@ -320,7 +861,7 @@
       "observer_lat": 43.8868,
       "observer_lon": 125.3245
     },
-    "snippet": "=== NOAA 19 过境预测 === 升起: 03:25:54 UTC, 方位 158° 中天: 03:30:24 UTC, 仰角 15.9°, 方位 285° 落下: 03:"
+    "snippet": "=== NOAA 19 过境预测 === 升起: 00:47:25 UTC, 方位 48° 中天: 00:51:25 UTC, 仰角 11.8°, 方位 86° 落下: 00:55"
   },
   "satellite_predict_all": {
     "cat": "OK",
@@ -328,7 +869,7 @@
       "observer_lat": 43.8868,
       "observer_lon": 125.3245
     },
-    "snippet": "=== 未来 24 小时卫星过境预测（共 6 次） ===  1. ISS (ZARYA): 02:49-02:56 (7分), 最大仰角 21°, 方位 339° 0.0MHz "
+    "snippet": "=== 未来 24 小时卫星过境预测（共 6 次） ===  1. FENGYUN 3D: 16:48-17:00 (12分), 最大仰角 38°, 方位 97° 137.1MHz"
   },
   "sky_view_visible": {
     "cat": "OK",
@@ -344,7 +885,7 @@
       "band_name": "L1",
       "center_freq_hz": 100000000
     },
-    "snippet": "=== GNSS 频带监测: L1 === 中心频率: 100.000 MHz 监测带宽: 2.048 MHz 平均功率: -105.2 dB 噪声基底: -104.6 dB 干扰"
+    "snippet": "=== GNSS 频带监测: L1 === 中心频率: 100.000 MHz 监测带宽: 2.048 MHz 平均功率: -105.3 dB 噪声基底: -104.7 dB 干扰"
   },
   "gnss_direction_find": {
     "cat": "OK",
@@ -395,7 +936,7 @@
     "args": {
       "device": "mock"
     },
-    "snippet": "=== 连接硬件: mock === 状态: 成功 设备: 模拟后端 TX能力: 支持"
+    "snippet": "=== 连接硬件: mock === 状态: 失败 原因: SoapySDR 连接 'mock' 失败"
   },
   "sdr_transmit_cw": {
     "cat": "NEED_HW",
@@ -416,7 +957,7 @@
     "args": {
       "port": "/dev/ttyUSB0"
     },
-    "snippet": "=== 电台连接 === 串口: /dev/ttyUSB0 波特率: 38400 型号: auto 状态: 已连接  支持操作:   radio_set_frequency - 设"
+    "snippet": "=== 电台连接 === 串口: /dev/ttyUSB0 波特率: 38400 型号: auto 状态: 失败  支持操作:   radio_set_frequency - 设置"
   },
   "radio_set_frequency": {
     "cat": "OK",
@@ -444,7 +985,7 @@
     "args": {
       "text": "HELLO"
     },
-    "snippet": "=== CW 发送 === 文本: HELLO 速度: 20 WPM Morse: .... . .-.. .-.. --- 状态: 已发送  提示: 先调用 radio_ptt "
+    "snippet": "=== CW 发送 === 文本: HELLO 速度: 20 WPM Morse: .... . .-.. .-.. --- 状态: 失败（需先PTT on）  提示: 先调用 r"
   },
   "morse_encode": {
     "cat": "OK",
@@ -500,19 +1041,61 @@
     },
     "snippet": "=== 云图合成 ===  输入目录: test 输出文件: /tmp/mbdsdr_test.bin 增强: 是  状态: 失败 错误: 未找到输出图像"
   },
-  "hook_trigger": {
+  "sdr_fm_preset": {
     "cat": "OK",
     "args": {
-      "event_type": "test"
+      "action": "list"
     },
-    "snippet": "事件已触发: test 监听器响应数: 0"
+    "snippet": "=== FM 电台预设（共 21 个）=== 上次更新: 2026-09-24T17:50:39 上次扫描: 97.0-99.0MHz (噪声底 -22.8dB)    1.  9"
+  },
+  "sdr_listen_fm": {
+    "cat": "OTHER",
+    "args": {
+      "action": "start"
+    },
+    "snippet": "start 时必须提供 freq_mhz"
+  },
+  "rds_decode_groups": {
+    "cat": "CRASH",
+    "args": {
+      "blocks_hex": "test"
+    },
+    "snippet": "需要 4 个 16bit 块字(hex, 空格分隔): A B C D"
+  },
+  "psk31_encode": {
+    "cat": "OK",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "PSK31 Varicode 编码 (50 bits): 10101010100111011100110101110011010111001010101100"
+  },
+  "psk31_decode": {
+    "cat": "OK",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "PSK31 往返: in='HELLO' out='HELLO' OK"
+  },
+  "rtty_decode": {
+    "cat": "OK",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "RTTY 往返: in='HELLO' out='HELLO' OK"
+  },
+  "feldhell_decode": {
+    "cat": "OK",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "FeldHell 重建: 'HELLO' (输入 'HELLO')"
   },
   "subagent_create": {
     "cat": "OK",
     "args": {
       "agent_type": "test"
     },
-    "snippet": "子代理已创建 ID: subagent_test_1789785384715_0 类型: test"
+    "snippet": "子代理已创建 ID: subagent_test_1790872135826_0 类型: test"
   },
   "subagent_execute": {
     "cat": "NEED_RESOURCE",
@@ -564,7 +1147,7 @@
     "args": {
       "name": "test"
     },
-    "snippet": "录制已开始 ID: rec_1789785384715 后续工具调用将被记录"
+    "snippet": "录制已开始 ID: rec_1790872135826 后续工具调用将被记录"
   },
   "workflow_template_create": {
     "cat": "NEED_RESOURCE",
@@ -580,49 +1163,21 @@
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md",
       "change_type": "test"
     },
-    "snippet": "{   \"change_id\": \"chg_1789785384715_15\",   \"file_path\": \"/home/user/Doubao/chats/384381600"
+    "snippet": "{   \"change_id\": \"chg_1790872135826_211\",   \"file_path\": \"/home/user/Doubao/chats/38438160"
   },
   "file_change_history": {
     "cat": "OK",
     "args": {
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "[   {     \"change_id\": \"chg_1789785384715_15\",     \"file_path\": \"/home/user/Doubao/chats/3"
+    "snippet": "[   {     \"change_id\": \"chg_1790872135826_211\",     \"file_path\": \"/home/user/Doubao/chats/"
   },
   "file_change_revert": {
     "cat": "NEED_RESOURCE",
     "args": {
       "change_id": "test"
     },
-    "snippet": "{   \"error\": \"变更不存在\" }"
-  },
-  "plugin_load": {
-    "cat": "OK",
-    "args": {
-      "plugin_name": "test"
-    },
-    "snippet": "{   \"manifest\": {     \"name\": \"test\",     \"version\": \"0.1.0\",     \"description\": \"自动发现的插件:"
-  },
-  "plugin_enable": {
-    "cat": "OK",
-    "args": {
-      "plugin_name": "test"
-    },
-    "snippet": "插件 启用失败: test"
-  },
-  "plugin_disable": {
-    "cat": "OK",
-    "args": {
-      "plugin_name": "test"
-    },
-    "snippet": "插件 禁用失败: test"
-  },
-  "plugin_install": {
-    "cat": "OK",
-    "args": {
-      "source_path": "/tmp/mbdsdr_test.bin"
-    },
-    "snippet": "插件已安装: mbdsdr_test.bin"
+    "snippet": "{   \"error\": \"变更不存在或已回滚: test\" }"
   },
   "judge_evaluate": {
     "cat": "OK",
@@ -637,42 +1192,21 @@
     "args": {
       "experience_type": "test"
     },
-    "snippet": "{   \"experience_id\": \"exp_1789785385253_16\",   \"experience_type\": \"task_completion\",   \"qu"
-  },
-  "learning_suggestion": {
-    "cat": "OK",
-    "args": {
-      "question": "test"
-    },
-    "snippet": "{   \"message\": \"暂无相关学习建议\" }"
-  },
-  "orchestrator_add_task": {
-    "cat": "OK",
-    "args": {
-      "name": "test"
-    },
-    "snippet": "任务已添加 ID: task_1"
-  },
-  "orchestrator_pipeline": {
-    "cat": "OK",
-    "args": {
-      "frequency_hz": 100000000
-    },
-    "snippet": "SDR 流水线已创建 任务数: 9 调用 orchestrator_plan 查看顺序，orchestrator_execute 执行"
+    "snippet": "{   \"experience_id\": \"exp_1790872136308_212\",   \"experience_type\": \"task_completion\",   \"q"
   },
   "code_read_file": {
     "cat": "OK",
     "args": {
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "文件: /home/user/Doubao/chats/38438160041798146/README.md 共 100 行  # MBDSDR  MBDSDR 是一个开源的 *"
+    "snippet": "文件: /home/user/Doubao/chats/38438160041798146/README.md 共 1 行  "
   },
   "code_modify_file": {
     "cat": "OK",
     "args": {
       "file_path": "/home/user/Doubao/chats/38438160041798146/README.md"
     },
-    "snippet": "{   \"edit_id\": \"edit_1789785385264_1\",   \"file_path\": \"/home/user/Doubao/chats/38438160041"
+    "snippet": "{   \"edit_id\": \"edit_1790872136319_1\",   \"file_path\": \"/home/user/Doubao/chats/38438160041"
   },
   "code_modify_section": {
     "cat": "NEED_RESOURCE",
@@ -702,7 +1236,7 @@
     "args": {
       "message": "HELLO"
     },
-    "snippet": "成功: 已提交: 01762730 [main 0176273] HELLO  5 files changed, 473 insertions(+), 147 deletions("
+    "snippet": "失败: 提交失败: fatal: Unable to create '/home/user/Doubao/chats/38438160041798146/.git/index.lo"
   },
   "code_rollback": {
     "cat": "NEED_RESOURCE",
@@ -725,7 +1259,7 @@
       "ra_deg": 1.0,
       "dec_deg": 1.0
     },
-    "snippet": "{   \"alt_deg\": -42.1507,   \"az_deg\": 334.5996,   \"alt_dms\": \"-42°09'02.4\\\"\",   \"az_compass"
+    "snippet": "{   \"alt_deg\": 42.8858,   \"az_deg\": 210.7081,   \"alt_dms\": \"+42°53'08.9\\\"\",   \"az_compass\""
   },
   "astro_altaz_to_equatorial": {
     "cat": "OK",
@@ -733,7 +1267,7 @@
       "alt_deg": 1.0,
       "az_deg": 1.0
     },
-    "snippet": "{   \"ra_deg\": 340.9952159907276,   \"dec_deg\": 46.74162419586798,   \"ra_hms\": \"22h43m58.9s\""
+    "snippet": "{   \"ra_deg\": 201.52408219683716,   \"dec_deg\": 46.74162419586798,   \"ra_hms\": \"13h26m05.8s"
   },
   "astro_compute_refraction": {
     "cat": "OK",
@@ -839,5 +1373,481 @@
       "label": "FSK"
     },
     "snippet": "已添加训练样本: FSK，当前训练集 129 个样本"
+  },
+  "web_fetch_url": {
+    "cat": "OK",
+    "args": {
+      "url": "https://example.org"
+    },
+    "snippet": "HTTP 200 取自 https://example.org <!doctype html><html lang=en><head><meta charset=utf-8><li"
+  },
+  "git_clone_repo": {
+    "cat": "OTHER",
+    "args": {
+      "url": "https://example.org"
+    },
+    "snippet": "克隆失败: Command '['git', 'clone', '--depth', '1', 'https://example.org', './repos/example.or"
+  },
+  "skill_load": {
+    "cat": "NEED_RESOURCE",
+    "args": {
+      "name": "test"
+    },
+    "snippet": "未找到技能 'test'，先 skill_list 看可用名称"
+  },
+  "ft8_decode_audio": {
+    "cat": "OTHER",
+    "args": {
+      "samples": 10,
+      "sample_rate": 1024000
+    },
+    "snippet": "需要 samples(浮点列表) 和 sample_rate"
+  },
+  "ft8_unpack_message": {
+    "cat": "OTHER",
+    "args": {
+      "bits": []
+    },
+    "snippet": "bits 必须是 77 个数据位（LDPC 信息位前 77 位）"
+  },
+  "ft8_unpack_callsign": {
+    "cat": "OK",
+    "args": {
+      "n28": 1
+    },
+    "snippet": "{\"callsign\": \"QRZ\", \"known\": true}"
+  },
+  "ft8_ldpc_decode": {
+    "cat": "OTHER",
+    "args": {
+      "llr": []
+    },
+    "snippet": "llr 必须是 174 个浮点（信道对数似然比）"
+  },
+  "ft8_soft_decode": {
+    "cat": "OTHER",
+    "args": {
+      "tone_energies": []
+    },
+    "snippet": "tone_energies 必须是 58 个数据符号、每个 8 路能量"
+  },
+  "ft8_encode": {
+    "cat": "NEED_RESOURCE",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "FT8编码失败: ValueError: FT8 消息至少需要 2 个空格分隔字段，如 'CQ BI4MIB OM74' 或 'BI4MIB K1ABC 73'，当前收到 1 个字"
+  },
+  "spectrum_analyze_iq": {
+    "cat": "OK",
+    "args": {
+      "iq": [],
+      "sample_rate": 1024000
+    },
+    "snippet": "{\"n_samples\": 0, \"sample_rate\": 1024000.0, \"center_hz\": 0.0, \"fft_size\": 64, \"frames_avera"
+  },
+  "fst4_ldpc_decode": {
+    "cat": "OTHER",
+    "args": {
+      "llr": []
+    },
+    "snippet": "需要 240 个 LLR，得到 0"
+  },
+  "fst4_encode": {
+    "cat": "NEED_RESOURCE",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "FST4编码失败：消息格式不正确，请使用标准格式如 'CQ BI4MIB OM74'、'BI4MIB K1ABC 73'"
+  },
+  "cw_decode_audio": {
+    "cat": "OK",
+    "args": {
+      "audio": []
+    },
+    "snippet": "{\"text\": \"\", \"chars\": [], \"wpm_est\": 0, \"confidence\": 0}"
+  },
+  "adsb_decode_iq": {
+    "cat": "OK",
+    "args": {
+      "iq": []
+    },
+    "snippet": "{\"frames\": [], \"aircraft\": {}, \"candidates\": 0, \"crc_ok\": 0, \"crc_failed\": 0, \"noise_floor"
+  },
+  "apt_decode_audio": {
+    "cat": "OK",
+    "args": {
+      "audio": []
+    },
+    "snippet": "{\"apt_present\": false, \"reason\": \"too_short\"}"
+  },
+  "aprs_decode_audio": {
+    "cat": "OK",
+    "args": {
+      "audio": []
+    },
+    "snippet": "{\"frames\": [], \"count\": 0}"
+  },
+  "ax25_encode": {
+    "cat": "OK",
+    "args": {
+      "source": "BI4MIB"
+    },
+    "snippet": "{\"hex\": \"82a0a4a64040e08492689a92846103f09317\", \"fcs\": \"0x1793\", \"len\": 18, \"stuffed_hex\":"
+  },
+  "ax25_decode": {
+    "cat": "CRASH",
+    "args": {
+      "hex": "test"
+    },
+    "snippet": "工具 'ax25_decode' 调用失败: ValueError: non-hexadecimal number found in fromhex() arg at positi"
+  },
+  "afsk_modulate": {
+    "cat": "OK",
+    "args": {
+      "source": "BI4MIB"
+    },
+    "snippet": "{\"sample_rate\": 48000.0, \"samples\": 13760, \"audio\": [0.0, 0.022700000554323196, -0.0284000"
+  },
+  "afsk_demodulate": {
+    "cat": "OK",
+    "args": {
+      "audio": []
+    },
+    "snippet": "{\"frames\": [], \"count\": 0}"
+  },
+  "aprs_parse": {
+    "cat": "CRASH",
+    "args": {
+      "hex": "test"
+    },
+    "snippet": "工具 'aprs_parse' 调用失败: ValueError: non-hexadecimal number found in fromhex() arg at positio"
+  },
+  "demod_analog_audio": {
+    "cat": "OK",
+    "args": {
+      "iq": [],
+      "sample_rate": 1024000
+    },
+    "snippet": "{\"sample_rate\": 1024000.0, \"mode\": \"fm\", \"rms_db\": -120.0, \"squelch_open\": false, \"signal_"
+  },
+  "acars_decode_iq": {
+    "cat": "OK",
+    "args": {
+      "audio": []
+    },
+    "snippet": "[]"
+  },
+  "acars_parse_message": {
+    "cat": "OK",
+    "args": {
+      "body": []
+    },
+    "snippet": "{\"err\": true, \"reason\": \"unparseable\"}"
+  },
+  "acars_msk_demod": {
+    "cat": "OK",
+    "args": {
+      "audio": []
+    },
+    "snippet": "{\"bits\": [], \"n_bits\": 0}"
+  },
+  "iq_correct": {
+    "cat": "OK",
+    "args": {
+      "iq": []
+    },
+    "snippet": "{\"mean_before\": NaN, \"dc_offset_i\": 0.0, \"dc_offset_q\": 0.0, \"mean_after_i\": NaN, \"mean_af"
+  },
+  "demod_wfm_stereo": {
+    "cat": "OK",
+    "args": {
+      "iq": [],
+      "sample_rate": 1024000
+    },
+    "snippet": "{\"sample_rate\": 48000, \"stereo\": false, \"pilot_snr_db\": null, \"duration_s\": 0.0}"
+  },
+  "signal_quality_stats": {
+    "cat": "OTHER",
+    "args": {
+      "iq": []
+    },
+    "snippet": "信号质量统计失败: zero-size array to reduction operation maximum which has no identity"
+  },
+  "gimbal_move": {
+    "cat": "OTHER",
+    "args": {
+      "azimuth_deg": 0.0,
+      "elevation_deg": 45.0
+    },
+    "snippet": "云台控制失败: [Errno 111] Connection refused"
+  },
+  "constellation_evm": {
+    "cat": "OK",
+    "args": {
+      "symbols": []
+    },
+    "snippet": "{\"evm_rms_pct\": NaN, \"evm_db\": NaN, \"symbol_count\": 0, \"cluster_centers\": []}"
+  },
+  "sdr_squelch_gate": {
+    "cat": "OTHER",
+    "args": {
+      "iq": []
+    },
+    "snippet": "静噪门控失败: integer division or modulo by zero"
+  },
+  "sdr_anr_denoise": {
+    "cat": "OK",
+    "args": {
+      "iq": []
+    },
+    "snippet": "{\"denoised_iq\": [], \"input_samples\": 0, \"output_samples\": 0}"
+  },
+  "sdr_constellation_scatter": {
+    "cat": "OK",
+    "args": {
+      "iq": []
+    },
+    "snippet": "{\"points\": [], \"n_points\": 0}"
+  },
+  "sdr_spectrum_peaks": {
+    "cat": "OK",
+    "args": {
+      "iq": []
+    },
+    "snippet": "{\"peaks\": []}"
+  },
+  "sdr_signal_overview": {
+    "cat": "OTHER",
+    "args": {
+      "iq": []
+    },
+    "snippet": "信号体检失败: zero-size array to reduction operation maximum which has no identity"
+  },
+  "baseband_save": {
+    "cat": "OK",
+    "args": {
+      "iq": [],
+      "sample_rate": 1024000
+    },
+    "snippet": "{\"center_freq_hz\": 0.0, \"sample_rate\": 1024000.0, \"start_time\": \"2026-10-01T16:28:59.96704"
+  },
+  "sdrsharp_spectrum_fft": {
+    "cat": "OTHER",
+    "args": {
+      "iq": []
+    },
+    "snippet": "FFT 失败: Invalid number of FFT data points (0) specified."
+  },
+  "owrx_fft_average": {
+    "cat": "OTHER",
+    "args": {
+      "iq": []
+    },
+    "snippet": "FFT 平均失败: Invalid number of FFT data points (0) specified."
+  },
+  "urh_modulate": {
+    "cat": "OTHER",
+    "args": {
+      "bits": []
+    },
+    "snippet": "URH 调制失败: index 0 is out of bounds for axis 0 with size 0"
+  },
+  "urh_demodulate": {
+    "cat": "OK",
+    "args": {
+      "iq": []
+    },
+    "snippet": "{\"num_samples\": 0, \"first_values\": [], \"source\": \"urh  afp_demod\"}"
+  },
+  "urh_sync_detect": {
+    "cat": "OK",
+    "args": {
+      "bits": [],
+      "sync_word": []
+    },
+    "snippet": "{\"positions\": [], \"num_hits\": 0, \"source\": \"urh awre / ProtocolAnalyzer.py\"}"
+  },
+  "inspectrum_measure_bandwidth": {
+    "cat": "OTHER",
+    "args": {
+      "frequencies": [],
+      "powers_db": 0
+    },
+    "snippet": "frequencies 和 powers_db 都必须是列表"
+  },
+  "inspectrum_measure_period": {
+    "cat": "OK",
+    "args": {
+      "pulse_starts_samples": []
+    },
+    "snippet": "{\"period_s\": 0.0, \"num_pulses\": 0, \"note\": \"脉冲数<2，无法测周期\", \"source\": \"inspectrum  垂直游标测周期\"}"
+  },
+  "inspectrum_measure_duty_cycle": {
+    "cat": "OK",
+    "args": {
+      "on_samples": 1.0,
+      "period_samples": 1.0
+    },
+    "snippet": "{\"duty_cycle\": 1.0, \"duty_percent\": 100.0, \"on_time_s\": 1e-06, \"period_s\": 1e-06, \"source\""
+  },
+  "sigutils_detect_channels": {
+    "cat": "OTHER",
+    "args": {
+      "frequencies": [],
+      "powers_db": 0
+    },
+    "snippet": "frequencies 和 powers_db 都必须是列表"
+  },
+  "sigutils_identify_modulation": {
+    "cat": "OK",
+    "args": {
+      "iq": []
+    },
+    "snippet": "{\"modulation\": \"unknown\", \"reason\": \"样本太少(<64)\"}"
+  },
+  "sigutils_peak_detector": {
+    "cat": "OK",
+    "args": {
+      "values": []
+    },
+    "snippet": "{\"peaks\": [], \"num_peaks\": 0, \"source\": \"sigutils  su_peak_detector_feed\"}"
+  },
+  "protocol_stack_decode": {
+    "cat": "OTHER",
+    "args": {
+      "protocol": "test",
+      "frame": "test"
+    },
+    "snippet": "未注册的协议层: test；可用: ['aprs', 'ax25']"
+  },
+  "protocol_stack_split_frames": {
+    "cat": "OK",
+    "args": {
+      "bits": []
+    },
+    "snippet": "{\"num_frames\": 1, \"frames\": [[]], \"source\": \"signal_functions.pyx:392 grab_pulse_lens\"}"
+  },
+  "pat_b2f_encode": {
+    "cat": "OK",
+    "args": {
+      "fromcall": "test",
+      "tocall": "test"
+    },
+    "snippet": "B2F 编码: test->test (62 字节, 0 附件)"
+  },
+  "pat_b2f_decode": {
+    "cat": "NEED_RESOURCE",
+    "args": {
+      "bytes_b64": "test"
+    },
+    "snippet": "B2F 解码失败: B2F 信封行未找到：需要 [from|to|subject|ts]"
+  },
+  "js8_encode_message": {
+    "cat": "OK",
+    "args": {
+      "de": "test",
+      "to": "test"
+    },
+    "snippet": "JS8 编码: test->test grid=OL95 payload=0x7357B6A3357B6A338D8 (77bit, 25符号)"
+  },
+  "js8_decode_message": {
+    "cat": "OK",
+    "args": {
+      "payload": 1
+    },
+    "snippet": "JS8 解码: type=0 de=00 to=00 grid=AA00"
+  },
+  "xastir_encode_object": {
+    "cat": "OK",
+    "args": {
+      "lat": 43.8868,
+      "lon": 125.3245
+    },
+    "snippet": "APRS 对象帧: ;OBJ      *4353.21N/12519.47E>"
+  },
+  "xastir_decode_frame": {
+    "cat": "OTHER",
+    "args": {
+      "packet": "test"
+    },
+    "snippet": "帧解码失败: 不是 APRS 对象/物品帧（应以 ';' 或 ')' 开头）"
+  },
+  "xastir_geofence": {
+    "cat": "OK",
+    "args": {
+      "center_lat": 43.8868,
+      "center_lon": 125.3245,
+      "radius_m": 1.0
+    },
+    "snippet": "围栏 'fence' r=1m: 0/0 点在内"
+  },
+  "bell103_modulate_text": {
+    "cat": "OK",
+    "args": {
+      "text": "HELLO"
+    },
+    "snippet": "Bell103 调制: 'HELLO' -> 8000 采样 (mark=1270/space=1070Hz, 300baud)"
+  },
+  "bell103_demodulate_text": {
+    "cat": "CRASH",
+    "args": {
+      "samples": 10
+    },
+    "snippet": "工具 'bell103_demodulate_text' 调用失败: TypeError: len() of unsized object。请检查参数是否正确，或参考工具说明。"
+  },
+  "r2cloud_schedule": {
+    "cat": "OK",
+    "args": {
+      "lat_deg": 43.8868,
+      "lon_deg": 125.3245,
+      "transmitters": []
+    },
+    "snippet": "r2cloud 调度完成：0 个过境任务"
+  },
+  "r2cloud_recording_meta": {
+    "cat": "OK",
+    "args": {
+      "lat_deg": 43.8868,
+      "lon_deg": 125.3245,
+      "start_unix_s": 1.0,
+      "end_unix_s": 1.0,
+      "frequency_hz": 100000000
+    },
+    "snippet": "录制元数据已生成"
+  },
+  "satnogs_doppler_plan": {
+    "cat": "CRASH",
+    "args": {
+      "sat_name": "NOAA 19",
+      "line1": "test",
+      "line2": "test",
+      "lat_deg": 43.8868,
+      "lon_deg": 125.3245,
+      "frequency_hz": 100000000,
+      "start_unix_s": 1.0
+    },
+    "snippet": "多普勒计算失败: TLE 校验和失败: 'test' / 'test'"
+  },
+  "sdrangel_ogn_decode": {
+    "cat": "CRASH",
+    "args": {
+      "frame_hex": "test"
+    },
+    "snippet": "OGN 解析失败: non-hexadecimal number found in fromhex() arg at position 0"
+  },
+  "sdrangel_firedetector": {
+    "cat": "OK",
+    "args": {
+      "points": []
+    },
+    "snippet": "检出 0 个火灾簇"
+  },
+  "sdrangel_remotecontrol": {
+    "cat": "CRASH",
+    "args": {
+      "commands": "help"
+    },
+    "snippet": "工具 'sdrangel_remotecontrol' 调用失败: TypeError: string indices must be integers, not 'str'。请检"
   }
 }

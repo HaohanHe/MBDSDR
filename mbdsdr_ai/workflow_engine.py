@@ -448,6 +448,14 @@ class WorkflowEngine:
     def _resolve_value(self, value: Any, context: Dict[str, Any]) -> Any:
         """递归解析任意值中的 {{variable}} 模板。"""
         if isinstance(value, str):
+            # 整串就是一个 {{var}} 模板：直接返回 context 原始值，不被 str() 化。
+            # 否则 {"rssi_by_azimuth": "{{rssi_by_azimuth}}"} 会把 dict 渲染成 repr 字符串，
+            # 下游工具（如 gnss_direction_find）拿不到映射。
+            m = re.fullmatch(r'\s*\{\{([\w.]+)\}\}\s*', value)
+            if m:
+                val = self._lookup_var(m.group(1), context)
+                if val is not None:
+                    return val
             rendered = self._render_string(value, context)
             # 纯数字字符串自动转 int/float
             if rendered.lstrip('-').isdigit():
@@ -566,14 +574,19 @@ class WorkflowEngine:
                 "step_id": step.step_id,
                 "tool": step.tool_name,
                 "success": True,
-                "result": str(result)[:500] if result else "",
+                "result": (result.content if hasattr(result, "content") else str(result))[:500] if result else "",
             })
 
             # 将结果存入上下文（供后续步骤使用）
             context[f"step_{step.step_id}_result"] = result
-            # 解析 ToolResult 的 content 为 dict，提取关键字段供后续步骤模板使用
+            # D6 接真实：优先用 ToolResult.data 结构化 sidecar 字典回填（关键工具把
+            # recording_path / interference_freq_hz / doppler_freq / rssi_by_azimuth 等
+            # 吐在 .data）；否则把 .content 当 JSON 解析；再否则按裸 dict 处理。
             result_dict = None
-            if hasattr(result, 'content') and result.content:
+            sidecar = getattr(result, "data", None)
+            if isinstance(sidecar, dict) and sidecar:
+                result_dict = sidecar
+            elif hasattr(result, "content") and result.content:
                 try:
                     result_dict = json.loads(result.content) if isinstance(result.content, str) else result.content
                 except (json.JSONDecodeError, TypeError):
@@ -584,7 +597,9 @@ class WorkflowEngine:
                 # 整份结果存到 step_N，支持 {{step_1.freq}} 点分访问
                 context[f"step_{step.step_id}"] = result_dict
                 for k, v in result_dict.items():
-                    if isinstance(v, (str, int, float, bool)):
+                    # 顶层标量/字典/列表都提升到 context：预设工作流用裸 {{recording_path}}、
+                    # {{rssi_by_azimuth}} 等引用上一步输出（dict/list 不再只落在 step_N 里）。
+                    if isinstance(v, (str, int, float, bool, list, dict)):
                         context[k] = v
 
         # 更新统计
@@ -593,6 +608,16 @@ class WorkflowEngine:
             workflow.success_count += 1
 
         execution_time = (time.time() - start_time) * 1000
+
+        # outputs 必须 JSON 可序列化：executor 返回的 ToolResult（鸭子类型：有 .success/.content）
+        # 不能直接进 outputs，换成摘要 dict；其余标量/dict/list 原样保留。
+        safe_outputs = {}
+        for k, v in context.items():
+            if hasattr(v, "success") and hasattr(v, "content"):
+                safe_outputs[k] = {"success": bool(v.success),
+                                   "content": str(v.content)[:300]}
+            else:
+                safe_outputs[k] = v
 
         return WorkflowResult(
             workflow_name=workflow_name,
@@ -603,7 +628,7 @@ class WorkflowEngine:
             error=error,
             step_results=step_results,
             execution_time_ms=execution_time,
-            outputs=context,
+            outputs=safe_outputs,
         )
 
     # ── 触发短语匹配 ────────────────────────────────────

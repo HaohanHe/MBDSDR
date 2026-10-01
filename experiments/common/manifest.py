@@ -8,13 +8,13 @@ B2 审计 §5：旧 CSV 与脚本漂移（ADS-B 提交 n=20 vs 脚本 trials=200
 
   script        : 产生本批产物的脚本名
   seed          : 主随机种子（int）
-  data_origin   : "synthetic" | "recorded" | "ota"  —— 口径，图/CSV 必须同标
+  data_origin   : "synthetic" | "recorded" | "ota" | "online" —— 口径，图/CSV 必须同标
   params        : 本 run 的关键参数（网格、trials、fs、Rb、B、模式…）
   n_samples     : 总样本数（trials × 格点数 等，由调用方算好传入）
   timestamp_utc : ISO8601 UTC 时间戳
   code_version  : git short sha（拿不到时如实标 "unknown"，不编造）
 
-红线：data_origin 只能是三值之一；synthetic 绝不在图/manifest 里写成 ota。
+红线：data_origin 只能是枚举内值（synthetic/recorded/ota/online）；synthetic 绝不在图/manifest 里写成 ota。
 """
 from __future__ import annotations
 
@@ -24,7 +24,14 @@ import subprocess
 from datetime import datetime, timezone
 from typing import Any, Dict
 
-ALLOWED_ORIGINS = ("synthetic", "recorded", "ota")
+# data_origin 枚举：
+#   synthetic : 脚本内合成信号 + 固定种子加噪（仿真）
+#   recorded  : 真实 RTL-SDR 录制（SigMF）回放
+#   ota       : 实时空中信号
+#   online    : 在线 LLM/API 推理结果（非本地确定性计算）。用于 LLM 基线列；
+#               信号本身仍多为 synthetic，但"AI 列"数值来自在线 API，可复现性
+#               依赖缓存（见 exp_llm_baseline.py）。云内无 key 时该列为空态。
+ALLOWED_ORIGINS = ("synthetic", "recorded", "ota", "online")
 
 
 def git_sha() -> str:
@@ -64,7 +71,7 @@ def write_manifest(out_dir: str, script: str, seed: int, data_origin: str,
         "seed": int(seed),
         "data_origin": data_origin,
         "origin_label": {"synthetic": "仿真", "recorded": "录制",
-                         "ota": "OTA"}[data_origin],
+                         "ota": "OTA", "online": "在线LLM"}[data_origin],
         "params": params,
         "n_samples": int(n_samples),
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),

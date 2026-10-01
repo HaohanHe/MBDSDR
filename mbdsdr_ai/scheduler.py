@@ -153,6 +153,9 @@ class Scheduler:
         now = time.time()
         if schedule_type == "once":
             next_run = run_at if run_at > 0 else now + 60
+        elif schedule_type == "cron" and cron_expression:
+            # 初值走 cron 解析，而不是 interval_seconds（D10 接真实）
+            next_run = self._next_cron_run(cron_expression, now)
         else:
             next_run = now + interval_seconds
 
@@ -260,7 +263,11 @@ class Scheduler:
             hours = cls._parse_cron_field(parts[1], 0, 23)
             days = cls._parse_cron_field(parts[2], 1, 31)
             months = cls._parse_cron_field(parts[3], 1, 12)
-            weekdays = cls._parse_cron_field(parts[4], 0, 6)
+            # cron 约定周 0=周日；Python datetime.isoweekday() 周一=1..周日=7。
+            # 映射到 isoweekday 集合再比较（原先直接用 dt.weekday() 与 cron 集合比较，
+            # 周一/周日错位——真实 bug 修复）。
+            cron_weekdays = cls._parse_cron_field(parts[4], 0, 6)
+            py_weekdays = {7 if w == 0 else w for w in cron_weekdays}
         except Exception:
             return after_ts + 3600
 
@@ -269,7 +276,7 @@ class Scheduler:
         for _ in range(60 * 24 * 366):  # 最多向后找一年
             if (dt.minute in minutes and dt.hour in hours
                     and dt.day in days and dt.month in months
-                    and dt.weekday() in weekdays):
+                    and dt.isoweekday() in py_weekdays):
                 return dt.timestamp()
             dt += datetime.timedelta(minutes=1)
         return after_ts + 3600

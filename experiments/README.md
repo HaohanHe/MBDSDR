@@ -12,8 +12,10 @@
 | `synthetic`（仿真） | 脚本内合成信号 + 固定种子加噪 | ✅ 全部新图均为此口径 |
 | `recorded` | 真实 RTL-SDR 录制（SigMF）回放 | ⬜ 云内无录制，空态 |
 | `ota` | 实时空中信号 | ⬜ 云内无硬件，空态 |
+| `online` | 在线 LLM/API 推理结果（非本地确定性计算） | ⬜ 云内无 key，LLM 列空态 |
 
 **绝不用合成数据冒充 OTA/录制。** 云内无录制时，OTA/录制段明确输出空态（见 `exp_ota_handoff.py`）。
+**LLM 无 key 时整列输出 `PENDING_ONLINE_RUN`，不伪造数值、不真调在线 API。**
 
 ---
 
@@ -36,6 +38,10 @@
 | `ebno_decode_success.csv` + `figures/ebno_decode_success__synthetic__N2400__*.png` | `exp_ebno_decode.py` | synthetic | 2400 | AX.25/ADS-B/BPSK 解码成功率 vs Eb/N0，Wilson 95% CI 误差棒 |
 | `doppler_convergence.csv` / `doppler_floor.csv` + `figures/doppler_convergence__synthetic__N155__*.png` | `exp_doppler_orbit.py` | synthetic | 155 | 固定 TLE(ISS) 多普勒定轨，EKF/RLS 位置误差收敛曲线 |
 | `baseline_compare.csv` + `figures/baseline_compare_amr__synthetic__N600__*.png` | `exp_baseline_compare.py` | synthetic | 600 | 经典规则 vs KNN-AMR 同数据集识别准确率；LLM 列=待在线 |
+| `llm_baseline.csv` + `figures/llm_baseline_amr__*.png` | `exp_llm_baseline.py` | synthetic(空态) / online(有key) | 随 trials | 经典/KNN/LLM 三列同数据集对比；无 key 时 LLM 列=`PENDING_ONLINE_RUN` |
+| `rate_bandwidth_success.csv` + `figures/rate_bandwidth_success__synthetic__*.png` | `exp_rate_bandwidth.py` | synthetic | 900 | BPSK 10k 解码成功率 vs 接收低通带宽（固定噪声 PSD/Eb/N0） |
+| `amr_confusion_public.csv` + `figures/amr_confusion_matrix__synthetic__*.png` + `manifest_amr.json` | `exp_amr.py` | synthetic | 640 | 8 类 AMR 混淆矩阵（热图+行归一化+计数+对角准确率 Wilson CI） |
+| `doppler_duration_convergence.csv` + `figures/doppler_duration_convergence__synthetic__*.png` | `exp_doppler_duration.py` | synthetic | 6 | RLS 参考历元误差 vs 观测窗长（固定 TLE/种子/噪声） |
 | `manifest_ota_handoff.json` | `exp_ota_handoff.py` | ota(空态) | 0 | 录制摄取空态演示 |
 | `manifest_*.json`（每 run 一份） | 各脚本 | 随 run | — | 脚本/种子/口径/参数/样本数/UTC 时间/git sha |
 
@@ -64,7 +70,19 @@ python3 experiments/exp_baseline_compare.py --trials-per-class 40 --seed 2026100
 # 4. OTA/录制空态（云内跑应输出空态，退出码 0）
 python3 experiments/exp_ota_handoff.py
 
-# 5. 离线确定性测试
+# 5. LLM 基线（无 key -> 经典/KNN 真算 + LLM 列 PENDING_ONLINE_RUN）
+python3 experiments/exp_llm_baseline.py --trials-per-class 20 --seed 20261001
+
+# 6. 解码成功率 vs 接收带宽（固定 Eb/N0，BPSK 10k）
+python3 experiments/exp_rate_bandwidth.py --trials 100 --seed 20261001
+
+# 7. AMR 混淆矩阵（公共口径：热图+CSV+manifest+CI）
+python3 experiments/exp_amr.py --trials 80
+
+# 8. 定轨收敛 vs 观测窗长（固定 TLE/种子/噪声）
+python3 experiments/exp_doppler_duration.py --seed 20261001
+
+# 9. 离线确定性测试
 python3 -m pytest experiments/tests/ -q
 ```
 
@@ -88,9 +106,29 @@ python3 -m pytest experiments/tests/ -q
 
 ## LLM/Agent 路径（待在线运行）
 
-`exp_baseline_compare.py` 的 `llm_agent` 列恒为 `PENDING_ONLINE_RUN`：该路径需在线 LLM API，
-云 VM 无 key、不可确定性复现（见 B2 审计 §5）。真机/有 key 环境运行
-`experiments/exp_weak_model_toolcall.py` 后再把数值回填，**不伪造**。
+两条 LLM 相关实验，**API key 只从环境变量读，代码/文档无 key 字面量**：
+
+- `exp_baseline_compare.py` 的 `llm_agent` 列恒为 `PENDING_ONLINE_RUN`（旧占位）。
+- `exp_llm_baseline.py`（Phase5 新增）：与经典/KNN 同数据集同指标的 LLM 列。
+  - **无 key（云内）**：classic/KNN 本地真算，LLM 列整列 `PENDING_ONLINE_RUN`，
+    不伪造、不联网；产物 `llm_baseline.csv` + manifest(`data_origin=synthetic`)。
+  - **有 key**：设好环境变量后真调 OpenAI 兼容 API，回答缓存到
+    `paper/experiments/.llm_cache_<model>.json`（重跑不重复花钱），
+    该 run 的 `data_origin=online`。
+
+```bash
+# 有 key 的环境（真机/本地）：
+export MBDSDR_LLM_API_KEY="sk-..."          # 仅环境变量，绝不写进代码
+export MBDSDR_LLM_BASE_URL="https://api.siliconflow.cn/v1"   # 可选
+python3 experiments/exp_llm_baseline.py \
+    --model "Qwen/Qwen2.5-7B-Instruct" \
+    --trials-per-class 20 --max-llm-samples 200
+```
+
+LLM **不看原始 IQ**（token 成本），只看本脚本抽取的紧凑特征（瞬时频率 std、
+幅度 std），在 {FSK,PSK,NOISE} 中选一类——这是"LLM-as-classifier on features"
+基线，与"阈值规则 classic"和"距离 KNN"同场对比。`exp_weak_model_toolcall.py`
+是另一套 tool-calling 成功率实验（读 `~/.mbdsdr/config.json`，不在本管线口径内）。
 
 ## 已知诚实局限
 
