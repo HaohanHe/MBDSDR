@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'package:mbdsdr_mobile/app/tokens.dart';
+import 'package:mbdsdr_mobile/astro/nav_satellites.dart';
 import 'package:mbdsdr_mobile/astro/passes.dart';
 import 'package:mbdsdr_mobile/astro/tle.dart';
 import 'package:mbdsdr_mobile/astro/tle_freshness.dart';
@@ -51,6 +52,8 @@ class SkyController extends ChangeNotifier {
   List<Tle> _tles = const [];
   List<SatVisibility> _visible = const [];
   List<Pass> _passes = const [];
+  // GNSS 导航星历（尽力单独拉取）；空表示未拉取到，UI 走诚实空态。
+  List<Tle> _navTles = const [];
   DeviceOrientation _orientation = DeviceOrientation.unavailable;
   String? _selectedName;
   bool _refreshing = false;
@@ -77,6 +80,19 @@ class SkyController extends ChangeNotifier {
   LocationStatus get locStatus => _locStatus;
   List<SatVisibility> get visible => List.unmodifiable(_visible);
   List<Pass> get passes => List.unmodifiable(_passes);
+
+  /// 在视导航卫星（SGP4 预测，非实时接收）；无导航星历时为空。
+  List<SatVisibility> get visibleNav {
+    final st = _station;
+    final t = _geometryTime;
+    if (st == null || t == null || _navTles.isEmpty) {
+      return const <SatVisibility>[];
+    }
+    return visibleNavSats(t, _navTles, st);
+  }
+
+  /// 是否已载入导航星历（决定是否显示空态提示）。
+  bool get hasNavTle => _navTles.isNotEmpty;
   DeviceOrientation get orientation => _orientation;
   String? get selectedName => _selectedName;
   bool get refreshing => _refreshing;
@@ -187,6 +203,13 @@ class SkyController extends ChangeNotifier {
       _tles = fetched;
       _lastUpdated = _tle.lastUpdated(_group);
       _recomputeGeometry();
+      // 尽力单独拉取 GNSS 导航星历：失败不影响主列表（保持空态）。
+      try {
+        _navTles = await _tle.fetch(TleGroup.gnss);
+      } catch (_) {
+        // 导航星历拉取失败：保持 _navTles 为空，UI 显示诚实空态。
+        _navTles = const [];
+      }
     } on TleFetchException catch (e) {
       _error = '$e';
     } catch (e) {
@@ -394,6 +417,7 @@ class _SkyPageState extends State<SkyPage> {
         if (_c.selectedVisibility != null)
           Expanded(child: _GuidanceCard(controller: _c)),
         Expanded(flex: 2, child: _PassList(passes: _c.passes, controller: _c)),
+        Expanded(flex: 2, child: _NavSatList(controller: _c)),
       ],
     );
     final body = isLandscape
@@ -828,5 +852,76 @@ class _PassList extends StatelessWidget {
     messenger
       ..clearSnackBars()
       ..showSnackBar(SnackBar(content: Text(msg, style: AppTokens.auxiliary)));
+  }
+}
+
+/// 在视导航卫星（GNSS）列表：SGP4 预测，非本机正在接收。
+///
+/// 诚实边界：所有条目以「预:」前缀与真实接收/过境标记区分；无导航星历
+/// 时显示空态，绝不编造卫星。
+class _NavSatList extends StatelessWidget {
+  const _NavSatList({required this.controller});
+  final SkyController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final nav = controller.visibleNav;
+    return Container(
+      margin: const EdgeInsets.all(AppTokens.spacingS),
+      padding: const EdgeInsets.all(AppTokens.spacingS),
+      decoration: BoxDecoration(
+        color: AppTokens.card1,
+        borderRadius: BorderRadius.circular(AppTokens.radiusSmall),
+        border: Border.all(color: AppTokens.cardEdge),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            '在视导航卫星（预测·SGP4 传播，非实时接收）',
+            style: AppTokens.auxiliary.copyWith(
+              fontSize: AppTokens.annotationFontSize,
+              color: AppTokens.textAt(AppTokens.textAlphaTertiary),
+            ),
+          ),
+          const SizedBox(height: AppTokens.spacingS),
+          Expanded(
+            child: !controller.hasNavTle
+                ? const Center(
+                    child: Text(
+                      '无导航星历·需联网拉取 GNSS TLE',
+                      style: AppTokens.auxiliary,
+                      textAlign: TextAlign.center,
+                    ),
+                  )
+                : nav.isEmpty
+                    ? const Center(
+                        child: Text('当前无在地平线上的导航卫星',
+                            style: AppTokens.auxiliary),
+                      )
+                    : ListView.builder(
+                        itemCount: nav.length,
+                        itemBuilder: (context, i) {
+                          final v = nav[i];
+                          return ListTile(
+                            dense: true,
+                            visualDensity: VisualDensity.compact,
+                            leading: const Icon(Icons.satellite_alt,
+                                color: AppTokens.warning,
+                                size: AppTokens.iconSizeInlineLg),
+                            title: Text('预: ${v.name}', style: AppTokens.body),
+                            subtitle: Text(
+                              '方位 ${v.az.toStringAsFixed(0)}° · '
+                              '仰角 ${v.el.toStringAsFixed(0)}° · '
+                              '距离 ${v.range.toStringAsFixed(0)} km',
+                              style: AppTokens.auxiliary,
+                            ),
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ),
+    );
   }
 }

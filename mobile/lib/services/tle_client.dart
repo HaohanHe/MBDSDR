@@ -8,7 +8,8 @@ enum TleGroup {
   stations,
   amateur,
   weather,
-  noaa;
+  noaa,
+  gnss;
 
   /// Celestrak 分组名。
   String get query => switch (this) {
@@ -16,6 +17,8 @@ enum TleGroup {
         TleGroup.amateur => 'amateur',
         TleGroup.weather => 'weather',
         TleGroup.noaa => 'noaa',
+        // GNSS 导航星座合集（GPS/GLONASS/Galileo/BeiDou），供在视导航星预测。
+        TleGroup.gnss => 'gnss',
       };
 }
 
