@@ -142,6 +142,11 @@ class _HomeShellState extends State<HomeShell> {
               onAddFixedMark: () =>
                   settings.addFixedMarkHz(radio.freqHz.toDouble()),
               onRemoveFixedMark: (hz) => settings.removeFixedMarkHz(hz),
+              onMarkChanged: (oldHz, newHz) {
+                // 拖动/键盘微调：先删旧再落新，立即持久化。
+                settings.removeFixedMarkHz(oldHz);
+                settings.addFixedMarkHz(newHz);
+              },
               onOpenSettings: _openSettings,
             ),
             SkyPage(manualStation: station, radio: radio),
