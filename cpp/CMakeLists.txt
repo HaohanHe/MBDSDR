@@ -64,7 +64,7 @@ set(SOURCES
     src/ui/activity_log.cpp
     src/ui/shortcuts_dialog.cpp
     src/dsp/test_signal.cpp
-    src/dsp/rtl_sdr_source.cpp
+    src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/device_lister.cpp
     src/dsp/spectrum_engine.cpp
     src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp
@@ -330,7 +330,7 @@ target_link_libraries(test_noise_blanker PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME noise_blanker COMMAND test_noise_blanker)
 
 add_executable(test_engine_integration tests/test_engine_integration.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -343,7 +343,7 @@ add_test(NAME engine_integration COMMAND test_engine_integration)
 # B3/B4: per-mode bandwidth table + coverage rule + engine real setBandwidth +
 # PowerSpectrum frame-average lock.
 add_executable(test_bandwidth_preset tests/test_bandwidth_preset.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -362,7 +362,7 @@ add_test(NAME decimation COMMAND test_decimation)
 # Device hotplug event channel: drop detection, honest fallback, 2 s rtl_tcp
 # auto-reconnect, connect-failure reason (real TCP loopback, no mocks).
 add_executable(test_engine_hotplug tests/test_engine_hotplug.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -376,7 +376,7 @@ add_test(NAME engine_hotplug COMMAND test_engine_hotplug)
 # documented wire format -- handshake, SET_SETTING, real IQ push, stop-keep-alive.
 add_executable(test_spyserver_server tests/test_spyserver_server.cpp
     src/dsp/spyserver_server.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -391,7 +391,7 @@ add_test(NAME spyserver_server COMMAND test_spyserver_server)
 # settings read back, illegal freq/rate honestly ignored.
 add_executable(test_e2e_smoke tests/test_e2e_smoke.cpp
     src/dsp/spyserver_server.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -404,7 +404,7 @@ add_test(NAME e2e_smoke COMMAND test_e2e_smoke)
 
 # IAudioSink contract: MemoryAudioSink capture/volume/mute + engine injection.
 add_executable(test_audio_sink tests/test_audio_sink.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp
@@ -464,7 +464,7 @@ add_test(NAME ai_integration COMMAND test_ai_integration)
 # WAV roundtrip: record demod audio to disk, read header back.
 add_executable(test_wav_roundtrip tests/test_wav_roundtrip.cpp
     src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
-    src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
@@ -475,7 +475,7 @@ add_test(NAME wav_roundtrip COMMAND test_wav_roundtrip)
 
 add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
     src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
-    src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
@@ -643,7 +643,7 @@ add_test(NAME squelch_gate COMMAND test_squelch_gate)
 # Audio-RMS-domain squelch auto-gate backing: real tracked noise floor signal +
 # the proven gate mute path. Engine-only, offline test source.
 add_executable(test_squelch_autogate tests/test_squelch_autogate.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -669,6 +669,30 @@ add_executable(test_device_capabilities tests/test_device_capabilities.cpp
 target_include_directories(test_device_capabilities PRIVATE src)
 target_link_libraries(test_device_capabilities PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME device_capabilities COMMAND test_device_capabilities)
+
+# Tuner discrete-gain snapping (no hardware): nearest-step snap, out-of-range
+# clamp, half-step tie, empty-table honest passthrough, readback shape.
+add_executable(test_tuner_gain_table tests/test_tuner_gain_table.cpp
+    src/dsp/tuner_gain_table.cpp)
+target_include_directories(test_tuner_gain_table PRIVATE src)
+target_link_libraries(test_tuner_gain_table PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME tuner_gain_table COMMAND test_tuner_gain_table)
+
+# Read-stream liveness watchdog (no hardware): failure counting, threshold
+# latch, successful-read reset, latched-dead until reset, reconnect recovery.
+add_executable(test_stream_watchdog tests/test_stream_watchdog.cpp
+    src/dsp/stream_watchdog.cpp)
+target_include_directories(test_stream_watchdog PRIVATE src)
+target_link_libraries(test_stream_watchdog PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME stream_watchdog COMMAND test_stream_watchdog)
+
+# Pull-based device enumeration diff (no hardware, no libusb hotplug): baseline,
+# added, removed, unchanged, rename=remove+add, empty-to-empty.
+add_executable(test_device_lister tests/test_device_lister.cpp
+    src/dsp/device_lister.cpp)
+target_include_directories(test_device_lister PRIVATE src)
+target_link_libraries(test_device_lister PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME device_lister COMMAND test_device_lister)
 
 # Offline GSM FCCH detector + clock-ppm estimator (NOT HARDWARE): synthetic
 # tone+noise IQ recovers the tone and the injected ppm; noise-only / too-short
@@ -725,7 +749,7 @@ set_tests_properties(recording_library PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=o
 # Offline file analysis: streaming FileSource (WAV/SigMF/raw, chunked, seek,
 # pause, honest errors) + engine openOfflineFile path.
 add_executable(test_file_source tests/test_file_source.cpp
-    src/dsp/file_source.cpp src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp
+    src/dsp/file_source.cpp src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
@@ -816,7 +840,7 @@ add_executable(test_agent tests/test_agent.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
     src/ai/agent_tools.cpp src/ai/agent.cpp src/ai/ai_context.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
@@ -837,7 +861,7 @@ add_executable(test_task_orchestrator tests/test_task_orchestrator.cpp
     src/ai/task_orchestrator.cpp src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
     src/ai/agent_tools.cpp src/ai/ai_context.cpp src/ui/bookmark_manager.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
@@ -857,7 +881,7 @@ add_executable(test_plan_parser tests/test_plan_parser.cpp
     src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
     src/ui/bookmark_manager.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
@@ -877,7 +901,7 @@ add_executable(test_sat_task_planner tests/test_sat_task_planner.cpp
     src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
     src/dsp/tle_client.cpp src/dsp/sgp4.cpp src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp
-    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp
+    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp
     src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp
     src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp
@@ -894,7 +918,7 @@ add_executable(test_task_async tests/test_task_async.cpp
     src/ai/task_runner.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp src/ai/llm_worker.cpp
     src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp src/ui/bookmark_manager.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
-    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
@@ -911,7 +935,7 @@ add_test(NAME task_async COMMAND test_task_async)
 # Tuner AGC: rtl_tcp real 0x03 command byte + engine readback.
 add_executable(test_agc tests/test_agc.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp
-    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/iq_frontend.cpp
+    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
     src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp
@@ -1071,7 +1095,7 @@ add_test(NAME tool_schema COMMAND test_tool_schema)
 # (llm_client/llm_worker/agent_tools/ai_config/ai_context) plus the M1-M3 units.
 add_executable(test_ai_tool_loop tests/test_ai_tool_loop.cpp
     src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
-    src/dsp/rtl_sdr_source.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
@@ -1096,7 +1120,7 @@ add_executable(test_ai_real_link tests/test_ai_real_link.cpp
     src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
     src/dsp/tle_client.cpp src/dsp/sgp4.cpp src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp
-    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp
+    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp
     src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp
     src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp

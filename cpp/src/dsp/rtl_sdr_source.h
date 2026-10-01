@@ -7,6 +7,8 @@
 #pragma once
 
 #include "source.h"
+#include "tuner_gain_table.h"
+#include "stream_watchdog.h"
 #include <complex>
 #include <vector>
 #include <cstddef>
@@ -44,7 +46,11 @@ public:
 
     double centerFreq() const override { return f0_; }
     double sampleRate() const override { return fs_; }
-    double gain() const override { return gainDb_; }
+    double gain() const override;
+
+    /// Legal discrete tuner gain steps in dB (empty when the table could not
+    /// be read -- honest empty state, passthrough slider).
+    std::vector<double> availableGainsDb() const override;
 
     QString name() const override;
     bool isConnected() const override;
@@ -62,6 +68,13 @@ private:
     double gainDb_ = 20.0;
     bool   running_ = false;
 
+    // Discrete gain table (filled from rtlsdr_get_tuner_gains on start under
+    // HAVE_RTLSDR; empty in stub/offline builds). setGain() snaps into it.
+    TunerGainTable gainTable_;
+    // Consecutive-read-failure watchdog. When it latches DEAD the source closes
+    // the device and isConnected() flips false -- no more silent zero reads.
+    StreamWatchdog readWatchdog_{kReadFailThreshold};
+
     // Tuning state -- always stored, then (re)applied to the device on start()
     // and pushed live whenever the device is already open.
     int    directSampling_ = 0;   // 0=off, 1=I, 2=Q
@@ -69,7 +82,12 @@ private:
     bool   rtlAgc_         = false;
     bool   tunerAgc_       = false;   // true => tuner gain automatic
     bool   biasTee_        = false;
-    double ppm_            = 0.0;
+    double ppm_            = 0;
+
+    // Consecutive rtlsdr_read_sync failures before the stream is declared dead
+    // and the device is closed. ~0.4 s at the engine's ~20 ms loop cadence,
+    // matching the engine's own kMaxZeroReadBeforeDrop.
+    static constexpr int kReadFailThreshold = 20;
 };
 
 } // namespace dsp
