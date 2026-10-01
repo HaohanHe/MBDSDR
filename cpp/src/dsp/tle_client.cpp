@@ -589,6 +589,8 @@ double TleClient::downlinkHzFor(const QString& name) {
         return 137.9125e6;  // NOAA-18 APT
     if (n.contains(QStringLiteral("NOAA 19")) || n.contains(QStringLiteral("NOAA-19")))
         return 137.9125e6;  // NOAA-19 APT
+    if (n.contains(QStringLiteral("CBERS")))
+        return 437.8e6;     // CBERS LEO UHF telemetry downlink (public)
     return 0.0;             // unknown: honest "no frequency", not a guess
 }
 

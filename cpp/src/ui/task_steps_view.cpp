@@ -70,8 +70,7 @@ void TaskStepsView::clear() {
     reportLabel_->setVisible(false);
 }
 
-void TaskStepsView::setRun(const QList<ai::StepResult>& steps, const QString& report) {
-    clearList();
+void TaskStepsView::renderCards(const QList<ai::StepResult>& steps) {
     int idx = 0;
     for (const ai::StepResult& r : steps) {
         ++idx;
@@ -84,7 +83,6 @@ void TaskStepsView::setRun(const QList<ai::StepResult>& steps, const QString& re
                                tokens::scaled(tokens::kSpacingS));
         cl->setSpacing(tokens::scaled(tokens::kSpacingS));
 
-        // Header: status dot + "N. tool · state · elapsed"
         auto* head = new QHBoxLayout;
         auto* dot = new QLabel(card);
         dot->setFixedSize(tokens::scaled(tokens::kSpacingM), tokens::scaled(tokens::kSpacingM));
@@ -100,7 +98,6 @@ void TaskStepsView::setRun(const QList<ai::StepResult>& steps, const QString& re
         head->addWidget(title, 1);
         cl->addLayout(head);
 
-        // Detail: human description + resolved args + summary.
         if (!r.description.isEmpty()) {
             auto* desc = new QLabel(r.description, card);
             desc->setObjectName("dockHint");
@@ -125,11 +122,22 @@ void TaskStepsView::setRun(const QList<ai::StepResult>& steps, const QString& re
         listLay_->addWidget(card);
     }
     listLay_->addStretch();
+}
 
+void TaskStepsView::setRun(const QList<ai::StepResult>& steps, const QString& report) {
+    clearList();
+    renderCards(steps);
     if (!report.isEmpty()) {
         reportLabel_->setText(report);
         reportLabel_->setVisible(true);
+    } else {
+        reportLabel_->setVisible(false);
     }
+}
+
+void TaskStepsView::setLiveSteps(const QList<ai::StepResult>& steps) {
+    clearList();
+    renderCards(steps);
 }
 
 } // namespace ui

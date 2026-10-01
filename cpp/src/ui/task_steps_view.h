@@ -21,6 +21,8 @@ public:
 
     // Replace the on-screen list with a run's real records + final report.
     void setRun(const QList<ai::StepResult>& steps, const QString& report);
+    // Incremental live update (async run): redraw the cards only, no report.
+    void setLiveSteps(const QList<ai::StepResult>& steps);
     void clear();
 
 private:
@@ -30,6 +32,7 @@ private:
     QLabel* reportLabel_ = nullptr;
 
     void clearList();
+    void renderCards(const QList<ai::StepResult>& steps);
 };
 
 } // namespace ui
