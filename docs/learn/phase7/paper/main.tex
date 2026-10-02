@@ -1,0 +1,165 @@
+%% =====================================================================
+%%  MBDSDR — IEEE Wireless Communications Letters (WCL), journal letter
+%%  Skeleton only.  SINGLE SOURCE OF TRUTH: main.md (this repo, v0.4).
+%%
+%%  MECHANISM: edit main.md first.  This .tex is a mirror for submission
+%%  typesetting.  After every main.md change, sync text here by hand or with
+%%  a pandoc pass (see README.md §"LaTeX sync").  Never edit numbers/claims
+%%  in this file without first changing main.md.
+%%
+%%  Build (once refs/figures are present):
+%%      pdflatex main && bibtex main && pdflatex main && pdflatex main
+%%  Figures live outside this docs/ tree at:
+%%      paper/experiments/figures/*.png   (relative to repo root)
+%% =====================================================================
+\documentclass[journal]{IEEEtran}
+
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{url}
+% \usepackage{siunitx}   % optional, for units
+
+\begin{document}
+
+%% ---------------------------------------------------------------------
+%% TITLE / AUTHORS  (placeholders — fill before submission; see PENDING)
+%% ---------------------------------------------------------------------
+\title{MBDSDR: An AI-Defined Software-Defined Radio Stack with a
+Function-Calling, Reproducible Measurement Backbone}
+
+\author{Firstname~Lastname,~\IEEEmembership{Member,~IEEE,}%
+and~Bi4MIB~open-source~contributors%
+% <-this % stops a space
+\thanks{Manuscript received ...; revised ... (PENDING).}
+\thanks{The authors are with ... (e-mail: ...).}}
+
+\maketitle
+
+%% ---------------------------------------------------------------------
+%% ABSTRACT  (keep in lock-step with main.md §Abstract)
+%% ---------------------------------------------------------------------
+\begin{abstract}
+We present MBDSDR, a full-stack AI-defined software-defined radio (SDR)
+reference platform that couples a C++ real-time receive chain, a Flutter
+mobile client, a Python signal-processing kernel, and an OpenAI-compatible
+function-calling tool layer exposing every radio operation as an
+agent-callable tool. This letter focuses on the reproducible experimental
+backbone: a fixed-seed Monte-Carlo runner with Wilson-score 95\% confidence
+intervals, an Eb/N0--in-band-SNR calibration convention, and per-run
+manifests locking script, seed, data-origin, parameters, sample count, git
+SHA and UTC timestamp. [SYNC: ten synthetic experiments, $\approx$10.4k
+trials; BPSK sample-rate invariance 0.595--0.705 at fixed Eb/N0; residual
+$\approx$10\,Hz Doppler collapses uncompensated decoding to 6.5\% while
+known-frequency restoration holds $\approx$0.94; KNN-AMR 0.96--1.00 vs.\
+classical rules 0.67--1.00 at $\ge$10\,dB; local tool pipeline handles
+400 mixed calls at 1.000 graceful rate. LLM-agent arm = PENDING_ONLINE_RUN.]
+\end{abstract}
+
+\begin{IEEEkeywords}
+Software-defined radio, AI-defined radio, function calling, automatic
+modulation recognition, Doppler compensation, reproducible experiments.
+\end{IEEEkeywords}
+
+%% ---------------------------------------------------------------------
+\section{Introduction}
+%% SYNC: main.md §I.  Two problems + Contributions (i)--(iv).
+\begin{itemize}
+  \item Layered stack; every SDR op registered as an OpenAI function-calling tool.
+  \item Fixed-seed Monte-Carlo library (\texttt{experiments/common/}) with Wilson 95\% CIs, explicit Eb/N0 calibration, per-run manifests.
+  \item Ten synthetic experiments, each labelled with origin / $N$ / UTC date.
+  \item Honest separation: deterministic local tool pipeline (measured) vs.\ online-LLM decision layer (reported as pending).
+\end{itemize}
+
+%% ---------------------------------------------------------------------
+\section{System Design}
+%% SYNC: main.md §II.  Four layers + experiment library.
+%% --- Table I (layers) ---
+\begin{table}[!t]
+\caption{MBDSDR layers (representative components).}
+\label{tab:layers}
+% MIGRATE: Tab.I rows from main.md (C++ chain / Flutter / Python kernel /
+%          tool layer / new space-time) into a booktabs table.
+\begin{tabular}{@{}lll@{}}
+\toprule
+Layer & Language/location & Role \\
+\midrule
+% ... (see main.md) ... \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% ---------------------------------------------------------------------
+\section{Experiments}
+%% All synthetic, master seed 20261001, Wilson 95\% CIs.
+
+\subsection{Decode success vs.\ Eb/N0 (Fig.~\ref{fig:ebno}, $N=2400$)}
+%% MIGRATE: Fig.1 -> paper/experiments/figures/ebno_decode_success__synthetic__N2400__20261001.png
+\begin{figure}[!t]
+\centering
+% \includegraphics[width=\linewidth]{paper/experiments/figures/ebno_decode_success__synthetic__N2400__20261001.png}
+\caption{[Fig.1] Decode success vs.\ Eb/N0 (BPSK/ADS-B/AX.25; synthetic).}
+\label{fig:ebno}
+\end{figure}
+% --- Table II (representative operating points) ---
+
+\subsection{Decode success vs.\ sample rate (Fig.~\ref{fig:rate}, $N=1400$)}
+%% MIGRATE: Fig.2 -> paper/experiments/figures/rate_sweep_success__synthetic__N1400__20261002.png
+% --- Table III (sample-rate sweep, fixed Eb/N0=6 dB) ---
+
+\subsection{Decode success vs.\ receiver bandwidth (Fig.~\ref{fig:bw}, $N=900$)}
+%% MIGRATE: Fig.3 -> paper/experiments/figures/rate_bandwidth_success__synthetic__N900__20261001.png
+
+\subsection{Doppler compensation benefit (Fig.~\ref{fig:doppler}, $N=3600$)}
+%% MIGRATE: Fig.4 -> paper/experiments/figures/doppler_comp_success__synthetic__N3600__20261002.png
+% --- Table IV (doppler compensation, fixed Eb/N0=8 dB) ---
+% NOTE: CSV/manifest regenerated at master seed 20261001; Tab.IV matches
+%       CSV cell-for-cell (see main.md resolved provenance note).
+
+\subsection{Automatic modulation recognition (Figs.~\ref{fig:base}--\ref{fig:cm}, $N=600/300/640$)}
+%% MIGRATE: Fig.5 -> paper/experiments/figures/baseline_compare_amr__synthetic__N600__20261001.png
+%% MIGRATE: Fig.6 -> paper/experiments/figures/llm_baseline_amr__synthetic__N300__20261001.png  (LLM column PENDING)
+%% MIGRATE: Fig.7 -> paper/experiments/figures/amr_confusion_matrix__synthetic__N640__20261001.png
+% Three detector families on identical samples: classical DSP rules, KNN-AMR
+% (25 features, k=5), LLM agent (PENDING_ONLINE_RUN).  Table V.
+% REVIEWER NOTE: merge Fig.5 & Fig.6 once the online LLM curve is filled.
+
+\subsection{Single-station Doppler orbit determination (Figs.~\ref{fig:orb}--\ref{fig:dur}, $N=155/6$)}
+%% MIGRATE: Fig.8 -> paper/experiments/figures/doppler_convergence__synthetic__N155__20261001.png
+%% MIGRATE: Fig.9 -> paper/experiments/figures/doppler_duration_convergence__synthetic__N6__20261001.png
+
+\subsection{Agent tool-call pipeline (Fig.~\ref{fig:tool}, $N=400$)}
+%% MIGRATE: Fig.10 -> paper/experiments/figures/agent_toolcall_stages__synthetic__N400__20261002.png
+% --- Table VI (local-pipeline stages; LLM decision row PENDING) ---
+
+%% ---------------------------------------------------------------------
+\section{Discussion and Limitations}
+%% SYNC: main.md §IV.  Synthetic-only; single-station observability;
+%%       ideal (known-fd) compensator = upper bound; LLM layer pending;
+%%       best-case BPSK (ideal carrier/timing sync).
+
+%% ---------------------------------------------------------------------
+\section{Related Work}
+%% SYNC: main.md §V.  GNU Radio / SDR++ / SatDump; LLM-tool/MCP prototypes
+%%       (interactive control, not a measurement backbone); O-RAN/6G xApp.
+%% 待补: final bibliography (see main.md "References to verify" list).
+
+%% ---------------------------------------------------------------------
+\section{Conclusion}
+%% SYNC: main.md §VI.  Ten fixed-seed experiments ($\approx$10.4k trials);
+%%       known-Doppler restores decoding at $\approx$10\,Hz residual;
+%%       KNN-AMR beats hand rules at low SNR; local tool pipeline reliable.
+%%       Online-LLM and OTA/recorded results flagged pending.
+
+%% ---------------------------------------------------------------------
+%% Appendix: experiment-to-artifact map (origin / N / date)
+%% SYNC: main.md Appendix table (Fig.1--Fig.10 -> script -> origin -> N -> date).
+% \begin{table*}[!t] ... \end{table*}
+
+%% ---------------------------------------------------------------------
+%% BIBLIOGRAPHY  (PENDING — no fabricated entries; see main.md §V "References
+%% to verify".  Create refs.bib only after confirming each source.)
+%% ---------------------------------------------------------------------
+% \bibliographystyle{IEEEtran}
+% \bibliography{refs}
+
+\end{document}

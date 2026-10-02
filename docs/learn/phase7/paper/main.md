@@ -1,11 +1,11 @@
 ---
-title: "MBDSDR: An AI-Defined Software-Defined Radio Stack with Deterministic, Reproducible Experimentation"
+title: "MBDSDR: An AI-Defined Software-Defined Radio Stack with a Function-Calling, Reproducible Measurement Backbone"
 venue: "IEEE Wireless Communications Letters (WCL) — submission draft"
-status: DRAFT v0.3 (2026-10-02, post system self-review; see CHANGES.md)
+status: DRAFT v0.4 (2026-10-02, pre-submission reviewer pass; see CHANGES.md)
 authors: "Bi4MIB (open-source, call for co-authors)"
 ---
 
-# MBDSDR: An AI-Defined Software-Defined Radio Stack with Deterministic, Reproducible Experimentation
+# MBDSDR: An AI-Defined Software-Defined Radio Stack with a Function-Calling, Reproducible Measurement Backbone
 
 > **Reproducibility & honesty note.** Every number in this paper is produced by a
 > fixed-seed simulation pipeline under `experiments/` and stored as CSV + Wilson
@@ -33,11 +33,15 @@ vs. sample rate, and vs. receiver bandwidth; the measured benefit of Doppler
 compensation; automatic modulation recognition (AMR) against a rule-based
 baseline; single-station Doppler orbit determination; and the local deterministic
 cost/reliability of the agent tool-call pipeline. At fixed Eb/N0, BPSK packet
-success is invariant to sample rate (≈0.60 across 10 kS/s–1 MS/s); residual
-Doppler of only ≈10 Hz collapses uncompensated decoding to 6.5% while known-
-frequency restoration holds ≈0.95; and KNN-AMR reaches 0.96–1.00 accuracy at
-≥10 dB where hand-tuned rules reach 0.67–1.00. The online-LLM decision layer
-remains a clearly-marked pending item. All code and experiment artifacts are open.
+success is invariant to sample rate (0.595–0.705 across 10 kS/s–1 MS/s, with
+overlapping Wilson bands); a residual Doppler of only ≈10 Hz collapses
+uncompensated decoding to 6.5% while known-frequency restoration holds ≈0.94; on
+identical samples KNN-AMR reaches 0.96–1.00 accuracy at ≥10 dB versus 0.67–1.00
+for classical rule thresholds (the LLM-agent arm is a clearly-marked pending
+run, not a fabricated number); and the local function-calling pipeline resolves,
+validates and executes 400 mixed valid and malformed calls at a 1.000
+graceful-handling rate. The online-LLM decision layer remains a clearly-marked
+pending item. All code and experiment artifacts are open.
 
 **Index Terms**—Software-defined radio, AI-defined radio, function calling,
 automatic modulation recognition, Doppler compensation, reproducible experiments.
@@ -126,6 +130,7 @@ zero bit errors. Eb/N0 is obtained from in-band SNR via `B=fs`: Δ=+15.6 dB
 (AX.25), +6.0 dB (ADS-B), +10.0 dB (BPSK). BPSK crosses 0.5 at ≈6 dB and reaches
 1.0 at ≥10 dB; ADS-B needs ≈12–14 dB; AX.25 (largest B/Rb penalty) needs ≈26 dB.
 This is a real power–bit-rate conversion, not a curve-placement choice.
+Representative operating points with Wilson intervals are listed in Tab. II.
 
 **TABLE II — Representative operating points (Fig. 1; synthetic).**
 
@@ -188,28 +193,37 @@ baseline. This is the ideal (known-fd) upper bound on the compensation loop.
 | 15 | 0.000 | 0.970 |
 | ≥25 | 0.000 | 0.955–0.975 |
 
-> **Provenance note (self-review, 2026-10-02).** The canonical figure for this run is
-> `doppler_comp_success__synthetic__N3600__20261002.png` (200 trials/cell), and the
-> Tab. IV values above are those of that run. After the figure was produced, the
-> on-disk `doppler_comp_success.csv` (and its `manifest_doppler_comp.json`) were
-> overwritten by a non-canonical smoke run (`seed=7`, N=360/cell) whose numbers
-> differ from the table. **Do not cite Tab. IV until `exp_doppler_comp.py` is
-> re-run at the master seed to regenerate the N=3600 CSV/manifest.** The qualitative
-> finding (≈10 Hz residual collapses uncompensated decoding; known-*f*d
-> restoration) is unchanged across both runs.
+> **Provenance note (resolved, v0.4, 2026-10-02).** The on-disk
+> `doppler_comp_success.csv` and `manifest_doppler_comp.json` have been regenerated
+> at the master seed (`seed=20261001`, `n_samples=3600`, 200 trials/cell; figure
+> `doppler_comp_success__synthetic__N3600__20261002.png`), and Tab. IV now matches
+> the CSV cell-for-cell (e.g. residual *f*d=10 Hz: uncompensated 0.065, compensated
+> 0.940). An earlier non-canonical smoke run (`seed=7`, N=360/cell) that briefly
+> overwrote the CSV has been superseded; the earlier "do not cite Tab. IV" warning
+> is withdrawn. The qualitative finding (≈10 Hz residual collapses uncompensated
+> decoding; known-*f*d restoration) is unchanged.
 
 ### E. Automatic modulation recognition (Figs. 5–7, N=600 / N=300 / N=640)
 
-On a fixed-seed synthetic dataset of FSK/PSK/NOISE, a hand-tuned rule classifier
-(instantaneous-frequency standard-deviation thresholds) is compared against the
-real KNN-AMR (25 features, k=5) on the **same samples**. At low in-band SNR the
-rule baseline is weak (0.33 at 0 dB, 0.67 at 10 dB) while KNN-AMR is 0.54 and
-0.96; both saturate by 15–20 dB (Tab. V). Separately, the full 8-class KNN evaluation (`exp_amr.py`;
-AM/FM/CW/FSK/PSK/QAM/OFDM/NOISE, N=640) gives a confusion matrix at SNR=10 dB
-(Fig. 7) with diagonal accuracy 0.9938 [0.984, 0.998]; the only residual confusion
-is FSK→QAM (4/80). The online-LLM classification column (Fig. 6) is
-`PENDING_ONLINE_RUN`: classic/KNN are computed locally, the LLM cell is left
-empty rather than fabricated.
+We compare **three detector families on the same fixed-seed samples** of
+FSK/PSK/NOISE: (i) a classical-DSP rule classifier (instantaneous-frequency
+standard-deviation thresholds), (ii) the real KNN-AMR (25 features, k=5), and
+(iii) an LLM agent asked to classify by tool call. At low in-band SNR the rule
+baseline is weak (0.33 at 0 dB, 0.67 at 10 dB) while KNN-AMR is 0.54 and 0.96;
+both saturate by 15–20 dB (Tab. V). The LLM-agent arm (Fig. 6; model slot
+`Qwen/Qwen2.5-7B-Instruct`) is `PENDING_ONLINE_RUN`: the classic and KNN cells are
+computed locally, the LLM cell is left empty rather than fabricated.
+
+Separately, the full 8-class KNN evaluation (`exp_amr.py`; AM/FM/CW/FSK/PSK/QAM/
+OFDM/NOISE, N=640) gives a confusion matrix at SNR=10 dB (Fig. 7) with diagonal
+accuracy 0.9938 [0.984, 0.998]; the only residual confusion is FSK→QAM (4/80).
+
+> **Reviewer note (v0.4).** Figs. 5 and 6 currently share the classic/KNN arms
+> (Fig. 5: 120 trials/SNR, `exp_baseline_compare.py`; Fig. 6: 60 trials/SNR,
+> `exp_llm_baseline.py`, reserved to receive the pending LLM curve). Once the
+> online LLM run fills that column, Figs. 5 and 6 should be merged into a single
+> three-family comparison figure; until then Fig. 6 is retained only to slot the
+> LLM curve and is clearly an incomplete panel.
 
 **TABLE V — AMR accuracy vs. in-band SNR (Fig. 5; synthetic, N=120/SNR point).**
 
@@ -293,6 +307,21 @@ This work differs by (a) treating every radio operation as a versioned,
 schema'd tool, and (b) shipping a fixed-seed, CI-runnable measurement library
 that reports CIs, data-origin, and manifests so that "AI runs the radio" claims
 are auditable.
+
+### References to verify before submission (待补 — no fabricated entries)
+
+The list below states the *kinds* of citations the final bibliography must
+contain. Each entry is a **placeholder** that must be searched, confirmed, and
+formatted in IEEE style before submission; **nothing below is asserted as a
+final, verified reference**, and no specific LLM-SDR/MCP project name is asserted
+until it is located in the literature.
+
+- **SDR frameworks:** GNU Radio, SDR++, SatDump — verify project citation (URL/version). [待核实]
+- **LLM tool-calling / MCP:** OpenAI function-calling/tool-use API; any peer-reviewed or citable LLM-driven-SDR / MCP-for-SDR system, if found. [待核实]
+- **Statistics:** Wilson score confidence interval (Wilson, JASA 1927). [待核实卷期]
+- **Orbit propagation:** SGP4/SDP4 (Hoots & Roe 1980; Vallado revision). [待核实]
+- **Recording standard:** SigMF — Signal Metadata Format (official spec). [待核实]
+- **O-RAN / 6G RAN intelligence:** one representative xApp/RIC standard or survey reference. [待核实]
 
 ---
 

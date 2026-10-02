@@ -1177,3 +1177,11 @@ add_executable(test_status_format tests/test_status_format.cpp)
 target_include_directories(test_status_format PRIVATE src)
 target_link_libraries(test_status_format PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME status_format COMMAND test_status_format)
+
+# ---- P3 (phase9): Spacetime-view state->text/role formatters (header-only) ----
+# Pure mapping, no QApplication: honest empty states + the system-never->GNSS rule.
+add_executable(test_spacetime_format tests/test_spacetime_format.cpp)
+target_include_directories(test_spacetime_format PRIVATE src)
+target_link_libraries(test_spacetime_format PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME spacetime_format COMMAND test_spacetime_format)
+

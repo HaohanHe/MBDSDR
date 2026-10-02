@@ -1,0 +1,135 @@
+# =============================================================================
+# MBDSDR 持续集成（CI）
+# -----------------------------------------------------------------------------
+# 状态：结构就绪 —— 本文件在云内编写，无法真正触发 GitHub Actions 执行验证。
+#       三个 job（cpp / flutter / python）的 checkout + setup + test 步骤已按
+#       本地实测命令组织；首次在 GitHub runner 上跑通前，需按下方注释补齐
+#       runner 环境（尤其 C++ 的 Qt 6.8 与系统图形库）。标注为 TODO(runner) 处
+#       即"待 runner 配置验证"项。
+#
+# 安全：本 workflow 不使用任何 secrets / API key / 凭据；硬件相关用例在无硬件
+#       runner 上由 pytest / Qt 自行 skip，不计失败。
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# 同一 ref 的新提交取消旧的排队运行，省 runner 资源
+concurrency:
+  group: ci-${{ ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Python：pytest 五个根目录
+  #   runner 需：Python 3.12 + PySide6 所需系统库（libGL 等）。
+  #   无硬件/无历表环境下：硬件用例自动 skip；test_solar_system 因 de421.bsp
+  #   未下载而 skip（属预期，非失败）。
+  # ---------------------------------------------------------------------------
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 系统图形库（PySide6 offscreen 需要）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libegl1 libxkbcommon0 libdbus-1-3
+
+      - name: 安装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          # 核心依赖；个别可选硬件库（SoapySDR 等）装不上不应让 CI 直接崩，故 || true
+          pip install -r requirements.txt || true
+          pip install pytest
+
+      - name: pytest（五个根目录）
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python -m pytest -q \
+            experiments/tests \
+            mbdsdr_ai/tests \
+            tools/onboarding \
+            tools/hw_selfcheck \
+            tests/
+
+  # ---------------------------------------------------------------------------
+  # Flutter：test + analyze
+  #   runner 需：Flutter stable（本地实测 3.47.5 / Dart 3.13.4）。
+  #   subosito/flutter-action 可拉取，无需凭据。
+  # ---------------------------------------------------------------------------
+  flutter:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: 'stable'
+
+      - name: 依赖解析
+        run: flutter pub get
+
+      - name: flutter analyze
+        run: flutter analyze
+
+      - name: flutter test
+        run: flutter test
+
+  # ---------------------------------------------------------------------------
+  # C++：cmake 构建 + Qt offscreen ctest
+  #   TODO(runner)：本地基线用 Qt 6.8.2（/home/user/Qt/6.8.2）。ubuntu-latest 自带
+  #   qt6-base-dev 版本可能低于 6.8，导致 find_package(Qt6) 或 API 不匹配。
+  #   首次跑通前二选一：
+  #     (a) runner 预装 Qt 6.8 并设 CMAKE_PREFIX_PATH（见下）；
+  #     (b) 用 jurplel/install-qt-action@v3（需 Qt 账户凭据，属 secrets，本仓库
+  #         不内建；由维护者在 GitHub 仓库 Settings→Secrets 配置后再启用）。
+  #   当前默认走 (a)：apt 装 Qt6 开发包——若版本不足，此 job 会在 configure 阶段
+  #   失败，即"待 runner 配置验证"的明确信号。
+  # ---------------------------------------------------------------------------
+  cpp:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 系统构建依赖 + Qt6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            qt6-base-dev qt6-multimedia-dev qt6-tools-dev \
+            libgl1-mesa-dev pkg-config
+
+      - name: CMake 配置
+        working-directory: cpp
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: 构建
+        working-directory: cpp
+        run: cmake --build build -j"$(nproc)"
+
+      - name: ctest（offscreen，无显示）
+        working-directory: cpp
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure
