@@ -65,14 +65,16 @@ class SpacetimeStatus {
             role: SpRole.warn);
 
     // GNSS 定位：无 fix -> 诚实空态（绝不画假坐标）。
+    // 与桌面 spTileGnss 同一口径：坐标 · 星N · HDOP x.x（HDOP 来自真实 NMEA，
+    // 无则不追加该段——绝不编造一个精度因子数字）。
+    final String gnssDetail = fix.hasFix
+        ? '${fix.latitude!.toStringAsFixed(5)},'
+            '${fix.longitude!.toStringAsFixed(5)}'
+            '${fix.satellites != null ? ' · 星${fix.satellites}' : ''}'
+            '${fix.hdop != null ? ' · HDOP ${fix.hdop!.toStringAsFixed(1)}' : ''}'
+        : '';
     final SpCell g = fix.hasFix
-        ? SpCell(
-            title: 'GNSS 定位',
-            text: '${fix.latitude!.toStringAsFixed(5)},'
-                '${fix.longitude!.toStringAsFixed(5)}'
-                '${fix.satellites != null ? ' · 星${fix.satellites}' : ''}',
-            role: SpRole.ok,
-          )
+        ? SpCell(title: 'GNSS 定位', text: gnssDetail, role: SpRole.ok)
         : const SpCell(title: 'GNSS 定位', text: '无 fix', role: SpRole.neutral);
 
     // 接收目标：优先真实选中目标；否则连接中的当前频率；否则诚实空态。

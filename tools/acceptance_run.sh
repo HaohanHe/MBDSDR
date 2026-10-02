@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
+# MBDSDR 真机端到端一键演练（phase11 P1）
+# ============================================
+#
+# 按 docs/learn/phase10/P1-acceptance-runbook.md 的四步真跑一遍，逐步记录
+# PASS/FAIL/SKIP 与关键输出，最后组装成检查表 JSON（默认 tools/acceptance_out.json），
+# 供整段贴回聊天；tools/acceptance_lib.py 的 CLI 负责其中可测的决策逻辑。
+#
+# 流程：
+#   ① selfcheck --json（插设备自检）
+#   ② selfcheck | diag_wizard --paste（产出围栏回传块）
+#   ③ onboard 三类信号 adsb/apt/cw（设备在场才真采集；不在场一律 SKIP + 原因）
+#   ④ exp_ota_run --recordings-dir 回填 recorded 口径
+#   ⑤ 桌面"时空视图"人工核对提示（脚本只提示，不自动验证）
+#
+# 红线：
+#   * 禁 mock：device_present 只从 selfcheck 报告读 target_hits；没设备就明确
+#     输出"未检测到设备"，下游全部 SKIP 并写原因，绝不假采集。
+#   * 无硬件分支在云 VM 真跑：诚实 FAIL/SKIP，退出码 2（不是错误）。
+#
+# 退出码（与 acceptance_lib.py 一致）：
+#   0 设备在场且演练全绿；1 设备在场但有步 FAIL；2 未检测到设备（诚实空态）；
+#   3 用法/环境错误。
+#
+# 用法：
+#   bash tools/acceptance_run.sh                      # 默认全流程
+#   bash tools/acceptance_run.sh --out /tmp/x.json    # 自定义检查表输出
+#   bash tools/acceptance_run.sh --modes adsb,cw      # 只跑指定模式（白名单 adsb/apt/cw）
+#   bash tools/acceptance_run.sh --keep-logs          # 保留中间日志目录
+
+set -u
+set -o pipefail
+
+# ---- 定位仓库根（脚本在 <root>/tools/ 下）----
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+ROOT="$(cd "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd)"
+cd "$ROOT"
+
+PY="${PYTHON:-python3}"
+OUT="$ROOT/tools/acceptance_out.json"
+KEEP_LOGS=0
+MODES_IN="adsb,apt,cw"
+
+# 模式参数（核对自 tools/onboarding/onboard.py 的 MODES 默认值）
+MODE_FREQ_adsb="1090e6";    MODE_N_adsb=""
+MODE_FREQ_apt="137.5e6";    MODE_N_apt="4800000"
+MODE_FREQ_cw="7020000";    MODE_N_cw="2400000"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --out) OUT="$2"; shift 2 ;;
+    --modes) MODES_IN="$2"; shift 2 ;;
+    --keep-logs) KEEP_LOGS=1; shift ;;
+    -h|--help)
+      grep -E '^#( |$)' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *) echo "[ERROR] 未知参数: $1" >&2; exit 3 ;;
+  esac
+done
+
+STAMP="$(date +%Y%m%d_%H%M%S)"
+LOG_DIR="$ROOT/tools/.acceptance_logs/${STAMP}"
+RAW="$LOG_DIR/raw.jsonl"
+mkdir -p "$LOG_DIR"
+
+info()  { echo "[演练] $*"; }
+warn()  { echo "[演练][WARN] $*" >&2; }
+
+# 把一行 raw 结果追加到 raw.jsonl（JSON 字符串由调用方保证合法）
+append_raw() { printf '%s\n' "$1" >> "$RAW"; }
+
+# 把任意值安全转成 JSON 字符串字面量（用 python，避免手工转义路径）
+jstr() { "$PY" -c 'import json,sys; print(json.dumps(sys.argv[1], ensure_ascii=False))' "$1"; }
+
+# ---------------------------------------------------------------------------
+# ① selfcheck --json
+# ---------------------------------------------------------------------------
+info "① selfcheck --json（只读硬件自检）"
+SELFCHECK_JSON="$LOG_DIR/selfcheck.json"
+"$PY" tools/hw_selfcheck/selfcheck.py --json > "$SELFCHECK_JSON" 2> "$LOG_DIR/selfcheck.stderr"
+RC_SC=$?
+append_raw "$(printf '{"id":"selfcheck","title":"插设备自检 selfcheck --json","rc":%d,"selfcheck_report":%s}' \
+  "$RC_SC" "$(jstr "$SELFCHECK_JSON")")"
+
+# 设备是否在场（只读报告，绝不猜）
+DP="$("$PY" tools/acceptance_lib.py device-present "$SELFCHECK_JSON" 2>/dev/null || echo false)"
+info "    设备在场判定: $DP"
+
+# ---------------------------------------------------------------------------
+# ② diag_wizard --paste（产出围栏回传块）
+# ---------------------------------------------------------------------------
+info "② selfcheck | diag_wizard --paste（诊断向导 + 回传块）"
+DIAG_TXT="$LOG_DIR/diag_wizard.txt"
+"$PY" tools/diag_wizard.py "$SELFCHECK_JSON" --paste > "$DIAG_TXT" 2> "$LOG_DIR/diag_wizard.stderr"
+RC_DW=$?
+if grep -q "==== MBDSDR 真机回传块" "$DIAG_TXT"; then
+  FENCE=true
+else
+  FENCE=false
+fi
+append_raw "$(printf '{"id":"diag_wizard_paste","title":"diag_wizard --paste 回传块","rc":%d,"paste_block":%s,"log":%s}' \
+  "$RC_DW" "$FENCE" "$(jstr "$DIAG_TXT")")"
+
+# ---------------------------------------------------------------------------
+# ③ onboard 三类信号（按设备在场分支）
+# ---------------------------------------------------------------------------
+# 解析 --modes 白名单
+RUN_MODES=""
+for m in ${MODES_IN//,/ }; do
+  case "$m" in
+    adsb|apt|cw) RUN_MODES="$RUN_MODES $m" ;;
+    *) warn "跳过非法模式 $m（白名单: adsb/apt/cw）" ;;
+  esac
+done
+
+FIRST_REC_DIR=""   # 记录第一个成功落盘 SigMF 的目录，给 ota 回填用
+
+run_onboard() {
+  local mode="$1"
+  local freq_var="MODE_FREQ_$mode"; local n_var="MODE_N_$mode"
+  local freq="${!freq_var}"; local ns="${!n_var}"
+  local oj="$LOG_DIR/onboard_${mode}.json"
+
+  info "③ onboard --mode $mode --freq $freq ${ns:+--n $ns}"
+  if [ -n "$ns" ]; then
+    "$PY" tools/onboarding/onboard.py --step all --freq "$freq" --mode "$mode" \
+      --n "$ns" --json > "$oj" 2> "$LOG_DIR/onboard_${mode}.stderr"
+  else
+    "$PY" tools/onboarding/onboard.py --step all --freq "$freq" --mode "$mode" \
+      --json > "$oj" 2> "$LOG_DIR/onboard_${mode}.stderr"
+  fi
+  local rc=$?
+
+  # 从 onboard --json 里抽 record 步落盘的 SigMF 目录（供 ota 回填）
+  local rec_dir
+  rec_dir="$("$PY" - "$oj" <<'PYEOF' 2>/dev/null || echo "")
+import json,sys,os
+try:
+    d=json.load(open(sys.argv[1],encoding="utf-8"))
+    for s in d.get("steps",[]):
+        if s.get("step")=="record" and s.get("status")=="PASS":
+            p=(s.get("detail") or {}).get("sigmf_data","")
+            if p: print(os.path.dirname(p)); break
+except Exception:
+    pass
+PYEOF
+"
+  [ -z "$FIRST_REC_DIR" ] && [ -n "$rec_dir" ] && FIRST_REC_DIR="$rec_dir"
+
+  append_raw "$(printf '{"id":"onboard_%s","title":"onboard 真机采集/录制/解码 (%s)","rc":%d,"onboard_json":%s,"recordings_dir":%s}' \
+    "$mode" "$mode" "$rc" "$(jstr "$oj")" "$(jstr "$rec_dir")")"
+}
+
+skip_onboard() {
+  local mode="$1"
+  info "③ onboard --mode $mode：SKIP（未检测到设备，不 mock、不采集）"
+  append_raw "$(printf '{"id":"onboard_%s","title":"onboard 真机采集/录制/解码 (%s)","skipped":true,"skip_reason":%s}' \
+    "$mode" "$mode" \
+    "$(jstr "未检测到 RTL-SDR 设备（0bda:2838/2832）；按红线不 mock、不采集，真机插好后重跑本脚本")")"
+}
+
+if [ "$DP" = "true" ]; then
+  for m in $RUN_MODES; do run_onboard "$m"; done
+else
+  warn "未检测到设备 -> 三类 onboard 全部 SKIP（无硬件诚实空态）"
+  for m in $RUN_MODES; do skip_onboard "$m"; done
+fi
+
+# ---------------------------------------------------------------------------
+# ④ exp_ota_run 回填 recorded 口径
+# ---------------------------------------------------------------------------
+OTA_LOG="$LOG_DIR/ota.txt"
+if [ "$DP" = "true" ] && [ -n "$FIRST_REC_DIR" ]; then
+  info "④ exp_ota_run --recordings-dir $FIRST_REC_DIR"
+  "$PY" experiments/exp_ota_run.py --recordings-dir "$FIRST_REC_DIR" > "$OTA_LOG" 2>&1
+  RC_OTA=$?
+  append_raw "$(printf '{"id":"ota_backfill","title":"exp_ota_run 回填 recorded 口径","rc":%d,"log":%s,"recordings_dir":%s}' \
+    "$RC_OTA" "$(jstr "$OTA_LOG")" "$(jstr "$FIRST_REC_DIR")")"
+else
+  info "④ ota_backfill：SKIP（无 onboard 录制产物）"
+  : > "$OTA_LOG"
+  append_raw "$(printf '{"id":"ota_backfill","title":"exp_ota_run 回填 recorded 口径","skipped":true,"skip_reason":%s,"log":%s}' \
+    "$(jstr "无 onboard 录制产物（未检测到设备 / record 未落盘 SigMF），跳过回填")" "$(jstr "$OTA_LOG")")"
+fi
+
+# ---------------------------------------------------------------------------
+# ⑤ 桌面"时空视图"人工核对提示
+# ---------------------------------------------------------------------------
+HINT="打开桌面端 -> 中心区[时空视图]tab：核对 4 格(设备连接/信号RSSI·SNR/解码状态/GNSS定位) 与 3 行(当前接收目标/时间源/多普勒补偿)。无硬件或未接 GNSS 时四格空态、时间源=system 属设计内诚实空态，不要冒充读数。"
+info "⑤ 桌面时空视图：人工核对（脚本只提示，见检查表 steps 末项）"
+append_raw "$(printf '{"id":"spacetime_hint","title":"桌面[时空视图]tab 人工核对","manual":true,"hint":%s}' \
+  "$(jstr "$HINT")")"
+
+# ---------------------------------------------------------------------------
+# 组装检查表（纯逻辑在 acceptance_lib.py）
+# ---------------------------------------------------------------------------
+info "组装检查表 -> $OUT"
+"$PY" tools/acceptance_lib.py assemble --raw "$RAW" --out "$OUT"
+RC_AS=$?
+
+echo
+echo "=================================================================="
+echo "演练完成：检查表 = $OUT"
+"$PY" tools/acceptance_lib.py validate "$OUT" >/dev/null 2>&1 \
+  && info "检查表结构自校验通过" \
+  || warn "检查表结构自校验失败（见上方 stderr）"
+if [ "$KEEP_LOGS" != "1" ]; then
+  info "中间日志目录 $LOG_DIR（--keep-logs 可保留）"
+else
+  warn "保留中间日志目录 $LOG_DIR"
+fi
+echo "=================================================================="
+exit "$RC_AS"
