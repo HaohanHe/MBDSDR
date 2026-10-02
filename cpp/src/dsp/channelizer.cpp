@@ -42,11 +42,13 @@ void Channelizer::designTaps(double cutoffNorm) {
 }
 
 void Channelizer::configure(double inRateHz, double outRateHz, double channelBwHz,
-                            int tapsPerBranch) {
+                            int tapsPerBranch, double transitionRatio) {
     inSr_ = inRateHz;
     outSr_ = outRateHz;
     bw_ = channelBwHz;
     tapsPerBranch_ = tapsPerBranch;
+    transitionRatio_ = transitionRatio;
+    skipFilter_ = false;
 
     // Decide whether in/out is an exact integer (fast path) or a fractional
     // ratio that needs exact rational resampling. The old round(in/out) pick
@@ -62,8 +64,18 @@ void Channelizer::configure(double inRateHz, double outRateHz, double channelBwH
         mode_ = ChannelizerMode::Integer;
         decimation_ = static_cast<int>(k);
         const double effOut = inSr_ / decimation_;
-        const double cutoff = std::min(bw_ / 2.0, effOut / 2.0 * 0.85);
-        designTaps(cutoff / inSr_);
+        // Pure filter decision: cutoff = bw/2 clamped so bw/2 + transition stays
+        // under Nyquist (replaces the old magic 0.85 back-off).
+        spec_ = planChannelFilter(effOut, bw_, transitionRatio_);
+        // RxVFO short-circuit: no rate change AND the channel covers the whole
+        // output band -> the low-pass is identity. Skip the FIR (and its history
+        // bookkeeping) entirely; only the NCO tuning runs.
+        skipFilter_ = (decimation_ == 1) && (!spec_.filterNeeded);
+        if (skipFilter_) {
+            taps_.clear();
+        } else {
+            designTaps(spec_.designCutoffHz / inSr_);
+        }
         resampler_.configure(inSr_ / decimation_, outSr_); // -> Passthrough
     } else {
         // Largest power-of-two pre-decimation that stays >= outRate. This is
@@ -76,8 +88,11 @@ void Channelizer::configure(double inRateHz, double outRateHz, double channelBwH
 
         mode_ = ChannelizerMode::Rational;
         decimation_ = predecRatio;
-        const double cutoff = std::min(bw_ / 2.0, outSr_ / 2.0 * 0.9);
-        designTaps(cutoff / inSr_);
+        // The decimating FIR is the anti-alias stage here; it always runs. The
+        // Nyquist reference matches the historical outSr/2 guard (old 0.9).
+        spec_ = planChannelFilter(outSr_, bw_, transitionRatio_);
+        skipFilter_ = false;
+        designTaps(spec_.designCutoffHz / inSr_);
 
         const double intermediate = inSr_ / predecRatio;
         resampler_.configure(intermediate, outSr_, 32);
@@ -107,9 +122,22 @@ double Channelizer::effectiveOutputRateHz() const {
 std::vector<std::complex<float>> Channelizer::process(
         const std::vector<std::complex<float>>& in) {
     const std::size_t L = in.size();
-    const std::size_t T = taps_.size();
     std::vector<std::complex<float>> out;
-    if (!primed_ || T == 0 || L == 0) return out;
+    if (!primed_ || L == 0) return out;
+
+    // Whole-band passthrough fast path: only the NCO down-mix runs; no channel
+    // LPF and no rate change (the resampler is Passthrough by construction).
+    // This is the RxVFO `if (!filterNeeded) return resamp.process(...)` short-
+    // circuit applied to the only case where MBDSDR's fused decimating FIR would
+    // otherwise be a pure overhead.
+    if (skipFilter_) {
+        out.resize(L);
+        for (std::size_t i = 0; i < L; ++i) out[i] = in[i] * nco_.next();
+        return out;
+    }
+
+    const std::size_t T = taps_.size();
+    if (T == 0) return out;
 
     // 1) Down-mix so the VFO offset lands at 0 Hz (continuous phase).
     std::vector<std::complex<float>> mixed(L);

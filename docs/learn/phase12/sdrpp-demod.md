@@ -347,4 +347,57 @@ const double cutoff = std::min(bw_/2.0, effOut/2.0 * 0.85);
 - SDR++ 实际模块侧（`root/modules/sdrpp_server/sdrpp_server.cpp` 等）如何把
   `RxVFO + Demod<stereo_t>` 拼起来、VFO 数量上限、多 VFO 扇出在哪做——
   归 Wave1-F 插件架构。
+
+---
+
+## 10. MBDSDR 落地记录（Phase12 / L9·L10·L13）
+
+> 干净室重写，GPLv3 上游仅学机制。未 commit / push。
+
+### 10.1 链内 AM 载波 AGC（L9）
+
+- 上游：SDR++ `am.h:34-35`（载波 AGC）、`am.h:103-106`（音频 AGC）双 AGC 结构。
+- MBDSDR 落地：`cpp/src/dsp/agc.h:55-75` `ComplexCarrierAgc`——复数包络跟随 AGC，
+  attack/decay 单极点，作用于 |·| 包络检波之前。纯样本级状态机，可单测。
+- 接入点：`cpp/src/dsp/demod.cpp:97-103` `DemodAM::process` 先 `carrierAgc_.processOne(iq[i])` 再 abs()。
+- 测试：`test_demod_enhance.cpp::amAgcNormalizesCarrierStep`——7.5x 载波台阶输出电平比 < 3.0，
+  对照组（AGC off）> 3.0。PASS。
+
+### 10.2 NFM 带宽匹配 FIR（L10）
+
+- 上游：SDR++ `fm.h:121` Nuttall 窗 LPF `cutoff=bw/2, trans=0.1·bw`。
+- MBDSDR 落地：`cpp/src/dsp/demod.h:55-63` `NuttallLpf`——Hz 驱动窗函数 sinc 低通，
+  抽头数 `ceil(3.8·sr/trans)` 取奇数；Nuttall 系数 `{0.355768, 0.487396, 0.144232, 0.012604}`；
+  DC 增益归一化。`DemodNFM::redesignLpf()` 调 `design(bw/2, bw*0.1, ifSr_)`。
+  `setBandwidth()` override 重算 gain_ + redesignLpf。
+- 接入点：`cpp/src/dsp/demod.cpp:143-156` 鉴频→discLpf→去加重。
+- **当前状态**：`firEnabled_ = false`（默认关）。FIR 单独测频响正确（12.5k 通道 1k→1.0, 9k→0；
+  25k 通道 9k→1.0），但在多 VFO 流式链中导致 multi_vfo 测试 ratio 从 281 跌到 2.64。
+  根因未定位（疑似 block 化延迟线与 rational resampler 交互）。类本身正确，可通过
+  `setFirEnabled(true)` 开启，单测覆盖通带选择性与热重设计。
+- 测试：`test_demod_enhance.cpp::nuttallLpfBandwidthSelective`、`nfmSetBandwidthRedesigns`。PASS。
+
+### 10.3 GFSK/FSK 解调（L13）
+
+- 上游：SDR++ `gfsk.h:31-34`（鉴频→浮点 RRC）、`gfsk.h:131-135`（MM 钟恢复）。
+- MBDSDR 落地：`cpp/src/dsp/fsk_demod.{h,cpp}` `FskDemod`——正交鉴频→NuttallLpf 基带滤波
+  →M&M 钟恢复（nAcc 累加器、omega=sps、TED error=sign(prev)·cur−prev·sign(cur)）→符号判决→bits。
+  `FskDemodConfig{sr=48000, symRate=1200, dev=600, basebandTrans=0.5, omegaGain=0.001, muGain=0.01}`。
+- 云内确定性验证：注入 300 bits 连续相位 2-FSK（dev=600Hz, sps=40），MM 钟恢复输出比特流
+  相对 TX 有固定群延时偏移，测试在 lag∈[-8,8] 搜索最优对齐，BER=0 @ lag=-4。
+- 测试：`test_demod_enhance.cpp::fskDecisionAccuracy`——BER < 0.01。PASS。
+
+### 10.4 测试结果
+
+- `test_demod_enhance`：6/6 PASS（amAgcNormalizesCarrierStep、nuttallLpfBandwidthSelective、
+  nfmSetBandwidthRedesigns、fskDecisionAccuracy 等）。
+- 全套 ctest（QT_QPA_PLATFORM=offscreen）：**101/101 PASS**，基线 98 未破（新增 demod_enhance 1 个 target）。
+
+### 10.5 未完成项 / backlog
+
+- **NFM FIR 流式链交互**：FIR 类频响正确，但在多 VFO block 流式链中导致 multi_vfo ratio 下降。
+  需定位 channelizer rational resampler 与 FIR 延迟线的交互（疑似群延时叠加导致 resampler 相位失配）。
+  临时方案：`firEnabled_=false`，类保留并单测覆盖。
+- **FSK/MM 钟恢复参数整定**：当前 omegaGain/muGain 为经验值，未做收敛性扫描。
+- **AM 音频 AGC**：仅实现了载波 AGC，音频侧 AGC（SDR++ am.h:103-106）未落地。
 - 未跑任何确定性测试；本笔记是纯阅读笔记。

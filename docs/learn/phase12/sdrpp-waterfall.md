@@ -312,3 +312,61 @@ hugeFont = ...128.0f*uiScale;   // 标题，字形范围只留 'S','D','R','+','
 - 全部为机制性引用，**未复制 GPLv3 代码**；落地须以自有实现重写并保留 MIT（GPL 干净室）。
 - 未在本机实跑：SDR++ 实际 GL 驱动行为、`Turbo` 色板文件落点（`colormaps::maps` 的扫描目录）需落地时再读 `theme_manager.cpp` / `main_window.cpp` 启动段。
 - 本轮只读机制，**未改任何 cpp/ 代码，未 commit/push**（遵循云环境无凭据约定）。
+
+---
+
+## 11. 落地记录（Phase12 waterfall 深度落地，G1/G2/G3 + 时间轴联动）
+
+> 本节记录差距清单 G1/G2/G3 的干净室落地结果。全部为自有 MIT 实现，未抄 GPLv3。
+> 纯函数抽离到新头 `cpp/src/ui/spectrum_render.h`（对标 `spectrum_tune.h` 的 header-only、
+> widget-free 风格），widget 只做接线。
+
+### 11.1 G1 doZoom 峰保持（块内 max 降采样）
+- 纯函数 `decimateBlockMaxRange()` / `decimateBlockMax()`（`spectrum_render.h:82,111`）：
+  把 `[srcBegin,srcEnd)` 按比例切成 `dstN` 块，每块取 **max**（非均值），窄峰在 zoom-out 不被抹平。
+- 接入瀑布绘制（`spectrum_display.cpp:700-740`）：可视源宽 `srcW <= falls.width()`（放大/1:1，
+  即 zoom-in 视图）仍走 Qt `drawImage` 双线性；当 `srcW > falls.width()`（多 bin 压到一个像素）
+  逐行对原始 dB 做 `decimateBlockMaxRange` 到显示宽，再查 LUT 上色，缓存到 `fallsPeak_`。
+- 与上游取向一致：zoom-in（窄视窗）不触发聚合，zoom-out（宽带压窄）才峰保持。
+
+### 11.2 G2 瀑布历史重染（保留 raw dB 行，不丢帧）
+- 环形由"已上色 `QRgb` 行"改为"**raw dB 行**"：`ringDb_`（`spectrum_display.h` 私有成员，
+  `allocateRing` `:169`、`pushHistoryRow` `:183` 只写 raw dB，不再入环即烤色）。
+- `history_` 仍是 bin 宽彩色快照（公开契约不变，`realFrameDrivesHistory` 等旧测试不破），
+  由 `materialiseHistory()`（`:195`）从 `ringDb_` + 当前 LUT/量程重算。
+- 触发重染：`setPalette`（`:443`）、`setDbRange`（`:339`，auto off 时）、`setAutoRangeOn(false)`
+  （`:352`）都在改参数后调 `materialiseHistory()`——整段历史即时重着色，无需重跑 FFT、不丢行。
+- 未写历史（`logical >= ringCount_`）的槽位填黑，与旧行为一致。
+
+### 11.3 G3 外部 JSON 色板（stops 解析+校验，诚实回退）
+- 纯解析 `parseColormapJson()`（`spectrum_render.h:171`，Qt6 `QJsonDocument`）：接受
+  `{"name":..,"stops":["#rrggbb",..]}`（均匀 0..1）或 `[{"t":..,"c":"#rrggbb"},..]`（显式位置）；
+  任意畸形（非 object / <2 stops / 非 #rrggbb / object 无 `t`）返回 false 且**不动 out**，
+  调用方保留内置三档。
+- `SpectrumDisplay::loadColormapFromJson/File`（`:451,462`）：成功即替换 `customStops_`、重建 LUT、
+  重染历史；失败诚实回退。内置 classic/mono/viridis 三档保留（`setPalette` 清自定义档）。
+
+### 11.4 瀑布时间轴刻度 × 缩放/平移联动（纯函数）
+- `niceStepForSpan()` / `freqTicksNice()`（`spectrum_render.h:234,244`）：取 `{1,2,2.5,5,10}×10^k`
+  步长使约 5 条刻度铺满可视窗；`paintEvent` 的频率条（`:823`）改为调它。
+- 数学与旧内联完全等价（行为不变），但现在可单测：zoom-in 步长变细（2.4 MHz→500 kHz，
+  ×16→50 kHz），平移一个整步步首刻度随之移动。
+
+### 11.5 确定性单测（ctest）
+- 新 `tests/test_spectrum_render.cpp`（header-only，链 Core/Gui，同 tune 范式）：
+  块内 max 语义、窄峰 survive、LUT 端点、量程重映射、JSON 合法/显式/非法回退、刻度随缩放/平移。
+- `tests/test_spectrum_display.cpp` 新增 `reRenderHistoryOnPaletteSwitch`：换灰阶色板后同列像素
+  变近白（229）、floor 列纯黑、行数不丢、畸形 JSON 拒绝保持原样、收窄量程后同 raw 值变 204。
+- CMakeLists 追加 `test_spectrum_render`（tune 块之后）。
+
+### 11.6 测试结果（offscreen, Qt 6.8.2, GCC 10.3）
+- `spectrum_render`：11 passed / 0 failed（新增纯函数）。
+- `spectrum_display`：15 passed（旧 14 + 新重染用例）。
+- `spectrum_autorange` 9 / `spectrum_interaction` 8 / `spectrum_tune` 12：全绿，98 基线不破。
+- `ctest -R spectrum`：5/5 passed。
+
+### 11.7 红线遵守
+- 只写 `cpp/src/ui/{spectrum_render.h, spectrum_display.{h,cpp}}`、`cpp/tests/{test_spectrum_render.cpp,
+  test_spectrum_display.cpp}`、`cpp/CMakeLists.txt`（追加）、`docs/learn/phase12/`、`docs/learn/phase13/`。
+- GPL 干净室：仅学机制，全部自有重写；禁 mock（纯函数直断言数值）；未 commit/push。
+

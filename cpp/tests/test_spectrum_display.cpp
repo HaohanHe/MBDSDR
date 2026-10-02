@@ -39,6 +39,7 @@ private slots:
     void traceWaterfallBinCentreAlign();
     void freqTickDecimalsAdaptive();
     void defaultShareIsOneToOne();
+    void reRenderHistoryOnPaletteSwitch();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -397,6 +398,61 @@ void TestSpectrumDisplay::defaultShareIsOneToOne() {
     QVERIFY2(std::abs(th - fh) <= 2,
              qPrintable(QString("default 1:1 split: trace=%1 falls=%2")
                         .arg(th).arg(fh)));
+}
+
+// G2 (clean-room SDR++ waterfall): the ring stores RAW dB rows, so swapping the
+// palette or the dB range RE-COLOURS the whole existing history (not just future
+// rows) without dropping a frame. Pin the range (auto off), push known frames,
+// then swap to a grayscale ramp and assert the same raw pixel moves to the new
+// ramp's colour while the history depth is unchanged.
+void TestSpectrumDisplay::reRenderHistoryOnPaletteSwitch() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    w.setAutoRangeOn(false);
+    w.setDbRange(-100.0f, 0.0f);
+
+    const int bins = 128;
+    w.setSpectrum(makeFrame(bins, 40, -10.0f, -100.0f));  // peak bin40 @ -10 dB
+    w.setSpectrum(makeFrame(bins, 40, -10.0f, -100.0f)); // second history row
+    QCOMPARE(w.history().width(), bins);
+    QCOMPARE(w.history().height(), tokens::kWaterfallHistoryLines);
+
+    // Row 0 at the peak column: under the built-in classic ramp, -10 dB over a
+    // [-100,0] range => t=0.9 => a warm/bright colour (non-trivial luminance).
+    const QRgb before = w.history().pixel(40, 0);
+    const int lumBefore = qRed(before) + qGreen(before) + qBlue(before);
+    QVERIFY(lumBefore > 100);
+
+    // Swap to an external grayscale ramp black->white. Re-render must recolor
+    // the SAME stored raw row: -10 dB (t=0.9) -> near-white (229,229,229).
+    QVERIFY(w.loadColormapFromJson(
+        QByteArray("{\"name\":\"gray\",\"stops\":[\"#000000\",\"#ffffff\"]}")));
+    const QRgb after = w.history().pixel(40, 0);
+    QVERIFY2(std::abs(qRed(after) - 229) <= 4 &&
+             std::abs(qGreen(after) - 229) <= 4 &&
+             std::abs(qBlue(after) - 229) <= 4,
+             qPrintable(QString("recoloured peak should be near-white, got %1,%2,%3")
+                        .arg(qRed(after)).arg(qGreen(after)).arg(qBlue(after))));
+    // The floor column (raw -100 dB) must be pure black under the new ramp.
+    const QRgb floorPx = w.history().pixel(0, 0);
+    QCOMPARE(qRed(floorPx), 0);
+    QCOMPARE(qGreen(floorPx), 0);
+    QCOMPARE(qBlue(floorPx), 0);
+    // No frame was dropped: depth still the full ring.
+    QCOMPARE(w.history().height(), tokens::kWaterfallHistoryLines);
+
+    // A malformed JSON must be HONESTLY REJECTED: the ramp stays the gray one.
+    QVERIFY(!w.loadColormapFromJson(QByteArray("{\"stops\":[\"#abc\"]}")));
+    QCOMPARE(w.history().pixel(40, 0), after);
+
+    // Narrow the dB range to [-50,0]: the same -10 dB raw value is now t=0.8 ->
+    // 204 on the gray ramp, proving the history re-coloured to the new range.
+    w.setDbRange(-50.0f, 0.0f);
+    const QRgb ranged = w.history().pixel(40, 0);
+    QVERIFY2(std::abs(qRed(ranged) - 204) <= 4,
+             qPrintable(QString("after range [-50,0], peak should be ~204, got %1")
+                        .arg(qRed(ranged))));
 }
 
 QTEST_MAIN(TestSpectrumDisplay)

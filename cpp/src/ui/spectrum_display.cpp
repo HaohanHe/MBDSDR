@@ -9,6 +9,7 @@
 #include <QWheelEvent>
 #include <QToolTip>
 #include <QRectF>
+#include <QFile>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -168,24 +169,24 @@ void SpectrumDisplay::publishVisibleRange() {
 void SpectrumDisplay::allocateRing(int bins) {
     bins_ = bins;
     ringDepth_ = tokens::kWaterfallHistoryLines;
-    ringRows_.assign(ringDepth_, QImage(bins, 1, QImage::Format_ARGB32));
+    // Raw dB ring: the source of truth. Pre-fill to the floor so un-written
+    // slots (history not yet long enough) render as the dark noise colour.
+    ringDb_.assign(ringDepth_, std::vector<float>(bins, dbFloorDb_));
     ringHead_ = 0;
     ringCount_ = 0;
-    for (QImage& r : ringRows_) r.fill(qRgb(0, 0, 0));
+    decScratch_.assign(std::max(bins, 1), dbFloorDb_);
+    fallsPeak_ = QImage();
     maxHold_.assign(bins, -std::numeric_limits<float>::max());
     materialiseHistory();
 }
 
 void SpectrumDisplay::pushHistoryRow() {
-    if (bins_ <= 0 || ringRows_.empty()) return;
-    QImage& row = ringRows_[ringHead_];
-    if (row.width() != bins_) row = QImage(bins_, 1, QImage::Format_ARGB32);
-    auto* line = reinterpret_cast<QRgb*>(row.bits());
+    if (bins_ <= 0 || ringDb_.empty()) return;
+    std::vector<float>& row = ringDb_[ringHead_];
+    if (static_cast<int>(row.size()) != bins_) row.assign(bins_, dbFloorDb_);
     const int n = std::min(bins_, static_cast<int>(frame_.dbfs.size()));
-    for (int i = 0; i < bins_; ++i) {
-        const float db = (i < n) ? frame_.dbfs[i] : dbFloorDb_;
-        line[i] = colourForDb(db);
-    }
+    for (int i = 0; i < bins_; ++i)
+        row[i] = (i < n) ? frame_.dbfs[i] : dbFloorDb_;
     ringHead_ = (ringHead_ + 1) % ringDepth_;
     if (ringCount_ < ringDepth_) ++ringCount_;
     materialiseHistory();
@@ -198,45 +199,48 @@ void SpectrumDisplay::materialiseHistory() {
     }
     if (history_.width() != bins_ || history_.height() != ringDepth_)
         history_ = QImage(bins_, ringDepth_, QImage::Format_ARGB32);
-    QPainter c(&history_);
-    c.setCompositionMode(QPainter::CompositionMode_Source);
     for (int logical = 0; logical < ringDepth_; ++logical) {
         // Logical row 0 is the newest push, which lives one slot behind head.
         const int phys = (ringHead_ - 1 - logical + ringDepth_) % ringDepth_;
-        c.drawImage(0, logical, ringRows_[phys]);
+        QRgb* line = reinterpret_cast<QRgb*>(history_.scanLine(logical));
+        if (logical < ringCount_) {
+            const std::vector<float>& row = ringDb_[phys];
+            for (int i = 0; i < bins_; ++i)
+                line[i] = colourForDb((i < static_cast<int>(row.size()))
+                                          ? row[i] : dbFloorDb_);
+        } else {
+            for (int i = 0; i < bins_; ++i) line[i] = qRgb(0, 0, 0);
+        }
     }
-    c.end();
 }
 
 void SpectrumDisplay::rebuildColormap() {
-    using namespace tokens;
-    const WaterfallStop* stops = kWaterfallStops;
-    int n = static_cast<int>(std::size(kWaterfallStops));
-    if (paletteIndex_ == 1) { stops = kWaterfallStopsMono; n = static_cast<int>(std::size(kWaterfallStopsMono)); }
-    else if (paletteIndex_ == 2) { stops = kWaterfallStopsViridis; n = static_cast<int>(std::size(kWaterfallStopsViridis)); }
-
-    for (int i = 0; i < 256; ++i) {
-        const float t = i / 255.0f;
-        int seg = 0;
-        while (seg < n - 2 && t > stops[seg + 1].t) ++seg;
-        const QColor a(stops[seg].hex);
-        const QColor b(stops[seg + 1].hex);
-        const float span = stops[seg + 1].t - stops[seg].t;
-        const float u = (span > 0.0f) ? (t - stops[seg].t) / span : 0.0f;
-        const int r = a.red()   + static_cast<int>(u * (b.red()   - a.red()));
-        const int g = a.green() + static_cast<int>(u * (b.green() - a.green()));
-        const int bl= a.blue()  + static_cast<int>(u * (b.blue()  - a.blue()));
-        lut_[i] = qRgb(r, g, bl);
+    // Resolve the control stops: an external user ramp overrides the three
+    // built-in palettes. The interpolation itself is the pure, unit-tested
+    // buildLut256().
+    std::vector<ColorStop> stops;
+    if (hasCustomStops_) {
+        stops = customStops_;
+    } else {
+        using namespace tokens;
+        const WaterfallStop* src = kWaterfallStops;
+        int n = static_cast<int>(std::size(kWaterfallStops));
+        if (paletteIndex_ == 1) { src = kWaterfallStopsMono; n = static_cast<int>(std::size(kWaterfallStopsMono)); }
+        else if (paletteIndex_ == 2) { src = kWaterfallStopsViridis; n = static_cast<int>(std::size(kWaterfallStopsViridis)); }
+        stops.reserve(n);
+        for (int i = 0; i < n; ++i) {
+            Rgb8 c; parseHexColor(QString::fromUtf8(src[i].hex), &c);
+            stops.push_back(ColorStop{src[i].t, c});
+        }
     }
+    const std::array<Rgb8, 256> lut = buildLut256(stops.data(),
+                                                  static_cast<int>(stops.size()));
+    for (int i = 0; i < 256; ++i)
+        lut_[i] = qRgb(lut[i].r, lut[i].g, lut[i].b);
 }
 
 QRgb SpectrumDisplay::colourForDb(float db) const {
-    const float span = dbCeilDb_ - dbFloorDb_;
-    if (span <= 0.0f) return lut_[0];
-    float t = (db - dbFloorDb_) / span;
-    t = static_cast<float>(clampd(t, 0.0f, 1.0f));
-    const int idx = static_cast<int>(t * 255.0f);
-    return lut_[std::clamp(idx, 0, 255)];
+    return lut_[lutIndexForDb(db, dbFloorDb_, dbCeilDb_)];
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +342,9 @@ void SpectrumDisplay::setDbRange(float minDb, float maxDb) {
     if (!autoRangeOn_) {
         dbFloorDb_ = minDb;
         dbCeilDb_  = maxDb;
+        // Manual range changed: re-colour the WHOLE stored raw-dB history so the
+        // existing rows track the new scale immediately (not just future rows).
+        materialiseHistory();
     }
     update();
 }
@@ -349,6 +356,7 @@ void SpectrumDisplay::setAutoRangeOn(bool on) {
         // user override). While off, setDbRange() owns both ends again.
         dbFloorDb_ = manualFloorDb_;
         dbCeilDb_  = manualCeilDb_;
+        materialiseHistory();   // re-colour history to the released manual bounds
     }
     update();
 }
@@ -434,8 +442,27 @@ void SpectrumDisplay::setScrollSpeed(int linesPerFrame) {
 
 void SpectrumDisplay::setPalette(int p) {
     paletteIndex_ = std::clamp(p, 0, 2);
+    hasCustomStops_ = false;       // choosing a built-in ramp drops the external one
     rebuildColormap();
+    materialiseHistory();          // re-colour the whole stored raw-dB history
     update();
+}
+
+bool SpectrumDisplay::loadColormapFromJson(const QByteArray& json) {
+    ParsedColormap parsed;
+    if (!parseColormapJson(json, &parsed)) return false;   // honest fallback
+    customStops_ = std::move(parsed.stops);
+    hasCustomStops_ = true;
+    rebuildColormap();
+    materialiseHistory();          // re-colour history with the new ramp
+    update();
+    return true;
+}
+
+bool SpectrumDisplay::loadColormapFromFile(const QString& absPath) {
+    QFile f(absPath);
+    if (!f.open(QIODevice::ReadOnly)) return false;
+    return loadColormapFromJson(f.readAll());
 }
 
 void SpectrumDisplay::setHighlightedPeak(int row) {
@@ -676,8 +703,41 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
                                     static_cast<double>(bins_));
         const double srcR = clampd((fHi - bandLo) / frameFsHz_ * bins, 0.0,
                                     static_cast<double>(bins_));
-        if (srcR > srcL + 0.5)
-            p.drawImage(falls, history_, QRectF(srcL, 0, srcR - srcL, ringDepth_));
+        const int outW = falls.width();
+        const double srcW = srcR - srcL;
+        if (srcW > 0.5 && outW > 0) {
+            if (srcW <= outW + 1.0 || ringDb_.empty()) {
+                // Upscale / 1:1 (zoomed-in view): no source bin collapses onto a
+                // single pixel, so Qt's bilinear is the right tool.
+                p.drawImage(falls, history_, QRectF(srcL, 0, srcW, ringDepth_));
+            } else {
+                // Downscale (more than one source bin per display pixel): Qt's
+                // bilinear would average a narrow CW peak into its neighbours and
+                // dim it. Instead block-MAX each stored raw-dB row so the peak
+                // survives the zoom-out (SDR++ doZoom waterfall.cpp:65-90,
+                // clean-room) -- pure decimateBlockMaxRange under the hood.
+                if (fallsPeak_.width() != outW || fallsPeak_.height() != ringDepth_)
+                    fallsPeak_ = QImage(outW, ringDepth_, QImage::Format_ARGB32);
+                if (static_cast<int>(decScratch_.size()) < outW)
+                    decScratch_.assign(outW, dbFloorDb_);
+                const int srcBinL = std::max(0, static_cast<int>(std::floor(srcL)));
+                const int srcBinR = std::min(bins_, static_cast<int>(std::ceil(srcR)));
+                for (int logical = 0; logical < ringDepth_; ++logical) {
+                    QRgb* out = reinterpret_cast<QRgb*>(fallsPeak_.scanLine(logical));
+                    if (logical >= ringCount_) {
+                        for (int x = 0; x < outW; ++x) out[x] = qRgb(0, 0, 0);
+                        continue;
+                    }
+                    const int phys = (ringHead_ - 1 - logical + ringDepth_) % ringDepth_;
+                    const std::vector<float>& row = ringDb_[phys];
+                    ui::decimateBlockMaxRange(row.data(), srcBinL, srcBinR,
+                                              decScratch_.data(), outW);
+                    for (int x = 0; x < outW; ++x)
+                        out[x] = colourForDb(decScratch_[x]);
+                }
+                p.drawImage(falls, fallsPeak_);
+            }
+        }
         p.setPen(QPen(tokens::cardEdge(), 1));
         p.drawRect(falls);
     }
@@ -755,17 +815,19 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
 
     // --- frequency strip ----------------------------------------------------
     p.fillRect(strip, QColor(tokens::kSpectrumBg).darker(120));
-    const double raw = span / tokens::kWaterfallFreqTicks;
-    const double mag = std::pow(10.0, std::floor(std::log10(raw)));
-    double nice = mag;
-    for (double f : {2.0, 2.5, 5.0, 10.0}) if (mag * f >= raw) { nice = mag * f; break; }
+    // Tick placement is the pure, unit-tested freqTicksNice(): a "nice" step
+    // {1,2,2.5,5,10}*10^k chosen so ~kWaterfallFreqTicks ticks span the visible
+    // window. Zoom in -> the step shrinks (fine ticks), pan -> ticks slide with
+    // the window; both come out of the same function.
+    const double nice = niceStepForSpan(span, tokens::kWaterfallFreqTicks);
+    const std::vector<double> ticks = freqTicksNice(fLo, fHi, tokens::kWaterfallFreqTicks);
     // Adaptive label precision by step (0/1/2 dp) -- the old hard-coded 3 dp drew
     // a redundant ".000" on every tick. Ticks hang from the strip bottom (shared
     // convention with the waterfall side).
     const int decimals = freqTickDecimals(nice);
     p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary), 1));
     const int half = tokens::scaled(tokens::kFreqLabelHalfW);
-    for (double f = std::floor(fLo / nice) * nice; f <= fHi; f += nice) {
+    for (double f : ticks) {
         const int x = xForFreq(f, fLo, span);
         if (x < strip.left() || x > strip.right()) continue;
         p.drawLine(x, strip.bottom(), x, strip.bottom() - tokens::scaled(tokens::kWaterfallTickH));

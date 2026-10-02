@@ -261,3 +261,68 @@ lin[i] *= 1.0f/depth;
 - 未在本机验证：VOLK 是否在 MBDSDR 构建链可用（G2 落地前置）；多相重采样原型窗
   （`taps/low_pass` 设计参数）需在落地时再读上游 `taps/low_pass.h` 与 `window/nuttall.h`。
 - 本轮只读机制，**未改任何 cpp/ 代码，未 commit/push**（遵循云环境无凭据约定）。
+
+---
+
+## 8. 落地记录（gap L11/L12，phase13）
+
+> 干净室实现，MIT。所有引用仍为 GPLv3 机制说明，未复制上游代码。未 commit/push。
+
+### 8.1 L11：RxVFO 带宽短路 + 过渡带参数化 —— 已落地
+对应 §3 / 差距表 G3。上游 `rx_vfo.h:24` `filterNeeded=(_bandwidth!=_outSamplerate)`、
+`:120` `lowPass(filterWidth, filterWidth*0.1, outSr)`。落地为**纯函数决策 + 真实路径接入**：
+
+- **纯函数 `planChannelFilter(outRate, bw, transitionRatio=0.1, tol=1e-6)`**
+  （`cpp/src/dsp/channelizer.h:53-77`）：
+  - `filterNeeded = bw < outRate*(1-tol)` —— 即上游 `bw==outRate` 短路判定；
+  - `passbandEdge = bw/2`，`transitionWidth = transitionRatio * bw/2`（默认 0.1，对齐上游）；
+  - `designCutoff = min(passbandEdge, Nyquist - transitionWidth)` —— 用**显式过渡带**
+    替换原来写死的 `effOut/2*0.85`（整数分支）与 `outSr/2*0.9`（有理分支）魔数。
+- **Channelizer 接入**（`channelizer.cpp:69-95`）：configure 两分支都改用
+  `planChannelFilter` 出的 `designCutoffHz` 设计抽头。
+  - 窄带配置（NFM 12.5k / WFM 200k 等）下 `designCutoff == bw/2`，与旧截止**逐点相同**
+    （因为 `bw/2` 远低于 `Nyquist - transition`），故 98 基线行为不变。
+- **整道出短路**（`channelizer.cpp:73`、`process()` `:131-137`）：
+  `skipFilter_ = (decimation_==1) && (!filterNeeded)`。即**既不改变采样率、信道带宽又铺满整带**
+  时，不构造 FIR、不跑卷积，process 只做 NCO 频移后直通——对应上游
+  `if(!filterNeeded) return resamp.process(...)`。MBDSDR 把"抗混叠抽取"和"信道限带"揉在一个
+  抽取 FIR 里，因此短路只在 `decimation==1` 时合法（否则跳过 FIR 会混叠），这是与上游管线
+  划分差异带来的必要约束，已在注释写明。
+- 访问器：`filterSkipped()`、`filterSpec()`、`transitionRatio()`（channelizer.h:103-106）。
+
+### 8.2 L12：VOLK SIMD 替代 —— backlog（如实结论，不做）
+对应 §2 / G2。结论：**本轮不引入 VOLK，保持手写标量 NCO**。理由：
+1. **算力占比小**：NCO 是每输入样本一次 `cos/sin`（O(1)/输入），而抽取 FIR 是
+   O(T)/输出、T≈tapsPerBranch·decimation。NFM decimation=50 时，NCO 开销约为 FIR 的
+   50/(31·50)≈3%；向量化 NCO 的边际收益个位数百分比。
+2. **构建链无 VOLK**：`cpp/CMakeLists.txt` 仅依赖 Qt6 + 可选 librtlsdr，全仓零 `volk` 引用、
+   零显式 SIMD（仅 `-O2`）。引入 VOLK 是新的重型外部依赖，对这个可移植 Qt 车机/桌面端没有
+   现成交叉编译/分发故事。
+3. **真正的计算大头已落地**：多级抽取/多相有理重采样（G1，rational_resampler.h）才是高
+   采样率下省算力的地方，NCO 不是瓶颈。
+4. 因此保留语义等价、连续相位的标量 NCO；仅补**相位连续性确定性测试**（见 8.3），把
+   "调谐无相位跳变"这条上游关键工程点钉死在测试里，而非上 VOLK。
+> 未来若 profiling 证明 NCO 成为热点，再考虑：先用相位累积复数旋转（`phase*=phaseDelta`）
+> 替代逐样本 cos/sin（纯函数等价、可逐样本对齐测试），最后才是 VOLK。当前不做。
+
+### 8.3 测试（ctest 追加，`cpp/tests/test_bandwidth_shortcut.cpp`）
+新增 `bandwidth_shortcut`（CMakeLists 追加注册），7 个确定性断言：
+- 纯函数：`bw==outRate → filterNeeded=false`（短路）；`bw<outRate → true`；
+  `transitionWidth=0.1·bw/2`；自定义 ratio 线性缩放；截止被钳到 `Nyquist-transition`。
+- 集成：`configure(sr,sr,sr) → filterSkipped()==true`、无抽头、直通保长、NCO 仍把音调平到 DC；
+  `configure(fs,fs,1MHz)`（=channelizer 既有 Test3 镜像）→ `filterSkipped()==false`（FIR 保留）。
+- NCO 相位连续性：短序列对齐 `e^{-j2π f i/fs}`；中途改频用**逐步角度差分**证明相位连续
+  （边界步=旧速率、之后步=新速率、无 reset 跳变）——对 float 累积漂移鲁棒。
+
+### 8.4 测试结果与未完成项
+- 环境：`QT_QPA_PLATFORM=offscreen`（headless）。基线 98 个 add_test；本轮 +1 = **101**。
+- 结果：**100/101 通过**。唯一失败 `multi_vfo::twoVfosDecodeOwnTones` 经 A/B 隔离
+  （把 channelizer.* 还原到 HEAD 仍同样失败）证明**与本 L11/L12 改动无关**，是前序 Wave1-C
+  demod/agc 未提交工作区的既有回归。
+- **附带修复（保持基线绿色）**：重建时发现 `test_chain`/`test_multi_vfo`/`test_vfo_audible`
+  的源清单漏接 `src/dsp/agc.cpp`（demod.cpp 现已引用 `ComplexCarrierAgc`），链接失败。
+  已在这三个既有 target 的源清单补上 `agc.cpp`（最小修复，非新逻辑），否则它们在干净重建下
+   "Not Run"。
+- 未完成/遗留：(a) multi_vfo 的 Wave1-C AGC 回归待 Wave1-C 作者跟进；(b) 抽头长度仍固定为
+  `tapsPerBranch·decimation`+Hann，未像上游 `estimateTapCount(transWidth,sr)` 那样让过渡带
+  反推抽头数（那会改变所有滤波行为、破基线，留作后续单独一轮）。
