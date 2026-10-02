@@ -559,6 +559,18 @@ target_include_directories(test_adsb_decode PRIVATE src)
 target_link_libraries(test_adsb_decode PRIVATE Qt6::Core)
 add_test(NAME adsb_decode COMMAND test_adsb_decode)
 
+# P4 phase14: SSDV byte layer (packet header parse + RS(255,223) CCSDS encoder)
+# and SSTV pure functions (VIS decode, zero-crossing inst freq). No Qt deps.
+add_executable(test_ssdv_packet tests/test_ssdv_packet.cpp src/dsp/ssdv_packet.cpp)
+target_include_directories(test_ssdv_packet PRIVATE src)
+target_link_libraries(test_ssdv_packet PRIVATE Qt6::Core)
+add_test(NAME ssdv_packet COMMAND test_ssdv_packet)
+
+add_executable(test_sstv_vis tests/test_sstv_vis.cpp src/dsp/sstv_vis.cpp)
+target_include_directories(test_sstv_vis PRIVATE src)
+target_link_libraries(test_sstv_vis PRIVATE Qt6::Core)
+add_test(NAME sstv_vis COMMAND test_sstv_vis)
+
 add_executable(test_aircraft_tracker tests/test_aircraft_tracker.cpp src/ui/aircraft_tracker.cpp)
 target_include_directories(test_aircraft_tracker PRIVATE src)
 # aircraft_tracker.h pulls in world_view.h (AircraftPoint), which needs QtWidgets.

@@ -90,6 +90,13 @@ MODES = {
         "freq_hint": 144.39e6,
         "desc": "APRS 位置报文（FM 解调 → AFSK → AX.25 FCS 校验）",
     },
+    "sstv": {
+        "label": "SSTV 慢扫描电视（卫星/地面 FM 信道）",
+        "default_sr": 250_000.0,     # 够覆盖 VHF FM 语音带宽（~25k）
+        "default_n": 30_000_000,     # 120 s @ 250 ksps，覆盖 Martin M1 整帧(~114s)
+        "freq_hint": 145.8e6,        # 卫星业余 SSTV 惯例(ISS 145.800)；JAMX01/ASRTU-1 以官方日程为准
+        "desc": "慢扫描电视图像（FM 解调音频 → SSTV 解码，自动识别 Martin/Scottie/Robot/PD）",
+    },
 }
 
 
@@ -628,6 +635,44 @@ def step_decode(
             r.detail["_apt_image_a"] = img_a
             r.detail["_apt_image_b"] = img_b
 
+        elif mode == "sstv":
+            from mbdsdr_ai.sstv_decoder import (
+                decode_sstv_from_samples, TARGET_SAMPLE_RATE as SSTV_RATE,
+            )
+            # FM 解调（VHF 语音信道，max_dev=5k）→ 音频
+            audio = _demod_fm(iq, sample_rate_hz, max_dev=5_000.0)
+            fs_audio = float(SSTV_RATE)  # 48000
+            n_out = int(audio.size * fs_audio / sample_rate_hz)
+            audio_resampled = np.interp(
+                np.linspace(0, audio.size - 1, n_out),
+                np.arange(audio.size),
+                audio,
+            ).astype(np.float32)
+            # 解码 PNG 写到 SigMF data 同目录，auto 自动识别制式
+            out_png = os.path.join(
+                os.path.dirname(sigmf_data_path), "sstv_decoded.png")
+            res = decode_sstv_from_samples(
+                audio_resampled, int(fs_audio), out_png, mode="auto")
+            ok = bool(res.get("success"))
+            r.detail["sstv_result"] = {
+                k: v for k, v in res.items()
+                if k not in ("image",)
+            }
+            if ok:
+                r.detail["_sstv_output_path"] = res.get("output_path", out_png)
+                r.add_evidence(
+                    f"SSTV 解码成功：制式={res.get('mode')} "
+                    f"{res.get('width')}x{res.get('height')}, "
+                    f"行={res.get('rows_decoded', '?')}")
+                r.status = "PASS"
+                r.message = f"SSTV 图像解码完成（{res.get('mode')}）"
+            else:
+                r.status = "FAIL"
+                r.message = f"SSTV 未解码出图像：{res.get('error', '未知')}"
+                r.add_fix(
+                    "确认录制覆盖完整一帧(Martin M1 ~114s)；卫星过境时开多普勒补偿；"
+                    "检查频率/天线/增益；SSTV 走 FM 语音信道")
+
     except ImportError as e:
         r.message = f"解码器模块导入失败: {e}"
         r.add_fix(f"确认 mbdsdr_ai 包完整安装（pip install -r requirements.txt）")
@@ -782,6 +827,19 @@ def step_output(
                 r.add_evidence(f"APT 云图 B 通道(iron伪彩): {apt_png_b}")
         except ImportError as e:
             r.add_evidence(f"(图像增强/PIL 不可用，跳过 APT 图像保存: {e})")
+
+    # 3b) SSTV 图像：把解码 PNG 纳入交付（标准命名，标口径/时间）
+    sstv_src = decode_result.detail.get("_sstv_output_path")
+    if sstv_src and mode == "sstv" and os.path.exists(sstv_src):
+        import shutil
+        stamp_day = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%d')
+        sstv_png = os.path.join(
+            out_dir,
+            f"sstv_image__{data_origin}__N{n_samples_out}__{stamp_day}.png")
+        if os.path.abspath(sstv_src) != os.path.abspath(sstv_png):
+            shutil.copyfile(sstv_src, sstv_png)
+        artifacts.append(sstv_png)
+        r.add_evidence(f"SSTV 图像: {sstv_png}")
 
     # 4) manifest.json（与 experiments/common/manifest.py 同口径）
     manifest_path = os.path.join(out_dir, f"{stamp}_manifest.json")
@@ -1020,6 +1078,9 @@ def main(argv: list[str] | None = None) -> int:
                                  message="无 decode 结果可输出（先跑 decode）")
                 results.append(out)
             else:
+                # SSTV/SSDV 解自 over-the-air 录制的音频，旁证口径记 "recorded"
+                # （真实信号录制后解码），其余模式保持 "captured"。
+                data_origin = "recorded" if mode == "sstv" else "captured"
                 out = step_output(
                     out_dir=args.out_dir,
                     mode=mode,
@@ -1027,7 +1088,7 @@ def main(argv: list[str] | None = None) -> int:
                     sample_rate_hz=args.sr,
                     n_samples=n_samples,
                     decode_result=dec_result,
-                    data_origin="captured",
+                    data_origin=data_origin,
                 )
                 results.append(out)
 
