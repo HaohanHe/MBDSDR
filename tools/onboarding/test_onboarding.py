@@ -298,3 +298,239 @@ class TestEndToEnd:
             m = json.load(f)
         assert m["n_samples"] == n_samples
         assert m["params"]["n_samples"] == n_samples
+
+
+# ---------------------------------------------------------------------------
+# 7. SSTV 真机闭环（Phase14 P1）
+#
+# 确定性合成：pysstv 按制式参数把参考图编码成 SSTV 基带音频 →
+#   (a) 直接 decode_audio 解码出图（数组入口往返）；
+#   (b) 把基带音频 FM 调制成复 IQ → onboard step_decode("sstv") 整条链路出图。
+# 无信号（纯噪声）必须诚实空态：success=False 且不伪造 PNG。
+# ---------------------------------------------------------------------------
+SSTV_TEST_SR = 48000  # sstv_decoder 目标采样率，省去重采样便于快速往返
+SSTV_FDEV = 5000.0    # 与 onboard _demod_fm(max_dev=5000) 对齐，解调后线性还原基带
+
+
+@pytest.fixture(scope="module")
+def sstv_baseband():
+    """用 pysstv 合成 Martin M1 / Robot 36 基带音频（48000Hz，固定参考图）。"""
+    pytest.importorskip("pysstv")
+    from PIL import Image
+    from pysstv.color import MartinM1, Robot36
+
+    fs = SSTV_TEST_SR
+    # Martin M1：均匀灰 320x256
+    ref_m = Image.fromarray(np.full((256, 320, 3), 120, np.uint8), "RGB")
+    audio_m = np.fromiter(
+        MartinM1(ref_m, fs, 16).gen_samples(),
+        dtype=np.int16).astype(np.float32) / 32768.0
+    # Robot 36：红蓝水平渐变 320x240
+    ref_r = np.zeros((240, 320, 3), np.uint8)
+    xx = np.arange(320)
+    ref_r[:, :, 0] = (xx * 255 // 319).astype(np.uint8)
+    ref_r[:, :, 1] = 128
+    ref_r[:, :, 2] = (255 - xx * 255 // 319).astype(np.uint8)
+    audio_r = np.fromiter(
+        Robot36(Image.fromarray(ref_r, "RGB"), fs, 16).gen_samples(),
+        dtype=np.int16).astype(np.float32) / 32768.0
+    return {"fs": fs, "Martin M1": audio_m, "Robot 36": audio_r}
+
+
+def _fm_modulate(baseband: np.ndarray, fs: float, fdev: float = SSTV_FDEV):
+    """基带音频 → FM 复 IQ（卫星 SSTV 走 FM 语音信道的物理层接线）。"""
+    bb = np.asarray(baseband, dtype=np.float64)
+    phase_inc = 2 * np.pi * fdev * bb / fs
+    return np.exp(1j * np.cumsum(phase_inc)).astype(np.complex64)
+
+
+class TestSstvDecodeAudioRoundtrip:
+    """decode_audio 数组入口：合成 SSTV 音频 → 解码出图（Martin M1 / Robot36）。"""
+
+    def test_martin_m1_roundtrip(self, sstv_baseband, tmp_path):
+        from mbdsdr_ai.sstv_decoder import decode_audio
+        audio = sstv_baseband["Martin M1"]
+        png = str(tmp_path / "martin_m1.png")
+        res = decode_audio(audio, sstv_baseband["fs"], out_png=png, mode="auto")
+        assert res.get("success") is True, f"Martin M1 解码失败: {res.get('error')}"
+        assert res["mode"] == "Martin M1"
+        assert res["width"] == 320 and res["height"] == 256
+        assert os.path.exists(png) and os.path.getsize(png) > 1000
+        # 像素非空：不能是全黑/全空图
+        from PIL import Image
+        arr = np.asarray(Image.open(png))
+        assert arr.size > 0 and np.any(arr > 0), "解码图像素全空"
+        assert res["rows_decoded"] >= 200
+
+    def test_robot36_roundtrip(self, sstv_baseband, tmp_path):
+        from mbdsdr_ai.sstv_decoder import decode_audio
+        audio = sstv_baseband["Robot 36"]
+        png = str(tmp_path / "robot36.png")
+        res = decode_audio(audio, sstv_baseband["fs"], out_png=png, mode="auto")
+        assert res.get("success") is True, f"Robot36 解码失败: {res.get('error')}"
+        assert res["mode"] == "Robot 36"
+        assert res["width"] == 320 and res["height"] == 240
+        assert os.path.exists(png) and os.path.getsize(png) > 1000
+        from PIL import Image
+        arr = np.asarray(Image.open(png))
+        assert arr.size > 0 and np.any(arr > 0), "解码图像素全空"
+        assert res["rows_decoded"] >= 200
+
+    def test_memory_mode_returns_image_without_disk(self, sstv_baseband):
+        """out_png=None：不写盘，返回内存图。"""
+        from mbdsdr_ai.sstv_decoder import decode_audio
+        res = decode_audio(sstv_baseband["Robot 36"], sstv_baseband["fs"],
+                           out_png=None, mode="Robot 36")
+        assert res.get("success") is True
+        assert "image" in res and res["image"].shape == (240, 320, 3)
+        assert "output_path" not in res
+
+    def test_noise_honest_empty(self, tmp_path):
+        """纯噪声：诚实 success=False，不兜底出图。"""
+        from mbdsdr_ai.sstv_decoder import decode_audio
+        rng = np.random.default_rng(20261002)
+        noise = rng.standard_normal(SSTV_TEST_SR * 4).astype(np.float32) * 0.1
+        png = str(tmp_path / "should_not_exist.png")
+        res = decode_audio(noise, SSTV_TEST_SR, out_png=png, mode="auto")
+        assert res.get("success") is False
+        assert "image" not in res and "output_path" not in res
+        assert not os.path.exists(png), "无信号时不得伪造 PNG"
+
+
+class TestSstvOnboardChain:
+    """onboard sstv 模式：合成 FM IQ → step_decode 正向路径 + 空态。"""
+
+    def test_sstv_positive_chain(self, sstv_baseband, tmp_out_dir):
+        iq = _fm_modulate(sstv_baseband["Robot 36"], sstv_baseband["fs"])
+        data_path = os.path.join(tmp_out_dir, "capture.sigmf-data")
+        iq.tofile(data_path)
+        dec = step_decode(data_path, "sstv", sstv_baseband["fs"], 145.8e6)
+        assert dec.status == "PASS", f"正向链路应 PASS: {dec.message}"
+        png = dec.detail.get("_sstv_output_path")
+        assert png and os.path.exists(png) and os.path.getsize(png) > 1000
+        sstv_res = dec.detail.get("sstv_result", {})
+        assert sstv_res.get("mode") == "Robot 36"
+
+    def test_sstv_empty_state_no_fake_image(self, tmp_out_dir):
+        """纯噪声 FM IQ：step_decode sstv 必须 FAIL 且不产出 PNG（诚实空态）。"""
+        rng = np.random.default_rng(20261002)
+        iq = (rng.standard_normal(SSTV_TEST_SR * 5)
+              + 1j * rng.standard_normal(SSTV_TEST_SR * 5)).astype(np.complex64)
+        data_path = os.path.join(tmp_out_dir, "noise.sigmf-data")
+        iq.tofile(data_path)
+        dec = step_decode(data_path, "sstv", float(SSTV_TEST_SR), 145.8e6)
+        assert dec.status == "FAIL", f"无信号应诚实 FAIL: {dec.status} {dec.message}"
+        assert "_sstv_output_path" not in dec.detail, "无信号时不得给出 PNG 路径"
+
+    def test_sstv_in_modes_registry(self):
+        assert "sstv" in MODES
+        assert MODES["sstv"]["default_sr"] > 0
+
+
+# ---------------------------------------------------------------------------
+# 8. SSDV 字节流入口（Wave2，fsphil 核心已接通）
+#
+# onboard ssdv 接收"解调后 256B 包字节流文件"→ SsdvDecoder.feed（同步/RS/CRC）
+# → SsdvImage.build 按 MCU 重组标准 JPEG。物理层（AFSK/卷积/解扰→字节）云内无
+# 射频留真机。正向链用 SsdvEncoder（测试编码方向）合成包；无字节/无包诚实空态。
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def ssdv_byte_stream():
+    """用 SsdvEncoder 把小渐变图分包成 SSDV 字节流（callsign 由参数传入）。"""
+    pytest.importorskip("PIL")
+    from mbdsdr_ai.ssdv_decoder import SsdvEncoder
+    arr = np.zeros((64, 64, 3), dtype=np.uint8)
+    arr[..., 0] = np.linspace(0, 255, 64, dtype=np.uint8)
+    arr[..., 1] = np.linspace(0, 255, 64, dtype=np.uint8)[:, None]
+    arr[..., 2] = 128
+    enc = SsdvEncoder(callsign="TEST", image_id=1, quality=4, mcu_mode=3)
+    packets = enc.encode_image(arr)
+    return {"packets": packets, "width": 64, "height": 64}
+
+
+def _corrupt(pkt: bytes, positions, xor=0xA5):
+    b = bytearray(pkt)
+    for p in positions:
+        b[p] ^= xor
+    return bytes(b)
+
+
+class TestSsdvOnboardSkeleton:
+    def test_ssdv_registered_without_hardcoded_freq(self):
+        assert "ssdv" in MODES
+        # 规格 §6：频率/速率未官方发布前留空，禁硬编码猜测。
+        assert MODES["ssdv"]["freq_hint"] is None
+
+    def test_ssdv_rejects_nonexistent_file(self):
+        dec = step_decode("/nonexistent/ssdv_bytes.bin", "ssdv", 19200.0, None)
+        assert dec.status == "FAIL"
+        assert "不存在" in dec.message
+
+    def test_ssdv_empty_bytes_is_honest_empty(self, tmp_out_dir):
+        path = os.path.join(tmp_out_dir, "empty_ssdv.bin")
+        open(path, "wb").close()  # 0 字节
+        dec = step_decode(path, "ssdv", 19200.0, None)
+        assert dec.status == "FAIL"
+        assert "空" in dec.message
+        assert "_ssdv_jpeg_path" not in dec.detail, "无字节时不得给出 JPEG 路径"
+
+    def test_ssdv_garbage_bytes_no_fake_image(self, tmp_out_dir):
+        """非空但无有效 256B 包（噪声）：诚实 FAIL，不伪造 JPEG。"""
+        rng = np.random.default_rng(20261002)
+        junk = rng.integers(0, 256, size=4096, dtype=np.uint8).tobytes()
+        path = os.path.join(tmp_out_dir, "junk_ssdv.bin")
+        with open(path, "wb") as f:
+            f.write(junk)
+        dec = step_decode(path, "ssdv", 19200.0, None)
+        assert dec.status == "FAIL", f"无有效包应诚实 FAIL: {dec.status} {dec.message}"
+        assert dec.detail.get("n_frames") == 0
+        assert "_ssdv_jpeg_path" not in dec.detail, "无包时不得伪造 JPEG"
+
+    def test_ssdv_positive_chain_reassembles_jpeg(self, ssdv_byte_stream, tmp_out_dir):
+        """正向链：合成 SSDV 字节流（纠错内注入误码）→ onboard ssdv → JPEG 可打开。"""
+        from PIL import Image
+        rng = np.random.default_rng(7)
+        packets = ssdv_byte_stream["packets"]
+        # 每个包注入 ≤10 个错字节（RS t=16 内可纠）
+        corrupted = [_corrupt(p, rng.choice(range(1, 256), size=10, replace=False))
+                     for p in packets]
+        raw = b"".join(corrupted)
+        path = os.path.join(tmp_out_dir, "ssdv_ok.bin")
+        with open(path, "wb") as f:
+            f.write(raw)
+
+        dec = step_decode(path, "ssdv", 19200.0, None)
+        assert dec.status == "PASS", f"正向链应 PASS: {dec.message}"
+        jpg = dec.detail.get("_ssdv_jpeg_path")
+        assert jpg and os.path.exists(jpg) and os.path.getsize(jpg) > 100
+        ssdv = dec.detail["ssdv"]
+        assert ssdv["missing_mcus"] == [], f"纠错内应无缺失 MCU: {ssdv['missing_mcus']}"
+        with Image.open(jpg) as im:
+            im.load()
+            assert im.size == (ssdv_byte_stream["width"], ssdv_byte_stream["height"])
+
+    def test_ssdv_over_capacity_reports_missing(self, ssdv_byte_stream, tmp_out_dir):
+        """超 RS 纠错能力（>16 错字节）→ 该包被丢 → 诚实报缺失 MCU，不造假整图。"""
+        from PIL import Image
+        rng = np.random.default_rng(11)
+        packets = ssdv_byte_stream["packets"]
+        assert len(packets) >= 2, "需多包图才能观察到丢包后的缺失 MCU"
+        # 把第一个包注入 18 个错字节（>t=16），其余干净
+        bad0 = _corrupt(packets[0],
+                        rng.choice(range(1, 256), size=18, replace=False))
+        raw = bad0 + b"".join(packets[1:])
+        path = os.path.join(tmp_out_dir, "ssdv_bad.bin")
+        with open(path, "wb") as f:
+            f.write(raw)
+
+        dec = step_decode(path, "ssdv", 19200.0, None)
+        # 仍应产出部分图（其余包可解），并诚实报告缺失 MCU
+        ssdv = dec.detail.get("ssdv", {})
+        assert ssdv.get("missing_mcus"), "超纠错能力应诚实报告缺失 MCU"
+        jpg = dec.detail.get("_ssdv_jpeg_path")
+        if jpg and os.path.exists(jpg):
+            with Image.open(jpg) as im:
+                im.load()  # 仍可被标准解码器打开（缺失 MCU 处花屏）
+
+
+

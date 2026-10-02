@@ -97,6 +97,16 @@ MODES = {
         "freq_hint": 145.8e6,        # 卫星业余 SSTV 惯例(ISS 145.800)；JAMX01/ASRTU-1 以官方日程为准
         "desc": "慢扫描电视图像（FM 解调音频 → SSTV 解码，自动识别 Martin/Scottie/Robot/PD）",
     },
+    "ssdv": {
+        "label": "SSDV 数字慢扫描（字节流 → MCU 重组 JPEG）",
+        # 物理层调制/速率/频率官方未定（见 docs/learn/phase14/SSDV_SSTV_SPEC.md §2.2）。
+        # 采样率/时长仅作 CLI 占位，以官方日程为准；频率字段显式留空，禁硬编码猜测。
+        "default_sr": 19_200.0,      # TODO(phase14): LilacSat 风格音频参考值，官方以日程为准
+        "default_n": 0,              # 字节流模式：长度由输入字节文件决定，不固定采样点数
+        "freq_hint": None,           # TODO(phase14): JAMX01/ASRTU-1 频率官方发布后填；不硬编码
+        "desc": "接收解调后的 SSDV 256B 包字节流→包校验/RS/CRC→MCU 重组 JPEG；"
+                "物理层 AFSK/卷积/解扰云内无射频，留真机",
+    },
 }
 
 
@@ -493,6 +503,107 @@ def _demod_am_envelope(iq: np.ndarray) -> np.ndarray:
     return np.abs(iq).astype(np.float32)
 
 
+def _ssdv_feed_core(raw: bytes, byte_path: str) -> tuple[int, Optional[str], dict]:
+    """可插拔字节流 → (有效包数, JPEG 路径, 旁证)。
+
+    物理层（FM→AFSK→帧同步→卷积/Viterbi→解扰→RS→256B 包字节）云内无射频，
+    留真机；本函数只做"字节/包层以上"：``mbdsdr_ai.ssdv_decoder``（fsphil 方言，
+    15B 头 + MCU 级 JPEG 重组）已就位——``SsdvDecoder.feed`` 同步/RS/CRC →
+    按 image_id 收集进 ``SsdvImage`` → ``build()`` 重组标准 JPEG 并诚实报缺失 MCU。
+    不内置呼号（callsign 由发射端参数决定）；无有效包诚实返回 0，绝不伪造图。
+    """
+    from mbdsdr_ai.ssdv_decoder import SsdvDecoder, SsdvImage
+
+    dec = SsdvDecoder()
+    images: dict[int, SsdvImage] = {}
+    n_ok = 0
+    for pkt in dec.feed(raw):
+        if pkt is None:
+            continue  # 同步/类型/RS 不可纠/CRC 不过 → 诚实丢包
+        n_ok += 1
+        img = images.get(pkt.image_id)
+        if img is None:
+            img = SsdvImage(pkt.image_id)
+            images[pkt.image_id] = img
+        img.add(pkt)
+
+    if n_ok == 0 or not images:
+        return 0, None, {"core_wired": True}
+
+    # 选包最多（EOI 优先）的一幅图重组
+    best_id = max(
+        images,
+        key=lambda k: (len(images[k].packets),
+                       int(any(p.eoi for p in images[k].packets.values()))))
+    res = images[best_id].build()
+    info: dict[str, Any] = {
+        "core_wired": True,
+        "image_id": best_id,
+        "width": res.width,
+        "height": res.height,
+        "mcu_count": res.mcu_count,
+        "received_mcus": len(res.received_mcus),
+        "missing_mcus": res.missing_mcus,
+        "eoi_seen": res.eoi_seen,
+    }
+    if res.empty or not res.jpeg:
+        return n_ok, None, info
+
+    jpeg_path = os.path.join(os.path.dirname(byte_path), "ssdv_rebuilt.jpg")
+    with open(jpeg_path, "wb") as f:
+        f.write(res.jpeg)
+    return n_ok, jpeg_path, info
+
+
+def _step_decode_ssdv(byte_path: str, r: StepResult) -> StepResult:
+    """SSDV 字节流入口：读解调后 256B 包字节流 → 喂核心 → MCU 重组 JPEG。
+
+    无字节 / 无有效包 → 诚实空态（FAIL），不 mock、不伪造图。
+    有包但部分 MCU 丢失 → 仍出图并在旁证报告 missing_mcus（局部花屏，不造假）。
+    """
+    try:
+        with open(byte_path, "rb") as f:
+            raw = f.read()
+    except OSError as e:
+        r.message = f"读取 SSDV 字节流失败: {e}"
+        return r
+
+    r.detail["n_bytes"] = len(raw)
+    r.detail["mode"] = "ssdv"
+    r.add_evidence(f"SSDV 解调字节流: {len(raw):,} 字节"
+                   f"（物理层 AFSK/卷积/解扰待真机，见 SSDV_SSTV_SPEC.md §2.2）")
+
+    if len(raw) == 0:
+        r.status = "FAIL"
+        r.message = "SSDV 字节流为空（无解调字节输入）"
+        r.add_fix("提供真机解调后的 SSDV 256B 包字节流文件（--sigmf-data 指向该字节文件）")
+        return r
+
+    n_packets, jpeg_path, info = _ssdv_feed_core(raw, byte_path)
+    r.detail["n_frames"] = int(n_packets)
+    r.detail["ssdv"] = info
+    r.add_evidence(f"SSDV 同步到 {n_packets} 个有效 256B 包")
+
+    if n_packets <= 0:
+        # 无有效包：诚实空态。
+        r.status = "FAIL"
+        r.message = "SSDV 字节流中未同步到任何有效 256B 包（物理层同步/信号）"
+        r.add_fix("确认字节流来自真机解调链（AFSK→帧同步→解扰→RS）；物理层参数待官方日程")
+        return r
+
+    n_missing = len(info.get("missing_mcus", []))
+    if jpeg_path:
+        r.detail["_ssdv_jpeg_path"] = jpeg_path
+        r.add_evidence(f"SSDV 重组 JPEG: {info.get('width')}x{info.get('height')}, "
+                       f"MCU {info.get('received_mcus')}/{info.get('mcu_count')}"
+                       f"{', 缺失 ' + str(n_missing) if n_missing else ''}")
+    r.status = "PASS"
+    r.message = (f"SSDV 重组完成：{n_packets} 包, "
+                  f"{info.get('width')}x{info.get('height')}"
+                  + (f", 缺失 {n_missing} MCU" if n_missing else ""))
+    return r
+
+
 def step_decode(
     sigmf_data_path: str,
     mode: str,
@@ -510,6 +621,10 @@ def step_decode(
         r.message = f"SigMF data 文件不存在: {sigmf_data_path}"
         r.add_fix("先跑 record 步")
         return r
+
+    # SSDV：输入是"解调后字节流文件"（不是 complex64 IQ），在 IQ 加载前单独处理。
+    if mode == "ssdv":
+        return _step_decode_ssdv(sigmf_data_path, r)
 
     # 加载 IQ
     try:
@@ -841,6 +956,20 @@ def step_output(
         artifacts.append(sstv_png)
         r.add_evidence(f"SSTV 图像: {sstv_png}")
 
+    # 3c) SSDV JPEG：把重组出的 JPEG 纳入交付（标准命名，标口径/时间）。
+    #     核心未接通/无包时 _ssdv_jpeg_path 不存在，这里自然空过——不造图。
+    ssdv_src = decode_result.detail.get("_ssdv_jpeg_path")
+    if ssdv_src and mode == "ssdv" and os.path.exists(ssdv_src):
+        import shutil
+        stamp_day = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%d')
+        ssdv_jpg = os.path.join(
+            out_dir,
+            f"ssdv_image__{data_origin}__N{n_samples_out}__{stamp_day}.jpg")
+        if os.path.abspath(ssdv_src) != os.path.abspath(ssdv_jpg):
+            shutil.copyfile(ssdv_src, ssdv_jpg)
+        artifacts.append(ssdv_jpg)
+        r.add_evidence(f"SSDV 图像: {ssdv_jpg}")
+
     # 4) manifest.json（与 experiments/common/manifest.py 同口径）
     manifest_path = os.path.join(out_dir, f"{stamp}_manifest.json")
     manifest = {
@@ -1078,9 +1207,9 @@ def main(argv: list[str] | None = None) -> int:
                                  message="无 decode 结果可输出（先跑 decode）")
                 results.append(out)
             else:
-                # SSTV/SSDV 解自 over-the-air 录制的音频，旁证口径记 "recorded"
-                # （真实信号录制后解码），其余模式保持 "captured"。
-                data_origin = "recorded" if mode == "sstv" else "captured"
+                # SSTV/SSDV 解自 over-the-air 录制/解调的信号，旁证口径记 "recorded"，
+                # 其余模式保持 "captured"。
+                data_origin = "recorded" if mode in ("sstv", "ssdv") else "captured"
                 out = step_output(
                     out_dir=args.out_dir,
                     mode=mode,
