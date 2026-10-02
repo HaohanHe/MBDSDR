@@ -65,6 +65,15 @@ No-FEC 模式 payload = 256 − 15 − 4 = **237 字节**。
 | 之后 | 4 | CRC32 | 覆盖 **byte[1] .. payload 末**（不含 sync 0x55）；标准 CRC32（poly 0xEDB88320 反射，init/xorout 0xFFFFFFFF） |
 | 之后 | 32 | RS parity | Normal 模式；Phil Karn `encode_rs_8`，从 byte[1] 起，pad 到 223 消息 |
 
+**RS 权威参数（已用 Phil Karn rs8.c 编译 KAT 逐字节验证，勿再改动）**：
+- GF(256) 本原多项式 **0x187**（与标准 CCSDS 相同，α=2；fsphil ALPHA_TO 表首 8 项 1,2,4,...,0x87 证实）。
+- 根生成元 **gamma = α^11**（`PRIM=11`），生成多项式根 = α^(11·(112+i))，i=0..31 —— **不是** 标准 CCSDS 的 α^(112+i)。
+- **无 0xFF 符号反转**（fsphil `ssdv.c` 直接喂原始字节给 `encode_rs_8/decode_rs_8`；0xFF 仅属 JPEG/CRC 字段）。
+- 位置域映射：Chien 找到 λ 根 α^j 后，字节位置 = (IPRIM·j − 1) mod 255，IPRIM = 11⁻¹ mod 255 = 116；差错特征值 X_k = α^(11·(254−pos))。
+- 参考向量（msg[i]=i, i=0..222 → 32 字节校验）：
+  `2fbd4fb4748494b9acd554627212eeb3ebed41191de1d36320ea49290b25abcf`
+  （由 rs8.c `FCR=112, PRIM=11, GENPOLY 0x187` 编译生成；仅验证事实，GPL 源码不入库）
+
 - mcu_mode：0=2×2（彩色 4 Y）、1=2×1、2=1×2、3=1×1（灰度）。
 - JPEG 限制：灰度或 YUV/YCbCr；宽高为 16 倍数（≤4080）；Baseline DCT；MCU 总数 ≤65535。
 - **MCU 级封装的意义**：编码端把标准 JPEG 完全解码成原始 MCU，用统一/固定的量化+Huffman 表
@@ -74,7 +83,10 @@ No-FEC 模式 payload = 256 − 15 − 4 = **237 字节**。
 ## 4. 资产盘点（已入库，可复用）
 
 - `mbdsdr_ai/fec.py`
-  - `ReedSolomon`：CCSDS RS(255,223)，prim 0x187、fcr 112、0xFF 反转，含 encode/decode（BM+Forney）。
+  - `ReedSolomon`：RS(255,223) 编/解码（BM+Chien+Forney）。参数可配：`fcr`（默认 112）、
+    `prim`（根序列步进，默认 1 = 标准 CCSDS α^(112+i)；**SSDV 用 prim=11**，根 γ=α^11）、
+    `prim_poly`（默认 0x187）、`ccsds_invert`（默认 True = 标准 CCSDS 符号反转；**SSDV 为 False**）。
+    编/解码均已按 IPRIM 位置映射 + prim 拉伸特征值正确处理 prim≠1（KAT 对拍 fsphil 参考向量）。
   - `Scrambler`：CCSDS 255 字节 PN 同步扰码/解扰（自逆，与 SatDump randomization 一致）。
   - `DifferentialEncoder`：DBPSK/DQPSK 差分。
 - `mbdsdr_ai/ax25.py` `AFSKModem`、`mbdsdr_ai/multimon_decoders.py` `AFSK1200Demod`：

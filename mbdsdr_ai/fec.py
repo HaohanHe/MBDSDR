@@ -154,24 +154,32 @@ class ReedSolomon:
         校验字节数（默认 32 → RS(255,223)，可纠 16 字节）。
     fcr : int
         生成多项式根的首指数（CCSDS = 112）。
+    prim : int
+        根序列指数步进：根 = alpha^(prim*(fcr+i))。标准 CCSDS prim=1；
+        fsphil SSDV 用 prim=11（根基 gamma=alpha^11）。
     prim_poly : int
         GF(256) 本原多项式。
     ccsds_invert : bool
         CCSDS 惯例：编/解码前把每个字节 ^= 0xFF（符号反转）。
     """
 
-    def __init__(self, nsym: int = 32, fcr: int = 112,
+    def __init__(self, nsym: int = 32, fcr: int = 112, prim: int = 1,
                  prim_poly: int = 0x187, ccsds_invert: bool = True):
         self.nsym = int(nsym)
         self.k = 255 - self.nsym
         self.fcr = int(fcr)
+        self.prim = int(prim)
+        # IPRIM：prim 在模 255 下的逆元（prim*iprim ≡ 1 mod 255）。
+        # 根序列步进 prim≠1 时（如 fsphil SSDV 的 prim=11），Chien 位置与
+        # 差错特征值需按 IPRIM/prim 重新映射；prim=1 时 iprim=1，退化为标准 CCSDS。
+        self.iprim = pow(self.prim, -1, 255)
         self.ccsds_invert = bool(ccsds_invert)
         self.gf = _GF256(prim_poly)
-        # 生成多项式 g(x) = prod_{i=0..nsym-1} (x - alpha^(fcr+i))
+        # 生成多项式 g(x) = prod_{i=0..nsym-1} (x - alpha^(prim*(fcr+i)))
         self.gen: List[int] = [1]
         for i in range(self.nsym):
-            # 乘 (x + alpha^(fcr+i))
-            root = self.gf.pow(2, self.fcr + i)
+            # 乘 (x + alpha^(prim*(fcr+i)))
+            root = self.gf.pow(2, self.prim * (self.fcr + i))
             new_g = [0] * (len(self.gen) + 1)
             for j in range(len(self.gen)):
                 new_g[j] ^= self.gf.mul(self.gen[j], root)
@@ -213,10 +221,10 @@ class ReedSolomon:
         if self.ccsds_invert:
             rcvd = [b ^ 0xFF for b in rcvd]
 
-        # 1. 伴随式 synd[i] = r(alpha^(fcr+i))，alpha=2（低次在前 synd[0]=S0）
+        # 1. 伴随式 synd[i] = r(alpha^(prim*(fcr+i)))（低次在前 synd[0]=S0）
         synd = [0] * self.nsym
         for i in range(self.nsym):
-            root = g.pow(2, self.fcr + i)
+            root = g.pow(2, self.prim * (self.fcr + i))
             s = 0
             for byte in rcvd:
                 s = g.mul(s, root) ^ byte
@@ -259,7 +267,8 @@ class ReedSolomon:
                     C[i + m] ^= g.mul(coef, B[i])
                 m += 1
 
-        # 3. Chien search：C(alpha^j)=0 → X_k^{-1}=alpha^j → pos = j-1
+        # 3. Chien search：C(alpha^j)=0 → 差错特征值 X_k^-1=alpha^j。
+        #    字节位置 pos = (iprim*j - 1) mod n（prim=1 时退化为 (j-1) mod n）。
         err_pos: List[int] = []
         for j in range(n):
             val = 0
@@ -268,7 +277,7 @@ class ReedSolomon:
                 val ^= g.mul(C[i], xn)
                 xn = g.mul(xn, g.pow(2, j))
             if val == 0:
-                err_pos.append((j - 1) % n)
+                err_pos.append((self.iprim * j - 1) % n)
         n_err = len(err_pos)
         if n_err == 0 or n_err > self.nsym // 2:
             out = bytes(b ^ 0xFF for b in rcvd[:self.k]) if self.ccsds_invert else bytes(rcvd[:self.k])
@@ -290,7 +299,8 @@ class ReedSolomon:
         out = list(rcvd)
         for pos in err_pos:
             d = n - 1 - pos                 # 该字节对应的多项式次数
-            Xk = g.pow(2, d)                # 差错特征值
+            # 差错特征值：prim≠1 时按 prim 拉伸（X_k = alpha^(prim*d)）
+            Xk = g.pow(2, self.prim * d)    # 差错特征值
             Xk_inv = g.inverse(Xk)
             num = 0
             xn = 1

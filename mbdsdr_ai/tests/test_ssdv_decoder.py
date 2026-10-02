@@ -28,9 +28,38 @@ from mbdsdr_ai.ssdv_decoder import (  # noqa: E402
     SsdvImage,
     TYPE_NOFEC,
     TYPE_NORMAL,
+    _SsdvRS,
     base40_to_callsign,
     callsign_to_base40,
 )
+
+
+# --------------------------------------------------------------------------
+# fsphil/rs8.c 兼容 KAT（根生成元 gamma = alpha^11，本原多项式 0x187，无反转）
+# 参考向量由 Phil Karn rs8.c（FCR=112, PRIM=11）编译生成，仅用于验证事实。
+# --------------------------------------------------------------------------
+SSDV_RS_REF_PARITY = bytes.fromhex(
+    "2fbd4fb4748494b9acd554627212eeb3ebed41191de1d36320ea49290b25abcf"
+)
+
+
+def test_ssdv_rs_encode_matches_fsphil_kat():
+    """_SsdvRS 编码校验字节与 fsphil rs8.c 参考向量逐字节一致。"""
+    rs = _SsdvRS()
+    parity = rs.encode(bytes(range(223)))
+    assert parity == SSDV_RS_REF_PARITY
+
+
+def test_ssdv_rs_decode_fsphil_kat_3_errors():
+    """fsphil KAT 同款 3 符号错误可全部纠正。"""
+    rs = _SsdvRS()
+    data = bytes(range(223))
+    cw = bytearray(bytes(data) + rs.encode(data))
+    for idx, val in ((5, 0x55), (100, 0x0F), (200, 0xAA)):
+        cw[idx] ^= val
+    out, nerr = rs.decode(bytes(cw))
+    assert nerr == 3
+    assert out == data
 
 
 # --------------------------------------------------------------------------
