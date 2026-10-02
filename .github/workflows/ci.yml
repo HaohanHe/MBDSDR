@@ -26,9 +26,25 @@ concurrency:
 jobs:
   # ---------------------------------------------------------------------------
   # Python：pytest 五个根目录
-  #   runner 需：Python 3.12 + PySide6 所需系统库（libGL 等）。
-  #   无硬件/无历表环境下：硬件用例自动 skip；test_solar_system 因 de421.bsp
-  #   未下载而 skip（属预期，非失败）。
+  #
+  # runner 要求（本地实测基线，首次接 runner 时据此核对）：
+  #   - 解释器：Python 3.12（本地 3.12.11；setup-python '3.12' 已对齐）。
+  #   - pytest：仅用标准能力（fixture/raises/mark.parametrize/skipif/skip/
+  #     importorskip），无需 pytest-qt / pytest-timeout / pytest-xdist 等
+  #     第三方插件；直接 `pip install pytest` 即可。
+  #   - 业务依赖：见根 requirements.txt 与 desktop/requirements.txt，核心为
+  #     numpy / scipy / requests / websocket-client / websockets / sgp4 /
+  #     skyfield / pymap3d / pyserial / Pillow / sounddevice + PySide6(>=6.5)。
+  #     硬件相关库（SoapySDR、pyrtlsdr 等）可选，装不上不应让 CI 崩，故下方
+  #     `pip install -r requirements.txt || true` 容错。
+  #   - PySide6 offscreen 系统库：libgl1 libegl1 libxkbcommon0 libdbus-1-3
+  #     （见下方 apt 步骤）；运行时须设 QT_QPA_PLATFORM=offscreen。
+  #
+  # 无硬件/无历表环境下：硬件用例由 pytest 自行 skip（importorskip/skipif）；
+  #   test_solar_system 因 de421.bsp 未下载而 skip（属预期，非失败）。
+  # 已知不稳定项：根 tests/ 大套件顺序相关、单例 QApplication 累积导致部分
+  #   UI 用例慢/偶发失败或墙钟超时，详见 docs/learn/phase10/P4-stability.md；
+  #   runner 上若该目录超时，按该文档排查，勿据此扩大其它 job。
   # ---------------------------------------------------------------------------
   python:
     runs-on: ubuntu-latest
@@ -68,8 +84,15 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Flutter：test + analyze
-  #   runner 需：Flutter stable（本地实测 3.47.5 / Dart 3.13.4）。
-  #   subosito/flutter-action 可拉取，无需凭据。
+  #
+  # runner 要求：
+  #   - Flutter SDK：stable 通道，版本钉到本地实测基线 3.47.5（Dart 3.13.4）。
+  #   - SDK 路径：subosito/flutter-action@v2 会把指定版本下载到 runner 缓存并
+  #     自动把 `flutter` 加入 PATH，无需手写 FLUTTER_ROOT；本地开发机的 SDK
+  #     在 /home/user/tools/flutter（见 scripts/run_all_tests.sh 的 FLUTTER_BIN），
+  #     CI 不依赖该绝对路径。
+  #   - 工程目录：mobile/（working-directory 已在此设置）。
+  #   - 步骤：flutter pub get → flutter analyze → flutter test；均无需凭据。
   # ---------------------------------------------------------------------------
   flutter:
     runs-on: ubuntu-latest
@@ -97,14 +120,30 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # C++：cmake 构建 + Qt offscreen ctest
-  #   TODO(runner)：本地基线用 Qt 6.8.2（/home/user/Qt/6.8.2）。ubuntu-latest 自带
-  #   qt6-base-dev 版本可能低于 6.8，导致 find_package(Qt6) 或 API 不匹配。
-  #   首次跑通前二选一：
-  #     (a) runner 预装 Qt 6.8 并设 CMAKE_PREFIX_PATH（见下）；
-  #     (b) 用 jurplel/install-qt-action@v3（需 Qt 账户凭据，属 secrets，本仓库
-  #         不内建；由维护者在 GitHub 仓库 Settings→Secrets 配置后再启用）。
-  #   当前默认走 (a)：apt 装 Qt6 开发包——若版本不足，此 job 会在 configure 阶段
-  #   失败，即"待 runner 配置验证"的明确信号。
+  #
+  # runner 要求 —— Qt 6.8 安装方式（本地基线 Qt 6.8.2，前缀 /home/user/Qt/6.8.2/gcc_64）：
+  #   ubuntu-latest apt 的 qt6-base-dev 版本通常低于 6.8，直接 `find_package(Qt6)`
+  #   可能因版本/API 不匹配在 configure 阶段失败。首次接 runner 时二选一：
+  #
+  #   (推荐，无需 Qt 账号) 用 aqtinstall 装一份 Qt 6.8.2 到固定前缀，再把前缀
+  #     传给 CMake——与本地开发机完全一致：
+  #       pip install aqtinstall
+  #       aqt install-qt linux desktop 6.8.2 gcc_64 \
+  #           --outputdir "$HOME/Qt"        # -> $HOME/Qt/6.8.2/gcc_64
+  #       cmake -S cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  #             -DCMAKE_PREFIX_PATH="$HOME/Qt/6.8.2/gcc_64"
+  #     （本地即如此安装，见 aqtinstall.log；offscreen 跑 ctest 时把
+  #       $HOME/Qt/6.8.2/gcc_64/lib 加入 LD_LIBRARY_PATH，并设 QT_QPA_PLATFORM=offscreen。）
+  #
+  #   (备选) jurplel/install-qt-action@v3：需 Qt 账户凭据（属 secrets，本仓库不
+  #     内建），由维护者在 GitHub 仓库 Settings→Secrets 配置后再启用。
+  #
+  #   当前 workflow 默认走"apt 装 qt6-base-dev"——若 runner 上 apt 版 <6.8，此 job
+  #   会在 configure 阶段失败，即"待 runner 配置验证"的明确信号；此时按上面
+  #   (推荐) 用 aqtinstall 固定 6.8.2。
+  #
+  # 其它构建依赖：build-essential cmake ninja-build + qt6-multimedia-dev
+  #   qt6-tools-dev + libgl1-mesa-dev（offscreen ctest 需要）。
   # ---------------------------------------------------------------------------
   cpp:
     runs-on: ubuntu-latest

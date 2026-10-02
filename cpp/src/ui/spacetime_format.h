@@ -132,11 +132,12 @@ inline SpLine spLineTarget(const QString& name, double centerHz) {
 }
 
 // 多普勒补偿。armed && hasTarget -> Ok "补偿中"；armed 但无目标 -> Warn（状态
-// 不一致）；未 armed -> 诚实 "未补偿（无目标）"。residualHz 非有限时不显示残差。
-inline SpLine spLineDoppler(bool armed, bool hasTarget, double residualHz) {
+// 不一致）；未 armed -> 诚实 "未补偿（无目标）"。appliedHz 是 range-rate 推出的
+// 真实补偿值（Hz），非有限时不显示（绝不编造一个残差数字）。
+inline SpLine spLineDoppler(bool armed, bool hasTarget, double appliedHz) {
     if (armed && hasTarget) {
-        const QString r = std::isfinite(residualHz)
-            ? QString(" · 残差 %1 Hz").arg(residualHz, 0, 'f', 1)
+        const QString r = std::isfinite(appliedHz)
+            ? QString(" · 补偿值 %1 Hz").arg(appliedHz, 0, 'f', 1)
             : QString();
         return {QString("多普勒补偿：补偿中（轨道传播实时微调）%1").arg(r),
                 SpRole::Ok};

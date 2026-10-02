@@ -23,6 +23,9 @@ PASS / WARN / FAIL / SKIP，并把每一项问题**直接翻译成可复制粘�
 用法：
   python3 tools/hw_selfcheck/selfcheck.py --json | python3 tools/diag_wizard.py
   python3 tools/diag_wizard.py report.json --json    # 额外输出结构化建议 JSON
+  python3 tools/hw_selfcheck/selfcheck.py --json | python3 tools/diag_wizard.py --paste
+      # 末尾追加围栏回传块；从 "==== MBDSDR 真机回传块" 行下整段复制贴回，
+      # parse_hw_report.py 可自动抽出并解析该块。
 
 退出码：
   0  报告有效，且无 FAIL（设备就绪 -> 给出 onboard 下一步；无硬件 -> 诚实空态）
@@ -39,6 +42,15 @@ from typing import Any, Optional
 
 SELFCHECK_TOOL = "mbdsdr-hw-selfcheck"
 ONBOARD_TOOL = "mbdsdr-onboarding"
+
+# 本向导自身的回传块身份（phase10 P1：--paste 模式）。
+WIZARD_TOOL = "mbdsdr-diag-wizard"
+WIZARD_VERSION = "0.1.0"
+
+# 回传块围栏标记：用户从 BEGIN 行下整段复制贴回；
+# parse_hw_report.extract_json_objects 会自动抽出围栏内的 {...} JSON 对象。
+PASTE_BEGIN = "==== MBDSDR 真机回传块（从此行下整段复制贴回）===="
+PASTE_END = "==== 回传块结束 ===="
 
 # 需要的用户组（与 selfcheck.check_usb_udev 保持一致）
 REQUIRED_GROUPS = ("plugdev", "dialout")
@@ -400,6 +412,67 @@ def render_human(res: WizardResult, report: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# --paste 回传块：人类可读报告末尾附一段机器可解析 JSON
+# ---------------------------------------------------------------------------
+def build_paste_block(res: WizardResult, report: dict) -> dict:
+    """把向导结论压成一段可整段贴回的紧凑 JSON。
+
+    字段对齐 phase10 P1 回传格式约定：
+      tool / version / timestamp / host / exit_code /
+      device_present / no_hardware_expected /
+      checks_summary（PASS/WARN/FAIL 计数） / summary_conclusion /
+      checks（逐项 name/status/verdict/commands 摘要） /
+      suggested_commands（所有可复制修复命令，去重保序） /
+      next_steps（设备就绪时的 onboard + 回填路径）。
+    """
+    suggested: list[str] = []
+    for a in res.advices:
+        for cmd in a.commands:
+            for line in cmd.splitlines():
+                line = line.strip()
+                # 注释行（# 开头）也保留进建议命令，方便用户理解上下文
+                if line and line not in suggested:
+                    suggested.append(line)
+
+    def _is_decor(line: str) -> bool:
+        s = line.strip()
+        return bool(s) and set(s) <= {"=", "-", "─", "~"}
+
+    return {
+        "tool": WIZARD_TOOL,
+        "version": WIZARD_VERSION,
+        "timestamp": str(report.get("timestamp") or ""),
+        "host": str(report.get("host") or ""),
+        "exit_code": 1 if res.fail_count > 0 else 0,
+        "device_present": bool(res.device_present),
+        "no_hardware_expected": bool(res.no_hardware_expected),
+        "checks_summary": {
+            "PASS": res.pass_count,
+            "WARN": res.warn_count,
+            "FAIL": res.fail_count,
+        },
+        "summary_conclusion": res.summary_conclusion,
+        "checks": [
+            {
+                "name": a.check,
+                "status": a.status,
+                "verdict": a.verdict,
+                "commands": list(a.commands),
+            }
+            for a in res.advices
+        ],
+        "suggested_commands": suggested,
+        "next_steps": [s for s in res.next_steps if s.strip() and not _is_decor(s)],
+    }
+
+
+def render_paste_block(block: dict) -> str:
+    """把回传块包进围栏标记，整段可直接复制贴回聊天。"""
+    body = json.dumps(block, ensure_ascii=False, indent=2)
+    return "\n".join([PASTE_BEGIN, body, PASTE_END])
+
+
+# ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
 def main(argv: list[str] | None = None) -> int:
@@ -407,6 +480,9 @@ def main(argv: list[str] | None = None) -> int:
         description="MBDSDR 交互式诊断向导：读 selfcheck --json，逐项给出可复制修复命令")
     ap.add_argument("path", nargs="?", help="selfcheck --json 报告文件路径（缺省从 stdin 读）")
     ap.add_argument("--json", action="store_true", help="额外输出结构化建议 JSON 到 stdout")
+    ap.add_argument("--paste", action="store_true",
+                    help="人类可读报告末尾追加一段机器可解析 JSON 回传块"
+                         "（围栏内整段复制贴回，供 parse_hw_report 解析）")
     args = ap.parse_args(argv)
 
     if args.path:
@@ -445,6 +521,9 @@ def main(argv: list[str] | None = None) -> int:
     res = build_result(report)
 
     print(render_human(res, report))
+    if args.paste:
+        print()
+        print(render_paste_block(build_paste_block(res, report)))
     if args.json:
         print("\n--- structured JSON ---")
         print(json.dumps({

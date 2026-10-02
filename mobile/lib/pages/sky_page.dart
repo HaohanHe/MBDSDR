@@ -7,8 +7,10 @@ import 'package:mbdsdr_mobile/astro/nav_satellites.dart';
 import 'package:mbdsdr_mobile/astro/passes.dart';
 import 'package:mbdsdr_mobile/astro/tle.dart';
 import 'package:mbdsdr_mobile/astro/tle_freshness.dart';
+import 'package:mbdsdr_mobile/models/radio_state.dart';
 import 'package:mbdsdr_mobile/models/satellite.dart';
 import 'package:mbdsdr_mobile/models/satellite_downlink.dart';
+import 'package:mbdsdr_mobile/pages/spacetime_status.dart';
 import 'package:mbdsdr_mobile/services/location_service.dart';
 import 'package:mbdsdr_mobile/services/orientation_service.dart';
 import 'package:mbdsdr_mobile/services/radio_controller.dart';
@@ -414,6 +416,14 @@ class _SkyPageState extends State<SkyPage> {
         // 顶部刷新指示：2px 发丝进度条，不抢视觉。
         if (_c.refreshing)
           const LinearProgressIndicator(minHeight: 2, color: AppTokens.accent),
+        // 时空状态四格：复用真实 radio 连接/频率与选中目标；GNSS fix 流与实时
+        // 多普勒在本机尚未接线 -> 走诚实空态（无 fix / 未补偿），绝不编造。
+        SpacetimeStatusCard(
+          radioConnected: widget.radio?.status == ConnectionStatus.connected,
+          freqHz: widget.radio?.freqHz,
+          targetName: _c.selectedName,
+          // 移动端暂无 SGP4 range-rate 实时补偿引擎 -> Doppler 恒为 null（诚实空态）。
+        ),
         if (_c.selectedVisibility != null)
           Expanded(child: _GuidanceCard(controller: _c)),
         Expanded(flex: 2, child: _PassList(passes: _c.passes, controller: _c)),
