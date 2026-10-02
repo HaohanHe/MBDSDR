@@ -94,18 +94,18 @@ MODES = {
         "label": "SSTV 慢扫描电视（卫星/地面 FM 信道）",
         "default_sr": 250_000.0,     # 够覆盖 VHF FM 语音带宽（~25k）
         "default_n": 30_000_000,     # 120 s @ 250 ksps，覆盖 Martin M1 整帧(~114s)
-        "freq_hint": 145.8e6,        # 卫星业余 SSTV 惯例(ISS 145.800)；JAMX01/ASRTU-1 以官方日程为准
+        "freq_hint": 145.8e6,        # 卫星业余 SSTV 惯例下行频率（如 ISS 145.800 MHz）；实际以目标信号为准
         "desc": "慢扫描电视图像（FM 解调音频 → SSTV 解码，自动识别 Martin/Scottie/Robot/PD）",
     },
     "ssdv": {
         "label": "SSDV 数字慢扫描（字节流 → MCU 重组 JPEG）",
-        # 物理层调制/速率/频率官方未定（见 docs/learn/phase14/SSDV_SSTV_SPEC.md §2.2）。
-        # 采样率/时长仅作 CLI 占位，以官方日程为准；频率字段显式留空，禁硬编码猜测。
-        "default_sr": 19_200.0,      # TODO(phase14): LilacSat 风格音频参考值，官方以日程为准
+        # SSDV 标准只定义 256B 包格式，物理层调制/速率/频率由具体传输链路决定，
+        # 故不内置默认频率；解调后的字节流由调用方喂入。
+        "default_sr": 19_200.0,      # 常见 AFSK-1200 链路的音频参考采样率
         "default_n": 0,              # 字节流模式：长度由输入字节文件决定，不固定采样点数
-        "freq_hint": None,           # TODO(phase14): JAMX01/ASRTU-1 频率官方发布后填；不硬编码
+        "freq_hint": None,           # 无通用默认频率，由调用方按目标链路指定
         "desc": "接收解调后的 SSDV 256B 包字节流→包校验/RS/CRC→MCU 重组 JPEG；"
-                "物理层 AFSK/卷积/解扰云内无射频，留真机",
+                "物理层（AFSK/卷积/解扰等）由传输链路决定、可插拔接入",
     },
 }
 
@@ -588,7 +588,7 @@ def _step_decode_ssdv(byte_path: str, r: StepResult) -> StepResult:
         # 无有效包：诚实空态。
         r.status = "FAIL"
         r.message = "SSDV 字节流中未同步到任何有效 256B 包（物理层同步/信号）"
-        r.add_fix("确认字节流来自真机解调链（AFSK→帧同步→解扰→RS）；物理层参数待官方日程")
+        r.add_fix("确认字节流来自解调链（AFSK→帧同步→解扰→RS）；物理层参数按实际链路配置")
         return r
 
     n_missing = len(info.get("missing_mcus", []))

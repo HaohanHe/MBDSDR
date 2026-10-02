@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: MIT
 """fsphil SSDV（Slow Scan Digital Video）256 字节包解码器 / 编码器 —— 干净室实现。
 
-本模块依据权威规格 ``docs/learn/phase14/SSDV_SSTV_SPEC.md``（§3 包格式 / §5 任务 /
-§6 验收）独立编写；参考 ``repos/ssdv_ref``（fsphil/ssdv，GPL）仅学习机制，**未逐字
-复制任何 GPL 代码**。JPEG 表为 ITU-T T.81 Annex K 公开标准采样表。
+本模块依据 fsphil SSDV 公开包格式独立编写；参考 fsphil/ssdv（GPL）仅学习机制，
+**未逐字复制任何 GPL 代码**。JPEG 表为 ITU-T T.81 Annex K 公开标准采样表。
 
 包布局（固定 256 字节，Normal/FEC 模式）::
 

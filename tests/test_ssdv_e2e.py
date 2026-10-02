@@ -1,6 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""SSDV 完整接收链端到端测试（权威规格 ``docs/learn/phase14/SSDV_SSTV_SPEC.md``
-§5 任务 4 / §6 验收）。
+"""SSDV 完整接收链端到端测试（fsphil SSDV 公开包格式）。
 
 本测试按 **真实就位接口**（非臆测）串联整条链，全部确定性、固定种子：
 

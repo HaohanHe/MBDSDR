@@ -6,7 +6,7 @@
 // VIS: 30 ms bits, 1100 Hz = mark/1, 1300 Hz = space/0, even parity).
 // These are the stateless, fully testable core of mbdsdr_ai/sstv_decoder.py;
 // the line-sync / mode-identification state machines stay on the Python side
-// for now (see docs/learn/phase14/P4-cpp-assessment.md).
+// for now.
 #pragma once
 
 #include <cstddef>
