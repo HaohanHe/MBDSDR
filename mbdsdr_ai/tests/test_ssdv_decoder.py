@@ -28,8 +28,8 @@ from mbdsdr_ai.ssdv_decoder import (  # noqa: E402
     SsdvImage,
     TYPE_NOFEC,
     TYPE_NORMAL,
-    decode_callsign,
-    encode_callsign,
+    base40_to_callsign,
+    callsign_to_base40,
 )
 
 
@@ -38,9 +38,9 @@ from mbdsdr_ai.ssdv_decoder import (  # noqa: E402
 # --------------------------------------------------------------------------
 @pytest.mark.parametrize("cs", ["BI4TST", "A", "ABCDE", "9"])
 def test_callsign_roundtrip(cs):
-    code = encode_callsign(cs)
+    code = callsign_to_base40(cs)
     assert 0 <= code < (1 << 32)
-    assert decode_callsign(code) == cs
+    assert base40_to_callsign(code) == cs
 
 
 def test_no_builtin_callsign():
@@ -88,7 +88,7 @@ def test_packet_structure():
     assert p[0] == 0x55           # sync
     assert p[1] == TYPE_NORMAL    # type
     code = (p[2] << 24) | (p[3] << 16) | (p[4] << 8) | p[5]
-    assert decode_callsign(code) == "BI4TST"
+    assert base40_to_callsign(code) == "BI4TST"
     assert p[6] == 0              # image_id
     assert p[9] == 32 >> 4        # width/16
     assert p[10] == 32 >> 4       # height/16
