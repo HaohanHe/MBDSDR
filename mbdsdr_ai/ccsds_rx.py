@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 """CCSDS 数字接收链（干净室 MIT 独立实现）。
 
-本模块依据 CCSDS 公开标准（TM 同步与信道编码）与 fsphil SSDV 规格 ``docs/learn/
-phase14/SSDV_SSTV_SPEC.md`` 独立实现，供 2026-10-08..10-10 卫星 SSDV 下传接收使用。
+本模块依据 CCSDS 公开标准（TM 同步与信道编码）与 fsphil SSDV 公开包格式独立实现，
+提供通用的 SSDV over CCSDS/AFSK 数字接收能力。
 
 参考实现（GPL，**只学机制、未复制代码**）：
   - ``repos/by2hit_arcssd-go/engine/ccsds/viterbi27.c``（Phil Karn KA9Q K=7 r=1/2 Viterbi）
@@ -19,9 +19,9 @@ phase14/SSDV_SSTV_SPEC.md`` 独立实现，供 2026-10-08..10-10 卫星 SSDV 下
 
     AFSK 音频 ──► 0/1 比特 ──► ASM 帧同步 ──► [Viterbi] ──► 解扰 ──► [RS] ──► SSDV 256B 包
 
-红线：
-  - 物理层未确定的参数（采样率/波特率/mark/space/帧长）全部为具名参数/常量，
-    不硬编码猜测；未拿到官方日程前只离线测试。
+约束：
+  - 物理层参数（采样率/波特率/mark/space/帧长）全部为具名参数/常量，
+    由调用方按实际链路传入，不内置猜测。
   - 不内置任何呼号；无数据时诚实空态（返回空列表）。
 """
 
@@ -61,11 +61,11 @@ RS_NSYM: int = 32
 #: SSDV 固定包长（fsphil 格式）。
 SSDV_PACKET_LEN: int = 256
 
-# 卫星 AFSK 物理层候选（规格 §2.2；官方日程未定，仅作参数默认，不改芯片/频率）。
-#: 1200 baud 卫星 AFSK 候选：mark=1200 / space=2400 Hz。
+# AFSK 物理层默认参数（常见 1200/2400 baud 卫星或高空气球链路；可由调用方覆盖）。
+#: 1200 baud AFSK 默认：mark=1200 / space=2400 Hz。
 SAT_AFSK_1200_MARK: float = 1200.0
 SAT_AFSK_1200_SPACE: float = 2400.0
-#: 2400 baud 卫星 AFSK 候选：mark=1200 / space=2400 Hz。
+#: 2400 baud AFSK 默认：mark=1200 / space=2400 Hz。
 SAT_AFSK_2400_MARK: float = 1200.0
 SAT_AFSK_2400_SPACE: float = 2400.0
 
