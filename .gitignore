@@ -68,6 +68,12 @@ MBDSDR-IEEE论文初稿*.md
 .env.*
 !.env.example
 
+# Android release 签名材料（密钥/密码永不入库）
+*.jks
+*.keystore
+mobile/android/key.properties
+key.properties
+
 # 运行时数据
 recordings/
 *.cf32

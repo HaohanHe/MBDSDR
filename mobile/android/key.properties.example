@@ -1,0 +1,20 @@
+# =============================================================================
+# key.properties.example — release 签名配置模板（复制为 key.properties 再填）
+#
+#   cp mobile/android/key.properties.example mobile/android/key.properties
+#
+# 然后把下面 4 个占位值换成你自己的。key.properties 已被 .gitignore 忽略，
+# 绝不会入库；gen_keystore.sh 会在生成 keystore 后打印好这段内容供你粘贴。
+#
+# ⚠ 不要把本文件里的任何密码提交、截图或贴进聊天/issue。
+# =============================================================================
+
+# keystore 文件路径。用绝对路径最稳；相对路径相对 mobile/android/app/ 解析。
+# 例（Linux/macOS）: /home/you/keystores/mbdsdr.jks
+# 例（Windows）    : C:/Users/you/keystores/mbdsdr.jks
+storeFile=/PATH/TO/YOUR/keystores/mbdsdr.jks
+
+# 你在 gen_keystore.sh 里设的密码（keystore 与 key 可不同；下面两个分别填）。
+storePassword=YOUR_KEYSTORE_PASSWORD
+keyAlias=mbdsdr
+keyPassword=YOUR_KEY_PASSWORD

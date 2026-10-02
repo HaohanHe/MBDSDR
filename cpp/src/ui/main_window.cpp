@@ -51,6 +51,9 @@
 #include <QClipboard>
 
 #include "dsp/vfo_manager.h"
+#include "dsp/device_lister.h"
+#include "dsp/device_presence_notifier.h"
+#include "ui/gain_control_model.h"
 #include "ui/constellation_view.h"
 
 #include <cmath>
@@ -410,6 +413,13 @@ MainWindow::MainWindow(QWidget* parent)
     gainValue_ = new QLabel("0 dB", gRx);
     auto* gainRow = new QHBoxLayout;
     gainRow->addWidget(gainSlider_);
+    // Discrete step combo: shown ONLY when the driver reported a real legal gain
+    // table (local RTL-SDR rtlsdr_get_tuner_gains). Empty table / no device keeps
+    // the continuous slider (honest empty state). Populated by refreshGainControl().
+    gainCombo_ = new QComboBox(gRx);
+    gainCombo_->setMinimumWidth(tokens::scaled(90));
+    gainCombo_->hide();
+    gainRow->addWidget(gainCombo_);
     gainRow->addWidget(gainValue_);
     gRxLay->addRow("增益", gainRow);
     // RTL-SDR over rtl_tcp exposes only the tuner's overall gain index (the
@@ -1685,10 +1695,14 @@ MainWindow::MainWindow(QWidget* parent)
     sbSnr_   = new QLabel("--", this);
     sbSquelch_ = new QLabel("静噪 OFF", this);
     sbGnss_  = new QLabel("", this);
+    // Real-time sound-card link health (声卡正常 / 欠载 / 断开重连中 / 不可用),
+    // fed from the engine audio sink's worker-thread observations. "--" until the
+    // first real read; never a fabricated "playing" state on a headless box.
+    sbAudio_ = new QLabel("--", this);
     // SDR++-style S-meter: fed by the SAME real engine RSSI as sbRssi_.
     sMeter_ = new ui::SMeterWidget(this);
     for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbWatch_,
-                      sbScan_, sbRec_, sbRssi_, sbSnr_, sbSquelch_, sbGnss_}) {
+                      sbScan_, sbRec_, sbRssi_, sbSnr_, sbSquelch_, sbGnss_, sbAudio_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
     }
@@ -1731,6 +1745,28 @@ MainWindow::MainWindow(QWidget* parent)
     // Paint the honest no-device empty state immediately (don't wait for the
     // first 1 Hz telemetry tick).
     refreshDeviceCapabilities();
+    refreshGainControl();
+
+    // ---- Hot-plug presence lister (enumeration diff -> UI notice) -----------
+    // Built only when librtlsdr is compiled in (the only thing that can enumerate
+    // USB RTL devices). In a stub/offline build there is no enumeration source, so
+    // we honestly show nothing rather than fabricate plug events. The 1 Hz timer
+    // pulls the injectable enumerator; a diff flips a calm banner. Real physical
+    // auto-open recovery is 「真机待验」.
+#ifdef HAVE_RTLSDR
+    deviceEnumerator_ = new dsp::RtlSdrDeviceEnumerator();
+    deviceLister_     = new dsp::DeviceLister(deviceEnumerator_, this);
+    presenceNotifier_ = new dsp::DevicePresenceNotifier(deviceLister_, this);
+    connect(presenceNotifier_, &dsp::DevicePresenceNotifier::presenceNotice,
+            this, [this](const QString& text, dsp::DevicePresenceNotifier::Kind kind) {
+                showPresenceNotice(text, kind == dsp::DevicePresenceNotifier::Kind::Connected);
+            });
+    devicePollTimer_ = new QTimer(this);
+    connect(devicePollTimer_, &QTimer::timeout,
+            presenceNotifier_, &dsp::DevicePresenceNotifier::pollOnce);
+    devicePollTimer_->start(1000);   // 1 Hz presence poll
+    deviceLister_->poll();            // establish baseline immediately (no event)
+#endif
     connect(engine_, &dsp::SpectrumEngine::squelchState,
             this, &MainWindow::onSquelchState);
     connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
@@ -1779,6 +1815,15 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this](int v) {
                 gainValue_->setText(QString("%1 dB").arg(v));
                 engine_->onSetGain(v);
+            });
+    // Discrete step combo: the real gain table lives in itemData (dB). Choosing a
+    // step commands EXACTLY that legal level; the source snaps to it anyway, so
+    // the readback in onSourceTelemetry confirms the truly applied value.
+    connect(gainCombo_, QOverload<int>::of(&QComboBox::activated),
+            this, [this](int idx) {
+                bool ok = false;
+                const double db = gainCombo_->itemData(idx).toDouble(&ok);
+                if (ok) engine_->onSetGain(db);
             });
     connect(demodCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int) {
@@ -2939,8 +2984,12 @@ QString MainWindow::vfoRowText(const dsp::VfoMarker& m) const {
     if (m.bandwidthHz >= 1e6)      bw = QString("%1 MHz").arg(m.bandwidthHz / 1e6, 0, 'f', 2);
     else if (m.bandwidthHz >= 1e3) bw = QString("%1 kHz").arg(m.bandwidthHz / 1e3, 0, 'f', 1);
     else                            bw = QString("%1 Hz").arg(int(m.bandwidthHz));
-    return QString("%1 %2  %3 MHz  %4  %5")
-        .arg(dot, idPart, QString::number(m.freqHz / 1e6, 'f', 3), m.mode, bw);
+    // The selected VFO is the one actually routed to the speaker (engine routes
+    // only the selected channel's audio48k). Make that explicit instead of relying
+    // on the dot alone: "● 名字  98.500 MHz  NFM  12.5 kHz  [出声]".
+    const QString audible = m.selected ? QStringLiteral("  [出声]") : QString();
+    return QString("%1 %2  %3 MHz  %4  %5%6")
+        .arg(dot, idPart, QString::number(m.freqHz / 1e6, 'f', 3), m.mode, bw, audible);
 }
 
 void MainWindow::vfoCopyUi() {
@@ -3621,6 +3670,9 @@ void MainWindow::onSourceTelemetry(const QString& name, bool connected,
             ? QString("增益 %1 dB").arg(gainDb, 0, 'f', 1) : QString("--"));
     if (sbSdr_)
         sbSdr_->setText(name + (connected ? QString() : QStringLiteral("（非硬件）")));
+    // Real-time sound-card link health (worker-thread observations of QAudioSink).
+    if (sbAudio_ && engine_ && engine_->audioOutput())
+        sbAudio_->setText(engine_->audioOutput()->audioHealthStatus());
     // Deferred (same rationale as onSourceChanged): refresh on a turn where the
     // engine lock is not held. Change-detector inside keeps this cheap.
     QTimer::singleShot(0, this, [this]() { refreshDeviceCapabilities(); });
@@ -3632,6 +3684,10 @@ void MainWindow::onSourceTelemetry(const QString& name, bool connected,
 void MainWindow::refreshDeviceCapabilities() {
     if (!engine_) return;
     const dsp::DeviceCapabilities caps = engine_->sourceCapabilities();
+
+    // Keep the gain control (discrete combo vs continuous slider) in sync every
+    // telemetry tick -- the readback gain may snap to a different legal step.
+    refreshGainControl();
 
     auto fmtRange = [](double lo, double hi) -> QString {
         if (!(hi > lo) || hi <= 0.0) return QStringLiteral("未知");
@@ -3679,6 +3735,70 @@ void MainWindow::refreshDeviceCapabilities() {
     srCombo_->setEnabled(caps.connected && !rates.isEmpty());
     if (bestIdx >= 0) srCombo_->setCurrentIndex(bestIdx);
     sbSr_->setText(srCombo_->currentText());
+}
+
+// Build / refresh the gain control from the ACTUAL discrete gain table the
+// driver reported. Honesty rules (see ui/gain_control_model.h):
+//   * real local RTL-SDR  -> one combo row per legal step; slider hidden.
+//   * empty table (rtl_tcp / test / file) -> continuous slider stays.
+//   * no hardware          -> control disabled with an explicit reason.
+void MainWindow::refreshGainControl() {
+    if (!engine_ || !gainCombo_ || !gainSlider_) return;
+    const std::vector<double> table = engine_->availableGainsDb();
+    const bool hw = engine_->sourceCapabilities().connected;
+    const ui::GainControlModel model = ui::GainControlModel::decide(table, hw);
+
+    if (model.mode == ui::GainControlModel::Mode::DiscreteCombo) {
+        gainSlider_->hide();
+        gainCombo_->show();
+        // Rebuild rows only when the table actually changes (the 1 Hz tick must
+        // not clobber the user's open combo / hover).
+        QString tableKey;
+        for (double g : table) tableKey += QString::number(g, 'f', 1) + u',';
+        if (tableKey != gainTableKey_) {
+            gainTableKey_ = tableKey;
+            const QSignalBlocker block(gainCombo_);
+            gainCombo_->clear();
+            for (double g : table)
+                gainCombo_->addItem(QString("%1 dB").arg(g, 0, 'f', 1), g);
+        }
+        // Select the row nearest the current readback gain (driver snapped value).
+        int best = 0; double bestDiff = 1e9;
+        for (int i = 0; i < gainCombo_->count(); ++i) {
+            const double d = std::fabs(gainCombo_->itemData(i).toDouble() - lastGainDb_);
+            if (d < bestDiff) { bestDiff = d; best = i; }
+        }
+        {
+            const QSignalBlocker block(gainCombo_);
+            gainCombo_->setCurrentIndex(best);
+        }
+        gainCombo_->setEnabled(model.enabled);
+        gainCombo_->setToolTip(model.reason.isEmpty()
+            ? QStringLiteral("离散增益档（驱动报告的合法步进）") : model.reason);
+        gainValue_->setText(QString("%1 dB").arg(lastGainDb_, 0, 'f', 1));
+    } else {
+        // No discrete table: honest continuous slider path (unchanged behavior).
+        gainTableKey_.clear();
+        gainCombo_->hide();
+        gainCombo_->clear();
+        gainSlider_->show();
+        gainSlider_->setEnabled(model.enabled);
+        gainSlider_->setToolTip(model.reason);
+    }
+}
+
+// Enumeration-diff notice -> calm status strip / device banner. Non-destructive:
+// we do not clear the drop/error flags; this is purely informational about USB
+// presence. The exact wording was produced (and unit-tested) by the notifier.
+void MainWindow::showPresenceNotice(const QString& text, bool appeared) {
+    if (text.isEmpty()) return;
+    if (statusLabel_) statusLabel_->setText(text);
+    if (sourceBanner_) {
+        sourceBanner_->setText(text);
+        sourceBanner_->setStyleSheet(QString(
+            "background-color:%1; color:%2; padding:6px; border-radius:4px;")
+            .arg(appeared ? tokens::kSuccess : tokens::kWarning, tokens::kTextPrimary));
+    }
 }
 
 QList<double> MainWindow::harnessSampleRateOptions() const {
@@ -3889,8 +4009,11 @@ void MainWindow::onAdsbPrune() {
 void MainWindow::setControlsEnabled(bool hw) {
     freqSpin_->setEnabled(hw);
     srCombo_->setEnabled(hw);
-    // Manual gain slider only when hardware connected AND tuner in manual mode.
-    gainSlider_->setEnabled(hw && !(tunerAgcChk_ && tunerAgcChk_->isChecked()));
+    // Manual gain control only when hardware connected AND tuner in manual mode.
+    // Both the continuous slider and the discrete step combo follow the same gate.
+    const bool gainOk = hw && !(tunerAgcChk_ && tunerAgcChk_->isChecked());
+    gainSlider_->setEnabled(gainOk);
+    if (gainCombo_) gainCombo_->setEnabled(gainOk);
     if (advPanel_) advPanel_->setEnabled(hw);
 }
 

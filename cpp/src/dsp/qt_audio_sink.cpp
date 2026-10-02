@@ -87,7 +87,18 @@ void QtAudioSink::ensureReady() {
     if (havePending) {
         buildSink(requested);
     } else if (!sink_) {
-        buildSink(QAudioDevice());   // null -> system default
+        // No live sink. Two cases:
+        //  (a) first run / healthy-but-no-device (headless): build immediately;
+        //      buildSink() degrades to unavailable, exactly as before.
+        //  (b) a previously healthy link died (state == Dead): attempt a BOUNDED
+        //      rebuild through health_.tickReconnect() so a vanished device is not
+        //      hammered, and stop honestly once it gives up (GivenUp).
+        if (health_.state() == AudioLinkHealth::State::Dead) {
+            if (health_.tickReconnect())
+                buildSink(currentDev_.isNull() ? QAudioDevice() : currentDev_);
+        } else if (health_.state() != AudioLinkHealth::State::GivenUp) {
+            buildSink(QAudioDevice());   // null -> system default
+        }
     }
 }
 
@@ -134,8 +145,15 @@ void QtAudioSink::buildSink(const QAudioDevice& dev) {
     // disconnected automatically when sink_ is destroyed in teardownSink().
     QObject::connect(sink_.get(), &QAudioSink::stateChanged,
         [this](QAudio::State s) {
-            if (s == QAudio::StoppedState && sink_ && sink_->error() != QAudio::NoError)
+            if (s == QAudio::StoppedState && sink_ && sink_->error() != QAudio::NoError) {
                 qWarning() << "[QtAudioSink] error:" << sink_->error();
+                // Device pulled / fatal: mark the link dead and flip available_
+                // false honestly. We do NOT destroy the sender inside its own
+                // callback; the worker's next ensureReady() teardowns + bounded
+                // rebuilds through health_. (Real unplug/replug 真机待验.)
+                health_.onDeviceError();
+                available_.store(false);
+            }
         });
     io_ = sink_->start();
     if (!io_) {
@@ -146,6 +164,7 @@ void QtAudioSink::buildSink(const QAudioDevice& dev) {
     fmt_ = fmt;
     sink_->setVolume(volume_.load());
     available_.store(true);
+    health_.reset();   // a fresh sink = healthy link
     qInfo() << "[QtAudioSink] ready on" << d.description() << ":" << fmt;
 }
 
@@ -185,6 +204,22 @@ std::vector<float> QtAudioSink::resampleToDevice(const std::vector<float>& in) c
     return out;
 }
 
+void QtAudioSink::feedAudioWrite(const QByteArray& bytes) {
+    if (bytes.isEmpty() || !io_) return;
+    const qint64 written = io_->write(bytes.constData(), bytes.size());
+    health_.onWrite(written >= 0);
+    // Underrun heuristic: after we just pushed a block, the hardware buffer is
+    // already completely drained (bytesFree == bufferSize). Tolerated by the
+    // state machine until it warrants the "欠载" warning.
+    if (sink_) {
+        const qint64 buf = sink_->bufferSize();
+        if (buf > 0 && sink_->bytesFree() >= buf)
+            health_.onUnderrun();
+        if (sink_->error() != QAudio::NoError)
+            health_.onDeviceError();
+    }
+}
+
 void QtAudioSink::write(const std::vector<float>& audio) {
     ensureReady();
     if (!available_.load() || muted_.load() || audio.empty() || !io_) return;
@@ -201,7 +236,7 @@ void QtAudioSink::write(const std::vector<float>& audio) {
         for (int c = 0; c < channels; ++c)
             appendSample(bytes, fmt_, s);
 
-    if (!bytes.isEmpty()) io_->write(bytes.constData(), bytes.size());
+    feedAudioWrite(bytes);
 }
 
 void QtAudioSink::writeStereo(const std::vector<float>& left,
@@ -233,7 +268,7 @@ void QtAudioSink::writeStereo(const std::vector<float>& left,
         }
     }
 
-    if (!bytes.isEmpty()) io_->write(bytes.constData(), bytes.size());
+    feedAudioWrite(bytes);
 }
 
 } // namespace dsp

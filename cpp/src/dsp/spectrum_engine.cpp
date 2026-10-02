@@ -130,6 +130,12 @@ DeviceCapabilities SpectrumEngine::sourceCapabilities() const {
 void SpectrumEngine::updateCapsSnapshotLocked() {
     QMutexLocker lk(&capsMutex_);
     capsSnapshot_ = source_ ? source_->capabilities() : noDeviceCapabilities();
+    gainTableSnapshot_ = source_ ? source_->availableGainsDb() : std::vector<double>{};
+}
+
+std::vector<double> SpectrumEngine::availableGainsDb() const {
+    QMutexLocker lk(&capsMutex_);
+    return gainTableSnapshot_;
 }
 
 void SpectrumEngine::onSetCenterFreq(double f) {

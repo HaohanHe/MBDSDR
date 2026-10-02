@@ -45,6 +45,10 @@ public:
     /// machine has no audio hardware.
     static QStringList availableDevices() { return QtAudioSink::availableDevices(); }
 
+    /// Real-time link-health status text (声卡正常 / 欠载 / 断开重连中 / 不可用),
+    /// driven by the worker thread's QAudioSink observations. Never fabricated.
+    QString audioHealthStatus() const { return impl_.healthStatus(); }
+
 private:
     QtAudioSink impl_;
 };
