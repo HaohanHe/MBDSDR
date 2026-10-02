@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
-// RTL-SDR source implementing ISource via librtlsdr C API.
+// RTL-SDR source implementing ISource via the librtlsdr C API.
 //
-// Compiled only when HAVE_RTLSDR is defined (CMake detects librtlsdr).
-// Without the macro, this file provides a stub whose start() always fails,
-// so the engine falls back to TestSignalSource gracefully.
+// All librtlsdr calls are routed through the RtlLibOps seam (rtl_sdr_ops.h):
+// production binds the real C symbols under HAVE_RTLSDR; without the macro the
+// ops table is nullptr and start() fails gracefully so the engine falls back to
+// TestSignalSource. Tests install an in-memory fake ops table (test double, not
+// a hardware mock) for deterministic branch coverage.
 #pragma once
 
 #include "source.h"
@@ -12,10 +14,6 @@
 #include <complex>
 #include <vector>
 #include <cstddef>
-
-#ifdef HAVE_RTLSDR
-#include <rtl-sdr.h>
-#endif
 
 namespace mbdsdr {
 namespace dsp {
@@ -59,10 +57,24 @@ public:
     /// "DS=off AGC=off TunerAGC=manual BiasT=off PPM=0.0". Purely diagnostic.
     QString rtlOptionsSummary() const;
 
+    /// Honest telemetry from the last center-frequency push: how many write
+    /// attempts the retry budget consumed, and whether the hardware actually
+    /// read back the requested frequency. A false convergence means the tune
+    /// failed loudly (qWarning) and the request is kept for the next attempt --
+    /// the caller can surface it instead of showing a tuned lie.
+    int  tuneAttemptsLast() const { return tuneAttemptsLast_; }
+    bool lastTuneConverged() const { return tuneConverged_; }
+
 private:
-#ifdef HAVE_RTLSDR
-    rtlsdr_dev_t* dev_ = nullptr;
-#endif
+    /// Push freqHz to the open device with the PLL write-loss defence: up to
+    /// kRtlMaxTuneAttempts writes, each followed by a get_center_freq readback.
+    /// Returns true iff the hardware actually reports the requested frequency;
+    /// on exhaustion it logs a loud warning and returns false (never masked).
+    bool pushCenterFreq(double freqHz);
+
+    // Opaque librtlsdr handle; the RtlLibOps adapters cast it to rtlsdr_dev_t*.
+    // Null whenever no device is open -- in stub builds it stays null forever.
+    void* dev_ = nullptr;
     double f0_ = 98.5e6;
     double fs_ = 2.4e6;
     double gainDb_ = 20.0;
@@ -77,6 +89,8 @@ private:
 
     // Tuning state -- always stored, then (re)applied to the device on start()
     // and pushed live whenever the device is already open.
+    int    tuneAttemptsLast_ = 0;   // attempts consumed by the last push
+    bool   tuneConverged_    = false; // last push read back == requested
     int    directSampling_ = 0;   // 0=off, 1=I, 2=Q
     bool   offsetTuning_   = false;
     bool   rtlAgc_         = false;

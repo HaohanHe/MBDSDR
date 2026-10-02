@@ -61,6 +61,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "tune_frequency";
         s.description = "Tune the receiver to a center frequency in Hz.";
+        s.write = true;   // changes center frequency
         ToolParamSpec p;
         p.name = "freq_hz";
         p.type = "number";
@@ -77,6 +78,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "set_mode";
         s.description = "Set demodulation mode.";
+        s.write = true;   // changes demodulation mode
         ToolParamSpec p;
         p.name = "mode";
         p.type = "string";
@@ -91,6 +93,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "start_recording";
         s.description = "Start recording raw IQ to SigMF file.";
+        s.write = true;   // starts IQ recording
         out.append(s);
     }
 
@@ -99,6 +102,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "stop_recording";
         s.description = "Stop recording.";
+        s.write = true;   // stops IQ recording
         out.append(s);
     }
 
@@ -107,6 +111,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "scan_band";
         s.description = "Scan a frequency band and return the peak signal.";
+        s.write = true;   // sweeps the receiver across a band (mutates freq)
         ToolParamSpec low;
         low.name = "low_hz";
         low.type = "number";
@@ -136,6 +141,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "set_bandwidth";
         s.description = "Set channel filter bandwidth in Hz.";
+        s.write = true;   // changes channel filter bandwidth
         ToolParamSpec p;
         p.name = "bandwidth_hz";
         p.type = "number";

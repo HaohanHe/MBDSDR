@@ -386,6 +386,9 @@ double SpectrumWidget::bandwidthHz() const {
 void SpectrumWidget::setStepHz(double hz) {
     if (canvas_) canvas_->setStepHz(hz);
 }
+void SpectrumWidget::followTunedFrequency(double hz) {
+    if (canvas_) canvas_->followTunedFrequency(hz);
+}
 void SpectrumWidget::setZoomFactor(double z) {
     if (canvas_) canvas_->setZoomFactor(z);
 }

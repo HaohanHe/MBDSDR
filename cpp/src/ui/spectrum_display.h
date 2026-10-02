@@ -112,6 +112,12 @@ public slots:
     void setPeakThresholdDb(float db) { peakThresholdDb_ = db; rescanPeaks(); update(); }
     void tuneAndCenter(double hz);
 
+    // After an external tune (arrow-key nudge / engine LO re-tune) decide whether
+    // the visible canvas must follow the tuned frequency so the VFO does not walk
+    // off-screen: pure followCenterAfterTune() under the hood, only pans the view
+    // when the tuned frequency crossed a 10% viewport margin. No-op otherwise.
+    void followTunedFrequency(double hz);
+
     // Injected, real measured noise floor (dBFS on the trace axis). NaN = do not
     // draw the baseline. The engine slowly tracks this; the integration layer
     // forwards it here. Also feeds the cursor SNR read-out.
