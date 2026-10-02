@@ -82,6 +82,7 @@ class RecordingHandle:
     sample_rate_hz: float = 0.0
     center_freq_hz: float = 0.0
     datetime: str = ""
+    time_source: str = ""        # "gnss" | "system" | ""（旧文件未知）
     n_samples: int = 0
     available: bool = False
     note: str = ""
@@ -113,6 +114,7 @@ class SigMFReplay:
             sample_rate_hz=self._pb.sample_rate,
             center_freq_hz=self._pb.center_freq_hz,
             datetime=self._pb.datetime,
+            time_source=self._pb.time_source,
             n_samples=self._pb.n_samples,
             available=bool(ok),
             note=("已打开真实录制" if ok else "打开失败"),

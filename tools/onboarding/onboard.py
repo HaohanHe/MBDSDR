@@ -333,8 +333,18 @@ def step_record(
     gain_db: float,
     mode: str,
     hw_label: str = "RTL-SDR",
+    gnss_file: Optional[str] = None,
+    clock=None,
 ) -> StepResult:
-    """把 rtl_sdr 的 interleaved uint8 IQ 转成 complex64 SigMF（与 IQPlayback 对齐）。"""
+    """把 rtl_sdr 的 interleaved uint8 IQ 转成 complex64 SigMF（与 IQPlayback 对齐）。
+
+    时空对齐（Q2）：
+      - ``gnss_file`` 给定时，读取该 NMEA 日志文件，用 ZDA/RMC 解出 GNSS UTC，
+        写入 ``captures[0].core:datetime`` 并标 ``mbdsdr:time_source="gnss"``；
+      - 无 gnss_file / 解不出合法日期（如仅 GGA 无 RMC/ZDA）→ 退化为系统 UTC，
+        标 ``mbdsdr:time_source="system"``，绝不冒充 GNSS 授时。
+      - ``clock`` 可注入（callable -> tz-aware UTC datetime），便于确定性测试。
+    """
     r = StepResult(step="record", status="FAIL")
 
     if not os.path.exists(raw_path) or os.path.getsize(raw_path) == 0:
@@ -384,7 +394,27 @@ def step_record(
         return r
 
     # 写 meta（与 cpp/src/dsp/recorder.cpp + playback.py 对齐）
-    now_iso = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+    # Q2 时空对齐：优先 GNSS 授时（--gnss NMEA 日志），无则系统 UTC，均显式标来源。
+    from mbdsdr_ai.gnss_timestamps import nmea_log_to_utc_datetime, resolve_capture_datetime
+    gnss_dt = None
+    if gnss_file:
+        try:
+            with open(gnss_file, "r", encoding="utf-8", errors="replace") as _gf:
+                gnss_dt = nmea_log_to_utc_datetime(_gf.read().splitlines())
+        except OSError as e:
+            r.add_evidence(f"  (GNSS NMEA 文件读取失败，退回系统时间: {e})")
+            gnss_dt = None
+    cap_time = resolve_capture_datetime(gnss_dt, clock=clock)
+    r.add_evidence(f"  core:datetime={cap_time.datetime_iso} "
+                   f"(time_source={cap_time.time_source}; {cap_time.note})")
+    capture_fields = {
+        "core:sample_start": 0,
+        "core:frequency": freq_hz,
+        "core:datetime": cap_time.datetime_iso,
+        "mbdsdr:gain_db": gain_db,
+        "mbdsdr:mode": mode,
+    }
+    capture_fields.update(cap_time.as_capture_fields())
     meta = {
         "global": {
             "core:datatype": "cf32_le",
@@ -397,15 +427,7 @@ def step_record(
             "core:num_samples": n_samples,
             "core:description": f"MBDSDR onboarding capture, mode={mode}, gain={gain_db}dB",
         },
-        "captures": [
-            {
-                "core:sample_start": 0,
-                "core:frequency": freq_hz,
-                "core:datetime": now_iso,
-                "mbdsdr:gain_db": gain_db,
-                "mbdsdr:mode": mode,
-            }
-        ],
+        "captures": [capture_fields],
         "annotations": [],
     }
 
@@ -590,16 +612,21 @@ def step_decode(
             ).astype(np.float32)
             # 调用 APT 解码：decode_apt(audio, sample_rate) → dict
             result = noaa_apt_lite.decode_apt(audio_apt, sample_rate=fs_apt)
-            img = result.get("image") or result.get("lines")
+            # Q3: decode_apt 返回 image_a/image_b（A/B 两通道）；旧代码查 "image"/"lines" 永远 None。
+            img_a = result.get("image_a")
+            img_b = result.get("image_b")
+            n_lines = result.get("lines_aligned", 0)
             r.detail["apt_result_keys"] = list(result.keys())
-            r.detail["apt_image_shape"] = list(img.shape) if img is not None else None
-            r.add_evidence(f"APT 解码: {len(result.get('lines_found', [])) if 'lines_found' in result else '?'} 行, "
-                           f"image shape={img.shape if img is not None else 'None'}")
-            r.status = "PASS" if img is not None and hasattr(img, 'size') and img.size > 0 else "FAIL"
+            r.detail["apt_image_shape"] = (list(img_a.shape) if img_a is not None else None)
+            r.add_evidence(f"APT 解码: {n_lines} 行, "
+                           f"image_a shape={img_a.shape if img_a is not None else 'None'}")
+            r.status = "PASS" if img_a is not None and img_a.size > 0 else "FAIL"
             r.message = "APT 解码完成"
-            if not (img is not None and hasattr(img, 'size') and img.size > 0):
+            if not (img_a is not None and img_a.size > 0):
                 r.add_fix("确认 NOAA 卫星过境时间与仰角；对准天线；延长录制时长")
-            r.detail["_apt_image"] = img  # 留给 output 步存图
+            # 留给 output 步：存 A/B 两通道（output 步做 SatDump 式增强）
+            r.detail["_apt_image_a"] = img_a
+            r.detail["_apt_image_b"] = img_b
 
     except ImportError as e:
         r.message = f"解码器模块导入失败: {e}"
@@ -725,21 +752,36 @@ def step_output(
     except Exception as e:  # noqa: BLE001
         r.add_evidence(f"(频谱图生成失败: {e})")
 
-    # 3) APT 图像特殊处理
-    apt_img = decode_result.detail.get("_apt_image")
-    if apt_img is not None and mode == "apt":
+    # 3) APT 图像特殊处理（Q3: SatDump 式增强：自动色阶 + 对比度 + 伪彩）
+    apt_a = decode_result.detail.get("_apt_image_a")
+    apt_b = decode_result.detail.get("_apt_image_b")
+    if (apt_a is not None or apt_b is not None) and mode == "apt":
         try:
             from PIL import Image
-            apt_png = os.path.join(
-                out_dir,
-                f"apt_image__{data_origin}__{mode}__N{n_samples_out}__"
-                f"{dt.datetime.now(dt.timezone.utc).strftime('%Y%m%d')}.png"
-            )
-            Image.fromarray((apt_img / apt_img.max() * 255).astype(np.uint8)).save(apt_png)
-            artifacts.append(apt_png)
-            r.add_evidence(f"APT 云图: {apt_png}")
-        except ImportError:
-            r.add_evidence("(PIL 不可用，跳过 APT 图像保存)")
+            from mbdsdr_ai import image_enhance as IE
+            stamp_day = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%d')
+
+            # 增强 A 通道（灰度输出）
+            if apt_a is not None and apt_a.size > 0:
+                enh_a = IE.enhance_apt(apt_a, auto_level=True, contrast=0.15, lut="gray")
+                apt_png_a = os.path.join(
+                    out_dir,
+                    f"apt_enhanced_A__{data_origin}__N{n_samples_out}__{stamp_day}.png")
+                IE.save_enhanced_png(enh_a, apt_png_a)
+                artifacts.append(apt_png_a)
+                r.add_evidence(f"APT 云图 A 通道(增强): {apt_png_a}")
+
+            # 增强 B 通道（伪彩色 iron 输出）
+            if apt_b is not None and apt_b.size > 0:
+                enh_b = IE.enhance_apt(apt_b, auto_level=True, contrast=0.15, lut="iron")
+                apt_png_b = os.path.join(
+                    out_dir,
+                    f"apt_enhanced_B_iron__{data_origin}__N{n_samples_out}__{stamp_day}.png")
+                IE.save_enhanced_png(enh_b, apt_png_b)
+                artifacts.append(apt_png_b)
+                r.add_evidence(f"APT 云图 B 通道(iron伪彩): {apt_png_b}")
+        except ImportError as e:
+            r.add_evidence(f"(图像增强/PIL 不可用，跳过 APT 图像保存: {e})")
 
     # 4) manifest.json（与 experiments/common/manifest.py 同口径）
     manifest_path = os.path.join(out_dir, f"{stamp}_manifest.json")
@@ -847,6 +889,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="产物输出目录（默认 paper/experiments/onboarding_<mode>_<timestamp>）")
     ap.add_argument("--raw-path", default="",
                     help="capture 步 raw IQ 文件路径（默认临时文件）")
+    ap.add_argument("--gnss", default="",
+                    help="可选：录制同期的 NMEA 日志文件路径（GGA/RMC/ZDA）；"
+                         "存在合法 RMC/ZDA 时把 GNSS UTC 写入 SigMF core:datetime 并标 time_source=gnss，"
+                         "否则退回系统时间并标 system")
     ap.add_argument("--sigmf-data", default="",
                     help="decode/output 步直接指定 SigMF data 文件（跳过 capture/record）")
     ap.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
@@ -938,6 +984,7 @@ def main(argv: list[str] | None = None) -> int:
                         sample_rate_hz=args.sr,
                         gain_db=args.gain,
                         mode=mode,
+                        gnss_file=(args.gnss or None),
                     )
                     results.append(rec)
                     sigmf_data_path = rec.detail.get("sigmf_data", "")

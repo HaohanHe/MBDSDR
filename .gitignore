@@ -58,10 +58,12 @@ fp-info-cache/
 
 # 论文不公开
 paper/
-
-# 论文不公开
-paper/
 MBDSDR-IEEE论文初稿*.md
+
+# 例外：phase7 受控论文初稿目录（docs/learn/phase7/paper/）纳入版本控制；
+# 仓库根 paper/ 仍整体忽略（早期草稿/实验产物不落库）。
+!docs/learn/phase7/paper/
+!docs/learn/phase7/paper/**
 
 # 环境变量与密钥
 .env

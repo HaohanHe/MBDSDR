@@ -232,6 +232,58 @@ void main() {
     });
   });
 
+  group('get_status 字段对齐：五态压不压平', () {
+    // 与桌面端 sourceTelemetry(connected) + sourceDropped/sourceError/
+    // reconnectRequested 的多信号披露对齐：connected 是就绪布尔，status 保留
+    // 完整状态机名，error_message 携带真实原因。新增字段只增不改旧契约。
+    Future<Map<String, dynamic>> callGetStatus(ConnectionStatus status,
+        {String? errorMessage}) async {
+      final radio = RecordingRadio(status: status)..errorMessage = errorMessage;
+      final tools = buildRadioTools(radio);
+      final t = tools.firstWhere((e) => e.name == 'get_status');
+      return jsonDecode(await t.execute(<String, dynamic>{}))
+          as Map<String, dynamic>;
+    }
+
+    test('connected：就绪布尔 true 且 status=connected', () async {
+      final r = await callGetStatus(ConnectionStatus.connected);
+      expect(r['ok'], isTrue);
+      expect(r['connected'], isTrue);
+      expect(r['status'], 'connected');
+    });
+
+    test('reconnecting：就绪布尔 false，但 status 明确为 reconnecting（不是 idle）',
+        () async {
+      final r = await callGetStatus(ConnectionStatus.reconnecting,
+          errorMessage: '传输中断；2s 后第 1 次自动重连');
+      expect(r['connected'], isFalse);
+      expect(r['status'], 'reconnecting');
+      expect(r['error_message'], contains('自动重连'));
+    });
+
+    test('disconnected：就绪布尔 false，status=disconnected', () async {
+      final r = await callGetStatus(ConnectionStatus.disconnected);
+      expect(r['connected'], isFalse);
+      expect(r['status'], 'disconnected');
+    });
+
+    test('error：就绪布尔 false，status=error 且带 error_message', () async {
+      final r = await callGetStatus(ConnectionStatus.error,
+          errorMessage: '连接失败: Connection refused');
+      expect(r['connected'], isFalse);
+      expect(r['status'], 'error');
+      expect(r['error_message'], contains('Connection refused'));
+    });
+
+    test('旧字段不回退：frequency/mode/gain/sample_rate 仍在', () async {
+      final r = await callGetStatus(ConnectionStatus.connected);
+      expect(r['frequency_hz'], 100000000);
+      expect(r['mode'], 'nfm');
+      expect(r['auto_gain'], isTrue);
+      expect(r['sample_rate_hz'], 2.048e6);
+    });
+  });
+
   group('工具总数审计：注册数 = Schema 数，漏注册即失败', () {
     test('buildRadioTools 恰好登记 6 个工具且名字齐全', () {
       final radio = RecordingRadio();
