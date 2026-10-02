@@ -68,6 +68,12 @@ public:
     // Harness/screenshot: rescan the recording library from engine_->recordingDir().
     void refreshRecordingLibrary() { refreshRecLib(); }
 
+    // Offscreen shortcut-wiring harness accessors (read-only mirrors of the live
+    // controls). The rewritten shortcuts test sends real QKeyEvents and asserts
+    // these moved, instead of the previous QVERIFY(true) stub.
+    int harnessStepIndex() const;
+    int harnessGainDb()   const;
+
     // ---- Device-info / dynamic sample-rate combo harness accessors ---------
     // Read-only; no radio is touched. Lets offscreen tests + the screenshot
     // harness assert the real readback panel and the device-derived combo.

@@ -1,7 +1,7 @@
 ---
 title: "MBDSDR: An AI-Defined Software-Defined Radio Stack with Deterministic, Reproducible Experimentation"
 venue: "IEEE Wireless Communications Letters (WCL) — submission draft"
-status: DRAFT v0.2 (2026-10-02)
+status: DRAFT v0.3 (2026-10-02, post system self-review; see CHANGES.md)
 authors: "Bi4MIB (open-source, call for co-authors)"
 ---
 
@@ -28,7 +28,7 @@ callable tool. This letter focuses on the **reproducible experimental backbone**
 a fixed-seed Monte-Carlo runner with Wilson-score 95% confidence intervals, an
 Eb/N0↔in-band-SNR calibration convention, and per-run manifests locking script,
 seed, data-origin, parameters, sample count, git SHA and UTC timestamp. We report
-ten synthetic experiments (≈11 800 trials) covering decode success vs. Eb/N0,
+ten synthetic experiments (≈10 400 trials; sum of per-experiment *N* in the Appendix) covering decode success vs. Eb/N0,
 vs. sample rate, and vs. receiver bandwidth; the measured benefit of Doppler
 compensation; automatic modulation recognition (AMR) against a rule-based
 baseline; single-station Doppler orbit determination; and the local deterministic
@@ -152,12 +152,13 @@ takeaway is to choose the lowest fs that satisfies Nyquist, with no energy penal
 
 | fs (kS/s) | sps | In-band SNR (dB) | Success | Wilson 95% CI |
 |---|---|---|---|---|
-| 10 | 1 | 6.00 | 0.595 | [0.526, 0.660] |
+| 10 | 1 | 6.00 | 0.595 | [0.526, 0.661] |
+| 20 | 2 | 2.99 | 0.605 | [0.536, 0.670] |
 | 50 | 5 | −0.99 | 0.610 | [0.541, 0.675] |
 | 100 | 10 | −4.00 | 0.615 | [0.546, 0.680] |
-| 200 | 20 | −7.01 | 0.630 | [0.561, 0.695] |
-| 500 | 50 | −10.99 | 0.705 | [0.638, 0.765] |
-| 1000 | 100 | −14.00 | 0.660 | [0.591, 0.723] |
+| 200 | 20 | −7.01 | 0.630 | [0.561, 0.694] |
+| 500 | 50 | −10.99 | 0.705 | [0.638, 0.764] |
+| 1000 | 100 | −14.00 | 0.660 | [0.592, 0.722] |
 
 ### C. Decode success vs. receiver bandwidth (Fig. 3, N=900)
 
@@ -187,14 +188,25 @@ baseline. This is the ideal (known-fd) upper bound on the compensation loop.
 | 15 | 0.000 | 0.970 |
 | ≥25 | 0.000 | 0.955–0.975 |
 
+> **Provenance note (self-review, 2026-10-02).** The canonical figure for this run is
+> `doppler_comp_success__synthetic__N3600__20261002.png` (200 trials/cell), and the
+> Tab. IV values above are those of that run. After the figure was produced, the
+> on-disk `doppler_comp_success.csv` (and its `manifest_doppler_comp.json`) were
+> overwritten by a non-canonical smoke run (`seed=7`, N=360/cell) whose numbers
+> differ from the table. **Do not cite Tab. IV until `exp_doppler_comp.py` is
+> re-run at the master seed to regenerate the N=3600 CSV/manifest.** The qualitative
+> finding (≈10 Hz residual collapses uncompensated decoding; known-*f*d
+> restoration) is unchanged across both runs.
+
 ### E. Automatic modulation recognition (Figs. 5–7, N=600 / N=300 / N=640)
 
 On a fixed-seed synthetic dataset of FSK/PSK/NOISE, a hand-tuned rule classifier
 (instantaneous-frequency standard-deviation thresholds) is compared against the
 real KNN-AMR (25 features, k=5) on the **same samples**. At low in-band SNR the
 rule baseline is weak (0.33 at 0 dB, 0.67 at 10 dB) while KNN-AMR is 0.54 and
-0.96; both saturate by 15–20 dB (Tab. V). The 8-class confusion matrix at SNR=10 dB
-(Fig. 7) has diagonal accuracy 0.9938 [0.984, 0.998]; the only residual confusion
+0.96; both saturate by 15–20 dB (Tab. V). Separately, the full 8-class KNN evaluation (`exp_amr.py`;
+AM/FM/CW/FSK/PSK/QAM/OFDM/NOISE, N=640) gives a confusion matrix at SNR=10 dB
+(Fig. 7) with diagonal accuracy 0.9938 [0.984, 0.998]; the only residual confusion
 is FSK→QAM (4/80). The online-LLM classification column (Fig. 6) is
 `PENDING_ONLINE_RUN`: classic/KNN are computed locally, the LLM cell is left
 empty rather than fabricated.
@@ -215,9 +227,9 @@ Using a fixed public ISS TLE propagated through SGP4, we add fixed-seed Gaussian
 noise to the Doppler-rates observed from a single Changchun station and run an EKF
 and a reference-epoch RLS. At Doppler-noise σ=1 Hz the RLS reference-epoch error
 floor is ≈1.1 km; error degrades as σ grows. Sweeping the observation window
-around peak elevation (Fig. 9) shows the expected single-station observability
-limit: short windows (60 s) give ≈5.8 km, and only a near-full-pass window
-(600 s) drops to ≈4.0 km.
+around peak elevation at σ=10 Hz (Fig. 9) shows the expected single-station
+observability limit: short windows (60 s) give ≈5.8 km, and only a near-full-pass
+window (600 s) drops to ≈4.0 km.
 
 ### G. Agent tool-call pipeline (Fig. 10, N=400)
 
@@ -269,13 +281,18 @@ decision* metrics (whether the model picks the right tool and fills args) are
 
 ## V. Related Work
 
-GNU Radio / SDR++ / SatDump provide powerful fixed-function SDR software but
-require manual expert configuration. GR-MCP exposes GNU Radio blocks to an LLM but
-does not measure the radio itself. O-RAN/6G xApp work uses AI for resource
-allocation, not open SDR experimentation. This work differs by (a) treating every
-radio operation as a versioned, schema'd tool, and (b) shipping a fixed-seed,
-CI-runnable measurement library that reports CIs, data-origin, and manifests so
-that "AI runs the radio" claims are auditable.
+GNU Radio, SDR++, and SatDump provide powerful fixed-function SDR software but
+require manual expert configuration. Several recent community prototypes expose
+GNU Radio blocks to LLMs via tool-calling / Model-Context-Protocol (MCP)
+interfaces, but they target interactive control rather than a measurement
+backbone; specific projects in this space must be verified and cited before
+submission — **no formal bibliography is attached in this draft**, and no named
+prior system is asserted here that we cannot confirm. O-RAN / 6G xApp work applies
+AI to radio-resource allocation, not to open, reproducible SDR experimentation.
+This work differs by (a) treating every radio operation as a versioned,
+schema'd tool, and (b) shipping a fixed-seed, CI-runnable measurement library
+that reports CIs, data-origin, and manifests so that "AI runs the radio" claims
+are auditable.
 
 ---
 
@@ -283,7 +300,7 @@ that "AI runs the radio" claims are auditable.
 
 MBDSDR couples a C++/Flutter/Python radio stack with a function-calling tool layer
 and a reproducible, honestly-labeled synthetic experiment backbone. Ten fixed-seed
-experiments (≈11.8k trials) quantify decode success across Eb/N0, sample rate, and
+experiments (≈10.4k trials) quantify decode success across Eb/N0, sample rate, and
 bandwidth; show that known-Doppler compensation restores decoding that otherwise
 collapses at ≈10 Hz residual offset; show KNN-AMR beating hand rules at low SNR;
 and measure the local tool pipeline's closed-failure reliability. The online-LLM

@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/app/ai_tools.dart';
 import 'package:mbdsdr_mobile/astro/tle.dart';
 import 'package:mbdsdr_mobile/models/radio_state.dart';
+import 'package:mbdsdr_mobile/models/recording.dart';
 import 'package:mbdsdr_mobile/models/satellite.dart';
 import 'package:mbdsdr_mobile/services/radio_controller.dart';
 import 'package:mbdsdr_mobile/services/sat_passes_provider.dart';
@@ -25,6 +26,12 @@ class RecordingRadio implements RadioApi {
   int setGainCalls = 0;
   int setAutoGainCalls = 0;
   int setSampleRateCalls = 0;
+  int startRecordingCalls = 0;
+  int stopRecordingCalls = 0;
+
+  /// 可翻转的录制态（默认未在录）。
+  @override
+  bool recording = false;
 
   @override
   ConnectionStatus status;
@@ -84,6 +91,27 @@ class RecordingRadio implements RadioApi {
   }
 
   @override
+  Future<void> startRecording() async {
+    startRecordingCalls++;
+    recording = true;
+  }
+
+  @override
+  Future<RecordingMeta?> stopRecording() async {
+    stopRecordingCalls++;
+    final was = recording;
+    recording = false;
+    if (!was) return null;
+    return RecordingMeta(
+      startedAtEpochMs: 1,
+      frequencyHz: freqHz,
+      mode: mode.name,
+      wavFileName: 'rec_test.wav',
+      durationMs: 1234,
+    );
+  }
+
+  @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw UnimplementedError('${invocation.memberName} 本测试不需要');
 }
@@ -111,8 +139,10 @@ void main() {
       final g = await call('set_gain', <String, dynamic>{'gain_db': 20.0});
       final s =
           await call('set_sample_rate', <String, dynamic>{'sample_rate_hz': 2.048e6});
+      // start_recording 同样要过连接 gate（未连接不得假装开始录）。
+      final r = await call('start_recording', <String, dynamic>{});
 
-      for (final r in [f, m, g, s]) {
+      for (final r in [f, m, g, s, r]) {
         expect(r['ok'], isFalse, reason: '断开时不得回 ok:true');
         expect(r['error'], contains('接收机未连接'), reason: '诚实报错');
       }
@@ -120,6 +150,7 @@ void main() {
       expect(radio.setModeCalls, 0);
       expect(radio.setGainCalls, 0);
       expect(radio.setSampleRateCalls, 0);
+      expect(radio.startRecordingCalls, 0);
     });
 
     test('reconnecting 同样视为未连接（不假装成功）', () async {
@@ -285,21 +316,85 @@ void main() {
   });
 
   group('工具总数审计：注册数 = Schema 数，漏注册即失败', () {
-    test('buildRadioTools 恰好登记 6 个工具且名字齐全', () {
+    test('buildRadioTools 恰好登记 8 个工具且名字齐全', () {
       final radio = RecordingRadio();
       final tools = buildRadioTools(radio);
-      expect(tools.length, 6,
+      expect(tools.length, 8,
           reason: 'set_frequency/set_mode/set_gain/set_sample_rate/'
-              'get_status/predict_passes 共 6 个；新增工具须同步更新本断言');
+              'start_recording/stop_recording/get_status/predict_passes 共 8 个；'
+              '新增工具须同步更新本断言');
       final names = tools.map((t) => t.name).toSet();
       expect(names, <String>{
         'set_frequency',
         'set_mode',
         'set_gain',
         'set_sample_rate',
+        'start_recording',
+        'stop_recording',
         'get_status',
         'predict_passes',
       });
+    });
+  });
+
+  group('录音工具 start/stop_recording（对齐桌面 C++ 同名工具）', () {
+    Future<Map<String, dynamic>> call(
+        RecordingRadio radio, String name, Map<String, dynamic> args) async {
+      final tools = buildRadioTools(radio);
+      final t = tools.firstWhere((e) => e.name == name);
+      return jsonDecode(await t.execute(args)) as Map<String, dynamic>;
+    }
+
+    test('connected 未在录：start_recording 真正下发并置 recording=true', () async {
+      final radio = RecordingRadio(status: ConnectionStatus.connected);
+      final r = await call(radio, 'start_recording', <String, dynamic>{});
+      expect(r['ok'], isTrue);
+      expect(r['recording'], isTrue);
+      expect(r['frequency_hz'], 100000000);
+      expect(radio.startRecordingCalls, 1);
+      expect(radio.recording, isTrue);
+    });
+
+    test('已在录：start_recording 不重复开文件，回 already_recording', () async {
+      final radio = RecordingRadio(status: ConnectionStatus.connected)
+        ..recording = true;
+      final r = await call(radio, 'start_recording', <String, dynamic>{});
+      expect(r['ok'], isTrue);
+      expect(r['already_recording'], isTrue);
+      expect(radio.startRecordingCalls, 0, reason: '不重复调用底层');
+    });
+
+    test('未在录：stop_recording 诚实回"当前未在录制"，不造文件', () async {
+      final radio = RecordingRadio(status: ConnectionStatus.connected)
+        ..recording = false;
+      final r = await call(radio, 'stop_recording', <String, dynamic>{});
+      expect(r['ok'], isTrue);
+      expect(r['recording'], isFalse);
+      expect(r['message'], contains('未在录制'));
+      expect(radio.stopRecordingCalls, 1);
+    });
+
+    test('在录：stop_recording 落盘并回 meta 字段（wav/时长）', () async {
+      final radio = RecordingRadio(status: ConnectionStatus.connected)
+        ..recording = true;
+      final r = await call(radio, 'stop_recording', <String, dynamic>{});
+      expect(r['ok'], isTrue);
+      expect(r['recording'], isFalse);
+      expect(r['wav_file'], 'rec_test.wav');
+      expect(r['duration_ms'], 1234);
+      expect(radio.recording, isFalse);
+    });
+
+    test('手动模式：start/stop_recording 同被 gate（与桌面 writeTools 一致）',
+        () async {
+      final radio = RecordingRadio(status: ConnectionStatus.connected);
+      final tools = buildRadioTools(radio, manualMode: true);
+      final t = tools.firstWhere((e) => e.name == 'start_recording');
+      final r = jsonDecode(
+          await t.execute(<String, dynamic>{})) as Map<String, dynamic>;
+      expect(r['ok'], isFalse);
+      expect(r['gated'], isTrue);
+      expect(radio.startRecordingCalls, 0, reason: '手动模式不真正下发');
     });
   });
 }

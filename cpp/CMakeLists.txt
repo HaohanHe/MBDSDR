@@ -1164,3 +1164,16 @@ add_executable(test_ai_real_link tests/test_ai_real_link.cpp
 target_include_directories(test_ai_real_link PRIVATE src)
 target_link_libraries(test_ai_real_link PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
 add_test(NAME ai_real_link COMMAND test_ai_real_link)
+
+# ---- P3 desktop polish (phase8): appended, existing registrations untouched ----
+# Pure shortcut-catalog + tuning arithmetic (header-only, no QApplication).
+add_executable(test_shortcut_catalog tests/test_shortcut_catalog.cpp)
+target_include_directories(test_shortcut_catalog PRIVATE src)
+target_link_libraries(test_shortcut_catalog PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME shortcut_catalog COMMAND test_shortcut_catalog)
+
+# Pure status-strip formatting (header-only formatters).
+add_executable(test_status_format tests/test_status_format.cpp)
+target_include_directories(test_status_format PRIVATE src)
+target_link_libraries(test_status_format PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME status_format COMMAND test_status_format)

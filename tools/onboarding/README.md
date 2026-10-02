@@ -61,6 +61,21 @@ JSON 时以退出码 2 报明确错误，绝不崩。
 - 字段逐项说明与完整输出示例：见 `docs/learn/phase6/P2-hw-report-format.md`
 - 解析器测试：`python3 -m pytest tools/onboarding/test_parse_hw_report.py -v`
 
+## 录制产物回填为论文图（recorded 口径）
+
+`onboard` 的 `record` 步写出标准 SigMF（`.sigmf-data` + `.sigmf-meta`）、`decode` 步写出
+`*_messages.json`。拿到这个产物目录后，把它交给回填脚本即可出 recorded 口径图/CSV/manifest：
+
+```bash
+python3 experiments/exp_ota_run.py --recordings-dir paper/experiments/onboarding_<mode>_<时间戳>/
+```
+
+- `parse_hw_report.py` 只解析 **JSON 日志**（告诉你产物目录在哪、设备是否正常）；
+  `exp_ota_run.py` 才**真读目录里的 IQ 波形**重算指标。
+- 产出：解码成功率 vs 估算 Eb/N0（Wilson CI）、AMR 预测、多普勒观测数；SNR 未标定、
+  需真机校准；无录制时诚实空态 N=0、退出码 0。
+- 完整三步说明见 `docs/learn/phase8/P1-ota-backfill.md`。
+
 ### 解析输出示例（真跑）
 
 贴回一段**混了人类对话、含两段 JSON（selfcheck + onboard）**的聊天文本后，解析器
