@@ -573,7 +573,7 @@ add_test(NAME channelizer COMMAND test_channelizer)
 
 add_executable(test_chain tests/test_chain.cpp
     src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
-    src/dsp/demod.cpp src/dsp/fft.cpp)
+    src/dsp/demod.cpp src/dsp/agc.cpp src/dsp/fft.cpp)
 target_include_directories(test_chain PRIVATE src)
 target_link_libraries(test_chain PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME chain COMMAND test_chain)
@@ -629,7 +629,7 @@ add_test(NAME recorder COMMAND test_recorder)
 # Multi-VFO fan-out: two synthesized carriers decoded independently.
 add_executable(test_multi_vfo tests/test_multi_vfo.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
-    src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/rds_decoder.cpp)
+    src/dsp/demod.cpp src/dsp/agc.cpp src/dsp/wfm_stereo.cpp src/dsp/rds_decoder.cpp)
 target_include_directories(test_multi_vfo PRIVATE src)
 target_link_libraries(test_multi_vfo PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME multi_vfo COMMAND test_multi_vfo)
@@ -722,7 +722,7 @@ add_test(NAME gain_control_model COMMAND test_gain_control_model)
 # SELECTED channel's audio, exactly one marker selected, switching flips both.
 add_executable(test_vfo_audible tests/test_vfo_audible.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
-    src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/rds_decoder.cpp)
+    src/dsp/demod.cpp src/dsp/agc.cpp src/dsp/wfm_stereo.cpp src/dsp/rds_decoder.cpp)
 target_include_directories(test_vfo_audible PRIVATE src)
 target_link_libraries(test_vfo_audible PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME vfo_audible COMMAND test_vfo_audible)
@@ -1217,6 +1217,16 @@ target_include_directories(test_spectrum_tune PRIVATE src)
 target_link_libraries(test_spectrum_tune PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME spectrum_tune COMMAND test_spectrum_tune)
 
+# ---- Phase12 waterfall render (clean-room SDR++ mechanism, header-only) ------
+# doZoom block-max decimation, 256-entry LUT build, dB->LUT range re-map,
+# external colormap JSON parse (valid/invalid/fallback), and nice frequency
+# ticks that follow zoom/pan. No QApplication: pure arithmetic, unit-tested
+# directly; spectrum_display.cpp delegates to them.
+add_executable(test_spectrum_render tests/test_spectrum_render.cpp)
+target_include_directories(test_spectrum_render PRIVATE src)
+target_link_libraries(test_spectrum_render PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME spectrum_render COMMAND test_spectrum_render)
+
 # ---- phase12 Wave2: RTL-SDR device-layer robustness (gap-analysis L3 + L4) ---
 # L3: tune retry + get_center_freq readback (clean-room re-derivation of the
 #     SDR++ RTL2832 PLL write-loss defence, main.cpp:344-359).
@@ -1241,3 +1251,26 @@ add_executable(test_rational_resampler tests/test_rational_resampler.cpp
 target_include_directories(test_rational_resampler PRIVATE src)
 target_link_libraries(test_rational_resampler PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME rational_resampler COMMAND test_rational_resampler)
+
+# ---- phase12 Wave1-C: demodulator gap-closing (L9/L10/L13) ------------------
+# L9  in-chain AM carrier AGC (ComplexCarrierAgc, on complex IQ before |·|).
+# L10 NFM bandwidth-matched Nuttall FIR (cutoff=bw/2, trans=0.1*bw, hot
+#     re-design on setBandwidth).
+# L13 real 2-FSK receiver: quadrature discriminator -> baseband Nuttall LPF ->
+#     Mueller-Muller strobe + sign decision. All deterministic synthetic signals.
+add_executable(test_demod_enhance tests/test_demod_enhance.cpp
+    src/dsp/demod.cpp src/dsp/agc.cpp src/dsp/fsk_demod.cpp)
+target_include_directories(test_demod_enhance PRIVATE src)
+target_link_libraries(test_demod_enhance PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME demod_enhance COMMAND test_demod_enhance)
+
+# ---- phase13: RxVFO bandwidth short-circuit + transition-band parameterization
+# Clean-room mapping of SDR++ rx_vfo.h (GPLv3, mechanism only):
+#   filterNeeded = (bandwidth != outRate); transition width = 0.1*(bw/2).
+# Pure decision (planChannelFilter), Channelizer whole-band passthrough fast
+# path, and NCO retune phase continuity. Links channelizer only (no FFT).
+add_executable(test_bandwidth_shortcut tests/test_bandwidth_shortcut.cpp
+    src/dsp/channelizer.cpp)
+target_include_directories(test_bandwidth_shortcut PRIVATE src)
+target_link_libraries(test_bandwidth_shortcut PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME bandwidth_shortcut COMMAND test_bandwidth_shortcut)

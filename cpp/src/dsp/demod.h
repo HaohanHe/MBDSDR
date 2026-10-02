@@ -9,6 +9,8 @@
 #include <vector>
 #include <QString>
 
+#include "agc.h"
+
 namespace mbdsdr {
 namespace dsp {
 
@@ -34,6 +36,24 @@ private:
     int numTaps_;
 };
 
+// ---- Nuttall-windowed-sinc lowpass, designed from Hz (clean-room) ----------
+// Mirrors SDR++ taps::lowPass(cutoff, transWidth, sr) with a Nuttall window:
+// tap count ~= ceil(3.8 * sr / transWidth), windowed-sinc impulse, DC-gain
+// normalized. Owns its own tail delay line so blocks stream continuously and
+// can be re-designed on the fly when the channel bandwidth changes.
+class NuttallLpf {
+public:
+    NuttallLpf() = default;
+    void design(double cutoffHz, double transWidthHz, double sampleRateHz);
+    void reset() { delay_.assign(taps_.size(), 0.0f); }
+    void process(const std::vector<float>& in, std::vector<float>& out);
+    bool empty() const { return taps_.empty(); }
+    int numTaps() const { return static_cast<int>(taps_.size()); }
+private:
+    std::vector<float> taps_;
+    std::vector<float> delay_;
+};
+
 // ---- AM: envelope detection ----
 class DemodAM : public IDemod {
 public:
@@ -43,13 +63,17 @@ public:
     QString name() const override { return QStringLiteral("AM"); }
     double outputSampleRate() const override { return ifSr_; }
     void setBandwidth(double hz) override;
+    // In-chain carrier AGC (on complex IQ BEFORE |·| envelope). On by default.
+    void setCarrierAgcEnabled(bool on) { carrierAgc_.setEnabled(on); }
+    bool carrierAgcEnabled() const { return carrierAgc_.enabled(); }
 private:
     double ifSr_, bw_;
     float dcPrev_ = 0;
     FirLowpass lpf_;
+    ComplexCarrierAgc carrierAgc_;
 };
 
-// ---- NFM: quadrature discriminator + de-emphasis ----
+// ---- NFM: quadrature discriminator + bandwidth-matched FIR + de-emphasis ----
 class DemodNFM : public IDemod {
 public:
     explicit DemodNFM(double ifSampleRate = 48000.0, double bandwidth = 12500.0);
@@ -57,12 +81,18 @@ public:
     void reset() override;
     QString name() const override { return QStringLiteral("NFM"); }
     double outputSampleRate() const override { return ifSr_; }
+    void setBandwidth(double hz) override;
 private:
+    void redesignLpf();
     double ifSr_, bw_;
     float gain_;
     float deAlpha_;
     float deState_ = 0;
     std::complex<float> prev_ = {1,0};
+    NuttallLpf discLpf_;
+    bool firEnabled_ = false;  // Nuttall LPF correct in isolation (unit-tested);
+                              // block-streaming interaction w/ channelizer needs
+                              // investigation before enabling in live chain.
 };
 
 // ---- WFM: discriminator, wide deviation, de-emphasis ----

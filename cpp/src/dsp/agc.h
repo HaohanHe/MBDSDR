@@ -2,6 +2,7 @@
 // Envelope-follower AGC.
 #pragma once
 
+#include <complex>
 #include <vector>
 
 namespace mbdsdr {
@@ -44,6 +45,36 @@ private:
     double blockDurMs_;
     double attackTauMs_ = DefaultAttackMs;
     double decayTauMs_  = DefaultDecayMs;
+};
+
+// ---- Complex carrier AGC (clean-room, mirrors SDR++ am.h:34-35,103-106) ----
+// Runs on the COMPLEX IQ stream BEFORE envelope detection. Tracks the input
+// modulus |x| with independent attack/decay one-poles and scales x so the
+// average envelope settles to setPoint. Pure sample-by-sample state machine ->
+// fully deterministic / unit-testable. Off by default; enable inside DemodAM.
+class ComplexCarrierAgc {
+public:
+    static constexpr float DefaultSetPoint = 1.0f;
+    static constexpr double DefaultAttackMs = 2.0;
+    static constexpr double DefaultDecayMs  = 100.0;
+    static constexpr float DefaultMaxGain   = 10000.0f;
+
+    explicit ComplexCarrierAgc(double sampleRateHz = 48000.0,
+                               float setPoint = DefaultSetPoint,
+                               double attackMs = DefaultAttackMs,
+                               double decayMs = DefaultDecayMs,
+                               float maxGain = DefaultMaxGain);
+    void reset();
+    void setEnabled(bool on) { enabled_ = on; }
+    bool enabled() const { return enabled_; }
+    std::complex<float> processOne(std::complex<float> x);
+    std::vector<std::complex<float>> process(const std::vector<std::complex<float>>& in);
+    float currentEnvelope() const { return env_; }
+    float currentGain() const { return gain_; }
+private:
+    float setPoint_, attackAlpha_, decayAlpha_, maxGain_;
+    float env_ = 0.0f, gain_ = 1.0f;
+    bool  enabled_ = true;
 };
 
 } // namespace dsp

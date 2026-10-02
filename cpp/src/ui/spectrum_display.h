@@ -34,6 +34,7 @@
 #include "core/spectrum_frame.h"
 #include "dsp/peak_detector.h"
 #include "dsp/vfo_manager.h"
+#include "ui/spectrum_render.h"   // pure waterfall arithmetic (decimate/lut/ticks/json)
 
 namespace mbdsdr {
 namespace ui {
@@ -106,6 +107,15 @@ public slots:
     // Waterfall controls.
     void setScrollSpeed(int linesPerFrame);   // push a row every N frames (1/2/4)
     void setPalette(int p);                   // 0 classic, 1 monochrome, 2 viridis
+
+    // External user colormap (clean-room SDR++ colormaps). Parses a JSON document
+    // of {"name":..,"stops":["#rrggbb",..]} or [{"t":..,"c":"#rrggbb"},..]; on
+    // success it becomes the active ramp and the ENTIRE waterfall history is
+    // re-coloured from the stored raw-dB rows (no frame is dropped). On any
+    // malformed input it returns false and the current ramp is left untouched
+    // (honest fallback). loadColormapFromFile() reads a .json from disk first.
+    bool loadColormapFromJson(const QByteArray& json);
+    bool loadColormapFromFile(const QString& absPath);
 
     // Peak handling driven by the container's matured peak table.
     void setHighlightedPeak(int row);         // row index into the matured list
@@ -320,8 +330,15 @@ private:
     QVector<FixedMarker> fixedMarkers_;
 
     // ---- Waterfall ring buffer -------------------------------------------
+    // The ring stores RAW dB rows (the SDR++ "source of truth"), not baked
+    // pixels: swapping the palette or dragging the dB range then re-colours every
+    // historical row from these numbers without re-running the FFT or dropping a
+    // frame. history_ is a derived, bin-resolution colour snapshot rebuilt from
+    // this ring by materialiseHistory().
     QImage history_;                 // public snapshot: width=bins, row 0 = newest
-    std::vector<QImage> ringRows_;   // depth single-pixel-tall strips
+    std::vector<std::vector<float>> ringDb_;   // depth raw-dB rows (length = bins_)
+    QImage fallsPeak_;               // display-res, peak-held downscale cache
+    std::vector<float> decScratch_;  // reused decimation output row
     int  ringDepth_ = 0;             // history depth (rows)
     int  ringHead_ = 0;              // next physical slot to overwrite
     int  ringCount_ = 0;             // rows written so far (capped at depth)
@@ -330,6 +347,9 @@ private:
     int  everyNthFrame_ = 1;         // push one row every N frames
     int  frameMod_ = 0;
     int  paletteIndex_ = 0;
+    // User-supplied external ramp (overrides the built-in three when set).
+    std::vector<ColorStop> customStops_;
+    bool hasCustomStops_ = false;
     double frameF0Hz_ = 0.0;         // centre frequency of the last frame
     double frameFsHz_ = 0.0;         // sample rate of the last frame
 };
