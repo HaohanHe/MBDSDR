@@ -2482,6 +2482,10 @@ MainWindow::MainWindow(QWidget* parent)
         freqSpin_->blockSignals(true);
         freqSpin_->setValue(f / 1e6);
         freqSpin_->blockSignals(false);
+        // Keyboard tuning can walk the VFO far from the (possibly zoomed/panned)
+        // view: pan the canvas to follow it so it does not leave the screen
+        // (pure followCenterAfterTune, 10% viewport margin; no-op if already on).
+        if (spectrum_) spectrum_->followTunedFrequency(f);
     };
     new QShortcut(QKeySequence(Qt::Key_Right), this, this, [this, retuneNudge]() {
         retuneNudge(currentStepHz_);

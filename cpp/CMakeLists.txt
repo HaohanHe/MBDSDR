@@ -1165,6 +1165,28 @@ target_include_directories(test_ai_real_link PRIVATE src)
 target_link_libraries(test_ai_real_link PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
 add_test(NAME ai_real_link COMMAND test_ai_real_link)
 
+# ---- L5: C++ tool-registry completeness / consistency audit (offline) -------
+# Introspects BOTH the declarative schema table (tool_schema.cpp) and the
+# self-registered dispatch table (agent_tools.cpp) and asserts they agree, pins
+# the 6-write/2-read split, and checks the unknown-tool honest path. Uses the
+# offline TestSignalSource engine; no network / no API key / no hardware.
+add_executable(test_tool_registry tests/test_tool_registry.cpp
+    src/ai/sat_task_planner.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp
+    src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
+    src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
+    src/dsp/tle_client.cpp src/dsp/sgp4.cpp src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp
+    src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp src/dsp/rtl_tcp_source.cpp
+    src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp
+    src/dsp/squelch.cpp src/dsp/agc.cpp src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp
+    src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp
+    src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp)
+target_include_directories(test_tool_registry PRIVATE src)
+target_link_libraries(test_tool_registry PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
+add_test(NAME tool_registry COMMAND test_tool_registry)
+
 # ---- P3 desktop polish (phase8): appended, existing registrations untouched ----
 # Pure shortcut-catalog + tuning arithmetic (header-only, no QApplication).
 add_executable(test_shortcut_catalog tests/test_shortcut_catalog.cpp)
@@ -1194,3 +1216,28 @@ add_executable(test_spectrum_tune tests/test_spectrum_tune.cpp)
 target_include_directories(test_spectrum_tune PRIVATE src)
 target_link_libraries(test_spectrum_tune PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME spectrum_tune COMMAND test_spectrum_tune)
+
+# ---- phase12 Wave2: RTL-SDR device-layer robustness (gap-analysis L3 + L4) ---
+# L3: tune retry + get_center_freq readback (clean-room re-derivation of the
+#     SDR++ RTL2832 PLL write-loss defence, main.cpp:344-359).
+# L4: start() explicitly asks tuner bandwidth = 0 (driver auto, main.cpp:310).
+# Driven by an injected FAKE librtlsdr ops table -- a test double, NOT a
+# hardware mock: no USB / no RTL2832, deterministic recorded call log.
+add_executable(test_rtl_sdr_tune tests/test_rtl_sdr_tune.cpp
+    src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp
+    src/dsp/device_capabilities.cpp)
+target_include_directories(test_rtl_sdr_tune PRIVATE src)
+target_link_libraries(test_rtl_sdr_tune PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME rtl_sdr_tune COMMAND test_rtl_sdr_tune)
+
+# ---- phase12 Wave2: channelizer rational resampling (gap-analysis L1) -------
+# Clean-room two-rate chain: power-of-two pre-decimation (the decimating FIR) +
+# GCD-reduced polyphase rational residual (rational_resampler.h). Fixes the
+# 2.048MHz->48kHz round(in/out)=43 drift (was 47.62kHz). Integer-exact ratios
+# still take the single-stage integer path. Header-only resampler, so no new
+# translation unit is added to the other per-target source lists.
+add_executable(test_rational_resampler tests/test_rational_resampler.cpp
+    src/dsp/channelizer.cpp src/dsp/fft.cpp)
+target_include_directories(test_rational_resampler PRIVATE src)
+target_link_libraries(test_rational_resampler PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME rational_resampler COMMAND test_rational_resampler)

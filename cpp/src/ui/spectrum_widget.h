@@ -39,6 +39,8 @@ public slots:
     void setBandwidthHz(double hz);
     double bandwidthHz() const;
     void setStepHz(double hz);
+    // Forward: after an external tune, pan the canvas to keep the VFO on screen.
+    void followTunedFrequency(double hz);
     void setZoomFactor(double z);
     double zoomFactor() const;
 

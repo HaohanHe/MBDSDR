@@ -451,6 +451,19 @@ void SpectrumDisplay::tuneAndCenter(double hz) {
     emit viewChanged();
 }
 
+void SpectrumDisplay::followTunedFrequency(double hz) {
+    if (!haveFrame_ || frameFsHz_ <= 0.0) return;
+    const ui::ViewWindow view{viewCenterHz_, frameFsHz_ / zoomFactor_};
+    const ui::FftBand band{frameF0Hz_, frameFsHz_};
+    const double next = ui::followCenterAfterTune(hz, view, band);
+    if (next != viewCenterHz_) {
+        viewCenterHz_ = next;
+        publishVisibleRange();
+        update();
+        emit viewChanged();
+    }
+}
+
 void SpectrumDisplay::setVfoMarkers(const QVector<dsp::VfoMarker>& markers) {
     markers_ = markers;
     update();
@@ -1064,14 +1077,32 @@ void SpectrumDisplay::wheelEvent(QWheelEvent* e) {
         publishVisibleRange();
         update();
         emit viewChanged();
+    } else if (lay_.stripRect.contains(e->position().toPoint())) {
+        // Wheel over the shared tick/label strip PANNS the view instead of tuning
+        // (SDR++ waterfall.cpp:411-435 region split). One notch = span/20; the
+        // signed accumulated notch count absorbs fast flicks. The new centre is
+        // clamped so panning stops at the capture-band edge.
+        const double notches = dy / 120.0;
+        const ui::FftBand band{frameF0Hz_, frameFsHz_};
+        viewCenterHz_ = ui::wheelPanView(viewCenterHz_, notches * span / 20.0, band);
+        publishVisibleRange();
+        update();
+        emit viewChanged();
     } else {
-        // Plain wheel step-tunes the dial by the configured step, then snaps
-        // onto a 0-anchored step grid so repeated taps land on round numbers
-        // instead of a slowly drifting offset.
-        const double dir = (dy > 0) ? 1.0 : -1.0;
-        const double newFreq = ui::snapFreqToStep(dialFreqHz_ + dir * tuneStepHz_,
-                                                 tuneStepHz_);
+        // Plain wheel over the trace/waterfall step-tunes the dial by the
+        // configured step, with the SDR++ modifier cascade: Shift = x10 coarse,
+        // Alt = x0.1 fine, neither = the step. The result snaps onto a
+        // 0-anchored grid at the EFFECTIVE step so repeated taps land on round
+        // numbers; the canvas then follows the tuned VFO so it does not walk
+        // off-screen (pure followCenterAfterTune, 10% viewport margin).
+        const ui::WheelTier tier =
+            (e->modifiers() & Qt::ShiftModifier) ? ui::WheelTier::Coarse
+          : (e->modifiers() & Qt::AltModifier)  ? ui::WheelTier::Fine
+          :                                        ui::WheelTier::Normal;
+        const double notches = dy / 120.0;
+        const double newFreq = ui::wheelStepFreq(dialFreqHz_, notches, tuneStepHz_, tier);
         dialFreqHz_ = newFreq;
+        followTunedFrequency(newFreq);
         emit frequencyChanged(newFreq);
         update();
     }

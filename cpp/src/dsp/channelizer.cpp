@@ -47,10 +47,41 @@ void Channelizer::configure(double inRateHz, double outRateHz, double channelBwH
     outSr_ = outRateHz;
     bw_ = channelBwHz;
     tapsPerBranch_ = tapsPerBranch;
-    decimation_ = std::max(1, static_cast<int>(std::round(inRateHz / outRateHz)));
-    const double effOut = inSr_ / decimation_;
-    const double cutoff = std::min(bw_ / 2.0, effOut / 2.0 * 0.85);
-    designTaps(cutoff / inSr_);
+
+    // Decide whether in/out is an exact integer (fast path) or a fractional
+    // ratio that needs exact rational resampling. The old round(in/out) pick
+    // a single integer that did NOT land on outRate for fractional ratios
+    // (e.g. 2.048MHz/48kHz -> 43 -> 47.62kHz, drifting pitch / RDS subcarrier).
+    const double ratio = inRateHz / outRateHz;
+    const long k = std::lround(ratio);
+    const bool integerExact =
+        (k >= 1) && (std::abs(inRateHz - outRateHz * static_cast<double>(k)) <=
+                    1e-6 * inRateHz);
+
+    if (integerExact) {
+        mode_ = ChannelizerMode::Integer;
+        decimation_ = static_cast<int>(k);
+        const double effOut = inSr_ / decimation_;
+        const double cutoff = std::min(bw_ / 2.0, effOut / 2.0 * 0.85);
+        designTaps(cutoff / inSr_);
+        resampler_.configure(inSr_ / decimation_, outSr_); // -> Passthrough
+    } else {
+        // Largest power-of-two pre-decimation that stays >= outRate. This is
+        // the integer DDC stage; the residual fraction (intermediate -> out)
+        // is handled exactly by the rational polyphase resampler.
+        long floorRatio = static_cast<long>(std::floor(ratio));
+        int predecPow = 0;
+        while ((1L << (predecPow + 1)) <= floorRatio && predecPow < 20) ++predecPow;
+        const int predecRatio = 1 << predecPow;
+
+        mode_ = ChannelizerMode::Rational;
+        decimation_ = predecRatio;
+        const double cutoff = std::min(bw_ / 2.0, outSr_ / 2.0 * 0.9);
+        designTaps(cutoff / inSr_);
+
+        const double intermediate = inSr_ / predecRatio;
+        resampler_.configure(intermediate, outSr_, 32);
+    }
     reset();
 }
 
@@ -65,9 +96,11 @@ void Channelizer::reset() {
     tail_.assign(T >= 1 ? T - 1 : 0, std::complex<float>(0.0f, 0.0f));
     nextBase_ = 0;
     primed_ = true;
+    resampler_.reset();
 }
 
 double Channelizer::effectiveOutputRateHz() const {
+    if (mode_ == ChannelizerMode::Rational) return outSr_; // exact target
     return decimation_ > 0 ? inSr_ / decimation_ : inSr_;
 }
 
@@ -102,6 +135,10 @@ std::vector<std::complex<float>> Channelizer::process(
     std::copy(combined.end() - static_cast<long>(hist), combined.end(),
               tail_.begin());
     nextBase_ -= static_cast<long>(L);
+
+    // 5) In rational mode the decimating FIR has only reached the intermediate
+    //    (power-of-two) rate; finish the residual fraction exactly on outRate.
+    if (mode_ == ChannelizerMode::Rational) return resampler_.process(out);
     return out;
 }
 

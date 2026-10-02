@@ -9,6 +9,7 @@
 #include <vector>
 #include <memory>
 #include <cstddef>
+#include "rational_resampler.h"
 
 namespace mbdsdr {
 namespace dsp {
@@ -25,10 +26,18 @@ private:
     float dphi_  = 0.0f;
 };
 
-// Decimating FIR channel filter. Only one convolution sum is evaluated per
-// OUTPUT sample (the dropped input samples are never computed), which matches
-// polyphase-decimator cost. Taps are a windowed-sinc low-pass designed at the
-// INPUT rate; total taps = tapsPerBranch * decimation.
+// Operating mode of the rate converter.
+//  - Integer:  in/out is an exact integer K -> single-stage integer decimation
+//    (the historical path; preserves output rate and behaviour).
+//  - Rational: in/out is fractional -> power-of-two pre-decimation by the
+//    decimating FIR followed by a GCD-reduced polyphase rational resampler, so
+//    the output lands EXACTLY on outRate (no pitch / sub-carrier drift).
+enum class ChannelizerMode { Integer, Rational };
+
+// Decimating FIR channel filter + exact rational rate conversion. Frequency-
+// translates the selected VFO to baseband, applies a channel low-pass, then
+// converts to the IF rate exactly. Streaming; NCO phase, FIR history and the
+// rational commutator are preserved across blocks.
 class Channelizer {
 public:
     Channelizer() = default;
@@ -41,8 +50,10 @@ public:
     void reset();
 
     double inputRateHz() const { return inSr_; }
-    double effectiveOutputRateHz() const; // inSr / decimation_
+    double effectiveOutputRateHz() const; // always == outRateHz after configure
     int decimation() const { return decimation_; }
+    ChannelizerMode mode() const { return mode_; }
+    const RationalResampler& resampler() const { return resampler_; }
 
     // Returns baseband IQ at effectiveOutputRateHz (variable length per call).
     std::vector<std::complex<float>> process(const std::vector<std::complex<float>>& in);
@@ -55,7 +66,9 @@ private:
     double bw_ = 0.0;
     int decimation_ = 1;
     int tapsPerBranch_ = 31;
+    ChannelizerMode mode_ = ChannelizerMode::Integer;
     Nco nco_;
+    RationalResampler resampler_;              // residual rational stage
     std::vector<float> taps_;                 // length T
     std::vector<std::complex<float>> tail_;   // T-1 previous (mixed) samples
     long nextBase_ = 0;                       // next output base, relative to block 0
