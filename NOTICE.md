@@ -9,6 +9,8 @@
 - 全仓 SPDX 标识：`SPDX-License-Identifier: MIT`。
 - 版权声明：`Copyright (c) 2026 Haohan He and the MBDSDR contributors`。
 - 本文件仅用于署名与合规说明，不改变上述许可证的任何条款。
+- **许可证总体策略与 GPL 组件使用/隔离政策，见 `LICENSING.md`**：主项目保持 MIT；个别必须
+  使用的 GPL 组件以独立进程、可替换外部工具后端方式接入，不改变主项目的 MIT 许可。
 
 ## 二、第三方打包依赖（各自保留其原始许可证与版权声明）
 

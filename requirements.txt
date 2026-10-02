@@ -19,7 +19,7 @@ Pillow>=9.0.0           # 图像处理(NOAA APT/SSTV 解码输出 PNG)
 #                        缺失时：用内置sstv_decoder.py
 
 # ===== 硬件相关依赖 =====
-# --- RTL-SDR 原生 USB 默认路径：SoapySDR（推荐，无 GPL 传染） ---
+# --- RTL-SDR 原生 USB 默认路径：SoapySDR（推荐，BSL-1.0 宽松许可） ---
 # SoapySDR + SoapyRTLSDR：SDR 硬件统一接入层，pip 可能失败，通常需系统级安装。
 # 这是不装 pyrtlsdr 时接收本机 RTL-SDR USB 棒的默认后端（enumerate_all_sdr_devices
 # 步骤1 优先枚举，build_backend_for_device 走 SoapySDRBackend）。
