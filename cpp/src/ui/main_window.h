@@ -37,7 +37,8 @@ class QSpinBox;
 
 namespace mbdsdr {
 namespace ui   { class BookmarkManager; class ActivityLog; }
-namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct TleEntry; struct VfoMarker; class FrequencyScanner; class SpyServerServer; }
+namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct TleEntry; struct VfoMarker; class FrequencyScanner; class SpyServerServer;
+                 class DeviceLister; class IRtlDeviceEnumerator; class DevicePresenceNotifier; }
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class SMeterWidget;
@@ -244,6 +245,7 @@ private:
     int             currentStepHz_ = 10000;   // tuning nudge / spinbox step
     QComboBox*      srCombo_    = nullptr;
     QSlider*        gainSlider_ = nullptr;
+    QComboBox*      gainCombo_  = nullptr;   // discrete step combo (real RTL gain table)
     QLabel*         gainValue_  = nullptr;
     QLabel*         sourceBanner_ = nullptr;
     QLabel*         statusLabel_ = nullptr;
@@ -263,6 +265,25 @@ private:
     QLabel*         devProvenanceLabel_ = nullptr;
     void            refreshDeviceCapabilities();     // re-read engine caps -> labels + dynamic srCombo_
     QString         capsKey_;                        // change detector (1 Hz telemetry must not rebuild the combo)
+
+    // ---- Hot-plug presence lister (enumeration diff -> UI notice) -----------
+    // A 1 Hz UI timer polls the injectable enumerator; a device appearing /
+    // disappearing flips a calm notice in sourceBanner_ / statusLabel_. Owns the
+    // production lister + enumerator. The diff->text mapping lives in
+    // dsp::DevicePresenceNotifier and is unit-tested offline; real physical
+    // plug/unplug recovery (auto-open) is 「真机待验」.
+    dsp::IRtlDeviceEnumerator* deviceEnumerator_   = nullptr;
+    dsp::DeviceLister*         deviceLister_       = nullptr;
+    dsp::DevicePresenceNotifier* presenceNotifier_ = nullptr;
+    QTimer*                    devicePollTimer_    = nullptr;
+    void showPresenceNotice(const QString& text, bool appeared);
+
+    // ---- Discrete gain control model ----------------------------------------
+    // Rebuild gainCombo_ / gainSlider_ visibility + enable from the engine's real
+    // gain table (empty = honest continuous slider). Called on source swap + the
+    // ~1 Hz telemetry tick.
+    void refreshGainControl();
+    QString gainTableKey_;   // change detector for the combo rows
 
     // ---- SpyServer remote-IQ server (SDR++/Airspy wire protocol) ----------
     // Off by default; binding is attempted only when the box is checked. The
@@ -420,6 +441,7 @@ private:
     QLabel*         sbSnr_   = nullptr;   // SNR dB (snrLevel)
     QLabel*         sbSquelch_ = nullptr; // OPEN / CLOSED / OFF (squelchState + checkbox)
     QLabel*         sbGnss_  = nullptr;   // "GNSS 定位" once a real fix lands; else empty
+    QLabel*         sbAudio_ = nullptr;   // sound-card link health (声卡正常/欠载/断开…)
     bool            squelchOn_ = false;    // mirrors 启用静噪 checkbox (for OFF state)
     // Cached real engine readback (from sourceTelemetry) so the SpyServer
     // handshake DEVICE_INFO reports the honest live sample rate / gain, not a

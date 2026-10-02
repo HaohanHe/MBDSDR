@@ -115,6 +115,12 @@ public slots:
     // false) -- the UI then shows "RTL-SDR 未连接". Thread-safe read of the
     // active source's own accessor.
     DeviceCapabilities sourceCapabilities() const;
+    // Real discrete tuner-gain steps reported by the ACTIVE source (filled from
+    // rtlsdr_get_tuner_gains on a real RTL-SDR; EMPTY for rtl_tcp / test / file
+    // sources -- honest empty state, never a fabricated step table). Read from a
+    // capsMutex_ snapshot refreshed ~1 Hz + on source swap, so the UI never has
+    // to take sourceMutex_ against the read loop.
+    std::vector<double> availableGainsDb() const;
     void setGatedRecordingEnabled(bool e);
     // ---- Unattended signal-triggered watch recording ----
     // Arm/disarm the watch (does not touch playback: listening is never
@@ -459,6 +465,10 @@ private:
     // only -- never contending with the read stream on sourceMutex_.
     mutable QMutex capsMutex_;
     DeviceCapabilities capsSnapshot_;
+    // Snapshot of the active source's discrete gain table (tenths-free dB steps).
+    // Empty unless a real local RTL-SDR reported rtlsdr_get_tuner_gains. Refreshed
+    // together with capsSnapshot_ under capsMutex_.
+    std::vector<double> gainTableSnapshot_;
     // Caller must hold sourceMutex_. Copies the live source's capabilities into
     // capsSnapshot_ (guarded by capsMutex_). Cheap; called on source swap + once
     // per loop iteration.

@@ -2,7 +2,7 @@
     <!-- 外部 USB GNSS（USB-TTL 串口）。required=false：无 USB host 的设备仍可装。 -->
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <application
-        android:label="mbdsdr_mobile"
+        android:label="MBDSDR"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

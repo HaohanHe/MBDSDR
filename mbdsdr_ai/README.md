@@ -1,7 +1,7 @@
 # mbdsdr_ai · AI 定义无线电智能内核
 
-> 本文件随 Phase4（P4）缺口清扫同步当前行为：工具面、已摘除项、诚实标注项。
-> 基线：远端 main `be1c653`；本批改动未 commit/push（云环境无有效凭据）。
+> 本文件随 Phase4（P4）缺口清扫建立，并在 Phase6（P4 文档同步）复核工具注册现状：工具面、已摘除项、诚实标注项。
+> 基线：远端 main `be1c653`；本批文档改动未 commit/push（云环境无有效凭据）。
 > 许可证：MIT。
 
 ## 1. 这是什么
@@ -60,7 +60,25 @@ LLM 通过 `tool_registry` 调用约 280 个工具（agent.py 注册 ~112 + sdr_
 - `pose.py` / `gnss_monitor.py` / `serial_gnss.py`：位姿融合（硬件推流待接）。
 - 后端保留但不在 LLM 面：`hooks.py` / `orchestrator.py` / `plugin_manager.py` / `self_learning.py`。
 
-## 5. 已知未完成 / 转后续 wave
+## 5. 真机联调与回传
+
+云 VM 无硬件，本内核的设备工具在云内一律诚实空态；真机联调走仓库根的工具（不重复造轮子）：
+
+```bash
+# 只读自检（枚举设备 / tuner / 丢包 / 声卡 / GNSS 串口 / 依赖）
+python3 tools/hw_selfcheck/selfcheck.py --json
+
+# 一条命令：自检 → rtl_sdr 起流 → 写 SigMF → 本内核真实解码器（ADS-B/AX.25/CW/APT）→ 出图/出报文
+python3 tools/onboarding/onboard.py --step all --freq 1090e6 --mode adsb --json
+```
+
+- `onboard.py` 的 decode 步直接调用本目录的真实解码器（`adsb.py` / `ax25.py` / CW / APT），
+  record 步写出的 SigMF 与 `playback.py` 的 `IQPlayback` 读取面对齐。
+- 跑完后把 `--json` 输出按 `docs/learn/phase6/P2-hw-report-format.md` 的格式贴回；
+  云侧解析见 `tools/onboarding/parse_hw_report.py`。
+- 详见 `tools/onboarding/README.md`、`docs/learn/phase5/P1-onboarding.md`。
+
+## 6. 已知未完成 / 转后续 wave
 
 - 移动端 production 外壳尚未接线录音/回放 building blocks（P3 范围）。
 - `satdump_*` 依赖外部 SatDump 二进制，常态"未安装"；`meteor_*` LRO EKF 量纲问题（A4/W2d 范围）。

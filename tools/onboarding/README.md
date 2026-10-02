@@ -39,10 +39,32 @@ python3 tools/onboarding/onboard.py --step detect --json
 | `cw` | 任意 HF | 莫尔斯电报 |
 | `ax25` | 144.39 MHz | APRS 位置报文（FCS-16 校验） |
 
+## 回传与解析（真机结果贴回聊天）
+
+真机跑两条 `--json` 命令后把输出整段贴回，云侧即可得到结构化结论：
+
+```bash
+# 真机上跑这两条（都要带 --json）
+python3 tools/hw_selfcheck/selfcheck.py --json
+python3 tools/onboarding/onboard.py --step all --freq 1090e6 --mode adsb --json
+
+# 云侧 / 本地解析贴回的文本（支持混杂了人类对话的多段 JSON）
+python3 tools/onboarding/parse_hw_report.py report.txt        # 文件
+cat report.txt | python3 tools/onboarding/parse_hw_report.py # stdin
+python3 tools/onboarding/parse_hw_report.py report.txt --json # 额外吐结构化 JSON
+```
+
+解析器输出：设备（有/无、tuner、丢包）、声卡、GNSS 串口（NMEA 判定）、依赖缺失、
+onboard 各步结果与产物清单，以及**与检测事实挂钩的后续可做步骤建议**；找不到任何
+JSON 时以退出码 2 报明确错误，绝不崩。
+
+- 字段逐项说明与完整输出示例：见 `docs/learn/phase6/P2-hw-report-format.md`
+- 解析器测试：`python3 -m pytest tools/onboarding/test_parse_hw_report.py -v`
+
 ## 测试
 
 ```bash
-python3 -m pytest tools/onboarding/test_onboarding.py -v
+python3 -m pytest tools/onboarding/test_onboarding.py tools/onboarding/test_parse_hw_report.py -v
 ```
 
 离线确定性测试：注入合成 IQ / 假设备检测结果，验证：

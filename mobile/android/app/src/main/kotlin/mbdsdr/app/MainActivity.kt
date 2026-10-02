@@ -1,4 +1,4 @@
-package com.example.mbdsdr_mobile
+package mbdsdr.app
 
 import android.app.PendingIntent
 import android.content.Context
@@ -19,8 +19,9 @@ import io.flutter.plugin.common.MethodChannel
 import kotlin.concurrent.thread
 
 // ============================================================================
-// [云未编译·真机待验] 本文件 Kotlin 由 B3 契约（docs/learn/phase4/audits/B3-mobile-native.md）
-// 生成。云 VM 无 Android SDK / 无设备，未编译、未链接、未真机运行。待真机验证：
+// [云已编译·真机待验] 本文件 Kotlin 由 B3 契约（docs/learn/phase4/audits/B3-mobile-native.md）
+// 生成。云 VM 已用 Android SDK 36 真编译出 debug APK（见 docs/learn/phase6/P1-release-build.md），
+// 但无真机、未链接设备、未真机运行。待真机验证：
 //   ① 实时收听：start/write → AudioTrack 出声；
 //   ② 文件回放：startFile → 从 .wav PCM 块入队、onComplete/onPosition 回调、进度准确；
 //   ③ USB GNSS：枚举 → 申请权限 → open → onData 吐出 NMEA 字节。
@@ -32,7 +33,7 @@ class MainActivity : FlutterActivity() {
     private val AUDIO_CHANNEL = "mbdsdr/audio"
     private val USB_SERIAL_CHANNEL = "mbdsdr/usb_serial"
     companion object {
-        const val ACTION_USB_PERMISSION = "com.example.mbdsdr_mobile.USB_PERMISSION"
+        const val ACTION_USB_PERMISSION = "mbdsdr.app.USB_PERMISSION"
     }
 
     private lateinit var audioChannel: MethodChannel

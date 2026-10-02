@@ -15,6 +15,7 @@
 #pragma once
 
 #include "iaudio_sink.h"
+#include "audio_link_health.h"
 
 #include <QAudioDevice>
 #include <QAudioFormat>
@@ -54,6 +55,13 @@ public:
     static QStringList availableDevices();
     float volume() const { return volume_.load(); }
 
+    // ---- Link health (underrun / disconnect / bounded reconnect) -----------
+    // Status-strip text driven by the worker thread's observations of QAudioSink.
+    // Never fabricated: on a headless box with no device the sink simply stays
+    // unavailable and the state reads accordingly.
+    QString healthStatus() const { return health_.statusText(); }
+    AudioLinkHealth::State healthState() const { return health_.state(); }
+
 private:
     // Worker-thread: consume any queued device request, then lazily build the
     // sink against the default device if none exists yet.
@@ -68,6 +76,10 @@ private:
     // rate (fmt_.sampleRate()). Worker-thread only; fmt_ is worker state.
     std::vector<float> resampleToDevice(const std::vector<float>& in) const;
 
+    // Write one prepared byte block to io_ and feed the result to health_
+    // (write outcome, buffer-drained underrun, post-write sink error). Worker-thread only.
+    void feedAudioWrite(const QByteArray& bytes);
+
     std::unique_ptr<QAudioSink> sink_;
     QIODevice* io_ = nullptr;
     QAudioFormat fmt_;
@@ -80,6 +92,10 @@ private:
     QMutex pendingMutex_;
     QAudioDevice pendingDev_;
     std::atomic<bool> pendingRebuild_{false};
+
+    // Link-health state machine (worker-thread observations only). Feeds
+    // underrun counting, fatal-error disconnect, and the bounded reconnect cadence.
+    AudioLinkHealth health_;
 };
 
 } // namespace dsp

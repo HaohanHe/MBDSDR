@@ -88,6 +88,13 @@ python3 -m pytest experiments/tests/ -q
 
 > 产物全部落到被忽略的 `paper/experiments/`；重新跑上述命令即可复现全部 CSV/PNG/manifest。
 
+### 目录下其他 `exp_*.py`（早期合成脚本，不在本公共模块口径内）
+
+`experiments/` 下另有 `exp_ax25_performance.py`、`exp_digital_modes.py`、`exp_fhss_detection.py`、
+`exp_freq_offset.py`、`exp_pnt_fusion.py`、`exp_spectrum_sensing.py`、`exp_sstv_identification.py`
+等脚本——均为更早的**纯软件合成信号**实验（脚本内已自标注"纯软件、可复现"），未接入 `common/`
+的统一 manifest/CI/出图口径。它们保留作历史基线与对照，论文主图以上表 `common/` 管线产物为准。
+
 ---
 
 ## 真机用户如何接入 RTL-SDR 录制

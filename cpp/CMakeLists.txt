@@ -65,6 +65,7 @@ set(SOURCES
     src/ui/shortcuts_dialog.cpp
     src/dsp/test_signal.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/device_lister.cpp
+    src/dsp/device_presence_notifier.cpp
     src/dsp/spectrum_engine.cpp
     src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp
@@ -693,6 +694,38 @@ add_executable(test_device_lister tests/test_device_lister.cpp
 target_include_directories(test_device_lister PRIVATE src)
 target_link_libraries(test_device_lister PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME device_lister COMMAND test_device_lister)
+
+# Hot-plug UI notice seam (no hardware): enumeration diff -> exact notice text
+# ("RTL-SDR 已连接/已移除：…"), baseline/unchanged stays silent, kind flag.
+add_executable(test_device_presence_notifier tests/test_device_presence_notifier.cpp
+    src/dsp/device_lister.cpp src/dsp/device_presence_notifier.cpp)
+target_include_directories(test_device_presence_notifier PRIVATE src)
+target_link_libraries(test_device_presence_notifier PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME device_presence_notifier COMMAND test_device_presence_notifier)
+
+# Sound-card link health state machine (no audio device): underrun warning,
+# fatal-error dead latch, bounded/throttled reconnect, give-up, rebuild reset.
+# Header-only (audio_link_health.h).
+add_executable(test_audio_link_health tests/test_audio_link_health.cpp)
+target_include_directories(test_audio_link_health PRIVATE src)
+target_link_libraries(test_audio_link_health PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME audio_link_health COMMAND test_audio_link_health)
+
+# Discrete gain-control decision (no radio): table->combo, empty->continuous
+# slider with honest reason, no-hardware disabled.
+add_executable(test_gain_control_model tests/test_gain_control_model.cpp)
+target_include_directories(test_gain_control_model PRIVATE src)
+target_link_libraries(test_gain_control_model PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME gain_control_model COMMAND test_gain_control_model)
+
+# "Currently-audible VFO" contract (synthetic wideband): process() returns the
+# SELECTED channel's audio, exactly one marker selected, switching flips both.
+add_executable(test_vfo_audible tests/test_vfo_audible.cpp
+    src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
+    src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/rds_decoder.cpp)
+target_include_directories(test_vfo_audible PRIVATE src)
+target_link_libraries(test_vfo_audible PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME vfo_audible COMMAND test_vfo_audible)
 
 # Offline GSM FCCH detector + clock-ppm estimator (NOT HARDWARE): synthetic
 # tone+noise IQ recovers the tone and the injected ppm; noise-only / too-short

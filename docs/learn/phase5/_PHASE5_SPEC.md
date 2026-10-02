@@ -1,5 +1,10 @@
 # 第五阶段实现规格：真机即出成果 + 实验补强 + 移动接线 + 缺口清扫
 
+> **交付状态（Phase6 复核，2026-10-02）：已交付。** P1 联调向导 `tools/onboarding/onboard.py`（分步 + 离线测试）、
+> P2 实验补强（`exp_llm_baseline.py` / `exp_rate_bandwidth.py` / `exp_amr.py` / `exp_doppler_duration.py` + `experiments/common/` 扩展）、
+> P3 移动录音/回放 Dart 接线（生产侧闭环、原生端标注待真机）、P4 缺口清扫（workflow 跨步回填 / cron 星期映射 /
+> sdr_tools 重复副作用与 None 保护 / astro/ntrip 真 bug，见 `mbdsdr_ai/README.md` §2）。本文件保留为历史规划快照。
+
 > 基线：远端 main = be1c653（本地已同步）。第四阶段已交付：hw_selfcheck 自检工具（14 测试）、论文实验管线（5 公共模块 + 4 脚本，29 pytest）、移动原生 building blocks（WAV/sidecar/Store/FilePlayer/NMEA，281 flutter）、C++ 断流看门狗/设备 diff/增益吸附（87 ctest）。
 
 ## 0. 环境事实（2026-10-01）

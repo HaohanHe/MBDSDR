@@ -1,5 +1,8 @@
 # MBDSDR 第三阶段实现规格：工具化做全做实 + 真机/真链路收敛（v1，2026-10-01）
 
+> **交付状态（Phase6 复核，2026-10-02）：已交付。** C++ `agent_tools.cpp` 7 个工具 / Flutter `ai_tools.dart` 5 个工具全 Schema 化并真链路调用；
+> 渲染器对齐、UI 收敛、mbdsdr_ai 假闭环工具摘除/接真（见 phase4 P4 与 mbdsdr_ai/README §2）。本文件保留为历史规划快照。
+
 > 前置：第二阶段已推送上线（408e739，本地与远端 main 同步，未推送提交数 0）。
 > 依据：docs/learn/model-tool-calling-boundaries.md、docs/learn/model-tool-calling/_IMPL_SPEC.md、docs/audit_r2/（历史审查）。
 > 纪律：先学后做、真读代码、禁假数据、禁 mock 冒充真实执行、诚实标注未完成项；每批确定性测试通过后独立验证再推下一批。
