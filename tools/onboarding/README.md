@@ -61,6 +61,63 @@ JSON 时以退出码 2 报明确错误，绝不崩。
 - 字段逐项说明与完整输出示例：见 `docs/learn/phase6/P2-hw-report-format.md`
 - 解析器测试：`python3 -m pytest tools/onboarding/test_parse_hw_report.py -v`
 
+### 解析输出示例（真跑）
+
+贴回一段**混了人类对话、含两段 JSON（selfcheck + onboard）**的聊天文本后，解析器
+自动抽出两段并输出（字段为真跑输出，非手写）：
+
+输入（节选）：`...selfcheck 输出 {…PASS:6…} … onboard 输出 {…mode=adsb…} …谢谢！`
+
+```text
+====================================================================
+MBDSDR 真机回传 · 云侧解析结论
+====================================================================
+共从贴回文本中识别到 2 个 JSON 对象：selfcheck=有，onboard=有
+
+── SDR 设备 ──────────────────────────────
+  • 检测到设备 0bda:2838 — RTL2838UHIDIR (目标真机) (RTL2838UHIDIR)
+  • tuner：Rafael Micro R820T（增益 29 档）
+  • 3 秒实读丢包：0 字节（流读状态=PASS）
+  • udev 规则：已装 ['/etc/udev/rules.d/99-rtlsdr.rules']
+
+── 声卡 ────────────────────────────────
+  状态=PASS  播放卡=1  录音卡=1  /dev/snd=存在
+
+── GNSS 串口 ────────────────────────────
+  状态=PASS  候选串口=['/dev/ttyUSB0']
+  NMEA 判定：读到 $-开头 NMEA 语句
+
+── 依赖 ─────────────────────────────────
+  状态=PASS
+  python rtlsdr=OK  SoapySDR=OK  gpsd=/usr/sbin/gpsd
+
+── Onboard 分步结果 ─────────────────────
+  mode=adsb  freq=1090000000.0  sr=2400000.0  n=240000  gain=24.0dB
+  [PASS] step=detect: 检测到 RTL-SDR 设备
+  [PASS] step=capture: 采集完成
+        写入 480,000 字节，丢包 0 字节
+  [PASS] step=record: SigMF 录制完成
+        SigMF：240,000 样本，时长 0.100s
+  [PASS] step=decode: ADS-B 解码完成，3 有效帧
+        解码有效帧：3
+  [PASS] step=output: 产物落盘完成：4 个文件
+  产物清单（4）：
+    - /x/a_messages.txt
+    - /x/a_messages.json
+    - /x/spectrum.png
+    - /x/manifest.json
+
+── 后续可做步骤建议 ──────────────────────
+  1. 【设备就绪】selfcheck 第 1/2/3 项通过 → 可直接跑：python3 tools/onboarding/onboard.py --step all --freq 1090e6 --mode adsb
+  2. 【全链路通过】产物已落盘（4 个），目录：/x。
+====================================================================
+```
+
+> 完整输入文本（两段 JSON 全字段）、`--json` 结构化结论节选、以及**无设备诚实空态**
+> （只报 `target_hits 为空` / `SKIP`、不臆造设备）的输出，见
+> `docs/learn/phase6/P2-hw-report-format.md` §6。序列号只回显前 3 位 + `***`，
+> 不原样暴露。
+
 ## 测试
 
 ```bash

@@ -220,13 +220,22 @@ List<AiTool> buildRadioTools(
     ),
     AiTool(
       name: 'get_status',
-      description: '读取当前接收机状态（连接、频率、模式、增益、采样率）。',
+      description: '读取当前接收机状态。返回连接状态机 status'
+          '（connected/connecting/reconnecting/disconnected/error）、是否就绪 '
+          'connected、错误原因 error_message，以及频率、模式、增益、采样率。',
       parameters: const <String, dynamic>{'type': 'object', 'properties': <String, dynamic>{}},
       execute: (Map<String, dynamic> args) async {
         try {
           return jsonEncode(<String, dynamic>{
             'ok': true,
+            // connected 仅在真·数据流就绪时为 true；status 保留完整状态机语义，
+            // 让 AI 能区分「空闲未连接(disconnected)」与「掉线自动重连中
+            // (reconnecting)」——与桌面端 sourceTelemetry(connected) +
+            // sourceDropped/sourceError/reconnectRequested 的多信号披露对齐，
+            // 而不是把五态压成一个布尔导致 AI 误判为用户已停手。
             'connected': radio.status == ConnectionStatus.connected,
+            'status': radio.status.name,
+            'error_message': radio.errorMessage,
             'frequency_hz': radio.freqHz,
             'mode': radio.mode.name,
             'gain_db': radio.gainDb,

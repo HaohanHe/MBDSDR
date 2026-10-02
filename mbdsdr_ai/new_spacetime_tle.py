@@ -18,6 +18,7 @@ import os
 import time
 import urllib.request
 import ssl
+from datetime import datetime, timezone, timedelta
 
 CELESTRAK_BASE = "https://celestrak.org/NORAD/elements/gp.php"
 
@@ -240,3 +241,82 @@ class TLEManager:
     def catnr_from_line1(line1: str) -> int:
         """从 TLE 第一行提取 NORAD CATNR（第 3-7 列，1 基）。"""
         return int(line1[2:7].strip())
+
+
+# ---------------------------------------------------------------------------
+# TLE 历元新鲜度（LEO SGP4 预报精度随历元老化下降）
+# ---------------------------------------------------------------------------
+#
+# 统一新鲜度阈值（天）。LEO 轨道受大气阻力摄动显著，TLE 历元越旧，SGP4 外推
+# 误差越大：经验上 <~3 天预报可靠，>~7 天过境方位/多普勒开始明显漂移，>2 周
+# 不建议用于对准。这里取 7 天作为"新鲜/陈旧"分界（保守，便于 SDR 对准）。
+# 该常量是全仓唯一阈值，predict_passes_report 与日志/测试共用。
+TLE_FRESHNESS_MAX_DAYS = 7.0
+
+
+def parse_tle_epoch(line1: str) -> Optional[datetime]:
+    """从 TLE 第 1 行解析历元（epoch）为 UTC datetime。
+
+    TLE 第 1 行历元占**固定列**第 19–32 列（1 基），格式 ``YYDOO.DDDDDDDD``：
+    两位年份 + 一年中的第几天（含小数）。按 Spacetrack Report #3 的列布局取子串，
+    不依赖空格分词（intl designator 等字段间空格数不固定）。
+    yy>=57 归 1900s，否则 2000s。解析失败返回 None —— 调用方据此标 "none"，绝不猜历元。
+    """
+    if not line1 or not line1.startswith("1 "):
+        return None
+    # 固定列：第 19~32 列（0 基 [18:32]）
+    if len(line1) < 32:
+        return None
+    ep = line1[18:32].strip()
+    try:
+        if len(ep) < 5 or "." not in ep:
+            return None
+        yy = int(ep[0:2])
+        doy = float(ep[2:])
+    except (ValueError, IndexError):
+        return None
+    year = (1900 + yy) if yy >= 57 else (2000 + yy)
+    if doy <= 0:
+        return None
+    # doy=1.0 = 1 月 1 日 00:00；(doy-1) 天后的小数时刻
+    base = datetime(year, 1, 1, tzinfo=timezone.utc)
+    return base + timedelta(days=(doy - 1.0))
+
+
+def tle_age_days(line1: str,
+                 now: Optional[datetime] = None) -> Optional[float]:
+    """TLE 历元到 ``now`` 的天数。历元解析失败返回 None。
+
+    ``now`` 默认本机 UTC；测试时注入固定时刻以做确定性断言。
+    """
+    epoch = parse_tle_epoch(line1)
+    if epoch is None:
+        return None
+    ref = now or datetime.now(timezone.utc)
+    return (ref - epoch).total_seconds() / 86400.0
+
+
+def tle_freshness(line1: str,
+                  now: Optional[datetime] = None,
+                  max_days: float = TLE_FRESHNESS_MAX_DAYS) -> dict:
+    """报告单条 TLE 的新鲜度三态：fresh / stale / none。
+
+    返回 dict::
+        {"status": "fresh"|"stale"|"none",
+         "epoch_utc": "ISO..."|None,
+         "age_days": float|None,
+         "threshold_days": float}
+
+    - 历元可解析且 age <= max_days → "fresh"；
+    - 历元可解析但 age > max_days → "stale"（仍可用，但预报精度下降，需告警）；
+    - 历元解析失败（无/坏 TLE）→ "none"。
+    """
+    epoch = parse_tle_epoch(line1)
+    if epoch is None:
+        return {"status": "none", "epoch_utc": None, "age_days": None,
+                "threshold_days": float(max_days)}
+    age = tle_age_days(line1, now=now)
+    status = "fresh" if (age is not None and age <= max_days) else "stale"
+    return {"status": status, "epoch_utc": epoch.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "age_days": round(age, 3) if age is not None else None,
+            "threshold_days": float(max_days)}

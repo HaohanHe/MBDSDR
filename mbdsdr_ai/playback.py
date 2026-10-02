@@ -55,14 +55,19 @@ def parse_sigmf_meta(meta_path: str) -> Dict[str, Any]:
     """解析 SigMF .sigmf-meta，抽取回放需要的字段。
 
     返回 dict:
-        sample_rate_hz, center_freq_hz, datetime, total_samples,
+        sample_rate_hz, center_freq_hz, datetime, time_source, total_samples,
         datatype, raw(原始 dict)
-    缺字段时给安全默认值（sample_rate=0, freq=0），不抛异常。
+    缺字段时给安全默认值（sample_rate=0, freq=0, time_source=""），不抛异常。
+
+    time_source 取自 captures[0].mbdsdr:time_source（"gnss"|"system"），
+    由 mbdsdr_ai.gnss_timestamps 在录制端写入；旧文件无此字段时返回 ""（未知），
+    绝不臆断。
     """
     out: Dict[str, Any] = {
         "sample_rate_hz": 0.0,
         "center_freq_hz": 0.0,
         "datetime": "",
+        "time_source": "",
         "total_samples": 0,
         "datatype": "cf32_le",
         "raw": {},
@@ -84,6 +89,7 @@ def parse_sigmf_meta(meta_path: str) -> Dict[str, Any]:
     captures = meta.get("captures", []) or []
     if captures:
         out["datetime"] = str(captures[0].get("core:datetime", "") or "")
+        out["time_source"] = str(captures[0].get("mbdsdr:time_source", "") or "")
     return out
 
 
@@ -119,6 +125,7 @@ class IQPlayback:
         self.sample_rate: float = 0.0
         self.center_freq_hz: float = 0.0
         self.datetime: str = ""
+        self.time_source: str = ""
         self.meta_raw: Dict[str, Any] = {}
 
         self._mmap: Optional[np.memmap] = None  # complex64 视图
@@ -150,6 +157,7 @@ class IQPlayback:
         self.sample_rate = meta["sample_rate_hz"]
         self.center_freq_hz = meta["center_freq_hz"]
         self.datetime = meta["datetime"]
+        self.time_source = meta["time_source"]
         self.meta_raw = meta["raw"]
 
         try:
@@ -361,5 +369,6 @@ class PlaybackSource:
             "duration_s": self._pb.get_duration(),
             "loop": self._pb.loop,
             "recording_datetime": self._pb.datetime,
+            "recording_time_source": self._pb.time_source,
             "error": "" if self._connected else "未连接",
         }

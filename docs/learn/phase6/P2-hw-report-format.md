@@ -288,6 +288,158 @@ python3 tools/onboarding/parse_hw_report.py report.txt --json
 
 ---
 
-## 6. 许可
+## 6. 解析输出示例（真跑，真实字段）
+
+> 下面的**输入**与**输出**都来自 `tools/onboarding/parse_hw_report.py` 的**真实运行**
+> （不是手写臆造）。输入里两段 JSON 的字段与 `test_parse_hw_report.py` 的
+> `good_selfcheck_json()` / `good_onboard_json()` fixture 同源，字段名逐字段核对自
+> `selfcheck.py` / `onboard.py` 源码；输出即 `python3 tools/onboarding/parse_hw_report.py
+> sample_report.txt` 的 stdout 原样。
+
+### 6.1 贴回的聊天文本（输入，含两段 JSON）
+
+真机用户把下面整段贴回聊天（人类对话 + 两段 `--json` 输出混杂）：
+
+```text
+你好，按文档在真机（realbox，Ubuntu 22.04）上跑了两条 --json 命令，结果整段贴下面，麻烦看下能不能开始收 ADS-B：
+
+=== ① selfcheck.py --json ===
+{"tool": "mbdsdr-hw-selfcheck", "version": "0.1.0", "timestamp": "2026-10-02T09:00:00+08:00", "host": "realbox", "os": "Linux-6.x-x86_64", "python": "3.12.11", "checks": [{"name": "1. USB/udev：RTL-SDR 枚举与权限", "status": "PASS", "evidence": ["lsusb 枚举到 4 个 USB 设备", "  命中 USB 设备 0bda:2838"], "fix": [], "detail": {"sys_scanned": ["1d6b:0002", "0bda:2838 RTL2838UHIDIR"], "target_hits": [{"sysdir": "1-1.2", "vid": "0bda", "pid": "2838", "product": "RTL2838UHIDIR", "known_as": "RTL2838UHIDIR (目标真机)"}], "user_groups": ["user", "plugdev", "dialout"], "udev_rules_hit": ["/etc/udev/rules.d/99-rtlsdr.rules"]}}, {"name": "2. 设备枚举：rtl_test -t（tuner 型号 / 增益档数）", "status": "PASS", "evidence": ["  tuner 型号：Rafael Micro R820T"], "fix": [], "detail": {"rc": 0, "output_tail": "...", "parsed": {"devices": [{"idx": "0", "vendor": "Generic", "product": "RTL2838UHIDIR", "serial": "00000001"}], "tuner": "Rafael Micro R820T", "gain_count": 29, "gain_list_db": ["-9.9", "0.0", "14.7", "24.0", "49.6"]}}}, {"name": "3. 流读取：rtl_sdr 实读 ≤3s（2.4 MS/s）丢包统计", "status": "PASS", "evidence": ["  3 秒实读无丢包上报"], "fix": [], "detail": {"rc": 0, "output_tail": "", "tmp_file_bytes": 14400000, "lost_bytes_total": 0}}, {"name": "4. 声卡：aplay -l / arecord -l", "status": "PASS", "evidence": [], "fix": [], "detail": {"playback_cards": [{"index": "0", "short": "PCH", "name": "HDA Intel PCH"}], "capture_cards": [{"index": "0", "short": "PCH", "name": "HDA Intel PCH"}], "dev_snd_entries": ["by-path", "pcmC0D0c", "timer"]}}, {"name": "5. GNSS 串口：/dev/ttyUSB*,/dev/ttyACM*,/dev/serial/by-id", "status": "PASS", "evidence": [], "fix": [], "detail": {"candidates": ["/dev/ttyUSB0"], "probes": [{"device": "/dev/ttyUSB0", "baud": 9600, "ok": true, "sample": "$GPGGA,", "reason": "matched NMEA line: $GPGGA,090000.00,..."}]}}, {"name": "6. 依赖：pyrtlsdr / SoapySDR / gpsd", "status": "PASS", "evidence": [], "fix": [], "detail": {"py_rtlsdr": true, "py_soapy": true, "gpsd": "/usr/sbin/gpsd", "gpsd_client": "/usr/bin/cgps"}}], "summary": {"counts": {"PASS": 6, "WARN": 0, "FAIL": 0, "SKIP": 0}, "conclusion": "环境基本就绪：未发现阻断性问题。", "real_machine_todo": []}}
+
+=== ② onboard.py --step all --freq 1090e6 --mode adsb --json ===
+{"tool": "mbdsdr-onboarding", "version": "0.1.0", "timestamp": "2026-10-02T09:00:05+08:00", "host": "realbox", "mode": "adsb", "params": {"freq_hz": 1090000000.0, "sample_rate_hz": 2400000.0, "n_samples": 240000, "gain_db": 24.0}, "steps": [{"step": "detect", "status": "PASS", "message": "检测到 RTL-SDR 设备", "evidence": [], "fixes": [], "detail": {"selfcheck_summary": {}, "selfcheck_checks": []}}, {"step": "capture", "status": "PASS", "message": "采集完成", "evidence": [], "fixes": [], "detail": {"rc": 0, "raw_bytes_written": 480000, "lost_bytes_total": 0, "actual_samples": 240000}}, {"step": "record", "status": "PASS", "message": "SigMF 录制完成", "evidence": [], "fixes": [], "detail": {"sigmf_data": "/x/20261002.sigmf-data", "sigmf_meta": "/x/20261002.sigmf-meta", "n_samples": 240000, "duration_s": 0.1}}, {"step": "decode", "status": "PASS", "message": "ADS-B 解码完成，3 有效帧", "evidence": [], "fixes": [], "detail": {"n_samples": 240000, "mode": "adsb", "decoded_frames": [{"icao": "AABBCC"}], "n_frames": 3}}, {"step": "output", "status": "PASS", "message": "产物落盘完成：4 个文件", "evidence": [], "fixes": [], "detail": {"artifacts": ["/x/a_messages.txt", "/x/a_messages.json", "/x/spectrum.png", "/x/manifest.json"], "out_dir": "/x"}}]}
+
+另外设备是 RTLSDR Blog V3（R820T tuner），插在 USB2.0 直连口。谢谢！
+```
+
+### 6.2 解析器人类可读输出（上面那段输入的 stdout）
+
+```text
+====================================================================
+MBDSDR 真机回传 · 云侧解析结论
+====================================================================
+共从贴回文本中识别到 2 个 JSON 对象：selfcheck=有，onboard=有
+
+── SDR 设备 ──────────────────────────────
+  • 检测到设备 0bda:2838 — RTL2838UHIDIR (目标真机) (RTL2838UHIDIR)
+  • tuner：Rafael Micro R820T（增益 29 档）
+  • 3 秒实读丢包：0 字节（流读状态=PASS）
+  • udev 规则：已装 ['/etc/udev/rules.d/99-rtlsdr.rules']
+
+── 声卡 ────────────────────────────────
+  状态=PASS  播放卡=1  录音卡=1  /dev/snd=存在
+
+── GNSS 串口 ────────────────────────────
+  状态=PASS  候选串口=['/dev/ttyUSB0']
+  NMEA 判定：读到 $-开头 NMEA 语句
+
+── 依赖 ─────────────────────────────────
+  状态=PASS
+  python rtlsdr=OK  SoapySDR=OK  gpsd=/usr/sbin/gpsd
+
+── Onboard 分步结果 ─────────────────────
+  mode=adsb  freq=1090000000.0  sr=2400000.0  n=240000  gain=24.0dB
+  [PASS] step=detect: 检测到 RTL-SDR 设备
+  [PASS] step=capture: 采集完成
+        写入 480,000 字节，丢包 0 字节
+  [PASS] step=record: SigMF 录制完成
+        SigMF：240,000 样本，时长 0.100s
+  [PASS] step=decode: ADS-B 解码完成，3 有效帧
+        解码有效帧：3
+  [PASS] step=output: 产物落盘完成：4 个文件
+  产物清单（4）：
+    - /x/a_messages.txt
+    - /x/a_messages.json
+    - /x/spectrum.png
+    - /x/manifest.json
+
+── 后续可做步骤建议 ──────────────────────
+  1. 【设备就绪】selfcheck 第 1/2/3 项通过 → 可直接跑：python3 tools/onboarding/onboard.py --step all --freq 1090e6 --mode adsb
+  2. 【全链路通过】产物已落盘（4 个），目录：/x。
+====================================================================
+```
+
+退出码 `0`。序列号在输入里是 `00000001`，解析器**只取前 3 位 + `***`**（结构化 JSON 里见 `"serials": ["000***"]`），不原样回显完整序列号。
+
+### 6.3 加 `--json` 时额外吐出的结构化结论（节选）
+
+`parse_hw_report.py sample_report.txt --json` 在上面人类可读报告之后再追加一段：
+
+```text
+--- structured JSON ---
+{
+  "selfcheck": {
+    "tool": "mbdsdr-hw-selfcheck",
+    "host": "realbox",
+    "counts": { "PASS": 6, "WARN": 0, "FAIL": 0, "SKIP": 0 },
+    "conclusion": "环境基本就绪：未发现阻断性问题。",
+    "device": {
+      "present": true,
+      "hits": [ { "vid": "0bda", "pid": "2838",
+                  "product": "RTL2838UHIDIR",
+                  "known_as": "RTL2838UHIDIR (目标真机)" } ],
+      "tuner": "Rafael Micro R820T",
+      "gain_count": 29,
+      "gain_list_db": ["-9.9", "0.0", "14.7", "24.0", "49.6"],
+      "serials": ["000***"],
+      "lost_bytes_total": 0,
+      "has_udev_rule": true,
+      "in_required_groups": true
+    },
+    "deps": { "py_rtlsdr": true, "py_soapy": true,
+              "gpsd": "/usr/sbin/gpsd", "missing": [] }
+  },
+  "onboard": {
+    "tool": "mbdsdr-onboarding",
+    "mode": "adsb",
+    "params": { "freq_hz": 1090000000.0, "sample_rate_hz": 2400000.0,
+                "n_samples": 240000, "gain_db": 24.0 },
+    "artifacts": ["/x/a_messages.txt", "/x/a_messages.json",
+                  "/x/spectrum.png", "/x/manifest.json"],
+    "out_dir": "/x"
+  },
+  "recommendations": [
+    "【设备就绪】selfcheck 第 1/2/3 项通过 → 可直接跑：...",
+    "【全链路通过】产物已落盘（4 个），目录：/x。"
+  ]
+}
+```
+
+### 6.4 无设备诚实空态（云 VM 真跑，退出码仍 0）
+
+只贴一段无设备 selfcheck（`target_hits: []`、检查 2/3 `SKIP`）时，解析器**不崩、不臆造设备**：
+
+```text
+====================================================================
+MBDSDR 真机回传 · 云侧解析结论
+====================================================================
+共从贴回文本中识别到 1 个 JSON 对象：selfcheck=有，onboard=无
+
+── SDR 设备 ──────────────────────────────
+  • 未检测到 RTL-SDR 设备（target_hits 为空）
+  • udev 规则：未安装
+
+── 声卡 ────────────────────────────────
+  状态=WARN  播放卡=0  录音卡=0  /dev/snd=不存在
+
+── GNSS 串口 ────────────────────────────
+  状态=WARN  未发现任何 /dev/ttyUSB* /dev/ttyACM*
+
+── 依赖 ─────────────────────────────────
+  状态=WARN
+  python rtlsdr=MISSING  SoapySDR=MISSING  gpsd=MISSING
+  缺失项：python 绑定 rtlsdr (pyrtlsdr), python 绑定 SoapySDR, gpsd 守护进程
+
+── 后续可做步骤建议 ──────────────────────
+  1. 【硬件未就绪】未检测到 RTL-SDR（0bda:2838/2832）→ 插好设备到 USB2.0 直连口后重跑 selfcheck。
+  2. 【权限准备】把当前用户加入 plugdev,dialout 组并重新登录：sudo usermod -aG plugdev,dialout $USER
+  3. 【udev 规则】安装 librtlsdr 自带 99-rtlsdr.rules 到 /etc/udev/rules.d/ 并重载 udev。
+  4. 【缺依赖】python 绑定 rtlsdr (pyrtlsdr), python 绑定 SoapySDR, gpsd 守护进程 → 影响 mbdsdr_ai Python 原型/GNSS 守护（不影响 C++/Qt 桌面端）。
+====================================================================
+```
+
+---
+
+## 7. 许可
 
 MIT。见仓库根 `LICENSE` 与各文件头 `SPDX-License-Identifier: MIT`。
