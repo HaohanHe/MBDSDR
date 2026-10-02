@@ -40,6 +40,9 @@ from typing import Any, Iterable
 
 SELFCHECK_TOOL = "mbdsdr-hw-selfcheck"
 ONBOARD_TOOL = "mbdsdr-onboarding"
+# diag_wizard.py --paste 末尾追加的回传块（phase10 P1）。它自带 "checks" 列表，
+# 因此 classify_block 必须按 tool 名优先识别，避免被误判成 selfcheck。
+DIAG_WIZARD_TOOL = "mbdsdr-diag-wizard"
 
 
 # ---------------------------------------------------------------------------
@@ -109,11 +112,22 @@ def extract_json_objects(text: str) -> list[dict]:
 # 2. 分类：这段 JSON 是 selfcheck 还是 onboard？
 # ---------------------------------------------------------------------------
 def classify_block(block: dict) -> str | None:
-    """返回 'selfcheck' / 'onboard' / None（无法识别）。"""
+    """返回 'selfcheck' / 'onboard' / 'diagwizard' / None（无法识别）。
+
+    按 ``tool`` 名优先判定：diag_wizard 回传块也带 "checks" 列表，若先按形状
+    匹配会被误判成 selfcheck。tool 缺失时才回退到旧的形状启发式（兼容裸
+    ``{"steps":[...]}`` / 裸 ``{"checks":[...]}`` 两种历史贴法）。
+    """
     tool = block.get("tool")
-    if tool == SELFCHECK_TOOL or ("checks" in block and isinstance(block.get("checks"), list)):
+    if tool == SELFCHECK_TOOL:
         return "selfcheck"
-    if tool == ONBOARD_TOOL or ("steps" in block and isinstance(block.get("steps"), list)):
+    if tool == ONBOARD_TOOL:
+        return "onboard"
+    if tool == DIAG_WIZARD_TOOL:
+        return "diagwizard"
+    if "checks" in block and isinstance(block.get("checks"), list):
+        return "selfcheck"
+    if "steps" in block and isinstance(block.get("steps"), list):
         return "onboard"
     return None
 
@@ -301,6 +315,42 @@ def analyze_onboard(block: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# 4b. diag_wizard --paste 回传块分析（phase10 P1）
+# ---------------------------------------------------------------------------
+def analyze_diagwizard(block: dict) -> dict:
+    """从 diag_wizard --paste 的围栏 JSON 块里抽出结构化结论。容错：缺字段
+    诚实标空，绝不臆造。"""
+    checks = block.get("checks") if isinstance(block.get("checks"), list) else []
+    out: dict[str, Any] = {
+        "tool": block.get("tool"),
+        "version": block.get("version"),
+        "host": block.get("host"),
+        "timestamp": block.get("timestamp"),
+        "exit_code": block.get("exit_code"),
+        "device_present": block.get("device_present"),
+        "no_hardware_expected": block.get("no_hardware_expected"),
+        "checks_summary": block.get("checks_summary") if isinstance(block.get("checks_summary"), dict) else {},
+        "summary_conclusion": block.get("summary_conclusion"),
+        "checks": [],
+        "suggested_commands": [],
+        "next_steps": [],
+    }
+    for c in checks:
+        if not isinstance(c, dict):
+            continue
+        out["checks"].append({
+            "name": c.get("name"),
+            "status": c.get("status"),
+            "verdict": c.get("verdict"),
+        })
+    out["suggested_commands"] = [
+        s for s in (block.get("suggested_commands") or []) if isinstance(s, str)]
+    out["next_steps"] = [
+        s for s in (block.get("next_steps") or []) if isinstance(s, str)]
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 5. 后续可做步骤建议（与检测到的事实挂钩）
 # ---------------------------------------------------------------------------
 def build_recommendations(sc: dict | None, ob: dict | None) -> list[str]:
@@ -375,8 +425,33 @@ def render_report(sc: dict | None, ob: dict | None, blocks: list[dict]) -> str:
     lines.append(bar)
     lines.append("MBDSDR 真机回传 · 云侧解析结论")
     lines.append(bar)
+    # phase10 P1：识别 diag_wizard --paste 回传块
+    dw_block = next((b for b in blocks if classify_block(b) == "diagwizard"), None)
+    dw = analyze_diagwizard(dw_block) if dw_block else None
     lines.append(f"共从贴回文本中识别到 {len(blocks)} 个 JSON 对象："
-                 f"selfcheck={'有' if sc else '无'}，onboard={'有' if ob else '无'}")
+                 f"selfcheck={'有' if sc else '无'}，onboard={'有' if ob else '无'}"
+                 f"，诊断向导={'有' if dw else '无'}")
+
+    # ---- diag_wizard 回传块（优先展示：这是用户 --paste 的主体）----
+    if dw:
+        lines.append("")
+        lines.append("── 诊断向导回传块 ────────────────────────")
+        lines.append(f"  tool={dw.get('tool')} v{dw.get('version')}  "
+                     f"host={dw.get('host') or '?'}  时间={dw.get('timestamp') or '?'}  "
+                     f"退出码={dw.get('exit_code')}")
+        cs = dw.get("checks_summary") or {}
+        lines.append(f"  检查汇总：PASS={cs.get('PASS', 0)}  WARN={cs.get('WARN', 0)}  "
+                     f"FAIL={cs.get('FAIL', 0)}"
+                     f"  （设备在场={'是' if dw.get('device_present') else '否'}，"
+                     f"无硬件空态={'是' if dw.get('no_hardware_expected') else '否'}）")
+        if dw.get("summary_conclusion"):
+            lines.append(f"  selfcheck 结论：{dw['summary_conclusion']}")
+        for c in dw.get("checks", []):
+            lines.append(f"  {_status_emoji(c.get('status'))} {c.get('name')}: {c.get('verdict')}")
+        if dw.get("suggested_commands"):
+            lines.append("  向导给出的可复制命令：")
+            for cmd in dw["suggested_commands"]:
+                lines.append(f"    $ {cmd}")
 
     # ---- selfcheck ----
     if sc:
@@ -446,8 +521,13 @@ def render_report(sc: dict | None, ob: dict | None, blocks: list[dict]) -> str:
     # ---- 建议 ----
     lines.append("")
     lines.append("── 后续可做步骤建议 ──────────────────────")
-    for i, r in enumerate(build_recommendations(sc, ob), 1):
-        lines.append(f"  {i}. {r}")
+    if dw and dw.get("next_steps"):
+        # --paste 块自带下一步（设备就绪时的 onboard + 回填路径），优先采用
+        for i, r in enumerate(dw["next_steps"], 1):
+            lines.append(f"  {i}. {r}")
+    else:
+        for i, r in enumerate(build_recommendations(sc, ob), 1):
+            lines.append(f"  {i}. {r}")
     lines.append(bar)
     return "\n".join(lines)
 
@@ -502,8 +582,10 @@ def main(argv: list[str] | None = None) -> int:
 
     print(render_report(sc, ob, blocks))
     if args.json:
+        dw_block = next((b for b in blocks if classify_block(b) == "diagwizard"), None)
         print("\n--- structured JSON ---")
         print(json.dumps({"selfcheck": sc, "onboard": ob,
+                          "diagwizard": analyze_diagwizard(dw_block) if dw_block else None,
                           "recommendations": build_recommendations(sc, ob)},
                          ensure_ascii=False, indent=2, default=str))
     return 0

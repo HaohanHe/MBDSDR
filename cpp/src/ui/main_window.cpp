@@ -3763,6 +3763,9 @@ void MainWindow::onRssiLevel(float dbfs) {
         recLibWatchLevel_->setText(QString("电平 %1 dBFS · 门限 %2")
                              .arg(dbfs, 0, 'f', 1)
                              .arg(watchThrSlider_ ? watchThrSlider_->value() : -50));
+    // 时空信号格：缓存这次真实遥测读数（NaN->有值即"等待遥测"->有读数）。
+    lastSpRssi_ = dbfs;
+    refreshSpacetimeView();
 }
 
 void MainWindow::onSnrLevel(float snrDb) {
@@ -3773,6 +3776,9 @@ void MainWindow::onSnrLevel(float snrDb) {
     // B5: one-line SNR readout (real measured SNR).
     if (sbSnr_)
         sbSnr_->setText(ui::fmtStripSnr(snrDb));
+    // 时空信号格：缓存这次真实 SNR 遥测并刷新。
+    lastSpSnr_ = snrDb;
+    refreshSpacetimeView();
 }
 
 void MainWindow::onSourceTelemetry(const QString& name, bool connected,
@@ -4463,6 +4469,8 @@ void MainWindow::onCapturePassClicked() {
 
     capturedIdx_ = liveRow_;
     dopplerLimiter_.reset(target);   // first live step continues from here
+    // 新捕获：尚未有本过境的实时 range-rate 多普勒，诚实置 NaN（1Hz 循环下一拍写入）。
+    lastSpDopplerHz_ = std::numeric_limits<double>::quiet_NaN();
 
     // Keep the left-panel readouts honest (mirrors the weather one-tune presets).
     if (freqSpin_) {
@@ -4501,8 +4509,12 @@ void MainWindow::onDopplerCompToggled(bool on) {
         }
         // The 1 Hz loop (updateLiveSatellite) now drives dopplerLimiter_.advance()
         // and retunes the active VFO; the label flips to "锁定中·多普勒补偿…".
+        // 刚开启：还没有本周期的实时多普勒读数，诚实 NaN 直到下一拍 range-rate。
+        lastSpDopplerHz_ = std::numeric_limits<double>::quiet_NaN();
     } else {
         dopplerLimiter_.disarm();
+        // 关闭补偿：读数立即作废，时空行回到诚实空态。
+        lastSpDopplerHz_ = std::numeric_limits<double>::quiet_NaN();
         // Back to the captured (but not auto-tracking) state, or un-locked.
         if (capturedIdx_ >= 0 && capturedIdx_ < passes_.size()) {
             const dsp::SatPass& p = passes_[capturedIdx_];
@@ -4643,6 +4655,8 @@ void MainWindow::updateLiveSatellite() {
                 const double stepped = dopplerLimiter_.advance(target);
                 const int selVfo = engine_->selectedVfoId();
                 if (selVfo >= 0) engine_->vfoSetOffset(selVfo, stepped);
+                // 缓存真实多普勒补偿值（range-rate 推出的 liveFd）供时空行显示。
+                lastSpDopplerHz_ = liveFd;
                 if (sbVfo_) sbVfo_->setText(
                     QString("%1 MHz").arg(stepped / 1.0e6, 0, 'f', 4));
                 captureStatusLabel_->setText(
@@ -4774,8 +4788,10 @@ static void paintSpRole(QLabel* lab, ui::SpRole role) {
 void MainWindow::refreshSpacetimeView() {
     // Device connection (cached from sourceChanged / sourceTelemetry).
     auto dev = ui::spTileDevice(lastSpConnected_, lastSpSourceName_);
-    // Signal: the cached real RSSI/SNR readbacks (NaN until a real value arrives).
-    auto sig = ui::spTileSignal(lastRssi_, lastSnr_);
+    // Signal: spacetime-specific telemetry caches (NaN until a REAL engine RSSI/SNR
+    // readback arrives via onRssiLevel/onSnrLevel). Using lastRssi_/lastSnr_ would
+    // render their -200/0 defaults as fake readings with no hardware.
+    auto sig = ui::spTileSignal(lastSpRssi_, lastSpSnr_);
     // Decode: the selected demod mode; a real frame count would be wired by a decode
     // slot later -- 0 here is the honest "no decoded frames yet" empty state.
     const QString mode = demodCombo_ ? demodCombo_->currentText() : QString();
@@ -4813,10 +4829,16 @@ void MainWindow::refreshSpacetimeView() {
     if (spTimeLine_) { spTimeLine_->setText(ts.text); paintSpRole(spTimeLine_, ts.role); }
 
     // Doppler compensation: armed = the live-comp checkbox is checked; has target =
-    // a pass is captured. Residual Hz is not readily observable here -> NaN (omitted).
+    // a pass is captured. The applied compensation Hz (lastSpDopplerHz_) is the REAL
+    // range-rate-derived liveFd written by the 1 Hz loop while tracking; it is only
+    // surfaced while compensation is actually ON and a target is captured -- otherwise
+    // NaN, which the formatter renders as the honest empty state (no fabricated Hz).
     const bool compOn = dopplerCompChk_ && dopplerCompChk_->isChecked();
-    auto dop = ui::spLineDoppler(compOn, capturedIdx_ >= 0,
-                                 std::numeric_limits<double>::quiet_NaN());
+    const bool hasTarget = capturedIdx_ >= 0;
+    const double dopHz = (compOn && hasTarget)
+        ? lastSpDopplerHz_
+        : std::numeric_limits<double>::quiet_NaN();
+    auto dop = ui::spLineDoppler(compOn, hasTarget, dopHz);
     if (spDopplerLine_) { spDopplerLine_->setText(dop.text); paintSpRole(spDopplerLine_, dop.role); }
 }
 

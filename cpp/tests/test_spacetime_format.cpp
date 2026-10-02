@@ -114,11 +114,18 @@ void TestSpacetimeFormat::dopplerLine() {
     auto idle = spLineDoppler(false, false, std::numeric_limits<double>::quiet_NaN());
     QCOMPARE(idle.text, QString("多普勒补偿：未补偿（无目标）"));
     QCOMPARE(spRoleKey(idle.role), "neutral");
-    // Armed + target: compensating, Ok.
+    // Armed + target + real applied compensation value: compensating, Ok, shows Hz.
     auto on = spLineDoppler(true, true, -12.5);
     QVERIFY(on.text.contains("补偿中"));
-    QVERIFY(on.text.contains("残差 -12.5 Hz"));
+    QVERIFY(on.text.contains("补偿值 -12.5 Hz"));
     QCOMPARE(spRoleKey(on.role), "ok");
+    // Armed + target but no real range-rate reading yet (NaN): compensating, Ok,
+    // but NO fabricated number -- honest omission.
+    auto onNoVal = spLineDoppler(true, true,
+                                 std::numeric_limits<double>::quiet_NaN());
+    QVERIFY(onNoVal.text.contains("补偿中"));
+    QVERIFY(!onNoVal.text.contains("补偿值"));
+    QCOMPARE(spRoleKey(onNoVal.role), "ok");
     // Armed but no target: inconsistent, Warn.
     auto weird = spLineDoppler(true, false, 0.0);
     QVERIFY(weird.text.contains("状态不一致"));

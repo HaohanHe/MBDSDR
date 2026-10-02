@@ -76,7 +76,12 @@ def test_rtl_first_gain_no_override_when_user_set():
 
 
 def test_rtl_first_gain_empty_table_no_crash():
-    """增益表为空时不应崩溃，也不应改 gain_db。"""
+    """增益表为空（未知调谐器/沙箱探测失败）时不应崩溃。
+
+    此时按设计回退到 R820T 系安全中点 _UNKNOWN_TUNER_FALLBACK_GAIN_DB（25.4 dB），
+    确保首启绝不留 0 dB 聋棒（对齐 SDR++ 初始化序列，见 sdr_backend 提交说明）；
+    故断言增益被拉到该回退值，而非停留在 0.0。
+    """
     from mbdsdr_ai.sdr_backend import RTLSDRBackend
 
     be = RTLSDRBackend(device_index=0)
@@ -87,7 +92,9 @@ def test_rtl_first_gain_empty_table_no_crash():
 
     be._maybe_apply_first_gain_midpoint()  # 不应抛异常
 
-    assert be.status.gain_db == 0.0
+    assert be.status.gain_db == be._UNKNOWN_TUNER_FALLBACK_GAIN_DB, \
+        f"空增益表应回退到安全中点 {be._UNKNOWN_TUNER_FALLBACK_GAIN_DB} dB，" \
+        f"实际 {be.status.gain_db}"
 
 
 # ---------------------------------------------------------------------------

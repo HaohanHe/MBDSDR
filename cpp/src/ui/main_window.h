@@ -261,6 +261,14 @@ private:
     // false，驱动诚实空态。
     bool         lastSpConnected_   = false;
     QString      lastSpSourceName_;
+    // 时空视图专用遥测读数缓存：NaN = 还没收到真实读数（驱动诚实 "--" 空态）。
+    // 不复用 lastRssi_/lastSnr_：那俩默认 -200/0（供扫描门限 / S-meter 用），
+    // 并非 NaN，直接接会在无硬件时把 "-200 dBFS" 渲染成一个假读数。
+    float  lastSpRssi_ = std::numeric_limits<float>::quiet_NaN();
+    float  lastSpSnr_  = std::numeric_limits<float>::quiet_NaN();
+    // 实时多普勒补偿值（Hz）：仅当捕获过境 + 补偿开启 + 几何传播出 range-rate 时
+    // 由 1Hz 循环写入真实 liveFd；新捕获 / 补偿开关 / 过境结束时复位 NaN（诚实空态）。
+    double lastSpDopplerHz_ = std::numeric_limits<double>::quiet_NaN();
     void refreshSpacetimeView();   // pull real state -> pure formatters -> labels
 
     // Left panel controls
