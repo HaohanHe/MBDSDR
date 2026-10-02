@@ -266,7 +266,7 @@ class _SsdvRS:
 # ---------------------------------------------------------------------------
 # base-40 呼号
 # ---------------------------------------------------------------------------
-def encode_callsign(callsign: str) -> int:
+def callsign_to_base40(callsign: str) -> int:
     x = 0
     for ch in reversed(callsign[:6]):
         x *= 40
@@ -279,7 +279,7 @@ def encode_callsign(callsign: str) -> int:
     return x & 0xFFFFFFFF
 
 
-def decode_callsign(code: int) -> str:
+def base40_to_callsign(code: int) -> str:
     if code > 0xF423FFFF:
         return ""
     out = []
@@ -364,7 +364,7 @@ class SsdvDecoder:
         callsign_code = (raw[2] << 24) | (raw[3] << 16) | (raw[4] << 8) | raw[5]
         return SsdvPacket(
             pkt_type=ptype,
-            callsign=decode_callsign(callsign_code),
+            callsign=base40_to_callsign(callsign_code),
             callsign_code=callsign_code,
             image_id=raw[6],
             packet_id=(raw[7] << 8) | raw[8],
@@ -887,7 +887,7 @@ class SsdvEncoder:
         pkt_payload_len = PAYLOAD_FEC if self.pkt_type == TYPE_NORMAL else PAYLOAD_NOFEC
         packets: List[bytes] = []
         pid = 0
-        callsign_code = encode_callsign(self.callsign)
+        callsign_code = callsign_to_base40(self.callsign)
         n_mcus = len(mcu_blobs)
 
         def build_packet(pid: int, first_mcu: int, payload: bytes, eoi: int) -> bytes:
@@ -942,5 +942,5 @@ __all__ = [
     "SYNC", "TYPE_NORMAL", "TYPE_NOFEC", "PACKET_LEN",
     "PAYLOAD_FEC", "PAYLOAD_NOFEC",
     "SsdvPacket", "SsdvDecoder", "SsdvImage", "ImageResult", "SsdvEncoder",
-    "encode_callsign", "decode_callsign",
+    "callsign_to_base40", "base40_to_callsign",
 ]
