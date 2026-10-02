@@ -767,32 +767,27 @@ def _decode_pd(freq: np.ndarray, sr: int, data_start: int,
     }
 
 
-def decode_sstv(file_path: str, output_path: Optional[str] = None,
-                 mode: str = "auto") -> Dict[str, Any]:
+def _save_image(image: np.ndarray, output_path: str) -> str:
+    """保存 RGB uint8 数组为 PNG；无 PIL 时退化为 .npy。返回实际落盘路径。"""
+    if HAS_PIL:
+        Image.fromarray(image).save(output_path)
+        return output_path
+    np.save(output_path + ".npy", image)
+    return output_path + ".npy"
+
+
+def _decode_core(samples: np.ndarray, mode: str = "auto") -> Dict[str, Any]:
+    """核心解码：输入为已重采样到 48000Hz 的单声道浮点音频。
+
+    与文件解耦：不读盘、不写盘。成功返回 dict 且带 ``image``(HxWx3 uint8)
+    键（调用方负责保存）；失败返回 ``{"success": False, "error": ...}``。
+    decode_sstv(WAV) 与 decode_audio(数组) 共用本函数，保证两条路径行为一致。
     """
-    解码 SSTV 图像。
-
-    Args:
-        file_path: 输入 wav 文件路径
-        output_path: 输出 PNG 路径（默认同目录同名 .png）
-        mode: 模式 ("auto" 自动检测, 或 "Martin M1"/"Scottie S1"/"Robot 36")
-
-    Returns:
-        dict: {success, mode, width, height, output_path, note}
-    """
-    if not os.path.exists(file_path):
-        return {"error": f"文件不存在: {file_path}"}
-
-    try:
-        samples, orig_rate = _read_wav(file_path)
-    except Exception as e:
-        return {"error": f"WAV 读取失败: {e}"}
-
-    samples = _resample_if_needed(samples, orig_rate)
     sr = TARGET_SAMPLE_RATE
 
     if len(samples) < sr * 2:  # 至少 2 秒
-        return {"error": "音频太短，无法解码 SSTV（至少需要 2 秒）"}
+        return {"success": False,
+                "error": "音频太短，无法解码 SSTV（至少需要 2 秒）"}
 
     # 计算瞬时频率
     freq = _instantaneous_frequency(samples, sr)
@@ -809,20 +804,14 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
     if detected_mode in ("Robot 72", "Robot72"):
         res = _decode_robot72(freq, sr, data_start)
         if not res.get("success"):
-            return {"error": res.get("error", "Robot72 解码失败")}
+            return {"success": False,
+                    "error": res.get("error", "Robot72 解码失败")}
         image = res.pop("image")
-        if output_path is None:
-            output_path = os.path.splitext(file_path)[0] + "_sstv.png"
-        if HAS_PIL:
-            Image.fromarray(image).save(output_path)
-        else:
-            np.save(output_path + ".npy", image)
-            output_path = output_path + ".npy"
         return {
             "success": True, "mode": "Robot 72", "width": res["width"],
             "height": res["height"], "period_ms": res["period_ms"],
             "pulse_ms": res["pulse_ms"], "rows_decoded": res["rows_decoded"],
-            "output_path": output_path,
+            "image": image,
             "identification": {"method": "timing", "vis_raw": vis_code},
         }
 
@@ -831,15 +820,9 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
         layout = id_info.get("robot_layout", "auto")
         res = _decode_robot36(freq, sr, data_start, layout=layout)
         if not res.get("success"):
-            return {"error": res.get("error", "Robot36 解码失败")}
+            return {"success": False,
+                    "error": res.get("error", "Robot36 解码失败")}
         image = res.pop("image")
-        if output_path is None:
-            output_path = os.path.splitext(file_path)[0] + "_sstv.png"
-        if HAS_PIL:
-            Image.fromarray(image).save(output_path)
-        else:
-            np.save(output_path + ".npy", image)
-            output_path = output_path + ".npy"
         return {
             "success": True,
             "mode": "Robot 36",
@@ -848,7 +831,7 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
             "layout": res["layout"],
             "period_ms": res["period_ms"],
             "rows_decoded": res["rows_decoded"],
-            "output_path": output_path,
+            "image": image,
             "identification": {
                 "method": "timing",
                 "vis_raw": vis_code,
@@ -861,15 +844,9 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
     if SSTV_MODES.get(detected_mode, {}).get("family") == "pd":
         res = _decode_pd(freq, sr, data_start, mode=detected_mode)
         if not res.get("success"):
-            return {"error": res.get("error", "PD 解码失败")}
+            return {"success": False,
+                    "error": res.get("error", "PD 解码失败")}
         image = res.pop("image")
-        if output_path is None:
-            output_path = os.path.splitext(file_path)[0] + "_sstv.png"
-        if HAS_PIL:
-            Image.fromarray(image).save(output_path)
-        else:
-            np.save(output_path + ".npy", image)
-            output_path = output_path + ".npy"
         return {
             "success": True,
             "mode": res["mode"],
@@ -878,7 +855,7 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
             "period_ms": res["period_ms"],
             "px_ms": res["px_ms"],
             "rows_decoded": res["rows_decoded"],
-            "output_path": output_path,
+            "image": image,
             "identification": {
                 "method": "timing", "vis_raw": vis_code,
                 "pulse_ms": res["pulse_ms"], "period_ms": res["period_ms"],
@@ -895,7 +872,7 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
         }
 
     if detected_mode not in SSTV_MODES:
-        return {"error": f"不支持的模式: {detected_mode}"}
+        return {"success": False, "error": f"不支持的模式: {detected_mode}"}
 
     mdef = SSTV_MODES[detected_mode]
     width = mdef["width"]
@@ -1005,56 +982,102 @@ def decode_sstv(file_path: str, output_path: Optional[str] = None,
             image[row, :, 1] = np.clip(Y - 0.344 * (BY - 128) - 0.714 * (RY - 128), 0, 255)
             image[row, :, 2] = np.clip(Y + 1.772 * (BY - 128), 0, 255)
 
-    # 保存图像
-    if output_path is None:
-        output_path = os.path.splitext(file_path)[0] + "_sstv.png"
-
-    if HAS_PIL:
-        img = Image.fromarray(image)
-        img.save(output_path)
-    else:
-        # 用 numpy 保存原始数据（无 PIL 时）
-        np.save(output_path + ".npy", image)
-        output_path = output_path + ".npy"
-
     result = {
         "success": True,
         "mode": detected_mode,
         "width": width,
         "height": height,
-        "output_path": output_path,
         "rows_decoded": int(np.sum(np.any(image > 0, axis=(1, 2)))),
+        "image": image,
     }
     if mode == "auto" and detected_mode != "Martin M1":
         result["note"] = f"自动检测到模式: {detected_mode}"
     return result
 
 
+# ---------------------------------------------------------------------------
+# 文件 / 数组入口（共用 _decode_core，行为一致）
+# ---------------------------------------------------------------------------
+def decode_sstv(file_path: str, output_path: Optional[str] = None,
+                 mode: str = "auto") -> Dict[str, Any]:
+    """
+    解码 SSTV 图像（从 WAV 文件）。
+
+    Args:
+        file_path: 输入 wav 文件路径
+        output_path: 输出 PNG 路径（默认同目录同名 _sstv.png）
+        mode: 模式 ("auto" 自动检测, 或 "Martin M1"/"Scottie S1"/"Robot 36")
+
+    Returns:
+        dict: {success, mode, width, height, output_path, rows_decoded, ...}
+    """
+    if not os.path.exists(file_path):
+        return {"success": False, "error": f"文件不存在: {file_path}"}
+
+    try:
+        samples, orig_rate = _read_wav(file_path)
+    except Exception as e:
+        return {"success": False, "error": f"WAV 读取失败: {e}"}
+
+    samples = _resample_if_needed(samples, orig_rate)
+    res = _decode_core(samples, mode=mode)
+    if not res.get("success"):
+        return res
+    image = res.pop("image")
+    if output_path is None:
+        output_path = os.path.splitext(file_path)[0] + "_sstv.png"
+    res["output_path"] = _save_image(image, output_path)
+    return res
+
+
+def decode_audio(samples: np.ndarray, sample_rate: int,
+                 out_png: Optional[str] = None,
+                 mode: str = "auto") -> Dict[str, Any]:
+    """从音频样本数组直接解码 SSTV 图像（实时流 / FM 解调后音频入口）。
+
+    与 WAV 路径 ``decode_sstv`` 共用同一核心（``_decode_core``）：先重采样到
+    48000Hz，再做瞬时频率 / VIS / 数据驱动制式识别 / 逐行采样。不落临时 wav。
+
+    Args:
+        samples: 单声道音频样本（一维 float；多维自动按通道取均值）。
+                 幅度任意——瞬时频率用过零率估计，去直流后对幅度不敏感。
+        sample_rate: ``samples`` 的采样率（Hz）。
+        out_png: 输出 PNG 路径。给定时落盘并在结果里返回 ``output_path``；
+                 为 ``None`` 时不写盘，把解码出的 HxWx3 uint8 图放在
+                 结果 ``image`` 键里返回（供调用方直接复用/二次加工）。
+        mode: ``"auto"`` 自动识别，或指定制式名（"Martin M1"/"Robot 36"/...）。
+
+    Returns:
+        dict：成功含 {success: True, mode, width, height, rows_decoded,
+        image 或 output_path, identification}；失败含 {success: False, error}。
+        无信号/弱信号时诚实返回 success=False，绝不兜底出垃圾图。
+    """
+    arr = np.asarray(samples)
+    if arr.ndim > 1:
+        arr = arr.mean(axis=tuple(range(1, arr.ndim)))
+    arr = arr.astype(np.float32)
+    if arr.size == 0:
+        return {"success": False, "error": "空音频输入（0 样本）"}
+    sr_in = int(round(float(sample_rate)))
+    if sr_in <= 0:
+        return {"success": False, "error": f"非法采样率: {sample_rate}"}
+
+    resampled = _resample_if_needed(arr, sr_in)
+    res = _decode_core(resampled, mode=mode)
+    if not res.get("success"):
+        return res
+    image = res.pop("image")
+    if out_png:
+        res["output_path"] = _save_image(image, out_png)
+    else:
+        res["image"] = image
+    return res
+
+
 def decode_sstv_from_samples(samples: np.ndarray, sample_rate: int,
                               output_path: str, mode: str = "Martin M1") -> Dict[str, Any]:
-    """从 numpy 样本数组解码 SSTV（用于实时流）。"""
-    # 写临时 wav 然后调用 decode_sstv
-    import tempfile
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        tmp_path = f.name
-    if HAS_SCIPY:
-        wavfile.write(tmp_path, sample_rate, (samples * 32767).astype(np.int16))
-    else:
-        # 简化写 wav
-        with open(tmp_path, "wb") as f:
-            f.write(b"RIFF")
-            f.write(struct.pack("<I", 36 + len(samples) * 2))
-            f.write(b"WAVEfmt ")
-            f.write(struct.pack("<I", 16))
-            f.write(struct.pack("<H", 1))  # PCM
-            f.write(struct.pack("<H", 1))  # mono
-            f.write(struct.pack("<I", sample_rate))
-            f.write(struct.pack("<I", sample_rate * 2))
-            f.write(struct.pack("<H", 2))
-            f.write(struct.pack("<H", 16))
-            f.write(b"data")
-            f.write(struct.pack("<I", len(samples) * 2))
-            f.write((samples * 32767).astype(np.int16).tobytes())
-    result = decode_sstv(tmp_path, output_path, mode=mode)
-    os.unlink(tmp_path)
-    return result
+    """从 numpy 样本数组解码 SSTV（用于实时流）。
+
+    现已直接走 ``decode_audio``（数组入口），不再写临时 wav。
+    """
+    return decode_audio(samples, sample_rate, out_png=output_path, mode=mode)
