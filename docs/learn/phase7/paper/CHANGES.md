@@ -84,3 +84,53 @@
 4. **参考文献与作者信息**：本稿未附正式 bibliography；GNU Radio/SDR++/SatDump/O-RAN 及 LLM-SDR/MCP 类先前工作的具体引用条目需核实并按 IEEE 格式补齐；作者名单待补（现为 Bi4MIB open-source call）。
 5. **LaTeX/IEEEtran 排版**：当前为 Markdown 初稿，投稿前迁移 `IEEEtran` 模板、图表改用 `\includegraphics{}`。
 6. **多站 / GNSS 融合定轨**：当前为单站多普勒-only（Fig.8/9 的观测性局限），属未来工作。
+
+---
+
+# v0.3 → v0.4（2026-10-02，投稿前审稿视角终稿）
+
+- 数据口径核对基准（本轮新增）：逐一复读 `paper/experiments/*.csv` 与
+  `manifest_*.json`。所有正文数字经复核与 CSV 一致（含 Wilson CI 三位小数）。
+- 红线遵守：未虚构任何文献/数据；未改动任何 CSV；只写本目录
+  （`docs/learn/phase7/paper/`）内文件；未 commit / push。
+
+## 一、审稿视角自查结论（按维度）
+
+| 维度 | 结论 | 说明 |
+|---|---|---|
+| 标题是否传达核心贡献 | **已改** | 原标题"…with Deterministic, Reproducible Experimentation"偏泛；改为"…with a **Function-Calling, Reproducible Measurement Backbone**"，直接点出两个新颖点（函数调用工具层 + 可复现测量骨干）。 |
+| 摘要关键指标数字 | **已补** | 原摘要缺工具管线成功率；补入：采样率不变区间 0.595–0.705（替换原含糊"≈0.60"）、补偿后≈0.94（对齐 CSV fd=10 补偿 0.940）、KNN 0.96–1.00 vs 经典规则 0.67–1.00、**本地工具管线 400 次混合调用 graceful-handling = 1.000**。 |
+| 图表编号/正文引用自洽 | **已修 1 处孤儿** | Fig.1–10、Tab.I–VI 全部有正文引用；唯 Tab.II 原先只有 caption、无正文交叉引用，III.A 补"Representative operating points…listed in Tab. II."。Fig.8 经"Figs. 8–9"在 III.F/Discussion 引用，非孤儿。 |
+| Baseline 三类对比（经典 DSP vs KNN vs Agent/LLM） | **已显式化** | III.E 原只说"rule vs KNN"；改为明确"three detector families on the same samples: (i) classical-DSP rule thresholds, (ii) KNN-AMR, (iii) LLM agent"，并标注 LLM 臂 `PENDING_ONLINE_RUN`。另加 reviewer note：Fig.5（120/SNR）与 Fig.6（60/SNR，预留 LLM 曲线）待 LLM 运行后合并为一张三类对比图。 |
+| Related Work 充分性 | **已加待补占位，不虚构** | 保留 GNU Radio/SDR++/SatDump/O-RAN·6G xApp 真实方向；新增"References to verify（待补）"清单，仅列*类别*与公认锚点（Wilson 1927、SGP4/Hoots&Roe、SigMF、OpenAI function-calling 等），全部标注"[待核实]"，未生成任何 final bib 条目，未断言任何无法确证的具体先前系统名。 |
+
+## 二、逐项改动
+
+- **改 T1 — 标题（front matter `title:` 与正文一级标题同步）**：见上表。
+- **改 S1 — Abstract 指标句**：见上表；补偿后数值由"≈0.95"收紧为"≈0.94"以对齐 `doppler_comp_success.csv`（fd=10 补偿 0.940）。
+- **改 R1 — III.A 补 Tab.II 交叉引用**：消除孤儿表。
+- **改 R2 — III.D Provenance note 由"请勿引用"改为"已解决"**：经核对，落盘 `doppler_comp_success.csv` 与 `manifest_doppler_comp.json` **已在主种子 `seed=20261001` 重跑恢复**（manifest：`n_samples=3600`、figure `...__N3600__20261002.png`、timestamp 2026-10-02T03:51Z），Tab.IV 与 CSV 逐格一致（fd=10：无补偿 0.065、补偿 0.940）。v0.3 的"do not cite"警示撤回，改写为 resolved 说明。
+- **增 R3 — III.E 三类 detector 框架 + Fig.5/6 合并 reviewer note**。
+- **增 R4 — §V 末尾"References to verify（待补）"占位清单**。
+- **增 F1 — 新增 `main.tex`**：IEEEtran journal letter 骨架（documentclass[journal]、title/author 占位、abstract、I–VI + Appendix 结构），图表一律以注释式迁移点标注（`% Fig.X → paper/experiments/figures/...png`），bib 注释为 `% 待补`。**`main.md` 仍为唯一事实源**。
+- **版本号**：front matter `status:` → `DRAFT v0.4 (2026-10-02, pre-submission reviewer pass; see CHANGES.md)`。
+
+## 三、本轮复核留痕（数字与 CSV 一致，未改动）
+
+- Tab.II（`ebno_decode_success.csv`）：BPSK 6 dB=0.60[0.462,0.724]、8 dB=0.92[0.812,0.969]；ADS-B 10/12 dB=0.48/0.86；AX.25 24/26 dB=0.70/0.98。Δ 标定 AX.25 +15.6、ADS-B +6.0、BPSK +10.0 dB，与 10·log10(B/Rb) 复核一致。
+- Tab.III（`rate_sweep_success.csv`）：7 档 0.595–0.705，Wilson CI 三位小数一致。
+- Fig.3（`rate_bandwidth_success.csv`）：8 kHz=0.71、12 kHz=0.77、≥20 kHz 0.78–0.88。
+- Tab.IV（`doppler_comp_success.csv`，已恢复 N=3600=9 fd×2 arm×200）：逐格一致。
+- Tab.V（`baseline_compare.csv`，N=120/SNR）：规则/KNN 五档全一致；LLM 列 `PENDING_ONLINE_RUN`。
+- Fig.7（`amr_confusion_matrix_snr10.csv`）：总体 636/640=0.9938，FSK→QAM 4/80。
+- Fig.8/9（`doppler_floor.csv`/`doppler_duration_convergence.csv`）：σ=1 Hz RLS≈1.11 km；60 s≈5.79 km、600 s=3.96 km。
+- Tab.VI（`agent_toolcall_stage_summary.csv`）：7 阶段全 1.000，注册 5 工具≈0.016 ms；LLM 决策行 PENDING。
+- 附录 N 求和 = 2400+1400+900+3600+600+300+640+155+6+400 = **10 401**（≈10.4k），Abstract/Conclusion 一致。
+
+## 四、v0.4 后仍待补（投稿前必须处理）
+
+1. **LLM 在线运行**：Fig.6（AMR 的 LLM 列）与 Fig.10/Tab.VI 末行（call/pick/arg）仍 `PENDING_ONLINE_RUN`；回填后合并 Fig.5+Fig.6。
+2. **OTA / 真实录制解码**：全部 synthetic；录 SigMF 后 `--recordings-dir` 回放，manifest 改 `recorded`。
+3. **参考文献与作者名单**：§V "References to verify" 逐条核实并按 IEEE 格式入 `refs.bib`；作者名单现为 open-source call，待补。
+4. **main.md → main.tex 同步**：投稿前按 README 机制把 main.md 终稿迁入 `main.tex` 的注释迁移点，图表换 `\includegraphics{}`，跑 pdflatex+bibtex。
+5. **多站 / GNSS 融合定轨**（未来工作）；**实测 fd 估计器**替换 Fig.4 理想已知 fd 上界。

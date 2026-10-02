@@ -245,6 +245,24 @@ private:
     void onDopplerCompToggled(bool on);  // arm/disarm live Doppler tracking
     void updateCaptureControls();         // enable/disable + status line from selection
 
+    // ---- 时空视图 tab (centerTabs_ 追加) ------------------------------------
+    // 四格总览（设备/信号/解码/GNSS）+ 当前接收目标 + 时间源(gnss/system) +
+    // 多普勒补偿状态。文案/颜色全部由 ui/spacetime_format.h 的纯函数产出；这里只
+    // 持有 label 句柄 + 两个真实读数缓存。无硬件时一切走诚实空态（时间源=system、
+    // GNSS=无 fix、多普勒=未补偿），绝不把 system 钟伪装成 GNSS 授时。
+    QLabel* spDeviceTile_  = nullptr;
+    QLabel* spSignalTile_   = nullptr;
+    QLabel* spDecodeTile_   = nullptr;
+    QLabel* spGnssTile_     = nullptr;
+    QLabel* spTargetLine_   = nullptr;
+    QLabel* spTimeLine_     = nullptr;
+    QLabel* spDopplerLine_  = nullptr;
+    // 真实源连接态缓存（来自 sourceChanged / sourceTelemetry）。云内无硬件 ->
+    // false，驱动诚实空态。
+    bool         lastSpConnected_   = false;
+    QString      lastSpSourceName_;
+    void refreshSpacetimeView();   // pull real state -> pure formatters -> labels
+
     // Left panel controls
     QDoubleSpinBox* freqSpin_   = nullptr;
     QComboBox*      stepCombo_  = nullptr;

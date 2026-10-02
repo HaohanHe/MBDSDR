@@ -84,6 +84,8 @@
 #include "ui/shortcuts_dialog.h"
 #include "ui/shortcuts_catalog.h"
 #include "ui/status_format.h"
+#include "ui/spacetime_format.h"
+#include <QGridLayout>
 #include <QListWidget>
 #include <QLineEdit>
 #include <QSpinBox>
@@ -742,6 +744,69 @@ MainWindow::MainWindow(QWidget* parent)
         weatherPanel_ = new ui::WeatherSatPanel(weatherPage);
         weatherLay->addWidget(weatherPanel_);
         centerTabs_->addTab(weatherPage, "气象");
+    }
+
+    // Spacetime (时空视图) tab: a compact 2x2 overview (device / signal / decode /
+    // GNSS) plus three status lines (current target / time source / Doppler comp).
+    // All text + colour come from the pure formatters in ui/spacetime_format.h;
+    // with no hardware every tile falls into its honest empty state (time source =
+    // system, GNSS = no fix, Doppler = uncompensated). refreshSpacetimeView() is
+    // driven by the existing 1 Hz loop + telemetry/fix slots -- no new timers.
+    {
+        auto* spPage = new QWidget(centerCard);
+        auto* spOuter = new QVBoxLayout(spPage);
+        spOuter->setContentsMargins(tokens::scaled(12), tokens::scaled(10),
+                                    tokens::scaled(12), tokens::scaled(10));
+        spOuter->setSpacing(tokens::scaled(10));
+
+        auto* spHead = new QLabel(QStringLiteral("时空视图 · 时空对齐状态"), spPage);
+        spHead->setObjectName("monoInfo");
+        spOuter->addWidget(spHead);
+
+        // Build one overview tile: a small title + a large value label we recolor.
+        auto makeTile = [&](const QString& title) -> QLabel* {
+            auto* card = new QFrame(spPage);
+            card->setObjectName("panelCard");
+            auto* lay = new QVBoxLayout(card);
+            lay->setContentsMargins(tokens::scaled(10), tokens::scaled(8),
+                                    tokens::scaled(10), tokens::scaled(8));
+            lay->setSpacing(tokens::scaled(4));
+            auto* t = new QLabel(title, card);
+            t->setObjectName("monoInfo");
+            auto* v = new QLabel(QStringLiteral("--"), card);
+            v->setWordWrap(true);
+            lay->addWidget(t);
+            lay->addWidget(v);
+            return v;
+        };
+
+        auto* grid = new QWidget(spPage);
+        auto* gridLay = new QGridLayout(grid);
+        gridLay->setContentsMargins(0, 0, 0, 0);
+        gridLay->setSpacing(tokens::scaled(8));
+        spDeviceTile_ = makeTile(QStringLiteral("设备连接"));
+        spSignalTile_ = makeTile(QStringLiteral("信号"));
+        spDecodeTile_ = makeTile(QStringLiteral("解码状态"));
+        spGnssTile_   = makeTile(QStringLiteral("GNSS 定位"));
+        gridLay->addWidget(spDeviceTile_, 0, 0);
+        gridLay->addWidget(spSignalTile_, 0, 1);
+        gridLay->addWidget(spDecodeTile_, 1, 0);
+        gridLay->addWidget(spGnssTile_,   1, 1);
+        spOuter->addWidget(grid);
+
+        // Three status lines: current target / time source / Doppler compensation.
+        spTargetLine_  = new QLabel(QStringLiteral("当前接收目标：无"), spPage);
+        spTimeLine_    = new QLabel(QStringLiteral("时间源 system"), spPage);
+        spDopplerLine_ = new QLabel(QStringLiteral("多普勒补偿：未补偿（无目标）"), spPage);
+        spTargetLine_->setWordWrap(true);
+        spTimeLine_->setWordWrap(true);
+        spDopplerLine_->setWordWrap(true);
+        spOuter->addWidget(spTargetLine_);
+        spOuter->addWidget(spTimeLine_);
+        spOuter->addWidget(spDopplerLine_);
+        spOuter->addStretch();
+
+        centerTabs_->addTab(spPage, "时空视图");
     }
 
     centerLay->addWidget(centerTabs_);
@@ -3604,6 +3669,10 @@ void MainWindow::onSourceChanged(const QString& name, bool connected) {
     if (recordBtn_) recordBtn_->setEnabled(true);
     sbSdr_->setText(name + (connected ? "" : " (test)"));
     setControlsEnabled(connected);
+    // Spacetime overview: track the real connection state immediately.
+    lastSpConnected_ = connected;
+    lastSpSourceName_ = name;
+    refreshSpacetimeView();
     // Deferred: sourceChanged can be delivered INLINE while the engine still
     // holds sourceMutex_ (connectRtlTcp emits it under that lock). Calling
     // sourceCapabilities() here would re-enter the non-recursive mutex and
@@ -3712,6 +3781,9 @@ void MainWindow::onSourceTelemetry(const QString& name, bool connected,
     // connected=false, values are honest synthetic readbacks tagged 非硬件.
     if (sampleRateHz > 0.0) lastSampleRateHz_ = sampleRateHz;
     lastGainDb_ = gainDb;
+    // Cache the real connection state for the spacetime overview tile.
+    lastSpConnected_ = connected;
+    lastSpSourceName_ = name;
     if (sbSr_)
         sbSr_->setText(ui::fmtStripSampleRate(sampleRateHz));
     if (sbVfo_)
@@ -3726,6 +3798,8 @@ void MainWindow::onSourceTelemetry(const QString& name, bool connected,
     // Deferred (same rationale as onSourceChanged): refresh on a turn where the
     // engine lock is not held. Change-detector inside keeps this cheap.
     QTimer::singleShot(0, this, [this]() { refreshDeviceCapabilities(); });
+    // Spacetime overview: device/signal tiles track this 1 Hz readback.
+    refreshSpacetimeView();
 }
 
 // Re-read the active source's REAL capabilities (rtl_tcp RTL0 handshake, or the
@@ -4487,6 +4561,7 @@ void MainWindow::updateLiveSatellite() {
     const QDateTime viewT = previewMode_ ? previewUtc_ : now;
     skyView_->setCurrentTime(viewT);
     updateClockBiasLabel();
+    refreshSpacetimeView();   // 1 Hz: target / time-source / Doppler line stay live
 
     if (!stationSet_) {
         skyView_->clearLiveSatellites();
@@ -4677,6 +4752,74 @@ void MainWindow::onSkySliderReleased() {
     updateLiveSatellite();   // back to live now
 }
 
+// Map a spacetime colour role to a tokens accent. The pure formatters only emit a
+// widget-agnostic SpRole; this is the one place that turns it into an actual colour.
+static void paintSpRole(QLabel* lab, ui::SpRole role) {
+    if (!lab) return;
+    const char* c = tokens::kInteract;            // neutral
+    switch (role) {
+    case ui::SpRole::Ok:      c = tokens::kSuccess; break;
+    case ui::SpRole::Warn:    c = tokens::kWarning; break;
+    case ui::SpRole::Danger:  c = tokens::kDanger;  break;
+    case ui::SpRole::Info:    c = tokens::kAccent;  break;
+    case ui::SpRole::Neutral: c = tokens::kInteract; break;
+    }
+    lab->setStyleSheet(QString("color:%1;").arg(QString::fromUtf8(c)));
+}
+
+// Pull the REAL engine/GNSS/capture state through the pure spacetime formatters and
+// push the resulting tiles/lines into the tab labels. No new state is invented:
+// with no hardware this lands on the honest empty state (system time, no GNSS fix,
+// uncompensated). Called from the 1 Hz loop + the telemetry/fix slots.
+void MainWindow::refreshSpacetimeView() {
+    // Device connection (cached from sourceChanged / sourceTelemetry).
+    auto dev = ui::spTileDevice(lastSpConnected_, lastSpSourceName_);
+    // Signal: the cached real RSSI/SNR readbacks (NaN until a real value arrives).
+    auto sig = ui::spTileSignal(lastRssi_, lastSnr_);
+    // Decode: the selected demod mode; a real frame count would be wired by a decode
+    // slot later -- 0 here is the honest "no decoded frames yet" empty state.
+    const QString mode = demodCombo_ ? demodCombo_->currentText() : QString();
+    auto dec = ui::spTileDecode(mode, 0);
+    // GNSS: the real merged fix (or the honest "no fix" empty state).
+    auto gnss = ui::spTileGnss(gnssHasFix_, lastGnssFix_.latitude,
+                               lastGnssFix_.longitude, lastGnssFix_.satellitesInUse,
+                               lastGnssFix_.hdop);
+
+    if (spDeviceTile_)  { spDeviceTile_->setText(dev.text);  paintSpRole(spDeviceTile_, dev.role); }
+    if (spSignalTile_)  { spSignalTile_->setText(sig.text);  paintSpRole(spSignalTile_, sig.role); }
+    if (spDecodeTile_)  { spDecodeTile_->setText(dec.text);  paintSpRole(spDecodeTile_, dec.role); }
+    if (spGnssTile_)    { spGnssTile_->setText(gnss.text);   paintSpRole(spGnssTile_, gnss.role); }
+
+    // Current receive target: the captured pass, if any.
+    QString tgtName; double tgtF = 0.0;
+    if (capturedIdx_ >= 0 && capturedIdx_ < passes_.size()) {
+        tgtName = passes_[capturedIdx_].name;
+        tgtF    = passes_[capturedIdx_].f0DownlinkHz;
+    }
+    auto tgt = ui::spLineTarget(tgtName, tgtF);
+    if (spTargetLine_) { spTargetLine_->setText(tgt.text); paintSpRole(spTargetLine_, tgt.role); }
+
+    // Time source: resolve EXACTLY like updateClockBiasLabel() -- GNSS only when the
+    // serial link is up AND a real NMEA clock (hasUtc) arrived; otherwise system.
+    // We never upgrade system -> gnss.
+    const bool gnssUp     = gnssRx_ && gnssRx_->connected();
+    const bool gnssClock  = gnssUp && lastGnssFix_.hasUtc && lastGnssFix_.utc.isValid();
+    const QString source  = gnssClock ? QStringLiteral("gnss")
+                                      : QStringLiteral("system");
+    const QString utcIso  = gnssClock
+        ? lastGnssFix_.utc.toUTC().toString("yyyy-MM-ddTHH:mm:ssZ")
+        : QDateTime::currentDateTimeUtc().toString("yyyy-MM-ddTHH:mm:ssZ");
+    auto ts = ui::spLineTimeSource(source, utcIso);
+    if (spTimeLine_) { spTimeLine_->setText(ts.text); paintSpRole(spTimeLine_, ts.role); }
+
+    // Doppler compensation: armed = the live-comp checkbox is checked; has target =
+    // a pass is captured. Residual Hz is not readily observable here -> NaN (omitted).
+    const bool compOn = dopplerCompChk_ && dopplerCompChk_->isChecked();
+    auto dop = ui::spLineDoppler(compOn, capturedIdx_ >= 0,
+                                 std::numeric_limits<double>::quiet_NaN());
+    if (spDopplerLine_) { spDopplerLine_->setText(dop.text); paintSpRole(spDopplerLine_, dop.role); }
+}
+
 void MainWindow::updateClockBiasLabel() {
     if (!clockInfoLabel_) return;
     // Clock-domain readout: GNSS 授时时间 (real NMEA GGA/RMC/ZDA time) vs the
@@ -4793,6 +4936,7 @@ void MainWindow::refreshNavSatellites() {
 void MainWindow::onNewFix(gnss::GnssFix fix) {
     lastGnssFix_ = fix;
     if (fix.hasUtc) updateClockBiasLabel();
+    refreshSpacetimeView();   // GNSS tile + time-source line track the latest fix
 
     if (!fix.isValid()) {
         // No position: never paint a fake receiver point. Keep the manual
@@ -4872,6 +5016,7 @@ void MainWindow::onGnssConnectionChanged(bool connected, QString description) {
         refetchTle();
     }
     if (!description.isEmpty()) statusBar()->showMessage("GNSS: " + description);
+    refreshSpacetimeView();   // GNSS tile + time-source line on link up/down
 }
 
 void MainWindow::onGnssConnectClicked() {
