@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "shortcuts_dialog.h"
+#include "ui/shortcuts_catalog.h"
 #include "core/tokens.h"
 
 #include <QGridLayout>
@@ -13,18 +14,13 @@ ShortcutsDialog::ShortcutsDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle("快捷键");
     setMinimumWidth(tokens::scaled(tokens::kSettingsMinW));
     auto* lay = new QGridLayout(this);
-    const struct { const char* key; const char* desc; } rows[] = {
-        {"← / →",        "中心频率 ± 步进"},
-        {"Shift+← / →",  "中心频率 ± 步进/10（细调）"},
-        {"↑ / ↓",        "带宽 ×2 / ÷2"},
-        {"Space",        "静音切换"},
-        {"Ctrl+R",       "录制 / 停止"},
-    };
+    // Rendered from the single-source catalog (ui/shortcuts_catalog.h) so the
+    // table can never drift out of sync with the MainWindow wiring again.
     int r = 0;
-    for (const auto& row : rows) {
-        auto* k = new QLabel(QString::fromLatin1(row.key), this);
+    for (const auto& row : shortcutCatalog()) {
+        auto* k = new QLabel(QString::fromLatin1(row.sequence), this);
         k->setObjectName("monoInfo");
-        auto* d = new QLabel(QString::fromLatin1(row.desc), this);
+        auto* d = new QLabel(QString::fromLatin1(row.description), this);
         lay->addWidget(k, r, 0);
         lay->addWidget(d, r, 1);
         ++r;

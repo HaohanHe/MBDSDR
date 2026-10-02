@@ -82,6 +82,8 @@
 #include "ui/bookmark_manager.h"
 #include "dsp/frequency_scanner.h"
 #include "ui/shortcuts_dialog.h"
+#include "ui/shortcuts_catalog.h"
+#include "ui/status_format.h"
 #include <QListWidget>
 #include <QLineEdit>
 #include <QSpinBox>
@@ -2401,19 +2403,30 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this]() { aiRenderChat(); });
 
     // ---- Keyboard tuning ----
-    // Left/Right: nudge center frequency by currentStepHz_ (set in the freq
-    // group). Shift+Left/Right: fine tune at currentStepHz_/10.
-    new QShortcut(QKeySequence(Qt::Key_Right), this, this, [this]() {
-        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 + currentStepHz_);
+    // Left/Right: nudge the ACTUAL tuned centre frequency by currentStepHz_
+    // (the live engine readback, not the spinbox value -- the spinbox is only
+    // updated by the spectrum-drag path, so nudging relative to it made two
+    // Rights then a Left not return to where you started). Shift+Left/Right:
+    // fine tune at currentStepHz_/10 (SDR++ Alt-wheel mechanism).
+    auto retuneNudge = [this](double deltaHz) {
+        if (!engine_) return;
+        const double f = engine_->centerFreq() + deltaHz;
+        engine_->onSetCenterFreq(f);
+        freqSpin_->blockSignals(true);
+        freqSpin_->setValue(f / 1e6);
+        freqSpin_->blockSignals(false);
+    };
+    new QShortcut(QKeySequence(Qt::Key_Right), this, this, [this, retuneNudge]() {
+        retuneNudge(currentStepHz_);
     });
-    new QShortcut(QKeySequence(Qt::Key_Left), this, this, [this]() {
-        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 - currentStepHz_);
+    new QShortcut(QKeySequence(Qt::Key_Left), this, this, [this, retuneNudge]() {
+        retuneNudge(-currentStepHz_);
     });
-    new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Right), this, this, [this]() {
-        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 + currentStepHz_ / 10);
+    new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Right), this, this, [this, retuneNudge]() {
+        retuneNudge(currentStepHz_ / 10.0);   // double: int /10 dead at the 1 Hz step
     });
-    new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Left), this, this, [this]() {
-        engine_->onSetCenterFreq(freqSpin_->value() * 1e6 - currentStepHz_ / 10);
+    new QShortcut(QKeySequence(Qt::SHIFT | Qt::Key_Left), this, this, [this, retuneNudge]() {
+        retuneNudge(-currentStepHz_ / 10.0);
     });
     // Up/Down: widen/narrow the IF bandwidth (×2 / ÷2, clamped to [1k, 200k]).
     // The bwCombo_ is then snapped to the nearest preset for display.
@@ -2464,6 +2477,46 @@ MainWindow::MainWindow(QWidget* parent)
         new QShortcut(QKeySequence(QString("Ctrl+%1").arg(i + 1)), this, this,
                       [selectVfoRow, row]() { selectVfoRow(row); });
     }
+
+    // ---- Gain step (+/-) & tuning-step cycle (PgUp/PgDown) ----------------
+    // GQRX dockaudio.cpp:71-72 binds Key_Plus/Key_Minus to gain; we adopt the
+    // same muscle memory for tuner gain. The arithmetic lives in the pure
+    // ui::stepGainDb() helper (unit-tested): a real discrete RTL table picks the
+    // next/previous legal level; the empty-table path (rtl_tcp / offline test /
+    // file source) nudges the continuous slider +/-2 dB clamped [0,50].
+    auto stepGain = [this](int dir) {
+        if (!engine_ || !gainSlider_) return;
+        const std::vector<double> table = engine_->availableGainsDb();
+        const double next = ui::stepGainDb(table, gainSlider_->value(), dir,
+                                           0.0, 50.0, 2.0);
+        if (!table.empty() && gainCombo_ && gainCombo_->isVisible()) {
+            // Discrete mode: select the combo row matching the legal level.
+            // setCurrentIndex does NOT emit activated(), so command the engine
+            // directly with the chosen legal dB.
+            int best = -1; double bestDiff = 1e9;
+            for (int i = 0; i < gainCombo_->count(); ++i) {
+                const double d = std::fabs(gainCombo_->itemData(i).toDouble() - next);
+                if (d < bestDiff) { bestDiff = d; best = i; }
+            }
+            if (best >= 0) gainCombo_->setCurrentIndex(best);
+            engine_->onSetGain(next);
+        } else {
+            // Continuous mode: setValue fires valueChanged -> onSetGain(v).
+            gainSlider_->setValue(static_cast<int>(std::round(next)));
+        }
+        statusBar()->showMessage(QString("增益: %1 dB").arg(next, 0, 'f', 1));
+    };
+    new QShortcut(QKeySequence(Qt::Key_Plus), this, this, [stepGain]() { stepGain(+1); });
+    new QShortcut(QKeySequence(Qt::Key_Minus), this, this, [stepGain]() { stepGain(-1); });
+    // PgUp/PgDown walk the tuning-step presets WITH wrap (pure ui::cycleStepIndex).
+    new QShortcut(QKeySequence(Qt::Key_PageUp), this, this, [this]() {
+        stepCombo_->setCurrentIndex(ui::cycleStepIndex(stepCombo_->currentIndex(), kStepCount, +1));
+        statusBar()->showMessage(QString("调频步进: %1").arg(stepCombo_->currentText()));
+    });
+    new QShortcut(QKeySequence(Qt::Key_PageDown), this, this, [this]() {
+        stepCombo_->setCurrentIndex(ui::cycleStepIndex(stepCombo_->currentIndex(), kStepCount, -1));
+        statusBar()->showMessage(QString("调频步进: %1").arg(stepCombo_->currentText()));
+    });
 
     // ---- Direct frequency input (MHz): honest validation -----------------
     // freqSpin_ is a QDoubleSpinBox, so format (numeric only) and range
@@ -3630,7 +3683,7 @@ void MainWindow::onRssiLevel(float dbfs) {
                              .arg(watchThrSlider_ ? watchThrSlider_->value() : -50));
     // B5: one-line RSSI readout (real engine value, not a guess).
     if (sbRssi_)
-        sbRssi_->setText(QString("RSSI %1").arg(dbfs, 0, 'f', 1));
+        sbRssi_->setText(ui::fmtStripRssi(dbfs));
     // S-meter uses the SAME real RSSI; noise reference from the engine floor.
     if (sMeter_) {
         sMeter_->setSignalDbfs(dbfs);
@@ -3650,7 +3703,7 @@ void MainWindow::onSnrLevel(float snrDb) {
                             .arg(lastRssi_, 0, 'f', 1).arg(snrDb, 0, 'f', 1));
     // B5: one-line SNR readout (real measured SNR).
     if (sbSnr_)
-        sbSnr_->setText(QString("SNR %1").arg(snrDb, 0, 'f', 1));
+        sbSnr_->setText(ui::fmtStripSnr(snrDb));
 }
 
 void MainWindow::onSourceTelemetry(const QString& name, bool connected,
@@ -3660,16 +3713,13 @@ void MainWindow::onSourceTelemetry(const QString& name, bool connected,
     if (sampleRateHz > 0.0) lastSampleRateHz_ = sampleRateHz;
     lastGainDb_ = gainDb;
     if (sbSr_)
-        sbSr_->setText(sampleRateHz > 0.0
-            ? QString("%1 MS/s").arg(sampleRateHz / 1e6, 0, 'f', 3) : QString("--"));
+        sbSr_->setText(ui::fmtStripSampleRate(sampleRateHz));
     if (sbVfo_)
-        sbVfo_->setText(centerHz > 0.0
-            ? QString("%1 MHz").arg(centerHz / 1e6, 0, 'f', 3) : QString("--"));
+        sbVfo_->setText(ui::fmtStripVfoFreq(centerHz));
     if (sbGain_)
-        sbGain_->setText(gainDb > 0.0
-            ? QString("增益 %1 dB").arg(gainDb, 0, 'f', 1) : QString("--"));
+        sbGain_->setText(ui::fmtStripGain(gainDb));
     if (sbSdr_)
-        sbSdr_->setText(name + (connected ? QString() : QStringLiteral("（非硬件）")));
+        sbSdr_->setText(ui::fmtStripSource(name, connected));
     // Real-time sound-card link health (worker-thread observations of QAudioSink).
     if (sbAudio_ && engine_ && engine_->audioOutput())
         sbAudio_->setText(engine_->audioOutput()->audioHealthStatus());
@@ -3823,6 +3873,14 @@ QString MainWindow::harnessTunerRangeText() const {
     return devTunerRangeLabel_ ? devTunerRangeLabel_->text() : QString();
 }
 
+int MainWindow::harnessStepIndex() const {
+    return stepCombo_ ? stepCombo_->currentIndex() : -1;
+}
+
+int MainWindow::harnessGainDb() const {
+    return gainSlider_ ? gainSlider_->value() : -1;
+}
+
 void MainWindow::onSpyServerToggled(bool on) {
     if (!spyServer_) return;
     if (on) {
@@ -3861,9 +3919,7 @@ void MainWindow::onSquelchState(bool open) {
     // disabled too, so we OR it with the real checkbox enabled state to show
     // OFF honestly rather than a misleading OPEN.
     if (sbSquelch_)
-        sbSquelch_->setText(!squelchOn_ ? QStringLiteral("静噪 OFF")
-                             : (open ? QStringLiteral("静噪 OPEN")
-                                     : QStringLiteral("静噪 CLOSED")));
+        sbSquelch_->setText(ui::fmtStripSquelch(squelchOn_, open));
 }
 
 void MainWindow::onRecordingState(bool recording, const QString& path) {

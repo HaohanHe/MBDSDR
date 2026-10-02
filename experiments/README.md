@@ -10,7 +10,7 @@
 | 口径 | 含义 | 本批是否产出 |
 |---|---|---|
 | `synthetic`（仿真） | 脚本内合成信号 + 固定种子加噪 | ✅ 全部新图均为此口径 |
-| `recorded` | 真实 RTL-SDR 录制（SigMF）回放 | ⬜ 云内无录制，空态 |
+| `recorded` | 真实 RTL-SDR 录制（SigMF）回放 | ✅ `exp_ota_run.py` 有录制即出图/CSV；无录制诚实空态 |
 | `ota` | 实时空中信号 | ⬜ 云内无硬件，空态 |
 | `online` | 在线 LLM/API 推理结果（非本地确定性计算） | ⬜ 云内无 key，LLM 列空态 |
 
@@ -43,6 +43,7 @@
 | `amr_confusion_public.csv` + `figures/amr_confusion_matrix__synthetic__*.png` + `manifest_amr.json` | `exp_amr.py` | synthetic | 640 | 8 类 AMR 混淆矩阵（热图+行归一化+计数+对角准确率 Wilson CI） |
 | `doppler_duration_convergence.csv` + `figures/doppler_duration_convergence__synthetic__*.png` | `exp_doppler_duration.py` | synthetic | 6 | RLS 参考历元误差 vs 观测窗长（固定 TLE/种子/噪声） |
 | `manifest_ota_handoff.json` | `exp_ota_handoff.py` | ota(空态) | 0 | 录制摄取空态演示 |
+| `ota_recorded_metrics.csv` + `figures/ota_recorded_success_vs_ebn0__recorded__*.png` + `manifest_ota_run.json` | `exp_ota_run.py` | recorded(有录制) / recorded(空态 N=0) | 随录制 | 真机录制回填：解码成功率 vs 估算 Eb/N0（Wilson CI）、AMR 预测、多普勒观测数；无录制诚实空态 |
 | `manifest_*.json`（每 run 一份） | 各脚本 | 随 run | — | 脚本/种子/口径/参数/样本数/UTC 时间/git sha |
 
 ### Eb/N0 换算口径
@@ -69,6 +70,9 @@ python3 experiments/exp_baseline_compare.py --trials-per-class 40 --seed 2026100
 
 # 4. OTA/录制空态（云内跑应输出空态，退出码 0）
 python3 experiments/exp_ota_handoff.py
+
+# 4b. 真机录制回填（指向 onboard 产物目录 -> recorded 口径图/CSV/manifest；无录制空态）
+python3 experiments/exp_ota_run.py --recordings-dir paper/experiments/onboarding_adsb_<时间戳>/
 
 # 5. LLM 基线（无 key -> 经典/KNN 真算 + LLM 列 PENDING_ONLINE_RUN）
 python3 experiments/exp_llm_baseline.py --trials-per-class 20 --seed 20261001
@@ -110,6 +114,20 @@ python3 -m pytest experiments/tests/ -q
 3. 管线经 `mbdsdr_ai.playback.IQPlayback` 读取（mmap、从 meta 读 fs/freq/datetime，**不硬编码**），
    再用 `orbit_determination.extract_doppler_observations` 跑真实多普勒前端；观测不足时诚实返回空、不补点。
 4. 该 run 的 manifest 会写 `data_origin="recorded"`。
+
+### 真机录制回填（recorded 口径一键出成果，P1）
+
+拿到 `tools/onboarding/onboard.py` 产出的录制目录（标准 SigMF + 解码报文）后：
+
+```bash
+python3 experiments/exp_ota_run.py --recordings-dir paper/experiments/onboarding_adsb_<时间戳>/
+```
+
+即出 `ota_recorded_metrics.csv` + `figures/ota_recorded_success_vs_ebn0__recorded__*.png`
++ `manifest_ota_run.json`：解码成功率 vs 估算 Eb/N0（Wilson CI）、AMR 预测（不报准确率，
+真实录制无标签）、多普勒观测数。SNR 为 PSD 峰/中位数粗估、**未标定**，绝对值需真机
+已知信号源校准。无 `.sigmf-data` 时诚实空态 N=0、退出码 0、不产图/CSV。
+完整三步与 parse_hw_report 关系见 **`docs/learn/phase8/P1-ota-backfill.md`**。
 
 ## LLM/Agent 路径（待在线运行）
 

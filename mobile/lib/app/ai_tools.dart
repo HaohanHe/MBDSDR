@@ -41,8 +41,9 @@ String _gated(String toolName) => jsonEncode(<String, dynamic>{
 
 /// 由射频接口构造 AI 工具集。
 ///
-/// [manualMode] 为 true 时进入「手动模式」：所有**会改变接收机状态**的动作
-/// （set_frequency / set_mode / set_gain / set_sample_rate）不再真正下发，
+/// [manualMode] 为 true 时进入「手动模式」：所有**会改变接收机状态/会话**的动作
+/// （set_frequency / set_mode / set_gain / set_sample_rate /
+/// start_recording / stop_recording）不再真正下发，
 /// 而是返回 [_gated] 结果并出现在对话流里；只读的 get_status 保持可用
 /// （读取不构成动作）。AI 接管（false，默认）时行为与历史完全一致。
 ///
@@ -219,6 +220,78 @@ List<AiTool> buildRadioTools(
       },
     ),
     AiTool(
+      name: 'start_recording',
+      description: '开始把当前解调后的音频录制成本地 16-bit 单声道 WAV'
+          '（过静噪门后"录听到的"），落盘 .wav + sidecar JSON，结束后可在录音列表回放。'
+          '需已连接接收机；重复调用安全（已在录则不另开文件）。'
+          '与桌面端 start_recording 对齐——桌面录原始 IQ（SigMF），本端录解调音频'
+          '（WAV），产物不同但 AI 入口一致。',
+      parameters: const <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{},
+      },
+      execute: (Map<String, dynamic> args) async {
+        try {
+          final dc = _disconnectError(radio, 'start_recording');
+          if (dc != null) return dc;
+          if (radio.recording) {
+            return jsonEncode(<String, dynamic>{
+              'ok': true,
+              'recording': true,
+              'already_recording': true,
+              'message': '已在录制中，无需重复开始',
+            });
+          }
+          await radio.startRecording();
+          return jsonEncode(<String, dynamic>{
+            'ok': true,
+            'recording': true,
+            'message': '开始录制解调音频（WAV）',
+            'frequency_hz': radio.freqHz,
+            'mode': radio.mode.name,
+          });
+        } on StateError catch (e) {
+          // 未连接 / 未配录音目录：诚实回错，绝不假装录上了。
+          return _err('录制未开始: $e');
+        } catch (e) {
+          return _err('开始录制失败: $e');
+        }
+      },
+    ),
+    AiTool(
+      name: 'stop_recording',
+      description: '停止当前录制，收尾落盘 .wav + sidecar 并写入录音列表。'
+          '未在录制时诚实返回（不报错、不造文件）。断连时也允许调用以收尾落盘。',
+      parameters: const <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{},
+      },
+      execute: (Map<String, dynamic> args) async {
+        try {
+          // stop 不做连接 gate：断连时也应能收尾；是否在录由底层判断。
+          final meta = await radio.stopRecording();
+          if (meta == null) {
+            return jsonEncode(<String, dynamic>{
+              'ok': true,
+              'recording': false,
+              'message': '当前未在录制',
+            });
+          }
+          return jsonEncode(<String, dynamic>{
+            'ok': true,
+            'recording': false,
+            'message': '已停止录制并落盘',
+            'wav_file': meta.wavFileName,
+            'duration_ms': meta.durationMs,
+            'frequency_hz': meta.frequencyHz,
+            'mode': meta.mode,
+          });
+        } catch (e) {
+          return _err('停止录制失败: $e');
+        }
+      },
+    ),
+    AiTool(
       name: 'get_status',
       description: '读取当前接收机状态。返回连接状态机 status'
           '（connected/connecting/reconnecting/disconnected/error）、是否就绪 '
@@ -337,6 +410,8 @@ List<AiTool> buildRadioTools(
     'set_mode',
     'set_gain',
     'set_sample_rate',
+    'start_recording',
+    'stop_recording',
   };
   return tools.map((AiTool t) {
     if (!mutatingTools.contains(t.name)) return t;
