@@ -13,6 +13,7 @@ GnssFix _fix({
   double? lon,
   int? sats,
   String? utc,
+  double? hdop,
 }) =>
     GnssFix(
       source: source,
@@ -20,6 +21,7 @@ GnssFix _fix({
       longitude: lon,
       satellites: sats,
       utcTime: utc,
+      hdop: hdop,
       fixQuality: (lat != null && lon != null) ? 1 : 0,
     );
 
@@ -54,6 +56,20 @@ void main() {
       expect(s.timeSource.text, contains('GNSS 072545.00'));
       expect(s.gnss.text, contains('39.90420,116.40740'));
       expect(s.gnss.text, contains('星9'));
+      // 未带 HDOP（旧用例不传）-> 不追加该段，保持向后兼容。
+      expect(s.gnss.text, isNot(contains('HDOP')));
+    });
+
+    test('真实 fix 带 HDOP -> 与桌面 spTileGnss 同口径展示 HDOP x.x', () {
+      final s = SpacetimeStatus.fromServices(
+        fix: _fix(source: 'real', lat: 39.9042, lon: 116.4074, sats: 9,
+            utc: '072545.00', hdop: 0.8),
+      );
+      expect(s.gnss.text, contains('39.90420,116.40740'));
+      expect(s.gnss.text, contains('星9'));
+      // 桌面格式："坐标 · 星N · HDOP 0.8"。
+      expect(s.gnss.text, contains('HDOP 0.8'));
+      expect(s.gnss.role, SpRole.ok);
     });
 
     test('已连接 + 有频率但无目标 -> 接收目标显示当前频率', () {

@@ -7,9 +7,11 @@
 |---|---|
 | 主稿（**唯一事实源**） | [`main.md`](./main.md)（Markdown，IEEE WCL 篇幅对标，约 4–5 页量级） |
 | LaTeX 镜像（骨架） | [`main.tex`](./main.tex)（IEEEtran journal letter 骨架，图表为注释式迁移点；**勿在此改数字/论断**） |
+| 参考文献 | [`refs.bib`](./refs.bib)（phase 11 已建：12 条，7 已核验 / 5 部分核验 / 0 虚构，逐条带核实注释；核实日 2026-10-02） |
 | 目标刊物 | IEEE Wireless Communications Letters (WCL)，4–5 页 |
-| 状态 | **DRAFT v0.4（2026-10-02，投稿前审稿视角终稿）**，未提交 / 未 commit |
+| 状态 | **DRAFT v0.5（2026-10-02，refs.bib 核实 + 作者/致谢/基金诚实 PENDING 占位）**，未提交 / 未 commit |
 | 数据口径 | 全部 `synthetic`（固定种子仿真）；无 OTA/录制；LLM 列 `PENDING_ONLINE_RUN` |
+| 投稿包 | `bash tools/paper_package.sh`（打包 + zip + `--check` 引用链自检，当前 71 pass / 0 fail） |
 | 许可证 | MIT（代码）；论文内容随仓库 |
 
 ---
@@ -39,7 +41,7 @@ pandoc docs/learn/phase7/paper/main.md -o main.pdf --toc \
   2. **工具**：`pandoc main.md -o body.tex --standalone=false` 生成正文片段后
      贴入 `main.tex`，再手工校正图表/表格/引用（pandoc 不会自动插图）。
 - 同步后跑 `pdflatex main && bibtex main && pdflatex main && pdflatex main`；
-  `refs.bib` 须先按 `main.md` §V "References to verify（待补）" 逐条核实后建立。
+  `refs.bib` **已建并逐条公开核验（2026-10-02）**，投稿时确认 `\cite` 键与正文对应即可。
 - 图表相对路径：仓库根 `paper/experiments/figures/*.png`（该目录被 gitignore，
   不随本目录版本控制）。
 
@@ -85,15 +87,15 @@ pytest experiments/tests/ -q
 | OTA / 真实录制解码 | 空态 | 用 C++ recorder 录 SigMF 后 `--recordings-dir` 回放，manifest 标 `recorded` |
 | 多普勒补偿的**实测** fd 估计 | 空态 | 当前 Fig.4 用已知 fd（理想上界）；待真实 fd 估计器接入 |
 | 多站 / GNSS 融合定轨 | 未做 | 当前为单站多普勒-only（Fig.8/9 的观测性局限） |
-| LaTeX/IEEEtran 排版 | **骨架已建（`main.tex`）** | 投稿前按 §同步机制把 main.md 终稿填入、插图、建 `refs.bib`、跑 pdflatex+bibtex |
-| 参考文献（`refs.bib`） | 未做（已列待核实清单） | 按 main.md §V "References to verify" 逐条搜索确认，IEEE 格式入 bib；**禁虚构** |
-| 作者名单 / 单位 / 联系方式 | 未做 | 现为 Bi4MIB open-source call；投稿前补真实作者与致谢 |
+| LaTeX/IEEEtran 排版 | **骨架已建（`main.tex`）** | 投稿前按 §同步机制把 main.md 终稿填入、插图、跑 pdflatex+bibtex |
+| 参考文献（`refs.bib`） | **已建（12 条，7 已核验 / 5 部分核验）**，2026-10-02 | 投稿前确认正文 `\cite` 键齐全；部分核验条目（开源项目/预印本）按需取舍 |
+| 作者名单 / 单位 / 邮箱 / 致谢 / 基金 | **PENDING 占位（main.tex \thanks + main.md 元信息）**，未编造 | 现为 Bi4MIB open-source call；投稿前由真人补真实作者/单位/邮箱/致谢/基金号 |
 
 ### 投稿准备清单（IEEE WCL）
 
 - [ ] LLM 在线运行回填 Fig.6 / Tab.VI，并合并 Fig.5+Fig.6。
 - [ ] 至少一组 OTA / 录制 SigMF 回放结果（manifest 标 `recorded`），否则在信中说明仅合成验证。
-- [ ] `refs.bib` 建成并逐条核实；作者/单位/基金/通讯地址补齐。
+- [x] `refs.bib` 建成并逐条公开核实（2026-10-02）；作者/单位/基金/通讯地址**仍 PENDING**，投稿前由真人补齐（未编造）。
 - [ ] `main.md` 终稿同步进 `main.tex`，图表换 `\includegraphics{}`，两栏排版落在 4–5 页。
 - [ ] pdflatex+bibtex 干净编译，无孤儿图/表，所有 `\ref`/`\cite` 解析。
 - [ ] 按 WCL 投稿系统提交（版权表、Highlights、图文摘要等按当届要求）。

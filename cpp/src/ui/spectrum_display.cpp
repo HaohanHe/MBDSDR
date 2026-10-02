@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "spectrum_display.h"
+#include "spectrum_tune.h"
 
 #include "core/tokens.h"
 
@@ -911,7 +912,8 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
         const int pool = lay_.botPad - lay_.topPad - fixedV;
         const int minTrace = tokens::scaled(tokens::kSpecAreaMinH);
         const int minFalls = tokens::scaled(tokens::kWfAreaMinH);
-        traceH = static_cast<int>(clampd(traceH, minTrace, pool - minFalls));
+        // Clamp so neither panel drops below its minimum (pure, unit-tested).
+        traceH = ui::clampTraceHeight(traceH, pool, minTrace, minFalls);
         traceShare_ = (pool > 0) ? static_cast<double>(traceH) / pool : 0.5;
         recomputeGeometry();
         update();
@@ -926,8 +928,8 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
         break;
     }
     case Grab::Tune: {
-        const int dx = pos.x() - downPos_.x();
-        const double newFreq = downFreqHz_ + dx / static_cast<double>(lay_.plotW) * span;
+        const double newFreq = ui::tuneFreqAfterDrag(
+            downFreqHz_, pos.x() - downPos_.x(), lay_.plotW, span);
         dialFreqHz_ = newFreq;
         emit frequencyChanged(newFreq);
         update();
@@ -945,8 +947,10 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
         for (int i = 0; i < markers_.size(); ++i) {
             if (markers_[i].id != grabVfoId_) continue;
             const double edgeFreq = freqForX(pos.x(), fLo, span);
-            double bw = std::abs(markers_[i].freqHz - edgeFreq);
-            bw = clampd(bw, tokens::kVfoMinBandwidthHz, tokens::kVfoMaxBandwidthHz);
+            // Half-bandwidth from marker centre, clamped to the legal band.
+            const double bw = ui::bandwidthAfterEdgeDrag(
+                markers_[i].freqHz, edgeFreq,
+                tokens::kVfoMinBandwidthHz, tokens::kVfoMaxBandwidthHz);
             emit vfoMarkerBandwidthChanged(grabVfoId_, bw);
         }
         update();
@@ -982,14 +986,29 @@ void SpectrumDisplay::mouseReleaseEvent(QMouseEvent* e) {
     } else if (grab_ == Grab::VfoBody && grabVfoId_ >= 0) {
         double fLo, fHi, span;
         visibleWindow(fLo, fHi, span);
-        // A click (little or no drag) settles the selected VFO on the pointer.
-        const double target = ((e->pos() - downPos_).manhattanLength() < 3)
-                              ? freqForX(e->pos().x(), fLo, span)
-                              : downFreqHz_ + (e->pos().x() - downPos_.x()) /
-                                                static_cast<double>(lay_.plotW) * span;
+        // A click (little or no drag) settles the selected VFO on the pointer;
+        // a drag keeps the offset model (identical to the last mouseMove).
+        const double target = ui::tuneSettleFreq(
+            downFreqHz_, downPos_.x(), downPos_.y(),
+            e->pos().x(), e->pos().y(),
+            lay_.plotX0, lay_.plotW, fLo, span);
         emit vfoMarkerCenterTuned(grabVfoId_, target);
         emit viewChanged();
-    } else if (grab_ == Grab::Tune || grab_ == Grab::Pan || grab_ == Grab::Divider) {
+    } else if (grab_ == Grab::Tune) {
+        // Bare tuning area (no VFO box): settle the dial. A near-stationary
+        // press now JUMPS the dial to the clicked frequency -- the long-missing
+        // "click a peak to tune" affordance; a finished drag settles on the same
+        // value the last mouseMove already emitted (idempotent, no jump-back).
+        double fLo, fHi, span;
+        visibleWindow(fLo, fHi, span);
+        const double target = ui::tuneSettleFreq(
+            downFreqHz_, downPos_.x(), downPos_.y(),
+            e->pos().x(), e->pos().y(),
+            lay_.plotX0, lay_.plotW, fLo, span);
+        dialFreqHz_ = target;
+        emit frequencyChanged(target);
+        emit viewChanged();
+    } else if (grab_ == Grab::Pan || grab_ == Grab::Divider) {
         emit viewChanged();
     }
     grab_ = Grab::None;
@@ -1046,9 +1065,12 @@ void SpectrumDisplay::wheelEvent(QWheelEvent* e) {
         update();
         emit viewChanged();
     } else {
-        // Plain wheel step-tunes the dial by the configured step.
+        // Plain wheel step-tunes the dial by the configured step, then snaps
+        // onto a 0-anchored step grid so repeated taps land on round numbers
+        // instead of a slowly drifting offset.
         const double dir = (dy > 0) ? 1.0 : -1.0;
-        const double newFreq = dialFreqHz_ + dir * tuneStepHz_;
+        const double newFreq = ui::snapFreqToStep(dialFreqHz_ + dir * tuneStepHz_,
+                                                 tuneStepHz_);
         dialFreqHz_ = newFreq;
         emit frequencyChanged(newFreq);
         update();

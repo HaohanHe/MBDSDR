@@ -1185,3 +1185,12 @@ target_include_directories(test_spacetime_format PRIVATE src)
 target_link_libraries(test_spacetime_format PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME spacetime_format COMMAND test_spacetime_format)
 
+
+# ---- P3 (phase11): spectrum interaction pure arithmetic (header-only) -------
+# Click-vs-drag settle, wheel step-snap, edge-drag bandwidth clamp, divider
+# share clamp. No QApplication: the rules are now header-only and unit-tested
+# directly; spectrum_display.cpp delegates to them.
+add_executable(test_spectrum_tune tests/test_spectrum_tune.cpp)
+target_include_directories(test_spectrum_tune PRIVATE src)
+target_link_libraries(test_spectrum_tune PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME spectrum_tune COMMAND test_spectrum_tune)

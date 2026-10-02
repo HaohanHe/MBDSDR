@@ -1,8 +1,15 @@
 ---
 title: "MBDSDR: An AI-Defined Software-Defined Radio Stack with a Function-Calling, Reproducible Measurement Backbone"
 venue: "IEEE Wireless Communications Letters (WCL) — submission draft"
-status: DRAFT v0.4 (2026-10-02, pre-submission reviewer pass; see CHANGES.md)
+status: DRAFT v0.5 (2026-10-02, refs.bib verified + honest author/ack/funding PENDING; see CHANGES.md)
 authors: "Bi4MIB (open-source, call for co-authors)"
+# --- Honest placeholders (red line: no fabricated identity/affiliation) ---
+author_names:      "PENDING — real individual author name(s) to be added by the human author"
+affiliation:       "PENDING — institutional affiliation unknown in this environment"
+corresponding_email: "PENDING — no e-mail address to be invented"
+acknowledgements:  "PENDING — none drafted; add only for real people/groups confirmed"
+funding:           "PENDING — no confirmed external grant; add only if a real grant exists"
+bibliography:      "refs.bib present (12 entries; 7 verified / 5 partial / 0 fabricated; verified 2026-10-02)"
 ---
 
 # MBDSDR: An AI-Defined Software-Defined Radio Stack with a Function-Calling, Reproducible Measurement Backbone
@@ -308,20 +315,38 @@ schema'd tool, and (b) shipping a fixed-seed, CI-runnable measurement library
 that reports CIs, data-origin, and manifests so that "AI runs the radio" claims
 are auditable.
 
-### References to verify before submission (待补 — no fabricated entries)
+### References — resolved into `refs.bib` (verified 2026-10-02)
 
-The list below states the *kinds* of citations the final bibliography must
-contain. Each entry is a **placeholder** that must be searched, confirmed, and
-formatted in IEEE style before submission; **nothing below is asserted as a
-final, verified reference**, and no specific LLM-SDR/MCP project name is asserted
-until it is located in the literature.
+> **Status update (phase 11 P2):** The "to verify" list below has been
+> resolved by public web verification into **`refs.bib`** (same folder).
+> Each BibTeX entry carries a comment with its verification method, search
+> date (2026-10-02), and status. **No volume/issue/page was fabricated**;
+> unconfirmed details were omitted or flagged. Distribution:
+> **7 已核验 / 5 部分核验 / 0 fabricated** (1 direction retained as an
+> honest `[未核验]` comment, no invented entry).
 
-- **SDR frameworks:** GNU Radio, SDR++, SatDump — verify project citation (URL/version). [待核实]
-- **LLM tool-calling / MCP:** OpenAI function-calling/tool-use API; any peer-reviewed or citable LLM-driven-SDR / MCP-for-SDR system, if found. [待核实]
-- **Statistics:** Wilson score confidence interval (Wilson, JASA 1927). [待核实卷期]
-- **Orbit propagation:** SGP4/SDP4 (Hoots & Roe 1980; Vallado revision). [待核实]
-- **Recording standard:** SigMF — Signal Metadata Format (official spec). [待核实]
-- **O-RAN / 6G RAN intelligence:** one representative xApp/RIC standard or survey reference. [待核实]
+- **SDR frameworks:** GNU Radio, SDR++, SatDump → `gnuradio_project`,
+  `sdrpp_project`, `satdump_project` — **部分核验** (project site/repo
+  confirmed; open-source software, no canonical paper; pin version at submission).
+- **LLM tool-calling / MCP:** OpenAI function-calling → `openai_function_calling`
+  (**已核验**, OpenAI API release 2023-06-13); MCP → `mcp_spec` (**已核验**,
+  Anthropic 2024-11-25). Closest LLM-radio prior art located as arXiv preprints
+  only → `radiomaster2026`, `mxai2025` (**部分核验**, NOT peer-reviewed;
+  target signal-gen / Open-RAN control, not a reproducible measurement backbone).
+- **Statistics:** Wilson score CI → `wilson1927` — **已核验** (JASA 22(158):209–212,
+  DOI 10.1080/01621459.1927.10502953).
+- **Orbit propagation:** SGP4/SDP4 → `hoots1980spacetrack` (**已核验**, Spacetrack
+  Report No.3, 1980; co-author is **Roehrich**, not "Roe") and
+  `vallado2006revisiting` (**已核验**, AIAA 2006-6753, DOI 10.2514/6.2006-6753).
+- **Recording standard:** SigMF → `sigmf_spec` — **已核验** (sigmf.org /
+  github.com/gnuradio/SigMF; spec v1.2.6 at search date).
+- **O-RAN / 6G RAN intelligence:** representative xApp/RIC survey →
+  `polese2023understanding` — **已核验** (IEEE COMST 25(2):1376–1411,
+  DOI 10.1109/COMST.2023.3239220).
+
+> No specific peer-reviewed LLM-SDR *measurement backbone* was located
+> (`[未核验]` direction retained in `refs.bib` comment) — the paper's claimed
+> gap remains honestly unclaimed against a confirmed competitor.
 
 ---
 

@@ -22,6 +22,7 @@ private slots:
     void ctrlWheelZooms();
     void plainWheelDoesNotZoomButStepTunes();
     void blankClickTunesSelectedVfo();
+    void bareClickTunesDialWithoutVfo();
     void freqStripDragPansWithoutShift();
 };
 
@@ -113,6 +114,31 @@ void TestSpectrumInteraction::blankClickTunesSelectedVfo() {
     QCOMPARE(id, 1);
     QVERIFY2(std::abs(freq - 98.5e6) > 10000.0,
              "tuned frequency must move away from the box center");
+}
+
+void TestSpectrumInteraction::bareClickTunesDialWithoutVfo() {
+    // No VFO box on screen (markers_ empty). A plain click on the trace used to
+    // do nothing on release; it must now jump the dial to the clicked frequency.
+    mbdsdr::ui::SpectrumWidget w; w.resize(800, 400); w.show();
+    w.setSpectrum(fakeFrame());
+    w.setStepHz(10000.0);
+    mbdsdr::ui::SpectrumDisplay* canvas = w.displayCanvas();
+    QVERIFY(canvas);
+    // Deterministic start: no persisted fixed markers, and no VFO box on screen
+    // (markers_ is empty by default on a fresh widget).
+    canvas->clearFixedMarkers();
+
+    QSignalSpy spy(canvas, &mbdsdr::ui::SpectrumDisplay::frequencyChanged);
+    // Click the trace well right of centre.
+    const QPoint c = canvas->spectrumRect().center();
+    const QPoint click = c + QPoint(150, 0);
+    QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, click);
+    QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, click);
+
+    QVERIFY2(spy.count() >= 1, "a bare click on the trace must settle the dial");
+    const double tuned = qvariant_cast<double>(spy.takeLast().at(0));
+    QVERIFY2(std::abs(tuned - 98.5e6) > 5000.0,
+             "the dial must jump to the clicked (off-centre) frequency");
 }
 
 void TestSpectrumInteraction::freqStripDragPansWithoutShift() {

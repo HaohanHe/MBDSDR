@@ -1862,7 +1862,9 @@ MainWindow::MainWindow(QWidget* parent)
     connect(freqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this, [this](double mhz) {
                 engine_->onSetCenterFreq(mhz * 1e6);
-                sbVfo_->setText(QString("%1 MHz").arg(mhz, 0, 'f', 3));
+                // Route through the SAME pure formatter as the telemetry tick so
+                // the spinbox path and the readback path can never drift.
+                sbVfo_->setText(ui::fmtStripVfoFreq(mhz * 1e6));
             });
     // Step combo: set currentStepHz_ and make the spinbox up/down arrows walk
     // by the same step (spinbox unit is MHz).
@@ -1950,7 +1952,7 @@ MainWindow::MainWindow(QWidget* parent)
         engine_->setSquelchEnabled(en);
         if (!en) squelchState_->setText("状态: CLOSED");
         // B5: immediately reflect OFF when the user disables the gate.
-        if (sbSquelch_ && !en) sbSquelch_->setText(QStringLiteral("静噪 OFF"));
+        if (sbSquelch_ && !en) sbSquelch_->setText(ui::fmtStripSquelch(false, false));
     });
     // Auto gate: threshold = tracked audio-RMS noise floor + margin (same dBFS
     // domain). applyAutoThreshold is read-back only; the slider valueChanged
