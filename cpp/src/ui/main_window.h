@@ -42,7 +42,8 @@ namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; str
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class SMeterWidget;
-                 class WeatherSatPanel; class TaskStepsView; }
+                 class WeatherSatPanel; class TaskStepsView;
+                 class PocsagPanel; class M17Panel; class VorPanel; }
 namespace ai   { class Agent; class AiSessionStore; class TaskRunner; struct StepResult; struct TaskPlan; }
 namespace gnss { class GnssReceiver; struct GnssFix; }
 
@@ -130,6 +131,9 @@ private:
     ui::ConstellationView* constellationView_ = nullptr;
     ui::ElevationPlot* elevationPlot_ = nullptr;
     ui::WeatherSatPanel* weatherPanel_ = nullptr;
+    ui::PocsagPanel* pocsagPanel_ = nullptr;
+    ui::M17Panel*    m17Panel_    = nullptr;
+    ui::VorPanel*    vorPanel_    = nullptr;
 
     // ---- GNSS serial receiver + compact toolbar (world tab) ----
     gnss::GnssReceiver* gnssRx_      = nullptr;

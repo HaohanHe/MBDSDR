@@ -63,6 +63,9 @@ private slots:
     void predictPasses_deterministicKnownTle();
     void predictPasses_emptyEntriesHonest();
     void predictPasses_badStationHonest();
+    void pocsagSnapshot_honestEmptyOffline();
+    void m17Snapshot_honestEmptyOffline();
+    void vorSnapshot_honestUnlockedOffline();
     void toolCount_registryEqualsExecution();
 };
 
@@ -184,6 +187,53 @@ void TestAiRealLink::predictPasses_badStationHonest() {
     QCOMPARE(o2.value("ok").toBool(), false);
 }
 
+// Wave2 read-only POCSAG snapshot tool. The offline test source runs a plain
+// audio demod mode, so the POCSAG decoder has produced nothing: the tool must
+// be callable and return an HONEST empty list (never a fabricated pager).
+void TestAiRealLink::pocsagSnapshot_honestEmptyOffline() {
+    dsp::SpectrumEngine engine;
+    QString r = ai::executeTool("get_pocsag_messages", QJsonObject{}, &engine);
+    QJsonObject o = parseObj(r);
+    QVERIFY2(!o.isEmpty(), qPrintable("expected JSON, got: " + r));
+    QCOMPARE(o.value("ok").toBool(), true);
+    QVERIFY(o.contains("channel_id"));
+    QVERIFY(o.value("messages").isArray());
+    QCOMPARE(o.value("messages").toArray().size(), 0);   // honest empty state
+    QCOMPARE(o.value("count").toInt(), 0);
+    QCOMPARE(o.value("connected").toBool(), false);
+}
+
+// Wave2 read-only m17 snapshot tool: same honest-empty contract on the offline
+// source (no 4FSK carrier decoded yet).
+void TestAiRealLink::m17Snapshot_honestEmptyOffline() {
+    dsp::SpectrumEngine engine;
+    QString r = ai::executeTool("get_m17_calls", QJsonObject{}, &engine);
+    QJsonObject o = parseObj(r);
+    QVERIFY2(!o.isEmpty(), qPrintable("expected JSON, got: " + r));
+    QCOMPARE(o.value("ok").toBool(), true);
+    QVERIFY(o.contains("channel_id"));
+    QVERIFY(o.value("calls").isArray());
+    QCOMPARE(o.value("calls").toArray().size(), 0);     // honest empty state
+    QCOMPARE(o.value("count").toInt(), 0);
+    QCOMPARE(o.value("connected").toBool(), false);
+}
+
+// Wave2 read-only VOR radial tool: offline source has no VOR carrier, so the
+// result is honestly unlocked -- locked=false and NO fabricated bearing.
+void TestAiRealLink::vorSnapshot_honestUnlockedOffline() {
+    dsp::SpectrumEngine engine;
+    QString r = ai::executeTool("get_vor_radial", QJsonObject{}, &engine);
+    QJsonObject o = parseObj(r);
+    QVERIFY2(!o.isEmpty(), qPrintable("expected JSON, got: " + r));
+    QCOMPARE(o.value("ok").toBool(), true);
+    QVERIFY(o.contains("channel_id"));
+    QCOMPARE(o.value("locked").toBool(), false);          // honest empty state
+    // radial must be explicitly null (meaningless), never a made-up 0 bearing.
+    QVERIFY(o.value("radial_deg").isNull());
+    QVERIFY2(o.value("note").toString().contains(QString::fromUtf8("锁定")),
+             qPrintable("unlocked VOR must say so, got: " + r));
+}
+
 // Tool-count audit: the declarative registry must list EXACTLY the tools
 // executeTool supports -- no missing registration, no phantom schema entry.
 void TestAiRealLink::toolCount_registryEqualsExecution() {
@@ -196,12 +246,17 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "tune_frequency", "set_mode", "start_recording", "stop_recording",
         "scan_band", "set_bandwidth", "get_status", "predict_passes",
         "calibrate_frequency", "apply_frequency_correction",
+        "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
 
     // predict_passes is read-only (never gated in manual mode).
     QVERIFY(!ai::isWriteTool("predict_passes"));
+    // Wave2 digital decode snapshot tools are read-only (never gated either).
+    QVERIFY(!ai::isWriteTool("get_pocsag_messages"));
+    QVERIFY(!ai::isWriteTool("get_m17_calls"));
+    QVERIFY(!ai::isWriteTool("get_vor_radial"));
 }
 
 QTEST_MAIN(TestAiRealLink)

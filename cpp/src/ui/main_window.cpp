@@ -103,6 +103,9 @@
 #include "ui/about_dialog.h"
 #include "ui/calibration_dialog.h"
 #include "ui/radio_panel.h"
+#include "ui/pocsag_panel.h"
+#include "ui/m17_panel.h"
+#include "ui/vor_panel.h"
 
 namespace mbdsdr {
 
@@ -438,7 +441,8 @@ MainWindow::MainWindow(QWidget* parent)
         "RTL-SDR：总增益（驱动离散档吸附）。rtl_tcp 不暴露 LNA/Mixer/VGA 分段。"));
     demodCombo_ = new QComboBox(gRx);
     demodCombo_->setObjectName("demodCombo");
-    demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW", "BPSK", "QPSK", "ADS-B"});
+    demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW", "BPSK", "QPSK", "ADS-B",
+                           "POCSAG", "m17", "VOR"});
     demodCombo_->setMinimumWidth(tokens::scaled(120));
     gRxLay->addRow("解调", demodCombo_);
     bwCombo_ = new QComboBox(gRx);
@@ -858,6 +862,41 @@ MainWindow::MainWindow(QWidget* parent)
     adsbTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     adsbLay->addWidget(adsbTable_);
     rightTabs_->addTab(adsbPage, "ADS-B");
+
+    // ---- POCSAG pager panel (right rail; fed by engine pocsagMessagesChanged) --
+    // Honest list: rows are the real decoded RIC/function/text pushed by the
+    // engine snapshot; empty vector = empty state. "清空" asks the engine to
+    // clearDigitalOutputs(selectedVfo) -- the panel never keeps stale messages.
+    {
+        auto* pocsagPage = new QWidget;
+        auto* pocsagLay = new QVBoxLayout(pocsagPage);
+        pocsagLay->setContentsMargins(0, 0, 0, 0);
+        pocsagPanel_ = new ui::PocsagPanel(pocsagPage);
+        pocsagLay->addWidget(pocsagPanel_);
+        rightTabs_->addTab(pocsagPage, "寻呼");
+    }
+
+    // ---- m17 digital-call panel (fed by engine m17CallsChanged) --------------
+    // Voice-stream rows are honestly flagged "语音·未解码" (Codec2 not bundled).
+    {
+        auto* m17Page = new QWidget;
+        auto* m17Lay = new QVBoxLayout(m17Page);
+        m17Lay->setContentsMargins(0, 0, 0, 0);
+        m17Panel_ = new ui::M17Panel(m17Page);
+        m17Lay->addWidget(m17Panel_);
+        rightTabs_->addTab(m17Page, "m17");
+    }
+
+    // ---- VOR radial instrument panel (fed by engine vorRadialChanged) --------
+    // locked=false -> needle hidden, radial reads "—" (no fabricated bearing).
+    {
+        auto* vorPage = new QWidget;
+        auto* vorLay = new QVBoxLayout(vorPage);
+        vorLay->setContentsMargins(0, 0, 0, 0);
+        vorPanel_ = new ui::VorPanel(vorPage);
+        vorLay->addWidget(vorPanel_);
+        rightTabs_->addTab(vorPage, "VOR");
+    }
 
     // 1 s TTL-prune tick: expires silent aircraft and refreshes the table/map.
     adsbTimer_ = new QTimer(this);
@@ -2151,6 +2190,32 @@ MainWindow::MainWindow(QWidget* parent)
                 if (idx >= 0) demodCombo_->setCurrentIndex(idx);  // -> setDemodMode
             }
         });
+    }
+
+    // ---- POCSAG / m17 / VOR digital panels (cross-thread: queued) ----------
+    // The engine diff-pushes only on real changes (new message / call / radial
+    // edge, or an honest empty edge when the user leaves the mode); the panels
+    // repopulate from the full snapshot. The clear buttons ask the engine to
+    // reset the SELECTED VFO's digital output queue.
+    connect(engine_, &dsp::SpectrumEngine::pocsagMessagesChanged,
+            this, [this](const std::vector<dsp::PocsagMessage>& msgs) {
+        if (pocsagPanel_) pocsagPanel_->setMessages(msgs);
+    }, Qt::QueuedConnection);
+    connect(engine_, &dsp::SpectrumEngine::m17CallsChanged,
+            this, [this](const std::vector<dsp::M17Call>& calls) {
+        if (m17Panel_) m17Panel_->setCalls(calls);
+    }, Qt::QueuedConnection);
+    connect(engine_, &dsp::SpectrumEngine::vorRadialChanged,
+            this, [this](const dsp::VorResult& result) {
+        if (vorPanel_) vorPanel_->setResult(result);
+    }, Qt::QueuedConnection);
+    if (pocsagPanel_) {
+        connect(pocsagPanel_, &ui::PocsagPanel::clearRequested,
+                this, [this]() { engine_->clearDigitalOutputs(engine_->selectedVfoId()); });
+    }
+    if (m17Panel_) {
+        connect(m17Panel_, &ui::M17Panel::clearRequested,
+                this, [this]() { engine_->clearDigitalOutputs(engine_->selectedVfoId()); });
     }
 
     // ---- ANR controls ----

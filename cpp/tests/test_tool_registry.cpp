@@ -29,11 +29,13 @@ namespace {
 // (also pinned by test_agent / test_tool_schema / ai_real_link); it is the
 // expected value the introspected tables are checked against. Grew from 8 to 10
 // with the frequency-calibration pair: calibrate_frequency (read-only measure)
-// and apply_frequency_correction (write, gated).
+// and apply_frequency_correction (write, gated). Grew 10 to 13 with the
+// Wave2 POCSAG/m17/VOR read-only decode-snapshot tools.
 const QSet<QString> kAllCxxTools = {
     "tune_frequency", "set_mode", "start_recording", "stop_recording",
     "scan_band", "set_bandwidth", "get_status", "predict_passes",
     "calibrate_frequency", "apply_frequency_correction",
+    "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -56,9 +58,13 @@ const QSet<QString> kExpectedWriteTools = {
 // must agree). calibrate_frequency is a DESKTOP-ONLY read tool (it drives
 // SpectrumEngine::captureForCalibration); Flutter does not ship it, so there is
 // nothing to gate on mobile -- on desktop it is ungated by construction and is
-// listed here so the read-only set equality stays honest.
+// listed here so the read-only set equality stays honest. The Wave2
+// get_pocsag_messages / get_m17_calls / get_vor_radial snapshot tools are the
+// same kind of DESKTOP-ONLY read (SpectrumEngine read-only slots); Flutter does
+// not ship them, so they are ungated by construction and listed here too.
 const QSet<QString> kFlutterUngatedReadTools = {
     "get_status", "predict_passes", "calibrate_frequency",
+    "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
 };
 } // namespace
 
@@ -84,7 +90,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 10, qPrintable(QString("expected 10 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 13, qPrintable(QString("expected 13 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -166,11 +172,11 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
     QVERIFY(!isWriteTool("definitely_not_a_real_tool"));
 }
 
-// Not-a-regression smoke: the on-wire contract still holds (8 defs, order kept)
+// Not-a-regression smoke: the on-wire contract still holds (13 defs, order kept)
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 10);
+    QCOMPARE(defs.size(), 13);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
 

@@ -46,6 +46,8 @@ private slots:
     void telemetryEmptyStateIsHonest();
     void recordingStartStop();
     void commandTableIsClassified();
+    void digitalSnapshotReadsAreHonestAndUngated();
+    void clearDigitalOutputsGateBothStates();
 };
 
 // 1) Every write command deterministically reaches the engine; the symmetric
@@ -267,13 +269,86 @@ void TestControlHub::commandTableIsClassified() {
     QVERIFY(!tbl.isEmpty());
 
     bool sawTune = false, sawGetFreq = false, sawStartRec = false, sawGetStatus = false;
+    bool sawClear = false, sawGetPocsag = false, sawGetM17 = false, sawGetVor = false;
     for (const control::ControlHub::CommandInfo& c : tbl) {
         if (c.name == QStringLiteral("tune"))           { sawTune = true;          QVERIFY(c.write); }
         if (c.name == QStringLiteral("start_recording")){ sawStartRec = true;     QVERIFY(c.write); }
         if (c.name == QStringLiteral("get_frequency")) { sawGetFreq = true;         QVERIFY(!c.write); }
         if (c.name == QStringLiteral("get_status"))     { sawGetStatus = true;       QVERIFY(!c.write); }
+        // New digital surface: reset is a write (gated), the three snapshots are reads.
+        if (c.name == QStringLiteral("clear_digital_outputs")) { sawClear = true;        QVERIFY(c.write); }
+        if (c.name == QStringLiteral("get_pocsag_messages"))  { sawGetPocsag = true;    QVERIFY(!c.write); }
+        if (c.name == QStringLiteral("get_m17_calls"))          { sawGetM17 = true;       QVERIFY(!c.write); }
+        if (c.name == QStringLiteral("get_vor_radial"))         { sawGetVor = true;       QVERIFY(!c.write); }
     }
     QVERIFY(sawTune && sawGetFreq && sawStartRec && sawGetStatus);
+    QVERIFY(sawClear && sawGetPocsag && sawGetM17 && sawGetVor);
+}
+
+// 5) The POCSAG / m17 / VOR read commands pull the engine's REAL decode snapshot.
+//    With the engine attached but never run() there is nothing decoded yet, so the
+//    honest result is an EXPLICIT empty state (empty list / locked=false) -- never a
+//    fabricated message, callsign or bearing. These are READ commands: they must work
+//    even when the write gate is closed (reads are never gated).
+void TestControlHub::digitalSnapshotReadsAreHonestAndUngated() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // Gate CLOSED: reads must still be allowed.
+    hub.setWriteEnabled(false);
+
+    // POCSAG: honest empty list.
+    QJsonObject r = parseObj(hub.execute("get_pocsag_messages", {}));
+    QVERIFY2(r.value("ok").toBool(), "pocsag snapshot read must never be gated");
+    QVERIFY(!r.value("gated").toBool());
+    QVERIFY(r.value("messages").isArray());
+    QCOMPARE(r.value("messages").toArray().size(), 0);
+    QCOMPARE(r.value("count").toInt(), 0);
+
+    // m17: honest empty list.
+    r = parseObj(hub.execute("get_m17_calls", {}));
+    QVERIFY2(r.value("ok").toBool(), "m17 snapshot read must never be gated");
+    QVERIFY(r.value("calls").isArray());
+    QCOMPARE(r.value("calls").toArray().size(), 0);
+
+    // VOR: honest no-lock (locked=false; a bearing must NOT be fabricated).
+    r = parseObj(hub.execute("get_vor_radial", {}));
+    QVERIFY2(r.value("ok").toBool(), "vor snapshot read must never be gated");
+    QVERIFY(!r.value("locked").toBool());
+
+    // An explicit unknown channel id must ALSO resolve to the honest empty state
+    // (the engine maps unknown id -> empty list / unlocked result), never a crash.
+    r = parseObj(hub.execute("get_pocsag_messages", {{QStringLiteral("channel"), 999}}));
+    QVERIFY(r.value("ok").toBool());
+    QCOMPARE(r.value("channel").toInt(), 999);
+    QCOMPARE(r.value("count").toInt(), 0);
+
+    // A wrong-typed channel argument is an honest error.
+    r = parseObj(hub.execute("get_vor_radial", {{QStringLiteral("channel"), QStringLiteral("abc")}}));
+    QVERIFY(!r.value("ok").toBool());
+    QVERIFY(r.value("error").toString().contains(QString::fromUtf8("channel")));
+}
+
+// 6) clear_digital_outputs is a WRITE: it lands with the gate open and is honestly
+//    refused (engine untouched) with the gate closed -- same two-state contract as
+//    every other gated write command.
+void TestControlHub::clearDigitalOutputsGateBothStates() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // Gate ON (default): the reset lands (no channel exists yet -> engine no-ops,
+    // but the command itself is accepted and echoed).
+    QJsonObject r = parseObj(hub.execute("clear_digital_outputs", {}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QVERIFY(r.value("channel").isDouble());
+
+    // Gate OFF: refused, never touches the engine.
+    hub.setWriteEnabled(false);
+    r = parseObj(hub.execute("clear_digital_outputs", {}));
+    QVERIFY(!r.value("ok").toBool());
+    QVERIFY(r.value("gated").toBool());
 }
 
 QTEST_MAIN(TestControlHub)

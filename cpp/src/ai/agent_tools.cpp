@@ -330,6 +330,105 @@ QString execApplyFrequencyCorrection(const QJsonObject& args,
     return compact(o);
 }
 
+// ---------------------------------------------------------------------------
+// Wave2 read-only digital decode snapshot tools (POCSAG / m17 / VOR). They pull
+// the accumulated decode output of a channel straight off the engine's read-only
+// snapshot slots (which take sourceMutex_ so the copy is stable off the engine
+// thread). They NEVER tune / gate / mutate the receiver, so they are registered
+// write=false (predict_passes-style: never blocked by the manual gate). Unknown
+// channel / non-matching mode / nothing decoded yet -> an HONEST empty state:
+// an empty array, or locked=false for VOR. No fabricated message / call /
+// bearing, and no pre-stored station.
+//
+// channel_id defaults to the currently selected VFO when omitted.
+namespace {
+int resolveChannelId(const QJsonObject& args, dsp::SpectrumEngine* engine) {
+    if (args.contains("channel_id") && args["channel_id"].isDouble())
+        return static_cast<int>(args["channel_id"].toDouble());
+    return engine->selectedVfoId();
+}
+} // namespace
+
+QString execGetPocsagMessages(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                              const SourceInfo& src) {
+    const int channelId = resolveChannelId(args, engine);
+    const std::vector<dsp::PocsagMessage> msgs = engine->pocsagMessages(channelId);
+    QJsonArray arr;
+    for (const dsp::PocsagMessage& m : msgs) {
+        QJsonObject o;
+        o["address"] = static_cast<qint64>(m.address);   // RIC 0..2097151
+        o["function"] = m.function;
+        const char* typeStr = "unknown";
+        switch (m.type) {
+            case dsp::PocsagMessage::Type::Numeric: typeStr = "numeric"; break;
+            case dsp::PocsagMessage::Type::Alpha:   typeStr = "alpha";   break;
+            case dsp::PocsagMessage::Type::Unknown:
+            default:                                typeStr = "unknown"; break;
+        }
+        o["type"] = QString::fromLatin1(typeStr);
+        o["text"] = QString::fromStdString(m.text);
+        arr.append(o);
+    }
+    QJsonObject out;
+    out["ok"] = true;
+    out["channel_id"] = channelId;
+    out["count"] = static_cast<int>(arr.size());
+    out["messages"] = arr;   // empty array = honest empty state
+    addSourceFields(out, src);
+    return compact(out);
+}
+
+QString execGetM17Calls(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                        const SourceInfo& src) {
+    const int channelId = resolveChannelId(args, engine);
+    const std::vector<dsp::M17Call> calls = engine->m17Calls(channelId);
+    QJsonArray arr;
+    for (const dsp::M17Call& c : calls) {
+        QJsonObject o;
+        o["src"] = QString::fromStdString(c.src);
+        o["dst"] = QString::fromStdString(c.dst);
+        o["type"] = static_cast<int>(c.type);          // raw LSF TYPE word
+        o["is_stream"] = c.isStream;
+        o["payload_class"] = c.payloadClass;
+        o["frame_kind"] = c.frameKind;
+        o["crc_ok"] = c.crcOk;
+        o["voice_undecoded"] = c.voiceUndecoded;        // Codec2 not decoded: honest
+        o["meta_size"] = static_cast<int>(c.meta.size());
+        o["payload_size"] = static_cast<int>(c.payload.size());
+        arr.append(o);
+    }
+    QJsonObject out;
+    out["ok"] = true;
+    out["channel_id"] = channelId;
+    out["count"] = static_cast<int>(arr.size());
+    out["calls"] = arr;      // empty array = honest empty state
+    addSourceFields(out, src);
+    return compact(out);
+}
+
+QString execGetVorRadial(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                         const SourceInfo& src) {
+    const int channelId = resolveChannelId(args, engine);
+    const dsp::VorResult v = engine->vorResult(channelId);
+    QJsonObject out;
+    out["ok"] = true;
+    out["channel_id"] = channelId;
+    out["locked"] = v.locked;
+    // Honest empty state: radial/quality are only meaningful when locked. When
+    // unlocked we refuse to invent a bearing and say so explicitly.
+    if (v.locked) {
+        out["radial_deg"] = v.radialDeg;
+        out["quality"] = v.quality;
+    } else {
+        out["radial_deg"] = QJsonValue(QJsonValue::Null);
+        out["quality"] = QJsonValue(QJsonValue::Null);
+        out["note"] = QString::fromUtf8("未锁定 VOR 台，方位不可信（不编造方位）");
+    }
+    out["morse_id"] = v.morseId;
+    addSourceFields(out, src);
+    return compact(out);
+}
+
 // The built-in tool registry: name -> executor. Learned (mechanism only) from
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
 // instead of an if-else chain. Clean-room reimplementation; no GPL code copied.
@@ -352,6 +451,9 @@ const QList<ToolDispatch>& dispatchTable() {
         {"predict_passes", &execPredictPasses},
         {"calibrate_frequency", &execCalibrateFrequency},
         {"apply_frequency_correction", &execApplyFrequencyCorrection},
+        {"get_pocsag_messages", &execGetPocsagMessages},
+        {"get_m17_calls", &execGetM17Calls},
+        {"get_vor_radial", &execGetVorRadial},
     };
     return kTable;
 }

@@ -41,7 +41,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 10);
+    QCOMPARE(specs.size(), 13);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -156,6 +156,20 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "写入并应用频率校正 ppm（通常取 calibrate_frequency 的 measured_ppm）。"
             "会保存到设置并下发给接收机；属于写动作，手动模式下被拦截。")},
+        {"get_pocsag_messages",
+         QString::fromUtf8(
+            "只读：读取指定（默认当前选中）信道已解码的 POCSAG 寻呼消息快照"
+            "（地址 RIC/功能位/文本）。无解码结果时诚实返回空列表，不编造消息。")},
+        {"get_m17_calls",
+         QString::fromUtf8(
+            "只读：读取指定（默认当前选中）信道已解码的 M17 呼叫/帧快照"
+            "（源/目的呼号、类型、CRC 状态、语音帧诚实标注未解码）。"
+            "无解码结果时诚实返回空列表。")},
+        {"get_vor_radial",
+         QString::fromUtf8(
+            "只读：读取指定（默认当前选中）VOR 信道最新径向读数"
+            "（radialDeg 方位、质量、莫尔斯识别码、锁定态）。"
+            "未锁定时 locked=false，方位不可信并被显式标注，不编造方位。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {
