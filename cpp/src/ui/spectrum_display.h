@@ -109,13 +109,15 @@ public slots:
     void setPalette(int p);                   // 0 classic, 1 monochrome, 2 viridis
 
     // External user colormap (clean-room SDR++ colormaps). Parses a JSON document
-    // of {"name":..,"stops":["#rrggbb",..]} or [{"t":..,"c":"#rrggbb"},..]; on
-    // success it becomes the active ramp and the ENTIRE waterfall history is
-    // re-coloured from the stored raw-dB rows (no frame is dropped). On any
-    // malformed input it returns false and the current ramp is left untouched
-    // (honest fallback). loadColormapFromFile() reads a .json from disk first.
-    bool loadColormapFromJson(const QByteArray& json);
-    bool loadColormapFromFile(const QString& absPath);
+    // of {"name":..,"stops":["#rrggbb",..]} / [{"t":..,"c":"#rrggbb"},..] or a
+    // bare top-level array of the same; on success it becomes the active ramp and
+    // the ENTIRE waterfall history is re-coloured from the stored raw-dB rows (no
+    // frame is dropped). On any malformed input it returns false, the current ramp
+    // is left untouched (honest fallback), and -- when errorOut is non-null -- it
+    // receives a short human-readable reason the UI can show the user.
+    // loadColormapFromFile() reads a .json from disk first.
+    bool loadColormapFromJson(const QByteArray& json, QString* errorOut = nullptr);
+    bool loadColormapFromFile(const QString& absPath, QString* errorOut = nullptr);
 
     // Peak handling driven by the container's matured peak table.
     void setHighlightedPeak(int row);         // row index into the matured list

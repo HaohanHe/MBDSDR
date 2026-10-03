@@ -47,6 +47,9 @@
 #include <QElapsedTimer>
 #include <QDialogButtonBox>
 #include <QMessageBox>
+#include <QMenu>
+#include <QAction>
+#include <QCursor>
 #include <QGuiApplication>
 #include <QClipboard>
 
@@ -55,6 +58,7 @@
 #include "dsp/device_presence_notifier.h"
 #include "ui/gain_control_model.h"
 #include "ui/constellation_view.h"
+#include "ui/spectrum_display.h"
 
 #include <cmath>
 #include <algorithm>
@@ -741,6 +745,49 @@ MainWindow::MainWindow(QWidget* parent)
     // controls live in the container's tool strip.
     centerTabs_->addTab(spectrum_, "频谱");
     centerTabs_->addTab(worldPage, "世界");
+
+    // L8 closed loop: right-click the spectrum/waterfall canvas to load an
+    // external colormap JSON (clean-room SDR++ colormaps). The ring keeps raw-dB
+    // rows, so the whole history is re-coloured, not just future rows. A parse
+    // failure is reported honestly (message box) and the built-in ramp is kept;
+    // the chosen file path persists and is re-applied on launch with a silent
+    // fallback if it vanished / is malformed.
+    if (ui::SpectrumDisplay* canvas = spectrum_->displayCanvas()) {
+        canvas->setContextMenuPolicy(Qt::CustomContextMenu);
+        QObject::connect(canvas, &QWidget::customContextMenuRequested,
+                         this, [this, canvas](const QPoint&) {
+            QMenu menu(canvas);
+            QAction* loadAct  = menu.addAction(QStringLiteral("加载瀑布色板文件…"));
+            QAction* resetAct = menu.addAction(QStringLiteral("恢复内置色板"));
+            QAction* chosen = menu.exec(QCursor::pos());
+            if (chosen == loadAct) {
+                QSettings s("MBDSDR", "MBDSDR");
+                const QString startDir =
+                    s.value(tokens::kSettingsKeyColormapFile).toString();
+                const QString path = QFileDialog::getOpenFileName(
+                    this, QStringLiteral("选择瀑布色板 JSON"), startDir,
+                    QStringLiteral("色板 (*.json);;所有文件 (*)"));
+                if (path.isEmpty()) return;
+                QString err;
+                if (canvas->loadColormapFromFile(path, &err))
+                    s.setValue(tokens::kSettingsKeyColormapFile, path);
+                else
+                    QMessageBox::warning(this, QStringLiteral("色板加载失败"), err);
+            } else if (chosen == resetAct) {
+                canvas->setPalette(0);   // back to built-in classic, drop custom ramp
+                QSettings("MBDSDR", "MBDSDR")
+                    .remove(tokens::kSettingsKeyColormapFile);
+            }
+        });
+        // Re-apply a previously chosen colormap file (honest silent fallback).
+        const QString savedFile =
+            QSettings("MBDSDR", "MBDSDR").value(tokens::kSettingsKeyColormapFile)
+                .toString();
+        if (!savedFile.isEmpty()) {
+            QString err;
+            canvas->loadColormapFromFile(savedFile, &err);   // failure -> built-in
+        }
+    }
 
     // Weather-satellite (NOAA APT) tab: the decoded image is wide (1818 px),
     // so it lives in the center stack alongside the spectrum / map rather than
