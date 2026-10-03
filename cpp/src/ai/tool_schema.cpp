@@ -273,6 +273,67 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // ---- Wave2: POCSAG / m17 / VOR digital decode snapshots (read-only) ----
+    // These pull the ACCUMULATED decode output of a channel straight off the
+    // engine's read-only snapshot slots (SpectrumEngine::pocsagMessages /
+    // m17Calls / vorResult). They NEVER tune, gate, or mutate anything, so
+    // write=false (not gated in manual mode). Unknown channel / non-matching
+    // mode / no decoded frames yet -> an HONEST empty state (empty array, or
+    // locked=false for VOR); we never fabricate a message / call / bearing.
+
+    // get_pocsag_messages (read-only) --------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_pocsag_messages";
+        s.description = QString::fromUtf8(
+            "只读：读取指定（默认当前选中）信道已解码的 POCSAG 寻呼消息快照"
+            "（地址 RIC/功能位/文本）。无解码结果时诚实返回空列表，不编造消息。");
+        s.write = false;
+        ToolParamSpec ch;
+        ch.name = "channel_id";
+        ch.type = "number";
+        ch.description = QString::fromUtf8("可选：信道 VFO id；缺省为当前选中信道");
+        ch.required = false;
+        s.params.append(ch);
+        out.append(s);
+    }
+
+    // get_m17_calls (read-only) --------------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_m17_calls";
+        s.description = QString::fromUtf8(
+            "只读：读取指定（默认当前选中）信道已解码的 M17 呼叫/帧快照"
+            "（源/目的呼号、类型、CRC 状态、语音帧诚实标注未解码）。"
+            "无解码结果时诚实返回空列表。");
+        s.write = false;
+        ToolParamSpec ch;
+        ch.name = "channel_id";
+        ch.type = "number";
+        ch.description = QString::fromUtf8("可选：信道 VFO id；缺省为当前选中信道");
+        ch.required = false;
+        s.params.append(ch);
+        out.append(s);
+    }
+
+    // get_vor_radial (read-only) -------------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_vor_radial";
+        s.description = QString::fromUtf8(
+            "只读：读取指定（默认当前选中）VOR 信道最新径向读数"
+            "（radialDeg 方位、质量、莫尔斯识别码、锁定态）。"
+            "未锁定时 locked=false，方位不可信并被显式标注，不编造方位。");
+        s.write = false;
+        ToolParamSpec ch;
+        ch.name = "channel_id";
+        ch.type = "number";
+        ch.description = QString::fromUtf8("可选：信道 VFO id；缺省为当前选中信道");
+        ch.required = false;
+        s.params.append(ch);
+        out.append(s);
+    }
+
     return out;
 }
 

@@ -80,6 +80,9 @@ set(SOURCES
     src/dsp/anr.cpp
     src/ui/constellation_view.cpp
     src/ui/weather_panel.cpp
+    src/ui/pocsag_panel.cpp
+    src/ui/m17_panel.cpp
+    src/ui/vor_panel.cpp
     src/dsp/squelch.cpp
     src/dsp/agc.cpp
     src/dsp/audio_output.cpp
@@ -172,6 +175,9 @@ set(HEADERS
     src/ui/world_view.h
     src/ui/aircraft_tracker.h
     src/ui/weather_panel.h
+    src/ui/pocsag_panel.h
+    src/ui/m17_panel.h
+    src/ui/vor_panel.h
     src/ui/map_projection.h
     src/ui/coastline_data.h
     src/ui/elevation_plot.h
@@ -922,6 +928,19 @@ target_include_directories(test_weather_panel PRIVATE src)
 target_link_libraries(test_weather_panel PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui)
 add_test(NAME weather_panel COMMAND test_weather_panel)
 set_tests_properties(weather_panel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Phase18 Wave2: POCSAG / m17 / VOR decoder panels. Feeds the SAME snapshot shapes
+# the engine pushes (pocsagMessagesChanged / m17CallsChanged / vorRadialChanged)
+# straight into the panel slots and asserts the honest display contract:
+# synthetic frames render correctly, an empty list / unlocked VorResult is the
+# honest empty state (no fabricated message / callsign / bearing), clear() emits
+# clearRequested, and a narrow resize renders without overflow. NOT HARDWARE.
+add_executable(test_digital_panel_ui tests/test_digital_panel_ui.cpp
+    src/ui/pocsag_panel.cpp src/ui/m17_panel.cpp src/ui/vor_panel.cpp)
+target_include_directories(test_digital_panel_ui PRIVATE src)
+target_link_libraries(test_digital_panel_ui PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME digital_panel_ui COMMAND test_digital_panel_ui)
+set_tests_properties(digital_panel_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # End-to-end: TestSignalSource digital IQ -> real channelizer -> DigitalDemod lock.
 add_executable(test_digital_e2e tests/test_digital_e2e.cpp

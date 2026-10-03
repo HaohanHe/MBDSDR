@@ -30,6 +30,15 @@ QString compact(const QJsonObject& o) {
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
 
+// Render a decoder's raw byte vector as a bounded JSON byte array. Used for the
+// m17 LSF meta / frame payload so the structured snapshot carries the real bytes
+// rather than a fabricated summary; empty when the decoder produced nothing.
+QJsonArray bytesToJson(const std::vector<uint8_t>& bytes) {
+    QJsonArray a;
+    for (uint8_t b : bytes) a.append(static_cast<int>(b));
+    return a;
+}
+
 } // namespace
 
 // The named command table. Each row maps a headless command straight onto an
@@ -63,6 +72,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"vfo_set_offset",       true,  &ControlHub::cmdVfoSetOffset},
         {"vfo_set_bandwidth",    true,  &ControlHub::cmdVfoSetBandwidth},
         {"vfo_set_mode",         true,  &ControlHub::cmdVfoSetMode},
+        {"clear_digital_outputs",true,  &ControlHub::cmdClearDigitalOutputs},
         // ---- Read commands (always allowed) ------------------------------
         {"get_frequency",        false, &ControlHub::cmdGetFrequency},
         {"get_mode",             false, &ControlHub::cmdGetMode},
@@ -73,6 +83,9 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_capabilities",     false, &ControlHub::cmdGetCapabilities},
         {"get_vfos",             false, &ControlHub::cmdGetVfos},
         {"get_recording_state",   false, &ControlHub::cmdGetRecordingState},
+        {"get_pocsag_messages",   false, &ControlHub::cmdGetPocsagMessages},
+        {"get_m17_calls",         false, &ControlHub::cmdGetM17Calls},
+        {"get_vor_radial",        false, &ControlHub::cmdGetVorRadial},
     };
     return kRows;
 }
@@ -198,6 +211,16 @@ bool ControlHub::needMode(const QJsonObject& a, const char* key, QString& out, Q
         if (out == QLatin1String(tokens::kControlHubModes[i])) return true;
     err = QString::fromUtf8("未知解调模式: %1").arg(v.toString());
     return false;
+}
+
+int ControlHub::resolveChannel(const QJsonObject& a, QString& err) const {
+    const QJsonValue v = a.value(QStringLiteral("channel"));
+    if (v.isUndefined() || v.isNull()) return engine_->selectedVfoId();
+    if (!v.isDouble()) {
+        err = QString::fromUtf8("参数 channel 必须是整数（VFO 信道 id）");
+        return -1;
+    }
+    return v.toInt();
 }
 
 // ---------------------------------------------------------------------------
@@ -502,6 +525,17 @@ QJsonObject ControlHub::cmdVfoSetMode(const QJsonObject& a) {
     return o;
 }
 
+QJsonObject ControlHub::cmdClearDigitalOutputs(const QJsonObject& a) {
+    QString err;
+    const int ch = resolveChannel(a, err);
+    if (ch < 0) return errResult(err);
+    engine_->clearDigitalOutputs(ch);
+    QJsonObject o = okBase();
+    o["command"] = "clear_digital_outputs";
+    o["channel"] = ch;
+    return o;
+}
+
 // ===========================================================================
 // Read commands (always allowed, even with the write gate closed)
 // ===========================================================================
@@ -621,6 +655,83 @@ QJsonObject ControlHub::cmdGetRecordingState(const QJsonObject&) {
     o["recording"] = snap.recording;
     o["path"] = engine_->recordingPath();
     return o;
+}
+
+QJsonObject ControlHub::cmdGetPocsagMessages(const QJsonObject& a) {
+    QString err;
+    const int ch = resolveChannel(a, err);
+    if (ch < 0) return errResult(err);
+    // Real accumulated decode output of the named channel; empty list when the
+    // channel does not exist / is not POCSAG / nothing decoded yet -- never fake.
+    std::vector<dsp::PocsagMessage> msgs = engine_->pocsagMessages(ch);
+    QJsonArray arr;
+    for (const dsp::PocsagMessage& m : msgs) {
+        QJsonObject o;
+        o["address"] = static_cast<double>(m.address);
+        o["function"] = m.function;
+        o["text"] = QString::fromStdString(m.text);
+        const char* t = "unknown";
+        switch (m.type) {
+            case dsp::PocsagMessage::Type::Numeric: t = "numeric"; break;
+            case dsp::PocsagMessage::Type::Alpha:  t = "alpha";    break;
+            default: break;
+        }
+        o["type"] = QString::fromUtf8(t);
+        arr.append(o);
+    }
+    QJsonObject r = okBase();
+    r["command"] = "get_pocsag_messages";
+    r["channel"] = ch;
+    r["messages"] = arr;
+    r["count"] = static_cast<int>(msgs.size());
+    return r;
+}
+
+QJsonObject ControlHub::cmdGetM17Calls(const QJsonObject& a) {
+    QString err;
+    const int ch = resolveChannel(a, err);
+    if (ch < 0) return errResult(err);
+    std::vector<dsp::M17Call> calls = engine_->m17Calls(ch);
+    QJsonArray arr;
+    for (const dsp::M17Call& c : calls) {
+        QJsonObject o;
+        o["src"] = QString::fromStdString(c.src);
+        o["dst"] = QString::fromStdString(c.dst);
+        o["type"] = QString::asprintf("0x%04X", static_cast<unsigned>(c.type));
+        o["is_stream"] = c.isStream;
+        o["payload_class"] = c.payloadClass;
+        o["frame_kind"] = c.frameKind;
+        o["crc_ok"] = c.crcOk;
+        o["viterbi_cost"] = c.viterbiCost;
+        // Codec2 is not bundled: voice streams are reported as metadata only,
+        // honestly flagged so a client never expects decoded speech.
+        o["voice_undecoded"] = c.voiceUndecoded;
+        o["meta"] = bytesToJson(c.meta);
+        o["payload"] = bytesToJson(c.payload);
+        arr.append(o);
+    }
+    QJsonObject r = okBase();
+    r["command"] = "get_m17_calls";
+    r["channel"] = ch;
+    r["calls"] = arr;
+    r["count"] = static_cast<int>(calls.size());
+    return r;
+}
+
+QJsonObject ControlHub::cmdGetVorRadial(const QJsonObject& a) {
+    QString err;
+    const int ch = resolveChannel(a, err);
+    if (ch < 0) return errResult(err);
+    dsp::VorResult v = engine_->vorResult(ch);
+    QJsonObject r = okBase();
+    r["command"] = "get_vor_radial";
+    r["channel"] = ch;
+    // locked=false is the honest no-lock state: a client must ignore radialDeg.
+    r["locked"] = v.locked;
+    r["radial_deg"] = v.radialDeg;
+    r["quality"] = v.quality;
+    r["morse_id"] = v.morseId;
+    return r;
 }
 
 } // namespace control

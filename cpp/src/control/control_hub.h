@@ -151,6 +151,10 @@ private:
     QJsonObject cmdVfoSetOffset(const QJsonObject& a);
     QJsonObject cmdVfoSetBandwidth(const QJsonObject& a);
     QJsonObject cmdVfoSetMode(const QJsonObject& a);
+    // POCSAG / m17 / VOR digital output reset (write -- gated): empties the
+    // named channel's decode queues and re-inits its decoders. Mirrors the UI
+    // panel "clear" button through the same gate as every other write command.
+    QJsonObject cmdClearDigitalOutputs(const QJsonObject& a);
 
     QJsonObject cmdGetFrequency(const QJsonObject&);
     QJsonObject cmdGetMode(const QJsonObject&);
@@ -161,12 +165,25 @@ private:
     QJsonObject cmdGetCapabilities(const QJsonObject&);
     QJsonObject cmdGetVfos(const QJsonObject&);
     QJsonObject cmdGetRecordingState(const QJsonObject&);
+    // Read-only decode snapshots (ALWAYS allowed, even with the gate closed).
+    // These pull the engine's real accumulated decode output for the current (or
+    // the explicitly-named) channel. No data / non-matching mode -> an explicit
+    // empty state (empty list / locked=false); nothing is ever fabricated.
+    QJsonObject cmdGetPocsagMessages(const QJsonObject&);
+    QJsonObject cmdGetM17Calls(const QJsonObject&);
+    QJsonObject cmdGetVorRadial(const QJsonObject&);
 
     // Argument extraction: fills `out` and returns true, else fills `err`.
     static bool needDbl(const QJsonObject& a, const char* key, double& out, QString& err);
     static bool needBool(const QJsonObject& a, const char* key, bool& out, QString& err);
     static bool needInt(const QJsonObject& a, const char* key, int& out, QString& err);
     static bool needMode(const QJsonObject& a, const char* key, QString& out, QString& err);
+
+    // Resolve the optional "channel" argument for the digital read/reset
+    // commands. When the arg is absent/null the SELECTED VFO is used; a
+    // wrong-typed value is an honest error. Returns the effective channel id,
+    // or -1 (with err filled) on a bad argument. Assumes engine_ != nullptr.
+    int resolveChannel(const QJsonObject& a, QString& err) const;
 };
 
 } // namespace control
