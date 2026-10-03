@@ -111,8 +111,14 @@ abstract interface class RadioApi {
   /// 开关静噪门控。
   void setSquelchEnabled(bool on);
 
-  /// 设置静噪门限（dBFS），内部 clamp 到 AppTokens 区间。
+  /// 设置静噪门限（dBFS），内部 clamp 到 AppTokens 区间。手动设置即退出自动门限。
   void setSquelchThresholdDb(double db);
+
+  /// 静噪是否自动门限（门限 = 实测同域音频噪声底 + 裕量，自动跟随）。
+  bool get squelchAuto;
+
+  /// 开关自动门限。开启后门限随噪声底自动跟随；手动拖门限滑杆即退出自动。
+  void setSquelchAuto(bool on);
 
   /// 实时频谱帧流。
   Stream<SpectrumFrame> get spectrumStream;
@@ -179,6 +185,10 @@ class RadioController extends ChangeNotifier implements RadioApi {
   /// 关门时复用的静音帧缓冲（按当前块长度惰性增长，避免逐块分配）。
   Float32List _silence = Float32List(0);
 
+  /// 自动门限跟随去抖：上次已通知 UI 的门限取整值（dB）。门限按 ≥1dB 变化才
+  /// 通知重建，避免每帧 rebuild；噪声底收敛后门限不再变化即停止通知。
+  int _lastNotifiedSquelchTrunc = 999;
+
   /// 信号活动回调：静噪门由关→开（真实有信号过声）时触发一次。
   /// 由外壳（main.dart）注入，把真实观察写进信号活动日志；未连接/无观察时不触发。
   void Function({
@@ -238,6 +248,8 @@ class RadioController extends ChangeNotifier implements RadioApi {
   bool get squelchOpen => _squelch.open;
   @override
   double get squelchLevelDb => _squelch.levelDb;
+  @override
+  bool get squelchAuto => _squelch.autoThreshold;
   @override
   Stream<SpectrumFrame> get spectrumStream => _spectrumCtrl.stream;
   @override
@@ -447,8 +459,13 @@ class RadioController extends ChangeNotifier implements RadioApi {
     }
     _sink.write(out);
     _recSink?.write(out);
-    // 仅在开门/关门跳变时通知 UI，避免每帧抖动 rebuild。
-    if (open != wasOpen) {
+    // 自动门限跟随：门限随噪声底变化时通知 UI（滑杆回读），按 1dB 取整去抖。
+    final int truncT = _squelch.thresholdDb.truncate();
+    final bool autoMoved =
+        _squelch.autoThreshold && truncT != _lastNotifiedSquelchTrunc;
+    if (autoMoved) _lastNotifiedSquelchTrunc = truncT;
+    // 仅在开门/关门跳变 或 自动门限移动时通知 UI，避免每帧抖动 rebuild。
+    if (open != wasOpen || autoMoved) {
       // 真实信号活动：静噪门由关→开（连接后首次出声 / 值守命中过门限）。
       // 电平取静噪门平滑后的真实解调 RMS，频率/模式取当前真实调谐。
       if (open) {
@@ -618,10 +635,24 @@ class RadioController extends ChangeNotifier implements RadioApi {
 
   @override
   void setSquelchThresholdDb(double db) {
+    // 用户手动拖滑杆 = 要手动控制：退出自动跟随，避免噪声底与拖杆打架
+    //（对齐桌面 sliderPressed → 取消「自动门限」选中）。
+    _squelch.autoThreshold = false;
     _squelch.thresholdDb = db.clamp(
       AppTokens.squelchThresholdMinDb,
       AppTokens.squelchThresholdMaxDb,
     );
+    notifyListeners();
+  }
+
+  @override
+  void setSquelchAuto(bool on) {
+    _squelch.autoThreshold = on;
+    if (on) {
+      // 开启即按当前噪声底立即定一次门限（对齐桌面开启按钮时采样当前 floor）。
+      _squelch.thresholdDb = (_squelch.noiseFloorDb + AppTokens.squelchAutoMarginDb)
+          .clamp(AppTokens.squelchThresholdMinDb, AppTokens.squelchThresholdMaxDb);
+    }
     notifyListeners();
   }
 

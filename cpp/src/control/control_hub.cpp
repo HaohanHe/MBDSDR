@@ -10,6 +10,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QStringList>
+#include <QThread>
 #include <algorithm>
 #include <cmath>
 
@@ -117,6 +118,13 @@ void ControlHub::setEngine(dsp::SpectrumEngine* engine) {
                          this, &ControlHub::onSquelchState);
         QObject::connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
                          this, &ControlHub::onRecordingState);
+        // Device-liveness event channel: a failed connect carries a real reason,
+        // and sourceDropped tells us a LIVE device was lost (distinct from an
+        // idle / manually disconnected state). Both feed get_status honestly.
+        QObject::connect(engine_, &dsp::SpectrumEngine::sourceError,
+                         this, &ControlHub::onSourceError);
+        QObject::connect(engine_, &dsp::SpectrumEngine::sourceDropped,
+                         this, &ControlHub::onSourceDropped);
     }
 }
 
@@ -129,6 +137,30 @@ void ControlHub::onTelemetry(QString name, bool connected, double centerHz,
     snap_.centerHz = centerHz;
     snap_.sampleRateHz = sampleRateHz;
     snap_.gainDb = gainDb;
+    // Once a real device is ACTUALLY streaming again, the previous failure/drop
+    // is stale: clear it so get_status never reports an old error after recovery.
+    if (connected) {
+        snap_.lastError.clear();
+        snap_.dropped = false;
+    }
+}
+
+void ControlHub::onSourceError(const QString& message) {
+    std::lock_guard<std::mutex> lk(snapMtx_);
+    snap_.lastError = message;
+    // NOTE: we deliberately do NOT clear `dropped` here. sourceError also fires
+    // when an AUTO-RECONNECT retry fails while a live device was previously lost;
+    // that retry failure is a *consequence* of the drop, not a fresh connect, so
+    // the "was live, now gone" diagnosis must survive. A never-connected manual
+    // connect failure simply leaves dropped=false (it was never set). Both are
+    // cleared together only once a real device actually streams (connected=true).
+}
+
+void ControlHub::onSourceDropped() {
+    std::lock_guard<std::mutex> lk(snapMtx_);
+    // sourceDropped carries no reason -- record the event but do NOT fabricate a
+    // cause (the engine already fell back to the offline/idle source).
+    snap_.dropped = true;
 }
 
 void ControlHub::onSquelchState(bool open) {
@@ -255,6 +287,38 @@ QString ControlHub::execute(const QString& command, const QJsonObject& args) {
 
     // 4) Dispatch. Handlers return their own result object; argument errors
     //    surface as {ok:false, error:...}.
+    //
+    //    THREADING: the engine slots are designed to run on the thread that owns
+    //    the SpectrumEngine object (its home thread -- the application/GUI thread
+    //    in the app, the test thread here). When execute() arrives on that home
+    //    thread we dispatch directly (zero overhead, identical to a main-window
+    //    call). When a remote/network front-end calls us on a FOREIGN thread we
+    //    must NOT call those slots here on the caller's thread: it would race the
+    //    engine run() loop and, for the non-locked setters (squelch/mute/watch/
+    //    gated-recording), introduce a second writer. Instead we marshal the whole
+    //    dispatch onto the engine's home thread with a BLOCKING queued call, which
+    //    preserves the synchronous JSON return contract while guaranteeing the
+    //    engine is only ever touched from its designed thread. (ControlHub is
+    //    created on -- and never moved off -- that same home thread, so invoking
+    //    on `this` lands exactly on engine_->thread().)
+    dsp::SpectrumEngine* eng = engine_;
+    const bool onHome = (QThread::currentThread() == eng->thread());
+    if (onHome) {
+        return dispatch(row, command, args);
+    }
+    QString result;
+    QMetaObject::invokeMethod(this,
+        [this, row, command, args, &result]() {
+            result = dispatch(row, command, args);
+        },
+        Qt::BlockingQueuedConnection);
+    return result;
+}
+
+// Matches the row's handler, runs it (on the engine's home thread), emits the
+// observational commandExecuted, and returns the compact JSON result.
+QString ControlHub::dispatch(const CommandRow* row, const QString& command,
+                             const QJsonObject& args) {
     QJsonObject res = (this->*(row->fn))(args);
     emit commandExecuted(command, res.value("ok").toBool());
     return compact(res);
@@ -570,6 +634,27 @@ QJsonObject ControlHub::cmdGetStatus(const QJsonObject&) {
     o["connected"] = snap.available && snap.connected;
     o["source"] = snap.available ? snap.sourceName
                                  : QString::fromUtf8("无遥测（未连接硬件或引擎未运行）");
+    // Honest coarse status derived from the telemetry bool + the liveness event
+    // channel. Every state is reachable on real hardware:
+    //   no_telemetry -- engine not running / no source has ever streamed;
+    //   connected    -- a real device is streaming right now;
+    //   dropped      -- a live device was lost (unplugged / link dropped; the
+    //                   auto-reconnect retry may still be failing in the
+    //                   background, and error_message then carries that retry's
+    //                   reason -- but the root event is the drop);
+    //   error        -- a connect attempt failed while NO live device was ever
+    //                   attached (error_message = the real reason);
+    //   disconnected -- idle / manually disconnected / offline fallback.
+    QString status;
+    if (!snap.available)                     status = QStringLiteral("no_telemetry");
+    else if (snap.connected)                 status = QStringLiteral("connected");
+    else if (snap.dropped)                   status = QStringLiteral("dropped");
+    else if (!snap.lastError.isEmpty())      status = QStringLiteral("error");
+    else                                     status = QStringLiteral("disconnected");
+    o["status"] = status;
+    // error_message carries the REAL reason from sourceError ("" when none). It is
+    // cleared automatically once a real device streams again, so it is never stale.
+    o["error_message"] = snap.lastError;
     if (snap.available) {
         o["readback_center_hz"] = snap.centerHz;
         o["readback_sample_rate_hz"] = snap.sampleRateHz;
@@ -590,6 +675,8 @@ QJsonObject ControlHub::cmdGetTelemetry(const QJsonObject&) {
     }
     o["source"] = snap.sourceName;
     o["connected"] = snap.connected;
+    o["error_message"] = snap.lastError;
+    o["dropped"] = snap.dropped;
     o["center_hz"] = snap.centerHz;
     o["sample_rate_hz"] = snap.sampleRateHz;
     o["gain_db"] = snap.gainDb;

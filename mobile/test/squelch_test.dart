@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/app/tokens.dart';
 import 'package:mbdsdr_mobile/dsp/squelch.dart';
+import 'package:mbdsdr_mobile/services/radio_controller.dart';
 
 const double _rate = 48000.0;
 
@@ -107,6 +108,92 @@ void main() {
       expect(SquelchGate.rmsDbfs(_silence(n)), SquelchGate.minMeasuredDb);
       // amp=1.0 正弦 RMS=1/sqrt2≈0.707 → dB≈-3.01。
       expect(SquelchGate.rmsDbfs(_sine(1.0, n)), closeTo(-3.01, 0.5));
+    });
+  });
+
+  group('自动门限（同域噪声底跟踪）', () {
+    // amp=0.01 正弦 RMS≈-43 dBFS：作「安静噪声底」参考电平。
+    // amp=0.3  正弦 RMS≈-13.5 dBFS：作「强信号」参考电平。
+    test('噪声底向安静快随、向响瞬变慢爬（真实信号不抬底）', () {
+      final gate = SquelchGate()
+        ..enabled = true
+        ..reset();
+
+      // 先建立 ≈ -43 dB 的安静底。
+      for (var i = 0; i < 20; i++) {
+        gate.process(_sine(0.01, n), audioSampleRateHz: _rate);
+      }
+      expect(gate.noiseFloorDb, inInclusiveRange(-46, -40));
+
+      // 强信号过门限：底向响慢爬（alphaUp=0.005），10 块几乎不动。
+      for (var i = 0; i < 10; i++) {
+        gate.process(_sine(0.3, n), audioSampleRateHz: _rate);
+      }
+      expect(gate.noiseFloorDb, greaterThan(-42.5),
+          reason: '真实信号不应明显抬升噪声底');
+
+      // 转静音：底向安静快随（alphaDown=0.20），6 块内大幅回落。
+      for (var i = 0; i < 6; i++) {
+        gate.process(_silence(n), audioSampleRateHz: _rate);
+      }
+      expect(gate.noiseFloorDb, lessThan(-90),
+          reason: '安静背景应快速被跟踪为新噪声底');
+    });
+
+    test('自动门限 = 实测噪声底 + 裕量：安静信道关门、强信号过门限开门', () {
+      final gate = SquelchGate()
+        ..enabled = true
+        ..autoThreshold = true
+        ..reset();
+
+      // 建立安静噪声底 ≈ -43 dB。
+      for (var i = 0; i < 20; i++) {
+        gate.process(_sine(0.01, n), audioSampleRateHz: _rate);
+      }
+      expect(gate.noiseFloorDb, inInclusiveRange(-46, -40));
+      // 自动门限 = 底 + 8dB ≈ -35 dB（clamp 到 token 区间）。
+      expect(gate.thresholdDb,
+          closeTo(gate.noiseFloorDb + AppTokens.squelchAutoMarginDb, 0.5));
+      expect(gate.thresholdDb,
+          inInclusiveRange(AppTokens.squelchThresholdMinDb, AppTokens.squelchThresholdMaxDb));
+
+      // 安静噪声（-43）低于自动门限（-35）→ 保持关门。
+      expect(gate.open, isFalse);
+
+      // 强信号（-13.5）高于自动门限 → 开门。
+      expect(gate.process(_sine(0.3, n), audioSampleRateHz: _rate), isTrue);
+      expect(gate.open, isTrue);
+    });
+
+    test('关闭自动门限后回到手动门限（不再随噪声底改写）', () {
+      final gate = SquelchGate()
+        ..enabled = true
+        ..autoThreshold = false
+        ..thresholdDb = -50
+        ..reset();
+
+      // 手动门限固定 -50：强信号（-13.5）开门。
+      expect(gate.process(_sine(0.3, n), audioSampleRateHz: _rate), isTrue);
+      // 转安静后手动门限仍是 -50（不被自动逻辑改写）。
+      gate.process(_silence(n), audioSampleRateHz: _rate);
+      expect(gate.thresholdDb, -50);
+    });
+  });
+
+  group('RadioController 自动门限接线', () {
+    test('开启自动；手动拖门限即退出自动跟随', () {
+      final c = RadioController();
+      addTearDown(c.dispose);
+
+      c.setSquelchAuto(true);
+      expect(c.squelchAuto, isTrue);
+      // 无音频时噪声底=下限(-120)，自动门限 clamp 到区间下限。
+      expect(c.squelchThresholdDb, AppTokens.squelchThresholdMinDb);
+
+      // 用户手动设门限 → 退出自动（避免噪声底与拖杆打架）。
+      c.setSquelchThresholdDb(-55);
+      expect(c.squelchAuto, isFalse, reason: '手动设门限即退出自动跟随');
+      expect(c.squelchThresholdDb, -55);
     });
   });
 }

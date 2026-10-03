@@ -94,6 +94,12 @@ class _TapRadio extends ChangeNotifier implements RadioApi {
   void setSquelchThresholdDb(double db) {}
 
   @override
+  bool get squelchAuto => false;
+
+  @override
+  void setSquelchAuto(bool on) {}
+
+  @override
   Stream<SpectrumFrame> get spectrumStream => const Stream.empty();
 
   @override

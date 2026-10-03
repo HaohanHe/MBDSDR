@@ -657,6 +657,16 @@ class _ControlPanel extends StatelessWidget {
             Row(
               children: [
                 const Text('门限', style: AppTokens.auxiliary),
+                // 自动门限：门限 = 实测同域噪声底 + 裕量，自动跟随。开启时滑杆
+                // 只读（手动拖滑杆会经 controller 退出自动）。对齐桌面「自动门限」。
+                FilterChip(
+                  label: const Text('自动', style: AppTokens.auxiliary),
+                  selected: controller.squelchAuto,
+                  visualDensity: VisualDensity.compact,
+                  onSelected: (connected && controller.squelchEnabled)
+                      ? (v) => controller.setSquelchAuto(v)
+                      : null,
+                ),
                 Expanded(
                   child: Slider(
                     min: AppTokens.squelchThresholdMinDb,
@@ -665,7 +675,9 @@ class _ControlPanel extends StatelessWidget {
                       AppTokens.squelchThresholdMinDb,
                       AppTokens.squelchThresholdMaxDb,
                     ),
-                    onChanged: (connected && controller.squelchEnabled)
+                    onChanged: (connected &&
+                            controller.squelchEnabled &&
+                            !controller.squelchAuto)
                         ? controller.setSquelchThresholdDb
                         : null,
                   ),

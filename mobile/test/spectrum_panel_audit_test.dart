@@ -74,6 +74,12 @@ class _PanelRadio extends ChangeNotifier implements RadioApi {
   void setSquelchThresholdDb(double db) => squelchThresholdDb = db;
 
   @override
+  bool get squelchAuto => false;
+
+  @override
+  void setSquelchAuto(bool on) {}
+
+  @override
   Future<void> connect(String host, int port) async {}
 
   @override
