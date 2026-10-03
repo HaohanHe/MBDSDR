@@ -609,6 +609,23 @@ target_include_directories(test_sstv_vis PRIVATE src)
 target_link_libraries(test_sstv_vis PRIVATE Qt6::Core)
 add_test(NAME sstv_vis COMMAND test_sstv_vis)
 
+# Phase 17: POCSAG paging / m17 / VOR navigation digital decoders.
+# POCSAG and m17 tests are plain main() (Qt-free cores); VOR uses QtTest.
+add_executable(test_pocsag_decoder tests/test_pocsag_decoder.cpp src/dsp/pocsag_decoder.cpp)
+target_include_directories(test_pocsag_decoder PRIVATE src)
+target_link_libraries(test_pocsag_decoder PRIVATE Qt6::Core)
+add_test(NAME pocsag_decoder COMMAND test_pocsag_decoder)
+
+add_executable(test_m17_decoder tests/test_m17_decoder.cpp src/dsp/m17_decoder.cpp)
+target_include_directories(test_m17_decoder PRIVATE src)
+target_link_libraries(test_m17_decoder PRIVATE Qt6::Core)
+add_test(NAME m17_decoder COMMAND test_m17_decoder)
+
+add_executable(test_vor_receiver tests/test_vor_receiver.cpp src/dsp/vor_receiver.cpp)
+target_include_directories(test_vor_receiver PRIVATE src)
+target_link_libraries(test_vor_receiver PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME vor_receiver COMMAND test_vor_receiver)
+
 add_executable(test_aircraft_tracker tests/test_aircraft_tracker.cpp src/ui/aircraft_tracker.cpp)
 target_include_directories(test_aircraft_tracker PRIVATE src)
 # aircraft_tracker.h pulls in world_view.h (AircraftPoint), which needs QtWidgets.
