@@ -741,6 +741,26 @@ int SpectrumEngine::selectedVfoId() const {
     return vfoManager_.selectedId();
 }
 
+std::vector<PocsagMessage> SpectrumEngine::pocsagMessages(int channelId) const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return vfoManager_.pocsagMessages(channelId);
+}
+
+std::vector<M17Call> SpectrumEngine::m17Calls(int channelId) const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return vfoManager_.m17Calls(channelId);
+}
+
+VorResult SpectrumEngine::vorResult(int channelId) const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return vfoManager_.vorResult(channelId);
+}
+
+void SpectrumEngine::clearDigitalOutputs(int channelId) {
+    QMutexLocker lk(&sourceMutex_);
+    vfoManager_.clearDigitalOutputs(channelId);
+}
+
 void SpectrumEngine::setDirectSampling(int mode) {
     cachedDirectSampling_ = mode;
     QMutexLocker lk(&sourceMutex_);
@@ -929,6 +949,53 @@ void SpectrumEngine::run() {
         const VfoChannel* sel = vfoManager_.selected();
         const QString selMode = sel ? sel->mode : demodMode_;
         const bool digital = VfoChannel::modeIsDigital(selMode);
+
+        // ---- POCSAG / m17 / VOR snapshot change-diff (every block) ----------
+        // Pull the SELECTED channel's digital read-out and emit ONLY when it
+        // changed vs the last push (mirrors rdsUpdated). Reading off a non-
+        // matching mode yields an honest empty snapshot, so leaving POCSAG/m17/
+        // VOR pushes exactly one cleared edge -- the panel never keeps a stale
+        // list / radial from another band.
+        {
+            const int selId = sel ? sel->id : -1;
+
+            // POCSAG message list (append-only; reset on clear / mode switch).
+            const std::vector<PocsagMessage> pmsgs =
+                (selMode == "POCSAG" && selId >= 0)
+                    ? vfoManager_.pocsagMessages(selId)
+                    : std::vector<PocsagMessage>{};
+            if (pmsgs.size() != lastPocsagCount_) {
+                lastPocsagCount_ = pmsgs.size();
+                emit pocsagMessagesChanged(pmsgs);
+            }
+
+            // m17 call list (append-only; reset on clear / mode switch).
+            const std::vector<M17Call> mcalls =
+                (selMode == "m17" && selId >= 0)
+                    ? vfoManager_.m17Calls(selId)
+                    : std::vector<M17Call>{};
+            if (mcalls.size() != lastM17Count_) {
+                lastM17Count_ = mcalls.size();
+                emit m17CallsChanged(mcalls);
+            }
+
+            // VOR radial: emit on lock edge / radial move / Morse-ID change.
+            const VorResult vres =
+                (selMode == "VOR" && selId >= 0)
+                    ? vfoManager_.vorResult(selId)
+                    : VorResult{};
+            const bool vorChanged =
+                vres.locked != lastVorLocked_ ||
+                (vres.locked &&
+                 std::abs(vres.radialDeg - lastVorRadialDeg_) > 0.5) ||
+                vres.morseId != lastVorMorseId_;
+            if (vorChanged) {
+                lastVorLocked_ = vres.locked;
+                lastVorRadialDeg_ = vres.radialDeg;
+                lastVorMorseId_ = vres.morseId;
+                emit vorRadialChanged(vres);
+            }
+        }
 
         // Keep the offline test source emitting the right kind of IQ for the
         // selected VFO (am/fm/tone/bpsk/qpsk). Real hardware ignores this.

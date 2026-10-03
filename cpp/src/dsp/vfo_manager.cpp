@@ -5,6 +5,7 @@
 #include <cmath>
 
 #include "core/bandwidth_preset.h"
+#include "core/tokens.h"
 
 namespace mbdsdr {
 namespace dsp {
@@ -72,9 +73,118 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
         needsRebuild = false;
         return;
     }
+
+    // ---- POCSAG (1200 baud 2-FSK, +/-4.5 kHz deviation) --------------------
+    // 48 kHz IF, ~12 kHz channel (Carson BW ~11.4 kHz). Channelized IQ feeds a
+    // dedicated FskDemod whose bits are handed to PocsagDecoder. No analog audio.
+    if (isPocsag()) {
+        ifTarget = 48000.0;
+        chBw = core::kBwPocsagHz;
+        channelizer.configure(sr, ifTarget, chBw, 31);
+        channelizer.setVfoOffsetHz(freqHz - sourceCenterHz);
+        const double ifRate = channelizer.effectiveOutputRateHz();
+        FskDemodConfig fcfg;
+        fcfg.sampleRateHz = ifRate;
+        fcfg.symbolRateBd = tokens::kPocsagBaudBd;
+        fcfg.deviationHz  = tokens::kPocsagDeviationHz;
+        fskDemod = std::make_unique<FskDemod>(fcfg);
+        pocsag   = std::make_unique<PocsagDecoder>();
+        demod.reset();          // no analog demod
+        digitalDemod.reset();
+        m17.reset();
+        vor.reset();
+        rds.reset();
+        stereo.reset();
+        pocsagMessages.clear();
+        m17Calls.clear();
+        vorResult = VorResult();
+        resampler.configure(ifRate, 48000.0, 31);
+        recoveredSymbols.clear();
+        lastSr = sr;
+        needsRebuild = false;
+        return;
+    }
+
+    // ---- m17 (4800 sym/s 4FSK; decoder owns its analogue front-end) --------
+    // 48 kHz IF, ~9.6 kHz channel. We hand channelized IQ straight to the
+    // M17Decoder's built-in discriminator+4-level slicer; no FskDemod here (it
+    // is a 2-FSK binary sign detector, not a 4FSK dibit recovery). No audio.
+    if (isM17()) {
+        ifTarget = 48000.0;
+        // The m17 decoder owns its analogue front-end (discriminator + boxcar
+        // matched filter + FREE-RUNNING 10-sps strobe). That strobe is aligned
+        // to the boxcar's own ~L/2 group delay and is NOT adaptive, so an extra
+        // channelizer FIR (~15-sample group delay) slides the sampling point onto
+        // symbol transitions and breaks frame sync. We therefore let the
+        // channelizer translate + decimate WITHOUT its band-limiting FIR here
+        // (whole-band passthrough, zero group delay); the decoder's own LPF is
+        // the matched filter. NCO offset still applies for out-of-centre VFOs.
+        chBw = ifTarget;   // bandwidth == IF rate -> channelizer skips its FIR
+        channelizer.configure(sr, ifTarget, chBw, 31);
+        channelizer.setVfoOffsetHz(freqHz - sourceCenterHz);
+        const double ifRate = channelizer.effectiveOutputRateHz();
+        m17 = std::make_unique<M17Decoder>(ifRate);
+        fskDemod.reset();
+        pocsag.reset();
+        demod.reset();          // no analog demod
+        digitalDemod.reset();
+        vor.reset();
+        rds.reset();
+        stereo.reset();
+        pocsagMessages.clear();
+        m17Calls.clear();
+        vorResult = VorResult();
+        resampler.configure(ifRate, 48000.0, 31);
+        recoveredSymbols.clear();
+        lastSr = sr;
+        needsRebuild = false;
+        return;
+    }
+
+    // ---- VOR (AM demod of the 108-118 MHz aeronautical composite) ----------
+    // 48 kHz IF wide enough to keep the 9960 Hz subcarrier; an AM demod produces
+    // the composite audio that VorReceiver turns into a radial. It DOES carry
+    // analog audio (rides the normal AM path); we additionally tap audio48k
+    // into the receiver in process().
+    if (isVor()) {
+        ifTarget = 48000.0;
+        chBw = core::kBwVorHz;
+        channelizer.configure(sr, ifTarget, chBw, 31);
+        channelizer.setVfoOffsetHz(freqHz - sourceCenterHz);
+        const double ifRate = channelizer.effectiveOutputRateHz();
+        demod  = std::make_unique<DemodAM>(ifRate, chBw);
+        vor    = std::make_unique<VorReceiver>(ifRate);
+        fskDemod.reset();
+        pocsag.reset();
+        m17.reset();
+        digitalDemod.reset();
+        rds.reset();
+        stereo.reset();
+        pocsagMessages.clear();
+        m17Calls.clear();
+        vorResult = VorResult();
+        resampler.configure(ifRate, 48000.0, 31);
+        stereoMResampler.configure(ifRate, 48000.0, 31);
+        stereoSResampler.configure(ifRate, 48000.0, 31);
+        recoveredSymbols.clear();
+        lastSr = sr;
+        needsRebuild = false;
+        return;
+    }
+
     digitalDemod.reset();
     rds.reset();   // re-created below only when this channel is WFM
     stereo.reset(); // re-created below only when this channel is WFM
+    // Generic analog mode (NFM/WFM/AM/USB/LSB/CW): tear down the digital-link
+    // decoders and clear their read-only snapshots, so switching away from
+    // POCSAG/m17/VOR never leaves a stale message / call / radial behind.
+    fskDemod.reset();
+    pocsag.reset();
+    m17.reset();
+    vor.reset();
+    pocsagMessages.clear();
+    m17Calls.clear();
+    vorResult = VorResult();
 
     channelizer.configure(sr, ifTarget, chBw, 31);
     const double ifRate = channelizer.effectiveOutputRateHz();
@@ -255,6 +365,35 @@ const std::vector<float>& VfoManager::process(
             ch.audio48k.clear();
             continue;
         }
+        // POCSAG / m17 digital data-link: no analog audio. Channelized IQ goes
+        // straight to the link decoder; decoded messages/calls are appended to
+        // the channel's read-only snapshot (drained here, queued for Wave2 UI).
+        if (ch.isPocsag() || ch.isM17()) {
+            ch.audio48k.clear();
+            if (!baseband.empty()) {
+                if (ch.isPocsag() && ch.fskDemod) {
+                    ch.fskDemod->process(baseband);
+                    std::vector<int> bits = ch.fskDemod->takeBits();
+                    if (!bits.empty() && ch.pocsag) {
+                        ch.pocsag->feed(bits);
+                        auto msgs = ch.pocsag->takeMessages();
+                        ch.pocsagMessages.insert(ch.pocsagMessages.end(),
+                                                 msgs.begin(), msgs.end());
+                    }
+                } else if (ch.isM17() && ch.m17) {
+                    ch.m17->feed(baseband);
+                    auto calls = ch.m17->takeCalls();
+                    // Only a CRC-verified LSF is a real call. On noise the front
+                    // end may false-match a sync and emit crcOk=false garbage;
+                    // those are REJECTED frames, not calls, and must never reach
+                    // the read-only snapshot (honest empty state).
+                    for (auto& c : calls)
+                        if (c.crcOk)
+                            ch.m17Calls.push_back(std::move(c));
+                }
+            }
+            continue;
+        }
         std::vector<float> aif;
         if (!baseband.empty() && ch.demod) {
             aif = ch.demod->process(baseband);
@@ -290,6 +429,18 @@ const std::vector<float>& VfoManager::process(
             ch.stereoPilot = 0.0f;
         }
         ch.audio48k = ch.resampler.process(aif);
+        // VOR: tap the 48 kHz composite audio into the radial receiver. take()
+        // only returns a FINISHED 2 s measurement once per block; between blocks
+        // it hands back a default (all-zero) result, which must NOT wipe a good
+        // radial -- so we update the cached snapshot only when a real reading
+        // finalized (non-zero coherence, locked, or a decoded Morse ID).
+        if (ch.vor && !ch.audio48k.empty()) {
+            ch.vor->feed(ch.audio48k);
+            VorResult r = ch.vor->take();
+            if (r.locked || r.varLevel > 0.0 || r.refLevel > 0.0 ||
+                !r.morseId.isEmpty())
+                ch.vorResult = r;
+        }
     }
     static const std::vector<float> kEmpty;
     const VfoChannel* sel = selected();
@@ -310,6 +461,32 @@ int VfoManager::maxDecimation() const {
     for (const auto& c : channels_)
         d = std::max(d, c.channelizer.decimation());
     return std::max(1, d);
+}
+
+std::vector<PocsagMessage> VfoManager::pocsagMessages(int channelId) const {
+    if (const VfoChannel* c = channel(channelId)) return c->pocsagMessages;
+    return {};
+}
+
+std::vector<M17Call> VfoManager::m17Calls(int channelId) const {
+    if (const VfoChannel* c = channel(channelId)) return c->m17Calls;
+    return {};
+}
+
+VorResult VfoManager::vorResult(int channelId) const {
+    if (const VfoChannel* c = channel(channelId)) return c->vorResult;
+    return VorResult{};
+}
+
+void VfoManager::clearDigitalOutputs(int channelId) {
+    VfoChannel* c = channel(channelId);
+    if (!c) return;
+    c->pocsagMessages.clear();
+    c->m17Calls.clear();
+    c->vorResult = VorResult{};
+    if (c->pocsag) c->pocsag->reset();
+    if (c->m17)   c->m17->reset();
+    if (c->vor)   c->vor->reset();
 }
 
 } // namespace dsp
