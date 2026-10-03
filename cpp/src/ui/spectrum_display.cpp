@@ -469,9 +469,10 @@ void SpectrumDisplay::setPalette(int p) {
     update();
 }
 
-bool SpectrumDisplay::loadColormapFromJson(const QByteArray& json) {
+bool SpectrumDisplay::loadColormapFromJson(const QByteArray& json, QString* errorOut) {
     ParsedColormap parsed;
-    if (!parseColormapJson(json, &parsed)) return false;   // honest fallback
+    if (!parseColormapJson(json, &parsed, errorOut))
+        return false;   // honest fallback: current ramp untouched
     customStops_ = std::move(parsed.stops);
     hasCustomStops_ = true;
     rebuildColormap();
@@ -480,10 +481,14 @@ bool SpectrumDisplay::loadColormapFromJson(const QByteArray& json) {
     return true;
 }
 
-bool SpectrumDisplay::loadColormapFromFile(const QString& absPath) {
+bool SpectrumDisplay::loadColormapFromFile(const QString& absPath, QString* errorOut) {
     QFile f(absPath);
-    if (!f.open(QIODevice::ReadOnly)) return false;
-    return loadColormapFromJson(f.readAll());
+    if (!f.open(QIODevice::ReadOnly)) {
+        if (errorOut)
+            errorOut->assign(QStringLiteral("无法打开文件：%1").arg(absPath));
+        return false;
+    }
+    return loadColormapFromJson(f.readAll(), errorOut);
 }
 
 void SpectrumDisplay::setHighlightedPeak(int row) {

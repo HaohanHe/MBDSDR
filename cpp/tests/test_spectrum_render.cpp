@@ -21,7 +21,9 @@ private slots:
     void lutIndexFollowsRange();
     void jsonParsesEvenlySpacedStops();
     void jsonParsesExplicitStops();
+    void jsonParsesBareArrayRoot();
     void jsonRejectsMalformedAndKeepsFallback();
+    void jsonReportsHonestErrorReason();
     void ticksShrinkOnZoomIn();
     void ticksFollowPan();
 };
@@ -110,7 +112,9 @@ void TestSpectrumRender::jsonRejectsMalformedAndKeepsFallback() {
     ParsedColormap out = good;
 
     QVERIFY(!parseColormapJson("this is not json", &out));
-    QVERIFY(!parseColormapJson("[1,2,3]", &out));                    // not object
+    // A bare array root is now ALLOWED, but numbers are not valid colour stops --
+    // rejected because the elements are neither "#rrggbb" strings nor {t,c} objs.
+    QVERIFY(!parseColormapJson("[1,2,3]", &out));
     QVERIFY(!parseColormapJson("{\"stops\":[\"#000000\"]}", &out));  // <2 stops
     QVERIFY(!parseColormapJson("{\"stops\":[\"#123\",\"#ff0000\"]}", &out)); // bad hex
     QVERIFY(!parseColormapJson("{\"stops\":[{\"c\":\"#ff0000\"},{\"c\":\"#00ff00\"}]}",
@@ -118,6 +122,49 @@ void TestSpectrumRender::jsonRejectsMalformedAndKeepsFallback() {
     // *out is STILL the good map after every rejection (caller keeps the default).
     QCOMPARE(static_cast<int>(out.stops.size()), 2);
     QCOMPARE(out.stops[1].c.r, 255);
+}
+
+// L8: a BARE top-level array is an accepted root (same element shapes as the
+// object form). Both a string list (evenly spaced) and a {t,c} object list must
+// parse, since external SDR++-style colormaps ship either shape.
+void TestSpectrumRender::jsonParsesBareArrayRoot() {
+    // Bare string list -> evenly spaced 0..1.
+    ParsedColormap str;
+    QVERIFY(parseColormapJson("[\"#000000\",\"#ff0000\",\"#00ff00\"]", &str));
+    QCOMPARE(static_cast<int>(str.stops.size()), 3);
+    QCOMPARE(str.stops[0].t, 0.0);
+    QCOMPARE(str.stops[1].t, 0.5);
+    QCOMPARE(str.stops[2].t, 1.0);
+    QCOMPARE(str.stops[2].c.g, 255);
+
+    // Bare {t,c} object list -> sorted by t.
+    ParsedColormap obj;
+    QVERIFY(parseColormapJson(
+        "[{\"t\":1.0,\"c\":\"#ffffff\"},{\"t\":0.0,\"c\":\"#000000\"}]", &obj));
+    QCOMPARE(static_cast<int>(obj.stops.size()), 2);
+    QCOMPARE(obj.stops[0].t, 0.0);
+    QCOMPARE(obj.stops[1].t, 1.0);
+    QCOMPARE(obj.stops[1].c.r, 255);
+}
+
+// Honest reporting: on rejection errorOut carries a non-empty reason; on success
+// it is cleared. Lets the UI show the user exactly why a file was rejected.
+void TestSpectrumRender::jsonReportsHonestErrorReason() {
+    ParsedColormap cm;
+    QString err;
+    QVERIFY(parseColormapJson("{\"stops\":[\"#000000\",\"#ffffff\"]}", &cm, &err));
+    QVERIFY2(err.isEmpty(), qPrintable(QString("success must clear error: %1").arg(err)));
+
+    QVERIFY(!parseColormapJson("not json {", &cm, &err));
+    QVERIFY2(!err.isEmpty(), "rejection must set a non-empty error reason");
+    QVERIFY2(!parseColormapJson("{\"stops\":[\"#000000\"]}", &cm, &err), "1 stop rejected");
+    QVERIFY2(!err.isEmpty(), "short-stop rejection must set a reason");
+    QVERIFY2(!parseColormapJson("[\"#abc\",\"#ffffff\"]", &cm, &err), "bad hex rejected");
+    QVERIFY2(err.contains("#abc"),
+             qPrintable(QString("reason should name the bad colour: %1").arg(err)));
+    // A successful re-parse clears the previous error again.
+    QVERIFY(parseColormapJson("[\"#000000\",\"#ffffff\"]", &cm, &err));
+    QVERIFY(err.isEmpty());
 }
 
 // ---- frequency ticks follow zoom/pan ---------------------------------------

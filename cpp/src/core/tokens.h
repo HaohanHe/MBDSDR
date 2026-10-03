@@ -485,6 +485,11 @@ inline constexpr double kDefaultSpecFraction = 0.5;
 inline constexpr const char* kSettingsKeySpecFraction = "view/specFraction";
 inline constexpr const char* kSettingsKeyScrollSpeed  = "view/wfScrollSpeed";
 inline constexpr const char* kSettingsKeyPalette      = "view/wfPalette";
+// Absolute path of a user-supplied external waterfall colormap JSON (loaded via
+// the canvas right-click menu). Empty = built-in palette. Honest silent fallback
+// on launch if the file vanished / is malformed -- never a crash, never an
+// invented ramp.
+inline constexpr const char* kSettingsKeyColormapFile = "view/wfColormapFile";
 
 // Small painted details inside the unified canvas (base px, scaled() at runtime).
 inline constexpr int kDispTickProtrusion = 3;   // freq tick pokes up/down into panels

@@ -14,6 +14,9 @@
 #include <QSettings>
 #include <QVariant>
 #include <QWheelEvent>
+#include <QDir>
+#include <QFile>
+#include <QTemporaryFile>
 #include <cmath>
 
 #include "ui/spectrum_display.h"
@@ -40,6 +43,8 @@ private slots:
     void freqTickDecimalsAdaptive();
     void defaultShareIsOneToOne();
     void reRenderHistoryOnPaletteSwitch();
+    void loadColormapFileRoundTrip();
+    void downscaleUsesBlockMaxDecimation();
     void specFractionRoundTripPersists();
     void specFractionInvalidFallsBackToDefault();
 
@@ -459,6 +464,93 @@ void TestSpectrumDisplay::reRenderHistoryOnPaletteSwitch() {
     QVERIFY2(std::abs(qRed(ranged) - 204) <= 4,
              qPrintable(QString("after range [-50,0], peak should be ~204, got %1")
                         .arg(qRed(ranged))));
+}
+
+// L8 file closed loop: loadColormapFromFile() parses a real on-disk JSON,
+// re-colours the whole stored raw-dB history (not just future rows), and a
+// missing / malformed file is HONESTLY rejected with a non-empty reason while
+// the current ramp is left untouched (no crash, no half-ramp).
+void TestSpectrumDisplay::loadColormapFileRoundTrip() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    w.setAutoRangeOn(false);
+    w.setDbRange(-100.0f, 0.0f);
+
+    const int bins = 128;
+    w.setSpectrum(makeFrame(bins, 40, -10.0f, -100.0f));
+    w.setSpectrum(makeFrame(bins, 40, -10.0f, -100.0f));
+    const QRgb before = w.history().pixel(40, 0);
+
+    // Write a gray ramp (black->white) to a temp file, then load it from disk.
+    QTemporaryFile good;
+    QVERIFY(good.open());
+    good.write("{\"name\":\"gray\",\"stops\":[\"#000000\",\"#ffffff\"]}");
+    good.flush();
+    QString err;
+    QVERIFY2(w.loadColormapFromFile(good.fileName(), &err),
+             qPrintable(QString("valid colormap file must load, err=%1").arg(err)));
+    QVERIFY(err.isEmpty());
+    const QRgb after = w.history().pixel(40, 0);
+    QVERIFY2(std::abs(qRed(after) - 229) <= 4,
+             qPrintable(QString("file-loaded gray ramp -> near-white, got %1")
+                        .arg(qRed(after))));
+    QVERIFY(after != before);   // the history actually changed colour
+
+    // A MISSING file: honest false + reason, ramp left as the gray one.
+    err.clear();
+    QVERIFY2(!w.loadColormapFromFile(QStringLiteral("/no/such/dir/wf_cmap.json"), &err),
+             "missing file must be rejected");
+    QVERIFY2(!err.isEmpty(), "missing file must report a reason");
+    QCOMPARE(w.history().pixel(40, 0), after);   // ramp unchanged
+
+    // A MALFORMED file on disk: honest false + reason, ramp left untouched.
+    QTemporaryFile bad;
+    QVERIFY(bad.open());
+    bad.write("this is { not valid json stops");
+    bad.flush();
+    err.clear();
+    QVERIFY2(!w.loadColormapFromFile(bad.fileName(), &err),
+             "malformed file must be rejected");
+    QVERIFY2(!err.isEmpty(), qPrintable(QString("malformed must report reason: %1").arg(err)));
+    QCOMPARE(w.history().pixel(40, 0), after);   // still the gray ramp
+}
+
+// doZoom peak-hold contract: when the visible source bins collapse onto fewer
+// display pixels (zoomed out / large FFT), paintEvent routes EVERY history row
+// through the block-MAX decimation (decimateBlockMaxRange) so a narrow CW peak
+// stays bright instead of being averaged away. We can observe the branch choice
+// the same way paintEvent does -- visible-bin count vs waterfall pixel width --
+// and pair it with the pure block-max unit test (decimatePeakSurvivesZoomOut).
+void TestSpectrumDisplay::downscaleUsesBlockMaxDecimation() {
+    // Large FFT at zoom=1: ~2048 visible bins into a ~900px waterfall -> the
+    // block-max (peak-hold) downscale branch is the live one.
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        w.setSpectrum(makeFrame(2048, 1000, 0.0f, -100.0f));
+        const double srcBins = w.waterfallSourceRect().width();
+        const int outPx = w.waterfallRect().width();
+        QVERIFY2(outPx > 0, "waterfall must have pixels");
+        QVERIFY2(srcBins > outPx + 1.0,
+                 qPrintable(QString("high-FFT zoom=1 must hit the block-max "
+                                    "downscale branch: srcBins=%1 outPx=%2")
+                            .arg(srcBins).arg(outPx)));
+    }
+    // Small FFT at zoom=1: 128 visible bins into a ~900px waterfall -> each bin
+    // maps to >=1 pixel, so the bilinear upscale/1:1 branch (no collapse) is used.
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        w.setSpectrum(makeFrame(128, 64, 0.0f, -100.0f));
+        const double srcBins = w.waterfallSourceRect().width();
+        const int outPx = w.waterfallRect().width();
+        QVERIFY2(srcBins <= outPx + 1.0,
+                 qPrintable(QString("small-FFT must NOT use downscale: srcBins=%1 outPx=%2")
+                            .arg(srcBins).arg(outPx)));
+    }
 }
 
 // P3: divider placement survives a restart. Drive a real divider drag to a new

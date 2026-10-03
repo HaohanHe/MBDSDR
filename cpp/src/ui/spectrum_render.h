@@ -152,30 +152,54 @@ inline int lutIndexForDb(float db, float floorDb, float ceilDb) {
 
 // ---------------------------------------------------------------------------
 // External colormap JSON (SDR++ colormaps.cpp:12-47 shape, clean-room).
-// Accepted document:
+// Accepted document, TWO equivalent roots:
 //   { "name": "optional",
 //     "stops": [ "#rrggbb", ... ] }                       // evenly spaced 0..1
-// or
-//   { "stops": [ {"t": 0.0, "c": "#rrggbb"}, ... ] }      // explicit positions
+//   { "stops": [ {"t":0.0,"c":"#rrggbb"}, ... ] }          // explicit positions
+// or a BARE top-level array with the same element shapes:
+//   [ "#rrggbb", ... ]                                      // evenly spaced 0..1
+//   [ {"t":0.0,"c":"#rrggbb"}, ... ]                        // explicit positions
 // On a well-formed map (>=2 valid stops) the stops are written to *out and the
-// function returns true. On ANY malformed input (not an object, not an array,
-// <2 entries, a colour that is not #rrggbb, an object entry without a numeric
-// "t") it returns false and leaves *out untouched -- the caller then keeps the
-// built-in default instead of painting a half-parsed ramp.
+// function returns true. On ANY malformed input it returns false and leaves
+// *out untouched -- the caller keeps the built-in default instead of painting a
+// half-parsed ramp. When errorOut is non-null it receives a short, human-readable
+// reason so the UI can tell the user exactly why the file was rejected (honest
+// reporting, never a silent no-op).
 // ---------------------------------------------------------------------------
 struct ParsedColormap {
     std::string          name;
     std::vector<ColorStop> stops;
 };
 
-inline bool parseColormapJson(const QByteArray& json, ParsedColormap* out) {
-    if (!out) return false;
+inline bool parseColormapJson(const QByteArray& json, ParsedColormap* out,
+                              QString* errorOut = nullptr) {
+    if (!out) {
+        if (errorOut) errorOut->assign(QStringLiteral("空输出"));
+        return false;
+    }
+    auto fail = [&](const QString& msg) {
+        if (errorOut) errorOut->assign(msg);
+        return false;
+    };
+
     QJsonParseError pe;
     const QJsonDocument doc = QJsonDocument::fromJson(json, &pe);
-    if (pe.error != QJsonParseError::NoError || !doc.isObject()) return false;
-    const QJsonObject root = doc.object();
-    const QJsonArray arr = root.value(QLatin1String("stops")).toArray();
-    if (arr.size() < 2) return false;
+    if (pe.error != QJsonParseError::NoError)
+        return fail(QStringLiteral("不是合法 JSON：%1").arg(pe.errorString()));
+
+    QJsonArray arr;
+    if (doc.isObject()) {
+        const QJsonObject root = doc.object();
+        arr = root.value(QLatin1String("stops")).toArray();
+        if (root.value(QLatin1String("name")).isString())
+            out->name = root.value(QLatin1String("name")).toString().toStdString();
+    } else if (doc.isArray()) {
+        arr = doc.array();
+    } else {
+        return fail(QStringLiteral("色板根必须是 {\"stops\":[...]} 对象或 [...] 数组"));
+    }
+    if (arr.size() < 2)
+        return fail(QStringLiteral("至少需要 2 个色标颜色（当前 %1 个）").arg(arr.size()));
 
     std::vector<ColorStop> parsed;
     parsed.reserve(arr.size());
@@ -185,23 +209,29 @@ inline bool parseColormapJson(const QByteArray& json, ParsedColormap* out) {
         ColorStop cs;
         if (el.isString()) {
             Rgb8 c;
-            if (!parseHexColor(el.toString(), &c)) return false;
+            if (!parseHexColor(el.toString(), &c))
+                return fail(QStringLiteral("第 %1 个颜色不是 #rrggbb 形式：%2")
+                                .arg(i + 1).arg(el.toString()));
             cs.c = c;
         } else if (el.isObject()) {
             const QJsonObject o = el.toObject();
             const QJsonValue cv = o.value(QLatin1String("c")).isString()
                                       ? o.value(QLatin1String("c"))
                                       : o.value(QLatin1String("color"));
-            if (!cv.isString()) return false;
+            if (!cv.isString())
+                return fail(QStringLiteral("第 %1 个色标缺少 \"c\":\"#rrggbb\"").arg(i + 1));
             Rgb8 c;
-            if (!parseHexColor(cv.toString(), &c)) return false;
+            if (!parseHexColor(cv.toString(), &c))
+                return fail(QStringLiteral("第 %1 个颜色不是 #rrggbb 形式：%2")
+                                .arg(i + 1).arg(cv.toString()));
             cs.c = c;
             const QJsonValue tv = o.value(QLatin1String("t"));
-            if (!tv.isDouble()) return false;
+            if (!tv.isDouble())
+                return fail(QStringLiteral("第 %1 个色标缺少数值型 \"t\"（0..1）").arg(i + 1));
             cs.t = std::min(std::max(tv.toDouble(0.0), 0.0), 1.0);
             explicitT = true;
         } else {
-            return false;
+            return fail(QStringLiteral("第 %1 个色标既不是颜色字符串也不是对象").arg(i + 1));
         }
         parsed.push_back(cs);
     }
@@ -216,11 +246,8 @@ inline bool parseColormapJson(const QByteArray& json, ParsedColormap* out) {
                   [](const ColorStop& a, const ColorStop& b) { return a.t < b.t; });
     }
 
-    ParsedColormap result;
-    result.stops = std::move(parsed);
-    if (root.value(QLatin1String("name")).isString())
-        result.name = root.value(QLatin1String("name")).toString().toStdString();
-    *out = std::move(result);
+    out->stops = std::move(parsed);
+    if (errorOut) errorOut->clear();
     return true;
 }
 
