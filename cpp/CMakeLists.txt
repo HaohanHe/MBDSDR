@@ -67,6 +67,7 @@ set(SOURCES
     src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/device_lister.cpp
     src/dsp/device_presence_notifier.cpp
     src/dsp/spectrum_engine.cpp
+    src/control/control_hub.cpp
     src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp
     src/dsp/channelizer.cpp
@@ -144,6 +145,7 @@ set(HEADERS
     src/dsp/rtl_sdr_source.h
     src/dsp/spyserver_server.h
     src/dsp/spectrum_engine.h
+    src/control/control_hub.h
     src/dsp/iq_frontend.h
     src/dsp/channelizer.h
     src/dsp/audio_resampler.h
@@ -340,6 +342,23 @@ add_executable(test_engine_integration tests/test_engine_integration.cpp
 target_include_directories(test_engine_integration PRIVATE src)
 target_link_libraries(test_engine_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_integration COMMAND test_engine_integration)
+
+# Headless ControlHub (GUI-decoupled command layer). Drives the REAL engine via
+# named commands with NO QWidget: deterministic write->readback, the read/write
+# gate in both states, honest unknown/bad-arg errors, and the no-engine / no-
+# telemetry empty states. Synthetic TestSignalSource only; recording case starts
+# the run loop briefly (mirrors test_wav_roundtrip).
+add_executable(test_control_hub tests/test_control_hub.cpp
+    src/control/control_hub.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_control_hub PRIVATE src)
+target_link_libraries(test_control_hub PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME control_hub COMMAND test_control_hub)
 
 # P1: deterministic synthetic IQ -> FileSource.openRaw -> REAL engine ->
 # MemoryAudioSink. Asserts recovered 1 kHz pitch / level for NFM/WFM/AM, the
@@ -612,7 +631,7 @@ add_test(NAME demod COMMAND test_demod)
 
 # TX modulator -> demodulator loopback (AM/NFM/WFM/SSB/CW), not hardware.
 add_executable(test_modulator tests/test_modulator.cpp
-    src/tx/modulator.cpp src/dsp/demod.cpp)
+    src/tx/modulator.cpp src/dsp/demod.cpp src/dsp/agc.cpp)
 target_include_directories(test_modulator PRIVATE src)
 target_link_libraries(test_modulator PRIVATE Qt6::Core)
 add_test(NAME modulator COMMAND test_modulator)
@@ -647,7 +666,7 @@ add_test(NAME soapy_tx COMMAND test_soapy_tx)
 add_executable(test_recorder tests/test_recorder.cpp
     src/dsp/recorder.cpp src/dsp/file_source.cpp src/dsp/gated_recorder.cpp
     src/dsp/device_capabilities.cpp
-    src/dsp/demod.cpp)
+    src/dsp/demod.cpp src/dsp/agc.cpp)
 target_include_directories(test_recorder PRIVATE src)
 target_link_libraries(test_recorder PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME recorder COMMAND test_recorder)
@@ -852,7 +871,7 @@ set_tests_properties(weather_panel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offsc
 # End-to-end: TestSignalSource digital IQ -> real channelizer -> DigitalDemod lock.
 add_executable(test_digital_e2e tests/test_digital_e2e.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp
-    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp
+    src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/agc.cpp src/dsp/wfm_stereo.cpp
     src/dsp/rds_decoder.cpp
     src/dsp/test_signal.cpp src/dsp/noise_blanker.cpp src/dsp/iq_frontend.cpp
     src/dsp/device_capabilities.cpp)
@@ -868,14 +887,14 @@ add_test(NAME decoder COMMAND test_decoder)
 
 # RDS (EN 300 401) offline data-link decoder: reference encoder -> MPX -> decode.
 add_executable(test_rds tests/test_rds.cpp
-    src/dsp/rds_decoder.cpp src/dsp/demod.cpp)
+    src/dsp/rds_decoder.cpp src/dsp/demod.cpp src/dsp/agc.cpp)
 target_include_directories(test_rds PRIVATE src)
 target_link_libraries(test_rds PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME rds COMMAND test_rds)
 
 # RDS end-to-end: synthesized FM IQ -> DemodWFM MPX tap -> RdsDecoder.
 add_executable(test_rds_chain tests/test_rds_chain.cpp
-    src/dsp/rds_decoder.cpp src/dsp/demod.cpp)
+    src/dsp/rds_decoder.cpp src/dsp/demod.cpp src/dsp/agc.cpp)
 target_include_directories(test_rds_chain PRIVATE src)
 target_link_libraries(test_rds_chain PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME rds_chain COMMAND test_rds_chain)
@@ -883,14 +902,14 @@ add_test(NAME rds_chain COMMAND test_rds_chain)
 # WFM stereo offline: synthesized FM IQ -> DemodWFM raw MPX -> WfmStereoDecoder.
 # No UI, no hardware; the composite MPX is built by hand in the test.
 add_executable(test_wfm_stereo tests/test_wfm_stereo.cpp
-    src/dsp/demod.cpp src/dsp/wfm_stereo.cpp)
+    src/dsp/demod.cpp src/dsp/agc.cpp src/dsp/wfm_stereo.cpp)
 target_include_directories(test_wfm_stereo PRIVATE src)
 target_link_libraries(test_wfm_stereo PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME wfm_stereo COMMAND test_wfm_stereo)
 
 # NOAA APT image decoder: synthetic test pattern -> 2400 Hz AM baseband ->
 # streaming AptDecoder -> grayscale QImage. DSP core only, no UI.
-add_executable(test_apt tests/test_apt.cpp src/dsp/apt_decoder.cpp src/dsp/demod.cpp)
+add_executable(test_apt tests/test_apt.cpp src/dsp/apt_decoder.cpp src/dsp/demod.cpp src/dsp/agc.cpp)
 target_include_directories(test_apt PRIVATE src)
 target_link_libraries(test_apt PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME apt COMMAND test_apt)
