@@ -12,10 +12,18 @@ using namespace mbdsdr::dsp;
 class TestEngineIntegration : public QObject {
     Q_OBJECT
 private slots:
+    // Phase21: the engine no longer auto-falls back to the synthetic test source.
+    // These cases exercise the offline TestSignalSource, so opt in explicitly
+    // BEFORE any engine is constructed (the flag is read in the ctor).
+    void initTestCase();
     void statePropagates();
     void vfoOffsetInBandNoRetuneUntilEdge();
     void wfmStereoEndToEnd();
 };
+
+void TestEngineIntegration::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 // DFT-bin power of `x` at frequency `fHz` (real cos/sin correlation), sampled
 // at 48 kHz. Pure Goertzel-style magnitude squared -- no FFT dependency.

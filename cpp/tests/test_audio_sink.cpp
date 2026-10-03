@@ -35,6 +35,11 @@ public:
 class TestAudioSink : public QObject {
     Q_OBJECT
 private slots:
+    // Phase21: engine no longer auto-synthesizes. The engine-driven slots route
+    // real demod audio into the injected sink and read SNR/squelch off flowing
+    // IQ, so opt in explicitly to the offline synthetic source before any engine
+    // is constructed (harmless for the pure MemoryAudioSink unit slots).
+    void initTestCase();
     void memoryCapturesSamples();
     void memoryVolumeScales();
     void memoryMuteSilences();
@@ -49,6 +54,10 @@ private slots:
     void defaultWriteStereoDownmix();
     void memoryStereoClearEmptiesStereoBuffers();
 };
+
+void TestAudioSink::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 void TestAudioSink::memoryCapturesSamples() {
     MemoryAudioSink sink;

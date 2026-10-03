@@ -96,10 +96,20 @@ private:
 class TestEngineHotplug : public QObject {
     Q_OBJECT
 private slots:
+    // Phase21: the idle/offline source is now the honest NullSource by default.
+    // These cases expect the device drop / connect-failure to land on the offline
+    // synthetic source (isTestSignalActive()==true), so opt in explicitly BEFORE
+    // any engine is constructed (the flag is read in the ctor and reused by
+    // installIdleSourceLocked on every drop/failure).
+    void initTestCase();
     void dropDetectsAndFallsBack();
     void autoReconnectRecovers();
     void connectFailureReportsReason();
 };
+
+void TestEngineHotplug::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 void TestEngineHotplug::dropDetectsAndFallsBack() {
     RtlTcpServer server;

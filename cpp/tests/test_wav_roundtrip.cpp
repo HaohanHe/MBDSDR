@@ -15,9 +15,17 @@ using namespace mbdsdr::dsp;
 class TestWavRoundtrip : public QObject {
     Q_OBJECT
 private slots:
+    // Phase21: engine no longer auto-falls back to TestSignalSource. Recording
+    // needs flowing demod audio, so opt in explicitly to the synthetic source
+    // before any engine is constructed.
+    void initTestCase();
     void writesValidWav();
     void writesSidecarJson();
 };
+
+void TestWavRoundtrip::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 static quint16 rd16(const uchar* p) { return quint16(p[0]) | (quint16(p[1])<<8); }
 static quint32 rd32(const uchar* p) {

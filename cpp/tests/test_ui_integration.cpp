@@ -69,6 +69,11 @@ private slots:
 QString TestUiIntegration::tmpSettingsDir;
 
 void TestUiIntegration::initTestCase() {
+    // Phase21: the engine no longer auto-falls back to the offline test source.
+    // The scan-hit and squelch-auto slots need flowing synthetic IQ (a real scan
+    // tone + a tracked audio-RMS floor), so opt in explicitly BEFORE any
+    // MainWindow (which builds the engine) is constructed.
+    qputenv("MBDSDR_TEST_SOURCE", "1");
     tmpSettingsDir = QDir::tempPath() + "/mbdsdr_uitest_" +
                      QString::number(QCoreApplication::applicationPid());
     QDir().mkpath(tmpSettingsDir);

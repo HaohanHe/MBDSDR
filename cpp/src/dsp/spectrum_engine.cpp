@@ -9,6 +9,7 @@
 #include "core/tokens.h"
 
 #include <QDebug>
+#include <QByteArray>
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
@@ -31,6 +32,15 @@ namespace dsp {
 // near capture center (offset ~0).
 namespace {
 constexpr double kVfoEdgeFraction = 0.85;
+
+// The synthetic test source is an EXPLICIT debugging opt-in, never automatic.
+// Honor the MBDSDR_TEST_SOURCE=1 environment variable (the --test-source CLI
+// flag sets this same variable in main.cpp before the engine is constructed,
+// so both channels funnel through this single read). Any other value / absence
+// leaves the production path on the honest empty state.
+bool testSourceEnvEnabled() {
+    return qgetenv("MBDSDR_TEST_SOURCE") == "1";
+}
 }
 
 SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
@@ -42,11 +52,24 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
     connect(this, &SpectrumEngine::reconnectRequested,
             this, &SpectrumEngine::handleReconnectRequested,
             Qt::QueuedConnection);
+    // The synthetic test source is opt-in only. Read the env/CLI opt-in BEFORE
+    // picking the startup source so a production launch with no RTL-SDR attached
+    // lands on the honest empty NullSource (no fabricated IQ), not on a
+    // self-synthesizing test signal.
+    testSourceEnabled_.store(testSourceEnvEnabled());
     auto rtl = std::make_unique<RtlSdrSource>();
     if (rtl->start()) {
         source_ = std::move(rtl);
-    } else {
+    } else if (testSourceEnabled_.load()) {
+        // Explicitly requested (--test-source / MBDSDR_TEST_SOURCE / API):
+        // synthetic source, honestly labeled "Test Signal".
         source_ = std::make_unique<TestSignalSource>();
+        source_->start();
+    } else {
+        // No hardware AND no explicit opt-in: honest empty state (NullSource),
+        // which produces no IQ until a device connects / a file opens / the
+        // caller explicitly enables the test source.
+        source_ = std::make_unique<NullSource>();
         source_->start();
     }
     // NOTE: do NOT emit sourceChanged() here. The engine is being constructed
@@ -271,28 +294,24 @@ bool SpectrumEngine::tryConnectRtl() {
         emit sourceChanged("RTL-SDR", true);
         return true;
     }
-    source_ = std::make_unique<TestSignalSource>();
-    source_->start();
-    reconnectPending_ = false;
-    updateCapsSnapshotLocked();
+    // Honest failure: no automatic synthetic fallback. Install the idle source
+    // (synthetic only if the caller explicitly opted in, else empty NullSource).
+    installIdleSourceLocked();
     emit sourceError(QStringLiteral("RTL-SDR 设备打开失败：未检测到硬件"));
-    emit sourceChanged("Test Signal", false);
+    emit sourceChanged(source_->name(), false);
     return false;
 }
 
 void SpectrumEngine::disconnectSource() {
     QMutexLocker lk(&sourceMutex_);
-    if (source_) source_->stop();
-    source_ = std::make_unique<TestSignalSource>();
-    source_->start();
+    // Manual disconnect -> idle source (synthetic only if explicitly opted in,
+    // else honest empty). No automatic synthetic fallback.
+    installIdleSourceLocked();
     // A manual disconnect is an explicit user action: cancel any pending
     // auto-reconnect so the device does not silently re-attach later.
-    reconnectPending_ = false;
-    realSourceActive_ = false;
     tcpHost_.clear();
     tcpPort_ = 0;
-    updateCapsSnapshotLocked();
-    emit sourceChanged("Test Signal", false);
+    emit sourceChanged(source_->name(), false);
 }
 
 bool SpectrumEngine::connectRtlTcp(const QString& host, quint16 port) {
@@ -309,17 +328,14 @@ bool SpectrumEngine::connectRtlTcp(const QString& host, quint16 port) {
         emit sourceChanged(QString("rtl_tcp %1:%2").arg(host).arg(port), true);
         return true;
     }
-    // Honest failure: fall back to test signal, no fake IQ over the wire.
-    // Report the REAL socket reason (refused / timeout / ...).
+    // Honest failure: no automatic synthetic fallback. Report the REAL socket
+    // reason (refused / timeout / ...) and install the idle source (synthetic
+    // only if explicitly opted in, else honest empty).
     const QString reason = tcp->lastError();
-    source_ = std::make_unique<TestSignalSource>();
-    source_->start();
-    reconnectPending_ = false;
-    realSourceActive_ = false;
-    updateCapsSnapshotLocked();
+    installIdleSourceLocked();
     emit sourceError(reason.isEmpty()
         ? QStringLiteral("rtl_tcp 连接失败") : reason);
-    emit sourceChanged("Test Signal", false);
+    emit sourceChanged(source_->name(), false);
     return false;
 }
 
@@ -376,15 +392,13 @@ bool SpectrumEngine::openOfflineFile(const QString& path, double rawSampleRateHz
         return true;
     }
 
-    // Honest failure: fall back to the offline test source, report the reason.
+    // Honest failure: no automatic synthetic fallback. Report the real reason
+    // and install the idle source (synthetic only if explicitly opted in, else
+    // honest empty).
     const QString why = fs->errorString();
-    source_ = std::make_unique<TestSignalSource>();
-    source_->start();
-    realSourceActive_ = false;
-    reconnectPending_ = false;
-    updateCapsSnapshotLocked();
+    installIdleSourceLocked();
     emit sourceError(why.isEmpty() ? QStringLiteral("文件打开失败") : why);
-    emit sourceChanged("Test Signal", false);
+    emit sourceChanged(source_->name(), false);
     return false;
 }
 
@@ -438,17 +452,18 @@ void SpectrumEngine::handleReconnectRequested() {
 // fall back from.
 void SpectrumEngine::dropSourceLocked() {
     if (!source_) return;
-    source_->stop();
-    source_ = std::make_unique<TestSignalSource>();
-    source_->start();
-    realSourceActive_ = false;
-    updateCapsSnapshotLocked();
+    // Honest drop: NO automatic synthetic fallback. Install the idle source
+    // (synthetic TestSignalSource only if the caller explicitly opted in, else
+    // the empty NullSource). Note: no isConnected() guard here -- after an RST
+    // the socket reads as unconnected while the device is in fact gone, and
+    // this is exactly the state we must recover from.
+    installIdleSourceLocked();
     if (autoReconnect_.load() && !tcpHost_.isEmpty() && tcpPort_ != 0) {
         reconnectPending_ = true;
         lastReconnectMs_ = reconnectClock_.elapsed();
     }
     emit sourceDropped();
-    emit sourceChanged("Test Signal", false);
+    emit sourceChanged(source_->name(), false);
 }
 
 // Outside sourceMutex_ no longer needed: the retry loop lives in run().
@@ -457,7 +472,65 @@ void SpectrumEngine::dropSourceLocked() {
 
 bool SpectrumEngine::isTestSignalActive() const {
     QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
-    return !realSourceActive_;
+    // True only when the synthetic TestSignalSource is actually the active
+    // source. On real hardware OR the honest empty NullSource this is false --
+    // a no-hardware idle launch is NOT mislabeled as "test signal".
+    return dynamic_cast<TestSignalSource*>(source_.get()) != nullptr;
+}
+
+bool SpectrumEngine::hasRealSource() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return source_ && source_->isConnected();
+}
+
+bool SpectrumEngine::isSynthetic() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return dynamic_cast<TestSignalSource*>(source_.get()) != nullptr;
+}
+
+void SpectrumEngine::installIdleSourceLocked() {
+    // Caller holds sourceMutex_. After a real source is gone (open failed,
+    // dropped, or manually disconnected) install the idle source: the explicitly
+    // opted-in synthetic TestSignalSource, or -- by default -- the honest empty
+    // NullSource that produces no IQ. Never silently synthesizes. Both report the
+    // same nominal 2.4 MHz / 98.5 MHz so no channelizer rebuild is needed.
+    if (source_) source_->stop();
+    if (testSourceEnabled_.load()) {
+        source_ = std::make_unique<TestSignalSource>();
+    } else {
+        source_ = std::make_unique<NullSource>();
+    }
+    source_->start();
+    realSourceActive_ = false;
+    reconnectPending_ = false;
+    updateCapsSnapshotLocked();
+}
+
+void SpectrumEngine::setTestSourceEnabled(bool on) {
+    QMutexLocker lk(&sourceMutex_);
+    testSourceEnabled_.store(on);
+    // Only materialize / tear down the synthetic source while we are on the idle
+    // source (NullSource empty <-> TestSignalSource). Enabling must never kick a
+    // live real device or an opened offline file; disabling only drops back to
+    // the honest empty state.
+    if (on && (!source_ || dynamic_cast<NullSource*>(source_.get()))) {
+        if (source_) source_->stop();
+        auto ts = std::make_unique<TestSignalSource>();
+        ts->start();
+        source_ = std::move(ts);
+        realSourceActive_ = false;
+        reconnectPending_ = false;
+        updateCapsSnapshotLocked();
+        emit sourceChanged(source_->name(), false);
+    } else if (!on && dynamic_cast<TestSignalSource*>(source_.get())) {
+        source_->stop();
+        source_ = std::make_unique<NullSource>();
+        source_->start();
+        realSourceActive_ = false;
+        reconnectPending_ = false;
+        updateCapsSnapshotLocked();
+        emit sourceChanged(source_->name(), false);
+    }
 }
 
 void SpectrumEngine::setMuted(bool m) {
@@ -499,18 +572,27 @@ QString SpectrumEngine::expandRecTemplate() const {
         .replace("{mode}", mode);
 }
 
-bool SpectrumEngine::hasData() const {
-    // A live producer exists iff source_ is set AND it is either real hardware
-    // or the offline test-signal source (which synthesizes its own IQ).
+bool SpectrumEngine::hasDataLocked() const {
+    // A live producer exists iff source_ yields IQ: real hardware (connected),
+    // the explicitly-enabled synthetic test signal, or an opened offline capture
+    // file. The honest empty NullSource yields nothing -> false. Called with
+    // sourceMutex_ held; the public hasData() takes the lock and calls this.
     if (!source_) return false;
-    if (source_->isConnected()) return true;
-    return dynamic_cast<TestSignalSource*>(source_.get()) != nullptr;
+    if (source_->isConnected()) return true;                        // real HW
+    if (dynamic_cast<TestSignalSource*>(source_.get())) return true;  // synthetic
+    if (dynamic_cast<FileSource*>(source_.get())) return true;        // offline file
+    return false;
+}
+
+bool SpectrumEngine::hasData() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return hasDataLocked();
 }
 
 bool SpectrumEngine::startRecording() {
     if (recorder_.isRecording() || wavWriter_.isRecording()) return false;
     QMutexLocker lk(&sourceMutex_);
-    if (!hasData()) return false;
+    if (!hasDataLocked()) return false;
 
     QDir().mkpath(recDir_);
     const QString base = recDir_ + QLatin1Char('/') + expandRecTemplate();

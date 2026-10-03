@@ -180,7 +180,7 @@ MainWindow::MainWindow(QWidget* parent)
     titleLabel->setFont(tf);
     topLay->addWidget(titleLabel);
 
-    statusLabel_ = new QLabel("● Test Signal", topBar);
+    statusLabel_ = new QLabel("● 无信号源", topBar);
     topLay->addWidget(statusLabel_);
     topLay->addStretch();
 
@@ -241,15 +241,31 @@ MainWindow::MainWindow(QWidget* parent)
 
     auto* gSrc = new QGroupBox("源与连接", leftCard);
     auto* gSrcLay = new QVBoxLayout(gSrc);
-    sourceBanner_ = new QLabel("RTL-SDR 未连接，使用测试信号", gSrc);
+    sourceBanner_ = new QLabel("RTL-SDR 未连接", gSrc);
     sourceBanner_->setObjectName("dockHint");
     sourceBanner_->setWordWrap(true);
     gSrcLay->addWidget(sourceBanner_);
 
-    // Source type selector: local RTL-SDR vs rtl_tcp remote.
+    // Source type selector: local RTL-SDR vs rtl_tcp remote vs the explicitly
+    // opt-in synthetic test source. The production path NEVER auto-synthesizes:
+    // the third item only installs the offline TestSignalSource when the user
+    // actively picks it, and is labelled as synthetic/debugging (never a real
+    // receiver). Switching back to a real-source item tears it down.
     srcTypeCombo_ = new QComboBox(gSrc);
-    srcTypeCombo_->addItems({"本地 RTL-SDR", "rtl_tcp 远程"});
+    srcTypeCombo_->addItems({"本地 RTL-SDR", "rtl_tcp 远程",
+                             "测试信号（离线调试·合成，非真实接收）"});
+    srcTypeCombo_->setToolTip(
+        "本地 RTL-SDR：真实 USB 接收机。rtl_tcp 远程：网络接收机。\n"
+        "测试信号：离线合成 IQ，仅供调试/演示，不是真实接收。");
     gSrcLay->addWidget(srcTypeCombo_);
+    // Prominent provenance pill: VISIBLE only while the synthetic source is
+    // actually active (driven by onSourceChanged). Honest "合成/调试" badge.
+    syntheticBanner_ = new QLabel(
+        QStringLiteral("⚠ 合成信号 · 离线调试 · 非真实接收"), gSrc);
+    syntheticBanner_->setObjectName("testBanner");
+    syntheticBanner_->setWordWrap(true);
+    syntheticBanner_->hide();
+    gSrcLay->addWidget(syntheticBanner_);
     tcpHostEdit_ = new QLineEdit("127.0.0.1", gSrc);
     tcpHostEdit_->setPlaceholderText("host");
     gSrcLay->addWidget(tcpHostEdit_);
@@ -257,15 +273,23 @@ MainWindow::MainWindow(QWidget* parent)
     tcpPortSpin_->setRange(1, 65535);
     tcpPortSpin_->setValue(1234);
     gSrcLay->addWidget(tcpPortSpin_);
-    // host/port only relevant for rtl_tcp mode.
-    tcpHostEdit_->setVisible(false);
-    tcpPortSpin_->setVisible(false);
+    // host/port only relevant for rtl_tcp mode (idx==1). idx==2 (test source)
+    // hides them too, and flips the explicit synthetic opt-in.
     connect(srcTypeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
         const bool tcp = (idx == 1);
+        const bool test = (idx == 2);
         tcpHostEdit_->setVisible(tcp);
         tcpPortSpin_->setVisible(tcp);
+        if (!engine_) return;
+        // Opt-in synthetic ONLY when the user actively picks the test item.
+        // Picking any real-source item (or returning to idle) tears it down.
+        engine_->setTestSourceEnabled(test);
     });
+    // Initial state is idx 0 (本地 RTL-SDR): the currentIndexChanged lambda does
+    // not fire on construction, so hide the tcp host/port fields explicitly.
+    tcpHostEdit_->setVisible(false);
+    tcpPortSpin_->setVisible(false);
 
     connectBtn_ = new QPushButton("连接", gSrc);
     gSrcLay->addWidget(connectBtn_);
@@ -1828,6 +1852,11 @@ MainWindow::MainWindow(QWidget* parent)
     splitter->setSizes({tokens::scaled(280), tokens::scaled(800), tokens::scaled(280)});
 
     centralLay->addWidget(splitter);
+    // First-run onboarding card (only when QSettings has no dismissal record).
+    // Built after the splitter so it can reference connectBtn_; inserted between
+    // the top bar and the splitter. Hidden immediately for returning users.
+    buildGuideCard();
+    if (guideCard_) centralLay->addWidget(guideCard_);
     setCentralWidget(central);
     statusBar()->showMessage("MBDSDR C++");
     // Permanent status strip: mode | sample rate | VFO | gain | source.
@@ -1839,7 +1868,7 @@ MainWindow::MainWindow(QWidget* parent)
     sbVfo_  = new QLabel("--", this);
     sbRds_  = new QLabel("", this);
     sbGain_ = new QLabel("--", this);
-    sbSdr_  = new QLabel("Test Signal", this);
+    sbSdr_  = new QLabel("无信号源", this);
     sbWatch_ = new QLabel("", this);
     sbWatch_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kInteract));
     sbScan_ = new QLabel("", this);
@@ -2817,7 +2846,7 @@ MainWindow::MainWindow(QWidget* parent)
             mainSplitter_->handle(i)->installEventFilter(this);
     }
 
-    setControlsEnabled(false);
+    setControlsEnabled(false, false);
     restoreUiState();
     engine_->start();
     refreshVfoUi();   // populate the VFO list + band boxes from the engine
@@ -3797,20 +3826,47 @@ void MainWindow::onSourceChanged(const QString& name, bool connected) {
         // of showing a plain "test signal" state.
         return;
     }
-    statusLabel_->setText(connected ? QString("● %1").arg(name) : QString("● %1 (test)").arg(name));
+    // Honest three-way source state. `connected` is true ONLY for a real
+    // hardware device. The explicitly-opted-in synthetic test source reports
+    // connected==false but is the TestSignalSource (name()=="Test Signal"); the
+    // honest idle NullSource reports "No Source". We derive the synthetic flag
+    // from the SIGNAL NAME -- NOT by calling engine_->isSynthetic()/hasData()
+    // inline, because setTestSourceEnabled() emits this signal WHILE holding
+    // sourceMutex_ (a non-recursive lock), and re-locking here would deadlock
+    // the UI thread. The precise hasData()/hasRealSource() gating is deferred
+    // to the next UI turn (below) when the lock is free.
+    const bool synthetic = !connected && name == QStringLiteral("Test Signal");
+    if (connected) {
+        statusLabel_->setText(QString("● %1").arg(name));
+        sourceBanner_->setText(QString("%1 已连接（真实硬件）").arg(name));
+        sbSdr_->setText(name);
+    } else if (synthetic) {
+        statusLabel_->setText(QString("● %1 · 合成/调试").arg(name));
+        sourceBanner_->setText(QStringLiteral(
+            "测试信号（合成·离线调试，非真实接收）"));
+        sbSdr_->setText(QStringLiteral("Test Signal · 合成"));
+    } else {
+        statusLabel_->setText(QString("● 无信号源"));
+        sourceBanner_->setText(QStringLiteral("RTL-SDR 未连接"));
+        sbSdr_->setText(QStringLiteral("无信号源"));
+    }
     if (connectBtn_) connectBtn_->setText(connected ? "断开" : "连接");
-    if (sourceBanner_) sourceBanner_->setText(connected
-        ? QString("%1 已连接（真实硬件）").arg(name)
-        : QStringLiteral("RTL-SDR 未连接，使用测试信号"));
-    // Recording needs a live data producer -- hardware OR the offline test
-    // signal (which still synthesizes IQ/audio). The engine guards the rest.
-    if (recordBtn_) recordBtn_->setEnabled(true);
-    sbSdr_->setText(name + (connected ? "" : " (test)"));
-    setControlsEnabled(connected);
-    // Spacetime overview: track the real connection state immediately.
+    // Provenance pill: prominent "合成/调试" badge ONLY while the synthetic
+    // source is actually live; hidden for real HW and for the empty state.
+    if (syntheticBanner_) syntheticBanner_->setVisible(synthetic);
     lastSpConnected_ = connected;
     lastSpSourceName_ = name;
     refreshSpacetimeView();
+    // Gate tuner/front-end controls on real hardware, and demod/record/decode
+    // controls on ANY live IQ producer (real HW, synthetic, or offline file).
+    // Deferred: the honest hasData()/hasRealSource() queries take sourceMutex_,
+    // which this inline emission may still hold (see note above).
+    QTimer::singleShot(0, this, [this]() {
+        if (!engine_) return;
+        setControlsEnabled(engine_->hasRealSource(), engine_->hasData());
+        // Keep the pill honest against the engine truth (covers offline file).
+        if (syntheticBanner_) syntheticBanner_->setVisible(engine_->isSynthetic());
+    });
     // Deferred: sourceChanged can be delivered INLINE while the engine still
     // holds sourceMutex_ (connectRtlTcp emits it under that lock). Calling
     // sourceCapabilities() here would re-enter the non-recursive mutex and
@@ -4280,7 +4336,65 @@ void MainWindow::onAdsbPrune() {
         refreshAdsbTable();
 }
 
-void MainWindow::setControlsEnabled(bool hw) {
+void MainWindow::buildGuideCard() {
+    // First-run only: if the user already dismissed this, never build it again.
+    QSettings s("MBDSDR", "MBDSDR");
+    if (s.value(QStringLiteral("ui/onboardingDismissed"), false).toBool())
+        return;
+
+    auto* card = new QFrame;
+    card->setObjectName("panelCard");
+    auto* lay = new QHBoxLayout(card);
+    lay->setContentsMargins(tokens::scaled(12), tokens::scaled(8),
+                            tokens::scaled(12), tokens::scaled(8));
+    lay->setSpacing(tokens::scaled(12));
+
+    // Left column: title + the three steps.
+    auto* textCol = new QVBoxLayout;
+    textCol->setSpacing(tokens::scaled(2));
+    auto* title = new QLabel(QStringLiteral("欢迎使用 MBDSDR · 三步上手"), card);
+    QFont tf = title->font();
+    tf.setBold(true);
+    title->setFont(tf);
+    auto* steps = new QLabel(
+        QStringLiteral("① 连接 RTL-SDR　　② 调谐频率　　③ 选解调模式"), card);
+    steps->setObjectName("dockHint");
+    steps->setWordWrap(true);
+    textCol->addWidget(title);
+    textCol->addWidget(steps);
+    lay->addLayout(textCol, 1);
+
+    lay->addStretch();
+
+    // "去连接" entry in the empty state: drives the REAL connect button so the
+    // user lands straight on the first step (no fake/demo action).
+    guideConnectBtn_ = new QPushButton(QStringLiteral("去连接"), card);
+    connect(guideConnectBtn_, &QPushButton::clicked, this, [this]() {
+        if (connectBtn_ && connectBtn_->text() == QStringLiteral("连接"))
+            connectBtn_->click();
+    });
+    lay->addWidget(guideConnectBtn_);
+
+    // "不再提示": permanent dismissal remembered in QSettings (never shown again).
+    guideDismissBtn_ = new QPushButton(QStringLiteral("✕ 不再提示"), card);
+    connect(guideDismissBtn_, &QPushButton::clicked, this,
+            [this]() { dismissGuideCard(); });
+    lay->addWidget(guideDismissBtn_);
+
+    guideCard_ = card;
+}
+
+void MainWindow::dismissGuideCard() {
+    QSettings s("MBDSDR", "MBDSDR");
+    s.setValue(QStringLiteral("ui/onboardingDismissed"), true);
+    if (guideCard_) guideCard_->hide();
+}
+
+bool MainWindow::harnessGuideCardVisible() const {
+    return guideCard_ && guideCard_->isVisible();
+}
+
+void MainWindow::setControlsEnabled(bool hw, bool hasData) {
     freqSpin_->setEnabled(hw);
     srCombo_->setEnabled(hw);
     // Manual gain control only when hardware connected AND tuner in manual mode.
@@ -4289,6 +4403,14 @@ void MainWindow::setControlsEnabled(bool hw) {
     gainSlider_->setEnabled(gainOk);
     if (gainCombo_) gainCombo_->setEnabled(gainOk);
     if (advPanel_) advPanel_->setEnabled(hw);
+    // Data-producing controls: they only do something when a live sample stream
+    // exists. The honest empty NullSource (no hardware, no opted-in synthetic,
+    // no opened file) disables them so the user can't start a recording / pick
+    // a demod mode on silence. Real HW AND the explicitly-enabled synthetic
+    // source both count as hasData.
+    if (recordBtn_)  recordBtn_->setEnabled(hasData);
+    if (demodCombo_)  demodCombo_->setEnabled(hasData);
+    if (bwCombo_)     bwCombo_->setEnabled(hasData);
 }
 
 void MainWindow::refetchTle() {

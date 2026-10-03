@@ -56,6 +56,13 @@ QJsonObject parseObj(const QString& s) {
 class TestAiRealLink : public QObject {
     Q_OBJECT
 private slots:
+    // Phase21: engine no longer auto-falls back to the offline test source. These
+    // cases assert the synthetic source is honestly disclosed (test_signal==true,
+    // "测试信号") and scanBand marks it synthetic, so opt in explicitly BEFORE any
+    // engine is constructed. The honest-empty POCSAG/m17/VOR slots still hold:
+    // they never start the run loop and connected==false (=hasRealSource) for a
+    // synthetic source.
+    void initTestCase();
     void sourceDisclosure_testSignalHonest();
     void scanBand_marksSynthetic();
     void startRecording_reportsBoolNotUnconditional();
@@ -68,6 +75,10 @@ private slots:
     void vorSnapshot_honestUnlockedOffline();
     void toolCount_registryEqualsExecution();
 };
+
+void TestAiRealLink::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 // Default engine = offline TestSignalSource. Every result must disclose
 // connected:false and a 测试信号 source -- never claim real hardware.

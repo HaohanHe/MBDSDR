@@ -99,6 +99,14 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     app.setStyleSheet(mbdsdr::tokens::buildDarkQss());
 
+    // Phase21: the engine no longer auto-falls back to the offline test source.
+    // Without it the idle NullSource never feeds the run loop, which left the
+    // default empty-state teardown hanging on exit. Opt in explicitly to the
+    // synthetic source BEFORE the MainWindow (which builds the engine) exists;
+    // Phase 1 still asserts the honest "未连接" empty state because a synthetic
+    // source reports connected=false and an empty device-capability table.
+    qputenv("MBDSDR_TEST_SOURCE", "1");
+
     int failures = 0;
     auto check = [&](bool cond, const char* msg) {
         if (!cond) { ++failures; qWarning("FAIL: %s", msg); }

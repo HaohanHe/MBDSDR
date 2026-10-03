@@ -353,6 +353,22 @@ target_include_directories(test_engine_integration PRIVATE src)
 target_link_libraries(test_engine_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_integration COMMAND test_engine_integration)
 
+# Phase21 Step1: honest empty state. No hardware + no explicit opt-in -> the
+# engine installs a NullSource, produces no IQ (hasData()=false, no
+# spectrumReady), and never self-synthesizes. Only setTestSourceEnabled(true) /
+# the --test-source CLI flag / MBDSDR_TEST_SOURCE=1 brings up the synthetic
+# source (isSynthetic()=true). Mirrors the engine_integration source set.
+add_executable(test_engine_empty_state tests/test_engine_empty_state.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/fsk_demod.cpp src/dsp/pocsag_decoder.cpp src/dsp/m17_decoder.cpp src/dsp/vor_receiver.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_engine_empty_state PRIVATE src)
+target_link_libraries(test_engine_empty_state PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME engine_empty_state COMMAND test_engine_empty_state)
+
 # Headless ControlHub (GUI-decoupled command layer). Drives the REAL engine via
 # named commands with NO QWidget: deterministic write->readback, the read/write
 # gate in both states, honest unknown/bad-arg errors, and the no-engine / no-
@@ -848,6 +864,16 @@ target_include_directories(test_device_ui PRIVATE src build/test_device_ui_autog
 target_link_libraries(test_device_ui PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 add_test(NAME device_ui COMMAND test_device_ui)
 set_tests_properties(device_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Phase 21 Step 2: honest no-hardware empty state + explicit opt-in synthetic
+# test source + first-run onboarding card. Cloud VM has no RTL-SDR, so the
+# engine defaults to the empty NullSource; the synthetic source appears ONLY
+# when the user actively picks the combo item. Offscreen, no hardware.
+add_executable(test_phase21_empty_state tests/test_phase21_empty_state.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_phase21_empty_state PRIVATE src build/test_phase21_empty_state_autogen/include)
+target_link_libraries(test_phase21_empty_state PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME phase21_empty_state COMMAND test_phase21_empty_state)
+set_tests_properties(phase21_empty_state PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(test_ui_audit tests/test_ui_audit.cpp ${TESTAPP_SRCS} ${HEADERS})
 target_include_directories(test_ui_audit PRIVATE src build/test_ui_audit_autogen/include)

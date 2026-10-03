@@ -78,5 +78,37 @@ public:
     virtual std::vector<double> availableGainsDb() const { return {}; }
 };
 
+// SPDX-License-Identifier: MIT
+// Honest empty source: a no-IQ producer installed when there is NEITHER real
+// hardware NOR an explicitly-requested synthetic test signal. readIQ() always
+// returns 0 (EOF) so the engine run loop simply idles and never emits a
+// spectrum frame -- no synthetic IQ is ever fabricated. isConnected()=false.
+// The nominal rate / centre mirror TestSignalSource so the VFO manager can
+// still be configured identically, but zero samples are ever synthesized.
+class NullSource : public ISource {
+public:
+    bool start() override { return true; }
+    void stop() override {}
+    std::size_t readIQ(std::vector<std::complex<float>>& out) override {
+        (void)out;
+        return 0;   // honest EOF: nothing to read
+    }
+
+    void setCenterFreq(double) override {}
+    void setSampleRate(double) override {}
+    void setGain(double) override {}
+
+    double centerFreq() const override { return kCenterHz; }
+    double sampleRate() const override { return kSampleRateHz; }
+    double gain() const override { return 0.0; }
+
+    QString name() const override { return QStringLiteral("No Source"); }
+    bool isConnected() const override { return false; }
+
+private:
+    static constexpr double kSampleRateHz = 2.4e6;
+    static constexpr double kCenterHz    = 98.5e6;
+};
+
 } // namespace dsp
 } // namespace mbdsdr
