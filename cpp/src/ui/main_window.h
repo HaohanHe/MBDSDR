@@ -20,6 +20,7 @@ class QComboBox;
 class QSlider;
 class QPushButton;
 class QCheckBox;
+class QFrame;
 class QTabWidget;
 class QPlainTextEdit;
 class QTableWidget;
@@ -82,6 +83,20 @@ public:
     bool          harnessSampleRateEnabled() const;
     QString       harnessDeviceName() const;
     QString       harnessTunerRangeText() const;
+
+    // ---- Phase 21 honest-empty-state / onboarding harness accessors --------
+    // Read-only handles so the offscreen UI test can drive the source-type
+    // combo, read the honest banner/status, and assert the data-dependent
+    // controls + onboarding card without touching private members.
+    QComboBox*  harnessSrcTypeCombo() const { return srcTypeCombo_; }
+    QLabel*     harnessSourceBanner() const { return sourceBanner_; }
+    QLabel*     harnessStatusLabel()  const { return statusLabel_; }
+    QPushButton*harnessRecordBtn()    const { return recordBtn_; }
+    QComboBox*  harnessDemodCombo()   const { return demodCombo_; }
+    QComboBox*  harnessBwCombo()      const { return bwCombo_; }
+    QLabel*     harnessSyntheticBanner() const { return syntheticBanner_; }
+    bool        harnessGuideCardVisible() const;   // defined in .cpp (QFrame complete there)
+    QPushButton*harnessGuideDismissBtn() const { return guideDismissBtn_; }
 
 private slots:
     void onSourceChanged(const QString& name, bool connected);
@@ -287,9 +302,24 @@ private:
     QLabel*         statusLabel_ = nullptr;
     QPushButton*    connectBtn_ = nullptr;
     QComboBox*      srcTypeCombo_ = nullptr;
+    // Prominent "合成/调试" provenance pill. VISIBLE only while the engine feeds
+    // the explicitly-opted-in synthetic TestSignalSource (engine_->isSynthetic()).
+    // Honest labelling so a user never mistakes generated IQ for a live receiver.
+    QLabel*         syntheticBanner_ = nullptr;
     QLineEdit*      tcpHostEdit_ = nullptr;
     QSpinBox*       tcpPortSpin_ = nullptr;
     QLabel*         rssiLabel_  = nullptr;
+
+    // ---- First-run light onboarding card (Phase 21 honest empty state) ------
+    // Shown only when QSettings has no "ui/onboardingDismissed" record (first ever
+    // launch, no hardware yet). Steps: ①连接 RTL-SDR ②调谐频率 ③选解调模式. The
+    // "去连接" entry drives the real connect button; the ✕ "不再提示" writes the
+    // QSettings key permanently. Never blocking / never modal.
+    QFrame*         guideCard_ = nullptr;
+    QPushButton*    guideDismissBtn_ = nullptr;
+    QPushButton*    guideConnectBtn_ = nullptr;
+    void            buildGuideCard();
+    void            dismissGuideCard();
 
     // ---- Device info panel (real readback; honest empty state) -----------
     // Device name / tuning range / sample-rate range come from
@@ -535,7 +565,13 @@ private:
     void onAiCompactContext();
     void onRunAutoTask();              // run a deterministic autonomous task template
 
-    void setControlsEnabled(bool hardwareConnected);
+    // hw = a real hardware device (RTL-SDR / rtl_tcp) is live -> gate tuner /
+    // sample-rate / gain / advanced front-end controls. hasData = ANY live IQ
+    // producer (real HW, the explicitly-opted-in synthetic test source, or an
+    // opened offline capture file) -> gate demod / record / decode controls.
+    // The honest empty NullSource yields hasData()==false and everything that
+    // needs a sample stream is disabled (never a fake-but-idle control).
+    void setControlsEnabled(bool hw, bool hasData);
     void saveUiState();
     void restoreUiState();
     // Focus mode (CarWith driving-mode analog): collapse the left scroll rail

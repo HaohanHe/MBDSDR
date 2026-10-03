@@ -15,8 +15,17 @@ using namespace mbdsdr;
 class TestSoak : public QObject {
     Q_OBJECT
 private slots:
+    // Phase21: engine no longer auto-falls back to the offline test source. The
+    // soak drives the whole cycle and expects frames to keep flowing even after a
+    // disconnect (idle source = the explicitly-enabled synthetic source), so opt
+    // in before the engine is constructed.
+    void initTestCase();
     void fullScenarioNoCrash();
 };
+
+void TestSoak::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 static bool frameFinite(const mbdsdr::SpectrumFrame& f) {
     for (float v : f.dbfs) if (!std::isfinite(v)) return false;

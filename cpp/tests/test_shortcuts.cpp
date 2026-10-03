@@ -17,8 +17,7 @@ private:
     // engine's offline test source has been installed (a saved RTL setting may
     // briefly swap in a stub source whose centre is 0; tuning from 0 would make
     // the symmetric +/-step assertions land on the engine's >0 guard).
-    void arm(mbdsdr::MainWindow& win) {
-        // Pump first: let the offline test source install (a saved RTL setting
+    void arm(mbdsdr::MainWindow& win) {        // Pump first: let the offline test source install (a saved RTL setting
         // may briefly swap in a stub source whose centre is 0; tuning from 0
         // would make the symmetric +/-step assertions land on the engine's >0
         // guard). Claim focus LAST so pumping cannot steal it back.
@@ -35,12 +34,20 @@ private:
         QApplication::processEvents(QEventLoop::AllEvents, 10);
     }
 private slots:
+    // Phase21: the engine no longer auto-falls back to the offline test source.
+    // arm() waits for the engine to come up on the synthetic 98.5 MHz source, so
+    // opt in explicitly BEFORE any MainWindow (which builds the engine) exists.
+    void initTestCase();
     void arrowRightMovesCenterFreq();
     void shiftArrowFineTunes();
     void pageUpAdvancesStepPreset();
     void pageDownWrapsStepPreset();
     void plusKeyStepsGainUp();
 };
+
+void TestShortcuts::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 void TestShortcuts::arrowRightMovesCenterFreq() {
     mbdsdr::MainWindow win; win.show(); arm(win);

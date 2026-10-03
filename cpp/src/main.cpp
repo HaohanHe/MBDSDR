@@ -32,10 +32,16 @@ static void printHelp() {
         "  --snapshot <path> Run the UI, wait for the first render, save a PNG\n"
         "                    screenshot to <path> and exit. Lets scripts verify\n"
         "                    the UI headlessly (use with --offscreen).\n"
+        "  --test-source     Explicitly enable the offline SYNTHETIC test signal\n"
+        "                    (debugging only, NOT real reception). Without this, and\n"
+        "                    with no hardware attached / no capture file loaded, the\n"
+        "                    engine stays in an honest empty state and produces no\n"
+        "                    on-screen IQ. Equivalent: MBDSDR_TEST_SOURCE=1.\n"
         "\n"
-        "Data sources: real SDR hardware via rtl_tcp / SoapySDR when connected;\n"
-        "otherwise an OFFLINE TEST SIGNAL generator runs and all on-screen data\n"
-        "is labeled \"非硬件 / NOT HARDWARE\". No fake hardware is ever shown.\n"
+        "Data sources: real SDR hardware when connected, or an offline capture\n"
+        "file. With neither, and unless --test-source / MBDSDR_TEST_SOURCE=1 is\n"
+        "given, the UI shows an honest \"未连接\" empty state -- no synthetic IQ is\n"
+        "ever invented. No fake hardware is ever shown.\n"
         "\n"
         "Build: Qt6 Widgets + C++17 CMake project. Single executable.\n"
         "No Python runtime is required at runtime.";
@@ -47,6 +53,7 @@ int main(int argc, char** argv) {
 
     double  cliScale    = 0.0;   // 0 = unset; only a positive value overrides
     QString cliSnapshot;         // empty = unset
+    bool    cliTestSource = false;  // --test-source: explicit synthetic debug IQ
 
     // Parse simple CLI flags
     for (int i = 1; i < argc; ++i) {
@@ -67,6 +74,11 @@ int main(int argc, char** argv) {
             else qWarning() << "[mbdsdr] --scale: expected a positive number, got" << argv[i];
         } else if (a == "--snapshot" && i + 1 < argc) {
             cliSnapshot = QString::fromLocal8Bit(argv[++i]);
+        } else if (a == "--test-source") {
+            // Explicit opt-in to the synthetic test signal. Translated to the
+            // env var below so the engine (constructed inside MainWindow) honors
+            // the SAME channel as MBDSDR_TEST_SOURCE=1.
+            cliTestSource = true;
         } else if (a.startsWith(QLatin1String("--"))) {
             qWarning() << "[mbdsdr] unknown option:" << a;
         }
@@ -110,6 +122,17 @@ int main(int argc, char** argv) {
     }
     // Apply dark QSS translated from desktop/tokens.py
     app.setStyleSheet(mbdsdr::tokens::buildDarkQss());
+
+    // The synthetic test source is an explicit debugging opt-in. The engine
+    // (built inside MainWindow) honors MBDSDR_TEST_SOURCE=1 in its constructor;
+    // bridge the --test-source CLI flag onto that same variable so either channel
+    // enables it. Absent both, a no-hardware launch lands on the honest empty
+    // state and invents no IQ.
+    if (cliTestSource) {
+        qputenv("MBDSDR_TEST_SOURCE", "1");
+        qInfo() << "[mbdsdr] --test-source: offline synthetic test signal ENABLED"
+                   "(debugging only, not real reception)";
+    }
 
     mbdsdr::MainWindow win;
     win.show();

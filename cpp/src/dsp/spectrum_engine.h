@@ -259,9 +259,32 @@ public:
     // connect/disconnect calls always cancel the pending retry.
     bool autoReconnectEnabled() const { return autoReconnect_.load(); }
     void setAutoReconnectEnabled(bool on) { autoReconnect_.store(on); }
-    // True iff the engine currently feeds the offline test-signal fallback
-    // (i.e. NOT real hardware). Honest state for the UI / integration tests.
+    // True iff the engine currently feeds the offline synthetic test signal
+    // (i.e. TestSignalSource is the ACTIVE source). Honest state for the UI /
+    // integration tests: on real hardware or the honest empty (NullSource) this
+    // is false.
     bool isTestSignalActive() const;
+
+    // ---- Explicit synthetic test source (opt-in debugging, never automatic)
+    // The production path NEVER synthesizes IQ on its own. The synthetic
+    // TestSignalSource is only installed when the caller explicitly opts in via
+    // setTestSourceEnabled(true) (the app also honors the --test-source CLI flag
+    // and the MBDSDR_TEST_SOURCE=1 environment variable, both read before the
+    // engine is built). Turning it on while no real device / file is active
+    // swaps in the synthetic source; turning it off (or having no hardware)
+    // drops back to the honest empty NullSource. Enabling never kicks a live
+    // real device; disabling only tears down the synthetic source.
+    void setTestSourceEnabled(bool on);
+    bool isTestSourceEnabled() const { return testSourceEnabled_.load(); }
+    // State queries for the UI / ControlHub to render the honest empty state and
+    // disable record / decode / scan controls:
+    //   hasRealSource() -- a real hardware device (RTL-SDR / rtl_tcp) is live.
+    //   isSynthetic()   -- the ACTIVE source is the synthetic TestSignalSource.
+    //   hasData()       -- ANY live IQ producer exists (real HW, synthetic test,
+    //                      or an opened offline capture file); false on empty.
+    bool hasRealSource() const;
+    bool isSynthetic() const;
+    bool hasData() const;
 
     // ---- SpyServer IQ tap (read-only, push) --------------------------------
     // When `on` is true the engine re-emits each freshly-read real IQ block
@@ -466,8 +489,10 @@ private:
 
     // Expand recTemplate_ against the current source/demod state.
     QString expandRecTemplate() const;
-    // True when a live data producer exists (real HW or the test signal).
-    bool hasData() const;
+    // True when a live data producer exists (real HW, the synthetic test signal,
+    // or an opened offline file). Called with sourceMutex_ held (internal use);
+    // the public hasData() takes the lock and delegates here.
+    bool hasDataLocked() const;
 
     // Live REC progress bookkeeping (reset in startRecording, sampled at 1 Hz
     // in run()). recCurrentPath_ is the file currently being written.
@@ -535,6 +560,13 @@ private:
     int zeroReadFrames_ = 0;
     std::atomic<bool> autoReconnect_{true};
     bool reconnectPending_ = false;
+    // Explicit opt-in to the synthetic test source. Default false; set true by
+    // setTestSourceEnabled(true) or by the MBDSDR_TEST_SOURCE=1 environment
+    // variable (read in the constructor; the --test-source CLI flag sets this
+    // variable in main.cpp). When a real source is absent, this decides whether
+    // the idle source is the synthetic TestSignalSource or the honest empty
+    // NullSource. It NEVER auto-synthesizes on the production path.
+    std::atomic<bool> testSourceEnabled_{false};
     // "A real device source is currently expected to be active" -- set by a
     // successful connectRtlTcp / auto-reconnect, cleared by a manual
     // disconnect or by dropSourceLocked. Unlike ISource::isConnected() this
@@ -548,6 +580,12 @@ private:
     // Caller must hold sourceMutex_. Swaps the live source to the offline test
     // signal (honest fallback) and emits sourceDropped + sourceChanged.
     void dropSourceLocked();
+    // Caller must hold sourceMutex_. Installs the idle (no-real-device) source:
+    // the explicitly-enabled synthetic TestSignalSource, or -- by default -- the
+    // honest empty NullSource that produces no IQ. Used after every real-source
+    // open / drop / disconnect failure. Emits no sourceChanged itself; callers
+    // emit the appropriate event.
+    void installIdleSourceLocked();
 
     // Cached RTL front-end options. The pass-through slots update these AND
     // forward to the live source_. On reconnect (tryConnectRtl) the cache is

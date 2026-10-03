@@ -30,8 +30,16 @@ static bool frameFinite(const SpectrumFrame& f) {
 class TestLeoSoak : public QObject {
     Q_OBJECT
 private slots:
+    // Phase21: engine no longer auto-synthesizes. The loopback soak needs real
+    // spectrum frames + RSSI readback off the offline test source, so opt in
+    // explicitly before the engine is constructed.
+    void initTestCase();
     void loopbackChainNoCrash();
 };
+
+void TestLeoSoak::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 void TestLeoSoak::loopbackChainNoCrash() {
     // 1) Engine loopback on the offline test source.

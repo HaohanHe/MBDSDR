@@ -26,9 +26,17 @@ using namespace mbdsdr::dsp;
 class TestSquelchAutoGate : public QObject {
     Q_OBJECT
 private slots:
+    // Phase21: engine no longer auto-synthesizes. These track the audio-RMS noise
+    // floor and the closed-gate mute path on flowing demod audio, so opt in
+    // explicitly to the offline synthetic source before construction.
+    void initTestCase();
     void audioRmsNoiseFloorIsRealSameDomain();
     void gateBelowThresholdMutesSpeaker();
 };
+
+void TestSquelchAutoGate::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 void TestSquelchAutoGate::audioRmsNoiseFloorIsRealSameDomain() {
     SpectrumEngine eng;

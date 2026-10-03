@@ -34,8 +34,15 @@ static inline quint32 getU32(const QByteArray& b, int off) {
 class TestSpyServer : public QObject {
     Q_OBJECT
 private slots:
+    // Phase21: engine no longer auto-synthesizes. The SpyServer streams the
+    // engine's offline TestSignalSource, so opt in explicitly before construction.
+    void initTestCase();
     void handshakeAndStreaming();
 };
+
+void TestSpyServer::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 // Pump the event loop until at least `n` bytes are readable (or timeout).
 static bool waitBytes(QTcpSocket* s, qint64 n, int timeoutMs) {

@@ -39,6 +39,13 @@ static QJsonObject parseObj(const QString& s) {
 class TestControlHub : public QObject {
     Q_OBJECT
 private slots:
+    // Phase21: the engine no longer auto-falls back to the synthetic test source.
+    // These cases drive the offline TestSignalSource (e.g. scan_band needs a
+    // real synthetic tone; recordingStartStop needs flowing audio), so opt in
+    // explicitly BEFORE any engine is constructed (read in the ctor). The
+    // telemetry-empty slot still sees an honest empty state because it never
+    // starts the run loop, so no sourceTelemetry ever fires.
+    void initTestCase();
     void commandsDriveEngineAndReadback();
     void readAlwaysAllowedWriteGateBothStates();
     void unknownCommandAndBadArgsAreHonest();
@@ -49,6 +56,10 @@ private slots:
     void digitalSnapshotReadsAreHonestAndUngated();
     void clearDigitalOutputsGateBothStates();
 };
+
+void TestControlHub::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 // 1) Every write command deterministically reaches the engine; the symmetric
 //    read command returns the applied value.

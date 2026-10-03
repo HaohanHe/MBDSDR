@@ -23,6 +23,11 @@ using namespace mbdsdr;
 class TestTaskOrchestrator : public QObject {
     Q_OBJECT
 private slots:
+    // Phase21: engine no longer auto-falls back to the offline test source. The
+    // sweep-to-bookmark chain needs scanBand to find a real synthetic tone, so opt
+    // in explicitly to the synthetic source BEFORE any engine is constructed (the
+    // tune/ gate slots are source-agnostic and unaffected).
+    void initTestCase();
     void testResolveRef();
     void testTemplateShapes();
     void testSweepHitChainsToBookmark();   // full loopback chain (soak)
@@ -31,6 +36,10 @@ private slots:
     void testSingleStepFailureContinue();
     void testManualGateHonestReport();      // manual mode blocks the task
 };
+
+void TestTaskOrchestrator::initTestCase() {
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+}
 
 // Build a fake prior result whose parsed JSON has hits[0].frequencyHz.
 static ai::StepResult priorScanResult(double hitHz) {
