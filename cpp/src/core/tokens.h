@@ -854,5 +854,37 @@ inline constexpr int kAiRequestTimeoutMs = 30000;
 // allowed to spend. Backend range is 128..32768 (SF chat-completions note).
 inline constexpr int kAiThinkingBudgetTokens = 4096;
 
+// =====================================================================
+// Headless ControlHub (无头控制层, cpp/src/control/control_hub.{h,cpp})
+//
+// A GUI-decoupled command dispatcher: a named command table maps straight onto
+// the existing dsp::SpectrumEngine slots (no QWidget, no rewritten DSP). It is a
+// general platform capability -- GUI, the AI tool loop and a future remote/JSON
+// front-end are all just its clients. Read commands (get_*, list_*, status) are
+// always allowed; write commands are gated by a single master switch
+// (setWriteEnabled). The numeric bounds below are DERIVED from the hardware
+// tokens above (kFreqMinHz..kFreqMaxHz / kGainMinDb..kGainMaxDb /
+// kSquelchMinDb..kSquelchMaxDb) so the command layer stays elastic and invents no
+// magic numbers of its own.
+// =====================================================================
+// Default write-gate posture for a freshly constructed ControlHub. true = the
+// headless layer may actually drive the receiver out of the box (that is its
+// purpose); a caller that only wants to observe state, or a remote/untrusted
+// front-end, flips it off via setWriteEnabled(false), after which every write
+// command is HONESTLY refused ({ok:false, gated:true}) and the engine is never
+// touched.
+inline constexpr bool kControlHubWriteEnabledDefault = true;
+// Demodulation modes the set_mode / vfo_set_mode commands accept. Mirrors the
+// AI tool enum (ai/tool_schema.cpp) so both command surfaces agree; an
+// out-of-vocabulary mode is an honest bad-argument error, never a silent guess.
+inline const char* const kControlHubModes[] = {
+    "AM", "NFM", "WFM", "USB", "LSB", "CW"
+};
+inline constexpr int kControlHubModesCount =
+    int(sizeof(kControlHubModes) / sizeof(kControlHubModes[0]));
+// Minimum non-zero scan step (Hz) for scan_band: guards against a meaningless
+// zero/negative sweep. Elastic upper bound is left to the caller.
+inline constexpr double kControlHubScanStepMinHz = 1.0;
+
 } // namespace tokens
 } // namespace mbdsdr
