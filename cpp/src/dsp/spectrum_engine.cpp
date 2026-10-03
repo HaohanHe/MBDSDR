@@ -208,6 +208,50 @@ double SpectrumEngine::scanBand(double lowHz, double highHz, double stepHz,
     return peakDb;
 }
 
+// One-shot synchronous capture for frequency calibration. Takes the SAME lock
+// scanBand() uses so the engine read-loop never interleaves a block into the
+// returned window. When tuneHz >= 0 the ACTIVE source is first parked there
+// (a no-op on the offline file source, which already streams a fixed capture),
+// then readIQ is pulled in chunks until `out` holds ~sampleCount complex
+// samples -- or the source honestly stops delivering data. sampleRateHzOut /
+// centreHzOut report the source's nominal rate and current centre for the ppm
+// denominator; on a test / offline source these are the honestly-labelled
+// generated-data values, never a fabricated device capture.
+std::size_t SpectrumEngine::captureForCalibration(
+        double tuneHz, int sampleCount,
+        std::vector<std::complex<float>>& out,
+        double& sampleRateHzOut, double& centreHzOut) {
+    QMutexLocker lk(&sourceMutex_);
+    out.clear();
+    sampleRateHzOut = 0.0;
+    centreHzOut = 0.0;
+    if (!source_) return 0;
+
+    if (tuneHz >= 0.0) source_->setCenterFreq(tuneHz);
+
+    // Chunked pull: readIQ fills exactly out.size() for live sources (blocks
+    // until ready) and loops the offline file on EOF, so a short read only
+    // happens when the source genuinely stops. 8192 is a small, cache-friendly
+    // block that keeps the lock hold-time modest.
+    constexpr std::size_t kChunk = 8192;
+    const std::size_t target =
+        sampleCount > 0 ? static_cast<std::size_t>(sampleCount) : 0;
+    std::size_t gotTotal = 0;
+    while (gotTotal < target) {
+        const std::size_t want = std::min<std::size_t>(kChunk, target - gotTotal);
+        std::vector<std::complex<float>> block(want);
+        const std::size_t got = source_->readIQ(block);
+        if (got == 0) break;   // honest EOF / source has no more data
+        if (got < want) block.resize(got);
+        out.insert(out.end(), block.begin(), block.end());
+        gotTotal += got;
+    }
+
+    sampleRateHzOut = source_->sampleRate();
+    centreHzOut = source_->centerFreq();
+    return gotTotal;
+}
+
 bool SpectrumEngine::tryConnectRtl() {
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->stop();

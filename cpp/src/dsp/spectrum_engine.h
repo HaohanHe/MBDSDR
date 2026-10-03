@@ -74,6 +74,19 @@ public:
     // the peak occurred (so callers can retune to the hit).
     double scanBand(double lowHz, double highHz, double stepHz,
                     double* peakFreqHzOut = nullptr);
+
+    // One-shot capture for frequency calibration (used by the calibration
+    // wizard and the calibrate_frequency agent tool). When tuneHz >= 0 it first
+    // tunes the ACTIVE source there, then synchronously reads ~sampleCount
+    // complex samples under sourceMutex_ -- the same locking scanBand() uses.
+    // Returns the number of samples placed in `out`; sampleRateHzOut and
+    // centreHzOut report the nominal rate and the tuned centre. On a test /
+    // offline source it returns that honestly-labelled generated data rather
+    // than fabricating a device capture.
+    std::size_t captureForCalibration(double tuneHz, int sampleCount,
+                                      std::vector<std::complex<float>>& out,
+                                      double& sampleRateHzOut,
+                                      double& centreHzOut);
     bool tryConnectRtl();
     void disconnectSource();
     void setMuted(bool m);  // returns peak dBFS
