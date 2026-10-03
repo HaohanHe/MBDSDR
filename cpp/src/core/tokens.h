@@ -886,5 +886,39 @@ inline constexpr int kControlHubModesCount =
 // zero/negative sweep. Elastic upper bound is left to the caller.
 inline constexpr double kControlHubScanStepMinHz = 1.0;
 
+// =====================================================================
+// VOR (VHF Omnidirectional Range, ICAO Annex 10) navigation receiver.
+//
+// Shared physics + business thresholds for dsp/vor_receiver.{h,cpp} and the
+// Wave-2 UI/ControlHub display (radial readout, lock indicator, station ID).
+// The audio fed to the decoder is the post-FM-demod composite baseband: it
+// carries BOTH a 30 Hz spatial (variable) AM tone AND a 30 Hz reference hidden
+// as frequency modulation of a 9960 Hz subcarrier (deviation +/-480 Hz,
+// modulation index 16). The bearing (radial) is the phase difference between
+// the two 30 Hz components. A 1020 Hz on/off-keyed Morse carrier announces the
+// station identifier. These are the ICAO standard values; no station database
+// is baked in -- the decoder only reports what the airwave actually carries.
+// =====================================================================
+// ICAO Annex 10 modulation constants (Hz).
+inline constexpr double kVorReferenceModHz      = 30.0;     // ref / variable tone
+inline constexpr double kVorSubcarrierHz        = 9960.0;   // reference subcarrier
+inline constexpr double kVorSubcarrierDevHz     = 480.0;    // +/- peak deviation
+inline constexpr double kVorMorseToneHz         = 1020.0;   // ID carrier
+// Measurement: one radial estimate integrates over an integer number of 30 Hz
+// cycles (2.0 s = 60 cycles) so every integer-Hz interferer coherently cancels.
+inline constexpr double kVorBlockSeconds        = 2.0;
+// The block is split into this many sub-measurements; their radial scatter
+// (circular mean-resultant length R in [0,1]) is the honest confidence.
+inline constexpr int    kVorSubBlocks           = 10;
+// Declare a radial "locked" only when sub-blocks agree this well AND both 30 Hz
+// channels are above their noise floor. Below this the decoder reports an
+// honest UNLOCKED state (no fabricated bearing).
+inline constexpr double kVorQualityLock         = 0.5;
+// Display / test tolerance (degrees): how far a reported radial may sit from
+// the true bearing before it is considered wrong.
+inline constexpr double kVorRadialToleranceDeg  = 5.0;
+// Morse sending speed (PARIS, words/min) used only to size on/off segments.
+inline constexpr double kVorMorseWpm           = 12.0;
+
 } // namespace tokens
 } // namespace mbdsdr

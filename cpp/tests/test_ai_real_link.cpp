@@ -195,6 +195,7 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     const QSet<QString> supported = {
         "tune_frequency", "set_mode", "start_recording", "stop_recording",
         "scan_band", "set_bandwidth", "get_status", "predict_passes",
+        "calibrate_frequency", "apply_frequency_correction",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
