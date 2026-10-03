@@ -40,6 +40,8 @@ private slots:
     void freqTickDecimalsAdaptive();
     void defaultShareIsOneToOne();
     void reRenderHistoryOnPaletteSwitch();
+    void specFractionRoundTripPersists();
+    void specFractionInvalidFallsBackToDefault();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -387,12 +389,16 @@ void TestSpectrumDisplay::freqTickDecimalsAdaptive() {
 
 // W2a: default traceShare_ = 0.5 -> trace and waterfall split 1:1 (the reported
 // "trace occupies too much" defect is a Flutter-only flex issue; desktop default
-// must stay balanced).
+// must stay balanced). Runs with the persisted key ABSENT so it proves the
+// no-key path falls back to tokens::kDefaultSpecFraction (not a leftover value
+// written by an earlier divider-drag test).
 void TestSpectrumDisplay::defaultShareIsOneToOne() {
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeySpecFraction);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
     w.setSpectrum(makeFrame(512, 256, 0.0f, -100.0f));
+    QCOMPARE(w.traceShareFraction(), tokens::kDefaultSpecFraction);
     const int th = w.spectrumRect().height();
     const int fh = w.waterfallRect().height();
     QVERIFY2(std::abs(th - fh) <= 2,
@@ -453,6 +459,68 @@ void TestSpectrumDisplay::reRenderHistoryOnPaletteSwitch() {
     QVERIFY2(std::abs(qRed(ranged) - 204) <= 4,
              qPrintable(QString("after range [-50,0], peak should be ~204, got %1")
                         .arg(qRed(ranged))));
+}
+
+// P3: divider placement survives a restart. Drive a real divider drag to a new
+// share, release (which persists it), then build a FRESH widget and prove it
+// read back the exact stored share -- no pixels inspected.
+void TestSpectrumDisplay::specFractionRoundTripPersists() {
+    QSettings s("MBDSDR", "MBDSDR");
+    s.remove(tokens::kSettingsKeySpecFraction);
+
+    // Instance 1: no key -> honest default, then drag the divider off-centre.
+    ui::SpectrumDisplay w1;
+    w1.resize(1000, 700);
+    w1.recomputeGeometry();
+    w1.setSpectrum(makeFrame(512, 256, 0.0f, -100.0f));
+    QCOMPARE(w1.traceShareFraction(), tokens::kDefaultSpecFraction);
+
+    const int cx = w1.width() / 2;
+    QTest::mousePress(&w1, Qt::LeftButton, Qt::NoModifier, QPoint(cx, w1.dividerY()));
+    QTest::mouseMove(&w1, QPoint(cx, 240), Qt::LeftButton);   // drag up: smaller trace share
+    QTest::mouseRelease(&w1, Qt::LeftButton, Qt::NoModifier, QPoint(cx, 240));
+
+    // Release must have written the share to QSettings.
+    QVERIFY2(s.contains(tokens::kSettingsKeySpecFraction),
+             "releasing a divider drag must persist the trace share");
+    const double saved = s.value(tokens::kSettingsKeySpecFraction).toDouble();
+    QVERIFY2(std::abs(saved - tokens::kDefaultSpecFraction) > 1e-6,
+             "drag must move the share off the 0.5 default");
+    QVERIFY2(saved > 0.1 && saved < 0.9, "stored share must sit in the legal band");
+
+    // Instance 2 (the "restart"): must read back exactly what was persisted.
+    ui::SpectrumDisplay w2;
+    w2.resize(1000, 700);
+    w2.recomputeGeometry();
+    QVERIFY2(std::abs(w2.traceShareFraction() - saved) < 1e-9,
+             qPrintable(QString("fresh instance read back %1, expected %2")
+                        .arg(w2.traceShareFraction()).arg(saved)));
+}
+
+// P3: a missing/non-numeric stored value falls back to the default; a wildly
+// out-of-range numeric value is clamped into the legal band (never left raw,
+// which would break geometry).
+void TestSpectrumDisplay::specFractionInvalidFallsBackToDefault() {
+    QSettings s("MBDSDR", "MBDSDR");
+    s.remove(tokens::kSettingsKeySpecFraction);
+
+    // Non-numeric garbage => default (the "illegal value" case).
+    s.setValue(tokens::kSettingsKeySpecFraction, QStringLiteral("bogus-share"));
+    ui::SpectrumDisplay bad;
+    bad.resize(1000, 700);
+    bad.recomputeGeometry();
+    QCOMPARE(bad.traceShareFraction(), tokens::kDefaultSpecFraction);
+
+    // Out-of-range number => clamped into the legal [0.1, 0.9] band (mirrors the
+    // local kSpecFracMin/Max in spectrum_display.cpp).
+    s.setValue(tokens::kSettingsKeySpecFraction, 5.0);
+    ui::SpectrumDisplay hi;
+    hi.resize(1000, 700);
+    hi.recomputeGeometry();
+    QVERIFY2(hi.traceShareFraction() >= 0.1 - 1e-9 &&
+             hi.traceShareFraction() <= 0.9 + 1e-9,
+             qPrintable(QString("out-of-range share must be clamped, got %1")
+                        .arg(hi.traceShareFraction())));
 }
 
 QTEST_MAIN(TestSpectrumDisplay)

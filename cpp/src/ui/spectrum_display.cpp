@@ -8,6 +8,7 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QToolTip>
+#include <QSettings>
 #include <QRectF>
 #include <QFile>
 #include <algorithm>
@@ -40,6 +41,25 @@ constexpr float kAutoPeakHeadroomDb = 4.0f;
 // Per-frame easing cap. Combined with a ~0.5s window this lands inside the
 // kAnimMedium1 (220 ms) feel: the scale glides instead of jumping.
 constexpr float kAutoEasePerFrameDb = 1.5f;
+
+// Legal bounds for the persisted trace/waterfall height share. Anything stored
+// outside this band (hand-edited config) is pulled back into it; a missing or
+// non-numeric stored value falls back to tokens::kDefaultSpecFraction. Kept local
+// (tokens.h owns the default + the QSettings key, not these display-only bounds).
+constexpr double kSpecFracMin = 0.1;
+constexpr double kSpecFracMax = 0.9;
+
+// Read the persisted trace/waterfall share back on construction. Missing key,
+// non-numeric or non-finite value => honest default; otherwise clamped to the
+// legal band. Mirrors the QSettings("MBDSDR","MBDSDR") group used app-wide.
+double loadSpecFraction() {
+    QSettings s("MBDSDR", "MBDSDR");
+    const QVariant v = s.value(tokens::kSettingsKeySpecFraction);
+    bool ok = false;
+    const double d = v.toDouble(&ok);
+    if (!ok || !std::isfinite(d)) return tokens::kDefaultSpecFraction;
+    return clampd(d, kSpecFracMin, kSpecFracMax);
+}
 } // namespace
 
 SpectrumDisplay::SpectrumDisplay(QWidget* parent)
@@ -48,7 +68,8 @@ SpectrumDisplay::SpectrumDisplay(QWidget* parent)
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setMouseTracking(true);
     setAutoFillBackground(true);
-    traceShare_ = tokens::kDefaultSpecFraction;
+    // Restore the user's last divider placement (honest default / clamped).
+    traceShare_ = loadSpecFraction();
 }
 
 // ---------------------------------------------------------------------------
@@ -1083,7 +1104,13 @@ void SpectrumDisplay::mouseReleaseEvent(QMouseEvent* e) {
         dialFreqHz_ = target;
         emit frequencyChanged(target);
         emit viewChanged();
-    } else if (grab_ == Grab::Pan || grab_ == Grab::Divider) {
+    } else if (grab_ == Grab::Divider) {
+        // Drag settled on release: persist the new trace/waterfall share so the
+        // user's layout survives a restart. Pan stays ephemeral.
+        QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeySpecFraction,
+                                               traceShare_);
+        emit viewChanged();
+    } else if (grab_ == Grab::Pan) {
         emit viewChanged();
     }
     grab_ = Grab::None;

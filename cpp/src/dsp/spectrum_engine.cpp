@@ -55,6 +55,11 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
 
     audioOut_ = new AudioOutput(this);
     audioSink_ = audioOut_;   // default: real device playback
+    // AGC operating point from the named tokens: drive recovered audio toward the
+    // target, but CEIL the boost so an idle noise floor is not blasted to
+    // listening volume (the real "sandpaper hiss" fault).
+    agc_.setTarget(tokens::kAgcTargetLin);
+    agc_.setMaxGain(tokens::kAgcMaxGainLin);
     // Shared output directory (user-configurable, program-dir "record").
     {
         QSettings rs("MBDSDR", "MBDSDR");

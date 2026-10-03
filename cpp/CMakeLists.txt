@@ -341,6 +341,20 @@ target_include_directories(test_engine_integration PRIVATE src)
 target_link_libraries(test_engine_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_integration COMMAND test_engine_integration)
 
+# P1: deterministic synthetic IQ -> FileSource.openRaw -> REAL engine ->
+# MemoryAudioSink. Asserts recovered 1 kHz pitch / level for NFM/WFM/AM, the
+# quiet-noise control, squelch OPEN/CLOSED, and no rational-resampler pitch drift.
+add_executable(test_engine_audio_e2e tests/test_engine_audio_e2e.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_engine_audio_e2e PRIVATE src)
+target_link_libraries(test_engine_audio_e2e PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME engine_audio_e2e COMMAND test_engine_audio_e2e)
+
 # B3/B4: per-mode bandwidth table + coverage rule + engine real setBandwidth +
 # PowerSpectrum frame-average lock.
 add_executable(test_bandwidth_preset tests/test_bandwidth_preset.cpp

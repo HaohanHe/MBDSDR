@@ -128,13 +128,25 @@ void IQBalanceCorrector::estimate() {
     const double n2 = std::sqrt(v2x*v2x + v2y*v2y);
     v1x/=n1; v1y/=n1; v2x/=n2; v2y/=n2;
 
-    // W = V diag(1/sqrt(l)) V^T
+    // W = V diag(1/sqrt(l)) V^T whitens the imbalance (equalises the two
+    // eigen-directions). BUT the raw whitener forces the OUTPUT covariance to
+    // the identity matrix, i.e. unit total power -- on an EMPTY channel the
+    // noise is isotropic (l1 == l2 == sigma^2), so W becomes diag(1/sigma) and
+    // the quiet idle noise is boosted to full scale regardless of how weak it
+    // is. That automatic power-normalisation is exactly the "sandpaper hiss on
+    // a tuned-to-nothing" fault: a balance corrector must equalise I/Q gain and
+    // phase while PRESERVING the absolute input level. Rescale W so the output
+    // trace equals the input trace (trace C = l1 + l2). For isotropic noise
+    // l1==l2 this collapses to the identity matrix (no boost at all); for a
+    // real gain/phase imbalance it equalises without changing the volume.
     const double s1 = 1.0/std::sqrt(l1);
     const double s2 = 1.0/std::sqrt(l2);
-    W_[0][0] = static_cast<float>(v1x*v1x*s1 + v2x*v2x*s2);
-    W_[0][1] = static_cast<float>(v1x*v1y*s1 + v2x*v2y*s2);
+    // Power-preserving scale: k^2 * trace(I) = trace(C) = l1 + l2.
+    const double k = std::sqrt((l1 + l2) * 0.5);
+    W_[0][0] = static_cast<float>(k * (v1x*v1x*s1 + v2x*v2x*s2));
+    W_[0][1] = static_cast<float>(k * (v1x*v1y*s1 + v2x*v2y*s2));
     W_[1][0] = W_[0][1];
-    W_[1][1] = static_cast<float>(v1y*v1y*s1 + v2y*v2y*s2);
+    W_[1][1] = static_cast<float>(k * (v1y*v1y*s1 + v2y*v2y*s2));
     fitted_ = true;
 }
 
