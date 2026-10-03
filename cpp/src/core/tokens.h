@@ -267,6 +267,24 @@ inline constexpr double kSquelchAutoMarginDb = 8.0;
 inline constexpr double kSquelchNfAlphaDown  = 0.20;  // fast track toward quieter
 inline constexpr double kSquelchNfAlphaUp   = 0.005; // slow creep toward louder
 
+// =====================================================================
+// Demodulator -> audio chain shared constants (dsp/agc.cpp, dsp/spectrum_engine).
+// The envelope AGC levels the recovered audio toward kAgcTargetLin, but its
+// boost is CEILed at kAgcMaxGainLin so an empty channel's quiet noise floor is
+// not amplified to listening volume (the real "sandpaper hiss" fault). A
+// well-received voice already sits near target, so its gain (~1..3x) never
+// reaches the ceiling; only idle noise is left quiet.
+// =====================================================================
+inline constexpr float  kAgcTargetLin   = 0.3f;   // audio level AGC drives toward
+inline constexpr float kAgcMaxGainLin = 12.0f;  // ~21.6 dB boost ceiling
+// Fixed audio render rate every VFO resampler lands on, and the broadcast-FM
+// intermediate rate. Shared by the engine + the synthetic e2e harness.
+inline constexpr int    kAudioRateHz   = 48000;
+inline constexpr int    kWfmIfRateHz   = 240000;
+// Typical RTL-SDR capture rate used by the offline synthetic e2e fixture
+// (NOT a production default; the device reports its real rate).
+inline constexpr double kFixtureSrcRateHz = 2.048e6;
+
 // Waterfall time-axis labels (inside the left margin)
 inline constexpr int kTimeLabelW = 44;
 inline constexpr int kTimeLabelH = 12;

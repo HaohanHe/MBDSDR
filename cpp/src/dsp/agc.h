@@ -14,12 +14,24 @@ public:
     static constexpr float DefaultTarget = 0.3f;
     static constexpr double DefaultAttackMs = 5.0;
     static constexpr double DefaultDecayMs  = 100.0;
+    // Gain ceiling (linear). Without it, an empty channel's tiny noise-floor
+    // envelope drives gain = target/env up to ~1e3, blasting the quiet
+    // background to listening volume -- the classic "sandpaper hiss on an empty
+    // channel". Real receivers cap the boost: a well-received voice already sits
+    // near target (gain ~1..3x) and never touches the ceiling, while a quiet
+    // noise floor is left quiet instead of being amplified. Named value lives in
+    // core/tokens.h (kAgcMaxGainLin); this constant is the fallback default.
+    static constexpr float DefaultMaxGain = 12.0f;
     // Carrier AGC operating point.
     static constexpr float CarrierTarget = 0.5f;
     static constexpr double CarrierAttackMs = 2.0;
 
     explicit Agc(double blockDurMs = 20.0);
     void setTarget(float level) { target_ = level; }
+    // Cap the linear gain applied to the audio. <= 0 means "no ceiling"
+    // (legacy behaviour); a finite value keeps an idle noise floor quiet.
+    void setMaxGain(float g) { maxGain_ = (g > 0.0f) ? g : 1e9f; }
+    float maxGain() const { return maxGain_; }
     // Runtime attack/decay time-constant update (ms); re-derives per-block alphas.
     void setAttackMs(double ms);
     void setDecayMs(double ms);
@@ -41,6 +53,7 @@ public:
 private:
     float target_ = DefaultTarget;
     float env_ = 0.0f;
+    float maxGain_ = DefaultMaxGain;
     float attackAlpha_, decayAlpha_;
     double blockDurMs_;
     double attackTauMs_ = DefaultAttackMs;

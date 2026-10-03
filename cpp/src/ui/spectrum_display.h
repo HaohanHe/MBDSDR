@@ -159,6 +159,9 @@ public slots:
     // inspecting pixels.
     float currentDbCeil() const { return dbCeilDb_; }
     float currentDbFloor() const { return dbFloorDb_; }
+    // Persisted trace/waterfall height share (0..1). Lets the persistence suite
+    // assert the QSettings round-trip / fallback without inspecting pixels.
+    double traceShareFraction() const { return traceShare_; }
     // Ceiling the auto-range is easing toward (0 when off / at rest).
     float autoCeilTarget() const { return autoRangeOn_ ? ceilTargetDb_ : dbCeilDb_; }
     // Source history column the waterfall crop starts at, mirroring paintEvent's

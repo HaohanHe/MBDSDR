@@ -44,7 +44,12 @@ void Agc::processWithGain(const std::vector<float>& in,
         const float mag = std::abs(in[i]);
         const float a = (mag > env_) ? attackAlpha_ : decayAlpha_;
         env_ += a * (mag - env_);
-        const float g = target_ / std::max(env_, 1e-4f);
+        // gain = target/env, but CEIL it: an empty channel's near-zero noise
+        // envelope must not be amplified up to target volume (the sandpaper
+        // hiss). A real voice raises env_ well above the floor, so its gain
+        // (~target/env, a few x) never reaches the ceiling.
+        const float gRaw = target_ / std::max(env_, 1e-4f);
+        const float g = std::min(gRaw, maxGain_);
         (*gain)[i] = g;
         (*out)[i] = std::clamp(in[i] * g, -1.0f, 1.0f);
     }
