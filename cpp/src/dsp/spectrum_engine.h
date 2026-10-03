@@ -175,6 +175,18 @@ public slots:
     QVector<VfoMarker> vfoMarkers() const;
     int selectedVfoId() const;
 
+    // ---- POCSAG / m17 / VOR digital read-out (Wave1 groundwork) ----------
+    // Read-only COPIES of channel `id`'s accumulated decode output. These take
+    // sourceMutex_ (same lock the run loop holds) so ControlHub / Agent / UI can
+    // pull a stable snapshot off the engine thread. Unknown id / non-matching
+    // mode -> empty list / unlocked VorResult (honest empty state, never a
+    // fabricated message / call / bearing). `clearDigitalOutputs(id)` resets the
+    // queues and re-inits that channel's decoders (panel "clear" / write cmd).
+    std::vector<PocsagMessage> pocsagMessages(int channelId) const;
+    std::vector<M17Call>        m17Calls(int channelId) const;
+    VorResult                   vorResult(int channelId) const;
+    void                        clearDigitalOutputs(int channelId);
+
     // ---- ANR (audio noise reduction on the selected VFO's audio) -------
     void setAnrEnabled(bool on);
     void setAnrStrength(float s);
@@ -335,6 +347,21 @@ signals:
     // blend is the smoothed matrix coefficient 0..1; pilotQuality is the normalised
     // pilot-to-audio ratio 0..1.
     void stereoState(bool stereo, float blend, float pilotQuality);
+    // POCSAG message list of the SELECTED channel. Emitted ONLY when the list
+    // actually changes (a new message decoded, the channel switched, or it was
+    // cleared) -- diffed against the last pushed snapshot like rdsUpdated, so
+    // the UI is not flooded every block. Carries the full accumulated list so
+    // the panel can repopulate; an empty vector = honest empty state.
+    void pocsagMessagesChanged(const std::vector<PocsagMessage>& messages);
+    // m17 call list of the SELECTED channel, same change-diff semantics. Voice
+    // stream calls arrive with voiceUndecoded=true (Codec2 not bundled) -- the
+    // panel must show that honestly rather than playing audio.
+    void m17CallsChanged(const std::vector<M17Call>& calls);
+    // Latest VOR radial of the SELECTED VOR channel. Emitted only when the
+    // reading changes (lock edge / radial move >0.5 deg / new Morse ID).
+    // locked=false = honest no-lock: the panel clears the instrument and never
+    // shows a fabricated bearing.
+    void vorRadialChanged(const VorResult& result);
     // Read-only tap of the raw engine IQ block, emitted only while a SpyServer
     // client is streaming (setSpyServerTapRequested). Carries the REAL source
     // block (complex float, native source rate); the server decimates/encodes
@@ -420,6 +447,16 @@ private:
     bool    testFmStereo_ = false;   // *** TEST ONLY, not hardware ***
     QElapsedTimer stereoEmitClock_;
     qint64 stereoLastEmitMs_ = -1;
+
+    // POCSAG / m17 / VOR snapshot change-diff state (engine thread only).
+    // Mirrors the rdsUpdated pattern: emit only on a real change, and push one
+    // honest empty/cleared edge when the user leaves the mode. Counts are the
+    // last pushed list sizes; VOR fields mirror the last pushed reading.
+    std::size_t lastPocsagCount_ = 0;
+    std::size_t lastM17Count_    = 0;
+    bool        lastVorLocked_    = false;
+    double      lastVorRadialDeg_ = 0.0;
+    QString     lastVorMorseId_;
 
     // Recording options (see setRec* above).
     RecTarget recTarget_ = RecTarget::BasebandIQ;

@@ -877,14 +877,36 @@ inline constexpr bool kControlHubWriteEnabledDefault = true;
 // Demodulation modes the set_mode / vfo_set_mode commands accept. Mirrors the
 // AI tool enum (ai/tool_schema.cpp) so both command surfaces agree; an
 // out-of-vocabulary mode is an honest bad-argument error, never a silent guess.
+// This is the SINGLE shared source of mode names: the ControlHub validation
+// (needMode), the engine's VfoManager rebuild(), the UI combo and (Wave2) the
+// agent tool schema all read this list. Modes are generic capability names --
+// never a station / repeater call sign.
 inline const char* const kControlHubModes[] = {
-    "AM", "NFM", "WFM", "USB", "LSB", "CW"
+    "AM", "NFM", "WFM", "USB", "LSB", "CW",
+    "POCSAG", "m17", "VOR"
 };
 inline constexpr int kControlHubModesCount =
     int(sizeof(kControlHubModes) / sizeof(kControlHubModes[0]));
 // Minimum non-zero scan step (Hz) for scan_band: guards against a meaningless
 // zero/negative sweep. Elastic upper bound is left to the caller.
 inline constexpr double kControlHubScanStepMinHz = 1.0;
+
+// =====================================================================
+// POCSAG / m17 digital data-link air-interface constants.
+//
+// Shared by dsp/vfo_manager (which wires the front-end per mode), the decoder
+// headers (protocol words) and the Wave-2 ControlHub/UI layers. These are the
+// PUBLIC standard modulation parameters -- no private station table.
+// =====================================================================
+// POCSAG (CCIR Radiopaging Code No.1) over-the-air 2-FSK:
+//   1200 baud, +/-4.5 kHz peak deviation. The VfoChannel FskDemod is configured
+//   from these so the discriminator normalises exactly to the occupied shift.
+inline constexpr double kPocsagBaudBd       = 1200.0;
+inline constexpr double kPocsagDeviationHz  = 4500.0;   // +/- peak shift
+
+// m17 4FSK symbol rate already lives on the decoder (M17Decoder::kSymbolRateBd
+// = 4800 sym/s); the VfoChannel just feeds channelized IQ to its built-in
+// 4FSK front-end at the 48 kHz IF. No extra magic here.
 
 // =====================================================================
 // VOR (VHF Omnidirectional Range, ICAO Annex 10) navigation receiver.

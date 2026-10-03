@@ -44,6 +44,9 @@ namespace core {
 //   BPSK/QPSK -> 12 kHz (2400-baud digital main-lobe; matches the digital
 //                        channelizer's fixed 12 kHz channel)
 //   ADS-B -> 2 MHz    (wideband 1090 MHz Mode S squitter capture)
+//   POCSAG -> 12 kHz  (1200-baud 2-FSK, +/-4.5 kHz deviation; Carson BW ~11.4k)
+//   m17 -> 9.6 kHz   (4800 sym/s 4FSK, tone spacing 625 Hz; max deviation 1.875k)
+//   VOR -> 24 kHz     (composite: 30 Hz var + 9960 Hz subcarrier +/-480 + 1020 Hz ID)
 inline constexpr double kBwNfmHz       = 12500.0;
 inline constexpr double kBwWfmHz       = 200000.0;
 inline constexpr double kBwAmHz        = 9000.0;
@@ -51,6 +54,9 @@ inline constexpr double kBwSsbHz      = 2400.0;
 inline constexpr double kBwCwHz       = 500.0;
 inline constexpr double kBwDigitalHz  = 12000.0;
 inline constexpr double kBwAdsbHz     = 2000000.0;
+inline constexpr double kBwPocsagHz   = 12000.0;
+inline constexpr double kBwM17Hz      = 9600.0;
+inline constexpr double kBwVorHz      = 24000.0;
 // Unknown / unlisted mode: conservative narrow-FM voice default.
 inline constexpr double kBwFallbackHz = 12500.0;
 
@@ -65,6 +71,9 @@ inline double defaultBandwidthHzForMode(const QString& mode) {
     if (mode == QLatin1String("BPSK") ||
         mode == QLatin1String("QPSK"))  return kBwDigitalHz;
     if (mode == QLatin1String("ADS-B")) return kBwAdsbHz;
+    if (mode == QLatin1String("POCSAG")) return kBwPocsagHz;
+    if (mode == QLatin1String("m17"))   return kBwM17Hz;
+    if (mode == QLatin1String("VOR"))    return kBwVorHz;
     return kBwFallbackHz;
 }
 

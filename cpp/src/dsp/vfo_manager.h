@@ -33,6 +33,10 @@
 #include "dsp/digital_demod.h"
 #include "dsp/rds_decoder.h"
 #include "dsp/wfm_stereo.h"
+#include "dsp/fsk_demod.h"
+#include "dsp/pocsag_decoder.h"
+#include "dsp/m17_decoder.h"
+#include "dsp/vor_receiver.h"
 
 namespace mbdsdr {
 namespace dsp {
@@ -118,6 +122,34 @@ struct VfoChannel {
     float stereoPilot = 0.0f;   // pilotQuality, normalised 0..1
     bool  stereoLock  = false;
 
+    // --- POCSAG / m17 / VOR digital data-link (Wave1) ------------------------
+    // Built ONLY for their matching mode; null otherwise. Same rebuild lifecycle
+    // as rds/stereo: a mode/rate change recreates them, which naturally resets
+    // their block-sync and flushed the snapshot below.
+    //   POCSAG: channelized IQ -> FskDemod (2-FSK, 1200 baud, +/-4.5 kHz) ->
+    //           drain bits -> PocsagDecoder. No analog audio.
+    //   m17:    channelized IQ -> M17Decoder's OWN built-in 4FSK front-end
+    //           (4800 sym/s @ 48 kHz). No analog audio.
+    //   VOR:    AM demod -> 48 kHz composite audio -> VorReceiver. DOES carry
+    //           analog audio (it rides the normal AM path).
+    std::unique_ptr<FskDemod>    fskDemod;
+    std::unique_ptr<PocsagDecoder> pocsag;
+    std::unique_ptr<M17Decoder>  m17;
+    std::unique_ptr<VorReceiver>  vor;
+
+    // Accumulated READ-ONLY output snapshot. pocsagMessages/m17Calls grow as
+    // frames arrive and are cleared only by rebuild (mode switch) or
+    // VfoManager::clearDigitalOutputs(); vorResult holds the LATEST finished
+    // measurement (locked=false = honest "no bearing yet", never fabricated).
+    std::vector<PocsagMessage> pocsagMessages;
+    std::vector<M17Call>       m17Calls;
+    VorResult                  vorResult;
+
+    // Mode predicates (generic capability names, never a station).
+    bool isPocsag() const { return mode == "POCSAG"; }
+    bool isM17()    const { return mode == "m17"; }
+    bool isVor()    const { return mode == "VOR"; }
+
     // True when this VFO runs a digital (rather than analog) demod.
     bool isDigital() const { return mode == "BPSK" || mode == "QPSK"; }
     static bool modeIsDigital(const QString& m) { return m == "BPSK" || m == "QPSK"; }
@@ -170,6 +202,19 @@ public:
     int  maxDecimation() const;
     // Cycle of colors handed out to newly added VFOs.
     static QColor nextColor(int index);
+
+    // ---- Digital read-out snapshots (FROZEN interface for Wave2) ----------
+    // Read-only COPIES of channel `id`'s accumulated decode output. These run
+    // on the engine run() thread (same sourceMutex_ as process()); callers
+    // (SpectrumEngine forwarders / ControlHub / Agent / UI) take the mutex.
+    // Empty list / unlocked VorResult = the honest empty state (a fresh channel
+    // or pure noise produces nothing -- never a fabricated message/call/bearing).
+    std::vector<PocsagMessage> pocsagMessages(int channelId) const;
+    std::vector<M17Call>       m17Calls(int channelId) const;
+    VorResult                   vorResult(int channelId) const;
+    // Reset channel `id`'s digital output queues AND re-initialise its decoders
+    // (panel "clear" / write command). No-op for an unknown id.
+    void clearDigitalOutputs(int channelId);
 
 private:
     std::vector<VfoChannel> channels_;
