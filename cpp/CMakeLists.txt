@@ -558,7 +558,7 @@ add_test(NAME leo_soak COMMAND test_leo_soak)
 add_executable(test_sat_capture tests/test_sat_capture.cpp
     src/dsp/tle_client.cpp src/dsp/sgp4.cpp
     src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
-    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/rds_decoder.cpp)
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/agc.cpp src/dsp/wfm_stereo.cpp src/dsp/rds_decoder.cpp)
 target_include_directories(test_sat_capture PRIVATE src)
 target_link_libraries(test_sat_capture PRIVATE Qt6::Network Qt6::Concurrent Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME sat_capture COMMAND test_sat_capture)
