@@ -214,6 +214,17 @@ abstract final class AppTokens {
   static double get squelchDefaultThresholdDb =>
       squelchNoiseFloorDb + squelchDefaultAboveNoiseDb;
 
+  /// 自动门限裕量（dB）：自动模式下门限 = 实测同域（解调后音频 RMS）噪声底 +
+  /// 本裕量。与桌面 cpp/src/core/tokens.h `kSquelchAutoMarginDb` 对齐。
+  static const double squelchAutoMarginDb = 8.0;
+
+  /// 噪声底跟踪系数：向更安静的背景快速跟随（每块）。对齐 kSquelchNfAlphaDown。
+  static const double squelchNfAlphaDown = 0.20;
+
+  /// 噪声底跟踪系数：向更响的瞬变缓慢爬升（每块），使真实信号不抬升噪声底。
+  /// 对齐 kSquelchNfAlphaUp。
+  static const double squelchNfAlphaUp = 0.005;
+
   // ---------------------------------------------------------------- 字体
   static const List<String> monoFallback = <String>[
     'JetBrains Mono',

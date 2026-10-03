@@ -29,9 +29,15 @@
 //     the snapshot is returned as an explicit empty state (telemetry_available=
 //     false), never fabricated.
 //
-// Threading: the engine slots are the same ones the main window calls directly;
-// execute() calls them synchronously on the caller's thread (the engine itself
-// serialises its DSP work behind sourceMutex_). The telemetry snapshot is the
+// Threading: the engine slots are the same ones the main window calls directly,
+// and they are designed to run on the thread that OWNS the SpectrumEngine object
+// (the application/GUI thread; the engine's run() loop is a SEPARATE worker
+// thread and serialises the DSP work behind sourceMutex_). execute() dispatches
+// on that home thread: when called from the home thread it dispatches directly,
+// but when a remote/network front-end calls it from a FOREIGN thread it marshals
+// the whole engine dispatch onto the engine's home thread with a BLOCKING queued
+// call -- preserving the synchronous JSON return while guaranteeing the engine is
+// never touched off its designed thread. The telemetry/liveness snapshot is the
 // only cross-thread shared state and is guarded by a mutex.
 #pragma once
 
@@ -62,6 +68,14 @@ struct TelemetrySnapshot {
     bool    squelchOpen = false; // last squelchState edge
     bool    recording = false;   // last recordingStateChanged edge
     QString recordingPath;       // file currently being written ("" when idle)
+    // Honest device-liveness bookkeeping beyond the ~1 Hz telemetry bool. A real
+    // reason string only ever arrives from engine sourceError (a connect attempt
+    // failed); `dropped` is set by engine sourceDropped when a LIVE device was
+    // detected as lost and the engine already fell back. Both are cleared once a
+    // real device is actually streaming again (connected=true telemetry) so the
+    // reported state is never stale. Neither is ever fabricated.
+    QString lastError;           // last sourceError reason ("" = none)
+    bool    dropped = false;     // a live device was detected as lost
 };
 
 class ControlHub : public QObject {
@@ -108,6 +122,9 @@ private slots:
                      double sampleRateHz, double gainDb);
     void onSquelchState(bool open);
     void onRecordingState(bool recording, const QString& path);
+    // Device-liveness event channel (distinct from the 1 Hz telemetry poll).
+    void onSourceError(const QString& message);
+    void onSourceDropped();
 
 private:
     using Handler = QJsonObject (ControlHub::*)(const QJsonObject&);
@@ -115,6 +132,12 @@ private:
     // The named command table (see .cpp). A private static so it may address
     // the private handler member functions; never exposed to clients.
     static const QList<CommandRow>& table();
+
+    // Runs one matched row's handler and emits commandExecuted, returning the
+    // compact JSON result. This is the ONLY place that touches the engine, and it
+    // is always executed on the engine's HOME thread (see execute()).
+    QString dispatch(const CommandRow* row, const QString& command,
+                     const QJsonObject& args);
 
     dsp::SpectrumEngine* engine_ = nullptr;
     std::atomic<bool>   writeEnabled_{true};

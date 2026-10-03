@@ -45,11 +45,26 @@ class SquelchGate {
   /// 当前门是否开门（true=送声，false=静音）。
   bool open = false;
 
+  // -------------------------------------------------- 自动门限
+  /// 是否自动门限。true 时门限 = [noiseFloorDb]（实测同域音频 RMS 噪声底）
+  /// + [AppTokens.squelchAutoMarginDb]，随噪声底自动跟随；false 时用手动
+  /// [thresholdDb]。语义对齐桌面「自动门限」按钮。
+  bool autoThreshold = false;
+
+  /// 实测同域噪声底（dBFS，解调后音频 RMS）。非对称跟踪：向安静背景快随、
+  /// 向响瞬变慢爬，使真实信号不抬升噪声底。与门控同域（dBFS），不跨域读 IQ。
+  double noiseFloorDb = minMeasuredDb;
+
+  bool _nfInit = false;
+
   double _hangLeftMs = 0;
 
-  /// 复位平滑/hangover 状态（切频率/重连后调用）。
+  /// 复位平滑/hangover/噪声底状态（切频率/重连后调用）。
+  /// 保留用户的 [autoThreshold] 选择，只清观察历史。
   void reset() {
     levelDb = minMeasuredDb;
+    noiseFloorDb = minMeasuredDb;
+    _nfInit = false;
     open = false;
     _hangLeftMs = 0;
   }
@@ -74,6 +89,20 @@ class SquelchGate {
     final rawDb = rmsDbfs(audio);
     final blockMs = (audio.length / audioSampleRateHz) * 1000.0;
 
+    // 非对称噪声底跟踪（同域：解调后音频 RMS dBFS）。向安静背景快随
+    //（alphaDown）、向响瞬变慢爬（alphaUp）——真实信号过门限时不会抬升底。
+    // 对齐桌面 spectrum_engine 的 audioNfDbfs_ 跟踪。
+    if (!_nfInit) {
+      noiseFloorDb = rawDb;
+      _nfInit = true;
+    } else if (rawDb < noiseFloorDb) {
+      noiseFloorDb = (1 - AppTokens.squelchNfAlphaDown) * noiseFloorDb +
+          AppTokens.squelchNfAlphaDown * rawDb;
+    } else {
+      noiseFloorDb = (1 - AppTokens.squelchNfAlphaUp) * noiseFloorDb +
+          AppTokens.squelchNfAlphaUp * rawDb;
+    }
+
     // attack/decay 一阶平滑：上升快、下降慢。
     final attackAlpha = 1 - math.exp(-blockMs / attackTauMs);
     final decayAlpha = 1 - math.exp(-blockMs / decayTauMs);
@@ -85,6 +114,15 @@ class SquelchGate {
       // 关闭：恒开门直通。
       open = true;
       return open;
+    }
+
+    // 自动门限：门限 = 实测噪声底 + 裕量，clamp 到 token 区间。写回 thresholdDb
+    // 供 UI 滑杆回读（对齐桌面 applyAutoThreshold：滑杆值 = 跟随结果）。
+    if (autoThreshold) {
+      thresholdDb = (noiseFloorDb + AppTokens.squelchAutoMarginDb).clamp(
+        AppTokens.squelchThresholdMinDb,
+        AppTokens.squelchThresholdMaxDb,
+      );
     }
 
     // 门控：过门限立即开门并刷新 hangover；跌出后 hangover 耗尽才关门。
