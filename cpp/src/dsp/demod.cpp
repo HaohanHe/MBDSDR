@@ -83,8 +83,24 @@ void NuttallLpf::process(const std::vector<float>& in, std::vector<float>& out) 
 }
 
 // ---- AM ----
+// AM carrier-AGC time constants, used only if a caller explicitly enables the
+// carrier AGC via setCarrierAgcEnabled(true). It must track slow fading only:
+// a fast attack gain-rides the modulation (a 2 ms attack follows a 1 kHz tone,
+// spawning harmonics), and the zero-initialised envelope would pin the gain at
+// its ceiling for the attack window (a huge startup transient). Named locally.
+constexpr double kAmCarrierAgcAttackMs = 200.0;
+constexpr double kAmCarrierAgcDecayMs = 500.0;
+
 DemodAM::DemodAM(double sr, double bw) : ifSr_(sr), bw_(bw),
-    lpf_(bw / 2.0 / sr, 63), carrierAgc_(sr) {}
+    lpf_(bw / 2.0 / sr, 63),
+    carrierAgc_(sr, ComplexCarrierAgc::DefaultSetPoint,
+                kAmCarrierAgcAttackMs, kAmCarrierAgcDecayMs) {
+    // The pre-detector complex carrier AGC is OFF by default for envelope AM:
+    // level control belongs to the downstream audio AGC, and an always-on AGC
+    // before |.| either rides the audio or overshoots at startup, corrupting the
+    // recovered envelope. It stays available behind this explicit opt-in.
+    carrierAgc_.setEnabled(false);
+}
 
 void DemodAM::reset() { dcPrev_ = 0; lpf_.reset(); carrierAgc_.reset(); }
 

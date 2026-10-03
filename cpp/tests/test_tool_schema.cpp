@@ -41,7 +41,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 8);
+    QCOMPARE(specs.size(), 10);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -146,6 +146,16 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：用本地新鲜 TLE 缓存预测指定卫星未来的过境（升/降时刻、最高仰角、起止方位）。"
             "无新鲜 TLE 时诚实返回空态，不使用陈旧内置数据。")},
+        {"calibrate_frequency",
+         QString::fromUtf8(
+            "只读测量：用一段已知精确频率的参考信号估计本机晶振 ppm 误差。"
+            "不修改任何设置。参考源：handheld=手台在已知频点按 PTT 发射；"
+            "gsm_fcch=GSM FCCH 精确纯音；manual=任意已知精确频率。"
+            "未检测到参考载波时诚实返回 detected=false，不编造 ppm。")},
+        {"apply_frequency_correction",
+         QString::fromUtf8(
+            "写入并应用频率校正 ppm（通常取 calibrate_frequency 的 measured_ppm）。"
+            "会保存到设置并下发给接收机；属于写动作，手动模式下被拦截。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {

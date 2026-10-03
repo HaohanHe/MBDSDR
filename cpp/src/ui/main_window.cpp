@@ -101,6 +101,7 @@
 #include "ui/spectrum_widget.h"
 #include "ui/settings_dialog.h"
 #include "ui/about_dialog.h"
+#include "ui/calibration_dialog.h"
 #include "ui/radio_panel.h"
 
 namespace mbdsdr {
@@ -195,10 +196,13 @@ MainWindow::MainWindow(QWidget* parent)
     focusBtn_->setToolTip("专注模式：隐藏侧栏，频谱占满全宽");
     topLay->addWidget(focusBtn_);
 
+    auto* calibBtn = new QPushButton("校准", topBar);
+    calibBtn->setToolTip("频率校准（晶振 ppm 自动测量）");
     auto* helpBtn = new QPushButton("?", topBar);
     helpBtn->setToolTip("快捷键");
     auto* aboutBtn = new QPushButton("关于", topBar);
     auto* settingsBtn = new QPushButton("⚙", topBar);
+    topLay->addWidget(calibBtn);
     topLay->addWidget(helpBtn);
     topLay->addWidget(aboutBtn);
     topLay->addWidget(settingsBtn);
@@ -2233,6 +2237,22 @@ MainWindow::MainWindow(QWidget* parent)
             engine_->disconnectSource();
             connectBtn_->setText("连接");
         }
+    });
+
+    connect(calibBtn, &QPushButton::clicked, this, [this]() {
+        ui::CalibrationDialog dlg(this);
+        // Wire the self-contained wizard to the REAL engine through the same
+        // synchronous capture seam scanBand uses. No hardware / a failed read
+        // yields an honest empty state inside the dialog.
+        dlg.setCaptureProvider(
+            [this](double tuneHz, int samples,
+                   std::vector<std::complex<float>>& out,
+                   double& sr, double& centre) -> bool {
+                const std::size_t got =
+                    engine_->captureForCalibration(tuneHz, samples, out, sr, centre);
+                return got > 0;
+            });
+        dlg.exec();
     });
 
     connect(aboutBtn, &QPushButton::clicked, this, [this]() {

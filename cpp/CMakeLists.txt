@@ -59,10 +59,12 @@ set(SOURCES
     src/dsp/rtl_tcp_source.cpp
     src/dsp/device_capabilities.cpp
     src/dsp/fcch_detector.cpp
+    src/dsp/frequency_calibrator.cpp
     src/dsp/spyserver_server.cpp
     src/ui/bookmark_manager.cpp
     src/ui/activity_log.cpp
     src/ui/shortcuts_dialog.cpp
+    src/ui/calibration_dialog.cpp
     src/dsp/test_signal.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/device_lister.cpp
     src/dsp/device_presence_notifier.cpp
@@ -136,6 +138,7 @@ set(HEADERS
     src/ui/main_window.h
     src/ui/spectrum_widget.h
     src/ui/spectrum_display.h
+    src/ui/calibration_dialog.h
     src/dsp/source.h
     src/dsp/device_capabilities.h
     src/dsp/fft.h
@@ -153,6 +156,7 @@ set(HEADERS
     src/dsp/wfm_stereo.h
     src/dsp/squelch.h
     src/dsp/agc.h
+    src/dsp/frequency_calibrator.h
     src/dsp/audio_output.h
     src/dsp/iaudio_sink.h
     src/dsp/qt_audio_sink.h
@@ -508,6 +512,7 @@ target_link_libraries(test_wav_roundtrip PRIVATE Qt6::Test Qt6::Core Qt6::Networ
 add_test(NAME wav_roundtrip COMMAND test_wav_roundtrip)
 
 add_executable(test_ai_function_calling tests/test_ai_function_calling.cpp
+    src/dsp/frequency_calibrator.cpp
     src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
@@ -780,6 +785,29 @@ target_include_directories(test_fcch PRIVATE src)
 target_link_libraries(test_fcch PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME fcch COMMAND test_fcch)
 
+# Frequency calibrator (晶振 ppm 自动测量, pure offline). Synthetic clock-error
+# fixtures (synthetic test fixture, NOT real reception): handheld/manual/FCCH
+# paths recover an injected +32/-20 ppm to sub-ppm, the post-apply residual is
+# ~0, and pure noise / a buried tone honestly report no reference carrier.
+add_executable(test_frequency_calibrator tests/test_frequency_calibrator.cpp src/dsp/frequency_calibrator.cpp)
+target_include_directories(test_frequency_calibrator PRIVATE src)
+target_link_libraries(test_frequency_calibrator PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME frequency_calibrator COMMAND test_frequency_calibrator)
+
+# Calibration wizard (self-contained QDialog). Driven headless through an
+# injected synthetic capture provider: steps through every page, locks the
+# reference, reports delta/ppm, applies + shows the before/after comparison, and
+# honestly shows the no-provider / no-signal empty state. Offscreen.
+add_executable(test_calibration_dialog tests/test_calibration_dialog.cpp
+    src/ui/calibration_dialog.cpp src/dsp/frequency_calibrator.cpp)
+target_include_directories(test_calibration_dialog PRIVATE src
+    build/test_calibration_dialog_autogen/include)
+target_link_libraries(test_calibration_dialog PRIVATE
+    Qt6::Test Qt6::Widgets Qt6::Core Qt6::Gui)
+add_test(NAME calibration_dialog COMMAND test_calibration_dialog)
+set_tests_properties(calibration_dialog PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # Offscreen device-info panel + dynamic sample-rate combo: honest empty state,
 # real loopback RTL0 handshake -> populated combo, device pull -> back to empty.
 add_executable(test_device_ui tests/test_device_ui.cpp ${TESTAPP_SRCS} ${HEADERS})
@@ -915,6 +943,7 @@ target_link_libraries(test_apt PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME apt COMMAND test_apt)
 
 add_executable(test_agent tests/test_agent.cpp
+    src/dsp/frequency_calibrator.cpp
     src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
     src/ai/agent_tools.cpp src/ai/agent.cpp src/ai/ai_context.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
@@ -936,6 +965,7 @@ add_test(NAME agent COMMAND test_agent)
 # Autonomous multi-step task orchestrator: real engine through deterministic
 # templates (sweep->hit->bookmark/record), interrupt, max-steps, gate report.
 add_executable(test_task_orchestrator tests/test_task_orchestrator.cpp
+    src/dsp/frequency_calibrator.cpp
     src/ai/task_orchestrator.cpp src/ai/llm_client.cpp src/ai/llm_worker.cpp src/ai/ai_config.cpp
     src/ai/agent_tools.cpp src/ai/ai_context.cpp src/ui/bookmark_manager.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
@@ -955,6 +985,7 @@ add_test(NAME task_orchestrator COMMAND test_task_orchestrator)
 
 # LLM plan parser: trustworthy parse + honest rejection/fallback.
 add_executable(test_plan_parser tests/test_plan_parser.cpp
+    src/dsp/frequency_calibrator.cpp
     src/ai/plan_parser.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp
     src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
@@ -975,6 +1006,7 @@ add_test(NAME plan_parser COMMAND test_plan_parser)
 
 # Satellite auto-tune task planner: real offline SGP4 -> capture frequency.
 add_executable(test_sat_task_planner tests/test_sat_task_planner.cpp
+    src/dsp/frequency_calibrator.cpp
     src/ai/sat_task_planner.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp
     src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
@@ -993,6 +1025,7 @@ add_test(NAME sat_task_planner COMMAND test_sat_task_planner)
 
 # Async task runner: worker QThread keeps UI responsive, queued steps, stop.
 add_executable(test_task_async tests/test_task_async.cpp
+    src/dsp/frequency_calibrator.cpp
     src/ai/task_runner.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp src/ai/llm_worker.cpp
     src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp src/ui/bookmark_manager.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
@@ -1172,6 +1205,7 @@ add_test(NAME tool_schema COMMAND test_tool_schema)
 # so no socket / no API key is ever needed. Mirrors the test_agent source set
 # (llm_client/llm_worker/agent_tools/ai_config/ai_context) plus the M1-M3 units.
 add_executable(test_ai_tool_loop tests/test_ai_tool_loop.cpp
+    src/dsp/frequency_calibrator.cpp
     src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/file_source.cpp
     src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
@@ -1194,6 +1228,7 @@ add_test(NAME ai_tool_loop COMMAND test_ai_tool_loop)
 # API key: the engine defaults to the offline test source and pass prediction
 # uses the pure predictPassesFromEntries seam with a fixed known TLE.
 add_executable(test_ai_real_link tests/test_ai_real_link.cpp
+    src/dsp/frequency_calibrator.cpp
     src/ai/sat_task_planner.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp
     src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp
@@ -1216,6 +1251,7 @@ add_test(NAME ai_real_link COMMAND test_ai_real_link)
 # the 6-write/2-read split, and checks the unknown-tool honest path. Uses the
 # offline TestSignalSource engine; no network / no API key / no hardware.
 add_executable(test_tool_registry tests/test_tool_registry.cpp
+    src/dsp/frequency_calibrator.cpp
     src/ai/sat_task_planner.cpp src/ai/task_orchestrator.cpp src/ai/llm_client.cpp
     src/ai/llm_worker.cpp src/ai/ai_config.cpp src/ai/agent_tools.cpp src/ai/ai_context.cpp
     src/ai/tool_schema.cpp src/ai/arguments_validator.cpp src/ai/llm_protocol.cpp

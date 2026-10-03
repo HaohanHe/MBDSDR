@@ -201,6 +201,78 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // calibrate_frequency (read-only measurement) -------------------------
+    // Measures the local clock / crystal ppm error against a signal of EXACTLY
+    // known frequency. This is a generic capability -- any SDR, any known
+    // reference tone works (handheld keyed on an exact frequency, GSM FCCH
+    // pure tone, or any user-supplied exact frequency). It is deliberately
+    // write=FALSE: taking a measurement must never be blocked by the manual
+    // gate, and it does NOT persist or apply any correction. Applying the
+    // measured ppm is the separate, gated apply_frequency_correction tool.
+    {
+        ToolSchemaSpec s;
+        s.name = "calibrate_frequency";
+        s.description = QString::fromUtf8(
+            "只读测量：用一段已知精确频率的参考信号估计本机晶振 ppm 误差。"
+            "不修改任何设置。参考源：handheld=手台在已知频点按 PTT 发射；"
+            "gsm_fcch=GSM FCCH 精确纯音；manual=任意已知精确频率。"
+            "未检测到参考载波时诚实返回 detected=false，不编造 ppm。");
+        s.write = false;
+        ToolParamSpec ref;
+        ref.name = "reference_freq_hz";
+        ref.type = "number";
+        ref.description = QString::fromUtf8(
+            "参考频率 Hz：handheld/manual 为已知精确频率；gsm_fcch 为 ARFCN 下行中心频率");
+        ref.hasMin = true; ref.min = tokens::kFreqMinHz;
+        ref.hasMax = true; ref.max = tokens::kFreqMaxHz;
+        ref.required = true;
+        ToolParamSpec type;
+        type.name = "reference_type";
+        type.type = "string";
+        type.description = QString::fromUtf8("参考源类型");
+        type.enumValues = QVariantList{"handheld", "gsm_fcch", "manual"};
+        type.required = true;
+        ToolParamSpec n;
+        n.name = "sample_count";
+        n.type = "number";
+        n.description = QString::fromUtf8("采集复样本数，默认 32768（4 段独立测量）");
+        n.hasMin = true; n.min = 4096.0;
+        n.required = false;
+        s.params << ref << type << n;
+        out.append(s);
+    }
+
+    // apply_frequency_correction (write -- gated in manual mode) -----------
+    // Persists and applies a measured ppm correction to the source. This is the
+    // ONLY write side of calibration: it writes QSettings("rtl/ppm") and calls
+    // source->setPpm, so it IS gated by the manual-mode write gate. It never
+    // invents a ppm of its own -- the caller is expected to have just measured
+    // one with calibrate_frequency.
+    {
+        ToolSchemaSpec s;
+        s.name = "apply_frequency_correction";
+        s.description = QString::fromUtf8(
+            "写入并应用频率校正 ppm（通常取 calibrate_frequency 的 measured_ppm）。"
+            "会保存到设置并下发给接收机；属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec ppm;
+        ppm.name = "ppm";
+        ppm.type = "number";
+        ppm.description = QString::fromUtf8("要应用的 ppm 校正值（如 32.0）");
+        ppm.hasMin = true; ppm.min = tokens::kPpmMin;
+        ppm.hasMax = true; ppm.max = tokens::kPpmMax;
+        ppm.required = true;
+        ToolParamSpec ref;
+        ref.name = "reference_freq_hz";
+        ref.type = "number";
+        ref.description = QString::fromUtf8("可选：测量时所用参考频率，仅用于出处/前后对比");
+        ref.hasMin = true; ref.min = tokens::kFreqMinHz;
+        ref.hasMax = true; ref.max = tokens::kFreqMaxHz;
+        ref.required = false;
+        s.params << ppm << ref;
+        out.append(s);
+    }
+
     return out;
 }
 

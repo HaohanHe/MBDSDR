@@ -4,6 +4,8 @@
 #include "sat_task_planner.h"
 #include "dsp/spectrum_engine.h"
 #include "dsp/device_capabilities.h"
+#include "dsp/frequency_calibrator.h"   // calibrateFromCapture / savePpmSetting
+#include "dsp/fcch_detector.h"          // kFcchToneHz
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -222,6 +224,112 @@ QString execPredictPasses(const QJsonObject& args, dsp::SpectrumEngine* /*engine
     return compact(o);
 }
 
+// Default capture length for a calibration measurement (complex samples).
+// 32768 splits into 4 independent 8192-point FFT blocks; at the common 2.048e6
+// rate that gives ~250 Hz bins refined by parabolic interpolation to well under
+// 1 ppm at VHF/UHF, and it also holds up on narrower offline rates. Named so
+// the call site never invents a magic count.
+constexpr int kCalibrationDefaultSamples = 32768;
+// Minimum useful capture: below this even one 512-point FFT cannot be split.
+constexpr int kCalibrationMinSamples = 4096;
+
+// READ-ONLY measurement. Tunes the source to the reference, pulls one capture,
+// and estimates the crystal ppm against the expected baseband position. It does
+// NOT persist anything; the gated apply_frequency_correction does that. On a
+// test / offline source the data is honestly-labelled generated IQ (never
+// presented as a real antenna capture).
+QString execCalibrateFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                               const SourceInfo& src) {
+    const double refFreq = args["reference_freq_hz"].toDouble();
+    const QString type = args["reference_type"].toString();
+    int sampleCount = static_cast<int>(args["sample_count"].toDouble(kCalibrationDefaultSamples));
+    if (sampleCount < kCalibrationMinSamples) sampleCount = kCalibrationDefaultSamples;
+
+    // Map the reference kind to the expected baseband position. handheld/manual
+    // expect the reference at baseband DC (0); GSM FCCH sits exactly one symbol-
+    // rate/4 tone above the tuned ARFCN centre.
+    dsp::CalibrationReference ref;
+    double expectedBaseband = 0.0;
+    if (type == QStringLiteral("gsm_fcch")) {
+        ref = dsp::CalibrationReference::GsmFcch;
+        expectedBaseband = dsp::kFcchToneHz;
+    } else if (type == QStringLiteral("handheld")) {
+        ref = dsp::CalibrationReference::HandheldGuided;
+        expectedBaseband = 0.0;
+    } else {
+        ref = dsp::CalibrationReference::Manual;
+        expectedBaseband = 0.0;
+    }
+
+    std::vector<std::complex<float>> iq;
+    double sr = 0.0, centre = 0.0;
+    const std::size_t got = engine->captureForCalibration(
+        refFreq, sampleCount, iq, sr, centre);
+
+    QJsonObject o;
+    o["ok"] = true;
+    o["reference_type"] = type;
+    o["reference_freq_hz"] = refFreq;
+    o["applied"] = false;
+    addSourceFields(o, src);
+
+    if (got < static_cast<std::size_t>(kCalibrationMinSamples) || iq.empty()) {
+        // Honest empty state: the source delivered too little to measure.
+        o["detected"] = false;
+        o["error"] = QString::fromUtf8("采集样本不足，无法测量（源无数据）");
+        o["hint"] = QString::fromUtf8("请确认已连接设备或打开离线文件，并让参考信号处于该频点");
+        return compact(o);
+    }
+
+    dsp::CalibratorConfig cfg;
+    cfg.centreFreqHz = refFreq;
+    cfg.expectedBasebandHz = expectedBaseband;
+    const dsp::CalibrationResult res =
+        dsp::calibrateFromCapture(iq, sr, ref, cfg, /*segments=*/4);
+
+    o["detected"] = res.detected;
+    if (res.detected) {
+        o["measured_ppm"] = res.ppm;
+        o["confidence"] = res.confidence;
+        o["delta_hz"] = res.meanOffsetHz;
+        o["spread_ppm"] = res.spreadPpm;
+        o["snr_db"] = res.worstSnrDb;
+        o["measurements_used"] = res.measurementsUsed;
+        o["hint"] = QString::fromUtf8("如需应用，请调用 apply_frequency_correction");
+    } else {
+        // Never fabricate a ppm: carry the honest "no reference carrier" status.
+        o["hint"] = res.status;
+    }
+    return compact(o);
+}
+
+// WRITE action: persist + apply a measured ppm correction. Gated in manual
+// mode (see llm_worker::dispatchToolCall). Reads the previous stored value so
+// the before/after comparison is real.
+QString execApplyFrequencyCorrection(const QJsonObject& args,
+                                     dsp::SpectrumEngine* engine,
+                                     const SourceInfo& src) {
+    const double ppm = args["ppm"].toDouble();
+    const double previous = dsp::currentPpmSetting();
+    dsp::savePpmSetting(ppm);
+    engine->setPpm(ppm);
+
+    QJsonObject o;
+    o["ok"] = true;
+    o["applied"] = true;
+    o["previous_ppm"] = previous;
+    o["applied_ppm"] = ppm;
+    // After applying the measured correction the residual baseband offset
+    // should collapse to ~0; with no live re-measurement here we report the
+    // design prediction (the next calibrate_frequency call would confirm).
+    o["predicted_residual_hz"] = 0.0;
+    o["message"] = QString::fromUtf8("已应用频率校正：%1 ppm（原 %2 ppm）")
+                       .arg(ppm, 0, 'f', 3)
+                       .arg(previous, 0, 'f', 3);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // The built-in tool registry: name -> executor. Learned (mechanism only) from
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
 // instead of an if-else chain. Clean-room reimplementation; no GPL code copied.
@@ -242,6 +350,8 @@ const QList<ToolDispatch>& dispatchTable() {
         {"set_bandwidth", &execSetBandwidth},
         {"get_status", &execGetStatus},
         {"predict_passes", &execPredictPasses},
+        {"calibrate_frequency", &execCalibrateFrequency},
+        {"apply_frequency_correction", &execApplyFrequencyCorrection},
     };
     return kTable;
 }

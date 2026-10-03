@@ -25,32 +25,40 @@ using namespace mbdsdr;
 using namespace mbdsdr::ai;
 
 namespace {
-// The 8 C++ desktop tools, in their on-wire order. This is the FROZEN contract
+// The C++ desktop tools, in their on-wire order. This is the FROZEN contract
 // (also pinned by test_agent / test_tool_schema / ai_real_link); it is the
-// expected value the introspected tables are checked against.
+// expected value the introspected tables are checked against. Grew from 8 to 10
+// with the frequency-calibration pair: calibrate_frequency (read-only measure)
+// and apply_frequency_correction (write, gated).
 const QSet<QString> kAllCxxTools = {
     "tune_frequency", "set_mode", "start_recording", "stop_recording",
     "scan_band", "set_bandwidth", "get_status", "predict_passes",
+    "calibrate_frequency", "apply_frequency_correction",
 };
 
-// The 6 mutating (write) tools -- the ONLY ones gated in manual mode. This is
+// The mutating (write) tools -- the ONLY ones gated in manual mode. This is
 // the C++ write gate; it must equal ToolSchemaSpec::write flags set in
-// tool_schema.cpp (the registry is now the single source).
+// tool_schema.cpp (the registry is now the single source). Grew from 6 to 7
+// with apply_frequency_correction (it persists QSettings + drives source->setPpm).
 const QSet<QString> kExpectedWriteTools = {
     "tune_frequency", "set_mode", "set_bandwidth",
     "start_recording", "stop_recording", "scan_band",
+    "apply_frequency_correction",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
 // gates these 6 mutating tools: set_frequency, set_mode, set_gain,
 // set_sample_rate, start_recording, stop_recording. Its 8 tools minus those 6
 // leave exactly two ungated read tools. THAT complement is the cross-platform
-// read/read-only contract, independent of the per-platform write-tool names
-// (desktop has scan_band/set_bandwidth/tune_frequency; mobile has
-// set_gain/set_sample_rate/set_frequency -- the hardware differs, but the
-// read-only complement must agree).
+// read/read-only contract for the SHARED tools (desktop has
+// scan_band/set_bandwidth/tune_frequency; mobile has set_gain/set_sample_rate/
+// set_frequency -- the hardware differs, but the shared read-only complement
+// must agree). calibrate_frequency is a DESKTOP-ONLY read tool (it drives
+// SpectrumEngine::captureForCalibration); Flutter does not ship it, so there is
+// nothing to gate on mobile -- on desktop it is ungated by construction and is
+// listed here so the read-only set equality stays honest.
 const QSet<QString> kFlutterUngatedReadTools = {
-    "get_status", "predict_passes",
+    "get_status", "predict_passes", "calibrate_frequency",
 };
 } // namespace
 
@@ -76,7 +84,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 8, qPrintable(QString("expected 8 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 10, qPrintable(QString("expected 10 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -162,7 +170,7 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 8);
+    QCOMPARE(defs.size(), 10);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
 
