@@ -230,6 +230,85 @@ def test_lost_whole_packet_reported():
 
 
 # ==========================================================================
+# 2b. 接收鲁棒性：乱序到达 / 重复包（卫星重传、多径、跨过境重播）
+#
+# 真实 over-the-air 里包不保证按 packet_id 顺序到达，重传更会重复。重组器必须：
+#   - 按 packet_id 排序后再按 mcu_id 放置（乱序仍正确重组）；
+#   - 同 packet_id 去重（重复包不重复计数、不污染 MCU 区间）。
+# 这两条是 C 块复现确认"已有健壮性"的行为，此处用回归测试锁定，防未来回归。
+# ==========================================================================
+def test_out_of_order_packets_reassemble_correctly():
+    """乱序（逆序）到达的包 → 仍按 packet_id 排序重组，无缺失、JPEG 可开。"""
+    rgb = _gradient_rgb(96, 96)
+    pkts = _encode_to_ssdv(rgb)
+    assert len(pkts) >= 4, "96x96 图应拆成多个包，便于乱序测试"
+
+    dec = SsdvDecoder()
+    imgset = SsdvImage(IMG_ID)
+    for raw in pkts[::-1]:          # 逆序喂入（跨 feed 边界逐包喂）
+        for p in dec.feed(raw):
+            if p is not None:
+                imgset.add(p)
+    res = imgset.build()
+
+    assert not res.empty
+    # 守恒 + 无缺失：乱序只是到达顺序问题，不应丢任何 MCU
+    assert res.missing_mcus == [], f"乱序到达不应丢 MCU，实得缺失 {res.missing_mcus}"
+    assert len(res.received_mcus) == res.mcu_count
+    assert len(res.received_mcus) + len(res.missing_mcus) == res.mcu_count
+    out = Image.open(io.BytesIO(res.jpeg))
+    out.load()
+    assert out.size == (96, 96)
+
+
+def test_duplicate_packets_are_deduped():
+    """同 packet_id 重复到达（重传）→ 去重，不重复计数、不破坏重组。"""
+    rgb = _gradient_rgb(96, 96)
+    pkts = _encode_to_ssdv(rgb)
+
+    dec = SsdvDecoder()
+    imgset = SsdvImage(IMG_ID)
+    n_received_packets = 0
+    for raw in pkts:
+        for raw_dup in (raw, raw):      # 每包喂两次（模拟重传）
+            for p in dec.feed(raw_dup):
+                if p is not None:
+                    imgset.add(p)
+                    n_received_packets += 1
+    res = imgset.build()
+
+    assert not res.empty
+    # 字节流层面收到了 2N 个包，但按 packet_id 去重后只剩 N 个
+    assert n_received_packets == 2 * len(pkts)
+    assert len(imgset.packets) == len(pkts), "重复 packet_id 必须被去重"
+    assert res.missing_mcus == [], f"重传不应导致缺失，实得 {res.missing_mcus}"
+    assert len(res.received_mcus) == res.mcu_count
+    Image.open(io.BytesIO(res.jpeg)).load()
+
+
+def test_out_of_order_with_middle_gap_reports_missing():
+    """乱序 + 中间整包丢失 → 仍正确重组，并诚实报出缺失 MCU 区间。"""
+    rgb = _gradient_rgb(96, 96)
+    pkts = _encode_to_ssdv(rgb)
+    drop = len(pkts) // 2
+    kept = [pb for i, pb in enumerate(pkts) if i != drop][::-1]   # 去中间包 + 乱序
+
+    dec = SsdvDecoder()
+    imgset = SsdvImage(IMG_ID)
+    for raw in kept:
+        for p in dec.feed(raw):
+            if p is not None:
+                imgset.add(p)
+    res = imgset.build()
+
+    assert not res.empty
+    assert res.missing_mcus, "中间丢包应诚实报缺失 MCU（即使乱序）"
+    # 守恒：收到 + 缺失 == 全部 MCU
+    assert len(res.received_mcus) + len(res.missing_mcus) == res.mcu_count
+    Image.open(io.BytesIO(res.jpeg)).load()
+
+
+# ==========================================================================
 # 3. CCSDS 数字链往返（卷积/Viterbi/解扰/RS 开关/ASM 同步/AFSK 速率）
 # ==========================================================================
 def _seed_bytes(seed: int, n: int) -> bytes:

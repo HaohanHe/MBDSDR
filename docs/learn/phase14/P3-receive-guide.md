@@ -118,17 +118,35 @@ from mbdsdr_ai.sat_passes import compute_doppler_curve   # 由 predict_passes �
 
 ## 路径 B：SSDV（数字慢扫描）
 
-> **现状**：P2 已干净室交付 `mbdsdr_ai/ssdv_decoder.py`（**库**，只学公开协议、
-> 不抄 GPL 实现）；但它是库函数、无 CLI，`onboard.py --mode ssdv` 是 Wave2 追加项。
-> 下面给的是 P2 **真实接口**（已核对源码），按此把「解调字节 → 图像」串起来即可。
+> **现状（2026-10-04 Phase23 B 演练更新）**：`onboard.py --mode ssdv` 已落地
+> （字节/包层以上：`_ssdv_feed_core` → `SsdvDecoder` → MCU 重组 JPEG），并用合成
+> 包流端到端验出图。**可执行值班单见 [`P3-receive-sop.md`](./P3-receive-sop.md)**。
+> 注意：ssdv 模式输入是「解调后 256B 包字节流文件」（`--sigmf-data`），物理层
+> AFSK/卷积/解扰尚未串入 onboard（见 SOP §8 缺口 1）。下面仍保留 P2 **真实库接口**
+> （已核对源码），供接物理层时参考。
 
-### B-1 物理链路（对接现有零件）
+### B-0 P3 方言核实结论（2026-10-04 A 块，先读；详见 SSDV_SSTV_SPEC.md §8）
+
+- **活动分工**：JAMX01 发 SSTV（模拟，走路径 A）；**ASRTU-1 发 SSDV**（本节路径 B）。
+- **ASRTU-1 SSDV 下行**：**436.210 MHz，BPSK 9600**，USB 接收、约 24 kHz 滤波窗
+  （来源：Libre Space ASRTU-1 SSDV 实解帖 + 活动帖；待活动日程最终确认）。
+- **方言判定（真实解码旁证，非官方规格书）= DSLWP 变体**：218 字节包 / 9 字节头 /
+  无 sync 0x55 / CRC32 魔数初值 0x4EE4FDE1 / **包内无 RS**。
+- **⚠️ 与我方 `mbdsdr_ai/ssdv_decoder.py`（fsphil 经典 256B/15 头）有实质差距**：
+  我方 `feed()` 靠「0x55+0x66」锁包，DSLWP 包没有这两个字节，**直接喂会锁不上**。
+  MCU→JPEG 重组核心可复用，但**包层需补 DSLWP 变体路径**（代码属 C 块，本节只登记）。
+- **试解顺序**：① DSLWP 变体（最高概率）→ ② fsphil 经典（我方现状，活动若改用标准则可直接解）
+  → ③ SP5WWP 6 头（兜底，已被真实证据排除）。
+- **验证动作**：拿真实录制样本回放——218B 定长切分 + 魔数 CRC(0x4EE4FDE1) 校验通过率高 = DSLWP 实锤。
+
+### B-1 物理链路（对接现有零件；参数为检索旁证，待活动日程确认）
 
 ```
-rtl_sdr 采集下行 IQ（同 onboard record 步，已可录）
-  → NFM 解调（mbdsdr_ai.demod_nfm / analog_demod，已有）
-  → 4FSK/GMSK 解调 → 得同步后的解调字节流
-  → SsdvDecoder.feed(bytes)        # 字节流同步 + RS(255,223) 纠错 + CRC 把关 → 256 字节包
+rtl_sdr 采集下行 IQ（436.210 MHz，BPSK 9600；同 onboard record 步，已可录）
+  → 差分 BPSK 解调（9600 baud；mbdsdr_ai 待补/对齐）
+  → CCSDS Concatenated：ASM 帧同步 → 卷积 K=7 r=1/2 Viterbi → 解扰 → RS(255,223) 信道解码
+    → 223 字节帧载荷（ASRTU-1.yml：precoding differential / RS conventional / frame 223）
+  → 拼出 SSDV 字节流 → 切 218B DSLWP 包（包层待补，见 B-0）
   → ImageReassembler.add(pkt)     # 按 (image_id, packet_id) 收包
   → reassembler.reassemble()       # 按 packet_id 升序拼扫描流（缺包跳空）
   → wrap_jpeg(scan, prefix_header) # restuff + 加 SOI..SOS 头 + EOI → 可解码 JPEG
