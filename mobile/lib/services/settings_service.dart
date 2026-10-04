@@ -122,10 +122,20 @@ const String _kRtlPort = 'rtlPort';
 /// 桌面 ControlHub HTTP 主机/端口（远程只读解码面板用）。
 ///
 /// 与 rtl_tcp（裸 IQ TCP，本机接收链）相互独立：ControlHub 是桌面引擎把
-/// POCSAG/M17/VOR 解码结果经 HTTP 暴露的只读通道。host 为空 = 未配置，
-/// 远程解码面板退化为「去设置」空态，不假连。
+/// POCSAG/M17/VOR 解码结果经 HTTP 暴露的只读通道。host 留空 = 未配置，远程
+/// 解码面板退化为「去设置」空态，不假连。
+///
+/// Phase27：默认值与桌面 HttpControlServer 对齐——桌面端点仅绑定 127.0.0.1
+/// 回环、默认端口 50732（tokens::kControlHttpDefaultPort）。移动端作为「本机
+/// 桌面查看器」时出厂即指向本机回环，开箱可达；远程查看由用户改主机地址。
 const String _kControlHubHost = 'controlHubHost';
 const String _kControlHubPort = 'controlHubPort';
+
+/// 桌面 ControlHub HTTP 默认主机（与桌面端回环绑定一致）。
+const String kDefaultControlHubHost = '127.0.0.1';
+
+/// 桌面 ControlHub HTTP 默认端口（对齐 tokens::kControlHttpDefaultPort = 50732）。
+const int kDefaultControlHubPort = 50732;
 const String _kApiKey = 'apiKey';
 const String _kApiModel = 'apiModel';
 const String _kStationLat = 'stationLat';
@@ -189,8 +199,8 @@ class SettingsService extends ChangeNotifier {
 
   String _rtlHost = '';
   int _rtlPort = 1234;
-  String _controlHubHost = '';
-  int _controlHubPort = 8080;
+  String _controlHubHost = kDefaultControlHubHost;
+  int _controlHubPort = kDefaultControlHubPort;
   String _apiKey = '';
   String _apiModel = kDefaultApiModel;
   double? _stationLat;
@@ -547,11 +557,11 @@ class SettingsService extends ChangeNotifier {
   Future<void> load() async {
     _rtlHost = _kv.getString(_kRtlHost) ?? '';
     _rtlPort = _kv.getInt(_kRtlPort) ?? 1234;
-    _controlHubHost = _kv.getString(_kControlHubHost) ?? '';
-    // 端口缺失/越界回退默认 8080，绝不抛。
+    _controlHubHost = _kv.getString(_kControlHubHost) ?? kDefaultControlHubHost;
+    // 端口缺失/越界回退默认 50732（对齐桌面），绝不抛。
     final int? chPort = _kv.getInt(_kControlHubPort);
     _controlHubPort = (chPort == null || chPort < 1 || chPort > 65535)
-        ? 8080
+        ? kDefaultControlHubPort
         : chPort;
     _apiModel = _kv.getString(_kApiModel) ?? kDefaultApiModel;
     _stationLat = _kv.getDouble(_kStationLat);

@@ -71,6 +71,9 @@
 #include "dsp/spyserver_server.h"
 #include "dsp/adsb_decoder.h"
 #include "dsp/tle_client.h"
+// Phase27: headless control command surface + its loopback-only HTTP front-end.
+#include "control/control_hub.h"
+#include "control/control_http_server.h"
 #include "ai/agent.h"
 #include "ai/ai_config.h"
 #include "ai/ai_session_store.h"
@@ -182,6 +185,17 @@ MainWindow::MainWindow(QWidget* parent)
 
     statusLabel_ = new QLabel("● 无信号源", topBar);
     topLay->addWidget(statusLabel_);
+    // Phase27: loopback control-HTTP status chip. Populated (calm green when up,
+    // amber honest failure when the port is occupied) by setupControlHttpServer()
+    // near the end of the ctor. Never blocks: a bind failure leaves the rest of
+    // the app fully functional. ObjectName "monoInfo" = the quiet readout style.
+    controlHttpBanner_ = new QLabel(QStringLiteral("控制HTTP: 启动中…"), topBar);
+    controlHttpBanner_->setObjectName("monoInfo");
+    controlHttpBanner_->setToolTip(
+        QStringLiteral("桌面控制 HTTP 端点（仅 127.0.0.1 本机回环，无鉴权）。\n"
+                      "端口可经 QSettings control/httpPort 或环境变量 "
+                      "MBDSDR_CONTROL_HTTP_PORT 覆盖。"));
+    topLay->addWidget(controlHttpBanner_);
     topLay->addStretch();
 
     auto* clockLabel = new QLabel(topBar);
@@ -2953,11 +2967,23 @@ MainWindow::MainWindow(QWidget* parent)
             this, &MainWindow::onSkySliderChanged);
     connect(skyTimeSlider_, &QSlider::sliderReleased,
             this, &MainWindow::onSkySliderReleased);
+
+    // Phase27: bring up the loopback control-HTTP front-end on top of the
+    // headless ControlHub. Done last (the banner widget must already exist) and
+    // made non-fatal: a port conflict only flips an amber chip, never a crash.
+    setupControlHttpServer();
 }
 
 MainWindow::~MainWindow() {
     // Stop the GNSS receiver thread first so no late newFix lands mid-teardown.
     if (gnssRx_) { gnssRx_->stop(); gnssRx_->wait(2000); }
+    // Phase27: close the loopback control-HTTP listener FIRST so no late
+    // execute() -> engine dispatch lands mid-teardown. The server and the hub
+    // live on this (GUI) thread -- there is no worker thread to join; stop() is
+    // synchronous on this thread and stops accepting new requests before the
+    // engine below is torn down. (HttpControlServer's own dtor calls stop() again
+    // safely; the hub+server are children of this and are destroyed with it.)
+    if (httpControlServer_) httpControlServer_->stop();
     // Flush any pending debounced save so the last 500 ms of tweaks are not lost.
     if (saveTimer_ && saveTimer_->isActive()) {
         saveTimer_->stop();
@@ -2971,6 +2997,58 @@ MainWindow::~MainWindow() {
     if (scanTimer_) scanTimer_->stop();
     delete scanner_; scanner_ = nullptr;
     delete scanTickClock_; scanTickClock_ = nullptr;
+}
+
+// ---- Phase27: loopback control-HTTP production wiring -----------------------
+void MainWindow::setupControlHttpServer() {
+    // Headless hub: the SINGLE command surface shared by the GUI, the AI tool
+    // loop and this HTTP front-end. Attach the engine (already constructed) so
+    // every endpoint dispatches onto the real SpectrumEngine on this home thread.
+    controlHub_ = new control::ControlHub(this);
+    controlHub_->setEngine(engine_);
+    httpControlServer_ = new control::HttpControlServer(controlHub_, this);
+
+    // startDefault() resolves env MBDSDR_CONTROL_HTTP_PORT -> QSettings
+    // control/httpPort -> tokens::kControlHttpDefaultPort, then binds loopback.
+    const bool ok = httpControlServer_->startDefault();
+    if (!controlHttpBanner_) return;
+
+    if (ok) {
+        const quint16 port = httpControlServer_->port();
+        controlHttpBanner_->setText(
+            QStringLiteral("控制HTTP: 127.0.0.1:%1 · 本机回环·无鉴权").arg(port));
+        controlHttpBanner_->setStyleSheet(
+            QString::fromUtf8("color:%1;").arg(QString::fromUtf8(tokens::kSuccess)));
+        controlHttpBanner_->setToolTip(control::HttpControlServer::warningBanner(port));
+    } else {
+        // Honest, NON-FATAL: the default/configured port is occupied (or bind
+        // refused). We do NOT silently fall back to an ephemeral port -- the
+        // mobile viewer is configured to reach the well-known default port, and a
+        // silent move would mislead it. Instead the app keeps running and the
+        // amber chip + tooltip tell the operator how to pick another port
+        // (QSettings control/httpPort or the env var) and restart.
+        controlHttpBanner_->setText(
+            QStringLiteral("控制HTTP: 启动失败(端口被占?) · 其余功能正常"));
+        controlHttpBanner_->setStyleSheet(
+            QString::fromUtf8("color:%1;").arg(QString::fromUtf8(tokens::kWarning)));
+        controlHttpBanner_->setToolTip(
+            QStringLiteral("绑定 127.0.0.1:%1 失败（端口可能被占用）。"
+                          "可在 QSettings control/httpPort 或环境变量 "
+                          "MBDSDR_CONTROL_HTTP_PORT 指定其它端口后重启。")
+                .arg(tokens::kControlHttpDefaultPort));
+        qWarning().noquote()
+            << "MBDSDR: control-HTTP bind failed on"
+            << tokens::kControlHttpDefaultPort
+            << "(port in use?) -- continuing WITHOUT the control server.";
+    }
+}
+
+quint16 MainWindow::harnessControlHttpPort() const {
+    return httpControlServer_ ? httpControlServer_->port() : quint16(0);
+}
+
+bool MainWindow::harnessControlHttpListening() const {
+    return httpControlServer_ && httpControlServer_->isListening();
 }
 
 void MainWindow::refreshBmTable() {

@@ -62,6 +62,17 @@ public:
     // few audio blocks have flowed; before that it reads back as ~-100 dBFS.
     float audioNoiseFloorDbfs() const { return static_cast<float>(audioNfDbfs_); }
 
+    // ---- Honest RSSI snapshot for the decoupled band-scan driver ----------
+    // The real measured total-power RSSI (dBFS) of the CURRENTLY tuned channel,
+    // recomputed every capture block in run() from raw capture energy (the SAME
+    // value emitted as rssiLevel). This is the honest input a headless
+    // ScanActivityLink / FrequencyScanner polls: the engine itself owns NO
+    // scanner and fabricates neither a frequency nor a level. Before the first
+    // block flows (or on the honest empty NullSource, which delivers no IQ) it
+    // reads back as -100 dBFS -- a quiet-band value, never a fabricated busy
+    // level. Thread-safe atomic read-back off the engine thread.
+    float rssiDbfs() const { return rssiDbfs_.load(); }
+
     // ---- Squelch read-back (for ControlHub get_squelch_status) -------------
     // thresholdDb() is the last threshold commanded (cached here; the Squelch
     // object itself exposes no getter). enabled() mirrors the gate mode; open()
@@ -475,6 +486,10 @@ private:
     AptDecoder aptDecoder_{48000.0};
 
     std::atomic<int> fftSize_{2048};
+    // Honest measured total-power RSSI (dBFS) of the currently tuned channel,
+    // refreshed in run() every block; -100 until the first block flows. The
+    // decoupled ScanActivityLink driver polls this (see rssiDbfs()).
+    std::atomic<float> rssiDbfs_{-100.0f};
     std::atomic<bool> running_{true};
     std::atomic<bool> needDemodReset_{false};
     // Set by the SpyServerServer via setSpyServerTapRequested: when true, each

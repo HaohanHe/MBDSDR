@@ -329,6 +329,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
         // ---------------------------------------------------- 桌面 ControlHub（远程只读解码）
         // 与本机 rtl_tcp 相互独立：移动端只读查看桌面引擎的 POCSAG/M17/VOR 解码结果。
+        // 默认 127.0.0.1:50732（与桌面回环端点一致，本机查看器开箱可达）；
         // 主机留空 = 不启用，频谱页远程解码面板退化为「去设置」空态，不假连。
         _section(
           title: '桌面 ControlHub（远程解码）',
@@ -337,7 +338,7 @@ class _SettingsPageState extends State<SettingsPage> {
               controller: _chHostCtrl,
               decoration: const InputDecoration(
                 labelText: '主机地址',
-                hintText: '留空 = 不启用；如 192.168.1.20',
+                hintText: '默认 127.0.0.1；留空 = 不启用，如 192.168.1.20',
                 prefixIcon: Icon(Icons.dns_outlined),
               ),
               keyboardType: TextInputType.url,
@@ -349,7 +350,7 @@ class _SettingsPageState extends State<SettingsPage> {
               controller: _chPortCtrl,
               decoration: const InputDecoration(
                 labelText: '端口',
-                hintText: '8080',
+                hintText: '默认 50732',
                 prefixIcon: Icon(Icons.numbers),
               ),
               keyboardType: TextInputType.number,

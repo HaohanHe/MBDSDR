@@ -70,6 +70,7 @@ set(SOURCES
     src/dsp/device_presence_notifier.cpp
     src/dsp/spectrum_engine.cpp
     src/control/control_hub.cpp
+    src/control/control_http_server.cpp   # Phase27: production loopback HTTP front-end (MainWindow wires it)
     src/dsp/iq_frontend.cpp
     src/dsp/vfo_manager.cpp src/dsp/fsk_demod.cpp src/dsp/pocsag_decoder.cpp src/dsp/m17_decoder.cpp src/dsp/vor_receiver.cpp
     src/dsp/channelizer.cpp
@@ -154,6 +155,7 @@ set(HEADERS
     src/dsp/spyserver_server.h
     src/dsp/spectrum_engine.h
     src/control/control_hub.h
+    src/control/control_http_server.h   # Phase27: AUTOMOC needs the Q_OBJECT front-end header
     src/dsp/iq_frontend.h
     src/dsp/channelizer.h
     src/dsp/audio_resampler.h
@@ -372,6 +374,24 @@ add_executable(test_engine_empty_state tests/test_engine_empty_state.cpp
 target_include_directories(test_engine_empty_state PRIVATE src)
 target_link_libraries(test_engine_empty_state PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_empty_state COMMAND test_engine_empty_state)
+
+# Phase27 Block2: ScanActivityLink ENGINE-level wiring. Feeds the LIVE engine's
+# measured RSSI (SpectrumEngine::rssiDbfs()) into a ScanActivityLink bound to the
+# engine's REAL primitives (onSetCenterFreq retune / startRecording arm /
+# stopRecording close) and asserts the busy band parks + records + demods while a
+# threshold-above-level band is an honest empty (no dwell, no record). Mirrors
+# the engine_integration minimal source set (already links scan_link + scanner).
+add_executable(test_scan_link_engine tests/test_scan_link_engine.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/fsk_demod.cpp src/dsp/pocsag_decoder.cpp src/dsp/m17_decoder.cpp src/dsp/vor_receiver.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
+target_include_directories(test_scan_link_engine PRIVATE src)
+target_link_libraries(test_scan_link_engine PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME scan_link_engine COMMAND test_scan_link_engine)
 
 # Headless ControlHub (GUI-decoupled command layer). Drives the REAL engine via
 # named commands with NO QWidget: deterministic write->readback, the read/write
@@ -937,6 +957,18 @@ target_include_directories(test_phase21_empty_state PRIVATE src build/test_phase
 target_link_libraries(test_phase21_empty_state PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 add_test(NAME phase21_empty_state COMMAND test_phase21_empty_state)
 set_tests_properties(phase21_empty_state PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Phase27 block1: end-to-end integration of the PRODUCTION control-HTTP wiring.
+# Boots the real MainWindow offscreen (not a hand-built hub) and drives the loopback
+# HttpControlServer that MainWindow itself starts: GET /status real fields, POST
+# set_frequency really retunes the engine, three decoder snapshots honest-empty,
+# and an honest non-fatal amber banner when the configured port is occupied. The
+# port is env-isolated (MBDSDR_CONTROL_HTTP_PORT) -- never the hard-coded default.
+add_executable(test_control_http_e2e_prod tests/test_control_http_e2e_prod.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_control_http_e2e_prod PRIVATE src build/test_control_http_e2e_prod_autogen/include)
+target_link_libraries(test_control_http_e2e_prod PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME control_http_e2e_prod COMMAND test_control_http_e2e_prod)
+set_tests_properties(control_http_e2e_prod PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(test_ui_audit tests/test_ui_audit.cpp ${TESTAPP_SRCS} ${HEADERS})
 target_include_directories(test_ui_audit PRIVATE src build/test_ui_audit_autogen/include)
