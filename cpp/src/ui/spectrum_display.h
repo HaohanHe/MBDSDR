@@ -28,6 +28,7 @@
 #include <QRectF>
 #include <QList>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <vector>
 
@@ -103,6 +104,17 @@ public slots:
     void addFixedMarker(double freqHz, const QString& name);
     void removeFixedMarker(int index);
     void clearFixedMarkers() { fixedMarkers_.clear(); update(); }
+
+    // ---- Dual measurement cursors (SDR++ Δ markers) ----------------------
+    // Two independent draggable vertical lines; the read-out shows |A-B|.
+    // NaN = not placed. Pure helper measurementDeltaHz(a,b) is unit-tested.
+    static double measurementDeltaHz(double aHz, double bHz);
+    void placeCursorA(double hz) { cursorA_Hz_ = hz; update(); }
+    void placeCursorB(double hz) { cursorB_Hz_ = hz; update(); }
+    void clearCursors() { cursorA_Hz_ = cursorB_Hz_ = std::nan(""); update(); }
+    double cursorAHz() const { return cursorA_Hz_; }
+    double cursorBHz() const { return cursorB_Hz_; }
+    double cursorDeltaHz() const { return measurementDeltaHz(cursorA_Hz_, cursorB_Hz_); }
 
     // Waterfall controls.
     void setScrollSpeed(int linesPerFrame);   // push a row every N frames (1/2/4)
@@ -271,6 +283,11 @@ private:
     // from mouseMoveEvent; suppressed while a divider/VFO/tune grab is active.
     bool    cursorActive_ = false;
     QPoint  cursorPos_;
+
+    // Dual measurement cursors (Hz; NaN = not placed).
+    double cursorA_Hz_ = std::nan("");
+    double cursorB_Hz_ = std::nan("");
+    int    grabCursor_ = 0;   // 0 none, 1 = A, 2 = B
 
     double dialBandwidthHz_ = 12500.0;
     double tuneStepHz_ = 1000.0;

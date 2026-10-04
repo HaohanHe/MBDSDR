@@ -285,6 +285,11 @@ add_executable(ui_shot_fileanalysis tests/ui_screenshot_file_analysis.cpp ${SHOT
 target_include_directories(ui_shot_fileanalysis PRIVATE src build/ui_shot_fileanalysis_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_fileanalysis PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 
+# Recording-library panel with auto-segmented files + 导出解码 button. Offscreen.
+add_executable(ui_shot_recseg tests/ui_screenshot_rec_segments.cpp ${SHOT_SRCS} ${HEADERS})
+target_include_directories(ui_shot_recseg PRIVATE src build/ui_shot_recseg_autogen/include build/mbdsdr_autogen/include)
+target_link_libraries(ui_shot_recseg PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+
 # Sky time-scrubber preview + trajectory, GIS legend + GNSS fix, clock-domain readout.
 # Offscreen; not in ctest. Writes cpp/scratch/ui_sky_drag.png etc.
 add_executable(ui_shot_skytime tests/ui_screenshot_sky_time.cpp ${SHOT_SRCS} ${HEADERS})
@@ -988,6 +993,12 @@ target_link_libraries(test_fixed_marker PRIVATE Qt6::Test Qt6::Widgets Qt6::Mult
 add_test(NAME fixed_marker COMMAND test_fixed_marker)
 set_tests_properties(fixed_marker PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(test_dual_cursor tests/test_dual_cursor.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_dual_cursor PRIVATE src build/test_dual_cursor_autogen/include)
+target_link_libraries(test_dual_cursor PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME dual_cursor COMMAND test_dual_cursor)
+set_tests_properties(dual_cursor PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # Unattended signal-triggered watch recording (detector + pre-roll + per-burst
 # WAV/JSON sidecar; NOT HARDWARE, fully synthesized).
 add_executable(test_watch_record tests/test_watch_record.cpp
@@ -1005,6 +1016,23 @@ target_include_directories(test_recording_library PRIVATE src)
 target_link_libraries(test_recording_library PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME recording_library COMMAND test_recording_library)
 set_tests_properties(recording_library PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Continuous-capture auto-segmentation: sample-cap rotation, collision-avoided
+# naming, unlimited stays single file. Real on-disk SigMF.
+add_executable(test_recorder_segment tests/test_recorder_segment.cpp
+    src/dsp/recorder.cpp)
+target_include_directories(test_recorder_segment PRIVATE src)
+target_link_libraries(test_recorder_segment PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME recorder_segment COMMAND test_recorder_segment)
+
+# Recording-library WAV playback loopback: decode a real PCM WAV and stream it
+# into MemoryAudioSink; assert the sink receives the exact file samples.
+add_executable(test_playback_loopback tests/test_playback_loopback.cpp
+    src/ui/recording_library.cpp src/dsp/memory_audio_sink.cpp)
+target_include_directories(test_playback_loopback PRIVATE src)
+target_link_libraries(test_playback_loopback PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME playback_loopback COMMAND test_playback_loopback)
+set_tests_properties(playback_loopback PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Offline file analysis: streaming FileSource (WAV/SigMF/raw, chunked, seek,
 # pause, honest errors) + engine openOfflineFile path.

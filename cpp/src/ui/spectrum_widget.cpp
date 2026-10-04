@@ -120,6 +120,28 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     topRow->addWidget(clearMarkerBtn);
     topRow->addSpacing(tokens::scaled(tokens::kSpacingM));
 
+    // ---- Dual measurement cursors: place A/B at visible centre, then drag --
+    auto* curABtn = new QPushButton("游标A", this);
+    curABtn->setObjectName("cursorABtn");
+    curABtn->setToolTip("在视窗中心放置游标 A（可拖动，显示与 B 的频差）");
+    connect(curABtn, &QPushButton::clicked, this, [this]() {
+        if (canvas_) canvas_->placeCursorA(canvas_->viewCenterHz());
+    });
+    auto* curBBtn = new QPushButton("游标B", this);
+    curBBtn->setObjectName("cursorBBtn");
+    curBBtn->setToolTip("在视窗中心放置游标 B（可拖动）");
+    connect(curBBtn, &QPushButton::clicked, this, [this]() {
+        if (canvas_) canvas_->placeCursorB(canvas_->viewCenterHz());
+    });
+    auto* curClr = new QPushButton("清游标", this);
+    connect(curClr, &QPushButton::clicked, this, [this]() {
+        if (canvas_) canvas_->clearCursors();
+    });
+    topRow->addWidget(curABtn);
+    topRow->addWidget(curBBtn);
+    topRow->addWidget(curClr);
+    topRow->addSpacing(tokens::scaled(tokens::kSpacingM));
+
     topRow->addWidget(new QLabel("dB", this));
     dbMinSpin_ = new QSpinBox(this);
     dbMinSpin_->setRange(tokens::kDbSpinLowerMin, tokens::kDbSpinLowerMax);
