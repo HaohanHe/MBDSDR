@@ -401,6 +401,7 @@ class _SkyPageState extends State<SkyPage> {
       onSelect: _c.select,
       station: _c.station,
       now: _c.geometryTime,
+      navVisible: _c.visibleNav,
     );
     final side = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,

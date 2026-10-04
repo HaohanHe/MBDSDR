@@ -66,6 +66,7 @@ class SkyRadar extends StatelessWidget {
     required this.onSelect,
     this.station,
     this.now,
+    this.navVisible = const <SatVisibility>[],
   });
 
   final List<SatVisibility> visible;
@@ -77,6 +78,10 @@ class SkyRadar extends StatelessWidget {
 
   /// 几何参考时刻（UTC）；与可见点同源。null 时不画轨迹。
   final DateTime? now;
+
+  /// 在视导航卫星（GNSS，SGP4 预测非接收）：空心圈 + 「预:」标签，
+  /// 与真实接收点区分。空列表则不画叠加层。
+  final List<SatVisibility> navVisible;
 
   /// 为一颗可见卫星采样未来一段弧（直到落地或 20 分钟上限）。
   List<({double az, double el})> _sampleArc(Tle tle, DateTime nowUtc) {
@@ -160,6 +165,7 @@ class SkyRadar extends StatelessWidget {
               selectedName: selectedName,
               arcs: arcs,
               selectedTrajectory: selectedTrajectory,
+              navVisible: navVisible,
             ),
           ),
         );
@@ -194,6 +200,7 @@ class _PolarPainter extends CustomPainter {
     required this.selectedName,
     required this.arcs,
     required this.selectedTrajectory,
+    this.navVisible = const <SatVisibility>[],
   });
 
   final List<SatVisibility> visible;
@@ -202,6 +209,9 @@ class _PolarPainter extends CustomPainter {
 
   /// 选中卫星过境前后 ±10 分钟的真实传播轨迹（az/el 采样）。
   final List<({double az, double el})> selectedTrajectory;
+
+  /// 在视导航卫星（预测）叠加层数据源。
+  final List<SatVisibility> navVisible;
 
   /// 外圆之外留给方位字母/刻度的边距（含文字半高，保证不被裁切）。
   static const double outerMargin = 26;
@@ -218,6 +228,7 @@ class _PolarPainter extends CustomPainter {
     _paintGrid(canvas, c, R);
     _paintArcs(canvas, c, R);
     _paintSelectedTrajectory(canvas, c, R);
+    _paintNavOverlay(canvas, c, R, size);
     _paintSatellites(canvas, c, R, size);
   }
 
@@ -359,6 +370,45 @@ class _PolarPainter extends CustomPainter {
     canvas.drawPath(path, paint);
   }
 
+  // ---- 在视导航卫星预测叠加层：空心圈 + 「预:」标签 ------------------------
+  // 与真实接收点（实心圆点）区分：warning 色空心圈，复用 polarPoint 投影，
+  // 不重造几何。无数据直接返回，绝不画假星。
+  void _paintNavOverlay(Canvas canvas, Offset c, double R, Size size) {
+    final items = navVisible.where((v) => v.el > 0.0).toList();
+    if (items.isEmpty) return;
+
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4
+      ..color = AppTokens.warning;
+
+    for (final v in items) {
+      final p = polarPoint(c, R, v.az, v.el);
+      // 空心圈（直径约 10px），与实心接收点明显区分。
+      canvas.drawCircle(p, 5.0, ring);
+
+      final tp = TextPainter(
+        text: TextSpan(
+          text: '预: ${v.name}',
+          style: const TextStyle(
+            fontSize: AppTokens.annotationFontSize,
+            color: AppTokens.warning,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: 110);
+
+      // 标签优先放点上方，越界则收进画布。
+      var at = p + Offset(-tp.width / 2, -tp.height - 8);
+      if (at.dy < 2) at = p + Offset(-tp.width / 2, 8);
+      if (at.dx < 2) at = Offset(2, at.dy);
+      if (at.dx + tp.width > size.width - 2) {
+        at = Offset(size.width - 2 - tp.width, at.dy);
+      }
+      tp.paint(canvas, at);
+    }
+  }
+
   // ---- 卫星点 + 避让标签 --------------------------------------------------
   void _paintSatellites(Canvas canvas, Offset c, double R, Size size) {
     final items = visible.where((v) => v.el > 0.0).toList();
@@ -445,5 +495,6 @@ class _PolarPainter extends CustomPainter {
       old.selectedName != selectedName ||
       !identical(old.visible, visible) ||
       !identical(old.arcs, arcs) ||
-      !identical(old.selectedTrajectory, selectedTrajectory);
+      !identical(old.selectedTrajectory, selectedTrajectory) ||
+      !identical(old.navVisible, navVisible);
 }
