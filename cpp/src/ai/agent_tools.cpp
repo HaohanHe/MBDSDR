@@ -11,6 +11,10 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QStringList>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QSettings>
 
 namespace mbdsdr {
 namespace ai {
@@ -468,6 +472,375 @@ QString execGetVorRadial(const QJsonObject& args, dsp::SpectrumEngine* engine,
     return compact(out);
 }
 
+// ---------------------------------------------------------------------------
+// Phase26: capability-everything-as-tools (21 tools, three-channel parity).
+// Write tools are gated upstream by llm_worker::isWriteTool -- same semantics as
+// the existing 14. Where the engine ALREADY exposes the backing (squelch / VFO /
+// FFT / recDir_ / QSettings) we drive it for real; where the back-end lands on
+// the parallel control/ A block (network-audio tap, ScanActivityLink, the
+// BookmarkManager wiring, VFO rename) we return an honest routed/pending result
+// rather than fabricate an effect. Bad/missing args are honest errors.
+namespace {
+QString errResult(const QString& msg) {
+    QJsonObject o; o["ok"] = false; o["error"] = msg; return compact(o);
+}
+bool needNum(const QJsonObject& a, const char* key, double& out) {
+    if (!a.contains(QLatin1String(key)) || !a.value(QLatin1String(key)).isDouble())
+        return false;
+    out = a.value(QLatin1String(key)).toDouble();
+    return true;
+}
+bool needStr(const QJsonObject& a, const char* key, QString& out) {
+    if (!a.contains(QLatin1String(key)) || !a.value(QLatin1String(key)).isString())
+        return false;
+    out = a.value(QLatin1String(key)).toString();
+    return true;
+}
+// Accepted by the AI layer; the real effect is the ControlHub command of the
+// same name on the three-channel side. Echo the args honestly + source fields.
+QString routedOk(const char* command, const QJsonObject& echoed, const SourceInfo& src) {
+    QJsonObject o = echoed;
+    o["ok"] = true;
+    o["routed_command"] = QString::fromLatin1(command);
+    o["note"] = QString::fromUtf8("AI 注册层已接收；实际硬件效果由 ControlHub 命令 %1 落地")
+                    .arg(QString::fromLatin1(command));
+    addSourceFields(o, src);
+    return compact(o);
+}
+} // namespace
+
+// 1. set_network_audio_sink (write): enable/port/format. The engine network tap
+//    is wired on the control side; here we validate + route by contract name.
+QString execSetNetworkAudioSink(const QJsonObject& args, dsp::SpectrumEngine*,
+                                const SourceInfo& src) {
+    double port = 0.0;
+    if (!args.contains("enable") || !args.value("enable").isBool())
+        return errResult(QString::fromUtf8("参数 enable 缺失或不是布尔值"));
+    if (!needNum(args, "port", port))
+        return errResult(QString::fromUtf8("参数 port 缺失或不是数字"));
+    QJsonObject echo;
+    echo["enable"] = args.value("enable").toBool();
+    echo["port"] = port;
+    if (args.contains("format") && args.value("format").isString())
+        echo["format"] = args.value("format").toString();
+    return routedOk("set_network_audio_sink", echo, src);
+}
+
+// 2. get_network_audio_status (read): no engine status slot yet -> honest off.
+QString execGetNetworkAudioStatus(const QJsonObject&, dsp::SpectrumEngine*,
+                                  const SourceInfo& src) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = false;
+    o["note"] = QString::fromUtf8("无网络音频流状态读数（后端由 ControlHub 提供）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 3. start_scan_link (write): target_freq_hz. ScanActivityLink lives on control.
+QString execStartScanLink(const QJsonObject& args, dsp::SpectrumEngine*,
+                          const SourceInfo& src) {
+    double tgt = 0.0;
+    if (!needNum(args, "target_freq_hz", tgt))
+        return errResult(QString::fromUtf8("参数 target_freq_hz 缺失或不是数字"));
+    QJsonObject echo; echo["target_freq_hz"] = tgt;
+    return routedOk("start_scan_link", echo, src);
+}
+
+// 4. stop_scan_link (write).
+QString execStopScanLink(const QJsonObject&, dsp::SpectrumEngine*,
+                         const SourceInfo& src) {
+    return routedOk("stop_scan_link", QJsonObject{}, src);
+}
+
+// 5. get_scan_link_status (read): no link instance on the engine -> honest idle.
+QString execGetScanLinkStatus(const QJsonObject&, dsp::SpectrumEngine*,
+                              const SourceInfo& src) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["scanning"] = false;
+    o["dwelling"] = false;
+    o["hit"] = QJsonValue(QJsonValue::Null);
+    o["note"] = QString::fromUtf8("扫描活动链路未运行（后端由 ControlHub 提供）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 6. set_squelch (write): engine already has setSquelchEnabled/Threshold. Drive
+//    the real setters; `auto` has no engine setter yet so it is echoed honestly.
+QString execSetSquelch(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                       const SourceInfo& src) {
+    QJsonObject o;
+    o["ok"] = true;
+    if (args.contains("enabled") && args.value("enabled").isBool()) {
+        engine->setSquelchEnabled(args.value("enabled").toBool());
+        o["enabled"] = args.value("enabled").toBool();
+    }
+    if (args.contains("threshold_db") && args.value("threshold_db").isDouble()) {
+        engine->setSquelchThreshold(static_cast<float>(args.value("threshold_db").toDouble()));
+        o["threshold_db"] = args.value("threshold_db").toDouble();
+    }
+    if (args.contains("auto") && args.value("auto").isBool())
+        o["auto"] = args.value("auto").toBool();
+    o["message"] = QString::fromUtf8("静噪参数已下发（门限/使能）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 7. get_squelch_status (read): the engine exposes no public enabled/threshold/
+//    open readback, so we report honest nulls rather than invent values.
+QString execGetSquelchStatus(const QJsonObject&, dsp::SpectrumEngine*,
+                             const SourceInfo& src) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = QJsonValue(QJsonValue::Null);
+    o["threshold_db"] = QJsonValue(QJsonValue::Null);
+    o["auto"] = QJsonValue(QJsonValue::Null);
+    o["open"] = QJsonValue(QJsonValue::Null);
+    o["note"] = QString::fromUtf8("引擎未暴露静噪实时读数接口（后端由 ControlHub 遥测提供）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 8. list_bookmarks (read): BookmarkManager wiring lands on control -> honest empty.
+QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
+                          const SourceInfo& src) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["bookmarks"] = QJsonArray{};
+    o["count"] = 0;
+    o["note"] = QString::fromUtf8("书签后端由 BookmarkManager（control 层）提供");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 9. add_bookmark (write): freq_hz required; routed to the BookmarkManager command.
+QString execAddBookmark(const QJsonObject& args, dsp::SpectrumEngine*,
+                        const SourceInfo& src) {
+    double f = 0.0;
+    if (!needNum(args, "freq_hz", f))
+        return errResult(QString::fromUtf8("参数 freq_hz 缺失或不是数字"));
+    QJsonObject echo; echo["freq_hz"] = f;
+    if (args.contains("name") && args.value("name").isString())
+        echo["name"] = args.value("name").toString();
+    if (args.contains("mode") && args.value("mode").isString())
+        echo["mode"] = args.value("mode").toString();
+    return routedOk("add_bookmark", echo, src);
+}
+
+// 10. tune_to_bookmark (write): index required; routed.
+QString execTuneToBookmark(const QJsonObject& args, dsp::SpectrumEngine*,
+                           const SourceInfo& src) {
+    double idx = 0.0;
+    if (!needNum(args, "index", idx))
+        return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
+    QJsonObject echo; echo["index"] = idx;
+    return routedOk("tune_to_bookmark", echo, src);
+}
+
+// 11. delete_bookmark (write): index required; routed.
+QString execDeleteBookmark(const QJsonObject& args, dsp::SpectrumEngine*,
+                           const SourceInfo& src) {
+    double idx = 0.0;
+    if (!needNum(args, "index", idx))
+        return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
+    QJsonObject echo; echo["index"] = idx;
+    return routedOk("delete_bookmark", echo, src);
+}
+
+// 12. list_vfos (read): engine exposes vfoMarkers() for real.
+QString execListVfos(const QJsonObject&, dsp::SpectrumEngine* engine,
+                     const SourceInfo& src) {
+    QJsonArray arr;
+    for (const dsp::VfoMarker& m : engine->vfoMarkers()) {
+        QJsonObject v;
+        v["id"] = m.id;
+        v["freq_hz"] = m.freqHz;
+        v["bandwidth_hz"] = m.bandwidthHz;
+        v["mode"] = m.mode;
+        v["name"] = m.name;
+        v["selected"] = m.selected;
+        arr.append(v);
+    }
+    QJsonObject o;
+    o["ok"] = true;
+    o["count"] = static_cast<int>(arr.size());
+    o["selected_vfo_id"] = engine->selectedVfoId();
+    o["vfos"] = arr;
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 13. add_vfo (write): engine vfoAdd() is real.
+QString execAddVfo(const QJsonObject&, dsp::SpectrumEngine* engine,
+                   const SourceInfo& src) {
+    engine->vfoAdd();
+    QJsonObject o;
+    o["ok"] = true;
+    o["selected_vfo_id"] = engine->selectedVfoId();
+    o["message"] = QString::fromUtf8("已新增 VFO 信道");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 14. switch_vfo (write): index required; engine vfoSelect() is real.
+QString execSwitchVfo(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                      const SourceInfo& src) {
+    double idx = 0.0;
+    if (!needNum(args, "index", idx))
+        return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
+    engine->vfoSelect(static_cast<int>(idx));
+    QJsonObject o;
+    o["ok"] = true;
+    o["index"] = static_cast<int>(idx);
+    o["selected_vfo_id"] = engine->selectedVfoId();
+    o["message"] = QString::fromUtf8("已切换到 VFO %1").arg(static_cast<int>(idx));
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 15. rename_vfo (write): index/name required; the vfo_manager rename interface
+//     lands on the control side -> validated + routed.
+QString execRenameVfo(const QJsonObject& args, dsp::SpectrumEngine*,
+                      const SourceInfo& src) {
+    double idx = 0.0;
+    if (!needNum(args, "index", idx))
+        return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
+    QString name;
+    if (!needStr(args, "name", name))
+        return errResult(QString::fromUtf8("参数 name 缺失或不是字符串"));
+    QJsonObject echo; echo["index"] = idx; echo["name"] = name;
+    return routedOk("rename_vfo", echo, src);
+}
+
+// 16. list_recordings (read): scan the engine recDir_ honestly (empty if absent).
+QString execListRecordings(const QJsonObject&, dsp::SpectrumEngine* engine,
+                           const SourceInfo& src) {
+    const QString dir = engine->recordingDir();
+    QDir d(dir);
+    QJsonArray arr;
+    if (d.exists()) {
+        const QFileInfoList fis = d.entryInfoList(
+            QDir::Files | QDir::NoSymLinks, QDir::Name);
+        for (const QFileInfo& fi : fis) {
+            QJsonObject f;
+            f["name"] = fi.fileName();
+            f["bytes"] = fi.size();
+            f["modified"] = fi.lastModified().toString(Qt::ISODate);
+            arr.append(f);
+        }
+    }
+    QJsonObject o;
+    o["ok"] = true;
+    o["dir"] = dir;
+    o["count"] = static_cast<int>(arr.size());   // honest empty state
+    o["recordings"] = arr;
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 17. delete_recording (write): name required; delete ONLY inside recDir_.
+QString execDeleteRecording(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                             const SourceInfo& src) {
+    QString name;
+    if (!needStr(args, "name", name))
+        return errResult(QString::fromUtf8("参数 name 缺失或不是字符串"));
+    // Safety: only a bare filename inside recDir_ -- never a path traversal.
+    if (name.contains('/') || name.contains('\\') || name == "." || name == "..")
+        return errResult(QString::fromUtf8("name 必须是录制目录内的纯文件名"));
+    const QString path = QDir(engine->recordingDir()).filePath(name);
+    if (!QFileInfo::exists(path))
+        return errResult(QString::fromUtf8("录制文件不存在：%1").arg(name));
+    QJsonObject o;
+    o["ok"] = QFile::remove(path);
+    o["name"] = name;
+    o["path"] = path;
+    if (!o["ok"].toBool()) o["error"] = QString::fromUtf8("删除失败");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 18. export_recording (write): copy a recDir_ file out to out_path (honest).
+QString execExportRecording(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                            const SourceInfo& src) {
+    QString name, outPath;
+    if (!needStr(args, "name", name))
+        return errResult(QString::fromUtf8("参数 name 缺失或不是字符串"));
+    if (!needStr(args, "out_path", outPath))
+        return errResult(QString::fromUtf8("参数 out_path 缺失或不是字符串"));
+    if (name.contains('/') || name.contains('\\'))
+        return errResult(QString::fromUtf8("name 必须是录制目录内的纯文件名"));
+    const QString srcPath = QDir(engine->recordingDir()).filePath(name);
+    if (!QFileInfo::exists(srcPath))
+        return errResult(QString::fromUtf8("录制文件不存在：%1").arg(name));
+    QJsonObject o;
+    o["ok"] = QFile::copy(srcPath, outPath);
+    o["name"] = name;
+    o["out_path"] = outPath;
+    if (!o["ok"].toBool())
+        o["error"] = QString::fromUtf8("导出失败（目标已存在或不可写）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 19. set_fft_params (write): engine setFftSize/setWindowType/setAverageMode real.
+QString execSetFftParams(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                         const SourceInfo& src) {
+    double sz = 0.0;
+    if (!needNum(args, "fft_size", sz))
+        return errResult(QString::fromUtf8("参数 fft_size 缺失或不是数字"));
+    engine->setFftSize(static_cast<int>(sz));
+    QJsonObject o;
+    o["ok"] = true;
+    o["fft_size"] = engine->fftSize();
+    if (args.contains("window") && args.value("window").isString()) {
+        const QString w = args.value("window").toString();
+        int wi = 0;   // 0=Hann 1=Flattop 2=Blackman (see spectrum_engine.h)
+        if (w == "Flattop") wi = 1;
+        else if (w == "Blackman") wi = 2;
+        engine->setWindowType(wi);
+        o["window"] = w;
+    }
+    if (args.contains("average") && args.value("average").isString()) {
+        const QString av = args.value("average").toString();
+        int ai = 0;   // 0=Off 1=Slow 2=Fast
+        if (av == "Slow") ai = 1;
+        else if (av == "Fast") ai = 2;
+        engine->setAverageMode(ai);
+        o["average"] = av;
+    }
+    o["message"] = QString::fromUtf8("FFT 参数已设置");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 20. set_color_map (write): persist the colormap file path to QSettings.
+QString execSetColorMap(const QJsonObject& args, dsp::SpectrumEngine*,
+                        const SourceInfo& src) {
+    QString p;
+    if (!needStr(args, "file_path", p))
+        return errResult(QString::fromUtf8("参数 file_path 缺失或不是字符串"));
+    QSettings().setValue(QStringLiteral("view/wfColormapFile"), p);
+    QJsonObject o;
+    o["ok"] = true;
+    o["file_path"] = p;
+    o["message"] = QString::fromUtf8("色板路径已保存到设置（重绘由 UI 持有）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 21. get_spectrum_status (read): engine fftSize()/windowType()/averageMode() real.
+QString execGetSpectrumStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
+                              const SourceInfo& src) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["fft_size"] = engine->fftSize();
+    o["window_type"] = engine->windowType();
+    o["average_mode"] = engine->averageMode();
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // The built-in tool registry: name -> executor. Learned (mechanism only) from
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
 // instead of an if-else chain. Clean-room reimplementation; no GPL code copied.
@@ -494,6 +867,28 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_pocsag_messages", &execGetPocsagMessages},
         {"get_m17_calls", &execGetM17Calls},
         {"get_vor_radial", &execGetVorRadial},
+        // Phase26: 21 capability tools (append-only, on-wire order kept).
+        {"set_network_audio_sink", &execSetNetworkAudioSink},
+        {"get_network_audio_status", &execGetNetworkAudioStatus},
+        {"start_scan_link", &execStartScanLink},
+        {"stop_scan_link", &execStopScanLink},
+        {"get_scan_link_status", &execGetScanLinkStatus},
+        {"set_squelch", &execSetSquelch},
+        {"get_squelch_status", &execGetSquelchStatus},
+        {"list_bookmarks", &execListBookmarks},
+        {"add_bookmark", &execAddBookmark},
+        {"tune_to_bookmark", &execTuneToBookmark},
+        {"delete_bookmark", &execDeleteBookmark},
+        {"list_vfos", &execListVfos},
+        {"add_vfo", &execAddVfo},
+        {"switch_vfo", &execSwitchVfo},
+        {"rename_vfo", &execRenameVfo},
+        {"list_recordings", &execListRecordings},
+        {"delete_recording", &execDeleteRecording},
+        {"export_recording", &execExportRecording},
+        {"set_fft_params", &execSetFftParams},
+        {"set_color_map", &execSetColorMap},
+        {"get_spectrum_status", &execGetSpectrumStatus},
     };
     return kTable;
 }

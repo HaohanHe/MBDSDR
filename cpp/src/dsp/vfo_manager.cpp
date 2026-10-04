@@ -319,6 +319,14 @@ bool VfoManager::setColor(int id, const QColor& col) {
     return true;
 }
 
+bool VfoManager::renameVfo(int id, const QString& name) {
+    VfoChannel* c = channel(id);
+    if (!c) return false;
+    if (name.trimmed().isEmpty()) return false;   // honest reject: never blank a label
+    c->name = name;
+    return true;
+}
+
 bool VfoManager::hasId(int id) const {
     return channel(id) != nullptr;
 }

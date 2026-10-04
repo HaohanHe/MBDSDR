@@ -16,6 +16,12 @@ namespace ai {
 // to the only place it is used.
 constexpr double kScanStepMinHz = 1.0;
 
+// FFT size advisory bounds for set_fft_params. The engine already validates the
+// real sizes it accepts; these just keep the JSON schema from advertising an
+// absurd range. Not a hardware token -- named locally next to the only use.
+constexpr double kFftSizeMin = 256.0;
+constexpr double kFftSizeMax = 65536.0;
+
 QJsonObject buildToolSchema(const ToolSchemaSpec& spec) {
     QJsonObject properties;
     QJsonArray required;
@@ -363,6 +369,357 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         f.hasMax = true; f.max = tokens::kFreqMaxHz;
         f.required = false;
         s.params << n << f;
+        out.append(s);
+    }
+
+    // ---- Phase26: capability-everything-as-tools (three-channel parity) ----
+    // The 21 frozen tools/commands below. Each Agent tool == a ControlHub command
+    // == HTTP POST /command on the SAME gate. write=true => gated in manual mode;
+    // write=false => two modes really execute. Order follows the frozen SPEC table.
+    // Backed by the engine methods / QSettings / recDir_ that already exist; the
+    // ScanActivityLink / network-audio / bookmark back-ends land on the control/
+    // side (parallel A block) -- these specs are the AI registration layer only.
+
+    // set_network_audio_sink (write -- gated) -----------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_network_audio_sink";
+        s.description = QString::fromUtf8(
+            "写入：配置网络音频流输出（UDP/TCP 镜像当前解调音频）。"
+            "enable 开关、port 端口、format 采样格式。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec en;
+        en.name = "enable";
+        en.type = "boolean";
+        en.description = QString::fromUtf8("是否开启网络音频流");
+        en.required = true;
+        ToolParamSpec port;
+        port.name = "port";
+        port.type = "number";
+        port.description = QString::fromUtf8("网络音频端口号");
+        port.required = true;
+        ToolParamSpec fmt;
+        fmt.name = "format";
+        fmt.type = "string";
+        fmt.description = QString::fromUtf8("采样格式，如 s16le");
+        fmt.required = false;
+        s.params << en << port << fmt;
+        out.append(s);
+    }
+
+    // get_network_audio_status (read-only) --------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_network_audio_status";
+        s.description = QString::fromUtf8(
+            "只读：返回网络音频流状态（是否使能、端口、格式）。"
+            "无状态时诚实返回 enabled=false，不编造端口。");
+        out.append(s);
+    }
+
+    // start_scan_link (write -- gated) ------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "start_scan_link";
+        s.description = QString::fromUtf8(
+            "写入：启动扫描活动链路（扫描→命中→驻留→解码→录制），目标频率 target_freq_hz。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec t;
+        t.name = "target_freq_hz";
+        t.type = "number";
+        t.description = QString::fromUtf8("扫描目标中心频率 Hz");
+        t.hasMin = true; t.min = tokens::kFreqMinHz;
+        t.hasMax = true; t.max = tokens::kFreqMaxHz;
+        t.required = true;
+        s.params.append(t);
+        out.append(s);
+    }
+
+    // stop_scan_link (write -- gated) -------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "stop_scan_link";
+        s.description = QString::fromUtf8(
+            "写入：停止扫描活动链路。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        out.append(s);
+    }
+
+    // get_scan_link_status (read-only) ------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_scan_link_status";
+        s.description = QString::fromUtf8(
+            "只读：返回扫描活动链路状态（scanning/dwelling/hit）。"
+            "未运行时诚实返回 scanning=false、无命中，不编造。");
+        out.append(s);
+    }
+
+    // set_squelch (write -- gated) ----------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_squelch";
+        s.description = QString::fromUtf8(
+            "写入：设置静噪（enabled 开关、threshold_db 门限、auto 自动链路）。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec en;
+        en.name = "enabled";
+        en.type = "boolean";
+        en.description = QString::fromUtf8("是否开启静噪");
+        en.required = false;
+        ToolParamSpec th;
+        th.name = "threshold_db";
+        th.type = "number";
+        th.description = QString::fromUtf8("静噪门限 dB");
+        th.required = false;
+        ToolParamSpec au;
+        au.name = "auto";
+        au.type = "boolean";
+        au.description = QString::fromUtf8("是否启用自动静噪");
+        au.required = false;
+        s.params << en << th << au;
+        out.append(s);
+    }
+
+    // get_squelch_status (read-only) --------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_squelch_status";
+        s.description = QString::fromUtf8(
+            "只读：返回静噪状态（enabled/threshold_db/auto/当前是否 open）。"
+            "无实时门限读数时诚实标注，不编造。");
+        out.append(s);
+    }
+
+    // list_bookmarks (read-only) -----------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "list_bookmarks";
+        s.description = QString::fromUtf8(
+            "只读：列出书签（频率/名称/模式）。无书签时诚实返回空列表，不编造。");
+        out.append(s);
+    }
+
+    // add_bookmark (write -- gated) --------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "add_bookmark";
+        s.description = QString::fromUtf8(
+            "写入：添加书签（freq_hz/name/mode）。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec f;
+        f.name = "freq_hz";
+        f.type = "number";
+        f.description = QString::fromUtf8("书签频率 Hz");
+        f.hasMin = true; f.min = tokens::kFreqMinHz;
+        f.hasMax = true; f.max = tokens::kFreqMaxHz;
+        f.required = true;
+        ToolParamSpec nm;
+        nm.name = "name";
+        nm.type = "string";
+        nm.description = QString::fromUtf8("书签名称");
+        nm.required = false;
+        ToolParamSpec md;
+        md.name = "mode";
+        md.type = "string";
+        md.description = QString::fromUtf8("解调模式，如 NFM/AM");
+        md.required = false;
+        s.params << f << nm << md;
+        out.append(s);
+    }
+
+    // tune_to_bookmark (write -- gated) ----------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "tune_to_bookmark";
+        s.description = QString::fromUtf8(
+            "写入：调谐到指定下标书签的频率。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec idx;
+        idx.name = "index";
+        idx.type = "number";
+        idx.description = QString::fromUtf8("书签下标（从 0 开始）");
+        idx.required = true;
+        s.params.append(idx);
+        out.append(s);
+    }
+
+    // delete_bookmark (write -- gated) -----------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "delete_bookmark";
+        s.description = QString::fromUtf8(
+            "写入：删除指定下标书签。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec idx;
+        idx.name = "index";
+        idx.type = "number";
+        idx.description = QString::fromUtf8("书签下标（从 0 开始）");
+        idx.required = true;
+        s.params.append(idx);
+        out.append(s);
+    }
+
+    // list_vfos (read-only) ----------------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "list_vfos";
+        s.description = QString::fromUtf8(
+            "只读：列出全部 VFO 信道（id/频率/带宽/模式/选中态）。");
+        out.append(s);
+    }
+
+    // add_vfo (write -- gated) -------------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "add_vfo";
+        s.description = QString::fromUtf8(
+            "写入：新增一个 VFO 信道。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        out.append(s);
+    }
+
+    // switch_vfo (write -- gated) ----------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "switch_vfo";
+        s.description = QString::fromUtf8(
+            "写入：切换选中的 VFO 信道（index）。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec idx;
+        idx.name = "index";
+        idx.type = "number";
+        idx.description = QString::fromUtf8("VFO id");
+        idx.required = true;
+        s.params.append(idx);
+        out.append(s);
+    }
+
+    // rename_vfo (write -- gated) ----------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "rename_vfo";
+        s.description = QString::fromUtf8(
+            "写入：重命名指定 VFO 信道（index/name）。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec idx;
+        idx.name = "index";
+        idx.type = "number";
+        idx.description = QString::fromUtf8("VFO id");
+        idx.required = true;
+        ToolParamSpec nm;
+        nm.name = "name";
+        nm.type = "string";
+        nm.description = QString::fromUtf8("新名称");
+        nm.required = true;
+        s.params << idx << nm;
+        out.append(s);
+    }
+
+    // list_recordings (read-only) ---------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "list_recordings";
+        s.description = QString::fromUtf8(
+            "只读：扫描录制目录并列出已有录制文件。目录不存在或为空时诚实返回空列表。");
+        out.append(s);
+    }
+
+    // delete_recording (write -- gated) ----------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "delete_recording";
+        s.description = QString::fromUtf8(
+            "写入：删除录制目录下指定名称的文件（仅限录制目录内）。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec nm;
+        nm.name = "name";
+        nm.type = "string";
+        nm.description = QString::fromUtf8("录制文件名（仅文件名，不得含路径）");
+        nm.required = true;
+        s.params.append(nm);
+        out.append(s);
+    }
+
+    // export_recording (write -- gated) ----------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "export_recording";
+        s.description = QString::fromUtf8(
+            "写入：把录制目录下指定文件复制导出到 out_path。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec nm;
+        nm.name = "name";
+        nm.type = "string";
+        nm.description = QString::fromUtf8("录制文件名（仅文件名）");
+        nm.required = true;
+        ToolParamSpec outPath;
+        outPath.name = "out_path";
+        outPath.type = "string";
+        outPath.description = QString::fromUtf8("导出目标完整路径");
+        outPath.required = true;
+        s.params << nm << outPath;
+        out.append(s);
+    }
+
+    // set_fft_params (write -- gated) ------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_fft_params";
+        s.description = QString::fromUtf8(
+            "写入：设置频谱 FFT 参数（fft_size/window/average）。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec sz;
+        sz.name = "fft_size";
+        sz.type = "number";
+        sz.description = QString::fromUtf8("FFT 点数，如 1024/2048/4096/8192");
+        sz.hasMin = true; sz.min = kFftSizeMin;
+        sz.hasMax = true; sz.max = kFftSizeMax;
+        sz.required = true;
+        ToolParamSpec w;
+        w.name = "window";
+        w.type = "string";
+        w.description = QString::fromUtf8("窗函数");
+        w.enumValues = QVariantList{"Hann", "Flattop", "Blackman"};
+        w.required = false;
+        ToolParamSpec av;
+        av.name = "average";
+        av.type = "string";
+        av.description = QString::fromUtf8("平均模式");
+        av.enumValues = QVariantList{"Off", "Slow", "Fast"};
+        av.required = false;
+        s.params << sz << w << av;
+        out.append(s);
+    }
+
+    // set_color_map (write -- gated) -------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_color_map";
+        s.description = QString::fromUtf8(
+            "写入：保存瀑布图色板文件路径到设置（headless 仅持久化偏好，重绘由 UI 持有）。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec p;
+        p.name = "file_path";
+        p.type = "string";
+        p.description = QString::fromUtf8("色板文件路径");
+        p.required = true;
+        s.params.append(p);
+        out.append(s);
+    }
+
+    // get_spectrum_status (read-only) ------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_spectrum_status";
+        s.description = QString::fromUtf8(
+            "只读：返回频谱当前参数（fft_size/window/average）真实值。");
         out.append(s);
     }
 

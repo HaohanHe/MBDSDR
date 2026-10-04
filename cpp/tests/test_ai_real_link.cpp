@@ -79,6 +79,8 @@ private slots:
     void exportIqSegment_writesRealFile();
     void exportIqSegment_noDataHonestError();
     void toolCount_registryEqualsExecution();
+    void phase26_tools_callableReturnJson();
+    void phase26_badArgsHonestError();
 };
 
 void TestAiRealLink::initTestCase() {
@@ -335,6 +337,14 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "calibrate_frequency", "apply_frequency_correction",
         "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
         "export_iq_segment",
+        // Phase26: 21 new tools.
+        "set_network_audio_sink", "get_network_audio_status",
+        "start_scan_link", "stop_scan_link", "get_scan_link_status",
+        "set_squelch", "get_squelch_status",
+        "list_bookmarks", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
+        "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
+        "list_recordings", "delete_recording", "export_recording",
+        "set_fft_params", "set_color_map", "get_spectrum_status",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -347,6 +357,106 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(!ai::isWriteTool("get_vor_radial"));
     // export_iq_segment writes a file to disk -> it IS a gated write tool.
     QVERIFY(ai::isWriteTool("export_iq_segment"));
+    // Phase26 write/read split: 14 new writes gated, 7 new reads open.
+    QVERIFY(ai::isWriteTool("set_network_audio_sink"));
+    QVERIFY(ai::isWriteTool("start_scan_link"));
+    QVERIFY(ai::isWriteTool("stop_scan_link"));
+    QVERIFY(ai::isWriteTool("set_squelch"));
+    QVERIFY(ai::isWriteTool("add_bookmark"));
+    QVERIFY(ai::isWriteTool("tune_to_bookmark"));
+    QVERIFY(ai::isWriteTool("delete_bookmark"));
+    QVERIFY(ai::isWriteTool("add_vfo"));
+    QVERIFY(ai::isWriteTool("switch_vfo"));
+    QVERIFY(ai::isWriteTool("rename_vfo"));
+    QVERIFY(ai::isWriteTool("delete_recording"));
+    QVERIFY(ai::isWriteTool("export_recording"));
+    QVERIFY(ai::isWriteTool("set_fft_params"));
+    QVERIFY(ai::isWriteTool("set_color_map"));
+    QVERIFY(!ai::isWriteTool("get_network_audio_status"));
+    QVERIFY(!ai::isWriteTool("get_scan_link_status"));
+    QVERIFY(!ai::isWriteTool("get_squelch_status"));
+    QVERIFY(!ai::isWriteTool("list_bookmarks"));
+    QVERIFY(!ai::isWriteTool("list_vfos"));
+    QVERIFY(!ai::isWriteTool("list_recordings"));
+    QVERIFY(!ai::isWriteTool("get_spectrum_status"));
+}
+
+// Phase26 contract: the newly registered tools are actually dispatchable
+// (executeTool returns JSON, never "未知工具") and the engine-backed ones report
+// real read-back. Offline synthetic source; honest source disclosure kept.
+void TestAiRealLink::phase26_tools_callableReturnJson() {
+    dsp::SpectrumEngine engine;
+
+    // Read tools: callable, honest empty / real read-back.
+    QJsonObject spec = parseObj(ai::executeTool("get_spectrum_status", QJsonObject{}, &engine));
+    QVERIFY2(!spec.isEmpty() && spec.value("ok").toBool(),
+             qPrintable("get_spectrum_status must return JSON, got: " +
+                        ai::executeTool("get_spectrum_status", QJsonObject{}, &engine)));
+    QVERIFY(spec.contains("fft_size"));
+
+    QJsonObject vfos = parseObj(ai::executeTool("list_vfos", QJsonObject{}, &engine));
+    QVERIFY2(vfos.value("ok").toBool(), qPrintable("list_vfos: " + ai::executeTool("list_vfos", QJsonObject{}, &engine)));
+    QVERIFY(vfos.value("vfos").isArray());
+
+    QJsonObject recs = parseObj(ai::executeTool("list_recordings", QJsonObject{}, &engine));
+    QVERIFY2(recs.value("ok").toBool(), qPrintable("list_recordings: " + ai::executeTool("list_recordings", QJsonObject{}, &engine)));
+    QVERIFY(recs.value("recordings").isArray());   // honest empty dir listing
+
+    // Write tools: callable on the non-gated executeTool path and JSON-returning.
+    QJsonObject fft; fft["fft_size"] = 4096;
+    QJsonObject fftR = parseObj(ai::executeTool("set_fft_params", fft, &engine));
+    QVERIFY2(fftR.value("ok").toBool(), qPrintable("set_fft_params: " + ai::executeTool("set_fft_params", fft, &engine)));
+    QCOMPARE(fftR.value("fft_size").toInt(), 4096);   // real engine read-back
+
+    QJsonObject sq; sq["enabled"] = true; sq["threshold_db"] = -60.0;
+    QJsonObject sqR = parseObj(ai::executeTool("set_squelch", sq, &engine));
+    QVERIFY2(sqR.value("ok").toBool(), qPrintable("set_squelch: " + ai::executeTool("set_squelch", sq, &engine)));
+
+    QJsonObject sw; sw["index"] = 0;
+    QJsonObject swR = parseObj(ai::executeTool("switch_vfo", sw, &engine));
+    QVERIFY2(swR.value("ok").toBool(), qPrintable("switch_vfo: " + ai::executeTool("switch_vfo", sw, &engine)));
+
+    // Every new tool must dispatch (never the "未知工具" fallback).
+    const QStringList newTools = {
+        "set_network_audio_sink", "get_network_audio_status",
+        "start_scan_link", "stop_scan_link", "get_scan_link_status",
+        "set_squelch", "get_squelch_status",
+        "list_bookmarks", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
+        "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
+        "list_recordings", "delete_recording", "export_recording",
+        "set_fft_params", "set_color_map", "get_spectrum_status",
+    };
+    for (const QString& t : newTools) {
+        const QString r = ai::executeTool(t, QJsonObject{}, &engine);
+        QVERIFY2(!r.contains(QString::fromUtf8("未知工具")),
+                 qPrintable("new tool not dispatched: " + t + " -> " + r));
+    }
+}
+
+// Phase26 contract: missing / wrong-typed required args -> honest ok:false,
+// never a crash, never a fabricated success.
+void TestAiRealLink::phase26_badArgsHonestError() {
+    dsp::SpectrumEngine engine;
+
+    // set_fft_params without fft_size.
+    QJsonObject fftR = parseObj(ai::executeTool("set_fft_params", QJsonObject{}, &engine));
+    QCOMPARE(fftR.value("ok").toBool(), false);
+
+    // switch_vfo without index.
+    QCOMPARE(parseObj(ai::executeTool("switch_vfo", QJsonObject{}, &engine))
+             .value("ok").toBool(), false);
+
+    // add_bookmark without freq_hz.
+    QCOMPARE(parseObj(ai::executeTool("add_bookmark", QJsonObject{}, &engine))
+             .value("ok").toBool(), false);
+
+    // set_network_audio_sink without enable.
+    QCOMPARE(parseObj(ai::executeTool("set_network_audio_sink", QJsonObject{}, &engine))
+             .value("ok").toBool(), false);
+
+    // delete_recording without name.
+    QCOMPARE(parseObj(ai::executeTool("delete_recording", QJsonObject{}, &engine))
+             .value("ok").toBool(), false);
 }
 
 QTEST_MAIN(TestAiRealLink)

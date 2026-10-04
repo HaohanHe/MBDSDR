@@ -41,7 +41,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 14);
+    QCOMPARE(specs.size(), 35);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -176,6 +176,81 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "cf32_le SigMF 文件（.sigmf-data + .sigmf-meta），返回真实路径与样本数。"
             "区别于 start_recording 的连续录制：这是按需导出一个有界窗口后即返回。"
             "无 IQ 数据时诚实报错，不生成空文件。属于写动作，手动模式下被拦截。")},
+        // Phase26: 21 new tools, verbatim description pairs (must match
+        // tool_schema.cpp registeredToolSpecs() exactly, in on-wire order).
+        {"set_network_audio_sink",
+         QString::fromUtf8(
+            "写入：配置网络音频流输出（UDP/TCP 镜像当前解调音频）。"
+            "enable 开关、port 端口、format 采样格式。属于写动作，手动模式下被拦截。")},
+        {"get_network_audio_status",
+         QString::fromUtf8(
+            "只读：返回网络音频流状态（是否使能、端口、格式）。"
+            "无状态时诚实返回 enabled=false，不编造端口。")},
+        {"start_scan_link",
+         QString::fromUtf8(
+            "写入：启动扫描活动链路（扫描→命中→驻留→解码→录制），目标频率 target_freq_hz。"
+            "属于写动作，手动模式下被拦截。")},
+        {"stop_scan_link",
+         QString::fromUtf8(
+            "写入：停止扫描活动链路。属于写动作，手动模式下被拦截。")},
+        {"get_scan_link_status",
+         QString::fromUtf8(
+            "只读：返回扫描活动链路状态（scanning/dwelling/hit）。"
+            "未运行时诚实返回 scanning=false、无命中，不编造。")},
+        {"set_squelch",
+         QString::fromUtf8(
+            "写入：设置静噪（enabled 开关、threshold_db 门限、auto 自动链路）。"
+            "属于写动作，手动模式下被拦截。")},
+        {"get_squelch_status",
+         QString::fromUtf8(
+            "只读：返回静噪状态（enabled/threshold_db/auto/当前是否 open）。"
+            "无实时门限读数时诚实标注，不编造。")},
+        {"list_bookmarks",
+         QString::fromUtf8(
+            "只读：列出书签（频率/名称/模式）。无书签时诚实返回空列表，不编造。")},
+        {"add_bookmark",
+         QString::fromUtf8(
+            "写入：添加书签（freq_hz/name/mode）。属于写动作，手动模式下被拦截。")},
+        {"tune_to_bookmark",
+         QString::fromUtf8(
+            "写入：调谐到指定下标书签的频率。属于写动作，手动模式下被拦截。")},
+        {"delete_bookmark",
+         QString::fromUtf8(
+            "写入：删除指定下标书签。属于写动作，手动模式下被拦截。")},
+        {"list_vfos",
+         QString::fromUtf8(
+            "只读：列出全部 VFO 信道（id/频率/带宽/模式/选中态）。")},
+        {"add_vfo",
+         QString::fromUtf8(
+            "写入：新增一个 VFO 信道。属于写动作，手动模式下被拦截。")},
+        {"switch_vfo",
+         QString::fromUtf8(
+            "写入：切换选中的 VFO 信道（index）。属于写动作，手动模式下被拦截。")},
+        {"rename_vfo",
+         QString::fromUtf8(
+            "写入：重命名指定 VFO 信道（index/name）。属于写动作，手动模式下被拦截。")},
+        {"list_recordings",
+         QString::fromUtf8(
+            "只读：扫描录制目录并列出已有录制文件。目录不存在或为空时诚实返回空列表。")},
+        {"delete_recording",
+         QString::fromUtf8(
+            "写入：删除录制目录下指定名称的文件（仅限录制目录内）。"
+            "属于写动作，手动模式下被拦截。")},
+        {"export_recording",
+         QString::fromUtf8(
+            "写入：把录制目录下指定文件复制导出到 out_path。"
+            "属于写动作，手动模式下被拦截。")},
+        {"set_fft_params",
+         QString::fromUtf8(
+            "写入：设置频谱 FFT 参数（fft_size/window/average）。"
+            "属于写动作，手动模式下被拦截。")},
+        {"set_color_map",
+         QString::fromUtf8(
+            "写入：保存瀑布图色板文件路径到设置（headless 仅持久化偏好，重绘由 UI 持有）。"
+            "属于写动作，手动模式下被拦截。")},
+        {"get_spectrum_status",
+         QString::fromUtf8(
+            "只读：返回频谱当前参数（fft_size/window/average）真实值。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {

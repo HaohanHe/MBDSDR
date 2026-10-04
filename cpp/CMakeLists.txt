@@ -94,6 +94,8 @@ set(SOURCES
     src/dsp/gated_recorder.cpp
     src/dsp/signal_watch.cpp
     src/dsp/frequency_scanner.cpp
+    src/dsp/scan_link.cpp
+    src/dsp/network_audio_sink.cpp
     src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp
     src/dsp/rds_decoder.cpp
@@ -348,7 +350,8 @@ add_executable(test_engine_integration tests/test_engine_integration.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_engine_integration PRIVATE src)
 target_link_libraries(test_engine_integration PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_integration COMMAND test_engine_integration)
@@ -364,7 +367,8 @@ add_executable(test_engine_empty_state tests/test_engine_empty_state.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_engine_empty_state PRIVATE src)
 target_link_libraries(test_engine_empty_state PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_empty_state COMMAND test_engine_empty_state)
@@ -381,7 +385,8 @@ add_executable(test_control_hub tests/test_control_hub.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_control_hub PRIVATE src)
 target_link_libraries(test_control_hub PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME control_hub COMMAND test_control_hub)
@@ -398,7 +403,8 @@ add_executable(test_control_hub_remote tests/test_control_hub_remote.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_control_hub_remote PRIVATE src)
 target_link_libraries(test_control_hub_remote PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME control_hub_remote COMMAND test_control_hub_remote)
@@ -415,7 +421,8 @@ add_executable(test_control_http tests/test_control_http.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_control_http PRIVATE src)
 target_link_libraries(test_control_http PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME control_http COMMAND test_control_http)
@@ -429,7 +436,8 @@ add_executable(test_engine_audio_e2e tests/test_engine_audio_e2e.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_engine_audio_e2e PRIVATE src)
 target_link_libraries(test_engine_audio_e2e PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_audio_e2e COMMAND test_engine_audio_e2e)
@@ -442,7 +450,8 @@ add_executable(test_bandwidth_preset tests/test_bandwidth_preset.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_bandwidth_preset PRIVATE src)
 target_link_libraries(test_bandwidth_preset PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME bandwidth_preset COMMAND test_bandwidth_preset)
@@ -461,7 +470,8 @@ add_executable(test_engine_hotplug tests/test_engine_hotplug.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_engine_hotplug PRIVATE src)
 target_link_libraries(test_engine_hotplug PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_hotplug COMMAND test_engine_hotplug)
@@ -475,7 +485,8 @@ add_executable(test_spyserver_server tests/test_spyserver_server.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_spyserver_server PRIVATE src)
 target_link_libraries(test_spyserver_server PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME spyserver_server COMMAND test_spyserver_server)
@@ -504,7 +515,8 @@ add_executable(test_audio_sink tests/test_audio_sink.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_audio_sink PRIVATE src)
 target_link_libraries(test_audio_sink PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME audio_sink COMMAND test_audio_sink)
@@ -562,7 +574,8 @@ add_executable(test_wav_roundtrip tests/test_wav_roundtrip.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_wav_roundtrip PRIVATE src)
 target_link_libraries(test_wav_roundtrip PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME wav_roundtrip COMMAND test_wav_roundtrip)
@@ -797,7 +810,8 @@ add_executable(test_squelch_autogate tests/test_squelch_autogate.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_squelch_autogate PRIVATE src)
 target_link_libraries(test_squelch_autogate PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME squelch_autogate COMMAND test_squelch_autogate)
@@ -968,7 +982,8 @@ add_executable(test_file_source tests/test_file_source.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_file_source PRIVATE src)
 target_link_libraries(test_file_source PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME file_source COMMAND test_file_source)
@@ -1174,7 +1189,8 @@ add_executable(test_agc tests/test_agc.cpp
     src/dsp/qt_audio_sink.cpp
     src/dsp/recorder.cpp src/dsp/wav_writer.cpp src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp
     src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_agc PRIVATE src)
 target_link_libraries(test_agc PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME agc COMMAND test_agc)
@@ -1491,7 +1507,8 @@ add_executable(test_network_audio_sink tests/test_network_audio_sink.cpp
     src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
     src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
     src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
-    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
 target_include_directories(test_network_audio_sink PRIVATE src)
 target_link_libraries(test_network_audio_sink PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME network_audio_sink COMMAND test_network_audio_sink)

@@ -208,8 +208,17 @@ void SpectrumEngine::setDemodMode(const QString& m) {
     needDemodReset_.store(true);
     emit vfoListChanged();
 }
-void SpectrumEngine::setSquelchThreshold(float db) { squelch_.setThresholdDb(db); }
+void SpectrumEngine::setSquelchThreshold(float db) {
+    squelchThreshold_ = db;        // cache for read-back (Squelch has no getter)
+    squelch_.setThresholdDb(db);
+    squelchAuto_.store(false);     // a manual threshold disarms auto
+}
 void SpectrumEngine::setSquelchEnabled(bool e) { squelch_.setEnabled(e); }
+
+bool SpectrumEngine::squelchEnabled() const {
+    return squelch_.mode() == Squelch::Mode::Gate;
+}
+bool SpectrumEngine::squelchOpen() const { return squelch_.open(); }
 
 double SpectrumEngine::scanBand(double lowHz, double highHz, double stepHz,
                                   double* peakFreqHzOut) {
@@ -865,6 +874,13 @@ void SpectrumEngine::vfoSetColor(int id, const QColor& c) {
     emit vfoListChanged();
 }
 
+bool SpectrumEngine::vfoRename(int id, const QString& name) {
+    QMutexLocker lk(&sourceMutex_);
+    const bool ok = vfoManager_.renameVfo(id, name);
+    if (ok) emit vfoListChanged();
+    return ok;
+}
+
 void SpectrumEngine::setAnrEnabled(bool on) {
     QMutexLocker lk(&sourceMutex_);
     anr_.setEnabled(on);
@@ -1294,6 +1310,15 @@ void SpectrumEngine::run() {
                 audioNfLastEmitMs_ = nowNf;
                 emit audioRmsNoiseFloor(static_cast<float>(audioNfDbfs_));
             }
+        }
+        // Auto-threshold latch: when armed, the gate threshold follows the tracked
+        // audio-RMS noise floor + margin (same domain), re-derived each block. A
+        // manual setSquelchThreshold disarms this (see above).
+        if (squelchAuto_.load()) {
+            const float autoThr = static_cast<float>(audioNfDbfs_)
+                                  + static_cast<float>(tokens::kSquelchAutoMarginDb);
+            squelchThreshold_ = autoThr;
+            squelch_.setThresholdDb(autoThr);
         }
         const bool gate = squelch_.decide(audio, rms);
         // Detection/ANR/squelch/AGC all run on the legacy mono M. processWithGain

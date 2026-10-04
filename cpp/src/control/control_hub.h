@@ -46,11 +46,17 @@
 #include <QJsonObject>
 #include <QList>
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <vector>
 
 namespace mbdsdr {
-namespace dsp { class SpectrumEngine; }
+namespace dsp {
+class SpectrumEngine;
+class NetworkAudioSink;   // owned here, handed to the engine as an IAudioSink tap
+class ScanActivityLink;   // headless band-scan state machine (start/stop/status)
+}
+namespace ui { class BookmarkManager; }   // pure data + QSettings persistence
 
 namespace control {
 
@@ -144,6 +150,15 @@ private:
     mutable std::mutex  snapMtx_;
     TelemetrySnapshot   snap_;
 
+    // Phase26 owned helpers. Held via unique_ptr so their (heavier) headers stay
+    // out of this lightweight header; the dtor is out-of-line in the .cpp.
+    std::unique_ptr<ui::BookmarkManager>   bookmarks_;
+    // Network-audio tap: ControlHub creates + starts it, then hands ownership to
+    // the engine's parallel-write seam (engine_->setNetworkAudioSink). We keep an
+    // observing raw pointer for status; the engine destroys it on disable/replace.
+    dsp::NetworkAudioSink*                 netTapRaw_ = nullptr;
+    std::unique_ptr<dsp::ScanActivityLink> scanLink_;
+
     // Result builders.
     static QJsonObject okBase();
     static QJsonObject errResult(const QString& error);
@@ -198,6 +213,38 @@ private:
     QJsonObject cmdGetPocsagMessages(const QJsonObject&);
     QJsonObject cmdGetM17Calls(const QJsonObject&);
     QJsonObject cmdGetVorRadial(const QJsonObject&);
+
+    // ---- Phase26: 21 newly tool-ized capabilities -------------------------
+    // Network audio tap (ControlHub owns the sink lifecycle; hands it to the
+    // engine's parallel-audio-write seam). WRITE gates enable/disable.
+    QJsonObject cmdSetNetworkAudioSink(const QJsonObject& a);
+    QJsonObject cmdGetNetworkAudioStatus(const QJsonObject&);
+    // Headless band-scan link (ControlHub owns the ScanActivityLink instance;
+    // onRetune drives the engine's centre). WRITE gates start/stop.
+    QJsonObject cmdStartScanLink(const QJsonObject& a);
+    QJsonObject cmdStopScanLink(const QJsonObject&);
+    QJsonObject cmdGetScanLinkStatus(const QJsonObject&);
+    // Unified squelch set + read-back.
+    QJsonObject cmdSetSquelch(const QJsonObject& a);
+    QJsonObject cmdGetSquelchStatus(const QJsonObject&);
+    // Bookmarks (ControlHub holds a ui::BookmarkManager; same QSettings key).
+    QJsonObject cmdListBookmarks(const QJsonObject&);
+    QJsonObject cmdAddBookmark(const QJsonObject& a);
+    QJsonObject cmdTuneToBookmark(const QJsonObject& a);
+    QJsonObject cmdDeleteBookmark(const QJsonObject& a);
+    // VFO list / add / switch / rename.
+    QJsonObject cmdListVfos(const QJsonObject&);
+    QJsonObject cmdAddVfo(const QJsonObject&);
+    QJsonObject cmdSwitchVfo(const QJsonObject& a);
+    QJsonObject cmdRenameVfo(const QJsonObject& a);
+    // Recordings on disk (honest empty state; deletion is path-contained).
+    QJsonObject cmdListRecordings(const QJsonObject&);
+    QJsonObject cmdDeleteRecording(const QJsonObject& a);
+    QJsonObject cmdExportRecording(const QJsonObject& a);
+    // FFT / spectrum parameters + waterfall colormap preference.
+    QJsonObject cmdSetFftParams(const QJsonObject& a);
+    QJsonObject cmdSetColorMap(const QJsonObject& a);
+    QJsonObject cmdGetSpectrumStatus(const QJsonObject&);
 
     // Argument extraction: fills `out` and returns true, else fills `err`.
     static bool needDbl(const QJsonObject& a, const char* key, double& out, QString& err);
