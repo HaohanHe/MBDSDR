@@ -38,6 +38,10 @@ if _REPO_ROOT not in sys.path:
 
 from mbdsdr_ai.ssdv_decoder import (  # noqa: E402
     PACKET_LEN,
+    DSLWP_PACKET_LEN,
+    DSLWP_HEADER_LEN,
+    DSLWP_PAYLOAD_LEN,
+    DIALECT_DSLWP,
     SsdvDecoder,
     SsdvEncoder,
     SsdvImage,
@@ -446,3 +450,193 @@ def test_no_builtin_callsign_in_sources():
         src = open(path, encoding="utf-8").read()
         for bad in ("BI4MIB", "DEFAULT_CALLSIGN"):
             assert bad not in src, f"{fname} 内置了呼号常量 {bad!r}"
+
+
+# ==========================================================================
+# 6. DSLWP 变体（218B 包 / 9 头 / 魔数 CRC32 0x4EE4FDE1 / 无包内 RS）
+#
+# 与 fsphil 经典的区别：无 sync 0x55、无 type、无 base-40 呼号、包内无 RS；
+# MCU→JPEG 重组核心（Annex K / mcu_mode / quality）完全同源，直接复用。
+# 编码方向仅作测试夹具：小图 -> DSLWP 218B 包 -> 全链解码 -> JPEG 出图断言。
+# ==========================================================================
+def _encode_to_dslwp(rgb: np.ndarray, image_id: int = IMG_ID) -> list:
+    enc = SsdvEncoder(callsign=CALLSIGN, image_id=image_id,
+                      quality=4, mcu_mode=3)
+    return enc.encode_image_dslwp(rgb)
+
+
+def _decode_dslwp_stream(stream: bytes, image_id: int = IMG_ID,
+                         dialect=DIALECT_DSLWP) -> "object":
+    dec = SsdvDecoder(dialect=dialect)
+    imgset = SsdvImage(image_id)
+    for pkt in dec.feed(stream):
+        if pkt is not None:
+            imgset.add(pkt)
+    return imgset.build()
+
+
+def test_dslwp_packet_layout_constants():
+    """DSLWP 包层常量：218B 包 / 9 头 / 205 载荷 / 末 4 字节 CRC。"""
+    assert DSLWP_PACKET_LEN == 218
+    assert DSLWP_HEADER_LEN == 9
+    assert DSLWP_PAYLOAD_LEN == 205
+    assert DSLWP_HEADER_LEN + DSLWP_PAYLOAD_LEN + 4 == DSLWP_PACKET_LEN
+
+
+def test_dslwp_roundtrip_full_decode_to_jpeg():
+    """小图 -> DSLWP 包流 -> 全链解码 -> JPEG 出图断言。"""
+    rgb = _gradient_rgb(48, 48)
+    src = _pil_jpeg_roundtrip(rgb)
+    pkts = _encode_to_dslwp(rgb)
+
+    assert len(pkts) >= 2, "48x48 图应拆成多个 DSLWP 包"
+    assert all(len(p) == DSLWP_PACKET_LEN == 218 for p in pkts)
+
+    stream = b"".join(pkts)
+    res = _decode_dslwp_stream(stream, IMG_ID)
+
+    assert not res.empty
+    assert (res.width, res.height) == (48, 48)
+    # 全部 MCU 收到、无缺失（无包内 RS；信道级 FEC 不在本层）
+    assert res.mcu_count == 36, f"mcu_count 期望 36，实得 {res.mcu_count}"
+    assert res.missing_mcus == [], f"完整包流应无缺失 MCU，实得 {res.missing_mcus}"
+    assert len(res.received_mcus) == res.mcu_count
+    assert res.eoi_seen, "末包应带 EOI 标志"
+
+    out = Image.open(io.BytesIO(res.jpeg))
+    out.load()
+    assert out.size == src.size == (48, 48)
+
+
+def test_dslwp_auto_detect_locks_dslwp():
+    """默认 auto 方言：纯 DSLWP 流（无 0x55/0x66）应自动判别并锁 dslwp。"""
+    rgb = _gradient_rgb(48, 48)
+    stream = b"".join(_encode_to_dslwp(rgb))
+    dec = SsdvDecoder()                 # 默认 auto
+    imgset = SsdvImage(IMG_ID)
+    for p in dec.feed(stream):
+        if p is not None:
+            imgset.add(p)
+    assert dec.locked == DIALECT_DSLWP, f"纯 DSLWP 流应锁 dslwp，实得 {dec.locked}"
+    res = imgset.build()
+    assert res.missing_mcus == []
+    Image.open(io.BytesIO(res.jpeg)).load()
+
+
+def test_dslwp_magic_crc_bad_packet_honestly_dropped():
+    """魔数 CRC 校验失败的包诚实丢弃（None），其负责的 MCU 列入 missing，不造假。"""
+    rgb = _gradient_rgb(48, 48)
+    pkts = _encode_to_dslwp(rgb)
+
+    bad = bytearray(pkts[1])
+    bad[20] ^= 0xFF                     # 翻一个载荷字节 -> CRC 必不过
+    corrupted = bytes(bad)
+
+    dec = SsdvDecoder(dialect=DIALECT_DSLWP)
+    imgset = SsdvImage(IMG_ID)
+    dropped = 0
+    for i, raw in enumerate(pkts):
+        chunk = corrupted if i == 1 else raw
+        for p in dec.feed(chunk):
+            if p is None:
+                dropped += 1
+            else:
+                imgset.add(p)
+    res = imgset.build()
+
+    assert dropped == 1, f"CRC 错包应被丢弃为 None，实得 dropped={dropped}"
+    assert not res.empty
+    assert res.missing_mcus, "CRC 错包负责的 MCU 应诚实报缺失"
+    # 守恒：收到 + 缺失 == 全部 MCU
+    assert len(res.received_mcus) + len(res.missing_mcus) == res.mcu_count
+    Image.open(io.BytesIO(res.jpeg)).load()
+
+
+def test_dslwp_bad_crc_region_also_rejected():
+    """直接校验：翻转 CRC 区或载荷都应让 correct_dslwp_packet 返回 None。"""
+    from mbdsdr_ai.ssdv_decoder import SsdvDecoder as _D
+    rgb = _gradient_rgb(48, 48)
+    pkt = _encode_to_dslwp(rgb)[0]
+    d = _D(dialect=DIALECT_DSLWP)
+    assert d.correct_dslwp_packet(pkt) is not None, "合法包必须通过魔数 CRC"
+    # 翻 CRC 区一个字节
+    assert d.correct_dslwp_packet(pkt[:-1] + bytes([pkt[-1] ^ 0xFF])) is None
+    # 翻载荷一个字节
+    c = bytearray(pkt); c[100] ^= 0xFF
+    assert d.correct_dslwp_packet(bytes(c)) is None
+    # 长度不对也拒绝
+    assert d.correct_dslwp_packet(pkt[:-1]) is None
+
+
+def test_dslwp_out_of_order_reassembles():
+    """乱序（逆序）到达的 DSLWP 包 -> 按 packet_id 排序重组，无缺失。"""
+    rgb = _gradient_rgb(96, 96)
+    pkts = _encode_to_dslwp(rgb)
+    assert len(pkts) >= 3
+
+    dec = SsdvDecoder(dialect=DIALECT_DSLWP)
+    imgset = SsdvImage(IMG_ID)
+    for raw in pkts[::-1]:
+        for p in dec.feed(raw):
+            if p is not None:
+                imgset.add(p)
+    res = imgset.build()
+    assert not res.empty
+    assert res.missing_mcus == [], f"乱序到达不应丢 MCU，实得 {res.missing_mcus}"
+    assert len(res.received_mcus) + len(res.missing_mcus) == res.mcu_count
+    Image.open(io.BytesIO(res.jpeg)).load()
+
+
+def test_dslwp_duplicate_packets_deduped():
+    """同 packet_id 重复到达（重传）-> 按 packet_id 去重。"""
+    rgb = _gradient_rgb(96, 96)
+    pkts = _encode_to_dslwp(rgb)
+
+    dec = SsdvDecoder(dialect=DIALECT_DSLWP)
+    imgset = SsdvImage(IMG_ID)
+    n_raw = 0
+    for raw in pkts:
+        for _ in range(2):
+            for p in dec.feed(raw):
+                if p is not None:
+                    imgset.add(p)
+                    n_raw += 1
+    res = imgset.build()
+    assert n_raw == 2 * len(pkts)
+    assert len(imgset.packets) == len(pkts), "重复 packet_id 必须去重"
+    assert res.missing_mcus == []
+    Image.open(io.BytesIO(res.jpeg)).load()
+
+
+def test_dslwp_middle_gap_reports_missing():
+    """中间整包丢失 -> 诚实报缺失 MCU，守恒成立，JPEG 仍可打开。"""
+    rgb = _gradient_rgb(96, 96)
+    pkts = _encode_to_dslwp(rgb)
+    drop = len(pkts) // 2
+
+    dec = SsdvDecoder(dialect=DIALECT_DSLWP)
+    imgset = SsdvImage(IMG_ID)
+    for i, raw in enumerate(pkts):
+        if i == drop:
+            continue
+        for p in dec.feed(raw):
+            if p is not None:
+                imgset.add(p)
+    res = imgset.build()
+    assert res.missing_mcus, "中间丢包应诚实报缺失 MCU"
+    assert len(res.received_mcus) + len(res.missing_mcus) == res.mcu_count
+    Image.open(io.BytesIO(res.jpeg)).load()
+
+
+def test_dslwp_noise_empty_state():
+    """纯随机噪声字节流：解不出合法 DSLWP 包，不伪造、空结果。"""
+    dec = SsdvDecoder(dialect=DIALECT_DSLWP)
+    assert dec.feed(b"") == [], "空输入不得产出包"
+
+    noise = np.random.default_rng(SEED).integers(0, 256, size=4096, dtype=np.uint8).tobytes()
+    out = [p for p in dec.feed(noise) if p is not None]
+    assert out == [], "纯噪声不得解出假 DSLWP 包"
+
+    imgset = SsdvImage(IMG_ID)
+    res = imgset.build()
+    assert res.empty and res.jpeg == b""

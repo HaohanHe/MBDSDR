@@ -69,6 +69,13 @@ public:
     // Pass nullptr to restore the default device sink. The engine takes
     // ownership; the previous injected sink is destroyed.
     void setTestAudioSink(std::unique_ptr<IAudioSink> sink);
+    // Network audio tap: a PARALLEL branch off the demodulated-audio write point
+    // (the same block that goes to audioSink_). The existing speaker/recording
+    // chain is never diverted or stopped -- the tap just mirrors its frames to
+    // the network. nullptr detaches and destroys the tap. Digital VFOs produce no
+    // analog audio, so the tap simply stays silent in that mode (no fabricated
+    // silence stream). Owned here.
+    void setNetworkAudioSink(std::unique_ptr<IAudioSink> tap);
     // Sweep [lowHz, highHz] in stepHz, returning the peak RMS dBFS observed.
     // When peakFreqHzOut is non-null it is filled with the frequency at which
     // the peak occurred (so callers can retune to the hit).
@@ -87,6 +94,19 @@ public:
                                       std::vector<std::complex<float>>& out,
                                       double& sampleRateHzOut,
                                       double& centreHzOut);
+
+    // One-shot, user-initiated IQ EXPORT (the independent "dump the current IQ
+    // segment to a file" entry, SDR++ iq_exporter-aligned but a FILE sink rather
+    // than a network stream): capture ~sampleCount complex BASEBAND IQ and write
+    // it as a cf32_le SigMF pair (.sigmf-data + .sigmf-meta) under the recording
+    // dir, WITHOUT disturbing any in-flight continuous recorder (it uses its own
+    // local Recorder). tuneHz<0 keeps the current source centre; tuneHz>=0 parks
+    // the source there first. Returns false + an honest error string when the
+    // source has no data (never fabricates a capture). On success the out-params
+    // carry the REAL written path / rate / centre / sample count / byte size.
+    bool exportIqSegment(int sampleCount, double tuneHz,
+                         QString& pathOut, double& sampleRateHzOut, double& centerHzOut,
+                         qint64& samplesOut, qint64& sizeBytesOut, QString& errorOut);
     bool tryConnectRtl();
     void disconnectSource();
     void setMuted(bool m);  // returns peak dBFS
@@ -407,6 +427,8 @@ private:
     // handle above.
     IAudioSink* audioSink_ = nullptr;
     std::unique_ptr<IAudioSink> testSink_;
+    // Parallel network mirror of the demodulated-audio write point (Phase24).
+    std::unique_ptr<IAudioSink> networkTap_;
     Recorder recorder_;
     GatedRecorder gatedRec_;
     // Real-RSSI trigger for the unattended watch mode.

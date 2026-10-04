@@ -21,6 +21,9 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QSet>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QDateTime>
 #include <QDate>
 #include <QTime>
@@ -73,6 +76,8 @@ private slots:
     void pocsagSnapshot_honestEmptyOffline();
     void m17Snapshot_honestEmptyOffline();
     void vorSnapshot_honestUnlockedOffline();
+    void exportIqSegment_writesRealFile();
+    void exportIqSegment_noDataHonestError();
     void toolCount_registryEqualsExecution();
 };
 
@@ -245,6 +250,77 @@ void TestAiRealLink::vorSnapshot_honestUnlockedOffline() {
              qPrintable("unlocked VOR must say so, got: " + r));
 }
 
+// One-shot export_iq_segment tool: on the synthetic source it really writes a
+// cf32_le SigMF pair; we check the data file exists, is non-empty, and the
+// sidecar meta carries the real sample count + cf32_le datatype (a real header
+// check, not just a path echo). Uses a temp dir; tidies up.
+void TestAiRealLink::exportIqSegment_writesRealFile() {
+    const QString outDir = QDir::tempPath() + "/mbdsdr_ai_export";
+    QDir().mkpath(outDir);
+
+    dsp::SpectrumEngine engine;
+    engine.setRecordingDir(outDir);
+
+    QJsonObject args;
+    args["sample_count"] = 16384;
+    QString r = ai::executeTool("export_iq_segment", args, &engine);
+    QJsonObject o = parseObj(r);
+    QVERIFY2(!o.isEmpty() && o.value("ok").toBool(),
+             qPrintable("export on test signal must write a file, got: " + r));
+
+    const QString dataPath = o.value("path").toString();
+    QVERIFY2(dataPath.endsWith(QStringLiteral(".sigmf-data")),
+             qPrintable("export must be a .sigmf-data file, got: " + dataPath));
+    QVERIFY2(QFileInfo::exists(dataPath),
+             qPrintable("exported data file must exist on disk: " + dataPath));
+
+    // Byte size = samples * sizeof(complex<float>) = 16384*8. Honest lower bound.
+    const qint64 bytes = o.value("bytes").toVariant().toLongLong();
+    QVERIFY2(bytes > 0 && bytes >= 16384 * 8,
+             qPrintable("file size must match the captured cf32 window, got: " +
+                        QString::number(bytes)));
+    QCOMPARE(o.value("samples").toVariant().toLongLong(), qint64(16384));
+
+    // Sidecar header check: .sigmf-meta must record the real datatype + count.
+    const QString metaPath =
+        QString(dataPath).replace(QStringLiteral(".sigmf-data"),
+                                  QStringLiteral(".sigmf-meta"));
+    QVERIFY2(QFileInfo::exists(metaPath),
+             qPrintable("export must write its SigMF sidecar: " + metaPath));
+    QFile mf(metaPath);
+    QVERIFY(mf.open(QIODevice::ReadOnly));
+    QJsonObject meta = QJsonDocument::fromJson(mf.readAll()).object();
+    QJsonObject global = meta.value("global").toObject();
+    QCOMPARE(global.value("core:datatype").toString(), QStringLiteral("cf32_le"));
+    QCOMPARE(global.value("core:num_samples").toVariant().toLongLong(),
+             qint64(16384));
+
+    // Honest provenance: synthetic source, not real hardware.
+    QCOMPARE(o.value("connected").toBool(), false);
+    QCOMPARE(o.value("test_signal").toBool(), true);
+
+    QFile::remove(dataPath);
+    QFile::remove(metaPath);
+}
+
+// No-data honest error: with the synthetic source OPTED OUT the engine lands on
+// the empty NullSource, which yields no IQ. The export tool must report
+// ok:false with an explicit error and must NOT fabricate an empty file.
+void TestAiRealLink::exportIqSegment_noDataHonestError() {
+    qunsetenv("MBDSDR_TEST_SOURCE");   // THIS engine -> honest empty NullSource
+    dsp::SpectrumEngine emptyEng;
+    QJsonObject args; args["sample_count"] = 8192;
+    QString r = ai::executeTool("export_iq_segment", args, &emptyEng);
+    qputenv("MBDSDR_TEST_SOURCE", "1");   // restore for any later engine
+
+    QJsonObject o = parseObj(r);
+    QVERIFY2(!o.isEmpty(), qPrintable("expected JSON, got: " + r));
+    QCOMPARE(o.value("ok").toBool(), false);
+    QVERIFY2(o.value("error").toString().contains(QString::fromUtf8("数据")),
+             qPrintable("no-data export must say so honestly, got: " + r));
+    QVERIFY(!o.contains("path") || o.value("path").toString().isEmpty());
+}
+
 // Tool-count audit: the declarative registry must list EXACTLY the tools
 // executeTool supports -- no missing registration, no phantom schema entry.
 void TestAiRealLink::toolCount_registryEqualsExecution() {
@@ -258,6 +334,7 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "scan_band", "set_bandwidth", "get_status", "predict_passes",
         "calibrate_frequency", "apply_frequency_correction",
         "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
+        "export_iq_segment",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -268,6 +345,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(!ai::isWriteTool("get_pocsag_messages"));
     QVERIFY(!ai::isWriteTool("get_m17_calls"));
     QVERIFY(!ai::isWriteTool("get_vor_radial"));
+    // export_iq_segment writes a file to disk -> it IS a gated write tool.
+    QVERIFY(ai::isWriteTool("export_iq_segment"));
 }
 
 QTEST_MAIN(TestAiRealLink)

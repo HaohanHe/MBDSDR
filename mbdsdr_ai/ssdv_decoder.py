@@ -56,6 +56,30 @@ RS_MSG_LEN: int = 223
 OFFSET_CRC_FEC: int = HEADER_LEN + PAYLOAD_FEC                   # 220
 OFFSET_CRC_NOFEC: int = HEADER_LEN + PAYLOAD_NOFEC               # 252
 
+# ---------------------------------------------------------------------------
+# DSLWP 变体（LilacSat / ASRTU 家族）包层常量 —— 通用能力，非活动专用。
+#
+# 与 fsphil 经典的区别（来源：daniestevez/ssdv fork，GPL 仅学机制，本实现干净室重写）：
+#   - 包长 218 字节（非 256）；头 9 字节（非 15）；
+#   - byte0 = image_id（无 sync 0x55、无 type 0x66/0x67、无 base-40 呼号）；
+#   - 包内无 RS 校验字节（FEC 由上游 CCSDS 信道级提供）；
+#   - CRC32 为标准反射 CRC-32（poly 0xEDB88320），但 LFSR 初值用魔数
+#     0x4EE4FDE1（fsphil 经典为 0xFFFFFFFF），末尾仍异或 0xFFFFFFFF；
+#     覆盖 byte[0..payload 末]，大端存放。
+# MCU→JPEG 重组核心（Annex K 表 / mcu_mode / quality）与 fsphil 家族完全一致，直接复用。
+# ---------------------------------------------------------------------------
+DIALECT_AUTO: str = "auto"
+DIALECT_FSPHIL: str = "fsphil"
+DIALECT_DSLWP: str = "dslwp"
+
+PKT_TYPE_DSLWP: int = 0xD1            # 方言标签（非线上字节），仅在 SsdvPacket.pkt_type 区分
+DSLWP_PACKET_LEN: int = 218
+DSLWP_HEADER_LEN: int = 9
+DSLWP_CRC_LEN: int = 4
+DSLWP_PAYLOAD_LEN: int = DSLWP_PACKET_LEN - DSLWP_HEADER_LEN - DSLWP_CRC_LEN   # 205
+DSLWP_OFFSET_CRC: int = DSLWP_HEADER_LEN + DSLWP_PAYLOAD_LEN                   # 214
+DSLWP_CRC_MAGIC: int = 0x4EE4FDE1     # DSLWP CRC32 魔数初值（非 0xFFFFFFFF）
+
 # mcu_mode -> 每 MCU 的 8x8 亮度块数（色度固定各 1 块）
 MCU_MODE_BLOCKS: Dict[int, int] = {0: 4, 1: 2, 2: 2, 3: 1}
 
@@ -300,6 +324,16 @@ def _crc32(data: bytes) -> int:
     return zlib.crc32(data) & 0xFFFFFFFF
 
 
+def _crc32_dslwp(data: bytes) -> int:
+    """DSLWP 变体 CRC32：反射 CRC-32（poly 0xEDB88320），LFSR 初值魔数 0x4EE4FDE1。
+
+    ``zlib.crc32(data, v)`` 内部以 ``v ^ 0xFFFFFFFF`` 作为 LFSR 初值、末再异或
+    0xFFFFFFFF；故传入 ``v = magic ^ 0xFFFFFFFF`` 即让 LFSR 从魔数起算，返回值与
+    参考实现 ``crc32(data, 0x4EE4FDE1)``（末异或 0xFFFFFFFF）逐位一致。
+    """
+    return zlib.crc32(data, DSLWP_CRC_MAGIC ^ 0xFFFFFFFF) & 0xFFFFFFFF
+
+
 # ---------------------------------------------------------------------------
 # 解析后的包
 # ---------------------------------------------------------------------------
@@ -333,11 +367,28 @@ class SsdvPacket:
 
 
 class SsdvDecoder:
-    """字节流同步 + RS 纠错 + CRC 把关。"""
+    """字节流同步 + RS 纠错 + CRC 把关；支持 fsphil 经典与 DSLWP 两种包方言。
 
-    def __init__(self) -> None:
+    dialect:
+      - ``"fsphil"``：经典 256B 包，靠 0x55 + 0x66/0x67 自字节同步（含包内 RS）。
+      - ``"dslwp"`` ：DSLWP 218B 定长包（无 sync/type/呼号/包内 RS）。因无同步字，
+                     假设输入字节流从包边界对齐（对齐由上游 CCSDS 信道帧提供），
+                     按魔数 CRC32 逐 218B 切包；CRC 不过即诚实丢弃该包（None）。
+      - ``"auto"``  ：先按包特征自动判别——出现一个通过 RS+CRC 的 0x55+type 包即锁
+                     fsphil；否则按 218B 头块做魔数 CRC，通过即锁 dslwp。判别未锁定前
+                     不产出任何包（噪声/假同步不伪造）。一旦锁定方言，本帧流内不再切换。
+    """
+
+    DIALECTS = (DIALECT_AUTO, DIALECT_FSPHIL, DIALECT_DSLWP)
+
+    def __init__(self, dialect: str = DIALECT_AUTO) -> None:
+        if dialect not in self.DIALECTS:
+            raise ValueError(f"未知 SSDV 方言 {dialect!r}；可选 {self.DIALECTS}")
         self._rs = _SsdvRS()
         self._buf = bytearray()
+        self._dialect = dialect
+        # auto 模式在见到第一个合法包前保持 None；显式模式立即锁定。
+        self.locked: Optional[str] = None if dialect == DIALECT_AUTO else dialect
 
     def correct_packet(self, chunk: bytes) -> Optional[SsdvPacket]:
         if len(chunk) != PACKET_LEN or chunk[0] != SYNC:
@@ -379,27 +430,115 @@ class SsdvDecoder:
             nerrors=nerrors,
         )
 
+    def correct_dslwp_packet(self, chunk: bytes) -> Optional[SsdvPacket]:
+        """校验并解析一个 218B DSLWP 包；CRC 不过返回 None（诚实丢弃）。
+
+        包内无 RS（FEC 在信道级），故 CRC 是唯一把关；nerrors 恒为 0（本层不可见信道纠错）。
+        """
+        if len(chunk) != DSLWP_PACKET_LEN:
+            return None
+        stored = int.from_bytes(chunk[DSLWP_OFFSET_CRC:DSLWP_OFFSET_CRC + 4], "big")
+        if _crc32_dslwp(bytes(chunk[:DSLWP_OFFSET_CRC])) != stored:
+            return None
+        flags = chunk[5]
+        # 包内无呼号字段；callsign 仅作方言标识 "DSLWP"（与参考解码器显示一致），
+        # 不代表任何真实电台，也不可配置（格式本身没有该字段）。
+        return SsdvPacket(
+            pkt_type=PKT_TYPE_DSLWP,
+            callsign="DSLWP",
+            callsign_code=callsign_to_base40("DSLWP"),
+            image_id=chunk[0],
+            packet_id=(chunk[1] << 8) | chunk[2],
+            width_px=chunk[3] << 4,
+            height_px=chunk[4] << 4,
+            flags=flags,
+            eoi=bool((flags >> 2) & 1),
+            quality=((flags >> 3) & 7) ^ 4,
+            mcu_mode=flags & 3,
+            mcu_offset=chunk[6],
+            mcu_id=(chunk[7] << 8) | chunk[8],
+            payload=bytes(chunk[DSLWP_HEADER_LEN:DSLWP_OFFSET_CRC]),
+            nerrors=0,
+        )
+
     def feed(self, data: bytes) -> List[Optional[SsdvPacket]]:
         self._buf.extend(data)
         out: List[Optional[SsdvPacket]] = []
-        while True:
-            idx = -1
-            for i in range(len(self._buf) - 1):
-                if self._buf[i] == SYNC and self._buf[i + 1] in (TYPE_NORMAL, TYPE_NOFEC):
-                    idx = i
-                    break
-            if idx < 0:
-                if len(self._buf) > 1:
-                    del self._buf[:-1]
-                break
-            if idx > 0:
-                del self._buf[:idx]
-            if len(self._buf) < PACKET_LEN:
-                break
-            chunk = bytes(self._buf[:PACKET_LEN])
-            del self._buf[:PACKET_LEN]
-            out.append(self.correct_packet(chunk))
+        while self._step(out):
+            pass
         return out
+
+    # -- feed 状态机分步（每步至多消费一个包；返回是否有进展）------------------
+    def _step(self, out: List[Optional[SsdvPacket]]) -> bool:
+        if self.locked == DIALECT_FSPHIL:
+            return self._step_fsphil(out)
+        if self.locked == DIALECT_DSLWP:
+            return self._step_dslwp(out)
+        return self._step_auto(out)
+
+    def _step_fsphil(self, out: List[Optional[SsdvPacket]]) -> bool:
+        idx = -1
+        for i in range(len(self._buf) - 1):
+            if self._buf[i] == SYNC and self._buf[i + 1] in (TYPE_NORMAL, TYPE_NOFEC):
+                idx = i
+                break
+        if idx < 0:
+            if len(self._buf) > 1:
+                del self._buf[:-1]
+            return False
+        if idx > 0:
+            del self._buf[:idx]
+        if len(self._buf) < PACKET_LEN:
+            return False
+        chunk = bytes(self._buf[:PACKET_LEN])
+        del self._buf[:PACKET_LEN]
+        out.append(self.correct_packet(chunk))
+        return True
+
+    def _step_dslwp(self, out: List[Optional[SsdvPacket]]) -> bool:
+        # 锁定后恒按 218B 对齐切包；不足则等待，CRC 不过则该包置 None（对齐不漂移）。
+        if len(self._buf) < DSLWP_PACKET_LEN:
+            return False
+        chunk = bytes(self._buf[:DSLWP_PACKET_LEN])
+        del self._buf[:DSLWP_PACKET_LEN]
+        out.append(self.correct_dslwp_packet(chunk))
+        return True
+
+    def _step_auto(self, out: List[Optional[SsdvPacket]]) -> bool:
+        # 1) fsphil 自同步特征：0x55 + type，且随后 256B 通过 RS+CRC 才认作 fsphil。
+        idx = -1
+        for i in range(len(self._buf) - 1):
+            if self._buf[i] == SYNC and self._buf[i + 1] in (TYPE_NORMAL, TYPE_NOFEC):
+                idx = i
+                break
+        if idx >= 0:
+            del self._buf[:idx]
+            if len(self._buf) < PACKET_LEN:
+                return False
+            chunk = bytes(self._buf[:PACKET_LEN])
+            pkt = self.correct_packet(chunk)
+            if pkt is not None:
+                self.locked = DIALECT_FSPHIL
+                del self._buf[:PACKET_LEN]
+                out.append(pkt)
+                return True
+            # 假同步（DSLWP 载荷/噪声里偶然出现的 0x55 0x66）：只丢该字节继续找，
+            # 不锁 fsphil、不出假包。
+            del self._buf[:1]
+            return True
+        # 2) 无 fsphil 同步特征：按当前头 218B 做魔数 CRC，通过即锁 dslwp。
+        if len(self._buf) >= DSLWP_PACKET_LEN:
+            chunk = bytes(self._buf[:DSLWP_PACKET_LEN])
+            pkt = self.correct_dslwp_packet(chunk)
+            if pkt is not None:
+                self.locked = DIALECT_DSLWP
+                del self._buf[:DSLWP_PACKET_LEN]
+                out.append(pkt)
+                return True
+            # 对齐未确认：逐字节滑窗重找包边界（诚实：校验不过绝不伪造包）。
+            del self._buf[:1]
+            return True
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -810,16 +949,15 @@ class SsdvEncoder:
         self.pkt_type = pkt_type
         self._rs = _SsdvRS()
 
-    def encode_image(self, rgb: np.ndarray) -> List[bytes]:
+    def _build_mcu_blobs(self, rgb: np.ndarray) -> Tuple[List[bytes], int, int]:
+        """RGB 图像 -> 逐 MCU 的 Huffman 字节串列表（fsphil / DSLWP 共用，与包布局无关）。
+
+        返回 ``(mcu_blobs, W, H)``；W/H 为对齐到 MCU 网格后的图像宽高。
+        每个 blob 从字节边界开始、绝对 DC（块间无预测，RST 由重组器插入）。
+        """
         h, w = rgb.shape[:2]
-        ycparts = MCU_MODE_BLOCKS[self.mcu_mode]
-        # 对齐到 MCU 网格
-        if self.mcu_mode == 0:
-            W = (w + 15) // 16 * 16
-            H = (h + 15) // 16 * 16
-        else:
-            W = (w + 15) // 16 * 16
-            H = (h + 15) // 16 * 16
+        W = (w + 15) // 16 * 16
+        H = (h + 15) // 16 * 16
         canvas = np.zeros((H, W, 3), dtype=np.uint8)
         canvas[:h, :w] = rgb
         # RGB -> YCbCr (BT.601)
@@ -862,7 +1000,6 @@ class SsdvEncoder:
                     _write_block(bw, _TBL_DC_LUMA, _TBL_AC_LUMA, int(zig[0]), list(zig[1:]))
                 # 色度块（8x8，取该 MCU 区域平均/中心）
                 cx0, cy0 = ox, oy
-                cw_ = 16 if self.mcu_mode == 0 else (8 if self.mcu_mode == 3 else 8)
                 cb_blk = Cb[cy0:cy0 + (16 if self.mcu_mode == 0 else 8),
                             cx0:cx0 + (16 if self.mcu_mode == 0 else 8)] - 128.0
                 cr_blk = Cr[cy0:cy0 + (16 if self.mcu_mode == 0 else 8),
@@ -880,7 +1017,10 @@ class SsdvEncoder:
                     _write_block(bw, _TBL_DC_CHROMA, _TBL_AC_CHROMA, int(zig[0]), list(zig[1:]))
                 bw.align()
                 mcu_blobs.append(bw.bytes())
+        return mcu_blobs, W, H
 
+    def encode_image(self, rgb: np.ndarray) -> List[bytes]:
+        mcu_blobs, W, H = self._build_mcu_blobs(rgb)
         # 分包：整 MCU 装入一个包（不在 MCU 中间切开），保证 mcu_offset=0、
         # 每个包从字节对齐的 MCU 边界开始；放不下的余零填充。
         pkt_payload_len = PAYLOAD_FEC if self.pkt_type == TYPE_NORMAL else PAYLOAD_NOFEC
@@ -936,10 +1076,61 @@ class SsdvEncoder:
             packets.append(build_packet(0, 0xFFFF, b"", 1))
         return packets
 
+    # -- DSLWP 变体编码（仅测试/往返用）：小图 -> 218B 定长包 ------------------
+    def encode_image_dslwp(self, rgb: np.ndarray) -> List[bytes]:
+        """把 numpy RGB 编码为 DSLWP 218B 包（无 sync/type/呼号/包内 RS，魔数 CRC）。
+
+        MCU 码流与 fsphil 完全同源（``_build_mcu_blobs``），仅包布局与 CRC 不同。
+        """
+        mcu_blobs, W, H = self._build_mcu_blobs(rgb)
+        packets: List[bytes] = []
+        n_mcus = len(mcu_blobs)
+
+        def build_dslwp_packet(pid: int, first_mcu: int, payload: bytes, eoi: int) -> bytes:
+            payload = payload + bytes(DSLWP_PAYLOAD_LEN - len(payload))
+            pkt = bytearray(DSLWP_PACKET_LEN)
+            pkt[0] = self.image_id
+            pkt[1] = (pid >> 8) & 0xFF
+            pkt[2] = pid & 0xFF
+            pkt[3] = W >> 4
+            pkt[4] = H >> 4
+            flags = (((self.quality ^ 4) & 7) << 3)
+            flags |= (eoi << 2)
+            flags |= (self.mcu_mode & 3)
+            pkt[5] = flags
+            pkt[6] = 0x00            # mcu_offset=0（整 MCU 分包）
+            pkt[7] = (first_mcu >> 8) & 0xFF
+            pkt[8] = first_mcu & 0xFF
+            pkt[DSLWP_HEADER_LEN:DSLWP_OFFSET_CRC] = payload
+            crc = _crc32_dslwp(bytes(pkt[:DSLWP_OFFSET_CRC]))
+            pkt[DSLWP_OFFSET_CRC:DSLWP_PACKET_LEN] = crc.to_bytes(4, "big")
+            return bytes(pkt)
+
+        i = 0
+        pid = 0
+        while i < n_mcus:
+            first_mcu = i
+            buf = bytearray()
+            while i < n_mcus and len(buf) + len(mcu_blobs[i]) <= DSLWP_PAYLOAD_LEN:
+                buf += mcu_blobs[i]
+                i += 1
+            if not buf:
+                buf += mcu_blobs[i][:DSLWP_PAYLOAD_LEN]
+                i += 1
+            eoi = 1 if i >= n_mcus else 0
+            packets.append(build_dslwp_packet(pid, first_mcu, bytes(buf), eoi))
+            pid += 1
+        if not packets:
+            packets.append(build_dslwp_packet(0, 0xFFFF, b"", 1))
+        return packets
+
 
 __all__ = [
     "SYNC", "TYPE_NORMAL", "TYPE_NOFEC", "PACKET_LEN",
     "PAYLOAD_FEC", "PAYLOAD_NOFEC",
+    "DIALECT_AUTO", "DIALECT_FSPHIL", "DIALECT_DSLWP",
+    "DSLWP_PACKET_LEN", "DSLWP_HEADER_LEN", "DSLWP_PAYLOAD_LEN",
+    "DSLWP_CRC_MAGIC",
     "SsdvPacket", "SsdvDecoder", "SsdvImage", "ImageResult", "SsdvEncoder",
     "callsign_to_base40", "base40_to_callsign",
 ]

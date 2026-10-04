@@ -334,6 +334,38 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // export_iq_segment (write -- gated in manual mode) ---------------------
+    // One-shot on-demand IQ dump: capture a bounded baseband IQ window NOW and
+    // write it to a cf32_le SigMF file, then return -- distinct from the
+    // continuous start_recording/stop_recording pair. It WRITES a file to disk,
+    // so it is a write tool (gated in manual mode). No source data -> honest
+    // ok:false, never a fabricated empty file.
+    {
+        ToolSchemaSpec s;
+        s.name = "export_iq_segment";
+        s.description = QString::fromUtf8(
+            "写入（一次性）：立即抓取一段当前中心频率的基带 IQ 复样本并导出为 "
+            "cf32_le SigMF 文件（.sigmf-data + .sigmf-meta），返回真实路径与样本数。"
+            "区别于 start_recording 的连续录制：这是按需导出一个有界窗口后即返回。"
+            "无 IQ 数据时诚实报错，不生成空文件。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec n;
+        n.name = "sample_count";
+        n.type = "number";
+        n.description = QString::fromUtf8("导出复样本数，默认 65536");
+        n.hasMin = true; n.min = 1024.0;
+        n.required = false;
+        ToolParamSpec f;
+        f.name = "tune_hz";
+        f.type = "number";
+        f.description = QString::fromUtf8("可选：先调谐到该 Hz 再导出；缺省/负数=保持当前中心频率");
+        f.hasMin = true; f.min = tokens::kFreqMinHz;
+        f.hasMax = true; f.max = tokens::kFreqMaxHz;
+        f.required = false;
+        s.params << n << f;
+        out.append(s);
+    }
+
     return out;
 }
 
