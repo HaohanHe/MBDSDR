@@ -469,6 +469,7 @@ private:
     QPushButton*    recLibDelBtn_    = nullptr;
     QPushButton*    recLibPlayBtn_   = nullptr;   // load/play|stop toggle
     QPushButton*    recLibAnalyzeBtn_ = nullptr;   // 该行 -> 离线流式分析
+    QPushButton*    recLibExportBtn_  = nullptr;   // 解码器输出 -> .txt 文件
     QVector<mbdsdr::ui::RecordingEntry> recLibEntries_;
     std::vector<float> recLibPcm_;                 // decoded 48k mono float buffer
     qint64          recLibPcmPos_   = 0;           // playback cursor (samples)
@@ -479,6 +480,7 @@ private:
     void onRecLibDelete();                         // confirm -> delete real files
     void onRecLibCopyPath();                       // copy selected row's full path
     void onRecLibAnalyze();                        // 选中行 -> engine 离线分析
+    void onRecLibExportDecode();                   // 解码器输出文本 -> .txt
 
     // ---- Offline file analysis (streaming through the real DSP chain) ------
     // Opens a captured file (WAV/SigMF/raw) as the engine source; the SAME
