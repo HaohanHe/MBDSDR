@@ -4,6 +4,7 @@
 #include "llm_client.h"
 #include <QObject>
 #include <QString>
+#include <functional>
 
 namespace mbdsdr {
 namespace dsp { class SpectrumEngine; }
@@ -27,6 +28,30 @@ public:
     /// the next tool call. Default false = AI takeover.
     void setManualMode(bool on) { manualMode_ = on; }
 
+    /// Read/write gate applied to one tool call with manual mode. Mirrors the
+    /// static dispatchToolCall() gate semantics (see below).
+    // (dispatchToolCall documented below.)
+
+    // ---- Phase31 Wave2 error-recovery primitives (pure, testable) -----------
+    // Classify an upstream LLM error string:
+    //   Terminal  -> 400/401/403/422/parse/no-key: never retried, honest PENDING.
+    //   Retryable -> 429/503/504/stream-timeout/connection: transient, backoff.
+    //   Ok        -> empty error string.
+    enum class LlmErrorClass { Ok, Terminal, Retryable };
+    static LlmErrorClass classifyLlmError(const QString& errorString);
+    // Exponential backoff delay (ms) for the n-th transient retry (1-based),
+    // clamped to [kAiBackoffBaseMs, kAiBackoffMaxMs]. No real network sleep here.
+    static int backoffDelayMs(int attemptOneBased);
+    // Assemble the user-facing line for a failed chat: keep whatever partial text
+    // already streamed, then append an honest error note. Never fabricates a reply.
+    static QString formatChatError(const QString& partialContent,
+                                   const QString& error);
+    // Test seam: override the backoff sleep (production = QThread::msleep). Tests
+    // inject a no-op so the bounded retry loop runs instantly offline. Pass null
+    // to restore the real sleep.
+    static void setBackoffSleepForTests(std::function<void(int)> fn);
+    static void sleepBackoffMs(int ms);
+
     /// Run one tool call with the manual-mode write gate applied. Extracted as a
     /// static, instance-free helper so the gate is unit-testable without an LLM:
     /// in manual mode a write tool returns gatedToolResult() WITHOUT calling
@@ -41,6 +66,10 @@ public slots:
 
 signals:
     void chatFinished(const QString& text);
+    // Phase31 G2: a failed/interrupted chat emits THIS (not chatFinished). The
+    // text keeps the partial streamed content + an honest error note; the Agent
+    // must NOT append it to the normal conversation history (no pollution).
+    void chatError(const QString& displayText);
     void toolCalled(const QString& tool, const QString& result);
     // Streaming: fired with the ACCUMULATED partial content on every SSE chunk
     // (the UI replaces its single transient line with it). No network when the

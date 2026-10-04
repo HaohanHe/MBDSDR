@@ -13,10 +13,12 @@ namespace ai {
 // Context-window budgeting. Named constants -- no magic numbers at the
 // call sites. These are APPROXIMATE (no tokenizer); the goal is to keep
 // the wire payload bounded, not to match a specific model's exact count.
+//
+// Phase31 Wave2: the budget is no longer a hardcoded 8192. It is a FRACTION of
+// the model context window (tokens::kAiContextBudgetRatio, default 0.75 of
+// tokens::kAiDefaultContextWindowTokens), so a bigger-window model just works.
+// Pass CompactOptions::budgetTokens explicitly to override (tests do).
 // =====================================================================
-// Hard ceiling for the assembled prompt (system + history). Once the
-// approximate count crosses this, early turns are folded into one summary.
-inline constexpr int kAiContextBudgetTokens = 8192;
 // How many most-recent user/assistant rounds are kept verbatim (a round =
 // one user turn and the assistant reply / tool turns that follow it).
 inline constexpr int kAiContextKeepRecentRounds = 4;
@@ -25,9 +27,24 @@ inline constexpr int kAiContextKeepRecentRounds = 4;
 // Latin/digit runs ~4 chars/token. Good enough to trigger compaction.
 int estimateTokens(const QString& text);
 
+// The default prompt budget: default context window * kAiContextBudgetRatio.
+// Kept in the .cpp so this header does not have to pull core/tokens.h (which
+// drags QtGui) into the lightweight session/compaction test.
+int defaultContextBudgetTokens();
+
+// Pre-trim any single oversized tool result to a head+tail preview, BEFORE the
+// whole-history budget check (OpenAI SDK ToolOutputTrimmer, context-compaction.md
+// §6.1). A verbose tool output (IQ snapshot / decode log) then never by itself
+// triggers a full LLM summary. Non-tool messages pass through untouched.
+QList<ChatMessage> truncateLargeToolOutputs(const QList<ChatMessage>& history);
+
 struct CompactOptions {
-    int budgetTokens = kAiContextBudgetTokens;
+    // <= 0 => AUTO: contextWindowTokens (or the tokens.h default window) *
+    // kAiContextBudgetRatio. Production uses auto; tests pass an explicit value.
+    int budgetTokens = -1;
     int keepRecentRounds = kAiContextKeepRecentRounds;
+    // Model context window in tokens; 0 => tokens::kAiDefaultContextWindowTokens.
+    int contextWindowTokens = 0;
 };
 
 struct CompactResult {

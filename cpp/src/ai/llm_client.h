@@ -72,6 +72,14 @@ public:
                      ChunkCallback onChunk = nullptr,
                      const RequestOptions& opts = {});
 
+    // Phase31 Wave2 (streaming.md G1): assemble an error response that RETAINS
+    // whatever partial content already streamed before the failure, instead of
+    // wiping the half-sentence the user already saw. Production calls the same
+    // assembly on the QNAM error branch; exposed as a pure seam so tests can pin
+    // the honesty contract without a socket.
+    static LLMResponse errorResponseWithPartial(const QString& partialContent,
+                                                const QString& error);
+
 private:
     // Feed one complete SSE text blob (already received bytes) into the shared
     // stream accumulator, splitting on line boundaries and honoring `data:`

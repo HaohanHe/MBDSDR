@@ -1299,7 +1299,9 @@ add_test(NAME recorder_naming COMMAND test_recorder_naming)
 add_executable(test_ai_session tests/test_ai_session.cpp
     src/ai/ai_session_store.cpp src/ai/ai_context.cpp)
 target_include_directories(test_ai_session PRIVATE src)
-target_link_libraries(test_ai_session PRIVATE Qt6::Test Qt6::Core Qt6::Network)
+# ai_context.cpp now includes core/tokens.h (QtGui headers) for the compaction
+# ratio/window constants, so Qt6::Gui is needed on the include path.
+target_link_libraries(test_ai_session PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Gui)
 add_test(NAME ai_session COMMAND test_ai_session)
 
 # GUI-dependent tests run on the offscreen platform so ctest works on

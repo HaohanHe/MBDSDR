@@ -15,9 +15,16 @@ namespace ai {
 //   "summary"    -- a context-compaction marker (rendered restrained as
 //                   "〔已摘要〕 ..."). Never sent verbatim to the wire; the
 //                   LLM layer maps it onto a system note before the request.
+//
+// Phase31 Wave2: `kind` separates ordinary chat lines from tool-call / tool-
+// result / error events so the UI can render them distinctly (multi-session.md
+// §4.1.1). `ts` is epoch-ms when the line was recorded. Both are BACKWARD
+// COMPATIBLE: a legacy JSON row without them loads with kind == role and ts==0.
 struct SessionMessage {
     QString role;
     QString content;
+    QString kind;        // "chat"|"tool_call"|"tool_result"|"error"; empty on load => role
+    qint64 ts = 0;       // epoch ms; 0 = legacy/unknown (never invented)
 };
 
 // Lightweight index entry (no message bodies).
@@ -25,6 +32,7 @@ struct SessionInfo {
     QString id;
     QString title;
     qint64 updatedAt = 0;   // epoch ms, bumped on every append/rename
+    bool incomplete = false; // last streamed reply was cut off mid-write (crash)
 };
 
 // On-disk layout (injectable directory so tests use a temp dir):
@@ -60,6 +68,18 @@ public:
     // Replace the whole message list of a session (used after context
     // compaction so the persisted record matches what was sent to the LLM).
     void setMessages(const QString& id, const QList<SessionMessage>& msgs);
+
+    // Incomplete (cut-off) marker, multi-session.md §4.1.3: a streamed assistant
+    // reply written half-way then crashed leaves a half line on disk. The caller
+    // (streaming UI) calls setIncomplete(id,true) when a reply starts streaming
+    // and setIncomplete(id,false) when it completes; a brand-new user message
+    // clears it automatically. On load a true flag survives so the UI can honestly
+    // badge the last line 〔上次未完成〕 instead of showing a half reply as final.
+    void setIncomplete(const QString& id, bool incomplete);
+    bool isIncomplete(const QString& id) const;
+    // On-disk schema version written into index.json. Old files without it load
+    // as v1 (the migration hook is: missing version == assume v1, apply defaults).
+    static constexpr int kIndexVersion = 1;
 
 signals:
     // The session index changed (create/rename/delete/select) -- refresh the

@@ -26,6 +26,7 @@ Agent::Agent(QObject* parent) : QObject(parent) {
     worker_->moveToThread(workerThread_);
     worker_->setManualMode(manualMode_);
     connect(worker_, &LLMWorker::chatFinished, this, &Agent::onChatFinished);
+    connect(worker_, &LLMWorker::chatError, this, &Agent::onChatError);
     connect(worker_, &LLMWorker::toolCalled, this, &Agent::toolCalled);
     connect(worker_, &LLMWorker::partialReady, this, &Agent::partialReady);
     connect(worker_, &LLMWorker::contextCompacted, this, &Agent::contextCompacted);
@@ -113,6 +114,13 @@ void Agent::onChatFinished(const QString& text) {
     // (which is what makes context compaction kick in once the budget trips).
     history_.append(ChatMessage{"assistant", text});
     emit responseReady(text);
+}
+
+void Agent::onChatError(const QString& displayText) {
+    // G2: a failed/interrupted chat is surfaced to the operator (transient line)
+    // but is NOT appended to history_ -- a half reply or an error string must
+    // never be persisted as a normal assistant turn that the next request sends.
+    emit responseReady(displayText);
 }
 
 } // namespace ai

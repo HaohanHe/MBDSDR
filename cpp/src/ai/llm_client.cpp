@@ -109,6 +109,14 @@ LLMClient::LLMClient(QObject* parent) : QObject(parent) {
     transport_ = s_testTransport;   // offline test seam (null in production)
 }
 
+LLMResponse LLMClient::errorResponseWithPartial(const QString& partialContent,
+                                                const QString& error) {
+    LLMResponse r;
+    r.content = partialContent;   // the half-sentence already on screen survives
+    r.error = error;
+    return r;
+}
+
 LLMResponse LLMClient::chat(const QList<ChatMessage>& messages,
                             const QList<ToolDef>& tools,
                             ChunkCallback onChunk,
@@ -174,9 +182,13 @@ LLMResponse LLMClient::chat(const QList<ChatMessage>& messages,
         loop.exec();
 
         if (reply->error() != QNetworkReply::NoError) {
-            resp.error = reply->errorString();
+            // Phase31 G1: keep whatever partial content already streamed (the
+            // user already saw the half sentence on screen); attach the error,
+            // never drop the partial reply to an empty one (streaming.md §4).
+            LLMResponse r = acc.toResponse();
+            r.error = reply->errorString();
             reply->deleteLater();
-            return resp;
+            return r;
         }
         if (onChunk) {
             feedSseText(sseBuf, opts.protocol, acc, nullptr);   // flush trailing lines

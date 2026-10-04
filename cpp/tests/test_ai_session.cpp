@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
 
 #include "ai/ai_session_store.h"
 #include "ai/ai_context.h"
@@ -27,6 +28,17 @@ private slots:
     void testCompactThreshold();
     void testRuleSummaryHonest();
     void testLlmSummaryCallbackUsed();
+
+    // ---- Phase31 Wave2: A1 compaction ------------------------------------
+    void toolOutputPreTrimmedBeforeBudgetCheck();
+    void budgetIsWindowRatioNotHardcoded();
+    void allUserAsksPreservedInRuleSummary();
+
+    // ---- Phase31 Wave2: A2 session metadata ------------------------------
+    void legacySessionLoadsWithKindFallback();
+    void kindAndTsRoundTrip();
+    void indexWritesVersion();
+    void incompleteMarkerSurvivesAndClears();
 
 private:
     QString dir_;
@@ -187,6 +199,126 @@ void TestAiSession::testLlmSummaryCallbackUsed() {
         [](const QList<ai::ChatMessage>&) { return QString::fromUtf8("LLM 生成的摘要"); });
     QVERIFY(out.didCompact);
     QCOMPARE(out.summaryText, QString::fromUtf8("LLM 生成的摘要"));
+}
+
+// A1: a single oversized tool result is pre-trimmed (head+tail) BEFORE the whole
+// history budget check, so one verbose tool output cannot by itself force a full
+// LLM summary. Non-tool messages pass through untouched.
+void TestAiSession::toolOutputPreTrimmedBeforeBudgetCheck() {
+    QList<ai::ChatMessage> h;
+    h.append(ai::ChatMessage{"user", "test"});
+    QString huge = QString("IQ-SNAPSHOT-DATA-").repeated(200);   // ~3400 chars
+    h.append(ai::ChatMessage{"tool", huge});
+    QCOMPARE(huge.size() > 1200, true);
+
+    auto trimmed = ai::truncateLargeToolOutputs(h);
+    QCOMPARE(trimmed.size(), 2);
+    QCOMPARE(trimmed[0].content, QString("test"));      // user untouched
+    QVERIFY2(trimmed[1].content.contains(QString::fromUtf8("[已截断")),
+             qPrintable(trimmed[1].content));
+    QVERIFY(trimmed[1].content.size() < huge.size());    // actually shrunk
+
+    // A normal (<=1200 char) tool result is NOT trimmed.
+    QList<ai::ChatMessage> smallTool;
+    smallTool.append(ai::ChatMessage{"tool", QString("short result")});
+    auto s2 = ai::truncateLargeToolOutputs(smallTool);
+    QCOMPARE(s2[0].content, QString("short result"));
+}
+
+// A1: the budget is a fraction of the model window, not a hardcoded 8192.
+void TestAiSession::budgetIsWindowRatioNotHardcoded() {
+    // Default budget = default window (32768) * 0.75.
+    QCOMPARE(ai::defaultContextBudgetTokens(), 24576);
+
+    // Auto budget (budgetTokens=-1) derived from an explicit small window:
+    // window=100 -> budget=75, so a 5-turn history (~160 tokens) compacts.
+    ai::CompactOptions opt;            // budgetTokens = -1 (auto)
+    opt.contextWindowTokens = 40;      // budget = 40 * 0.75 = 30 tokens
+    opt.keepRecentRounds = 1;
+    auto out = ai::compactContext(makeHistory(5), "SYS", opt, nullptr);
+    QVERIFY(out.didCompact);
+}
+
+// A1: the honest rule-based summary preserves EVERY dropped user ask (not just
+// the first 3) -- the OpenAI-SDK-excluded user asks must survive compaction.
+void TestAiSession::allUserAsksPreservedInRuleSummary() {
+    auto h = makeHistory(8);   // 16 messages; keep 1 recent round
+    auto out = ai::compactContext(h, "SYS", ai::CompactOptions{30, 1}, nullptr);
+    QVERIFY(out.didCompact);
+    // Dropped asks are questions 0..6; the one-liners keep them all.
+    for (int i = 0; i <= 6; ++i)
+        QVERIFY2(out.summaryText.contains(QString("question number %1").arg(i)),
+                 qPrintable(QString("missing ask %1").arg(i)));
+    // Kept recent turn (question 7) stays verbatim in the message list.
+    bool q7 = false;
+    for (const auto& m : out.messages)
+        if (m.content == "question number 7 about tuning") q7 = true;
+    QVERIFY(q7);
+}
+
+// A2: a legacy session file (no kind/ts) loads with kind == role, ts == 0.
+void TestAiSession::legacySessionLoadsWithKindFallback() {
+    // Write a legacy index (no version) and a legacy session (no kind/ts).
+    QDir().mkpath(dir_ + "/sessions");
+    QFile idx(dir_ + "/index.json");
+    idx.open(QIODevice::WriteOnly);
+    idx.write(R"({"current":"s1","sessions":[{"id":"s1","title":"旧","updatedAt":1}]})");
+    idx.close();
+    QFile sf(dir_ + "/sessions/s1.json");
+    sf.open(QIODevice::WriteOnly);
+    sf.write(R"({"id":"s1","title":"旧","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"yo"}]})");
+    sf.close();
+
+    ai::AiSessionStore store(dir_);
+    auto ms = store.messages("s1");
+    QCOMPARE(ms.size(), 2);
+    QCOMPARE(ms[0].role, QString("user"));
+    QCOMPARE(ms[0].kind, QString("user"));   // fallback: kind == role
+    QCOMPARE(ms[0].ts, qint64(0));
+    QCOMPARE(ms[1].kind, QString("assistant"));
+}
+
+// A2: explicit kind/ts round-trips through the JSON layer.
+void TestAiSession::kindAndTsRoundTrip() {
+    ai::AiSessionStore store(dir_);
+    const QString id = store.currentId();
+    store.appendMessage(id, ai::SessionMessage{"tool", R"({"ok":true})",
+                                               "tool_result", 1700000000123LL});
+    QVERIFY(store.messages(id)[0].kind.isEmpty() == false);
+
+    ai::AiSessionStore reloaded(dir_);
+    auto ms = reloaded.messages(id);
+    QCOMPARE(ms.size(), 1);
+    QCOMPARE(ms[0].kind, QString("tool_result"));
+    QCOMPARE(ms[0].ts, 1700000000123LL);
+}
+
+// A2: index.json carries the on-disk schema version (migration hook).
+void TestAiSession::indexWritesVersion() {
+    ai::AiSessionStore store(dir_);
+    store.createSession("x");
+    QFile f(dir_ + "/index.json");
+    f.open(QIODevice::ReadOnly);
+    QByteArray raw = f.readAll();
+    QVERIFY(QJsonDocument::fromJson(raw).object().value("version").toInt() ==
+            ai::AiSessionStore::kIndexVersion);
+}
+
+// A2: incomplete (cut-off) marker survives a reload and is cleared by a new user
+// turn (a crashed half-reply is honestly badged, then superseded).
+void TestAiSession::incompleteMarkerSurvivesAndClears() {
+    ai::AiSessionStore store(dir_);
+    const QString id = store.currentId();
+    store.setIncomplete(id, true);
+    QVERIFY(store.isIncomplete(id));
+
+    // Survives a reload (crash honesty).
+    ai::AiSessionStore reloaded(dir_);
+    QVERIFY(reloaded.isIncomplete(id));
+
+    // A brand-new user message clears the stale incomplete flag.
+    reloaded.appendMessage(id, ai::SessionMessage{"user", "next"});
+    QCOMPARE(reloaded.isIncomplete(id), false);
 }
 
 #include <QCoreApplication>
