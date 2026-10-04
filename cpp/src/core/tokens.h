@@ -699,6 +699,7 @@ QTabBar::tab {
     background: transparent;
     color: %textSec%;
     padding: %padMV%px %padLH%px;
+    min-height: %touch%px;
     border: none;
     border-radius: %radSmall%px;
 }

@@ -1004,6 +1004,12 @@ MainWindow::MainWindow(QWidget* parent)
         auto* cstLay = new QVBoxLayout(cstPage);
         cstLay->setContentsMargins(0, 0, 0, 0);
         cstLay->setSpacing(0);
+        auto* cstEmpty = new QLabel(
+            QStringLiteral("选择数字解调（PSK/QAM）后\n此处显示实时星座图"), cstPage);
+        cstEmpty->setObjectName("statusHint");
+        cstEmpty->setAlignment(Qt::AlignCenter);
+        cstEmpty->setWordWrap(true);
+        cstLay->addWidget(cstEmpty);
         constellationView_ = new ui::ConstellationView(cstPage);
         cstLay->addWidget(constellationView_, 1);
 
@@ -1693,6 +1699,8 @@ MainWindow::MainWindow(QWidget* parent)
     auto* aiPage = new QWidget;
     auto* aiLay = new QVBoxLayout(aiPage);
     aiStatus_ = new QLabel("AI 助手将在这里接入（需在设置中配置 API Key）", aiPage);
+    aiStatus_->setObjectName("statusHint");
+    aiStatus_->setAlignment(Qt::AlignCenter);
     aiStatus_->setWordWrap(true);
     aiLay->addWidget(aiStatus_);
 
