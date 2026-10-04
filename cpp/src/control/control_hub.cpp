@@ -60,6 +60,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"set_muted",            true,  &ControlHub::cmdSetMuted},
         {"start_recording",      true,  &ControlHub::cmdStartRecording},
         {"stop_recording",       true,  &ControlHub::cmdStopRecording},
+        {"export_iq_segment",    true,  &ControlHub::cmdExportIqSegment},
         {"set_anr",              true,  &ControlHub::cmdSetAnr},
         {"set_gated_recording",  true,  &ControlHub::cmdSetGatedRecording},
         {"set_watch",            true,  &ControlHub::cmdSetWatch},
@@ -431,6 +432,44 @@ QJsonObject ControlHub::cmdStopRecording(const QJsonObject&) {
     engine_->stopRecording();
     QJsonObject o = okBase();
     o["command"] = "stop_recording";
+    return o;
+}
+
+// One-shot IQ export. Writes a file to disk (WRITE, gated). Pulls ~sample_count
+// complex baseband IQ; tune_hz<0 (default) keeps the current centre, a >=0 value
+// parks the source there first. No source data -> an honest error, never a fake
+// file. On success the real written path / size / sample count are returned.
+QJsonObject ControlHub::cmdExportIqSegment(const QJsonObject& a) {
+    int sampleCount = static_cast<int>(
+        a.value(QStringLiteral("sample_count")).toDouble(65536.0));
+    // tune_hz is optional; -1 = keep the current centre. A present-but-wrongly-
+    // typed value is an honest error (toDouble would silently retune to 0).
+    double tuneHz = -1.0;
+    const QJsonValue tv = a.value(QStringLiteral("tune_hz"));
+    if (tv.isDouble()) {
+        tuneHz = tv.toDouble();
+        if (!std::isfinite(tuneHz))
+            return errResult(QString::fromUtf8("参数非有限数: tune_hz"));
+    } else if (!(tv.isUndefined() || tv.isNull())) {
+        return errResult(QString::fromUtf8("参数 tune_hz 必须是数字（Hz，缺省=保持当前中心）"));
+    }
+
+    QString path; double sr = 0.0, center = 0.0;
+    qint64 samples = 0, bytes = 0; QString err;
+    const bool ok = engine_->exportIqSegment(sampleCount, tuneHz, path,
+                                             sr, center, samples, bytes, err);
+    QJsonObject o;
+    o["ok"] = ok;
+    if (ok) {
+        o["command"] = "export_iq_segment";
+        o["path"] = path;
+        o["sample_rate_hz"] = sr;
+        o["center_hz"] = center;
+        o["samples"] = samples;
+        o["bytes"] = bytes;
+    } else {
+        o["error"] = err;
+    }
     return o;
 }
 

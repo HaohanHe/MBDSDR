@@ -750,6 +750,21 @@ target_include_directories(test_digital_link_integration PRIVATE src)
 target_link_libraries(test_digital_link_integration PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME digital_link_integration COMMAND test_digital_link_integration)
 
+# Phase24 Block3: scanner <-> schedule linkage closed loop (dsp-internal).
+# Synthetic RSSI table + synthetic 2-FSK burst ONLY (NOT HARDWARE):
+# FrequencyScanner sweep -> onRetune -> onActivityFound(park+POCSAG decode+arm
+# Recorder) -> onDwellEnded(stop recorder). Asserts the full scan->hit->dwell->
+# decode->record chain on the busy channel, and the honest empty state on a
+# quiet band (no self-trigger).
+add_executable(test_scan_link tests/test_scan_link.cpp
+    src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp src/dsp/signal_watch.cpp
+    src/dsp/recorder.cpp
+    src/dsp/vfo_manager.cpp src/dsp/fsk_demod.cpp src/dsp/pocsag_decoder.cpp src/dsp/m17_decoder.cpp src/dsp/vor_receiver.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp src/dsp/audio_resampler.cpp
+    src/dsp/demod.cpp src/dsp/agc.cpp src/dsp/wfm_stereo.cpp src/dsp/rds_decoder.cpp)
+target_include_directories(test_scan_link PRIVATE src)
+target_link_libraries(test_scan_link PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME scan_link COMMAND test_scan_link)
+
 # Squelch gate + gated recorder linkage (filenames, no dead leading silence).
 add_executable(test_squelch_gate tests/test_squelch_gate.cpp
     src/dsp/squelch.cpp src/dsp/gated_recorder.cpp)
@@ -1444,3 +1459,22 @@ add_executable(test_bandwidth_shortcut tests/test_bandwidth_shortcut.cpp
 target_include_directories(test_bandwidth_shortcut PRIVATE src)
 target_link_libraries(test_bandwidth_shortcut PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME bandwidth_shortcut COMMAND test_bandwidth_shortcut)
+
+# ---- phase24 block1: demodulated-audio network sink (SDR++ network_sink) ------
+# Raw 16-bit LE PCM stream of the 48 kHz demodulated audio over UDP (send to
+# host:port) or TCP (single-client listening server), benchmarked on the SDR++
+# module (GPLv3, mechanism only). The engine installs it as a PARALLEL tap off
+# the existing audio write point -- playback is never diverted. Loopback tests
+# prove byte-exact wiring, honest idle/no-client/disconnect states, and the
+# engine tap e2e (synthetic offline IQ) matches the MemoryAudioSink capture.
+add_executable(test_network_audio_sink tests/test_network_audio_sink.cpp
+    src/dsp/network_audio_sink.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/fsk_demod.cpp src/dsp/pocsag_decoder.cpp src/dsp/m17_decoder.cpp src/dsp/vor_receiver.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_network_audio_sink PRIVATE src)
+target_link_libraries(test_network_audio_sink PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME network_audio_sink COMMAND test_network_audio_sink)

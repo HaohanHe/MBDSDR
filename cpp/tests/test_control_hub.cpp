@@ -20,6 +20,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <cmath>
 
 #include "dsp/spectrum_engine.h"
@@ -55,6 +57,10 @@ private slots:
     void commandTableIsClassified();
     void digitalSnapshotReadsAreHonestAndUngated();
     void clearDigitalOutputsGateBothStates();
+    void exportIqSegment_writesRealFile();
+    void exportIqSegment_noDataHonestError();
+    void exportIqSegment_gatedWhenWriteGateClosed();
+    void exportIqSegment_badTuneArgHonestError();
 };
 
 void TestControlHub::initTestCase() {
@@ -360,6 +366,97 @@ void TestControlHub::clearDigitalOutputsGateBothStates() {
     r = parseObj(hub.execute("clear_digital_outputs", {}));
     QVERIFY(!r.value("ok").toBool());
     QVERIFY(r.value("gated").toBool());
+}
+
+// ---- Phase24 block2: one-shot IQ export (independent of continuous recording) --
+// export_iq_segment really writes a cf32_le SigMF pair on the synthetic source.
+void TestControlHub::exportIqSegment_writesRealFile() {
+    const QString recDir = QDir::tempPath() + "/mbdsdr_chub_export";
+    QDir().mkpath(recDir);
+
+    SpectrumEngine eng;
+    eng.setRecordingDir(recDir);
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject r = parseObj(hub.execute("export_iq_segment", {{"sample_count", 16384}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    const QString dataPath = r.value("path").toString();
+    QVERIFY2(dataPath.endsWith(QStringLiteral(".sigmf-data")),
+             qPrintable("export must be .sigmf-data, got: " + dataPath));
+    QVERIFY(QFileInfo::exists(dataPath));
+
+    // Real size/header check: bytes == samples*8; sidecar records cf32_le + count.
+    QCOMPARE(r.value("samples").toVariant().toLongLong(), qint64(16384));
+    const qint64 bytes = r.value("bytes").toVariant().toLongLong();
+    QVERIFY2(bytes == 16384 * 8, qPrintable("cf32_le size must be samples*8, got " +
+                                             QString::number(bytes)));
+    const QString metaPath = QString(dataPath).replace(".sigmf-data", ".sigmf-meta");
+    QVERIFY(QFileInfo::exists(metaPath));
+    QFile mf(metaPath);
+    QVERIFY(mf.open(QIODevice::ReadOnly));
+    QJsonObject meta = QJsonDocument::fromJson(mf.readAll()).object();
+    QJsonObject global = meta.value("global").toObject();
+    QCOMPARE(global.value("core:datatype").toString(), QString("cf32_le"));
+    QCOMPARE(global.value("core:num_samples").toVariant().toLongLong(), qint64(16384));
+
+    QFile::remove(dataPath);
+    QFile::remove(metaPath);
+}
+
+// No source data -> honest ok:false (the engine lands on the empty NullSource
+// when the synthetic opt-in is removed), never a fabricated file.
+void TestControlHub::exportIqSegment_noDataHonestError() {
+    qunsetenv("MBDSDR_TEST_SOURCE");    // THIS engine -> honest empty NullSource
+    SpectrumEngine emptyEng;
+    qputenv("MBDSDR_TEST_SOURCE", "1"); // restore for later engines
+
+    control::ControlHub hub;
+    hub.setEngine(&emptyEng);
+    QJsonObject r = parseObj(hub.execute("export_iq_segment", {{"sample_count", 8192}}));
+    QCOMPARE(r.value("ok").toBool(), false);
+    QVERIFY2(r.value("error").toString().contains(QString::fromUtf8("数据")),
+             qPrintable("no-data export must say so, got: " +
+                        r.value("error").toString()));
+    QVERIFY(!r.contains("path") || r.value("path").toString().isEmpty());
+}
+
+// export_iq_segment is a WRITE: it lands with the gate open and is honestly
+// refused (gated:true, no file touched) with the gate closed.
+void TestControlHub::exportIqSegment_gatedWhenWriteGateClosed() {
+    const QString recDir = QDir::tempPath() + "/mbdsdr_chub_export_gate";
+    QDir().mkpath(recDir);
+
+    SpectrumEngine eng;
+    eng.setRecordingDir(recDir);
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // Gate CLOSED: refused, engine untouched, no file created.
+    hub.setWriteEnabled(false);
+    QJsonObject r = parseObj(hub.execute("export_iq_segment", {{"sample_count", 8192}}));
+    QCOMPARE(r.value("ok").toBool(), false);
+    QVERIFY(r.value("gated").toBool());
+
+    // Gate OPEN: the same export now lands and writes a real file.
+    hub.setWriteEnabled(true);
+    r = parseObj(hub.execute("export_iq_segment", {{"sample_count", 8192}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    const QString dataPath = r.value("path").toString();
+    QVERIFY(QFileInfo::exists(dataPath));
+    QFile::remove(dataPath);
+    QFile::remove(QString(dataPath).replace(".sigmf-data", ".sigmf-meta"));
+}
+
+// A wrongly-typed tune_hz is an honest argument error (never a silent retune to 0).
+void TestControlHub::exportIqSegment_badTuneArgHonestError() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+    QJsonObject r = parseObj(hub.execute("export_iq_segment",
+                                         {{"tune_hz", "not-a-number"}}));
+    QCOMPARE(r.value("ok").toBool(), false);
+    QVERIFY(r.value("error").toString().contains(QString::fromUtf8("tune_hz")));
 }
 
 QTEST_MAIN(TestControlHub)

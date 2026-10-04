@@ -86,8 +86,12 @@ void Recorder::stop() {
     recording_ = false;
     dataFile_.close();
 
-    // Patch num_samples and write meta
-    meta_["global"].toObject()["core:num_samples"] = static_cast<qint64>(sampleCount_);
+    // Patch num_samples and write meta. NOTE: meta_["global"].toObject() returns
+    // a COPY -- the patch must be written back into meta_ or it is silently lost
+    // (the sidecar would always read num_samples=0, a dishonest header).
+    QJsonObject global = meta_.value(QStringLiteral("global")).toObject();
+    global[QStringLiteral("core:num_samples")] = static_cast<qint64>(sampleCount_);
+    meta_[QStringLiteral("global")] = global;
     QJsonDocument doc(meta_);
     QFile f(currentMetaPath_);
     if (f.open(QIODevice::WriteOnly)) {

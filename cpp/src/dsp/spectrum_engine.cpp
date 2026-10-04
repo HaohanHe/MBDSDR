@@ -12,6 +12,7 @@
 #include <QByteArray>
 #include <QDateTime>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -275,6 +276,91 @@ std::size_t SpectrumEngine::captureForCalibration(
     return gotTotal;
 }
 
+// One-shot user-initiated IQ export. Mirrors captureForCalibration's proven
+// locked chunked pull, but ALSO reads the source gain/hw readback under the SAME
+// lock (so the SigMF sidecar carries real values, never a fabricated 0), then
+// writes the captured window to its own local Recorder (the in-flight continuous
+// recorder_ is never touched). All file IO happens AFTER the lock is released so
+// the DSP read-loop is not blocked on disk.
+bool SpectrumEngine::exportIqSegment(int sampleCount, double tuneHz,
+                                     QString& pathOut, double& sampleRateHzOut,
+                                     double& centerHzOut, qint64& samplesOut,
+                                     qint64& sizeBytesOut, QString& errorOut) {
+    pathOut.clear();
+    samplesOut = 0;
+    sizeBytesOut = 0;
+    sampleRateHzOut = 0.0;
+    centerHzOut = 0.0;
+
+    // Honest request bounds: tiny captures are useless, huge ones would stall
+    // the read loop under the lock. Clamp rather than refuse.
+    if (sampleCount < 1024) sampleCount = 1024;
+    if (sampleCount > 16 * 1024 * 1024) sampleCount = 16 * 1024 * 1024;
+
+    std::vector<std::complex<float>> iq;
+    double gainDb = 0.0;
+    QString hardware;
+    {
+        QMutexLocker lk(&sourceMutex_);
+        if (!source_ || !hasDataLocked()) {
+            errorOut = QString::fromUtf8("无 IQ 数据可导出：源未运行、无硬件且未打开离线文件");
+            return false;
+        }
+        if (tuneHz >= 0.0) source_->setCenterFreq(tuneHz);
+
+        constexpr std::size_t kChunk = 8192;
+        const std::size_t target = static_cast<std::size_t>(sampleCount);
+        std::size_t gotTotal = 0;
+        while (gotTotal < target) {
+            const std::size_t want = std::min<std::size_t>(kChunk, target - gotTotal);
+            std::vector<std::complex<float>> block(want);
+            const std::size_t got = source_->readIQ(block);
+            if (got == 0) break;   // honest EOF / source has no more data
+            if (got < want) block.resize(got);
+            iq.insert(iq.end(), block.begin(), block.end());
+            gotTotal += got;
+        }
+        sampleRateHzOut = source_->sampleRate();
+        centerHzOut     = source_->centerFreq();
+        gainDb          = source_->gain();
+        hardware        = source_->name();
+    }
+
+    if (iq.empty()) {
+        errorOut = QString::fromUtf8("源未产出任何 IQ 样本（无可导出数据）");
+        return false;
+    }
+
+    // Build a collision-free base path under the recording dir, mirroring the
+    // continuous Recorder's second-resolution disambiguation so an export never
+    // truncates a sibling capture.
+    QDir().mkpath(recDir_);
+    const QString stamp = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+    QString base = QStringLiteral("%1/export_%2_%3Hz")
+                       .arg(recDir_, stamp)
+                       .arg(static_cast<qint64>(centerHzOut));
+    int n = 2;
+    while (QFile::exists(base + QStringLiteral(".sigmf-data")) && n < 10000) {
+        base = QStringLiteral("%1_%2").arg(base).arg(n++);
+    }
+
+    // Local, dedicated recorder: this NEVER disturbs an in-flight recorder_ /
+    // wavWriter_ continuous capture. startWithBase opens the file, writeIQ dumps
+    // the captured window, stop() patches num_samples and writes the sidecar.
+    Recorder rec;
+    if (!rec.startWithBase(base, sampleRateHzOut, centerHzOut, gainDb, hardware)) {
+        errorOut = QString::fromUtf8("导出文件创建失败（无法打开输出文件）");
+        return false;
+    }
+    rec.writeIQ(iq);
+    rec.stop();
+
+    pathOut = rec.currentFilePath();
+    samplesOut = static_cast<qint64>(iq.size());
+    sizeBytesOut = QFileInfo(pathOut).size();
+    return true;
+}
+
 bool SpectrumEngine::tryConnectRtl() {
     QMutexLocker lk(&sourceMutex_);
     if (source_) source_->stop();
@@ -535,6 +621,7 @@ void SpectrumEngine::setTestSourceEnabled(bool on) {
 
 void SpectrumEngine::setMuted(bool m) {
     if (audioSink_) audioSink_->setMuted(m);
+    if (networkTap_) networkTap_->setMuted(m);
 }
 
 void SpectrumEngine::setTestAudioSink(std::unique_ptr<IAudioSink> sink) {
@@ -543,6 +630,13 @@ void SpectrumEngine::setTestAudioSink(std::unique_ptr<IAudioSink> sink) {
     // changes. nullptr restores the real device sink.
     testSink_ = std::move(sink);
     audioSink_ = testSink_ ? testSink_.get() : static_cast<IAudioSink*>(audioOut_);
+}
+
+void SpectrumEngine::setNetworkAudioSink(std::unique_ptr<IAudioSink> tap) {
+    // Parallel branch: the production write path above is untouched -- the tap
+    // simply receives the same frames in run(). The DSP loop reads networkTap_
+    // with no lock; swap only happens from the UI/test thread between blocks.
+    networkTap_ = std::move(tap);
 }
 
 void SpectrumEngine::setBandwidth(double hz) {
@@ -1242,8 +1336,14 @@ void SpectrumEngine::run() {
                 R[i] = std::clamp(g * (m - blend * s), -1.0f, 1.0f);
             }
             audioSink_->writeStereo(L, R);
+            // Phase24 network tap: mirror the SAME frames in parallel. The local
+            // playback above is never altered; digital-mode silence (the other
+            // write site) is deliberately NOT tapped -- digital VFOs carry no
+            // demodulated audio, so the stream simply stays empty there.
+            if (networkTap_) networkTap_->writeStereo(L, R);
         } else {
             audioSink_->write(out);
+            if (networkTap_) networkTap_->write(out);
         }
 
         // Throttled (~5 Hz) honest stereo readout for the UI badge. Stereo means

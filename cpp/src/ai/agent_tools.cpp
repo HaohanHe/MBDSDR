@@ -118,6 +118,45 @@ QString execStopRecording(const QJsonObject& /*args*/, dsp::SpectrumEngine* engi
     return compact(o);
 }
 
+// WRITE action: one-shot IQ export to a cf32_le SigMF file on disk (gated in
+// manual mode). Distinct from start_recording: it dumps a bounded, on-demand
+// window NOW and returns, rather than recording continuously until stopped.
+// No source data -> honest ok:false (never a fabricated empty file).
+QString execExportIqSegment(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                            const SourceInfo& src) {
+    int sampleCount = static_cast<int>(args["sample_count"].toDouble(65536.0));
+    double tuneHz = -1.0;   // default: keep the current centre
+    if (args.contains("tune_hz") && !args["tune_hz"].isNull()) {
+        if (!args["tune_hz"].isDouble()) {
+            QJsonObject o;
+            o["ok"] = false;
+            o["error"] = QString::fromUtf8("参数 tune_hz 必须是数字（Hz，缺省=保持当前中心）");
+            return compact(o);
+        }
+        tuneHz = args["tune_hz"].toDouble();
+    }
+
+    QString path; double sr = 0.0, center = 0.0;
+    qint64 samples = 0, bytes = 0; QString err;
+    const bool ok = engine->exportIqSegment(sampleCount, tuneHz, path,
+                                            sr, center, samples, bytes, err);
+    QJsonObject o;
+    o["ok"] = ok;
+    if (ok) {
+        o["message"] = QString::fromUtf8("已导出 IQ 段：%1 个复样本（%2 字节）-> %3")
+                           .arg(samples).arg(bytes).arg(path);
+        o["path"] = path;
+        o["sample_rate_hz"] = sr;
+        o["center_hz"] = center;
+        o["samples"] = samples;
+        o["bytes"] = bytes;
+        addSourceFields(o, src);
+    } else {
+        o["error"] = err;
+    }
+    return compact(o);
+}
+
 QString execScanBand(const QJsonObject& args, dsp::SpectrumEngine* engine,
                      const SourceInfo& src) {
     double low = args["low_hz"].toDouble();
@@ -445,6 +484,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"set_mode", &execSetMode},
         {"start_recording", &execStartRecording},
         {"stop_recording", &execStopRecording},
+        {"export_iq_segment", &execExportIqSegment},
         {"scan_band", &execScanBand},
         {"set_bandwidth", &execSetBandwidth},
         {"get_status", &execGetStatus},

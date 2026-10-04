@@ -41,7 +41,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 13);
+    QCOMPARE(specs.size(), 14);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -170,6 +170,12 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "只读：读取指定（默认当前选中）VOR 信道最新径向读数"
             "（radialDeg 方位、质量、莫尔斯识别码、锁定态）。"
             "未锁定时 locked=false，方位不可信并被显式标注，不编造方位。")},
+        {"export_iq_segment",
+         QString::fromUtf8(
+            "写入（一次性）：立即抓取一段当前中心频率的基带 IQ 复样本并导出为 "
+            "cf32_le SigMF 文件（.sigmf-data + .sigmf-meta），返回真实路径与样本数。"
+            "区别于 start_recording 的连续录制：这是按需导出一个有界窗口后即返回。"
+            "无 IQ 数据时诚实报错，不生成空文件。属于写动作，手动模式下被拦截。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {

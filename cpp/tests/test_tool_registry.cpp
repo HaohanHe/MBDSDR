@@ -30,22 +30,25 @@ namespace {
 // expected value the introspected tables are checked against. Grew from 8 to 10
 // with the frequency-calibration pair: calibrate_frequency (read-only measure)
 // and apply_frequency_correction (write, gated). Grew 10 to 13 with the
-// Wave2 POCSAG/m17/VOR read-only decode-snapshot tools.
+// Wave2 POCSAG/m17/VOR read-only decode-snapshot tools. Grew 13 to 14 with the
+// one-shot export_iq_segment IQ dump (write, gated).
 const QSet<QString> kAllCxxTools = {
     "tune_frequency", "set_mode", "start_recording", "stop_recording",
     "scan_band", "set_bandwidth", "get_status", "predict_passes",
     "calibrate_frequency", "apply_frequency_correction",
     "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
+    "export_iq_segment",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
 // the C++ write gate; it must equal ToolSchemaSpec::write flags set in
 // tool_schema.cpp (the registry is now the single source). Grew from 6 to 7
 // with apply_frequency_correction (it persists QSettings + drives source->setPpm).
+// Grew 7 to 8 with export_iq_segment (it writes an IQ file to disk).
 const QSet<QString> kExpectedWriteTools = {
     "tune_frequency", "set_mode", "set_bandwidth",
     "start_recording", "stop_recording", "scan_band",
-    "apply_frequency_correction",
+    "apply_frequency_correction", "export_iq_segment",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -90,7 +93,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 13, qPrintable(QString("expected 13 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 14, qPrintable(QString("expected 14 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -172,13 +175,15 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
     QVERIFY(!isWriteTool("definitely_not_a_real_tool"));
 }
 
-// Not-a-regression smoke: the on-wire contract still holds (13 defs, order kept)
+// Not-a-regression smoke: the on-wire contract still holds (14 defs, order kept)
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 13);
+    QCOMPARE(defs.size(), 14);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
+    // The newest tool is appended last (on-wire order kept).
+    QCOMPARE(defs.last().name, QString("export_iq_segment"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

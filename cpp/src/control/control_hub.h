@@ -161,6 +161,9 @@ private:
     QJsonObject cmdSetMuted(const QJsonObject& a);
     QJsonObject cmdStartRecording(const QJsonObject& a);
     QJsonObject cmdStopRecording(const QJsonObject& a);
+    // One-shot user export: dump the current (or a tuned) baseband IQ segment to
+    // a cf32_le SigMF file, independent of the continuous recorder. WRITE gated.
+    QJsonObject cmdExportIqSegment(const QJsonObject& a);
     QJsonObject cmdSetAnr(const QJsonObject& a);
     QJsonObject cmdSetGatedRecording(const QJsonObject& a);
     QJsonObject cmdSetWatch(const QJsonObject& a);
