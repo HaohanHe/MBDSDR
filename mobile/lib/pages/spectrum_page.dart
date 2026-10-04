@@ -461,6 +461,68 @@ class _ControlPanel extends StatelessWidget {
     }
   }
 
+  /// 范围扫描对话框：默认以当前频率为中心 ±0.5 MHz，步进 25 kHz。
+  /// 命中门限取当前静噪门限（真实电平阈值），走真实调谐+真实量测。
+  Future<void> _promptScan(BuildContext context) async {
+    final center = controller.freqHz / 1e6;
+    final startCtrl = TextEditingController(
+      text: (center - 0.5).clamp(24.0, 1700.0).toStringAsFixed(4),
+    );
+    final endCtrl = TextEditingController(
+      text: (center + 0.5).clamp(24.0, 1700.0).toStringAsFixed(4),
+    );
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTokens.bgBar,
+        title: const Text('范围扫描', style: AppTokens.sectionTitle),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: startCtrl,
+              decoration: const InputDecoration(labelText: '起始 (MHz)'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: AppTokens.mono,
+            ),
+            TextField(
+              controller: endCtrl,
+              decoration: const InputDecoration(labelText: '结束 (MHz)'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: AppTokens.mono,
+            ),
+            const SizedBox(height: AppTokens.spacingS),
+            Text(
+              '步进 25 kHz · 命中门限 ${controller.squelchThresholdDb.toStringAsFixed(0)} dBFS',
+              style: AppTokens.auxiliary,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('开始'),
+          ),
+        ],
+      ),
+    );
+    if (result != true) return;
+    final start = double.tryParse(startCtrl.text.trim());
+    final end = double.tryParse(endCtrl.text.trim());
+    if (start == null || end == null || end <= start) return;
+    unawaited(controller.startScan(
+      startHz: (start * 1e6).round(),
+      endHz: (end * 1e6).round(),
+      stepHz: 25000,
+      thresholdDbfs: controller.squelchThresholdDb,
+      dwellMs: 300,
+    ));
+  }
+
   /// 收藏当前频点：弹窗让用户命名（默认用频率占位，可改；不留空则存无名书签）。
   /// 自动带入真实当前频率 / 模式 / 带宽。绝不预存假台名。
   Future<void> _promptAddBookmark(BuildContext context) async {
@@ -806,6 +868,53 @@ class _ControlPanel extends StatelessWidget {
                 ),
               ],
             ),
+            // ---- 范围扫描：真实调谐+真实电平量测，命中写活动日志。未连接诚实禁用。
+            const SizedBox(height: AppTokens.spacingM),
+            if (controller.scanning) ...[
+              LinearProgressIndicator(
+                value: controller.scanProgress <= 0
+                    ? null
+                    : controller.scanProgress,
+                color: AppTokens.accent,
+                backgroundColor: AppTokens.card2,
+              ),
+              const SizedBox(height: AppTokens.spacingS),
+              Row(
+                children: [
+                  Text(
+                    '扫描中 ${(controller.scanHz != null ? controller.scanHz! / 1e6 : 0).toStringAsFixed(3)} MHz · '
+                    '${(controller.scanProgress * 100).round()}%',
+                    style: AppTokens.mono,
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: () => controller.stopScan(),
+                    icon: const Icon(Icons.stop_circle_outlined,
+                        size: AppTokens.iconSizeInlineLg),
+                    label: const Text('停止'),
+                  ),
+                ],
+              ),
+            ] else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    tooltip: connected
+                        ? '在当前频率附近范围扫描'
+                        : '需连接设备后才能范围扫描',
+                    icon: const Icon(Icons.tune),
+                    onPressed: connected ? () => _promptScan(context) : null,
+                    color: connected
+                        ? AppTokens.accent
+                        : AppTokens.textAt(AppTokens.textAlphaFaint),
+                  ),
+                  Text(
+                    connected ? '范围扫描' : '范围扫描（需连接）',
+                    style: AppTokens.auxiliary,
+                  ),
+                ],
+              ),
             // 收藏当前频点（命名弹窗）+ 已收藏列表：点击真实跳频并应用模式/带宽。
             // 书签默认空，不内置台名/位置。
             if (onAddBookmark != null) ...[

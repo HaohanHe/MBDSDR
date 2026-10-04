@@ -114,6 +114,26 @@ class _TapRadio extends ChangeNotifier implements RadioApi {
 
   @override
   Future<RecordingMeta?> stopRecording() async => null;
+
+  @override
+  bool get scanning => false;
+
+  @override
+  int? get scanHz => null;
+
+  @override
+  double get scanProgress => 0;
+
+  @override
+  Future<void> startScan(
+          {required int startHz,
+          required int endHz,
+          required int stepHz,
+          required double thresholdDbfs,
+          int dwellMs = 300}) async {}
+
+  @override
+  void stopScan() {}
 }
 
 void main() {
