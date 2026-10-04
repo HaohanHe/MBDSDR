@@ -1598,3 +1598,17 @@ add_executable(test_network_audio_sink tests/test_network_audio_sink.cpp
 target_include_directories(test_network_audio_sink PRIVATE src)
 target_link_libraries(test_network_audio_sink PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME network_audio_sink COMMAND test_network_audio_sink)
+
+# ---- Phase32 block1: AI multi-session panel, production MainWindow offscreen -
+# Boots the REAL MainWindow (env-isolated store dir) and drives the production AI
+# panel wiring: 新会话/删除 session CRUD with real JSON on disk, combo switch +
+# honest re-point after deleting the current session, the single-transient partial
+# line replacing chunks and settling exactly once (no dup), and the 〔未完成〕
+# incomplete badge shown while a reply is pending and cleared once it settles.
+# CI has no LLM key, so the streaming lifecycle is driven through the same
+# handlers the Agent signals connect to (harnessAi*), never a fabricated reply.
+add_executable(test_ai_sessions_prod tests/test_ai_sessions_prod.cpp ${TESTAPP_SRCS} ${HEADERS})
+target_include_directories(test_ai_sessions_prod PRIVATE src build/test_ai_sessions_prod_autogen/include)
+target_link_libraries(test_ai_sessions_prod PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+add_test(NAME ai_sessions_prod COMMAND test_ai_sessions_prod)
+set_tests_properties(ai_sessions_prod PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

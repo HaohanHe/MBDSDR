@@ -14,6 +14,26 @@
 namespace mbdsdr {
 namespace ai {
 
+namespace {
+// Phase32 block2: build an honest user-facing error line for an HTTP error
+// status. QNetworkReply::errorString() drops the numeric code ("server replied:
+// Too Many Requests"), so we read the real code from HttpStatusCodeAttribute and
+// carry it here. Append the server's own reason when the body follows the OpenAI
+// shape {"error":{"message":...}}, and an explicit API-key hint on 401/403.
+QString httpStatusErrorMessage(int code, const QByteArray& body) {
+    QString msg = QString::fromUtf8("HTTP %1").arg(code);
+    QJsonDocument d = QJsonDocument::fromJson(body);
+    if (d.isObject()) {
+        QJsonObject err = d.object().value(QStringLiteral("error")).toObject();
+        QString reason = err.value(QStringLiteral("message")).toString();
+        if (!reason.isEmpty()) msg += QStringLiteral(": ") + reason;
+    }
+    if (code == 401 || code == 403)
+        msg += QString::fromUtf8("（请检查 API Key 是否有效/是否有额度）");
+    return msg;
+}
+} // namespace
+
 // static process-wide test transport (null in production).
 LLMClient::TransportFn LLMClient::s_testTransport;
 
@@ -152,6 +172,10 @@ LLMResponse LLMClient::chat(const QList<ChatMessage>& messages,
 
     StreamAccumulator acc;
     QByteArray raw;
+    // Phase32 block2: real HTTP status code from the transport. Stays 0 on the
+    // offline-mock path (no socket, no status line) -> the worker then classifies
+    // by the Phase31 string heuristic instead.
+    int httpStatus = 0;
 
     if (transport_) {
         // ---- Offline / injected transport: fully synchronous, no socket. ----
@@ -181,25 +205,69 @@ LLMResponse LLMClient::chat(const QList<ChatMessage>& messages,
         }
         loop.exec();
 
-        if (reply->error() != QNetworkReply::NoError) {
-            // Phase31 G1: keep whatever partial content already streamed (the
-            // user already saw the half sentence on screen); attach the error,
-            // never drop the partial reply to an empty one (streaming.md §4).
+        // Read the REAL HTTP status code. This is the only place the numeric code
+        // survives: QNetworkReply::errorString() renders it as a reason phrase
+        // ("server replied: Too Many Requests") with no number. The attribute is
+        // invalid when no HTTP status line arrived (conn refused / DNS / TLS /
+        // timeout), in which case httpStatus correctly stays 0.
+        {
+            QVariant sv = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+            if (sv.isValid()) httpStatus = sv.toInt();
+        }
+        const QNetworkReply::NetworkError netErr = reply->error();
+
+        if (onChunk) {
+            feedSseText(sseBuf, opts.protocol, acc, nullptr);   // flush trailing
+            // Phase31 G1: keep whatever partial content already streamed (the user
+            // saw the half sentence on screen); attach the error + the real code.
             LLMResponse r = acc.toResponse();
-            r.error = reply->errorString();
+            r.httpStatus = httpStatus;
+            if (netErr != QNetworkReply::NoError) {
+                // QNAM maps non-2xx statuses onto error(), but its errorString()
+                // drops the numeric code ("server replied: Too Many Requests").
+                // When we DO have a code, render it (with the key hint) ourselves.
+                r.error = (httpStatus > 0)
+                              ? httpStatusErrorMessage(httpStatus, QByteArray())
+                              : reply->errorString();
+            } else if (httpStatus >= 300) {
+                r.error = httpStatusErrorMessage(httpStatus, QByteArray());
+            }
             reply->deleteLater();
             return r;
         }
-        if (onChunk) {
-            feedSseText(sseBuf, opts.protocol, acc, nullptr);   // flush trailing lines
-        } else {
-            raw = reply->readAll();
-        }
+
+        raw = reply->readAll();
+        const QString netErrString = reply->errorString();
         reply->deleteLater();
+
+        if (netErr != QNetworkReply::NoError) {
+            // Transport-layer abort (timeout / reset / DNS / TLS). httpStatus may
+            // be 0 (no status line) or a code seen before the abort -- the worker
+            // classifies on whichever is present. Render the code (+server reason
+            // body) when known; else fall back to the network error string.
+            resp.httpStatus = httpStatus;
+            resp.error = (httpStatus > 0)
+                             ? httpStatusErrorMessage(httpStatus, raw)
+                             : netErrString;
+            return resp;
+        }
+        if (httpStatus >= 300) {
+            // The server answered with an error status but QNAM did not abort the
+            // request: surface the numeric code + server reason so the worker can
+            // classify (429/503 retry, 401 key hint, 400 terminal).
+            resp.httpStatus = httpStatus;
+            resp.error = httpStatusErrorMessage(httpStatus, raw);
+            return resp;
+        }
     }
 
-    if (onChunk) return acc.toResponse();
+    if (onChunk) {
+        LLMResponse r = acc.toResponse();
+        r.httpStatus = httpStatus;   // 0 on the offline-mock path
+        return r;
+    }
 
+    resp.httpStatus = httpStatus;
     QString err;
     if (!parseChatResponse(raw, opts.protocol, &resp, &err)) {
         resp.error = err.isEmpty() ? QStringLiteral("response parse error") : err;

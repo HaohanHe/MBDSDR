@@ -2595,30 +2595,8 @@ MainWindow::MainWindow(QWidget* parent)
     // clears the transient + tool notes, appends the final assistant message to
     // the persisted session, and re-renders -- so the final content shows up
     // exactly once, even across many partial chunks.
-    connect(agent_, &ai::Agent::responseReady, this, [this](const QString& t) {
-        aiToolNotes_.clear();
-        aiTransient_.clear();
-        aiSessionStore_->appendMessage(aiCurSessionId_,
-            mbdsdr::ai::SessionMessage{"assistant", t});
-        aiRenderChat();
-        // Autonomous task bridge: if the model replied with a trusted JSON plan
-        // block, execute it for real on the worker thread.  If it did NOT parse
-        // (no plan block / unknown tool), the reply stays a normal chat message
-        // -- we never invent steps.
-        if (!aiRunner_ || aiRunner_->isRunning()) return;
-        ai::ParsedPlan pp = ai::parsePlanFromLlm(t);
-        if (pp.ok) {
-            aiSessionStore_->appendMessage(aiCurSessionId_,
-                mbdsdr::ai::SessionMessage{"assistant",
-                    QString::fromUtf8("已按规划执行 %1 步").arg(pp.plan.steps.size())});
-            aiRenderChat();
-            startRunnerPlan(pp.plan);
-        }
-    });
-    connect(agent_, &ai::Agent::partialReady, this, [this](const QString& acc) {
-        aiTransient_ = acc;          // replaces the previous transient, no dup
-        aiRenderChat();
-    });
+    connect(agent_, &ai::Agent::responseReady, this, &MainWindow::aiOnResponseReady);
+    connect(agent_, &ai::Agent::partialReady, this, &MainWindow::aiOnPartialReady);
     connect(agent_, &ai::Agent::contextCompacted, this, [this](const QString& note) {
         aiSessionStore_->appendMessage(aiCurSessionId_,
             mbdsdr::ai::SessionMessage{"summary", note});
@@ -2643,11 +2621,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(sendBtn, &QPushButton::clicked, this, [this]() {
         QString t = aiInput_->text().trimmed();
         if (t.isEmpty()) return;
-        aiSessionStore_->appendMessage(aiCurSessionId_,
-            mbdsdr::ai::SessionMessage{"user", t});
-        aiToolNotes_.clear();
-        aiTransient_ = QString::fromUtf8("思考中…");
-        aiRenderChat();
+        aiBeginUserTurn(t);
         agent_->sendMessage(t);
         aiInput_->clear();
     });
@@ -2665,7 +2639,13 @@ MainWindow::MainWindow(QWidget* parent)
     connect(aiSessionStore_, &mbdsdr::ai::AiSessionStore::sessionsChanged,
             this, [this]() { aiRefreshSessionCombo(); });
     connect(aiSessionStore_, &mbdsdr::ai::AiSessionStore::currentSessionChanged,
-            this, [this]() { aiRenderChat(); });
+            this, [this]() {
+        aiRenderChat();
+        // The 〔未完成〕 badge lives in the switcher; a pending/settled reply or a
+        // new user line flips that flag, so rebuild the dropdown too (blocked
+        // against re-entrancy; selection is restored by id, never lost).
+        aiRefreshSessionCombo();
+    });
 
     // ---- Keyboard tuning ----
     // Left/Right: nudge the ACTUAL tuned centre frequency by currentStepHz_
@@ -5519,6 +5499,66 @@ void MainWindow::aiRenderChat() {
         aiChat_->appendPlainText(QString("AI: %1 ▌").arg(aiTransient_));
 }
 
+// ---- Phase32 block1: streaming transient / incomplete lifecycle -------------
+void MainWindow::aiBeginUserTurn(const QString& text) {
+    if (!aiSessionStore_) return;
+    // appendMessage(user) auto-clears any prior 未完成 (the operator moved on);
+    // then raise the pending-stream flag so a crash mid-reply survives on disk as
+    // an honest 〔未完成〕 badge rather than looking like a finished turn.
+    aiSessionStore_->appendMessage(aiCurSessionId_,
+        mbdsdr::ai::SessionMessage{"user", text});
+    aiSessionStore_->setIncomplete(aiCurSessionId_, true);
+    aiToolNotes_.clear();
+    aiTransient_ = QString::fromUtf8("思考中…");
+    aiRenderChat();
+}
+
+void MainWindow::aiOnPartialReady(const QString& accumulated) {
+    // Replace (never append) the single transient line, so a long stream of SSE
+    // chunks renders as ONE growing line with no duplication.
+    aiTransient_ = accumulated;
+    aiRenderChat();
+}
+
+void MainWindow::aiOnResponseReady(const QString& finalText) {
+    // The terminal turn result -- both a clean chatFinished AND a failed chat.
+    // Agent collapses chatError onto THIS signal, and its displayText already
+    // embeds whatever partial text had streamed (formatChatError), so a half
+    // sentence is kept, not dropped. Settle it EXACTLY once: drop the transient
+    // + tool notes and persist the final line (even an error/partial one -- that
+    // is the honest record). The pending-stream flag clears because the turn
+    // reached a terminal state (success or a surfaced error); the next user
+    // message would clear it again anyway.
+    aiToolNotes_.clear();
+    aiTransient_.clear();
+    if (aiSessionStore_ && !aiCurSessionId_.isEmpty()) {
+        aiSessionStore_->appendMessage(aiCurSessionId_,
+            mbdsdr::ai::SessionMessage{"assistant", finalText});
+        aiSessionStore_->setIncomplete(aiCurSessionId_, false);
+    }
+    aiRenderChat();
+    // Autonomous task bridge: if the model replied with a trusted JSON plan
+    // block, execute it for real on the worker thread. If it did NOT parse (no
+    // plan block / unknown tool), the reply stays a normal chat message -- we
+    // never invent steps.
+    if (!aiRunner_ || aiRunner_->isRunning()) return;
+    ai::ParsedPlan pp = ai::parsePlanFromLlm(finalText);
+    if (pp.ok) {
+        aiSessionStore_->appendMessage(aiCurSessionId_,
+            mbdsdr::ai::SessionMessage{"assistant",
+                QString::fromUtf8("已按规划执行 %1 步").arg(pp.plan.steps.size())});
+        aiRenderChat();
+        startRunnerPlan(pp.plan);
+    }
+}
+
+// Offscreen harness wrappers (see the header) -- drive the SAME handlers the
+// Agent signals are wired to, so the lifecycle is testable without a live LLM.
+void MainWindow::harnessAiBeginUserTurn(const QString& text) { aiBeginUserTurn(text); }
+void MainWindow::harnessAiSetPartial(const QString& acc)     { aiOnPartialReady(acc); }
+void MainWindow::harnessAiFinishResponse(const QString& t)   { aiOnResponseReady(t); }
+QString MainWindow::harnessAiChatText() const { return aiChat_ ? aiChat_->toPlainText() : QString(); }
+
 void MainWindow::aiRefreshSessionCombo() {
     if (!aiSessionCombo_ || !aiSessionStore_) return;
     QSignalBlocker blk(aiSessionCombo_);
@@ -5526,7 +5566,14 @@ void MainWindow::aiRefreshSessionCombo() {
     int sel = 0;
     const auto list = aiSessionStore_->sessions();
     for (int i = 0; i < list.size(); ++i) {
-        aiSessionCombo_->addItem(list[i].title, list[i].id);
+        // Honest badge: a session whose last streamed reply was cut off mid-write
+        // (crash / error before it settled) is flagged 〔未完成〕 right in the
+        // switcher, so a half reply is never shown as a finished turn. The store
+        // clears the flag automatically on the next user message.
+        QString title = list[i].title;
+        if (list[i].incomplete)
+            title += QString::fromUtf8(" 〔未完成〕");
+        aiSessionCombo_->addItem(title, list[i].id);
         if (list[i].id == aiCurSessionId_) sel = i;
     }
     aiSessionCombo_->setCurrentIndex(sel);
@@ -5566,6 +5613,20 @@ void MainWindow::onAiRenameSession() {
 
 void MainWindow::onAiDeleteSession() {
     if (!aiSessionStore_ || aiCurSessionId_.isEmpty()) return;
+    // Destructive + irreversible: ask first (offscreen tests flip
+    // aiAutoConfirmDelete_ so the button isn't blocked on a modal). The store
+    // never leaves zero sessions -- if this is the last one it is emptied, and if
+    // we delete the current one the store honestly re-points currentId_ at the
+    // survivor; we then mirror that honestly instead of staying on a dead id.
+    if (!aiAutoConfirmDelete_) {
+        const QString name = aiSessionCombo_ ? aiSessionCombo_->currentText()
+                                             : aiCurSessionId_;
+        auto ans = QMessageBox::question(this,
+            QString::fromUtf8("删除会话"),
+            QString::fromUtf8("确定删除会话「%1」？此操作不可撤销。").arg(name),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (ans != QMessageBox::Yes) return;
+    }
     aiSessionStore_->deleteSession(aiCurSessionId_);
     aiCurSessionId_ = aiSessionStore_->currentId();
     aiToolNotes_.clear();

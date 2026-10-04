@@ -38,7 +38,16 @@ public:
     //   Retryable -> 429/503/504/stream-timeout/connection: transient, backoff.
     //   Ok        -> empty error string.
     enum class LlmErrorClass { Ok, Terminal, Retryable };
+    // Phase31 heuristic (retained verbatim as the FALLBACK): string matching.
     static LlmErrorClass classifyLlmError(const QString& errorString);
+    // Phase32 block2: classify by the REAL HTTP status code first:
+    //   429            -> Retryable (exponential backoff, existing seam)
+    //   500/502/503/504/408 -> Retryable (server/timeout transient)
+    //   401/403        -> Terminal (key hint; client-side, won't self-heal)
+    //   400/404/422    -> Terminal (bad request shape; honest PENDING)
+    // other 4xx -> Terminal, other 5xx -> Retryable. httpStatus <= 0 (no HTTP
+    // reply: conn fail / timeout) defers to the string heuristic above.
+    static LlmErrorClass classifyLlmError(int httpStatus, const QString& errorString);
     // Exponential backoff delay (ms) for the n-th transient retry (1-based),
     // clamped to [kAiBackoffBaseMs, kAiBackoffMaxMs]. No real network sleep here.
     static int backoffDelayMs(int attemptOneBased);

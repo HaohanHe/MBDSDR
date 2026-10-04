@@ -21,6 +21,9 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QNetworkRequest>
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QHostAddress>
 
 #include "ai/llm_client.h"
 #include "ai/llm_worker.h"
@@ -100,6 +103,76 @@ struct ScriptedMock {
     }
 };
 
+// Phase32 block2: a REAL loopback HTTP server (QTcpServer) so the test exercises
+// the production QNAM path end-to-end -- no injected transport, no socket mocking.
+// It answers every accepted connection with a chosen HTTP status line + body.
+// Connection: close means one connection == one request, so `hits` counts calls.
+class LoopbackHttp : public QObject {
+    Q_OBJECT
+public:
+    int statusCode = 200;
+    QJsonObject errorBody;          // {"error":{...}} sent for >=400
+    int hits = 0;
+
+    explicit LoopbackHttp(QObject* parent = nullptr) : QObject(parent) {
+        QObject::connect(&server, &QTcpServer::newConnection, this, [this]() {
+            while (server.hasPendingConnections()) {
+                QTcpSocket* sock = server.nextPendingConnection();
+                ++hits;
+                // Per-connection request accumulator + one-shot guard.
+                QByteArray* req = new QByteArray;
+                bool* responded = new bool(false);
+                QObject::connect(sock, &QTcpSocket::readyRead, sock,
+                    [this, sock, req, responded]() {
+                        if (*responded) return;
+                        *req += sock->readAll();
+                        if (!req->contains("\r\n\r\n")) return;   // need full headers
+                        *responded = true;
+                        QByteArray body;
+                        if (statusCode >= 400) {
+                            QJsonObject root; root["error"] = errorBody;
+                            body = QJsonDocument(root).toJson(QJsonDocument::Compact);
+                        } else {
+                            body = "{\"choices\":[{\"message\":{\"role\":\"assistant\","
+                                   "\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}";
+                        }
+                        QByteArray resp =
+                            "HTTP/1.1 " + QByteArray::number(statusCode) + " " +
+                            reasonPhrase(statusCode) + "\r\n"
+                            "Content-Type: application/json\r\n"
+                            "Content-Length: " + QByteArray::number(body.size()) + "\r\n"
+                            "Connection: close\r\n\r\n" + body;
+                        sock->write(resp);
+                        sock->disconnectFromHost();
+                        delete req; delete responded;
+                    });
+                QObject::connect(sock, &QTcpSocket::disconnected,
+                                 sock, &QTcpSocket::deleteLater);
+            }
+        });
+        QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    }
+
+    QUrl url() const {
+        return QUrl(QStringLiteral("http://127.0.0.1:") +
+                    QString::number(server.serverPort()));
+    }
+
+private:
+    static QByteArray reasonPhrase(int c) {
+        switch (c) {
+            case 400: return "Bad Request";
+            case 401: return "Unauthorized";
+            case 408: return "Request Timeout";
+            case 429: return "Too Many Requests";
+            case 500: return "Internal Server Error";
+            case 503: return "Service Unavailable";
+            default:  return "OK";
+        }
+    }
+    QTcpServer server;
+};
+
 } // namespace
 
 class TestAiToolLoop : public QObject {
@@ -120,6 +193,12 @@ private slots:
     void manualGatedWriteFedBackAsToolMessage();
     void errorClassTerminalVsRetryable();
     void backoffDelayExponentialAndClamped();
+
+    // Phase32 block2: real HTTP status code transported + classified by code.
+    void realHttpStatus_transportedAndClassified();
+    void retryBudget_exhaustedOn429();
+    void terminalOn401_noRetryWithKeyHint();
+    void noKey_honestPending_noTransport();
 };
 
 // ---------------------------------------------------------------------------
@@ -493,6 +572,127 @@ void TestAiToolLoop::backoffDelayExponentialAndClamped() {
     QCOMPARE(ai::LLMWorker::backoffDelayMs(2), 2000);
     QCOMPARE(ai::LLMWorker::backoffDelayMs(3), 4000);
     QCOMPARE(ai::LLMWorker::backoffDelayMs(99), 8000);   // clamped to max
+}
+
+// Phase32 block2: a REAL loopback HTTP server answers with a chosen status. The
+// production QNAM path must surface the numeric code on the response and the
+// worker must classify it by that code (not by string guessing).
+void TestAiToolLoop::realHttpStatus_transportedAndClassified() {
+    using E = ai::LLMWorker::LlmErrorClass;
+    // Ensure no prior test's offline mock transport is installed: this exercises
+    // the real QNAM path against loopback.
+    ai::LLMClient::setDefaultTransportForTests(nullptr);
+
+    struct Case { int code; E expected; };
+    const Case cases[] = {
+        {429, E::Retryable},
+        {503, E::Retryable},
+        {500, E::Retryable},
+        {401, E::Terminal},
+        {400, E::Terminal},
+    };
+    for (const Case& c : cases) {
+        LoopbackHttp srv;
+        srv.statusCode = c.code;
+        QJsonObject err;
+        err["message"] = QStringLiteral("boom-%1").arg(c.code);
+        err["type"] = "error";
+        srv.errorBody = err;
+
+        ai::LLMClient client;
+        client.setApiKey("k");
+        client.setBaseUrl(srv.url().toString());
+
+        QList<ai::ChatMessage> msgs;
+        msgs.append(ai::ChatMessage{"user", "hi"});
+        ai::LLMResponse r = client.chat(msgs, {});
+
+        QCOMPARE(r.httpStatus, c.code);                 // real code transported
+        QVERIFY2(!r.error.isEmpty(), qPrintable("HTTP " +
+                  QString::number(c.code) + " must set an error"));
+        QVERIFY2(r.error.contains(QString::number(c.code)),
+                 qPrintable("error line must carry the numeric code, got: " + r.error));
+        QCOMPARE(ai::LLMWorker::classifyLlmError(r.httpStatus, r.error), c.expected);
+    }
+    // A 2xx success carries the code and no error.
+    {
+        LoopbackHttp srv;
+        srv.statusCode = 200;
+        ai::LLMClient client;
+        client.setApiKey("k");
+        client.setBaseUrl(srv.url().toString());
+        QList<ai::ChatMessage> msgs; msgs.append(ai::ChatMessage{"user", "hi"});
+        ai::LLMResponse r = client.chat(msgs, {});
+        QCOMPARE(r.httpStatus, 200);
+        QVERIFY(r.error.isEmpty());
+        QCOMPARE(r.content, QStringLiteral("ok"));
+    }
+}
+
+// Phase32 block2: 429 hits the bounded retry loop (existing exponential backoff
+// seam) up to kAiMaxTransientRetries, then surfaces chatError honestly -- never
+// chatFinished, never a mock answer.
+void TestAiToolLoop::retryBudget_exhaustedOn429() {
+    ai::LLMClient::setDefaultTransportForTests(nullptr);
+    LoopbackHttp srv;
+    srv.statusCode = 429;
+    QJsonObject err; err["message"] = "rate limit"; srv.errorBody = err;
+
+    ai::LLMWorker w;
+    w.setApiKey("k");
+    w.setBaseUrl(srv.url().toString());
+    ai::LLMWorker::setBackoffSleepForTests([](int) {});   // no real sleep
+
+    QSignalSpy errSpy(&w, &ai::LLMWorker::chatError);
+    QSignalSpy finSpy(&w, &ai::LLMWorker::chatFinished);
+    w.doChat(baseChat(), ai::toolDefs());
+
+    // 1 initial + kAiMaxTransientRetries retries, then give up honestly.
+    QCOMPARE(srv.hits, 1 + (int)tokens::kAiMaxTransientRetries);
+    QCOMPARE(errSpy.size(), 1);
+    QCOMPARE(finSpy.size(), 0);
+    ai::LLMWorker::setBackoffSleepForTests(nullptr);
+}
+
+// Phase32 block2: 401 is terminal -- exactly ONE request, no retry, and the error
+// line carries the API-key hint.
+void TestAiToolLoop::terminalOn401_noRetryWithKeyHint() {
+    ai::LLMClient::setDefaultTransportForTests(nullptr);
+    LoopbackHttp srv;
+    srv.statusCode = 401;
+    QJsonObject err; err["message"] = "invalid key"; srv.errorBody = err;
+
+    ai::LLMWorker w;
+    w.setApiKey("k");
+    w.setBaseUrl(srv.url().toString());
+    ai::LLMWorker::setBackoffSleepForTests([](int) {});
+
+    QSignalSpy errSpy(&w, &ai::LLMWorker::chatError);
+    QSignalSpy finSpy(&w, &ai::LLMWorker::chatFinished);
+    w.doChat(baseChat(), ai::toolDefs());
+
+    QCOMPARE(srv.hits, 1);                            // no retry on 401
+    QCOMPARE(errSpy.size(), 1);
+    QCOMPARE(finSpy.size(), 0);
+    const QString line = errSpy.takeFirst().at(0).toString();
+    QVERIFY2(line.contains(QStringLiteral("401")),
+             qPrintable("401 must surface in honest line, got: " + line));
+    QVERIFY2(line.contains(QStringLiteral("API Key")),
+             qPrintable("401 must carry the API-key hint, got: " + line));
+    ai::LLMWorker::setBackoffSleepForTests(nullptr);
+}
+
+// Phase32 block2: with NO key the client returns an honest terminal error BEFORE
+// any socket. httpStatus stays 0 (no HTTP reply) and classification falls back to
+// the string heuristic -> Terminal (no retry storm, no mock).
+void TestAiToolLoop::noKey_honestPending_noTransport() {
+    ai::LLMClient client;   // no setApiKey -> empty key
+    QList<ai::ChatMessage> msgs; msgs.append(ai::ChatMessage{"user", "hi"});
+    ai::LLMResponse r = client.chat(msgs, {});
+    QVERIFY(!r.error.isEmpty());
+    QCOMPARE(r.httpStatus, 0);                          // no HTTP reply at all
+    QCOMPARE(ai::LLMWorker::classifyLlmError(r.httpStatus, r.error),
+             ai::LLMWorker::LlmErrorClass::Terminal);
 }
 
 QTEST_MAIN(TestAiToolLoop)

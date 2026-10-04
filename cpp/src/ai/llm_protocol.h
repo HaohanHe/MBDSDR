@@ -54,6 +54,11 @@ struct LLMResponse {
     QList<ToolCall> toolCalls;
     QString finishReason;             // "stop" | "tool_calls" | "length" | ...
     QString error;
+    // Phase32 block2: the REAL HTTP status code from the transport layer
+    // (QNetworkRequest::HttpStatusCodeAttribute). 0 = no HTTP status line was
+    // ever received (connection refused / DNS / TLS / request timeout) -- the
+    // worker then falls back to the Phase31 string heuristic. 2xx on success.
+    int httpStatus = 0;
 };
 
 struct RequestOptions {

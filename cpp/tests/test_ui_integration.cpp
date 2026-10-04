@@ -196,7 +196,10 @@ void TestUiIntegration::aiSessionSwitcherCrud() {
     QVERIFY2(!chat->toPlainText().contains(QString::fromUtf8("在新会话里")),
              "switching sessions must show the selected session's messages only");
 
-    // Delete the current (first) session: count drops back to 1.
+    // Delete the current (first) session: count drops back to 1. The delete is
+    // destructive, so the production panel asks a modal QMessageBox first; the
+    // offscreen harness seam auto-confirms so this click isn't blocked.
+    win.harnessSetAutoConfirmSessionDelete(true);
     delBtn->click();
     QCOMPARE(combo->count(), 1);
 }
