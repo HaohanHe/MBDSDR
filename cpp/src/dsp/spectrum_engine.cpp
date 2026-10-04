@@ -1207,6 +1207,10 @@ void SpectrumEngine::run() {
         double rssi = 0;
         for (auto c : iq) rssi += std::norm(c);
         rssi = 10 * std::log10(rssi / iq.size() + 1e-10);
+        // Snapshot for the decoupled band-scan driver (rssiDbfs()). Only reachable
+        // when a real block was read (got>0 above), so the honest empty source
+        // leaves it at the -100 dBFS quiet default -- no fabricated busy level.
+        rssiDbfs_.store(static_cast<float>(rssi));
         emit rssiLevel(static_cast<float>(rssi));
 
         // Real-RSSI trigger for the unattended watch. The block duration is

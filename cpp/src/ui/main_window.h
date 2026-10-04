@@ -47,6 +47,10 @@ namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class Con
                  class PocsagPanel; class M17Panel; class VorPanel; }
 namespace ai   { class Agent; class AiSessionStore; class TaskRunner; struct StepResult; struct TaskPlan; }
 namespace gnss { class GnssReceiver; struct GnssFix; }
+// Phase27: headless control layer + its loopback-only HTTP front-end. Both live
+// on THIS (GUI) thread -- the thread that owns the SpectrumEngine -- so the hub
+// dispatches engine calls directly (same invariant the rest of the UI uses).
+namespace control { class ControlHub; class HttpControlServer; }
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -61,6 +65,13 @@ public:
     // already owns so offscreen tests can drive scan/bookmark state deterministically.
     dsp::FrequencyScanner* scanner() { return scanner_; }
     ui::BookmarkManager* bookmarkManager() { return bookmarkManager_; }
+    // Phase27 harness accessors: the production loopback control-HTTP server. The
+    // port is 0 when it failed to bind (honest -- the banner then explains why);
+    // offscreen e2e tests read the real bound port and drive loopback clients at
+    // it. No radio is opened by these; they only expose what the UI already owns.
+    quint16 harnessControlHttpPort() const;
+    bool     harnessControlHttpListening() const;
+    QLabel*  harnessControlHttpBanner() const { return controlHttpBanner_; }
     // AI multi-session store (harness/screenshot drive it offscreen).
     ai::AiSessionStore* aiSessionStore() { return aiSessionStore_; }
     // Harness/programmatic refresh (offscreen screenshots / embedding): re-sync
@@ -140,6 +151,20 @@ private slots:
 
 private:
     dsp::SpectrumEngine* engine_   = nullptr;
+
+    // ---- Phase27: loopback control-HTTP production wiring -------------------
+    // The headless ControlHub is the SINGLE command surface shared by the GUI,
+    // the AI tool loop and this HTTP front-end; MainWindow owns it (parented to
+    // this) and attaches the engine right after the engine is constructed. The
+    // HttpControlServer is a thin loopback-only JSON front-end on top of it.
+    // Both run on the GUI thread (the engine's home thread); there is NO worker
+    // thread to join -- shutdown is an orderly stop() on this thread before the
+    // engine is torn down. Bind failure is non-fatal: an honest amber banner
+    // explains the port conflict and the rest of the app keeps working.
+    mbdsdr::control::ControlHub*        controlHub_        = nullptr;
+    mbdsdr::control::HttpControlServer*  httpControlServer_ = nullptr;
+    QLabel*  controlHttpBanner_ = nullptr;   // top-bar chip (status / honest failure)
+    void setupControlHttpServer();
     ui::SpectrumWidget* spectrum_ = nullptr;
     ui::SkyView*     skyView_   = nullptr;
     ui::WorldView*   worldView_ = nullptr;
