@@ -375,6 +375,14 @@ target_include_directories(test_noise_blanker PRIVATE src)
 target_link_libraries(test_noise_blanker PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME noise_blanker COMMAND test_noise_blanker)
 
+# Phase35 W2: block-level lookahead anti-clip for dsp::Agc. Pure DSP (no Qt
+# widgets) -- burst first-sample no-clip, steady-state no over-suppression,
+# empty/zero/single-sample boundaries.
+add_executable(test_agc_dsp tests/test_agc_dsp.cpp src/dsp/agc.cpp)
+target_include_directories(test_agc_dsp PRIVATE src)
+target_link_libraries(test_agc_dsp PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME agc_dsp COMMAND test_agc_dsp)
+
 add_executable(test_engine_integration tests/test_engine_integration.cpp
     src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/fsk_demod.cpp src/dsp/pocsag_decoder.cpp src/dsp/m17_decoder.cpp src/dsp/vor_receiver.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
@@ -606,6 +614,14 @@ add_executable(test_spectrum_autorange tests/test_spectrum_autorange.cpp
 target_include_directories(test_spectrum_autorange PRIVATE src)
 target_link_libraries(test_spectrum_autorange PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME spectrum_autorange COMMAND test_spectrum_autorange)
+
+# Phase35 W2: peak-hold per-frame decay (hold = max(frame, hold - kMaxHoldDecayDb)).
+# Offscreen: drives setSpectrum and reads the maxHoldEnvelopeForTest seam.
+add_executable(test_spectrum_maxhold tests/test_spectrum_maxhold.cpp
+    src/ui/spectrum_display.cpp src/dsp/peak_detector.cpp)
+target_include_directories(test_spectrum_maxhold PRIVATE src)
+target_link_libraries(test_spectrum_maxhold PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME spectrum_maxhold COMMAND test_spectrum_maxhold)
 
 # AI integration test: SKIPs without MBDSDR_AI_KEY env (never FAILs offline).
 # llm_client.cpp now calls the M3 protocol layer and includes core/tokens.h
