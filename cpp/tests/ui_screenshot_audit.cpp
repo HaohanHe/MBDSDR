@@ -47,9 +47,9 @@ int main(int argc, char** argv) {
     win.resize(w > 0 ? w : 1280, h > 0 ? h : 800);
     win.show();
 
-    // Collect the two tab widgets: [0]=center(频谱/世界/气象), [1]=right.
-    QList<QTabWidget*> tabs = win.findChildren<QTabWidget*>();
-    QTabWidget* right = tabs.size() >= 2 ? tabs[1] : nullptr;
+    // Collect the right tab widget by its object name (center tabs have a
+    // different objectName; findChildren order is not guaranteed).
+    QTabWidget* right = win.findChild<QTabWidget*>("rightTabs");
 
     // 1. Main window with focus ring on the frequency spinbox.
     if (QDoubleSpinBox* f = win.findChild<QDoubleSpinBox*>("freqSpin"))
@@ -103,14 +103,25 @@ int main(int argc, char** argv) {
 
     // 2. Right tab: 录制库.
     if (right) {
-        // Phase 29: right-panel info-architecture groups (解码/观测/系统).
-        for (int i = 0; i < right->count(); ++i)
-            if (right->tabText(i).contains("CW")) right->setCurrentIndex(i);
-        grabLater(&win, dir + "/ui_ux_tabs.png", 1700, app);
+        // Grab the QTabBar directly (it is the visible strip of group headers +
+        // tabs). Force a sensible size so offscreen layout does not collapse it.
+        QTabBar* bar = right->findChild<QTabBar*>();
+        if (bar) {
+            bar->setEnabled(true);
+            bar->resize(520, bar->sizeHint().height());
+            bar->show();
+            QCoreApplication::processEvents();
+            QTimer::singleShot(1800, [bar, dir]() {
+                QPixmap pm = bar->grab();
+                pm.save(dir + "/ui_ux_tabs.png", "PNG");
+                qInfo("tabs -> %s (%dx%d)", qPrintable(dir + "/ui_ux_tabs.png"),
+                      pm.width(), pm.height());
+            });
+        }
 
         for (int i = 0; i < right->count(); ++i)
             if (right->tabText(i).contains("录制")) right->setCurrentIndex(i);
-        grabLater(&win, dir + "/ui_audit_reclib.png", 1900, app);
+        grabLater(&win, dir + "/ui_audit_reclib.png", 2100, app);
 
         // 3. Right tab: AI 助手.
         for (int i = 0; i < right->count(); ++i)
