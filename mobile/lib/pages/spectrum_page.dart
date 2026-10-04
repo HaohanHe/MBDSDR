@@ -14,8 +14,10 @@ import '../app/tokens.dart';
 import '../dsp/fft_processor.dart';
 import '../models/bookmark.dart';
 import '../models/radio_state.dart';
+import '../services/control_hub_client.dart';
 import '../services/radio_controller.dart';
 import '../widgets/empty_state.dart';
+import '../widgets/remote_decoder_panel.dart';
 import '../widgets/s_meter.dart';
 import '../widgets/spectrum_display.dart';
 import '../widgets/timing_panel.dart';
@@ -61,6 +63,13 @@ class SpectrumPage extends StatefulWidget {
   /// 空 host 时引导用户去设置页。
   final VoidCallback? onOpenSettings;
 
+  /// 桌面 ControlHub HTTP 主机（空串 = 不启用远程解码查看）。可选，
+  /// 默认空串以保持既有构造调用方（含测试）不受影响。
+  final String controlHubHost;
+
+  /// 桌面 ControlHub HTTP 端口。
+  final int controlHubPort;
+
   const SpectrumPage({
     super.key,
     required this.controller,
@@ -74,6 +83,8 @@ class SpectrumPage extends StatefulWidget {
     this.onRemoveFixedMark,
     this.onMarkChanged,
     this.onOpenSettings,
+    this.controlHubHost = '',
+    this.controlHubPort = 8080,
   });
 
   @override
@@ -115,6 +126,8 @@ class _SpectrumPageState extends State<SpectrumPage> {
                   fixedMarksHz: widget.fixedMarksHz,
                   onAddFixedMark: widget.onAddFixedMark,
                   onRemoveFixedMark: widget.onRemoveFixedMark,
+                  controlHubHost: widget.controlHubHost,
+                  controlHubPort: widget.controlHubPort,
                   onOpenSettings: widget.onOpenSettings,
                 );
                 final display = _DisplayArea(
@@ -380,6 +393,10 @@ class _ControlPanel extends StatelessWidget {
   final List<double> fixedMarksHz;
   final VoidCallback? onAddFixedMark;
   final ValueChanged<double>? onRemoveFixedMark;
+
+  /// 桌面 ControlHub HTTP 主机（空串 = 不启用远程解码查看）。
+  final String controlHubHost;
+  final int controlHubPort;
   final VoidCallback? onOpenSettings;
 
   const _ControlPanel({
@@ -395,6 +412,8 @@ class _ControlPanel extends StatelessWidget {
     required this.fixedMarksHz,
     required this.onAddFixedMark,
     required this.onRemoveFixedMark,
+    this.controlHubHost = '',
+    this.controlHubPort = 8080,
     this.onOpenSettings,
   });
 
@@ -878,6 +897,19 @@ class _ControlPanel extends StatelessWidget {
             // ---- 授时面板：真实系统钟 + GNSS 授时三态（无 NMEA 诚实空态）----
             const SizedBox(height: AppTokens.spacingL),
             const TimingPanel(),
+            // ---- 远程解码面板：只读查看桌面 ControlHub 的 POCSAG/M17/VOR 结果。
+            // 与本机 rtl_tcp IQ 链路相互独立；host 为空 -> 面板内部退化为「去设置」空态。
+            const SizedBox(height: AppTokens.spacingL),
+            Builder(builder: (context) {
+              final String host = controlHubHost.trim();
+              final ControlHubClient? client = host.isEmpty
+                  ? null
+                  : ControlHubClient(host: host, port: controlHubPort);
+              return RemoteDecoderPanel(
+                client: client,
+                onOpenSettings: onOpenSettings,
+              );
+            }),
           ],
         ),
       ),

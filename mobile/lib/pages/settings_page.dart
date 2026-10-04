@@ -26,6 +26,8 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _hostCtrl;
   late final TextEditingController _portCtrl;
+  late final TextEditingController _chHostCtrl;
+  late final TextEditingController _chPortCtrl;
   late final TextEditingController _keyCtrl;
   late final TextEditingController _modelCtrl;
   late final TextEditingController _latCtrl;
@@ -50,6 +52,8 @@ class _SettingsPageState extends State<SettingsPage> {
     final SettingsService s = widget.settings;
     _hostCtrl = TextEditingController(text: s.rtlHost);
     _portCtrl = TextEditingController(text: '${s.rtlPort}');
+    _chHostCtrl = TextEditingController(text: s.controlHubHost);
+    _chPortCtrl = TextEditingController(text: '${s.controlHubPort}');
     _keyCtrl = TextEditingController(text: _masked(s.apiKey));
     _modelCtrl = TextEditingController(text: s.apiModel);
     _latCtrl = TextEditingController(text: _d2s(s.stationLat));
@@ -61,6 +65,8 @@ class _SettingsPageState extends State<SettingsPage> {
   void dispose() {
     _hostCtrl.dispose();
     _portCtrl.dispose();
+    _chHostCtrl.dispose();
+    _chPortCtrl.dispose();
     _keyCtrl.dispose();
     _modelCtrl.dispose();
     _latCtrl.dispose();
@@ -102,6 +108,25 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       widget.settings.rtlPort = port;
       _toast('已保存端口');
+    } on FormatException catch (e) {
+      _toast(e.message, error: true);
+    }
+  }
+
+  void _saveControlHubHost() {
+    widget.settings.controlHubHost = _chHostCtrl.text;
+    _toast('已保存桌面 ControlHub 地址');
+  }
+
+  void _saveControlHubPort() {
+    final int? port = int.tryParse(_chPortCtrl.text.trim());
+    if (port == null) {
+      _toast('端口必须是 1–65535 的整数', error: true);
+      return;
+    }
+    try {
+      widget.settings.controlHubPort = port;
+      _toast('已保存 ControlHub 端口');
     } on FormatException catch (e) {
       _toast(e.message, error: true);
     }
@@ -297,6 +322,44 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: AppTokens.spacingS),
             const Text(
               '在电脑或树莓派上运行：rtl_tcp -a 0.0.0.0',
+              style: AppTokens.auxiliary,
+            ),
+          ],
+        ),
+
+        // ---------------------------------------------------- 桌面 ControlHub（远程只读解码）
+        // 与本机 rtl_tcp 相互独立：移动端只读查看桌面引擎的 POCSAG/M17/VOR 解码结果。
+        // 主机留空 = 不启用，频谱页远程解码面板退化为「去设置」空态，不假连。
+        _section(
+          title: '桌面 ControlHub（远程解码）',
+          children: <Widget>[
+            TextField(
+              controller: _chHostCtrl,
+              decoration: const InputDecoration(
+                labelText: '主机地址',
+                hintText: '留空 = 不启用；如 192.168.1.20',
+                prefixIcon: Icon(Icons.dns_outlined),
+              ),
+              keyboardType: TextInputType.url,
+              onEditingComplete: _saveControlHubHost,
+              onSubmitted: (_) => _saveControlHubHost(),
+            ),
+            const SizedBox(height: AppTokens.spacingM),
+            TextField(
+              controller: _chPortCtrl,
+              decoration: const InputDecoration(
+                labelText: '端口',
+                hintText: '8080',
+                prefixIcon: Icon(Icons.numbers),
+              ),
+              keyboardType: TextInputType.number,
+              onEditingComplete: _saveControlHubPort,
+              onSubmitted: (_) => _saveControlHubPort(),
+            ),
+            const SizedBox(height: AppTokens.spacingS),
+            const Text(
+              '仅只读拉取 /status、/pocsag_messages、/m17_calls、/vor_radial；'
+              '解码在桌面引擎进行，移动端为查看器。',
               style: AppTokens.auxiliary,
             ),
           ],
