@@ -40,6 +40,20 @@ void Agc::processWithGain(const std::vector<float>& in,
                           std::vector<float>* gain) {
     out->resize(in.size());
     gain->resize(in.size());
+
+    // Block-level lookahead anti-clip (clean-room; the *idea* of previewing the
+    // block peak before scaling, written independently). Before touching the
+    // envelope, scan this block ONCE for its loudest sample -- O(n), deliberately
+    // not a per-sample nested inner scan. A burst that arrives while the
+    // envelope is still settling from a quiet block would otherwise be amplified
+    // by a too-high gain on its first samples and slam into OutputCeiling.
+    // Knowing the block peak up front lets us pre-empt exactly that.
+    float blockPeak = 0.0f;
+    for (const float v : in) {
+        const float m = std::abs(v);
+        if (m > blockPeak) blockPeak = m;
+    }
+
     for (std::size_t i = 0; i < in.size(); ++i) {
         const float mag = std::abs(in[i]);
         const float a = (mag > env_) ? attackAlpha_ : decayAlpha_;
@@ -48,10 +62,24 @@ void Agc::processWithGain(const std::vector<float>& in,
         // envelope must not be amplified up to target volume (the sandpaper
         // hiss). A real voice raises env_ well above the floor, so its gain
         // (~target/env, a few x) never reaches the ceiling.
-        const float gRaw = target_ / std::max(env_, 1e-4f);
-        const float g = std::min(gRaw, maxGain_);
+        float gRaw = target_ / std::max(env_, 1e-4f);
+        float g = std::min(gRaw, maxGain_);
+
+        // Lookahead: would the gain derived so far push the block's known peak
+        // past the output ceiling? If so the envelope is lagging a burst. Jump
+        // the envelope up to the block peak NOW (attack ahead of the one-pole)
+        // and recompute gain; release is effectively backed off for the rest of
+        // the block because we re-pin whenever the gain would creep up again.
+        // The loudest sample then lands at ~target_ <= OutputCeiling and never
+        // touches the clamp. Steady state needs no help: blockPeak*g ~= target_.
+        if (blockPeak > 0.0f && blockPeak * g > OutputCeiling) {
+            env_ = std::max(env_, blockPeak);
+            gRaw = target_ / std::max(env_, 1e-4f);
+            g = std::min(gRaw, maxGain_);
+        }
+
         (*gain)[i] = g;
-        (*out)[i] = std::clamp(in[i] * g, -1.0f, 1.0f);
+        (*out)[i] = std::clamp(in[i] * g, -OutputCeiling, OutputCeiling);
     }
 }
 

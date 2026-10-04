@@ -333,8 +333,15 @@ void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
     if (maxHoldOn_) {
         if (static_cast<int>(maxHold_.size()) != bins)
             maxHold_.assign(bins, -std::numeric_limits<float>::max());
-        for (int i = 0; i < bins && i < static_cast<int>(frame.dbfs.size()); ++i)
-            if (frame.dbfs[i] > maxHold_[i]) maxHold_[i] = frame.dbfs[i];
+        for (int i = 0; i < bins && i < static_cast<int>(frame.dbfs.size()); ++i) {
+            // Per-frame peak-hold decay: the held peak eases DOWN by a named dB
+            // step before taking the max with the fresh frame, so a burst's peak
+            // lingers visibly and then fades instead of freezing forever. A fresh
+            // rise still refreshes the bin back up immediately.
+            float held = maxHold_[i];
+            if (std::isfinite(held)) held -= tokens::kMaxHoldDecayDb;
+            maxHold_[i] = (frame.dbfs[i] > held) ? frame.dbfs[i] : held;
+        }
     }
 
     // ---- Persistence (余晖): decay the ghost envelope, refresh on fresh rise --

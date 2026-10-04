@@ -125,6 +125,14 @@ inline constexpr float kPersistDecayHigh = 0.93f;   // slow, long trails
 inline constexpr float kPersistAlphaLow  = 0.35f;
 inline constexpr float kPersistAlphaHigh = 0.55f;
 
+// Peak-hold (maxHold) decay: each frame the held per-bin peak eases DOWN by this
+// many dB before taking the max with the fresh frame, i.e.
+//   hold = max(frame, hold - kMaxHoldDecayDb).
+// A permanently-frozen max hides where a burst was seconds ago; a slow per-frame
+// fall-off keeps recent peaks visible while letting them fade. Named so the decay
+// rate is never a bare number in the canvas.
+inline constexpr float kMaxHoldDecayDb = 1.5f;   // dB per rendered frame
+
 // ---- Frontend software decimation (real anti-alias lowpass + integer D) --
 // Selectable integer decimation factors applied BEFORE channelization so narrow
 // modes (CW/FT8) run on a reduced-rate band with less compute. D=1 = off.

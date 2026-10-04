@@ -22,6 +22,12 @@ public:
     // noise floor is left quiet instead of being amplified. Named value lives in
     // core/tokens.h (kAgcMaxGainLin); this constant is the fallback default.
     static constexpr float DefaultMaxGain = 12.0f;
+    // Linear amplitude the output is clamped to. The block-level lookahead uses
+    // this same ceiling: a block peak that, under the running envelope-derived
+    // gain, would exceed it pulls the envelope up EARLY so the first samples of
+    // a burst do not slam into this clamp. Named so the anti-clip threshold and
+    // the output clamp agree on one number.
+    static constexpr float OutputCeiling = 1.0f;
     // Carrier AGC operating point.
     static constexpr float CarrierTarget = 0.5f;
     static constexpr double CarrierAttackMs = 2.0;

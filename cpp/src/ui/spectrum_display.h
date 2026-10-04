@@ -87,6 +87,10 @@ public slots:
     void setStepHz(double hz) { tuneStepHz_ = hz; }
     void setMaxHoldEnabled(bool on);
     void clearMaxHold() { maxHold_.clear(); update(); }
+    // Test seam: read back the per-bin peak-hold envelope (dB). Not for
+    // production UI use -- lets ctest drive setSpectrum and assert the
+    // per-frame kMaxHoldDecayDb decay without painting.
+    const std::vector<float>& maxHoldEnvelopeForTest() const { return maxHold_; }
 
     // ---- Spectrum persistence (余晖) -------------------------------------
     // mode: 0 = off, 1 = low (short trails), 2 = high (long trails). The ghost
