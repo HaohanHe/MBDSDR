@@ -7,11 +7,70 @@
 #include "core/tokens.h"
 
 #include <QHash>
+#include <QThread>
 
 namespace mbdsdr {
 namespace ai {
 
 LLMWorker::LLMWorker(QObject* parent) : QObject(parent) {}
+
+LLMWorker::LlmErrorClass LLMWorker::classifyLlmError(const QString& e) {
+    if (e.isEmpty()) return LlmErrorClass::Ok;
+    const QString s = e.toLower();
+    // Terminal: bad request / bad key / forbidden / unprocessable / local config.
+    // These are NEVER retried (honest PENDING, no mock output).
+    static const char* kTerminal[] = {
+        "400", "401", "403", "422", "invalid token", "api key not configured",
+        "api key", "unauthorized", "forbidden", "parse error",
+    };
+    for (const char* t : kTerminal)
+        if (s.contains(QLatin1String(t))) return LlmErrorClass::Terminal;
+    // Retryable: rate limit / server overload / gateway / timeout / transient net.
+    static const char* kRetry[] = {
+        "429", "500", "502", "503", "504", "rate limit", "overloaded",
+        "timed out", "timeout", "refused", "temporarily", "try again",
+    };
+    for (const char* t : kRetry)
+        if (s.contains(QLatin1String(t))) return LlmErrorClass::Retryable;
+    // Unknown errors default to terminal: we never silently retry something we
+    // don't understand (avoids a retry storm on a genuine config bug).
+    return LlmErrorClass::Terminal;
+}
+
+int LLMWorker::backoffDelayMs(int attemptOneBased) {
+    if (attemptOneBased < 1) attemptOneBased = 1;
+    long delay = tokens::kAiBackoffBaseMs;
+    // Double each attempt, clamping AT the max so a huge attempt number cannot
+    // overflow back to 0.
+    for (int i = 1; i < attemptOneBased; ++i) {
+        delay *= 2;
+        if (delay >= tokens::kAiBackoffMaxMs) {
+            delay = tokens::kAiBackoffMaxMs;
+            break;
+        }
+    }
+    return static_cast<int>(delay);
+}
+
+QString LLMWorker::formatChatError(const QString& partialContent,
+                                   const QString& error) {
+    QString out = partialContent;
+    if (!out.isEmpty()) out += QString::fromUtf8("\n\n[生成中断] ");
+    else out = QString::fromUtf8("LLM 请求失败：");
+    out += error;
+    return out;
+}
+
+namespace {
+std::function<void(int)> s_backoffHook;   // null in production
+}
+void LLMWorker::setBackoffSleepForTests(std::function<void(int)> fn) {
+    s_backoffHook = std::move(fn);
+}
+void LLMWorker::sleepBackoffMs(int ms) {
+    if (s_backoffHook) s_backoffHook(ms);
+    else QThread::msleep(static_cast<unsigned long>(ms));
+}
 
 QString LLMWorker::dispatchToolCall(const QString& name, const QJsonObject& args,
                                     dsp::SpectrumEngine* engine, bool manualMode) {
@@ -92,9 +151,25 @@ void LLMWorker::doChat(const QList<ChatMessage>& messages,
         // toolRound == the requests made AFTER tool results have been fed back.
         applyThinkingConfig(opts, model_, /*toolRound=*/round > 0);
 
-        LLMResponse resp = client_->chat(msgs, tools, onChunk, opts);
+        LLMResponse resp;
+        // Bounded transient-retry (error-recovery layer 5): retry only RETRYABLE
+        // upstream errors (429/503/504/timeout/conn-refused) up to
+        // kAiMaxTransientRetries with exponential backoff. Terminal errors
+        // (400/401/403/no-key/parse) and the exhausted budget return as-is so the
+        // caller surfaces an honest PENDING -- never a mock, never a retry storm.
+        for (int attempt = 0; ; ++attempt) {
+            resp = client_->chat(msgs, tools, onChunk, opts);
+            if (resp.error.isEmpty()) break;
+            if (classifyLlmError(resp.error) != LlmErrorClass::Retryable ||
+                attempt >= tokens::kAiMaxTransientRetries) {
+                break;   // terminal or budget exhausted -> return the honest error
+            }
+            sleepBackoffMs(backoffDelayMs(attempt + 1));
+        }
         if (!resp.error.isEmpty()) {
-            emit chatFinished("LLM 错误: " + resp.error);
+            // G2: surface on the SEPARATE chatError signal (partial content kept),
+            // NOT chatFinished -- the Agent must not persist it as a normal reply.
+            emit chatError(formatChatError(resp.content, resp.error));
             return;
         }
 

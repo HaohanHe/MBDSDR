@@ -113,6 +113,13 @@ private slots:
     void sse_streams_reassembles();
     void thinking_config_perModel();
     void anthropic_toolUseResult();
+
+    // Phase31 Wave2: A3 streaming-error honesty + A4 error-recovery.
+    void errorResponseKeepsPartialContent();
+    void chatErrorSignalNotFinished();
+    void manualGatedWriteFedBackAsToolMessage();
+    void errorClassTerminalVsRetryable();
+    void backoffDelayExponentialAndClamped();
 };
 
 // ---------------------------------------------------------------------------
@@ -404,6 +411,88 @@ void TestAiToolLoop::anthropic_toolUseResult() {
         }
     }
     QVERIFY(sawToolResult);
+}
+
+// A3/G1: an error response KEEPS the partial content already streamed (the user
+// saw the half sentence), and carries the error string alongside -- never wiped.
+void TestAiToolLoop::errorResponseKeepsPartialContent() {
+    auto r = ai::LLMClient::errorResponseWithPartial(QString::fromUtf8("已生成一半"),
+                                                    QString("timed out"));
+    QCOMPARE(r.content, QString::fromUtf8("已生成一半"));
+    QCOMPARE(r.error, QString("timed out"));
+}
+
+// A3/G2: a failed chat emits chatError (not chatFinished), so the Agent does not
+// persist a half/error line as a normal assistant reply. No API key => the
+// client returns an honest terminal error immediately, fully offline.
+void TestAiToolLoop::chatErrorSignalNotFinished() {
+    ai::LLMWorker w;
+    ai::LLMWorker::setBackoffSleepForTests([](int) {});   // no-op: no real sleep
+    QSignalSpy errSpy(&w, &ai::LLMWorker::chatError);
+    QSignalSpy finSpy(&w, &ai::LLMWorker::chatFinished);
+    w.doChat(baseChat(), ai::toolDefs());
+    QCOMPARE(errSpy.size(), 1);
+    QCOMPARE(finSpy.size(), 0);                    // NOT a normal terminal answer
+    const QString line = errSpy.takeFirst().at(0).toString();
+    QVERIFY(line.contains(QString::fromUtf8("LLM")));   // honest, not a mock reply
+    ai::LLMWorker::setBackoffSleepForTests(nullptr);    // restore real sleep
+}
+
+// A4 error-recovery layer 2: with the write gate on, a blocked write tool call's
+// gated result is fed back to the model as a role=tool message (self-correction
+// channel), not dropped and not auto-retried.
+void TestAiToolLoop::manualGatedWriteFedBackAsToolMessage() {
+    ScriptedMock mock;
+    mock.responses = {
+        sseToolCalls("", {FakeCall{"call1", "tune_frequency", "{\"freq_hz\":100000000}"}}),
+        sseStop(QString::fromUtf8("写动作已被手动模式拦截")),
+    };
+    mock.arm();
+
+    ai::LLMWorker w;
+    w.setBaseUrl("https://example.com");
+    w.setApiKey("test-key");
+    w.setManualMode(true);   // gate ON: write tools refuse shut
+
+    QSignalSpy fin(&w, &ai::LLMWorker::chatFinished);
+    w.doChat(baseChat(), ai::toolDefs());
+
+    QCOMPARE(fin.size(), 1);
+    QVERIFY(mock.calls.size() >= 2);
+    // The second request must carry the gated result as a role=tool message.
+    QJsonObject req2 = QJsonDocument::fromJson(mock.calls.at(1)).object();
+    bool sawGated = false;
+    for (const QJsonValue& v : req2.value("messages").toArray()) {
+        QJsonObject o = v.toObject();
+        if (o.value("role").toString() != "tool") continue;
+        QJsonObject body = QJsonDocument::fromJson(o.value("content").toString().toUtf8()).object();
+        if (body.value("ok").toBool() == false &&
+            (body.contains("gated") || body.contains(QStringLiteral("error")))) {
+            sawGated = true;
+        }
+    }
+    QVERIFY2(sawGated, "gated write result must be fed back as a tool message");
+}
+
+// A4: error classification -- terminal (never retried) vs retryable (backoff).
+void TestAiToolLoop::errorClassTerminalVsRetryable() {
+    using E = ai::LLMWorker::LlmErrorClass;
+    QCOMPARE(ai::LLMWorker::classifyLlmError(""), E::Ok);
+    QCOMPARE(ai::LLMWorker::classifyLlmError("API key not configured"), E::Terminal);
+    QCOMPARE(ai::LLMWorker::classifyLlmError("HTTP 401 unauthorized"), E::Terminal);
+    QCOMPARE(ai::LLMWorker::classifyLlmError("http 400 bad request"), E::Terminal);
+    QCOMPARE(ai::LLMWorker::classifyLlmError("http 429 rate limited"), E::Retryable);
+    QCOMPARE(ai::LLMWorker::classifyLlmError("server 503 overloaded"), E::Retryable);
+    QCOMPARE(ai::LLMWorker::classifyLlmError("connection timed out"), E::Retryable);
+    QCOMPARE(ai::LLMWorker::classifyLlmError("some unknown failure"), E::Terminal);
+}
+
+// A4: exponential backoff doubles per attempt, clamped at the max budget.
+void TestAiToolLoop::backoffDelayExponentialAndClamped() {
+    QCOMPARE(ai::LLMWorker::backoffDelayMs(1), 1000);
+    QCOMPARE(ai::LLMWorker::backoffDelayMs(2), 2000);
+    QCOMPARE(ai::LLMWorker::backoffDelayMs(3), 4000);
+    QCOMPARE(ai::LLMWorker::backoffDelayMs(99), 8000);   // clamped to max
 }
 
 QTEST_MAIN(TestAiToolLoop)

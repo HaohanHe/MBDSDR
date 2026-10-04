@@ -28,6 +28,7 @@ private slots:
     void noArgToolsHaveEmptyProperties();
     void sevenToolsNameDescriptionMatch();
     void scanBandShape();
+    void generateToolDocumentationCoversAllTools();
 };
 
 static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
@@ -283,6 +284,35 @@ void TestToolSchema::scanBandShape() {
     for (const QJsonValue& v : buildToolSchema(*s).value("required").toArray())
         required.insert(v.toString());
     QCOMPARE(required, QSet<QString>({"low_hz", "high_hz"}));
+}
+
+// Phase31 A4: generateToolDocumentation() renders EVERY registered tool with the
+// SAME fixed fields (name/description/schema/read-write marker/error example).
+void TestToolSchema::generateToolDocumentationCoversAllTools() {
+    const QList<ToolSchemaSpec> specs = registeredToolSpecs();
+    const QString doc = generateToolDocumentation();
+    QVERIFY(!doc.isEmpty());
+
+    // Every one of the 35 tools appears as its own "## <name>" block.
+    int headerCount = 0;
+    for (const ToolSchemaSpec& s : specs) {
+        QVERIFY2(doc.contains(QString("## %1 ").arg(s.name)), qPrintable(s.name));
+        // Fixed fields: description line, schema JSON, read-write marker, err ex.
+        QVERIFY2(doc.contains(s.description), qPrintable(s.name));
+        if (s.write) {
+            QVERIFY2(doc.contains(QStringLiteral("[write")), qPrintable(s.name));
+            // write tools additionally fail shut at the manual gate
+            QVERIFY2(doc.contains(QStringLiteral("gated")), qPrintable(s.name));
+        } else {
+            QVERIFY2(doc.contains(QStringLiteral("[read")), qPrintable(s.name));
+        }
+        ++headerCount;
+    }
+    QCOMPARE(headerCount, 35);
+    // Fixed schema + error-example fields present on every block.
+    QVERIFY(doc.contains(QStringLiteral("schema:")));
+    QVERIFY(doc.contains(QStringLiteral("错误示例")));
+    QVERIFY(doc.contains(QStringLiteral("description:")));
 }
 
 QTEST_MAIN(TestToolSchema)

@@ -880,6 +880,31 @@ inline constexpr int kAiRequestTimeoutMs = 30000;
 // allowed to spend. Backend range is 128..32768 (SF chat-completions note).
 inline constexpr int kAiThinkingBudgetTokens = 4096;
 
+// ---- Context compaction (ai/ai_context.cpp), Phase31 Wave2 --------------
+// The prompt budget is a FRACTION of the model context window, not a hardcoded
+// token count (context-compaction.md §6.2; MetaGPT base_llm.py:352 uses 0.8).
+// 0.75 reserves the remaining 25% for completion + tool results, so swapping
+// in a bigger-window model (32k -> 128k) scales the budget with it instead of
+// over-compacting early. estimateTokens() is heuristic, so this is a trigger,
+// not an exact wire measurement.
+inline constexpr int    kAiDefaultContextWindowTokens = 32768;  // Qwen2.5-7B window
+inline constexpr double  kAiContextBudgetRatio          = 0.75;
+// A single tool result longer than this (chars) is PRE-truncated to a head+tail
+// preview BEFORE the whole-history budget check, so one verbose tool output (an
+// IQ snapshot, a decode log) does not by itself force a full LLM summary. This is
+// the orthogonal light trim OpenAI SDK does in ToolOutputTrimmer
+// (tool_output_trimmer.py:112-114: max_output_chars=500, preview=200).
+inline constexpr int    kAiToolOutputMaxChars     = 1200;
+inline constexpr int    kAiToolOutputPreviewChars = 400;
+
+// ---- LLM request error recovery (ai/llm_worker.cpp), Phase31 Wave2 -------
+// Retry/backoff budget for TRANSIENT upstream failures (429 / 503 / 504 / stream
+// read timeout). Mirrors MiMo-Code retry.ts budget bands: rate_limit 5, server 8.
+// 400/401/403 are TERMINAL (never retried -- honest PENDING, no mock).
+inline constexpr int    kAiMaxTransientRetries    = 3;
+inline constexpr int    kAiBackoffBaseMs         = 1000;
+inline constexpr int    kAiBackoffMaxMs           = 8000;
+
 // =====================================================================
 // Headless ControlHub (无头控制层, cpp/src/control/control_hub.{h,cpp})
 //

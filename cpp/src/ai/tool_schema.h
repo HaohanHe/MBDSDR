@@ -58,5 +58,12 @@ QList<ToolDef> toolDefsFromSpecs(const QList<ToolSchemaSpec>& specs);
 // dispatches execution by name against this same list (see executorToolNames()).
 QList<ToolSchemaSpec> registeredToolSpecs();
 
+// Phase31 Wave2 (tool-calling-boundary.md §4.1): render the full tool registry
+// into an Agent-visible capability document. EVERY tool carries the SAME fixed
+// fields: name / description / JSON Schema / read-write marker / error example.
+// This is the single generated source (write it to docs or inject it into the
+// model) -- it must never drift from registeredToolSpecs(). Deterministic order.
+QString generateToolDocumentation();
+
 } // namespace ai
 } // namespace mbdsdr

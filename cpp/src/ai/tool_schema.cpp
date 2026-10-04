@@ -6,6 +6,7 @@
 #include "core/bandwidth_preset.h"  // kBw*Hz preset set
 
 #include <QJsonArray>
+#include <QJsonDocument>
 
 namespace mbdsdr {
 namespace ai {
@@ -724,6 +725,40 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     }
 
     return out;
+}
+
+QString generateToolDocumentation() {
+    const QList<ToolSchemaSpec> specs = registeredToolSpecs();
+    QStringList doc;
+    doc << QString::fromUtf8("# Agent 工具能力清单（自动生成，%1 个工具）")
+               .arg(specs.size());
+    doc << QString::fromUtf8(
+        "固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。"
+        "参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。");
+    for (const ToolSchemaSpec& s : specs) {
+        const QJsonObject schema = buildToolSchema(s);
+        const QString schemaJson =
+            QString::fromUtf8(QJsonDocument(schema).toJson(QJsonDocument::Compact));
+        doc << QString::fromUtf8("\n## %1  [%2]")
+                   .arg(s.name,
+                        s.write ? QString::fromUtf8("write 写(手动模式拦截)")
+                                : QString::fromUtf8("read 只读"));
+        doc << QString::fromUtf8("description: %1").arg(s.description);
+        doc << QString::fromUtf8("schema: %1").arg(schemaJson);
+        // Error examples: write tools additionally fail shut at the manual gate;
+        // every tool rejects illegal args and feeds the error back for self-correction.
+        QString errs =
+            QString::fromUtf8("错误示例: 参数非法/缺失/幻觉字段 -> "
+                              "{\"ok\":false,\"reasons\":[...]}，以 role=tool 回注自纠");
+        if (s.write) {
+            errs += QString::fromUtf8("；手动模式写门拒绝 -> "
+                                      "{\"ok\":false,\"gated\":true,"
+                                      "\"error\":\"手动模式：未执行 %1\"}（不自动重试写动作）")
+                        .arg(s.name);
+        }
+        doc << errs;
+    }
+    return doc.join(QLatin1Char('\n'));
 }
 
 } // namespace ai

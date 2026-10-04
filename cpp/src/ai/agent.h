@@ -49,6 +49,10 @@ signals:
 
 private slots:
     void onChatFinished(const QString& text);
+    // Phase31 G2: a failed/interrupted chat does NOT append to history_ -- the
+    // partial+error line is shown transiently but never pollutes the next LLM
+    // request. Mirrors LLMWorker::chatError.
+    void onChatError(const QString& displayText);
 
 private:
     AiConfig config_;

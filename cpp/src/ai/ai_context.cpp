@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "ai_context.h"
 
+#include "core/tokens.h"   // kAiContextBudgetRatio / window / tool-output trim sizes
+
 #include <QString>
 
 namespace mbdsdr {
@@ -26,22 +28,47 @@ int estimateTokens(const QString& text) {
     return cjk + (other + 3) / 4;
 }
 
-// Honest rule-based summary when no LLM summary is available: count the
-// dropped rounds and quote the first few user asks. Never invents content.
+int defaultContextBudgetTokens() {
+    return static_cast<int>(tokens::kAiDefaultContextWindowTokens *
+                            tokens::kAiContextBudgetRatio);
+}
+
+QList<ChatMessage> truncateLargeToolOutputs(const QList<ChatMessage>& history) {
+    QList<ChatMessage> out = history;
+    const int maxChars   = tokens::kAiToolOutputMaxChars;
+    const int previewLen = tokens::kAiToolOutputPreviewChars;
+    for (auto& m : out) {
+        if (m.role != QLatin1String("tool")) continue;   // only tool results
+        if (m.content.size() <= maxChars) continue;
+        const int total = m.content.size();
+        const QString head = m.content.left(previewLen);
+        const QString tail = m.content.right(previewLen);
+        m.content = QString::fromUtf8(
+                       "[已截断 tool 输出：原 %1 字符，保留头尾预览]\n").arg(total)
+                   + head + QLatin1String("\n...\n") + tail;
+    }
+    return out;
+}
+
+// Honest rule-based summary when no LLM summary is available: count the dropped
+// rounds and quote EVERY user ask one-line each. Per context-compaction.md §6.3
+// the OpenAI SDK explicitly EXCLUDES user messages from what it compacts; the
+// folded summary must therefore preserve the user's asks (not just the first 3).
+// Never invents content.
 static QString ruleBasedSummary(const QList<ChatMessage>& oldMessages,
                                 int compressedRounds) {
     QStringList asks;
     for (const auto& m : oldMessages) {
-        if (m.role == "user" && asks.size() < 3) {
+        if (m.role == "user") {
             QString s = m.content.trimmed();
-            if (s.size() > 24) s = s.left(24) + "…";
+            if (s.size() > 24) s = s.left(24) + QString::fromUtf8("…");
             asks << s;
         }
     }
     QString body =
         QString::fromUtf8("此前 %1 轮对话已压缩").arg(compressedRounds);
     if (!asks.isEmpty())
-        body += QString::fromUtf8("：用户曾询问「%1」").arg(asks.join("」「"));
+        body += QString::fromUtf8("：用户曾依次询问「%1」").arg(asks.join("」「"));
     body += QString::fromUtf8("；助手已相应回复，细节从略。");
     return body;
 }
@@ -52,13 +79,26 @@ CompactResult compactContext(const QList<ChatMessage>& history,
                              SummaryFn summarize) {
     CompactResult out;
 
+    // Resolve the effective budget: explicit override, else window * ratio.
+    int budget = opts.budgetTokens;
+    if (budget <= 0) {
+        const int window = opts.contextWindowTokens > 0
+                               ? opts.contextWindowTokens
+                               : tokens::kAiDefaultContextWindowTokens;
+        budget = static_cast<int>(window * tokens::kAiContextBudgetRatio);
+    }
+
+    // Pre-trim oversized tool results BEFORE the budget check (orthogonal light
+    // trim). The history actually sent is the trimmed copy, not the raw one.
+    const QList<ChatMessage> work = truncateLargeToolOutputs(history);
+
     int total = estimateTokens(systemPrompt);
-    for (const auto& m : history) total += estimateTokens(m.content);
+    for (const auto& m : work) total += estimateTokens(m.content);
 
     out.messages.append(ChatMessage{"system", systemPrompt});
 
-    if (total <= opts.budgetTokens || history.isEmpty()) {
-        out.messages.append(history);
+    if (total <= budget || work.isEmpty()) {
+        out.messages.append(work);
         return out;
     }
 
@@ -66,8 +106,8 @@ CompactResult compactContext(const QList<ChatMessage>& history,
     int userSeen = 0;
     int boundary = 0;  // default: compact everything (shouldn't normally happen)
     bool found = false;
-    for (int i = history.size() - 1; i >= 0; --i) {
-        if (history[i].role == "user") {
+    for (int i = work.size() - 1; i >= 0; --i) {
+        if (work[i].role == "user") {
             ++userSeen;
             if (userSeen >= opts.keepRecentRounds) {
                 boundary = i;
@@ -79,9 +119,9 @@ CompactResult compactContext(const QList<ChatMessage>& history,
     if (!found) boundary = 0;  // fewer rounds than keep: keep all, nothing drops
 
     QList<ChatMessage> oldMessages, recent;
-    for (int i = 0; i < history.size(); ++i) {
-        if (i < boundary) oldMessages.append(history[i]);
-        else recent.append(history[i]);
+    for (int i = 0; i < work.size(); ++i) {
+        if (i < boundary) oldMessages.append(work[i]);
+        else recent.append(work[i]);
     }
 
     int compressedRounds = 0;
