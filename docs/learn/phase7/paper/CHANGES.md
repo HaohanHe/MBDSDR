@@ -134,3 +134,39 @@
 3. **参考文献与作者名单**：§V "References to verify" 逐条核实并按 IEEE 格式入 `refs.bib`；作者名单现为 open-source call，待补。
 4. **main.md → main.tex 同步**：投稿前按 README 机制把 main.md 终稿迁入 `main.tex` 的注释迁移点，图表换 `\includegraphics{}`，跑 pdflatex+bibtex。
 5. **多站 / GNSS 融合定轨**（未来工作）；**实测 fd 估计器**替换 Fig.4 理想已知 fd 上界。
+
+---
+
+# v0.4 → v0.5（2026-10-05，Phase33 块2+3：IEEEtran 取得 + 真实图接入 + 全流程编译验证）
+
+- 对象：`docs/learn/phase7/paper/main.tex`。红线：未改 `refs.bib`（块 A 独占接线）；
+  未改 C++/Flutter；页数/警告如实；无比赛字样；未 commit/push。
+
+## 一、本轮改动
+
+1. **取得 IEEEtran 支持文件**（系统原未装，`kpsewhich IEEEtran.cls` 为空）：
+   - `IEEEtran.cls` **V1.8b (2015/08/26)**，来源 `https://ctan.org/tex-archive/macros/latex/contrib/IEEEtran/IEEEtran.cls`（mirrors.ctan.org 504，ctan.org 直连成功），放本目录。
+   - `IEEEtran.bst` **V1.14 (2015/08/26)**，从 CTAN `IEEEtran.zip`（aliyun CTAN 镜像）解压 `IEEEtran/bibtex/IEEEtran.bst`，放本目录。
+   - 详见 `build-log.txt §1`。
+2. **真实图接入（10/10）**：勘察发现图**实际存在**于仓库根 `paper/experiments/figures/`（先前"图不存在"的判断有误）。main.tex 加 `\graphicspath{{../../../../paper/experiments/figures/}}`（本目录上溯 4 层到仓库根），Fig.1–Fig.10 全部由注释迁移点改为真实 `\includegraphics`，并补全 `fig:rate/bw/doppler/base/cm/orb/dur/tool` 等 `\label`。pdfimages 证实 10 图全部嵌入，0 个 undefined figure 引用。Fig.6 caption 如实标注 LLM 列 `PENDING_ONLINE_RUN`。
+3. **机械括号修复（非内容改动）**：作者 `\thanks` 块结尾原为 `exists.}}}`（3 个 `}`），`\author{...}` 在最后一个 `\thanks{...}` 闭合后只需 1 个 `}`，多 1 个导致 TeX 致命错误 "Too many }'s"。减为 `exists.}}`。所有 PENDING 作者/单位/邮箱/致谢/基金占位文字**原样未动**。
+4. **bibliography 开关**：按 main.tex 原注释"Uncomment once typesetting with IEEEtran.cls is available"曾启用 `\bibliographystyle{IEEEtran}`/`\bibliography{refs}`；但 bibtex 因 refs.bib 兼容性问题（见下）失败、其产出的残缺 .bbl 使 pdflatex 崩溃。遂**恢复为注释态**，待 refs.bib 修复后再开。**refs.bib 本身一字未改**。
+5. **文档**：新建 `build-log.txt`（真实编译记录）、重建 `P2-submission-check.md`；README.md 补 pdflatex 编译环境要求（需自备 IEEEtran.cls/.bst）。
+
+## 二、真实编译结果（无编造）
+
+- `pdflatex main.tex` ×2 → **exit 0，0 致命错误**，真实产出 **`main.pdf`，3 页，US letter (612×792pt)**，pdfTeX 1.40.22。
+- 警告（非错误，如实列）：23 条 undefined `\cite`（bibliography 暂关所致，见下）；4 条 Underfull \hbox（双栏排版松紧，cosmetic）；0 Overfull；0 缺图；0 字体告警。
+
+## 三、未解决 blocker（refs.bib，块 A 负责，本块未改）
+
+`bibtex main` 报 4 错、pdflatex 无法消费其 .bbl。根因全部在 refs.bib（已在 /tmp 副本复现并验证修复方向，未动仓库原文件）：
+1. `%%` 注释散文裸写条目类型 `@techreport`(L~70)/`@misc`(L~112/183/198)，被 BibTeX 0.99d 误判为条目起始。
+2. @misc note 字段含原始中文 `[部分核验]`（radiomaster2026、mxai2025），pdflatex 无 CJK 排版 → Unicode 错误。
+3. openai_function_calling note 字段未转义下划线 `function_call` → "Missing $"。
+- 验证：仅在 /tmp 副本中和注释里的 `@` 字样后，bibtex 即生成全部 12 条 `\bibitem`、零错误。
+- 块 A 修后：取消 main.tex 末尾 `\bibliography{refs}` 注释，重跑 `pdflatex → bibtex → pdflatex ×2`。
+
+## 四、仍待补（沿 v0.4，未变）
+
+LLM 在线运行回填 Fig.6/Tab.VI（有 key 跑 `exp_llm_baseline.py`/`exp_agent_toolcall.py`，不 mock）；OTA 真机 SigMF 经 `exp_ota_run.py --recordings-dir` 回放；表 Tab.I–VI 行与 Appendix 映射表迁入 main.tex；作者/单位/邮箱/致谢/基金实名补齐。

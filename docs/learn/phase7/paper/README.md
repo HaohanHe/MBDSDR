@@ -33,6 +33,30 @@ pandoc docs/learn/phase7/paper/main.md -o main.pdf --toc \
 
 - **改稿只动 `main.md`**。`main.tex` 是投稿排版用的镜像骨架，**不要**在
   `main.tex` 里直接改数字、结论或措辞——一切以 `main.md` 为准。
+
+### pdflatex 真实编译（2026-10-05 已跑通正文+图）
+
+- **环境要求**：TeX Live 的 `pdflatex` + `bibtex`（本环境 `/usr/bin/`，TeX Live
+  2022）。**需自备 `IEEEtran.cls` 与 `IEEEtran.bst`**——系统默认未装（`kpsewhich
+  IEEEtran.cls` 为空）。本轮已从 CTAN 取
+  `IEEEtran.cls V1.8b (2015/08/26)` 与 `IEEEtran.bst V1.14 (2015/08/26)` 放进本目录
+  （来源与版本见 `build-log.txt §1`）。TeX Live 完整版若已带 IEEEtran 则无需下载。
+- **编译命令**（在本目录 `docs/learn/phase7/paper/` 下）：
+  ```bash
+  pdflatex main.tex
+  bibtex main          # 见下方注意：refs.bib 当前暂不可被 bibtex 解析
+  pdflatex main.tex
+  pdflatex main.tex
+  ```
+- **图路径**：图不在本 docs 树内，而在仓库根 `paper/experiments/figures/*.png`。
+  main.tex 已加 `\graphicspath{{../../../../paper/experiments/figures/}}`（从本目录上溯
+  4 层到仓库根）。Fig.1–10 已全部真实 `\includegraphics` 接入（2026-10-05 核实图均存在）。
+- **当前真实结果**：正文 + 10 图可干净编译（`main.pdf`，3 页，0 致命错误）。
+  **bibliography 暂注释**——refs.bib 有三处 BibTeX/pdflatex 兼容性问题（注释里裸写
+  `@misc`/`@techreport`、note 里含中文 `[部分核验]`、note 里未转义 `function_call`），
+  由 refs.bib 的负责块修复后取消 main.tex 末尾 `\bibliography{refs}` 注释再重跑全流程。
+  详见 `build-log.txt` 与 `P2-submission-check.md`。
+
 - `main.tex` 里图表以注释式迁移点标出，例如：
   `% Fig.1 → paper/experiments/figures/ebno_decode_success__synthetic__N2400__20261001.png`。
 - 投稿前同步二选一：

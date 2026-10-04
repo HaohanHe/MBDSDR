@@ -19,6 +19,12 @@
 \usepackage{url}
 % \usepackage{siunitx}   % optional, for units
 
+% FIGURE PATH: figures live at repo-root paper/experiments/figures/ (outside
+% this docs/ tree, gitignored).  Relative to this paper/ dir = up 4 to repo
+% root then paper/experiments/figures/.  Resolved & verified for Fig.1-10 on
+% 2026-10-05 (see build-log.txt).  Update this path if the build moves.
+\graphicspath{{../../../../paper/experiments/figures/}}
+
 \begin{document}
 
 %% ---------------------------------------------------------------------
@@ -48,7 +54,12 @@ and~Bi4MIB~open-source~contributors%
 %   left empty rather than invented.
 \thanks{PENDING\_ACK: acknowledgements (if any) to be added by the author.
 PENDING\_FUND: This work has received no confirmed external funding;
-grant/acknowledgement statement to be added only if a real grant exists.}}}
+grant/acknowledgement statement to be added only if a real grant exists.}}
+% NOTE (2026-10-05 build fix): the skeleton originally ended this block with
+% three closing braces (`exists.}}}`) which TeX rejected as "Too many }'s".
+% \author{...} needs exactly one closing brace after the last \thanks{...};
+% the extra brace was a mechanical skeleton typo, NOT an author/content change.
+% All PENDING placeholders are unchanged.
 
 \maketitle
 
@@ -80,9 +91,17 @@ modulation recognition, Doppler compensation, reproducible experiments.
 %% ---------------------------------------------------------------------
 \section{Introduction}
 %% SYNC: main.md §I.  Two problems + Contributions (i)--(iv).
+Software-defined radio (SDR) has moved modulation, filtering and decoding into
+software, but mainstream SDR tooling~\cite{gnuradio_project,sdrpp_project,satdump_project}
+still requires manual, expert-driven configuration. Large language models (LLMs)
+with tool-calling now make it plausible to drive a radio by natural language,
+yet prior AI-SDR work largely wraps existing GUI software rather than exposing a
+deterministic, reproducible measurement backbone.
 \begin{itemize}
-  \item Layered stack; every SDR op registered as an OpenAI function-calling tool.
-  \item Fixed-seed Monte-Carlo library (\texttt{experiments/common/}) with Wilson 95\% CIs, explicit Eb/N0 calibration, per-run manifests.
+  \item Layered stack; every SDR op registered as an OpenAI function-calling
+        tool~\cite{openai_function_calling}.
+  \item Fixed-seed Monte-Carlo library (\texttt{experiments/common/}) with Wilson
+        95\% CIs~\cite{wilson1927}, explicit Eb/N0 calibration, per-run manifests.
   \item Ten synthetic experiments, each labelled with origin / $N$ / UTC date.
   \item Honest separation: deterministic local tool pipeline (measured) vs.\ online-LLM decision layer (reported as pending).
 \end{itemize}
@@ -90,6 +109,12 @@ modulation recognition, Doppler compensation, reproducible experiments.
 %% ---------------------------------------------------------------------
 \section{System Design}
 %% SYNC: main.md §II.  Four layers + experiment library.
+The C++ real-time chain records standard \texttt{.sigmf-data} /
+\texttt{.sigmf-meta} files under the open SigMF recording
+metadata format~\cite{sigmf_spec}. The Python kernel reuses modems and decoders
+(AX.25/AFSK, ADS-B Mode-S, coherent BPSK, KNN-AMR) unchanged by the experiments,
+and its orbit-determination code builds on the SGP4/SDP4 element-propagation
+model~\cite{hoots1980spacetrack,vallado2006revisiting}.
 %% --- Table I (layers) ---
 \begin{table}[!t]
 \caption{MBDSDR layers (representative components).}
@@ -108,12 +133,15 @@ Layer & Language/location & Role \\
 %% ---------------------------------------------------------------------
 \section{Experiments}
 %% All synthetic, master seed 20261001, Wilson 95\% CIs.
+All experiments are \texttt{synthetic}, fixed-seed (master seed 20261001), and
+run on a headless CI VM with no radio hardware; confidence intervals are Wilson
+95\% CIs~\cite{wilson1927}.
 
 \subsection{Decode success vs.\ Eb/N0 (Fig.~\ref{fig:ebno}, $N=2400$)}
 %% MIGRATE: Fig.1 -> paper/experiments/figures/ebno_decode_success__synthetic__N2400__20261001.png
 \begin{figure}[!t]
 \centering
-% \includegraphics[width=\linewidth]{paper/experiments/figures/ebno_decode_success__synthetic__N2400__20261001.png}
+\includegraphics[width=\linewidth]{ebno_decode_success__synthetic__N2400__20261001.png}
 \caption{[Fig.1] Decode success vs.\ Eb/N0 (BPSK/ADS-B/AX.25; synthetic).}
 \label{fig:ebno}
 \end{figure}
@@ -121,13 +149,33 @@ Layer & Language/location & Role \\
 
 \subsection{Decode success vs.\ sample rate (Fig.~\ref{fig:rate}, $N=1400$)}
 %% MIGRATE: Fig.2 -> paper/experiments/figures/rate_sweep_success__synthetic__N1400__20261002.png
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{rate_sweep_success__synthetic__N1400__20261002.png}
+\caption{[Fig.2] Decode success vs.\ sample rate at fixed Eb/N0=6\,dB
+(synthetic, $N=1400$).}
+\label{fig:rate}
+\end{figure}
 % --- Table III (sample-rate sweep, fixed Eb/N0=6 dB) ---
 
 \subsection{Decode success vs.\ receiver bandwidth (Fig.~\ref{fig:bw}, $N=900$)}
 %% MIGRATE: Fig.3 -> paper/experiments/figures/rate_bandwidth_success__synthetic__N900__20261001.png
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{rate_bandwidth_success__synthetic__N900__20261001.png}
+\caption{[Fig.3] Decode success vs.\ receiver bandwidth (synthetic, $N=900$).}
+\label{fig:bw}
+\end{figure}
 
 \subsection{Doppler compensation benefit (Fig.~\ref{fig:doppler}, $N=3600$)}
 %% MIGRATE: Fig.4 -> paper/experiments/figures/doppler_comp_success__synthetic__N3600__20261002.png
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{doppler_comp_success__synthetic__N3600__20261002.png}
+\caption{[Fig.4] Doppler-compensation benefit vs.\ residual frequency offset
+(synthetic, $N=3600$; known-fd compensator = upper bound).}
+\label{fig:doppler}
+\end{figure}
 % --- Table IV (doppler compensation, fixed Eb/N0=8 dB) ---
 % NOTE: CSV/manifest regenerated at master seed 20261001; Tab.IV matches
 %       CSV cell-for-cell (see main.md resolved provenance note).
@@ -136,6 +184,28 @@ Layer & Language/location & Role \\
 %% MIGRATE: Fig.5 -> paper/experiments/figures/baseline_compare_amr__synthetic__N600__20261001.png
 %% MIGRATE: Fig.6 -> paper/experiments/figures/llm_baseline_amr__synthetic__N300__20261001.png  (LLM column PENDING)
 %% MIGRATE: Fig.7 -> paper/experiments/figures/amr_confusion_matrix__synthetic__N640__20261001.png
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{baseline_compare_amr__synthetic__N600__20261001.png}
+\caption{[Fig.5] Classical-DSP rules vs.\ KNN-AMR on identical samples
+(synthetic, $N=600$; LLM arm not plotted --- PENDING).}
+\label{fig:base}
+\end{figure}
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{llm_baseline_amr__synthetic__N300__20261001.png}
+\caption{[Fig.6] AMR SNR grid, same classic/KNN curves; the LLM-agent column
+is \texttt{PENDING\_ONLINE\_RUN} ($llm\_calls\_this\_run=0$, no API key in CI)
+--- no LLM accuracy is plotted.}
+\label{fig:llm}
+\end{figure}
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{amr_confusion_matrix__synthetic__N640__20261001.png}
+\caption{[Fig.7] Full 8-class AMR confusion matrix at 10\,dB (synthetic,
+$N=640$; exp\_amr.py, independent of the 3-class Fig.5/6 comparison).}
+\label{fig:cm}
+\end{figure}
 % Three detector families on identical samples: classical DSP rules, KNN-AMR
 % (25 features, k=5), LLM agent (PENDING_ONLINE_RUN).  Table V.
 % REVIEWER NOTE: merge Fig.5 & Fig.6 once the online LLM curve is filled.
@@ -143,9 +213,33 @@ Layer & Language/location & Role \\
 \subsection{Single-station Doppler orbit determination (Figs.~\ref{fig:orb}--\ref{fig:dur}, $N=155/6$)}
 %% MIGRATE: Fig.8 -> paper/experiments/figures/doppler_convergence__synthetic__N155__20261001.png
 %% MIGRATE: Fig.9 -> paper/experiments/figures/doppler_duration_convergence__synthetic__N6__20261001.png
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{doppler_convergence__synthetic__N155__20261001.png}
+\caption{[Fig.8] Single-station Doppler orbit convergence (synthetic,
+$N=155$; $\sigma=1$\,Hz observation noise).}
+\label{fig:orb}
+\end{figure}
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{doppler_duration_convergence__synthetic__N6__20261001.png}
+\caption{[Fig.9] Convergence vs.\ observation-window duration around peak
+elevation (synthetic, $N=6$; $\sigma=10$\,Hz).}
+\label{fig:dur}
+\end{figure}
+We propagate a fixed public ISS TLE through SGP4~\cite{hoots1980spacetrack,vallado2006revisiting},
+add fixed-seed Gaussian noise to the Doppler rates observed from a single
+station, and run an EKF and a reference-epoch RLS.
 
 \subsection{Agent tool-call pipeline (Fig.~\ref{fig:tool}, $N=400$)}
 %% MIGRATE: Fig.10 -> paper/experiments/figures/agent_toolcall_stages__synthetic__N400__20261002.png
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\linewidth]{agent_toolcall_stages__synthetic__N400__20261002.png}
+\caption{[Fig.10] Local agent tool-call pipeline stage success (synthetic,
+$N=400$; deterministic local stages at 1.000; LLM decision row PENDING).}
+\label{fig:tool}
+\end{figure}
 % --- Table VI (local-pipeline stages; LLM decision row PENDING) ---
 
 %% ---------------------------------------------------------------------
@@ -158,7 +252,35 @@ Layer & Language/location & Role \\
 \section{Related Work}
 %% SYNC: main.md §V.  GNU Radio / SDR++ / SatDump; LLM-tool/MCP prototypes
 %%       (interactive control, not a measurement backbone); O-RAN/6G xApp.
-%% 待补: final bibliography (see main.md "References to verify" list).
+
+\emph{SDR frameworks.}  Open-source SDR software such as GNU
+Radio~\cite{gnuradio_project}, SDR++~\cite{sdrpp_project}, and
+SatDump~\cite{satdump_project} provides powerful fixed-function receivers but
+requires manual, expert-driven configuration.
+
+\emph{LLM tool-calling and radio agents.}  Modern chat-completion APIs expose
+function-calling~\cite{openai_function_calling}, and open protocols such as the
+Model Context Protocol~\cite{mcp_spec} connect LLMs to external tools. The
+closest LLM-driven radio systems we located are preprints on autonomous
+multi-agent RF signal generation~\cite{radiomaster2026} and agentic
+observability/control of Open-RAN~\cite{mxai2025}; neither is confirmed
+peer-reviewed, and both target signal generation or RAN control rather than an
+open, reproducible SDR measurement backbone.
+
+\emph{O-RAN / 6G RAN intelligence.}  Near-RT RIC and xApp
+surveys~\cite{polese2023understanding} apply AI to radio-resource allocation,
+not to open, reproducible SDR experimentation.
+
+\emph{Foundations reused here.}  Recordings follow the SigMF metadata
+standard~\cite{sigmf_spec}; orbit propagation uses SGP4/SDP4 as originally
+specified by Hoots and Roehrich~\cite{hoots1980spacetrack} and as revisited by
+Vallado et al.~\cite{vallado2006revisiting}; and all binomial success intervals
+use the Wilson score interval~\cite{wilson1927}.
+
+This work differs by (a) treating every radio operation as a versioned,
+schema'd tool, and (b) shipping a fixed-seed, CI-runnable measurement library
+that reports CIs, data-origin, and per-run manifests so that ``AI runs the
+radio'' claims are auditable.
 
 %% ---------------------------------------------------------------------
 \section{Conclusion}
@@ -178,8 +300,25 @@ Layer & Language/location & Role \\
 %% and vendor-API entries are @misc (no canonical paper).  The two
 %% LLM-radio candidates are arXiv preprints (部分核验, not peer-reviewed).
 %% Uncomment once typesetting with IEEEtran.cls is available:
+%%   -> IEEEtran.cls V1.8b + IEEEtran.bst V1.14 placed locally on 2026-10-05.
+%%   -> BUT left COMMENTED again after the 2026-10-05 build: refs.bib is NOT yet
+%%      BibTeX/pdflatex-ready (block A owns refs.bib; not edited by this block).
+%%      Three refs.bib issues break the build (see build-log.txt /
+%%      P2-submission-check.md for the exact list):
+%%        (1) `%%` comment lines name entry types literally (`@techreport` on
+%%            L~70, `@misc` on L~112/183/198) -> classic BibTeX 0.99d mistakes
+%%            them for entry starts ("expecting { or ("), 4 errors, skips 4
+%%            entries.
+%%        (2) @misc note fields carry raw CJK `[部分核验]` (radiomaster2026,
+%%            mxai2025) -> pdflatex "Unicode character ... not set up".
+%%        (3) note field `` `function_call` `` has an unescaped `_` ->
+%%            pdflatex "Missing $ inserted".
+%%   -> Once block A neutralizes the comment `@tokens`, LaTeX-escapes the CJK
+%%      notes (or drops them) and escapes `\_`, uncomment the two lines below
+%%      and re-run pdflatex -> bibtex -> pdflatex x2.  Verified on a throwaway
+%%      /tmp copy that the 12-item .bbl builds once issue (1) is fixed.
 %% ---------------------------------------------------------------------
-% \bibliographystyle{IEEEtran}
-% \bibliography{refs}
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
 
 \end{document}

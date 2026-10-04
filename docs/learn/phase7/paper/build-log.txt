@@ -1,0 +1,235 @@
+%% =====================================================================
+%%  build-log.txt — MBDSDR main.tex LaTeX build record (REAL, 2026-10-05)
+%%  Phase33 块2+3: IEEEtran 取得 + 真实图接入 + 全流程编译验证.
+%%  All numbers below are from actual tool runs in this directory; nothing
+%%  estimated.  Refs: main.tex / refs.bib owned jointly with block A.
+%% =====================================================================
+
+Build date        : 2026-10-05 (Asia/Shanghai, UTC+8)
+Build dir         : docs/learn/phase7/paper/
+Output            : main.pdf  (566,858 bytes)
+Pages             : 3
+Page size         : 612 x 792 pts (US letter, IEEEtran journal default)
+Engine            : pdfTeX 3.141592653-2.6-1.40.22 (TeX Live 2022/dev/Debian)
+BibTeX            : BibTeX 0.99d (TeX Live 2022/dev/Debian)
+pdflatex/bibtex   : /usr/bin/pdflatex , /usr/bin/bibtex (preinstalled)
+
+---------------------------------------------------------------------------
+1. IEEEtran support files (obtained this block; were NOT on the system)
+---------------------------------------------------------------------------
+Before this block: `kpsewhich IEEEtran.cls` returned empty (not installed).
+
+  IEEEtran.cls  V1.8b  (2015/08/26)
+    source : https://ctan.org/tex-archive/macros/latex/contrib/IEEEtran/IEEEtran.cls
+             (mirrors.ctan.org gave HTTP 504; ctan.org direct mirror worked)
+    placed : ./IEEEtran.cls in this paper/ dir (local; kpsewhich now resolves ./IEEEtran.cls)
+    note   : matches the V1.8b previously used.
+
+  IEEEtran.bst  V1.14  (2015/08/26)
+    source : CTAN IEEEtran.zip bundle (mirrors.aliyun.com CTAN mirror),
+             member IEEEtran/bibtex/IEEEtran.bst.  (Direct .bst URLs 404'd;
+             extracted from the bundle zip.)
+    placed : ./IEEEtran.bst in this paper/ dir.
+
+---------------------------------------------------------------------------
+2. Figures — REAL \includegraphics wiring (all 10 figures EXIST)
+---------------------------------------------------------------------------
+The agent note assumed paper/experiments/figures/ did not exist.  It DOES:
+repo-root `paper/experiments/figures/` contains the artifacts.  All ten
+MIGRATE filenames in main.tex were verified present and resolved from the
+build dir via relative path `../../../../paper/experiments/figures/`
+(repo root = up 4 from docs/learn/phase7/paper/).  A \graphicspath pointing
+there was added; each figure uses the bare filename.
+
+Embedded (pdfimages -list reports 20 image objects = 10 PNGs, each with a
+soft-mask plane):
+  Fig.1  ebno_decode_success__synthetic__N2400__20261001.png        \label{fig:ebno}
+  Fig.2  rate_sweep_success__synthetic__N1400__20261002.png          \label{fig:rate}
+  Fig.3  rate_bandwidth_success__synthetic__N900__20261001.png       \label{fig:bw}
+  Fig.4  doppler_comp_success__synthetic__N3600__20261002.png        \label{fig:doppler}
+  Fig.5  baseline_compare_amr__synthetic__N600__20261001.png         \label{fig:base}
+  Fig.6  llm_baseline_amr__synthetic__N300__20261001.png             \label{fig:llm}
+  Fig.7  amr_confusion_matrix__synthetic__N640__20261001.png        \label{fig:cm}
+  Fig.8  doppler_convergence__synthetic__N155__20261001.png          \label{fig:orb}
+  Fig.9  doppler_duration_convergence__synthetic__N6__20261001.png   \label{fig:dur}
+  Fig.10 agent_toolcall_stages__synthetic__N400__20261002.png        \label{fig:tool}
+
+Result: ZERO undefined figure \ref warnings (fig:ebno/rate/bw/doppler/
+        base/cm/orb/dur/tool all resolve).  No missing-figure errors.
+Fig.6 caption honestly states the LLM-agent column is PENDING_ONLINE_RUN
+(llm_calls_this_run=0; the PNG plots classic/KNN only, per manifest_llm_baseline.json).
+
+---------------------------------------------------------------------------
+3. Commands actually run (sequence + exit codes)
+---------------------------------------------------------------------------
+  $ pdflatex -interaction=nonstopmode main.tex     # pass 1
+      -> FIRST run died: "Too many }'s" at the author \thanks block.
+         PRE-EXISTING skeleton typo (see §5).  Fixed mechanically, then:
+  $ pdflatex -interaction=nonstopmode main.tex     # pass 1 after fix  -> exit 0, 3 pp
+  $ bibtex main                                    # FAILED (see §4)     -> exit 2, 4 errs
+  $ pdflatex -interaction=nonstopmode main.tex     # pass 2 with broken .bbl -> exit 1
+  $ pdflatex -interaction=nonstopmode main.tex     # pass 3                 -> exit 1
+  (The broken .bbl from the failed bibtex leaked CJK + an unescaped '_' into
+   the body and crashed pdflatex — see §4.  Removed main.bbl, reverted the
+   bibliography to commented per block-A-not-ready, then:)
+  $ rm -f main.bbl main.blg main.aux main.out main.pdf
+  $ pdflatex -interaction=nonstopmode main.tex     # clean pass 1 -> exit 0
+  $ pdflatex -interaction=nonstopmode main.tex     # clean pass 2 -> exit 0
+
+FINAL STATE: pdflatex builds main.pdf cleanly (exit 0, 3 pages, 0 fatal errors).
+
+---------------------------------------------------------------------------
+4. BLOCKER — refs.bib is NOT yet BibTeX/pdflatex-ready (owned by block A;
+   this block did NOT edit refs.bib per red line)
+---------------------------------------------------------------------------
+bibtex `main` currently emits 4 errors and pdflatex cannot consume the
+resulting .bbl.  Root causes, all inside refs.bib (verified by reproducing
+on a throwaway /tmp copy of refs.bib, NOT the repo file):
+
+  (a) `%%` comment lines literally name entry types, which classic BibTeX
+      0.99d mistakes for real entry starts:
+        ~L70  "...recorded as @techreport."
+        ~L112 "...-> @misc, cite the spec URL."
+        ~L183 "...peer-reviewed -> @misc."
+        ~L198 "...peer-reviewed -> @misc."
+      BibTeX: "I was expecting a `{' or a `('" /
+      `" immediately follows an entry type""; skips those entries.
+      FIX (block A): write "at-techreport"/"at-misc" in the comment prose,
+      or otherwise remove a bare @<word> from comment lines.
+      VERIFIED: on the /tmp copy, neutralizing only these comment @tokens
+      made bibtex emit all 12 \bibitem with ZERO errors.
+
+  (b) @misc note fields carry RAW CJK characters "[部分核验]" in
+      radiomaster2026 and mxai2025.  A clean .bbl would pass them through and
+      pdflatex dies: "LaTeX Error: Unicode character 部/分/核/验 (U+90E8/...)
+      not set up for use with LaTeX."  FIX: LaTeX-escape or drop the CJK
+      status tags from the bib notes (this build has no CJK font setup).
+
+  (c) openai_function_calling note field contains an unescaped underscore:
+      `` `function_call` ''  -> pdflatex "Missing $ inserted" (treats _ as
+      math subscript).  FIX: escape as function\_call.
+
+ACTION FOR BLOCK A: apply (a)(b)(c) in refs.bib, then uncomment
+  \bibliographystyle{IEEEtran} / \bibliography{refs} in main.tex and re-run
+  the full pdflatex -> bibtex -> pdflatex x2 loop.  Until then the
+  bibliography lines stay commented and in-text \cite render as "[?]"
+  (23 undefined-citation WARNINGS, not errors).
+
+The 12 in-body \cite keys already wired by block A:
+  wilson1927, hoots1980spacetrack, vallado2006revisiting, sigmf_spec,
+  gnuradio_project, sdrpp_project, satdump_project, openai_function_calling,
+  mcp_spec, radiomaster2026, mxai2025, polese2023understanding.
+  All 12 keys exist in refs.bib (verified by key name).
+
+---------------------------------------------------------------------------
+5. Other fix applied (mechanical, NO author/content change)
+---------------------------------------------------------------------------
+  The author \thanks block ended with three closing braces (`exists.}}}`);
+  \author{...} needs exactly one `}` after the last \thanks{...}.  TeX
+  rejected it as "Too many }'s" (fatal, no PDF).  Reduced to `exists.}}`.
+  All PENDING placeholders (author / affiliation / email / ack / funding)
+  are unchanged — this was a brace-balance typo in the skeleton, not an
+  author-identity edit.
+
+---------------------------------------------------------------------------
+6. WARNINGS in the final clean build (honest list; NO errors)
+---------------------------------------------------------------------------
+  * 23x  "LaTeX Warning: Citation `...' undefined"  -> expected; bibliography
+    off pending block A refs.bib fixes (see §4).  Renders as "[?]".
+  * 1x   "LaTeX Warning: There were undefined references."  -> same citations.
+  * 4x   "Underfull \hbox (badness 10000 / 2057 / 2111 / 2310)" -> cosmetic
+    two-column justification spacing around floats; NOT errors.  Locations:
+    paragraphs at source lines 69-84, 103-105, 112-132, 183.
+  * No Overfull \hbox.  No font warnings.  No missing-figure errors.
+  * No fatal errors; pdflatex exit 0 on the final two passes.
+
+---------------------------------------------------------------------------
+7. Files written by THIS block (all under docs/learn/phase7/paper/)
+---------------------------------------------------------------------------
+  IEEEtran.cls          (downloaded, V1.8b)
+  IEEEtran.bst          (downloaded, V1.14)
+  main.pdf             (real build output, 3 pp)
+  main.tex             (figure blocks + graphicspath + brace fix; bibliography
+                        left commented pending A; refs.bib NOT touched)
+  build-log.txt        (this file)
+  P2-submission-check.md (reconstructed)
+  README.md / CHANGES.md (updated)
+Build intermediates left on purpose: main.aux, main.log (inspection).
+No commit / push performed.  No C++/Flutter touched.  No refs.bib change.
+
+===========================================================================
+8. BLOCK-A FOLLOW-UP (2026-10-05, later) — refs.bib mechanical fixes applied;
+   bibliography ENABLED; full pdflatex->bibtex->pdflatex x2 now GREEN.
+   (Supersedes the "blocker" state in §4 and the 23x undefined-citation
+   warnings in §6.  No entry added/removed; no factual field changed; no
+   invented data — pure mechanical syntax repair.)
+===========================================================================
+
+8.1  Mechanical edits to refs.bib (file:line, after B-block figure wiring
+     shifted nothing in refs.bib; these line numbers are post-edit):
+
+   (a) Stray `@` in `%%` comment prose removed (BibTeX 0.99d does NOT treat
+       `%` as a comment char — it skips non-`@` junk, but a bare `@<word>`
+       in a comment line is misread as an entry start).  Note: an earlier
+       attempt merely wrote `@-techreport` / `@-misc`; the `-` did NOT help
+       because the `@` itself still triggered entry parsing.  Fix = delete
+       the `@` character entirely:
+         L70   "...recorded as @techreport."        -> "...recorded as a techreport-style entry."
+         L112  "...-> @misc, cite the spec URL."     -> "...-> misc-style entry, cite the spec URL."
+         L183  "...peer-reviewed -> @misc."          -> "...peer-reviewed -> misc-style entry."
+         L199  "...peer-reviewed -> @misc."          -> "...peer-reviewed -> misc-style entry."
+       (Real entry starts @article/@techreport/@inproceedings/@misc{...} on
+        L46/71/89/114/140/151/161/184/200/221/233/256 are untouched.)
+
+   (b) Raw CJK `[部分核验]` inside note fields (which reach the .bbl and then
+       pdflatex with no CJK font) transliterated to an ASCII status tag:
+         radiomaster2026 note (L226): "[部分核验] preprint located ..." -> "[partial-check] preprint located ..."
+         mxai2025        note (L238): "[部分核验] preprint located ..." -> "[partial-check] preprint located ..."
+       (CJK that lives ONLY in `%%` comment blocks was left as-is — it never
+        reaches the .bbl.  The verification provenance comments are intact.)
+
+   (c) Unescaped underscore in openai_function_calling note:
+         L191  "`function_call` params ..." -> "`function\_call` params ..."
+       (Rendered correctly in the .bbl/bibliography as `function_call`; no
+        more "Missing $ inserted".)
+
+8.2  main.tex: uncommented the two bibliography lines (formerly L321-322):
+         \bibliographystyle{IEEEtran}
+         \bibliography{refs}
+
+8.3  Commands actually run (clean rebuild, this block):
+       $ rm -f main.aux main.bbl main.blg main.out main.log main.pdf
+       $ pdflatex -interaction=nonstopmode -halt-on-error main.tex   -> exit 0
+       $ bibtex main                                                -> exit 0
+       $ pdflatex -interaction=nonstopmode -halt-on-error main.tex   -> exit 0
+       $ pdflatex -interaction=nonstopmode -halt-on-error main.tex   -> exit 0
+
+8.4  bibtex output summary:
+       "This is BibTeX, Version 0.99d ... The style file: IEEEtran.bst
+        Database file #1: refs.bib ... Done."   -> 0 errors (was 4).
+
+8.5  Final result (this block):
+       main.pdf : 571,220 bytes, **4 pages** (was 3 before bibliography on).
+       main.bbl : **12 \bibitem**, keys = gnuradio_project, sdrpp_project,
+                  satdump_project, openai_function_calling, wilson1927,
+                  sigmf_spec, hoots1980spacetrack, vallado2006revisiting,
+                  mcp_spec, radiomaster2026, mxai2025, polese2023understanding.
+       Undefined-citation warnings : **0** (was 23x).  "There were undefined
+       references" : gone.
+       Fatal `!` errors in final main.log : **0**.
+       Unicode / Missing-$ / CJK-not-set-up errors : **0**.
+       Overfull \hbox : 0.
+       Underfull \hbox : 7 (cosmetic IEEE two-column justification — long
+                         URLs in the reference list and narrow column text;
+                         NOT errors).  Locations span abstract, the
+                         fixed-seed Monte-Carlo paragraph, SGP4 paragraph,
+                         the AMR subsection heading, and reference entries
+                         (SDR++ howpublished, OpenAI note, function_call line).
+       No font warnings.  No missing-figure warnings (figures still resolve).
+
+8.6  Red lines honored by this follow-up: refs.bib gained/changed NO entry,
+     NO author/title/venue/year/vol/page/DOI field; only comment-prose `@`
+     removal, two note status-tag transliterations, and one `\_` escape.
+     main.tex bibliography lines enabled.  No C++/Flutter touched.  No
+     competition wording.  No commit / push.
+
