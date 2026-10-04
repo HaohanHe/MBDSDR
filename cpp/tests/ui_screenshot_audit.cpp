@@ -71,6 +71,12 @@ int main(int argc, char** argv) {
         grabLater(&win, dir + "/ui_persistence.png", 2600, app);
         grabLater(&win, dir + "/ui_markers.png", 2900, app);
         grabLater(&win, dir + "/ui_markers_interact.png", 3100, app);
+        // Dual measurement cursors: place A/B and show the Δf read-out.
+        QTimer::singleShot(1600, [cv]() {
+            cv->placeCursorA(cv->viewCenterHz() - 150e3);
+            cv->placeCursorB(cv->viewCenterHz() + 220e3);
+        });
+        grabLater(&win, dir + "/ui_dual_cursor.png", 3400, app);
     }
     if (QComboBox* d = win.findChild<QComboBox*>("decimCombo")) {
         QTimer::singleShot(1500, [d]() { d->setCurrentIndex(2); });  // x4

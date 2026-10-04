@@ -140,6 +140,14 @@ inline constexpr int    kFixedMarkerKeyStepDiv = 200;
 inline constexpr const char* kFixedMarkerSelColor = "#e0b35a";
 inline constexpr int    kFixedMarkerLineWidth = 1;
 
+// ---- Dual measurement cursors (SDR++ Δ markers) -------------------------
+// Two independent vertical measurement lines; the read-out shows |A-B| Hz.
+// Distinct from fixed markers (amber) and peaks (accent triangles): cursor A =
+// teal, cursor B = pink. Drag tolerance = half the touch minimum.
+inline constexpr const char* kCursorAColor = "#5fe0d0";
+inline constexpr const char* kCursorBColor = "#ff8fb2";
+inline constexpr int    kCursorLineWidth = 1;
+
 // =====================================================================
 // Corner radii
 // =====================================================================
@@ -212,6 +220,15 @@ inline constexpr double kGainMinDb = 0.0;
 inline constexpr double kGainMaxDb = 49.6;
 inline constexpr double kGainStepDb = 0.6;
 inline const std::initializer_list<double> kSampleRatesHz = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
+
+// Continuous-capture auto-segmentation: after this many seconds of wall-clock
+// (by sample count) the recorder finalises the current SigMF capture and opens a
+// fresh, collision-avoided file. 0 = unlimited (single file). Not a hard-coded
+// magic number: the engine reads it from QSettings("rec/max_seg_s") falling back
+// to this default, so a user override never has to edit code.
+inline constexpr double kRecMaxSegmentSecondsDefault = 300.0;
+inline constexpr double kRecMaxSegmentSecondsMin     = 5.0;
+inline constexpr double kRecMaxSegmentSecondsMax     = 3600.0;
 
 // RTL-SDR front-end tuning (advanced panel)
 inline constexpr double kPpmMin = -100.0;

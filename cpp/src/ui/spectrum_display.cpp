@@ -156,8 +156,12 @@ int SpectrumDisplay::xForFrequency(double f) const {
     return xForFreq(f, lo, span);
 }
 
-QString SpectrumDisplay::cursorReadoutText(const QPoint& pos) const {
-    if (!haveFrame_ || bins_ <= 0 || frame_.dbfs.empty()) return QString();
+double SpectrumDisplay::measurementDeltaHz(double aHz, double bHz) {
+    if (!std::isfinite(aHz) || !std::isfinite(bHz)) return 0.0;
+    return std::abs(aHz - bHz);
+}
+
+QString SpectrumDisplay::cursorReadoutText(const QPoint& pos) const {    if (!haveFrame_ || bins_ <= 0 || frame_.dbfs.empty()) return QString();
     if (!(lay_.traceRect.contains(pos) || lay_.fallsRect.contains(pos))) return QString();
     double fLo, fHi, span; visibleWindow(fLo, fHi, span);
     const double f = freqForX(pos.x(), fLo, span);
@@ -715,6 +719,34 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         }
     }
 
+    // --- Dual measurement cursors (A=teal, B=pink) + Δf read-out -----------
+    auto paintCursor = [&](double hz, const char* color, const char* tag) {
+        if (!std::isfinite(hz)) return;
+        const int x = xForFreq(hz, fLo, span);
+        if (x < trace.left() || x > trace.right()) return;
+        p.setPen(QPen(QColor(color), tokens::kCursorLineWidth, Qt::DashLine));
+        p.drawLine(x, trace.top(), x, trace.bottom());
+        p.drawText(x + tokens::scaled(2), trace.bottom() - tokens::scaled(4),
+                   QString::fromLatin1(tag));
+    };
+    paintCursor(cursorA_Hz_, tokens::kCursorAColor, "A");
+    paintCursor(cursorB_Hz_, tokens::kCursorBColor, "B");
+    if (std::isfinite(cursorA_Hz_) && std::isfinite(cursorB_Hz_)) {
+        const double dHz = measurementDeltaHz(cursorA_Hz_, cursorB_Hz_);
+        const int xa = xForFreq(cursorA_Hz_, fLo, span);
+        const int xb = xForFreq(cursorB_Hz_, fLo, span);
+        const int x0 = std::min(xa, xb), x1 = std::max(xa, xb);
+        // Δ read-out box at the top of the band between the two cursors.
+        const QString txt = QString("Δ %1").arg(
+            dHz >= 1e6 ? QString::number(dHz / 1e6, 'f', 3) + " MHz"
+                       : QString::number(dHz / 1e3, 'f', 2) + " kHz");
+        QFont f = p.font(); f.setPointSizeF(tokens::kFontAuxPt); p.setFont(f);
+        const QRect box(x0, trace.top(), x1 - x0, tokens::scaled(18));
+        p.fillRect(box, QColor(tokens::kSelectedFill));
+        p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaPrimary), 1));
+        p.drawText(box, Qt::AlignCenter, txt);
+    }
+
     // --- waterfall (crop the history snapshot to the visible window) --------
     // Bin-centre mapping SHARED with the trace above: history column i sits at
     // image x in [i, i+1), whose centre (i+0.5) is the bin-centre frequency
@@ -948,6 +980,19 @@ void SpectrumDisplay::mousePressEvent(QMouseEvent* e) {
             panRefX_ = pos.x();
             return;
         }
+        // Dual measurement cursors take priority: grab the nearest placed one.
+        const int hitTolC = tokens::scaled(tokens::kTouchMinDim) / 2;
+        int hitC = 0;
+        if (std::isfinite(cursorA_Hz_) &&
+            std::abs(pos.x() - xForFreq(cursorA_Hz_, fLo, span)) <= hitTolC) hitC = 1;
+        else if (std::isfinite(cursorB_Hz_) &&
+                 std::abs(pos.x() - xForFreq(cursorB_Hz_, fLo, span)) <= hitTolC) hitC = 2;
+        if (hitC > 0) {
+            grabCursor_ = hitC;
+            grab_ = Grab::None;   // cursor drag handled via grabCursor_
+            e->accept();
+            return;
+        }
         // Fixed markers take priority: a click/tap near a line selects+drags it.
         const int hitTol = tokens::scaled(tokens::kTouchMinDim) / 2;
         int hitFixed = -1;
@@ -1003,6 +1048,14 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
     const QPoint pos = e->pos();
     double fLo, fHi, span;
     visibleWindow(fLo, fHi, span);
+
+    // Dragging a measurement cursor.
+    if (grabCursor_ > 0) {
+        const double f = freqForX(pos.x(), fLo, span);
+        if (grabCursor_ == 1) cursorA_Hz_ = f; else cursorB_Hz_ = f;
+        update();
+        return;
+    }
 
     dividerHot_ = lay_.splitZone.contains(pos);
 
@@ -1079,6 +1132,7 @@ void SpectrumDisplay::mouseMoveEvent(QMouseEvent* e) {
 }
 
 void SpectrumDisplay::mouseReleaseEvent(QMouseEvent* e) {
+    if (grabCursor_ > 0) { grabCursor_ = 0; update(); return; }
     if (grab_ == Grab::FixedMarker) {
         if (dragFixedIdx_ >= 0) {
             dragFixedIdx_ = -1;
