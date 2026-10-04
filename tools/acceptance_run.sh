@@ -11,7 +11,10 @@
 # 流程：
 #   ① selfcheck --json（插设备自检）
 #   ② selfcheck | diag_wizard --paste（产出围栏回传块）
-#   ③ onboard 三类信号 adsb/apt/cw（设备在场才真采集；不在场一律 SKIP + 原因）
+#   ③ onboard 信号模式（设备在场才真采集；不在场一律 SKIP + 原因）
+#        - 默认：adsb/apt/cw（教学白名单，频率见下方 MODE_FREQ_*）
+#        - --event：sstv/ssdv（活动图像通联，下行频率由 --freq-sstv/--freq-ssdv
+#          从 docs/learn/phase14/P3-event-params.md 查得后传入；脚本不硬编码）
 #   ④ exp_ota_run --recordings-dir 回填 recorded 口径
 #   ⑤ 桌面"时空视图"人工核对提示（脚本只提示，不自动验证）
 #
@@ -19,16 +22,24 @@
 #   * 禁 mock：device_present 只从 selfcheck 报告读 target_hits；没设备就明确
 #     输出"未检测到设备"，下游全部 SKIP 并写原因，绝不假采集。
 #   * 无硬件分支在云 VM 真跑：诚实 FAIL/SKIP，退出码 2（不是错误）。
+#   * --event 活动参数（频率/卫星名/日期）绝不进脚本硬编码：频率只从
+#     --freq-sstv/--freq-ssdv 传入；缺了就报错并提示去 P3-event-params.md 查。
 #
 # 退出码（与 acceptance_lib.py 一致）：
 #   0 设备在场且演练全绿；1 设备在场但有步 FAIL；2 未检测到设备（诚实空态）；
-#   3 用法/环境错误。
+#   3 用法/环境错误（含 --event 缺频率/坏模式）。
 #
 # 用法：
-#   bash tools/acceptance_run.sh                      # 默认全流程
+#   bash tools/acceptance_run.sh                      # 默认全流程（adsb/apt/cw）
 #   bash tools/acceptance_run.sh --out /tmp/x.json    # 自定义检查表输出
 #   bash tools/acceptance_run.sh --modes adsb,cw      # 只跑指定模式（白名单 adsb/apt/cw）
 #   bash tools/acceptance_run.sh --keep-logs          # 保留中间日志目录
+#   bash tools/acceptance_run.sh --event \
+#        --freq-sstv <Hz> --freq-ssdv <Hz>
+#        # 活动模式 sstv/ssdv；频率必须自己从 P3-event-params.md 查了再传
+#        # （单位 Hz，如 435e6 仅为格式示例，脚本不内置任何活动频率）
+#   bash tools/acceptance_run.sh --event --event-modes sstv
+#        # 只跑 SSTV 一路
 
 set -u
 set -o pipefail
@@ -43,16 +54,30 @@ OUT="$ROOT/tools/acceptance_out.json"
 KEEP_LOGS=0
 MODES_IN="adsb,apt,cw"
 
+# --event 活动模式开关（默认关；--event 开启）
+EVENT_MODE=0
+EVENT_MODES_IN="sstv,ssdv"
+FREQ_SSTV=""     # 空=未传；脚本绝不填默认活动频率
+FREQ_SSDV=""
+
 # 模式参数（核对自 tools/onboarding/onboard.py 的 MODES 默认值）
 MODE_FREQ_adsb="1090e6";    MODE_N_adsb=""
 MODE_FREQ_apt="137.5e6";    MODE_N_apt="4800000"
 MODE_FREQ_cw="7020000";    MODE_N_cw="2400000"
+# sstv/ssdv 的 --n 留空：让 onboard.py 用自己 MODES 注册表里的默认值
+# （sstv sr=250k n=30M≈120s 整帧；ssdv 是字节流模式 n=0，采集步会诚实 FAIL）
+MODE_FREQ_sstv=""; MODE_N_sstv=""
+MODE_FREQ_ssdv=""; MODE_N_ssdv=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --out) OUT="$2"; shift 2 ;;
     --modes) MODES_IN="$2"; shift 2 ;;
     --keep-logs) KEEP_LOGS=1; shift ;;
+    --event) EVENT_MODE=1; shift ;;
+    --event-modes) EVENT_MODES_IN="$2"; shift 2 ;;
+    --freq-sstv) FREQ_SSTV="$2"; shift 2 ;;
+    --freq-ssdv) FREQ_SSDV="$2"; shift 2 ;;
     -h|--help)
       grep -E '^#( |$)' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -73,6 +98,27 @@ append_raw() { printf '%s\n' "$1" >> "$RAW"; }
 
 # 把任意值安全转成 JSON 字符串字面量（用 python，避免手工转义路径）
 jstr() { "$PY" -c 'import json,sys; print(json.dumps(sys.argv[1], ensure_ascii=False))' "$1"; }
+
+# ---- --event 模式：校验白名单 + 频率覆盖（纯逻辑在 acceptance_lib.py）----
+# 频率绝不硬编码：缺了就报错并提示去 P3-event-params.md 查。
+if [ "$EVENT_MODE" = "1" ]; then
+  info "--event 活动模式：校验白名单与下行频率覆盖"
+  EVENT_RESOLVE="$("$PY" tools/acceptance_lib.py resolve-event \
+    --modes "$EVENT_MODES_IN" \
+    --freq-sstv "$FREQ_SSTV" \
+    --freq-ssdv "$FREQ_SSDV" 2> "$LOG_DIR/event_resolve.stderr")"
+  RC_ER=$?
+  if [ "$RC_ER" != "0" ]; then
+    cat "$LOG_DIR/event_resolve.stderr" >&2
+    exit 3
+  fi
+  # 从 resolve-event JSON 里抽出最终生效的模式列表
+  RUN_EVENT_MODES="$("$PY" -c 'import json,sys; print(" ".join(json.loads(sys.argv[1])["modes"]))' "$EVENT_RESOLVE")"
+  # 把用户传的频率灌进 MODE_FREQ_* 变量，复用既有 run_onboard 路径
+  MODE_FREQ_sstv="$FREQ_SSTV"
+  MODE_FREQ_ssdv="$FREQ_SSDV"
+  info "    活动模式: $RUN_EVENT_MODES（频率由用户传参，未硬编码）"
+fi
 
 # ---------------------------------------------------------------------------
 # ① selfcheck --json
@@ -104,16 +150,23 @@ append_raw "$(printf '{"id":"diag_wizard_paste","title":"diag_wizard --paste 回
   "$RC_DW" "$FENCE" "$(jstr "$DIAG_TXT")")"
 
 # ---------------------------------------------------------------------------
-# ③ onboard 三类信号（按设备在场分支）
+# ③ onboard 信号采集（按设备在场分支）
 # ---------------------------------------------------------------------------
-# 解析 --modes 白名单
+# 解析模式白名单：
+#   - 默认：adsb/apt/cw（教学信号，频率硬编码在上方 MODE_FREQ_*）
+#   - --event：sstv/ssdv（活动图像通联，已在前面 resolve-event 校验过白名单
+#     与频率覆盖；RUN_EVENT_MODES 即最终生效列表）
 RUN_MODES=""
-for m in ${MODES_IN//,/ }; do
-  case "$m" in
-    adsb|apt|cw) RUN_MODES="$RUN_MODES $m" ;;
-    *) warn "跳过非法模式 $m（白名单: adsb/apt/cw）" ;;
-  esac
-done
+if [ "$EVENT_MODE" = "1" ]; then
+  RUN_MODES="$RUN_EVENT_MODES"
+else
+  for m in ${MODES_IN//,/ }; do
+    case "$m" in
+      adsb|apt|cw) RUN_MODES="$RUN_MODES $m" ;;
+      *) warn "跳过非法模式 $m（白名单: adsb/apt/cw）" ;;
+    esac
+  done
+fi
 
 FIRST_REC_DIR=""   # 记录第一个成功落盘 SigMF 的目录，给 ota 回填用
 

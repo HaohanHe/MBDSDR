@@ -24,6 +24,9 @@ MBDSDR 真机端到端演练 · 纯逻辑库（checklist 组装 / 分类 / 校�
 CLI 子命令（shell 与手动调试共用）：
   python3 tools/acceptance_lib.py device-present <selfcheck.json>
       # 打印 true/false
+  python3 tools/acceptance_lib.py resolve-event --modes sstv,ssdv \
+          --freq-sstv <Hz> --freq-ssdv <Hz>
+      # 校验 --event 模式白名单与频率覆盖；缺频率/坏模式退出 3
   python3 tools/acceptance_lib.py assemble --raw <steps.jsonl> --out <checklist.json>
       # 读 raw 行（每行一个步的原始结果），组装成最终检查表 JSON；退出码=检查表结论
   python3 tools/acceptance_lib.py validate <checklist.json>
@@ -50,6 +53,11 @@ EXIT_USAGE = 3       # 用法/输入错误
 
 # 演练步允许的状态
 ALLOWED_STATUS = ("PASS", "FAIL", "SKIP")
+
+# --event 模式允许的 onboard 模式（活动图像通联：SSTV 模拟 / SSDV 数字）。
+# 频率/卫星名/日期等活动参数绝不硬编码进脚本，只从 docs 登记、由用户传参。
+EVENT_MODES = ("sstv", "ssdv")
+EVENT_PARAMS_DOC = "docs/learn/phase14/P3-event-params.md"
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +86,46 @@ def device_present_from_selfcheck(report: dict) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# 2. onboard --json 结果分类（按 phase10 手册通过口径）
+# 1.5 --event 模式：模式白名单 + 频率覆盖校验（纯逻辑，shell/CLI 共用）
+# ---------------------------------------------------------------------------
+def resolve_event_modes(requested: list[str],
+                        freq_map: dict[str, str]) -> tuple[list[str], Optional[str]]:
+    """解析 --event 模式的模式白名单与下行频率覆盖。
+
+    红线：活动频率/卫星名/日期**绝不硬编码**——``freq_map`` 由调用方
+    （bash ``--freq-sstv``/``--freq-ssdv``）从 ``EVENT_PARAMS_DOC`` 查得后传入。
+
+    参数:
+      requested: 用户 ``--event-modes`` 拆分出的模式列表（如 ["sstv","ssdv"]）。
+      freq_map:  mode -> 频率字符串（如 {"sstv": "435e6", "ssdv": ""}）。
+
+    返回:
+      (有效模式列表, 错误信息)；错误信息为 None 表示全部合法。
+      即使有频率缺失，也仍返回已通过白名单校验的模式列表（供 shell 打印）。
+    """
+    valid: list[str] = []
+    invalid: list[str] = []
+    for m in requested:
+        m = str(m).strip()
+        if not m:
+            continue
+        if m in EVENT_MODES:
+            if m not in valid:
+                valid.append(m)
+        else:
+            invalid.append(m)
+
+    if invalid:
+        return [], f"非法活动模式 {invalid}（白名单: {list(EVENT_MODES)}）"
+
+    missing = [m for m in valid if not str(freq_map.get(m, "")).strip()]
+    if missing:
+        return valid, (
+            f"活动模式 {missing} 缺少下行频率：请阅读 {EVENT_PARAMS_DOC} "
+            f"查对应卫星下行载频，再用 --freq-{missing[0]} <Hz> "
+            f"（单位 Hz，如 435e6）传入；脚本绝不硬编码活动频率"
+        )
+    return valid, None
 # ---------------------------------------------------------------------------
 def onboard_outcome(onboard_report: dict) -> dict:
     """把 onboard.py --json 的 steps 列表翻译成演练步结论。
@@ -410,6 +457,13 @@ def main(argv: list[str] | None = None) -> int:
     p_v = sub.add_parser("validate", help="校验检查表 JSON")
     p_v.add_argument("checklist_json")
 
+    p_re = sub.add_parser("resolve-event",
+                          help="解析 --event 模式白名单与频率覆盖（shell 调用）")
+    p_re.add_argument("--modes", required=True,
+                      help="逗号分隔的活动模式，如 sstv,ssdv")
+    p_re.add_argument("--freq-sstv", default="", help="sstv 下行频率 Hz")
+    p_re.add_argument("--freq-ssdv", default="", help="ssdv 下行频率 Hz")
+
     args = ap.parse_args(argv)
 
     if args.cmd == "device-present":
@@ -480,6 +534,16 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print("OK: 检查表结构合法")
         return 0
+
+    if args.cmd == "resolve-event":
+        requested = [m.strip() for m in args.modes.split(",") if m.strip()]
+        freq_map = {"sstv": args.freq_sstv, "ssdv": args.freq_ssdv}
+        modes, err = resolve_event_modes(requested, freq_map)
+        print(json.dumps({"modes": modes, "error": err}, ensure_ascii=False))
+        if err:
+            print(f"[ERROR] {err}", file=sys.stderr)
+            return EXIT_USAGE
+        return EXIT_OK
 
     return EXIT_USAGE
 
