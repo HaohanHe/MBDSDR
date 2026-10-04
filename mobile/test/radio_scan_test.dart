@@ -4,7 +4,6 @@
 library;
 
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/audio/null_pcm_sink.dart';
@@ -40,6 +39,8 @@ class _FakeClient extends RtlTcpClient {
   Future<void> setGainDb(double db) async {}
   @override
   Future<void> setFrequencyHz(int hz) async => tunedHz.add(hz);
+
+  void close() => _iq.close();
 }
 
 class _Hit {
@@ -88,6 +89,7 @@ void main() {
       expect(hits[i].source, 'scan');
     }
     await ctl.disconnect();
+    client.close();
   });
 
   test('停止扫描：stopScan 后循环提前退出，不再继续调谐', () async {
@@ -112,6 +114,7 @@ void main() {
     expect(client.tunedHz.length, lessThan(10001));
     expect(client.tunedHz.length, greaterThan(0)); // 至少真调谐过一点
     await ctl.disconnect();
+    client.close();
   });
 
   test('未连接时 startScan 空转：不调谐、不命中、不挂起', () async {

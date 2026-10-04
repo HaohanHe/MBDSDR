@@ -6,6 +6,7 @@ import 'app/home_shell.dart';
 import 'app/theme.dart';
 import 'audio/file_player.dart';
 import 'audio/platform_pcm_sink.dart';
+import 'services/chat_session_store.dart';
 import 'services/radio_controller.dart';
 import 'services/recording_store.dart';
 import 'services/settings_service.dart';
@@ -29,6 +30,11 @@ Future<void> main() async {
     secure: FlutterSecureStorageStore(),
   );
   await settings.load();
+
+  // AI 多会话存储：与桌面同形的 JSON 文档，存进同一个 KvStore。
+  final ChatSessionStore chatSessionStore =
+      ChatSessionStore(kv: SharedPreferencesKvStore(prefs));
+  await chatSessionStore.load();
 
   // 真机出声 sink：MethodChannel → 原生 AudioTrack/AVAudioEngine（原生端待验）。
   final PlatformPcmSink pcmSink = PlatformPcmSink();
@@ -74,6 +80,7 @@ Future<void> main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider<SettingsService>.value(value: settings),
+        ChangeNotifierProvider<ChatSessionStore>.value(value: chatSessionStore),
         ChangeNotifierProvider<RadioController>.value(value: radioController),
         Provider<RecordingStore>.value(value: recordingStore),
         Provider<FilePlayer>.value(value: filePlayer),

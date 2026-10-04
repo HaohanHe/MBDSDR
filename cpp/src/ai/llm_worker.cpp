@@ -37,6 +37,35 @@ LLMWorker::LlmErrorClass LLMWorker::classifyLlmError(const QString& e) {
     return LlmErrorClass::Terminal;
 }
 
+LLMWorker::LlmErrorClass LLMWorker::classifyLlmError(int httpStatus, const QString& e) {
+    // Phase32 block2: the real HTTP status code wins when the transport actually
+    // saw one. Only when there is NO status line (httpStatus <= 0: connection
+    // refused / DNS / TLS / request timeout) do we fall back to the Phase31
+    // string heuristic, so offline mocks and no-key errors keep their old shape.
+    if (httpStatus > 0) {
+        switch (httpStatus) {
+            case 429:  // rate limited -> existing exponential backoff seam
+            case 408:  // request timeout -> retryable
+            case 500:  // internal error (often transient for upstreams)
+            case 502:  // bad gateway
+            case 503:  // service unavailable -> retry
+            case 504:  // gateway timeout
+                return LlmErrorClass::Retryable;
+            case 401:  // bad/missing key -> key hint, never self-heals
+            case 403:  // forbidden / no quota
+            case 400:  // bad request shape (model/args) -> terminal, honest
+            case 404:  // unknown route/model
+            case 422:  // unprocessable entity
+                return LlmErrorClass::Terminal;
+            default: break;
+        }
+        if (httpStatus >= 500 && httpStatus < 600) return LlmErrorClass::Retryable;
+        if (httpStatus >= 400 && httpStatus < 500) return LlmErrorClass::Terminal;
+        // 1xx/2xx/3xx with an attached error string (shouldn't happen): defer.
+    }
+    return classifyLlmError(e);
+}
+
 int LLMWorker::backoffDelayMs(int attemptOneBased) {
     if (attemptOneBased < 1) attemptOneBased = 1;
     long delay = tokens::kAiBackoffBaseMs;
@@ -153,14 +182,16 @@ void LLMWorker::doChat(const QList<ChatMessage>& messages,
 
         LLMResponse resp;
         // Bounded transient-retry (error-recovery layer 5): retry only RETRYABLE
-        // upstream errors (429/503/504/timeout/conn-refused) up to
+        // upstream errors -- now classified by the REAL HTTP status code
+        // (429/503/504/408/5xx); no-HTTP-reply (conn fail/timeout) and offline
+        // mocks fall back to the Phase31 string heuristic -- up to
         // kAiMaxTransientRetries with exponential backoff. Terminal errors
         // (400/401/403/no-key/parse) and the exhausted budget return as-is so the
         // caller surfaces an honest PENDING -- never a mock, never a retry storm.
         for (int attempt = 0; ; ++attempt) {
             resp = client_->chat(msgs, tools, onChunk, opts);
             if (resp.error.isEmpty()) break;
-            if (classifyLlmError(resp.error) != LlmErrorClass::Retryable ||
+            if (classifyLlmError(resp.httpStatus, resp.error) != LlmErrorClass::Retryable ||
                 attempt >= tokens::kAiMaxTransientRetries) {
                 break;   // terminal or budget exhausted -> return the honest error
             }

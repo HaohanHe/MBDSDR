@@ -13,6 +13,7 @@ import '../pages/settings_page.dart';
 import '../pages/sky_page.dart';
 import '../pages/spectrum_page.dart';
 import '../services/ai_client.dart';
+import '../services/chat_session_store.dart';
 import '../services/radio_controller.dart';
 import '../services/recording_store.dart';
 import '../services/settings_service.dart';
@@ -175,6 +176,8 @@ class _HomeShellState extends State<HomeShell> {
         // 任一缺失（导航单测）→ onPlay/onStop 为 null，录音页不渲染假播放按钮。
         final RecordingStore? store = _maybeRead<RecordingStore>();
         final FilePlayer? player = _maybeRead<FilePlayer>();
+        // 多会话存储可选注入：未提供（如导航单测）时 ChatPage 退化为纯内存单会话。
+        final ChatSessionStore? chatSessions = _maybeRead<ChatSessionStore>();
         Station? station;
         if (settings.hasManualStation) {
           station = Station(
@@ -227,6 +230,7 @@ class _HomeShellState extends State<HomeShell> {
               ),
               manualMode: settings.aiManualMode,
               onOpenSettings: _openSettings,
+              store: chatSessions,
             ),
             RecordingsPage(
               radio: radio,

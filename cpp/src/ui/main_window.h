@@ -74,6 +74,23 @@ public:
     QLabel*  harnessControlHttpBanner() const { return controlHttpBanner_; }
     // AI multi-session store (harness/screenshot drive it offscreen).
     ai::AiSessionStore* aiSessionStore() { return aiSessionStore_; }
+
+    // ---- Phase32 block1: offscreen chat-lifecycle harness -------------------
+    // CI has no LLM key, so the streaming signals (partialReady/responseReady)
+    // can't be driven by a real network reply. These call the EXACT same handlers
+    // the Agent signals are wired to, so the transient-replace / 固化去重 /
+    // incomplete badge lifecycle is exercised end-to-end on the production
+    // MainWindow without fabricating a reply. harnessAiBeginUserTurn does the
+    // bookkeeping only (it does NOT invoke the worker), leaving the pending
+    // "未完成" state observable.
+    void harnessAiBeginUserTurn(const QString& text);   // append user line + mark pending
+    void harnessAiSetPartial(const QString& acc);       // partialReady handler
+    void harnessAiFinishResponse(const QString& text);  // responseReady handler (固化 once)
+    QString harnessAiChatText() const;   // defined in .cpp (QPlainTextEdit complete there)
+    // Offscreen: auto-confirm the destructive delete-session dialog so tests can
+    // drive aiDeleteSessionBtn_ without a blocking QMessageBox. Production keeps
+    // this false and always asks first.
+    void harnessSetAutoConfirmSessionDelete(bool on) { aiAutoConfirmDelete_ = on; }
     // Harness/programmatic refresh (offscreen screenshots / embedding): re-sync
     // the scan button enables + state labels AND the bookmark table from the
     // current headless state. No radio is touched.
@@ -591,6 +608,18 @@ private:
     void onAiSessionChanged(int idx);
     void onAiCompactContext();
     void onRunAutoTask();              // run a deterministic autonomous task template
+
+    // Shared send bookkeeping (the 发送 button AND the offscreen harness both use
+    // it): append the user line (which auto-clears any prior 未完成), raise the
+    // pending-stream incomplete flag, and show the single "思考中…" transient.
+    // Does NOT invoke the worker -- the caller does that.
+    void aiBeginUserTurn(const QString& text);
+    // The two worker-observation handlers (connected to Agent::partialReady /
+    // ::responseReady). Extracted so the offscreen harness drives the SAME code.
+    void aiOnPartialReady(const QString& accumulated);
+    void aiOnResponseReady(const QString& finalText);
+    // Offscreen seam: skip the modal delete confirm (see the public setter).
+    bool aiAutoConfirmDelete_ = false;
 
     // hw = a real hardware device (RTL-SDR / rtl_tcp) is live -> gate tuner /
     // sample-rate / gain / advanced front-end controls. hasData = ANY live IQ
