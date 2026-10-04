@@ -897,6 +897,23 @@ inline constexpr int kControlHubModesCount =
 inline constexpr double kControlHubScanStepMinHz = 1.0;
 
 // =====================================================================
+// Loopback HTTP/JSON control endpoint (cpp/src/control/control_http_server.{h,cpp})
+//
+// A thin local front-end on top of ControlHub: GET /status + the three decoder
+// snapshots, POST /command -> execute() (the SAME read/write gate). It binds
+// 127.0.0.1 ONLY and has NO authentication by design. The port is a named token
+// (never a raw literal at the call site) and is elastic: it can be overridden at
+// runtime by the env var or the QSettings key below, so a test can pin/ephemeral-
+// port without recompiling and an operator can move it off the default.
+// =====================================================================
+// Default loopback TCP port. Chosen clear of the common SDR daemons (rtl_tcp
+// 1234, SpyServer 1631, SoapyRemote 55130, rigctl 45321) to avoid a clash.
+inline constexpr quint16 kControlHttpDefaultPort = 50732;
+// Runtime overrides (highest precedence first: env, then QSettings).
+inline constexpr const char* kControlHttpPortEnvVar       = "MBDSDR_CONTROL_HTTP_PORT";
+inline constexpr const char* kControlHttpPortSettingsKey  = "control/httpPort";
+
+// =====================================================================
 // POCSAG / m17 digital data-link air-interface constants.
 //
 // Shared by dsp/vfo_manager (which wires the front-end per mode), the decoder

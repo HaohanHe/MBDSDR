@@ -190,6 +190,8 @@ class _HomeShellState extends State<HomeShell> {
               controller: radio,
               rtlHost: settings.rtlHost,
               rtlPort: settings.rtlPort,
+              controlHubHost: settings.controlHubHost,
+              controlHubPort: settings.controlHubPort,
               bookmarks: settings.bookmarks,
               onAddBookmark: (name, hz, mode, bw) =>
                   settings.addBookmark(

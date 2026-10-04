@@ -118,6 +118,14 @@ const String kDefaultThemeName = '默认';
 
 const String _kRtlHost = 'rtlHost';
 const String _kRtlPort = 'rtlPort';
+
+/// 桌面 ControlHub HTTP 主机/端口（远程只读解码面板用）。
+///
+/// 与 rtl_tcp（裸 IQ TCP，本机接收链）相互独立：ControlHub 是桌面引擎把
+/// POCSAG/M17/VOR 解码结果经 HTTP 暴露的只读通道。host 为空 = 未配置，
+/// 远程解码面板退化为「去设置」空态，不假连。
+const String _kControlHubHost = 'controlHubHost';
+const String _kControlHubPort = 'controlHubPort';
 const String _kApiKey = 'apiKey';
 const String _kApiModel = 'apiModel';
 const String _kStationLat = 'stationLat';
@@ -181,6 +189,8 @@ class SettingsService extends ChangeNotifier {
 
   String _rtlHost = '';
   int _rtlPort = 1234;
+  String _controlHubHost = '';
+  int _controlHubPort = 8080;
   String _apiKey = '';
   String _apiModel = kDefaultApiModel;
   double? _stationLat;
@@ -208,6 +218,25 @@ class SettingsService extends ChangeNotifier {
     }
     _rtlPort = value;
     unawaited(_kv.setInt(_kRtlPort, value));
+    notifyListeners();
+  }
+
+  /// 桌面 ControlHub HTTP 主机（已 trim）。空串 = 未配置远程解码查看。
+  String get controlHubHost => _controlHubHost;
+  set controlHubHost(String value) {
+    _controlHubHost = value.trim();
+    unawaited(_kv.setString(_kControlHubHost, _controlHubHost));
+    notifyListeners();
+  }
+
+  /// 桌面 ControlHub HTTP 端口，合法范围 1–65535，越界抛 [FormatException]。
+  int get controlHubPort => _controlHubPort;
+  set controlHubPort(int value) {
+    if (value < 1 || value > 65535) {
+      throw FormatException('端口必须在 1–65535 之间，收到: $value');
+    }
+    _controlHubPort = value;
+    unawaited(_kv.setInt(_kControlHubPort, _controlHubPort));
     notifyListeners();
   }
 
@@ -518,6 +547,12 @@ class SettingsService extends ChangeNotifier {
   Future<void> load() async {
     _rtlHost = _kv.getString(_kRtlHost) ?? '';
     _rtlPort = _kv.getInt(_kRtlPort) ?? 1234;
+    _controlHubHost = _kv.getString(_kControlHubHost) ?? '';
+    // 端口缺失/越界回退默认 8080，绝不抛。
+    final int? chPort = _kv.getInt(_kControlHubPort);
+    _controlHubPort = (chPort == null || chPort < 1 || chPort > 65535)
+        ? 8080
+        : chPort;
     _apiModel = _kv.getString(_kApiModel) ?? kDefaultApiModel;
     _stationLat = _kv.getDouble(_kStationLat);
     _stationLon = _kv.getDouble(_kStationLon);
