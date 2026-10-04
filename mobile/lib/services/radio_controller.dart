@@ -120,6 +120,27 @@ abstract interface class RadioApi {
   /// 开关自动门限。开启后门限随噪声底自动跟随；手动拖门限滑杆即退出自动。
   void setSquelchAuto(bool on);
 
+  /// 是否正在范围扫描。
+  bool get scanning;
+
+  /// 扫描当前正在调谐的频率（Hz）；未扫描为 null。
+  int? get scanHz;
+
+  /// 扫描进度 0..1。
+  double get scanProgress;
+
+  /// 开始范围扫描（真实调谐+真实电平量测，命中写活动日志）。未连接/已在扫描直接返回。
+  Future<void> startScan({
+    required int startHz,
+    required int endHz,
+    required int stepHz,
+    required double thresholdDbfs,
+    int dwellMs,
+  });
+
+  /// 请求停止扫描。
+  void stopScan();
+
   /// 实时频谱帧流。
   Stream<SpectrumFrame> get spectrumStream;
 
@@ -189,13 +210,33 @@ class RadioController extends ChangeNotifier implements RadioApi {
   /// 通知重建，避免每帧 rebuild；噪声底收敛后门限不再变化即停止通知。
   int _lastNotifiedSquelchTrunc = 999;
 
-  /// 信号活动回调：静噪门由关→开（真实有信号过声）时触发一次。
+  /// 信号活动回调：真实观察到信号时触发一次（静噪门开门 / 扫描命中）。
   /// 由外壳（main.dart）注入，把真实观察写进信号活动日志；未连接/无观察时不触发。
+  /// [source]：'squelch'=值守开门，'scan'=范围扫描命中。
   void Function({
     required int frequencyHz,
     required String mode,
     required double levelDbfs,
+    String source,
   })? onSignalActivity;
+
+  // ---------------------------------------------------- 范围扫描
+  bool _scanning = false;
+  bool _scanCancel = false;
+  int? _scanHz;
+  double _scanProgress = 0;
+
+  /// 是否正在范围扫描。
+  @override
+  bool get scanning => _scanning;
+
+  /// 扫描当前正在调谐的频率（Hz）；未扫描为 null。
+  @override
+  int? get scanHz => _scanHz;
+
+  /// 扫描进度 0..1。
+  @override
+  double get scanProgress => _scanProgress;
 
   // ---------------------------------------------------- 真实文件录制
   /// 当前录制会话（null = 未在录）。写盘走 [FileRecordingSink]（16-bit 小端 WAV）。
@@ -473,6 +514,7 @@ class RadioController extends ChangeNotifier implements RadioApi {
           frequencyHz: _freqHz,
           mode: _mode.name,
           levelDbfs: _squelch.levelDb,
+          source: 'squelch',
         );
       }
       notifyListeners();
@@ -572,6 +614,65 @@ class RadioController extends ChangeNotifier implements RadioApi {
     _freqHz = hz;
     notifyListeners();
     await _client?.setFrequencyHz(hz);
+  }
+
+  // ---------------------------------------------------- 范围扫描（真实调谐+真实量测）
+  /// 开始范围扫描：从 [startHz] 到 [endHz] 按 [stepHz] 步进，每点驻留 [dwellMs]。
+  ///
+  /// 全程走真实链路：每点 [setFrequencyHz] 真实下发 rtl_tcp，驻留期间 IQ 解调更新
+  /// 静噪门平滑电平（真实 RMS dBFS）；电平 ≥ [thresholdDbfs] 即真实命中，经
+  /// [onSignalActivity]（source:'scan'）写进活动日志。未连接/已在扫描时直接返回。
+  /// 取消由 [stopScan] 置位原子标志，驻留后即退出循环。
+  @override
+  Future<void> startScan({
+    required int startHz,
+    required int endHz,
+    required int stepHz,
+    required double thresholdDbfs,
+    int dwellMs = 300,
+  }) async {
+    if (_status != ConnectionStatus.connected || _scanning) return;
+    if (stepHz <= 0 || endHz <= startHz) return;
+
+    _scanning = true;
+    _scanCancel = false;
+    final points = ((endHz - startHz) ~/ stepHz) + 1;
+    try {
+      for (var i = 0; i < points; i++) {
+        if (_scanCancel) break;
+        final hz = startHz + i * stepHz;
+        _scanHz = hz;
+        _scanProgress = points <= 1 ? 1.0 : i / (points - 1);
+        notifyListeners();
+
+        // 真实调谐到该频点。
+        await setFrequencyHz(hz);
+        // 驻留：让 IQ 流过解调器，静噪门平滑电平收敛为该频点真实 RMS。
+        await Future<void>.delayed(Duration(milliseconds: dwellMs));
+        if (_scanCancel) break;
+
+        final level = _squelch.levelDb; // 真实量测电平（dBFS）
+        if (level >= thresholdDbfs) {
+          onSignalActivity?.call(
+            frequencyHz: hz,
+            mode: _mode.name,
+            levelDbfs: level,
+            source: 'scan',
+          );
+        }
+      }
+    } finally {
+      _scanning = false;
+      _scanHz = null;
+      _scanProgress = 0;
+      notifyListeners();
+    }
+  }
+
+  /// 请求停止扫描（原子标志，驻留后即退出）。
+  @override
+  void stopScan() {
+    _scanCancel = true;
   }
 
   @override

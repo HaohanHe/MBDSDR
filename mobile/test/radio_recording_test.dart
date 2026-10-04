@@ -284,6 +284,26 @@ class _PanelRadio extends ChangeNotifier implements RadioApi {
     notifyListeners();
     return null;
   }
+
+  @override
+  bool get scanning => false;
+
+  @override
+  int? get scanHz => null;
+
+  @override
+  double get scanProgress => 0;
+
+  @override
+  Future<void> startScan(
+          {required int startHz,
+          required int endHz,
+          required int stepHz,
+          required double thresholdDbfs,
+          int dwellMs = 300}) async {}
+
+  @override
+  void stopScan() {}
 }
 
 Widget _wrap(_PanelRadio r) => MaterialApp(
