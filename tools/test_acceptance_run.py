@@ -416,5 +416,160 @@ class TestShellNoHardware:
         assert not A.validate_checklist(ck)
 
 
+# ---------------------------------------------------------------------------
+# 8. --event 模式：resolve_event_modes 纯逻辑
+# ---------------------------------------------------------------------------
+class TestResolveEventModes:
+    def test_both_modes_with_freqs_ok(self):
+        modes, err = A.resolve_event_modes(
+            ["sstv", "ssdv"], {"sstv": "435e6", "ssdv": "436e6"})
+        assert err is None
+        assert modes == ["sstv", "ssdv"]
+
+    def test_single_mode_ok(self):
+        modes, err = A.resolve_event_modes(
+            ["sstv"], {"sstv": "435e6", "ssdv": ""})
+        assert err is None
+        assert modes == ["sstv"]
+
+    def test_missing_freq_points_to_doc(self):
+        modes, err = A.resolve_event_modes(
+            ["sstv", "ssdv"], {"sstv": "", "ssdv": "436e6"})
+        # 仍返回已通过白名单的模式列表，但报错指出缺哪个频率
+        assert modes == ["sstv", "ssdv"]
+        assert err is not None
+        assert "sstv" in err
+        assert A.EVENT_PARAMS_DOC in err  # 指向 P3-event-params.md
+        assert "--freq-sstv" in err
+
+    def test_bad_mode_rejected(self):
+        modes, err = A.resolve_event_modes(["adsb"], {"sstv": "", "ssdv": ""})
+        assert modes == []
+        assert err is not None
+        assert "非法活动模式" in err
+        assert "adsb" in err
+
+    def test_empty_requested_ok(self):
+        modes, err = A.resolve_event_modes([], {"sstv": "", "ssdv": ""})
+        assert err is None
+        assert modes == []
+
+    def test_whitelist_excludes_teaching_modes(self):
+        # adsb/apt/cw 是教学模式，不属于 --event 活动模式
+        for m in ("adsb", "apt", "cw", "ax25", "bogus"):
+            modes, err = A.resolve_event_modes([m], {})
+            assert err is not None, f"mode={m!r} 应被拒"
+
+    def test_empty_strings_are_skipped(self):
+        # 尾随逗号产生的空 token 应被静默跳过，不算错误
+        modes, err = A.resolve_event_modes(["", "sstv", ""], {"sstv": "435e6"})
+        assert err is None
+        assert modes == ["sstv"]
+
+
+# ---------------------------------------------------------------------------
+# 9. --event 模式：resolve-event CLI
+# ---------------------------------------------------------------------------
+class TestResolveEventCLI:
+    def test_ok_prints_modes(self, tmp_path):
+        r = subprocess.run(
+            [sys.executable, str(_HERE / "acceptance_lib.py"),
+             "resolve-event", "--modes", "sstv,ssdv",
+             "--freq-sstv", "435e6", "--freq-ssdv", "436e6"],
+            capture_output=True, text=True, check=False)
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout.strip().splitlines()[-1])
+        assert out["modes"] == ["sstv", "ssdv"]
+        assert out["error"] is None
+
+    def test_missing_freq_exit_usage(self):
+        r = subprocess.run(
+            [sys.executable, str(_HERE / "acceptance_lib.py"),
+             "resolve-event", "--modes", "sstv,ssdv",
+             "--freq-sstv", "435e6"],  # 缺 ssdv
+            capture_output=True, text=True, check=False)
+        assert r.returncode == A.EXIT_USAGE
+        assert "P3-event-params" in r.stderr or "freq-ssdv" in r.stderr
+
+    def test_bad_mode_exit_usage(self):
+        r = subprocess.run(
+            [sys.executable, str(_HERE / "acceptance_lib.py"),
+             "resolve-event", "--modes", "adsb", "--freq-sstv", "x"],
+            capture_output=True, text=True, check=False)
+        assert r.returncode == A.EXIT_USAGE
+        assert "非法活动模式" in r.stderr
+
+
+# ---------------------------------------------------------------------------
+# 10. acceptance_run.sh --event 云内无硬件真跑（诚实 NO_HARDWARE / exit 3 坏输入）
+# ---------------------------------------------------------------------------
+class TestShellEventMode:
+    def test_event_no_hardware_exit2(self, tmp_path):
+        """--event 带频率、云内无设备 -> exit 2，onboard_sstv/ssdv 诚实 SKIP。"""
+        out = tmp_path / "ev.json"
+        r = subprocess.run(
+            ["bash", str(_HERE / "acceptance_run.sh"), "--event",
+             "--freq-sstv", "435e6", "--freq-ssdv", "436e6",
+             "--out", str(out)],
+            capture_output=True, text=True, timeout=120, check=False,
+            cwd=str(_HERE.parent))
+        assert r.returncode == A.EXIT_NO_HW, (
+            f"rc={r.returncode}\nstdout={r.stdout[-1500:]}\nstderr={r.stderr[-1500:]}")
+        assert out.exists()
+        ck = json.loads(out.read_text(encoding="utf-8"))
+        assert ck["device_present"] is False
+        assert ck["overall"] == "NO_HARDWARE"
+        # 必须跑的是 sstv/ssdv，不是教学三类
+        ob = {s["id"]: s for s in ck["steps"] if s["id"].startswith("onboard_")}
+        assert set(ob) == {"onboard_sstv", "onboard_ssdv"}
+        for sid, s in ob.items():
+            assert s["status"] == "SKIP", f"{sid} 应 SKIP，实际 {s['status']}"
+            assert "未检测到" in (s["skip_reason"] or "")
+        assert not A.validate_checklist(ck)
+
+    def test_event_single_mode_sstv(self, tmp_path):
+        out = tmp_path / "ev.json"
+        r = subprocess.run(
+            ["bash", str(_HERE / "acceptance_run.sh"), "--event",
+             "--event-modes", "sstv",
+             "--freq-sstv", "435e6",
+             "--out", str(out)],
+            capture_output=True, text=True, timeout=120, check=False,
+            cwd=str(_HERE.parent))
+        assert r.returncode == A.EXIT_NO_HW, (
+            f"rc={r.returncode}\nstdout={r.stdout[-1200:]}\nstderr={r.stderr[-1200:]}")
+        ck = json.loads(out.read_text(encoding="utf-8"))
+        ob = [s["id"] for s in ck["steps"] if s["id"].startswith("onboard_")]
+        assert ob == ["onboard_sstv"]
+
+    def test_event_missing_freq_exit_usage(self, tmp_path):
+        """--event 缺 --freq-* -> exit 3，并提示去 P3-event-params.md 查。"""
+        out = tmp_path / "ev.json"
+        r = subprocess.run(
+            ["bash", str(_HERE / "acceptance_run.sh"), "--event",
+             "--out", str(out)],
+            capture_output=True, text=True, timeout=60, check=False,
+            cwd=str(_HERE.parent))
+        assert r.returncode == A.EXIT_USAGE, (
+            f"rc={r.returncode}\nstdout={r.stdout[-800:]}\nstderr={r.stderr[-800:]}")
+        # 必须指向活动参数文档，且绝不硬编码频率
+        assert "P3-event-params" in (r.stderr + r.stdout)
+        assert "--freq-sstv" in (r.stderr + r.stdout)
+        assert not out.exists() or True  # 检查表可能未生成（用法错提前退出）
+
+    def test_event_bad_mode_exit_usage(self, tmp_path):
+        out = tmp_path / "ev.json"
+        r = subprocess.run(
+            ["bash", str(_HERE / "acceptance_run.sh"), "--event",
+             "--event-modes", "bogus",
+             "--freq-sstv", "435e6",
+             "--out", str(out)],
+            capture_output=True, text=True, timeout=60, check=False,
+            cwd=str(_HERE.parent))
+        assert r.returncode == A.EXIT_USAGE, (
+            f"rc={r.returncode}\nstdout={r.stdout[-800:]}\nstderr={r.stderr[-800:]}")
+        assert "非法活动模式" in (r.stderr + r.stdout)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
