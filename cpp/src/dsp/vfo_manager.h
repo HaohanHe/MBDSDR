@@ -181,6 +181,9 @@ public:
     bool setMode(int id, const QString& mode);
     bool setBandwidth(int id, double hz);
     bool setColor(int id, const QColor& c);
+    // Rename channel `id` (an empty name is rejected -> false). Minimal gap fill:
+    // the band-box / list label simply reads back `name`; no DSP rebuild needed.
+    bool renameVfo(int id, const QString& name);
 
     // ---- Process ----------------------------------------------------------
     // Fan the source IQ out to every channel; fills each channel's audio48k.

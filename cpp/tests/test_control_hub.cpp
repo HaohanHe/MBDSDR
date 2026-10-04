@@ -22,6 +22,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSettings>
 #include <cmath>
 
 #include "dsp/spectrum_engine.h"
@@ -61,6 +62,15 @@ private slots:
     void exportIqSegment_noDataHonestError();
     void exportIqSegment_gatedWhenWriteGateClosed();
     void exportIqSegment_badTuneArgHonestError();
+    // ---- Phase26: 21 newly tool-ized capabilities ------------------------
+    void fftParamsLandAndSpectrumStatusReadsBack();
+    void squelchSetLandAndStatusReadsBack();
+    void vfoListAddSwitchRename();
+    void bookmarksPersistToQSettings();
+    void recordingsListEmptyThenRealDeleteExport();
+    void scanLinkStartStopStatus();
+    void networkAudioStatusHonest();
+    void phase26WritesAreGatedAndBadArgsHonest();
 };
 
 void TestControlHub::initTestCase() {
@@ -457,6 +467,272 @@ void TestControlHub::exportIqSegment_badTuneArgHonestError() {
                                          {{"tune_hz", "not-a-number"}}));
     QCOMPARE(r.value("ok").toBool(), false);
     QVERIFY(r.value("error").toString().contains(QString::fromUtf8("tune_hz")));
+}
+
+// ---- Phase26 -------------------------------------------------------------
+// set_fft_params really changes fft_size/window/average; get_spectrum_status
+// reads the REAL engine values back.
+void TestControlHub::fftParamsLandAndSpectrumStatusReadsBack() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject r = parseObj(hub.execute("set_fft_params",
+        {{"fft_size", 4096}, {"window", 2}, {"average", 1}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(r.value("fft_size").toInt(), 4096);
+
+    QJsonObject s = parseObj(hub.execute("get_spectrum_status", {}));
+    QVERIFY(s.value("ok").toBool());
+    QCOMPARE(s.value("fft_size").toInt(), 4096);   // real engine fftSize_
+    QCOMPARE(s.value("window").toInt(), 2);
+    QCOMPARE(s.value("average").toInt(), 1);
+
+    // Bad args: no parameter at all is an honest error.
+    r = parseObj(hub.execute("set_fft_params", {}));
+    QCOMPARE(r.value("ok").toBool(), false);
+}
+
+// set_squelch really moves the threshold; get_squelch_status reads it back.
+void TestControlHub::squelchSetLandAndStatusReadsBack() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject r = parseObj(hub.execute("set_squelch",
+        {{"enabled", true}, {"threshold_db", -70.0}, {"auto", false}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(r.value("threshold_db").toDouble(), -70.0);
+
+    QJsonObject s = parseObj(hub.execute("get_squelch_status", {}));
+    QVERIFY(s.value("ok").toBool());
+    QCOMPARE(s.value("enabled").toBool(), true);
+    QCOMPARE(s.value("threshold_db").toDouble(), -70.0);  // real cached threshold
+    QCOMPARE(s.value("auto").toBool(), false);
+
+    // auto=true latches; manual threshold disarms it.
+    r = parseObj(hub.execute("set_squelch", {{"auto", true}}));
+    QVERIFY(r.value("ok").toBool());
+    s = parseObj(hub.execute("get_squelch_status", {}));
+    QCOMPARE(s.value("auto").toBool(), true);
+    r = parseObj(hub.execute("set_squelch", {{"threshold_db", -60.0}}));
+    QVERIFY(r.value("ok").toBool());
+    s = parseObj(hub.execute("get_squelch_status", {}));
+    QCOMPARE(s.value("auto").toBool(), false);   // manual threshold disarmed auto
+}
+
+// add_vfo / switch_vfo really move the selected channel; rename_vfo renames it.
+void TestControlHub::vfoListAddSwitchRename() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject before = parseObj(hub.execute("list_vfos", {}));
+    QVERIFY(before.value("ok").toBool());
+    const int firstSel = before.value("selected_vfo_id").toInt();
+
+    QJsonObject r = parseObj(hub.execute("add_vfo", {}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    const int newId = r.value("selected_vfo_id").toInt();
+    QVERIFY(newId != firstSel);
+
+    // Switch back to the original channel: the active point really moves.
+    r = parseObj(hub.execute("switch_vfo", {{"index", firstSel}}));
+    QVERIFY(r.value("ok").toBool());
+    QCOMPARE(r.value("selected_vfo_id").toInt(), firstSel);
+    QCOMPARE(parseObj(hub.execute("get_vfos", {})).value("selected_vfo_id").toInt(),
+             firstSel);
+
+    // Rename the new VFO; list_vfos must show the real name.
+    r = parseObj(hub.execute("rename_vfo", {{"index", newId}, {"name", QStringLiteral("我的VFO")}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    bool found = false;
+    for (const auto& v : parseObj(hub.execute("list_vfos", {})).value("vfos").toArray()) {
+        QJsonObject vv = v.toObject();
+        if (vv.value("id").toInt() == newId) {
+            found = true;
+            QCOMPARE(vv.value("name").toString(), QStringLiteral("我的VFO"));
+        }
+    }
+    QVERIFY(found);
+}
+
+// add_bookmark really persists to QSettings "ui/bookmarks"; delete_bookmark removes.
+void TestControlHub::bookmarksPersistToQSettings() {
+    control::ControlHub hub;   // engine not needed for bookmark bookkeeping, but
+    SpectrumEngine eng;        // execute() requires an attached engine.
+    hub.setEngine(&eng);
+
+    QSettings rs(QString::fromUtf8("MBDSDR"), QString::fromUtf8("MBDSDR"));
+    const int countBefore =
+        parseObj(hub.execute("list_bookmarks", {})).value("count").toInt();
+
+    QJsonObject r = parseObj(hub.execute("add_bookmark",
+        {{"freq_hz", 144.5e6}, {"name", QStringLiteral("测试台")}, {"mode", "NFM"}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    const int idx = r.value("index").toInt();
+
+    // QSettings really landed on disk.
+    QJsonArray stored = QJsonDocument::fromJson(
+        rs.value(QStringLiteral("ui/bookmarks")).toByteArray()).array();
+    bool found = false;
+    for (const auto& b : stored) {
+        if (qAbs(b.toObject().value("freq").toDouble() - 144.5e6) < 1.0) found = true;
+    }
+    QVERIFY2(found, "add_bookmark must write QSettings ui/bookmarks");
+
+    QCOMPARE(parseObj(hub.execute("list_bookmarks", {})).value("count").toInt(),
+             countBefore + 1);
+
+    // tune_to_bookmark really retunes the engine to the stored frequency.
+    r = parseObj(hub.execute("tune_to_bookmark", {{"index", idx}}));
+    QVERIFY(r.value("ok").toBool());
+    QCOMPARE(r.value("freq_hz").toDouble(), 144.5e6);
+    QCOMPARE(parseObj(hub.execute("get_frequency", {})).value("frequency_hz").toDouble(),
+             144.5e6);
+
+    // delete_bookmark removes it.
+    r = parseObj(hub.execute("delete_bookmark", {{"index", idx}}));
+    QVERIFY(r.value("ok").toBool());
+    QCOMPARE(parseObj(hub.execute("list_bookmarks", {})).value("count").toInt(),
+             countBefore);
+}
+
+// list_recordings: honest empty state on a fresh dir, then a real file appears;
+// delete_recording only removes inside recDir; export_recording copies out.
+void TestControlHub::recordingsListEmptyThenRealDeleteExport() {
+    const QString recDir = QDir::tempPath() + "/mbdsdr_chub_recs";
+    QDir(recDir).removeRecursively();
+    QDir().mkpath(recDir);
+    const QString outPath = QDir::tempPath() + "/mbdsdr_chub_exported.wav";
+
+    SpectrumEngine eng;
+    eng.setRecordingDir(recDir);
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // Honest empty state.
+    QJsonObject r = parseObj(hub.execute("list_recordings", {}));
+    QVERIFY(r.value("ok").toBool());
+    QCOMPARE(r.value("count").toInt(), 0);
+
+    // Drop a real file into the rec dir; list must show it.
+    QFile f(recDir + "/tone.wav");
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("fake");
+    f.close();
+    r = parseObj(hub.execute("list_recordings", {}));
+    QCOMPARE(r.value("count").toInt(), 1);
+    QCOMPARE(r.value("recordings").toArray().first().toObject().value("name").toString(),
+             QStringLiteral("tone.wav"));
+
+    // export_recording copies it out.
+    r = parseObj(hub.execute("export_recording",
+        {{"name", QStringLiteral("tone.wav")}, {"out_path", outPath}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QVERIFY(QFileInfo::exists(outPath));
+
+    // Path-contained guard: a ".." escape is refused, nothing deleted.
+    r = parseObj(hub.execute("delete_recording", {{"name", QStringLiteral("../tone.wav")}}));
+    QCOMPARE(r.value("ok").toBool(), false);
+    QVERIFY(QFileInfo::exists(recDir + "/tone.wav"));
+
+    // delete_recording removes the contained file.
+    r = parseObj(hub.execute("delete_recording", {{"name", QStringLiteral("tone.wav")}}));
+    QVERIFY(r.value("ok").toBool());
+    QVERIFY(!QFileInfo::exists(recDir + "/tone.wav"));
+
+    QFile::remove(outPath);
+    QDir(recDir).removeRecursively();
+}
+
+// start_scan_link arms the link (state -> scanning); stop -> idle.
+void TestControlHub::scanLinkStartStopStatus() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject r = parseObj(hub.execute("start_scan_link", {{"target_freq_hz", 145.0e6}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(r.value("status").toString(), QStringLiteral("scanning"));
+
+    QJsonObject s = parseObj(hub.execute("get_scan_link_status", {}));
+    QVERIFY(s.value("ok").toBool());
+    QVERIFY(s.value("status").toString() == QStringLiteral("scanning") ||
+            s.value("status").toString() == QStringLiteral("dwell"));
+
+    r = parseObj(hub.execute("stop_scan_link", {}));
+    QVERIFY(r.value("ok").toBool());
+    s = parseObj(hub.execute("get_scan_link_status", {}));
+    QCOMPARE(s.value("status").toString(), QStringLiteral("idle"));
+
+    // Bad arg: missing target.
+    r = parseObj(hub.execute("start_scan_link", {}));
+    QCOMPARE(r.value("ok").toBool(), false);
+}
+
+// Network-audio status: honest disabled empty state; enabling (UDP loopback, if
+// the sandbox permits a socket) reads the port back; disabling returns to empty.
+void TestControlHub::networkAudioStatusHonest() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject s = parseObj(hub.execute("get_network_audio_status", {}));
+    QVERIFY(s.value("ok").toBool());
+    QCOMPARE(s.value("enabled").toBool(), false);
+
+    QJsonObject r = parseObj(hub.execute("set_network_audio_sink",
+        {{"enable", true}, {"port", 49154}, {"format", QStringLiteral("udp")}}));
+    if (r.value("ok").toBool()) {
+        QCOMPARE(r.value("port").toInt(), 49154);
+        s = parseObj(hub.execute("get_network_audio_status", {}));
+        QCOMPARE(s.value("enabled").toBool(), true);
+        QCOMPARE(s.value("port").toInt(), 49154);
+    } // else: sandbox blocked the socket -> honest error, not a fake stream.
+
+    // Disable always returns to the empty state.
+    r = parseObj(hub.execute("set_network_audio_sink", {{"enable", false}}));
+    QVERIFY(r.value("ok").toBool());
+    s = parseObj(hub.execute("get_network_audio_status", {}));
+    QCOMPARE(s.value("enabled").toBool(), false);
+}
+
+// Phase26 write commands are gated; reads are not; bad args are honest errors.
+void TestControlHub::phase26WritesAreGatedAndBadArgsHonest() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // Gate closed: a sample of new writes are refused, engine untouched.
+    hub.setWriteEnabled(false);
+    for (const char* cmd : {
+            "set_fft_params", "add_bookmark", "start_scan_link",
+            "delete_recording", "set_squelch", "rename_vfo", "set_color_map"}) {
+        QJsonObject r = parseObj(hub.execute(QString::fromUtf8(cmd), {{}}));
+        QVERIFY2(!r.value("ok").toBool() && r.value("gated").toBool(),
+                 qPrintable(QString::fromUtf8(cmd)));
+    }
+    // Reads still pass with the gate closed.
+    QVERIFY(parseObj(hub.execute("get_spectrum_status", {})).value("ok").toBool());
+    QVERIFY(parseObj(hub.execute("list_bookmarks", {})).value("ok").toBool());
+
+    hub.setWriteEnabled(true);
+
+    // set_color_map really writes the QSettings persistence key.
+    QJsonObject r = parseObj(hub.execute("set_color_map",
+        {{"file_path", QStringLiteral("/tmp/wf_cmap_test.json")}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QSettings rs(QString::fromUtf8("MBDSDR"), QString::fromUtf8("MBDSDR"));
+    QCOMPARE(rs.value(QLatin1String(tokens::kSettingsKeyColormapFile)).toString(),
+             QStringLiteral("/tmp/wf_cmap_test.json"));
+    rs.remove(QLatin1String(tokens::kSettingsKeyColormapFile));
+
+    // Bad args are honest errors.
+    QCOMPARE(parseObj(hub.execute("add_bookmark", {})).value("ok").toBool(), false);
+    QCOMPARE(parseObj(hub.execute("rename_vfo", {{"index", 1}})).value("ok").toBool(), false);
+    QCOMPARE(parseObj(hub.execute("set_squelch", {})).value("ok").toBool(), false);
+    QCOMPARE(parseObj(hub.execute("set_color_map", {{}})).value("ok").toBool(), false);
 }
 
 QTEST_MAIN(TestControlHub)

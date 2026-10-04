@@ -27,28 +27,40 @@ using namespace mbdsdr::ai;
 namespace {
 // The C++ desktop tools, in their on-wire order. This is the FROZEN contract
 // (also pinned by test_agent / test_tool_schema / ai_real_link); it is the
-// expected value the introspected tables are checked against. Grew from 8 to 10
-// with the frequency-calibration pair: calibrate_frequency (read-only measure)
-// and apply_frequency_correction (write, gated). Grew 10 to 13 with the
-// Wave2 POCSAG/m17/VOR read-only decode-snapshot tools. Grew 13 to 14 with the
-// one-shot export_iq_segment IQ dump (write, gated).
+// expected value the introspected tables are checked against. Grew 8 -> 10 with
+// the calibration pair, 10 -> 13 with the Wave2 snapshots, 13 -> 14 with
+// export_iq_segment, and 14 -> 35 with the Phase26 capability-everything set.
 const QSet<QString> kAllCxxTools = {
     "tune_frequency", "set_mode", "start_recording", "stop_recording",
     "scan_band", "set_bandwidth", "get_status", "predict_passes",
     "calibrate_frequency", "apply_frequency_correction",
     "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
     "export_iq_segment",
+    // Phase26: 21 new tools (14 write / 7 read), appended in SPEC order.
+    "set_network_audio_sink", "get_network_audio_status",
+    "start_scan_link", "stop_scan_link", "get_scan_link_status",
+    "set_squelch", "get_squelch_status",
+    "list_bookmarks", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
+    "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
+    "list_recordings", "delete_recording", "export_recording",
+    "set_fft_params", "set_color_map", "get_spectrum_status",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
 // the C++ write gate; it must equal ToolSchemaSpec::write flags set in
-// tool_schema.cpp (the registry is now the single source). Grew from 6 to 7
-// with apply_frequency_correction (it persists QSettings + drives source->setPpm).
-// Grew 7 to 8 with export_iq_segment (it writes an IQ file to disk).
+// tool_schema.cpp (the registry is now the single source). Grew 6 -> 7 with
+// apply_frequency_correction, 7 -> 8 with export_iq_segment, and 8 -> 22 with
+// the Phase26 write tools (14 new gated writes).
 const QSet<QString> kExpectedWriteTools = {
     "tune_frequency", "set_mode", "set_bandwidth",
     "start_recording", "stop_recording", "scan_band",
     "apply_frequency_correction", "export_iq_segment",
+    // Phase26 new gated writes (14).
+    "set_network_audio_sink", "start_scan_link", "stop_scan_link",
+    "set_squelch", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
+    "add_vfo", "switch_vfo", "rename_vfo",
+    "delete_recording", "export_recording",
+    "set_fft_params", "set_color_map",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -64,10 +76,15 @@ const QSet<QString> kExpectedWriteTools = {
 // listed here so the read-only set equality stays honest. The Wave2
 // get_pocsag_messages / get_m17_calls / get_vor_radial snapshot tools are the
 // same kind of DESKTOP-ONLY read (SpectrumEngine read-only slots); Flutter does
-// not ship them, so they are ungated by construction and listed here too.
+// not ship them, so they are ungated by construction and listed here too. The
+// Phase26 read tools (get_network_audio_status / get_scan_link_status /
+// get_squelch_status / list_bookmarks / list_vfos / list_recordings /
+// get_spectrum_status) are also DESKTOP-ONLY reads; ungated by construction.
 const QSet<QString> kFlutterUngatedReadTools = {
     "get_status", "predict_passes", "calibrate_frequency",
     "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
+    "get_network_audio_status", "get_scan_link_status", "get_squelch_status",
+    "list_bookmarks", "list_vfos", "list_recordings", "get_spectrum_status",
 };
 } // namespace
 
@@ -93,7 +110,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 14, qPrintable(QString("expected 14 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 35, qPrintable(QString("expected 35 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -128,6 +145,13 @@ void TestToolRegistry::writeReadSplit_registryMatchesContract() {
         QVERIFY2(isWriteTool(n), qPrintable(n + " must be a write tool"));
     QVERIFY(!isWriteTool("get_status"));
     QVERIFY(!isWriteTool("predict_passes"));
+    // Phase26: spot-check the new write/read split.
+    QVERIFY(isWriteTool("set_squelch"));
+    QVERIFY(isWriteTool("add_vfo"));
+    QVERIFY(isWriteTool("set_fft_params"));
+    QVERIFY(!isWriteTool("list_vfos"));
+    QVERIFY(!isWriteTool("get_spectrum_status"));
+    QVERIFY(!isWriteTool("list_recordings"));
 }
 
 // Cross-platform parity: the read-only complement on the C++ desktop side must
@@ -175,15 +199,15 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
     QVERIFY(!isWriteTool("definitely_not_a_real_tool"));
 }
 
-// Not-a-regression smoke: the on-wire contract still holds (14 defs, order kept)
+// Not-a-regression smoke: the on-wire contract still holds (35 defs, order kept)
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 14);
+    QCOMPARE(defs.size(), 35);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("export_iq_segment"));
+    QCOMPARE(defs.last().name, QString("get_spectrum_status"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

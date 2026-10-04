@@ -61,6 +61,21 @@ public:
     // it is NOT the IQ total-power / per-bin canvas noise floor. Valid once a
     // few audio blocks have flowed; before that it reads back as ~-100 dBFS.
     float audioNoiseFloorDbfs() const { return static_cast<float>(audioNfDbfs_); }
+
+    // ---- Squelch read-back (for ControlHub get_squelch_status) -------------
+    // thresholdDb() is the last threshold commanded (cached here; the Squelch
+    // object itself exposes no getter). enabled() mirrors the gate mode; open()
+    // is the gate's last decision edge; auto() is the engine-level auto-threshold
+    // latch (when on, the run loop re-derives threshold = tracked audio noise
+    // floor + margin each block). All are honest read-backs, never fabricated.
+    float squelchThresholdDb() const { return squelchThreshold_; }
+    bool  squelchEnabled() const;
+    bool  squelchOpen() const;
+    bool  squelchAuto() const { return squelchAuto_.load(); }
+    void  setSquelchAuto(bool on) { squelchAuto_.store(on); }
+    // True iff a network-audio tap is currently installed (setNetworkAudioSink).
+    // The detailed stream stats live on the sink the caller installed.
+    bool  networkTapActive() const { return networkTap_ != nullptr; }
     // Owned audio sink (UI-thread affinity). Exposed so the settings dialog can
     // hot-restart playback on a user-selected output device.
     AudioOutput* audioOutput() const { return audioOut_; }
@@ -191,6 +206,9 @@ public slots:
     void vfoSetBandwidth(int id, double hz);
     void vfoSetMode(int id, const QString& mode);
     void vfoSetColor(int id, const QColor& c);
+    // Rename channel `id` (minimal forwarder to VfoManager::renameVfo; false on
+    // unknown id / empty name). Takes sourceMutex_ like the other VFO mutators.
+    bool vfoRename(int id, const QString& name);
     // Snapshot for the UI (VFO list + band boxes). Blocks on sourceMutex_.
     QVector<VfoMarker> vfoMarkers() const;
     int selectedVfoId() const;
@@ -508,6 +526,14 @@ private:
     QString recTemplate_ = "{time}_{freq}_{mode}";
     bool recStereo_ = false;
     bool recIgnoreSquelch_ = false;
+
+    // Last commanded squelch threshold (dBFS), mirrored from setSquelchThreshold
+    // so ControlHub can read it back (the Squelch object exposes no getter).
+    // Default -50 dBFS matches Squelch::thresholdDb_ / tokens kSquelchDefaultDb.
+    float squelchThreshold_ = -50.0f;
+    // When set, the run loop re-derives the threshold as tracked audio noise
+    // floor + kSquelchAutoMarginDb each block.
+    std::atomic<bool> squelchAuto_{false};
 
     // Expand recTemplate_ against the current source/demod state.
     QString expandRecTemplate() const;

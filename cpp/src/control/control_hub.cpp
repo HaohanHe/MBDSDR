@@ -4,12 +4,19 @@
 #include "dsp/spectrum_engine.h"
 #include "dsp/device_capabilities.h"
 #include "dsp/vfo_manager.h"
+#include "dsp/network_audio_sink.h"
+#include "dsp/scan_link.h"
+#include "ui/bookmark_manager.h"
 #include "core/tokens.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QStringList>
+#include <QSettings>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QThread>
 #include <algorithm>
 #include <cmath>
@@ -38,6 +45,29 @@ QJsonArray bytesToJson(const std::vector<uint8_t>& bytes) {
     QJsonArray a;
     for (uint8_t b : bytes) a.append(static_cast<int>(b));
     return a;
+}
+
+// Half-window (Hz) either side of the anchor frequency for start_scan_link.
+// Operational default for the headless band walk; the step reuses the named
+// kFreqStepHz token.
+constexpr double kScanHalfWindowHz = 200e3;
+
+// Resolve a bare recording `name` to an absolute path INSIDE `recDir`. Rejects
+// absolute paths and any ".." escape honestly (never deletes outside the rec dir).
+// Returns an empty string + fills `err` on refusal.
+QString safeUnderRecDir(const QString& recDir, const QString& name, QString& err) {
+    if (name.isEmpty() || QFileInfo(name).isAbsolute() ||
+        name.contains(QStringLiteral(".."))) {
+        err = QString::fromUtf8("拒绝：name 必须是 recDir 内的纯文件名（不允许绝对路径或 ..）");
+        return {};
+    }
+    const QString base = QDir::cleanPath(QDir(recDir).absolutePath());
+    const QString full = QDir::cleanPath(QDir(base).absoluteFilePath(name));
+    if (full != base && !full.startsWith(base + QLatin1Char('/'))) {
+        err = QString::fromUtf8("拒绝：解析路径越出 recDir");
+        return {};
+    }
+    return full;
 }
 
 } // namespace
@@ -75,6 +105,21 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"vfo_set_bandwidth",    true,  &ControlHub::cmdVfoSetBandwidth},
         {"vfo_set_mode",         true,  &ControlHub::cmdVfoSetMode},
         {"clear_digital_outputs",true,  &ControlHub::cmdClearDigitalOutputs},
+        // ---- Phase26 new write commands ---------------------------------
+        {"set_network_audio_sink", true, &ControlHub::cmdSetNetworkAudioSink},
+        {"start_scan_link",       true,  &ControlHub::cmdStartScanLink},
+        {"stop_scan_link",        true,  &ControlHub::cmdStopScanLink},
+        {"set_squelch",           true,  &ControlHub::cmdSetSquelch},
+        {"add_bookmark",          true,  &ControlHub::cmdAddBookmark},
+        {"tune_to_bookmark",      true,  &ControlHub::cmdTuneToBookmark},
+        {"delete_bookmark",       true,  &ControlHub::cmdDeleteBookmark},
+        {"add_vfo",               true,  &ControlHub::cmdAddVfo},
+        {"switch_vfo",            true,  &ControlHub::cmdSwitchVfo},
+        {"rename_vfo",            true,  &ControlHub::cmdRenameVfo},
+        {"delete_recording",      true,  &ControlHub::cmdDeleteRecording},
+        {"export_recording",      true,  &ControlHub::cmdExportRecording},
+        {"set_fft_params",        true,  &ControlHub::cmdSetFftParams},
+        {"set_color_map",         true,  &ControlHub::cmdSetColorMap},
         // ---- Read commands (always allowed) ------------------------------
         {"get_frequency",        false, &ControlHub::cmdGetFrequency},
         {"get_mode",             false, &ControlHub::cmdGetMode},
@@ -88,13 +133,33 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_pocsag_messages",   false, &ControlHub::cmdGetPocsagMessages},
         {"get_m17_calls",         false, &ControlHub::cmdGetM17Calls},
         {"get_vor_radial",        false, &ControlHub::cmdGetVorRadial},
+        // ---- Phase26 new read commands ----------------------------------
+        {"get_network_audio_status", false, &ControlHub::cmdGetNetworkAudioStatus},
+        {"get_scan_link_status",  false, &ControlHub::cmdGetScanLinkStatus},
+        {"get_squelch_status",    false, &ControlHub::cmdGetSquelchStatus},
+        {"list_bookmarks",        false, &ControlHub::cmdListBookmarks},
+        {"list_vfos",             false, &ControlHub::cmdListVfos},
+        {"list_recordings",       false, &ControlHub::cmdListRecordings},
+        {"get_spectrum_status",   false, &ControlHub::cmdGetSpectrumStatus},
     };
     return kRows;
 }
 
 ControlHub::ControlHub(QObject* parent)
     : QObject(parent),
-      writeEnabled_(tokens::kControlHubWriteEnabledDefault) {
+      writeEnabled_(tokens::kControlHubWriteEnabledDefault),
+      bookmarks_(std::make_unique<ui::BookmarkManager>()),
+      scanLink_(std::make_unique<dsp::ScanActivityLink>()) {
+    bookmarks_->load();   // QSettings "ui/bookmarks" (empty by design)
+    // Bind the scan-link retune seam: when the scanner asks to move, retune the
+    // engine centre. The other edges (activity found / dwell ended) are left as
+    // no-ops here -- recording/decode arming is a production-policy concern this
+    // headless block does not invent.
+    dsp::ScanLinkActions acts;
+    acts.onRetune = [this](double hz) {
+        if (engine_) engine_->onSetCenterFreq(hz);
+    };
+    scanLink_->setActions(std::move(acts));
 }
 
 ControlHub::~ControlHub() = default;
@@ -858,6 +923,350 @@ QJsonObject ControlHub::cmdGetVorRadial(const QJsonObject& a) {
     r["quality"] = v.quality;
     r["morse_id"] = v.morseId;
     return r;
+}
+
+// ===========================================================================
+// Phase26: 21 newly tool-ized capabilities
+// ===========================================================================
+QJsonObject ControlHub::cmdSetNetworkAudioSink(const QJsonObject& a) {
+    bool enable; QString err;
+    if (!needBool(a, "enable", enable, err)) return errResult(err);
+    if (!enable) {
+        engine_->setNetworkAudioSink(nullptr);   // detaches + destroys the tap
+        netTapRaw_ = nullptr;
+        QJsonObject o = okBase();
+        o["command"] = "set_network_audio_sink";
+        o["enabled"] = false;
+        return o;
+    }
+    int port;
+    if (!needInt(a, "port", port, err)) return errResult(err);
+    if (port <= 0 || port > 65535)
+        return errResult(QString::fromUtf8("port 越界 (1..65535): %1").arg(port));
+    const QString fmt = a.value(QStringLiteral("format"))
+                            .toString(QStringLiteral("udp")).toLower();
+    dsp::NetAudioProtocol proto = dsp::NetAudioProtocol::UDP;
+    if (fmt == QLatin1String("tcp"))      proto = dsp::NetAudioProtocol::TCP;
+    else if (fmt != QLatin1String("udp"))
+        return errResult(QString::fromUtf8("未知 format（udp/tcp）: %1").arg(fmt));
+    const bool stereo = a.value(QStringLiteral("stereo")).toBool(false);
+    const QString host = a.value(QStringLiteral("host"))
+                             .toString(QStringLiteral("127.0.0.1"));
+
+    auto s = std::make_unique<dsp::NetworkAudioSink>();
+    if (!s->start(host.toStdString(), static_cast<uint16_t>(port), proto, stereo)) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromStdString(s->lastError());
+        return o;
+    }
+    netTapRaw_ = s.get();
+    engine_->setNetworkAudioSink(std::unique_ptr<dsp::IAudioSink>(std::move(s)));
+    QJsonObject o = okBase();
+    o["command"] = "set_network_audio_sink";
+    o["enabled"] = true;
+    o["port"] = port;
+    o["format"] = fmt;
+    o["stereo"] = stereo;
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetNetworkAudioStatus(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "get_network_audio_status";
+    const bool active = (netTapRaw_ != nullptr);
+    o["enabled"] = active;
+    if (!active) {
+        o["note"] = QString::fromUtf8("网络音频流未开启");
+        return o;
+    }
+    o["port"] = static_cast<int>(netTapRaw_->actualPort());
+    o["protocol"] = netTapRaw_->protocol() == dsp::NetAudioProtocol::TCP
+                        ? QStringLiteral("tcp") : QStringLiteral("udp");
+    o["client_connected"] = netTapRaw_->clientConnected();
+    o["bytes_sent"] = static_cast<qint64>(netTapRaw_->bytesSent());
+    o["frames_dropped"] = static_cast<qint64>(netTapRaw_->framesDropped());
+    o["last_error"] = QString::fromStdString(netTapRaw_->lastError());
+    return o;
+}
+
+QJsonObject ControlHub::cmdStartScanLink(const QJsonObject& a) {
+    double center; QString err;
+    if (!needDbl(a, "target_freq_hz", center, err)) return errResult(err);
+    dsp::ScanConfig cfg;
+    cfg.source = dsp::ScanSource::Range;
+    cfg.startHz = center - kScanHalfWindowHz;
+    cfg.stopHz  = center + kScanHalfWindowHz;
+    cfg.stepHz  = tokens::kFreqStepHz;
+    cfg.thresholdDb = static_cast<float>(tokens::kSquelchDefaultDb);
+    scanLink_->setConfig(cfg);
+    scanLink_->start();
+    QJsonObject o = okBase();
+    o["command"] = "start_scan_link";
+    o["target_freq_hz"] = center;
+    o["status"] = QString::fromUtf8("scanning");
+    return o;
+}
+
+QJsonObject ControlHub::cmdStopScanLink(const QJsonObject&) {
+    scanLink_->stop();
+    QJsonObject o = okBase();
+    o["command"] = "stop_scan_link";
+    o["status"] = QString::fromUtf8("idle");
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetScanLinkStatus(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "get_scan_link_status";
+    const dsp::ScanLinkState st = scanLink_->state();
+    const char* s = "idle";
+    if (st == dsp::ScanLinkState::Scanning)      s = "scanning";
+    else if (st == dsp::ScanLinkState::Dwell)    s = "dwell";
+    o["status"] = QString::fromUtf8(s);
+    o["dwell_count"] = scanLink_->dwellCount();
+    o["parked_freq_hz"] = scanLink_->parkedFrequency();
+    o["retune_count"] = scanLink_->retuneLog().size();
+    return o;
+}
+
+QJsonObject ControlHub::cmdSetSquelch(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "set_squelch";
+    bool has = false;
+    const QJsonValue en = a.value(QStringLiteral("enabled"));
+    if (en.isBool()) { engine_->setSquelchEnabled(en.toBool()); o["enabled"] = en.toBool(); has = true; }
+    const QJsonValue th = a.value(QStringLiteral("threshold_db"));
+    if (th.isDouble()) {
+        const double eff = std::clamp(th.toDouble(),
+                                      double(tokens::kSquelchMinDb),
+                                      double(tokens::kSquelchMaxDb));
+        engine_->setSquelchThreshold(static_cast<float>(eff));
+        o["threshold_db"] = eff;
+        has = true;
+    }
+    const QJsonValue au = a.value(QStringLiteral("auto"));
+    if (au.isBool()) { engine_->setSquelchAuto(au.toBool()); o["auto"] = au.toBool(); has = true; }
+    if (!has)
+        return errResult(QString::fromUtf8("set_squelch 需要至少一个参数: enabled/threshold_db/auto"));
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetSquelchStatus(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "get_squelch_status";
+    o["enabled"] = engine_->squelchEnabled();
+    o["threshold_db"] = engine_->squelchThresholdDb();
+    o["auto"] = engine_->squelchAuto();
+    o["open"] = engine_->squelchOpen();
+    return o;
+}
+
+QJsonObject ControlHub::cmdListBookmarks(const QJsonObject&) {
+    QJsonArray arr;
+    for (const ui::Bookmark& b : bookmarks_->list()) {
+        QJsonObject v;
+        v["name"] = b.name;
+        v["freq_hz"] = b.frequencyHz;
+        v["mode"] = b.mode;
+        v["bandwidth_hz"] = b.bandwidthHz;
+        v["group"] = b.group;
+        arr.append(v);
+    }
+    QJsonObject o = okBase();
+    o["command"] = "list_bookmarks";
+    o["bookmarks"] = arr;
+    o["count"] = arr.size();
+    return o;
+}
+
+QJsonObject ControlHub::cmdAddBookmark(const QJsonObject& a) {
+    double f; QString err;
+    if (!needDbl(a, "freq_hz", f, err)) return errResult(err);
+    ui::Bookmark b;
+    b.frequencyHz = f;
+    b.name = a.value(QStringLiteral("name")).toString(
+        QString::number(f / 1e6, 'f', 3));
+    b.mode = a.value(QStringLiteral("mode")).toString();
+    b.bandwidthHz = a.value(QStringLiteral("bandwidth_hz")).toDouble(0.0);
+    const int idx = bookmarks_->add(b);   // auto-saves to QSettings
+    if (idx < 0)
+        return errResult(QString::fromUtf8("freq_hz 必须 >0"));
+    QJsonObject o = okBase();
+    o["command"] = "add_bookmark";
+    o["index"] = idx;
+    o["freq_hz"] = f;
+    return o;
+}
+
+QJsonObject ControlHub::cmdTuneToBookmark(const QJsonObject& a) {
+    int idx; QString err;
+    if (!needInt(a, "index", idx, err)) return errResult(err);
+    if (idx < 0 || idx >= bookmarks_->count())
+        return errResult(QString::fromUtf8("书签下标越界: %1").arg(idx));
+    const ui::Bookmark b = bookmarks_->list().at(idx);
+    engine_->onSetCenterFreq(b.frequencyHz);
+    if (!b.mode.isEmpty()) engine_->setDemodMode(b.mode);
+    QJsonObject o = okBase();
+    o["command"] = "tune_to_bookmark";
+    o["index"] = idx;
+    o["freq_hz"] = b.frequencyHz;
+    o["mode"] = b.mode;
+    return o;
+}
+
+QJsonObject ControlHub::cmdDeleteBookmark(const QJsonObject& a) {
+    int idx; QString err;
+    if (!needInt(a, "index", idx, err)) return errResult(err);
+    if (idx < 0 || idx >= bookmarks_->count())
+        return errResult(QString::fromUtf8("书签下标越界: %1").arg(idx));
+    bookmarks_->removeAt(idx);   // auto-saves
+    QJsonObject o = okBase();
+    o["command"] = "delete_bookmark";
+    o["index"] = idx;
+    return o;
+}
+
+QJsonObject ControlHub::cmdListVfos(const QJsonObject&) {
+    QJsonObject o = cmdGetVfos(QJsonObject());
+    o["command"] = "list_vfos";
+    return o;
+}
+
+QJsonObject ControlHub::cmdAddVfo(const QJsonObject&) {
+    engine_->vfoAdd();
+    QJsonObject o = okBase();
+    o["command"] = "add_vfo";
+    o["selected_vfo_id"] = engine_->selectedVfoId();
+    return o;
+}
+
+QJsonObject ControlHub::cmdSwitchVfo(const QJsonObject& a) {
+    QJsonValue v = a.value(QStringLiteral("index"));
+    if (v.isUndefined()) v = a.value(QStringLiteral("id"));
+    if (!v.isDouble())
+        return errResult(QString::fromUtf8("缺少整数参数: index"));
+    engine_->vfoSelect(v.toInt());
+    QJsonObject o = okBase();
+    o["command"] = "switch_vfo";
+    o["selected_vfo_id"] = engine_->selectedVfoId();
+    return o;
+}
+
+QJsonObject ControlHub::cmdRenameVfo(const QJsonObject& a) {
+    QJsonValue v = a.value(QStringLiteral("index"));
+    if (v.isUndefined()) v = a.value(QStringLiteral("id"));
+    if (!v.isDouble())
+        return errResult(QString::fromUtf8("缺少整数参数: index"));
+    const QString name = a.value(QStringLiteral("name")).toString();
+    if (name.trimmed().isEmpty())
+        return errResult(QString::fromUtf8("缺少非空参数: name"));
+    if (!engine_->vfoRename(v.toInt(), name))
+        return errResult(QString::fromUtf8("VFO 不存在或名为空: id=%1").arg(v.toInt()));
+    QJsonObject o = okBase();
+    o["command"] = "rename_vfo";
+    o["index"] = v.toInt();
+    o["name"] = name;
+    return o;
+}
+
+QJsonObject ControlHub::cmdListRecordings(const QJsonObject&) {
+    const QString dir = engine_->recordingDir();
+    QDir d(dir);
+    const QFileInfoList files =
+        d.entryInfoList(QDir::Files | QDir::NoSymLinks, QDir::Name);
+    QJsonArray arr;
+    for (const QFileInfo& fi : files) {
+        QJsonObject v;
+        v["name"] = fi.fileName();
+        v["bytes"] = static_cast<qint64>(fi.size());
+        arr.append(v);
+    }
+    QJsonObject o = okBase();
+    o["command"] = "list_recordings";
+    o["dir"] = dir;
+    o["recordings"] = arr;
+    o["count"] = arr.size();
+    return o;
+}
+
+QJsonObject ControlHub::cmdDeleteRecording(const QJsonObject& a) {
+    if (!a.value(QStringLiteral("name")).isString())
+        return errResult(QString::fromUtf8("缺少字符串参数: name"));
+    const QString name = a.value(QStringLiteral("name")).toString();
+    QString err;
+    const QString full = safeUnderRecDir(engine_->recordingDir(), name, err);
+    if (full.isEmpty()) return errResult(err);
+    if (!QFileInfo::exists(full))
+        return errResult(QString::fromUtf8("录制不存在: %1").arg(name));
+    if (!QFile::remove(full))
+        return errResult(QString::fromUtf8("删除失败: %1").arg(name));
+    QJsonObject o = okBase();
+    o["command"] = "delete_recording";
+    o["name"] = name;
+    return o;
+}
+
+QJsonObject ControlHub::cmdExportRecording(const QJsonObject& a) {
+    if (!a.value(QStringLiteral("name")).isString())
+        return errResult(QString::fromUtf8("缺少字符串参数: name"));
+    if (!a.value(QStringLiteral("out_path")).isString())
+        return errResult(QString::fromUtf8("缺少字符串参数: out_path"));
+    const QString name = a.value(QStringLiteral("name")).toString();
+    const QString out = a.value(QStringLiteral("out_path")).toString();
+    QString err;
+    const QString full = safeUnderRecDir(engine_->recordingDir(), name, err);
+    if (full.isEmpty()) return errResult(err);
+    if (!QFileInfo::exists(full))
+        return errResult(QString::fromUtf8("录制不存在: %1").arg(name));
+    QFileInfo outFi(out);
+    if (!outFi.absolutePath().isEmpty()) QDir().mkpath(outFi.absolutePath());
+    if (QFile::exists(out)) QFile::remove(out);
+    if (!QFile::copy(full, out))
+        return errResult(QString::fromUtf8("导出复制失败: %1").arg(out));
+    QJsonObject o = okBase();
+    o["command"] = "export_recording";
+    o["out_path"] = out;
+    return o;
+}
+
+QJsonObject ControlHub::cmdSetFftParams(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "set_fft_params";
+    bool has = false;
+    const QJsonValue sz = a.value(QStringLiteral("fft_size"));
+    if (sz.isDouble()) { engine_->setFftSize(sz.toInt()); o["fft_size"] = sz.toInt(); has = true; }
+    const QJsonValue w = a.value(QStringLiteral("window"));
+    if (w.isDouble()) { engine_->setWindowType(w.toInt()); o["window"] = w.toInt(); has = true; }
+    const QJsonValue av = a.value(QStringLiteral("average"));
+    if (av.isDouble()) { engine_->setAverageMode(av.toInt()); o["average"] = av.toInt(); has = true; }
+    if (!has)
+        return errResult(QString::fromUtf8("set_fft_params 需要至少一个: fft_size/window/average"));
+    return o;
+}
+
+QJsonObject ControlHub::cmdSetColorMap(const QJsonObject& a) {
+    if (!a.value(QStringLiteral("file_path")).isString())
+        return errResult(QString::fromUtf8("缺少字符串参数: file_path"));
+    const QString path = a.value(QStringLiteral("file_path")).toString();
+    if (path.isEmpty())
+        return errResult(QString::fromUtf8("file_path 不能为空"));
+    QSettings(QString::fromUtf8("MBDSDR"), QString::fromUtf8("MBDSDR"))
+        .setValue(QLatin1String(tokens::kSettingsKeyColormapFile), path);
+    QJsonObject o = okBase();
+    o["command"] = "set_color_map";
+    o["file_path"] = path;
+    o["note"] = QString::fromUtf8("已持久化到 QSettings view/wfColormapFile；重渲染由 UI 启动时重应用，headless 仅保存偏好");
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetSpectrumStatus(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "get_spectrum_status";
+    o["fft_size"] = engine_->fftSize();
+    o["window"] = engine_->windowType();
+    o["average"] = engine_->averageMode();
+    return o;
 }
 
 } // namespace control
