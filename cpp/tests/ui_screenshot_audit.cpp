@@ -17,6 +17,7 @@
 #include <QDialog>
 #include <QList>
 #include <cstdlib>
+#include <cmath>
 #include "core/tokens.h"
 #include "ui/main_window.h"
 #include "ui/settings_dialog.h"
@@ -77,6 +78,23 @@ int main(int argc, char** argv) {
             cv->placeCursorB(cv->viewCenterHz() + 220e3);
         });
         grabLater(&win, dir + "/ui_dual_cursor.png", 3400, app);
+        // Dual cursors with a synthetic signal frame so the dashed A/B lines and
+        // the Δf read-out box are actually visible (Phase 28 leftover).
+        QTimer::singleShot(1700, [cv]() {
+            mbdsdr::SpectrumFrame fr;
+            fr.centerFreqHz = cv->viewCenterHz();
+            fr.sampleRateHz = 1000000.0;
+            fr.fftSize = 1024;
+            fr.dbfs.assign(1024, -90.0f);
+            for (int i = 0; i < 1024; ++i) {
+                const double off = (i - 512) / 512.0 * 500e3;
+                if (std::abs(off) < 40e3) fr.dbfs[i] = -30.0f;
+            }
+            cv->setSpectrum(fr);
+            cv->placeCursorA(cv->viewCenterHz() - 150e3);
+            cv->placeCursorB(cv->viewCenterHz() + 220e3);
+        });
+        grabLater(&win, dir + "/ui_dual_cursor_sig.png", 3600, app);
     }
     if (QComboBox* d = win.findChild<QComboBox*>("decimCombo")) {
         QTimer::singleShot(1500, [d]() { d->setCurrentIndex(2); });  // x4
@@ -85,6 +103,11 @@ int main(int argc, char** argv) {
 
     // 2. Right tab: 录制库.
     if (right) {
+        // Phase 29: right-panel info-architecture groups (解码/观测/系统).
+        for (int i = 0; i < right->count(); ++i)
+            if (right->tabText(i).contains("CW")) right->setCurrentIndex(i);
+        grabLater(&win, dir + "/ui_ux_tabs.png", 1700, app);
+
         for (int i = 0; i < right->count(); ++i)
             if (right->tabText(i).contains("录制")) right->setCurrentIndex(i);
         grabLater(&win, dir + "/ui_audit_reclib.png", 1900, app);
