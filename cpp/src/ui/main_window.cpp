@@ -914,6 +914,14 @@ MainWindow::MainWindow(QWidget* parent)
     rightTabs_->setUsesScrollButtons(true);
     rightTabs_->setElideMode(Qt::ElideRight);
 
+    // Insert a non-switchable section-header tab (disabled, styled via QSS
+    // QTabBar::tab:disabled) to group the flat right-panel tabs by semantics.
+    // Pure UI organization: switching/persistence of real tabs is unchanged.
+    auto addTabGroupHeader = [this](const QString& title) {
+        rightTabs_->addTab(new QWidget, title);
+        rightTabs_->setTabEnabled(rightTabs_->count() - 1, false);
+    };
+
     auto* cwPage = new QWidget;
     auto* cwLay = new QVBoxLayout(cwPage);
     auto* cwTop = new QHBoxLayout;
@@ -933,6 +941,7 @@ MainWindow::MainWindow(QWidget* parent)
     cwText_ = new QPlainTextEdit(cwPage);
     cwText_->setReadOnly(true);
     cwLay->addWidget(cwText_);
+    addTabGroupHeader(QString::fromUtf8("解码"));
     rightTabs_->addTab(cwPage, "CW");
 
     auto* adsbPage = new QWidget;
@@ -1046,6 +1055,7 @@ MainWindow::MainWindow(QWidget* parent)
         connect(histBtn, &QPushButton::toggled,
                 constellationView_, &ui::ConstellationView::setHistogramVisible);
 
+        addTabGroupHeader(QString::fromUtf8("观测"));
         rightTabs_->addTab(cstPage, "星座");
     }
 
@@ -1602,6 +1612,7 @@ MainWindow::MainWindow(QWidget* parent)
         recLay->addWidget(aBox);
 
 
+        addTabGroupHeader(QString::fromUtf8("系统"));
         rightTabs_->addTab(recPage, "录制库");
 
         connect(recLibRefreshBtn_, &QPushButton::clicked,

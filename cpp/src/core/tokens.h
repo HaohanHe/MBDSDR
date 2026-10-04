@@ -704,6 +704,9 @@ QTabBar::tab {
 }
 QTabBar::tab:selected { color: %interact%; font-weight: 600; }
 QTabBar::tab:hover { color: %textPri%; }
+/* Non-switchable section header tab (right-panel info-architecture groups):
+   dim, centered, no hover feedback, acts as a group label. */
+QTabBar::tab:disabled { color: %textSec%; font-weight: 500; background: transparent; }
 QPushButton {
     background-color: transparent;
     color: %textPri%;
