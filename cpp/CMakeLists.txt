@@ -40,6 +40,30 @@ if(NOT RTLSDR_FOUND)
     endif()
 endif()
 
+# ---- Build-platform detection (informational only) ----
+# The project is built generically for any CPU: there are no architecture-
+# specific source paths, compile definitions, or link rules gated on arch.
+# This block only records what CMake configured for, and on ARM64 points the
+# operator at the native arm64 Debian/Ubuntu package names so a missing dep
+# reads as "install the package" instead of a cryptic build error. It must
+# NEVER hard-fail on architecture -- configuration stays portable across
+# x86_64 / arm64 / other. (CMAKE_SYSTEM_PROCESSOR reports "aarch64" on most
+# Linux distros even though Debian/Ubuntu call the package arch "arm64".)
+set(MBDSDR_CMAKE_ARCH "${CMAKE_SYSTEM_PROCESSOR}")
+if(MBDSDR_CMAKE_ARCH MATCHES "^(x86_64|AMD64)$")
+    set(MBDSDR_ARCH_LABEL "x86_64")
+elseif(MBDSDR_CMAKE_ARCH MATCHES "^(aarch64|arm64|armv8l)$")
+    set(MBDSDR_ARCH_LABEL "arm64")
+else()
+    set(MBDSDR_ARCH_LABEL "other (${MBDSDR_CMAKE_ARCH})")
+endif()
+message(STATUS "MBDSDR build platform: CMAKE_SYSTEM_PROCESSOR=${MBDSDR_CMAKE_ARCH} (${MBDSDR_ARCH_LABEL})")
+
+if(MBDSDR_ARCH_LABEL STREQUAL "arm64")
+    message(STATUS "MBDSDR arm64 deps (native): sudo apt install qt6-base-dev librtlsdr-dev cmake")
+    message(STATUS "MBDSDR arm64: if librtlsdr-dev is absent the build auto-compiles the no-RTL software stub (USB/SDR paths unchanged).")
+endif()
+
 set(SOURCES
     src/main.cpp
     src/ui/main_window.cpp
