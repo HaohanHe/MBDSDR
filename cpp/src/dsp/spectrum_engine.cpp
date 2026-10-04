@@ -89,6 +89,8 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
         QSettings rs("MBDSDR", "MBDSDR");
         recDir_ = rs.value("rec/dir", QStringLiteral("record")).toString();
         if (recDir_.isEmpty()) recDir_ = QStringLiteral("record");
+        recMaxSegSecs_ = rs.value("rec/max_seg_s",
+                                  tokens::kRecMaxSegmentSecondsDefault).toDouble();
     }
     gatedRec_.setOutputDir(recDir_);
     telemetryClock_.start();
@@ -692,6 +694,11 @@ bool SpectrumEngine::hasData() const {
     return hasDataLocked();
 }
 
+void SpectrumEngine::setRecMaxSegmentSeconds(double secs) {
+    recMaxSegSecs_ = secs;
+    QSettings("MBDSDR", "MBDSDR").setValue("rec/max_seg_s", secs);
+}
+
 bool SpectrumEngine::startRecording() {
     if (recorder_.isRecording() || wavWriter_.isRecording()) return false;
     QMutexLocker lk(&sourceMutex_);
@@ -701,6 +708,9 @@ bool SpectrumEngine::startRecording() {
     const QString base = recDir_ + QLatin1Char('/') + expandRecTemplate();
 
     if (recTarget_ == RecTarget::BasebandIQ) {
+        // Arm auto-segmentation (tokens/settings value, never a hard-coded magic
+        // number here) before opening the first capture file.
+        recorder_.setMaxSegmentSeconds(recMaxSegSecs_);
         if (!recorder_.startWithBase(base, source_->sampleRate(),
                                      source_->centerFreq(), source_->gain(),
                                      source_->name())) {
@@ -1443,6 +1453,12 @@ void SpectrumEngine::run() {
         // 1 Hz REC progress tick: elapsed wall-clock seconds + current file
         // size, so the UI can render "● REC: name (MM:SS, NN KB)".
         if (wavWriter_.isRecording() || recorder_.isRecording()) {
+            // Auto-segment rotation: if the IQ recorder opened a fresh file since
+            // the last tick, surface the new path honestly.
+            if (recorder_.isRecording() && recorder_.takeSegmentRotated()) {
+                recCurrentPath_ = recorder_.currentFilePath();
+                emit recordingSegmentChanged(recCurrentPath_);
+            }
             const int secs = static_cast<int>(recClock_.elapsed() / 1000);
             if (secs != lastRecSecond_) {
                 lastRecSecond_ = secs;

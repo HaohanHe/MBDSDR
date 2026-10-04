@@ -1558,15 +1558,17 @@ MainWindow::MainWindow(QWidget* parent)
         recLibDelBtn_     = new QPushButton("删除", lBox);
         recLibPlayBtn_    = new QPushButton("播放", lBox);
         recLibAnalyzeBtn_ = new QPushButton("分析", lBox);
+        recLibExportBtn_  = new QPushButton("导出解码", lBox);
         // Touch: every row action is a >=44px tap target (tokens, scaled()).
         for (auto* b : {recLibRefreshBtn_, recLibCopyBtn_, recLibDelBtn_,
-                        recLibPlayBtn_, recLibAnalyzeBtn_})
+                        recLibPlayBtn_, recLibAnalyzeBtn_, recLibExportBtn_})
             b->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
         rBtnRow->addWidget(recLibRefreshBtn_);
         rBtnRow->addWidget(recLibCopyBtn_);
         rBtnRow->addWidget(recLibDelBtn_);
         rBtnRow->addWidget(recLibPlayBtn_);
         rBtnRow->addWidget(recLibAnalyzeBtn_);
+        rBtnRow->addWidget(recLibExportBtn_);
         lBoxLay->addLayout(rBtnRow);
         recLibPlayStatus_ = new QLabel("未加载", lBox);
         recLibPlayStatus_->setObjectName("monoInfo");
@@ -1612,6 +1614,8 @@ MainWindow::MainWindow(QWidget* parent)
                 this, &MainWindow::onRecLibPlayToggle);
         connect(recLibAnalyzeBtn_, &QPushButton::clicked,
                 this, &MainWindow::onRecLibAnalyze);
+        connect(recLibExportBtn_, &QPushButton::clicked,
+                this, &MainWindow::onRecLibExportDecode);
 
         // Chunked playback: push decoded 48 kHz mono float ~20 ms at a time into
         // the EXISTING AudioOutput write channel. Offscreen/headless has no
@@ -3200,6 +3204,37 @@ void MainWindow::onRecLibAnalyze() {
     const int row = recLibList_->currentRow();
     if (row < 0 || row >= recLibEntries_.size()) return;
     openOfflinePath(recLibEntries_[row].wavPath);
+}
+
+// Export the decoder's ACTUAL output text (CW decode view) to a real .txt file.
+// This is NOT the activity log / bookmarks -- it is exactly what the decoder
+// emitted. With no decoded data we say so honestly and write nothing.
+void MainWindow::onRecLibExportDecode() {
+    const QString text = cwText_ ? cwText_->toPlainText().trimmed() : QString();
+    if (text.isEmpty()) {
+        if (recLibPlayStatus_)
+            recLibPlayStatus_->setText(QStringLiteral("无解码文本可导出"));
+        statusBar()->showMessage(QStringLiteral("当前无解码输出，未导出"));
+        return;
+    }
+    const QString dir = engine_ ? engine_->recordingDir() : QString();
+    const QString suggested = dir + "/decode_" +
+        QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".txt";
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("导出解码文本"), suggested,
+        QStringLiteral("文本文件 (*.txt)"));
+    if (path.isEmpty()) return;
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        if (recLibPlayStatus_)
+            recLibPlayStatus_->setText(QStringLiteral("导出失败: 无法写入"));
+        return;
+    }
+    f.write(text.toUtf8());
+    f.close();
+    if (recLibPlayStatus_)
+        recLibPlayStatus_->setText(QStringLiteral("已导出 %1 字节").arg(text.size()));
+    statusBar()->showMessage(QStringLiteral("解码文本已导出: %1").arg(path));
 }
 
 void MainWindow::openOfflinePath(const QString& path) {

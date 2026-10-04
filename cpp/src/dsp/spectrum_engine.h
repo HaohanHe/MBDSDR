@@ -269,6 +269,9 @@ public:
     QString recFilenameTemplate() const { return recTemplate_; }
     void setRecStereo(bool s) { recStereo_ = s; }
     bool recStereo() const { return recStereo_; }
+    // Continuous-capture auto-segment length in seconds (0 = single file).
+    void setRecMaxSegmentSeconds(double secs);
+    double recMaxSegmentSeconds() const { return recMaxSegSecs_; }
     // Audio recording: keep writing during squelch-closed gaps.
     void setRecIgnoreSquelch(bool ignore) { recIgnoreSquelch_ = ignore; }
     bool recIgnoreSquelch() const { return recIgnoreSquelch_; }
@@ -389,6 +392,9 @@ signals:
     // 1 Hz tick while recording: current file path, elapsed wall-clock seconds,
     // and on-disk byte count. Lets the UI show a live REC timer / size.
     void recordingProgress(const QString& path, int seconds, qint64 bytes);
+    // Emitted when continuous IQ recording auto-segments: the recorder just
+    // finalised one capture and opened a fresh collision-avoided file.
+    void recordingSegmentChanged(const QString& newPath);
     void cwDecoded(const QString& text, double wpm);
     void adsbAircraft(const AircraftInfo& info);
     // RDS station data from the SELECTED WFM channel's RdsDecoder, emitted only
@@ -541,6 +547,9 @@ private:
     QString recTemplate_ = "{time}_{freq}_{mode}";
     bool recStereo_ = false;
     bool recIgnoreSquelch_ = false;
+    // Auto-segment length (seconds). 0 = unlimited. Loaded from QSettings
+    // rec/max_seg_s, default tokens::kRecMaxSegmentSecondsDefault.
+    double recMaxSegSecs_ = 0.0;
 
     // Last commanded squelch threshold (dBFS), mirrored from setSquelchThreshold
     // so ControlHub can read it back (the Squelch object exposes no getter).
