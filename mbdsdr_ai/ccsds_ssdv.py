@@ -56,7 +56,7 @@ class CcsdsSsdvTx:
 def synthesize_ssdv_ccsds_iq(rgb: np.ndarray, fs: float, symrate: float,
                              callsign: str, image_id: int = 0,
                              quality: int = 4, mcu_mode: int = 3,
-                             f_if: float = 0.0) -> CcsdsSsdvTx:
+                             f_if: float = 0.0, guard_bits: int = 64) -> CcsdsSsdvTx:
     """RGB → DSLWP 218B 包流 → 外层 RS → 加扰 → 卷积 → ASM → BPSK 复 IQ。
 
     云内合成/测试用：收发两端 fs/symrate 对齐即确定往返。``callsign`` 由调用方传入
@@ -79,7 +79,11 @@ def synthesize_ssdv_ccsds_iq(rgb: np.ndarray, fs: float, symrate: float,
     coded = [b for p in pairs for b in p]
     asm = bytes_to_bits_msb(CCSDS_ASM_WORD.to_bytes(4, "big"))
     pre = bytes_to_bits_msb(b"\x55" * 8)
-    tx = np.array(pre + asm + coded, dtype=np.int8)
+    # 尾部保护带：真实链路帧间本就有 guard 间隔；给盲定时环路留采样余量，避免
+    # warmup 裁剪/可变步长导致凑不满 frame_bits（framer 收集满 frame_bits 后即复位，
+    # 保护带被忽略）。
+    guard = [0, 1] * (guard_bits // 2)
+    tx = np.array(pre + asm + coded + guard, dtype=np.int8)
 
     iq = bpsk_modulate_bits(tx, fs, symrate, f_if=f_if)
     return CcsdsSsdvTx(iq=iq, stream218=stream218,
@@ -92,6 +96,8 @@ class CcsdsSsdvResult:
 
     n_demod_bits: int = 0
     n_asm_frames: int = 0
+    #: 盲 CFO 估计值 Hz（f_offset=None 时；显式下变频时为传入值）。
+    cfo_est_hz: float = 0.0
     #: 每帧内每个 RS(255) 块纠正的符号数（-1=不可纠）。
     rs_nerrors: List[List[int]] = field(default_factory=list)
     n_packets: int = 0
@@ -131,7 +137,7 @@ def ccsds_frame_to_dslwp(frame: bytes) -> tuple[bytes, List[int]]:
 
 
 def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
-                       frame_bits: int, f_offset: float = 0.0,
+                       frame_bits: int, f_offset: Optional[float] = 0.0,
                        timing: str = "coarse") -> CcsdsSsdvResult:
     """复 IQ → demod_bpsk → ASM 同步 → Viterbi → 解扰 → RS → 218B → DSLWP JPEG。
 
@@ -140,14 +146,21 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
     frame_bits :
         每个 ASM 之后要收集的编码比特数（= 卷积后总比特数；由 TX 合成/链路参数
         给出）。ASM 同步出几帧就解几帧。
+    f_offset :
+        显式带内频偏 Hz；传 ``None`` = 盲估计（平方环，见
+        :func:`mbdsdr_ai.ssdv_phy.estimate_cfo_bpsk`）。
     timing :
-        传 ``"coarse"``（默认，眼图粗定时，合成确定性强）或 ``"gardner"``
-        （Gardner TED 闭环，真机弱信号用；见 :mod:`mbdsdr_ai.ssdv_phy`）。
+        传 ``"coarse"``（眼图粗定时）或 ``"gardner"``（Gardner TED 闭环精跟踪）。
 
     诚实空态：ASM 0 帧 / RS 全不可纠 / CRC 不过 → 结果计数全 0、jpeg 为空，不伪造。
     """
+    from .ssdv_phy import estimate_cfo_bpsk
     out = CcsdsSsdvResult()
-    bits = demod_bpsk(iq, fs, symrate, f_offset=f_offset, timing=timing)
+    foff = f_offset
+    if foff is None:
+        foff, prom = estimate_cfo_bpsk(iq, fs)
+    out.cfo_est_hz = float(foff)
+    bits = demod_bpsk(iq, fs, symrate, f_offset=foff, timing=timing)
     out.n_demod_bits = int(bits.size)
     if bits.size == 0:
         return out

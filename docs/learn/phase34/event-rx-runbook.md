@@ -146,27 +146,30 @@ python3 tools/onboarding/onboard.py --step all \
     --freq <官方下行Hz> --mode ssdv --sr <活动采样率Hz> \
     --n <采样点数> --gain 24 --out-dir ./phase14_rx
 
-# 直接对录下的 complex64 IQ 跑级联解码（符号率/中频偏移/帧长走 phase14 活动参数）
+# 直接对录下的 complex64 IQ 跑级联解码（符号率/帧长走 phase14 活动参数；
+# 多普勒不确定时加 --ssdv-blind-cfo 平方环盲估频偏，不必手填 --ssdv-tone-offset）
 python3 tools/onboarding/onboard.py --step decode --mode ssdv \
     --sr <活动采样率Hz> \
     --ssdv-input iq --ssdv-mode ccsds \
-    --ssdv-symrate <活动符号率Hz> --ssdv-tone-offset <带内偏移Hz> \
+    --ssdv-symrate <活动符号率Hz> \
     --ssdv-frame-bits <每帧卷积后编码比特数> \
-    --ssdv-timing coarse \
+    --ssdv-blind-cfo --ssdv-timing gardner \
     --sigmf-data ./phase14_rx/<录制>.iq
 ```
 
 - 产物：`./phase14_rx/ssdv_ccsds_rebuilt.jpg`。
-- **判据（现场看这一行判断走哪条）**：
-  1. 先看 `ASM 同步 N 帧`：
-     - `ASM 同步 0 帧` → 级联物理层没锁住：核对符号率/中频偏移/帧长；弱信号把
-       `--ssdv-timing` 从 `coarse` 改 `gardner`（**注意：当前干净室 Gardner 闭环
-       尚未正确锁眼心，可能仍 0 帧——此时诚实不造图，回退路径 B 或用 gr_satellites**）。
+- **判据（现场看这几行判断走哪条/是否降级）**：
+  1. 先看 `盲 CFO 估计 = ±x Hz`：prominence 不足时诚实报 0 且不继续出图；估计值应与
+     预期带内偏移同量级（真机多普勒几十~几百 Hz）。
+  2. 再看 `ASM 同步 N 帧`：
+     - `ASM 同步 0 帧` → 物理层没锁住。**降级顺序**：(a) 用 `--ssdv-timing gardner`
+       （弱信号首选；Phase48 实测 sd=0.5+CFO30Hz 下 gardner 0/30 滑移、优于 coarse 的
+       2~6/30）；(b) 仍 0 帧 → 核对符号率/帧长；(c) 再不行 → 回退路径 B。
      - `ASM 同步 ≥1 帧` → 继续。
-  2. 再看每帧 `RS nerrors = [[..]]`：
+  3. 再看每帧 `RS nerrors = [[..]]`：
      - 全 `0` → 干净链路；有小正数 → FEC 真实纠错（可接受）；出现 `-1` → 该 RS 块
        不可纠，后级 CRC 会丢该包，对应 MCU 缺失。
-  3. 最终 `[PASS] … MCU x/y, 缺失 z`：`缺失 0` 理想；少量缺失仍算收到图。
+  4. 最终 `[PASS] … MCU x/y, 缺失 z`：`缺失 0` 理想；少量缺失仍算收到图。
 
 #### 路径 B（兜底）：`--ssdv-mode fsphil`（默认）解解调后包字节流
 
@@ -190,11 +193,11 @@ python3 tools/onboarding/onboard.py --step decode --mode ssdv \
      内仍算「收到图」，缺大块则按失败重收。
 - **判为失败（诚实空态）**：`ASM 未同步出任何帧` / `未同步到任何有效包` / 字节流为空
   时应 `FAIL`、不造图（`onboard.py _step_decode_ssdv_iq_ccsds` / `_finish_ssdv`）。
-- **【待真机确认】**：路径 A 已在**云内合成级联 IQ** 上一条命令出图（确定性：1 ASM 帧、
-  RS nerrors=0、36/36 MCU 无缺失），但**真实卫星过境 IQ 尚未验证**；真机的
-  符号率/中频偏移/帧长仍以 phase14 活动参数录入位为准。Gardner 精定时闭环尚未
-  正确锁眼心（见 `test_phase47_timing.py`），弱信号现场仍以 `coarse` 为准、
-  必要时回退路径 B / gr_satellites。
+- **【待真机确认】**：路径 A 已在**云内合成级联 IQ** 上一条命令出图（确定性：注入 37Hz
+  CFO 时盲 CFO 估 +36.9Hz、1 ASM 帧、RS nerrors=0、36/36 MCU 无缺失），但**真实卫星过境
+  IQ 尚未验证**；真机的符号率/中频偏移/帧长仍以 phase14 活动参数录入位为准。Phase48 已修
+  Gardner 眼心 seed（盲平均幅度扫描找眼心）+ 平方环盲 CFO：sd=0.5+CFO30Hz 下 gardner
+  0/30 滑移、优于 coarse 的 2~6/30，弱信号现场优先 `--ssdv-blind-cfo --ssdv-timing gardner`。
 
 ---
 
