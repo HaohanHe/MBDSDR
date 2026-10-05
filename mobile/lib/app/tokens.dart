@@ -188,6 +188,20 @@ abstract final class AppTokens {
   /// 思考（thinking）思维链预算 token 数；OpenAI 兼容参数 thinking_budget，界 128..32768。
   static const int kThinkingBudgetTokens = 4096;
 
+  /// ---------------------------------------------------------------- AI 上下文压缩
+  /// 上送历史的字符预算（**字符数粗代理**，非精确 token）。移动端无分词器（tiktoken），
+  /// 按所有消息 content 长度之和近似估计占用；超过该预算即触发折叠（见
+  /// AiClient.compactHistory）。命名常量、可在调用处传参覆盖，禁在业务里裸写阈值。
+  static const int kAiContextBudgetChars = 6000;
+
+  /// 触发折叠后，最近保留的 **user 轮次**原文逐句上送；更早的轮次折叠成一条
+  /// system 占位。与桌面 compactContext「保留最近 N 个 user turn」同一思路。
+  static const int kAiKeepRecentUserTurns = 6;
+
+  /// 折叠占位里逐条引用用户诉求时，单条预览的最大字符数（超出加省略号，
+  /// 不把整段历史复述进占位——占位本身也要省 token）。
+  static const int kAiFoldAskPreviewChars = 24;
+
   // ---------------------------------------------------------------- RTL-SDR 硬件范围
   static const double freqMinHz = 24e6;
   static const double freqMaxHz = 1700e6;

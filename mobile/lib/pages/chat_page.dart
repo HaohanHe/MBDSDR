@@ -153,6 +153,58 @@ class _ChatPageState extends State<ChatPage> {
     setState(_loadCurrentSession);
   }
 
+  /// 重命名会话：弹一个带输入框的对话框，预填当前标题；确认后写回 store。
+  /// 重命名入口（铅笔 IconButton）默认 48x48 触控，≥ AppTokens.touchMin。
+  Future<void> _renameSession(BuildContext context, String id) async {
+    final ChatSessionStore? store = _store;
+    if (store == null || _busy) return;
+    SessionInfo? target;
+    for (final SessionInfo s in store.sessions) {
+      if (s.id == id) {
+        target = s;
+        break;
+      }
+    }
+    if (target == null) return;
+    final TextEditingController controller =
+        TextEditingController(text: target.title);
+    final String? newTitle = await showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        backgroundColor: AppTokens.bgBar,
+        title: const Text('重命名会话', style: AppTokens.sectionTitle),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: AppTokens.body,
+          cursorColor: AppTokens.accent,
+          decoration: const InputDecoration(
+            hintText: '输入新会话标题',
+            isDense: true,
+          ),
+          onSubmitted: (String v) => Navigator.of(dialogContext).pop(v),
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (newTitle == null) return;
+    store.renameSession(id, newTitle);
+    // 重命名在抽屉里触发：关掉抽屉回到对话页，并刷新会话栏标题。
+    if (context.mounted) Navigator.of(context).maybePop();
+    if (mounted) setState(() {});
+  }
+
   // ------------------------------------------------------------- 发送 / 重试
   /// 模板入口：把草稿填入输入框（可编辑），不自动发送。
   void _onPickTemplate(String draft) {
@@ -503,11 +555,24 @@ class _ChatPageState extends State<ChatPage> {
                             ),
                           )
                         : null,
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      tooltip: '删除会话',
-                      color: AppTokens.textAt(AppTokens.textAlphaTertiary),
-                      onPressed: _busy ? null : () => _deleteSession(s.id),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        // 重命名入口：IconButton 默认 48x48，≥ AppTokens.touchMin(44)。
+                        IconButton(
+                          icon: const Icon(Icons.drive_file_rename_outline),
+                          tooltip: '重命名',
+                          color: AppTokens.textAt(AppTokens.textAlphaTertiary),
+                          onPressed:
+                              _busy ? null : () => _renameSession(context, s.id),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          tooltip: '删除会话',
+                          color: AppTokens.textAt(AppTokens.textAlphaTertiary),
+                          onPressed: _busy ? null : () => _deleteSession(s.id),
+                        ),
+                      ],
                     ),
                     onTap: _busy ? null : () {
                       Navigator.of(context).pop();

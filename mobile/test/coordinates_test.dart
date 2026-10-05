@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/astro/coordinates.dart';
 import 'package:mbdsdr_mobile/astro/sgp4.dart';
+import 'package:mbdsdr_mobile/astro/tle.dart';
 import 'package:mbdsdr_mobile/models/satellite.dart';
 
 /// 坐标链几何自检（无需网络/传播）。
@@ -75,6 +76,50 @@ void main() {
       expect(r.x, closeTo(0.0, 1e-9));
       expect(r.y, closeTo(-1000.0, 1e-9));
       expect(r.z, closeTo(500.0, 1e-9));
+    });
+  });
+
+  group('多普勒频移（G6 显值）', () {
+    test('纯函数：远离(vr>0)→负、靠近(vr<0)→正；量级 = -f0·v_r/c', () {
+      final double d =
+          dopplerShiftFromRangeRateHz(downlinkHz: 137.1e6, rangeRateKmS: 7.5);
+      expect(d, closeTo(-137.1e6 * 7.5 / kSpeedOfLightKmS, 1e-6));
+      expect(d, isNegative, reason: '卫星远离 → 接收载频偏低 → 多普勒为负');
+
+      expect(
+        dopplerShiftFromRangeRateHz(downlinkHz: 137.1e6, rangeRateKmS: -7.5),
+        isPositive,
+        reason: '卫星靠近 → 接收载频偏高 → 多普勒为正',
+      );
+    });
+
+    test('SGP4 已知 TLE：range-rate 有限、多普勒量级合理且符号自洽', () {
+      // ISS TLE（与 satellite_capture_test 同一组已知根数）。
+      const l1 =
+          '1 25544U 98067A   08264.51782472  .00016717  00000-0  10270-3 0  0864';
+      const l2 =
+          '2 25544  51.6400 247.4627 0006703 130.5360 325.0288 15.72125391563537';
+      final iss = Tle.fromLines(l1, l2);
+      const station = Station(lat: 40, lon: -100);
+      final t = iss.epoch.add(const Duration(minutes: 30));
+
+      final double vr = rangeRateAt(Sgp4(iss), t, station);
+      expect(vr.isFinite, isTrue);
+      expect(vr.abs(), lessThan(9.0),
+          reason: 'LEO 径向速度量级应在 ~7.5 km/s 内，实得 $vr km/s');
+
+      final double dop =
+          dopplerShiftFromRangeRateHz(downlinkHz: 137.1e6, rangeRateKmS: vr);
+      expect(dop.isFinite, isTrue);
+      // 137 MHz × ~7.5 km/s / c ≈ 数 kHz 量级；放宽到 50 kHz 以内。
+      expect(dop.abs(), lessThan(50e3), reason: '多普勒量级应在几十 kHz 内，实得 $dop Hz');
+
+      // 符号约定：vr>0(远离) → dop<0；vr<0(靠近) → dop>0。
+      if (vr > 0) {
+        expect(dop, isNegative);
+      } else if (vr < 0) {
+        expect(dop, isPositive);
+      }
     });
   });
 }

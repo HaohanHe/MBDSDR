@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'package:mbdsdr_mobile/app/tokens.dart';
+import 'package:mbdsdr_mobile/astro/coordinates.dart';
 import 'package:mbdsdr_mobile/astro/nav_satellites.dart';
 import 'package:mbdsdr_mobile/astro/passes.dart';
+import 'package:mbdsdr_mobile/astro/sgp4.dart';
 import 'package:mbdsdr_mobile/astro/tle.dart';
 import 'package:mbdsdr_mobile/astro/tle_freshness.dart';
 import 'package:mbdsdr_mobile/models/radio_state.dart';
@@ -130,6 +132,33 @@ class SkyController extends ChangeNotifier {
       if (v.name == _selectedName) return v;
     }
     return null;
+  }
+
+  /// 当前选中目标的**瞬时多普勒频移读数**（Hz）。
+  ///
+  /// 诚实边界（务必保留）：
+  ///   * 这是「当前几何时刻」单点 SGP4 传播得到的估算读数，**仅用于显示**。
+  ///   * **绝不据此自动改频**——移动端没有随时间连续传播并微调调谐的轨道 loop，
+  ///     自动改频有把人带偏的风险；这一步保守只显值。要真正补偿请用过境
+  ///     「捕获」的一次性预测偏置，或手动在频谱上微调（与桌面勾选实时补偿不同）。
+  ///   * 无选中目标 / 无本站 / 无标称下行频率（目录外卫星）/ SGP4 失效时为 null，
+  ///     走卡片诚实空态，绝不编一个多普勒数字。
+  double? get dopplerHz {
+    final SatVisibility? v = selectedVisibility;
+    final Station? st = _station;
+    final DateTime? gt = _geometryTime;
+    if (v == null || st == null || gt == null) return null;
+    final SatDownlink? dl = satelliteDownlink(v.tle.catalogNumber);
+    if (dl == null) return null; // 无标称下行频率 → 无参考载频，诚实 null
+    try {
+      final double vr = rangeRateAt(Sgp4(v.tle), gt.toUtc(), st);
+      return dopplerShiftFromRangeRateHz(
+        downlinkHz: dl.downlinkHz,
+        rangeRateKmS: vr,
+      );
+    } on Sgp4Exception {
+      return null;
+    }
   }
 
   /// 启动监听（位置 + 姿态流）。
@@ -417,13 +446,15 @@ class _SkyPageState extends State<SkyPage> {
         // 顶部刷新指示：2px 发丝进度条，不抢视觉。
         if (_c.refreshing)
           const LinearProgressIndicator(minHeight: 2, color: AppTokens.accent),
-        // 时空状态四格：复用真实 radio 连接/频率与选中目标；GNSS fix 流与实时
-        // 多普勒在本机尚未接线 -> 走诚实空态（无 fix / 未补偿），绝不编造。
+        // 时空状态四格：复用真实 radio 连接/频率与选中目标；GNSS fix 流本端未接线
+        // -> 走诚实空态（无 fix），绝不编造。
+        // G6：已接通选中目标的瞬时多普勒读数（仅显值、**绝不自动改频**，见
+        // SkyController.dopplerHz 诚实边界注释）；无目标/无下行频率时为 null 走空态。
         SpacetimeStatusCard(
           radioConnected: widget.radio?.status == ConnectionStatus.connected,
           freqHz: widget.radio?.freqHz,
           targetName: _c.selectedName,
-          // 移动端暂无 SGP4 range-rate 实时补偿引擎 -> Doppler 恒为 null（诚实空态）。
+          dopplerHz: _c.dopplerHz,
         ),
         if (_c.selectedVisibility != null)
           Expanded(child: _GuidanceCard(controller: _c)),

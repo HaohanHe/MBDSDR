@@ -227,6 +227,29 @@ class ToolCallAccumulator {
 }
 
 // ---------------------------------------------------------------------------
+// 历史折叠（G1 AI 上下文压缩）
+// ---------------------------------------------------------------------------
+
+/// [AiClient.compactHistory] 的结果：真正上送模型的消息序列 + 诚实的折叠标记。
+@immutable
+class ContextCompaction {
+  const ContextCompaction({
+    required this.messages,
+    required this.didCompact,
+    required this.compressedUserTurns,
+  });
+
+  /// 折叠后实际用于请求的消息序列（调用方按需再拷贝）。
+  final List<ChatMessage> messages;
+
+  /// 是否真的发生了折叠（false = 预算内，原样全量直传）。
+  final bool didCompact;
+
+  /// 被折叠（不再逐句上送）的 user 轮次数。
+  final int compressedUserTurns;
+}
+
+// ---------------------------------------------------------------------------
 // AiClient
 // ---------------------------------------------------------------------------
 
@@ -395,6 +418,103 @@ class AiClient {
     };
   }
 
+  // ------------------------------------------------------------- 历史折叠（G1）
+  /// 发送前把「超预算」的旧轮次折叠成一条诚实占位；预算内则原样直传。
+  ///
+  /// 机制（学桌面 cpp/src/ai/ai_context.cpp `compactContext` 的思路，自写 Dart、不抄码）：
+  ///   1. 先量「占用」：所有消息 content 字符数之和（移动端无分词器，用字符数粗代理）；
+  ///   2. 占用 ≤ 预算 → 原样返回，一条不动；
+  ///   3. 超预算 → 从尾部向前数，保留最近 [keepRecentUserTurns] 个 user 轮次原文逐句上送，
+  ///      其之前的旧轮次整体折叠成**一条 system 占位**；
+  ///   4. 占位是**规则法诚实摘要**（不发第二次 LLM 请求、不 mock 摘要）：只报「折叠了 N 轮」
+  ///      并逐条列出旧轮里每个 user 的诉求（截断预览）。绝不编造助手回复内容。
+  ///
+  /// 不静默丢原文：折叠只作用在「上送给模型的提示」这一层；会话完整原文仍由
+  /// ChatSessionStore 持久化、在 UI 里可回看——本函数不删任何落盘数据。
+  /// 前导 system 指令永不折叠（它们是设定，不是对话历史）。
+  @visibleForTesting
+  static ContextCompaction compactHistory(
+    List<ChatMessage> history, {
+    int budgetChars = AppTokens.kAiContextBudgetChars,
+    int keepRecentUserTurns = AppTokens.kAiKeepRecentUserTurns,
+  }) {
+    // 前导 system（指令）整段保留，不参与折叠。
+    int sysEnd = 0;
+    while (sysEnd < history.length &&
+        history[sysEnd].role == ChatRole.system) {
+      sysEnd++;
+    }
+    final List<ChatMessage> systemMsgs = history.sublist(0, sysEnd);
+    final List<ChatMessage> convo = history.sublist(sysEnd);
+
+    // 占用估计：字符数粗代理。
+    int total = 0;
+    for (final ChatMessage m in history) {
+      total += m.content.length;
+    }
+    if (total <= budgetChars || convo.isEmpty) {
+      return ContextCompaction(
+        messages: history,
+        didCompact: false,
+        compressedUserTurns: 0,
+      );
+    }
+
+    // 从尾部向前定位折叠边界：保留最近 N 个 user 轮次原文。
+    // 默认 boundary=0 → oldMessages 为空 → 不折叠（user 轮次不足 N 时整体保留）。
+    int userSeen = 0;
+    int boundary = 0;
+    for (int i = convo.length - 1; i >= 0; i--) {
+      if (convo[i].role == ChatRole.user) {
+        userSeen++;
+        if (userSeen >= keepRecentUserTurns) {
+          boundary = i;
+          break;
+        }
+      }
+    }
+    final List<ChatMessage> oldMessages = convo.sublist(0, boundary);
+    final List<ChatMessage> recent = convo.sublist(boundary);
+    if (oldMessages.isEmpty) {
+      return ContextCompaction(
+        messages: history,
+        didCompact: false,
+        compressedUserTurns: 0,
+      );
+    }
+
+    // 规则法诚实占位：数 user 轮 + 逐条列诉求（截断）。不调 LLM，不编造。
+    int compressedUserTurns = 0;
+    final List<String> asks = <String>[];
+    for (final ChatMessage m in oldMessages) {
+      if (m.role != ChatRole.user) continue;
+      compressedUserTurns++;
+      final String s = m.content.trim();
+      final String preview = s.length > AppTokens.kAiFoldAskPreviewChars
+          ? '${s.substring(0, AppTokens.kAiFoldAskPreviewChars)}…'
+          : s;
+      asks.add(preview);
+    }
+    final StringBuffer buf = StringBuffer(
+      '此前 $compressedUserTurns 轮对话已折叠为占位（不逐句上送模型；'
+      '完整原文仍保存在本会话记录中，可随时回看，并非删除）。',
+    );
+    if (asks.isNotEmpty) {
+      buf.write('用户曾依次询问：「${asks.join('」「')}」。助手已相应回复，细节从略。');
+    }
+    final ChatMessage placeholder = ChatMessage(
+      role: ChatRole.system,
+      content: buf.toString(),
+      time: DateTime.now(),
+    );
+
+    return ContextCompaction(
+      messages: <ChatMessage>[...systemMsgs, placeholder, ...recent],
+      didCompact: true,
+      compressedUserTurns: compressedUserTurns,
+    );
+  }
+
   static Object? _safeParseObject(String json) {
     try {
       final Object? decoded = jsonDecode(json);
@@ -426,8 +546,22 @@ class AiClient {
 
   // ------------------------------------------------------------- 高层循环
   /// 跑一轮对话（内部自动处理 tool-calling 多轮）。
-  Stream<ChatStreamEvent> complete({required List<ChatMessage> history}) async* {
-    final List<ChatMessage> working = List<ChatMessage>.from(history);
+  ///
+  /// [compactBudgetChars] / [keepRecentUserTurns] 为历史折叠预算（见 [compactHistory]）；
+  /// 默认走 AppTokens 具名常量，测试可注入极小预算触发折叠，生产不覆盖。
+  Stream<ChatStreamEvent> complete({
+    required List<ChatMessage> history,
+    int compactBudgetChars = AppTokens.kAiContextBudgetChars,
+    int keepRecentUserTurns = AppTokens.kAiKeepRecentUserTurns,
+  }) async* {
+    // G1：history 超预算时先把旧轮折叠成诚实占位，再把「折叠后的提示」发给模型。
+    // 只压缩上送提示层，不删会话落盘原文（见 compactHistory 注释）。
+    final ContextCompaction compaction = compactHistory(
+      history,
+      budgetChars: compactBudgetChars,
+      keepRecentUserTurns: keepRecentUserTurns,
+    );
+    final List<ChatMessage> working = List<ChatMessage>.from(compaction.messages);
     int round = 0;
 
     while (round < AppTokens.kMaxToolRounds) {

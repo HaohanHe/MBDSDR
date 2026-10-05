@@ -226,10 +226,29 @@ class ChatSessionStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ------------------------------------------------------------------ 重命名
+  /// 重命名会话：更新 index 里的 title 与会话文档里的 title（同一处真值，两份落盘同步）。
+  ///
+  /// id 不存在 → 静默忽略；新标题 trim 后为空 → 不改名（不把会话清成空白标题）。
+  /// 重命名不改动消息内容，仅刷新 updatedAtMs。
+  void renameSession(String id, String title) {
+    final SessionInfo? info = _meta[id];
+    if (info == null) return;
+    final String trimmed = title.trim();
+    if (trimmed.isEmpty) return;
+    if (trimmed == info.title) return; // 无变化不写盘。
+    _meta[id] = info.copyWith(
+      title: trimmed,
+      updatedAtMs: DateTime.now().millisecondsSinceEpoch,
+    );
+    _persistIndex();
+    _persistSession(id);
+    notifyListeners();
+  }
+
   // ------------------------------------------------------------------ 消息
   /// 追加一条消息。新 user 行自动清掉上一次的 incomplete 标记（操作者已翻篇）。
-  void appendLine(String id, SessionLine line) {
-    if (!_meta.containsKey(id)) return;
+  void appendLine(String id, SessionLine line) {    if (!_meta.containsKey(id)) return;
     (_cache[id] ??= <SessionLine>[]).add(line);
     final SessionInfo info = _meta[id]!;
     final bool clearsIncomplete = line.role == 'user' && info.incomplete;
