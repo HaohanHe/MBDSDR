@@ -225,8 +225,8 @@ rtl_tcp -a 0.0.0.0 -p 1234
 
 ## 9. ARM（arm64）Chromebook —— 未实测，先给验证路径
 
-> **状态：截至本文，arm64 路径未在任何真机上构建/跑通，云端也无 arm64 工具链可预验。**
-> 本节只列依赖清单、验证动作与已知边界，**不写“应该能跑”**；任何结论以真机记录为准。
+> **状态（2026-10-05 更新）：云端已用交叉工具链 + qemu-aarch64 真正交叉编译并实跑通过一批 arm64 测试目标（见文末「验证记录」）；物理 arm64 Chromebook 真机仍未验证。**
+> 本节列出依赖清单、验证动作与已知边界，**不写"应该能跑"**；任何结论以真机记录为准。
 > Phase30 B 块（arm64 构建能力探测）的真机/容器验证结果，将回填到本节下方「验证记录」。
 
 **arm64 预期依赖（与 x86_64 同源，仅架构不同）**
@@ -266,4 +266,20 @@ cmake --build build -j"$(nproc)"
   **未实跑 arm64 构建**（不伪造通过）；已真实验证的仅是新增的 `CMAKE_SYSTEM_PROCESSOR` 探测块在 x86 host 上
   配置干净、对 x86_64 / aarch64 / arm64 / 未知输入分支正确、零报错。真机（arm64 机器出现后）照本节
   「真机验证动作」并加 `QT_QPA_PLATFORM=offscreen ctest --output-on-failure` 执行；6 项未验证清单见底稿 §6。
-- _（待回填：真机 cmake / build / ctest 实际输出、`qt6-base-dev` / `librtlsdr-dev` 齐全性、`mbdsdr` 实机表现）_
+
+- **✅ 云端已交叉编译验证（Phase44，2026-10-05）**：在 x86_64 云主机上用
+  Arm GNU 13.3.Rel1（`aarch64-none-linux-gnu`）交叉工具链 + `qemu-aarch64` 10.0.13 用户态模拟，
+  配合手写解压的 Debian trixie arm64 sysroot（Qt **6.8.2**，与 x86 host Qt 同版本；
+  191 个 .deb，`ar x`+`tar xf` 到 `~/.local/arm-cross/sysroot-qt`，469M；含 Qt6 Core/Gui/Widgets/Network/
+  Test/Multimedia + librtlsdr0），把非 Qt / 纯算法 / QtTest / offscreen UI 目标真正编成 aarch64 ELF 并在
+  qemu 下实跑通过。**这是云端模拟验证，不是物理 arm64 Chromebook 真机**——USB 直收 / 真机 rtl_tcp 表现仍待真机。
+  - 入库的只有 `cpp/cmake/aarch64-linux-gnu.cmake`；工具链/qemu/sysroot 均在 `~/.local`，不入库。
+  - 配置实测命中：`MBDSDR build platform: CMAKE_SYSTEM_PROCESSOR=aarch64 (arm64)`、
+    `RTL-SDR support: ENABLED (librtlsdr )`、`Qt6 version: 6.8.2`、`Configuring done`（EXIT=0）。
+  - **qemu 实跑通过的测试目标（全部 exit=0）**：`test_ssdv_packet`、`test_sstv_vis`、`test_pocsag_decoder`、
+    `test_m17_decoder`、`test_adsb_cpr`（纯 C++/协议，all-green），`test_agc_dsp`(6)、`test_power_spectrum_window`(5)、
+    `test_spectrum_maxhold`(5)、`test_fft`(6)、`test_peak_detector`(4)、`test_noise_blanker`(4)（QtTest，
+    合计 30 个 case 全 PASS），`test_sgp4`（15 个轨道状态全 PASS）。
+  - qemu 跑 Qt GUI 测试需 `QT_QPA_PLATFORM=offscreen QT_PLUGIN_PATH=<sysroot>/usr/lib/aarch64-linux-gnu/qt6/plugins`。
+  - **剩余缺口（诚实）**：完整 `mbdsdr` 图形主程序未在 arm64 全量编译（仅编了测试/核心目标；全树编译的内存/时间预算未走）；
+    无物理 arm64 硬件，USB/rtl_tcp 真机行为未验证；configure 有一条非致命 `Could NOT find XKB` 告警（offscreen 不受影响）。

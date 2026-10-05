@@ -104,10 +104,34 @@ QT_QPA_PLATFORM=offscreen ctest --output-on-failure
 - `cpp/CMakeLists.txt` 仍**无架构专属代码路径**——arm64 与 x86_64 走同一套构建逻辑；探测块只打印信息，不分支编译。
 - 高采样率（~2.4Msps 以上）在 ARM 小核/USB 带宽紧张时可能丢包，属硬件/带宽问题，需真机观察，CMake 无法解决。
 
-## 6. 本次未验证项清单（如实）
+## 6. 本次未验证项清单（如实）—— Phase44 回填
 
-- [ ] arm64 真机 `cmake -B build -S .` 完整配置输出
-- [ ] arm64 产物 `cmake --build` 全量编译（是否有架构相关告警/报错）
-- [ ] arm64 上 `ctest` 全量通过数（x86_64 基线 123/123 见回归记录）
-- [ ] arm64 Debian 仓库 `qt6-base-dev` / `librtlsdr-dev` 齐全性与版本
-- [ ] arm64 上 `mbdsdr` 启动、USB 直收、rtl_tcp 取流实机表现
+> Phase30 当时全部未验证；Phase44（2026-10-05）在 x86_64 云主机用 Arm 交叉工具链 + qemu-aarch64
+> 用户态模拟真正交叉编译并实跑。注意：这是**云端 qemu 模拟**，不是物理 arm64 真机。逐项结果：
+
+- [x] **arm64 配置输出**（交叉配置，非真机）：`cmake -S cpp -B cpp/build-arm64 -DCMAKE_TOOLCHAIN_FILE=cpp/cmake/aarch64-linux-gnu.cmake -DQt6_DIR=...`
+  → `MBDSDR build platform: CMAKE_SYSTEM_PROCESSOR=aarch64 (arm64)`、`RTL-SDR support: ENABLED (librtlsdr )`、`Qt6 version: 6.8.2`、`Configuring done / Generating done`（EXIT=0）。
+- [~] **arm64 产物编译**：未做全树 `mbdsdr` 主程序全量编译（内存/时间预算仅够单目标 -j2）；已逐个交叉编译 **12 个核心/测试目标**成功（aarch64 ELF），无架构相关告警。
+- [x] **arm64 qemu 实跑通过数**：**12/12 目标 exit=0**。QtTest 合计 30 个 case 全 PASS：
+  test_agc_dsp(6)、test_power_spectrum_window(5)、test_spectrum_maxhold(5)、test_fft(6)、test_peak_detector(4)、test_noise_blanker(4)；
+  纯 C++/协议 6 个 all-green：test_ssdv_packet、test_sstv_vis、test_pocsag_decoder、test_m17_decoder、test_adsb_cpr、test_sgp4(15 状态)。
+  qemu 命令：`qemu-aarch64 -L ~/.local/arm-cross/sysroot-qt <bin>`（Qt GUI 测试加 `QT_QPA_PLATFORM=offscreen QT_PLUGIN_PATH=<sysroot>/usr/lib/aarch64-linux-gnu/qt6/plugins`）。
+- [x] **arm64 Qt6 / librtlsdr 齐全性与版本**：Debian trixie arm64 自带 **Qt 6.8.2**（与 x86 host 6.8.2 同版本，moc 零 mismatch），
+  Core/Gui/Widgets/Network/Test/Multimedia 全部就位；librtlsdr0 2.0.2 + librtlsdr-dev 2.0.2 就位（配置报 RTL-SDR ENABLED）。
+  共手解 191 个 .deb 到 `~/.local/arm-cross/sysroot-qt`（469M）。
+- [ ] **物理 arm64 真机 `mbdsdr` 启动、USB 直收、rtl_tcp 取流实机表现**：仍未验证（无 arm64 硬件；云端为 qemu 用户态模拟，无 USB）。
+
+### Phase44 踩坑记录（复现价值）
+
+1. **顶层强制 Qt6**：`cpp/CMakeLists.txt:20 find_package(Qt6 REQUIRED ...)`，连"非 Qt"测试也链接 `Qt6::Core/Test`——
+   所以 arm64 Qt sysroot 是配置/编译任何目标的硬门槛，不是可选增强。
+2. **多arch库路径**：Arm 工具链三元组是 `aarch64-none-linux-gnu`，CMake 不会自动推断 `CMAKE_LIBRARY_ARCHITECTURE=aarch64-linux-gnu`，
+   不设则 FindOpenGL 等通用模块找不到 `/usr/lib/aarch64-linux-gnu`（工具链文件已补）。
+3. **Qt6Gui 需 OpenGL dev**：裸 `qt6-base-dev` 不够，需补 libglvnd-dev/libglx-dev/libopengl-dev/libegl-dev 才有 WrapOpenGL；
+   **Qt6Multimedia 是独立模块**，需另下 qt6-multimedia-dev + libqt6multimedia6。
+4. **链接传递依赖**：Qt6Core 经 DT_NEEDED 拉 libicu76/glib/pcre2-16/zstd/libb2/double-conversion，需 `-Wl,-rpath-link=<sysroot multiarch libdir>` 才能递归解析。
+5. **libstdc++/libm 版本**：工具链自带 glibc 2.38 / gcc-13 libstdc++，而 Debian Qt 6.8.2 需 `CXXABI_1.3.15` 与 `exp10@GLIBC_2.39`；
+   工具链文件把 sysroot-qt 的 gcc-14 libstdc++.so.6 + libm.so.6 追加到链接行末尾（**不**链 Debian libc.so.6——会与工具链 crt 的 GLIBC_PRIVATE 冲突）。
+6. **arm64 moc 无法在 x86 直接跑**：host 无 x86 Qt 工具；做法是把 sysroot 里的 arm64 moc/rcc/uic 原位换成
+   `qemu-aarch64 -L sysroot-qt .../moc.arm64 "$@"` 包装脚本，AUTOMOC 透明经 qemu 运行（版本仍是 6.8.2）。
+7. **usrmerge**：解压 Debian deb 后顶层无 `lib/`，需 `ln -s usr/lib lib` 才有 `/lib/ld-linux-aarch64.so.1`。
