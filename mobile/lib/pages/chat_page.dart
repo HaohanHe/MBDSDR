@@ -48,11 +48,29 @@ class _UiMessage {
   String? error;
   final List<_UiToolCall> toolCalls = <_UiToolCall>[];
 
+  /// 折叠占位标记（展示层）：true 时这不是一条气泡，而是一行居中的
+  /// 「已折叠 N 轮早期对话」诚实说明——它只说明上送层发生了折叠，不删任何气泡/原文。
+  final bool isFoldMarker;
+
+  /// 折叠标记被折走的 user 轮次数（[isFoldMarker] = true 时有意义）。
+  final int foldedTurns;
+
   _UiMessage({
     required this.role,
     required this.text,
     required this.time,
+    this.isFoldMarker = false,
+    this.foldedTurns = 0,
   });
+
+  /// 构造一条居中折叠占位说明（不渲染气泡）。
+  factory _UiMessage.foldMarker(int foldedTurns) => _UiMessage(
+        role: ChatRole.system,
+        text: '',
+        time: DateTime.now(),
+        isFoldMarker: true,
+        foldedTurns: foldedTurns,
+      );
 }
 
 class ChatPage extends StatefulWidget {
@@ -152,6 +170,88 @@ class _ChatPageState extends State<ChatPage> {
     if (store == null || _busy) return;
     store.deleteSession(id);
     setState(_loadCurrentSession);
+  }
+
+  // ------------------------------------------------------------- 手动压缩（G1）
+  /// 当前 LLM 上下文的估算占用字符（所有 content 长度之和，与 compactHistory 同口径）。
+  int get _historyCharsUsed {
+    int t = 0;
+    for (final ChatMessage m in _history) {
+      t += m.content.length;
+    }
+    return t;
+  }
+
+  /// 真实跑一次 compactHistory，决定「压缩上下文」按钮的可用态与 tooltip。
+  ///
+  /// 诚实原则：只有**真能折出东西**（didCompact=true）才可点；
+  /// 无历史 / 预算内 / user 轮次不足 → 禁用并给 tooltip 说清原因，绝不渲染假动作。
+  ({bool canCompact, ContextCompaction compaction}) get _compactPlan {
+    if (_busy || _history.isEmpty) {
+      return (
+        canCompact: false,
+        compaction: const ContextCompaction(
+          messages: <ChatMessage>[],
+          didCompact: false,
+          compressedUserTurns: 0,
+          charsUsed: 0,
+        ),
+      );
+    }
+    final ContextCompaction c = AiClient.compactHistory(_history);
+    return (canCompact: c.didCompact, compaction: c);
+  }
+
+  /// 按钮 tooltip：禁用时诚实说明原因（无历史 / 未达门槛），启用时说明机制。
+  String _compactTooltip({required bool isEmpty, required bool canCompact}) {
+    if (isEmpty) return '当前会话还没有可压缩的历史';
+    if (!canCompact) {
+      return '上下文未达压缩门槛（约 $_historyCharsUsed / '
+          '预算 ${AppTokens.kAiContextBudgetChars} 字符），暂无需压缩';
+    }
+    return '压缩早期对话为占位（不删除落盘原文）';
+  }
+
+  /// 手动压缩：真实调用 compactHistory（G1 规则法折叠，不二次 LLM、不 mock）。
+  ///
+  /// 效果只作用于两层：
+  ///   * 上送层——把 `_history` 换成折叠版（占位 system + 最近 N 轮原文），
+  ///     下一次 send 就上送更小的提示；
+  ///   * 展示层——在折叠边界插入一行诚实占位说明（真实折叠条数）。
+  /// 绝不删落盘原文：ChatSessionStore 里的完整会话记录原样保留，气泡也不删。
+  void _onManualCompact() {
+    if (_busy) return;
+    final ContextCompaction c = AiClient.compactHistory(_history);
+    if (!c.didCompact) return; // 禁用态已拦截，双保险。
+    setState(() {
+      _history
+        ..clear()
+        ..addAll(c.messages);
+      _messages.insert(_foldMarkerInsertIndex(), _UiMessage.foldMarker(c.compressedUserTurns));
+    });
+    _scrollToBottom();
+  }
+
+  /// 把折叠边界映射回 `_messages`：convo（剥前导 system 后）从「上一个折叠标记之后」
+  /// 与气泡一一对齐；新标记插在被折走的最后一条气泡之后。规则与 compactHistory 共用。
+  int _foldMarkerInsertIndex() {
+    final int boundary = AiClient.findCompactBoundary(
+      _history,
+      keepRecentUserTurns: AppTokens.kAiKeepRecentUserTurns,
+    );
+    int sysEnd = 0;
+    while (sysEnd < _history.length &&
+        _history[sysEnd].role == ChatRole.system) {
+      sysEnd++;
+    }
+    int lastMarker = -1;
+    for (int i = 0; i < _messages.length; i++) {
+      if (_messages[i].isFoldMarker) lastMarker = i;
+    }
+    int insertAt = lastMarker + (boundary - sysEnd) + 1;
+    if (insertAt < 0) insertAt = 0;
+    if (insertAt > _messages.length) insertAt = _messages.length;
+    return insertAt;
   }
 
   /// 重命名会话：弹一个带输入框的对话框，预填当前标题；确认后写回 store。
@@ -409,6 +509,25 @@ class _ChatPageState extends State<ChatPage> {
         }
       case AssistantTurnDoneEvent():
         assistantMsg.streaming = false;
+      case ContextCompactedEvent(
+          :final int compressedUserTurns,
+          :final int charsUsed,
+          :final int budgetChars,
+        ):
+        // 自动压缩真实发生：与手动压缩共用统一纯函数出文案，弹一次瞬态提示。
+        // 不动 _history 本体（下一次 send 仍按阈值自动折）；这里只做可观测告知。
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              compactionStatusText(
+                compressedTurns: compressedUserTurns,
+                charsUsed: charsUsed,
+                budgetChars: budgetChars,
+              ),
+            ),
+            duration: AppTokens.kAiCompactionNotice,
+          ),
+        );
       case AiErrorEvent(:final String message):
         assistantMsg.streaming = false;
         assistantMsg.error = message;
@@ -460,9 +579,11 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  /// 会话栏：≡ 抽屉 / 当前标题 / 新建会话。全部走 touchMin 触控目标。
+  /// 会话栏：≡ 抽屉 / 当前标题 / 压缩上下文 / 新建会话。全部走 touchMin 触控目标。
   Widget _buildSessionBar() {
     final String title = _store?.current?.title ?? '';
+    final ({bool canCompact, ContextCompaction compaction}) plan = _compactPlan;
+    final bool historyEmpty = _history.isEmpty;
     return Container(
       height: AppTokens.topBarH,
       padding: const EdgeInsets.symmetric(horizontal: AppTokens.spacingS),
@@ -489,6 +610,16 @@ class _ChatPageState extends State<ChatPage> {
               overflow: TextOverflow.ellipsis,
               style: AppTokens.sectionTitle,
             ),
+          ),
+          // 手动压缩上下文：IconButton 默认 48x48 触控（≥ touchMin=44）。
+          // 无历史 / 未达压缩门槛 → 禁用 + 诚实 tooltip（不渲染假动作）。
+          IconButton(
+            icon: const Icon(Icons.unfold_less_outlined),
+            tooltip: _compactTooltip(isEmpty: historyEmpty, canCompact: plan.canCompact),
+            color: plan.canCompact
+                ? AppTokens.accent
+                : AppTokens.textAt(AppTokens.textAlphaFaint),
+            onPressed: plan.canCompact ? _onManualCompact : null,
           ),
           // AI 工具能力清单（只读对照页）入口。
           IconButton(
@@ -662,6 +793,26 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildBubble(_UiMessage m) {
+    // 折叠占位标记：不是气泡，一行居中次要色说明（真实折叠轮次）。
+    if (m.isFoldMarker) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(
+          vertical: AppTokens.spacingS,
+          horizontal: AppTokens.spacingL,
+        ),
+        child: Center(
+          child: Text(
+            '〔已折叠 ${m.foldedTurns} 轮早期对话为占位；原文仍可在上下回看，未删除〕',
+            textAlign: TextAlign.center,
+            style: AppTokens.auxiliary.copyWith(
+              fontSize: AppTokens.annotationFontSize,
+              color: AppTokens.textAt(AppTokens.textAlphaTertiary),
+            ),
+          ),
+        ),
+      );
+    }
+
     final bool isUser = m.role == ChatRole.user;
     final bool isError = m.error != null;
     // 气泡最大宽度占屏比：移动端聊天通用 0.78，避免长气泡撑满整行。

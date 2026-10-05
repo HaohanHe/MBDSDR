@@ -77,6 +77,12 @@ Finder findRich(String s) => find.byWidgetPredicate((Widget w) {
       return false;
     });
 
+/// 「压缩上下文」IconButton：byIcon 命中的是内部 Icon，需向上找到 IconButton。
+Finder get compactBtn => find.ancestor(
+      of: find.byIcon(Icons.unfold_less_outlined),
+      matching: find.byType(IconButton),
+    );
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -198,5 +204,115 @@ void main() {
     expect(find.textContaining('HTTP 401'), findsOneWidget);
     // partial 也被固化，不丢。
     expect(store.currentMessages().last.content, 'Par');
+  });
+
+  // ------------------------------------------------------------- 手动压缩上下文
+  testWidgets('压缩上下文：空历史 → 按钮禁用（诚实空态，不渲染假动作）', (tester) async {
+    final ChatSessionStore store = ChatSessionStore(kv: _MemKv());
+    await store.load();
+
+    await tester.pumpWidget(_wrap(ChatPage(
+      isConfigured: true,
+      store: store,
+      clientFactory: () => AiClient(apiKey: 'x', transport: _textTransport('ok')),
+    )));
+    await tester.pump();
+
+    final Finder btn = compactBtn;
+    expect(btn, findsOneWidget);
+    expect(tester.widget<IconButton>(btn).onPressed, isNull,
+        reason: '无历史时压缩按钮应禁用');
+  });
+
+  testWidgets('压缩上下文：历史未达预算门槛 → 按钮禁用', (tester) async {
+    final ChatSessionStore store = ChatSessionStore(kv: _MemKv());
+    await store.load();
+    final String id = store.currentId;
+    store.appendLine(id, const SessionLine(role: 'user', content: '短问题一'));
+    store.appendLine(id, const SessionLine(role: 'assistant', content: '短回答一'));
+
+    await tester.pumpWidget(_wrap(ChatPage(
+      isConfigured: true,
+      store: store,
+      clientFactory: () => AiClient(apiKey: 'x', transport: _textTransport('ok')),
+    )));
+    await tester.pump();
+
+    final Finder btn = compactBtn;
+    expect(tester.widget<IconButton>(btn).onPressed, isNull,
+        reason: '未达预算门槛应禁用');
+  });
+
+  testWidgets('压缩上下文：超预算 → 真实折叠出占位 + 真实轮次，落盘原文不删',
+      (tester) async {
+    final ChatSessionStore store = ChatSessionStore(kv: _MemKv());
+    await store.load();
+    final String id = store.currentId;
+    // 7 个长 user 轮（>6000 字符），keepRecentUserTurns=6 → 折最旧 1 轮。
+    for (int i = 0; i < 7; i++) {
+      store.appendLine(id, SessionLine(role: 'user', content: 'U$i: ${'x' * 1000}'));
+      store.appendLine(id, const SessionLine(role: 'assistant', content: 'r'));
+    }
+
+    await tester.pumpWidget(_wrap(ChatPage(
+      isConfigured: true,
+      store: store,
+      clientFactory: () => AiClient(apiKey: 'x', transport: _textTransport('ok')),
+    )));
+    await tester.pump();
+
+    final Finder btn = compactBtn;
+    expect(tester.widget<IconButton>(btn).onPressed, isNotNull,
+        reason: '超预算应可压缩');
+
+    // 折叠前：最旧 U0 原文已在落盘里。
+    expect(
+      store.messagesFor(id).any((SessionLine l) => l.content.startsWith('U0:')),
+      isTrue,
+    );
+
+    await tester.tap(btn);
+    await tester.pump();
+
+    // 真实占位：折了 1 轮（7 个 user 轮，保留最近 6 → 最旧 1 被折）。
+    expect(find.textContaining('已折叠 1 轮'), findsOneWidget);
+
+    // 落盘原文原样保留（折叠只作用上送/展示层，不删）。
+    expect(
+      store.messagesFor(id).any((SessionLine l) => l.content.startsWith('U0:')),
+      isTrue,
+      reason: '手动压缩不删落盘原文',
+    );
+    // UI 气泡也不删：最旧 U0 仍可回看。
+    expect(findRich('U0:'), findsWidgets, reason: '折叠不删气泡，原文可回看');
+  });
+
+  testWidgets('自动压缩：send 超阈值 → 弹统一文案 SnackBar（真实条数/预算）',
+      (tester) async {
+    final ChatSessionStore store = ChatSessionStore(kv: _MemKv());
+    await store.load();
+    final String id = store.currentId;
+    for (int i = 0; i < 7; i++) {
+      store.appendLine(id, SessionLine(role: 'user', content: 'OLD$i: ${'x' * 1000}'));
+      store.appendLine(id, const SessionLine(role: 'assistant', content: 'r'));
+    }
+
+    await tester.pumpWidget(_wrap(ChatPage(
+      isConfigured: true,
+      store: store,
+      clientFactory: () => AiClient(apiKey: 'x', transport: _textTransport('ok')),
+    )));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField), '新的一句');
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+
+    // 自动折叠发生 → SnackBar 用统一纯函数文案（真实轮次 + 预算具名常量 6000）。
+    expect(find.textContaining('已折叠'), findsOneWidget,
+        reason: '自动压缩应弹统一文案提示');
+    expect(find.textContaining('6000'), findsOneWidget);
   });
 }
