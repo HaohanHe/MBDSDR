@@ -245,6 +245,17 @@ abstract final class AppTokens {
   /// 对齐 kSquelchNfAlphaUp。
   static const double squelchNfAlphaUp = 0.005;
 
+  // ---------------------------------------------------------------- 实时多普勒自动补偿
+  // 与桌面 cpp/src/core/tokens.h `kDopplerMaxStepHz` 同一语义：1 Hz 闭环里每拍
+  // VFO 最多向目标频率迈进这么多 Hz，使缓慢漂移（几十 Hz/s）一拍即落、
+  // 大步跳变（过境起始/捕获/改 f0）被切成有界小片，绝不抖动调谐器。
+  // 移动端为 rtl_tcp 瘦客户端：开关默认 off，仅用户显式开启后才闭环改频。
+  /// 实时多普勒闭环每拍最大步进（Hz）。对齐桌面 kDopplerMaxStepHz = 2000。
+  static const double dopplerAutoMaxStepHz = 2000.0;
+
+  /// 实时多普勒闭环节拍（1 Hz，对齐桌面 1 Hz retune）。
+  static const Duration dopplerAutoTickPeriod = Duration(seconds: 1);
+
   // ---------------------------------------------------------------- 范围扫描
   // 对齐桌面 cpp/src/dsp/frequency_scanner.{h,cpp}：纯逻辑状态机 + 真实 RSSI 量测。
   // 本端复用真实调谐 + 静噪门真实电平，不伪造电平。

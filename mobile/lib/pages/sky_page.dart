@@ -13,6 +13,7 @@ import 'package:mbdsdr_mobile/models/radio_state.dart';
 import 'package:mbdsdr_mobile/models/satellite.dart';
 import 'package:mbdsdr_mobile/models/satellite_downlink.dart';
 import 'package:mbdsdr_mobile/pages/spacetime_status.dart';
+import 'package:mbdsdr_mobile/services/doppler_step_limiter.dart';
 import 'package:mbdsdr_mobile/services/location_service.dart';
 import 'package:mbdsdr_mobile/services/orientation_service.dart';
 import 'package:mbdsdr_mobile/services/radio_controller.dart';
@@ -77,6 +78,17 @@ class SkyController extends ChangeNotifier {
   Duration _previewOffset = Duration.zero;
   Duration _pendingOffset = Duration.zero;
   Timer? _previewTimer;
+
+  // ---- 实时多普勒自动补偿（开关默认 off；镜像桌面 DopplerStepLimiter 闭环）----
+  // 诚实边界：这是 opt-in 的连续闭环。仅当用户显式开启、接收机已连接、选中
+  // 目标在下行目录内、且非时间预览态时，才以 1 Hz 拍 setFrequencyHz；步进由
+  // [DopplerStepLimiter] 限幅（≤ AppTokens.dopplerAutoMaxStepHz/拍），绝不抖动。
+  bool _dopplerAuto = false;
+  Timer? _dopplerTimer;
+  final DopplerStepLimiter _dopplerLimiter = DopplerStepLimiter();
+
+  /// 当前闭环实际施加的 VFO 偏移（= 末拍 VFO − 标称下行，Hz）；未在补偿为 null。
+  double? _dopplerAppliedHz;
 
   // ---- 只读状态 ----
   TleGroup get group => _group;
@@ -159,6 +171,71 @@ class SkyController extends ChangeNotifier {
     } on Sgp4Exception {
       return null;
     }
+  }
+
+  // ---- 实时多普勒自动补偿状态（opt-in，默认 off）----
+  /// 开关是否开启（默认 off）。仅开启后才可能闭环改频。
+  bool get dopplerAuto => _dopplerAuto;
+
+  /// 是否正在真实闭环补偿（已成功下发过至少一拍）。用于状态卡文案「补偿中」。
+  bool get dopplerCompensating => _dopplerAppliedHz != null;
+
+  /// 闭环当前施加的 VFO 偏移（Hz）；未在补偿为 null。
+  double? get dopplerAppliedHz => _dopplerAppliedHz;
+
+  /// 开关自动多普勒补偿。开启即从当前 VFO 平滑起步拍一拍；关闭即停表、解绑，
+  /// 不把频率拉回（离开时保留当前 VFO，诚实）。未连接/无目标/无下行目录时
+  /// 开关仍记录意图但 tick 空转（见 [_dopplerTick] 门控），绝不猜频率。
+  void setDopplerAuto(bool on) {
+    _dopplerAuto = on;
+    if (on) {
+      final r = radio;
+      if (r != null && r.status == ConnectionStatus.connected) {
+        _dopplerLimiter.reset(r.freqHz.toDouble());
+      }
+      _dopplerTimer?.cancel();
+      _dopplerTimer = Timer.periodic(
+          AppTokens.dopplerAutoTickPeriod, (_) => _dopplerTick());
+      _dopplerTick(); // 开启立即拍一拍，不空等一个节拍
+    } else {
+      _dopplerTimer?.cancel();
+      _dopplerTimer = null;
+      _dopplerLimiter.disarm();
+      _dopplerAppliedHz = null;
+    }
+    notifyListeners();
+  }
+
+  /// 闭环一拍：用「当前几何时刻」单点 SGP4 得径向速度 → 目标 VFO = 标称下行 +
+  /// 实时多普勒 → 限幅器向目标步进 → 真实 setFrequencyHz。
+  ///
+  /// 任一前置缺失（未开/未连接/无目标/无站/无下行目录/SGP4 失效/时间预览中）
+  /// 都诚实空转，不改频、不编数。每拍先清 [_dopplerAppliedHz]，成功下发才回填。
+  void _dopplerTick() {
+    _dopplerAppliedHz = null;
+    if (!_dopplerAuto) return;
+    final r = radio;
+    if (r == null || r.status != ConnectionStatus.connected) return;
+    final v = selectedVisibility;
+    final st = _station;
+    if (v == null || st == null) return;
+    if (isPreview) return; // 时间预览中不改频
+    final SatDownlink? dl = satelliteDownlink(v.tle.catalogNumber);
+    if (dl == null) return; // 目录外卫星无参考载频，诚实空转
+    final double doppler;
+    try {
+      doppler = dopplerShiftFromRangeRateHz(
+        downlinkHz: dl.downlinkHz,
+        rangeRateKmS: rangeRateAt(Sgp4(v.tle), _clock().toUtc(), st),
+      );
+    } on Sgp4Exception {
+      return;
+    }
+    final targetHz = dl.downlinkHz + doppler;
+    final steppedHz = _dopplerLimiter.advance(targetHz);
+    unawaited(r.setFrequencyHz(steppedHz.round()));
+    _dopplerAppliedHz = steppedHz - dl.downlinkHz;
+    notifyListeners();
   }
 
   /// 启动监听（位置 + 姿态流）。
@@ -322,6 +399,7 @@ class SkyController extends ChangeNotifier {
     _locSub?.cancel();
     _oriSub?.cancel();
     _previewTimer?.cancel();
+    _dopplerTimer?.cancel();
     super.dispose();
   }
 }
@@ -387,6 +465,17 @@ class _SkyPageState extends State<SkyPage> {
     if (mounted) setState(() {});
   }
 
+  /// 自动补偿开关是否可用：已连接接收机 + 选中目标 + 该目标在下行目录内
+  /// （有标称载频可参考）+ 非时间预览态。任一不满足则禁用并诚实说明。
+  bool _dopplerSwitchEnabled() {
+    final r = widget.radio;
+    if (r == null || r.status != ConnectionStatus.connected) return false;
+    final v = _c.selectedVisibility;
+    if (v == null) return false;
+    if (satelliteDownlink(v.tle.catalogNumber) == null) return false;
+    return !_c.isPreview;
+  }
+
   @override
   void dispose() {
     _clockTicker?.cancel();
@@ -448,13 +537,21 @@ class _SkyPageState extends State<SkyPage> {
           const LinearProgressIndicator(minHeight: 2, color: AppTokens.accent),
         // 时空状态四格：复用真实 radio 连接/频率与选中目标；GNSS fix 流本端未接线
         // -> 走诚实空态（无 fix），绝不编造。
-        // G6：已接通选中目标的瞬时多普勒读数（仅显值、**绝不自动改频**，见
-        // SkyController.dopplerHz 诚实边界注释）；无目标/无下行频率时为 null 走空态。
+        // G6：已接通选中目标的瞬时多普勒读数（仅显值）；无目标/无下行频率时为 null。
+        // P49：在用户显式开启「实时多普勒补偿」后，该格升级为「补偿中·累计 xxx Hz」
+        // （1 Hz 闭环真实改频，步进限幅）；未开启时保持仅显值，绝不自动改频。
         SpacetimeStatusCard(
           radioConnected: widget.radio?.status == ConnectionStatus.connected,
           freqHz: widget.radio?.freqHz,
           targetName: _c.selectedName,
           dopplerHz: _c.dopplerHz,
+          dopplerActive: _c.dopplerCompensating,
+          dopplerAppliedHz: _c.dopplerAppliedHz,
+        ),
+        _DopplerAutoControl(
+          enabled: _dopplerSwitchEnabled(),
+          value: _c.dopplerAuto,
+          onChanged: _c.setDopplerAuto,
         ),
         if (_c.selectedVisibility != null)
           Expanded(child: _GuidanceCard(controller: _c)),
@@ -485,6 +582,59 @@ class _SkyPageState extends State<SkyPage> {
       ),
       Expanded(child: body),
     ]);
+  }
+}
+
+/// 实时多普勒补偿开关：opt-in 闭环改频入口（默认 off）。
+///
+/// 诚实边界：未连接/无目标/目录外卫星/时间预览态时禁用；开启后由
+/// SkyController 以 1 Hz 限幅闭环改频，关闭即停。整行最小触控高 ≥44
+/// （AppTokens.touchMin），不做更小触控区。
+class _DopplerAutoControl extends StatelessWidget {
+  const _DopplerAutoControl({
+    required this.enabled,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final bool enabled;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final String sub = enabled
+        ? '1 Hz 限幅闭环改频（对齐桌面）'
+        : '需已连接接收机并选中目录内目标';
+    return Container(
+      constraints: const BoxConstraints(minHeight: AppTokens.touchMin),
+      margin: const EdgeInsets.fromLTRB(AppTokens.spacingM, 0,
+          AppTokens.spacingM, AppTokens.spacingS),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppTokens.spacingM, vertical: AppTokens.spacingS),
+      decoration: AppTokens.cardDecoration(),
+      child: Row(children: [
+        Icon(value ? Icons.sync : Icons.tune,
+            size: AppTokens.iconSizeInlineLg,
+            color: value ? AppTokens.success : AppTokens.textSecondary),
+        const SizedBox(width: AppTokens.spacingS),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('实时多普勒补偿', style: AppTokens.body),
+              Text(sub,
+                  style: AppTokens.auxiliary.copyWith(
+                    fontSize: AppTokens.annotationFontSize,
+                    color: AppTokens.textAt(AppTokens.textAlphaTertiary),
+                  )),
+            ],
+          ),
+        ),
+        Switch(value: value, onChanged: enabled ? onChanged : null),
+      ]),
+    );
   }
 }
 

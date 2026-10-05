@@ -4841,7 +4841,10 @@ void MainWindow::onCapturePassClicked() {
     }
 
     capturedIdx_ = liveRow_;
-    dopplerLimiter_.reset(target);   // first live step continues from here
+    // The limiter tracks a pure Doppler OFFSET (Hz) on top of the nominal
+    // downlink; bind it to the predicted peak-Doppler suggestion.  The VFO was
+    // already set above to f0 + dopplerAtPeakHz == f0 + limiter.offset().
+    dopplerLimiter_.reset(p.dopplerAtPeakHz);
     // 新捕获：尚未有本过境的实时 range-rate 多普勒，诚实置 NaN（1Hz 循环下一拍写入）。
     lastSpDopplerHz_ = std::numeric_limits<double>::quiet_NaN();
 
@@ -4880,14 +4883,22 @@ void MainWindow::onDopplerCompToggled(bool on) {
             captureStatusLabel_->setText(QStringLiteral("请先捕获一个过境"));
             return;
         }
+        // Re-arm to Tracking from the current offset (no-op right after a
+        // capture reset(), but smooths a re-enable mid-return): the 1 Hz loop
+        // now drives dopplerLimiter_.advance() toward the live range-rate.
+        dopplerLimiter_.rearm();
         // The 1 Hz loop (updateLiveSatellite) now drives dopplerLimiter_.advance()
-        // and retunes the active VFO; the label flips to "锁定中·多普勒补偿…".
+        // and retunes the active VFO; the label flips to "补偿中·累计…".
         // 刚开启：还没有本周期的实时多普勒读数，诚实 NaN 直到下一拍 range-rate。
         lastSpDopplerHz_ = std::numeric_limits<double>::quiet_NaN();
     } else {
-        dopplerLimiter_.disarm();
-        // 关闭补偿：读数立即作废，时空行回到诚实空态。
-        lastSpDopplerHz_ = std::numeric_limits<double>::quiet_NaN();
+        // Switch off: do NOT hard-disarm (which would park the VFO wherever
+        // the compensated frequency happened to be).  Instead enter Returning so
+        // the 1 Hz loop glides the offset smoothly back to 0 (VFO -> nominal
+        // f0) within the step limit -- no instant tuner jump.
+        dopplerLimiter_.requestReturnToZero();
+        // 关闭补偿：1Hz 循环会把「补偿回零·累计 N Hz」逐拍写到 0；此处不立即置 NaN，
+        // 让回零过程在时空行/捕获行上诚实可见。
         // Back to the captured (but not auto-tracking) state, or un-locked.
         if (capturedIdx_ >= 0 && capturedIdx_ < passes_.size()) {
             const dsp::SatPass& p = passes_[capturedIdx_];
@@ -5019,24 +5030,53 @@ void MainWindow::updateLiveSatellite() {
             statusBar()->showMessage(msg);
 
             // ---- Live Doppler auto-compensation (real propagated range-rate) --
-            // Only while checked AND this exact pass is the one we captured AND
-            // it is within AOS..LOS.  The limiter bounds each 1 Hz retune so the
-            // tuner converges on f0+fd without dithering.
+            // The limiter owns a pure OFFSET in Hz on top of the nominal downlink
+            // f0; we apply VFO = f0 + offset() each tick.  Two modes are driven
+            // from THIS 1 Hz loop (so the smooth-return also progresses):
+            //   * compOn        -> advance(liveFd): bounded step toward the real
+            //                     range-rate Doppler; self-freezes if liveFd
+            //                     ever goes non-finite (target lost).
+            //   * comp off but -> advance(0.0): glide the offset home to 0 in
+            //     Returning         bounded steps (the checkbox was just switched
+            //                     off via requestReturnToZero()).
             const bool compOn = dopplerCompChk_ && dopplerCompChk_->isChecked();
-            if (compOn && capturedIdx_ == i && p.f0DownlinkHz > 0.0) {
-                const double target = p.f0DownlinkHz + liveFd;
-                const double stepped = dopplerLimiter_.advance(target);
+            const bool trackedPass = (capturedIdx_ == i) && p.f0DownlinkHz > 0.0;
+            if (trackedPass) {
+                const double f0 = p.f0DownlinkHz;
                 const int selVfo = engine_->selectedVfoId();
-                if (selVfo >= 0) engine_->vfoSetOffset(selVfo, stepped);
-                // 缓存真实多普勒补偿值（range-rate 推出的 liveFd）供时空行显示。
-                lastSpDopplerHz_ = liveFd;
-                if (sbVfo_) sbVfo_->setText(
-                    QString("%1 MHz").arg(stepped / 1.0e6, 0, 'f', 4));
-                captureStatusLabel_->setText(
-                    QStringLiteral("锁定中·多普勒补偿 %1%2 Hz")
-                        .arg(liveFd >= 0.0 ? QStringLiteral("+")
-                                           : QStringLiteral("−"))
-                        .arg(std::llround(std::fabs(liveFd))));
+                const auto limState = dopplerLimiter_.state();
+                if (compOn) {
+                    const double off = dopplerLimiter_.advance(liveFd);
+                    if (selVfo >= 0) engine_->vfoSetOffset(selVfo, f0 + off);
+                    // 缓存「引擎实际施加」的累计 offset（纯值），非原始 liveFd。
+                    lastSpDopplerHz_ = off;
+                    if (sbVfo_) sbVfo_->setText(
+                        QString("%1 MHz").arg((f0 + off) / 1.0e6, 0, 'f', 4));
+                    const QString sign = off >= 0.0 ? QStringLiteral("+")
+                                                    : QStringLiteral("−");
+                    if (dopplerLimiter_.frozen()) {
+                        captureStatusLabel_->setText(
+                            QStringLiteral("补偿中·保持（目标丢失）累计 %1%2 Hz")
+                                .arg(sign).arg(std::llround(std::fabs(off))));
+                    } else {
+                        captureStatusLabel_->setText(
+                            QStringLiteral("补偿中·累计 %1%2 Hz")
+                                .arg(sign).arg(std::llround(std::fabs(off))));
+                    }
+                } else if (limState == core::DopplerLimiterState::Returning) {
+                    const double off = dopplerLimiter_.advance(0.0);
+                    if (selVfo >= 0) engine_->vfoSetOffset(selVfo, f0 + off);
+                    lastSpDopplerHz_ = off;
+                    if (sbVfo_) sbVfo_->setText(
+                        QString("%1 MHz").arg((f0 + off) / 1.0e6, 0, 'f', 4));
+                    const QString sign = off >= 0.0 ? QStringLiteral("+")
+                                                    : QStringLiteral("−");
+                    captureStatusLabel_->setText(
+                        QStringLiteral("补偿回零·累计 %1%2 Hz")
+                            .arg(sign).arg(std::llround(std::fabs(off))));
+                }
+                // comp off & Idle: leave the VFO parked at the capture-set
+                // frequency and do not retune (honest: not compensating).
             }
         }
     }

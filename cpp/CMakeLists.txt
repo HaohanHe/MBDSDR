@@ -747,6 +747,14 @@ target_include_directories(test_sat_capture PRIVATE src)
 target_link_libraries(test_sat_capture PRIVATE Qt6::Network Qt6::Concurrent Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME sat_capture COMMAND test_sat_capture)
 
+# Deterministic DopplerStepLimiter safety loop (step clamp / freeze-hold on a
+# non-finite target loss / smooth return-to-zero) driven over a synthetic LEO
+# Doppler curve.  Pure-header, offscreen, no radio / no SGP4.
+add_executable(test_doppler_limiter tests/test_doppler_limiter.cpp)
+target_include_directories(test_doppler_limiter PRIVATE src)
+target_link_libraries(test_doppler_limiter PRIVATE Qt6::Gui Qt6::Core)
+add_test(NAME doppler_limiter COMMAND test_doppler_limiter)
+
 add_executable(test_adsb_cpr tests/test_adsb_cpr.cpp src/dsp/adsb_decoder.cpp)
 target_include_directories(test_adsb_cpr PRIVATE src)
 target_link_libraries(test_adsb_cpr PRIVATE Qt6::Core)

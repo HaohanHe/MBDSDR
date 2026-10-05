@@ -100,31 +100,36 @@ int main() {
     }
 
     // ------------------------------------------------------------------
-    // 3. DopplerStepLimiter: bounded, radar-style convergence.
+    // 3. DopplerStepLimiter: bounded, radar-style convergence (now a pure
+    //    OFFSET in Hz on top of the nominal downlink).
     // ------------------------------------------------------------------
     {
         DopplerStepLimiter lim;   // default maxStep = tokens::kDopplerMaxStepHz
         check(std::fabs(lim.maxStep() - 2000.0) < 1e-9,
               "limiter default maxStep = kDopplerMaxStepHz (2000 Hz)");
-        lim.reset(100.0e6);
-        // A 5000 Hz jump must be sliced into 2000 Hz steps, not slammed.
-        double s1 = lim.advance(100.0e6 + 5000.0);
-        check(std::fabs(s1 - (100.0e6 + 2000.0)) < 1e-6,
+        lim.reset(0.0);   // start at zero Doppler offset
+        check(lim.state() == DopplerLimiterState::Tracking && !lim.frozen(),
+              "reset() binds Tracking at the given offset");
+        // A 5000 Hz offset target must be sliced into 2000 Hz steps, not slammed.
+        double s1 = lim.advance(5000.0);
+        check(std::fabs(s1 - 2000.0) < 1e-6,
               "limiter step 1 caps at +maxStep (radar convergence)");
-        double s2 = lim.advance(100.0e6 + 5000.0);
-        check(std::fabs(s2 - (100.0e6 + 4000.0)) < 1e-6,
+        double s2 = lim.advance(5000.0);
+        check(std::fabs(s2 - 4000.0) < 1e-6,
               "limiter step 2 continues bounded");
-        double s3 = lim.advance(100.0e6 + 5000.0);
-        check(std::fabs(s3 - (100.0e6 + 5000.0)) < 1e-6,
+        double s3 = lim.advance(5000.0);
+        check(std::fabs(s3 - 5000.0) < 1e-6,
               "limiter lands exactly once within one step");
         // Small live corrections (<< maxStep) land immediately (no lag).
-        double s4 = lim.advance(100.0e6 + 5050.0);
-        check(std::fabs(s4 - (100.0e6 + 5050.0)) < 1e-6,
+        double s4 = lim.advance(5050.0);
+        check(std::fabs(s4 - 5050.0) < 1e-6,
               "sub-step live correction lands immediately");
-        // Disarm re-binds on the next advance.
+        // disarm() is a hard stop: Idle at offset 0; the next advance() re-binds.
         lim.disarm();
-        double s5 = lim.advance(200.0e6);
-        check(std::fabs(s5 - 200.0e6) < 1e-6, "disarm -> re-binds to new target");
+        check(lim.offset() == 0.0 && lim.state() == DopplerLimiterState::Idle,
+              "disarm() releases to Idle at offset 0");
+        double s5 = lim.advance(300.0);
+        check(std::fabs(s5 - 300.0) < 1e-6, "disarm -> Idle advance re-binds to target");
     }
 
     // ------------------------------------------------------------------
@@ -154,32 +159,30 @@ int main() {
         if (passes.isEmpty()) { std::printf("test_sat_capture: %d FAILURE(S)\n", ++failures); return 1; }
         const SatPass p = passes.first();
 
-        // Capture once: VFO binds to f0 + peak-Doppler suggestion.
-        const double captureFreq = captureTargetHz(p.f0DownlinkHz > 0 ? p.f0DownlinkHz : f0,
-                                                   p.dopplerAtPeakHz);
+        // Capture once: the limiter binds to the predicted peak-Doppler OFFSET;
+        // the UI would set VFO = f0 + offset() (= f0 + dopplerAtPeakHz).
         DopplerStepLimiter lim;
-        lim.reset(captureFreq);
+        lim.reset(p.dopplerAtPeakHz);
 
-        // Walk the pass at 30 s steps.  On capture the VFO binds to
-        // f0 + PEAK-Doppler; at AOS the live fd is several kHz away, so the
-        // limiter converges in bounded 2 kHz/s steps (a deliberate transient,
-        // NOT a slam).  We assert (a) every per-tick move is bounded by the
-        // token, and (b) once past the AOS/LOS transients the loop lands
-        // EXACTLY on f0+dopplerHz(f0, rangeRate) every tick.
+        // Walk the pass at 30 s steps.  On capture the offset binds to the PEAK
+        // Doppler; at AOS the live fd is several kHz away, so the limiter
+        // converges in bounded 2 kHz/s steps (a deliberate transient, NOT a
+        // slam).  We assert (a) every per-tick offset move is bounded by the
+        // token, and (b) once past the AOS/LOS transients the loop lands EXACTLY
+        // on dopplerHz(f0, rangeRate) every tick.
         double maxPerMove = 0.0, steadyMaxGap = 0.0;
         int tick = 0;
         const int totalTicks = static_cast<int>(p.aos.secsTo(p.los) / 30) + 1;
         for (qint64 s = 0; s <= p.aos.secsTo(p.los); s += 30, ++tick) {
             QDateTime t = p.aos.addSecs(s);
             Topocentric tp = client.propagateAt(t, tle, staLat, staLon);
-            const double fd = dopplerHz(f0, tp.rangeRateKmS);
-            const double target = f0 + fd;
-            const double before = lim.current();
-            const double stepped = lim.advance(target);
+            const double fd = dopplerHz(f0, tp.rangeRateKmS);   // desired offset
+            const double before = lim.offset();
+            const double stepped = lim.advance(fd);
             maxPerMove = std::max(maxPerMove, std::fabs(stepped - before));
             // Skip the first/last few ticks (AOS/LOS convergence transient).
             if (tick >= 4 && tick <= totalTicks - 5)
-                steadyMaxGap = std::max(steadyMaxGap, std::fabs(stepped - target));
+                steadyMaxGap = std::max(steadyMaxGap, std::fabs(stepped - fd));
         }
         std::printf("  max per-tick move: %.1f Hz (token %.0f)\n",
                     maxPerMove, lim.maxStep());
