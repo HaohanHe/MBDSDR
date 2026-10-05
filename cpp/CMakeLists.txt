@@ -1637,3 +1637,63 @@ target_include_directories(test_ai_sessions_prod PRIVATE src build/test_ai_sessi
 target_link_libraries(test_ai_sessions_prod PRIVATE Qt6::Test Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
 add_test(NAME ai_sessions_prod COMMAND test_ai_sessions_prod)
 set_tests_properties(ai_sessions_prod PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# ============================================================================
+# Phase38 · Stage 3 -- test-suite stability: slow / heavy-UI labeling
+# ----------------------------------------------------------------------------
+# A plain `ctest` still runs ALL 127 tests; this block only attaches LABELS so
+# the heavy tier can be filtered out of the fast inner loop. Nothing here is
+# DISABLED (the 127/127 gate is unchanged).
+#
+# Measured offscreen baseline (QT_QPA_PLATFORM=offscreen, real run, no cache):
+#   total ~167s. The wall-clock is dominated by a handful of DSP/e2e tests that
+#   stream IQ / fixed-pump, NOT by MainWindow construction -- offscreen a full
+#   MainWindow builds in well under 1s (the ~11s figure is the *Python* desktop
+#   suite's AMR training-data cost, which has no C++ analogue here; the C++ AI
+#   agent is LLM-only and boots no builtin training data).
+#
+# Split rule (documented in docs/learn/phase38/test-stability.md):
+#   * label `mainwindow` -- a test that cold-starts the FULL production
+#     mbdsdr::MainWindow (engine + agent + timers + loopback control-HTTP). This
+#     is the heavy-UI *integration* tier, not a pure unit test.
+#   * label `slow`      -- the tests you do NOT want in a fast inner loop. Union
+#       (a) the `mainwindow` integration tier above, and
+#       (b) empirically slow DSP/e2e tests (offscreen wall-clock >= 3s).
+#
+#   Fast inner loop  : cd build && QT_QPA_PLATFORM=offscreen ctest -LE slow
+#   Heavy tier only  : cd build && QT_QPA_PLATFORM=offscreen ctest -L  slow
+#   Full 127 gate    : cd build && QT_QPA_PLATFORM=offscreen ctest
+# ============================================================================
+
+# Tests that cold-start the production MainWindow (heavy-UI integration tier).
+set(MBDSDR_MAINWINDOW_TESTS
+    ui_integration
+    shortcuts
+    device_ui
+    phase21_empty_state
+    sky_time_slider
+    control_http_e2e_prod
+    ai_sessions_prod
+    ui_audit)
+
+# Empirically slow offscreen DSP/e2e tests (>= 3s wall clock in the 127 baseline):
+#   e2e_smoke 42s (fixed 6s event-loop pump + 3s engine teardown wait + an
+#     under-fed 20ms/8KB loopback rtl_tcp stream), engine_audio_e2e 35s,
+#   engine_integration 13s, scan_link_engine 6.7s, apt 4.8s, digital_e2e 4.8s,
+#   control_hub_remote 4.5s, network_audio_sink 3.7s, engine_empty_state 3.7s,
+#   engine_hotplug 3.5s. These are left enabled (no assertion change); they are
+#   just tagged so a fast loop can skip them.
+set(MBDSDR_SLOW_DSP_TESTS
+    e2e_smoke
+    engine_audio_e2e
+    engine_integration
+    scan_link_engine
+    apt
+    digital_e2e
+    control_hub_remote
+    network_audio_sink
+    engine_empty_state
+    engine_hotplug)
+
+set_tests_properties(${MBDSDR_MAINWINDOW_TESTS} PROPERTIES LABELS "mainwindow;slow")
+set_tests_properties(${MBDSDR_SLOW_DSP_TESTS} PROPERTIES LABELS "slow")

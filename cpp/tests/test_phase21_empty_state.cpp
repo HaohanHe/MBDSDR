@@ -17,6 +17,7 @@
 //   4. Narrow window: the onboarding card stays inside the window width
 //      (elastic tokens::scaled, no horizontal overflow).
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QtTest>
@@ -48,6 +49,19 @@ static bool waitFor(const std::function<bool()>& pred, int timeoutMs) {
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     app.setStyleSheet(mbdsdr::tokens::buildDarkQss());
+
+    // Phase38: redirect ALL QSettings("MBDSDR","MBDSDR") to a throwaway,
+    // PID-unique dir. Previously this test wrote ui/onboardingDismissed=true into
+    // the developer's REAL user config (and the MainWindow dtor wrote geometry /
+    // rx / vfo state back), leaking across runs. The test's first-run card
+    // assertions need a FRESH store (key absent -> card visible), so we do NOT
+    // pre-seed onboardingDismissed; the remove() below is a harmless no-op here.
+    {
+        const QString cfgDir = QDir::tempPath() + "/mbdsdr_cfg_phase21_" +
+                               QString::number(QCoreApplication::applicationPid());
+        QDir().mkpath(cfgDir);
+        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, cfgDir);
+    }
 
     int failures = 0;
     auto check = [&](bool cond, const char* msg) {
