@@ -139,4 +139,103 @@ void main() {
     expect(fired, isFalse);
     expect(ctl.scanning, isFalse);
   });
+
+  test('下行方向：从 endHz 向 startHz 递减调谐（对齐桌面 ScanDirection::Down）',
+      () async {
+    final client = _FakeClient();
+    final ctl = RadioController(sink: NoOpSink(), clientFactory: () => client);
+    await ctl.connect('127.0.0.1', 1234);
+
+    // 3 个步进点：144.000 / 144.050 / 144.100 MHz。下行应从高到低调。
+    await ctl.startScan(
+      startHz: 144000000,
+      endHz: 144100000,
+      stepHz: 50000,
+      thresholdDbfs: -300,
+      dwellMs: 20,
+      direction: ScanDirection.down,
+    );
+
+    expect(client.tunedHz.sublist(client.tunedHz.length - 3),
+        [144100000, 144050000, 144000000]);
+    expect(ctl.scanning, isFalse);
+    await ctl.disconnect();
+    client.close();
+  });
+
+  test('暂停：冻结调谐；恢复：从暂停处继续（对齐桌面 pause/resume）', () async {
+    final client = _FakeClient();
+    final ctl = RadioController(sink: NoOpSink(), clientFactory: () => client);
+    await ctl.connect('127.0.0.1', 1234);
+
+    // 大范围、短驻留，便于中途暂停观察冻结。
+    final future = ctl.startScan(
+      startHz: 100000000,
+      endHz: 200000000,
+      stepHz: 10000,
+      thresholdDbfs: -300,
+      dwellMs: 30,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+
+    ctl.pauseScan();
+    expect(ctl.scanPaused, isTrue);
+    final frozen = client.tunedHz.length;
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    // 暂停期间不得继续调谐（冻结当前频点与驻留计时）。
+    expect(client.tunedHz.length, frozen,
+        reason: '暂停期间应冻结，不得继续调谐');
+
+    ctl.resumeScan();
+    expect(ctl.scanPaused, isFalse);
+    final resumed = client.tunedHz.length;
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(client.tunedHz.length, greaterThan(resumed),
+        reason: '恢复后应继续调谐');
+
+    ctl.stopScan();
+    await future;
+    expect(ctl.scanning, isFalse);
+    expect(ctl.scanPaused, isFalse);
+    await ctl.disconnect();
+    client.close();
+  });
+
+  test('命中停留：命中频点额外驻留 hitHoldMs，总耗时显著变长', () async {
+    final client = _FakeClient();
+    final ctl = RadioController(sink: NoOpSink(), clientFactory: () => client);
+    await ctl.connect('127.0.0.1', 1234);
+
+    // 基线：无命中停留（2 点，每点 dwell 15ms ≈ 30ms 量级）。
+    final sw0 = Stopwatch()..start();
+    await ctl.startScan(
+      startHz: 144000000,
+      endHz: 144050000,
+      stepHz: 50000,
+      thresholdDbfs: -300,
+      dwellMs: 15,
+    );
+    sw0.stop();
+    final noHold = sw0.elapsedMilliseconds;
+
+    // 命中停留：门限压到极低使每点都命中；每点命中后再驻留 200ms。
+    final sw1 = Stopwatch()..start();
+    await ctl.startScan(
+      startHz: 145000000,
+      endHz: 145050000,
+      stepHz: 50000,
+      thresholdDbfs: -300,
+      dwellMs: 15,
+      hitHoldMs: 200,
+    );
+    sw1.stop();
+    final withHold = sw1.elapsedMilliseconds;
+
+    expect(noHold, lessThan(200),
+        reason: '无命中停留应很快结束：实际 ${noHold}ms');
+    expect(withHold, greaterThan(noHold + 250),
+        reason: '有命中停留应显著更长：实际 ${withHold}ms');
+    await ctl.disconnect();
+    client.close();
+  });
 }

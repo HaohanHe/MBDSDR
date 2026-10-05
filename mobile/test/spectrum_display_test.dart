@@ -271,10 +271,18 @@ class _FakeRadio extends ChangeNotifier implements RadioApi {
           required int endHz,
           required int stepHz,
           required double thresholdDbfs,
-          int dwellMs = 300}) async {}
+          int dwellMs = 300,
+          ScanDirection direction = ScanDirection.up,
+          int hitHoldMs = 0}) async {}
 
   @override
   void stopScan() {}
+  @override
+  bool get scanPaused => false;
+  @override
+  void pauseScan() {}
+  @override
+  void resumeScan() {}
 }
 
 /// 已连接 fake：持续吐合成频谱帧（测试专用，不进产品代码）。
@@ -394,10 +402,18 @@ class _FakeConnectedRadio extends ChangeNotifier implements RadioApi {
           required int endHz,
           required int stepHz,
           required double thresholdDbfs,
-          int dwellMs = 300}) async {}
+          int dwellMs = 300,
+          ScanDirection direction = ScanDirection.up,
+          int hitHoldMs = 0}) async {}
 
   @override
   void stopScan() {}
+  @override
+  bool get scanPaused => false;
+  @override
+  void pauseScan() {}
+  @override
+  void resumeScan() {}
 
   @override
   void dispose() {

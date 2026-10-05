@@ -533,4 +533,82 @@ class TestSsdvOnboardSkeleton:
                 im.load()  # 仍可被标准解码器打开（缺失 MCU 处花屏）
 
 
+# ---------------------------------------------------------------------------
+# 9. SSDV IQ 物理层一条命令（Phase43 块2）
+#
+# 云内用合成 BPSK IQ 跑通：SSDV 包字节 → BPSK 调制到复 IQ（带内中频偏移）
+#   → onboard step_decode(ssdv_input="iq") 带内下变频 + BPSK 解调 → 字节流
+#   → SsdvDecoder 自同步 → MCU 重组 JPEG。确定性、固定种子，无真机/无活动参数。
+# 真机符号率/中频偏移由 --ssdv-symrate/--ssdv-tone-offset 传入（代码不硬编码）。
+# ---------------------------------------------------------------------------
+PHY_FS = 48_000.0
+PHY_SYMR = 4_800.0
+PHY_F_IF = 3_000.0
+
+
+def _ssdv_packets_image(w=48, h=48):
+    from mbdsdr_ai.ssdv_decoder import SsdvEncoder, TYPE_NORMAL
+    arr = np.zeros((h, w, 3), dtype=np.uint8)
+    arr[..., 0] = np.linspace(0, 255, w, dtype=np.uint8)
+    arr[..., 1] = np.linspace(0, 255, h, dtype=np.uint8)[:, None]
+    arr[..., 2] = 128
+    enc = SsdvEncoder(callsign="PHYTST", image_id=5, quality=4, mcu_mode=3,
+                      pkt_type=TYPE_NORMAL)
+    return enc.encode_image(arr), w, h
+
+
+class TestSsdvIqPhysicalLayer:
+    """合成 BPSK IQ → onboard ssdv iq 物理层 → JPEG 全链（确定性）。"""
+
+    def test_ssdv_iq_chain_demods_to_jpeg(self, tmp_out_dir):
+        from PIL import Image
+        from mbdsdr_ai.ccsds_rx import bytes_to_bits_msb
+        from mbdsdr_ai.ssdv_phy import bpsk_modulate_bits
+        packets, w, h = _ssdv_packets_image()
+        raw = b"".join(packets)
+        bits = bytes_to_bits_msb(raw)
+        iq = bpsk_modulate_bits(bits, PHY_FS, PHY_SYMR, f_if=PHY_F_IF)
+
+        iq_path = os.path.join(tmp_out_dir, "ssdv_capture.sigmf-data")
+        iq.tofile(iq_path)
+
+        dec = step_decode(iq_path, "ssdv", PHY_FS, None,
+                          ssdv_input="iq", ssdv_symrate=PHY_SYMR,
+                          ssdv_tone_offset=PHY_F_IF)
+        assert dec.status == "PASS", f"SSDV IQ 物理层应 PASS: {dec.status} {dec.message}"
+        jpg = dec.detail.get("_ssdv_jpeg_path")
+        assert jpg and os.path.exists(jpg) and os.path.getsize(jpg) > 100
+        ssdv = dec.detail.get("ssdv", {})
+        assert ssdv.get("missing_mcus") == [], f"干净信号不应缺 MCU: {ssdv.get('missing_mcus')}"
+        assert ssdv.get("dialect") == "fsphil"
+        with Image.open(jpg) as im:
+            im.load()
+            assert im.size == (w, h)
+
+    def test_ssdv_iq_noise_honest_empty(self, tmp_out_dir):
+        """纯噪声 IQ：物理层解不出有效包 → 诚实 FAIL，不伪造 JPEG。"""
+        rng = np.random.default_rng(20261005)
+        iq = (rng.standard_normal(int(PHY_FS)) + 1j * rng.standard_normal(int(PHY_FS)))
+        iq = iq.astype(np.complex64)
+        iq_path = os.path.join(tmp_out_dir, "ssdv_noise.sigmf-data")
+        iq.tofile(iq_path)
+        dec = step_decode(iq_path, "ssdv", PHY_FS, None,
+                          ssdv_input="iq", ssdv_symrate=PHY_SYMR,
+                          ssdv_tone_offset=PHY_F_IF)
+        assert dec.status == "FAIL", f"纯噪声应诚实 FAIL: {dec.status} {dec.message}"
+        assert "_ssdv_jpeg_path" not in dec.detail
+
+    def test_ssdv_iq_requires_symrate(self, tmp_out_dir):
+        """IQ 物理层未给符号率 → 诚实 FAIL（不猜速率、不硬编码）。"""
+        iq_path = os.path.join(tmp_out_dir, "ssdv_x.sigmf-data")
+        np.zeros(1024, dtype=np.complex64).tofile(iq_path)
+        dec = step_decode(iq_path, "ssdv", PHY_FS, None,
+                          ssdv_input="iq", ssdv_symrate=0.0)
+        assert dec.status == "FAIL"
+        assert "symrate" in dec.message.lower() or "符号率" in dec.message
+
+
+
+
+
 

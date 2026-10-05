@@ -179,3 +179,29 @@ SSDV 物理层 IQ→包）均无硬件、未在真实过境中验证，须活动
 - ✅ 无虚构：所有真机项均标【待真机确认】；离线/合成证据均为本次实跑留证。
 - ✅ 全文仅用「活动/通联/接收」措辞，未出现赛事类字样。
 - ✅ 未 `git add`（尤其禁 `add -A`）、**未 commit/push**；改动文件见 §4。
+
+---
+
+## 7. Phase43 活动解码冲刺更新（2026-10-05）
+
+### 新能力就绪状态
+| 能力 | 状态 | 证据 |
+|---|---|---|
+| **SSTV Robot36 解码**（120 两行组×240 行，per_line/grouped 双路径） | ✅ 已就绪 | `mbdsdr_ai/sstv_decoder.py:516 _decode_robot36`；内置确定性组首合成器往返（vis=8/119 markers/234 行） |
+| **SSTV 自动制式识别**（行数主判+VIS 旁证） | ✅ 已就绪 | `sstv_decoder.py:404 _identify_sstv_mode`（改于 :458）：Robot72 逐行 239 markers vs Robot36 组首 119 markers，阈值 180；real_sstv.wav→Robot72 ✓ |
+| **SSDV 物理层一条命令** | ✅ 已就绪（合成链路） | `mbdsdr_ai/ssdv_phy.py:51 demod_bpsk`（NCO 带内下变频+盲符号定时）；`onboard.py --mode ssdv --ssdv-input iq` 云内全链 PASS（合成 IQ→BPSK→字节→JPEG 48×48，MCU 36/36，方言 fsphil） |
+| **SSDV DSLWP 218B 方言**（Viterbi/RS 级联） | ⚠ 待真机/待补 | 完整 CCSDS 级联未在云内跑（fsphil 256B 自同步方言仅证明物理层→JPEG 通）；BPSK 载波恢复/0-π 模糊未做 |
+
+### §5 第 4 项更新（原"SSDV 现场物理层预案"）
+- ~~确认 gr_satellites / ccsds_rx.py 零件~~ → **现有一条命令**：
+  `python3 tools/onboarding/onboard.py --step decode --mode ssdv --sr 225000 --sigmf-data <IQ> --ssdv-input iq --ssdv-symrate 9600 --ssdv-tone-offset <f> --out-dir out/`
+  （符号率/频偏活动日按官方公告填 docs 活动参数；真机 rtl_sdr 联调未做——活动期最大操作风险从"无链路"降为"真机参数与 CCSDS 级联"）
+
+### TLE 重拉时机提醒（不变，重申）
+- 10-07 活动前一天：重拉 JAMX01 + ASRTU-1 TLE 粘进 pass_predict.py tle_lines；填本机经纬度锁定 ≥30° 仰角过境；等官方频率公告填 downlink_hz。
+
+### 真机步骤（Phase43 后最终版）
+1. 10-07：重拉 TLE / 填站坐标 / 等频率公告 / 现场设备自检
+2. 活动日 SSTV：onboard --mode sstv（一条命令，Robot36/72 自动识别）
+3. 活动日 SSDV：rtl_sdr 录 IQ（≥225k）→ onboard --mode ssdv --ssdv-input iq（--ssdv-symrate 按公告）→ JPEG
+4. 真机未验证项如实汇总（SSTV OTA / SSDV rtl_sdr 联调 / CCSDS 级联）→ 见 open-items.md A 类
