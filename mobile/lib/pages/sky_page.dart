@@ -790,7 +790,9 @@ class _GuidanceCard extends StatelessWidget {
           const Spacer(),
           if (aligned)
             const Text('已对准 ✓',
-                style: TextStyle(color: AppTokens.success, fontWeight: FontWeight.w600)),
+                style: TextStyle(
+                    color: AppTokens.success,
+                    fontWeight: AppTokens.weightSemi)),
         ]),
         const SizedBox(height: AppTokens.spacingS),
         Text(azText, style: AppTokens.body),

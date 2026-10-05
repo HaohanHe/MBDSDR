@@ -18,12 +18,12 @@ namespace ui {
 namespace {
 // Local geometry constants (base px, scaled() at runtime per DESIGN_RULES).
 constexpr int kHeaderH     = 26;   // reserved top strip for status row + buttons
-constexpr int kPad         = 8;    // inset around the image area
+constexpr int kPad         = tokens::kSpacingM;   // inset around the image area (==8)
 constexpr int kPresetCount  = 3;   // 137.62 / 137.9125 / 137.1 MHz NOAA passes
 } // namespace
 
 WeatherSatPanel::WeatherSatPanel(QWidget* parent) : QWidget(parent) {
-    setMinimumSize(tokens::scaled(320), tokens::scaled(240));
+    setMinimumSize(tokens::scaled(tokens::kWeatherPanelMinW), tokens::scaled(tokens::kWeatherPanelMinH));
     setAutoFillBackground(false);
 
     auto* root = new QVBoxLayout(this);

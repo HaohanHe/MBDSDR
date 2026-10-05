@@ -228,9 +228,10 @@ class _SettingsPageState extends State<SettingsPage> {
             },
           ),
         ),
-        // 音量百分比定宽列：3 位数字右对齐所需宽度。
+        // 音量百分比定宽列：3 位数字右对齐所需宽度（≥ touchMin 的读位列，
+        // 取触控最小宽 token 派生，禁裸写 44）。
         SizedBox(
-          width: 44,
+          width: AppTokens.touchMin,
           child: Text(
             '${(shown * 100).round()}%',
             style: AppTokens.auxiliary,

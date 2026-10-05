@@ -110,6 +110,12 @@ abstract final class AppTokens {
   /// 行内中图标（18px 档）。
   static const double iconSizeInlineLg = 18;
 
+  /// 状态指示小圆点直径（连接状态点 / 设备信息状态点）。
+  /// 圆点与其后文字的相邻间隙沿用同一尺寸（视觉上点=间隙宽，节奏紧凑）。
+  /// 跨 connection_status_line / device_info_card 两处复用，禁止散落裸写
+  /// `spacingS + 2`（=6）。非 4pt 栅格间距，是图形直径，故单列 token。
+  static const double statusDotSize = 6;
+
   /// 空态卡片最大宽度（居中约束）。
   static const double emptyStateMaxWidth = 360;
 

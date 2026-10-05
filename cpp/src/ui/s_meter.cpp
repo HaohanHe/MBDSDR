@@ -9,7 +9,7 @@ namespace mbdsdr {
 namespace ui {
 
 SMeterWidget::SMeterWidget(QWidget* parent) : QWidget(parent) {
-    setMinimumHeight(tokens::scaled(34));
+    setMinimumHeight(tokens::scaled(tokens::kSMeterH));
 }
 
 int SMeterWidget::sUnitsAboveNoise(double signalDbfs, double noiseFloorDbfs) {

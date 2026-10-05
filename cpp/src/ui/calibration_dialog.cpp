@@ -176,8 +176,8 @@ void CalibrationDialog::setKnownFrequencyHz(double hz) {
 // --------------------------------------------------------------------- UI --
 void CalibrationDialog::buildUi() {
     setWindowTitle(QString::fromUtf8("频率校准向导"));
-    setMinimumSize(tokens::scaled(tokens::kSettingsMinW + 180),
-                   tokens::scaled(420));
+    setMinimumSize(tokens::scaled(tokens::kSettingsMinW + tokens::kCalibMinWExtra),
+                   tokens::scaled(tokens::kCalibMinH));
     setStyleSheet(tokens::buildDarkQss());
 
     auto* root = new QVBoxLayout(this);
@@ -327,7 +327,7 @@ void CalibrationDialog::buildPageGuide() {
 
     guideLabel_ = new QLabel(page);
     guideLabel_->setWordWrap(true);
-    guideLabel_->setMinimumHeight(tokens::scaled(120));
+    guideLabel_->setMinimumHeight(tokens::scaled(tokens::kCalibReadoutMinH));
     guideLabel_->setObjectName(QStringLiteral("guideText"));
     lay->addWidget(guideLabel_);
     lay->addStretch(1);
@@ -369,7 +369,7 @@ void CalibrationDialog::buildPageMeasure() {
     {
         QFont f = ppmLabel_->font();
         f.setPointSizeF(tokens::kFontDisplayPt);
-        f.setWeight(QFont::DemiBold);
+        f.setWeight(static_cast<QFont::Weight>(tokens::kWeightSemi));
         ppmLabel_->setFont(f);
     }
     deltaLabel_ = new QLabel(QString::fromUtf8("残余频偏 —"), page);
@@ -416,7 +416,7 @@ void CalibrationDialog::buildPageApply() {
     compareLabel_ = new QLabel(
         QString::fromUtf8("尚未测得有效参考载波。请返回测量页完成一次锁定。"), page);
     compareLabel_->setWordWrap(true);
-    compareLabel_->setMinimumHeight(tokens::scaled(120));
+    compareLabel_->setMinimumHeight(tokens::scaled(tokens::kCalibReadoutMinH));
     compareLabel_->setObjectName(QStringLiteral("monoInfo"));
     lay->addWidget(compareLabel_);
     lay->addStretch(1);

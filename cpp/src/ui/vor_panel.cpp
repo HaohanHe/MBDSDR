@@ -17,13 +17,15 @@ namespace ui {
 namespace {
 // Local geometry (base px, scaled() at runtime).
 constexpr int kHeaderH  = 26;   // top strip: mode hint + lock badge
-constexpr int kReadoutH  = 44;   // bottom strip: hero radial + ID + quality
+// Bottom read-out strip meets the logical touch minimum (>=44px tap target);
+// derive from the shared token rather than re-hardcoding 44.
+constexpr int kReadoutH  = tokens::kTouchMinDim;
 constexpr int kDialPad   = 10;   // inset around the compass ring
 constexpr double kDeg2Rad = 3.14159265358979323846 / 180.0;
 } // namespace
 
 VorPanel::VorPanel(QWidget* parent) : QWidget(parent) {
-    setMinimumSize(tokens::scaled(200), tokens::scaled(240));
+    setMinimumSize(tokens::scaled(tokens::kVorPanelMinW), tokens::scaled(tokens::kVorPanelMinH));
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(tokens::scaled(tokens::kSpacingM),

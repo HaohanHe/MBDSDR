@@ -44,11 +44,11 @@ class ConnectionStatusLine extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Container(
-          width: AppTokens.spacingS + 2,
-          height: AppTokens.spacingS + 2,
+          width: AppTokens.statusDotSize,
+          height: AppTokens.statusDotSize,
           decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
         ),
-        const SizedBox(width: AppTokens.spacingS + 2),
+        const SizedBox(width: AppTokens.statusDotSize),
         Flexible(
           child: Text(
             text,
