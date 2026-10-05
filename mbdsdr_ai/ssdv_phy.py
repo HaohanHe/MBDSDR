@@ -131,10 +131,14 @@ def _gardner_symbols(r: np.ndarray, sps: float,
         ip += step
         cnt += 1
 
+    # warmup 期环路尚未收敛（积分器未开、匹配滤波器边沿过渡），这几个起始符号是
+    # 采集瞬态、不可靠——裁掉，避免给 ASM 帧同步引入 1 位偏移。
+    bits = bits[warmup:]
+    errs = errs[warmup:]
     diag.n_symbols = len(bits)
-    tail = np.asarray(errs[max(warmup, len(errs) - max(8, len(errs) // 4)):])
+    tail = np.asarray(errs[max(0, len(errs) - max(8, len(errs) // 4)):])
     diag.residual_err = float(np.mean(np.abs(tail))) if tail.size else float("nan")
-    diag.drift_samples = float(ip - (init_phase + len(bits) * sps))
+    diag.drift_samples = float(ip - (init_phase + (len(bits) + warmup) * sps))
     # 诚实判据：必须解出足够符号，且闭环累计漂移未失控（|drift| 远小于一个符号）。
     # 这只是"环路没跑飞"的旁证，不等于数据一定对——最终仍由 ASM/RS/CRC 把关。
     diag.locked = (len(bits) >= 16) and (abs(diag.drift_samples) < sps * 0.9)
