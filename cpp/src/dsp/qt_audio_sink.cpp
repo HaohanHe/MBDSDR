@@ -20,6 +20,10 @@ namespace {
 // Resampling below only adapts to a device whose native rate differs from 48 kHz.
 constexpr double kInputSampleRateHz = 48000.0;
 
+// When no default audio output device exists (headless CI / no PulseAudio),
+// re-query QMediaDevices at most this often instead of on every 25 ms block.
+constexpr int kNoDeviceRetryMs = 2000;
+
 float clampUnit(float v) {
     if (v > 1.0f) return 1.0f;
     if (v < -1.0f) return -1.0f;
@@ -116,11 +120,19 @@ void QtAudioSink::buildSink(const QAudioDevice& dev) {
 
     // Null means system default.
     QAudioDevice d = dev;
-    if (d.isNull()) d = QMediaDevices::defaultAudioOutput();
+    if (d.isNull()) {
+        // Headless throttle: skip the QMediaDevices query entirely while a
+        // previous probe found no device and the cooldown has not elapsed.
+        if (std::chrono::steady_clock::now() < nextNoDeviceProbe_) return;
+        d = QMediaDevices::defaultAudioOutput();
+    }
     currentDev_ = d;
 
     if (d.isNull()) {
-        qWarning() << "[QtAudioSink] no audio output device; audio disabled";
+        qWarning() << "[QtAudioSink] no audio output device; audio disabled"
+                      "(headless -- re-probing at most every" << kNoDeviceRetryMs << "ms)";
+        nextNoDeviceProbe_ = std::chrono::steady_clock::now()
+                           + std::chrono::milliseconds(kNoDeviceRetryMs);
         return;
     }
 

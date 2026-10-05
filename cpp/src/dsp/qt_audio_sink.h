@@ -24,6 +24,7 @@
 #include <QMutex>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <vector>
 
@@ -96,6 +97,13 @@ private:
     // Link-health state machine (worker-thread observations only). Feeds
     // underrun counting, fatal-error disconnect, and the bounded reconnect cadence.
     AudioLinkHealth health_;
+
+    // Headless / no-backoff throttle: when QMediaDevices reports no default
+    // output device we must NOT re-query it (and re-warn) on every 25 ms audio
+    // block -- that floods the log and, on boxes without PulseAudio, re-triggers
+    // the autospawn handshake every frame. Warn once, then re-probe at most this
+    // often so a device that appears later is still picked up. Worker-thread only.
+    std::chrono::steady_clock::time_point nextNoDeviceProbe_{};
 };
 
 } // namespace dsp

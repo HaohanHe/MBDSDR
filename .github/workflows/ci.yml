@@ -1,11 +1,12 @@
 # =============================================================================
 # MBDSDR 持续集成（CI）
 # -----------------------------------------------------------------------------
-# 状态：结构就绪 —— 本文件在云内编写，无法真正触发 GitHub Actions 执行验证。
+# 状态：结构就绪 —— 本文件在云内编写，未经 runner 实测，待配置验证。
 #       三个 job（cpp / flutter / python）的 checkout + setup + test 步骤已按
 #       本地实测命令组织；首次在 GitHub runner 上跑通前，需按下方注释补齐
 #       runner 环境（尤其 C++ 的 Qt 6.8 与系统图形库）。标注为 TODO(runner) 处
-#       即"待 runner 配置验证"项。
+#       即"待 runner 配置验证"项；详见 docs/learn/phase40/ci-notes.md 的上 runner
+#       检查清单。
 #
 # 安全：本 workflow 不使用任何 secrets / API key / 凭据；硬件相关用例在无硬件
 #       runner 上由 pytest / Qt 自行 skip，不计失败。
@@ -42,12 +43,19 @@ jobs:
   #
   # 无硬件/无历表环境下：硬件用例由 pytest 自行 skip（importorskip/skipif）；
   #   test_solar_system 因 de421.bsp 未下载而 skip（属预期，非失败）。
+  # 无音频环境下：runner 无 PulseAudio/ALSA 默认输出设备（本步骤也不装音频服务），
+  #   sounddevice 可 import 但 query_devices() 为空；依赖真实声卡的用例
+  #   （AudioPlayer / 解调后回放类）由测试代码按"无设备即 skip 并写明原因"处理，
+  #   不计失败——与本地 scripts/run_all_tests.sh 的 SKIP 语义一致。
+  # 墙钟：本地脚本对每个 pytest 根目录套 `timeout -k 20 900`（PYTEST_TIMEOUT=900）
+  #   防卡死用例；CI 侧用 job 级 timeout-minutes 兜底（GitHub 默认 360min 太长）。
   # 已知不稳定项：根 tests/ 大套件顺序相关、单例 QApplication 累积导致部分
   #   UI 用例慢/偶发失败或墙钟超时，详见 docs/learn/phase10/P4-stability.md；
   #   runner 上若该目录超时，按该文档排查，勿据此扩大其它 job。
   # ---------------------------------------------------------------------------
   python:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,6 +77,10 @@ jobs:
           python -m pip install --upgrade pip
           # 核心依赖；个别可选硬件库（SoapySDR 等）装不上不应让 CI 直接崩，故 || true
           pip install -r requirements.txt || true
+          # 桌面端依赖（PySide6>=6.5 等）——根 requirements.txt 不含 PySide6，
+          # pytest 套件里 offscreen 用例直接 import PySide6，缺了会整批 skip 而非真跑。
+          # 该文件内全部为 manylinux 可装 wheel，无需 || true。
+          pip install -r desktop/requirements.txt
           pip install pytest
 
       - name: pytest（五个根目录）
@@ -163,12 +175,18 @@ jobs:
         working-directory: cpp
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
+      # OOM 提示：ubuntu-latest 内存有限，Qt 全量多目标并行 Release 构建可能被
+      #   cgroup OOM kill。若此处 OOM：先降并行度 `cmake --build build -j2`，
+      #   仍 OOM 则按单目标逐个构建 `cmake --build build --target <one>`。
       - name: 构建
         working-directory: cpp
         run: cmake --build build -j"$(nproc)"
 
       - name: ctest（offscreen，无显示）
         working-directory: cpp
+        # 用 apt 装的 Qt6（/usr/lib）时无需 LD_LIBRARY_PATH；
+        # 若按上面 (推荐) 切到 aqtinstall 固定 6.8.2，须在此 env 追加
+        #   LD_LIBRARY_PATH: $HOME/Qt/6.8.2/gcc_64/lib
         env:
           QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build --output-on-failure
