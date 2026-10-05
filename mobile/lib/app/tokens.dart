@@ -262,6 +262,102 @@ abstract final class AppTokens {
   /// 扫频驻留切片（ms）：把整段驻留切成小片逐片检查取消/暂停，使暂停真正冻结驻留计时。
   static const int scanDwellSliceMs = 50;
 
+  // ---------------------------------------------------------------- 天空极坐标图（SkyRadar）
+  // Stellarium 式方位/仰角极坐标画布（widgets/compass_dial.dart）。纯绘制参数：
+  // 下列值与 Phase37 mobile-audit §4#1 登记的字面量逐一等价
+  // （标注字号 8.5/8/10.5、点半径 3.0/4.5/5.0/7.5、线宽 1.2/1.6/1.4/1.0、
+  // 标签偏移 10/15/8），本次仅具名化，不改变任何渲染行为。
+  // 桌面对应物 = cpp/src/core/tokens.h 的 kSky* 组（kSkyGutter/kArcWidth/
+  // kTrajLineWidth…）；两端按各自平台 DPI 策略取值，只对齐语义类别，不强等数值。
+  // 注意：下列多为图形笔画/点径/标注偏移，落在亚像素视觉调优档（8.5/4.5/0.8/1.1），
+  // 不属 4pt 间距栅格，故单列图形 token 组，不并入 spacingS/M/L。
+  /// 外圆（地平线）到画布边的留白：容纳方位字母 N/E/S/W 与 30° 刻度（含文字半高）。
+  static const double kSkyOuterMargin = 26;
+
+  /// 非主方位角小标注字号（30°/60°…辐条外侧的数字）。
+  static const double kSkyAzMinorFontSize = 8.5;
+
+  /// 仰角圈标注字号（西侧 30°/60° 圈上的度数）。
+  static const double kSkyAltitudeFontSize = 8.0;
+
+  /// 卫星名标签字号（8 向避让试位的名字）。
+  static const double kSkySatLabelFontSize = 10.5;
+
+  /// 普通接收卫星实心点半径。
+  static const double kSkyDotRadius = 3.0;
+
+  /// 高亮卫星点半径（选中 / 最高仰角）。
+  static const double kSkyDotRadiusHighlight = 4.5;
+
+  /// 在视导航预测卫星空心圈半径（与实心接收点区分）。
+  static const double kSkyNavRingRadius = 5.0;
+
+  /// 最高仰角点外圈光晕半径（accent 半透明环）。
+  static const double kSkyTopHaloRadius = 7.5;
+
+  /// 网格基线线宽（仰角圈、次方位辐条、外圆刻度基线）。
+  static const double kSkyGridStrokeWidth = 1.0;
+
+  /// 主方位辐条线宽（N/E/S/W，比次辐条略实）。
+  static const double kSkyGridCardinalStrokeWidth = 1.1;
+
+  /// 地平线外圆线宽（比网格略清晰）。
+  static const double kSkyOuterCircleStrokeWidth = 1.2;
+
+  /// 未来过境预测弧线段线宽。
+  static const double kSkyArcStrokeWidth = 1.2;
+
+  /// 选中卫星真实传播轨迹线宽（绿色高亮）。
+  static const double kSkyTrajectoryStrokeWidth = 1.6;
+
+  /// 导航预测空心圈线宽。
+  static const double kSkyNavRingStrokeWidth = 1.4;
+
+  /// 最高仰角光晕环线宽。
+  static const double kSkyHaloStrokeWidth = 1.0;
+
+  /// 点→标签细引线线宽。
+  static const double kSkyLeaderStrokeWidth = 0.8;
+
+  /// 外圆上每 30° 小刻度沿径向伸出长度（半径方向 ±此值）。
+  static const double kSkyTickLength = 3.0;
+
+  /// 方位标注径向内收：标注圆心 = R + outerMargin - 此值。
+  static const double kSkyAzLabelInset = 10.0;
+
+  /// 仰角标注相对落点的横向偏移。
+  static const double kSkyAltLabelDx = 3.0;
+
+  /// 仰角标注相对文字底的纵向偏移（负值 = 向上抬离落点）。
+  static const double kSkyAltLabelDy = -1.0;
+
+  /// 标签相对卫星点上方/下方的间隙。
+  static const double kSkyLabelGap = 8.0;
+
+  /// 卫星标签避让盒内边距。
+  static const double kSkyLabelPad = 3.0;
+
+  /// 标签 8 向试位时锚点距卫星点的半径。
+  static const double kSkyLabelAnchorRadius = 15.0;
+
+  /// 点与标签锚点距离超过此值时补一根细引线。
+  static const double kSkyLeaderMinGap = 18.0;
+
+  /// 引线端点相对标签中心的回缩比例（0.4 = 收到标签半尺寸的 40%）。
+  static const double kSkyLeaderEndFraction = 0.4;
+
+  /// 画布安全边距：标签/点不越过距边此值。
+  static const double kSkyEdgeInset = 2.0;
+
+  /// 外圆半径 R 小于此值则整图不画（窄窗/最小尺寸保护）。
+  static const double kSkyMinRadius = 8.0;
+
+  /// 导航预测标签最大宽。
+  static const double kSkyNavLabelMaxWidth = 110.0;
+
+  /// 卫星名标签最大宽。
+  static const double kSkySatLabelMaxWidth = 96.0;
+
   // ---------------------------------------------------------------- 字体
   static const List<String> monoFallback = <String>[
     'JetBrains Mono',
