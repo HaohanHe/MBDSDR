@@ -15,7 +15,7 @@ namespace mbdsdr {
 namespace ui {
 
 WorldView::WorldView(QWidget* parent) : QWidget(parent) {
-    setMinimumSize(tokens::scaled(300), tokens::scaled(200));
+    setMinimumSize(tokens::scaled(tokens::kWorldViewMinW), tokens::scaled(tokens::kWorldViewMinH));
     setMouseTracking(true);
     proj_.setSize(width(), height());
     proj_.setViewState({0.0, 0.0, 1.0});

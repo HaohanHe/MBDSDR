@@ -27,7 +27,7 @@ constexpr int kGridRings = 2;    // extra concentric rings inside unit circle
 } // namespace
 
 ConstellationView::ConstellationView(QWidget* parent) : QWidget(parent) {
-    setMinimumSize(tokens::scaled(180), tokens::scaled(180));
+    setMinimumSize(tokens::scaled(tokens::kCstViewMinW), tokens::scaled(tokens::kCstViewMinH));
     recomputeLayout();
 }
 

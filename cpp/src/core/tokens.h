@@ -567,6 +567,47 @@ inline constexpr int kSettingsMinW = 420;
 inline constexpr int kRecComboMinW = 150;
 inline constexpr int kRecTemplateMinW = 140;
 
+// =====================================================================
+// Phase37 UI-audit: widget / panel / control minimum sizes (base px).
+// Promoted from bare literals previously scattered in cpp/src/ui. Every
+// value below is byte-identical to the literal it replaced -- pure
+// tokenization, zero visual change. Panel/control mins go through
+// scaled() at the call site; kAboutMinW / kAiSessionComboMinW are
+// intentionally UNSCALED to preserve their pre-audit behavior.
+// =====================================================================
+// Left-rail control widths (base px, scaled()).
+inline constexpr int kFreqSpinMinW    = 140;  // center-frequency spinbox
+inline constexpr int kComboMinW       = 120;  // step / sample-rate / demod / bw combos
+inline constexpr int kGainComboMinW   = 90;   // gain combo (hidden by default)
+inline constexpr int kRecDirMinW      = 80;   // recording-directory line edit
+inline constexpr int kLevelBarH       = 16;   // audio level meter bar height
+// Embedded instrument heights inside the left rail (base px, scaled()).
+inline constexpr int kElevPlotMinH    = 120;  // elevation-vs-time curve min height
+inline constexpr int kElevPlotMaxH    = 160;  // elevation-vs-time curve max height
+inline constexpr int kNavSatTableMaxH = 120;  // visible-satellite table height cap
+inline constexpr int kAiTaskStepsMaxH = 360;  // autonomous task-step list cap
+inline constexpr int kAiActivityMaxH = 140;  // signal-activity log cap
+inline constexpr int kAiSessionComboMinW = 120; // AI session switcher width (unscaled by design)
+// Instrument panel widget minimum sizes (base px, scaled()).
+inline constexpr int kSkyViewMinW    = 220;
+inline constexpr int kSkyViewMinH     = 220;
+inline constexpr int kVorPanelMinW    = 200;
+inline constexpr int kVorPanelMinH    = 240;
+inline constexpr int kWeatherPanelMinW = 320;
+inline constexpr int kWeatherPanelMinH = 240;
+inline constexpr int kWorldViewMinW   = 300;
+inline constexpr int kWorldViewMinH   = 200;
+inline constexpr int kElevPlotW      = 280;  // elevation-vs-time widget min width
+inline constexpr int kElevPlotH       = 160;  // elevation-vs-time widget min height
+inline constexpr int kCstViewMinW     = 180;  // constellation widget min
+inline constexpr int kCstViewMinH     = 180;
+inline constexpr int kSMeterH         = 34;   // S-meter widget height
+// Dialogs / read-outs.
+inline constexpr int kAboutMinW       = 380;  // about-dialog min width (unscaled by design)
+inline constexpr int kCalibMinWExtra = 180;  // calibration-dialog width beyond kSettingsMinW
+inline constexpr int kCalibMinH      = 420;  // calibration-dialog min height
+inline constexpr int kCalibReadoutMinH = 120; // calibration guide/compare label min height
+
 // Fine tuning step (keyboard nudge)
 inline constexpr double kFreqFineStepHz = 10000.0;
 

@@ -63,7 +63,7 @@ bool placeSkyLabel(const QPointF& point, const QString& text, const QFontMetrics
 } // namespace
 
 SkyView::SkyView(QWidget* parent) : QWidget(parent) {
-    setMinimumSize(tokens::scaled(220), tokens::scaled(220));
+    setMinimumSize(tokens::scaled(tokens::kSkyViewMinW), tokens::scaled(tokens::kSkyViewMinH));
     setMouseTracking(true);
 }
 

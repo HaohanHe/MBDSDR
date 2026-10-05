@@ -277,8 +277,9 @@ class _PolarPainter extends CustomPainter {
       final theta = az * math.pi / 180.0;
       final dir = Offset(math.sin(theta), -math.cos(theta));
       final isCardinal = cardinal.containsKey(az);
+      // 主方位角（N/E/S/W）：与 auxiliary 同字号(12)，仅字重提半档到 semi。
       final style = isCardinal
-          ? AppTokens.auxiliary.copyWith(fontSize: 12, fontWeight: FontWeight.w600)
+          ? AppTokens.auxiliary.copyWith(fontWeight: AppTokens.weightSemi)
           : TextStyle(
               fontSize: 8.5,
               color: AppTokens.textAt(0.45),

@@ -10,7 +10,7 @@ namespace mbdsdr {
 namespace ui {
 
 ElevationPlot::ElevationPlot(QWidget* parent) : QWidget(parent) {
-    setMinimumSize(tokens::scaled(280), tokens::scaled(160));
+    setMinimumSize(tokens::scaled(tokens::kElevPlotW), tokens::scaled(tokens::kElevPlotH));
 }
 
 void ElevationPlot::setPass(const QString& name,

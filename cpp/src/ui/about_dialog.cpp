@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "about_dialog.h"
 
+#include "core/tokens.h"
+
 #include <QVBoxLayout>
 #include <QLabel>
 
@@ -9,7 +11,7 @@ namespace ui {
 
 AboutDialog::AboutDialog(QWidget* parent) : QDialog(parent) {
     setWindowTitle("关于");
-    setMinimumWidth(380);
+    setMinimumWidth(tokens::kAboutMinW);
 
     auto* lay = new QVBoxLayout(this);
     lay->addWidget(new QLabel("<h2>MBDSDR C++</h2>", this));

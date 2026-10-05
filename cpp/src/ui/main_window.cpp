@@ -175,7 +175,7 @@ MainWindow::MainWindow(QWidget* parent)
     topBar->setObjectName("topBar");
     topBar->setFixedHeight(tokens::scaled(tokens::kTopbarH));
     auto* topLay = new QHBoxLayout(topBar);
-    topLay->setContentsMargins(tokens::scaled(16), 0, tokens::scaled(16), 0);
+    topLay->setContentsMargins(tokens::scaled(tokens::kSpacingL), 0, tokens::scaled(tokens::kSpacingL), 0);
 
     auto* titleLabel = new QLabel("MBDSDR", topBar);
     QFont tf = titleLabel->font();
@@ -251,7 +251,7 @@ MainWindow::MainWindow(QWidget* parent)
     leftCard->setObjectName("panelCard");
     auto* leftLay = new QVBoxLayout(leftCard);
     leftLay->setContentsMargins(tokens::scaled(12), tokens::scaled(12), tokens::scaled(12), tokens::scaled(12));
-    leftLay->setSpacing(tokens::scaled(8));
+    leftLay->setSpacing(tokens::scaled(tokens::kSpacingM));
 
     auto* gSrc = new QGroupBox("源与连接", leftCard);
     auto* gSrcLay = new QVBoxLayout(gSrc);
@@ -443,13 +443,13 @@ MainWindow::MainWindow(QWidget* parent)
     freqSpin_->setValue(98.5);
     freqSpin_->setDecimals(3);
     freqSpin_->setSuffix(" MHz");
-    freqSpin_->setMinimumWidth(tokens::scaled(140));
+    freqSpin_->setMinimumWidth(tokens::scaled(tokens::kFreqSpinMinW));
     gFreqLay->addRow("中心频率", freqSpin_);
     stepCombo_ = new QComboBox(gFreq);
     stepCombo_->addItems({"1 Hz", "10 Hz", "100 Hz", "1 kHz",
                           "10 kHz", "100 kHz", "1 MHz"});
     stepCombo_->setCurrentIndex(4);   // 10 kHz default
-    stepCombo_->setMinimumWidth(tokens::scaled(120));
+    stepCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
     gFreqLay->addRow("步进", stepCombo_);
     leftLay->addWidget(gFreq);
 
@@ -459,7 +459,7 @@ MainWindow::MainWindow(QWidget* parent)
     // Populated dynamically from the connected device's real range by
     // refreshDeviceCapabilities() -- no fixed device-independent menu. With no
     // device the combo is empty + disabled (honest empty state).
-    srCombo_->setMinimumWidth(tokens::scaled(120));
+    srCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
     gRxLay->addRow("采样率", srCombo_);
     gainSlider_ = new QSlider(Qt::Horizontal, gRx);
     gainSlider_->setRange(0, 50);
@@ -470,7 +470,7 @@ MainWindow::MainWindow(QWidget* parent)
     // table (local RTL-SDR rtlsdr_get_tuner_gains). Empty table / no device keeps
     // the continuous slider (honest empty state). Populated by refreshGainControl().
     gainCombo_ = new QComboBox(gRx);
-    gainCombo_->setMinimumWidth(tokens::scaled(90));
+    gainCombo_->setMinimumWidth(tokens::scaled(tokens::kGainComboMinW));
     gainCombo_->hide();
     gainRow->addWidget(gainCombo_);
     gainRow->addWidget(gainValue_);
@@ -485,7 +485,7 @@ MainWindow::MainWindow(QWidget* parent)
     demodCombo_->setObjectName("demodCombo");
     demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW", "BPSK", "QPSK", "ADS-B",
                            "POCSAG", "m17", "VOR"});
-    demodCombo_->setMinimumWidth(tokens::scaled(120));
+    demodCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
     gRxLay->addRow("解调", demodCombo_);
     bwCombo_ = new QComboBox(gRx);
     bwCombo_->setObjectName("bwCombo");
@@ -499,7 +499,7 @@ MainWindow::MainWindow(QWidget* parent)
         else                       lbl = QString::number(hz, 'f', 0) + " Hz";
         bwCombo_->addItem(lbl);
     }
-    bwCombo_->setMinimumWidth(tokens::scaled(120));
+    bwCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
     gRxLay->addRow("带宽", bwCombo_);
 
     // ---- Frontend software decimation (real anti-alias low-pass + integer D) --
@@ -629,7 +629,7 @@ MainWindow::MainWindow(QWidget* parent)
     levelLabel_ = new QLabel("电平: -- dBFS", gAud);
     gAudLay->addWidget(levelLabel_);
     levelBar_ = new QLabel("", gAud);
-    levelBar_->setFixedHeight(tokens::scaled(16));
+    levelBar_->setFixedHeight(tokens::scaled(tokens::kLevelBarH));
     gAudLay->addWidget(levelBar_);
     leftLay->addWidget(gAud);
 
@@ -642,7 +642,7 @@ MainWindow::MainWindow(QWidget* parent)
     auto* recDirLay = new QHBoxLayout(recDirRow);
     recDirLay->setContentsMargins(0, 0, 0, 0);
     recDirEdit_ = new QLineEdit("record", recDirRow);
-    recDirEdit_->setMinimumWidth(tokens::scaled(80));
+    recDirEdit_->setMinimumWidth(tokens::scaled(tokens::kRecDirMinW));
     recDirBrowseBtn_ = new QPushButton("浏览…", recDirRow);
     recDirLay->addWidget(recDirEdit_);
     recDirLay->addWidget(recDirBrowseBtn_);
@@ -863,7 +863,7 @@ MainWindow::MainWindow(QWidget* parent)
             auto* lay = new QVBoxLayout(card);
             lay->setContentsMargins(tokens::scaled(10), tokens::scaled(8),
                                     tokens::scaled(10), tokens::scaled(8));
-            lay->setSpacing(tokens::scaled(4));
+            lay->setSpacing(tokens::scaled(tokens::kSpacingS));
             auto* t = new QLabel(title, card);
             t->setObjectName("monoInfo");
             auto* v = new QLabel(QStringLiteral("--"), card);
@@ -876,7 +876,7 @@ MainWindow::MainWindow(QWidget* parent)
         auto* grid = new QWidget(spPage);
         auto* gridLay = new QGridLayout(grid);
         gridLay->setContentsMargins(0, 0, 0, 0);
-        gridLay->setSpacing(tokens::scaled(8));
+        gridLay->setSpacing(tokens::scaled(tokens::kSpacingM));
         spDeviceTile_ = makeTile(QStringLiteral("设备连接"));
         spSignalTile_ = makeTile(QStringLiteral("信号"));
         spDecodeTile_ = makeTile(QStringLiteral("解码状态"));
@@ -1114,8 +1114,8 @@ MainWindow::MainWindow(QWidget* parent)
     }
     // Elevation-vs-time curve for the selected pass (AOS..LOS on the x axis).
     elevationPlot_ = new ui::ElevationPlot(skyPage);
-    elevationPlot_->setMinimumHeight(tokens::scaled(120));
-    elevationPlot_->setMaximumHeight(tokens::scaled(160));
+    elevationPlot_->setMinimumHeight(tokens::scaled(tokens::kElevPlotMinH));
+    elevationPlot_->setMaximumHeight(tokens::scaled(tokens::kElevPlotMaxH));
     skyLay->addWidget(elevationPlot_);
     // Clock-bias readout: GNSS UTC vs system UTC vs local, plus a copy button.
     // We only DISPLAY the bias -- the app never sets the system clock.
@@ -1152,7 +1152,7 @@ MainWindow::MainWindow(QWidget* parent)
         navSatTable_->verticalHeader()->setVisible(false);
         navSatTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
         navSatTable_->setSelectionMode(QAbstractItemView::NoSelection);
-        navSatTable_->setMaximumHeight(tokens::scaled(120));
+        navSatTable_->setMaximumHeight(tokens::scaled(tokens::kNavSatTableMaxH));
         skyLay->addWidget(navSatTable_);
         // PNT geometry availability (PREDICTION from the same propagated az/el).
         geoLabel_ = new QLabel(skyPage);
@@ -1714,7 +1714,7 @@ MainWindow::MainWindow(QWidget* parent)
     auto* sessRow = new QHBoxLayout;
     aiSessionCombo_ = new QComboBox(aiPage);
     aiSessionCombo_->setObjectName("aiSessionCombo");
-    aiSessionCombo_->setMinimumWidth(120);
+    aiSessionCombo_->setMinimumWidth(tokens::kAiSessionComboMinW);
     // Touch: the session switcher and its row buttons are >=44px tap targets.
     aiSessionCombo_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
     sessRow->addWidget(aiSessionCombo_, /*stretch=*/1);
@@ -1822,7 +1822,7 @@ MainWindow::MainWindow(QWidget* parent)
     aiLay->addLayout(runRow);
 
     aiTaskSteps_ = new ui::TaskStepsView(aiPage);
-    aiTaskSteps_->setMaximumHeight(tokens::scaled(360));
+    aiTaskSteps_->setMaximumHeight(tokens::scaled(tokens::kAiTaskStepsMaxH));
     aiTaskSteps_->setObjectName("aiTaskSteps");
     aiTaskHint_ = new QLabel(QString::fromUtf8("尚未运行自主任务"), aiPage);
     aiTaskHint_->setObjectName("dockHint");
@@ -1841,7 +1841,7 @@ MainWindow::MainWindow(QWidget* parent)
     aiActivityView_ = new QPlainTextEdit(aiPage);
     aiActivityView_->setObjectName("aiActivityView");
     aiActivityView_->setReadOnly(true);
-    aiActivityView_->setMaximumHeight(tokens::scaled(140));
+    aiActivityView_->setMaximumHeight(tokens::scaled(tokens::kAiActivityMaxH));
     aiLay->addWidget(aiActivityView_);
 
     auto* actBtnRow = new QHBoxLayout;
@@ -1907,11 +1907,11 @@ MainWindow::MainWindow(QWidget* parent)
     sbGain_ = new QLabel("--", this);
     sbSdr_  = new QLabel("无信号源", this);
     sbWatch_ = new QLabel("", this);
-    sbWatch_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kInteract));
+    sbWatch_->setStyleSheet(QString("color:%1; font-weight:%2;").arg(tokens::kInteract).arg(tokens::kWeightSemi));
     sbScan_ = new QLabel("", this);
-    sbScan_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kInteract));
+    sbScan_->setStyleSheet(QString("color:%1; font-weight:%2;").arg(tokens::kInteract).arg(tokens::kWeightSemi));
     sbRec_  = new QLabel("", this);
-    sbRec_->setStyleSheet(QString("color:%1; font-weight:600;").arg(tokens::kDanger));
+    sbRec_->setStyleSheet(QString("color:%1; font-weight:%2;").arg(tokens::kDanger).arg(tokens::kWeightSemi));
     // B5: extra one-line readouts. "--" until the first real engine readback;
     // the GNSS field stays EMPTY until a genuine fix (never a fabricated one).
     sbRssi_  = new QLabel("--", this);
@@ -3112,17 +3112,17 @@ void MainWindow::updateScanStatus() {
     if (sbScan_) {
         if (st == dsp::ScanState::Scanning) {
             sbScan_->setText("扫描中…");
-            sbScan_->setStyleSheet(QString("color:%1; font-weight:600;")
-                                   .arg(tokens::kInteract));
+            sbScan_->setStyleSheet(QString("color:%1; font-weight:%2;")
+                                   .arg(tokens::kInteract).arg(tokens::kWeightSemi));
         } else if (st == dsp::ScanState::Hit) {
             sbScan_->setText(QString("● 命中 %1 MHz")
                              .arg(scanner_->hitFrequency() / 1e6, 0, 'f', 3));
-            sbScan_->setStyleSheet(QString("color:%1; font-weight:600;")
-                                   .arg(tokens::kSuccess));
+            sbScan_->setStyleSheet(QString("color:%1; font-weight:%2;")
+                                   .arg(tokens::kSuccess).arg(tokens::kWeightSemi));
         } else if (st == dsp::ScanState::Paused) {
             sbScan_->setText("已暂停");
-            sbScan_->setStyleSheet(QString("color:%1; font-weight:600;")
-                                   .arg(tokens::kInteract));
+            sbScan_->setStyleSheet(QString("color:%1; font-weight:%2;")
+                                   .arg(tokens::kInteract).arg(tokens::kWeightSemi));
         } else {
             sbScan_->setText("");
         }
@@ -4232,8 +4232,9 @@ void MainWindow::showPresenceNotice(const QString& text, bool appeared) {
     if (sourceBanner_) {
         sourceBanner_->setText(text);
         sourceBanner_->setStyleSheet(QString(
-            "background-color:%1; color:%2; padding:6px; border-radius:4px;")
-            .arg(appeared ? tokens::kSuccess : tokens::kWarning, tokens::kTextPrimary));
+            "background-color:%1; color:%2; padding:6px; border-radius:%3px;")
+            .arg(appeared ? tokens::kSuccess : tokens::kWarning, tokens::kTextPrimary)
+            .arg(tokens::kRadiusSmall));
     }
 }
 

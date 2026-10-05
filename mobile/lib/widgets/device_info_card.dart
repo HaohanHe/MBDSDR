@@ -157,14 +157,14 @@ class _InfoRow extends StatelessWidget {
         const SizedBox(width: AppTokens.spacingM),
         if (dot != null) ...<Widget>[
           Container(
-            width: AppTokens.spacingS + 2,
-            height: AppTokens.spacingS + 2,
+            width: AppTokens.statusDotSize,
+            height: AppTokens.statusDotSize,
             decoration: BoxDecoration(
               color: dot,
               shape: BoxShape.circle,
             ),
           ),
-          const SizedBox(width: AppTokens.spacingS + 2),
+          const SizedBox(width: AppTokens.statusDotSize),
         ],
         Text(
           value,
