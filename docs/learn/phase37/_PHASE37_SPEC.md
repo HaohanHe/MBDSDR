@@ -1,4 +1,6 @@
 # 第三十七阶段实现规格：UI 弹性再收口（反硬编码专项）
+> **交付状态（Phase41 收官复核，2026-10-05）：已交付。** 本阶段规格各项已落地、并通过当时记录的测试基线（见下方基线行）；跨阶段未决项统一登记在 [../phase41/open-items.md](../phase41/open-items.md)。本文件保留为历史规划快照。
+>
 
 > 基线：HEAD = 66b81c8（已推送），ctest 127/127、flutter 342、pytest 42/42。
 > 设计语言：tokens.h（301 常量）/ AppTokens 弹性派生禁裸数、触控≥44（kTouchMinDim）、4pt 栅格、字重 500、强调色 #919cac；statusHint 空态统一。

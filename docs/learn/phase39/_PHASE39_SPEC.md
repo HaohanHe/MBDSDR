@@ -1,4 +1,6 @@
 # 第三十九阶段实现规格：移动端全面对齐
+> **交付状态（Phase41 收官复核，2026-10-05）：已交付。** 本阶段规格各项已落地、并通过当时记录的测试基线（见下方基线行）；跨阶段未决项统一登记在 [../phase41/open-items.md](../phase41/open-items.md)。本文件保留为历史规划快照。
+>
 
 > 基线：HEAD = 5a5a8ef（已推送），ctest 127/127、flutter 342、pytest 42/42。
 > 移动端已有：control_hub_client（5 端点）、remote_decoder_panel、sky_page、radio_scan/activity_log/recording、AI 会话页（Phase32）、AGC 开关、app_tokens.dart。
