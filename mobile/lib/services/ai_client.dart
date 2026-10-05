@@ -98,6 +98,40 @@ class AiErrorEvent extends ChatStreamEvent {
   const AiErrorEvent(this.message);
 }
 
+/// 自动压缩（send 阈值触发）真实发生了一次历史折叠。
+///
+/// 与手动压缩共用同一组真实口径（折叠条数 + 折叠前占用 / 预算字符估算），
+/// 由 UI 用统一纯函数 [compactionStatusText] 出文案，绝不伪造计数。
+class ContextCompactedEvent extends ChatStreamEvent {
+  const ContextCompactedEvent({
+    required this.compressedUserTurns,
+    required this.charsUsed,
+    required this.budgetChars,
+  });
+
+  /// 被折叠（不再逐句上送）的 user 轮次数。
+  final int compressedUserTurns;
+
+  /// 折叠前估算的总占用字符（所有 content 长度之和，粗代理）。
+  final int charsUsed;
+
+  /// 本次触发所用的字符预算（具名常量，非裸数）。
+  final int budgetChars;
+}
+
+/// 压缩状态文案纯函数：自动压缩（send 阈值触发）与手动压缩两条路径**共用同一口径**，
+/// 禁在 UI 里散落裸拼文案。
+///
+/// 给真实折叠条数 + 真实「占用 / 预算」字符估算；并诚实说明原文仍保留（未删落盘）。
+String compactionStatusText({
+  required int compressedTurns,
+  required int charsUsed,
+  required int budgetChars,
+}) {
+  return '已折叠 $compressedTurns 轮早期对话为占位'
+      '（占用约 $charsUsed / 预算 $budgetChars 字符；完整原文仍在本会话记录中，可回看，未删除）';
+}
+
 // ---------------------------------------------------------------------------
 // SSE chunk 解析
 // ---------------------------------------------------------------------------
@@ -237,6 +271,7 @@ class ContextCompaction {
     required this.messages,
     required this.didCompact,
     required this.compressedUserTurns,
+    required this.charsUsed,
   });
 
   /// 折叠后实际用于请求的消息序列（调用方按需再拷贝）。
@@ -247,6 +282,10 @@ class ContextCompaction {
 
   /// 被折叠（不再逐句上送）的 user 轮次数。
   final int compressedUserTurns;
+
+  /// 折叠前估算的总占用字符（所有 content 长度之和，粗代理）。
+  /// 供 UI 统一文案用真实口径，不伪造。
+  final int charsUsed;
 }
 
 // ---------------------------------------------------------------------------
@@ -419,6 +458,38 @@ class AiClient {
   }
 
   // ------------------------------------------------------------- 历史折叠（G1）
+  /// 定位折叠边界：前导 system 指令整段保留不参与折叠；其后从尾部向前数，
+  /// 保留最近 [keepRecentUserTurns] 个 user 轮原文逐句上送。
+  ///
+  /// 返回「recent 段在 [history] 里的**绝对起始下标**」——即 history[0..boundary) 中
+  /// 除去前导 system 的旧轮次会被折走。user 轮次不足 [keepRecentUserTurns] 时返回 sysEnd
+  /// （oldMessages 为空 → 不折叠，保住当前提问）。
+  ///
+  /// 抽出为静态 helper：compactHistory 与 ChatPage「折叠占位气泡定位」共用同一规则，
+  /// 避免两处边界判定漂移。ChatPage 手动压缩定位占位气泡也会调用，故为公开 API。
+  static int findCompactBoundary(
+    List<ChatMessage> history, {
+    required int keepRecentUserTurns,
+  }) {
+    int sysEnd = 0;
+    while (sysEnd < history.length &&
+        history[sysEnd].role == ChatRole.system) {
+      sysEnd++;
+    }
+    int userSeen = 0;
+    int boundary = sysEnd; // 默认：user 轮次不足 → 不折。
+    for (int i = history.length - 1; i >= sysEnd; i--) {
+      if (history[i].role == ChatRole.user) {
+        userSeen++;
+        if (userSeen >= keepRecentUserTurns) {
+          boundary = i;
+          break;
+        }
+      }
+    }
+    return boundary;
+  }
+
   /// 发送前把「超预算」的旧轮次折叠成一条诚实占位；预算内则原样直传。
   ///
   /// 机制（学桌面 cpp/src/ai/ai_context.cpp `compactContext` 的思路，自写 Dart、不抄码）：
@@ -432,7 +503,8 @@ class AiClient {
   /// 不静默丢原文：折叠只作用在「上送给模型的提示」这一层；会话完整原文仍由
   /// ChatSessionStore 持久化、在 UI 里可回看——本函数不删任何落盘数据。
   /// 前导 system 指令永不折叠（它们是设定，不是对话历史）。
-  @visibleForTesting
+  ///
+  /// 公开 API：除 send 自动压缩外，ChatPage「压缩上下文」按钮也直接调用它做手动折叠。
   static ContextCompaction compactHistory(
     List<ChatMessage> history, {
     int budgetChars = AppTokens.kAiContextBudgetChars,
@@ -457,29 +529,21 @@ class AiClient {
         messages: history,
         didCompact: false,
         compressedUserTurns: 0,
+        charsUsed: total,
       );
     }
 
-    // 从尾部向前定位折叠边界：保留最近 N 个 user 轮次原文。
-    // 默认 boundary=0 → oldMessages 为空 → 不折叠（user 轮次不足 N 时整体保留）。
-    int userSeen = 0;
-    int boundary = 0;
-    for (int i = convo.length - 1; i >= 0; i--) {
-      if (convo[i].role == ChatRole.user) {
-        userSeen++;
-        if (userSeen >= keepRecentUserTurns) {
-          boundary = i;
-          break;
-        }
-      }
-    }
-    final List<ChatMessage> oldMessages = convo.sublist(0, boundary);
-    final List<ChatMessage> recent = convo.sublist(boundary);
+    // 从尾部向前定位折叠边界：保留最近 N 个 user 轮次原文（共用规则）。
+    final int boundary =
+        findCompactBoundary(history, keepRecentUserTurns: keepRecentUserTurns);
+    final List<ChatMessage> oldMessages = history.sublist(sysEnd, boundary);
+    final List<ChatMessage> recent = history.sublist(boundary);
     if (oldMessages.isEmpty) {
       return ContextCompaction(
         messages: history,
         didCompact: false,
         compressedUserTurns: 0,
+        charsUsed: total,
       );
     }
 
@@ -512,6 +576,7 @@ class AiClient {
       messages: <ChatMessage>[...systemMsgs, placeholder, ...recent],
       didCompact: true,
       compressedUserTurns: compressedUserTurns,
+      charsUsed: total,
     );
   }
 
@@ -561,6 +626,14 @@ class AiClient {
       budgetChars: compactBudgetChars,
       keepRecentUserTurns: keepRecentUserTurns,
     );
+    // 真实折叠发生 → 吐一条可观测事件，让 UI 用统一纯函数出诚实文案（真实条数/占用）。
+    if (compaction.didCompact) {
+      yield ContextCompactedEvent(
+        compressedUserTurns: compaction.compressedUserTurns,
+        charsUsed: compaction.charsUsed,
+        budgetChars: compactBudgetChars,
+      );
+    }
     final List<ChatMessage> working = List<ChatMessage>.from(compaction.messages);
     int round = 0;
 

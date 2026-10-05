@@ -202,6 +202,10 @@ abstract final class AppTokens {
   /// 不把整段历史复述进占位——占位本身也要省 token）。
   static const int kAiFoldAskPreviewChars = 24;
 
+  /// 自动压缩（send 阈值触发）发生后，给用户的一次性可观测提示停留时长。
+  /// 手动压缩走持久气泡占位，不用它；此处仅用于自动压缩的瞬态 SnackBar。
+  static const Duration kAiCompactionNotice = Duration(milliseconds: 2600);
+
   // ---------------------------------------------------------------- RTL-SDR 硬件范围
   static const double freqMinHz = 24e6;
   static const double freqMaxHz = 1700e6;

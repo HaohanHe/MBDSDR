@@ -808,5 +808,74 @@ data: [DONE]''';
           );
       expect(oldAsUser, isFalse);
     });
+
+    test('charsUsed = 折叠前所有 content 长度之和（真实占用口径）', () {
+      final List<ChatMessage> h = <ChatMessage>[
+        ChatMessage(role: ChatRole.system, content: 'abcd', time: DateTime(2026)), // 4
+        ChatMessage(role: ChatRole.user, content: '12', time: DateTime(2026)), // 2
+        ChatMessage(role: ChatRole.assistant, content: 'xyzw', time: DateTime(2026)), // 4
+      ];
+      // 预算内 → 不折，但 charsUsed 仍如实给总占用。
+      final ContextCompaction c =
+          AiClient.compactHistory(h, budgetChars: 100000);
+      expect(c.charsUsed, 10); // 4+2+4
+      expect(c.didCompact, isFalse);
+    });
+
+    test('complete() 真实折叠时吐 ContextCompactedEvent（真实条数 + 占用/预算）', () async {
+      const String sseStop = '''data: {"choices":[{"delta":{"content":"ok"}}]}
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+data: [DONE]''';
+
+      Future<Stream<String>> fakeTransport(
+        Uri url,
+        Map<String, String> headers,
+        String body,
+      ) async =>
+          Stream<String>.fromIterable(sseStop.split('\n'));
+
+      final AiClient client = AiClient(apiKey: 'sk-x', transport: fakeTransport);
+      final List<ChatStreamEvent> seen = <ChatStreamEvent>[];
+      final List<ChatMessage> history = <ChatMessage>[
+        ChatMessage(role: ChatRole.user, content: 'OLD: ${'q' * 300}', time: DateTime(2026)),
+        ChatMessage(role: ChatRole.assistant, content: 'old reply', time: DateTime(2026)),
+        ChatMessage(role: ChatRole.user, content: 'CURRENT ask', time: DateTime(2026)),
+      ];
+
+      await client
+          .complete(
+            history: history,
+            compactBudgetChars: 100,
+            keepRecentUserTurns: 1,
+          )
+          .forEach(seen.add);
+
+      final List<ContextCompactedEvent> compacted =
+          seen.whereType<ContextCompactedEvent>().toList();
+      expect(compacted.length, 1, reason: '折叠只触发一次');
+      expect(compacted.single.compressedUserTurns, 1, reason: '折走 OLD 这一轮');
+      expect(compacted.single.budgetChars, 100);
+      expect(compacted.single.charsUsed, greaterThan(100),
+          reason: '折叠前占用确实超预算');
+    });
+  });
+
+  group('压缩状态文案纯函数 compactionStatusText', () {
+    test('自动/手动共用同一口径：真实条数 + 占用/预算 + 不删原文说明', () {
+      final String s = compactionStatusText(
+        compressedTurns: 5,
+        charsUsed: 6230,
+        budgetChars: 6000,
+      );
+      expect(s, contains('5 轮'));
+      expect(s, contains('6230'));
+      expect(s, contains('6000'));
+      expect(s, contains('未删除'));
+      // 两个不同来源（自动 / 手动）只要数字相同，文案逐字一致。
+      expect(
+        s,
+        compactionStatusText(compressedTurns: 5, charsUsed: 6230, budgetChars: 6000),
+      );
+    });
   });
 }
