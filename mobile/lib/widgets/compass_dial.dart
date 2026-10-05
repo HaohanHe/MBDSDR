@@ -175,7 +175,7 @@ class SkyRadar extends StatelessWidget {
 
   void _handleTap(Offset pos, double side) {
     final center = Offset(side / 2, side / 2);
-    final R = side / 2 - _PolarPainter.outerMargin;
+    final R = side / 2 - AppTokens.kSkyOuterMargin;
     final g = polarPointInverse(pos, center, R);
     SatVisibility? best;
     var bestD = 30.0;
@@ -213,17 +213,14 @@ class _PolarPainter extends CustomPainter {
   /// 在视导航卫星（预测）叠加层数据源。
   final List<SatVisibility> navVisible;
 
-  /// 外圆之外留给方位字母/刻度的边距（含文字半高，保证不被裁切）。
-  static const double outerMargin = 26;
-
   static const List<double> _altitudeRings = [30.0, 60.0];
 
   @override
   void paint(Canvas canvas, Size size) {
     final side = math.min(size.width, size.height);
     final c = Offset(size.width / 2, size.height / 2);
-    final R = side / 2 - outerMargin;
-    if (R <= 8) return;
+    final R = side / 2 - AppTokens.kSkyOuterMargin;
+    if (R <= AppTokens.kSkyMinRadius) return;
 
     _paintGrid(canvas, c, R);
     _paintArcs(canvas, c, R);
@@ -236,14 +233,16 @@ class _PolarPainter extends CustomPainter {
   void _paintGrid(Canvas canvas, Offset c, double R) {
     final faint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
+      ..strokeWidth = AppTokens.kSkyGridStrokeWidth;
 
     // 方位辐条：每 30°。
     for (var az = 0; az < 360; az += 30) {
       final cardinal = az % 90 == 0;
       final p = polarPoint(c, R, az.toDouble(), 0);
       faint.color = AppTokens.textAt(cardinal ? 0.12 : 0.06);
-      faint.strokeWidth = cardinal ? 1.1 : 1.0;
+      faint.strokeWidth = cardinal
+          ? AppTokens.kSkyGridCardinalStrokeWidth
+          : AppTokens.kSkyGridStrokeWidth;
       canvas.drawLine(c, p, faint);
     }
 
@@ -251,20 +250,21 @@ class _PolarPainter extends CustomPainter {
     for (final el in _altitudeRings) {
       final r = R * (90.0 - el) / 90.0;
       faint.color = AppTokens.textAt(0.08);
-      faint.strokeWidth = 1.0;
+      faint.strokeWidth = AppTokens.kSkyGridStrokeWidth;
       canvas.drawCircle(c, r, faint);
     }
 
     // 外圆（地平线 el=0）稍清晰。
     faint.color = AppTokens.textAt(0.18);
-    faint.strokeWidth = 1.2;
+    faint.strokeWidth = AppTokens.kSkyOuterCircleStrokeWidth;
     canvas.drawCircle(c, R, faint);
 
     // 外圆上每 30° 的小刻度。
     for (var az = 0; az < 360; az += 30) {
       final theta = az * math.pi / 180.0;
       final dir = Offset(math.sin(theta), -math.cos(theta));
-      canvas.drawLine(c + dir * (R - 3), c + dir * (R + 3), faint);
+      canvas.drawLine(c + dir * (R - AppTokens.kSkyTickLength),
+          c + dir * (R + AppTokens.kSkyTickLength), faint);
     }
 
     _paintAzimuthLabels(canvas, c, R);
@@ -281,14 +281,15 @@ class _PolarPainter extends CustomPainter {
       final style = isCardinal
           ? AppTokens.auxiliary.copyWith(fontWeight: AppTokens.weightSemi)
           : TextStyle(
-              fontSize: 8.5,
+              fontSize: AppTokens.kSkyAzMinorFontSize,
               color: AppTokens.textAt(0.45),
             );
       final tp = TextPainter(
         text: TextSpan(text: cardinal[az] ?? '$az°', style: style),
         textDirection: TextDirection.ltr,
       )..layout();
-      final at = c + dir * (R + outerMargin - 10);
+      final at = c +
+          dir * (R + AppTokens.kSkyOuterMargin - AppTokens.kSkyAzLabelInset);
       tp.paint(canvas, at - Offset(tp.width / 2, tp.height / 2));
     }
   }
@@ -300,11 +301,14 @@ class _PolarPainter extends CustomPainter {
       final tp = TextPainter(
         text: TextSpan(
           text: '${el.round()}°',
-          style: TextStyle(fontSize: 8, color: AppTokens.textAt(0.4)),
+          style: TextStyle(
+              fontSize: AppTokens.kSkyAltitudeFontSize,
+              color: AppTokens.textAt(0.4)),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      tp.paint(canvas, p + Offset(3, -tp.height - 1));
+      tp.paint(canvas, p +
+          Offset(AppTokens.kSkyAltLabelDx, -tp.height + AppTokens.kSkyAltLabelDy));
     }
   }
 
@@ -312,7 +316,7 @@ class _PolarPainter extends CustomPainter {
   void _paintArcs(Canvas canvas, Offset c, double R) {
     final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2
+      ..strokeWidth = AppTokens.kSkyArcStrokeWidth
       ..color = AppTokens.accent.withValues(alpha: 0.28)
       ..strokeJoin = StrokeJoin.round
       ..strokeCap = StrokeCap.round;
@@ -346,7 +350,7 @@ class _PolarPainter extends CustomPainter {
     if (samples.length < 2) return;
     final paint = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.6
+      ..strokeWidth = AppTokens.kSkyTrajectoryStrokeWidth
       ..color = AppTokens.success.withValues(alpha: 0.85)
       ..strokeJoin = StrokeJoin.round
       ..strokeCap = StrokeCap.round;
@@ -380,13 +384,13 @@ class _PolarPainter extends CustomPainter {
 
     final ring = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.4
+      ..strokeWidth = AppTokens.kSkyNavRingStrokeWidth
       ..color = AppTokens.warning;
 
     for (final v in items) {
       final p = polarPoint(c, R, v.az, v.el);
       // 空心圈（直径约 10px），与实心接收点明显区分。
-      canvas.drawCircle(p, 5.0, ring);
+      canvas.drawCircle(p, AppTokens.kSkyNavRingRadius, ring);
 
       final tp = TextPainter(
         text: TextSpan(
@@ -397,14 +401,18 @@ class _PolarPainter extends CustomPainter {
           ),
         ),
         textDirection: TextDirection.ltr,
-      )..layout(maxWidth: 110);
+      )..layout(maxWidth: AppTokens.kSkyNavLabelMaxWidth);
 
       // 标签优先放点上方，越界则收进画布。
-      var at = p + Offset(-tp.width / 2, -tp.height - 8);
-      if (at.dy < 2) at = p + Offset(-tp.width / 2, 8);
-      if (at.dx < 2) at = Offset(2, at.dy);
-      if (at.dx + tp.width > size.width - 2) {
-        at = Offset(size.width - 2 - tp.width, at.dy);
+      var at = p + Offset(-tp.width / 2, -tp.height - AppTokens.kSkyLabelGap);
+      if (at.dy < AppTokens.kSkyEdgeInset) {
+        at = p + Offset(-tp.width / 2, AppTokens.kSkyLabelGap);
+      }
+      if (at.dx < AppTokens.kSkyEdgeInset) {
+        at = Offset(AppTokens.kSkyEdgeInset, at.dy);
+      }
+      if (at.dx + tp.width > size.width - AppTokens.kSkyEdgeInset) {
+        at = Offset(size.width - AppTokens.kSkyEdgeInset - tp.width, at.dy);
       }
       tp.paint(canvas, at);
     }
@@ -430,17 +438,27 @@ class _PolarPainter extends CustomPainter {
           ? AppTokens.success
           : (isTop ? AppTokens.accent : AppTokens.textPrimary);
       final dot = Paint()..color = color;
-      canvas.drawCircle(p, isSelected || isTop ? 4.5 : 3.0, dot);
+      canvas.drawCircle(
+          p,
+          isSelected || isTop
+              ? AppTokens.kSkyDotRadiusHighlight
+              : AppTokens.kSkyDotRadius,
+          dot);
       if (isTop && !isSelected) {
         canvas.drawCircle(
-            p, 7.5, Paint()..color = AppTokens.accent.withValues(alpha: 0.25)..style = PaintingStyle.stroke..strokeWidth = 1.0);
+            p,
+            AppTokens.kSkyTopHaloRadius,
+            Paint()
+              ..color = AppTokens.accent.withValues(alpha: 0.25)
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = AppTokens.kSkyHaloStrokeWidth);
       }
     }
 
     // 标签避让：仰角高的优先；8 向试位，重叠/越界则放弃（宁可稀疏不叠字）。
     items.sort((a, b) => b.el.compareTo(a.el));
     final occupied = <Rect>[];
-    const pad = 3.0;
+    const pad = AppTokens.kSkyLabelPad;
     for (final v in items) {
       final p = polarPoint(c, R, v.az, v.el);
       final isSelected = v.name == selectedName;
@@ -448,25 +466,26 @@ class _PolarPainter extends CustomPainter {
         text: TextSpan(
           text: v.name,
           style: TextStyle(
-            fontSize: 10.5,
+            fontSize: AppTokens.kSkySatLabelFontSize,
             color: isSelected ? AppTokens.success : AppTokens.textSecondary,
           ),
         ),
         textDirection: TextDirection.ltr,
-      )..layout(maxWidth: 96);
+      )..layout(maxWidth: AppTokens.kSkySatLabelMaxWidth);
 
       Rect? chosen;
       Offset? anchor;
       for (var k = 0; k < 8; k++) {
         final ang = k * math.pi / 4.0;
-        final lp = p + Offset(math.cos(ang), math.sin(ang)) * 15.0;
+        final lp = p +
+            Offset(math.cos(ang), math.sin(ang)) * AppTokens.kSkyLabelAnchorRadius;
         final rect = Rect.fromCenter(
             center: lp, width: tp.width + pad * 2, height: tp.height + pad * 2);
         // 不越出画布。
-        if (rect.left < 2 ||
-            rect.right > size.width - 2 ||
-            rect.top < 2 ||
-            rect.bottom > size.height - 2) {
+        if (rect.left < AppTokens.kSkyEdgeInset ||
+            rect.right > size.width - AppTokens.kSkyEdgeInset ||
+            rect.top < AppTokens.kSkyEdgeInset ||
+            rect.bottom > size.height - AppTokens.kSkyEdgeInset) {
           continue;
         }
         // 不与已放置标签重叠。
@@ -479,13 +498,15 @@ class _PolarPainter extends CustomPainter {
       occupied.add(chosen);
 
       // 点与标签距离稍远时画一根细引线。
-      if ((anchor - p).distance > 18) {
+      if ((anchor - p).distance > AppTokens.kSkyLeaderMinGap) {
         canvas.drawLine(
             p,
-            anchor - Offset(tp.width / 2, tp.height / 2) * 0.4,
+            anchor -
+                Offset(tp.width / 2, tp.height / 2) *
+                    AppTokens.kSkyLeaderEndFraction,
             Paint()
               ..color = AppTokens.textAt(0.25)
-              ..strokeWidth = 0.8);
+              ..strokeWidth = AppTokens.kSkyLeaderStrokeWidth);
       }
       tp.paint(canvas, anchor - Offset(tp.width / 2, tp.height / 2));
     }

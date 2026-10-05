@@ -205,3 +205,22 @@ SSDV 物理层 IQ→包）均无硬件、未在真实过境中验证，须活动
 2. 活动日 SSTV：onboard --mode sstv（一条命令，Robot36/72 自动识别）
 3. 活动日 SSDV：rtl_sdr 录 IQ（≥225k）→ onboard --mode ssdv --ssdv-input iq（--ssdv-symrate 按公告）→ JPEG
 4. 真机未验证项如实汇总（SSTV OTA / SSDV rtl_sdr 联调 / CCSDS 级联）→ 见 open-items.md A 类
+
+---
+
+## 8. Phase45 CCSDS 级联补齐更新（2026-10-05）
+
+### 级联解码就绪状态（§7 表中"SSDV DSLWP 218B 级联"项更新）
+| 能力 | 状态 | 证据 |
+|---|---|---|
+| **Viterbi (2,1,7)** 卷积解码（多项式 171/133，64 状态硬判决 ACS+回溯，flush 已知终态） | ✅ 已就绪 | `mbdsdr_ai/ccsds_rx.py:182-235`；BER 2% 全恢复/5% 3 字节/15% 优雅降级 |
+| **RS(255,223)** CCSDS 131.0-B（GF 0x187，根 α^112..α^143，t=16） | ✅ 已就绪 | `mbdsdr_ai/fec.py:148`；与 reedsolo 库逐字节一致；t=16 全纠（200/200）/t=17 失败边界实测 |
+| **完整级联全链** IQ→BPSK→ASM→Viterbi→解扰→RS→218B→JPEG | ✅ 云内合成已通 | 36/36 MCU、missing=[]；**AWGN 硬判决原始 BER 1.66%（137 bit）下全图恢复**——FEC 真实生效；纯噪声 0 帧 0 假包 |
+| **onboard.py CLI 接级联** | ⚠ 待补 | 现仍走 fsphil 256B 自同步方言；后续可加 `--ssdv-mode ccsds`（按红线本轮未改 CLI） |
+| **真机 CCSDS 硬件互通** | ⚠ 待真机 | 字节级互通需真机参数联调（符号率/频偏/是否带级联编码现场确认），活动参数仍走 docs |
+
+### 活动日 SSDV 处置（更新）
+- 软件已具备完整解级联能力（Viterbi+RS）；现场先确认 ASRTU-1 是否带级联编码：
+  - 带级联 → rtl_sdr 录 IQ → 级联链（Viterbi+RS）→ 218B → JPEG
+  - 不带/自同步 → fsphil 方言路径
+- 最大技术风险从"软件无级联能力"降为"真机参数与盲定时（高噪下需精定时）"。

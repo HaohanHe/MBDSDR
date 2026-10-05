@@ -179,13 +179,22 @@ class ViterbiDecoder:
                 self._expected[s][b] = (_parity7(full & self.g1),
                                         _parity7(full & self.g2))
 
-    def decode(self, pairs: Sequence[Tuple[int, int]]) -> List[int]:
+    def decode(self, pairs: Sequence[Tuple[int, int]],
+               final_state: Optional[int] = None) -> List[int]:
         """对 (g1,g2) 符号对序列做块式 Viterbi，返回信息 0/1 比特。
 
         本编码器状态打包为 ``s' = ((s<<1)|u)&63``（u 进 bit0），因此从下一状态
         ``ns`` 反推时：信息比特恒为 ``u = ns & 1``；两个前驱仅相差被移出的最老比特
         ``ns>>1`` 与 ``(ns>>1)|32``，ACS 在二者间择优并记录走向，回溯时信息位直接取
         路径状态的 LSB。
+
+        参数
+        ----------
+        pairs :
+            接收符号对序列（硬判决，每元素 0/1）。
+        final_state :
+            已知终态（flush 收尾时编码器已归零，传 ``0`` 即从 state 0 确定性回溯，
+            教科书最优）。``None``（默认）= 自由收尾，从最终最小度量状态回溯。
         """
         n = len(pairs)
         if n == 0:
@@ -216,8 +225,11 @@ class ViterbiDecoder:
             metrics = new_metrics
             decisions.append(dec)
 
-        # 从最终最小度量状态回溯；信息位 = 路径状态的 LSB
-        state = min(range(CONV_STATES), key=lambda s: metrics[s])
+        # 回溯起点：已知终态（flush 收尾）则固定；否则取最终最小度量状态
+        if final_state is not None:
+            state = final_state & (CONV_STATES - 1)
+        else:
+            state = min(range(CONV_STATES), key=lambda s: metrics[s])
         bits: List[int] = []
         for stage in range(n - 1, -1, -1):
             bits.append(state & 1)
