@@ -245,6 +245,23 @@ abstract final class AppTokens {
   /// 对齐 kSquelchNfAlphaUp。
   static const double squelchNfAlphaUp = 0.005;
 
+  // ---------------------------------------------------------------- 范围扫描
+  // 对齐桌面 cpp/src/dsp/frequency_scanner.{h,cpp}：纯逻辑状态机 + 真实 RSSI 量测。
+  // 本端复用真实调谐 + 静噪门真实电平，不伪造电平。
+
+  /// 每步默认驻留（ms）。对齐桌面 frequency_scanner.h `dwellMs = 300`（0.2–0.5 s）。
+  static const int scanDwellMsDefault = 300;
+
+  /// 命中后默认停留（ms）。对齐桌面 HitHoldMode::FixedMs `holdMs = 2000`。
+  static const int scanHitHoldMsDefault = 2000;
+
+  /// 命中停留可选项（ms）：0 = 命中即继续；否则在命中频点额外驻留这么久。
+  /// 全部具名，禁在对话框/控制器里裸写 ms 数。
+  static const List<int> scanHitHoldMsOptions = [0, 1000, 2000, 3000];
+
+  /// 扫频驻留切片（ms）：把整段驻留切成小片逐片检查取消/暂停，使暂停真正冻结驻留计时。
+  static const int scanDwellSliceMs = 50;
+
   // ---------------------------------------------------------------- 字体
   static const List<String> monoFallback = <String>[
     'JetBrains Mono',

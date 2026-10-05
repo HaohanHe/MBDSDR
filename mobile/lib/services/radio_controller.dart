@@ -129,17 +129,32 @@ abstract interface class RadioApi {
   /// 扫描进度 0..1。
   double get scanProgress;
 
+  /// 扫描是否处于暂停（冻结当前频点调谐与驻留计时；对齐桌面 FrequencyScanner.pause）。
+  bool get scanPaused;
+
   /// 开始范围扫描（真实调谐+真实电平量测，命中写活动日志）。未连接/已在扫描直接返回。
+  ///
+  /// [direction]：上行（start→end 递增）/ 下行（end→start 递减）。
+  /// [hitHoldMs]：命中后在该频点额外驻留的毫秒数（0 = 命中即继续；对齐桌面
+  /// HitHoldMode::FixedMs holdMs）。暂停/取消对该驻留同样生效。
   Future<void> startScan({
     required int startHz,
     required int endHz,
     required int stepHz,
     required double thresholdDbfs,
     int dwellMs,
+    ScanDirection direction,
+    int hitHoldMs,
   });
 
   /// 请求停止扫描。
   void stopScan();
+
+  /// 暂停扫描：冻结当前频点调谐与驻留计时（对齐桌面 FrequencyScanner.pause）。
+  void pauseScan();
+
+  /// 恢复扫描：从暂停处继续（对齐桌面 FrequencyScanner.resume）。
+  void resumeScan();
 
   /// 实时频谱帧流。
   Stream<SpectrumFrame> get spectrumStream;
@@ -226,6 +241,10 @@ class RadioController extends ChangeNotifier implements RadioApi {
   int? _scanHz;
   double _scanProgress = 0;
 
+  /// 暂停闸：true 时冻结调谐与驻留计时；[_scanResume] 在恢复时 complete 以唤醒循环。
+  bool _scanPaused = false;
+  Completer<void>? _scanResume;
+
   /// 是否正在范围扫描。
   @override
   bool get scanning => _scanning;
@@ -237,6 +256,10 @@ class RadioController extends ChangeNotifier implements RadioApi {
   /// 扫描进度 0..1。
   @override
   double get scanProgress => _scanProgress;
+
+  /// 扫描是否暂停（冻结调谐/计时）。
+  @override
+  bool get scanPaused => _scanPaused;
 
   // ---------------------------------------------------- 真实文件录制
   /// 当前录制会话（null = 未在录）。写盘走 [FileRecordingSink]（16-bit 小端 WAV）。
@@ -629,26 +652,38 @@ class RadioController extends ChangeNotifier implements RadioApi {
     required int endHz,
     required int stepHz,
     required double thresholdDbfs,
-    int dwellMs = 300,
+    int dwellMs = AppTokens.scanDwellMsDefault,
+    ScanDirection direction = ScanDirection.up,
+    int hitHoldMs = 0,
   }) async {
     if (_status != ConnectionStatus.connected || _scanning) return;
     if (stepHz <= 0 || endHz <= startHz) return;
 
     _scanning = true;
     _scanCancel = false;
+    _scanPaused = false;
+    _scanResume = null;
     final points = ((endHz - startHz) ~/ stepHz) + 1;
     try {
       for (var i = 0; i < points; i++) {
+        // 方向：up 从首点递增；down 从末点递减（对齐桌面 ScanDirection::Up/Down）。
+        final idx = direction == ScanDirection.up ? i : (points - 1 - i);
         if (_scanCancel) break;
-        final hz = startHz + i * stepHz;
+        await _scanFreezeGate();
+        if (_scanCancel) break;
+
+        final hz = startHz + idx * stepHz;
         _scanHz = hz;
-        _scanProgress = points <= 1 ? 1.0 : i / (points - 1);
+        _scanProgress = points <= 1 ? 1.0 : idx / (points - 1);
         notifyListeners();
 
         // 真实调谐到该频点。
         await setFrequencyHz(hz);
         // 驻留：让 IQ 流过解调器，静噪门平滑电平收敛为该频点真实 RMS。
-        await Future<void>.delayed(Duration(milliseconds: dwellMs));
+        // 切成小片逐片检查取消/暂停，使暂停真正冻结驻留计时。
+        await _dwellInterruptible(dwellMs);
+        if (_scanCancel) break;
+        await _scanFreezeGate();
         if (_scanCancel) break;
 
         final level = _squelch.levelDb; // 真实量测电平（dBFS）
@@ -659,20 +694,76 @@ class RadioController extends ChangeNotifier implements RadioApi {
             levelDbfs: level,
             source: 'scan',
           );
+          // 命中停留：在命中频点额外驻留 hitHoldMs（对齐桌面 HitHoldMode::FixedMs）。
+          if (hitHoldMs > 0) {
+            await _dwellInterruptible(hitHoldMs);
+            if (_scanCancel) break;
+          }
         }
       }
     } finally {
       _scanning = false;
+      _scanPaused = false;
+      final c = _scanResume; // 收尾前唤醒可能正阻塞在暂停闸上的循环
+      _scanResume = null;
+      c?.complete();
       _scanHz = null;
       _scanProgress = 0;
       notifyListeners();
     }
   }
 
-  /// 请求停止扫描（原子标志，驻留后即退出）。
+  /// 请求停止扫描（原子标志，驻留后即退出；同时唤醒暂停闸避免循环悬挂）。
   @override
   void stopScan() {
     _scanCancel = true;
+    final c = _scanResume;
+    _scanResume = null;
+    _scanPaused = false;
+    c?.complete();
+  }
+
+  /// 暂停扫描：冻结当前频点调谐与驻留计时（对齐桌面 FrequencyScanner.pause:88）。
+  @override
+  void pauseScan() {
+    if (!_scanning || _scanPaused) return;
+    _scanPaused = true;
+    _scanResume = Completer<void>();
+    notifyListeners();
+  }
+
+  /// 恢复扫描：从暂停处继续（对齐桌面 FrequencyScanner.resume:95）。
+  @override
+  void resumeScan() {
+    if (!_scanPaused) return;
+    _scanPaused = false;
+    final c = _scanResume;
+    _scanResume = null;
+    c?.complete();
+    notifyListeners();
+  }
+
+  /// 暂停闸：处于暂停时一直 await 到恢复或取消；否则立即返回。
+  Future<void> _scanFreezeGate() async {
+    while (_scanPaused && !_scanCancel) {
+      await _scanResume?.future;
+    }
+  }
+
+  /// 可中断驻留：把驻留切成 [AppTokens.scanDwellSliceMs] 小片，逐片检查取消/暂停。
+  Future<void> _dwellInterruptible(int ms) async {
+    var remaining = ms;
+    while (remaining > 0 && !_scanCancel) {
+      if (_scanPaused) {
+        await _scanFreezeGate();
+        continue;
+      }
+      final slice = remaining < AppTokens.scanDwellSliceMs
+          ? remaining
+          : AppTokens.scanDwellSliceMs;
+      await Future<void>.delayed(Duration(milliseconds: slice));
+      remaining -= slice;
+    }
   }
 
   @override

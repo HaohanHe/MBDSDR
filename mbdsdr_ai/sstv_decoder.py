@@ -449,8 +449,13 @@ def _identify_sstv_mode(freq: np.ndarray, sr: int, data_start: int,
     # 注意：组首 ~290-300，与 Scottie S2（~272ms）区分，下界收窄到 285。
     if pulse_ms >= 7.0 and (130.0 <= period_ms <= 175.0):
         return "Robot 36", {**info, "robot_layout": "per_line"}
+    # ~300ms 周期、9ms 脉宽的有两种发送变体，靠【行数】区分（不依赖易解错的 VIS）：
+    #   - Robot 72：每行一个 1200Hz 同步，240 行 → ≈239~240 个 markers；
+    #   - Robot 36 组首式：每两行一个同步，240 行 → ≈119~120 个 markers（120 组）。
+    # 两者周期/脉宽几乎重合（均 ~300ms/9ms），故以 markers 数（=行数/组首数）为主判据，
+    # vis_code==12(0x0C) 仅作旁证兜底（弱信号 markers 不足时仍可凭 VIS 判 Robot72）。
     if pulse_ms >= 7.0 and (285.0 <= period_ms <= 330.0):
-        if vis_code == 12:  # 0x0C = Robot72
+        if n_markers >= 180 or vis_code == 12:
             return "Robot 72", {**info, "robot_layout": "robot72"}
         return "Robot 36", {**info, "robot_layout": "grouped"}
     # PD 系列：SYNC 约 20ms（明显长于 Robot 9ms），组周期 450~1050ms。

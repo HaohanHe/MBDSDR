@@ -35,3 +35,21 @@ enum DemodMode {
     DemodMode.wfm => 'WFM',
   };
 }
+
+/// 范围扫描方向（对齐桌面 cpp/src/dsp/frequency_scanner.h `ScanDirection`）。
+///
+/// 桌面另有 PingPong（来回）；移动端本期先对齐任务要求的上行/下行两档，
+/// 不硬造来回回绕。Up=从 startHz 向 endHz 递增；Down=从 endHz 向 startHz 递减。
+enum ScanDirection {
+  /// 从 startHz 向 endHz 递增扫。
+  up,
+
+  /// 从 endHz 向 startHz 递减扫。
+  down;
+
+  /// 面向 UI 的短标签。
+  String get label => switch (this) {
+    ScanDirection.up => '上行',
+    ScanDirection.down => '下行',
+  };
+}

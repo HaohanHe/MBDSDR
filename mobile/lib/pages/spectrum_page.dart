@@ -511,6 +511,7 @@ class _ControlPanel extends StatelessWidget {
 
   /// 范围扫描对话框：默认以当前频率为中心 ±0.5 MHz，步进 25 kHz。
   /// 命中门限取当前静噪门限（真实电平阈值），走真实调谐+真实量测。
+  /// 方向（上行/下行）与命中停留时长在弹窗内配置，均取自 AppTokens 具名常量。
   Future<void> _promptScan(BuildContext context) async {
     final center = controller.freqHz / 1e6;
     final startCtrl = TextEditingController(
@@ -519,32 +520,95 @@ class _ControlPanel extends StatelessWidget {
     final endCtrl = TextEditingController(
       text: (center + 0.5).clamp(24.0, 1700.0).toStringAsFixed(4),
     );
+    // 弹窗内本地选择：方向默认上行（对齐桌面 ScanDirection::Up）；
+    // 命中停留默认 AppTokens.scanHitHoldMsDefault（对齐桌面 FixedMs holdMs=2000）。
+    ScanDirection dir = ScanDirection.up;
+    int holdMs = AppTokens.scanHitHoldMsDefault;
     final result = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTokens.bgBar,
         title: const Text('范围扫描', style: AppTokens.sectionTitle),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: startCtrl,
-              decoration: const InputDecoration(labelText: '起始 (MHz)'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: AppTokens.mono,
-            ),
-            TextField(
-              controller: endCtrl,
-              decoration: const InputDecoration(labelText: '结束 (MHz)'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              style: AppTokens.mono,
-            ),
-            const SizedBox(height: AppTokens.spacingS),
-            Text(
-              '步进 25 kHz · 命中门限 ${controller.squelchThresholdDb.toStringAsFixed(0)} dBFS',
-              style: AppTokens.auxiliary,
-            ),
-          ],
+        content: StatefulBuilder(
+          builder: (ctx, setDialog) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: startCtrl,
+                decoration: const InputDecoration(labelText: '起始 (MHz)'),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                style: AppTokens.mono,
+              ),
+              TextField(
+                controller: endCtrl,
+                decoration: const InputDecoration(labelText: '结束 (MHz)'),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                style: AppTokens.mono,
+              ),
+              const SizedBox(height: AppTokens.spacingS),
+              // 扫描方向：上行（start→end 递增）/ 下行（end→start 递减）。
+              Row(
+                children: [
+                  const Text('方向', style: AppTokens.auxiliary),
+                  const SizedBox(width: AppTokens.spacingM),
+                  SegmentedButton<ScanDirection>(
+                    style: ButtonStyle(
+                      backgroundColor: WidgetStateProperty.resolveWith((s) =>
+                          s.contains(WidgetState.selected)
+                              ? AppTokens.selectedFill
+                              : Colors.transparent),
+                      foregroundColor:
+                          WidgetStateProperty.all(AppTokens.textPrimary),
+                      side: WidgetStateProperty.all(
+                        const BorderSide(color: AppTokens.divider),
+                      ),
+                    ),
+                    segments: [
+                      for (final d in ScanDirection.values)
+                        ButtonSegment(value: d, label: Text(d.label)),
+                    ],
+                    selected: {dir},
+                    onSelectionChanged: (s) => setDialog(() => dir = s.first),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppTokens.spacingS),
+              // 命中停留：命中频点额外驻留时长（0=立即继续）。选项来自 AppTokens。
+              Row(
+                children: [
+                  const Text('命中停留', style: AppTokens.auxiliary),
+                  const SizedBox(width: AppTokens.spacingM),
+                  Expanded(
+                    child: DropdownButton<int>(
+                      value: AppTokens.scanHitHoldMsOptions.contains(holdMs)
+                          ? holdMs
+                          : AppTokens.scanHitHoldMsDefault,
+                      isExpanded: true,
+                      dropdownColor: AppTokens.bgBar,
+                      style: AppTokens.mono,
+                      items: [
+                        for (final ms in AppTokens.scanHitHoldMsOptions)
+                          DropdownMenuItem(
+                            value: ms,
+                            child: Text(ms == 0 ? '立即继续' : '${ms ~/ 1000} s'),
+                          ),
+                      ],
+                      onChanged: (v) => setDialog(
+                        () => holdMs = v ?? AppTokens.scanHitHoldMsDefault,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppTokens.spacingS),
+              Text(
+                '步进 25 kHz · 命中门限 ${controller.squelchThresholdDb.toStringAsFixed(0)} dBFS',
+                style: AppTokens.auxiliary,
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -567,7 +631,9 @@ class _ControlPanel extends StatelessWidget {
       endHz: (end * 1e6).round(),
       stepHz: 25000,
       thresholdDbfs: controller.squelchThresholdDb,
-      dwellMs: 300,
+      dwellMs: AppTokens.scanDwellMsDefault,
+      direction: dir,
+      hitHoldMs: holdMs,
     ));
   }
 
@@ -931,7 +997,7 @@ class _ControlPanel extends StatelessWidget {
                 children: [
                   Flexible(
                     child: Text(
-                      '扫描中 ${(controller.scanHz != null ? controller.scanHz! / 1e6 : 0).toStringAsFixed(3)} MHz · '
+                      '${controller.scanPaused ? '已暂停' : '扫描中'} ${(controller.scanHz != null ? controller.scanHz! / 1e6 : 0).toStringAsFixed(3)} MHz · '
                       '${(controller.scanProgress * 100).round()}%',
                       style: AppTokens.mono,
                       maxLines: 1,
@@ -939,6 +1005,19 @@ class _ControlPanel extends StatelessWidget {
                     ),
                   ),
                   const Spacer(),
+                  // 暂停/恢复：冻结当前频点调谐与驻留计时（对齐桌面 scanPauseBtn_）。
+                  TextButton.icon(
+                    onPressed: controller.scanPaused
+                        ? () => controller.resumeScan()
+                        : () => controller.pauseScan(),
+                    icon: Icon(
+                      controller.scanPaused
+                          ? Icons.play_arrow
+                          : Icons.pause,
+                      size: AppTokens.iconSizeInlineLg,
+                    ),
+                    label: Text(controller.scanPaused ? '恢复' : '暂停'),
+                  ),
                   TextButton.icon(
                     onPressed: () => controller.stopScan(),
                     icon: const Icon(Icons.stop_circle_outlined,

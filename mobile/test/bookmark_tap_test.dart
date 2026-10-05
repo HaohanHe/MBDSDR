@@ -130,10 +130,18 @@ class _TapRadio extends ChangeNotifier implements RadioApi {
           required int endHz,
           required int stepHz,
           required double thresholdDbfs,
-          int dwellMs = 300}) async {}
+          int dwellMs = 300,
+          ScanDirection direction = ScanDirection.up,
+          int hitHoldMs = 0}) async {}
 
   @override
   void stopScan() {}
+  @override
+  bool get scanPaused => false;
+  @override
+  void pauseScan() {}
+  @override
+  void resumeScan() {}
 }
 
 void main() {

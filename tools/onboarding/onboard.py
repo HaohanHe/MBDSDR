@@ -98,14 +98,15 @@ MODES = {
         "desc": "慢扫描电视图像（FM 解调音频 → SSTV 解码，自动识别 Martin/Scottie/Robot/PD）",
     },
     "ssdv": {
-        "label": "SSDV 数字慢扫描（字节流 → MCU 重组 JPEG）",
+        "label": "SSDV 数字慢扫描（IQ→BPSK 物理层→字节流→MCU 重组 JPEG）",
         # SSDV 标准只定义 256B 包格式，物理层调制/速率/频率由具体传输链路决定，
-        # 故不内置默认频率；解调后的字节流由调用方喂入。
-        "default_sr": 19_200.0,      # 常见 AFSK-1200 链路的音频参考采样率
+        # 故不内置默认频率；真机符号率/中频偏移由 --ssdv-* 传入（走 docs 活动参数）。
+        "default_sr": 19_200.0,      # 字节流/音频参考采样率（非 rtl_sdr 采集率）；
+                                     # rtl_sdr 实采 IQ 须 --sr ≥225k（见 step_capture 检查）
         "default_n": 0,              # 字节流模式：长度由输入字节文件决定，不固定采样点数
         "freq_hint": None,           # 无通用默认频率，由调用方按目标链路指定
-        "desc": "接收解调后的 SSDV 256B 包字节流→包校验/RS/CRC→MCU 重组 JPEG；"
-                "物理层（AFSK/卷积/解扰等）由传输链路决定、可插拔接入",
+        "desc": "BPSK IQ 物理层（带内下变频→解调→字节）或解调后包字节流→包校验/RS/CRC"
+                "→MCU 重组 JPEG；物理层符号率/中频偏移可插拔，不硬编码活动参数",
     },
 }
 
@@ -528,7 +529,7 @@ def _ssdv_feed_core(raw: bytes, byte_path: str) -> tuple[int, Optional[str], dic
         img.add(pkt)
 
     if n_ok == 0 or not images:
-        return 0, None, {"core_wired": True}
+        return 0, None, {"core_wired": True, "dialect": dec.locked}
 
     # 选包最多（EOI 优先）的一幅图重组
     best_id = max(
@@ -538,6 +539,7 @@ def _ssdv_feed_core(raw: bytes, byte_path: str) -> tuple[int, Optional[str], dic
     res = images[best_id].build()
     info: dict[str, Any] = {
         "core_wired": True,
+        "dialect": dec.locked,
         "image_id": best_id,
         "width": res.width,
         "height": res.height,
@@ -555,40 +557,33 @@ def _ssdv_feed_core(raw: bytes, byte_path: str) -> tuple[int, Optional[str], dic
     return n_ok, jpeg_path, info
 
 
-def _step_decode_ssdv(byte_path: str, r: StepResult) -> StepResult:
-    """SSDV 字节流入口：读解调后 256B 包字节流 → 喂核心 → MCU 重组 JPEG。
+def _finish_ssdv(raw: bytes, byte_path: str, r: StepResult) -> StepResult:
+    """把"解调后字节流"喂 SSDV 核心并写旁证（字节文件路径与 IQ 物理层路径共用）。
 
-    无字节 / 无有效包 → 诚实空态（FAIL），不 mock、不伪造图。
-    有包但部分 MCU 丢失 → 仍出图并在旁证报告 missing_mcus（局部花屏，不造假）。
+    有包但部分 MCU 丢失 → 仍出图并报告 missing_mcus（局部花屏不造假）；
+    0 有效包 → 诚实 FAIL 空态。
     """
-    try:
-        with open(byte_path, "rb") as f:
-            raw = f.read()
-    except OSError as e:
-        r.message = f"读取 SSDV 字节流失败: {e}"
-        return r
-
     r.detail["n_bytes"] = len(raw)
     r.detail["mode"] = "ssdv"
-    r.add_evidence(f"SSDV 解调字节流: {len(raw):,} 字节"
-                   f"（物理层 AFSK/卷积/解扰待真机，见 SSDV_SSTV_SPEC.md §2.2）")
 
     if len(raw) == 0:
         r.status = "FAIL"
         r.message = "SSDV 字节流为空（无解调字节输入）"
-        r.add_fix("提供真机解调后的 SSDV 256B 包字节流文件（--sigmf-data 指向该字节文件）")
+        r.add_fix("提供解调后的 SSDV 包字节流（--ssdv-input bytes）或录制 IQ "
+                  "（--ssdv-input iq + --ssdv-symrate）")
         return r
 
     n_packets, jpeg_path, info = _ssdv_feed_core(raw, byte_path)
     r.detail["n_frames"] = int(n_packets)
     r.detail["ssdv"] = info
-    r.add_evidence(f"SSDV 同步到 {n_packets} 个有效 256B 包")
+    r.add_evidence(f"SSDV 同步到 {n_packets} 个有效包"
+                   f"（方言={info.get('dialect', info.get('core_wired'))}）")
 
     if n_packets <= 0:
         # 无有效包：诚实空态。
         r.status = "FAIL"
-        r.message = "SSDV 字节流中未同步到任何有效 256B 包（物理层同步/信号）"
-        r.add_fix("确认字节流来自解调链（AFSK→帧同步→解扰→RS）；物理层参数按实际链路配置")
+        r.message = "SSDV 字节流中未同步到任何有效包（物理层同步/信号）"
+        r.add_fix("确认字节流来自解调链；物理层参数（符号率/中频偏移）按实际链路配置")
         return r
 
     n_missing = len(info.get("missing_mcus", []))
@@ -599,9 +594,54 @@ def _step_decode_ssdv(byte_path: str, r: StepResult) -> StepResult:
                        f"{', 缺失 ' + str(n_missing) if n_missing else ''}")
     r.status = "PASS"
     r.message = (f"SSDV 重组完成：{n_packets} 包, "
-                  f"{info.get('width')}x{info.get('height')}"
-                  + (f", 缺失 {n_missing} MCU" if n_missing else ""))
+                 f"{info.get('width')}x{info.get('height')}"
+                 + (f", 缺失 {n_missing} MCU" if n_missing else ""))
     return r
+
+
+def _step_decode_ssdv(byte_path: str, r: StepResult) -> StepResult:
+    """SSDV 字节流入口：读解调后包字节流文件 → 喂核心 → MCU 重组 JPEG。"""
+    try:
+        with open(byte_path, "rb") as f:
+            raw = f.read()
+    except OSError as e:
+        r.message = f"读取 SSDV 字节流失败: {e}"
+        return r
+    r.add_evidence(f"SSDV 字节流模式: 读入 {len(raw):,} 字节"
+                   f"（物理层 AFSK/卷积/解扰待真机，见 SSDV_SSTV_SPEC.md §2.2）")
+    return _finish_ssdv(raw, byte_path, r)
+
+
+def _step_decode_ssdv_iq(iq_path: str, r: StepResult, fs: float,
+                         symrate: float, f_offset: float) -> StepResult:
+    """SSDV 物理层入口：复 IQ → 带内下变频 + BPSK 解调 → 字节流 → SSDV 核心 → JPEG。
+
+    云内用合成 IQ 跑通全链（确定性）；真机符号率/中频偏移由参数传入，本层不硬编码。
+    纯噪声/无信号 → 解调字节为空 → ``_finish_ssdv`` 诚实空态，不伪造图。
+    """
+    try:
+        iq = np.fromfile(iq_path, dtype=np.complex64)
+    except OSError as e:
+        r.message = f"读取 SSDV IQ 文件失败: {e}"
+        return r
+
+    r.add_evidence(f"SSDV IQ 物理层: {iq.size:,} complex64 @ {fs/1e3:.1f} ksps, "
+                   f"BPSK symrate={symrate:.0f} Bd, tone_offset={f_offset:.0f} Hz")
+    if iq.size == 0:
+        r.status = "FAIL"
+        r.message = "SSDV IQ 文件为空"
+        r.add_fix("先录制或合成 BPSK 信号 IQ")
+        return r
+    if symrate <= 0:
+        r.status = "FAIL"
+        r.message = "IQ 物理层需指定符号率（--ssdv-symrate）"
+        r.add_fix("符号率走 docs 活动参数；代码不硬编码")
+        return r
+
+    from mbdsdr_ai.ssdv_phy import iq_to_ssdv_bytes
+    raw = iq_to_ssdv_bytes(iq, fs, symrate, f_offset)
+    r.detail["n_demod_bytes"] = len(raw)
+    return _finish_ssdv(raw, iq_path, r)
 
 
 def step_decode(
@@ -609,8 +649,15 @@ def step_decode(
     mode: str,
     sample_rate_hz: float,
     center_freq_hz: float,
+    ssdv_input: str = "bytes",
+    ssdv_symrate: float = 0.0,
+    ssdv_tone_offset: float = 0.0,
 ) -> StepResult:
-    """加载 SigMF IQ，按模式调用真实解码器。"""
+    """加载 SigMF IQ，按模式调用真实解码器。
+
+    SSDV 专用：``ssdv_input``="bytes"（默认，输入为解调后包字节流文件，向后兼容）；
+    ``ssdv_input``="iq"（输入为 complex64 IQ，走带内下变频+BPSK 物理层 → 字节）。
+    """
     r = StepResult(step="decode", status="FAIL")
 
     if mode not in MODES:
@@ -622,8 +669,11 @@ def step_decode(
         r.add_fix("先跑 record 步")
         return r
 
-    # SSDV：输入是"解调后字节流文件"（不是 complex64 IQ），在 IQ 加载前单独处理。
+    # SSDV：在 IQ 加载前单独处理。字节流模式读包字节；IQ 模式走物理层解调。
     if mode == "ssdv":
+        if ssdv_input == "iq":
+            return _step_decode_ssdv_iq(
+                sigmf_data_path, r, sample_rate_hz, ssdv_symrate, ssdv_tone_offset)
         return _step_decode_ssdv(sigmf_data_path, r)
 
     # 加载 IQ
@@ -1082,6 +1132,14 @@ def main(argv: list[str] | None = None) -> int:
                          "否则退回系统时间并标 system")
     ap.add_argument("--sigmf-data", default="",
                     help="decode/output 步直接指定 SigMF data 文件（跳过 capture/record）")
+    ap.add_argument("--ssdv-input", default="bytes",
+                    choices=["bytes", "iq"],
+                    help="ssdv 模式输入：bytes=解调后包字节流文件(默认)；"
+                         "iq=complex64 IQ 走带内下变频+BPSK 物理层")
+    ap.add_argument("--ssdv-symrate", type=float, default=0.0,
+                    help="ssdv IQ 物理层符号率 Bd（真机走 docs 活动参数，代码不硬编码）")
+    ap.add_argument("--ssdv-tone-offset", type=float, default=0.0,
+                    help="ssdv IQ 物理层信号在带内的中频偏移 Hz（带内下变频用，默认 0）")
     ap.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
     ap.add_argument("--timeout", type=float, default=30.0,
                     help="子进程超时（秒）")
@@ -1195,6 +1253,9 @@ def main(argv: list[str] | None = None) -> int:
                     mode=mode,
                     sample_rate_hz=args.sr,
                     center_freq_hz=args.freq,
+                    ssdv_input=args.ssdv_input,
+                    ssdv_symrate=args.ssdv_symrate,
+                    ssdv_tone_offset=args.ssdv_tone_offset,
                 )
                 dec.detail["sigmf_data"] = sigmf_data_path
                 results.append(dec)
