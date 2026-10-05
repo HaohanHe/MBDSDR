@@ -205,6 +205,12 @@ if __name__ == "__main__":
                     help="AMRClassifier 内置模板使用的种子（仅记录，不重新训练）")
     ap.add_argument("--test-seed", type=int, default=TEST_SEED,
                     help="测试集独立 RNG 种子，必须与 train-seed 不同")
+    ap.add_argument("--out", default=None,
+                    help="输出目录覆盖（默认 paper/experiments）；用于隔离复现")
     args = ap.parse_args()
+    # 复现隔离：允许把 CSV/图/manifest 重定向到独立目录，默认行为不变。
+    if args.out:
+        OUT_DIR = args.out  # noqa: F811 (模块级常量被本入口覆盖)
+        FIG_DIR = os.path.join(OUT_DIR, "figures")
     run(args.trials, args.fs, train_seed=args.train_seed,
         test_seed=args.test_seed)

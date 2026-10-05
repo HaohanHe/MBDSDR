@@ -40,6 +40,9 @@
 | `baseline_compare.csv` + `figures/baseline_compare_amr__synthetic__N600__*.png` | `exp_baseline_compare.py` | synthetic | 600 | 经典规则 vs KNN-AMR 同数据集识别准确率；LLM 列=待在线 |
 | `llm_baseline.csv` + `figures/llm_baseline_amr__*.png` | `exp_llm_baseline.py` | synthetic(空态) / online(有key) | 随 trials | 经典/KNN/LLM 三列同数据集对比；无 key 时 LLM 列=`PENDING_ONLINE_RUN` |
 | `rate_bandwidth_success.csv` + `figures/rate_bandwidth_success__synthetic__*.png` | `exp_rate_bandwidth.py` | synthetic | 900 | BPSK 10k 解码成功率 vs 接收低通带宽（固定噪声 PSD/Eb/N0） |
+| `rate_sweep_success.csv` + `figures/rate_sweep_success__synthetic__*.png` | `exp_rate_sweep.py` | synthetic | 1400 | BPSK 10k 整包成功率 vs 采样率 fs（固定 Eb/N0=6dB，7 档 fs×200 次） |
+| `doppler_comp_success.csv` + `figures/doppler_comp_success__synthetic__*.png` | `exp_doppler_comp.py` | synthetic | 3600 | BPSK 10k 解码成功率 vs 多普勒频偏 fd（固定 Eb/N0=8dB，9 档 fd×2 方向×200 次，数字下变频理想补偿上界） |
+| `agent_toolcall_stage_summary.csv` + `agent_toolcall_detail.csv` + `figures/agent_toolcall_stages__synthetic__*.png` | `exp_agent_toolcall.py` | synthetic | 400 | 工具注册/名称解析/参数校验/执行四环节成功率（Wilson CI，8 请求×50 次）；LLM 决策列=`PENDING_ONLINE_RUN`；mean_latency_ms 为墙钟实测、非种子可复现 |
 | `amr_confusion_public.csv` + `figures/amr_confusion_matrix__synthetic__*.png` + `manifest_amr.json` | `exp_amr.py` | synthetic | 640 | 8 类 AMR 混淆矩阵（热图+行归一化+计数+对角准确率 Wilson CI） |
 | `doppler_duration_convergence.csv` + `figures/doppler_duration_convergence__synthetic__*.png` | `exp_doppler_duration.py` | synthetic | 6 | RLS 参考历元误差 vs 观测窗长（固定 TLE/种子/噪声） |
 | `manifest_ota_handoff.json` | `exp_ota_handoff.py` | ota(空态) | 0 | 录制摄取空态演示 |
@@ -80,8 +83,17 @@ python3 experiments/exp_llm_baseline.py --trials-per-class 20 --seed 20261001
 # 6. 解码成功率 vs 接收带宽（固定 Eb/N0，BPSK 10k）
 python3 experiments/exp_rate_bandwidth.py --trials 100 --seed 20261001
 
+# 6b. 整包成功率 vs 采样率/fs（固定 Eb/N0=6dB，BPSK 10k；能量归一化假设）
+python3 experiments/exp_rate_sweep.py --trials 200 --seed 20261001
+
+# 6c. 解码成功率 vs 多普勒频偏 fd（固定 Eb/N0=8dB，数字下变频理想补偿上界）
+python3 experiments/exp_doppler_comp.py --trials 200 --seed 20261001
+
 # 7. AMR 混淆矩阵（公共口径：热图+CSV+manifest+CI）
 python3 experiments/exp_amr.py --trials 80
+
+# 7b. Agent 工具调用管线（注册/解析/校验/执行成功率，Wilson CI；LLM 决策列占位 PENDING）
+python3 experiments/exp_agent_toolcall.py --trials 50 --seed 20261001
 
 # 8. 定轨收敛 vs 观测窗长（固定 TLE/种子/噪声）
 python3 experiments/exp_doppler_duration.py --seed 20261001
