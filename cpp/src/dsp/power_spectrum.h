@@ -19,6 +19,10 @@ std::vector<float> makeHannWindow(std::size_t n);
 // Stateful power spectrum: selectable window + frame averaging.
 class PowerSpectrum {
 public:
+    // Sidelobe floor of each window (dB), documented so the trade-off is visible
+    // at the call site: Hann ~44 dB (general observation default), Blackman ~74
+    // dB (weak-signal-near-strong), Flattop ~93 dB (flat peak for amplitude
+    // calibration -- NOT for sidelobe viewing).
     enum Window { Hann, Flattop, Blackman };
     enum Average { Off, Slow, Fast };   // Slow ~16-frame, Fast ~4-frame average
 
@@ -26,6 +30,9 @@ public:
     void setAverage(Average a);
     Window window() const { return win_; }
     Average average() const { return avg_; }
+    // Test/debug inspector: the currently-built (RMS-normalized) window taps.
+    // Empty until process() has built the window for a given size.
+    const std::vector<float>& windowTaps() const { return window_; }
     // input: complex IQ (power-of-two length); output: dBFS, fft-shifted.
     void process(const std::vector<std::complex<float>>& input,
                  std::vector<float>& output);
@@ -36,6 +43,11 @@ private:
     Average avg_ = Off;
     std::vector<float> window_;
     std::size_t windowLen_ = 0;
+    // Coherent mean of the RMS-normalized window (see rebuildWindow). Folded
+    // into the power scale in process() so a full-scale tone reads 0 dBFS
+    // regardless of the chosen window -- switching windows no longer drifts the
+    // on-screen level. 1.0 == the rectangular-window reference.
+    float windowCoherent_ = 1.0f;
     std::vector<std::vector<float>> ring_;   // ring of linear power frames
     int ringIdx_ = 0;
 };

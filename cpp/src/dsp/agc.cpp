@@ -49,9 +49,26 @@ void Agc::processWithGain(const std::vector<float>& in,
     // by a too-high gain on its first samples and slam into OutputCeiling.
     // Knowing the block peak up front lets us pre-empt exactly that.
     float blockPeak = 0.0f;
+    double sumAbs = 0.0;   // mean magnitude, for reset fast-capture seeding
     for (const float v : in) {
         const float m = std::abs(v);
         if (m > blockPeak) blockPeak = m;
+        sumAbs += m;
+    }
+
+    // First block after reset (env_ still exactly 0): seed the envelope from
+    // the block's mean magnitude instead of letting the first sample derive a
+    // tentative gain from a near-zero envelope. Clean-room; the *idea* of
+    // setting gain in one shot from the first block's average magnitude
+    // (gr-analog agc3 sweeps the first samples to compute gain directly),
+    // written independently. Matters for a QUIET block: the tentative first
+    // gain would otherwise ride the maxGain ceiling, and because
+    // blockPeak*ceiling < OutputCeiling the block-peak lookahead would never
+    // pull it down -- overshooting the first samples. Seeding env_ to the mean
+    // puts the first sample already at its settled gain. A loud block still
+    // trips the lookahead below exactly as before.
+    if (env_ == 0.0f && !in.empty()) {
+        env_ = static_cast<float>(sumAbs / static_cast<double>(in.size()));
     }
 
     for (std::size_t i = 0; i < in.size(); ++i) {

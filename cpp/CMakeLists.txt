@@ -383,6 +383,15 @@ target_include_directories(test_agc_dsp PRIVATE src)
 target_link_libraries(test_agc_dsp PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME agc_dsp COMMAND test_agc_dsp)
 
+# Phase36 W2: window RMS-normalization for dsp::PowerSpectrum. Verifies the
+# rebuilt window is unit-RMS and that the same full-scale sine peaks within
+# <1 dB across Hann/Blackman/Flattop (no on-screen level drift on window switch).
+add_executable(test_power_spectrum_window tests/test_power_spectrum_window.cpp
+    src/dsp/power_spectrum.cpp src/dsp/fft.cpp)
+target_include_directories(test_power_spectrum_window PRIVATE src)
+target_link_libraries(test_power_spectrum_window PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME power_spectrum_window COMMAND test_power_spectrum_window)
+
 add_executable(test_engine_integration tests/test_engine_integration.cpp
     src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/fsk_demod.cpp src/dsp/pocsag_decoder.cpp src/dsp/m17_decoder.cpp src/dsp/vor_receiver.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp

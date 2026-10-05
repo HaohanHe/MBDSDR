@@ -28,6 +28,7 @@ private slots:
     void burstFirstSamplesDoNotClip();
     void steadyStateNotOverSuppressed();
     void boundaryBlocksAreSafe();
+    void resetFirstBlockNoGainJump();
 };
 
 // Quiet floor amplitude used to settle the envelope low (gain rides high).
@@ -110,6 +111,30 @@ void TestAgcDsp::boundaryBlocksAreSafe() {
     agc.processWithGain(one, &out, &gain);
     QCOMPARE(out.size(), std::size_t(1));
     QVERIFY(std::abs(out[0]) <= Agc::OutputCeiling + 1e-6f);
+}
+
+void TestAgcDsp::resetFirstBlockNoGainJump() {
+    Agc agc(/*blockDurMs=*/1.0);
+    agc.reset();
+
+    // Quiet steady tone: settled gain = target/tone = 0.3/0.05 = 6.0, which is
+    // under the maxGain ceiling (12). Crucially blockPeak*ceiling = 0.05*12 =
+    // 0.6 < OutputCeiling (1.0), so the block-peak lookahead CANNOT pull a
+    // too-high first-sample gain down here. Without reset fast-capture the first
+    // sample derives gain from a near-zero envelope and rides the maxGain
+    // ceiling (12), overshooting the output; seeding env_ to the block mean puts
+    // the first sample already at its settled gain.
+    const float tone = 0.05f;
+    const float settledGain = Agc::DefaultTarget / tone;
+    std::vector<float> block(256, tone);
+    std::vector<float> out, gain;
+    agc.processWithGain(block, &out, &gain);
+
+    QVERIFY2(std::abs(gain[0] - settledGain) < 0.5f,
+             "after reset the first-block gain must already sit near the settled "
+             "gain, not ride the maxGain ceiling");
+    QVERIFY2(std::abs(std::abs(out[0]) - Agc::DefaultTarget) < 0.05f,
+             "the first output sample must already be ~target, not overshooting");
 }
 
 QTEST_MAIN(TestAgcDsp)
