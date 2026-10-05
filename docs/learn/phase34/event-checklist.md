@@ -69,8 +69,13 @@ Phase34 块4：活动前核对清单（设备/天线/时间/预测/邮件）
       `onboard --step decode --mode ssdv --sigmf-data <...>.bin`
       【待真机确认：现场物理层解调手段（gr_satellites 61781 / ccsds_rx 零件）】
 - [ ] **出图产物目录约定**：统一 `--out-dir ./phase14_rx`，便于找 PNG/JPG
-- [ ] **离线回放已验**：SSTV 用 `real_sstv.wav` 离线解过（历史闭环）；
-      SSDV 合成包流 `pytest tests/test_ssdv_e2e.py` 绿（14/14）
+- [x] **离线回放已验（2026-10-05 复跑留证）**：
+      - SSTV：`python3 tests/test_sstv_onboard_e2e.py`（`real_sstv.wav` 重 FM 调制合成 IQ → onboard sstv 解码）
+        `status=PASS`，制式 Robot 72 320×240、**行=239/240**，PNG 116192 B —— 仅**离线 bench 闭环**，
+        **真实 JAMX01 过境射频出图仍待真机**。
+      - SSDV：`pytest tests/test_ssdv_e2e.py` = **26 passed**（2026-10-05 复跑；本清单/recv-chain-conclusion
+        旧记「14/14」为 2026-10-04 演练时点数字，测试后续增至 26）—— 仅**合成包流**，真机 IQ→包 `.bin`
+        物理层仍待真机。
 
 ## F. 换证书邮件模板（收图后即用）
 

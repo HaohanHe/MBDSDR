@@ -86,9 +86,11 @@ RTL-SDR (RTL2832U)  IQ
    （周期 CV、同步标记形态学、逐行/组首布局自识别、色差直流恢复）是对着
    **真实 over-the-air 录音**反复调出来的；C++ 侧云内只能合成信号自测，
    无真机录音迭代，极易「合成全绿、真机斜条纹」（P4 §3.1）。
-3. **活动期 Python 已全链出图**：SSTV 已对 `real_sstv.wav` 闭环；SSDV 字节/包层以上
-   已用合成包流端到端验出图（`pytest tests/test_ssdv_e2e.py` 14/14 passed，
-   见 `P3-receive-sop.md` §6）。再在 C++ 重写一遍同一功能 = 双倍维护、双倍调参，
+3. **活动期 Python 已全链出图**：SSTV 已对 `real_sstv.wav` 闭环（2026-10-05 复跑
+   `tests/test_sstv_onboard_e2e.py` PASS，Robot72 320×240、行=239/240）；SSDV 字节/包层以上
+   已用合成包流端到端验出图（`pytest tests/test_ssdv_e2e.py` **26 passed**，2026-10-05 复跑；
+   本结论旧记「14/14」为 2026-10-04 演练时点数字，测试后续增至 26，见 `P3-receive-sop.md` §6）。
+   再在 C++ 重写一遍同一功能 = 双倍维护、双倍调参，
    对「活动期收到图」这个唯一目标零增量。
 4. **C++ 现有零件与本活动方言也不匹配**：`cpp/src/dsp/ssdv_packet.*` 是
    **SP5WWP 6 字节头**变体（`SSDV_SSTV_SPEC.md` §8.4、§4 资产盘点），

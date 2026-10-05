@@ -1,4 +1,6 @@
 # 第四十阶段实现规格：稳定性收官
+> **交付状态（Phase41 收官复核，2026-10-05）：已交付。** 本阶段规格各项已落地、并通过当时记录的测试基线（见下方基线行）；跨阶段未决项统一登记在 [../phase41/open-items.md](../phase41/open-items.md)。本文件保留为历史规划快照。
+>
 
 > 基线：HEAD = 80b2192（已推送），ctest 127/127、flutter 351、pytest 42/42。
 > 背景：tests/ 大套件已拆标签（mainwindow=8/slow=18/快循环 109）+ QSettings 隔离；e2e_smoke 环境性（无 PulseAudio）、device_ui 顺序相关墙钟（单跑即过）、audio_sink 间歇性；CI ci.yml 三 job 结构完整但"待 runner 配置验证"；8GB cgroup OOM。

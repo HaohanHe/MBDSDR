@@ -1,4 +1,6 @@
 # 第三十六阶段实现规格：GNU Radio 机制学习落地
+> **交付状态（Phase41 收官复核，2026-10-05）：已交付。** 本阶段规格各项已落地、并通过当时记录的测试基线（见下方基线行）；跨阶段未决项统一登记在 [../phase41/open-items.md](../phase41/open-items.md)。本文件保留为历史规划快照。
+>
 
 > 基线：HEAD = 677cb4c（已推送），ctest 126/126、flutter 342、pytest 42/42。
 > 学习材料：repos/gnuradio（上游，gitignore 不入库；干净室学机制不抄代码）。
