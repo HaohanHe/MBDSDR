@@ -136,9 +136,50 @@ def ccsds_frame_to_dslwp(frame: bytes) -> tuple[bytes, List[int]]:
     return b"".join(parts), nerrors
 
 
+def _demod_resync(z: np.ndarray, fs: float, symrate: float, foff: float,
+                  timing: str, win: int = 4096,
+                  min_prom: float = 8.0) -> np.ndarray:
+    """多缓冲重同步解调：按窗信号存在性切段，每段独立解调（重新 seed 定时）。
+
+    遮挡/静默窗（prominence 低）被丢弃；相邻活跃窗合并成段，每段独立跑
+    :func:`~mbdsdr_ai.ssdv_phy.demod_bpsk`，gardner 定时环路在段边界重新 seed，
+    不会被噪声段带偏。各段比特顺序拼接，交给下游 ASM 重搜。
+    """
+    from .ssdv_phy import estimate_cfo_bpsk, demod_bpsk
+    n = z.size
+    if n < win:
+        return demod_bpsk(z, fs, symrate, f_offset=foff, timing=timing)
+    n_win = n // win
+    active = []
+    for k in range(n_win):
+        seg = z[k * win:(k + 1) * win]
+        _est, prom = estimate_cfo_bpsk(seg, fs, min_prom)
+        active.append(prom >= min_prom)
+    # 合并活跃窗为连续段（允许 1 窗毛刺）
+    bits_parts = []
+    i = 0
+    while i < n_win:
+        if not active[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n_win and (active[j + 1] or (j + 2 < n_win and active[j + 2])):
+            j += 1
+        lo, hi = i * win, min((j + 1) * win, n)
+        seg_bits = demod_bpsk(z[lo:hi], fs, symrate, f_offset=foff, timing=timing)
+        if seg_bits.size:
+            bits_parts.append(seg_bits)
+        i = j + 1
+    if not bits_parts:
+        return np.zeros(0, dtype=np.int8)
+    return np.concatenate(bits_parts)
+
+
 def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
                        frame_bits: int, f_offset: Optional[float] = 0.0,
-                       timing: str = "coarse") -> CcsdsSsdvResult:
+                       timing: str = "coarse", afc: bool = False,
+                       notch_cw: bool = False, resync: bool = False
+                       ) -> CcsdsSsdvResult:
     """复 IQ → demod_bpsk → ASM 同步 → Viterbi → 解扰 → RS → 218B → DSLWP JPEG。
 
     参数
@@ -151,16 +192,33 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
         :func:`mbdsdr_ai.ssdv_phy.estimate_cfo_bpsk`）。
     timing :
         传 ``"coarse"``（眼图粗定时）或 ``"gardner"``（Gardner TED 闭环精跟踪）。
+    afc :
+        ``True`` = 先做分段自适应 AFC（:func:`~mbdsdr_ai.ssdv_phy.afc_correct`）
+        再解调，跟踪慢扫频多普勒。
+    notch_cw :
+        ``True`` = 先做 CW 对消（:func:`~mbdsdr_ai.ssdv_phy.notch_cw`）再解调。
+    resync :
+        ``True`` = 多缓冲重同步（:func:`_demod_resync`），遮挡后重新 ASM 搜索。
 
     诚实空态：ASM 0 帧 / RS 全不可纠 / CRC 不过 → 结果计数全 0、jpeg 为空，不伪造。
     """
-    from .ssdv_phy import estimate_cfo_bpsk
+    from .ssdv_phy import estimate_cfo_bpsk, afc_correct, notch_cw, demod_bpsk
     out = CcsdsSsdvResult()
-    foff = f_offset
-    if foff is None:
-        foff, prom = estimate_cfo_bpsk(iq, fs)
+    z = iq
+    if notch_cw:
+        z, _cw = notch_cw(z, fs, symrate)
+    if afc:
+        z, _track = afc_correct(z, fs, symrate)
+        foff = 0.0
+    elif f_offset is None:
+        foff, prom = estimate_cfo_bpsk(z, fs)
+    else:
+        foff = f_offset
     out.cfo_est_hz = float(foff)
-    bits = demod_bpsk(iq, fs, symrate, f_offset=foff, timing=timing)
+    if resync:
+        bits = _demod_resync(z, fs, symrate, foff, timing)
+    else:
+        bits = demod_bpsk(z, fs, symrate, f_offset=foff, timing=timing)
     out.n_demod_bits = int(bits.size)
     if bits.size == 0:
         return out

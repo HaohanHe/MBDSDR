@@ -107,7 +107,9 @@ class TestCwInterference:
         base, fb = _frame()
         n = base.size
         t = np.arange(n) / FS
-        cw = 6.0 * np.exp(1j * 2 * np.pi * 600.0 * t)
+        # Phase52 抛物线亚-bin CFO 后，amp<=12 @+600Hz 已不毒死盲 CFO（能自解）；
+        # 真正的诚实失效边界在 amp=20（信号被 CW 淹没，notch 也救不回）。
+        cw = 20.0 * np.exp(1j * 2 * np.pi * 600.0 * t)
         iq = base + cw + _noise(rng, n, 0.5)
         r = ccsds_iq_to_result(iq, FS, SYMRATE, frame_bits=fb,
                                f_offset=None, timing="gardner")

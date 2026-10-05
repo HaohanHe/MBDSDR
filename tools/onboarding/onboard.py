@@ -647,13 +647,15 @@ def _step_decode_ssdv_iq(iq_path: str, r: StepResult, fs: float,
 def _step_decode_ssdv_iq_ccsds(iq_path: str, r: StepResult, fs: float,
                                symrate: float, f_offset: float,
                                frame_bits: int, timing: str,
-                               blind_cfo: bool = False) -> StepResult:
+                               blind_cfo: bool = False, afc: bool = False,
+                               notch_cw: bool = False, resync: bool = False) -> StepResult:
     """SSDV over CCSDS 级联全链入口：复 IQ → demod → ASM → Viterbi(终态0)
     → 解扰 → RS → DSLWP 218B → ssdv_decoder → JPEG。
 
     链路实现在 :mod:`mbdsdr_ai.ccsds_ssdv`（单一可复用层，本函数不重写链路）。
     真机符号率/中频偏移/帧长由参数传入，代码不硬编码活动参数。
-    ``blind_cfo=True`` 用平方环盲估计频偏（真机多普勒不确定时用）。
+    ``blind_cfo``=平方环盲估；``afc``=分段 AFC 跟踪多普勒；``notch_cw``=CW 对消；
+    ``resync``=遮挡后多缓冲重同步。
     纯噪声/不可解码：ASM 0 帧或 CRC 不过 → 诚实 FAIL，不伪造图。
     """
     try:
@@ -663,9 +665,10 @@ def _step_decode_ssdv_iq_ccsds(iq_path: str, r: StepResult, fs: float,
         return r
 
     foff = None if blind_cfo else f_offset
+    opts = [o for o, on in (("afc", afc), ("notch", notch_cw), ("resync", resync)) if on]
     r.add_evidence(f"SSDV CCSDS 级联: {iq.size:,} complex64 @ {fs/1e3:.1f} ksps, "
                    f"symrate={symrate:.0f} Bd, cfo={'blind' if blind_cfo else f'{f_offset:.0f} Hz'}, "
-                   f"frame_bits={frame_bits}, timing={timing}")
+                   f"frame_bits={frame_bits}, timing={timing}, opts={opts or '-'}")
     if iq.size == 0:
         r.status = "FAIL"
         r.message = "SSDV CCSDS IQ 文件为空"
@@ -684,7 +687,8 @@ def _step_decode_ssdv_iq_ccsds(iq_path: str, r: StepResult, fs: float,
 
     from mbdsdr_ai.ccsds_ssdv import ccsds_iq_to_result
     res = ccsds_iq_to_result(iq, fs, symrate, frame_bits=frame_bits,
-                             f_offset=foff, timing=timing)
+                             f_offset=foff, timing=timing,
+                             afc=afc, notch_cw=notch_cw, resync=resync)
     r.detail["n_demod_bits"] = res.n_demod_bits
     r.detail["n_asm_frames"] = res.n_asm_frames
     r.detail["rs_nerrors"] = res.rs_nerrors
@@ -745,6 +749,9 @@ def step_decode(
     ssdv_frame_bits: int = 0,
     ssdv_timing: str = "coarse",
     ssdv_blind_cfo: bool = False,
+    ssdv_afc: bool = False,
+    ssdv_notch: bool = False,
+    ssdv_resync: bool = False,
 ) -> StepResult:
     """加载 SigMF IQ，按模式调用真实解码器。
 
@@ -769,7 +776,8 @@ def step_decode(
         if ssdv_mode == "ccsds" and ssdv_input == "iq":
             return _step_decode_ssdv_iq_ccsds(
                 sigmf_data_path, r, sample_rate_hz, ssdv_symrate,
-                ssdv_tone_offset, ssdv_frame_bits, ssdv_timing, ssdv_blind_cfo)
+                ssdv_tone_offset, ssdv_frame_bits, ssdv_timing, ssdv_blind_cfo,
+                ssdv_afc, ssdv_notch, ssdv_resync)
         if ssdv_input == "iq":
             return _step_decode_ssdv_iq(
                 sigmf_data_path, r, sample_rate_hz, ssdv_symrate, ssdv_tone_offset)
@@ -1254,6 +1262,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ssdv-blind-cfo", action="store_true",
                     help="ssdv ccsds：平方环盲估计载波频偏(真机多普勒不确定时用；"
                          "开了就忽略 --ssdv-tone-offset)")
+    ap.add_argument("--ssdv-afc", action="store_true",
+                    help="ssdv ccsds：分段自适应 AFC 跟踪慢扫频多普勒")
+    ap.add_argument("--ssdv-notch", action="store_true",
+                    help="ssdv ccsds：自适应 CW 对消(窄带单音干扰)")
+    ap.add_argument("--ssdv-resync", action="store_true",
+                    help="ssdv ccsds：多缓冲重同步(遮挡后重新 ASM 切窗)")
     ap.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
     ap.add_argument("--timeout", type=float, default=30.0,
                     help="子进程超时（秒）")
@@ -1374,6 +1388,9 @@ def main(argv: list[str] | None = None) -> int:
                     ssdv_frame_bits=args.ssdv_frame_bits,
                     ssdv_timing=args.ssdv_timing,
                     ssdv_blind_cfo=args.ssdv_blind_cfo,
+                    ssdv_afc=args.ssdv_afc,
+                    ssdv_notch=args.ssdv_notch,
+                    ssdv_resync=args.ssdv_resync,
                 )
                 dec.detail["sigmf_data"] = sigmf_data_path
                 results.append(dec)

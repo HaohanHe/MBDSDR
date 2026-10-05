@@ -73,10 +73,152 @@ def estimate_cfo_bpsk(iq: np.ndarray, fs: float,
     pk = int(np.argmax(mag))
     med = float(np.median(mag)) + 1e-12
     prominence = float(mag[pk] / med)
-    cfo = float(fq[pk] / 2.0)
+    # 抛物线插值亚-bin 精峰位（降频率量化误差，供 AFC 小窗跟踪）
+    if 1 <= pk <= n - 2:
+        y0, y1, y2 = mag[pk - 1], mag[pk], mag[pk + 1]
+        denom = (y0 - 2.0 * y1 + y2)
+        if denom > 1e-12:
+            delta = 0.5 * (y0 - y2) / denom          # [-0.5,0.5] bin
+            df = fs / n
+            cfo = float((fq[pk] + delta * df) / 2.0)
+        else:
+            cfo = float(fq[pk] / 2.0)
+    else:
+        cfo = float(fq[pk] / 2.0)
     if prominence < min_prominence:
         return 0.0, prominence
     return cfo, prominence
+
+
+# AFC / notch 的具名门限常量（不硬编码活动参数；仅通用演示默认，真机可由参数覆盖）。
+AFC_WIN_SAMPLES: int = 8192          # 每 AFC 窗样本数（频率分辨率 fs/win ≈ 5.9Hz）
+AFC_MAX_STEP_HZ: float = 40.0        # 相邻窗频偏估计的限幅（Hz/窗），防野点跳变
+AFC_MIN_PROMINENCE: float = 8.0      # 窗内信号 prominence 门限，低于则冻结前值
+NOTCH_GATE: float = 6.0              # CW 峰 = 该 bin 幅度 / 局部均值 > 此门限
+NOTCH_HALF_BINS: int = 1             # 陷波半宽（bin），±half 一并清零
+NOTCH_LOCAL_BINS: int = 16           # 局部背景对比半径（bin），需大于 CW 主瓣泄漏宽
+
+
+def afc_correct(iq: np.ndarray, fs: float, symrate: float,
+                win: int = AFC_WIN_SAMPLES,
+                max_step: float = AFC_MAX_STEP_HZ,
+                min_prom: float = AFC_MIN_PROMINENCE
+                ) -> tuple[np.ndarray, np.ndarray]:
+    """分段自适应 AFC：滑窗平方环估计 → 限幅/冻结平滑 → 逐窗逆旋。
+
+    对**慢扫频多普勒**（窗内频偏变化 << 窗分辨率量级）可跟踪；对快扫频（单窗内
+    扫过量级分辨率）仍失效——这是 AFC 带宽与频率分辨率的固有矛盾，诚实返回
+    未补偿信号并由下游 ASM/RS 把关。
+
+    状态机语义（对齐 Phase49 DopplerStepLimiter，纯 Python）：
+      - 窗内 prominence 达标 → 估本窗频偏，再与前值限幅（|Δf|<=max_step）；
+      - 窗内 prominence 不足（信号弱/遮挡）→ **冻结**前一频偏（不跳 0）；
+      - 全程无任何达标窗 → 频偏恒 0（诚实不补偿，下游判空）。
+
+    返回 ``(de-rotated complex64 iq, 每窗中心瞬时频偏估计 Hz 数组)``。
+    """
+    z = np.asarray(iq, dtype=np.complex128)
+    n = z.size
+    if n == 0:
+        return np.zeros(0, dtype=np.complex64), np.zeros(0)
+    if win < 256 or n < win:
+        # 样本不足以滑窗：退化为整段单估
+        cfo, _ = estimate_cfo_bpsk(z, fs, min_prom)
+        t = np.arange(n) / fs
+        return (z * np.exp(-1j * 2 * np.pi * cfo * t)).astype(np.complex64), \
+            np.array([cfo])
+
+    n_win = int(np.ceil(n / win))
+    centers = np.zeros(n_win)
+    smooth = np.zeros(n_win)
+    prev = 0.0
+    have_lock = False
+    for k in range(n_win):
+        lo, hi = k * win, min((k + 1) * win, n)
+        est, prom = estimate_cfo_bpsk(z[lo:hi], fs, min_prom)
+        centers[k] = (lo + hi) / 2.0
+        if prom < min_prom:
+            # 冻结：无新观测时保持前值（不跳 0）
+            smooth[k] = prev
+            continue
+        if not have_lock:
+            prev = est
+            have_lock = True
+        else:
+            # 限幅：单次步进不超过 max_step（防野点/谱线二义跳变）
+            d = est - prev
+            d = max(-max_step, min(max_step, d))
+            prev = prev + d
+        smooth[k] = prev
+
+    # 由窗中心平滑频偏 → 逐样本瞬时频偏 → 积分成相位 → 逆旋
+    f_inst = np.interp(np.arange(n), centers, smooth)
+    phase = 2 * np.pi * np.cumsum(f_inst) / fs
+    derot = z * np.exp(-1j * phase)
+    return derot.astype(np.complex64), smooth
+
+
+def notch_cw(iq: np.ndarray, fs: float, symrate: float,
+             gate: float = NOTCH_GATE, local_bins: int = NOTCH_LOCAL_BINS
+             ) -> tuple[np.ndarray, list]:
+    """自适应 CW 对消：FFT 检测窄带强单音 → 估计复幅度 → 时域精确相减。
+
+    频域切除会留 sinc 旁瓣（频率未对齐 bin 时尤其严重）；这里改成**参数对消**：
+    检测到 CW 峰频 ``f_cw`` 后，用 ``mean(z·exp(-j2π f_cw t))`` 估计复幅度，再从
+    时域 ``z(t)`` 减去 ``a·exp(+j2π f_cw t)``——主瓣与旁瓣一并消除。
+
+    判据：某 bin 幅度 > ``gate × 局部（±local_bins 均值）`` 视为窄带 CW 峰。信号主瓣是
+    **宽带**的，局部均值同样高，故不会被当 CW 误陷；真正的窄单音才命中。
+
+    返回 ``(对消后 complex64 iq, 检测到的 CW 频偏 Hz 列表)``。
+    """
+    z = np.asarray(iq, dtype=np.complex128)
+    n = z.size
+    if n < 64:
+        return np.asarray(iq, dtype=np.complex64), []
+    Z = np.fft.fft(z)
+    mag = np.abs(Z)
+    fq = np.fft.fftfreq(n, 1.0 / fs)
+    t = np.arange(n) / fs
+
+    # 找 CW 峰：按幅度扫描，命中后把该峰及其邻近 bin 标记为已处理（不重复报）
+    order = np.argsort(mag)[::-1]
+    removed: set = set()
+    cw_freqs: list = []
+    df = fs / n
+    for pk in order:
+        if pk in removed:
+            continue
+        lo = max(0, pk - local_bins)
+        hi = min(n, pk + local_bins + 1)
+        local = np.concatenate([mag[lo:pk], mag[pk + 1:hi]])
+        loc_mean = float(np.mean(local)) + 1e-12
+        if mag[pk] <= gate * loc_mean:
+            break  # 已按幅度降序，后面都更低，不必再查
+        # 抛物线亚-bin 精峰频（频率误差 over 长窗会让时域对消失配）
+        f_cw = float(fq[pk])
+        if 1 <= pk <= n - 2:
+            y0, y1, y2 = mag[pk - 1], mag[pk], mag[pk + 1]
+            den = (y0 - 2.0 * y1 + y2)
+            if den > 1e-12:
+                f_cw += (0.5 * (y0 - y2) / den) * df
+        # 细网格精调：最大化 |mean(z·exp(-j2π f t))|，步长 0.05Hz（长窗下 0.3Hz 偏差
+        # 即积累数 rad 相位差，令对消失败；亚-Hz 精度才能干净相消）
+        best_f, best_abs = f_cw, -1.0
+        for fg in np.arange(f_cw - df, f_cw + df, 0.05):
+            aa = float(np.abs(np.mean(z * np.exp(-1j * 2 * np.pi * fg * t))))
+            if aa > best_abs:
+                best_abs, best_f = aa, float(fg)
+        f_cw = best_f
+        # 估计该 CW 的复幅度 → 时域相减
+        a = np.mean(z * np.exp(-1j * 2 * np.pi * f_cw * t))
+        z = z - a * np.exp(1j * 2 * np.pi * f_cw * t)
+        cw_freqs.append(f_cw)
+        for m in range(pk - 2, pk + 3):
+            if 0 <= m < n:
+                removed.add(m)
+
+    return z.astype(np.complex64), cw_freqs
 
 
 def _eye_center_phase(filt: np.ndarray, sps: float) -> float:
