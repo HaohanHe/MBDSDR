@@ -82,11 +82,20 @@ int LLMWorker::backoffDelayMs(int attemptOneBased) {
 }
 
 QString LLMWorker::formatChatError(const QString& partialContent,
-                                   const QString& error) {
+                                   const QString& error,
+                                   int retriesExhausted) {
     QString out = partialContent;
     if (!out.isEmpty()) out += QString::fromUtf8("\n\n[生成中断] ");
     else out = QString::fromUtf8("LLM 请求失败：");
     out += error;
+    // Transient-retry budget spent (429/503/timeout after backoff): the raw
+    // transport `error` already carries the HTTP code; append an honest tail so
+    // the operator knows we already retried N times and are giving up -- never a
+    // silent retry storm, never a fabricated answer.
+    if (retriesExhausted > 0) {
+        out += QString::fromUtf8("（服务端繁忙，已自动重试 %1 次后放弃）")
+                   .arg(retriesExhausted);
+    }
     return out;
 }
 
@@ -188,19 +197,32 @@ void LLMWorker::doChat(const QList<ChatMessage>& messages,
         // kAiMaxTransientRetries with exponential backoff. Terminal errors
         // (400/401/403/no-key/parse) and the exhausted budget return as-is so the
         // caller surfaces an honest PENDING -- never a mock, never a retry storm.
+        int retriesUsed = 0;          // transient retries actually performed
+        bool budgetExhausted = false; // retryable error hit the budget ceiling
         for (int attempt = 0; ; ++attempt) {
             resp = client_->chat(msgs, tools, onChunk, opts);
             if (resp.error.isEmpty()) break;
-            if (classifyLlmError(resp.httpStatus, resp.error) != LlmErrorClass::Retryable ||
+            const LlmErrorClass cls = classifyLlmError(resp.httpStatus, resp.error);
+            if (cls != LlmErrorClass::Retryable ||
                 attempt >= tokens::kAiMaxTransientRetries) {
+                // Terminal on first try, OR a retryable error that has now eaten
+                // the whole bounded budget (429/503 after kAiMaxTransientRetries).
+                // In the latter case flag it so the surfaced line can honestly say
+                // "retried N times, giving up" -- the operator never sees a bare
+                // transport error and wonders why we stopped.
+                if (cls == LlmErrorClass::Retryable &&
+                    attempt >= tokens::kAiMaxTransientRetries)
+                    budgetExhausted = true;
                 break;   // terminal or budget exhausted -> return the honest error
             }
+            retriesUsed = attempt + 1;   // this attempt will be followed by a retry
             sleepBackoffMs(backoffDelayMs(attempt + 1));
         }
         if (!resp.error.isEmpty()) {
             // G2: surface on the SEPARATE chatError signal (partial content kept),
             // NOT chatFinished -- the Agent must not persist it as a normal reply.
-            emit chatError(formatChatError(resp.content, resp.error));
+            emit chatError(formatChatError(resp.content, resp.error,
+                                           budgetExhausted ? retriesUsed : 0));
             return;
         }
 

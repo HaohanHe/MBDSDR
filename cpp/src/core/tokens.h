@@ -391,6 +391,12 @@ inline constexpr double  kGeoDopPoor        = 8.0;   // DOP <=8  => 差; beyond 
 inline constexpr double  kSMeterDbPerUnit   = 6.0;
 inline constexpr int     kSMeterMaxUnits    = 9;
 inline constexpr double  kSMeterPeakDecayDbPerSec = 12.0;
+// Narrow-window elasticity (Phase42): the S0..S9 labels share one cell each, so
+// when the status bar squeezes the meter the glyphs would otherwise run together
+// as "S1S2S3...". The paint loop thins the LABELS elastically -- stride =
+// ceil((labelWidth + gap)/cellWidth) -- so a wide meter shows every unit while a
+// narrow meter strides (S0 S2 S4 ... S9), never touching. Tick marks stay dense.
+inline constexpr int     kSMeterTickLabelGap = 4;   // min base-px gap between adjacent drawn S labels
 
 // TLE freshness: orbit elements drift; an epoch older than kTleStaleDays is
 // labelled 过期 (still usable, flagged). kTleRefreshAgeHours = cache age after

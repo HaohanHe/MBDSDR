@@ -43,8 +43,8 @@ void SMeterWidget::tickDecay(double dtSec) {
     update();
 }
 
-QSize SMeterWidget::sizeHint() const {
-    return QSize(tokens::scaled(220), tokens::scaled(34));
+    QSize SMeterWidget::sizeHint() const {
+    return QSize(tokens::scaled(220), tokens::scaled(tokens::kSMeterH));
 }
 
 void SMeterWidget::paintEvent(QPaintEvent*) {
@@ -73,16 +73,30 @@ void SMeterWidget::paintEvent(QPaintEvent*) {
     p.setBrush(QColor(tokens::kAccent));
     p.drawRoundedRect(fill, tokens::scaled(4), tokens::scaled(4));
 
-    // S0..S9 tick labels.
+    // S0..S9 tick labels. Elastic thinning (Phase42): the status bar can squeeze
+    // the meter narrow enough that one cell barely fits a 2-char label, so the
+    // glyphs would otherwise run together as "S1S2S3...". We measure the widest
+    // label ("S9") and stride the LABELS so adjacent drawn labels keep at least
+    // kSMeterTickLabelGap of breathing room: a wide meter draws every unit, a
+    // narrow meter strides (S0 S2 S4 ... S9). The hairline tick marks stay dense.
     p.setPen(tokens::rgbaA(tokens::kTextAlphaSecondary));
     QFont f = p.font(); f.setPointSizeF(tokens::kFontAuxPt); p.setFont(f);
     const QFontMetrics fm(f);
+    const double labelW = fm.horizontalAdvance(QStringLiteral("S9"));  // widest label
+    const double minGap = tokens::scaled(tokens::kSMeterTickLabelGap);
+    const int stride = std::max(1,
+        static_cast<int>(std::ceil((labelW + minGap) / uW)));
     for (int i = 0; i <= units; ++i) {
         const double x = r.left() + uW * i;
         p.setPen(QPen(tokens::rgbaA(tokens::kTickLabelAlpha), 1.0));
         p.drawLine(QPointF(x, r.bottom()), QPointF(x, r.bottom() - tokens::scaled(4)));
+        const bool isEnd = (i == units);   // S9 end cap always shown
+        // Interior label: keep it on the stride AND at least `stride` cells away
+        // from the S9 end cap, else it would sit adjacent to the end label and
+        // crowd it (the end cap is drawn regardless of the stride).
+        if (!isEnd && ((i % stride) != 0 || (units - i) < stride)) continue;
         p.setPen(tokens::rgbaA(tokens::kTextAlphaTertiary));
-        const QString lab = (i == units) ? QStringLiteral("S9") : QStringLiteral("S%1").arg(i);
+        const QString lab = isEnd ? QStringLiteral("S9") : QStringLiteral("S%1").arg(i);
         p.drawText(QRectF(x - uW / 2, r.top(), uW, tokens::scaled(12)),
                    Qt::AlignCenter, lab);
     }
