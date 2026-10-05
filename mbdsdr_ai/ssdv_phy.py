@@ -49,6 +49,56 @@ def bpsk_modulate_bits(bits, fs: float, symrate: float,
     return iq.astype(np.complex64)
 
 
+def estimate_cfo_bpsk(iq: np.ndarray, fs: float,
+                      min_prominence: float = 8.0) -> tuple[float, float]:
+    """BPSK 盲载波频偏估计（平方环，干净室教科书实现）。
+
+    原理：复基带 BPSK ``z(t)=d(t)·exp(j2π f₀ t)`` 平方后 ``d²=1`` 数据被抹除，
+    出现一根在 ``2·f₀`` 的谱线 → FFT 找峰 /2 即频偏估计。对抑制载波 BPSK 适用。
+
+    返回 ``(cfo_hz, prominence)``。``prominence`` = 峰谱线幅度 / 谱中位数，是"信号
+    是否真在"的旁证：纯噪声无相干谱线，prominence 很低（实测 ~4）；有信号时即便
+    sd=3 仍 ~8+。``prominence < min_prominence`` 视为无可靠信号（诚实返回 0 频偏，
+    由下游 ASM/RS/CRC 把关，不伪造估计）。
+    """
+    z = np.asarray(iq, dtype=np.complex128)
+    n = z.size
+    if n < 64:
+        return 0.0, 0.0
+    z2 = z * z
+    z2 = z2 * np.hanning(n)
+    Z = np.fft.fftshift(np.fft.fft(z2))
+    fq = np.fft.fftshift(np.fft.fftfreq(n, 1.0 / fs))
+    mag = np.abs(Z)
+    pk = int(np.argmax(mag))
+    med = float(np.median(mag)) + 1e-12
+    prominence = float(mag[pk] / med)
+    cfo = float(fq[pk] / 2.0)
+    if prominence < min_prominence:
+        return 0.0, prominence
+    return cfo, prominence
+
+
+def _eye_center_phase(filt: np.ndarray, sps: float) -> float:
+    """盲找眼图中心相位：在 [0,sps) 扫相位，选 mean(|采样点|) 最大者。
+
+    与粗定时用 ``|mean|`` 不同——这里取平均**幅度**，眼心 |y|≈1、过渡点 |y|≈0，
+    故峰值准确落在眼心，用作 Gardner/M&M 环路的初始相位 seed（避免从过渡点启动
+    被不稳定平衡点困住）。
+    """
+    n_sym = int(filt.size / sps)
+    best_off, best_score = 0.0, -1.0
+    for off in np.linspace(0.0, sps, max(8, int(sps)), endpoint=False):
+        idx = np.round(off + np.arange(n_sym) * sps).astype(int)
+        idx = idx[idx < filt.size]
+        if idx.size < 8:
+            continue
+        score = float(np.mean(np.abs(filt[idx])))
+        if score > best_score:
+            best_score, best_off = score, off
+    return best_off
+
+
 def _lin_interp(x: np.ndarray, t: float) -> float:
     """线性插值取 x[t]（t 可落在样本之间）；越界夹到端点。"""
     n = x.size
@@ -146,29 +196,35 @@ def _gardner_symbols(r: np.ndarray, sps: float,
 
 
 def demod_bpsk(iq: np.ndarray, fs: float, symrate: float,
-               f_offset: float = 0.0, timing: str = "coarse"
+               f_offset: Optional[float] = 0.0, timing: str = "coarse"
                ) -> np.ndarray:
     """复 IQ → BPSK 硬比特 (int8 0/1)。
 
-    步骤：NCO 带内下变频 → 矩形匹配低通 → 符号定时 → 符号中心按实部正负判决。
+    步骤：盲/显式载波频偏校正 → 矩形匹配低通 → 符号定时 → 符号中心按实部正负判决。
     无足够符号/纯噪声时返回空数组（诚实空态）。
 
     参数
     ----------
+    f_offset :
+        显式带内中频偏移 Hz。传 ``None`` = **盲估计**（平方环 :func:`estimate_cfo_bpsk`
+        自动估计频偏；prominence 不足时诚实按 0 处理，由下游 ASM/RS/CRC 把关）。
     timing :
         ``"coarse"``（默认）：盲符号定时——在 [0, sps) 扫描采样相位，选
-        ``|mean(采样点实部)|`` 最大者（眼图张开度最大）。实现简单，但在高噪/弱信号
-        下会整比特滑移。
+        ``|mean(采样点实部)|`` 最大者（眼图张开度最大）。
         ``"gardner"``：Gardner TED 插值定时恢复闭环（见 :func:`_gardner_symbols`），
-        对定时相位偏移/小频偏可自动收敛到眼图中心，显著降低滑移率；极低 SNR 下
+        先用平均幅度扫描盲找眼心作为初始相位 seed，再闭环精跟踪；极低 SNR 下
         环路不收敛，由本函数诚实返回空（下游 ASM/RS/CRC 再把关，不伪造出图）。
     """
     z = np.asarray(iq, dtype=np.complex64)
     if z.size == 0 or symrate <= 0:
         return np.zeros(0, dtype=np.int8)
 
+    # 1) 载波频偏：None=盲估计；否则用显式 f_offset。
+    if f_offset is None:
+        f_offset, _prom = estimate_cfo_bpsk(z, fs)
+
     t = np.arange(z.size) / fs
-    # 1) 带内下变频：把落在 f_offset 处的信号搬到零中频
+    # 带内下变频：把落在 f_offset 处的信号搬到零中频
     base = z * np.exp(-1j * 2.0 * np.pi * f_offset * t)
 
     sps = fs / symrate
@@ -182,7 +238,8 @@ def demod_bpsk(iq: np.ndarray, fs: float, symrate: float,
         return np.zeros(0, dtype=np.int8)
 
     if timing == "gardner":
-        bits, diag = _gardner_symbols(filt, sps)
+        eye = _eye_center_phase(filt, sps)
+        bits, diag = _gardner_symbols(filt, sps, init_phase=eye)
         if not diag.locked:
             return np.zeros(0, dtype=np.int8)
         return bits
@@ -223,5 +280,6 @@ __all__ = [
     "demod_bpsk",
     "iq_to_ssdv_bytes",
     "TedDiagnostics",
+    "estimate_cfo_bpsk",
     "_gardner_symbols",
 ]

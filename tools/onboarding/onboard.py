@@ -646,12 +646,14 @@ def _step_decode_ssdv_iq(iq_path: str, r: StepResult, fs: float,
 
 def _step_decode_ssdv_iq_ccsds(iq_path: str, r: StepResult, fs: float,
                                symrate: float, f_offset: float,
-                               frame_bits: int, timing: str) -> StepResult:
+                               frame_bits: int, timing: str,
+                               blind_cfo: bool = False) -> StepResult:
     """SSDV over CCSDS 级联全链入口：复 IQ → demod → ASM → Viterbi(终态0)
     → 解扰 → RS → DSLWP 218B → ssdv_decoder → JPEG。
 
     链路实现在 :mod:`mbdsdr_ai.ccsds_ssdv`（单一可复用层，本函数不重写链路）。
     真机符号率/中频偏移/帧长由参数传入，代码不硬编码活动参数。
+    ``blind_cfo=True`` 用平方环盲估计频偏（真机多普勒不确定时用）。
     纯噪声/不可解码：ASM 0 帧或 CRC 不过 → 诚实 FAIL，不伪造图。
     """
     try:
@@ -660,8 +662,9 @@ def _step_decode_ssdv_iq_ccsds(iq_path: str, r: StepResult, fs: float,
         r.message = f"读取 SSDV CCSDS IQ 文件失败: {e}"
         return r
 
+    foff = None if blind_cfo else f_offset
     r.add_evidence(f"SSDV CCSDS 级联: {iq.size:,} complex64 @ {fs/1e3:.1f} ksps, "
-                   f"symrate={symrate:.0f} Bd, tone_offset={f_offset:.0f} Hz, "
+                   f"symrate={symrate:.0f} Bd, cfo={'blind' if blind_cfo else f'{f_offset:.0f} Hz'}, "
                    f"frame_bits={frame_bits}, timing={timing}")
     if iq.size == 0:
         r.status = "FAIL"
@@ -681,10 +684,13 @@ def _step_decode_ssdv_iq_ccsds(iq_path: str, r: StepResult, fs: float,
 
     from mbdsdr_ai.ccsds_ssdv import ccsds_iq_to_result
     res = ccsds_iq_to_result(iq, fs, symrate, frame_bits=frame_bits,
-                             f_offset=f_offset, timing=timing)
+                             f_offset=foff, timing=timing)
     r.detail["n_demod_bits"] = res.n_demod_bits
     r.detail["n_asm_frames"] = res.n_asm_frames
     r.detail["rs_nerrors"] = res.rs_nerrors
+    r.detail["cfo_est_hz"] = res.cfo_est_hz
+    if blind_cfo:
+        r.add_evidence(f"盲 CFO 估计 = {res.cfo_est_hz:+.1f} Hz")
 
     # 判据：先看 ASM 是否同步。
     if res.n_asm_frames == 0:
@@ -738,6 +744,7 @@ def step_decode(
     ssdv_mode: str = "fsphil",
     ssdv_frame_bits: int = 0,
     ssdv_timing: str = "coarse",
+    ssdv_blind_cfo: bool = False,
 ) -> StepResult:
     """加载 SigMF IQ，按模式调用真实解码器。
 
@@ -762,7 +769,7 @@ def step_decode(
         if ssdv_mode == "ccsds" and ssdv_input == "iq":
             return _step_decode_ssdv_iq_ccsds(
                 sigmf_data_path, r, sample_rate_hz, ssdv_symrate,
-                ssdv_tone_offset, ssdv_frame_bits, ssdv_timing)
+                ssdv_tone_offset, ssdv_frame_bits, ssdv_timing, ssdv_blind_cfo)
         if ssdv_input == "iq":
             return _step_decode_ssdv_iq(
                 sigmf_data_path, r, sample_rate_hz, ssdv_symrate, ssdv_tone_offset)
@@ -1242,8 +1249,11 @@ def main(argv: list[str] | None = None) -> int:
                          "（卷积后每帧比特数；走 docs 活动链路参数，代码不硬编码）")
     ap.add_argument("--ssdv-timing", default="coarse",
                     choices=["coarse", "gardner"],
-                    help="ssdv ccsds 符号定时：coarse=眼图粗定时(默认,合成确定性强)；"
+                    help="ssdv ccsds 符号定时：coarse=眼图粗定时(默认)；"
                          "gardner=Gardner TED 闭环(真机弱信号/小频偏)")
+    ap.add_argument("--ssdv-blind-cfo", action="store_true",
+                    help="ssdv ccsds：平方环盲估计载波频偏(真机多普勒不确定时用；"
+                         "开了就忽略 --ssdv-tone-offset)")
     ap.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
     ap.add_argument("--timeout", type=float, default=30.0,
                     help="子进程超时（秒）")
@@ -1363,6 +1373,7 @@ def main(argv: list[str] | None = None) -> int:
                     ssdv_mode=args.ssdv_mode,
                     ssdv_frame_bits=args.ssdv_frame_bits,
                     ssdv_timing=args.ssdv_timing,
+                    ssdv_blind_cfo=args.ssdv_blind_cfo,
                 )
                 dec.detail["sigmf_data"] = sigmf_data_path
                 results.append(dec)
