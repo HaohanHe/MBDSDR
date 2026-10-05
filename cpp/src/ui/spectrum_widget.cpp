@@ -4,6 +4,9 @@
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QLayout>
+#include <QLayoutItem>
+#include <QRect>
 #include <QComboBox>
 #include <QSpinBox>
 #include <QLabel>
@@ -21,6 +24,77 @@
 namespace mbdsdr {
 namespace ui {
 
+namespace {
+// FlowLayout: a left-to-right wrap layout for the compact tool strip. On wide
+// windows it lays every control out on ONE row (visually identical to the old
+// fixed QHBoxLayout); on a narrow window it WRAPS the overflow onto a second row
+// instead of crushing the combos/buttons below their readable size -- the Phase37
+// narrow-window findings 1&2 (combo value elided to "2"/"H", cursor buttons
+// jammed). No new fixed pixel: row/column gaps come from the tokens passed in.
+// Embedded here (not a new file) so CMakeLists stays untouched.
+class FlowLayout : public QLayout {
+public:
+    FlowLayout(int hSpacing, int vSpacing)
+        : QLayout(), m_hSpace(hSpacing), m_vSpace(vSpacing) {
+        setContentsMargins(0, 0, 0, 0);
+    }
+    ~FlowLayout() override { while (QLayoutItem* it = takeAt(0)) delete it; }
+
+    void addItem(QLayoutItem* item) override { m_items.append(item); }
+    int count() const override { return m_items.size(); }
+    QLayoutItem* itemAt(int i) const override {
+        return (i >= 0 && i < m_items.size()) ? m_items.at(i) : nullptr;
+    }
+    QLayoutItem* takeAt(int i) override {
+        if (i >= 0 && i < m_items.size()) return m_items.takeAt(i);
+        return nullptr;
+    }
+
+    Qt::Orientations expandingDirections() const override { return Qt::Orientations(); }
+    bool hasHeightForWidth() const override { return true; }
+    int heightForWidth(int width) const override { return doLayout(QRect(0, 0, width, 0), true); }
+
+    QSize sizeHint() const override { return minimumSize(); }
+    QSize minimumSize() const override {
+        QSize sz;
+        for (QLayoutItem* it : m_items) sz = sz.expandedTo(it->minimumSize());
+        int l, t, r, b; getContentsMargins(&l, &t, &r, &b);
+        sz += QSize(l + r, t + b);
+        return sz;
+    }
+
+    void setGeometry(const QRect& rect) override {
+        QLayout::setGeometry(rect);
+        doLayout(rect, false);
+    }
+
+private:
+    int doLayout(const QRect& rect, bool testOnly) const {
+        int l, t, r, b; getContentsMargins(&l, &t, &r, &b);
+        const QRect area = rect.adjusted(l, t, -r, -b);
+        int x = area.x();
+        int y = area.y();
+        int lineH = 0;
+        for (QLayoutItem* it : m_items) {
+            const QSize sz = it->sizeHint();
+            const int nextX = x + sz.width() + m_hSpace;
+            if (nextX - m_hSpace > area.right() && x > area.x()) {
+                // Does not fit on this line: wrap to the next line.
+                x = area.x();
+                y += lineH + m_vSpace;
+                lineH = 0;
+            }
+            if (!testOnly) it->setGeometry(QRect(QPoint(x, y), sz));
+            x += sz.width() + m_hSpace;
+            lineH = qMax(lineH, sz.height());
+        }
+        return y + lineH - rect.y() + b;
+    }
+    QList<QLayoutItem*> m_items;
+    int m_hSpace, m_vSpace;
+};
+} // namespace
+
 SpectrumWidget::SpectrumWidget(QWidget* parent)
     : QWidget(parent)
 {
@@ -35,14 +109,25 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
                               tokens::scaled(tokens::kSpectrumPad));
     outer->setSpacing(tokens::scaled(tokens::kSpectrumSpacing));
 
-    // ---- Row 1: compact tool strip ---------------------------------------
-    auto* topRow = new QHBoxLayout();
-    topRow->setSpacing(tokens::scaled(tokens::kSpacingS));
+    // ---- Row 1: compact tool strip (wraps elastically on narrow windows) --
+    // FlowLayout: one row when wide (standard/hidpi), wraps to a second row when
+    // narrow so the combos/buttons keep their readable size instead of being
+    // crushed (Phase42 narrow-window fix).
+    auto* topRow = new FlowLayout(tokens::scaled(tokens::kSpacingS),
+                                   tokens::scaled(tokens::kSpacingS));
 
     topRow->addWidget(new QLabel("FFT", this));
     fftCombo_ = new QComboBox(this);
     fftCombo_->addItems({"1024", "2048", "4096"});
     fftCombo_->setCurrentIndex(1);
+    // Elastic combo width: size to the LONGEST item so the closed box never
+    // collapses to an elided "2" (Phase42 narrow fix). The flow layout already
+    // prevents crushing; this keeps the closed read-out honest. A live tooltip
+    // echoes the full current value as a belt-and-suspenders.
+    fftCombo_->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    connect(fftCombo_, &QComboBox::currentTextChanged,
+            fftCombo_, [this](const QString& t) { fftCombo_->setToolTip(t); });
+    fftCombo_->setToolTip(fftCombo_->currentText());
     connect(fftCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) {
                 switch (idx) {
@@ -57,6 +142,10 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     topRow->addWidget(new QLabel("窗", this));
     auto* winCombo = new QComboBox(this);
     winCombo->addItems({"Hann", "FlatTop", "Blackman"});
+    winCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    connect(winCombo, &QComboBox::currentTextChanged,
+            winCombo, [winCombo](const QString& t) { winCombo->setToolTip(t); });
+    winCombo->setToolTip(winCombo->currentText());
     connect(winCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) { emit windowTypeRequested(idx); });
     topRow->addWidget(winCombo);
@@ -64,6 +153,10 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     topRow->addWidget(new QLabel("平均", this));
     auto* avgCombo = new QComboBox(this);
     avgCombo->addItems({"Off", "Slow", "Fast"});
+    avgCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    connect(avgCombo, &QComboBox::currentTextChanged,
+            avgCombo, [avgCombo](const QString& t) { avgCombo->setToolTip(t); });
+    avgCombo->setToolTip(avgCombo->currentText());
     connect(avgCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, [this](int idx) { emit averageModeRequested(idx); });
     topRow->addWidget(avgCombo);
@@ -77,7 +170,6 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         if (canvas_) canvas_->clearMaxHold();
     });
     topRow->addWidget(maxRst);
-    topRow->addSpacing(tokens::scaled(tokens::kSpacingM));
 
     // ---- Persistence (余晖): 关/低/高 + clear ----------------------------
     topRow->addWidget(new QLabel("余晖", this));
@@ -97,7 +189,6 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         if (canvas_) canvas_->clearPersistence();
     });
     topRow->addWidget(persistRst);
-    topRow->addSpacing(tokens::scaled(tokens::kSpacingM));
 
     // ---- Fixed marker: add a named vertical line at the visible center ----
     auto* addMarkerBtn = new QPushButton("标记", this);
@@ -118,7 +209,6 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     });
     topRow->addWidget(addMarkerBtn);
     topRow->addWidget(clearMarkerBtn);
-    topRow->addSpacing(tokens::scaled(tokens::kSpacingM));
 
     // ---- Dual measurement cursors: place A/B at visible centre, then drag --
     auto* curABtn = new QPushButton("游标A", this);
@@ -140,7 +230,6 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     topRow->addWidget(curABtn);
     topRow->addWidget(curBBtn);
     topRow->addWidget(curClr);
-    topRow->addSpacing(tokens::scaled(tokens::kSpacingM));
 
     topRow->addWidget(new QLabel("dB", this));
     dbMinSpin_ = new QSpinBox(this);
@@ -218,7 +307,9 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     infoLabel_ = new QLabel(this);
     infoLabel_->setObjectName("monoInfo");
     infoLabel_->setText(" ");
-    topRow->addWidget(infoLabel_, 1);
+    // FlowLayout ignores stretch (no right-stretch in a wrap strip); the mono
+    // read-out simply sits as the last item.
+    topRow->addWidget(infoLabel_);
     outer->addLayout(topRow);
 
     // ---- Row 2: waterfall controls + honest test-signal banner ------------

@@ -53,8 +53,12 @@ public:
     static int backoffDelayMs(int attemptOneBased);
     // Assemble the user-facing line for a failed chat: keep whatever partial text
     // already streamed, then append an honest error note. Never fabricates a reply.
+    // retriesExhausted > 0 means the bounded transient-retry budget
+    // (kAiMaxTransientRetries on 429/5xx) was spent: the line appends an honest
+    // "已重试 N 次后放弃" tail. The raw transport error already carries the code.
     static QString formatChatError(const QString& partialContent,
-                                   const QString& error);
+                                   const QString& error,
+                                   int retriesExhausted = 0);
     // Test seam: override the backoff sleep (production = QThread::msleep). Tests
     // inject a no-op so the bounded retry loop runs instantly offline. Pass null
     // to restore the real sleep.
