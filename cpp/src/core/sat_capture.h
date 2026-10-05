@@ -81,42 +81,161 @@ inline double captureTargetHz(double f0DownlinkHz, double dopplerAtPeakHz) {
     return f0DownlinkHz + dopplerAtPeakHz;
 }
 
-// Radar-style convergence limiter for the 1 Hz Doppler retune.  Call
-// reset(target) once (on capture / switch-on), then advance(liveTarget) every
-// tick.  The returned frequency moves toward liveTarget by at most
-// kDopplerMaxStepHz Hz, so the loop never dithers the tuner: a slowly-moving
-// real track (tens of Hz/s) always lands on target immediately, while a big
-// discrete jump (pass start, capture, f0 correction) steps in bounded slices.
+// =====================================================================
+// Doppler compensation chain -- division of labour (so the three loops do
+// not fight over the same VFO):
+//
+//   * TLE compensation (this limiter, 1 Hz, desktop C++): the SLOW, large-
+//     scale Doppler ramp of a real LEO pass.  propagateAt() gives the
+//     topocentric range-rate -> dopplerHz(f0, vr) -> a desired OFFSET in Hz
+//     on top of the nominal downlink carrier f0DownlinkHz.  This limiter is
+//     the ONLY thing that retunes the VFO in the sky-tab path; it moves the
+//     offset by at most kDopplerMaxStepHz per second.
+//   * Blind CFO / Gardner timing recovery (Python, mbdsdr_ai/ssdv_phy): the
+//     FAST residual carrier-frequency offset and the symbol clock, closed
+//     inside the demodulator on the baseband stream.  The desktop app never
+//     talks to it per-sample; it rides on whatever in-band offset this
+//     limiter leaves the channeliser at.  Boundary: this limiter's bandwidth
+//     budget (a few kHz of slow ramp) stays WELL inside the demodulator's
+//     blind-acquisition pull range, so the two loops are non-overlapping.
+//
+// Honest empty state: with no station / no captured pass there is no TLE
+// propagation, so this limiter stays Idle at offset 0 and the UI disables
+// the checkbox.  Nothing here invents a TLE or a fake fd.
+// =====================================================================
+
+// State machine for the 1 Hz Doppler offset tracker.
+//   Idle      : not tracking (offset 0).  advance() one-shot re-binds.
+//   Tracking  : normal -- bounded step toward the live range-rate offset.
+//   Frozen    : target went non-finite (range-rate lost / stale TLE).  The
+//               offset is HELD at its last valid value; we never walk the
+//               tuner on a NaN target (that would be a blind scan).  A
+//               finite target later resumes tracking.
+//   Returning : user switched compensation off -- the offset glides back to
+//               0 by the same per-tick clamp, never an instant jump to f0.
+enum class DopplerLimiterState { Idle, Tracking, Frozen, Returning };
+
+// Radar-style convergence limiter for the 1 Hz Doppler retune, expressed as a
+// pure OFFSET in Hz (the caller applies VFO = f0DownlinkHz + offset()).  Call
+// reset(initialOffsetHz) once on capture, then advance(liveOffsetHz) every
+// tick.  Three deterministic safety behaviours, all unit-testable off a
+// synthetic pass curve:
+//
+//   1. Step clamp   -- advance() moves offset_ by at most kDopplerMaxStepHz
+//                      per tick.  A slowly-moving real track (tens of Hz/s)
+//                      lands on target immediately; a big discrete jump
+//                      (capture / AOS) converges in bounded slices instead of
+//                      slamming the local oscillator.
+//   2. Freeze-hold  -- a non-finite target (target lost / range-rate invalid)
+//                      freezes the offset at its last valid value and sets
+//                      frozen(); the tuner is NOT walked.  A finite target
+//                      resumes tracking.
+//   3. Smooth return-- requestReturnToZero() (checkbox off) glides the offset
+//                      back to 0 within the step limit over the next ticks.
 class DopplerStepLimiter {
 public:
     explicit DopplerStepLimiter(double maxStepHz = tokens::kDopplerMaxStepHz)
         : maxStepHz_(maxStepHz) {}
 
-    // Bind to a starting VFO frequency (no step).
-    void reset(double vfoHz) { current_ = vfoHz; armed_ = true; }
-    // Stop tracking (checkbox off / pass ended); next advance() re-binds.
-    void disarm() { armed_ = false; }
-    bool   armed() const { return armed_; }
-    double current() const { return current_; }
-    double maxStep() const { return maxStepHz_; }
-
-    // Move from current_ toward targetHz by at most maxStepHz_.  Returns the
-    // frequency the caller should actually set on the VFO this tick.
-    double advance(double targetHz) {
-        if (!armed_) { current_ = targetHz; armed_ = true; return current_; }
-        const double diff = targetHz - current_;
-        if (std::fabs(diff) <= maxStepHz_) {
-            current_ = targetHz;                 // within one step: land exactly
-        } else {
-            current_ += (diff > 0.0 ? maxStepHz_ : -maxStepHz_);   // bounded step
-        }
-        return current_;
+    // Bind to a starting Doppler offset (Hz) and start tracking.  Called on
+    // capture with the predicted peak-Doppler suggestion (dopplerAtPeakHz).
+    void reset(double offsetHz) {
+        offset_  = offsetHz;
+        frozen_  = false;
+        state_   = DopplerLimiterState::Tracking;
     }
+
+    // User switched compensation OFF.  Leave the offset where it is but flip
+    // to Returning so the next advance() calls glide it home to 0.  Idempotent;
+    // an already-Idle limiter stays Idle.
+    void requestReturnToZero() {
+        if (state_ == DopplerLimiterState::Idle) return;
+        state_ = DopplerLimiterState::Returning;
+    }
+
+    // Re-arm to Tracking from the CURRENT offset (used when the user switches
+    // compensation back on while a smooth-return is still in flight).  The
+    // offset is left where it is; the next advance() steps toward the live
+    // target by the clamp -- never a jump.  Idle stays Idle (nothing to resume).
+    void rearm() {
+        if (state_ == DopplerLimiterState::Idle) return;
+        frozen_ = false;
+        state_  = DopplerLimiterState::Tracking;
+    }
+
+    // Hard stop (pass ended / TLE refetch / station lost / new row selected).
+    // Release the offset; the VFO itself is left where the caller parked it
+    // (the caller stops driving us).  The next reset() re-binds cleanly.
+    void disarm() {
+        offset_ = 0.0;
+        frozen_ = false;
+        state_  = DopplerLimiterState::Idle;
+    }
+
+    // 1 Hz tick.  Steps offset_ toward targetOffsetHz by at most maxStepHz_.
+    // Returns the offset the caller should apply this tick (VFO = f0 + ret).
+    double advance(double targetOffsetHz) {
+        switch (state_) {
+        case DopplerLimiterState::Idle:
+            // Not tracking: one-shot re-bind (safety net; the UI path always
+            // reset()s on capture before checking the box).  A non-finite
+            // target here must NOT be bound (would poison the offset with NaN);
+            // stay Idle at 0.
+            if (!std::isfinite(targetOffsetHz)) return offset_;
+            offset_ = targetOffsetHz;
+            state_  = DopplerLimiterState::Tracking;
+            return offset_;
+
+        case DopplerLimiterState::Returning: {
+            // Glide toward 0 regardless of the (ignored) target.
+            const double diff = 0.0 - offset_;
+            if (std::fabs(diff) <= maxStepHz_) {
+                offset_ = 0.0;
+                state_  = DopplerLimiterState::Idle;   // arrived home
+            } else {
+                offset_ += (diff > 0.0 ? maxStepHz_ : -maxStepHz_);
+            }
+            return offset_;
+        }
+
+        case DopplerLimiterState::Frozen:
+        case DopplerLimiterState::Tracking: {
+            // Behaviour 2: a non-finite target means the live range-rate just
+            // became unavailable.  HOLD the last valid offset; do NOT step the
+            // tuner (a NaN diff would otherwise walk it by the clamp each tick).
+            if (!std::isfinite(targetOffsetHz)) {
+                frozen_ = true;
+                state_  = DopplerLimiterState::Frozen;
+                return offset_;
+            }
+            // A finite target from Frozen resumes tracking.
+            frozen_ = false;
+            state_  = DopplerLimiterState::Tracking;
+            const double diff = targetOffsetHz - offset_;
+            if (std::fabs(diff) <= maxStepHz_) {
+                offset_ = targetOffsetHz;             // within one step: land
+            } else {
+                offset_ += (diff > 0.0 ? maxStepHz_ : -maxStepHz_);   // bounded
+            }
+            return offset_;
+        }
+        }
+        return offset_;
+    }
+
+    // The applied Doppler offset (Hz) the caller should add to f0DownlinkHz.
+    // This is the PURE, real cumulative value surfaced on the status line.
+    double offset()   const { return offset_; }
+    // True while a non-finite target has the loop holding its last offset.
+    bool   frozen()   const { return frozen_; }
+    DopplerLimiterState state() const { return state_; }
+    double maxStep()  const { return maxStepHz_; }
 
 private:
     double maxStepHz_;
-    double current_ = 0.0;
-    bool   armed_   = false;
+    double offset_ = 0.0;
+    bool   frozen_ = false;
+    DopplerLimiterState state_ = DopplerLimiterState::Idle;
 };
 
 } // namespace core

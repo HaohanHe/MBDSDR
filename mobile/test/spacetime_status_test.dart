@@ -99,6 +99,39 @@ void main() {
       // 有目标但没有真实 range-rate -> 不编数字（仍"未补偿"，区别于"补偿中"）。
       expect(noDop.doppler.text, '未补偿（无目标）');
     });
+
+    test('开闭环补偿 -> 升级为「补偿中·累计 xxx Hz」；关闭回退仅显值', () {
+      final active = SpacetimeStatus.fromServices(
+        fix: GnssFix.empty,
+        targetName: 'NOAA-19',
+        dopplerHz: -12.5,
+        dopplerActive: true,
+        dopplerAppliedHz: -1834.0,
+      );
+      expect(active.doppler.text, contains('补偿中·累计'));
+      expect(active.doppler.text, contains('-1834'));
+      expect(active.doppler.role, SpRole.ok);
+
+      // 同一读数但未开闭环 -> 仍是仅显值「补偿值」，不冒充"补偿中"。
+      final passive = SpacetimeStatus.fromServices(
+        fix: GnssFix.empty,
+        targetName: 'NOAA-19',
+        dopplerHz: -12.5,
+        dopplerActive: false,
+        dopplerAppliedHz: -1834.0,
+      );
+      expect(passive.doppler.text, contains('补偿值 -12.5 Hz'));
+      expect(passive.doppler.text, isNot(contains('补偿中')));
+    });
+
+    test('开闭环但无目标 -> 不显示"补偿中"（诚实空态）', () {
+      final s = SpacetimeStatus.fromServices(
+        fix: GnssFix.empty,
+        dopplerActive: true,
+        dopplerAppliedHz: -500.0,
+      );
+      expect(s.doppler.text, '未补偿（无目标）');
+    });
   });
 
   testWidgets('widget：空态渲染四格标题与诚实文案', (tester) async {

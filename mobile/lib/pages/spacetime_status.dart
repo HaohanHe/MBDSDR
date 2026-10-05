@@ -46,12 +46,16 @@ class SpacetimeStatus {
   /// - [radioConnected]：接收机是否已连接；[freqHz] 当前真实调谐。
   /// - [targetName]：当前捕获/选中的接收目标（null = 无目标）。
   /// - [dopplerHz]：真实多普勒补偿值（null = 本端无 range-rate，绝不编）。
+  /// - [dopplerActive]：移动端是否正在 1 Hz 闭环真实改频（opt-in 开关，默认 off）。
+  /// - [dopplerAppliedHz]：闭环当前施加的 VFO 偏移（Hz）；未在补偿为 null。
   factory SpacetimeStatus.fromServices({
     required GnssFix fix,
     bool radioConnected = false,
     int? freqHz,
     String? targetName,
     double? dopplerHz,
+    bool dopplerActive = false,
+    double? dopplerAppliedHz,
   }) {
     // 时间源：真实 NMEA 语句且带 UTC -> gnss；否则 system（本机时钟，诚实告诫）。
     final hasUtc = fix.source == 'real' &&
@@ -95,17 +99,30 @@ class SpacetimeStatus {
       t = const SpCell(title: '接收目标', text: '无接收目标', role: SpRole.neutral);
     }
 
-    // 多普勒补偿：只有在有真实补偿值且确有目标时才显示数字。
-    final SpCell d = (dopplerHz != null && hasTarget)
-        ? SpCell(
-            title: '多普勒补偿',
-            text: '补偿值 ${dopplerHz.toStringAsFixed(1)} Hz',
-            role: SpRole.ok,
-          )
-        : const SpCell(
-            title: '多普勒补偿',
-            text: '未补偿（无目标）',
-            role: SpRole.neutral);
+    // 多普勒补偿：三态优先级——
+    //   1) 正在 1 Hz 闭环改频（dopplerActive 且已施加偏移）→「补偿中·累计 xxx Hz」；
+    //   2) 仅显值（有目标 + 有 range-rate，未开闭环）→「补偿值 x Hz」；
+    //   3) 否则诚实空态「未补偿（无目标）」，绝不编数。
+    final SpCell d;
+    if (dopplerActive && dopplerAppliedHz != null && hasTarget) {
+      d = SpCell(
+        title: '多普勒补偿',
+        text: '补偿中·累计 ${dopplerAppliedHz.toStringAsFixed(0)} Hz',
+        role: SpRole.ok,
+      );
+    } else if (dopplerHz != null && hasTarget) {
+      d = SpCell(
+        title: '多普勒补偿',
+        text: '补偿值 ${dopplerHz.toStringAsFixed(1)} Hz',
+        role: SpRole.ok,
+      );
+    } else {
+      d = const SpCell(
+        title: '多普勒补偿',
+        text: '未补偿（无目标）',
+        role: SpRole.neutral,
+      );
+    }
 
     return SpacetimeStatus(timeSource: ts, target: t, doppler: d, gnss: g);
   }
@@ -120,6 +137,8 @@ class SpacetimeStatusCard extends StatelessWidget {
     this.freqHz,
     this.targetName,
     this.dopplerHz,
+    this.dopplerActive = false,
+    this.dopplerAppliedHz,
   });
 
   /// gnss 服务层最新 fix（默认空 = 无 NMEA，走诚实空态）。
@@ -136,6 +155,12 @@ class SpacetimeStatusCard extends StatelessWidget {
 
   /// 真实多普勒补偿值（null = 无 range-rate，绝不编造）。
   final double? dopplerHz;
+
+  /// 是否正在 1 Hz 闭环真实改频（opt-in，默认 off）。
+  final bool dopplerActive;
+
+  /// 闭环当前施加的 VFO 偏移（Hz）；未在补偿为 null。
+  final double? dopplerAppliedHz;
 
   Color _color(SpRole r) => switch (r) {
         SpRole.ok => AppTokens.success,
@@ -172,6 +197,8 @@ class SpacetimeStatusCard extends StatelessWidget {
       freqHz: freqHz,
       targetName: targetName,
       dopplerHz: dopplerHz,
+      dopplerActive: dopplerActive,
+      dopplerAppliedHz: dopplerAppliedHz,
     );
     // 2x2 用自然高度的 Row 排布（不锁 childAspectRatio），紧凑空间里不溢出。
     Widget row(SpCell a, SpCell b) => Row(
