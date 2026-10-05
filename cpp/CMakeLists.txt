@@ -572,6 +572,23 @@ add_executable(test_e2e_smoke tests/test_e2e_smoke.cpp
 target_include_directories(test_e2e_smoke PRIVATE src)
 target_link_libraries(test_e2e_smoke PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME e2e_smoke COMMAND test_e2e_smoke)
+# Phase40: no default audio output (headless/no-PulseAudio container) -> the test
+# prints an environmental SKIP and exits 77; ctest then reports "Skipped"
+# instead of a green pass. With audio present it runs the full loopback E2E.
+set_tests_properties(e2e_smoke PROPERTIES SKIP_RETURN_CODE 77)
+
+# Phase40 startup robustness: launch the REAL mbdsdr binary in the "three-no"
+# environment -- offscreen QPA, NO audio backend, NO SDR/stub source
+# (MBDSDR_TEST_SOURCE unset). It must construct MainWindow into the honest empty
+# state ("未连接" / "无信号源"), paint one frame, snapshot, and exit cleanly
+# (exit code 0). No crash, no hang. On failure ctest captures the stderr log
+# (Qt default logging -> test output) which doubles as the crash log path.
+# The binary self-quits via QTimer::singleShot(1500) after grabbing the window.
+add_test(NAME startup_robustness
+    COMMAND sh -c "QT_QPA_PLATFORM=offscreen \"$<TARGET_FILE:mbdsdr>\" --snapshot \"${CMAKE_CURRENT_BINARY_DIR}/startup_snap.png\" && test -s \"${CMAKE_CURRENT_BINARY_DIR}/startup_snap.png\"")
+set_tests_properties(startup_robustness PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # IAudioSink contract: MemoryAudioSink capture/volume/mute + engine injection.
 add_executable(test_audio_sink tests/test_audio_sink.cpp

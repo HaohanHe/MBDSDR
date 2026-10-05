@@ -9,6 +9,16 @@
 //   2. Connect (server sends RTL0, tuner type 5 = R820T) -> combo populated from
 //      the real range and device labelled R820T.
 //   3. Pull the device -> combo back to empty/disabled.
+//
+// Phase40 note (intermittent / order wall-clock): this test drives a REAL
+// MainWindow, which builds the production QtAudioSink. On a headless box with
+// no PulseAudio, the engine worker can stall briefly while it probes the audio
+// backend, so the Phase-2 "connect -> combo populated" waitFor(6000) window is
+// occasionally exceeded under load (observed ~1 in 4 single runs). We do NOT
+// widen the timing assertions to paper over this: the window already matches the
+// production handshake budget, and a real regression in the handshake would be
+// hidden by a bigger timeout. The environmental contributor (no audio backend)
+// is documented in docs/learn/phase40; on an audio-equipped box this is stable.
 #include <QApplication>
 #include <QDir>
 #include <QElapsedTimer>
