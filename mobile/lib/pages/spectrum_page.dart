@@ -96,6 +96,12 @@ class _SpectrumPageState extends State<SpectrumPage> {
   SpectrumPersistence _persistence = SpectrumPersistence.off;
   int _clearTick = 0;
 
+  // 只读测频差游标 A/B：页面本地态（不持久化，对齐桌面 cursorClear 语义）。
+  // 纯画布叠加测量线，点「游标A/B」落在当前视窗中心（=当前调谐频率）；
+  // 不改 DSP、不调谐、不写书签。置 null = 不画。
+  double? _cursorAHz;
+  double? _cursorBHz;
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
@@ -126,6 +132,20 @@ class _SpectrumPageState extends State<SpectrumPage> {
                   fixedMarksHz: widget.fixedMarksHz,
                   onAddFixedMark: widget.onAddFixedMark,
                   onRemoveFixedMark: widget.onRemoveFixedMark,
+                  cursorAHz: _cursorAHz,
+                  cursorBHz: _cursorBHz,
+                  onPlaceCursorA: controller.status == ConnectionStatus.connected
+                      ? () => setState(() => _cursorAHz = controller.freqHz.toDouble())
+                      : null,
+                  onPlaceCursorB: controller.status == ConnectionStatus.connected
+                      ? () => setState(() => _cursorBHz = controller.freqHz.toDouble())
+                      : null,
+                  onClearCursors: (_cursorAHz != null || _cursorBHz != null)
+                      ? () => setState(() {
+                            _cursorAHz = null;
+                            _cursorBHz = null;
+                          })
+                      : null,
                   controlHubHost: widget.controlHubHost,
                   controlHubPort: widget.controlHubPort,
                   onOpenSettings: widget.onOpenSettings,
@@ -139,6 +159,8 @@ class _SpectrumPageState extends State<SpectrumPage> {
                   onMarkChanged: widget.onMarkChanged,
                   onRemoveFixedMark: widget.onRemoveFixedMark,
                   onOpenSettings: widget.onOpenSettings,
+                  cursorAHz: _cursorAHz,
+                  cursorBHz: _cursorBHz,
                 );
                 return wide
                     ? Row(
@@ -176,6 +198,10 @@ class _DisplayArea extends StatelessWidget {
   final ValueChanged<double>? onRemoveFixedMark;
   final VoidCallback? onOpenSettings;
 
+  /// 只读测频差游标 A/B（Hz），透传到画布叠加；为空则不画。
+  final double? cursorAHz;
+  final double? cursorBHz;
+
   const _DisplayArea({
     required this.controller,
     required this.rtlHost,
@@ -185,6 +211,8 @@ class _DisplayArea extends StatelessWidget {
     required this.onMarkChanged,
     required this.onRemoveFixedMark,
     required this.onOpenSettings,
+    this.cursorAHz,
+    this.cursorBHz,
   });
 
   @override
@@ -229,6 +257,8 @@ class _DisplayArea extends StatelessWidget {
           fixedMarksHz: fixedMarksHz,
           onMarkChanged: onMarkChanged,
           onRemoveFixedMark: onRemoveFixedMark,
+          cursorAHz: cursorAHz,
+          cursorBHz: cursorBHz,
         );
     }
   }
@@ -242,6 +272,8 @@ class _ConnectedBody extends StatefulWidget {
   final List<double> fixedMarksHz;
   final void Function(double oldHz, double newHz)? onMarkChanged;
   final ValueChanged<double>? onRemoveFixedMark;
+  final double? cursorAHz;
+  final double? cursorBHz;
   const _ConnectedBody({
     required this.controller,
     required this.persistence,
@@ -249,6 +281,8 @@ class _ConnectedBody extends StatefulWidget {
     required this.fixedMarksHz,
     required this.onMarkChanged,
     required this.onRemoveFixedMark,
+    this.cursorAHz,
+    this.cursorBHz,
   });
 
   @override
@@ -296,6 +330,8 @@ class _ConnectedBodyState extends State<_ConnectedBody> {
             fixedMarksHz: widget.fixedMarksHz,
             onMarkChanged: widget.onMarkChanged,
             onDeleteMark: widget.onRemoveFixedMark,
+            cursorAHz: widget.cursorAHz,
+            cursorBHz: widget.cursorBHz,
           ),
         ),
       ],
@@ -394,6 +430,13 @@ class _ControlPanel extends StatelessWidget {
   final VoidCallback? onAddFixedMark;
   final ValueChanged<double>? onRemoveFixedMark;
 
+  // 只读测频差游标 A/B：放置（落在当前视窗中心）/ 清除。未连接时禁用。
+  final double? cursorAHz;
+  final double? cursorBHz;
+  final VoidCallback? onPlaceCursorA;
+  final VoidCallback? onPlaceCursorB;
+  final VoidCallback? onClearCursors;
+
   /// 桌面 ControlHub HTTP 主机（空串 = 不启用远程解码查看）。
   final String controlHubHost;
   final int controlHubPort;
@@ -412,6 +455,11 @@ class _ControlPanel extends StatelessWidget {
     required this.fixedMarksHz,
     required this.onAddFixedMark,
     required this.onRemoveFixedMark,
+    this.cursorAHz,
+    this.cursorBHz,
+    this.onPlaceCursorA,
+    this.onPlaceCursorB,
+    this.onClearCursors,
     this.controlHubHost = '',
     this.controlHubPort = 8080,
     this.onOpenSettings,
@@ -881,10 +929,14 @@ class _ControlPanel extends StatelessWidget {
               const SizedBox(height: AppTokens.spacingS),
               Row(
                 children: [
-                  Text(
-                    '扫描中 ${(controller.scanHz != null ? controller.scanHz! / 1e6 : 0).toStringAsFixed(3)} MHz · '
-                    '${(controller.scanProgress * 100).round()}%',
-                    style: AppTokens.mono,
+                  Flexible(
+                    child: Text(
+                      '扫描中 ${(controller.scanHz != null ? controller.scanHz! / 1e6 : 0).toStringAsFixed(3)} MHz · '
+                      '${(controller.scanProgress * 100).round()}%',
+                      style: AppTokens.mono,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   const Spacer(),
                   TextButton.icon(
@@ -1003,6 +1055,34 @@ class _ControlPanel extends StatelessWidget {
                   ],
                 ),
             ],
+            // ---- 只读测频差游标 A/B（对齐桌面 spectrum_widget:123）----
+            // 纯画布叠加：点「游标A/B」落在当前视窗中心，两线同框即画 Δf；
+            // 不调谐、不改 DSP、不持久化。未连接时禁用（无帧可测）。
+            const SizedBox(height: AppTokens.spacingL),
+            const Text('测频差游标 A/B（只读测量，不调谐）', style: AppTokens.auxiliary),
+            const SizedBox(height: AppTokens.spacingS),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  tooltip: connected ? '在视窗中心放游标 A' : '需连接后才能放置游标',
+                  icon: const Text('A', style: AppTokens.mono),
+                  color: AppTokens.success,
+                  onPressed: onPlaceCursorA,
+                ),
+                IconButton(
+                  tooltip: connected ? '在视窗中心放游标 B' : '需连接后才能放置游标',
+                  icon: const Text('B', style: AppTokens.mono),
+                  color: const Color(0xFFE57FD0),
+                  onPressed: onPlaceCursorB,
+                ),
+                IconButton(
+                  tooltip: '清除游标 A/B',
+                  icon: const Icon(Icons.close, size: AppTokens.iconSizeInlineLg),
+                  onPressed: onClearCursors,
+                ),
+              ],
+            ),
             // ---- 授时面板：真实系统钟 + GNSS 授时三态（无 NMEA 诚实空态）----
             const SizedBox(height: AppTokens.spacingL),
             const TimingPanel(),

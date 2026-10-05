@@ -155,4 +155,82 @@ void main() {
     await tester.pumpAndSettle();
     expect(settings.recordings, isEmpty);
   });
+
+  // ---- G2 录制回放接真：播放按钮可见性 / 启用逻辑 ----
+
+  RecordingMeta wavRecording() => RecordingMeta(
+        startedAtEpochMs:
+            DateTime.utc(2024, 6, 1, 10, 30).millisecondsSinceEpoch,
+        frequencyHz: 145800000,
+        mode: 'wfm',
+        wavFileName: 'rec_20240601_103000.wav',
+        durationMs: 5000,
+      );
+
+  testWidgets('注入 onPlay/onStop 且有 wavFileName：显示播放图标，点按回调 onPlay',
+      (tester) async {
+    final settings = SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    final meta = wavRecording();
+    settings.addRecording(meta);
+
+    RecordingMeta? played;
+    var stopped = 0;
+    await tester.pumpWidget(_wrap(RecordingsPage(
+      radio: _StatusRadio(),
+      settings: settings,
+      onPlay: (m) => played = m,
+      onStop: () => stopped++,
+    )));
+
+    // 可播放：显示 play_arrow 播放图标。
+    expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+    expect(find.byIcon(Icons.audiotrack), findsNothing);
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await tester.pumpAndSettle();
+    expect(played, same(meta));
+    expect(stopped, 0);
+  });
+
+  testWidgets('playing 指向本条：切换为停止图标，点按回调 onStop', (tester) async {
+    final settings = SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    final meta = wavRecording();
+    settings.addRecording(meta);
+
+    var stopped = 0;
+    await tester.pumpWidget(_wrap(RecordingsPage(
+      radio: _StatusRadio(),
+      settings: settings,
+      onPlay: (_) {},
+      onStop: () => stopped++,
+      playing: meta, // 当前正在回放这条
+    )));
+
+    // 正在播放：显示 stop_circle_outlined 停止图标而非播放图标。
+    expect(find.byIcon(Icons.stop_circle_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.play_arrow), findsNothing);
+    await tester.tap(find.byIcon(Icons.stop_circle_outlined));
+    await tester.pumpAndSettle();
+    expect(stopped, 1);
+  });
+
+  testWidgets('有 wavFileName 但未注入 onPlay/onStop：不渲染假播放按钮（诚实空态）',
+      (tester) async {
+    final settings = SettingsService(kv: _MemKv(), secure: _MemSecure());
+    await settings.load();
+    settings.addRecording(wavRecording());
+
+    // 完全不传 onPlay/onStop（如导航单测外壳）：不应出现播放/停止图标，
+    // 列表项整行 onTap 必须为 null（不可点）。
+    await tester.pumpWidget(_wrap(RecordingsPage(
+      radio: _StatusRadio(),
+      settings: settings,
+    )));
+    expect(find.byIcon(Icons.play_arrow), findsNothing);
+    expect(find.byIcon(Icons.stop_circle_outlined), findsNothing);
+    expect(find.byIcon(Icons.audiotrack), findsOneWidget); // 退化为纯音频图标
+    final tile = tester.widget<ListTile>(find.byType(ListTile).first);
+    expect(tile.onTap, isNull);
+  });
 }

@@ -51,6 +51,13 @@ class SpectrumDisplay extends StatefulWidget {
   /// 标记被删除（选中 + Del/外部）时回调其 Hz，立即持久化。
   final ValueChanged<double>? onDeleteMark;
 
+  /// 只读测频差游标 A（Hz）。对齐桌面 spectrum_widget 的游标 A/B：
+  /// 纯画布叠加测量线，**不调谐、不改 DSP、不持久化**；为空则不画。
+  final double? cursorAHz;
+
+  /// 只读测频差游标 B（Hz）。与 [cursorAHz] 同时存在时画 Δf 读数。
+  final double? cursorBHz;
+
   const SpectrumDisplay({
     super.key,
     required this.frame,
@@ -61,6 +68,8 @@ class SpectrumDisplay extends StatefulWidget {
     this.fixedMarksHz = const <double>[],
     this.onMarkChanged,
     this.onDeleteMark,
+    this.cursorAHz,
+    this.cursorBHz,
   });
 
   @override
@@ -299,6 +308,8 @@ class _SpectrumDisplayState extends State<SpectrumDisplay> {
                             persistence: widget.persistence,
                             fixedMarksHz: widget.fixedMarksHz,
                             selectedMarkHz: _selectedMarkHz,
+                            cursorAHz: widget.cursorAHz,
+                            cursorBHz: widget.cursorBHz,
                           ),
                         ),
                       ),
@@ -413,6 +424,15 @@ double adaptiveFreqStepHz(double spanHz, double plotWidthPx,
 /// 把频率 snap 到最近的步长整数倍。
 double snapToFreqStep(double hz, double stepHz) =>
     stepHz <= 0 ? hz : (hz / stepHz).round() * stepHz;
+
+/// 只读测频差：把 |ΔHz| 格式化为克制的人读串（Hz/kHz/MHz 自动选档）。
+/// 纯函数，便于 widget 测试断言；不参与任何调谐。
+String formatCursorDiff(double deltaHz) {
+  final d = deltaHz.abs();
+  if (d >= 1e6) return '${(d / 1e6).toStringAsFixed(3)} MHz';
+  if (d >= 1e3) return '${(d / 1e3).toStringAsFixed(2)} kHz';
+  return '${d.toStringAsFixed(0)} Hz';
+}
 
 /// bin 中心频率 → 逻辑绘图 x（bin-center 映射）。
 ///
@@ -531,6 +551,10 @@ class _SpectrumPainter extends CustomPainter {
   /// 当前选中的标记（Hz）：实线高亮 + 顶部手柄，与普通虚线/ VFO/峰值区分。
   final double? selectedMarkHz;
 
+  /// 只读测频差游标 A/B（Hz）。纯叠加，不调谐不改 DSP。
+  final double? cursorAHz;
+  final double? cursorBHz;
+
   _SpectrumPainter({
     required this.frame,
     required this.channelBandwidthHz,
@@ -538,6 +562,8 @@ class _SpectrumPainter extends CustomPainter {
     this.persistence = SpectrumPersistence.off,
     this.fixedMarksHz = const <double>[],
     this.selectedMarkHz,
+    this.cursorAHz,
+    this.cursorBHz,
   });
 
   @override
@@ -607,6 +633,92 @@ class _SpectrumPainter extends CustomPainter {
             );
           }
         }
+      }
+    }
+
+    // ---- 只读测频差游标 A/B（对齐桌面 spectrum_widget：纯叠加测量线，不调谐）----
+    // A=绿(success)、B=品红(与琥珀固定标记/蓝色 VFO 刻意区分)；落在当前扫宽内才画。
+    {
+      final span = frame.sampleRateHz;
+      final leftF = frame.centerFreqHz - span / 2;
+      double? ax;
+      double? bx;
+      double xFor(double f) => (f - leftF) / span * size.width;
+      final a = cursorAHz;
+      final b = cursorBHz;
+      if (a != null) {
+        final x = xFor(a);
+        if (x >= 0 && x <= size.width) {
+          ax = x;
+          canvas.drawLine(Offset(x, 0), Offset(x, size.height),
+              Paint()..color = AppTokens.success..strokeWidth = 1.2);
+        }
+      }
+      if (b != null) {
+        final x = xFor(b);
+        if (x >= 0 && x <= size.width) {
+          bx = x;
+          canvas.drawLine(Offset(x, 0), Offset(x, size.height),
+              Paint()..color = const Color(0xFFE57FD0)..strokeWidth = 1.2);
+        }
+      }
+      // 顶部 A / B 标签。
+      final labelTp = TextPainter(textDirection: TextDirection.ltr);
+      if (ax != null) {
+        labelTp.text = TextSpan(
+          text: 'A',
+          style: AppTokens.mono.copyWith(
+            fontSize: AppTokens.annotationFontSize,
+            color: AppTokens.success,
+            fontWeight: AppTokens.weightMedium,
+          ),
+        );
+        labelTp.layout();
+        labelTp.paint(
+            canvas, Offset((ax - labelTp.width / 2).clamp(0.0, size.width - labelTp.width), 8));
+      }
+      if (bx != null) {
+        labelTp.text = TextSpan(
+          text: 'B',
+          style: AppTokens.mono.copyWith(
+            fontSize: AppTokens.annotationFontSize,
+            color: const Color(0xFFE57FD0),
+            fontWeight: AppTokens.weightMedium,
+          ),
+        );
+        labelTp.layout();
+        labelTp.paint(
+            canvas, Offset((bx - labelTp.width / 2).clamp(0.0, size.width - labelTp.width), 8));
+      }
+      // 两游标都落在视内 → 中央上方画 Δf 读数盒（只读测量，不改频率）。
+      if (ax != null && bx != null && a != null && b != null) {
+        final diffTp = TextPainter(textDirection: TextDirection.ltr)
+          ..text = TextSpan(
+            text: 'Δ ${formatCursorDiff(a - b)}',
+            style: AppTokens.mono.copyWith(
+              fontSize: AppTokens.annotationFontSize,
+              color: AppTokens.textPrimary,
+              fontWeight: AppTokens.weightMedium,
+            ),
+          )
+          ..layout();
+        const padX = AppTokens.spacingS;
+        const padY = AppTokens.spacingS;
+        final boxW = diffTp.width + padX * 2;
+        final boxH = diffTp.height + padY * 2;
+        final boxRect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(size.width / 2 - boxW / 2, 4, boxW, boxH),
+          const Radius.circular(AppTokens.radiusSmall),
+        );
+        canvas.drawRRect(boxRect, Paint()..color = AppTokens.bgBar.withValues(alpha: 0.9));
+        canvas.drawRRect(
+          boxRect,
+          Paint()
+            ..color = AppTokens.cardEdge
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1,
+        );
+        diffTp.paint(canvas, Offset(size.width / 2 - diffTp.width / 2, 4 + padY));
       }
     }
 
@@ -809,6 +921,8 @@ class _SpectrumPainter extends CustomPainter {
       oldDelegate.persistence != persistence ||
       oldDelegate.history.length != history.length ||
       oldDelegate.selectedMarkHz != selectedMarkHz ||
+      oldDelegate.cursorAHz != cursorAHz ||
+      oldDelegate.cursorBHz != cursorBHz ||
       !listEquals(oldDelegate.fixedMarksHz, fixedMarksHz);
 }
 

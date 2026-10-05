@@ -24,6 +24,7 @@ import '../services/chat_session_store.dart';
 import '../widgets/empty_state.dart';
 import '../widgets/task_progress.dart';
 import '../widgets/task_templates_bar.dart';
+import 'tools_catalog_page.dart';
 
 /// UI 层的工具调用 chip。
 class _UiToolCall {
@@ -487,6 +488,17 @@ class _ChatPageState extends State<ChatPage> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: AppTokens.sectionTitle,
+            ),
+          ),
+          // AI 工具能力清单（只读对照页）入口。
+          IconButton(
+            icon: const Icon(Icons.build_circle_outlined),
+            tooltip: 'AI 工具清单',
+            color: AppTokens.textSecondary,
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const ToolsCatalogPage(),
+              ),
             ),
           ),
           IconButton(
