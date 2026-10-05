@@ -116,6 +116,10 @@ private slots:
     void decoderSnapshotsAreHonestEmpty();
     void unknownPathAndBadRequestsAreHonest();
     void bindsLoopbackOnlyAndHasBanner();
+    // Phase51 block2: three-channel alignment gaps that were previously untested.
+    void postCommandArgsMustBeObject();
+    void optionsPreflightReturns204();
+    void channelQueryPassthroughIsHonest();
 };
 
 void TestControlHttp::initTestCase() {
@@ -309,6 +313,91 @@ void TestControlHttp::bindsLoopbackOnlyAndHasBanner() {
 
     srv.stop();
     QVERIFY(!srv.isListening());
+}
+
+// 7) POST /command: the "args" field, when present, MUST be a JSON object. A
+//    string / array / number is an honest 400 (never silently coerced, never
+//    silently ignored). This pins the same input contract the ControlHub layer
+//    documents so HTTP and in-process clients cannot diverge.
+void TestControlHttp::postCommandArgsMustBeObject() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+    control::HttpControlServer srv(&hub);
+    QVERIFY(srv.start(0));
+    const quint16 port = srv.port();
+
+    // args as a string -> 400.
+    HttpResp r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"tune\",\"args\":\"98.5e6\"}"));
+    QCOMPARE(r.status, 400);
+    QVERIFY(!r.obj().value("ok").toBool());
+    QVERIFY(r.obj().value("error").isString());
+
+    // args as an array -> 400.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"tune\",\"args\":[1,2,3]}"));
+    QCOMPARE(r.status, 400);
+    QVERIFY(!r.obj().value("ok").toBool());
+
+    // args as a number -> 400.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"tune\",\"args\":145000000}"));
+    QCOMPARE(r.status, 400);
+    QVERIFY(!r.obj().value("ok").toBool());
+
+    // Omitting args entirely is ALLOWED (defaults to {}).
+    r = httpPost(port, "/command", QByteArray("{\"tool\":\"get_status\"}"));
+    QCOMPARE(r.status, 200);
+    QVERIFY(r.obj().value("ok").toBool());
+}
+
+// 8) CORS preflight: a browser-based dev client sends OPTIONS first. It must get
+//    a 204 No Content with NO body and NO engine touch (read-only, idempotent).
+void TestControlHttp::optionsPreflightReturns204() {
+    control::ControlHub hub;   // no engine
+    control::HttpControlServer srv(&hub);
+    QVERIFY(srv.start(0));
+    const quint16 port = srv.port();
+
+    HttpResp r = httpRequest(port, "OPTIONS", "/command");
+    QCOMPARE(r.status, 204);
+    QVERIFY(r.body.isEmpty());   // No Content: empty body
+}
+
+// 9) The ?channel=N query on the decoder snapshot endpoints must pass through to
+//    the ControlHub read command as args.channel and MUST NOT crash / fabricate
+//    when there is no data yet. A non-numeric channel is ignored (honest).
+void TestControlHttp::channelQueryPassthroughIsHonest() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+    control::HttpControlServer srv(&hub);
+    QVERIFY(srv.start(0));
+    const quint16 port = srv.port();
+
+    // Numeric channel -> same honest empty shape (count:0 / empty array).
+    HttpResp r = httpGet(port, "/pocsag_messages?channel=0");
+    QCOMPARE(r.status, 200);
+    QJsonObject o = r.obj();
+    QVERIFY(o.value("ok").toBool());
+    QCOMPARE(o.value("count").toInt(), 0);
+    QVERIFY(o.value("messages").isArray());
+
+    // Non-numeric channel is ignored (falls back to selected VFO) -- still honest,
+    // never a fabricated channel id.
+    r = httpGet(port, "/pocsag_messages?channel=abc");
+    QCOMPARE(r.status, 200);
+    QVERIFY(r.obj().value("ok").toBool());
+    QCOMPARE(r.obj().value("count").toInt(), 0);
+
+    // Same for m17 / vor with a numeric channel -- no crash, honest empty.
+    r = httpGet(port, "/m17_calls?channel=1");
+    QCOMPARE(r.status, 200);
+    QVERIFY(r.obj().value("ok").toBool());
+    r = httpGet(port, "/vor_radial?channel=1");
+    QCOMPARE(r.status, 200);
+    QVERIFY(!r.obj().value("locked").toBool());
 }
 
 QTEST_MAIN(TestControlHttp)
