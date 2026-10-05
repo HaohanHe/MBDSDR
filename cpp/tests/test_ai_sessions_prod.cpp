@@ -42,6 +42,7 @@
 #include <QtGlobal>
 #include <QTcpServer>
 #include <QHostAddress>
+#include <QSettings>
 
 #include "core/tokens.h"
 #include "ui/main_window.h"
@@ -83,6 +84,21 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     app.setStyleSheet(mbdsdr::tokens::buildDarkQss());
     qputenv("MBDSDR_TEST_SOURCE", "1");   // synthetic engine source (no real HW)
+
+    // Phase38: isolate QSettings to a throwaway PID-unique dir (the AI session
+    // store is already isolated per-block by freshStoreDir()). Keeps the offscreen
+    // MainWindow from reading/writing the developer's persisted rx/vfo/geometry /
+    // aiManualMode. onboardingDismissed pre-seeded so the first-run card does not
+    // pop; assertions here only read the AI session panel + on-disk JSON store.
+    {
+        const QString cfgDir = QDir::tempPath() + "/mbdsdr_cfg_aisess_" +
+                               QString::number(QCoreApplication::applicationPid());
+        QDir().mkpath(cfgDir);
+        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, cfgDir);
+        QSettings s("MBDSDR", "MBDSDR");
+        s.setValue(QString::fromUtf8("ui/onboardingDismissed"), true);
+        s.sync();
+    }
 
     int failures = 0;
     auto check = [&](bool cond, const char* msg) {

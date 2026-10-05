@@ -35,6 +35,7 @@
 // desktop or a parallel run. The honest default-port banner text is asserted
 // separately against HttpControlServer::warningBanner.
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QtTest>
@@ -46,6 +47,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QSettings>
 #include <functional>
 
 #include "core/tokens.h"
@@ -150,6 +152,21 @@ int main(int argc, char** argv) {
     // still synthetic: it is NOT a real receiver, and connected stays honest
     // false (same contract test_control_http already exercises).
     qputenv("MBDSDR_TEST_SOURCE", "1");
+
+    // Phase38: isolate QSettings to a throwaway PID-unique dir so the offscreen
+    // MainWindow does not read/write the developer's persisted rx/vfo/geometry
+    // (cross-run Qt-state pollution). onboardingDismissed pre-seeded so the
+    // first-run card does not pop; assertions here only read the control-HTTP
+    // wiring and /status telemetry.
+    {
+        const QString cfgDir = QDir::tempPath() + "/mbdsdr_cfg_http_e2e_" +
+                               QString::number(QCoreApplication::applicationPid());
+        QDir().mkpath(cfgDir);
+        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, cfgDir);
+        QSettings s("MBDSDR", "MBDSDR");
+        s.setValue(QString::fromUtf8("ui/onboardingDismissed"), true);
+        s.sync();
+    }
 
     int failures = 0;
     auto check = [&](bool cond, const char* msg) {

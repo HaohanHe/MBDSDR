@@ -9,7 +9,9 @@
 //   3. Mode/bandwidth coverage rule re-check: a manually-set bandwidth is
 //      preserved across a mode switch; an untouched default is adopted.
 #include <QApplication>
+#include <QDir>
 #include <QDoubleSpinBox>
+#include <QSettings>
 #include <QtTest>
 
 #include "core/tokens.h"
@@ -21,6 +23,7 @@ using namespace mbdsdr;
 class TestUiAudit : public QObject {
     Q_OBJECT
 private slots:
+    void initTestCase();
     void qssWiresAuditTokens();
     void qssUsesRestrainedInteractiveBlue();
     void frequencyInputClampsOutOfRange();
@@ -28,6 +31,21 @@ private slots:
     void mainWindowHasFocusableFreqSpin();
     void mainWindowHasTokenizedMinimumSize();
 };
+
+void TestUiAudit::initTestCase() {
+    // Phase38: isolate QSettings to a throwaway PID-unique dir so the two
+    // MainWindow slots below do not read the developer's persisted rx/vfo/geometry
+    // or write it back. onboardingDismissed pre-seeded so the first-run card does
+    // not pop. The audit assertions check QSS / focus policy / minimum size, none
+    // of which depend on persisted values, so a fresh store is deterministic.
+    const QString cfgDir = QDir::tempPath() + "/mbdsdr_cfg_uiaudit_" +
+                           QString::number(QCoreApplication::applicationPid());
+    QDir().mkpath(cfgDir);
+    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, cfgDir);
+    QSettings s("MBDSDR", "MBDSDR");
+    s.setValue(QString::fromUtf8("ui/onboardingDismissed"), true);
+    s.sync();
+}
 
 void TestUiAudit::qssWiresAuditTokens() {
     const QString qss = tokens::buildDarkQss();

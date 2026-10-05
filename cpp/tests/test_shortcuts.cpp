@@ -5,6 +5,8 @@
 // now proven, not merely compiled.
 #include <QtTest/QtTest>
 #include <QApplication>
+#include <QDir>
+#include <QSettings>
 #include <cmath>
 #include "ui/main_window.h"
 #include "dsp/spectrum_engine.h"
@@ -47,6 +49,19 @@ private slots:
 
 void TestShortcuts::initTestCase() {
     qputenv("MBDSDR_TEST_SOURCE", "1");   // explicit synthetic offline source
+    // Phase38: isolate QSettings to a throwaway PID-unique dir. Previously each
+    // MainWindow read the developer's persisted rx/centerFreq/demodMode/gain and
+    // wrote geometry/ui state back. The shortcut assertions are order-invariant
+    // (arm() waits for the synthetic 98.5 MHz source; gain asserts
+    // min(before+2,50)), so a fresh store is deterministic. onboardingDismissed
+    // pre-seeded so the first-run card cannot steal focus from the keyClick arm().
+    const QString cfgDir = QDir::tempPath() + "/mbdsdr_cfg_shortcuts_" +
+                           QString::number(QCoreApplication::applicationPid());
+    QDir().mkpath(cfgDir);
+    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, cfgDir);
+    QSettings s("MBDSDR", "MBDSDR");
+    s.setValue(QString::fromUtf8("ui/onboardingDismissed"), true);
+    s.sync();
 }
 
 void TestShortcuts::arrowRightMovesCenterFreq() {

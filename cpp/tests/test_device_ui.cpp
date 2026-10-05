@@ -10,9 +10,11 @@
 //      the real range and device labelled R820T.
 //   3. Pull the device -> combo back to empty/disabled.
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QtTest>
+#include <QSettings>
 #include <functional>
 
 #include <atomic>
@@ -106,6 +108,21 @@ int main(int argc, char** argv) {
     // Phase 1 still asserts the honest "未连接" empty state because a synthetic
     // source reports connected=false and an empty device-capability table.
     qputenv("MBDSDR_TEST_SOURCE", "1");
+
+    // Phase38: isolate QSettings to a throwaway PID-unique dir so the offscreen
+    // MainWindow neither reads the developer's persisted rx/vfo/onboarding state
+    // nor writes geometry/UI back into the real user config. onboardingDismissed
+    // is pre-seeded so the first-run card does not pop (matches the returning-user
+    // state this device-panel test assumes; assertions touch only the device panel).
+    {
+        const QString cfgDir = QDir::tempPath() + "/mbdsdr_cfg_deviceui_" +
+                               QString::number(QCoreApplication::applicationPid());
+        QDir().mkpath(cfgDir);
+        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, cfgDir);
+        QSettings s("MBDSDR", "MBDSDR");
+        s.setValue(QString::fromUtf8("ui/onboardingDismissed"), true);
+        s.sync();
+    }
 
     int failures = 0;
     auto check = [&](bool cond, const char* msg) {
