@@ -146,6 +146,60 @@ void main() {
     });
   });
 
+  group('重命名 renameSession（G7）', () {
+    test('改名 → index 与会话文档 title 同步更新，并持久化', () async {
+      final _MemKv kv = _MemKv();
+      final ChatSessionStore store = ChatSessionStore(kv: kv);
+      await store.load();
+      final String id = store.currentId;
+      store.appendLine(
+          id, const SessionLine(role: 'user', content: '测一下重命名'));
+
+      store.renameSession(id, '  卫星过境助手  ');
+      // 内存索引立即反映（trim 后）。
+      expect(store.sessions.single.title, '卫星过境助手');
+
+      // index.json 与 sessions/<id>.json 两处 title 都更新。
+      final Map<String, dynamic> index =
+          jsonDecode(kv.getString('aiSessionsIndex')!) as Map<String, dynamic>;
+      final Map<String, dynamic> idxInfo =
+          (index['sessions']! as List<dynamic>).single! as Map<String, dynamic>;
+      expect(idxInfo['title'], '卫星过境助手');
+      final Map<String, dynamic> doc =
+          jsonDecode(kv.getString('aiSession.$id')!) as Map<String, dynamic>;
+      expect(doc['title'], '卫星过境助手');
+      // 消息内容不被重命名动到。
+      expect((doc['messages']! as List<dynamic>).length, 1);
+    });
+
+    test('空白标题 / 同名 / 不存在 id → 不改写盘', () async {
+      final _MemKv kv = _MemKv();
+      final ChatSessionStore store = ChatSessionStore(kv: kv);
+      await store.load();
+      final String id = store.currentId;
+      final String before = store.sessions.single.title;
+
+      store.renameSession(id, '   '); // 空白 → 忽略
+      expect(store.sessions.single.title, before);
+
+      store.renameSession('不存在的id', 'x'); // 不存在 → 忽略，不抛
+      expect(store.sessions.length, 1);
+    });
+
+    test('重载后新标题回来', () async {
+      final _MemKv kv = _MemKv();
+      final ChatSessionStore store = ChatSessionStore(kv: kv);
+      await store.load();
+      final String id = store.currentId;
+      store.renameSession(id, '多普勒观测笔记');
+
+      final ChatSessionStore restored = ChatSessionStore(kv: kv);
+      await restored.load();
+      expect(restored.currentId, id);
+      expect(restored.current!.title, '多普勒观测笔记');
+    });
+  });
+
   group('持久化往返 / 健壮性', () {
     test('重载后会话与消息都回来；current 指向正确', () async {
       final _MemKv kv = _MemKv();

@@ -675,4 +675,138 @@ data: [DONE]''';
       expect((msgs[0]! as Map<String, dynamic>)['role'], 'user');
     });
   });
+
+  group('历史折叠 compactHistory（G1 AI 上下文压缩）', () {
+    ChatMessage m(ChatRole r, String c) =>
+        ChatMessage(role: r, content: c, time: DateTime(2026));
+
+    // 构造：1 条 system + 3 组 user/assistant（user 文本都很长以撑爆小预算）。
+    List<ChatMessage> sampleHistory() => <ChatMessage>[
+          m(ChatRole.system, '你是 SDR 助手'),
+          m(ChatRole.user, 'U1: ${'x' * 200}'),
+          m(ChatRole.assistant, 'R1'),
+          m(ChatRole.user, 'U2: ${'y' * 200}'),
+          m(ChatRole.assistant, 'R2'),
+          m(ChatRole.user, 'U3: ${'z' * 200}'),
+          m(ChatRole.assistant, 'R3'),
+        ];
+
+    test('预算内 → 原样全量直传，不折叠', () {
+      final List<ChatMessage> h = sampleHistory();
+      final ContextCompaction c = AiClient.compactHistory(
+        h,
+        budgetChars: 100000, // 远超
+      );
+      expect(c.didCompact, isFalse);
+      expect(c.compressedUserTurns, 0);
+      expect(c.messages, same(h));
+    });
+
+    test('超预算 → 折叠最旧轮为 system 占位，保留最近 N 个 user 轮原文', () {
+      final List<ChatMessage> h = sampleHistory();
+      // keepRecentUserTurns=2 → 保留 U2/U3，折叠 U1。
+      final ContextCompaction c = AiClient.compactHistory(
+        h,
+        budgetChars: 100,
+        keepRecentUserTurns: 2,
+      );
+      expect(c.didCompact, isTrue);
+      expect(c.compressedUserTurns, 1, reason: '只折叠了 U1 这一轮 user');
+
+      // 前导 system 指令原样保留在最前。
+      expect(c.messages.first.role, ChatRole.system);
+      expect(c.messages.first.content, '你是 SDR 助手');
+
+      // 占位是紧跟其后的第二条，role=system，诚实标注折叠且列出 U1 诉求。
+      final ChatMessage placeholder = c.messages[1];
+      expect(placeholder.role, ChatRole.system);
+      expect(placeholder.content, contains('已折叠为占位'));
+      expect(placeholder.content, contains('可随时回看')); // 不静默丢原文
+      expect(placeholder.content, contains('U1:'));
+
+      // 最近 U2 / U3 原文逐句保留。
+      final String joined = c.messages.map((ChatMessage e) => e.content).join('\n');
+      expect(joined, contains('U2:'));
+      expect(joined, contains('U3:'));
+      // U1 的长文本不再作为独立 user 消息上送（被折进占位）。
+      final bool u1AsUser = c.messages
+          .any((ChatMessage e) => e.role == ChatRole.user && e.content.contains('U1:'));
+      expect(u1AsUser, isFalse);
+    });
+
+    test('user 轮次少于保留数 → 即便超预算也不折叠（保住当前提问）', () {
+      final List<ChatMessage> h = sampleHistory();
+      // keepRecentUserTurns=10，总共只有 3 个 user 轮 → 不折叠。
+      final ContextCompaction c = AiClient.compactHistory(
+        h,
+        budgetChars: 100,
+        keepRecentUserTurns: 10,
+      );
+      expect(c.didCompact, isFalse);
+      expect(c.compressedUserTurns, 0);
+      expect(c.messages.length, h.length);
+    });
+
+    test('经 complete()：注入小预算后，占位与最近原文确实进了上送请求体', () async {
+      String? firstBody;
+      int requestCount = 0;
+
+      const String sseStop = '''data: {"choices":[{"delta":{"content":"ok"}}]}
+data: {"choices":[{"delta":{},"finish_reason":"stop"}]}
+data: [DONE]''';
+
+      Future<Stream<String>> fakeTransport(
+        Uri url,
+        Map<String, String> headers,
+        String body,
+      ) async {
+        requestCount++;
+        firstBody = body;
+        return Stream<String>.fromIterable(sseStop.split('\n'));
+      }
+
+      final AiClient client = AiClient(apiKey: 'sk-x', transport: fakeTransport);
+
+      final List<ChatMessage> history = <ChatMessage>[
+        ChatMessage(role: ChatRole.system, content: 'sys', time: DateTime(2026)),
+        ChatMessage(role: ChatRole.user, content: 'OLD: ${'q' * 300}', time: DateTime(2026)),
+        ChatMessage(role: ChatRole.assistant, content: 'old reply', time: DateTime(2026)),
+        ChatMessage(role: ChatRole.user, content: 'CURRENT ask', time: DateTime(2026)),
+      ];
+
+      // keepRecentUserTurns=1 → 保留最后一个 user（CURRENT），折叠 OLD。
+      await client
+          .complete(
+            history: history,
+            compactBudgetChars: 100,
+            keepRecentUserTurns: 1,
+          )
+          .drain<void>();
+
+      expect(requestCount, 1);
+      final Map<String, dynamic> req =
+          jsonDecode(firstBody!) as Map<String, dynamic>;
+      final List<dynamic> msgs = req['messages']! as List<dynamic>;
+
+      // 占位消息出现，且列出 OLD 诉求。
+      final bool hasPlaceholder = msgs.cast<Map<String, dynamic>>().any(
+            (Map<String, dynamic> m) =>
+                m['role'] == 'system' &&
+                (m['content']! as String).contains('OLD:'),
+          );
+      expect(hasPlaceholder, isTrue);
+      // 当前提问 CURRENT ask 原文保留。
+      final bool hasCurrent = msgs.cast<Map<String, dynamic>>().any(
+            (Map<String, dynamic> m) => m['content'] == 'CURRENT ask',
+          );
+      expect(hasCurrent, isTrue);
+      // OLD 长文不再作为独立 user 消息上送。
+      final bool oldAsUser = msgs.cast<Map<String, dynamic>>().any(
+            (Map<String, dynamic> m) =>
+                m['role'] == 'user' &&
+                (m['content']! as String).startsWith('OLD:'),
+          );
+      expect(oldAsUser, isFalse);
+    });
+  });
 }

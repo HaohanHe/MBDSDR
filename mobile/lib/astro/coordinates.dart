@@ -127,3 +127,15 @@ double rangeRateAt(Sgp4 propagator, DateTime t, Station station) {
   return (velEcef.x * rho.x + velEcef.y * rho.y + velEcef.z * rho.z) /
       range;
 }
+
+/// 由径向速度估算下行多普勒频移（Hz）：f_d ≈ -f0 · v_r / c。
+///
+/// 纯函数：给定标称下行频率 [downlinkHz] 与径向速度 [rangeRateKmS] 即得，不碰
+/// 网络/硬件，可直接单测。符号约定与一次性捕获偏置（satellite_capture）一致：
+/// v_r > 0（卫星远离测站）→ 接收载频被拉低 → f_d 为负。
+double dopplerShiftFromRangeRateHz({
+  required double downlinkHz,
+  required double rangeRateKmS,
+}) {
+  return -downlinkHz * rangeRateKmS / kSpeedOfLightKmS;
+}
