@@ -164,19 +164,26 @@ def ccsds_softframe_to_dslwp(soft_symbols: np.ndarray) -> tuple[bytes, List[int]
     return _descramble_rs(vbytes)
 
 
-def _scan_asm_offsets(hard_bits: Sequence[int], frame_bits: int) -> List[int]:
-    """在 0/1 比特流里滑动找 ASM（严格匹配），返回每个 ASM 起始比特下标。
+def _scan_asm_offsets(hard_bits: Sequence[int], frame_bits: int,
+                      asm_tol: int = 0) -> List[int]:
+    """在 0/1 比特流里滑动找 ASM（hamming 容忍 ``asm_tol`` bit），返回起始下标。
 
     软路径专用：硬比特由同一软数组 sign 得到，ASM 定位后即可按 ``off+32`` 切出
-    对应软符号窗交给软 Viterbi（与硬 framer 结果对齐）。
+    对应软符号窗交给软 Viterbi。容忍 bit 越多，弱信号越易同步但假同步概率上升
+    （实测见 docs/learn/phase56）。
     """
+    from .ccsds_rx import _popcount32
     syncl = bytes_to_bits_msb(CCSDS_ASM_WORD.to_bytes(4, "big"))
+    syncw = CCSDS_ASM_WORD & 0xFFFFFFFF
     L = len(syncl)
     offs: List[int] = []
     i = 0
     N = len(hard_bits)
     while i <= N - L - frame_bits:
-        if [int(hard_bits[i + j]) for j in range(L)] == syncl:
+        win = 0
+        for j in range(L):
+            win = (win << 1) | int(hard_bits[i + j])
+        if _popcount32(win ^ syncw) <= asm_tol:
             offs.append(i)
             i += L + frame_bits  # 跳到下一帧（背靠背）
         else:
@@ -227,7 +234,8 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
                        frame_bits: int, f_offset: Optional[float] = 0.0,
                        timing: str = "coarse", afc: bool = False,
                        notch_cw: bool = False, resync: bool = False,
-                       pll: bool = False, soft: bool = False
+                       pll: bool = False, soft: bool = False,
+                       asm_tol: int = 0
                        ) -> CcsdsSsdvResult:
     """复 IQ → demod_bpsk → ASM 同步 → Viterbi → 解扰 → RS → 218B → DSLWP JPEG。
 
@@ -278,7 +286,7 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
         if soft_sym.size == 0:
             return out
         hard_bits = (soft_sym > 0).astype(np.int8)
-        offs = _scan_asm_offsets(hard_bits.tolist(), frame_bits)
+        offs = _scan_asm_offsets(hard_bits.tolist(), frame_bits, asm_tol=asm_tol)
         out.n_asm_frames = len(offs)
         if not offs:
             return out
@@ -296,6 +304,8 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
                     img = SsdvImage(pkt.image_id)
                     images[pkt.image_id] = img
                 img.add(pkt)
+        if not images:
+            return out  # ASM 同步但 RS 全不可纠 → 诚实空态，不伪造
         return _collect_image(out, images)
 
     if resync:
@@ -306,7 +316,7 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
     if bits.size == 0:
         return out
 
-    framer = AsmFramer(frame_bits=frame_bits, max_hamming=0)
+    framer = AsmFramer(frame_bits=frame_bits, max_hamming=asm_tol)
     frames = framer.feed_bits(bits.tolist())
     out.n_asm_frames = len(frames)
     if not frames:

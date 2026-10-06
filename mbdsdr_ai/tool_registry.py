@@ -766,6 +766,8 @@ class ToolRegistry:
                 notch_cw=bool(args.get("notch_cw", False)),
                 resync=bool(args.get("resync", False)),
                 pll=bool(args.get("pll", False)),
+                soft=bool(args.get("soft", False)),
+                asm_tol=int(args.get("asm_tol", 0)),
             )
             return ToolResult(
                 success=r.n_asm_frames > 0,
@@ -789,6 +791,8 @@ class ToolRegistry:
                 "timing": {"type": "string", "enum": ["coarse", "gardner"]},
                 "afc": {"type": "boolean"}, "pll": {"type": "boolean"},
                 "notch_cw": {"type": "boolean"}, "resync": {"type": "boolean"},
+                "soft": {"type": "boolean", "description": "软判决 Viterbi"},
+                "asm_tol": {"type": "integer", "description": "ASM hamming 容忍 bit"},
             }, "required": ["iq_path"]},
             handler=_decode, category="ssdv_rx",
         )
