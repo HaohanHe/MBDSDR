@@ -112,6 +112,9 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
     vfoManager_.initDefault(source_->sampleRate(), source_->centerFreq(),
                             demodMode_, bandwidth_);
     rebuildDemod();
+    // Seed the lock-free VFO snapshot so the first UI refresh (before the run()
+    // loop delivers its first block) reads a populated list, not an empty one.
+    publishVfoSnapshotLocked();
 }
 
 SpectrumEngine::~SpectrumEngine() {
@@ -182,6 +185,21 @@ void SpectrumEngine::updateCapsSnapshotLocked() {
     QMutexLocker lk(&capsMutex_);
     capsSnapshot_ = source_ ? source_->capabilities() : noDeviceCapabilities();
     gainTableSnapshot_ = source_ ? source_->availableGainsDb() : std::vector<double>{};
+}
+
+void SpectrumEngine::publishVfoSnapshotLocked() {
+    QVector<VfoMarker> out = vfoManager_.markers();
+    // Backfill IF-offset bookkeeping against the CURRENT source capture center:
+    // referenceHz = capture center, centerOffsetHz = signed IF offset.
+    const double center = source_ ? source_->centerFreq() : 0.0;
+    for (auto& m : out) {
+        m.referenceHz = center;
+        m.centerOffsetHz = m.freqHz - center;
+    }
+    const int selected = vfoManager_.selectedId();
+    QMutexLocker lk(&vfoMutex_);
+    vfoSnapshot_ = std::move(out);
+    vfoSelectedSnapshot_ = selected;
 }
 
 std::vector<double> SpectrumEngine::availableGainsDb() const {
@@ -822,6 +840,7 @@ void SpectrumEngine::vfoAdd() {
         demodMode_ = sel->mode;
         bandwidth_ = sel->bandwidthHz;
     }
+    publishVfoSnapshotLocked();
     emit vfoListChanged();
     (void)id;
 }
@@ -833,6 +852,7 @@ void SpectrumEngine::vfoRemove(int id) {
         demodMode_ = sel->mode;
         bandwidth_ = sel->bandwidthHz;
     }
+    publishVfoSnapshotLocked();
     emit vfoListChanged();
 }
 
@@ -843,6 +863,7 @@ void SpectrumEngine::vfoSelect(int id) {
             demodMode_ = sel->mode;
             bandwidth_ = sel->bandwidthHz;
         }
+        publishVfoSnapshotLocked();
         emit vfoListChanged();
     }
 }
@@ -850,6 +871,7 @@ void SpectrumEngine::vfoSelect(int id) {
 void SpectrumEngine::vfoSetFreq(int id, double hz) {
     QMutexLocker lk(&sourceMutex_);
     vfoManager_.setFreq(id, hz);
+    publishVfoSnapshotLocked();
     emit vfoListChanged();
 }
 
@@ -877,6 +899,7 @@ bool SpectrumEngine::vfoSetOffset(int id, double targetHz) {
     // (freqHz - sourceCenterHz). This is the SDR++ in-band IF-offset path: the
     // RTL tuner is NOT retuned while the VFO stays inside the capture band.
     vfoManager_.setFreq(id, targetHz);
+    publishVfoSnapshotLocked();
     emit vfoListChanged();
     return retuned;
 }
@@ -885,6 +908,7 @@ void SpectrumEngine::vfoSetBandwidth(int id, double hz) {
     QMutexLocker lk(&sourceMutex_);
     vfoManager_.setBandwidth(id, hz);
     if (vfoManager_.selectedId() == id) bandwidth_ = hz;
+    publishVfoSnapshotLocked();
     emit vfoListChanged();
 }
 
@@ -895,19 +919,21 @@ void SpectrumEngine::vfoSetMode(int id, const QString& mode) {
         demodMode_ = mode;
         if (const VfoChannel* sel = vfoManager_.selected()) bandwidth_ = sel->bandwidthHz;
     }
+    publishVfoSnapshotLocked();
     emit vfoListChanged();
 }
 
 void SpectrumEngine::vfoSetColor(int id, const QColor& c) {
     QMutexLocker lk(&sourceMutex_);
     vfoManager_.setColor(id, c);
+    publishVfoSnapshotLocked();
     emit vfoListChanged();
 }
 
 bool SpectrumEngine::vfoRename(int id, const QString& name) {
     QMutexLocker lk(&sourceMutex_);
     const bool ok = vfoManager_.renameVfo(id, name);
-    if (ok) emit vfoListChanged();
+    if (ok) { publishVfoSnapshotLocked(); emit vfoListChanged(); }
     return ok;
 }
 
@@ -945,22 +971,15 @@ void SpectrumEngine::resetAptDecoder() {
 }
 
 QVector<VfoMarker> SpectrumEngine::vfoMarkers() const {
-    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
-    QVector<VfoMarker> out = vfoManager_.markers();
-    // Backfill the IF-offset bookkeeping against the CURRENT source capture
-    // center. This is the snapshot the UI draws: referenceHz = capture center,
-    // centerOffsetHz = this VFO's signed IF offset (freqHz - capture center).
-    const double center = source_ ? source_->centerFreq() : 0.0;
-    for (auto& m : out) {
-        m.referenceHz = center;
-        m.centerOffsetHz = m.freqHz - center;
-    }
-    return out;
+    // Read ONLY the independent snapshot: never take sourceMutex_ here, or the
+    // UI thread stalls against the run loop's blocking source read.
+    QMutexLocker lk(&vfoMutex_);
+    return vfoSnapshot_;
 }
 
 int SpectrumEngine::selectedVfoId() const {
-    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
-    return vfoManager_.selectedId();
+    QMutexLocker lk(&vfoMutex_);
+    return vfoSelectedSnapshot_;
 }
 
 std::vector<PocsagMessage> SpectrumEngine::pocsagMessages(int channelId) const {
@@ -1140,7 +1159,7 @@ void SpectrumEngine::applyControlCommandsLocked() {
         if (source_) source_->setPpm(p.ppm);
     }
 
-    if (vfoChanged) emit vfoListChanged();
+    if (vfoChanged) { publishVfoSnapshotLocked(); emit vfoListChanged(); }
 }
 
 void SpectrumEngine::run() {
@@ -1279,6 +1298,9 @@ void SpectrumEngine::run() {
             lastEffSrForVfo_ = srEff;
         }
         const std::vector<float>& raw = vfoManager_.process(iq, srEff, centerNow);
+        // Publish the lock-free VFO snapshot (list + band boxes + selected id)
+        // so the UI thread's vfoMarkers()/selectedVfoId() never take sourceMutex_.
+        publishVfoSnapshotLocked();
         const VfoChannel* sel = vfoManager_.selected();
         const QString selMode = sel ? sel->mode : demodMode_;
         const bool digital = VfoChannel::modeIsDigital(selMode);

@@ -2509,7 +2509,10 @@ MainWindow::MainWindow(QWidget* parent)
     // Autonomous task runner: a worker QThread (see task_runner.h).  Real engine
     // + real bookmark store; queued step/finished signals update the UI. Manual-
     // mode state mirrors the checkbox so a gated task reports honestly.
-    aiRunner_ = new ai::TaskRunner(engine_, bookmarkManager_, this);
+    // No QObject parent: start() moveToThread()'s this runner onto its worker
+    // thread, and Qt refuses to move an object that has a parent. Lifetime is
+    // owned manually in ~MainWindow (joined before the engine is shut down).
+    aiRunner_ = new ai::TaskRunner(engine_, bookmarkManager_, nullptr);
     aiRunner_->setManualMode(aiManualCheck_ && aiManualCheck_->isChecked());
     aiRunner_->start();
     connect(aiRunTaskBtn_, &QPushButton::clicked, this, &MainWindow::onRunAutoTask);
@@ -2998,6 +3001,9 @@ MainWindow::~MainWindow() {
         saveSettings();
     }
     saveUiState();
+    // Join the autonomous task runner's worker thread BEFORE the engine it
+    // drives is shut down (~TaskRunner quits + waits its own thread).
+    delete aiRunner_; aiRunner_ = nullptr;
     if (engine_) { engine_->shutdown(); engine_->wait(); }
     if (adsbTimer_) adsbTimer_->stop();
     delete adsbTracker_; adsbTracker_ = nullptr;

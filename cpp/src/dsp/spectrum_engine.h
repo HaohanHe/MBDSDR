@@ -676,6 +676,20 @@ private:
     // per loop iteration.
     void updateCapsSnapshotLocked();
 
+    // Lock-free-to-UI VFO snapshot. vfoMarkers()/selectedVfoId() used to take
+    // sourceMutex_ directly on the UI thread; because run() holds sourceMutex_
+    // across a whole block including the (potentially blocking) source read, a
+    // posted refreshVfoUi() MetaCall could stall the UI thread indefinitely and
+    // starve heartbeat/snapshot timers. run() now publishes this snapshot while
+    // holding sourceMutex_, and UI reads go through vfoMutex_ only.
+    mutable QMutex vfoMutex_;
+    QVector<VfoMarker> vfoSnapshot_;
+    int vfoSelectedSnapshot_ = 0;
+    // Caller must hold sourceMutex_ (or be the single-threaded constructor).
+    // Copies live VFO markers + selected id into vfoSnapshot_ under vfoMutex_.
+    // Cheap; called once at open and after each block's VFO processing.
+    void publishVfoSnapshotLocked();
+
     // Device-liveness bookkeeping (engine thread only). A real source that
     // returns zero IQ reads for a short grace period is treated as dropped:
     // the engine falls back to the offline test source and fires sourceDropped.
