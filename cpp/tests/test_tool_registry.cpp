@@ -44,6 +44,8 @@ const QSet<QString> kAllCxxTools = {
     "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
     "list_recordings", "delete_recording", "export_recording",
     "set_fft_params", "set_color_map", "get_spectrum_status",
+    // Phase55 block3: live Doppler compensation toggle (write, gated).
+    "set_doppler_compensation",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -61,6 +63,8 @@ const QSet<QString> kExpectedWriteTools = {
     "add_vfo", "switch_vfo", "rename_vfo",
     "delete_recording", "export_recording",
     "set_fft_params", "set_color_map",
+    // Phase55 block3: live Doppler compensation toggle (gated write).
+    "set_doppler_compensation",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -110,7 +114,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 35, qPrintable(QString("expected 35 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 36, qPrintable(QString("expected 36 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -203,11 +207,11 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 35);
+    QCOMPARE(defs.size(), 36);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("get_spectrum_status"));
+    QCOMPARE(defs.last().name, QString("set_doppler_compensation"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

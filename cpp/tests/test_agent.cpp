@@ -35,6 +35,9 @@ private slots:
     void testManualModeAllowsReadTool();
     void testAiTakeoverRunsWriteTool();
     void testManualModePersistence();
+    // --- Phase55: Costas lock read-out + Doppler control surface ------------
+    void testDigitalLockStatusHonestEmpty();
+    void testDopplerSurfaceNullHonestUnavailable();
     // --- Frequency calibration agent tools (offline synthetic e2e) ---------
     void calibrate_handheld_syntheticInjectedPpm();
     void calibrate_fcch_syntheticInjectedPpm();
@@ -47,7 +50,7 @@ private slots:
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 35);
+    QCOMPARE(tools.size(), 36);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -199,6 +202,32 @@ void TestAgent::testManualModePersistence() {
     if (prev.isValid()) s.setValue("aiManualMode", prev);
     else s.remove("aiManualMode");
     s.sync();
+}
+
+// Phase55 block2: a fresh engine's Costas lock read-out is the honest empty
+// state (no carrier lock, no EVM) -- never a fabricated lock.
+void TestAgent::testDigitalLockStatusHonestEmpty() {
+    dsp::SpectrumEngine engine;
+    const dsp::DigitalLockStatus lock = engine.digitalLockStatus();
+    QVERIFY2(!lock.carrierLocked, "fresh engine must report carrier not locked");
+    QVERIFY2(!lock.symbolLocked, "fresh engine must report symbol not locked");
+    QVERIFY2(lock.evmPercent == 0.0f, "fresh engine EVM must be 0 (honest empty)");
+}
+
+// Phase55 block3: with no UI control surface registered (headless/test), the
+// set_doppler_compensation tool reports an honest unavailable state instead of
+// fabricating a toggle. The surface defaults to null on a fresh engine.
+void TestAgent::testDopplerSurfaceNullHonestUnavailable() {
+    dsp::SpectrumEngine engine;
+    QVERIFY2(engine.dopplerControlSurface() == nullptr,
+             "fresh engine has no Doppler control surface");
+    QJsonObject args; args["enable"] = true;
+    const QString r = ai::executeTool("set_doppler_compensation", args, &engine);
+    const QJsonObject rj = QJsonDocument::fromJson(r.toUtf8()).object();
+    QVERIFY2(rj.value("ok").toBool() == false,
+             "set_doppler_compensation must refuse when no UI surface exists");
+    QVERIFY2(rj.value("available").toBool() == false,
+             "must report available=false without a UI surface");
 }
 
 // ===========================================================================

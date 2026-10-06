@@ -110,6 +110,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"start_scan_link",       true,  &ControlHub::cmdStartScanLink},
         {"stop_scan_link",        true,  &ControlHub::cmdStopScanLink},
         {"set_squelch",           true,  &ControlHub::cmdSetSquelch},
+        {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"add_bookmark",          true,  &ControlHub::cmdAddBookmark},
         {"tune_to_bookmark",      true,  &ControlHub::cmdTuneToBookmark},
         {"delete_bookmark",       true,  &ControlHub::cmdDeleteBookmark},
@@ -448,6 +449,26 @@ QJsonObject ControlHub::cmdSetBandwidth(const QJsonObject& a) {
     return o;
 }
 
+// Phase55 block3: toggle live Doppler compensation via the UI control surface.
+// No surface (headless/test) -> honest unavailable; the UI re-checks the
+// station/capture preconditions on the way through.
+QJsonObject ControlHub::cmdSetDopplerCompensation(const QJsonObject& a) {
+    dsp::DopplerControlSurface* surf = engine_->dopplerControlSurface();
+    QJsonObject o = okBase();
+    o["command"] = "set_doppler_compensation";
+    if (!surf) {
+        o["ok"] = false;
+        o["available"] = false;
+        o["error"] = QString::fromUtf8("多普勒补偿不可用（无 UI 控制面）");
+        return o;
+    }
+    const bool on = a.value("enable").toBool(false);
+    surf->setDopplerCompensationEnabled(on);
+    o["available"] = surf->isDopplerCompensationAvailable();
+    o["enabled"] = surf->isDopplerCompensationEnabled();
+    return o;
+}
+
 QJsonObject ControlHub::cmdSetSquelchEnabled(const QJsonObject& a) {
     bool e; QString err;
     if (!needBool(a, "enabled", e, err)) return errResult(err);
@@ -733,6 +754,16 @@ QJsonObject ControlHub::cmdGetStatus(const QJsonObject&) {
     o["frequency_hz"] = engine_->centerFreq();
     o["mode"] = engine_->demodMode();
     o["bandwidth_hz"] = engine_->bandwidth();
+    // Phase55 block2: Costas carrier-lock snapshot of the selected VFO. On an
+    // analog channel the engine returns an honest all-false lock status.
+    const dsp::DigitalLockStatus lock = engine_->digitalLockStatus();
+    o["carrier_locked"] = lock.carrierLocked;
+    o["symbol_locked"] = lock.symbolLocked;
+    o["evm_percent"] = lock.evmPercent;
+    // Phase55 block3: live Doppler compensation state via the UI control surface.
+    dsp::DopplerControlSurface* dsurf = engine_->dopplerControlSurface();
+    o["doppler_available"] = dsurf && dsurf->isDopplerCompensationAvailable();
+    o["doppler_enabled"] = dsurf && dsurf->isDopplerCompensationEnabled();
     // Hardware readback -- only truthful once telemetry has actually arrived.
     o["telemetry_available"] = snap.available;
     o["connected"] = snap.available && snap.connected;

@@ -724,6 +724,28 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // set_doppler_compensation (write) -- Phase55 block3 -------------------
+    // Live satellite-pass Doppler auto-compensation (the 1 Hz TLE range-rate
+    // retune). This is the programmatic mirror of the sky-tab checkbox; it
+    // refuses honestly (stays off) unless a station is configured AND a pass is
+    // captured. Without a UI surface (headless/test) it reports unavailable.
+    {
+        ToolSchemaSpec s;
+        s.name = "set_doppler_compensation";
+        s.description = QString::fromUtf8(
+            "写入：开关过境实时多普勒自动补偿（1Hz TLE 距离率重调 VFO）。"
+            "需已设置本站位置并捕获一个过境，否则保持关闭（诚实拒绝）。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec en;
+        en.name = "enable";
+        en.type = "boolean";
+        en.description = QString::fromUtf8("是否开启多普勒自动补偿");
+        en.required = true;
+        s.params << en;
+        out.append(s);
+    }
+
     return out;
 }
 

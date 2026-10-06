@@ -171,6 +171,7 @@ private:
     QJsonObject cmdSetGain(const QJsonObject& a);
     QJsonObject cmdSetMode(const QJsonObject& a);
     QJsonObject cmdSetBandwidth(const QJsonObject& a);
+    QJsonObject cmdSetDopplerCompensation(const QJsonObject& a);
     QJsonObject cmdSetSquelchEnabled(const QJsonObject& a);
     QJsonObject cmdSetSquelchThreshold(const QJsonObject& a);
     QJsonObject cmdSetMuted(const QJsonObject& a);

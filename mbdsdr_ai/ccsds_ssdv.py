@@ -136,6 +136,54 @@ def ccsds_frame_to_dslwp(frame: bytes) -> tuple[bytes, List[int]]:
     return b"".join(parts), nerrors
 
 
+def _descramble_rs(vbytes: bytes) -> tuple[bytes, List[int]]:
+    """Viterbi 输出字节流 → 解扰 → RS(255,223) 逐块 → (218B 流, [nerrors])。"""
+    n_rsblocks = len(vbytes) // 255
+    stream_rs = vbytes[: n_rsblocks * 255]
+    desc = Scrambler().descramble(stream_rs)
+    rs = ReedSolomon(nsym=32)
+    parts: List[bytes] = []
+    nerrors: List[int] = []
+    for i in range(0, len(desc), 255):
+        res = rs.decode(desc[i:i + 255])
+        nerrors.append(res.nerrors)
+        parts.append(res.data)
+    return b"".join(parts), nerrors
+
+
+def ccsds_softframe_to_dslwp(soft_symbols: np.ndarray) -> tuple[bytes, List[int]]:
+    """单帧 ASM 后**实值软符号**数组 → 软判决 Viterbi(终态0) → 解扰 → RS。
+
+    与 :func:`ccsds_frame_to_dslwp` 对齐，但保留 BPSK 幅值软信息（欧氏距离分支度量），
+    弱信号下有 ~14× BER 增益（见 test_phase54_softviterbi）。
+    """
+    s = soft_symbols
+    n = (s.size // 2) * 2
+    pairs = [(float(s[i]), float(s[i + 1])) for i in range(0, n, 2)]
+    vbytes = bits_to_bytes_msb(ViterbiDecoder().decode_soft(pairs, final_state=0))
+    return _descramble_rs(vbytes)
+
+
+def _scan_asm_offsets(hard_bits: Sequence[int], frame_bits: int) -> List[int]:
+    """在 0/1 比特流里滑动找 ASM（严格匹配），返回每个 ASM 起始比特下标。
+
+    软路径专用：硬比特由同一软数组 sign 得到，ASM 定位后即可按 ``off+32`` 切出
+    对应软符号窗交给软 Viterbi（与硬 framer 结果对齐）。
+    """
+    syncl = bytes_to_bits_msb(CCSDS_ASM_WORD.to_bytes(4, "big"))
+    L = len(syncl)
+    offs: List[int] = []
+    i = 0
+    N = len(hard_bits)
+    while i <= N - L - frame_bits:
+        if [int(hard_bits[i + j]) for j in range(L)] == syncl:
+            offs.append(i)
+            i += L + frame_bits  # 跳到下一帧（背靠背）
+        else:
+            i += 1
+    return offs
+
+
 def _demod_resync(z: np.ndarray, fs: float, symrate: float, foff: float,
                   timing: str, win: int = 4096,
                   min_prom: float = 8.0) -> np.ndarray:
@@ -179,7 +227,7 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
                        frame_bits: int, f_offset: Optional[float] = 0.0,
                        timing: str = "coarse", afc: bool = False,
                        notch_cw: bool = False, resync: bool = False,
-                       pll: bool = False
+                       pll: bool = False, soft: bool = False
                        ) -> CcsdsSsdvResult:
     """复 IQ → demod_bpsk → ASM 同步 → Viterbi → 解扰 → RS → 218B → DSLWP JPEG。
 
@@ -206,7 +254,8 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
 
     诚实空态：ASM 0 帧 / RS 全不可纠 / CRC 不过 → 结果计数全 0、jpeg 为空，不伪造。
     """
-    from .ssdv_phy import estimate_cfo_bpsk, afc_correct, notch_cw, demod_bpsk, pll_bpsk
+    from .ssdv_phy import (estimate_cfo_bpsk, afc_correct, notch_cw,
+                           demod_bpsk, demod_bpsk_soft, pll_bpsk)
     out = CcsdsSsdvResult()
     z = iq
     if notch_cw:
@@ -221,6 +270,34 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
     if pll:
         z = pll_bpsk(z, fs, symrate)
     out.cfo_est_hz = float(foff)
+
+    # ── 软判决全链：从同一软数组 sign 出硬比特定位 ASM，再按窗切软符号送软 Viterbi ──
+    if soft:
+        soft_sym = demod_bpsk_soft(z, fs, symrate, f_offset=foff)
+        out.n_demod_bits = int(soft_sym.size)
+        if soft_sym.size == 0:
+            return out
+        hard_bits = (soft_sym > 0).astype(np.int8)
+        offs = _scan_asm_offsets(hard_bits.tolist(), frame_bits)
+        out.n_asm_frames = len(offs)
+        if not offs:
+            return out
+        dec = SsdvDecoder(dialect=DIALECT_DSLWP)
+        images: dict[int, SsdvImage] = {}
+        for off in offs:
+            seg = soft_sym[off + 32: off + 32 + frame_bits]
+            stream218, nerrors = ccsds_softframe_to_dslwp(seg)
+            out.rs_nerrors.append(nerrors)
+            for pkt in dec.feed(stream218):
+                if pkt is None:
+                    continue
+                img = images.get(pkt.image_id)
+                if img is None:
+                    img = SsdvImage(pkt.image_id)
+                    images[pkt.image_id] = img
+                img.add(pkt)
+        return _collect_image(out, images)
+
     if resync:
         bits = _demod_resync(z, fs, symrate, foff, timing)
     else:
@@ -251,6 +328,12 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
 
     if not images:
         return out
+    return _collect_image(out, images)
+
+
+def _collect_image(out: "CcsdsSsdvResult",
+                   images: dict) -> "CcsdsSsdvResult":
+    """从多帧累积的 SsdvImage 里挑最优，填充结果计数（硬/软两链共用）。"""
     best_id = max(
         images,
         key=lambda k: (len(images[k].packets),

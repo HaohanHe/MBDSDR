@@ -36,7 +36,10 @@ class QListWidgetItem;
 class QLineEdit;
 class QSpinBox;
 
+#include "dsp/doppler_control_surface.h"
+
 namespace mbdsdr {
+
 namespace ui   { class BookmarkManager; class ActivityLog; }
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct TleEntry; struct VfoMarker; class FrequencyScanner; class SpyServerServer;
                  class DeviceLister; class IRtlDeviceEnumerator; class DevicePresenceNotifier; }
@@ -52,11 +55,20 @@ namespace gnss { class GnssReceiver; struct GnssFix; }
 // dispatches engine calls directly (same invariant the rest of the UI uses).
 namespace control { class ControlHub; class HttpControlServer; }
 
-class MainWindow : public QMainWindow {
+class MainWindow : public QMainWindow, public dsp::DopplerControlSurface {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = nullptr);
     ~MainWindow() override;
+
+    // Phase55 block3: DopplerControlSurface implementation (live compensation
+    // bridge to ControlHub / HTTP / Agent). The UI checkbox drives the real loop;
+    // these are the programmatic mirrors. Precondition checks live in
+    // onDopplerCompToggled, so a tool toggle refuses honestly without a station
+    // / captured pass.
+    void setDopplerCompensationEnabled(bool on) override;
+    bool isDopplerCompensationEnabled() const override;
+    bool isDopplerCompensationAvailable() const override;
     // Programmatic entry point (CLI / screenshot harness / embedding): the
     // engine behind the UI. GUI remains optional for every action.
     dsp::SpectrumEngine* engine() { return engine_; }

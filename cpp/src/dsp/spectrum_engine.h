@@ -31,6 +31,7 @@
 #include "dsp/cw_decoder.h"
 #include "dsp/adsb_decoder.h"
 #include "dsp/apt_decoder.h"
+#include "dsp/doppler_control_surface.h"
 
 namespace mbdsdr {
 namespace dsp {
@@ -235,6 +236,17 @@ public slots:
     std::vector<M17Call>        m17Calls(int channelId) const;
     VorResult                   vorResult(int channelId) const;
     void                        clearDigitalOutputs(int channelId);
+
+    // Phase55 block2: Costas carrier-lock snapshot for the SELECTED VFO channel.
+    // Returns a default (carrierLocked=false) honest empty state when the
+    // selected channel is not a digital BPSK/QPSK mode -- never a fabricated
+    // lock. Takes sourceMutex_; read by ControlHub / Agent get_status / UI.
+    DigitalLockStatus           digitalLockStatus() const;
+
+    // Phase55 block3: register the live Doppler control surface (MainWindow).
+    // Null until a UI registers; callers get an honest "not available" otherwise.
+    void setDopplerControlSurface(DopplerControlSurface* s) { dopplerSurface_ = s; }
+    DopplerControlSurface* dopplerControlSurface() const { return dopplerSurface_; }
 
     // ---- ANR (audio noise reduction on the selected VFO's audio) -------
     void setAnrEnabled(bool on);
@@ -454,6 +466,9 @@ private:
     std::unique_ptr<ISource> source_;
     IQFrontend frontend_;
     VfoManager vfoManager_;
+    // Phase55 block3: optional live Doppler control surface (set by MainWindow).
+    // Null in headless/test runs -> honest "not available" from the tool layer.
+    DopplerControlSurface* dopplerSurface_ = nullptr;
     Squelch squelch_;
     Agc agc_;
     AudioOutput* audioOut_ = nullptr;
