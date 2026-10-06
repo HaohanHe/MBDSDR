@@ -619,6 +619,29 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // set_vfo_armed (write -- gated) ------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_vfo_armed";
+        s.description = QString::fromUtf8(
+            "写入：开启/关闭某 VFO 的后台并行解调（index/enabled）。开启后即使该 VFO "
+            "未被选中，仍会在每个数据块被解调，便于并行监听/录制；关闭则停止以节省 CPU。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec idx;
+        idx.name = "index";
+        idx.type = "number";
+        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序）");
+        idx.required = true;
+        ToolParamSpec en;
+        en.name = "enabled";
+        en.type = "boolean";
+        en.description = QString::fromUtf8("true=后台并行监听，false=停止");
+        en.required = true;
+        s.params << idx << en;
+        out.append(s);
+    }
+
     // list_recordings (read-only) ---------------------------------------
     {
         ToolSchemaSpec s;

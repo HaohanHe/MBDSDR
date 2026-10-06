@@ -51,6 +51,7 @@ struct VfoMarker {
     QColor  color;
     QString name;
     bool    selected = false;
+    bool    armed = false;        // user-enabled parallel monitoring (not selected)
     // Signed IF offset of this VFO relative to the source's capture center:
     //   centerOffsetHz = freqHz - referenceHz.
     // This is what the channelizer NCO actually tunes. During an in-band
@@ -81,6 +82,10 @@ struct VfoChannel {
 
     bool   needsRebuild = true;    // mode/bandwidth/sr changed -> reconfigure
     double lastSr = 0.0;           // source rate the channelizer was built for
+    // User explicitly wants this NON-selected channel demodulated every block
+    // (parallel monitoring / recording). The selected channel is always active;
+    // other channels are skipped unless armed -> orphan VFOs cost ~zero CPU.
+    bool   armed = false;
 
     // --- Reserved slots for a future round (digital demod / ANR) ------------
     // When these land, process() will branch here: digital modes skip the audio
@@ -184,6 +189,8 @@ public:
     // Rename channel `id` (an empty name is rejected -> false). Minimal gap fill:
     // the band-box / list label simply reads back `name`; no DSP rebuild needed.
     bool renameVfo(int id, const QString& name);
+    // Enable/disable parallel demod of a non-selected channel (false default).
+    bool setArmed(int id, bool on);
 
     // ---- Process ----------------------------------------------------------
     // Fan the source IQ out to every channel; fills each channel's audio48k.

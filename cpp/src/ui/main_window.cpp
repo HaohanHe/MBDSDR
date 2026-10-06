@@ -572,6 +572,13 @@ MainWindow::MainWindow(QWidget* parent)
     vfoBtnRow->addWidget(vfoCopyBtn_);
     vfoBtnRow->addWidget(vfoDelBtn_);
     gVfoLay->addLayout(vfoBtnRow);
+    // Toggle parallel demod of the HIGHLIGHTED non-selected VFO (armed). Checked
+    // state is re-synced from that row's real armed flag in refreshVfoUi().
+    vfoArmBtn_ = new QPushButton("并行监听选中 VFO", gVfo);
+    vfoArmBtn_->setObjectName("vfoArmBtn");
+    vfoArmBtn_->setCheckable(true);
+    vfoArmBtn_->setMinimumHeight(tokens::scaled(tokens::kTouchMin));
+    gVfoLay->addWidget(vfoArmBtn_);
     leftLay->addWidget(gVfo);
 
     auto* gSql = new QGroupBox("静噪", leftCard);
@@ -2274,6 +2281,13 @@ MainWindow::MainWindow(QWidget* parent)
     });
     connect(spectrum_, &ui::SpectrumWidget::vfoMarkerBandwidthChanged,
             this, [this](int id, double hz) { engine_->vfoSetBandwidth(id, hz); });
+    // Keep the CURRENT VFO demodulated in the background after the user later
+    // selects another one (parallel monitor). Checked state mirrors the selected
+    // VFO's armed flag (synced in refreshVfoUi).
+    connect(vfoArmBtn_, &QPushButton::clicked, this, [this](bool checked) {
+        if (!engine_) return;
+        engine_->vfoSetArmed(engine_->selectedVfoId(), checked);
+    });
 
     // ---- Constellation panel (cross-thread: queued) ----------------------
     connect(engine_, &dsp::SpectrumEngine::constellationSymbols,
@@ -3346,6 +3360,14 @@ void MainWindow::refreshVfoUi() {
     if (selRow >= 0) vfoList_->setCurrentRow(selRow);
     vfoList_->blockSignals(false);
 
+    // Sync the parallel-monitor toggle to the selected VFO's real armed flag.
+    if (vfoArmBtn_) {
+        bool arm = false;
+        for (const auto& m : vfoMarkers_) if (m.selected) { arm = m.armed; break; }
+        QSignalBlocker b(vfoArmBtn_);
+        vfoArmBtn_->setChecked(arm);
+    }
+
     // Backfill the single-channel controls from the selected VFO.
     const dsp::VfoMarker* sel = nullptr;
     for (const auto& m : vfoMarkers_) if (m.selected) { sel = &m; break; }
@@ -3396,10 +3418,13 @@ QString MainWindow::vfoRowText(const dsp::VfoMarker& m) const {
     else                            bw = QString("%1 Hz").arg(int(m.bandwidthHz));
     // The selected VFO is the one actually routed to the speaker (engine routes
     // only the selected channel's audio48k). Make that explicit instead of relying
-    // on the dot alone: "● 名字  98.500 MHz  NFM  12.5 kHz  [出声]".
-    const QString audible = m.selected ? QStringLiteral("  [出声]") : QString();
+    // on the dot alone: "● 名字  98.500 MHz  NFM  12.5 kHz  [出声]"; a non-selected
+    // channel the user armed for parallel demod shows "[并行监听]".
+    QString stateTag;
+    if (m.selected)       stateTag = QStringLiteral("  [出声]");
+    else if (m.armed)     stateTag = QStringLiteral("  [并行监听]");
     return QString("%1 %2  %3 MHz  %4  %5%6")
-        .arg(dot, idPart, QString::number(m.freqHz / 1e6, 'f', 3), m.mode, bw, audible);
+        .arg(dot, idPart, QString::number(m.freqHz / 1e6, 'f', 3), m.mode, bw, stateTag);
 }
 
 void MainWindow::vfoCopyUi() {
@@ -3543,6 +3568,7 @@ void MainWindow::saveUiState() {
         s.setValue(QString("vfo/%1/bw").arg(i), m.bandwidthHz);
         s.setValue(QString("vfo/%1/color").arg(i), m.color.name());
         s.setValue(QString("vfo/%1/selected").arg(i), m.selected);
+        s.setValue(QString("vfo/%1/armed").arg(i), m.armed);
     }
 
     // ---- User VFO display names (JSON map: "vfo id" -> name). Empty by default,
@@ -3906,6 +3932,8 @@ void MainWindow::restoreUiState() {
                 engine_->vfoSetBandwidth(id, bw);
                 engine_->vfoSetColor(id, QColor(colName));
                 engine_->vfoSetFreq(id, freq);
+                if (s.value(QString("vfo/%1/armed").arg(i), false).toBool())
+                    engine_->vfoSetArmed(id, true);
                 if (s.value(QString("vfo/%1/selected").arg(i), false).toBool()) selId = id;
             }
             engine_->vfoSelect(selId);

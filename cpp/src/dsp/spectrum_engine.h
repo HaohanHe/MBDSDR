@@ -221,6 +221,9 @@ public slots:
     // Rename channel `id` (minimal forwarder to VfoManager::renameVfo; false on
     // unknown id / empty name). Takes sourceMutex_ like the other VFO mutators.
     bool vfoRename(int id, const QString& name);
+    // Enable/disable parallel demod of a non-selected channel (forwarder to
+    // VfoManager::setArmed; false on unknown id). Takes sourceMutex_.
+    bool vfoSetArmed(int id, bool on);
     // Snapshot for the UI (VFO list + band boxes). Blocks on sourceMutex_.
     QVector<VfoMarker> vfoMarkers() const;
     int selectedVfoId() const;

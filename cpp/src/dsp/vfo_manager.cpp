@@ -327,6 +327,16 @@ bool VfoManager::renameVfo(int id, const QString& name) {
     return true;
 }
 
+bool VfoManager::setArmed(int id, bool on) {
+    VfoChannel* c = channel(id);
+    if (!c) return false;
+    // Allowed even for the selected channel: arming it now means it KEEPS being
+    // demodulated after the user later selects another VFO (background monitor).
+    c->armed = on;
+    if (on) c->needsRebuild = true;          // may have never been built
+    return true;
+}
+
 bool VfoManager::hasId(int id) const {
     return channel(id) != nullptr;
 }
@@ -347,6 +357,16 @@ const std::vector<float>& VfoManager::process(
         const std::vector<std::complex<float>>& iq,
         double sourceSr, double sourceCenterHz) {
     for (auto& ch : channels_) {
+        // Only the selected (audible) channel plus user-armed parallel channels
+        // are demodulated. Idle/orphan VFOs cost ~zero CPU; their band boxes are
+        // still drawn from markers() (freq only, no channelizer required).
+        const bool active = (ch.id == selectedId_) || ch.armed;
+        if (!active) {
+            // Idle/orphan VFO: no channelizer/NCO/demod work at all. When it
+            // later becomes active the block below rebuilds/retunes it correctly.
+            ch.audio48k.clear();
+            continue;
+        }
         if (ch.needsRebuild || ch.lastSr != sourceSr) {
             ch.rebuild(sourceSr, sourceCenterHz);
         } else {
@@ -460,7 +480,7 @@ QVector<VfoMarker> VfoManager::markers() const {
     out.reserve(channels_.size());
     for (const auto& c : channels_)
         out.push_back({c.id, c.freqHz, c.bandwidthHz, c.mode, c.color, c.name,
-                       c.id == selectedId_});
+                       c.id == selectedId_, c.armed});
     return out;
 }
 

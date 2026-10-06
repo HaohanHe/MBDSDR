@@ -11,6 +11,7 @@
 
 #include <QDebug>
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -934,6 +935,13 @@ bool SpectrumEngine::vfoRename(int id, const QString& name) {
     QMutexLocker lk(&sourceMutex_);
     const bool ok = vfoManager_.renameVfo(id, name);
     if (ok) { publishVfoSnapshotLocked(); emit vfoListChanged(); }
+    return ok;
+}
+
+bool SpectrumEngine::vfoSetArmed(int id, bool on) {
+    QMutexLocker lk(&sourceMutex_);
+    const bool ok = vfoManager_.setArmed(id, on);
+    if (ok) emit vfoListChanged();
     return ok;
 }
 
