@@ -74,6 +74,11 @@ void TestMultiVfo::twoVfosDecodeOwnTones() {
     mgr.setFreq(idA, +100e3);
     const int idB = mgr.addVfo(-300e3);
     mgr.setMode(idB, "NFM");
+    // On-demand demodulation: addVfo selects idB, so idA is no longer selected.
+    // To keep decoding idA in parallel it MUST be armed (this is exactly the
+    // armed parallel-monitoring path); otherwise idA costs zero CPU and its
+    // audio buffer stays empty.
+    QVERIFY(mgr.setArmed(idA, true));
 
     // Warm up: fill channelizer/demod/resampler state, discard output.
     for (int blk = 0; blk < 30; ++blk) {

@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 37);
+    QCOMPARE(specs.size(), 38);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -230,6 +230,12 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"rename_vfo",
          QString::fromUtf8(
             "写入：重命名指定 VFO 信道（index/name）。属于写动作，手动模式下被拦截。")},
+        // Phase59: armed parallel VFO monitoring, in registeredToolSpecs order.
+        {"set_vfo_armed",
+         QString::fromUtf8(
+            "写入：开启/关闭某 VFO 的后台并行解调（index/enabled）。开启后即使该 VFO "
+            "未被选中，仍会在每个数据块被解调，便于并行监听/录制；关闭则停止以节省 CPU。"
+            "属于写动作，手动模式下被拦截。")},
         {"list_recordings",
          QString::fromUtf8(
             "只读：扫描录制目录并列出已有录制文件。目录不存在或为空时诚实返回空列表。")},
@@ -304,7 +310,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
     const QString doc = generateToolDocumentation();
     QVERIFY(!doc.isEmpty());
 
-    // Every one of the 37 tools appears as its own "## <name>" block.
+    // Every one of the 38 tools appears as its own "## <name>" block.
     int headerCount = 0;
     for (const ToolSchemaSpec& s : specs) {
         QVERIFY2(doc.contains(QString("## %1 ").arg(s.name)), qPrintable(s.name));
@@ -319,7 +325,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 37);
+    QCOMPARE(headerCount, 38);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

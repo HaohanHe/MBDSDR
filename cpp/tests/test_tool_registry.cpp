@@ -48,6 +48,8 @@ const QSet<QString> kAllCxxTools = {
     "set_doppler_compensation",
     // Phase58 block2: rtl_tcp network source connect (write, gated).
     "connect_network_source",
+    // Phase59: armed parallel VFO monitoring toggle (write, gated).
+    "set_vfo_armed",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -69,6 +71,8 @@ const QSet<QString> kExpectedWriteTools = {
     "set_doppler_compensation",
     // Phase58 block2: rtl_tcp network source connect (gated write).
     "connect_network_source",
+    // Phase59: armed parallel VFO monitoring toggle (gated write).
+    "set_vfo_armed",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -118,7 +122,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 37, qPrintable(QString("expected 37 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 38, qPrintable(QString("expected 38 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -211,7 +215,7 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 37);
+    QCOMPARE(defs.size(), 38);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
