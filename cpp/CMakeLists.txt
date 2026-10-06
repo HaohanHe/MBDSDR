@@ -436,6 +436,21 @@ target_include_directories(test_engine_empty_state PRIVATE src)
 target_link_libraries(test_engine_empty_state PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME engine_empty_state COMMAND test_engine_empty_state)
 
+# Regression: hardware/shared-state set commands go through the async control
+# mailbox, so clicking the panadapter / dragging a slider never blocks the
+# caller's thread on sourceMutex_ or the USB retune.
+add_executable(test_tune_nonblocking tests/test_tune_nonblocking.cpp
+    src/dsp/spectrum_engine.cpp src/dsp/device_capabilities.cpp src/dsp/test_signal.cpp src/dsp/rtl_sdr_source.cpp src/dsp/tuner_gain_table.cpp src/dsp/stream_watchdog.cpp src/dsp/file_source.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/iq_frontend.cpp src/dsp/vfo_manager.cpp src/dsp/fsk_demod.cpp src/dsp/pocsag_decoder.cpp src/dsp/m17_decoder.cpp src/dsp/vor_receiver.cpp src/dsp/digital_demod.cpp src/dsp/anr.cpp src/dsp/channelizer.cpp
+    src/dsp/audio_resampler.cpp src/dsp/demod.cpp src/dsp/wfm_stereo.cpp src/dsp/squelch.cpp src/dsp/agc.cpp
+    src/dsp/audio_output.cpp src/dsp/qt_audio_sink.cpp src/dsp/memory_audio_sink.cpp src/dsp/recorder.cpp src/dsp/wav_writer.cpp
+    src/dsp/gated_recorder.cpp src/dsp/signal_watch.cpp src/dsp/cw_decoder.cpp src/dsp/adsb_decoder.cpp src/dsp/rds_decoder.cpp src/dsp/apt_decoder.cpp
+    src/dsp/fft.cpp src/dsp/power_spectrum.cpp src/dsp/noise_blanker.cpp src/dsp/peak_detector.cpp
+    src/ui/bookmark_manager.cpp src/dsp/network_audio_sink.cpp src/dsp/scan_link.cpp src/dsp/frequency_scanner.cpp)
+target_include_directories(test_tune_nonblocking PRIVATE src)
+target_link_libraries(test_tune_nonblocking PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
+add_test(NAME tune_nonblocking COMMAND test_tune_nonblocking)
+
 # Phase27 Block2: ScanActivityLink ENGINE-level wiring. Feeds the LIVE engine's
 # measured RSSI (SpectrumEngine::rssiDbfs()) into a ScanActivityLink bound to the
 # engine's REAL primitives (onSetCenterFreq retune / startRecording arm /
