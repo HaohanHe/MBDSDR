@@ -238,6 +238,64 @@ class ViterbiDecoder:
         bits.reverse()
         return bits
 
+    def decode_soft(self, pairs,
+                    final_state: Optional[int] = None) -> List[int]:
+        """软判决 Viterbi：接收符号对为实值软信息（非 0/1），欧氏距离分支度量。
+
+        教科书 BPSK 软判决：期望比特 e∈{0,1} 映射到发送幅值 s = +1（e=0）/
+        -1（e=1）；分支度量 = (rx1-s1)² + (rx2-s2)²（最小化欧氏距离 = 最大化
+        互相关）。弱信号下保留幅度信息，比硬判决（先 sign 丢弃幅值）有 ~2dB 增益。
+
+        参数
+        ----------
+        pairs :
+            实值软符号对序列（每元素两个 float），与硬判决 pairs 同顺序同长度。
+        final_state :
+            同 :meth:`decode`。
+        """
+        n = len(pairs)
+        if n == 0:
+            return []
+        INF = 1e18
+        metrics = [INF] * CONV_STATES
+        metrics[0] = 0.0
+        decisions: List[List[int]] = []
+        for rx in pairs:
+            rx1, rx2 = float(rx[0]), float(rx[1])
+            new_metrics = [INF] * CONV_STATES
+            dec = [0] * CONV_STATES
+            for ns in range(CONV_STATES):
+                b = ns & 1
+                p0 = ns >> 1
+                p1 = p0 | 32
+                e0 = self._expected[p0][b]
+                e1 = self._expected[p1][b]
+                # 期望比特 → ±1 幅值（bit=1→+1，bit=0→-1，与 bpsk_modulate_bits 一致）
+                s01, s02 = 2.0 * e0[0] - 1.0, 2.0 * e0[1] - 1.0
+                s11, s12 = 2.0 * e1[0] - 1.0, 2.0 * e1[1] - 1.0
+                d0 = metrics[p0] + (rx1 - s01) ** 2 + (rx2 - s02) ** 2
+                d1 = metrics[p1] + (rx1 - s11) ** 2 + (rx2 - s12) ** 2
+                if d0 <= d1:
+                    new_metrics[ns] = d0
+                    dec[ns] = 0
+                else:
+                    new_metrics[ns] = d1
+                    dec[ns] = 1
+            metrics = new_metrics
+            decisions.append(dec)
+
+        if final_state is not None:
+            state = final_state & (CONV_STATES - 1)
+        else:
+            state = min(range(CONV_STATES), key=lambda s: metrics[s])
+        bits: List[int] = []
+        for stage in range(n - 1, -1, -1):
+            bits.append(state & 1)
+            d = decisions[stage][state]
+            state = (state >> 1) if d == 0 else ((state >> 1) | 32)
+        bits.reverse()
+        return bits
+
 
 # ===========================================================================
 # CCSDS ASM 帧同步状态机

@@ -447,6 +447,43 @@ def demod_bpsk(iq: np.ndarray, fs: float, symrate: float,
     return bits
 
 
+def demod_bpsk_soft(iq: np.ndarray, fs: float, symrate: float,
+                    f_offset: float = 0.0) -> np.ndarray:
+    """复 IQ → 每符号**软信息**（匹配滤波后符号中心实部幅值，float32）。
+
+    与 :func:`demod_bpsk` 同粗定时盲扫，但**不做 sign 判决**，保留幅值——这是软判决
+    Viterbi 所需的 BPSK 软信息（幅值大=可靠、幅值小=不可靠）。期望发送幅值 ±1，
+    故软采样 ≈ ±1 + 噪声。极短/无信号返回空（诚实空态）。
+    """
+    z = np.asarray(iq, dtype=np.complex64)
+    if z.size == 0 or symrate <= 0:
+        return np.zeros(0, dtype=np.float32)
+    if f_offset is None:
+        f_offset, _prom = estimate_cfo_bpsk(z, fs)
+    t = np.arange(z.size) / fs
+    base = z * np.exp(-1j * 2.0 * np.pi * f_offset * t)
+    sps = fs / symrate
+    k = max(1, int(round(sps)))
+    kernel = np.ones(k, dtype=np.float64) / k
+    filt = np.convolve(base.real, kernel, mode="same")
+    n_sym = int(filt.size / sps)
+    if n_sym < 8:
+        return np.zeros(0, dtype=np.float32)
+    n_ph = max(8, int(sps))
+    best_off, best_score = 0.0, -np.inf
+    for off in np.linspace(0.0, sps, n_ph, endpoint=False):
+        idx = np.round(off + np.arange(n_sym) * sps).astype(int)
+        idx = idx[idx < filt.size]
+        if idx.size < 8:
+            continue
+        score = float(np.abs(np.mean(filt[idx])))
+        if score > best_score:
+            best_score, best_off = score, off
+    idx = np.round(best_off + np.arange(n_sym) * sps).astype(int)
+    idx = idx[idx < filt.size]
+    return filt[idx].astype(np.float32)
+
+
 def iq_to_ssdv_bytes(iq: np.ndarray, fs: float, symrate: float,
                      f_offset: float = 0.0) -> bytes:
     """复 IQ → BPSK 硬比特 → MSB-first 打包字节（交给 SsdvDecoder 自同步）。"""

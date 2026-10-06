@@ -684,6 +684,9 @@ class ToolRegistry:
         # 实际实现见 mbdsdr_ai/orbit_determination.py
         self.register_orbit_determination_tools()
 
+        # ── SSDV/CCSDS 接收链健壮性工具（AFC/PLL/notch/resync，Python 独有，无设备）──
+        self.register_ssdv_rx_tools()
+
     def register_goeslrit_tools(self):
         """注册 GOES LRIT/HRIT 帧解析工具（依据 GOES HRIT/LRIT 公开标准独立实现）。
 
@@ -733,15 +736,68 @@ class ToolRegistry:
             return
         FY.register_tool_registry(self)
 
+    def register_ssdv_rx_tools(self):
+        """注册 Python 侧 SSDV/CCSDS 接收链健壮性工具（无设备，吃 complex64 IQ 文件）。
+
+        能力全在 Python 链（ssdv_phy / ccsds_ssdv）：分段 AFC、二阶 PLL、CW 对消、
+        多缓冲重同步、软判决 Viterbi。真机频率/符号率由参数传入，代码零硬编码；
+        无 IQ/纯噪声诚实返回空结果（不 mock）。
+        """
+        def _decode(args):
+            import numpy as np
+            from .ccsds_ssdv import ccsds_iq_to_result
+            path = args.get("iq_path", "")
+            if not path:
+                return ToolResult(success=False,
+                                  content="需提供 complex64 IQ 文件路径 iq_path")
+            try:
+                iq = np.fromfile(path, dtype=np.complex64)
+            except OSError as e:
+                return ToolResult(success=False, content=f"读 IQ 失败: {e}")
+            if iq.size == 0:
+                return ToolResult(success=False, content="IQ 为空（诚实空态，不伪造出图）")
+            r = ccsds_iq_to_result(
+                iq, float(args.get("sample_rate_hz", 48000.0)),
+                float(args.get("symrate_hz", 4800.0)),
+                frame_bits=int(args.get("frame_bits", 8172)),
+                f_offset=float(args.get("tone_offset_hz", 0.0)),
+                timing=args.get("timing", "gardner"),
+                afc=bool(args.get("afc", False)),
+                notch_cw=bool(args.get("notch_cw", False)),
+                resync=bool(args.get("resync", False)),
+                pll=bool(args.get("pll", False)),
+            )
+            return ToolResult(
+                success=r.n_asm_frames > 0,
+                content=(f"asm={r.n_asm_frames} rs={r.rs_nerrors} "
+                         f"mcu={r.received_mcus}/{r.mcu_count} "
+                         f"jpeg={len(r.jpeg)}B"),
+                data={"asm": r.n_asm_frames, "rs_nerrors": r.rs_nerrors,
+                      "mcu": r.received_mcus, "mcu_tot": r.mcu_count,
+                      "jpeg_bytes": len(r.jpeg)},
+            )
+
+        self.register(
+            name="ssdv_ccsds_decode",
+            description=("对 complex64 IQ 文件跑 CCSDS/BPSK→Viterbi→RS→SSDV 全链解码。"
+                         "开关：afc(分段多普勒跟踪)/pll(二阶精相位)/notch_cw(窄带干扰)/"
+                         "resync(遮挡后重同步)/timing(coarse|gardner)。无设备，纯文件离线。"),
+            parameters={"type": "object", "properties": {
+                "iq_path": {"type": "string", "description": "complex64 IQ 文件路径"},
+                "sample_rate_hz": {"type": "number"}, "symrate_hz": {"type": "number"},
+                "frame_bits": {"type": "integer"}, "tone_offset_hz": {"type": "number"},
+                "timing": {"type": "string", "enum": ["coarse", "gardner"]},
+                "afc": {"type": "boolean"}, "pll": {"type": "boolean"},
+                "notch_cw": {"type": "boolean"}, "resync": {"type": "boolean"},
+            }, "required": ["iq_path"]},
+            handler=_decode, category="ssdv_rx",
+        )
+
     def register_sat_image_tools(self):
         """注册气象卫星图像处理链工具（中值/CLAHE/白平衡/Kuwahara/几何校正/RGB）。
 
         实现依据（通用图像处理与全圆盘投影公开方法；SatDump 仅作技术参考，
-        本仓未包含其源代码）：
-          - 中值滤波
-          - 直方图均衡（CLAHE）
-          - Kuwahara 降噪
-          - 全圆盘投影正反变换
+        本仓未包含其源代码）。
         """
         try:
             from . import sat_image_processing as SIP
