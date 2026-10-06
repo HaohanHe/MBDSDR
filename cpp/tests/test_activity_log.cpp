@@ -20,7 +20,13 @@ private:
 private slots:
     void init() {
         tmp = new QTemporaryDir;
-        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, tmp->path());
+        // Windows NativeFormat is the registry, where setPath() is ignored and an
+        // unset org/app name makes default QSettings unwritable. Use IniFormat,
+        // which honors setPath() on every platform (on Linux native == ini).
+        QCoreApplication::setOrganizationName("MBDSDR");
+        QCoreApplication::setApplicationName("MBDSDR");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmp->path());
     }
     void cleanup() { delete tmp; tmp = nullptr; }
     void appendFields();

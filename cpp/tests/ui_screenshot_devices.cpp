@@ -12,11 +12,27 @@
 #include <cstdlib>
 #include <cstring>
 #include <atomic>
+#include <chrono>
 #include <thread>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+using rawsock = SOCKET;
+const rawsock kRawInvalid = INVALID_SOCKET;
+inline void rawClose(rawsock s) { ::closesocket(s); }
+constexpr int kRawNoSignal = 0;
+constexpr int kRawShutBoth = SD_BOTH;
+#else
+#  include <arpa/inet.h>
+#  include <netinet/in.h>
+#  include <sys/socket.h>
+#  include <unistd.h>
+using rawsock = int;
+constexpr rawsock kRawInvalid = -1;
+inline void rawClose(rawsock s) { ::close(s); }
+constexpr int kRawNoSignal = MSG_NOSIGNAL;
+constexpr int kRawShutBoth = kRawShutBoth;
+#endif
 
 #include "core/tokens.h"
 #include "dsp/spectrum_engine.h"
@@ -28,16 +44,23 @@ class RawRtlTcp {
 public:
     ~RawRtlTcp() { stop(); }
     bool listen() {
-        int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (fd < 0) return false;
+        rawsock fd = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (fd == kRawInvalid) return false;
         int one = 1;
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const char*>(&one), sizeof(one));
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) { ::close(fd); return false; }
-        if (::listen(fd, 1) < 0) { ::close(fd); return false; }
+        if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            rawClose(fd); return false;
+        }
+        if (::listen(fd, 1) != 0) { rawClose(fd); return false; }
+#ifdef _WIN32
+        int alen = sizeof(addr);
+#else
         socklen_t alen = sizeof(addr);
+#endif
         ::getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &alen);
         listenFd_ = fd;
         port_ = ntohs(addr.sin_port);
@@ -47,8 +70,8 @@ public:
     quint16 port() const { return port_; }
 private:
     void acceptLoop() {
-        int c = ::accept(listenFd_, nullptr, nullptr);
-        if (c < 0) return;
+        rawsock c = ::accept(listenFd_, nullptr, nullptr);
+        if (c == kRawInvalid) return;
         clientFd_ = c;
         unsigned char hdr[12];
         std::memcpy(hdr, "RTL0", 4);
@@ -56,22 +79,28 @@ private:
         const quint32 gains = 29;
         for (int i = 0; i < 4; ++i) hdr[4 + i] = (tuner >> (24 - 8*i)) & 0xff;
         for (int i = 0; i < 4; ++i) hdr[8 + i] = (gains >> (24 - 8*i)) & 0xff;
-        ::send(c, reinterpret_cast<const char*>(hdr), 12, 0);
+        ::send(c, reinterpret_cast<const char*>(hdr), 12, kRawNoSignal);
         char chunk[60000];
         std::memset(chunk, 0x80, sizeof(chunk));
         while (!stop_.load()) {
-            if (::send(c, chunk, sizeof(chunk), 0) <= 0) break;
-            usleep(25000);
+            if (::send(c, chunk, sizeof(chunk), kRawNoSignal) <= 0) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(25));
         }
     }
     void stop() {
         stop_ = true;
-        if (listenFd_ >= 0) { ::shutdown(listenFd_, SHUT_RDWR); ::close(listenFd_); listenFd_ = -1; }
-        if (clientFd_ >= 0) { ::shutdown(clientFd_, SHUT_RDWR); ::close(clientFd_); clientFd_ = -1; }
+        if (listenFd_ != kRawInvalid) {
+            ::shutdown(listenFd_, kRawShutBoth); rawClose(listenFd_);
+            listenFd_ = kRawInvalid;
+        }
+        if (clientFd_ != kRawInvalid) {
+            ::shutdown(clientFd_, kRawShutBoth); rawClose(clientFd_);
+            clientFd_ = kRawInvalid;
+        }
         if (thread_.joinable()) thread_.join();
     }
-    int listenFd_ = -1;
-    int clientFd_ = -1;
+    rawsock listenFd_ = kRawInvalid;
+    rawsock clientFd_ = kRawInvalid;
     std::atomic<bool> stop_{false};
     std::thread thread_;
     quint16 port_ = 0;

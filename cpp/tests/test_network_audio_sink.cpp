@@ -22,13 +22,52 @@
 #include <QtTest/QtTest>
 #include <QTemporaryDir>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+using rawsock = SOCKET;
+const rawsock kRawInvalid = INVALID_SOCKET;
+inline int  rawErr() { return WSAGetLastError(); }
+inline void rawClose(rawsock s) { ::closesocket(s); }
+constexpr int kRawCloexec = 0;
+constexpr int kRawNoSignal = 0;
+// One-time Winsock init for in-test mock peers (production source self-inits).
+inline void ensureRawStack() {
+    static const bool kInit = [] {
+        WSADATA data;
+        return WSAStartup(MAKEWORD(2, 2), &data) == 0;
+    }();
+    (void)kInit;
+}
+// Winsock SO_RCVTIMEO takes a DWORD of milliseconds.
+inline void setRawRcvTimeout(rawsock s, int ms) {
+    DWORD v = static_cast<DWORD>(ms);
+    ::setsockopt(s, SOL_SOCKET, SO_RCVTIMEO,
+                 reinterpret_cast<const char*>(&v), sizeof(v));
+}
+#else
+#  include <arpa/inet.h>
+#  include <netinet/in.h>
+#  include <poll.h>
+#  include <sys/socket.h>
+#  include <unistd.h>
+using rawsock = int;
+constexpr rawsock kRawInvalid = -1;
+inline int  rawErr() { return errno; }
+inline void rawClose(rawsock s) { ::close(s); }
+constexpr int kRawCloexec = SOCK_CLOEXEC;
+constexpr int kRawNoSignal = MSG_NOSIGNAL;
+inline void ensureRawStack() {}
+inline void setRawRcvTimeout(rawsock s, int ms) {
+    timeval tv{};
+    tv.tv_sec = ms / 1000;
+    tv.tv_usec = (ms % 1000) * 1000;
+    ::setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+}
+#endif
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -56,53 +95,57 @@ int16_t toPcm16(float s) {
 
 // --- tiny raw-socket loopback helpers (mirror the sink's own sockets) -------
 
-int openUdpReceiver() {
-    int fd = ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
-    if (fd < 0) return -1;
+rawsock openUdpReceiver() {
+    ensureRawStack();
+    rawsock fd = ::socket(AF_INET, SOCK_DGRAM | kRawCloexec, 0);
+    if (fd == kRawInvalid) return kRawInvalid;
     sockaddr_in a{};
     a.sin_family = AF_INET;
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     a.sin_port = 0;
-    if (::bind(fd, reinterpret_cast<sockaddr*>(&a), sizeof(a)) < 0) {
-        ::close(fd);
-        return -1;
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0) {
+        rawClose(fd);
+        return kRawInvalid;
     }
-    timeval tv{}; tv.tv_usec = 300 * 1000;
-    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setRawRcvTimeout(fd, 300);
     return fd;
 }
 
-uint16_t portOf(int fd) {
+uint16_t portOf(rawsock fd) {
     sockaddr_in a{};
+#ifdef _WIN32
+    int al = sizeof(a);
+#else
     socklen_t al = sizeof(a);
-    if (::getsockname(fd, reinterpret_cast<sockaddr*>(&a), &al) < 0) return 0;
+#endif
+    if (::getsockname(fd, reinterpret_cast<sockaddr*>(&a), &al) != 0) return 0;
     return ntohs(a.sin_port);
 }
 
 // Blocking recv until `wantBytes` collected or read times out.
-std::vector<uint8_t> recvUntilBytes(int fd, std::size_t wantBytes, int timeoutMs) {
+std::vector<uint8_t> recvUntilBytes(rawsock fd, std::size_t wantBytes, int timeoutMs) {
     std::vector<uint8_t> out;
-    timeval tv{}; tv.tv_usec = timeoutMs * 1000;
-    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setRawRcvTimeout(fd, timeoutMs);
     uint8_t buf[65536];
     while (out.size() < wantBytes) {
-        ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+        const int n = static_cast<int>(::recv(fd, reinterpret_cast<char*>(buf), sizeof(buf), 0));
         if (n > 0) out.insert(out.end(), buf, buf + n);
         else break;   // timeout or EOF
     }
     return out;
 }
 
-int connectTcp(uint16_t port) {
-    int fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    if (fd < 0) return -1;
+rawsock connectTcp(uint16_t port) {
+    ensureRawStack();
+    rawsock fd = ::socket(AF_INET, SOCK_STREAM | kRawCloexec, 0);
+    if (fd == kRawInvalid) return kRawInvalid;
     sockaddr_in a{};
     a.sin_family = AF_INET;
     a.sin_port = htons(port);
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (::connect(fd, reinterpret_cast<sockaddr*>(&a), sizeof(a)) < 0) {
-        ::close(fd);
-        return -1;
+    if (::connect(fd, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0) {
+        rawClose(fd);
+        return kRawInvalid;
     }
     return fd;
 }
@@ -111,26 +154,25 @@ int connectTcp(uint16_t port) {
 // receive buffer never backs up the sink's send path.
 class TcpDrain {
 public:
-    int fd = -1;
+    rawsock fd = kRawInvalid;
     std::atomic<bool> stop{false};
     std::vector<uint8_t> data;
     std::thread th;
     TcpDrain() = default;
     ~TcpDrain() { stop.store(true); if (th.joinable()) th.join(); }
     void start() {
-        timeval tv{}; tv.tv_usec = 100 * 1000;
-        ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setRawRcvTimeout(fd, 100);
         th = std::thread([this] {
             uint8_t buf[65536];
             while (!stop.load()) {
-                ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+                const int n = static_cast<int>(::recv(fd, reinterpret_cast<char*>(buf), sizeof(buf), 0));
                 if (n > 0) {
                     std::lock_guard<std::mutex> lk(mtx);
                     data.insert(data.end(), buf, buf + n);
                 } else if (n == 0) {
                     break;   // orderly close
                 }
-                // EAGAIN: loop and re-check stop
+                // timeout: loop and re-check stop
             }
         });
     }
@@ -179,8 +221,8 @@ void TestNetworkAudioSink::idleStateHonest() {
 }
 
 void TestNetworkAudioSink::udpLoopbackPcmExact() {
-    int rx = openUdpReceiver();
-    QVERIFY(rx >= 0);
+    rawsock rx = openUdpReceiver();
+    QVERIFY(rx != kRawInvalid);
     const uint16_t port = portOf(rx);
     QVERIFY(port > 0);
 
@@ -206,22 +248,22 @@ void TestNetworkAudioSink::udpLoopbackPcmExact() {
                             (static_cast<int16_t>(got[2 * i + 1]) << 8);
         QCOMPARE(act, exp);
     }
-    ::close(rx);
+    rawClose(rx);
 }
 
 void TestNetworkAudioSink::udpSilentWhenNoData() {
-    int rx = openUdpReceiver();
-    QVERIFY(rx >= 0);
+    rawsock rx = openUdpReceiver();
+    QVERIFY(rx != kRawInvalid);
     const uint16_t port = portOf(rx);
 
     NetworkAudioSink sink;
     QVERIFY(sink.start("127.0.0.1", port, NetAudioProtocol::UDP));
     QTest::qWait(350);   // nothing written at all
     uint8_t b;
-    ssize_t n = ::recv(rx, &b, 1, 0);
+    const int n = static_cast<int>(::recv(rx, reinterpret_cast<char*>(&b), 1, 0));
     QVERIFY(n <= 0);                       // no datagram, ever
     QCOMPARE(sink.bytesSent(), 0ULL);      // no fabricated audio
-    ::close(rx);
+    rawClose(rx);
 }
 
 void TestNetworkAudioSink::tcpLoopbackPcmExact() {
@@ -233,8 +275,8 @@ void TestNetworkAudioSink::tcpLoopbackPcmExact() {
     QVERIFY(sink.running());
     QVERIFY(!sink.clientConnected());
 
-    int cli = connectTcp(port);
-    QVERIFY(cli >= 0);
+    rawsock cli = connectTcp(port);
+    QVERIFY(cli != kRawInvalid);
     QTRY_VERIFY_WITH_TIMEOUT(sink.clientConnected(), 2000);
 
     std::vector<float> blk(1024);
@@ -254,7 +296,7 @@ void TestNetworkAudioSink::tcpLoopbackPcmExact() {
         QCOMPARE(a0, exp);
         QCOMPARE(a1, exp);
     }
-    ::close(cli);
+    rawClose(cli);
 }
 
 void TestNetworkAudioSink::tcpNoClientDropsHonest() {
@@ -274,8 +316,8 @@ void TestNetworkAudioSink::tcpDisconnectAndReconnect() {
     QVERIFY(sink.start("127.0.0.1", 0, NetAudioProtocol::TCP));
     const uint16_t port = sink.actualPort();
 
-    int cli = connectTcp(port);
-    QVERIFY(cli >= 0);
+    rawsock cli = connectTcp(port);
+    QVERIFY(cli != kRawInvalid);
     QTRY_VERIFY_WITH_TIMEOUT(sink.clientConnected(), 2000);
 
     const std::vector<float> blk(256, 0.5f);
@@ -283,7 +325,7 @@ void TestNetworkAudioSink::tcpDisconnectAndReconnect() {
     QCOMPARE(sink.bytesSent(), 256 * sizeof(int16_t));
 
     // Peer leaves: the accept thread must notice and the state must go honest.
-    ::close(cli);
+    rawClose(cli);
     QTRY_VERIFY_WITH_TIMEOUT(!sink.clientConnected(), 4000);
 
     // Sending with no client: counted as a drop, no crash, no fake buffering.
@@ -292,13 +334,13 @@ void TestNetworkAudioSink::tcpDisconnectAndReconnect() {
     QCOMPARE(sink.framesDropped(), dropsBefore + 1);
 
     // Re-listen: a new client connects and streaming resumes (SDR++ semantics).
-    int cli2 = connectTcp(port);
-    QVERIFY(cli2 >= 0);
+    rawsock cli2 = connectTcp(port);
+    QVERIFY(cli2 != kRawInvalid);
     QTRY_VERIFY_WITH_TIMEOUT(sink.clientConnected(), 2000);
     sink.write(blk);
     auto got = recvUntilBytes(cli2, blk.size() * sizeof(int16_t), 2000);
     QCOMPARE(got.size(), blk.size() * sizeof(int16_t));
-    ::close(cli2);
+    rawClose(cli2);
 }
 
 void TestNetworkAudioSink::startFailureHonest() {
@@ -338,7 +380,7 @@ void TestNetworkAudioSink::engineTapE2eMatchesDemod() {
 
     TcpDrain drain;
     drain.fd = connectTcp(port);
-    QVERIFY(drain.fd >= 0);
+    QVERIFY(drain.fd != kRawInvalid);
     drain.start();
 
     QVERIFY(eng.openOfflineFile(rawPath, 2.048e6));

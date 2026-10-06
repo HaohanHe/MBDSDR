@@ -235,6 +235,11 @@ target_include_directories(mbdsdr PRIVATE src)
 # so test executables are untouched and ctest 129 does not relink/regress).
 target_sources(mbdsdr PRIVATE src/heap_probe.cpp)
 
+# Offscreen screenshot tools (reuse all sources except main.cpp). These are
+# Linux/offscreen developer-only harnesses, are NOT registered with ctest, and
+# several still drive raw POSIX loopback sockets; they are not built on Windows
+# (the shipped mbdsdr target and the ctest suite below are the Windows surface).
+if(NOT WIN32)
 # Offscreen screenshot tool (reuses all sources except main.cpp).
 set(SHOT_SRCS ${SOURCES})
 list(REMOVE_ITEM SHOT_SRCS src/main.cpp)
@@ -348,8 +353,15 @@ target_link_libraries(ui_shot_devices PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::
 add_executable(ui_shot_audit tests/ui_screenshot_audit.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_audit PRIVATE src build/ui_shot_audit_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_audit PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+endif() # NOT WIN32 (developer-only offscreen screenshot harnesses)
 
 target_link_libraries(mbdsdr PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent ${CMAKE_DL_LIBS})
+if(WIN32)
+    # Winsock (network_audio_sink / rtl_tcp_source) + Process Status API
+    # (heap_probe GetProcessMemoryInfo). Qt6::Network pulls ws2_32 transitively,
+    # but link explicitly so the app target is self-contained.
+    target_link_libraries(mbdsdr PRIVATE ws2_32 psapi)
+endif()
 
 if(RTLSDR_FOUND)
     target_compile_definitions(mbdsdr PRIVATE HAVE_RTLSDR=1)
@@ -567,6 +579,9 @@ add_executable(test_rtl_tcp_protocol tests/test_rtl_tcp_protocol.cpp
     src/dsp/rtl_tcp_source.cpp src/dsp/device_capabilities.cpp)
 target_include_directories(test_rtl_tcp_protocol PRIVATE src)
 target_link_libraries(test_rtl_tcp_protocol PRIVATE Qt6::Test Qt6::Core)
+if(WIN32)
+    target_link_libraries(test_rtl_tcp_protocol PRIVATE ws2_32)
+endif()
 add_test(NAME rtl_tcp_protocol COMMAND test_rtl_tcp_protocol)
 
 # Offscreen end-to-end smoke over a POSIX loopback rtl_tcp (NOT HARDWARE):
@@ -596,8 +611,16 @@ set_tests_properties(e2e_smoke PROPERTIES SKIP_RETURN_CODE 77)
 # (exit code 0). No crash, no hang. On failure ctest captures the stderr log
 # (Qt default logging -> test output) which doubles as the crash log path.
 # The binary self-quits via QTimer::singleShot(1500) after grabbing the window.
-add_test(NAME startup_robustness
-    COMMAND sh -c "QT_QPA_PLATFORM=offscreen \"$<TARGET_FILE:mbdsdr>\" --snapshot \"${CMAKE_CURRENT_BINARY_DIR}/startup_snap.png\" && test -s \"${CMAKE_CURRENT_BINARY_DIR}/startup_snap.png\"")
+if(WIN32)
+  # No POSIX sh on Windows: the executable self-quits and returns non-zero when
+  # the snapshot fails; ctest treats that as a test failure.
+  add_test(NAME startup_robustness
+      COMMAND "$<TARGET_FILE:mbdsdr>" --snapshot
+              "${CMAKE_CURRENT_BINARY_DIR}/startup_snap.png")
+else()
+  add_test(NAME startup_robustness
+      COMMAND sh -c "QT_QPA_PLATFORM=offscreen \"$<TARGET_FILE:mbdsdr>\" --snapshot \"${CMAKE_CURRENT_BINARY_DIR}/startup_snap.png\" && test -s \"${CMAKE_CURRENT_BINARY_DIR}/startup_snap.png\"")
+endif()
 set_tests_properties(startup_robustness PROPERTIES
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
@@ -1428,6 +1451,7 @@ message(STATUS "MBDSDR C++ build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Qt6 version: ${Qt6Core_VERSION}")
 message(STATUS "Target: mbdsdr (dynamic Qt6 linking -- system Qt6 is shared)")
 
+if(NOT WIN32)
 add_executable(ui_shot_wfm tests/ui_screenshot_wfm.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_wfm PRIVATE src build/ui_shot_wfm_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_wfm PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
@@ -1461,6 +1485,7 @@ target_link_libraries(ui_shot_fftband PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::
 add_executable(ui_shot_task_steps tests/ui_screenshot_task_steps.cpp ${SHOT_SRCS} ${HEADERS})
 target_include_directories(ui_shot_task_steps PRIVATE src build/ui_shot_task_steps_autogen/include build/mbdsdr_autogen/include)
 target_link_libraries(ui_shot_task_steps PRIVATE Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+endif() # NOT WIN32 (developer-only offscreen screenshot harnesses, group 2)
 
 # M3 dual-protocol layer (OpenAI + Anthropic). Pure functions, no network.
 add_executable(test_llm_protocol tests/test_llm_protocol.cpp src/ai/llm_protocol.cpp)
