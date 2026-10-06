@@ -218,6 +218,17 @@ QString execGetStatus(const QJsonObject& /*args*/, dsp::SpectrumEngine* engine,
     o["frequency_hz"] = engine->centerFreq();
     o["mode"] = engine->demodMode();
     o["bandwidth_hz"] = engine->bandwidth();
+    // Phase55 block2: Costas carrier-lock snapshot of the selected VFO. On an
+    // analog (non-BPSK/QPSK) channel the engine returns an honest all-false
+    // lock status -- we never fabricate a lock.
+    const dsp::DigitalLockStatus lock = engine->digitalLockStatus();
+    o["carrier_locked"] = lock.carrierLocked;
+    o["symbol_locked"] = lock.symbolLocked;
+    o["evm_percent"] = lock.evmPercent;
+    // Phase55 block3: live Doppler compensation state via the UI control surface.
+    auto* surf = engine->dopplerControlSurface();
+    o["doppler_available"] = surf && surf->isDopplerCompensationAvailable();
+    o["doppler_enabled"] = surf && surf->isDopplerCompensationEnabled();
     o["summary"] = QString("频率=%1MHz 模式=%2 带宽=%3Hz 连接=%4")
         .arg(engine->centerFreq() / 1e6, 0, 'f', 3)
         .arg(engine->demodMode())
@@ -841,6 +852,31 @@ QString execGetSpectrumStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// Phase55 block3: toggle live satellite-pass Doppler auto-compensation through
+// the abstract surface MainWindow registers on the engine. No surface
+// (headless/test) -> honest "not available". The implementation re-checks the
+// station/capture preconditions, so a toggle without them stays off.
+QString execSetDopplerCompensation(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                                  const SourceInfo& src) {
+    QJsonObject o;
+    auto* surf = engine->dopplerControlSurface();
+    if (!surf) {
+        o["ok"] = false;
+        o["available"] = false;
+        o["error"] = QString::fromUtf8("多普勒补偿不可用（无 UI 控制面；需在桌面端设置本站并捕获过境）");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    const bool on = args.value("enable").toBool(false);
+    surf->setDopplerCompensationEnabled(on);
+    o["ok"] = true;
+    o["available"] = surf->isDopplerCompensationAvailable();
+    o["enabled"] = surf->isDopplerCompensationEnabled();
+    o["requested_enable"] = on;
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // The built-in tool registry: name -> executor. Learned (mechanism only) from
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
 // instead of an if-else chain. Clean-room reimplementation; no GPL code copied.
@@ -889,6 +925,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"set_fft_params", &execSetFftParams},
         {"set_color_map", &execSetColorMap},
         {"get_spectrum_status", &execGetSpectrumStatus},
+        {"set_doppler_compensation", &execSetDopplerCompensation},
     };
     return kTable;
 }

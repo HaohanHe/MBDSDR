@@ -219,6 +219,14 @@ public:
     // (panel "clear" / write command). No-op for an unknown id.
     void clearDigitalOutputs(int channelId);
 
+    // ---- Costas / carrier-lock read-out (Phase55 block2) ------------------
+    // Snapshot of the SELECTED channel's Costas loop lock status. When the
+    // selected channel is not a digital (BPSK/QPSK) mode, digitalDemod is null
+    // and we return a default DigitalLockStatus{carrierLocked=false,...} -- the
+    // honest "no carrier lock" state, never a fabricated lock. The engine takes
+    // sourceMutex_ around this; ControlHub / Agent get_status / UI read it.
+    DigitalLockStatus digitalLockStatus() const;
+
 private:
     std::vector<VfoChannel> channels_;
     int nextId_ = 1;

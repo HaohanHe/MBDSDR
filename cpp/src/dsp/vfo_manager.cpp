@@ -486,6 +486,15 @@ VorResult VfoManager::vorResult(int channelId) const {
     return VorResult{};
 }
 
+DigitalLockStatus VfoManager::digitalLockStatus() const {
+    // Honest empty state: no selected digital channel -> not locked. We never
+    // fabricate a carrier lock for an analog mode or a fresh channel.
+    if (const VfoChannel* c = selected()) {
+        if (c->digitalDemod) return c->lockStatus;
+    }
+    return DigitalLockStatus{};
+}
+
 void VfoManager::clearDigitalOutputs(int channelId) {
     VfoChannel* c = channel(channelId);
     if (!c) return;

@@ -169,6 +169,11 @@ MainWindow::MainWindow(QWidget* parent)
     // Engine must exist before UI construction: many widgets connect their
     // signals directly to engine slots while the panels are being built.
     engine_ = new dsp::SpectrumEngine(this);
+    // Phase55 block3: expose the live Doppler compensation loop to the control
+    // layer through the abstract surface (engine depends on the interface, not
+    // on MainWindow). The checkbox does not exist yet at this point, but the
+    // interface methods null-check it, so registration is safe here.
+    engine_->setDopplerControlSurface(this);
 
     // ---- Top bar (real elements only) ----
     auto* topBar = new QFrame;
@@ -4911,6 +4916,25 @@ void MainWindow::onDopplerCompToggled(bool on) {
         }
     }
     updateCaptureControls();
+}
+
+// Phase55 block3: DopplerControlSurface bridge. These are the programmatic
+// mirrors of the dopplerCompChk_ checkbox; the real precondition checks and the
+// 1 Hz loop live in onDopplerCompToggled / updateLiveSatellite, so a tool
+// toggle refuses honestly (un-checked) without a station / captured pass.
+void MainWindow::setDopplerCompensationEnabled(bool on) {
+    if (!dopplerCompChk_) return;
+    // setChecked fires toggled -> onDopplerCompToggled, which re-checks
+    // stationSet_/capturedIdx_ and un-checks itself if preconditions fail.
+    dopplerCompChk_->setChecked(on);
+}
+
+bool MainWindow::isDopplerCompensationEnabled() const {
+    return dopplerCompChk_ && dopplerCompChk_->isChecked();
+}
+
+bool MainWindow::isDopplerCompensationAvailable() const {
+    return stationSet_ && capturedIdx_ >= 0;
 }
 
 void MainWindow::updateCaptureControls() {

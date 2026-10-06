@@ -958,6 +958,11 @@ VorResult SpectrumEngine::vorResult(int channelId) const {
     return vfoManager_.vorResult(channelId);
 }
 
+DigitalLockStatus SpectrumEngine::digitalLockStatus() const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return vfoManager_.digitalLockStatus();
+}
+
 void SpectrumEngine::clearDigitalOutputs(int channelId) {
     QMutexLocker lk(&sourceMutex_);
     vfoManager_.clearDigitalOutputs(channelId);

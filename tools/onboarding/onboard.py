@@ -649,7 +649,7 @@ def _step_decode_ssdv_iq_ccsds(iq_path: str, r: StepResult, fs: float,
                                frame_bits: int, timing: str,
                                blind_cfo: bool = False, afc: bool = False,
                                notch_cw: bool = False, resync: bool = False,
-                               pll: bool = False) -> StepResult:
+                               pll: bool = False, soft: bool = False) -> StepResult:
     """SSDV over CCSDS 级联全链入口：复 IQ → demod → ASM → Viterbi(终态0)
     → 解扰 → RS → DSLWP 218B → ssdv_decoder → JPEG。
 
@@ -690,7 +690,8 @@ def _step_decode_ssdv_iq_ccsds(iq_path: str, r: StepResult, fs: float,
     from mbdsdr_ai.ccsds_ssdv import ccsds_iq_to_result
     res = ccsds_iq_to_result(iq, fs, symrate, frame_bits=frame_bits,
                              f_offset=foff, timing=timing,
-                             afc=afc, notch_cw=notch_cw, resync=resync, pll=pll)
+                             afc=afc, notch_cw=notch_cw, resync=resync, pll=pll,
+                             soft=soft)
     r.detail["n_demod_bits"] = res.n_demod_bits
     r.detail["n_asm_frames"] = res.n_asm_frames
     r.detail["rs_nerrors"] = res.rs_nerrors
@@ -755,6 +756,7 @@ def step_decode(
     ssdv_notch: bool = False,
     ssdv_resync: bool = False,
     ssdv_pll: bool = False,
+    ssdv_soft: bool = False,
 ) -> StepResult:
     """加载 SigMF IQ，按模式调用真实解码器。
 
@@ -780,7 +782,7 @@ def step_decode(
             return _step_decode_ssdv_iq_ccsds(
                 sigmf_data_path, r, sample_rate_hz, ssdv_symrate,
                 ssdv_tone_offset, ssdv_frame_bits, ssdv_timing, ssdv_blind_cfo,
-                ssdv_afc, ssdv_notch, ssdv_resync, ssdv_pll)
+                ssdv_afc, ssdv_notch, ssdv_resync, ssdv_pll, ssdv_soft)
         if ssdv_input == "iq":
             return _step_decode_ssdv_iq(
                 sigmf_data_path, r, sample_rate_hz, ssdv_symrate, ssdv_tone_offset)
@@ -1273,6 +1275,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="ssdv ccsds：多缓冲重同步(遮挡后重新 ASM 切窗)")
     ap.add_argument("--ssdv-pll", action="store_true",
                     help="ssdv ccsds：二阶 PLL 精相位跟踪(陡多普勒扫频,配 --ssdv-afc)")
+    ap.add_argument("--ssdv-soft", action="store_true",
+                    help="ssdv ccsds：软判决 Viterbi(欧氏距离/保留幅值,弱信号约3x MCU增益)")
     ap.add_argument("--json", action="store_true", help="机器可读 JSON 输出")
     ap.add_argument("--timeout", type=float, default=30.0,
                     help="子进程超时（秒）")
@@ -1397,6 +1401,7 @@ def main(argv: list[str] | None = None) -> int:
                     ssdv_notch=args.ssdv_notch,
                     ssdv_resync=args.ssdv_resync,
                     ssdv_pll=args.ssdv_pll,
+                    ssdv_soft=args.ssdv_soft,
                 )
                 dec.detail["sigmf_data"] = sigmf_data_path
                 results.append(dec)
