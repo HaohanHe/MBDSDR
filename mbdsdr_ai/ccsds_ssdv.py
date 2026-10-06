@@ -178,7 +178,8 @@ def _demod_resync(z: np.ndarray, fs: float, symrate: float, foff: float,
 def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
                        frame_bits: int, f_offset: Optional[float] = 0.0,
                        timing: str = "coarse", afc: bool = False,
-                       notch_cw: bool = False, resync: bool = False
+                       notch_cw: bool = False, resync: bool = False,
+                       pll: bool = False
                        ) -> CcsdsSsdvResult:
     """复 IQ → demod_bpsk → ASM 同步 → Viterbi → 解扰 → RS → 218B → DSLWP JPEG。
 
@@ -199,10 +200,13 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
         ``True`` = 先做 CW 对消（:func:`~mbdsdr_ai.ssdv_phy.notch_cw`）再解调。
     resync :
         ``True`` = 多缓冲重同步（:func:`_demod_resync`），遮挡后重新 ASM 搜索。
+    pll :
+        ``True`` = 在 AFC/下变频后加二阶 decision-directed PLL
+        （:func:`~mbdsdr_ai.ssdv_phy.pll_bpsk`）精相位跟踪，攻陡扫频残差。
 
     诚实空态：ASM 0 帧 / RS 全不可纠 / CRC 不过 → 结果计数全 0、jpeg 为空，不伪造。
     """
-    from .ssdv_phy import estimate_cfo_bpsk, afc_correct, notch_cw, demod_bpsk
+    from .ssdv_phy import estimate_cfo_bpsk, afc_correct, notch_cw, demod_bpsk, pll_bpsk
     out = CcsdsSsdvResult()
     z = iq
     if notch_cw:
@@ -214,6 +218,8 @@ def ccsds_iq_to_result(iq: np.ndarray, fs: float, symrate: float,
         foff, prom = estimate_cfo_bpsk(z, fs)
     else:
         foff = f_offset
+    if pll:
+        z = pll_bpsk(z, fs, symrate)
     out.cfo_est_hz = float(foff)
     if resync:
         bits = _demod_resync(z, fs, symrate, foff, timing)

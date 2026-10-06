@@ -158,6 +158,47 @@ def afc_correct(iq: np.ndarray, fs: float, symrate: float,
     return derot.astype(np.complex64), smooth
 
 
+# 二阶 PLL 具名门限（不硬编码活动参数；仅通用演示默认）。
+PLL_KP: float = 0.05                 # 比例支路增益（环路带宽粗调）
+PLL_KI: float = 0.002                # 积分支路增益（type-2，跟踪频斜）
+PLL_WARMUP: int = 200                # 环路建立前 NCO 相位冻结样本数（不输出误差）
+
+
+def pll_bpsk(iq: np.ndarray, fs: float, symrate: float,
+             kp: float = PLL_KP, ki: float = PLL_KI,
+             warmup: int = PLL_WARMUP) -> np.ndarray:
+    """二阶 decision-directed PLL 精载波恢复（干净室教科书实现）。
+
+    在分段 AFC 粗校正之后使用：AFC 把信号拉到零中频附近但残 ~Hz 频偏/频斜；
+    二阶 type-2 环路（比例 + 积分）对**频率斜升（多普勒斜率）稳态误差为零**，
+    正是攻 Phase52 陡扫频缺口的关键。
+
+    结构：NCO 相位累加器 θ[k] → 旋转输入 → BPSK 硬判决 d=sign(Re) →
+    鉴相误差 e = Im(rot)·d（d 抹除 BPSK 调制，等价乘方鉴相）→ 二阶环路滤波器
+    （积分器累加 ki·e，频率增量 = kp·e + integ）→ 更新 NCO 频率。
+
+    低 SNR 下鉴相噪声大、环路可能失锁；本函数诚实输出旋转后信号，由下游
+    ASM/RS/CRC 把关（不伪造）。
+    """
+    z = np.asarray(iq, dtype=np.complex128)
+    n = z.size
+    out = np.empty(n, dtype=np.complex128)
+    theta = 0.0
+    integ = 0.0
+    for k in range(n):
+        rot = z[k] * np.exp(-1j * theta)
+        out[k] = rot
+        if k < warmup:
+            # 建立期：不累计误差，仅自由旋转到粗相位
+            theta += kp * 0.0
+            continue
+        d = 1.0 if rot.real >= 0.0 else -1.0
+        e = rot.imag * d
+        integ += ki * e
+        theta += kp * e + integ
+    return out.astype(np.complex64)
+
+
 def notch_cw(iq: np.ndarray, fs: float, symrate: float,
              gate: float = NOTCH_GATE, local_bins: int = NOTCH_LOCAL_BINS
              ) -> tuple[np.ndarray, list]:

@@ -12,8 +12,10 @@
 #include <QString>
 #include <QStringList>
 #include <QTimer>
+#include <QElapsedTimer>
 
 #include "core/tokens.h"
+#include "heap_probe.h"
 #include "ui/main_window.h"
 
 static void printHelp() {
@@ -88,6 +90,24 @@ int main(int argc, char** argv) {
     QApplication::setApplicationName("mbdsdr");
     QApplication::setApplicationVersion("0.2.0");
 
+    // Phase53 block3: optional startup-phase timing (off unless
+    // MBDSDR_STARTUP_PROFILE=1). Prints wall-clock ms for each init phase so the
+    // slow step can be found and optimized with before/after numbers.
+    QElapsedTimer bootTimer;
+    const bool profileBoot = qgetenv("MBDSDR_STARTUP_PROFILE") == "1";
+    qint64 bootMark = 0;
+    auto bootPhase = [&](const char* name) {
+        if (!profileBoot) return;
+        const qint64 now = bootTimer.nsecsElapsed() / 1000000;
+        qInfo().noquote() << QString("[bootprofile] %1: %2 ms (+%3)")
+                                 .arg(QString::fromLatin1(name))
+                                 .arg(now)
+                                 .arg(now - bootMark);
+        bootMark = now;
+    };
+    if (profileBoot) bootTimer.start();
+    bootPhase("qapp_created");
+
     // Single-instance guard: a second launch must not open a second
     // SpectrumEngine and fight over the same RTL-SDR handle/port. The lock is
     // a stack object living for the whole process and is released automatically
@@ -109,6 +129,7 @@ int main(int argc, char** argv) {
         qWarning() << "[mbdsdr] another instance is already running; exiting.";
         return 0;
     }
+    bootPhase("single_instance_lock");
 
     // Restore persisted UI scale before building the stylesheet; a --scale on
     // the command line wins for this run (automation hooks only, no write-back).
@@ -122,6 +143,7 @@ int main(int argc, char** argv) {
     }
     // Apply dark QSS translated from desktop/tokens.py
     app.setStyleSheet(mbdsdr::tokens::buildDarkQss());
+    bootPhase("stylesheet_applied");
 
     // The synthetic test source is an explicit debugging opt-in. The engine
     // (built inside MainWindow) honors MBDSDR_TEST_SOURCE=1 in its constructor;
@@ -134,8 +156,17 @@ int main(int argc, char** argv) {
                    "(debugging only, not real reception)";
     }
 
+    // Phase53 block2: optional heap allocation probe. Off unless
+    // MBDSDR_HEAP_PROBE=1; prints live/total allocation count every 10 s so a
+    // slow C++ object leak can be told apart from glibc RSS retention without a
+    // heavyweight profiler.
+    if (qgetenv("MBDSDR_HEAP_PROBE") == "1") {
+        mbdsdr::probe::installPrinter();
+    }
+
     mbdsdr::MainWindow win;
     win.show();
+    bootPhase("mainwindow_shown");
 
     if (!cliSnapshot.isEmpty()) {
         // Offscreen-verifiable render: wait one paint cycle, save, exit.

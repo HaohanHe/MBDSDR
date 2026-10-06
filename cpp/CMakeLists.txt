@@ -231,6 +231,9 @@ set(HEADERS
 
 add_executable(mbdsdr ${SOURCES} ${HEADERS})
 target_include_directories(mbdsdr PRIVATE src)
+# Phase53 block2: lightweight heap allocation-counting probe (mbdsdr target ONLY,
+# so test executables are untouched and ctest 129 does not relink/regress).
+target_sources(mbdsdr PRIVATE src/heap_probe.cpp)
 
 # Offscreen screenshot tool (reuses all sources except main.cpp).
 set(SHOT_SRCS ${SOURCES})
