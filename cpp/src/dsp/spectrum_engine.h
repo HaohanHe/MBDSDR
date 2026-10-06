@@ -463,6 +463,40 @@ protected:
     void run() override;
 
 private:
+    // ---- Asynchronous control mailbox ------------------------------------
+    // Hardware / shared-state set commands must NOT run on the caller's thread
+    // (the GUI thread, when a user clicks the panadapter or drags a slider):
+    // taking sourceMutex_ there contends with the run() loop, and the actual
+    // USB tuning (especially slow tuners like FC0012) then blocks/freezes the
+    // UI. Instead every set command only records its LATEST value + a dirty bit
+    // under the lightweight ctrlMutex_ and returns immediately; the run() loop
+    // drains and applies them ON THE ENGINE THREAD (which already owns the
+    // device and holds sourceMutex_). High-frequency drags naturally coalesce
+    // to the newest value. GUI and headless/Agent callers share this one path.
+    struct PendingControls {
+        double centerFreqHz = 0.0;   bool dCenterFreq = false;
+        double sampleRateHz = 0.0;   bool dSampleRate = false;
+        double gainDb = 0.0;         bool dGain = false;
+        QString demodMode;           bool dDemodMode = false;
+        double bandwidthHz = 0.0;    bool dBandwidth = false;
+        int directSampling = 0;      bool dDirectSampling = false;
+        bool offsetTuning = false;   bool dOffsetTuning = false;
+        bool rtlAgc = false;         bool dRtlAgc = false;
+        bool tunerAgc = false;       bool dTunerAgc = false;
+        bool biasTee = false;        bool dBiasTee = false;
+        double ppm = 0.0;            bool dPpm = false;
+        bool any() const {
+            return dCenterFreq || dSampleRate || dGain || dDemodMode ||
+                   dBandwidth || dDirectSampling || dOffsetTuning || dRtlAgc ||
+                   dTunerAgc || dBiasTee || dPpm;
+        }
+    };
+    QMutex ctrlMutex_;
+    PendingControls pending_;
+    // Called by run() while holding sourceMutex_: drains pending_ and applies
+    // every command to the hardware / engine state on the engine thread.
+    void applyControlCommandsLocked();
+
     std::unique_ptr<ISource> source_;
     IQFrontend frontend_;
     VfoManager vfoManager_;

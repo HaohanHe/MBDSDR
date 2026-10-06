@@ -170,45 +170,33 @@ std::vector<double> SpectrumEngine::availableGainsDb() const {
 }
 
 void SpectrumEngine::onSetCenterFreq(double f) {
-    QMutexLocker lk(&sourceMutex_);
     // Honest guard: a non-positive / non-finite frequency would drive the
-    // tuner and every downstream mixer into NaN. Ignore it rather than emit
+    // tuner and every downstream mixer into NaN. Ignore it rather than queue
     // a bogus tune (the caller keeps its previous value).
     if (!(f > 0.0) || !std::isfinite(f)) return;
-    if (source_) source_->setCenterFreq(f);
-    // Tuning the receiver moves the SELECTED VFO with it (kept at offset 0),
-    // exactly like the legacy single-channel receiver. Other VFOs keep their
-    // absolute frequencies and just see a different relative offset.
-    if (VfoChannel* sel = vfoManager_.selected()) {
-        sel->freqHz = f;
-    }
-    emit vfoListChanged();
+    // Enqueue only: the engine thread applies the tuning (see
+    // applyControlCommandsLocked) so the caller's thread never blocks on USB.
+    QMutexLocker lk(&ctrlMutex_);
+    pending_.centerFreqHz = f;
+    pending_.dCenterFreq = true;
 }
 void SpectrumEngine::onSetSampleRate(double r) {
-    QMutexLocker lk(&sourceMutex_);
     // Guard against bogus rates (<=0 / NaN / absurdly high) reaching the
     // channelizer and the rtl_tcp setSampleRate command.
     if (!(r > 0.0) || !std::isfinite(r) || r > 32e6) return;
-    if (source_) source_->setSampleRate(r);
-    // Sample rate feeds every channelizer; rebuild all channels on next loop.
-    vfoManager_.sourceRateChanged();
-    needDemodReset_.store(true);
+    QMutexLocker lk(&ctrlMutex_);
+    pending_.sampleRateHz = r;
+    pending_.dSampleRate = true;
 }
 void SpectrumEngine::onSetGain(double g) {
-    QMutexLocker lk(&sourceMutex_);
-    if (source_) source_->setGain(g);
+    QMutexLocker lk(&ctrlMutex_);
+    pending_.gainDb = g;
+    pending_.dGain = true;
 }
 void SpectrumEngine::setDemodMode(const QString& m) {
-    QMutexLocker lk(&sourceMutex_);
-    // Drive the SELECTED VFO's mode (which also resets its bandwidth to the
-    // mode default), keeping the legacy demodMode_/bandwidth_ caches in sync.
-    vfoManager_.setMode(vfoManager_.selectedId(), m);
-    if (const VfoChannel* sel = vfoManager_.selected()) {
-        demodMode_ = sel->mode;
-        bandwidth_ = sel->bandwidthHz;
-    }
-    needDemodReset_.store(true);
-    emit vfoListChanged();
+    QMutexLocker lk(&ctrlMutex_);
+    pending_.demodMode = m;
+    pending_.dDemodMode = true;
 }
 void SpectrumEngine::setSquelchThreshold(float db) {
     squelchThreshold_ = db;        // cache for read-back (Squelch has no getter)
@@ -651,12 +639,9 @@ void SpectrumEngine::setNetworkAudioSink(std::unique_ptr<IAudioSink> tap) {
 }
 
 void SpectrumEngine::setBandwidth(double hz) {
-    QMutexLocker lk(&sourceMutex_);
-    bandwidth_ = hz;
-    vfoManager_.setBandwidth(vfoManager_.selectedId(), hz);
-    // The channel filter cutoff depends on bandwidth; rebuild on next loop.
-    needDemodReset_.store(true);
-    emit vfoListChanged();
+    QMutexLocker lk(&ctrlMutex_);
+    pending_.bandwidthHz = hz;
+    pending_.dBandwidth = true;
 }
 
 QString SpectrumEngine::expandRecTemplate() const {
@@ -969,34 +954,34 @@ void SpectrumEngine::clearDigitalOutputs(int channelId) {
 }
 
 void SpectrumEngine::setDirectSampling(int mode) {
-    cachedDirectSampling_ = mode;
-    QMutexLocker lk(&sourceMutex_);
-    if (source_) source_->setDirectSampling(mode);
+    QMutexLocker lk(&ctrlMutex_);
+    pending_.directSampling = mode;
+    pending_.dDirectSampling = true;
 }
 void SpectrumEngine::setOffsetTuning(bool on) {
-    cachedOffsetTuning_ = on;
-    QMutexLocker lk(&sourceMutex_);
-    if (source_) source_->setOffsetTuning(on);
+    QMutexLocker lk(&ctrlMutex_);
+    pending_.offsetTuning = on;
+    pending_.dOffsetTuning = true;
 }
 void SpectrumEngine::setRtlAgc(bool on) {
-    cachedRtlAgc_ = on;
-    QMutexLocker lk(&sourceMutex_);
-    if (source_) source_->setRtlAgc(on);
+    QMutexLocker lk(&ctrlMutex_);
+    pending_.rtlAgc = on;
+    pending_.dRtlAgc = true;
 }
 void SpectrumEngine::setTunerAgc(bool on) {
-    cachedTunerAgc_ = on;
-    QMutexLocker lk(&sourceMutex_);
-    if (source_) source_->setTunerAgc(on);
+    QMutexLocker lk(&ctrlMutex_);
+    pending_.tunerAgc = on;
+    pending_.dTunerAgc = true;
 }
 void SpectrumEngine::setBiasTee(bool on) {
-    cachedBiasTee_ = on;
-    QMutexLocker lk(&sourceMutex_);
-    if (source_) source_->setBiasTee(on);
+    QMutexLocker lk(&ctrlMutex_);
+    pending_.biasTee = on;
+    pending_.dBiasTee = true;
 }
 void SpectrumEngine::setPpm(double ppm) {
-    cachedPpm_ = ppm;
-    QMutexLocker lk(&sourceMutex_);
-    if (source_) source_->setPpm(ppm);
+    QMutexLocker lk(&ctrlMutex_);
+    pending_.ppm = ppm;
+    pending_.dPpm = true;
 }
 
 void SpectrumEngine::setWindowType(int w) {
@@ -1021,6 +1006,79 @@ bool SpectrumEngine::noiseBlankerEnabled() const { return noiseBlanker_.enabled(
 int SpectrumEngine::windowType() const { return static_cast<int>(powerSpectrum_.window()); }
 int SpectrumEngine::averageMode() const { return static_cast<int>(powerSpectrum_.average()); }
 
+// Drains the asynchronous control mailbox and applies every command ON THE
+// ENGINE THREAD. Called from run() while sourceMutex_ is held, so the device
+// and all shared engine state are touched here -- never on a caller's thread.
+void SpectrumEngine::applyControlCommandsLocked() {
+    PendingControls p;
+    {
+        QMutexLocker lk(&ctrlMutex_);
+        if (!pending_.any()) return;
+        p = pending_;
+        pending_ = PendingControls{};
+    }
+
+    bool vfoChanged = false;
+
+    if (p.dCenterFreq) {
+        if (source_) source_->setCenterFreq(p.centerFreqHz);
+        // Tuning moves the SELECTED VFO with it (kept at offset 0), like the
+        // legacy single-channel receiver; other VFOs keep absolute frequencies.
+        if (VfoChannel* sel = vfoManager_.selected()) sel->freqHz = p.centerFreqHz;
+        vfoChanged = true;
+    }
+    if (p.dSampleRate) {
+        if (source_) source_->setSampleRate(p.sampleRateHz);
+        vfoManager_.sourceRateChanged();
+        needDemodReset_.store(true);
+    }
+    if (p.dGain) {
+        if (source_) source_->setGain(p.gainDb);
+    }
+    if (p.dDemodMode) {
+        vfoManager_.setMode(vfoManager_.selectedId(), p.demodMode);
+        if (const VfoChannel* sel = vfoManager_.selected()) {
+            demodMode_ = sel->mode;
+            bandwidth_ = sel->bandwidthHz;
+        }
+        needDemodReset_.store(true);
+        vfoChanged = true;
+    }
+    if (p.dBandwidth) {
+        bandwidth_ = p.bandwidthHz;
+        vfoManager_.setBandwidth(vfoManager_.selectedId(), p.bandwidthHz);
+        // The channel filter cutoff depends on bandwidth; rebuild on next loop.
+        needDemodReset_.store(true);
+        vfoChanged = true;
+    }
+    if (p.dDirectSampling) {
+        cachedDirectSampling_ = p.directSampling;
+        if (source_) source_->setDirectSampling(p.directSampling);
+    }
+    if (p.dOffsetTuning) {
+        cachedOffsetTuning_ = p.offsetTuning;
+        if (source_) source_->setOffsetTuning(p.offsetTuning);
+    }
+    if (p.dRtlAgc) {
+        cachedRtlAgc_ = p.rtlAgc;
+        if (source_) source_->setRtlAgc(p.rtlAgc);
+    }
+    if (p.dTunerAgc) {
+        cachedTunerAgc_ = p.tunerAgc;
+        if (source_) source_->setTunerAgc(p.tunerAgc);
+    }
+    if (p.dBiasTee) {
+        cachedBiasTee_ = p.biasTee;
+        if (source_) source_->setBiasTee(p.biasTee);
+    }
+    if (p.dPpm) {
+        cachedPpm_ = p.ppm;
+        if (source_) source_->setPpm(p.ppm);
+    }
+
+    if (vfoChanged) emit vfoListChanged();
+}
+
 void SpectrumEngine::run() {
     std::vector<std::complex<float>> iq;
     iq.resize(static_cast<std::size_t>(fftSize_.load()));
@@ -1035,6 +1093,10 @@ void SpectrumEngine::run() {
         int n = fftSize_.load();
 
         QMutexLocker lk(&sourceMutex_);
+
+        // Apply queued set commands on THIS (engine) thread before touching the
+        // device, so GUI/headless callers never block on USB tuning.
+        applyControlCommandsLocked();
 
         if (needDemodReset_.load()) { rebuildDemod(); needDemodReset_.store(false); }
 

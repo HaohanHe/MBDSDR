@@ -61,10 +61,10 @@ protected:
     // daemon sends immediately on accept. Tolerates a missing header (mock /
     // legacy server) without stalling connect().
     void readDongleInfo();
-    void setFdBlocking(bool blocking);
+    void setFdBlocking(qintptr fd, bool blocking);
     QString host_;
     quint16 port_;
-    std::atomic<int> fd_{-1};       // native fd; -1 = closed
+    std::atomic<qintptr> fd_{-1};   // native socket; -1 = closed (qintptr fits SOCKET)
     std::atomic<bool> eof_{false};  // peer closed / reset detected
     QString lastError_;
     double freqHz_ = 98.5e6;
