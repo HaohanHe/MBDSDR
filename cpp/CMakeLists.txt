@@ -560,6 +560,15 @@ target_include_directories(test_spyserver_server PRIVATE src)
 target_link_libraries(test_spyserver_server PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME spyserver_server COMMAND test_spyserver_server)
 
+# Phase58 block2: rtl_tcp wire-protocol unit test against a local POSIX loopback
+# mock. Tests command-frame byte layout (5B = cmd + u32 BE param), RTL0 handshake
+# parsing, and honest connection-refusal. No engine/audio -> runs green headless.
+add_executable(test_rtl_tcp_protocol tests/test_rtl_tcp_protocol.cpp
+    src/dsp/rtl_tcp_source.cpp src/dsp/device_capabilities.cpp)
+target_include_directories(test_rtl_tcp_protocol PRIVATE src)
+target_link_libraries(test_rtl_tcp_protocol PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME rtl_tcp_protocol COMMAND test_rtl_tcp_protocol)
+
 # Offscreen end-to-end smoke over a POSIX loopback rtl_tcp (NOT HARDWARE):
 # handshake + deterministic tone IQ -> engine frames flow, spectrum lights up,
 # settings read back, illegal freq/rate honestly ignored.

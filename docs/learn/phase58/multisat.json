@@ -1,0 +1,30 @@
+[
+  {
+    "catnr": 25544,
+    "status": "OK",
+    "epoch": "26278.04655461",
+    "peak_doppler_hz": 8614.0,
+    "max_rate_hz_s": 71.61,
+    "asm": 1,
+    "mcu": 36,
+    "mcu_tot": 36,
+    "per_frame_swing_hz": 124.3
+  },
+  {
+    "catnr": 33591,
+    "status": "OK",
+    "epoch": "26278.26498741",
+    "peak_doppler_hz": 9072.6,
+    "max_rate_hz_s": 56.38,
+    "asm": 1,
+    "mcu": 36,
+    "mcu_tot": 36,
+    "per_frame_swing_hz": 97.9
+  },
+  {
+    "catnr": 25338,
+    "status": "NO_PASS",
+    "epoch": "26278.25723109",
+    "reason": "未来90min无过境（诚实空态，不伪造）"
+  }
+]
