@@ -7,6 +7,9 @@
 //   * no-device state -> empty option list (honest empty state)
 #include <QtTest>
 #include "dsp/device_capabilities.h"
+// wingdi.h #define's DeviceCapabilities to DeviceCapabilitiesW; undef so the
+// project's DeviceCapabilities type resolves (harmless when the macro is absent).
+#undef DeviceCapabilities
 
 using namespace mbdsdr::dsp;
 

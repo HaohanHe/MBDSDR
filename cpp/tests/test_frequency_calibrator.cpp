@@ -14,6 +14,10 @@
 
 #include <QtTest/QtTest>
 
+#include <QCoreApplication>
+#include <QDir>
+#include <QSettings>
+
 #include <complex>
 #include <cmath>
 #include <random>
@@ -61,6 +65,7 @@ CalibratorConfig configFor(double Fc, double expectedBb) {
 class TestFrequencyCalibrator : public QObject {
     Q_OBJECT
 private slots:
+    void initTestCase();
     void handheld_plus32_recoversAndResidualZero();
     void manual_minus20_recovers();
     void gsmFcch_plus32_recovers();
@@ -165,6 +170,19 @@ void TestFrequencyCalibrator::confidenceAndSpread_areSane() {
     QVERIFY2(r.spreadPpm < 1.0,
              qPrintable(QString("spread %1 should be sub-ppm").arg(r.spreadPpm)));
     QVERIFY2(r.measurementsUsed == 4, "all four clean segments must be accepted");
+}
+
+void TestFrequencyCalibrator::initTestCase() {
+    // Default QSettings under QTEST_MAIN has no org/app name and Windows
+    // NativeFormat (registry) ignores setPath and rejects empty keys. Isolate to
+    // a PID-unique IniFormat dir (honors setPath on every platform).
+    const QString cfg = QDir::tempPath() + "/mbdsdr_cfg_freqcal_" +
+                        QString::number(QCoreApplication::applicationPid());
+    QDir().mkpath(cfg);
+    QCoreApplication::setOrganizationName("MBDSDR");
+    QCoreApplication::setApplicationName("MBDSDR");
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, cfg);
 }
 
 void TestFrequencyCalibrator::settingRoundtrip_andRefName() {

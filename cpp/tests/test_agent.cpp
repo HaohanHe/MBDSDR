@@ -22,6 +22,7 @@ using namespace mbdsdr;
 class TestAgent : public QObject {
     Q_OBJECT
 private slots:
+    void initTestCase();
     void testToolParse();
     void testTuneTool();
     void testModeTool();
@@ -47,6 +48,20 @@ private slots:
     void manualMode_gatesApplyCorrection();
     void manualMode_allowsCalibrateRead();
 };
+
+void TestAgent::initTestCase() {
+    // Default QSettings has no org/app name; Windows NativeFormat (registry)
+    // ignores setPath and rejects empty keys, so apply_frequency_correction's
+    // savePpmSetting would be silently dropped. Isolate to a PID-unique
+    // IniFormat dir (honors setPath on every platform).
+    const QString cfg = QDir::tempPath() + "/mbdsdr_cfg_agent_" +
+                        QString::number(QCoreApplication::applicationPid());
+    QDir().mkpath(cfg);
+    QCoreApplication::setOrganizationName("MBDSDR");
+    QCoreApplication::setApplicationName("MBDSDR");
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, cfg);
+}
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();

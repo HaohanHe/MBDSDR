@@ -96,7 +96,7 @@ void TestPlaybackLoopback::exportDecodeTextRoundTrip() {
 
     const QString p = dir + "/decode_test.txt";
     QFile f(p);
-    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+    QVERIFY(f.open(QIODevice::WriteOnly));
     f.write(decoded.toUtf8());
     f.close();
 

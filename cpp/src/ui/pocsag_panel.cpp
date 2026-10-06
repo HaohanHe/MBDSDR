@@ -42,6 +42,12 @@ PocsagPanel::PocsagPanel(QWidget* parent) : QWidget(parent) {
     header->setSpacing(tokens::scaled(tokens::kSpacingM));
     auto* hint = new QLabel(QStringLiteral("寻呼解码 · POCSAG 1200"), this);
     hint->setObjectName("monoInfo");
+    // Cross-platform narrow-rail: a non-wrapping QLabel reports its full text
+    // width as its minimum (wider on Windows fonts) and would force the header
+    // (title + clear button) past the rail. Let it shrink/elide; it still takes
+    // the leftover space when wide (stretch 1).
+    hint->setSizePolicy(QSizePolicy::Ignored, hint->sizePolicy().verticalPolicy());
+    hint->setMinimumWidth(0);
     header->addWidget(hint, 1);
     clearBtn_ = new QPushButton(QStringLiteral("清空"), this);
     clearBtn_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));

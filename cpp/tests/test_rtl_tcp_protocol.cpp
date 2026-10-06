@@ -13,14 +13,45 @@
 #include <QtTest/QtTest>
 
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <thread>
 #include <vector>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+// wingdi.h #define's DeviceCapabilities to DeviceCapabilitiesW; undef so the
+// project's DeviceCapabilities type (used below) resolves.
+#  undef DeviceCapabilities
+using rawsock = SOCKET;
+const rawsock kRawInvalid = INVALID_SOCKET;
+inline int  rawErr() { return WSAGetLastError(); }
+inline void rawClose(rawsock s) { ::closesocket(s); }
+constexpr int kRawNoSignal = 0;
+constexpr int kRawShutBoth = SD_BOTH;
+// One-time Winsock init (WSAStartup); the production source does this itself,
+// but the in-test mock server creates sockets directly and must init the stack.
+inline void ensureRawStack() {
+    static const bool kInit = [] {
+        WSADATA data;
+        return WSAStartup(MAKEWORD(2, 2), &data) == 0;
+    }();
+    (void)kInit;
+}
+#else
+#  include <arpa/inet.h>
+#  include <netinet/in.h>
+#  include <sys/socket.h>
+#  include <unistd.h>
+using rawsock = int;
+constexpr rawsock kRawInvalid = -1;
+inline int  rawErr() { return errno; }
+inline void rawClose(rawsock s) { ::close(s); }
+constexpr int kRawNoSignal = MSG_NOSIGNAL;
+constexpr int kRawShutBoth = SHUT_RDWR;
+inline void ensureRawStack() {}
+#endif
 
 #include "dsp/rtl_tcp_source.h"
 
@@ -35,19 +66,25 @@ class MockRtlTcpServer {
 public:
     ~MockRtlTcpServer() { stop(); }
     bool listen() {
-        int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (fd < 0) return false;
+        ensureRawStack();
+        rawsock fd = ::socket(AF_INET, SOCK_STREAM, 0);
+        if (fd == kRawInvalid) return false;
         int one = 1;
-        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,
+                   reinterpret_cast<const char*>(&one), sizeof(one));
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         addr.sin_port = 0;
-        if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-            ::close(fd); return false;
+        if (::bind(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+            rawClose(fd); return false;
         }
-        if (::listen(fd, 1) < 0) { ::close(fd); return false; }
+        if (::listen(fd, 1) != 0) { rawClose(fd); return false; }
+#ifdef _WIN32
+        int alen = sizeof(addr);
+#else
         socklen_t alen = sizeof(addr);
+#endif
         ::getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &alen);
         listenFd_ = fd;
         port_ = ntohs(addr.sin_port);
@@ -63,14 +100,20 @@ public:
     }
     void stop() {
         stop_ = true;
-        if (listenFd_ >= 0) { ::shutdown(listenFd_, SHUT_RDWR); ::close(listenFd_); listenFd_ = -1; }
-        if (clientFd_ >= 0) { ::shutdown(clientFd_, SHUT_RDWR); ::close(clientFd_); clientFd_ = -1; }
+        if (listenFd_ != kRawInvalid) {
+            ::shutdown(listenFd_, kRawShutBoth); rawClose(listenFd_);
+            listenFd_ = kRawInvalid;
+        }
+        if (clientFd_ != kRawInvalid) {
+            ::shutdown(clientFd_, kRawShutBoth); rawClose(clientFd_);
+            clientFd_ = kRawInvalid;
+        }
         if (thread_.joinable()) thread_.join();
     }
 private:
     void run() {
-        int c = ::accept(listenFd_, nullptr, nullptr);
-        if (c < 0) return;
+        rawsock c = ::accept(listenFd_, nullptr, nullptr);
+        if (c == kRawInvalid) return;
         clientFd_ = c;
         // Send the 12-byte RTL0 dongle-info header (R820T: tuner=5, gains=29).
         unsigned char hdr[12];
@@ -78,14 +121,15 @@ private:
         const quint32 tuner = 5, gains = 29;
         for (int i = 0; i < 4; ++i) hdr[4 + i] = (tuner >> (24 - 8*i)) & 0xff;
         for (int i = 0; i < 4; ++i) hdr[8 + i] = (gains >> (24 - 8*i)) & 0xff;
-        ::send(c, reinterpret_cast<const char*>(hdr), 12, MSG_NOSIGNAL);
+        ::send(c, reinterpret_cast<const char*>(hdr), 12, kRawNoSignal);
 
         // Drain 5-byte command frames until the client stops / closes.
         unsigned char buf[5];
         while (!stop_.load()) {
-            ssize_t got = 0;
+            int got = 0;
             while (got < 5) {
-                ssize_t n = ::recv(c, reinterpret_cast<char*>(buf) + got, 5 - got, 0);
+                const int n = static_cast<int>(::recv(
+                    c, reinterpret_cast<char*>(buf) + got, 5 - got, 0));
                 if (n <= 0) { stop_.store(true); return; }
                 got += n;
             }
@@ -93,7 +137,7 @@ private:
             frames_.push_back({buf[0], buf[1], buf[2], buf[3], buf[4]});
         }
     }
-    int listenFd_ = -1, clientFd_ = -1;
+    rawsock listenFd_ = kRawInvalid, clientFd_ = kRawInvalid;
     std::atomic<bool> stop_{false};
     std::thread thread_;
     quint16 port_ = 0;

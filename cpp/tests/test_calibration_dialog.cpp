@@ -106,7 +106,12 @@ private slots:
     void init() {
         // Isolate QSettings so apply/save does not touch the real user config.
         tmp_ = new QTemporaryDir;
-        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+        // Windows NativeFormat = registry (setPath ignored, empty org unwritable);
+        // IniFormat honors setPath on every platform.
+        QCoreApplication::setOrganizationName("MBDSDR");
+        QCoreApplication::setApplicationName("MBDSDR");
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            tmp_->path());
         dlg_ = new CalibrationDialog;
     }

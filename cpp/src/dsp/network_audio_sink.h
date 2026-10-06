@@ -32,6 +32,8 @@
 
 #include "iaudio_sink.h"
 
+#include <QtGlobal>
+
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -105,9 +107,10 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> stopAccept_{false};
 
-    int sendFd_ = -1;          // UDP: connected datagram socket
-    int listenFd_ = -1;        // TCP: listening socket
-    std::atomic<int> clientFd_{-1};  // TCP: currently attached client
+    qintptr sendFd_ = -1;      // UDP: connected datagram socket
+    qintptr listenFd_ = -1;    // TCP: listening socket
+    std::atomic<qintptr> clientFd_{-1};  // TCP: currently attached client
+    // qintptr fits both a POSIX int fd and a Winsock SOCKET (UINT_PTR).
     std::thread acceptThread_;
 
     // Guards fd lifecycle in start()/stop() against the DSP write() path.

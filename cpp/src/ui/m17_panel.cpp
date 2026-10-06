@@ -66,6 +66,8 @@ M17Panel::M17Panel(QWidget* parent) : QWidget(parent) {
     header->setSpacing(tokens::scaled(tokens::kSpacingM));
     auto* hint = new QLabel(QStringLiteral("数字呼叫 · m17 4800 4FSK"), this);
     hint->setObjectName("monoInfo");
+    hint->setSizePolicy(QSizePolicy::Ignored, hint->sizePolicy().verticalPolicy());
+    hint->setMinimumWidth(0);
     header->addWidget(hint, 1);
     clearBtn_ = new QPushButton(QStringLiteral("清空"), this);
     clearBtn_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));

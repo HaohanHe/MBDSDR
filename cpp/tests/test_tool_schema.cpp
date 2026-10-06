@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 35);
+    QCOMPARE(specs.size(), 37);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -252,6 +252,17 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"get_spectrum_status",
          QString::fromUtf8(
             "只读：返回频谱当前参数（fft_size/window/average）真实值。")},
+        // Phase55/58: two appended tools (must match tool_schema.cpp on-wire order).
+        {"set_doppler_compensation",
+         QString::fromUtf8(
+            "写入：开关过境实时多普勒自动补偿（1Hz TLE 距离率重调 VFO）。"
+            "需已设置本站位置并捕获一个过境，否则保持关闭（诚实拒绝）。"
+            "属于写动作，手动模式下被拦截。")},
+        {"connect_network_source",
+         QString::fromUtf8(
+            "写入：连接 rtl_tcp 网络接收机（host/port）。"
+            "真实 TCP 握手+RTL0 设备头；失败返回真实 socket 原因并回到空态，不伪造 IQ。"
+            "属于写动作，手动模式下被拦截。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {
@@ -293,7 +304,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
     const QString doc = generateToolDocumentation();
     QVERIFY(!doc.isEmpty());
 
-    // Every one of the 35 tools appears as its own "## <name>" block.
+    // Every one of the 37 tools appears as its own "## <name>" block.
     int headerCount = 0;
     for (const ToolSchemaSpec& s : specs) {
         QVERIFY2(doc.contains(QString("## %1 ").arg(s.name)), qPrintable(s.name));
@@ -308,7 +319,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 35);
+    QCOMPARE(headerCount, 37);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

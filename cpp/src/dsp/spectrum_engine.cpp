@@ -6,6 +6,7 @@
 #include "file_source.h"
 #include "power_spectrum.h"
 #include "noise_blanker.h"
+#include "null_audio_sink.h"
 #include "core/tokens.h"
 
 #include <QDebug>
@@ -78,7 +79,17 @@ SpectrumEngine::SpectrumEngine(QObject* parent) : QThread(parent) {
     // The initial state is emitted once in run(), after connections are wired.
 
     audioOut_ = new AudioOutput(this);
-    audioSink_ = audioOut_;   // default: real device playback
+    // Headless/automated runs must never open a real render device: an offscreen
+    // platform or an explicit MBDSDR_NULL_AUDIO routes the write path to a sink
+    // that discards (the real QtAudioSink is built lazily on first write, so it
+    // is never created here). Squelch/demod logic is untouched -- only the
+    // render endpoint is muted, so no demod hiss reaches a speaker.
+    if (qgetenv("MBDSDR_NULL_AUDIO") == "1" ||
+        qgetenv("QT_QPA_PLATFORM").contains("offscreen")) {
+        testSink_ = std::make_unique<NullAudioSink>();
+    }
+    audioSink_ = testSink_ ? testSink_.get()
+                           : static_cast<IAudioSink*>(audioOut_);
     // AGC operating point from the named tokens: drive recovered audio toward the
     // target, but CEIL the boost so an idle noise floor is not blasted to
     // listening volume (the real "sandpaper hiss" fault).
@@ -147,8 +158,17 @@ void SpectrumEngine::setFftSize(int n) {
 void SpectrumEngine::shutdown() { running_.store(false); }
 
 double SpectrumEngine::centerFreq() const {
+    // Async tuning (mailbox) means the source LO can lag the commanded value by
+    // one engine tick. Report a pending command immediately (the dial/source is
+    // driven to exactly this value on the next loop); otherwise read the LO.
+    double pendingHz = 0.0;
+    {
+        QMutexLocker cl(&const_cast<QMutex&>(ctrlMutex_));
+        if (pending_.dCenterFreq) pendingHz = pending_.centerFreqHz;
+    }
     QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
-    return source_ ? source_->centerFreq() : 0.0;
+    const double actual = source_ ? source_->centerFreq() : 0.0;
+    return pendingHz > 0.0 ? pendingHz : actual;
 }
 
 DeviceCapabilities SpectrumEngine::sourceCapabilities() const {
@@ -176,27 +196,39 @@ void SpectrumEngine::onSetCenterFreq(double f) {
     if (!(f > 0.0) || !std::isfinite(f)) return;
     // Enqueue only: the engine thread applies the tuning (see
     // applyControlCommandsLocked) so the caller's thread never blocks on USB.
+    {
     QMutexLocker lk(&ctrlMutex_);
     pending_.centerFreqHz = f;
     pending_.dCenterFreq = true;
+    }
+    applyIfIdle();
 }
 void SpectrumEngine::onSetSampleRate(double r) {
     // Guard against bogus rates (<=0 / NaN / absurdly high) reaching the
     // channelizer and the rtl_tcp setSampleRate command.
     if (!(r > 0.0) || !std::isfinite(r) || r > 32e6) return;
+    {
     QMutexLocker lk(&ctrlMutex_);
     pending_.sampleRateHz = r;
     pending_.dSampleRate = true;
+    }
+    applyIfIdle();
 }
 void SpectrumEngine::onSetGain(double g) {
+    {
     QMutexLocker lk(&ctrlMutex_);
     pending_.gainDb = g;
     pending_.dGain = true;
+    }
+    applyIfIdle();
 }
 void SpectrumEngine::setDemodMode(const QString& m) {
+    {
     QMutexLocker lk(&ctrlMutex_);
     pending_.demodMode = m;
     pending_.dDemodMode = true;
+    }
+    applyIfIdle();
 }
 void SpectrumEngine::setSquelchThreshold(float db) {
     squelchThreshold_ = db;        // cache for read-back (Squelch has no getter)
@@ -639,9 +671,12 @@ void SpectrumEngine::setNetworkAudioSink(std::unique_ptr<IAudioSink> tap) {
 }
 
 void SpectrumEngine::setBandwidth(double hz) {
+    {
     QMutexLocker lk(&ctrlMutex_);
     pending_.bandwidthHz = hz;
     pending_.dBandwidth = true;
+    }
+    applyIfIdle();
 }
 
 QString SpectrumEngine::expandRecTemplate() const {
@@ -954,34 +989,52 @@ void SpectrumEngine::clearDigitalOutputs(int channelId) {
 }
 
 void SpectrumEngine::setDirectSampling(int mode) {
+    {
     QMutexLocker lk(&ctrlMutex_);
     pending_.directSampling = mode;
     pending_.dDirectSampling = true;
+    }
+    applyIfIdle();
 }
 void SpectrumEngine::setOffsetTuning(bool on) {
+    {
     QMutexLocker lk(&ctrlMutex_);
     pending_.offsetTuning = on;
     pending_.dOffsetTuning = true;
+    }
+    applyIfIdle();
 }
 void SpectrumEngine::setRtlAgc(bool on) {
+    {
     QMutexLocker lk(&ctrlMutex_);
     pending_.rtlAgc = on;
     pending_.dRtlAgc = true;
+    }
+    applyIfIdle();
 }
 void SpectrumEngine::setTunerAgc(bool on) {
+    {
     QMutexLocker lk(&ctrlMutex_);
     pending_.tunerAgc = on;
     pending_.dTunerAgc = true;
+    }
+    applyIfIdle();
 }
 void SpectrumEngine::setBiasTee(bool on) {
+    {
     QMutexLocker lk(&ctrlMutex_);
     pending_.biasTee = on;
     pending_.dBiasTee = true;
+    }
+    applyIfIdle();
 }
 void SpectrumEngine::setPpm(double ppm) {
+    {
     QMutexLocker lk(&ctrlMutex_);
     pending_.ppm = ppm;
     pending_.dPpm = true;
+    }
+    applyIfIdle();
 }
 
 void SpectrumEngine::setWindowType(int w) {
@@ -1005,6 +1058,17 @@ void SpectrumEngine::setFrontendDecimation(int D) {
 bool SpectrumEngine::noiseBlankerEnabled() const { return noiseBlanker_.enabled(); }
 int SpectrumEngine::windowType() const { return static_cast<int>(powerSpectrum_.window()); }
 int SpectrumEngine::averageMode() const { return static_cast<int>(powerSpectrum_.average()); }
+
+void SpectrumEngine::applyIfIdle() {
+    // The loop flag running_ defaults true even before QThread::start() launches
+    // run(); gate on the ACTUAL thread state. When the thread is live the run()
+    // loop drains asynchronously (keeps USB tuning off the caller's thread);
+    // when it has not been started (headless tests) drain on this thread so
+    // set-then-readback stays consistent (the legacy synchronous behavior).
+    if (QThread::isRunning()) return;
+    QMutexLocker lk(&sourceMutex_);
+    applyControlCommandsLocked();
+}
 
 // Drains the asynchronous control mailbox and applies every command ON THE
 // ENGINE THREAD. Called from run() while sourceMutex_ is held, so the device

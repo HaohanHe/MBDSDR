@@ -40,6 +40,8 @@ VorPanel::VorPanel(QWidget* parent) : QWidget(parent) {
     header->setSpacing(tokens::scaled(tokens::kSpacingM));
     auto* hint = new QLabel(QStringLiteral("VOR 径向 · 108-118 MHz"), this);
     hint->setObjectName("monoInfo");
+    hint->setSizePolicy(QSizePolicy::Ignored, hint->sizePolicy().verticalPolicy());
+    hint->setMinimumWidth(0);
     header->addWidget(hint, 1);
     lockLabel_ = new QLabel(QStringLiteral("未锁定"), this);
     lockLabel_->setObjectName("monoInfo");

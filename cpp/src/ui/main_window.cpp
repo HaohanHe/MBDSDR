@@ -3229,7 +3229,9 @@ void MainWindow::onRecLibExportDecode() {
         QStringLiteral("文本文件 (*.txt)"));
     if (path.isEmpty()) return;
     QFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    // Exact UTF-8 bytes (no QIODevice::Text: on Windows it would translate the
+    // decoder's \n to \r\n and corrupt the byte-for-byte content).
+    if (!f.open(QIODevice::WriteOnly)) {
         if (recLibPlayStatus_)
             recLibPlayStatus_->setText(QStringLiteral("导出失败: 无法写入"));
         return;

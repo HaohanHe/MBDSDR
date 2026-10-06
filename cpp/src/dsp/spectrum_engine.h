@@ -496,6 +496,12 @@ private:
     // Called by run() while holding sourceMutex_: drains pending_ and applies
     // every command to the hardware / engine state on the engine thread.
     void applyControlCommandsLocked();
+    // When the engine thread is NOT running (headless unit tests), drain the
+    // control mailbox synchronously on the caller's thread so set-then-readback
+    // stays consistent (legacy behavior). While running (the real app) this is a
+    // no-op: the run() loop drains asynchronously, keeping USB tuning off the UI
+    // thread (the reason the mailbox exists).
+    void applyIfIdle();
 
     std::unique_ptr<ISource> source_;
     IQFrontend frontend_;

@@ -345,6 +345,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
         "list_recordings", "delete_recording", "export_recording",
         "set_fft_params", "set_color_map", "get_spectrum_status",
+        // Phase55/58 appended tools.
+        "set_doppler_compensation", "connect_network_source",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
