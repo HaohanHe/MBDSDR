@@ -60,6 +60,11 @@ EVENT_MODES_IN="sstv,ssdv"
 FREQ_SSTV=""     # 空=未传；脚本绝不填默认活动频率
 FREQ_SSDV=""
 
+# 校准参考（全部参数化传入，脚本不内置任何台/电平）
+CAL_REF_HZ=""    # 已知参考信号频率 Hz（校准用；空=跳过频率校准）
+CAL_REF_DBFS=""  # 已知参考电平 dBFS（空=跳过电平校准）
+CAL_JSON=""      # 校准结果 JSON 输出（空=用日志目录内默认）
+
 # 模式参数（核对自 tools/onboarding/onboard.py 的 MODES 默认值）
 MODE_FREQ_adsb="1090e6";    MODE_N_adsb=""
 MODE_FREQ_apt="137.5e6";    MODE_N_apt="4800000"
@@ -78,6 +83,9 @@ while [ $# -gt 0 ]; do
     --event-modes) EVENT_MODES_IN="$2"; shift 2 ;;
     --freq-sstv) FREQ_SSTV="$2"; shift 2 ;;
     --freq-ssdv) FREQ_SSDV="$2"; shift 2 ;;
+    --cal-ref-hz) CAL_REF_HZ="$2"; shift 2 ;;
+    --cal-ref-dbfs) CAL_REF_DBFS="$2"; shift 2 ;;
+    --cal-json) CAL_JSON="$2"; shift 2 ;;
     -h|--help)
       grep -E '^#( |$)' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -150,7 +158,26 @@ append_raw "$(printf '{"id":"diag_wizard_paste","title":"diag_wizard --paste 回
   "$RC_DW" "$FENCE" "$(jstr "$DIAG_TXT")")"
 
 # ---------------------------------------------------------------------------
-# ③ onboard 信号采集（按设备在场分支）
+# ③ 校准（频率 PPM / 电平 dBFS；参考全部参数化，不硬编码）
+# ---------------------------------------------------------------------------
+info "③ 校准：频率 PPM / 电平 dBFS（tools/calibration.py）"
+[ -n "$CAL_JSON" ] || CAL_JSON="$LOG_DIR/calibration.json"
+CAL_RES="$LOG_DIR/calibration.txt"
+{
+  if [ "$DP" != "true" ]; then
+    echo '{"status":"FAIL","step":"calibration","reason":"未检测到设备，无法录制参考信号校准（不 mock）","next":"插好设备后，先录一段已知参考信号 IQ 再跑校准"}'
+  elif [ -z "$CAL_REF_HZ" ] && [ -z "$CAL_REF_DBFS" ]; then
+    echo '{"status":"SKIP","step":"calibration","reason":"未传 --cal-ref-hz/--cal-ref-dbfs","next":"从 docs/learn/phase57 选一个已知参考频率/电平传入"}'
+  else
+    # 有设备才采集参考；此处调用方需先录好参考 IQ（onboard record 产物）
+    echo '{"status":"FAIL","step":"calibration","reason":"本脚本自动校准确需参考 IQ 录制件","next":"用 onboard 录已知参考信号 IQ 后跑 tools/calibration.py freq/level"}'
+  fi
+} > "$CAL_RES"
+append_raw "$(printf '{"id":"calibration","title":"频率 PPM / 电平 dBFS 校准","calibration_json":%s}' \
+  "$(jstr "$CAL_RES")")"
+
+# ---------------------------------------------------------------------------
+# ④ onboard 信号采集（按设备在场分支）
 # ---------------------------------------------------------------------------
 # 解析模式白名单：
 #   - 默认：adsb/apt/cw（教学信号，频率硬编码在上方 MODE_FREQ_*）
