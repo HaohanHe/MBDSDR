@@ -111,6 +111,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"stop_scan_link",        true,  &ControlHub::cmdStopScanLink},
         {"set_squelch",           true,  &ControlHub::cmdSetSquelch},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
+        {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
         {"add_bookmark",          true,  &ControlHub::cmdAddBookmark},
         {"tune_to_bookmark",      true,  &ControlHub::cmdTuneToBookmark},
         {"delete_bookmark",       true,  &ControlHub::cmdDeleteBookmark},
@@ -466,6 +467,21 @@ QJsonObject ControlHub::cmdSetDopplerCompensation(const QJsonObject& a) {
     surf->setDopplerCompensationEnabled(on);
     o["available"] = surf->isDopplerCompensationAvailable();
     o["enabled"] = surf->isDopplerCompensationEnabled();
+    return o;
+}
+
+// Phase58 block2: connect to an rtl_tcp network source. Real TCP handshake +
+// RTL0 header; on failure the engine emits the honest socket reason.
+QJsonObject ControlHub::cmdConnectNetworkSource(const QJsonObject& a) {
+    const QString host = a.value("host").toString();
+    if (host.isEmpty()) return errResult(QString::fromUtf8("缺少 host 参数"));
+    const int port = static_cast<int>(a.value("port").toDouble(1234.0));
+    QJsonObject o = okBase();
+    o["command"] = "connect_network_source";
+    const bool ok = engine_->connectRtlTcp(host, static_cast<quint16>(port));
+    o["ok"] = ok;
+    o["host"] = host;
+    o["port"] = port;
     return o;
 }
 

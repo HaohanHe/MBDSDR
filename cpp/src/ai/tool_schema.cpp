@@ -746,6 +746,32 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // connect_network_source (write) -- Phase58 block2 ---------------------
+    // Connect to an rtl_tcp network SDR source. Real TCP handshake + RTL0
+    // dongle-info header; on failure it reports the honest socket reason and
+    // installs the idle source (no fake IQ). 
+    {
+        ToolSchemaSpec s;
+        s.name = "connect_network_source";
+        s.description = QString::fromUtf8(
+            "写入：连接 rtl_tcp 网络接收机（host/port）。"
+            "真实 TCP 握手+RTL0 设备头；失败返回真实 socket 原因并回到空态，不伪造 IQ。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec host;
+        host.name = "host";
+        host.type = "string";
+        host.description = QString::fromUtf8("rtl_tcp 服务端主机/IP");
+        host.required = true;
+        ToolParamSpec port;
+        port.name = "port";
+        port.type = "number";
+        port.description = QString::fromUtf8("rtl_tcp 服务端端口（默认 1234）");
+        port.required = false;
+        s.params << host << port;
+        out.append(s);
+    }
+
     return out;
 }
 

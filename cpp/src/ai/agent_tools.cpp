@@ -877,6 +877,29 @@ QString execSetDopplerCompensation(const QJsonObject& args, dsp::SpectrumEngine*
     return compact(o);
 }
 
+// Phase58 block2: connect to an rtl_tcp network source. Real TCP handshake +
+// RTL0 header; the engine reports the honest socket reason on failure.
+QString execConnectNetworkSource(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                                 const SourceInfo& src) {
+    QJsonObject o;
+    const QString host = args.value("host").toString();
+    if (host.isEmpty()) {
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("缺少 host 参数");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    const int port = static_cast<int>(args.value("port").toDouble(1234.0));
+    const bool ok = engine->connectRtlTcp(host, static_cast<quint16>(port));
+    o["ok"] = ok;
+    o["host"] = host;
+    o["port"] = port;
+    o["source"] = ok ? QString("rtl_tcp %1:%2").arg(host).arg(port)
+                     : QString::fromUtf8("连接失败（真实 socket 错误已回传）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // The built-in tool registry: name -> executor. Learned (mechanism only) from
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
 // instead of an if-else chain. Clean-room reimplementation; no GPL code copied.
@@ -926,6 +949,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"set_color_map", &execSetColorMap},
         {"get_spectrum_status", &execGetSpectrumStatus},
         {"set_doppler_compensation", &execSetDopplerCompensation},
+        {"connect_network_source", &execConnectNetworkSource},
     };
     return kTable;
 }
