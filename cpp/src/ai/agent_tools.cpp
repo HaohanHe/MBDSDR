@@ -724,6 +724,40 @@ QString execRenameVfo(const QJsonObject& args, dsp::SpectrumEngine*,
     return routedOk("rename_vfo", echo, src);
 }
 
+// 16. set_vfo_armed (write): index + enabled required. Keeps a VFO demodulated in
+//     the background (parallel monitoring) after another VFO is selected. Engine
+//     vfoSetArmed() is real (forwarder to VfoManager::setArmed).
+QString execSetVfoArmed(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                        const SourceInfo& src) {
+    double idx = 0.0;
+    if (!needNum(args, "index", idx))
+        return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
+    bool enabled = false;
+    if (!args.contains("enabled"))
+        return errResult(QString::fromUtf8("参数 enabled 缺失"));
+    const QJsonValue v = args.value("enabled");
+    if (v.isBool()) enabled = v.toBool();
+    else if (v.isDouble()) enabled = v.toDouble() != 0.0;
+    else return errResult(QString::fromUtf8("参数 enabled 必须是布尔值"));
+    const auto markers = engine->vfoMarkers();
+    const int i = static_cast<int>(idx);
+    if (i < 0 || i >= markers.size())
+        return errResult(QString::fromUtf8("VFO index %1 越界（共 %2 个）")
+                         .arg(i).arg(markers.size()));
+    const int id = markers[i].id;
+    engine->vfoSetArmed(id, enabled);
+    QJsonObject o;
+    o["ok"] = true;
+    o["index"] = i;
+    o["vfo_id"] = id;
+    o["armed"] = enabled;
+    o["message"] = enabled
+        ? QString::fromUtf8("VFO %1 将在后台并行监听").arg(i)
+        : QString::fromUtf8("已取消 VFO %1 的后台并行监听").arg(i);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // 16. list_recordings (read): scan the engine recDir_ honestly (empty if absent).
 QString execListRecordings(const QJsonObject&, dsp::SpectrumEngine* engine,
                            const SourceInfo& src) {
@@ -942,6 +976,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"add_vfo", &execAddVfo},
         {"switch_vfo", &execSwitchVfo},
         {"rename_vfo", &execRenameVfo},
+        {"set_vfo_armed", &execSetVfoArmed},
         {"list_recordings", &execListRecordings},
         {"delete_recording", &execDeleteRecording},
         {"export_recording", &execExportRecording},

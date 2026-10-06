@@ -437,6 +437,7 @@ private:
     QPushButton*    vfoAddBtn_   = nullptr;
     QPushButton*    vfoDelBtn_   = nullptr;
     QPushButton*    vfoCopyBtn_   = nullptr;   // copy active/selected VFO's params
+    QPushButton*    vfoArmBtn_    = nullptr;   // toggle parallel demod (armed)
     QVector<mbdsdr::dsp::VfoMarker> vfoMarkers_;  // last snapshot from engine
     // User-assigned display names keyed by engine VFO id. Empty by default and
     // persisted as JSON under QSettings key "ui/vfoNames". Never pre-seeded.
