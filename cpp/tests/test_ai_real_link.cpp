@@ -347,6 +347,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "set_fft_params", "set_color_map", "get_spectrum_status",
         // Phase55/58 appended tools.
         "set_doppler_compensation", "connect_network_source",
+        // Phase59 armed parallel VFO monitoring.
+        "set_vfo_armed",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
