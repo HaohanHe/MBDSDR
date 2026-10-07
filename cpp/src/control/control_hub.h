@@ -220,6 +220,10 @@ private:
     QJsonObject cmdGetVorRadial(const QJsonObject&);
     QJsonObject cmdGetAcarsPackets(const QJsonObject&);
     QJsonObject cmdGetNavtexMessages(const QJsonObject&);
+    // Read-only pass prediction: mirrors the Agent predict_passes tool so the
+    // three channels expose the same satellite capability. Pure function over
+    // the fresh on-disk TLE cache; never fabricates a pass.
+    QJsonObject cmdPredictPasses(const QJsonObject&);
 
     // ---- Phase26: 21 newly tool-ized capabilities -------------------------
     // Network audio tap (ControlHub owns the sink lifecycle; hands it to the

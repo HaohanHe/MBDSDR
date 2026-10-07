@@ -787,6 +787,17 @@ target_include_directories(test_adsb_cpr PRIVATE src)
 target_link_libraries(test_adsb_cpr PRIVATE Qt6::Core)
 add_test(NAME adsb_cpr COMMAND test_adsb_cpr)
 
+# Phase50 demodulation throughput baseline: deterministic synthetic FM IQ fed
+# straight into VfoManager::process; prints realtime multiples for 1 / 4 / 9
+# active VFOs and the idle-VFO cost proof. Numbers are printed (not asserted)
+# and captured in docs/learn/phase50/performance-baseline.md.
+add_executable(test_phase50_throughput tests/test_phase50_throughput.cpp)
+target_link_libraries(test_phase50_throughput PRIVATE mbdsdr_core)
+set_target_properties(test_phase50_throughput PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+target_include_directories(test_phase50_throughput PRIVATE src)
+target_link_libraries(test_phase50_throughput PRIVATE Qt6::Core)
+add_test(NAME phase50_throughput COMMAND test_phase50_throughput)
+
 add_executable(test_adsb_decode tests/test_adsb_decode.cpp)
 target_link_libraries(test_adsb_decode PRIVATE mbdsdr_core)
 set_target_properties(test_adsb_decode PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)

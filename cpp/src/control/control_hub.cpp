@@ -7,6 +7,7 @@
 #include "dsp/network_audio_sink.h"
 #include "dsp/scan_link.h"
 #include "ui/bookmark_manager.h"
+#include "ai/sat_task_planner.h"
 #include "core/tokens.h"
 
 #include <QJsonDocument>
@@ -139,6 +140,9 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         // ---- Phase60 packet-text read commands --------------------------
         {"get_acars_packets",     false, &ControlHub::cmdGetAcarsPackets},
         {"get_navtex_messages",   false, &ControlHub::cmdGetNavtexMessages},
+        // Read-only satellite pass prediction (same capability as the Agent
+        // predict_passes tool; pure function, never fabricates a pass).
+        {"predict_passes",        false, &ControlHub::cmdPredictPasses},
         // ---- Phase26 new read commands ----------------------------------
         {"get_network_audio_status", false, &ControlHub::cmdGetNetworkAudioStatus},
         {"get_scan_link_status",  false, &ControlHub::cmdGetScanLinkStatus},
@@ -1055,6 +1059,49 @@ QJsonObject ControlHub::cmdGetNavtexMessages(const QJsonObject& a) {
     r["messages"] = arr;
     r["count"] = static_cast<int>(msgs.size());
     return r;
+}
+
+// Read-only satellite pass prediction, mirroring the Agent predict_passes tool
+// field-for-field so all three channels expose the same capability. Pure
+// function over the fresh on-disk TLE cache; ok=false is always honest (no
+// fresh cache / satellite absent / no pass in window / bad args).
+QJsonObject ControlHub::cmdPredictPasses(const QJsonObject& a) {
+    QString sat = a.value(QStringLiteral("satellite_name")).toString();
+    int hours = static_cast<int>(a.value(QStringLiteral("hours_ahead")).toDouble(24.0));
+    if (hours < 1) hours = 24;
+    const bool hasLat = a.contains(QStringLiteral("station_lat_deg")) &&
+                        a.value(QStringLiteral("station_lat_deg")).isDouble();
+    const bool hasLon = a.contains(QStringLiteral("station_lon_deg")) &&
+                        a.value(QStringLiteral("station_lon_deg")).isDouble();
+    const double lat = hasLat ? a.value(QStringLiteral("station_lat_deg")).toDouble() : qQNaN();
+    const double lon = hasLon ? a.value(QStringLiteral("station_lon_deg")).toDouble() : qQNaN();
+
+    ai::SatPassListResult r = ai::predictSatellitePasses(
+        sat, lat, lon, QDateTime::currentDateTimeUtc(), hours);
+    QJsonObject o = okBase();
+    o["command"] = "predict_passes";
+    if (!r.ok) {
+        o["ok"] = false;
+        o["error"] = r.error;
+        o["source"] = r.source.isEmpty()
+            ? QString::fromUtf8("无新鲜 TLE 缓存") : r.source;
+        return o;
+    }
+    o["source"] = r.source;   // "cached_tle" -- honest data provenance
+    QJsonArray arr;
+    for (const ai::SatPassEntry& e : r.passes) {
+        QJsonObject p;
+        p["name"] = e.name;
+        p["catalog_number"] = e.catalogNumber;
+        p["rise_time"] = e.aosUtc.toUTC().toString(Qt::ISODate);
+        p["rise_az"] = e.azAos;
+        p["set_time"] = e.losUtc.toUTC().toString(Qt::ISODate);
+        p["set_az"] = e.azLos;
+        p["max_el"] = e.maxEl;
+        arr.append(p);
+    }
+    o["passes"] = arr;
+    return o;
 }
 
 // ===========================================================================
