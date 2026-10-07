@@ -120,6 +120,9 @@ private slots:
     void postCommandArgsMustBeObject();
     void optionsPreflightReturns204();
     void channelQueryPassthroughIsHonest();
+    // Phase60+: armed VFO monitoring over HTTP POST /command -> same engine
+    // state the Agent tool / ControlHub / UI checkbox drive.
+    void postCommandSetVfoArmedLandsInEngine();
 };
 
 void TestControlHttp::initTestCase() {
@@ -398,6 +401,58 @@ void TestControlHttp::channelQueryPassthroughIsHonest() {
     r = httpGet(port, "/vor_radial?channel=1");
     QCOMPARE(r.status, 200);
     QVERIFY(!r.obj().value("locked").toBool());
+}
+
+// POST /command {"tool":"set_vfo_armed","args":{index,enabled}} -> the engine
+// really flips the VFO's armed state; GET /status readback agrees (same state
+// the Agent tool / ControlHub / UI checkbox drive).
+void TestControlHttp::postCommandSetVfoArmedLandsInEngine() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+    control::HttpControlServer srv(&hub);
+    QVERIFY(srv.start(0));
+    const quint16 port = srv.port();
+    QVERIFY(port != 0);
+
+    // Create a VFO over the same HTTP surface.
+    HttpResp r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"vfo_add\",\"args\":{}}"));
+    QCOMPARE(r.status, 200);
+    QVERIFY(r.obj().value("ok").toBool());
+    // Index 0 is the pre-existing default VFO (vfo_add appends and selects the
+    // new one); take index 0's real id from list_vfos.
+    r = httpPost(port, "/command", QByteArray("{\"tool\":\"list_vfos\",\"args\":{}}"));
+    QVERIFY(r.obj().value("vfos").toArray().size() >= 1);
+    const int id = r.obj().value("vfos").toArray().at(0).toObject().value("id").toInt();
+
+    // Arm it via HTTP.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_vfo_armed\",\"args\":{\"index\":0,\"enabled\":true}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject o = r.obj();
+    QVERIFY2(o.value("ok").toBool(), o.value("error").toString().toUtf8().constData());
+    QCOMPARE(o.value("vfo_id").toInt(), id);
+    QCOMPARE(o.value("armed").toBool(), true);
+
+    // Readback over HTTP: the same engine VFO reports armed=true.
+    r = httpPost(port, "/command", QByteArray("{\"tool\":\"list_vfos\",\"args\":{}}"));
+    QCOMPARE(r.status, 200);
+    bool found = false;
+    for (const auto& v : r.obj().value("vfos").toArray()) {
+        QJsonObject vv = v.toObject();
+        if (vv.value("id").toInt() == id) {
+            found = true;
+            QCOMPARE(vv.value("armed").toBool(), true);
+        }
+    }
+    QVERIFY(found);
+
+    // Bad args over HTTP are honest errors, not crashes.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_vfo_armed\",\"args\":{\"index\":0,\"enabled\":\"yes\"}}"));
+    QCOMPARE(r.status, 200);
+    QVERIFY(!r.obj().value("ok").toBool());
 }
 
 QTEST_MAIN(TestControlHttp)

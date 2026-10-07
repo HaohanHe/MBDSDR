@@ -629,6 +629,9 @@ inline constexpr int kSplitterMarginV = 8;
 inline constexpr int kSplitterMarginH = 2;
 inline constexpr int kComboPadV       = kSpacingM;
 inline constexpr int kComboPadH       = kSpacingL;
+// Presence/source banner inner padding (px). Named token so the banner QSS
+// reads from the rhythm instead of a magic 6 in the widget cpp.
+inline constexpr int kPadBanner       = 6;
 inline constexpr int kGroupMarginTop  = kSpacingL;
 inline constexpr int kGroupPadTop      = kSpacingM;
 

@@ -4299,9 +4299,9 @@ void MainWindow::showPresenceNotice(const QString& text, bool appeared) {
     if (sourceBanner_) {
         sourceBanner_->setText(text);
         sourceBanner_->setStyleSheet(QString(
-            "background-color:%1; color:%2; padding:6px; border-radius:%3px;")
+            "background-color:%1; color:%2; padding:%4px; border-radius:%3px;")
             .arg(appeared ? tokens::kSuccess : tokens::kWarning, tokens::kTextPrimary)
-            .arg(tokens::kRadiusSmall));
+            .arg(tokens::kRadiusSmall).arg(tokens::kPadBanner));
     }
 }
 

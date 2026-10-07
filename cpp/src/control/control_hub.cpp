@@ -104,6 +104,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"vfo_set_offset",       true,  &ControlHub::cmdVfoSetOffset},
         {"vfo_set_bandwidth",    true,  &ControlHub::cmdVfoSetBandwidth},
         {"vfo_set_mode",         true,  &ControlHub::cmdVfoSetMode},
+        {"set_vfo_armed",        true,  &ControlHub::cmdSetVfoArmed},
         {"clear_digital_outputs",true,  &ControlHub::cmdClearDigitalOutputs},
         // ---- Phase26 new write commands ---------------------------------
         {"set_network_audio_sink", true, &ControlHub::cmdSetNetworkAudioSink},
@@ -733,6 +734,30 @@ QJsonObject ControlHub::cmdVfoSetMode(const QJsonObject& a) {
     return o;
 }
 
+// set_vfo_armed (write): index + enabled, aligned 1:1 with the Agent tool
+// set_vfo_armed and the engine's vfoSetArmed. Resolves the marker index to
+// the VFO id via vfoMarkers() (same path the Agent executor uses), so
+// engine / UI / Agent / ControlHub / HTTP all drive one state.
+QJsonObject ControlHub::cmdSetVfoArmed(const QJsonObject& a) {
+    int idx; QString err;
+    if (!needInt(a, "index", idx, err)) return errResult(err);
+    if (!a.contains("enabled") || !a.value("enabled").isBool())
+        return errResult(QString::fromUtf8("参数 enabled 必须是布尔值"));
+    const bool enabled = a.value("enabled").toBool();
+    const auto markers = engine_->vfoMarkers();
+    if (idx < 0 || idx >= static_cast<int>(markers.size()))
+        return errResult(QString::fromUtf8("VFO index %1 越界（共 %2 个）")
+                         .arg(idx).arg(markers.size()));
+    const int id = markers[idx].id;
+    engine_->vfoSetArmed(id, enabled);
+    QJsonObject o = okBase();
+    o["command"] = "set_vfo_armed";
+    o["index"] = idx;
+    o["vfo_id"] = id;
+    o["armed"] = enabled;
+    return o;
+}
+
 QJsonObject ControlHub::cmdClearDigitalOutputs(const QJsonObject& a) {
     QString err;
     const int ch = resolveChannel(a, err);
@@ -877,6 +902,7 @@ QJsonObject ControlHub::cmdGetVfos(const QJsonObject&) {
         v["bandwidth_hz"] = m.bandwidthHz;
         v["mode"] = m.mode;
         v["selected"] = m.selected;
+        v["armed"] = m.armed;
         v["center_offset_hz"] = m.centerOffsetHz;
         arr.append(v);
     }
