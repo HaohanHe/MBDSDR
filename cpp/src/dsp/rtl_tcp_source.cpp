@@ -56,7 +56,13 @@ constexpr socket_t kInvalidSocket = -1;
 inline int  lastSocketErr() { return errno; }
 inline void closeSocket(int s) { ::close(s); }
 inline int  doPoll(pollfd* fds, int n, int ms) { return ::poll(fds, n, ms); }
-inline bool socketWouldBlock(int e) { return e == EAGAIN || e == EWOULDBLOCK; }
+inline bool socketWouldBlock(int e) {
+    // A non-blocking connect() in progress is EINPROGRESS on POSIX (NOT
+    // EAGAIN/EWOULDBLOCK -- omitting it made the connect loop close a healthy
+    // socket and report a false "connection timed out"); the corresponding
+    // Winsock code for both connect and other ops is WSAEWOULDBLOCK.
+    return e == EAGAIN || e == EWOULDBLOCK || e == EINPROGRESS;
+}
 inline bool socketInterrupted(int e) { return e == EINTR; }
 constexpr int kSocketCloexec = SOCK_CLOEXEC;
 constexpr int kMsgNoSignal   = MSG_NOSIGNAL;
