@@ -351,6 +351,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "set_doppler_compensation", "connect_network_source",
         // Phase59 armed parallel VFO monitoring.
         "set_vfo_armed",
+        // Phase61 VFO fine-grained edit tools.
+        "set_vfo_frequency", "set_vfo_mode", "set_vfo_bandwidth",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -374,6 +376,10 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(ai::isWriteTool("add_vfo"));
     QVERIFY(ai::isWriteTool("switch_vfo"));
     QVERIFY(ai::isWriteTool("rename_vfo"));
+    QVERIFY(ai::isWriteTool("set_vfo_armed"));
+    QVERIFY(ai::isWriteTool("set_vfo_frequency"));
+    QVERIFY(ai::isWriteTool("set_vfo_mode"));
+    QVERIFY(ai::isWriteTool("set_vfo_bandwidth"));
     QVERIFY(ai::isWriteTool("delete_recording"));
     QVERIFY(ai::isWriteTool("export_recording"));
     QVERIFY(ai::isWriteTool("set_fft_params"));

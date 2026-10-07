@@ -52,6 +52,8 @@ const QSet<QString> kAllCxxTools = {
     "connect_network_source",
     // Phase59: armed parallel VFO monitoring toggle (write, gated).
     "set_vfo_armed",
+    // Phase61: VFO fine-grained edit tools (write, gated).
+    "set_vfo_frequency", "set_vfo_mode", "set_vfo_bandwidth",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -75,6 +77,8 @@ const QSet<QString> kExpectedWriteTools = {
     "connect_network_source",
     // Phase59: armed parallel VFO monitoring toggle (gated write).
     "set_vfo_armed",
+    // Phase61: VFO fine-grained edit tools (gated write).
+    "set_vfo_frequency", "set_vfo_mode", "set_vfo_bandwidth",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
