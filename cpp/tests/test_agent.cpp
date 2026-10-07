@@ -4,6 +4,7 @@
 #include <QSettings>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 
@@ -50,6 +51,8 @@ private slots:
     // --- VFO fine-grained edit tools (set_vfo_frequency/mode/bandwidth) -----
     void vfoEditToolsLandAndReadback();
     void vfoEditToolsBadArgsAndGate();
+    // --- Read-only capability + recording-state snapshot tools -------------
+    void capabilitiesAndRecordingStateHonestEmptyThenRecording();
 };
 
 void TestAgent::initTestCase() {
@@ -68,7 +71,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 43);
+    QCOMPARE(tools.size(), 45);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -520,6 +523,74 @@ void TestAgent::vfoEditToolsBadArgsAndGate() {
     QVERIFY2(g.contains("\"gated\":true"), qPrintable(g));
     QVERIFY2(g.contains("\"ok\":false"), qPrintable(g));
     QCOMPARE(engine.vfoMarkers().at(0).bandwidthHz, bwBefore);
+}
+
+// Read-only source-capability + recording-state snapshot tools. HONEST empty
+// state on a fresh no-hardware engine: connected=false, gains_db empty array,
+// recording=false + empty path. After arming the synthetic test source and really
+// starting a recording, the state reads back truthfully. Nothing fabricated.
+void TestAgent::capabilitiesAndRecordingStateHonestEmptyThenRecording() {
+    // --- Honest empty state: fresh engine lands on the empty NullSource. ---
+    {
+        dsp::SpectrumEngine eng;
+        QJsonObject caps = runTool(eng, "get_capabilities", {});
+        QVERIFY2(caps.value("ok").toBool(), qPrintable(QString::fromUtf8(
+            QJsonDocument(caps).toJson(QJsonDocument::Compact))));
+        QVERIFY(caps.value("connected").isBool());
+        QVERIFY(!caps.value("connected").toBool());          // no real hardware
+        QVERIFY(caps.value("gains_db").isArray());
+        QCOMPARE(caps.value("gains_db").toArray().size(), 0); // honest empty gain table
+        QVERIFY(caps.value("tunable_min_hz").isDouble());
+        QVERIFY(caps.value("tunable_max_hz").isDouble());
+        QVERIFY(caps.value("provenance").isString());
+        QVERIFY(!caps.value("provenance").toString().isEmpty());
+
+        QJsonObject rs = runTool(eng, "get_recording_state", {});
+        QVERIFY(rs.value("ok").toBool());
+        QVERIFY(!rs.value("recording").toBool());            // not recording
+        QVERIFY(rs.value("recording_path").toString().isEmpty());
+        QVERIFY(rs.value("watch_enabled").isBool());
+        QVERIFY(rs.value("recording_dir").isString());
+    }
+
+    // --- Populated: arm the synthetic test source + really start a recording. ---
+    {
+        const QString recDir = QDir::tempPath() + "/mbdsdr_agent_cap_rec";
+        QDir().mkpath(recDir);
+        dsp::SpectrumEngine eng;
+        eng.setRecordingDir(recDir);
+        eng.setTestSourceEnabled(true);   // synthetic IQ, explicitly opted in
+
+        // On the test source capabilities stay honestly empty but are labelled.
+        QJsonObject caps = runTool(eng, "get_capabilities", {});
+        QVERIFY(caps.value("ok").toBool());
+        QVERIFY(!caps.value("connected").toBool());          // still no real hardware
+        QVERIFY(caps.value("gains_db").toArray().isEmpty());
+        QVERIFY2(caps.value("provenance").toString().contains(QString::fromUtf8("测试信号")),
+                 qPrintable("test source must be labelled, got: " +
+                            caps.value("provenance").toString()));
+
+        // Not recording yet.
+        QJsonObject rs0 = runTool(eng, "get_recording_state", {});
+        QVERIFY(!rs0.value("recording").toBool());
+        QVERIFY(rs0.value("recording_path").toString().isEmpty());
+        QCOMPARE(rs0.value("recording_dir").toString(), recDir);
+
+        // Really start a recording (the test source feeds the recorder).
+        QJsonObject start = runTool(eng, "start_recording", {});
+        QVERIFY2(start.value("ok").toBool(), qPrintable(QString::fromUtf8(
+            QJsonDocument(start).toJson(QJsonDocument::Compact))));
+        QJsonObject rs = runTool(eng, "get_recording_state", {});
+        QVERIFY2(rs.value("recording").toBool(), qPrintable(QString::fromUtf8(
+            QJsonDocument(rs).toJson(QJsonDocument::Compact))));
+        QVERIFY2(!rs.value("recording_path").toString().isEmpty(),
+                 "a live recording must report its real path");
+        QVERIFY(QFileInfo::exists(rs.value("recording_path").toString()));
+        // Tidy up. (The recorder finalises on the engine thread, so we do NOT
+        // re-assert recording flips back to false here -- that transition is async
+        // and the honest-empty state is already covered by the first block.)
+        runTool(eng, "stop_recording", {});
+    }
 }
 
 #include <QCoreApplication>

@@ -123,6 +123,10 @@ private slots:
     // Phase60+: armed VFO monitoring over HTTP POST /command -> same engine
     // state the Agent tool / ControlHub / UI checkbox drive.
     void postCommandSetVfoArmedLandsInEngine();
+    // Read-only capability / recording-state snapshots reach the engine through
+    // the generic POST /command -> ControlHub.execute() delegation (no per-route
+    // handler needed) and return honest empty fields.
+    void postCommandCapabilitiesAndRecordingStateRoute();
 };
 
 void TestControlHttp::initTestCase() {
@@ -453,6 +457,42 @@ void TestControlHttp::postCommandSetVfoArmedLandsInEngine() {
         QByteArray("{\"tool\":\"set_vfo_armed\",\"args\":{\"index\":0,\"enabled\":\"yes\"}}"));
     QCOMPARE(r.status, 200);
     QVERIFY(!r.obj().value("ok").toBool());
+}
+
+// The two new read commands ride the SAME generic POST /command ->
+// ControlHub.execute() delegation (HTTP needs no per-route handler). They reach
+// the engine and return honest empty fields over the wire.
+void TestControlHttp::postCommandCapabilitiesAndRecordingStateRoute() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+    control::HttpControlServer srv(&hub);
+    QVERIFY(srv.start(0));
+    const quint16 port = srv.port();
+    QVERIFY(port != 0);
+
+    // get_capabilities over POST /command.
+    HttpResp r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"get_capabilities\",\"args\":{}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject c = r.obj();
+    QVERIFY2(c.value("ok").toBool(), c.value("error").toString().toUtf8().constData());
+    QCOMPARE(c.value("command").toString(), QStringLiteral("get_capabilities"));
+    QVERIFY(c.value("gains_db").isArray());
+    QCOMPARE(c.value("gains_db").toArray().size(), 0);   // honest empty on test source
+    QVERIFY(!c.value("connected").toBool());
+
+    // get_recording_state over POST /command.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"get_recording_state\",\"args\":{}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject rs = r.obj();
+    QVERIFY2(rs.value("ok").toBool(), rs.value("error").toString().toUtf8().constData());
+    QCOMPARE(rs.value("command").toString(), QStringLiteral("get_recording_state"));
+    QVERIFY(!rs.value("recording").toBool());
+    QVERIFY(rs.value("recording_path").toString().isEmpty());
+    QVERIFY(rs.value("watch_enabled").isBool());
+    QVERIFY(rs.value("recording_dir").isString());
 }
 
 QTEST_MAIN(TestControlHttp)

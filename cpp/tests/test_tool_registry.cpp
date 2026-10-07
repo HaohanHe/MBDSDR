@@ -54,6 +54,8 @@ const QSet<QString> kAllCxxTools = {
     "set_vfo_armed",
     // Phase61: VFO fine-grained edit tools (write, gated).
     "set_vfo_frequency", "set_vfo_mode", "set_vfo_bandwidth",
+    // Read-only source-capability + recording-state snapshot tools (honest empty).
+    "get_capabilities", "get_recording_state",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -105,6 +107,8 @@ const QSet<QString> kFlutterUngatedReadTools = {
     "get_acars_packets", "get_navtex_messages",
     "get_network_audio_status", "get_scan_link_status", "get_squelch_status",
     "list_bookmarks", "list_vfos", "list_recordings", "get_spectrum_status",
+    // Read-only capability/recording-state snapshots (desktop-only reads).
+    "get_capabilities", "get_recording_state",
 };
 } // namespace
 
@@ -130,7 +134,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 43, qPrintable(QString("expected 43 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 45, qPrintable(QString("expected 45 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -223,11 +227,11 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 43);
+    QCOMPARE(defs.size(), 45);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("connect_network_source"));
+    QCOMPARE(defs.last().name, QString("get_recording_state"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

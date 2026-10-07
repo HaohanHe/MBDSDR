@@ -353,6 +353,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "set_vfo_armed",
         // Phase61 VFO fine-grained edit tools.
         "set_vfo_frequency", "set_vfo_mode", "set_vfo_bandwidth",
+        // Read-only capability/recording-state snapshots.
+        "get_capabilities", "get_recording_state",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -391,6 +393,9 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(!ai::isWriteTool("list_vfos"));
     QVERIFY(!ai::isWriteTool("list_recordings"));
     QVERIFY(!ai::isWriteTool("get_spectrum_status"));
+    // Read-only capability/recording-state snapshots are never gated.
+    QVERIFY(!ai::isWriteTool("get_capabilities"));
+    QVERIFY(!ai::isWriteTool("get_recording_state"));
 }
 
 // Phase26 contract: the newly registered tools are actually dispatchable

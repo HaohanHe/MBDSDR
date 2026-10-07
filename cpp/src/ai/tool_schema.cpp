@@ -895,6 +895,38 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // get_capabilities (read-only) ----------------------------------------
+    // Real source capability read-back straight off the ACTIVE source: device
+    // name, tunable / sample-rate range, the discrete gain-step table. It NEVER
+    // fabricates a tunable range or a gain table: an offline/test/unconnected
+    // source reports connected=false, an EMPTY gains array, and an honest
+    // provenance note. write=false (predict_passes-style: never gated).
+    {
+        ToolSchemaSpec s;
+        s.name = "get_capabilities";
+        s.description = QString::fromUtf8(
+            "只读：返回当前源的真实能力（设备名、可调谐频率范围、采样率范围、离散增益档 gains_db）。"
+            "未连接或测试信号源时诚实返回 connected=false、空增益档数组与来源说明 provenance，"
+            "不编造调谐范围或增益表。");
+        s.write = false;
+        out.append(s);
+    }
+
+    // get_recording_state (read-only) --------------------------------------
+    // Recording state straight off the engine (live recording path, watch enable,
+    // recording dir). recording is derived from the live path (empty = not
+    // recording) -- never fabricated. write=false.
+    {
+        ToolSchemaSpec s;
+        s.name = "get_recording_state";
+        s.description = QString::fromUtf8(
+            "只读：返回录制状态（recording 是否在手动录制中、recording_path 当前路径、"
+            "watch_enabled 值守录制是否使能、recording_dir 录制目录）。"
+            "未录制时诚实返回 recording=false、空路径，不伪造。");
+        s.write = false;
+        out.append(s);
+    }
+
     return out;
 }
 

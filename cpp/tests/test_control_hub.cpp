@@ -78,6 +78,9 @@ private slots:
     // Read-only pass prediction exposed over ControlHub/HTTP exactly like the
     // Agent predict_passes tool; honest ok=false when no fresh TLE cache.
     void predictPassesReadOnlyAndHonestEmpty();
+    // Read-only capability + recording-state snapshots land on the engine and
+    // read back honestly (empty gains / not recording) on the offline source.
+    void capabilitiesAndRecordingStateReadBack();
 };
 
 void TestControlHub::initTestCase() {
@@ -859,6 +862,46 @@ void TestControlHub::predictPassesReadOnlyAndHonestEmpty() {
     // Bad args (missing satellite name) are still an honest structured result.
     r = parseObj(hub.execute("predict_passes", {{"station_lat_deg", 43.8}}));
     QVERIFY(r.value("ok").isBool());
+}
+
+// get_capabilities / get_recording_state are READ commands: they land on the
+// engine and read back honestly on the offline synthetic source -- connected is
+// false, gains_db is an EMPTY array (no fabricated gain table), provenance labels
+// the test source, and recording=false with an empty path. Reads are never gated.
+void TestControlHub::capabilitiesAndRecordingStateReadBack() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // Reads work even with the write gate closed.
+    hub.setWriteEnabled(false);
+
+    QJsonObject c = parseObj(hub.execute("get_capabilities", {}));
+    QVERIFY2(c.value("ok").toBool(), "capabilities read must never be gated");
+    QVERIFY(!c.value("gated").toBool());
+    QCOMPARE(c.value("command").toString(), QStringLiteral("get_capabilities"));
+    QVERIFY(c.value("connected").isBool());
+    QVERIFY(!c.value("connected").toBool());          // synthetic source, not real HW
+    QVERIFY(c.value("gains_db").isArray());
+    QCOMPARE(c.value("gains_db").toArray().size(), 0); // honest empty gain table
+    QVERIFY(c.value("tunable_min_hz").isDouble());
+    QVERIFY(c.value("tunable_max_hz").isDouble());
+    QVERIFY(c.value("sample_rate_min_hz").isDouble());
+    QVERIFY(c.value("sample_rate_max_hz").isDouble());
+    QVERIFY2(c.value("provenance").toString().contains(QStringLiteral("测试信号")),
+             qPrintable("test source must be labelled, got: " +
+                        c.value("provenance").toString()));
+
+    QJsonObject rs = parseObj(hub.execute("get_recording_state", {}));
+    QVERIFY2(rs.value("ok").toBool(), "recording-state read must never be gated");
+    QVERIFY(!rs.value("gated").toBool());
+    QCOMPARE(rs.value("command").toString(), QStringLiteral("get_recording_state"));
+    QVERIFY(!rs.value("recording").toBool());          // nothing recording yet
+    QVERIFY(rs.value("recording_path").toString().isEmpty());
+    QVERIFY(rs.value("watch_enabled").isBool());
+    QVERIFY(rs.value("recording_dir").isString());
+
+    hub.setWriteEnabled(true);
 }
 
 QTEST_MAIN(TestControlHub)
