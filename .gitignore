@@ -110,3 +110,6 @@ mbdsdr-ui-mockup/_backup/
 # hardware release artifacts
 !hardware/v2/*.zip
 !hardware/v2/*.xlsx
+
+# QtTest hand-run moc residue (AUTOMOC generates these into build/)
+cpp/tests/*.moc

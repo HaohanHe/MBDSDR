@@ -31,7 +31,7 @@ using rawsock = int;
 constexpr rawsock kRawInvalid = -1;
 inline void rawClose(rawsock s) { ::close(s); }
 constexpr int kRawNoSignal = MSG_NOSIGNAL;
-constexpr int kRawShutBoth = kRawShutBoth;
+constexpr int kRawShutBoth = SHUT_RDWR;
 #endif
 
 #include "core/tokens.h"
