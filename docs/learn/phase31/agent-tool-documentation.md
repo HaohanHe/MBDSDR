@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，35 个工具）
+# Agent 工具能力清单（自动生成，45 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -63,6 +63,16 @@ schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；缺
 
 ## get_vor_radial  [read 只读]
 description: 只读：读取指定（默认当前选中）VOR 信道最新径向读数（radialDeg 方位、质量、莫尔斯识别码、锁定态）。未锁定时 locked=false，方位不可信并被显式标注，不编造方位。
+schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## get_acars_packets  [read 只读]
+description: 只读：读取指定（默认当前选中）信道已解码的 ACARS 航空报文快照（方向 air/ground、label、block id、ack、正文、CRC 结果）。无解码结果时诚实返回空列表，不编造报文。
+schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## get_navtex_messages  [read 只读]
+description: 只读：读取指定（默认当前选中）信道已解码的 NAVTEX 海上安全报文快照（发台 B1、类型 B2、编号、正文、时间分集/定相状态）。无解码结果时诚实返回空列表，不编造报文。
 schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 
@@ -146,6 +156,26 @@ description: 写入：重命名指定 VFO 信道（index/name）。属于写动�
 schema: {"properties":{"index":{"description":"VFO id","type":"number"},"name":{"description":"新名称","type":"string"}},"required":["index","name"],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 rename_vfo"}（不自动重试写动作）
 
+## set_vfo_armed  [write 写(手动模式拦截)]
+description: 写入：开启/关闭某 VFO 的后台并行解调（index/enabled）。开启后即使该 VFO 未被选中，仍会在每个数据块被解调，便于并行监听/录制；关闭则停止以节省 CPU。属于写动作，手动模式下被拦截。
+schema: {"properties":{"enabled":{"description":"true=后台并行监听，false=停止","type":"boolean"},"index":{"description":"VFO 序号（list_vfos 返回顺序）","type":"number"}},"required":["index","enabled"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_vfo_armed"}（不自动重试写动作）
+
+## set_vfo_frequency  [write 写(手动模式拦截)]
+description: 写入：把指定 VFO 调谐到新频率（index/freq_hz）。属于写动作，手动模式下被拦截。
+schema: {"properties":{"freq_hz":{"description":"目标频率（Hz）","type":"number"},"index":{"description":"VFO 序号（list_vfos 返回顺序）","type":"number"}},"required":["index","freq_hz"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_vfo_frequency"}（不自动重试写动作）
+
+## set_vfo_mode  [write 写(手动模式拦截)]
+description: 写入：切换指定 VFO 的解调模式（index/mode，mode 取值见 ControlHub 模式表：AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX）。属于写动作，手动模式下被拦截。
+schema: {"properties":{"index":{"description":"VFO 序号（list_vfos 返回顺序）","type":"number"},"mode":{"description":"解调模式（大小写不敏感）","type":"string"}},"required":["index","mode"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_vfo_mode"}（不自动重试写动作）
+
+## set_vfo_bandwidth  [write 写(手动模式拦截)]
+description: 写入：设置指定 VFO 的信道带宽（index/bandwidth_hz）。属于写动作，手动模式下被拦截。
+schema: {"properties":{"bandwidth_hz":{"description":"信道带宽（Hz）","type":"number"},"index":{"description":"VFO 序号（list_vfos 返回顺序）","type":"number"}},"required":["index","bandwidth_hz"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_vfo_bandwidth"}（不自动重试写动作）
+
 ## list_recordings  [read 只读]
 description: 只读：扫描录制目录并列出已有录制文件。目录不存在或为空时诚实返回空列表。
 schema: {"properties":{},"required":[],"type":"object"}
@@ -173,5 +203,25 @@ schema: {"properties":{"file_path":{"description":"色板文件路径","type":"s
 
 ## get_spectrum_status  [read 只读]
 description: 只读：返回频谱当前参数（fft_size/window/average）真实值。
+schema: {"properties":{},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## set_doppler_compensation  [write 写(手动模式拦截)]
+description: 写入：开关过境实时多普勒自动补偿（1Hz TLE 距离率重调 VFO）。需已设置本站位置并捕获一个过境，否则保持关闭（诚实拒绝）。属于写动作，手动模式下被拦截。
+schema: {"properties":{"enable":{"description":"是否开启多普勒自动补偿","type":"boolean"}},"required":["enable"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_doppler_compensation"}（不自动重试写动作）
+
+## connect_network_source  [write 写(手动模式拦截)]
+description: 写入：连接 rtl_tcp 网络接收机（host/port）。真实 TCP 握手+RTL0 设备头；失败返回真实 socket 原因并回到空态，不伪造 IQ。属于写动作，手动模式下被拦截。
+schema: {"properties":{"host":{"description":"rtl_tcp 服务端主机/IP","type":"string"},"port":{"description":"rtl_tcp 服务端端口（默认 1234）","type":"number"}},"required":["host"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 connect_network_source"}（不自动重试写动作）
+
+## get_capabilities  [read 只读]
+description: 只读：返回当前源的真实能力（设备名、可调谐频率范围、采样率范围、离散增益档 gains_db）。未连接或测试信号源时诚实返回 connected=false、空增益档数组与来源说明 provenance，不编造调谐范围或增益表。
+schema: {"properties":{},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## get_recording_state  [read 只读]
+description: 只读：返回录制状态（recording 是否在手动录制中、recording_path 当前路径、watch_enabled 值守录制是否使能、recording_dir 录制目录）。未录制时诚实返回 recording=false、空路径，不伪造。
 schema: {"properties":{},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠

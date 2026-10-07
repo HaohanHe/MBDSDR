@@ -53,6 +53,8 @@ private slots:
     void vfoEditToolsBadArgsAndGate();
     // --- Read-only capability + recording-state snapshot tools -------------
     void capabilitiesAndRecordingStateHonestEmptyThenRecording();
+    // --- Phase62 audit: 10-tool manual-gate spot-check (5 write / 5 read) ---
+    void manualMode_gateSpotCheckTenTools();
 };
 
 void TestAgent::initTestCase() {
@@ -591,6 +593,65 @@ void TestAgent::capabilitiesAndRecordingStateHonestEmptyThenRecording() {
         // and the honest-empty state is already covered by the first block.)
         runTool(eng, "stop_recording", {});
     }
+}
+
+// Phase62 three-channel audit: 10-tool manual-gate spot-check. The gate itself
+// is uniform (LLMWorker::dispatchToolCall: manualMode && isWriteTool(name) ->
+// gated, BEFORE any engine touch; isWriteTool reads the spec table). This slot
+// pins the requested sample: the 5 write tools must come back
+// {"gated":true,"ok":false} with engine/QSettings untouched, and the 5 read
+// tools must actually execute (no "gated") even in manual mode.
+void TestAgent::manualMode_gateSpotCheckTenTools() {
+    dsp::SpectrumEngine engine;
+
+    // --- Snapshot every back-end the gated writes would otherwise touch ----
+    const double vfoFreqBefore = engine.vfoMarkers().at(0).freqHz;
+    const bool sqEnBefore = engine.squelchEnabled();
+    const float sqThBefore = engine.squelchThresholdDb();
+    const QString recPathBefore = engine.recordingPath();
+    const double ppmBefore = QSettings().value("rtl/ppm", 0.0).toDouble();
+
+    auto expectGated = [&](const QString& name, const QJsonObject& args) {
+        const QString r = ai::LLMWorker::dispatchToolCall(name, args, &engine,
+                                                         /*manualMode=*/true);
+        QVERIFY2(r.contains("\"gated\":true"),
+                 qPrintable(name + " must be gated: " + r));
+        QVERIFY2(r.contains("\"ok\":false"),
+                 qPrintable(name + " must be ok:false: " + r));
+    };
+
+    // 5 write tools (task spot-check list), all must be intercepted:
+    QJsonObject vfo; vfo["index"] = 0; vfo["freq_hz"] = 145000000.0;
+    expectGated("set_vfo_frequency", vfo);
+    expectGated("start_recording", QJsonObject{});
+    QJsonObject ppm; ppm["ppm"] = 42.5;
+    expectGated("apply_frequency_correction", ppm);
+    QJsonObject sq; sq["enabled"] = true; sq["threshold_db"] = -10.0;
+    expectGated("set_squelch", sq);
+    QJsonObject del; del["name"] = QString::fromUtf8("phase62_audit_nonexistent.sigmf-data");
+    expectGated("delete_recording", del);
+
+    // ... and none of them may have reached engine or settings.
+    QCOMPARE(engine.vfoMarkers().at(0).freqHz, vfoFreqBefore);
+    QCOMPARE(engine.squelchEnabled(), sqEnBefore);
+    QCOMPARE(engine.squelchThresholdDb(), sqThBefore);
+    QCOMPARE(engine.recordingPath(), recPathBefore);
+    QCOMPARE(QSettings().value("rtl/ppm", 0.0).toDouble(), ppmBefore);
+
+    // 5 read tools: manual mode must NOT gate them; they run and report ok.
+    auto expectRuns = [&](const QString& name) {
+        const QString r = ai::LLMWorker::dispatchToolCall(name, QJsonObject{}, &engine,
+                                                         /*manualMode=*/true);
+        QVERIFY2(!r.contains("\"gated\""),
+                 qPrintable(name + " must not be gated: " + r));
+        QVERIFY2(r.contains("\"ok\":true"),
+                 qPrintable(name + " must still execute: " + r));
+    };
+    expectRuns("get_capabilities");
+    expectRuns("get_recording_state");
+    expectRuns("get_status");
+    expectRuns("get_vor_radial");
+    expectRuns("list_vfos");
 }
 
 #include <QCoreApplication>
