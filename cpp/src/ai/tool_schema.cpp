@@ -678,6 +678,70 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // set_vfo_frequency (write -- gated) ---------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_vfo_frequency";
+        s.description = QString::fromUtf8(
+            "写入：把指定 VFO 调谐到新频率（index/freq_hz）。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec idx;
+        idx.name = "index";
+        idx.type = "number";
+        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序）");
+        idx.required = true;
+        ToolParamSpec fq;
+        fq.name = "freq_hz";
+        fq.type = "number";
+        fq.description = QString::fromUtf8("目标频率（Hz）");
+        fq.required = true;
+        s.params << idx << fq;
+        out.append(s);
+    }
+
+    // set_vfo_mode (write -- gated) --------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_vfo_mode";
+        s.description = QString::fromUtf8(
+            "写入：切换指定 VFO 的解调模式（index/mode，mode 取值见 ControlHub 模式表："
+            "AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX）。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec idx;
+        idx.name = "index";
+        idx.type = "number";
+        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序）");
+        idx.required = true;
+        ToolParamSpec md;
+        md.name = "mode";
+        md.type = "string";
+        md.description = QString::fromUtf8("解调模式（大小写不敏感）");
+        md.required = true;
+        s.params << idx << md;
+        out.append(s);
+    }
+
+    // set_vfo_bandwidth (write -- gated) ---------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_vfo_bandwidth";
+        s.description = QString::fromUtf8(
+            "写入：设置指定 VFO 的信道带宽（index/bandwidth_hz）。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec idx;
+        idx.name = "index";
+        idx.type = "number";
+        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序）");
+        idx.required = true;
+        ToolParamSpec bw;
+        bw.name = "bandwidth_hz";
+        bw.type = "number";
+        bw.description = QString::fromUtf8("信道带宽（Hz）");
+        bw.required = true;
+        s.params << idx << bw;
+        out.append(s);
+    }
+
     // list_recordings (read-only) ---------------------------------------
     {
         ToolSchemaSpec s;

@@ -47,6 +47,9 @@ private slots:
     void applyCorrection_writesSettingAndApplies();
     void manualMode_gatesApplyCorrection();
     void manualMode_allowsCalibrateRead();
+    // --- VFO fine-grained edit tools (set_vfo_frequency/mode/bandwidth) -----
+    void vfoEditToolsLandAndReadback();
+    void vfoEditToolsBadArgsAndGate();
 };
 
 void TestAgent::initTestCase() {
@@ -65,7 +68,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 40);
+    QCOMPARE(tools.size(), 43);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -455,6 +458,68 @@ void TestAgent::manualMode_allowsCalibrateRead() {
     QVERIFY2(!r.contains("gated"),
              qPrintable("calibrate_frequency is read-only and must run in manual mode: " + r));
     QFile::remove(path);
+}
+
+// VFO fine-grained edit tools really land in the engine and read back through
+// list_vfos / vfoMarkers (the same snapshot all channels read).
+void TestAgent::vfoEditToolsLandAndReadback() {
+    dsp::SpectrumEngine engine;
+    const QString add = ai::executeTool("add_vfo", QJsonObject{}, &engine);
+    QVERIFY2(add.contains("\"ok\":true"), qPrintable(add));
+
+    const auto markers = engine.vfoMarkers();
+    QVERIFY(!markers.isEmpty());
+    const int id0 = markers.at(0).id;   // default VFO is index 0
+
+    QJsonObject freq; freq["index"] = 0; freq["freq_hz"] = 101100000.0;
+    QString r = ai::executeTool("set_vfo_frequency", freq, &engine);
+    QVERIFY2(r.contains("\"ok\":true"), qPrintable(r));
+    QVERIFY2(r.contains("\"vfo_id\":" + QByteArray::number(id0)), qPrintable(r));
+    // Readback through the snapshot.
+    bool saw = false;
+    for (const auto& m : engine.vfoMarkers())
+        if (m.id == id0) { QCOMPARE(m.freqHz, 101100000.0); saw = true; }
+    QVERIFY(saw);
+
+    QJsonObject mode; mode["index"] = 0; mode["mode"] = "WFM";
+    r = ai::executeTool("set_vfo_mode", mode, &engine);
+    QVERIFY2(r.contains("\"ok\":true"), qPrintable(r));
+    saw = false;
+    for (const auto& m : engine.vfoMarkers())
+        if (m.id == id0) { QCOMPARE(m.mode, QStringLiteral("WFM")); saw = true; }
+    QVERIFY(saw);
+
+    QJsonObject bw; bw["index"] = 0; bw["bandwidth_hz"] = 200000.0;
+    r = ai::executeTool("set_vfo_bandwidth", bw, &engine);
+    QVERIFY2(r.contains("\"ok\":true"), qPrintable(r));
+    saw = false;
+    for (const auto& m : engine.vfoMarkers())
+        if (m.id == id0) { QCOMPARE(m.bandwidthHz, 200000.0); saw = true; }
+    QVERIFY(saw);
+}
+
+// Bad args are honest errors; manual mode gates the writes and leaves the
+// engine untouched.
+void TestAgent::vfoEditToolsBadArgsAndGate() {
+    dsp::SpectrumEngine engine;
+
+    // Out-of-range index, missing args, unknown mode, non-positive bandwidth.
+    QJsonObject oob; oob["index"] = 99; oob["freq_hz"] = 1.0e8;
+    QVERIFY(!ai::executeTool("set_vfo_frequency", oob, &engine).contains("\"ok\":true"));
+    QVERIFY(!ai::executeTool("set_vfo_mode", {{"index", 0}}, &engine).contains("\"ok\":true"));
+    QJsonObject badm; badm["index"] = 0; badm["mode"] = "XYZ";
+    QVERIFY(!ai::executeTool("set_vfo_mode", badm, &engine).contains("\"ok\":true"));
+    QJsonObject badbw; badbw["index"] = 0; badbw["bandwidth_hz"] = -100.0;
+    QVERIFY(!ai::executeTool("set_vfo_bandwidth", badbw, &engine).contains("\"ok\":true"));
+
+    // Manual mode gates the writes (engine untouched).
+    const double bwBefore = engine.vfoMarkers().at(0).bandwidthHz;
+    QJsonObject args; args["index"] = 0; args["bandwidth_hz"] = 500000.0;
+    QString g = ai::LLMWorker::dispatchToolCall(
+        "set_vfo_bandwidth", args, &engine, /*manualMode=*/true);
+    QVERIFY2(g.contains("\"gated\":true"), qPrintable(g));
+    QVERIFY2(g.contains("\"ok\":false"), qPrintable(g));
+    QCOMPARE(engine.vfoMarkers().at(0).bandwidthHz, bwBefore);
 }
 
 #include <QCoreApplication>

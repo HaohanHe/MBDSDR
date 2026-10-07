@@ -2,6 +2,7 @@
 #include "agent_tools.h"
 #include "tool_schema.h"
 #include "sat_task_planner.h"
+#include "core/tokens.h"
 #include "dsp/spectrum_engine.h"
 #include "dsp/device_capabilities.h"
 #include "dsp/frequency_calibrator.h"   // calibrateFromCapture / savePpmSetting
@@ -815,7 +816,98 @@ QString execSetVfoArmed(const QJsonObject& args, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
-// 16. list_recordings (read): scan the engine recDir_ honestly (empty if absent).
+// 17. set_vfo_frequency (write): index + freq_hz. Resolves the marker index to
+//     the VFO id (same path as set_vfo_armed / the ControlHub commands), then
+//     tunes that VFO only -- the on-demand parallel-monitoring design.
+QString execSetVfoFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                            const SourceInfo& src) {
+    double idx = 0.0;
+    if (!needNum(args, "index", idx))
+        return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
+    double hz = 0.0;
+    if (!needNum(args, "freq_hz", hz))
+        return errResult(QString::fromUtf8("参数 freq_hz 缺失或不是数字"));
+    const auto markers = engine->vfoMarkers();
+    const int i = static_cast<int>(idx);
+    if (i < 0 || i >= markers.size())
+        return errResult(QString::fromUtf8("VFO index %1 越界（共 %2 个）")
+                         .arg(i).arg(markers.size()));
+    const int id = markers[i].id;
+    engine->vfoSetFreq(id, hz);
+    QJsonObject o;
+    o["ok"] = true;
+    o["index"] = i;
+    o["vfo_id"] = id;
+    o["freq_hz"] = hz;
+    o["message"] = QString::fromUtf8("VFO %1 已调谐至 %2 Hz").arg(i).arg(hz);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 18. set_vfo_mode (write): index + mode, mode validated against the shared
+//     ControlHub mode table (tokens::kControlHubModes) so the Agent and the
+//     ControlHub/HTTP channel reject the same values.
+QString execSetVfoMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                       const SourceInfo& src) {
+    double idx = 0.0;
+    if (!needNum(args, "index", idx))
+        return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
+    QString mode;
+    if (!needStr(args, "mode", mode))
+        return errResult(QString::fromUtf8("参数 mode 缺失或不是字符串"));
+    const QString up = mode.toUpper();
+    bool known = false;
+    for (int k = 0; k < tokens::kControlHubModesCount; ++k)
+        if (up == QLatin1String(tokens::kControlHubModes[k])) { known = true; break; }
+    if (!known)
+        return errResult(QString::fromUtf8("未知解调模式: %1").arg(mode));
+    const auto markers = engine->vfoMarkers();
+    const int i = static_cast<int>(idx);
+    if (i < 0 || i >= markers.size())
+        return errResult(QString::fromUtf8("VFO index %1 越界（共 %2 个）")
+                         .arg(i).arg(markers.size()));
+    const int id = markers[i].id;
+    engine->vfoSetMode(id, up);
+    QJsonObject o;
+    o["ok"] = true;
+    o["index"] = i;
+    o["vfo_id"] = id;
+    o["mode"] = up;
+    o["message"] = QString::fromUtf8("VFO %1 解调模式已切换为 %2").arg(i).arg(up);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 19. set_vfo_bandwidth (write): index + bandwidth_hz, same marker-index
+//     resolution and honest error contract as the other VFO edit tools.
+QString execSetVfoBandwidth(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                            const SourceInfo& src) {
+    double idx = 0.0;
+    if (!needNum(args, "index", idx))
+        return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
+    double bw = 0.0;
+    if (!needNum(args, "bandwidth_hz", bw))
+        return errResult(QString::fromUtf8("参数 bandwidth_hz 缺失或不是数字"));
+    if (bw <= 0.0)
+        return errResult(QString::fromUtf8("参数 bandwidth_hz 必须为正数"));
+    const auto markers = engine->vfoMarkers();
+    const int i = static_cast<int>(idx);
+    if (i < 0 || i >= markers.size())
+        return errResult(QString::fromUtf8("VFO index %1 越界（共 %2 个）")
+                         .arg(i).arg(markers.size()));
+    const int id = markers[i].id;
+    engine->vfoSetBandwidth(id, bw);
+    QJsonObject o;
+    o["ok"] = true;
+    o["index"] = i;
+    o["vfo_id"] = id;
+    o["bandwidth_hz"] = bw;
+    o["message"] = QString::fromUtf8("VFO %1 带宽已设为 %2 Hz").arg(i).arg(bw);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 20. list_recordings (read): scan the engine recDir_ honestly (empty if absent).
 QString execListRecordings(const QJsonObject&, dsp::SpectrumEngine* engine,
                            const SourceInfo& src) {
     const QString dir = engine->recordingDir();
@@ -1037,6 +1129,9 @@ const QList<ToolDispatch>& dispatchTable() {
         {"switch_vfo", &execSwitchVfo},
         {"rename_vfo", &execRenameVfo},
         {"set_vfo_armed", &execSetVfoArmed},
+        {"set_vfo_frequency", &execSetVfoFrequency},
+        {"set_vfo_mode", &execSetVfoMode},
+        {"set_vfo_bandwidth", &execSetVfoBandwidth},
         {"list_recordings", &execListRecordings},
         {"delete_recording", &execDeleteRecording},
         {"export_recording", &execExportRecording},
