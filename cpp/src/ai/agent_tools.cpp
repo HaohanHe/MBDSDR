@@ -727,6 +727,7 @@ QString execListVfos(const QJsonObject&, dsp::SpectrumEngine* engine,
         v["mode"] = m.mode;
         v["name"] = m.name;
         v["selected"] = m.selected;
+        v["armed"] = m.armed;
         arr.append(v);
     }
     QJsonObject o;

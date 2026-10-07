@@ -941,7 +941,7 @@ bool SpectrumEngine::vfoRename(int id, const QString& name) {
 bool SpectrumEngine::vfoSetArmed(int id, bool on) {
     QMutexLocker lk(&sourceMutex_);
     const bool ok = vfoManager_.setArmed(id, on);
-    if (ok) emit vfoListChanged();
+    if (ok) { publishVfoSnapshotLocked(); emit vfoListChanged(); }
     return ok;
 }
 

@@ -194,6 +194,9 @@ private:
     QJsonObject cmdVfoSetOffset(const QJsonObject& a);
     QJsonObject cmdVfoSetBandwidth(const QJsonObject& a);
     QJsonObject cmdVfoSetMode(const QJsonObject& a);
+    // set_vfo_armed (write -- gated): index + enabled, aligned 1:1 with the
+    // Agent tool set_vfo_armed; keeps a VFO demodulated in the background.
+    QJsonObject cmdSetVfoArmed(const QJsonObject& a);
     // POCSAG / m17 / VOR digital output reset (write -- gated): empties the
     // named channel's decode queues and re-inits its decoders. Mirrors the UI
     // panel "clear" button through the same gate as every other write command.

@@ -71,6 +71,10 @@ private slots:
     void scanLinkStartStopStatus();
     void networkAudioStatusHonest();
     void phase26WritesAreGatedAndBadArgsHonest();
+    // ---- Phase60+ armed parallel VFO monitoring: engine / UI / Agent /
+    // ControlHub / HTTP all drive ONE state via vfoSetArmed + set_vfo_armed
+    // (index+enabled, resolved through vfoMarkers like the Agent executor).
+    void vfoArmedLandAndReadbackSameState();
 };
 
 void TestControlHub::initTestCase() {
@@ -733,6 +737,95 @@ void TestControlHub::phase26WritesAreGatedAndBadArgsHonest() {
     QCOMPARE(parseObj(hub.execute("rename_vfo", {{"index", 1}})).value("ok").toBool(), false);
     QCOMPARE(parseObj(hub.execute("set_squelch", {})).value("ok").toBool(), false);
     QCOMPARE(parseObj(hub.execute("set_color_map", {{}})).value("ok").toBool(), false);
+}
+
+// Armed parallel monitoring: ControlHub set_vfo_armed (index+enabled) lands in
+// the engine, get_vfos reads it back as the SAME state (armed), and the engine
+// direct path vfoSetArmed agrees -- the state a UI checkbox / Agent tool /
+// ControlHub / HTTP POST /command all drive is one.
+void TestControlHub::vfoArmedLandAndReadbackSameState() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject r = parseObj(hub.execute("vfo_add", {}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    // Index 0 is the pre-existing default VFO (vfo_add appends the new one at
+    // the tail and selects it), so index 0's id comes from the marker list.
+    QJsonArray vfos0 = parseObj(hub.execute("get_vfos", {})).value("vfos").toArray();
+    QVERIFY(vfos0.size() >= 1);
+    const int id = vfos0.at(0).toObject().value("id").toInt();
+
+    // Default: not armed.
+    {
+        QJsonArray vfos = parseObj(hub.execute("get_vfos", {})).value("vfos").toArray();
+        bool found = false;
+        for (const auto& v : vfos) {
+            QJsonObject vv = v.toObject();
+            if (vv.value("id").toInt() == id) {
+                found = true;
+                QCOMPARE(vv.value("armed").toBool(), false);
+            }
+        }
+        QVERIFY(found);
+    }
+
+    // ControlHub write: index 0 armed=true -> engine state flips, readback armed.
+    r = parseObj(hub.execute("set_vfo_armed", {{"index", 0}, {"enabled", true}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(r.value("vfo_id").toInt(), id);
+    QCOMPARE(r.value("armed").toBool(), true);
+    {
+        QJsonArray vfos = parseObj(hub.execute("get_vfos", {})).value("vfos").toArray();
+        for (const auto& v : vfos) {
+            QJsonObject vv = v.toObject();
+            if (vv.value("id").toInt() == id)
+                QCOMPARE(vv.value("armed").toBool(), true);
+        }
+        // Engine direct path agrees with the ControlHub write.
+        QVERIFY(eng.vfoSetArmed(id, true));       // idempotent, stays armed
+        vfos = parseObj(hub.execute("get_vfos", {})).value("vfos").toArray();
+        for (const auto& v : vfos) {
+            QJsonObject vv = v.toObject();
+            if (vv.value("id").toInt() == id)
+                QCOMPARE(vv.value("armed").toBool(), true);
+        }
+    }
+
+    // Un-arm through ControlHub; readback follows.
+    r = parseObj(hub.execute("set_vfo_armed", {{"index", 0}, {"enabled", false}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(r.value("armed").toBool(), false);
+    {
+        QJsonArray vfos = parseObj(hub.execute("get_vfos", {})).value("vfos").toArray();
+        for (const auto& v : vfos) {
+            QJsonObject vv = v.toObject();
+            if (vv.value("id").toInt() == id)
+                QCOMPARE(vv.value("armed").toBool(), false);
+        }
+    }
+
+    // Honest errors: index out of range, enabled not a bool, missing args.
+    r = parseObj(hub.execute("set_vfo_armed", {{"index", 99}, {"enabled", true}}));
+    QVERIFY(!r.value("ok").toBool());
+    r = parseObj(hub.execute("set_vfo_armed", {{"index", 0}, {"enabled", "yes"}}));
+    QVERIFY(!r.value("ok").toBool());
+    r = parseObj(hub.execute("set_vfo_armed", {{"index", 0}}));
+    QVERIFY(!r.value("ok").toBool());
+
+    // Write gate closed: refused, engine untouched (still un-armed).
+    hub.setWriteEnabled(false);
+    r = parseObj(hub.execute("set_vfo_armed", {{"index", 0}, {"enabled", true}}));
+    QVERIFY(!r.value("ok").toBool() && r.value("gated").toBool());
+    hub.setWriteEnabled(true);
+    {
+        QJsonArray vfos = parseObj(hub.execute("get_vfos", {})).value("vfos").toArray();
+        for (const auto& v : vfos) {
+            QJsonObject vv = v.toObject();
+            if (vv.value("id").toInt() == id)
+                QCOMPARE(vv.value("armed").toBool(), false);
+        }
+    }
 }
 
 QTEST_MAIN(TestControlHub)
