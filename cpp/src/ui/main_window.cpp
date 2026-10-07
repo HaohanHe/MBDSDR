@@ -5615,9 +5615,10 @@ void MainWindow::aiRenderChat() {
         } else if (m.role == QLatin1String("summary")) {
             // Restrained small annotation, not a loud sticker.
             aiChat_->appendHtml(
-                QString("<div style='color:%1; font-size:9pt;'>〔已摘要〕 %2</div>")
-                    .arg(tokens::textRgba(tokens::kTextAlphaTertiary),
-                         m.content.toHtmlEscaped()));
+                QString("<div style='color:%1; font-size:%2pt;'>〔已摘要〕 %3</div>")
+                    .arg(tokens::textRgba(tokens::kTextAlphaTertiary))
+                    .arg(tokens::kFontAuxPt)
+                    .arg(m.content.toHtmlEscaped()));
         }
     }
     for (const QString& note : aiToolNotes_)
