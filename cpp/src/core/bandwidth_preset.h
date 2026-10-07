@@ -57,6 +57,11 @@ inline constexpr double kBwAdsbHz     = 2000000.0;
 inline constexpr double kBwPocsagHz   = 12000.0;
 inline constexpr double kBwM17Hz      = 9600.0;
 inline constexpr double kBwVorHz      = 24000.0;
+// ACARS: aeronautical VHF data (ARINC 618 MSK 2400 b/s, +/-600 Hz) in a
+// 12.5 kHz channel slot. NAVTEX: 100-baud SITOR-B 2-FSK (+/-85 Hz), Carson BW
+// ~270 Hz -> 600 Hz channel.
+inline constexpr double kBwAcarsHz    = 12500.0;
+inline constexpr double kBwNavtexHz   = 600.0;
 // Unknown / unlisted mode: conservative narrow-FM voice default.
 inline constexpr double kBwFallbackHz = 12500.0;
 
@@ -74,6 +79,8 @@ inline double defaultBandwidthHzForMode(const QString& mode) {
     if (mode == QLatin1String("POCSAG")) return kBwPocsagHz;
     if (mode == QLatin1String("m17"))   return kBwM17Hz;
     if (mode == QLatin1String("VOR"))    return kBwVorHz;
+    if (mode == QLatin1String("ACARS"))  return kBwAcarsHz;
+    if (mode == QLatin1String("NAVTEX")) return kBwNavtexHz;
     return kBwFallbackHz;
 }
 

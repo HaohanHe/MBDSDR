@@ -336,6 +336,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "scan_band", "set_bandwidth", "get_status", "predict_passes",
         "calibrate_frequency", "apply_frequency_correction",
         "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
+        // Phase60 packet-text snapshot tools.
+        "get_acars_packets", "get_navtex_messages",
         "export_iq_segment",
         // Phase26: 21 new tools.
         "set_network_audio_sink", "get_network_audio_status",

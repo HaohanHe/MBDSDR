@@ -135,6 +135,9 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_pocsag_messages",   false, &ControlHub::cmdGetPocsagMessages},
         {"get_m17_calls",         false, &ControlHub::cmdGetM17Calls},
         {"get_vor_radial",        false, &ControlHub::cmdGetVorRadial},
+        // ---- Phase60 packet-text read commands --------------------------
+        {"get_acars_packets",     false, &ControlHub::cmdGetAcarsPackets},
+        {"get_navtex_messages",   false, &ControlHub::cmdGetNavtexMessages},
         // ---- Phase26 new read commands ----------------------------------
         {"get_network_audio_status", false, &ControlHub::cmdGetNetworkAudioStatus},
         {"get_scan_link_status",  false, &ControlHub::cmdGetScanLinkStatus},
@@ -969,6 +972,62 @@ QJsonObject ControlHub::cmdGetVorRadial(const QJsonObject& a) {
     r["radial_deg"] = v.radialDeg;
     r["quality"] = v.quality;
     r["morse_id"] = v.morseId;
+    return r;
+}
+
+QJsonObject ControlHub::cmdGetAcarsPackets(const QJsonObject& a) {
+    QString err;
+    const int ch = resolveChannel(a, err);
+    if (ch < 0) return errResult(err);
+    std::vector<dsp::AcarsPacket> pkts = engine_->acarsPackets(ch);
+    QJsonArray arr;
+    for (const dsp::AcarsPacket& p : pkts) {
+        QJsonObject o;
+        const char* dir = "unknown";
+        switch (p.direction) {
+            case dsp::AcarsPacket::Direction::Air:    dir = "air";    break;
+            case dsp::AcarsPacket::Direction::Ground: dir = "ground"; break;
+            default: break;
+        }
+        o["direction"] = QString::fromLatin1(dir);
+        o["mode"]     = QString::fromStdString(p.mode);
+        o["label"]    = QString::fromStdString(p.label);
+        o["block_id"] = QString::fromStdString(p.blockId);
+        o["ack"]      = QString::fromStdString(p.ack);
+        o["text"]     = QString::fromStdString(p.text);
+        o["crc_ok"]   = p.crcOk;
+        arr.append(o);
+    }
+    QJsonObject r = okBase();
+    r["command"] = "get_acars_packets";
+    r["channel"] = ch;
+    r["packets"] = arr;
+    r["count"] = static_cast<int>(pkts.size());
+    return r;
+}
+
+QJsonObject ControlHub::cmdGetNavtexMessages(const QJsonObject& a) {
+    QString err;
+    const int ch = resolveChannel(a, err);
+    if (ch < 0) return errResult(err);
+    std::vector<dsp::NavtexMessage> msgs = engine_->navtexMessages(ch);
+    QJsonArray arr;
+    for (const dsp::NavtexMessage& m : msgs) {
+        QJsonObject o;
+        o["station"] = QString::fromStdString(m.stationB1);
+        o["type"]    = QString::fromStdString(m.typeB2);
+        o["number"]  = QString::fromStdString(m.numberB3B4);
+        o["text"]    = QString::fromStdString(m.text);
+        o["diversity_ok"] = m.diversityOk;
+        o["phasing_ok"]   = m.phasingOk;
+        o["diversity_errors"] = m.diversityErrors;
+        arr.append(o);
+    }
+    QJsonObject r = okBase();
+    r["command"] = "get_navtex_messages";
+    r["channel"] = ch;
+    r["messages"] = arr;
+    r["count"] = static_cast<int>(msgs.size());
     return r;
 }
 

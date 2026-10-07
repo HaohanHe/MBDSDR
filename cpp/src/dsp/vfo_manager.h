@@ -37,6 +37,8 @@
 #include "dsp/pocsag_decoder.h"
 #include "dsp/m17_decoder.h"
 #include "dsp/vor_receiver.h"
+#include "dsp/acars_decoder.h"
+#include "dsp/navtex_decoder.h"
 
 namespace mbdsdr {
 namespace dsp {
@@ -141,6 +143,8 @@ struct VfoChannel {
     std::unique_ptr<PocsagDecoder> pocsag;
     std::unique_ptr<M17Decoder>  m17;
     std::unique_ptr<VorReceiver>  vor;
+    std::unique_ptr<AcarsDecoder>  acars;
+    std::unique_ptr<NavtexDecoder> navtex;
 
     // Accumulated READ-ONLY output snapshot. pocsagMessages/m17Calls grow as
     // frames arrive and are cleared only by rebuild (mode switch) or
@@ -149,11 +153,15 @@ struct VfoChannel {
     std::vector<PocsagMessage> pocsagMessages;
     std::vector<M17Call>       m17Calls;
     VorResult                  vorResult;
+    std::vector<AcarsPacket>   acarsPackets;
+    std::vector<NavtexMessage> navtexMessages;
 
     // Mode predicates (generic capability names, never a station).
     bool isPocsag() const { return mode == "POCSAG"; }
     bool isM17()    const { return mode == "m17"; }
     bool isVor()    const { return mode == "VOR"; }
+    bool isAcars()  const { return mode == "ACARS"; }
+    bool isNavtex() const { return mode == "NAVTEX"; }
 
     // True when this VFO runs a digital (rather than analog) demod.
     bool isDigital() const { return mode == "BPSK" || mode == "QPSK"; }
@@ -222,6 +230,8 @@ public:
     std::vector<PocsagMessage> pocsagMessages(int channelId) const;
     std::vector<M17Call>       m17Calls(int channelId) const;
     VorResult                   vorResult(int channelId) const;
+    std::vector<AcarsPacket>   acarsPackets(int channelId) const;
+    std::vector<NavtexMessage> navtexMessages(int channelId) const;
     // Reset channel `id`'s digital output queues AND re-initialise its decoders
     // (panel "clear" / write command). No-op for an unknown id.
     void clearDigitalOutputs(int channelId);

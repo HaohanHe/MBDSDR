@@ -35,6 +35,8 @@ const QSet<QString> kAllCxxTools = {
     "scan_band", "set_bandwidth", "get_status", "predict_passes",
     "calibrate_frequency", "apply_frequency_correction",
     "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
+    // Phase60 packet-text snapshot tools (read-only).
+    "get_acars_packets", "get_navtex_messages",
     "export_iq_segment",
     // Phase26: 21 new tools (14 write / 7 read), appended in SPEC order.
     "set_network_audio_sink", "get_network_audio_status",
@@ -95,6 +97,8 @@ const QSet<QString> kExpectedWriteTools = {
 const QSet<QString> kFlutterUngatedReadTools = {
     "get_status", "predict_passes", "calibrate_frequency",
     "get_pocsag_messages", "get_m17_calls", "get_vor_radial",
+    // Phase60 packet-text snapshot tools (read-only, desktop-only).
+    "get_acars_packets", "get_navtex_messages",
     "get_network_audio_status", "get_scan_link_status", "get_squelch_status",
     "list_bookmarks", "list_vfos", "list_recordings", "get_spectrum_status",
 };
@@ -122,7 +126,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 38, qPrintable(QString("expected 38 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 40, qPrintable(QString("expected 40 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -215,7 +219,7 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 38);
+    QCOMPARE(defs.size(), 40);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).

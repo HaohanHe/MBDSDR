@@ -1005,6 +1005,16 @@ VorResult SpectrumEngine::vorResult(int channelId) const {
     return vfoManager_.vorResult(channelId);
 }
 
+std::vector<AcarsPacket> SpectrumEngine::acarsPackets(int channelId) const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return vfoManager_.acarsPackets(channelId);
+}
+
+std::vector<NavtexMessage> SpectrumEngine::navtexMessages(int channelId) const {
+    QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
+    return vfoManager_.navtexMessages(channelId);
+}
+
 DigitalLockStatus SpectrumEngine::digitalLockStatus() const {
     QMutexLocker lk(&const_cast<QMutex&>(sourceMutex_));
     return vfoManager_.digitalLockStatus();
@@ -1357,6 +1367,26 @@ void SpectrumEngine::run() {
                 lastVorRadialDeg_ = vres.radialDeg;
                 lastVorMorseId_ = vres.morseId;
                 emit vorRadialChanged(vres);
+            }
+
+            // ACARS packet list (append-only; same honest mode-exit edge).
+            const std::vector<AcarsPacket> apkts =
+                (selMode == "ACARS" && selId >= 0)
+                    ? vfoManager_.acarsPackets(selId)
+                    : std::vector<AcarsPacket>{};
+            if (apkts.size() != lastAcarsCount_) {
+                lastAcarsCount_ = apkts.size();
+                emit acarsPacketsChanged(apkts);
+            }
+
+            // NAVTEX message list.
+            const std::vector<NavtexMessage> nmsgs =
+                (selMode == "NAVTEX" && selId >= 0)
+                    ? vfoManager_.navtexMessages(selId)
+                    : std::vector<NavtexMessage>{};
+            if (nmsgs.size() != lastNavtexCount_) {
+                lastNavtexCount_ = nmsgs.size();
+                emit navtexMessagesChanged(nmsgs);
             }
         }
 

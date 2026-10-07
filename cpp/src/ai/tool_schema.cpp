@@ -341,6 +341,42 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // get_acars_packets (read-only) ----------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_acars_packets";
+        s.description = QString::fromUtf8(
+            "只读：读取指定（默认当前选中）信道已解码的 ACARS 航空报文快照"
+            "（方向 air/ground、label、block id、ack、正文、CRC 结果）。"
+            "无解码结果时诚实返回空列表，不编造报文。");
+        s.write = false;
+        ToolParamSpec ch;
+        ch.name = "channel_id";
+        ch.type = "number";
+        ch.description = QString::fromUtf8("可选：信道 VFO id；缺省为当前选中信道");
+        ch.required = false;
+        s.params.append(ch);
+        out.append(s);
+    }
+
+    // get_navtex_messages (read-only) --------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_navtex_messages";
+        s.description = QString::fromUtf8(
+            "只读：读取指定（默认当前选中）信道已解码的 NAVTEX 海上安全报文快照"
+            "（发台 B1、类型 B2、编号、正文、时间分集/定相状态）。"
+            "无解码结果时诚实返回空列表，不编造报文。");
+        s.write = false;
+        ToolParamSpec ch;
+        ch.name = "channel_id";
+        ch.type = "number";
+        ch.description = QString::fromUtf8("可选：信道 VFO id；缺省为当前选中信道");
+        ch.required = false;
+        s.params.append(ch);
+        out.append(s);
+    }
+
     // export_iq_segment (write -- gated in manual mode) ---------------------
     // One-shot on-demand IQ dump: capture a bounded baseband IQ window NOW and
     // write it to a cf32_le SigMF file, then return -- distinct from the

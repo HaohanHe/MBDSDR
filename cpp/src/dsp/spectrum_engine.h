@@ -238,6 +238,8 @@ public slots:
     std::vector<PocsagMessage> pocsagMessages(int channelId) const;
     std::vector<M17Call>        m17Calls(int channelId) const;
     VorResult                   vorResult(int channelId) const;
+    std::vector<AcarsPacket>   acarsPackets(int channelId) const;
+    std::vector<NavtexMessage> navtexMessages(int channelId) const;
     void                        clearDigitalOutputs(int channelId);
 
     // Phase55 block2: Costas carrier-lock snapshot for the SELECTED VFO channel.
@@ -455,6 +457,10 @@ signals:
     // locked=false = honest no-lock: the panel clears the instrument and never
     // shows a fabricated bearing.
     void vorRadialChanged(const VorResult& result);
+    // ACARS packet list / NAVTEX message list of the SELECTED channel, same
+    // change-diff semantics; empty vector = honest empty state.
+    void acarsPacketsChanged(const std::vector<AcarsPacket>& packets);
+    void navtexMessagesChanged(const std::vector<NavtexMessage>& messages);
     // Read-only tap of the raw engine IQ block, emitted only while a SpyServer
     // client is streaming (setSpyServerTapRequested). Carries the REAL source
     // block (complex float, native source rate); the server decimates/encodes
@@ -596,6 +602,8 @@ private:
     // last pushed list sizes; VOR fields mirror the last pushed reading.
     std::size_t lastPocsagCount_ = 0;
     std::size_t lastM17Count_    = 0;
+    std::size_t lastAcarsCount_  = 0;
+    std::size_t lastNavtexCount_ = 0;
     bool        lastVorLocked_    = false;
     double      lastVorRadialDeg_ = 0.0;
     QString     lastVorMorseId_;

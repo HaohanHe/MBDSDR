@@ -989,7 +989,7 @@ inline constexpr bool kControlHubWriteEnabledDefault = true;
 // never a station / repeater call sign.
 inline const char* const kControlHubModes[] = {
     "AM", "NFM", "WFM", "USB", "LSB", "CW",
-    "POCSAG", "m17", "VOR"
+    "POCSAG", "m17", "VOR", "ACARS", "NAVTEX"
 };
 inline constexpr int kControlHubModesCount =
     int(sizeof(kControlHubModes) / sizeof(kControlHubModes[0]));

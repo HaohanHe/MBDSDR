@@ -260,6 +260,10 @@ QByteArray HttpControlServer::route(const Request& req, int& statusOut) {
                                {QStringLiteral("path"), QStringLiteral("/m17_calls?channel=N")}});
         eps.append(QJsonObject{{QStringLiteral("method"), QStringLiteral("GET")},
                                {QStringLiteral("path"), QStringLiteral("/vor_radial?channel=N")}});
+        eps.append(QJsonObject{{QStringLiteral("method"), QStringLiteral("GET")},
+                               {QStringLiteral("path"), QStringLiteral("/acars_packets?channel=N")}});
+        eps.append(QJsonObject{{QStringLiteral("method"), QStringLiteral("GET")},
+                               {QStringLiteral("path"), QStringLiteral("/navtex_messages?channel=N")}});
         eps.append(QJsonObject{{QStringLiteral("method"), QStringLiteral("POST")},
                                {QStringLiteral("path"), QStringLiteral("/command")},
                                {QStringLiteral("body"), QStringLiteral("{\"tool\":\"...\",\"args\":{...}}")}});
@@ -289,6 +293,13 @@ QByteArray HttpControlServer::route(const Request& req, int& statusOut) {
     }
     if (req.method == QLatin1String("GET") && req.path == QLatin1String("/vor_radial")) {
         return readSnapshot("get_vor_radial");
+    }
+    // Phase60 packet-text snapshots (?channel=N optional).
+    if (req.method == QLatin1String("GET") && req.path == QLatin1String("/acars_packets")) {
+        return readSnapshot("get_acars_packets");
+    }
+    if (req.method == QLatin1String("GET") && req.path == QLatin1String("/navtex_messages")) {
+        return readSnapshot("get_navtex_messages");
     }
 
     // ---- Write / unified command: one honest body -> execute() same write gate.

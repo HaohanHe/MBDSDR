@@ -172,6 +172,68 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
         return;
     }
 
+    // ---- ACARS (2400 b/s MSK, ARINC 618; decoder owns its FskDemod) ------
+    // 48 kHz IF, 12.5 kHz channel slot. Channelized IQ goes straight to the
+    // AcarsDecoder's built-in 2-FSK symbol recovery (2400 bd / +-600 Hz). No
+    // analog audio.
+    if (isAcars()) {
+        ifTarget = 48000.0;
+        chBw = core::kBwAcarsHz;
+        channelizer.configure(sr, ifTarget, chBw, 31);
+        channelizer.setVfoOffsetHz(freqHz - sourceCenterHz);
+        const double ifRate = channelizer.effectiveOutputRateHz();
+        acars = std::make_unique<AcarsDecoder>(ifRate);
+        fskDemod.reset();
+        pocsag.reset();
+        m17.reset();
+        vor.reset();
+        demod.reset();
+        digitalDemod.reset();
+        rds.reset();
+        stereo.reset();
+        pocsagMessages.clear();
+        m17Calls.clear();
+        vorResult = VorResult();
+        acarsPackets.clear();
+        navtexMessages.clear();
+        resampler.configure(ifRate, 48000.0, 31);
+        recoveredSymbols.clear();
+        lastSr = sr;
+        needsRebuild = false;
+        return;
+    }
+
+    // ---- NAVTEX (100 baud SITOR-B FEC; decoder owns its FskDemod) ---------
+    // 12 kHz IF, 600 Hz channel. Channelized IQ goes straight to the
+    // NavtexDecoder (setSampleRate MUST precede feed). No analog audio.
+    if (isNavtex()) {
+        ifTarget = 12000.0;
+        chBw = core::kBwNavtexHz;
+        channelizer.configure(sr, ifTarget, chBw, 31);
+        channelizer.setVfoOffsetHz(freqHz - sourceCenterHz);
+        const double ifRate = channelizer.effectiveOutputRateHz();
+        navtex = std::make_unique<NavtexDecoder>();
+        navtex->setSampleRate(ifRate);
+        fskDemod.reset();
+        pocsag.reset();
+        m17.reset();
+        vor.reset();
+        demod.reset();
+        digitalDemod.reset();
+        rds.reset();
+        stereo.reset();
+        pocsagMessages.clear();
+        m17Calls.clear();
+        vorResult = VorResult();
+        acarsPackets.clear();
+        navtexMessages.clear();
+        resampler.configure(ifRate, 48000.0, 31);
+        recoveredSymbols.clear();
+        lastSr = sr;
+        needsRebuild = false;
+        return;
+    }
+
     digitalDemod.reset();
     rds.reset();   // re-created below only when this channel is WFM
     stereo.reset(); // re-created below only when this channel is WFM
@@ -182,9 +244,13 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
     pocsag.reset();
     m17.reset();
     vor.reset();
+    acars.reset();
+    navtex.reset();
     pocsagMessages.clear();
     m17Calls.clear();
     vorResult = VorResult();
+    acarsPackets.clear();
+    navtexMessages.clear();
 
     channelizer.configure(sr, ifTarget, chBw, 31);
     const double ifRate = channelizer.effectiveOutputRateHz();
@@ -396,7 +462,7 @@ const std::vector<float>& VfoManager::process(
         // POCSAG / m17 digital data-link: no analog audio. Channelized IQ goes
         // straight to the link decoder; decoded messages/calls are appended to
         // the channel's read-only snapshot (drained here, queued for Wave2 UI).
-        if (ch.isPocsag() || ch.isM17()) {
+        if (ch.isPocsag() || ch.isM17() || ch.isAcars() || ch.isNavtex()) {
             ch.audio48k.clear();
             if (!baseband.empty()) {
                 if (ch.isPocsag() && ch.fskDemod) {
@@ -418,6 +484,16 @@ const std::vector<float>& VfoManager::process(
                     for (auto& c : calls)
                         if (c.crcOk)
                             ch.m17Calls.push_back(std::move(c));
+                } else if (ch.isAcars() && ch.acars) {
+                    ch.acars->feed(baseband);
+                    auto pkts = ch.acars->takeNewPackets();
+                    ch.acarsPackets.insert(ch.acarsPackets.end(),
+                                           pkts.begin(), pkts.end());
+                } else if (ch.isNavtex() && ch.navtex) {
+                    ch.navtex->feed(baseband);
+                    auto msgs = ch.navtex->takeNewMessages();
+                    ch.navtexMessages.insert(ch.navtexMessages.end(),
+                                             msgs.begin(), msgs.end());
                 }
             }
             continue;
@@ -501,6 +577,16 @@ std::vector<M17Call> VfoManager::m17Calls(int channelId) const {
     return {};
 }
 
+std::vector<AcarsPacket> VfoManager::acarsPackets(int channelId) const {
+    const VfoChannel* c = channel(channelId);
+    return c ? c->acarsPackets : std::vector<AcarsPacket>{};
+}
+
+std::vector<NavtexMessage> VfoManager::navtexMessages(int channelId) const {
+    const VfoChannel* c = channel(channelId);
+    return c ? c->navtexMessages : std::vector<NavtexMessage>{};
+}
+
 VorResult VfoManager::vorResult(int channelId) const {
     if (const VfoChannel* c = channel(channelId)) return c->vorResult;
     return VorResult{};
@@ -521,9 +607,13 @@ void VfoManager::clearDigitalOutputs(int channelId) {
     c->pocsagMessages.clear();
     c->m17Calls.clear();
     c->vorResult = VorResult{};
+    c->acarsPackets.clear();
+    c->navtexMessages.clear();
     if (c->pocsag) c->pocsag->reset();
     if (c->m17)   c->m17->reset();
     if (c->vor)   c->vor->reset();
+    if (c->acars)  c->acars->reset();
+    if (c->navtex) c->navtex->reset();
 }
 
 } // namespace dsp
