@@ -9,6 +9,7 @@
 #include <QJsonObject>
 
 #include "ai/agent_tools.h"
+#include "ai/tool_schema.h"
 #include "ai/agent.h"
 #include "ai/llm_worker.h"
 #include "ai/ai_config.h"
@@ -55,6 +56,8 @@ private slots:
     void capabilitiesAndRecordingStateHonestEmptyThenRecording();
     // --- Phase62 audit: 10-tool manual-gate spot-check (5 write / 5 read) ---
     void manualMode_gateSpotCheckTenTools();
+    // --- Phase62 gate full-coverage: ALL 28 writes gated / ALL 17 reads open ---
+    void manualMode_gateSpotCheckAllWrites();
 };
 
 void TestAgent::initTestCase() {
@@ -652,6 +655,119 @@ void TestAgent::manualMode_gateSpotCheckTenTools() {
     expectRuns("get_status");
     expectRuns("get_vor_radial");
     expectRuns("list_vfos");
+}
+
+// Phase62 gate FULL-COVERAGE: iterate the DECLARATIVE spec table itself
+// (registeredToolSpecs) -- no hardcoded name list -- and prove that the
+// manual-mode write gate intercepts EVERY write tool and that EVERY read tool
+// still runs. The gate is uniform: LLMWorker::dispatchToolCall returns
+// gatedToolResult(name) on `manualMode && isWriteTool(name)` BEFORE any engine
+// touch and BEFORE argument validation, so valid args are supplied per write tool
+// (the only possible ok:false is the gate itself, never a param error). This is
+// the systematic version of the 10-tool spot check above; it also pins the
+// frozen 28-write / 17-read split and proves zero engine/QSettings drift.
+void TestAgent::manualMode_gateSpotCheckAllWrites() {
+    dsp::SpectrumEngine engine;
+
+    // --- Snapshot every observable back-end a gated write could otherwise touch --
+    const double freqBefore = engine.centerFreq();
+    const QString modeBefore = engine.demodMode();
+    const double bwBefore = engine.bandwidth();
+    const int vfoCountBefore = engine.vfoMarkers().size();
+    const int selVfoBefore = engine.selectedVfoId();
+    const bool sqEnBefore = engine.squelchEnabled();
+    const float sqThBefore = engine.squelchThresholdDb();
+    const QString recPathBefore = engine.recordingPath();
+    const QString recDirBefore = engine.recordingDir();
+    const bool watchBefore = engine.watchEnabled();
+    const int fftBefore = engine.fftSize();
+    const int winBefore = engine.windowType();
+    const int avgBefore = engine.averageMode();
+    const double ppmBefore = QSettings().value("rtl/ppm", 0.0).toDouble();
+    const QVariant cmapBefore = QSettings().value("view/wfColormapFile");
+
+    // Honest, schema-valid args per write tool. The gate fires before validation,
+    // so these also demonstrate "gated" precedes arg checking. Write tools with
+    // no params (start/stop_recording, stop_scan_link, add_vfo) stay empty.
+    auto argsFor = [](const QString& name) -> QJsonObject {
+        QJsonObject a;
+        if (name == "tune_frequency") a["freq_hz"] = 98500000.0;
+        else if (name == "set_mode") a["mode"] = "AM";
+        else if (name == "scan_band") { a["low_hz"] = 88e6; a["high_hz"] = 108e6; a["step_hz"] = 200000; }
+        else if (name == "set_bandwidth") a["bandwidth_hz"] = 8000.0;
+        else if (name == "apply_frequency_correction") a["ppm"] = 32.0;
+        else if (name == "export_iq_segment") a["sample_count"] = 4096.0;
+        else if (name == "set_network_audio_sink") { a["enable"] = true; a["port"] = 12345; a["format"] = "s16le"; }
+        else if (name == "start_scan_link") a["target_freq_hz"] = 100e6;
+        else if (name == "set_squelch") { a["enabled"] = true; a["threshold_db"] = -10.0; }
+        else if (name == "add_bookmark") { a["freq_hz"] = 100e6; a["name"] = "gate_probe"; a["mode"] = "NFM"; }
+        else if (name == "tune_to_bookmark") a["index"] = 0;
+        else if (name == "delete_bookmark") a["index"] = 0;
+        else if (name == "switch_vfo") a["index"] = 0;
+        else if (name == "rename_vfo") { a["index"] = 0; a["name"] = "gate_probe"; }
+        else if (name == "set_vfo_armed") { a["index"] = 0; a["enabled"] = true; }
+        else if (name == "set_vfo_frequency") { a["index"] = 0; a["freq_hz"] = 145e6; }
+        else if (name == "set_vfo_mode") { a["index"] = 0; a["mode"] = "NFM"; }
+        else if (name == "set_vfo_bandwidth") { a["index"] = 0; a["bandwidth_hz"] = 12500.0; }
+        else if (name == "delete_recording") a["name"] = "phase62_gate_probe.sigmf-data";
+        else if (name == "export_recording") { a["name"] = "phase62_gate_probe.sigmf-data"; a["out_path"] = "/tmp/mbdsdr_phase62_gate_probe.sigmf-data"; }
+        else if (name == "set_fft_params") a["fft_size"] = 2048.0;
+        else if (name == "set_color_map") a["file_path"] = "/tmp/mbdsdr_phase62_gate_probe.cmap";
+        else if (name == "set_doppler_compensation") a["enable"] = true;
+        else if (name == "connect_network_source") { a["host"] = "127.0.0.1"; a["port"] = 1234; }
+        return a;
+    };
+
+    int writes = 0, reads = 0;
+    for (const ai::ToolSchemaSpec& s : ai::registeredToolSpecs()) {
+        const QString r = ai::LLMWorker::dispatchToolCall(
+            s.name, argsFor(s.name), &engine, /*manualMode=*/true);
+        if (s.write) {
+            ++writes;
+            QVERIFY2(r.contains("\"gated\":true"),
+                     qPrintable(s.name + " (write) must be gated: " + r));
+            QVERIFY2(r.contains("\"ok\":false"),
+                     qPrintable(s.name + " (write) must be ok:false: " + r));
+            QVERIFY2(r.contains(QString::fromUtf8("手动模式：未执行 %1").arg(s.name)),
+                     qPrintable(s.name + " (write) must name the gated tool: " + r));
+        } else {
+            ++reads;
+            // Reads must never be blocked by the write gate.
+            QVERIFY2(!r.contains("\"gated\""),
+                     qPrintable(s.name + " (read) must NOT be gated: " + r));
+            // Every read deterministically returns ok:true on a fresh engine
+            // EXCEPT predict_passes, which honestly returns ok:false with no
+            // fresh TLE cache (honest empty state) -- that is NOT a gate block,
+            // which we already asserted above.
+            if (s.name != "predict_passes") {
+                QVERIFY2(r.contains("\"ok\":true"),
+                         qPrintable(s.name + " (read) must execute ok:true: " + r));
+            }
+        }
+    }
+
+    // The frozen split must be exactly 28 writes / 17 reads.
+    QCOMPARE(writes, 28);
+    QCOMPARE(reads, 17);
+
+    // Every observable back-end must be byte-for-byte unchanged: the gated writes
+    // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
+    // recording/FFT/settings field may have drifted.
+    QCOMPARE(engine.centerFreq(), freqBefore);
+    QCOMPARE(engine.demodMode(), modeBefore);
+    QCOMPARE(engine.bandwidth(), bwBefore);
+    QCOMPARE(engine.vfoMarkers().size(), vfoCountBefore);
+    QCOMPARE(engine.selectedVfoId(), selVfoBefore);
+    QCOMPARE(engine.squelchEnabled(), sqEnBefore);
+    QCOMPARE(engine.squelchThresholdDb(), sqThBefore);
+    QCOMPARE(engine.recordingPath(), recPathBefore);
+    QCOMPARE(engine.recordingDir(), recDirBefore);
+    QCOMPARE(engine.watchEnabled(), watchBefore);
+    QCOMPARE(engine.fftSize(), fftBefore);
+    QCOMPARE(engine.windowType(), winBefore);
+    QCOMPARE(engine.averageMode(), avgBefore);
+    QCOMPARE(QSettings().value("rtl/ppm", 0.0).toDouble(), ppmBefore);
+    QCOMPARE(QSettings().value("view/wfColormapFile"), cmapBefore);
 }
 
 #include <QCoreApplication>
