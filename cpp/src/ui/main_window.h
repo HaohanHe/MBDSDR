@@ -47,7 +47,8 @@ namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class Con
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class SMeterWidget;
                  class WeatherSatPanel; class TaskStepsView;
-                 class PocsagPanel; class M17Panel; class VorPanel; }
+                 class PocsagPanel; class M17Panel; class VorPanel;
+                 class DataTextPanel; }
 namespace ai   { class Agent; class AiSessionStore; class TaskRunner; struct StepResult; struct TaskPlan; }
 namespace gnss { class GnssReceiver; struct GnssFix; }
 // Phase27: headless control layer + its loopback-only HTTP front-end. Both live
@@ -203,6 +204,7 @@ private:
     ui::PocsagPanel* pocsagPanel_ = nullptr;
     ui::M17Panel*    m17Panel_    = nullptr;
     ui::VorPanel*    vorPanel_    = nullptr;
+    ui::DataTextPanel* dataTextPanel_ = nullptr;
 
     // ---- GNSS serial receiver + compact toolbar (world tab) ----
     gnss::GnssReceiver* gnssRx_      = nullptr;

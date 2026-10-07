@@ -215,6 +215,8 @@ private:
     QJsonObject cmdGetPocsagMessages(const QJsonObject&);
     QJsonObject cmdGetM17Calls(const QJsonObject&);
     QJsonObject cmdGetVorRadial(const QJsonObject&);
+    QJsonObject cmdGetAcarsPackets(const QJsonObject&);
+    QJsonObject cmdGetNavtexMessages(const QJsonObject&);
 
     // ---- Phase26: 21 newly tool-ized capabilities -------------------------
     // Network audio tap (ControlHub owns the sink lifecycle; hands it to the

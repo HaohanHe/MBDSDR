@@ -460,6 +460,62 @@ QString execGetM17Calls(const QJsonObject& args, dsp::SpectrumEngine* engine,
     return compact(out);
 }
 
+QString execGetAcarsPackets(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                            const SourceInfo& src) {
+    const int channelId = resolveChannelId(args, engine);
+    const std::vector<dsp::AcarsPacket> pkts = engine->acarsPackets(channelId);
+    QJsonArray arr;
+    for (const dsp::AcarsPacket& p : pkts) {
+        QJsonObject o;
+        const char* dir = "unknown";
+        switch (p.direction) {
+            case dsp::AcarsPacket::Direction::Air:    dir = "air";    break;
+            case dsp::AcarsPacket::Direction::Ground: dir = "ground"; break;
+            default:                                  dir = "unknown"; break;
+        }
+        o["direction"] = QString::fromLatin1(dir);
+        o["mode"]     = QString::fromStdString(p.mode);
+        o["label"]    = QString::fromStdString(p.label);
+        o["block_id"] = QString::fromStdString(p.blockId);
+        o["ack"]      = QString::fromStdString(p.ack);
+        o["text"]     = QString::fromStdString(p.text);
+        o["crc_ok"]   = p.crcOk;   // honest block-check result
+        arr.append(o);
+    }
+    QJsonObject out;
+    out["ok"] = true;
+    out["channel_id"] = channelId;
+    out["count"] = static_cast<int>(arr.size());
+    out["packets"] = arr;   // empty array = honest empty state
+    addSourceFields(out, src);
+    return compact(out);
+}
+
+QString execGetNavtexMessages(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                              const SourceInfo& src) {
+    const int channelId = resolveChannelId(args, engine);
+    const std::vector<dsp::NavtexMessage> msgs = engine->navtexMessages(channelId);
+    QJsonArray arr;
+    for (const dsp::NavtexMessage& m : msgs) {
+        QJsonObject o;
+        o["station"] = QString::fromStdString(m.stationB1);
+        o["type"]    = QString::fromStdString(m.typeB2);
+        o["number"]  = QString::fromStdString(m.numberB3B4);
+        o["text"]    = QString::fromStdString(m.text);
+        o["diversity_ok"] = m.diversityOk;
+        o["phasing_ok"]   = m.phasingOk;
+        o["diversity_errors"] = m.diversityErrors;
+        arr.append(o);
+    }
+    QJsonObject out;
+    out["ok"] = true;
+    out["channel_id"] = channelId;
+    out["count"] = static_cast<int>(arr.size());
+    out["messages"] = arr;
+    addSourceFields(out, src);
+    return compact(out);
+}
+
 QString execGetVorRadial(const QJsonObject& args, dsp::SpectrumEngine* engine,
                          const SourceInfo& src) {
     const int channelId = resolveChannelId(args, engine);
@@ -960,6 +1016,9 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_pocsag_messages", &execGetPocsagMessages},
         {"get_m17_calls", &execGetM17Calls},
         {"get_vor_radial", &execGetVorRadial},
+        // Phase60 packet-text snapshot tools (read-only, append-only order).
+        {"get_acars_packets", &execGetAcarsPackets},
+        {"get_navtex_messages", &execGetNavtexMessages},
         // Phase26: 21 capability tools (append-only, on-wire order kept).
         {"set_network_audio_sink", &execSetNetworkAudioSink},
         {"get_network_audio_status", &execGetNetworkAudioStatus},

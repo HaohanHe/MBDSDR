@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 38);
+    QCOMPARE(specs.size(), 40);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -171,6 +171,16 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "只读：读取指定（默认当前选中）VOR 信道最新径向读数"
             "（radialDeg 方位、质量、莫尔斯识别码、锁定态）。"
             "未锁定时 locked=false，方位不可信并被显式标注，不编造方位。")},
+        {"get_acars_packets",
+         QString::fromUtf8(
+            "只读：读取指定（默认当前选中）信道已解码的 ACARS 航空报文快照"
+            "（方向 air/ground、label、block id、ack、正文、CRC 结果）。"
+            "无解码结果时诚实返回空列表，不编造报文。")},
+        {"get_navtex_messages",
+         QString::fromUtf8(
+            "只读：读取指定（默认当前选中）信道已解码的 NAVTEX 海上安全报文快照"
+            "（发台 B1、类型 B2、编号、正文、时间分集/定相状态）。"
+            "无解码结果时诚实返回空列表，不编造报文。")},
         {"export_iq_segment",
          QString::fromUtf8(
             "写入（一次性）：立即抓取一段当前中心频率的基带 IQ 复样本并导出为 "
@@ -325,7 +335,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 38);
+    QCOMPARE(headerCount, 40);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

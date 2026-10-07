@@ -113,6 +113,7 @@
 #include "ui/pocsag_panel.h"
 #include "ui/m17_panel.h"
 #include "ui/vor_panel.h"
+#include "ui/data_text_panel.h"
 
 namespace mbdsdr {
 
@@ -489,7 +490,7 @@ MainWindow::MainWindow(QWidget* parent)
     demodCombo_ = new QComboBox(gRx);
     demodCombo_->setObjectName("demodCombo");
     demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW", "BPSK", "QPSK", "ADS-B",
-                           "POCSAG", "m17", "VOR"});
+                           "POCSAG", "m17", "VOR", "ACARS", "NAVTEX"});
     demodCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
     gRxLay->addRow("解调", demodCombo_);
     bwCombo_ = new QComboBox(gRx);
@@ -980,6 +981,19 @@ MainWindow::MainWindow(QWidget* parent)
         pocsagPanel_ = new ui::PocsagPanel(pocsagPage);
         pocsagLay->addWidget(pocsagPanel_);
         rightTabs_->addTab(pocsagPage, "寻呼");
+    }
+
+    // ---- Data-message panel (ACARS + NAVTEX; fed by engine list signals) ----
+    // Honest table: rows are the real decoded packets pushed by engine
+    // snapshots; empty vectors = empty state. "清空" asks the engine to
+    // clearDigitalOutputs(selectedVfo).
+    {
+        auto* dataPage = new QWidget;
+        auto* dataLay = new QVBoxLayout(dataPage);
+        dataLay->setContentsMargins(0, 0, 0, 0);
+        dataTextPanel_ = new ui::DataTextPanel(dataPage);
+        dataLay->addWidget(dataTextPanel_);
+        rightTabs_->addTab(dataPage, "数据");
     }
 
     // ---- m17 digital-call panel (fed by engine m17CallsChanged) --------------
@@ -2347,6 +2361,18 @@ MainWindow::MainWindow(QWidget* parent)
     }
     if (m17Panel_) {
         connect(m17Panel_, &ui::M17Panel::clearRequested,
+                this, [this]() { engine_->clearDigitalOutputs(engine_->selectedVfoId()); });
+    }
+    connect(engine_, &dsp::SpectrumEngine::acarsPacketsChanged,
+            this, [this](const std::vector<dsp::AcarsPacket>& pkts) {
+        if (dataTextPanel_) dataTextPanel_->setAcars(pkts);
+    }, Qt::QueuedConnection);
+    connect(engine_, &dsp::SpectrumEngine::navtexMessagesChanged,
+            this, [this](const std::vector<dsp::NavtexMessage>& msgs) {
+        if (dataTextPanel_) dataTextPanel_->setNavtex(msgs);
+    }, Qt::QueuedConnection);
+    if (dataTextPanel_) {
+        connect(dataTextPanel_, &ui::DataTextPanel::clearRequested,
                 this, [this]() { engine_->clearDigitalOutputs(engine_->selectedVfoId()); });
     }
 

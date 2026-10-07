@@ -108,6 +108,7 @@ set(SOURCES
     src/ui/pocsag_panel.cpp
     src/ui/m17_panel.cpp
     src/ui/vor_panel.cpp
+    src/ui/data_text_panel.cpp
     src/dsp/squelch.cpp
     src/dsp/agc.cpp
     src/dsp/audio_output.cpp
@@ -228,6 +229,21 @@ set(HEADERS
     src/ui/radio_panel.h
     src/ui/recording_library.h
 )
+
+# ---- Phase60 packet-text decoders (ACARS + NAVTEX), compiled ONCE --------
+# A small self-contained STATIC archive so the ~30 test targets that compile
+# vfo_manager.cpp resolve AcarsDecoder/NavtexDecoder symbols WITHOUT each
+# adding decoder sources to its explicit source list (which would trigger a
+# heavy per-target recompile). Injected directory-wide via link_libraries();
+# the static linker pulls archive members ONLY to satisfy undefined symbols,
+# so targets without vfo_manager are untouched, and targets that already
+# compile fsk/demod/agc objects use those (no duplicate members).
+add_library(mbdsdr_packet STATIC
+    src/dsp/acars_decoder.cpp src/dsp/navtex_decoder.cpp
+    src/dsp/fsk_demod.cpp src/dsp/demod.cpp src/dsp/agc.cpp)
+target_include_directories(mbdsdr_packet PUBLIC src)
+target_link_libraries(mbdsdr_packet PUBLIC Qt6::Core)
+link_libraries(mbdsdr_packet)
 
 add_executable(mbdsdr ${SOURCES} ${HEADERS})
 target_include_directories(mbdsdr PRIVATE src)
@@ -834,6 +850,19 @@ target_include_directories(test_pocsag_decoder PRIVATE src)
 target_link_libraries(test_pocsag_decoder PRIVATE Qt6::Core)
 add_test(NAME pocsag_decoder COMMAND test_pocsag_decoder)
 
+# Phase60 dedicated packet-text decoder tests (deterministic synthetic IQ,
+# honest empty states). Link the once-built mbdsdr_packet archive.
+add_executable(test_acars_decode tests/test_acars_decode.cpp)
+target_include_directories(test_acars_decode PRIVATE src)
+target_link_libraries(test_acars_decode PRIVATE mbdsdr_packet Qt6::Core)
+add_test(NAME acars_decode COMMAND test_acars_decode)
+
+add_executable(test_navtex_decode tests/test_navtex_decode.cpp)
+target_include_directories(test_navtex_decode PRIVATE src)
+target_link_libraries(test_navtex_decode PRIVATE mbdsdr_packet Qt6::Test Qt6::Core)
+add_test(NAME navtex_decode COMMAND test_navtex_decode)
+set_tests_properties(navtex_decode PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(test_m17_decoder tests/test_m17_decoder.cpp src/dsp/m17_decoder.cpp)
 target_include_directories(test_m17_decoder PRIVATE src)
 target_link_libraries(test_m17_decoder PRIVATE Qt6::Core)
@@ -1210,7 +1239,7 @@ set_tests_properties(weather_panel PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offsc
 # honest empty state (no fabricated message / callsign / bearing), clear() emits
 # clearRequested, and a narrow resize renders without overflow. NOT HARDWARE.
 add_executable(test_digital_panel_ui tests/test_digital_panel_ui.cpp
-    src/ui/pocsag_panel.cpp src/ui/m17_panel.cpp src/ui/vor_panel.cpp)
+    src/ui/pocsag_panel.cpp src/ui/m17_panel.cpp src/ui/vor_panel.cpp src/ui/data_text_panel.cpp)
 target_include_directories(test_digital_panel_ui PRIVATE src)
 target_link_libraries(test_digital_panel_ui PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME digital_panel_ui COMMAND test_digital_panel_ui)
