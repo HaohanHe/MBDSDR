@@ -75,6 +75,9 @@ private slots:
     // ControlHub / HTTP all drive ONE state via vfoSetArmed + set_vfo_armed
     // (index+enabled, resolved through vfoMarkers like the Agent executor).
     void vfoArmedLandAndReadbackSameState();
+    // Read-only pass prediction exposed over ControlHub/HTTP exactly like the
+    // Agent predict_passes tool; honest ok=false when no fresh TLE cache.
+    void predictPassesReadOnlyAndHonestEmpty();
 };
 
 void TestControlHub::initTestCase() {
@@ -826,6 +829,36 @@ void TestControlHub::vfoArmedLandAndReadbackSameState() {
                 QCOMPARE(vv.value("armed").toBool(), false);
         }
     }
+}
+
+// predict_passes over ControlHub is read-only (works with the gate closed) and
+// honest: ok is a real bool, an ok=false always carries an error+source, and an
+// ok=true carries source + a passes array (whatever the TLE cache holds at the
+// moment -- we assert structure, never fabricate a pass).
+void TestControlHub::predictPassesReadOnlyAndHonestEmpty() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // Read passes even with the write gate closed.
+    hub.setWriteEnabled(false);
+    QJsonObject r = parseObj(hub.execute("predict_passes", {
+        {"satellite_name", QStringLiteral("ISS (ZARYA)")},
+        {"station_lat_deg", 43.8}, {"station_lon_deg", 125.3}}));
+    QVERIFY2(r.contains("ok") && r.value("ok").isBool(),
+             qPrintable(r.value("error").toString()));
+    if (r.value("ok").toBool()) {
+        QVERIFY(r.contains("source"));
+        QVERIFY(r.value("passes").isArray());
+    } else {
+        // Honest empty: error text + a source label, never a fabricated pass.
+        QVERIFY(r.contains("error") && !r.value("error").toString().isEmpty());
+        QVERIFY(r.contains("source"));
+    }
+
+    // Bad args (missing satellite name) are still an honest structured result.
+    r = parseObj(hub.execute("predict_passes", {{"station_lat_deg", 43.8}}));
+    QVERIFY(r.value("ok").isBool());
 }
 
 QTEST_MAIN(TestControlHub)
