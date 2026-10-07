@@ -926,6 +926,10 @@ MainWindow::MainWindow(QWidget* parent)
     rightTabs_->setObjectName("rightTabs");
     rightTabs_->setUsesScrollButtons(true);
     rightTabs_->setElideMode(Qt::ElideRight);
+    // The tab bar scrolls, so the rail must be allowed to shrink well below the
+    // "show every tab" preferred width; otherwise at narrow windows the splitter
+    // hands the right rail ~428px and starves the left control rail.
+    rightTabs_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 
     // Insert a non-switchable section-header tab (disabled, styled via QSS
     // QTabBar::tab:disabled) to group the flat right-panel tabs by semantics.
@@ -3676,8 +3680,13 @@ void MainWindow::setFocusMode(bool on, bool animate) {
                 anim->setEndValue(0);
                 anim->start();
             };
-            collapse(left,  focusAnimL_,  left->maximumWidth());
-            collapse(right, focusAnimR_, right->maximumWidth());
+            // Start the collapse from the just-recorded natural width. When the
+            // rail is un-pinned (first launch) its maximumWidth is the huge
+            // default, so animating from that would sit idle until the very end;
+            // leftRailW_/rightRailW_ hold the real visible width. On every other
+            // path maximumWidth()==recorded width, so this is unchanged.
+            collapse(left,  focusAnimL_,  leftRailW_  > 0 ? leftRailW_  : left->maximumWidth());
+            collapse(right, focusAnimR_, rightRailW_ > 0 ? rightRailW_ : right->maximumWidth());
             // Once the width hits 0, drop the widgets entirely so the center
             // spectrum truly takes the full width.
             QTimer::singleShot(tokens::kAnimMedium1, this, [this, left, right]() {
@@ -3697,8 +3706,25 @@ void MainWindow::setFocusMode(bool on, bool animate) {
         left->setVisible(true);
         right->setVisible(true);
         if (!animate) {
-            left->setMaximumWidth(lw);
-            right->setMaximumWidth(rw);
+            if (leftRailW_ > 0 && rightRailW_ > 0) {
+                // Both rails already have a recorded user width: pin exactly that
+                // so the splitter hands them back at the dragged size.
+                left->setMaximumWidth(lw);
+                right->setMaximumWidth(rw);
+            } else {
+                // First launch: no recorded width, so lw/rw were derived from the
+                // pre-layout splitter width (the window has not been shown yet).
+                // Pinning that stale pixel value (≈140px) used to clamp each rail
+                // forever, clipping its controls (device name, frequency, buttons).
+                // Leave the maximum unconstrained so the splitter's symmetric
+                // initial split ({280,800,280}) scales with the later real resize,
+                // instead of being pinned. Do not call setSizes here: any pixel
+                // value computed now is stale and would fight the children's
+                // sizeHints (the right tab bar ballooned when we tried it). The
+                // real natural width is captured on the first fold above.
+                left->setMaximumWidth(QWIDGETSIZE_MAX);
+                right->setMaximumWidth(QWIDGETSIZE_MAX);
+            }
         } else {
             auto expand = [this](QWidget* w, QPropertyAnimation*& anim, int to) {
                 if (!anim) {
@@ -3885,6 +3911,17 @@ void MainWindow::restoreUiState() {
         if (focusBtn_) focusBtn_->blockSignals(true);
         setFocusMode(focus, /*animate=*/false);
         if (focusBtn_) focusBtn_->blockSignals(false);
+    }
+
+    // First launch (no persisted splitter geometry): restoreUiState runs in the
+    // constructor, before show(), so mainSplitter_->width() here is still the
+    // pre-layout value -- sizing the rails to it would re-pin them to a stale
+    // ~140px. Defer to the next event-loop turn (after the window has its real
+    // size) and apply the same 0.22/0.56/0.22 ratio the handle double-click uses.
+    // Users who previously dragged the splitter keep their saved layout
+    // (splitterState non-empty), so this never overrides a personal arrangement.
+    if (mainSplitter_ && splitterState.isEmpty()) {
+        QTimer::singleShot(0, this, [this]() { resetSplitterRatios(); });
     }
 
     // Unblock.
