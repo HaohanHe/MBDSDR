@@ -892,6 +892,22 @@ QJsonObject ControlHub::cmdGetCapabilities(const QJsonObject&) {
     o["tunable_max_hz"] = c.tunableMaxHz;
     o["sample_rate_min_hz"] = c.sampleRateMinHz;
     o["sample_rate_max_hz"] = c.sampleRateMaxHz;
+    // Real discrete gain steps from the ACTIVE source; EMPTY for rtl_tcp / test /
+    // file sources -- never a fabricated step table.
+    std::vector<double> gains = engine_->availableGainsDb();
+    QJsonArray gainArr;
+    for (double g : gains) gainArr.append(g);
+    o["gains_db"] = gainArr;
+    // Honest provenance: the struct carries the real source note; a synthetic test
+    // source must be explicitly labelled (the empty-state note does not
+    // distinguish "synthetic" from "truly unplugged"). A fresh engine whose caps
+    // snapshot is not yet filled leaves provenance empty -> honest "未连接".
+    QString provenance = c.provenance;
+    if (engine_->isTestSignalActive())
+        provenance = QString::fromUtf8("测试信号源（非硬件，能力表为空）");
+    else if (!c.connected && provenance.isEmpty())
+        provenance = QString::fromUtf8("未连接");
+    o["provenance"] = provenance;
     return o;
 }
 
@@ -918,13 +934,16 @@ QJsonObject ControlHub::cmdGetVfos(const QJsonObject&) {
 }
 
 QJsonObject ControlHub::cmdGetRecordingState(const QJsonObject&) {
-    TelemetrySnapshot snap = telemetry();
+    // `recording` is derived from the live recording path (empty = not recording),
+    // which is deterministic and does not wait for the recordingStateChanged signal
+    // to have fired. watch/dir are real engine getters. Never fabricated.
+    const QString path = engine_->recordingPath();
     QJsonObject o = okBase();
     o["command"] = "get_recording_state";
-    // The engine always knows the current recording path; the recording bool
-    // comes from the recordingStateChanged signal (false until it fires).
-    o["recording"] = snap.recording;
-    o["path"] = engine_->recordingPath();
+    o["recording"] = !path.isEmpty();
+    o["recording_path"] = path;
+    o["watch_enabled"] = engine_->watchEnabled();
+    o["recording_dir"] = engine_->recordingDir();
     return o;
 }
 

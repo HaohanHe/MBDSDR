@@ -1083,6 +1083,56 @@ QString execConnectNetworkSource(const QJsonObject& args, dsp::SpectrumEngine* e
     return compact(o);
 }
 
+// READ-ONLY: real source capability read-back (device name, tunable / sample-rate
+// range, discrete gain steps) straight off the ACTIVE source. Honest empty state:
+// an offline / test / unconnected source reports connected=false, an EMPTY gains
+// array, and an honest provenance note -- we never fabricate a tunable range or a
+// gain step table (the engine itself leaves those at 0 / empty for non-real sources).
+QString execGetCapabilities(const QJsonObject&, dsp::SpectrumEngine* engine,
+                            const SourceInfo& src) {
+    const dsp::DeviceCapabilities c = engine->sourceCapabilities();
+    QJsonArray gains;
+    for (double g : engine->availableGainsDb()) gains.append(g);   // empty when no real source
+    // The struct carries the real source note, but a synthetic test source must
+    // be explicitly labelled: the empty-state provenance does not distinguish
+    // "synthetic" from "truly unplugged", so say so honestly. A fresh engine whose
+    // caps snapshot has not been filled yet leaves provenance empty -> honest
+    // "未连接" rather than a blank.
+    QString provenance = c.provenance;
+    if (src.testSignal)
+        provenance = QString::fromUtf8("测试信号源（非硬件，能力表为空）");
+    else if (!c.connected && provenance.isEmpty())
+        provenance = QString::fromUtf8("未连接");
+    QJsonObject o;
+    o["ok"] = true;
+    o["connected"] = c.connected;
+    o["device_name"] = c.deviceName;
+    o["tunable_min_hz"] = c.tunableMinHz;
+    o["tunable_max_hz"] = c.tunableMaxHz;
+    o["sample_rate_min_hz"] = c.sampleRateMinHz;
+    o["sample_rate_max_hz"] = c.sampleRateMaxHz;
+    o["gains_db"] = gains;
+    o["provenance"] = provenance;
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// READ-ONLY: recording state straight off the engine. `recording` is derived from
+// the live recording path (empty = not recording), which is deterministic and
+// does not wait for a state-changed signal. watch/dir are real engine getters.
+QString execGetRecordingState(const QJsonObject&, dsp::SpectrumEngine* engine,
+                              const SourceInfo& src) {
+    const QString path = engine->recordingPath();
+    QJsonObject o;
+    o["ok"] = true;
+    o["recording"] = !path.isEmpty();
+    o["recording_path"] = path;
+    o["watch_enabled"] = engine->watchEnabled();
+    o["recording_dir"] = engine->recordingDir();
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // The built-in tool registry: name -> executor. Learned (mechanism only) from
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
 // instead of an if-else chain. Clean-room reimplementation; no GPL code copied.
@@ -1140,6 +1190,9 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_spectrum_status", &execGetSpectrumStatus},
         {"set_doppler_compensation", &execSetDopplerCompensation},
         {"connect_network_source", &execConnectNetworkSource},
+        // Read-only source-capability + recording-state snapshots (honest empty).
+        {"get_capabilities", &execGetCapabilities},
+        {"get_recording_state", &execGetRecordingState},
     };
     return kTable;
 }

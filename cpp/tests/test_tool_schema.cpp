@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 43);
+    QCOMPARE(specs.size(), 45);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -290,6 +290,18 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "写入：连接 rtl_tcp 网络接收机（host/port）。"
             "真实 TCP 握手+RTL0 设备头；失败返回真实 socket 原因并回到空态，不伪造 IQ。"
             "属于写动作，手动模式下被拦截。")},
+        // Read-only capability/recording-state snapshot tools (must match
+        // tool_schema.cpp on-wire order; appended last).
+        {"get_capabilities",
+         QString::fromUtf8(
+            "只读：返回当前源的真实能力（设备名、可调谐频率范围、采样率范围、离散增益档 gains_db）。"
+            "未连接或测试信号源时诚实返回 connected=false、空增益档数组与来源说明 provenance，"
+            "不编造调谐范围或增益表。")},
+        {"get_recording_state",
+         QString::fromUtf8(
+            "只读：返回录制状态（recording 是否在手动录制中、recording_path 当前路径、"
+            "watch_enabled 值守录制是否使能、recording_dir 录制目录）。"
+            "未录制时诚实返回 recording=false、空路径，不伪造。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {
@@ -346,7 +358,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 43);
+    QCOMPARE(headerCount, 45);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));
