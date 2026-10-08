@@ -679,6 +679,22 @@ target_include_directories(test_spectrum_maxhold PRIVATE src)
 target_link_libraries(test_spectrum_maxhold PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME spectrum_maxhold COMMAND test_spectrum_maxhold)
 
+# Min-hold envelope (running per-bin minimum, no decay) -- mirrors the maxhold
+# suite; offscreen, drives setSpectrum and reads the test-seam envelope.
+add_executable(test_spectrum_minhold tests/test_spectrum_minhold.cpp)
+target_link_libraries(test_spectrum_minhold PRIVATE mbdsdr_core)
+target_include_directories(test_spectrum_minhold PRIVATE src)
+target_link_libraries(test_spectrum_minhold PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME spectrum_minhold COMMAND test_spectrum_minhold)
+
+# Auto peak table panel (SpectrumWidget): row population from synthetic carriers,
+# click-a-row -> peakTuned, and the honest no-signal empty state.
+add_executable(test_spectrum_peaktbl tests/test_spectrum_peaktbl.cpp)
+target_link_libraries(test_spectrum_peaktbl PRIVATE mbdsdr_core)
+target_include_directories(test_spectrum_peaktbl PRIVATE src)
+target_link_libraries(test_spectrum_peaktbl PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME spectrum_peaktbl COMMAND test_spectrum_peaktbl)
+
 # AI integration test: SKIPs without MBDSDR_AI_KEY env (never FAILs offline).
 # llm_client.cpp now calls the M3 protocol layer and includes core/tokens.h
 # (which pulls QtGui), so link llm_protocol.cpp + Qt6::Gui here.

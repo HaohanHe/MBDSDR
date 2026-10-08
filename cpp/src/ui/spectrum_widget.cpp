@@ -162,6 +162,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     topRow->addWidget(avgCombo);
 
     auto* maxHoldChk = new QCheckBox("Max", this);
+    maxHoldChk->setObjectName("maxHoldChk");
     connect(maxHoldChk, &QCheckBox::toggled,
             this, &SpectrumWidget::setMaxHoldEnabled);
     topRow->addWidget(maxHoldChk);
@@ -170,6 +171,17 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         if (canvas_) canvas_->clearMaxHold();
     });
     topRow->addWidget(maxRst);
+
+    // ---- Min-hold overlay (symmetric to Max above) ------------------------
+    // A second trace overlay: the running per-bin minimum (no decay). Independent
+    // of max-hold so both can be on together. Toggling it off then on re-arms a
+    // fresh envelope (the canvas handles re-seeding).
+    auto* minHoldChk = new QCheckBox("Min", this);
+    minHoldChk->setObjectName("minHoldChk");
+    minHoldChk->setToolTip("最小保持：叠加每帧最低电平包络线");
+    connect(minHoldChk, &QCheckBox::toggled,
+            this, &SpectrumWidget::setMinHoldEnabled);
+    topRow->addWidget(minHoldChk);
 
     // ---- Persistence (余晖): 关/低/高 + clear ----------------------------
     topRow->addWidget(new QLabel("余晖", this));
@@ -382,9 +394,13 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
             this, &SpectrumWidget::saveFixedMarkers);
     canvas_->setFocusPolicy(Qt::StrongFocus);
 
-    // ---- Bottom peak table -------------------------------------------------
+    // ---- Bottom peak table (auto signal list) ------------------------------
+    // Columns: # | frequency (MHz) | power (dBFS) | offset from dial (Δ kHz).
+    // The Δ column is the signed distance of the carrier from the tuned
+    // frequency -- a single click tunes the receiver there (peakTuned).
     peakTable_ = new QTableWidget(0, 4, this);
-    peakTable_->setHorizontalHeaderLabels({"#", "频率(MHz)", "强度(dBFS)", "带宽(kHz)"});
+    peakTable_->setObjectName("peakTable");
+    peakTable_->setHorizontalHeaderLabels({"#", "频率(MHz)", "强度(dBFS)", "Δ(kHz)"});
     peakTable_->horizontalHeader()->setStretchLastSection(true);
     peakTable_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     peakTable_->verticalHeader()->setVisible(false);
@@ -392,14 +408,12 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     peakTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     peakTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     peakTable_->setFixedHeight(tokens::scaled(tokens::kPeakTableH));
+    // A single click on a row tunes to that carrier (SDR++ signal-list click);
+    // a double click does the same (kept as an alias for power users).
+    connect(peakTable_, &QTableWidget::cellClicked,
+            this, [this](int row, int) { activatePeakRow(row); });
     connect(peakTable_, &QTableWidget::cellDoubleClicked,
-            this, [this](int row, int) {
-        auto* item = peakTable_->item(row, 1);
-        if (!item) return;
-        bool ok = false;
-        const double mhz = item->data(Qt::UserRole).toDouble(&ok);
-        if (ok && canvas_) canvas_->tuneAndCenter(mhz * 1e6);
-    });
+            this, [this](int row, int) { activatePeakRow(row); });
     connect(peakTable_, &QTableWidget::currentCellChanged,
             this, [this](int row, int, int, int) {
         if (canvas_) canvas_->setHighlightedPeak(row);
@@ -446,13 +460,22 @@ void SpectrumWidget::rebuildPeakTable(const QList<mbdsdr::dsp::PeakInfo>& peaks,
     peakTable_->setRowCount(0);
 
     if (peaks.isEmpty()) {
+        // Honest empty state: a pure-noise / no-frame band shows one spanned row
+        // saying there is nothing above the detection gate -- never a blank grid
+        // and never an invented row.
         peakTable_->setRowCount(1);
         peakTable_->setSpan(0, 0, 1, 4);
-        auto* it = new QTableWidgetItem(QStringLiteral("未检测到信号"));
+        auto* it = new QTableWidgetItem(QStringLiteral("无信号峰值（纯噪声）"));
+        it->setTextAlignment(Qt::AlignCenter);
         it->setFlags(Qt::NoItemFlags);
         peakTable_->setItem(0, 0, it);
         return;
     }
+    // Authoritative rows (with the signed Δ vs the tuned frequency) come from
+    // the canvas's matured PeakEntry list, which is in the SAME order as the
+    // (peaks, ids) signal this was called with.
+    const std::vector<ui::SpectrumDisplay::PeakEntry> entries =
+        canvas_ ? canvas_->peaks() : std::vector<ui::SpectrumDisplay::PeakEntry>{};
     for (int k = 0; k < peaks.size(); ++k) {
         const auto& pk = peaks[k];
         const int row = peakTable_->rowCount();
@@ -464,9 +487,27 @@ void SpectrumWidget::rebuildPeakTable(const QList<mbdsdr::dsp::PeakInfo>& peaks,
         peakTable_->setItem(row, 1, fItem);
         peakTable_->setItem(row, 2,
             new QTableWidgetItem(QString("%1").arg(pk.dbfs, 0, 'f', 1)));
+        // Signed offset from the tuned frequency, in kHz. Falls back to 0 when
+        // the authoritative entry is unavailable (size-mismatch guard).
+        const double dkHz = (k < static_cast<int>(entries.size()))
+                                ? entries[k].deltaHz / 1e3 : 0.0;
         peakTable_->setItem(row, 3,
-            new QTableWidgetItem(QString("%1").arg(pk.bandwidthHz / 1e3, 0, 'f', 2)));
+            new QTableWidgetItem(QString("%1%2").arg(dkHz >= 0 ? "+" : "")
+                                                    .arg(dkHz, 0, 'f', 1)));
     }
+}
+
+void SpectrumWidget::activatePeakRow(int row) {
+    if (!canvas_) return;
+    if (row < 0) return;
+    auto* item = peakTable_->item(row, 1);
+    if (!item) return;
+    bool ok = false;
+    const double mhz = item->data(Qt::UserRole).toDouble(&ok);
+    if (!ok) return;
+    const double hz = mhz * 1e6;
+    canvas_->tuneAndCenter(hz);   // recentre the view locally (no engine call)
+    emit peakTuned(hz);           // the container retunes the selected VFO
 }
 
 void SpectrumWidget::setSpectrum(const SpectrumFrame& frame) {
@@ -536,6 +577,10 @@ void SpectrumWidget::setFftSizeValue(int n) {
 
 void SpectrumWidget::setMaxHoldEnabled(bool on) {
     if (canvas_) canvas_->setMaxHoldEnabled(on);
+}
+
+void SpectrumWidget::setMinHoldEnabled(bool on) {
+    if (canvas_) canvas_->setMinHoldEnabled(on);
 }
 
 void SpectrumWidget::setScrollSpeed(int linesPerFrame) {

@@ -16,7 +16,9 @@
 #include <QSplitter>
 #include <cstdlib>
 #include "core/tokens.h"
+#include "core/spectrum_frame.h"
 #include "ui/main_window.h"
+#include "ui/spectrum_widget.h"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
@@ -65,6 +67,47 @@ int main(int argc, char** argv) {
                 sa->ensureWidgetVisible(w);
                 sa->horizontalScrollBar()->setValue(0);   // no left-offset artifact
             }
+        }
+    }
+
+    // Optional: feed deterministic synthetic carriers straight into the spectrum
+    // canvas (MBD_PEAKSHOT=1) so the auto peak table renders real detected rows
+    // -- frequency / power / signed-Δ -- instead of sitting on the no-source
+    // blank. Pure offline test signal, clearly labelled by the existing banner;
+    // off by default so every other screenshot is unchanged.
+    mbdsdr::ui::SpectrumWidget* sw = nullptr;
+    if (qgetenv("MBD_PEAKSHOT").size()) {
+        for (auto* tb : win.findChildren<QTabWidget*>()) {
+            for (int i = 0; i < tb->count(); ++i)
+                if (tb->tabText(i) == QString::fromUtf8("频谱"))
+                    sw = qobject_cast<mbdsdr::ui::SpectrumWidget*>(tb->widget(i));
+        }
+        if (sw) {
+            const int bins = 512;
+            const double fs = 2.4e6, f0 = 98.5e6;
+            auto frame = [&](int c1, float d1, int c2, float d2) {
+                mbdsdr::SpectrumFrame fr;
+                fr.sampleRateHz = fs;
+                fr.centerFreqHz = f0;
+                fr.fftSize = bins;
+                fr.dbfs.assign(bins, -100.0f);
+                for (int c = 0; c < 2; ++c) {
+                    const int b = (c == 0) ? c1 : c2;
+                    const float db = (c == 0) ? d1 : d2;
+                    if (b < 2 || b >= bins - 2) continue;
+                    fr.dbfs[b] = db;
+                    fr.dbfs[b - 1] = db - 4.0f;
+                    fr.dbfs[b + 1] = db - 4.0f;
+                    fr.dbfs[b - 2] = db - 10.0f;
+                    fr.dbfs[b + 2] = db - 10.0f;
+                }
+                fr.sourceName = "test";
+                fr.isTestSignal = true;
+                return fr;
+            };
+            // Repeat >= kPeakMinSeenFrames so the carriers mature into rows.
+            for (int i = 0; i < 6; ++i)
+                sw->setSpectrum(frame(180, -22.0f, 340, -38.0f));
         }
     }
 

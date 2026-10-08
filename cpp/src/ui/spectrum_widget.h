@@ -52,6 +52,8 @@ public slots:
     void setFftSizeValue(int n);
 
     void setMaxHoldEnabled(bool on);
+    // Forward: arm/disarm the running minimum (min-hold) overlay envelope.
+    void setMinHoldEnabled(bool on);
 
     // Waterfall controls (originally the standalone wfBar).
     void setScrollSpeed(int linesPerFrame);
@@ -71,6 +73,12 @@ signals:
     void bandwidthChanged(double newBandwidthHz);
     void visibleRangeChanged(double fLoHz, double fHiHz);
     void viewChanged();
+
+    /// Emitted when the user clicks a row of the auto peak table: the container
+    /// tunes the selected VFO to that carrier's frequency (the canvas itself has
+    /// already recentred its view). Honest -- only ever carries a real detected
+    /// peak frequency, never an invented one.
+    void peakTuned(double freqHz);
 
     // Multi-VFO interaction.
     void vfoMarkerSelected(int id);
@@ -93,6 +101,9 @@ private:
     // Rebuild the peak table from the canvas's matured, tracked peak list.
     void rebuildPeakTable(const QList<mbdsdr::dsp::PeakInfo>& peaks,
                           const QList<int>& ids);
+    // A table row was activated (single click / double click): recentre the
+    // canvas on the carrier and forward the real frequency as peakTuned().
+    void activatePeakRow(int row);
     // Persist / restore the user's fixed markers (default empty) via QSettings.
     void saveFixedMarkers();
     void loadFixedMarkers();
