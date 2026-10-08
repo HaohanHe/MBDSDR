@@ -145,6 +145,46 @@ int main(int argc, char** argv) {
             sw->displayCanvas()->setBookmarkHz({98.0e6, 99.0e6});
     }
 
+    // Optional: fill the waterfall history and pin a known seconds-per-row so the
+    // vertical time axis ("now" at the top, "-Ns" counting seconds down) renders
+    // deterministically for the layout shot. Offscreen frames fed in a tight loop
+    // measure ~0 inter-frame gap, so the production EWMA (honestly) stays silent;
+    // this gate pins the same row period the live engine would converge to. Pure
+    // display demo data -- off by default so every other screenshot is unchanged.
+    if (qgetenv("MBD_WATERTICK").size()) {
+        if (!sw) {   // resolve the spectrum tab if PEAKSHOT did not already
+            for (auto* tb : win.findChildren<QTabWidget*>())
+                for (int i = 0; i < tb->count(); ++i)
+                    if (tb->tabText(i) == QString::fromUtf8("频谱"))
+                        sw = qobject_cast<mbdsdr::ui::SpectrumWidget*>(tb->widget(i));
+        }
+        if (sw && sw->displayCanvas()) {
+            mbdsdr::ui::SpectrumDisplay* cv = sw->displayCanvas();
+            const int bins = 512;
+            auto frame = [&](int c1, float d1) {
+                mbdsdr::SpectrumFrame fr;
+                fr.sampleRateHz = 2.4e6;
+                fr.centerFreqHz = 98.5e6;
+                fr.fftSize = bins;
+                fr.dbfs.assign(bins, -100.0f);
+                if (c1 >= 2 && c1 < bins - 2) {
+                    fr.dbfs[c1] = d1;
+                    fr.dbfs[c1 - 1] = d1 - 4.0f;
+                    fr.dbfs[c1 + 1] = d1 - 4.0f;
+                    fr.dbfs[c1 - 2] = d1 - 10.0f;
+                    fr.dbfs[c1 + 2] = d1 - 10.0f;
+                }
+                fr.sourceName = "test";
+                fr.isTestSignal = true;
+                return fr;
+            };
+            // Fill the whole rolling ring so the time axis spans its full depth.
+            for (int i = 0; i < 256; ++i)
+                cv->setSpectrum(frame(180, -22.0f));
+            cv->setSecondsPerRowForTest(0.05);   // 256 rows => ~12.8 s history
+        }
+    }
+
     QTimer::singleShot(1200, [&]() {
         if (qEnvironmentVariableIntValue("MBD_DUMP") > 0) {
             for (const char* nm : {"netAudioHostEdit", "netAudioPortSpin",
