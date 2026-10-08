@@ -20,6 +20,7 @@
 #include "ui/main_window.h"
 #include "ui/spectrum_widget.h"
 #include "ui/spectrum_display.h"
+#include "ui/bookmark_manager.h"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
@@ -39,6 +40,12 @@ int main(int argc, char** argv) {
     // flexibility checks; defaults preserve the original 820x640.
     const int w = qEnvironmentVariableIntValue("MBD_W");
     const int h = qEnvironmentVariableIntValue("MBD_H");
+    // Harness escape hatch: the production floor tokens::kMainMinW keeps the app
+    // readable, but this narrow-adaptation harness exists to check layouts BELOW
+    // that floor. An explicit MBD_W under the floor lifts the minimum here
+    // (screenshot harness only; production keeps its tokenized floor).
+    if (w > 0 && w < mbdsdr::tokens::kMainMinW)
+        win.setMinimumSize(0, 0);
     win.resize(w > 0 ? w : 820, h > 0 ? h : 640);
     win.show();
 
@@ -143,6 +150,27 @@ int main(int argc, char** argv) {
         }
         if (sw && sw->displayCanvas())
             sw->displayCanvas()->setBookmarkHz({98.0e6, 99.0e6});
+    }
+
+    // Optional: seed three groups of bookmarks (MBD_BMKGROUP=1) straight into the
+    // real BookmarkManager so the grouped bookmark table renders its section
+    // headers ("默认 (N)" / "组名 (N)") on the 扫描/书签 tab. Real store + the
+    // real refresh path; the throwaway QSettings path at the top keeps this off
+    // the user's persisted data. Off by default so every other screenshot is
+    // unchanged.
+    if (qgetenv("MBD_BMKGROUP").size()) {
+        if (auto* bm = win.bookmarkManager()) {
+            bm->clear();
+            const mbdsdr::ui::Bookmark rows[] = {
+                {"本地调频", 98.5e6,   "WFM", 120000.0, ""    },
+                {"航空警戒", 121.5e6,  "AM",  8000.0,   "AIR" },
+                {"航空导航", 118.0e6,  "AM",  8000.0,   "AIR" },
+                {"VHF 直频", 144.8e6,  "NFM", 12500.0,  "VHF" },
+                {"VHF 中继", 145.6e6,  "NFM", 12500.0,  "VHF" },
+            };
+            for (const auto& r : rows) bm->add(r);
+            win.refreshScanBookmarksUi();
+        }
     }
 
     // Optional: fill the waterfall history and pin a known seconds-per-row so the

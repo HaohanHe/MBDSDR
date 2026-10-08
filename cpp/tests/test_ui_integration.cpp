@@ -62,6 +62,10 @@ private slots:
     void aiStreamingPartialReplacesTransientNoDup();
     void aiSessionSwitcherCrud();
     void scanHitSaveBookmarkThenJump();
+    // Phase63: grouped bookmark table -- section headers per group, honest empty
+    // state, UserRole keeps visual-row -> store-index mapping, retune on the
+    // grouped layout, and a group re-assign rebuilds the partitions.
+    void bmGroupedViewSectionsEmptyStateAndIndexMapping();
     void squelchAutoFollowsSameDomainFloor();
     void vfoCopyDuplicatesSourceParams();
     void vfoDoubleClickSwitchesActive();
@@ -273,11 +277,101 @@ void TestUiIntegration::scanHitSaveBookmarkThenJump() {
     QVERIFY2(!saved.mode.isEmpty(), "bookmark mode must be captured live");
 
     // Stop the scan so it stops retuning, then double-click the row -> tune here.
+    // Grouped layout: the visual row no longer equals the store index; resolve
+    // the table row that carries this bookmark's store index in UserRole.
     win.scanner()->stop();
+    int visualRow = -1;
+    for (int v = 0; v < bmTable->rowCount(); ++v) {
+        auto* it = bmTable->item(v, 0);
+        if (it && it->data(Qt::UserRole).toInt() == row) { visualRow = v; break; }
+    }
+    QVERIFY2(visualRow >= 0, "the saved bookmark must have a selectable table row");
     QMetaObject::invokeMethod(bmTable, "cellDoubleClicked", Qt::DirectConnection,
-                             Q_ARG(int, row), Q_ARG(int, 0));
+                             Q_ARG(int, visualRow), Q_ARG(int, 0));
     QVERIFY2(std::abs(win.engine()->centerFreq() - hitF) < 5000.0,
              "double-clicking the bookmark row must tune the engine to hit freq");
+}
+
+// Phase63 grouped bookmark view: data comes only from the real BookmarkManager.
+// Empty store -> one honest 暂无书签 row. Seeded store -> one section header row
+// per group ("默认 (N)" for the empty group, "组名 (N)" otherwise) plus that
+// group's bookmark rows; data rows carry their store index in UserRole so the
+// grouped layout can't drift the index-keyed wiring; a group re-assign rebuilds
+// the partitions with fresh indices.
+void TestUiIntegration::bmGroupedViewSectionsEmptyStateAndIndexMapping() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    auto* bmTable = win.findChild<QTableWidget*>("bmTable");
+    auto* bm = win.bookmarkManager();
+    QVERIFY(bmTable && bm);
+
+    // Honest empty state: cleared store -> exactly one non-interactive hint row.
+    bm->clear();
+    win.refreshScanBookmarksUi();
+    QCOMPARE(bm->count(), 0);
+    QCOMPARE(bmTable->rowCount(), 1);
+    QVERIFY2(bmTable->item(0, 0)->text().contains(QString::fromUtf8("暂无书签")),
+             "empty store must show the honest 暂无书签 row");
+    QCOMPARE(bmTable->item(0, 0)->data(Qt::UserRole).toInt(), -2);
+
+    // Seed three groups (default "" + AIR + VHF) through the real manager.
+    bm->add(ui::Bookmark{"默认台",  98.5e6,   "WFM", 120000.0, ""    });
+    bm->add(ui::Bookmark{"航空",    127.6e6,  "AM",  8000.0,   "AIR" });
+    bm->add(ui::Bookmark{"Simplex", 144.8e6,  "NFM", 12500.0,  "VHF" });
+    bm->add(ui::Bookmark{"中继",    145.05e6, "NFM", 12500.0,  "VHF" });
+    win.refreshScanBookmarksUi();
+
+    // Layout: 3 section headers + 4 data rows = 7 visual rows.
+    QCOMPARE(bm->count(), 4);
+    QCOMPARE(bmTable->rowCount(), 7);
+    // Section headers at visual rows 0 (默认), 2 (AIR), 4 (VHF); UserRole -1.
+    QVERIFY2(bmTable->item(0, 0)->text().contains(QString::fromUtf8("默认 (1)")),
+             qPrintable(QString("default group header must read 默认 (1), got: %1")
+                            .arg(bmTable->item(0, 0)->text())));
+    QCOMPARE(bmTable->item(2, 0)->text(), QStringLiteral("AIR (1)"));
+    QCOMPARE(bmTable->item(4, 0)->text(), QStringLiteral("VHF (2)"));
+    QCOMPARE(bmTable->item(0, 0)->data(Qt::UserRole).toInt(), -1);
+    QCOMPARE(bmTable->item(2, 0)->data(Qt::UserRole).toInt(), -1);
+    QCOMPARE(bmTable->item(4, 0)->data(Qt::UserRole).toInt(), -1);
+    // Data rows carry their store index; visual row != store index now.
+    // list() order: 默认98.5=0, AIR127.6=1, VHF144.8=2, VHF145.05=3.
+    QCOMPARE(bmTable->item(1, 0)->data(Qt::UserRole).toInt(), 0);
+    QCOMPARE(bmTable->item(3, 0)->data(Qt::UserRole).toInt(), 1);
+    QCOMPARE(bmTable->item(5, 0)->data(Qt::UserRole).toInt(), 2);
+    QCOMPARE(bmTable->item(6, 0)->data(Qt::UserRole).toInt(), 3);
+    QCOMPARE(bmTable->item(5, 1)->text(), QStringLiteral("144.800"));
+
+    // Grouped-view double-click on visual row 5 (store idx 2) retunes really.
+    win.scanner()->stop();
+    QMetaObject::invokeMethod(bmTable, "cellDoubleClicked", Qt::DirectConnection,
+                             Q_ARG(int, 5), Q_ARG(int, 0));
+    QVERIFY2(std::abs(win.engine()->centerFreq() - 144.8e6) < 5000.0,
+             "grouped-view double-click must resolve the store index and retune");
+    // Double-clicking a section header row (visual 4) is a honest no-op.
+    const double beforeHz = win.engine()->centerFreq();
+    QMetaObject::invokeMethod(bmTable, "cellDoubleClicked", Qt::DirectConnection,
+                             Q_ARG(int, 4), Q_ARG(int, 0));
+    QVERIFY2(std::abs(win.engine()->centerFreq() - beforeHz) < 1.0,
+             "double-clicking a section header must not retune");
+
+    // Re-assign store index 2 (144.8e6) into the default group -> partitions
+    // rebuild: 默认 (2), AIR (1), VHF (1) = still 3 headers + 4 rows.
+    ui::Bookmark edited = bm->list().at(2);
+    edited.group = "";
+    bm->update(2, edited);
+    win.refreshScanBookmarksUi();
+    QCOMPARE(bmTable->rowCount(), 7);
+    QVERIFY2(bmTable->item(0, 0)->text().contains(QString::fromUtf8("默认 (2)")),
+             qPrintable(QString("re-group must rebuild 默认 (2), got: %1")
+                            .arg(bmTable->item(0, 0)->text())));
+    QCOMPARE(bmTable->item(3, 0)->text(), QStringLiteral("AIR (1)"));
+    QCOMPARE(bmTable->item(5, 0)->text(), QStringLiteral("VHF (1)"));
+    // Fresh list order: 默认98.5=0, 默认144.8=1, AIR127.6=2, VHF145.05=3.
+    QCOMPARE(bmTable->item(1, 0)->data(Qt::UserRole).toInt(), 0);
+    QCOMPARE(bmTable->item(2, 0)->data(Qt::UserRole).toInt(), 1);
+    QCOMPARE(bmTable->item(4, 0)->data(Qt::UserRole).toInt(), 2);
+    QCOMPARE(bmTable->item(6, 0)->data(Qt::UserRole).toInt(), 3);
 }
 
 void TestUiIntegration::squelchAutoFollowsSameDomainFloor() {

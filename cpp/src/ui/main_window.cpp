@@ -1603,7 +1603,9 @@ MainWindow::MainWindow(QWidget* parent)
         }
     });
     connect(bmEditBtn_, &QPushButton::clicked, this, [this, bmDialog, resyncScanBookmarks]() {
-        int row = bmTable_->currentRow();
+        // Grouped layout: visual row -> store index through the row's UserRole;
+        // section header / empty-state rows resolve to -1 and refuse honestly.
+        const int row = bmStoreIndexAtVisualRow(bmTable_->currentRow());
         if (row < 0 || row >= bookmarkManager_->list().size()) return;
         ui::Bookmark bm = bookmarkManager_->list().at(row);
         if (bmDialog(bm, bm)) {
@@ -1613,7 +1615,7 @@ MainWindow::MainWindow(QWidget* parent)
         }
     });
     connect(bmDelBtn_, &QPushButton::clicked, this, [this, resyncScanBookmarks]() {
-        int row = bmTable_->currentRow();
+        const int row = bmStoreIndexAtVisualRow(bmTable_->currentRow());
         if (row < 0) return;
         bookmarkManager_->removeAt(row);
         refreshBmTable();
@@ -1636,10 +1638,12 @@ MainWindow::MainWindow(QWidget* parent)
             resyncScanBookmarks();
         }
     });
-    // Double-click row = jump directly (no edit dialog).
+    // Double-click row = jump directly (no edit dialog). Section header rows
+    // resolve to -1 via the UserRole mapping and are a no-op.
     connect(bmTable_, &QTableWidget::cellDoubleClicked, this, [this](int row, int) {
-        if (row < 0 || row >= bookmarkManager_->list().size()) return;
-        const ui::Bookmark& b = bookmarkManager_->list().at(row);
+        const int idx = bmStoreIndexAtVisualRow(row);
+        if (idx < 0 || idx >= bookmarkManager_->list().size()) return;
+        const ui::Bookmark& b = bookmarkManager_->list().at(idx);
         engine_->onSetCenterFreq(b.frequencyHz);
         if (!b.mode.isEmpty()) engine_->setDemodMode(b.mode);
         if (b.bandwidthHz > 0) engine_->setBandwidth(b.bandwidthHz);
@@ -3332,20 +3336,89 @@ void MainWindow::refreshBmTable() {
     if (!bmTable_) return;
     bmTable_->setRowCount(0);
     const auto& items = bookmarkManager_->list();
-    for (const auto& b : items) {
+
+    // Honest empty state: no persisted bookmarks -> exactly one non-interactive
+    // hint row (UserRole -2), never a fabricated station.
+    if (items.isEmpty()) {
         const int row = bmTable_->rowCount();
         bmTable_->insertRow(row);
-        auto set = [&](int col, const QString& text) {
-            bmTable_->setItem(row, col, new QTableWidgetItem(text));
-        };
-        set(0, b.name);
-        set(1, QString::number(b.frequencyHz / 1e6, 'f', 3));
-        set(2, b.mode);
-        set(3, b.bandwidthHz > 0.0 ? QString::number(b.bandwidthHz / 1e3, 'f', 1)
-                                   : QString(""));
-        // Group column: empty storage renders as "默认" in the table only.
-        set(4, b.group.isEmpty() ? QString("默认") : b.group);
+        auto* empty = new QTableWidgetItem(QString::fromUtf8("暂无书签"));
+        empty->setFlags(Qt::ItemIsEnabled);          // not selectable / editable
+        empty->setData(Qt::UserRole, -2);            // empty-state marker
+        empty->setTextAlignment(Qt::AlignCenter);
+        empty->setForeground(QBrush(tokens::rgbaA(tokens::kTextAlphaTertiary)));
+        for (int c = 0; c < bmTable_->columnCount(); ++c)
+            bmTable_->setItem(row, c, c == 0 ? empty : new QTableWidgetItem);
+        return;
     }
+
+    // Grouped view: one non-interactive section header row per group
+    // ("组名 (N)"; the empty default group renders as "默认"), followed by that
+    // group's bookmark rows, all straight from the real store. list() is sorted
+    // by (group, freq), so walking groups() -> byGroup() slices in order
+    // re-assigns the store indices 0..N-1 exactly; each data row carries its
+    // list() index in the col-0 Qt::UserRole (visual rows no longer equal store
+    // rows, and the edit/delete/double-click wiring reads through that mapping).
+    int storeIdx = 0;
+    const QBrush headBg(tokens::card1());
+    const QBrush headFg(QColor(QString::fromUtf8(tokens::kTextSecondary)));
+    for (const QString& g : bookmarkManager_->groups()) {
+        const QList<ui::Bookmark> grp = bookmarkManager_->byGroup(g);
+        // ---- section header row ----
+        {
+            const int row = bmTable_->rowCount();
+            bmTable_->insertRow(row);
+            auto* head = new QTableWidgetItem(
+                QString("%1 (%2)").arg(g.isEmpty() ? QString::fromUtf8("默认") : g)
+                                  .arg(grp.size()));
+            head->setFlags(Qt::ItemIsEnabled);            // static divider
+            head->setData(Qt::UserRole, -1);              // section marker
+            head->setBackground(headBg);
+            head->setForeground(headFg);
+            QFont hf = head->font();
+            hf.setWeight(QFont::DemiBold);                // = tokens::kWeightSemi
+            head->setFont(hf);
+            for (int c = 0; c < bmTable_->columnCount(); ++c) {
+                if (c == 0) {
+                    bmTable_->setItem(row, c, head);
+                } else {
+                    auto* blank = new QTableWidgetItem;
+                    blank->setFlags(Qt::ItemIsEnabled);
+                    blank->setBackground(headBg);
+                    bmTable_->setItem(row, c, blank);
+                }
+            }
+        }
+        // ---- bookmark rows of this group ----
+        for (const auto& b : grp) {
+            const int row = bmTable_->rowCount();
+            bmTable_->insertRow(row);
+            const int idx = storeIdx;
+            auto set = [&](int col, const QString& text) {
+                auto* it = new QTableWidgetItem(text);
+                if (col == 0) it->setData(Qt::UserRole, idx);
+                bmTable_->setItem(row, col, it);
+            };
+            set(0, b.name);
+            set(1, QString::number(b.frequencyHz / 1e6, 'f', 3));
+            set(2, b.mode);
+            set(3, b.bandwidthHz > 0.0 ? QString::number(b.bandwidthHz / 1e3, 'f', 1)
+                                       : QString(""));
+            // Group column: empty storage renders as "默认" in the table only.
+            set(4, b.group.isEmpty() ? QString("默认") : b.group);
+            ++storeIdx;
+        }
+    }
+}
+
+int MainWindow::bmStoreIndexAtVisualRow(int visualRow) const {
+    if (!bmTable_ || visualRow < 0 || visualRow >= bmTable_->rowCount()) return -1;
+    QTableWidgetItem* it = bmTable_->item(visualRow, 0);
+    if (!it) return -1;
+    bool ok = false;
+    const int v = it->data(Qt::UserRole).toInt(&ok);
+    // Section headers (-1) and the empty-state row (-2) never map to a store row.
+    return (ok && v >= 0) ? v : -1;
 }
 
 void MainWindow::scanTimerTick() {
