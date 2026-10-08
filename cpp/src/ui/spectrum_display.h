@@ -50,6 +50,16 @@ public:
     // outside the slots section, so moc does not choke on a nested type.
     struct FixedMarker { double freqHz = 0; QString name; };
 
+    // One row of the auto peak table (clean-room SDR++ "signal list"). Pure
+    // POD read-back of the matured, tracked detection -- no synthetic peaks.
+    // deltaHz is the signed offset of the carrier from the current dial/tuned
+    // frequency (positive = the peak sits above where the receiver is tuned).
+    struct PeakEntry {
+        double freqHz = 0.0;   // absolute centre frequency of the carrier
+        float  dbfs   = 0.0f;  // carrier power (dBFS)
+        double deltaHz = 0.0;  // freqHz - tunedFrequencyHz()
+    };
+
     // ---- Geometry accessors (recomputed in resizeEvent / recomputeGeometry) --
     void recomputeGeometry();
     QRect spectrumRect()   const { return lay_.traceRect; }
@@ -91,6 +101,15 @@ public slots:
     // production UI use -- lets ctest drive setSpectrum and assert the
     // per-frame kMaxHoldDecayDb decay without painting.
     const std::vector<float>& maxHoldEnvelopeForTest() const { return maxHold_; }
+
+    // ---- Minimum-hold envelope (SDR++ "min hold") -------------------------
+    // The per-bin running MINIMUM of every frame (symmetric to the max-hold
+    // above). Unlike max-hold this envelope has NO decay: it takes each frame's
+    // minimum and holds it, so the trace's quietest floor over the session is
+    // visible as a second overlay line. Re-armed fresh on the next enable.
+    void setMinHoldEnabled(bool on);
+    void clearMinHold() { minHold_.clear(); update(); }
+    const std::vector<float>& minHoldEnvelopeForTest() const { return minHold_; }
 
     // ---- Spectrum persistence (余晖) -------------------------------------
     // mode: 0 = off, 1 = low (short trails), 2 = high (long trails). The ghost
@@ -167,6 +186,13 @@ public slots:
     // inspecting pixels. They duplicate no logic: they reuse the very mappings
     // paintEvent uses.
     const QList<mbdsdr::dsp::PeakInfo>& maturedPeaks() const { return peaks_; }
+    // Compact auto-peak-table rows (loudest first, capped at kMaxPeakCount),
+    // each annotated with its signed offset from the current tuned frequency.
+    // This is the container-facing API the peak table renders from; it is a
+    // pure read-back of the matured detection (no peaks are invented).
+    std::vector<PeakEntry> peaks() const;
+    // Current dial/tuned frequency (Hz) -- the reference for PeakEntry.deltaHz.
+    double tunedFrequencyHz() const { return dialFreqHz_; }
     int    yForDbfs(float db) const;                 // trace dBFS -> canvas y
     int    xForFrequency(double f) const;            // absolute Hz -> canvas x
     QString cursorReadoutText(const QPoint& pos) const; // hover F/dBFS/SNR lines
@@ -346,6 +372,16 @@ private:
     // Max-hold envelope.
     std::vector<float> maxHold_;
     bool maxHoldOn_ = false;
+
+    // Min-hold envelope (running per-bin minimum, no decay; +inf = "unset").
+    std::vector<float> minHold_;
+    bool minHoldOn_ = false;
+
+    // Guarantees the FIRST matured detection (even an empty one) is pushed to
+    // the container, so the peak table shows its honest empty state on launch
+    // instead of a blank un-populated grid. Without this the empty signature ""
+    // would equal the initial lastPeakSig_ "" and suppress the very first emit.
+    bool peaksAnnounced_ = false;
 
     // Persistence (余晖) ghost envelope: decays per frame, refreshed by fresh
     // rises. Same bin count as the trace; floor initialises to -inf.

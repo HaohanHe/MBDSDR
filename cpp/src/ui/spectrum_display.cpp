@@ -49,6 +49,12 @@ constexpr float kAutoEasePerFrameDb = 1.5f;
 constexpr double kSpecFracMin = 0.1;
 constexpr double kSpecFracMax = 0.9;
 
+// Auto peak table: keep only the k strongest (loudest) matured carriers, even
+// if the band holds more detections. A long tail of weak blips would crowd the
+// compact panel and bury the few real signals; the container table shows the
+// loudest N and nothing below. Named (not a bare literal) per the UI-token rule.
+constexpr int kMaxPeakCount = 12;
+
 // Read the persisted trace/waterfall share back on construction. Missing key,
 // non-numeric or non-finite value => honest default; otherwise clamped to the
 // legal band. Mirrors the QSettings("MBDSDR","MBDSDR") group used app-wide.
@@ -202,6 +208,9 @@ void SpectrumDisplay::allocateRing(int bins) {
     decScratch_.assign(std::max(bins, 1), dbFloorDb_);
     fallsPeak_ = QImage();
     maxHold_.assign(bins, -std::numeric_limits<float>::max());
+    // Min-hold seeds to +inf so the very first real frame immediately becomes
+    // the running minimum (symmetric to max-hold seeding to -inf).
+    minHold_.assign(bins, std::numeric_limits<float>::max());
     materialiseHistory();
 }
 
@@ -344,6 +353,21 @@ void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
         }
     }
 
+    // ---- Min-hold: running per-bin MINIMUM, held (no decay) ----------------
+    // Symmetric to max-hold above but with NO per-frame fall-off: each bin keeps
+    // the quietest dBFS seen since enable, so the floor that the trace's carriers
+    // rise above is visible as a second overlay. A frame below the held value
+    // pulls it down; a frame above leaves it untouched.
+    if (minHoldOn_) {
+        if (static_cast<int>(minHold_.size()) != bins)
+            minHold_.assign(bins, std::numeric_limits<float>::max());
+        for (int i = 0; i < bins && i < static_cast<int>(frame.dbfs.size()); ++i) {
+            const float fresh = frame.dbfs[i];
+            if (std::isfinite(fresh) && fresh < minHold_[i])
+                minHold_[i] = fresh;
+        }
+    }
+
     // ---- Persistence (余晖): decay the ghost envelope, refresh on fresh rise --
     if (persistMode_ > 0) {
         const float decay = (persistMode_ == 2) ? tokens::kPersistDecayHigh
@@ -441,6 +465,18 @@ void SpectrumDisplay::resetZoom() {
 void SpectrumDisplay::setMaxHoldEnabled(bool on) {
     maxHoldOn_ = on;
     if (!on) maxHold_.clear();
+    update();
+}
+
+void SpectrumDisplay::setMinHoldEnabled(bool on) {
+    minHoldOn_ = on;
+    if (!on) {
+        minHold_.clear();
+    } else if (!minHold_.empty() && bins_ > 0 &&
+               static_cast<int>(minHold_.size()) != bins_) {
+        // Bin count changed while armed: re-seed so every bin starts fresh.
+        minHold_.assign(bins_, std::numeric_limits<float>::max());
+    }
     update();
 }
 
@@ -610,21 +646,54 @@ void SpectrumDisplay::rescanPeaks() {
     }
     tracked_ = kept;
 
+    // Collect the matured detections, order them loudest-first, then keep only
+    // the strongest kMaxPeakCount so a crowded band cannot flood the compact
+    // peak table with weak blips (SDR++ signal-list top-N).
+    struct Matured { double freqHz; float dbfs; double bw; int id; };
+    std::vector<Matured> mat;
+    mat.reserve(tracked_.size());
+    for (const auto& t : tracked_) {
+        if (t.seen >= tokens::kPeakMinSeenFrames)
+            mat.push_back({t.freqHz, t.dbfs, t.bandwidthHz, t.id});
+    }
+    std::sort(mat.begin(), mat.end(),
+              [](const Matured& a, const Matured& b) { return a.dbfs > b.dbfs; });
+    if (static_cast<int>(mat.size()) > kMaxPeakCount)
+        mat.resize(kMaxPeakCount);
+
     peaks_.clear();
     peakIds_.clear();
     QString sig;
-    for (const auto& t : tracked_) {
-        if (t.seen >= tokens::kPeakMinSeenFrames) {
-            dsp::PeakInfo p; p.freqHz = t.freqHz; p.dbfs = t.dbfs; p.bandwidthHz = t.bandwidthHz;
-            peaks_.append(p);
-            peakIds_.append(t.id);
-            sig += QString::number(static_cast<int>(t.freqHz / 1000.0)) + QLatin1Char(',');
-        }
+    for (const auto& m : mat) {
+        dsp::PeakInfo p; p.freqHz = m.freqHz; p.dbfs = m.dbfs; p.bandwidthHz = m.bw;
+        peaks_.append(p);
+        peakIds_.append(m.id);
+        sig += QString::number(static_cast<int>(m.freqHz / 1000.0)) + QLatin1Char(',');
     }
-    if (sig != lastPeakSig_) {
+    // Emit on the FIRST rescan unconditionally (peaksAnnounced_) so an empty
+    // band still pushes the honest "no signal" table row on launch; afterwards
+    // only when the rounded-kHz signature actually changes.
+    if (!peaksAnnounced_ || sig != lastPeakSig_) {
+        peaksAnnounced_ = true;
         lastPeakSig_ = sig;
         emit peaksUpdated(peaks_, peakIds_);
     }
+}
+
+std::vector<SpectrumDisplay::PeakEntry> SpectrumDisplay::peaks() const {
+    // Pure read-back of the matured detection (already loudest-first and capped
+    // to kMaxPeakCount by rescanPeaks); each row's delta is the signed offset of
+    // the carrier from the current dial/tuned frequency. No peaks are invented.
+    std::vector<PeakEntry> out;
+    out.reserve(peaks_.size());
+    for (const auto& p : peaks_) {
+        PeakEntry e;
+        e.freqHz = p.freqHz;
+        e.dbfs   = p.dbfs;
+        e.deltaHz = p.freqHz - dialFreqHz_;
+        out.push_back(e);
+    }
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -662,6 +731,7 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         const double binHz = frameFsHz_ / bins;
         QPolygonF line;
         QPolygonF holdLine;
+        QPolygonF minLine;
         QPolygonF ghostLine;
         for (int i = 0; i < bins; ++i) {
             const double f = bandLo + (i + 0.5) * binHz;
@@ -670,6 +740,10 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
             line << QPointF(x, dbToY(frame_.dbfs[i]));
             if (maxHoldOn_ && i < static_cast<int>(maxHold_.size()))
                 holdLine << QPointF(x, dbToY(maxHold_[i]));
+            if (minHoldOn_ && i < static_cast<int>(minHold_.size()) &&
+                std::isfinite(minHold_[i]) &&
+                minHold_[i] != std::numeric_limits<float>::max())
+                minLine << QPointF(x, dbToY(minHold_[i]));
             if (persistMode_ > 0 && i < static_cast<int>(persist_.size()) &&
                 std::isfinite(persist_[i]))
                 ghostLine << QPointF(x, dbToY(persist_[i]));
@@ -687,6 +761,16 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         if (maxHoldOn_ && !holdLine.isEmpty()) {
             p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary2), 1.0));
             p.drawPolyline(holdLine);
+        }
+        // Min-hold overlay: a faint teal line along the running floor, drawn
+        // under the live trace (symmetric to the neutral max-hold line above).
+        // Uses only named tokens (cursor A colour + hairline alpha) -- no bare
+        // colour or alpha literal.
+        if (minHoldOn_ && !minLine.isEmpty()) {
+            QColor minCol(QString::fromUtf8(tokens::kCursorAColor));
+            minCol.setAlphaF(tokens::kCursorLineAlpha);
+            p.setPen(QPen(minCol, 1.0));
+            p.drawPolyline(minLine);
         }
     }
 

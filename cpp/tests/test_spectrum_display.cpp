@@ -37,6 +37,10 @@ private slots:
     void zoomAndPanStayAligned();
     void ssbBoxEdgesAreAligned();
     void maturedPeakMarkerGeometry();
+    void multiTonePeaksWithinHalfBin();
+    void pureNoiseReportsNoPeaks();
+    void peakDeltaIsOffsetFromDial();
+    void peakTableCappedToMaxCount();
     void noiseFloorBaselineGeometry();
     void cursorReadoutIsRealData();
     void traceWaterfallBinCentreAlign();
@@ -63,6 +67,30 @@ static SpectrumFrame makeFrame(int bins, int peakBin, float peakDb, float floorD
     fr.fftSize = bins;
     fr.dbfs.assign(bins, floorDb);
     if (peakBin >= 0 && peakBin < bins) fr.dbfs[peakBin] = peakDb;
+    fr.sourceName = "test";
+    fr.isTestSignal = true;
+    return fr;
+}
+
+// Deterministic synthetic multi-tone frame: a flat floor with shaped, gaussian-
+// like carriers (centre peak + 4 dB shoulders + 10 dB skirting) at the given
+// bins. Same bin->frequency mapping as the production engine. The shoulders are
+// always below the centre so detectPeaks' local-maximum rule picks the centre.
+static SpectrumFrame makeMultiToneFrame(int bins, const QList<int>& toneBins,
+                                        float toneDb, float floorDb) {
+    SpectrumFrame fr;
+    fr.sampleRateHz = 2.4e6;
+    fr.centerFreqHz = 98.5e6;
+    fr.fftSize = bins;
+    fr.dbfs.assign(bins, floorDb);
+    for (int b : toneBins) {
+        if (b < 2 || b >= bins - 2) continue;
+        fr.dbfs[b] = toneDb;
+        fr.dbfs[b - 1] = toneDb - 4.0f;
+        fr.dbfs[b + 1] = toneDb - 4.0f;
+        fr.dbfs[b - 2] = toneDb - 10.0f;
+        fr.dbfs[b + 2] = toneDb - 10.0f;
+    }
     fr.sourceName = "test";
     fr.isTestSignal = true;
     return fr;
@@ -301,6 +329,105 @@ void TestSpectrumDisplay::maturedPeakMarkerGeometry() {
     // can sit one pixel above the top edge by construction) -- allow that slack.
     QVERIFY2(ay >= w.spectrumRect().top() - 2 && ay <= w.spectrumRect().bottom(),
              "peak marker apex y must lie on the trace");
+}
+
+// Auto peak table: three well-separated deterministic carriers mature into
+// peaks() rows. Each reported frequency must land within HALF A BIN of the
+// injected carrier bin, and its power must match the injected tone. Loudest-first
+// ordering is exercised implicitly (all equal amplitude -> a permutation).
+void TestSpectrumDisplay::multiTonePeaksWithinHalfBin() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+
+    const int bins = 512;
+    const QList<int> toneBins = {100, 256, 400};
+    for (int i = 0; i < tokens::kPeakMinSeenFrames; ++i)
+        w.setSpectrum(makeMultiToneFrame(bins, toneBins, -30.0f, -100.0f));
+
+    const auto peaks = w.peaks();
+    QCOMPARE(peaks.size(), std::vector<ui::SpectrumDisplay::PeakEntry>::size_type(3));
+
+    // detectPeaks maps bin i -> fLowEdge + i * (fs/(n-1)); the injected carrier
+    // sits exactly on its centre bin, so the reported frequency matches to ~0.
+    const double fs = 2.4e6, f0 = 98.5e6;
+    const double binHz = fs / (bins - 1);
+    const double fLowEdge = f0 - fs / 2.0;
+    for (int tb : toneBins) {
+        const double expectF = fLowEdge + tb * binHz;
+        bool found = false;
+        for (const auto& p : peaks) {
+            if (std::abs(p.freqHz - expectF) < binHz / 2.0) {
+                found = true;
+                QVERIFY2(std::abs(p.dbfs - (-30.0f)) < 1.0f,
+                         "reported carrier power must match the injected tone");
+                break;
+            }
+        }
+        QVERIFY2(found,
+                 qPrintable(QString("injected tone at bin %1 must appear within half a bin")
+                            .arg(tb)));
+    }
+}
+
+// Honest empty state: a flat frame at the absolute noise floor (no carrier above
+// the gate) must produce an EMPTY peak list -- never an invented row.
+void TestSpectrumDisplay::pureNoiseReportsNoPeaks() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    const int bins = 256;
+    for (int i = 0; i < tokens::kPeakMinSeenFrames + 2; ++i)
+        w.setSpectrum(makeFrame(bins, -1, -100.0f, -100.0f));   // no peakBin
+    QVERIFY2(w.peaks().empty(),
+             "pure noise (flat at the abs floor) must yield an empty peak list");
+}
+
+// PeakEntry.deltaHz is the SIGNED offset of the carrier from the current tuned
+// frequency. At startup the dial == the frame centre (f0), so a carrier left of
+// centre reports a negative delta and one right of centre a positive delta.
+void TestSpectrumDisplay::peakDeltaIsOffsetFromDial() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    const int bins = 512;
+    const QList<int> toneBins = {100, 400};   // left of centre, right of centre
+    for (int i = 0; i < tokens::kPeakMinSeenFrames; ++i)
+        w.setSpectrum(makeMultiToneFrame(bins, toneBins, -30.0f, -100.0f));
+
+    QCOMPARE(w.tunedFrequencyHz(), 98.5e6);
+    const auto peaks = w.peaks();
+    QCOMPARE(peaks.size(), std::vector<ui::SpectrumDisplay::PeakEntry>::size_type(2));
+
+    bool sawNeg = false, sawPos = false;
+    for (const auto& p : peaks) {
+        QVERIFY2(std::abs(p.deltaHz - (p.freqHz - 98.5e6)) < 1.0,
+                 "deltaHz must equal the carrier offset from the tuned frequency");
+        if (p.deltaHz < 0) sawNeg = true;
+        else if (p.deltaHz > 0) sawPos = true;
+    }
+    QVERIFY2(sawNeg && sawPos,
+             "one carrier left of the dial and one right must give opposite-sign deltas");
+}
+
+// The compact peak table keeps only the loudest kMaxPeakCount (=12) rows even
+// when the band holds more detections. Inject 16 separated carriers; the list
+// must be capped (never more than 12) while still showing real peaks.
+void TestSpectrumDisplay::peakTableCappedToMaxCount() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    const int bins = 1024;
+    QList<int> toneBins;
+    for (int i = 0; i < 16; ++i) toneBins.append(60 + i * 60);   // 16 carriers
+    for (int i = 0; i < tokens::kPeakMinSeenFrames; ++i)
+        w.setSpectrum(makeMultiToneFrame(bins, toneBins, -30.0f, -100.0f));
+
+    const auto peaks = w.peaks();
+    QVERIFY2(peaks.size() <= 12,
+             qPrintable(QString("peak table must cap at 12 rows, got %1")
+                        .arg(peaks.size())));
+    QVERIFY2(!peaks.empty(), "at least the real carriers must still be listed");
 }
 
 // (b) Noise-floor baseline: default NaN suppresses it; after injection the line

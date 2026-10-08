@@ -2982,6 +2982,18 @@ MainWindow::MainWindow(QWidget* parent)
         const int sel = engine_->selectedVfoId();
         if (sel >= 0) engine_->vfoSetOffset(sel, hz);
     });
+    // Auto peak table: clicking a detected carrier row tunes the selected VFO to
+    // it. Identical offset path as a canvas drag (in-band slide; LO retune only on
+    // the capture edge, decided by the engine) -- the canvas has already
+    // recentred its own view. The frequency is always a real detected peak.
+    connect(spectrum_, &ui::SpectrumWidget::peakTuned, this, [this](double hz) {
+        if (!engine_) return;
+        freqSpin_->blockSignals(true);
+        freqSpin_->setValue(hz / 1e6);
+        freqSpin_->blockSignals(false);
+        const int sel = engine_->selectedVfoId();
+        if (sel >= 0) engine_->vfoSetOffset(sel, hz);
+    });
 
     // ---- Debounced persistence: high-frequency signals (zoom/pan every frame,
     // slider/spinbox drags) arm a 500 ms one-shot timer instead of hitting the
