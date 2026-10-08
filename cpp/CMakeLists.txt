@@ -71,6 +71,7 @@ set(SOURCES
     src/ui/spectrum_display.cpp
     src/ui/sky_view.cpp
     src/ui/s_meter.cpp
+    src/ui/rssi_trend.cpp
     src/ui/world_view.cpp
     src/ui/aircraft_tracker.cpp
     src/ui/settings_dialog.cpp
@@ -211,6 +212,7 @@ set(HEADERS
     src/ui/map_projection.h
     src/ui/coastline_data.h
     src/ui/elevation_plot.h
+    src/ui/rssi_trend.h
     src/gnss/gnss_types.h
     src/gnss/i_transport.h
     src/gnss/serial_transport.h

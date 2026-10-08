@@ -89,6 +89,7 @@
 #include "ui/activity_log.h"
 #include "ui/sky_view.h"
 #include "ui/s_meter.h"
+#include "ui/rssi_trend.h"
 #include "ui/bookmark_manager.h"
 #include "dsp/frequency_scanner.h"
 #include "ui/shortcuts_dialog.h"
@@ -2166,12 +2167,23 @@ MainWindow::MainWindow(QWidget* parent)
     sbAudio_ = new QLabel("--", this);
     // SDR++-style S-meter: fed by the SAME real engine RSSI as sbRssi_.
     sMeter_ = new ui::SMeterWidget(this);
+    // Mini RSSI/dBfs trend strip: the recent real-RSSI shape beside the meter.
+    // Fed by the same onRssiLevel value; NaN / link-down clears it honestly.
+    rssiTrend_ = new ui::RssiTrendWidget(this);
     for (QLabel* l : {sbMode_, sbSr_, sbVfo_, sbRds_, sbGain_, sbSdr_, sbWatch_,
                       sbScan_, sbRec_, sbRssi_, sbSnr_, sbSquelch_, sbGnss_, sbAudio_}) {
         l->setObjectName("dockHint");
         statusBar()->addPermanentWidget(l);
     }
     statusBar()->addPermanentWidget(sMeter_);
+    // Small breathing gap so the S-meter's S9 end-cap label never crowds the
+    // trend strip's card border regardless of DPI scaling.
+    {
+        auto* gap = new QWidget(this);
+        gap->setFixedWidth(tokens::scaled(6));
+        statusBar()->addPermanentWidget(gap);
+    }
+    statusBar()->addPermanentWidget(rssiTrend_);
     sbMode_->setText(demodCombo_->currentText());
 
     // ---- Engine wiring (engine_ created before UI construction) ----
@@ -4712,6 +4724,9 @@ void MainWindow::onSourceDropped() {
     setConnState(ConnState::Error, QStringLiteral("设备断开，等待重插"));
     // Controls stay enabled: the offline test source is honest data (合成测试
     // 信号), and the auto-reconnect may bring the device back at any moment.
+    // The trend strip drops to its honest empty state: stale history from the
+    // dropped link must not keep rendering after the data flow stops.
+    if (rssiTrend_) rssiTrend_->clear();
 }
 
 // A connect attempt failed with a REAL socket reason (refused / timeout /
@@ -4764,6 +4779,8 @@ void MainWindow::onRssiLevel(float dbfs) {
         sMeter_->setSignalDbfs(dbfs);
         if (engine_) sMeter_->setNoiseFloorDbfs(engine_->audioNoiseFloorDbfs());
     }
+    // Mini trend strip records the SAME real RSSI sample (NaN -> honest clear).
+    if (rssiTrend_) rssiTrend_->pushDbfs(dbfs);
     // Recording-library panel watch meter (same real RSSI + threshold).
     if (recLibWatchLevel_)
         recLibWatchLevel_->setText(QString("电平 %1 dBFS · 门限 %2")
