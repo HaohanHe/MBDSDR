@@ -54,7 +54,12 @@ static void sendKey(ui::SpectrumDisplay* cv, int key) {
 }
 
 void TestFixedMarker::dragChangesFreqAndPersists() {
+    // Isolation: the persisted trace/waterfall split (view/specFraction) is a
+    // shared QSettings key other tests may leave behind; a non-default value
+    // moves the strip band and puts traceY() (height()/3) outside the trace
+    // plot, breaking press-hit. Clear it so geometry is deterministic.
     QSettings("MBDSDR", "MBDSDR").remove("view/fixedMarkers");
+    QSettings("MBDSDR", "MBDSDR").remove("view/specFraction");
     ui::SpectrumDisplay cv;
     pump(&cv);
     feedFrame(cv);
