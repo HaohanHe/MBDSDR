@@ -21,6 +21,24 @@ int SMeterWidget::sUnitsAboveNoise(double signalDbfs, double noiseFloorDbfs) {
     return u;
 }
 
+SMeterWidget::SLabelPlacement SMeterWidget::labelPlacement(
+        int index, int units, double trackLeft, double trackRight,
+        double rowTop, double rowH) {
+    const double w = trackRight - trackLeft;
+    const double cellW = (units > 0) ? w / units : w;
+    // S0 (left rail): flush-left so the glyph starts INSIDE the track edge.
+    if (index <= 0)
+        return {QRectF(trackLeft, rowTop, w, rowH),
+                Qt::AlignLeft | Qt::AlignVCenter};
+    // S9 (right rail): flush-right so the glyph ends INSIDE the track edge.
+    if (index >= units)
+        return {QRectF(trackLeft, rowTop, w, rowH),
+                Qt::AlignRight | Qt::AlignVCenter};
+    // Interior label: centered on its cell.
+    const double x = trackLeft + cellW * index;
+    return {QRectF(x - cellW / 2.0, rowTop, cellW, rowH), Qt::AlignCenter};
+}
+
 void SMeterWidget::setSignalDbfs(double dbfs) {
     signalDbfs_ = dbfs;
     if (!std::isfinite(dbfs)) { peakDbfs_ = qQNaN(); shownUnits_ = -1; update(); return; }
@@ -90,15 +108,16 @@ void SMeterWidget::paintEvent(QPaintEvent*) {
         const double x = r.left() + uW * i;
         p.setPen(QPen(tokens::rgbaA(tokens::kTickLabelAlpha), 1.0));
         p.drawLine(QPointF(x, r.bottom()), QPointF(x, r.bottom() - tokens::scaled(4)));
-        const bool isEnd = (i == units);   // S9 end cap always shown
+        const bool edgeCap = (i == 0 || i == units);   // S0/S9 always drawn
         // Interior label: keep it on the stride AND at least `stride` cells away
         // from the S9 end cap, else it would sit adjacent to the end label and
         // crowd it (the end cap is drawn regardless of the stride).
-        if (!isEnd && ((i % stride) != 0 || (units - i) < stride)) continue;
+        if (!edgeCap && ((i % stride) != 0 || (units - i) < stride)) continue;
         p.setPen(tokens::rgbaA(tokens::kTextAlphaTertiary));
-        const QString lab = isEnd ? QStringLiteral("S9") : QStringLiteral("S%1").arg(i);
-        p.drawText(QRectF(x - uW / 2, r.top(), uW, tokens::scaled(12)),
-                   Qt::AlignCenter, lab);
+        const QString lab = QStringLiteral("S%1").arg(i);
+        const auto lp = labelPlacement(i, units, r.left(), r.right(),
+                                       r.top(), tokens::scaled(12));
+        p.drawText(lp.rect, lp.align, lab);
     }
     // Peak-hold marker (slow decay).
     if (std::isfinite(peakDbfs_)) {
