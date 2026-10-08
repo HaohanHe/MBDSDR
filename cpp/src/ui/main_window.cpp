@@ -160,7 +160,7 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
         setWindowTitle("MBDSDR");
-    resize(tokens::scaled(1280), tokens::scaled(800));
+    resize(tokens::scaled(tokens::kInitWinW), tokens::scaled(tokens::kInitWinH));
     // Tokenized floor: narrow windows stay readable (no horizontal overflow,
     // no crushed center trace). Left rail already scrolls, right rail elides.
     setMinimumSize(tokens::scaled(tokens::kMainMinW),
@@ -1916,7 +1916,7 @@ MainWindow::MainWindow(QWidget* parent)
     splitter->setStretchFactor(0, 1);
     splitter->setStretchFactor(1, 3);
     splitter->setStretchFactor(2, 1);
-    splitter->setSizes({tokens::scaled(280), tokens::scaled(800), tokens::scaled(280)});
+    splitter->setSizes({tokens::scaled(tokens::kSplitInitL), tokens::scaled(tokens::kSplitInitM), tokens::scaled(tokens::kSplitInitR)});
 
     centralLay->addWidget(splitter);
     // First-run onboarding card (only when QSettings has no dismissal record).
@@ -3717,7 +3717,7 @@ void MainWindow::setFocusMode(bool on, bool animate) {
                 // Pinning that stale pixel value (≈140px) used to clamp each rail
                 // forever, clipping its controls (device name, frequency, buttons).
                 // Leave the maximum unconstrained so the splitter's symmetric
-                // initial split ({280,800,280}) scales with the later real resize,
+                // initial split ({kSplitInitL,kSplitInitM,kSplitInitR}) scales with the later real resize,
                 // instead of being pinned. Do not call setSizes here: any pixel
                 // value computed now is stale and would fight the children's
                 // sizeHints (the right tab bar ballooned when we tried it). The

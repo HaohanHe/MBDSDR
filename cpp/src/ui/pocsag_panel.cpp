@@ -71,7 +71,7 @@ PocsagPanel::PocsagPanel(QWidget* parent) : QWidget(parent) {
     // would force a ~284 px table and overflow the right rail; shrink it so
     // Stretch columns actually contract. Long payloads elide (tooltips keep
     // them readable).
-    table_->horizontalHeader()->setMinimumSectionSize(tokens::scaled(36));
+    table_->horizontalHeader()->setMinimumSectionSize(tokens::scaled(tokens::kTableMinSectionW));
     table_->horizontalHeader()->setSectionResizeMode(kColAddress, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(kColPayload, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(kColTime, QHeaderView::Stretch);

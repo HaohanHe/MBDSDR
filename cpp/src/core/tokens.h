@@ -608,6 +608,13 @@ inline constexpr int kElevPlotH       = 160;  // elevation-vs-time widget min he
 inline constexpr int kCstViewMinW     = 180;  // constellation widget min
 inline constexpr int kCstViewMinH     = 180;
 inline constexpr int kSMeterH         = 34;   // S-meter widget height
+inline constexpr int kSMeterW         = 220;  // S-meter widget width
+inline constexpr int kTableMinSectionW = 36;  // data-table header minimum section width
+inline constexpr int kInitWinW        = 1280; // initial main-window width
+inline constexpr int kInitWinH        = 800;  // initial main-window height
+inline constexpr int kSplitInitL      = 280;  // initial splitter size: left rail
+inline constexpr int kSplitInitM      = 800;  // initial splitter size: middle
+inline constexpr int kSplitInitR      = 280;  // initial splitter size: right rail
 // Dialogs / read-outs.
 inline constexpr int kAboutMinW       = 380;  // about-dialog min width (unscaled by design)
 inline constexpr int kCalibMinWExtra = 180;  // calibration-dialog width beyond kSettingsMinW

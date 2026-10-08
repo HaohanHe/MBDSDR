@@ -89,7 +89,7 @@ M17Panel::M17Panel(QWidget* parent) : QWidget(parent) {
     table_->setSelectionMode(QAbstractItemView::NoSelection);
     // Narrow-rail elasticity: shrink the QHeaderView default 100 px min section
     // so Stretch columns actually contract (else a 4-col table forces ~440 px).
-    table_->horizontalHeader()->setMinimumSectionSize(tokens::scaled(36));
+    table_->horizontalHeader()->setMinimumSectionSize(tokens::scaled(tokens::kTableMinSectionW));
     table_->horizontalHeader()->setSectionResizeMode(kColSrc,  QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(kColDst,  QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(kColType, QHeaderView::Stretch);

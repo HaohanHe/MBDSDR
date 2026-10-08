@@ -69,7 +69,7 @@ DataTextPanel::DataTextPanel(QWidget* parent) : QWidget(parent) {
     table_->verticalHeader()->setVisible(false);
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table_->setSelectionMode(QAbstractItemView::NoSelection);
-    table_->horizontalHeader()->setMinimumSectionSize(tokens::scaled(36));
+    table_->horizontalHeader()->setMinimumSectionSize(tokens::scaled(tokens::kTableMinSectionW));
     table_->horizontalHeader()->setSectionResizeMode(kColMode, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(kColHeader, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(kColBody, QHeaderView::Stretch);
