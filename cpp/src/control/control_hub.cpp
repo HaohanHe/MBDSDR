@@ -720,6 +720,13 @@ QJsonObject ControlHub::cmdVfoSetBandwidth(const QJsonObject& a) {
     int id; double hz; QString err;
     if (!needInt(a, "id", id, err)) return errResult(err);
     if (!needDbl(a, "bandwidth_hz", hz, err)) return errResult(err);
+    // Honest-contract parity with the Agent tool set_vfo_bandwidth
+    // (agent_tools.cpp:1012): a non-positive bandwidth must be REJECTED here,
+    // not silently swallowed. The engine's VfoManager::setBandwidth already
+    // drops hz<=0 internally but returns void through SpectrumEngine, so
+    // without this guard CH would report ok:true for a no-op (fake success).
+    if (hz <= 0.0)
+        return errResult(QString::fromUtf8("参数 bandwidth_hz 必须为正数"));
     engine_->vfoSetBandwidth(id, hz);
     QJsonObject o = okBase();
     o["command"] = "vfo_set_bandwidth";

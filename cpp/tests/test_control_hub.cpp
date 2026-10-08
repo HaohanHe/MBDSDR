@@ -161,6 +161,30 @@ void TestControlHub::commandsDriveEngineAndReadback() {
     }
     QVERIFY(found);
 
+    // -- VFO bandwidth boundary (Phase63 D3): a non-positive VFO bandwidth must
+    //    be REJECTED here with ok:false (parity with the Agent set_vfo_bandwidth
+    //    tool), NOT silently accepted as ok:true while the engine no-ops. Pin the
+    //    regression: the engine bandwidth must NOT drift on rejection. --
+    auto vfoBwById = [&](int idWant) -> double {
+        QJsonArray vs = parseObj(hub.execute("get_vfos", {})).value("vfos").toArray();
+        for (const auto& v : vs) {
+            QJsonObject vv = v.toObject();
+            if (vv.value("id").toInt() == idWant)
+                return vv.value("bandwidth_hz").toDouble();
+        }
+        return -1.0;
+    };
+    r = parseObj(hub.execute("vfo_set_bandwidth", {{"id", selId}, {"bandwidth_hz", 12500.0}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(vfoBwById(selId), 12500.0);
+    // Zero / negative bandwidth must be refused, not fake-ok.
+    r = parseObj(hub.execute("vfo_set_bandwidth", {{"id", selId}, {"bandwidth_hz", 0.0}}));
+    QVERIFY2(!r.value("ok").toBool(), "vfo_set_bandwidth(0) must be ok:false");
+    r = parseObj(hub.execute("vfo_set_bandwidth", {{"id", selId}, {"bandwidth_hz", -500.0}}));
+    QVERIFY2(!r.value("ok").toBool(), "vfo_set_bandwidth(-500) must be ok:false");
+    // Engine bandwidth unchanged after both rejected writes (zero drift).
+    QCOMPARE(vfoBwById(selId), 12500.0);
+
     // -- Scan band (synthetic source: must return a structured hit, tagged) --
     r = parseObj(hub.execute("scan_band",
         {{"low_hz", 100.0e6}, {"high_hz", 102.0e6}, {"step_hz", 200e3}}));
