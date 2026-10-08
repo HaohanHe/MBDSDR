@@ -561,6 +561,17 @@ inline constexpr const char* kSettingsKeyPalette      = "view/wfPalette";
 // invented ramp.
 inline constexpr const char* kSettingsKeyColormapFile = "view/wfColormapFile";
 
+// Waterfall rolling-history depth (rows). The ring is rebuilt on change because
+// the displayed time window literally changes with depth. An unconfigured,
+// non-numeric or otherwise-illegal value honestly resolves to
+// kWaterfallDepthDefault (== kWaterfallHistoryLines, 256). The legal choice set
+// is exactly what the waterfall row combo offers; anything outside it falls back
+// to the default rather than being clamped mid-way (a ring depth has no sensible
+// continuous band -- only the named powers the ring buffer was tuned for).
+inline constexpr int kWaterfallDepthDefault = 256;
+inline constexpr int kWaterfallDepthChoices[] = { 128, 256, 512 };
+inline constexpr const char* kSettingsKeyWfDepth = "view/wfDepth";
+
 // Small painted details inside the unified canvas (base px, scaled() at runtime).
 inline constexpr int kDispTickProtrusion = 3;   // freq tick pokes up/down into panels
 inline constexpr int kVfoHandleHalfW     = 4;   // VFO band-edge drag handle half-width

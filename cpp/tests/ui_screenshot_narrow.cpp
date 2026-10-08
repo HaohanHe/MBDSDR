@@ -49,6 +49,19 @@ int main(int argc, char** argv) {
         s.sync();
     }
 
+    // Optional: seed the persisted waterfall ring depth (MBD_WFDEPTH=128/256/512)
+    // BEFORE MainWindow restores it, so both the "瀑布" row depth combo AND the
+    // canvas ring come up at the chosen depth -- the real persisted round-trip,
+    // not a post-hoc poke. The throwaway QSettings path above keeps this off the
+    // user's data. A value outside the named set honestly resolves to the default.
+    const int wfDepth = qEnvironmentVariableIntValue("MBD_WFDEPTH");
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        if (wfDepth > 0)
+            s.setValue(mbdsdr::tokens::kSettingsKeyWfDepth, wfDepth);
+        s.sync();
+    }
+
     mbdsdr::MainWindow win;
     // Shrink to a narrow but usable width. The left rail is a QScrollArea so
     // its controls scroll rather than clip; the spectrum keeps its minimum.
@@ -227,6 +240,45 @@ int main(int argc, char** argv) {
             for (int i = 0; i < 256; ++i)
                 cv->setSpectrum(frame(180, -22.0f));
             cv->setSecondsPerRowForTest(0.05);   // 256 rows => ~12.8 s history
+        }
+    }
+
+    // Optional: fill the waterfall ring to its (possibly non-default) depth so the
+    // shot shows the deep rolling history the chosen MBD_WFDEPTH buys, and proves
+    // the ring was actually re-allocated at that depth rather than left at 256.
+    // Pure offline test signal; off by default so every other screenshot is
+    // unchanged.
+    if (wfDepth > 0) {
+        if (!sw) {   // resolve the spectrum tab if an earlier gate did not
+            for (auto* tb : win.findChildren<QTabWidget*>())
+                for (int i = 0; i < tb->count(); ++i)
+                    if (tb->tabText(i) == QString::fromUtf8("频谱"))
+                        sw = qobject_cast<mbdsdr::ui::SpectrumWidget*>(tb->widget(i));
+        }
+        if (sw && sw->displayCanvas()) {
+            mbdsdr::ui::SpectrumDisplay* cv = sw->displayCanvas();
+            const int bins = 512;
+            auto frame = [&](int peakBin, float peakDb) {
+                mbdsdr::SpectrumFrame fr;
+                fr.sampleRateHz = 2.4e6;
+                fr.centerFreqHz = 98.5e6;
+                fr.fftSize = bins;
+                fr.dbfs.assign(bins, -100.0f);
+                if (peakBin >= 2 && peakBin < bins - 2) {
+                    fr.dbfs[peakBin] = peakDb;
+                    fr.dbfs[peakBin - 1] = peakDb - 4.0f;
+                    fr.dbfs[peakBin + 1] = peakDb - 4.0f;
+                    fr.dbfs[peakBin - 2] = peakDb - 10.0f;
+                    fr.dbfs[peakBin + 2] = peakDb - 10.0f;
+                }
+                fr.sourceName = "test";
+                fr.isTestSignal = true;
+                return fr;
+            };
+            // A drifting carrier so the waterfall paints a sloping trace instead of
+            // a flat line -- makes the filled depth visually obvious.
+            for (int i = 0; i < wfDepth + 16; ++i)
+                cv->setSpectrum(frame(180 + (i % 120), -22.0f));
         }
     }
 

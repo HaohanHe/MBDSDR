@@ -56,6 +56,10 @@ private slots:
     void bookmarkOverlayRefeedsUpdate();
     void waterfallTimeTickLabelsAreRealSeconds();
     void waterfallTimeTickHonestEmptyState();
+    void waterfallDepthDefaultsTo256();
+    void waterfallDepthChangeRebuildsRing();
+    void waterfallDepthInvalidFallsBackToDefault();
+    void waterfallDepthPersistsRoundTrip();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -108,6 +112,7 @@ void TestSpectrumDisplay::initTestCase() {
         tokens::kSettingsKeySpecFraction,
         tokens::kSettingsKeyScrollSpeed,
         tokens::kSettingsKeyPalette,
+        tokens::kSettingsKeyWfDepth,
         QStringLiteral("rx/peakThresholdDb"),
     };
     QSettings s("MBDSDR", "MBDSDR");
@@ -884,6 +889,113 @@ void TestSpectrumDisplay::waterfallTimeTickHonestEmptyState() {
         QCOMPARE(w.waterfallRowCountForTest(), 20);
         QVERIFY2(w.waterfallTimeTickLabelsForTest().isEmpty(),
                  "rows without a measured time base must paint no ticks");
+    }
+}
+
+// With no persisted key the ring must come up at the named default (256 rows),
+// both as the requested depth before the first frame and as the active depth
+// after allocateRing(). No invented depth.
+void TestSpectrumDisplay::waterfallDepthDefaultsTo256() {
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfDepth);
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    // Before any frame the request already honours the honest default.
+    QCOMPARE(w.requestedRingDepthForTest(), tokens::kWaterfallDepthDefault);
+    w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
+    QCOMPARE(w.ringDepthForTest(), tokens::kWaterfallDepthDefault);
+}
+
+// Changing depth rebuilds the ring to the new size: the stored history is
+// dropped (the time window changed), ringCount_ resets, and subsequent rows are
+// now capped at the NEW depth -- proving the ring was actually re-allocated and
+// not left at the old size.
+void TestSpectrumDisplay::waterfallDepthChangeRebuildsRing() {
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfDepth);
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+
+    for (int i = 0; i < 30; ++i)
+        w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
+    QCOMPARE(w.ringDepthForTest(), 256);
+    QCOMPARE(w.waterfallRowCountForTest(), 30);
+
+    // Grow to 512: ring rebuilt, history dropped (count back to 0).
+    w.setRingDepth(512);
+    QCOMPARE(w.ringDepthForTest(), 512);
+    QCOMPARE(w.requestedRingDepthForTest(), 512);
+    QCOMPARE(w.waterfallRowCountForTest(), 0);
+
+    // Overflow the ring: rows must now cap at 512 (not the old 256).
+    for (int i = 0; i < 700; ++i)
+        w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
+    QCOMPARE(w.waterfallRowCountForTest(), 512);
+
+    // Shrink to 128: rebuild again, count resets, then caps at 128.
+    w.setRingDepth(128);
+    QCOMPARE(w.ringDepthForTest(), 128);
+    QCOMPARE(w.waterfallRowCountForTest(), 0);
+    for (int i = 0; i < 300; ++i)
+        w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
+    QCOMPARE(w.waterfallRowCountForTest(), 128);
+}
+
+// An out-of-set or non-numeric requested depth honestly resolves to the default
+// (256) -- there is no continuous band to clamp into, only the named choices.
+void TestSpectrumDisplay::waterfallDepthInvalidFallsBackToDefault() {
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfDepth);
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+
+    w.setRingDepth(999);                 // way outside the named set
+    QCOMPARE(w.requestedRingDepthForTest(), 256);
+    w.setRingDepth(-8);                  // nonsense
+    QCOMPARE(w.requestedRingDepthForTest(), 256);
+    w.setRingDepth(0);                   // zero depth makes no sense
+    QCOMPARE(w.requestedRingDepthForTest(), 256);
+
+    // After a frame the active ring also sits at the default.
+    w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
+    QCOMPARE(w.ringDepthForTest(), 256);
+}
+
+// Persistence round trip: a fresh instance must read kSettingsKeyWfDepth in its
+// ctor and allocate the first ring at the stored depth; a garbage stored value
+// must honestly fall back to the default (256).
+void TestSpectrumDisplay::waterfallDepthPersistsRoundTrip() {
+    QSettings s("MBDSDR", "MBDSDR");
+
+    // Legal stored choice -> honoured on a fresh instance.
+    s.setValue(tokens::kSettingsKeyWfDepth, 512);
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        QCOMPARE(w.requestedRingDepthForTest(), 512);
+        w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
+        QCOMPARE(w.ringDepthForTest(), 512);
+    }
+
+    s.setValue(tokens::kSettingsKeyWfDepth, 128);
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
+        QCOMPARE(w.ringDepthForTest(), 128);
+    }
+
+    // Garbage stored value -> honest default, never a crash, never a weird depth.
+    s.setValue(tokens::kSettingsKeyWfDepth, QStringLiteral("bogus-depth"));
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        QCOMPARE(w.requestedRingDepthForTest(), 256);
+        w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
+        QCOMPARE(w.ringDepthForTest(), 256);
     }
 }
 

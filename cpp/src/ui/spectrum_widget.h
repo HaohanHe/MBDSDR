@@ -94,6 +94,7 @@ private:
     QSpinBox*  peakThreshSpin_ = nullptr;
     QComboBox* scrollCombo_ = nullptr;
     QComboBox* paletteCombo_ = nullptr;
+    QComboBox* depthCombo_ = nullptr;   // waterfall history depth (rows)
     QLabel*    testLabel_  = nullptr;
     QLabel*    infoLabel_   = nullptr;
     QTableWidget* peakTable_ = nullptr;
