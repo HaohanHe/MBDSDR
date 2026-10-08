@@ -278,6 +278,71 @@ QRgb SpectrumDisplay::colourForDb(float db) const {
 }
 
 // ---------------------------------------------------------------------------
+// Waterfall vertical time axis
+// ---------------------------------------------------------------------------
+double SpectrumDisplay::effectiveSecondsPerRow() const {
+    if (pinnedSecPerRow_ > 0.0) return pinnedSecPerRow_;      // test seam
+    if (!haveSecPerFrame_) return 0.0;                        // no honest base
+    return secPerFrameSmoothed_ * std::max(1, everyNthFrame_);
+}
+
+QString SpectrumDisplay::formatTimeOffset(double pastSeconds) {
+    // pastSeconds is a positive span INTO THE PAST. One decimal below 1 s so a
+    // fast-scrolling short history still reads honestly; whole seconds after;
+    // minutes beyond an hour's worth of ticks.
+    if (pastSeconds < 1.0)
+        return QString("-%1s").arg(pastSeconds, 0, 'f', 1);
+    if (pastSeconds < 60.0)
+        return QString("-%1s").arg(std::lround(pastSeconds));
+    return QString("-%1m").arg(std::lround(pastSeconds / 60.0));
+}
+
+QVector<QPair<int, QString>> SpectrumDisplay::computeTimeTicks() const {
+    QVector<QPair<int, QString>> out;
+    const int rows = ringCount_;
+    const double spr = effectiveSecondsPerRow();
+    if (rows <= 0 || spr <= 0.0) return out;     // honest empty state
+
+    // Elastic row stride: at least the named kWaterfallTimeTickRows, but WIDEN so
+    // on a short waterfall the tick labels never stack on top of each other --
+    // the on-screen tick pitch must be >= one label height. Tall waterfalls keep
+    // the denser token stride; narrow windows thin the ticks out instead of
+    // overlapping them (same elastic-thinning principle as the S-meter labels).
+    int stride = tokens::kWaterfallTimeTickRows;
+    const int fallsH = lay_.fallsRect.height();
+    if (fallsH > 0 && ringDepth_ > 0) {
+        const int minPitch = tokens::scaled(tokens::kTimeLabelH + tokens::kTimeLabelPadY);
+        const int minRows = std::max(1, static_cast<int>(
+            std::ceil(static_cast<double>(minPitch) * ringDepth_ / fallsH)));
+        stride = std::max(stride, minRows);
+    }
+
+    // Row 0 = newest sweep = top edge = "now" (t=0).
+    out.push_back({0, QStringLiteral("now")});
+    // Interior ticks every `stride` rows down into the past.
+    for (int d = stride; d < rows - 1; d += stride)
+        out.push_back({d, formatTimeOffset(d * spr)});
+    // Boundary tick on the oldest filled row, unless it would crowd the last
+    // interior tick (within one stride) -- then the interior tick already speaks
+    // for the bottom edge.
+    const int oldest = rows - 1;
+    if (oldest > 0 && out.constLast().first + stride <= oldest)
+        out.push_back({oldest, formatTimeOffset(oldest * spr)});
+    return out;
+}
+
+void SpectrumDisplay::setSecondsPerRowForTest(double s) {
+    pinnedSecPerRow_ = (s > 0.0) ? s : -1.0;
+    update();
+}
+
+QStringList SpectrumDisplay::waterfallTimeTickLabelsForTest() const {
+    QStringList labels;
+    for (const auto& tick : computeTimeTicks()) labels << tick.second;
+    return labels;
+}
+
+// ---------------------------------------------------------------------------
 // Frame intake
 // ---------------------------------------------------------------------------
 void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
@@ -385,6 +450,25 @@ void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
     if (frameMod_ >= everyNthFrame_) {
         frameMod_ = 0;
         pushHistoryRow();
+    }
+
+    // ---- Vertical time-axis time base: measure the REAL inter-frame gap ----
+    // The engine publishes no fps and SpectrumFrame has no timestamp, so the
+    // honest seconds-per-row comes from timing how long the UI actually waits
+    // between frames. Only samples inside the named sanity band feed the EWMA:
+    // sub-ms gaps (a tight offline/test loop) and multi-second stalls are
+    // rejected so the axis never snaps to 0 or stretches across a pause.
+    if (frameClock_.isValid()) {
+        const double dt = frameClock_.restart() / 1000.0;
+        if (dt >= tokens::kWfTimeMinFrameDtS && dt <= tokens::kWfTimeMaxFrameDtS) {
+            secPerFrameSmoothed_ = haveSecPerFrame_
+                ? (1.0 - tokens::kWfTimeEmaAlpha) * secPerFrameSmoothed_
+                  + tokens::kWfTimeEmaAlpha * dt
+                : dt;
+            haveSecPerFrame_ = true;
+        }
+    } else {
+        frameClock_.start();
     }
 
     rescanPeaks();
@@ -910,6 +994,40 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         }
         p.setPen(QPen(tokens::cardEdge(), 1));
         p.drawRect(falls);
+    }
+
+    // --- waterfall vertical time axis (left gutter, off the data) -----------
+    // Row 0 = newest sweep = TOP of falls = "now". Ticks count seconds into the
+    // past going DOWN, drawn in the free left gutter (the 50px inset holds no
+    // dB labels over the waterfall band), so they never cover the spectrogram.
+    // Honest empty: no filled rows or no measured time base -> nothing painted.
+    {
+        const QVector<QPair<int, QString>> ticks = computeTimeTicks();
+        if (!ticks.isEmpty() && falls.height() > 0 && ringDepth_ > 0) {
+            const int tickLen = tokens::scaled(tokens::kWaterfallTimeTickW);
+            const int labelW  = tokens::scaled(tokens::kTimeLabelW);
+            const int labelH  = tokens::scaled(tokens::kTimeLabelH);
+            const int gap     = tokens::scaled(tokens::kSpacingS);
+            const QFont savedFont = p.font();
+            QFont tf = savedFont;
+            tf.setPointSizeF(tokens::kFontAuxPt);
+            p.setFont(tf);
+            p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary), 1));
+            for (const auto& tick : ticks) {
+                // history row d maps linearly onto the falls height (row 0 top).
+                const int y = falls.top() + falls.height() * tick.first / ringDepth_;
+                // Short horizontal tick poking LEFT off the falls border.
+                p.drawLine(falls.left(), y, falls.left() - tickLen, y);
+                // Right-aligned label in the gutter, kept inside the falls band
+                // vertically so the top/bottom labels never clip the divider.
+                const int cy = std::clamp(y, falls.top() + labelH / 2,
+                                          falls.bottom() - labelH / 2);
+                const QRect lr(falls.left() - gap - labelW, cy - labelH / 2,
+                               labelW, labelH);
+                p.drawText(lr, Qt::AlignRight | Qt::AlignVCenter, tick.second);
+            }
+            p.setFont(savedFont);
+        }
     }
 
     // --- VFO band boxes on trace + waterfall --------------------------------

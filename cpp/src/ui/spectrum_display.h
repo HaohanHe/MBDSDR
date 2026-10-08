@@ -232,6 +232,20 @@ public slots:
     // the suite can assert the adaptive label precision without pixel reads.
     static int freqTickDecimals(double stepHz);
 
+    // ---- Offscreen-test-only: waterfall vertical time axis -----------------
+    // The production time base is the EWMA of REAL inter-frame wall-clock
+    // arrivals (see cpp). These seams pin / read it so the suite can assert the
+    // "-Ns" label sequence deterministically without driving a real clock:
+    //   setSecondsPerRowForTest(s>0) pins the measured seconds-per-row override;
+    //   setSecondsPerRowForTest(s<=0) releases it back to the live estimate.
+    void    setSecondsPerRowForTest(double s);
+    // Row offset (0=newest/top) -> "-Ns" label, top-to-bottom, exactly what
+    // paintEvent draws. Empty when there is no honest time base / no rows.
+    QStringList waterfallTimeTickLabelsForTest() const;
+    // Number of real history rows filled (ringCount_), so the suite can assert
+    // the top ("now") and bottom (oldest-row) boundary ticks.
+    int     waterfallRowCountForTest() const { return ringCount_; }
+
 signals:
     void frequencyChanged(double newFreqHz);
     void bandwidthChanged(double newBandwidthHz);
@@ -298,6 +312,16 @@ private:
     void materialiseHistory();          // ring -> history_ snapshot (row 0 = newest)
     void rebuildColormap();
     QRgb colourForDb(float db) const;
+
+    // ---- Waterfall vertical time axis -------------------------------------
+    // Effective seconds per waterfall row: the pinned test override when set,
+    // else the EWMA-measured frame period x everyNthFrame_. 0 = no honest base.
+    double effectiveSecondsPerRow() const;
+    // Row-offset (0=newest/top, going down = into the past) -> "-Ns" label list,
+    // top-to-bottom. Empty when ringCount_==0 or no time base (honest empty).
+    QVector<QPair<int, QString>> computeTimeTicks() const;
+    // Format a positive past-seconds span as "-Ns" / "-N.Ns" / "-Nm".
+    static QString formatTimeOffset(double pastSeconds);
 
     SpectrumFrame frame_;
     bool haveFrame_ = false;
@@ -428,6 +452,14 @@ private:
     bool hasCustomStops_ = false;
     double frameF0Hz_ = 0.0;         // centre frequency of the last frame
     double frameFsHz_ = 0.0;         // sample rate of the last frame
+
+    // ---- Vertical time-axis time base (measured, never invented) ----------
+    // The engine publishes no fps and SpectrumFrame carries no timestamp, so the
+    // widget times the REAL gap between setSpectrum() arrivals and smooths it.
+    QElapsedTimer frameClock_;            // restarted every accepted frame
+    double secPerFrameSmoothed_ = 0.0;    // EWMA of real inter-frame seconds
+    bool   haveSecPerFrame_ = false;      // >=1 sample inside the sanity band
+    double pinnedSecPerRow_ = -1.0;       // test seam: >0 overrides the estimate
 };
 
 } // namespace ui

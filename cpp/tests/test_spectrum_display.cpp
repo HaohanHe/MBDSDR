@@ -54,6 +54,8 @@ private slots:
     void bookmarkOverlayMapsToTraceX();
     void bookmarkOverlayHonestEmptyState();
     void bookmarkOverlayRefeedsUpdate();
+    void waterfallTimeTickLabelsAreRealSeconds();
+    void waterfallTimeTickHonestEmptyState();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -819,6 +821,70 @@ void TestSpectrumDisplay::bookmarkOverlayRefeedsUpdate() {
     QCOMPARE(w.bookmarkHz().at(0), 98.0e6);
     QCOMPARE(w.bookmarkHz().at(1), 98.5e6);
     QCOMPARE(w.bookmarkHz().at(2), 99.0e6);
+}
+
+// Waterfall vertical time axis: row 0 = newest sweep = TOP = "now"; ticks
+// count seconds into the past going down. With a pinned honest row period, the
+// label sequence must read now -> -N.Ns at every kWaterfallTimeTickRows, and the
+// bottom boundary must land on the oldest filled row.
+void TestSpectrumDisplay::waterfallTimeTickLabelsAreRealSeconds() {
+    // Deterministic 1:1 trace/waterfall split (a prior divider-drag suite may
+    // have persisted a traceShare_ we must not inherit).
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeySpecFraction);
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+
+    // Push exactly 129 rows (everyNthFrame_=1 default) -> ringCount_ = 129,
+    // oldest filled row offset d = 128 (an exact multiple of the 32-row stride,
+    // so the bottom boundary tick is exercised).
+    const int bins = 256;
+    const int rows = 129;
+    for (int i = 0; i < rows; ++i)
+        w.setSpectrum(makeFrame(bins, 128, -20.0f, -100.0f));
+    QCOMPARE(w.waterfallRowCountForTest(), rows);
+
+    // Pin an honest 0.125 s per row (the value the production EWMA would measure).
+    // stride(32) x 0.125 s lands on whole seconds, so rounding is exact.
+    w.setSecondsPerRowForTest(0.125);
+
+    const QStringList labels = w.waterfallTimeTickLabelsForTest();
+    // d=0,32,64,96 (interior) + d=128 (oldest-row boundary) -> 4/8/12/16 s.
+    const QStringList expect = {"now", "-4s", "-8s", "-12s", "-16s"};
+    QCOMPARE(labels, expect);
+    QCOMPARE(labels.first(), QStringLiteral("now"));       // top edge = now
+    QCOMPARE(labels.last(),  QStringLiteral("-16s"));      // bottom edge = oldest row
+
+    // Releasing the pin returns to the (un-measured in this tight loop) honest
+    // empty state: no fabricated seconds.
+    w.setSecondsPerRowForTest(0.0);
+    QVERIFY2(w.waterfallTimeTickLabelsForTest().isEmpty(),
+             "releasing the time base must drop the ticks (no invented fps)");
+}
+
+// Honest empty states: a fresh canvas has no rows; a fed canvas with no measured
+// time base (tight test loop -> every inter-frame gap is rejected as sub-ms) must
+// also paint nothing -- the axis never guesses a frame rate.
+void TestSpectrumDisplay::waterfallTimeTickHonestEmptyState() {
+    // Fresh widget: no frame pushed -> no rows -> no ticks.
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        QVERIFY2(w.waterfallTimeTickLabelsForTest().isEmpty(),
+                 "fresh canvas must have no time ticks (empty ring)");
+    }
+    // Fed ring but no pinned/measured base: still no ticks.
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        for (int i = 0; i < 20; ++i)
+            w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
+        QCOMPARE(w.waterfallRowCountForTest(), 20);
+        QVERIFY2(w.waterfallTimeTickLabelsForTest().isEmpty(),
+                 "rows without a measured time base must paint no ticks");
+    }
 }
 
 QTEST_MAIN(TestSpectrumDisplay)

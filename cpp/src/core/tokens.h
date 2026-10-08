@@ -323,11 +323,37 @@ inline constexpr int    kWfmIfRateHz   = 240000;
 // (NOT a production default; the device reports its real rate).
 inline constexpr double kFixtureSrcRateHz = 2.048e6;
 
-// Waterfall time-axis labels (inside the left margin)
+// Waterfall vertical time axis (left gutter beside the scrolling spectrogram).
+// The waterfall keeps its history as a rolling ring of rows; row 0 = the
+// NEWEST sweep = painted at the TOP of the falls box, and older rows scroll
+// DOWNWARD (verified by realFrameDrivesHistory). So "now" (t=0) sits at the
+// top edge and "-Ns" ticks count the SECONDS into the past going down.
+//
+// Time base: the engine publishes NO frame-rate constant and SpectrumFrame
+// carries no timestamp, so the widget measures the REAL wall-clock interval
+// between successive setSpectrum() arrivals (EWMA) and derives seconds/row =
+// smoothed frame period x everyNthFrame_. When no sane sample exists yet (fresh
+// start, or a paused source) the axis is honestly suppressed -- never an
+// invented fps. kTimeLabelW/H below are the gutter label box; the stride /
+// tick length / EWMA band are the new named tokens for this axis.
 inline constexpr int kTimeLabelW = 44;
 inline constexpr int kTimeLabelH = 12;
 inline constexpr int kTimeLabelPadY = 2;
 inline constexpr int kTimeTickCount = 3;          // interior ticks (excl. top/bottom)
+// Row stride between interior time ticks (ring rows). ringDepth=256 / 32 = 8
+// visible ticks of history span.
+inline constexpr int kWaterfallTimeTickRows = 32;
+// Horizontal tick-mark length poking left from the falls border into the gutter
+// (base px, scaled()).
+inline constexpr int kWaterfallTimeTickW = 5;
+// EWMA weight on a freshly measured inter-frame interval (0..1).
+inline constexpr double kWfTimeEmaAlpha = 0.20;
+// Sanity band for a measured inter-frame interval (seconds). Below the floor
+// the sample is a tight test-loop / sub-ms glitch (rejected, keeps the EWMA
+// honest); above the ceiling the source paused/stalled (rejected, so a long
+// gap never stretches the axis). Production RTL/loopback cadence ~= 0.025 s.
+inline constexpr double kWfTimeMinFrameDtS = 0.002;
+inline constexpr double kWfTimeMaxFrameDtS = 0.5;
 
 // Waterfall bottom frequency scale (drawn under the plot area)
 inline constexpr int kWaterfallBottomPad = 22;     // reserved strip height
