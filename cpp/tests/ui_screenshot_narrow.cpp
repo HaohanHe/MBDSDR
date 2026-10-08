@@ -56,6 +56,21 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Optional: close (hide) one named right-rail panel tab (MBD_HIDETAB=数据)
+    // via the real tabCloseRequested path, so the shot shows the closable-tab
+    // affordance + the "显示全部面板" restore button honestly render. Off by
+    // default so every other screenshot is unchanged.
+    const QByteArray hideName = qgetenv("MBD_HIDETAB");
+    if (!hideName.isEmpty()) {
+        for (auto* t : win.findChildren<QTabWidget*>()) {
+            for (int i = 0; i < t->count(); ++i) {
+                if (t->tabText(i) == QString::fromUtf8(hideName) && t->isTabEnabled(i))
+                    QMetaObject::invokeMethod(t, "tabCloseRequested",
+                                              Qt::DirectConnection, Q_ARG(int, i));
+            }
+        }
+    }
+
     // Optional: scroll the left control rail to its BOTTOM so groups below the
     // fold (e.g. the network-audio tap) land in the viewport, without the
     // horizontal-offset artifact ensureWidgetVisible can produce.

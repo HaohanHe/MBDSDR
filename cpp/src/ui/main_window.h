@@ -96,6 +96,10 @@ public:
     QLabel*  harnessControlHttpBanner() const { return controlHttpBanner_; }
     // AI multi-session store (harness/screenshot drive it offscreen).
     ai::AiSessionStore* aiSessionStore() { return aiSessionStore_; }
+    // Phase63: right-rail panel tabs are closable (SDR++ module show/hide,
+    // lightweight equivalent). This re-shows every hidden panel; the tab-bar
+    // context menu and the small "显示全部面板" button call the same entry.
+    void showAllRightTabs();
 
     // ---- Phase32 block1: offscreen chat-lifecycle harness -------------------
     // CI has no LLM key, so the streaming signals (partialReady/responseReady)
@@ -575,6 +579,9 @@ private:
     // Right tabs
     QTabWidget*     rightTabs_   = nullptr;
     QSplitter*      mainSplitter_ = nullptr;
+    // Phase63: flat restore button, shown only while >=1 right-rail panel tab
+    // is hidden (the tab-bar context menu offers the same action).
+    QPushButton*    rightTabRestoreBtn_ = nullptr;
 
     // Focus mode state: remembered natural widths of the two side rails (in
     // splitter pixels) captured when collapsing, so toggling back restores the
@@ -688,6 +695,11 @@ private:
     void setControlsEnabled(bool hw, bool hasData);
     void saveUiState();
     void restoreUiState();
+    // Phase63: closable right-rail panel tabs. onRightTabCloseRequested hides
+    // (never removes) the tab -- indexes stay stable so decoder/bookmark
+    // wiring by index is untouched; the last visible panel cannot be closed.
+    void onRightTabCloseRequested(int idx);
+    void updateRightTabRestoreAffordance();   // restore button iff >=1 tab hidden
     // Focus mode (CarWith driving-mode analog): collapse the left scroll rail
     // and the right tab rail to width 0 so the spectrum takes the full width.
     // animate=false applies the state instantly (used at startup restore).
