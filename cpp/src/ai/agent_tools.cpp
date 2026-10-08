@@ -681,18 +681,20 @@ QString execSetSquelch(const QJsonObject& args, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
-// 7. get_squelch_status (read): the engine exposes no public enabled/threshold/
-//    open readback, so we report honest nulls rather than invent values.
-QString execGetSquelchStatus(const QJsonObject&, dsp::SpectrumEngine*,
+// 7. get_squelch_status (read): the engine DOES expose public readback
+// (squelchEnabled/ThresholdDb/Auto/Open -- the same getters ControlHub's
+// cmdGetSquelchStatus uses), so we return the REAL values rather than hardcoded
+// nulls. On a fresh/no-device engine these read back honest defaults
+// (off / -50 dB / auto off / closed), identical to the CH/HTTP wire.
+QString execGetSquelchStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
                              const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
     o["ok"] = true;
-    o["enabled"] = QJsonValue(QJsonValue::Null);
-    o["threshold_db"] = QJsonValue(QJsonValue::Null);
-    o["auto"] = QJsonValue(QJsonValue::Null);
-    o["open"] = QJsonValue(QJsonValue::Null);
-    o["note"] = QString::fromUtf8("引擎未暴露静噪实时读数接口（后端由 ControlHub 遥测提供）");
+    o["enabled"] = engine->squelchEnabled();
+    o["threshold_db"] = engine->squelchThresholdDb();
+    o["auto"] = engine->squelchAuto();
+    o["open"] = engine->squelchOpen();
     addSourceFields(o, src);
     return compact(o);
 }
