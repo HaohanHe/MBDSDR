@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 35 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 47 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -33,9 +33,10 @@ class ToolCatalogEntry {
   final bool write;
 }
 
-/// 桌面端 35 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
+/// 桌面端 47 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
+/// 顺序与 write 标志逐字按 registeredToolSpecs() 注册顺序排列（47=29 写 + 18 读）。
 const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
-  // ---- 基础调谐/解调 ----
+  // ---- 基础调谐 / 解调（注册序 #1-7）----
   ToolCatalogEntry(
       name: 'tune_frequency',
       description: '把接收机调到指定中心频率（Hz）。',
@@ -43,10 +44,6 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
   ToolCatalogEntry(
       name: 'set_mode',
       description: '设置解调模式（AM/NFM/WFM/USB/LSB/CW）。',
-      write: true),
-  ToolCatalogEntry(
-      name: 'set_bandwidth',
-      description: '设置信道滤波带宽（Hz，取命名档位）。',
       write: true),
   ToolCatalogEntry(
       name: 'start_recording',
@@ -61,23 +58,27 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       description: '扫描一个频段并返回峰值信号。',
       write: true),
   ToolCatalogEntry(
+      name: 'set_bandwidth',
+      description: '设置信道滤波带宽（Hz，取命名档位）。',
+      write: true),
+  ToolCatalogEntry(
       name: 'get_status',
       description: '读取当前接收机状态（频率/模式/带宽/采样率）。',
       write: false),
-  // ---- 卫星 / 频率校准 ----
+  // ---- 卫星 / 频率校准（#8-10）----
   ToolCatalogEntry(
       name: 'predict_passes',
-      description: '只读：用本地新鲜 TLE 预测卫星未来过境。',
+      description: '只读：用本地新鲜 TLE 缓存预测卫星未来过境。',
       write: false),
   ToolCatalogEntry(
       name: 'calibrate_frequency',
-      description: '只读测量：用已知精确参考信号估计晶振 ppm 误差。',
+      description: '只读测量：用已知精确参考信号估计本机晶振 ppm 误差。',
       write: false),
   ToolCatalogEntry(
       name: 'apply_frequency_correction',
-      description: '写入并应用频率校正 ppm。',
+      description: '写入并应用频率校正 ppm（保存到设置并下发接收机）。',
       write: true),
-  // ---- 数字解码快照（只读）----
+  // ---- 数字解码快照（只读，#11-15）----
   ToolCatalogEntry(
       name: 'get_pocsag_messages',
       description: '只读：读取已解码的 POCSAG 寻呼消息快照。',
@@ -90,19 +91,27 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'get_vor_radial',
       description: '只读：读取 VOR 信道最新径向读数。',
       write: false),
-  // ---- IQ 导出 ----
+  ToolCatalogEntry(
+      name: 'get_acars_packets',
+      description: '只读：读取已解码的 ACARS 航空报文快照。',
+      write: false),
+  ToolCatalogEntry(
+      name: 'get_navtex_messages',
+      description: '只读：读取已解码的 NAVTEX 海上安全报文快照。',
+      write: false),
+  // ---- IQ 导出（#16）----
   ToolCatalogEntry(
       name: 'export_iq_segment',
-      description: '写入：即时抓取一段基带 IQ 导出为 SigMF。',
+      description: '写入：即时抓取一段基带 IQ 导出为 cf32_le SigMF。',
       write: true),
-  // ---- 网络音频 / 扫描活动链路 ----
+  // ---- 网络音频 / 扫描活动链路（#17-21）----
   ToolCatalogEntry(
       name: 'set_network_audio_sink',
-      description: '写入：配置网络音频流输出（UDP/TCP 镜像）。',
+      description: '写入：配置网络音频流输出（UDP/TCP 镜像当前解调音频）。',
       write: true),
   ToolCatalogEntry(
       name: 'get_network_audio_status',
-      description: '只读：返回网络音频流状态。',
+      description: '只读：返回网络音频流状态（使能/端口/格式）。',
       write: false),
   ToolCatalogEntry(
       name: 'start_scan_link',
@@ -114,9 +123,9 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       write: true),
   ToolCatalogEntry(
       name: 'get_scan_link_status',
-      description: '只读：返回扫描活动链路状态。',
+      description: '只读：返回扫描活动链路状态（scanning/dwelling/hit）。',
       write: false),
-  // ---- 静噪 ----
+  // ---- 静噪 / 噪声抑制（#22-25）----
   ToolCatalogEntry(
       name: 'set_squelch',
       description: '写入：设置静噪（开关/门限/自动）。',
@@ -125,7 +134,15 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'get_squelch_status',
       description: '只读：返回静噪状态（开关/门限/open）。',
       write: false),
-  // ---- 书签 ----
+  ToolCatalogEntry(
+      name: 'set_noise_blanker',
+      description: '写入：开关噪声抑制器。',
+      write: true),
+  ToolCatalogEntry(
+      name: 'get_noise_blanker_status',
+      description: '只读：返回噪声抑制器使能状态。',
+      write: false),
+  // ---- 书签（#26-29）----
   ToolCatalogEntry(
       name: 'list_bookmarks',
       description: '只读：列出书签（频率/名称/模式）。',
@@ -142,7 +159,7 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'delete_bookmark',
       description: '写入：删除指定下标书签。',
       write: true),
-  // ---- VFO 信道 ----
+  // ---- VFO 信道（#30-37）----
   ToolCatalogEntry(
       name: 'list_vfos',
       description: '只读：列出全部 VFO 信道。',
@@ -159,7 +176,23 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'rename_vfo',
       description: '写入：重命名指定 VFO 信道。',
       write: true),
-  // ---- 录制文件管理 ----
+  ToolCatalogEntry(
+      name: 'set_vfo_armed',
+      description: '写入：开启/关闭某 VFO 的后台并行解调。',
+      write: true),
+  ToolCatalogEntry(
+      name: 'set_vfo_frequency',
+      description: '写入：把指定 VFO 调谐到新频率。',
+      write: true),
+  ToolCatalogEntry(
+      name: 'set_vfo_mode',
+      description: '写入：切换指定 VFO 的解调模式。',
+      write: true),
+  ToolCatalogEntry(
+      name: 'set_vfo_bandwidth',
+      description: '写入：设置指定 VFO 的信道带宽。',
+      write: true),
+  // ---- 录制文件管理（#38-40）----
   ToolCatalogEntry(
       name: 'list_recordings',
       description: '只读：列出录制目录下已有录制文件。',
@@ -172,7 +205,7 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'export_recording',
       description: '写入：把录制文件复制导出到目标路径。',
       write: true),
-  // ---- 频谱参数 / 色板 ----
+  // ---- 频谱参数 / 色板（#41-43）----
   ToolCatalogEntry(
       name: 'set_fft_params',
       description: '写入：设置 FFT 参数（点数/窗/平均）。',
@@ -184,6 +217,23 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
   ToolCatalogEntry(
       name: 'get_spectrum_status',
       description: '只读：返回频谱当前参数真实值。',
+      write: false),
+  // ---- 卫星多普勒 / 网络源 / 能力与录制态（#44-47）----
+  ToolCatalogEntry(
+      name: 'set_doppler_compensation',
+      description: '写入：开关过境实时多普勒自动补偿（1Hz TLE 距离率重调 VFO）。',
+      write: true),
+  ToolCatalogEntry(
+      name: 'connect_network_source',
+      description: '写入：连接 rtl_tcp 网络接收机（host/port）。',
+      write: true),
+  ToolCatalogEntry(
+      name: 'get_capabilities',
+      description: '只读：返回当前源真实能力（设备名/调谐范围/采样率/增益档）。',
+      write: false),
+  ToolCatalogEntry(
+      name: 'get_recording_state',
+      description: '只读：返回录制状态（是否录制/路径/值守录制/录制目录）。',
       write: false),
 ];
 
