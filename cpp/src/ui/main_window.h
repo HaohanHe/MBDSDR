@@ -151,6 +151,20 @@ public:
     QComboBox*  harnessDemodCombo()   const { return demodCombo_; }
     QComboBox*  harnessBwCombo()      const { return bwCombo_; }
     QLabel*     harnessSyntheticBanner() const { return syntheticBanner_; }
+    // Receive-link state badge (Idle/Connecting/Running/Error). Read-only handle
+    // so offscreen tests + the screenshot harness can assert the real four-state
+    // text driven by the real engine signals.
+    QLabel*     harnessConnStateBadge() const { return connStateBadge_; }
+    // Test/screenshot seam: feed a real source signal into the SAME private slots
+    // the engine's queued signals reach (production args originate in the engine,
+    // never here). Drives the real state code path, not a fake widget state.
+    void harnessSourceChanged(const QString& name, bool connected) { onSourceChanged(name, connected); }
+    void harnessSourceError(const QString& message) { onSourceError(message); }
+    void harnessSourceDropped() { onSourceDropped(); }
+    // Display-only screenshot seam: hold the transient Connecting pill (the real
+    // connect click sets it, then a blocking socket call runs on the UI thread,
+    // so it can't be held in a live offscreen shot otherwise).
+    void harnessShowConnecting() { setConnState(ConnState::Connecting); }
     bool        harnessGuideCardVisible() const;   // defined in .cpp (QFrame complete there)
     QPushButton*harnessGuideDismissBtn() const { return guideDismissBtn_; }
 
@@ -258,6 +272,12 @@ private:
     // manual source change (which does not set the flags).
     bool   hotplugDropped_   = false;
     bool   connectErrorShown_ = false;
+    // Receive-link connection state, rendered as a single compact badge next to
+    // the connect button. Driven ONLY by the real engine signals / the real
+    // connect click -- never a guess. Idle is the honest empty state; Running is
+    // real hardware streaming; Error carries the REAL reason from sourceError.
+    enum class ConnState { Idle, Connecting, Running, Error };
+    void setConnState(ConnState s, const QString& detail = QString());
     double lastGnssAppliedLat_ = std::numeric_limits<double>::quiet_NaN();
     double lastGnssAppliedLon_ = std::numeric_limits<double>::quiet_NaN();
     double clockBiasSec_ = 0.0;
@@ -388,6 +408,10 @@ private:
     QLabel*         sourceBanner_ = nullptr;
     QLabel*         statusLabel_ = nullptr;
     QPushButton*    connectBtn_ = nullptr;
+    // Single four-state receive-link badge (see ConnState). Quiet pill; the long
+    // reason text still lives in sourceBanner_.
+    QLabel*         connStateBadge_ = nullptr;
+    ConnState       connState_ = ConnState::Idle;
     QComboBox*      srcTypeCombo_ = nullptr;
     // Prominent "合成/调试" provenance pill. VISIBLE only while the engine feeds
     // the explicitly-opted-in synthetic TestSignalSource (engine_->isSynthetic()).

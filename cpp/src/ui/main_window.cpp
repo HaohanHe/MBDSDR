@@ -316,6 +316,13 @@ MainWindow::MainWindow(QWidget* parent)
 
     connectBtn_ = new QPushButton("连接", gSrc);
     gSrcLay->addWidget(connectBtn_);
+    // Single four-state receive-link badge (Idle/Connecting/Running/Error).
+    // Quiet pill whose accent color swaps with the real state; the long reason
+    // stays in sourceBanner_. Initial = honest idle empty state.
+    connStateBadge_ = new QLabel(QStringLiteral("空闲 · 未连接"), gSrc);
+    connStateBadge_->setObjectName("connStateBadge");
+    connStateBadge_->setWordWrap(true);
+    gSrcLay->addWidget(connStateBadge_);
     rssiLabel_ = new QLabel("RSSI: -- dBFS", gSrc);
     gSrcLay->addWidget(rssiLabel_);
 
@@ -2662,6 +2669,7 @@ MainWindow::MainWindow(QWidget* parent)
             // result; failures surface via onSourceError.
             connectBtn_->setEnabled(false);
             connectBtn_->setText(QStringLiteral("连接中…"));
+            setConnState(ConnState::Connecting);
             statusBar()->showMessage(rtlTcp
                 ? QStringLiteral("正在连接 rtl_tcp %1:%2 …").arg(host).arg(port)
                 : QStringLiteral("正在探测本地 RTL-SDR 设备…"));
@@ -4566,6 +4574,47 @@ void MainWindow::restoreUiState() {
     // to the real f0, which is what syncs the waterfall.
 }
 
+// Single source-of-truth for the receive-link four-state badge. Geometry/font
+// come from the QLabel#connStateBadge QSS rule in tokens.h; only the accent
+// background + foreground is layered here, always from a named color token.
+// Idle is the honest empty state; Running/Error carry the real source name /
+// reason. Never invents a state -- every caller is a real engine signal or the
+// real connect click.
+void MainWindow::setConnState(ConnState s, const QString& detail) {
+    connState_ = s;
+    if (!connStateBadge_) return;
+    QString text, bg, fg;
+    switch (s) {
+    case ConnState::Idle:
+        text = QStringLiteral("空闲 · 未连接");
+        bg = QString::fromUtf8(tokens::kSelectedFill);
+        fg = QString::fromUtf8(tokens::kTextSecondary);
+        break;
+    case ConnState::Connecting:
+        text = QStringLiteral("连接中…");
+        bg = QString::fromUtf8(tokens::kWarning);
+        fg = QString::fromUtf8(tokens::kTextPrimary);
+        break;
+    case ConnState::Running:
+        text = detail.isEmpty() ? QStringLiteral("已连接")
+                                : QStringLiteral("已连接 · %1").arg(detail);
+        bg = QString::fromUtf8(tokens::kSuccess);
+        fg = QString::fromUtf8(tokens::kTextPrimary);
+        break;
+    case ConnState::Error:
+        text = detail.isEmpty() ? QStringLiteral("连接错误")
+                                : QStringLiteral("错误 · %1").arg(detail);
+        bg = QString::fromUtf8(tokens::kDanger);
+        fg = QString::fromUtf8(tokens::kTextPrimary);
+        break;
+    }
+    connStateBadge_->setText(text);
+    // Lay only the two color roles inline; radius/padding/font stay in QSS.
+    connStateBadge_->setStyleSheet(
+        QString("QLabel#connStateBadge { background-color:%1; color:%2; }")
+            .arg(bg, fg));
+}
+
 void MainWindow::onSourceChanged(const QString& name, bool connected) {
     if (connected) {
         hotplugDropped_ = false;
@@ -4601,6 +4650,12 @@ void MainWindow::onSourceChanged(const QString& name, bool connected) {
         sbSdr_->setText(QStringLiteral("无信号源"));
     }
     if (connectBtn_) connectBtn_->setText(connected ? "断开" : "连接");
+    // Receive-link four-state badge. Real HW -> Running; the opt-in synthetic
+    // source and the plain empty source both leave the hardware LINK idle (the
+    // synthetic provenance pill already covers data provenance). The early
+    // return above (drop / error follow-up) keeps an Error badge on screen.
+    setConnState(connected ? ConnState::Running : ConnState::Idle,
+                 connected ? name : QString());
     // Provenance pill: prominent "合成/调试" badge ONLY while the synthetic
     // source is actually live; hidden for real HW and for the empty state.
     if (syntheticBanner_) syntheticBanner_->setVisible(synthetic);
@@ -4652,6 +4707,9 @@ void MainWindow::onSourceDropped() {
     if (connectBtn_) connectBtn_->setText(QStringLiteral("连接"));
     if (sourceBanner_)
         sourceBanner_->setText(QStringLiteral("设备断开，正在等待重新连接…（真实数据流中断）"));
+    // The real link is down -> badge shows the error state honestly until the
+    // next successful reconnect (which clears hotplugDropped_).
+    setConnState(ConnState::Error, QStringLiteral("设备断开，等待重插"));
     // Controls stay enabled: the offline test source is honest data (合成测试
     // 信号), and the auto-reconnect may bring the device back at any moment.
 }
@@ -4665,12 +4723,16 @@ void MainWindow::onSourceError(const QString& message) {
         if (sourceBanner_)
             sourceBanner_->setText(
                 QStringLiteral("设备断开，正在等待重新连接…（%1）").arg(message));
+        setConnState(ConnState::Error, message);
         return;
     }
     connectErrorShown_ = true;
     statusLabel_->setText(QStringLiteral("● rtl_tcp 连接失败"));
     if (sourceBanner_)
         sourceBanner_->setText(QStringLiteral("连接失败：%1").arg(message));
+    // Badge carries the REAL reason (socket error / no hardware / ...), never a
+    // fabricated cause.
+    setConnState(ConnState::Error, message);
 }
 
 void MainWindow::onAudioLevel(float dbfs) {

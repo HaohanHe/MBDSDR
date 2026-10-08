@@ -5,9 +5,9 @@
 
 | 组件 | 位置 | 是什么 |
 |---|---|---|
-| 原生桌面端 | [`cpp/`](cpp/README.md) | C++/Qt 原生 SDR 接收软件（UI 与 DSP 同进程，不依赖 Python 运行时）。AI 助手工具面实测 **35 个**（`cpp/src/ai/tool_schema.cpp`，read/write 双态、写动作在手动模式被门拦截），并内置 ControlHub HTTP 控制通道 |
+| 原生桌面端 | [`cpp/`](cpp/README.md) | C++/Qt 原生 SDR 接收软件（UI 与 DSP 同进程，不依赖 Python 运行时）。AI 助手工具面实测 **47 个**（`cpp/src/ai/tool_schema.cpp`，read/write 双态、写动作在手动模式被门拦截），并内置 ControlHub HTTP 控制通道 |
 | 手机端 | [`mobile/`](mobile/README.md) | Flutter 一套代码（Android/iOS），手机作 AI 的"眼睛和手臂"：定位+罗盘指向+rtl_tcp 直连外置 SDR；经 ControlHub HTTP 只读对接桌面引擎 |
-| Python 智能体内核 | [`mbdsdr_ai/`](mbdsdr_ai/README.md) | **研究原型**：注册约 280 个 LLM 可调用工具（agent.py ~112 + sdr_tools.py ~137 + tool_registry 内置 ~63，口径见该 README §1）+ 工作流引擎。这是原型期工具面，**不是**随桌面交付的 35 工具集 |
+| Python 智能体内核 | [`mbdsdr_ai/`](mbdsdr_ai/README.md) | **研究原型**：注册约 280 个 LLM 可调用工具（agent.py ~112 + sdr_tools.py ~137 + tool_registry 内置 ~63，口径见该 README §1）+ 工作流引擎。这是原型期工具面，**不是**随桌面交付的 47 工具集 |
 | 论文实验管线 | [`experiments/`](experiments/README.md) | 可复现实验（Eb/N0 解码成功率 / 多普勒定轨 / AMR 基线 / LLM 基线），固定种子、逐图标口径 |
 | 真机工具 | [`tools/`](tools/) | 一键只读自检 `hw_selfcheck` + 联调向导 `onboarding` |
 | 学习与阶段规格 | [`docs/learn/`](docs/learn/) | 上游真实源码精读（sdrpp/gnuradio/librtlsdr…）+ phase3–6 实现规格与审计 |

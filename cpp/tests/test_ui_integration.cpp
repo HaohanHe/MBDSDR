@@ -83,6 +83,10 @@ private slots:
     // Phase63: recent-tune list -- honest empty state, persisted-list load, and a
     // picked entry driving the real spinbox tune path.
     void tuneHistoryEmptyStateLoadsAndJumps();
+    // Phase63: receive-link four-state badge (Idle/Connecting/Running/Error)
+    // driven by the REAL engine source signals; the follow-on fallback
+    // sourceChanged(false) must not erase an Error badge.
+    void receiveLinkBadgeFourStatesDrivenByRealSignals();
 };
 
 QString TestUiIntegration::tmpSettingsDir;
@@ -841,6 +845,58 @@ void TestUiIntegration::tuneHistoryEmptyStateLoadsAndJumps() {
     // Picking the first history entry must retune to 100.0 MHz.
     Q_EMIT combo->activated(0);
     QCOMPARE(spin->value(), 100.0);
+}
+
+// Phase63: the receive-link four-state badge is the single explicit Idle /
+// Connecting / Running / Error indicator next to the connect button. It is
+// driven ONLY by the real engine source signals (the harness forwards the SAME
+// private slots the queued engine signals reach). Error shows the real reason
+// verbatim, and the engine's fallback sourceChanged(false) after a failed
+// connect must not silently erase it.
+void TestUiIntegration::receiveLinkBadgeFourStatesDrivenByRealSignals() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    QLabel* badge = win.harnessConnStateBadge();
+    QVERIFY2(badge, "the four-state receive-link badge must exist");
+
+    // Boot: no real hardware -> honest idle empty state.
+    QVERIFY2(badge->text().contains(QStringLiteral("空闲")),
+             qPrintable(QString("boot badge should read idle, got: %1").arg(badge->text())));
+
+    // Real hardware connects -> Running carries the real source name.
+    win.harnessSourceChanged(QStringLiteral("RTL-SDR"), true);
+    QCOMPARE(badge->text(), QStringLiteral("已连接 · RTL-SDR"));
+
+    // A connect attempt fails with a REAL reason -> Error shows it verbatim.
+    win.harnessSourceError(QStringLiteral("连接被拒绝 (refused)"));
+    QVERIFY2(badge->text().contains(QStringLiteral("错误")) &&
+             badge->text().contains(QStringLiteral("连接被拒绝")),
+             qPrintable(QString("error badge must carry the real reason, got: %1")
+                            .arg(badge->text())));
+
+    // The engine follows every failed connect with a fallback sourceChanged(false);
+    // it must NOT reset the Error badge to Idle (honest retention).
+    win.harnessSourceChanged(QStringLiteral("No Source"), false);
+    QVERIFY2(badge->text().contains(QStringLiteral("错误")),
+             qPrintable(QString("fallback sourceChanged(false) must keep Error, got: %1")
+                            .arg(badge->text())));
+
+    // A successful reconnect clears the flags and shows Running again.
+    win.harnessSourceChanged(QStringLiteral("rtl_tcp 127.0.0.1:1234"), true);
+    QCOMPARE(badge->text(), QStringLiteral("已连接 · rtl_tcp 127.0.0.1:1234"));
+
+    // Manual disconnect -> honest idle empty state.
+    win.harnessSourceChanged(QStringLiteral("No Source"), false);
+    QVERIFY2(badge->text().contains(QStringLiteral("空闲")),
+             qPrintable(QString("disconnect should return to idle, got: %1").arg(badge->text())));
+
+    // The opt-in synthetic test source does NOT claim Running (no real link);
+    // its provenance pill covers data origin, so the link badge stays idle.
+    win.harnessSourceChanged(QStringLiteral("Test Signal"), false);
+    QVERIFY2(badge->text().contains(QStringLiteral("空闲")),
+             qPrintable(QString("synthetic source must keep the link badge idle, got: %1")
+                            .arg(badge->text())));
 }
 
 QTEST_MAIN(TestUiIntegration)
