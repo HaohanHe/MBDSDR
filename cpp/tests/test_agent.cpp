@@ -61,6 +61,8 @@ private slots:
     void manualMode_gateSpotCheckAllWrites();
     // --- Noise blanker three-channel tool: land / readback / honest empty / gate ---
     void noiseBlankerLandReadbackAndGate();
+    // --- Phase63 D1: get_squelch_status returns REAL engine getters, not nulls ---
+    void squelchStatusRealReadback();
     // --- Phase63: bookmark tools execute for real against injected store -------
     void bookmarkToolsRealExecutionWithInjectedStore();
 };
@@ -828,6 +830,47 @@ void TestAgent::noiseBlankerLandReadbackAndGate() {
     QJsonObject badO = QJsonDocument::fromJson(
         ai::executeTool("set_noise_blanker", bad, &engine).toUtf8()).object();
     QVERIFY2(!badO.value("ok").toBool(), "non-boolean `on` must be an error");
+}
+
+// Phase63 D1: get_squelch_status must read the REAL engine getters
+// (squelchEnabled/ThresholdDb/Auto/Open), matching ControlHub's wire shape --
+// NOT the old hardcoded nulls. Fresh/no-device engine drives honest defaults.
+void TestAgent::squelchStatusRealReadback() {
+    dsp::SpectrumEngine engine;
+
+    QJsonObject r = QJsonDocument::fromJson(
+        ai::executeTool("get_squelch_status", QJsonObject{}, &engine)
+            .toUtf8()).object();
+    QVERIFY2(r.value("ok").toBool(), qPrintable(
+        ai::executeTool("get_squelch_status", QJsonObject{}, &engine)));
+    // No longer null: every field is driven by the engine getter.
+    QVERIFY2(!r.value("enabled").isNull(), "enabled must be a real bool, not null");
+    QVERIFY2(!r.value("threshold_db").isNull(), "threshold_db must be a real number, not null");
+    QVERIFY2(!r.value("auto").isNull(), "auto must be a real bool, not null");
+    QVERIFY2(!r.value("open").isNull(), "open must be a real bool, not null");
+    // Values match the engine getters exactly (and the no-device defaults).
+    QCOMPARE(r.value("enabled").toBool(), engine.squelchEnabled());
+    QCOMPARE(r.value("threshold_db").toDouble(),
+             static_cast<double>(engine.squelchThresholdDb()));
+    QCOMPARE(r.value("auto").toBool(), engine.squelchAuto());
+    QCOMPARE(r.value("open").toBool(), engine.squelchOpen());
+    // The stale "no readback interface" note must be gone.
+    QVERIFY2(!r.contains(QString::fromUtf8("note")),
+             "stale 'engine has no squelch readback' note must be removed");
+
+    // Flip the engine through the write tool; the read tool follows for real.
+    QJsonObject on; on["enabled"] = true; on["threshold_db"] = -10.0;
+    QString w = ai::LLMWorker::dispatchToolCall("set_squelch", on, &engine,
+                                                /*manualMode=*/false);
+    QVERIFY2(!w.contains("\"gated\":true"), qPrintable(w));
+    QJsonObject r2 = QJsonDocument::fromJson(
+        ai::executeTool("get_squelch_status", QJsonObject{}, &engine)
+            .toUtf8()).object();
+    QCOMPARE(r2.value("enabled").toBool(), engine.squelchEnabled());
+    QCOMPARE(r2.value("enabled").toBool(), true);
+    QCOMPARE(r2.value("threshold_db").toDouble(),
+             static_cast<double>(engine.squelchThresholdDb()));
+    QCOMPARE(r2.value("threshold_db").toDouble(), -10.0);
 }
 
 // Phase63: the three bookmark tools (add_bookmark / tune_to_bookmark /
