@@ -127,6 +127,9 @@ private slots:
     // the generic POST /command -> ControlHub.execute() delegation (no per-route
     // handler needed) and return honest empty fields.
     void postCommandCapabilitiesAndRecordingStateRoute();
+    // Noise blanker toggle + read-back ride the same generic POST /command ->
+    // ControlHub.execute() delegation (HTTP needs no per-route handler).
+    void postCommandNoiseBlankerRoute();
 };
 
 void TestControlHttp::initTestCase() {
@@ -493,6 +496,49 @@ void TestControlHttp::postCommandCapabilitiesAndRecordingStateRoute() {
     QVERIFY(rs.value("recording_path").toString().isEmpty());
     QVERIFY(rs.value("watch_enabled").isBool());
     QVERIFY(rs.value("recording_dir").isString());
+}
+
+// set_noise_blanker / get_noise_blanker_status reach the engine through the
+// generic POST /command delegation: the write flips the real switch, the read
+// returns it, and the write gate still blocks the write when closed.
+void TestControlHttp::postCommandNoiseBlankerRoute() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+    control::HttpControlServer srv(&hub);
+    QVERIFY(srv.start(0));
+    const quint16 port = srv.port();
+    QVERIFY(port != 0);
+
+    // Write the toggle over POST /command -> engine flips.
+    HttpResp r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_noise_blanker\",\"args\":{\"on\":true}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject w = r.obj();
+    QVERIFY2(w.value("ok").toBool(), w.value("error").toString().toUtf8().constData());
+    QCOMPARE(w.value("command").toString(), QStringLiteral("set_noise_blanker"));
+    QCOMPARE(w.value("enabled").toBool(), true);
+    QCOMPARE(eng.noiseBlankerEnabled(), true);
+
+    // Read it back over the wire.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"get_noise_blanker_status\",\"args\":{}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject rd = r.obj();
+    QVERIFY2(rd.value("ok").toBool(), rd.value("error").toString().toUtf8().constData());
+    QCOMPARE(rd.value("command").toString(), QStringLiteral("get_noise_blanker_status"));
+    QCOMPARE(rd.value("enabled").toBool(), true);
+
+    // Gate closed: the same write POST is honestly refused, engine untouched.
+    hub.setWriteEnabled(false);
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_noise_blanker\",\"args\":{\"on\":false}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject g = r.obj();
+    QVERIFY(!g.value("ok").toBool());
+    QVERIFY(g.value("gated").toBool());
+    QCOMPARE(eng.noiseBlankerEnabled(), true);   // still true: gated write did not land
+    hub.setWriteEnabled(true);
 }
 
 QTEST_MAIN(TestControlHttp)

@@ -343,6 +343,7 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "set_network_audio_sink", "get_network_audio_status",
         "start_scan_link", "stop_scan_link", "get_scan_link_status",
         "set_squelch", "get_squelch_status",
+        "set_noise_blanker", "get_noise_blanker_status",
         "list_bookmarks", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
         "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
         "list_recordings", "delete_recording", "export_recording",
@@ -372,6 +373,7 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(ai::isWriteTool("start_scan_link"));
     QVERIFY(ai::isWriteTool("stop_scan_link"));
     QVERIFY(ai::isWriteTool("set_squelch"));
+    QVERIFY(ai::isWriteTool("set_noise_blanker"));
     QVERIFY(ai::isWriteTool("add_bookmark"));
     QVERIFY(ai::isWriteTool("tune_to_bookmark"));
     QVERIFY(ai::isWriteTool("delete_bookmark"));
@@ -389,6 +391,7 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(!ai::isWriteTool("get_network_audio_status"));
     QVERIFY(!ai::isWriteTool("get_scan_link_status"));
     QVERIFY(!ai::isWriteTool("get_squelch_status"));
+    QVERIFY(!ai::isWriteTool("get_noise_blanker_status"));
     QVERIFY(!ai::isWriteTool("list_bookmarks"));
     QVERIFY(!ai::isWriteTool("list_vfos"));
     QVERIFY(!ai::isWriteTool("list_recordings"));
@@ -438,6 +441,7 @@ void TestAiRealLink::phase26_tools_callableReturnJson() {
         "set_network_audio_sink", "get_network_audio_status",
         "start_scan_link", "stop_scan_link", "get_scan_link_status",
         "set_squelch", "get_squelch_status",
+        "set_noise_blanker", "get_noise_blanker_status",
         "list_bookmarks", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
         "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
         "list_recordings", "delete_recording", "export_recording",
@@ -474,6 +478,21 @@ void TestAiRealLink::phase26_badArgsHonestError() {
     // delete_recording without name.
     QCOMPARE(parseObj(ai::executeTool("delete_recording", QJsonObject{}, &engine))
              .value("ok").toBool(), false);
+
+    // set_noise_blanker without `on` (and with a non-boolean `on`) -> honest error.
+    QCOMPARE(parseObj(ai::executeTool("set_noise_blanker", QJsonObject{}, &engine))
+             .value("ok").toBool(), false);
+    QJsonObject badOn; badOn["on"] = "yes";
+    QCOMPARE(parseObj(ai::executeTool("set_noise_blanker", badOn, &engine))
+             .value("ok").toBool(), false);
+
+    // Real round-trip: set flips the engine, get reads the real switch back.
+    QJsonObject nb; nb["on"] = true;
+    QJsonObject nbR = parseObj(ai::executeTool("set_noise_blanker", nb, &engine));
+    QVERIFY2(nbR.value("ok").toBool(), qPrintable(ai::executeTool("set_noise_blanker", nb, &engine)));
+    QJsonObject nbS = parseObj(ai::executeTool("get_noise_blanker_status", QJsonObject{}, &engine));
+    QVERIFY(nbS.value("ok").toBool());
+    QCOMPARE(nbS.value("enabled").toBool(), true);
 }
 
 QTEST_MAIN(TestAiRealLink)

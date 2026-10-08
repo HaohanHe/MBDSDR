@@ -42,6 +42,7 @@ const QSet<QString> kAllCxxTools = {
     "set_network_audio_sink", "get_network_audio_status",
     "start_scan_link", "stop_scan_link", "get_scan_link_status",
     "set_squelch", "get_squelch_status",
+    "set_noise_blanker", "get_noise_blanker_status",
     "list_bookmarks", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
     "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
     "list_recordings", "delete_recording", "export_recording",
@@ -69,7 +70,7 @@ const QSet<QString> kExpectedWriteTools = {
     "apply_frequency_correction", "export_iq_segment",
     // Phase26 new gated writes (14).
     "set_network_audio_sink", "start_scan_link", "stop_scan_link",
-    "set_squelch", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
+    "set_squelch", "set_noise_blanker", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
     "add_vfo", "switch_vfo", "rename_vfo",
     "delete_recording", "export_recording",
     "set_fft_params", "set_color_map",
@@ -106,6 +107,7 @@ const QSet<QString> kFlutterUngatedReadTools = {
     // Phase60 packet-text snapshot tools (read-only, desktop-only).
     "get_acars_packets", "get_navtex_messages",
     "get_network_audio_status", "get_scan_link_status", "get_squelch_status",
+    "get_noise_blanker_status",
     "list_bookmarks", "list_vfos", "list_recordings", "get_spectrum_status",
     // Read-only capability/recording-state snapshots (desktop-only reads).
     "get_capabilities", "get_recording_state",
@@ -134,7 +136,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 45, qPrintable(QString("expected 45 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 47, qPrintable(QString("expected 47 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -171,6 +173,8 @@ void TestToolRegistry::writeReadSplit_registryMatchesContract() {
     QVERIFY(!isWriteTool("predict_passes"));
     // Phase26: spot-check the new write/read split.
     QVERIFY(isWriteTool("set_squelch"));
+    QVERIFY(isWriteTool("set_noise_blanker"));
+    QVERIFY(!isWriteTool("get_noise_blanker_status"));
     QVERIFY(isWriteTool("add_vfo"));
     QVERIFY(isWriteTool("set_fft_params"));
     QVERIFY(!isWriteTool("list_vfos"));
@@ -227,7 +231,7 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 45);
+    QCOMPARE(defs.size(), 47);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).

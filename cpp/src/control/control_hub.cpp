@@ -112,6 +112,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"start_scan_link",       true,  &ControlHub::cmdStartScanLink},
         {"stop_scan_link",        true,  &ControlHub::cmdStopScanLink},
         {"set_squelch",           true,  &ControlHub::cmdSetSquelch},
+        {"set_noise_blanker",     true,  &ControlHub::cmdSetNoiseBlanker},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
         {"add_bookmark",          true,  &ControlHub::cmdAddBookmark},
@@ -147,6 +148,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_network_audio_status", false, &ControlHub::cmdGetNetworkAudioStatus},
         {"get_scan_link_status",  false, &ControlHub::cmdGetScanLinkStatus},
         {"get_squelch_status",    false, &ControlHub::cmdGetSquelchStatus},
+        {"get_noise_blanker_status", false, &ControlHub::cmdGetNoiseBlankerStatus},
         {"list_bookmarks",        false, &ControlHub::cmdListBookmarks},
         {"list_vfos",             false, &ControlHub::cmdListVfos},
         {"list_recordings",       false, &ControlHub::cmdListRecordings},
@@ -1257,6 +1259,23 @@ QJsonObject ControlHub::cmdGetSquelchStatus(const QJsonObject&) {
     o["threshold_db"] = engine_->squelchThresholdDb();
     o["auto"] = engine_->squelchAuto();
     o["open"] = engine_->squelchOpen();
+    return o;
+}
+
+QJsonObject ControlHub::cmdSetNoiseBlanker(const QJsonObject& a) {
+    bool on; QString err;
+    if (!needBool(a, "on", on, err)) return errResult(err);
+    engine_->setNoiseBlanker(on);
+    QJsonObject o = okBase();
+    o["command"] = "set_noise_blanker";
+    o["enabled"] = on;
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetNoiseBlankerStatus(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "get_noise_blanker_status";
+    o["enabled"] = engine_->noiseBlankerEnabled();
     return o;
 }
 
