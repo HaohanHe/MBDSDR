@@ -29,6 +29,17 @@ public:
     // Returns -1 when either level is invalid (empty state, not a fake 0).
     static int sUnitsAboveNoise(double signalDbfs, double noiseFloorDbfs);
 
+    // Pure: draw-rect + alignment for one S0..S9 scale label inside the track.
+    // Interior labels center on their cell. The two END caps (S0 at the left
+    // rail, S9 at the right rail) align INWARD -- flush-left / flush-right --
+    // so their glyphs stay inside the track edge; centering them ON the edge
+    // line previously hung half the glyph off the widget and clipped it
+    // (rendering "S0" as "0" and "S9" as "S!").
+    struct SLabelPlacement { QRectF rect; Qt::Alignment align; };
+    static SLabelPlacement labelPlacement(int index, int units,
+                                          double trackLeft, double trackRight,
+                                          double rowTop, double rowH);
+
     QSize sizeHint() const override;
 
 private:

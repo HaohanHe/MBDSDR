@@ -19,6 +19,7 @@ private slots:
     void clampsToS9();
     void emptyStateWhenNoLevel();
     void peakHoldSlowDecay();
+    void endCapLabelsStayInsideTrack();
     void trendStartsEmpty();
     void trendAccumulatesRealSamples();
     void trendCapsAtMaxDepth();
@@ -57,6 +58,35 @@ void TestSMeter::peakHoldSlowDecay() {
     for (int i = 0; i < 5; ++i) m.tickDecay(1.0);   // 5s * 12 dB/s = 60 dB decay
     // Peak should have decayed close to the new low signal.
     QVERIFY2(true, "peak-hold decay ran without crash");
+}
+
+void TestSMeter::endCapLabelsStayInsideTrack() {
+    // Regression: end-cap S0/S9 scale labels must align INWARD so their glyphs
+    // stay inside the track edge. Centering them on the edge line previously
+    // hung half the glyph off the widget boundary, clipping "S0" -> "0" and
+    // "S9" -> "S!" at every window width (not just narrow).
+    const double L = 10.0, R = 230.0, rowTop = 4.0, rowH = 12.0;
+    const int units = tokens::kSMeterMaxUnits;
+
+    auto s0 = ui::SMeterWidget::labelPlacement(0, units, L, R, rowTop, rowH);
+    auto s9 = ui::SMeterWidget::labelPlacement(units, units, L, R, rowTop, rowH);
+
+    // S0 flush-left: glyph starts at the left rail, never hangs off it.
+    QCOMPARE(s0.rect.left(), L);
+    QVERIFY(s0.rect.right() <= R + 1e-6);
+    QVERIFY(s0.align & Qt::AlignLeft);
+    // S9 flush-right: glyph ends at the right rail, never hangs off it.
+    QCOMPARE(s9.rect.right(), R);
+    QVERIFY(s9.rect.left() >= L - 1e-6);
+    QVERIFY(s9.align & Qt::AlignRight);
+
+    // Interior labels still center on their own cell (unchanged behaviour).
+    const double cell = (R - L) / units;
+    for (int i = 1; i < units; ++i) {
+        auto mid = ui::SMeterWidget::labelPlacement(i, units, L, R, rowTop, rowH);
+        QCOMPARE(mid.rect.center().x(), L + cell * i);
+        QVERIFY(mid.align & Qt::AlignHCenter);
+    }
 }
 
 // ---- Mini RSSI trend strip (real-sample ring buffer, honest empty state) ----
