@@ -316,12 +316,13 @@ void main() {
   });
 
   group('工具总数审计：注册数 = Schema 数，漏注册即失败', () {
-    test('buildRadioTools 恰好登记 8 个工具且名字齐全', () {
+    test('buildRadioTools 恰好登记 10 个工具且名字齐全', () {
       final radio = RecordingRadio();
       final tools = buildRadioTools(radio);
-      expect(tools.length, 8,
+      expect(tools.length, 10,
           reason: 'set_frequency/set_mode/set_gain/set_sample_rate/'
-              'start_recording/stop_recording/get_status/predict_passes 共 8 个；'
+              'start_recording/stop_recording/set_squelch/get_squelch_status/'
+              'get_status/predict_passes 共 10 个；'
               '新增工具须同步更新本断言');
       final names = tools.map((t) => t.name).toSet();
       expect(names, <String>{
@@ -331,6 +332,8 @@ void main() {
         'set_sample_rate',
         'start_recording',
         'stop_recording',
+        'set_squelch',
+        'get_squelch_status',
         'get_status',
         'predict_passes',
       });

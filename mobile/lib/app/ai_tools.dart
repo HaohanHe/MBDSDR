@@ -292,6 +292,77 @@ List<AiTool> buildRadioTools(
       },
     ),
     AiTool(
+      name: 'set_squelch',
+      description: '设置静噪门控。可分别提供 enabled（是否使能静噪）、'
+          'threshold_db（手动门限，dBFS，范围 -100 到 -20，越接近 0 越严）、'
+          'auto（true = 门限自动跟随噪声底）；至少提供其中一项。'
+          '同时给 threshold_db 时按手动门限生效并退出自动跟随。',
+      parameters: const <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{
+          'enabled': <String, dynamic>{'type': 'boolean'},
+          'threshold_db': <String, dynamic>{
+            'type': 'number',
+            'minimum': AppTokens.squelchThresholdMinDb,
+            'maximum': AppTokens.squelchThresholdMaxDb,
+          },
+          'auto': <String, dynamic>{'type': 'boolean'},
+        },
+      },
+      execute: (Map<String, dynamic> args) async {
+        try {
+          final dc = _disconnectError(radio, 'set_squelch');
+          if (dc != null) return dc;
+          final enabled = args['enabled'];
+          final threshold = args['threshold_db'];
+          final auto = args['auto'];
+          if (enabled == null && threshold == null && auto == null) {
+            return _err('需要 enabled / threshold_db / auto 至少一项');
+          }
+          if (enabled is bool) radio.setSquelchEnabled(enabled);
+          // 顺序：先自动跟随，再手动门限——同给 threshold_db 时手动覆盖自动，
+          // 与频谱页拖门限滑杆「退出自动跟随」语义一致。
+          if (auto is bool) radio.setSquelchAuto(auto);
+          if (threshold is num) {
+            radio.setSquelchThresholdDb(threshold.toDouble());
+          }
+          return jsonEncode(<String, dynamic>{
+            'ok': true,
+            'squelch_enabled': radio.squelchEnabled,
+            'squelch_auto': radio.squelchAuto,
+            'threshold_db': radio.squelchThresholdDb,
+            'open': radio.squelchOpen,
+          });
+        } catch (e) {
+          return _err('设置静噪失败: $e');
+        }
+      },
+    ),
+    AiTool(
+      name: 'get_squelch_status',
+      description: '只读：读取静噪门控状态——是否使能、是否自动门限、'
+          '当前手动门限（dBFS）、门当前是否开门（true=送声）、实测解调电平（dBFS）。'
+          '不需要接收机连接也可读取当前门配置。',
+      parameters: const <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{},
+      },
+      execute: (Map<String, dynamic> args) async {
+        try {
+          return jsonEncode(<String, dynamic>{
+            'ok': true,
+            'squelch_enabled': radio.squelchEnabled,
+            'squelch_auto': radio.squelchAuto,
+            'threshold_db': radio.squelchThresholdDb,
+            'open': radio.squelchOpen,
+            'level_db': radio.squelchLevelDb,
+          });
+        } catch (e) {
+          return _err('读取静噪状态失败: $e');
+        }
+      },
+    ),
+    AiTool(
       name: 'get_status',
       description: '读取当前接收机状态。返回连接状态机 status'
           '（connected/connecting/reconnecting/disconnected/error）、是否就绪 '
@@ -412,6 +483,7 @@ List<AiTool> buildRadioTools(
     'set_sample_rate',
     'start_recording',
     'stop_recording',
+    'set_squelch',
   };
   return tools.map((AiTool t) {
     if (!mutatingTools.contains(t.name)) return t;

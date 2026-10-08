@@ -16,6 +16,7 @@ import '../services/ai_client.dart';
 import '../services/chat_session_store.dart';
 import '../services/radio_controller.dart';
 import '../services/recording_store.dart';
+import '../services/sat_passes_provider.dart';
 import '../services/settings_service.dart';
 import '../widgets/connection_status_line.dart';
 import 'ai_tools.dart';
@@ -42,6 +43,11 @@ class _HomeShellState extends State<HomeShell> {
   /// 当前正在回放的录音（FilePlayer 状态镜像）；无回放/未注入时为 null。
   RecordingMeta? _playing;
   StreamSubscription<PlaybackState>? _playSub;
+
+  /// AI 工具 predict_passes 的数据源（Celestrak TLE + 本地 SGP4）。构造无副作用，
+  /// 首次 predict 才联网；与天空页共用同一预测路径，不另造执行链。未注入前
+  /// predict_passes 恒回「未配置」诚实空态（见 ai_tools.dart）。
+  final SatPassesService _passesService = SatPassesService();
 
   @override
   void didChangeDependencies() {
@@ -226,6 +232,11 @@ class _HomeShellState extends State<HomeShell> {
                 tools: buildRadioTools(
                   radio,
                   manualMode: settings.aiManualMode,
+                  // 注入过境预测数据源与本站坐标：此前缺省导致 predict_passes
+                  // 在生产环境恒回「未配置」，工具形同未接线。station 未配置时
+                  // 传 null，工具自身回「未配置测站坐标」诚实空态。
+                  passesService: _passesService,
+                  station: station,
                 ),
               ),
               manualMode: settings.aiManualMode,

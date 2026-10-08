@@ -4,7 +4,7 @@
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
 //   * 桌面端（C++/Qt）注册了 35 个 Agent 工具；移动端 AiClient 实际接入的工具
-//     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 8 个）。
+//     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
 //     此处仅作只读对照，绝不冒充移动端已有。
@@ -194,6 +194,8 @@ const Set<String> kMobileImplementedToolNames = <String>{
   'set_mode',
   'start_recording',
   'stop_recording',
+  'set_squelch',
+  'get_squelch_status',
   'get_status',
   'predict_passes',
 };
