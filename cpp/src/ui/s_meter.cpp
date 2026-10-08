@@ -44,7 +44,7 @@ void SMeterWidget::tickDecay(double dtSec) {
 }
 
     QSize SMeterWidget::sizeHint() const {
-    return QSize(tokens::scaled(220), tokens::scaled(tokens::kSMeterH));
+    return QSize(tokens::scaled(tokens::kSMeterW), tokens::scaled(tokens::kSMeterH));
 }
 
 void SMeterWidget::paintEvent(QPaintEvent*) {
