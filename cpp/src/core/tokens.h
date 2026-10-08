@@ -148,6 +148,19 @@ inline constexpr int    kFixedMarkerKeyStepDiv = 200;
 inline constexpr const char* kFixedMarkerSelColor = "#e0b35a";
 inline constexpr int    kFixedMarkerLineWidth = 1;
 
+// ---- Spectrum bookmark overlay (read-only reference lines) --------------
+// Fed from BookmarkManager::frequencies() as a PURE display overlay: each saved
+// frequency maps to x through the same frequency->x as the trace and paints one
+// quiet reference line -- no storage here, no interaction, no trace-data
+// coupling. Visual separation from the other vertical lines on the trace:
+//   fixed user markers = quiet accent solid / amber dashed-selected;
+//   measurement cursors = teal/pink dashed; peaks = accent triangles.
+// Bookmarks = quiet green DOTTED lines at low alpha so they read as "saved
+// references", never as a live signal or a user-placed marker.
+inline constexpr const char* kBookmarkColor     = "#5fd08a";
+inline constexpr double      kBookmarkLineAlpha = 0.45;
+inline constexpr int         kBookmarkLineWidth = 1;
+
 // ---- Dual measurement cursors (SDR++ Δ markers) -------------------------
 // Two independent vertical measurement lines; the read-out shows |A-B| Hz.
 // Distinct from fixed markers (amber) and peaks (accent triangles): cursor A =

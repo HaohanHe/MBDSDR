@@ -19,6 +19,7 @@
 #include "core/spectrum_frame.h"
 #include "ui/main_window.h"
 #include "ui/spectrum_widget.h"
+#include "ui/spectrum_display.h"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
@@ -109,6 +110,24 @@ int main(int argc, char** argv) {
             for (int i = 0; i < 6; ++i)
                 sw->setSpectrum(frame(180, -22.0f, 340, -38.0f));
         }
+    }
+
+    // Optional: inject two deterministic bookmark frequencies (MBD_BMKSHOT=1) so
+    // the spectrum bookmark overlay renders its real dotted reference lines on
+    // the trace. Pure display geometry pushed straight to the canvas -- no
+    // storage, no demo data in the app itself. Both frequencies sit inside the
+    // ~98.5 MHz startup view (default tuned centre, fs 2.4 MHz). Off by default
+    // so every other screenshot is unchanged.
+    if (qgetenv("MBD_BMKSHOT").size()) {
+        if (!sw) {   // resolve the spectrum tab if PEAKSHOT did not already
+            for (auto* tb : win.findChildren<QTabWidget*>()) {
+                for (int i = 0; i < tb->count(); ++i)
+                    if (tb->tabText(i) == QString::fromUtf8("频谱"))
+                        sw = qobject_cast<mbdsdr::ui::SpectrumWidget*>(tb->widget(i));
+            }
+        }
+        if (sw && sw->displayCanvas())
+            sw->displayCanvas()->setBookmarkHz({98.0e6, 99.0e6});
     }
 
     QTimer::singleShot(1200, [&]() {

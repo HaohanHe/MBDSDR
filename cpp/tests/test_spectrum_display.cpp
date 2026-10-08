@@ -51,6 +51,9 @@ private slots:
     void downscaleUsesBlockMaxDecimation();
     void specFractionRoundTripPersists();
     void specFractionInvalidFallsBackToDefault();
+    void bookmarkOverlayMapsToTraceX();
+    void bookmarkOverlayHonestEmptyState();
+    void bookmarkOverlayRefeedsUpdate();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -740,6 +743,82 @@ void TestSpectrumDisplay::specFractionInvalidFallsBackToDefault() {
              hi.traceShareFraction() <= 0.9 + 1e-9,
              qPrintable(QString("out-of-range share must be clamped, got %1")
                         .arg(hi.traceShareFraction())));
+}
+
+// Bookmark overlay: injected bookmark frequencies land on the trace through the
+// SAME frequency->x mapping as the rest of the canvas (xForFrequency), inside the
+// trace horizontal extent and monotonic with frequency. A fixed marker at the
+// same frequency shares the identical x -- proving both overlays use the one
+// shared mapping rather than each inventing its own.
+void TestSpectrumDisplay::bookmarkOverlayMapsToTraceX() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    w.setSpectrum(makeFrame(512, 256, 0.0f, -100.0f));   // fs=2.4MHz, f0=98.5MHz
+
+    // Two bookmarks straddling the band centre, both inside the visible window.
+    const double fL = 98.0e6;
+    const double fR = 99.0e6;
+    w.setBookmarkHz({fL, fR});
+    QCOMPARE(w.bookmarkHz().size(), 2);
+
+    const int xL = w.xForFrequency(fL);
+    const int xR = w.xForFrequency(fR);
+    // Each bookmark line maps inside the trace plot (visible, not culled).
+    QVERIFY2(xL >= w.spectrumRect().left() && xL <= w.spectrumRect().right(),
+             "left bookmark line must map inside the trace horizontal extent");
+    QVERIFY2(xR >= w.spectrumRect().left() && xR <= w.spectrumRect().right(),
+             "right bookmark line must map inside the trace horizontal extent");
+    // Frequency increases left -> right, so x must increase too.
+    QVERIFY2(xL < xR, "bookmark x must increase monotonically with frequency");
+
+    // Cross-check with a fixed user marker at the SAME frequency: both overlays
+    // share the very xForFreq mapping, so the x agrees within 1px rounding.
+    ui::SpectrumDisplay::FixedMarker fm;
+    fm.freqHz = fL; fm.name = QStringLiteral("ref");
+    w.setFixedMarkers({fm});
+    const int xFixed = w.xForFrequency(fL);
+    QVERIFY2(std::abs(xFixed - xL) <= 1,
+             "bookmark and fixed-marker at the same freq must share the x mapping");
+}
+
+// Honest empty state: a freshly constructed overlay holds no bookmarks and paints
+// nothing; re-feeding an empty list clears a previously fed one. The paint loop
+// iterates exactly bookmarkHz(), so an empty vector means zero bookmark lines.
+void TestSpectrumDisplay::bookmarkOverlayHonestEmptyState() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    w.setSpectrum(makeFrame(512, 256, 0.0f, -100.0f));
+    QVERIFY2(w.bookmarkHz().isEmpty(),
+             "default bookmark overlay must be empty (honest empty state)");
+
+    // Feed one, then re-feed an empty list -> the overlay drops back to empty.
+    w.setBookmarkHz({98.5e6});
+    QCOMPARE(w.bookmarkHz().size(), 1);
+    w.setBookmarkHz({});
+    QVERIFY2(w.bookmarkHz().isEmpty(),
+             "re-feeding an empty list must clear the bookmark overlay");
+}
+
+// Re-feed on change: the container whole-list-replaces on every bookmark
+// add/edit/delete. A second feed must REPLACE the first list, never append.
+void TestSpectrumDisplay::bookmarkOverlayRefeedsUpdate() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    w.setSpectrum(makeFrame(512, 256, 0.0f, -100.0f));
+
+    w.setBookmarkHz({98.0e6});
+    QCOMPARE(w.bookmarkHz().size(), 1);
+    QCOMPARE(w.bookmarkHz().at(0), 98.0e6);
+
+    // Container re-pushes the full list after an add (whole-list replace).
+    w.setBookmarkHz({98.0e6, 98.5e6, 99.0e6});
+    QCOMPARE(w.bookmarkHz().size(), 3);
+    QCOMPARE(w.bookmarkHz().at(0), 98.0e6);
+    QCOMPARE(w.bookmarkHz().at(1), 98.5e6);
+    QCOMPARE(w.bookmarkHz().at(2), 99.0e6);
 }
 
 QTEST_MAIN(TestSpectrumDisplay)

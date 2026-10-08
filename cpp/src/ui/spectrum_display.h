@@ -128,6 +128,16 @@ public slots:
     void removeFixedMarker(int index);
     void clearFixedMarkers() { fixedMarkers_.clear(); update(); }
 
+    // ---- Spectrum bookmark overlay (read-only reference lines) -----------
+    // The container pushes BookmarkManager::frequencies() here. PURE DISPLAY:
+    // each saved frequency maps to x through the SAME xForFrequency as the trace
+    // and paints one quiet dotted reference line over the trace. No storage in
+    // this widget, no interaction, no coupling to the trace data -- an empty list
+    // paints nothing (honest empty state). Whole-list replace: the container
+    // re-feeds on every bookmark add/edit/delete.
+    void setBookmarkHz(const QVector<double>& hz);
+    const QVector<double>& bookmarkHz() const { return bookmarkHz_; }
+
     // ---- Dual measurement cursors (SDR++ Δ markers) ----------------------
     // Two independent draggable vertical lines; the read-out shows |A-B|.
     // NaN = not placed. Pure helper measurementDeltaHz(a,b) is unit-tested.
@@ -390,6 +400,10 @@ private:
 
     // User fixed markers (persisted by the container).
     QVector<FixedMarker> fixedMarkers_;
+
+    // Spectrum bookmark reference frequencies (Hz), pushed read-only from the
+    // container's BookmarkManager. Display-only state -- no persistence here.
+    QVector<double> bookmarkHz_;
 
     // ---- Waterfall ring buffer -------------------------------------------
     // The ring stores RAW dB rows (the SDR++ "source of truth"), not baked

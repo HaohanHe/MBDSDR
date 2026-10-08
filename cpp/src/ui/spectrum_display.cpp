@@ -503,6 +503,11 @@ void SpectrumDisplay::removeFixedMarker(int index) {
     }
 }
 
+void SpectrumDisplay::setBookmarkHz(const QVector<double>& hz) {
+    bookmarkHz_ = hz;
+    update();
+}
+
 void SpectrumDisplay::setScrollSpeed(int linesPerFrame) {
     everyNthFrame_ = (linesPerFrame == 1 || linesPerFrame == 2 || linesPerFrame == 4)
                      ? linesPerFrame : 1;
@@ -772,6 +777,22 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
             p.setPen(QPen(minCol, 1.0));
             p.drawPolyline(minLine);
         }
+    }
+
+    // --- Spectrum bookmarks: quiet dotted reference lines -------------------
+    // Pure geometry overlay fed by the container's BookmarkManager::frequencies().
+    // Each saved frequency maps through the SAME xForFreq as the trace and paints
+    // a low-alpha green dotted line across the trace, UNDER the user fixed markers
+    // above. No trace-data coupling -- when the list is empty nothing is painted
+    // (honest empty state), and frequencies outside the visible window are culled
+    // exactly like the fixed-marker lines.
+    for (double bmHz : bookmarkHz_) {
+        const int x = xForFreq(bmHz, fLo, span);
+        if (x < trace.left() || x > trace.right()) continue;
+        QColor bc = QColor(tokens::kBookmarkColor);
+        bc.setAlphaF(tokens::kBookmarkLineAlpha);
+        p.setPen(QPen(bc, tokens::kBookmarkLineWidth, Qt::DotLine));
+        p.drawLine(x, trace.top(), x, trace.bottom());
     }
 
     // --- Fixed user markers: vertical named lines on the trace ---------------
