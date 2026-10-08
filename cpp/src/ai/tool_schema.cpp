@@ -530,6 +530,32 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // set_noise_blanker (write -- gated) ----------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "set_noise_blanker";
+        s.description = QString::fromUtf8(
+            "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec on;
+        on.name = "on";
+        on.type = "boolean";
+        on.description = QString::fromUtf8("是否开启噪声抑制");
+        on.required = true;
+        s.params << on;
+        out.append(s);
+    }
+
+    // get_noise_blanker_status (read-only) ---------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_noise_blanker_status";
+        s.description = QString::fromUtf8(
+            "只读：返回噪声抑制器状态（enabled 是否使能）。"
+            "读取引擎真实开关，不编造。");
+        out.append(s);
+    }
+
     // list_bookmarks (read-only) -----------------------------------------
     {
         ToolSchemaSpec s;

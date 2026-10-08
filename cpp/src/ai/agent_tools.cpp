@@ -670,6 +670,34 @@ QString execGetSquelchStatus(const QJsonObject&, dsp::SpectrumEngine*,
     return compact(o);
 }
 
+// 7b. set_noise_blanker (write): the engine exposes setNoiseBlanker(bool) and the
+//     UI checkbox already drives it; wire the real setter. `on` is required and
+//     must be a boolean -- missing/non-bool is an honest error, never a default.
+QString execSetNoiseBlanker(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                            const SourceInfo& src) {
+    if (!args.contains("on") || !args.value("on").isBool())
+        return errResult(QString::fromUtf8("参数 on 缺失或不是布尔值"));
+    const bool on = args.value("on").toBool();
+    engine->setNoiseBlanker(on);
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = on;
+    o["message"] = QString::fromUtf8("噪声抑制开关已下发");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 7c. get_noise_blanker_status (read): the engine DOES expose noiseBlankerEnabled()
+//     (unlike squelch), so we return the real switch rather than a null.
+QString execGetNoiseBlankerStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
+                                 const SourceInfo& src) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = engine->noiseBlankerEnabled();
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // 8. list_bookmarks (read): BookmarkManager wiring lands on control -> honest empty.
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
                           const SourceInfo& src) {
@@ -1170,6 +1198,8 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_scan_link_status", &execGetScanLinkStatus},
         {"set_squelch", &execSetSquelch},
         {"get_squelch_status", &execGetSquelchStatus},
+        {"set_noise_blanker", &execSetNoiseBlanker},
+        {"get_noise_blanker_status", &execGetNoiseBlankerStatus},
         {"list_bookmarks", &execListBookmarks},
         {"add_bookmark", &execAddBookmark},
         {"tune_to_bookmark", &execTuneToBookmark},

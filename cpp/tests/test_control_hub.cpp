@@ -65,6 +65,7 @@ private slots:
     // ---- Phase26: 21 newly tool-ized capabilities ------------------------
     void fftParamsLandAndSpectrumStatusReadsBack();
     void squelchSetLandAndStatusReadsBack();
+    void noiseBlankerSetLandAndStatusReadsBack();
     void vfoListAddSwitchRename();
     void bookmarksPersistToQSettings();
     void recordingsListEmptyThenRealDeleteExport();
@@ -531,6 +532,40 @@ void TestControlHub::squelchSetLandAndStatusReadsBack() {
     QCOMPARE(s.value("auto").toBool(), false);   // manual threshold disarmed auto
 }
 
+// set_noise_blanker really flips the engine switch; get_noise_blanker_status
+// reads the real state back. Missing / non-boolean `on` are honest errors.
+void TestControlHub::noiseBlankerSetLandAndStatusReadsBack() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // Fresh engine: honest off.
+    QJsonObject s0 = parseObj(hub.execute("get_noise_blanker_status", {}));
+    QVERIFY2(s0.value("ok").toBool(), s0.value("error").toString().toUtf8().constData());
+    QCOMPARE(s0.value("command").toString(), QStringLiteral("get_noise_blanker_status"));
+    QCOMPARE(s0.value("enabled").toBool(), false);
+
+    // Write lands on the engine.
+    QJsonObject r = parseObj(hub.execute("set_noise_blanker", {{"on", true}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(r.value("enabled").toBool(), true);
+    QCOMPARE(eng.noiseBlankerEnabled(), true);
+
+    // Read-back reflects the real engine state.
+    QJsonObject s = parseObj(hub.execute("get_noise_blanker_status", {}));
+    QCOMPARE(s.value("enabled").toBool(), true);
+
+    // Off again.
+    parseObj(hub.execute("set_noise_blanker", {{"on", false}}));
+    QCOMPARE(parseObj(hub.execute("get_noise_blanker_status", {}))
+             .value("enabled").toBool(), false);
+
+    // Missing / wrong-typed `on` -> honest ok:false.
+    QCOMPARE(parseObj(hub.execute("set_noise_blanker", {})).value("ok").toBool(), false);
+    QCOMPARE(parseObj(hub.execute("set_noise_blanker", {{"on", "yes"}}))
+             .value("ok").toBool(), false);
+}
+
 // add_vfo / switch_vfo really move the selected channel; rename_vfo renames it.
 void TestControlHub::vfoListAddSwitchRename() {
     SpectrumEngine eng;
@@ -718,7 +753,8 @@ void TestControlHub::phase26WritesAreGatedAndBadArgsHonest() {
     hub.setWriteEnabled(false);
     for (const char* cmd : {
             "set_fft_params", "add_bookmark", "start_scan_link",
-            "delete_recording", "set_squelch", "rename_vfo", "set_color_map"}) {
+            "delete_recording", "set_squelch", "rename_vfo", "set_color_map",
+            "set_noise_blanker"}) {
         QJsonObject r = parseObj(hub.execute(QString::fromUtf8(cmd), {{}}));
         QVERIFY2(!r.value("ok").toBool() && r.value("gated").toBool(),
                  qPrintable(QString::fromUtf8(cmd)));

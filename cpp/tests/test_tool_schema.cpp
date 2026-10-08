@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 45);
+    QCOMPARE(specs.size(), 47);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -216,6 +216,13 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：返回静噪状态（enabled/threshold_db/auto/当前是否 open）。"
             "无实时门限读数时诚实标注，不编造。")},
+        {"set_noise_blanker",
+         QString::fromUtf8(
+            "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。")},
+        {"get_noise_blanker_status",
+         QString::fromUtf8(
+            "只读：返回噪声抑制器状态（enabled 是否使能）。"
+            "读取引擎真实开关，不编造。")},
         {"list_bookmarks",
          QString::fromUtf8(
             "只读：列出书签（频率/名称/模式）。无书签时诚实返回空列表，不编造。")},
@@ -358,7 +365,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 45);
+    QCOMPARE(headerCount, 47);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

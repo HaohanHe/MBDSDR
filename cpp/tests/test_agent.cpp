@@ -56,8 +56,10 @@ private slots:
     void capabilitiesAndRecordingStateHonestEmptyThenRecording();
     // --- Phase62 audit: 10-tool manual-gate spot-check (5 write / 5 read) ---
     void manualMode_gateSpotCheckTenTools();
-    // --- Phase62 gate full-coverage: ALL 28 writes gated / ALL 17 reads open ---
+    // --- Phase62 gate full-coverage: ALL 29 writes gated / ALL 18 reads open ---
     void manualMode_gateSpotCheckAllWrites();
+    // --- Noise blanker three-channel tool: land / readback / honest empty / gate ---
+    void noiseBlankerLandReadbackAndGate();
 };
 
 void TestAgent::initTestCase() {
@@ -76,7 +78,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 45);
+    QCOMPARE(tools.size(), 47);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -677,6 +679,7 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
     const int selVfoBefore = engine.selectedVfoId();
     const bool sqEnBefore = engine.squelchEnabled();
     const float sqThBefore = engine.squelchThresholdDb();
+    const bool nbBefore = engine.noiseBlankerEnabled();
     const QString recPathBefore = engine.recordingPath();
     const QString recDirBefore = engine.recordingDir();
     const bool watchBefore = engine.watchEnabled();
@@ -700,6 +703,7 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         else if (name == "set_network_audio_sink") { a["enable"] = true; a["port"] = 12345; a["format"] = "s16le"; }
         else if (name == "start_scan_link") a["target_freq_hz"] = 100e6;
         else if (name == "set_squelch") { a["enabled"] = true; a["threshold_db"] = -10.0; }
+        else if (name == "set_noise_blanker") a["on"] = true;
         else if (name == "add_bookmark") { a["freq_hz"] = 100e6; a["name"] = "gate_probe"; a["mode"] = "NFM"; }
         else if (name == "tune_to_bookmark") a["index"] = 0;
         else if (name == "delete_bookmark") a["index"] = 0;
@@ -746,9 +750,9 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split must be exactly 28 writes / 17 reads.
-    QCOMPARE(writes, 28);
-    QCOMPARE(reads, 17);
+    // The frozen split must be exactly 29 writes / 18 reads.
+    QCOMPARE(writes, 29);
+    QCOMPARE(reads, 18);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -760,6 +764,7 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
     QCOMPARE(engine.selectedVfoId(), selVfoBefore);
     QCOMPARE(engine.squelchEnabled(), sqEnBefore);
     QCOMPARE(engine.squelchThresholdDb(), sqThBefore);
+    QCOMPARE(engine.noiseBlankerEnabled(), nbBefore);
     QCOMPARE(engine.recordingPath(), recPathBefore);
     QCOMPARE(engine.recordingDir(), recDirBefore);
     QCOMPARE(engine.watchEnabled(), watchBefore);
@@ -768,6 +773,58 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
     QCOMPARE(engine.averageMode(), avgBefore);
     QCOMPARE(QSettings().value("rtl/ppm", 0.0).toDouble(), ppmBefore);
     QCOMPARE(QSettings().value("view/wfColormapFile"), cmapBefore);
+}
+
+// Noise blanker three-channel tool: honest off on a fresh engine, the write
+// really flips the engine switch, the read returns the real state back, the
+// manual-mode gate intercepts the write without touching the engine, and
+// missing / non-boolean `on` is an honest error rather than a default.
+void TestAgent::noiseBlankerLandReadbackAndGate() {
+    dsp::SpectrumEngine engine;
+
+    // Empty state: a fresh engine reports the real (off) switch, no fabrication.
+    QJsonObject off = QJsonDocument::fromJson(
+        ai::executeTool("get_noise_blanker_status", QJsonObject{}, &engine)
+            .toUtf8()).object();
+    QVERIFY2(off.value("ok").toBool(), qPrintable(ai::executeTool(
+        "get_noise_blanker_status", QJsonObject{}, &engine)));
+    QCOMPARE(off.value("enabled").toBool(), false);
+
+    // AI takeover (manualMode=false): the write really lands on the engine.
+    QJsonObject on; on["on"] = true;
+    QString r = ai::LLMWorker::dispatchToolCall("set_noise_blanker", on, &engine,
+                                               /*manualMode=*/false);
+    QVERIFY2(!r.contains(QString::fromUtf8("\"gated\":true")), qPrintable(r));
+    QVERIFY2(engine.noiseBlankerEnabled(), "set_noise_blanker(true) must flip the engine");
+
+    // Real read-back through the tool now reports enabled=true.
+    QJsonObject st = QJsonDocument::fromJson(
+        ai::executeTool("get_noise_blanker_status", QJsonObject{}, &engine)
+            .toUtf8()).object();
+    QCOMPARE(st.value("enabled").toBool(), true);
+
+    // Back off.
+    QJsonObject off2; off2["on"] = false;
+    ai::LLMWorker::dispatchToolCall("set_noise_blanker", off2, &engine,
+                                    /*manualMode=*/false);
+    QVERIFY2(!engine.noiseBlankerEnabled(), "set_noise_blanker(false) must clear the engine");
+
+    // Manual mode: the write is intercepted, engine untouched.
+    QString g = ai::LLMWorker::dispatchToolCall("set_noise_blanker", on, &engine,
+                                                /*manualMode=*/true);
+    QVERIFY2(g.contains("\"gated\":true"), qPrintable(g));
+    QVERIFY2(g.contains("\"ok\":false"), qPrintable(g));
+    QVERIFY2(!engine.noiseBlankerEnabled(),
+             "manual-mode gate must not flip the noise-blanker engine");
+
+    // Missing / non-boolean `on` are honest errors, never a silent default.
+    QJsonObject miss = QJsonDocument::fromJson(
+        ai::executeTool("set_noise_blanker", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(!miss.value("ok").toBool(), "missing `on` must be an error");
+    QJsonObject bad; bad["on"] = "yes";
+    QJsonObject badO = QJsonDocument::fromJson(
+        ai::executeTool("set_noise_blanker", bad, &engine).toUtf8()).object();
+    QVERIFY2(!badO.value("ok").toBool(), "non-boolean `on` must be an error");
 }
 
 #include <QCoreApplication>

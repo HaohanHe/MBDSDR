@@ -238,6 +238,9 @@ private:
     // Unified squelch set + read-back.
     QJsonObject cmdSetSquelch(const QJsonObject& a);
     QJsonObject cmdGetSquelchStatus(const QJsonObject&);
+    // Noise blanker toggle + real read-back (engine exposes both).
+    QJsonObject cmdSetNoiseBlanker(const QJsonObject& a);
+    QJsonObject cmdGetNoiseBlankerStatus(const QJsonObject&);
     // Bookmarks (ControlHub holds a ui::BookmarkManager; same QSettings key).
     QJsonObject cmdListBookmarks(const QJsonObject&);
     QJsonObject cmdAddBookmark(const QJsonObject& a);
