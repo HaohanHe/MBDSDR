@@ -42,7 +42,8 @@ namespace mbdsdr {
 
 namespace ui   { class BookmarkManager; class ActivityLog; }
 namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; struct SatPass; struct TleEntry; struct VfoMarker; class FrequencyScanner; class SpyServerServer;
-                 class DeviceLister; class IRtlDeviceEnumerator; class DevicePresenceNotifier; }
+                 class DeviceLister; class IRtlDeviceEnumerator; class DevicePresenceNotifier;
+                 class NetworkAudioSink; class ScanActivityLink; }
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class SMeterWidget;
@@ -77,6 +78,14 @@ public:
     // bookmark store). No radio is opened by these; they only expose what the UI
     // already owns so offscreen tests can drive scan/bookmark state deterministically.
     dsp::FrequencyScanner* scanner() { return scanner_; }
+    // Phase62 orphan wiring: headless activity-scan bridge the UI now owns.
+    dsp::ScanActivityLink* scanLink() { return scanLink_; }
+    // Offscreen harness: run the raw-IQ export with an explicit duration seconds,
+    // skipping the modal duration dialog. Returns the real engine result; the
+    // honest success/failure line lands on the recording-library status label
+    // (read via harnessRecLibStatus).
+    bool harnessExportIq(double seconds) { return doRecLibExportIq(seconds); }
+    QLabel* harnessRecLibStatus() const { return recLibPlayStatus_; }
     ui::BookmarkManager* bookmarkManager() { return bookmarkManager_; }
     // Phase27 harness accessors: the production loopback control-HTTP server. The
     // port is 0 when it failed to bind (honest -- the banner then explains why);
@@ -277,6 +286,19 @@ private:
     QPushButton*    scanSaveBmBtn_      = nullptr;  // Hit-state one-shot: save hit as bookmark
     QLabel*         scanFreqLabel_      = nullptr;  // monoInfo current freq
     QLabel*         scanStateLabel_     = nullptr;  // idle/scanning/hit text
+    // Phase62 orphan C: independent "活动扫描链" bridge (dwell->decode->record),
+    // separate from the manual scanner_ above. Owns its 50 ms UI-thread ticker;
+    // fed by the engine's REAL rssiDbfs(). The retune/dwell seams drive the real
+    // engine centre + recorder; a quiet band arms nothing (honest).
+    dsp::ScanActivityLink* scanLink_    = nullptr;
+    QTimer*         scanLinkTimer_     = nullptr;
+    QElapsedTimer*  scanLinkTickClock_ = nullptr;
+    QCheckBox*      scanLinkChk_       = nullptr;
+    QLabel*         scanLinkStateLabel_ = nullptr;
+    bool            scanLinkRecording_ = false;   // link armed the recorder
+    void onScanLinkToggled(bool on);
+    void scanLinkTimerTick();
+    void updateScanLinkStatus();
     // Bookmark table group "频率书签".
     QTableWidget*   bmTable_            = nullptr;
     QPushButton*    bmAddBtn_           = nullptr;
@@ -418,6 +440,23 @@ private:
     void onSpyServerToggled(bool on);                // start/stop the listener
     void updateSpyServerStatus();                    // refresh the status line
 
+    // Phase62 orphan B: demodulated 48k PCM -> UDP/TCP network tap. The UI owns
+    // the lifecycle (start/stop on THIS thread per the sink contract) and hands
+    // the sink to the engine as a PARALLEL write tap (setNetworkAudioSink). The
+    // borrowed raw pointer is only for honest status read-back; ownership stays
+    // with the engine tap (nullptr detaches + destroys it).
+    QLineEdit*      netAudioHostEdit_    = nullptr;
+    QSpinBox*       netAudioPortSpin_    = nullptr;
+    QComboBox*      netAudioProtoCombo_  = nullptr;
+    QPushButton*    netAudioStartBtn_    = nullptr;
+    QPushButton*    netAudioStopBtn_    = nullptr;
+    QLabel*         netAudioStatusLabel_ = nullptr;
+    dsp::NetworkAudioSink* netAudioRaw_  = nullptr;
+    QTimer*         netAudioTimer_       = nullptr;  // 1 s stats refresh while streaming
+    void onNetAudioStart();
+    void onNetAudioStop();
+    void updateNetAudioStatus();
+
     // Collapsible advanced front-end options (RTL-SDR only; disabled w/o HW)
     QPushButton*    advToggle_   = nullptr;
     QWidget*        advPanel_    = nullptr;
@@ -502,6 +541,7 @@ private:
     QPushButton*    recLibPlayBtn_   = nullptr;   // load/play|stop toggle
     QPushButton*    recLibAnalyzeBtn_ = nullptr;   // 该行 -> 离线流式分析
     QPushButton*    recLibExportBtn_  = nullptr;   // 解码器输出 -> .txt 文件
+    QPushButton*    recLibIqBtn_      = nullptr;   // Phase62: 实时基带 IQ 段 -> SigMF
     QVector<mbdsdr::ui::RecordingEntry> recLibEntries_;
     std::vector<float> recLibPcm_;                 // decoded 48k mono float buffer
     qint64          recLibPcmPos_   = 0;           // playback cursor (samples)
@@ -513,6 +553,9 @@ private:
     void onRecLibCopyPath();                       // copy selected row's full path
     void onRecLibAnalyze();                        // 选中行 -> engine 离线分析
     void onRecLibExportDecode();                   // 解码器输出文本 -> .txt
+    // Phase62 orphan A: one-shot raw-IQ segment dump (SigMF pair) -> recording dir.
+    void onRecLibExportIq();                       // modal duration dialog -> doRecLibExportIq
+    bool doRecLibExportIq(double seconds);         // the real export (harness-friendly)
 
     // ---- Offline file analysis (streaming through the real DSP chain) ------
     // Opens a captured file (WAV/SigMF/raw) as the engine source; the SAME

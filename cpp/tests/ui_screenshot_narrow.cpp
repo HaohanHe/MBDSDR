@@ -8,6 +8,10 @@
 #include <QTimer>
 #include <QPixmap>
 #include <QSettings>
+#include <QTabWidget>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QGroupBox>
 #include <QDir>
 #include <QSplitter>
 #include <cstdlib>
@@ -35,7 +39,56 @@ int main(int argc, char** argv) {
     win.resize(w > 0 ? w : 820, h > 0 ? h : 640);
     win.show();
 
+    // Optional: jump to a named right-rail tab (e.g. MBD_TAB=扫描/书签 or
+    // 录制库) so the same harness can verify every rail at every width.
+    const QByteArray tabName = qgetenv("MBD_TAB");
+    if (!tabName.isEmpty()) {
+        for (auto* t : win.findChildren<QTabWidget*>()) {
+            for (int i = 0; i < t->count(); ++i) {
+                if (t->tabText(i) == QString::fromUtf8(tabName)) {
+                    t->setCurrentIndex(i);
+                    t->currentWidget()->show();
+                }
+            }
+        }
+    }
+
+    // Optional: scroll the left control rail to its BOTTOM so groups below the
+    // fold (e.g. the network-audio tap) land in the viewport, without the
+    // horizontal-offset artifact ensureWidgetVisible can produce.
+    if (qgetenv("MBD_SCROLL") == "bottom") {
+        for (auto* sa : win.findChildren<QScrollArea*>())
+            sa->verticalScrollBar()->setValue(sa->verticalScrollBar()->maximum());
+    } else if (!qgetenv("MBD_SCROLL").isEmpty()) {
+        if (auto* w = win.findChild<QWidget*>(QString::fromUtf8(qgetenv("MBD_SCROLL")))) {
+            for (auto* sa : win.findChildren<QScrollArea*>()) {
+                sa->ensureWidgetVisible(w);
+                sa->horizontalScrollBar()->setValue(0);   // no left-offset artifact
+            }
+        }
+    }
+
     QTimer::singleShot(1200, [&]() {
+        if (qEnvironmentVariableIntValue("MBD_DUMP") > 0) {
+            for (const char* nm : {"netAudioHostEdit", "netAudioPortSpin",
+                                   "netAudioStartBtn", "netAudioStopBtn",
+                                   "netAudioStatusLabel", "spyserverStatusLabel",
+                                   "scanLinkChk", "scanLinkStateLabel", "recLibIqBtn"}) {
+                if (auto* w = win.findChild<QWidget*>(QString::fromLatin1(nm)))
+                    qInfo("GEOM %-20s x=%d y=%d w=%d h=%d vis=%d",
+                          nm, w->x(), w->y(), w->width(), w->height(), w->isVisible());
+            }
+            for (auto* sa : win.findChildren<QScrollArea*>()) {
+                qInfo("SCROLLAREA vp=%d widget=%d wr=%d",
+                      sa->viewport()->width(), sa->widget() ? sa->widget()->width() : -1,
+                      sa->widgetResizable());
+            }
+            for (auto* gb : win.findChildren<QGroupBox*>()) {
+                if (gb->isVisible())
+                    qInfo("GBOX %-16s w=%d min=%d", gb->title().toUtf8().constData(),
+                          gb->width(), gb->minimumSizeHint().width());
+            }
+        }
         qInfo("scaleFactor=%.3f window=%dx%d", mbdsdr::tokens::scaleFactor(),
               win.width(), win.height());
         const auto splits = win.findChildren<QSplitter*>();
