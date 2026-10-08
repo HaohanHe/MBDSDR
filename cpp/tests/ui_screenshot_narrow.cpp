@@ -15,11 +15,14 @@
 #include <QDir>
 #include <QSplitter>
 #include <cstdlib>
+#include <cmath>
 #include "core/tokens.h"
 #include "core/spectrum_frame.h"
 #include "ui/main_window.h"
 #include "ui/spectrum_widget.h"
 #include "ui/spectrum_display.h"
+#include "ui/s_meter.h"
+#include "ui/rssi_trend.h"
 #include "ui/bookmark_manager.h"
 
 int main(int argc, char** argv) {
@@ -365,6 +368,29 @@ int main(int argc, char** argv) {
             sw->setDbSpinValues(
                 static_cast<int>(std::round(cv->currentDbFloor())),
                 static_cast<int>(std::round(cv->currentDbCeil())));
+        }
+    }
+
+    // Optional: populate the mini RSSI/dBfs trend strip (MBD_RSSITREND=1) with a
+    // deterministic sequence of REAL-valued dBfs samples pushed straight into the
+    // widget -- the same pushDbfs() path the production onRssiLevel slot uses --
+    // so the recent-N-sample line renders instead of its honest empty caption.
+    // Pure display-harness injection; off by default so every other shot is
+    // unchanged. No mock signal is invented inside the app itself.
+    if (qgetenv("MBD_RSSITREND").size()) {
+        if (auto* trend = win.findChild<mbdsdr::ui::RssiTrendWidget*>()) {
+            // A gentle fading/fluctuating envelope so the shape is visible.
+            for (int i = 0; i < 60; ++i) {
+                const float db = -55.0f
+                    - 8.0f * std::sin(i * 0.35f)
+                    - (i / 60.0f) * 6.0f;   // slow downward drift (fading)
+                trend->pushDbfs(db);
+            }
+            // Also seed the S-meter so the two adjacent strips line up in state.
+            if (auto* meter = win.findChild<mbdsdr::ui::SMeterWidget*>()) {
+                meter->setNoiseFloorDbfs(-72.0);
+                meter->setSignalDbfs(-55.0);
+            }
         }
     }
 

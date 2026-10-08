@@ -49,6 +49,7 @@ namespace dsp  { class SpectrumEngine; struct AircraftInfo; class TleClient; str
 namespace ui   { class SpectrumWidget; class SkyView; class WorldView; class ConstellationView;
                  class ElevationPlot; struct AircraftPoint; class AircraftTracker;
                  class SMeterWidget;
+                 class RssiTrendWidget;
                  class WeatherSatPanel; class TaskStepsView;
                  class PocsagPanel; class M17Panel; class VorPanel;
                  class DataTextPanel; }
@@ -256,6 +257,7 @@ private:
     // LEO PNT geometry readout (prediction, not a fix) + S-meter widget.
     QLabel* geoLabel_ = nullptr;
     ui::SMeterWidget* sMeter_ = nullptr;
+    ui::RssiTrendWidget* rssiTrend_ = nullptr;
     // TLE freshness panel (epoch/days/status/manual refresh).
     QLabel* tleFreshLabel_ = nullptr;
     QPushButton* refetchTleBtn_ = nullptr;

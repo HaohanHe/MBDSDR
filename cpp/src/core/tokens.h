@@ -457,6 +457,15 @@ inline constexpr double  kSMeterPeakDecayDbPerSec = 12.0;
 // narrow meter strides (S0 S2 S4 ... S9), never touching. Tick marks stay dense.
 inline constexpr int     kSMeterTickLabelGap = 4;   // min base-px gap between adjacent drawn S labels
 
+// Mini RSSI/dBfs history trend strip (status bar, beside the S-meter). It holds
+// ONLY the real engine RSSI samples (the same value the S-meter / sbRssi_ use);
+// the line is the recent-N-sample shape so fading / flutter is visible. A
+// non-finite (NaN) sample or an explicit clear() drops to the honest empty
+// state -- no fabricated or stale history.
+inline constexpr int         kRssiTrendMaxSamples = 120;            // rolling sample depth (oldest dropped)
+inline constexpr const char*  kRssiTrendColor     = "#7CC4FF";      // trend line (accent blue)
+inline constexpr double       kRssiTrendLineAlpha = 0.8;          // line opacity
+
 // TLE freshness: orbit elements drift; an epoch older than kTleStaleDays is
 // labelled 过期 (still usable, flagged). kTleRefreshAgeHours = cache age after
 // which we block-refetch instead of cache-first. Real thresholds, not demo.
@@ -679,6 +688,7 @@ inline constexpr int kCstViewMinW     = 180;  // constellation widget min
 inline constexpr int kCstViewMinH     = 180;
 inline constexpr int kSMeterH         = 34;   // S-meter widget height
 inline constexpr int kSMeterW         = 220;  // S-meter widget width
+inline constexpr int kRssiTrendW      = 140;  // RSSI trend mini-strip width (base px; height = kSMeterH)
 inline constexpr int kTableMinSectionW = 36;  // data-table header minimum section width
 inline constexpr int kInitWinW        = 1280; // initial main-window width
 inline constexpr int kInitWinH        = 800;  // initial main-window height
