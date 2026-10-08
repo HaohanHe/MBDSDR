@@ -663,6 +663,13 @@ inline constexpr int kCalibReadoutMinH = 120; // calibration guide/compare label
 // Fine tuning step (keyboard nudge)
 inline constexpr double kFreqFineStepHz = 10000.0;
 
+// Recent-tune history (最近频率快速回跳). The list records only REAL centre
+// frequencies read back by the ~1 Hz telemetry tick; kTuneHistoryMax caps the
+// persisted list, kTuneDedupHz merges readbacks within one step so a spinbox
+// drag does not flood the history with intermediate values.
+inline constexpr int    kTuneHistoryMax = 12;
+inline constexpr double kTuneDedupHz     = 1.0;
+
 // QSS internal padding/margin (base px, scaled at generation time).
 // Vertical padding = kSpacingM, horizontal = kSpacingL, per the rhythm.
 inline constexpr int kBtnPadV         = kSpacingM;
@@ -742,6 +749,10 @@ inline constexpr double kBadgeTextAlpha  = 0.62;   // calm tertiary text
 // Focus mode: hide the side rails so the spectrum takes the full width
 // (CarWith driving-mode analog). Animation uses the existing kAnimMedium1.
 inline constexpr const char* kSettingsKeyFocusMode = "view/focusMode";
+
+// Persisted recent-tune list (QVariantList of Hz doubles, capped at
+// kTuneHistoryMax). Empty / absent key = honest "无调谐记录" empty state.
+inline constexpr const char* kSettingsKeyTuneHistory = "rx/tuneHistoryHz";
 
 // =====================================================================
 // Dark QSS generator -- simplified, only what we use.
