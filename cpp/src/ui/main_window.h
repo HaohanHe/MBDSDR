@@ -11,6 +11,8 @@
 #include "core/sat_capture.h"
 // RecordingEntry is a value member (recLibEntries_); the struct must be complete.
 #include "ui/recording_library.h"
+// ui::TuneHistory is a value member (tuneHistory_); header-only value object.
+#include "ui/tune_history.h"
 // dsp::TleEntry is a value member (tleEntries_); include its header.
 #include "dsp/tle_client.h"
 
@@ -375,7 +377,10 @@ private:
     // Left panel controls
     QDoubleSpinBox* freqSpin_   = nullptr;
     QComboBox*      stepCombo_  = nullptr;
+    QComboBox*      tuneHistCombo_ = nullptr;   // "最近" recent-frequency jump list
     int             currentStepHz_ = 10000;   // tuning nudge / spinbox step
+    ui::TuneHistory tuneHistory_;             // real read-back centre-frequency history
+    void            refreshTuneHistoryCombo();  // rebuild tuneHistCombo_ from tuneHistory_
     QComboBox*      srCombo_    = nullptr;
     QSlider*        gainSlider_ = nullptr;
     QComboBox*      gainCombo_  = nullptr;   // discrete step combo (real RTL gain table)

@@ -536,6 +536,16 @@ MainWindow::MainWindow(QWidget* parent)
     stepCombo_->setCurrentIndex(4);   // 10 kHz default
     stepCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
     gFreqLay->addRow("步进", stepCombo_);
+    // Recent-tune jump list: populated ONLY from real telemetry read-backs of the
+    // settled centre frequency (see onSourceTelemetry). Empty = honest single
+    // disabled "无调谐记录" item -- never a demo seed. Choosing an entry drives
+    // the normal freqSpin_ tune path.
+    tuneHistCombo_ = new QComboBox(gFreq);
+    tuneHistCombo_->setObjectName("tuneHistCombo");
+    tuneHistCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
+    tuneHistCombo_->setToolTip(QStringLiteral(
+        "最近调谐过的中心频率（来自真实回读）。选择即快速回跳。"));
+    gFreqLay->addRow("最近", tuneHistCombo_);
     leftLay->addWidget(gFreq);
 
     auto* gRx = new QGroupBox("接收参数", leftCard);
@@ -577,12 +587,9 @@ MainWindow::MainWindow(QWidget* parent)
     // Build the item list from the shared preset table so the combo order and
     // the kBwComboPresetsHz array can never drift apart.
     for (int i = 0; i < kBwComboPresetCount; ++i) {
-        const double hz = kBwComboPresetsHz[i];
-        QString lbl;
-        if (hz >= 1000000.0)      lbl = QString::number(hz / 1e6) + " MHz";
-        else if (hz >= 1000.0)    lbl = QString::number(hz / 1000.0) + " kHz";
-        else                       lbl = QString::number(hz, 'f', 0) + " Hz";
-        bwCombo_->addItem(lbl);
+        // Shared auto-unit formatter (same one the recent-tune list uses), so
+        // MHz/kHz/Hz unit choice and precision cannot drift between the two.
+        bwCombo_->addItem(ui::formatFrequencyAutoHz(kBwComboPresetsHz[i]));
     }
     bwCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
     gRxLay->addRow("带宽", bwCombo_);
@@ -2250,6 +2257,19 @@ MainWindow::MainWindow(QWidget* parent)
                 // the spinbox path and the readback path can never drift.
                 sbVfo_->setText(ui::fmtStripVfoFreq(mhz * 1e6));
             });
+    // Recent-tune jump: a user-picked entry drives the NORMAL spinbox tune path
+    // (setValue -> valueChanged -> engine), so the read-back record, the strip
+    // label and the spectrum all update exactly as if the user typed it.
+    connect(tuneHistCombo_, QOverload<int>::of(&QComboBox::activated),
+            this, [this](int idx) {
+                bool ok = false;
+                const double hz = tuneHistCombo_->itemData(idx).toDouble(&ok);
+                if (ok && hz > 0.0) {
+                    freqSpin_->blockSignals(false);   // ensure the normal tune path fires
+                    freqSpin_->setValue(hz / 1e6);
+                }
+            });
+    refreshTuneHistoryCombo();   // honest "无调谐记录" empty state until first read-back
     // Step combo: set currentStepHz_ and make the spinbox up/down arrows walk
     // by the same step (spinbox unit is MHz).
     auto applyStep = [this](int idx) {
@@ -3993,6 +4013,8 @@ void MainWindow::saveUiState() {
     // ---- RX state (Hz / dB as stored) ----
     s.setValue("rx/centerFreq", freqSpin_->value() * 1e6);
     s.setValue("rx/tuningStep", currentStepHz_);
+    // Recent-tune history (most-recent first, capped at kTuneHistoryMax).
+    s.setValue(tokens::kSettingsKeyTuneHistory, tuneHistory_.toVariantList());
     {
         // Persist the live sample rate (Hz) straight from the selected item's
         // data -- the combo options are device-derived, so there is no fixed
@@ -4097,6 +4119,28 @@ void MainWindow::scheduleSave() {
     // Re-arm the single-shot timer; repeated events within 500 ms collapse into
     // a single disk write when it finally fires.
     if (saveTimer_) saveTimer_->start();
+}
+
+// Rebuild the "最近" combo from tuneHistory_. Entries carry their Hz in
+// itemData; an empty history renders a single disabled placeholder so the combo
+// never looks broken. Signals are blocked: this is a repaint, not a user pick.
+void MainWindow::refreshTuneHistoryCombo() {
+    if (!tuneHistCombo_) return;
+    tuneHistCombo_->blockSignals(true);
+    tuneHistCombo_->clear();
+    if (tuneHistory_.isEmpty()) {
+        tuneHistCombo_->addItem(QStringLiteral("无调谐记录"));
+        tuneHistCombo_->setItemData(0, 0.0);
+        tuneHistCombo_->setEnabled(false);   // honest empty state: nothing to jump to
+    } else {
+        tuneHistCombo_->setEnabled(true);
+        const auto& e = tuneHistory_.entries();
+        for (int i = 0; i < e.size(); ++i) {
+            tuneHistCombo_->addItem(tuneHistory_.labelAt(i));
+            tuneHistCombo_->setItemData(tuneHistCombo_->count() - 1, e[i]);
+        }
+    }
+    tuneHistCombo_->blockSignals(false);
 }
 
 void MainWindow::setFocusMode(bool on, bool animate) {
@@ -4262,6 +4306,13 @@ void MainWindow::restoreUiState() {
     // ---- RX ----
     const double centerHz = s.value("rx/centerFreq", 98.5e6).toDouble();
     freqSpin_->setValue(centerHz / 1e6);
+
+    // Restore the recent-tune list (most-recent first). Absent/empty key leaves
+    // an empty history -> the combo shows the honest "无调谐记录" item until the
+    // first real telemetry read-back records a frequency.
+    tuneHistory_.fromVariantList(
+        s.value(tokens::kSettingsKeyTuneHistory).toList());
+    refreshTuneHistoryCombo();
 
     const int savedStep = s.value("rx/tuningStep", 10000).toInt();
     int stepIdx = 4;  // 10 kHz default
@@ -4687,6 +4738,14 @@ void MainWindow::onSourceTelemetry(const QString& name, bool connected,
         sbSr_->setText(ui::fmtStripSampleRate(sampleRateHz));
     if (sbVfo_)
         sbVfo_->setText(ui::fmtStripVfoFreq(centerHz));
+    // Record the REAL read-back centre into the recent-tune history. This is the
+    // single non-invasive choke through which every settled tune (spinbox,
+    // spectrum drag, bookmark, peak, scanner) flows; deduped + capped inside
+    // TuneHistory. Only repaint/persist when the list actually changed.
+    if (tuneHistory_.maybePush(centerHz)) {
+        refreshTuneHistoryCombo();
+        scheduleSave();
+    }
     if (sbGain_)
         sbGain_->setText(ui::fmtStripGain(gainDb));
     if (sbSdr_)

@@ -27,6 +27,18 @@ inline QString fmtStripVfoFreq(double hz) {
                     : QString("--");
 }
 
+// Auto-unit frequency label (MHz / kHz / Hz), the single named formatter the
+// bandwidth combo and the recent-tune list share so unit choice and precision
+// can never drift apart. Uses the default (trailing-zero trimmed) QString
+// precision for MHz/kHz and integer Hz -- byte-identical to the bandwidth combo
+// labels this replaced. hz <= 0 => honest "--".
+inline QString formatFrequencyAutoHz(double hz) {
+    if (!(hz > 0.0)) return QStringLiteral("--");
+    if (hz >= 1000000.0) return QString::number(hz / 1e6) + QStringLiteral(" MHz");
+    if (hz >= 1000.0)    return QString::number(hz / 1000.0) + QStringLiteral(" kHz");
+    return QString::number(hz, 'f', 0) + QStringLiteral(" Hz");
+}
+
 // Tuner-gain read-out. Driver readback <= 0 (AGC / unknown) => "--".
 inline QString fmtStripGain(double db) {
     return db > 0.0 ? QString("增益 %1 dB").arg(db, 0, 'f', 1)

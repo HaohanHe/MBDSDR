@@ -32,6 +32,23 @@ int main(int argc, char** argv) {
 
     const QString out = QString::fromLocal8Bit(qgetenv("MBD_OUT"));
 
+    // Optional: seed the REAL recent-tune list (MBD_TUNEHIST=1) into the
+    // throwaway QSettings BEFORE MainWindow restores it, so the "最近" combo in
+    // the 频率 group renders its real populated rows instead of the honest empty
+    // state. MBD_TUNEHIST=empty seeds nothing (forces the "无调谐记录" item).
+    // Pure persisted-state display -- no demo data inside the app itself.
+    const QByteArray tuneHist = qgetenv("MBD_TUNEHIST");
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        if (tuneHist == "empty") {
+            s.remove(mbdsdr::tokens::kSettingsKeyTuneHistory);
+        } else if (tuneHist.size()) {
+            s.setValue(mbdsdr::tokens::kSettingsKeyTuneHistory,
+                       QVariantList{100.0e6, 98.5e6, 137.0e6, 121.5e6});
+        }
+        s.sync();
+    }
+
     mbdsdr::MainWindow win;
     // Shrink to a narrow but usable width. The left rail is a QScrollArea so
     // its controls scroll rather than clip; the spectrum keeps its minimum.

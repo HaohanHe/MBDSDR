@@ -80,6 +80,9 @@ private slots:
     void rightTabCloseHidesTabKeepsIndexStable();
     void rightTabVisibilityPersistsRoundTrip();
     void rightTabCloseLastVisibleRefused();
+    // Phase63: recent-tune list -- honest empty state, persisted-list load, and a
+    // picked entry driving the real spinbox tune path.
+    void tuneHistoryEmptyStateLoadsAndJumps();
 };
 
 QString TestUiIntegration::tmpSettingsDir;
@@ -796,6 +799,48 @@ void TestUiIntegration::rightTabCloseLastVisibleRefused() {
     QApplication::processEvents();
     QVERIFY2(tabs->isTabVisible(last),
              "the last visible panel tab must not be closable");
+}
+
+void TestUiIntegration::tuneHistoryEmptyStateLoadsAndJumps() {
+    // (1) Honest empty state: no persisted history -> a single disabled
+    //     "无调谐记录" item, never a fabricated seed.
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        s.remove(tokens::kSettingsKeyTuneHistory);
+        s.sync();
+    }
+    {
+        MainWindow win;
+        auto* combo = win.findChild<QComboBox*>("tuneHistCombo");
+        QVERIFY2(combo, "tuneHistCombo must exist in the 频率 group");
+        QCOMPARE(combo->count(), 1);
+        QCOMPARE(combo->itemText(0), QStringLiteral("无调谐记录"));
+        QVERIFY2(!combo->isEnabled(),
+                 "empty recent-tune list must be disabled (nothing to jump to)");
+    }
+
+    // (2) Persisted history loads most-recent-first, and picking an entry drives
+    //     the real spinbox tune path.
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        s.setValue(tokens::kSettingsKeyTuneHistory,
+                   QVariantList{100.0e6, 98.5e6});
+        s.sync();
+    }
+    MainWindow win;
+    auto* combo = win.findChild<QComboBox*>("tuneHistCombo");
+    QVERIFY(combo);
+    QCOMPARE(combo->count(), 2);
+    QCOMPARE(combo->itemText(0), QString("100 MHz"));
+    QCOMPARE(combo->itemText(1), QString("98.5 MHz"));
+    QVERIFY(combo->isEnabled());
+
+    auto* spin = win.findChild<QDoubleSpinBox*>("freqSpin");
+    QVERIFY(spin);
+    // Restored centre defaults to 98.5 MHz (no rx/centerFreq persisted here).
+    // Picking the first history entry must retune to 100.0 MHz.
+    Q_EMIT combo->activated(0);
+    QCOMPARE(spin->value(), 100.0);
 }
 
 QTEST_MAIN(TestUiIntegration)
