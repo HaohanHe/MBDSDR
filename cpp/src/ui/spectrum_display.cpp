@@ -492,10 +492,16 @@ void SpectrumDisplay::setDbRange(float minDb, float maxDb) {
 void SpectrumDisplay::setAutoRangeOn(bool on) {
     autoRangeOn_ = on;
     if (!on) {
-        // Release the scale back to the manual bounds immediately (no glide on
-        // user override). While off, setDbRange() owns both ends again.
-        dbFloorDb_ = manualFloorDb_;
-        dbCeilDb_  = manualCeilDb_;
+        // Freeze the CURRENT on-screen range as the new manual baseline.
+        // Turning auto off = "lock the range you're looking at" -- the eased
+        // ceiling that auto has been gliding toward the data-driven target
+        // becomes the new manual ceiling, instead of jumping back to whatever
+        // the spinboxes last said. The floor is already pinned to manualFloorDb_
+        // (see setSpectrum auto-range block), so this copy is a no-op for the
+        // floor but keeps the two sides symmetric and honest.
+        manualCeilDb_  = dbCeilDb_;
+        manualFloorDb_ = dbFloorDb_;
+        // dbCeilDb_ / dbFloorDb_ already equal the frozen values (no visual jump).
         materialiseHistory();   // re-colour history to the released manual bounds
     }
     update();

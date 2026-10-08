@@ -18,6 +18,7 @@
 #include <QToolButton>
 #include <QSettings>
 #include <algorithm>
+#include <cmath>
 
 #include "core/tokens.h"
 
@@ -293,7 +294,23 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     };
     paintAutoBtn();
     connect(autoDbBtn, &QToolButton::toggled, this, [this, paintAutoBtn](bool on) {
-        if (canvas_) canvas_->setAutoRangeOn(on);
+        if (canvas_) {
+            canvas_->setAutoRangeOn(on);
+            if (!on) {
+                // Sync the frozen range back to the spinboxes so the UI displays
+                // the range that's now locked. The eased auto ceiling becomes the
+                // new manual ceiling shown in the dB spinboxes. Block signals so
+                // this programmatic update does not re-trigger setDbRange().
+                const int ceilVal = static_cast<int>(std::round(canvas_->currentDbCeil()));
+                const int floorVal = static_cast<int>(std::round(canvas_->currentDbFloor()));
+                dbMinSpin_->blockSignals(true);
+                dbMaxSpin_->blockSignals(true);
+                dbMinSpin_->setValue(floorVal);
+                dbMaxSpin_->setValue(ceilVal);
+                dbMinSpin_->blockSignals(false);
+                dbMaxSpin_->blockSignals(false);
+            }
+        }
         paintAutoBtn();
     });
     topRow->addWidget(autoDbBtn);

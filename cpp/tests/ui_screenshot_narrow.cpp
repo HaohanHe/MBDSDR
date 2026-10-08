@@ -230,6 +230,49 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Optional: demonstrate the y-axis range freeze (MBD_YFREEZE=1). Feeds strong
+    // carriers so auto-range eases the ceiling down from 0 dB, then turns auto off
+    // -- the frozen ceiling stays on the dB grid and the spinboxes sync to it.
+    // Pure offline test signal; off by default so every other screenshot is unchanged.
+    if (qgetenv("MBD_YFREEZE").size()) {
+        if (!sw) {   // resolve the spectrum tab if PEAKSHOT did not already
+            for (auto* tb : win.findChildren<QTabWidget*>())
+                for (int i = 0; i < tb->count(); ++i)
+                    if (tb->tabText(i) == QString::fromUtf8("频谱"))
+                        sw = qobject_cast<mbdsdr::ui::SpectrumWidget*>(tb->widget(i));
+        }
+        if (sw && sw->displayCanvas()) {
+            mbdsdr::ui::SpectrumDisplay* cv = sw->displayCanvas();
+            const int bins = 512;
+            auto frame = [&](int peakBin, float peakDb) {
+                mbdsdr::SpectrumFrame fr;
+                fr.sampleRateHz = 2.4e6;
+                fr.centerFreqHz = 98.5e6;
+                fr.fftSize = bins;
+                fr.dbfs.assign(bins, -100.0f);
+                if (peakBin >= 2 && peakBin < bins - 2) {
+                    fr.dbfs[peakBin] = peakDb;
+                    fr.dbfs[peakBin - 1] = peakDb - 4.0f;
+                    fr.dbfs[peakBin + 1] = peakDb - 4.0f;
+                    fr.dbfs[peakBin - 2] = peakDb - 10.0f;
+                    fr.dbfs[peakBin + 2] = peakDb - 10.0f;
+                }
+                fr.sourceName = "test";
+                fr.isTestSignal = true;
+                return fr;
+            };
+            // Feed strong frames so auto-range eases the ceiling down.
+            for (int i = 0; i < 30; ++i)
+                cv->setSpectrum(frame(200, -25.0f));
+            // Turn off auto range -> freeze the current eased ceiling.
+            cv->setAutoRangeOn(false);
+            // Sync the spinboxes to the frozen range (mirrors the widget button handler).
+            sw->setDbSpinValues(
+                static_cast<int>(std::round(cv->currentDbFloor())),
+                static_cast<int>(std::round(cv->currentDbCeil())));
+        }
+    }
+
     QTimer::singleShot(1200, [&]() {
         // Drive the receive-link four-state badge (MBD_CONNSTATE=running/error/
         // dropped) through the SAME real slots the engine's source signals reach.

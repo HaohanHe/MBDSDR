@@ -6,7 +6,8 @@
 //    * a sustained strong-but-not-full-scale signal pulls the ceiling DOWN so the
 //      trace stops wasting the upper plot area, then eases back when it recedes;
 //    * the on-screen ceiling glides by a bounded step per frame (no flicker);
-//    * the manual toggle releases the scale back to the fixed bounds.
+//    * the manual toggle FREEZES the current on-screen range (not jump back to
+//      the old spinbox values) -- "关自动 = 定格当前量程".
 //
 //  Task 2 -- drag-tune / waterfall contract (the "trace and waterfall disagree"
 //  red line):
@@ -35,7 +36,10 @@ private slots:
     void defaultCeilingStaysAtFullScale();
     void strongSignalPullsCeilingDownSmoothly();
     void ceilingRecoversWhenSignalFalls();
-    void manualToggleRestoresFixedRange();
+    void manualToggleFreezesCurrentRange();
+    void freezeThenStrongFrameDoesNotMoveCeiling();
+    void freezeThenWeakFrameDoesNotMoveCeiling();
+    void freezeHonestEmptyState();
     void vfoDragLandsOnPeakFrequency();
     void waterfallCropSharesTraceWindow();
     void panDragWaterfallStartsSmoothly();
@@ -149,26 +153,87 @@ void TestSpectrumAutoRange::ceilingRecoversWhenSignalFalls() {
     QCOMPARE(w.currentDbCeil(), 0.0f);
 }
 
-// Turning auto-range off must hand the scale straight back to the fixed manual
-// bounds (no lingering eased value).
-void TestSpectrumAutoRange::manualToggleRestoresFixedRange() {
+// Turning auto-range off must FREEZE the current on-screen range (not jump
+// back to the old manual spinbox values). The eased ceiling becomes the new
+// locked ceiling; the floor stays pinned to its current value.
+void TestSpectrumAutoRange::manualToggleFreezesCurrentRange() {
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
     w.setDbRange(-100.0f, 0.0f);
     for (int i = 0; i < 40; ++i)
         w.setSpectrum(makeFrame(kBins, 200, -30.0f, -100.0f));
-    QVERIFY(w.currentDbCeil() < -5.0f);
+    QVERIFY(w.currentDbCeil() < -5.0f);   // auto pulled ceiling down from 0
+    const float frozenCeil  = w.currentDbCeil();
+    const float frozenFloor = w.currentDbFloor();
 
     w.setAutoRangeOn(false);
     QVERIFY2(!w.autoRangeOn(), "toggle must report off");
-    QCOMPARE(w.currentDbCeil(), 0.0f);    // manual ceiling restored instantly
-    QCOMPARE(w.currentDbFloor(), -100.0f);
+    // The current range is FROZEN -- no jump back to the old manual 0.0f.
+    QCOMPARE(w.currentDbCeil(), frozenCeil);
+    QCOMPARE(w.currentDbFloor(), frozenFloor);
+}
 
-    // While off, a strong signal must NOT move the scale any more.
-    for (int i = 0; i < 20; ++i)
-        w.setSpectrum(makeFrame(kBins, 200, -30.0f, -100.0f));
-    QCOMPARE(w.currentDbCeil(), 0.0f);
+// After freezing the range (auto off) at a low ceiling, a much stronger signal
+// must NOT move the ceiling up -- the range is locked.
+void TestSpectrumAutoRange::freezeThenStrongFrameDoesNotMoveCeiling() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    // Start with a weak signal -> auto keeps ceiling settled low.
+    for (int i = 0; i < 40; ++i)
+        w.setSpectrum(makeFrame(kBins, 200, -60.0f, -100.0f));
+    const float frozenCeil = w.currentDbCeil();
+    QVERIFY2(frozenCeil < -10.0f,
+             qPrintable(QString("weak signal must keep ceiling low, got %1 dB")
+                        .arg(frozenCeil)));
+
+    w.setAutoRangeOn(false);
+    // Now push much stronger frames -> ceiling must NOT move up.
+    for (int i = 0; i < 30; ++i)
+        w.setSpectrum(makeFrame(kBins, 200, -10.0f, -100.0f));
+    QCOMPARE(w.currentDbCeil(), frozenCeil);
+    QCOMPARE(w.currentDbFloor(), -100.0f);
+}
+
+// After freezing at a high ceiling, weaker frames must NOT pull it down.
+void TestSpectrumAutoRange::freezeThenWeakFrameDoesNotMoveCeiling() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    // Start with a strong full-scale signal -> auto raises ceiling to 0.
+    for (int i = 0; i < 40; ++i)
+        w.setSpectrum(makeFrame(kBins, 200, -5.0f, -100.0f));
+    QVERIFY2(w.currentDbCeil() > -15.0f,
+             qPrintable(QString("strong signal must raise ceiling, got %1 dB")
+                        .arg(w.currentDbCeil())));
+    const float frozenCeil = w.currentDbCeil();
+
+    w.setAutoRangeOn(false);
+    // Now push weak frames -> ceiling must NOT move down.
+    for (int i = 0; i < 30; ++i)
+        w.setSpectrum(makeFrame(kBins, 200, -70.0f, -100.0f));
+    QCOMPARE(w.currentDbCeil(), frozenCeil);
+}
+
+// Honest empty state: no frame pushed, turn off auto -> stays at defaults,
+// then pushing frames keeps the default range locked (no invented scaling).
+void TestSpectrumAutoRange::freezeHonestEmptyState() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    // No frames pushed yet. Current range = defaults (0 dB ceil, -100 dB floor).
+    const float defaultCeil  = w.currentDbCeil();
+    const float defaultFloor = w.currentDbFloor();
+    w.setAutoRangeOn(false);
+    QCOMPARE(w.currentDbCeil(), defaultCeil);    // no-op freeze at defaults
+    QCOMPARE(w.currentDbFloor(), defaultFloor);
+
+    // Now push real frames -> range stays at defaults (locked, no auto scaling).
+    for (int i = 0; i < 30; ++i)
+        w.setSpectrum(makeFrame(kBins, 200, -20.0f, -100.0f));
+    QCOMPARE(w.currentDbCeil(), defaultCeil);
+    QCOMPARE(w.currentDbFloor(), defaultFloor);
 }
 
 // (a) Drag the VFO body onto a known peak bin; the emitted tuning frequency
