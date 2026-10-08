@@ -8,6 +8,7 @@
 
 namespace mbdsdr {
 namespace dsp { class SpectrumEngine; }
+namespace ui  { class BookmarkManager; }
 
 namespace ai {
 
@@ -21,6 +22,12 @@ public:
     explicit LLMWorker(QObject* parent = nullptr);
     ~LLMWorker();
     void setEngine(dsp::SpectrumEngine* e) { engine_ = e; }
+    /// Optional bookmark store for add_bookmark / tune_to_bookmark /
+    /// delete_bookmark. Null (default) = those tools return an honest
+    /// "书签管理器未注入" error instead of executing. The desktop main window
+    /// owns the BookmarkManager's lifetime; wiring it here is a follow-up that
+    /// does NOT change the null-path contract.
+    void setBookmarkManager(ui::BookmarkManager* bm) { bookmarks_ = bm; }
     void setApiKey(const QString& k) { apiKey_ = k; if (client_) client_->setApiKey(k); }
     void setBaseUrl(const QString& u) { baseUrl_ = u; if (client_) client_->setBaseUrl(u); }
     void setModel(const QString& m) { model_ = m; if (client_) client_->setModel(m); }
@@ -69,9 +76,12 @@ public:
     /// static, instance-free helper so the gate is unit-testable without an LLM:
     /// in manual mode a write tool returns gatedToolResult() WITHOUT calling
     /// executeTool / touching the engine; read-only tools always run. With
-    /// manualMode=false this is identical to executeTool().
+    /// manualMode=false this is identical to executeTool(). `bookmarks` (default
+    /// null) is forwarded to executeTool so add_bookmark / tune_to_bookmark /
+    /// delete_bookmark can execute for real; null -> honest "未注入" error.
     static QString dispatchToolCall(const QString& name, const QJsonObject& args,
-                                     dsp::SpectrumEngine* engine, bool manualMode);
+                                     dsp::SpectrumEngine* engine, bool manualMode,
+                                     ui::BookmarkManager* bookmarks = nullptr);
 
 public slots:
     void doChat(const QList<ChatMessage>& messages, const QList<ToolDef>& tools);
@@ -96,6 +106,7 @@ private:
     LLMClient* client_ = nullptr;   // created on worker thread
     QString apiKey_, baseUrl_, model_;
     dsp::SpectrumEngine* engine_ = nullptr;
+    ui::BookmarkManager* bookmarks_ = nullptr;   // optional Agent-layer store
     bool manualMode_ = false;       // write tools gated when true
 };
 

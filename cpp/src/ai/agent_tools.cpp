@@ -7,6 +7,7 @@
 #include "dsp/device_capabilities.h"
 #include "dsp/frequency_calibrator.h"   // calibrateFromCapture / savePpmSetting
 #include "dsp/fcch_detector.h"          // kFcchToneHz
+#include "ui/bookmark_manager.h"   // ui::BookmarkManager / ui::Bookmark (real Agent-layer store)
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -71,7 +72,8 @@ QString compact(const QJsonObject& o) {
 // `src` is the honest source snapshot read once per call and injected here.
 
 QString execTuneFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                          const SourceInfo& src) {
+                          const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double f = args["freq_hz"].toDouble();
     engine->onSetCenterFreq(f);
     QJsonObject o;
@@ -83,7 +85,8 @@ QString execTuneFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
 }
 
 QString execSetMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                    const SourceInfo& src) {
+                    const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QString m = args["mode"].toString();
     engine->setDemodMode(m);
     QJsonObject o;
@@ -95,7 +98,8 @@ QString execSetMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
 }
 
 QString execStartRecording(const QJsonObject& /*args*/, dsp::SpectrumEngine* engine,
-                           const SourceInfo& src) {
+                           const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     // Propagate the engine's real bool: a failed recorder must NOT be
     // reported as "开始录制" (A4 P1-4). On the offline test source the
     // recorder really does write a SigMF file (sidecar labels it
@@ -114,7 +118,8 @@ QString execStartRecording(const QJsonObject& /*args*/, dsp::SpectrumEngine* eng
 }
 
 QString execStopRecording(const QJsonObject& /*args*/, dsp::SpectrumEngine* engine,
-                          const SourceInfo& src) {
+                          const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     engine->stopRecording();
     QJsonObject o;
     o["ok"] = true;
@@ -128,7 +133,8 @@ QString execStopRecording(const QJsonObject& /*args*/, dsp::SpectrumEngine* engi
 // window NOW and returns, rather than recording continuously until stopped.
 // No source data -> honest ok:false (never a fabricated empty file).
 QString execExportIqSegment(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                            const SourceInfo& src) {
+                            const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     int sampleCount = static_cast<int>(args["sample_count"].toDouble(65536.0));
     double tuneHz = -1.0;   // default: keep the current centre
     if (args.contains("tune_hz") && !args["tune_hz"].isNull()) {
@@ -163,7 +169,8 @@ QString execExportIqSegment(const QJsonObject& args, dsp::SpectrumEngine* engine
 }
 
 QString execScanBand(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                     const SourceInfo& src) {
+                     const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double low = args["low_hz"].toDouble();
     double high = args["high_hz"].toDouble();
     double step = args["step_hz"].toDouble(200000);
@@ -194,7 +201,8 @@ QString execScanBand(const QJsonObject& args, dsp::SpectrumEngine* engine,
 }
 
 QString execSetBandwidth(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                         const SourceInfo& src) {
+                         const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double bw = args["bandwidth_hz"].toDouble();
     engine->setBandwidth(bw);
     QJsonObject o;
@@ -206,7 +214,8 @@ QString execSetBandwidth(const QJsonObject& args, dsp::SpectrumEngine* engine,
 }
 
 QString execGetStatus(const QJsonObject& /*args*/, dsp::SpectrumEngine* engine,
-                      const SourceInfo& src) {
+                      const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     // Aligned with Flutter ai_tools.dart get_status: connected + source, plus
     // the read-back values. We do NOT fabricate gain/sample-rate the engine
     // does not expose. A human-readable summary is kept so existing UI copy
@@ -240,7 +249,8 @@ QString execGetStatus(const QJsonObject& /*args*/, dsp::SpectrumEngine* engine,
 }
 
 QString execPredictPasses(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
-                           const SourceInfo& /*src*/) {
+                           const SourceInfo& /*src*/,
+                        ui::BookmarkManager* /*bookmarks*/) {
     // Read-only: does NOT touch the radio. Uses the FRESH on-disk TLE cache
     // via the planner; no builtin/demo TLE is reported as a real pass.
     QString sat = args["satellite_name"].toString();
@@ -294,7 +304,8 @@ constexpr int kCalibrationMinSamples = 4096;
 // test / offline source the data is honestly-labelled generated IQ (never
 // presented as a real antenna capture).
 QString execCalibrateFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                               const SourceInfo& src) {
+                               const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     const double refFreq = args["reference_freq_hz"].toDouble();
     const QString type = args["reference_type"].toString();
     int sampleCount = static_cast<int>(args["sample_count"].toDouble(kCalibrationDefaultSamples));
@@ -363,7 +374,8 @@ QString execCalibrateFrequency(const QJsonObject& args, dsp::SpectrumEngine* eng
 // the before/after comparison is real.
 QString execApplyFrequencyCorrection(const QJsonObject& args,
                                      dsp::SpectrumEngine* engine,
-                                     const SourceInfo& src) {
+                                     const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     const double ppm = args["ppm"].toDouble();
     const double previous = dsp::currentPpmSetting();
     dsp::savePpmSetting(ppm);
@@ -405,7 +417,8 @@ int resolveChannelId(const QJsonObject& args, dsp::SpectrumEngine* engine) {
 } // namespace
 
 QString execGetPocsagMessages(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                              const SourceInfo& src) {
+                              const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     const int channelId = resolveChannelId(args, engine);
     const std::vector<dsp::PocsagMessage> msgs = engine->pocsagMessages(channelId);
     QJsonArray arr;
@@ -434,7 +447,8 @@ QString execGetPocsagMessages(const QJsonObject& args, dsp::SpectrumEngine* engi
 }
 
 QString execGetM17Calls(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                        const SourceInfo& src) {
+                        const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     const int channelId = resolveChannelId(args, engine);
     const std::vector<dsp::M17Call> calls = engine->m17Calls(channelId);
     QJsonArray arr;
@@ -462,7 +476,8 @@ QString execGetM17Calls(const QJsonObject& args, dsp::SpectrumEngine* engine,
 }
 
 QString execGetAcarsPackets(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                            const SourceInfo& src) {
+                            const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     const int channelId = resolveChannelId(args, engine);
     const std::vector<dsp::AcarsPacket> pkts = engine->acarsPackets(channelId);
     QJsonArray arr;
@@ -493,7 +508,8 @@ QString execGetAcarsPackets(const QJsonObject& args, dsp::SpectrumEngine* engine
 }
 
 QString execGetNavtexMessages(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                              const SourceInfo& src) {
+                              const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     const int channelId = resolveChannelId(args, engine);
     const std::vector<dsp::NavtexMessage> msgs = engine->navtexMessages(channelId);
     QJsonArray arr;
@@ -518,7 +534,8 @@ QString execGetNavtexMessages(const QJsonObject& args, dsp::SpectrumEngine* engi
 }
 
 QString execGetVorRadial(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                         const SourceInfo& src) {
+                         const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     const int channelId = resolveChannelId(args, engine);
     const dsp::VorResult v = engine->vorResult(channelId);
     QJsonObject out;
@@ -566,11 +583,14 @@ bool needStr(const QJsonObject& a, const char* key, QString& out) {
 }
 // Accepted by the AI layer; the real effect is the ControlHub command of the
 // same name on the three-channel side. Echo the args honestly + source fields.
+// The note wording is unified HERE (single point) so every routed tool reports
+// the identical contract: routed, not locally executed, must be confirmed on
+// the UI / ControlHub channel.
 QString routedOk(const char* command, const QJsonObject& echoed, const SourceInfo& src) {
     QJsonObject o = echoed;
     o["ok"] = true;
     o["routed_command"] = QString::fromLatin1(command);
-    o["note"] = QString::fromUtf8("AI 注册层已接收；实际硬件效果由 ControlHub 命令 %1 落地")
+    o["note"] = QString::fromUtf8("命令 %1 已路由，实际效果由 ControlHub 通道落地，需在 UI 或 ControlHub 确认执行")
                     .arg(QString::fromLatin1(command));
     addSourceFields(o, src);
     return compact(o);
@@ -580,7 +600,8 @@ QString routedOk(const char* command, const QJsonObject& echoed, const SourceInf
 // 1. set_network_audio_sink (write): enable/port/format. The engine network tap
 //    is wired on the control side; here we validate + route by contract name.
 QString execSetNetworkAudioSink(const QJsonObject& args, dsp::SpectrumEngine*,
-                                const SourceInfo& src) {
+                                const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double port = 0.0;
     if (!args.contains("enable") || !args.value("enable").isBool())
         return errResult(QString::fromUtf8("参数 enable 缺失或不是布尔值"));
@@ -596,7 +617,8 @@ QString execSetNetworkAudioSink(const QJsonObject& args, dsp::SpectrumEngine*,
 
 // 2. get_network_audio_status (read): no engine status slot yet -> honest off.
 QString execGetNetworkAudioStatus(const QJsonObject&, dsp::SpectrumEngine*,
-                                  const SourceInfo& src) {
+                                  const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
     o["ok"] = true;
     o["enabled"] = false;
@@ -607,7 +629,8 @@ QString execGetNetworkAudioStatus(const QJsonObject&, dsp::SpectrumEngine*,
 
 // 3. start_scan_link (write): target_freq_hz. ScanActivityLink lives on control.
 QString execStartScanLink(const QJsonObject& args, dsp::SpectrumEngine*,
-                          const SourceInfo& src) {
+                          const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double tgt = 0.0;
     if (!needNum(args, "target_freq_hz", tgt))
         return errResult(QString::fromUtf8("参数 target_freq_hz 缺失或不是数字"));
@@ -617,13 +640,15 @@ QString execStartScanLink(const QJsonObject& args, dsp::SpectrumEngine*,
 
 // 4. stop_scan_link (write).
 QString execStopScanLink(const QJsonObject&, dsp::SpectrumEngine*,
-                         const SourceInfo& src) {
+                         const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     return routedOk("stop_scan_link", QJsonObject{}, src);
 }
 
 // 5. get_scan_link_status (read): no link instance on the engine -> honest idle.
 QString execGetScanLinkStatus(const QJsonObject&, dsp::SpectrumEngine*,
-                              const SourceInfo& src) {
+                              const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
     o["ok"] = true;
     o["scanning"] = false;
@@ -637,7 +662,8 @@ QString execGetScanLinkStatus(const QJsonObject&, dsp::SpectrumEngine*,
 // 6. set_squelch (write): engine already has setSquelchEnabled/Threshold. Drive
 //    the real setters; `auto` has no engine setter yet so it is echoed honestly.
 QString execSetSquelch(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                       const SourceInfo& src) {
+                       const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
     o["ok"] = true;
     if (args.contains("enabled") && args.value("enabled").isBool()) {
@@ -658,7 +684,8 @@ QString execSetSquelch(const QJsonObject& args, dsp::SpectrumEngine* engine,
 // 7. get_squelch_status (read): the engine exposes no public enabled/threshold/
 //    open readback, so we report honest nulls rather than invent values.
 QString execGetSquelchStatus(const QJsonObject&, dsp::SpectrumEngine*,
-                             const SourceInfo& src) {
+                             const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
     o["ok"] = true;
     o["enabled"] = QJsonValue(QJsonValue::Null);
@@ -674,7 +701,8 @@ QString execGetSquelchStatus(const QJsonObject&, dsp::SpectrumEngine*,
 //     UI checkbox already drives it; wire the real setter. `on` is required and
 //     must be a boolean -- missing/non-bool is an honest error, never a default.
 QString execSetNoiseBlanker(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                            const SourceInfo& src) {
+                            const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     if (!args.contains("on") || !args.value("on").isBool())
         return errResult(QString::fromUtf8("参数 on 缺失或不是布尔值"));
     const bool on = args.value("on").toBool();
@@ -690,7 +718,8 @@ QString execSetNoiseBlanker(const QJsonObject& args, dsp::SpectrumEngine* engine
 // 7c. get_noise_blanker_status (read): the engine DOES expose noiseBlankerEnabled()
 //     (unlike squelch), so we return the real switch rather than a null.
 QString execGetNoiseBlankerStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
-                                 const SourceInfo& src) {
+                                 const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
     o["ok"] = true;
     o["enabled"] = engine->noiseBlankerEnabled();
@@ -700,7 +729,8 @@ QString execGetNoiseBlankerStatus(const QJsonObject&, dsp::SpectrumEngine* engin
 
 // 8. list_bookmarks (read): BookmarkManager wiring lands on control -> honest empty.
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
-                          const SourceInfo& src) {
+                          const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
     o["ok"] = true;
     o["bookmarks"] = QJsonArray{};
@@ -710,43 +740,99 @@ QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
     return compact(o);
 }
 
-// 9. add_bookmark (write): freq_hz required; routed to the BookmarkManager command.
+// 9. add_bookmark (write): REAL execution against the injected BookmarkManager.
+//    freq_hz required; mode / bandwidth_hz / group / name optional. A null store
+//    is an honest error (never a routed stub); add() itself rejects freq<=0.
 QString execAddBookmark(const QJsonObject& args, dsp::SpectrumEngine*,
-                        const SourceInfo& src) {
+                        const SourceInfo& src,
+                        ui::BookmarkManager* bookmarks) {
     double f = 0.0;
     if (!needNum(args, "freq_hz", f))
         return errResult(QString::fromUtf8("参数 freq_hz 缺失或不是数字"));
-    QJsonObject echo; echo["freq_hz"] = f;
-    if (args.contains("name") && args.value("name").isString())
-        echo["name"] = args.value("name").toString();
+    if (!bookmarks)
+        return errResult(QString::fromUtf8("书签管理器未注入（Agent 层无书签存储，未执行）"));
+    ui::Bookmark b;
+    b.frequencyHz = f;
     if (args.contains("mode") && args.value("mode").isString())
-        echo["mode"] = args.value("mode").toString();
-    return routedOk("add_bookmark", echo, src);
+        b.mode = args.value("mode").toString();
+    if (args.contains("bandwidth_hz") && args.value("bandwidth_hz").isDouble())
+        b.bandwidthHz = args.value("bandwidth_hz").toDouble();
+    if (args.contains("group") && args.value("group").isString())
+        b.group = args.value("group").toString();
+    if (args.contains("name") && args.value("name").isString())
+        b.name = args.value("name").toString();
+    const int idx = bookmarks->add(b);   // auto-sorts by (group, freq) + saves
+    QJsonObject o;
+    if (idx < 0) {
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("频率非法：freq_hz 必须大于 0（书签已拒绝入册）");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    o["ok"] = true;
+    o["index"] = idx;
+    o["count"] = bookmarks->count();
+    o["freq_hz"] = f;
+    o["message"] = QString::fromUtf8("书签已写入（排序后落位 %1 / 共 %2 条）")
+                       .arg(idx).arg(bookmarks->count());
+    addSourceFields(o, src);
+    return compact(o);
 }
 
-// 10. tune_to_bookmark (write): index required; routed.
-QString execTuneToBookmark(const QJsonObject& args, dsp::SpectrumEngine*,
-                           const SourceInfo& src) {
+// 10. tune_to_bookmark (write): index required; out-of-range is an honest error.
+//     On a hit the SELECTED VFO is retuned to the bookmark's frequency through
+//     the same in-band IF-offset path the band-box drag uses (vfoSetOffset).
+QString execTuneToBookmark(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                           const SourceInfo& src,
+                           ui::BookmarkManager* bookmarks) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
-    QJsonObject echo; echo["index"] = idx;
-    return routedOk("tune_to_bookmark", echo, src);
+    if (!bookmarks)
+        return errResult(QString::fromUtf8("书签管理器未注入（Agent 层无书签存储，未执行）"));
+    const int i = static_cast<int>(idx);
+    if (i < 0 || i >= bookmarks->count())
+        return errResult(QString::fromUtf8("书签 index %1 越界（共 %2 条）")
+                         .arg(i).arg(bookmarks->count()));
+    const ui::Bookmark b = bookmarks->list().at(i);
+    const int vfoId = engine->selectedVfoId();
+    engine->vfoSetOffset(vfoId, b.frequencyHz);
+    QJsonObject o;
+    o["ok"] = true;
+    o["freq_hz"] = b.frequencyHz;
+    o["vfo_index"] = vfoId;
+    o["message"] = QString::fromUtf8("已按书签 %1 调谐至 %2 Hz").arg(i).arg(b.frequencyHz);
+    addSourceFields(o, src);
+    return compact(o);
 }
 
-// 11. delete_bookmark (write): index required; routed.
+// 11. delete_bookmark (write): index required; out-of-range is an honest error
+//     (removeAt itself is silently out-of-bounds, so we check before calling).
 QString execDeleteBookmark(const QJsonObject& args, dsp::SpectrumEngine*,
-                           const SourceInfo& src) {
+                           const SourceInfo& src,
+                           ui::BookmarkManager* bookmarks) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
-    QJsonObject echo; echo["index"] = idx;
-    return routedOk("delete_bookmark", echo, src);
+    if (!bookmarks)
+        return errResult(QString::fromUtf8("书签管理器未注入（Agent 层无书签存储，未执行）"));
+    const int i = static_cast<int>(idx);
+    if (i < 0 || i >= bookmarks->count())
+        return errResult(QString::fromUtf8("书签 index %1 越界（共 %2 条）")
+                         .arg(i).arg(bookmarks->count()));
+    bookmarks->removeAt(i);
+    QJsonObject o;
+    o["ok"] = true;
+    o["remaining"] = bookmarks->count();
+    o["message"] = QString::fromUtf8("书签 %1 已删除（剩余 %2 条）").arg(i).arg(bookmarks->count());
+    addSourceFields(o, src);
+    return compact(o);
 }
 
 // 12. list_vfos (read): engine exposes vfoMarkers() for real.
 QString execListVfos(const QJsonObject&, dsp::SpectrumEngine* engine,
-                     const SourceInfo& src) {
+                     const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QJsonArray arr;
     for (const dsp::VfoMarker& m : engine->vfoMarkers()) {
         QJsonObject v;
@@ -770,7 +856,8 @@ QString execListVfos(const QJsonObject&, dsp::SpectrumEngine* engine,
 
 // 13. add_vfo (write): engine vfoAdd() is real.
 QString execAddVfo(const QJsonObject&, dsp::SpectrumEngine* engine,
-                   const SourceInfo& src) {
+                   const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     engine->vfoAdd();
     QJsonObject o;
     o["ok"] = true;
@@ -782,7 +869,8 @@ QString execAddVfo(const QJsonObject&, dsp::SpectrumEngine* engine,
 
 // 14. switch_vfo (write): index required; engine vfoSelect() is real.
 QString execSwitchVfo(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                      const SourceInfo& src) {
+                      const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
@@ -799,7 +887,8 @@ QString execSwitchVfo(const QJsonObject& args, dsp::SpectrumEngine* engine,
 // 15. rename_vfo (write): index/name required; the vfo_manager rename interface
 //     lands on the control side -> validated + routed.
 QString execRenameVfo(const QJsonObject& args, dsp::SpectrumEngine*,
-                      const SourceInfo& src) {
+                      const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
@@ -814,7 +903,8 @@ QString execRenameVfo(const QJsonObject& args, dsp::SpectrumEngine*,
 //     the background (parallel monitoring) after another VFO is selected. Engine
 //     vfoSetArmed() is real (forwarder to VfoManager::setArmed).
 QString execSetVfoArmed(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                        const SourceInfo& src) {
+                        const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
@@ -848,7 +938,8 @@ QString execSetVfoArmed(const QJsonObject& args, dsp::SpectrumEngine* engine,
 //     the VFO id (same path as set_vfo_armed / the ControlHub commands), then
 //     tunes that VFO only -- the on-demand parallel-monitoring design.
 QString execSetVfoFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                            const SourceInfo& src) {
+                            const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
@@ -876,7 +967,8 @@ QString execSetVfoFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine
 //     ControlHub mode table (tokens::kControlHubModes) so the Agent and the
 //     ControlHub/HTTP channel reject the same values.
 QString execSetVfoMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                       const SourceInfo& src) {
+                       const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
@@ -909,7 +1001,8 @@ QString execSetVfoMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
 // 19. set_vfo_bandwidth (write): index + bandwidth_hz, same marker-index
 //     resolution and honest error contract as the other VFO edit tools.
 QString execSetVfoBandwidth(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                            const SourceInfo& src) {
+                            const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
@@ -937,7 +1030,8 @@ QString execSetVfoBandwidth(const QJsonObject& args, dsp::SpectrumEngine* engine
 
 // 20. list_recordings (read): scan the engine recDir_ honestly (empty if absent).
 QString execListRecordings(const QJsonObject&, dsp::SpectrumEngine* engine,
-                           const SourceInfo& src) {
+                           const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     const QString dir = engine->recordingDir();
     QDir d(dir);
     QJsonArray arr;
@@ -963,7 +1057,8 @@ QString execListRecordings(const QJsonObject&, dsp::SpectrumEngine* engine,
 
 // 17. delete_recording (write): name required; delete ONLY inside recDir_.
 QString execDeleteRecording(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                             const SourceInfo& src) {
+                             const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QString name;
     if (!needStr(args, "name", name))
         return errResult(QString::fromUtf8("参数 name 缺失或不是字符串"));
@@ -984,7 +1079,8 @@ QString execDeleteRecording(const QJsonObject& args, dsp::SpectrumEngine* engine
 
 // 18. export_recording (write): copy a recDir_ file out to out_path (honest).
 QString execExportRecording(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                            const SourceInfo& src) {
+                            const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QString name, outPath;
     if (!needStr(args, "name", name))
         return errResult(QString::fromUtf8("参数 name 缺失或不是字符串"));
@@ -1007,7 +1103,8 @@ QString execExportRecording(const QJsonObject& args, dsp::SpectrumEngine* engine
 
 // 19. set_fft_params (write): engine setFftSize/setWindowType/setAverageMode real.
 QString execSetFftParams(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                         const SourceInfo& src) {
+                         const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     double sz = 0.0;
     if (!needNum(args, "fft_size", sz))
         return errResult(QString::fromUtf8("参数 fft_size 缺失或不是数字"));
@@ -1038,7 +1135,8 @@ QString execSetFftParams(const QJsonObject& args, dsp::SpectrumEngine* engine,
 
 // 20. set_color_map (write): persist the colormap file path to QSettings.
 QString execSetColorMap(const QJsonObject& args, dsp::SpectrumEngine*,
-                        const SourceInfo& src) {
+                        const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QString p;
     if (!needStr(args, "file_path", p))
         return errResult(QString::fromUtf8("参数 file_path 缺失或不是字符串"));
@@ -1053,7 +1151,8 @@ QString execSetColorMap(const QJsonObject& args, dsp::SpectrumEngine*,
 
 // 21. get_spectrum_status (read): engine fftSize()/windowType()/averageMode() real.
 QString execGetSpectrumStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
-                              const SourceInfo& src) {
+                              const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
     o["ok"] = true;
     o["fft_size"] = engine->fftSize();
@@ -1068,7 +1167,8 @@ QString execGetSpectrumStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
 // (headless/test) -> honest "not available". The implementation re-checks the
 // station/capture preconditions, so a toggle without them stays off.
 QString execSetDopplerCompensation(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                                  const SourceInfo& src) {
+                                  const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
     auto* surf = engine->dopplerControlSurface();
     if (!surf) {
@@ -1091,7 +1191,8 @@ QString execSetDopplerCompensation(const QJsonObject& args, dsp::SpectrumEngine*
 // Phase58 block2: connect to an rtl_tcp network source. Real TCP handshake +
 // RTL0 header; the engine reports the honest socket reason on failure.
 QString execConnectNetworkSource(const QJsonObject& args, dsp::SpectrumEngine* engine,
-                                 const SourceInfo& src) {
+                                 const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
     const QString host = args.value("host").toString();
     if (host.isEmpty()) {
@@ -1117,7 +1218,8 @@ QString execConnectNetworkSource(const QJsonObject& args, dsp::SpectrumEngine* e
 // array, and an honest provenance note -- we never fabricate a tunable range or a
 // gain step table (the engine itself leaves those at 0 / empty for non-real sources).
 QString execGetCapabilities(const QJsonObject&, dsp::SpectrumEngine* engine,
-                            const SourceInfo& src) {
+                            const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     const dsp::DeviceCapabilities c = engine->sourceCapabilities();
     QJsonArray gains;
     for (double g : engine->availableGainsDb()) gains.append(g);   // empty when no real source
@@ -1149,7 +1251,8 @@ QString execGetCapabilities(const QJsonObject&, dsp::SpectrumEngine* engine,
 // the live recording path (empty = not recording), which is deterministic and
 // does not wait for a state-changed signal. watch/dir are real engine getters.
 QString execGetRecordingState(const QJsonObject&, dsp::SpectrumEngine* engine,
-                              const SourceInfo& src) {
+                              const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
     const QString path = engine->recordingPath();
     QJsonObject o;
     o["ok"] = true;
@@ -1168,7 +1271,10 @@ QString execGetRecordingState(const QJsonObject&, dsp::SpectrumEngine* engine,
 // adding a tool = add the declarative spec in tool_schema.cpp + one row here.
 struct ToolDispatch {
     const char* name;
-    QString (*exec)(const QJsonObject&, dsp::SpectrumEngine*, const SourceInfo&);
+    // The 4th arg is the optional injected bookmark store; only the three
+    // bookmark tools consume it, every other executor ignores it.
+    QString (*exec)(const QJsonObject&, dsp::SpectrumEngine*, const SourceInfo&,
+                    ui::BookmarkManager*);
 };
 
 const QList<ToolDispatch>& dispatchTable() {
@@ -1255,14 +1361,14 @@ QList<ToolDef> toolDefs() {
 }
 
 QString executeTool(const QString& name, const QJsonObject& args,
-                    dsp::SpectrumEngine* engine) {
+                    dsp::SpectrumEngine* engine, ui::BookmarkManager* bookmarks) {
     if (!engine) return "error: no engine";
 
     const SourceInfo src = readSourceInfo(engine);
 
     for (const ToolDispatch& d : dispatchTable()) {
         if (name == QLatin1String(d.name))
-            return d.exec(args, engine, src);
+            return d.exec(args, engine, src, bookmarks);
     }
     return "未知工具: " + name;
 }

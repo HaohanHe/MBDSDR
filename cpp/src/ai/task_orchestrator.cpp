@@ -146,28 +146,12 @@ QString TaskOrchestrator::run(const TaskPlan& plan, StepCallback onStep) {
         r.argsResolved = resolved;
 
         QString out;
-        if (st.tool == "add_bookmark") {
-            // Bookmark persistence is a UI/data concern (not an engine action),
-            // so it goes through the injected BookmarkManager rather than the
-            // engine execution point. Engine tools below reuse dispatchToolCall.
-            if (!bookmarks_) {
-                out = "error: no bookmark manager";
-            } else {
-                ui::Bookmark b;
-                b.frequencyHz = resolved.value("freq_hz").toDouble();
-                b.name = resolved.value("name").toString();
-                b.mode = resolved.value("mode").toString();
-                const int idx = bookmarks_->add(b);
-                QJsonObject o;
-                o["ok"] = (idx >= 0);
-                o["index"] = idx;
-                o["freq_hz"] = b.frequencyHz;
-                out = QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
-            }
-        } else {
-            // THE single engine execution point: manual-mode gate applies here.
-            out = LLMWorker::dispatchToolCall(st.tool, resolved, engine_, manualMode_);
-        }
+        // THE single engine execution point: manual-mode gate applies here.
+        // add_bookmark no longer has a special branch -- its executor now takes
+        // the injected BookmarkManager (bookmarks_) itself, so every step --
+        // including the bookmark step -- flows through this one dispatch point.
+        out = LLMWorker::dispatchToolCall(st.tool, resolved, engine_, manualMode_,
+                                          bookmarks_);
         r.resultText = out;
         QJsonDocument doc = QJsonDocument::fromJson(out.toUtf8());
         if (doc.isObject()) r.resultJson = doc.object();

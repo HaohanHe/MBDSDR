@@ -111,14 +111,15 @@ void LLMWorker::sleepBackoffMs(int ms) {
 }
 
 QString LLMWorker::dispatchToolCall(const QString& name, const QJsonObject& args,
-                                    dsp::SpectrumEngine* engine, bool manualMode) {
+                                    dsp::SpectrumEngine* engine, bool manualMode,
+                                    ui::BookmarkManager* bookmarks) {
     // Manual-mode gate: a write action must NOT reach the radio. Skip
     // executeTool entirely (no engine touch) and hand back the gated result so it
     // still enters the conversation context and surfaces via toolCalled().
     if (manualMode && isWriteTool(name)) {
         return gatedToolResult(name);
     }
-    return executeTool(name, args, engine);
+    return executeTool(name, args, engine, bookmarks);
 }
 
 LLMWorker::~LLMWorker() {
@@ -255,7 +256,8 @@ void LLMWorker::doChat(const QList<ChatMessage>& messages,
                 continue;
             }
 
-            QString result = dispatchToolCall(tc.name, tc.arguments, engine_, manualMode_);
+            QString result = dispatchToolCall(tc.name, tc.arguments, engine_,
+                                              manualMode_, bookmarks_);
             emit toolCalled(tc.name, result);
             ChatMessage tr;
             tr.role = "tool";

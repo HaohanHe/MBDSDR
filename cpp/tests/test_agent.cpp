@@ -16,6 +16,7 @@
 #include "dsp/spectrum_engine.h"
 #include "dsp/frequency_calibrator.h"
 #include "dsp/fcch_detector.h"
+#include "ui/bookmark_manager.h"
 #include "core/tokens.h"
 #include "synthetic_iq_fixture.h"
 
@@ -60,6 +61,8 @@ private slots:
     void manualMode_gateSpotCheckAllWrites();
     // --- Noise blanker three-channel tool: land / readback / honest empty / gate ---
     void noiseBlankerLandReadbackAndGate();
+    // --- Phase63: bookmark tools execute for real against injected store -------
+    void bookmarkToolsRealExecutionWithInjectedStore();
 };
 
 void TestAgent::initTestCase() {
@@ -825,6 +828,116 @@ void TestAgent::noiseBlankerLandReadbackAndGate() {
     QJsonObject badO = QJsonDocument::fromJson(
         ai::executeTool("set_noise_blanker", bad, &engine).toUtf8()).object();
     QVERIFY2(!badO.value("ok").toBool(), "non-boolean `on` must be an error");
+}
+
+// Phase63: the three bookmark tools (add_bookmark / tune_to_bookmark /
+// delete_bookmark) execute for REAL against an injected ui::BookmarkManager --
+// the Agent layer, not a routed stub. Honest error paths: missing args,
+// out-of-range index, freq<=0 rejected by the manager, and a null (un-injected)
+// store. No GUI, no mock; QSettings is isolated by initTestCase().
+void TestAgent::bookmarkToolsRealExecutionWithInjectedStore() {
+    QSettings("MBDSDR", "MBDSDR").remove("ui/bookmarks");
+
+    dsp::SpectrumEngine engine;
+    ui::BookmarkManager bm;
+    bm.load();
+    QCOMPARE(bm.count(), 0);
+
+    auto run = [&](const QString& tool, const QJsonObject& args) {
+        return QJsonDocument::fromJson(
+            ai::executeTool(tool, args, &engine, &bm).toUtf8()).object();
+    };
+
+    // --- add_bookmark: real persistence, sorted landing index + count --------
+    QJsonObject a1; a1["freq_hz"] = 145.05e6; a1["mode"] = "NFM";
+    a1["bandwidth_hz"] = 12500.0; a1["group"] = "VHF"; a1["name"] = "中继";
+    QJsonObject r1 = run("add_bookmark", a1);
+    QVERIFY2(r1.value("ok").toBool(), qPrintable(QString::fromUtf8(
+        QJsonDocument(r1).toJson(QJsonDocument::Compact))));
+    QCOMPARE(r1.value("index").toInt(), 0);
+    QCOMPARE(r1.value("count").toInt(), 1);
+    QCOMPARE(bm.count(), 1);
+    QCOMPARE(bm.list()[0].frequencyHz, 145.05e6);
+    QCOMPARE(bm.list()[0].mode, QString("NFM"));
+    QCOMPARE(bm.list()[0].bandwidthHz, 12500.0);
+    QCOMPARE(bm.list()[0].group, QString("VHF"));
+    QCOMPARE(bm.list()[0].name, QString("中继"));
+
+    QJsonObject a2; a2["freq_hz"] = 98.5e6; a2["name"] = "FM";
+    QJsonObject r2 = run("add_bookmark", a2);
+    QVERIFY2(r2.value("ok").toBool(), qPrintable(QString::fromUtf8(
+        QJsonDocument(r2).toJson(QJsonDocument::Compact))));
+    QCOMPARE(bm.count(), 2);
+    // Sorted by (group, freq): empty-group 98.5e6 lands at index 0.
+    QCOMPARE(bm.list()[0].frequencyHz, 98.5e6);
+    QCOMPARE(bm.list()[1].frequencyHz, 145.05e6);
+
+    // --- honest errors: missing freq_hz / freq_hz<=0 -------------------------
+    QJsonObject miss = QJsonDocument::fromJson(
+        ai::executeTool("add_bookmark", QJsonObject{}, &engine, &bm).toUtf8()).object();
+    QVERIFY2(!miss.value("ok").toBool(), "missing freq_hz must be an error");
+    QJsonObject zero; zero["freq_hz"] = 0.0;
+    QJsonObject rzero = run("add_bookmark", zero);
+    QVERIFY2(!rzero.value("ok").toBool(), "freq_hz=0 must be rejected by the manager");
+    QCOMPARE(bm.count(), 2);   // rejected input inserted nothing
+
+    // --- null store: honest "未注入" error, zero effect ------------------------
+    QJsonObject nullAdd = QJsonDocument::fromJson(
+        ai::executeTool("add_bookmark", a1, &engine, nullptr).toUtf8()).object();
+    QVERIFY2(!nullAdd.value("ok").toBool(), qPrintable(nullAdd.value("error").toString()));
+    QVERIFY2(nullAdd.value("error").toString().contains(
+                 QString::fromUtf8("书签管理器未注入")),
+             qPrintable(nullAdd.value("error").toString()));
+    QCOMPARE(bm.count(), 2);
+
+    // --- tune_to_bookmark: retunes the selected VFO to the bookmark freq -----
+    engine.setTestSourceEnabled(true);   // real synthetic IQ source (offline)
+    QJsonObject t0; t0["index"] = 0;
+    QJsonObject rt = run("tune_to_bookmark", t0);
+    QVERIFY2(rt.value("ok").toBool(), qPrintable(QString::fromUtf8(
+        QJsonDocument(rt).toJson(QJsonDocument::Compact))));
+    QCOMPARE(rt.value("freq_hz").toDouble(), 98.5e6);
+    QVERIFY(rt.contains("vfo_index"));
+    // Readback: the selected VFO marker now sits at the bookmark frequency.
+    bool saw = false;
+    for (const auto& m : engine.vfoMarkers())
+        if (m.selected) { QCOMPARE(m.freqHz, 98.5e6); saw = true; }
+    QVERIFY(saw);
+
+    // out-of-range index -> honest error; null store -> honest error.
+    QJsonObject oob; oob["index"] = 99;
+    QJsonObject roob = run("tune_to_bookmark", oob);
+    QVERIFY2(!roob.value("ok").toBool(), qPrintable(roob.value("error").toString()));
+    QJsonObject nullT = QJsonDocument::fromJson(
+        ai::executeTool("tune_to_bookmark", t0, &engine, nullptr).toUtf8()).object();
+    QVERIFY2(!nullT.value("ok").toBool(), qPrintable(nullT.value("error").toString()));
+
+    // --- delete_bookmark: real removal + remaining count ---------------------
+    QJsonObject d0; d0["index"] = 0;
+    QJsonObject rd = run("delete_bookmark", d0);
+    QVERIFY2(rd.value("ok").toBool(), qPrintable(QString::fromUtf8(
+        QJsonDocument(rd).toJson(QJsonDocument::Compact))));
+    QCOMPARE(rd.value("remaining").toInt(), 1);
+    QCOMPARE(bm.count(), 1);
+    QCOMPARE(bm.list()[0].frequencyHz, 145.05e6);
+
+    QJsonObject rd2 = run("delete_bookmark", oob);
+    QVERIFY2(!rd2.value("ok").toBool(), "out-of-range delete must be an error");
+    QCOMPARE(bm.count(), 1);
+    QJsonObject nullD = QJsonDocument::fromJson(
+        ai::executeTool("delete_bookmark", d0, &engine, nullptr).toUtf8()).object();
+    QVERIFY2(!nullD.value("ok").toBool(), qPrintable(nullD.value("error").toString()));
+
+    // --- the LLMWorker dispatch seam forwards the injected bm too -------------
+    QJsonObject throughGate = QJsonDocument::fromJson(
+        ai::LLMWorker::dispatchToolCall("add_bookmark", a1, &engine,
+                                        /*manualMode=*/false, &bm).toUtf8()).object();
+    QVERIFY2(throughGate.value("ok").toBool(), qPrintable(QString::fromUtf8(
+        QJsonDocument(throughGate).toJson(QJsonDocument::Compact))));
+    QCOMPARE(bm.count(), 2);
+
+    bm.clear();
+    QSettings("MBDSDR", "MBDSDR").remove("ui/bookmarks");
 }
 
 #include <QCoreApplication>
