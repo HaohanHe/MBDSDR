@@ -231,6 +231,22 @@ int main(int argc, char** argv) {
     }
 
     QTimer::singleShot(1200, [&]() {
+        // Drive the receive-link four-state badge (MBD_CONNSTATE=running/error/
+        // dropped) through the SAME real slots the engine's source signals reach.
+        // Done HERE, right before the grab, so the engine's own startup source
+        // emit (run() head) can't overwrite the injected state between injection
+        // and capture. Off by default => the honest boot idle state shows.
+        const QByteArray connState = qgetenv("MBD_CONNSTATE");
+        if (connState == "running") {
+            win.harnessSourceChanged(QString::fromUtf8("RTL-SDR"), true);
+        } else if (connState == "error") {
+            win.harnessSourceError(QString::fromUtf8("连接被拒绝 (refused)"));
+        } else if (connState == "dropped") {
+            win.harnessSourceDropped();
+        } else if (connState == "connecting") {
+            win.harnessShowConnecting();
+        }
+        QApplication::processEvents();
         if (qEnvironmentVariableIntValue("MBD_DUMP") > 0) {
             for (const char* nm : {"netAudioHostEdit", "netAudioPortSpin",
                                    "netAudioStartBtn", "netAudioStopBtn",

@@ -810,6 +810,14 @@ QLabel#testBanner {
     border-radius: %radSmall%px;
     padding: 1px %padMV%px;
 }
+/* Receive-link state badge (Idle/Connecting/Running/Error). Geometry + font
+   live here; the per-state accent color is layered inline by MainWindow via the
+   named kSuccess/kWarning/kDanger/kSelectedFill tokens. */
+QLabel#connStateBadge {
+    font-size: %fontAux%pt;
+    border-radius: %radSmall%px;
+    padding: 1px %padMV%px;
+}
 QTabBar::tab {
     background: transparent;
     color: %textSec%;

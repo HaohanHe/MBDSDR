@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，45 个工具）
+# Agent 工具能力清单（自动生成，47 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -113,6 +113,16 @@ schema: {"properties":{"auto":{"description":"是否启用自动静噪","type":"
 
 ## get_squelch_status  [read 只读]
 description: 只读：返回静噪状态（enabled/threshold_db/auto/当前是否 open）。无实时门限读数时诚实标注，不编造。
+schema: {"properties":{},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## set_noise_blanker  [write 写(手动模式拦截)]
+description: 写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。
+schema: {"properties":{"on":{"description":"是否开启噪声抑制","type":"boolean"}},"required":["on"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_noise_blanker"}（不自动重试写动作）
+
+## get_noise_blanker_status  [read 只读]
+description: 只读：返回噪声抑制器状态（enabled 是否使能）。读取引擎真实开关，不编造。
 schema: {"properties":{},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 
