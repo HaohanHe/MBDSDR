@@ -1344,6 +1344,11 @@ MainWindow::MainWindow(QWidget* parent)
     // ---- Bookmarks / Scanner tab (SDR++-style "扫描/书签" panel) ----
     bookmarkManager_ = new ui::BookmarkManager();
     bookmarkManager_->load();
+    // Seed the spectrum bookmark overlay with the PERSISTED bookmark frequencies
+    // (pure display read-only lines -- no new storage here). The same push is
+    // re-run by resyncScanBookmarks() on every add/edit/delete below.
+    if (ui::SpectrumDisplay* canvas = spectrum_->displayCanvas())
+        canvas->setBookmarkHz(bookmarkManager_->frequencies());
     scanner_ = new dsp::FrequencyScanner();
     auto* bmPage = new QWidget;
     auto* bmLay = new QVBoxLayout(bmPage);
@@ -1578,10 +1583,14 @@ MainWindow::MainWindow(QWidget* parent)
     };
 
     // After any bookmark mutation, resync the scanner's bookmark-frequency list
-    // while "只扫书签" is configured.
+    // while "只扫书签" is configured, AND mirror the same real list onto the
+    // spectrum bookmark overlay (pure display; independent of the scanner
+    // checkbox -- the overlay always shows the saved frequencies).
     auto resyncScanBookmarks = [this]() {
         if (scanBmOnlyChk_->isChecked())
             scanner_->setBookmarkFrequencies(bookmarkManager_->frequencies());
+        if (ui::SpectrumDisplay* canvas = spectrum_->displayCanvas())
+            canvas->setBookmarkHz(bookmarkManager_->frequencies());
     };
 
     connect(bmAddBtn_, &QPushButton::clicked, this, [this, bmDialog, resyncScanBookmarks]() {
