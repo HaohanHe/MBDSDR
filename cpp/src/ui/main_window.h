@@ -720,6 +720,11 @@ private:
 
     // Scan / bookmark panel.
     void refreshBmTable();          // refill bmTable_ from bookmarkManager_->list()
+    // Visual row -> BookmarkManager store index. Section header rows carry -1
+    // and the honest empty-state row carries -2 (never bookable); bookmark data
+    // rows carry their list() index via Qt::UserRole, so the grouped layout does
+    // not drift the store-indexed edit/delete/double-click wiring.
+    int bmStoreIndexAtVisualRow(int visualRow) const;
     void scanTimerTick();           // 50 ms tick into the FrequencyScanner state machine
     void updateScanStatus();        // refresh scan labels + sbScan_ + button enables
 
