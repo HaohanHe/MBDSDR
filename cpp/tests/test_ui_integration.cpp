@@ -35,6 +35,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSlider>
+#include <QTabWidget>
 #include <QTableWidget>
 #include <QTimer>
 
@@ -71,6 +72,10 @@ private slots:
     void exportIqSegmentHonestFailureWithoutData();
     void networkAudioSinkEmptyStateAndToggle();
     void scanLinkToggleDrivesStateLabel();
+    // Phase63: closable right-rail panel tabs (SDR++ module show/hide, light).
+    void rightTabCloseHidesTabKeepsIndexStable();
+    void rightTabVisibilityPersistsRoundTrip();
+    void rightTabCloseLastVisibleRefused();
 };
 
 QString TestUiIntegration::tmpSettingsDir;
@@ -567,6 +572,136 @@ void TestUiIntegration::scanLinkToggleDrivesStateLabel() {
     QTest::qWait(150);
     QCOMPARE(win.scanLink()->state(), dsp::ScanLinkState::Idle);
     QVERIFY(label->text().contains(QStringLiteral("空闲")));
+}
+
+// Phase63: closing a right-rail panel tab hides ONLY that tab -- the count, the
+// page widgets and every index stay put (decoder/bookmark wiring by index must
+// not move). The restore button appears; showAllRightTabs brings the tab back.
+void TestUiIntegration::rightTabCloseHidesTabKeepsIndexStable() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+
+    auto* tabs = win.findChild<QTabWidget*>("rightTabs");
+    QVERIFY(tabs);
+    // Pick a real (enabled) panel tab that sits between others, e.g. 数据.
+    int idx = -1;
+    for (int i = 0; i < tabs->count(); ++i) {
+        if (tabs->tabText(i) == QString::fromUtf8("数据") && tabs->isTabEnabled(i))
+            idx = i;
+    }
+    QVERIFY2(idx > 0, "the 数据 panel tab must exist and be switchable");
+    QWidget* page = tabs->widget(idx);
+    QWidget* leftNeighbor = tabs->widget(idx - 1);
+    QWidget* rightNeighbor = tabs->widget(idx + 1);
+    const int countBefore = tabs->count();
+    QVERIFY(tabs->isTabVisible(idx));
+
+    // Drive the real close path: emit tabCloseRequested exactly as the tab bar
+    // close button does.
+    QMetaObject::invokeMethod(tabs, "tabCloseRequested", Qt::DirectConnection,
+                             Q_ARG(int, idx));
+    QApplication::processEvents();
+
+    QVERIFY2(!tabs->isTabVisible(idx), "closed tab must be hidden, not removed");
+    QCOMPARE(tabs->count(), countBefore);            // index layout untouched
+    QCOMPARE(tabs->widget(idx), page);               // same page widget
+    QCOMPARE(tabs->widget(idx - 1), leftNeighbor);    // neighbors unchanged
+    QCOMPARE(tabs->widget(idx + 1), rightNeighbor);
+    // The restore affordance appears while something is hidden.
+    auto* restore = win.findChild<QPushButton*>("rightTabRestoreBtn");
+    QVERIFY(restore);
+    QVERIFY2(restore->isVisible(), "restore button must appear once a tab is hidden");
+
+    win.showAllRightTabs();
+    QApplication::processEvents();
+    QVERIFY(tabs->isTabVisible(idx));
+    QVERIFY2(!restore->isVisible(), "restore button hides again once all visible");
+}
+
+// Phase63: the hidden tab list persists through a fresh QSettings round-trip.
+void TestUiIntegration::rightTabVisibilityPersistsRoundTrip() {
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        s.remove("ui/hiddenRightTabs");
+        s.sync();
+    }
+    // First window: close the 数据 tab. The destructor flushes saveUiState()
+    // (the production backstop for the 500 ms debounce), so the hidden list is
+    // on disk once this block ends.
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* tabs = win.findChild<QTabWidget*>("rightTabs");
+        QVERIFY(tabs);
+        int idx = -1;
+        for (int i = 0; i < tabs->count(); ++i) {
+            if (tabs->tabText(i) == QString::fromUtf8("数据") && tabs->isTabEnabled(i))
+                idx = i;
+        }
+        QVERIFY(idx > 0);
+        QVERIFY(tabs->isTabVisible(idx));
+        QMetaObject::invokeMethod(tabs, "tabCloseRequested", Qt::DirectConnection,
+                                 Q_ARG(int, idx));
+        QApplication::processEvents();
+        QVERIFY(!tabs->isTabVisible(idx));
+    }
+    // The flush must have recorded the closed tab by text.
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        const QStringList hidden = s.value("ui/hiddenRightTabs").toStringList();
+        QVERIFY2(hidden.contains(QString::fromUtf8("数据")),
+                 qPrintable(QString("ui/hiddenRightTabs must record 数据, got: %1")
+                                .arg(hidden.join(", "))));
+    }
+    // Second window: the same tab must start out hidden (restored from QSettings).
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* tabs = win.findChild<QTabWidget*>("rightTabs");
+        QVERIFY(tabs);
+        int idx = -1;
+        for (int i = 0; i < tabs->count(); ++i) {
+            if (tabs->tabText(i) == QString::fromUtf8("数据") && tabs->isTabEnabled(i))
+                idx = i;
+        }
+        QVERIFY(idx > 0);
+        QVERIFY2(!tabs->isTabVisible(idx),
+                 "restored window must keep the persisted-hidden tab hidden");
+        win.showAllRightTabs();   // leaves an empty list for the next suite
+        QApplication::processEvents();
+    }
+}
+
+// Phase63: the rail never ends up with zero visible panels -- closing the last
+// visible tab is refused; the restore entry stays reachable.
+void TestUiIntegration::rightTabCloseLastVisibleRefused() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    auto* tabs = win.findChild<QTabWidget*>("rightTabs");
+    QVERIFY(tabs);
+    QList<int> enabled;
+    for (int i = 0; i < tabs->count(); ++i)
+        if (tabs->isTabEnabled(i)) enabled << i;
+    QVERIFY2(enabled.size() >= 3, "the right rail must ship several real panels");
+
+    // Close every real tab but the last one in the list.
+    for (int k = 0; k < enabled.size() - 1; ++k) {
+        QMetaObject::invokeMethod(tabs, "tabCloseRequested", Qt::DirectConnection,
+                                 Q_ARG(int, enabled[k]));
+    }
+    QApplication::processEvents();
+    // Now exactly one real panel remains visible; closing it again is refused.
+    const int last = enabled.last();
+    QVERIFY(tabs->isTabVisible(last));
+    QMetaObject::invokeMethod(tabs, "tabCloseRequested", Qt::DirectConnection,
+                             Q_ARG(int, last));
+    QApplication::processEvents();
+    QVERIFY2(tabs->isTabVisible(last),
+             "the last visible panel tab must not be closable");
 }
 
 QTEST_MAIN(TestUiIntegration)

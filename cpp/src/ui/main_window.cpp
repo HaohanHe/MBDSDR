@@ -15,6 +15,7 @@
 #include <QCheckBox>
 #include <QGroupBox>
 #include <QTabWidget>
+#include <QTabBar>
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
 #include <QPlainTextEdit>
@@ -2059,6 +2060,50 @@ MainWindow::MainWindow(QWidget* parent)
     // Radio / transmit panel: serial CAT, CW, AX.25/KISS, SoapySDR TX.
     rightTabs_->addTab(new ui::RadioPanel(rightCard), "电台");
 
+    // ---- Phase63: closable right-rail panel tabs ---------------------------
+    // SDR++ module show/hide, lightweight equivalent: the user can close panel
+    // tabs they never use and restore them later. We ONLY flip tab visibility
+    // (QTabWidget::setTabVisible): removeTab would renumber the indexes that
+    // decoder panels / bookmark logic reference, so every page widget stays
+    // put at its stable index; currentChanged/scheduleSave wiring is untouched.
+    rightTabs_->setTabsClosable(true);
+    {
+        // The disabled group-header tabs are pure section labels: strip their
+        // close button so they can never be hidden.
+        for (int i = 0; i < rightTabs_->count(); ++i) {
+            if (!rightTabs_->isTabEnabled(i))
+                rightTabs_->tabBar()->setTabButton(i, QTabBar::RightSide, nullptr);
+        }
+        connect(rightTabs_, &QTabWidget::tabCloseRequested,
+                this, &MainWindow::onRightTabCloseRequested);
+    }
+    // Restore affordance: a flat button that only appears while >=1 panel is
+    // hidden (honest empty state -- gone otherwise). Right-clicking the tab bar
+    // offers the same action, so restore stays reachable even if every tab but
+    // one has been closed.
+    rightTabRestoreBtn_ = new QPushButton(QString::fromUtf8("显示全部面板"), rightCard);
+    rightTabRestoreBtn_->setObjectName("rightTabRestoreBtn");
+    rightTabRestoreBtn_->setFlat(true);
+    rightTabRestoreBtn_->setToolTip(
+        QString::fromUtf8("重新显示被关闭的右栏面板（标签栏上右键同样有效）"));
+    rightTabRestoreBtn_->hide();
+    connect(rightTabRestoreBtn_, &QPushButton::clicked,
+            this, &MainWindow::showAllRightTabs);
+    rightTabs_->tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(rightTabs_->tabBar(), &QTabBar::customContextMenuRequested, this,
+            [this](const QPoint&) {
+                QMenu menu(this);
+                auto* act = menu.addAction(QString::fromUtf8("显示全部面板"));
+                int hidden = 0;
+                for (int i = 0; i < rightTabs_->count(); ++i)
+                    if (rightTabs_->isTabEnabled(i) && !rightTabs_->isTabVisible(i))
+                        ++hidden;
+                act->setEnabled(hidden > 0);
+                connect(act, &QAction::triggered, this, &MainWindow::showAllRightTabs);
+                menu.exec(QCursor::pos());
+            });
+
+    rightLay->addWidget(rightTabRestoreBtn_);
     rightLay->addWidget(rightTabs_);
     splitter->addWidget(rightCard);
 
@@ -3837,6 +3882,37 @@ void MainWindow::loadVfoNames() {
         vfoNames_[it.key().toInt()] = it.value().toString();
 }
 
+void MainWindow::onRightTabCloseRequested(int idx) {
+    if (!rightTabs_ || idx < 0 || idx >= rightTabs_->count()) return;
+    // Group-header tabs are not closable (their close button was stripped).
+    if (!rightTabs_->isTabEnabled(idx)) return;
+    // Honest empty state: never let the rail end up with zero visible panels.
+    // The restore button / tab-bar context menu stays reachable regardless.
+    int visibleReal = 0;
+    for (int i = 0; i < rightTabs_->count(); ++i)
+        if (rightTabs_->isTabEnabled(i) && rightTabs_->isTabVisible(i)) ++visibleReal;
+    if (visibleReal <= 1) return;
+    rightTabs_->setTabVisible(idx, false);   // hide only; index/widget stay put
+    updateRightTabRestoreAffordance();
+    scheduleSave();
+}
+
+void MainWindow::showAllRightTabs() {
+    if (!rightTabs_) return;
+    for (int i = 0; i < rightTabs_->count(); ++i)
+        rightTabs_->setTabVisible(i, true);
+    updateRightTabRestoreAffordance();
+    scheduleSave();
+}
+
+void MainWindow::updateRightTabRestoreAffordance() {
+    if (!rightTabs_ || !rightTabRestoreBtn_) return;
+    int hidden = 0;
+    for (int i = 0; i < rightTabs_->count(); ++i)
+        if (rightTabs_->isTabEnabled(i) && !rightTabs_->isTabVisible(i)) ++hidden;
+    rightTabRestoreBtn_->setVisible(hidden > 0);
+}
+
 void MainWindow::saveUiState() {
     QSettings s("MBDSDR", "MBDSDR");
     s.setValue("geometry", saveGeometry());
@@ -3888,6 +3964,16 @@ void MainWindow::saveUiState() {
 
     // ---- Layout / tabs / FFT ----
     s.setValue("ui/rightTabIndex", rightTabs_->currentIndex());
+    // Phase63: which right-rail panel tabs the user closed (by text -- the tab
+    // order never changes at runtime, but text survives layout drift between
+    // versions). Disabled group-header tabs are never hidden, so they are out.
+    {
+        QStringList hidden;
+        for (int i = 0; i < rightTabs_->count(); ++i)
+            if (rightTabs_->isTabEnabled(i) && !rightTabs_->isTabVisible(i))
+                hidden << rightTabs_->tabText(i);
+        s.setValue("ui/hiddenRightTabs", hidden);
+    }
     s.setValue("ui/centerTabIndex", centerTabs_->currentIndex());
     if (mainSplitter_) s.setValue("ui/splitterSizes", mainSplitter_->saveState());
     s.setValue(tokens::kSettingsKeyFocusMode, focusMode_);
@@ -4200,8 +4286,28 @@ void MainWindow::restoreUiState() {
     recStereoCheck_->setEnabled(recTargetCombo_->currentIndex() == 1);
 
     // ---- Layout / tabs / FFT ----
+    // Phase63 first: re-apply the user's closed right-rail panel tabs (by text),
+    // so the remembered current index below lands on a page that still exists.
+    {
+        const QStringList hidden = s.value("ui/hiddenRightTabs").toStringList();
+        for (int i = 0; i < rightTabs_->count(); ++i) {
+            if (rightTabs_->isTabEnabled(i) && hidden.contains(rightTabs_->tabText(i)))
+                rightTabs_->setTabVisible(i, false);
+        }
+    }
     rightTabs_->setCurrentIndex(std::clamp(s.value("ui/rightTabIndex", 0).toInt(),
                                            0, rightTabs_->count() - 1));
+    // If the remembered page was closed since last run, land on the first
+    // visible panel (skip disabled group-header tabs, which are not switchable).
+    if (!rightTabs_->isTabVisible(rightTabs_->currentIndex())) {
+        for (int i = 0; i < rightTabs_->count(); ++i) {
+            if (rightTabs_->isTabEnabled(i) && rightTabs_->isTabVisible(i)) {
+                rightTabs_->setCurrentIndex(i);
+                break;
+            }
+        }
+    }
+    updateRightTabRestoreAffordance();
     centerTabs_->setCurrentIndex(std::clamp(s.value("ui/centerTabIndex", 0).toInt(),
                                             0, centerTabs_->count() - 1));
     const QByteArray splitterState = s.value("ui/splitterSizes").toByteArray();
