@@ -182,6 +182,49 @@ int main(int argc, char** argv) {
             sw->displayCanvas()->setBookmarkHz({98.0e6, 99.0e6});
     }
 
+    // Optional: place the two dual measurement cursors (MBD_CURSORSHOT=1) so
+    // the trace renders the teal/pink dashed cursors AND their quiet lavender
+    // center-symmetric mirror dotted lines about the tuned centre f0. Pure
+    // display geometry pushed to the canvas -- no storage, no demo data in the
+    // app. f0 = 98.5 MHz, fs = 2.4 MHz: cursor A at +300 kHz (98.8) mirrors to
+    // 98.2; cursor B at -200 kHz (98.3) mirrors to 98.7. Off by default so every
+    // other screenshot is unchanged.
+    if (qgetenv("MBD_CURSORSHOT").size()) {
+        if (!sw) {   // resolve the spectrum tab if an earlier gate did not
+            for (auto* tb : win.findChildren<QTabWidget*>())
+                for (int i = 0; i < tb->count(); ++i)
+                    if (tb->tabText(i) == QString::fromUtf8("频谱"))
+                        sw = qobject_cast<mbdsdr::ui::SpectrumWidget*>(tb->widget(i));
+        }
+        if (sw && sw->displayCanvas()) {
+            mbdsdr::ui::SpectrumDisplay* cv = sw->displayCanvas();
+            const int bins = 512;
+            auto frame = [&](int peakBin, float peakDb) {
+                mbdsdr::SpectrumFrame fr;
+                fr.sampleRateHz = 2.4e6;
+                fr.centerFreqHz = 98.5e6;
+                fr.fftSize = bins;
+                fr.dbfs.assign(bins, -100.0f);
+                if (peakBin >= 2 && peakBin < bins - 2) {
+                    fr.dbfs[peakBin] = peakDb;
+                    fr.dbfs[peakBin - 1] = peakDb - 4.0f;
+                    fr.dbfs[peakBin + 1] = peakDb - 4.0f;
+                    fr.dbfs[peakBin - 2] = peakDb - 10.0f;
+                    fr.dbfs[peakBin + 2] = peakDb - 10.0f;
+                }
+                fr.sourceName = "test";
+                fr.isTestSignal = true;
+                return fr;
+            };
+            // A real frame sets the 2.4 MHz visible window; without it the mirror
+            // x would collapse (span=1 Hz) and be culled off-canvas.
+            for (int i = 0; i < 4; ++i)
+                cv->setSpectrum(frame(256, -30.0f));
+            cv->placeCursorA(98.8e6);   // teal dashed; mirror -> 98.2
+            cv->placeCursorB(98.3e6);   // pink dashed; mirror -> 98.7
+        }
+    }
+
     // Optional: seed three groups of bookmarks (MBD_BMKGROUP=1) straight into the
     // real BookmarkManager so the grouped bookmark table renders its section
     // headers ("默认 (N)" / "组名 (N)") on the 扫描/书签 tab. Real store + the

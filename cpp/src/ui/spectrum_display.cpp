@@ -193,6 +193,13 @@ double SpectrumDisplay::measurementDeltaHz(double aHz, double bHz) {
     return std::abs(aHz - bHz);
 }
 
+double SpectrumDisplay::mirrorOfCursorHz(int which) const {
+    const double cursorHz = (which == 2) ? cursorB_Hz_ : cursorA_Hz_;
+    const double f0 = dialFreqHz_;   // == tunedFrequencyHz()
+    if (!std::isfinite(cursorHz) || !std::isfinite(f0)) return std::nan("");
+    return 2.0 * f0 - cursorHz;
+}
+
 QString SpectrumDisplay::cursorReadoutText(const QPoint& pos) const {    if (!haveFrame_ || bins_ <= 0 || frame_.dbfs.empty()) return QString();
     if (!(lay_.traceRect.contains(pos) || lay_.fallsRect.contains(pos))) return QString();
     double fLo, fHi, span; visibleWindow(fLo, fHi, span);
@@ -992,6 +999,28 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaPrimary), 1));
         p.drawText(box, Qt::AlignCenter, txt);
     }
+
+    // --- Center-symmetric mirror auxiliary lines ----------------------------
+    // SDR teaching tool: about the tuned centre f0 = tunedFrequencyHz() draw a
+    // quiet dotted line at the mirror of each PLACED cursor, f_mirror = 2*f0 -
+    // f_cursor. It reuses the live cursorA/B positions + the tuning frequency, so
+    // it follows a cursor drag and a retune for free (both already call update());
+    // no new state, no new interaction. HONEST EMPTY STATE: an unplaced cursor
+    // (NaN) -- or an out-of-window mirror -- paints nothing; with no cursors at
+    // all there are zero mirror lines.
+    auto paintMirror = [&](double hz) {
+        if (!std::isfinite(hz)) return;
+        const double f0 = tunedFrequencyHz();
+        if (!std::isfinite(f0)) return;
+        const int x = xForFreq(2.0 * f0 - hz, fLo, span);
+        if (x < trace.left() || x > trace.right()) return;
+        QColor mc = QColor(QString::fromUtf8(tokens::kMirrorLineColor));
+        mc.setAlphaF(tokens::kMirrorLineAlpha);
+        p.setPen(QPen(mc, tokens::kMirrorLineWidth, Qt::DotLine));
+        p.drawLine(x, trace.top(), x, trace.bottom());
+    };
+    paintMirror(cursorA_Hz_);
+    paintMirror(cursorB_Hz_);
 
     // --- waterfall (crop the history snapshot to the visible window) --------
     // Bin-centre mapping SHARED with the trace above: history column i sits at

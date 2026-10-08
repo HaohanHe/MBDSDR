@@ -149,6 +149,14 @@ public slots:
     double cursorBHz() const { return cursorB_Hz_; }
     double cursorDeltaHz() const { return measurementDeltaHz(cursorA_Hz_, cursorB_Hz_); }
 
+    // Center-symmetric mirror of a placed cursor about the tuned frequency f0
+    // (tunedFrequencyHz()): f_mirror = 2*f0 - f_cursor. `which` 1 = A, 2 = B.
+    // PURE geometry -- the exact mapping paintEvent draws the dotted mirror line
+    // through, so the offscreen suite can assert the mirror position without
+    // inspecting pixels. Returns NaN when the cursor is unplaced OR the tuned
+    // frequency is not finite (the mirror line is then honestly not painted).
+    double mirrorOfCursorHz(int which) const;
+
     // Waterfall controls.
     void setScrollSpeed(int linesPerFrame);   // push a row every N frames (1/2/4)
     void setPalette(int p);                   // 0 classic, 1 monochrome, 2 viridis

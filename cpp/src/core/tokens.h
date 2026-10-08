@@ -169,6 +169,26 @@ inline constexpr const char* kCursorAColor = "#5fe0d0";
 inline constexpr const char* kCursorBColor = "#ff8fb2";
 inline constexpr int    kCursorLineWidth = 1;
 
+// ---- Center-symmetric mirror auxiliary lines (SDR teaching tool) ---------
+// When a measurement cursor is placed, paint a quiet dotted reference at the
+// MIRROR frequency about the tuned centre f0: f_mirror = 2*f0 - f_cursor. This is
+// the direct on-canvas teaching tool for image/sideband symmetry -- a signal at
+// +Δ off the dial has its image at -Δ on the other side. PURE display: it reuses
+// the existing cursorA/B positions + tunedFrequencyHz(), adds no state, no
+// interaction, no button. No cursor placed -> no line (honest empty state).
+// Visual separation from every other vertical element on the trace:
+//   cursors            = teal/pink DASHED (kCursorA/BColor);
+//   fixed markers      = accent solid / amber dashed-selected;
+//   bookmarks          = green dotted at 0.45 (kBookmark*);
+//   peaks              = accent triangles;
+//   VFO tuning centre  = solid blue line.
+// The mirror is therefore a quiet LAVENDER DOTTED line at LOW alpha -- it reads
+// as a *derived reference* of the active cursor, never as a live signal, a saved
+// bookmark, or a user-placed marker.
+inline constexpr const char* kMirrorLineColor = "#b48fd6";
+inline constexpr double      kMirrorLineAlpha  = 0.35;
+inline constexpr int         kMirrorLineWidth  = 1;
+
 // =====================================================================
 // Corner radii
 // =====================================================================
