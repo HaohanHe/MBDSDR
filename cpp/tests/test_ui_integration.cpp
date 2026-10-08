@@ -30,6 +30,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QListWidgetItem>
+#include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
@@ -45,6 +46,7 @@
 #include "ai/agent.h"
 #include "ai/ai_session_store.h"
 #include "dsp/frequency_scanner.h"
+#include "dsp/scan_link.h"
 #include "dsp/spectrum_engine.h"
 
 using namespace mbdsdr;
@@ -64,6 +66,11 @@ private slots:
     void vfoDoubleClickSwitchesActive();
     void vfoNamingPersistsRoundTrip();
     void vfoRemoveRefreshesList();
+    // Phase62 orphan wiring: honest UI entries for the three backends that had
+    // no desktop surface (export IQ segment / network audio tap / scan link).
+    void exportIqSegmentHonestFailureWithoutData();
+    void networkAudioSinkEmptyStateAndToggle();
+    void scanLinkToggleDrivesStateLabel();
 };
 
 QString TestUiIntegration::tmpSettingsDir;
@@ -465,6 +472,101 @@ void TestUiIntegration::vfoRemoveRefreshesList() {
     bool stillThere = false;
     for (const auto& m : eng->vfoMarkers()) if (m.id == activeId) stillThere = true;
     QVERIFY2(!stillThere, "the removed VFO id must be gone after delete");
+}
+
+// Phase62 orphan A: with the honest empty source (no hardware, no file) the
+// one-shot raw-IQ export must FAIL honestly -- the status label carries the
+// engine's real reason and no file is fabricated.
+void TestUiIntegration::exportIqSegmentHonestFailureWithoutData() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    // Drop the synthetic source this suite opted into: the production honest
+    // empty (NullSource) yields no IQ, exactly like a box with no hardware.
+    win.engine()->setTestSourceEnabled(false);
+    QTest::qWait(400);
+    QVERIFY2(!win.engine()->hasData(),
+             "empty source must report hasData()==false");
+
+    QLabel* status = win.harnessRecLibStatus();
+    QVERIFY(status);
+    const bool ok = win.harnessExportIq(1.0);
+    QVERIFY2(!ok, "export must honestly refuse with no IQ data");
+    QVERIFY2(status->text().contains(QStringLiteral("导出失败")),
+             qPrintable(QString("status must carry the honest failure, got: %1")
+                            .arg(status->text())));
+}
+
+// Phase62 orphan B: the network-audio tap entry starts/stops the REAL
+// NetworkAudioSink through the engine's parallel-tap seam. The empty states are
+// honest: stop disabled while nothing streams; an empty host is refused.
+void TestUiIntegration::networkAudioSinkEmptyStateAndToggle() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+
+    auto* startBtn = win.findChild<QPushButton*>("netAudioStartBtn");
+    auto* stopBtn  = win.findChild<QPushButton*>("netAudioStopBtn");
+    auto* status   = win.findChild<QLabel*>("netAudioStatusLabel");
+    auto* hostEdit = win.findChild<QLineEdit*>("netAudioHostEdit");
+    QVERIFY(startBtn && stopBtn && status && hostEdit);
+
+    // Honest empty state: not streaming -> stop disabled, status idle, no tap.
+    QVERIFY(!stopBtn->isEnabled());
+    QCOMPARE(status->text(), QStringLiteral("未开启"));
+    QVERIFY(!win.engine()->networkTapActive());
+
+    // Empty config: start refuses honestly and installs nothing.
+    hostEdit->clear();
+    startBtn->click();
+    QVERIFY2(status->text().contains(QStringLiteral("未配置")),
+             qPrintable(QString("empty host must be refused, got: %1").arg(status->text())));
+    QVERIFY(!win.engine()->networkTapActive());
+
+    // UDP to loopback always binds; streaming goes live through the engine tap.
+    hostEdit->setText("127.0.0.1");
+    startBtn->click();
+    QVERIFY(win.engine()->networkTapActive());
+    QVERIFY(!startBtn->isEnabled());
+    QVERIFY(stopBtn->isEnabled());
+    qInfo() << "network audio status:" << status->text();
+
+    stopBtn->click();
+    QVERIFY(!win.engine()->networkTapActive());
+    QCOMPARE(status->text(), QStringLiteral("未开启"));
+}
+
+// Phase62 orphan C: the activity-scan link checkbox drives the real headless
+// bridge: enabled -> it walks the band on the engine's real RSSI; disabled ->
+// back to Idle. No fabricated dwells: a quiet band stays Scanning forever.
+void TestUiIntegration::scanLinkToggleDrivesStateLabel() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+
+    auto* chk = win.findChild<QCheckBox*>("scanLinkChk");
+    auto* label = win.findChild<QLabel*>("scanLinkStateLabel");
+    QVERIFY(chk && label);
+    // Honest empty state: disabled link shows the not-armed idle.
+    QCOMPARE(label->text(), QStringLiteral("空闲（未启用）"));
+
+    // Any dwell-recording goes to a throwaway dir, never the cwd.
+    win.engine()->setRecordingDir(QDir::tempPath() + "/mbdsdr_scanlink_rec");
+
+    chk->setChecked(true);
+    QTest::qWait(250);   // ~five 50 ms ticks
+    qInfo() << "scan link state:" << label->text();
+    QVERIFY(win.scanLink());
+    const dsp::ScanLinkState st = win.scanLink()->state();
+    QVERIFY2(st == dsp::ScanLinkState::Scanning || st == dsp::ScanLinkState::Dwell,
+             "an enabled link must walk the band");
+    QVERIFY2(!label->text().contains(QStringLiteral("未启用")),
+             "an enabled link must leave the disabled empty state");
+
+    chk->setChecked(false);
+    QTest::qWait(150);
+    QCOMPARE(win.scanLink()->state(), dsp::ScanLinkState::Idle);
+    QVERIFY(label->text().contains(QStringLiteral("空闲")));
 }
 
 QTEST_MAIN(TestUiIntegration)

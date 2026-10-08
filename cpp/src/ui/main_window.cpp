@@ -69,6 +69,8 @@
 #include "core/bandwidth_preset.h"
 #include "dsp/spectrum_engine.h"
 #include "dsp/spyserver_server.h"
+#include "dsp/network_audio_sink.h"
+#include "dsp/scan_link.h"
 #include "dsp/adsb_decoder.h"
 #include "dsp/tle_client.h"
 // Phase27: headless control command surface + its loopback-only HTTP front-end.
@@ -439,6 +441,82 @@ MainWindow::MainWindow(QWidget* parent)
             QSettings("MBDSDR", "MBDSDR").setValue("net/spyPort", v);
             scheduleSave();
         });
+    }
+
+    // ---- 网络音频外送 (demodulated 48k PCM -> UDP/TCP) --------------------
+    // A PARALLEL tap off the demodulated-audio write point (engine
+    // setNetworkAudioSink); the local speaker/recording chain is never
+    // diverted. Default OFF. start()/stop() run on this (UI) thread per the
+    // sink's own threading contract; every status line is a real read-back.
+    {
+        auto* gNet = new QGroupBox("网络音频外送", leftCard);
+        auto* gNetLay = new QVBoxLayout(gNet);
+        gNetLay->setSpacing(tokens::kSpacingS);
+
+        auto* hostRow = new QHBoxLayout;
+        auto* hostLbl = new QLabel("host", gNet);
+        netAudioHostEdit_ = new QLineEdit("127.0.0.1", gNet);
+        netAudioHostEdit_->setObjectName("netAudioHostEdit");
+        netAudioHostEdit_->setPlaceholderText(QStringLiteral("目标 host"));
+        // The left rail's viewport is chronically narrower than the card (the
+        // top 源与连接 group's minimum width forces ~294 px at a 640 window).
+        // Keep this group compact-LEFT so its controls never spill off the
+        // visible edge: the edit grows only up to the 4-pt-grid cap.
+        netAudioHostEdit_->setMinimumWidth(tokens::scaled(64));
+        netAudioHostEdit_->setMaximumWidth(tokens::scaled(128));
+        hostRow->addWidget(hostLbl);
+        hostRow->addWidget(netAudioHostEdit_, 1);
+        hostRow->addStretch(0);
+        gNetLay->addLayout(hostRow);
+
+        auto* portRow = new QHBoxLayout;
+        auto* portLbl = new QLabel(QStringLiteral("端口"), gNet);
+        netAudioPortSpin_ = new QSpinBox(gNet);
+        netAudioPortSpin_->setObjectName("netAudioPortSpin");
+        netAudioPortSpin_->setRange(1, 65535);
+        netAudioPortSpin_->setValue(49100);
+        portRow->addWidget(portLbl);
+        portRow->addWidget(netAudioPortSpin_);
+        portRow->addStretch(0);
+        gNetLay->addLayout(portRow);
+
+        auto* protoRow = new QHBoxLayout;
+        netAudioProtoCombo_ = new QComboBox(gNet);
+        netAudioProtoCombo_->setObjectName("netAudioProtoCombo");
+        netAudioProtoCombo_->addItems({"UDP", "TCP"});
+        protoRow->addWidget(netAudioProtoCombo_);
+        protoRow->addStretch(0);
+        gNetLay->addLayout(protoRow);
+
+        auto* netBtnRow = new QHBoxLayout;
+        netAudioStartBtn_ = new QPushButton(QStringLiteral("开始"), gNet);
+        netAudioStartBtn_->setObjectName("netAudioStartBtn");
+        netAudioStartBtn_->setToolTip(QStringLiteral("开始网络音频外送（解调后 48 kHz PCM）"));
+        netAudioStopBtn_ = new QPushButton(QStringLiteral("停止"), gNet);
+        netAudioStopBtn_->setObjectName("netAudioStopBtn");
+        netAudioStopBtn_->setToolTip(QStringLiteral("停止网络音频外送"));
+        // Honest empty state: nothing streaming yet -> stop disabled.
+        netAudioStopBtn_->setEnabled(false);
+        netBtnRow->addWidget(netAudioStartBtn_);
+        netBtnRow->addWidget(netAudioStopBtn_);
+        netBtnRow->addStretch(0);
+        gNetLay->addLayout(netBtnRow);
+
+        netAudioStatusLabel_ = new QLabel(QStringLiteral("未开启"), gNet);
+        netAudioStatusLabel_->setObjectName("netAudioStatusLabel");
+        netAudioStatusLabel_->setWordWrap(true);
+        gNetLay->addWidget(netAudioStatusLabel_);
+
+        leftLay->addWidget(gNet);
+
+        netAudioTimer_ = new QTimer(this);
+        netAudioTimer_->setInterval(1000);
+        connect(netAudioTimer_, &QTimer::timeout,
+                this, [this]() { updateNetAudioStatus(); });
+        connect(netAudioStartBtn_, &QPushButton::clicked,
+                this, &MainWindow::onNetAudioStart);
+        connect(netAudioStopBtn_, &QPushButton::clicked,
+                this, &MainWindow::onNetAudioStop);
     }
 
     auto* gFreq = new QGroupBox("频率", leftCard);
@@ -1378,6 +1456,55 @@ MainWindow::MainWindow(QWidget* parent)
     scanBoxLay->addWidget(scanStateLabel_);
     bmLay->addWidget(scanBox);
 
+    // ===== A2. 活动扫描链 (dwell -> decode/record bridge) =================
+    // Independent from the manual scanner_ above: a headless ScanActivityLink
+    // walking the SAME band config the user set, parking on REAL RSSI hits and
+    // arming the recorder for each dwell. Driven by a 50 ms UI-thread timer
+    // feeding the engine's REAL rssiDbfs(); it fabricates no frequency and no
+    // level -- a quiet band simply never dwells.
+    {
+        auto* linkBox = new QGroupBox("活动扫描链", bmPage);
+        linkBox->setObjectName("scanLinkGroup");
+        auto* linkLay = new QVBoxLayout(linkBox);
+        linkLay->setSpacing(tokens::kSpacingS);
+
+        scanLinkChk_ = new QCheckBox("启用活动扫描链", linkBox);
+        scanLinkChk_->setObjectName("scanLinkChk");
+        linkLay->addWidget(scanLinkChk_);
+
+        scanLinkStateLabel_ = new QLabel("空闲（未启用）", linkBox);
+        scanLinkStateLabel_->setObjectName("scanLinkStateLabel");
+        linkLay->addWidget(scanLinkStateLabel_);
+        bmLay->addWidget(linkBox);
+
+        scanLink_ = new dsp::ScanActivityLink();
+        dsp::ScanLinkActions acts;
+        acts.onRetune = [this](double hz) {
+            if (engine_) engine_->onSetCenterFreq(hz);
+        };
+        acts.onActivityFound = [this](double, float) {
+            // Park on the hit: arm the real continuous recorder. startRecording()
+            // refuses honestly when there is nothing to record (returns false);
+            // we only remember the arm when it really took.
+            if (engine_ && engine_->startRecording()) scanLinkRecording_ = true;
+        };
+        acts.onDwellEnded = [this](double) {
+            if (scanLinkRecording_ && engine_) {
+                engine_->stopRecording();
+                scanLinkRecording_ = false;
+            }
+        };
+        scanLink_->setActions(std::move(acts));
+
+        scanLinkTimer_ = new QTimer(this);
+        scanLinkTimer_->setInterval(50);
+        scanLinkTickClock_ = new QElapsedTimer();
+        connect(scanLinkTimer_, &QTimer::timeout,
+                this, &MainWindow::scanLinkTimerTick);
+        connect(scanLinkChk_, &QCheckBox::toggled,
+                this, &MainWindow::onScanLinkToggled);
+    }
+
     // ===== B. 频率书签 table group =====
     auto* bmBox = new QGroupBox("频率书签", bmPage);
     bmBox->setObjectName("bmGroup");
@@ -1616,6 +1743,17 @@ MainWindow::MainWindow(QWidget* parent)
         rBtnRow->addWidget(recLibAnalyzeBtn_);
         rBtnRow->addWidget(recLibExportBtn_);
         lBoxLay->addLayout(rBtnRow);
+        // Phase62 orphan A: one-shot raw-IQ dump of the live ring buffer (SigMF
+        // pair). Its own row (the row above already holds six actions) so the
+        // label never squeezes at narrow rail widths. The duration is asked in a
+        // small dialog; the centre follows the selected VFO; the engine owns the
+        // collision-free output name under recordingDir.
+        auto* iqRow = new QHBoxLayout;
+        recLibIqBtn_ = new QPushButton(QStringLiteral("导出原始 IQ 段"), lBox);
+        recLibIqBtn_->setObjectName("recLibIqBtn");
+        recLibIqBtn_->setMinimumHeight(tokens::scaled(tokens::kTouchMinDim));
+        iqRow->addWidget(recLibIqBtn_);
+        lBoxLay->addLayout(iqRow);
         recLibPlayStatus_ = new QLabel("未加载", lBox);
         recLibPlayStatus_->setObjectName("monoInfo");
         lBoxLay->addWidget(recLibPlayStatus_);
@@ -1663,6 +1801,8 @@ MainWindow::MainWindow(QWidget* parent)
                 this, &MainWindow::onRecLibAnalyze);
         connect(recLibExportBtn_, &QPushButton::clicked,
                 this, &MainWindow::onRecLibExportDecode);
+        connect(recLibIqBtn_, &QPushButton::clicked,
+                this, &MainWindow::onRecLibExportIq);
 
         // Chunked playback: push decoded 48 kHz mono float ~20 ms at a time into
         // the EXISTING AudioOutput write channel. Offscreen/headless has no
@@ -3039,6 +3179,14 @@ MainWindow::~MainWindow() {
     // engine below is torn down. (HttpControlServer's own dtor calls stop() again
     // safely; the hub+server are children of this and are destroyed with it.)
     if (httpControlServer_) httpControlServer_->stop();
+    // Phase62: detach the network-audio tap on THIS thread BEFORE the engine
+    // stops (shutdown/wait below), so the sink's destructor never races the DSP
+    // write path. setNetworkAudioSink(nullptr) destroys the borrowed sink.
+    if (netAudioTimer_) netAudioTimer_->stop();
+    if (netAudioRaw_ && engine_) {
+        engine_->setNetworkAudioSink(nullptr);
+        netAudioRaw_ = nullptr;
+    }
     // Flush any pending debounced save so the last 500 ms of tweaks are not lost.
     if (saveTimer_ && saveTimer_->isActive()) {
         saveTimer_->stop();
@@ -3055,6 +3203,11 @@ MainWindow::~MainWindow() {
     if (scanTimer_) scanTimer_->stop();
     delete scanner_; scanner_ = nullptr;
     delete scanTickClock_; scanTickClock_ = nullptr;
+    // Phase62: the activity-scan link has no radio of its own; stop its ticker
+    // and drop the headless bridge explicitly.
+    if (scanLinkTimer_) scanLinkTimer_->stop();
+    delete scanLink_; scanLink_ = nullptr;
+    delete scanLinkTickClock_; scanLinkTickClock_ = nullptr;
 }
 
 // ---- Phase27: loopback control-HTTP production wiring -----------------------
@@ -3198,6 +3351,79 @@ void MainWindow::updateScanStatus() {
     if (scanSaveBmBtn_) scanSaveBmBtn_->setEnabled(st == dsp::ScanState::Hit);
 }
 
+// ---- Phase62 orphan C: activity-scan link (dwell -> record bridge) -------
+// The band/step/threshold config is reused verbatim from the manual scanner
+// widgets above -- the user already tuned those knobs, so the link introduces
+// NO hardcoded scan parameters. startRecording() on the hit edge is the real
+// production arming the ControlHub headless layer deliberately left as a no-op.
+void MainWindow::onScanLinkToggled(bool on) {
+    if (!scanLink_) return;
+    if (on) {
+        dsp::ScanConfig cfg;
+        cfg.startHz = scanStartSpin_->value() * 1e6;
+        cfg.stopHz  = scanStopSpin_->value() * 1e6;
+        switch (scanStepCombo_->currentIndex()) {
+            case 0:  cfg.stepHz = 10e3;   break;
+            case 1:  cfg.stepHz = 12.5e3; break;
+            case 3:  cfg.stepHz = 1e6;    break;
+            default: cfg.stepHz = 100e3;  break;
+        }
+        cfg.dwellMs = scanDwellSpin_->value();
+        cfg.thresholdDb = static_cast<float>(scanThrSpin_->value());
+        cfg.holdMode = scanHoldCombo_->currentIndex() == 1
+                       ? dsp::HitHoldMode::FixedMs : dsp::HitHoldMode::UntilSignalGone;
+        cfg.lingerMs = scanLingerSpin_->value();
+        cfg.holdMs   = scanHoldMsSpin_->value();
+        scanLink_->setConfig(cfg);
+        scanLinkTickClock_->start();
+        scanLink_->start();
+        scanLinkTimer_->start();
+    } else {
+        scanLink_->stop();
+        scanLinkTimer_->stop();
+        // If a dwell recording was armed by the link, finalise it honestly.
+        if (scanLinkRecording_ && engine_) {
+            engine_->stopRecording();
+            scanLinkRecording_ = false;
+        }
+    }
+    updateScanLinkStatus();
+}
+
+void MainWindow::scanLinkTimerTick() {
+    if (!scanLink_) return;
+    int elapsed = 50;
+    if (scanLinkTickClock_->isValid())
+        elapsed = static_cast<int>(scanLinkTickClock_->restart());
+    else
+        scanLinkTickClock_->start();
+    // Honess input: the engine's REAL measured channel RSSI. Before the first
+    // block flows this reads -100 (quiet band) -> the link never dwells on a
+    // fabricated hit.
+    const float rssi = engine_ ? engine_->rssiDbfs() : -100.0f;
+    scanLink_->tick(elapsed, rssi);
+    updateScanLinkStatus();
+}
+
+void MainWindow::updateScanLinkStatus() {
+    if (!scanLink_ || !scanLinkStateLabel_) return;
+    const bool enabled = scanLinkChk_ && scanLinkChk_->isChecked();
+    if (!enabled) {
+        scanLinkStateLabel_->setText(QStringLiteral("空闲（未启用）"));
+        return;
+    }
+    const dsp::ScanLinkState st = scanLink_->state();
+    QString t;
+    if (st == dsp::ScanLinkState::Idle)            t = QStringLiteral("空闲");
+    else if (st == dsp::ScanLinkState::Scanning)   t = QStringLiteral("扫描中");
+    else t = scanLinkRecording_ ? QStringLiteral("停驻 · 录制中")
+                                 : QStringLiteral("停驻 · 解码");
+    if (st == dsp::ScanLinkState::Dwell && scanLink_->parkedFrequency() > 0.0)
+        t += QString(" · %1 MHz").arg(scanLink_->parkedFrequency() / 1e6, 0, 'f', 3);
+    t += QString(" · 命中 %1").arg(scanLink_->dwellCount());
+    scanLinkStateLabel_->setText(t);
+}
+
 // ===================== 录制库 panel =====================================
 void MainWindow::refreshRecLib() {
     if (!recLibList_) return;
@@ -3291,6 +3517,63 @@ void MainWindow::onRecLibExportDecode() {
     if (recLibPlayStatus_)
         recLibPlayStatus_->setText(QStringLiteral("已导出 %1 字节").arg(text.size()));
     statusBar()->showMessage(QStringLiteral("解码文本已导出: %1").arg(path));
+}
+
+// Phase62 orphan A: one-shot dump of the live baseband ring buffer to a SigMF
+// pair under the recording dir. The duration is asked in a small modal dialog
+// (never hardcoded); the centre follows the SELECTED VFO; the engine picks the
+// collision-free output name. doRecLibExportIq is the real call path -- the
+// offscreen harness invokes it directly, skipping the dialog.
+void MainWindow::onRecLibExportIq() {
+    if (!engine_) return;
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("导出原始 IQ 段"));
+    auto* form = new QFormLayout(&dlg);
+    auto* secsSpin = new QDoubleSpinBox(&dlg);
+    secsSpin->setRange(0.1, 30.0);
+    secsSpin->setDecimals(1);
+    secsSpin->setSingleStep(0.5);
+    secsSpin->setValue(1.0);
+    secsSpin->setSuffix(QStringLiteral(" s"));
+    form->addRow(QStringLiteral("时长"), secsSpin);
+    auto* btns = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+    form->addRow(btns);
+    connect(btns, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(btns, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() != QDialog::Accepted) return;
+    doRecLibExportIq(secsSpin->value());
+}
+
+bool MainWindow::doRecLibExportIq(double seconds) {
+    if (!engine_) return false;
+    // sampleCount from the REAL live sample rate (honest units; the engine
+    // itself clamps to its own honest bounds 1024..16M).
+    const int sampleCount = static_cast<int>(seconds * lastSampleRateHz_);
+    // Centre = the SELECTED VFO's absolute frequency from the engine's honest
+    // VFO snapshot; -1 (unresolved) keeps the current source centre.
+    double tuneHz = -1.0;
+    for (const auto& m : engine_->vfoMarkers()) {
+        if (m.selected) { tuneHz = m.freqHz; break; }
+    }
+    QString path, err;
+    double sr = 0.0, center = 0.0;
+    qint64 samples = 0, bytes = 0;
+    const bool ok = engine_->exportIqSegment(sampleCount, tuneHz, path,
+                                             sr, center, samples, bytes, err);
+    if (recLibPlayStatus_) {
+        if (ok) {
+            recLibPlayStatus_->setText(
+                QStringLiteral("已导出 IQ: %1 样本 · %2")
+                    .arg(samples).arg(QFileInfo(path).fileName()));
+        } else {
+            // Honest failure reason: no data / source produced nothing / path
+            // not writable -- the engine wording, never a fabricated success.
+            recLibPlayStatus_->setText(QStringLiteral("导出失败: %1").arg(err));
+        }
+    }
+    if (ok) refreshRecLib();   // the new SigMF pair shows up in the list
+    statusBar()->showMessage(ok ? QStringLiteral("IQ 段已导出") : err);
+    return ok;
 }
 
 void MainWindow::openOfflinePath(const QString& path) {
@@ -4402,6 +4685,72 @@ void MainWindow::updateSpyServerStatus() {
     spyserverStatusLabel_->setText(
         QStringLiteral("监听 %1 · %2 客户端")
             .arg(spyServer_->port()).arg(spyServer_->clientCount()));
+}
+
+// ---- Phase62 orphan B: network audio out (demodulated 48k PCM tap) -------
+void MainWindow::onNetAudioStart() {
+    if (!engine_ || netAudioRaw_) return;
+    const QString host = netAudioHostEdit_->text().trimmed();
+    if (host.isEmpty()) {
+        // Honest empty-config state: refuse rather than stream to nowhere.
+        netAudioStatusLabel_->setText(QStringLiteral("未配置目标 host"));
+        return;
+    }
+    const dsp::NetAudioProtocol proto = netAudioProtoCombo_->currentIndex() == 1
+                                            ? dsp::NetAudioProtocol::TCP
+                                            : dsp::NetAudioProtocol::UDP;
+    auto s = std::make_unique<dsp::NetworkAudioSink>();
+    const auto port = static_cast<uint16_t>(netAudioPortSpin_->value());
+    if (!s->start(host.toStdString(), port, proto)) {
+        // Bind/listen failure surfaces honestly (real socket errno), never
+        // faked as "streaming".
+        netAudioStatusLabel_->setText(
+            QStringLiteral("启动失败: %1").arg(QString::fromStdString(s->lastError())));
+        return;
+    }
+    netAudioRaw_ = s.get();
+    // Parallel tap: the local playback/recording chain is never diverted.
+    engine_->setNetworkAudioSink(std::unique_ptr<dsp::IAudioSink>(std::move(s)));
+    netAudioStartBtn_->setEnabled(false);
+    netAudioStopBtn_->setEnabled(true);
+    netAudioHostEdit_->setEnabled(false);
+    netAudioPortSpin_->setEnabled(false);
+    netAudioProtoCombo_->setEnabled(false);
+    netAudioTimer_->start();
+    updateNetAudioStatus();
+}
+
+void MainWindow::onNetAudioStop() {
+    if (!engine_) return;
+    engine_->setNetworkAudioSink(nullptr);   // detaches + destroys the tap
+    netAudioRaw_ = nullptr;
+    netAudioTimer_->stop();
+    netAudioStartBtn_->setEnabled(true);
+    netAudioStopBtn_->setEnabled(false);
+    netAudioHostEdit_->setEnabled(true);
+    netAudioPortSpin_->setEnabled(true);
+    netAudioProtoCombo_->setEnabled(true);
+    netAudioStatusLabel_->setText(QStringLiteral("未开启"));
+}
+
+void MainWindow::updateNetAudioStatus() {
+    if (!netAudioStatusLabel_) return;
+    if (!netAudioRaw_) {
+        netAudioStatusLabel_->setText(QStringLiteral("未开启"));
+        return;
+    }
+    const bool tcp = netAudioRaw_->protocol() == dsp::NetAudioProtocol::TCP;
+    QString line = tcp
+        ? QString("TCP 监听 :%1").arg(netAudioRaw_->actualPort())
+        : QString("UDP → %1:%2").arg(netAudioHostEdit_->text())
+                                   .arg(netAudioRaw_->actualPort());
+    if (tcp)
+        line += netAudioRaw_->clientConnected() ? QStringLiteral(" · 客户端已连接")
+                                                : QStringLiteral(" · 等待客户端");
+    line += QString(" · %1 B").arg(netAudioRaw_->bytesSent());
+    if (netAudioRaw_->sendErrors() > 0)
+        line += QString(" · 发送错误 %1").arg(netAudioRaw_->sendErrors());
+    netAudioStatusLabel_->setText(line);
 }
 
 void MainWindow::onSquelchState(bool open) {
