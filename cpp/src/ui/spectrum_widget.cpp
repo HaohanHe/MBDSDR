@@ -374,6 +374,37 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         if (canvas_) canvas_->setPalette(pal);
     });
     wfRow->addWidget(paletteCombo_);
+
+    // Waterfall history depth (rows): rebuilds the ring to 128/256/512. The
+    // persisted value is read here into the combo (unset/illegal -> default 256).
+    // The canvas ctor ALSO reads kSettingsKeyWfDepth, so the depth is honoured on
+    // the very first frame even before any combo interaction; the combo is the
+    // live UI reflection + the change entry point. Mirrors the scroll/palette
+    // pattern: setCurrentIndex BEFORE connect so construction cannot fire the
+    // lambda against a not-yet-existing canvas_.
+    depthCombo_ = new QComboBox(this);
+    for (int d : tokens::kWaterfallDepthChoices)
+        depthCombo_->addItem(QString("%1 行").arg(d), d);
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        int depth = s.value(tokens::kSettingsKeyWfDepth,
+                            tokens::kWaterfallDepthDefault).toInt();
+        int idx = 1;   // default 256 is the middle entry of {128,256,512}
+        int i = 0;
+        for (int c : tokens::kWaterfallDepthChoices) {
+            if (c == depth) idx = i;
+            ++i;
+        }
+        depthCombo_->setCurrentIndex(idx);
+    }
+    connect(depthCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+        const int depth = depthCombo_->itemData(idx).toInt();
+        QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeyWfDepth, depth);
+        if (canvas_) canvas_->setRingDepth(depth);
+    });
+    wfRow->addWidget(depthCombo_);
+
     wfRow->addSpacing(tokens::scaled(tokens::kSpacingM));
 
     testLabel_ = new QLabel("", this);

@@ -66,6 +66,29 @@ double loadSpecFraction() {
     if (!ok || !std::isfinite(d)) return tokens::kDefaultSpecFraction;
     return clampd(d, kSpecFracMin, kSpecFracMax);
 }
+
+// Resolve a requested waterfall ring depth to a legal choice. Only the named
+// tokens::kWaterfallDepthChoices[] are honoured; a value outside that set
+// (hand-edited config) honestly falls back to tokens::kWaterfallDepthDefault.
+// There is no continuous band to clamp into: the ring is sized for the named
+// depths only.
+int legalRingDepth(int rows) {
+    for (int c : tokens::kWaterfallDepthChoices)
+        if (c == rows) return rows;
+    return tokens::kWaterfallDepthDefault;
+}
+
+// Read the persisted waterfall depth back on construction. Missing key,
+// non-numeric value, or a value outside the named choice set => honest default
+// (256). Mirrors the QSettings("MBDSDR","MBDSDR") group used app-wide.
+int loadRequestedRingDepth() {
+    QSettings s("MBDSDR", "MBDSDR");
+    const QVariant v = s.value(tokens::kSettingsKeyWfDepth);
+    bool ok = false;
+    const int rows = v.toInt(&ok);
+    if (!ok) return tokens::kWaterfallDepthDefault;
+    return legalRingDepth(rows);
+}
 } // namespace
 
 SpectrumDisplay::SpectrumDisplay(QWidget* parent)
@@ -76,6 +99,9 @@ SpectrumDisplay::SpectrumDisplay(QWidget* parent)
     setAutoFillBackground(true);
     // Restore the user's last divider placement (honest default / clamped).
     traceShare_ = loadSpecFraction();
+    // Restore the user's last waterfall ring depth (honest default if unset or
+    // illegal). The first allocateRing() honours requestedRingDepth_.
+    requestedRingDepth_ = loadRequestedRingDepth();
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +225,10 @@ void SpectrumDisplay::publishVisibleRange() {
 // ---------------------------------------------------------------------------
 void SpectrumDisplay::allocateRing(int bins) {
     bins_ = bins;
-    ringDepth_ = tokens::kWaterfallHistoryLines;
+    // Honour the (possibly user-configured / persisted) depth instead of a
+    // compile-time constant. ctor/setRingDepth() keep requestedRingDepth_ on the
+    // named choice set with an honest default.
+    ringDepth_ = requestedRingDepth_;
     // Raw dB ring: the source of truth. Pre-fill to the floor so un-written
     // slots (history not yet long enough) render as the dark noise colour.
     ringDb_.assign(ringDepth_, std::vector<float>(bins, dbFloorDb_));
@@ -601,6 +630,21 @@ void SpectrumDisplay::setBookmarkHz(const QVector<double>& hz) {
 void SpectrumDisplay::setScrollSpeed(int linesPerFrame) {
     everyNthFrame_ = (linesPerFrame == 1 || linesPerFrame == 2 || linesPerFrame == 4)
                      ? linesPerFrame : 1;
+}
+
+// Change the waterfall rolling-history depth. Only the named choice set
+// (tokens::kWaterfallDepthChoices, 128/256/512) is honoured; anything else
+// honestly resolves to the default (256) -- no silent mid-band clamp. Once a
+// ring exists (bins_ > 0) it is rebuilt at the new depth: the stored history is
+// dropped because the time window itself changed, and materialiseHistory() then
+// renders the fresh, empty-but-honest ring (dark noise rows). Before the first
+// frame the call only records the request; allocateRing() picks it up.
+void SpectrumDisplay::setRingDepth(int rows) {
+    requestedRingDepth_ = legalRingDepth(rows);
+    if (bins_ > 0) {
+        allocateRing(bins_);   // rebuild ring + history_ at the new depth
+        update();
+    }
 }
 
 void SpectrumDisplay::setPalette(int p) {

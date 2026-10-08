@@ -152,6 +152,10 @@ public slots:
     // Waterfall controls.
     void setScrollSpeed(int linesPerFrame);   // push a row every N frames (1/2/4)
     void setPalette(int p);                   // 0 classic, 1 monochrome, 2 viridis
+    // Rebuild the waterfall ring to a named depth (128/256/512); any other value
+    // honestly falls back to 256. Persisted under kSettingsKeyWfDepth by the
+    // container. Before the first frame it only records the request.
+    void setRingDepth(int rows);
 
     // External user colormap (clean-room SDR++ colormaps). Parses a JSON document
     // of {"name":..,"stops":["#rrggbb",..]} / [{"t":..,"c":"#rrggbb"},..] or a
@@ -245,6 +249,13 @@ public slots:
     // Number of real history rows filled (ringCount_), so the suite can assert
     // the top ("now") and bottom (oldest-row) boundary ticks.
     int     waterfallRowCountForTest() const { return ringCount_; }
+    // Active ring depth (rows) after the latest allocateRing/setRingDepth, so the
+    // suite can assert a depth change actually rebuilt the ring to the new size.
+    int     ringDepthForTest() const { return ringDepth_; }
+    // Requested depth that the next allocateRing() will honour (post-validation),
+    // so the suite can assert setRingDepth() records the request before the first
+    // frame.
+    int     requestedRingDepthForTest() const { return requestedRingDepth_; }
 
 signals:
     void frequencyChanged(double newFreqHz);
@@ -439,7 +450,13 @@ private:
     std::vector<std::vector<float>> ringDb_;   // depth raw-dB rows (length = bins_)
     QImage fallsPeak_;               // display-res, peak-held downscale cache
     std::vector<float> decScratch_;  // reused decimation output row
-    int  ringDepth_ = 0;             // history depth (rows)
+    int  ringDepth_ = 0;             // active history depth (rows) after allocateRing
+    // Honoured by the next allocateRing(). In-class default matches
+    // tokens::kWaterfallHistoryLines; the ctor overrides this with the persisted
+    // and validated depth (loadRequestedRingDepth()), so this literal is only a
+    // pre-ctor safety value. Kept as a literal to avoid pulling tokens.h into
+    // this widget header.
+    int  requestedRingDepth_ = 256;
     int  ringHead_ = 0;              // next physical slot to overwrite
     int  ringCount_ = 0;             // rows written so far (capped at depth)
     int  bins_ = 0;
