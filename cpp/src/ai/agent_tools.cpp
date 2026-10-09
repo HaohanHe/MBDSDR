@@ -17,6 +17,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSettings>
+#include <cmath>
 
 namespace mbdsdr {
 namespace ai {
@@ -65,6 +66,12 @@ QString compact(const QJsonObject& o) {
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
 
+// Forward declaration: the honest-error helper is defined in the Phase26 block
+// below (~line 570); the early executors (tune_frequency / set_mode) reuse it.
+namespace {
+QString errResult(const QString& msg);
+}
+
 // ---- Built-in tool executors ------------------------------------------------
 // Each was one branch of the old if-else chain in executeTool(). They are now
 // plain functions bound into the registry table below; the bodies are verbatim
@@ -75,6 +82,12 @@ QString execTuneFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
                           const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
     double f = args["freq_hz"].toDouble();
+    // Honest guard (parity with the engine guard spectrum_engine.cpp:214 and CH
+    // needDbl): a non-positive / non-finite frequency must be REJECTED here with
+    // ok:false -- otherwise the engine drops it silently while we echo f back as
+    // success and the next get_status still reports the old value (fake success).
+    if (!(f > 0.0) || !std::isfinite(f))
+        return errResult(QString::fromUtf8("频率必须为正的有限数"));
     engine->onSetCenterFreq(f);
     QJsonObject o;
     o["ok"] = true;
@@ -87,12 +100,22 @@ QString execTuneFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
 QString execSetMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
                     const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
-    QString m = args["mode"].toString();
-    engine->setDemodMode(m);
+    // Whitelist (parity with CH needMode and execSetVfoMode): the engine's
+    // VfoManager accepts ANY mode string, so without this gate an unknown mode
+    // would be echoed as applied while the demod never really changes -- reject
+    // it honestly. Echo the canonical upper-case name like the other channels.
+    const QString up = args["mode"].toString().toUpper();
+    bool known = false;
+    for (int k = 0; k < tokens::kControlHubModesCount; ++k)
+        if (up == QLatin1String(tokens::kControlHubModes[k])) { known = true; break; }
+    if (!known)
+        return errResult(QString::fromUtf8("未知解调模式: %1")
+                             .arg(args["mode"].toString()));
+    engine->setDemodMode(up);
     QJsonObject o;
     o["ok"] = true;
-    o["mode"] = m;
-    o["message"] = QString("解调模式切换为 %1").arg(m);
+    o["mode"] = up;
+    o["message"] = QString("解调模式切换为 %1").arg(up);
     addSourceFields(o, src);
     return compact(o);
 }
@@ -659,8 +682,9 @@ QString execGetScanLinkStatus(const QJsonObject&, dsp::SpectrumEngine*,
     return compact(o);
 }
 
-// 6. set_squelch (write): engine already has setSquelchEnabled/Threshold. Drive
-//    the real setters; `auto` has no engine setter yet so it is echoed honestly.
+// 6. set_squelch (write): the engine exposes setSquelchEnabled / Threshold AND
+//    setSquelchAuto -- every field drives its real setter (parity with CH
+//    cmdSetSquelch), so get_squelch_status reads the real value back.
 QString execSetSquelch(const QJsonObject& args, dsp::SpectrumEngine* engine,
                        const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
@@ -674,8 +698,10 @@ QString execSetSquelch(const QJsonObject& args, dsp::SpectrumEngine* engine,
         engine->setSquelchThreshold(static_cast<float>(args.value("threshold_db").toDouble()));
         o["threshold_db"] = args.value("threshold_db").toDouble();
     }
-    if (args.contains("auto") && args.value("auto").isBool())
+    if (args.contains("auto") && args.value("auto").isBool()) {
+        engine->setSquelchAuto(args.value("auto").toBool());
         o["auto"] = args.value("auto").toBool();
+    }
     o["message"] = QString::fromUtf8("静噪参数已下发（门限/使能）");
     addSourceFields(o, src);
     return compact(o);
