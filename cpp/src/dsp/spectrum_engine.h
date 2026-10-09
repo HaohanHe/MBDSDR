@@ -12,6 +12,7 @@
 #include <complex>
 
 #include "core/spectrum_frame.h"
+#include "core/tokens.h"
 #include "dsp/source.h"
 #include "dsp/power_spectrum.h"
 #include "dsp/noise_blanker.h"
@@ -20,6 +21,7 @@
 #include "dsp/audio_resampler.h"
 #include "dsp/demod.h"
 #include "dsp/squelch.h"
+#include "dsp/ctcss.h"
 #include "dsp/agc.h"
 #include "dsp/anr.h"
 #include "dsp/audio_output.h"
@@ -85,6 +87,14 @@ public:
     bool  squelchOpen() const;
     bool  squelchAuto() const { return squelchAuto_.load(); }
     void  setSquelchAuto(bool on) { squelchAuto_.store(on); }
+
+    // ---- CTCSS sub-audible tone detection (read-back) ---------------------
+    // The detector taps the SELECTED VFO's post-ANR 48 kHz mono audio. All
+    // read-backs are honest: disabled / no-signal / warm-up all read
+    // ctcssPresent() == false (never a fabricated tone).
+    bool   ctcssEnabled() const { return ctcssEnabled_.load(); }
+    bool   ctcssPresent() const { return ctcss_.tonePresent(); }
+    double ctcssFreqHz() const { return ctcssFreqHz_; }
     // True iff a network-audio tap is currently installed (setNetworkAudioSink).
     // The detailed stream stats live on the sink the caller installed.
     bool  networkTapActive() const { return networkTap_ != nullptr; }
@@ -145,6 +155,12 @@ public slots:
     void setDemodMode(const QString& mode);
     void setSquelchThreshold(float db);
     void setSquelchEnabled(bool e);
+    // CTCSS tone squelch control. setCtcssFreqHz() clamps the requested Hz into
+    // the legal PL domain (tokens kCtcssToneHzMin..Max); an out-of-domain value
+    // is clamped, not invented. setCtcssEnabled(false) clears the detector so
+    // ctcssPresent() reads back false. Default: disabled, 88.5 Hz.
+    void setCtcssEnabled(bool on);
+    void setCtcssFreqHz(double hz);
     void setBandwidth(double hz);
     bool startRecording();
     void stopRecording();
@@ -520,6 +536,12 @@ private:
     DopplerControlSurface* dopplerSurface_ = nullptr;
     Squelch squelch_;
     Agc agc_;
+    // CTCSS tone detector fed the selected VFO's post-ANR 48 kHz mono audio
+    // each block (engine thread). ctcssEnabled_ / ctcssFreqHz_ are the desired
+    // state set from any thread; the run loop applies them to ctcss_ there.
+    CtcssToneDetector ctcss_;
+    std::atomic<bool> ctcssEnabled_{false};
+    double ctcssFreqHz_ = tokens::kCtcssToneHzDefault;
     AudioOutput* audioOut_ = nullptr;
     // Active 48k write path. Defaults to audioOut_; an injected test sink
     // (setTestAudioSink) redirects it without touching the settings-dialog
