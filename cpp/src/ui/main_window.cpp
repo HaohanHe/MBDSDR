@@ -714,6 +714,60 @@ MainWindow::MainWindow(QWidget* parent)
     ctcssRow->addStretch(1);
     gRxLay->addRow("音调", ctcssRow);
 
+    // ---- CDCSS/DCS digital coded squelch (parallel to CTCSS) ---------------
+    cdcssCheck_ = new QCheckBox("数字亚音", gRx);
+    cdcssCheck_->setObjectName("cdcssCheck");
+    cdcssCheck_->setToolTip(QStringLiteral(
+        "CDCSS/DCS 数字编码亚音静噪：在解调音频上检测 134.4 bps 3-of-8 Golay(23,12) 码字。"
+        "开启后仅在检测到目标 DCS 码时认为信道活动。"));
+    connect(cdcssCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        if (engine_) engine_->setCdcssEnabled(on);
+        scheduleSave();
+        updateCdcssBadge();
+    });
+    gRxLay->addRow("数字亚音", cdcssCheck_);
+
+    cdcssGateCheck_ = new QCheckBox("数字亚音静噪", gRx);
+    cdcssGateCheck_->setObjectName("cdcssGateCheck");
+    cdcssGateCheck_->setToolTip(QStringLiteral(
+        "数字亚音门控静音：开启后仅在真实检测到匹配 DCS 码时才放音（speaker），"
+        "无匹配即静音；录制不受影响。需先开启「数字亚音」检测。"));
+    connect(cdcssGateCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        if (engine_) engine_->setCdcssGateAudio(on);
+        scheduleSave();
+        updateCdcssBadge();
+    });
+    gRxLay->addRow("数字门控", cdcssGateCheck_);
+
+    // DCS octal code combo, populated from the real 104-code table
+    // (dsp/cdcss.cpp). Display as 3-digit octal; itemData holds the 12-bit int.
+    cdcssCodeCombo_ = new QComboBox(gRx);
+    cdcssCodeCombo_->setObjectName("cdcssCodeCombo");
+    cdcssCodeCombo_->setMinimumWidth(tokens::scaled(90));
+    for (int i = 0; i < dsp::CdcssDecoder::codeTableCount(); ++i) {
+        const int code = dsp::CdcssDecoder::codeTableAt(i);
+        cdcssCodeCombo_->addItem(QStringLiteral("%1").arg(code, 3, 8, QLatin1Char('0')),
+                                 code);
+    }
+    connect(cdcssCodeCombo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int idx) {
+        const int code = cdcssCodeCombo_->itemData(idx).toInt();
+        if (engine_) engine_->setCdcssCode(code);
+        scheduleSave();
+    });
+    cdcssBadge_ = new QLabel("--", gRx);
+    cdcssBadge_->setObjectName("cdcssBadge");
+    cdcssBadge_->setAlignment(Qt::AlignCenter);
+    cdcssBadge_->setStyleSheet(
+        QString("QLabel#cdcssBadge { color: %1; }")
+            .arg(QString::fromUtf8(tokens::kTextSecondary)));
+    auto* cdcssRow = new QHBoxLayout;
+    cdcssRow->addWidget(cdcssCodeCombo_);
+    cdcssRow->addWidget(cdcssBadge_);
+    cdcssCodeCombo_->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+    cdcssRow->addStretch(1);
+    gRxLay->addRow("DCS码", cdcssRow);
+
     leftLay->addWidget(gRx);
 
     // ---- Multi-VFO panel ---------------------------------------------------
@@ -2451,9 +2505,13 @@ MainWindow::MainWindow(QWidget* parent)
     // read-back (no signal), so the UI samples it at ~4 Hz and repaints the
     // honest badge. The detector itself cycles at 200 ms; 250 ms is ample.
     ctcssPollTimer_ = new QTimer(this);
-    connect(ctcssPollTimer_, &QTimer::timeout, this, &MainWindow::updateCtcssBadge);
+    connect(ctcssPollTimer_, &QTimer::timeout, this, [this]{
+        updateCtcssBadge();
+        updateCdcssBadge();
+    });
     ctcssPollTimer_->start(250);
     updateCtcssBadge();               // paint the initial honest state now
+    updateCdcssBadge();
     connect(engine_, &dsp::SpectrumEngine::squelchState,
             this, &MainWindow::onSquelchState);
     connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
@@ -4351,6 +4409,14 @@ void MainWindow::saveUiState() {
     s.setValue(tokens::kSettingsKeyCtcssToneHz, ctcssFreqSpin_->value());
     if (ctcssGateCheck_)
         s.setValue(tokens::kSettingsKeyCtcssGate, ctcssGateCheck_->isChecked());
+    // CDCSS/DCS digital coded squelch persistence.
+    if (cdcssCheck_)
+        s.setValue(tokens::kSettingsKeyCdcssEnabled, cdcssCheck_->isChecked());
+    if (cdcssCodeCombo_)
+        s.setValue(tokens::kSettingsKeyCdcssCode,
+                   cdcssCodeCombo_->currentText());
+    if (cdcssGateCheck_)
+        s.setValue(tokens::kSettingsKeyCdcssGate, cdcssGateCheck_->isChecked());
     s.setValue("rx/dbMin", static_cast<float>(spectrum_->dbMinValue()));
     s.setValue("rx/dbMax", static_cast<float>(spectrum_->dbMaxValue()));
 
@@ -4705,6 +4771,38 @@ void MainWindow::restoreUiState() {
             if (engine_) engine_->setCtcssGateAudio(gateOn);
         }
         updateCtcssBadge();
+    }
+
+    // CDCSS/DCS digital coded squelch restore (default off, code "023").
+    {
+        // Restore the DCS combo to the saved octal code (or default 023).
+        const QString codeStr =
+            s.value(tokens::kSettingsKeyCdcssCode, QStringLiteral("023")).toString();
+        int idx = cdcssCodeCombo_->findText(codeStr);
+        if (idx < 0) idx = cdcssCodeCombo_->findText(QStringLiteral("023"));
+        if (idx < 0) idx = 0;
+        cdcssCodeCombo_->blockSignals(true);
+        cdcssCodeCombo_->setCurrentIndex(idx);
+        cdcssCodeCombo_->blockSignals(false);
+        if (engine_)
+            engine_->setCdcssCode(cdcssCodeCombo_->itemData(idx).toInt());
+
+        const bool cdcssOn =
+            s.value(tokens::kSettingsKeyCdcssEnabled, false).toBool();
+        cdcssCheck_->blockSignals(true);
+        cdcssCheck_->setChecked(cdcssOn);
+        cdcssCheck_->blockSignals(false);
+        if (engine_) engine_->setCdcssEnabled(cdcssOn);
+
+        if (cdcssGateCheck_) {
+            const bool gateOn =
+                s.value(tokens::kSettingsKeyCdcssGate, false).toBool();
+            cdcssGateCheck_->blockSignals(true);
+            cdcssGateCheck_->setChecked(gateOn);
+            cdcssGateCheck_->blockSignals(false);
+            if (engine_) engine_->setCdcssGateAudio(gateOn);
+        }
+        updateCdcssBadge();
     }
 
     const float dbMin = s.value("rx/dbMin", static_cast<float>(tokens::kDbLowerDefault)).toFloat();
@@ -5571,6 +5669,48 @@ void MainWindow::updateCtcssBadge() {
             QString("QLabel#ctcssBadge { color: %1; }")
                 .arg(QString::fromUtf8(tokens::kTextSecondary)));
         ctcssBadge_->setToolTip(QStringLiteral("已开启，等待目标亚音音调"));
+    }
+}
+
+void MainWindow::updateCdcssBadge() {
+    if (!cdcssBadge_ || !engine_) return;
+    // Honest-state rule, mirrors updateCtcssBadge but for the DCS digital domain.
+    const bool detOn = engine_->cdcssEnabled();
+    const bool gateOn = engine_->cdcssGateAudio();
+    if (!detOn) {
+        cdcssBadge_->setText(gateOn ? QStringLiteral("门控静音")
+                                    : QStringLiteral("--"));
+        cdcssBadge_->setStyleSheet(
+            QString("QLabel#cdcssBadge { color: %1; }")
+                .arg(QString::fromUtf8(gateOn ? tokens::kWarning
+                                              : tokens::kTextSecondary)));
+        cdcssBadge_->setToolTip(gateOn
+            ? QStringLiteral("数字亚音门控已开但检测未开启：speaker 将持续静音")
+            : QStringLiteral("数字亚音检测未开启"));
+        return;
+    }
+    const bool present = engine_->cdcssPresent();
+    if (present) {
+        cdcssBadge_->setText(QStringLiteral("检测到"));
+        cdcssBadge_->setStyleSheet(
+            QString("QLabel#cdcssBadge { color: %1; }")
+                .arg(QString::fromUtf8(tokens::kSuccess)));
+        cdcssBadge_->setToolTip(QStringLiteral("检测到匹配 DCS 码 (cdcssPresent 真值)"));
+        return;
+    }
+    if (gateOn) {
+        cdcssBadge_->setText(QStringLiteral("静音"));
+        cdcssBadge_->setStyleSheet(
+            QString("QLabel#cdcssBadge { color: %1; }")
+                .arg(QString::fromUtf8(tokens::kWarning)));
+        cdcssBadge_->setToolTip(QStringLiteral(
+            "门控开启：未检测到匹配 DCS 码，speaker 静音（录制仍收真实音频）"));
+    } else {
+        cdcssBadge_->setText(QStringLiteral("未检测到"));
+        cdcssBadge_->setStyleSheet(
+            QString("QLabel#cdcssBadge { color: %1; }")
+                .arg(QString::fromUtf8(tokens::kTextSecondary)));
+        cdcssBadge_->setToolTip(QStringLiteral("已开启，等待目标 DCS 码"));
     }
 }
 

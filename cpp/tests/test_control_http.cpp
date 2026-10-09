@@ -617,6 +617,27 @@ void TestControlHttp::postCommandCtcssRoute() {
     QVERIFY(g.value("gated").toBool());
     QCOMPARE(eng.ctcssEnabled(), true);   // still true: gated write did not land
     hub.setWriteEnabled(true);
+
+    // CDCSS/DCS over POST /command (透传, no new route): write lands + reads back.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_cdcss\",\"args\":{\"enabled\":true,\"code\":\"023\"}}"));
+    QCOMPARE(r.status, 200);
+    QVERIFY2(r.obj().value("ok").toBool(), r.obj().value("error").toString().toUtf8().constData());
+    QCOMPARE(eng.cdcssEnabled(), true);
+    QCOMPARE(eng.cdcssCode(), 023);
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"get_cdcss_status\",\"args\":{}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject rd2 = r.obj();
+    QVERIFY2(rd2.value("ok").toBool(), rd2.value("error").toString().toUtf8().constData());
+    QCOMPARE(rd2.value("code").toString(), QStringLiteral("023"));
+    QVERIFY(rd2.value("active").isBool());
+    // Illegal DCS code over the wire is honestly rejected.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_cdcss\",\"args\":{\"enabled\":true,\"code\":\"777\"}}"));
+    QCOMPARE(r.status, 200);
+    QVERIFY(!r.obj().value("ok").toBool());
+    QCOMPARE(eng.cdcssCode(), 023);
 }
 
 QTEST_MAIN(TestControlHttp)

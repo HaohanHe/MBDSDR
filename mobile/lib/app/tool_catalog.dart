@@ -143,6 +143,14 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       description: '只读：返回 CTCSS 亚音状态（enabled/frequency_hz/active 是否检测到亚音）。',
       write: false),
   ToolCatalogEntry(
+      name: 'set_cdcss',
+      description: '写入：设置 CDCSS/DCS 数字亚音（enabled 开关、code 三位八进制 DCS 码 "023"–"754"、可选 gate_audio）。',
+      write: true),
+  ToolCatalogEntry(
+      name: 'get_cdcss_status',
+      description: '只读：返回 CDCSS/DCS 数字亚音状态（enabled/code/active 是否检测到匹配 DCS 码）。',
+      write: false),
+  ToolCatalogEntry(
       name: 'set_noise_blanker',
       description: '写入：开关噪声抑制器。',
       write: true),

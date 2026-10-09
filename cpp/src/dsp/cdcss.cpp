@@ -129,6 +129,12 @@ constexpr int    kWordBits        = 23;
 
 } // namespace
 
+bool CdcssDecoder::isValidCode(int code12) { return dcsCodeValid(code12); }
+int  CdcssDecoder::codeTableCount() { return static_cast<int>(kDcsCodes.size()); }
+int  CdcssDecoder::codeTableAt(int i) {
+    return (i >= 0 && i < static_cast<int>(kDcsCodes.size())) ? kDcsCodes[i] : -1;
+}
+
 // ===========================================================================
 void CdcssDecoder::configure(double sampleRateHz, int code12) {
     if (sampleRateHz <= 0.0) return;

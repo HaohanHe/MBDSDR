@@ -113,6 +113,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"stop_scan_link",        true,  &ControlHub::cmdStopScanLink},
         {"set_squelch",           true,  &ControlHub::cmdSetSquelch},
         {"set_ctcss",             true,  &ControlHub::cmdSetCtcss},
+        {"set_cdcss",             true,  &ControlHub::cmdSetCdcss},
         {"set_noise_blanker",     true,  &ControlHub::cmdSetNoiseBlanker},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
@@ -150,6 +151,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_scan_link_status",  false, &ControlHub::cmdGetScanLinkStatus},
         {"get_squelch_status",    false, &ControlHub::cmdGetSquelchStatus},
         {"get_ctcss_status",      false, &ControlHub::cmdGetCtcssStatus},
+        {"get_cdcss_status",      false, &ControlHub::cmdGetCdcssStatus},
         {"get_noise_blanker_status", false, &ControlHub::cmdGetNoiseBlankerStatus},
         {"list_bookmarks",        false, &ControlHub::cmdListBookmarks},
         {"list_vfos",             false, &ControlHub::cmdListVfos},
@@ -1390,6 +1392,49 @@ QJsonObject ControlHub::cmdGetCtcssStatus(const QJsonObject&) {
     o["frequency_hz"] = engine_->ctcssFreqHz();
     o["active"] = engine_->ctcssPresent();
     o["gate_audio"] = engine_->ctcssGateAudio();
+    return o;
+}
+
+// CDCSS/DCS digital coded squelch: `enabled` required. `code` optional 3-digit
+// octal string; when supplied it must parse and be in the public 104-code
+// table -- an illegal code is REJECTED here with ok:false. `gate_audio` optional.
+QJsonObject ControlHub::cmdSetCdcss(const QJsonObject& a) {
+    bool on; QString err;
+    if (!needBool(a, "enabled", on, err)) return errResult(err);
+    int code = engine_->cdcssCode();   // keep current when omitted
+    const QJsonValue cv = a.value(QStringLiteral("code"));
+    if (!cv.isUndefined() && !cv.isNull()) {
+        const QString cs = cv.toString();
+        bool ok = false;
+        const int v = cs.toInt(&ok, 8);
+        if (!ok || !dsp::CdcssDecoder::isValidCode(v))
+            return errResult(QString::fromUtf8(
+                "DCS 码非法：须为三位八进制且在公开 104 码表内（收到 \"%1\"）").arg(cs));
+        code = v;
+    }
+    bool gateAudio = engine_->cdcssGateAudio();
+    const QJsonValue gv = a.value(QStringLiteral("gate_audio"));
+    if (!gv.isUndefined() && !gv.isNull()) {
+        if (!needBool(a, "gate_audio", gateAudio, err)) return errResult(err);
+    }
+    engine_->setCdcssEnabled(on);
+    engine_->setCdcssCode(code);
+    engine_->setCdcssGateAudio(gateAudio);
+    QJsonObject o = okBase();
+    o["command"] = "set_cdcss";
+    o["enabled"] = on;
+    o["code"] = QStringLiteral("%1").arg(code, 3, 8, QLatin1Char('0'));
+    o["gate_audio"] = gateAudio;
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetCdcssStatus(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "get_cdcss_status";
+    o["enabled"] = engine_->cdcssEnabled();
+    o["code"] = QStringLiteral("%1").arg(engine_->cdcssCode(), 3, 8, QLatin1Char('0'));
+    o["active"] = engine_->cdcssPresent();
+    o["gate_audio"] = engine_->cdcssGateAudio();
     return o;
 }
 

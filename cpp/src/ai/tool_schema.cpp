@@ -594,6 +594,55 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // set_cdcss (write -- gated) ------------------------------------------
+    // Phase63 CDCSS/DCS digital coded squelch tool. `enabled` is REQUIRED
+    // (missing/non-bool -> honest error). `code` is an optional 3-digit octal
+    // DCS address string ("023".."754"); when supplied it MUST be in the public
+    // 104-code table (dsp/cdcss.cpp) -- an illegal code is REJECTED here with
+    // ok:false rather than silently tuning to a nonsense address. Omit to keep
+    // the current code. `gate_audio` (optional) arms the speaker-only digital
+    // sub-audio gate: while on, the speaker stays silent unless a matching DCS
+    // codeword is detected (the recorder is NOT muted).
+    {
+        ToolSchemaSpec s;
+        s.name = "set_cdcss";
+        s.description = QString::fromUtf8(
+            "写入：设置 CDCSS/DCS 数字亚音（enabled 开关、code 三位八进制 DCS 码 "
+            "\"023\"–\"754\"、可选 gate_audio 数字亚音门控静音开关）。"
+            "属于写动作，手动模式下被拦截；非表内 DCS 码诚实拒绝，不静默接受。");
+        s.write = true;
+        ToolParamSpec en;
+        en.name = "enabled";
+        en.type = "boolean";
+        en.description = QString::fromUtf8("是否开启 CDCSS/DCS 数字亚音检测");
+        en.required = true;
+        ToolParamSpec code;
+        code.name = "code";
+        code.type = "string";
+        code.description = QString::fromUtf8(
+            "三位八进制 DCS 码字符串（如 \"023\"，须在公开 104 码表内；缺省沿用当前码）");
+        code.required = false;
+        ToolParamSpec gate;
+        gate.name = "gate_audio";
+        gate.type = "boolean";
+        gate.description = QString::fromUtf8(
+            "可选：是否开启数字亚音门控静音（开启后仅在检测到匹配 DCS 码时才放音，录制不受影响；缺省不改动当前门控）");
+        gate.required = false;
+        s.params << en << code << gate;
+        out.append(s);
+    }
+
+    // get_cdcss_status (read-only) ----------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_cdcss_status";
+        s.description = QString::fromUtf8(
+            "只读：返回 CDCSS/DCS 数字亚音状态（enabled 是否使能、code 调谐 DCS 码、"
+            "active 是否真实检测到匹配码、gate_audio 是否开启数字亚音门控静音）。"
+            "无信号/未使能时 active 诚实为 false，不编造。");
+        out.append(s);
+    }
+
     // set_noise_blanker (write -- gated) ----------------------------------
     {
         ToolSchemaSpec s;

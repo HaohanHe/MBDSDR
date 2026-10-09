@@ -149,6 +149,24 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Optional: seed the persisted CDCSS/DCS digital coded-squelch preference
+    // (MBD_CDCSS=023) BEFORE MainWindow restores it, so both the 数字亚音 checkbox
+    // AND the DCS码 combo come up armed at the chosen octal code -- the real
+    // persisted round-trip, not a post-hoc poke. The code string must be a legal
+    // 3-digit octal DCS code ("023".."754"); off by default so other shots unchanged.
+    {
+        const QByteArray cdcssSeed = qgetenv("MBD_CDCSS");
+        if (!cdcssSeed.isEmpty()) {
+            QSettings s("MBDSDR", "MBDSDR");
+            s.setValue(mbdsdr::tokens::kSettingsKeyCdcssEnabled, true);
+            s.setValue(mbdsdr::tokens::kSettingsKeyCdcssCode,
+                       QString::fromLocal8Bit(cdcssSeed));
+            if (qgetenv("MBD_CDCSSGATE") == "1")
+                s.setValue(mbdsdr::tokens::kSettingsKeyCdcssGate, true);
+            s.sync();
+        }
+    }
+
     // Optional: seed the persisted Rx demod-mode + bandwidth (MBD_MODE=USB
     // MBD_BW=9000) BEFORE MainWindow restores it, so the left "解调" / "带宽"
     // combos render the restored values -- the real persisted round-trip, not a

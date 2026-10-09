@@ -67,6 +67,7 @@ private slots:
     void squelchSetLandAndStatusReadsBack();
     void noiseBlankerSetLandAndStatusReadsBack();
     void ctcssSetLandOutOfRangeRejectedAndGate();
+    void cdcssSetLandIllegalCodeRejectedAndGate();
     void vfoListAddSwitchRename();
     void bookmarksPersistToQSettings();
     void recordingsListEmptyThenRealDeleteExport();
@@ -681,6 +682,52 @@ void TestControlHub::ctcssSetLandOutOfRangeRejectedAndGate() {
              qPrintable(QString::fromUtf8("set_ctcss must be gated")));
     QVERIFY(eng.ctcssEnabled());   // unchanged by the gated attempt
     QVERIFY(parseObj(hub.execute("get_ctcss_status", {})).value("ok").toBool());
+    hub.setWriteEnabled(true);
+}
+
+// CDCSS/DCS: set_cdcss lands on the engine; get_cdcss_status reads back; an
+// illegal (non-table) DCS code string is REJECTED; missing `enabled` errors;
+// the write gate intercepts set_cdcss while the read stays open.
+void TestControlHub::cdcssSetLandIllegalCodeRejectedAndGate() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject s0 = parseObj(hub.execute("get_cdcss_status", {}));
+    QVERIFY2(s0.value("ok").toBool(), s0.value("error").toString().toUtf8().constData());
+    QCOMPARE(s0.value("command").toString(), QStringLiteral("get_cdcss_status"));
+    QCOMPARE(s0.value("enabled").toBool(), false);
+    QCOMPARE(s0.value("active").toBool(), false);
+    QCOMPARE(s0.value("gate_audio").toBool(), false);
+
+    QJsonObject r = parseObj(hub.execute("set_cdcss",
+        {{"enabled", true}, {"code", QStringLiteral("023")}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(r.value("enabled").toBool(), true);
+    QCOMPARE(r.value("code").toString(), QStringLiteral("023"));
+    QCOMPARE(eng.cdcssEnabled(), true);
+    QCOMPARE(eng.cdcssCode(), 023);
+
+    QJsonObject s = parseObj(hub.execute("get_cdcss_status", {}));
+    QCOMPARE(s.value("enabled").toBool(), true);
+    QCOMPARE(s.value("code").toString(), QStringLiteral("023"));
+
+    // Illegal DCS code (not in the 104-table) -> rejected, engine untouched.
+    QVERIFY2(!parseObj(hub.execute("set_cdcss",
+        {{"enabled", true}, {"code", QStringLiteral("777")}})).value("ok").toBool(),
+        "illegal DCS code must be rejected");
+    QCOMPARE(eng.cdcssCode(), 023);
+
+    // Missing required `enabled` -> honest ok:false.
+    QCOMPARE(parseObj(hub.execute("set_cdcss", {})).value("ok").toBool(), false);
+
+    // Write gate closed: set_cdcss refused, engine untouched; read stays open.
+    hub.setWriteEnabled(false);
+    QJsonObject g = parseObj(hub.execute("set_cdcss", {{"enabled", false}}));
+    QVERIFY2(!g.value("ok").toBool() && g.value("gated").toBool(),
+             qPrintable(QString::fromUtf8("set_cdcss must be gated")));
+    QVERIFY(eng.cdcssEnabled());
+    QVERIFY(parseObj(hub.execute("get_cdcss_status", {})).value("ok").toBool());
     hub.setWriteEnabled(true);
 }
 
