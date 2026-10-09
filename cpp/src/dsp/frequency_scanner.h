@@ -76,6 +76,11 @@ public:
     void stop();
 
     ScanState state() const;
+    // True iff the most recent Idle transition was a NATURAL completion (walked
+    // the sequence to its end, non-loop, non-pingpong) rather than an explicit
+    // stop() call. Cleared on every start() and stop(). The caller uses this to
+    // decide whether to retune back to the pre-scan frequency.
+    bool finishedNaturally() const;
     double currentFrequency() const; // 请求调谐时该值已更新为新目标
     double hitFrequency() const;     // Hit 时有效
     float  lastLevelDb() const;
@@ -98,6 +103,7 @@ private:
 
     ScanState state_ = ScanState::Idle;
     ScanState prePause_ = ScanState::Scanning; // pause 前的活动状态
+    bool finishedNaturally_ = false; // set by advance() when the walk hits the end
 
     bool pendingTune_ = false; // 下一 tick 必须先发出一次调谐请求
     double freqTimerMs_ = 0.0; // 当前频率驻留计时（settle+评估）

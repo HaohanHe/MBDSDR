@@ -61,6 +61,7 @@ void FrequencyScanner::start() {
     watch_->reset();
     goneTimerMs_ = 0.0;
     holdTimerMs_ = 0.0;
+    finishedNaturally_ = false;
 
     if (seq_.isEmpty()) {
         state_ = ScanState::Idle;
@@ -102,9 +103,11 @@ void FrequencyScanner::stop() {
     freqTimerMs_ = 0.0;
     holdTimerMs_ = 0.0;
     goneTimerMs_ = 0.0;
+    finishedNaturally_ = false;   // explicit user stop: do NOT return to pre-scan
 }
 
 ScanState FrequencyScanner::state() const { return state_; }
+bool FrequencyScanner::finishedNaturally() const { return finishedNaturally_; }
 double FrequencyScanner::currentFrequency() const { return currentFreq_; }
 double FrequencyScanner::hitFrequency() const { return hitFreq_; }
 float  FrequencyScanner::lastLevelDb() const { return lastLevel_; }
@@ -125,6 +128,7 @@ bool FrequencyScanner::advance() {
                 next = (next < 0) ? seq_.size() - 1 : 0;
             } else {
                 state_ = ScanState::Idle;   // 走到尽头，扫描结束
+                finishedNaturally_ = true;  // caller may retune back to pre-scan freq
                 return false;
             }
         }

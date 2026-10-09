@@ -298,6 +298,12 @@ private:
     QTimer*         scanTimer_         = nullptr;
     QElapsedTimer*  scanTickClock_     = nullptr;  // per-tick elapsed ms clock
     float           lastRssi_          = -200.0f;
+    // Pre-scan center frequency captured at start-click (real engine centerFreq).
+    // On NATURAL completion (walked the whole band, non-loop) the engine retunes
+    // back here. Manual stop / loop / pingpong never trigger this.
+    double          preScanFreqHz_      = 0.0;
+    bool            scanReturned_       = false;   // one-shot guard for the return tune
+    double          scanReturnToHz_     = 0.0;     // the freq we actually returned to
     // Scan-control group "频率扫描".
     QDoubleSpinBox* scanStartSpin_      = nullptr;  // MHz
     QDoubleSpinBox* scanStopSpin_       = nullptr;  // MHz

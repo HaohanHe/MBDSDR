@@ -12,6 +12,9 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QGroupBox>
+#include <QPushButton>
+#include <QDoubleSpinBox>
+#include <QSpinBox>
 #include <QDir>
 #include <QSplitter>
 #include <QTableWidget>
@@ -453,6 +456,30 @@ int main(int argc, char** argv) {
                 meter->setSignalDbfs(-55.0);
             }
         }
+    }
+
+    // Optional: run a tiny range scan to NATURAL completion so the status label
+    // shows "扫描完成，已回到 XX.XXX MHz" (MBD_SCANRETURN=1). Sets a narrow
+    // 500 kHz range with 100 ms dwell so the walk finishes within the ~1.2 s
+    // pre-grab delay, then retunes back to the pre-scan frequency. Real scanner
+    // state machine driven by the real engine RSSI -- no mock. Off by default.
+    if (qgetenv("MBD_SCANRETURN").size()) {
+        // Jump to the scan/bookmarks tab.
+        for (auto* t : win.findChildren<QTabWidget*>()) {
+            for (int i = 0; i < t->count(); ++i) {
+                if (t->tabText(i) == QString::fromUtf8("扫描/书签")) {
+                    t->setCurrentIndex(i);
+                    t->currentWidget()->show();
+                }
+            }
+        }
+        // Narrow range + short dwell so the walk ends quickly.
+        if (auto* sp = win.findChild<QDoubleSpinBox*>("scanStartSpin")) sp->setValue(98.0);
+        if (auto* sp = win.findChild<QDoubleSpinBox*>("scanStopSpin"))  sp->setValue(98.5);
+        if (auto* sp = win.findChild<QSpinBox*>("scanDwellSpin"))       sp->setValue(100);
+        // Click the real start button -> real scanner_->start() + pre-scan freq capture.
+        if (auto* btn = win.findChild<QPushButton*>("scanStartBtn"))
+            btn->click();
     }
 
     QTimer::singleShot(1200, [&]() {

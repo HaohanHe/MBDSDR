@@ -1387,6 +1387,7 @@ MainWindow::MainWindow(QWidget* parent)
     scanForm->setLabelAlignment(Qt::AlignRight);
 
     scanStartSpin_ = new QDoubleSpinBox(scanBox);
+    scanStartSpin_->setObjectName("scanStartSpin");
     scanStartSpin_->setRange(0.1, 2200);
     scanStartSpin_->setDecimals(3);
     scanStartSpin_->setValue(88);
@@ -1394,6 +1395,7 @@ MainWindow::MainWindow(QWidget* parent)
     scanForm->addRow("起始", scanStartSpin_);
 
     scanStopSpin_ = new QDoubleSpinBox(scanBox);
+    scanStopSpin_->setObjectName("scanStopSpin");
     scanStopSpin_->setRange(0.1, 2200);
     scanStopSpin_->setDecimals(3);
     scanStopSpin_->setValue(108);
@@ -1406,6 +1408,7 @@ MainWindow::MainWindow(QWidget* parent)
     scanForm->addRow("步进", scanStepCombo_);
 
     scanDwellSpin_ = new QSpinBox(scanBox);
+    scanDwellSpin_->setObjectName("scanDwellSpin");
     scanDwellSpin_->setRange(100, 2000);
     scanDwellSpin_->setSingleStep(50);
     scanDwellSpin_->setValue(300);        // 默认驻留 300 ms
@@ -1728,6 +1731,11 @@ MainWindow::MainWindow(QWidget* parent)
             cfg.source = dsp::ScanSource::Range;
         }
         scanner_->setConfig(cfg);
+        // Snapshot the REAL engine center frequency before we start retuning the
+        // LO. On natural completion the scanner hands control back to this freq.
+        preScanFreqHz_ = engine_ ? engine_->centerFreq() : 0.0;
+        scanReturned_ = false;
+        scanReturnToHz_ = 0.0;
         scanTickClock_->start();
         scanner_->start();
         scanTimer_->start();
@@ -3521,6 +3529,18 @@ void MainWindow::scanTimerTick() {
     const double target = scanner_->tick(elapsed, lastRssi_, &needTune);
     if (needTune && engine_)
         engine_->onSetCenterFreq(target);
+    // Natural completion: the walk reached the end of the sequence (non-loop,
+    // non-pingpong). Retune the engine back to the frequency the user was
+    // listening to before they pressed Scan. Manual stop / loop / pingpong never
+    // set finishedNaturally_, so they stay on the current position by design.
+    if (!scanReturned_ && engine_ &&
+        scanner_->state() == dsp::ScanState::Idle &&
+        scanner_->finishedNaturally() &&
+        preScanFreqHz_ > 0.0) {
+        engine_->onSetCenterFreq(preScanFreqHz_);
+        scanReturnToHz_ = preScanFreqHz_;
+        scanReturned_ = true;
+    }
     updateScanStatus();
 }
 
@@ -3537,6 +3557,9 @@ void MainWindow::updateScanStatus() {
         stateText = QString("命中 %1 MHz · %2 dBFS")
                     .arg(scanner_->hitFrequency() / 1e6, 0, 'f', 3)
                     .arg(scanner_->lastLevelDb(), 0, 'f', 1);
+    else if (scanReturned_)
+        stateText = QString("完成·回 %1 MHz")
+                    .arg(scanReturnToHz_ / 1e6, 0, 'f', 3);
     else                                     stateText = "空闲";
     if (scanStateLabel_) scanStateLabel_->setText(stateText);
 
@@ -3555,6 +3578,11 @@ void MainWindow::updateScanStatus() {
             sbScan_->setText("已暂停");
             sbScan_->setStyleSheet(QString("color:%1; font-weight:%2;")
                                    .arg(tokens::kInteract).arg(tokens::kWeightSemi));
+        } else if (scanReturned_) {
+            sbScan_->setText(QString("扫描完成 · 已回 %1 MHz")
+                             .arg(scanReturnToHz_ / 1e6, 0, 'f', 3));
+            sbScan_->setStyleSheet(QString("color:%1; font-weight:%2;")
+                                   .arg(tokens::kTextSecondary).arg(tokens::kWeightRegular));
         } else {
             sbScan_->setText("");
         }

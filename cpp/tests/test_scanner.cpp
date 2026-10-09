@@ -66,6 +66,9 @@ private slots:
     void bookmarks();
     // 7: FixedMs holds exactly holdMs regardless of signal.
     void fixedMs();
+    // 8: Natural-completion flag -- non-loop walk sets finishedNaturally;
+    //    manual stop / loop / pingpong never set it.
+    void finishedNaturallyFlag();
 };
 
 void TestScanner::rangeStep() {
@@ -378,6 +381,102 @@ void TestScanner::fixedMs() {
     QCOMPARE(sc.currentFrequency(), 100.2e6);
     QVERIFY2(holdTicks * kTickMs >= 500, "FixedMs must hold the full holdMs");
     QVERIFY2(holdTicks * kTickMs <= 700, "FixedMs must not overshoot by much");
+}
+
+void TestScanner::finishedNaturallyFlag() {
+    // ---- (a) Non-loop Up: walking to the end sets finishedNaturally ----
+    {
+        FrequencyScanner sc;
+        ScanConfig c;
+        c.source = ScanSource::Range;
+        c.startHz = 100.0e6;
+        c.stopHz  = 100.2e6;       // 3 channels: 100.0, 100.1, 100.2
+        c.stepHz  = 100e3;
+        c.dwellMs = 300;
+        c.settleMs = 80;
+        c.thresholdDb = kThr;
+        c.direction = ScanDirection::Up;
+        c.loop = false;
+        sc.setConfig(c);
+
+        MemBackend fx;   // all quiet
+        sc.start();
+        QVERIFY(!sc.finishedNaturally());   // not yet
+        int guard = 5000;
+        while (sc.state() != ScanState::Idle && guard-- > 0) step(sc, fx);
+        QCOMPARE(sc.state(), ScanState::Idle);
+        QVERIFY2(sc.finishedNaturally(), "non-loop walk to end must set finishedNaturally");
+    }
+
+    // ---- (b) Manual stop: finishedNaturally stays false ----
+    {
+        FrequencyScanner sc;
+        ScanConfig c;
+        c.source = ScanSource::Range;
+        c.startHz = 100.0e6;
+        c.stopHz  = 100.3e6;
+        c.stepHz  = 100e3;
+        c.dwellMs = 300;
+        c.settleMs = 80;
+        c.thresholdDb = kThr;
+        c.direction = ScanDirection::Up;
+        c.loop = false;
+        sc.setConfig(c);
+
+        MemBackend fx;
+        sc.start();
+        step(sc, fx);               // advance a bit
+        QCOMPARE(sc.state(), ScanState::Scanning);
+        sc.stop();                   // user clicks Stop
+        QCOMPARE(sc.state(), ScanState::Idle);
+        QVERIFY2(!sc.finishedNaturally(), "manual stop must NOT set finishedNaturally");
+    }
+
+    // ---- (c) Loop mode: never reaches the end, finishedNaturally stays false ----
+    {
+        FrequencyScanner sc;
+        ScanConfig c;
+        c.source = ScanSource::Range;
+        c.startHz = 100.0e6;
+        c.stopHz  = 100.2e6;
+        c.stepHz  = 100e3;
+        c.dwellMs = 300;
+        c.settleMs = 80;
+        c.thresholdDb = kThr;
+        c.direction = ScanDirection::Up;
+        c.loop = true;              // wraps around
+        sc.setConfig(c);
+
+        MemBackend fx;
+        sc.start();
+        // Walk ~10 seconds (well past the whole band several times).
+        for (int i = 0; i < 300; ++i) step(sc, fx);
+        QCOMPARE(sc.state(), ScanState::Scanning);  // still scanning (never Idle)
+        QVERIFY2(!sc.finishedNaturally(), "loop mode must never set finishedNaturally");
+        sc.stop();
+    }
+
+    // ---- (d) PingPong: reverses at endpoints, never Idle on its own ----
+    {
+        FrequencyScanner sc;
+        ScanConfig c;
+        c.source = ScanSource::Range;
+        c.startHz = 100.0e6;
+        c.stopHz  = 100.2e6;
+        c.stepHz  = 100e3;
+        c.dwellMs = 300;
+        c.settleMs = 80;
+        c.thresholdDb = kThr;
+        c.direction = ScanDirection::PingPong;
+        sc.setConfig(c);
+
+        MemBackend fx;
+        sc.start();
+        for (int i = 0; i < 300; ++i) step(sc, fx);
+        QCOMPARE(sc.state(), ScanState::Scanning);
+        QVERIFY2(!sc.finishedNaturally(), "pingpong must never set finishedNaturally");
+        sc.stop();
+    }
 }
 
 QTEST_MAIN(TestScanner)
