@@ -356,6 +356,29 @@ inline constexpr double kSquelchNfAlphaDown  = 0.20;  // fast track toward quiet
 inline constexpr double kSquelchNfAlphaUp   = 0.005; // slow creep toward louder
 
 // =====================================================================
+// CTCSS sub-audible tone squelch (dsp/ctcss.cpp, SpectrumEngine integration).
+//
+// The detector runs a streaming Goertzel resonator on the 48 kHz demodulated
+// mono audio and compares the target-tone bin energy against total block
+// energy. toneHz is the analog PL domain only (CDCSS/DCS not implemented).
+// =====================================================================
+inline constexpr double kCtcssToneHzMin     = 67.0;    // legal domain lower edge
+inline constexpr double kCtcssToneHzMax     = 254.1;   // legal domain upper edge
+inline constexpr double kCtcssToneHzDefault  = 88.5;    // most-common default
+// Goertzel bin width: one measurement cycle covers N = round(sr/5.0) samples
+// (= 9600 @48 kHz -> 5.0 Hz bin, 200 ms per measurement cycle).
+inline constexpr double kCtcssGoertzelBandwidthHz = 5.0;
+// Bin-energy / total-energy ratio above which a cycle counts as "tone".
+// Pure aligned tone ~= N/2 (~4800); broadband noise ~= O(1). This sits far
+// above noise and far below any real in-band tone.
+inline constexpr double kCtcssMinBinEnergyRatio  = 50.0;
+// Debounce: consecutive above-threshold cycles to latch ON, below-threshold
+// cycles to release (hangover). 1 hit / 3 misses @200 ms cycles -> ~200 ms
+// open, ~600 ms hangover.
+inline constexpr int    kCtcssDetectHits    = 1;
+inline constexpr int    kCtcssDetectMisses = 3;
+
+// =====================================================================
 // Demodulator -> audio chain shared constants (dsp/agc.cpp, dsp/spectrum_engine).
 // The envelope AGC levels the recovered audio toward kAgcTargetLin, but its
 // boost is CEILed at kAgcMaxGainLin so an empty channel's quiet noise floor is
@@ -832,6 +855,13 @@ inline constexpr const char* kSettingsKeyFocusMode = "view/focusMode";
 // Persisted recent-tune list (QVariantList of Hz doubles, capped at
 // kTuneHistoryMax). Empty / absent key = honest "无调谐记录" empty state.
 inline constexpr const char* kSettingsKeyTuneHistory = "rx/tuneHistoryHz";
+
+// Persisted CTCSS sub-audible-tone squelch preference (UI face, phase63). The
+// enabled flag mirrors the engine default off; the tone Hz is clamped into the
+// legal PL domain kCtcssToneHzMin..Max on restore. Absent keys => honest off +
+// kCtcssToneHzDefault, never a fabricated locked tone.
+inline constexpr const char* kSettingsKeyCtcssEnabled = "rx/ctcssEnabled";
+inline constexpr const char* kSettingsKeyCtcssToneHz  = "rx/ctcssToneHz";
 
 // =====================================================================
 // Dark QSS generator -- simplified, only what we use.

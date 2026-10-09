@@ -256,6 +256,20 @@ void SpectrumEngine::setSquelchThreshold(float db) {
 }
 void SpectrumEngine::setSquelchEnabled(bool e) { squelch_.setEnabled(e); }
 
+void SpectrumEngine::setCtcssEnabled(bool on) {
+    ctcssEnabled_.store(on);
+    // Applied to the detector itself on the engine thread next block, so the
+    // Goertzel recurrence state is never raced from the UI/agent thread.
+}
+
+void SpectrumEngine::setCtcssFreqHz(double hz) {
+    // Clamp into the legal PL domain -- an illegal request is clamped, not
+    // silently tuned to garbage.
+    const double clamped = std::clamp(hz, tokens::kCtcssToneHzMin,
+                                      tokens::kCtcssToneHzMax);
+    ctcssFreqHz_ = clamped;
+}
+
 bool SpectrumEngine::squelchEnabled() const {
     return squelch_.mode() == Squelch::Mode::Gate;
 }
@@ -1491,6 +1505,18 @@ void SpectrumEngine::run() {
         // ANR sits AFTER the per-VFO resampler and BEFORE squelch/AGC/gated
         // recorder. Disabled by default -> identity (bit-exact legacy chain).
         const std::vector<float> audio = anr_.process(raw);
+
+        // CTCSS tone detector: tap the same post-ANR 48 kHz mono. Desired
+        // enabled/freq were set from any thread; apply them here on the engine
+        // thread so the Goertzel state is never raced. When disabled the
+        // detector is reset and tonePresent() reads false (honest empty state).
+        {
+            const bool wantEnabled = ctcssEnabled_.load();
+            if (wantEnabled != ctcss_.enabled()) ctcss_.setEnabled(wantEnabled);
+            if (wantEnabled && ctcss_.toneHz() != ctcssFreqHz_)
+                ctcss_.configure(48000.0, ctcssFreqHz_);
+            ctcss_.process(audio.data(), static_cast<int>(audio.size()));
+        }
 
         // Squelch decision FIRST (updates smoothing/hangover, does not mute),
         // then AGC always sees the REAL audio (it tracks the noise floor while

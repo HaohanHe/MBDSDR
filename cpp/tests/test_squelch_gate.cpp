@@ -19,6 +19,8 @@
 
 #include "dsp/squelch.h"
 #include "dsp/gated_recorder.h"
+#include "dsp/ctcss.h"
+#include "core/tokens.h"
 
 using namespace mbdsdr::dsp;
 
@@ -33,6 +35,26 @@ std::vector<float> sineBlock(int n, double freq, double amp, double& phase) {
     return v;
 }
 std::vector<float> silenceBlock(int n) { return std::vector<float>(n, 0.0f); }
+
+// Deterministic white-noise source (fixed-seed LCG, [-1,1]) so the CTCSS
+// detector tests are reproducible. *** SYNTHETIC -- NOT HARDWARE ***
+double lcg = 0xC0FFEE;
+double whiteNoise() {
+    lcg = lcg * 1664525.0 + 1013904223.0;
+    return (static_cast<double>(static_cast<unsigned long>(lcg) & 0xFFFFFFu)
+            / static_cast<double>(0xFFFFFFu)) * 2.0 - 1.0;
+}
+// Audio block = sine at toneHz + white noise (std ~= 0.03). Real numbers --
+// the detector sees a genuine sub-audible tone riding on band noise.
+std::vector<float> tonePlusNoiseBlock(int n, double toneHz, double amp,
+                                      double noiseStd, double& phase) {
+    std::vector<float> v(n);
+    for (int i = 0; i < n; ++i) {
+        phase += 2.0 * M_PI * toneHz / 48000.0;
+        v[i] = static_cast<float>(amp * std::sin(phase) + noiseStd * whiteNoise());
+    }
+    return v;
+}
 } // namespace
 
 class TestSquelchGate : public QObject {
@@ -41,6 +63,10 @@ private slots:
     void gateOpensOnSignalClosesOnSilence();
     void offModePassthrough();
     void gatedRecorderSavesOnlyWhenOpenAndLabelsFilename();
+    void ctcssDetectsConfiguredTone();
+    void ctcssFalseOnNoiseOnly();
+    void ctcssRejectsWrongFrequency();
+    void ctcssDisabledStaysFalse();
     void cleanupTestCase();
 };
 
@@ -149,6 +175,79 @@ void TestSquelchGate::gatedRecorderSavesOnlyWhenOpenAndLabelsFilename() {
     // 30 ms = 1440 samples. The leading dead-silence must be well under that.
     QVERIFY2(leadingZero < 1440,
              "Saved segment must not begin with >30ms of dead silence");
+}
+
+// (a) Real 88.5 Hz sub-audible tone riding on noise, configured for 88.5 Hz:
+// the Goertzel latch must come up true (and drop again when the tone leaves).
+void TestSquelchGate::ctcssDetectsConfiguredTone() {
+    CtcssToneDetector det;
+    det.configure(48000.0, 88.5);
+    det.setEnabled(true);
+    QCOMPARE(det.binBandwidthHz(), 5.0);   // N = 48000/5 = 9600
+
+    double ph = 0.0;
+    bool seen = false;
+    // ~1.2 s of tone+noise (>= 1 measurement cycle + margin).
+    for (int i = 0; i < 60 && !seen; ++i) {
+        auto blk = tonePlusNoiseBlock(960, 88.5, 0.10, 0.03, ph);
+        det.process(blk.data(), static_cast<int>(blk.size()));
+        if (det.tonePresent()) seen = true;
+    }
+    QVERIFY2(seen, "Configured 88.5 Hz tone must latch present");
+
+    // Tone gone (noise only): hangover then drops it honest.
+    bool dropped = false;
+    for (int i = 0; i < 120 && !dropped; ++i) {
+        std::vector<float> blk(960);
+        for (auto& s : blk) s = static_cast<float>(0.03 * whiteNoise());
+        det.process(blk.data(), static_cast<int>(blk.size()));
+        if (!det.tonePresent()) dropped = true;
+    }
+    QVERIFY2(dropped, "Present must drop after hangover when tone leaves");
+}
+
+// (b) Noise-only audio, no sub-audible tone: the latch must stay false.
+void TestSquelchGate::ctcssFalseOnNoiseOnly() {
+    CtcssToneDetector det;
+    det.configure(48000.0, 88.5);
+    det.setEnabled(true);
+    for (int i = 0; i < 120; ++i) {
+        std::vector<float> blk(960);
+        for (auto& s : blk) s = static_cast<float>(0.03 * whiteNoise());
+        det.process(blk.data(), static_cast<int>(blk.size()));
+        QVERIFY2(!det.tonePresent(), "Noise-only must never latch a tone");
+    }
+}
+
+// (c) Frequency discrimination: a real 88.5 Hz tone, but the detector is
+// configured for 67.0 Hz -> wrong bin -> must stay false.
+void TestSquelchGate::ctcssRejectsWrongFrequency() {
+    CtcssToneDetector det;
+    det.configure(48000.0, 67.0);
+    det.setEnabled(true);
+    double ph = 0.0;
+    for (int i = 0; i < 80; ++i) {
+        auto blk = tonePlusNoiseBlock(960, 88.5, 0.10, 0.03, ph);
+        det.process(blk.data(), static_cast<int>(blk.size()));
+        QVERIFY2(!det.tonePresent(),
+                 "88.5 Hz tone tuned into the 67.0 Hz bin must not latch");
+    }
+}
+
+// (d) Disabled: even with the real tone present, tonePresent() is always false.
+void TestSquelchGate::ctcssDisabledStaysFalse() {
+    CtcssToneDetector det;
+    det.configure(48000.0, 88.5);
+    det.setEnabled(false);
+    double ph = 0.0;
+    for (int i = 0; i < 40; ++i) {
+        auto blk = tonePlusNoiseBlock(960, 88.5, 0.10, 0.03, ph);
+        det.process(blk.data(), static_cast<int>(blk.size()));
+        QVERIFY2(!det.tonePresent(), "Disabled detector must read false");
+    }
+    // An out-of-domain configure must be rejected (keeps 88.5).
+    det.configure(48000.0, 400.0);
+    QCOMPARE(det.toneHz(), 88.5);
 }
 
 void TestSquelchGate::cleanupTestCase() {
