@@ -63,6 +63,8 @@ private slots:
     void noiseBlankerLandReadbackAndGate();
     // --- Phase63 D1: get_squelch_status returns REAL engine getters, not nulls ---
     void squelchStatusRealReadback();
+    // --- Phase63 readback-loop audit: D-2/D-3/D-5 honest-repair round-trip -----
+    void readbackLoopHonestRejectsAndAutoLand();
     // --- Phase63: bookmark tools execute for real against injected store -------
     void bookmarkToolsRealExecutionWithInjectedStore();
 };
@@ -871,6 +873,83 @@ void TestAgent::squelchStatusRealReadback() {
     QCOMPARE(r2.value("threshold_db").toDouble(),
              static_cast<double>(engine.squelchThresholdDb()));
     QCOMPARE(r2.value("threshold_db").toDouble(), -10.0);
+}
+
+// Phase63 readback-loop audit: the three write-path honest-repair cases.
+//   D-2: tune_frequency rejects non-positive / non-finite freq_hz with ok:false
+//        (previously the engine dropped it silently while the ack echoed it as
+//        success and get_status kept the old value -- fake success).
+//   D-3: set_mode rejects whitelist-unknown modes with ok:false (the engine's
+//        VfoManager accepts ANY string, so the ack was the only real gate).
+//   D-5: set_squelch{auto:true} really lands on engine->setSquelchAuto, so
+//        get_squelch_status.auto reads back true (previously echoed, never set).
+void TestAgent::readbackLoopHonestRejectsAndAutoLand() {
+    dsp::SpectrumEngine engine;
+    auto run = [&](const QString& tool, const QJsonObject& args) {
+        return QJsonDocument::fromJson(
+            ai::executeTool(tool, args, &engine).toUtf8()).object();
+    };
+    const auto compactJson = [](const QJsonObject& o) -> QString {
+        return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+    };
+
+    // --- D-2: illegal frequency is an honest error, engine untouched ----------
+    const double oldFreq = engine.centerFreq();
+    QJsonObject badNeg; badNeg["freq_hz"] = -1e6;
+    QJsonObject rNeg = run("tune_frequency", badNeg);
+    QVERIFY2(!rNeg.value("ok").toBool(), qPrintable(compactJson(rNeg)));
+    QVERIFY2(rNeg.value("error").toString().contains(QString::fromUtf8("频率")),
+             qPrintable(rNeg.value("error").toString()));
+    QCOMPARE(engine.centerFreq(), oldFreq);
+
+    QJsonObject badNaN; badNaN["freq_hz"] = qQNaN();
+    QJsonObject rNaN = run("tune_frequency", badNaN);
+    QVERIFY2(!rNaN.value("ok").toBool(), qPrintable(compactJson(rNaN)));
+    QCOMPARE(engine.centerFreq(), oldFreq);
+
+    // Regression guard: a valid positive frequency is acked honestly (on the
+    // headless NullSource setCenterFreq is a no-op and the settled read-back
+    // stays at its constant 98.5 MHz -- pre-existing source semantics, not this
+    // gate's concern; we pin the ack contract, not the phantom landing value).
+    QJsonObject okF; okF["freq_hz"] = 100e6;
+    QJsonObject rOk = run("tune_frequency", okF);
+    QVERIFY2(rOk.value("ok").toBool(), qPrintable(compactJson(rOk)));
+    QCOMPARE(rOk.value("frequency_hz").toDouble(), 100e6);
+
+    // --- D-3: unknown mode is an honest error, engine demodMode untouched ------
+    const QString oldMode = engine.demodMode();
+    QJsonObject badMode; badMode["mode"] = "XYZ";
+    QJsonObject rMode = run("set_mode", badMode);
+    QVERIFY2(!rMode.value("ok").toBool(), qPrintable(compactJson(rMode)));
+    QCOMPARE(engine.demodMode(), oldMode);
+
+    // A whitelisted mode still lands, echoed canonical upper-case.
+    QJsonObject goodMode; goodMode["mode"] = "nfm";
+    QJsonObject rGood = run("set_mode", goodMode);
+    QVERIFY2(rGood.value("ok").toBool(), qPrintable(compactJson(rGood)));
+    QCOMPARE(rGood.value("mode").toString(), QStringLiteral("NFM"));
+    QCOMPARE(engine.demodMode(), QStringLiteral("NFM"));
+
+    // --- D-5: set_squelch{auto:true} really lands, readback follows -----------
+    QJsonObject autoOn; autoOn["auto"] = true;
+    QString w = ai::LLMWorker::dispatchToolCall("set_squelch", autoOn, &engine,
+                                                /*manualMode=*/false);
+    QVERIFY2(!w.contains("\"gated\":true"), qPrintable(w));
+    QJsonObject st = QJsonDocument::fromJson(
+        ai::executeTool("get_squelch_status", QJsonObject{}, &engine)
+            .toUtf8()).object();
+    QVERIFY2(st.value("auto").toBool(),
+             "set_squelch{auto:true} must land on engine->setSquelchAuto");
+    QCOMPARE(st.value("auto").toBool(), engine.squelchAuto());
+
+    // Back off: auto:false also lands.
+    QJsonObject autoOff; autoOff["auto"] = false;
+    ai::LLMWorker::dispatchToolCall("set_squelch", autoOff, &engine,
+                                    /*manualMode=*/false);
+    QJsonObject st2 = QJsonDocument::fromJson(
+        ai::executeTool("get_squelch_status", QJsonObject{}, &engine)
+            .toUtf8()).object();
+    QVERIFY2(!st2.value("auto").toBool(), "auto:false must clear the latch");
 }
 
 // Phase63: the three bookmark tools (add_bookmark / tune_to_bookmark /
