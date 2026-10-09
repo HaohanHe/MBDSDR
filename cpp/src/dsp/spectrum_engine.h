@@ -22,6 +22,7 @@
 #include "dsp/demod.h"
 #include "dsp/squelch.h"
 #include "dsp/ctcss.h"
+#include "dsp/cdcss.h"
 #include "dsp/agc.h"
 #include "dsp/anr.h"
 #include "dsp/audio_output.h"
@@ -100,6 +101,16 @@ public:
     // path is deliberately NOT gated (mirrors the squelch precedent: only the
     // speaker path is silenced). Default: off.
     bool   ctcssGateAudio() const { return ctcssGateEnabled_.load(); }
+
+    // ---- CDCSS/DCS digital coded squelch (read-back) ----------------------
+    // Parallel to CTCSS: the CdcssDecoder taps the same post-ANR 48k mono.
+    // All read-backs are honest: disabled / no-carrier / warm-up all read
+    // cdcssPresent() == false. cdcssCode() is the desired 12-bit DCS address.
+    bool   cdcssEnabled() const { return cdcssEnabled_.load(); }
+    bool   cdcssPresent() const { return cdcss_.codePresent(); }
+    int    cdcssCode() const { return cdcssCode_; }
+    // Speaker-only digital sub-audio gate, independent of detection enable.
+    bool   cdcssGateAudio() const { return cdcssGateEnabled_.load(); }
     // True iff a network-audio tap is currently installed (setNetworkAudioSink).
     // The detailed stream stats live on the sink the caller installed.
     bool  networkTapActive() const { return networkTap_ != nullptr; }
@@ -170,6 +181,14 @@ public slots:
     // enable): while on, the speaker stays silent unless a matching tone is
     // detected. Does not mute the recorder. Default off.
     void setCtcssGateAudio(bool on);
+    // CDCSS/DCS digital coded squelch control. setCdcssCode() stores the desired
+    // 12-bit DCS address (validated against the public 104-code table by the
+    // caller); an out-of-table value is rejected here (keeps previous code).
+    // setCdcssEnabled(false) clears the decoder so cdcssPresent() reads false.
+    // Default: disabled, code 023.
+    void setCdcssEnabled(bool on);
+    void setCdcssCode(int code12);
+    void setCdcssGateAudio(bool on);
     void setBandwidth(double hz);
     bool startRecording();
     void stopRecording();
@@ -554,6 +573,15 @@ private:
     // Speaker-only sub-audio gate desired state (set from any thread; applied
     // in the run loop). When true, the speaker open requires ctcss_.tonePresent().
     std::atomic<bool> ctcssGateEnabled_{false};
+
+    // CDCSS/DCS digital coded squelch, parallel to CTCSS. cdcss_ is fed the same
+    // post-ANR 48k mono each block (engine thread). cdcssEnabled_ / cdcssCode_ /
+    // cdcssGateEnabled_ are desired state set from any thread; the run loop
+    // applies them to cdcss_ there so the Golay/Manchester state is never raced.
+    CdcssDecoder cdcss_;
+    std::atomic<bool> cdcssEnabled_{false};
+    int    cdcssCode_ = 023;                 // octal 023 (default DCS code)
+    std::atomic<bool> cdcssGateEnabled_{false};
     AudioOutput* audioOut_ = nullptr;
     // Active 48k write path. Defaults to audioOut_; an injected test sink
     // (setTestAudioSink) redirects it without touching the settings-dialog

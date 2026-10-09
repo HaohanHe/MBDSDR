@@ -73,6 +73,13 @@ public:
     double sampleRateHz() const { return sampleRateHz_; }
     int configuredCode() const { return configuredCode_; }
 
+    // True iff the 12-bit value is in the public DCS code table (104 codes).
+    // The tool/UI layers call this to reject illegal codes honestly.
+    static bool isValidCode(int code12);
+    // Access the public DCS code table (count + index) for UI combo population.
+    static int  codeTableCount();
+    static int  codeTableAt(int i);
+
 private:
     // Close out one Manchester half-bit: sign the averaged I envelope and push
     // it through the Manchester pairer -> 23-bit word assembler.

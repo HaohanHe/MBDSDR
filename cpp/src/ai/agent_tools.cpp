@@ -878,6 +878,66 @@ QString execGetCtcssStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// 7f. set_cdcss (write): CDCSS/DCS digital coded squelch control. `enabled` is
+//     REQUIRED and must be a boolean. `code` is an optional 3-digit octal string
+//     ("023"); when supplied it must parse and be in the public 104-code table
+//     (CdcssDecoder::isValidCode) -- an illegal code is REJECTED here with
+//     ok:false rather than tuning to a nonsense address. `gate_audio` optional.
+QString execSetCdcss(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                     const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
+    const QJsonValue en = args.value(QStringLiteral("enabled"));
+    if (!en.isBool())
+        return errResult(QString::fromUtf8("参数 enabled 缺失或不是布尔值"));
+    const bool on = en.toBool();
+
+    int code = engine->cdcssCode();   // default: keep current
+    if (args.contains(QStringLiteral("code"))) {
+        const QString cs = args.value(QStringLiteral("code")).toString();
+        bool ok = false;
+        const int v = cs.toInt(&ok, 8);   // octal parse ("023" -> 19)
+        if (!ok || !dsp::CdcssDecoder::isValidCode(v))
+            return errResult(QString::fromUtf8(
+                "DCS 码非法：须为三位八进制且在公开 104 码表内（收到 \"%1\"）").arg(cs));
+        code = v;
+    }
+
+    bool gateAudio = engine->cdcssGateAudio();
+    if (args.contains(QStringLiteral("gate_audio"))) {
+        const QJsonValue gv = args.value(QStringLiteral("gate_audio"));
+        if (!gv.isBool())
+            return errResult(QString::fromUtf8("参数 gate_audio 不是布尔值"));
+        gateAudio = gv.toBool();
+    }
+
+    engine->setCdcssEnabled(on);
+    engine->setCdcssCode(code);
+    engine->setCdcssGateAudio(gateAudio);
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = on;
+    o["code"] = QStringLiteral("%1").arg(code, 3, 8, QLatin1Char('0'));
+    o["gate_audio"] = gateAudio;
+    o["message"] = QString::fromUtf8("CDCSS/DCS 数字亚音参数已下发（开关/DCS码/门控静音）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 7g. get_cdcss_status (read): real engine getters. `active` is the honest
+//     detection latch (false with no signal / disabled).
+QString execGetCdcssStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
+                           const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = engine->cdcssEnabled();
+    o["code"] = QStringLiteral("%1").arg(engine->cdcssCode(), 3, 8, QLatin1Char('0'));
+    o["active"] = engine->cdcssPresent();
+    o["gate_audio"] = engine->cdcssGateAudio();
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // 8. list_bookmarks (read): BookmarkManager wiring lands on control -> honest empty.
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
                           const SourceInfo& src,
@@ -1460,6 +1520,8 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_squelch_status", &execGetSquelchStatus},
         {"set_ctcss", &execSetCtcss},
         {"get_ctcss_status", &execGetCtcssStatus},
+        {"set_cdcss", &execSetCdcss},
+        {"get_cdcss_status", &execGetCdcssStatus},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},
         {"list_bookmarks", &execListBookmarks},

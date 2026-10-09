@@ -65,6 +65,8 @@ private slots:
     void squelchStatusRealReadback();
     // --- Phase63 CTCSS three-channel tool: land / readback / out-of-range reject / gate ---
     void ctcssLandReadbackOutOfRangeRejectAndGate();
+    // --- Phase63 CDCSS/DCS three-channel tool: land / readback / illegal-code reject / gate ---
+    void cdcssLandReadbackIllegalCodeRejectAndGate();
     // --- Phase63 readback-loop audit: D-2/D-3/D-5 honest-repair round-trip -----
     void readbackLoopHonestRejectsAndAutoLand();
     // --- Phase63: bookmark tools execute for real against injected store -------
@@ -94,7 +96,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 49);
+    QCOMPARE(tools.size(), 51);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -769,9 +771,9 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split must be exactly 30 writes / 19 reads.
-    QCOMPARE(writes, 30);
-    QCOMPARE(reads, 19);
+    // The frozen split must be exactly 31 writes / 20 reads.
+    QCOMPARE(writes, 31);
+    QCOMPARE(reads, 20);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -981,6 +983,50 @@ void TestAgent::ctcssLandReadbackOutOfRangeRejectAndGate() {
     QVERIFY2(g.contains("\"ok\":false"), qPrintable(g));
     QVERIFY2(engine.ctcssEnabled(),
              "manual-mode gate must not flip the CTCSS engine");
+}
+
+// CDCSS/DCS three-channel tool: set_cdcss lands on the engine; get_cdcss_status
+// readback is honest; an illegal (non-table) DCS code string is REJECTED with
+// ok:false; missing/non-bool `enabled` is an error; manual-mode gates the write.
+void TestAgent::cdcssLandReadbackIllegalCodeRejectAndGate() {
+    dsp::SpectrumEngine engine;
+
+    QJsonObject off = QJsonDocument::fromJson(
+        ai::executeTool("get_cdcss_status", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(off.value("ok").toBool(), qPrintable(
+        ai::executeTool("get_cdcss_status", QJsonObject{}, &engine)));
+    QCOMPARE(off.value("enabled").toBool(), false);
+    QCOMPARE(off.value("active").toBool(), false);
+    QCOMPARE(off.value("gate_audio").toBool(), false);
+
+    QJsonObject on; on["enabled"] = true; on["code"] = "023";
+    QString r = ai::LLMWorker::dispatchToolCall("set_cdcss", on, &engine,
+                                                /*manualMode=*/false);
+    QVERIFY2(!r.contains("\"gated\":true"), qPrintable(r));
+    QVERIFY2(engine.cdcssEnabled(), "set_cdcss{enabled:true} must flip the engine");
+    QCOMPARE(engine.cdcssCode(), 023);
+    QJsonObject st = QJsonDocument::fromJson(
+        ai::executeTool("get_cdcss_status", QJsonObject{}, &engine).toUtf8()).object();
+    QCOMPARE(st.value("enabled").toBool(), true);
+    QCOMPARE(st.value("code").toString(), QStringLiteral("023"));
+
+    // Illegal DCS code (not in the 104-code table) -> rejected, engine untouched.
+    QJsonObject bad; bad["enabled"] = true; bad["code"] = "777";
+    QJsonObject rBad = QJsonDocument::fromJson(
+        ai::executeTool("set_cdcss", bad, &engine).toUtf8()).object();
+    QVERIFY2(!rBad.value("ok").toBool(), qPrintable(rBad.value("error").toString()));
+    QCOMPARE(engine.cdcssCode(), 023);   // untouched
+
+    // Missing / non-bool `enabled` -> honest error.
+    QJsonObject miss = QJsonDocument::fromJson(
+        ai::executeTool("set_cdcss", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(!miss.value("ok").toBool(), "missing `enabled` must be an error");
+
+    // Manual mode: the write is intercepted, engine untouched.
+    QString g = ai::LLMWorker::dispatchToolCall("set_cdcss", on, &engine,
+                                                /*manualMode=*/true);
+    QVERIFY2(g.contains("\"gated\":true"), qPrintable(g));
+    QVERIFY2(g.contains("\"ok\":false"), qPrintable(g));
 }
 
 // Phase63 readback-loop audit: the three write-path honest-repair cases.

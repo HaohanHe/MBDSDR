@@ -245,6 +245,10 @@ private:
     // domain rejected here, not silently clamped) + real read-back.
     QJsonObject cmdSetCtcss(const QJsonObject& a);
     QJsonObject cmdGetCtcssStatus(const QJsonObject&);
+    // CDCSS/DCS digital coded squelch (mirrors CTCSS; code is a 3-digit octal
+    // string validated against the public 104-code table).
+    QJsonObject cmdSetCdcss(const QJsonObject& a);
+    QJsonObject cmdGetCdcssStatus(const QJsonObject&);
     // Bookmarks (ControlHub holds a ui::BookmarkManager; same QSettings key).
     QJsonObject cmdListBookmarks(const QJsonObject&);
     QJsonObject cmdAddBookmark(const QJsonObject& a);

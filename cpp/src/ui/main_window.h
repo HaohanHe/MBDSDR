@@ -202,6 +202,8 @@ private slots:
     // ctcssPresent(). Disabled -> honest blank (no fake reading); armed but no
     // tone -> secondary "未检测到"; armed + real tone -> success "检测到".
     void updateCtcssBadge();
+    // CDCSS/DCS badge: mirrors the engine's real cdcssPresent() poll.
+    void updateCdcssBadge();
     void saveSettings();   // immediate persistence (writes QSettings)
     void scheduleSave();   // debounced persistence: arms the 500 ms save timer
     void onPassesReady(QList<dsp::SatPass> passes);
@@ -544,6 +546,15 @@ private:
     QDoubleSpinBox*  ctcssFreqSpin_ = nullptr;
     QLabel*          ctcssBadge_    = nullptr;
     QTimer*          ctcssPollTimer_ = nullptr;
+
+    // CDCSS/DCS digital coded squelch UI face (phase63), parallel to CTCSS.
+    // cdcssCheck_ arms the DCS detector; cdcssCodeCombo_ picks the target DCS
+    // octal address (populated from the real 104-code table, dsp/cdcss.cpp).
+    // cdcssBadge_ is driven ONLY by the engine's real cdcssPresent() poll.
+    QCheckBox*       cdcssCheck_    = nullptr;
+    QCheckBox*       cdcssGateCheck_ = nullptr;   // speaker-only DCS gate
+    QComboBox*       cdcssCodeCombo_ = nullptr;
+    QLabel*          cdcssBadge_    = nullptr;
     double          currentBwHz_ = 12500.0;   // live RF bandwidth (Up/Down nudge)
 
     // Multi-VFO management panel (left rail).

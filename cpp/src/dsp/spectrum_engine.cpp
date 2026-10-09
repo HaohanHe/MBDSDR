@@ -277,6 +277,22 @@ void SpectrumEngine::setCtcssGateAudio(bool on) {
     ctcssGateEnabled_.store(on);
 }
 
+void SpectrumEngine::setCdcssEnabled(bool on) {
+    cdcssEnabled_.store(on);
+    // Applied to the decoder itself on the engine thread next block.
+}
+
+void SpectrumEngine::setCdcssCode(int code12) {
+    // Reject out-of-table codes honestly (keeps the previous tuning rather than
+    // silently tuning to a nonsense address).
+    if (!CdcssDecoder::isValidCode(code12)) return;
+    cdcssCode_ = code12;
+}
+
+void SpectrumEngine::setCdcssGateAudio(bool on) {
+    cdcssGateEnabled_.store(on);
+}
+
 bool SpectrumEngine::squelchEnabled() const {
     return squelch_.mode() == Squelch::Mode::Gate;
 }
@@ -1529,6 +1545,18 @@ void SpectrumEngine::run() {
             ctcss_.process(audio.data(), static_cast<int>(audio.size()));
         }
 
+        // CDCSS/DCS digital coded squelch: parallel to CTCSS, taps the same
+        // post-ANR 48k mono. Desired enabled/code applied on the engine thread so
+        // the Golay/Manchester state is never raced. Disabled -> reset and
+        // codePresent() reads false (honest empty state).
+        {
+            const bool wantEnabled = cdcssEnabled_.load();
+            if (wantEnabled != cdcss_.enabled()) cdcss_.setEnabled(wantEnabled);
+            if (wantEnabled && cdcss_.configuredCode() != cdcssCode_)
+                cdcss_.configure(48000.0, cdcssCode_);
+            cdcss_.process(audio.data(), static_cast<int>(audio.size()));
+        }
+
         // Squelch decision FIRST (updates smoothing/hangover, does not mute),
         // then AGC always sees the REAL audio (it tracks the noise floor while
         // closed instead of decaying away on zero blocks). We mute only the
@@ -1579,7 +1607,17 @@ void SpectrumEngine::run() {
         // WAV continuity deliberately keep squelchGate + the real leveled audio
         // (mirrors the squelch precedent: only the speaker path is silenced).
         const bool ctcssOpen = !ctcssGateEnabled_.load() || ctcss_.tonePresent();
-        const bool gate = squelchGate && ctcssOpen;   // speaker + network-tap gate
+        // CDCSS digital sub-audio gate, parallel to CTCSS. Mutual-exclusion
+        // design: detection enable and gate arm are separate (mirror CTCSS).
+        // toneGateOpen = no sub-audio gate armed -> open; else at least one
+        // armed gate must match. Both gates armed at once is a config error a
+        // real radio never hits, but the engine does not deadlock: any match
+        // opens the speaker. The recorder/WAV path is NOT gated.
+        const bool cdcssOpen = !cdcssGateEnabled_.load() || cdcss_.codePresent();
+        const bool anySubGate = ctcssGateEnabled_.load() || cdcssGateEnabled_.load();
+        const bool toneGateOpen = !anySubGate || (ctcssOpen && ctcssGateEnabled_.load())
+                                                 || (cdcssOpen && cdcssGateEnabled_.load());
+        const bool gate = squelchGate && toneGateOpen;   // speaker + network-tap gate
         // Detection/ANR/squelch/AGC all run on the legacy mono M. processWithGain
         // exposes the per-sample linear gain so the stereo M/S matrix below reuses
         // the EXACT same envelope (mono and L/R never level-mismatched).

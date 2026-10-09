@@ -866,6 +866,13 @@ inline constexpr const char* kSettingsKeyCtcssToneHz  = "rx/ctcssToneHz";
 // tone is detected (the recorder is NOT muted). Absent key => honest off.
 inline constexpr const char* kSettingsKeyCtcssGate   = "rx/ctcssGateAudio";
 
+// CDCSS/DCS digital coded squelch (dsp/cdcss.cpp, SpectrumEngine integration).
+// Persistence mirrors CTCSS: absent keys => honest off + default octal 023,
+// never a fabricated locked code. The code is stored as a 3-digit octal string.
+inline constexpr const char* kSettingsKeyCdcssEnabled = "rx/cdcssEnabled";
+inline constexpr const char* kSettingsKeyCdcssCode    = "rx/cdcssCode";
+inline constexpr const char* kSettingsKeyCdcssGate    = "rx/cdcssGateAudio";
+
 // =====================================================================
 // Dark QSS generator -- simplified, only what we use.
 // Sizes are scaled at generation time.
