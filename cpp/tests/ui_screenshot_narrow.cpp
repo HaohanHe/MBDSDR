@@ -65,6 +65,28 @@ int main(int argc, char** argv) {
         s.sync();
     }
 
+    // Optional: seed the persisted Rx demod-mode + bandwidth (MBD_MODE=USB
+    // MBD_BW=9000) BEFORE MainWindow restores it, so the left "解调" / "带宽"
+    // combos render the restored values -- the real persisted round-trip, not a
+    // post-hoc poke. The matching vfo/0 row is seeded consistently so the
+    // engine's authoritative VFO restore lands on the same mode/bandwidth instead
+    // of the NFM/12.5k defaults. Off by default so every other shot is unchanged.
+    const QByteArray modeSeed = qgetenv("MBD_MODE");
+    bool bwOk = false;
+    const double bwSeed = qgetenv("MBD_BW").toDouble(&bwOk);
+    if (!modeSeed.isEmpty() && bwOk && bwSeed > 0.0) {
+        QSettings s("MBDSDR", "MBDSDR");
+        s.setValue("rx/demodMode", QString::fromUtf8(modeSeed));
+        s.setValue("rx/bandwidth", bwSeed);
+        s.setValue("vfo/count", 1);
+        s.setValue("vfo/0/freq", 98.5e6);
+        s.setValue("vfo/0/mode", QString::fromUtf8(modeSeed));
+        s.setValue("vfo/0/bw", bwSeed);
+        s.setValue("vfo/0/color", QString::fromUtf8(mbdsdr::tokens::kAccent));
+        s.setValue("vfo/0/selected", true);
+        s.sync();
+    }
+
     mbdsdr::MainWindow win;
     // Shrink to a narrow but usable width. The left rail is a QScrollArea so
     // its controls scroll rather than clip; the spectrum keeps its minimum.
