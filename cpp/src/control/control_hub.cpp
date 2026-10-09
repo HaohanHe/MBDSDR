@@ -324,10 +324,17 @@ bool ControlHub::needMode(const QJsonObject& a, const char* key, QString& out, Q
 }
 
 int ControlHub::resolveChannel(const QJsonObject& a, QString& err) const {
-    const QJsonValue v = a.value(QStringLiteral("channel"));
+    // Phase63 D2 bilateral alias: prefer "channel" (historic CH/HTTP key), but
+    // also accept "channel_id" (the Agent LLM schema key). Either selects the
+    // VFO; neither falls back to the currently-selected VFO. Mirrors the
+    // Agent-side resolveChannelId in agent_tools.cpp so the two channels never
+    // silently disagree on which channel a caller meant.
+    QJsonValue v = a.value(QStringLiteral("channel"));
+    if (v.isUndefined() || v.isNull())
+        v = a.value(QStringLiteral("channel_id"));
     if (v.isUndefined() || v.isNull()) return engine_->selectedVfoId();
     if (!v.isDouble()) {
-        err = QString::fromUtf8("参数 channel 必须是整数（VFO 信道 id）");
+        err = QString::fromUtf8("参数 channel/channel_id 必须是整数（VFO 信道 id）");
         return -1;
     }
     return v.toInt();
@@ -691,14 +698,50 @@ QJsonObject ControlHub::cmdVfoSelect(const QJsonObject& a) {
     return o;
 }
 
+// Phase63 D1 bilateral alias: resolve a VFO write target from EITHER
+//   - "id"    (direct VFO id, the historic CH/HTTP key), or
+//   - "index" (marker ordinal in vfoMarkers(), the Agent LLM schema key).
+// Returns true on success, fills outId/outIndex; on missing/bad input returns
+// false with an honest error. Mirrors the Agent-side resolveVfoTarget.
+namespace {
+bool resolveVfoTargetHelper(dsp::SpectrumEngine* engine, const QJsonObject& a,
+                            int& outId, int& outIndex, QString& err) {
+    const QJsonValue idV = a.value(QStringLiteral("id"));
+    const QJsonValue idxV = a.value(QStringLiteral("index"));
+    if (idV.isDouble()) {
+        outId = idV.toInt();
+        outIndex = -1;
+        const auto markers = engine->vfoMarkers();
+        for (int k = 0; k < markers.size(); ++k)
+            if (markers[k].id == outId) { outIndex = k; break; }
+        return true;
+    }
+    if (idxV.isDouble()) {
+        const int i = idxV.toInt();
+        const auto markers = engine->vfoMarkers();
+        if (i < 0 || i >= markers.size()) {
+            err = QString::fromUtf8("VFO index %1 越界（共 %2 个）").arg(i).arg(markers.size());
+            return false;
+        }
+        outId = markers[i].id;
+        outIndex = i;
+        return true;
+    }
+    err = QString::fromUtf8("参数 id 或 index 必须提供一个（VFO id 或列表序号）");
+    return false;
+}
+} // namespace
+
 QJsonObject ControlHub::cmdVfoSetFreq(const QJsonObject& a) {
-    int id; double hz; QString err;
-    if (!needInt(a, "id", id, err)) return errResult(err);
+    double hz; QString err;
     if (!needDbl(a, "freq_hz", hz, err)) return errResult(err);
+    int id = -1, idx = -1;
+    if (!resolveVfoTargetHelper(engine_, a, id, idx, err)) return errResult(err);
     engine_->vfoSetFreq(id, hz);
     QJsonObject o = okBase();
     o["command"] = "vfo_set_freq";
     o["id"] = id;
+    if (idx >= 0) o["index"] = idx;
     o["freq_hz"] = hz;
     return o;
 }
@@ -717,32 +760,33 @@ QJsonObject ControlHub::cmdVfoSetOffset(const QJsonObject& a) {
 }
 
 QJsonObject ControlHub::cmdVfoSetBandwidth(const QJsonObject& a) {
-    int id; double hz; QString err;
-    if (!needInt(a, "id", id, err)) return errResult(err);
+    double hz; QString err;
     if (!needDbl(a, "bandwidth_hz", hz, err)) return errResult(err);
-    // Honest-contract parity with the Agent tool set_vfo_bandwidth
-    // (agent_tools.cpp:1012): a non-positive bandwidth must be REJECTED here,
-    // not silently swallowed. The engine's VfoManager::setBandwidth already
-    // drops hz<=0 internally but returns void through SpectrumEngine, so
-    // without this guard CH would report ok:true for a no-op (fake success).
+    // Honest-contract parity with the Agent tool set_vfo_bandwidth: a non-positive
+    // bandwidth must be REJECTED, not silently swallowed.
     if (hz <= 0.0)
         return errResult(QString::fromUtf8("参数 bandwidth_hz 必须为正数"));
+    int id = -1, idx = -1;
+    if (!resolveVfoTargetHelper(engine_, a, id, idx, err)) return errResult(err);
     engine_->vfoSetBandwidth(id, hz);
     QJsonObject o = okBase();
     o["command"] = "vfo_set_bandwidth";
     o["id"] = id;
+    if (idx >= 0) o["index"] = idx;
     o["bandwidth_hz"] = hz;
     return o;
 }
 
 QJsonObject ControlHub::cmdVfoSetMode(const QJsonObject& a) {
-    int id; QString m; QString err;
-    if (!needInt(a, "id", id, err)) return errResult(err);
+    QString m; QString err;
     if (!needMode(a, "mode", m, err)) return errResult(err);
+    int id = -1, idx = -1;
+    if (!resolveVfoTargetHelper(engine_, a, id, idx, err)) return errResult(err);
     engine_->vfoSetMode(id, m);
     QJsonObject o = okBase();
     o["command"] = "vfo_set_mode";
     o["id"] = id;
+    if (idx >= 0) o["index"] = idx;
     o["mode"] = m;
     return o;
 }
@@ -1313,6 +1357,11 @@ QJsonObject ControlHub::cmdAddBookmark(const QJsonObject& a) {
         QString::number(f / 1e6, 'f', 3));
     b.mode = a.value(QStringLiteral("mode")).toString();
     b.bandwidthHz = a.value(QStringLiteral("bandwidth_hz")).toDouble(0.0);
+    // Phase63 D4: consume `group` so the CH/HTTP channel and the Agent channel
+    // agree on which fields a bookmark carries. The Agent executor has read
+    // group all along (agent_tools.cpp execAddBookmark); CH was silently dropping
+    // it.
+    b.group = a.value(QStringLiteral("group")).toString();
     const int idx = bookmarks_->add(b);   // auto-saves to QSettings
     if (idx < 0)
         return errResult(QString::fromUtf8("freq_hz 必须 >0"));
@@ -1460,10 +1509,29 @@ QJsonObject ControlHub::cmdSetFftParams(const QJsonObject& a) {
     bool has = false;
     const QJsonValue sz = a.value(QStringLiteral("fft_size"));
     if (sz.isDouble()) { engine_->setFftSize(sz.toInt()); o["fft_size"] = sz.toInt(); has = true; }
+    // Phase63 D3 bilateral dual-type: accept BOTH the raw int (historic CH
+    // contract) AND the string enum ("Hann"/"Flattop"/"Blackman", the Agent
+    // LLM schema contract). Either lands on the same engine setter.
     const QJsonValue w = a.value(QStringLiteral("window"));
-    if (w.isDouble()) { engine_->setWindowType(w.toInt()); o["window"] = w.toInt(); has = true; }
+    if (w.isDouble()) {
+        engine_->setWindowType(w.toInt()); o["window"] = w.toInt(); has = true;
+    } else if (w.isString()) {
+        const QString ws = w.toString();
+        int wi = 0;   // 0=Hann 1=Flattop 2=Blackman
+        if (ws == QLatin1String("Flattop")) wi = 1;
+        else if (ws == QLatin1String("Blackman")) wi = 2;
+        engine_->setWindowType(wi); o["window"] = ws; has = true;
+    }
     const QJsonValue av = a.value(QStringLiteral("average"));
-    if (av.isDouble()) { engine_->setAverageMode(av.toInt()); o["average"] = av.toInt(); has = true; }
+    if (av.isDouble()) {
+        engine_->setAverageMode(av.toInt()); o["average"] = av.toInt(); has = true;
+    } else if (av.isString()) {
+        const QString avs = av.toString();
+        int ai = 0;   // 0=Off 1=Slow 2=Fast
+        if (avs == QLatin1String("Slow")) ai = 1;
+        else if (avs == QLatin1String("Fast")) ai = 2;
+        engine_->setAverageMode(ai); o["average"] = avs; has = true;
+    }
     if (!has)
         return errResult(QString::fromUtf8("set_fft_params 需要至少一个: fft_size/window/average"));
     return o;

@@ -87,6 +87,10 @@ private slots:
     // async-mailbox semantics), but get_bandwidth / get_status must keep the
     // previously settled positive value -- never 0 / negative.
     void topLevelSetBandwidthNonPositiveDoesNotDriveEngine();
+    // Phase63 D1-D5 bilateral alias contract: pin the new dual-key / dual-type
+    // acceptance on the CH side (channel_id alias, string fft window/average,
+    // add_bookmark group, vfo_set_* index alias).
+    void phase63BilateralAliasContract();
 };
 
 void TestControlHub::initTestCase() {
@@ -1011,6 +1015,69 @@ void TestControlHub::topLevelSetBandwidthNonPositiveDoesNotDriveEngine() {
     QVERIFY2(st.value("bandwidth_hz").toDouble() > 0.0,
              "get_status bandwidth_hz must not be polluted by a rejected write");
     QCOMPARE(st.value("bandwidth_hz").toDouble(), 8000.0);
+}
+
+// Phase63 D1-D5 bilateral alias contract (CH side).
+void TestControlHub::phase63BilateralAliasContract() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // --- D2: get_pocsag_messages accepts "channel_id" (Agent key). ---
+    {
+        QJsonObject r = parseObj(hub.execute("get_pocsag_messages", {{"channel_id", 0}}));
+        QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+        QCOMPARE(r.value("channel").toInt(), 0);
+    }
+
+    // --- D3: set_fft_params accepts string window/average (Agent enum). ---
+    {
+        QJsonObject r = parseObj(hub.execute("set_fft_params",
+            {{"fft_size", 4096}, {"window", QStringLiteral("Blackman")},
+             {"average", QStringLiteral("Slow")}}));
+        QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+        QCOMPARE(eng.windowType(), 2);
+        QCOMPARE(eng.averageMode(), 1);
+        // And raw int still works.
+        r = parseObj(hub.execute("set_fft_params",
+            {{"fft_size", 2048}, {"window", 1}, {"average", 0}}));
+        QVERIFY(r.value("ok").toBool());
+        QCOMPARE(eng.windowType(), 1);
+        QCOMPARE(eng.averageMode(), 0);
+    }
+
+    // --- D4: add_bookmark consumes `group`. ---
+    {
+        QJsonObject r = parseObj(hub.execute("add_bookmark",
+            {{"freq_hz", 145.0e6}, {"group", QStringLiteral("vfo")},
+             {"name", QStringLiteral("test")}}));
+        QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+        QJsonObject lst = parseObj(hub.execute("list_bookmarks", {}));
+        QVERIFY(lst.value("ok").toBool());
+        bool saw = false;
+        for (const auto& b : lst.value("bookmarks").toArray()) {
+            QJsonObject bo = b.toObject();
+            if (bo.value("freq_hz").toDouble() == 145.0e6) {
+                QCOMPARE(bo.value("group").toString(), QStringLiteral("vfo"));
+                saw = true;
+            }
+        }
+        QVERIFY(saw);
+    }
+
+    // --- D1: vfo_set_freq accepts "index" (Agent key) instead of "id". ---
+    {
+        QJsonObject before = parseObj(hub.execute("list_vfos", {}));
+        const int idx = 0;
+        QJsonObject r = parseObj(hub.execute("vfo_set_freq",
+            {{"index", idx}, {"freq_hz", 101100000.0}}));
+        QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+        QVERIFY(r.value("id").toInt() >= 0);
+        // Readback: marker 0 moved to the new frequency.
+        QJsonObject after = parseObj(hub.execute("list_vfos", {}));
+        QCOMPARE(after.value("vfos").toArray().at(0).toObject().value("freq_hz").toDouble(),
+                 101100000.0);
+    }
 }
 
 QTEST_MAIN(TestControlHub)

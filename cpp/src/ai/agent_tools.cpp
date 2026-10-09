@@ -433,9 +433,47 @@ QString execApplyFrequencyCorrection(const QJsonObject& args,
 // channel_id defaults to the currently selected VFO when omitted.
 namespace {
 int resolveChannelId(const QJsonObject& args, dsp::SpectrumEngine* engine) {
-    if (args.contains("channel_id") && args["channel_id"].isDouble())
-        return static_cast<int>(args["channel_id"].toDouble());
+    const QJsonValue v = args.value(QStringLiteral("channel_id"));
+    if (v.isDouble()) return static_cast<int>(v.toDouble());
+    const QJsonValue c = args.value(QStringLiteral("channel"));
+    if (c.isDouble()) return static_cast<int>(c.toDouble());
     return engine->selectedVfoId();
+}
+
+// Phase63 D1 bilateral alias: resolve a VFO write target from EITHER
+//   - "index" (marker ordinal in vfoMarkers(), the Agent LLM schema key), or
+//   - "id"    (direct VFO id, the ControlHub/HTTP key).
+// On success fills outIndex/outId and returns true; on missing/bad input
+// returns false with an honest error message. When `id` is given directly we
+// do NOT bounds-check it against the marker list (the engine will reject an
+// unknown id) -- but we DO fill outIndex by searching the markers so the
+// response echo stays informative.
+bool resolveVfoTarget(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                      int& outIndex, int& outId, QString& err) {
+    const QJsonValue idxV = args.value(QStringLiteral("index"));
+    const QJsonValue idV  = args.value(QStringLiteral("id"));
+    const auto markers = engine->vfoMarkers();
+    if (idxV.isDouble()) {
+        const int i = static_cast<int>(idxV.toDouble());
+        if (i < 0 || i >= markers.size()) {
+            err = QString::fromUtf8("VFO index %1 越界（共 %2 个）").arg(i).arg(markers.size());
+            return false;
+        }
+        outIndex = i;
+        outId = markers[i].id;
+        return true;
+    }
+    if (idV.isDouble()) {
+        const int id = static_cast<int>(idV.toDouble());
+        // Locate the marker ordinal for a useful echo; -1 if not found.
+        outIndex = -1;
+        for (int k = 0; k < markers.size(); ++k)
+            if (markers[k].id == id) { outIndex = k; break; }
+        outId = id;
+        return true;
+    }
+    err = QString::fromUtf8("参数 index 或 id 必须提供一个（VFO 序号或 VFO id）");
+    return false;
 }
 } // namespace
 
@@ -622,6 +660,8 @@ QString routedOk(const char* command, const QJsonObject& echoed, const SourceInf
 
 // 1. set_network_audio_sink (write): enable/port/format. The engine network tap
 //    is wired on the control side; here we validate + route by contract name.
+//    Phase63 D5: echo host/stereo so the routed stub does not silently drop
+//    them (CH cmdSetNetworkAudioSink already consumes them).
 QString execSetNetworkAudioSink(const QJsonObject& args, dsp::SpectrumEngine*,
                                 const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
@@ -635,6 +675,10 @@ QString execSetNetworkAudioSink(const QJsonObject& args, dsp::SpectrumEngine*,
     echo["port"] = port;
     if (args.contains("format") && args.value("format").isString())
         echo["format"] = args.value("format").toString();
+    if (args.contains("host") && args.value("host").isString())
+        echo["host"] = args.value("host").toString();
+    if (args.contains("stereo") && args.value("stereo").isBool())
+        echo["stereo"] = args.value("stereo").toBool();
     return routedOk("set_network_audio_sink", echo, src);
 }
 
@@ -962,24 +1006,16 @@ QString execSetVfoArmed(const QJsonObject& args, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
-// 17. set_vfo_frequency (write): index + freq_hz. Resolves the marker index to
-//     the VFO id (same path as set_vfo_armed / the ControlHub commands), then
-//     tunes that VFO only -- the on-demand parallel-monitoring design.
+// 17. set_vfo_frequency (write): index|id + freq_hz. Phase63 D1: accepts EITHER
+//     "index" (marker ordinal, Agent schema) OR "id" (direct VFO id, CH/HTTP).
 QString execSetVfoFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
                             const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
-    double idx = 0.0;
-    if (!needNum(args, "index", idx))
-        return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
     double hz = 0.0;
     if (!needNum(args, "freq_hz", hz))
         return errResult(QString::fromUtf8("参数 freq_hz 缺失或不是数字"));
-    const auto markers = engine->vfoMarkers();
-    const int i = static_cast<int>(idx);
-    if (i < 0 || i >= markers.size())
-        return errResult(QString::fromUtf8("VFO index %1 越界（共 %2 个）")
-                         .arg(i).arg(markers.size()));
-    const int id = markers[i].id;
+    int i = -1, id = -1; QString err;
+    if (!resolveVfoTarget(args, engine, i, id, err)) return errResult(err);
     engine->vfoSetFreq(id, hz);
     QJsonObject o;
     o["ok"] = true;
@@ -991,15 +1027,11 @@ QString execSetVfoFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine
     return compact(o);
 }
 
-// 18. set_vfo_mode (write): index + mode, mode validated against the shared
-//     ControlHub mode table (tokens::kControlHubModes) so the Agent and the
-//     ControlHub/HTTP channel reject the same values.
+// 18. set_vfo_mode (write): index|id + mode, mode validated against the shared
+//     ControlHub mode table. Phase63 D1: accepts "index" OR "id".
 QString execSetVfoMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
                        const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
-    double idx = 0.0;
-    if (!needNum(args, "index", idx))
-        return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
     QString mode;
     if (!needStr(args, "mode", mode))
         return errResult(QString::fromUtf8("参数 mode 缺失或不是字符串"));
@@ -1009,12 +1041,8 @@ QString execSetVfoMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
         if (up == QLatin1String(tokens::kControlHubModes[k])) { known = true; break; }
     if (!known)
         return errResult(QString::fromUtf8("未知解调模式: %1").arg(mode));
-    const auto markers = engine->vfoMarkers();
-    const int i = static_cast<int>(idx);
-    if (i < 0 || i >= markers.size())
-        return errResult(QString::fromUtf8("VFO index %1 越界（共 %2 个）")
-                         .arg(i).arg(markers.size()));
-    const int id = markers[i].id;
+    int i = -1, id = -1; QString err;
+    if (!resolveVfoTarget(args, engine, i, id, err)) return errResult(err);
     engine->vfoSetMode(id, up);
     QJsonObject o;
     o["ok"] = true;
@@ -1026,25 +1054,18 @@ QString execSetVfoMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
-// 19. set_vfo_bandwidth (write): index + bandwidth_hz, same marker-index
-//     resolution and honest error contract as the other VFO edit tools.
+// 19. set_vfo_bandwidth (write): index|id + bandwidth_hz. Phase63 D1: accepts
+//     "index" OR "id"; positive-bandwidth guard preserved.
 QString execSetVfoBandwidth(const QJsonObject& args, dsp::SpectrumEngine* engine,
                             const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
-    double idx = 0.0;
-    if (!needNum(args, "index", idx))
-        return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
     double bw = 0.0;
     if (!needNum(args, "bandwidth_hz", bw))
         return errResult(QString::fromUtf8("参数 bandwidth_hz 缺失或不是数字"));
     if (bw <= 0.0)
         return errResult(QString::fromUtf8("参数 bandwidth_hz 必须为正数"));
-    const auto markers = engine->vfoMarkers();
-    const int i = static_cast<int>(idx);
-    if (i < 0 || i >= markers.size())
-        return errResult(QString::fromUtf8("VFO index %1 越界（共 %2 个）")
-                         .arg(i).arg(markers.size()));
-    const int id = markers[i].id;
+    int i = -1, id = -1; QString err;
+    if (!resolveVfoTarget(args, engine, i, id, err)) return errResult(err);
     engine->vfoSetBandwidth(id, bw);
     QJsonObject o;
     o["ok"] = true;
@@ -1130,6 +1151,22 @@ QString execExportRecording(const QJsonObject& args, dsp::SpectrumEngine* engine
 }
 
 // 19. set_fft_params (write): engine setFftSize/setWindowType/setAverageMode real.
+//     Phase63 D3 bilateral dual-type: window/average accept BOTH the string
+//     enum ("Hann"/"Flattop"/"Blackman", "Off"/"Slow"/"Fast") that the LLM
+//     schema advertises AND the raw int (0/1/2) that the ControlHub/HTTP
+//     channel has always used. Either type lands on the same engine setter.
+namespace {
+int mapWindowString(const QString& w) {
+    if (w == QLatin1String("Flattop")) return 1;
+    if (w == QLatin1String("Blackman")) return 2;
+    return 0;   // "Hann" (default / unrecognised falls back to Hann)
+}
+int mapAverageString(const QString& av) {
+    if (av == QLatin1String("Slow")) return 1;
+    if (av == QLatin1String("Fast")) return 2;
+    return 0;   // "Off"
+}
+} // namespace
 QString execSetFftParams(const QJsonObject& args, dsp::SpectrumEngine* engine,
                          const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
@@ -1140,21 +1177,27 @@ QString execSetFftParams(const QJsonObject& args, dsp::SpectrumEngine* engine,
     QJsonObject o;
     o["ok"] = true;
     o["fft_size"] = engine->fftSize();
-    if (args.contains("window") && args.value("window").isString()) {
-        const QString w = args.value("window").toString();
-        int wi = 0;   // 0=Hann 1=Flattop 2=Blackman (see spectrum_engine.h)
-        if (w == "Flattop") wi = 1;
-        else if (w == "Blackman") wi = 2;
-        engine->setWindowType(wi);
+    // window: accept string enum OR raw int (0=Hann 1=Flattop 2=Blackman).
+    const QJsonValue wv = args.value(QStringLiteral("window"));
+    if (wv.isString()) {
+        const QString w = wv.toString();
+        engine->setWindowType(mapWindowString(w));
         o["window"] = w;
+    } else if (wv.isDouble()) {
+        const int wi = wv.toInt();
+        engine->setWindowType(wi);
+        o["window"] = wi;
     }
-    if (args.contains("average") && args.value("average").isString()) {
-        const QString av = args.value("average").toString();
-        int ai = 0;   // 0=Off 1=Slow 2=Fast
-        if (av == "Slow") ai = 1;
-        else if (av == "Fast") ai = 2;
+    // average: accept string enum OR raw int (0=Off 1=Slow 2=Fast).
+    const QJsonValue av = args.value(QStringLiteral("average"));
+    if (av.isString()) {
+        const QString avs = av.toString();
+        engine->setAverageMode(mapAverageString(avs));
+        o["average"] = avs;
+    } else if (av.isDouble()) {
+        const int ai = av.toInt();
         engine->setAverageMode(ai);
-        o["average"] = av;
+        o["average"] = ai;
     }
     o["message"] = QString::fromUtf8("FFT 参数已设置");
     addSourceFields(o, src);

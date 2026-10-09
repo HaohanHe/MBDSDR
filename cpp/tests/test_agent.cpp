@@ -71,6 +71,9 @@ private slots:
     //     error envelope (aligned with ControlHub::execute :353), never a plain
     //     string, never {ok:true} with fabricated values, never a null deref. ---
     void nullEngineReturnsHonestErrorEnvelope();
+    // --- Phase63 D1-D5 bilateral alias contract: pin the new dual-key / dual-type
+    //     acceptance so future refactors cannot silently regress the drift fix. ---
+    void phase63BilateralAliasContract();
 };
 
 void TestAgent::initTestCase() {
@@ -1098,6 +1101,66 @@ void TestAgent::nullEngineReturnsHonestErrorEnvelope() {
                      qPrintable(QString("%1 -> must not contain fake field '%2': %3")
                                 .arg(QString::fromUtf8(tool), QString::fromUtf8(fake), raw)));
         }
+    }
+}
+
+// Phase63 D1-D5 bilateral alias contract. Pins:
+//   D2: get_pocsag_messages accepts "channel" (CH key) in addition to "channel_id".
+//   D3: set_fft_params accepts raw int for window/average (in addition to string enum).
+//   D5: set_network_audio_sink echoes host/stereo (no silent drop).
+//   D1: set_vfo_frequency accepts "id" (CH key) in addition to "index".
+void TestAgent::phase63BilateralAliasContract() {
+    dsp::SpectrumEngine eng;
+
+    // --- D2: "channel" alias on the Agent read tools. ---
+    {
+        QJsonObject a; a["channel"] = 0;
+        QJsonObject r = runTool(eng, "get_pocsag_messages", a);
+        QVERIFY2(r.value("ok").toBool(), qPrintable(QString::fromUtf8(
+            QJsonDocument(r).toJson(QJsonDocument::Compact))));
+        QCOMPARE(r.value("channel_id").toInt(), 0);   // resolves marker channel 0
+    }
+
+    // --- D3: set_fft_params accepts raw int window/average (CH-style). ---
+    {
+        QJsonObject a; a["fft_size"] = 2048; a["window"] = 2; a["average"] = 1;
+        QJsonObject r = runTool(eng, "set_fft_params", a);
+        QVERIFY2(r.value("ok").toBool(), qPrintable(QString::fromUtf8(
+            QJsonDocument(r).toJson(QJsonDocument::Compact))));
+        QCOMPARE(r.value("window").toInt(), 2);
+        QCOMPARE(r.value("average").toInt(), 1);
+        QCOMPARE(eng.windowType(), 2);
+        QCOMPARE(eng.averageMode(), 1);
+        // And string enum still works.
+        QJsonObject b; b["fft_size"] = 4096; b["window"] = "Flattop"; b["average"] = "Slow";
+        r = runTool(eng, "set_fft_params", b);
+        QVERIFY2(r.value("ok").toBool(), qPrintable(QString::fromUtf8(
+            QJsonDocument(r).toJson(QJsonDocument::Compact))));
+        QCOMPARE(eng.windowType(), 1);
+        QCOMPARE(eng.averageMode(), 1);
+    }
+
+    // --- D5: set_network_audio_sink echoes host/stereo. ---
+    {
+        QJsonObject a; a["enable"] = true; a["port"] = 12345;
+        a["host"] = "192.168.1.5"; a["stereo"] = true;
+        QString raw = ai::executeTool("set_network_audio_sink", a, &eng);
+        QVERIFY2(raw.contains("\"host\":\"192.168.1.5\""), qPrintable(raw));
+        QVERIFY2(raw.contains("\"stereo\":true"), qPrintable(raw));
+    }
+
+    // --- D1: set_vfo_frequency accepts "id" directly (CH-style). ---
+    {
+        const auto markers = eng.vfoMarkers();
+        QVERIFY(!markers.isEmpty());
+        const int id0 = markers.at(0).id;
+        QJsonObject a; a["id"] = id0; a["freq_hz"] = 99100000.0;
+        QString raw = ai::executeTool("set_vfo_frequency", a, &eng);
+        QVERIFY2(raw.contains("\"ok\":true"), qPrintable(raw));
+        bool saw = false;
+        for (const auto& m : eng.vfoMarkers())
+            if (m.id == id0) { QCOMPARE(m.freqHz, 99100000.0); saw = true; }
+        QVERIFY(saw);
     }
 }
 
