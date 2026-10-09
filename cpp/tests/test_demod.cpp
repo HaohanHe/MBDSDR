@@ -19,6 +19,7 @@ private slots:
     void fmDemodFinds1k();
     void agcStability();
     void squelchGate();
+    void rawPassthroughLIQ();
 };
 
 // Helper: FFT magnitude at a given bin (simple DFT bin extract)
@@ -106,6 +107,37 @@ void TestDemod::squelchGate() {
         [](float a, float b){return a+b*b;}) / g2.size());
     QVERIFY2(rmsLoud > 0.3f, qPrintable(QString("loud RMS %1").arg(rmsLoud)));
     QVERIFY2(rmsQuiet < 0.01f, qPrintable(QString("quiet RMS %1").arg(rmsQuiet)));
+}
+
+// RAW direct-listen: channelized complex IQ must pass through as [I,Q,I,Q...]
+// interleaved with NO scaling / filtering / state. Even samples == I (Left),
+// odd samples == Q (Right), bit-exact on the float values.
+void TestDemod::rawPassthroughLIQ() {
+    const int N = 512;
+    const double ifSr = 48000.0;
+    std::vector<std::complex<float>> iq(N);
+    for (int i = 0; i < N; ++i) {
+        // Deterministic non-trivial I/Q (a rotating phasor at an offset).
+        const double ang = 2 * M_PI * 0.13 * i;
+        iq[i] = {static_cast<float>(0.6 * std::cos(ang)),
+                 static_cast<float>(0.4 * std::sin(ang))};
+    }
+    DemodRaw raw(ifSr);
+    QCOMPARE(raw.name(), QStringLiteral("RAW"));
+    QCOMPARE(raw.outputSampleRate(), ifSr);
+
+    auto out = raw.process(iq);
+    QCOMPARE(out.size(), static_cast<std::size_t>(N * 2));
+    for (int i = 0; i < N; ++i) {
+        QCOMPARE(out[2 * i],     iq[i].real());  // even -> Left  = I
+        QCOMPARE(out[2 * i + 1], iq[i].imag());  // odd  -> Right = Q
+    }
+    // Stateless: a second block streams identically (reset() is a no-op).
+    raw.reset();
+    auto out2 = raw.process(iq);
+    QCOMPARE(out2.size(), out.size());
+    for (std::size_t k = 0; k < out.size(); ++k)
+        QCOMPARE(out2[k], out[k]);
 }
 
 QTEST_MAIN(TestDemod)

@@ -259,6 +259,12 @@ void VfoChannel::rebuild(double sourceSr, double sourceCenterHz) {
     channelizer.setVfoOffsetHz(freqHz - sourceCenterHz);
 
     if (mode == "AM")          demod = std::make_unique<DemodAM>(ifRate, bandwidthHz);
+    else if (mode == "RAW")
+        // RAW direct-listen: the channelizer still cuts the SELECTED VFO's
+        // narrowband channel IQ (chBw = the mode default, see bandwidth_preset.h)
+        // -- DemodRaw hands that channelized complex IQ straight through as
+        // L=I / R=Q interleaved audio (no demodulation, no bandwidth filter).
+        demod = std::make_unique<DemodRaw>(ifRate);
     else if (mode == "WFM") {
         demod = std::make_unique<DemodWFM>(ifRate, chBw);
         // RDS subcarrier lives in the de-emphasized MPX; sample rate = IF rate.

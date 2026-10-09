@@ -247,5 +247,23 @@ std::vector<float> DemodSSB::process(const std::vector<std::complex<float>>& iq)
     return out;
 }
 
+// ---- RAW: channelized-IQ passthrough, L=I / R=Q interleaved --------------
+// Bit-exact on the real/imag parts (no scaling, no filtering, no state). Each
+// complex input sample becomes [I, Q] consecutively so the engine can split the
+// even/odd samples into Left=I / Right=Q for writeStereo.
+DemodRaw::DemodRaw(double ifSampleRate) : ifSr_(ifSampleRate) {}
+
+std::vector<float> DemodRaw::process(const std::vector<std::complex<float>>& iq) {
+    std::vector<float> out;
+    out.reserve(iq.size() * 2);
+    for (const auto& c : iq) {
+        out.push_back(c.real());  // even index -> Left channel  (I)
+        out.push_back(c.imag());  // odd  index -> Right channel (Q)
+    }
+    return out;
+}
+
+void DemodRaw::reset() {}   // stateless passthrough
+
 } // namespace dsp
 } // namespace mbdsdr

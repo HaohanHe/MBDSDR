@@ -1038,6 +1038,21 @@ void TestAgent::readbackLoopHonestRejectsAndAutoLand() {
     QCOMPARE(rGood.value("mode").toString(), QStringLiteral("NFM"));
     QCOMPARE(engine.demodMode(), QStringLiteral("NFM"));
 
+    // --- RAW direct-listen: whitelisted mode lands (read back "RAW"), and
+    //     set_bandwidth on RAW is honestly refused (a passthrough has no demod
+    //     filter to retune -- the tool must not echo a fake success). ----------
+    QJsonObject rawMode; rawMode["mode"] = "RAW";
+    QJsonObject rRaw = run("set_mode", rawMode);
+    QVERIFY2(rRaw.value("ok").toBool(), qPrintable(compactJson(rRaw)));
+    QCOMPARE(engine.demodMode(), QStringLiteral("RAW"));
+
+    QJsonObject bwRaw; bwRaw["bandwidth_hz"] = 8000.0;
+    QJsonObject rBwRaw = run("set_bandwidth", bwRaw);
+    QVERIFY2(!rBwRaw.value("ok").toBool(),
+             qPrintable(compactJson(rBwRaw)));
+    QVERIFY2(rBwRaw.value("error").toString().contains(QString::fromUtf8("RAW")),
+             qPrintable(rBwRaw.value("error").toString()));
+
     // --- D-5: set_squelch{auto:true} really lands, readback follows -----------
     QJsonObject autoOn; autoOn["auto"] = true;
     QString w = ai::LLMWorker::dispatchToolCall("set_squelch", autoOn, &engine,

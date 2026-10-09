@@ -148,5 +148,29 @@ private:
     FirLowpass lpf_;
 };
 
+// ---- RAW: channelized narrowband-IQ passthrough (L=I / R=Q) -------------
+// The selected VFO's channelized complex IQ is handed straight to the audio
+// path with NO demodulation. Each complex sample (I,Q) becomes two consecutive
+// floats in process(): [I0, Q0, I1, Q1, ...]. The engine de-interleaves this
+// stream into Left = I and Right = Q (writeStereo) so a listener can compare
+// the in-phase and quadrature channels directly (scope / spectrum cross-check,
+// external-analyzer tap). outputSampleRate() == the channelizer IF rate (narrow
+// modes target 48 kHz) so the downstream ifRate->48k resampler is a 1:1 passthrough
+// and never re-times the I/Q pairs. Stateless: reset() is a no-op. setBandwidth()
+// is intentionally a base-class no-op -- the three-channel set_bandwidth tool
+// HONESTLY rejects bandwidth changes for RAW (a passthrough has no demod filter
+// to retune), so the DSP layer must never silently swallow one.
+class DemodRaw : public IDemod {
+public:
+    explicit DemodRaw(double ifSampleRate = 48000.0);
+    std::vector<float> process(const std::vector<std::complex<float>>& iq) override;
+    void reset() override;
+    QString name() const override { return QStringLiteral("RAW"); }
+    double outputSampleRate() const override { return ifSr_; }
+    // setBandwidth: base empty no-op (tool layer rejects; see control_hub/agent_tools).
+private:
+    double ifSr_;
+};
+
 } // namespace dsp
 } // namespace mbdsdr

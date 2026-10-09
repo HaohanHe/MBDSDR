@@ -1511,7 +1511,11 @@ void SpectrumEngine::run() {
 
         // ANR sits AFTER the per-VFO resampler and BEFORE squelch/AGC/gated
         // recorder. Disabled by default -> identity (bit-exact legacy chain).
-        const std::vector<float> audio = anr_.process(raw);
+        // RAW passthrough: ANR is an AUDIO-domain noise reducer -- running it on
+        // channelized complex IQ (interleaved I/Q) would alter the samples the
+        // listener expects to be bit-exact, so it is bypassed (identity) here.
+        const bool rawSel = (selMode == "RAW");
+        const std::vector<float> audio = rawSel ? raw : anr_.process(raw);
 
         // CTCSS tone detector: tap the same post-ANR 48 kHz mono. Desired
         // enabled/freq were set from any thread; apply them here on the engine
@@ -1579,8 +1583,18 @@ void SpectrumEngine::run() {
         // Detection/ANR/squelch/AGC all run on the legacy mono M. processWithGain
         // exposes the per-sample linear gain so the stereo M/S matrix below reuses
         // the EXACT same envelope (mono and L/R never level-mismatched).
+        // RAW passthrough: AGC is an audio-domain envelope compressor -- it must
+        // NOT be applied to channelized IQ (it would rescale the I/Q pairs the
+        // listener expects to be exact), so bypass it with a unit gain envelope.
+        // The squelch RMS energy gate below STILL runs (interleaved I/Q RMS is a
+        // honest carrier-energy measure) and mutes the speaker when closed.
         std::vector<float> leveled, agcGain;
-        agc_.processWithGain(audio, &leveled, &agcGain);
+        if (rawSel) {
+            leveled = audio;                              // identity passthrough
+            agcGain.assign(audio.size(), 1.0f);           // unit envelope
+        } else {
+            agc_.processWithGain(audio, &leveled, &agcGain);
+        }
         // `out` stays SQUELCH-gated (feeds the WAV continuity, the gated
         // recorder pre-roll and the CW decoder) -- the CTCSS gate must NOT mute
         // it; the speaker mute is applied at the write sites below.
@@ -1594,7 +1608,26 @@ void SpectrumEngine::run() {
         // same AGC gain (zeroed when the squelch gate is closed). All other analog
         // modes keep the legacy mono write. Recording below stays mono (`out`).
         const bool wfmSel = (selMode == "WFM");
-        if (wfmSel && sel && sel->stereo) {
+        if (rawSel) {
+            // RAW direct-listen: `audio` IS the channelized IQ interleaved as
+            // [I0,Q0,I1,Q1,...] (ANR/AGC already bypassed above). Split it into
+            // Left = I (even samples) and Right = Q (odd samples) and write true
+            // stereo so the listener can cross-check the two quadrature channels.
+            // The squelch RMS energy gate still applies (interleaved I/Q RMS is a
+            // honest carrier-energy measure). The CTCSS sub-audio gate does NOT
+            // apply: RAW has no demodulated audio, so a sub-audio PL tone cannot
+            // gate it (the CTCSS detector still runs on the stream but never
+            // mutes the speaker here). A trailing odd sample is dropped so L/R
+            // stay frame-aligned.
+            const std::size_t n = audio.size() / 2;
+            std::vector<float> L(n), R(n);
+            for (std::size_t i = 0; i < n; ++i) {
+                L[i] = squelchGate ? std::clamp(audio[2 * i], -1.0f, 1.0f) : 0.0f;
+                R[i] = squelchGate ? std::clamp(audio[2 * i + 1], -1.0f, 1.0f) : 0.0f;
+            }
+            audioSink_->writeStereo(L, R);
+            if (networkTap_) networkTap_->writeStereo(L, R);
+        } else if (wfmSel && sel && sel->stereo) {
             sel->stereo->setForceMono(forceMono_);   // survives channel rebuilds
             const float blend = sel->stereoBlend;
             const std::vector<float>& M = sel->stereoM48k;

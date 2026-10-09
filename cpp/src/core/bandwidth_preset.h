@@ -62,6 +62,12 @@ inline constexpr double kBwVorHz      = 24000.0;
 // ~270 Hz -> 600 Hz channel.
 inline constexpr double kBwAcarsHz    = 12500.0;
 inline constexpr double kBwNavtexHz   = 600.0;
+// RAW: channelized-IQ passthrough. DemodRaw applies NO audio filter, but the
+// channelizer must still cut the SELECTED VFO's narrowband slot out of the wide
+// capture so the passthrough carries only what the VFO boxed. 12.5 kHz is a
+// neutral narrow-voice slot (same as NFM); it is the channelizer cut width, NOT
+// a demod filter -- set_bandwidth on RAW is honestly rejected (no demod BW).
+inline constexpr double kBwRawHz      = 12500.0;
 // Unknown / unlisted mode: conservative narrow-FM voice default.
 inline constexpr double kBwFallbackHz = 12500.0;
 
@@ -81,6 +87,7 @@ inline double defaultBandwidthHzForMode(const QString& mode) {
     if (mode == QLatin1String("VOR"))    return kBwVorHz;
     if (mode == QLatin1String("ACARS"))  return kBwAcarsHz;
     if (mode == QLatin1String("NAVTEX")) return kBwNavtexHz;
+    if (mode == QLatin1String("RAW"))    return kBwRawHz;
     return kBwFallbackHz;
 }
 

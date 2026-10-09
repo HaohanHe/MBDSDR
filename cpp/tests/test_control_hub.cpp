@@ -130,6 +130,24 @@ void TestControlHub::commandsDriveEngineAndReadback() {
     QCOMPARE(parseObj(hub.execute("get_bandwidth", {})).value("bandwidth_hz").toDouble(),
              8000.0);
 
+    // -- RAW direct-listen: whitelisted mode lands (get_mode reads "RAW"), and
+    //    set_bandwidth on RAW is honestly refused (passthrough has no demod
+    //    filter to retune). Switch back to WFM afterwards so the later
+    //    get_status mode readback still matches. --
+    r = parseObj(hub.execute("set_mode", {{"mode", "RAW"}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(parseObj(hub.execute("get_mode", {})).value("mode").toString(),
+             QString("RAW"));
+    r = parseObj(hub.execute("set_bandwidth", {{"bandwidth_hz", 8000.0}}));
+    QVERIFY2(!r.value("ok").toBool(),
+             "set_bandwidth on RAW must be honestly refused (no demod filter)");
+    QVERIFY2(r.value("error").toString().contains(QString::fromUtf8("RAW")),
+             r.value("error").toString().toUtf8().constData());
+    r = parseObj(hub.execute("set_mode", {{"mode", "WFM"}}));
+    QVERIFY(r.value("ok").toBool());
+    r = parseObj(hub.execute("set_bandwidth", {{"bandwidth_hz", 8000.0}}));
+    QVERIFY(r.value("ok").toBool());
+
     // -- Gain / squelch / mute / ANR (no synchronous getter; just assert the
     //    command is accepted and echoed, and that nothing crashes). --
     r = parseObj(hub.execute("set_gain", {{"gain_db", 20.0}}));
