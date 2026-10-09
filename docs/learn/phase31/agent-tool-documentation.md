@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，47 个工具）
+# Agent 工具能力清单（自动生成，49 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -53,27 +53,27 @@ schema: {"properties":{"ppm":{"description":"要应用的 ppm 校正值（如 32
 
 ## get_pocsag_messages  [read 只读]
 description: 只读：读取指定（默认当前选中）信道已解码的 POCSAG 寻呼消息快照（地址 RIC/功能位/文本）。无解码结果时诚实返回空列表，不编造消息。
-schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
+schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 
 ## get_m17_calls  [read 只读]
 description: 只读：读取指定（默认当前选中）信道已解码的 M17 呼叫/帧快照（源/目的呼号、类型、CRC 状态、语音帧诚实标注未解码）。无解码结果时诚实返回空列表。
-schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
+schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 
 ## get_vor_radial  [read 只读]
 description: 只读：读取指定（默认当前选中）VOR 信道最新径向读数（radialDeg 方位、质量、莫尔斯识别码、锁定态）。未锁定时 locked=false，方位不可信并被显式标注，不编造方位。
-schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
+schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 
 ## get_acars_packets  [read 只读]
 description: 只读：读取指定（默认当前选中）信道已解码的 ACARS 航空报文快照（方向 air/ground、label、block id、ack、正文、CRC 结果）。无解码结果时诚实返回空列表，不编造报文。
-schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
+schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 
 ## get_navtex_messages  [read 只读]
 description: 只读：读取指定（默认当前选中）信道已解码的 NAVTEX 海上安全报文快照（发台 B1、类型 B2、编号、正文、时间分集/定相状态）。无解码结果时诚实返回空列表，不编造报文。
-schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
+schema: {"properties":{"channel_id":{"description":"可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道","type":"number"}},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 
 ## export_iq_segment  [write 写(手动模式拦截)]
@@ -82,8 +82,8 @@ schema: {"properties":{"sample_count":{"description":"导出复样本数，默�
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 export_iq_segment"}（不自动重试写动作）
 
 ## set_network_audio_sink  [write 写(手动模式拦截)]
-description: 写入：配置网络音频流输出（UDP/TCP 镜像当前解调音频）。enable 开关、port 端口、format 采样格式。属于写动作，手动模式下被拦截。
-schema: {"properties":{"enable":{"description":"是否开启网络音频流","type":"boolean"},"format":{"description":"采样格式，如 s16le","type":"string"},"port":{"description":"网络音频端口号","type":"number"}},"required":["enable","port"],"type":"object"}
+description: 写入：配置网络音频流输出（UDP/TCP 镜像当前解调音频）。enable 开关、port 端口、format 协议；可选 host 与 stereo。属于写动作，手动模式下被拦截。
+schema: {"properties":{"enable":{"description":"是否开启网络音频流","type":"boolean"},"format":{"description":"协议：udp 或 tcp（默认 udp）","type":"string"},"host":{"description":"绑定/对端主机（默认 127.0.0.1）","type":"string"},"port":{"description":"网络音频端口号 (1..65535)","type":"number"},"stereo":{"description":"立体声（默认 false=单声道）","type":"boolean"}},"required":["enable","port"],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_network_audio_sink"}（不自动重试写动作）
 
 ## get_network_audio_status  [read 只读]
@@ -116,6 +116,16 @@ description: 只读：返回静噪状态（enabled/threshold_db/auto/当前是�
 schema: {"properties":{},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 
+## set_ctcss  [write 写(手动模式拦截)]
+description: 写入：设置 CTCSS 亚音（enabled 开关、frequency_hz 亚音频率 67.0–254.1 Hz）。属于写动作，手动模式下被拦截；越界频率诚实拒绝，不静默钳位。
+schema: {"properties":{"enabled":{"description":"是否开启 CTCSS 亚音检测","type":"boolean"},"frequency_hz":{"description":"CTCSS 亚音频率 Hz（67.0–254.1，缺省沿用当前/默认 88.5）","maximum":254.1,"minimum":67,"type":"number"}},"required":["enabled"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_ctcss"}（不自动重试写动作）
+
+## get_ctcss_status  [read 只读]
+description: 只读：返回 CTCSS 亚音状态（enabled 是否使能、frequency_hz 调谐频率、active 是否真实检测到亚音）。无信号/未使能时 active 诚实为 false，不编造。
+schema: {"properties":{},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
 ## set_noise_blanker  [write 写(手动模式拦截)]
 description: 写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。
 schema: {"properties":{"on":{"description":"是否开启噪声抑制","type":"boolean"}},"required":["on"],"type":"object"}
@@ -132,8 +142,8 @@ schema: {"properties":{},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 
 ## add_bookmark  [write 写(手动模式拦截)]
-description: 写入：添加书签（freq_hz/name/mode）。属于写动作，手动模式下被拦截。
-schema: {"properties":{"freq_hz":{"description":"书签频率 Hz","maximum":1700000000,"minimum":24000000,"type":"number"},"mode":{"description":"解调模式，如 NFM/AM","type":"string"},"name":{"description":"书签名称","type":"string"}},"required":["freq_hz"],"type":"object"}
+description: 写入：添加书签（freq_hz/name/mode/bandwidth_hz/group）。属于写动作，手动模式下被拦截。
+schema: {"properties":{"bandwidth_hz":{"description":"书签带宽 Hz（可选）","type":"number"},"freq_hz":{"description":"书签频率 Hz","maximum":1700000000,"minimum":24000000,"type":"number"},"group":{"description":"书签分组名（可选）","type":"string"},"mode":{"description":"解调模式，如 NFM/AM","type":"string"},"name":{"description":"书签名称","type":"string"}},"required":["freq_hz"],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 add_bookmark"}（不自动重试写动作）
 
 ## tune_to_bookmark  [write 写(手动模式拦截)]
@@ -172,18 +182,18 @@ schema: {"properties":{"enabled":{"description":"true=后台并行监听，false
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_vfo_armed"}（不自动重试写动作）
 
 ## set_vfo_frequency  [write 写(手动模式拦截)]
-description: 写入：把指定 VFO 调谐到新频率（index/freq_hz）。属于写动作，手动模式下被拦截。
-schema: {"properties":{"freq_hz":{"description":"目标频率（Hz）","type":"number"},"index":{"description":"VFO 序号（list_vfos 返回顺序）","type":"number"}},"required":["index","freq_hz"],"type":"object"}
+description: 写入：把指定 VFO 调谐到新频率（index 或 id 二选一 + freq_hz）。属于写动作，手动模式下被拦截。
+schema: {"properties":{"freq_hz":{"description":"目标频率（Hz）","type":"number"},"index":{"description":"VFO 序号（list_vfos 返回顺序；亦可改用 id 直传 VFO id）","type":"number"}},"required":["index","freq_hz"],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_vfo_frequency"}（不自动重试写动作）
 
 ## set_vfo_mode  [write 写(手动模式拦截)]
-description: 写入：切换指定 VFO 的解调模式（index/mode，mode 取值见 ControlHub 模式表：AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX）。属于写动作，手动模式下被拦截。
-schema: {"properties":{"index":{"description":"VFO 序号（list_vfos 返回顺序）","type":"number"},"mode":{"description":"解调模式（大小写不敏感）","type":"string"}},"required":["index","mode"],"type":"object"}
+description: 写入：切换指定 VFO 的解调模式（index 或 id 二选一 + mode，mode 取值见 ControlHub 模式表：AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX）。属于写动作，手动模式下被拦截。
+schema: {"properties":{"index":{"description":"VFO 序号（list_vfos 返回顺序；亦可改用 id 直传 VFO id）","type":"number"},"mode":{"description":"解调模式（大小写不敏感）","type":"string"}},"required":["index","mode"],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_vfo_mode"}（不自动重试写动作）
 
 ## set_vfo_bandwidth  [write 写(手动模式拦截)]
-description: 写入：设置指定 VFO 的信道带宽（index/bandwidth_hz）。属于写动作，手动模式下被拦截。
-schema: {"properties":{"bandwidth_hz":{"description":"信道带宽（Hz）","type":"number"},"index":{"description":"VFO 序号（list_vfos 返回顺序）","type":"number"}},"required":["index","bandwidth_hz"],"type":"object"}
+description: 写入：设置指定 VFO 的信道带宽（index 或 id 二选一 + bandwidth_hz）。属于写动作，手动模式下被拦截。
+schema: {"properties":{"bandwidth_hz":{"description":"信道带宽（Hz）","type":"number"},"index":{"description":"VFO 序号（list_vfos 返回顺序；亦可改用 id 直传 VFO id）","type":"number"}},"required":["index","bandwidth_hz"],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_vfo_bandwidth"}（不自动重试写动作）
 
 ## list_recordings  [read 只读]
@@ -202,8 +212,8 @@ schema: {"properties":{"name":{"description":"录制文件名（仅文件名）"
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 export_recording"}（不自动重试写动作）
 
 ## set_fft_params  [write 写(手动模式拦截)]
-description: 写入：设置频谱 FFT 参数（fft_size/window/average）。属于写动作，手动模式下被拦截。
-schema: {"properties":{"average":{"description":"平均模式","enum":["Off","Slow","Fast"],"type":"string"},"fft_size":{"description":"FFT 点数，如 1024/2048/4096/8192","maximum":65536,"minimum":256,"type":"number"},"window":{"description":"窗函数","enum":["Hann","Flattop","Blackman"],"type":"string"}},"required":["fft_size"],"type":"object"}
+description: 写入：设置频谱 FFT 参数（fft_size/window/average）。window/average 接受字符串枚举（推荐）或原始整数 0/1/2。属于写动作，手动模式下被拦截。
+schema: {"properties":{"average":{"description":"平均模式（亦接受整数 0=Off/1=Slow/2=Fast）","enum":["Off","Slow","Fast"],"type":"string"},"fft_size":{"description":"FFT 点数，如 1024/2048/4096/8192","maximum":65536,"minimum":256,"type":"number"},"window":{"description":"窗函数（亦接受整数 0=Hann/1=Flattop/2=Blackman）","enum":["Hann","Flattop","Blackman"],"type":"string"}},"required":["fft_size"],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_fft_params"}（不自动重试写动作）
 
 ## set_color_map  [write 写(手动模式拦截)]
