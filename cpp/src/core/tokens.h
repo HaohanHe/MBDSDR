@@ -299,7 +299,21 @@ inline constexpr int    kDbSpinUpperMin = -40;    // upper spinbox allowed min
 inline constexpr int    kDbSpinUpperMax = 20;     // upper spinbox allowed max
 inline constexpr int    kDbLowerDefault = -100;
 inline constexpr int    kDbUpperDefault = 0;
-inline constexpr int    kDbGridStep = 20;         // dB gridline spacing
+// dB reference gridline spacing (dB between horizontal grid lines + y labels).
+// Selectable from the spectrum toolbar (格线 combo): denser (10 dB) for a finer
+// y-axis ruler, sparser (40 dB) for a cleaner plot. Only the named tiers below
+// are offered; a persisted value outside the set (hand-edited config) honestly
+// resolves to kDbGridStepDefault (20) rather than being clamped into an arbitrary
+// continuous band. The canvas ctor reads kSettingsKeyDbGridStep so the very first
+// frame already uses the user's chosen density; the toolbar combo is the live
+// reflection + the change entry point.
+inline constexpr int    kDbGridStep10 = 10;       // 密: 细 y 轴标尺
+inline constexpr int    kDbGridStep20 = 20;       // 默认
+inline constexpr int    kDbGridStep40 = 40;       // 疏: 干净绘图
+inline constexpr int    kDbGridStepChoices[] = {
+    kDbGridStep10, kDbGridStep20, kDbGridStep40 };
+inline constexpr int    kDbGridStepDefault = kDbGridStep20;
+inline constexpr const char* kSettingsKeyDbGridStep = "view/dbGridStep";
 
 // Horizontal zoom (display-only, does not touch the engine)
 inline constexpr double kZoomMin = 1.0;

@@ -114,6 +114,29 @@ float loadRequestedMaxHoldDecay() {
     if (!ok || !std::isfinite(d)) return tokens::kMaxHoldDecayDefault;
     return legalMaxHoldDecay(static_cast<float>(d));
 }
+
+// Resolve a requested dB gridline spacing (dB) to a legal tier. Only the named
+// tokens::kDbGridStepChoices[] are honoured; a value outside that set (hand-edited
+// config) honestly falls back to tokens::kDbGridStepDefault. There is no continuous
+// band to clamp into: the combo offers exactly three ruler densities (10/20/40),
+// so an unknown number is rejected outright rather than silently re-interpreted.
+int legalDbGridStep(int db) {
+    for (int c : tokens::kDbGridStepChoices)
+        if (c == db) return c;
+    return tokens::kDbGridStepDefault;
+}
+
+// Read the persisted dB gridline spacing back on construction. Missing key,
+// non-numeric value, or a value outside the named choice set => honest default
+// (20 dB). Mirrors the QSettings("MBDSDR","MBDSDR") group used app-wide.
+int loadRequestedDbGridStep() {
+    QSettings s("MBDSDR", "MBDSDR");
+    const QVariant v = s.value(tokens::kSettingsKeyDbGridStep);
+    bool ok = false;
+    const int db = v.toInt(&ok);
+    if (!ok) return tokens::kDbGridStepDefault;
+    return legalDbGridStep(db);
+}
 } // namespace
 
 SpectrumDisplay::SpectrumDisplay(QWidget* parent)
@@ -130,6 +153,9 @@ SpectrumDisplay::SpectrumDisplay(QWidget* parent)
     // Restore the user's chosen peak-hold decay tier (honest default if unset or
     // illegal). The very first setSpectrum() honours maxHoldDecayDb_.
     maxHoldDecayDb_ = loadRequestedMaxHoldDecay();
+    // Restore the user's chosen dB gridline density (honest default if unset or
+    // illegal). The very first paint draws the horizontal grid at the chosen step.
+    dbGridStepDb_ = loadRequestedDbGridStep();
 }
 
 // ---------------------------------------------------------------------------
@@ -634,6 +660,15 @@ void SpectrumDisplay::setMaxHoldDecayDb(float db) {
     update();
 }
 
+void SpectrumDisplay::setDbGridStepDb(int db) {
+    // Only the named 10/20/40 dB tiers are honoured; anything else falls back to
+    // the default (20 dB) rather than being clamped into a continuous band that has
+    // no meaning for a y-axis ruler. The very next paintEvent() re-draws the grid
+    // at the new step, so a switch is honoured immediately (no frame deferral).
+    dbGridStepDb_ = legalDbGridStep(db);
+    update();
+}
+
 void SpectrumDisplay::setMinHoldEnabled(bool on) {
     minHoldOn_ = on;
     if (!on) {
@@ -901,8 +936,9 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
     p.fillRect(trace, QColor(tokens::kSpectrumBg));
     QPen gridPen(tokens::rgbaA(tokens::kTextAlphaFaint), 1);
     p.setPen(gridPen);
-    for (float db = std::ceil(dbFloorDb_ / tokens::kDbGridStep) * tokens::kDbGridStep;
-         db <= dbCeilDb_; db += tokens::kDbGridStep) {
+    const float gridStep = static_cast<float>(dbGridStepDb_);
+    for (float db = std::ceil(dbFloorDb_ / gridStep) * gridStep;
+         db <= dbCeilDb_; db += gridStep) {
         const int y = dbToY(db);
         p.drawLine(trace.left(), y, trace.right(), y);
         p.drawText(trace.left() + tokens::scaled(tokens::kDbLabelPadR),

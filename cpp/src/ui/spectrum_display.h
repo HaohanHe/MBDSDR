@@ -109,6 +109,14 @@ public slots:
     void setMaxHoldDecayDb(float db);
     float maxHoldDecayDbForTest() const { return maxHoldDecayDb_; }
 
+    // dB reference gridline spacing (dB between horizontal grid lines + y labels).
+    // Only the named tokens::kDbGridStepChoices[] tiers are honoured; anything else
+    // (hand-edited config) honestly falls back to tokens::kDbGridStepDefault. The
+    // ctor reads the persisted value so the very first paint already uses the
+    // user's chosen grid density.
+    void setDbGridStepDb(int db);
+    int dbGridStepForTest() const { return dbGridStepDb_; }
+
     // ---- Minimum-hold envelope (SDR++ "min hold") -------------------------
     // The per-bin running MINIMUM of every frame (symmetric to the max-hold
     // above). Unlike max-hold this envelope has NO decay: it takes each frame's
@@ -438,6 +446,13 @@ private:
     // pre-ctor safety value. Kept as a literal to avoid pulling tokens.h into this
     // widget header (mirrors requestedRingDepth_).
     float maxHoldDecayDb_ = 1.5f;
+
+    // dB reference gridline spacing (dB between horizontal grid lines). In-class
+    // default 20 matches tokens::kDbGridStepDefault; the ctor overrides this with
+    // the persisted + validated value (loadRequestedDbGridStep()), so this literal
+    // is only a pre-ctor safety value. Kept as a literal to avoid pulling tokens.h
+    // into this widget header (mirrors maxHoldDecayDb_).
+    int dbGridStepDb_ = 20;
 
     // Min-hold envelope (running per-bin minimum, no decay; +inf = "unset").
     std::vector<float> minHold_;

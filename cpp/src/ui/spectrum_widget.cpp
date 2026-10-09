@@ -353,6 +353,42 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     });
     topRow->addWidget(autoDbBtn);
 
+    // ---- dB reference gridline density (格线 10/20/40 dB) -------------------
+    // Merged into the existing dB-axis row (zero new buttons): picks the spacing
+    // between horizontal dB reference lines (and y labels). The canvas ctor ALSO
+    // reads kSettingsKeyDbGridStep, so the chosen density is honoured on the very
+    // first frame even before any combo interaction; the combo is the live UI
+    // reflection + the change entry point. Mirrors the decayCombo pattern:
+    // setCurrentIndex BEFORE connect so construction cannot fire the lambda
+    // against a not-yet-existing canvas_.
+    topRow->addWidget(new QLabel("格线", this));
+    auto* gridCombo = new QComboBox(this);
+    gridCombo->setObjectName("dbGridStepCombo");
+    gridCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    for (int step : tokens::kDbGridStepChoices)
+        gridCombo->addItem(QString("%1 dB").arg(step), step);
+    gridCombo->setToolTip("dB 参考格线密度：相邻水平格线（及 y 轴刻度）间距（dB）");
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        const int persisted = s.value(tokens::kSettingsKeyDbGridStep,
+                                      tokens::kDbGridStepDefault).toInt();
+        int idx = 1;   // default 20 dB is the middle entry of {10,20,40}
+        int i = 0;
+        for (int c : tokens::kDbGridStepChoices) {
+            if (c == persisted) idx = i;
+            ++i;
+        }
+        gridCombo->setCurrentIndex(idx);
+    }
+    connect(gridCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, gridCombo](int idx) {
+        const int step = gridCombo->itemData(idx).toInt();
+        QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeyDbGridStep, step);
+        if (canvas_) canvas_->setDbGridStepDb(step);
+        emit viewChanged();
+    });
+    topRow->addWidget(gridCombo);
+
     topRow->addWidget(new QLabel("门限", this));
     peakThreshSpin_ = new QSpinBox(this);
     peakThreshSpin_->setRange(tokens::kPeakThresholdMin, tokens::kPeakThresholdMax);

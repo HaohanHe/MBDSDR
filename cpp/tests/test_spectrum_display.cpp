@@ -60,6 +60,10 @@ private slots:
     void waterfallDepthChangeRebuildsRing();
     void waterfallDepthInvalidFallsBackToDefault();
     void waterfallDepthPersistsRoundTrip();
+    void dbGridStepDefaultsTo20();
+    void dbGridStepSetterHonoursTier();
+    void dbGridStepPersistsRoundTrip();
+    void dbGridStepInvalidFallsBack();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -113,6 +117,7 @@ void TestSpectrumDisplay::initTestCase() {
         tokens::kSettingsKeyScrollSpeed,
         tokens::kSettingsKeyPalette,
         tokens::kSettingsKeyWfDepth,
+        tokens::kSettingsKeyDbGridStep,
         QStringLiteral("rx/peakThresholdDb"),
     };
     QSettings s("MBDSDR", "MBDSDR");
@@ -997,6 +1002,100 @@ void TestSpectrumDisplay::waterfallDepthPersistsRoundTrip() {
         w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
         QCOMPARE(w.ringDepthForTest(), 256);
     }
+}
+
+// With no persisted key the dB reference gridline step must come up at the named
+// default (20 dB), both as the ctor-read value. No invented density.
+void TestSpectrumDisplay::dbGridStepDefaultsTo20() {
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyDbGridStep);
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    QCOMPARE(w.dbGridStepForTest(), tokens::kDbGridStepDefault);
+    QCOMPARE(w.dbGridStepForTest(), 20);
+}
+
+// The setter honours exactly the named 10/20/40 dB tiers. A denser ruler (10)
+// yields more grid lines than a sparser one (40) for the SAME dB range:
+//   lines(step) = ceil(range/step)+1, so 10 dB > 20 dB > 40 dB.
+void TestSpectrumDisplay::dbGridStepSetterHonoursTier() {
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyDbGridStep);
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+
+    w.setDbGridStepDb(tokens::kDbGridStep10);
+    QCOMPARE(w.dbGridStepForTest(), 10);
+    w.setDbGridStepDb(tokens::kDbGridStep20);
+    QCOMPARE(w.dbGridStepForTest(), 20);
+    w.setDbGridStepDb(tokens::kDbGridStep40);
+    QCOMPARE(w.dbGridStepForTest(), 40);
+
+    // Honest grid-line count for a fixed [-100,0] range must be strictly ordered
+    // by density: 10 dB -> 11 lines, 20 dB -> 6, 40 dB -> 3.
+    auto gridLines = [](int step) {
+        int n = 0;
+        for (float db = std::ceil(-100.0f / step) * step; db <= 0.0f; db += step)
+            ++n;
+        return n;
+    };
+    QVERIFY2(gridLines(10) > gridLines(20) && gridLines(20) > gridLines(40),
+             "denser dB step must draw strictly more grid lines over the same range");
+    QCOMPARE(gridLines(10), 11);
+    QCOMPARE(gridLines(20), 6);
+    QCOMPARE(gridLines(40), 3);
+}
+
+// Persistence round trip: a fresh instance must read kSettingsKeyDbGridStep in its
+// ctor and come up at the stored density (the toolbar combo is just the live
+// reflection). Writes then removes the real key so the user's config is untouched.
+void TestSpectrumDisplay::dbGridStepPersistsRoundTrip() {
+    QSettings s("MBDSDR", "MBDSDR");
+
+    s.setValue(tokens::kSettingsKeyDbGridStep, 10);
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        QCOMPARE(w.dbGridStepForTest(), 10);
+    }
+
+    s.setValue(tokens::kSettingsKeyDbGridStep, 40);
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        QCOMPARE(w.dbGridStepForTest(), 40);
+    }
+
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyDbGridStep);
+}
+
+// An out-of-set or non-numeric persisted grid step honestly resolves to the
+// default (20) -- there is no continuous band to clamp into, only the named
+// choices (mirrors the waterfall-depth invalid case).
+void TestSpectrumDisplay::dbGridStepInvalidFallsBack() {
+    QSettings s("MBDSDR", "MBDSDR");
+
+    // Out-of-set number -> default.
+    s.setValue(tokens::kSettingsKeyDbGridStep, 99);
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        QCOMPARE(w.dbGridStepForTest(), tokens::kDbGridStepDefault);
+    }
+
+    // Non-numeric garbage -> default.
+    s.setValue(tokens::kSettingsKeyDbGridStep, QStringLiteral("bogus-grid"));
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        QCOMPARE(w.dbGridStepForTest(), tokens::kDbGridStepDefault);
+    }
+
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyDbGridStep);
 }
 
 QTEST_MAIN(TestSpectrumDisplay)
