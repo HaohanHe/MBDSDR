@@ -65,6 +65,20 @@ int main(int argc, char** argv) {
         s.sync();
     }
 
+    // Optional: seed the persisted peak-hold decay tier (MBD_MHDECAY=0.5/1.5/3.0)
+    // BEFORE MainWindow restores it, so both the spectrum "衰减" combo AND the
+    // canvas maxHold step come up at the chosen 慢/中/快 tier -- the real persisted
+    // round-trip, not a post-hoc poke. The throwaway QSettings path above keeps
+    // this off the user's data. A value outside the named set honestly resolves
+    // to the default (1.5). Off by default so every other shot is unchanged.
+    const double mhDecaySeed =
+        QString::fromLocal8Bit(qgetenv("MBD_MHDECAY")).toDouble();
+    if (mhDecaySeed > 0.0) {
+        QSettings s("MBDSDR", "MBDSDR");
+        s.setValue(mbdsdr::tokens::kSettingsKeyMaxHoldDecay, mhDecaySeed);
+        s.sync();
+    }
+
     // Optional: seed the persisted Rx demod-mode + bandwidth (MBD_MODE=USB
     // MBD_BW=9000) BEFORE MainWindow restores it, so the left "解调" / "带宽"
     // combos render the restored values -- the real persisted round-trip, not a

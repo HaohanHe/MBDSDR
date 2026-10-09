@@ -173,6 +173,44 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     });
     topRow->addWidget(maxRst);
 
+    // ---- Peak-hold decay rate (慢/中/快) ----------------------------------
+    // Merged into the existing Max/Rst peak row (zero new buttons): picks how fast
+    // the held peak eases down each rendered frame. Labels read a fall-off SPEED,
+    // not a raw dB number; itemData carries the honest dB/frame tier. The canvas
+    // ctor ALSO reads kSettingsKeyMaxHoldDecay, so the chosen tier is honoured on
+    // the very first frame even before any combo interaction; the combo is the
+    // live UI reflection + the change entry point. Mirrors the depthCombo pattern:
+    // setCurrentIndex BEFORE connect so construction cannot fire the lambda against
+    // a not-yet-existing canvas_.
+    topRow->addWidget(new QLabel("衰减", this));
+    auto* decayCombo = new QComboBox(this);
+    decayCombo->setObjectName("maxHoldDecayCombo");
+    decayCombo->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    decayCombo->addItem("慢", tokens::kMaxHoldDecaySlow);     // 0.5 dB/frame
+    decayCombo->addItem("中", tokens::kMaxHoldDecayMedium);  // 1.5 dB/frame (default)
+    decayCombo->addItem("快", tokens::kMaxHoldDecayFast);     // 3.0 dB/frame
+    decayCombo->setToolTip("峰值保持衰减速率：慢=峰值久留，快=峰值快落（dB/帧）");
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        const double persisted = s.value(tokens::kSettingsKeyMaxHoldDecay,
+                                        tokens::kMaxHoldDecayDefault).toDouble();
+        int idx = 1;   // default 中 (1.5) is the middle entry
+        int i = 0;
+        for (float c : tokens::kMaxHoldDecayChoices) {
+            if (std::abs(c - persisted) < 1e-6f) idx = i;
+            ++i;
+        }
+        decayCombo->setCurrentIndex(idx);
+    }
+    connect(decayCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this, decayCombo](int idx) {
+        const double db = decayCombo->itemData(idx).toDouble();
+        QSettings("MBDSDR", "MBDSDR").setValue(tokens::kSettingsKeyMaxHoldDecay, db);
+        if (canvas_) canvas_->setMaxHoldDecayDb(static_cast<float>(db));
+        emit viewChanged();
+    });
+    topRow->addWidget(decayCombo);
+
     // ---- Min-hold overlay (symmetric to Max above) ------------------------
     // A second trace overlay: the running per-bin minimum (no decay). Independent
     // of max-hold so both can be on together. Toggling it off then on re-arms a
