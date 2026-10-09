@@ -14,6 +14,7 @@
 #include <QGroupBox>
 #include <QDir>
 #include <QSplitter>
+#include <QTableWidget>
 #include <cstdlib>
 #include <cmath>
 #include "core/tokens.h"
@@ -282,6 +283,30 @@ int main(int argc, char** argv) {
             };
             for (const auto& r : rows) bm->add(r);
             win.refreshScanBookmarksUi();
+        }
+    }
+
+    // Optional: collapse a named bookmark group (MBD_BMKCOLLAPSE=VHF) by the real
+    // cellClicked path on its section header, so the shot shows the ▸ collapsed
+    // state -- the header keeps its real "(N)" count while that group's rows are
+    // hidden. Pure UI state on top of MBD_BMKGROUP's real store; off by default.
+    if (qgetenv("MBD_BMKCOLLAPSE").size()) {
+        const QString want = QString::fromUtf8(qgetenv("MBD_BMKCOLLAPSE"));
+        if (auto* tbl = win.findChild<QTableWidget*>("bmTable")) {
+            for (int v = 0; v < tbl->rowCount(); ++v) {
+                auto* it = tbl->item(v, 0);
+                if (it && it->data(Qt::UserRole).toInt() == -1 &&
+                    it->text().contains(want)) {
+                    QMetaObject::invokeMethod(tbl, "cellClicked",
+                                              Qt::DirectConnection,
+                                              Q_ARG(int, v), Q_ARG(int, 0));
+                    // The right rail stacks several group boxes above the table,
+                    // so the collapsed header can sit below the table viewport;
+                    // scroll it into view for the shot.
+                    tbl->scrollToBottom();
+                    break;
+                }
+            }
         }
     }
 

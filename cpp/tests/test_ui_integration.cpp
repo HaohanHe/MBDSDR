@@ -66,6 +66,11 @@ private slots:
     // state, UserRole keeps visual-row -> store-index mapping, retune on the
     // grouped layout, and a group re-assign rebuilds the partitions.
     void bmGroupedViewSectionsEmptyStateAndIndexMapping();
+    // Phase63: bookmark group collapse/expand -- clicking a section header hides
+    // that group's rows (store untouched, "(N)" stays the real total), clicking
+    // again restores them, and adding a bookmark into a collapsed group expands
+    // it so the fresh row is honestly visible (other groups keep their state).
+    void bmGroupCollapseToggleHidesRowsKeepsCountAndNewRowVisible();
     void squelchAutoFollowsSameDomainFloor();
     void vfoCopyDuplicatesSourceParams();
     void vfoDoubleClickSwitchesActive();
@@ -344,8 +349,8 @@ void TestUiIntegration::bmGroupedViewSectionsEmptyStateAndIndexMapping() {
     QVERIFY2(bmTable->item(0, 0)->text().contains(QString::fromUtf8("默认 (1)")),
              qPrintable(QString("default group header must read 默认 (1), got: %1")
                             .arg(bmTable->item(0, 0)->text())));
-    QCOMPARE(bmTable->item(2, 0)->text(), QStringLiteral("AIR (1)"));
-    QCOMPARE(bmTable->item(4, 0)->text(), QStringLiteral("VHF (2)"));
+    QCOMPARE(bmTable->item(2, 0)->text(), QStringLiteral("▾ AIR (1)"));
+    QCOMPARE(bmTable->item(4, 0)->text(), QStringLiteral("▾ VHF (2)"));
     QCOMPARE(bmTable->item(0, 0)->data(Qt::UserRole).toInt(), -1);
     QCOMPARE(bmTable->item(2, 0)->data(Qt::UserRole).toInt(), -1);
     QCOMPARE(bmTable->item(4, 0)->data(Qt::UserRole).toInt(), -1);
@@ -380,13 +385,143 @@ void TestUiIntegration::bmGroupedViewSectionsEmptyStateAndIndexMapping() {
     QVERIFY2(bmTable->item(0, 0)->text().contains(QString::fromUtf8("默认 (2)")),
              qPrintable(QString("re-group must rebuild 默认 (2), got: %1")
                             .arg(bmTable->item(0, 0)->text())));
-    QCOMPARE(bmTable->item(3, 0)->text(), QStringLiteral("AIR (1)"));
-    QCOMPARE(bmTable->item(5, 0)->text(), QStringLiteral("VHF (1)"));
+    QCOMPARE(bmTable->item(3, 0)->text(), QStringLiteral("▾ AIR (1)"));
+    QCOMPARE(bmTable->item(5, 0)->text(), QStringLiteral("▾ VHF (1)"));
     // Fresh list order: 默认98.5=0, 默认144.8=1, AIR127.6=2, VHF145.05=3.
     QCOMPARE(bmTable->item(1, 0)->data(Qt::UserRole).toInt(), 0);
     QCOMPARE(bmTable->item(2, 0)->data(Qt::UserRole).toInt(), 1);
     QCOMPARE(bmTable->item(4, 0)->data(Qt::UserRole).toInt(), 2);
     QCOMPARE(bmTable->item(6, 0)->data(Qt::UserRole).toInt(), 3);
+}
+
+// Find the visual row of a group's section header by its rendered "组名 (" text
+// prefix (section rows carry UserRole == -1). Returns -1 if not found.
+static int findBmHeaderRow(QTableWidget* t, const QString& groupDisp) {
+    for (int v = 0; v < t->rowCount(); ++v) {
+        auto* it = t->item(v, 0);
+        if (it && it->data(Qt::UserRole).toInt() == -1 &&
+            it->text().contains(groupDisp))
+            return v;
+    }
+    return -1;
+}
+
+void TestUiIntegration::bmGroupCollapseToggleHidesRowsKeepsCountAndNewRowVisible() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    auto* bmTable = win.findChild<QTableWidget*>("bmTable");
+    auto* bm = win.bookmarkManager();
+    QVERIFY(bmTable && bm);
+
+    bm->clear();
+    win.refreshScanBookmarksUi();
+    // Seed three groups: 默认(1) AIR(1) VHF(2) -> 3 headers + 4 data = 7 rows.
+    bm->add(ui::Bookmark{"默认台",  98.5e6,   "WFM", 120000.0, ""    });
+    bm->add(ui::Bookmark{"航空",    127.6e6,  "AM",  8000.0,   "AIR" });
+    bm->add(ui::Bookmark{"Simplex", 144.8e6,  "NFM", 12500.0,  "VHF" });
+    bm->add(ui::Bookmark{"中继",    145.05e6, "NFM", 12500.0,  "VHF" });
+    win.refreshScanBookmarksUi();
+    QCOMPARE(bm->count(), 4);
+    QCOMPARE(bmTable->rowCount(), 7);
+
+    // --- Collapse the VHF group by the real cellClicked path on its header. ---
+    int vhfHead = findBmHeaderRow(bmTable, QStringLiteral("VHF ("));
+    QVERIFY2(vhfHead >= 0, "VHF section header must exist before collapse");
+    QMetaObject::invokeMethod(bmTable, "cellClicked", Qt::DirectConnection,
+                              Q_ARG(int, vhfHead), Q_ARG(int, 0));
+    QApplication::processEvents();
+
+    // 3 headers remain; the 2 VHF data rows are gone -> 5 visual rows.
+    QCOMPARE(bmTable->rowCount(), 5);
+    // The header flips to the ▸ collapsed glyph but keeps the REAL total (2).
+    QVERIFY2(bmTable->item(vhfHead, 0)->text().startsWith(QString::fromUtf8("▸")),
+             qPrintable(QString("collapsed VHF header must start with ▸, got: %1")
+                            .arg(bmTable->item(vhfHead, 0)->text())));
+    QVERIFY2(bmTable->item(vhfHead, 0)->text().endsWith(QStringLiteral("(2)")),
+             qPrintable(QString("collapsed count must stay the real (2), got: %1")
+                            .arg(bmTable->item(vhfHead, 0)->text())));
+    // Store is untouched: collapse hides rows only.
+    QCOMPARE(bm->count(), 4);
+    // The VHF data rows (store idx 2 = 144.8, idx 3 = 145.05) are no longer in
+    // the table; the other two groups' rows are still there.
+    bool saw144 = false, saw145 = false;
+    for (int v = 0; v < bmTable->rowCount(); ++v) {
+        const int idx = bmTable->item(v, 0)->data(Qt::UserRole).toInt();
+        if (idx == 2) saw144 = true;
+        if (idx == 3) saw145 = true;
+    }
+    QVERIFY2(!saw144 && !saw145, "collapsed VHF rows must be hidden from the table");
+    QCOMPARE(bmTable->item(1, 0)->data(Qt::UserRole).toInt(), 0);  // 默认 row kept
+    QCOMPARE(bmTable->item(3, 0)->data(Qt::UserRole).toInt(), 1);  // AIR row kept
+
+    // --- Click the same header again -> expand restores the rows exactly. ---
+    QMetaObject::invokeMethod(bmTable, "cellClicked", Qt::DirectConnection,
+                              Q_ARG(int, vhfHead), Q_ARG(int, 0));
+    QApplication::processEvents();
+    QCOMPARE(bmTable->rowCount(), 7);
+    QVERIFY2(bmTable->item(vhfHead, 0)->text().startsWith(QString::fromUtf8("▾")),
+             qPrintable(QString("expanded VHF header must start with ▾, got: %1")
+                            .arg(bmTable->item(vhfHead, 0)->text())));
+    QCOMPARE(bmTable->item(5, 0)->data(Qt::UserRole).toInt(), 2);
+    QCOMPARE(bmTable->item(6, 0)->data(Qt::UserRole).toInt(), 3);
+
+    // --- Collapse VHF again, then add a bookmark INTO VHF via the real add
+    // button: the target group must auto-expand so the fresh row is visible. ---
+    QMetaObject::invokeMethod(bmTable, "cellClicked", Qt::DirectConnection,
+                              Q_ARG(int, vhfHead), Q_ARG(int, 0));
+    QApplication::processEvents();
+    QCOMPARE(bmTable->rowCount(), 5);
+
+    // Auto-fill the modal add dialog: name + group=VHF, then accept.
+    QTimer::singleShot(300, [&]() {
+        auto* dlg = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        if (!dlg) return;
+        // The form's own QLineEdits are direct children of the dialog (the
+        // QDoubleSpinBoxes embed their own private line edits, which must not be
+        // touched). Of the two direct fields, 名称 carries the seeded-MHz
+        // placeholder and 分组 is blank -- pick them by that honest signature.
+        QLineEdit* nameEdit = nullptr;
+        QLineEdit* groupEdit = nullptr;
+        for (QLineEdit* le : dlg->findChildren<QLineEdit*>()) {
+            if (le->parent() != dlg) continue;   // skip spinbox-embedded editors
+            if (!le->placeholderText().isEmpty()) nameEdit = le;
+            else                                  groupEdit = le;
+        }
+        if (nameEdit)  nameEdit->setText(QString::fromUtf8("折叠组新行"));
+        if (groupEdit) groupEdit->setText(QStringLiteral("VHF"));
+        auto* bb = dlg->findChild<QDialogButtonBox*>();
+        if (bb && bb->button(QDialogButtonBox::Ok))
+            bb->button(QDialogButtonBox::Ok)->click();
+    });
+    bmTable->clearSelection();
+    win.findChild<QPushButton*>("bmAddBtn")->click();   // blocks until dialog accepted
+    QApplication::processEvents();
+
+    QCOMPARE(bm->count(), 5);
+    // VHF auto-expanded: header back to ▾ and now reads the real total (3).
+    vhfHead = findBmHeaderRow(bmTable, QStringLiteral("VHF ("));
+    QVERIFY2(vhfHead >= 0, "VHF header must be present after auto-expand");
+    QVERIFY2(bmTable->item(vhfHead, 0)->text().startsWith(QString::fromUtf8("▾")),
+             qPrintable(QString("new-row group must expand to ▾, got: %1")
+                            .arg(bmTable->item(vhfHead, 0)->text())));
+    QVERIFY2(bmTable->item(vhfHead, 0)->text().endsWith(QStringLiteral("(3)")),
+             qPrintable(QString("new-row group count must be the real (3), got: %1")
+                            .arg(bmTable->item(vhfHead, 0)->text())));
+    // The fresh bookmark's row is on screen (find its store index in UserRole).
+    int newIdx = -1;
+    for (int i = 0; i < bm->list().size(); ++i)
+        if (bm->list().at(i).name == QString::fromUtf8("折叠组新行")) newIdx = i;
+    QVERIFY2(newIdx >= 0, "the added bookmark must be in the real store");
+    bool newRowVisible = false;
+    for (int v = 0; v < bmTable->rowCount(); ++v)
+        if (bmTable->item(v, 0)->data(Qt::UserRole).toInt() == newIdx) newRowVisible = true;
+    QVERIFY2(newRowVisible, "a bookmark added into a collapsed group must render visible");
+    // The default + AIR groups were untouched by the VHF auto-expand.
+    QVERIFY2(findBmHeaderRow(bmTable, QStringLiteral("默认 (")) >= 0,
+             "default group header must survive");
+    QVERIFY2(findBmHeaderRow(bmTable, QStringLiteral("AIR (")) >= 0,
+             "AIR group header must survive");
 }
 
 void TestUiIntegration::squelchAutoFollowsSameDomainFloor() {
