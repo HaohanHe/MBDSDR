@@ -241,6 +241,10 @@ private:
     // Noise blanker toggle + real read-back (engine exposes both).
     QJsonObject cmdSetNoiseBlanker(const QJsonObject& a);
     QJsonObject cmdGetNoiseBlankerStatus(const QJsonObject&);
+    // CTCSS tone-squelch set (enabled required; frequency_hz optional, out-of-
+    // domain rejected here, not silently clamped) + real read-back.
+    QJsonObject cmdSetCtcss(const QJsonObject& a);
+    QJsonObject cmdGetCtcssStatus(const QJsonObject&);
     // Bookmarks (ControlHub holds a ui::BookmarkManager; same QSettings key).
     QJsonObject cmdListBookmarks(const QJsonObject&);
     QJsonObject cmdAddBookmark(const QJsonObject& a);

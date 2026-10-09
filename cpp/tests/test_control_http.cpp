@@ -130,6 +130,8 @@ private slots:
     // Noise blanker toggle + read-back ride the same generic POST /command ->
     // ControlHub.execute() delegation (HTTP needs no per-route handler).
     void postCommandNoiseBlankerRoute();
+    // CTCSS set + read-back ride the same generic POST /command delegation.
+    void postCommandCtcssRoute();
 };
 
 void TestControlHttp::initTestCase() {
@@ -548,6 +550,61 @@ void TestControlHttp::postCommandNoiseBlankerRoute() {
     QVERIFY(!g.value("ok").toBool());
     QVERIFY(g.value("gated").toBool());
     QCOMPARE(eng.noiseBlankerEnabled(), true);   // still true: gated write did not land
+    hub.setWriteEnabled(true);
+}
+
+// CTCSS set + read-back ride the SAME generic POST /command -> ControlHub.execute()
+// delegation (HTTP needs no per-route handler): the write flips the real engine
+// switch + tuning, the read returns them over the wire, an out-of-domain tone is
+// honestly rejected, and the write gate still blocks the write when closed.
+void TestControlHttp::postCommandCtcssRoute() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+    control::HttpControlServer srv(&hub);
+    QVERIFY(srv.start(0));
+    const quint16 port = srv.port();
+    QVERIFY(port != 0);
+
+    // Write enabled + a legal tone over POST /command -> engine lands.
+    HttpResp r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_ctcss\",\"args\":{\"enabled\":true,\"frequency_hz\":100.0}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject w = r.obj();
+    QVERIFY2(w.value("ok").toBool(), w.value("error").toString().toUtf8().constData());
+    QCOMPARE(w.value("command").toString(), QStringLiteral("set_ctcss"));
+    QCOMPARE(w.value("enabled").toBool(), true);
+    QCOMPARE(w.value("frequency_hz").toDouble(), 100.0);
+    QCOMPARE(eng.ctcssEnabled(), true);
+    QCOMPARE(eng.ctcssFreqHz(), 100.0);
+
+    // Read it back over the wire.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"get_ctcss_status\",\"args\":{}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject rd = r.obj();
+    QVERIFY2(rd.value("ok").toBool(), rd.value("error").toString().toUtf8().constData());
+    QCOMPARE(rd.value("command").toString(), QStringLiteral("get_ctcss_status"));
+    QCOMPARE(rd.value("enabled").toBool(), true);
+    QCOMPARE(rd.value("frequency_hz").toDouble(), 100.0);
+    QVERIFY(rd.value("active").isBool());   // honest detection latch, false w/o tone
+
+    // Out-of-domain tone over the wire is honestly rejected, engine untouched.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_ctcss\",\"args\":{\"enabled\":true,\"frequency_hz\":300.0}}"));
+    QCOMPARE(r.status, 200);
+    QVERIFY(!r.obj().value("ok").toBool());
+    QCOMPARE(eng.ctcssFreqHz(), 100.0);
+
+    // Gate closed: the same write POST is honestly refused, engine untouched.
+    hub.setWriteEnabled(false);
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_ctcss\",\"args\":{\"enabled\":false}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject g = r.obj();
+    QVERIFY(!g.value("ok").toBool());
+    QVERIFY(g.value("gated").toBool());
+    QCOMPARE(eng.ctcssEnabled(), true);   // still true: gated write did not land
     hub.setWriteEnabled(true);
 }
 

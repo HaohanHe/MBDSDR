@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 47 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 49 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -33,8 +33,8 @@ class ToolCatalogEntry {
   final bool write;
 }
 
-/// 桌面端 47 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
-/// 顺序与 write 标志逐字按 registeredToolSpecs() 注册顺序排列（47=29 写 + 18 读）。
+/// 桌面端 49 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
+/// 顺序与 write 标志逐字按 registeredToolSpecs() 注册顺序排列（49=30 写 + 19 读）。
 const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
   // ---- 基础调谐 / 解调（注册序 #1-7）----
   ToolCatalogEntry(
@@ -125,7 +125,7 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'get_scan_link_status',
       description: '只读：返回扫描活动链路状态（scanning/dwelling/hit）。',
       write: false),
-  // ---- 静噪 / 噪声抑制（#22-25）----
+  // ---- 静噪 / CTCSS 亚音 / 噪声抑制（#22-27）----
   ToolCatalogEntry(
       name: 'set_squelch',
       description: '写入：设置静噪（开关/门限/自动）。',
@@ -135,6 +135,14 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       description: '只读：返回静噪状态（开关/门限/open）。',
       write: false),
   ToolCatalogEntry(
+      name: 'set_ctcss',
+      description: '写入：设置 CTCSS 亚音（enabled 开关、frequency_hz 亚音频率 67.0–254.1 Hz）。',
+      write: true),
+  ToolCatalogEntry(
+      name: 'get_ctcss_status',
+      description: '只读：返回 CTCSS 亚音状态（enabled/frequency_hz/active 是否检测到亚音）。',
+      write: false),
+  ToolCatalogEntry(
       name: 'set_noise_blanker',
       description: '写入：开关噪声抑制器。',
       write: true),
@@ -142,7 +150,7 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'get_noise_blanker_status',
       description: '只读：返回噪声抑制器使能状态。',
       write: false),
-  // ---- 书签（#26-29）----
+  // ---- 书签（#28-31）----
   ToolCatalogEntry(
       name: 'list_bookmarks',
       description: '只读：列出书签（频率/名称/模式）。',
@@ -159,7 +167,7 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'delete_bookmark',
       description: '写入：删除指定下标书签。',
       write: true),
-  // ---- VFO 信道（#30-37）----
+  // ---- VFO 信道（#32-39）----
   ToolCatalogEntry(
       name: 'list_vfos',
       description: '只读：列出全部 VFO 信道。',
@@ -192,7 +200,7 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'set_vfo_bandwidth',
       description: '写入：设置指定 VFO 的信道带宽。',
       write: true),
-  // ---- 录制文件管理（#38-40）----
+  // ---- 录制文件管理（#40-42）----
   ToolCatalogEntry(
       name: 'list_recordings',
       description: '只读：列出录制目录下已有录制文件。',
@@ -205,7 +213,7 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'export_recording',
       description: '写入：把录制文件复制导出到目标路径。',
       write: true),
-  // ---- 频谱参数 / 色板（#41-43）----
+  // ---- 频谱参数 / 色板（#43-45）----
   ToolCatalogEntry(
       name: 'set_fft_params',
       description: '写入：设置 FFT 参数（点数/窗/平均）。',
@@ -218,7 +226,7 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'get_spectrum_status',
       description: '只读：返回频谱当前参数真实值。',
       write: false),
-  // ---- 卫星多普勒 / 网络源 / 能力与录制态（#44-47）----
+  // ---- 卫星多普勒 / 网络源 / 能力与录制态（#46-49）----
   ToolCatalogEntry(
       name: 'set_doppler_compensation',
       description: '写入：开关过境实时多普勒自动补偿（1Hz TLE 距离率重调 VFO）。',

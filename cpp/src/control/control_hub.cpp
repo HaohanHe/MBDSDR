@@ -112,6 +112,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"start_scan_link",       true,  &ControlHub::cmdStartScanLink},
         {"stop_scan_link",        true,  &ControlHub::cmdStopScanLink},
         {"set_squelch",           true,  &ControlHub::cmdSetSquelch},
+        {"set_ctcss",             true,  &ControlHub::cmdSetCtcss},
         {"set_noise_blanker",     true,  &ControlHub::cmdSetNoiseBlanker},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
@@ -148,6 +149,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_network_audio_status", false, &ControlHub::cmdGetNetworkAudioStatus},
         {"get_scan_link_status",  false, &ControlHub::cmdGetScanLinkStatus},
         {"get_squelch_status",    false, &ControlHub::cmdGetSquelchStatus},
+        {"get_ctcss_status",      false, &ControlHub::cmdGetCtcssStatus},
         {"get_noise_blanker_status", false, &ControlHub::cmdGetNoiseBlankerStatus},
         {"list_bookmarks",        false, &ControlHub::cmdListBookmarks},
         {"list_vfos",             false, &ControlHub::cmdListVfos},
@@ -1332,6 +1334,42 @@ QJsonObject ControlHub::cmdGetNoiseBlankerStatus(const QJsonObject&) {
     QJsonObject o = okBase();
     o["command"] = "get_noise_blanker_status";
     o["enabled"] = engine_->noiseBlankerEnabled();
+    return o;
+}
+
+// CTCSS tone-squelch: `enabled` required. `frequency_hz` optional (omit keeps the
+// current tuning, default 88.5 Hz); an out-of-domain value is REJECTED here with
+// ok:false -- the engine clamps, so the command layer is the honest gate that
+// refuses rather than silently retuning to a clamped tone.
+QJsonObject ControlHub::cmdSetCtcss(const QJsonObject& a) {
+    bool on; QString err;
+    if (!needBool(a, "enabled", on, err)) return errResult(err);
+    double fq = engine_->ctcssFreqHz();   // keep current tuning when omitted
+    const QJsonValue fv = a.value(QStringLiteral("frequency_hz"));
+    if (!fv.isUndefined() && !fv.isNull()) {
+        double v = 0.0;
+        if (!needDbl(a, "frequency_hz", v, err)) return errResult(err);
+        if (v < tokens::kCtcssToneHzMin || v > tokens::kCtcssToneHzMax)
+            return errResult(QString::fromUtf8(
+                "CTCSS 亚音频率越界：必须在 %1–%2 Hz 之间（收到 %3）")
+                .arg(tokens::kCtcssToneHzMin).arg(tokens::kCtcssToneHzMax).arg(v));
+        fq = v;
+    }
+    engine_->setCtcssEnabled(on);
+    engine_->setCtcssFreqHz(fq);
+    QJsonObject o = okBase();
+    o["command"] = "set_ctcss";
+    o["enabled"] = on;
+    o["frequency_hz"] = fq;
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetCtcssStatus(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "get_ctcss_status";
+    o["enabled"] = engine_->ctcssEnabled();
+    o["frequency_hz"] = engine_->ctcssFreqHz();
+    o["active"] = engine_->ctcssPresent();
     return o;
 }
 

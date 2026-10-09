@@ -63,6 +63,8 @@ private slots:
     void noiseBlankerLandReadbackAndGate();
     // --- Phase63 D1: get_squelch_status returns REAL engine getters, not nulls ---
     void squelchStatusRealReadback();
+    // --- Phase63 CTCSS three-channel tool: land / readback / out-of-range reject / gate ---
+    void ctcssLandReadbackOutOfRangeRejectAndGate();
     // --- Phase63 readback-loop audit: D-2/D-3/D-5 honest-repair round-trip -----
     void readbackLoopHonestRejectsAndAutoLand();
     // --- Phase63: bookmark tools execute for real against injected store -------
@@ -92,7 +94,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 47);
+    QCOMPARE(tools.size(), 49);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -694,6 +696,8 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
     const bool sqEnBefore = engine.squelchEnabled();
     const float sqThBefore = engine.squelchThresholdDb();
     const bool nbBefore = engine.noiseBlankerEnabled();
+    const bool ctcssEnBefore = engine.ctcssEnabled();
+    const double ctcssFreqBefore = engine.ctcssFreqHz();
     const QString recPathBefore = engine.recordingPath();
     const QString recDirBefore = engine.recordingDir();
     const bool watchBefore = engine.watchEnabled();
@@ -717,6 +721,7 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         else if (name == "set_network_audio_sink") { a["enable"] = true; a["port"] = 12345; a["format"] = "s16le"; }
         else if (name == "start_scan_link") a["target_freq_hz"] = 100e6;
         else if (name == "set_squelch") { a["enabled"] = true; a["threshold_db"] = -10.0; }
+        else if (name == "set_ctcss") { a["enabled"] = true; a["frequency_hz"] = 88.5; }
         else if (name == "set_noise_blanker") a["on"] = true;
         else if (name == "add_bookmark") { a["freq_hz"] = 100e6; a["name"] = "gate_probe"; a["mode"] = "NFM"; }
         else if (name == "tune_to_bookmark") a["index"] = 0;
@@ -764,9 +769,9 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split must be exactly 29 writes / 18 reads.
-    QCOMPARE(writes, 29);
-    QCOMPARE(reads, 18);
+    // The frozen split must be exactly 30 writes / 19 reads.
+    QCOMPARE(writes, 30);
+    QCOMPARE(reads, 19);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -779,6 +784,8 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
     QCOMPARE(engine.squelchEnabled(), sqEnBefore);
     QCOMPARE(engine.squelchThresholdDb(), sqThBefore);
     QCOMPARE(engine.noiseBlankerEnabled(), nbBefore);
+    QCOMPARE(engine.ctcssEnabled(), ctcssEnBefore);
+    QCOMPARE(engine.ctcssFreqHz(), ctcssFreqBefore);
     QCOMPARE(engine.recordingPath(), recPathBefore);
     QCOMPARE(engine.recordingDir(), recDirBefore);
     QCOMPARE(engine.watchEnabled(), watchBefore);
@@ -880,6 +887,78 @@ void TestAgent::squelchStatusRealReadback() {
     QCOMPARE(r2.value("threshold_db").toDouble(),
              static_cast<double>(engine.squelchThresholdDb()));
     QCOMPARE(r2.value("threshold_db").toDouble(), -10.0);
+}
+
+// Phase63 CTCSS three-channel tool: fresh engine reads honest defaults
+// (disabled, 88.5 Hz, active=false -- never a fabricated tone); the write lands
+// on the real engine setters and the read follows; an out-of-domain frequency is
+// REJECTED with ok:false rather than silently clamped; missing/non-bool `enabled`
+// is an honest error; and the manual-mode gate intercepts the write untouched.
+void TestAgent::ctcssLandReadbackOutOfRangeRejectAndGate() {
+    dsp::SpectrumEngine engine;
+
+    // Fresh engine: honest defaults, active=false (no tone / disabled).
+    QJsonObject off = QJsonDocument::fromJson(
+        ai::executeTool("get_ctcss_status", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(off.value("ok").toBool(), qPrintable(
+        ai::executeTool("get_ctcss_status", QJsonObject{}, &engine)));
+    QCOMPARE(off.value("enabled").toBool(), false);
+    QCOMPARE(off.value("frequency_hz").toDouble(), engine.ctcssFreqHz());
+    QCOMPARE(off.value("frequency_hz").toDouble(), 88.5);   // default PL
+    QCOMPARE(off.value("active").toBool(), false);           // no signal -> honest false
+
+    // AI takeover (manualMode=false): enabled only (omit frequency) lands, keeps
+    // the current/default tuning.
+    QJsonObject on; on["enabled"] = true;
+    QString r = ai::LLMWorker::dispatchToolCall("set_ctcss", on, &engine,
+                                                /*manualMode=*/false);
+    QVERIFY2(!r.contains("\"gated\":true"), qPrintable(r));
+    QVERIFY2(engine.ctcssEnabled(), "set_ctcss{enabled:true} must flip the engine");
+    QJsonObject st = QJsonDocument::fromJson(
+        ai::executeTool("get_ctcss_status", QJsonObject{}, &engine).toUtf8()).object();
+    QCOMPARE(st.value("enabled").toBool(), true);
+    QCOMPARE(st.value("frequency_hz").toDouble(), 88.5);     // unchanged default
+
+    // Set an explicit legal tone; it lands and reads back.
+    QJsonObject fq; fq["enabled"] = true; fq["frequency_hz"] = 100.0;
+    QString r2 = ai::LLMWorker::dispatchToolCall("set_ctcss", fq, &engine,
+                                                 /*manualMode=*/false);
+    QVERIFY2(!r2.contains("\"gated\":true"), qPrintable(r2));
+    QCOMPARE(engine.ctcssFreqHz(), 100.0);
+    QJsonObject st2 = QJsonDocument::fromJson(
+        ai::executeTool("get_ctcss_status", QJsonObject{}, &engine).toUtf8()).object();
+    QCOMPARE(st2.value("frequency_hz").toDouble(), 100.0);
+
+    // Out-of-domain frequency is REJECTED (the engine clamps; the tool layer is
+    // the honest gate that refuses instead of fake-success at a clamped tone).
+    const double freqBefore = engine.ctcssFreqHz();
+    QJsonObject low; low["enabled"] = true; low["frequency_hz"] = 30.0;
+    QJsonObject rLow = QJsonDocument::fromJson(
+        ai::executeTool("set_ctcss", low, &engine).toUtf8()).object();
+    QVERIFY2(!rLow.value("ok").toBool(), qPrintable(rLow.value("error").toString()));
+    QCOMPARE(engine.ctcssFreqHz(), freqBefore);   // untouched
+    QJsonObject high; high["enabled"] = true; high["frequency_hz"] = 300.0;
+    QJsonObject rHigh = QJsonDocument::fromJson(
+        ai::executeTool("set_ctcss", high, &engine).toUtf8()).object();
+    QVERIFY2(!rHigh.value("ok").toBool(), qPrintable(rHigh.value("error").toString()));
+    QCOMPARE(engine.ctcssFreqHz(), freqBefore);
+
+    // Missing / non-bool `enabled` -> honest error, never a silent toggle.
+    QJsonObject miss = QJsonDocument::fromJson(
+        ai::executeTool("set_ctcss", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(!miss.value("ok").toBool(), "missing `enabled` must be an error");
+    QJsonObject bad; bad["enabled"] = "yes";
+    QJsonObject badO = QJsonDocument::fromJson(
+        ai::executeTool("set_ctcss", bad, &engine).toUtf8()).object();
+    QVERIFY2(!badO.value("ok").toBool(), "non-boolean `enabled` must be an error");
+
+    // Manual mode: the write is intercepted, engine untouched.
+    QString g = ai::LLMWorker::dispatchToolCall("set_ctcss", on, &engine,
+                                                /*manualMode=*/true);
+    QVERIFY2(g.contains("\"gated\":true"), qPrintable(g));
+    QVERIFY2(g.contains("\"ok\":false"), qPrintable(g));
+    QVERIFY2(engine.ctcssEnabled(),
+             "manual-mode gate must not flip the CTCSS engine");
 }
 
 // Phase63 readback-loop audit: the three write-path honest-repair cases.

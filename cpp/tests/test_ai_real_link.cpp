@@ -343,6 +343,7 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "set_network_audio_sink", "get_network_audio_status",
         "start_scan_link", "stop_scan_link", "get_scan_link_status",
         "set_squelch", "get_squelch_status",
+        "set_ctcss", "get_ctcss_status",
         "set_noise_blanker", "get_noise_blanker_status",
         "list_bookmarks", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
         "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
@@ -373,6 +374,7 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(ai::isWriteTool("start_scan_link"));
     QVERIFY(ai::isWriteTool("stop_scan_link"));
     QVERIFY(ai::isWriteTool("set_squelch"));
+    QVERIFY(ai::isWriteTool("set_ctcss"));
     QVERIFY(ai::isWriteTool("set_noise_blanker"));
     QVERIFY(ai::isWriteTool("add_bookmark"));
     QVERIFY(ai::isWriteTool("tune_to_bookmark"));
@@ -391,6 +393,7 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(!ai::isWriteTool("get_network_audio_status"));
     QVERIFY(!ai::isWriteTool("get_scan_link_status"));
     QVERIFY(!ai::isWriteTool("get_squelch_status"));
+    QVERIFY(!ai::isWriteTool("get_ctcss_status"));
     QVERIFY(!ai::isWriteTool("get_noise_blanker_status"));
     QVERIFY(!ai::isWriteTool("list_bookmarks"));
     QVERIFY(!ai::isWriteTool("list_vfos"));
@@ -441,6 +444,7 @@ void TestAiRealLink::phase26_tools_callableReturnJson() {
         "set_network_audio_sink", "get_network_audio_status",
         "start_scan_link", "stop_scan_link", "get_scan_link_status",
         "set_squelch", "get_squelch_status",
+        "set_ctcss", "get_ctcss_status",
         "set_noise_blanker", "get_noise_blanker_status",
         "list_bookmarks", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
         "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",

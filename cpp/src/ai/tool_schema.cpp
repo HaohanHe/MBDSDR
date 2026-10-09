@@ -543,6 +543,46 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // set_ctcss (write -- gated) ------------------------------------------
+    // Phase63 CTCSS tone-squelch tool. `enabled` is REQUIRED (a missing /
+    // non-bool is an honest error, never a silent toggle). `frequency_hz` is
+    // optional (omit to keep the current / default 88.5 Hz); an out-of-domain
+    // value (<67.0 or >254.1 Hz) is REJECTED here with ok:false -- the engine
+    // clamps, so the tool layer is the honest gate that refuses rather than
+    // silently retuning to a clamped tone.
+    {
+        ToolSchemaSpec s;
+        s.name = "set_ctcss";
+        s.description = QString::fromUtf8(
+            "写入：设置 CTCSS 亚音（enabled 开关、frequency_hz 亚音频率 67.0–254.1 Hz）。"
+            "属于写动作，手动模式下被拦截；越界频率诚实拒绝，不静默钳位。");
+        s.write = true;
+        ToolParamSpec en;
+        en.name = "enabled";
+        en.type = "boolean";
+        en.description = QString::fromUtf8("是否开启 CTCSS 亚音检测");
+        en.required = true;
+        ToolParamSpec fq;
+        fq.name = "frequency_hz";
+        fq.type = "number";
+        fq.description = QString::fromUtf8("CTCSS 亚音频率 Hz（67.0–254.1，缺省沿用当前/默认 88.5）");
+        fq.hasMin = true; fq.min = tokens::kCtcssToneHzMin;
+        fq.hasMax = true; fq.max = tokens::kCtcssToneHzMax;
+        fq.required = false;
+        s.params << en << fq;
+        out.append(s);
+    }
+
+    // get_ctcss_status (read-only) ----------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_ctcss_status";
+        s.description = QString::fromUtf8(
+            "只读：返回 CTCSS 亚音状态（enabled 是否使能、frequency_hz 调谐频率、"
+            "active 是否真实检测到亚音）。无信号/未使能时 active 诚实为 false，不编造。");
+        out.append(s);
+    }
+
     // set_noise_blanker (write -- gated) ----------------------------------
     {
         ToolSchemaSpec s;

@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 47);
+    QCOMPARE(specs.size(), 49);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -217,6 +217,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：返回静噪状态（enabled/threshold_db/auto/当前是否 open）。"
             "无实时门限读数时诚实标注，不编造。")},
+        {"set_ctcss",
+         QString::fromUtf8(
+            "写入：设置 CTCSS 亚音（enabled 开关、frequency_hz 亚音频率 67.0–254.1 Hz）。"
+            "属于写动作，手动模式下被拦截；越界频率诚实拒绝，不静默钳位。")},
+        {"get_ctcss_status",
+         QString::fromUtf8(
+            "只读：返回 CTCSS 亚音状态（enabled 是否使能、frequency_hz 调谐频率、"
+            "active 是否真实检测到亚音）。无信号/未使能时 active 诚实为 false，不编造。")},
         {"set_noise_blanker",
          QString::fromUtf8(
             "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。")},
@@ -367,7 +375,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 47);
+    QCOMPARE(headerCount, 49);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

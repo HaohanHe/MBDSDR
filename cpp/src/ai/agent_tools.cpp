@@ -799,6 +799,60 @@ QString execGetNoiseBlankerStatus(const QJsonObject&, dsp::SpectrumEngine* engin
     return compact(o);
 }
 
+// 7d. set_ctcss (write): CTCSS tone-squelch control, real engine backing.
+//     `enabled` is REQUIRED and must be a boolean (missing/non-bool -> honest
+//     error, never a silent toggle). `frequency_hz` is optional: when omitted
+//     the current tuning (default 88.5 Hz) is kept; when supplied it must be a
+//     finite number inside the legal PL domain [67.0, 254.1] Hz -- an out-of-
+//     range value is REJECTED here with ok:false rather than letting the engine
+//     silently clamp (the clamp would echo a fake success at a tone the caller
+//     never asked for). On success the engine setters run for real.
+QString execSetCtcss(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                     const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
+    const QJsonValue en = args.value(QStringLiteral("enabled"));
+    if (!en.isBool())
+        return errResult(QString::fromUtf8("参数 enabled 缺失或不是布尔值"));
+    const bool on = en.toBool();
+
+    double fq = engine->ctcssFreqHz();   // default: keep current tuning
+    if (args.contains(QStringLiteral("frequency_hz"))) {
+        double v = 0.0;
+        if (!needNum(args, "frequency_hz", v) || !std::isfinite(v))
+            return errResult(QString::fromUtf8("参数 frequency_hz 缺失或不是有限数字"));
+        if (v < tokens::kCtcssToneHzMin || v > tokens::kCtcssToneHzMax)
+            return errResult(QString::fromUtf8(
+                "CTCSS 亚音频率越界：必须在 %1–%2 Hz 之间（收到 %3）")
+                .arg(tokens::kCtcssToneHzMin).arg(tokens::kCtcssToneHzMax).arg(v));
+        fq = v;
+    }
+
+    engine->setCtcssEnabled(on);
+    engine->setCtcssFreqHz(fq);
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = on;
+    o["frequency_hz"] = fq;
+    o["message"] = QString::fromUtf8("CTCSS 亚音参数已下发（开关/亚音频率）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 7e. get_ctcss_status (read): real engine getters -- ctcssEnabled /
+//     ctcssFreqHz / ctcssPresent. `active` is the honest detection latch: with
+//     no signal or detection disabled it reads false (never a fabricated tone).
+QString execGetCtcssStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
+                           const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = engine->ctcssEnabled();
+    o["frequency_hz"] = engine->ctcssFreqHz();
+    o["active"] = engine->ctcssPresent();
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // 8. list_bookmarks (read): BookmarkManager wiring lands on control -> honest empty.
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
                           const SourceInfo& src,
@@ -1379,6 +1433,8 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_scan_link_status", &execGetScanLinkStatus},
         {"set_squelch", &execSetSquelch},
         {"get_squelch_status", &execGetSquelchStatus},
+        {"set_ctcss", &execSetCtcss},
+        {"get_ctcss_status", &execGetCtcssStatus},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},
         {"list_bookmarks", &execListBookmarks},
