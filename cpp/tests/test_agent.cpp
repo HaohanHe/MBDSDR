@@ -1162,6 +1162,23 @@ void TestAgent::phase63BilateralAliasContract() {
             if (m.id == id0) { QCOMPARE(m.freqHz, 99100000.0); saw = true; }
         QVERIFY(saw);
     }
+
+    // --- OF2 (output-contract): get_spectrum_status readback keys are
+    //     window/average (int), matching the schema description, the CH readback,
+    //     and the set_fft_params write echo. The old window_type/average_mode keys
+    //     must no longer be emitted. ---
+    {
+        QJsonObject setA; setA["fft_size"] = 2048; setA["window"] = 2; setA["average"] = 1;
+        QVERIFY(runTool(eng, "set_fft_params", setA).value("ok").toBool());
+        QJsonObject r = runTool(eng, "get_spectrum_status", QJsonObject{});
+        QVERIFY2(r.value("ok").toBool(), qPrintable(QString::fromUtf8(
+            QJsonDocument(r).toJson(QJsonDocument::Compact))));
+        QCOMPARE(r.value("window").toInt(), 2);
+        QCOMPARE(r.value("average").toInt(), 1);
+        QCOMPARE(r.value("fft_size").toInt(), 2048);
+        QVERIFY2(!r.contains("window_type") && !r.contains("average_mode"),
+                 "OF2: legacy window_type/average_mode keys must not be emitted");
+    }
 }
 
 #include <QCoreApplication>

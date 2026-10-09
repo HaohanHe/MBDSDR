@@ -1227,8 +1227,12 @@ QString execGetSpectrumStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
     QJsonObject o;
     o["ok"] = true;
     o["fft_size"] = engine->fftSize();
-    o["window_type"] = engine->windowType();
-    o["average_mode"] = engine->averageMode();
+    // Phase63 output-contract OF2: key names aligned to the declared schema
+    // description ("fft_size/window/average"), the ControlHub readback
+    // (cmdGetSpectrumStatus), and the set_fft_params write echo -- previously
+    // emitted window_type/average_mode, which disagreed with both.
+    o["window"] = engine->windowType();
+    o["average"] = engine->averageMode();
     addSourceFields(o, src);
     return compact(o);
 }

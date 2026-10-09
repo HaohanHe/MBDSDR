@@ -1040,7 +1040,12 @@ QJsonObject ControlHub::cmdGetM17Calls(const QJsonObject& a) {
         QJsonObject o;
         o["src"] = QString::fromStdString(c.src);
         o["dst"] = QString::fromStdString(c.dst);
-        o["type"] = QString::asprintf("0x%04X", static_cast<unsigned>(c.type));
+        // Phase63 output-contract OF1: emit the raw LSF TYPE word as an INTEGER,
+        // matching the Agent channel (execGetM17Calls) AND the Flutter consumer
+        // (M17Call.fromJson only accepts `type` as a number; the old "0x%04X"
+        // string was silently coerced to 0 on the mobile side). One numeric
+        // wire type across all three channels.
+        o["type"] = static_cast<int>(c.type);
         o["is_stream"] = c.isStream;
         o["payload_class"] = c.payloadClass;
         o["frame_kind"] = c.frameKind;
