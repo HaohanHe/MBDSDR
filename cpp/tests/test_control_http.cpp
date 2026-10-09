@@ -223,6 +223,16 @@ void TestControlHttp::gateClosedRefusesWritePost() {
     QVERIFY(o.value("gated").toBool());
     QVERIFY(o.value("error").isString());
 
+    // No fake-success payload leaked across the HTTP boundary: a gated write must
+    // carry NONE of the fields a real tune() reports on success (frequency_hz /
+    // command / clamped). The compact relayed body is exactly gatedResult().
+    QVERIFY2(!o.contains("frequency_hz"), qPrintable(QString::fromUtf8(
+        "gated tune must not leak frequency_hz: ") + QString::fromUtf8(r.body)));
+    QVERIFY2(!o.contains("command"), qPrintable(QString::fromUtf8(
+        "gated tune must not leak command: ") + QString::fromUtf8(r.body)));
+    QVERIFY2(!o.contains("clamped"), qPrintable(QString::fromUtf8(
+        "gated tune must not leak clamped: ") + QString::fromUtf8(r.body)));
+
     // Engine untouched.
     QJsonObject after = httpGet(port, "/status").obj();
     QCOMPARE(after.value("frequency_hz").toDouble(), baseFreq);
