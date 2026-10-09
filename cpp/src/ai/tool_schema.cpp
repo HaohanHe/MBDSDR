@@ -549,12 +549,16 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     // optional (omit to keep the current / default 88.5 Hz); an out-of-domain
     // value (<67.0 or >254.1 Hz) is REJECTED here with ok:false -- the engine
     // clamps, so the tool layer is the honest gate that refuses rather than
-    // silently retuning to a clamped tone.
+    // silently retuning to a clamped tone. `gate_audio` (optional) arms the
+    // speaker-only sub-audio gate: while on, the speaker stays silent unless a
+    // matching tone is detected (the recorder is NOT muted). Omit to leave the
+    // gate untouched.
     {
         ToolSchemaSpec s;
         s.name = "set_ctcss";
         s.description = QString::fromUtf8(
-            "写入：设置 CTCSS 亚音（enabled 开关、frequency_hz 亚音频率 67.0–254.1 Hz）。"
+            "写入：设置 CTCSS 亚音（enabled 开关、frequency_hz 亚音频率 67.0–254.1 Hz、"
+            "可选 gate_audio 亚音门控静音开关）。"
             "属于写动作，手动模式下被拦截；越界频率诚实拒绝，不静默钳位。");
         s.write = true;
         ToolParamSpec en;
@@ -569,7 +573,13 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         fq.hasMin = true; fq.min = tokens::kCtcssToneHzMin;
         fq.hasMax = true; fq.max = tokens::kCtcssToneHzMax;
         fq.required = false;
-        s.params << en << fq;
+        ToolParamSpec gate;
+        gate.name = "gate_audio";
+        gate.type = "boolean";
+        gate.description = QString::fromUtf8(
+            "可选：是否开启亚音门控静音（开启后仅在检测到匹配亚音时才放音，录制不受影响；缺省不改动当前门控）");
+        gate.required = false;
+        s.params << en << fq << gate;
         out.append(s);
     }
 
@@ -579,7 +589,8 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.name = "get_ctcss_status";
         s.description = QString::fromUtf8(
             "只读：返回 CTCSS 亚音状态（enabled 是否使能、frequency_hz 调谐频率、"
-            "active 是否真实检测到亚音）。无信号/未使能时 active 诚实为 false，不编造。");
+            "active 是否真实检测到亚音、gate_audio 是否开启亚音门控静音）。"
+            "无信号/未使能时 active 诚实为 false，不编造。");
         out.append(s);
     }
 

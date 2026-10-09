@@ -71,6 +71,40 @@ makeNfmIq(double sampleRateHz, double seconds, double toneHz,
     return x;
 }
 
+// Narrowband FM with an OPTIONAL embedded sub-audible CTCSS PL tone. The
+// instantaneous frequency deviation is the SUM of a (voice) tone and an optional
+// sub-audible tone: inst = carrier + voiceDev*sin(2π·voice·t) + subDev*sin(2π·
+// subTone·t). After the NFM discriminator both components appear in the mono
+// audio -- exactly how a real PL transmitter embeds the sub-audible tone. Set
+// voiceDev=0 / subDev=0 to omit that component. *** SYNTHETIC, NOT HARDWARE ***
+inline std::vector<std::complex<float>>
+makeNfmCtcssIq(double sampleRateHz, double seconds,
+               double voiceToneHz, double voiceDev,
+               double subToneHz, double subDev,
+               double noiseAmp, double carrierOffsetHz = 50000.0,
+               unsigned seed = 12345) {
+    const long n = static_cast<long>(sampleRateHz * seconds);
+    std::vector<std::complex<float>> x(n);
+    std::mt19937 rng(seed);
+    std::normal_distribution<float> gauss(0.0f, 1.0f);
+    double phase = 0.0;
+    for (long i = 0; i < n; ++i) {
+        const double t = static_cast<double>(i) / sampleRateHz;
+        double inst = carrierOffsetHz;
+        if (voiceDev > 0.0)
+            inst += voiceDev * std::sin(2.0 * M_PI * voiceToneHz * t);
+        if (subDev > 0.0)
+            inst += subDev * std::sin(2.0 * M_PI * subToneHz * t);
+        phase += 2.0 * M_PI * inst / sampleRateHz;
+        const float re = static_cast<float>(std::cos(phase))
+                       + noiseAmp * gauss(rng);
+        const float im = static_cast<float>(std::sin(phase))
+                       + noiseAmp * gauss(rng);
+        x[i] = std::complex<float>(re, im);
+    }
+    return x;
+}
+
 // Broadcast FM: carrier at `carrierOffsetHz`, modulating baseband m(t) = tone
 // (1 kHz) plus an optional 19 kHz pilot tone, frequency-modulated with 75 kHz
 // peak deviation.

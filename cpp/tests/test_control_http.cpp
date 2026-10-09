@@ -588,6 +588,17 @@ void TestControlHttp::postCommandCtcssRoute() {
     QCOMPARE(rd.value("enabled").toBool(), true);
     QCOMPARE(rd.value("frequency_hz").toDouble(), 100.0);
     QVERIFY(rd.value("active").isBool());   // honest detection latch, false w/o tone
+    QCOMPARE(rd.value("gate_audio").toBool(), false);  // speaker gate defaults off
+
+    // Optional speaker gate over the wire: arm it, engine lands, read back.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_ctcss\",\"args\":{\"enabled\":true,\"gate_audio\":true}}"));
+    QCOMPARE(r.status, 200);
+    QVERIFY2(r.obj().value("ok").toBool(), r.obj().value("error").toString().toUtf8().constData());
+    QVERIFY(eng.ctcssGateAudio());
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"get_ctcss_status\",\"args\":{}}"));
+    QCOMPARE(r.obj().value("gate_audio").toBool(), true);
 
     // Out-of-domain tone over the wire is honestly rejected, engine untouched.
     r = httpPost(port, "/command",

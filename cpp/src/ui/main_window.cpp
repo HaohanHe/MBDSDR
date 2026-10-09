@@ -661,6 +661,22 @@ MainWindow::MainWindow(QWidget* parent)
     });
     gRxLay->addRow("亚音", ctcssCheck_);
 
+    // Speaker-only sub-audio gate (phase63 closed loop): independent of the
+    // detector arm. While on, the speaker opens ONLY when a matching tone is
+    // detected; the recorder keeps receiving the real audio (not muted). Wired
+    // straight to the engine setter + persisted, mirrors ctcssCheck_ above.
+    ctcssGateCheck_ = new QCheckBox("亚音静噪", gRx);
+    ctcssGateCheck_->setObjectName("ctcssGateCheck");
+    ctcssGateCheck_->setToolTip(QStringLiteral(
+        "亚音门控静音：开启后仅在真实检测到目标亚音音调时才放音（speaker），"
+        "无匹配亚音即静音；录制不受影响。需先开启「亚音」检测。"));
+    connect(ctcssGateCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        if (engine_) engine_->setCtcssGateAudio(on);
+        scheduleSave();
+        updateCtcssBadge();
+    });
+    gRxLay->addRow("门控", ctcssGateCheck_);
+
     ctcssFreqSpin_ = new QDoubleSpinBox(gRx);
     ctcssFreqSpin_->setObjectName("ctcssFreqSpin");
     ctcssFreqSpin_->setRange(tokens::kCtcssToneHzMin, tokens::kCtcssToneHzMax);
@@ -668,7 +684,10 @@ MainWindow::MainWindow(QWidget* parent)
     ctcssFreqSpin_->setDecimals(1);
     ctcssFreqSpin_->setSuffix(" Hz");
     ctcssFreqSpin_->setValue(tokens::kCtcssToneHzDefault);
-    ctcssFreqSpin_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
+    // Narrower than the generic combo min: "88.5 Hz" is a short field and the
+    // present-state badge sits beside it on the 音调 row, so a smaller floor
+    // keeps the badge in view on the 960 narrow rail instead of squeezing it out.
+    ctcssFreqSpin_->setMinimumWidth(tokens::scaled(90));
     ctcssFreqSpin_->setToolTip(QStringLiteral(
         "目标 CTCSS 音调 (Hz)，合法域 67.0–254.1。"));
     connect(ctcssFreqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
@@ -688,6 +707,11 @@ MainWindow::MainWindow(QWidget* parent)
     auto* ctcssRow = new QHBoxLayout;
     ctcssRow->addWidget(ctcssFreqSpin_);
     ctcssRow->addWidget(ctcssBadge_);
+    // Keep the spinbox at its size hint (don't greedily expand) so the badge
+    // keeps its natural width and stays visible on the 960 narrow rail; a
+    // trailing stretch absorbs any extra horizontal space.
+    ctcssFreqSpin_->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+    ctcssRow->addStretch(1);
     gRxLay->addRow("音调", ctcssRow);
 
     leftLay->addWidget(gRx);
@@ -4325,6 +4349,8 @@ void MainWindow::saveUiState() {
     s.setValue("rx/squelchAuto", squelchAutoBtn_->isChecked());
     s.setValue(tokens::kSettingsKeyCtcssEnabled, ctcssCheck_->isChecked());
     s.setValue(tokens::kSettingsKeyCtcssToneHz, ctcssFreqSpin_->value());
+    if (ctcssGateCheck_)
+        s.setValue(tokens::kSettingsKeyCtcssGate, ctcssGateCheck_->isChecked());
     s.setValue("rx/dbMin", static_cast<float>(spectrum_->dbMinValue()));
     s.setValue("rx/dbMax", static_cast<float>(spectrum_->dbMaxValue()));
 
@@ -4668,6 +4694,16 @@ void MainWindow::restoreUiState() {
         ctcssCheck_->setChecked(ctcssOn);
         ctcssCheck_->blockSignals(false);
         if (engine_) engine_->setCtcssEnabled(ctcssOn);
+
+        // Speaker-only sub-audio gate, restored independently (default off).
+        if (ctcssGateCheck_) {
+            const bool gateOn =
+                s.value(tokens::kSettingsKeyCtcssGate, false).toBool();
+            ctcssGateCheck_->blockSignals(true);
+            ctcssGateCheck_->setChecked(gateOn);
+            ctcssGateCheck_->blockSignals(false);
+            if (engine_) engine_->setCtcssGateAudio(gateOn);
+        }
         updateCtcssBadge();
     }
 
@@ -5486,28 +5522,56 @@ void MainWindow::onStereoState(bool stereo, float blend, float pilotQuality) {
 
 void MainWindow::updateCtcssBadge() {
     if (!ctcssBadge_ || !engine_) return;
-    // Honest-state rule: the badge mirrors ONLY the engine's real ctcssPresent().
-    //  - disabled            -> blank "--" (no fake reading ever shown);
-    //  - armed, no tone      -> secondary "未检测到";
-    //  - armed, real tone    -> success-green "检测到".
-    if (!engine_->ctcssEnabled()) {
-        ctcssBadge_->setText(QStringLiteral("--"));
+    // Honest-state rule: the badge mirrors ONLY the engine's real ctcssPresent()
+    // and the real gate flag -- never a fabricated "locked".
+    //  - detector off, gate off   -> blank "--";
+    //  - detector off, gate on    -> amber "门控静音" (speaker held silent, since
+    //                                no detector means no matching tone ever);
+    //  - armed, real tone         -> success-green "检测到" (+ tooltip notes the
+    //                                sub-audio gate released the speaker);
+    //  - armed, no tone, gate on -> amber "静音" (speaker held muted by the gate;
+    //                                the recorder still captures the real audio);
+    //  - armed, no tone, gate off -> secondary "未检测到" (detection only).
+    const bool detOn = engine_->ctcssEnabled();
+    const bool gateOn = engine_->ctcssGateAudio();
+    if (!detOn) {
+        ctcssBadge_->setText(gateOn ? QStringLiteral("门控静音")
+                                    : QStringLiteral("--"));
         ctcssBadge_->setStyleSheet(
             QString("QLabel#ctcssBadge { color: %1; }")
-                .arg(QString::fromUtf8(tokens::kTextSecondary)));
-        ctcssBadge_->setToolTip(QStringLiteral("亚音检测未开启"));
+                .arg(QString::fromUtf8(gateOn ? tokens::kWarning
+                                              : tokens::kTextSecondary)));
+        ctcssBadge_->setToolTip(gateOn
+            ? QStringLiteral("亚音门控已开但检测未开启：speaker 将持续静音，请先开启「亚音」")
+            : QStringLiteral("亚音检测未开启"));
         return;
     }
     const bool present = engine_->ctcssPresent();
-    ctcssBadge_->setText(present ? QStringLiteral("检测到")
-                                 : QStringLiteral("未检测到"));
-    ctcssBadge_->setStyleSheet(
-        QString("QLabel#ctcssBadge { color: %1; }")
-            .arg(QString::fromUtf8(present ? tokens::kSuccess
-                                           : tokens::kTextSecondary)));
-    ctcssBadge_->setToolTip(present
-        ? QStringLiteral("检测到目标亚音音调 (ctcssPresent 真值)")
-        : QStringLiteral("已开启，等待目标亚音音调"));
+    if (present) {
+        ctcssBadge_->setText(QStringLiteral("检测到"));
+        ctcssBadge_->setStyleSheet(
+            QString("QLabel#ctcssBadge { color: %1; }")
+                .arg(QString::fromUtf8(tokens::kSuccess)));
+        ctcssBadge_->setToolTip(gateOn
+            ? QStringLiteral("检测到目标亚音音调，门控放行 (ctcssPresent 真值)")
+            : QStringLiteral("检测到目标亚音音调 (ctcssPresent 真值)"));
+        return;
+    }
+    // Armed, no tone.
+    if (gateOn) {
+        ctcssBadge_->setText(QStringLiteral("静音"));
+        ctcssBadge_->setStyleSheet(
+            QString("QLabel#ctcssBadge { color: %1; }")
+                .arg(QString::fromUtf8(tokens::kWarning)));
+        ctcssBadge_->setToolTip(QStringLiteral(
+            "门控开启：未检测到匹配亚音，speaker 静音（录制仍收真实音频）"));
+    } else {
+        ctcssBadge_->setText(QStringLiteral("未检测到"));
+        ctcssBadge_->setStyleSheet(
+            QString("QLabel#ctcssBadge { color: %1; }")
+                .arg(QString::fromUtf8(tokens::kTextSecondary)));
+        ctcssBadge_->setToolTip(QStringLiteral("已开启，等待目标亚音音调"));
+    }
 }
 
 void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {

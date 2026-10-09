@@ -862,6 +862,9 @@ inline constexpr const char* kSettingsKeyTuneHistory = "rx/tuneHistoryHz";
 // kCtcssToneHzDefault, never a fabricated locked tone.
 inline constexpr const char* kSettingsKeyCtcssEnabled = "rx/ctcssEnabled";
 inline constexpr const char* kSettingsKeyCtcssToneHz  = "rx/ctcssToneHz";
+// Speaker-only sub-audio gate: when on, the speaker opens only while a matching
+// tone is detected (the recorder is NOT muted). Absent key => honest off.
+inline constexpr const char* kSettingsKeyCtcssGate   = "rx/ctcssGateAudio";
 
 // =====================================================================
 // Dark QSS generator -- simplified, only what we use.

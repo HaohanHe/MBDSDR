@@ -827,20 +827,33 @@ QString execSetCtcss(const QJsonObject& args, dsp::SpectrumEngine* engine,
         fq = v;
     }
 
+    // Optional speaker-only sub-audio gate. Omit -> leave the current gate
+    // untouched; present-but-non-bool -> honest error (never a silent toggle).
+    bool gateAudio = engine->ctcssGateAudio();
+    if (args.contains(QStringLiteral("gate_audio"))) {
+        const QJsonValue gv = args.value(QStringLiteral("gate_audio"));
+        if (!gv.isBool())
+            return errResult(QString::fromUtf8("参数 gate_audio 不是布尔值"));
+        gateAudio = gv.toBool();
+    }
+
     engine->setCtcssEnabled(on);
     engine->setCtcssFreqHz(fq);
+    engine->setCtcssGateAudio(gateAudio);
     QJsonObject o;
     o["ok"] = true;
     o["enabled"] = on;
     o["frequency_hz"] = fq;
-    o["message"] = QString::fromUtf8("CTCSS 亚音参数已下发（开关/亚音频率）");
+    o["gate_audio"] = gateAudio;
+    o["message"] = QString::fromUtf8("CTCSS 亚音参数已下发（开关/亚音频率/门控静音）");
     addSourceFields(o, src);
     return compact(o);
 }
 
 // 7e. get_ctcss_status (read): real engine getters -- ctcssEnabled /
-//     ctcssFreqHz / ctcssPresent. `active` is the honest detection latch: with
-//     no signal or detection disabled it reads false (never a fabricated tone).
+//     ctcssFreqHz / ctcssPresent / ctcssGateAudio. `active` is the honest
+//     detection latch: with no signal or detection disabled it reads false
+//     (never a fabricated tone).
 QString execGetCtcssStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
                            const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
@@ -849,6 +862,7 @@ QString execGetCtcssStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
     o["enabled"] = engine->ctcssEnabled();
     o["frequency_hz"] = engine->ctcssFreqHz();
     o["active"] = engine->ctcssPresent();
+    o["gate_audio"] = engine->ctcssGateAudio();
     addSourceFields(o, src);
     return compact(o);
 }

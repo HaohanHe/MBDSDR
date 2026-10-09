@@ -140,6 +140,11 @@ int main(int argc, char** argv) {
             QSettings s("MBDSDR", "MBDSDR");
             s.setValue(mbdsdr::tokens::kSettingsKeyCtcssEnabled, true);
             s.setValue(mbdsdr::tokens::kSettingsKeyCtcssToneHz, ctcssSeed);
+            // Optional: also arm the speaker-only sub-audio gate
+            // (MBD_CTCSSGATE=1) so the "亚音静噪" checkbox + muted badge are
+            // visible -- the real persisted round-trip, not a post-hoc poke.
+            if (qgetenv("MBD_CTCSSGATE") == "1")
+                s.setValue(mbdsdr::tokens::kSettingsKeyCtcssGate, true);
             s.sync();
         }
     }

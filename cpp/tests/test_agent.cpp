@@ -906,6 +906,7 @@ void TestAgent::ctcssLandReadbackOutOfRangeRejectAndGate() {
     QCOMPARE(off.value("frequency_hz").toDouble(), engine.ctcssFreqHz());
     QCOMPARE(off.value("frequency_hz").toDouble(), 88.5);   // default PL
     QCOMPARE(off.value("active").toBool(), false);           // no signal -> honest false
+    QCOMPARE(off.value("gate_audio").toBool(), false);      // speaker gate defaults off
 
     // AI takeover (manualMode=false): enabled only (omit frequency) lands, keeps
     // the current/default tuning.
@@ -928,6 +929,27 @@ void TestAgent::ctcssLandReadbackOutOfRangeRejectAndGate() {
     QJsonObject st2 = QJsonDocument::fromJson(
         ai::executeTool("get_ctcss_status", QJsonObject{}, &engine).toUtf8()).object();
     QCOMPARE(st2.value("frequency_hz").toDouble(), 100.0);
+
+    // Optional speaker gate: arm it explicitly, it lands on the real engine
+    // setter and reads back; a later set that OMITS gate_audio leaves it armed.
+    QJsonObject gateOn; gateOn["enabled"] = true; gateOn["gate_audio"] = true;
+    QString rg = ai::LLMWorker::dispatchToolCall("set_ctcss", gateOn, &engine,
+                                                /*manualMode=*/false);
+    QVERIFY2(!rg.contains("\"gated\":true"), qPrintable(rg));
+    QVERIFY2(engine.ctcssGateAudio(), "set_ctcss{gate_audio:true} must arm the speaker gate");
+    QJsonObject stg = QJsonDocument::fromJson(
+        ai::executeTool("get_ctcss_status", QJsonObject{}, &engine).toUtf8()).object();
+    QCOMPARE(stg.value("gate_audio").toBool(), true);
+    // Omit gate_audio -> current gate kept (still armed).
+    QJsonObject noGate; noGate["enabled"] = true; noGate["frequency_hz"] = 120.0;
+    ai::LLMWorker::dispatchToolCall("set_ctcss", noGate, &engine,
+                                   /*manualMode=*/false);
+    QVERIFY2(engine.ctcssGateAudio(), "omitting gate_audio must keep the current gate state");
+    // Non-bool gate_audio -> honest error, never a silent toggle.
+    QJsonObject badGate; badGate["enabled"] = true; badGate["gate_audio"] = "yes";
+    QJsonObject badGateO = QJsonDocument::fromJson(
+        ai::executeTool("set_ctcss", badGate, &engine).toUtf8()).object();
+    QVERIFY2(!badGateO.value("ok").toBool(), "non-boolean `gate_audio` must be an error");
 
     // Out-of-domain frequency is REJECTED (the engine clamps; the tool layer is
     // the honest gate that refuses instead of fake-success at a clamped tone).

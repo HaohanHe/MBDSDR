@@ -136,6 +136,38 @@ double snrDb(const std::vector<float>& x, double fs, double targetHz,
     return 10.0 * std::log10((sig + 1e-12) / (tot - sig + 1e-12));
 }
 
+// CTCSS sub-audio gate scenario: drive the REAL NFM chain with a synthetic
+// carrier and return the captured post-gate SPEAKER RMS plus the honest
+// detection latch. Squelch is ON with a low threshold so the carrier opens it
+// (the variable under test is the CTCSS speaker gate, not the RMS squelch).
+struct CtcssGateCap { double spkRms = 0.0; bool present = false; };
+CtcssGateCap runCtcssGateScenario(const QString& rawPath, double sr,
+                                  bool detectorOn, double tuneHz, bool gateOn) {
+    SpectrumEngine eng;
+    auto* mem = new MemoryAudioSink();
+    eng.setTestAudioSink(std::unique_ptr<IAudioSink>(mem));
+    if (!eng.openOfflineFile(rawPath, sr)) return {};
+    eng.setDemodMode("NFM");
+    eng.vfoSetFreq(eng.selectedVfoId(), 50000.0);
+    eng.setSquelchThreshold(-45.0f);
+    eng.setSquelchEnabled(true);
+    eng.setMuted(false);
+    eng.setCtcssEnabled(detectorOn);
+    eng.setCtcssFreqHz(tuneHz);
+    eng.setCtcssGateAudio(gateOn);
+
+    eng.start();
+    QTest::qWait(2200);          // warmup: squelch opens + CTCSS latch
+    mem->clear();
+    QTest::qWait(1200);          // capture steady state
+    CtcssGateCap cap;
+    cap.spkRms = rms(mem->buffer());
+    cap.present = eng.ctcssPresent();
+    eng.shutdown();
+    eng.wait(3000);
+    return cap;
+}
+
 } // namespace
 
 class TestEngineAudioE2E : public QObject {
@@ -147,6 +179,9 @@ private slots:
     void pureNoiseIsQuietAndToneFree();
     void squelchOpensOnSignalClosesOnNoise();
     void rationalResampleNoPitchDrift();
+    void ctcssGateMutesSpeakerWithoutMatchingTone();
+    void ctcssGateOpensSpeakerWithMatchingTone();
+    void ctcssGateOffIsLegacySquelchPassthrough();
 };
 
 // ---- NFM: 1 kHz tone, +/-3 kHz deviation, clean carrier -------------------
@@ -312,6 +347,54 @@ void TestEngineAudioE2E::rationalResampleNoPitchDrift() {
     qInfo("NFM@250k: dominant=%.1f Hz  RMS=%.3f", got, rms(cap.mono));
     QVERIFY2(std::fabs(got - 1000.0) < 150.0,
              "rational resampling must recover exactly 1 kHz (no pitch drift)");
+}
+
+// ---- CTCSS speaker gate: no matching tone -> speaker muted (recorder kept) --
+// A 1 kHz voice carrier (no sub-audible tone) opens the squelch, but the armed
+// CTCSS gate tuned to 88.5 Hz must hold the SPEAKER silent. The honest latch
+// must read false (no fabricated tone), and the captured speaker buffer ~silent.
+void TestEngineAudioE2E::ctcssGateMutesSpeakerWithoutMatchingTone() {
+    QTemporaryDir dir;
+    const QString path = dir.filePath("nfm_voice.raw");
+    auto iq = fixture::makeNfmCtcssIq(kSrcFs, 2.0, 1000.0, 2500.0, 0.0, 0.0, 0.0);
+    QVERIFY(fixture::writeRawCf32(path, iq));
+
+    CtcssGateCap cap = runCtcssGateScenario(path, kSrcFs, true, 88.5, true);
+    qInfo("CTCSS gate no-tone: spkRms=%.4f present=%d", cap.spkRms, (int)cap.present);
+    QVERIFY2(!cap.present, "a voice-only carrier must NOT latch a sub-audible tone");
+    QVERIFY2(cap.spkRms < 0.01,
+             "armed CTCSS gate must mute the speaker when no matching tone is present");
+}
+
+// ---- CTCSS speaker gate: matching 88.5 Hz tone -> speaker opens ------------
+// A quiet 1 kHz voice + a strong embedded 88.5 Hz PL. The armed gate tuned to
+// 88.5 must latch present AND open the speaker (real audio out).
+void TestEngineAudioE2E::ctcssGateOpensSpeakerWithMatchingTone() {
+    QTemporaryDir dir;
+    const QString path = dir.filePath("nfm_pl.raw");
+    auto iq = fixture::makeNfmCtcssIq(kSrcFs, 2.0, 1000.0, 800.0, 88.5, 2000.0, 0.0);
+    QVERIFY(fixture::writeRawCf32(path, iq));
+
+    CtcssGateCap cap = runCtcssGateScenario(path, kSrcFs, true, 88.5, true);
+    qInfo("CTCSS gate matched: spkRms=%.4f present=%d", cap.spkRms, (int)cap.present);
+    QVERIFY2(cap.present, "the embedded 88.5 Hz tone must latch present");
+    QVERIFY2(cap.spkRms > 0.02,
+             "armed CTCSS gate must open the speaker on a matching tone");
+}
+
+// ---- CTCSS gate OFF: legacy squelch-only passthrough -----------------------
+// Detector on but the speaker gate OFF: the speaker must follow the squelch
+// open (real audio out), exactly the pre-gate legacy behavior.
+void TestEngineAudioE2E::ctcssGateOffIsLegacySquelchPassthrough() {
+    QTemporaryDir dir;
+    const QString path = dir.filePath("nfm_voice2.raw");
+    auto iq = fixture::makeNfmCtcssIq(kSrcFs, 2.0, 1000.0, 2500.0, 0.0, 0.0, 0.0);
+    QVERIFY(fixture::writeRawCf32(path, iq));
+
+    CtcssGateCap cap = runCtcssGateScenario(path, kSrcFs, true, 88.5, false);
+    qInfo("CTCSS gate off: spkRms=%.4f present=%d", cap.spkRms, (int)cap.present);
+    QVERIFY2(cap.spkRms > 0.02,
+             "with the gate off the speaker must follow squelch (legacy passthrough)");
 }
 
 QTEST_MAIN(TestEngineAudioE2E)
