@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 #include <QList>
+#include <QSet>
 #include <limits>
 
 // GnssFix is a value member (lastGnssFix_), so its layout must be visible here.
@@ -332,6 +333,13 @@ private:
     QPushButton*    bmAddBtn_           = nullptr;
     QPushButton*    bmEditBtn_          = nullptr;
     QPushButton*    bmDelBtn_           = nullptr;
+    // Groups whose bookmark rows are hidden by a section-header click. The raw
+    // group string is the key (the empty default group renders as "默认"); the
+    // set persists across refreshBmTable() within the window's lifetime. Collapse
+    // hides rows only -- it never mutates the store, so the "(N)" count always
+    // stays the real total. A newly added/edited bookmark's group is pruned from
+    // this set on mutation so the fresh row is honestly visible.
+    QSet<QString>   bmCollapsedGroups_;
     float           lastSnr_       = 0.0f;
     QList<dsp::SatPass> passes_;
     QTimer*         tleTimer_    = nullptr;

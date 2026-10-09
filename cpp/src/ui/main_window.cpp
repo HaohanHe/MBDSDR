@@ -121,6 +121,12 @@
 
 namespace mbdsdr {
 
+// Bookmark table: on the section-header row, Qt::UserRole stays the section
+// marker (-1); this extra role carries the group's raw store string (the empty
+// default group == "") so the cellClicked toggle can map a header back to its
+// group. Bookmark data rows instead carry their list() index in Qt::UserRole.
+enum : int { kBmGroupRole = Qt::UserRole + 1 };
+
 // Recording-library core types live in the ui sub-namespace.
 using ui::RecordingLibrary;
 using ui::RecordingEntry;
@@ -1544,6 +1550,9 @@ MainWindow::MainWindow(QWidget* parent)
     bmAddBtn_  = new QPushButton("添加", bmBox);
     bmEditBtn_ = new QPushButton("编辑", bmBox);
     bmDelBtn_  = new QPushButton("删除", bmBox);
+    bmAddBtn_->setObjectName("bmAddBtn");
+    bmEditBtn_->setObjectName("bmEditBtn");
+    bmDelBtn_->setObjectName("bmDelBtn");
     bmBtnRow->addWidget(bmAddBtn_);
     bmBtnRow->addWidget(bmEditBtn_);
     bmBtnRow->addWidget(bmDelBtn_);
@@ -1613,6 +1622,9 @@ MainWindow::MainWindow(QWidget* parent)
         ui::Bookmark bm;   // empty -> dialog seeds from live engine freq/mode/bw
         if (bmDialog(bm, bm)) {
             bookmarkManager_->add(bm);
+            // Honest visibility: a fresh row must be on screen, so expand its
+            // group (other groups keep whatever collapse state the user set).
+            bmCollapsedGroups_.remove(bm.group);
             refreshBmTable();
             resyncScanBookmarks();
         }
@@ -1625,6 +1637,9 @@ MainWindow::MainWindow(QWidget* parent)
         ui::Bookmark bm = bookmarkManager_->list().at(row);
         if (bmDialog(bm, bm)) {
             bookmarkManager_->update(row, bm);
+            // If the edit re-assigned the bookmark into another (possibly
+            // collapsed) group, expand that target so the row stays visible.
+            bmCollapsedGroups_.remove(bm.group);
             refreshBmTable();
             resyncScanBookmarks();
         }
@@ -1649,9 +1664,25 @@ MainWindow::MainWindow(QWidget* parent)
         bm.name.clear();   // let the user name it; placeholder shows the freq
         if (bmDialog(bm, bm)) {
             bookmarkManager_->add(bm);
+            bmCollapsedGroups_.remove(bm.group);   // keep the saved row visible
             refreshBmTable();
             resyncScanBookmarks();
         }
+    });
+    // Single-click a section-header row -> toggle that group's collapse state.
+    // Only rows whose col-0 UserRole == -1 are headers; data rows and the empty
+    // hint row are untouched by this handler (their own wiring lives on
+    // double-click / the edit-delete buttons). Collapse hides rows only: the
+    // store and its "(N)" total never change, and the ▾/▸ prefix flips in place.
+    connect(bmTable_, &QTableWidget::cellClicked, this, [this](int row, int) {
+        if (!bmTable_ || row < 0 || row >= bmTable_->rowCount()) return;
+        QTableWidgetItem* it = bmTable_->item(row, 0);
+        if (!it) return;
+        if (it->data(Qt::UserRole).toInt() != -1) return;   // not a section header
+        const QString g = it->data(kBmGroupRole).toString();
+        if (bmCollapsedGroups_.contains(g)) bmCollapsedGroups_.remove(g);
+        else                                bmCollapsedGroups_.insert(g);
+        refreshBmTable();
     });
     // Double-click row = jump directly (no edit dialog). Section header rows
     // resolve to -1 via the UserRole mapping and are a no-op.
@@ -3402,17 +3433,28 @@ void MainWindow::refreshBmTable() {
     int storeIdx = 0;
     const QBrush headBg(tokens::card1());
     const QBrush headFg(QColor(QString::fromUtf8(tokens::kTextSecondary)));
+    // Custom item role on the section-header row carrying the group's raw store
+    // string (empty default group == ""). Qt::UserRole stays the section marker
+    // (-1); this one lets the cellClicked toggle map a header back to its group.
     for (const QString& g : bookmarkManager_->groups()) {
         const QList<ui::Bookmark> grp = bookmarkManager_->byGroup(g);
+        const bool collapsed = bmCollapsedGroups_.contains(g);
         // ---- section header row ----
         {
             const int row = bmTable_->rowCount();
             bmTable_->insertRow(row);
+            // ▾ = expanded (click collapses), ▸ = collapsed (click expands).
+            // The "(N)" count is ALWAYS the real store total for the group, even
+            // while collapsed -- hiding rows never lies about how many are stored.
+            const QString dispName = g.isEmpty() ? QString::fromUtf8("默认") : g;
             auto* head = new QTableWidgetItem(
-                QString("%1 (%2)").arg(g.isEmpty() ? QString::fromUtf8("默认") : g)
-                                  .arg(grp.size()));
+                QString("%1 %2 (%3)")
+                    .arg(collapsed ? QString::fromUtf8("▸") : QString::fromUtf8("▾"),
+                         dispName)
+                    .arg(grp.size()));
             head->setFlags(Qt::ItemIsEnabled);            // static divider
             head->setData(Qt::UserRole, -1);              // section marker
+            head->setData(kBmGroupRole, g);               // raw group string for toggle
             head->setBackground(headBg);
             head->setForeground(headFg);
             QFont hf = head->font();
@@ -3429,7 +3471,10 @@ void MainWindow::refreshBmTable() {
                 }
             }
         }
-        // ---- bookmark rows of this group ----
+        // ---- bookmark rows of this group (skipped entirely while collapsed:
+        // collapse hides rows only, the store is untouched and storeIdx still
+        // advances so surviving rows keep their honest list() indices) ----
+        if (collapsed) continue;
         for (const auto& b : grp) {
             const int row = bmTable_->rowCount();
             bmTable_->insertRow(row);
