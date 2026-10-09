@@ -20,6 +20,7 @@
 #include "dsp/squelch.h"
 #include "dsp/gated_recorder.h"
 #include "dsp/ctcss.h"
+#include "dsp/cdcss.h"
 #include "core/tokens.h"
 
 using namespace mbdsdr::dsp;
@@ -57,6 +58,51 @@ std::vector<float> tonePlusNoiseBlock(int n, double toneHz, double amp,
 }
 } // namespace
 
+// ---------------------------------------------------------------------------
+// CDCSS/DCS test-side synthesizer (*** SYNTHETIC -- NOT HARDWARE ***).
+//
+// Clean-room Golay(23,12) encoder (same public polynomial 0xC75, re-implemented
+// here so the product code is not exercised by its own test synthesizer).
+// Bits are emitted LSB-first, Manchester-II encoded (bit 1 = high-then-low),
+// and key a 1500 Hz sine at +/- amplitude (BPSK).  A fixed-seed LCG adds
+// band noise so the test sees a real signal-plus-noise waveform, not a bit array.
+namespace {
+constexpr uint32_t kTestGolayGen = 0xC75u;
+uint32_t testGolayEncode(uint32_t data12) {
+    const uint32_t cw = (data12 & 0xFFFu) << 11;
+    uint32_t work = cw;
+    for (int i = 22; i >= 11; --i)
+        if ((work >> i) & 1u) work ^= kTestGolayGen << (i - 11);
+    return (cw | (work & 0x7FFu)) & 0x7FFFFFu;
+}
+
+// Repeat-emit the 23-bit Golay word for durationSec seconds, LSB-first.
+// The half-bit grid mirrors the decoder's fractional countdown exactly, so
+// the strobe windows stay aligned over long runs (no integer-truncation drift).
+std::vector<float> synthesizeDcs(int code12, double durationSec,
+                                 double amp, double noiseStd, double& phase) {
+    const double sr = 48000.0;
+    const double halfBit = sr / (2.0 * 134.4);
+    const int total = static_cast<int>(durationSec * sr);
+    std::vector<float> out(total, 0.0f);
+    const uint32_t cw = testGolayEncode(static_cast<uint32_t>(code12));
+    double fbCountdown = halfBit;
+    int half = 0;
+    for (int s = 0; s < total; ++s) {
+        const int bitIdx = (half / 2) % 23;
+        const bool firstHalf = (half % 2) == 0;
+        const bool bit = (cw >> bitIdx) & 1u;
+        const bool level = firstHalf ? bit : !bit;
+        const double pol = level ? +1.0 : -1.0;
+        phase += 2.0 * M_PI * 1500.0 / sr;
+        out[s] = static_cast<float>(amp * pol * std::sin(phase) + noiseStd * whiteNoise());
+        fbCountdown -= 1.0;
+        if (fbCountdown <= 0.0) { fbCountdown += halfBit; ++half; }
+    }
+    return out;
+}
+} // namespace
+
 class TestSquelchGate : public QObject {
     Q_OBJECT
 private slots:
@@ -67,6 +113,10 @@ private slots:
     void ctcssFalseOnNoiseOnly();
     void ctcssRejectsWrongFrequency();
     void ctcssDisabledStaysFalse();
+    void cdcssDetectsConfiguredCode();
+    void cdcssFalseOnWrongCode();
+    void cdcssCorrectsBitFlips();
+    void cdcssDisabledStaysFalse();
     void cleanupTestCase();
 };
 
@@ -248,6 +298,101 @@ void TestSquelchGate::ctcssDisabledStaysFalse() {
     // An out-of-domain configure must be rejected (keeps 88.5).
     det.configure(48000.0, 400.0);
     QCOMPARE(det.toneHz(), 88.5);
+}
+
+// (e) CDCSS: a real 023 DCS stream (Golay+Manchester, on a 1500 Hz keyed sine
+// riding on noise) must latch codePresent() and report lastCode()==023.
+void TestSquelchGate::cdcssDetectsConfiguredCode() {
+    CdcssDecoder dec;
+    dec.configure(48000.0, 023);        // octal 023
+    dec.setEnabled(true);
+    QCOMPARE(dec.configuredCode(), 023);
+
+    double ph = 0.0;
+    bool seen = false;
+    // ~1.2 s of DCS stream (>= 3 latch words).
+    auto blk = synthesizeDcs(023, 1.2, 0.20, 0.02, ph);
+    // Feed in 20 ms chunks to exercise the streaming block path.
+    for (size_t off = 0; off + 960 <= blk.size(); off += 960) {
+        dec.process(blk.data() + off, 960);
+        if (dec.codePresent()) { seen = true; break; }
+    }
+    QVERIFY2(seen, "Configured 023 DCS stream must latch present");
+    QCOMPARE(dec.lastCode(), 023);
+}
+
+// (f) CDCSS: the on-air stream is code 025 but the decoder is tuned to 023 ->
+// codePresent() must stay false (no fabrication).
+void TestSquelchGate::cdcssFalseOnWrongCode() {
+    CdcssDecoder dec;
+    dec.configure(48000.0, 023);
+    dec.setEnabled(true);
+    double ph = 0.0;
+    auto blk = synthesizeDcs(025, 1.5, 0.20, 0.02, ph);
+    for (size_t off = 0; off + 960 <= blk.size(); off += 960) {
+        dec.process(blk.data() + off, 960);
+        QVERIFY2(!dec.codePresent(),
+                 "On-air 025 must not latch when tuned to 023");
+    }
+    QCOMPARE(dec.lastCode(), 025);       // honest: it DID decode 025, just not matched
+}
+
+// (g) CDCSS: Golay(23,12) must correct 1-2 bit flips.  We synthesize the 023
+// stream, then in the test-side bitstream we flip 1 and 2 bits per word before
+// re-emitting; the decoder must still latch 023.
+void TestSquelchGate::cdcssCorrectsBitFlips() {
+    // Build a corrupted stream: encode 023, then XOR 1 and 2 bit-flips into
+    // every emitted 23-bit word.  The DSP decoder's Golay table must fix them.
+    const double sr = 48000.0;
+    const double halfBit = sr / (2.0 * 134.4);
+    const int total = static_cast<int>(1.5 * sr);
+    const uint32_t clean = testGolayEncode(023);
+    // Flip bit 5 and bit 17 of every word (2-bit error).
+    const uint32_t corrupted = clean ^ (1u << 5) ^ (1u << 17);
+
+    double ph = 0.0;
+    std::vector<float> blk(total, 0.0f);
+    double fbCountdown = halfBit;
+    int half = 0;
+    for (int s = 0; s < total; ++s) {
+        const int bitIdx = (half / 2) % 23;
+        const bool firstHalf = (half % 2) == 0;
+        const bool bit = (corrupted >> bitIdx) & 1u;
+        const bool level = firstHalf ? bit : !bit;
+        const double pol = level ? +1.0 : -1.0;
+        ph += 2.0 * M_PI * 1500.0 / sr;
+        blk[s] = static_cast<float>(0.20 * pol * std::sin(ph) + 0.02 * whiteNoise());
+        fbCountdown -= 1.0;
+        if (fbCountdown <= 0.0) { fbCountdown += halfBit; ++half; }
+    }
+
+    CdcssDecoder dec;
+    dec.configure(48000.0, 023);
+    dec.setEnabled(true);
+    bool seen = false;
+    for (size_t off = 0; off + 960 <= blk.size(); off += 960) {
+        dec.process(blk.data() + off, 960);
+        if (dec.codePresent()) { seen = true; break; }
+    }
+    QVERIFY2(seen, "Golay(23,12) must correct 2 bit flips and still latch 023");
+    QCOMPARE(dec.lastCode(), 023);
+}
+
+// (h) CDCSS: disabled -> even with the real 023 stream present, codePresent()
+// is always false.
+void TestSquelchGate::cdcssDisabledStaysFalse() {
+    CdcssDecoder dec;
+    dec.configure(48000.0, 023);
+    dec.setEnabled(false);
+    double ph = 0.0;
+    auto blk = synthesizeDcs(023, 1.0, 0.20, 0.02, ph);
+    for (size_t off = 0; off + 960 <= blk.size(); off += 960) {
+        dec.process(blk.data() + off, 960);
+        QVERIFY2(!dec.codePresent(), "Disabled CDCSS must read false");
+    }
+    // Out-of-table configure must be rejected.
+    dec.configure(48000.0, 0777);
+    QCOMPARE(dec.configuredCode(), 023);
 }
 
 void TestSquelchGate::cleanupTestCase() {
