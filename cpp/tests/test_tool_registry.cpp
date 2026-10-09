@@ -206,7 +206,8 @@ void TestToolRegistry::readOnlySet_parityWithFlutter() {
 }
 
 // Unknown tool: honest error string, never a crash, never a fake ok. A null
-// engine reports "error: no engine" before dispatch.
+// engine is rejected by the pre-dispatch guard with the honest JSON envelope
+// {ok:false,error:...} (aligned with ControlHub::execute()).
 void TestToolRegistry::unknownTool_honestErrorPath() {
     dsp::SpectrumEngine engine;
     QString r = executeTool("definitely_not_a_real_tool", QJsonObject{}, &engine);
@@ -219,9 +220,15 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
     QVERIFY2(o.isEmpty() || o.value("ok").toBool() == false,
              qPrintable("unknown tool must not report ok:true, got: " + r));
 
-    // Null engine -> the pre-dispatch guard, byte-for-byte.
-    QCOMPARE(executeTool("get_status", QJsonObject{}, nullptr),
-             QString("error: no engine"));
+    // Null engine -> the pre-dispatch guard: parseable JSON envelope,
+    // ok:false, non-empty error, no fabricated fields.
+    const QString r2 = executeTool("get_status", QJsonObject{}, nullptr);
+    const QJsonObject e = QJsonDocument::fromJson(r2.toUtf8()).object();
+    QVERIFY2(!e.isEmpty(), qPrintable("null engine must yield a JSON envelope, got: " + r2));
+    QVERIFY2(e.value("ok").toBool() == false,
+             qPrintable("null engine must not report ok:true, got: " + r2));
+    QVERIFY2(!e.value("error").toString().isEmpty(),
+             qPrintable("null engine must carry a non-empty error, got: " + r2));
 
     // Unknown names are never gated.
     QVERIFY(!isWriteTool("definitely_not_a_real_tool"));
