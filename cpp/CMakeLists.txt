@@ -114,6 +114,7 @@ set(SOURCES
     src/ui/data_text_panel.cpp
     src/dsp/squelch.cpp
     src/dsp/ctcss.cpp
+    src/dsp/cdcss.cpp
     src/dsp/agc.cpp
     src/dsp/audio_output.cpp
     src/dsp/qt_audio_sink.cpp
