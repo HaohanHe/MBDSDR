@@ -89,6 +89,31 @@ int loadRequestedRingDepth() {
     if (!ok) return tokens::kWaterfallDepthDefault;
     return legalRingDepth(rows);
 }
+
+// Resolve a requested peak-hold decay (dB/frame) to a legal tier. Only the named
+// tokens::kMaxHoldDecayChoices[] are honoured; a value outside that set
+// (hand-edited config) honestly falls back to tokens::kMaxHoldDecayDefault. There
+// is no continuous band to clamp into: the combo offers exactly three fall-off
+// speeds (慢/中/快), so an unknown number is rejected outright rather than
+// silently re-interpreted.
+float legalMaxHoldDecay(float db) {
+    for (float c : tokens::kMaxHoldDecayChoices)
+        if (std::abs(c - db) < 1e-6f) return c;
+    return tokens::kMaxHoldDecayDefault;
+}
+
+// Read the persisted peak-hold decay back on construction. Missing key,
+// non-numeric / non-finite value, or a value outside the named choice set =>
+// honest default (1.5 dB/frame). Mirrors the QSettings("MBDSDR","MBDSDR") group
+// used app-wide.
+float loadRequestedMaxHoldDecay() {
+    QSettings s("MBDSDR", "MBDSDR");
+    const QVariant v = s.value(tokens::kSettingsKeyMaxHoldDecay);
+    bool ok = false;
+    const double d = v.toDouble(&ok);
+    if (!ok || !std::isfinite(d)) return tokens::kMaxHoldDecayDefault;
+    return legalMaxHoldDecay(static_cast<float>(d));
+}
 } // namespace
 
 SpectrumDisplay::SpectrumDisplay(QWidget* parent)
@@ -102,6 +127,9 @@ SpectrumDisplay::SpectrumDisplay(QWidget* parent)
     // Restore the user's last waterfall ring depth (honest default if unset or
     // illegal). The first allocateRing() honours requestedRingDepth_.
     requestedRingDepth_ = loadRequestedRingDepth();
+    // Restore the user's chosen peak-hold decay tier (honest default if unset or
+    // illegal). The very first setSpectrum() honours maxHoldDecayDb_.
+    maxHoldDecayDb_ = loadRequestedMaxHoldDecay();
 }
 
 // ---------------------------------------------------------------------------
@@ -447,9 +475,11 @@ void SpectrumDisplay::setSpectrum(const SpectrumFrame& frame) {
             // Per-frame peak-hold decay: the held peak eases DOWN by a named dB
             // step before taking the max with the fresh frame, so a burst's peak
             // lingers visibly and then fades instead of freezing forever. A fresh
-            // rise still refreshes the bin back up immediately.
+            // rise still refreshes the bin back up immediately. The step is the
+            // user-selected 慢/中/快 tier (maxHoldDecayDb_, validated + persisted);
+            // the canvas never invents a decay rate of its own.
             float held = maxHold_[i];
-            if (std::isfinite(held)) held -= tokens::kMaxHoldDecayDb;
+            if (std::isfinite(held)) held -= maxHoldDecayDb_;
             maxHold_[i] = (frame.dbfs[i] > held) ? frame.dbfs[i] : held;
         }
     }
@@ -591,6 +621,16 @@ void SpectrumDisplay::resetZoom() {
 void SpectrumDisplay::setMaxHoldEnabled(bool on) {
     maxHoldOn_ = on;
     if (!on) maxHold_.clear();
+    update();
+}
+
+void SpectrumDisplay::setMaxHoldDecayDb(float db) {
+    // Only the named 慢/中/快 tiers are honoured; anything else falls back to the
+    // default (1.5 dB/frame) rather than being clamped into a continuous band that
+    // has no physical meaning for a per-frame peak fall-off. No envelope rebuild
+    // is needed: the very next setSpectrum() applies the new step to the held
+    // bins, so a switch is honoured on the next frame, not deferred.
+    maxHoldDecayDb_ = legalMaxHoldDecay(db);
     update();
 }
 

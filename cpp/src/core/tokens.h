@@ -133,6 +133,22 @@ inline constexpr float kPersistAlphaHigh = 0.55f;
 // rate is never a bare number in the canvas.
 inline constexpr float kMaxHoldDecayDb = 1.5f;   // dB per rendered frame
 
+// Peak-hold decay RATE selectable from the spectrum toolbar (慢/中/快). The held
+// peak falls by this many dB every rendered frame: a small step lingers recent
+// bursts a long time (慢), a large step lets them fade quickly (快). The legal
+// choice set is exactly what the decay combo offers; a persisted value outside it
+// (hand-edited config) honestly resolves to kMaxHoldDecayDb (== the middle tier).
+// Labels read 慢/中/快 so the user picks a fall-off SPEED, not a raw dB number;
+// the dB/frame values below are the honest mechanism behind each label.
+inline constexpr float kMaxHoldDecaySlow   = 0.5f;   // 慢: 峰值久留 (slow fade)
+inline constexpr float kMaxHoldDecayMedium = 1.5f;   // 中: 默认 (= kMaxHoldDecayDb)
+inline constexpr float kMaxHoldDecayFast   = 3.0f;   // 快: 峰值快落 (fast fade)
+inline constexpr float kMaxHoldDecayChoices[] = {
+    kMaxHoldDecaySlow, kMaxHoldDecayMedium, kMaxHoldDecayFast };
+// Honest default when the key is missing / non-numeric / not in the choice set.
+inline constexpr float kMaxHoldDecayDefault = kMaxHoldDecayDb;
+inline constexpr const char* kSettingsKeyMaxHoldDecay = "view/maxHoldDecay";
+
 // ---- Frontend software decimation (real anti-alias lowpass + integer D) --
 // Selectable integer decimation factors applied BEFORE channelization so narrow
 // modes (CW/FT8) run on a reduced-rate band with less compute. D=1 = off.

@@ -101,6 +101,13 @@ public slots:
     // production UI use -- lets ctest drive setSpectrum and assert the
     // per-frame kMaxHoldDecayDb decay without painting.
     const std::vector<float>& maxHoldEnvelopeForTest() const { return maxHold_; }
+    // Peak-hold decay rate (dB per rendered frame). Only the named
+    // tokens::kMaxHoldDecayChoices[] tiers are honoured; anything else (hand-edited
+    // config) honestly falls back to tokens::kMaxHoldDecayDefault. The ctor reads
+    // the persisted value (loadRequestedMaxHoldDecay()) so the very first frame is
+    // already at the user's chosen 慢/中/快 tier.
+    void setMaxHoldDecayDb(float db);
+    float maxHoldDecayDbForTest() const { return maxHoldDecayDb_; }
 
     // ---- Minimum-hold envelope (SDR++ "min hold") -------------------------
     // The per-bin running MINIMUM of every frame (symmetric to the max-hold
@@ -425,6 +432,12 @@ private:
     // Max-hold envelope.
     std::vector<float> maxHold_;
     bool maxHoldOn_ = false;
+    // Per-frame peak-hold decay (dB/frame). In-class default 1.5f matches
+    // tokens::kMaxHoldDecayDefault; the ctor overrides this with the persisted and
+    // validated value (loadRequestedMaxHoldDecay()), so this literal is only a
+    // pre-ctor safety value. Kept as a literal to avoid pulling tokens.h into this
+    // widget header (mirrors requestedRingDepth_).
+    float maxHoldDecayDb_ = 1.5f;
 
     // Min-hold envelope (running per-bin minimum, no decay; +inf = "unset").
     std::vector<float> minHold_;
