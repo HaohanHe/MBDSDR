@@ -87,6 +87,7 @@ set(SOURCES
     src/dsp/frequency_calibrator.cpp
     src/dsp/spyserver_server.cpp
     src/ui/bookmark_manager.cpp
+    src/ui/scan_session.cpp
     src/ui/activity_log.cpp
     src/ui/shortcuts_dialog.cpp
     src/ui/calibration_dialog.cpp
@@ -169,6 +170,7 @@ set(HEADERS
     src/core/spectrum_frame.h
     src/core/bandwidth_preset.h
     src/ui/main_window.h
+    src/ui/scan_session.h
     src/ui/spectrum_widget.h
     src/ui/spectrum_display.h
     src/ui/calibration_dialog.h
