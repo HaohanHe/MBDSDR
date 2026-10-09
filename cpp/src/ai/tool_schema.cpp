@@ -299,7 +299,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolParamSpec ch;
         ch.name = "channel_id";
         ch.type = "number";
-        ch.description = QString::fromUtf8("可选：信道 VFO id；缺省为当前选中信道");
+        ch.description = QString::fromUtf8("可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道");
         ch.required = false;
         s.params.append(ch);
         out.append(s);
@@ -317,7 +317,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolParamSpec ch;
         ch.name = "channel_id";
         ch.type = "number";
-        ch.description = QString::fromUtf8("可选：信道 VFO id；缺省为当前选中信道");
+        ch.description = QString::fromUtf8("可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道");
         ch.required = false;
         s.params.append(ch);
         out.append(s);
@@ -335,7 +335,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolParamSpec ch;
         ch.name = "channel_id";
         ch.type = "number";
-        ch.description = QString::fromUtf8("可选：信道 VFO id；缺省为当前选中信道");
+        ch.description = QString::fromUtf8("可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道");
         ch.required = false;
         s.params.append(ch);
         out.append(s);
@@ -353,7 +353,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolParamSpec ch;
         ch.name = "channel_id";
         ch.type = "number";
-        ch.description = QString::fromUtf8("可选：信道 VFO id；缺省为当前选中信道");
+        ch.description = QString::fromUtf8("可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道");
         ch.required = false;
         s.params.append(ch);
         out.append(s);
@@ -371,7 +371,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolParamSpec ch;
         ch.name = "channel_id";
         ch.type = "number";
-        ch.description = QString::fromUtf8("可选：信道 VFO id；缺省为当前选中信道");
+        ch.description = QString::fromUtf8("可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道");
         ch.required = false;
         s.params.append(ch);
         out.append(s);
@@ -418,12 +418,15 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     // side (parallel A block) -- these specs are the AI registration layer only.
 
     // set_network_audio_sink (write -- gated) -----------------------------
+    // Phase63 D5: advertise host/stereo so the routed stub echoes them instead
+    // of silently dropping (CH cmdSetNetworkAudioSink already accepts them).
     {
         ToolSchemaSpec s;
         s.name = "set_network_audio_sink";
         s.description = QString::fromUtf8(
             "写入：配置网络音频流输出（UDP/TCP 镜像当前解调音频）。"
-            "enable 开关、port 端口、format 采样格式。属于写动作，手动模式下被拦截。");
+            "enable 开关、port 端口、format 协议；可选 host 与 stereo。"
+            "属于写动作，手动模式下被拦截。");
         s.write = true;
         ToolParamSpec en;
         en.name = "enable";
@@ -433,14 +436,24 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolParamSpec port;
         port.name = "port";
         port.type = "number";
-        port.description = QString::fromUtf8("网络音频端口号");
+        port.description = QString::fromUtf8("网络音频端口号 (1..65535)");
         port.required = true;
         ToolParamSpec fmt;
         fmt.name = "format";
         fmt.type = "string";
-        fmt.description = QString::fromUtf8("采样格式，如 s16le");
+        fmt.description = QString::fromUtf8("协议：udp 或 tcp（默认 udp）");
         fmt.required = false;
-        s.params << en << port << fmt;
+        ToolParamSpec host;
+        host.name = "host";
+        host.type = "string";
+        host.description = QString::fromUtf8("绑定/对端主机（默认 127.0.0.1）");
+        host.required = false;
+        ToolParamSpec st;
+        st.name = "stereo";
+        st.type = "boolean";
+        st.description = QString::fromUtf8("立体声（默认 false=单声道）");
+        st.required = false;
+        s.params << en << port << fmt << host << st;
         out.append(s);
     }
 
@@ -566,11 +579,15 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     }
 
     // add_bookmark (write -- gated) --------------------------------------
+    // Phase63 D4: schema now declares bandwidth_hz and group (which the executor
+    // already accepted) so the LLM sees them; CH cmdAddBookmark also consumes
+    // group on the control side.
     {
         ToolSchemaSpec s;
         s.name = "add_bookmark";
         s.description = QString::fromUtf8(
-            "写入：添加书签（freq_hz/name/mode）。属于写动作，手动模式下被拦截。");
+            "写入：添加书签（freq_hz/name/mode/bandwidth_hz/group）。"
+            "属于写动作，手动模式下被拦截。");
         s.write = true;
         ToolParamSpec f;
         f.name = "freq_hz";
@@ -589,7 +606,17 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         md.type = "string";
         md.description = QString::fromUtf8("解调模式，如 NFM/AM");
         md.required = false;
-        s.params << f << nm << md;
+        ToolParamSpec bw;
+        bw.name = "bandwidth_hz";
+        bw.type = "number";
+        bw.description = QString::fromUtf8("书签带宽 Hz（可选）");
+        bw.required = false;
+        ToolParamSpec grp;
+        grp.name = "group";
+        grp.type = "string";
+        grp.description = QString::fromUtf8("书签分组名（可选）");
+        grp.required = false;
+        s.params << f << nm << md << bw << grp;
         out.append(s);
     }
 
@@ -705,16 +732,18 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     }
 
     // set_vfo_frequency (write -- gated) ---------------------------------
+    // Phase63 D1: accept EITHER index (marker ordinal) OR id (direct VFO id).
     {
         ToolSchemaSpec s;
         s.name = "set_vfo_frequency";
         s.description = QString::fromUtf8(
-            "写入：把指定 VFO 调谐到新频率（index/freq_hz）。属于写动作，手动模式下被拦截。");
+            "写入：把指定 VFO 调谐到新频率（index 或 id 二选一 + freq_hz）。"
+            "属于写动作，手动模式下被拦截。");
         s.write = true;
         ToolParamSpec idx;
         idx.name = "index";
         idx.type = "number";
-        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序）");
+        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序；亦可改用 id 直传 VFO id）");
         idx.required = true;
         ToolParamSpec fq;
         fq.name = "freq_hz";
@@ -730,13 +759,13 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "set_vfo_mode";
         s.description = QString::fromUtf8(
-            "写入：切换指定 VFO 的解调模式（index/mode，mode 取值见 ControlHub 模式表："
+            "写入：切换指定 VFO 的解调模式（index 或 id 二选一 + mode，mode 取值见 ControlHub 模式表："
             "AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX）。属于写动作，手动模式下被拦截。");
         s.write = true;
         ToolParamSpec idx;
         idx.name = "index";
         idx.type = "number";
-        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序）");
+        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序；亦可改用 id 直传 VFO id）");
         idx.required = true;
         ToolParamSpec md;
         md.name = "mode";
@@ -752,12 +781,13 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "set_vfo_bandwidth";
         s.description = QString::fromUtf8(
-            "写入：设置指定 VFO 的信道带宽（index/bandwidth_hz）。属于写动作，手动模式下被拦截。");
+            "写入：设置指定 VFO 的信道带宽（index 或 id 二选一 + bandwidth_hz）。"
+            "属于写动作，手动模式下被拦截。");
         s.write = true;
         ToolParamSpec idx;
         idx.name = "index";
         idx.type = "number";
-        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序）");
+        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序；亦可改用 id 直传 VFO id）");
         idx.required = true;
         ToolParamSpec bw;
         bw.name = "bandwidth_hz";
@@ -817,11 +847,15 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     }
 
     // set_fft_params (write -- gated) ------------------------------------
+    // Phase63 D3: window/average accept BOTH the string enum below AND the raw
+    // int (0/1/2) used by the ControlHub/HTTP channel. The schema advertises
+    // the human-readable enum for the LLM; the executor accepts either type.
     {
         ToolSchemaSpec s;
         s.name = "set_fft_params";
         s.description = QString::fromUtf8(
             "写入：设置频谱 FFT 参数（fft_size/window/average）。"
+            "window/average 接受字符串枚举（推荐）或原始整数 0/1/2。"
             "属于写动作，手动模式下被拦截。");
         s.write = true;
         ToolParamSpec sz;
@@ -834,13 +868,13 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolParamSpec w;
         w.name = "window";
         w.type = "string";
-        w.description = QString::fromUtf8("窗函数");
+        w.description = QString::fromUtf8("窗函数（亦接受整数 0=Hann/1=Flattop/2=Blackman）");
         w.enumValues = QVariantList{"Hann", "Flattop", "Blackman"};
         w.required = false;
         ToolParamSpec av;
         av.name = "average";
         av.type = "string";
-        av.description = QString::fromUtf8("平均模式");
+        av.description = QString::fromUtf8("平均模式（亦接受整数 0=Off/1=Slow/2=Fast）");
         av.enumValues = QVariantList{"Off", "Slow", "Fast"};
         av.required = false;
         s.params << sz << w << av;
