@@ -66,6 +66,7 @@ private slots:
     void fftParamsLandAndSpectrumStatusReadsBack();
     void squelchSetLandAndStatusReadsBack();
     void noiseBlankerSetLandAndStatusReadsBack();
+    void ctcssSetLandOutOfRangeRejectedAndGate();
     void vfoListAddSwitchRename();
     void bookmarksPersistToQSettings();
     void recordingsListEmptyThenRealDeleteExport();
@@ -599,6 +600,60 @@ void TestControlHub::noiseBlankerSetLandAndStatusReadsBack() {
              .value("ok").toBool(), false);
 }
 
+// CTCSS: set_ctcss really flips the engine switch + tuning; get_ctcss_status
+// reads the real state back; an out-of-domain frequency is REJECTED (not
+// silently clamped); missing `enabled` is an honest error; and the write gate
+// intercepts set_ctcss untouched while the read stays open.
+void TestControlHub::ctcssSetLandOutOfRangeRejectedAndGate() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // Fresh engine: honest disabled state, default 88.5 Hz, active=false.
+    QJsonObject s0 = parseObj(hub.execute("get_ctcss_status", {}));
+    QVERIFY2(s0.value("ok").toBool(), s0.value("error").toString().toUtf8().constData());
+    QCOMPARE(s0.value("command").toString(), QStringLiteral("get_ctcss_status"));
+    QCOMPARE(s0.value("enabled").toBool(), false);
+    QCOMPARE(s0.value("frequency_hz").toDouble(), 88.5);
+    QCOMPARE(s0.value("active").toBool(), false);
+
+    // Write lands on the engine (enabled + explicit legal tone).
+    QJsonObject r = parseObj(hub.execute("set_ctcss",
+        {{"enabled", true}, {"frequency_hz", 100.0}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(r.value("enabled").toBool(), true);
+    QCOMPARE(r.value("frequency_hz").toDouble(), 100.0);
+    QCOMPARE(eng.ctcssEnabled(), true);
+    QCOMPARE(eng.ctcssFreqHz(), 100.0);
+
+    // Read-back reflects the real engine state.
+    QJsonObject s = parseObj(hub.execute("get_ctcss_status", {}));
+    QCOMPARE(s.value("enabled").toBool(), true);
+    QCOMPARE(s.value("frequency_hz").toDouble(), 100.0);
+
+    // Out-of-domain frequency is REJECTED (engine untouched).
+    const double fBefore = eng.ctcssFreqHz();
+    QVERIFY2(!parseObj(hub.execute("set_ctcss",
+        {{"enabled", true}, {"frequency_hz", 30.0}})).value("ok").toBool(),
+        "low CTCSS tone must be rejected");
+    QVERIFY2(!parseObj(hub.execute("set_ctcss",
+        {{"enabled", true}, {"frequency_hz", 300.0}})).value("ok").toBool(),
+        "high CTCSS tone must be rejected");
+    QCOMPARE(eng.ctcssFreqHz(), fBefore);
+
+    // Missing required `enabled` -> honest ok:false.
+    QCOMPARE(parseObj(hub.execute("set_ctcss", {})).value("ok").toBool(), false);
+
+    // Write gate closed: set_ctcss refused and engine untouched; read stays open.
+    hub.setWriteEnabled(false);
+    QJsonObject g = parseObj(hub.execute("set_ctcss", {{"enabled", false}}));
+    QVERIFY2(!g.value("ok").toBool() && g.value("gated").toBool(),
+             qPrintable(QString::fromUtf8("set_ctcss must be gated")));
+    QVERIFY(eng.ctcssEnabled());   // unchanged by the gated attempt
+    QVERIFY(parseObj(hub.execute("get_ctcss_status", {})).value("ok").toBool());
+    hub.setWriteEnabled(true);
+}
+
 // add_vfo / switch_vfo really move the selected channel; rename_vfo renames it.
 void TestControlHub::vfoListAddSwitchRename() {
     SpectrumEngine eng;
@@ -786,8 +841,8 @@ void TestControlHub::phase26WritesAreGatedAndBadArgsHonest() {
     hub.setWriteEnabled(false);
     for (const char* cmd : {
             "set_fft_params", "add_bookmark", "start_scan_link",
-            "delete_recording", "set_squelch", "rename_vfo", "set_color_map",
-            "set_noise_blanker"}) {
+            "delete_recording", "set_squelch", "set_ctcss", "rename_vfo",
+            "set_color_map", "set_noise_blanker"}) {
         QJsonObject r = parseObj(hub.execute(QString::fromUtf8(cmd), {{}}));
         QVERIFY2(!r.value("ok").toBool() && r.value("gated").toBool(),
                  qPrintable(QString::fromUtf8(cmd)));
