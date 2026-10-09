@@ -1697,11 +1697,12 @@ void SpectrumEngine::run() {
             if (networkTap_) networkTap_->writeStereo(L, R);
         } else {
             // Speaker buffer = `out` (already squelch-gated) further muted by the
-            // CTCSS sub-audio gate. When armed and no matching tone is present,
-            // the speaker stays silent even though squelch opened; `out` feeding
-            // the recorder/WAV below keeps the real, un-muted audio.
+            // unified sub-audio gate (CTCSS OR CDCSS). When any sub-audio gate is
+            // armed and no matching domain is present, the speaker stays silent
+            // even though squelch opened; `out` feeding the recorder/WAV below
+            // keeps the real, un-muted audio.
             std::vector<float> spk = out;
-            if (!ctcssOpen) std::fill(spk.begin(), spk.end(), 0.0f);
+            if (!toneGateOpen) std::fill(spk.begin(), spk.end(), 0.0f);
             audioSink_->write(spk);
             if (networkTap_) networkTap_->write(spk);
         }
