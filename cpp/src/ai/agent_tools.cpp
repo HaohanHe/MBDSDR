@@ -227,6 +227,17 @@ QString execSetBandwidth(const QJsonObject& args, dsp::SpectrumEngine* engine,
                          const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
     double bw = args["bandwidth_hz"].toDouble();
+    // RAW direct-listen has NO demodulation filter: channelized IQ is passed
+    // straight through as L=I/R=Q. Refuse honestly (ok:false) rather than
+    // echoing a bandwidth that DemodRaw would ignore.
+    if (engine->demodMode() == QLatin1String("RAW")) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8(
+            "带宽对 RAW 直通无意义：RAW 为所选 VFO 信道化窄带 IQ 的 L=I/R=Q 直通，无解调滤波器可设");
+        addSourceFields(o, src);
+        return compact(o);
+    }
     engine->setBandwidth(bw);
     QJsonObject o;
     o["ok"] = true;

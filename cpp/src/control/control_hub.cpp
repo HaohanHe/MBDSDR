@@ -462,6 +462,16 @@ QJsonObject ControlHub::cmdSetMode(const QJsonObject& a) {
 QJsonObject ControlHub::cmdSetBandwidth(const QJsonObject& a) {
     double bw; QString err;
     if (!needDbl(a, "bandwidth_hz", bw, err)) return errResult(err);
+    // RAW direct-listen has NO demodulation filter: it passes the selected VFO's
+    // channelized narrowband IQ straight through as L=I/R=Q. A bandwidth change
+    // would be silently swallowed by a no-op DemodRaw otherwise -- refuse honestly
+    // (ok:false) instead of echoing a fake success.
+    if (engine_->demodMode() == QLatin1String("RAW")) {
+        QJsonObject o = errResult(QString::fromUtf8(
+            "带宽对 RAW 直通无意义：RAW 为所选 VFO 信道化窄带 IQ 的 L=I/R=Q 直通，无解调滤波器可设"));
+        o["command"] = "set_bandwidth";
+        return o;
+    }
     engine_->setBandwidth(bw);
     QJsonObject o = okBase();
     o["command"] = "set_bandwidth";

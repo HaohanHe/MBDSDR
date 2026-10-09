@@ -182,6 +182,7 @@ private slots:
     void ctcssGateMutesSpeakerWithoutMatchingTone();
     void ctcssGateOpensSpeakerWithMatchingTone();
     void ctcssGateOffIsLegacySquelchPassthrough();
+    void rawDirectListenProducesStereoPassthrough();
 };
 
 // ---- NFM: 1 kHz tone, +/-3 kHz deviation, clean carrier -------------------
@@ -395,6 +396,46 @@ void TestEngineAudioE2E::ctcssGateOffIsLegacySquelchPassthrough() {
     qInfo("CTCSS gate off: spkRms=%.4f present=%d", cap.spkRms, (int)cap.present);
     QVERIFY2(cap.spkRms > 0.02,
              "with the gate off the speaker must follow squelch (legacy passthrough)");
+}
+
+// ---- RAW direct-listen: channelized IQ reaches writeStereo as L=I / R=Q -----
+// Drive a real carrier through the engine in mode=RAW with the squelch gate OFF
+// so the passthrough is never muted. The speaker path must be the stereo write
+// (Left=even=I, Right=odd=Q) -- both channels must exist, be frame-aligned, and
+// carry non-zero samples (the channelized IQ really reached the sink). ANR/AGC
+// are bypassed for RAW; this test only pins that the e2e path exists and is
+// non-empty, not the exact DSP values (those are asserted in test_demod).
+void TestEngineAudioE2E::rawDirectListenProducesStereoPassthrough() {
+    QTemporaryDir dir;
+    const QString path = dir.filePath("raw.carrier.raw");
+    auto iq = fixture::makeAmIq(kSrcFs, 1.5, 1000.0, 0.8, 0.0);
+    QVERIFY(fixture::writeRawCf32(path, iq));
+
+    SpectrumEngine eng;
+    auto* mem = new MemoryAudioSink();
+    eng.setTestAudioSink(std::unique_ptr<IAudioSink>(mem));
+    QVERIFY(eng.openOfflineFile(path, kSrcFs));
+    eng.setDemodMode("RAW");
+    QCOMPARE(eng.demodMode(), QString("RAW"));
+    eng.vfoSetFreq(eng.selectedVfoId(), 50000.0);
+    eng.setSquelchEnabled(false);     // keep the passthrough unmuted
+    eng.setMuted(false);
+
+    eng.start();
+    QTest::qWait(2500);
+    mem->clear();
+    QTest::qWait(1500);
+
+    const std::vector<float>& L = mem->stereoLeft();
+    const std::vector<float>& R = mem->stereoRight();
+    qInfo("RAW: L frames=%zu R frames=%zu  Lrms=%.4f Rrms=%.4f",
+          L.size(), R.size(), rms(L), rms(R));
+    QVERIFY2(L.size() > 8000, "RAW must produce 48 kHz stereo Left frames");
+    QCOMPARE(L.size(), R.size());
+    QVERIFY2(rms(L) > 0.005, "RAW Left (=I) must carry non-zero passthrough samples");
+    QVERIFY2(rms(R) > 0.005, "RAW Right (=Q) must carry non-zero passthrough samples");
+    eng.shutdown();
+    eng.wait(3000);
 }
 
 QTEST_MAIN(TestEngineAudioE2E)

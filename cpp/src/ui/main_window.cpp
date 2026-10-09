@@ -594,7 +594,7 @@ MainWindow::MainWindow(QWidget* parent)
     demodCombo_ = new QComboBox(gRx);
     demodCombo_->setObjectName("demodCombo");
     demodCombo_->addItems({"AM", "NFM", "WFM", "USB", "LSB", "CW", "BPSK", "QPSK", "ADS-B",
-                           "POCSAG", "m17", "VOR", "ACARS", "NAVTEX"});
+                           "POCSAG", "m17", "VOR", "ACARS", "NAVTEX", "RAW"});
     demodCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
     gRxLay->addRow("解调", demodCombo_);
     bwCombo_ = new QComboBox(gRx);
