@@ -690,6 +690,13 @@ void SpectrumEngine::setNetworkAudioSink(std::unique_ptr<IAudioSink> tap) {
 }
 
 void SpectrumEngine::setBandwidth(double hz) {
+    // Honest guard (parity with onSetCenterFreq :215): a non-positive /
+    // non-finite bandwidth would be rejected by VfoManager::setBandwidth
+    // anyway, but the engine-level bandwidth_ cache must NOT be clobbered
+    // with the bogus value -- otherwise get_status reports 0/negative while
+    // the UI (vfoList / bwCombo / spectrum band-edge box) still shows the
+    // old settled bandwidth. Drop it here so the caller keeps its prior value.
+    if (!(hz > 0.0) || !std::isfinite(hz)) return;
     {
     QMutexLocker lk(&ctrlMutex_);
     pending_.bandwidthHz = hz;
