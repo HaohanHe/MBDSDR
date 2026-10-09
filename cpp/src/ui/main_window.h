@@ -198,6 +198,10 @@ private slots:
     // WFM stereo badge: driven ONLY by the engine's real recovered pilot.
     // stereo=true -> "立体声" (success green), otherwise "单声道" (secondary).
     void onStereoState(bool stereo, float blend, float pilotQuality);
+    // CTCSS present-state badge poll (phase63): reads the engine's real
+    // ctcssPresent(). Disabled -> honest blank (no fake reading); armed but no
+    // tone -> secondary "未检测到"; armed + real tone -> success "检测到".
+    void updateCtcssBadge();
     void saveSettings();   // immediate persistence (writes QSettings)
     void scheduleSave();   // debounced persistence: arms the 500 ms save timer
     void onPassesReady(QList<dsp::SatPass> passes);
@@ -531,6 +535,14 @@ private:
     QComboBox*      bwCombo_     = nullptr;
     QLabel*         channelBadge_ = nullptr;   // 立体声/单声道, from real pilot
     QCheckBox*      forceMonoCheck_ = nullptr;  // WFM-only, forces mono
+    // CTCSS sub-audible-tone squelch UI face (phase63). ctcssCheck_ arms the
+    // detector; ctcssFreqSpin_ picks the target PL tone (legal domain enforced by
+    // the spinbox range, tokens kCtcssToneHzMin..Max). ctcssBadge_ is driven ONLY
+    // by the engine's real ctcssPresent() poll -- never a fabricated "locked".
+    QCheckBox*       ctcssCheck_    = nullptr;
+    QDoubleSpinBox*  ctcssFreqSpin_ = nullptr;
+    QLabel*          ctcssBadge_    = nullptr;
+    QTimer*          ctcssPollTimer_ = nullptr;
     double          currentBwHz_ = 12500.0;   // live RF bandwidth (Up/Down nudge)
 
     // Multi-VFO management panel (left rail).

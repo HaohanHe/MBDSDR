@@ -127,6 +127,23 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Optional: seed the persisted CTCSS sub-audible-tone preference
+    // (MBD_CTCSS=88.5) BEFORE MainWindow restores it, so both the 解调参数 "亚音"
+    // checkbox AND the "音调" spinbox come up armed at the chosen Hz -- the real
+    // persisted round-trip, not a post-hoc poke. The throwaway QSettings path
+    // keeps this off the user's data. The Hz is clamped to the legal PL domain on
+    // restore; off by default so every other shot is unchanged.
+    {
+        const double ctcssSeed =
+            QString::fromLocal8Bit(qgetenv("MBD_CTCSS")).toDouble();
+        if (ctcssSeed > 0.0) {
+            QSettings s("MBDSDR", "MBDSDR");
+            s.setValue(mbdsdr::tokens::kSettingsKeyCtcssEnabled, true);
+            s.setValue(mbdsdr::tokens::kSettingsKeyCtcssToneHz, ctcssSeed);
+            s.sync();
+        }
+    }
+
     // Optional: seed the persisted Rx demod-mode + bandwidth (MBD_MODE=USB
     // MBD_BW=9000) BEFORE MainWindow restores it, so the left "解调" / "带宽"
     // combos render the restored values -- the real persisted round-trip, not a
