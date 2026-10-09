@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，49 个工具）
+# Agent 工具能力清单（自动生成，51 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -117,12 +117,22 @@ schema: {"properties":{},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 
 ## set_ctcss  [write 写(手动模式拦截)]
-description: 写入：设置 CTCSS 亚音（enabled 开关、frequency_hz 亚音频率 67.0–254.1 Hz）。属于写动作，手动模式下被拦截；越界频率诚实拒绝，不静默钳位。
-schema: {"properties":{"enabled":{"description":"是否开启 CTCSS 亚音检测","type":"boolean"},"frequency_hz":{"description":"CTCSS 亚音频率 Hz（67.0–254.1，缺省沿用当前/默认 88.5）","maximum":254.1,"minimum":67,"type":"number"}},"required":["enabled"],"type":"object"}
+description: 写入：设置 CTCSS 亚音（enabled 开关、frequency_hz 亚音频率 67.0–254.1 Hz、可选 gate_audio 亚音门控静音开关）。属于写动作，手动模式下被拦截；越界频率诚实拒绝，不静默钳位。
+schema: {"properties":{"enabled":{"description":"是否开启 CTCSS 亚音检测","type":"boolean"},"frequency_hz":{"description":"CTCSS 亚音频率 Hz（67.0–254.1，缺省沿用当前/默认 88.5）","maximum":254.1,"minimum":67,"type":"number"},"gate_audio":{"description":"可选：是否开启亚音门控静音（开启后仅在检测到匹配亚音时才放音，录制不受影响；缺省不改动当前门控）","type":"boolean"}},"required":["enabled"],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_ctcss"}（不自动重试写动作）
 
 ## get_ctcss_status  [read 只读]
-description: 只读：返回 CTCSS 亚音状态（enabled 是否使能、frequency_hz 调谐频率、active 是否真实检测到亚音）。无信号/未使能时 active 诚实为 false，不编造。
+description: 只读：返回 CTCSS 亚音状态（enabled 是否使能、frequency_hz 调谐频率、active 是否真实检测到亚音、gate_audio 是否开启亚音门控静音）。无信号/未使能时 active 诚实为 false，不编造。
+schema: {"properties":{},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## set_cdcss  [write 写(手动模式拦截)]
+description: 写入：设置 CDCSS/DCS 数字亚音（enabled 开关、code 三位八进制 DCS 码 "023"–"754"、可选 gate_audio 数字亚音门控静音开关）。属于写动作，手动模式下被拦截；非表内 DCS 码诚实拒绝，不静默接受。
+schema: {"properties":{"code":{"description":"三位八进制 DCS 码字符串（如 \"023\"，须在公开 104 码表内；缺省沿用当前码）","type":"string"},"enabled":{"description":"是否开启 CDCSS/DCS 数字亚音检测","type":"boolean"},"gate_audio":{"description":"可选：是否开启数字亚音门控静音（开启后仅在检测到匹配 DCS 码时才放音，录制不受影响；缺省不改动当前门控）","type":"boolean"}},"required":["enabled"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_cdcss"}（不自动重试写动作）
+
+## get_cdcss_status  [read 只读]
+description: 只读：返回 CDCSS/DCS 数字亚音状态（enabled 是否使能、code 调谐 DCS 码、active 是否真实检测到匹配码、gate_audio 是否开启数字亚音门控静音）。无信号/未使能时 active 诚实为 false，不编造。
 schema: {"properties":{},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 
