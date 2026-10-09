@@ -108,6 +108,12 @@ private slots:
     // Phase63: an absurd persisted FFT size (8192) must honestly fall back to the
     // 2048 default instead of presenting a bogus combo entry.
     void fftSizeIllegalPersistedFallsBack();
+    // Phase63: CTCSS UI face -- the 亚音 checkbox arms the real engine detector
+    // (setCtcssEnabled read-back), the 音调 spinbox dispatches the target Hz
+    // (setCtcssFreqHz read-back, range == the legal PL domain tokens), and both
+    // persist through the real saveUiState() and restore on the next launch. The
+    // honest badge never claims 检测到 without a real ctcssPresent().
+    void ctcssUiWiresEngineAndPersistsRoundTrip();
 };
 
 QString TestUiIntegration::tmpSettingsDir;
@@ -1214,6 +1220,80 @@ void TestUiIntegration::fftSizeIllegalPersistedFallsBack() {
     // setFftSizeValue(8192): no tier matches -> combo stays index 1 (2048).
     QCOMPARE(spec->fftSizeValue(), 2048);
     QTRY_VERIFY_WITH_TIMEOUT(eng->fftSize() == 2048, 2000);
+}
+
+// Phase63: CTCSS UI face. Drives the real MainWindow offscreen (offline test
+// source) and asserts the 亚音 checkbox + 音调 spinbox wire into the REAL
+// SpectrumEngine setters (read-back), the spinbox range IS the legal PL domain,
+// the armed-but-no-tone badge honestly reads 未检测到 (never a fabricated 检测到),
+// and the preference persists through saveUiState() + restore on the next launch.
+void TestUiIntegration::ctcssUiWiresEngineAndPersistsRoundTrip() {
+    clearVfoSettings();
+    const double targetHz = 100.0;
+
+    // Window 1: wire the controls into the engine, then persist.
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* eng = win.engine();
+        auto* chk = win.findChild<QCheckBox*>("ctcssCheck");
+        auto* spin = win.findChild<QDoubleSpinBox*>("ctcssFreqSpin");
+        auto* badge = win.findChild<QLabel*>("ctcssBadge");
+        QVERIFY(eng && chk && spin && badge);
+
+        // Spinbox range IS the legal PL domain (tokens) -- no out-of-domain input.
+        QCOMPARE(spin->minimum(), tokens::kCtcssToneHzMin);
+        QCOMPARE(spin->maximum(), tokens::kCtcssToneHzMax);
+        QCOMPARE(spin->singleStep(), 0.1);
+
+        // Default: off, engine detector disabled.
+        QVERIFY2(!chk->isChecked(), "CTCSS must default to off");
+        QTRY_VERIFY_WITH_TIMEOUT(!eng->ctcssEnabled(), 2000);
+
+        // Arming the checkbox must dispatch setCtcssEnabled(true) into the engine.
+        chk->setChecked(true);
+        QApplication::processEvents();
+        QTRY_VERIFY_WITH_TIMEOUT(eng->ctcssEnabled(), 2000);
+
+        // Changing the tone must dispatch setCtcssFreqHz and read back equal.
+        spin->setValue(targetHz);
+        QApplication::processEvents();
+        QTRY_VERIFY_WITH_TIMEOUT(std::abs(eng->ctcssFreqHz() - targetHz) < 0.05, 2000);
+
+        // Honest badge: armed but no real tone on the offline source -> 未检测到,
+        // never a fabricated 检测到. The 250 ms poll must paint it.
+        QTest::qWait(350);
+        QVERIFY2(!eng->ctcssPresent(), "offline source must not present a tone");
+        QCOMPARE(badge->text(), QStringLiteral("未检测到"));
+
+        QTest::qWait(700);   // debounced save timer arms; dtor flushes it
+    }
+
+    // Fresh QSettings on disk (window 1 destroyed + flushed).
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        s.sync();
+        QCOMPARE(s.value(tokens::kSettingsKeyCtcssEnabled).toBool(), true);
+        QCOMPARE(s.value(tokens::kSettingsKeyCtcssToneHz).toDouble(), targetHz);
+    }
+
+    // Window 2: a fresh launch must restore the arming + tone and dispatch them
+    // into the running engine.
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* eng = win.engine();
+        auto* chk = win.findChild<QCheckBox*>("ctcssCheck");
+        auto* spin = win.findChild<QDoubleSpinBox*>("ctcssFreqSpin");
+        QVERIFY(eng && chk && spin);
+
+        QCOMPARE(chk->isChecked(), true);
+        QCOMPARE(spin->value(), targetHz);
+        QTRY_VERIFY_WITH_TIMEOUT(eng->ctcssEnabled(), 2000);
+        QTRY_VERIFY_WITH_TIMEOUT(std::abs(eng->ctcssFreqHz() - targetHz) < 0.05, 2000);
+    }
 }
 
 QTEST_MAIN(TestUiIntegration)

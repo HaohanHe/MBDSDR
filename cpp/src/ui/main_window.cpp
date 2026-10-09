@@ -642,6 +642,54 @@ MainWindow::MainWindow(QWidget* parent)
     forceMonoCheck_->setObjectName("forceMonoCheck");
     forceMonoCheck_->setEnabled(false);
     gRxLay->addRow("", forceMonoCheck_);
+
+    // ---- CTCSS sub-audible tone squelch (UI face, phase63) --------------
+    // Reuse the existing 解调参数 form (zero new groupbox). The checkbox arms the
+    // detector; the spinbox picks the target PL tone. Both wire straight into the
+    // already-landed SpectrumEngine setters (dsp/ctcss.cpp). The spinbox range IS
+    // the legal domain (tokens kCtcssToneHzMin..Max), so an out-of-domain value is
+    // unreachable by construction -- never clamped-then-invented in the UI.
+    ctcssCheck_ = new QCheckBox("亚音", gRx);
+    ctcssCheck_->setObjectName("ctcssCheck");
+    ctcssCheck_->setToolTip(QStringLiteral(
+        "CTCSS 亚音静噪：在解调音频上检测 67.0–254.1 Hz 的亚音导频（仅 PL 模拟域，不含 DCS）。"
+        "开启后仅在检测到目标音调时认为信道活动。"));
+    connect(ctcssCheck_, &QCheckBox::toggled, this, [this](bool on) {
+        if (engine_) engine_->setCtcssEnabled(on);
+        scheduleSave();
+        updateCtcssBadge();
+    });
+    gRxLay->addRow("亚音", ctcssCheck_);
+
+    ctcssFreqSpin_ = new QDoubleSpinBox(gRx);
+    ctcssFreqSpin_->setObjectName("ctcssFreqSpin");
+    ctcssFreqSpin_->setRange(tokens::kCtcssToneHzMin, tokens::kCtcssToneHzMax);
+    ctcssFreqSpin_->setSingleStep(0.1);
+    ctcssFreqSpin_->setDecimals(1);
+    ctcssFreqSpin_->setSuffix(" Hz");
+    ctcssFreqSpin_->setValue(tokens::kCtcssToneHzDefault);
+    ctcssFreqSpin_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
+    ctcssFreqSpin_->setToolTip(QStringLiteral(
+        "目标 CTCSS 音调 (Hz)，合法域 67.0–254.1。"));
+    connect(ctcssFreqSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, [this](double hz) {
+        if (engine_) engine_->setCtcssFreqHz(hz);
+        scheduleSave();
+    });
+
+    // Honest present-state badge: driven ONLY by the engine's real ctcssPresent()
+    // (polled), never by this handler. Disabled -> blank (no fake reading).
+    ctcssBadge_ = new QLabel("--", gRx);
+    ctcssBadge_->setObjectName("ctcssBadge");
+    ctcssBadge_->setAlignment(Qt::AlignCenter);
+    ctcssBadge_->setStyleSheet(
+        QString("QLabel#ctcssBadge { color: %1; }")
+            .arg(QString::fromUtf8(tokens::kTextSecondary)));
+    auto* ctcssRow = new QHBoxLayout;
+    ctcssRow->addWidget(ctcssFreqSpin_);
+    ctcssRow->addWidget(ctcssBadge_);
+    gRxLay->addRow("音调", ctcssRow);
+
     leftLay->addWidget(gRx);
 
     // ---- Multi-VFO panel ---------------------------------------------------
@@ -2375,6 +2423,13 @@ MainWindow::MainWindow(QWidget* parent)
     devicePollTimer_->start(1000);   // 1 Hz presence poll
     deviceLister_->poll();            // establish baseline immediately (no event)
 #endif
+    // CTCSS present-state poll: the engine exposes ctcssPresent() as a truth
+    // read-back (no signal), so the UI samples it at ~4 Hz and repaints the
+    // honest badge. The detector itself cycles at 200 ms; 250 ms is ample.
+    ctcssPollTimer_ = new QTimer(this);
+    connect(ctcssPollTimer_, &QTimer::timeout, this, &MainWindow::updateCtcssBadge);
+    ctcssPollTimer_->start(250);
+    updateCtcssBadge();               // paint the initial honest state now
     connect(engine_, &dsp::SpectrumEngine::squelchState,
             this, &MainWindow::onSquelchState);
     connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
@@ -4268,6 +4323,8 @@ void MainWindow::saveUiState() {
     s.setValue("rx/squelchEnabled", squelchCheck_->isChecked());
     s.setValue("rx/squelchThreshold", static_cast<float>(squelchSlider_->value()));
     s.setValue("rx/squelchAuto", squelchAutoBtn_->isChecked());
+    s.setValue(tokens::kSettingsKeyCtcssEnabled, ctcssCheck_->isChecked());
+    s.setValue(tokens::kSettingsKeyCtcssToneHz, ctcssFreqSpin_->value());
     s.setValue("rx/dbMin", static_cast<float>(spectrum_->dbMinValue()));
     s.setValue("rx/dbMax", static_cast<float>(spectrum_->dbMaxValue()));
 
@@ -4590,6 +4647,29 @@ void MainWindow::restoreUiState() {
     // Restore auto-gate arming. Checking it re-applies floor+margin via the
     // toggled handler (once audio blocks have flowed the real floor is ready).
     squelchAutoBtn_->setChecked(s.value("rx/squelchAuto", false).toBool());
+
+    // ---- CTCSS sub-audible-tone preference (phase63) ----
+    // Restore the target tone clamped into the legal PL domain, then the arming
+    // flag. Block signals so we dispatch to the engine exactly once here rather
+    // than letting each set() fire its handler; default off + 88.5 Hz.
+    {
+        const double ctcssHz = std::clamp(
+            s.value(tokens::kSettingsKeyCtcssToneHz, tokens::kCtcssToneHzDefault)
+                .toDouble(),
+            tokens::kCtcssToneHzMin, tokens::kCtcssToneHzMax);
+        ctcssFreqSpin_->blockSignals(true);
+        ctcssFreqSpin_->setValue(ctcssHz);
+        ctcssFreqSpin_->blockSignals(false);
+        if (engine_) engine_->setCtcssFreqHz(ctcssHz);
+
+        const bool ctcssOn =
+            s.value(tokens::kSettingsKeyCtcssEnabled, false).toBool();
+        ctcssCheck_->blockSignals(true);
+        ctcssCheck_->setChecked(ctcssOn);
+        ctcssCheck_->blockSignals(false);
+        if (engine_) engine_->setCtcssEnabled(ctcssOn);
+        updateCtcssBadge();
+    }
 
     const float dbMin = s.value("rx/dbMin", static_cast<float>(tokens::kDbLowerDefault)).toFloat();
     const float dbMax = s.value("rx/dbMax", static_cast<float>(tokens::kDbUpperDefault)).toFloat();
@@ -5402,6 +5482,32 @@ void MainWindow::onStereoState(bool stereo, float blend, float pilotQuality) {
                 .arg(blend * 100.0f, 0, 'f', 0).arg(pilotQuality));
     else
         channelBadge_->setToolTip(QStringLiteral("单声道（无锁定导频）"));
+}
+
+void MainWindow::updateCtcssBadge() {
+    if (!ctcssBadge_ || !engine_) return;
+    // Honest-state rule: the badge mirrors ONLY the engine's real ctcssPresent().
+    //  - disabled            -> blank "--" (no fake reading ever shown);
+    //  - armed, no tone      -> secondary "未检测到";
+    //  - armed, real tone    -> success-green "检测到".
+    if (!engine_->ctcssEnabled()) {
+        ctcssBadge_->setText(QStringLiteral("--"));
+        ctcssBadge_->setStyleSheet(
+            QString("QLabel#ctcssBadge { color: %1; }")
+                .arg(QString::fromUtf8(tokens::kTextSecondary)));
+        ctcssBadge_->setToolTip(QStringLiteral("亚音检测未开启"));
+        return;
+    }
+    const bool present = engine_->ctcssPresent();
+    ctcssBadge_->setText(present ? QStringLiteral("检测到")
+                                 : QStringLiteral("未检测到"));
+    ctcssBadge_->setStyleSheet(
+        QString("QLabel#ctcssBadge { color: %1; }")
+            .arg(QString::fromUtf8(present ? tokens::kSuccess
+                                           : tokens::kTextSecondary)));
+    ctcssBadge_->setToolTip(present
+        ? QStringLiteral("检测到目标亚音音调 (ctcssPresent 真值)")
+        : QStringLiteral("已开启，等待目标亚音音调"));
 }
 
 void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {
