@@ -192,7 +192,8 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"set_network_audio_sink",
          QString::fromUtf8(
             "写入：配置网络音频流输出（UDP/TCP 镜像当前解调音频）。"
-            "enable 开关、port 端口、format 采样格式。属于写动作，手动模式下被拦截。")},
+            "enable 开关、port 端口、format 协议；可选 host 与 stereo。"
+            "属于写动作，手动模式下被拦截。")},
         {"get_network_audio_status",
          QString::fromUtf8(
             "只读：返回网络音频流状态（是否使能、端口、格式）。"
@@ -228,7 +229,7 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "只读：列出书签（频率/名称/模式）。无书签时诚实返回空列表，不编造。")},
         {"add_bookmark",
          QString::fromUtf8(
-            "写入：添加书签（freq_hz/name/mode）。属于写动作，手动模式下被拦截。")},
+            "写入：添加书签（freq_hz/name/mode/bandwidth_hz/group）。属于写动作，手动模式下被拦截。")},
         {"tune_to_bookmark",
          QString::fromUtf8(
             "写入：调谐到指定下标书签的频率。属于写动作，手动模式下被拦截。")},
@@ -256,14 +257,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         // Phase61: VFO fine-grained edit tools (must match tool_schema.cpp order).
         {"set_vfo_frequency",
          QString::fromUtf8(
-            "写入：把指定 VFO 调谐到新频率（index/freq_hz）。属于写动作，手动模式下被拦截。")},
+            "写入：把指定 VFO 调谐到新频率（index 或 id 二选一 + freq_hz）。属于写动作，手动模式下被拦截。")},
         {"set_vfo_mode",
          QString::fromUtf8(
-            "写入：切换指定 VFO 的解调模式（index/mode，mode 取值见 ControlHub 模式表："
+            "写入：切换指定 VFO 的解调模式（index 或 id 二选一 + mode，mode 取值见 ControlHub 模式表："
             "AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX）。属于写动作，手动模式下被拦截。")},
         {"set_vfo_bandwidth",
          QString::fromUtf8(
-            "写入：设置指定 VFO 的信道带宽（index/bandwidth_hz）。属于写动作，手动模式下被拦截。")},
+            "写入：设置指定 VFO 的信道带宽（index 或 id 二选一 + bandwidth_hz）。属于写动作，手动模式下被拦截。")},
         {"list_recordings",
          QString::fromUtf8(
             "只读：扫描录制目录并列出已有录制文件。目录不存在或为空时诚实返回空列表。")},
@@ -278,6 +279,7 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"set_fft_params",
          QString::fromUtf8(
             "写入：设置频谱 FFT 参数（fft_size/window/average）。"
+            "window/average 接受字符串枚举（推荐）或原始整数 0/1/2。"
             "属于写动作，手动模式下被拦截。")},
         {"set_color_map",
          QString::fromUtf8(
