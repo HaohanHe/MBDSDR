@@ -67,6 +67,10 @@ private slots:
     void readbackLoopHonestRejectsAndAutoLand();
     // --- Phase63: bookmark tools execute for real against injected store -------
     void bookmarkToolsRealExecutionWithInjectedStore();
+    // --- Phase63 no-engine audit: null SpectrumEngine must return honest JSON
+    //     error envelope (aligned with ControlHub::execute :353), never a plain
+    //     string, never {ok:true} with fabricated values, never a null deref. ---
+    void nullEngineReturnsHonestErrorEnvelope();
 };
 
 void TestAgent::initTestCase() {
@@ -1060,6 +1064,41 @@ void TestAgent::bookmarkToolsRealExecutionWithInjectedStore() {
 
     bm.clear();
     QSettings("MBDSDR", "MBDSDR").remove("ui/bookmarks");
+}
+
+// Phase63 no-engine audit (D2): when executeTool() is handed a null SpectrumEngine
+// (Agent constructed without setEngine, or headless embedding), the dispatch-layer
+// guard at agent_tools.cpp:1393 must return the SAME honest JSON error envelope as
+// ControlHub::execute() (control_hub.cpp:353): {ok:false, error:"..."}. It must NOT
+// (a) return a plain string, (b) return {ok:true} with fabricated frequency/squelch
+// values, or (c) crash on a null deref (the executor bodies all dereference engine->
+// without their own guard). Spot-check the three read-only tools named in the audit.
+void TestAgent::nullEngineReturnsHonestErrorEnvelope() {
+    for (const char* tool : {
+            "get_status",
+            "get_squelch_status",
+            "get_spectrum_status" }) {
+        const QString raw = ai::executeTool(QString::fromUtf8(tool), QJsonObject{},
+                                            nullptr /*engine*/, nullptr /*bookmarks*/);
+        // Must be parseable JSON (not the old plain-string "error: no engine").
+        QJsonParseError pe{};
+        const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8(), &pe);
+        QVERIFY2(pe.error == QJsonParseError::NoError && doc.isObject(),
+                 qPrintable(QString("%1 -> not JSON: %2").arg(QString::fromUtf8(tool), raw)));
+        const QJsonObject o = doc.object();
+        QVERIFY2(o.value("ok").isBool() && !o.value("ok").toBool(),
+                 qPrintable(QString("%1 -> ok must be false: %2").arg(QString::fromUtf8(tool), raw)));
+        QVERIFY2(o.value("error").isString() && !o.value("error").toString().isEmpty(),
+                 qPrintable(QString("%1 -> error must be non-empty string: %2").arg(QString::fromUtf8(tool), raw)));
+        // No fake-success business fields may leak through on the error path.
+        for (const char* fake : {
+                "frequency_hz", "threshold_db", "fft_size",
+                "enabled", "open", "auto", "connected" }) {
+            QVERIFY2(!o.contains(QString::fromUtf8(fake)),
+                     qPrintable(QString("%1 -> must not contain fake field '%2': %3")
+                                .arg(QString::fromUtf8(tool), QString::fromUtf8(fake), raw)));
+        }
+    }
 }
 
 #include <QCoreApplication>

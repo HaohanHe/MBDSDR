@@ -1390,7 +1390,16 @@ QList<ToolDef> toolDefs() {
 
 QString executeTool(const QString& name, const QJsonObject& args,
                     dsp::SpectrumEngine* engine, ui::BookmarkManager* bookmarks) {
-    if (!engine) return "error: no engine";
+    // Honest error envelope aligned with ControlHub::execute() (control_hub.cpp:354):
+    // never a plain string, never {ok:true} with fabricated values. The executor
+    // bodies below all dereference engine->... without their own null guard, so
+    // this line is the single crash-seam for the null-engine state.
+    if (!engine) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("无引擎连接（Agent 未 attach SpectrumEngine）");
+        return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+    }
 
     const SourceInfo src = readSourceInfo(engine);
 
