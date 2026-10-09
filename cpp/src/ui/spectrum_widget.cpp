@@ -479,6 +479,43 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     });
     wfRow->addWidget(depthCombo_);
 
+    // ---- Waterfall scroll pause/resume (SDR++ waterfall "scroll pause") ----
+    // Checkable toolbutton merged into the existing 瀑布 row (zero new layout).
+    // ON freezes the waterfall DISPLAY on a snapshot: the spectrum trace keeps
+    // updating live and real frames keep entering the history ring (no data
+    // loss) -- this pauses the scroll, never the measurement. Persisted under
+    // kSettingsKeyWfScrollPaused; the canvas ctor ALSO reads it, so the very
+    // first paint honours the persisted state. setChecked BEFORE connect so
+    // construction cannot fire the lambda against a not-yet-existing canvas_.
+    auto* wfPauseBtn = new QToolButton(this);
+    wfPauseBtn->setObjectName("wfPauseBtn");
+    wfPauseBtn->setText("暂停滚动");
+    wfPauseBtn->setCheckable(true);
+    wfPauseBtn->setAutoRaise(true);
+    wfPauseBtn->setToolTip(
+        "暂停瀑布滚动：显示冻结在当前帧（频谱 trace 仍实时更新，真实数据继续入历史缓冲）");
+    wfPauseBtn->setChecked(
+        QSettings("MBDSDR", "MBDSDR")
+            .value(tokens::kSettingsKeyWfScrollPaused, false).toBool());
+    auto paintWfPauseBtn = [wfPauseBtn]() {
+        if (wfPauseBtn->isChecked()) {
+            wfPauseBtn->setStyleSheet(
+                QStringLiteral("QToolButton{color:%1;} QToolButton:hover{color:%2;}")
+                    .arg(QString::fromUtf8(tokens::kAccent),
+                         QString::fromUtf8(tokens::kAccentHover)));
+        } else {
+            wfPauseBtn->setStyleSheet(QString());
+        }
+    };
+    paintWfPauseBtn();
+    connect(wfPauseBtn, &QToolButton::toggled, this, [this, paintWfPauseBtn](bool on) {
+        QSettings("MBDSDR", "MBDSDR")
+            .setValue(tokens::kSettingsKeyWfScrollPaused, on);
+        if (canvas_) canvas_->setScrollPaused(on);
+        paintWfPauseBtn();
+    });
+    wfRow->addWidget(wfPauseBtn);
+
     wfRow->addSpacing(tokens::scaled(tokens::kSpacingM));
 
     testLabel_ = new QLabel("", this);

@@ -631,6 +631,14 @@ inline constexpr int kWaterfallDepthDefault = 256;
 inline constexpr int kWaterfallDepthChoices[] = { 128, 256, 512 };
 inline constexpr const char* kSettingsKeyWfDepth = "view/wfDepth";
 
+// Waterfall scroll pause (SDR++ waterfall "scroll pause"). When ON the waterfall
+// DISPLAY freezes on a snapshot of the current moment; real frames keep entering
+// the history ring (no data loss, the post-resume time window is honest) and the
+// spectrum trace keeps updating live -- freezing the display only, never the
+// measurement. Off by default. A missing key or any non-bool stored value
+// (hand-edited config) honestly resolves to off.
+inline constexpr const char* kSettingsKeyWfScrollPaused = "view/wfScrollPaused";
+
 // Small painted details inside the unified canvas (base px, scaled() at runtime).
 inline constexpr int kDispTickProtrusion = 3;   // freq tick pokes up/down into panels
 inline constexpr int kVfoHandleHalfW     = 4;   // VFO band-edge drag handle half-width

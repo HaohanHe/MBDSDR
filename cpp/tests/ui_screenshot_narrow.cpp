@@ -96,6 +96,18 @@ int main(int argc, char** argv) {
         s.sync();
     }
 
+    // Optional: seed the persisted waterfall scroll-pause flag (MBD_WFPAUSE=1)
+    // BEFORE MainWindow restores it, so both the spectrum "暂停滚动" tool button
+    // AND the canvas frozen snapshot come up in the paused state -- the real
+    // persisted round-trip, not a post-hoc poke. The throwaway QSettings path
+    // above keeps this off the user's data. Off by default so every other shot
+    // is unchanged.
+    if (qgetenv("MBD_WFPAUSE") == "1") {
+        QSettings s("MBDSDR", "MBDSDR");
+        s.setValue(mbdsdr::tokens::kSettingsKeyWfScrollPaused, true);
+        s.sync();
+    }
+
     // Optional: seed the persisted Rx demod-mode + bandwidth (MBD_MODE=USB
     // MBD_BW=9000) BEFORE MainWindow restores it, so the left "解调" / "带宽"
     // combos render the restored values -- the real persisted round-trip, not a
