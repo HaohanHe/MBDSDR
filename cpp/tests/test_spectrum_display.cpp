@@ -68,6 +68,10 @@ private slots:
     void scrollPauseFreezesDisplayButKeepsBuffering();
     void scrollPauseResumeContinuesWithoutReset();
     void scrollPausePersistsRoundTrip();
+    // Phase63: switching the FFT tier (bin count) honestly REBUILDS the waterfall
+    // ring at the new width -- old rows are DROPPED (count resets), never resampled
+    // or padded from 2048->1024 bins.
+    void fftSizeChangeRebuildsWaterfallRingHonestly();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -1215,6 +1219,34 @@ void TestSpectrumDisplay::scrollPausePersistsRoundTrip() {
     }
 
     QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfScrollPaused);
+}
+
+// Phase63: switching the FFT tier changes the bin count of every published frame.
+// The canvas must honestly REBUILD the waterfall ring at the new width: the old
+// 2048-bin history is dropped (ringCount resets to 0), never resampled or padded
+// down to 1024 bins (that would fabricate frequency resolution the new FFT did
+// not measure). maxHold/minHold envelopes are rebuilt at the new width too.
+void TestSpectrumDisplay::fftSizeChangeRebuildsWaterfallRingHonestly() {
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+
+    // Accumulate real waterfall history at the 2048-bin tier.
+    for (int i = 0; i < 30; ++i)
+        w.setSpectrum(makeFrame(2048, 1024, -20.0f, -100.0f));
+    QCOMPARE(w.waterfallRowCountForTest(), 30);
+    QCOMPARE(static_cast<int>(w.maxHoldEnvelopeForTest().size()), 2048);
+
+    // User picks the 1024 tier: the next frame carries 1024 bins -> ring rebuilt.
+    w.setSpectrum(makeFrame(1024, 512, -20.0f, -100.0f));
+    // History honestly dropped (count reset to 0) then this single row pushed.
+    QCOMPARE(w.waterfallRowCountForTest(), 1);
+    QCOMPARE(static_cast<int>(w.maxHoldEnvelopeForTest().size()), 1024);
+
+    // Accumulate further rows; they now live at the honest 1024 width.
+    for (int i = 0; i < 29; ++i)
+        w.setSpectrum(makeFrame(1024, 512, -20.0f, -100.0f));
+    QCOMPARE(w.waterfallRowCountForTest(), 30);
 }
 
 QTEST_MAIN(TestSpectrumDisplay)
