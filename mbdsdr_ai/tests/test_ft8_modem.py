@@ -106,9 +106,11 @@ def test_modulator_placeholder_data_deterministic():
     assert d1.min() >= 0 and d1.max() < N_TONES
 
 
-def test_encode_message_not_implemented():
-    with pytest.raises(NotImplementedError):
-        MOD.encode_message("CQ CALL1 GRID")
+def test_encode_message_wired_step2():
+    """第②步：encode_message 已接线（委托 ft8_codec），不再 NotImplementedError。"""
+    tones = MOD.encode_message(from_call="K1ABC", to_call="K2DEF", grid4="EM12")
+    assert tones.size == N_DATA_SYMBOLS
+    assert tones.min() >= 0 and tones.max() < N_TONES
 
 
 def test_iq_to_interleaved():
