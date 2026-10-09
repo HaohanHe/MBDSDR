@@ -1357,10 +1357,19 @@ QJsonObject ControlHub::cmdSetCtcss(const QJsonObject& a) {
     }
     engine_->setCtcssEnabled(on);
     engine_->setCtcssFreqHz(fq);
+    // Optional speaker-only sub-audio gate. Omit -> keep current; present-but-
+    // non-bool -> honest error. Mirrors the agent channel.
+    bool gateAudio = engine_->ctcssGateAudio();
+    const QJsonValue gv = a.value(QStringLiteral("gate_audio"));
+    if (!gv.isUndefined() && !gv.isNull()) {
+        if (!needBool(a, "gate_audio", gateAudio, err)) return errResult(err);
+    }
+    engine_->setCtcssGateAudio(gateAudio);
     QJsonObject o = okBase();
     o["command"] = "set_ctcss";
     o["enabled"] = on;
     o["frequency_hz"] = fq;
+    o["gate_audio"] = gateAudio;
     return o;
 }
 
@@ -1370,6 +1379,7 @@ QJsonObject ControlHub::cmdGetCtcssStatus(const QJsonObject&) {
     o["enabled"] = engine_->ctcssEnabled();
     o["frequency_hz"] = engine_->ctcssFreqHz();
     o["active"] = engine_->ctcssPresent();
+    o["gate_audio"] = engine_->ctcssGateAudio();
     return o;
 }
 

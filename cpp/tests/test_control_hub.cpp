@@ -616,6 +616,7 @@ void TestControlHub::ctcssSetLandOutOfRangeRejectedAndGate() {
     QCOMPARE(s0.value("enabled").toBool(), false);
     QCOMPARE(s0.value("frequency_hz").toDouble(), 88.5);
     QCOMPARE(s0.value("active").toBool(), false);
+    QCOMPARE(s0.value("gate_audio").toBool(), false);   // speaker gate defaults off
 
     // Write lands on the engine (enabled + explicit legal tone).
     QJsonObject r = parseObj(hub.execute("set_ctcss",
@@ -630,6 +631,17 @@ void TestControlHub::ctcssSetLandOutOfRangeRejectedAndGate() {
     QJsonObject s = parseObj(hub.execute("get_ctcss_status", {}));
     QCOMPARE(s.value("enabled").toBool(), true);
     QCOMPARE(s.value("frequency_hz").toDouble(), 100.0);
+
+    // Optional speaker gate: arm it, it lands + reads back; omit keeps it.
+    QJsonObject rg = parseObj(hub.execute("set_ctcss",
+        {{"enabled", true}, {"gate_audio", true}}));
+    QVERIFY2(rg.value("ok").toBool(), rg.value("error").toString().toUtf8().constData());
+    QCOMPARE(rg.value("gate_audio").toBool(), true);
+    QVERIFY(eng.ctcssGateAudio());
+    QCOMPARE(parseObj(hub.execute("get_ctcss_status", {})).value("gate_audio").toBool(), true);
+    // Omit gate_audio -> gate kept armed (not silently reset to false).
+    parseObj(hub.execute("set_ctcss", {{"enabled", true}, {"frequency_hz", 120.0}}));
+    QVERIFY(eng.ctcssGateAudio());
 
     // Out-of-domain frequency is REJECTED (engine untouched).
     const double fBefore = eng.ctcssFreqHz();

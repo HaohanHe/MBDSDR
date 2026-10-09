@@ -95,6 +95,11 @@ public:
     bool   ctcssEnabled() const { return ctcssEnabled_.load(); }
     bool   ctcssPresent() const { return ctcss_.tonePresent(); }
     double ctcssFreqHz() const { return ctcssFreqHz_; }
+    // Speaker-only sub-audio gate: when armed, the speaker (and the parallel
+    // network tap) opens only while ctcssPresent() is true. The recorder/WAV
+    // path is deliberately NOT gated (mirrors the squelch precedent: only the
+    // speaker path is silenced). Default: off.
+    bool   ctcssGateAudio() const { return ctcssGateEnabled_.load(); }
     // True iff a network-audio tap is currently installed (setNetworkAudioSink).
     // The detailed stream stats live on the sink the caller installed.
     bool  networkTapActive() const { return networkTap_ != nullptr; }
@@ -161,6 +166,10 @@ public slots:
     // ctcssPresent() reads back false. Default: disabled, 88.5 Hz.
     void setCtcssEnabled(bool on);
     void setCtcssFreqHz(double hz);
+    // Arm/disarm the speaker-only sub-audio gate (independent of detection
+    // enable): while on, the speaker stays silent unless a matching tone is
+    // detected. Does not mute the recorder. Default off.
+    void setCtcssGateAudio(bool on);
     void setBandwidth(double hz);
     bool startRecording();
     void stopRecording();
@@ -542,6 +551,9 @@ private:
     CtcssToneDetector ctcss_;
     std::atomic<bool> ctcssEnabled_{false};
     double ctcssFreqHz_ = tokens::kCtcssToneHzDefault;
+    // Speaker-only sub-audio gate desired state (set from any thread; applied
+    // in the run loop). When true, the speaker open requires ctcss_.tonePresent().
+    std::atomic<bool> ctcssGateEnabled_{false};
     AudioOutput* audioOut_ = nullptr;
     // Active 48k write path. Defaults to audioOut_; an injected test sink
     // (setTestAudioSink) redirects it without touching the settings-dialog

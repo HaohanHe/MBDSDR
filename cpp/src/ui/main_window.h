@@ -540,6 +540,7 @@ private:
     // the spinbox range, tokens kCtcssToneHzMin..Max). ctcssBadge_ is driven ONLY
     // by the engine's real ctcssPresent() poll -- never a fabricated "locked".
     QCheckBox*       ctcssCheck_    = nullptr;
+    QCheckBox*       ctcssGateCheck_ = nullptr;   // speaker-only sub-audio gate
     QDoubleSpinBox*  ctcssFreqSpin_ = nullptr;
     QLabel*          ctcssBadge_    = nullptr;
     QTimer*          ctcssPollTimer_ = nullptr;

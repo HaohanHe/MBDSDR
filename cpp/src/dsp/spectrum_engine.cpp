@@ -270,6 +270,13 @@ void SpectrumEngine::setCtcssFreqHz(double hz) {
     ctcssFreqHz_ = clamped;
 }
 
+void SpectrumEngine::setCtcssGateAudio(bool on) {
+    // Speaker-only gate desired state. Combined with ctcss_.tonePresent() in
+    // the run loop next block (engine thread), so the Goertzel state is never
+    // raced from the UI/agent thread. The recorder/WAV path is NOT muted here.
+    ctcssGateEnabled_.store(on);
+}
+
 bool SpectrumEngine::squelchEnabled() const {
     return squelch_.mode() == Squelch::Mode::Gate;
 }
@@ -1558,15 +1565,28 @@ void SpectrumEngine::run() {
             squelchThreshold_ = autoThr;
             squelch_.setThresholdDb(autoThr);
         }
-        const bool gate = squelch_.decide(audio, rms);
+        const bool squelchGate = squelch_.decide(audio, rms);
+        // CTCSS sub-audio gate (SPEAKER-only, independent of detection enable).
+        // When armed, the speaker opens ONLY while a matching sub-audible tone is
+        // detected. ctcss_.tonePresent() honest-reads false when the detector is
+        // disabled / warming up / no carrier / wrong tone, so an armed gate with
+        // no matching PL stays silent (never fabricated audio), and the ~600 ms
+        // hangover keeps the speaker open through brief tone dips. The recorder /
+        // WAV continuity deliberately keep squelchGate + the real leveled audio
+        // (mirrors the squelch precedent: only the speaker path is silenced).
+        const bool ctcssOpen = !ctcssGateEnabled_.load() || ctcss_.tonePresent();
+        const bool gate = squelchGate && ctcssOpen;   // speaker + network-tap gate
         // Detection/ANR/squelch/AGC all run on the legacy mono M. processWithGain
         // exposes the per-sample linear gain so the stereo M/S matrix below reuses
         // the EXACT same envelope (mono and L/R never level-mismatched).
         std::vector<float> leveled, agcGain;
         agc_.processWithGain(audio, &leveled, &agcGain);
+        // `out` stays SQUELCH-gated (feeds the WAV continuity, the gated
+        // recorder pre-roll and the CW decoder) -- the CTCSS gate must NOT mute
+        // it; the speaker mute is applied at the write sites below.
         std::vector<float> out = leveled;
-        if (!gate) std::fill(out.begin(), out.end(), 0.0f);
-        emit squelchState(gate);
+        if (!squelchGate) std::fill(out.begin(), out.end(), 0.0f);
+        emit squelchState(squelchGate);
         emit audioLevel(agc_.currentLevelDb());
 
         // Speaker path. WFM with a live stereo decoder: rebuild L/R from the same
@@ -1605,8 +1625,14 @@ void SpectrumEngine::run() {
             // demodulated audio, so the stream simply stays empty there.
             if (networkTap_) networkTap_->writeStereo(L, R);
         } else {
-            audioSink_->write(out);
-            if (networkTap_) networkTap_->write(out);
+            // Speaker buffer = `out` (already squelch-gated) further muted by the
+            // CTCSS sub-audio gate. When armed and no matching tone is present,
+            // the speaker stays silent even though squelch opened; `out` feeding
+            // the recorder/WAV below keeps the real, un-muted audio.
+            std::vector<float> spk = out;
+            if (!ctcssOpen) std::fill(spk.begin(), spk.end(), 0.0f);
+            audioSink_->write(spk);
+            if (networkTap_) networkTap_->write(spk);
         }
 
         // Throttled (~5 Hz) honest stereo readout for the UI badge. Stereo means
@@ -1643,7 +1669,10 @@ void SpectrumEngine::run() {
             gatedRec_.setContext(ctx);
 
             bool recGate = false;
-            if (gatedEnabled_) recGate = recGate || gate;
+            // Recording trigger follows the SQUELCH gate (NOT the CTCSS speaker
+            // gate): a CTCSS-blocked carrier must still be captured, mirroring
+            // the squelch precedent where only the speaker path is silenced.
+            if (gatedEnabled_) recGate = recGate || squelchGate;
             if (watchEnabled_.load()) recGate = recGate || watchGate;
 
             const std::vector<QString> saved = gatedRec_.feed(leveled, recGate);
@@ -1666,7 +1695,10 @@ void SpectrumEngine::run() {
         // continuous and the file duration matches the time spent recording.
         // (Baseband IQ recording above is unaffected: it always writes real IQ.)
         if (wavWriter_.isRecording()) {
-            if (recIgnoreSquelch_ || gate) {
+            // WAV continuity follows the SQUELCH gate (the CTCSS speaker gate does
+            // NOT mute the recording): while squelch is open the real `out` is
+            // written even when the speaker is held silent by the sub-audio gate.
+            if (recIgnoreSquelch_ || squelchGate) {
                 wavWriter_.write(out);
             } else {
                 std::vector<float> silence(out.size(), 0.0f);

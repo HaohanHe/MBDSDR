@@ -1240,16 +1240,19 @@ void TestUiIntegration::ctcssUiWiresEngineAndPersistsRoundTrip() {
         auto* chk = win.findChild<QCheckBox*>("ctcssCheck");
         auto* spin = win.findChild<QDoubleSpinBox*>("ctcssFreqSpin");
         auto* badge = win.findChild<QLabel*>("ctcssBadge");
-        QVERIFY(eng && chk && spin && badge);
+        auto* gate = win.findChild<QCheckBox*>("ctcssGateCheck");
+        QVERIFY(eng && chk && spin && badge && gate);
 
         // Spinbox range IS the legal PL domain (tokens) -- no out-of-domain input.
         QCOMPARE(spin->minimum(), tokens::kCtcssToneHzMin);
         QCOMPARE(spin->maximum(), tokens::kCtcssToneHzMax);
         QCOMPARE(spin->singleStep(), 0.1);
 
-        // Default: off, engine detector disabled.
+        // Default: off, engine detector disabled, speaker gate off.
         QVERIFY2(!chk->isChecked(), "CTCSS must default to off");
+        QVERIFY2(!gate->isChecked(), "speaker gate must default to off");
         QTRY_VERIFY_WITH_TIMEOUT(!eng->ctcssEnabled(), 2000);
+        QTRY_VERIFY_WITH_TIMEOUT(!eng->ctcssGateAudio(), 2000);
 
         // Arming the checkbox must dispatch setCtcssEnabled(true) into the engine.
         chk->setChecked(true);
@@ -1267,6 +1270,14 @@ void TestUiIntegration::ctcssUiWiresEngineAndPersistsRoundTrip() {
         QVERIFY2(!eng->ctcssPresent(), "offline source must not present a tone");
         QCOMPARE(badge->text(), QStringLiteral("未检测到"));
 
+        // Arming the speaker gate must dispatch setCtcssGateAudio(true), and with
+        // no matching tone the badge honestly flips to the muted state 静音.
+        gate->setChecked(true);
+        QApplication::processEvents();
+        QTRY_VERIFY_WITH_TIMEOUT(eng->ctcssGateAudio(), 2000);
+        QTest::qWait(350);
+        QCOMPARE(badge->text(), QStringLiteral("静音"));
+
         QTest::qWait(700);   // debounced save timer arms; dtor flushes it
     }
 
@@ -1276,10 +1287,11 @@ void TestUiIntegration::ctcssUiWiresEngineAndPersistsRoundTrip() {
         s.sync();
         QCOMPARE(s.value(tokens::kSettingsKeyCtcssEnabled).toBool(), true);
         QCOMPARE(s.value(tokens::kSettingsKeyCtcssToneHz).toDouble(), targetHz);
+        QCOMPARE(s.value(tokens::kSettingsKeyCtcssGate).toBool(), true);
     }
 
-    // Window 2: a fresh launch must restore the arming + tone and dispatch them
-    // into the running engine.
+    // Window 2: a fresh launch must restore the arming + tone + gate and dispatch
+    // them into the running engine.
     {
         MainWindow win;
         win.show();
@@ -1287,12 +1299,15 @@ void TestUiIntegration::ctcssUiWiresEngineAndPersistsRoundTrip() {
         auto* eng = win.engine();
         auto* chk = win.findChild<QCheckBox*>("ctcssCheck");
         auto* spin = win.findChild<QDoubleSpinBox*>("ctcssFreqSpin");
-        QVERIFY(eng && chk && spin);
+        auto* gate = win.findChild<QCheckBox*>("ctcssGateCheck");
+        QVERIFY(eng && chk && spin && gate);
 
         QCOMPARE(chk->isChecked(), true);
         QCOMPARE(spin->value(), targetHz);
+        QCOMPARE(gate->isChecked(), true);
         QTRY_VERIFY_WITH_TIMEOUT(eng->ctcssEnabled(), 2000);
         QTRY_VERIFY_WITH_TIMEOUT(std::abs(eng->ctcssFreqHz() - targetHz) < 0.05, 2000);
+        QTRY_VERIFY_WITH_TIMEOUT(eng->ctcssGateAudio(), 2000);
     }
 }
 
