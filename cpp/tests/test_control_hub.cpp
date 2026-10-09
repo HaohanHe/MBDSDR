@@ -82,6 +82,11 @@ private slots:
     // Read-only capability + recording-state snapshots land on the engine and
     // read back honestly (empty gains / not recording) on the offline source.
     void capabilitiesAndRecordingStateReadBack();
+    // Phase63 D1: top-level set_bandwidth with hz<=0 must NOT pollute the
+    // engine bandwidth_ cache. The write tool echoes the request (ok:true,
+    // async-mailbox semantics), but get_bandwidth / get_status must keep the
+    // previously settled positive value -- never 0 / negative.
+    void topLevelSetBandwidthNonPositiveDoesNotDriveEngine();
 };
 
 void TestControlHub::initTestCase() {
@@ -962,6 +967,50 @@ void TestControlHub::capabilitiesAndRecordingStateReadBack() {
     QVERIFY(rs.value("recording_dir").isString());
 
     hub.setWriteEnabled(true);
+}
+
+// Phase63 D1: top-level set_bandwidth{0.0 / -500.0} must be dropped by the
+// engine guard (parity with onSetCenterFreq), not silently enqueued. The CH
+// write tool still echoes the request with ok:true (async-mailbox semantics),
+// but the engine bandwidth_ cache -- and therefore get_bandwidth / get_status
+// -- must keep the previously settled positive value. UI (vfoList / bwCombo /
+// spectrum band-edge box) reads the same engine cache, so this pins the
+// get_status-vs-UI consistency.
+void TestControlHub::topLevelSetBandwidthNonPositiveDoesNotDriveEngine() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // Land a known positive bandwidth first.
+    QJsonObject r = parseObj(hub.execute("set_bandwidth", {{"bandwidth_hz", 8000.0}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(parseObj(hub.execute("get_bandwidth", {})).value("bandwidth_hz").toDouble(),
+             8000.0);
+
+    // Zero bandwidth: tool echoes request with ok:true (write semantics), but
+    // the engine cache must NOT move to 0.
+    r = parseObj(hub.execute("set_bandwidth", {{"bandwidth_hz", 0.0}}));
+    QVERIFY(r.value("ok").toBool());
+    QCOMPARE(r.value("bandwidth_hz").toDouble(), 0.0);   // echo, not applied
+    QVERIFY2(parseObj(hub.execute("get_bandwidth", {}))
+                 .value("bandwidth_hz").toDouble() > 0.0,
+             "engine bandwidth must stay positive after set_bandwidth{0}");
+    QCOMPARE(parseObj(hub.execute("get_bandwidth", {})).value("bandwidth_hz").toDouble(),
+             8000.0);
+
+    // Negative bandwidth: same expectation.
+    r = parseObj(hub.execute("set_bandwidth", {{"bandwidth_hz", -500.0}}));
+    QVERIFY(r.value("ok").toBool());
+    QCOMPARE(r.value("bandwidth_hz").toDouble(), -500.0);  // echo, not applied
+    QCOMPARE(parseObj(hub.execute("get_bandwidth", {})).value("bandwidth_hz").toDouble(),
+             8000.0);
+
+    // Aggregate status must also reflect the unchanged positive bandwidth.
+    QJsonObject st = parseObj(hub.execute("get_status", {}));
+    QVERIFY(st.value("ok").toBool());
+    QVERIFY2(st.value("bandwidth_hz").toDouble() > 0.0,
+             "get_status bandwidth_hz must not be polluted by a rejected write");
+    QCOMPARE(st.value("bandwidth_hz").toDouble(), 8000.0);
 }
 
 QTEST_MAIN(TestControlHub)
