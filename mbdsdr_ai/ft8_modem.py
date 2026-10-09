@@ -140,18 +140,35 @@ class Ft8Modulator:
         if self.n_tones != 8:
             raise ValueError("第①步仅实现 8-FSK（n_tones=8）")
 
-    # -- 接口占位（第②步实现） --------------------------------------------- #
-    def encode_message(self, message_text: Optional[str] = None) -> np.ndarray:
-        """把消息文本编码成 58 个数据 tone 符号（**第②步占位，勿调**）。
+    # -- 真实编码（第②步，委托 ft8_codec） ----------------------------------- #
+    def encode_message(self, message_text: Optional[str] = None, *,
+                       from_call: str = "K1ABC", to_call: str = "K2DEF",
+                       grid4: str = "EM12", report: bool = False) -> np.ndarray:
+        """把标准 FT8 消息编码成 58 个数据 tone 符号（int8，0..7）。
 
-        第②步将实现：pack77(msg) -> 77 bit -> CRC14 -> 91 bit ->
+        流程：pack77(from,to,grid) -> 77 bit -> CRC14 -> 91 bit ->
         LDPC(174,91) -> 174 bit -> 每 3 bit 经格雷表选 tone（58 个）。
-        本轮只留签名与 docstring，真实编码未实现。
+        实现见 :mod:`mbdsdr_ai.ft8_codec`（干净室 MIT，自写）。
+
+        参数:
+            message_text: 预留（文本解析留后续）；当前用显式 from/to/grid。
+            from_call:    占位呼号（不预置真实呼号，默认 K1ABC/K2DEF）。
+            to_call:      占位呼号。
+            grid4:        4 字符 Maidenhead 网格（默认 EM12 占位）。
+            report:       是否 R+ 报告格式。
         """
-        raise NotImplementedError(
-            "FT8 LDPC(174,91) 编码 + 77-bit unpack 留第②步；"
-            "本轮数据段请用 placeholder_data_symbols() 注入确定性占位符号。"
-        )
+        from . import ft8_codec as _c
+        msg77 = _c.pack77(from_call, to_call, grid4, report=report)
+        bits91 = msg77 + _c.crc14_bits(msg77)
+        codec = _c.Ft8Codec()
+        cw = codec.encode(bits91)                 # 174 bit
+        # 每 3 bit -> 格雷 tone 索引
+        tones = np.empty(N_DATA_SYMBOLS, dtype=np.int8)
+        for s in range(N_DATA_SYMBOLS):
+            bits3 = (int(cw[s * 3]) << 2) | (int(cw[s * 3 + 1]) << 1) \
+                | int(cw[s * 3 + 2])
+            tones[s] = self.gray_map[bits3]
+        return tones
 
     # -- 确定性占位数据段 --------------------------------------------------- #
     def placeholder_data_symbols(self, seed: int = 20261010,
