@@ -127,6 +127,11 @@ public:
     void refreshScanBookmarksUi() { updateScanStatus(); refreshBmTable(); }
     // Harness/screenshot: rescan the recording library from engine_->recordingDir().
     void refreshRecordingLibrary() { refreshRecLib(); }
+    // Phase63: load a .mbdscan scan-session file -- restore the 频率扫描 parameter
+    // controls (only while the scanner is Idle) and show the honest "已加载 N 个
+    // 历史命中" summary. Never fakes the loaded hits as live scan results. Returns
+    // false + fills *err on any problem; the caller surfaces it verbatim.
+    bool loadScanSessionFromFile(const QString& path, QString* err);
 
     // Offscreen shortcut-wiring harness accessors (read-only mirrors of the live
     // controls). The rewritten shortcuts test sends real QKeyEvents and asserts
@@ -319,6 +324,12 @@ private:
     QPushButton*    scanPauseBtn_      = nullptr;  // pause / resume (same btn)
     QPushButton*    scanStopBtn_        = nullptr;
     QPushButton*    scanSaveBmBtn_      = nullptr;  // Hit-state one-shot: save hit as bookmark
+    // Full-session snapshot (params + historical hits) to/from a .mbdscan JSON
+    // file. Honest: a loaded session restores the parameter controls and shows a
+    // "已加载 N 个历史命中" readout; it never fakes them as live scan results.
+    QPushButton*    scanSaveSessionBtn_ = nullptr;
+    QPushButton*    scanLoadSessionBtn_  = nullptr;
+    QLabel*         scanSessionLabel_    = nullptr;  // honest loaded-session summary
     QLabel*         scanFreqLabel_      = nullptr;  // monoInfo current freq
     QLabel*         scanStateLabel_     = nullptr;  // idle/scanning/hit text
     // Phase62 orphan C: independent "活动扫描链" bridge (dwell->decode->record),

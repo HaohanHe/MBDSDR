@@ -17,10 +17,13 @@
 #include <QtTest/QtTest>
 #include <QMap>
 #include <QList>
+#include <QTemporaryDir>
 
 #include "dsp/frequency_scanner.h"
+#include "ui/scan_session.h"
 
 using namespace mbdsdr::dsp;
+namespace ui = mbdsdr::ui;
 
 namespace {
 constexpr int kTickMs = 30;          // fixed 30 ms per tick
@@ -69,6 +72,12 @@ private slots:
     // 8: Natural-completion flag -- non-loop walk sets finishedNaturally;
     //    manual stop / loop / pingpong never set it.
     void finishedNaturallyFlag();
+    // 9: scan-session JSON round-trip -- save a params+hits snapshot to a real
+    //    .mbdscan file, load it back, every field (incl. each hit) must match.
+    void scanSessionRoundTrip();
+    // 10: scan-session honest rejection -- garbage / wrong-type / hand-corrupted
+    //     bytes must be refused loudly (non-empty error), never silently healed.
+    void scanSessionRejectsCorrupt();
 };
 
 void TestScanner::rangeStep() {
@@ -477,6 +486,133 @@ void TestScanner::finishedNaturallyFlag() {
         QVERIFY2(!sc.finishedNaturally(), "pingpong must never set finishedNaturally");
         sc.stop();
     }
+}
+
+// 9: save a params+hits snapshot to a real .mbdscan file in a throwaway temp
+// dir, load it back, and assert every field round-trips exactly (params AND
+// each historical hit: freq + level + mode + bw).
+void TestScanner::scanSessionRoundTrip() {
+    ui::ScanSession s;
+    s.startMHz     = 88.0;
+    s.stopMHz      = 108.0;
+    s.stepIndex    = 3;          // 1 MHz
+    s.dwellMs      = 500;
+    s.thresholdDb  = -42.5;
+    s.dirIndex     = 2;          // 来回
+    s.holdIndex    = 1;          // 固定时长
+    s.lingerMs     = 1500;
+    s.holdMs       = 2500;
+    s.bmOnly       = true;
+    s.mode         = "NFM";
+    s.bwHz         = 12500.0;
+    ui::ScanSessionHit h1{118.0e6, -38.5f, "AM", 8000.0};
+    ui::ScanSessionHit h2{121.5e6, -51.2f, "AM", 8000.0};
+    s.hits = {h1, h2};
+
+    QTemporaryDir dir;
+    QVERIFY2(dir.isValid(), "temp dir must be usable");
+    const QString path = dir.filePath("roundtrip.mbdscan");
+
+    QString err;
+    QVERIFY2(ui::scanSessionSaveFile(path, s, &err),
+             qPrintable(QStringLiteral("save failed: %1").arg(err)));
+
+    ui::ScanSession back;
+    QVERIFY2(ui::scanSessionLoadFile(path, back, &err),
+             qPrintable(QStringLiteral("load failed: %1").arg(err)));
+
+    QCOMPARE(back.startMHz,    s.startMHz);
+    QCOMPARE(back.stopMHz,     s.stopMHz);
+    QCOMPARE(back.stepIndex,    s.stepIndex);
+    QCOMPARE(back.dwellMs,      s.dwellMs);
+    QCOMPARE(back.thresholdDb,  s.thresholdDb);
+    QCOMPARE(back.dirIndex,     s.dirIndex);
+    QCOMPARE(back.holdIndex,    s.holdIndex);
+    QCOMPARE(back.lingerMs,     s.lingerMs);
+    QCOMPARE(back.holdMs,       s.holdMs);
+    QCOMPARE(back.bmOnly,       s.bmOnly);
+    QCOMPARE(back.mode,         s.mode);
+    QCOMPARE(back.bwHz,         s.bwHz);
+    QCOMPARE(back.hits.size(),  2);
+    QCOMPARE(back.hits[0].freqHz,  h1.freqHz);
+    QCOMPARE(back.hits[0].levelDb, h1.levelDb);
+    QCOMPARE(back.hits[0].mode,    h1.mode);
+    QCOMPARE(back.hits[0].bwHz,    h1.bwHz);
+    QCOMPARE(back.hits[1].freqHz,  h2.freqHz);
+    QCOMPARE(back.hits[1].levelDb, h2.levelDb);
+    QCOMPARE(back.hits[1].mode,    h2.mode);
+    QCOMPARE(back.hits[1].bwHz,    h2.bwHz);
+
+    // Empty-hits session must also round-trip honestly (quiet band -> 0 hits).
+    ui::ScanSession empty;
+    empty.startMHz = 100.0; empty.stopMHz = 102.0;
+    const QString epath = dir.filePath("empty.mbdscan");
+    QVERIFY2(ui::scanSessionSaveFile(epath, empty, &err),
+             qPrintable(QStringLiteral("save empty failed: %1").arg(err)));
+    ui::ScanSession eback;
+    QVERIFY2(ui::scanSessionLoadFile(epath, eback, &err),
+             qPrintable(QStringLiteral("load empty failed: %1").arg(err)));
+    QCOMPARE(eback.hits.size(), 0);
+    QCOMPARE(eback.startMHz, 100.0);
+}
+
+// 10: hand-corrupted / wrong-type / non-object bytes must be refused loudly,
+// with a non-empty honest reason -- never silently defaulted to a session.
+void TestScanner::scanSessionRejectsCorrupt() {
+    ui::ScanSession out;
+    QString err;
+
+    // (a) not JSON at all.
+    out = ui::ScanSession(); err.clear();
+    QVERIFY2(!ui::scanSessionFromJson("this is { not json", out, &err),
+             "garbage must be rejected");
+    QVERIFY2(!err.isEmpty(), "rejection must carry an honest reason");
+
+    // (b) a JSON array, not the expected object.
+    out = ui::ScanSession(); err.clear();
+    QVERIFY2(!ui::scanSessionFromJson("[1,2,3]", out, &err),
+             "top-level array must be rejected");
+    QVERIFY2(!err.isEmpty(), "array rejection must carry a reason");
+
+    // (c) object but wrong kind.
+    out = ui::ScanSession(); err.clear();
+    QVERIFY2(!ui::scanSessionFromJson("{\"kind\":\"other\"}", out, &err),
+             "wrong kind must be rejected");
+    QVERIFY2(!err.isEmpty(), "wrong-kind rejection must carry a reason");
+
+    // (d) object with right kind but a required numeric field is a string
+    //     (the classic hand-edit corruption): must be rejected, not healed.
+    out = ui::ScanSession(); err.clear();
+    const QByteArray bad =
+        "{\"app\":\"MBDSDR\",\"kind\":\"scan-session\",\"version\":1,"
+        "\"startMHz\":\"88\",\"stopMHz\":108,\"stepIndex\":2,\"dwellMs\":300,"
+        "\"thresholdDb\":-50,\"dirIndex\":0,\"holdIndex\":0,\"lingerMs\":1000,"
+        "\"holdMs\":2000,\"bmOnly\":false,\"mode\":\"NFM\",\"bwHz\":12500,"
+        "\"hits\":[]}";
+    QVERIFY2(!ui::scanSessionFromJson(bad, out, &err),
+             "string-typed startMHz must be rejected, not healed");
+    QVERIFY2(!err.isEmpty(), "type-error rejection must carry a reason");
+
+    // (e) "hits" present but not an array.
+    out = ui::ScanSession(); err.clear();
+    const QByteArray badHits =
+        "{\"app\":\"MBDSDR\",\"kind\":\"scan-session\",\"version\":1,"
+        "\"startMHz\":88,\"stopMHz\":108,\"stepIndex\":2,\"dwellMs\":300,"
+        "\"thresholdDb\":-50,\"dirIndex\":0,\"holdIndex\":0,\"lingerMs\":1000,"
+        "\"holdMs\":2000,\"bmOnly\":false,\"mode\":\"NFM\",\"bwHz\":12500,"
+        "\"hits\":{\"freqHz\":100000000}}";
+    QVERIFY2(!ui::scanSessionFromJson(badHits, out, &err),
+             "non-array hits must be rejected");
+    QVERIFY2(!err.isEmpty(), "non-array hits rejection must carry a reason");
+
+    // (f) missing file on disk -> honest refusal.
+    out = ui::ScanSession(); err.clear();
+    QTemporaryDir dir;
+    QVERIFY2(dir.isValid(), "temp dir must be usable");
+    QVERIFY2(!ui::scanSessionLoadFile(
+                 dir.filePath("does-not-exist.mbdscan"), out, &err),
+             "missing file must be refused, not treated as empty session");
+    QVERIFY2(!err.isEmpty(), "missing-file rejection must carry a reason");
 }
 
 QTEST_MAIN(TestScanner)

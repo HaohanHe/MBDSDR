@@ -91,6 +91,7 @@
 #include "ui/s_meter.h"
 #include "ui/rssi_trend.h"
 #include "ui/bookmark_manager.h"
+#include "ui/scan_session.h"
 #include "dsp/frequency_scanner.h"
 #include "ui/shortcuts_dialog.h"
 #include "ui/shortcuts_catalog.h"
@@ -1478,6 +1479,29 @@ MainWindow::MainWindow(QWidget* parent)
     scanBtnRow->addWidget(scanSaveBmBtn_);
     scanBoxLay->addLayout(scanBtnRow);
 
+    // Full-session snapshot row: persist/restore the 频率扫描 parameter controls
+    // together with the historical hit list to/from a real .mbdscan JSON file.
+    // A second row inside the SAME group box (zero new groupbox / tab). The hits
+    // saved are whatever the real scanner recorded; a quiet band saves 0 hits and
+    // restores an honest "无命中（仅参数）" empty state.
+    auto* scanSessionRow = new QHBoxLayout;
+    scanSaveSessionBtn_ = new QPushButton("保存会话", scanBox);
+    scanSaveSessionBtn_->setObjectName("scanSaveSessionBtn");
+    scanSaveSessionBtn_->setToolTip("把当前扫描参数 + 历史命中列表存为 .mbdscan 文件");
+    scanLoadSessionBtn_ = new QPushButton("加载会话", scanBox);
+    scanLoadSessionBtn_->setObjectName("scanLoadSessionBtn");
+    scanLoadSessionBtn_->setToolTip("从 .mbdscan 文件恢复扫描参数，并显示历史命中（非本次扫描结果）");
+    scanSessionRow->addWidget(scanSaveSessionBtn_);
+    scanSessionRow->addWidget(scanLoadSessionBtn_);
+    scanBoxLay->addLayout(scanSessionRow);
+    // Honest loaded-session readout. Starts EMPTY (no session loaded = no claim).
+    // After a load it states the hit count + that they are historical, never
+    // lighting the live "命中" badge.
+    scanSessionLabel_ = new QLabel("", scanBox);
+    scanSessionLabel_->setObjectName("dockHint");
+    scanSessionLabel_->setWordWrap(true);
+    scanBoxLay->addWidget(scanSessionLabel_);
+
     scanFreqLabel_ = new QLabel("当前 --.-- MHz", scanBox);
     scanFreqLabel_->setObjectName("monoInfo");
     scanBoxLay->addWidget(scanFreqLabel_);
@@ -1753,6 +1777,74 @@ MainWindow::MainWindow(QWidget* parent)
         scanner_->stop();
         updateScanStatus();
     });
+
+    // ---- Phase63: full scan-session save (params + real hit list) ------------
+    // Snapshot the SAME controls the 开始 button reads, plus whatever the real
+    // FrequencyScanner has recorded since its last start() (empty band = empty
+    // hits, honestly). The live demod mode + bandwidth are stamped onto each hit
+    // because a scan runs under one receiving mode/bw. Written as real UTF-8
+    // JSON to a user-chosen .mbdscan file (default location = the real recording
+    // dir; the file name is timestamped honestly). No mock, no demo stations.
+    connect(scanSaveSessionBtn_, &QPushButton::clicked, this, [this]() {
+        ui::ScanSession s;
+        s.startMHz    = scanStartSpin_->value();
+        s.stopMHz     = scanStopSpin_->value();
+        s.stepIndex   = scanStepCombo_->currentIndex();
+        s.dwellMs     = scanDwellSpin_->value();
+        s.thresholdDb = scanThrSpin_->value();
+        s.dirIndex    = scanDirCombo_->currentIndex();
+        s.holdIndex   = scanHoldCombo_->currentIndex();
+        s.lingerMs    = scanLingerSpin_->value();
+        s.holdMs      = scanHoldMsSpin_->value();
+        s.bmOnly      = scanBmOnlyChk_->isChecked();
+        s.mode        = demodCombo_->currentText();
+        s.bwHz        = currentBwHz_;
+        if (scanner_) {
+            for (const dsp::ScanHit& h : scanner_->hits()) {
+                ui::ScanSessionHit sh;
+                sh.freqHz  = h.freqHz;
+                sh.levelDb = h.levelDb;
+                sh.mode    = s.mode;
+                sh.bwHz    = s.bwHz;
+                s.hits.append(sh);
+            }
+        }
+        const QString dir = engine_ ? engine_->recordingDir() : QString();
+        const QString stamp =
+            QDateTime::currentDateTime().toString("yyyyMMdd-HHmmss");
+        const QString defaultName =
+            QDir(dir).filePath(QStringLiteral("scan-session-%1.mbdscan").arg(stamp));
+        const QString path = QFileDialog::getSaveFileName(
+            this, QStringLiteral("保存扫描会话"), defaultName,
+            QStringLiteral("MBDSDR 扫描会话 (*.mbdscan)"));
+        if (path.isEmpty()) return;   // user cancelled: no claim
+        QString err;
+        if (!ui::scanSessionSaveFile(path, s, &err)) {
+            QMessageBox::warning(this, QStringLiteral("保存会话失败"), err);
+            return;
+        }
+        if (scanSessionLabel_) {
+            scanSessionLabel_->setText(
+                QStringLiteral("已保存会话：%1（%2 个命中）")
+                    .arg(QFileInfo(path).fileName()).arg(s.hits.size()));
+        }
+    });
+
+    // ---- Phase63: full scan-session load (restore params + honest hit note) --
+    connect(scanLoadSessionBtn_, &QPushButton::clicked, this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("加载扫描会话"),
+            engine_ ? engine_->recordingDir() : QString(),
+            QStringLiteral("MBDSDR 扫描会话 (*.mbdscan)"));
+        if (path.isEmpty()) return;   // user cancelled
+        QString err;
+        if (!loadScanSessionFromFile(path, &err)) {
+            // Hand-edited / corrupt / wrong-type file: reject loudly, never heal.
+            QMessageBox::warning(this, QStringLiteral("加载会话失败"),
+                QStringLiteral("未能加载 %1：\n%2").arg(path, err));
+        }
+    });
+
     updateScanStatus();
 
     rightTabs_->addTab(bmPage, "扫描/书签");
@@ -3601,6 +3693,59 @@ void MainWindow::updateScanStatus() {
     if (scanBmOnlyChk_) scanBmOnlyChk_->setEnabled(st == dsp::ScanState::Idle);
     // "存入书签" only meaningful while a real hit is held.
     if (scanSaveBmBtn_) scanSaveBmBtn_->setEnabled(st == dsp::ScanState::Hit);
+}
+
+// Phase63: restore a saved scan session. Loads + validates the .mbdscan bytes,
+// then (only while the scanner is Idle) writes the parameter controls back and
+// shows an honest summary. The loaded hits are NEVER injected into scanner_ and
+// never light the live "命中" badge -- they are historical evidence only.
+bool MainWindow::loadScanSessionFromFile(const QString& path, QString* err) {
+    ui::ScanSession s;
+    if (!ui::scanSessionLoadFile(path, s, err)) return false;
+
+    // Honest guard: do not fight a running scan.
+    if (scanner_ && scanner_->state() != dsp::ScanState::Idle) {
+        if (err) *err = QStringLiteral("扫描正在进行，请先停止再加载会话");
+        return false;
+    }
+
+    // Restore the 频率扫描 controls exactly as saved.
+    if (scanStartSpin_)   scanStartSpin_->setValue(s.startMHz);
+    if (scanStopSpin_)    scanStopSpin_->setValue(s.stopMHz);
+    if (scanStepCombo_ && s.stepIndex >= 0 &&
+        s.stepIndex < scanStepCombo_->count())
+        scanStepCombo_->setCurrentIndex(s.stepIndex);
+    if (scanDwellSpin_)   scanDwellSpin_->setValue(s.dwellMs);
+    if (scanThrSpin_)     scanThrSpin_->setValue(s.thresholdDb);
+    if (scanDirCombo_ && s.dirIndex >= 0 &&
+        s.dirIndex < scanDirCombo_->count())
+        scanDirCombo_->setCurrentIndex(s.dirIndex);
+    if (scanHoldCombo_ && s.holdIndex >= 0 &&
+        s.holdIndex < scanHoldCombo_->count())
+        scanHoldCombo_->setCurrentIndex(s.holdIndex);   // re-enables the right spin
+    if (scanLingerSpin_)  scanLingerSpin_->setValue(s.lingerMs);
+    if (scanHoldMsSpin_)  scanHoldMsSpin_->setValue(s.holdMs);
+    if (scanBmOnlyChk_)    scanBmOnlyChk_->setChecked(s.bmOnly);
+
+    // Restore the receiving mode + bandwidth the scan ran under.
+    if (!s.mode.isEmpty() && demodCombo_)
+        demodCombo_->setCurrentText(s.mode);
+    if (bwCombo_ && s.bwHz > 0)
+        bwCombo_->setCurrentIndex(nearestBwPresetIndex(s.bwHz));
+
+    // Honest summary: count + explicit "historical, not this scan" framing.
+    if (scanSessionLabel_) {
+        if (s.hits.isEmpty()) {
+            scanSessionLabel_->setText(
+                QStringLiteral("已加载会话：参数已恢复 · 无命中记录（仅参数，非本次扫描）"));
+        } else {
+            scanSessionLabel_->setText(
+                QStringLiteral("已加载会话：参数已恢复 · 历史命中 %1 个（非本次扫描结果）")
+                    .arg(s.hits.size()));
+        }
+    }
+    updateScanStatus();
+    return true;
 }
 
 // ---- Phase62 orphan C: activity-scan link (dwell -> record bridge) -------

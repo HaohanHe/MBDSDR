@@ -16,6 +16,7 @@
 #include <QDoubleSpinBox>
 #include <QSpinBox>
 #include <QDir>
+#include <QTemporaryDir>
 #include <QSplitter>
 #include <QTableWidget>
 #include <cstdlib>
@@ -28,6 +29,7 @@
 #include "ui/s_meter.h"
 #include "ui/rssi_trend.h"
 #include "ui/bookmark_manager.h"
+#include "ui/scan_session.h"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
@@ -328,6 +330,36 @@ int main(int argc, char** argv) {
             };
             for (const auto& r : rows) bm->add(r);
             win.refreshScanBookmarksUi();
+        }
+    }
+
+    // Optional: seed a real .mbdscan scan-session file (written through the real
+    // scanSessionSaveFile byte+file path) and load it back via the production
+    // MainWindow::loadScanSessionFromFile, so the shot shows the restored 频率
+    //扫描 parameter controls AND the honest "已加载会话：...历史命中 N 个" summary
+    // label. The two new 保存会话/加载会话 buttons must be fully visible. Off by
+    // default so every other screenshot is unchanged. Uses a throwaway temp dir.
+    if (qgetenv("MBD_SCANSESSION").size()) {
+        QTemporaryDir dir;
+        if (dir.isValid()) {
+            mbdsdr::ui::ScanSession s;
+            s.startMHz = 118.0; s.stopMHz = 137.0;
+            s.stepIndex = 2; s.dwellMs = 400; s.thresholdDb = -45.0;
+            s.dirIndex = 0; s.holdIndex = 0;
+            s.lingerMs = 1200; s.holdMs = 2000; s.bmOnly = false;
+            s.mode = "AM"; s.bwHz = 8000.0;
+            const mbdsdr::ui::ScanSessionHit hs[] = {
+                {118.0e6, -41.0f, "AM", 8000.0},
+                {121.5e6, -38.0f, "AM", 8000.0},
+                {130.0e6, -52.0f, "AM", 8000.0},
+            };
+            for (const auto& h : hs) s.hits.append(h);
+            const QString path = dir.filePath("shot-session.mbdscan");
+            QString err;
+            if (mbdsdr::ui::scanSessionSaveFile(path, s, &err)) {
+                QString lerr;
+                win.loadScanSessionFromFile(path, &lerr);   // restores + labels
+            }
         }
     }
 
