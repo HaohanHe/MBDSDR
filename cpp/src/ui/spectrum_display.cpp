@@ -137,6 +137,23 @@ int loadRequestedDbGridStep() {
     if (!ok) return tokens::kDbGridStepDefault;
     return legalDbGridStep(db);
 }
+
+// Read the persisted waterfall scroll-pause flag back on construction. Only a
+// real bool (or the strings "true"/"false") is honoured; a missing key, a
+// number, or any other garbage honestly resolves to off (a hand-edited config
+// must never start the app with a silently-frozen waterfall). Mirrors the
+// QSettings("MBDSDR","MBDSDR") group used app-wide.
+bool loadRequestedScrollPaused() {
+    QSettings s("MBDSDR", "MBDSDR");
+    const QVariant v = s.value(tokens::kSettingsKeyWfScrollPaused);
+    if (v.type() == QVariant::Bool) return v.toBool();
+    if (v.type() == QVariant::String) {
+        const QString t = v.toString().trimmed().toLower();
+        if (t == QStringLiteral("true"))  return true;
+        if (t == QStringLiteral("false")) return false;
+    }
+    return false;
+}
 } // namespace
 
 SpectrumDisplay::SpectrumDisplay(QWidget* parent)
@@ -156,6 +173,10 @@ SpectrumDisplay::SpectrumDisplay(QWidget* parent)
     // Restore the user's chosen dB gridline density (honest default if unset or
     // illegal). The very first paint draws the horizontal grid at the chosen step.
     dbGridStepDb_ = loadRequestedDbGridStep();
+    // Restore the user's waterfall scroll-pause flag (honest default off). With
+    // no frame yet the frozen snapshot is empty; as frames arrive the live ring
+    // keeps filling while the display stays frozen until the user resumes.
+    scrollPaused_ = loadRequestedScrollPaused();
 }
 
 // ---------------------------------------------------------------------------
@@ -302,6 +323,12 @@ void SpectrumDisplay::allocateRing(int bins) {
     // the running minimum (symmetric to max-hold seeding to -inf).
     minHold_.assign(bins, std::numeric_limits<float>::max());
     materialiseHistory();
+    // A rebuilt ring (new depth / first frame under a persisted pause) must be
+    // reflected in the frozen snapshot: it was taken from the OLD ring.
+    if (scrollPaused_) {
+        pausedHistory_  = history_.copy();
+        pausedRingCount_ = ringCount_;
+    }
 }
 
 void SpectrumDisplay::pushHistoryRow() {
@@ -389,7 +416,11 @@ QString SpectrumDisplay::formatTimeOffset(double pastSeconds) {
 
 QVector<QPair<int, QString>> SpectrumDisplay::computeTimeTicks() const {
     QVector<QPair<int, QString>> out;
-    const int rows = ringCount_;
+    // While paused the DISPLAYED rows are the frozen snapshot's filled count --
+    // live ticks would march down the screen while the picture stands still.
+    // The seconds-per-row base stays live (real frames keep arriving), so the
+    // frozen image's time labels remain honest about the pace it was recorded at.
+    const int rows = scrollPaused_ ? pausedRingCount_ : ringCount_;
     const double spr = effectiveSecondsPerRow();
     if (rows <= 0 || spr <= 0.0) return out;     // honest empty state
 
@@ -577,6 +608,10 @@ void SpectrumDisplay::setDbRange(float minDb, float maxDb) {
         // Manual range changed: re-colour the WHOLE stored raw-dB history so the
         // existing rows track the new scale immediately (not just future rows).
         materialiseHistory();
+        if (scrollPaused_) {   // frozen picture tracks the new colour scale
+            pausedHistory_  = history_.copy();
+            pausedRingCount_ = ringCount_;
+        }
     }
     update();
 }
@@ -595,6 +630,10 @@ void SpectrumDisplay::setAutoRangeOn(bool on) {
         manualFloorDb_ = dbFloorDb_;
         // dbCeilDb_ / dbFloorDb_ already equal the frozen values (no visual jump).
         materialiseHistory();   // re-colour history to the released manual bounds
+        if (scrollPaused_) {   // frozen picture tracks the released colour scale
+            pausedHistory_  = history_.copy();
+            pausedRingCount_ = ringCount_;
+        }
     }
     update();
 }
@@ -714,6 +753,26 @@ void SpectrumDisplay::setScrollSpeed(int linesPerFrame) {
                      ? linesPerFrame : 1;
 }
 
+// Freeze / unfreeze the waterfall DISPLAY (never the measurement). Pausing
+// snapshots the live coloured history (row 0 = newest) and the filled row
+// count; from then on paintEvent draws the snapshot while setSpectrum keeps
+// pushing real rows into the live ring. Resuming drops the snapshot -- the
+// live ring already holds every frame that arrived during the pause, so the
+// next paint shows the honest current picture with the whole pause window
+// present (no gap, no fabricated catch-up frames).
+void SpectrumDisplay::setScrollPaused(bool on) {
+    if (scrollPaused_ == on) return;
+    scrollPaused_ = on;
+    if (on) {
+        pausedHistory_  = history_.copy();
+        pausedRingCount_ = ringCount_;
+    } else {
+        pausedHistory_  = QImage();
+        pausedRingCount_ = 0;
+    }
+    update();
+}
+
 // Change the waterfall rolling-history depth. Only the named choice set
 // (tokens::kWaterfallDepthChoices, 128/256/512) is honoured; anything else
 // honestly resolves to the default (256) -- no silent mid-band clamp. Once a
@@ -734,6 +793,10 @@ void SpectrumDisplay::setPalette(int p) {
     hasCustomStops_ = false;       // choosing a built-in ramp drops the external one
     rebuildColormap();
     materialiseHistory();          // re-colour the whole stored raw-dB history
+    if (scrollPaused_) {           // frozen picture tracks the new ramp
+        pausedHistory_  = history_.copy();
+        pausedRingCount_ = ringCount_;
+    }
     update();
 }
 
@@ -745,6 +808,10 @@ bool SpectrumDisplay::loadColormapFromJson(const QByteArray& json, QString* erro
     hasCustomStops_ = true;
     rebuildColormap();
     materialiseHistory();          // re-colour history with the new ramp
+    if (scrollPaused_) {           // frozen picture tracks the new ramp
+        pausedHistory_  = history_.copy();
+        pausedRingCount_ = ringCount_;
+    }
     update();
     return true;
 }
@@ -1106,7 +1173,13 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
     // waterfall column centres land EXACTLY on the trace bin x positions. The old
     // floor/ceil introduced up to a ~4px offset at zoom=16 (the reported
     // "trace peak sits right of the waterfall colour" defect).
-    if (!history_.isNull() && falls.height() > 0 && bins > 0) {
+    // While paused the painted image is the frozen snapshot taken at pause time
+    // (row 0 = the newest row THEN), not the live history_ -- new real rows keep
+    // entering the ring but do not roll into the frozen display. Colour/palette
+    // changes while paused re-materialise history_ and refresh this snapshot, so
+    // the frozen picture tracks the chosen colour scale without un-freezing.
+    const QImage& wfImg = scrollPaused_ ? pausedHistory_ : history_;
+    if (!wfImg.isNull() && falls.height() > 0 && bins > 0) {
         const double bandLo = frameF0Hz_ - frameFsHz_ / 2.0;
         const double srcL = clampd((fLo - bandLo) / frameFsHz_ * bins, 0.0,
                                     static_cast<double>(bins_));
@@ -1115,10 +1188,13 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
         const int outW = falls.width();
         const double srcW = srcR - srcL;
         if (srcW > 0.5 && outW > 0) {
-            if (srcW <= outW + 1.0 || ringDb_.empty()) {
+            if (srcW <= outW + 1.0 || ringDb_.empty() || scrollPaused_) {
                 // Upscale / 1:1 (zoomed-in view): no source bin collapses onto a
-                // single pixel, so Qt's bilinear is the right tool.
-                p.drawImage(falls, history_, QRectF(srcL, 0, srcW, ringDepth_));
+                // single pixel, so Qt's bilinear is the right tool. While paused
+                // this is the ONLY path: the snapshot is baked pixels, so the
+                // live block-max decimation (which reads the raw ring) never runs
+                // against a frozen picture.
+                p.drawImage(falls, wfImg, QRectF(srcL, 0, srcW, ringDepth_));
             } else {
                 // Downscale (more than one source bin per display pixel): Qt's
                 // bilinear would average a narrow CW peak into its neighbours and

@@ -180,6 +180,18 @@ public slots:
     // container. Before the first frame it only records the request.
     void setRingDepth(int rows);
 
+    // ---- Waterfall scroll pause/resume (display freeze only) --------------
+    // ON: the waterfall DISPLAY freezes on a colour snapshot of the current
+    // moment. Real frames KEEP entering the history ring (no data is discarded,
+    // the measured time base keeps running, and resuming shows the live ring with
+    // the whole pause window present -- no fabricated catch-up). The spectrum
+    // trace keeps updating live: this freezes the waterfall scroll, never the
+    // measurement. OFF: the snapshot is dropped and painting continues from the
+    // live ring. Persisted under kSettingsKeyWfScrollPaused; the ctor reads it
+    // so the very first paint honours the persisted state.
+    void setScrollPaused(bool on);
+    bool scrollPaused() const { return scrollPaused_; }
+
     // External user colormap (clean-room SDR++ colormaps). Parses a JSON document
     // of {"name":..,"stops":["#rrggbb",..]} / [{"t":..,"c":"#rrggbb"},..] or a
     // bare top-level array of the same; on success it becomes the active ramp and
@@ -279,6 +291,15 @@ public slots:
     // so the suite can assert setRingDepth() records the request before the first
     // frame.
     int     requestedRingDepthForTest() const { return requestedRingDepth_; }
+
+    // ---- Offscreen-test-only: waterfall scroll pause -----------------------
+    // Pause state + the frozen display snapshot (empty / null when unpaused).
+    // Lets the suite prove: while paused the painted snapshot stays unchanged
+    // even though the LIVE ring keeps receiving real rows (history() /
+    // waterfallRowCountForTest() keep advancing), and resuming drops the
+    // snapshot with no ring reset.
+    bool              scrollPausedForTest() const { return scrollPaused_; }
+    const QImage&     pausedHistoryForTest() const { return pausedHistory_; }
 
 signals:
     void frequencyChanged(double newFreqHz);
@@ -505,6 +526,18 @@ private:
     bool hasCustomStops_ = false;
     double frameF0Hz_ = 0.0;         // centre frequency of the last frame
     double frameFsHz_ = 0.0;         // sample rate of the last frame
+
+    // ---- Waterfall scroll pause (display freeze only) ---------------------
+    // When true, paintEvent draws pausedHistory_ instead of the live history_:
+    // a colour snapshot taken at the moment pausing began (row 0 = the newest
+    // row then). The live ring keeps receiving real frames the whole time, so
+    // on resume the very next paint already shows every paused frame -- no gap,
+    // no fabricated catch-up. pausedRingCount_ snapshots how many rows were
+    // filled at pause time so the time-axis ticks describe the FROZEN image
+    // (live ticks would march while the picture stands still).
+    bool   scrollPaused_ = false;
+    QImage pausedHistory_;          // frozen coloured snapshot (null = unpaused)
+    int    pausedRingCount_ = 0;     // filled rows at the pause moment
 
     // ---- Vertical time-axis time base (measured, never invented) ----------
     // The engine publishes no fps and SpectrumFrame carries no timestamp, so the

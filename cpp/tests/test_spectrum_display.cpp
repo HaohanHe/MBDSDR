@@ -64,6 +64,10 @@ private slots:
     void dbGridStepSetterHonoursTier();
     void dbGridStepPersistsRoundTrip();
     void dbGridStepInvalidFallsBack();
+    void scrollPauseDefaultsOff();
+    void scrollPauseFreezesDisplayButKeepsBuffering();
+    void scrollPauseResumeContinuesWithoutReset();
+    void scrollPausePersistsRoundTrip();
 
 private:
     // Save/restore the QSettings keys this suite may touch, so tests never leak
@@ -118,6 +122,7 @@ void TestSpectrumDisplay::initTestCase() {
         tokens::kSettingsKeyPalette,
         tokens::kSettingsKeyWfDepth,
         tokens::kSettingsKeyDbGridStep,
+        tokens::kSettingsKeyWfScrollPaused,
         QStringLiteral("rx/peakThresholdDb"),
     };
     QSettings s("MBDSDR", "MBDSDR");
@@ -1096,6 +1101,120 @@ void TestSpectrumDisplay::dbGridStepInvalidFallsBack() {
     }
 
     QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyDbGridStep);
+}
+
+// With no persisted key the waterfall scroll-pause flag must come up off --
+// the default live-scrolling waterfall, never a silently frozen display.
+void TestSpectrumDisplay::scrollPauseDefaultsOff() {
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfScrollPaused);
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+    QVERIFY(!w.scrollPausedForTest());
+    w.setSpectrum(makeFrame(256, 128, -20.0f, -100.0f));
+    QVERIFY(!w.scrollPausedForTest());
+    QVERIFY(w.pausedHistoryForTest().isNull());
+}
+
+// The core pause contract: while paused the painted DISPLAY snapshot stays
+// frozen even though the LIVE ring keeps receiving real frames (no data lost).
+// We park a bright peak at bin 128, pause, then push new frames with a bright
+// peak at bin 200. The frozen snapshot must still show bin 200 as the old floor
+// colour, while the live history() must show the new bright bin 200 row --
+// proving the display froze but the buffer did not stop recording.
+void TestSpectrumDisplay::scrollPauseFreezesDisplayButKeepsBuffering() {
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfScrollPaused);
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+
+    // 30 frames: bright peak parked at bin 128; bin 200 stays floor.
+    for (int i = 0; i < 30; ++i)
+        w.setSpectrum(makeFrame(256, 128, 0.0f, -100.0f));
+    QCOMPARE(w.waterfallRowCountForTest(), 30);
+
+    w.setScrollPaused(true);
+    QVERIFY(w.scrollPausedForTest());
+    QVERIFY(!w.pausedHistoryForTest().isNull());
+    // Snapshot row 0 (newest) at bin 200 = floor colour (200 was never a peak).
+    const QRgb frozenBin200 = w.pausedHistoryForTest().pixel(200, 0);
+
+    // 15 MORE real frames, now with the bright peak at bin 200.
+    for (int i = 0; i < 15; ++i)
+        w.setSpectrum(makeFrame(256, 200, 0.0f, -100.0f));
+
+    // (1) Real data kept entering the live ring: 30 + 15 = 45 rows.
+    QCOMPARE(w.waterfallRowCountForTest(), 45);
+    // (2) The frozen display did NOT roll the new rows in: snapshot row 0 bin
+    //     200 is still the floor colour from the pause moment.
+    QCOMPARE(w.pausedHistoryForTest().pixel(200, 0), frozenBin200);
+    // (3) The live buffer DID record the new peak: live history row 0 bin 200
+    //     is now bright -- a different colour from the frozen floor pixel.
+    QVERIFY(w.history().pixel(200, 0) != frozenBin200);
+}
+
+// Resuming drops the snapshot and continues the live ring from where it is --
+// no reset, no fabricated catch-up frames. The row count keeps climbing from the
+// live value reached during the pause.
+void TestSpectrumDisplay::scrollPauseResumeContinuesWithoutReset() {
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfScrollPaused);
+    ui::SpectrumDisplay w;
+    w.resize(1000, 700);
+    w.recomputeGeometry();
+
+    for (int i = 0; i < 20; ++i)
+        w.setSpectrum(makeFrame(256, 128, 0.0f, -100.0f));
+    w.setScrollPaused(true);
+    for (int i = 0; i < 10; ++i)
+        w.setSpectrum(makeFrame(256, 200, 0.0f, -100.0f));
+    QCOMPARE(w.waterfallRowCountForTest(), 30);
+
+    w.setScrollPaused(false);
+    QVERIFY(!w.scrollPausedForTest());
+    QVERIFY(w.pausedHistoryForTest().isNull());   // snapshot dropped
+    QCOMPARE(w.waterfallRowCountForTest(), 30);   // live ring untouched
+
+    // Pushing resumes straight onto the live ring -- no reset to 0.
+    for (int i = 0; i < 5; ++i)
+        w.setSpectrum(makeFrame(256, 128, 0.0f, -100.0f));
+    QCOMPARE(w.waterfallRowCountForTest(), 35);
+
+    // Idempotent toggle: toggling when already in the state is a no-op.
+    w.setScrollPaused(false);
+    QVERIFY(!w.scrollPausedForTest());
+}
+
+// Persistence round trip: a fresh instance must read kSettingsKeyWfScrollPaused
+// in its ctor; a missing key / garbage value honestly resolves to off.
+void TestSpectrumDisplay::scrollPausePersistsRoundTrip() {
+    QSettings s("MBDSDR", "MBDSDR");
+
+    s.setValue(tokens::kSettingsKeyWfScrollPaused, true);
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        QVERIFY(w.scrollPausedForTest());
+    }
+
+    s.setValue(tokens::kSettingsKeyWfScrollPaused, false);
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        QVERIFY(!w.scrollPausedForTest());
+    }
+
+    // Garbage stored value -> honest off, never a crash, never frozen.
+    s.setValue(tokens::kSettingsKeyWfScrollPaused, QStringLiteral("bogus-pause"));
+    {
+        ui::SpectrumDisplay w;
+        w.resize(1000, 700);
+        w.recomputeGeometry();
+        QVERIFY(!w.scrollPausedForTest());
+    }
+
+    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfScrollPaused);
 }
 
 QTEST_MAIN(TestSpectrumDisplay)
