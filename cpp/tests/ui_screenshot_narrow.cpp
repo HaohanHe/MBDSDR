@@ -83,6 +83,19 @@ int main(int argc, char** argv) {
         s.sync();
     }
 
+    // Optional: seed the persisted dB reference gridline density (MBD_DBGRID=10/20/40)
+    // BEFORE MainWindow restores it, so both the spectrum "格线" combo AND the canvas
+    // horizontal dB grid come up at the chosen density -- the real persisted
+    // round-trip, not a post-hoc poke. The throwaway QSettings path above keeps this
+    // off the user's data. A value outside the named set honestly resolves to the
+    // default (20). Off by default so every other shot is unchanged.
+    const int dbGridSeed = qEnvironmentVariableIntValue("MBD_DBGRID");
+    if (dbGridSeed > 0) {
+        QSettings s("MBDSDR", "MBDSDR");
+        s.setValue(mbdsdr::tokens::kSettingsKeyDbGridStep, dbGridSeed);
+        s.sync();
+    }
+
     // Optional: seed the persisted Rx demod-mode + bandwidth (MBD_MODE=USB
     // MBD_BW=9000) BEFORE MainWindow restores it, so the left "解调" / "带宽"
     // combos render the restored values -- the real persisted round-trip, not a
