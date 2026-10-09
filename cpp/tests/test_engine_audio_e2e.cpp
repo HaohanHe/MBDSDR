@@ -168,6 +168,103 @@ CtcssGateCap runCtcssGateScenario(const QString& rawPath, double sr,
     return cap;
 }
 
+// ---- CDCSS/DCS RF-domain synthetic modulator (*** SYNTHETIC -- NOT HARDWARE ***)
+// Clean-room Golay(23,12) encoder (public polynomial 0xC75, re-implemented here
+// so the product decoder is not exercised by its own test encoder).
+constexpr uint32_t kE2eGolayGen = 0xC75u;
+uint32_t e2eGolayEncode(uint32_t data12) {
+    const uint32_t cw = (data12 & 0xFFFu) << 11;
+    uint32_t work = cw;
+    for (int i = 22; i >= 11; --i)
+        if ((work >> i) & 1u) work ^= kE2eGolayGen << (i - 11);
+    return (cw | (work & 0x7FFu)) & 0x7FFFFFu;
+}
+
+// RF-domain NFM with an embedded BPSK-keyed DCS subcarrier. The instantaneous
+// frequency deviation is the SUM of a (voice) tone and a DCS component:
+//   inst = carrierOffset + voiceDev*sin(2π·voice·t)
+//          + dcsDev * pol(t) * sin(2π·1500·t)
+// where pol(t) is the Manchester-II polarity of a repeated Golay(23,12) word
+// (bit 1 = high-then-low, emitted LSB-first). After the NFM discriminator this
+// lands in the 48 kHz audio exactly as the CdcssDecoder expects. code12 < 0 emits
+// no DCS stream (voice-only carrier). *** SYNTHETIC, NOT HARDWARE ***
+std::vector<std::complex<float>>
+makeNfmCdcssIq(double sr, double seconds, double voiceToneHz, double voiceDev,
+               int code12, double dcsDev, double noiseAmp,
+               double carrierOffsetHz = 50000.0, unsigned seed = 54321) {
+    const long n = static_cast<long>(sr * seconds);
+    std::vector<std::complex<float>> x(n);
+    std::mt19937 rng(seed);
+    std::normal_distribution<float> gauss(0.0f, 1.0f);
+    const double halfBit = sr / (2.0 * 134.4);
+    const uint32_t cw = e2eGolayEncode(static_cast<uint32_t>(code12));
+    double fbCountdown = halfBit;
+    int half = 0;
+    double dcsPhase = 0.0;
+    double phase = 0.0;
+    for (long i = 0; i < n; ++i) {
+        const double t = static_cast<double>(i) / sr;
+        double inst = carrierOffsetHz;
+        if (voiceDev > 0.0)
+            inst += voiceDev * std::sin(2.0 * M_PI * voiceToneHz * t);
+        if (code12 >= 0 && dcsDev > 0.0) {
+            const int bitIdx = (half / 2) % 23;
+            const bool firstHalf = (half % 2) == 0;
+            const bool bit = (cw >> bitIdx) & 1u;
+            const bool level = firstHalf ? bit : !bit;
+            const double pol = level ? +1.0 : -1.0;
+            dcsPhase += 2.0 * M_PI * 1500.0 / sr;
+            inst += dcsDev * pol * std::sin(dcsPhase);
+            fbCountdown -= 1.0;
+            if (fbCountdown <= 0.0) { fbCountdown += halfBit; ++half; }
+        }
+        phase += 2.0 * M_PI * inst / sr;
+        const float re = static_cast<float>(std::cos(phase))
+                       + noiseAmp * gauss(rng);
+        const float im = static_cast<float>(std::sin(phase))
+                       + noiseAmp * gauss(rng);
+        x[i] = std::complex<float>(re, im);
+    }
+    return x;
+}
+
+// Flexible sub-audio gate scenario: arm CTCSS and/or CDCSS detectors + their
+// speaker gates, drive the real NFM chain, return captured post-gate SPEAKER RMS
+// plus both honest detection latches. Squelch ON low threshold so the carrier
+// opens it (the variables under test are the two sub-audio speaker gates).
+struct SubGateCap { double spkRms = 0.0; bool ctcssPresent = false; bool cdcssPresent = false; };
+SubGateCap runSubGateScenario(const QString& rawPath, double sr,
+                              bool ctcssOn, double ctcssTune, bool ctcssGate,
+                              bool cdcssOn, int cdcssCode, bool cdcssGate) {
+    SpectrumEngine eng;
+    auto* mem = new MemoryAudioSink();
+    eng.setTestAudioSink(std::unique_ptr<IAudioSink>(mem));
+    if (!eng.openOfflineFile(rawPath, sr)) return {};
+    eng.setDemodMode("NFM");
+    eng.vfoSetFreq(eng.selectedVfoId(), 50000.0);
+    eng.setSquelchThreshold(-45.0f);
+    eng.setSquelchEnabled(true);
+    eng.setMuted(false);
+    eng.setCtcssEnabled(ctcssOn);
+    eng.setCtcssFreqHz(ctcssTune);
+    eng.setCtcssGateAudio(ctcssGate);
+    eng.setCdcssEnabled(cdcssOn);
+    eng.setCdcssCode(cdcssCode);
+    eng.setCdcssGateAudio(cdcssGate);
+
+    eng.start();
+    QTest::qWait(2600);          // warmup: squelch opens + sub-audio latch
+    mem->clear();
+    QTest::qWait(1400);          // capture steady state
+    SubGateCap cap;
+    cap.spkRms = rms(mem->buffer());
+    cap.ctcssPresent = eng.ctcssPresent();
+    cap.cdcssPresent = eng.cdcssPresent();
+    eng.shutdown();
+    eng.wait(3000);
+    return cap;
+}
+
 } // namespace
 
 class TestEngineAudioE2E : public QObject {
@@ -182,6 +279,8 @@ private slots:
     void ctcssGateMutesSpeakerWithoutMatchingTone();
     void ctcssGateOpensSpeakerWithMatchingTone();
     void ctcssGateOffIsLegacySquelchPassthrough();
+    void cdcssGateOpensOnMatchingCodeMutesWithout();
+    void dualSubGateEitherMatchOpensSpeaker();
     void rawDirectListenProducesStereoPassthrough();
 };
 
@@ -396,6 +495,86 @@ void TestEngineAudioE2E::ctcssGateOffIsLegacySquelchPassthrough() {
     qInfo("CTCSS gate off: spkRms=%.4f present=%d", cap.spkRms, (int)cap.present);
     QVERIFY2(cap.spkRms > 0.02,
              "with the gate off the speaker must follow squelch (legacy passthrough)");
+}
+
+// ---- CDCSS speaker gate: matching 023 code -> speaker opens; no code -> muted;
+//      gate off -> legacy squelch passthrough ---------------------------------
+// A quiet 1 kHz voice + an embedded BPSK-keyed 023 Golay word on a 1500 Hz
+// subcarrier. The armed CDCSS gate tuned to 023 must latch present AND open the
+// speaker. A voice-only carrier (no DCS stream) must stay muted; gate off must
+// follow the squelch like the legacy behavior.
+void TestEngineAudioE2E::cdcssGateOpensOnMatchingCodeMutesWithout() {
+    QTemporaryDir dir;
+
+    // (a) matching code: gate open, real audio out, honest latch true.
+    const QString pMatch = dir.filePath("nfm_dcs_match.raw");
+    auto iqM = makeNfmCdcssIq(kSrcFs, 2.5, 1000.0, 800.0, 023, 1500.0, 0.0);
+    QVERIFY(fixture::writeRawCf32(pMatch, iqM));
+    SubGateCap m = runSubGateScenario(pMatch, kSrcFs,
+                                      false, 88.5, false,   // CTCSS off
+                                      true, 023, true);     // CDCSS on, gate on
+    qInfo("CDCSS gate matched: spkRms=%.4f present=%d", m.spkRms, (int)m.cdcssPresent);
+    QVERIFY2(m.cdcssPresent, "the embedded 023 DCS stream must latch present");
+    QVERIFY2(m.spkRms > 0.02,
+             "armed CDCSS gate must open the speaker on a matching code");
+
+    // (b) voice-only carrier (no DCS stream): honest latch false, speaker muted.
+    const QString pNone = dir.filePath("nfm_dcs_none.raw");
+    auto iqN = makeNfmCdcssIq(kSrcFs, 2.5, 1000.0, 2500.0, -1, 0.0, 0.0);
+    QVERIFY(fixture::writeRawCf32(pNone, iqN));
+    SubGateCap n = runSubGateScenario(pNone, kSrcFs,
+                                      false, 88.5, false,
+                                      true, 023, true);
+    qInfo("CDCSS gate no-code: spkRms=%.4f present=%d", n.spkRms, (int)n.cdcssPresent);
+    QVERIFY2(!n.cdcssPresent, "a voice-only carrier must NOT latch a DCS code");
+    QVERIFY2(n.spkRms < 0.01,
+             "armed CDCSS gate must mute the speaker when no matching code is present");
+
+    // (c) gate OFF: detector still on, but the speaker follows squelch (legacy).
+    SubGateCap off = runSubGateScenario(pNone, kSrcFs,
+                                        false, 88.5, false,
+                                        true, 023, false);
+    qInfo("CDCSS gate off: spkRms=%.4f present=%d", off.spkRms, (int)off.cdcssPresent);
+    QVERIFY2(off.spkRms > 0.02,
+             "with the CDCSS gate off the speaker must follow squelch (legacy)");
+}
+
+// ---- Dual sub-audio gate: CTCSS gate + CDCSS gate both armed. With only a DCS
+//      match (no CTCSS tone) the speaker must STILL open (either-domain match
+//      wins; the engine must not deadlock on a double-gate config). With neither
+//      domain matching the speaker stays muted. --------------------------------
+void TestEngineAudioE2E::dualSubGateEitherMatchOpensSpeaker() {
+    QTemporaryDir dir;
+
+    // Carrier: quiet voice + embedded 023 DCS, but NO 88.5 Hz CTCSS tone.
+    const QString p = dir.filePath("nfm_dual_dcs.raw");
+    auto iq = makeNfmCdcssIq(kSrcFs, 2.5, 1000.0, 800.0, 023, 1500.0, 0.0);
+    QVERIFY(fixture::writeRawCf32(p, iq));
+
+    // Both gates armed; only CDCSS matches -> speaker must open (either-domain).
+    SubGateCap one = runSubGateScenario(p, kSrcFs,
+                                        true, 88.5, true,    // CTCSS gate on, no tone
+                                        true, 023, true);    // CDCSS gate on, matches
+    qInfo("Dual gate, DCS-only match: spkRms=%.4f ctcss=%d cdcss=%d",
+          one.spkRms, (int)one.ctcssPresent, (int)one.cdcssPresent);
+    QVERIFY2(one.cdcssPresent && !one.ctcssPresent,
+             "sanity: only the DCS domain should latch here");
+    QVERIFY2(one.spkRms > 0.02,
+             "with both gates armed, a DCS-only match must still open the speaker");
+
+    // Neither domain matches: voice-only carrier -> both gates hold the speaker.
+    const QString pNone = dir.filePath("nfm_dual_none.raw");
+    auto iqNone = makeNfmCdcssIq(kSrcFs, 2.5, 1000.0, 2500.0, -1, 0.0, 0.0);
+    QVERIFY(fixture::writeRawCf32(pNone, iqNone));
+    SubGateCap none = runSubGateScenario(pNone, kSrcFs,
+                                         true, 88.5, true,
+                                         true, 023, true);
+    qInfo("Dual gate, no match: spkRms=%.4f ctcss=%d cdcss=%d",
+          none.spkRms, (int)none.ctcssPresent, (int)none.cdcssPresent);
+    QVERIFY2(!none.ctcssPresent && !none.cdcssPresent,
+             "sanity: neither domain should latch on a voice-only carrier");
+    QVERIFY2(none.spkRms < 0.01,
+             "with both gates armed and no match, the speaker must stay muted");
 }
 
 // ---- RAW direct-listen: channelized IQ reaches writeStereo as L=I / R=Q -----
