@@ -43,6 +43,7 @@
 
 #include "core/tokens.h"
 #include "ui/main_window.h"
+#include "ui/spectrum_widget.h"
 #include "ui/bookmark_manager.h"
 #include "ai/agent.h"
 #include "ai/ai_session_store.h"
@@ -100,6 +101,13 @@ private slots:
     // Phase63: a corrupted/illegal persisted mode + absurd bandwidth must snap to
     // honest defaults (NFM + widest preset) instead of presenting a bogus entry.
     void demodBandwidthIllegalPersistedFallsBack();
+    // Phase63: spectrum FFT tier (1024/2048/4096) persists through the real
+    // saveUiState() ("rx/fftSize") and restores on the next launch, dispatched
+    // into the running engine. Drives the real MainWindow offscreen -- no mock.
+    void fftSizePersistsAndRestoresRoundTrip();
+    // Phase63: an absurd persisted FFT size (8192) must honestly fall back to the
+    // 2048 default instead of presenting a bogus combo entry.
+    void fftSizeIllegalPersistedFallsBack();
 };
 
 QString TestUiIntegration::tmpSettingsDir;
@@ -1133,6 +1141,79 @@ void TestUiIntegration::demodBandwidthIllegalPersistedFallsBack() {
     // 12.5 kHz is authoritative and the combo snaps to its preset (index 4). The
     // point is an honest, valid default -- never a bogus combo entry.
     QTRY_VERIFY_WITH_TIMEOUT(bw->currentIndex() == 4, 2000);
+}
+
+// Phase63: FFT tier (1024/2048/4096) round-trips through the real saveUiState()
+// path. Window 1 picks 1024; the debounced save flush + window destructor write
+// "rx/fftSize"; window 2 (fresh launch) must restore the combo AND dispatch the
+// tier into the running engine (read back fftSize()). No mock -- the offline
+// TestSignalSource keeps the engine thread live.
+void TestUiIntegration::fftSizePersistsAndRestoresRoundTrip() {
+    clearVfoSettings();
+    const int targetFft = 1024;
+
+    // Window 1: default is 2048; switch the spectrum combo to the 1024 tier.
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* eng = win.engine();
+        auto* spec = win.findChild<ui::SpectrumWidget*>();
+        QVERIFY(eng && spec);
+
+        QCOMPARE(spec->fftSizeValue(), 2048);
+        spec->setFftSizeValue(targetFft);
+        QApplication::processEvents();
+
+        // The combo's currentIndexChanged -> fftSizeRequested -> engine setFftSize
+        // (atomic store; queued delivery only if the engine lives on its thread).
+        QTRY_VERIFY_WITH_TIMEOUT(eng->fftSize() == targetFft, 2000);
+
+        QTest::qWait(700);   // let the debounced save timer arm; dtor flushes it
+    }
+
+    // Fresh QSettings on disk (window 1 destroyed + flushed).
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        s.sync();
+        QCOMPARE(s.value("rx/fftSize").toInt(), targetFft);
+    }
+
+    // Window 2: a fresh launch must restore the combo tier and dispatch it into
+    // the running engine.
+    {
+        MainWindow win;
+        win.show();
+        QApplication::processEvents();
+        auto* eng = win.engine();
+        auto* spec = win.findChild<ui::SpectrumWidget*>();
+        QVERIFY(eng && spec);
+
+        QCOMPARE(spec->fftSizeValue(), targetFft);
+        QTRY_VERIFY_WITH_TIMEOUT(eng->fftSize() == targetFft, 2000);
+    }
+}
+
+// Phase63: an absurd persisted FFT size (8192, no such tier) must honestly fall
+// back to the 2048 default in BOTH the spectrum combo and the engine -- never a
+// bogus combo entry, never a half-applied tier.
+void TestUiIntegration::fftSizeIllegalPersistedFallsBack() {
+    clearVfoSettings();
+    {
+        QSettings s("MBDSDR", "MBDSDR");
+        s.setValue("rx/fftSize", 8192);   // outside {1024,2048,4096}
+        s.sync();
+    }
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    auto* eng = win.engine();
+    auto* spec = win.findChild<ui::SpectrumWidget*>();
+    QVERIFY(eng && spec);
+
+    // setFftSizeValue(8192): no tier matches -> combo stays index 1 (2048).
+    QCOMPARE(spec->fftSizeValue(), 2048);
+    QTRY_VERIFY_WITH_TIMEOUT(eng->fftSize() == 2048, 2000);
 }
 
 QTEST_MAIN(TestUiIntegration)

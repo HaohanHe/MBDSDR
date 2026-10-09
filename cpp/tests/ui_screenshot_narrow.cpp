@@ -108,6 +108,23 @@ int main(int argc, char** argv) {
         s.sync();
     }
 
+    // Optional: seed the persisted spectrum FFT tier (MBD_FFTSIZE=1024/2048/4096)
+    // BEFORE MainWindow restores it, so the spectrum "FFT" tool combo AND the
+    // running engine come up at the chosen bin count -- the real persisted
+    // round-trip, not a post-hoc poke. The throwaway QSettings path above keeps
+    // this off the user's data. The key is the same "rx/fftSize" string the
+    // production save/restore path uses (main_window); a value outside the named
+    // set honestly resolves to the 2048 default. Off by default so every other
+    // shot is unchanged.
+    {
+        const int fftSeed = qEnvironmentVariableIntValue("MBD_FFTSIZE");
+        if (fftSeed == 1024 || fftSeed == 2048 || fftSeed == 4096) {
+            QSettings s("MBDSDR", "MBDSDR");
+            s.setValue("rx/fftSize", fftSeed);
+            s.sync();
+        }
+    }
+
     // Optional: seed the persisted Rx demod-mode + bandwidth (MBD_MODE=USB
     // MBD_BW=9000) BEFORE MainWindow restores it, so the left "解调" / "带宽"
     // combos render the restored values -- the real persisted round-trip, not a
