@@ -121,6 +121,67 @@ Ft8Candidate Ft8Detector::processWindow(const std::complex<float>* iq,
         }
         ++dataIdx;
     }
+
+    // SIC 最小集：重构最强信号 8-tone 并从窗口扣除，二次 Costas 粗搜。
+    // 重构用每符号主导音（能量最大音）+ Costas 序列，相减后重跑粗搜找第二信号。
+    secondary_ = Ft8Candidate();
+    {
+        std::vector<std::complex<float>> sub(iq, iq + n);
+        // 帧内所有 79 符号：Costas 音 + 数据主导音。
+        for (int s = 0; s < 79; ++s) {
+            int sampleStart = bestStart + s * kNsps;
+            int txTone;
+            bool isCostas = (s < 7) || (s >= 36 && s < 43) || (s >= 72);
+            if (isCostas) {
+                static constexpr int kCostas[7] = {3,1,4,0,6,5,2};
+                int idx = (s < 7) ? s : (s < 43) ? s - 36 : s - 72;
+                txTone = kCostas[idx];
+            } else {
+                // 数据符号：取 8-tone 能量最大音。
+                double e[8]; int bestT = 0; double bestE = -1;
+                for (int t = 0; t < 8; ++t) {
+                    double f = bestFreq + (t - 3.5) * kToneSpacing;
+                    e[t] = toneEnergy(iq, (int)n, sampleStart, kNsps, f, kFs);
+                    if (e[t] > bestE) { bestE = e[t]; bestT = t; }
+                }
+                txTone = bestT;
+            }
+            double f = bestFreq + (txTone - 3.5) * kToneSpacing;
+            double amp = std::sqrt(std::max(0.0, toneEnergy(iq, (int)n, sampleStart, kNsps, f, kFs)) / kNsps);
+            for (int k = 0; k < kNsps && sampleStart + k < (int)n; ++k) {
+                double ph = 2.0 * M_PI * f * (sampleStart + k) / kFs;
+                sub[sampleStart + k] -= std::complex<float>((float)(amp * std::cos(ph)),
+                                                             (float)(amp * std::sin(ph)));
+            }
+        }
+        // 二次粗搜：在扣除缓冲上重跑。
+        double bestScore2 = 0.0, bestFreq2 = 0.0; int bestStart2 = 0;
+        const int maxStart2 = (int)n - 79 * kNsps;
+        for (int start = 0; start <= maxStart2; start += kNsps) {
+            for (int fo = -8; fo <= 8; ++fo) {
+                double fOff = fo * kToneSpacing;
+                double corr = 0.0, total = 0.0;
+                for (int s = 0; s < 7; ++s) {
+                    int sampleStart = start + s * kNsps;
+                    int txTone = kCostas[s];
+                    double txF = fOff + (txTone - 3.5) * kToneSpacing;
+                    double eTx = toneEnergy(sub.data(), (int)n, sampleStart, kNsps, txF, kFs);
+                    double eSum = 0.0;
+                    for (int t = 0; t < 8; ++t)
+                        eSum += toneEnergy(sub.data(), (int)n, sampleStart, kNsps, fOff + (t - 3.5) * kToneSpacing, kFs);
+                    corr += eTx; total += eSum;
+                }
+                double sc = total > 0.0 ? corr / total : 0.0;
+                if (sc > bestScore2) { bestScore2 = sc; bestStart2 = start; bestFreq2 = fOff; }
+            }
+        }
+        if (bestScore2 >= kQualityThreshold) {
+            secondary_.valid = true;
+            secondary_.freqOffsetHz = bestFreq2;
+            secondary_.timeOffsetSec = (double)bestStart2 / kFs;
+            secondary_.syncQuality = bestScore2;
+        }
+    }
     return best;
 }
 
