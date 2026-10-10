@@ -97,6 +97,30 @@ Ft8Candidate Ft8Detector::processWindow(const std::complex<float>* iq,
     best.syncQuality = quality;
     best.snrDb = 10.0 * std::log10(bestScore + 1e-9);
     best.dataSymbolsDetected = 58;
+
+    // LLR 提取：58 数据符号（帧内 7..35 与 43..71）× 8-tone 能量 → 174 LLR。
+    static constexpr int kInvGray[8] = {0,1,3,2,6,4,5,7}; // inv[t]=承载的3-bit
+    lastLlr_.assign(174, 0.0);
+    int dataIdx = 0;
+    for (int s = 0; s < 79 && dataIdx < 58; ++s) {
+        bool isData = (s >= 7 && s <= 35) || (s >= 43 && s <= 71);
+        if (!isData) continue;
+        int sampleStart = bestStart + s * kNsps;
+        double e[8];
+        for (int t = 0; t < 8; ++t) {
+            double f = bestFreq + (t - 3.5) * kToneSpacing;
+            e[t] = toneEnergy(iq, (int)n, sampleStart, kNsps, f, kFs);
+        }
+        for (int bit = 0; bit < 3; ++bit) {
+            double p1 = 1e-12, p0 = 1e-12;
+            for (int t = 0; t < 8; ++t) {
+                if ((kInvGray[t] >> bit) & 1) p1 += e[t]; else p0 += e[t];
+            }
+            // bit=0 LSB -> s*3+2；bit=2 MSB -> s*3
+            lastLlr_[dataIdx * 3 + (2 - bit)] = std::log(p0 / p1);
+        }
+        ++dataIdx;
+    }
     return best;
 }
 
