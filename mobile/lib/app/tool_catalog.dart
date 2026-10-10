@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 55 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 58 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -165,6 +165,18 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
   ToolCatalogEntry(
       name: 'get_lrpt_status',
       description: '只读：返回 LRPT 接收层状态（enabled/sync_locked 是否锁定位同步/decoded_frames 行数）。C++ 解码器未移植前 sync_locked 诚实为 false、decoded_frames 为 0。',
+      write: false),
+  ToolCatalogEntry(
+      name: 'set_vna_sweep',
+      description: '写入：设置 NanoVNA 扫频范围（start_hz/stop_hz/points 必填，stop>start、points>0）。无设备时参数校验但不下发（applied=false）。',
+      write: true),
+  ToolCatalogEntry(
+      name: 'get_vna_data',
+      description: '只读：返回当前扫频数据（frequencies、S11/S21 及派生 VSWR/回波损耗/阻抗）。无设备时各数组诚实为空。',
+      write: false),
+  ToolCatalogEntry(
+      name: 'get_vna_status',
+      description: '只读：返回 NanoVNA 状态（connected/model/version/cal/sweep）。未连接时 connected 诚实为 false。',
       write: false),
   ToolCatalogEntry(
       name: 'set_noise_blanker',

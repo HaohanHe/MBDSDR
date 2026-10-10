@@ -28,6 +28,7 @@
 #include "ui/spectrum_display.h"
 #include "ui/s_meter.h"
 #include "ui/rssi_trend.h"
+#include "ui/vna_panel.h"
 #include "ui/bookmark_manager.h"
 #include "ui/scan_session.h"
 
@@ -226,6 +227,35 @@ int main(int argc, char** argv) {
                     t->currentWidget()->show();
                 }
             }
+        }
+    }
+
+    // Optional: seed the VNA instrument panel with self-made replay sweep data
+    // (MBD_VNASHOT=1) so the "VNA" tab renders a connected, measuring state with
+    // real S11(VSWR)/S21(gain) curves. The protocol text is authored
+    // independently (same wire format as the Python fixture, no GPL code copied);
+    // off by default so every other screenshot is unchanged.
+    if (qgetenv("MBD_VNASHOT").size()) {
+        if (auto* panel = win.findChild<mbdsdr::ui::VnaPanel*>()) {
+            std::vector<long> freqs;
+            std::vector<std::complex<double>> s11, s21;
+            for (int i = 0; i <= 40; ++i) {
+                double f = 1.0 + 29.0 * i / 40.0;                 // MHz
+                freqs.push_back((long)(f * 1e6));
+                double det = f - 14.0;                             // resonance at 14 MHz
+                double g = 0.15 + 0.55 * (det * det) / 225.0;      // |g| 0.15..0.7
+                if (g > 0.9) g = 0.9;
+                s11.emplace_back(g, 0.05 * det);
+                double a = 0.3 + 0.6 * std::exp(-(det * det) / 32.0);  // bandpass
+                s21.emplace_back(a, 0.1 * det);
+            }
+            panel->seedSnapshotForTest(
+                QString::fromUtf8("NanoVNA-H"),
+                QString::fromUtf8("1.0.174-hugen"),
+                QStringList{QString::fromUtf8("load"), QString::fromUtf8("open"),
+                            QString::fromUtf8("short"), QString::fromUtf8("thru"),
+                            QString::fromUtf8("cal'ed")},
+                freqs, s11, s21);
         }
     }
 

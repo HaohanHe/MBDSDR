@@ -70,6 +70,7 @@ private slots:
     void cdcssSetLandIllegalCodeRejectedAndGate();
     void ft8SetLandHonestEmpty();
     void lrptSetLandHonestEmpty();
+    void vnaSweepValidatesHonestEmptyAndGate();
     void vfoListAddSwitchRename();
     void bookmarksPersistToQSettings();
     void recordingsListEmptyThenRealDeleteExport();
@@ -802,7 +803,49 @@ void TestControlHub::lrptSetLandHonestEmpty() {
     hub.setWriteEnabled(true);
 }
 
-// add_vfo / switch_vfo really move the selected channel; rename_vfo renames it.
+// NanoVNA step-2: set_vna_sweep validates params honestly (missing / bad ranges
+// -> ok:false); with no device the sweep is validated but NOT sent (applied=false,
+// connected=false) -- never faked. Reads return honest empty arrays/fields.
+void TestControlHub::vnaSweepValidatesHonestEmptyAndGate() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    // Status read: honest empty (no device).
+    QJsonObject st = parseObj(hub.execute("get_vna_status", {}));
+    QVERIFY2(st.value("ok").toBool(), st.value("error").toString().toUtf8().constData());
+    QCOMPARE(st.value("connected").toBool(), false);
+    QVERIFY(st.value("model").toString().isEmpty());
+
+    // Data read: empty arrays, honest.
+    QJsonObject dt = parseObj(hub.execute("get_vna_data", {}));
+    QCOMPARE(dt.value("connected").toBool(), false);
+    QVERIFY(dt.value("frequencies").toArray().isEmpty());
+
+    // Missing params -> honest ok:false.
+    QCOMPARE(parseObj(hub.execute("set_vna_sweep", {})).value("ok").toBool(), false);
+    // stop <= start -> rejected.
+    QCOMPARE(parseObj(hub.execute("set_vna_sweep",
+        {{"start_hz", 100e6}, {"stop_hz", 50e6}, {"points", 101}})).value("ok").toBool(), false);
+    // points <= 0 -> rejected.
+    QCOMPARE(parseObj(hub.execute("set_vna_sweep",
+        {{"start_hz", 1e6}, {"stop_hz", 100e6}, {"points", 0}})).value("ok").toBool(), false);
+
+    // Valid params, no device -> ok:true but applied=false/connected=false.
+    QJsonObject ok = parseObj(hub.execute("set_vna_sweep",
+        {{"start_hz", 1e6}, {"stop_hz", 100e6}, {"points", 101}}));
+    QVERIFY2(ok.value("ok").toBool(), ok.value("error").toString().toUtf8().constData());
+    QCOMPARE(ok.value("connected").toBool(), false);
+    QCOMPARE(ok.value("applied").toBool(), false);
+
+    // Write gate closed: set_vna_sweep refused, gated.
+    hub.setWriteEnabled(false);
+    QJsonObject g = parseObj(hub.execute("set_vna_sweep",
+        {{"start_hz", 1e6}, {"stop_hz", 100e6}, {"points", 101}}));
+    QVERIFY2(!g.value("ok").toBool() && g.value("gated").toBool(),
+             qPrintable(QString::fromUtf8("set_vna_sweep must be gated")));
+    hub.setWriteEnabled(true);
+}
 void TestControlHub::vfoListAddSwitchRename() {
     SpectrumEngine eng;
     control::ControlHub hub;

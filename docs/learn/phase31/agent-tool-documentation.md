@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，55 个工具）
+# Agent 工具能力清单（自动生成，58 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -273,5 +273,20 @@ schema: {"properties":{},"required":[],"type":"object"}
 
 ## get_recording_state  [read 只读]
 description: 只读：返回录制状态（recording 是否在手动录制中、recording_path 当前路径、watch_enabled 值守录制是否使能、recording_dir 录制目录）。未录制时诚实返回 recording=false、空路径，不伪造。
+schema: {"properties":{},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## set_vna_sweep  [write 写]
+description: 写入：外置 NanoVNA(H/H4) 的扫频参数（start_hz/stop_hz/points）。参数先校验（stop>start、points>0）；未连接设备时诚实返回 connected=false、applied=false 且 note 说明"参数已校验但未下发"，不伪造数据。
+schema: {"properties":{"start_hz":{"type":"number"},"stop_hz":{"type":"number"},"points":{"type":"number"}},"required":["start_hz","stop_hz","points"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；stop<=start 或 points<=0 -> {"ok":false,...}
+
+## get_vna_data  [read 只读]
+description: 只读：返回 NanoVNA 当前扫频的 frequencies(Hz) 与 S11 复数（s11_re/s11_im 平行数组）。未连接时诚实返回 connected=false、空数组，note 说明"数组为空"，不伪造曲线。
+schema: {"properties":{},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## get_vna_status  [read 只读]
+description: 只读：返回 NanoVNA 连接/身份/校准状态（connected、model 板名、version 固件、cal 校准项数组、has_sweep、start_hz/stop_hz/points）。未连接时诚实返回 connected=false、空字段，note 说明，不伪造。
 schema: {"properties":{},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠

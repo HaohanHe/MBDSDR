@@ -707,6 +707,52 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // set_vna_sweep (write -- gated) ---------------------------------------
+    // NanoVNA step-2: program a sweep on the connected instrument. start_hz /
+    // stop_hz / points are REQUIRED; stop>start and points>0 validated both in
+    // the tool layer (honest ok:false) and the client. With no device attached
+    // parameters are validated but the command is not sent (applied=false).
+    {
+        ToolSchemaSpec s;
+        s.name = "set_vna_sweep";
+        s.description = QString::fromUtf8(
+            "写入：设置 NanoVNA 扫频范围（start_hz/stop_hz/points，均必填；stop 必须大于 start，"
+            "points 为正整数）。属于写动作，手动模式下被拦截。无设备时参数仍校验，但不下发（applied=false），"
+            "不伪造连接。");
+        s.write = true;
+        ToolParamSpec a;
+        a.name = "start_hz"; a.type = "number"; a.required = true;
+        a.description = QString::fromUtf8("扫频起始频率 (Hz)");
+        ToolParamSpec b;
+        b.name = "stop_hz"; b.type = "number"; b.required = true;
+        b.description = QString::fromUtf8("扫频终止频率 (Hz，必须大于 start_hz)");
+        ToolParamSpec c;
+        c.name = "points"; c.type = "number"; c.required = true;
+        c.description = QString::fromUtf8("扫描点数 (正整数)");
+        s.params << a << b << c;
+        out.append(s);
+    }
+
+    // get_vna_data (read-only) ----------------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_vna_data";
+        s.description = QString::fromUtf8(
+            "只读：返回当前扫频测量数据（frequencies、S11/S21 复数对及派生 VSWR/回波损耗/阻抗）。"
+            "无设备/未取数时各数组诚实为空，不编造曲线。");
+        out.append(s);
+    }
+
+    // get_vna_status (read-only) --------------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_vna_status";
+        s.description = QString::fromUtf8(
+            "只读：返回 NanoVNA 状态（connected 是否已连接、model 型号、version 固件、cal 已置位校准项、"
+            "当前 sweep 范围与点数）。未连接时 connected 诚实为 false，字段为空。");
+        out.append(s);
+    }
+
     {
         ToolSchemaSpec s;
         s.name = "set_noise_blanker";

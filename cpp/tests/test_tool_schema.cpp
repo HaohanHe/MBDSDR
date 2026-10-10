@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 55);
+    QCOMPARE(specs.size(), 58);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -258,6 +258,19 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "只读：返回 LRPT 接收层状态（enabled 是否使能、sync_locked 是否已锁定位同步、"
             "decoded_frames 已解码行数）。C++ 解码器未移植前 sync_locked 诚实为 false、"
             "decoded_frames 为 0，不编造。")},
+        {"set_vna_sweep",
+         QString::fromUtf8(
+            "写入：设置 NanoVNA 扫频范围（start_hz/stop_hz/points，均必填；stop 必须大于 start，"
+            "points 为正整数）。属于写动作，手动模式下被拦截。无设备时参数仍校验，但不下发（applied=false），"
+            "不伪造连接。")},
+        {"get_vna_data",
+         QString::fromUtf8(
+            "只读：返回当前扫频测量数据（frequencies、S11/S21 复数对及派生 VSWR/回波损耗/阻抗）。"
+            "无设备/未取数时各数组诚实为空，不编造曲线。")},
+        {"get_vna_status",
+         QString::fromUtf8(
+            "只读：返回 NanoVNA 状态（connected 是否已连接、model 型号、version 固件、cal 已置位校准项、"
+            "当前 sweep 范围与点数）。未连接时 connected 诚实为 false，字段为空。")},
         {"set_noise_blanker",
          QString::fromUtf8(
             "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。")},
@@ -408,7 +421,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 55);
+    QCOMPARE(headerCount, 58);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

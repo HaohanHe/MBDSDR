@@ -1,7 +1,7 @@
-// G5 AI 工具能力清单（只读页）：对照桌面 tool_schema.cpp 的 55 工具。
+// G5 AI 工具能力清单（只读页）：对照桌面 tool_schema.cpp 的 58 工具。
 //
 // 诚实性断言：
-//   * 目录恰为 55 条，名称唯一、说明非空；
+//   * 目录恰为 58 条，名称唯一、说明非空；
 //   * write=true 才显示「write」标记，read 显示「read」；
 //   * 「已接入」只打在与移动端同名的子集上，其余绝不冒充；
 //   * 页面只读渲染：不构造 AiTool、不发请求。
@@ -13,10 +13,10 @@ import 'package:mbdsdr_mobile/app/tool_catalog.dart';
 import 'package:mbdsdr_mobile/pages/tools_catalog_page.dart';
 
 void main() {
-  test('桌面目录恰为 55 条、名称唯一、说明非空', () {
-    expect(kDesktopToolCatalog.length, 55);
+  test('桌面目录恰为 58 条、名称唯一、说明非空', () {
+    expect(kDesktopToolCatalog.length, 58);
     final names = kDesktopToolCatalog.map((e) => e.name).toList();
-    expect(names.toSet().length, 55, reason: '工具名不得重复');
+    expect(names.toSet().length, 58, reason: '工具名不得重复');
     for (final e in kDesktopToolCatalog) {
       expect(e.name, isNotEmpty);
       expect(e.description, isNotEmpty);
@@ -38,7 +38,7 @@ void main() {
     await tester.pump();
 
     // 头部诚实说明（标注桌面 51 个、只读对照）。
-    expect(find.textContaining('桌面端共 55 个'), findsOneWidget);
+    expect(find.textContaining('桌面端共 58 个'), findsOneWidget);
     // 顶部几个工具名渲染。
     expect(find.text('tune_frequency'), findsOneWidget);
     expect(find.text('set_mode'), findsOneWidget);

@@ -19,6 +19,7 @@
 #include "dsp/iq_frontend.h"
 #include "dsp/ft8_detector.h"
 #include "dsp/ft8_codec.h"
+#include "vna/nanovna_client.h"
 #include "dsp/vfo_manager.h"
 #include "dsp/audio_resampler.h"
 #include "dsp/demod.h"
@@ -39,6 +40,7 @@
 #include "dsp/doppler_control_surface.h"
 
 namespace mbdsdr {
+namespace vna { class NanoVnaClient; }
 namespace dsp {
 
 // What the main record button captures: raw baseband IQ (SigMF) or the
@@ -122,6 +124,12 @@ public:
     bool   lrptEnabled() const { return lrptEnabled_.load(); }
     bool   lrptSyncLocked() const { return lrptSyncLocked_; }
     int    lrptDecodedFrames() const { return lrptDecodedFrames_; }
+
+    // NanoVNA step-2: the engine owns an honest-empty VNA client (no transport
+    // until line B wires a real serial port). Tools/UI read through this; with
+    // no device everything reads back empty/false -- never fabricated.
+    vna::NanoVnaClient& vnaClient() { return vna_; }
+    const vna::NanoVnaClient& vnaClient() const { return vna_; }
     // 喂 1024 字节 CADU（Viterbi 译码后字节流，含 4 字节 ASM）-> C++ FEC 解码。
     // 全 4 块 RS 可纠才更新 syncLocked=true/decodedFrames++；否则诚实空态。
     void feedLrptCadu(const uint8_t* cadu, int n);
@@ -632,6 +640,10 @@ private:
     std::atomic<bool> lrptEnabled_{false};
     bool   lrptSyncLocked_ = false;    // C++ decoder not ported yet
     int    lrptDecodedFrames_ = 0;      // C++ decoder not ported yet
+
+    // NanoVNA client: honest-empty by default (no transport until line B wires
+    // a real serial port). Tools/UI read through engine.vnaClient().
+    vna::NanoVnaClient vna_;
 
     // FT8 detection layer (step 3). ft8Detector_ is fed 12k complex baseband by
     // the run loop when enabled; ft8Last_ holds the honest last candidate.
