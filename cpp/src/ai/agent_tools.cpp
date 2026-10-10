@@ -973,6 +973,39 @@ QString execGetFt8Status(const QJsonObject&, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// 7j. set_lrpt (write): LRPT state-layer enable. `enabled` REQUIRED boolean.
+//     State/control layer only; C++ demod/FEC port deferred to step 4.
+QString execSetLrpt(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                    const SourceInfo& src,
+                    ui::BookmarkManager* /*bookmarks*/) {
+    const QJsonValue en = args.value(QStringLiteral("enabled"));
+    if (!en.isBool())
+        return errResult(QString::fromUtf8("参数 enabled 缺失或不是布尔值"));
+    const bool on = en.toBool();
+    engine->setLrptEnabled(on);
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = on;
+    o["message"] = QString::fromUtf8("LRPT 接收层开关已下发（状态层，C++ 解调/FEC 移植留后续第④轮）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 7k. get_lrpt_status (read): honest engine getters. With no C++ decoder yet,
+//     sync_locked stays false and decoded_frames 0 -- never fabricated.
+QString execGetLrptStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
+                          const SourceInfo& src,
+                          ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = engine->lrptEnabled();
+    o["sync_locked"] = engine->lrptSyncLocked();
+    o["decoded_frames"] = engine->lrptDecodedFrames();
+    o["note"] = QString::fromUtf8("C++ LRPT 解调/FEC 未移植（第④轮），当前为状态控制层");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // 8. list_bookmarks (read): BookmarkManager wiring lands on control -> honest empty.
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
                           const SourceInfo& src,
@@ -1559,6 +1592,8 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_cdcss_status", &execGetCdcssStatus},
         {"set_ft8", &execSetFt8},
         {"get_ft8_status", &execGetFt8Status},
+        {"set_lrpt", &execSetLrpt},
+        {"get_lrpt_status", &execGetLrptStatus},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},
         {"list_bookmarks", &execListBookmarks},

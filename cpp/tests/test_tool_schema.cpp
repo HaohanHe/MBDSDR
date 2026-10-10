@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 53);
+    QCOMPARE(specs.size(), 55);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -248,6 +248,16 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "只读：返回 FT8 检测层状态（enabled 是否使能、active 是否真实检出候选帧、"
             "freq_offset_hz 估计频偏、sync_quality 相关峰/次峰比、candidate_count 候选数）。"
             "无信号/未使能时 active 诚实为 false，不编造。")},
+        {"set_lrpt",
+         QString::fromUtf8(
+            "写入：开关 LRPT 卫星云图接收层（enabled 布尔，必填）。属于写动作，"
+            "手动模式下被拦截。本轮为状态控制层（C++ 解调/FEC 移植留后续第④轮），"
+            "不编造图像或帧。")},
+        {"get_lrpt_status",
+         QString::fromUtf8(
+            "只读：返回 LRPT 接收层状态（enabled 是否使能、sync_locked 是否已锁定位同步、"
+            "decoded_frames 已解码行数）。C++ 解码器未移植前 sync_locked 诚实为 false、"
+            "decoded_frames 为 0，不编造。")},
         {"set_noise_blanker",
          QString::fromUtf8(
             "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。")},
@@ -398,7 +408,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 53);
+    QCOMPARE(headerCount, 55);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

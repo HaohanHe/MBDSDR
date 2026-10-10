@@ -115,6 +115,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"set_ctcss",             true,  &ControlHub::cmdSetCtcss},
         {"set_cdcss",             true,  &ControlHub::cmdSetCdcss},
         {"set_ft8",               true,  &ControlHub::cmdSetFt8},
+        {"set_lrpt",              true,  &ControlHub::cmdSetLrpt},
         {"set_noise_blanker",     true,  &ControlHub::cmdSetNoiseBlanker},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
@@ -154,6 +155,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_ctcss_status",      false, &ControlHub::cmdGetCtcssStatus},
         {"get_cdcss_status",      false, &ControlHub::cmdGetCdcssStatus},
         {"get_ft8_status",        false, &ControlHub::cmdGetFt8Status},
+        {"get_lrpt_status",       false, &ControlHub::cmdGetLrptStatus},
         {"get_noise_blanker_status", false, &ControlHub::cmdGetNoiseBlankerStatus},
         {"list_bookmarks",        false, &ControlHub::cmdListBookmarks},
         {"list_vfos",             false, &ControlHub::cmdListVfos},
@@ -1459,6 +1461,26 @@ QJsonObject ControlHub::cmdGetFt8Status(const QJsonObject&) {
     o["freq_offset_hz"] = engine_->ft8FreqOffsetHz();
     o["sync_quality"] = engine_->ft8SyncQuality();
     o["candidate_count"] = engine_->ft8CandidateCount();
+    return o;
+}
+
+QJsonObject ControlHub::cmdSetLrpt(const QJsonObject& a) {
+    QString err;
+    bool on = false;
+    if (!needBool(a, "enabled", on, err)) return errResult(err);
+    engine_->setLrptEnabled(on);
+    QJsonObject o = okBase();
+    o["command"] = "set_lrpt";
+    o["enabled"] = on;
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetLrptStatus(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "get_lrpt_status";
+    o["enabled"] = engine_->lrptEnabled();
+    o["sync_locked"] = engine_->lrptSyncLocked();
+    o["decoded_frames"] = engine_->lrptDecodedFrames();
     return o;
 }
 

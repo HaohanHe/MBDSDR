@@ -114,6 +114,15 @@ public:
     // Speaker-only digital sub-audio gate, independent of detection enable.
     bool   cdcssGateAudio() const { return cdcssGateEnabled_.load(); }
 
+    // ---- LRPT satellite imaging (state layer only, step 3) ---------------
+    // The C++ LRPT demod/FEC port is deferred to step 4; until then this is a
+    // minimal, honest enable + state shell. lrptEnabled() reflects the desired
+    // on/off (the tool/gate reads it). syncLocked()/decodedFrames() stay honest
+    // empty: with no C++ decoder wired they read false / 0 -- never fabricated.
+    bool   lrptEnabled() const { return lrptEnabled_.load(); }
+    bool   lrptSyncLocked() const { return lrptSyncLocked_; }        // decoder not yet ported
+    int    lrptDecodedFrames() const { return lrptDecodedFrames_; }  // decoder not yet ported
+
     // ---- FT8 detection (read-back) --------------------------------------
     // Detection layer only (C++ BP decode deferred to step 4). All read-backs
     // are honest: disabled / no-signal -> ft8Present() == false, never a
@@ -212,6 +221,11 @@ public slots:
     void setCdcssEnabled(bool on);
     void setCdcssCode(int code12);
     void setCdcssGateAudio(bool on);
+    // LRPT satellite imaging enable (state layer, step 3). The C++ demod/FEC
+    // port lands in step 4; this only arms the desired flag so the control plane
+    // can gate on it honestly. Default disabled; sync/frame stats stay honest
+    // empty until the decoder is wired.
+    void setLrptEnabled(bool on);
     // FT8 detection enable. setFt8Enabled(false) clears ft8Last_ so ft8Present()
     // reads back false. Default disabled. Detection layer only (no C++ BP decode).
     void setFt8Enabled(bool on);
@@ -608,6 +622,13 @@ private:
     std::atomic<bool> cdcssEnabled_{false};
     int    cdcssCode_ = 023;                 // octal 023 (default DCS code)
     std::atomic<bool> cdcssGateEnabled_{false};
+
+    // LRPT state layer (step 3). Only the desired-enable flag is wired to the
+    // control plane this round; syncLocked_/decodedFrames_ are honest-empty
+    // placeholders the step-4 C++ decoder will actually drive.
+    std::atomic<bool> lrptEnabled_{false};
+    bool   lrptSyncLocked_ = false;    // C++ decoder not ported yet
+    int    lrptDecodedFrames_ = 0;      // C++ decoder not ported yet
 
     // FT8 detection layer (step 3). ft8Detector_ is fed 12k complex baseband by
     // the run loop when enabled; ft8Last_ holds the honest last candidate.
