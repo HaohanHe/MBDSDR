@@ -638,6 +638,20 @@ void TestControlHttp::postCommandCtcssRoute() {
     QCOMPARE(r.status, 200);
     QVERIFY(!r.obj().value("ok").toBool());
     QCOMPARE(eng.cdcssCode(), 023);
+
+    // FT8 over POST /command (透传, no new route): write lands + reads back honest.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_ft8\",\"args\":{\"enabled\":true}}"));
+    QCOMPARE(r.status, 200);
+    QVERIFY2(r.obj().value("ok").toBool(), r.obj().value("error").toString().toUtf8().constData());
+    QCOMPARE(eng.ft8Enabled(), true);
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"get_ft8_status\",\"args\":{}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject rd3 = r.obj();
+    QVERIFY2(rd3.value("ok").toBool(), rd3.value("error").toString().toUtf8().constData());
+    QCOMPARE(rd3.value("enabled").toBool(), true);
+    QCOMPARE(rd3.value("active").toBool(), false);   // 无信号诚实空态
 }
 
 QTEST_MAIN(TestControlHttp)

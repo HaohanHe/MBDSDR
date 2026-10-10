@@ -938,6 +938,39 @@ QString execGetCdcssStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// 7h. set_ft8 (write): FT8 detection-layer enable. `enabled` REQUIRED boolean.
+//     Detection layer only; C++ BP decode deferred to step 4.
+QString execSetFt8(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                   const SourceInfo& src,
+                   ui::BookmarkManager* /*bookmarks*/) {
+    const QJsonValue en = args.value(QStringLiteral("enabled"));
+    if (!en.isBool())
+        return errResult(QString::fromUtf8("参数 enabled 缺失或不是布尔值"));
+    const bool on = en.toBool();
+    engine->setFt8Enabled(on);
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = on;
+    o["message"] = QString::fromUtf8("FT8 检测层开关已下发（检测层，C++ BP 解码留后续）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// 7i. get_ft8_status (read): honest engine getters. `active` false with no signal.
+QString execGetFt8Status(const QJsonObject&, dsp::SpectrumEngine* engine,
+                         const SourceInfo& src,
+                         ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["enabled"] = engine->ft8Enabled();
+    o["active"] = engine->ft8Present();
+    o["freq_offset_hz"] = engine->ft8FreqOffsetHz();
+    o["sync_quality"] = engine->ft8SyncQuality();
+    o["candidate_count"] = engine->ft8CandidateCount();
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // 8. list_bookmarks (read): BookmarkManager wiring lands on control -> honest empty.
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
                           const SourceInfo& src,
@@ -1522,6 +1555,8 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_ctcss_status", &execGetCtcssStatus},
         {"set_cdcss", &execSetCdcss},
         {"get_cdcss_status", &execGetCdcssStatus},
+        {"set_ft8", &execSetFt8},
+        {"get_ft8_status", &execGetFt8Status},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},
         {"list_bookmarks", &execListBookmarks},

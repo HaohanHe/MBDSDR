@@ -67,6 +67,7 @@ private slots:
     void ctcssLandReadbackOutOfRangeRejectAndGate();
     // --- Phase63 CDCSS/DCS three-channel tool: land / readback / illegal-code reject / gate ---
     void cdcssLandReadbackIllegalCodeRejectAndGate();
+    void ft8LandReadbackHonestEmpty();
     // --- Phase63 readback-loop audit: D-2/D-3/D-5 honest-repair round-trip -----
     void readbackLoopHonestRejectsAndAutoLand();
     // --- Phase63: bookmark tools execute for real against injected store -------
@@ -96,7 +97,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 51);
+    QCOMPARE(tools.size(), 53);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -724,6 +725,8 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         else if (name == "start_scan_link") a["target_freq_hz"] = 100e6;
         else if (name == "set_squelch") { a["enabled"] = true; a["threshold_db"] = -10.0; }
         else if (name == "set_ctcss") { a["enabled"] = true; a["frequency_hz"] = 88.5; }
+        else if (name == "set_cdcss") { a["enabled"] = true; a["code"] = "023"; }
+        else if (name == "set_ft8") a["enabled"] = true;
         else if (name == "set_noise_blanker") a["on"] = true;
         else if (name == "add_bookmark") { a["freq_hz"] = 100e6; a["name"] = "gate_probe"; a["mode"] = "NFM"; }
         else if (name == "tune_to_bookmark") a["index"] = 0;
@@ -771,9 +774,9 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split must be exactly 31 writes / 20 reads.
-    QCOMPARE(writes, 31);
-    QCOMPARE(reads, 20);
+    // The frozen split must be exactly 32 writes / 21 reads.
+    QCOMPARE(writes, 32);
+    QCOMPARE(reads, 21);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -1027,6 +1030,39 @@ void TestAgent::cdcssLandReadbackIllegalCodeRejectAndGate() {
                                                 /*manualMode=*/true);
     QVERIFY2(g.contains("\"gated\":true"), qPrintable(g));
     QVERIFY2(g.contains("\"ok\":false"), qPrintable(g));
+}
+
+void TestAgent::ft8LandReadbackHonestEmpty() {
+    dsp::SpectrumEngine engine;
+
+    QJsonObject off = QJsonDocument::fromJson(
+        ai::executeTool("get_ft8_status", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(off.value("ok").toBool(), qPrintable(
+        ai::executeTool("get_ft8_status", QJsonObject{}, &engine)));
+    QCOMPARE(off.value("enabled").toBool(), false);
+    QCOMPARE(off.value("active").toBool(), false);   // 诚实空态
+
+    QJsonObject on; on["enabled"] = true;
+    QString r = ai::LLMWorker::dispatchToolCall("set_ft8", on, &engine,
+                                               /*manualMode=*/false);
+    QVERIFY2(!r.contains("\"gated\":true"), qPrintable(r));
+    QVERIFY2(engine.ft8Enabled(), "set_ft8{enabled:true} must flip the engine");
+
+    QJsonObject st = QJsonDocument::fromJson(
+        ai::executeTool("get_ft8_status", QJsonObject{}, &engine).toUtf8()).object();
+    QCOMPARE(st.value("enabled").toBool(), true);
+    // 无信号 -> active 仍诚实为 false
+    QCOMPARE(st.value("active").toBool(), false);
+
+    // Missing / non-bool `enabled` -> honest error.
+    QJsonObject miss = QJsonDocument::fromJson(
+        ai::executeTool("set_ft8", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(!miss.value("ok").toBool(), "missing `enabled` must be an error");
+
+    // Manual mode: the write is intercepted, engine untouched.
+    QString g = ai::LLMWorker::dispatchToolCall("set_ft8", on, &engine,
+                                               /*manualMode=*/true);
+    QVERIFY2(g.contains("\"gated\":true"), qPrintable(g));
 }
 
 // Phase63 readback-loop audit: the three write-path honest-repair cases.

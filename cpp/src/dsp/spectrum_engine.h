@@ -17,6 +17,7 @@
 #include "dsp/power_spectrum.h"
 #include "dsp/noise_blanker.h"
 #include "dsp/iq_frontend.h"
+#include "dsp/ft8_detector.h"
 #include "dsp/vfo_manager.h"
 #include "dsp/audio_resampler.h"
 #include "dsp/demod.h"
@@ -111,6 +112,16 @@ public:
     int    cdcssCode() const { return cdcssCode_; }
     // Speaker-only digital sub-audio gate, independent of detection enable.
     bool   cdcssGateAudio() const { return cdcssGateEnabled_.load(); }
+
+    // ---- FT8 detection (read-back) --------------------------------------
+    // Detection layer only (C++ BP decode deferred to step 4). All read-backs
+    // are honest: disabled / no-signal -> ft8Present() == false, never a
+    // fabricated candidate. setFt8Enabled(false) clears stats.
+    bool   ft8Enabled() const { return ft8Enabled_.load(); }
+    bool   ft8Present() const { return ft8Last_.valid; }
+    double ft8FreqOffsetHz() const { return ft8Last_.freqOffsetHz; }
+    double ft8SyncQuality() const { return ft8Last_.syncQuality; }
+    int    ft8CandidateCount() const { return ft8Detector_.lastCandidateCount(); }
     // True iff a network-audio tap is currently installed (setNetworkAudioSink).
     // The detailed stream stats live on the sink the caller installed.
     bool  networkTapActive() const { return networkTap_ != nullptr; }
@@ -189,6 +200,9 @@ public slots:
     void setCdcssEnabled(bool on);
     void setCdcssCode(int code12);
     void setCdcssGateAudio(bool on);
+    // FT8 detection enable. setFt8Enabled(false) clears ft8Last_ so ft8Present()
+    // reads back false. Default disabled. Detection layer only (no C++ BP decode).
+    void setFt8Enabled(bool on);
     void setBandwidth(double hz);
     bool startRecording();
     void stopRecording();
@@ -582,6 +596,12 @@ private:
     std::atomic<bool> cdcssEnabled_{false};
     int    cdcssCode_ = 023;                 // octal 023 (default DCS code)
     std::atomic<bool> cdcssGateEnabled_{false};
+
+    // FT8 detection layer (step 3). ft8Detector_ is fed 12k complex baseband by
+    // the run loop when enabled; ft8Last_ holds the honest last candidate.
+    Ft8Detector ft8Detector_;
+    std::atomic<bool> ft8Enabled_{false};
+    Ft8Candidate ft8Last_;
     AudioOutput* audioOut_ = nullptr;
     // Active 48k write path. Defaults to audioOut_; an injected test sink
     // (setTestAudioSink) redirects it without touching the settings-dialog

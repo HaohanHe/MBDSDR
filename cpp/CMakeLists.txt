@@ -115,6 +115,7 @@ set(SOURCES
     src/dsp/squelch.cpp
     src/dsp/ctcss.cpp
     src/dsp/cdcss.cpp
+    src/dsp/ft8_detector.cc
     src/dsp/agc.cpp
     src/dsp/audio_output.cpp
     src/dsp/qt_audio_sink.cpp
@@ -522,6 +523,12 @@ target_link_libraries(test_control_hub PRIVATE mbdsdr_core)
 target_include_directories(test_control_hub PRIVATE src)
 target_link_libraries(test_control_hub PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia)
 add_test(NAME control_hub COMMAND test_control_hub)
+
+add_executable(test_ft8_detector tests/test_ft8_detector.cpp)
+target_link_libraries(test_ft8_detector PRIVATE mbdsdr_core)
+target_include_directories(test_ft8_detector PRIVATE src)
+target_link_libraries(test_ft8_detector PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME ft8_detector COMMAND test_ft8_detector)
 
 # Phase22-A remote/threading hardening: (1) foreign worker threads hammer
 # execute() concurrently -> the engine dispatch is marshaled to the engine home

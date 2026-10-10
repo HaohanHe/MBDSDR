@@ -68,6 +68,7 @@ private slots:
     void noiseBlankerSetLandAndStatusReadsBack();
     void ctcssSetLandOutOfRangeRejectedAndGate();
     void cdcssSetLandIllegalCodeRejectedAndGate();
+    void ft8SetLandHonestEmpty();
     void vfoListAddSwitchRename();
     void bookmarksPersistToQSettings();
     void recordingsListEmptyThenRealDeleteExport();
@@ -728,6 +729,39 @@ void TestControlHub::cdcssSetLandIllegalCodeRejectedAndGate() {
              qPrintable(QString::fromUtf8("set_cdcss must be gated")));
     QVERIFY(eng.cdcssEnabled());
     QVERIFY(parseObj(hub.execute("get_cdcss_status", {})).value("ok").toBool());
+    hub.setWriteEnabled(true);
+}
+
+// FT8: set_ft8 flips the engine; get_ft8_status reads back honest empty (active
+// false with no signal); missing `enabled` errors; write gate intercepts.
+void TestControlHub::ft8SetLandHonestEmpty() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject s0 = parseObj(hub.execute("get_ft8_status", {}));
+    QVERIFY2(s0.value("ok").toBool(), s0.value("error").toString().toUtf8().constData());
+    QCOMPARE(s0.value("command").toString(), QStringLiteral("get_ft8_status"));
+    QCOMPARE(s0.value("enabled").toBool(), false);
+    QCOMPARE(s0.value("active").toBool(), false);   // 诚实空态
+
+    QJsonObject r = parseObj(hub.execute("set_ft8", {{"enabled", true}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(eng.ft8Enabled(), true);
+
+    QJsonObject s = parseObj(hub.execute("get_ft8_status", {}));
+    QCOMPARE(s.value("enabled").toBool(), true);
+    QCOMPARE(s.value("active").toBool(), false);   // 无信号不编造
+
+    // Missing required `enabled` -> honest ok:false.
+    QCOMPARE(parseObj(hub.execute("set_ft8", {})).value("ok").toBool(), false);
+
+    // Write gate closed: set_ft8 refused, engine untouched; read stays open.
+    hub.setWriteEnabled(false);
+    QJsonObject g = parseObj(hub.execute("set_ft8", {{"enabled", false}}));
+    QVERIFY2(!g.value("ok").toBool() && g.value("gated").toBool(),
+             qPrintable(QString::fromUtf8("set_ft8 must be gated")));
+    QVERIFY(eng.ft8Enabled());
     hub.setWriteEnabled(true);
 }
 
