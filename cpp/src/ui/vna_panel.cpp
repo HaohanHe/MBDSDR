@@ -235,9 +235,11 @@ VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
     s21Plot_ = new VnaTraceWidget(QString::fromUtf8("S21 增益 dB"), this);
     smithPlot_ = new VnaSmithWidget(QString::fromUtf8("Smith / Polar (S11)"), this);
     gdPlot_ = new VnaTraceWidget(QString::fromUtf8("群延迟 s"), this);
+    muPlot_ = new VnaTraceWidget(QString::fromUtf8("磁导率 μr' vs f"), this);
     lay->addWidget(s11Plot_, 1);
     lay->addWidget(s21Plot_, 1);
     lay->addWidget(gdPlot_, 1);
+    lay->addWidget(muPlot_, 1);
     lay->addWidget(smithPlot_, 1);
 
     readoutLabel_ = new QLabel(vnaReadoutText(std::nan(""), 0, std::nan("")), this);
@@ -324,14 +326,19 @@ void VnaPanel::applyReadout(const std::vector<long>& freqs,
     double thickMm = thickEdit_->text().toDouble(&okmm);
     if (!okmm || thickMm <= 0.0) {
         muLabel_->setText(QString::fromUtf8("μr: 输入夹具厚度以计算"));
+        muPlot_->clear();
     } else {
         vna::PermeabilityResult pr = vna::permeabilityNRW(fHz, s11, s21, thickMm * 1e-3);
         if (!pr.valid || pr.mu_real.empty() || !std::isfinite(pr.mu_real[pr.mu_real.size()/2])) {
             muLabel_->setText(QString::fromUtf8("μr: 数据不足/病态，无法计算"));
+            muPlot_->clear();
         } else {
             size_t mid = pr.mu_real.size() / 2;
             muLabel_->setText(QString::fromUtf8("μr'=%1  μr''=%2")
                 .arg(pr.mu_real[mid], 0, 'f', 2).arg(pr.mu_imag[mid], 0, 'f', 3));
+            std::vector<double> mur;
+            for (double v : pr.mu_real) mur.push_back(std::isfinite(v) ? v : 0.0);
+            muPlot_->setData(mur);
         }
     }
 }

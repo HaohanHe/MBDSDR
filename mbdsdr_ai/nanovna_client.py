@@ -399,6 +399,11 @@ class NanoVNAClient:
             )
         self._exec(f"bandwidth {bw_khz}")
 
+    def read_cal_status(self) -> List[str]:
+        """读校准状态（'cal' 命令输出，如 open/short/load/thru 是否已置位）。"""
+        self.cal_status = self._exec("cal")
+        return self.cal_status
+
     def read_frequencies(self) -> List[int]:
         """读频点表（Hz，整数）。"""
         out: List[int] = []

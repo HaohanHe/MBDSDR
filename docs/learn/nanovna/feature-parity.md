@@ -191,3 +191,27 @@ mobile 64 / phase31 头部 64。
 
 ## 快照三档（MBD_VNASHOT=1 + MBD_TAB=VNA）
 1920：夹具厚输入行 + μr 引导 + Smith 网格弧 + S11 轨迹，0 裁切 0 叠字。
+
+---
+
+# 第⑧批：工具面复查 + TDR 峰分离 + μ-vs-f 曲线（HEAD=d9522f7）
+
+## 工具面复查（只读）
+64 工具三通道一致：registry 8 / schema 10 / agent 38（读28写36）/ control_hub 34 / ai_real_link 17，全 0 failed。
+写工具手动 gate：set_vna_sweep/vna_tdr_cable/export_vna_snapshot/set_cdcss 在写表（true）注册。mobile 64 / phase31 头部 64。无计数缺口。
+
+## TDR 峰分离钉扎（test_vna_rf tdrPeakSeparation）
+合成双峰（20ns vs 150ns 往返）：最强峰距离 ~1.98m，容差 ±40% + 2m（诚实标注直接 IDFT 分辨率粗，多峰数组 best-effort）。
+
+## 磁导率 μ-vs-f 曲线（vna_panel.{h,cpp} muPlot_）
+新增「磁导率 μr' vs f」VnaTraceWidget；有厚度输入时画 μr' vs f，无厚度诚实空态（空白 caption）。
+
+## 频段 UI 快照
+bandCombo 在 main_window（SDR 域归线 A），本轮不碰 main_window，无种子注入缝→诚实未拍频段三档快照。
+
+## 计数（offscreen 真实 passed）
+- test_vna_rf **19 passed**（+tdrPeakSeparation）。
+- 金集不变（本批不加工具）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
+
+## 快照三档（MBD_VNASHOT=1 + MBD_TAB=VNA）
+1920：磁导率 μr' vs f 空态框 + μr 引导 + Smith 网格弧 + S11 轨迹，0 裁切 0 叠字。
