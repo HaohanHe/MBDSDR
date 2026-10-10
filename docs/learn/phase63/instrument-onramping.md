@@ -65,9 +65,20 @@
 诚实空态贯穿：未连接/未校准/无效分析（点数不足、span=0、无反射峰）均给真实引导，不伪造。
 测试：`test_vna_onramp` 15 passed；`test_agent` 38 passed 无回归。
 
-## 7. 本批未做（诚实标注）
+## 7. 未做（诚实标注）
 
-- VNA tab 数值读数区与三档新快照：线 B 并行改 vna_panel.*，为避免同树冲突本批未动 UI，
-  下一批 localCommand 稳定后再接。
 - Smith/Polar/滤波器一句话意图与曲线：待 analyze_vna_filter 交付后下轮。
 - 真机未在环，待用户插 H/H4 回传。
+
+## 8. 第③批：VNA tab 数值读数区 + 快照 + 数值钉扎
+
+- 读数区：`vna_panel.{h,cpp}` 新增 `analysisLabel_`；`applyReadout` 在真实扫频上跑
+  `vna::analyzeResonance(freqs,s11)`，经纯函数 `vnaAnalysisText`（vna_panel_format.cpp）
+  显示 fr/Q/BW/ESR；无效（点数不足/span=0）诚实显示 "--"，不伪造。
+- 快照：MBD_VNASHOT（MBD_TAB=VNA）三档 OCR——1920 完整显示
+  "谐振 fr 14.0500 MHz · Q 0.5 · BW 2900000 Hz · ESR 67.65 Ω"，0 裁切 0 叠字；
+  960 清晰；640 触最小宽 floor，文本换行/右侧略溢出（诚实标注，不崩）。
+- 数值钉扎：`test_vna_onramp resonanceRlcTheoryPin`——已知串联 RLC（L=1µH,C=1pF,Rs=10Ω）
+  理论 fr≈159.15 MHz，实测 fr 在 ±0.5 MHz 内、ESR≈10Ω±2Ω。
+- 测试：test_vna_onramp 16 passed（含数值钉扎）；test_vna_panel_format 7 passed。
+- 注：execGetVnaData 现同时读 s21（data 1），回放脚本已对齐。

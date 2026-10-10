@@ -11,8 +11,10 @@
 #include "ai/vna_onramp.h"
 #include "ai/agent_tools.h"
 #include "vna/nanovna_client.h"
+#include "vna/vna_rf.h"
 #include "dsp/spectrum_engine.h"
 
+#include <cmath>
 #include <complex>
 #include <memory>
 #include <vector>
@@ -71,6 +73,7 @@ std::vector<ReplayTransport::Step> calibratedScript(double targetGamma) {
         {"sweep 438000000 439000000 101", {}},
         {"frequencies", freqs},
         {"data 0", data0},
+        {"data 1", {}},
     };
 }
 
@@ -92,6 +95,7 @@ private slots:
     void cableVfTable();
     void tdrNoTypeListsOptions();
     void resonanceNoNominalAsks();
+    void resonanceRlcTheoryPin();
 };
 
 void TestVnaOnramp::parseTarget() {
@@ -205,6 +209,26 @@ void TestVnaOnramp::resonanceNoNominalAsks() {
     engine.vnaClient().attachTransport(std::make_unique<ReplayTransport>(std::move(script)));
     QString out = ai::runVswrOnramp(&engine, QString::fromUtf8("晶体谐振频率Q多少"));
     QVERIFY(out.contains(QString::fromUtf8("标称频率")));
+}
+
+void TestVnaOnramp::resonanceRlcTheoryPin() {
+    // 已知串联 RLC：L=1uH, C=1pF, Rs=10Ω -> 理论 fr = 1/(2π√(LC)) ≈ 159.15 MHz。
+    const double L = 1e-6, C = 1e-12, Rs = 10.0, Z0 = 50.0;
+    const double frTheory = 1.0 / (2 * M_PI * std::sqrt(L * C));
+    std::vector<double> f; std::vector<std::complex<double>> s11;
+    for (int i = 0; i < 401; ++i) {
+        double fHz = 140e6 + (180e6 - 140e6) * i / 400.0;
+        double xs = 2 * M_PI * fHz * L - 1.0 / (2 * M_PI * fHz * C);
+        std::complex<double> z(Rs, xs);
+        f.push_back(fHz);
+        s11.push_back((z - Z0) / (z + Z0));
+    }
+    vna::ResonanceResult r = vna::analyzeResonance(f, s11);
+    QVERIFY(r.valid);
+    // 钉扎：测得串联谐振在理论值 ±0.5 MHz 内。
+    QVERIFY(std::abs(r.series_fr_hz - frTheory) < 0.5e6);
+    // ESR 应接近 Rs=10Ω（容差 ±2Ω）。
+    QVERIFY(std::abs(r.esr - Rs) < 2.0);
 }
 
 QTEST_MAIN(TestVnaOnramp)

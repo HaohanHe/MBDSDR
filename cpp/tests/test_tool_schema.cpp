@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 60);
+    QCOMPARE(specs.size(), 61);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -279,6 +279,10 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "写入：对当前扫频 S11 做 TDR 时域反射（velocity_factor 速度因子，0<vf<=1，必填），"
             "返回首反射峰距离与电缆长度。属于写动作，手动模式下被拦截。无设备/无峰时 valid 诚实为 false。")},
+        {"analyze_vna_filter",
+         QString::fromUtf8(
+            "只读：对当前扫频 S21 幅度做滤波器分析（自动识别 bandpass/bandstop/highpass/lowpass，"
+            "输出 -3dB 截止边、带宽、通带插损、阻带衰减）。无设备/幅度平坦非滤波器形态时 valid 诚实为 false。")},
         {"set_noise_blanker",
          QString::fromUtf8(
             "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。")},
@@ -429,7 +433,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 60);
+    QCOMPARE(headerCount, 61);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

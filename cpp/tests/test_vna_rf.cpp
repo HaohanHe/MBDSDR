@@ -20,6 +20,8 @@ private slots:
     void reactanceToLC();
     void resonancePinchesSyntheticTank();
     void tdrFindsSyntheticCable();
+    void smithPolarKnownPoint();
+    void filterDetectsBandpass();
     void honestEmpty();
 };
 
@@ -82,6 +84,34 @@ void TestVnaRf::honestEmpty() {
     TdrResult t = tdrCable({}, {}, 0.66, 50.0);
     QVERIFY(!t.valid);
     QCOMPARE(coaxLossDbPerM({1}, {{1, 0}}, 1.0, 0.66), 0.0);
+    // flat trace -> not a filter
+    FilterResult flat = analyzeFilter({1e6, 2e6, 3e6, 4e6}, {0, 0, 0, 0});
+    QVERIFY(!flat.valid);
+}
+
+// Smith: g=0.5 real -> z=(1+0.5)/(1-0.5)=3. Polar: (1,0)->(1,0).
+void TestVnaRf::smithPolarKnownPoint() {
+    auto z = smithNormalizedZ({0.5, 0.0}, 50.0);
+    QCOMPARE(z.real(), 3.0);
+    QCOMPARE(z.imag(), 0.0);
+    PolarXY p = polarToXY({1.0, 0.0});
+    QCOMPARE(p.x, 1.0); QCOMPARE(p.y, 0.0);
+}
+
+// Synthetic band-pass: 0 dB in [20-30 MHz], -40 dB outside, sharp edges.
+void TestVnaRf::filterDetectsBandpass() {
+    std::vector<double> f, db;
+    for (int i = 0; i < 101; ++i) {
+        double fr = 0e6 + 50e6 * i / 100.0;
+        double v = (fr >= 20e6 && fr <= 30e6) ? 0.0 : -40.0;
+        f.push_back(fr); db.push_back(v);
+    }
+    FilterResult r = analyzeFilter(f, db);
+    QVERIFY(r.valid);
+    QCOMPARE(r.type, std::string("bandpass"));
+    QVERIFY(std::abs(r.f_low_hz - 20e6) < 1e6);
+    QVERIFY(std::abs(r.f_high_hz - 30e6) < 1e6);
+    QVERIFY(std::abs(r.stopband_atten_db - 40.0) < 1.0);
 }
 
 QTEST_MAIN(TestVnaRf)

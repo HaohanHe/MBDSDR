@@ -155,5 +155,64 @@ double coaxLossDbPerM(const std::vector<double>& f_hz,
     return -db / distance_m;
 }
 
+// ---- Smith / Polar --------------------------------------------------------
+std::complex<double> smithNormalizedZ(std::complex<double> s11, double z0) {
+    (void)z0; // normalized already: z_norm = (1+g)/(1-g)
+    std::complex<double> d = 1.0 - s11;
+    if (d == std::complex<double>(0, 0))
+        return {std::numeric_limits<double>::infinity(),
+                std::numeric_limits<double>::infinity()};
+    return (1.0 + s11) / d;
+}
+
+PolarXY polarToXY(std::complex<double> s) {
+    double m = std::abs(s);
+    double ph = std::arg(s);
+    return {m * std::cos(ph), m * std::sin(ph)};
+}
+
+// ---- Filter analysis ------------------------------------------------------
+// Strategy: take |S21| dB. The "passband" level = the most common (mode) level.
+// Find where the trace drops 3 dB below that. Classify by which side(s) roll off.
+FilterResult analyzeFilter(const std::vector<double>& f_hz,
+                           const std::vector<double>& s21_db) {
+    FilterResult out;
+    int n = (int)std::min(f_hz.size(), s21_db.size());
+    if (n < 4) return out;
+    double span = f_hz.back() - f_hz.front();
+    if (span <= 0.0) return out;
+
+    double mn = *std::min_element(s21_db.begin(), s21_db.end());
+    double mx = *std::max_element(s21_db.begin(), s21_db.end());
+    // Flat trace (not a filter): <6 dB peak-to-peak -> honest not-detected.
+    if (mx - mn < 6.0) return out;
+
+    // Passband reference = max level (lowest loss); stopband = min.
+    out.passband_db = mx;
+    out.stopband_atten_db = -(mn - mx);   // positive dB attenuation
+    double edge = mx - 3.0;               // -3 dB level
+
+    // Walk out from the band of max level to find -3 dB crossings.
+    int iMax = (int)(std::max_element(s21_db.begin(), s21_db.end()) - s21_db.begin());
+    int lo = iMax, hi = iMax;
+    while (lo > 0 && s21_db[lo] > edge) --lo;
+    while (hi < n - 1 && s21_db[hi] > edge) ++hi;
+    out.f_low_hz = f_hz[lo];
+    out.f_high_hz = f_hz[hi];
+    out.bandwidth_hz = f_hz[hi] - f_hz[lo];
+
+    // Classify by where the high/low attenuation sits.
+    double lowEdgeDb = s21_db[0];
+    double highEdgeDb = s21_db[n - 1];
+    bool lowIsStop  = (lowEdgeDb  < edge);  // low-f side attenuated
+    bool highIsStop = (highEdgeDb < edge);  // high-f side attenuated
+    if (lowIsStop && highIsStop)      out.type = "bandpass";
+    else if (!lowIsStop && !highIsStop) out.type = "bandstop";  // pass on both outer edges
+    else if (lowIsStop && !highIsStop) out.type = "highpass";
+    else                              out.type = "lowpass";
+    out.valid = true;
+    return out;
+}
+
 } // namespace vna
 } // namespace mbdsdr
