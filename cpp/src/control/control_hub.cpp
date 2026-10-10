@@ -116,6 +116,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"set_cdcss",             true,  &ControlHub::cmdSetCdcss},
         {"set_ft8",               true,  &ControlHub::cmdSetFt8},
         {"set_lrpt",              true,  &ControlHub::cmdSetLrpt},
+        {"set_vna_sweep",         true,  &ControlHub::cmdSetVnaSweep},
         {"set_noise_blanker",     true,  &ControlHub::cmdSetNoiseBlanker},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
@@ -156,6 +157,8 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_cdcss_status",      false, &ControlHub::cmdGetCdcssStatus},
         {"get_ft8_status",        false, &ControlHub::cmdGetFt8Status},
         {"get_lrpt_status",       false, &ControlHub::cmdGetLrptStatus},
+        {"get_vna_data",          false, &ControlHub::cmdGetVnaData},
+        {"get_vna_status",        false, &ControlHub::cmdGetVnaStatus},
         {"get_noise_blanker_status", false, &ControlHub::cmdGetNoiseBlankerStatus},
         {"list_bookmarks",        false, &ControlHub::cmdListBookmarks},
         {"list_vfos",             false, &ControlHub::cmdListVfos},
@@ -1481,6 +1484,70 @@ QJsonObject ControlHub::cmdGetLrptStatus(const QJsonObject&) {
     o["enabled"] = engine_->lrptEnabled();
     o["sync_locked"] = engine_->lrptSyncLocked();
     o["decoded_frames"] = engine_->lrptDecodedFrames();
+    return o;
+}
+
+// NanoVNA step-2: program a sweep. Params validated honestly; with no device the
+// sweep is not sent (applied=false) but the validated values are echoed.
+QJsonObject ControlHub::cmdSetVnaSweep(const QJsonObject& a) {
+    QString err;
+    int start = 0, stop = 0, points = 0;
+    if (!needInt(a, "start_hz", start, err)) return errResult(err);
+    if (!needInt(a, "stop_hz", stop, err)) return errResult(err);
+    if (!needInt(a, "points", points, err)) return errResult(err);
+    if (stop <= start) return errResult(QStringLiteral("stop_hz 必须大于 start_hz"));
+    if (points <= 0)  return errResult(QStringLiteral("points 必须为正整数"));
+
+    QJsonObject o = okBase();
+    o["command"] = "set_vna_sweep";
+    auto& vna = engine_->vnaClient();
+    if (!vna.isConnected()) {
+        o["connected"] = false;
+        o["applied"] = false;
+        o["start_hz"] = start; o["stop_hz"] = stop; o["points"] = points;
+        o["note"] = QStringLiteral("未连接 NanoVNA：参数已校验但未下发");
+        return o;
+    }
+    QString verr;
+    bool ok = vna.setSweep(start, stop, points, &verr);
+    o["connected"] = true; o["applied"] = ok;
+    if (ok) { o["start_hz"] = start; o["stop_hz"] = stop; o["points"] = points; }
+    else    o["error"] = verr;
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetVnaData(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "get_vna_data";
+    auto& vna = engine_->vnaClient();
+    o["connected"] = vna.isConnected();
+    QJsonArray freqs, re, im;
+    if (vna.isConnected()) {
+        auto f = vna.readFrequencies();
+        auto s11 = vna.readData(0);
+        for (size_t i = 0; i < s11.size(); ++i) {
+            if (i < f.size()) freqs.append((double)f[i]);
+            re.append(s11[i].real()); im.append(s11[i].imag());
+        }
+    }
+    o["frequencies"] = freqs; o["s11_re"] = re; o["s11_im"] = im;
+    if (!vna.isConnected()) o["note"] = QStringLiteral("未连接 NanoVNA：数组为空");
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetVnaStatus(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "get_vna_status";
+    auto& vna = engine_->vnaClient();
+    o["connected"] = vna.isConnected();
+    o["model"] = vna.model();
+    o["version"] = vna.version();
+    o["cal"] = QJsonArray::fromStringList(vna.calStatus());
+    o["has_sweep"] = vna.hasSweep();
+    o["start_hz"] = (double)vna.sweepStartHz();
+    o["stop_hz"] = (double)vna.sweepStopHz();
+    o["points"] = vna.sweepPoints();
+    if (!vna.isConnected()) o["note"] = QStringLiteral("未连接 NanoVNA：状态字段为空");
     return o;
 }
 

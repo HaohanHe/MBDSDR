@@ -1006,6 +1006,107 @@ QString execGetLrptStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// ---- NanoVNA step-2 -------------------------------------------------------
+// set_vna_sweep (write, gated): validate start/stop/points, then hand to the
+// client. With no device attached the params are still validated (honest
+// ok:false on bad input) but the command is not sent -- applied=false.
+QString execSetVnaSweep(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                        const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
+    const QJsonValue a = args.value(QStringLiteral("start_hz"));
+    const QJsonValue b = args.value(QStringLiteral("stop_hz"));
+    const QJsonValue p = args.value(QStringLiteral("points"));
+    if (!a.isDouble() || !b.isDouble() || !p.isDouble())
+        return errResult(QString::fromUtf8("参数 start_hz/stop_hz/points 缺失或不是数字"));
+    const long start = (long)a.toDouble();
+    const long stop  = (long)b.toDouble();
+    const int points = (int)p.toDouble();
+    if (stop <= start)
+        return errResult(QString::fromUtf8("stop_hz 必须大于 start_hz"));
+    if (points <= 0)
+        return errResult(QString::fromUtf8("points 必须为正整数"));
+
+    QJsonObject o;
+    auto& vna = engine->vnaClient();
+    if (!vna.isConnected()) {
+        o["ok"] = true;
+        o["connected"] = false;
+        o["applied"] = false;
+        o["start_hz"] = (double)start; o["stop_hz"] = (double)stop; o["points"] = points;
+        o["message"] = QString::fromUtf8("未连接 NanoVNA：参数已校验但未下发");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    QString err;
+    bool ok = vna.setSweep(start, stop, points, &err);
+    o["ok"] = ok;
+    o["connected"] = true;
+    o["applied"] = ok;
+    if (ok) { o["start_hz"] = (double)start; o["stop_hz"] = (double)stop; o["points"] = points; }
+    else    o["error"] = err;
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// get_vna_data (read): frequencies + S11/S21 complex pairs + derived VSWR/RL/
+// impedance. Empty arrays when no device / no data -- never fabricated.
+QString execGetVnaData(const QJsonObject&, dsp::SpectrumEngine* engine,
+                        const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    o["ok"] = true;
+    auto& vna = engine->vnaClient();
+    o["connected"] = vna.isConnected();
+
+    QJsonArray freqs, s11re, s11im, vswrArr, rlArr, zRe, zIm;
+    if (vna.isConnected()) {
+        auto f = vna.readFrequencies();
+        auto s11 = vna.readData(0);
+        for (size_t i = 0; i < s11.size(); ++i) {
+            const std::complex<double>& g = s11[i];
+            if (i < f.size()) freqs.append((double)f[i]);
+            s11re.append(g.real()); s11im.append(g.imag());
+            double rl = vna::returnLossDb(g);
+            double sw = vna::vswr(g);
+            auto z = vna::s11ToImpedance(g);
+            auto finite = [](double x){ return std::isfinite(x) ? x : 0.0; };
+            rlArr.append(finite(rl));
+            vswrArr.append(finite(sw));
+            zRe.append(finite(z.real())); zIm.append(finite(z.imag()));
+        }
+    }
+    o["frequencies"] = freqs;
+    o["s11_re"] = s11re; o["s11_im"] = s11im;
+    o["vswr"] = vswrArr; o["return_loss_db"] = rlArr;
+    o["z_real"] = zRe; o["z_imag"] = zIm;
+    if (!vna.isConnected())
+        o["note"] = QString::fromUtf8("未连接 NanoVNA：测量数组为空");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// get_vna_status (read): connected / model / version / cal / current sweep.
+QString execGetVnaStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
+                          const SourceInfo& src,
+                          ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    o["ok"] = true;
+    auto& vna = engine->vnaClient();
+    o["connected"] = vna.isConnected();
+    o["model"] = vna.model();
+    o["version"] = vna.version();
+    o["cal"] = QJsonArray::fromStringList(vna.calStatus());
+    o["has_sweep"] = vna.hasSweep();
+    o["start_hz"] = (double)vna.sweepStartHz();
+    o["stop_hz"] = (double)vna.sweepStopHz();
+    o["points"] = vna.sweepPoints();
+    if (!vna.isConnected())
+        o["note"] = QString::fromUtf8("未连接 NanoVNA：状态字段为空");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+
 // 8. list_bookmarks (read): BookmarkManager wiring lands on control -> honest empty.
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
                           const SourceInfo& src,
@@ -1594,6 +1695,9 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_ft8_status", &execGetFt8Status},
         {"set_lrpt", &execSetLrpt},
         {"get_lrpt_status", &execGetLrptStatus},
+        {"set_vna_sweep", &execSetVnaSweep},
+        {"get_vna_data", &execGetVnaData},
+        {"get_vna_status", &execGetVnaStatus},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},
         {"list_bookmarks", &execListBookmarks},

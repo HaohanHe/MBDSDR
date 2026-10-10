@@ -98,7 +98,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 55);
+    QCOMPARE(tools.size(), 58);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -776,8 +776,8 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
     }
 
     // The frozen split must be exactly 33 writes / 22 reads.
-    QCOMPARE(writes, 33);
-    QCOMPARE(reads, 22);
+    QCOMPARE(writes, 34);
+    QCOMPARE(reads, 24);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/

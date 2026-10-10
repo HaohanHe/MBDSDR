@@ -112,6 +112,8 @@ set(SOURCES
     src/ui/m17_panel.cpp
     src/ui/vor_panel.cpp
     src/ui/data_text_panel.cpp
+    src/ui/vna_panel.cpp
+    src/ui/vna_panel_format.cpp
     src/dsp/squelch.cpp
     src/dsp/ctcss.cpp
     src/dsp/cdcss.cpp
@@ -141,6 +143,7 @@ set(SOURCES
     src/gnss/stream_transport.cpp
     src/gnss/nmea_parser.cpp
     src/gnss/gnss_receiver.cpp
+    src/vna/nanovna_client.cpp
     src/ui/elevation_plot.cpp
     src/ui/map_projection.cpp
     src/ai/llm_client.cpp
@@ -223,6 +226,7 @@ set(HEADERS
     src/ui/rssi_trend.h
     src/gnss/gnss_types.h
     src/gnss/i_transport.h
+    src/vna/nanovna_client.h
     src/gnss/serial_transport.h
     src/gnss/stream_transport.h
     src/gnss/nmea_parser.h
@@ -553,6 +557,13 @@ target_include_directories(test_lrpt_cpp PRIVATE src)
 target_compile_definitions(test_lrpt_cpp PRIVATE SRCDIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
 target_link_libraries(test_lrpt_cpp PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME lrpt_cpp COMMAND test_lrpt_cpp)
+
+# NanoVNA step-2: clean-room client + RF math over a self-made scripted replay.
+add_executable(test_nanovna_client tests/test_nanovna_client.cpp)
+target_link_libraries(test_nanovna_client PRIVATE mbdsdr_core)
+target_include_directories(test_nanovna_client PRIVATE src)
+target_link_libraries(test_nanovna_client PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME nanovna_client COMMAND test_nanovna_client)
 
 # Phase22-A remote/threading hardening: (1) foreign worker threads hammer
 # execute() concurrently -> the engine dispatch is marshaled to the engine home
@@ -1589,6 +1600,12 @@ target_link_libraries(test_status_format PRIVATE mbdsdr_core)
 target_include_directories(test_status_format PRIVATE src)
 target_link_libraries(test_status_format PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME status_format COMMAND test_status_format)
+
+add_executable(test_vna_panel_format tests/test_vna_panel_format.cpp)
+target_link_libraries(test_vna_panel_format PRIVATE mbdsdr_core)
+target_include_directories(test_vna_panel_format PRIVATE src)
+target_link_libraries(test_vna_panel_format PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME vna_panel_format COMMAND test_vna_panel_format)
 
 # ---- P3 (phase9): Spacetime-view state->text/role formatters (header-only) ----
 # Pure mapping, no QApplication: honest empty states + the system-never->GNSS rule.

@@ -119,6 +119,7 @@
 #include "ui/m17_panel.h"
 #include "ui/vor_panel.h"
 #include "ui/data_text_panel.h"
+#include "ui/vna_panel.h"
 
 namespace mbdsdr {
 
@@ -2359,6 +2360,10 @@ MainWindow::MainWindow(QWidget* parent)
 
     // Radio / transmit panel: serial CAT, CW, AX.25/KISS, SoapySDR TX.
     rightTabs_->addTab(new ui::RadioPanel(rightCard), "电台");
+
+    // Instrument: external NanoVNA (H/H4) over USB CDC serial. Honest empty
+    // state when no device; shares engine_->vnaClient() with the MCP tools.
+    rightTabs_->addTab(new ui::VnaPanel(engine_, rightCard), "VNA");
 
     // ---- Phase63: closable right-rail panel tabs ---------------------------
     // SDR++ module show/hide, lightweight equivalent: the user can close panel
