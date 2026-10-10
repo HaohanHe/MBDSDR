@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 63);
+    QCOMPARE(specs.size(), 64);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -291,6 +291,10 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "写入：把当前 NanoVNA 扫频（Smith 轨迹）离屏渲染为 PNG 存到 path。属于写动作，手动模式下被拦截。"
             "未连接/无数据时 ok:false 诚实拒绝。")},
+        {"analyze_vna_match",
+         QString::fromUtf8(
+            "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回 EFHW/反 L 匹配网络的 L/C 建议（Q、串联/并联臂值）。"
+            "负载电阻需 >50Ω；否则 valid 诚实为 false。")},
         {"set_noise_blanker",
          QString::fromUtf8(
             "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。")},
@@ -441,7 +445,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 63);
+    QCOMPARE(headerCount, 64);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

@@ -141,3 +141,28 @@ round-trip 钉扎：写→读频率/S11/S21 一致。
 
 ## 快照三档（MBD_VNASHOT=1 + MBD_TAB=VNA）
 1920：S11 VSWR/S21/群延迟/Smith 四图堆叠干净，0 裁切 0 叠字。
+
+---
+
+# 第⑥批：Smith R/X 网格弧 + 滤波器四形态 + EFHW 工具 + TDR 误差带（HEAD=b38d238）
+
+## Smith R/X 网格弧（vna_panel.cpp VnaSmithWidget）
+常 R 圆族（r=0.2/0.5/1/2/5）+ 常 X 弧族（x=±0.2/±0.5/±1/±2），QPainter 自绘零依赖，半透明网格。
+
+## 滤波器四形态数值钉扎（test_vna_rf）
+lowpass/hipass 合成响应数值断言（截止边 <2MHz）；bandpass 已有（上轮）；bandstop 靠外沿通带推断。
+
+## efhwMatch + analyze_vna_match（vna_rf + 三通道，63→64）
+`efhwMatch(z_load,f,r0)`：反 L 拓扑（负载高阻→50），已知点 load 2000Ω→50@3.5MHz，Q=6.245，shunt L≈14.6µH。
+`analyze_vna_match`（read）三通道一处不漏。
+
+## TDR 误差带（test_vna_rf tdrToleranceBand）
+合成 50ns 往返反射钉扎：期望 ~4.95m，容差 ±50% + 1.5m（诚实标注 O(N²) 直接 IDFT + 平坦窗分辨率粗）。
+
+## 计数（offscreen 真实 passed）
+- test_vna_rf **16 passed**（+efhwMatchKnownPoint +filterFourShapesNumerical +tdrToleranceBand）。
+- registry 8 / schema 10 / agent 38（读 28）/ control_hub 34 / ai_real_link 17，全 0 failed。
+- mobile 63→64；phase31 头部 64 + 手工补 1 段。
+
+## 快照三档（MBD_VNASHOT=1 + MBD_TAB=VNA）
+1920：Smith 图 R/X 网格弧 + S11 轨迹 + 黄尾点完整，0 裁切 0 叠字。

@@ -168,6 +168,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"analyze_vna_resonance", false, &ControlHub::cmdAnalyzeVnaResonance},
         {"analyze_vna_filter",    false, &ControlHub::cmdAnalyzeVnaFilter},
         {"analyze_vna_touchstone", false, &ControlHub::cmdAnalyzeVnaTouchstone},
+        {"analyze_vna_match",    false, &ControlHub::cmdAnalyzeVnaMatch},
         {"get_noise_blanker_status", false, &ControlHub::cmdGetNoiseBlankerStatus},
         {"list_bookmarks",        false, &ControlHub::cmdListBookmarks},
         {"list_vfos",             false, &ControlHub::cmdListVfos},
@@ -1673,6 +1674,27 @@ QJsonObject ControlHub::cmdExportVnaSnapshot(const QJsonObject& a) {
     if (!img.save(path, "PNG")) { o["ok"] = false; o["note"] = QStringLiteral("写 PNG 失败"); return o; }
     o["path"] = path;
     o["points"] = (int)s11.size();
+    return o;
+}
+
+QJsonObject ControlHub::cmdAnalyzeVnaMatch(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "analyze_vna_match";
+    double r = a.value("load_r").toDouble(std::nan(""));
+    double x = a.value("load_x").toDouble(0.0);
+    double f = a.value("f_hz").toDouble(std::nan(""));
+    if (!std::isfinite(r) || !std::isfinite(f) || r <= 0.0 || f <= 0.0) {
+        o["valid"] = false; o["note"] = QStringLiteral("需要 load_r(>0) 与 f_hz(>0)"); return o;
+    }
+    vna::LMatchResult m = vna::efhwMatch({r, x}, f, 50.0);
+    o["valid"] = m.valid;
+    o["q"] = m.q;
+    o["series_henry"] = m.series_henry;
+    o["series_farad"] = m.series_farad;
+    o["shunt_henry"] = m.shunt_henry;
+    o["shunt_farad"] = m.shunt_farad;
+    o["topology"] = QString::fromStdString(m.topology);
+    if (!m.valid) o["note"] = QStringLiteral("负载电阻需 > 50Ω");
     return o;
 }
 

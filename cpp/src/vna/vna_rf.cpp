@@ -237,7 +237,29 @@ LMatchResult lMatchNetwork(std::complex<double> z_load, double f_hz, double r0) 
     return out;
 }
 
-// ---- Touchstone -----------------------------------------------------------
+// ---- EFHW matching (inverse L, load R >> R0) ------------------------------
+LMatchResult efhwMatch(std::complex<double> z_load, double f_hz, double r0) {
+    LMatchResult out;
+    double R = z_load.real();
+    double X = z_load.imag();
+    if (R <= 0.0 || f_hz <= 0.0 || r0 <= 0.0) return out;
+    if (R <= r0) return out;   // EFHW canonical assumes load R > R0
+    double q2 = R / r0 - 1.0;
+    if (q2 <= 0.0) return out;
+    double q = std::sqrt(q2);
+    out.q = q;
+    double Xp = R / q;         // shunt reactance on the load (high-Z) side
+    double Xs = q * r0 - X;    // series reactance on the source (50) side
+    const double w = kTwoPi * f_hz;
+    if (Xp >= 0.0) out.shunt_henry = Xp / w;
+    else           out.shunt_farad = -1.0 / (w * Xp);
+    if (Xs >= 0.0) { out.series_henry = Xs / w; out.topology = "series_L"; }
+    else           { out.series_farad = -1.0 / (w * Xs); out.topology = "series_C"; }
+    out.valid = true;
+    return out;
+}
+
+
 #include <cstdio>
 #include <sstream>
 

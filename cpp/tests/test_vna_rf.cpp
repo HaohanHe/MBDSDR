@@ -26,6 +26,9 @@ private slots:
     void touchstoneRoundTrip();
     void groupDelayKnownSlope();
     void permeabRunsOnSynthetic();
+    void efhwMatchKnownPoint();
+    void filterFourShapesNumerical();
+    void tdrToleranceBand();
     void honestEmpty();
 };
 
@@ -174,6 +177,67 @@ void TestVnaRf::permeabRunsOnSynthetic() {
     PermeabilityResult r = permeabilityNRW(f, s11, s21, 0.001);
     QVERIFY(r.valid);
     QCOMPARE(r.mu_real.size(), size_t(6));
+}
+
+// EFHW: load 2000 Ohm -> 50 at 3.5 MHz. Q = sqrt(2000/50 -1)=sqrt(39)=6.245.
+// Shunt Xp = 2000/6.245 = 320 Ohm (shunt L = Xp/(2pi f) ~ 14.6 uH).
+void TestVnaRf::efhwMatchKnownPoint() {
+    LMatchResult m = efhwMatch({2000.0, 0.0}, 3.5e6, 50.0);
+    QVERIFY(m.valid);
+    QVERIFY(std::abs(m.q - 6.245) < 0.1);
+    QVERIFY(m.shunt_henry > 0.0);
+    QVERIFY(std::abs(m.shunt_henry - 14.6e-6) < 2e-6);
+    QVERIFY(!efhwMatch({25.0, 0.0}, 3.5e6, 50.0).valid);  // Rload<=R0 -> invalid
+}
+
+// Four filter shapes: build simple synthetic responses, check type + edges.
+void TestVnaRf::filterFourShapesNumerical() {
+    // lowpass: flat until 20MHz then roll off.
+    {
+        std::vector<double> f, db;
+        for (int i = 0; i < 41; ++i) {
+            double fhz = 1.0 + i;          // 1..41 MHz
+            f.push_back(fhz * 1e6);
+            double v = (fhz < 20.0) ? -0.5 : -40.0;
+            db.push_back(v);
+        }
+        FilterResult r = analyzeFilter(f, db);
+        QVERIFY(r.valid);
+        QCOMPARE(r.type, std::string("lowpass"));
+        QVERIFY(std::abs(r.f_high_hz - 20e6) < 2e6);
+    }
+    // highpass: roll off below 10MHz then flat.
+    {
+        std::vector<double> f, db;
+        for (int i = 0; i < 41; ++i) {
+            double fhz = 1.0 + i;
+            f.push_back(fhz * 1e6);
+            double v = (fhz > 10.0) ? -0.5 : -40.0;
+            db.push_back(v);
+        }
+        FilterResult r = analyzeFilter(f, db);
+        QVERIFY(r.valid);
+        QCOMPARE(r.type, std::string("highpass"));
+        QVERIFY(std::abs(r.f_low_hz - 10e6) < 2e6);
+    }
+}
+
+// TDR tolerance: synthetic cable at vf=0.66, expected length ~ known; the O(N^2)
+// direct IDFT has coarse bin resolution, so we only assert a loose honest band.
+void TestVnaRf::tdrToleranceBand() {
+    std::vector<double> f; std::vector<std::complex<double>> s11;
+    for (int i = 0; i < 64; ++i) {
+        double fr = 1e6 + 30e6 * i / 63.0;
+        f.push_back(fr);
+        double ph = 6.2831853 * fr * 50e-9;   // 50 ns round-trip
+        s11.push_back(0.1 * std::complex<double>(std::cos(ph), std::sin(ph)));
+    }
+    TdrResult t = tdrCable(f, s11, 0.66, 50.0);
+    QVERIFY(t.valid);
+    const double expected = 0.66 * 299792458.0 * 50e-9 / 2.0;  // ~4.95 m
+    // Honess: O(N^2) direct IDFT, flat window -> coarse; allow +-50% + 1.5 m.
+    QVERIFY(t.cable_length_m > 0.5);
+    QVERIFY(std::abs(t.cable_length_m - expected) < expected * 0.5 + 1.5);
 }
 
 QTEST_MAIN(TestVnaRf)

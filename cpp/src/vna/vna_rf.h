@@ -111,6 +111,11 @@ struct LMatchResult {
 // f_hz = design frequency. Honest: valid=false when R0<=0, f<=0, or load R<=0.
 LMatchResult lMatchNetwork(std::complex<double> z_load, double f_hz, double r0 = 50.0);
 
+// EFHW / end-fed half-wave feedpoint matching: load Rload is typically much
+// higher than r0 (kOhm -> 50). Inverse L topology (shunt on load, series on
+// source). Pure textbook matching equations.
+LMatchResult efhwMatch(std::complex<double> z_load, double f_hz, double r0 = 50.0);
+
 // ---- Touchstone s1p/s2p ---------------------------------------------------
 // Independent clean-room reader/writer for the Touchstone 1.x/2.0 text format:
 // '!' comments, # FREQUENCY-UNIT S R Z R (frequencies in Hz after unit scaling),

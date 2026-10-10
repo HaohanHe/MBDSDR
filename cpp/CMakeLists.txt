@@ -1045,6 +1045,12 @@ target_include_directories(test_squelch_gate PRIVATE src)
 target_link_libraries(test_squelch_gate PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME squelch_gate COMMAND test_squelch_gate)
 
+add_executable(test_band_preset tests/test_band_preset.cpp)
+target_link_libraries(test_band_preset PRIVATE mbdsdr_core)
+target_include_directories(test_band_preset PRIVATE src)
+target_link_libraries(test_band_preset PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
+add_test(NAME band_preset COMMAND test_band_preset)
+
 # Audio-RMS-domain squelch auto-gate backing: real tracked noise floor signal +
 # the proven gate mute path. Engine-only, offline test source.
 add_executable(test_squelch_autogate tests/test_squelch_autogate.cpp)

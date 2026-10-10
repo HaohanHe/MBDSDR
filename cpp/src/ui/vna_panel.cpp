@@ -148,6 +148,20 @@ void VnaSmithWidget::paintEvent(QPaintEvent*) {
     // center mark (gamma=0 -> z=50)
     p.drawPoint(QPointF(cx, cy));
 
+    // Constant-R circles (r = 0.2, 0.5, 1, 2, 5): center (r/(1+r),0), r=1/(1+r).
+    p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaQuaternary), 0.6));
+    for (double rr : {0.2, 0.5, 1.0, 2.0, 5.0}) {
+        double cxg = rr / (1.0 + rr), rxg = 1.0 / (1.0 + rr);
+        p.drawEllipse(QPointF(cx + cxg * rad, cy), rxg * rad, rxg * rad);
+    }
+    // Constant-X arcs (x = +/-0.2, +/-0.5, +/-1, +/-2): center (1,1/x), r=1/|x|.
+    for (double xx : {0.2, 0.5, 1.0, 2.0}) {
+        for (double sgn : {1.0, -1.0}) {
+            double cgy = sgn / xx, rgx = 1.0 / xx;
+            p.drawEllipse(QPointF(cx + rad, cy - sgn * cgy * rad), rgx * rad, rgx * rad);
+        }
+    }
+
     // S11 trajectory
     QPolygonF line;
     for (auto& g : s11_) line << toXY(g);

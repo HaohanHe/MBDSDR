@@ -1314,6 +1314,32 @@ QString execExportVnaSnapshot(const QJsonObject& a, dsp::SpectrumEngine* engine,
     o["points"] = (int)s11.size();
     addSourceFields(o, src); return compact(o);
 }
+
+// analyze_vna_match (read): given a measured load Z + design frequency, return
+// an EFHW / inverse-L matching network L/C suggestion.
+QString execAnalyzeVnaMatch(const QJsonObject& a, dsp::SpectrumEngine*,
+                            const SourceInfo& src,
+                            ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o; o["ok"] = true;
+    double r = a.value("load_r").toDouble(std::nan(""));
+    double x = a.value("load_x").toDouble(0.0);
+    double f = a.value("f_hz").toDouble(std::nan(""));
+    if (!std::isfinite(r) || !std::isfinite(f) || r <= 0.0 || f <= 0.0) {
+        o["valid"] = false;
+        o["note"] = QString::fromUtf8("需要 load_r(>0) 与 f_hz(>0)");
+        addSourceFields(o, src); return compact(o);
+    }
+    vna::LMatchResult m = vna::efhwMatch({r, x}, f, 50.0);
+    o["valid"] = m.valid;
+    o["q"] = m.q;
+    o["series_henry"] = m.series_henry;
+    o["series_farad"] = m.series_farad;
+    o["shunt_henry"] = m.shunt_henry;
+    o["shunt_farad"] = m.shunt_farad;
+    o["topology"] = QString::fromStdString(m.topology);
+    if (!m.valid) o["note"] = QString::fromUtf8("负载电阻需 > 50Ω（EFHW 高阻馈电点）");
+    addSourceFields(o, src); return compact(o);
+}
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
                           const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
@@ -1909,6 +1935,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"analyze_vna_filter", &execAnalyzeVnaFilter},
         {"analyze_vna_touchstone", &execAnalyzeVnaTouchstone},
         {"export_vna_snapshot", &execExportVnaSnapshot},
+        {"analyze_vna_match", &execAnalyzeVnaMatch},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},
         {"list_bookmarks", &execListBookmarks},

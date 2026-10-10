@@ -823,6 +823,23 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // analyze_vna_match (read-only) ------------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "analyze_vna_match";
+        s.description = QString::fromUtf8(
+            "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回 EFHW/反 L 匹配网络的 L/C 建议（Q、串联/并联臂值）。"
+            "负载电阻需 >50Ω；否则 valid 诚实为 false。");
+        ToolParamSpec r; r.name = "load_r"; r.type = "number";
+        r.description = QString::fromUtf8("负载电阻 Ω（>50，高阻馈电点）"); r.required = true;
+        ToolParamSpec x; x.name = "load_x"; x.type = "number";
+        x.description = QString::fromUtf8("负载电抗 Ω（默认 0）");
+        ToolParamSpec f; f.name = "f_hz"; f.type = "number";
+        f.description = QString::fromUtf8("设计频率 Hz"); f.required = true;
+        s.params << r << x << f;
+        out.append(s);
+    }
+
     {
         ToolSchemaSpec s;
         s.name = "set_noise_blanker";
