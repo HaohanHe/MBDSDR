@@ -44,7 +44,15 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
                     "请用 --port 显式指定串口，并确认 USB 已连、udev/dialout 权限。"
                 )
             port = found[0][0]
-        client = NanoVNAClient(port=port)
+        try:
+            client = NanoVNAClient(port=port)
+            client.connect()
+        except (OSError, NanoVNADriverError) as e:
+            raise SystemExit(
+                f"无法打开串口 {port}：{e}\n"
+                "排查：(1) 端口是否存在；(2) 是否在 dialout 组 / udev 权限；"
+                "(3) 是否已被其它程序占用。"
+            ) from e
 
     client.connect()
     try:

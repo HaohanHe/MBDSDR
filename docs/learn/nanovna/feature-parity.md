@@ -215,3 +215,20 @@ bandCombo 在 main_window（SDR 域归线 A），本轮不碰 main_window，无�
 
 ## 快照三档（MBD_VNASHOT=1 + MBD_TAB=VNA）
 1920：磁导率 μr' vs f 空态框 + μr 引导 + Smith 网格弧 + S11 轨迹，0 裁切 0 叠字。
+
+---
+
+# 第⑨批：工具面复查 + UI 三档快照复核（HEAD=01d4329）
+
+## 工具面复查（只读）
+64 工具三通道一致，全绿：registry 8 / schema 10 / agent 38（读28写36）/ control_hub 34 / ai_real_link 17。
+写工具手动 gate：set_vna_sweep/vna_tdr_cable/export_vna_snapshot/set_cdcss 写表注册。mobile 64 / phase31 头部 64。无缺口。
+
+## 三档快照 OCR（MBD_VNASHOT=1 + MBD_TAB=VNA）
+- 1920：S11 VSWR / S21 增益 / 群延迟 / 磁导率 μr' vs f（空态）/ Smith-Polar（R/X 网格弧 + S11 轨迹 + 黄尾点）五图 + 谐振读数区 + μr 引导，0 裁切 0 叠字。
+- 960：同上完整。
+- 640（窄档 floor）：五图竖排不崩，Smith 圆完整；长 caption 末尾截断（"S11 VSW"/"磁导率 μr' v"）——诚实窄档 floor。
+- SDR 主界面 1920：左 rail / 中频谱网格 / 右 rail 解码 tab / 底部状态栏，0 裁切 0 叠字。
+
+## 计数
+金集不变（本批不加工具）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。

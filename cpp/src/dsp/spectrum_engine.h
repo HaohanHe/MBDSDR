@@ -113,6 +113,8 @@ public:
     bool   cdcssEnabled() const { return cdcssEnabled_.load(); }
     bool   cdcssPresent() const { return cdcss_.codePresent(); }
     int    cdcssCode() const { return cdcssCode_; }
+    // On-air decoded 12-bit DCS address (-1 when none latched). Honest empty.
+    int    cdcssDecodedCode() const { return cdcss_.lastCode(); }
     // Speaker-only digital sub-audio gate, independent of detection enable.
     bool   cdcssGateAudio() const { return cdcssGateEnabled_.load(); }
 

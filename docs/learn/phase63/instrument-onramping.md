@@ -105,3 +105,11 @@
   cdcssFalseOnWrongCode/cdcssCorrectsBitFlips，合成 DCS 位流 + 翻转 1/2 bit 纠错）。
   三通道 set_cdcss/get_cdcss_status 与 UI 开关已在。无 DSP/UI 缺口。
 - 测试：test_squelch_gate 13 passed（含 3 个 CDCSS 用例）。
+
+## 11. 第⑨批：CDCSS 外显码值 + dump USB 异常分支
+- CDCSS UI：badge 原本只显"检测到"，现补外显 on-air 解码 3 位八进制码（main_window.cpp
+  updateCdcssBadge）；engine 新增只读外显 cdcssDecodedCode()（spectrum_engine.h:116，
+  复用 CdcssDecoder::lastCode，无信号 -1 诚实空态）。DSP 层闭环（Golay/104 码表/latch/
+  三通道/开关）已于第⑤批核验。
+- dump USB 分支：nanovna_dump.py run_dump 捕 (OSError, NanoVNADriverError) → 明确报错+
+  端口存在/权限/占用三排查；pytest 3 passed（replay 形状 + VSWR 钉扎 + 不存在端口 SystemExit）。

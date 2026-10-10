@@ -40,3 +40,10 @@ def test_replay_cal_recorded(tmp_path):
     p.write_text(json.dumps(_script()), encoding="utf-8")
     out = run_dump("", 430_000_000, 431_000_000, 11, replay=str(p))
     assert any("cal" in c for c in out["cal"])
+
+
+def test_nonexistent_port_fails_cleanly():
+    import pytest
+    with pytest.raises(SystemExit):
+        run_dump("/dev/definitely-not-a-real-tty-1234",
+                 430_000_000, 431_000_000, 11, replay=None)

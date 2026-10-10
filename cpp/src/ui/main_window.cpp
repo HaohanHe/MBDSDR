@@ -5755,11 +5755,15 @@ void MainWindow::updateCdcssBadge() {
     }
     const bool present = engine_->cdcssPresent();
     if (present) {
-        cdcssBadge_->setText(QStringLiteral("检测到"));
+        const int code = engine_->cdcssDecodedCode();  // on-air decoded 12-bit
+        const QString oct = code >= 0
+            ? QStringLiteral("DCS %1").arg(code, 3, 8, QLatin1Char('0'))
+            : QStringLiteral("检测到");
+        cdcssBadge_->setText(oct);
         cdcssBadge_->setStyleSheet(
             QString("QLabel#cdcssBadge { color: %1; }")
                 .arg(QString::fromUtf8(tokens::kSuccess)));
-        cdcssBadge_->setToolTip(QStringLiteral("检测到匹配 DCS 码 (cdcssPresent 真值)"));
+        cdcssBadge_->setToolTip(QStringLiteral("检测到匹配 DCS 码 (cdcssPresent)"));
         return;
     }
     if (gateOn) {
