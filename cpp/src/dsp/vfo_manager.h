@@ -102,6 +102,9 @@ struct VfoChannel {
     // produces NO audio -- only recovered symbols via `recoveredSymbols`.
     std::unique_ptr<DigitalDemod> digitalDemod;
     std::vector<std::complex<float>> recoveredSymbols;   // last block's post-Costas symbols
+    // Last block's channelizer complex baseband (native IF rate, e.g. 48k for
+    // digital modes). Read-only feed for external narrowband detectors (FT8).
+    std::vector<std::complex<float>> lastBaseband;
     DigitalLockStatus lockStatus{};
 
     // RDS (EN 300 401) data-link decoder. Built ONLY for WFM channels, at the

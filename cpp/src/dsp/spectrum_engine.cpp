@@ -1420,6 +1420,19 @@ void SpectrumEngine::run() {
         const QString selMode = sel ? sel->mode : demodMode_;
         const bool digital = VfoChannel::modeIsDigital(selMode);
 
+        // FT8 run-loop 喂数：选中 VFO channelizer 复基带（48k）按 4:1 抽取到 12k
+        // 喂入环形缓冲。仅当 FT8 启用且选中信道有 baseband 时触发；诚实空态。
+        if (ft8Enabled_.load() && sel && !sel->lastBaseband.empty()) {
+            const auto& bb = sel->lastBaseband;
+            // 48k -> 12k 简单 4:1 抽取（FT8 仅 6.25 Hz 分辨率，抗混叠由 channelizer
+            // 12 kHz 信道带宽提供；不额外重构）。
+            std::vector<std::complex<float>> bb12;
+            bb12.reserve(bb.size() / 4);
+            for (std::size_t i = 0; i + 3 < bb.size(); i += 4)
+                bb12.push_back(bb[i]);
+            if (!bb12.empty()) feedFt8Baseband(bb12.data(), bb12.size());
+        }
+
         // ---- POCSAG / m17 / VOR snapshot change-diff (every block) ----------
         // Pull the SELECTED channel's digital read-out and emit ONLY when it
         // changed vs the last push (mirrors rdsUpdated). Reading off a non-
