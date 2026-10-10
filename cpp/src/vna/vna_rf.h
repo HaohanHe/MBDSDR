@@ -156,5 +156,20 @@ PermeabilityResult permeabilityNRW(const std::vector<double>& freq_hz,
                                     const std::vector<std::complex<double>>& s21,
                                     double slab_thickness_m);
 
+// Equivalent-circuit extraction from measured S11 (series RLC at resonance).
+// Self-written (public RLC / resonant-impedance formulas); no code copy.
+struct EquivalentResult {
+    bool valid = false;
+    double series_r_ohm = 0.0;   // ESR at series resonance
+    double series_l_h = 0.0;     // series inductance near resonance
+    double series_c_f = 0.0;     // series capacitance near resonance
+    double series_q = 0.0;       // loaded Q at resonance
+    double resonance_hz = 0.0;
+    std::string note;
+};
+EquivalentResult equivalentRlc(const std::vector<double>& freq_hz,
+                               const std::vector<std::complex<double>>& s11,
+                               double z0_ohm = 50.0);
+
 } // namespace vna
 } // namespace mbdsdr

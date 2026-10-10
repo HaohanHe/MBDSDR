@@ -113,3 +113,11 @@
   三通道/开关）已于第⑤批核验。
 - dump USB 分支：nanovna_dump.py run_dump 捕 (OSError, NanoVNADriverError) → 明确报错+
   端口存在/权限/占用三排查；pytest 3 passed（replay 形状 + VSWR 钉扎 + 不存在端口 SystemExit）。
+
+## 12. 第⑪批：NRW 标注 + dump --selftest + SDR 侦察
+- NRW：permeabilityNRW 公式核对为标准一阶 NRW（X=(S11²-S21²+1)/2S21；μr=(1+Γ)/(1-Γ)·波导项），
+  vna_rf.cpp:384 加 out.note 诚实标注——薄板近似、小 μ'(≪1) 为薄样/低反射量级伪影，非标定测量。
+- dump --selftest：nanovna_dump.py _selftest_script + --selftest 旗标，无设备跑通
+  连接→sweep→data 形状校验，明确标注合成演示；pytest 4 passed。
+- SDR 下一机制侦察：FFT 尺寸/AGC 手动/静噪滑块/频段下拉/WFM 立体声/书签扫描均已在
+  main_window，无新硬缺口，按宁缺毋滥不落地。

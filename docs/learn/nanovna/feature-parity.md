@@ -251,3 +251,24 @@ mobile 64 / phase31 头部 64。无缺口。
 
 ## 计数
 金集不变：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
+
+---
+
+# 第⑪批：bandCombo 取景 + 等效电路提取（HEAD=8bb4781）
+
+## bandCombo 取景（MBD_SCROLL=end + MBD_BANDCOMBO）
+harness 加 MBD_SCROLL=end（所有 QScrollArea 滚到底）。OCR：bandCombo 选中态 hook 生效（无崩溃），但左 rail 是一条长表单（源与连接→频率→静噪/ANR→音频→录制），滚到底落在录制/静噪区，bandCombo（在频率组上部）被滚出框。诚实未拍选中频段 center/模式/带宽行——需定向 scroll 到频率组中值，留后续。真机步骤：手动开「频率」组选 bandCombo 第二项即见选中频段。
+
+## 等效电路提取（vna_rf equivalentRlc）
+自写串联 RLC 提取：S11→Zin，串联谐振 |Z|min=R(ESR)，半功率点定 BW=fr/Q，L=RQ/(2πfr)，C=1/((2πfr)^2·L)。公开阻抗公式，干净室。
+合成 R=10Ω/L=1µH/C=100pF（fr~15.9MHz Q~10）钉扎：resonance 容差 ±1.5MHz、R ±3Ω、Q ±3。
+
+## 终检（只读）
+64 工具三通道一致：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。mobile 64 / phase31 头部 64。无缺口。
+
+## 计数
+- test_vna_rf **20 passed**（+equivalentRlcExtraction）。
+- 金集不变（本批新工具 analyze_vna_equivalent 三通道接线留后续轮，宁缺毋滥）。
+
+## 待加 CMake 清单
+无新源文件（并入 vna_rf.cpp/h）；无新测试目标。

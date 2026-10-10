@@ -236,6 +236,12 @@ int main(int argc, char** argv) {
     // N = preset index, 1-based skipping the "频段…" placeholder) so the shot
     // shows a selected band with center/mode/bandwidth rows.
     {
+        // Scroll every QScrollArea to bottom first so the left-rail receive group
+        // (频率/中心频率/步进/最近/接收参数) is in frame.
+        if (qgetenv("MBD_SCROLL") == "end") {
+            for (auto* sa : win.findChildren<QScrollArea*>())
+                sa->verticalScrollBar()->setValue(sa->verticalScrollBar()->maximum());
+        }
         bool okb = false;
         int bidx = qgetenv("MBD_BANDCOMBO").toInt(&okb);
         if (okb && bidx > 0) {

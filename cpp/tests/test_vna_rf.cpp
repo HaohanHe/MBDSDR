@@ -32,6 +32,7 @@ private slots:
     void bandstopNumerical();
     void tdrMultiPeak();
     void tdrPeakSeparation();
+    void equivalentRlcExtraction();
     void honestEmpty();
 };
 
@@ -303,6 +304,25 @@ void TestVnaRf::tdrPeakSeparation() {
     // Honest best-effort: local-maxima list may be empty if the direct IDFT
     // smears the response; the strongest peak distance above is the reliable one.
     QVERIFY(t.peak_distances_m.size() >= 0);
+}
+
+// Synthetic series RLC: R=10 ohm, L=1 uH, C=100 pF -> f0~15.915 MHz, Q~10.
+// Build S11 from Z_in, then equivalentRlc should recover R/f0/Q within band.
+void TestVnaRf::equivalentRlcExtraction() {
+    const double R = 10.0, L = 1e-6, C = 100e-12, Z0 = 50.0;
+    std::vector<double> f; std::vector<std::complex<double>> s11;
+    for (int i = 0; i < 201; ++i) {
+        double fr = 10e6 + 40e6 * i / 200.0;
+        double w = 6.283185307 * fr;
+        std::complex<double> z(R, w * L - 1.0 / (w * C));
+        s11.push_back((z - Z0) / (z + Z0));
+        f.push_back(fr);
+    }
+    EquivalentResult e = equivalentRlc(f, s11, Z0);
+    QVERIFY(e.valid);
+    QVERIFY(std::abs(e.resonance_hz - 15.915e6) < 1.5e6);   // within ~10%
+    QVERIFY(std::abs(e.series_r_ohm - R) < 3.0);            // ESR ~10 ohm
+    QVERIFY(std::abs(e.series_q - 10.0) < 3.0);             // Q ~10
 }
 
 QTEST_MAIN(TestVnaRf)

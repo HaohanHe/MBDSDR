@@ -86,6 +86,22 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
     }
 
 
+def _selftest_script(start_hz: int, stop_hz: int, points: int):
+    """合成演示脚本（标注合成，非真实测量）：跑通连接→sweep→data 形状校验。"""
+    freqs = [start_hz + (stop_hz - start_hz) * i // max(1, points - 1)
+             for i in range(points)]
+    return [
+        ["help", []],
+        ["version", ["selftest-1.0"]],
+        ["info", ["NanoVNA-H(selftest)"]],
+        ["cal", ["load open short thru cal'ed"]],
+        [f"sweep {int(start_hz)} {int(stop_hz)} {int(points)}", []],
+        ["frequencies", [str(f) for f in freqs]],
+        ["data 0", ["0.3 0.0"] * points],
+        ["data 1", ["0.1 0.0"] * points],
+    ]
+
+
 def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description="NanoVNA 真机一键 dump")
     ap.add_argument("--port", default="",
@@ -96,7 +112,16 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--points", type=int, default=101, help="扫频点数")
     ap.add_argument("--out", default="-", help="输出 JSON 路径；- 为 stdout")
     ap.add_argument("--replay", default=None, help="测试用：自造协议脚本 JSON（不碰硬件）")
+    ap.add_argument("--selftest", action="store_true",
+                    help="无设备自检：用合成回放跑通全流程（数据为合成演示，非真实测量）")
     args = ap.parse_args(argv)
+
+    replay = args.replay
+    if args.selftest:
+        import tempfile, os
+        fd, replay = tempfile.mkstemp(suffix=".json")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(_selftest_script(args.start, args.stop, args.points), f)
 
     try:
         data = run_dump(args.port, args.start, args.stop, args.points, args.replay)

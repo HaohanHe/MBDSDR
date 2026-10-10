@@ -381,6 +381,59 @@ PermeabilityResult permeabilityNRW(const std::vector<double>& freq_hz,
         out.mu_imag.push_back(-mur.imag());   // convention: mu'' = loss (positive)
     }
     out.valid = true;
+    out.note = "一阶薄板 NRW 近似（对称样片，未做多次反射/空气线去嵌入）；"
+               "小 μ'（≪1）多为薄样/低反射下的量级伪影，非标定材料测量。";
+    return out;
+}
+
+// Self-written series-RLC extraction from measured S11. Public resonant-impedance
+// relations only: at series resonance |Z_in| = R (ESR); half-power points give
+// Q = f0/BW; L = R*Q/(2*pi*f0), C = 1/((2*pi*f0)^2 * L).
+EquivalentResult equivalentRlc(const std::vector<double>& freq_hz,
+                              const std::vector<std::complex<double>>& s11,
+                              double z0_ohm) {
+    EquivalentResult out;
+    if (freq_hz.size() < 5 || freq_hz.size() != s11.size()) {
+        out.note = "点数不足或频率/S11 长度不一致"; return out;
+    }
+    // Input impedance Z_in from reflection.
+    std::vector<std::complex<double>> zin;
+    std::vector<double> mag;
+    for (size_t i = 0; i < s11.size(); ++i) {
+        double d = 1.0 - s11[i].real();
+        double z = 1.0 + s11[i].real();
+        std::complex<double> denom(d, -s11[i].imag());
+        std::complex<double> num(z, s11[i].imag());
+        std::complex<double> zz = (std::abs(denom) > 1e-12) ? num / denom : std::complex<double>(1e9, 0);
+        zin.push_back(z0_ohm * zz);
+        mag.push_back(std::abs(zin[i]));
+    }
+    // Series resonance = minimum |Z|.
+    size_t imin = 0;
+    for (size_t i = 1; i < mag.size(); ++i) if (mag[i] < mag[imin]) imin = i;
+    double r = mag[imin];
+    double f0 = freq_hz[imin];
+    if (r <= 0.0 || f0 <= 0.0) { out.note = "谐振点病态（R<=0 或 f<=0）"; return out; }
+    // Half-power: |Z| = R*sqrt(2) on either side of f0.
+    double hi = f0, lo = f0;
+    for (size_t i = imin; i < mag.size(); ++i) {
+        if (mag[i] >= r * 1.41421356) { hi = freq_hz[i]; break; }
+    }
+    for (size_t i = imin; i-- > 0;) {
+        if (mag[i] >= r * 1.41421356) { lo = freq_hz[i]; break; }
+    }
+    double bw = hi - lo;
+    if (bw <= 0.0) { out.note = "带宽退化（单边未越 3dB）"; return out; }
+    double q = f0 / bw;
+    double l = r * q / (6.283185307 * f0);
+    double c = 1.0 / ((6.283185307 * f0) * (6.283185307 * f0) * l);
+    out.valid = true;
+    out.series_r_ohm = r;
+    out.series_l_h = l;
+    out.series_c_f = c;
+    out.series_q = q;
+    out.resonance_hz = f0;
+    out.note = "串联 RLC 等效（串联谐振点 |Z|=R 为 ESR；BW=fr/Q）";
     return out;
 }
 

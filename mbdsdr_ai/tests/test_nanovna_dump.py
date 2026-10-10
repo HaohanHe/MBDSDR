@@ -47,3 +47,13 @@ def test_nonexistent_port_fails_cleanly():
     with pytest.raises(SystemExit):
         run_dump("/dev/definitely-not-a-real-tty-1234",
                  430_000_000, 431_000_000, 11, replay=None)
+
+
+def test_selftest_runs(tmp_path):
+    from mbdsdr_ai import nanovna_dump as nd
+    script = nd._selftest_script(430_000_000, 431_000_000, 11)
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps(script), encoding="utf-8")
+    out = run_dump("", 430_000_000, 431_000_000, 11, replay=str(p))
+    assert out["model"] == "NanoVNA-H(selftest)"
+    assert len(out["vswr"]) == 11
