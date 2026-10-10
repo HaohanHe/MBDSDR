@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT
 // test_lrpt_cpp.cpp -- LRPT C++ 解码链跨语言 round-trip。
 #include "dsp/lrpt_fec.h"
+#include "dsp/lrpt_demod.h"
 #include "dsp/spectrum_engine.h"
 #include <QtTest/QtTest>
+#include <complex>
 #include <fstream>
 #include <vector>
 
@@ -16,6 +18,8 @@ private slots:
     void pureNoiseCaduHonestEmpty(); // 随机字节 -> nullopt
     void viterbiKnownVector();       // 已知软位 -> 硬判决
     void engineFeedDrivesReadback(); // 引擎 feed CADU -> 真实驱动 sync/frames
+    void iqToPayloadRoundTrip();     // IQ -> QPSK 解调 -> Viterbi -> FEC -> payload 逐字节
+    void pureNoiseDemodHonestEmpty(); // 纯噪声 IQ -> 空 frames
     void cleanupTestCase() {}
 };
 
@@ -63,6 +67,30 @@ void TestLrptCpp::engineFeedDrivesReadback() {
     mbdsdr::dsp::SpectrumEngine eng2;
     eng2.feedLrptCadu(cadu.data(), (int)cadu.size());
     QVERIFY(!eng2.lrptSyncLocked());
+}
+
+void TestLrptCpp::iqToPayloadRoundTrip() {
+    std::ifstream f(SRCDIR "/lrpt_e2e_iq.raw", std::ios::binary | std::ios::ate);
+    int samples = (int)f.tellg() / 8; f.seekg(0);
+    std::vector<float> raw(samples * 2);
+    f.read((char*)raw.data(), samples * 2 * 4);
+    std::vector<std::complex<float>> iq(samples);
+    for (int i = 0; i < samples; ++i) iq[i] = {raw[2*i], raw[2*i+1]};
+    auto frames = lrptDemodulate(iq.data(), samples);
+    QVERIFY2(!frames.empty(), "应检出同步帧（ham=0）");
+    QVERIFY2(frames[0].hamming <= 4, "同步汉明距应 <=4");
+    QCOMPARE((int)frames[0].caduBytes.size(), 1024);
+    auto d = lrptDecodeCadu(frames[0].caduBytes.data(), (int)frames[0].caduBytes.size());
+    QVERIFY2(d.has_value(), "IQ 全链应解出 payload");
+    auto exp = loadBin(SRCDIR "/lrpt_e2e_payload.raw", 892);
+    QCOMPARE(*d, exp);   // IQ -> payload 逐字节精确匹配
+}
+
+void TestLrptCpp::pureNoiseDemodHonestEmpty() {
+    // 纯零 IQ -> 无同步 -> 空 frames（诚实空态）。
+    std::vector<std::complex<float>> iq(10000, {0.0f, 0.0f});
+    auto frames = lrptDemodulate(iq.data(), (int)iq.size());
+    QVERIFY2(frames.empty(), "纯零 IQ 应诚实空态");
 }
 
 QTEST_MAIN(TestLrptCpp)
