@@ -45,10 +45,14 @@ public:
     // 无检出 -> 空 vector（诚实空态）。
     const std::vector<double>& lastLlr174() const { return lastLlr_; }
 
+    // SIC：谱减最强信号后二次检出的第二候选（无第二信号 -> valid=false）。
+    const Ft8Candidate& lastSecondary() const { return secondary_; }
+
 private:
     bool enabled_ = false;
     int  lastCandidates_ = 0;
     std::vector<double> lastLlr_;
+    Ft8Candidate secondary_;
 };
 
 } // namespace mbdsdr

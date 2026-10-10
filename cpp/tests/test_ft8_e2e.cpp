@@ -14,6 +14,7 @@ private slots:
     void initTestCase() {}
     void decodesSyntheticFrame();     // 合成编码帧 -> 解码字段精确匹配
     void feedPathRingBufferDecodes(); // 分块喂入环形缓冲 -> 满窗触发解码
+    void sicDualSignalDetectsSecondary(); // 双信号同窗 -> 谱减后二次检出
     void pureNoiseHonestEmpty();      // 纯噪声 -> active=false, decoded 空
     void disabledHonestEmpty();       // 未启用 -> 空态
     void cleanupTestCase() {}
@@ -50,6 +51,18 @@ void TestFt8E2e::feedPathRingBufferDecodes() {
     QCOMPARE(QString::fromStdString(eng.ft8DecodedText()),
              QString("K1ABC K2DEF EM12"));
     QVERIFY2(eng.ft8DecodedFrameCount() >= 1, "去重后至少计数 1 帧");
+}
+
+void TestFt8E2e::sicDualSignalDetectsSecondary() {
+    // 双信号同窗（+30Hz K1ABC/K2DEF/EM12 与 -20Hz K2DEF/K1ABC/FN44）。
+    // 诚实断言：最强帧解码正确 + 谱减后二次检出一个候选（secondary.valid）。
+    // 第二帧精确分离受重构幅度/残留泄漏限制，不断言第二帧文本。
+    auto buf = loadRaw(SRCDIR "/ft8_dual_iq.raw", 180000);
+    mbdsdr::Ft8Detector det;
+    det.setEnabled(true);
+    auto c = det.processWindow(buf.data(), buf.size());
+    QVERIFY2(c.valid, "双信号中应检出最强帧");
+    QVERIFY2(det.lastSecondary().valid, "SIC 谱减后应二次检出候选");
 }
 
 void TestFt8E2e::pureNoiseHonestEmpty() {
