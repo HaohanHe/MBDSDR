@@ -118,6 +118,7 @@ set(SOURCES
     src/dsp/ft8_detector.cc
     src/dsp/ft8_codec.cc
     src/dsp/lrpt_fec.cc
+    src/dsp/lrpt_demod.cc
     src/dsp/agc.cpp
     src/dsp/audio_output.cpp
     src/dsp/qt_audio_sink.cpp
