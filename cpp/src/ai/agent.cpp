@@ -4,6 +4,7 @@
 #include "vna_onramp.h"
 #include "llm_worker.h"
 #include "dsp/spectrum_engine.h"
+#include "dsp/band_preset.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -93,6 +94,28 @@ QString Agent::localCommand(const QString& input) {
             "- 若无声：请先在「源与连接」启动 SDR（USB 未识别时检查 udev/dialout 组权限）。\n"
             "- 手台多带亚音：按需要在静噪/亚音设置开启对应 CTCSS；先把静噪调低以听到信号。")
             .arg(mhz, 0, 'f', 3);
+    }
+
+    // 频段一键：调到 20米/2米/70厘米/航空/FM广播/中波 -> 中心+模式+带宽。
+    static QRegularExpression bandRe(
+        R"((调到|切换到|去|听)?\s*(20米|2米|70厘米|航空|FM广播|中波|fm|airband|mw))");
+    auto bm = bandRe.match(input.trimmed());
+    if (bm.hasMatch()) {
+        auto p = mbdsdr::bandPresetByName(bm.captured(2).toUtf8().constData());
+        if (!p.has_value())
+            return QString::fromUtf8("未识别该频段。可选：FM广播、航空、中波、20米、2米、70厘米。");
+        double mid = (p->lowHz + p->highHz) / 2.0;
+        if (engine_) {
+            engine_->onSetCenterFreq(mid);
+            engine_->setDemodMode(QString::fromUtf8(p->mode));
+            engine_->setBandwidth(p->bwHz);
+        }
+        return QString::fromUtf8(
+            "已切到 %1：中心 %2 MHz，模式 %3，带宽 %4 kHz。")
+            .arg(QString::fromUtf8(p->name))
+            .arg(mid / 1e6, 0, 'f', 4)
+            .arg(QString::fromUtf8(p->mode))
+            .arg(p->bwHz / 1e3, 0, 'f', 1);
     }
 
     QString low = input.trimmed().toLower();

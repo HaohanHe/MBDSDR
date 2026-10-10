@@ -6,7 +6,9 @@
 #ifndef MBDSDR_BAND_PRESET_H
 #define MBDSDR_BAND_PRESET_H
 
+#include <cctype>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace mbdsdr {
@@ -39,6 +41,34 @@ inline const std::vector<BandPreset>& bandPresets() {
 inline std::optional<BandPreset> bandPresetForFrequency(double hz) {
     for (const auto& p : bandPresets())
         if (hz >= p.lowHz && hz <= p.highHz) return p;
+    return std::nullopt;
+}
+
+// Find a preset by a short alias. Aliases cover the common spoken names
+// (航空 / airband, FM广播 / fm, 中波 / mw, 20m / 20米, 2m / 2米,
+// 70cm / 70厘米). Case-insensitive. Honest: nullopt when unknown.
+inline std::optional<BandPreset> bandPresetByName(const std::string& alias) {
+    static const struct { const char* key; const char* band; } aliases[] = {
+        {"fm广播", "FM广播"}, {"fm", "FM广播"}, {"广播", "FM广播"},
+        {"航空", "航空"}, {"airband", "航空"}, {"air", "航空"},
+        {"中波", "中波广播"}, {"mw", "中波广播"}, {"am广播", "中波广播"},
+        {"20米", "20m 业余"}, {"20m", "20m 业余"},
+        {"2米", "2m 业余"}, {"2m", "2m 业余"},
+        {"70厘米", "70cm 业余"}, {"70cm", "70cm 业余"}, {"430", "70cm 业余"},
+    };
+    std::string a;
+    a.reserve(alias.size());
+    for (char c : alias) a.push_back((char)tolower((unsigned char)c));
+    for (const auto& al : aliases) {
+        std::string k = al.key;
+        std::string kl;
+        kl.reserve(k.size());
+        for (char c : k) kl.push_back((char)tolower((unsigned char)c));
+        if (a.find(kl) != std::string::npos) {
+            for (const auto& p : bandPresets())
+                if (std::string(p.name) == al.band) return p;
+        }
+    }
     return std::nullopt;
 }
 

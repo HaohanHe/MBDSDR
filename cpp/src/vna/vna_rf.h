@@ -54,6 +54,7 @@ struct TdrResult {
     double distance_m = 0;      // distance to first reflection peak (one-way)
     double cable_length_m = 0;  // = distance_m / 2
     double peak_reflection = 0; // magnitude of the first reflection peak
+    std::vector<double> peak_distances_m;  // all detected reflection-peak distances (one-way), honest
 };
 // S11(freq) -> time-domain impulse response via windowed IFFT; locate the first
 // reflection peak (after the direct pulse). distance = v_f * c * t / 2.

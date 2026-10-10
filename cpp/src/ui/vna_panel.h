@@ -101,6 +101,8 @@ private:
     QSpinBox*    startSpin_   = nullptr;
     QSpinBox*    stopSpin_    = nullptr;
     QSpinBox*    pointsSpin_  = nullptr;
+    QLineEdit*   thickEdit_   = nullptr;  // fixture thickness mm (permeability)
+    QLabel*      muLabel_     = nullptr;  // mu_r'/mu_r'' readout
 
     VnaTraceWidget* s11Plot_ = nullptr;  // VSWR vs frequency
     VnaTraceWidget* s21Plot_ = nullptr;  // gain dB vs frequency

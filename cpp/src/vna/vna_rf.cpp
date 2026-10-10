@@ -124,12 +124,21 @@ TdrResult tdrCable(const std::vector<double>& f_hz,
     double dt = tRecord / n;               // sample spacing
     double v = velocity_factor * kC;
 
-    // Find first reflection peak after the direct (n=0) pulse, above a floor.
+    // Find reflection peaks after the direct (n=0) pulse, above a floor.
+    // Collect all local maxima (multi-peak) in addition to the strongest.
     double floor = 0.05 * std::abs(imp[0]);
     int peak = -1; double peakMag = floor;
     for (int i = 1; i < n / 2; ++i) {
         double m = std::abs(imp[i]);
         if (m > peakMag) { peakMag = m; peak = i; }
+        // local maximum (neighbours below) -> record as a reflection peak
+        if (i > 1 && i + 1 < n / 2) {
+            double mi = std::abs(imp[i]);
+            if (mi > std::abs(imp[i-1]) && mi > std::abs(imp[i+1]) && mi > floor) {
+                double pi = v * (i * dt) / 2.0;
+                out.peak_distances_m.push_back(pi);
+            }
+        }
     }
     if (peak < 0) return out;
     out.valid = true;

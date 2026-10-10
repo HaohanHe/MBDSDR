@@ -10,6 +10,7 @@ private slots:
     void hitsInsideBand();
     void missOutsideBands();
     void edgesInclusive();
+    void byNameAliases();
 };
 
 void TestBandPreset::tableHasExpectedBands() {
@@ -42,6 +43,18 @@ void TestBandPreset::edgesInclusive() {
     QVERIFY(bandPresetForFrequency(87.5e6).has_value());  // FM lower edge
     QVERIFY(bandPresetForFrequency(108.0e6).has_value()); // FM upper edge
     QVERIFY(bandPresetForFrequency(136.0e6).has_value()); // air upper edge
+}
+
+void TestBandPreset::byNameAliases() {
+    auto air = bandPresetByName("航空");
+    QVERIFY(air.has_value());
+    QCOMPARE(QString(air->mode), QString("AM"));
+    auto m20 = bandPresetByName("20米");
+    QVERIFY(m20.has_value());
+    QCOMPARE(QString(m20->mode), QString("USB"));
+    auto c70 = bandPresetByName("70厘米");
+    QVERIFY(c70.has_value());
+    QVERIFY(!bandPresetByName("火星频道").has_value()); // honest miss
 }
 
 QTEST_MAIN(TestBandPreset)

@@ -222,6 +222,9 @@ VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
     sweepForm->addRow(QString::fromUtf8("起 Hz"), startSpin_);
     sweepForm->addRow(QString::fromUtf8("止 Hz"), stopSpin_);
     sweepForm->addRow(QString::fromUtf8("点数"), pointsSpin_);
+    thickEdit_ = new QLineEdit(this);
+    thickEdit_->setPlaceholderText(QString::fromUtf8("mm（磁导率夹具）"));
+    sweepForm->addRow(QString::fromUtf8("夹具厚"), thickEdit_);
     lay->addLayout(sweepForm);
 
     measureBtn_ = new QPushButton(QString::fromUtf8("开始测量"), this);
@@ -243,6 +246,9 @@ VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
     analysisLabel_ = new QLabel(vnaAnalysisText(false, 0, 0, 0, 0), this);
     analysisLabel_->setWordWrap(true);
     lay->addWidget(analysisLabel_);
+    muLabel_ = new QLabel(QString::fromUtf8("μr: 输入夹具厚度以计算"), this);
+    muLabel_->setWordWrap(true);
+    lay->addWidget(muLabel_);
 
     timer_ = new QTimer(this);
     timer_->setInterval(1000);
@@ -312,6 +318,22 @@ void VnaPanel::applyReadout(const std::vector<long>& freqs,
     vna::ResonanceResult rr = vna::analyzeResonance(fHz, s11);
     analysisLabel_->setText(
         vnaAnalysisText(rr.valid, rr.series_fr_hz, rr.q, rr.bandwidth_hz, rr.esr));
+
+    // 磁导率：需夹具厚度输入（mm）；无输入诚实引导，不伪造。
+    bool okmm = false;
+    double thickMm = thickEdit_->text().toDouble(&okmm);
+    if (!okmm || thickMm <= 0.0) {
+        muLabel_->setText(QString::fromUtf8("μr: 输入夹具厚度以计算"));
+    } else {
+        vna::PermeabilityResult pr = vna::permeabilityNRW(fHz, s11, s21, thickMm * 1e-3);
+        if (!pr.valid || pr.mu_real.empty() || !std::isfinite(pr.mu_real[pr.mu_real.size()/2])) {
+            muLabel_->setText(QString::fromUtf8("μr: 数据不足/病态，无法计算"));
+        } else {
+            size_t mid = pr.mu_real.size() / 2;
+            muLabel_->setText(QString::fromUtf8("μr'=%1  μr''=%2")
+                .arg(pr.mu_real[mid], 0, 'f', 2).arg(pr.mu_imag[mid], 0, 'f', 3));
+        }
+    }
 }
 
 void VnaPanel::poll() {

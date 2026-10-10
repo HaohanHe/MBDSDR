@@ -57,6 +57,7 @@
 #include "dsp/vfo_manager.h"
 #include "dsp/device_lister.h"
 #include "dsp/device_presence_notifier.h"
+#include "dsp/band_preset.h"
 #include "ui/gain_control_model.h"
 #include "ui/constellation_view.h"
 #include "ui/spectrum_display.h"
@@ -609,6 +610,26 @@ MainWindow::MainWindow(QWidget* parent)
     }
     bwCombo_->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
     gRxLay->addRow("带宽", bwCombo_);
+
+    // Band one-click preset: tune center + mode + bandwidth from the shared
+    // band_preset table. Honest: only listed bands are offered.
+    auto* bandCombo = new QComboBox(gRx);
+    bandCombo->setObjectName("bandCombo");
+    bandCombo->addItem(QString::fromUtf8("频段…"));
+    for (const auto& p : mbdsdr::bandPresets())
+        bandCombo->addItem(QString::fromUtf8(p.name));
+    bandCombo->setMinimumWidth(tokens::scaled(tokens::kComboMinW));
+    connect(bandCombo, QOverload<int>::of(&QComboBox::activated),
+            this, [this](int idx) {
+        if (idx <= 0) return;
+        const auto& table = mbdsdr::bandPresets();
+        const auto& p = table[idx - 1];
+        if (!engine_) return;
+        engine_->onSetCenterFreq((p.lowHz + p.highHz) / 2.0);
+        engine_->setDemodMode(QString::fromUtf8(p.mode));
+        engine_->setBandwidth(p.bwHz);
+    });
+    gRxLay->addRow("频段", bandCombo);
 
     // ---- Frontend software decimation (real anti-alias low-pass + integer D) --
     // 关 = D1 (native). Higher factors narrow the wideband band and cut compute

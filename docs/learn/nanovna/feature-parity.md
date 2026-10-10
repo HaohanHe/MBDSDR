@@ -166,3 +166,28 @@ lowpass/hipass 合成响应数值断言（截止边 <2MHz）；bandpass 已有�
 
 ## 快照三档（MBD_VNASHOT=1 + MBD_TAB=VNA）
 1920：Smith 图 R/X 网格弧 + S11 轨迹 + 黄尾点完整，0 裁切 0 叠字。
+
+---
+
+# 第⑦批：收尾登记项 + 工具面核查（HEAD=ffd887f）
+
+## 磁导率 UI 接线（vna_panel.{h,cpp}）
+新增「夹具厚」QLineEdit（mm）+ muLabel_ 读数。applyReadout 读厚度→permeabilityNRW→中点 μr'/μr''；无输入诚实引导"输入夹具厚度"，病态/不足诚实提示，不伪造。
+
+## TDR 多峰反射分离（vna_rf TdrResult.peak_distances_m）
+tdrCable 现在收集所有过 floor 的局部极大峰距离；诚实标注直接 IDFT 可能合并近峰（合成多峰夹具只钉运行+最强峰距离，多峰数组 best-effort）。
+
+## bandstop 数值钉扎（test_vna_rf bandstopNumerical）
+合成 BS（30-40MHz 陷波 -40dB）→ type=bandstop + stopband 40dB<2dB。
+
+## 工具面核查（只读）
+64 工具三通道一致：registry/schema/agent(读28写36)/control_hub/ai_real_link 全绿。
+写工具手动 gate：set_vna_sweep/vna_tdr_cable/export_vna_snapshot/set_cdcss 等在 control_hub 写表（true）注册，手动模式拦截。
+mobile 64 / phase31 头部 64。
+
+## 计数（offscreen 真实 passed）
+- test_vna_rf **18 passed**（+bandstopNumerical +tdrMultiPeak）。
+- 金集不变（本批不加工具）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
+
+## 快照三档（MBD_VNASHOT=1 + MBD_TAB=VNA）
+1920：夹具厚输入行 + μr 引导 + Smith 网格弧 + S11 轨迹，0 裁切 0 叠字。
