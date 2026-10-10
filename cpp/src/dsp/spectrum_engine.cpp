@@ -300,8 +300,20 @@ void SpectrumEngine::setFt8Enabled(bool on) {
 }
 
 std::string SpectrumEngine::ft8DecodedText() const {
-    // 诚实空态：detector->LLR->codec 接线未启用前返回空串，绝不编造帧文本。
-    return {};
+    return ft8Decoded_;
+}
+
+void SpectrumEngine::processFt8Window(const std::complex<float>* iq, std::size_t n) {
+    ft8Decoded_.clear();
+    if (!ft8Enabled_.load()) return;
+    Ft8Candidate c = ft8Detector_.processWindow(iq, n);
+    ft8Last_ = c;
+    if (!c.valid) return;   // 诚实空态：无检出
+    const auto& llr = ft8Detector_.lastLlr174();
+    if (llr.size() != 174) return;
+    auto d = ft8Codec_.decode(llr.data(), llr.size(), 50);
+    if (!d) return;         // CRC 不过/不收敛 -> 诚实空态，不产出文本
+    ft8Decoded_ = d->from + " " + d->to + " " + d->exchange;
 }
 
 bool SpectrumEngine::squelchEnabled() const {

@@ -538,6 +538,13 @@ target_compile_definitions(test_ft8_codec PRIVATE SRCDIR="${CMAKE_CURRENT_SOURCE
 target_link_libraries(test_ft8_codec PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME ft8_codec COMMAND test_ft8_codec)
 
+add_executable(test_ft8_e2e tests/test_ft8_e2e.cpp)
+target_link_libraries(test_ft8_e2e PRIVATE mbdsdr_core)
+target_include_directories(test_ft8_e2e PRIVATE src)
+target_compile_definitions(test_ft8_e2e PRIVATE SRCDIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
+target_link_libraries(test_ft8_e2e PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME ft8_e2e COMMAND test_ft8_e2e)
+
 # Phase22-A remote/threading hardening: (1) foreign worker threads hammer
 # execute() concurrently -> the engine dispatch is marshaled to the engine home
 # thread (BlockingQueued), no crash / no data race; (2) get_status connected/

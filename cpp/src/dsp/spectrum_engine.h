@@ -18,6 +18,7 @@
 #include "dsp/noise_blanker.h"
 #include "dsp/iq_frontend.h"
 #include "dsp/ft8_detector.h"
+#include "dsp/ft8_codec.h"
 #include "dsp/vfo_manager.h"
 #include "dsp/audio_resampler.h"
 #include "dsp/demod.h"
@@ -125,6 +126,10 @@ public:
     // Step-4 decode readback. Empty string until detector->LLR->codec wiring is
     // enabled (honest: no fabricated frame text).
     std::string ft8DecodedText() const;
+
+    // 喂一段 12 kS/s 复基带窗（检测→LLR→解码全链路）。未启用则直接空态返回。
+    // 测试注入/引擎 run loop 共用此入口；CRC 不过/不收敛 -> ft8Decoded_ 保持空。
+    void processFt8Window(const std::complex<float>* iq, std::size_t n);
     // True iff a network-audio tap is currently installed (setNetworkAudioSink).
     // The detailed stream stats live on the sink the caller installed.
     bool  networkTapActive() const { return networkTap_ != nullptr; }
@@ -603,8 +608,10 @@ private:
     // FT8 detection layer (step 3). ft8Detector_ is fed 12k complex baseband by
     // the run loop when enabled; ft8Last_ holds the honest last candidate.
     Ft8Detector ft8Detector_;
+    Ft8Codec    ft8Codec_;
     std::atomic<bool> ft8Enabled_{false};
     Ft8Candidate ft8Last_;
+    std::string ft8Decoded_;   // 最近一次解码帧文本（空=诚实空态）
     AudioOutput* audioOut_ = nullptr;
     // Active 48k write path. Defaults to audioOut_; an injected test sink
     // (setTestAudioSink) redirects it without touching the settings-dialog

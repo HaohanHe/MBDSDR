@@ -13,6 +13,7 @@
 #include <complex>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace mbdsdr {
 
@@ -40,9 +41,14 @@ public:
     // 最近一次处理的候选数（诚实计数）。
     int lastCandidateCount() const { return lastCandidates_; }
 
+    // 最近一次检出帧的 174 个 LLR（正=bit0，逆格雷分组，镜像 ft8_codec.py:335）。
+    // 无检出 -> 空 vector（诚实空态）。
+    const std::vector<double>& lastLlr174() const { return lastLlr_; }
+
 private:
     bool enabled_ = false;
     int  lastCandidates_ = 0;
+    std::vector<double> lastLlr_;
 };
 
 } // namespace mbdsdr
