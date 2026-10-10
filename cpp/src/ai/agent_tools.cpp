@@ -1061,6 +1061,7 @@ QString execGetVnaData(const QJsonObject&, dsp::SpectrumEngine* engine,
 
     QJsonArray freqs, s11re, s11im, vswrArr, rlArr, zRe, zIm;
     QJsonArray s21re, s21im, s21gain, znormRe, znormIm;
+    double coax = 0.0;
     if (vna.isConnected()) {
         auto f = vna.readFrequencies();
         auto s11 = vna.readData(0);
@@ -1084,6 +1085,17 @@ QString execGetVnaData(const QJsonObject&, dsp::SpectrumEngine* engine,
             double g = vna::s21GainDb(s21[i]);
             s21gain.append(std::isfinite(g) ? g : 0.0);
         }
+        // Coax loss per metre: derive the cable length from TDR on the live S11
+        // (vf=0.66 nominal), then divide the midpoint S21 insertion loss by that
+        // length. Honest: no TDR peak -> 0 + note, never fabricated.
+        if (!f.empty() && !s11.empty()) {
+            std::vector<double> fv(f.begin(), f.end());
+            vna::TdrResult t = vna::tdrCable(fv, s11, 0.66);
+            if (t.valid && t.cable_length_m > 0.0 && !s21gain.isEmpty()) {
+                double mid = s21gain.at(s21gain.size() / 2).toDouble(); // dB (<=0)
+                if (std::isfinite(mid)) coax = -mid / t.cable_length_m;
+            }
+        }
     }
     o["frequencies"] = freqs;
     o["s11_re"] = s11re; o["s11_im"] = s11im;
@@ -1092,18 +1104,6 @@ QString execGetVnaData(const QJsonObject&, dsp::SpectrumEngine* engine,
     o["s21_re"] = s21re; o["s21_im"] = s21im;
     o["s21_gain_db"] = s21gain;
     o["smith_z_real"] = znormRe; o["smith_z_imag"] = znormIm;
-    // Coax loss per metre: derive the cable length from TDR on the live S11
-    // (vf=0.66 nominal), then divide the midpoint S21 insertion loss by that
-    // length. Honest: no device / no TDR peak -> 0 + note, never fabricated.
-    double coax = 0.0;
-    if (vna.isConnected() && !f.empty() && !s11.empty()) {
-        std::vector<double> fv(f.begin(), f.end());
-        vna::TdrResult t = vna::tdrCable(fv, s11, 0.66);
-        if (t.valid && t.cable_length_m > 0.0 && !s21gain.empty()) {
-            double mid = s21gain[s21gain.size() / 2];   // dB (<=0)
-            if (std::isfinite(mid)) coax = -mid / t.cable_length_m;
-        }
-    }
     o["coax_loss_db_per_m"] = coax;
     o["note"] = QString::fromUtf8("未连接 NanoVNA：测量数组为空；coax_loss_db_per_m 需已知电缆长度（用 vna_tdr_cable 测长）");
     addSourceFields(o, src);
