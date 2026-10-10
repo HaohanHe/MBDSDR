@@ -64,8 +64,8 @@ void Agent::configureFromConfig() {
 }
 
 QString Agent::localCommand(const QString& input) {
-    // "一句话测驻波"：识别到驻波/VSWR/天线驻波意图即走真实三通道工具编排。
-    if (isVswrIntent(input))
+    // 统一 VNA 意图入口：驻波/谐振晶体/TDR 电缆/L-C，内部按问题分发。
+    if (isVnaOnrampIntent(input))
         return runVswrOnramp(engine_, input);
 
     static QRegularExpression freqRe(

@@ -88,6 +88,10 @@ private slots:
     void goodReading();
     void badReading();
     void noFrequencyAsksForOne();
+    void intentClassification();
+    void cableVfTable();
+    void tdrNoTypeListsOptions();
+    void resonanceNoNominalAsks();
 };
 
 void TestVnaOnramp::parseTarget() {
@@ -161,8 +165,46 @@ void TestVnaOnramp::badReading() {
 
 void TestVnaOnramp::noFrequencyAsksForOne() {
     dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(
+        std::make_unique<ReplayTransport>(calibratedScript(0.1)));
     QString out = ai::runVswrOnramp(&engine, QString::fromUtf8("我的天线驻波怎么样"));
     QVERIFY(out.contains(QString::fromUtf8("请在问题里给出目标频率")));
+}
+
+void TestVnaOnramp::intentClassification() {
+    using ai::VnaIntent;
+    QCOMPARE(ai::classifyVnaIntent(QString::fromUtf8("天线在438.5MHz驻波多少")), VnaIntent::Vswr);
+    QCOMPARE(ai::classifyVnaIntent(QString::fromUtf8("8MHz晶体谐振频率Q是多少")), VnaIntent::Resonance);
+    QCOMPARE(ai::classifyVnaIntent(QString::fromUtf8("RG58电缆多长")), VnaIntent::Tdr);
+    QCOMPARE(ai::classifyVnaIntent(QString::fromUtf8("这个电感多大")), VnaIntent::Lc);
+    QVERIFY(ai::isVnaOnrampIntent(QString::fromUtf8("电缆多长")));
+    QVERIFY(!ai::isVnaOnrampIntent(QString::fromUtf8("今天天气怎么样")));
+}
+
+void TestVnaOnramp::cableVfTable() {
+    auto vf = ai::parseCableVf(QString::fromUtf8("RG-58 电缆"));
+    QVERIFY(vf.has_value());
+    QCOMPARE(vf->second, 0.66);
+    QCOMPARE(ai::parseCableVf(QString::fromUtf8("LMR400 多长"))->second, 0.85);
+    QVERIFY(!ai::parseCableVf(QString::fromUtf8("随便什么线")).has_value());
+    QVERIFY(ai::cableVfOptionsText().contains("RG-58"));
+}
+
+void TestVnaOnramp::tdrNoTypeListsOptions() {
+    dsp::SpectrumEngine engine;
+    auto script = calibratedScript(0.1);
+    engine.vnaClient().attachTransport(std::make_unique<ReplayTransport>(std::move(script)));
+    QString out = ai::runVswrOnramp(&engine, QString::fromUtf8("电缆多长"));
+    QVERIFY(out.contains(QString::fromUtf8("RG-58")));
+    QVERIFY(out.contains(QString::fromUtf8("速度因子")));
+}
+
+void TestVnaOnramp::resonanceNoNominalAsks() {
+    dsp::SpectrumEngine engine;
+    auto script = calibratedScript(0.1);
+    engine.vnaClient().attachTransport(std::make_unique<ReplayTransport>(std::move(script)));
+    QString out = ai::runVswrOnramp(&engine, QString::fromUtf8("晶体谐振频率Q多少"));
+    QVERIFY(out.contains(QString::fromUtf8("标称频率")));
 }
 
 QTEST_MAIN(TestVnaOnramp)

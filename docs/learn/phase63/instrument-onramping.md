@@ -49,3 +49,25 @@
 - core 源：`src/ai/vna_onramp.cpp`（紧随 `src/ai/agent_tools.cpp` 后）。
 - 测试目标：`test_vna_onramp tests/test_vna_onramp.cpp`，链 `mbdsdr_core` +
   `Qt6::Test/Core/Network/Widgets/Multimedia/Concurrent`，`add_test(NAME vna_onramp ...)`。
+  （线 B 已在统一 CMake 接好 vna_onramp.cpp 与 test_vna_onramp。）
+
+## 6. 统一 VNA 意图入口（本批扩展）
+
+`isVnaOnrampIntent` 取代单一驻波分支，`runVswrOnramp` 内部分发 `VnaIntent`：
+
+- **驻波/匹配**：现有四分支（接线/OSL/good/ok/bad）。
+- **谐振/晶体**：有标称频率 → 窄扫 ±10kHz → `analyze_vna_resonance` → fr/Q/BW/ESR/串并点；
+  无标称 → 请用户给出标称频率。
+- **TDR 电缆**：识别电缆类型取速度因子（常量表 RG-58/213≈0.66、RG-8X≈0.78、LMR-400≈0.85）；
+  未指定 → 列选项不硬编码假设；指定后 `vna_tdr_cable` → 电缆长度/故障距离。
+- **L/C**：目标频点由 S11 虚部经 `vna::reactanceToHenries/Farads` 派生（感性 nH/容性 pF）。
+
+诚实空态贯穿：未连接/未校准/无效分析（点数不足、span=0、无反射峰）均给真实引导，不伪造。
+测试：`test_vna_onramp` 15 passed；`test_agent` 38 passed 无回归。
+
+## 7. 本批未做（诚实标注）
+
+- VNA tab 数值读数区与三档新快照：线 B 并行改 vna_panel.*，为避免同树冲突本批未动 UI，
+  下一批 localCommand 稳定后再接。
+- Smith/Polar/滤波器一句话意图与曲线：待 analyze_vna_filter 交付后下轮。
+- 真机未在环，待用户插 H/H4 回传。
