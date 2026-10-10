@@ -255,12 +255,17 @@ private slots:
         const QString dir = QString::fromLocal8Bit(
             qgetenv("MBD_ARTIFACT_DIR"));
         if (dir.isEmpty()) return;   // not requested: skip silently
-        dlg_->resize(780, 500);
+        // Width is parameterized via MBD_W so the same harness covers the narrow
+        // 640 / 960 / full 1920 breakpoints (MBD_CAL demo shots).
+        const int w = qEnvironmentVariableIntValue("MBD_W");
+        dlg_->resize(w > 0 ? w : 780, 500);
         dlg_->show();
         QTest::qWait(30);
         QImage img = dlg_->grab().toImage();
         QVERIFY2(!img.isNull(), "offscreen grab must produce an image");
-        const QString path = dir + QStringLiteral("/calibration_dialog.png");
+        const QString tag = qgetenv("MBD_CAL_TAG");
+        const QString path = dir + QStringLiteral("/calibration_dialog%1.png")
+                                  .arg(tag.isEmpty() ? QString() : QStringLiteral("_") + tag);
         QVERIFY2(img.save(path), qPrintable(QString("save %1").arg(path)));
     }
 
