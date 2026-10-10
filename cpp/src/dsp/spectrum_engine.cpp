@@ -7,6 +7,7 @@
 #include "power_spectrum.h"
 #include "noise_blanker.h"
 #include "null_audio_sink.h"
+#include "lrpt_fec.h"
 #include "core/tokens.h"
 
 #include <QDebug>
@@ -295,8 +296,15 @@ void SpectrumEngine::setCdcssGateAudio(bool on) {
 
 void SpectrumEngine::setLrptEnabled(bool on) {
     lrptEnabled_.store(on);
-    // The C++ LRPT demod/FEC port lands in step 4; until then this only arms the
-    // desired flag. When disabled we keep the honest-empty sync/frame stats.
+    if (!on) { lrptSyncLocked_ = false; lrptDecodedFrames_ = 0; }
+}
+
+void SpectrumEngine::feedLrptCadu(const uint8_t* cadu, int n) {
+    if (!lrptEnabled_.load() || cadu == nullptr || n < 1024) return;
+    auto d = lrptDecodeCadu(cadu, n);
+    if (!d) { lrptSyncLocked_ = false; return; }   // 诚实空态：RS 不可纠
+    lrptSyncLocked_ = true;
+    lrptDecodedFrames_++;
 }
 
 void SpectrumEngine::setFt8Enabled(bool on) {
