@@ -167,6 +167,15 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Optional: seed the persisted FT8 digital-mode preference (MBD_FT8=1)
+    // BEFORE MainWindow restores it, so the FT8 checkbox comes up armed at the
+    // real persisted round-trip. Off by default so other shots unchanged.
+    if (qgetenv("MBD_FT8") == "1") {
+        QSettings s("MBDSDR", "MBDSDR");
+        s.setValue(mbdsdr::tokens::kSettingsKeyFt8Enabled, true);
+        s.sync();
+    }
+
     // Optional: seed the persisted Rx demod-mode + bandwidth (MBD_MODE=USB
     // MBD_BW=9000) BEFORE MainWindow restores it, so the left "解调" / "带宽"
     // combos render the restored values -- the real persisted round-trip, not a

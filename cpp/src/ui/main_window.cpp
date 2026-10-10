@@ -768,6 +768,30 @@ MainWindow::MainWindow(QWidget* parent)
     cdcssRow->addStretch(1);
     gRxLay->addRow("DCS码", cdcssRow);
 
+    // ---- FT8 digital mode (phase63 step6) -----------------------------------
+    ft8Check_ = new QCheckBox("FT8", gRx);
+    ft8Check_->setObjectName("ft8Check");
+    ft8Check_->setToolTip(QStringLiteral(
+        "FT8 数字模式：C++ Costas 检测 + LDPC(174,91) BP 解码。开启后在 12 kS/s "
+        "窄带复基带上搜索 15 s 帧；徽标镜像引擎真实状态，无信号不显示假读数。"));
+    connect(ft8Check_, &QCheckBox::toggled, this, [this](bool on) {
+        if (engine_) engine_->setFt8Enabled(on);
+        scheduleSave();
+        updateFt8Badge();
+    });
+    gRxLay->addRow("数字模式", ft8Check_);
+
+    ft8Badge_ = new QLabel("--", gRx);
+    ft8Badge_->setObjectName("ft8Badge");
+    ft8Badge_->setAlignment(Qt::AlignCenter);
+    ft8Badge_->setStyleSheet(
+        QString("QLabel#ft8Badge { color: %1; }")
+            .arg(QString::fromUtf8(tokens::kTextSecondary)));
+    auto* ft8Row = new QHBoxLayout;
+    ft8Row->addWidget(ft8Badge_);
+    ft8Row->addStretch(1);
+    gRxLay->addRow("FT8状态", ft8Row);
+
     leftLay->addWidget(gRx);
 
     // ---- Multi-VFO panel ---------------------------------------------------
@@ -2508,10 +2532,12 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ctcssPollTimer_, &QTimer::timeout, this, [this]{
         updateCtcssBadge();
         updateCdcssBadge();
+        updateFt8Badge();
     });
     ctcssPollTimer_->start(250);
     updateCtcssBadge();               // paint the initial honest state now
     updateCdcssBadge();
+    updateFt8Badge();
     connect(engine_, &dsp::SpectrumEngine::squelchState,
             this, &MainWindow::onSquelchState);
     connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
@@ -4417,6 +4443,8 @@ void MainWindow::saveUiState() {
                    cdcssCodeCombo_->currentText());
     if (cdcssGateCheck_)
         s.setValue(tokens::kSettingsKeyCdcssGate, cdcssGateCheck_->isChecked());
+    if (ft8Check_)
+        s.setValue(tokens::kSettingsKeyFt8Enabled, ft8Check_->isChecked());
     s.setValue("rx/dbMin", static_cast<float>(spectrum_->dbMinValue()));
     s.setValue("rx/dbMax", static_cast<float>(spectrum_->dbMaxValue()));
 
@@ -4803,6 +4831,16 @@ void MainWindow::restoreUiState() {
             if (engine_) engine_->setCdcssGateAudio(gateOn);
         }
         updateCdcssBadge();
+    }
+
+    // FT8 digital mode restore (default off).
+    if (ft8Check_) {
+        const bool ft8On = s.value(tokens::kSettingsKeyFt8Enabled, false).toBool();
+        ft8Check_->blockSignals(true);
+        ft8Check_->setChecked(ft8On);
+        ft8Check_->blockSignals(false);
+        if (engine_) engine_->setFt8Enabled(ft8On);
+        updateFt8Badge();
     }
 
     const float dbMin = s.value("rx/dbMin", static_cast<float>(tokens::kDbLowerDefault)).toFloat();
@@ -5712,6 +5750,47 @@ void MainWindow::updateCdcssBadge() {
                 .arg(QString::fromUtf8(tokens::kTextSecondary)));
         cdcssBadge_->setToolTip(QStringLiteral("已开启，等待目标 DCS 码"));
     }
+}
+
+void MainWindow::updateFt8Badge() {
+    if (!ft8Badge_ || !engine_) return;
+    // Honest-state rule: mirrors ONLY engine ft8Enabled()/ft8Present()/ft8DecodedText().
+    //  - detector off   -> "--"（未开启）
+    //  - on, no candidate -> "检测中"（secondary）
+    //  - on, candidate, no decode -> "检出"（warning，检测到帧但 BP 未出文本）
+    //  - on, decoded text -> success-green 截断前 18 字符（防溢出）
+    if (!engine_->ft8Enabled()) {
+        ft8Badge_->setText(QStringLiteral("--"));
+        ft8Badge_->setStyleSheet(
+            QString("QLabel#ft8Badge { color: %1; }")
+                .arg(QString::fromUtf8(tokens::kTextSecondary)));
+        ft8Badge_->setToolTip(QStringLiteral("FT8 检测未开启"));
+        return;
+    }
+    const std::string dec = engine_->ft8DecodedText();
+    if (!dec.empty()) {
+        QString t = QString::fromStdString(dec);
+        if (t.size() > 18) t = t.left(18) + QStringLiteral("…");
+        ft8Badge_->setText(t);
+        ft8Badge_->setStyleSheet(
+            QString("QLabel#ft8Badge { color: %1; }")
+                .arg(QString::fromUtf8(tokens::kSuccess)));
+        ft8Badge_->setToolTip(QString::fromStdString(dec));
+        return;
+    }
+    if (engine_->ft8Present()) {
+        ft8Badge_->setText(QStringLiteral("检出帧"));
+        ft8Badge_->setStyleSheet(
+            QString("QLabel#ft8Badge { color: %1; }")
+                .arg(QString::fromUtf8(tokens::kWarning)));
+        ft8Badge_->setToolTip(QStringLiteral("检测到帧同步，BP 解码未出文本（CRC/收敛）"));
+        return;
+    }
+    ft8Badge_->setText(QStringLiteral("检测中"));
+    ft8Badge_->setStyleSheet(
+        QString("QLabel#ft8Badge { color: %1; }")
+            .arg(QString::fromUtf8(tokens::kTextSecondary)));
+    ft8Badge_->setToolTip(QStringLiteral("FT8 已开启，等待 15 s 帧"));
 }
 
 void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {
