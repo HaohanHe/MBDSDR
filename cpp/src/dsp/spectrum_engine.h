@@ -130,6 +130,10 @@ public:
     // 喂一段 12 kS/s 复基带窗（检测→LLR→解码全链路）。未启用则直接空态返回。
     // 测试注入/引擎 run loop 共用此入口；CRC 不过/不收敛 -> ft8Decoded_ 保持空。
     void processFt8Window(const std::complex<float>* iq, std::size_t n);
+    // 增量喂 12 kS/s 复基带（运行时主路径：vfo channelizer 后/run loop 调用）。
+    // 内部 15 s 环形缓冲，满窗触发 processFt8Window；多帧去重（相同文本+相近频偏合并）。
+    void feedFt8Baseband(const std::complex<float>* iq, std::size_t n);
+    int    ft8DecodedFrameCount() const { return ft8DecodedFrames_.load(); }
     // True iff a network-audio tap is currently installed (setNetworkAudioSink).
     // The detailed stream stats live on the sink the caller installed.
     bool  networkTapActive() const { return networkTap_ != nullptr; }
@@ -612,6 +616,11 @@ private:
     std::atomic<bool> ft8Enabled_{false};
     Ft8Candidate ft8Last_;
     std::string ft8Decoded_;   // 最近一次解码帧文本（空=诚实空态）
+    // 15 s 环形缓冲（12 kS/s × 15 s = 180000 复样本）+ 多帧去重状态。
+    std::vector<std::complex<float>> ft8Ring_;
+    int  ft8RingFilled_ = 0;
+    std::atomic<int> ft8DecodedFrames_{0};
+    std::string ft8LastDedupKey_;   // 去重键（文本+频偏粗桶）
     AudioOutput* audioOut_ = nullptr;
     // Active 48k write path. Defaults to audioOut_; an injected test sink
     // (setTestAudioSink) redirects it without touching the settings-dialog

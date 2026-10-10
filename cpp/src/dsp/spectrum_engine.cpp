@@ -314,6 +314,36 @@ void SpectrumEngine::processFt8Window(const std::complex<float>* iq, std::size_t
     auto d = ft8Codec_.decode(llr.data(), llr.size(), 50);
     if (!d) return;         // CRC 不过/不收敛 -> 诚实空态，不产出文本
     ft8Decoded_ = d->from + " " + d->to + " " + d->exchange;
+    // 多帧去重：相同文本 + 相近频偏（±6 Hz 粗桶）合并，不重复计数。
+    std::string key = ft8Decoded_ + "|" +
+                      std::to_string((int)std::round(c.freqOffsetHz / 6.0));
+    if (key != ft8LastDedupKey_) {
+        ft8LastDedupKey_ = key;
+        ft8DecodedFrames_.fetch_add(1);
+    }
+}
+
+void SpectrumEngine::feedFt8Baseband(const std::complex<float>* iq, std::size_t n) {
+    if (!ft8Enabled_.load() || iq == 0 || n == 0) return;
+    constexpr int kWin = 180000;   // 12 kS/s × 15 s
+    if (ft8Ring_.capacity() < (std::size_t)kWin) {
+        ft8Ring_.resize(kWin);
+        ft8RingFilled_ = 0;
+    }
+    // 环形写入：新样本覆盖最旧，维护最近 kWin 样本。
+    for (std::size_t i = 0; i < n; ++i) {
+        ft8Ring_[ft8RingFilled_ % kWin] = iq[i];
+        ++ft8RingFilled_;
+    }
+    if (ft8RingFilled_ < kWin) return;   // 未满窗，不触发
+    // 满窗：把环形缓冲按顺序排成连续 kWin 样本喂入。
+    std::vector<std::complex<float>> win(kWin);
+    int start = ft8RingFilled_ % kWin;
+    for (int i = 0; i < kWin; ++i) win[i] = ft8Ring_[(start + i) % kWin];
+    processFt8Window(win.data(), win.size());
+    // 滑动窗：保留最近 1 s（12000 样本）作重叠，避免每 15s 硬切丢失帧。
+    ft8RingFilled_ = 12000;
+    for (int i = 0; i < 12000; ++i) ft8Ring_[i] = win[kWin - 12000 + i];
 }
 
 bool SpectrumEngine::squelchEnabled() const {

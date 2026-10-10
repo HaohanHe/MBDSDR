@@ -968,6 +968,7 @@ QString execGetFt8Status(const QJsonObject&, dsp::SpectrumEngine* engine,
     o["sync_quality"] = engine->ft8SyncQuality();
     o["candidate_count"] = engine->ft8CandidateCount();
     o["decoded_text"] = QString::fromStdString(engine->ft8DecodedText());
+    o["decoded_frame_count"] = engine->ft8DecodedFrameCount();
     addSourceFields(o, src);
     return compact(o);
 }
