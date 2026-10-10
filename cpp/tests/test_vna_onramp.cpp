@@ -96,6 +96,7 @@ private slots:
     void tdrNoTypeListsOptions();
     void resonanceNoNominalAsks();
     void resonanceRlcTheoryPin();
+    void filterNoShapeHonest();
 };
 
 void TestVnaOnramp::parseTarget() {
@@ -181,6 +182,7 @@ void TestVnaOnramp::intentClassification() {
     QCOMPARE(ai::classifyVnaIntent(QString::fromUtf8("8MHz晶体谐振频率Q是多少")), VnaIntent::Resonance);
     QCOMPARE(ai::classifyVnaIntent(QString::fromUtf8("RG58电缆多长")), VnaIntent::Tdr);
     QCOMPARE(ai::classifyVnaIntent(QString::fromUtf8("这个电感多大")), VnaIntent::Lc);
+    QCOMPARE(ai::classifyVnaIntent(QString::fromUtf8("这个滤波器截止带宽多少")), VnaIntent::Filter);
     QVERIFY(ai::isVnaOnrampIntent(QString::fromUtf8("电缆多长")));
     QVERIFY(!ai::isVnaOnrampIntent(QString::fromUtf8("今天天气怎么样")));
 }
@@ -229,6 +231,22 @@ void TestVnaOnramp::resonanceRlcTheoryPin() {
     QVERIFY(std::abs(r.series_fr_hz - frTheory) < 0.5e6);
     // ESR 应接近 Rs=10Ω（容差 ±2Ω）。
     QVERIFY(std::abs(r.esr - Rs) < 2.0);
+}
+
+void TestVnaOnramp::filterNoShapeHonest() {
+    dsp::SpectrumEngine engine;
+    // 滤波器分支不发 sweep，直接 frequencies + data 1(S21 空) -> 无形态 -> 诚实引导。
+    std::vector<ReplayTransport::Step> script = {
+        {"help", {}}, {"version", {"1.0.174-hugen"}}, {"info", {"NanoVNA-H"}},
+        {"cal", {"load open short thru cal'ed"}},
+        {"frequencies", {"438000000", "439000000"}},
+        {"data 1", {}},
+    };
+    engine.vnaClient().attachTransport(
+        std::make_unique<ReplayTransport>(std::move(script)));
+    QString out = ai::runVswrOnramp(&engine, QString::fromUtf8("这个滤波器什么特性"));
+    QVERIFY(out.contains(QString::fromUtf8("滤波器")));
+    QVERIFY(out.contains(QString::fromUtf8("扫频")));
 }
 
 QTEST_MAIN(TestVnaOnramp)

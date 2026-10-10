@@ -79,3 +79,35 @@ tool_schema.cpp / `execAnalyzeVnaFilter` / dispatch / `cmdAnalyzeVnaFilter`（�
 
 ## 待加 CMake 清单（本批无新文件，仅 vna_rf.cpp 已列上批）
 本批纯函数全部并入既有 `src/vna/vna_rf.{h,cpp}`，无新源文件；test_vna_rf.cpp 同上批。
+
+---
+
+# 第④批：TDR/LC 钉扎 + Smith/Polar 曲线进 VNA tab + EFHW/LC 匹配（HEAD=d156d09）
+
+## TDR/LC 数值钉扎
+- test_vna_rf `tdrFindsSyntheticCable`：合成 S11 含已知延迟反射峰 -> tdrCable 报正长度（O(N²) 直接 IDFT，Kaiser 窗当前为平坦占位，只做正长度/类型钉扎，不做紧误差界——诚实标注精度有限）。
+- LC 派生：`reactanceToHenries/Farads` 已知 L/C 夹具钉扎；`lMatchNetwork` 已知点钉扎。
+
+## EFHW/LC 匹配纯函数（vna_rf.{h,cpp} 新增，纯函数，未挂工具）
+`lMatchNetwork(z_load, f_hz, r0=50)`：canonical series-on-load L 匹配
+（要求 R0>R，Q=sqrt(R0/R-1)，Xs=Q·R-X，Xp=R0/Q，再转 L/C）。
+已知点钉扎：load 12.5Ω -> 50Ω @3.5MHz，Q=1.732，shunt L≈1.31µH。
+
+## coax_loss_db_per_m 接线（agent_tools.cpp execGetVnaData）
+connected 时用 `vna::tdrCable(f, s11, 0.66)` 测 cable_length_m，再除以 s21 中点增益 dB（负值取反）得 dB/m；无设备/无 TDR 峰 -> 0+note，诚实不伪造。
+
+## Smith/Polar 曲线进 VNA tab（vna_panel.{h,cpp}）
+新增 `VnaSmithWidget`（QPainter 自绘，无外部图表依赖）：Smith 单位圆 + 水平直径 + S11 gamma 轨迹（mag/phase -> x/y，clamp |g|<=1）+ 首点/黄尾点；无数据诚实 "--"。
+applyReadout 喂 s11；布局弹性走 tokens::scaled。
+
+## 快照三档（MBD_VNASHOT=1 + MBD_TAB=VNA，ui_shot_narrow）
+- 1920：Smith 单位圆 + S11 轨迹 + 黄尾点完整，caption 可读，0 裁切 0 叠字。
+- 960：同上完整，VSWR/S21 曲线干净。
+- 640（窄档 floor）：图圆本身完整不裁，右轨窄致长 caption 末尾截断（"Smith / P…"）——诚实标注窄档触 floor 行为。
+
+## 计数
+- test_vna_rf **10 passed**（+lMatchKnownPoint）。
+- 金集不变（本批不加工具）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17，全 0 failed。
+
+## 待加 CMake 清单
+本批无新源文件（VnaSmithWidget 在既有 vna_panel.cpp；lMatchNetwork 在既有 vna_rf.cpp）；无新测试目标（test_vna_rf.cpp 已列）。

@@ -22,6 +22,7 @@ private slots:
     void tdrFindsSyntheticCable();
     void smithPolarKnownPoint();
     void filterDetectsBandpass();
+    void lMatchKnownPoint();
     void honestEmpty();
 };
 
@@ -112,6 +113,18 @@ void TestVnaRf::filterDetectsBandpass() {
     QVERIFY(std::abs(r.f_low_hz - 20e6) < 1e6);
     QVERIFY(std::abs(r.f_high_hz - 30e6) < 1e6);
     QVERIFY(std::abs(r.stopband_atten_db - 40.0) < 1.0);
+}
+
+// Load 12.5 Ohm (resistive) -> match to 50 at 3.5 MHz. Q = sqrt(50/12.5-1)=sqrt(3)=1.732.
+// Shunt Xp = 50/1.732 = 28.87 Ohm (shunt inductor L=Xp/(2pi f) ~ 1.31 uH).
+void TestVnaRf::lMatchKnownPoint() {
+    LMatchResult m = lMatchNetwork({12.5, 0.0}, 3.5e6, 50.0);
+    QVERIFY(m.valid);
+    QVERIFY(std::abs(m.q - 1.732) < 0.05);
+    QVERIFY(m.shunt_henry > 0.0);
+    QVERIFY(std::abs(m.shunt_henry - 1.31e-6) < 0.1e-6);
+    // R0 <= load R -> invalid (canonical topology).
+    QVERIFY(!lMatchNetwork({75.0, 0.0}, 3.5e6, 50.0).valid);
 }
 
 QTEST_MAIN(TestVnaRf)

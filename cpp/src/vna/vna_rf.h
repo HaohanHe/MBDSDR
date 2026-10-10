@@ -94,5 +94,22 @@ struct FilterResult {
 FilterResult analyzeFilter(const std::vector<double>& f_hz,
                            const std::vector<double>& s21_db);
 
+// ---- L-network matching (EFHW / antenna matching) -------------------------
+// Single-section L match between a complex load Zload and a target R0 (Ohm,
+// e.g. 50). Given a design quality factor Q, returns the series + shunt L/C
+// values (Henry / Farad) for the two canonical topologies. Pure textbook
+// matching equations; no device specifics.
+struct LMatchResult {
+    bool valid = false;
+    double q = 0;
+    double series_henry = 0;   // series arm inductor (>0) / capacitor
+    double series_farad = 0;   // series arm value (whichever applies)
+    double shunt_henry = 0;
+    double shunt_farad = 0;
+    std::string topology;      // "series_L_shunt_C" / "shunt_L_series_C" / ""
+};
+// f_hz = design frequency. Honest: valid=false when R0<=0, f<=0, or load R<=0.
+LMatchResult lMatchNetwork(std::complex<double> z_load, double f_hz, double r0 = 50.0);
+
 } // namespace vna
 } // namespace mbdsdr

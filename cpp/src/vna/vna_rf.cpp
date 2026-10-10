@@ -214,5 +214,28 @@ FilterResult analyzeFilter(const std::vector<double>& f_hz,
     return out;
 }
 
+// ---- L-network matching ---------------------------------------------------
+LMatchResult lMatchNetwork(std::complex<double> z_load, double f_hz, double r0) {
+    LMatchResult out;
+    double R = z_load.real();
+    double X = z_load.imag();
+    if (R <= 0.0 || f_hz <= 0.0 || r0 <= 0.0) return out;
+    if (r0 <= R) return out;   // canonical series-on-load L match assumes R0>R
+    double q2 = r0 / R - 1.0;
+    if (q2 <= 0.0) return out;
+    double q = std::sqrt(q2);
+    out.q = q;
+    double Xs = q * R - X;     // series reactance on the load side
+    double Xp = r0 / q;        // shunt reactance on the source side
+    const double w = kTwoPi * f_hz;
+
+    if (Xs >= 0.0) { out.series_henry = Xs / w; out.topology = "series_L"; }
+    else           { out.series_farad = -1.0 / (w * Xs); out.topology = "series_C"; }
+    if (Xp >= 0.0) out.shunt_henry = Xp / w;
+    else           out.shunt_farad = -1.0 / (w * Xp);
+    out.valid = true;
+    return out;
+}
+
 } // namespace vna
 } // namespace mbdsdr

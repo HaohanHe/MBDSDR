@@ -44,6 +44,25 @@ private:
     std::vector<double> y_;
 };
 
+// Self-painted Smith + Polar chart: draws the Smith unit circle with a few R/X
+// grid arcs and the measured S11 trajectory on the same (gamma) plane. Empty
+// data -> honest blank caption. Pure QPainter, no external chart dependency.
+class VnaSmithWidget : public QWidget {
+    Q_OBJECT
+public:
+    explicit VnaSmithWidget(const QString& caption, QWidget* parent = nullptr);
+    void setS11(const std::vector<std::complex<double>>& s);
+    void clear();
+    QSize sizeHint() const override;
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+
+private:
+    QString caption_;
+    std::vector<std::complex<double>> s11_;
+};
+
 class VnaPanel : public QWidget {
     Q_OBJECT
 public:
@@ -85,6 +104,7 @@ private:
 
     VnaTraceWidget* s11Plot_ = nullptr;  // VSWR vs frequency
     VnaTraceWidget* s21Plot_ = nullptr;  // gain dB vs frequency
+    QWidget* smithPlot_  = nullptr;  // Smith + Polar trajectory widget
     QTimer*         timer_   = nullptr;
 };
 

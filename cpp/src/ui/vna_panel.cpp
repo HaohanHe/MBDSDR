@@ -94,6 +94,81 @@ void VnaTraceWidget::paintEvent(QPaintEvent*) {
 }
 
 // ---------------------------------------------------------------------------
+// VnaSmithWidget — Smith + Polar chart
+// ---------------------------------------------------------------------------
+VnaSmithWidget::VnaSmithWidget(const QString& caption, QWidget* parent)
+    : QWidget(parent), caption_(caption) {
+    setMinimumHeight(tokens::scaled(96));
+}
+
+void VnaSmithWidget::setS11(const std::vector<std::complex<double>>& s) {
+    s11_ = s;
+    update();
+}
+
+void VnaSmithWidget::clear() {
+    if (!s11_.empty()) { s11_.clear(); update(); }
+}
+
+QSize VnaSmithWidget::sizeHint() const {
+    return QSize(tokens::scaled(200), tokens::scaled(110));
+}
+
+void VnaSmithWidget::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const QRectF r = rect().adjusted(2, 2, -2, -2);
+    p.setPen(QPen(tokens::cardEdge(), 1.0));
+    p.setBrush(tokens::card1());
+    p.drawRoundedRect(r, tokens::scaled(4), tokens::scaled(4));
+
+    if (s11_.empty()) {
+        p.setPen(tokens::rgbaA(tokens::kTextAlphaQuaternary));
+        QFont f = p.font(); f.setPointSizeF(tokens::kFontAuxPt); p.setFont(f);
+        p.drawText(r, Qt::AlignCenter, caption_);
+        return;
+    }
+
+    // Smith unit circle centered in the widget, gamma in [-1,1].
+    const double cx = r.center().x(), cy = r.center().y();
+    const double rad = std::min(r.width(), r.height()) / 2.0 - tokens::scaled(6);
+    auto toXY = [&](std::complex<double> g) {
+        double m = std::abs(g);
+        if (m > 1.0) m = 1.0;            // clamp outside the unit circle
+        double ph = std::arg(g);
+        return QPointF(cx + rad * m * std::cos(ph),
+                       cy - rad * m * std::sin(ph));
+    };
+
+    // unit circle + horizontal diameter
+    p.setPen(QPen(tokens::rgbaA(tokens::kTextAlphaTertiary), 0.8));
+    p.setBrush(Qt::NoBrush);
+    p.drawEllipse(QPointF(cx, cy), rad, rad);
+    p.drawLine(QPointF(cx - rad, cy), QPointF(cx + rad, cy));
+    // center mark (gamma=0 -> z=50)
+    p.drawPoint(QPointF(cx, cy));
+
+    // S11 trajectory
+    QPolygonF line;
+    for (auto& g : s11_) line << toXY(g);
+    QColor trace(QString::fromUtf8(tokens::kRssiTrendColor));
+    trace.setAlphaF(0.95);
+    p.setPen(QPen(trace, 1.4));
+    p.drawPolyline(line);
+    // mark first/last points
+    if (!line.isEmpty()) {
+    p.setBrush(trace);
+    p.drawEllipse(line.first(), 2.0, 2.0);
+    p.setBrush(Qt::yellow);
+    p.drawEllipse(line.last(), 2.4, 2.4);
+    }
+
+    p.setPen(tokens::rgbaA(tokens::kTextAlphaTertiary));
+    QFont f = p.font(); f.setPointSizeF(tokens::kFontAuxPt); p.setFont(f);
+    p.drawText(r.adjusted(4, 2, -4, -2), Qt::AlignTop | Qt::AlignLeft, caption_);
+}
+
+// ---------------------------------------------------------------------------
 // VnaPanel
 // ---------------------------------------------------------------------------
 VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
@@ -141,8 +216,10 @@ VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
 
     s11Plot_ = new VnaTraceWidget(QString::fromUtf8("S11 VSWR"), this);
     s21Plot_ = new VnaTraceWidget(QString::fromUtf8("S21 增益 dB"), this);
+    smithPlot_ = new VnaSmithWidget(QString::fromUtf8("Smith / Polar (S11)"), this);
     lay->addWidget(s11Plot_, 1);
     lay->addWidget(s21Plot_, 1);
+    lay->addWidget(smithPlot_, 1);
 
     readoutLabel_ = new QLabel(vnaReadoutText(std::nan(""), 0, std::nan("")), this);
     lay->addWidget(readoutLabel_);
@@ -208,6 +285,7 @@ void VnaPanel::applyReadout(const std::vector<long>& freqs,
 
     s11Plot_->setData(vswr);
     s21Plot_->setData(gain);
+    static_cast<VnaSmithWidget*>(smithPlot_)->setS11(s11);
     readoutLabel_->setText(vnaReadoutText(best, bestHz, midGain));
 
     // 谐振数值读数：由 vna_rf 在真实扫频上派生；无效 -> 诚实 "--"。

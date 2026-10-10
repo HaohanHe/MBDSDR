@@ -40,8 +40,8 @@ struct VswrReport {
 // "驻波/VSWR/天线驻波"意图识别。
 bool isVswrIntent(const QString& input);
 
-// 统一 VNA 意图：驻波/谐振晶体/TDR 电缆/L-C 测量。agent.cpp 只调这一个入口。
-enum class VnaIntent { Vswr, Resonance, Tdr, Lc };
+// 统一 VNA 意图：驻波/谐振晶体/TDR 电缆/L-C/滤波器。agent.cpp 只调这一个入口。
+enum class VnaIntent { Vswr, Resonance, Tdr, Lc, Filter };
 bool isVnaOnrampIntent(const QString& input);
 VnaIntent classifyVnaIntent(const QString& input);
 

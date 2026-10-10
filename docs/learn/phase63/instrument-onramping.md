@@ -82,3 +82,14 @@
   理论 fr≈159.15 MHz，实测 fr 在 ±0.5 MHz 内、ESR≈10Ω±2Ω。
 - 测试：test_vna_onramp 16 passed（含数值钉扎）；test_vna_panel_format 7 passed。
 - 注：execGetVnaData 现同时读 s21（data 1），回放脚本已对齐。
+
+## 9. 第④批：滤波器意图 + SDR 听手台对照
+
+- **滤波器意图**：`classifyVnaIntent` 增 `Filter`（vna_onramp.cpp:52）；runVswrOnramp 在当前
+  扫频上真实调 `analyze_vna_filter`，报形态(bandpass/bandstop/highpass/lowpass)/-3dB 边沿/
+  带宽/插损/阻带衰减；平坦或点数不足诚实说明并提示先设扫频范围。
+- **SDR 听手台**：`agent.cpp localCommand` 增 listen 分支（:81 起）——"我想听 409.750MHz
+  手台" → 真实 `onSetCenterFreq` 调谐 + `setDemodMode("NFM")`，附源未启动/udev/dialout 与
+  CTCSS/静噪提示；复用既有引擎方法，未新增工具。
+- 测试：test_vna_onramp 17 passed（含滤波器空态分支 + 意图分类 Filter）；test_agent 38 passed。
+- 诚实空态：滤波器未给扫频范围提示先设置；SDR 未连源给真实引导，不伪造声音。

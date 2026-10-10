@@ -57,6 +57,8 @@ VnaIntent classifyVnaIntent(const QString& input) {
         return VnaIntent::Tdr;
     if (low.contains(QRegularExpression(QString::fromUtf8("(电感多大|电容多大|电感量|电容量|这个.*电感|这个.*电容)"))))
         return VnaIntent::Lc;
+    if (low.contains(QRegularExpression(QString::fromUtf8("(滤波器|带通|带阻|高通|低通|截止频率|插损|阻带)"))))
+        return VnaIntent::Filter;
     return VnaIntent::Vswr;  // 默认驻波/天线匹配
 }
 
@@ -64,7 +66,7 @@ bool isVnaOnrampIntent(const QString& input) {
     if (isVswrIntent(input)) return true;
     QString low = input.toLower();
     static const QRegularExpression re(
-        QString::fromUtf8("(谐振|晶体|晶振|esr|q值|电缆|多长|断了|故障点|tdr|电感多大|电容多大|电感量|电容量)"),
+        QString::fromUtf8("(谐振|晶体|晶振|esr|q值|电缆|多长|断了|故障点|tdr|电感多大|电容多大|电感量|电容量|滤波器|带通|带阻|高通|低通|截止)"),
         QRegularExpression::CaseInsensitiveOption);
     return re.match(low).hasMatch();
 }
@@ -238,6 +240,24 @@ QString runVswrOnramp(dsp::SpectrumEngine* engine, const QString& input) {
             .arg(rr.value("bandwidth_hz").toDouble(), 0, 'f', 0)
             .arg(rr.value("esr").toDouble(), 0, 'f', 2)
             .arg(rr.value("parallel_fr_hz").toDouble()/1e6, 0, 'f', 4);
+    }
+
+    // ---- 滤波器：在当前扫频上跑 analyze_vna_filter（用 S21 幅度） -----------
+    if (kind == VnaIntent::Filter) {
+        QJsonObject fr = QJsonDocument::fromJson(
+            executeTool("analyze_vna_filter", QJsonObject(), engine, nullptr).toUtf8()).object();
+        if (!fr.value("valid").toBool(false))
+            return QString::fromUtf8("未识别出滤波器形态（%1）。请确认已校准、扫频覆盖通带，"
+                                     "并先设置合理的扫频起止后重测。").arg(fr.value("note").toString());
+        return QString::fromUtf8(
+            "滤波器分析：形态 %1\n- -3dB 边沿 %2 ~ %3 MHz；带宽 %4 Hz；\n"
+            "- 通带插损 %5 dB；阻带最佳衰减 %6 dB。")
+            .arg(fr.value("type").toString())
+            .arg(fr.value("f_low_hz").toDouble()/1e6, 0, 'f', 3)
+            .arg(fr.value("f_high_hz").toDouble()/1e6, 0, 'f', 3)
+            .arg(fr.value("bandwidth_hz").toDouble(), 0, 'f', 0)
+            .arg(fr.value("passband_db").toDouble(), 0, 'f', 1)
+            .arg(fr.value("stopband_atten_db").toDouble(), 0, 'f', 1);
     }
 
     // ---- 默认：驻波/匹配（需目标频率） --------------------------------------

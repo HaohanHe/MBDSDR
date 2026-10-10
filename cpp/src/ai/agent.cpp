@@ -78,6 +78,23 @@ QString Agent::localCommand(const QString& input) {
         return QString("已调谐到 %1 MHz（本地指令）").arg(val, 0, 'f', 3);
     }
 
+    // "听手台"类：我想听 409.750MHz 的手台信号 -> 调谐 + NFM + 亚音/静噪提示。
+    static QRegularExpression listenRe(
+        R"((听|收|监控|守).*?(\d+(?:\.\d+)?)\s*(?:MHz|兆赫))");
+    auto lm = listenRe.match(input.trimmed());
+    if (lm.hasMatch()) {
+        double mhz = lm.captured(2).toDouble();
+        if (engine_) {
+            engine_->onSetCenterFreq(mhz * 1e6);
+            engine_->setDemodMode("NFM");
+        }
+        return QString::fromUtf8(
+            "已调谐到 %1 MHz 并切到 NFM。\n"
+            "- 若无声：请先在「源与连接」启动 SDR（USB 未识别时检查 udev/dialout 组权限）。\n"
+            "- 手台多带亚音：按需要在静噪/亚音设置开启对应 CTCSS；先把静噪调低以听到信号。")
+            .arg(mhz, 0, 'f', 3);
+    }
+
     QString low = input.trimmed().toLower();
     if (low == "am" || low == "fm" || low == "nfm" || low == "wfm" ||
         low == "usb" || low == "lsb" || low == "cw") {
