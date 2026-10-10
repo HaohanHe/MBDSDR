@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 51);
+    QCOMPARE(specs.size(), 53);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -237,6 +237,17 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "只读：返回 CDCSS/DCS 数字亚音状态（enabled 是否使能、code 调谐 DCS 码、"
             "active 是否真实检测到匹配码、gate_audio 是否开启数字亚音门控静音）。"
             "无信号/未使能时 active 诚实为 false，不编造。")},
+        // Phase63 step3: FT8 detection-layer tools (must match tool_schema.cpp order).
+        {"set_ft8",
+         QString::fromUtf8(
+            "写入：开关 FT8 数字模式检测层（enabled 布尔，必填）。属于写动作，"
+            "手动模式下被拦截。本轮为检测层（Costas 同步 + 候选帧统计），"
+            "C++ BP 解码留后续，不编造解码消息。")},
+        {"get_ft8_status",
+         QString::fromUtf8(
+            "只读：返回 FT8 检测层状态（enabled 是否使能、active 是否真实检出候选帧、"
+            "freq_offset_hz 估计频偏、sync_quality 相关峰/次峰比、candidate_count 候选数）。"
+            "无信号/未使能时 active 诚实为 false，不编造。")},
         {"set_noise_blanker",
          QString::fromUtf8(
             "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。")},
@@ -387,7 +398,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 51);
+    QCOMPARE(headerCount, 53);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));
