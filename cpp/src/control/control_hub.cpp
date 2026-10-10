@@ -2,6 +2,7 @@
 #include "control/control_hub.h"
 
 #include "dsp/spectrum_engine.h"
+#include "vna/vna_rf.h"
 #include "dsp/device_capabilities.h"
 #include "dsp/vfo_manager.h"
 #include "dsp/network_audio_sink.h"
@@ -117,6 +118,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"set_ft8",               true,  &ControlHub::cmdSetFt8},
         {"set_lrpt",              true,  &ControlHub::cmdSetLrpt},
         {"set_vna_sweep",         true,  &ControlHub::cmdSetVnaSweep},
+        {"vna_tdr_cable",         true,  &ControlHub::cmdVnaTdrCable},
         {"set_noise_blanker",     true,  &ControlHub::cmdSetNoiseBlanker},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
@@ -159,6 +161,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_lrpt_status",       false, &ControlHub::cmdGetLrptStatus},
         {"get_vna_data",          false, &ControlHub::cmdGetVnaData},
         {"get_vna_status",        false, &ControlHub::cmdGetVnaStatus},
+        {"analyze_vna_resonance", false, &ControlHub::cmdAnalyzeVnaResonance},
         {"get_noise_blanker_status", false, &ControlHub::cmdGetNoiseBlankerStatus},
         {"list_bookmarks",        false, &ControlHub::cmdListBookmarks},
         {"list_vfos",             false, &ControlHub::cmdListVfos},
@@ -1548,6 +1551,48 @@ QJsonObject ControlHub::cmdGetVnaStatus(const QJsonObject&) {
     o["stop_hz"] = (double)vna.sweepStopHz();
     o["points"] = vna.sweepPoints();
     if (!vna.isConnected()) o["note"] = QStringLiteral("未连接 NanoVNA：状态字段为空");
+    return o;
+}
+
+QJsonObject ControlHub::cmdAnalyzeVnaResonance(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "analyze_vna_resonance";
+    auto& vna = engine_->vnaClient();
+    o["connected"] = vna.isConnected();
+    if (!vna.isConnected()) { o["valid"] = false; o["note"] = QStringLiteral("未连接 NanoVNA：无扫频数据"); return o; }
+    auto f = vna.readFrequencies();
+    auto s11 = vna.readData(0);
+    vna::ResonanceResult r = vna::analyzeResonance(
+        std::vector<double>(f.begin(), f.end()),
+        std::vector<std::complex<double>>(s11.begin(), s11.end()));
+    o["valid"] = r.valid;
+    o["series_fr_hz"] = r.series_fr_hz;
+    o["parallel_fr_hz"] = r.parallel_fr_hz;
+    o["esr"] = r.esr;
+    o["bandwidth_hz"] = r.bandwidth_hz;
+    o["q"] = r.q;
+    return o;
+}
+
+QJsonObject ControlHub::cmdVnaTdrCable(const QJsonObject& a) {
+    double vf = 0.0;
+    QString err;
+    if (!a.value("velocity_factor").isDouble()) return errResult(QStringLiteral("参数 velocity_factor 缺失或不是数字"));
+    vf = a.value("velocity_factor").toDouble();
+    if (vf <= 0.0 || vf > 1.0) return errResult(QStringLiteral("velocity_factor 必须在 (0,1] 之间"));
+    QJsonObject o = okBase();
+    o["command"] = "vna_tdr_cable";
+    auto& vna = engine_->vnaClient();
+    o["connected"] = vna.isConnected();
+    if (!vna.isConnected()) { o["valid"] = false; o["note"] = QStringLiteral("未连接 NanoVNA：无扫频数据"); return o; }
+    auto f = vna.readFrequencies();
+    auto s11 = vna.readData(0);
+    vna::TdrResult t = vna::tdrCable(
+        std::vector<double>(f.begin(), f.end()),
+        std::vector<std::complex<double>>(s11.begin(), s11.end()), vf);
+    o["valid"] = t.valid;
+    o["distance_m"] = t.distance_m;
+    o["cable_length_m"] = t.cable_length_m;
     return o;
 }
 

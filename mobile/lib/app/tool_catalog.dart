@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 58 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 60 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -178,6 +178,14 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'get_vna_status',
       description: '只读：返回 NanoVNA 状态（connected/model/version/cal/sweep）。未连接时 connected 诚实为 false。',
       write: false),
+  ToolCatalogEntry(
+      name: 'analyze_vna_resonance',
+      description: '只读：对当前扫频 S11 做谐振分析（串联/并联谐振 fr、ESR、-3dB 带宽、有载 Q）。无设备/点数不足时 valid 诚实为 false。',
+      write: false),
+  ToolCatalogEntry(
+      name: 'vna_tdr_cable',
+      description: '写入：对当前扫频 S11 做 TDR 时域反射（velocity_factor 速度因子 0<vf<=1 必填），返回首反射峰距离与电缆长度。手动模式下被拦截。',
+      write: true),
   ToolCatalogEntry(
       name: 'set_noise_blanker',
       description: '写入：开关噪声抑制器。',

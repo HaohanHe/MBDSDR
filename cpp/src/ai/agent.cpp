@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: MIT
 #include "agent.h"
 #include "agent_tools.h"
+#include "vna_onramp.h"
 #include "llm_worker.h"
 #include "dsp/spectrum_engine.h"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRegularExpression>
 #include <QSettings>
 
@@ -12,7 +16,7 @@ namespace ai {
 
 namespace {
 const char* kManualModeKey = "aiManualMode";  // QSettings key, persisted
-}
+} // namespace
 
 Agent::Agent(QObject* parent) : QObject(parent) {
     config_.load();
@@ -60,6 +64,10 @@ void Agent::configureFromConfig() {
 }
 
 QString Agent::localCommand(const QString& input) {
+    // "一句话测驻波"：识别到驻波/VSWR/天线驻波意图即走真实三通道工具编排。
+    if (isVswrIntent(input))
+        return runVswrOnramp(engine_, input);
+
     static QRegularExpression freqRe(
         R"(^\s*(\d+(\.\d+)?)\s*([mM]?[Hh]?[Zz]?)\s*$)");
     auto m = freqRe.match(input);
