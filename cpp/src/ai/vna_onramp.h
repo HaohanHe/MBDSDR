@@ -40,6 +40,17 @@ struct VswrReport {
 // "驻波/VSWR/天线驻波"意图识别。
 bool isVswrIntent(const QString& input);
 
+// 统一 VNA 意图：驻波/谐振晶体/TDR 电缆/L-C 测量。agent.cpp 只调这一个入口。
+enum class VnaIntent { Vswr, Resonance, Tdr, Lc };
+bool isVnaOnrampIntent(const QString& input);
+VnaIntent classifyVnaIntent(const QString& input);
+
+// 同轴线速度因子常量表（文档值）。未指定类型时列出选项、不硬编码假设。
+// 返回 (vf, 规范名)；识别不到返回空。
+std::optional<QPair<QString,double>> parseCableVf(const QString& input);
+// 列出可选电缆类型与 vf（用于引导用户指定）。
+QString cableVfOptionsText();
+
 // 从问题里抓目标频率 MHz（如 "438.5MHz"）；无则返回空。仅解析用户输入，不硬编码默认。
 std::optional<double> parseTargetMhz(const QString& input);
 

@@ -3,11 +3,14 @@
 
 #include "agent_tools.h"
 #include "dsp/spectrum_engine.h"
+#include "vna/vna_rf.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+
+#include <cmath>
 
 namespace mbdsdr {
 namespace ai {
@@ -17,6 +20,53 @@ bool isVswrIntent(const QString& input) {
         QString::fromUtf8("(驻波|驻波比|vswr|smith|天线.*(匹配|驻波)|回波)"),
         QRegularExpression::CaseInsensitiveOption);
     return re.match(input.trimmed()).hasMatch();
+}
+
+// ---- 统一 VNA 意图分类 -----------------------------------------------------
+namespace {
+struct CableVf { const char* name; const char* pat; double vf; };
+const CableVf kCableTable[] = {
+    {"RG-58",  "rg-?58",   0.66},
+    {"RG-213", "rg-?213",  0.66},
+    {"RG-8X",  "rg-?8x",   0.78},
+    {"LMR-400","lmr-?400", 0.85},
+};
+}
+
+std::optional<QPair<QString,double>> parseCableVf(const QString& input) {
+    QString low = input.toLower();
+    for (const CableVf& c : kCableTable) {
+        if (low.contains(QRegularExpression(QString::fromLatin1(c.pat))))
+            return QPair<QString,double>(QString::fromUtf8(c.name), c.vf);
+    }
+    return std::nullopt;
+}
+
+QString cableVfOptionsText() {
+    QStringList items;
+    for (const CableVf& c : kCableTable)
+        items << QString::fromUtf8("%1 (vf≈%2)").arg(QString::fromUtf8(c.name)).arg(c.vf);
+    return items.join(QStringLiteral("、"));
+}
+
+VnaIntent classifyVnaIntent(const QString& input) {
+    QString low = input.toLower();
+    if (low.contains(QRegularExpression(QString::fromUtf8("(谐振|晶体|晶振|晶振频|q值|esr|esr)"))))
+        return VnaIntent::Resonance;
+    if (low.contains(QRegularExpression(QString::fromUtf8("(电缆|多长|断了|断线|故障点|tdr)"))))
+        return VnaIntent::Tdr;
+    if (low.contains(QRegularExpression(QString::fromUtf8("(电感多大|电容多大|电感量|电容量|这个.*电感|这个.*电容)"))))
+        return VnaIntent::Lc;
+    return VnaIntent::Vswr;  // 默认驻波/天线匹配
+}
+
+bool isVnaOnrampIntent(const QString& input) {
+    if (isVswrIntent(input)) return true;
+    QString low = input.toLower();
+    static const QRegularExpression re(
+        QString::fromUtf8("(谐振|晶体|晶振|esr|q值|电缆|多长|断了|故障点|tdr|电感多大|电容多大|电感量|电容量)"),
+        QRegularExpression::CaseInsensitiveOption);
+    return re.match(low).hasMatch();
 }
 
 std::optional<double> parseTargetMhz(const QString& input) {
@@ -126,8 +176,6 @@ QString renderReport(const VswrReport& r) {
 QString runVswrOnramp(dsp::SpectrumEngine* engine, const QString& input) {
     if (!engine) return QString::fromUtf8("无引擎连接，无法测量驻波。");
     auto tgt = parseTargetMhz(input);
-    if (!tgt.has_value())
-        return QString::fromUtf8("请在问题里给出目标频率，例如：“438.5MHz 驻波是多少？”");
 
     // 1) get_vna_status（真实工具，留审计轨迹）。注意：该工具 JSON 的 "connected"
     // 字段会被 addSourceFields 覆盖为 SDR 源连接，故连通性以 VNA 客户端真实状态为准。
@@ -145,8 +193,58 @@ QString runVswrOnramp(dsp::SpectrumEngine* engine, const QString& input) {
     if (!connected || !calibrated)
         return renderReport(interpretVswr(connected, calibrated, std::nullopt));
 
+    VnaIntent kind = classifyVnaIntent(input);
+
+    // ---- TDR 电缆：需用户指定电缆类型（速度因子），不硬编码假设 -------------
+    if (kind == VnaIntent::Tdr) {
+        auto cvf = parseCableVf(input);
+        if (!cvf.has_value())
+            return QString::fromUtf8(
+                "请在问题里指定同轴电缆类型以取速度因子，例如“RG-58 电缆多长”。\n"
+                "可选：") + cableVfOptionsText();
+        QJsonObject tdrArgs; tdrArgs["velocity_factor"] = cvf->second;
+        QJsonObject tdr = QJsonDocument::fromJson(
+            executeTool("vna_tdr_cable", tdrArgs, engine, nullptr).toUtf8()).object();
+        if (!tdr.value("valid").toBool(false))
+            return QString::fromUtf8("未检出明显反射点（%1）。请确认已做 OSL 校准、电缆接 PORT1，"
+                                     "并在更宽扫频上重测。").arg(tdr.value("note").toString());
+        return QString::fromUtf8(
+            "%1 TDR 分析（vf=%2）：\n- 估算电缆长度约 %3 m；\n- 首个反射（故障/开路/短路）约在 %4 m 处。")
+            .arg(cvf->first).arg(cvf->second).arg(tdr.value("cable_length_m").toDouble(), 0, 'f', 2)
+            .arg(tdr.value("distance_m").toDouble(), 0, 'f', 2);
+    }
+
+    // ---- 以下分析都需要一个中心频率 ----------------------------------------
+    long tgtHz = tgt.has_value() ? (long)(tgt.value() * 1e6) : 0;
+
+    // ---- 谐振/晶体：有标称频率则窄扫 ±10kHz；否则请用户给出标称 -------------
+    if (kind == VnaIntent::Resonance) {
+        if (!tgt.has_value())
+            return QString::fromUtf8("请给出晶体标称频率，例如“8.000MHz 晶体谐振/Q 是多少”，"
+                                     "以便在标称 ±10kHz 内窄扫。");
+        long s0, s1; int pts;
+        planSweep(tgtHz, s0, s1, pts, 20'000, 201);  // 窄 span 20kHz
+        QJsonObject sw; sw["start_hz"]=(double)s0; sw["stop_hz"]=(double)s1; sw["points"]=pts;
+        executeTool("set_vna_sweep", sw, engine, nullptr);
+        QJsonObject rr = QJsonDocument::fromJson(
+            executeTool("analyze_vna_resonance", QJsonObject(), engine, nullptr).toUtf8()).object();
+        if (!rr.value("valid").toBool(false))
+            return QString::fromUtf8("谐振分析无效（%1）。请确认已校准、扫频覆盖晶体标称点。")
+                .arg(rr.value("note").toString());
+        return QString::fromUtf8(
+            "谐振分析：\n- 串联谐振 fr ≈ %1 MHz（Q≈%2，BW≈%3 Hz，ESR≈%4 Ω）；\n- 并联谐振 ≈ %5 MHz。")
+            .arg(rr.value("series_fr_hz").toDouble()/1e6, 0, 'f', 4)
+            .arg(rr.value("q").toDouble(), 0, 'f', 1)
+            .arg(rr.value("bandwidth_hz").toDouble(), 0, 'f', 0)
+            .arg(rr.value("esr").toDouble(), 0, 'f', 2)
+            .arg(rr.value("parallel_fr_hz").toDouble()/1e6, 0, 'f', 4);
+    }
+
+    // ---- 默认：驻波/匹配（需目标频率） --------------------------------------
+    if (!tgt.has_value())
+        return QString::fromUtf8("请在问题里给出目标频率，例如：“438.5MHz 驻波是多少？”");
+
     // 2) set_vna_sweep 围绕目标频率；3) get_vna_data 取平行数组。
-    long tgtHz = (long)(tgt.value() * 1e6);
     long s0, s1; int pts;
     planSweep(tgtHz, s0, s1, pts);
     QJsonObject sweepArgs;
@@ -163,6 +261,25 @@ QString runVswrOnramp(dsp::SpectrumEngine* engine, const QString& input) {
     QJsonArray zb = data.value("z_imag").toArray();
     QList<double> freqs;
     for (const QJsonValue& v : fa) freqs.append(v.toDouble());
+
+    // ---- L/C 测量：在目标频点由电抗派生 -----------------------------------
+    if (kind == VnaIntent::Lc) {
+        int j = nearestIndex(freqs, (double)tgtHz);
+        if (j < 0 || j >= za.size() || j >= zb.size())
+            return QString::fromUtf8("无扫频数据可派生 L/C。请确认已校准并有有效扫频。");
+        double xs = zb.at(j).toDouble();
+        double f = freqs.value(j, (double)tgtHz);
+        double l = vna::reactanceToHenries(xs, f);
+        double c = vna::reactanceToFarads(xs, f);
+        if (l > 0)
+            return QString::fromUtf8("在 %1 MHz（呈感性）：电感约 %2 nH。")
+                .arg(f/1e6, 0, 'f', 4).arg(l*1e9, 0, 'f', 2);
+        if (c > 0)
+            return QString::fromUtf8("在 %1 MHz（呈容性）：电容约 %2 pF。")
+                .arg(f/1e6, 0, 'f', 4).arg(c*1e12, 0, 'f', 2);
+        return QString::fromUtf8("在该频点电抗接近 0（串联谐振），无法据此区分 L/C。");
+    }
+
     int idx = nearestIndex(freqs, (double)tgtHz);
     if (idx < 0 || idx >= va.size())
         return renderReport(interpretVswr(true, true, std::nullopt));
