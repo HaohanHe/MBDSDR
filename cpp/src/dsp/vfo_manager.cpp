@@ -452,6 +452,7 @@ const std::vector<float>& VfoManager::process(
             continue;
         }
         auto baseband = ch.channelizer.process(iq);
+        ch.lastBaseband = baseband;   // 只读喂数源（FT8 等窄带外部检测器）
         if (ch.isDigital()) {
             // Digital channel: feed channelized complex baseband to the Costas
             // demod, pull post-Costas recovered symbols for the constellation.
