@@ -21,5 +21,10 @@ QString vnaStatusText(bool connected, const QString& model,
 // plus the S21 mid-band gain. Non-finite / empty -> honest "无数据".
 QString vnaReadoutText(double minVswr, long freqAtMinHz, double midGainDb);
 
+// Resonance numeric readout: fr/Q/BW/ESR from vna_rf::analyzeResonance.
+// valid=false (点数不足/span=0/无极值) -> honest "--" placeholders, never fabricated.
+QString vnaAnalysisText(bool valid, double seriesFrHz, double q,
+                        double bandwidthHz, double esr);
+
 } // namespace ui
 } // namespace mbdsdr

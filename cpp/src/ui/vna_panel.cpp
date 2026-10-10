@@ -5,6 +5,7 @@
 #include "core/tokens.h"
 #include "dsp/spectrum_engine.h"
 #include "vna/nanovna_client.h"
+#include "vna/vna_rf.h"
 
 #include <QComboBox>
 #include <QFormLayout>
@@ -146,6 +147,10 @@ VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
     readoutLabel_ = new QLabel(vnaReadoutText(std::nan(""), 0, std::nan("")), this);
     lay->addWidget(readoutLabel_);
 
+    analysisLabel_ = new QLabel(vnaAnalysisText(false, 0, 0, 0, 0), this);
+    analysisLabel_->setWordWrap(true);
+    lay->addWidget(analysisLabel_);
+
     timer_ = new QTimer(this);
     timer_->setInterval(1000);
 
@@ -204,6 +209,14 @@ void VnaPanel::applyReadout(const std::vector<long>& freqs,
     s11Plot_->setData(vswr);
     s21Plot_->setData(gain);
     readoutLabel_->setText(vnaReadoutText(best, bestHz, midGain));
+
+    // 谐振数值读数：由 vna_rf 在真实扫频上派生；无效 -> 诚实 "--"。
+    std::vector<double> fHz;
+    fHz.reserve(freqs.size());
+    for (long f : freqs) fHz.push_back((double)f);
+    vna::ResonanceResult rr = vna::analyzeResonance(fHz, s11);
+    analysisLabel_->setText(
+        vnaAnalysisText(rr.valid, rr.series_fr_hz, rr.q, rr.bandwidth_hz, rr.esr));
 }
 
 void VnaPanel::poll() {

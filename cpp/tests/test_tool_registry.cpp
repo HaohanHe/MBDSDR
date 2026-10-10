@@ -47,7 +47,7 @@ const QSet<QString> kAllCxxTools = {
     "set_ft8", "get_ft8_status",
     "set_lrpt", "get_lrpt_status",
     "set_vna_sweep", "get_vna_data", "get_vna_status",
-    "analyze_vna_resonance", "vna_tdr_cable",
+    "analyze_vna_resonance", "vna_tdr_cable", "analyze_vna_filter",
     "set_noise_blanker", "get_noise_blanker_status",
     "list_bookmarks", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
     "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
@@ -117,7 +117,7 @@ const QSet<QString> kFlutterUngatedReadTools = {
     "get_cdcss_status",
     "get_ft8_status",
     "get_lrpt_status",
-    "get_vna_data", "get_vna_status", "analyze_vna_resonance",
+    "get_vna_data", "get_vna_status", "analyze_vna_resonance", "analyze_vna_filter",
     "get_noise_blanker_status",
     "list_bookmarks", "list_vfos", "list_recordings", "get_spectrum_status",
     // Read-only capability/recording-state snapshots (desktop-only reads).
@@ -147,7 +147,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 60, qPrintable(QString("expected 60 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 61, qPrintable(QString("expected 61 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -197,6 +197,7 @@ void TestToolRegistry::writeReadSplit_registryMatchesContract() {
     QVERIFY(!isWriteTool("get_vna_status"));
     QVERIFY(isWriteTool("vna_tdr_cable"));
     QVERIFY(!isWriteTool("analyze_vna_resonance"));
+    QVERIFY(!isWriteTool("analyze_vna_filter"));
     QVERIFY(isWriteTool("set_noise_blanker"));
     QVERIFY(!isWriteTool("get_noise_blanker_status"));
     QVERIFY(isWriteTool("add_vfo"));
@@ -262,7 +263,7 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 60);
+    QCOMPARE(defs.size(), 61);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).

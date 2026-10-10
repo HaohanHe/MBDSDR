@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，60 个工具）
+# Agent 工具能力清单（自动生成，61 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -300,3 +300,8 @@ schema: {"properties":{},"required":[],"type":"object"}
 description: 写入：对当前扫频 S11 做 TDR 时域反射（velocity_factor 速度因子，0<vf<=1，必填），返回首反射峰 distance_m 与 cable_length_m。属于写动作，手动模式下被拦截。无设备/无反射峰时 valid 诚实为 false。
 schema: {"properties":{"velocity_factor":{"description":"电缆速度因子 (0<vf<=1，如同轴 0.66)","type":"number"}},"required":["velocity_factor"],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true}（不自动重试写动作）
+
+## analyze_vna_filter  [read 只读]
+description: 只读：对当前扫频 S21 幅度做滤波器分析（自动识别 bandpass/bandstop/highpass/lowpass，输出 -3dB 截止边 f_low_hz/f_high_hz、bandwidth_hz、passband_db 通带插损、stopband_atten_db 阻带衰减）。无设备/幅度平坦非滤波器形态时 valid 诚实为 false。
+schema: {"properties":{},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠

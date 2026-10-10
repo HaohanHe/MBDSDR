@@ -779,6 +779,16 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // analyze_vna_filter (read-only) ----------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "analyze_vna_filter";
+        s.description = QString::fromUtf8(
+            "只读：对当前扫频 S21 幅度做滤波器分析（自动识别 bandpass/bandstop/highpass/lowpass，"
+            "输出 -3dB 截止边、带宽、通带插损、阻带衰减）。无设备/幅度平坦非滤波器形态时 valid 诚实为 false。");
+        out.append(s);
+    }
+
     {
         ToolSchemaSpec s;
         s.name = "set_noise_blanker";

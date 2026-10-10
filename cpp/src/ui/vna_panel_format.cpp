@@ -38,5 +38,16 @@ QString vnaReadoutText(double minVswr, long freqAtMinHz, double midGainDb) {
     return QString::fromUtf8("最小 VSWR %1%2%3").arg(minVswr, 0, 'f', 2).arg(f, g);
 }
 
+QString vnaAnalysisText(bool valid, double seriesFrHz, double q,
+                        double bandwidthHz, double esr) {
+    if (!valid)
+        return QString::fromUtf8("谐振分析：--（有效点数不足或 span=0）");
+    return QString::fromUtf8("谐振 fr %1 MHz · Q %2 · BW %3 Hz · ESR %4 Ω")
+        .arg(seriesFrHz / 1e6, 0, 'f', 4)
+        .arg(q, 0, 'f', 1)
+        .arg(bandwidthHz, 0, 'f', 0)
+        .arg(esr, 0, 'f', 2);
+}
+
 } // namespace ui
 } // namespace mbdsdr

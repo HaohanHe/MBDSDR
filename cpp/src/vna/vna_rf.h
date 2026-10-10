@@ -9,6 +9,7 @@
 #pragma once
 
 #include <complex>
+#include <string>
 #include <vector>
 
 namespace mbdsdr {
@@ -69,6 +70,29 @@ double coaxLossDbPerM(const std::vector<double>& f_hz,
                       const std::vector<std::complex<double>>& s21,
                       double distance_m,
                       double velocity_factor);
+
+// ---- Smith / Polar normalized coordinates ----------------------------------
+// Normalized impedance z = (1+g)/(1-g) with g = S11 (Smith chart plane).
+std::complex<double> smithNormalizedZ(std::complex<double> s11, double z0 = 50.0);
+// Polar: complex -> (x,y) = mag*(cos ph, sin ph) for plotting.
+struct PolarXY { double x = 0, y = 0; };
+PolarXY polarToXY(std::complex<double> s);
+
+// ---- Filter analysis ------------------------------------------------------
+struct FilterResult {
+    bool valid = false;
+    std::string type;          // bandpass/bandstop/highpass/lowpass
+    double f_low_hz = 0;       // -3 dB lower edge (BP/BS); lower edge for HP
+    double f_high_hz = 0;      // -3 dB upper edge (BP/BS); upper edge for LP
+    double bandwidth_hz = 0;
+    double passband_db = 0;        // reference passband insertion loss (dB, <=0)
+    double stopband_atten_db = 0;  // best stopband attenuation (positive dB)
+};
+// Given freqs + |S21| in dB, auto-detect response form and report -3 dB edges,
+// bandwidth, insertion loss, stopband attenuation. Honest: valid=false when
+// points<4, span<=0, or the trace is flat (not a filter shape).
+FilterResult analyzeFilter(const std::vector<double>& f_hz,
+                           const std::vector<double>& s21_db);
 
 } // namespace vna
 } // namespace mbdsdr

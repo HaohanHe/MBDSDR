@@ -51,3 +51,31 @@
 - 并联谐振 fp 仅在 \|Z\| 峰非边缘且 >2× 极小时报出；晶体两路（fs/fp）精确定点未单独标定。
 - S21 派生（同轴损耗/增益）纯函数已写，尚未接到 get_vna_data 字段（留后续）。
 - 真实设备取数路径未接（线 B UI 域），本批工具在无设备时全部诚实空态。
+
+---
+
+# 第二批·S21 同轴损耗 + Smith/Polar + 滤波器分析（HEAD=caf0040）
+
+## S21 同轴损耗进 get_vna_data
+`execGetVnaData`（agent_tools.cpp）新增字段：`s21_re/s21_im/s21_gain_db`、
+`smith_z_real/smith_z_imag`（归一化 z=(1+g)/(1-g)）、`coax_loss_db_per_m`。
+诚实空态：未连设备数组为空；`coax_loss_db_per_m` 需已知电缆长度（用 vna_tdr_cable 测长），
+无长度时诚实报 0 + note，不伪造距离。
+
+## 纯函数（vna_rf.{h,cpp} 扩展）
+- `smithNormalizedZ(s11,z0)`：归一化 z=(1+g)/(1-g)；
+- `polarToXY(s)`：mag·(cosφ, sinφ)；
+- `analyzeFilter(f_hz, s21_db)`：自动识别 bandpass/bandstop/highpass/lowpass，
+  输出 -3dB 边、带宽、通带插损、阻带衰减；幅度平坦（<6dB p-p）诚实 valid=false。
+
+## analyze_vna_filter 工具（read，60→61）
+tool_schema.cpp / `execAnalyzeVnaFilter` / dispatch / `cmdAnalyzeVnaFilter`（读表）。
+
+## 计数（offscreen 真实 passed）
+- test_vna_rf **9 passed**（+smithPolarKnownPoint +filterDetectsBandpass；+平坦空态）。
+- test_tool_registry 8 / test_tool_schema 10 / test_agent 38（读 25→26）/ test_control_hub 34 /
+  test_ai_real_link 17，全 0 failed。
+- mobile catalog 60→61；phase31 手工补 1 段 + 头部 61。
+
+## 待加 CMake 清单（本批无新文件，仅 vna_rf.cpp 已列上批）
+本批纯函数全部并入既有 `src/vna/vna_rf.{h,cpp}`，无新源文件；test_vna_rf.cpp 同上批。

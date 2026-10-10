@@ -77,6 +77,7 @@ private:
     QPushButton* measureBtn_  = nullptr;
     QLabel*      statusLabel_ = nullptr;
     QLabel*      readoutLabel_ = nullptr;
+    QLabel*      analysisLabel_ = nullptr;
     QLabel*      hintLabel_   = nullptr;
     QSpinBox*    startSpin_   = nullptr;
     QSpinBox*    stopSpin_    = nullptr;

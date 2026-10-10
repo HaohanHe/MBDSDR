@@ -1060,9 +1060,11 @@ QString execGetVnaData(const QJsonObject&, dsp::SpectrumEngine* engine,
     o["connected"] = vna.isConnected();
 
     QJsonArray freqs, s11re, s11im, vswrArr, rlArr, zRe, zIm;
+    QJsonArray s21re, s21im, s21gain, znormRe, znormIm;
     if (vna.isConnected()) {
         auto f = vna.readFrequencies();
         auto s11 = vna.readData(0);
+        auto s21 = vna.readData(1);
         for (size_t i = 0; i < s11.size(); ++i) {
             const std::complex<double>& g = s11[i];
             if (i < f.size()) freqs.append((double)f[i]);
@@ -1070,18 +1072,30 @@ QString execGetVnaData(const QJsonObject&, dsp::SpectrumEngine* engine,
             double rl = vna::returnLossDb(g);
             double sw = vna::vswr(g);
             auto z = vna::s11ToImpedance(g);
+            auto zn = vna::smithNormalizedZ(g);
             auto finite = [](double x){ return std::isfinite(x) ? x : 0.0; };
             rlArr.append(finite(rl));
             vswrArr.append(finite(sw));
             zRe.append(finite(z.real())); zIm.append(finite(z.imag()));
+            znormRe.append(finite(zn.real())); znormIm.append(finite(zn.imag()));
+        }
+        for (size_t i = 0; i < s21.size(); ++i) {
+            s21re.append(s21[i].real()); s21im.append(s21[i].imag());
+            double g = vna::s21GainDb(s21[i]);
+            s21gain.append(std::isfinite(g) ? g : 0.0);
         }
     }
     o["frequencies"] = freqs;
     o["s11_re"] = s11re; o["s11_im"] = s11im;
     o["vswr"] = vswrArr; o["return_loss_db"] = rlArr;
     o["z_real"] = zRe; o["z_imag"] = zIm;
-    if (!vna.isConnected())
-        o["note"] = QString::fromUtf8("未连接 NanoVNA：测量数组为空");
+    o["s21_re"] = s21re; o["s21_im"] = s21im;
+    o["s21_gain_db"] = s21gain;
+    o["smith_z_real"] = znormRe; o["smith_z_imag"] = znormIm;
+    // Coax loss per metre: needs a known cable length; without one we report 0
+    // honestly rather than fabricate a distance.
+    o["coax_loss_db_per_m"] = 0.0;
+    o["note"] = QString::fromUtf8("未连接 NanoVNA：测量数组为空；coax_loss_db_per_m 需已知电缆长度（用 vna_tdr_cable 测长）");
     addSourceFields(o, src);
     return compact(o);
 }
@@ -1167,6 +1181,38 @@ QString execVnaTdrCable(const QJsonObject& args, dsp::SpectrumEngine* engine,
     o["distance_m"] = t.distance_m;
     o["cable_length_m"] = t.cable_length_m;
     if (!t.valid) o["note"] = QString::fromUtf8("未检出反射峰：TDR 无效");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// analyze_vna_filter (read): run vna_rf::analyzeFilter on live S21 magnitude.
+QString execAnalyzeVnaFilter(const QJsonObject&, dsp::SpectrumEngine* engine,
+                            const SourceInfo& src,
+                            ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    o["ok"] = true;
+    auto& vna = engine->vnaClient();
+    o["connected"] = vna.isConnected();
+    if (!vna.isConnected()) {
+        o["valid"] = false;
+        o["note"] = QString::fromUtf8("未连接 NanoVNA：无扫频数据可分析");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    auto f = vna.readFrequencies();
+    auto s21 = vna.readData(1);
+    std::vector<double> db;
+    for (auto& s : s21) db.push_back(vna::s21GainDb(s));
+    vna::FilterResult r = vna::analyzeFilter(
+        std::vector<double>(f.begin(), f.end()), db);
+    o["valid"] = r.valid;
+    o["type"] = QString::fromStdString(r.type);
+    o["f_low_hz"] = r.f_low_hz;
+    o["f_high_hz"] = r.f_high_hz;
+    o["bandwidth_hz"] = r.bandwidth_hz;
+    o["passband_db"] = r.passband_db;
+    o["stopband_atten_db"] = r.stopband_atten_db;
+    if (!r.valid) o["note"] = QString::fromUtf8("幅度平坦或点数不足：非滤波器形态");
     addSourceFields(o, src);
     return compact(o);
 }
@@ -1765,6 +1811,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_vna_status", &execGetVnaStatus},
         {"analyze_vna_resonance", &execAnalyzeVnaResonance},
         {"vna_tdr_cable", &execVnaTdrCable},
+        {"analyze_vna_filter", &execAnalyzeVnaFilter},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},
         {"list_bookmarks", &execListBookmarks},

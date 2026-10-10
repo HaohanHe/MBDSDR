@@ -258,6 +258,7 @@ private:
     QJsonObject cmdGetVnaStatus(const QJsonObject&);
     QJsonObject cmdAnalyzeVnaResonance(const QJsonObject&);
     QJsonObject cmdVnaTdrCable(const QJsonObject&);
+    QJsonObject cmdAnalyzeVnaFilter(const QJsonObject&);
     // Bookmarks (ControlHub holds a ui::BookmarkManager; same QSettings key).
     QJsonObject cmdListBookmarks(const QJsonObject&);
     QJsonObject cmdAddBookmark(const QJsonObject& a);
