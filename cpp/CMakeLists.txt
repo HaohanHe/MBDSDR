@@ -117,6 +117,7 @@ set(SOURCES
     src/dsp/cdcss.cpp
     src/dsp/ft8_detector.cc
     src/dsp/ft8_codec.cc
+    src/dsp/lrpt_fec.cc
     src/dsp/agc.cpp
     src/dsp/audio_output.cpp
     src/dsp/qt_audio_sink.cpp
@@ -544,6 +545,13 @@ target_include_directories(test_ft8_e2e PRIVATE src)
 target_compile_definitions(test_ft8_e2e PRIVATE SRCDIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
 target_link_libraries(test_ft8_e2e PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME ft8_e2e COMMAND test_ft8_e2e)
+
+add_executable(test_lrpt_cpp tests/test_lrpt_cpp.cpp)
+target_link_libraries(test_lrpt_cpp PRIVATE mbdsdr_core)
+target_include_directories(test_lrpt_cpp PRIVATE src)
+target_compile_definitions(test_lrpt_cpp PRIVATE SRCDIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
+target_link_libraries(test_lrpt_cpp PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME lrpt_cpp COMMAND test_lrpt_cpp)
 
 # Phase22-A remote/threading hardening: (1) foreign worker threads hammer
 # execute() concurrently -> the engine dispatch is marshaled to the engine home

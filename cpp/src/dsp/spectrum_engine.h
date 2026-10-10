@@ -120,8 +120,11 @@ public:
     // on/off (the tool/gate reads it). syncLocked()/decodedFrames() stay honest
     // empty: with no C++ decoder wired they read false / 0 -- never fabricated.
     bool   lrptEnabled() const { return lrptEnabled_.load(); }
-    bool   lrptSyncLocked() const { return lrptSyncLocked_; }        // decoder not yet ported
-    int    lrptDecodedFrames() const { return lrptDecodedFrames_; }  // decoder not yet ported
+    bool   lrptSyncLocked() const { return lrptSyncLocked_; }
+    int    lrptDecodedFrames() const { return lrptDecodedFrames_; }
+    // 喂 1024 字节 CADU（Viterbi 译码后字节流，含 4 字节 ASM）-> C++ FEC 解码。
+    // 全 4 块 RS 可纠才更新 syncLocked=true/decodedFrames++；否则诚实空态。
+    void feedLrptCadu(const uint8_t* cadu, int n);
 
     // ---- FT8 detection (read-back) --------------------------------------
     // Detection layer only (C++ BP decode deferred to step 4). All read-backs
