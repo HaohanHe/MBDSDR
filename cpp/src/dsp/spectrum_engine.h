@@ -122,6 +122,9 @@ public:
     double ft8FreqOffsetHz() const { return ft8Last_.freqOffsetHz; }
     double ft8SyncQuality() const { return ft8Last_.syncQuality; }
     int    ft8CandidateCount() const { return ft8Detector_.lastCandidateCount(); }
+    // Step-4 decode readback. Empty string until detector->LLR->codec wiring is
+    // enabled (honest: no fabricated frame text).
+    std::string ft8DecodedText() const;
     // True iff a network-audio tap is currently installed (setNetworkAudioSink).
     // The detailed stream stats live on the sink the caller installed.
     bool  networkTapActive() const { return networkTap_ != nullptr; }

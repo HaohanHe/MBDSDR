@@ -299,6 +299,11 @@ void SpectrumEngine::setFt8Enabled(bool on) {
     if (!on) ft8Last_ = Ft8Candidate();   // 诚实清空
 }
 
+std::string SpectrumEngine::ft8DecodedText() const {
+    // 诚实空态：detector->LLR->codec 接线未启用前返回空串，绝不编造帧文本。
+    return {};
+}
+
 bool SpectrumEngine::squelchEnabled() const {
     return squelch_.mode() == Squelch::Mode::Gate;
 }
