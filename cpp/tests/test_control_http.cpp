@@ -652,6 +652,21 @@ void TestControlHttp::postCommandCtcssRoute() {
     QVERIFY2(rd3.value("ok").toBool(), rd3.value("error").toString().toUtf8().constData());
     QCOMPARE(rd3.value("enabled").toBool(), true);
     QCOMPARE(rd3.value("active").toBool(), false);   // 无信号诚实空态
+
+    // LRPT over POST /command (透传, no new route): write lands + honest empty read.
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"set_lrpt\",\"args\":{\"enabled\":true}}"));
+    QCOMPARE(r.status, 200);
+    QVERIFY2(r.obj().value("ok").toBool(), r.obj().value("error").toString().toUtf8().constData());
+    QCOMPARE(eng.lrptEnabled(), true);
+    r = httpPost(port, "/command",
+        QByteArray("{\"tool\":\"get_lrpt_status\",\"args\":{}}"));
+    QCOMPARE(r.status, 200);
+    QJsonObject rd4 = r.obj();
+    QVERIFY2(rd4.value("ok").toBool(), rd4.value("error").toString().toUtf8().constData());
+    QCOMPARE(rd4.value("enabled").toBool(), true);
+    QCOMPARE(rd4.value("sync_locked").toBool(), false);   // C++ 解码器未移植
+    QCOMPARE(rd4.value("decoded_frames").toInt(), 0);
 }
 
 QTEST_MAIN(TestControlHttp)

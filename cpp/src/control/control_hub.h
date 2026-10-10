@@ -251,6 +251,8 @@ private:
     QJsonObject cmdGetCdcssStatus(const QJsonObject&);
     QJsonObject cmdSetFt8(const QJsonObject& a);
     QJsonObject cmdGetFt8Status(const QJsonObject&);
+    QJsonObject cmdSetLrpt(const QJsonObject& a);
+    QJsonObject cmdGetLrptStatus(const QJsonObject&);
     // Bookmarks (ControlHub holds a ui::BookmarkManager; same QSettings key).
     QJsonObject cmdListBookmarks(const QJsonObject&);
     QJsonObject cmdAddBookmark(const QJsonObject& a);

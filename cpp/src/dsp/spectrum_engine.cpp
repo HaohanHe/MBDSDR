@@ -293,6 +293,12 @@ void SpectrumEngine::setCdcssGateAudio(bool on) {
     cdcssGateEnabled_.store(on);
 }
 
+void SpectrumEngine::setLrptEnabled(bool on) {
+    lrptEnabled_.store(on);
+    // The C++ LRPT demod/FEC port lands in step 4; until then this only arms the
+    // desired flag. When disabled we keep the honest-empty sync/frame stats.
+}
+
 void SpectrumEngine::setFt8Enabled(bool on) {
     ft8Enabled_.store(on);
     ft8Detector_.setEnabled(on);

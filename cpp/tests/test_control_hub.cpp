@@ -69,6 +69,7 @@ private slots:
     void ctcssSetLandOutOfRangeRejectedAndGate();
     void cdcssSetLandIllegalCodeRejectedAndGate();
     void ft8SetLandHonestEmpty();
+    void lrptSetLandHonestEmpty();
     void vfoListAddSwitchRename();
     void bookmarksPersistToQSettings();
     void recordingsListEmptyThenRealDeleteExport();
@@ -762,6 +763,42 @@ void TestControlHub::ft8SetLandHonestEmpty() {
     QVERIFY2(!g.value("ok").toBool() && g.value("gated").toBool(),
              qPrintable(QString::fromUtf8("set_ft8 must be gated")));
     QVERIFY(eng.ft8Enabled());
+    hub.setWriteEnabled(true);
+}
+
+// LRPT step-3: set_lrpt flips the engine flag; get_lrpt_status reads back honest
+// empty (sync_locked false / decoded_frames 0 with no C++ decoder); missing
+// `enabled` errors; write gate intercepts.
+void TestControlHub::lrptSetLandHonestEmpty() {
+    SpectrumEngine eng;
+    control::ControlHub hub;
+    hub.setEngine(&eng);
+
+    QJsonObject s0 = parseObj(hub.execute("get_lrpt_status", {}));
+    QVERIFY2(s0.value("ok").toBool(), s0.value("error").toString().toUtf8().constData());
+    QCOMPARE(s0.value("command").toString(), QStringLiteral("get_lrpt_status"));
+    QCOMPARE(s0.value("enabled").toBool(), false);
+    QCOMPARE(s0.value("sync_locked").toBool(), false);   // 诚实空态
+    QCOMPARE(s0.value("decoded_frames").toInt(), 0);
+
+    QJsonObject r = parseObj(hub.execute("set_lrpt", {{"enabled", true}}));
+    QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
+    QCOMPARE(eng.lrptEnabled(), true);
+
+    QJsonObject s = parseObj(hub.execute("get_lrpt_status", {}));
+    QCOMPARE(s.value("enabled").toBool(), true);
+    QCOMPARE(s.value("sync_locked").toBool(), false);   // decoder not ported yet
+    QCOMPARE(s.value("decoded_frames").toInt(), 0);
+
+    // Missing required `enabled` -> honest ok:false.
+    QCOMPARE(parseObj(hub.execute("set_lrpt", {})).value("ok").toBool(), false);
+
+    // Write gate closed: set_lrpt refused, engine untouched; read stays open.
+    hub.setWriteEnabled(false);
+    QJsonObject g = parseObj(hub.execute("set_lrpt", {{"enabled", false}}));
+    QVERIFY2(!g.value("ok").toBool() && g.value("gated").toBool(),
+             qPrintable(QString::fromUtf8("set_lrpt must be gated")));
+    QVERIFY(eng.lrptEnabled());
     hub.setWriteEnabled(true);
 }
 

@@ -68,6 +68,7 @@ private slots:
     // --- Phase63 CDCSS/DCS three-channel tool: land / readback / illegal-code reject / gate ---
     void cdcssLandReadbackIllegalCodeRejectAndGate();
     void ft8LandReadbackHonestEmpty();
+    void lrptLandReadbackHonestEmpty();
     // --- Phase63 readback-loop audit: D-2/D-3/D-5 honest-repair round-trip -----
     void readbackLoopHonestRejectsAndAutoLand();
     // --- Phase63: bookmark tools execute for real against injected store -------
@@ -97,7 +98,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 53);
+    QCOMPARE(tools.size(), 55);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -774,9 +775,9 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split must be exactly 32 writes / 21 reads.
-    QCOMPARE(writes, 32);
-    QCOMPARE(reads, 21);
+    // The frozen split must be exactly 33 writes / 22 reads.
+    QCOMPARE(writes, 33);
+    QCOMPARE(reads, 22);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -1065,7 +1066,44 @@ void TestAgent::ft8LandReadbackHonestEmpty() {
     QVERIFY2(g.contains("\"gated\":true"), qPrintable(g));
 }
 
-// Phase63 readback-loop audit: the three write-path honest-repair cases.
+// P2 LRPT step-3: set_lrpt arms the engine flag; get_lrpt_status is honest empty
+// (no C++ decoder yet -> sync_locked=false, decoded_frames=0). Missing enabled is
+// an error; manual mode gates the write.
+void TestAgent::lrptLandReadbackHonestEmpty() {
+    dsp::SpectrumEngine engine;
+
+    QJsonObject off = QJsonDocument::fromJson(
+        ai::executeTool("get_lrpt_status", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(off.value("ok").toBool(), qPrintable(
+        ai::executeTool("get_lrpt_status", QJsonObject{}, &engine)));
+    QCOMPARE(off.value("enabled").toBool(), false);
+    QCOMPARE(off.value("sync_locked").toBool(), false);   // 诚实空态
+    QCOMPARE(off.value("decoded_frames").toInt(), 0);
+
+    QJsonObject on; on["enabled"] = true;
+    QString r = ai::LLMWorker::dispatchToolCall("set_lrpt", on, &engine,
+                                                /*manualMode=*/false);
+    QVERIFY2(!r.contains("\"gated\":true"), qPrintable(r));
+    QVERIFY2(engine.lrptEnabled(), "set_lrpt{enabled:true} must flip the engine");
+
+    QJsonObject st = QJsonDocument::fromJson(
+        ai::executeTool("get_lrpt_status", QJsonObject{}, &engine).toUtf8()).object();
+    QCOMPARE(st.value("enabled").toBool(), true);
+    QCOMPARE(st.value("sync_locked").toBool(), false);   // decoder not ported yet
+    QCOMPARE(st.value("decoded_frames").toInt(), 0);
+
+    // Missing / non-bool `enabled` -> honest error.
+    QJsonObject miss = QJsonDocument::fromJson(
+        ai::executeTool("set_lrpt", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(!miss.value("ok").toBool(), "missing `enabled` must be an error");
+
+    // Manual mode: the write is intercepted, engine untouched.
+    QString g = ai::LLMWorker::dispatchToolCall("set_lrpt", on, &engine,
+                                               /*manualMode=*/true);
+    QVERIFY2(g.contains("\"gated\":true"), qPrintable(g));
+    QVERIFY2(engine.lrptEnabled(), "gated write must not flip the engine");
+}
+
 //   D-2: tune_frequency rejects non-positive / non-finite freq_hz with ok:false
 //        (previously the engine dropped it silently while the ack echoed it as
 //        success and get_status kept the old value -- fake success).

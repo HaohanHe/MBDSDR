@@ -674,7 +674,39 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
-    // set_noise_blanker (write -- gated) ----------------------------------
+    // set_lrpt (write -- gated) --------------------------------------------
+    // P2 LRPT step-3 satellite-imaging tool. `enabled` is REQUIRED (missing/
+    // non-bool -> honest error). State/control layer only: the C++ LRPT demod/FEC
+    // port lands in step 4; this arms the desired flag so the control plane can
+    // gate on it. It does NOT fabricate imagery or frames.
+    {
+        ToolSchemaSpec s;
+        s.name = "set_lrpt";
+        s.description = QString::fromUtf8(
+            "写入：开关 LRPT 卫星云图接收层（enabled 布尔，必填）。属于写动作，"
+            "手动模式下被拦截。本轮为状态控制层（C++ 解调/FEC 移植留后续第④轮），"
+            "不编造图像或帧。");
+        s.write = true;
+        ToolParamSpec en;
+        en.name = "enabled";
+        en.type = "boolean";
+        en.description = QString::fromUtf8("是否开启 LRPT 卫星云图接收");
+        en.required = true;
+        s.params << en;
+        out.append(s);
+    }
+
+    // get_lrpt_status (read-only) ------------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_lrpt_status";
+        s.description = QString::fromUtf8(
+            "只读：返回 LRPT 接收层状态（enabled 是否使能、sync_locked 是否已锁定位同步、"
+            "decoded_frames 已解码行数）。C++ 解码器未移植前 sync_locked 诚实为 false、"
+            "decoded_frames 为 0，不编造。");
+        out.append(s);
+    }
+
     {
         ToolSchemaSpec s;
         s.name = "set_noise_blanker";
