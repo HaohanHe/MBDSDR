@@ -872,6 +872,7 @@ inline constexpr const char* kSettingsKeyCtcssGate   = "rx/ctcssGateAudio";
 inline constexpr const char* kSettingsKeyCdcssEnabled = "rx/cdcssEnabled";
 inline constexpr const char* kSettingsKeyCdcssCode    = "rx/cdcssCode";
 inline constexpr const char* kSettingsKeyCdcssGate    = "rx/cdcssGateAudio";
+inline constexpr const char* kSettingsKeyFt8Enabled   = "rx/ft8Enabled";
 
 // =====================================================================
 // Dark QSS generator -- simplified, only what we use.

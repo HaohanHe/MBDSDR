@@ -204,6 +204,8 @@ private slots:
     void updateCtcssBadge();
     // CDCSS/DCS badge: mirrors the engine's real cdcssPresent() poll.
     void updateCdcssBadge();
+    // FT8 badge: mirrors engine ft8Present()/ft8DecodedText() poll (honest).
+    void updateFt8Badge();
     void saveSettings();   // immediate persistence (writes QSettings)
     void scheduleSave();   // debounced persistence: arms the 500 ms save timer
     void onPassesReady(QList<dsp::SatPass> passes);
@@ -555,6 +557,10 @@ private:
     QCheckBox*       cdcssGateCheck_ = nullptr;   // speaker-only DCS gate
     QComboBox*       cdcssCodeCombo_ = nullptr;
     QLabel*          cdcssBadge_    = nullptr;
+    // FT8 digital mode (phase63 step6). ft8Check_ arms the C++ detector/decoder;
+    // ft8Badge_ mirrors ONLY engine ft8Present()/ft8DecodedText() (honest poll).
+    QCheckBox*       ft8Check_     = nullptr;
+    QLabel*          ft8Badge_     = nullptr;
     double          currentBwHz_ = 12500.0;   // live RF bandwidth (Up/Down nudge)
 
     // Multi-VFO management panel (left rail).
