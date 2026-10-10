@@ -41,7 +41,8 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
             if not found:
                 raise SystemExit(
                     "未探测到 NanoVNA（VID:PID 0x0483:0x5740）。\n"
-                    "请用 --port 显式指定串口，并确认 USB 已连、udev/dialout 权限。"
+                    "请用 --port 显式指定串口（Linux /dev/ttyACM0，Windows COMx），"
+                    "并确认 USB 已连、udev/dialout 权限。"
                 )
             port = found[0][0]
         try:
@@ -87,7 +88,9 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
 
 def main(argv: List[str]) -> int:
     ap = argparse.ArgumentParser(description="NanoVNA 真机一键 dump")
-    ap.add_argument("--port", default="", help="串口路径，如 /dev/ttyACM0；缺省自动探测")
+    ap.add_argument("--port", default="",
+                    help="串口路径：Linux 如 /dev/ttyACM0；Windows 如 COM3。"
+                         "缺省自动探测")
     ap.add_argument("--start", type=int, default=430_000_000, help="扫频起点 Hz")
     ap.add_argument("--stop", type=int, default=440_000_000, help="扫频终点 Hz")
     ap.add_argument("--points", type=int, default=101, help="扫频点数")

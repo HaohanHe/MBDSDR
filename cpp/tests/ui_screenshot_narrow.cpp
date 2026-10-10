@@ -9,6 +9,8 @@
 #include <QPixmap>
 #include <QSettings>
 #include <QTabWidget>
+#include <QComboBox>
+#include <QLineEdit>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QGroupBox>
@@ -230,6 +232,20 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Optional: select a band preset in the left-rail bandCombo (MBD_BANDCOMBO=N,
+    // N = preset index, 1-based skipping the "频段…" placeholder) so the shot
+    // shows a selected band with center/mode/bandwidth rows.
+    {
+        bool okb = false;
+        int bidx = qgetenv("MBD_BANDCOMBO").toInt(&okb);
+        if (okb && bidx > 0) {
+            if (auto* bc = win.findChild<QComboBox*>(QString::fromUtf8("bandCombo"))) {
+                const int want = bidx + 1;
+                if (want < bc->count()) bc->setCurrentIndex(want);
+            }
+        }
+    }
+
     // Optional: seed the VNA instrument panel with self-made replay sweep data
     // (MBD_VNASHOT=1) so the "VNA" tab renders a connected, measuring state with
     // real S11(VSWR)/S21(gain) curves. The protocol text is authored
@@ -256,6 +272,18 @@ int main(int argc, char** argv) {
                             QString::fromUtf8("short"), QString::fromUtf8("thru"),
                             QString::fromUtf8("cal'ed")},
                 freqs, s11, s21);
+            // Optional: inject fixture thickness (MBD_VNATHICK=mm) so the
+            // permeability mu-vs-f curve renders a real (non-empty) trace.
+            const QByteArray thick = qgetenv("MBD_VNATHICK");
+            if (!thick.isEmpty()) {
+                if (auto* le = win.findChild<QLineEdit*>(QString::fromUtf8("vnaThickEdit")))
+                    le->setText(QString::fromUtf8(thick));
+                panel->seedSnapshotForTest(   // re-feed so applyReadout recomputes mu
+                    QString::fromUtf8("NanoVNA-H"), QString::fromUtf8("1.0.174-hugen"),
+                    QStringList{QString::fromUtf8("load"), QString::fromUtf8("open"),
+                                QString::fromUtf8("short"), QString::fromUtf8("thru")},
+                    freqs, s11, s21);
+            }
         }
     }
 

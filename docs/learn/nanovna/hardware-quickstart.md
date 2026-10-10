@@ -40,3 +40,12 @@ python3 -m mbdsdr_ai.nanovna_dump --port /dev/ttyACM0 \
 2. 一组 `sweep.json`（上面 dump 的产物，可删冗余只留 frequencies_hz + S11 + vswr）。
 
 > 合成 replay fixture 仅用于 CI 确定性测试，绝不代表真实测量值。
+
+## 附：CDCSS badge 真机验证步骤（offscreen 无法注入合成 DCS 流）
+
+offscreen 测试环境无法把真实 DCS 位流喂进解调链，故 badge "DCS 023" 读数无 CI 快照证据，
+需真机验证：
+1. 发射端/对端发出带 DCS 码（如 023）的数字亚音。
+2. 接收端解调音频喂入后，CDCSS latch（连续 3 字）→ badge 应从"未检测到"变绿色 **DCS 023**。
+3. 换码或停发 → 5 字内 badge 回退"未检测到"。
+DSP 端已用合成位流钉扎（test_squelch_gate 13，含 bit-flip 纠错）；本步仅为 UI 呈现真机确认。

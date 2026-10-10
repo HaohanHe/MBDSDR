@@ -232,3 +232,22 @@ bandCombo 在 main_window（SDR 域归线 A），本轮不碰 main_window，无�
 
 ## 计数
 金集不变（本批不加工具）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
+
+---
+
+# 第⑩批：bandCombo 快照钩子 + μr 实态 + 终检（HEAD=feb0a68）
+
+## bandCombo 种子钩子（ui_screenshot_narrow.cpp MBD_BANDCOMBO）
+harness 新增 MBD_BANDCOMBO=N：findChild<QComboBox>("bandCombo") setCurrentIndex（跳过"频段…"占位）。
+OCR：种子生效（无崩溃 setCurrentIndex），但频段行在左 rail 滚动区、快照框未取景→诚实未拍选中频段 center/mode 行（需滚动取景，留后续）。
+
+## μr 实态快照（MBD_VNATHICK=mm）
+harness 新增 MBD_VNATHICK：findChild<QLineEdit>("vnaThickEdit") 注入厚度→重 seed→muPlot_ 画实曲线。
+1920：夹具厚=2.0，磁导率 μr' vs f 实曲线（蓝色驼峰），读数 μr'=0.01 μr''=0.001，0 裁切 0 叠字。
+
+## 终检（只读）
+64 工具三通道一致：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
+mobile 64 / phase31 头部 64。无缺口。
+
+## 计数
+金集不变：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。

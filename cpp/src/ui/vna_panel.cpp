@@ -224,6 +224,7 @@ VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
     sweepForm->addRow(QString::fromUtf8("点数"), pointsSpin_);
     thickEdit_ = new QLineEdit(this);
     thickEdit_->setPlaceholderText(QString::fromUtf8("mm（磁导率夹具）"));
+    thickEdit_->setObjectName(QString::fromUtf8("vnaThickEdit"));
     sweepForm->addRow(QString::fromUtf8("夹具厚"), thickEdit_);
     lay->addLayout(sweepForm);
 

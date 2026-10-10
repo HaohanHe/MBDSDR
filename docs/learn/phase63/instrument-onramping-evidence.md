@@ -15,6 +15,14 @@
 | 调到 2 米波段 | band_preset 查表 → onSetCenterFreq+NFM+带宽 | 中心 146MHz / NFM / 12.5k |
 | 我想听 409.75MHz 手台 | onSetCenterFreq + NFM + 源/CTCSS 提示 | 已调谐 + 启动源引导 |
 | FT8 解码 / CTCSS 亚音 / LRPT 云图 | SDR 解码链（既有） | 既有输出 |
+| 对端发了什么 DCS 码？ | CdcssDecoder Golay(23,12) latch → engine.cdcssDecodedCode() → badge | UI badge 绿显 "DCS 023"（真机 PENDING） |
+
+> **真机数据列一律 PENDING**：上表"真实输出"中具体数值（VSWR/fr/长度/nH/插损/DCS 码）
+> 均待 NanoVNA-H/H4 与真机音频回传后填，绝不预填。
+
+## 工具能力索引
+- 三通道工具清单：`docs/learn/phase31/agent-tool-documentation.md`（set/get_vna_sweep/data/status、
+  analyze_vna_resonance、vna_tdr_cable、analyze_vna_filter、set/get_cdcss_status 等）。
 
 ## 设计要点（论文骨架）
 - **一句话意图 → 真实工具编排**：分类纯函数 `classifyVnaIntent` / localCommand 分支，
