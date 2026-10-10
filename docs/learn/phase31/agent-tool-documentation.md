@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，51 个工具）
+# Agent 工具能力清单（自动生成，53 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -133,6 +133,16 @@ schema: {"properties":{"code":{"description":"三位八进制 DCS 码字符串�
 
 ## get_cdcss_status  [read 只读]
 description: 只读：返回 CDCSS/DCS 数字亚音状态（enabled 是否使能、code 调谐 DCS 码、active 是否真实检测到匹配码、gate_audio 是否开启数字亚音门控静音）。无信号/未使能时 active 诚实为 false，不编造。
+schema: {"properties":{},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## set_ft8  [write 写(手动模式拦截)]
+description: 写入：开关 FT8 数字模式检测层（enabled 布尔，必填）。属于写动作，手动模式下被拦截。本轮为检测层（Costas 同步 + 候选帧统计），C++ BP 解码留后续，不编造解码消息。
+schema: {"properties":{"enabled":{"description":"是否开启 FT8 检测层","type":"boolean"}},"required":["enabled"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true,"error":"手动模式：未执行 set_ft8"}（不自动重试写动作）
+
+## get_ft8_status  [read 只读]
+description: 只读：返回 FT8 检测层状态（enabled 是否使能、active 是否真实检出候选帧、freq_offset_hz 估计频偏、sync_quality 相关峰/次峰比、candidate_count 候选数）。无信号/未使能时 active 诚实为 false，不编造。
 schema: {"properties":{},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
 

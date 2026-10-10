@@ -293,6 +293,12 @@ void SpectrumEngine::setCdcssGateAudio(bool on) {
     cdcssGateEnabled_.store(on);
 }
 
+void SpectrumEngine::setFt8Enabled(bool on) {
+    ft8Enabled_.store(on);
+    ft8Detector_.setEnabled(on);
+    if (!on) ft8Last_ = Ft8Candidate();   // 诚实清空
+}
+
 bool SpectrumEngine::squelchEnabled() const {
     return squelch_.mode() == Squelch::Mode::Gate;
 }

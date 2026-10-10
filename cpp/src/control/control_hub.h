@@ -249,6 +249,8 @@ private:
     // string validated against the public 104-code table).
     QJsonObject cmdSetCdcss(const QJsonObject& a);
     QJsonObject cmdGetCdcssStatus(const QJsonObject&);
+    QJsonObject cmdSetFt8(const QJsonObject& a);
+    QJsonObject cmdGetFt8Status(const QJsonObject&);
     // Bookmarks (ControlHub holds a ui::BookmarkManager; same QSettings key).
     QJsonObject cmdListBookmarks(const QJsonObject&);
     QJsonObject cmdAddBookmark(const QJsonObject& a);

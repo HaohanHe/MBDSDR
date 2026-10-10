@@ -114,6 +114,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"set_squelch",           true,  &ControlHub::cmdSetSquelch},
         {"set_ctcss",             true,  &ControlHub::cmdSetCtcss},
         {"set_cdcss",             true,  &ControlHub::cmdSetCdcss},
+        {"set_ft8",               true,  &ControlHub::cmdSetFt8},
         {"set_noise_blanker",     true,  &ControlHub::cmdSetNoiseBlanker},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
@@ -152,6 +153,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_squelch_status",    false, &ControlHub::cmdGetSquelchStatus},
         {"get_ctcss_status",      false, &ControlHub::cmdGetCtcssStatus},
         {"get_cdcss_status",      false, &ControlHub::cmdGetCdcssStatus},
+        {"get_ft8_status",        false, &ControlHub::cmdGetFt8Status},
         {"get_noise_blanker_status", false, &ControlHub::cmdGetNoiseBlankerStatus},
         {"list_bookmarks",        false, &ControlHub::cmdListBookmarks},
         {"list_vfos",             false, &ControlHub::cmdListVfos},
@@ -1435,6 +1437,28 @@ QJsonObject ControlHub::cmdGetCdcssStatus(const QJsonObject&) {
     o["code"] = QStringLiteral("%1").arg(engine_->cdcssCode(), 3, 8, QLatin1Char('0'));
     o["active"] = engine_->cdcssPresent();
     o["gate_audio"] = engine_->cdcssGateAudio();
+    return o;
+}
+
+QJsonObject ControlHub::cmdSetFt8(const QJsonObject& a) {
+    QString err;
+    bool on = false;
+    if (!needBool(a, "enabled", on, err)) return errResult(err);
+    engine_->setFt8Enabled(on);
+    QJsonObject o = okBase();
+    o["command"] = "set_ft8";
+    o["enabled"] = on;
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetFt8Status(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "get_ft8_status";
+    o["enabled"] = engine_->ft8Enabled();
+    o["active"] = engine_->ft8Present();
+    o["freq_offset_hz"] = engine_->ft8FreqOffsetHz();
+    o["sync_quality"] = engine_->ft8SyncQuality();
+    o["candidate_count"] = engine_->ft8CandidateCount();
     return o;
 }
 

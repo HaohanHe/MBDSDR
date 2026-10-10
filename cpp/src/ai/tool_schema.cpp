@@ -643,6 +643,37 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // set_ft8 (write -- gated) --------------------------------------------
+    // Phase63 step3 FT8 detection-layer tool. `enabled` is REQUIRED (missing/
+    // non-bool -> honest error). Detection layer only; C++ BP decode deferred.
+    {
+        ToolSchemaSpec s;
+        s.name = "set_ft8";
+        s.description = QString::fromUtf8(
+            "写入：开关 FT8 数字模式检测层（enabled 布尔，必填）。属于写动作，"
+            "手动模式下被拦截。本轮为检测层（Costas 同步 + 候选帧统计），"
+            "C++ BP 解码留后续，不编造解码消息。");
+        s.write = true;
+        ToolParamSpec en;
+        en.name = "enabled";
+        en.type = "boolean";
+        en.description = QString::fromUtf8("是否开启 FT8 检测层");
+        en.required = true;
+        s.params << en;
+        out.append(s);
+    }
+
+    // get_ft8_status (read-only) ------------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "get_ft8_status";
+        s.description = QString::fromUtf8(
+            "只读：返回 FT8 检测层状态（enabled 是否使能、active 是否真实检出候选帧、"
+            "freq_offset_hz 估计频偏、sync_quality 相关峰/次峰比、candidate_count 候选数）。"
+            "无信号/未使能时 active 诚实为 false，不编造。");
+        out.append(s);
+    }
+
     // set_noise_blanker (write -- gated) ----------------------------------
     {
         ToolSchemaSpec s;
