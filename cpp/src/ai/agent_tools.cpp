@@ -4,6 +4,7 @@
 #include "sat_task_planner.h"
 #include "core/tokens.h"
 #include "dsp/spectrum_engine.h"
+#include "vna/vna_rf.h"
 #include "dsp/device_capabilities.h"
 #include "dsp/frequency_calibrator.h"   // calibrateFromCapture / savePpmSetting
 #include "dsp/fcch_detector.h"          // kFcchToneHz
@@ -1106,6 +1107,70 @@ QString execGetVnaStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// analyze_vna_resonance (read): run vna_rf::analyzeResonance on the live sweep.
+QString execAnalyzeVnaResonance(const QJsonObject&, dsp::SpectrumEngine* engine,
+                                const SourceInfo& src,
+                                ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    o["ok"] = true;
+    auto& vna = engine->vnaClient();
+    o["connected"] = vna.isConnected();
+    if (!vna.isConnected()) {
+        o["valid"] = false;
+        o["note"] = QString::fromUtf8("未连接 NanoVNA：无扫频数据可分析");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    auto f = vna.readFrequencies();
+    auto s11 = vna.readData(0);
+    vna::ResonanceResult r = vna::analyzeResonance(
+        std::vector<double>(f.begin(), f.end()),
+        std::vector<std::complex<double>>(s11.begin(), s11.end()));
+    o["valid"] = r.valid;
+    o["series_fr_hz"] = r.series_fr_hz;
+    o["parallel_fr_hz"] = r.parallel_fr_hz;
+    o["esr"] = r.esr;
+    o["bandwidth_hz"] = r.bandwidth_hz;
+    o["q"] = r.q;
+    if (!r.valid) o["note"] = QString::fromUtf8("点数不足或 span=0：谐振分析无效");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// vna_tdr_cable (write, gated): TDR reflection run; velocity_factor required.
+QString execVnaTdrCable(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                        const SourceInfo& src,
+                        ui::BookmarkManager* /*bookmarks*/) {
+    const QJsonValue v = args.value(QStringLiteral("velocity_factor"));
+    if (!v.isDouble())
+        return errResult(QString::fromUtf8("参数 velocity_factor 缺失或不是数字"));
+    const double vf = v.toDouble();
+    if (vf <= 0.0 || vf > 1.0)
+        return errResult(QString::fromUtf8("velocity_factor 必须在 (0,1] 之间"));
+
+    QJsonObject o;
+    o["ok"] = true;
+    auto& vna = engine->vnaClient();
+    o["connected"] = vna.isConnected();
+    if (!vna.isConnected()) {
+        o["valid"] = false;
+        o["note"] = QString::fromUtf8("未连接 NanoVNA：无扫频数据可做 TDR");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    auto f = vna.readFrequencies();
+    auto s11 = vna.readData(0);
+    vna::TdrResult t = vna::tdrCable(
+        std::vector<double>(f.begin(), f.end()),
+        std::vector<std::complex<double>>(s11.begin(), s11.end()), vf);
+    o["valid"] = t.valid;
+    o["distance_m"] = t.distance_m;
+    o["cable_length_m"] = t.cable_length_m;
+    if (!t.valid) o["note"] = QString::fromUtf8("未检出反射峰：TDR 无效");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 
 // 8. list_bookmarks (read): BookmarkManager wiring lands on control -> honest empty.
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
@@ -1698,6 +1763,8 @@ const QList<ToolDispatch>& dispatchTable() {
         {"set_vna_sweep", &execSetVnaSweep},
         {"get_vna_data", &execGetVnaData},
         {"get_vna_status", &execGetVnaStatus},
+        {"analyze_vna_resonance", &execAnalyzeVnaResonance},
+        {"vna_tdr_cable", &execVnaTdrCable},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},
         {"list_bookmarks", &execListBookmarks},

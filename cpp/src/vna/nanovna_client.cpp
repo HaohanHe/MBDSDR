@@ -148,10 +148,14 @@ bool NanoVnaClient::connect() {
     return true;
 }
 
-bool NanoVnaClient::connectSerial(const QString& device) {
+bool NanoVnaClient::attachTransport(std::unique_ptr<VnaTransport> transport) {
     close();
-    tr_ = createSerialTransport(device);
+    tr_ = std::move(transport);
     return connect();
+}
+
+bool NanoVnaClient::connectSerial(const QString& device) {
+    return attachTransport(createSerialTransport(device));
 }
 
 void NanoVnaClient::close() {

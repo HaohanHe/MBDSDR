@@ -753,6 +753,32 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // analyze_vna_resonance (read-only) -------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "analyze_vna_resonance";
+        s.description = QString::fromUtf8(
+            "只读：对当前扫频 S11 做谐振分析（串联谐振 fr、并联谐振 fp、ESR、-3dB 带宽、有载 Q）。"
+            "无设备/点数不足/span=0 时 valid 诚实为 false，不编造。");
+        out.append(s);
+    }
+
+    // vna_tdr_cable (write -- gated): runs a TDR reflection run on the current
+    // sweep. velocity_factor (0..1) REQUIRED.
+    {
+        ToolSchemaSpec s;
+        s.name = "vna_tdr_cable";
+        s.description = QString::fromUtf8(
+            "写入：对当前扫频 S11 做 TDR 时域反射（velocity_factor 速度因子，0<vf<=1，必填），"
+            "返回首反射峰距离与电缆长度。属于写动作，手动模式下被拦截。无设备/无峰时 valid 诚实为 false。");
+        s.write = true;
+        ToolParamSpec vf;
+        vf.name = "velocity_factor"; vf.type = "number"; vf.required = true;
+        vf.description = QString::fromUtf8("电缆速度因子 (0<vf<=1，如同轴 0.66)");
+        s.params << vf;
+        out.append(s);
+    }
+
     {
         ToolSchemaSpec s;
         s.name = "set_noise_blanker";

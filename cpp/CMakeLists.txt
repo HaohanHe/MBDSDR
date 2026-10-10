@@ -144,6 +144,7 @@ set(SOURCES
     src/gnss/nmea_parser.cpp
     src/gnss/gnss_receiver.cpp
     src/vna/nanovna_client.cpp
+    src/vna/vna_rf.cpp
     src/ui/elevation_plot.cpp
     src/ui/map_projection.cpp
     src/ai/llm_client.cpp
@@ -160,6 +161,7 @@ set(SOURCES
     src/ai/task_runner.cpp
     src/ai/plan_parser.cpp
     src/ai/sat_task_planner.cpp
+    src/ai/vna_onramp.cpp
     src/tx/modulator.cpp
     src/tx/loopback_backend.cpp
     src/tx/tx_controller.cpp
@@ -564,6 +566,18 @@ target_link_libraries(test_nanovna_client PRIVATE mbdsdr_core)
 target_include_directories(test_nanovna_client PRIVATE src)
 target_link_libraries(test_nanovna_client PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME nanovna_client COMMAND test_nanovna_client)
+
+add_executable(test_vna_rf tests/test_vna_rf.cpp)
+target_link_libraries(test_vna_rf PRIVATE mbdsdr_core)
+target_include_directories(test_vna_rf PRIVATE src)
+target_link_libraries(test_vna_rf PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME vna_rf COMMAND test_vna_rf)
+
+add_executable(test_vna_onramp tests/test_vna_onramp.cpp)
+target_link_libraries(test_vna_onramp PRIVATE mbdsdr_core)
+target_include_directories(test_vna_onramp PRIVATE src)
+target_link_libraries(test_vna_onramp PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME vna_onramp COMMAND test_vna_onramp)
 
 # Phase22-A remote/threading hardening: (1) foreign worker threads hammer
 # execute() concurrently -> the engine dispatch is marshaled to the engine home

@@ -73,6 +73,9 @@ public:
     // Line-B UI entry: open a real serial device (termios 115200 8N1) and run
     // the help/version/info handshake. Honest: returns false on open failure.
     bool connectSerial(const QString& device);
+    // Inject a caller-owned transport and run the handshake. Test seam (scripted
+    // replay drives deterministic, offscreen tests); production uses connectSerial().
+    bool attachTransport(std::unique_ptr<VnaTransport> transport);
     void close();
     bool isConnected() const { return connected_; }
 

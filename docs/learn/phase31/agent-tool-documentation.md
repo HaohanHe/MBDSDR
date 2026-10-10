@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，58 个工具）
+# Agent 工具能力清单（自动生成，60 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -290,3 +290,13 @@ schema: {"properties":{},"required":[],"type":"object"}
 description: 只读：返回 NanoVNA 连接/身份/校准状态（connected、model 板名、version 固件、cal 校准项数组、has_sweep、start_hz/stop_hz/points）。未连接时诚实返回 connected=false、空字段，note 说明，不伪造。
 schema: {"properties":{},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## analyze_vna_resonance  [read 只读]
+description: 只读：对当前扫频 S11 做谐振分析（series_fr_hz 串联谐振、parallel_fr_hz 并联谐振、esr 串联等效电阻、bandwidth_hz -3dB 带宽、q 有载 Q）。无设备/点数不足/span=0 时 valid 诚实为 false，不编造。
+schema: {"properties":{},"required":[],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## vna_tdr_cable  [write 写(手动模式拦截)]
+description: 写入：对当前扫频 S11 做 TDR 时域反射（velocity_factor 速度因子，0<vf<=1，必填），返回首反射峰 distance_m 与 cable_length_m。属于写动作，手动模式下被拦截。无设备/无反射峰时 valid 诚实为 false。
+schema: {"properties":{"velocity_factor":{"description":"电缆速度因子 (0<vf<=1，如同轴 0.66)","type":"number"}},"required":["velocity_factor"],"type":"object"}
+错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠；手动模式写门拒绝 -> {"ok":false,"gated":true}（不自动重试写动作）
