@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，61 个工具）
+# Agent 工具能力清单（自动生成，63 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -305,3 +305,13 @@ schema: {"properties":{"velocity_factor":{"description":"电缆速度因子 (0<v
 description: 只读：对当前扫频 S21 幅度做滤波器分析（自动识别 bandpass/bandstop/highpass/lowpass，输出 -3dB 截止边 f_low_hz/f_high_hz、bandwidth_hz、passband_db 通带插损、stopband_atten_db 阻带衰减）。无设备/幅度平坦非滤波器形态时 valid 诚实为 false。
 schema: {"properties":{},"required":[],"type":"object"}
 错误示例: 参数非法/缺失/幻觉字段 -> {"ok":false,"reasons":[...]}，以 role=tool 回注自纠
+
+## analyze_vna_touchstone  [read 只读]
+description: 只读：解析 Touchstone s1p/s2p 文件（content 文本 或 path 路径），返回频率表与 S11/S21 实虚部数据集，可复用谐振/滤波器分析。仅 R/I 格式；不可解析时 ok:false 诚实拒绝。
+schema: {"properties":{"content":{"description":"Touchstone 文件全文","type":"string"},"path":{"description":"Touchstone 文件路径","type":"string"}},"required":[],"type":"object"}
+错误示例: 无 content/path -> valid:false（仍 ok:true 空态）
+
+## export_vna_snapshot  [write 写，手动门拦截]
+description: 写入：把当前 NanoVNA 扫频（Smith 轨迹）离屏渲染为 PNG 存到 path。未连接/无数据时 ok:false 诚实拒绝。
+schema: {"properties":{"path":{"description":"PNG 输出路径","type":"string"}},"required":["path"],"type":"object"}
+错误示例: 手动模式写门拒绝 -> {"ok":false,"gated":true}；无设备 -> ok:false

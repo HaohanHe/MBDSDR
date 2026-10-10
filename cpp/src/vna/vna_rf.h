@@ -111,5 +111,44 @@ struct LMatchResult {
 // f_hz = design frequency. Honest: valid=false when R0<=0, f<=0, or load R<=0.
 LMatchResult lMatchNetwork(std::complex<double> z_load, double f_hz, double r0 = 50.0);
 
+// ---- Touchstone s1p/s2p ---------------------------------------------------
+// Independent clean-room reader/writer for the Touchstone 1.x/2.0 text format:
+// '!' comments, # FREQUENCY-UNIT S R Z R (frequencies in Hz after unit scaling),
+// then rows "f  re im [re im ...]". Only R/I (real-imaginary) format supported;
+// MA/DB are reported unsupported honestly rather than mis-parsed.
+struct TouchstoneData {
+    bool valid = false;
+    std::vector<double> freq_hz;
+    std::vector<std::complex<double>> s11;
+    std::vector<std::complex<double>> s21;
+    int n_ports = 1;          // 1 = s1p (S11 only), 2 = s2p
+    std::string note;
+};
+TouchstoneData parseTouchstone(const std::string& text);
+// Write a Touchstone file (Hz, R/I). Returns the file text.
+std::string writeTouchstone(double start_hz, double stop_hz,
+                            const std::vector<std::complex<double>>& s11,
+                            const std::vector<std::complex<double>>& s21);
+
+// ---- Group delay & permeability -------------------------------------------
+// Group delay (seconds) = -d(phase)/d(omega) from S21 unwrapped phase.
+// Returns one value per interior frequency (centred difference); empty on <2 pts.
+std::vector<double> groupDelayS21(const std::vector<double>& freq_hz,
+                                  const std::vector<std::complex<double>>& s21);
+// Permeability from a coaxial short-circuit (1) fixture, per the standard
+// "NRW" / Nicolson-Ross-Weir two-port (S11/S21) approximation for a material
+// slab of thickness t (m) in a Z0 air line. Returns mu' and mu'' arrays.
+// Honest: valid=false when points<3 or the derivation is ill-conditioned.
+struct PermeabilityResult {
+    bool valid = false;
+    std::vector<double> mu_real;   // mu_r'
+    std::vector<double> mu_imag;  // mu_r''
+    std::string note;
+};
+PermeabilityResult permeabilityNRW(const std::vector<double>& freq_hz,
+                                    const std::vector<std::complex<double>>& s11,
+                                    const std::vector<std::complex<double>>& s21,
+                                    double slab_thickness_m);
+
 } // namespace vna
 } // namespace mbdsdr

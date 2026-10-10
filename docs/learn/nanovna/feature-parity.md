@@ -111,3 +111,33 @@ applyReadout 喂 s11；布局弹性走 tokens::scaled。
 
 ## 待加 CMake 清单
 本批无新源文件（VnaSmithWidget 在既有 vna_panel.cpp；lMatchNetwork 在既有 vna_rf.cpp）；无新测试目标（test_vna_rf.cpp 已列）。
+
+---
+
+# 第⑤批：Touchstone + 磁导率/群延迟 + VNA 截图（HEAD=9c00d8b）
+
+## Touchstone s1p/s2p（vna_rf.{h,cpp}）
+`parseTouchstone(text)` / `writeTouchstone(...)`：注释 !/# 单位（GHz/MHz/kHz/Hz）/R/I；MA/DB 诚实不支持。
+round-trip 钉扎：写→读频率/S11/S21 一致。
+
+## 磁导率 + 群延迟纯函数（vna_rf.{h,cpp}）
+- `groupDelayS21(f,s21)`：相位 unwrap 后 −dφ/dω，合成线性相位钉扎 50ns@<5ns。
+- `permeabilityNRW(f,s11,s21,t)`：Nicolson-Ross-Weir 薄板近似，输出 μ'/μ''；点数不足/病态诚实 NaN。
+  （参考公开电磁学 NRW 公式；未抄 GPL；μ'' 约定取正损耗。）
+
+## VNA tab 群延迟曲线（vna_panel.cpp）
+新增 gdPlot_「群延迟 s」VnaTraceWidget，applyReadout 喂 groupDelayS21；无数据诚实空态。
+磁导率需短路/环形夹具厚度参数，UI 未接线（纯函数已落地，夹具数据留后续）。
+
+## 新工具（61→63）
+- `analyze_vna_touchstone`（read）：解析 content/path 返回数据集；
+- `export_vna_snapshot`（write，手动门）：离屏渲染 Smith PNG 到 path；未连接/无数据 ok:false。
+三通道：tool_schema.cpp / exec*+dispatch / control_hub.{cpp,h} 一处不漏。
+
+## 计数（offscreen 真实 passed）
+- test_vna_rf **13 passed**（+touchstoneRoundTrip +groupDelayKnownSlope +permeabRunsOnSynthetic）。
+- registry 8 / schema 10 / agent 38（写 36 / 读 27）/ control_hub 34 / ai_real_link 17，全 0 failed。
+- mobile catalog 61→63；phase31 头部 63 + 手工补 2 段。
+
+## 快照三档（MBD_VNASHOT=1 + MBD_TAB=VNA）
+1920：S11 VSWR/S21/群延迟/Smith 四图堆叠干净，0 裁切 0 叠字。

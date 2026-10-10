@@ -23,6 +23,9 @@ private slots:
     void smithPolarKnownPoint();
     void filterDetectsBandpass();
     void lMatchKnownPoint();
+    void touchstoneRoundTrip();
+    void groupDelayKnownSlope();
+    void permeabRunsOnSynthetic();
     void honestEmpty();
 };
 
@@ -125,6 +128,52 @@ void TestVnaRf::lMatchKnownPoint() {
     QVERIFY(std::abs(m.shunt_henry - 1.31e-6) < 0.1e-6);
     // R0 <= load R -> invalid (canonical topology).
     QVERIFY(!lMatchNetwork({75.0, 0.0}, 3.5e6, 50.0).valid);
+}
+
+void TestVnaRf::touchstoneRoundTrip() {
+    std::vector<std::complex<double>> s11{{0.1,-0.2},{0.0,-0.05}}, s21{{0.9,0.0},{0.88,0.01}};
+    std::string txt = writeTouchstone(1e6, 2e6, s11, s21);
+    TouchstoneData d = parseTouchstone(txt);
+    QVERIFY(d.valid);
+    QCOMPARE(d.n_ports, 2);
+    QCOMPARE(d.freq_hz.size(), size_t(2));
+    QVERIFY(std::abs(d.freq_hz[0] - 1e6) < 1.0);
+    QVERIFY(std::abs(d.s11[0].real() - 0.1) < 1e-9);
+    QVERIFY(std::abs(d.s11[0].imag() - (-0.2)) < 1e-9);
+    QVERIFY(std::abs(d.s21[1].real() - 0.88) < 1e-9);
+    // comments ignored
+    TouchstoneData c = parseTouchstone("! comment\n# MHz S R Z R\n10 0.5 0.1\n");
+    QVERIFY(c.valid);
+    QVERIFY(std::abs(c.freq_hz[0] - 10e6) < 1.0);
+}
+
+void TestVnaRf::groupDelayKnownSlope() {
+    // S21 phase = linear in f -> constant group delay.
+    std::vector<double> f; std::vector<std::complex<double>> s21;
+    const double gdExpected = 50e-9;  // 50 ns
+    for (int i = 0; i < 9; ++i) {
+        double fhz = 1e6 + i * 1e5;
+        f.push_back(fhz);
+        double ph = -6.283185307179586 * fhz * gdExpected;   // phase slope = -gd
+        s21.emplace_back(0.9 * std::cos(ph), 0.9 * std::sin(ph));
+    }
+    std::vector<double> gd = groupDelayS21(f, s21);
+    QCOMPARE(gd.size(), size_t(9));
+    QVERIFY(std::abs(gd[4] - gdExpected) < 5e-9);
+}
+
+void TestVnaRf::permeabRunsOnSynthetic() {
+    // Synthetic low-loss slab S-params; just check it runs & emits values.
+    std::vector<double> f; std::vector<std::complex<double>> s11, s21;
+    for (int i = 0; i < 6; ++i) {
+        double fhz = 1e6 + i * 5e5;
+        f.push_back(fhz);
+        s11.emplace_back(0.2, 0.01);
+        s21.emplace_back(0.9 - 0.01*i, 0.02);
+    }
+    PermeabilityResult r = permeabilityNRW(f, s11, s21, 0.001);
+    QVERIFY(r.valid);
+    QCOMPARE(r.mu_real.size(), size_t(6));
 }
 
 QTEST_MAIN(TestVnaRf)

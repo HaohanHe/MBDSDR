@@ -93,3 +93,15 @@
   CTCSS/静噪提示；复用既有引擎方法，未新增工具。
 - 测试：test_vna_onramp 17 passed（含滤波器空态分支 + 意图分类 Filter）；test_agent 38 passed。
 - 诚实空态：滤波器未给扫频范围提示先设置；SDR 未连源给真实引导，不伪造声音。
+
+## 10. 第⑤批：ppm 协议核验 + CDCSS/DCS 收尾核验
+
+- **ppm**：无协议依据（详见 docs/learn/nanovna/protocol-study.md「参考晶体 ppm 协议核验」）。
+  H `freq` 仅设频点（main.c:621），V2 寄存器表无 ref clock/ppm。不落地命令，不硬编字段。
+- **CDCSS/DCS 已闭环**：Golay(23,12) 干净室实现（dsp/cdcss.cpp:34-81，生成多项式 0xC75，
+  权≤2 纠错表）；104 码 3-of-8 恒权码表（cdcss.cpp:102 `kDcsCodes`）；
+  latch 去抖（cdcss.cpp:126-127，kLatchHits=3/kLatchMisses=5，应用于 214-225）；
+  确定性合成位流测试在 test_squelch_gate.cpp（cdcssDetectsConfiguredCode/
+  cdcssFalseOnWrongCode/cdcssCorrectsBitFlips，合成 DCS 位流 + 翻转 1/2 bit 纠错）。
+  三通道 set_cdcss/get_cdcss_status 与 UI 开关已在。无 DSP/UI 缺口。
+- 测试：test_squelch_gate 13 passed（含 3 个 CDCSS 用例）。

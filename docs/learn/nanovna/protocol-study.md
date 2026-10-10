@@ -194,3 +194,20 @@ VSWR     = (1 + |Γ|) / (1 - |Γ|)        [驻波比]
 - USB VID/PID 与枚举：`Hardware/Hardware.py:48-52,103-126`
 - 机型识别：`Hardware/Hardware.py:158-176`
 - H/H4 差异：`Hardware/NanoVNA_H.py:32-35`、`NanoVNA_H4.py:24-32`、`NanoVNA.py:34-35,60-94`
+
+## 参考晶体 ppm 协议核验（第⑤批）
+
+结论：**无协议依据**——NanoVNA H/H4 文本协议与 V2 二进制协议均**未暴露**参考时钟/ppm 设置。
+
+- H 文本协议 `freq` 命令：`repos/NanoVNA-H-hugen/main.c:621 cmd_freq` 仅
+  `set_frequency(freq)` 设单频点（:627-629），无 ppm/参考频率参数；usage: `freq {Hz}`。
+  全文唯一 "ppm" 出现在 `main.c:661 cmd_time`（RTC 时间校准 `y|m|d|h|min|sec|ppm`），
+  与射频参考时钟无关。
+- V2 二进制寄存器表：`repos/NanoVNA-App-OneOfEleven/NanoVNA_v2_comms.h:25-70` 全表为
+  sweep start/step/points(0x00/0x10/0x20)、values fifo(0x30)、average(0x40)、
+  si5351/adf4350 power(0x41/0x42)、unix time(0x58)、capture screen(0xEE)、
+  device/fw 版本(0xF0-0xF4)。**无 ref clock / xtal / ppm 寄存器**。
+
+处置：**不落地 `set_vna_reference_freq`，不硬编 ref_clock_ppm 字段**。参考频率由板载
+TCXO/晶振决定，无法经串口校正；若未来需 ppm 补偿，只能由外部已知频标比对离线估算
+（应用层派生，非设备协议命令）。此为诚实空态，待用户确有需求再议。

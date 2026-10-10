@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 61);
+    QCOMPARE(specs.size(), 63);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -283,6 +283,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "只读：对当前扫频 S21 幅度做滤波器分析（自动识别 bandpass/bandstop/highpass/lowpass，"
             "输出 -3dB 截止边、带宽、通带插损、阻带衰减）。无设备/幅度平坦非滤波器形态时 valid 诚实为 false。")},
+        {"analyze_vna_touchstone",
+         QString::fromUtf8(
+            "只读：解析 Touchstone s1p/s2p 文件（content 文本 或 path 路径），返回频率表与 S11/S21 实虚部数据集，"
+            "可复用谐振/滤波器分析。仅 R/I 格式；不可解析时 ok:false 诚实拒绝。")},
+        {"export_vna_snapshot",
+         QString::fromUtf8(
+            "写入：把当前 NanoVNA 扫频（Smith 轨迹）离屏渲染为 PNG 存到 path。属于写动作，手动模式下被拦截。"
+            "未连接/无数据时 ok:false 诚实拒绝。")},
         {"set_noise_blanker",
          QString::fromUtf8(
             "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。")},
@@ -433,7 +441,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 61);
+    QCOMPARE(headerCount, 63);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

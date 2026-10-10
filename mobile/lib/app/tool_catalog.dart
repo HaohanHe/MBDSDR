@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 61 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 63 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -190,6 +190,14 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'analyze_vna_filter',
       description: '只读：对当前扫频 S21 幅度做滤波器分析（自动识别 bandpass/bandstop/highpass/lowpass，-3dB 截止边/带宽/插损/阻带衰减）。无设备/平坦时 valid 诚实为 false。',
       write: false),
+  ToolCatalogEntry(
+      name: 'analyze_vna_touchstone',
+      description: '只读：解析 Touchstone s1p/s2p（content 或 path），返回频率表与 S11/S21 实虚部数据集。',
+      write: false),
+  ToolCatalogEntry(
+      name: 'export_vna_snapshot',
+      description: '写入：把当前 NanoVNA 扫频离屏渲染为 PNG 存到 path。手动模式下被拦截。',
+      write: true),
   ToolCatalogEntry(
       name: 'set_noise_blanker',
       description: '写入：开关噪声抑制器。',

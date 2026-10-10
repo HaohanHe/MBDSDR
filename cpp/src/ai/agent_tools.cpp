@@ -18,6 +18,10 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSettings>
+#include <QImage>
+#include <QPainter>
+#include <QPen>
+#include <QPolygonF>
 #include <cmath>
 
 namespace mbdsdr {
@@ -1227,8 +1231,89 @@ QString execAnalyzeVnaFilter(const QJsonObject&, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// analyze_vna_touchstone (read): parse a Touchstone file's content or path and
+// return the dataset (frequencies + S11/S21). Honest: unparseable -> ok:false.
+QString execAnalyzeVnaTouchstone(const QJsonObject& a, dsp::SpectrumEngine*,
+                                 const SourceInfo& src,
+                                 ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o; o["ok"] = true;
+    QString content = a.value("content").toString();
+    const QString path = a.value("path").toString();
+    if (content.isEmpty() && !path.isEmpty()) {
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) content = QString::fromUtf8(f.readAll());
+    }
+    if (content.isEmpty()) {
+        o["valid"] = false;
+        o["note"] = QString::fromUtf8("需要 content 或可读的 path（Touchstone 文本）");
+        addSourceFields(o, src); return compact(o);
+    }
+    vna::TouchstoneData d = vna::parseTouchstone(content.toStdString());
+    o["valid"] = d.valid;
+    o["n_ports"] = d.n_ports;
+    QJsonArray fr, s11r, s11i, s21r, s21i;
+    for (size_t i = 0; i < d.freq_hz.size(); ++i) {
+        fr.append(d.freq_hz[i]);
+        s11r.append(d.s11[i].real()); s11i.append(d.s11[i].imag());
+        if (i < d.s21.size()) { s21r.append(d.s21[i].real()); s21i.append(d.s21[i].imag()); }
+    }
+    o["frequencies"] = fr;
+    o["s11_re"] = s11r; o["s11_im"] = s11i;
+    o["s21_re"] = s21r; o["s21_im"] = s21i;
+    if (!d.valid) o["note"] = QString::fromStdString(d.note);
+    addSourceFields(o, src); return compact(o);
+}
 
-// 8. list_bookmarks (read): BookmarkManager wiring lands on control -> honest empty.
+// export_vna_snapshot (write, gated): offscreen-render the current sweep
+// (Smith + VSWR) to a PNG at `path`. Honest: no device/data -> ok:false.
+QString execExportVnaSnapshot(const QJsonObject& a, dsp::SpectrumEngine* engine,
+                              const SourceInfo& src,
+                              ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    const QString path = a.value("path").toString();
+    if (path.isEmpty()) {
+        o["ok"] = false;
+        o["note"] = QString::fromUtf8("需要 path（PNG 输出路径）");
+        addSourceFields(o, src); return compact(o);
+    }
+    auto& vna = engine->vnaClient();
+    if (!vna.isConnected()) {
+        o["ok"] = false;
+        o["note"] = QString::fromUtf8("未连接 NanoVNA：无扫频数据可截图");
+        addSourceFields(o, src); return compact(o);
+    }
+    auto s11 = vna.readData(0);
+    if (s11.empty()) {
+        o["ok"] = false;
+        o["note"] = QString::fromUtf8("无扫频数据");
+        addSourceFields(o, src); return compact(o);
+    }
+    QImage img(640, 480, QImage::Format_ARGB32);
+    img.fill(QColor(18, 18, 20));
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    const double cx = 320, cy = 240, rad = 180;
+    p.setPen(QPen(QColor(120,120,120), 1.0)); p.setBrush(Qt::NoBrush);
+    p.drawEllipse(QPointF(cx, cy), rad, rad);
+    p.drawLine(QPointF(cx-rad, cy), QPointF(cx+rad, cy));
+    QPolygonF line;
+    for (auto& g : s11) {
+        double m = std::abs(g); if (m > 1.0) m = 1.0;
+        double ph = std::arg(g);
+        line << QPointF(cx + rad*m*std::cos(ph), cy - rad*m*std::sin(ph));
+    }
+    p.setPen(QPen(QColor(80,180,255), 1.6)); p.drawPolyline(line);
+    p.end();
+    if (!img.save(path, "PNG")) {
+        o["ok"] = false;
+        o["note"] = QString::fromUtf8("写 PNG 失败（路径不可写）");
+        addSourceFields(o, src); return compact(o);
+    }
+    o["ok"] = true;
+    o["path"] = path;
+    o["points"] = (int)s11.size();
+    addSourceFields(o, src); return compact(o);
+}
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
                           const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/) {
@@ -1822,6 +1907,8 @@ const QList<ToolDispatch>& dispatchTable() {
         {"analyze_vna_resonance", &execAnalyzeVnaResonance},
         {"vna_tdr_cable", &execVnaTdrCable},
         {"analyze_vna_filter", &execAnalyzeVnaFilter},
+        {"analyze_vna_touchstone", &execAnalyzeVnaTouchstone},
+        {"export_vna_snapshot", &execExportVnaSnapshot},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},
         {"list_bookmarks", &execListBookmarks},

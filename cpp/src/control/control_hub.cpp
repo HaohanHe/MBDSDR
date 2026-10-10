@@ -3,6 +3,9 @@
 
 #include "dsp/spectrum_engine.h"
 #include "vna/vna_rf.h"
+#include <QImage>
+#include <QPainter>
+#include <QPolygonF>
 #include "dsp/device_capabilities.h"
 #include "dsp/vfo_manager.h"
 #include "dsp/network_audio_sink.h"
@@ -119,6 +122,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"set_lrpt",              true,  &ControlHub::cmdSetLrpt},
         {"set_vna_sweep",         true,  &ControlHub::cmdSetVnaSweep},
         {"vna_tdr_cable",         true,  &ControlHub::cmdVnaTdrCable},
+        {"export_vna_snapshot",   true,  &ControlHub::cmdExportVnaSnapshot},
         {"set_noise_blanker",     true,  &ControlHub::cmdSetNoiseBlanker},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
@@ -163,6 +167,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_vna_status",        false, &ControlHub::cmdGetVnaStatus},
         {"analyze_vna_resonance", false, &ControlHub::cmdAnalyzeVnaResonance},
         {"analyze_vna_filter",    false, &ControlHub::cmdAnalyzeVnaFilter},
+        {"analyze_vna_touchstone", false, &ControlHub::cmdAnalyzeVnaTouchstone},
         {"get_noise_blanker_status", false, &ControlHub::cmdGetNoiseBlankerStatus},
         {"list_bookmarks",        false, &ControlHub::cmdListBookmarks},
         {"list_vfos",             false, &ControlHub::cmdListVfos},
@@ -1616,6 +1621,58 @@ QJsonObject ControlHub::cmdAnalyzeVnaFilter(const QJsonObject&) {
     o["bandwidth_hz"] = r.bandwidth_hz;
     o["passband_db"] = r.passband_db;
     o["stopband_atten_db"] = r.stopband_atten_db;
+    return o;
+}
+
+QJsonObject ControlHub::cmdAnalyzeVnaTouchstone(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "analyze_vna_touchstone";
+    QString content = a.value("content").toString();
+    const QString path = a.value("path").toString();
+    if (content.isEmpty() && !path.isEmpty()) {
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) content = QString::fromUtf8(f.readAll());
+    }
+    if (content.isEmpty()) {
+        o["valid"] = false;
+        o["note"] = QStringLiteral("需要 content 或可读 path");
+        return o;
+    }
+    vna::TouchstoneData d = vna::parseTouchstone(content.toStdString());
+    o["valid"] = d.valid;
+    o["n_ports"] = d.n_ports;
+    if (!d.valid) o["note"] = QString::fromStdString(d.note);
+    return o;
+}
+
+QJsonObject ControlHub::cmdExportVnaSnapshot(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "export_vna_snapshot";
+    const QString path = a.value("path").toString();
+    if (path.isEmpty()) return errResult(QStringLiteral("参数 path 缺失"));
+    auto& vna = engine_->vnaClient();
+    o["connected"] = vna.isConnected();
+    if (!vna.isConnected()) { o["ok"] = false; o["note"] = QStringLiteral("未连接 NanoVNA"); return o; }
+    auto s11 = vna.readData(0);
+    if (s11.empty()) { o["ok"] = false; o["note"] = QStringLiteral("无扫频数据"); return o; }
+    QImage img(640, 480, QImage::Format_ARGB32);
+    img.fill(QColor(18, 18, 20));
+    QPainter p(&img); p.setRenderHint(QPainter::Antialiasing, true);
+    const double cx = 320, cy = 240, rad = 180;
+    p.setPen(QPen(QColor(120,120,120), 1.0)); p.setBrush(Qt::NoBrush);
+    p.drawEllipse(QPointF(cx, cy), rad, rad);
+    p.drawLine(QPointF(cx-rad, cy), QPointF(cx+rad, cy));
+    QPolygonF line;
+    for (auto& g : s11) {
+        double m = std::abs(g); if (m > 1.0) m = 1.0;
+        double ph = std::arg(g);
+        line << QPointF(cx + rad*m*std::cos(ph), cy - rad*m*std::sin(ph));
+    }
+    p.setPen(QPen(QColor(80,180,255), 1.6)); p.drawPolyline(line);
+    p.end();
+    if (!img.save(path, "PNG")) { o["ok"] = false; o["note"] = QStringLiteral("写 PNG 失败"); return o; }
+    o["path"] = path;
+    o["points"] = (int)s11.size();
     return o;
 }
 

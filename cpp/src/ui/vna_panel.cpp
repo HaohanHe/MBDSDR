@@ -217,8 +217,10 @@ VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
     s11Plot_ = new VnaTraceWidget(QString::fromUtf8("S11 VSWR"), this);
     s21Plot_ = new VnaTraceWidget(QString::fromUtf8("S21 增益 dB"), this);
     smithPlot_ = new VnaSmithWidget(QString::fromUtf8("Smith / Polar (S11)"), this);
+    gdPlot_ = new VnaTraceWidget(QString::fromUtf8("群延迟 s"), this);
     lay->addWidget(s11Plot_, 1);
     lay->addWidget(s21Plot_, 1);
+    lay->addWidget(gdPlot_, 1);
     lay->addWidget(smithPlot_, 1);
 
     readoutLabel_ = new QLabel(vnaReadoutText(std::nan(""), 0, std::nan("")), this);
@@ -292,6 +294,7 @@ void VnaPanel::applyReadout(const std::vector<long>& freqs,
     std::vector<double> fHz;
     fHz.reserve(freqs.size());
     for (long f : freqs) fHz.push_back((double)f);
+    gdPlot_->setData(vna::groupDelayS21(fHz, s21));
     vna::ResonanceResult rr = vna::analyzeResonance(fHz, s11);
     analysisLabel_->setText(
         vnaAnalysisText(rr.valid, rr.series_fr_hz, rr.q, rr.bandwidth_hz, rr.esr));

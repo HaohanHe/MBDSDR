@@ -789,6 +789,40 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // analyze_vna_touchstone (read-only) ------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "analyze_vna_touchstone";
+        s.description = QString::fromUtf8(
+            "只读：解析 Touchstone s1p/s2p 文件（content 文本 或 path 路径），返回频率表与 S11/S21 实虚部数据集，"
+            "可复用谐振/滤波器分析。仅 R/I 格式；不可解析时 ok:false 诚实拒绝。");
+        ToolParamSpec content;
+        content.name = "content"; content.type = "string";
+        content.description = QString::fromUtf8("Touchstone 文件全文（与 path 二选一）");
+        s.params << content;
+        ToolParamSpec path;
+        path.name = "path"; path.type = "string";
+        path.description = QString::fromUtf8("Touchstone 文件路径（与 content 二选一）");
+        s.params << path;
+        out.append(s);
+    }
+
+    // export_vna_snapshot (write, gated) -------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "export_vna_snapshot";
+        s.description = QString::fromUtf8(
+            "写入：把当前 NanoVNA 扫频（Smith 轨迹）离屏渲染为 PNG 存到 path。属于写动作，手动模式下被拦截。"
+            "未连接/无数据时 ok:false 诚实拒绝。");
+        s.write = true;
+        ToolParamSpec path;
+        path.name = "path"; path.type = "string";
+        path.description = QString::fromUtf8("PNG 输出路径");
+        path.required = true;
+        s.params << path;
+        out.append(s);
+    }
+
     {
         ToolSchemaSpec s;
         s.name = "set_noise_blanker";

@@ -104,6 +104,7 @@ private:
 
     VnaTraceWidget* s11Plot_ = nullptr;  // VSWR vs frequency
     VnaTraceWidget* s21Plot_ = nullptr;  // gain dB vs frequency
+    VnaTraceWidget* gdPlot_  = nullptr;  // group delay (s) vs frequency
     QWidget* smithPlot_  = nullptr;  // Smith + Polar trajectory widget
     QTimer*         timer_   = nullptr;
 };
