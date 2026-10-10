@@ -116,6 +116,7 @@ set(SOURCES
     src/dsp/ctcss.cpp
     src/dsp/cdcss.cpp
     src/dsp/ft8_detector.cc
+    src/dsp/ft8_codec.cc
     src/dsp/agc.cpp
     src/dsp/audio_output.cpp
     src/dsp/qt_audio_sink.cpp
@@ -529,6 +530,13 @@ target_link_libraries(test_ft8_detector PRIVATE mbdsdr_core)
 target_include_directories(test_ft8_detector PRIVATE src)
 target_link_libraries(test_ft8_detector PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME ft8_detector COMMAND test_ft8_detector)
+
+add_executable(test_ft8_codec tests/test_ft8_codec.cpp)
+target_link_libraries(test_ft8_codec PRIVATE mbdsdr_core)
+target_include_directories(test_ft8_codec PRIVATE src)
+target_compile_definitions(test_ft8_codec PRIVATE SRCDIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
+target_link_libraries(test_ft8_codec PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME ft8_codec COMMAND test_ft8_codec)
 
 # Phase22-A remote/threading hardening: (1) foreign worker threads hammer
 # execute() concurrently -> the engine dispatch is marshaled to the engine home
