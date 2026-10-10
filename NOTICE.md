@@ -77,6 +77,17 @@
 - **CelesTrak**（https://celestrak.org/ ）公开发布的 TLE / 验证星历：用于 SGP4
   精度核对与（无网络时的）离线演示星历，历元必然过时。
 
+## 三b、WTFPL / 宽松许可参考实现（保留归属）
+
+下列上游源码以 WTFPL（或同类极宽松许可）发布，本项目在干净室纪律下以其**协议事实与
+互操作接口**为参考实现依据（不整文件拷入主代码库）；保留其许可与归属，详见
+`LICENSING.md` §4b。
+
+- **NanoVNA-App**（OneOfEleven，https://github.com/OneOfEleven/NanoVNA-App ，
+  WTFPL v2）：NanoVNA 文本协议（`data 0-7` 等）与 V2 二进制寄存器协议的参考实现，
+  对应 MBDSDR 的 NanoVNA 仪器接入模块（`mbdsdr_ai/nanovna_client.py`、
+  `cpp/src/vna/`）。
+
 ## 四、模块级说明
 
 更细粒度的模块拆分、构建期依赖与端到端测试向量说明，分别见：
