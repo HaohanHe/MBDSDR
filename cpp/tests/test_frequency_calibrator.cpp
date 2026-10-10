@@ -68,6 +68,7 @@ private slots:
     void initTestCase();
     void handheld_plus32_recoversAndResidualZero();
     void manual_minus20_recovers();
+    void smallHandheldOffsets_recoveredToWithinFewHz();
     void gsmFcch_plus32_recovers();
     void remeasureAfterCorrection_isZero();
     void noiseOnly_notDetected();
@@ -106,6 +107,38 @@ void TestFrequencyCalibrator::manual_minus20_recovers() {
     QVERIFY2(std::fabs(r.ppm - injected) < 0.2,
              qPrintable(QString("manual ppm %1 vs injected %2")
                             .arg(r.ppm).arg(injected)));
+}
+
+// The handheld graphical demo anchors: a carrier sitting a small KNOWN baseband
+// offset away from the VFO centre (the SDR's crystal error + the handheld's
+// tuning error combined). measureCarrier must read that residual to within a few
+// Hz on both demo UHF channel centres, at +500 Hz / -250 Hz / zero offset. This
+// pins the Hz-level precision the wizard's delta-Hz readout promises.
+void TestFrequencyCalibrator::smallHandheldOffsets_recoveredToWithinFewHz() {
+    const double Fs = tokens::kFixtureSrcRateHz;
+    // Generic, non-preset UHF channel centres (the demo anchors only).
+    const double centres[2] = {409.75e6, 438.5e6};
+    const double offsets[3]  = {+500.0, -250.0, 0.0};
+    for (double F : centres) {
+        for (double want : offsets) {
+            // Carrier placed at expectedBaseband(0) + want Hz.
+            std::vector<std::complex<float>> iq(16384);
+            std::mt19937 rng(9000 + (long)F + (long)want);
+            std::normal_distribution<float> gauss(0.0f, 0.02f);
+            for (long n = 0; n < 16384; ++n) {
+                const double ph = 2.0 * M_PI * want * n / Fs;
+                iq[n] = {static_cast<float>(std::cos(ph)) + gauss(rng),
+                         static_cast<float>(std::sin(ph)) + gauss(rng)};
+            }
+            CalibrationMeasurement m = measureCarrier(iq, Fs, configFor(F, 0.0));
+            QVERIFY2(m.detected, qPrintable(
+                QString("centre %1 offset %2 Hz must lock")
+                    .arg(F).arg(want)));
+            QVERIFY2(std::fabs(m.offsetHz - want) < 5.0, qPrintable(
+                QString("centre %1: measured offset %2 Hz vs injected %3 Hz")
+                    .arg(F).arg(m.offsetHz).arg(want)));
+        }
+    }
 }
 
 void TestFrequencyCalibrator::gsmFcch_plus32_recovers() {
