@@ -186,3 +186,10 @@
   但**无复制/导出/clipboard 能力**；UI 仅复选框（main_window.cpp:794）。
 - 登记为缺口：解码结果导出/复制留线 B；当前手动路径——解码在终端/控制台输出，用户自行拷贝。
 - SDR++ 侦察：无新硬缺口。
+
+## 23. 第㉔批：engine peaks() 访问器
+- spectrum_engine.h 增只读 peaks(maxN=10, relThreshDb=6)：从 latestFrame_ 找局部极大、
+  按强度降序、限 N；无帧/平坦诚实空态。线 B 可据此接 CSV 导出。
+- FT8 评估：ft8_decode.decode_ft8_payload 返回 {data_bits, iters}，无去重/SIC/呼号字段；
+  export_ft8_results 数据源需线 B 在 C++ 侧补结构化解码结果。
+- SDR++ 侦察：无新硬缺口。

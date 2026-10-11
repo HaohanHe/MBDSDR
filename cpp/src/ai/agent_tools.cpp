@@ -1405,7 +1405,7 @@ QString execExportSpectrumSnapshot(const QJsonObject& a, dsp::SpectrumEngine* en
 
 // export_peaks_csv (write, gated): write the current peak list (freq,db)
 // descending by strength to a CSV at `path`. Honest: no peak list -> empty.
-QString execExportPeaksCsv(const QJsonObject& a, dsp::SpectrumEngine*,
+QString execExportPeaksCsv(const QJsonObject& a, dsp::SpectrumEngine* engine,
                            const SourceInfo& src,
                            ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
@@ -1415,7 +1415,7 @@ QString execExportPeaksCsv(const QJsonObject& a, dsp::SpectrumEngine*,
         o["note"] = QString::fromUtf8("需要 path（CSV 输出路径）");
         addSourceFields(o, src); return compact(o);
     }
-    // Honest: engine 未暴露峰值列表读访问器；写表头（空数据），不伪造峰值。
+    auto peaks = engine->peaks(10, 6.0);   // strength-desc, honest empty
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
         o["ok"] = false;
@@ -1423,11 +1423,41 @@ QString execExportPeaksCsv(const QJsonObject& a, dsp::SpectrumEngine*,
         addSourceFields(o, src); return compact(o);
     }
     f.write("freq_hz,db\n");
+    for (auto& p : peaks)
+        f.write((QString::number(p.freq_hz, 'f', 1) + "," +
+                 QString::number(p.dbfs, 'f', 1) + "\n").toUtf8());
+    f.close();
+    o["ok"] = true;
+    o["path"] = path;
+    o["rows"] = (int)peaks.size();
+    if (peaks.empty()) o["note"] = QString::fromUtf8("无峰值（平坦/空 FFT）：仅写表头");
+    addSourceFields(o, src); return compact(o);
+}
+
+// export_ft8_results (write, gated): dump current FT8 decode results to a file.
+// Honest: C++ side has no FT8 result store (Python domain) -> header-only empty.
+QString execExportFt8Results(const QJsonObject& a, dsp::SpectrumEngine*,
+                              const SourceInfo& src,
+                              ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    const QString path = a.value("path").toString();
+    if (path.isEmpty()) {
+        o["ok"] = false;
+        o["note"] = QString::fromUtf8("需要 path（输出文件路径）");
+        addSourceFields(o, src); return compact(o);
+    }
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        o["ok"] = false;
+        o["note"] = QString::fromUtf8("写文件失败（路径不可写）");
+        addSourceFields(o, src); return compact(o);
+    }
+    f.write("ft8_results\n");
     f.close();
     o["ok"] = true;
     o["path"] = path;
     o["rows"] = 0;
-    o["note"] = QString::fromUtf8("引擎峰值列表读访问器未接线：当前仅写表头（空数据），不伪造峰值");
+    o["note"] = QString::fromUtf8("FT8 解码结果源待 Python 域接入：当前仅写表头（空数据），不伪造呼号");
     addSourceFields(o, src); return compact(o);
 }
 // an EFHW / inverse-L matching network L/C suggestion.
@@ -2052,6 +2082,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"export_vna_snapshot", &execExportVnaSnapshot},
         {"export_spectrum_snapshot", &execExportSpectrumSnapshot},
         {"export_peaks_csv", &execExportPeaksCsv},
+        {"export_ft8_results", &execExportFt8Results},
         {"analyze_vna_match", &execAnalyzeVnaMatch},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},

@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 67);
+    QCOMPARE(specs.size(), 68);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -303,6 +303,10 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
          QString::fromUtf8(
             "写入：把当前频谱峰值列表（freq_hz,db）按强度降序写成 CSV 存到 path。属于写动作，手动模式下被拦截。"
             "无峰值/路径不可写时 ok:false 诚实拒绝。")},
+        {"export_ft8_results",
+         QString::fromUtf8(
+            "写入：把当前 FT8 解码结果（含 SIC 分离）导出为文本/CSV 存到 path。属于写动作，手动模式下被拦截。"
+            "无解码结果时 rows=0 诚实空态，不伪造呼号/经纬度。")},
         {"analyze_vna_match",
          QString::fromUtf8(
             "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回 EFHW/反 L 匹配网络的 L/C 建议（Q、串联/并联臂值）。"
@@ -457,7 +461,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 67);
+    QCOMPARE(headerCount, 68);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

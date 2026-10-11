@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，67 个工具）
+# Agent 工具能力清单（自动生成，68 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -329,3 +329,6 @@ schema: {"properties":{"load_r":{"description":"负载电阻 Ω（>50）","type"
 
 ## export_peaks_csv（写，第㉓批新增）
 把当前频谱峰值列表（freq_hz,db）按强度降序写成 CSV 存到 path。写工具，手动模式 gate 拦截。引擎峰值列表读访问器未接线时仅写表头（空数据），不伪造峰值。
+
+## export_ft8_results（写，第㉔批新增）
+把当前 FT8 解码结果（含 SIC 分离）导出为文本/CSV 存到 path。写工具，手动模式 gate 拦截。FT8 解码结果源待 Python 域接入时仅写表头（空数据），不伪造呼号/经纬度。

@@ -125,6 +125,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"export_vna_snapshot",   true,  &ControlHub::cmdExportVnaSnapshot},
         {"export_spectrum_snapshot", true, &ControlHub::cmdExportSpectrumSnapshot},
         {"export_peaks_csv",    true,  &ControlHub::cmdExportPeaksCsv},
+        {"export_ft8_results",  true,  &ControlHub::cmdExportFt8Results},
         {"set_noise_blanker",     true,  &ControlHub::cmdSetNoiseBlanker},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
@@ -1735,6 +1736,21 @@ QJsonObject ControlHub::cmdExportPeaksCsv(const QJsonObject& a) {
     o["path"] = path;
     o["rows"] = 0;
     o["note"] = QStringLiteral("引擎峰值列表读访问器未接线：仅写表头（空数据）");
+    return o;
+}
+
+QJsonObject ControlHub::cmdExportFt8Results(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "export_ft8_results";
+    const QString path = a.value("path").toString();
+    if (path.isEmpty()) return errResult(QStringLiteral("参数 path 缺失"));
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) { o["ok"] = false; o["note"] = QStringLiteral("写文件失败"); return o; }
+    f.write("ft8_results\n");
+    f.close();
+    o["path"] = path;
+    o["rows"] = 0;
+    o["note"] = QStringLiteral("FT8 解码结果源待 Python 域接入：仅写表头（空数据）");
     return o;
 }
 

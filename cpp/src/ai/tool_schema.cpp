@@ -865,6 +865,22 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // export_ft8_results (write, gated) --------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "export_ft8_results";
+        s.description = QString::fromUtf8(
+            "写入：把当前 FT8 解码结果（含 SIC 分离）导出为文本/CSV 存到 path。属于写动作，手动模式下被拦截。"
+            "无解码结果时 rows=0 诚实空态，不伪造呼号/经纬度。");
+        s.write = true;
+        ToolParamSpec path;
+        path.name = "path"; path.type = "string";
+        path.description = QString::fromUtf8("输出文件路径（.csv/.txt）");
+        path.required = true;
+        s.params << path;
+        out.append(s);
+    }
+
     // analyze_vna_match (read-only) ------------------------------------------
     {
         ToolSchemaSpec s;

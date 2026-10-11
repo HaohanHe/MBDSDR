@@ -66,6 +66,28 @@ public:
         std::lock_guard<std::mutex> lk(frameMu_);
         return latestFrame_.centerFreqHz;
     }
+    // Local-maxima peaks over the latest FFT, sorted by strength desc.
+    // Each entry: {freq_hz, dbfs}. Honest empty when no frame / flat noise.
+    struct Peak { double freq_hz; float dbfs; };
+    std::vector<Peak> peaks(int maxN = 10, float relThreshDb = 6.0) const {
+        std::lock_guard<std::mutex> lk(frameMu_);
+        const auto& d = latestFrame_.dbfs;
+        std::vector<Peak> out;
+        if (d.size() < 3) return out;
+        double sr = latestFrame_.sampleRateHz;
+        double fc = latestFrame_.centerFreqHz;
+        float mx = *std::max_element(d.begin(), d.end());
+        for (size_t i = 1; i + 1 < d.size(); ++i) {
+            if (d[i] >= d[i-1] && d[i] > d[i+1] && d[i] >= mx - relThreshDb) {
+                double f = fc - sr / 2.0 + sr * i / d.size();
+                out.push_back({f, d[i]});
+            }
+        }
+        std::sort(out.begin(), out.end(),
+                  [](const Peak& a, const Peak& b){ return a.dbfs > b.dbfs; });
+        if ((int)out.size() > maxN) out.resize(maxN);
+        return out;
+    }
     void shutdown();
     // Read-only state getters for integration tests / status display.
     QString demodMode() const { return demodMode_; }

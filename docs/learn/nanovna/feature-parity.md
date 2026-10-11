@@ -459,3 +459,17 @@ competition/比赛/ghp_ 0；MIT 头。
 ## 计数（offscreen 真实 passed）
 - 工具 67；mobile catalog 67；phase31 头部 67。
 - registry 8 / schema 10 / agent 38（读29写38）/ control_hub 34 / ai_real_link 17，全 0 failed。
+
+---
+
+# 第㉔批：export_peaks_csv 真实行 + export_ft8_results 三通道（HEAD=a8ff52a，工具 67→68）
+
+## export_peaks_csv 真实行
+execExportPeaksCsv 接 engine->peaks(10,6dB) → 真实行（freq_hz,db 降序）；无峰值 rows=0 诚实空态。
+
+## export_ft8_results（写，骨架）
+spec/exec/dispatch/hub 三通道；C++ 无 FT8 结构化结果（Python 域）→ rows=0 诚实空态，不伪造呼号。
+
+## 计数（offscreen 真实 passed）
+- 工具 68；mobile catalog 68；phase31 头部 68；README 矩阵 68。
+- registry 8 / schema 10 / agent 38（读29写39）/ control_hub 34 / ai_real_link 17，全 0 failed。
