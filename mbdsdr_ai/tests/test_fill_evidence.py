@@ -31,3 +31,14 @@ def test_lc_pin():
 def test_filter_shape():
     from mbdsdr_ai.fill_evidence_example import filter_shape_py
     assert filter_shape_py([0, 0, -30, -30, 0, 0, -30, -30]) in ("lowpass", "bandpass")
+
+
+def test_resonance_empty_no_crash():
+    from mbdsdr_ai.fill_evidence_example import analyze_resonance_py
+    r = analyze_resonance_py([], [])
+    assert r["bw_hz"] == 0.0 or r["fr_hz"] == 0.0
+
+
+def test_tdr_empty():
+    from mbdsdr_ai.fill_evidence_example import tdr_length_py
+    assert tdr_length_py([], []) == 0.0

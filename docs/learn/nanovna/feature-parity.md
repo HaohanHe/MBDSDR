@@ -562,3 +562,14 @@ competition/比赛/ghp_ 0。
 
 ## 红线
 competition/比赛/ghp_ 0。
+
+---
+
+# 第㉛批：维护态例行（HEAD=6041d3e，只读）
+
+## 八处计数核对
+- registry 8/schema 10/agent 40/control_hub 34/ai_real_link 17，全 0 failed；phase31 头 68；README 合计 68。
+- **mobile 实际 name 条目 64**（test 期望 68，差 4 已知缺口）。
+
+## 红线
+competition/比赛/ghp_ 0。

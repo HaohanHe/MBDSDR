@@ -19,6 +19,8 @@ def tdr_length_py(freqs_hz, s11, vf=0.66):
     与 C++ vna_rf::tdrCable 同思路，独立实现。合成占位。"""
     c = 299792458.0
     mag = [abs(complex(*s)) for s in s11]
+    if not mag or not freqs_hz:
+        return 0.0
     k = max(range(len(mag)), key=lambda i: mag[i])
     n = len(freqs_hz)
     span = freqs_hz[-1] - freqs_hz[0]
@@ -51,6 +53,8 @@ def filter_shape_py(s21_db):
 def analyze_resonance_py(freqs_hz, s11):
     """Python 侧轻量谐振分析（与 C++ vna_rf 同公式、独立实现）：
     |Z|极小点为 fr，半功率(-3dB)带宽 BW，fr 处 |Z| 近似 ESR。合成占位用。"""
+    if not freqs_hz or not s11 or len(freqs_hz) != len(s11):
+        return {"fr_hz": 0.0, "bw_hz": 0.0, "q": 0.0, "esr": 0.0}
     import math
     z = [abs(complex(*s)) for s in s11]
     i = min(range(len(z)), key=lambda k: z[k])

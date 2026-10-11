@@ -234,3 +234,9 @@
   无预制剧本/固定回答。
 - 与"纯工具+模型自主"一致：onramp 是真实工具链的薄编排器，产品不含演示话术。
 - SDR++ 侦察：无新硬缺口。
+
+## 30. 第㉛批：回传链路端到端预演
+- selftest --json-pretty --out 全路径复跑通过，sweep.json keys 齐全（S11/S21/cal/freqs/
+  summary/sweep/vswr/回损）。
+- fill 边界加固：analyze_resonance_py/tdr_length_py 空数组不崩溃返回零；test_fill_evidence 6 passed。
+- 双平台命令（/dev/ttyACM0 vs COMx）+ dialout/udev 已在 quickstart；回传 checklist 与 argparse 零漂移。
