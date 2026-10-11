@@ -128,3 +128,11 @@
 - UI badge 八进制外显已就绪（第⑨批）。合成位流 bit-flip 纠错测试已在 test_squelch_gate 13 passed。
 - offscreen 快照不可注入（定案见第⑩批），真机步骤已入 quickstart。
 - pytest nanovna_dump 5 passed 复核全绿；PENDING 列字段对齐延续第⑬批。
+
+## 14. 第⑮批：发布前健康检查 + 预案演练
+- LICENSE：MIT，LICENSING.md 有 GPL 边界处理、repos/ gitignore；ci.yml 无硬编码密钥
+  （仅注释提及 secrets 需维护者配置）。
+- README：30 秒上手已加；工具计数口径并存（README 原型 ~63 / 交付 47 / phase31 65），
+  README 已声明原型面≠交付集，不强行统一。
+- 预案演练：mbdsdr_ai/fill_evidence_example.py 走「dump -> 复算最低 VSWR 点 -> 填充行」，
+  输出带 _MARKER=SYNTHETIC_PLACEHOLDER 标注；真机替换 sweep.json 即完成。

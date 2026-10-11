@@ -339,3 +339,18 @@ SDR++ 机制（外部开源接收机 GUI）无可复用新硬缺口；本仓 Nan
 
 ## 计数
 金集不变（65）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
+
+---
+
+# 第⑮批：论文支持素材 + SDR 侧侦察（HEAD=d5f7d2e）
+
+## 论文素材
+docs/learn/phase63/instrument-democratization-narrative.md（problem→approach→evidence 骨架 + SDR/VNA 双实证清单 + PENDING 真机列）。
+
+## SDR 侧侦察结论
+- 现有：VNA 侧 export_vna_snapshot（QWidget::grab PNG）已落地；
+- 缺口：SDR 侧无 export_spectrum_snapshot（主频谱图导出 PNG）——真实缺口，但需 main_window 按钮 + 三通道工具接线，本轮宁缺毋滥不落地，留后续。
+- FT8 结果一键复制：线 A 域 Python 原型，不在本线。
+
+## 计数
+金集不变（65）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
