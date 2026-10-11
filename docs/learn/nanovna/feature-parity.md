@@ -446,3 +446,16 @@ competition/比赛/ghp_ 0；MIT 头。
 ## 双文档核对
 - narrative.md：工具数 65→66 已修正（注册/mobile/金集三处）；
 - evidence.md：PENDING 标注 3 处完整。
+
+---
+
+# 第㉓批：export_peaks_csv 三通道落地（HEAD=c26ce43，工具 66→67）
+
+## 三通道
+- spec tool_schema.cpp：export_peaks_csv（write, gated, path 必填）。
+- exec agent_tools.cpp execExportPeaksCsv（写 CSV 表头 freq_hz,db；无峰值数据诚实空态 rows=0）+ dispatch。
+- hub control_hub.{h,cpp} 写表 true + cmdExportPeaksCsv。
+
+## 计数（offscreen 真实 passed）
+- 工具 67；mobile catalog 67；phase31 头部 67。
+- registry 8 / schema 10 / agent 38（读29写38）/ control_hub 34 / ai_real_link 17，全 0 failed。

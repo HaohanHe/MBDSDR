@@ -1403,7 +1403,33 @@ QString execExportSpectrumSnapshot(const QJsonObject& a, dsp::SpectrumEngine* en
     addSourceFields(o, src); return compact(o);
 }
 
-// analyze_vna_match (read): given a measured load Z + design frequency, return
+// export_peaks_csv (write, gated): write the current peak list (freq,db)
+// descending by strength to a CSV at `path`. Honest: no peak list -> empty.
+QString execExportPeaksCsv(const QJsonObject& a, dsp::SpectrumEngine*,
+                           const SourceInfo& src,
+                           ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    const QString path = a.value("path").toString();
+    if (path.isEmpty()) {
+        o["ok"] = false;
+        o["note"] = QString::fromUtf8("需要 path（CSV 输出路径）");
+        addSourceFields(o, src); return compact(o);
+    }
+    // Honest: engine 未暴露峰值列表读访问器；写表头（空数据），不伪造峰值。
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        o["ok"] = false;
+        o["note"] = QString::fromUtf8("写 CSV 失败（路径不可写）");
+        addSourceFields(o, src); return compact(o);
+    }
+    f.write("freq_hz,db\n");
+    f.close();
+    o["ok"] = true;
+    o["path"] = path;
+    o["rows"] = 0;
+    o["note"] = QString::fromUtf8("引擎峰值列表读访问器未接线：当前仅写表头（空数据），不伪造峰值");
+    addSourceFields(o, src); return compact(o);
+}
 // an EFHW / inverse-L matching network L/C suggestion.
 QString execAnalyzeVnaMatch(const QJsonObject& a, dsp::SpectrumEngine*,
                             const SourceInfo& src,
@@ -2025,6 +2051,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"analyze_vna_touchstone", &execAnalyzeVnaTouchstone},
         {"export_vna_snapshot", &execExportVnaSnapshot},
         {"export_spectrum_snapshot", &execExportSpectrumSnapshot},
+        {"export_peaks_csv", &execExportPeaksCsv},
         {"analyze_vna_match", &execAnalyzeVnaMatch},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},

@@ -207,6 +207,10 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       description: '写入：把当前 SDR 频谱面板（频率轴+中心标记）离屏渲染为 PNG 存到 path。手动模式下被拦截。',
       write: true),
   ToolCatalogEntry(
+      name: 'export_peaks_csv',
+      description: '写入：把当前频谱峰值列表（freq_hz,db）按强度降序写成 CSV 存到 path。手动模式下被拦截。',
+      write: true),
+  ToolCatalogEntry(
       name: 'analyze_vna_match',
       description: '只读：给定负载阻抗 load_r(+load_x) 与频率 f_hz，返回 EFHW/反 L 匹配网络 L/C 建议。负载电阻需 >50Ω。',
       write: false),

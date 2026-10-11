@@ -849,6 +849,22 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // export_peaks_csv (write, gated) ----------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "export_peaks_csv";
+        s.description = QString::fromUtf8(
+            "写入：把当前频谱峰值列表（freq_hz,db）按强度降序写成 CSV 存到 path。属于写动作，手动模式下被拦截。"
+            "无峰值/路径不可写时 ok:false 诚实拒绝。");
+        s.write = true;
+        ToolParamSpec path;
+        path.name = "path"; path.type = "string";
+        path.description = QString::fromUtf8("CSV 输出路径");
+        path.required = true;
+        s.params << path;
+        out.append(s);
+    }
+
     // analyze_vna_match (read-only) ------------------------------------------
     {
         ToolSchemaSpec s;

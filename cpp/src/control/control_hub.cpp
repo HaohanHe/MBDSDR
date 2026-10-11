@@ -124,6 +124,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"vna_tdr_cable",         true,  &ControlHub::cmdVnaTdrCable},
         {"export_vna_snapshot",   true,  &ControlHub::cmdExportVnaSnapshot},
         {"export_spectrum_snapshot", true, &ControlHub::cmdExportSpectrumSnapshot},
+        {"export_peaks_csv",    true,  &ControlHub::cmdExportPeaksCsv},
         {"set_noise_blanker",     true,  &ControlHub::cmdSetNoiseBlanker},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
@@ -1719,6 +1720,21 @@ QJsonObject ControlHub::cmdExportSpectrumSnapshot(const QJsonObject& a) {
     if (!img.save(path, "PNG")) { o["ok"] = false; o["note"] = QStringLiteral("写 PNG 失败"); return o; }
     o["path"] = path;
     o["center_hz"] = center;
+    return o;
+}
+
+QJsonObject ControlHub::cmdExportPeaksCsv(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "export_peaks_csv";
+    const QString path = a.value("path").toString();
+    if (path.isEmpty()) return errResult(QStringLiteral("参数 path 缺失"));
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) { o["ok"] = false; o["note"] = QStringLiteral("写 CSV 失败"); return o; }
+    f.write("freq_hz,db\n");
+    f.close();
+    o["path"] = path;
+    o["rows"] = 0;
+    o["note"] = QStringLiteral("引擎峰值列表读访问器未接线：仅写表头（空数据）");
     return o;
 }
 

@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，66 个工具）
+# Agent 工具能力清单（自动生成，67 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -326,3 +326,6 @@ schema: {"properties":{"load_r":{"description":"负载电阻 Ω（>50）","type"
 
 ## export_spectrum_snapshot（写，第⑯批新增）
 把当前 SDR 频谱面板（频率轴 + 中心频点标记）离屏渲染为 PNG 存到 path。写工具，手动模式 gate 拦截。路径不可写 ok:false 诚实拒绝。
+
+## export_peaks_csv（写，第㉓批新增）
+把当前频谱峰值列表（freq_hz,db）按强度降序写成 CSV 存到 path。写工具，手动模式 gate 拦截。引擎峰值列表读访问器未接线时仅写表头（空数据），不伪造峰值。

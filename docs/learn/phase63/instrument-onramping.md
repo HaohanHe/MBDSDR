@@ -180,3 +180,9 @@
   checklist 与 evidence 字段对齐逐列一致（dump 直出 summary/vswr/回损；vna_rf 复算 fr/Q/ESR/TDR/LC/滤波器）。
 - SDR 现状（供线 B）：书签跳转已在（main_window.cpp:1888 bmTable_ cellDoubleClicked）；
   峰值列表 #/频率/强度 表在窄屏截图出现（spectrum_display 域）；FT8 仅复选框(:794)，无解码结果复制功能。
+
+## 22. 第㉓批：FT8 复制核验
+- FT8 现状：mbdsdr_ai/ft8_decode.py 有解码函数（decode_ft8_payload/costas/ldpc），
+  但**无复制/导出/clipboard 能力**；UI 仅复选框（main_window.cpp:794）。
+- 登记为缺口：解码结果导出/复制留线 B；当前手动路径——解码在终端/控制台输出，用户自行拷贝。
+- SDR++ 侦察：无新硬缺口。

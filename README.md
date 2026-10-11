@@ -122,7 +122,7 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 3. 回传 sweep.json（+ 连接日志 version/info/cal）即可比对。
 无设备可先 `--selftest` 跑通流程（合成演示，非真实测量）。详见 docs/learn/nanovna/hardware-quickstart.md。
 
-## 工具能力矩阵（66 工具，三通道：Agent / Hub / HTTP 透传）
+## 工具能力矩阵（67 工具，三通道：Agent / Hub / HTTP 透传）
 
 按域分组；写=手动模式 gate 拦截，读=不拦截。
 
@@ -164,7 +164,7 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 | 工具 | 写/读 |
 |---|---|
 | start_recording / stop_recording / delete_recording / export_recording / export_iq_segment / list_recordings / get_recording_state | 写/读 |
-| export_vna_snapshot / export_spectrum_snapshot | 写 |
+| export_vna_snapshot / export_spectrum_snapshot / export_peaks_csv | 写 |
 
 ### 书签 / 扫描 / 网络
 | 工具 | 写/读 |
@@ -179,4 +179,4 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 | calibrate_frequency / apply_frequency_correction / predict_passes | 读 |
 | set_fft_params / set_color_map / set_doppler_compensation / get_capabilities | 写/读 |
 
-合计 66 工具，与 docs/learn/phase31/agent-tool-documentation.md 头部一致。
+合计 67 工具，与 docs/learn/phase31/agent-tool-documentation.md 头部一致。
