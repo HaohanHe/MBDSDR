@@ -158,3 +158,8 @@
 - UI 导出按钮：未加（频谱工具栏锚定风险大，offscreen 环境不硬塞）；继续用工具调用导出。
 - fill 六列核对：VSWR/回损/谐振/TDR/LC/滤波器齐全，SYNTHETIC 标注在；TDR/LC 为 Python 近似，真机以 C++ vna_rf 为准。
 - SDR++ 侦察：无新硬缺口。
+
+## 18. 第⑲批：Python 客户端核验
+- NanoVNAClient/SerialTransport/ReplayTransport/read_cal_status 均在；补 read_cal_status 边界测试，
+  test_nanovna_client 16->17 passed。既有覆盖握手序列/sweep/data0·1/坏行容错/无设备报错。
+- SDR++ 侦察：无新硬缺口。

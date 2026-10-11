@@ -214,3 +214,9 @@ class TestBadResponseTolerance:
         c.connect(do_handshake=False)
         freqs = c.read_frequencies()
         assert freqs == [1_000_000, 1_500_000]
+
+    def test_read_cal_status(self):
+        c, t = _connected([("cal", [CAL_LINE])])
+        out = c.read_cal_status()
+        assert out == [CAL_LINE]
+        assert "cal" in c.cal_status[0]

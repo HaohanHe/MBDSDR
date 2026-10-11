@@ -399,3 +399,13 @@ engine 未暴露 FFT bins 读访问器（spectrum_engine.h 无 fftDb/readSpectru
 
 ## VNA 三档快照复核
 1920：五图 + 等效串联读数行（ESR=67.6Ω fr=14.05MHz Q=0.6 L=0.495µH C=259.22pF）+ Smith 网格弧 + S11 轨迹，0 裁切 0 叠字。640 窄档 caption 截断诚实 floor。
+
+---
+
+# 第⑲批：收尾清账（HEAD=a8a37cd，只读核对）
+
+## phase31 核对
+agent-tool-documentation.md 头 = 66，与工具注册（registry schemas=66）一致。
+
+## evidence PENDING 一致性
+instrument-onramping-evidence.md：双实证（SDR FT8/CTCSS/LRPT + VNA 驻波/谐振/TDR/LC/滤波器）表完整；PENDING 标注 3 处（真机 sweep.json 回传后填，绝不预填）；字段对齐，无不一致。
