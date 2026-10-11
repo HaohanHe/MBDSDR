@@ -266,3 +266,17 @@
   3) parserWhitelist：parsePlanFromLlm steps 工具白名单 get_capabilities ok。
 - 依赖：LLMClient.chat()/llm_protocol ToolCall.name/plan_parser.h。
 - 新 CMake target：test_llm_loopback（回报挂）。
+
+## 34. 第㉔批 P0 #65：Python 长尾收敛
+- 盘点：Python MCP 工具 53→60（+7 A 类）；`tool_registry` 74 个注册族（~280 预期基底）。
+  cpp 缺口核对 baudot/ardop/dab_plus/nrsc5/freedv/dmr/fst4/rtl433/rtk/gk2a/bladerf/gimbal
+  在 cpp/src 均 0 命中；M17/LRPT/ACARS/FT8/NAVTEX/POCSAG/VOR/GNSS-NMEA C++ 已有，不计缺口。
+- A 类挂入 `core/mcp_server.py`（DAB+ FIC、NRSC5 帧、rtl433 list/decode、GK-2A 头、
+  FST4 编码、bladeRF 参数查表）；新增 Python 扩展域「解码器长尾」，C++ 冻结 8 域不动，
+  客户端合并视图并列拼装，schema 各自独立不复制。
+- B 类不挂：freedv/dmr（整段音频/IQ 边界不自然）、m17（与 C++ 重复）、ardop/gimbal/
+  rtklib（已注册或重复/需硬件）。C 类登记：baudot/Wi-Fi/LoRaWAN/RTK-PPP、GPL 外部编排。
+- GPL：LICENSING §2 已覆盖独立进程边界（§4b 为 WTFPL 专用）；SatDump/wsjtx/fldigi/multimon
+  编排未实现，登记 C 类，不抄不链不内嵌。
+- 诚实：所有 A 类结果体带 `real_hardware_verified:false`（合成钉扎可过、真机 PENDING）。
+- pytest：335→342 passed（+6 长尾/域钉扎）。详见 python-decoder-longtail.md。

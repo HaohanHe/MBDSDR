@@ -37,7 +37,7 @@ python3 -m mbdsdr_ai.nanovna_dump --port /dev/ttyACM0 \
 ## 5. 最短回传格式
 回传以下两项即可比对合成/真机差异：
 1. 连接日志（`version`/`info`/`cal` 三行原始输出）。
-2. 一组 `sweep.json`（上面 dump 的产物，可删冗余只留 frequencies_hz + S11 + vswr）。
+2. 一组 `sweep.json`（上面 dump 的产物，可删冗余只留 `frequencies_hz` + `S11` + `S21`——fill_evidence 的滤波器形态列按 S21 复算，`vswr`/`return_loss_db` 可删，fill 会重算）。
 
 > 合成 replay fixture 仅用于 CI 确定性测试，绝不代表真实测量值。
 

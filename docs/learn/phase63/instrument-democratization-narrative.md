@@ -46,8 +46,12 @@
 | EFHW/LC 匹配 | 端馈匹配网络 L/C 建议 | 已落地，analyze_vna_match 工具 |
 
 ### 3.3 AI 三通道工具面
-- 66 工具注册，三通道一致（registry/schema/agent/hub/ai_real_link 全绿）；
-- 写工具手动模式 gate 拦截，读工具诚实空态；mobile catalog 同步 66。
+- **70 工具注册**，三通道一致（registry/schema/agent/hub/ai_real_link/mobile/phase31/README 八处全绿）；
+- 写工具手动模式 gate 拦截（ControlHub manual 语义 + MCP 侧 arm_manual），读工具诚实空态；
+- **校准闭环**：vna_calibration 门面（单工具状态机，只读引导给客观下一步 + 写步骤人在环）+ get_vna_status 校准结构化解读（每步 done/missing、补偿态、扫频范围变更后旧校准失效显式提示）；
+- **VNA 设备级杂项**：vna_device 门面（status/vbat/freq_offset/edelay/averaging 单工具状态机）；
+- **MCP 外部 agent 接入**：C++ mbdsdr-mcp（JSON-RPC 2.0 over stdio，initialize/tools/list/tools/call，工具表=toolDefs() 唯一事实源，零模型依赖）与 Python mbdsdr.decoders 可同时接入，**8 域分组视图**（SDR 调谐/VFO、亚音数字解码、VNA 测量、VNA 分析、VNA 校准、导出演制、书签扫描卫星、系统设备；每工具恰一域，C++/Python 域名集合钉扎一致）；
+- **去预制化**：产品本体=Agent+tool call、模型自主推理；代码零场景话术/零固定多步剧本（onramp 为真实工具链薄编排）。
 
 ## 4. PENDING（真机列，诚实数据缺口）
 - [ ] 真机 NanoVNA-H 实测扫频（当前 all synthetic seed 夹具）；
@@ -55,9 +59,12 @@
 - [ ] 真机 LRPT 卫星下行 → C++ 解码链（当前 Python 原型）；
 - [ ] 真机 CTCSS/CDCSS 亚音发射 → 检测门控 e2e；
 - [ ] bandCombo 频段预设真机交互取景（离线快照框未取景）；
-- [ ] 并联 RLC 拟合（高 Q 并联谐振场景，非明确缺口）。
+- [ ] 并联 RLC 拟合（高 Q 并联谐振场景，非明确缺口）；
+- [ ] vbat/freqoffset/edelay/averages 设备命令真机核对（命令词为 H 协议事实，行为待真机验证，protocol-study §2.2）；
+- [ ] RTL-SDR ENABLED（librtlsdr）构建只能在真机/Windows 侧验证。
 
 ## 5. 可直接引用的数据点
-- test_vna_rf 20 纯函数钉扎全绿；
-- 金集 66 工具三通道全绿（registry 8/schema 10/agent 38/hub 34/ai_real_link 17）；
+- test_vna_rf 24 纯函数钉扎全绿（含 xps/xs/xpl 三电抗拓扑 + R 补偿）；
+- 金集 70 工具三通道全绿（registry 8/schema 10/agent 56/hub 34/ai_real_link 17/mcp_server 12/nanovna_client 14）；
+- Python pytest 335 passed（含 mcp_server 分组 7 用例）；
 - 三档 UI 快照 640/960/1920 零裁切零叠字（窄档 caption 截断诚实 floor）。

@@ -52,6 +52,133 @@ def _noop(ctrl: SDRController, args: Dict[str, Any]) -> Any:  # pragma: no cover
     return {"ok": True}
 
 
+# ======================================================================
+# 解码器长尾 handler（P0 #65）
+#
+# 全部懒加载对应 numpy 模块——保持本文件在不触长尾解码器时的导入轻量，
+# 也让任一解码器模块的导入问题退化为工具级诚实错误，而不是拖垮整个 server。
+# 每个 handler 只调用该模块的公开纯函数，输入非法/模块缺失时返回 dict 错误，
+# 绝不抛裸异常、绝不伪造解码结果。
+# ======================================================================
+def _hex_bytes(name: str, hexstr: str) -> Any:
+    """把 hex 字符串解析成 bytes；失败返回 (None, err_dict)。"""
+    try:
+        clean = (hexstr or "").strip().replace(" ", "").replace("0x", "")
+        if not clean:
+            return None, {"error": "empty_input",
+                          "suggestion": "请提供 %s 的 hex 字节串。" % name}
+        return bytes.fromhex(clean), None
+    except ValueError as e:
+        return None, {"error": "bad_hex", "detail": str(e),
+                      "suggestion": "%s 必须是偶数长度的 hex。" % name}
+
+
+def _lt_dab_fic(fic_hex: str) -> Any:
+    data, err = _hex_bytes("fic_hex", fic_hex)
+    if err is not None:
+        return err
+    from mbdsdr_ai.dab_plus_lite import dab_fic_decode
+    out = dab_fic_decode(data)
+    out["verify_state"] = "synthetic_pinned"
+    out["real_hardware_verified"] = False  # PENDING
+    return out
+
+
+def _lt_nrsc5_parse(data_hex: str) -> Any:
+    data, err = _hex_bytes("data_hex", data_hex)
+    if err is not None:
+        return err
+    from mbdsdr_ai.nrsc5_lite import hdradio_frame_parse
+    out = hdradio_frame_parse(data)
+    out["verify_state"] = "synthetic_pinned"
+    out["real_hardware_verified"] = False  # PENDING
+    return out
+
+
+def _lt_rtl433_list() -> Any:
+    from mbdsdr_ai.rtl433_decoder import list_devices
+    devs = list_devices()
+    return {"protocols": [
+        {"device_type": d.get("device_type"),
+         "name": d.get("name", ""),
+         "modulation": d.get("modulation")} for d in devs],
+        "count": len(devs),
+        "real_hardware_verified": False}  # PENDING
+
+
+def _lt_rtl433_decode(device_type: str, message_hex: str) -> Any:
+    data, err = _hex_bytes("message_hex", message_hex)
+    if err is not None:
+        return err
+    from mbdsdr_ai.rtl433_decoder import get_device
+    dec = get_device(device_type)
+    if dec is None:
+        return {"error": "unknown_device_type",
+                "suggestion": "先用 decoder_rtl433_list 查看支持的 device_type。"}
+    msg = dec.decode_message(data)
+    if msg is None:
+        return {"decoded": None, "reason": "message_not_matched",
+                "real_hardware_verified": False}
+    msg["real_hardware_verified"] = False  # PENDING
+    return {"decoded": msg}
+
+
+def _lt_gk2a_headers(buf_hex: str) -> Any:
+    data, err = _hex_bytes("buf_hex", buf_hex)
+    if err is not None:
+        return err
+    from dataclasses import asdict
+    from mbdsdr_ai.gk2a_lrit import parse_gk2a_headers
+    hdr = parse_gk2a_headers(data)
+    out = asdict(hdr)
+    out["real_hardware_verified"] = False  # PENDING
+    return out
+
+
+def _lt_fst4_encode(text: str) -> Any:
+    text = (text or "").strip()
+    if not text:
+        return {"error": "empty_input",
+                "suggestion": "text 形如 'CQ BI4MIB OM74'。"}
+    from mbdsdr_ai.fst4_encode import encode_fst4_text
+    tones = encode_fst4_text(text)
+    return {"tones": [int(t) for t in tones],
+            "n_tones": len(tones),
+            "real_hardware_verified": False}  # PENDING
+
+
+def _lt_bladerf_params(model: str, freq_hz: Any, sr_hz: Any, bw_hz: Any) -> Any:
+    from mbdsdr_ai.bladerf_params import BladeRFParams
+    if model == "bladerf1":
+        p = BladeRFParams(
+            model="bladerf1",
+            min_freq_hz=30_000_000, max_freq_hz=3_800_000_000,
+            min_tx_freq_hz=30_000_000,
+            min_sr_hz=4_000, max_sr_hz=56_000_000,
+            min_bw_hz=0, max_bw_hz=28_000_000)
+    else:
+        model = "bladerf2_micro"
+        p = BladeRFParams(model=model)
+    out = {
+        "model": p.model,
+        "frequency_hz": {"min": p.min_freq_hz, "max": p.max_freq_hz,
+                         "min_tx": p.min_tx_freq_hz},
+        "sample_rate_hz": {"min": p.min_sr_hz, "max": p.max_sr_hz,
+                           "default": p.default_sr_hz},
+        "bandwidth_hz": {"min": p.min_bw_hz, "max": p.max_bw_hz},
+        "rx_total_gain_db": [p.rx_total_gain_min_db, p.rx_total_gain_max_db],
+        "checks": {},
+        "real_hardware_verified": False,  # 纯查表；设备连接由 BladeRFBackend 另行判定
+    }
+    if freq_hz is not None:
+        out["checks"]["freq_in_range"] = bool(p.is_valid_frequency(float(freq_hz)))
+    if sr_hz is not None:
+        out["checks"]["sample_rate_in_range"] = bool(p.is_valid_sample_rate(float(sr_hz)))
+    if bw_hz is not None:
+        out["checks"]["bandwidth_in_range"] = bool(p.is_valid_bandwidth(float(bw_hz)))
+    return out
+
+
 def _build_tool_table() -> List[Dict[str, Any]]:
     """构造静态工具表（与 SDRController 方法一一对应）。"""
     table: List[Dict[str, Any]] = []
@@ -288,6 +415,61 @@ def _build_tool_table() -> List[Dict[str, Any]]:
     add("shutdown", "优雅关闭全部资源。", _schema({}),
         lambda c, a: (c.shutdown(), {"ok": True})[1])
 
+    # ==================================================================
+    # 解码器长尾（P0 #65）—— Python 面独立实现、C++ 8 域未覆盖的长尾
+    # 协议/硬件参数工具。全部为离线纯函数 handler：不依赖已连接后端，
+    # 输入为结构化小数据（hex 字节串 / 文本 / 型号名），输出真实解析结果；
+    # 输入非法时返回诚实错误，绝不造假。真机验证状态见
+    # docs/learn/phase63/python-decoder-longtail.md（多数为合成钉扎可过、
+    # 真机未验 -> PENDING）。
+    # ==================================================================
+    add("decoder_dab_fic_decode",
+        "DAB/DAB+ FIC 解码（ETSI EN 300 400/401 独立实现）。输入 FIC 字节的 hex，"
+        "输出 ensemble/服务列表/子信道配置。只做 FIC/FIB/FIG 解析，不做 AAC 音频解码。",
+        _schema({"fic_hex": _STR}, ["fic_hex"]),
+        lambda c, a: _lt_dab_fic(a.get("fic_hex", "")))
+
+    add("decoder_nrsc5_frame_parse",
+        "HD Radio (NRSC-5) 帧解析。输入 HDLC/L3 字节的 hex，输出 PSD 节目文字。"
+        "只做成帧/PSD 提取，不做 HDC/AAC 音频解码。",
+        _schema({"data_hex": _STR}, ["data_hex"]),
+        lambda c, a: _lt_nrsc5_parse(a.get("data_hex", "")))
+
+    add("decoder_rtl433_list",
+        "列出 433.92MHz ISM 频段本仓独立支持的解码器协议（天气站/胎压/温湿度）。",
+        _schema({}),
+        lambda c, a: _lt_rtl433_list())
+
+    add("decoder_rtl433_decode",
+        "按指定协议解码一段 433.92MHz 设备消息字节的 hex。"
+        "device_type 取 decoder_rtl433_list 返回的 device_type。",
+        _schema({"device_type": _STR, "message_hex": _STR},
+                ["device_type", "message_hex"]),
+        lambda c, a: _lt_rtl433_decode(a.get("device_type", ""),
+                                      a.get("message_hex", "")))
+
+    add("decoder_gk2a_parse_headers",
+        "GK-2A LRIT 图像文件头解析（CCSDS 独立实现）。输入文件头缓冲 hex，"
+        "输出图像列数/行数/位深/分段数等字段。",
+        _schema({"buf_hex": _STR}, ["buf_hex"]),
+        lambda c, a: _lt_gk2a_headers(a.get("buf_hex", "")))
+
+    add("decoder_fst4_encode_text",
+        "FST4 文本消息 -> 160 音调（WSJT 公开协议独立编码器）。"
+        "text 形如 'CQ BI4MIB OM74'。",
+        _schema({"text": _STR}, ["text"]),
+        lambda c, a: _lt_fst4_encode(a.get("text", "")))
+
+    add("device_bladerf_params_query",
+        "查询 bladeRF 硬件参数表（纯查表，无设备依赖）。model 取 "
+        "'bladerf2_micro'(默认) 或 'bladerf1'；可选传入 freq_hz/sample_rate_hz/"
+        "bandwidth_hz 做量程合法性校验。",
+        _schema({"model": _STR, "freq_hz": _NUM,
+                 "sample_rate_hz": _NUM, "bandwidth_hz": _NUM}),
+        lambda c, a: _lt_bladerf_params(
+            a.get("model", "bladerf2_micro"),
+            a.get("freq_hz"), a.get("sample_rate_hz"), a.get("bandwidth_hz")))
+
     return table
 
 
@@ -311,6 +493,24 @@ FROZEN_DOMAIN_SUMMARIES: Dict[str, str] = {
 }
 
 FROZEN_DOMAIN_NAMES: List[str] = list(FROZEN_DOMAIN_SUMMARIES.keys())
+
+# Python 面扩展域（P0 #65）——不参与与 C++ 的 8 域跨语言冻结钉扎，
+# 仅在本 Python MCP server 视图末尾追加。C++ 侧没有对应域；客户端合并视图时
+# 应把 C++ 的 8 域与本域并列拼装（两者 schema 各自独立，互不复制）。
+PYTHON_EXTENSION_DOMAIN_SUMMARIES: Dict[str, str] = {
+    "解码器长尾": "Python 侧独立实现、C++ 8 域尚未覆盖的长尾协议解码器与硬件参数查表"
+                 "（DAB+/NRSC-5/433.92MHz ISM/GK-2A LRIT/FST4/bladeRF 参数）。"
+                 "离线纯函数，真机验证多为 PENDING。",
+}
+
+PYTHON_EXTENSION_DOMAIN_NAMES: List[str] = list(PYTHON_EXTENSION_DOMAIN_SUMMARIES.keys())
+
+# 全域名 = 冻结 8 域（与 C++ 钉扎）+ Python 扩展域。
+ALL_DOMAIN_NAMES: List[str] = FROZEN_DOMAIN_NAMES + PYTHON_EXTENSION_DOMAIN_NAMES
+
+# 域 -> summary 合并视图（冻结 8 域原样 + Python 扩展域）。
+ALL_DOMAIN_SUMMARIES: Dict[str, str] = {
+    **FROZEN_DOMAIN_SUMMARIES, **PYTHON_EXTENSION_DOMAIN_SUMMARIES}
 
 # 本表面工具 -> 域。未列出的工具会被 _grouped_tool_cards 视为“未分配”，
 # 测试会据此钉死“每工具恰好一个域”。
@@ -374,18 +574,26 @@ _TOOL_DOMAIN: Dict[str, str] = {
     "get_service_status": "系统设备",
     "get_status": "系统设备",
     "shutdown": "系统设备",
+    # 解码器长尾（Python 扩展域）
+    "decoder_dab_fic_decode": "解码器长尾",
+    "decoder_nrsc5_frame_parse": "解码器长尾",
+    "decoder_rtl433_list": "解码器长尾",
+    "decoder_rtl433_decode": "解码器长尾",
+    "decoder_gk2a_parse_headers": "解码器长尾",
+    "decoder_fst4_encode_text": "解码器长尾",
+    "device_bladerf_params_query": "解码器长尾",
 }
 
 
 def _resolve_domain(query: str) -> Optional[str]:
-    """把 params.domain 容错解析成冻结域名；匹配不到返回 None。"""
-    if query in FROZEN_DOMAIN_NAMES:
+    """把 params.domain 容错解析成域名（冻结 8 域 + Python 扩展域）；匹配不到返回 None。"""
+    if query in ALL_DOMAIN_NAMES:
         return query
     q = query.strip().lower()
-    for name in FROZEN_DOMAIN_NAMES:
+    for name in ALL_DOMAIN_NAMES:
         if name.lower() == q:
             return name
-    hits = [n for n in FROZEN_DOMAIN_NAMES
+    hits = [n for n in ALL_DOMAIN_NAMES
             if q and (n.lower().find(q) >= 0 or q.find(n.lower()) >= 0)]
     if len(hits) == 1:
         return hits[0]
@@ -443,7 +651,7 @@ class MCPToolSet:
     def _bucketed(self, full: bool) -> Dict[str, List[Dict[str, Any]]]:
         """按 _TOOL_DOMAIN 把本表工具分桶。full=True 放完整 schema，否则只放名。"""
         buckets: Dict[str, List[Dict[str, Any]]] = {
-            n: [] for n in FROZEN_DOMAIN_NAMES}
+            n: [] for n in ALL_DOMAIN_NAMES}
         for t in self._table:
             dom = _TOOL_DOMAIN.get(t["name"])
             if dom is None:
@@ -466,7 +674,7 @@ class MCPToolSet:
             name = _resolve_domain(dom)
             if name is None:
                 return None, ("未知 domain: %s（合法域: %s）"
-                              % (dom, "、".join(FROZEN_DOMAIN_NAMES)))
+                              % (dom, "、".join(ALL_DOMAIN_NAMES)))
             entries = [
                 {"name": t["name"], "description": t["description"],
                  "inputSchema": t["inputSchema"]}
@@ -476,16 +684,16 @@ class MCPToolSet:
         buckets = self._bucketed(full=detailed)
         if detailed:
             cards = [
-                {"domain": n, "summary": FROZEN_DOMAIN_SUMMARIES[n],
+                {"domain": n, "summary": ALL_DOMAIN_SUMMARIES[n],
                  "tools": buckets[n]}
-                for n in FROZEN_DOMAIN_NAMES]
+                for n in ALL_DOMAIN_NAMES]
             return {"domains": cards}, None
 
         # 默认：域卡片（只列工具名）。
         cards = [
-            {"domain": n, "summary": FROZEN_DOMAIN_SUMMARIES[n],
+            {"domain": n, "summary": ALL_DOMAIN_SUMMARIES[n],
              "tools": [t["name"] for t in buckets[n]]}
-            for n in FROZEN_DOMAIN_NAMES]
+            for n in ALL_DOMAIN_NAMES]
         return {"tools": cards}, None
 
     def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
