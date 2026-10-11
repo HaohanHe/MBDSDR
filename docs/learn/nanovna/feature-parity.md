@@ -422,3 +422,16 @@ agent-tool-documentation.md 头 = 66，与工具注册一致。
 
 ## 红线
 competition/比赛/ghp_ 0；MIT 头。
+
+---
+
+# 第㉑批：维护性深检（HEAD=7707d06，只读）
+
+## 一致性核对
+- registry schemas = 66（test_tool_registry 8 passed）；
+- phase31 头 = 66；
+- mobile catalog 命名条目 = 66；mobile test length=66。
+四处一致，无修正。
+
+## README 五节终审
+快速开始（桌面/真机自检/Python 内核）+ 能力矩阵（66 工具分组）+ 真机云测诚实声明 + LLM 基线 + 目录导览；构建/测试姿势引 cpp/README.md。齐全。

@@ -168,3 +168,9 @@
 - dump 输出增 summary（min_vswr + at_hz 摘要行）；pytest 6 passed。
 - quickstart 补双平台示例（Linux /dev/ttyACM0+dialout / Windows COMx）+ 回传填表 checklist。
 - SDR++ 侦察：无新硬缺口。
+
+## 20. 第㉑批：维护性深检 + --cal 直显
+- LICENSING/NOTICE 核对：NanoVNA 协议事实 vs 干净室实现边界表述准确（GPL 上游只学机制、
+  WTFPL 参考源、官方 docs 优先），repos/ 仍 .gitignore:91 未入仓。无需修。
+- dump --cal 旗标：stderr 直显校准行（open/short/load/thru）；pytest 6 passed。
+- SDR++ 侦察：无新硬缺口。

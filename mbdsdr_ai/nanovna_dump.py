@@ -124,6 +124,8 @@ def main(argv: List[str]) -> int:
                     help="无设备自检：用合成回放跑通全流程（数据为合成演示，非真实测量）")
     ap.add_argument("--json-pretty", action="store_true",
                     help="缩进 2 输出 JSON（便于阅读/回传）；缺省紧凑单行")
+    ap.add_argument("--cal", action="store_true",
+                    help="dump 时在 stderr 直显校准状态（open/short/load/thru 逐项）")
     args = ap.parse_args(argv)
 
     replay = args.replay
@@ -138,6 +140,9 @@ def main(argv: List[str]) -> int:
     except NanoVNADriverError as e:
         print(f"错误：{e}", file=sys.stderr)
         return 1
+
+    if args.cal:
+        print("cal: " + " | ".join(data.get("cal", [])), file=sys.stderr)
 
     text = json.dumps(data, ensure_ascii=False,
                       indent=2 if args.json_pretty else None)
