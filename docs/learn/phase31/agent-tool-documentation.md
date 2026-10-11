@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，64 个工具）
+# Agent 工具能力清单（自动生成，65 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -320,3 +320,6 @@ schema: {"properties":{"path":{"description":"PNG 输出路径","type":"string"}
 description: 只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回 EFHW/反 L 匹配网络的 L/C 建议（Q、串联/并联臂值）。负载电阻需 >50Ω；否则 valid 诚实为 false。
 schema: {"properties":{"load_r":{"description":"负载电阻 Ω（>50）","type":"number"},"load_x":{"description":"负载电抗 Ω","type":"number"},"f_hz":{"description":"设计频率 Hz","type":"number"}},"required":["load_r","f_hz"],"type":"object"}
 错误示例: 缺 load_r/f_hz -> valid:false（仍 ok:true 空态）
+
+## analyze_vna_equivalent（只读，第⑫批新增）
+由当前扫频 S11 提取串联 RLC 等效电路：ESR=串联谐振点 |Z|，Q=fr/BW，L=R·Q/(2πfr)，C=1/((2πfr)²·L)。无设备/点数不足时 valid 诚实为 false。读工具（手动 gate 不拦截）。

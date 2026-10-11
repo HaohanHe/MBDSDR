@@ -789,6 +789,16 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // analyze_vna_equivalent (read-only) ------------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "analyze_vna_equivalent";
+        s.description = QString::fromUtf8(
+            "只读：由当前扫频 S11 提取串联 RLC 等效电路（ESR=串联谐振点 |Z|，Q=fr/BW，L/C 由谐振关系推出）。"
+            "无设备/点数不足时 valid 诚实为 false。");
+        out.append(s);
+    }
+
     // analyze_vna_touchstone (read-only) ------------------------------------
     {
         ToolSchemaSpec s;

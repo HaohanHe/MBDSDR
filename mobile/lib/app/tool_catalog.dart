@@ -191,6 +191,10 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       description: '只读：对当前扫频 S21 幅度做滤波器分析（自动识别 bandpass/bandstop/highpass/lowpass，-3dB 截止边/带宽/插损/阻带衰减）。无设备/平坦时 valid 诚实为 false。',
       write: false),
   ToolCatalogEntry(
+      name: 'analyze_vna_equivalent',
+      description: '只读：由当前扫频 S11 提取串联 RLC 等效电路（ESR=串联谐振点 |Z|，Q=fr/BW，L/C 谐振关系推出）。无设备/点数不足 valid 诚实为 false。',
+      write: false),
+  ToolCatalogEntry(
       name: 'analyze_vna_touchstone',
       description: '只读：解析 Touchstone s1p/s2p（content 或 path），返回频率表与 S11/S21 实虚部数据集。',
       write: false),

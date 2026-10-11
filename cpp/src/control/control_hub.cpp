@@ -167,6 +167,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_vna_status",        false, &ControlHub::cmdGetVnaStatus},
         {"analyze_vna_resonance", false, &ControlHub::cmdAnalyzeVnaResonance},
         {"analyze_vna_filter",    false, &ControlHub::cmdAnalyzeVnaFilter},
+        {"analyze_vna_equivalent", false, &ControlHub::cmdAnalyzeVnaEquivalent},
         {"analyze_vna_touchstone", false, &ControlHub::cmdAnalyzeVnaTouchstone},
         {"analyze_vna_match",    false, &ControlHub::cmdAnalyzeVnaMatch},
         {"get_noise_blanker_status", false, &ControlHub::cmdGetNoiseBlankerStatus},
@@ -1622,6 +1623,27 @@ QJsonObject ControlHub::cmdAnalyzeVnaFilter(const QJsonObject&) {
     o["bandwidth_hz"] = r.bandwidth_hz;
     o["passband_db"] = r.passband_db;
     o["stopband_atten_db"] = r.stopband_atten_db;
+    return o;
+}
+
+QJsonObject ControlHub::cmdAnalyzeVnaEquivalent(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "analyze_vna_equivalent";
+    auto& vna = engine_->vnaClient();
+    o["connected"] = vna.isConnected();
+    if (!vna.isConnected()) { o["valid"] = false; o["note"] = QStringLiteral("未连接 NanoVNA：无扫频数据"); return o; }
+    auto f = vna.readFrequencies();
+    auto s11 = vna.readData(0);
+    vna::EquivalentResult r = vna::equivalentRlc(
+        std::vector<double>(f.begin(), f.end()),
+        std::vector<std::complex<double>>(s11.begin(), s11.end()));
+    o["valid"] = r.valid;
+    o["resonance_hz"] = r.resonance_hz;
+    o["series_r_ohm"] = r.series_r_ohm;
+    o["series_l_h"] = r.series_l_h;
+    o["series_c_f"] = r.series_c_f;
+    o["series_q"] = r.series_q;
+    if (!r.valid) o["note"] = QString::fromStdString(r.note);
     return o;
 }
 

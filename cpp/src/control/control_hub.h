@@ -259,6 +259,7 @@ private:
     QJsonObject cmdAnalyzeVnaResonance(const QJsonObject&);
     QJsonObject cmdVnaTdrCable(const QJsonObject&);
     QJsonObject cmdAnalyzeVnaFilter(const QJsonObject&);
+    QJsonObject cmdAnalyzeVnaEquivalent(const QJsonObject&);
     QJsonObject cmdAnalyzeVnaTouchstone(const QJsonObject&);
     QJsonObject cmdExportVnaSnapshot(const QJsonObject&);
     QJsonObject cmdAnalyzeVnaMatch(const QJsonObject&);

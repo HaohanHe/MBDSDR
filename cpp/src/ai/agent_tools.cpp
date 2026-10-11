@@ -1231,6 +1231,36 @@ QString execAnalyzeVnaFilter(const QJsonObject&, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// analyze_vna_equivalent (read): run vna::equivalentRlc on live S11 to extract a
+// series-RLC equivalent (ESR / Q / L / C at the series resonance).
+QString execAnalyzeVnaEquivalent(const QJsonObject&, dsp::SpectrumEngine* engine,
+                                 const SourceInfo& src,
+                                 ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o; o["ok"] = true;
+    auto& vna = engine->vnaClient();
+    o["connected"] = vna.isConnected();
+    if (!vna.isConnected()) {
+        o["valid"] = false;
+        o["note"] = QString::fromUtf8("未连接 NanoVNA：无扫频数据可分析");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    auto f = vna.readFrequencies();
+    auto s11 = vna.readData(0);
+    vna::EquivalentResult r = vna::equivalentRlc(
+        std::vector<double>(f.begin(), f.end()),
+        std::vector<std::complex<double>>(s11.begin(), s11.end()));
+    o["valid"] = r.valid;
+    o["resonance_hz"] = r.resonance_hz;
+    o["series_r_ohm"] = r.series_r_ohm;
+    o["series_l_h"] = r.series_l_h;
+    o["series_c_f"] = r.series_c_f;
+    o["series_q"] = r.series_q;
+    if (!r.valid) o["note"] = QString::fromUtf8(r.note.empty() ? "点数不足或谐振点病态" : r.note);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // analyze_vna_touchstone (read): parse a Touchstone file's content or path and
 // return the dataset (frequencies + S11/S21). Honest: unparseable -> ok:false.
 QString execAnalyzeVnaTouchstone(const QJsonObject& a, dsp::SpectrumEngine*,
@@ -1933,6 +1963,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"analyze_vna_resonance", &execAnalyzeVnaResonance},
         {"vna_tdr_cable", &execVnaTdrCable},
         {"analyze_vna_filter", &execAnalyzeVnaFilter},
+        {"analyze_vna_equivalent", &execAnalyzeVnaEquivalent},
         {"analyze_vna_touchstone", &execAnalyzeVnaTouchstone},
         {"export_vna_snapshot", &execExportVnaSnapshot},
         {"analyze_vna_match", &execAnalyzeVnaMatch},

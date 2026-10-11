@@ -272,3 +272,24 @@ harness 加 MBD_SCROLL=end（所有 QScrollArea 滚到底）。OCR：bandCombo �
 
 ## 待加 CMake 清单
 无新源文件（并入 vna_rf.cpp/h）；无新测试目标。
+
+---
+
+# 第⑫批：analyze_vna_equivalent 三通道接线 + bandCombo 取景（HEAD=46dcd2c）
+
+## analyze_vna_equivalent（读工具，工具 64→65）
+- spec tool_schema.cpp：analyze_vna_equivalent（read，无参）。
+- exec agent_tools.cpp:execAnalyzeVnaEquivalent（读 S11→equivalentRlc→resonance/r/l/c/q）+ dispatch 注册。
+- hub control_hub.{h,cpp}：读表（false=读）+ cmdAnalyzeVnaEquivalent。
+- 端到端：合成 RLC 夹具 fr/Q/R 钉扎（test_vna_rf equivalentRlcExtraction）；无设备 valid=false 诚实空态。
+
+## bandCombo 取景
+MBD_SCROLL=end / 拉高窗高均未把「频段」行框入：左 rail 为单长表单，频段行位于频率组上部、滚动定位落在中心频率行处。诚实未拍选中频段行。真机步骤：手动开「频率」组即见 bandCombo。
+
+## 计数（offscreen 真实 passed）
+- 工具 64→65；mobile catalog 64→65；phase31 头部 65。
+- test_tool_registry 8 / test_tool_schema 10 / test_agent 38（读 29 / 写 36）/ test_control_hub 34 / test_ai_real_link 17，全 0 failed。
+- test_vna_rf 20 passed。
+
+## 待加 CMake 清单
+无新源（并入 vna_rf.cpp/h）；无新测试目标。
