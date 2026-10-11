@@ -59,6 +59,7 @@ private slots:
     void manualMode_gateSpotCheckTenTools();
     // --- Phase62 gate full-coverage: ALL 29 writes gated / ALL 18 reads open ---
     void manualMode_gateSpotCheckAllWrites();
+    void exportPeaksCsv_content();
     // --- Noise blanker three-channel tool: land / readback / honest empty / gate ---
     void noiseBlankerLandReadbackAndGate();
     // --- Phase63 D1: get_squelch_status returns REAL engine getters, not nulls ---
@@ -800,6 +801,35 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
     QCOMPARE(engine.averageMode(), avgBefore);
     QCOMPARE(QSettings().value("rtl/ppm", 0.0).toDouble(), ppmBefore);
     QCOMPARE(QSettings().value("view/wfColormapFile"), cmapBefore);
+}
+
+// export_peaks_csv: inject a synthetic spectrum frame, assert CSV header/rows/order.
+void TestAgent::exportPeaksCsv_content() {
+    dsp::SpectrumEngine engine;
+    // 64 bins: two local maxima at idx 10 (-20 dB) and idx 30 (-10 dB).
+    std::vector<float> bins(64, -80.0f);
+    bins[10] = -12.0f; bins[30] = -10.0f;
+    engine.injectTestFrame(bins, 96000.0, 100.0e6);
+    QJsonObject args;
+    const QString path = "/tmp/mbd_test_peaks.csv";
+    args["path"] = path;
+    QString r = ai::executeTool("export_peaks_csv", args, &engine);
+    QVERIFY2(r.contains("\"ok\":true"), qPrintable(r));
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+    QStringList lines = QString::fromUtf8(f.readAll()).split('\n', Qt::SkipEmptyParts);
+    QCOMPARE(lines.size(), 3);                 // header + 2 peaks
+    QCOMPARE(lines[0], QString("freq_hz,db"));
+    // desc by db: -10dB peak first.
+    QVERIFY2(lines[1].contains("-10.0"), qPrintable(lines[1]));
+    QVERIFY2(lines[2].contains("-12.0"), qPrintable(lines[2]));
+    f.remove();
+
+    // Honest empty: flat frame -> rows=0, only header.
+    std::vector<float> flat(64, -50.0f);
+    engine.injectTestFrame(flat, 96000.0, 100.0e6);
+    r = ai::executeTool("export_peaks_csv", args, &engine);
+    QVERIFY2(r.contains("\"ok\":true") && r.contains("\"rows\":0"), qPrintable(r));
 }
 
 // Noise blanker three-channel tool: honest off on a fresh engine, the write

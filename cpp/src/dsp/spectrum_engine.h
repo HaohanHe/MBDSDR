@@ -88,6 +88,15 @@ public:
         if ((int)out.size() > maxN) out.resize(maxN);
         return out;
     }
+    // Test-only fixture: inject a synthetic spectrum frame so peaks() / export
+    // tools can be pinned deterministically. Not used in production audio path.
+    void injectTestFrame(std::vector<float> dbfs, double sampleRateHz,
+                         double centerFreqHz) {
+        std::lock_guard<std::mutex> lk(frameMu_);
+        latestFrame_.dbfs = std::move(dbfs);
+        latestFrame_.sampleRateHz = sampleRateHz;
+        latestFrame_.centerFreqHz = centerFreqHz;
+    }
     void shutdown();
     // Read-only state getters for integration tests / status display.
     QString demodMode() const { return demodMode_; }

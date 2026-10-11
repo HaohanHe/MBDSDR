@@ -193,3 +193,12 @@
 - FT8 评估：ft8_decode.decode_ft8_payload 返回 {data_bits, iters}，无去重/SIC/呼号字段；
   export_ft8_results 数据源需线 B 在 C++ 侧补结构化解码结果。
 - SDR++ 侦察：无新硬缺口。
+
+## 24. 第㉕批：FT8 Python 桥接侦察
+- decode_ft8_payload 返回结构化：info_bits/data_bits/crc_bits/codeword/iters/crc_ok/
+  costas_score/rejected/reject_reason；入参 snr_db（可选，联合拒绝门）。
+- **缺**：无 bits->文本/呼号的报文解码（无 wsjtx 风格 message decode），故桥接只能给
+  "crc_ok 候选数 + costas 分 + SNR"，不能给呼号/消息文本。
+- 桥接路径建议：线 B 在 C++ 侧接 crc_ok 候选列表（条数/SNR/频率槽）作 export_ft8_results 真实行；
+  呼号文本解码留后续（诚实空态，不伪造呼号）。
+- SDR++ 侦察：无新硬缺口。

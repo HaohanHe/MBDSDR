@@ -473,3 +473,14 @@ spec/exec/dispatch/hub 三通道；C++ 无 FT8 结构化结果（Python 域）�
 ## 计数（offscreen 真实 passed）
 - 工具 68；mobile catalog 68；phase31 头部 68；README 矩阵 68。
 - registry 8 / schema 10 / agent 38（读29写39）/ control_hub 34 / ai_real_link 17，全 0 failed。
+
+---
+
+# 第㉕批：CSV 钉扎单测（HEAD=5843239）
+
+## CSV 钉扎
+- spectrum_engine.h injectTestFrame 测试夹具注入 bins → exportPeaksCsv_content 断言表头 freq_hz,db + 行数 + 首行 -10dB 降序 + 平坦帧 rows=0 空态。
+- test_agent 38→39。
+
+## FT8 定夺
+线 A Python 桥接未就绪，保持诚实空态 rows=0，不伪造呼号。
