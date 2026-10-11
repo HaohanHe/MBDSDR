@@ -209,3 +209,8 @@
 - test_ft8_candidates 1 passed。
 - 75-bit 呼号文本解码（base-41/网格/遥测）：公式公开但实现链长，登记远期项，本轮不伪造。
 - SDR++ 侦察：无新硬缺口。
+
+## 26. 第㉗批：FT8 候选 CSV 出口
+- ft8_decode.candidates_to_csv：候选列表 -> CSV（freq_hz,crc_ok,costas_score,rejected,
+  reject_reason,iters），与 C++ export_ft8_results 列对齐；空态仅表头。
+- test_ft8_candidates 2 passed（行 + 空态）。呼号文本解码仍远期项。SDR 无新缺口。

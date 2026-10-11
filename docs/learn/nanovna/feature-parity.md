@@ -497,3 +497,20 @@ execExportFt8Results（agent_tools.cpp）+ cmdExportFt8Results（control_hub.cpp
 ## 计数
 无新工具（export_ft8_results 已注册为第 68 个）；工具数保持 68。
 - registry 8 / schema 10 / agent 39（读29写39）/ control_hub 34 / ai_real_link 17，全 0 failed。
+
+---
+
+# 第㉗批：engine FT8 候选访问器 + export_ft8_results 真实行（HEAD=329b89d）
+
+## 候选访问器
+spectrum_engine.h Ft8ExportCandidate{freq_hz,crc_ok,costas_score,rejected,reject_reason,iters} + ft8ExportCandidates() 只读 + injectFt8Candidates() 测试注入。
+
+## CSV 真实行
+execExportFt8Results/ cmdExportFt8Results 改写候选列表行（freq_hz,crc_ok,costas_score,rejected,reject_reason,iters）；无候选 rows=0 诚实空态。
+
+## 桥接边界
+Python collect_ft8_candidates() 尚未桥接进 C++；injectFt8Candidates 为测试夹具，生产路径候选源待解码桥接。
+
+## 计数
+工具数保持 68（export_ft8_results 已注册，无新工具）。
+- test_agent 39→40（exportFt8Candidates_rows）；registry 8 / schema 10 / control_hub 34 / ai_real_link 17，全 0 failed。

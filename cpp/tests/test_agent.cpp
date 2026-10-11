@@ -60,6 +60,7 @@ private slots:
     // --- Phase62 gate full-coverage: ALL 29 writes gated / ALL 18 reads open ---
     void manualMode_gateSpotCheckAllWrites();
     void exportPeaksCsv_content();
+    void exportFt8Candidates_rows();
     // --- Noise blanker three-channel tool: land / readback / honest empty / gate ---
     void noiseBlankerLandReadbackAndGate();
     // --- Phase63 D1: get_squelch_status returns REAL engine getters, not nulls ---
@@ -829,6 +830,33 @@ void TestAgent::exportPeaksCsv_content() {
     std::vector<float> flat(64, -50.0f);
     engine.injectTestFrame(flat, 96000.0, 100.0e6);
     r = ai::executeTool("export_peaks_csv", args, &engine);
+    QVERIFY2(r.contains("\"ok\":true") && r.contains("\"rows\":0"), qPrintable(r));
+}
+
+// export_ft8_results: inject candidate rows, assert CSV header/rows + honest empty.
+void TestAgent::exportFt8Candidates_rows() {
+    dsp::SpectrumEngine engine;
+    std::vector<dsp::SpectrumEngine::Ft8ExportCandidate> cands;
+    cands.push_back({14.074e6, true, 8.5, false, "", 3});
+    cands.push_back({14.0745e6, false, 2.1, true, "low costas", 1});
+    engine.injectFt8Candidates(std::move(cands));
+    QJsonObject args;
+    const QString path = "/tmp/mbd_test_ft8.csv";
+    args["path"] = path;
+    QString r = ai::executeTool("export_ft8_results", args, &engine);
+    QVERIFY2(r.contains("\"ok\":true") && r.contains("\"rows\":2"), qPrintable(r));
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+    QStringList lines = QString::fromUtf8(f.readAll()).split('\n', Qt::SkipEmptyParts);
+    QCOMPARE(lines.size(), 3);  // header + 2 rows
+    QCOMPARE(lines[0], QString("freq_hz,crc_ok,costas_score,rejected,reject_reason,iters"));
+    QVERIFY2(lines[1].contains(",1,"), qPrintable(lines[1]));   // crc_ok=1
+    QVERIFY2(lines[2].contains(",0,") && lines[2].contains("low costas"), qPrintable(lines[2]));
+    f.remove();
+
+    // Honest empty: fresh engine has no candidates.
+    dsp::SpectrumEngine e2;
+    r = ai::executeTool("export_ft8_results", args, &e2);
     QVERIFY2(r.contains("\"ok\":true") && r.contains("\"rows\":0"), qPrintable(r));
 }
 

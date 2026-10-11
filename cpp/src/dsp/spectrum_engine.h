@@ -187,6 +187,28 @@ public:
     double ft8FreqOffsetHz() const { return ft8Last_.freqOffsetHz; }
     double ft8SyncQuality() const { return ft8Last_.syncQuality; }
     int    ft8CandidateCount() const { return ft8Detector_.lastCandidateCount(); }
+
+    // Honest FT8 candidate list exported by export_ft8_results. Mirrors the
+    // Python collect_ft8_candidates() rows: {freq_hz, crc_ok, costas_score,
+    // rejected, reject_reason, iters}. Populated by the decode bridge; empty
+    // until then (no fabricated callsigns/grid). Tests inject via
+    // injectFt8Candidates() to pin the CSV writer.
+    struct Ft8ExportCandidate {
+        double      freq_hz = 0.0;
+        bool        crc_ok = false;
+        double      costas_score = 0.0;
+        bool        rejected = false;
+        std::string reject_reason;
+        int         iters = 0;
+    };
+    std::vector<Ft8ExportCandidate> ft8ExportCandidates() const {
+        std::lock_guard<std::mutex> lk(ft8CandMu_);
+        return ft8Candidates_;
+    }
+    void injectFt8Candidates(std::vector<Ft8ExportCandidate> c) {
+        std::lock_guard<std::mutex> lk(ft8CandMu_);
+        ft8Candidates_ = std::move(c);
+    }
     // Step-4 decode readback. Empty string until detector->LLR->codec wiring is
     // enabled (honest: no fabricated frame text).
     std::string ft8DecodedText() const;
@@ -701,6 +723,8 @@ private:
     int  ft8RingFilled_ = 0;
     std::atomic<int> ft8DecodedFrames_{0};
     std::string ft8LastDedupKey_;   // 去重键（文本+频偏粗桶）
+    mutable std::mutex ft8CandMu_;
+    std::vector<Ft8ExportCandidate> ft8Candidates_;  // exported candidate list
     AudioOutput* audioOut_ = nullptr;
     // Active 48k write path. Defaults to audioOut_; an injected test sink
     // (setTestAudioSink) redirects it without touching the settings-dialog

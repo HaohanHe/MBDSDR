@@ -1746,19 +1746,22 @@ QJsonObject ControlHub::cmdExportFt8Results(const QJsonObject& a) {
     if (path.isEmpty()) return errResult(QStringLiteral("参数 path 缺失"));
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) { o["ok"] = false; o["note"] = QStringLiteral("写文件失败"); return o; }
-    f.write("valid,freq_offset_hz,sync_quality,candidate_count\n");
+    f.write("freq_hz,crc_ok,costas_score,rejected,reject_reason,iters\n");
     int rows = 0;
-    if (engine_->ft8Present()) {
-        f.write((QString::number(1) + "," +
-                 QString::number(engine_->ft8FreqOffsetHz(), 'f', 2) + "," +
-                 QString::number(engine_->ft8SyncQuality(), 'f', 3) + "," +
-                 QString::number(engine_->ft8CandidateCount()) + "\n").toUtf8());
-        rows = 1;
+    auto cands = engine_->ft8ExportCandidates();
+    for (const auto& c : cands) {
+        f.write((QString::number(c.freq_hz, 'f', 1) + "," +
+                 (c.crc_ok ? "1" : "0") + "," +
+                 QString::number(c.costas_score, 'f', 3) + "," +
+                 (c.rejected ? "1" : "0") + ",\"" +
+                 QString::fromStdString(c.reject_reason) + "\"," +
+                 QString::number(c.iters) + "\n").toUtf8());
+        ++rows;
     }
     f.close();
     o["path"] = path;
     o["rows"] = rows;
-    if (rows == 0) o["note"] = QStringLiteral("无 FT8 候选（无信号/未检出）：仅写表头；crc_ok 待 BP 解码移植");
+    if (rows == 0) o["note"] = QStringLiteral("无 FT8 候选（无信号/未检出）：仅写表头");
     return o;
 }
 

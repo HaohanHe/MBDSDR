@@ -194,6 +194,19 @@ def collect_ft8_candidates(decoded_list):
     return out
 
 
+def candidates_to_csv(candidates) -> str:
+    """候选列表 -> CSV 文本（与 C++ export_ft8_results 列对齐）。空列表仅表头。"""
+    import io, csv
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["freq_hz", "crc_ok", "costas_score", "rejected",
+                "reject_reason", "iters"])
+    for c in candidates:
+        w.writerow([c["freq_hz"], c["crc_ok"], c["costas_score"],
+                    c["rejected"], c["reject_reason"], c["iters"]])
+    return buf.getvalue()
+
+
 if __name__ == "__main__":
     # 闭环自测：构造全零数据符号（tone 全 0）→ 应解出全零信息位
     tones = [[0.0] * 8 for _ in range(58)]
