@@ -214,3 +214,14 @@
 - ft8_decode.candidates_to_csv：候选列表 -> CSV（freq_hz,crc_ok,costas_score,rejected,
   reject_reason,iters），与 C++ export_ft8_results 列对齐；空态仅表头。
 - test_ft8_candidates 2 passed（行 + 空态）。呼号文本解码仍远期项。SDR 无新缺口。
+
+## 27. 第㉘批：SDR++ 机制学侦察（宁缺毋滥）
+- 候选（FFT 尺寸/AGC 手动/静噪滑块/频段下拉/WFM 立体声/书签跳转/峰值表/FT8 候选出口）
+  均已覆盖（main_window 48 处相关接线）。无新硬缺口，不落地。
+
+## 28. 第㉙批：场景话术/代码边界核查
+- 全仓 grep（cpp/src + mbdsdr_ai）：代码中无 ISS 通联/对话剧本/预制回答话术（命中均为
+  "contains/isString" 等通用英文）。代码 0 场景文案。
+- docs 边界声明：本仓 docs/learn 下的对话/示例仅演示工具链组合，**产品不含预制剧本**；
+  真实回复由实时工具结果驱动。
+- SDR++ 侦察：无新硬缺口。

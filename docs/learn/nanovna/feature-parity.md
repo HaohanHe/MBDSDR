@@ -514,3 +514,37 @@ Python collect_ft8_candidates() 尚未桥接进 C++；injectFt8Candidates 为测
 ## 计数
 工具数保持 68（export_ft8_results 已注册，无新工具）。
 - test_agent 39→40（exportFt8Candidates_rows）；registry 8 / schema 10 / control_hub 34 / ai_real_link 17，全 0 failed。
+
+---
+
+# 第㉘批：vna_panel 三档快照 + 维护态例行（HEAD=ed30076）
+
+## 三档快照（ui_shot_narrow，MBD_VNASHOT=1 MBD_TAB=VNA）
+- **1920**：VNA 面板全功能（S11 VSWR/S21 增益/群延迟/磁导率 μr'vs f/Smith-Polar），底部读数区完整：最小 VSWR 1.35@14.050MHz、谐振 fr 14.050MHz Q=0.5 ESR 67.65Ω、**等效串联 ESR=67.6Ω fr=14.05MHz Q=0.6 L=0.495µH C=259.22pF**。0 裁切 0 叠字。
+- **960**：读数区完整（等效串联行 L=0.495µH C=259.22pF 全行可见）。0 裁切 0 叠字。
+- **640**（窄档 floor）：右 rail VNA 面板挤压，等效串联行尾部「C=259.22pF」触底裁切（窄档 floor 诚实标注）；左 rail 源连接区左侧裁切。曲线正常渲染。
+
+## 七处计数核对
+- phase31 头 68；README 矩阵头/合计 68；金集 registry 8/schema 10/agent 40/control_hub 34/ai_real_link 17。
+- **mobile 不一致**：tool_catalog.dart 实际 name 条目 = 64，test 期望 68（差 4）——未跑 flutter（环境无），报父定。
+
+## gate 抽查
+export_spectrum_snapshot/export_peaks_csv/export_ft8_results 均 isWriteTool 写 gate（registry :206-208）。
+
+## 红线
+competition/比赛/ghp_ 0。
+
+---
+
+# 第㉙批：工具原子性/去预制化专项审查（HEAD=ed30076）
+
+## 审查结论：干净
+- **68 工具 executor 原子性**：agent_tools.cpp 68 个 exec* 逐一抽查，无场景关键词分支（ISS/通联/驻波/天线/手台/教学）；长字符串仅 2 处（:670 路由说明、:1112 coax_loss 空态提示），均为诚实 note，非预制话术。每工具=单一引擎动作。
+- **localCommand（agent.cpp:62-89）**：为「未配置 API Key 仅本地指令」离线兜底（确定性 NL→引擎动作），非 LLM 预编排剧本；调谐/听手台/频段一键为原子便利指令，模型配置后请求走 LLM+tool call。听手台返回的操作提示为 advisory 文本，非工具结果剧本。
+- **契约**：每工具输入/输出结构化 JSON；写工具 gate（registry :206-208），读工具不 gate；无场景示例文案进代码。
+
+## 工具面例行（5a）
+registry 8/schema 10/agent 40/control_hub 34/ai_real_link 17，全 0 failed。mobile/phase31/README 68（mobile 实际条目 64 vs test 68 差 4，上批已报）。
+
+## 红线
+competition/比赛/ghp_ 0。
