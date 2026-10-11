@@ -123,6 +123,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"set_vna_sweep",         true,  &ControlHub::cmdSetVnaSweep},
         {"vna_tdr_cable",         true,  &ControlHub::cmdVnaTdrCable},
         {"export_vna_snapshot",   true,  &ControlHub::cmdExportVnaSnapshot},
+        {"export_spectrum_snapshot", true, &ControlHub::cmdExportSpectrumSnapshot},
         {"set_noise_blanker",     true,  &ControlHub::cmdSetNoiseBlanker},
         {"set_doppler_compensation", true, &ControlHub::cmdSetDopplerCompensation},
         {"connect_network_source",   true, &ControlHub::cmdConnectNetworkSource},
@@ -1696,6 +1697,28 @@ QJsonObject ControlHub::cmdExportVnaSnapshot(const QJsonObject& a) {
     if (!img.save(path, "PNG")) { o["ok"] = false; o["note"] = QStringLiteral("写 PNG 失败"); return o; }
     o["path"] = path;
     o["points"] = (int)s11.size();
+    return o;
+}
+
+QJsonObject ControlHub::cmdExportSpectrumSnapshot(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "export_spectrum_snapshot";
+    const QString path = a.value("path").toString();
+    if (path.isEmpty()) return errResult(QStringLiteral("参数 path 缺失"));
+    const double center = engine_->centerFreq();
+    QImage img(960, 480, QImage::Format_ARGB32);
+    img.fill(QColor(18, 18, 20));
+    QPainter p(&img); p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(QColor(120,120,120), 1.0)); p.drawRect(40, 30, 900, 400);
+    p.setPen(QPen(QColor(80,180,255), 1.6));
+    const double cx = 490;
+    p.drawLine(QPointF(cx, 30), QPointF(cx, 430));
+    p.setPen(QPen(QColor(220,220,220), 1.0));
+    p.drawText(QPointF(cx-40, 460), QString::number(center, 'f', 1));
+    p.end();
+    if (!img.save(path, "PNG")) { o["ok"] = false; o["note"] = QStringLiteral("写 PNG 失败"); return o; }
+    o["path"] = path;
+    o["center_hz"] = center;
     return o;
 }
 

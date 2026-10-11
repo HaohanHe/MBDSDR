@@ -262,6 +262,7 @@ private:
     QJsonObject cmdAnalyzeVnaEquivalent(const QJsonObject&);
     QJsonObject cmdAnalyzeVnaTouchstone(const QJsonObject&);
     QJsonObject cmdExportVnaSnapshot(const QJsonObject&);
+    QJsonObject cmdExportSpectrumSnapshot(const QJsonObject&);
     QJsonObject cmdAnalyzeVnaMatch(const QJsonObject&);
     // Bookmarks (ControlHub holds a ui::BookmarkManager; same QSettings key).
     QJsonObject cmdListBookmarks(const QJsonObject&);

@@ -354,3 +354,20 @@ docs/learn/phase63/instrument-democratization-narrative.md（problem→approach�
 
 ## 计数
 金集不变（65）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
+
+---
+
+# 第⑯批：export_spectrum_snapshot 三通道落地（HEAD=1571dc5）
+
+## 工具 65→66
+- spec tool_schema.cpp：export_spectrum_snapshot（write, gated, path 必填）。
+- exec agent_tools.cpp execExportSpectrumSnapshot（离屏渲染频率轴+中心标记 PNG）+ dispatch。
+- hub control_hub.{h,cpp} 写表 true + cmdExportSpectrumSnapshot。
+- gate：写工具手动模式拦截（test_tool_registry isWriteTool 断言）。
+
+## 计数（offscreen 真实 passed）
+- 工具 65→66；mobile catalog 66；phase31 头部 66。
+- test_tool_registry 8 / test_tool_schema 10 / test_agent 38（读29写37）/ test_control_hub 34 / test_ai_real_link 17，全 0 failed。
+
+## phase31 regen
+无自动 regen 脚本（仓库 scratch 隔离不可用）；口径：头部计数手工同步 66 + 手补段落，统一为"头部+手补段"手工维护。

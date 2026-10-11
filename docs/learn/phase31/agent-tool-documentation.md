@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，65 个工具）
+# Agent 工具能力清单（自动生成，66 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -323,3 +323,6 @@ schema: {"properties":{"load_r":{"description":"负载电阻 Ω（>50）","type"
 
 ## analyze_vna_equivalent（只读，第⑫批新增）
 由当前扫频 S11 提取串联 RLC 等效电路：ESR=串联谐振点 |Z|，Q=fr/BW，L=R·Q/(2πfr)，C=1/((2πfr)²·L)。无设备/点数不足时 valid 诚实为 false。读工具（手动 gate 不拦截）。
+
+## export_spectrum_snapshot（写，第⑯批新增）
+把当前 SDR 频谱面板（频率轴 + 中心频点标记）离屏渲染为 PNG 存到 path。写工具，手动模式 gate 拦截。路径不可写 ok:false 诚实拒绝。

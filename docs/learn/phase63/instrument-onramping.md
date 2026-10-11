@@ -136,3 +136,9 @@
   README 已声明原型面≠交付集，不强行统一。
 - 预案演练：mbdsdr_ai/fill_evidence_example.py 走「dump -> 复算最低 VSWR 点 -> 填充行」，
   输出带 _MARKER=SYNTHETIC_PLACEHOLDER 标注；真机替换 sweep.json 即完成。
+
+## 15. 第⑯批：fill 扩展 fr/Q/ESR
+- fill_evidence_example.py 增 analyze_resonance_py（Python 独立实现，与 C++ vna_rf 同公式：
+  |Z|极小=fr、半功率带宽 BW、|Z|谷=ESR）；输出加 谐振_fr_MHz/Q/ESR 列，仍带 SYNTHETIC 标注。
+- test_fill_evidence 1 passed（自造谷值钉扎 fr/ESR）。
+- SDR++ 侦察：候选（FFT/AGC/静噪/频段/WFM/书签）均已在，无新硬缺口，宁缺毋滥不落地。

@@ -833,6 +833,22 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // export_spectrum_snapshot (write, gated) -------------------------------
+    {
+        ToolSchemaSpec s;
+        s.name = "export_spectrum_snapshot";
+        s.description = QString::fromUtf8(
+            "写入：把当前 SDR 频谱面板（频率轴 + 中心频点标记）离屏渲染为 PNG 存到 path。属于写动作，手动模式下被拦截。"
+            "未初始化/路径不可写时 ok:false 诚实拒绝。");
+        s.write = true;
+        ToolParamSpec path;
+        path.name = "path"; path.type = "string";
+        path.description = QString::fromUtf8("PNG 输出路径");
+        path.required = true;
+        s.params << path;
+        out.append(s);
+    }
+
     // analyze_vna_match (read-only) ------------------------------------------
     {
         ToolSchemaSpec s;

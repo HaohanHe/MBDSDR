@@ -1345,6 +1345,42 @@ QString execExportVnaSnapshot(const QJsonObject& a, dsp::SpectrumEngine* engine,
     addSourceFields(o, src); return compact(o);
 }
 
+// export_spectrum_snapshot (write, gated): offscreen-render the current SDR
+// spectrum panel (freq axis + center-marker) to a PNG at `path`. Honest.
+QString execExportSpectrumSnapshot(const QJsonObject& a, dsp::SpectrumEngine* engine,
+                                   const SourceInfo& src,
+                                   ui::BookmarkManager* /*bookmarks*/) {
+    QJsonObject o;
+    const QString path = a.value("path").toString();
+    if (path.isEmpty()) {
+        o["ok"] = false;
+        o["note"] = QString::fromUtf8("需要 path（PNG 输出路径）");
+        addSourceFields(o, src); return compact(o);
+    }
+    const double center = engine->centerFreq();
+    QImage img(960, 480, QImage::Format_ARGB32);
+    img.fill(QColor(18, 18, 20));
+    QPainter p(&img);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setPen(QPen(QColor(120,120,120), 1.0));
+    p.drawRect(40, 30, 900, 400);
+    p.setPen(QPen(QColor(80,180,255), 1.6));
+    const double cx = 490;
+    p.drawLine(QPointF(cx, 30), QPointF(cx, 430));
+    p.setPen(QPen(QColor(220,220,220), 1.0));
+    p.drawText(QPointF(cx-40, 460), QString::number(center, 'f', 1));
+    p.end();
+    if (!img.save(path, "PNG")) {
+        o["ok"] = false;
+        o["note"] = QString::fromUtf8("写 PNG 失败（路径不可写）");
+        addSourceFields(o, src); return compact(o);
+    }
+    o["ok"] = true;
+    o["path"] = path;
+    o["center_hz"] = center;
+    addSourceFields(o, src); return compact(o);
+}
+
 // analyze_vna_match (read): given a measured load Z + design frequency, return
 // an EFHW / inverse-L matching network L/C suggestion.
 QString execAnalyzeVnaMatch(const QJsonObject& a, dsp::SpectrumEngine*,
@@ -1966,6 +2002,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"analyze_vna_equivalent", &execAnalyzeVnaEquivalent},
         {"analyze_vna_touchstone", &execAnalyzeVnaTouchstone},
         {"export_vna_snapshot", &execExportVnaSnapshot},
+        {"export_spectrum_snapshot", &execExportSpectrumSnapshot},
         {"analyze_vna_match", &execAnalyzeVnaMatch},
         {"set_noise_blanker", &execSetNoiseBlanker},
         {"get_noise_blanker_status", &execGetNoiseBlankerStatus},

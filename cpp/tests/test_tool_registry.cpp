@@ -49,7 +49,7 @@ const QSet<QString> kAllCxxTools = {
     "set_vna_sweep", "get_vna_data", "get_vna_status",
     "analyze_vna_resonance", "vna_tdr_cable", "analyze_vna_filter",
     "analyze_vna_equivalent",
-    "analyze_vna_touchstone", "export_vna_snapshot", "analyze_vna_match",
+    "analyze_vna_touchstone", "export_vna_snapshot", "export_spectrum_snapshot", "analyze_vna_match",
     "set_noise_blanker", "get_noise_blanker_status",
     "list_bookmarks", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
     "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
@@ -78,7 +78,7 @@ const QSet<QString> kExpectedWriteTools = {
     "apply_frequency_correction", "export_iq_segment",
     // Phase26 new gated writes (14).
     "set_network_audio_sink", "start_scan_link", "stop_scan_link",
-    "set_squelch", "set_ctcss", "set_cdcss", "set_ft8", "set_lrpt", "set_vna_sweep", "vna_tdr_cable", "export_vna_snapshot", "set_noise_blanker", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
+    "set_squelch", "set_ctcss", "set_cdcss", "set_ft8", "set_lrpt", "set_vna_sweep", "vna_tdr_cable", "export_vna_snapshot", "export_spectrum_snapshot", "set_noise_blanker", "add_bookmark", "tune_to_bookmark", "delete_bookmark",
     "add_vfo", "switch_vfo", "rename_vfo",
     "delete_recording", "export_recording",
     "set_fft_params", "set_color_map",
@@ -149,7 +149,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 65, qPrintable(QString("expected 65 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 66, qPrintable(QString("expected 66 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -203,6 +203,7 @@ void TestToolRegistry::writeReadSplit_registryMatchesContract() {
     QVERIFY(!isWriteTool("analyze_vna_touchstone"));
     QVERIFY(!isWriteTool("analyze_vna_match"));
     QVERIFY(isWriteTool("export_vna_snapshot"));
+    QVERIFY(isWriteTool("export_spectrum_snapshot"));
     QVERIFY(isWriteTool("set_noise_blanker"));
     QVERIFY(!isWriteTool("get_noise_blanker_status"));
     QVERIFY(isWriteTool("add_vfo"));
@@ -268,7 +269,7 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 65);
+    QCOMPARE(defs.size(), 66);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
