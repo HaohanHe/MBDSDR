@@ -135,7 +135,7 @@ void TestToolSchema::noArgToolsHaveEmptyProperties() {
 void TestToolSchema::sevenToolsNameDescriptionMatch() {
     QList<ToolDef> defs = toolDefsFromSpecs(registeredToolSpecs());
     QList<QPair<QString, QString>> expected = {
-        {"tune_frequency", "Tune the receiver to a center frequency in Hz."},
+        {"tune_frequency", "Tune the receiver to a center frequency in Hz (single/main VFO). For multi-VFO setups use set_vfo_frequency with a vfo_id instead."},
         {"set_mode", "Set demodulation mode."},
         {"start_recording", "Start recording raw IQ to SigMF file."},
         {"stop_recording", "Stop recording."},
@@ -266,6 +266,7 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"get_vna_data",
          QString::fromUtf8(
             "只读：返回当前扫频测量数据（frequencies、S11/S21 复数对及派生 VSWR/回波损耗/阻抗）。"
+            "区别：本工具返回测量曲线数据；get_vna_status 仅返回连接/校准/扫描参数状态。"
             "无设备/未取数时各数组诚实为空，不编造曲线。")},
         {"get_vna_status",
          QString::fromUtf8(

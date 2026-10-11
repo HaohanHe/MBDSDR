@@ -573,3 +573,28 @@ competition/比赛/ghp_ 0。
 
 ## 红线
 competition/比赛/ghp_ 0。
+
+---
+
+# 第㉜批：ISS 工具链映射 + schema LLM 可读性改进（HEAD=3c445ee）
+
+## ISS 场景工具链映射（覆盖）
+predict_passes/hours_ahead（过境预报）→ tune_frequency/set_vfo_frequency（调谐）→ set_mode/set_vfo_mode（USB/LSB）→ set_doppler_compensation（多普勒）→ set_squelch/set_ctcss（静噪/亚音）→ get_status/get_spectrum_status（RSSI/信号）→ export_iq_segment/start_recording（录制）。68 工具全覆盖，无真缺口。
+
+## 组合自由性
+代码零预编排：模型自由选择调用顺序（localCommand 为离线兜底，LLM 配置后走 tool call）。
+
+## schema 改进（描述-only，不动执行逻辑）
+- tune_frequency：补「单/主 VFO；多 VFO 用 set_vfo_frequency+vfo_id」边界说明。
+- get_vna_data：补「区别于 get_vna_status：本工具返回测量曲线数据，后者仅连接/校准状态」。
+- test_tool_schema exact-match 字符串同步。
+
+## 高误用风险对（已改 2 对，余 3 对描述已足够区分）
+- get_vna_data vs get_vna_status（已改）；tune_frequency vs set_vfo_frequency（已改）；
+- set_mode vs set_vfo_mode、start_recording vs start_scan_link、export_vna_snapshot vs export_spectrum_snapshot（描述已区分，未改）。
+
+## 计数
+描述-only 改动，工具数 68 不变；registry 8/schema 10/agent 40/control_hub 34/ai_real_link 17，全 0 failed。
+
+## 红线
+competition/比赛/ghp_ 0。

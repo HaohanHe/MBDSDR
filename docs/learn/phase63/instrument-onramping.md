@@ -240,3 +240,9 @@
   summary/sweep/vswr/回损）。
 - fill 边界加固：analyze_resonance_py/tdr_length_py 空数组不崩溃返回零；test_fill_evidence 6 passed。
 - 双平台命令（/dev/ttyACM0 vs COMx）+ dialout/udev 已在 quickstart；回传 checklist 与 argparse 零漂移。
+
+## 31. ISS 通联场景工具映射（docs 示例）
+示例：145.800MHz FM / 定向天线 / 多普勒提示。
+- 映射：onSetCenterFreq(145.8e6)+NFM → 源连接引导（udev/dialout）→ 卫星过顶提示
+  （orbit 工具，模型知识）→ 多普勒频移随仰角变化提示。
+- **边界**：示例仅演示工具链组合，属模型知识非代码；产品不含预制剧本/ISS 话术。

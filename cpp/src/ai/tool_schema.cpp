@@ -67,7 +67,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     {
         ToolSchemaSpec s;
         s.name = "tune_frequency";
-        s.description = "Tune the receiver to a center frequency in Hz.";
+        s.description = "Tune the receiver to a center frequency in Hz (single/main VFO). For multi-VFO setups use set_vfo_frequency with a vfo_id instead.";
         s.write = true;   // changes center frequency
         ToolParamSpec p;
         p.name = "freq_hz";
@@ -739,6 +739,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.name = "get_vna_data";
         s.description = QString::fromUtf8(
             "只读：返回当前扫频测量数据（frequencies、S11/S21 复数对及派生 VSWR/回波损耗/阻抗）。"
+            "区别：本工具返回测量曲线数据；get_vna_status 仅返回连接/校准/扫描参数状态。"
             "无设备/未取数时各数组诚实为空，不编造曲线。");
         out.append(s);
     }
