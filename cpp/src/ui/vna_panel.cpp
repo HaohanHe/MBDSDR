@@ -237,11 +237,21 @@ VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
     smithPlot_ = new VnaSmithWidget(QString::fromUtf8("Smith / Polar (S11)"), this);
     gdPlot_ = new VnaTraceWidget(QString::fromUtf8("群延迟 s"), this);
     muPlot_ = new VnaTraceWidget(QString::fromUtf8("磁导率 μr' vs f"), this);
-    lay->addWidget(s11Plot_, 1);
-    lay->addWidget(s21Plot_, 1);
+
+    // Main display area (owned, reparented into the center tab by MainWindow):
+    // a big Smith + VSWR/S21 main traces, so the right panel only keeps
+    // controls + readouts. Honest empty: plots draw "--" until data arrives.
+    mainView_ = new QWidget(this);
+    auto* mvLay = new QGridLayout(mainView_);
+    mvLay->setContentsMargins(0, 0, 0, 0);
+    mvLay->addWidget(smithPlot_, 0, 0, 2, 1);
+    mvLay->addWidget(s11Plot_, 0, 1);
+    mvLay->addWidget(s21Plot_, 1, 1);
+    mvLay->setColumnStretch(0, 1);
+    mvLay->setColumnStretch(1, 1);
+
     lay->addWidget(gdPlot_, 1);
     lay->addWidget(muPlot_, 1);
-    lay->addWidget(smithPlot_, 1);
 
     readoutLabel_ = new QLabel(vnaReadoutText(std::nan(""), 0, std::nan("")), this);
     lay->addWidget(readoutLabel_);

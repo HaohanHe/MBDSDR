@@ -1188,6 +1188,13 @@ MainWindow::MainWindow(QWidget* parent)
         centerTabs_->addTab(spPage, "时空视图");
     }
 
+    // Stretch the central tab bar so tabs fill the container width (eliminates
+    // the ~400px black empty rectangle to the right of 频谱/世界/气象/时空视图).
+    if (auto* tb = centerTabs_->tabBar()) {
+        tb->setExpanding(true);
+        tb->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    }
+
     centerLay->addWidget(centerTabs_);
     splitter->addWidget(centerCard);
 
@@ -2384,7 +2391,20 @@ MainWindow::MainWindow(QWidget* parent)
 
     // Instrument: external NanoVNA (H/H4) over USB CDC serial. Honest empty
     // state when no device; shares engine_->vnaClient() with the MCP tools.
-    rightTabs_->addTab(new ui::VnaPanel(engine_, rightCard), "VNA");
+    auto* vnaPanel = new ui::VnaPanel(engine_, rightCard);
+    rightTabs_->addTab(vnaPanel, "VNA");
+    // Promote the VNA main display (Smith + VSWR/S21) into the center tab so it
+    // renders large/readable; the right panel keeps controls + readouts.
+    if (QWidget* mv = vnaPanel->mainView()) {
+        int vnaIdx = centerTabs_->addTab(mv, "VNA");
+        // Switch the center view to the VNA main display when the right VNA tab
+        // is selected; do not force when leaving other right tabs.
+        QObject::connect(rightTabs_, &QTabWidget::currentChanged,
+                         this, [this, vnaIdx](int idx) {
+            if (rightTabs_->tabText(idx) == QStringLiteral("VNA"))
+                centerTabs_->setCurrentIndex(vnaIdx);
+        });
+    }
 
     // ---- Phase63: closable right-rail panel tabs ---------------------------
     // SDR++ module show/hide, lightweight equivalent: the user can close panel
@@ -2443,7 +2463,10 @@ MainWindow::MainWindow(QWidget* parent)
     // Built after the splitter so it can reference connectBtn_; inserted between
     // the top bar and the splitter. Hidden immediately for returning users.
     buildGuideCard();
-    if (guideCard_) centralLay->addWidget(guideCard_);
+    // Insert the onboarding card between the top bar and the splitter (index 1)
+    // so the splitter keeps full height and the left rail controls stay reachable
+    // (the card no longer crowds the bottom edge).
+    if (guideCard_) centralLay->insertWidget(1, guideCard_);
     setCentralWidget(central);
     statusBar()->showMessage("MBDSDR C++");
     // Permanent status strip: mode | sample rate | VFO | gain | source.

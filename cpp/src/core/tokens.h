@@ -938,6 +938,7 @@ QLabel#connStateBadge {
     border-radius: %radSmall%px;
     padding: 1px %padMV%px;
 }
+QTabBar { background-color: %bgBar%; }
 QTabBar::tab {
     background: transparent;
     color: %textSec%;

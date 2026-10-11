@@ -246,3 +246,23 @@
 - 映射：onSetCenterFreq(145.8e6)+NFM → 源连接引导（udev/dialout）→ 卫星过顶提示
   （orbit 工具，模型知识）→ 多普勒频移随仰角变化提示。
 - **边界**：示例仅演示工具链组合，属模型知识非代码；产品不含预制剧本/ISS 话术。
+
+## 32. 第㉓批 P0 实证
+- RTL-SDR：CMakeCache RTLSDR_LIBRARY-NOTFOUND（云 VM 无 librtlsdr，系统只读禁 sudo）。
+  stub 路径 rtl_sdr_source.cpp:211 返回 nullptr ops → start()=false → engine
+  spectrum_engine.cpp:540 sourceError「RTL-SDR 设备打开失败：未检测到硬件」诚实报错。
+  ENABLED(HAVE_RTLSDR=1) 构建只能真机/Windows 侧验证（需 libusb+librtlsdr 编译链）。
+- LLM loopback：llm_client.h:46 已有 TransportFn 注入缝（setTransport）；ai_real_link 16 测试覆盖。
+  QTcpServer 真实 HTTP 往返测试需逆向 OpenAI tool_calls schema，本轮不冒险造半成品，登记下批。
+- 半成品清单：ADS-B Gillham/地速（在）、RDS type4/8/0B/2B（在）、network audio sink routed stub（在）、
+  FT8 生产源桥接 collect_ft8_candidates→C++（Python 侧已备，C++ 接真实行待线 B）、mobile Flutter（只读盘点）。
+
+## 33. 第㉓批 P0：LLM loopback 端到端（真实 HTTP）
+- 新测试 cpp/tests/test_llm_loopback.cpp（3 用例）：
+  1) QTcpServer 127.0.0.1:0 收真实 POST（断言 POST+Authorization 头）→ 手写 OpenAI
+     ChatCompletion（tool_calls=get_capabilities）→ LLMClient 真实 QNAM 往返 →
+     r.toolCalls[0].name=="get_capabilities"。
+  2) 错误分支：服务器回 500 + 畸形 JSON → r.error 非空不崩溃。
+  3) parserWhitelist：parsePlanFromLlm steps 工具白名单 get_capabilities ok。
+- 依赖：LLMClient.chat()/llm_protocol ToolCall.name/plan_parser.h。
+- 新 CMake target：test_llm_loopback（回报挂）。

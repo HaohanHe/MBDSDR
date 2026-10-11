@@ -598,3 +598,35 @@ predict_passes/hours_ahead（过境预报）→ tune_frequency/set_vfo_frequency
 
 ## 红线
 competition/比赛/ghp_ 0。
+
+---
+
+# 第㉓批紧急：P0-UI 三处修复（HEAD=f2d0d31）
+
+## before 看图确认（问题真实存在）
+- /tmp/ui_fix_before_1920.png：中栏 QTabBar（频谱/世界/气象/时空视图）右侧 ~800px 纯黑空白矩形，tab 行未拉伸。
+- /tmp/ui_fix_before_vna_1920.png：VNA tab 激活时中栏仍频谱空网格；右栏 420px 挤 5 图（VSWR/S21/群延迟/μr/Smith）每图 ~400×110 缩略，Smith 不可读。
+- 左栏底部「控制参数」组被「三步上手」欢迎横幅裁切（只露标题）。
+
+## 修复
+- main_window.cpp:1191 附近：centerTabs_->tabBar() setExpanding(true)+SizePolicy(Expanding,Fixed)。
+- **offscreen 复拍（/tmp/ui_fix_after_1920.png）黑块未消除**——Qt QSS 绘制 tabBar 下 setExpanding 视觉未生效，需真机/runtime 复核；本批 offscreen 无法确认。
+
+## 诚实未完成（预算内未做，报父定）
+- VNA 主显示区切中栏（信息架构硬伤）：需 vna_panel 主图嵌入 centerTabs 或独立全屏视图，重大重构，本批未做。
+- 左栏底部横幅裁切层级修复未做。
+- 640 窄档长 caption 截断未修。
+
+---
+
+# 第㉓批·追加：UI 三项修复落地（HEAD=f2d0d31）
+
+## 三项修复 file:line
+1. **黑块** tokens.h:941 `QTabBar { background-color: %bgBar%; }`（中栏 tab 条右侧融入统一底色）。
+2. **VNA 主显示** vna_panel.{h,cpp} 新增 mainView()（Smith 大图左 + S11 VSWR/S21 右栅格）；main_window.cpp:2394 addTab 到 centerTabs + rightTabs currentChanged 联动。
+3. **横幅** main_window.cpp:2453 insertWidget(1, guideCard_)（移 topBar 后，splitter 全高）。
+
+## after 看图结论（/tmp/ui_after_*.png）
+- spec_1920：横幅移顶部条下；tab 行（频谱/世界/气象/时空视图/VNA）右侧黑块融入统一深色 tab 条；左栏 splitter 全高控件可达。
+- vna_1920：中栏切 VNA 大图——Smith/Polar 大圆清晰可读（R/X 网格弧可见），S11 VSWR/S21 增益主轨迹占中栏；右栏只剩连接/扫描控制 + 小缩略 + 读数。
+- vna_640：中栏 VNA 大图仍渲染（Smith 圆可读）；右 rail 控制 caption 窄档 floor 截断（诚实）。

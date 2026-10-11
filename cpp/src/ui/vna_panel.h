@@ -78,6 +78,10 @@ public:
                              const std::vector<std::complex<double>>& s11,
                              const std::vector<std::complex<double>>& s21);
 
+    // Large main display (Smith + VSWR/S21 main traces) for the center tab.
+    // Owned by this panel; MainWindow re-parents it into centerTabs_.
+    QWidget* mainView() const { return mainView_; }
+
 private slots:
     void onConnectClicked();
     void onMeasureClicked();
@@ -110,6 +114,7 @@ private:
     VnaTraceWidget* gdPlot_  = nullptr;  // group delay (s) vs frequency
     VnaTraceWidget* muPlot_  = nullptr;  // mu_r' vs frequency
     QWidget* smithPlot_  = nullptr;  // Smith + Polar trajectory widget
+    QWidget* mainView_   = nullptr;  // center-tab main display (Smith+VSWR/S21)
     QTimer*         timer_   = nullptr;
 };
 

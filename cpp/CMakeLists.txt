@@ -1595,6 +1595,12 @@ target_include_directories(test_ai_real_link PRIVATE src)
 target_link_libraries(test_ai_real_link PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
 add_test(NAME ai_real_link COMMAND test_ai_real_link)
 
+add_executable(test_llm_loopback tests/test_llm_loopback.cpp)
+target_link_libraries(test_llm_loopback PRIVATE mbdsdr_core)
+target_include_directories(test_llm_loopback PRIVATE src)
+target_link_libraries(test_llm_loopback PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
+add_test(NAME llm_loopback COMMAND test_llm_loopback)
+
 # ---- L5: C++ tool-registry completeness / consistency audit (offline) -------
 # Introspects BOTH the declarative schema table (tool_schema.cpp) and the
 # self-registered dispatch table (agent_tools.cpp) and asserts they agree, pins

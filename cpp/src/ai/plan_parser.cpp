@@ -9,9 +9,15 @@ namespace mbdsdr {
 namespace ai {
 
 bool isExecutableTool(const QString& tool) {
-    if (tool == QLatin1String("add_bookmark")) return true;   // orchestrator step
-    if (tool == QLatin1String("get_status"))  return true;    // read tool
-    return isWriteTool(tool);                                 // write tools whitelist
+    // Every tool the executor actually dispatches is executable -- read-only and
+    // write alike. Introspected from the real registry so a newly added read
+    // tool is accepted here without touching this list (the prior hardcoded set
+    // only knew get_status + write tools and wrongly rejected read tools such as
+    // get_capabilities / get_vna_data / get_vna_status).
+    static const QStringList kExecutable = executorToolNames();
+    if (kExecutable.contains(tool)) return true;
+    if (tool == QLatin1String("add_bookmark")) return true;  // orchestrator step
+    return false;
 }
 
 ParsedPlan parsePlanFromLlm(const QString& text) {
