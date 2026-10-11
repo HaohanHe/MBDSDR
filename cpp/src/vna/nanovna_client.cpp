@@ -223,5 +223,117 @@ QStringList NanoVnaClient::readCalStatus() {
     return cal_;
 }
 
+// Shared body for every calibration write step: guard -> exec("cal <word>") ->
+// refresh the cal_ readback member -> record session coverage (only when a sweep
+// range is active, since coverage is meaningless without a span). Returns false
+// with *err on any guard failure; exec itself is best-effort (the firmware
+// echoes little) and the cal_ refresh is what makes the state visible.
+namespace {
+bool guardConnected(bool connected, QString* err) {
+    if (!connected) {
+        if (err) *err = QStringLiteral("NanoVNA 未连接");
+        return false;
+    }
+    return true;
+}
+} // namespace
+
+bool NanoVnaClient::calReset(QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("cal reset"));
+    readCalStatus();          // refresh cal_ readback
+    return true;
+}
+
+bool NanoVnaClient::calOpen(QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("cal open"));
+    readCalStatus();
+    if (hasSweep_) { calCoverageKnown_ = true; lastCalStartHz_ = sStartHz_; lastCalStopHz_ = sStopHz_; }
+    return true;
+}
+
+bool NanoVnaClient::calShort(QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("cal short"));
+    readCalStatus();
+    if (hasSweep_) { calCoverageKnown_ = true; lastCalStartHz_ = sStartHz_; lastCalStopHz_ = sStopHz_; }
+    return true;
+}
+
+bool NanoVnaClient::calLoad(QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("cal load"));
+    readCalStatus();
+    if (hasSweep_) { calCoverageKnown_ = true; lastCalStartHz_ = sStartHz_; lastCalStopHz_ = sStopHz_; }
+    return true;
+}
+
+bool NanoVnaClient::calIsolation(QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("cal isolation"));
+    readCalStatus();
+    if (hasSweep_) { calCoverageKnown_ = true; lastCalStartHz_ = sStartHz_; lastCalStopHz_ = sStopHz_; }
+    return true;
+}
+
+bool NanoVnaClient::calThru(QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("cal thru"));
+    readCalStatus();
+    if (hasSweep_) { calCoverageKnown_ = true; lastCalStartHz_ = sStartHz_; lastCalStopHz_ = sStopHz_; }
+    return true;
+}
+
+bool NanoVnaClient::calDone(QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("cal done"));
+    readCalStatus();
+    if (hasSweep_) { calCoverageKnown_ = true; lastCalStartHz_ = sStartHz_; lastCalStopHz_ = sStopHz_; }
+    return true;
+}
+
+bool NanoVnaClient::calSave(int slot, QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    if (slot < 1 || slot > 4) {
+        if (err) *err = QStringLiteral("cal save 槽位必须为 1..4");
+        return false;
+    }
+    exec(QStringLiteral("cal save %1").arg(slot));
+    readCalStatus();
+    if (hasSweep_) { calCoverageKnown_ = true; lastCalStartHz_ = sStartHz_; lastCalStopHz_ = sStopHz_; }
+    return true;
+}
+
+bool NanoVnaClient::calLoadSlot(int slot, QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    if (slot < 1 || slot > 4) {
+        if (err) *err = QStringLiteral("cal load 槽位必须为 1..4");
+        return false;
+    }
+    exec(QStringLiteral("cal load %1").arg(slot));
+    readCalStatus();
+    if (hasSweep_) { calCoverageKnown_ = true; lastCalStartHz_ = sStartHz_; lastCalStopHz_ = sStopHz_; }
+    return true;
+}
+
+bool NanoVnaClient::scan(QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("scan"));
+    return true;
+}
+
+bool NanoVnaClient::pauseScan(QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("pause"));
+    return true;
+}
+
+bool NanoVnaClient::resumeScan(QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("resume"));
+    return true;
+}
+
 } // namespace vna
 } // namespace mbdsdr

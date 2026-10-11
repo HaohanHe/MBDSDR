@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，68 个工具）
+# Agent 工具能力清单（自动生成，69 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -332,3 +332,9 @@ schema: {"properties":{"load_r":{"description":"负载电阻 Ω（>50）","type"
 
 ## export_ft8_results（写，第㉔批新增）
 把当前 FT8 解码结果（含 SIC 分离）导出为文本/CSV 存到 path。写工具，手动模式 gate 拦截。FT8 解码结果源待 Python 域接入时仅写表头（空数据），不伪造呼号/经纬度。
+
+## vna_calibration（写，P0 #59 校准门面单工具状态机）
+NanoVNA 校准门面：单工具状态机，`step` 为校准/测量命令字（必填枚举），`slot` 仅 save/load 用（1..4）。
+- `step=status`（或省略）=只读引导：实时读回 `cal_`，返回 cal_steps（open/short/load/isolation/thru/done 已完成态）、missing_steps、cal_compensation_sets（`^c\d+$` 项）、cal_complete、cal_confidence（calibrated/partial/unknown）、cal_out_of_range（扫频范围相对校准时是否漂移）与客观 next_step（按协议顺序给出第一个缺失步骤及标准件连接说明）。
+- 写步骤 `open/short/load/isolation/thru/done/reset` 走手动 gate、人在环逐步确认；`save/load` 需 slot 1..4；`scan/pause/resume` 控制扫频。
+- 接标准件到 CH0（OPEN/SHORT/LOAD）、CH0-CH1 THRU 连接是仪器协议客观事实，编排权在调用者（模型），本工具不编固定剧本。未连接 ok:false 并给 USB/串口排查清单。

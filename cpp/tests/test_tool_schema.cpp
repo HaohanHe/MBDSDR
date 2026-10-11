@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 68);
+    QCOMPARE(specs.size(), 69);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -261,7 +261,8 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"set_vna_sweep",
          QString::fromUtf8(
             "写入：设置 NanoVNA 扫频范围（start_hz/stop_hz/points，均必填；stop 必须大于 start，"
-            "points 为正整数）。属于写动作，手动模式下被拦截。无设备时参数仍校验，但不下发（applied=false），"
+            "points 为正整数）。宽扫建议 ±5~10%，窄扫 ±1%（经验范围）。"
+            "属于写动作，手动模式下被拦截。无设备时参数仍校验，但不下发（applied=false），"
             "不伪造连接。")},
         {"get_vna_data",
          QString::fromUtf8(
@@ -279,7 +280,8 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"vna_tdr_cable",
          QString::fromUtf8(
             "写入：对当前扫频 S11 做 TDR 时域反射（velocity_factor 速度因子，0<vf<=1，必填），"
-            "返回首反射峰距离与电缆长度。属于写动作，手动模式下被拦截。无设备/无峰时 valid 诚实为 false。")},
+            "返回首反射峰距离与电缆长度（馈线好坏/电缆故障/进水/接头虚接）。"
+            "属于写动作，手动模式下被拦截。无设备/无峰时 valid 诚实为 false。")},
         {"analyze_vna_filter",
          QString::fromUtf8(
             "只读：对当前扫频 S21 幅度做滤波器分析（自动识别 bandpass/bandstop/highpass/lowpass，"
@@ -310,7 +312,8 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "无解码结果时 rows=0 诚实空态，不伪造呼号/经纬度。")},
         {"analyze_vna_match",
          QString::fromUtf8(
-            "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回 EFHW/反 L 匹配网络的 L/C 建议（Q、串联/并联臂值）。"
+            "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回 EFHW/反 L 匹配网络的 L/C 建议（Q、串联/并联臂值）"
+            "（驻波下不来/做匹配/加感）。"
             "负载电阻需 >50Ω；否则 valid 诚实为 false。")},
         {"set_noise_blanker",
          QString::fromUtf8(
@@ -406,6 +409,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "只读：返回录制状态（recording 是否在手动录制中、recording_path 当前路径、"
             "watch_enabled 值守录制是否使能、recording_dir 录制目录）。"
             "未录制时诚实返回 recording=false、空路径，不伪造。")},
+        // P0 #59: single-tool NanoVNA calibration state machine (write, gated).
+        {"vna_calibration",
+         QString::fromUtf8(
+            "写入：NanoVNA 校准单工具状态机。step 为校准/测量命令字（必填枚举）："
+            "status=只读引导（返回客观下一步与已完成/缺失步骤）；"
+            "reset/open/short/load/isolation/thru/done=校准写步骤；"
+            "save/load=保存/加载校准集（需 slot 1..4）；scan/pause/resume=扫频控制。"
+            "写动作走手动 gate、人在环逐步确认。接标准件到 CH0 / CH0-CH1 THRU 是仪器协议客观事实，"
+            "编排权在调用者（模型），非固定剧本。未连接 ok:false 并给排查清单。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {
@@ -462,7 +474,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 68);
+    QCOMPARE(headerCount, 69);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

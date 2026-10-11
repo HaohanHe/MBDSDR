@@ -69,7 +69,8 @@ std::vector<ReplayTransport::Step> calibratedScript(double targetGamma) {
         {"help", {}},
         {"version", {"1.0.174-hugen"}},
         {"info", {"NanoVNA-H"}},
-        {"cal", {"load open short thru cal'ed"}},
+        {"cal", {"load open short thru cal'ed"}},   // get_vna_status live readCalStatus()
+        {"cal", {"load open short thru cal'ed"}},   // runVswrOnramp's own cal refresh
         {"sweep 438000000 439000000 101", {}},
         {"frequencies", freqs},
         {"data 0", data0},
@@ -138,7 +139,8 @@ void TestVnaOnramp::uncalibratedGuidance() {
     dsp::SpectrumEngine engine;
     // Same handshake but "cal" yields no "cal'ed" -> uncalibrated branch.
     auto script = calibratedScript(0.1);
-    script[3] = {"cal", {"load open short thru"}};  // no cal'ed
+    script[3] = {"cal", {"load open short thru"}};  // get_vna_status refresh, no cal'ed
+    script[4] = {"cal", {"load open short thru"}};  // onramp's own refresh, no cal'ed
     engine.vnaClient().attachTransport(
         std::make_unique<ReplayTransport>(std::move(script)));
     QString out = ai::runVswrOnramp(&engine, QString::fromUtf8("438.5MHz驻波多少"));
@@ -238,7 +240,8 @@ void TestVnaOnramp::filterNoShapeHonest() {
     // 滤波器分支不发 sweep，直接 frequencies + data 1(S21 空) -> 无形态 -> 诚实引导。
     std::vector<ReplayTransport::Step> script = {
         {"help", {}}, {"version", {"1.0.174-hugen"}}, {"info", {"NanoVNA-H"}},
-        {"cal", {"load open short thru cal'ed"}},
+        {"cal", {"load open short thru cal'ed"}},   // get_vna_status live refresh
+        {"cal", {"load open short thru cal'ed"}},   // onramp's own cal refresh
         {"frequencies", {"438000000", "439000000"}},
         {"data 1", {}},
     };

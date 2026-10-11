@@ -13,6 +13,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QSet>
 #include <QStringList>
 #include <QDir>
 #include <QFile>
@@ -23,6 +24,7 @@
 #include <QPen>
 #include <QPolygonF>
 #include <cmath>
+#include <limits>
 
 namespace mbdsdr {
 namespace ai {
@@ -69,6 +71,110 @@ void addSourceFields(QJsonObject& o, const SourceInfo& s) {
 
 QString compact(const QJsonObject& o) {
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+// cal_ readback tokens from the firmware are space-split set items. A
+// compensation-set token matches ^c\d+$ (e.g. "c1"..="calibration set 1 applied").
+// Hand-rolled so we need no QRegularExpression include on this hot path.
+bool isCalCompensationSet(const QString& t) {
+    if (t.size() < 2 || t.at(0) != QLatin1Char('c')) return false;
+    for (int i = 1; i < t.size(); ++i)
+        if (!t.at(i).isDigit()) return false;
+    return true;
+}
+
+// The six canonical SOLT calibration step words, in NanoVNA protocol order.
+const QStringList& calStepWords() {
+    static const QStringList k{QStringLiteral("open"), QStringLiteral("short"),
+                               QStringLiteral("load"), QStringLiteral("isolation"),
+                               QStringLiteral("thru"), QStringLiteral("done")};
+    return k;
+}
+
+// Honest calibration confidence + coverage-out-of-range interpretation, shared
+// by get_vna_data / get_vna_status / vna_calibration so the three faces never
+// disagree. Nothing is fabricated: unconnected or bare "done" -> "unknown".
+void addCalInterpretation(QJsonObject& o, const vna::NanoVnaClient& vna) {
+    const QStringList cal = vna.calStatus();
+    const QSet<QString> have(cal.begin(), cal.end());
+    const bool hasDone   = have.contains(QStringLiteral("done"));
+    const bool haveOpen  = have.contains(QStringLiteral("open"));
+    const bool haveShort = have.contains(QStringLiteral("short"));
+    const bool haveLoad  = have.contains(QStringLiteral("load"));
+
+    QString confidence;
+    if (!vna.isConnected()) {
+        confidence = QString::fromUtf8("unknown");
+    } else if (hasDone && haveOpen && haveShort && haveLoad) {
+        confidence = QString::fromUtf8("calibrated");
+    } else if (haveOpen || haveShort || haveLoad) {
+        // At least one SOL measurement recorded but the set is incomplete.
+        QStringList missing;
+        for (const QString& w : calStepWords())
+            if (!have.contains(w)) missing << w;
+        confidence = QString::fromUtf8("partial: %1").arg(missing.join(QLatin1Char(',')));
+    } else {
+        // Empty cal_ or a bare "done" (no SOL steps verifiable) -> unknown, never
+        // claim calibrated on a token we cannot prove.
+        confidence = QString::fromUtf8("unknown");
+    }
+    o["cal_confidence"] = confidence;
+
+    bool outOfRange = false;
+    QString oorNote;
+    if (vna.calCoverageKnown()) {
+        const long curStart = vna.sweepStartHz();
+        const long curStop  = vna.sweepStopHz();
+        if (curStart != vna.lastCalStartHz() || curStop != vna.lastCalStopHz()) {
+            outOfRange = true;
+            oorNote = QString::fromUtf8(
+                          "扫频范围已改变（当前 %1–%2 Hz vs 校准时 %3–%4 Hz），"
+                          "校准可能失效，建议重校或恢复原范围")
+                          .arg(curStart).arg(curStop)
+                          .arg(vna.lastCalStartHz()).arg(vna.lastCalStopHz());
+        } else {
+            oorNote = QString::fromUtf8("扫频范围与校准时一致，校准覆盖有效");
+        }
+    } else {
+        oorNote = QString::fromUtf8("校准覆盖范围未知（本会话未在校准时记录扫频）");
+    }
+    o["cal_out_of_range"] = outOfRange;
+    o["cal_out_of_range_note"] = oorNote;
+}
+
+// Build the structured cal_steps / missing_steps / compensation-sets / complete
+// object from the current (already refreshed) cal_ readback. Shared by
+// get_vna_status and the vna_calibration status + post-write readback.
+void fillCalSteps(QJsonObject& o, const vna::NanoVnaClient& vna) {
+    const QStringList cal = vna.calStatus();
+    const QSet<QString> have(cal.begin(), cal.end());
+    QJsonObject steps;
+    steps["open"]      = have.contains(QStringLiteral("open"));
+    steps["short"]     = have.contains(QStringLiteral("short"));
+    steps["load"]      = have.contains(QStringLiteral("load"));
+    steps["isolation"] = have.contains(QStringLiteral("isolation"));
+    steps["thru"]      = have.contains(QStringLiteral("thru"));
+    steps["done"]      = have.contains(QStringLiteral("done"));
+    o["cal_steps"] = steps;
+
+    QStringList missing;
+    for (const QString& w : calStepWords())
+        if (!have.contains(w)) missing << w;
+    o["missing_steps"] = QJsonArray::fromStringList(missing);
+
+    QJsonArray comp;
+    for (const QString& t : cal)
+        if (isCalCompensationSet(t)) comp.append(t);
+    o["cal_compensation_sets"] = comp;
+
+    o["cal_complete"] = have.contains(QStringLiteral("done"));
+
+    QJsonArray unknown;
+    for (const QString& t : cal) {
+        if (!calStepWords().contains(t) && !isCalCompensationSet(t))
+            unknown.append(t);
+    }
+    o["cal_unknown_items"] = unknown;
 }
 
 // Forward declaration: the honest-error helper is defined in the Phase26 block
@@ -1109,12 +1215,58 @@ QString execGetVnaData(const QJsonObject&, dsp::SpectrumEngine* engine,
     o["s21_gain_db"] = s21gain;
     o["smith_z_real"] = znormRe; o["smith_z_imag"] = znormIm;
     o["coax_loss_db_per_m"] = coax;
-    o["note"] = QString::fromUtf8("未连接 NanoVNA：测量数组为空；coax_loss_db_per_m 需已知电缆长度（用 vna_tdr_cable 测长）");
+
+    // #60 summary fields, all from the real arrays -- null when there is no data.
+    // Min VSWR is the best (lowest) standing-wave point and the frequency at it.
+    QJsonValue minVswr = QJsonValue::Null;
+    QJsonValue minVswrAt = QJsonValue::Null;
+    if (vswrArr.size() == freqs.size()) {
+        double best = std::numeric_limits<double>::infinity();
+        int bestIdx = -1;
+        for (int i = 0; i < vswrArr.size(); ++i) {
+            const double v = vswrArr.at(i).toDouble();
+            if (std::isfinite(v) && v < best) { best = v; bestIdx = i; }
+        }
+        if (bestIdx >= 0) {
+            minVswr = best;
+            minVswrAt = freqs.at(bestIdx).toDouble();
+        }
+    }
+    o["min_vswr"] = minVswr;
+    o["min_vswr_at_hz"] = minVswrAt;
+
+    // Calibration confidence + coverage-range drift (honest: unknown/uncalibrated
+    // is never dressed up as calibrated).
+    addCalInterpretation(o, vna);
+
+    // Wiring fact: fixed protocol truth (S11=CH0 reflection, S21=CH0->CH1).
+    QJsonObject wiring;
+    wiring["s11_ch0"] = true;
+    wiring["s21_ch0_ch1"] = true;
+    wiring["note"] = QString::fromUtf8("S11 测量 CH0 反射，S21 测量 CH0→CH1 传输");
+    o["wiring"] = wiring;
+
+    // #60 note bugfix: stop lying "未连接" unconditionally. Three honest branches.
+    QString note;
+    if (!vna.isConnected()) {
+        note = QString::fromUtf8(
+                   "未连接 NanoVNA：排查 ①USB/CDC 接线（Linux 需 dialout/udev，"
+                   "Windows 见设备管理器 COMx）②设备是否进入扫频模式 "
+                   "③串口路径（/dev/ttyACM0 或 COMx）；连接后先 set_vna_sweep 再 get_vna_data");
+    } else if (s11re.isEmpty()) {
+        note = QString::fromUtf8(
+                   "已连接但暂无测量数据：请先执行 set_vna_sweep（等待扫描完成）后再调用本工具");
+    } else {
+        note = QString::fromUtf8("coax_loss_db_per_m 需已知电缆长度（用 vna_tdr_cable 测长）");
+    }
+    o["note"] = note;
     addSourceFields(o, src);
     return compact(o);
 }
 
 // get_vna_status (read): connected / model / version / cal / current sweep.
+// On connect we do a live readCalStatus() refresh, then interpret the cal_ set
+// into structured step/compensation/complete fields (honest unknown-items list).
 QString execGetVnaStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
                           const SourceInfo& src,
                           ui::BookmarkManager* /*bookmarks*/) {
@@ -1124,13 +1276,124 @@ QString execGetVnaStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
     o["connected"] = vna.isConnected();
     o["model"] = vna.model();
     o["version"] = vna.version();
+    if (vna.isConnected()) vna.readCalStatus();   // live refresh before interpreting
     o["cal"] = QJsonArray::fromStringList(vna.calStatus());
     o["has_sweep"] = vna.hasSweep();
     o["start_hz"] = (double)vna.sweepStartHz();
     o["stop_hz"] = (double)vna.sweepStopHz();
     o["points"] = vna.sweepPoints();
+    // Structured calibration interpretation (empty/honest when unconnected).
+    fillCalSteps(o, vna);
+    addCalInterpretation(o, vna);
     if (!vna.isConnected())
         o["note"] = QString::fromUtf8("未连接 NanoVNA：状态字段为空");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// vna_calibration (write -- gated): single-tool calibration STATE MACHINE.
+// step selects one instrument-protocol command word; the model (human-in-the-loop
+// on every write) decides the ORDER and when to put standards on CH0 / THRU.
+// step=status (or omitted) is read-only and returns the objective next step;
+// write steps route through the manual gate. No fixed script is baked in -- the
+// connection of standards to ports is a hardware fact the caller controls.
+QString execVnaCalibration(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                          const SourceInfo& src,
+                          ui::BookmarkManager* /*bookmarks*/) {
+    auto& vna = engine->vnaClient();
+    const QString step = args.value("step").toString(QStringLiteral("status"));
+
+    // Honest unconnected envelope (before any command is issued).
+    if (!vna.isConnected()) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("NanoVNA 未连接");
+        o["suggestion"] = QString::fromUtf8(
+                   "排查 ①USB/CDC 接线（Linux 需 dialout/udev，Windows 见设备管理器 COMx）"
+                   "②设备是否进入扫频模式 ③串口路径（/dev/ttyACM0 或 COMx）；"
+                   "连接后先 set_vna_sweep 再校准");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+
+    // Read-only guidance: refresh + report objective next step in protocol order.
+    if (step == QStringLiteral("status")) {
+        vna.readCalStatus();
+        QJsonObject o;
+        o["ok"] = true;
+        o["step"] = QStringLiteral("status");
+        fillCalSteps(o, vna);
+        addCalInterpretation(o, vna);
+        const QStringList calNow = vna.calStatus();
+        const QSet<QString> have(calNow.begin(), calNow.end());
+        if (have.contains("done") && have.contains("open") &&
+            have.contains("short") && have.contains("load")) {
+            o["next_step"] = QString::fromUtf8("calibration complete（可用 step=save slot=1..4 保存校准集）");
+        } else {
+            // First missing step in canonical SOLT order, with the standard it needs.
+            static const QList<QPair<QString, QString>> kGuide = {
+                {QStringLiteral("open"),      QStringLiteral("接 OPEN 开路标准件到 CH0（PORT1）后 step=open")},
+                {QStringLiteral("short"),     QStringLiteral("接 SHORT 短路标准件到 CH0（PORT1）后 step=short")},
+                {QStringLiteral("load"),      QStringLiteral("接 LOAD 50Ω 负载标准件到 CH0（PORT1）后 step=load")},
+                {QStringLiteral("isolation"), QStringLiteral("CH0 接 SOL 件、CH1 开路（测隔离）后 step=isolation")},
+                {QStringLiteral("thru"),      QStringLiteral("CH0–CH1 用 through 直通（测传输）后 step=thru")},
+                {QStringLiteral("done"),      QStringLiteral("以上就绪后 step=done 完成校准")},
+            };
+            for (const auto& g : kGuide)
+                if (!have.contains(g.first)) { o["next_step"] = g.second; break; }
+        }
+        addSourceFields(o, src);
+        return compact(o);
+    }
+
+    // write steps ------------------------------------------------------------
+    const bool isSaveOrLoad = (step == QStringLiteral("save") || step == QStringLiteral("load"));
+    if (isSaveOrLoad) {
+        const QJsonValue sv = args.value("slot");
+        if (!sv.isDouble()) {
+            QJsonObject o; o["ok"] = false;
+            o["error"] = QString::fromUtf8("save/load 需要 slot（1..4 整数）");
+            addSourceFields(o, src); return compact(o);
+        }
+        const int slot = sv.toInt();
+        if (slot < 1 || slot > 4) {
+            QJsonObject o; o["ok"] = false;
+            o["error"] = QString::fromUtf8("slot 必须在 1..4 之间");
+            addSourceFields(o, src); return compact(o);
+        }
+    }
+
+    QString err;
+    bool ok = false;
+    if (step == QStringLiteral("reset"))            ok = vna.calReset(&err);
+    else if (step == QStringLiteral("open"))         ok = vna.calOpen(&err);
+    else if (step == QStringLiteral("short"))       ok = vna.calShort(&err);
+    else if (step == QStringLiteral("load"))        ok = vna.calLoad(&err);
+    else if (step == QStringLiteral("isolation"))   ok = vna.calIsolation(&err);
+    else if (step == QStringLiteral("thru"))        ok = vna.calThru(&err);
+    else if (step == QStringLiteral("done"))        ok = vna.calDone(&err);
+    else if (step == QStringLiteral("save"))         ok = vna.calSave(args.value("slot").toInt(), &err);
+    else if (step == QStringLiteral("load"))        ok = vna.calLoadSlot(args.value("slot").toInt(), &err);
+    else if (step == QStringLiteral("scan"))        ok = vna.scan(&err);
+    else if (step == QStringLiteral("pause"))       ok = vna.pauseScan(&err);
+    else if (step == QStringLiteral("resume"))      ok = vna.resumeScan(&err);
+    else {
+        QJsonObject o; o["ok"] = false;
+        o["error"] = QString::fromUtf8("未知 step，合法值：status/reset/open/short/load/"
+                                       "isolation/thru/done/save/load/scan/pause/resume");
+        addSourceFields(o, src); return compact(o);
+    }
+
+    // Post-write readback: the cal step methods already refreshed cal_, but a
+    // fresh read keeps the returned steps truthful for scan/pause/resume too.
+    vna.readCalStatus();
+    QJsonObject o;
+    o["ok"] = ok;
+    o["step"] = step;
+    if (!ok) o["error"] = err;
+    fillCalSteps(o, vna);
+    addCalInterpretation(o, vna);
+    o["coverage_recorded"] = vna.calCoverageKnown();
     addSourceFields(o, src);
     return compact(o);
 }
@@ -2126,6 +2389,8 @@ const QList<ToolDispatch>& dispatchTable() {
         // Read-only source-capability + recording-state snapshots (honest empty).
         {"get_capabilities", &execGetCapabilities},
         {"get_recording_state", &execGetRecordingState},
+        // P0 #59: single-tool NanoVNA calibration state machine (write, gated).
+        {"vna_calibration", &execVnaCalibration},
     };
     return kTable;
 }

@@ -717,7 +717,8 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.name = "set_vna_sweep";
         s.description = QString::fromUtf8(
             "写入：设置 NanoVNA 扫频范围（start_hz/stop_hz/points，均必填；stop 必须大于 start，"
-            "points 为正整数）。属于写动作，手动模式下被拦截。无设备时参数仍校验，但不下发（applied=false），"
+            "points 为正整数）。宽扫建议 ±5~10%，窄扫 ±1%（经验范围）。"
+            "属于写动作，手动模式下被拦截。无设备时参数仍校验，但不下发（applied=false），"
             "不伪造连接。");
         s.write = true;
         ToolParamSpec a;
@@ -771,7 +772,8 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.name = "vna_tdr_cable";
         s.description = QString::fromUtf8(
             "写入：对当前扫频 S11 做 TDR 时域反射（velocity_factor 速度因子，0<vf<=1，必填），"
-            "返回首反射峰距离与电缆长度。属于写动作，手动模式下被拦截。无设备/无峰时 valid 诚实为 false。");
+            "返回首反射峰距离与电缆长度（馈线好坏/电缆故障/进水/接头虚接）。"
+            "属于写动作，手动模式下被拦截。无设备/无峰时 valid 诚实为 false。");
         s.write = true;
         ToolParamSpec vf;
         vf.name = "velocity_factor"; vf.type = "number"; vf.required = true;
@@ -887,7 +889,8 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "analyze_vna_match";
         s.description = QString::fromUtf8(
-            "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回 EFHW/反 L 匹配网络的 L/C 建议（Q、串联/并联臂值）。"
+            "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回 EFHW/反 L 匹配网络的 L/C 建议（Q、串联/并联臂值）"
+            "（驻波下不来/做匹配/加感）。"
             "负载电阻需 >50Ω；否则 valid 诚实为 false。");
         ToolParamSpec r; r.name = "load_r"; r.type = "number";
         r.description = QString::fromUtf8("负载电阻 Ω（>50，高阻馈电点）"); r.required = true;
@@ -1339,6 +1342,40 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
             "watch_enabled 值守录制是否使能、recording_dir 录制目录）。"
             "未录制时诚实返回 recording=false、空路径，不伪造。");
         s.write = false;
+        out.append(s);
+    }
+
+    // vna_calibration (write -- gated): single-tool NanoVNA calibration state
+    // machine. `step` is the instrument-protocol command word; `slot` is only
+    // consumed by save/load. status (or omitted) is read-only guidance that
+    // returns the objective next step. Write steps go through the manual gate so
+    // a human confirms each standard connection. The ordering / when to attach
+    // standards (OPEN/SHORT/LOAD to CH0, isolation, THRU CH0-CH1) is a hardware
+    // fact under the caller's control -- no fixed script is baked in.
+    {
+        ToolSchemaSpec s;
+        s.name = "vna_calibration";
+        s.description = QString::fromUtf8(
+            "写入：NanoVNA 校准单工具状态机。step 为校准/测量命令字（必填枚举）："
+            "status=只读引导（返回客观下一步与已完成/缺失步骤）；"
+            "reset/open/short/load/isolation/thru/done=校准写步骤；"
+            "save/load=保存/加载校准集（需 slot 1..4）；scan/pause/resume=扫频控制。"
+            "写动作走手动 gate、人在环逐步确认。接标准件到 CH0 / CH0-CH1 THRU 是仪器协议客观事实，"
+            "编排权在调用者（模型），非固定剧本。未连接 ok:false 并给排查清单。");
+        s.write = true;
+        ToolParamSpec step;
+        step.name = "step"; step.type = "string"; step.required = true;
+        step.description = QString::fromUtf8(
+            "校准命令字：status/reset/open/short/load/isolation/thru/done/save/load/scan/pause/resume");
+        step.enumValues = QVariantList{
+            "status", "reset", "open", "short", "load", "isolation",
+            "thru", "done", "save", "load", "scan", "pause", "resume"};
+        ToolParamSpec slot;
+        slot.name = "slot"; slot.type = "number"; slot.required = false;
+        slot.description = QString::fromUtf8("校准集槽位 1..4（仅 save/load 用）");
+        slot.hasMin = true; slot.min = 1.0;
+        slot.hasMax = true; slot.max = 4.0;
+        s.params << step << slot;
         out.append(s);
     }
 

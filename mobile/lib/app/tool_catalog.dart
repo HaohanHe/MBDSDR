@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 64 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 69 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -33,8 +33,8 @@ class ToolCatalogEntry {
   final bool write;
 }
 
-/// 桌面端 49 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
-/// 顺序与 write 标志逐字按 registeredToolSpecs() 注册顺序排列（49=30 写 + 19 读）。
+/// 桌面端 69 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
+/// 顺序与 write 标志逐字按 registeredToolSpecs() 注册顺序排列。
 const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
   // ---- 基础调谐 / 解调（注册序 #1-7）----
   ToolCatalogEntry(
@@ -319,6 +319,12 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'get_recording_state',
       description: '只读：返回录制状态（是否录制/路径/值守录制/录制目录）。',
       write: false),
+  // ---- NanoVNA 校准状态机（P0 #59，写）----
+  ToolCatalogEntry(
+      name: 'vna_calibration',
+      description:
+          '写入：NanoVNA 校准单工具状态机。step 为命令字（status/open/short/load/isolation/thru/done/save/load/scan/pause/resume），save/load 需 slot 1..4。写动作手动 gate 拦截。',
+      write: true),
 ];
 
 /// 与移动端 buildRadioTools() 当前注册工具**同名**的集合，用于在目录里诚实标注

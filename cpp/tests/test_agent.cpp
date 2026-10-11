@@ -14,6 +14,7 @@
 #include "ai/llm_worker.h"
 #include "ai/ai_config.h"
 #include "dsp/spectrum_engine.h"
+#include "vna/nanovna_client.h"
 #include "dsp/frequency_calibrator.h"
 #include "dsp/fcch_detector.h"
 #include "ui/bookmark_manager.h"
@@ -82,6 +83,13 @@ private slots:
     // --- Phase63 D1-D5 bilateral alias contract: pin the new dual-key / dual-type
     //     acceptance so future refactors cannot silently regress the drift fix. ---
     void phase63BilateralAliasContract();
+    // --- P0 #59/#60: vna_calibration facade + get_vna_data/status honest cal -----
+    void vnaCalibration_isWriteTool();
+    void vnaCalibration_statusUnconnectedHonest();
+    void vnaCalibration_statusConnectedGuidance();
+    void vnaCalibration_writeStepsReplayAndSlotValidation();
+    void getVnaStatus_calInterpretationAndCoverageOutOfRange();
+    void getVnaData_minVswrAndNoteBranches();
 };
 
 void TestAgent::initTestCase() {
@@ -100,7 +108,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 68);
+    QCOMPARE(tools.size(), 69);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -316,6 +324,41 @@ QString writeCalibFixture(double fsNom, double centreHz, double expectedBaseband
     dsp::fixture::writeRawCf32(path, x);
     return path;
 }
+
+// Scripted replay transport (synthetic NanoVNA wire text, labelled). Injected
+// into engine.vnaClient() via attachTransport -- no hardware, no baked-in
+// measurement. Each write() must equal the expected command; replies are queued
+// plus the "ch>" prompt. Authored independently (same wire format as the client
+// fixture) so the vna_calibration / get_vna_* tools are pinned for real.
+class ReplayTransport : public vna::VnaTransport {
+public:
+    struct Step { QString expect; QStringList lines; };
+    explicit ReplayTransport(std::vector<Step> script) : script_(std::move(script)) {}
+    bool open() override { open_ = true; return true; }
+    void close() override { open_ = false; }
+    bool isOpen() const override { return open_; }
+    QString errorString() const override { return {}; }
+    void write(const QByteArray& data) override {
+        const QString cmd = QString::fromUtf8(data).trimmed();
+        sent_.push_back(cmd);
+        QVERIFY(cursor_ < (int)script_.size());
+        QCOMPARE(cmd, script_[cursor_].expect);
+        queue_ = script_[cursor_].lines;
+        queue_.push_back(QStringLiteral("ch>"));
+        ++cursor_;
+    }
+    bool readLine(QByteArray& out) override {
+        if (queue_.isEmpty()) { out.clear(); return false; }
+        out = queue_.takeFirst().toUtf8();
+        return true;
+    }
+    void resetInputBuffer() override { queue_.clear(); }
+    QStringList sent_;
+private:
+    std::vector<Step> script_;
+    QStringList queue_;
+    int cursor_ = 0; bool open_ = false;
+};
 
 QJsonObject runTool(dsp::SpectrumEngine& engine, const QString& name,
                     const QJsonObject& args) {
@@ -777,8 +820,8 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split must be exactly 33 writes / 22 reads.
-    QCOMPARE(writes, 39);
+    // The frozen split: 40 writes / 29 reads (69 tools; vna_calibration added).
+    QCOMPARE(writes, 40);
     QCOMPARE(reads, 29);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
@@ -1472,6 +1515,190 @@ void TestAgent::phase63BilateralAliasContract() {
         QCOMPARE(r.value("fft_size").toInt(), 2048);
         QVERIFY2(!r.contains("window_type") && !r.contains("average_mode"),
                  "OF2: legacy window_type/average_mode keys must not be emitted");
+    }
+}
+
+// --- P0 #59: vna_calibration is a gated write tool -------------------------
+void TestAgent::vnaCalibration_isWriteTool() {
+    QVERIFY(ai::isWriteTool("vna_calibration"));
+}
+
+// step=status with no device -> honest ok:false + error + USB/serial checklist.
+void TestAgent::vnaCalibration_statusUnconnectedHonest() {
+    dsp::SpectrumEngine engine;   // no transport -> unconnected
+    QJsonObject r = runTool(engine, "vna_calibration", {{"step", "status"}});
+    QVERIFY2(!r.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(r).toJson(QJsonDocument::Compact))));
+    QVERIFY2(r.value("error").toString().contains(QStringLiteral("未连接")),
+             qPrintable(r.value("error").toString()));
+    QVERIFY2(r.value("suggestion").toString().contains(QStringLiteral("USB")),
+             qPrintable(r.value("suggestion").toString()));
+}
+
+// Connected replay: cal_ = {open,short,load} -> partial confidence, next_step
+// objectively points at the first missing SOLT step (isolation).
+void TestAgent::vnaCalibration_statusConnectedGuidance() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        {"help", {}},
+        {"version", {"v1"}},
+        {"info", {"NanoVNA H4"}},
+        {"cal", {"open", "short", "load"}},
+    });
+    dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(std::move(tr));
+// attachTransport runs the help/version/info handshake, leaving the client
+// connected -- no explicit connect() (that would double-send the handshake).
+
+    QJsonObject r = runTool(engine, "vna_calibration", {{"step", "status"}});
+    QVERIFY2(r.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(r).toJson(QJsonDocument::Compact))));
+    QJsonObject steps = r.value("cal_steps").toObject();
+    QCOMPARE(steps.value("open").toBool(), true);
+    QCOMPARE(steps.value("short").toBool(), true);
+    QCOMPARE(steps.value("load").toBool(), true);
+    QCOMPARE(steps.value("isolation").toBool(), false);
+    QCOMPARE(steps.value("done").toBool(), false);
+    QVERIFY2(r.value("next_step").toString().contains(QStringLiteral("isolation")),
+             qPrintable(r.value("next_step").toString()));
+    QCOMPARE(r.value("cal_confidence").toString(), QString("partial: isolation,thru,done"));
+}
+
+// Write step (open) goes through the real client method (wire "cal open");
+// save without slot / slot=0 are rejected before any command; unknown step rejected.
+void TestAgent::vnaCalibration_writeStepsReplayAndSlotValidation() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        {"help", {}},
+        {"version", {"v1"}},
+        {"info", {"NanoVNA H4"}},
+        {"cal open", {}},
+        {"cal", {"open"}},      // internal readback after calOpen
+        {"cal", {"open"}},      // post-write readback in executor
+    });
+    ReplayTransport* raw = tr.get();
+    dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(std::move(tr));
+// attachTransport runs the help/version/info handshake, leaving the client
+// connected -- no explicit connect() (that would double-send the handshake).
+
+    // save without slot -> rejected, no wire command.
+    QJsonObject r1 = runTool(engine, "vna_calibration", {{"step", "save"}});
+    QVERIFY(!r1.value("ok").toBool());
+    QVERIFY2(r1.value("error").toString().contains(QStringLiteral("slot")),
+             qPrintable(r1.value("error").toString()));
+    // slot=0 -> rejected (range 1..4).
+    QJsonObject r2 = runTool(engine, "vna_calibration", {{"step", "save"}, {"slot", 0}});
+    QVERIFY(!r2.value("ok").toBool());
+    QVERIFY2(r2.value("error").toString().contains(QStringLiteral("1..4")),
+             qPrintable(r2.value("error").toString()));
+    // unknown step -> rejected.
+    QJsonObject r3 = runTool(engine, "vna_calibration", {{"step", "bogus"}});
+    QVERIFY(!r3.value("ok").toBool());
+
+    // The real write step lands on the wire.
+    QJsonObject r4 = runTool(engine, "vna_calibration", {{"step", "open"}});
+    QVERIFY2(r4.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(r4).toJson(QJsonDocument::Compact))));
+    QVERIFY(raw->sent_.contains(QStringLiteral("cal open")));
+    QVERIFY(r4.value("cal_steps").toObject().value("open").toBool());
+}
+
+// get_vna_status: structured cal interpretation + coverage drift detection.
+// calDone records coverage at sweep [1e6,100e6]; then re-sweep to [2e6,200e6]
+// -> cal_out_of_range==true. Bare "done" without SOL stays honest "unknown".
+void TestAgent::getVnaStatus_calInterpretationAndCoverageOutOfRange() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        {"help", {}},
+        {"version", {"v1"}},
+        {"info", {"NanoVNA H4"}},
+        {"sweep 1000000 100000000 101", {}},
+        {"cal done", {}},
+        {"cal", {"done", "c1"}},    // internal refresh after calDone (coverage recorded)
+        {"sweep 2000000 200000000 101", {}},
+        {"cal", {"done", "c1"}},    // get_vna_status live readCalStatus
+    });
+    dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(std::move(tr));
+// attachTransport runs the help/version/info handshake, leaving the client
+// connected -- no explicit connect() (that would double-send the handshake).
+    QString err;
+    QVERIFY(engine.vnaClient().setSweep(1000000, 100000000, 101, &err));
+    QVERIFY(engine.vnaClient().calDone(&err));          // records coverage @1e6..100e6
+    QVERIFY(engine.vnaClient().setSweep(2000000, 200000000, 101, &err));  // range moved
+
+    QJsonObject st = runTool(engine, "get_vna_status", {});
+    QVERIFY2(st.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(st).toJson(QJsonDocument::Compact))));
+    QCOMPARE(st.value("cal_complete").toBool(), true);
+    QCOMPARE(st.value("cal_steps").toObject().value("done").toBool(), true);
+    QJsonArray comp = st.value("cal_compensation_sets").toArray();
+    QCOMPARE(comp.size(), 1);
+    QCOMPARE(comp.at(0).toString(), QString("c1"));
+    // Bare done (no open/short/load) -> honest unknown, not "calibrated".
+    QCOMPARE(st.value("cal_confidence").toString(), QString("unknown"));
+    // Sweep range moved since the calibration -> out-of-range flagged.
+    QVERIFY2(st.value("cal_out_of_range").toBool(),
+             qPrintable(st.value("cal_out_of_range_note").toString()));
+    QVERIFY2(st.value("cal_out_of_range_note").toString().contains(QStringLiteral("扫频范围已改变")),
+             qPrintable(st.value("cal_out_of_range_note").toString()));
+}
+
+// get_vna_data: min_vswr/min_vswr_at_hz computed from the real S11 curve, plus
+// the three honest note branches (unconnected vs connected-no-data vs has-data).
+void TestAgent::getVnaData_minVswrAndNoteBranches() {
+    // (a) unconnected -> note = USB/serial checklist, min_vswr null.
+    {
+        dsp::SpectrumEngine eng;   // no transport
+        QJsonObject r = runTool(eng, "get_vna_data", {});
+        QVERIFY2(r.value("note").toString().contains(QStringLiteral("排查")),
+                 qPrintable(r.value("note").toString()));
+        QVERIFY(r.value("min_vswr").isNull());
+        QVERIFY(r.value("min_vswr_at_hz").isNull());
+        QCOMPARE(r.value("wiring").toObject().value("s11_ch0").toBool(), true);
+        QCOMPARE(r.value("wiring").toObject().value("s21_ch0_ch1").toBool(), true);
+    }
+    // (b) connected but no measurement data -> "已连接但暂无测量数据" note.
+    {
+        auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+            {"help", {}},
+            {"version", {"v1"}},
+            {"info", {"NanoVNA H4"}},
+            {"frequencies", {}},
+            {"data 0", {}},
+            {"data 1", {}},
+        });
+        dsp::SpectrumEngine eng;
+        eng.vnaClient().attachTransport(std::move(tr));
+// attachTransport runs the help/version/info handshake, leaving the client
+// connected -- no explicit connect() (that would double-send the handshake).
+        QJsonObject r = runTool(eng, "get_vna_data", {});
+        QVERIFY2(r.value("note").toString().contains(QStringLiteral("暂无测量数据")),
+                 qPrintable(r.value("note").toString()));
+        QVERIFY(r.value("min_vswr").isNull());
+    }
+    // (c) connected with synthetic S11: |g| = 0.5 / 0.1 / 0.8 -> min VSWR at f=2MHz.
+    {
+        auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+            {"help", {}},
+            {"version", {"v1"}},
+            {"info", {"NanoVNA H4"}},
+            {"frequencies", {"1000000", "2000000", "3000000"}},
+            {"data 0", {"0.5 0.0", "0.1 0.0", "0.8 0.0"}},
+            {"data 1", {}},
+        });
+        dsp::SpectrumEngine eng;
+        eng.vnaClient().attachTransport(std::move(tr));
+// attachTransport runs the help/version/info handshake, leaving the client
+// connected -- no explicit connect() (that would double-send the handshake).
+        QJsonObject r = runTool(eng, "get_vna_data", {});
+        QVERIFY2(r.value("ok").toBool(),
+                 qPrintable(QString::fromUtf8(QJsonDocument(r).toJson(QJsonDocument::Compact))));
+        // VSWR(|g|=0.1) = (1+0.1)/(1-0.1) = 1.2222..., the minimum of the three.
+        const double expectVswr = (1.0 + 0.1) / (1.0 - 0.1);
+        QVERIFY2(std::fabs(r.value("min_vswr").toDouble() - expectVswr) < 1e-6,
+                 qPrintable(QString("min_vswr=%1 expect=%2").arg(r.value("min_vswr").toDouble()).arg(expectVswr)));
+        QCOMPARE(r.value("min_vswr_at_hz").toDouble(), 2000000.0);
+        QVERIFY2(r.value("note").toString().contains(QStringLiteral("coax_loss")),
+                 qPrintable(r.value("note").toString()));
     }
 }
 

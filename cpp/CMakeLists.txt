@@ -174,6 +174,7 @@ set(SOURCES
     src/ui/radio_panel.cpp
     src/ui/recording_library.cpp
     src/ui/task_steps_view.cpp
+    src/agentapi/mcp_server.cpp
 )
 
 set(HEADERS
@@ -1600,6 +1601,24 @@ target_link_libraries(test_llm_loopback PRIVATE mbdsdr_core)
 target_include_directories(test_llm_loopback PRIVATE src)
 target_link_libraries(test_llm_loopback PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
 add_test(NAME llm_loopback COMMAND test_llm_loopback)
+
+# ---- P0 #63: headless MCP server (JSON-RPC 2.0 over stdio) ------------------
+# Instrument-capability backend for external third-party agents (Claude Desktop
+# / Cursor / any agent) via standard MCP. Zero LLM dependency: the server reuses
+# ai::toolDefs() (single schema source) and ai::executeTool() (real dispatch),
+# never instantiates an LLM client. Write tools stay behind the manual gate
+# (arm_manual) exactly like the hub/worker layers.
+add_executable(mbdsdr_mcp src/agentapi/mbdsdr_mcp_main.cpp src/agentapi/mcp_server.cpp)
+target_link_libraries(mbdsdr_mcp PRIVATE mbdsdr_core)
+target_include_directories(mbdsdr_mcp PRIVATE src)
+target_link_libraries(mbdsdr_mcp PRIVATE Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
+
+add_executable(test_mcp_server tests/test_mcp_server.cpp)
+target_link_libraries(test_mcp_server PRIVATE mbdsdr_core)
+target_include_directories(test_mcp_server PRIVATE src)
+target_link_libraries(test_mcp_server PRIVATE Qt6::Test Qt6::Core Qt6::Network Qt6::Widgets Qt6::Multimedia Qt6::Concurrent)
+target_compile_definitions(test_mcp_server PRIVATE MBDSDR_MCP_BIN="${CMAKE_BINARY_DIR}/mbdsdr_mcp")
+add_test(NAME mcp_server COMMAND test_mcp_server)
 
 # ---- L5: C++ tool-registry completeness / consistency audit (offline) -------
 # Introspects BOTH the declarative schema table (tool_schema.cpp) and the

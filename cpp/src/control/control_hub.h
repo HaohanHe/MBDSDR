@@ -266,6 +266,10 @@ private:
     QJsonObject cmdExportPeaksCsv(const QJsonObject&);
     QJsonObject cmdExportFt8Results(const QJsonObject&);
     QJsonObject cmdAnalyzeVnaMatch(const QJsonObject&);
+    // P0 #59: single-tool NanoVNA calibration state machine (write -- gated).
+    // Mirrors the Agent vna_calibration tool; step selects the protocol command,
+    // slot only for save/load. status/omitted is read-only objective guidance.
+    QJsonObject cmdVnaCalibration(const QJsonObject& a);
     // Bookmarks (ControlHub holds a ui::BookmarkManager; same QSettings key).
     QJsonObject cmdListBookmarks(const QJsonObject&);
     QJsonObject cmdAddBookmark(const QJsonObject& a);

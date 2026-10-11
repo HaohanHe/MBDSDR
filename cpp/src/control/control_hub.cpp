@@ -18,6 +18,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QStringList>
+#include <QSet>
 #include <QSettings>
 #include <QDir>
 #include <QFile>
@@ -122,6 +123,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"set_lrpt",              true,  &ControlHub::cmdSetLrpt},
         {"set_vna_sweep",         true,  &ControlHub::cmdSetVnaSweep},
         {"vna_tdr_cable",         true,  &ControlHub::cmdVnaTdrCable},
+        {"vna_calibration",       true,  &ControlHub::cmdVnaCalibration},
         {"export_vna_snapshot",   true,  &ControlHub::cmdExportVnaSnapshot},
         {"export_spectrum_snapshot", true, &ControlHub::cmdExportSpectrumSnapshot},
         {"export_peaks_csv",    true,  &ControlHub::cmdExportPeaksCsv},
@@ -1783,6 +1785,94 @@ QJsonObject ControlHub::cmdAnalyzeVnaMatch(const QJsonObject& a) {
     o["shunt_farad"] = m.shunt_farad;
     o["topology"] = QString::fromStdString(m.topology);
     if (!m.valid) o["note"] = QStringLiteral("负载电阻需 > 50Ω");
+    return o;
+}
+
+// P0 #59: single-tool NanoVNA calibration state machine. Mirrors the Agent
+// vna_calibration tool. step=status (or omitted) is read-only objective guidance;
+// write steps are gated by the write table. slot is only for save/load (1..4).
+QJsonObject ControlHub::cmdVnaCalibration(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "vna_calibration";
+    auto& vna = engine_->vnaClient();
+    const QString step = a.value("step").toString(QStringLiteral("status"));
+
+    if (!vna.isConnected()) {
+        o["ok"] = false;
+        o["error"] = QStringLiteral("NanoVNA 未连接");
+        o["suggestion"] = QStringLiteral(
+            "排查 ①USB/CDC 接线（Linux 需 dialout/udev，Windows 见设备管理器 COMx）"
+            "②设备是否进入扫频模式 ③串口路径（/dev/ttyACM0 或 COMx）；连接后先 set_vna_sweep 再校准");
+        return o;
+    }
+
+    // Read-only guidance branch.
+    if (step == QStringLiteral("status")) {
+        vna.readCalStatus();
+        const QStringList cal = vna.calStatus();
+        QSet<QString> have(cal.begin(), cal.end());
+        QJsonObject steps;
+        steps["open"] = have.contains("open"); steps["short"] = have.contains("short");
+        steps["load"] = have.contains("load"); steps["isolation"] = have.contains("isolation");
+        steps["thru"] = have.contains("thru"); steps["done"] = have.contains("done");
+        o["cal_steps"] = steps;
+        o["cal_complete"] = have.contains("done");
+        if (have.contains("done") && have.contains("open") &&
+            have.contains("short") && have.contains("load")) {
+            o["next_step"] = QStringLiteral("calibration complete（可用 step=save slot=1..4 保存校准集）");
+        } else {
+            static const QList<QPair<QString,QString>> kGuide = {
+                {"open",      "接 OPEN 标准件到 CH0 后 step=open"},
+                {"short",     "接 SHORT 标准件到 CH0 后 step=short"},
+                {"load",      "接 LOAD 50Ω 到 CH0 后 step=load"},
+                {"isolation", "CH0 接 SOL、CH1 开路后 step=isolation"},
+                {"thru",      "CH0–CH1 用 through 直通后 step=thru"},
+                {"done",      "就绪后 step=done 完成校准"},
+            };
+            for (const auto& g : kGuide)
+                if (!have.contains(g.first)) { o["next_step"] = g.second; break; }
+        }
+        return o;
+    }
+
+    // slot validation for save/load.
+    if (step == QStringLiteral("save") || step == QStringLiteral("load")) {
+        if (!a.value("slot").isDouble())
+            return errResult(QStringLiteral("save/load 需要 slot（1..4 整数）"));
+        const int slot = a.value("slot").toInt();
+        if (slot < 1 || slot > 4)
+            return errResult(QStringLiteral("slot 必须在 1..4 之间"));
+    }
+
+    QString err;
+    bool ok = false;
+    if (step == QStringLiteral("reset"))           ok = vna.calReset(&err);
+    else if (step == QStringLiteral("open"))       ok = vna.calOpen(&err);
+    else if (step == QStringLiteral("short"))      ok = vna.calShort(&err);
+    else if (step == QStringLiteral("load"))       ok = vna.calLoad(&err);
+    else if (step == QStringLiteral("isolation")) ok = vna.calIsolation(&err);
+    else if (step == QStringLiteral("thru"))       ok = vna.calThru(&err);
+    else if (step == QStringLiteral("done"))       ok = vna.calDone(&err);
+    else if (step == QStringLiteral("save"))        ok = vna.calSave(a.value("slot").toInt(), &err);
+    else if (step == QStringLiteral("load"))       ok = vna.calLoadSlot(a.value("slot").toInt(), &err);
+    else if (step == QStringLiteral("scan"))       ok = vna.scan(&err);
+    else if (step == QStringLiteral("pause"))      ok = vna.pauseScan(&err);
+    else if (step == QStringLiteral("resume"))     ok = vna.resumeScan(&err);
+    else return errResult(QStringLiteral("未知 step，合法值：status/reset/open/short/load/isolation/thru/done/save/load/scan/pause/resume"));
+
+    vna.readCalStatus();
+    o["ok"] = ok;
+    o["step"] = step;
+    if (!ok) o["error"] = err;
+    const QStringList cal = vna.calStatus();
+    QSet<QString> have(cal.begin(), cal.end());
+    QJsonObject steps;
+    steps["open"] = have.contains("open"); steps["short"] = have.contains("short");
+    steps["load"] = have.contains("load"); steps["isolation"] = have.contains("isolation");
+    steps["thru"] = have.contains("thru"); steps["done"] = have.contains("done");
+    o["cal_steps"] = steps;
+    o["cal_complete"] = have.contains("done");
+    o["coverage_recorded"] = vna.calCoverageKnown();
     return o;
 }
 

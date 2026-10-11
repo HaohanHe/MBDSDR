@@ -122,7 +122,7 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 3. 回传 sweep.json（+ 连接日志 version/info/cal）即可比对。
 无设备可先 `--selftest` 跑通流程（合成演示，非真实测量）。详见 docs/learn/nanovna/hardware-quickstart.md。
 
-## 工具能力矩阵（68 工具，三通道：Agent / Hub / HTTP 透传）
+## 工具能力矩阵（69 工具，三通道：Agent / Hub / HTTP 透传）
 
 按域分组；写=手动模式 gate 拦截，读=不拦截。
 
@@ -160,6 +160,11 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 | vna_tdr_cable | 写 |
 | analyze_vna_resonance / analyze_vna_filter / analyze_vna_equivalent / analyze_vna_touchstone / analyze_vna_match | 读 |
 
+### VNA 校准
+| 工具 | 写/读 |
+|---|---|
+| vna_calibration | 写（step=status 为只读引导） |
+
 ### 导出 / 录制
 | 工具 | 写/读 |
 |---|---|
@@ -179,4 +184,4 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 | calibrate_frequency / apply_frequency_correction / predict_passes | 读 |
 | set_fft_params / set_color_map / set_doppler_compensation / get_capabilities | 写/读 |
 
-合计 68 工具，与 docs/learn/phase31/agent-tool-documentation.md 头部一致。
+合计 69 工具，与 docs/learn/phase31/agent-tool-documentation.md 头部一致。

@@ -65,6 +65,8 @@ const QSet<QString> kAllCxxTools = {
     "set_vfo_frequency", "set_vfo_mode", "set_vfo_bandwidth",
     // Read-only source-capability + recording-state snapshot tools (honest empty).
     "get_capabilities", "get_recording_state",
+    // P0 #59: single-tool NanoVNA calibration state machine (write, gated).
+    "vna_calibration",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -90,6 +92,8 @@ const QSet<QString> kExpectedWriteTools = {
     "set_vfo_armed",
     // Phase61: VFO fine-grained edit tools (gated write).
     "set_vfo_frequency", "set_vfo_mode", "set_vfo_bandwidth",
+    // P0 #59: NanoVNA calibration state machine (gated write).
+    "vna_calibration",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -149,7 +153,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 68, qPrintable(QString("expected 68 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 69, qPrintable(QString("expected 69 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -198,6 +202,7 @@ void TestToolRegistry::writeReadSplit_registryMatchesContract() {
     QVERIFY(!isWriteTool("get_vna_data"));
     QVERIFY(!isWriteTool("get_vna_status"));
     QVERIFY(isWriteTool("vna_tdr_cable"));
+    QVERIFY(isWriteTool("vna_calibration"));   // P0 #59: gated calibration writes
     QVERIFY(!isWriteTool("analyze_vna_resonance"));
     QVERIFY(!isWriteTool("analyze_vna_filter"));
     QVERIFY(!isWriteTool("analyze_vna_touchstone"));
@@ -271,11 +276,11 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 68);
+    QCOMPARE(defs.size(), 69);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("get_recording_state"));
+    QCOMPARE(defs.last().name, QString("vna_calibration"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

@@ -64,6 +64,12 @@ private slots:
     void sweepValidatesAndOrdersCommands();
     void frequenciesAndDataParse();
     void honestEmptyWithoutTransport();
+    // --- Calibration command family (P0 #59 client side) ---------------------
+    void calStepsEmitWordsAndRefreshCalReadback();
+    void calSaveLoadSlotValidatesSlotRange();
+    void calCommandsRejectWhenDisconnected();
+    void calCoverageTrackedOnlyAfterSweep();
+    void scanPauseResumeEmitWords();
 };
 
 void TestNanoVnaClient::rfMathKnownValues() {
@@ -161,6 +167,155 @@ void TestNanoVnaClient::honestEmptyWithoutTransport() {
     QString err;
     QVERIFY(!client.setSweep(1, 2, 10, &err));  // honest: not connected
     QVERIFY(!err.isEmpty());
+}
+
+void TestNanoVnaClient::calStepsEmitWordsAndRefreshCalReadback() {
+    // Every cal step emits "cal <word>" then a follow-up "cal" readback query.
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        ReplayTransport::Step{QStringLiteral("help"), {}},
+        ReplayTransport::Step{QStringLiteral("version"), {QStringLiteral("v1")}},
+        ReplayTransport::Step{QStringLiteral("info"), {QStringLiteral("H4")}},
+        ReplayTransport::Step{QStringLiteral("cal open"), {}},
+        ReplayTransport::Step{QStringLiteral("cal"), {QStringLiteral("open")}},
+        ReplayTransport::Step{QStringLiteral("cal short"), {}},
+        ReplayTransport::Step{QStringLiteral("cal"), {QStringLiteral("short")}},
+        ReplayTransport::Step{QStringLiteral("cal load"), {}},
+        ReplayTransport::Step{QStringLiteral("cal"), {QStringLiteral("load")}},
+        ReplayTransport::Step{QStringLiteral("cal thru"), {}},
+        ReplayTransport::Step{QStringLiteral("cal"), {QStringLiteral("thru done c1")}},
+    });
+    ReplayTransport* raw = tr.get();
+    NanoVnaClient client(std::move(tr));
+    QVERIFY(client.connect());
+
+    QString err;
+    QVERIFY(client.calOpen(&err));
+    QCOMPARE(raw->sent_.at(3), QStringLiteral("cal open"));
+    QCOMPARE(raw->sent_.at(4), QStringLiteral("cal"));
+    QCOMPARE(client.calStatus(), QStringList{QStringLiteral("open")});
+
+    QVERIFY(client.calShort(&err));
+    QCOMPARE(raw->sent_.at(5), QStringLiteral("cal short"));
+    QCOMPARE(client.calStatus(), QStringList{QStringLiteral("short")});
+
+    QVERIFY(client.calLoad(&err));   // 50 Ohm load standard step
+    QCOMPARE(raw->sent_.at(7), QStringLiteral("cal load"));
+    QCOMPARE(client.calStatus(), QStringList{QStringLiteral("load")});
+
+    QVERIFY(client.calThru(&err));
+    QCOMPARE(raw->sent_.at(9), QStringLiteral("cal thru"));
+    // cal reply carries multiple tokens incl. done/c1 -> space-split set items
+    QStringList expect{QStringLiteral("thru"), QStringLiteral("done"), QStringLiteral("c1")};
+    QCOMPARE(client.calStatus(), expect);
+}
+
+void TestNanoVnaClient::calSaveLoadSlotValidatesSlotRange() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        ReplayTransport::Step{QStringLiteral("help"), {}},
+        ReplayTransport::Step{QStringLiteral("version"), {QStringLiteral("v1")}},
+        ReplayTransport::Step{QStringLiteral("info"), {QStringLiteral("H4")}},
+        ReplayTransport::Step{QStringLiteral("cal save 1"), {}},
+        ReplayTransport::Step{QStringLiteral("cal"), {QStringLiteral("c1")}},
+        ReplayTransport::Step{QStringLiteral("cal load 4"), {}},
+        ReplayTransport::Step{QStringLiteral("cal"), {QStringLiteral("c4")}},
+    });
+    ReplayTransport* raw = tr.get();
+    NanoVnaClient client(std::move(tr));
+    QVERIFY(client.connect());
+
+    QString err;
+    // Out-of-range slots rejected before any command is sent.
+    QVERIFY(!client.calSave(0, &err));
+    QVERIFY(!err.isEmpty());
+    QVERIFY(!client.calSave(5, &err));
+    QVERIFY(!client.calLoadSlot(0, &err));
+    QVERIFY(!client.calLoadSlot(5, &err));
+    // In-range slots emit "cal save N" / "cal load N" then the cal readback.
+    QVERIFY(client.calSave(1, &err));
+    QCOMPARE(raw->sent_.at(3), QStringLiteral("cal save 1"));
+    QCOMPARE(client.calStatus(), QStringList{QStringLiteral("c1")});
+    QVERIFY(client.calLoadSlot(4, &err));
+    QCOMPARE(raw->sent_.at(5), QStringLiteral("cal load 4"));
+    QCOMPARE(client.calStatus(), QStringList{QStringLiteral("c4")});
+}
+
+void TestNanoVnaClient::calCommandsRejectWhenDisconnected() {
+    NanoVnaClient client;   // no transport -> honest empty state
+    QString err;
+    QVERIFY(!client.isConnected());
+    QVERIFY(!client.calReset(&err));
+    QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
+    QVERIFY(!client.calOpen(&err));
+    QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
+    QVERIFY(!client.calShort(&err));
+    QVERIFY(!client.calLoad(&err));
+    QVERIFY(!client.calIsolation(&err));
+    QVERIFY(!client.calThru(&err));
+    QVERIFY(!client.calDone(&err));
+    QVERIFY(!client.calSave(1, &err));
+    QVERIFY(!client.calLoadSlot(1, &err));
+    QVERIFY(!client.scan(&err));
+    QVERIFY(!client.pauseScan(&err));
+    QVERIFY(!client.resumeScan(&err));
+}
+
+void TestNanoVnaClient::calCoverageTrackedOnlyAfterSweep() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        ReplayTransport::Step{QStringLiteral("help"), {}},
+        ReplayTransport::Step{QStringLiteral("version"), {QStringLiteral("v1")}},
+        ReplayTransport::Step{QStringLiteral("info"), {QStringLiteral("H4")}},
+        // calDone before any sweep: coverage must NOT be recorded.
+        ReplayTransport::Step{QStringLiteral("cal done"), {}},
+        ReplayTransport::Step{QStringLiteral("cal"), {QStringLiteral("done")}},
+        // Now set a sweep range, then calDone -> coverage becomes known.
+        ReplayTransport::Step{QStringLiteral("sweep 1000000 100000000 101"), {}},
+        ReplayTransport::Step{QStringLiteral("cal done"), {}},
+        ReplayTransport::Step{QStringLiteral("cal"), {QStringLiteral("done c1")}},
+    });
+    NanoVnaClient client(std::move(tr));
+    QVERIFY(client.connect());
+
+    QString err;
+    QVERIFY(!client.calCoverageKnown());
+    QCOMPARE(client.lastCalStartHz(), 0L);
+    QCOMPARE(client.lastCalStopHz(), 0L);
+
+    // No sweep active: the step still succeeds but coverage is not recorded.
+    QVERIFY(client.calDone(&err));
+    QVERIFY(!client.calCoverageKnown());
+    QCOMPARE(client.lastCalStartHz(), 0L);
+    QCOMPARE(client.lastCalStopHz(), 0L);
+
+    // With a sweep active: coverage becomes known at the sweep range.
+    QVERIFY(client.setSweep(1000000, 100000000, 101, &err));
+    QVERIFY(client.calDone(&err));
+    QVERIFY(client.calCoverageKnown());
+    QCOMPARE(client.lastCalStartHz(), 1000000L);
+    QCOMPARE(client.lastCalStopHz(), 100000000L);
+}
+
+void TestNanoVnaClient::scanPauseResumeEmitWords() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        ReplayTransport::Step{QStringLiteral("help"), {}},
+        ReplayTransport::Step{QStringLiteral("version"), {QStringLiteral("v1")}},
+        ReplayTransport::Step{QStringLiteral("info"), {QStringLiteral("H4")}},
+        ReplayTransport::Step{QStringLiteral("scan"), {}},
+        ReplayTransport::Step{QStringLiteral("pause"), {}},
+        ReplayTransport::Step{QStringLiteral("resume"), {}},
+    });
+    ReplayTransport* raw = tr.get();
+    NanoVnaClient client(std::move(tr));
+    QVERIFY(client.connect());
+
+    QString err;
+    QVERIFY(client.scan(&err));
+    QCOMPARE(raw->sent_.at(3), QStringLiteral("scan"));
+    QVERIFY(client.pauseScan(&err));
+    QCOMPARE(raw->sent_.at(4), QStringLiteral("pause"));
+    QVERIFY(client.resumeScan(&err));
+    QCOMPARE(raw->sent_.at(5), QStringLiteral("resume"));
+    // scan/pause/resume do NOT refresh cal_ readback.
+    QVERIFY(client.calStatus().isEmpty());
 }
 
 QTEST_MAIN(TestNanoVnaClient)

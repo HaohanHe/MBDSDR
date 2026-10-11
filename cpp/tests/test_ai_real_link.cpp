@@ -362,6 +362,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "set_vfo_frequency", "set_vfo_mode", "set_vfo_bandwidth",
         // Read-only capability/recording-state snapshots.
         "get_capabilities", "get_recording_state",
+        // P0 #59: single-tool NanoVNA calibration state machine (write, gated).
+        "vna_calibration",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -396,6 +398,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(ai::isWriteTool("export_recording"));
     QVERIFY(ai::isWriteTool("set_fft_params"));
     QVERIFY(ai::isWriteTool("set_color_map"));
+    // P0 #59: vna_calibration write steps go through the manual gate.
+    QVERIFY(ai::isWriteTool("vna_calibration"));
     QVERIFY(!ai::isWriteTool("get_network_audio_status"));
     QVERIFY(!ai::isWriteTool("get_scan_link_status"));
     QVERIFY(!ai::isWriteTool("get_squelch_status"));

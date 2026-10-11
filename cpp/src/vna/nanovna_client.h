@@ -88,6 +88,17 @@ public:
     long sweepStopHz() const { return sStopHz_; }
     int sweepPoints() const { return sPoints_; }
 
+    // Session-level calibration coverage (honest: only this client instance,
+    // talking to the device through this transport, knows which calibration
+    // write steps it performed). True once any calibration write step
+    // (cal open/short/load/isolation/thru/done/save N) has succeeded while a
+    // sweep range was active (hasSweep_). lastCalStartHz_/lastCalStopHz_ are
+    // the sweep range in force when the most recent calibration write step
+    // completed. Before that they read 0 and coverage is unknown.
+    bool calCoverageKnown() const { return calCoverageKnown_; }
+    long lastCalStartHz() const { return lastCalStartHz_; }
+    long lastCalStopHz() const { return lastCalStopHz_; }
+
     // Business commands; each returns false (with *err set) when disconnected or
     // rejected. setSweep validates stop>start and points>0 before sending.
     bool setSweep(long startHz, long stopHz, int points, QString* err);
@@ -95,6 +106,28 @@ public:
     // channel 0 -> S11, channel 1 -> S21.
     std::vector<std::complex<double>> readData(int channel);
     QStringList readCalStatus();
+
+    // ---- Calibration command family (real NanoVNA firmware words) ------------
+    // Every method first guards on isConnected() (honest empty state) and then
+    // runs the matching firmware word via exec(); afterwards it refreshes the
+    // cal_ readback member with a "cal" query so get_vna_status / calStatus()
+    // sees the freshly applied calibration state. If a sweep range is active the
+    // step is also recorded against lastCalStartHz_/lastCalStopHz_ and coverage
+    // becomes known. slot is validated to 1..4 (NanoVNA user slots).
+    bool calReset(QString* err);       // "cal reset"
+    bool calOpen(QString* err);       // "cal open"
+    bool calShort(QString* err);      // "cal short"
+    bool calLoad(QString* err);       // "cal load"  (50 Ohm load standard)
+    bool calIsolation(QString* err);   // "cal isolation"
+    bool calThru(QString* err);       // "cal thru"
+    bool calDone(QString* err);       // "cal done"
+    bool calSave(int slot, QString* err);    // "cal save N", slot 1..4
+    bool calLoadSlot(int slot, QString* err); // "cal load N", slot 1..4
+
+    // ---- Sweep control (real firmware words; do not touch cal_ readback) -----
+    bool scan(QString* err);          // "scan"
+    bool pauseScan(QString* err);     // "pause"
+    bool resumeScan(QString* err);    // "resume"
 
 private:
     QList<QString> exec(const QString& command);
@@ -108,6 +141,10 @@ private:
     long sStartHz_ = 0;
     long sStopHz_ = 0;
     int sPoints_ = 0;
+    // Session calibration coverage tracking (honest: only what this client did).
+    bool calCoverageKnown_ = false;
+    long lastCalStartHz_ = 0;
+    long lastCalStopHz_ = 0;
 };
 
 } // namespace vna
