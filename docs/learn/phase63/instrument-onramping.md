@@ -121,3 +121,10 @@
   连接→sweep→data 形状校验，明确标注合成演示；pytest 4 passed。
 - SDR 下一机制侦察：FFT 尺寸/AGC 手动/静噪滑块/频段下拉/WFM 立体声/书签扫描均已在
   main_window，无新硬缺口，按宁缺毋滥不落地。
+
+## 13. 第⑭批：CDCSS 三通道终检
+- set_cdcss/get_cdcss_status 三通道三处全在：tool_schema.cpp:608/638、agent_tools.cpp:1954/1955
+  （exec :886/:931）、control_hub.cpp:120/163。无缺口，计数无变化。
+- UI badge 八进制外显已就绪（第⑨批）。合成位流 bit-flip 纠错测试已在 test_squelch_gate 13 passed。
+- offscreen 快照不可注入（定案见第⑩批），真机步骤已入 quickstart。
+- pytest nanovna_dump 5 passed 复核全绿；PENDING 列字段对齐延续第⑬批。

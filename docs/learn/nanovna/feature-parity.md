@@ -317,3 +317,25 @@ applyReadout 跑 vna::equivalentRlc(fHz,s11)→新增「等效串联: ESR/fr/Q/L
 
 ## 待加 CMake 清单
 无新源（并入 vna_panel.cpp）；无新测试目标。
+
+---
+
+# 第⑭批：计数一致性核对 + SDR++ 侦察 + UI 三档抽查（HEAD=4f2a7ab）
+
+## 计数一致性核对（结论）
+上轮回报"phase31 头 66"为笔误；实际：
+- phase31 文档头 = **65**；
+- mobile catalog 命名条目 = **65**；
+- 金集全绿：registry 8 / schema 10 / agent 38（读29写36）/ control_hub 34 / ai_real_link 17（registered.size()==65）。
+最终工具数统一 **65**，无遗漏。
+
+## SDR++ 侦察
+SDR++ 机制（外部开源接收机 GUI）无可复用新硬缺口；本仓 NanoVNA 子系统已覆盖扫频/Smith/Polar/谐振/TDR/滤波器/等效/Touchstone/磁导率/群延迟。结论：不做，宁缺毋滥。
+
+## UI 三档快照抽查
+- VNA 1920：五图 + 等效串联读数行（ESR=67.6Ω fr=14.05MHz Q=0.6 L=0.495µH C=259.22pF），0 裁切 0 叠字。
+- VNA 640（窄档 floor）：五图竖排 Smith 圆完整；长 caption 末尾截断（"S11 VSW"/"磁导率 μr' v"）诚实标注，无叠字。
+- SDR 主界面 1920：左/中/右 rail + 状态栏，0 裁切 0 叠字。
+
+## 计数
+金集不变（65）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
