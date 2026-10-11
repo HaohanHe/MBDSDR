@@ -874,6 +874,8 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.name = "export_ft8_results";
         s.description = QString::fromUtf8(
             "写入：把当前 FT8 解码结果（含 SIC 分离）导出为文本/CSV 存到 path。属于写动作，手动模式下被拦截。"
+            "默认（all_history=false）导出引擎候选列表（freq_hz,crc_ok,costas_score,rejected,reject_reason,iters）；"
+            "all_history=true 时导出解码历史全量（表头 time_ms,freq_hz,demod,text），无历史 rows=0 诚实空态。"
             "无解码结果时 rows=0 诚实空态，不伪造呼号/经纬度。");
         s.write = true;
         ToolParamSpec path;
@@ -881,6 +883,11 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         path.description = QString::fromUtf8("输出文件路径（.csv/.txt）");
         path.required = true;
         s.params << path;
+        ToolParamSpec allHist;
+        allHist.name = "all_history"; allHist.type = "boolean";
+        allHist.description = QString::fromUtf8("true=导出解码历史全量（time_ms,freq_hz,demod,text）；默认 false=候选列表");
+        allHist.required = false;
+        s.params << allHist;
         out.append(s);
     }
 
@@ -1413,6 +1420,28 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         val.description = QString::fromUtf8(
             "写动作参数：freq_offset=Hz（整数）、edelay=ps（整数）、averaging=1..64（整数）；读动作不用");
         s.params << act << val;
+        out.append(s);
+    }
+
+    // get_ft8_history (read-only): rolling decoded-message window (WSJT-X style).
+    // Distinct from get_ft8_status (current-frame instant state) and
+    // export_ft8_results (file dump). Empty list when no frames decoded.
+    {
+        ToolSchemaSpec s;
+        s.name = "get_ft8_history";
+        s.description = QString::fromUtf8(
+            "只读：返回最近 N 条 FT8 解码历史（WSJT-X 风格滚动窗口，按时间倒序），"
+            "每条字段 time_ms（墙钟毫秒）/freq_hz（绝对 RF Hz）/demod（解调，如 FT8）/"
+            "text（解码文本 FROM TO EXCHANGE）。无历史时 history=[] 诚实空态，不伪造。"
+            "区别于 get_ft8_status（当前帧即时状态）与 export_ft8_results（导出文件）。");
+        s.write = false;
+        ToolParamSpec lim;
+        lim.name = "limit"; lim.type = "number";
+        lim.description = QString::fromUtf8("返回条数上限 1..200，默认 50；超界诚实 clamp");
+        lim.required = false;
+        lim.hasMin = true; lim.min = 1.0;
+        lim.hasMax = true; lim.max = 200.0;
+        s.params << lim;
         out.append(s);
     }
 

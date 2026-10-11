@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 70);
+    QCOMPARE(specs.size(), 71);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -309,6 +309,8 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"export_ft8_results",
          QString::fromUtf8(
             "写入：把当前 FT8 解码结果（含 SIC 分离）导出为文本/CSV 存到 path。属于写动作，手动模式下被拦截。"
+            "默认（all_history=false）导出引擎候选列表（freq_hz,crc_ok,costas_score,rejected,reject_reason,iters）；"
+            "all_history=true 时导出解码历史全量（表头 time_ms,freq_hz,demod,text），无历史 rows=0 诚实空态。"
             "无解码结果时 rows=0 诚实空态，不伪造呼号/经纬度。")},
         {"analyze_vna_match",
          QString::fromUtf8(
@@ -430,6 +432,13 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "edelay=写电延迟(ps)；averaging=写平均次数(1..64)。"
             "写动作走手动 gate、人在环确认。读动作客观返回当前值；编排权在调用者，非固定剧本。"
             "未连接 ok:false 并给排查清单。")},
+        // P2 #71: FT8 decoded-message rolling history (read-only).
+        {"get_ft8_history",
+         QString::fromUtf8(
+            "只读：返回最近 N 条 FT8 解码历史（WSJT-X 风格滚动窗口，按时间倒序），"
+            "每条字段 time_ms（墙钟毫秒）/freq_hz（绝对 RF Hz）/demod（解调，如 FT8）/"
+            "text（解码文本 FROM TO EXCHANGE）。无历史时 history=[] 诚实空态，不伪造。"
+            "区别于 get_ft8_status（当前帧即时状态）与 export_ft8_results（导出文件）。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {
@@ -486,7 +495,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 70);
+    QCOMPARE(headerCount, 71);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

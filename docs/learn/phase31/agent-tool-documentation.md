@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，70 个工具）
+# Agent 工具能力清单（自动生成，71 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -331,7 +331,7 @@ schema: {"properties":{"load_r":{"description":"负载电阻 Ω（高阻馈电�
 把当前频谱峰值列表（freq_hz,db）按强度降序写成 CSV 存到 path。写工具，手动模式 gate 拦截。引擎峰值列表读访问器未接线时仅写表头（空数据），不伪造峰值。
 
 ## export_ft8_results（写，第㉔批新增）
-把当前 FT8 解码结果（含 SIC 分离）导出为文本/CSV 存到 path。写工具，手动模式 gate 拦截。FT8 解码结果源待 Python 域接入时仅写表头（空数据），不伪造呼号/经纬度。
+把当前 FT8 解码结果（含 SIC 分离）导出为文本/CSV 存到 path。写工具，手动模式 gate 拦截。默认（all_history=false）导出引擎候选列表（freq_hz,crc_ok,costas_score,rejected,reject_reason,iters）；all_history=true 时导出解码历史全量（表头 time_ms,freq_hz,demod,text），无历史 rows=0 诚实空态，不伪造呼号/经纬度。
 
 ## vna_calibration（写，P0 #59 校准门面单工具状态机）
 NanoVNA 校准门面：单工具状态机，`step` 为校准/测量命令字（必填枚举），`slot` 仅 save/load 用（1..4）。
@@ -346,3 +346,9 @@ NanoVNA 设备级杂项门面：单工具状态机，`action` 为设备命令字
 - `action=freq_offset` 无 value=读本振频偏（wire `freqoffset`）；有 value=写频偏（wire `freqoffset <hz>`）。
 - `action=edelay`=写电延迟 ps（wire `edelay <ps>`）；`action=averaging`=写平均次数 1..64（wire `averages <n>`，executor 内再校验防直调绕过）。
 - 整体 write=true（门面可能写设备），读动作客观返回当前值、写动作走手动 gate；编排权在调用者，不编固定剧本。未连接 ok:false 并给 USB/串口排查清单。
+
+## get_ft8_history（读，P2 #71 新增）
+WSJT-X 风格滚动解码消息窗口。只读工具（手动 gate 不拦截）。
+- 返回最近 N 条 FT8 解码历史（按时间倒序），每条字段 time_ms（墙钟毫秒）/freq_hz（绝对 RF Hz）/demod（解调，如 FT8）/text（解码文本 FROM TO EXCHANGE）。
+- `limit` 可选 1..200，默认 50；超界诚实 clamp。无历史时 history=[] 诚实空态，不伪造呼号。
+- 区别于 `get_ft8_status`（当前帧即时状态）与 `export_ft8_results`（导出文件）。

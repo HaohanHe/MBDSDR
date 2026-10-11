@@ -1084,6 +1084,46 @@ QString execGetFt8Status(const QJsonObject&, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// 7i-bis. get_ft8_history (read): WSJT-X style rolling decoded-message window.
+// Reads engine->ft8History(limit) honestly; empty list when no frames decoded.
+// limit clamped to [1,200] by the engine accessor (default 50 if omitted/NaN).
+QString execGetFt8History(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                          const SourceInfo& src,
+                          ui::BookmarkManager* /*bookmarks*/) {
+    int limit = 50;
+    const QJsonValue lv = args.value(QStringLiteral("limit"));
+    if (lv.isDouble() || lv.isBool()) {
+        // Qt6: toDouble(default) returns the default when not a number.
+        const double v = lv.toDouble(std::nan(""));
+        if (std::isfinite(v)) {
+            int iv = (int)std::lround(v);
+            if (iv < 1) iv = 1;
+            if (iv > dsp::SpectrumEngine::kFt8HistoryMax)
+                iv = dsp::SpectrumEngine::kFt8HistoryMax;
+            limit = iv;
+        }
+    }
+    QJsonArray arr;
+    const auto rows = engine->ft8History(limit);
+    for (const auto& e : rows) {
+        QJsonObject r;
+        r["time_ms"] = (double)e.time_ms;
+        r["freq_hz"] = e.freq_hz;
+        r["demod"] = e.demod;
+        r["text"] = e.text;
+        arr.append(r);
+    }
+    QJsonObject o;
+    o["ok"] = true;
+    o["limit"] = limit;
+    o["returned"] = (int)rows.size();
+    o["history"] = arr;
+    if (rows.isEmpty())
+        o["note"] = QString::fromUtf8("无 FT8 解码历史（未开启/无帧/CRC 不过）：history=[] 诚实空态");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // 7j. set_lrpt (write): LRPT state-layer enable. `enabled` REQUIRED boolean.
 //     State/control layer only; C++ demod/FEC port deferred to step 4.
 QString execSetLrpt(const QJsonObject& args, dsp::SpectrumEngine* engine,
@@ -1841,6 +1881,9 @@ QString execExportPeaksCsv(const QJsonObject& a, dsp::SpectrumEngine* engine,
 
 // export_ft8_results (write, gated): dump current FT8 decode results to a file.
 // Honest: C++ side has no FT8 result store (Python domain) -> header-only empty.
+// With all_history=true, dumps the engine's decoded-message ring (WSJT-X style)
+// with columns time_ms,freq_hz,demod,text; default false keeps the legacy
+// candidate-list CSV (freq_hz,crc_ok,costas_score,rejected,reject_reason,iters).
 QString execExportFt8Results(const QJsonObject& a, dsp::SpectrumEngine* engine,
                               const SourceInfo& src,
                               ui::BookmarkManager* /*bookmarks*/) {
@@ -1851,35 +1894,60 @@ QString execExportFt8Results(const QJsonObject& a, dsp::SpectrumEngine* engine,
         o["note"] = QString::fromUtf8("需要 path（输出文件路径）");
         addSourceFields(o, src); return compact(o);
     }
+    const bool allHistory = a.value("all_history").toBool(false);
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
         o["ok"] = false;
         o["note"] = QString::fromUtf8("写文件失败（路径不可写）");
         addSourceFields(o, src); return compact(o);
     }
-    // Honest: dump the exported candidate list the C++ engine exposes. Columns
-    // mirror Python collect_ft8_candidates(). Empty list = no candidates (no
-    // fabricated callsigns/grid); crc_ok rows pending the decode bridge.
-    f.write("freq_hz,crc_ok,costas_score,rejected,reject_reason,iters\n");
     int rows = 0;
-    if (engine) {
-        auto cands = engine->ft8ExportCandidates();
-        for (const auto& c : cands) {
-            f.write((QString::number(c.freq_hz, 'f', 1) + "," +
-                     (c.crc_ok ? "1" : "0") + "," +
-                     QString::number(c.costas_score, 'f', 3) + "," +
-                     (c.rejected ? "1" : "0") + ",\"" +
-                     QString::fromStdString(c.reject_reason) + "\"," +
-                     QString::number(c.iters) + "\n").toUtf8());
-            ++rows;
+    if (allHistory) {
+        // Decoded-message history full dump (newest-first ring -> oldest-first
+        // file for readability). Empty history = header-only (honest).
+        f.write("time_ms,freq_hz,demod,text\n");
+        if (engine) {
+            const auto hist = engine->ft8History(dsp::SpectrumEngine::kFt8HistoryMax);
+            // hist is newest-first; reverse for file output.
+            for (int i = hist.size() - 1; i >= 0; --i) {
+                const auto& e = hist.at(i);
+                // CSV-quote text (may contain spaces; no commas in CALL grid
+                // exchange by FT8 spec, but quote defensively).
+                const QString t = QString(e.text).replace('"', "\"\"");
+                f.write((QString::number(e.time_ms) + "," +
+                         QString::number(e.freq_hz, 'f', 1) + "," +
+                         e.demod + ",\"" + t + "\"\n").toUtf8());
+                ++rows;
+            }
+        }
+    } else {
+        // Honest: dump the exported candidate list the C++ engine exposes. Columns
+        // mirror Python collect_ft8_candidates(). Empty list = no candidates (no
+        // fabricated callsigns/grid); crc_ok rows pending the decode bridge.
+        f.write("freq_hz,crc_ok,costas_score,rejected,reject_reason,iters\n");
+        if (engine) {
+            auto cands = engine->ft8ExportCandidates();
+            for (const auto& c : cands) {
+                f.write((QString::number(c.freq_hz, 'f', 1) + "," +
+                         (c.crc_ok ? "1" : "0") + "," +
+                         QString::number(c.costas_score, 'f', 3) + "," +
+                         (c.rejected ? "1" : "0") + ",\"" +
+                         QString::fromStdString(c.reject_reason) + "\"," +
+                         QString::number(c.iters) + "\n").toUtf8());
+                ++rows;
+            }
         }
     }
     f.close();
     o["ok"] = true;
     o["path"] = path;
     o["rows"] = rows;
-    if (rows == 0)
-        o["note"] = QString::fromUtf8("无 FT8 候选（无信号/未检出）：仅写表头，不伪造呼号");
+    o["all_history"] = allHistory;
+    if (rows == 0) {
+        o["note"] = allHistory
+            ? QString::fromUtf8("无 FT8 解码历史：仅写表头，不伪造呼号")
+            : QString::fromUtf8("无 FT8 候选（无信号/未检出）：仅写表头，不伪造呼号");
+    }
     addSourceFields(o, src); return compact(o);
 }
 // an EFHW / inverse-L matching network L/C suggestion.
@@ -2522,6 +2590,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_cdcss_status", &execGetCdcssStatus},
         {"set_ft8", &execSetFt8},
         {"get_ft8_status", &execGetFt8Status},
+        {"get_ft8_history", &execGetFt8History},
         {"set_lrpt", &execSetLrpt},
         {"get_lrpt_status", &execGetLrptStatus},
         {"set_vna_sweep", &execSetVnaSweep},

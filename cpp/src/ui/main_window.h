@@ -559,8 +559,13 @@ private:
     QLabel*          cdcssBadge_    = nullptr;
     // FT8 digital mode (phase63 step6). ft8Check_ arms the C++ detector/decoder;
     // ft8Badge_ mirrors ONLY engine ft8Present()/ft8DecodedText() (honest poll).
+    // ft8HistoryTable_ is the WSJT-X style rolling decoded-message window fed by
+    // engine->ft8History(); 200-row cap (engine-side), empty table = honest empty.
     QCheckBox*       ft8Check_     = nullptr;
     QLabel*          ft8Badge_     = nullptr;
+    QTableWidget*    ft8HistoryTable_ = nullptr;
+    int              ft8HistoryLastSize_ = -1;   // change-diff trigger
+    void refreshFt8HistoryTable();
     double          currentBwHz_ = 12500.0;   // live RF bandwidth (Up/Down nudge)
 
     // Multi-VFO management panel (left rail).

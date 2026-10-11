@@ -295,7 +295,8 @@
   6) 频段预设联动（bandCombo→中心频+模式+带宽）→ main_window:622-631 已落地；
   7) 频谱显示选项（dB range/格线/门限/maxhold 衰减/余辉/palette）→ spectrum_widget 全落地；
   8) 其余解码器结果 UI（M17/POCSAG/ACARS/NAVTEX 均 QTableWidget 可选中复制）→ 无 FT8 类
-     "结果不可见"缺口；FT8 无历史解码列表表为历轮已登记项（第㉓批）且已被 badge 解码文本 +
-     get_ft8_status + export_ft8_results 部分缓解，本轮不重复立案（SDR++ 官方本不带 FT8 解码）。
+     "结果不可见"缺口；FT8 无历史解码列表表为历轮已登记项（第㉓批），已于后续批次落地为
+     get_ft8_history 只读工具 + export_ft8_results all_history=true + SDR 主界面解码 tab "FT8"
+     滚动历史表（200 条上限，引擎 ft8History() 单一数据源，badge 与表同源），闭环。
 - 结论：无真缺口，只做维护线，不强行改码（宁缺毋滥）。C++ 无改动，双构型沿用基线
   D125/R125=143/143。

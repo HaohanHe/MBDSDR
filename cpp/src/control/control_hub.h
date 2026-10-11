@@ -251,6 +251,7 @@ private:
     QJsonObject cmdGetCdcssStatus(const QJsonObject&);
     QJsonObject cmdSetFt8(const QJsonObject& a);
     QJsonObject cmdGetFt8Status(const QJsonObject&);
+    QJsonObject cmdGetFt8History(const QJsonObject&);
     QJsonObject cmdSetLrpt(const QJsonObject& a);
     QJsonObject cmdGetLrptStatus(const QJsonObject&);
     QJsonObject cmdSetVnaSweep(const QJsonObject&);

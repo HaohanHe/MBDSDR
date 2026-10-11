@@ -168,6 +168,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_ctcss_status",      false, &ControlHub::cmdGetCtcssStatus},
         {"get_cdcss_status",      false, &ControlHub::cmdGetCdcssStatus},
         {"get_ft8_status",        false, &ControlHub::cmdGetFt8Status},
+        {"get_ft8_history",       false, &ControlHub::cmdGetFt8History},
         {"get_lrpt_status",       false, &ControlHub::cmdGetLrptStatus},
         {"get_vna_data",          false, &ControlHub::cmdGetVnaData},
         {"get_vna_status",        false, &ControlHub::cmdGetVnaStatus},
@@ -1484,6 +1485,42 @@ QJsonObject ControlHub::cmdGetFt8Status(const QJsonObject&) {
     return o;
 }
 
+// get_ft8_history (read-only): WSJT-X style rolling decoded-message window.
+// Mirrors the Agent get_ft8_history tool; empty list when no frames decoded.
+QJsonObject ControlHub::cmdGetFt8History(const QJsonObject& a) {
+    int limit = 50;
+    const QJsonValue lv = a.value("limit");
+    if (lv.isDouble() || lv.isBool()) {
+        // Qt6 QJsonValue::toDouble(default) returns the default if not a number.
+        const double v = lv.toDouble(std::nan(""));
+        if (std::isfinite(v)) {
+            int iv = (int)std::lround(v);
+            if (iv < 1) iv = 1;
+            if (iv > dsp::SpectrumEngine::kFt8HistoryMax)
+                iv = dsp::SpectrumEngine::kFt8HistoryMax;
+            limit = iv;
+        }
+    }
+    QJsonObject o = okBase();
+    o["command"] = "get_ft8_history";
+    o["limit"] = limit;
+    QJsonArray arr;
+    const auto rows = engine_->ft8History(limit);
+    for (const auto& e : rows) {
+        QJsonObject r;
+        r["time_ms"] = (double)e.time_ms;
+        r["freq_hz"] = e.freq_hz;
+        r["demod"] = e.demod;
+        r["text"] = e.text;
+        arr.append(r);
+    }
+    o["returned"] = (int)rows.size();
+    o["history"] = arr;
+    if (rows.isEmpty())
+        o["note"] = QStringLiteral("无 FT8 解码历史：history=[] 诚实空态");
+    return o;
+}
+
 QJsonObject ControlHub::cmdSetLrpt(const QJsonObject& a) {
     QString err;
     bool on = false;
@@ -1747,24 +1784,42 @@ QJsonObject ControlHub::cmdExportFt8Results(const QJsonObject& a) {
     o["command"] = "export_ft8_results";
     const QString path = a.value("path").toString();
     if (path.isEmpty()) return errResult(QStringLiteral("参数 path 缺失"));
+    const bool allHistory = a.value("all_history").toBool(false);
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) { o["ok"] = false; o["note"] = QStringLiteral("写文件失败"); return o; }
-    f.write("freq_hz,crc_ok,costas_score,rejected,reject_reason,iters\n");
     int rows = 0;
-    auto cands = engine_->ft8ExportCandidates();
-    for (const auto& c : cands) {
-        f.write((QString::number(c.freq_hz, 'f', 1) + "," +
-                 (c.crc_ok ? "1" : "0") + "," +
-                 QString::number(c.costas_score, 'f', 3) + "," +
-                 (c.rejected ? "1" : "0") + ",\"" +
-                 QString::fromStdString(c.reject_reason) + "\"," +
-                 QString::number(c.iters) + "\n").toUtf8());
-        ++rows;
+    if (allHistory) {
+        f.write("time_ms,freq_hz,demod,text\n");
+        const auto hist = engine_->ft8History(dsp::SpectrumEngine::kFt8HistoryMax);
+        for (int i = hist.size() - 1; i >= 0; --i) {
+            const auto& e = hist.at(i);
+            const QString t = QString(e.text).replace('"', "\"\"");
+            f.write((QString::number(e.time_ms) + "," +
+                     QString::number(e.freq_hz, 'f', 1) + "," +
+                     e.demod + ",\"" + t + "\"\n").toUtf8());
+            ++rows;
+        }
+    } else {
+        f.write("freq_hz,crc_ok,costas_score,rejected,reject_reason,iters\n");
+        auto cands = engine_->ft8ExportCandidates();
+        for (const auto& c : cands) {
+            f.write((QString::number(c.freq_hz, 'f', 1) + "," +
+                     (c.crc_ok ? "1" : "0") + "," +
+                     QString::number(c.costas_score, 'f', 3) + "," +
+                     (c.rejected ? "1" : "0") + ",\"" +
+                     QString::fromStdString(c.reject_reason) + "\"," +
+                     QString::number(c.iters) + "\n").toUtf8());
+            ++rows;
+        }
     }
     f.close();
     o["path"] = path;
     o["rows"] = rows;
-    if (rows == 0) o["note"] = QStringLiteral("无 FT8 候选（无信号/未检出）：仅写表头");
+    o["all_history"] = allHistory;
+    if (rows == 0)
+        o["note"] = allHistory
+            ? QStringLiteral("无 FT8 解码历史：仅写表头")
+            : QStringLiteral("无 FT8 候选（无信号/未检出）：仅写表头");
     return o;
 }
 

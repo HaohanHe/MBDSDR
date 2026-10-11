@@ -18,6 +18,7 @@
 #include <QDoubleSpinBox>
 #include <QSpinBox>
 #include <QDir>
+#include <QDateTime>
 #include <QTemporaryDir>
 #include <QSplitter>
 #include <QTableWidget>
@@ -25,6 +26,7 @@
 #include <cmath>
 #include "core/tokens.h"
 #include "core/spectrum_frame.h"
+#include "dsp/spectrum_engine.h"
 #include "ui/main_window.h"
 #include "ui/spectrum_widget.h"
 #include "ui/spectrum_display.h"
@@ -229,6 +231,20 @@ int main(int argc, char** argv) {
                     t->currentWidget()->show();
                 }
             }
+        }
+    }
+
+    // Optional: inject 2-3 synthetic FT8 history rows (MBD_FT8HIST=1) so the
+    // "FT8" decode-tab table renders real rows. This is a TEST FIXTURE ONLY --
+    // production decode path never calls injectFt8HistoryEntry(); the engine
+    // stamps rows from real decoded frames in processFt8Window().
+    if (qgetenv("MBD_FT8HIST") == "1") {
+        auto* eng = win.engine();
+        if (eng) {
+            const qint64 base = QDateTime::currentMSecsSinceEpoch();
+            eng->injectFt8HistoryEntry(14.074e6, "JA1ABC DL1XYZ RR73", base - 30000);
+            eng->injectFt8HistoryEntry(14.0745e6, "W1XYZ K2DEF RR73",     base - 15000);
+            eng->injectFt8HistoryEntry(14.075e6,  "G4HIJ PA3OP RR73",     base);
         }
     }
 

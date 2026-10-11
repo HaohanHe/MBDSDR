@@ -6,6 +6,7 @@
 #include <QElapsedTimer>
 #include <QString>
 #include <QColor>
+#include <QList>
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -212,6 +213,27 @@ public:
     // Step-4 decode readback. Empty string until detector->LLR->codec wiring is
     // enabled (honest: no fabricated frame text).
     std::string ft8DecodedText() const;
+
+    // ---- FT8 decoded-message history (WSJT-X style rolling window) --------
+    // Production path: processFt8Window() appends ONE entry per NEW (dedup'd)
+    // decoded frame, using the real wall-clock ms + real VFO center + real
+    // detector freqOffsetHz + real decoded text. No text -> no entry (honest
+    // empty). Ring cap kFt8HistoryMax (200); oldest evicted on overflow.
+    // Tests inject via injectFt8HistoryEntry() to pin the UI table / tools;
+    // that path is the ONLY place non-real rows appear, and it is annotated.
+    struct Ft8HistoryEntry {
+        qint64  time_ms = 0;     // wall-clock ms since epoch (QDateTime::currentMSecsSinceEpoch)
+        double  freq_hz = 0.0;   // absolute RF freq Hz (VFO center + detector offset)
+        QString demod;           // "FT8" (the only producer today)
+        QString text;            // decoded "FROM TO EXCHANGE" text; empty = honest empty
+    };
+    // Returns up to maxN most-recent entries, newest first. maxN clamped to
+    // [1, kFt8HistoryMax] honestly. Empty list when no frames decoded.
+    QList<Ft8HistoryEntry> ft8History(int maxN) const;
+    // Test-only injection (NOT production): push a synthetic row into the ring.
+    // Production decode path must never call this.
+    void injectFt8HistoryEntry(double freq_hz, const QString& text, qint64 time_ms);
+    static constexpr int kFt8HistoryMax = 200;
 
     // 喂一段 12 kS/s 复基带窗（检测→LLR→解码全链路）。未启用则直接空态返回。
     // 测试注入/引擎 run loop 共用此入口；CRC 不过/不收敛 -> ft8Decoded_ 保持空。
@@ -725,6 +747,14 @@ private:
     std::string ft8LastDedupKey_;   // 去重键（文本+频偏粗桶）
     mutable std::mutex ft8CandMu_;
     std::vector<Ft8ExportCandidate> ft8Candidates_;  // exported candidate list
+    // FT8 decoded-message rolling history (WSJT-X style). Production writes
+    // happen inside processFt8Window() on a NEW dedup'd frame; tests inject via
+    // injectFt8HistoryEntry(). Guarded by QMutex because entries carry QString.
+    mutable QMutex ft8HistMu_;
+    QList<Ft8HistoryEntry> ft8History_;   // oldest->newest; cap kFt8HistoryMax
+    // VFO center Hz captured at feedFt8Baseband() time; stamped onto history
+    // entries so absolute freq = ft8VfoCenterHz_ + detector freqOffsetHz.
+    double ft8VfoCenterHz_ = 0.0;
     AudioOutput* audioOut_ = nullptr;
     // Active 48k write path. Defaults to audioOut_; an injected test sink
     // (setTestAudioSink) redirects it without touching the settings-dialog

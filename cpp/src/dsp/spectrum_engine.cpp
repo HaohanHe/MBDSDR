@@ -317,6 +317,33 @@ std::string SpectrumEngine::ft8DecodedText() const {
     return ft8Decoded_;
 }
 
+QList<SpectrumEngine::Ft8HistoryEntry> SpectrumEngine::ft8History(int maxN) const {
+    int n = maxN;
+    if (n < 1) n = 1;
+    if (n > kFt8HistoryMax) n = kFt8HistoryMax;
+    QMutexLocker lk(&ft8HistMu_);
+    const int total = ft8History_.size();
+    if (total == 0) return {};
+    QList<Ft8HistoryEntry> out;
+    out.reserve(std::min(n, total));
+    // Newest first.
+    for (int i = total - 1; i >= 0 && out.size() < n; --i)
+        out.append(ft8History_.at(i));
+    return out;
+}
+
+void SpectrumEngine::injectFt8HistoryEntry(double freq_hz, const QString& text, qint64 time_ms) {
+    // Test-only fixture: never called from production decode path.
+    Ft8HistoryEntry e;
+    e.time_ms = time_ms;
+    e.freq_hz = freq_hz;
+    e.demod = QStringLiteral("FT8");
+    e.text = text;
+    QMutexLocker lk(&ft8HistMu_);
+    ft8History_.append(std::move(e));
+    while (ft8History_.size() > kFt8HistoryMax) ft8History_.removeFirst();
+}
+
 void SpectrumEngine::processFt8Window(const std::complex<float>* iq, std::size_t n) {
     ft8Decoded_.clear();
     if (!ft8Enabled_.load()) return;
@@ -334,6 +361,17 @@ void SpectrumEngine::processFt8Window(const std::complex<float>* iq, std::size_t
     if (key != ft8LastDedupKey_) {
         ft8LastDedupKey_ = key;
         ft8DecodedFrames_.fetch_add(1);
+        // Production path: append ONE history row per NEW decoded frame. Uses
+        // real wall-clock, real VFO center captured at feed time, real detector
+        // offset, real decoded text. No fabrication.
+        Ft8HistoryEntry e;
+        e.time_ms = QDateTime::currentMSecsSinceEpoch();
+        e.freq_hz = ft8VfoCenterHz_ + c.freqOffsetHz;
+        e.demod = QStringLiteral("FT8");
+        e.text = QString::fromStdString(ft8Decoded_);
+        QMutexLocker lk(&ft8HistMu_);
+        ft8History_.append(std::move(e));
+        while (ft8History_.size() > kFt8HistoryMax) ft8History_.removeFirst();
     }
 }
 
@@ -1448,7 +1486,12 @@ void SpectrumEngine::run() {
             bb12.reserve(bb.size() / 4);
             for (std::size_t i = 0; i + 3 < bb.size(); i += 4)
                 bb12.push_back(bb[i]);
-            if (!bb12.empty()) feedFt8Baseband(bb12.data(), bb12.size());
+            if (!bb12.empty()) {
+                // Capture the real selected VFO center so any future decoded
+                // frame stamps an honest absolute freq = center + offset.
+                ft8VfoCenterHz_ = sel->freqHz;
+                feedFt8Baseband(bb12.data(), bb12.size());
+            }
         }
 
         // ---- POCSAG / m17 / VOR snapshot change-diff (every block) ----------

@@ -69,6 +69,8 @@ const QSet<QString> kAllCxxTools = {
     "vna_calibration",
     // P1 #70: device-level misc facade state machine (write, gated).
     "vna_device",
+    // P2 #71: FT8 decoded-message rolling history (read-only).
+    "get_ft8_history",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -126,6 +128,7 @@ const QSet<QString> kFlutterUngatedReadTools = {
     "get_ctcss_status",
     "get_cdcss_status",
     "get_ft8_status",
+    "get_ft8_history",
     "get_lrpt_status",
     "get_vna_data", "get_vna_status", "analyze_vna_resonance", "analyze_vna_filter", "analyze_vna_equivalent", "analyze_vna_touchstone", "analyze_vna_match",
     "get_noise_blanker_status",
@@ -157,7 +160,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 70, qPrintable(QString("expected 70 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 71, qPrintable(QString("expected 71 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -277,15 +280,15 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
     QVERIFY(!isWriteTool("definitely_not_a_real_tool"));
 }
 
-// Not-a-regression smoke: the on-wire contract still holds (35 defs, order kept)
+// Not-a-regression smoke: the on-wire contract still holds (71 defs, order kept)
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 70);
+    QCOMPARE(defs.size(), 71);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("vna_device"));
+    QCOMPARE(defs.last().name, QString("get_ft8_history"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

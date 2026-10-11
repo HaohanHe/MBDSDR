@@ -62,6 +62,11 @@ private slots:
     void manualMode_gateSpotCheckAllWrites();
     void exportPeaksCsv_content();
     void exportFt8Candidates_rows();
+    // --- FT8 decoded-message rolling history (WSJT-X style) -----------------
+    void getFt8History_emptyState();
+    void getFt8History_injectedRowsOrderAndFields();
+    void getFt8History_limitClamp();
+    void exportFt8Results_allHistoryEmptyAndInjected();
     // --- Noise blanker three-channel tool: land / readback / honest empty / gate ---
     void noiseBlankerLandReadbackAndGate();
     // --- Phase63 D1: get_squelch_status returns REAL engine getters, not nulls ---
@@ -120,7 +125,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 70);
+    QCOMPARE(tools.size(), 71);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -832,9 +837,9 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 41 writes / 29 reads (70 tools; vna_device added).
+    // The frozen split: 41 writes / 30 reads (71 tools; get_ft8_history added).
     QCOMPARE(writes, 41);
-    QCOMPARE(reads, 29);
+    QCOMPARE(reads, 30);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -913,6 +918,120 @@ void TestAgent::exportFt8Candidates_rows() {
     dsp::SpectrumEngine e2;
     r = ai::executeTool("export_ft8_results", args, &e2);
     QVERIFY2(r.contains("\"ok\":true") && r.contains("\"rows\":0"), qPrintable(r));
+}
+
+// get_ft8_history empty state: fresh engine -> ok:true, history:[] (honest).
+void TestAgent::getFt8History_emptyState() {
+    dsp::SpectrumEngine engine;
+    QJsonObject o = QJsonDocument::fromJson(
+        ai::executeTool("get_ft8_history", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(o.value("ok").toBool(), qPrintable(
+        ai::executeTool("get_ft8_history", QJsonObject{}, &engine)));
+    QCOMPARE(o.value("returned").toInt(), 0);
+    QVERIFY(o.value("history").isArray());
+    QCOMPARE(o.value("history").toArray().size(), 0);
+    QVERIFY(o.value("note").toString().contains(QStringLiteral("空态")));
+}
+
+// get_ft8_history injected rows: 2-3 rows -> returned N, fields aligned,
+// newest-first ordering.
+void TestAgent::getFt8History_injectedRowsOrderAndFields() {
+    dsp::SpectrumEngine engine;
+    engine.injectFt8HistoryEntry(14.074e6, "JA1ABC DL1XYZ RR73", 1700000001000LL);
+    engine.injectFt8HistoryEntry(14.0745e6, "W1XYZ K2DEF RR73",     1700000002000LL);
+    engine.injectFt8HistoryEntry(14.075e6,  "G4HIJ PA3OP RR73",     1700000003000LL);
+    QJsonObject args;
+    QJsonObject o = QJsonDocument::fromJson(
+        ai::executeTool("get_ft8_history", args, &engine).toUtf8()).object();
+    QVERIFY2(o.value("ok").toBool(), qPrintable(
+        ai::executeTool("get_ft8_history", args, &engine)));
+    QCOMPARE(o.value("returned").toInt(), 3);
+    QJsonArray hist = o.value("history").toArray();
+    QCOMPARE(hist.size(), 3);
+    // Newest first: third injected row (time 3000) must be [0].
+    const QJsonObject r0 = hist.at(0).toObject();
+    QCOMPARE(r0.value("time_ms").toVariant().toLongLong(), (qint64)1700000003000LL);
+    QCOMPARE(r0.value("text").toString(), QStringLiteral("G4HIJ PA3OP RR73"));
+    QCOMPARE(r0.value("demod").toString(), QStringLiteral("FT8"));
+    QCOMPARE(r0.value("freq_hz").toDouble(), 14.075e6);
+    const QJsonObject r2 = hist.at(2).toObject();
+    QCOMPARE(r2.value("time_ms").toVariant().toLongLong(), (qint64)1700000001000LL);
+}
+
+// get_ft8_history limit clamp: inject > limit -> only `limit` returned;
+// limit out-of-range -> honest clamp (not crash).
+void TestAgent::getFt8History_limitClamp() {
+    dsp::SpectrumEngine engine;
+    for (int i = 0; i < 10; ++i)
+        engine.injectFt8HistoryEntry(14.074e6,
+                                      QStringLiteral("CALL%1 GRID RR73").arg(i),
+                                      1700000000000LL + i * 1000);
+    // Explicit limit=3 -> 3 rows.
+    QJsonObject args; args["limit"] = 3;
+    QJsonObject o = QJsonDocument::fromJson(
+        ai::executeTool("get_ft8_history", args, &engine).toUtf8()).object();
+    QCOMPARE(o.value("returned").toInt(), 3);
+    QCOMPARE(o.value("limit").toInt(), 3);
+    // Out-of-range limit -> clamped by the tool (1..200).
+    QJsonObject bad; bad["limit"] = 9999;
+    QJsonObject ob = QJsonDocument::fromJson(
+        ai::executeTool("get_ft8_history", bad, &engine).toUtf8()).object();
+    QCOMPARE(ob.value("returned").toInt(), 10);   // only 10 injected
+    QCOMPARE(ob.value("limit").toInt(), dsp::SpectrumEngine::kFt8HistoryMax);
+    QJsonObject tiny; tiny["limit"] = 0;
+    QJsonObject ot = QJsonDocument::fromJson(
+        ai::executeTool("get_ft8_history", tiny, &engine).toUtf8()).object();
+    QCOMPARE(ot.value("returned").toInt(), 1);
+    QCOMPARE(ot.value("limit").toInt(), 1);
+}
+
+// export_ft8_results all_history=true: empty engine -> rows=0 header-only;
+// after injection -> rows == injected count, columns time_ms,freq_hz,demod,text.
+void TestAgent::exportFt8Results_allHistoryEmptyAndInjected() {
+    const QString path = "/tmp/mbd_test_ft8_hist.csv";
+    // Empty state.
+    {
+        dsp::SpectrumEngine e;
+        QJsonObject args; args["path"] = path; args["all_history"] = true;
+        QString r = ai::executeTool("export_ft8_results", args, &e);
+        QVERIFY2(r.contains("\"ok\":true") && r.contains("\"rows\":0"), qPrintable(r));
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+        QStringList lines = QString::fromUtf8(f.readAll()).split('\n', Qt::SkipEmptyParts);
+        QCOMPARE(lines.size(), 1);
+        QCOMPARE(lines[0], QString("time_ms,freq_hz,demod,text"));
+        f.remove();
+    }
+    // Injected rows.
+    {
+        dsp::SpectrumEngine e;
+        e.injectFt8HistoryEntry(14.074e6, "JA1ABC DL1XYZ RR73", 1700000001000LL);
+        e.injectFt8HistoryEntry(14.0745e6, "W1XYZ K2DEF RR73",     1700000002000LL);
+        QJsonObject args; args["path"] = path; args["all_history"] = true;
+        QString r = ai::executeTool("export_ft8_results", args, &e);
+        QVERIFY2(r.contains("\"ok\":true") && r.contains("\"rows\":2"), qPrintable(r));
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+        QStringList lines = QString::fromUtf8(f.readAll()).split('\n', Qt::SkipEmptyParts);
+        QCOMPARE(lines.size(), 3);  // header + 2 rows
+        QCOMPARE(lines[0], QString("time_ms,freq_hz,demod,text"));
+        QVERIFY2(lines[1].startsWith("1700000001000,"), qPrintable(lines[1]));
+        QVERIFY2(lines[2].startsWith("1700000002000,"), qPrintable(lines[2]));
+        f.remove();
+    }
+    // Default (all_history=false omitted) keeps the legacy candidate CSV shape.
+    {
+        dsp::SpectrumEngine e;
+        QJsonObject args; args["path"] = path;
+        QString r = ai::executeTool("export_ft8_results", args, &e);
+        QVERIFY2(r.contains("\"rows\":0"), qPrintable(r));
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+        QStringList lines = QString::fromUtf8(f.readAll()).split('\n', Qt::SkipEmptyParts);
+        QCOMPARE(lines.size(), 1);
+        QCOMPARE(lines[0], QString("freq_hz,crc_ok,costas_score,rejected,reject_reason,iters"));
+        f.remove();
+    }
 }
 
 // Noise blanker three-channel tool: honest off on a fresh engine, the write

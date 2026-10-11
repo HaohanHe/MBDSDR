@@ -1254,6 +1254,36 @@ MainWindow::MainWindow(QWidget* parent)
     adsbLay->addWidget(adsbTable_);
     rightTabs_->addTab(adsbPage, "ADS-B");
 
+    // ---- FT8 decoded-message history table (WSJT-X style rolling window) ----
+    // Fed ONLY by engine->ft8History() (real decoded frames). Columns:
+    // time / freq MHz / demod / text. 200-row cap enforced engine-side; the
+    // table re-renders from the engine each poll (change-diff by size). Empty
+    // table = honest empty (no fabricated callsigns). New rows appear at top
+    // (newest-first) matching the WSJT-X convention.
+    {
+        auto* ft8Page = new QWidget;
+        auto* ft8Lay = new QVBoxLayout(ft8Page);
+        ft8Lay->setContentsMargins(0, 0, 0, 0);
+        auto* ft8Empty = new QLabel(
+            QStringLiteral("开启 FT8 检测后\n此处滚动显示已解码消息（最多 200 条）"), ft8Page);
+        ft8Empty->setObjectName("statusHint");
+        ft8Empty->setAlignment(Qt::AlignCenter);
+        ft8Empty->setWordWrap(true);
+        ft8Lay->addWidget(ft8Empty);
+        ft8HistoryTable_ = new QTableWidget(0, 4, ft8Page);
+        ft8HistoryTable_->setObjectName("ft8HistoryTable");
+        ft8HistoryTable_->setHorizontalHeaderLabels(
+            {QStringLiteral("时间"), QStringLiteral("频率(MHz)"),
+             QStringLiteral("解调"), QStringLiteral("文本")});
+        ft8HistoryTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+        ft8HistoryTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        ft8HistoryTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
+        ft8HistoryTable_->setSelectionMode(QAbstractItemView::SingleSelection);
+        ft8HistoryTable_->setAlternatingRowColors(true);
+        ft8Lay->addWidget(ft8HistoryTable_);
+        rightTabs_->addTab(ft8Page, "FT8");
+    }
+
     // ---- POCSAG pager panel (right rail; fed by engine pocsagMessagesChanged) --
     // Honest list: rows are the real decoded RIC/function/text pushed by the
     // engine snapshot; empty vector = empty state. "清空" asks the engine to
@@ -2582,11 +2612,13 @@ MainWindow::MainWindow(QWidget* parent)
         updateCtcssBadge();
         updateCdcssBadge();
         updateFt8Badge();
+        refreshFt8HistoryTable();
     });
     ctcssPollTimer_->start(250);
     updateCtcssBadge();               // paint the initial honest state now
     updateCdcssBadge();
     updateFt8Badge();
+    refreshFt8HistoryTable();
     connect(engine_, &dsp::SpectrumEngine::squelchState,
             this, &MainWindow::onSquelchState);
     connect(engine_, &dsp::SpectrumEngine::recordingStateChanged,
@@ -5844,6 +5876,35 @@ void MainWindow::updateFt8Badge() {
         QString("QLabel#ft8Badge { color: %1; }")
             .arg(QString::fromUtf8(tokens::kTextSecondary)));
     ft8Badge_->setToolTip(QStringLiteral("FT8 已开启，等待 15 s 帧"));
+}
+
+// WSJT-X style rolling decoded-message table. Data source is engine->ft8History()
+// ONLY (real decoded frames; empty = honest empty). We repopulate when the engine
+// ring size changes (cheap change-diff); rows are newest-first. The engine caps
+// the ring at 200 entries (kFt8HistoryMax) so the table never grows unbounded.
+void MainWindow::refreshFt8HistoryTable() {
+    if (!ft8HistoryTable_ || !engine_) return;
+    const auto rows = engine_->ft8History(dsp::SpectrumEngine::kFt8HistoryMax);
+    const int sz = rows.size();
+    if (sz == ft8HistoryLastSize_) return;   // no new rows -> no repaint
+    ft8HistoryLastSize_ = sz;
+    ft8HistoryTable_->setRowCount(sz);
+    for (int i = 0; i < sz; ++i) {
+        const auto& e = rows.at(i);   // newest first
+        // time_ms -> HH:mm:ss (local) for readability; keep raw ms in tooltip.
+        const QDateTime dt = QDateTime::fromMSecsSinceEpoch(e.time_ms);
+        const QString tstr = dt.toString(QStringLiteral("HH:mm:ss"));
+        const QString fstr = QString::number(e.freq_hz / 1.0e6, 'f', 4);
+        auto* c0 = new QTableWidgetItem(tstr);
+        c0->setToolTip(QString::number(e.time_ms));
+        auto* c1 = new QTableWidgetItem(fstr);
+        auto* c2 = new QTableWidgetItem(e.demod);
+        auto* c3 = new QTableWidgetItem(e.text);
+        ft8HistoryTable_->setItem(i, 0, c0);
+        ft8HistoryTable_->setItem(i, 1, c1);
+        ft8HistoryTable_->setItem(i, 2, c2);
+        ft8HistoryTable_->setItem(i, 3, c3);
+    }
 }
 
 void MainWindow::onAdsbAircraft(const dsp::AircraftInfo& info) {
