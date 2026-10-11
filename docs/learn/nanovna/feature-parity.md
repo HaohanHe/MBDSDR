@@ -435,3 +435,14 @@ competition/比赛/ghp_ 0；MIT 头。
 
 ## README 五节终审
 快速开始（桌面/真机自检/Python 内核）+ 能力矩阵（66 工具分组）+ 真机云测诚实声明 + LLM 基线 + 目录导览；构建/测试姿势引 cpp/README.md。齐全。
+
+---
+
+# 第㉒批：SDR 侦察 + 论文证据双文档核对（HEAD=a1bcd1b）
+
+## SDR 侦察
+现有 scan_band 已返回峰值信号；缺口=peaks→CSV 导出（写工具）。本轮宁缺毋滥不落地，留后续。
+
+## 双文档核对
+- narrative.md：工具数 65→66 已修正（注册/mobile/金集三处）；
+- evidence.md：PENDING 标注 3 处完整。

@@ -46,8 +46,8 @@
 | EFHW/LC 匹配 | 端馈匹配网络 L/C 建议 | 已落地，analyze_vna_match 工具 |
 
 ### 3.3 AI 三通道工具面
-- 65 工具注册，三通道一致（registry/schema/agent/hub/ai_real_link 全绿）；
-- 写工具手动模式 gate 拦截，读工具诚实空态；mobile catalog 同步 65。
+- 66 工具注册，三通道一致（registry/schema/agent/hub/ai_real_link 全绿）；
+- 写工具手动模式 gate 拦截，读工具诚实空态；mobile catalog 同步 66。
 
 ## 4. PENDING（真机列，诚实数据缺口）
 - [ ] 真机 NanoVNA-H 实测扫频（当前 all synthetic seed 夹具）；
@@ -59,5 +59,5 @@
 
 ## 5. 可直接引用的数据点
 - test_vna_rf 20 纯函数钉扎全绿；
-- 金集 65 工具三通道全绿（registry 8/schema 10/agent 38/hub 34/ai_real_link 17）；
+- 金集 66 工具三通道全绿（registry 8/schema 10/agent 38/hub 34/ai_real_link 17）；
 - 三档 UI 快照 640/960/1920 零裁切零叠字（窄档 caption 截断诚实 floor）。

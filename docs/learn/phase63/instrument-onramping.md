@@ -174,3 +174,9 @@
   WTFPL 参考源、官方 docs 优先），repos/ 仍 .gitignore:91 未入仓。无需修。
 - dump --cal 旗标：stderr 直显校准行（open/short/load/thru）；pytest 6 passed。
 - SDR++ 侦察：无新硬缺口。
+
+## 21. 第㉒批：真机回传终检 + SDR 现状侦察
+- quickstart 四步 + dump --cal/--json-pretty/--selftest 命令串复核，pytest 6 passed 全绿；
+  checklist 与 evidence 字段对齐逐列一致（dump 直出 summary/vswr/回损；vna_rf 复算 fr/Q/ESR/TDR/LC/滤波器）。
+- SDR 现状（供线 B）：书签跳转已在（main_window.cpp:1888 bmTable_ cellDoubleClicked）；
+  峰值列表 #/频率/强度 表在窄屏截图出现（spectrum_display 域）；FT8 仅复选框(:794)，无解码结果复制功能。
