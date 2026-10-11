@@ -300,3 +300,10 @@
      滚动历史表（200 条上限，引擎 ft8History() 单一数据源，badge 与表同源），闭环。
 - 结论：无真缺口，只做维护线，不强行改码（宁缺毋滥）。C++ 无改动，双构型沿用基线
   D125/R125=143/143。
+
+## 34. 真机就绪终检（无设备实测）
+- 四命令链全跑通（--selftest/--cal/--json-pretty/紧凑），keys 齐全：
+  S11/S21/cal/frequencies_hz/model/port/return_loss_db/sn/summary/sweep/version/vswr。
+- dump↔fill 六列对齐：fill 读 data["frequencies_hz"]/["S11"]/["S21"]，dump 输出同名；
+  VSWR/回损(nanovna_client.vswr)、谐振/TDR/LC/滤波器重算自 S11/S21——列名单位一致，无需修。
+- pytest 14 passed（dump 6 + fill 6 + ft8 2）。quickstart/CDCSS/双平台命令与 argparse 一致。
