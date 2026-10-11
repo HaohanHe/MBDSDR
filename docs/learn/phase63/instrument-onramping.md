@@ -149,3 +149,12 @@
   电缆长度/L·C/滤波器形态列，仍带 SYNTHETIC 标注。
 - test_fill_evidence 1->4 passed（谐振谷 + TDR 正长度 + LC=1uH 钉扎 + 形态判定）。
 - SDR++ 侦察：候选均已在，无新硬缺口，不落地。
+
+## 17. 第⑱批：engine FFT 访问器 + 真实轨迹导出
+- spectrum_engine.h 增只读访问器 fftDb()/fftCenterHz()（:58，锁 latestFrame_，无帧诚实空态）；
+  spectrum_engine.cpp:1415 emit 处同步存 latestFrame_。
+- execExportSpectrumSnapshot（agent_tools.cpp:1360）接真实 bins：逐点画 dBFS 轨迹线 + 峰值标记
+  + 中心频点竖线；空 bins 仅画框（诚实）。test_agent 38 passed 无回归。
+- UI 导出按钮：未加（频谱工具栏锚定风险大，offscreen 环境不硬塞）；继续用工具调用导出。
+- fill 六列核对：VSWR/回损/谐振/TDR/LC/滤波器齐全，SYNTHETIC 标注在；TDR/LC 为 Python 近似，真机以 C++ vna_rf 为准。
+- SDR++ 侦察：无新硬缺口。

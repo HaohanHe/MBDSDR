@@ -387,3 +387,15 @@ engine 未暴露 FFT bins 读访问器（spectrum_engine.h 无 fftDb/readSpectru
 
 ## 计数
 金集不变（66）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
+
+---
+
+# 第⑱批：金集/工具面回归复查（HEAD=c5a29fb，只读）
+
+## 回归结论
+66 工具三通道一致，全 0 failed：
+- test_tool_registry 8 / test_tool_schema 10 / test_agent 38（读29写37）/ test_control_hub 34 / test_ai_real_link 17。
+- mobile 66 / phase31 头部 66。写工具手动 gate 注册。线 A 渲染改动无回归。
+
+## VNA 三档快照复核
+1920：五图 + 等效串联读数行（ESR=67.6Ω fr=14.05MHz Q=0.6 L=0.495µH C=259.22pF）+ Smith 网格弧 + S11 轨迹，0 裁切 0 叠字。640 窄档 caption 截断诚实 floor。

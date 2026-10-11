@@ -55,6 +55,17 @@ public:
 
     void setFftSize(int n);
     int  fftSize() const { return fftSize_.load(); }
+
+    // Read-only snapshot of the latest emitted spectrum frame (honest empty when
+    // no frame has ever arrived). Offscreen export / tests read this.
+    std::vector<float> fftDb() const {
+        std::lock_guard<std::mutex> lk(frameMu_);
+        return latestFrame_.dbfs;
+    }
+    double fftCenterHz() const {
+        std::lock_guard<std::mutex> lk(frameMu_);
+        return latestFrame_.centerFreqHz;
+    }
     void shutdown();
     // Read-only state getters for integration tests / status display.
     QString demodMode() const { return demodMode_; }
@@ -695,6 +706,8 @@ private:
     AptDecoder aptDecoder_{48000.0};
 
     std::atomic<int> fftSize_{2048};
+    mutable std::mutex frameMu_;
+    SpectrumFrame latestFrame_;   // last emitted spectrum frame (read-only snapshot)
     // Honest measured total-power RSSI (dBFS) of the currently tuned channel,
     // refreshed in run() every block; -100 until the first block flows. The
     // decoupled ScanActivityLink driver polls this (see rssiDbfs()).

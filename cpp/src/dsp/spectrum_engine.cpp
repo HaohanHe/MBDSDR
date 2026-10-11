@@ -1412,6 +1412,10 @@ void SpectrumEngine::run() {
             frame.fftSize = static_cast<int>(specN);
             frame.isTestSignal = !real;
             frame.sourceName = source_->name();
+            {
+                std::lock_guard<std::mutex> lk(frameMu_);
+                latestFrame_ = frame;
+            }
             emit spectrumReady(frame);
         }
 

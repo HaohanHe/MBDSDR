@@ -1358,14 +1358,36 @@ QString execExportSpectrumSnapshot(const QJsonObject& a, dsp::SpectrumEngine* en
         addSourceFields(o, src); return compact(o);
     }
     const double center = engine->centerFreq();
+    const std::vector<float> bins = engine->fftDb();
+    const double sr = engine->fftCenterHz() > 0 ? engine->centerFreq() : 0.0;
     QImage img(960, 480, QImage::Format_ARGB32);
     img.fill(QColor(18, 18, 20));
     QPainter p(&img);
     p.setRenderHint(QPainter::Antialiasing, true);
     p.setPen(QPen(QColor(120,120,120), 1.0));
     p.drawRect(40, 30, 900, 400);
+    // Trace from real bins (dBFS mapped to y); honest flat baseline when empty.
     p.setPen(QPen(QColor(80,180,255), 1.6));
+    if (!bins.empty()) {
+        const int n = (int)bins.size();
+        const double x0 = 40, w = 900, yTop = 30, h = 400;
+        for (int i = 1; i < n; ++i) {
+            double y1 = yTop + h * std::clamp((bins[i-1] + 60.0) / 80.0, 0.0, 1.0);
+            double y2 = yTop + h * std::clamp((bins[i]   + 60.0) / 80.0, 0.0, 1.0);
+            p.drawLine(QPointF(x0 + w * (i-1) / (n-1), y1),
+                       QPointF(x0 + w * i / (n-1), y2));
+        }
+        // Peak marker
+        int pk = (int)std::distance(bins.begin(),
+                    std::max_element(bins.begin(), bins.end()));
+        double px = x0 + w * pk / (n-1);
+        double py = yTop + h * std::clamp((bins[pk] + 60.0) / 80.0, 0.0, 1.0);
+        p.setPen(QPen(QColor(255,200,80), 1.4));
+        p.drawLine(QPointF(px, py), QPointF(px, yTop + h));
+        p.drawText(QPointF(px+4, py-4), QString::number(bins[pk], 'f', 1));
+    }
     const double cx = 490;
+    p.setPen(QPen(QColor(120,120,120), 1.0));
     p.drawLine(QPointF(cx, 30), QPointF(cx, 430));
     p.setPen(QPen(QColor(220,220,220), 1.0));
     p.drawText(QPointF(cx-40, 460), QString::number(center, 'f', 1));
