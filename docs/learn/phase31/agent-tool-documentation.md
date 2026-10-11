@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，69 个工具）
+# Agent 工具能力清单（自动生成，70 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -317,9 +317,9 @@ schema: {"properties":{"path":{"description":"PNG 输出路径","type":"string"}
 错误示例: 手动模式写门拒绝 -> {"ok":false,"gated":true}；无设备 -> ok:false
 
 ## analyze_vna_match  [read 只读]
-description: 只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回 EFHW/反 L 匹配网络的 L/C 建议（Q、串联/并联臂值）。负载电阻需 >50Ω；否则 valid 诚实为 false。
-schema: {"properties":{"load_r":{"description":"负载电阻 Ω（>50）","type":"number"},"load_x":{"description":"负载电抗 Ω","type":"number"},"f_hz":{"description":"设计频率 Hz","type":"number"}},"required":["load_r","f_hz"],"type":"object"}
-错误示例: 缺 load_r/f_hz -> valid:false（仍 ok:true 空态）
+description: 只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回匹配网络的 L/C 建议（Q、串联/并联臂值）。topology 可选 series_shunt（默认既有 EFHW 语义）/xps/xs/xpl（三电抗 Pi）；r_comp 为串联 R 补偿。无闭式解的拓扑诚实 valid:false。
+schema: {"properties":{"load_r":{"description":"负载电阻 Ω（高阻馈电点用 >50；xs 用 <50）","type":"number"},"load_x":{"description":"负载电抗 Ω（默认 0）","type":"number"},"f_hz":{"description":"设计频率 Hz","type":"number"},"topology":{"description":"匹配拓扑：series_shunt（默认既有 EFHW 语义）/xps/xs/xpl","enum":["series_shunt","xps","xs","xpl"],"type":"string"},"r_comp":{"description":"串联 R 补偿 Ω（≥0，并入负载电阻，默认 0）","type":"number"}},"required":["load_r","f_hz"],"type":"object"}
+错误示例: 缺 load_r/f_hz -> valid:false（仍 ok:true 空态）；未知/无闭式拓扑 -> valid:false + 诚实 note（不伪造数值）
 
 ## analyze_vna_equivalent（只读，第⑫批新增）
 由当前扫频 S11 提取串联 RLC 等效电路：ESR=串联谐振点 |Z|，Q=fr/BW，L=R·Q/(2πfr)，C=1/((2πfr)²·L)。无设备/点数不足时 valid 诚实为 false。读工具（手动 gate 不拦截）。
@@ -338,3 +338,11 @@ NanoVNA 校准门面：单工具状态机，`step` 为校准/测量命令字（�
 - `step=status`（或省略）=只读引导：实时读回 `cal_`，返回 cal_steps（open/short/load/isolation/thru/done 已完成态）、missing_steps、cal_compensation_sets（`^c\d+$` 项）、cal_complete、cal_confidence（calibrated/partial/unknown）、cal_out_of_range（扫频范围相对校准时是否漂移）与客观 next_step（按协议顺序给出第一个缺失步骤及标准件连接说明）。
 - 写步骤 `open/short/load/isolation/thru/done/reset` 走手动 gate、人在环逐步确认；`save/load` 需 slot 1..4；`scan/pause/resume` 控制扫频。
 - 接标准件到 CH0（OPEN/SHORT/LOAD）、CH0-CH1 THRU 连接是仪器协议客观事实，编排权在调用者（模型），本工具不编固定剧本。未连接 ok:false 并给 USB/串口排查清单。
+
+## vna_device（写，P1 #70 设备级门面单工具状态机）
+NanoVNA 设备级杂项门面：单工具状态机，`action` 为设备命令字（必填枚举：status/vbat/freq_offset/edelay/averaging），`value` 仅写动作用。
+- `action=status`（或省略）=只读快照：connected、has_sweep、扫频范围、cal 摘要（复用 cal_confidence/cal_out_of_range 解释）；edelay/averaging/freq_offset 当前值本会话未读回时诚实给 0 + note，绝不猜设备状态。
+- `action=vbat`=读电池电压（wire `vbat`）。
+- `action=freq_offset` 无 value=读本振频偏（wire `freqoffset`）；有 value=写频偏（wire `freqoffset <hz>`）。
+- `action=edelay`=写电延迟 ps（wire `edelay <ps>`）；`action=averaging`=写平均次数 1..64（wire `averages <n>`，executor 内再校验防直调绕过）。
+- 整体 write=true（门面可能写设备），读动作客观返回当前值、写动作走手动 gate；编排权在调用者，不编固定剧本。未连接 ok:false 并给 USB/串口排查清单。

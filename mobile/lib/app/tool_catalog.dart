@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 69 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 70 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -33,7 +33,7 @@ class ToolCatalogEntry {
   final bool write;
 }
 
-/// 桌面端 69 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
+/// 桌面端 70 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
 /// 顺序与 write 标志逐字按 registeredToolSpecs() 注册顺序排列。
 const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
   // ---- 基础调谐 / 解调（注册序 #1-7）----
@@ -216,7 +216,7 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       write: true),
   ToolCatalogEntry(
       name: 'analyze_vna_match',
-      description: '只读：给定负载阻抗 load_r(+load_x) 与频率 f_hz，返回 EFHW/反 L 匹配网络 L/C 建议。负载电阻需 >50Ω。',
+      description: '只读：给定负载阻抗 load_r(+load_x) 与频率 f_hz，返回匹配网络 L/C 建议。topology 可选 series_shunt(默认)/xps/xs/xpl 三电抗拓扑，r_comp 为 R 补偿。负载电阻需 >50Ω（xs 相反）。',
       write: false),
   ToolCatalogEntry(
       name: 'set_noise_blanker',
@@ -324,6 +324,12 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'vna_calibration',
       description:
           '写入：NanoVNA 校准单工具状态机。step 为命令字（status/open/short/load/isolation/thru/done/save/load/scan/pause/resume），save/load 需 slot 1..4。写动作手动 gate 拦截。',
+      write: true),
+  // ---- NanoVNA 设备级门面（P1 #70，写）----
+  ToolCatalogEntry(
+      name: 'vna_device',
+      description:
+          '写入：NanoVNA 设备级杂项单工具状态机。action=status/vbat/freq_offset/edelay/averaging；读动作客观返回当前值，写动作手动 gate 拦截。',
       write: true),
 ];
 

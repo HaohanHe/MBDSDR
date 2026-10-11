@@ -70,6 +70,9 @@ private slots:
     void calCommandsRejectWhenDisconnected();
     void calCoverageTrackedOnlyAfterSweep();
     void scanPauseResumeEmitWords();
+    // --- Device misc command family (P1 #61 client side) ---------------------
+    void deviceMiscWordsAndParsing();
+    void deviceMiscRejectWhenDisconnected();
 };
 
 void TestNanoVnaClient::rfMathKnownValues() {
@@ -316,6 +319,80 @@ void TestNanoVnaClient::scanPauseResumeEmitWords() {
     QCOMPARE(raw->sent_.at(5), QStringLiteral("resume"));
     // scan/pause/resume do NOT refresh cal_ readback.
     QVERIFY(client.calStatus().isEmpty());
+}
+
+void TestNanoVnaClient::deviceMiscWordsAndParsing() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        ReplayTransport::Step{QStringLiteral("help"), {}},
+        ReplayTransport::Step{QStringLiteral("version"), {QStringLiteral("v1")}},
+        ReplayTransport::Step{QStringLiteral("info"), {QStringLiteral("H4")}},
+        // Happy path: vbat reply line -> volts; freqoffset read -> hz.
+        ReplayTransport::Step{QStringLiteral("vbat"), {QStringLiteral("3.82")}},
+        ReplayTransport::Step{QStringLiteral("freqoffset"), {QStringLiteral("-150")}},
+        // Writes: exact wire words + argument.
+        ReplayTransport::Step{QStringLiteral("freqoffset 200"), {}},
+        ReplayTransport::Step{QStringLiteral("edelay 1200"), {}},
+        ReplayTransport::Step{QStringLiteral("averages 8"), {}},
+        // Parse failure: firmware prints a non-numeric line -> honest error.
+        ReplayTransport::Step{QStringLiteral("vbat"), {QStringLiteral("battery?")}},
+    });
+    ReplayTransport* raw = tr.get();
+    NanoVnaClient client(std::move(tr));
+    QVERIFY(client.connect());
+
+    QString err;
+    double volts = 0.0;
+    QVERIFY(client.readVbat(volts, &err));
+    QVERIFY(qFuzzyCompare(volts, 3.82));
+
+    long fh = 0;
+    QVERIFY(client.readFreqOffset(fh, &err));
+    QCOMPARE(fh, -150L);
+
+    QVERIFY(client.setFreqOffset(200, &err));
+    QCOMPARE(client.freqOffsetHz(), 200L);
+
+    QVERIFY(client.setElectricalDelay(1200, &err));
+    QCOMPARE(client.edelayPs(), 1200);
+
+    // Averaging range guard (1..64) rejects before any wire write.
+    QVERIFY(!client.setAveraging(0, &err));
+    QVERIFY(!err.isEmpty());
+    QVERIFY(!client.setAveraging(65, &err));
+    QVERIFY(client.setAveraging(8, &err));
+    QCOMPARE(client.averagingCount(), 8);
+
+    // Parse failure on vbat -> false + honest error.
+    double volts2 = 0.0;
+    QVERIFY(!client.readVbat(volts2, &err));
+    QVERIFY(!err.isEmpty());
+
+    // Command word/arg order on the wire (3 handshake + the 6 replay steps).
+    QCOMPARE(raw->sent_.size(), 9);
+    QCOMPARE(raw->sent_.at(3), QStringLiteral("vbat"));
+    QCOMPARE(raw->sent_.at(4), QStringLiteral("freqoffset"));
+    QCOMPARE(raw->sent_.at(5), QStringLiteral("freqoffset 200"));
+    QCOMPARE(raw->sent_.at(6), QStringLiteral("edelay 1200"));
+    QCOMPARE(raw->sent_.at(7), QStringLiteral("averages 8"));
+    QCOMPARE(raw->sent_.at(8), QStringLiteral("vbat"));
+}
+
+void TestNanoVnaClient::deviceMiscRejectWhenDisconnected() {
+    NanoVnaClient client;   // no transport -> honest empty state
+    QString err;
+    double volts = 0.0;
+    long fh = 0;
+    QVERIFY(!client.isConnected());
+    QVERIFY(!client.readVbat(volts, &err));
+    QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
+    QVERIFY(!client.readFreqOffset(fh, &err));
+    QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
+    QVERIFY(!client.setFreqOffset(100, &err));
+    QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
+    QVERIFY(!client.setElectricalDelay(100, &err));
+    QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
+    QVERIFY(!client.setAveraging(4, &err));
+    QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
 }
 
 QTEST_MAIN(TestNanoVnaClient)

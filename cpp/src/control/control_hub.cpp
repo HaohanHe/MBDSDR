@@ -124,6 +124,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"set_vna_sweep",         true,  &ControlHub::cmdSetVnaSweep},
         {"vna_tdr_cable",         true,  &ControlHub::cmdVnaTdrCable},
         {"vna_calibration",       true,  &ControlHub::cmdVnaCalibration},
+        {"vna_device",             true,  &ControlHub::cmdVnaDevice},
         {"export_vna_snapshot",   true,  &ControlHub::cmdExportVnaSnapshot},
         {"export_spectrum_snapshot", true, &ControlHub::cmdExportSpectrumSnapshot},
         {"export_peaks_csv",    true,  &ControlHub::cmdExportPeaksCsv},
@@ -1874,6 +1875,95 @@ QJsonObject ControlHub::cmdVnaCalibration(const QJsonObject& a) {
     o["cal_complete"] = have.contains("done");
     o["coverage_recorded"] = vna.calCoverageKnown();
     return o;
+}
+
+// P1 #70: device-level misc facade mirror. status/vbat/freq_offset-read are read
+// actions; freq_offset-set/edelay/averaging are writes (gated by the write table).
+QJsonObject ControlHub::cmdVnaDevice(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "vna_device";
+    auto& vna = engine_->vnaClient();
+    const QString action = a.value("action").toString(QStringLiteral("status"));
+
+    if (!vna.isConnected()) {
+        o["ok"] = false;
+        o["error"] = QStringLiteral("NanoVNA 未连接");
+        o["suggestion"] = QStringLiteral(
+            "排查 ①USB/CDC 接线（Linux 需 dialout/udev，Windows 见设备管理器 COMx）"
+            "②设备是否进入扫频模式 ③串口路径（/dev/ttyACM0 或 COMx）；连接后先 set_vna_sweep");
+        return o;
+    }
+
+    if (action == QStringLiteral("status")) {
+        o["connected"] = true;
+        o["has_sweep"] = vna.hasSweep();
+        o["start_hz"] = (double)vna.sweepStartHz();
+        o["stop_hz"] = (double)vna.sweepStopHz();
+        o["points"] = vna.sweepPoints();
+        o["electrical_delay_ps"] = 0;
+        o["averaging"] = 0;
+        o["freq_offset_hz"] = 0;
+        o["note"] = QStringLiteral(
+            "edelay/averaging/freq_offset 当前值本会话未读回，0 不代表设备真实设置");
+        return o;
+    }
+
+    if (action == QStringLiteral("vbat")) {
+        double volts = 0.0; QString err;
+        const bool ok = vna.readVbat(volts, &err);
+        o["ok"] = ok;
+        if (ok) o["volts"] = volts;
+        else    o["error"] = err.isEmpty() ? QStringLiteral("读 vbat 失败") : err;
+        return o;
+    }
+
+    if (action == QStringLiteral("freq_offset")) {
+        if (!a.contains("value")) {
+            long hz = 0; QString err;
+            const bool ok = vna.readFreqOffset(hz, &err);
+            o["ok"] = ok;
+            if (ok) o["freq_offset_hz"] = (double)hz;
+            else    o["error"] = err.isEmpty() ? QStringLiteral("读 freqoffset 失败") : err;
+            return o;
+        }
+        if (!a.value("value").isDouble())
+            return errResult(QStringLiteral("freq_offset 写需要 value（Hz 整数）"));
+        const long hz = (long)a.value("value").toDouble();
+        QString err;
+        const bool ok = vna.setFreqOffset(hz, &err);
+        o["ok"] = ok;
+        o["value"] = (double)hz;
+        if (!ok) o["error"] = err.isEmpty() ? QStringLiteral("写 freqoffset 失败") : err;
+        return o;
+    }
+
+    if (action == QStringLiteral("edelay")) {
+        if (!a.value("value").isDouble())
+            return errResult(QStringLiteral("edelay 需要 value（电延迟 ps 整数）"));
+        const int ps = a.value("value").toInt();
+        QString err;
+        const bool ok = vna.setElectricalDelay(ps, &err);
+        o["ok"] = ok;
+        o["value"] = ps;
+        if (!ok) o["error"] = err.isEmpty() ? QStringLiteral("写 edelay 失败") : err;
+        return o;
+    }
+
+    if (action == QStringLiteral("averaging")) {
+        if (!a.value("value").isDouble())
+            return errResult(QStringLiteral("averaging 需要 value（平均次数 1..64 整数）"));
+        const int n = a.value("value").toInt();
+        if (n < 1 || n > 64)
+            return errResult(QStringLiteral("averaging 必须在 1..64 之间"));
+        QString err;
+        const bool ok = vna.setAveraging(n, &err);
+        o["ok"] = ok;
+        o["value"] = n;
+        if (!ok) o["error"] = err.isEmpty() ? QStringLiteral("写 averages 失败") : err;
+        return o;
+    }
+
+    return errResult(QStringLiteral("未知 action，合法值：status/vbat/freq_offset/edelay/averaging"));
 }
 
 QJsonObject ControlHub::cmdListBookmarks(const QJsonObject&) {

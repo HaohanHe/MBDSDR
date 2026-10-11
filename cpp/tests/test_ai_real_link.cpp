@@ -364,6 +364,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "get_capabilities", "get_recording_state",
         // P0 #59: single-tool NanoVNA calibration state machine (write, gated).
         "vna_calibration",
+        // P1 #70: device-level misc facade state machine (write, gated).
+        "vna_device",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -400,6 +402,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(ai::isWriteTool("set_color_map"));
     // P0 #59: vna_calibration write steps go through the manual gate.
     QVERIFY(ai::isWriteTool("vna_calibration"));
+    // P1 #70: vna_device facade (can write device state) is gated as a whole.
+    QVERIFY(ai::isWriteTool("vna_device"));
     QVERIFY(!ai::isWriteTool("get_network_audio_status"));
     QVERIFY(!ai::isWriteTool("get_scan_link_status"));
     QVERIFY(!ai::isWriteTool("get_squelch_status"));

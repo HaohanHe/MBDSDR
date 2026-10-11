@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 69);
+    QCOMPARE(specs.size(), 70);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -312,9 +312,12 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "无解码结果时 rows=0 诚实空态，不伪造呼号/经纬度。")},
         {"analyze_vna_match",
          QString::fromUtf8(
-            "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回 EFHW/反 L 匹配网络的 L/C 建议（Q、串联/并联臂值）"
-            "（驻波下不来/做匹配/加感）。"
-            "负载电阻需 >50Ω；否则 valid 诚实为 false。")},
+            "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回匹配网络的 L/C 建议"
+            "（Q、串联/并联臂值）（驻波下不来/做匹配/加感）。"
+            "topology 可选：series_shunt（默认，既有 EFHW/反 L 语义）/xps（shunt 并联后 series 串联）"
+            "/xs（series 串联后 shunt 并联）/xpl（shunt-series-shunt 三电抗 Pi）；"
+            "r_comp 可选，串联 R 补偿（≥0，并入负载电阻）。"
+            "无闭式解的拓扑诚实 valid:false，不伪造数值。")},
         {"set_noise_blanker",
          QString::fromUtf8(
             "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。")},
@@ -418,6 +421,15 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "save/load=保存/加载校准集（需 slot 1..4）；scan/pause/resume=扫频控制。"
             "写动作走手动 gate、人在环逐步确认。接标准件到 CH0 / CH0-CH1 THRU 是仪器协议客观事实，"
             "编排权在调用者（模型），非固定剧本。未连接 ok:false 并给排查清单。")},
+        // P1 #70: device-level misc facade state machine (write, gated).
+        {"vna_device",
+         QString::fromUtf8(
+            "写入：NanoVNA 设备级杂项单工具状态机。action 为命令字（必填枚举）："
+            "status=只读（连接/校准摘要/扫频范围/edelay/averaging/freq_offset 当前值，未读回的诚实给 0+note）；"
+            "vbat=读电池电压；freq_offset 无 value=读本振频偏(Hz)、有 value=写频偏；"
+            "edelay=写电延迟(ps)；averaging=写平均次数(1..64)。"
+            "写动作走手动 gate、人在环确认。读动作客观返回当前值；编排权在调用者，非固定剧本。"
+            "未连接 ok:false 并给排查清单。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {
@@ -474,7 +486,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 69);
+    QCOMPARE(headerCount, 70);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

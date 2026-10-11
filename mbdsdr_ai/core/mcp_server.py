@@ -291,6 +291,107 @@ def _build_tool_table() -> List[Dict[str, Any]]:
     return table
 
 
+# ======================================================================
+# 二级域目录（P1 #64）——冻结 8 域，与 C++ 侧 mcp_server.cpp 同名同序
+#
+# 这是服务器侧分组视图：工具 schema 的唯一事实源仍是上面的
+# ``_build_tool_table()``；这里只做“每工具恰好归属一个域”的桶分组。
+# Python 面（SDRController）当前没有 VNA 工具，故三个 VNA 域在本表面向用户
+# 为空卡片（诚实空态）；8 域名集合本身保持与 C++ 完全一致，形成跨语言钉扎。
+# ======================================================================
+FROZEN_DOMAIN_SUMMARIES: Dict[str, str] = {
+    "SDR 调谐/VFO": "接收机调谐、解调模式、带宽/静噪/降噪与多 VFO 及频谱读取参数控制。",
+    "亚音数字解码": "CTCSS/DCS 亚音与各类数字报文解码器的启停与报文读取。",
+    "VNA 测量": "VNA 扫频设置与 S 参数原始测量读取。",
+    "VNA 分析": "对 VNA 测量数据做谐振/阻抗匹配等分析。",
+    "VNA 校准": "VNA 校准状态与校准流程控制。",
+    "导出演制": "IQ 录制、录制状态与音频/频谱数据导出。",
+    "书签扫描卫星": "书签管理、步进扫描与卫星过境预报/调谐。",
+    "系统设备": "设备连接、音频/服务开关与整体状态。",
+}
+
+FROZEN_DOMAIN_NAMES: List[str] = list(FROZEN_DOMAIN_SUMMARIES.keys())
+
+# 本表面工具 -> 域。未列出的工具会被 _grouped_tool_cards 视为“未分配”，
+# 测试会据此钉死“每工具恰好一个域”。
+_TOOL_DOMAIN: Dict[str, str] = {
+    # SDR 调谐/VFO
+    "set_frequency": "SDR 调谐/VFO",
+    "get_frequency": "SDR 调谐/VFO",
+    "set_demod": "SDR 调谐/VFO",
+    "get_demod": "SDR 调谐/VFO",
+    "set_gain": "SDR 调谐/VFO",
+    "set_sample_rate": "SDR 调谐/VFO",
+    "set_bandwidth": "SDR 调谐/VFO",
+    "set_squelch": "SDR 调谐/VFO",
+    "start_analyze": "SDR 调谐/VFO",
+    "set_anr_enabled": "SDR 调谐/VFO",
+    "set_anr_strength": "SDR 调谐/VFO",
+    "learn_noise_floor": "SDR 调谐/VFO",
+    "add_vfo": "SDR 调谐/VFO",
+    "remove_vfo": "SDR 调谐/VFO",
+    "set_primary_vfo": "SDR 调谐/VFO",
+    "list_vfos": "SDR 调谐/VFO",
+    "read_spectrum": "SDR 调谐/VFO",
+    # 亚音数字解码
+    "start_decoder": "亚音数字解码",
+    "stop_decoder": "亚音数字解码",
+    "get_decoder_messages": "亚音数字解码",
+    # VNA 测量 / VNA 分析 / VNA 校准：本面无 VNA 工具（空卡片，诚实空态）
+    # 导出演制
+    "start_recording": "导出演制",
+    "stop_recording": "导出演制",
+    "get_recording_status": "导出演制",
+    "read_iq": "导出演制",
+    "read_audio": "导出演制",
+    # 书签扫描卫星
+    "start_scan": "书签扫描卫星",
+    "stop_scan": "书签扫描卫星",
+    "get_scan_results": "书签扫描卫星",
+    "list_satellites": "书签扫描卫星",
+    "get_satellite_pass": "书签扫描卫星",
+    "tune_satellite": "书签扫描卫星",
+    "set_ground_station": "书签扫描卫星",
+    "add_bookmark": "书签扫描卫星",
+    "list_bookmarks": "书签扫描卫星",
+    "delete_bookmark": "书签扫描卫星",
+    "find_nearest_bookmark": "书签扫描卫星",
+    # 系统设备
+    "list_devices": "系统设备",
+    "connect": "系统设备",
+    "disconnect": "系统设备",
+    "is_connected": "系统设备",
+    "list_audio_outputs": "系统设备",
+    "set_audio_output": "系统设备",
+    "start_audio": "系统设备",
+    "stop_audio": "系统设备",
+    "set_volume": "系统设备",
+    "set_mute": "系统设备",
+    "start_remote_control": "系统设备",
+    "stop_remote_control": "系统设备",
+    "start_web_server": "系统设备",
+    "stop_web_server": "系统设备",
+    "get_service_status": "系统设备",
+    "get_status": "系统设备",
+    "shutdown": "系统设备",
+}
+
+
+def _resolve_domain(query: str) -> Optional[str]:
+    """把 params.domain 容错解析成冻结域名；匹配不到返回 None。"""
+    if query in FROZEN_DOMAIN_NAMES:
+        return query
+    q = query.strip().lower()
+    for name in FROZEN_DOMAIN_NAMES:
+        if name.lower() == q:
+            return name
+    hits = [n for n in FROZEN_DOMAIN_NAMES
+            if q and (n.lower().find(q) >= 0 or q.find(n.lower()) >= 0)]
+    if len(hits) == 1:
+        return hits[0]
+    return None
+
+
 def _ndarray_to_json(arr: Any) -> Any:
     """numpy 数组转 JSON；None 表示无数据。"""
     if arr is None:
@@ -325,12 +426,67 @@ class MCPToolSet:
 
     # ------------------------------------------------------------------
     def list_tools(self) -> List[Dict[str, Any]]:
-        """返回 MCP tools/list 格式的工具列表（不含 handler）。"""
+        """返回扁平工具列表（name/description/inputSchema，不含 handler）。
+
+        保留为兼容内部调用；对外 ``tools/list`` 走 :meth:`tools_list_result`
+        的二级域分组视图。
+        """
         return [
             {"name": t["name"], "description": t["description"],
              "inputSchema": t["inputSchema"]}
             for t in self._table
         ]
+
+    # ------------------------------------------------------------------
+    # 二级域分组视图（P1 #64，与 C++ mcp_server.cpp 同形状）
+    # ------------------------------------------------------------------
+    def _bucketed(self, full: bool) -> Dict[str, List[Dict[str, Any]]]:
+        """按 _TOOL_DOMAIN 把本表工具分桶。full=True 放完整 schema，否则只放名。"""
+        buckets: Dict[str, List[Dict[str, Any]]] = {
+            n: [] for n in FROZEN_DOMAIN_NAMES}
+        for t in self._table:
+            dom = _TOOL_DOMAIN.get(t["name"])
+            if dom is None:
+                continue  # 未分配工具：测试会钉死不发生
+            if full:
+                buckets[dom].append(
+                    {"name": t["name"], "description": t["description"],
+                     "inputSchema": t["inputSchema"]})
+            else:
+                buckets[dom].append({"name": t["name"]})
+        return buckets
+
+    def tools_list_result(self, params: Optional[Dict[str, Any]] = None):
+        """tools/list 的 result 体；带错误串时返回 (None, errmsg)。"""
+        params = params or {}
+        detailed = bool(params.get("detailed", False))
+        dom = params.get("domain")
+
+        if isinstance(dom, str) and dom:
+            name = _resolve_domain(dom)
+            if name is None:
+                return None, ("未知 domain: %s（合法域: %s）"
+                              % (dom, "、".join(FROZEN_DOMAIN_NAMES)))
+            entries = [
+                {"name": t["name"], "description": t["description"],
+                 "inputSchema": t["inputSchema"]}
+                for t in self._table if _TOOL_DOMAIN.get(t["name"]) == name]
+            return {"tools": entries}, None
+
+        buckets = self._bucketed(full=detailed)
+        if detailed:
+            cards = [
+                {"domain": n, "summary": FROZEN_DOMAIN_SUMMARIES[n],
+                 "tools": buckets[n]}
+                for n in FROZEN_DOMAIN_NAMES]
+            return {"domains": cards}, None
+
+        # 默认：域卡片（只列工具名）。
+        cards = [
+            {"domain": n, "summary": FROZEN_DOMAIN_SUMMARIES[n],
+             "tools": [t["name"] for t in buckets[n]]}
+            for n in FROZEN_DOMAIN_NAMES]
+        return {"tools": cards}, None
 
     def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
         """按名调用工具。无后端时安全降级，绝不抛异常。"""
@@ -369,7 +525,10 @@ class MCPToolSet:
         if method == "notifications/initialized":
             return None  # 通知无需回复
         if method == "tools/list":
-            return ok({"tools": self.list_tools()})
+            result, errmsg = self.tools_list_result(params)
+            if errmsg is not None:
+                return err(-32602, errmsg)
+            return ok(result)
         if method == "tools/call":
             name = params.get("name")
             arguments = params.get("arguments") or {}

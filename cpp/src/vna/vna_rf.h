@@ -117,6 +117,42 @@ LMatchResult lMatchNetwork(std::complex<double> z_load, double f_hz, double r0 =
 // source). Pure textbook matching equations.
 LMatchResult efhwMatch(std::complex<double> z_load, double f_hz, double r0 = 50.0);
 
+// ---- Multi-reactance matching topologies (clean-room closed forms) --------
+// topology (lower-case string):
+//   "xps" = shunt reactance across the load, then series reactance to the
+//           source (parallel-first / inverse-L; valid when R_load > r0).
+//   "xs"  = series reactance on the load, then shunt reactance at the source
+//           (series-first / canonical L; valid when R_load < r0).
+//   "xpl" = shunt--series--shunt Pi (low-pass: shunt C at both ends, series L
+//           middle; valid when R_load > r0). The Pi needs a chosen loaded Q;
+//           this implementation picks Q = 2*sqrt(R_load/r0 - 1) (a documented
+//           design choice, NOT a measured fact) and says so in note.
+// series_*   = the middle/only series arm (Henry when inductive, Farad when
+//              capacitive; the other unit is 0).
+// shunt_*    = the first shunt arm (load side for xps/xpl).
+// shunt2_*   = the second shunt arm (source side; xpl only, 0 otherwise).
+// Honest: valid=false (+ note) when f/r0/R out of range, the topology is the
+// wrong shape for this load, or the topology string is unknown -- never a
+// fabricated number. r_comp is a non-negative series loss resistance folded
+// into the load R before solving.
+struct MatchTopologyResult {
+    bool valid = false;
+    bool closed_form = true;   // false when the asked topology has no closed form
+    double q = 0;
+    double series_henry = 0.0;
+    double series_farad = 0.0;
+    double shunt_henry = 0.0;
+    double shunt_farad = 0.0;
+    double shunt2_henry = 0.0;
+    double shunt2_farad = 0.0;
+    std::string topology;      // echoed + solved, e.g. "xps"
+    std::string note;          // honest invalidity / design-choice explanation
+};
+MatchTopologyResult analyzeMatchTopology(const std::string& topology,
+                                         std::complex<double> z_load,
+                                         double f_hz, double r0 = 50.0,
+                                         double r_comp = 0.0);
+
 // ---- Touchstone s1p/s2p ---------------------------------------------------
 // Independent clean-room reader/writer for the Touchstone 1.x/2.0 text format:
 // '!' comments, # FREQUENCY-UNIT S R Z R (frequencies in Hz after unit scaling),

@@ -34,6 +34,10 @@ private slots:
     void tdrPeakSeparation();
     void equivalentRlcExtraction();
     void honestEmpty();
+    void topologyXpsKnownPoint();
+    void topologyXsKnownPoint();
+    void topologyXplKnownPoint();
+    void topologyHonestInvalidAndRcomp();
 };
 
 // Series Rs=50, Xs=50 -> Q=1 -> Rp = 50*(1+1)=100, Xp = 50*(1+1)=100.
@@ -323,6 +327,64 @@ void TestVnaRf::equivalentRlcExtraction() {
     QVERIFY(std::abs(e.resonance_hz - 15.915e6) < 1.5e6);   // within ~10%
     QVERIFY(std::abs(e.series_r_ohm - R) < 3.0);            // ESR ~10 ohm
     QVERIFY(std::abs(e.series_q - 10.0) < 3.0);             // Q ~10
+}
+
+// xps (shunt across load, series to source): load 2000R -> 50 at 3.5 MHz.
+// Q = sqrt(2000/50-1) = 6.245. Shunt X = 2000/6.245 = 320.3 Ohm -> L ~= 14.6 uH;
+// series X = 6.245*50 = 312.3 Ohm -> L ~= 14.2 uH.
+void TestVnaRf::topologyXpsKnownPoint() {
+    MatchTopologyResult m = analyzeMatchTopology("xps", {2000.0, 0.0}, 3.5e6, 50.0);
+    QVERIFY(m.valid);
+    QVERIFY(std::abs(m.q - 6.245) < 0.1);
+    QVERIFY(m.shunt_henry > 0.0 && m.shunt_farad == 0.0);
+    QVERIFY(std::abs(m.shunt_henry - 14.6e-6) < 1e-6);
+    QVERIFY(m.series_henry > 0.0);
+    QVERIFY(std::abs(m.series_henry - 14.2e-6) < 1e-6);
+    QCOMPARE(m.shunt2_henry, 0.0);   // 2-element topology
+}
+
+// xs (series on load, shunt at source): load 12.5R -> 50. Q = sqrt(50/12.5-1)=1.732.
+// series X = Q*12.5 = 21.65 Ohm -> L ~= 0.985 uH; shunt X = 50/1.732 = 28.87 Ohm -> 1.31 uH.
+void TestVnaRf::topologyXsKnownPoint() {
+    MatchTopologyResult m = analyzeMatchTopology("xs", {12.5, 0.0}, 3.5e6, 50.0);
+    QVERIFY(m.valid);
+    QVERIFY(std::abs(m.q - 1.732) < 0.05);
+    QVERIFY(std::abs(m.series_henry - 0.985e-6) < 0.1e-6);
+    QVERIFY(std::abs(m.shunt_henry - 1.31e-6) < 0.1e-6);
+}
+
+// xpl low-pass Pi: load 2000R -> 50. Chosen Q1 = 2*sqrt(39) = 12.49.
+// Rv = 2000/(1+12.49^2) = 12.74; Q2 = sqrt(50/12.74-1) = 1.71.
+// shunt C at load ~= 284 pF; shunt C at source ~= 1.55 nF; series L ~= 8.2 uH.
+void TestVnaRf::topologyXplKnownPoint() {
+    MatchTopologyResult m = analyzeMatchTopology("xpl", {2000.0, 0.0}, 3.5e6, 50.0);
+    QVERIFY(m.valid);
+    QVERIFY(std::abs(m.q - 12.49) < 0.3);
+    QVERIFY(m.shunt_farad > 0.0);                       // shunt C at load
+    QVERIFY(std::abs(m.shunt_farad - 284e-12) < 30e-12);
+    QVERIFY(m.shunt2_farad > 0.0);                     // shunt C at source
+    QVERIFY(std::abs(m.shunt2_farad - 1.55e-9) < 0.2e-9);
+    QVERIFY(m.series_henry > 0.0);                      // middle series L
+    QVERIFY(std::abs(m.series_henry - 8.2e-6) < 1e-6);
+    QVERIFY(!m.note.empty());                          // design choice disclosed
+}
+
+// Honest invalidity: wrong-shape load, out-of-range params, unknown topology.
+// r_comp folds into the load resistance before solving.
+void TestVnaRf::topologyHonestInvalidAndRcomp() {
+    // xps needs R > r0; xs needs R < r0.
+    QVERIFY(!analyzeMatchTopology("xps", {12.5, 0.0}, 3.5e6, 50.0).valid);
+    QVERIFY(!analyzeMatchTopology("xs", {2000.0, 0.0}, 3.5e6, 50.0).valid);
+    QVERIFY(!analyzeMatchTopology("xpl", {25.0, 0.0}, 3.5e6, 50.0).valid);
+    // Unknown topology: closed_form=false, no numbers fabricated.
+    MatchTopologyResult u = analyzeMatchTopology("totally_bogus", {2000.0, 0.0}, 3.5e6, 50.0);
+    QVERIFY(!u.valid);
+    QVERIFY(!u.closed_form);
+    QCOMPARE(u.series_henry, 0.0);
+    // r_comp = 50 folds in: effective R = 2050 -> Q = sqrt(2050/50-1) = 6.325.
+    MatchTopologyResult c = analyzeMatchTopology("xps", {2000.0, 0.0}, 3.5e6, 50.0, 50.0);
+    QVERIFY(c.valid);
+    QVERIFY(std::abs(c.q - 6.325) < 0.05);
 }
 
 QTEST_MAIN(TestVnaRf)

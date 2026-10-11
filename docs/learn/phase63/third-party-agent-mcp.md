@@ -34,13 +34,49 @@
 |------|------|------|
 | `initialize` | — | `{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"mbdsdr-core","version":"0.1.0"}}` |
 | `notifications/initialized` | — | 无回复（通知） |
-| `tools/list` | — | `{"tools":[{"name","description","inputSchema"},...]}` |
+| `tools/list` | `{}` / `{"domain":<名>}` / `{"detailed":true}` | 默认→8 域卡片；`domain`→该域完整 schema；`detailed`→全部域完整 schema（见 §2.1.1） |
 | `tools/call` | `{"name":..,"arguments":{..}}` | `{"content":[{"type":"text","text":<executeTool 返回的 JSON 串>}]}` |
 
 * **工具表唯一事实源**：`ai::toolDefs()`（底层 `toolDefsFromSpecs(registeredToolSpecs())`）。
   `tools/list` 里没有第二份手写清单；`inputSchema` 直接取 `ToolDef.parameters`
   （已是完整 JSON Schema object），缺 `required` 数组时补空数组 `[]`。
 * 未知方法 → JSON-RPC 错误 `{"code":-32601,"message":"未知方法: <m>"}`。
+
+### 2.1.1 tools/list 二级域分组视图（P1 #64）
+
+工具数量增长后，一次性吐出全部 schema 对 LLM 是噪声。`tools/list` 改为**两级目录**：
+第一级给 8 个**冻结域**卡片（只列工具名），第二级按需下钻到完整 schema。
+域分配是**服务器侧视图**——`ai::toolDefs()` / `registeredToolSpecs()` 本体一个字不改，
+分组只是把既有名字桶分到 8 个域（C++ 侧 `domainForTool`，Python 侧 `_TOOL_DOMAIN`，
+两边**同 8 域名、同序**，跨语言钉扎）。
+
+8 个冻结域（summary 为一句话用途）：
+
+| 域 | 一句话 |
+|----|--------|
+| `SDR 调谐/VFO` | 接收机调谐、解调模式、带宽/静噪/噪声门限与多 VFO 及频谱显示参数控制 |
+| `亚音数字解码` | CTCSS/DCS 亚音与 POCSAG/M17/VOR/ACARS/NAVTEX/FT8/LRPT 等数字报文解码 |
+| `VNA 测量` | VNA 扫频设置、S 参数原始测量与设备级杂项（电池/频偏/电延迟/平均） |
+| `VNA 分析` | 对测量数据做谐振/TDR/滤波/等效电路/阻抗匹配等分析 |
+| `VNA 校准` | VNA 校准状态与校准流程控制 |
+| `导出演制` | IQ 录制、录制状态与各类快照/报文结果导出 |
+| `书签扫描卫星` | 书签管理、波段/链路扫描与卫星过境预报/调谐 |
+| `系统设备` | 设备连接、频率基准校准、网络音频/音源接入与整体状态 |
+
+三种入参分支（C++ 与 Python 参考实现同形状）：
+
+* **默认（无 params）** → `result.tools` = 8 张域卡片数组：
+  `[{"domain":<名>,"summary":<句>,"tools":[<工具名>...]}, ...]`。
+  把全部卡片的 `tools` 名展开即等于 `ai::toolDefs()` 名集合——**不丢、不重**。
+* **`params.domain`**（精确名或容错：trim/小写/唯一子串）→ `result.tools` =
+  该域完整工具列表 `[{name,description,inputSchema}...]`（schema 仍来自 `toolDefs()` 单源）。
+  未知 `domain` → JSON-RPC 错误 `-32602`，message 里**诚实列出全部合法域名**。
+* **`params.detailed:true`** → `result.domains` = 8 张卡片，每张 `tools` 带完整 schema，
+  总数同样不丢。
+
+> 跨语言一致性：Python 参考 `mbdsdr_ai/core/mcp_server.py` 用**同一组 8 域名**做分组
+> （其工具表来自自身 `_build_tool_table`，逐名映射）。Python 面当前无 VNA 工具，故
+> 三个 VNA 域在该面为空卡片（诚实空态）；8 域名集合本身两侧逐名相等。
 
 ### 2.2 写工具手动 gate（MCP 侧强制）
 

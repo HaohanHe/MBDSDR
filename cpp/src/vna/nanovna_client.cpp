@@ -335,5 +335,60 @@ bool NanoVnaClient::resumeScan(QString* err) {
     return true;
 }
 
+// ---- Device misc command family (P1 #61 client side) -----------------------
+
+bool NanoVnaClient::readVbat(double& volts, QString* err) {
+    volts = 0.0;
+    if (!guardConnected(connected_, err)) return false;
+    const QList<QString> lines = exec(QStringLiteral("vbat"));
+    // The firmware prints one voltage line (e.g. "3.82"). Honest: a missing or
+    // non-numeric reply is an error, never a fabricated battery voltage.
+    for (const QString& line : lines) {
+        bool ok = false;
+        double v = line.toDouble(&ok);
+        if (ok) { volts = v; return true; }
+    }
+    if (err) *err = QStringLiteral("vbat 回复无法解析为电压值");
+    return false;
+}
+
+bool NanoVnaClient::readFreqOffset(long& hz, QString* err) {
+    hz = 0;
+    if (!guardConnected(connected_, err)) return false;
+    const QList<QString> lines = exec(QStringLiteral("freqoffset"));
+    for (const QString& line : lines) {
+        bool ok = false;
+        long v = line.toLong(&ok);
+        if (ok) { hz = v; return true; }
+    }
+    if (err) *err = QStringLiteral("freqoffset 回复无法解析为整数 Hz");
+    return false;
+}
+
+bool NanoVnaClient::setFreqOffset(long hz, QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("freqoffset %1").arg(hz));
+    freqOffsetHz_ = hz;   // record the applied session value
+    return true;
+}
+
+bool NanoVnaClient::setElectricalDelay(int ps, QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    exec(QStringLiteral("edelay %1").arg(ps));
+    edelayPs_ = ps;       // port extension electrical delay (picoseconds)
+    return true;
+}
+
+bool NanoVnaClient::setAveraging(int n, QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    if (n < 1 || n > 64) {
+        if (err) *err = QStringLiteral("averages 硬件平均档必须为 1..64");
+        return false;
+    }
+    exec(QStringLiteral("averages %1").arg(n));
+    averages_ = n;
+    return true;
+}
+
 } // namespace vna
 } // namespace mbdsdr

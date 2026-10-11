@@ -1398,6 +1398,148 @@ QString execVnaCalibration(const QJsonObject& args, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// vna_device (write -- gated): single-tool device-level misc state machine.
+// action selects one instrument-protocol command; read actions (status/vbat/
+// freq_offset-read) return objective current values, write actions (freq_offset
+// set / edelay / averaging) route through the manual gate. No fixed script --
+// the caller decides when to change bias/delay/averaging.
+QString execVnaDevice(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                      const SourceInfo& src,
+                      ui::BookmarkManager* /*bookmarks*/) {
+    auto& vna = engine->vnaClient();
+    const QString action = args.value("action").toString(QStringLiteral("status"));
+
+    // Honest unconnected envelope (before any command is issued).
+    if (!vna.isConnected()) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("NanoVNA 未连接");
+        o["suggestion"] = QString::fromUtf8(
+                   "排查 ①USB/CDC 接线（Linux 需 dialout/udev，Windows 见设备管理器 COMx）"
+                   "②设备是否进入扫频模式 ③串口路径（/dev/ttyACM0 或 COMx）；"
+                   "连接后先 set_vna_sweep 再操作设备");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+
+    // status: read-only objective snapshot. edelay/averaging/freq_offset are NOT
+    // kept as client readbacks in this session -> honest 0 + note, never guessed.
+    if (action == QStringLiteral("status")) {
+        QJsonObject o;
+        o["ok"] = true;
+        o["action"] = "status";
+        o["has_sweep"] = vna.hasSweep();
+        o["start_hz"] = (double)vna.sweepStartHz();
+        o["stop_hz"] = (double)vna.sweepStopHz();
+        o["points"] = vna.sweepPoints();
+        fillCalSteps(o, vna);
+        addCalInterpretation(o, vna);
+        o["electrical_delay_ps"] = 0;
+        o["averaging"] = 0;
+        o["freq_offset_hz"] = 0;
+        o["note"] = QString::fromUtf8(
+                   "edelay/averaging/freq_offset 当前值本会话未读回，0 不代表设备真实设置；"
+                   "读电压用 action=vbat，读频偏用 action=freq_offset（不带 value）");
+        addSourceFields(o, src);
+        // addSourceFields wrote the SDR-source connected flag; the VNA tool's
+        // "connected" must reflect the NanoVNA link, not the SDR source.
+        o["connected"] = vna.isConnected();
+        return compact(o);
+    }
+
+    if (action == QStringLiteral("vbat")) {
+        double volts = 0.0;
+        QString err;
+        const bool ok = vna.readVbat(volts, &err);
+        QJsonObject o;
+        o["ok"] = ok;
+        o["action"] = "vbat";
+        if (ok) o["volts"] = volts;
+        else    o["error"] = err.isEmpty() ? QString::fromUtf8("读 vbat 失败") : err;
+        addSourceFields(o, src);
+        return compact(o);
+    }
+
+    if (action == QStringLiteral("freq_offset")) {
+        // No value -> read current offset; with value -> write (gated at gate layer).
+        if (!args.contains("value")) {
+            long hz = 0;
+            QString err;
+            const bool ok = vna.readFreqOffset(hz, &err);
+            QJsonObject o;
+            o["ok"] = ok;
+            o["action"] = "freq_offset";
+            if (ok) o["freq_offset_hz"] = (double)hz;
+            else    o["error"] = err.isEmpty() ? QString::fromUtf8("读 freqoffset 失败") : err;
+            addSourceFields(o, src);
+            return compact(o);
+        }
+        if (!args.value("value").isDouble()) {
+            QJsonObject o; o["ok"] = false;
+            o["error"] = QString::fromUtf8("freq_offset 写需要 value（Hz 整数）");
+            addSourceFields(o, src); return compact(o);
+        }
+        const long hz = (long)args.value("value").toDouble();
+        QString err;
+        const bool ok = vna.setFreqOffset(hz, &err);
+        QJsonObject o;
+        o["ok"] = ok;
+        o["action"] = "freq_offset";
+        o["value"] = (double)hz;
+        if (!ok) o["error"] = err.isEmpty() ? QString::fromUtf8("写 freqoffset 失败") : err;
+        addSourceFields(o, src);
+        return compact(o);
+    }
+
+    if (action == QStringLiteral("edelay")) {
+        if (!args.value("value").isDouble()) {
+            QJsonObject o; o["ok"] = false;
+            o["error"] = QString::fromUtf8("edelay 需要 value（电延迟 ps 整数）");
+            addSourceFields(o, src); return compact(o);
+        }
+        const int ps = args.value("value").toInt();
+        QString err;
+        const bool ok = vna.setElectricalDelay(ps, &err);
+        QJsonObject o;
+        o["ok"] = ok;
+        o["action"] = "edelay";
+        o["value"] = ps;
+        if (!ok) o["error"] = err.isEmpty() ? QString::fromUtf8("写 edelay 失败") : err;
+        addSourceFields(o, src);
+        return compact(o);
+    }
+
+    if (action == QStringLiteral("averaging")) {
+        // Executor-side range check too -- defends a direct call that bypasses
+        // the manual gate.
+        if (!args.value("value").isDouble()) {
+            QJsonObject o; o["ok"] = false;
+            o["error"] = QString::fromUtf8("averaging 需要 value（平均次数 1..64 整数）");
+            addSourceFields(o, src); return compact(o);
+        }
+        const int n = args.value("value").toInt();
+        if (n < 1 || n > 64) {
+            QJsonObject o; o["ok"] = false;
+            o["error"] = QString::fromUtf8("averaging 必须在 1..64 之间");
+            addSourceFields(o, src); return compact(o);
+        }
+        QString err;
+        const bool ok = vna.setAveraging(n, &err);
+        QJsonObject o;
+        o["ok"] = ok;
+        o["action"] = "averaging";
+        o["value"] = n;
+        if (!ok) o["error"] = err.isEmpty() ? QString::fromUtf8("写 averages 失败") : err;
+        addSourceFields(o, src);
+        return compact(o);
+    }
+
+    QJsonObject o; o["ok"] = false;
+    o["error"] = QString::fromUtf8("未知 action，合法值：status/vbat/freq_offset/edelay/averaging");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // analyze_vna_resonance (read): run vna_rf::analyzeResonance on the live sweep.
 QString execAnalyzeVnaResonance(const QJsonObject&, dsp::SpectrumEngine* engine,
                                 const SourceInfo& src,
@@ -1753,15 +1895,46 @@ QString execAnalyzeVnaMatch(const QJsonObject& a, dsp::SpectrumEngine*,
         o["note"] = QString::fromUtf8("需要 load_r(>0) 与 f_hz(>0)");
         addSourceFields(o, src); return compact(o);
     }
-    vna::LMatchResult m = vna::efhwMatch({r, x}, f, 50.0);
-    o["valid"] = m.valid;
-    o["q"] = m.q;
-    o["series_henry"] = m.series_henry;
-    o["series_farad"] = m.series_farad;
-    o["shunt_henry"] = m.shunt_henry;
-    o["shunt_farad"] = m.shunt_farad;
-    o["topology"] = QString::fromStdString(m.topology);
-    if (!m.valid) o["note"] = QString::fromUtf8("负载电阻需 > 50Ω（EFHW 高阻馈电点）");
+    // Optional R-compensation (series loss resistance) folded into the load.
+    double rComp = a.value("r_comp").toDouble(0.0);
+    if (!std::isfinite(rComp) || rComp < 0.0) {
+        o["valid"] = false;
+        o["note"] = QString::fromUtf8("r_comp 需为 >=0 的电阻值");
+        addSourceFields(o, src); return compact(o);
+    }
+    const double rEff = r + rComp;
+    const QString topology = a.value("topology").toString(QStringLiteral("series_shunt"));
+
+    // Default (omitted) topology keeps the legacy EFHW inverse-L output byte-for-
+    // byte: same fields, same notes, same validity rule (R_load > 50).
+    if (topology == QStringLiteral("series_shunt")) {
+        vna::LMatchResult m = vna::efhwMatch({rEff, x}, f, 50.0);
+        o["valid"] = m.valid;
+        o["q"] = m.q;
+        o["series_henry"] = m.series_henry;
+        o["series_farad"] = m.series_farad;
+        o["shunt_henry"] = m.shunt_henry;
+        o["shunt_farad"] = m.shunt_farad;
+        o["topology"] = QString::fromStdString(m.topology);
+        if (!m.valid) o["note"] = QString::fromUtf8("负载电阻需 > 50Ω（EFHW 高阻馈电点）");
+        addSourceFields(o, src); return compact(o);
+    }
+
+    // Multi-reactance topologies (xps / xs / xpl): closed-form pure function in
+    // vna_rf. No closed-form / unknown topology -> honest valid:false.
+    vna::MatchTopologyResult t =
+        vna::analyzeMatchTopology(topology.toStdString(), {rEff, x}, f, 50.0);
+    o["valid"] = t.valid;
+    o["q"] = t.q;
+    o["series_henry"] = t.series_henry;
+    o["series_farad"] = t.series_farad;
+    o["shunt_henry"] = t.shunt_henry;
+    o["shunt_farad"] = t.shunt_farad;
+    o["shunt2_henry"] = t.shunt2_henry;
+    o["shunt2_farad"] = t.shunt2_farad;
+    o["topology"] = QString::fromStdString(t.topology);
+    if (!t.valid) o["note"] = QString::fromStdString(t.note);
+    else if (!t.closed_form) o["note"] = QString::fromStdString(t.note);
     addSourceFields(o, src); return compact(o);
 }
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
@@ -2391,6 +2564,8 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_recording_state", &execGetRecordingState},
         // P0 #59: single-tool NanoVNA calibration state machine (write, gated).
         {"vna_calibration", &execVnaCalibration},
+        // P1 #61/#70: device-level misc facade state machine (write, gated).
+        {"vna_device", &execVnaDevice},
     };
     return kTable;
 }

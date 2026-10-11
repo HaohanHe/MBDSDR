@@ -90,6 +90,18 @@ private slots:
     void vnaCalibration_writeStepsReplayAndSlotValidation();
     void getVnaStatus_calInterpretationAndCoverageOutOfRange();
     void getVnaData_minVswrAndNoteBranches();
+    // --- P1 #70: vna_device device-level facade state machine -----------------
+    void vnaDevice_isWriteTool();
+    void vnaDevice_unconnectedHonest();
+    void vnaDevice_statusConnectedSparse();
+    void vnaDevice_vbatReadReplay();
+    void vnaDevice_freqOffsetReadWriteReplay();
+    void vnaDevice_edelayWriteReplay();
+    void vnaDevice_averagingRangeAndWriteReplay();
+    void vnaDevice_unknownActionHonest();
+    // --- P1 #61: analyze_vna_match multi-topology (xps/xs/xpl + r_comp) --------
+    void analyzeMatch_topologyEnumInSchema();
+    void analyzeMatch_xpsNumericAndUnknownTopologyHonest();
 };
 
 void TestAgent::initTestCase() {
@@ -108,7 +120,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 69);
+    QCOMPARE(tools.size(), 70);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -820,8 +832,8 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 40 writes / 29 reads (69 tools; vna_calibration added).
-    QCOMPARE(writes, 40);
+    // The frozen split: 41 writes / 29 reads (70 tools; vna_device added).
+    QCOMPARE(writes, 41);
     QCOMPARE(reads, 29);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
@@ -1700,6 +1712,204 @@ void TestAgent::getVnaData_minVswrAndNoteBranches() {
         QVERIFY2(r.value("note").toString().contains(QStringLiteral("coax_loss")),
                  qPrintable(r.value("note").toString()));
     }
+}
+
+// --- P1 #70: vna_device device-level facade state machine -------------------
+void TestAgent::vnaDevice_isWriteTool() {
+    QVERIFY(ai::isWriteTool("vna_device"));
+}
+
+// No transport -> honest ok:false + USB/serial checklist (same wording family).
+void TestAgent::vnaDevice_unconnectedHonest() {
+    dsp::SpectrumEngine engine;   // no transport -> unconnected
+    QJsonObject r = runTool(engine, "vna_device", {{"action", "status"}});
+    QVERIFY2(!r.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(r).toJson(QJsonDocument::Compact))));
+    QVERIFY2(r.value("error").toString().contains(QStringLiteral("未连接")),
+             qPrintable(r.value("error").toString()));
+    QVERIFY2(r.value("suggestion").toString().contains(QStringLiteral("USB")),
+             qPrintable(r.value("suggestion").toString()));
+}
+
+// Connected status: read-only snapshot. edelay/averaging/freq_offset were never
+// read back this session -> honest 0 + note (never guess device state).
+void TestAgent::vnaDevice_statusConnectedSparse() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        {"help", {}},
+        {"version", {"v1"}},
+        {"info", {"NanoVNA H4"}},
+    });
+    dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(std::move(tr));
+    QJsonObject r = runTool(engine, "vna_device", {{"action", "status"}});
+    QVERIFY2(r.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(r).toJson(QJsonDocument::Compact))));
+    QCOMPARE(r.value("connected").toBool(), true);
+    QCOMPARE(r.value("electrical_delay_ps").toInt(), 0);
+    QCOMPARE(r.value("averaging").toInt(), 0);
+    QVERIFY2(r.value("note").toString().contains(QStringLiteral("未读回")),
+             qPrintable(r.value("note").toString()));
+}
+
+// vbat: wire "vbat" -> reply "3.21" -> volts 3.21.
+void TestAgent::vnaDevice_vbatReadReplay() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        {"help", {}},
+        {"version", {"v1"}},
+        {"info", {"NanoVNA H4"}},
+        {"vbat", {"3.21"}},
+    });
+    ReplayTransport* raw = tr.get();
+    dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(std::move(tr));
+    QJsonObject r = runTool(engine, "vna_device", {{"action", "vbat"}});
+    QVERIFY2(r.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(r).toJson(QJsonDocument::Compact))));
+    QVERIFY2(std::fabs(r.value("volts").toDouble() - 3.21) < 1e-9,
+             qPrintable(QString::number(r.value("volts").toDouble())));
+    QVERIFY(raw->sent_.contains(QStringLiteral("vbat")));
+}
+
+// freq_offset: no value -> wire "freqoffset" read; with value -> wire
+// "freqoffset <hz>" write. Non-numeric value rejected before the wire.
+void TestAgent::vnaDevice_freqOffsetReadWriteReplay() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        {"help", {}},
+        {"version", {"v1"}},
+        {"info", {"NanoVNA H4"}},
+        {"freqoffset", {"-123"}},
+        {"freqoffset 200", {}},
+    });
+    ReplayTransport* raw = tr.get();
+    dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(std::move(tr));
+
+    QJsonObject r1 = runTool(engine, "vna_device", {{"action", "freq_offset"}});
+    QVERIFY2(r1.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(r1).toJson(QJsonDocument::Compact))));
+    QCOMPARE(r1.value("freq_offset_hz").toDouble(), -123.0);
+
+    QJsonObject r2 = runTool(engine, "vna_device", {{"action", "freq_offset"}, {"value", 200.0}});
+    QVERIFY2(r2.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(r2).toJson(QJsonDocument::Compact))));
+    QVERIFY(raw->sent_.contains(QStringLiteral("freqoffset 200")));
+
+    // Non-numeric value -> honest error, no wire command.
+    auto tr3 = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        {"help", {}},
+        {"version", {"v1"}},
+        {"info", {"NanoVNA H4"}},
+    });
+    dsp::SpectrumEngine engine3;
+    engine3.vnaClient().attachTransport(std::move(tr3));
+    QJsonObject r3 = runTool(engine3, "vna_device", {{"action", "freq_offset"}, {"value", "abc"}});
+    QVERIFY(!r3.value("ok").toBool());
+    QVERIFY2(r3.value("error").toString().contains(QStringLiteral("value")),
+             qPrintable(r3.value("error").toString()));
+}
+
+// edelay: value required (ps int); lands on the wire as "edelay <ps>".
+void TestAgent::vnaDevice_edelayWriteReplay() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        {"help", {}},
+        {"version", {"v1"}},
+        {"info", {"NanoVNA H4"}},
+        {"edelay 500", {}},
+    });
+    ReplayTransport* raw = tr.get();
+    dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(std::move(tr));
+    QJsonObject r = runTool(engine, "vna_device", {{"action", "edelay"}, {"value", 500.0}});
+    QVERIFY2(r.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(r).toJson(QJsonDocument::Compact))));
+    QVERIFY(raw->sent_.contains(QStringLiteral("edelay 500")));
+}
+
+// averaging: executor-side 1..64 range check (defends a direct call bypassing
+// the gate); valid n lands on the wire as "averages <n>".
+void TestAgent::vnaDevice_averagingRangeAndWriteReplay() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        {"help", {}},
+        {"version", {"v1"}},
+        {"info", {"NanoVNA H4"}},
+        {"averages 5", {}},
+    });
+    ReplayTransport* raw = tr.get();
+    dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(std::move(tr));
+
+    // n=0 rejected before the wire (only handshake consumed).
+    QJsonObject r0 = runTool(engine, "vna_device", {{"action", "averaging"}, {"value", 0.0}});
+    QVERIFY(!r0.value("ok").toBool());
+    QVERIFY2(r0.value("error").toString().contains(QStringLiteral("1..64")),
+             qPrintable(r0.value("error").toString()));
+
+    QJsonObject r = runTool(engine, "vna_device", {{"action", "averaging"}, {"value", 5.0}});
+    QVERIFY2(r.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(r).toJson(QJsonDocument::Compact))));
+    QVERIFY(raw->sent_.contains(QStringLiteral("averages 5")));
+}
+
+// Unknown action -> honest error enumerating the legal values.
+void TestAgent::vnaDevice_unknownActionHonest() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        {"help", {}},
+        {"version", {"v1"}},
+        {"info", {"NanoVNA H4"}},
+    });
+    dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(std::move(tr));
+    QJsonObject r = runTool(engine, "vna_device", {{"action", "bogus"}});
+    QVERIFY(!r.value("ok").toBool());
+    QVERIFY2(r.value("error").toString().contains(QStringLiteral("freq_offset")),
+             qPrintable(r.value("error").toString()));
+}
+
+// --- P1 #61: analyze_vna_match multi-topology -------------------------------
+// The declared schema must advertise the topology enum + r_comp parameter.
+void TestAgent::analyzeMatch_topologyEnumInSchema() {
+    const QList<ai::ToolDef> defs = ai::toolDefs();
+    const ai::ToolDef* def = nullptr;
+    for (const ai::ToolDef& d : defs)
+        if (d.name == QStringLiteral("analyze_vna_match")) def = &d;
+    QVERIFY(def != nullptr);
+    const QJsonObject props = def->parameters.value("properties").toObject();
+    QVERIFY(props.contains("topology"));
+    QVERIFY(props.contains("r_comp"));
+    const QJsonArray en = props.value("topology").toObject().value("enum").toArray();
+    QStringList ens;
+    for (const QJsonValue& v : en) ens << v.toString();
+    QVERIFY(ens.contains("series_shunt"));
+    QVERIFY(ens.contains("xps"));
+    QVERIFY(ens.contains("xs"));
+    QVERIFY(ens.contains("xpl"));
+}
+
+// xps on a 2000R load solves numerically; an unknown topology is honest
+// valid:false (no fabricated L/C). Default (omitted topology) unchanged.
+void TestAgent::analyzeMatch_xpsNumericAndUnknownTopologyHonest() {
+    dsp::SpectrumEngine engine;
+    QJsonObject rDef = runTool(engine, "analyze_vna_match",
+                               {{"load_r", 2000.0}, {"f_hz", 3.5e6}});
+    QVERIFY2(rDef.value("valid").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(rDef).toJson(QJsonDocument::Compact))));
+    QVERIFY2(rDef.value("shunt_henry").toDouble() > 10e-6,
+             qPrintable(QString::number(rDef.value("shunt_henry").toDouble())));
+
+    QJsonObject rXps = runTool(engine, "analyze_vna_match",
+                               {{"load_r", 2000.0}, {"f_hz", 3.5e6}, {"topology", "xps"}});
+    QVERIFY2(rXps.value("valid").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(rXps).toJson(QJsonDocument::Compact))));
+    QCOMPARE(rXps.value("topology").toString(), QString("xps"));
+    QVERIFY2(rXps.value("shunt_henry").toDouble() > 10e-6,
+             qPrintable(QString::number(rXps.value("shunt_henry").toDouble())));
+
+    QJsonObject rBad = runTool(engine, "analyze_vna_match",
+                               {{"load_r", 2000.0}, {"f_hz", 3.5e6}, {"topology", "nope"}});
+    QVERIFY2(!rBad.value("valid").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(rBad).toJson(QJsonDocument::Compact))));
+    QVERIFY2(rBad.value("note").toString().contains(QStringLiteral("未知拓扑")),
+             qPrintable(rBad.value("note").toString()));
 }
 
 #include <QCoreApplication>

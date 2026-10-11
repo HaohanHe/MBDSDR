@@ -129,6 +129,24 @@ public:
     bool pauseScan(QString* err);     // "pause"
     bool resumeScan(QString* err);    // "resume"
 
+    // ---- Device misc command family (P1 #61 client side) --------------------
+    // Every method first guards on isConnected() (honest empty state: *err =
+    // "NanoVNA 未连接", returns false). Wire words are the standard H/Hugen text
+    // protocol words; replies are best-effort parsed and a parse failure is an
+    // honest error (never a fabricated value). Writes record the session member
+    // below so the applied value can be read back without re-querying the device.
+    bool readVbat(double& volts, QString* err);       // "vbat" -> reply line voltage
+    bool readFreqOffset(long& hz, QString* err);      // "freqoffset" readback
+    bool setFreqOffset(long hz, QString* err);        // "freqoffset <hz>"
+    bool setElectricalDelay(int ps, QString* err);    // "edelay <ps>" (port extension)
+    bool setAveraging(int n, QString* err);           // "averages <n>", n validated 1..64
+
+    // Honest session readback of the misc writes this client performed. Default
+    // 0 = "not set this session" (empty state, not a device query).
+    int edelayPs() const { return edelayPs_; }
+    int averagingCount() const { return averages_; }
+    long freqOffsetHz() const { return freqOffsetHz_; }
+
 private:
     QList<QString> exec(const QString& command);
 
@@ -145,6 +163,10 @@ private:
     bool calCoverageKnown_ = false;
     long lastCalStartHz_ = 0;
     long lastCalStopHz_ = 0;
+    // Device-misc session readback (honest: only what this client wrote). 0 = unset.
+    int edelayPs_ = 0;
+    int averages_ = 0;
+    long freqOffsetHz_ = 0;
 };
 
 } // namespace vna

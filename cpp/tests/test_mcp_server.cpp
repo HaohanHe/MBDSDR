@@ -13,6 +13,8 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QSet>
+#include <QElapsedTimer>
 
 #include "agentapi/mcp_server.h"
 #include "ai/agent_tools.h"
@@ -50,6 +52,7 @@ private slots:
     void initTestCase();
     void initializeHandshake();
     void toolsListSingleSourceConsistency();
+    void toolsListGroupedBranches();
     void toolsCallGetCapabilitiesRealRoundtrip();
     void writeToolGatedWithoutArmAndStateUnchanged();
     void writeToolRunsWhenArmed();
@@ -86,21 +89,85 @@ void TestMcpServer::toolsListSingleSourceConsistency() {
     dsp::SpectrumEngine engine;
     QJsonObject r = post(
         QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}"), &engine);
-    QJsonArray tools = r.value(QStringLiteral("result")).toObject()
+    // Default view = 8 frozen domain cards; each card carries names only.
+    QJsonArray cards = r.value(QStringLiteral("result")).toObject()
                            .value(QStringLiteral("tools")).toArray();
-    // Single-source consistency: MCP list == declarative registry == dispatch
-    // table. Do NOT hardcode the count (it grows as tools are added).
-    QCOMPARE(tools.size(), ai::toolDefs().size());
-    QCOMPARE(tools.size(), ai::executorToolNames().size());
-    // Every entry has name/description/inputSchema, and inputSchema carries a
-    // "required" array (empty when the schema had none).
-    for (const QJsonValue& v : tools) {
-        QJsonObject t = v.toObject();
-        QVERIFY(t.contains(QStringLiteral("name")));
-        QVERIFY(t.contains(QStringLiteral("description")));
-        QJsonObject schema = t.value(QStringLiteral("inputSchema")).toObject();
-        QVERIFY(schema.contains(QStringLiteral("required")));
+    QCOMPARE(cards.size(), 8);
+
+    // Single-source pin: flattening every card's name list == the declarative
+    // registry name set, each tool appearing in EXACTLY one domain (no loss,
+    // no dup). Do NOT hardcode the count (it grows as tools are added).
+    QSet<QString> flattened;
+    int total = 0;
+    for (const QJsonValue& c : cards) {
+        QJsonObject card = c.toObject();
+        QVERIFY(card.contains(QStringLiteral("domain")));
+        QVERIFY(card.contains(QStringLiteral("summary")));
+        for (const QJsonValue& n : card.value(QStringLiteral("tools")).toArray()) {
+            flattened.insert(n.toString());
+            ++total;
+        }
     }
+    QSet<QString> registry;
+    for (const ai::ToolDef& d : ai::toolDefs()) registry.insert(d.name);
+    QCOMPARE(total, ai::toolDefs().size());     // nothing lost
+    QCOMPARE(flattened.size(), registry.size()); // each tool in exactly one domain
+    QCOMPARE(flattened, registry);
+    // ...and the dispatch executor names agree with the registry, as before.
+    QCOMPARE(registry.size(), ai::executorToolNames().size());
+}
+
+void TestMcpServer::toolsListGroupedBranches() {
+    dsp::SpectrumEngine engine;
+
+    // -- params.domain -> that domain's FULL tool list (schema from toolDefs()).
+    QJsonObject byDom = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"tools/list\","
+                       "\"params\":{\"domain\":\"VNA 测量\"}}"), &engine);
+    QJsonArray vna = byDom.value(QStringLiteral("result")).toObject()
+                         .value(QStringLiteral("tools")).toArray();
+    QCOMPARE(vna.size(), 4);   // set_vna_sweep / get_vna_data / get_vna_status / vna_device
+    QStringList vnaNames;
+    for (const QJsonValue& t : vna) {
+        QJsonObject o = t.toObject();
+        QVERIFY(o.contains(QStringLiteral("name")));
+        QVERIFY(o.contains(QStringLiteral("description")));
+        QVERIFY(o.value(QStringLiteral("inputSchema")).toObject()
+                    .contains(QStringLiteral("required")));
+        vnaNames.append(o.value(QStringLiteral("name")).toString());
+    }
+    vnaNames.sort();
+    QStringList expectVna;
+    expectVna << QStringLiteral("get_vna_data") << QStringLiteral("get_vna_status")
+              << QStringLiteral("set_vna_sweep") << QStringLiteral("vna_device");
+    QCOMPARE(vnaNames, expectVna);
+
+    // Fuzzy match (lowercase) resolves to the same domain.
+    QJsonObject fuzzy = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"tools/list\","
+                       "\"params\":{\"domain\":\"vna 测量\"}}"), &engine);
+    QCOMPARE(fuzzy.value(QStringLiteral("result")).toObject()
+                 .value(QStringLiteral("tools")).toArray().size(), 4);
+
+    // -- unknown domain -> honest JSON-RPC error listing legal domain names.
+    QJsonObject bad = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"tools/list\","
+                       "\"params\":{\"domain\":\"不存在的域\"}}"), &engine);
+    QJsonObject e = bad.value(QStringLiteral("error")).toObject();
+    QCOMPARE(e.value(QStringLiteral("code")).toInt(), -32602);
+    QVERIFY(e.value(QStringLiteral("message")).toString().contains(QStringLiteral("VNA 测量")));
+
+    // -- detailed:true -> all domains with full per-tool schema; nothing lost.
+    QJsonObject det = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":43,\"method\":\"tools/list\","
+                       "\"params\":{\"detailed\":true}}"), &engine);
+    QJsonArray doms = det.value(QStringLiteral("result")).toObject()
+                         .value(QStringLiteral("domains")).toArray();
+    QCOMPARE(doms.size(), 8);
+    int detTotal = 0;
+    for (const QJsonValue& c : doms)
+        detTotal += c.toObject().value(QStringLiteral("tools")).toArray().size();
+    QCOMPARE(detTotal, ai::toolDefs().size());
 }
 
 void TestMcpServer::toolsCallGetCapabilitiesRealRoundtrip() {
@@ -204,8 +271,17 @@ void TestMcpServer::processLevelStdioRoundtrip() {
     auto exchange = [&](const QByteArray& request) -> QByteArray {
         proc.write(request + "\n");
         proc.waitForBytesWritten(2000);
-        // Read one line off stdout.
-        if (!proc.waitForReadyRead(5000)) return QByteArray();
+        // Block until a COMPLETE newline-terminated line arrives on stdout. The
+        // reply can be delivered in chunks; a single waitForReadyRead()+readLine()
+        // may then return a partial line (no trailing '\n'), which makes
+        // QJsonDocument::fromJson fail and intermittently flake the assert.
+        // Accumulate until canReadLine(), bounded by a total timeout.
+        QElapsedTimer total;
+        total.start();
+        while (!proc.canReadLine()) {
+            if (total.elapsed() > 5000) return QByteArray();  // timeout -> caller QVERIFY fails
+            proc.waitForReadyRead(50);
+        }
         QByteArray line = proc.readLine();
         while (line.endsWith('\n') || line.endsWith('\r')) line.chop(1);
         return line;
@@ -222,14 +298,19 @@ void TestMcpServer::processLevelStdioRoundtrip() {
                  .value(QStringLiteral("name")).toString(),
              QStringLiteral("mbdsdr-core"));
 
-    // 2) tools/list -> count equals the declarative registry size
+    // 2) tools/list (default) -> 8 domain cards; flattening all cards' tool
+    //    names loses nothing vs the declarative registry.
     QByteArray listLine = exchange(
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}");
     QVERIFY2(!listLine.isEmpty(), "no tools/list reply");
     QJsonObject listObj = QJsonDocument::fromJson(listLine).object();
-    QJsonArray tools = listObj.value(QStringLiteral("result")).toObject()
+    QJsonArray cards = listObj.value(QStringLiteral("result")).toObject()
                            .value(QStringLiteral("tools")).toArray();
-    QCOMPARE(tools.size(), ai::toolDefs().size());
+    QCOMPARE(cards.size(), 8);
+    int flatTotal = 0;
+    for (const QJsonValue& c : cards)
+        flatTotal += c.toObject().value(QStringLiteral("tools")).toArray().size();
+    QCOMPARE(flatTotal, ai::toolDefs().size());
 
     // 3) tools/call get_capabilities -> ok:true
     QByteArray callLine = exchange(

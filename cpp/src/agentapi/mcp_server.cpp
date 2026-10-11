@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QHash>
 
 #include "ai/agent_tools.h"
 #include "ai/llm_protocol.h"   // ToolDef (type-only)
@@ -37,21 +38,175 @@ QJsonObject makeError(const QJsonValue& id, int code, const QString& message) {
 // Build the tools/list payload straight from the declarative registry. Each
 // ToolDef.parameters is already a complete JSON Schema object; we only ensure
 // a "required" array exists (empty when the schema omits it) per MCP convention.
-QJsonObject listToolsResult() {
-    QJsonArray tools;
-    for (const ai::ToolDef& def : ai::toolDefs()) {
-        QJsonObject schema = def.parameters;
-        if (!schema.contains(QStringLiteral("required")))
-            schema[QStringLiteral("required")] = QJsonArray();
-        QJsonObject t;
-        t[QStringLiteral("name")] = def.name;
-        t[QStringLiteral("description")] = def.description;
-        t[QStringLiteral("inputSchema")] = schema;
-        tools.append(t);
+QJsonObject toolEntry(const ai::ToolDef& def) {
+    QJsonObject schema = def.parameters;
+    if (!schema.contains(QStringLiteral("required")))
+        schema[QStringLiteral("required")] = QJsonArray();
+    QJsonObject t;
+    t[QStringLiteral("name")] = def.name;
+    t[QStringLiteral("description")] = def.description;
+    t[QStringLiteral("inputSchema")] = schema;
+    return t;
+}
+
+// ---- Frozen secondary-domain directory (P1 #64) ---------------------------
+// 8 domains, FROZEN and shared verbatim with the Python reference
+// (mbdsdr_ai/core/mcp_server.py). This is a server-side grouping view ONLY:
+// the schema + dispatch single source remains ai::toolDefs() /
+// registeredToolSpecs(); we never edit the registry here, we only bucket its
+// existing names. Every toolDefs() name appears in exactly one domain.
+struct DomainGroup {
+    QString name;
+    QString summary;
+    QList<QString> tools;   // assigned tool names (registry order preserved by bucket)
+};
+
+QList<DomainGroup> domainGroups() {
+    return QList<DomainGroup>{
+        {QStringLiteral("SDR 调谐/VFO"),
+         QStringLiteral("接收机调谐、解调模式、带宽/静噪/噪声门限与多 VFO 及频谱显示参数控制。"),
+         {QStringLiteral("tune_frequency"), QStringLiteral("set_mode"),
+          QStringLiteral("set_bandwidth"), QStringLiteral("set_squelch"),
+          QStringLiteral("get_squelch_status"), QStringLiteral("set_noise_blanker"),
+          QStringLiteral("get_noise_blanker_status"), QStringLiteral("list_vfos"),
+          QStringLiteral("add_vfo"), QStringLiteral("switch_vfo"),
+          QStringLiteral("rename_vfo"), QStringLiteral("set_vfo_armed"),
+          QStringLiteral("set_vfo_frequency"), QStringLiteral("set_vfo_mode"),
+          QStringLiteral("set_vfo_bandwidth"), QStringLiteral("set_fft_params"),
+          QStringLiteral("set_color_map"), QStringLiteral("get_spectrum_status"),
+          QStringLiteral("set_doppler_compensation")}},
+        {QStringLiteral("亚音数字解码"),
+         QStringLiteral("CTCSS/DCS 亚音与 POCSAG/M17/VOR/ACARS/NAVTEX/FT8/LRPT 等数字报文解码。"),
+         {QStringLiteral("set_ctcss"), QStringLiteral("get_ctcss_status"),
+          QStringLiteral("set_cdcss"), QStringLiteral("get_cdcss_status"),
+          QStringLiteral("get_pocsag_messages"), QStringLiteral("get_m17_calls"),
+          QStringLiteral("get_vor_radial"), QStringLiteral("get_acars_packets"),
+          QStringLiteral("get_navtex_messages"), QStringLiteral("set_ft8"),
+          QStringLiteral("get_ft8_status"), QStringLiteral("set_lrpt"),
+          QStringLiteral("get_lrpt_status")}},
+        {QStringLiteral("VNA 测量"),
+         QStringLiteral("VNA 扫频设置、S 参数原始测量与设备级杂项（电池/频偏/电延迟/平均）。"),
+         {QStringLiteral("set_vna_sweep"), QStringLiteral("get_vna_data"),
+          QStringLiteral("get_vna_status"), QStringLiteral("vna_device")}},
+        {QStringLiteral("VNA 分析"),
+         QStringLiteral("对测量数据做谐振/TDR/滤波/等效电路/阻抗匹配等分析。"),
+         {QStringLiteral("analyze_vna_resonance"), QStringLiteral("vna_tdr_cable"),
+          QStringLiteral("analyze_vna_filter"), QStringLiteral("analyze_vna_equivalent"),
+          QStringLiteral("analyze_vna_touchstone"), QStringLiteral("analyze_vna_match")}},
+        {QStringLiteral("VNA 校准"),
+         QStringLiteral("VNA 校准状态与校准流程控制。"),
+         {QStringLiteral("vna_calibration")}},
+        {QStringLiteral("导出演制"),
+         QStringLiteral("IQ 录制、录制状态与各类快照/报文结果导出。"),
+         {QStringLiteral("start_recording"), QStringLiteral("stop_recording"),
+          QStringLiteral("export_iq_segment"), QStringLiteral("export_vna_snapshot"),
+          QStringLiteral("export_spectrum_snapshot"), QStringLiteral("export_peaks_csv"),
+          QStringLiteral("export_ft8_results"), QStringLiteral("list_recordings"),
+          QStringLiteral("delete_recording"), QStringLiteral("export_recording"),
+          QStringLiteral("get_recording_state")}},
+        {QStringLiteral("书签扫描卫星"),
+         QStringLiteral("书签管理、波段/链路扫描与卫星过境预报/调谐。"),
+         {QStringLiteral("scan_band"), QStringLiteral("predict_passes"),
+          QStringLiteral("start_scan_link"), QStringLiteral("stop_scan_link"),
+          QStringLiteral("get_scan_link_status"), QStringLiteral("list_bookmarks"),
+          QStringLiteral("add_bookmark"), QStringLiteral("tune_to_bookmark"),
+          QStringLiteral("delete_bookmark")}},
+        {QStringLiteral("系统设备"),
+         QStringLiteral("设备连接、频率基准校准、网络音频/音源接入与整体状态。"),
+         {QStringLiteral("get_status"), QStringLiteral("calibrate_frequency"),
+          QStringLiteral("apply_frequency_correction"), QStringLiteral("set_network_audio_sink"),
+          QStringLiteral("get_network_audio_status"), QStringLiteral("connect_network_source"),
+          QStringLiteral("get_capabilities")}},
+    };
+}
+
+// Reverse lookup: domain name for a tool. Returns "" when the tool is not in
+// any group (the tests pin this never happens for ai::toolDefs()).
+QString domainForTool(const QString& tool) {
+    for (const DomainGroup& g : domainGroups())
+        if (g.tools.contains(tool)) return g.name;
+    return {};
+}
+
+// Resolve a "domain" param to a group: exact first, then trimmed / case-folded,
+// then a unique unambiguous substring. Returns nullptr when no group matches,
+// setting *legalNames to the sorted unique legal domain names (honest error).
+const DomainGroup* resolveDomain(const QString& query, QStringList* legalNames) {
+    const QList<DomainGroup> groups = domainGroups();
+    for (const DomainGroup& g : groups)
+        if (g.name == query) return &g;
+    const QString q = query.trimmed().toLower();
+    for (const DomainGroup& g : groups)
+        if (g.name.toLower() == q) return &g;
+    const DomainGroup* hit = nullptr;
+    for (const DomainGroup& g : groups) {
+        if (g.name.toLower().contains(q) || q.contains(g.name.toLower())) hit = &g;
     }
-    QJsonObject o;
-    o[QStringLiteral("tools")] = tools;
-    return o;
+    if (legalNames) {
+        *legalNames = {};
+        for (const DomainGroup& g : groups) legalNames->append(g.name);
+    }
+    return hit;
+}
+
+// Build the tools/list result object from params. Returns false (and fills
+// *errMessage) on an unknown "domain"; otherwise fills *out.
+bool buildToolsListResult(const QJsonObject& params, QJsonObject* out,
+                          QString* errMessage) {
+    const QList<DomainGroup> groups = domainGroups();
+    const bool detailed = params.value(QStringLiteral("detailed")).toBool(false);
+    const QJsonValue domVal = params.value(QStringLiteral("domain"));
+
+    // index tool name -> its full entry (schema single-sourced from toolDefs())
+    QHash<QString, QJsonObject> entry;
+    for (const ai::ToolDef& def : ai::toolDefs()) entry.insert(def.name, toolEntry(def));
+
+    if (domVal.isString() && !domVal.toString().isEmpty()) {
+        QStringList legal;
+        const DomainGroup* g = resolveDomain(domVal.toString(), &legal);
+        if (!g) {
+            if (errMessage)
+                *errMessage = QStringLiteral("未知 domain: %1（合法域: %2）")
+                                  .arg(domVal.toString(), legal.join(QStringLiteral("、")));
+            return false;
+        }
+        QJsonArray tools;
+        for (const QString& tool : g->tools)
+            if (entry.contains(tool)) tools.append(entry.value(tool));
+        (*out)[QStringLiteral("tools")] = tools;
+        return true;
+    }
+
+    if (detailed) {
+        // All domains with FULL per-tool schema (name/description/inputSchema).
+        QJsonArray doms;
+        for (const DomainGroup& g : groups) {
+            QJsonArray tools;
+            for (const QString& tool : g.tools)
+                if (entry.contains(tool)) tools.append(entry.value(tool));
+            QJsonObject card;
+            card[QStringLiteral("domain")] = g.name;
+            card[QStringLiteral("summary")] = g.summary;
+            card[QStringLiteral("tools")] = tools;
+            doms.append(card);
+        }
+        (*out)[QStringLiteral("domains")] = doms;
+        return true;
+    }
+
+    // Default (no params): domain cards, names only — a two-level directory.
+    QJsonArray doms;
+    for (const DomainGroup& g : groups) {
+        QJsonArray names;
+        for (const QString& tool : g.tools) names.append(tool);
+        QJsonObject card;
+        card[QStringLiteral("domain")] = g.name;
+        card[QStringLiteral("summary")] = g.summary;
+        card[QStringLiteral("tools")] = names;
+        doms.append(card);
+    }
+    (*out)[QStringLiteral("tools")] = doms;
+    return true;
 }
 
 // tools/call dispatch with the write-tool manual gate. Returns the text payload
@@ -111,8 +266,15 @@ QString handleRequestLine(const QString& line,
     }
 
     if (method == QLatin1String("tools/list")) {
+        QJsonObject result;
+        QString domErr;
+        if (!buildToolsListResult(params, &result, &domErr)) {
+            // Unknown domain -> honest JSON-RPC error listing the legal names.
+            return QString::fromUtf8(
+                QJsonDocument(makeError(id, -32602, domErr)).toJson(QJsonDocument::Compact));
+        }
         return QString::fromUtf8(
-            QJsonDocument(makeResponse(id, listToolsResult())).toJson(QJsonDocument::Compact));
+            QJsonDocument(makeResponse(id, result)).toJson(QJsonDocument::Compact));
     }
 
     if (method == QLatin1String("tools/call")) {

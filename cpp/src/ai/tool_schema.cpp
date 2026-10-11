@@ -889,16 +889,24 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "analyze_vna_match";
         s.description = QString::fromUtf8(
-            "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回 EFHW/反 L 匹配网络的 L/C 建议（Q、串联/并联臂值）"
-            "（驻波下不来/做匹配/加感）。"
-            "负载电阻需 >50Ω；否则 valid 诚实为 false。");
+            "只读：给定实测负载阻抗 load_r(+load_x) 与设计频率 f_hz，返回匹配网络的 L/C 建议"
+            "（Q、串联/并联臂值）（驻波下不来/做匹配/加感）。"
+            "topology 可选：series_shunt（默认，既有 EFHW/反 L 语义）/xps（shunt 并联后 series 串联）"
+            "/xs（series 串联后 shunt 并联）/xpl（shunt-series-shunt 三电抗 Pi）；"
+            "r_comp 可选，串联 R 补偿（≥0，并入负载电阻）。"
+            "无闭式解的拓扑诚实 valid:false，不伪造数值。");
         ToolParamSpec r; r.name = "load_r"; r.type = "number";
-        r.description = QString::fromUtf8("负载电阻 Ω（>50，高阻馈电点）"); r.required = true;
+        r.description = QString::fromUtf8("负载电阻 Ω（高阻馈电点用 >50；xs 用 <50）"); r.required = true;
         ToolParamSpec x; x.name = "load_x"; x.type = "number";
         x.description = QString::fromUtf8("负载电抗 Ω（默认 0）");
         ToolParamSpec f; f.name = "f_hz"; f.type = "number";
         f.description = QString::fromUtf8("设计频率 Hz"); f.required = true;
-        s.params << r << x << f;
+        ToolParamSpec topo; topo.name = "topology"; topo.type = "string";
+        topo.description = QString::fromUtf8("匹配拓扑：series_shunt（默认既有 EFHW 语义）/xps/xs/xpl");
+        topo.enumValues = QVariantList{"series_shunt", "xps", "xs", "xpl"};
+        ToolParamSpec rc; rc.name = "r_comp"; rc.type = "number";
+        rc.description = QString::fromUtf8("串联 R 补偿 Ω（≥0，并入负载电阻，默认 0）");
+        s.params << r << x << f << topo << rc;
         out.append(s);
     }
 
@@ -1376,6 +1384,35 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         slot.hasMin = true; slot.min = 1.0;
         slot.hasMax = true; slot.max = 4.0;
         s.params << step << slot;
+        out.append(s);
+    }
+
+    // vna_device (write -- gated): single-tool device-level misc state machine.
+    // Read actions (status/vbat/freq_offset read) return objective current
+    // values; write actions (freq_offset set/edelay/averaging) go through the
+    // manual gate. The whole tool is write=true because it CAN write the
+    // device -- defense in depth, never half-open.
+    {
+        ToolSchemaSpec s;
+        s.name = "vna_device";
+        s.description = QString::fromUtf8(
+            "写入：NanoVNA 设备级杂项单工具状态机。action 为命令字（必填枚举）："
+            "status=只读（连接/校准摘要/扫频范围/edelay/averaging/freq_offset 当前值，未读回的诚实给 0+note）；"
+            "vbat=读电池电压；freq_offset 无 value=读本振频偏(Hz)、有 value=写频偏；"
+            "edelay=写电延迟(ps)；averaging=写平均次数(1..64)。"
+            "写动作走手动 gate、人在环确认。读动作客观返回当前值；编排权在调用者，非固定剧本。"
+            "未连接 ok:false 并给排查清单。");
+        s.write = true;
+        ToolParamSpec act;
+        act.name = "action"; act.type = "string"; act.required = true;
+        act.description = QString::fromUtf8("设备命令字：status/vbat/freq_offset/edelay/averaging");
+        act.enumValues = QVariantList{
+            "status", "vbat", "freq_offset", "edelay", "averaging"};
+        ToolParamSpec val;
+        val.name = "value"; val.type = "number"; val.required = false;
+        val.description = QString::fromUtf8(
+            "写动作参数：freq_offset=Hz（整数）、edelay=ps（整数）、averaging=1..64（整数）；读动作不用");
+        s.params << act << val;
         out.append(s);
     }
 

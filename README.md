@@ -122,7 +122,7 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 3. 回传 sweep.json（+ 连接日志 version/info/cal）即可比对。
 无设备可先 `--selftest` 跑通流程（合成演示，非真实测量）。详见 docs/learn/nanovna/hardware-quickstart.md。
 
-## 工具能力矩阵（69 工具，三通道：Agent / Hub / HTTP 透传）
+## 工具能力矩阵（70 工具，三通道：Agent / Hub / HTTP 透传）
 
 按域分组；写=手动模式 gate 拦截，读=不拦截。
 
@@ -164,6 +164,7 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 | 工具 | 写/读 |
 |---|---|
 | vna_calibration | 写（step=status 为只读引导） |
+| vna_device | 写（action=status/vbat/freq_offset 读为只读，整体手动 gate） |
 
 ### 导出 / 录制
 | 工具 | 写/读 |
@@ -184,4 +185,13 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 | calibrate_frequency / apply_frequency_correction / predict_passes | 读 |
 | set_fft_params / set_color_map / set_doppler_compensation / get_capabilities | 写/读 |
 
-合计 69 工具，与 docs/learn/phase31/agent-tool-documentation.md 头部一致。
+合计 70 工具，与 docs/learn/phase31/agent-tool-documentation.md 头部一致。
+
+## MCP 服务器（C++ mbdsdr-mcp 与 Python mbdsdr_ai/core/mcp_server.py）合并视图
+
+两套 MCP server 同仓并存、互为镜像：
+
+- **域分组一致**：两 server 均提供 8 域分组的 `tools/list`，域名集合完全一致（由钉扎测试保证两边不漂移）。
+- **C++ `mbdsdr-mcp`**：面向外部第三方 agent 的 stdio 接入面（接入细节见 `docs/learn/phase63/third-party-agent-mcp.md`），工具本体与桌面 Agent 同一套 `registeredToolSpecs()`，不另立实现。
+- **Python `mbdsdr_ai/core/mcp_server.py`**：面向脚本/嵌入式控制器的本地调用面，便于在测试台与自动化脚本里直接驱动同一工具语义。
+- **写工具一致门控**：两 server 的写工具统一走 `arm_manual` / 手动 gate，人在环确认，不会因接入面不同而绕过。

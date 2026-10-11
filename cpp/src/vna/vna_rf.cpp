@@ -268,8 +268,81 @@ LMatchResult efhwMatch(std::complex<double> z_load, double f_hz, double r0) {
     return out;
 }
 
+// ---- Multi-reactance matching topologies (clean-room closed forms) ---------
+namespace {
+// Signed reactance -> component value at f. X>=0 inductive -> Henry;
+// X<0 capacitive -> Farad. The unused unit stays 0.
+void fillArm(double xReact, double f_hz, double& henry, double& farad) {
+    const double w = kTwoPi * f_hz;
+    if (xReact >= 0.0) { henry = xReact / w; farad = 0.0; }
+    else               { henry = 0.0; farad = -1.0 / (w * xReact); }
+}
+} // namespace
 
-#include <cstdio>
+MatchTopologyResult analyzeMatchTopology(const std::string& topology,
+                                         std::complex<double> z_load,
+                                         double f_hz, double r0, double r_comp) {
+    MatchTopologyResult out;
+    out.topology = topology;
+    const double R = z_load.real() + std::max(0.0, r_comp);
+    const double X = z_load.imag();
+    if (R <= 0.0 || f_hz <= 0.0 || r0 <= 0.0) {
+        out.note = "需要 R_load(>0)、f_hz(>0)、r0(>0)";
+        return out;
+    }
+
+    if (topology == "xps") {
+        // Shunt arm across the (high-Z) load, series arm to the (low-Z) source.
+        if (R <= r0) { out.note = "xps(shunt 并联后 series 串联) 适用于 R_load > r0"; return out; }
+        const double q = std::sqrt(R / r0 - 1.0);
+        out.q = q;
+        const double xShunt = R / q;          // shunt across the load
+        const double xSeries = q * r0 - X;     // series to source, absorbing X_load
+        fillArm(xShunt, f_hz, out.shunt_henry, out.shunt_farad);
+        fillArm(xSeries, f_hz, out.series_henry, out.series_farad);
+        out.valid = true;
+        return out;
+    }
+
+    if (topology == "xs") {
+        // Series arm on the (low-Z) load, shunt arm at the (high-Z) source.
+        if (R >= r0) { out.note = "xs(series 串联后 shunt 并联) 适用于 R_load < r0"; return out; }
+        const double q = std::sqrt(r0 / R - 1.0);
+        out.q = q;
+        const double xSeries = q * R - X;     // series on the load, absorbing X_load
+        const double xShunt = r0 / q;         // shunt at the source
+        fillArm(xSeries, f_hz, out.series_henry, out.series_farad);
+        fillArm(xShunt, f_hz, out.shunt_henry, out.shunt_farad);
+        out.valid = true;
+        return out;
+    }
+
+    if (topology == "xpl") {
+        // Low-pass Pi: shunt C at load -- series L -- shunt C at source.
+        if (R <= r0) { out.note = "xpl(shunt-series-shunt Pi) 适用于 R_load > r0"; return out; }
+        // The Pi is under-determined without a chosen loaded Q; pick the minimum-Q
+        // solution scaled x2 as a documented design choice (not a measured fact).
+        const double qMin = std::sqrt(R / r0 - 1.0);
+        const double q1 = 2.0 * qMin;
+        out.q = q1;
+        const double rv = R / (1.0 + q1 * q1);       // virtual node resistance
+        const double q2 = std::sqrt(r0 / rv - 1.0);
+        const double xShuntLoad = -R / q1;          // shunt C at the load
+        const double xShuntSrc  = -r0 / q2;         // shunt C at the source
+        const double xSeries    = rv * (q1 + q2) - X;  // middle L, absorbing X_load
+        fillArm(xShuntLoad, f_hz, out.shunt_henry, out.shunt_farad);
+        fillArm(xShuntSrc, f_hz, out.shunt2_henry, out.shunt2_farad);
+        fillArm(xSeries, f_hz, out.series_henry, out.series_farad);
+        out.note = "Pi 网络需选定有载 Q：本实现取 Q=2·sqrt(R_load/r0-1)（设计参数，可自行缩放）";
+        out.valid = true;
+        return out;
+    }
+
+    // Unknown topology: honest -- no fabricated numbers.
+    out.closed_form = false;
+    out.note = "未知拓扑 \"" + topology + "\"；本实现支持 xps/xs/xpl（默认 series_shunt 走 EFHW 反 L）";
+    return out;
+}
 #include <sstream>
 
 TouchstoneData parseTouchstone(const std::string& text) {
