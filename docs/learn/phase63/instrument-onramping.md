@@ -280,3 +280,22 @@
   编排未实现，登记 C 类，不抄不链不内嵌。
 - 诚实：所有 A 类结果体带 `real_hardware_verified:false`（合成钉扎可过、真机 PENDING）。
 - pytest：335→342 passed（+6 长尾/域钉扎）。详见 python-decoder-longtail.md。
+
+## 35. SDR++ 机制学做深化侦察（只读，结论=无真缺口）
+- 对照方法：官方 SDR++ 仅产品机制知识（repos/ 本节点缺失，gitignore:91 未持久，如实标注）；
+  仓内以 Read/Grep 盘点。
+- 8 候选逐项判定（全部非缺口）：
+  1) 瀑布时间轴（历史滚动/时间刻度/暂停冻结不丢帧）→ 已落地 spectrum_display.cpp:328/412/541；
+  2) 扫频状态机（Idle/Scanning/Paused/Hit + loop/PingPong/单次回绕）→ frequency_scanner.h:32
+     + UI 按钮组/状态标签 :1642-1687；
+  3) 增益/AGC 链路（Tuner/RTL AGC 开关 + 手动滑条/离散档/回显 + 状态栏 ~1Hz 回读）→
+     :349-352/:576-589/:2480；RTL 单增益滑条与官方一致，三阶 LNA/IF/RF 不伪造；
+  4) VFO A/B swap → 官方产品无此机制（动态多 VFO 各自解调），我们的多 VFO 管理面已超官方；
+  5) 解调器切换带宽联动（bandwidthOnModeSwitch + ADS-B 1090MHz 特例 + WFM force-mono）→ 已落地；
+  6) 频段预设联动（bandCombo→中心频+模式+带宽）→ main_window:622-631 已落地；
+  7) 频谱显示选项（dB range/格线/门限/maxhold 衰减/余辉/palette）→ spectrum_widget 全落地；
+  8) 其余解码器结果 UI（M17/POCSAG/ACARS/NAVTEX 均 QTableWidget 可选中复制）→ 无 FT8 类
+     "结果不可见"缺口；FT8 无历史解码列表表为历轮已登记项（第㉓批）且已被 badge 解码文本 +
+     get_ft8_status + export_ft8_results 部分缓解，本轮不重复立案（SDR++ 官方本不带 FT8 解码）。
+- 结论：无真缺口，只做维护线，不强行改码（宁缺毋滥）。C++ 无改动，双构型沿用基线
+  D125/R125=143/143。
