@@ -484,3 +484,16 @@ spec/exec/dispatch/hub 三通道；C++ 无 FT8 结构化结果（Python 域）�
 
 ## FT8 定夺
 线 A Python 桥接未就绪，保持诚实空态 rows=0，不伪造呼号。
+
+---
+
+# 第㉕批（补）：export_ft8_results 真实检测行（HEAD=7b3fdc7）
+
+## 接线
+execExportFt8Results（agent_tools.cpp）+ cmdExportFt8Results（control_hub.cpp）接 C++ 检测层真实字段：valid/freq_offset_hz/sync_quality/candidate_count（engine->ft8Present()/ft8FreqOffsetHz()/ft8SyncQuality()/ft8CandidateCount()）。
+- 无候选 rows=0 诚实空态，不伪造呼号。
+- crc_ok 候选列表来自 Python collect_ft8_candidates()，尚未桥接进 C++（src/dsp 线 A 域）；75-bit 呼号文本解码为远期项。
+
+## 计数
+无新工具（export_ft8_results 已注册为第 68 个）；工具数保持 68。
+- registry 8 / schema 10 / agent 39（读29写39）/ control_hub 34 / ai_real_link 17，全 0 failed。

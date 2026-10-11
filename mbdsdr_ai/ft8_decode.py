@@ -173,6 +173,27 @@ def check_crc14(info_bits: Sequence[int]) -> bool:
     return sum(r[:14]) == 0
 
 
+def collect_ft8_candidates(decoded_list):
+    """汇总多解码结果为结构化候选列表（供 C++ export_ft8_results 接真实行）。
+
+    decoded_list: [(freq_hz, decode_result_dict), ...]
+    返回 {freq_hz, crc_ok, costas_score, rejected, reject_reason, iters} 列表，
+    按 crc_ok/分数降序。诚实：文本/呼号未解码，保持空。
+    """
+    out = []
+    for freq, r in decoded_list:
+        out.append({
+            "freq_hz": freq,
+            "crc_ok": bool(r.get("crc_ok", False)),
+            "costas_score": r.get("costas_score", 0.0),
+            "rejected": bool(r.get("rejected", False)),
+            "reject_reason": r.get("reject_reason", ""),
+            "iters": r.get("iters", 0),
+        })
+    out.sort(key=lambda c: (c["crc_ok"], c["costas_score"]), reverse=True)
+    return out
+
+
 if __name__ == "__main__":
     # 闭环自测：构造全零数据符号（tone 全 0）→ 应解出全零信息位
     tones = [[0.0] * 8 for _ in range(58)]

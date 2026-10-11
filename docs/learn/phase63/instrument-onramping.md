@@ -202,3 +202,10 @@
 - 桥接路径建议：线 B 在 C++ 侧接 crc_ok 候选列表（条数/SNR/频率槽）作 export_ft8_results 真实行；
   呼号文本解码留后续（诚实空态，不伪造呼号）。
 - SDR++ 侦察：无新硬缺口。
+
+## 25. 第㉖批：FT8 候选集接口
+- ft8_decode.py 增 collect_ft8_candidates（freq_hz, crc_ok, costas_score, rejected,
+  reject_reason, iters，按 crc_ok/分数降序）——线 B C++ export_ft8_results 数据源。
+- test_ft8_candidates 1 passed。
+- 75-bit 呼号文本解码（base-41/网格/遥测）：公式公开但实现链长，登记远期项，本轮不伪造。
+- SDR++ 侦察：无新硬缺口。

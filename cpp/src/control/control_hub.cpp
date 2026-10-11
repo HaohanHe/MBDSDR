@@ -1746,11 +1746,19 @@ QJsonObject ControlHub::cmdExportFt8Results(const QJsonObject& a) {
     if (path.isEmpty()) return errResult(QStringLiteral("参数 path 缺失"));
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) { o["ok"] = false; o["note"] = QStringLiteral("写文件失败"); return o; }
-    f.write("ft8_results\n");
+    f.write("valid,freq_offset_hz,sync_quality,candidate_count\n");
+    int rows = 0;
+    if (engine_->ft8Present()) {
+        f.write((QString::number(1) + "," +
+                 QString::number(engine_->ft8FreqOffsetHz(), 'f', 2) + "," +
+                 QString::number(engine_->ft8SyncQuality(), 'f', 3) + "," +
+                 QString::number(engine_->ft8CandidateCount()) + "\n").toUtf8());
+        rows = 1;
+    }
     f.close();
     o["path"] = path;
-    o["rows"] = 0;
-    o["note"] = QStringLiteral("FT8 解码结果源待 Python 域接入：仅写表头（空数据）");
+    o["rows"] = rows;
+    if (rows == 0) o["note"] = QStringLiteral("无 FT8 候选（无信号/未检出）：仅写表头；crc_ok 待 BP 解码移植");
     return o;
 }
 

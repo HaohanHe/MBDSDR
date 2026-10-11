@@ -1436,7 +1436,7 @@ QString execExportPeaksCsv(const QJsonObject& a, dsp::SpectrumEngine* engine,
 
 // export_ft8_results (write, gated): dump current FT8 decode results to a file.
 // Honest: C++ side has no FT8 result store (Python domain) -> header-only empty.
-QString execExportFt8Results(const QJsonObject& a, dsp::SpectrumEngine*,
+QString execExportFt8Results(const QJsonObject& a, dsp::SpectrumEngine* engine,
                               const SourceInfo& src,
                               ui::BookmarkManager* /*bookmarks*/) {
     QJsonObject o;
@@ -1452,12 +1452,24 @@ QString execExportFt8Results(const QJsonObject& a, dsp::SpectrumEngine*,
         o["note"] = QString::fromUtf8("写文件失败（路径不可写）");
         addSourceFields(o, src); return compact(o);
     }
-    f.write("ft8_results\n");
+    // Honest: dump the detection-layer candidate stats the C++ engine actually
+    // exposes. crc_ok / decoded message pending BP decode port (not yet wired);
+    // no fabricating callsigns/grid.
+    f.write("valid,freq_offset_hz,sync_quality,candidate_count\n");
+    int rows = 0;
+    if (engine && engine->ft8Present()) {
+        f.write((QString::number(1) + "," +
+                 QString::number(engine->ft8FreqOffsetHz(), 'f', 2) + "," +
+                 QString::number(engine->ft8SyncQuality(), 'f', 3) + "," +
+                 QString::number(engine->ft8CandidateCount()) + "\n").toUtf8());
+        rows = 1;
+    }
     f.close();
     o["ok"] = true;
     o["path"] = path;
-    o["rows"] = 0;
-    o["note"] = QString::fromUtf8("FT8 解码结果源待 Python 域接入：当前仅写表头（空数据），不伪造呼号");
+    o["rows"] = rows;
+    if (rows == 0)
+        o["note"] = QString::fromUtf8("无 FT8 候选（无信号/未检出）：仅写表头，不伪造呼号；crc_ok 待 BP 解码移植");
     addSourceFields(o, src); return compact(o);
 }
 // an EFHW / inverse-L matching network L/C suggestion.
