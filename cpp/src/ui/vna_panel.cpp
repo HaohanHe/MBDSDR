@@ -252,6 +252,9 @@ VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
     muLabel_ = new QLabel(QString::fromUtf8("μr: 输入夹具厚度以计算"), this);
     muLabel_->setWordWrap(true);
     lay->addWidget(muLabel_);
+    eqLabel_ = new QLabel(QString::fromUtf8("等效: --"), this);
+    eqLabel_->setWordWrap(true);
+    lay->addWidget(eqLabel_);
 
     timer_ = new QTimer(this);
     timer_->setInterval(1000);
@@ -321,6 +324,19 @@ void VnaPanel::applyReadout(const std::vector<long>& freqs,
     vna::ResonanceResult rr = vna::analyzeResonance(fHz, s11);
     analysisLabel_->setText(
         vnaAnalysisText(rr.valid, rr.series_fr_hz, rr.q, rr.bandwidth_hz, rr.esr));
+
+    // 串联 RLC 等效电路：由 S11 提取 ESR/fr/Q/L/C；无数据诚实 "--"。
+    vna::EquivalentResult eq = vna::equivalentRlc(fHz, s11);
+    if (eq.valid) {
+        eqLabel_->setText(QString::fromUtf8("等效串联: ESR=%1Ω  fr=%2MHz  Q=%3  L=%4µH  C=%5pF")
+            .arg(eq.series_r_ohm, 0, 'f', 1)
+            .arg(eq.resonance_hz / 1e6, 0, 'f', 2)
+            .arg(eq.series_q, 0, 'f', 1)
+            .arg(eq.series_l_h * 1e6, 0, 'f', 3)
+            .arg(eq.series_c_f * 1e12, 0, 'f', 2));
+    } else {
+        eqLabel_->setText(QString::fromUtf8("等效: --"));
+    }
 
     // 磁导率：需夹具厚度输入（mm）；无输入诚实引导，不伪造。
     bool okmm = false;

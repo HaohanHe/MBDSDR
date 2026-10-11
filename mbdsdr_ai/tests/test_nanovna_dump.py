@@ -57,3 +57,10 @@ def test_selftest_runs(tmp_path):
     out = run_dump("", 430_000_000, 431_000_000, 11, replay=str(p))
     assert out["model"] == "NanoVNA-H(selftest)"
     assert len(out["vswr"]) == 11
+
+
+def test_json_pretty_parseable(tmp_path):
+    from mbdsdr_ai import nanovna_dump as nd
+    import io, contextlib
+    rc = nd.main(["--selftest", "--points", "11", "--json-pretty"])
+    assert rc == 0

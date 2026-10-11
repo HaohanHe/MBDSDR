@@ -32,3 +32,8 @@
 
 ## 待真机补
 - 上表数值列待 NanoVNA-H/H4 回传 sweep.json 后填入（对照合成/真机差异）。
+
+## 字段对齐（quickstart 回传 ↔ evidence 数值列）
+- dump JSON 直出：frequencies_hz、S11、S21、vswr、return_loss_db、cal、model/version。
+- evidence 所需：VSWR/RL ← dump 直出；fr/Q/ESR、电缆长度、L/C、滤波器插损 ← 由 vna_rf 对
+  dump 的 S11/S21 后处理得出。即回传 sweep.json 一次即可复算全部数值列，PENDING 列统一填真机值。

@@ -112,3 +112,12 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 
 根目录另存历史设计稿（白皮书、IEEE 论文初稿、卫星指向雷达图）与硬件工程
 （KiCad、BOM、接线表），均为阶段性交付物，不参与三端构建。
+
+## 30 秒上手：NanoVNA 真机 dump
+1. 接线：被测件接 PORT 1（S11），USB 接电脑（VID:PID 0x0483:0x5740，Windows 用 COMx）。
+2. 跑：
+   ```
+   python3 -m mbdsdr_ai.nanovna_dump --port /dev/ttyACM0 --json-pretty --out sweep.json
+   ```
+3. 回传 sweep.json（+ 连接日志 version/info/cal）即可比对。
+无设备可先 `--selftest` 跑通流程（合成演示，非真实测量）。详见 docs/learn/nanovna/hardware-quickstart.md。

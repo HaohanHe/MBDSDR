@@ -114,6 +114,8 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--replay", default=None, help="测试用：自造协议脚本 JSON（不碰硬件）")
     ap.add_argument("--selftest", action="store_true",
                     help="无设备自检：用合成回放跑通全流程（数据为合成演示，非真实测量）")
+    ap.add_argument("--json-pretty", action="store_true",
+                    help="缩进 2 输出 JSON（便于阅读/回传）；缺省紧凑单行")
     args = ap.parse_args(argv)
 
     replay = args.replay
@@ -124,12 +126,13 @@ def main(argv: List[str]) -> int:
             json.dump(_selftest_script(args.start, args.stop, args.points), f)
 
     try:
-        data = run_dump(args.port, args.start, args.stop, args.points, args.replay)
+        data = run_dump(args.port, args.start, args.stop, args.points, replay)
     except NanoVNADriverError as e:
         print(f"错误：{e}", file=sys.stderr)
         return 1
 
-    text = json.dumps(data, ensure_ascii=False, indent=2)
+    text = json.dumps(data, ensure_ascii=False,
+                      indent=2 if args.json_pretty else None)
     if args.out == "-":
         print(text)
     else:

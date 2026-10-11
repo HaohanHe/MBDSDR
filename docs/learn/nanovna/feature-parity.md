@@ -293,3 +293,27 @@ MBD_SCROLL=end / 拉高窗高均未把「频段」行框入：左 rail 为单长
 
 ## 待加 CMake 清单
 无新源（并入 vna_rf.cpp/h）；无新测试目标。
+
+---
+
+# 第⑬批：等效电路 UI 读数区 + bandCombo 取景定案 + 并联 RLC 侦察（HEAD=ccb3fff）
+
+## 等效电路 UI 读数区（vna_panel.{h,cpp} eqLabel_）
+applyReadout 跑 vna::equivalentRlc(fHz,s11)→新增「等效串联: ESR/fr/Q/L/C」行；无数据诚实 "--"。
+1920 实拍：等效串联 ESR=67.6Ω fr=14.05MHz Q=0.6 L=0.495µH C=259.22pF（合成 seed S11 驱动），0 裁切 0 叠字。
+
+## bandCombo 取景定案
+多轮（滚到底/拉高窗高/半滚）均未把「频段」行框入：左 rail 单长表单，频段行位于频率组上部、滚动定位落在中心频率行。**诚实定案：需真机/交互验证**；用户手动步骤：手动开「频率」组选 bandCombo 即见。不再反复尝试。
+
+## 工具面终检（只读）
+65 工具三通道一致：registry 8 / schema 10 / agent 38（读29写36）/ control_hub 34 / ai_real_link 17。mobile 65 / phase31 头部 65。无缺口。
+
+## 并联 RLC 侦察（仅评估）
+串联 RLC 已覆盖多数谐振/阻抗提取场景；并联型（G||L||C 由 |Z|max 提取）对高 Q 并联谐振场景有增量价值，但当前 seed/测试无并联夹具，非明确缺口→不落地，留后续。
+
+## 计数
+- test_vna_rf 20 passed。
+- 金集不变（本批不加工具）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
+
+## 待加 CMake 清单
+无新源（并入 vna_panel.cpp）；无新测试目标。
