@@ -49,3 +49,14 @@ offscreen 测试环境无法把真实 DCS 位流喂进解调链，故 badge "DCS
 2. 接收端解调音频喂入后，CDCSS latch（连续 3 字）→ badge 应从"未检测到"变绿色 **DCS 023**。
 3. 换码或停发 → 5 字内 badge 回退"未检测到"。
 DSP 端已用合成位流钉扎（test_squelch_gate 13，含 bit-flip 纠错）；本步仅为 UI 呈现真机确认。
+
+## 双平台命令示例
+- Linux：`python3 -m mbdsdr_ai.nanovna_dump --port /dev/ttyACM0 --json-pretty --out sweep.json`
+  （权限：`sudo usermod -aG dialout $USER`，重登；或写 udev 规则匹配 0483:5740）。
+- Windows：把 `--port` 换成 `COM3`（设备管理器查串口号）。
+
+## 回传 -> 填表 checklist（逐列）
+1. `sweep.json` 一次回传。
+2. 直出列：summary.min_vswr / at_hz（摘要行）、vswr、return_loss_db。
+3. vna_rf 复算列：fr/Q/ESR、TDR 长度、L/C、滤波器形态。
+4. 填 evidence.md 对照表对应行，替换 SYNTHETIC_PLACEHOLDER。

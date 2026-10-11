@@ -409,3 +409,16 @@ agent-tool-documentation.md 头 = 66，与工具注册（registry schemas=66）�
 
 ## evidence PENDING 一致性
 instrument-onramping-evidence.md：双实证（SDR FT8/CTCSS/LRPT + VNA 驻波/谐振/TDR/LC/滤波器）表完整；PENDING 标注 3 处（真机 sweep.json 回传后填，绝不预填）；字段对齐，无不一致。
+
+---
+
+# 第⑳批：README 能力矩阵 + 收尾清账（HEAD=840343d）
+
+## README 能力矩阵
+README.md 补「工具能力矩阵」表：66 工具按域分组（SDR 调谐/VFO、静噪亚音解码、VNA 基础、VNA 分析、导出演制、书签扫描网络、系统校准卫星），含写/读标记。计数与 phase31 头部一致（66）。
+
+## phase31 核对
+agent-tool-documentation.md 头 = 66，与工具注册一致。
+
+## 红线
+competition/比赛/ghp_ 0；MIT 头。

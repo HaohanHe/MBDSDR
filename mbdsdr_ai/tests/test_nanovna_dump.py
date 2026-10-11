@@ -64,3 +64,12 @@ def test_json_pretty_parseable(tmp_path):
     import io, contextlib
     rc = nd.main(["--selftest", "--points", "11", "--json-pretty"])
     assert rc == 0
+
+
+def test_summary_min_vswr(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps(_script()), encoding="utf-8")
+    out = run_dump("", 430_000_000, 431_000_000, 11, replay=str(p))
+    assert "summary" in out
+    assert out["summary"]["min_vswr"] == 3.0  # |gamma|=0.5 -> vswr 3
+    assert out["summary"]["at_hz"] == 430_000_000

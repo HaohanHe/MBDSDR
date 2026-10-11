@@ -163,3 +163,8 @@
 - NanoVNAClient/SerialTransport/ReplayTransport/read_cal_status 均在；补 read_cal_status 边界测试，
   test_nanovna_client 16->17 passed。既有覆盖握手序列/sweep/data0·1/坏行容错/无设备报错。
 - SDR++ 侦察：无新硬缺口。
+
+## 19. 第⑳批：真机预案最终化
+- dump 输出增 summary（min_vswr + at_hz 摘要行）；pytest 6 passed。
+- quickstart 补双平台示例（Linux /dev/ttyACM0+dialout / Windows COMx）+ 回传填表 checklist。
+- SDR++ 侦察：无新硬缺口。

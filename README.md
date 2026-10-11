@@ -121,3 +121,62 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
    ```
 3. 回传 sweep.json（+ 连接日志 version/info/cal）即可比对。
 无设备可先 `--selftest` 跑通流程（合成演示，非真实测量）。详见 docs/learn/nanovna/hardware-quickstart.md。
+
+## 工具能力矩阵（66 工具，三通道：Agent / Hub / HTTP 透传）
+
+按域分组；写=手动模式 gate 拦截，读=不拦截。
+
+### SDR 调谐 / VFO
+| 工具 | 写/读 |
+|---|---|
+| tune_frequency | 写 |
+| set_mode | 写 |
+| set_bandwidth | 写 |
+| get_status | 读 |
+| get_spectrum_status | 读 |
+| list_vfos / add_vfo / delete_vfo(rename_vfo/switch_vfo 同) | 读/写 |
+| set_vfo_frequency / set_vfo_mode / set_vfo_bandwidth / set_vfo_armed | 写 |
+
+### SDR 静噪 / 亚音 / 解码
+| 工具 | 写/读 |
+|---|---|
+| set_squelch / get_squelch_status | 写/读 |
+| set_ctcss / get_ctcss_status | 写/读 |
+| set_cdcss / get_cdcss_status | 写/读 |
+| set_ft8 / get_ft8_status | 写/读 |
+| set_lrpt / get_lrpt_status | 写/读 |
+| set_noise_blanker / get_noise_blanker_status | 写/读 |
+| get_acars_packets / get_navtex_messages / get_pocsag_messages / get_m17_calls / get_vor_radial | 读 |
+
+### VNA 基础
+| 工具 | 写/读 |
+|---|---|
+| set_vna_sweep | 写 |
+| get_vna_data / get_vna_status | 读 |
+
+### VNA 分析
+| 工具 | 写/读 |
+|---|---|
+| vna_tdr_cable | 写 |
+| analyze_vna_resonance / analyze_vna_filter / analyze_vna_equivalent / analyze_vna_touchstone / analyze_vna_match | 读 |
+
+### 导出 / 录制
+| 工具 | 写/读 |
+|---|---|
+| start_recording / stop_recording / delete_recording / export_recording / export_iq_segment / list_recordings / get_recording_state | 写/读 |
+| export_vna_snapshot / export_spectrum_snapshot | 写 |
+
+### 书签 / 扫描 / 网络
+| 工具 | 写/读 |
+|---|---|
+| list_bookmarks / add_bookmark / tune_to_bookmark / delete_bookmark | 读/写 |
+| scan_band / start_scan_link / stop_scan_link / get_scan_link_status | 写/读 |
+| connect_network_source / set_network_audio_sink / get_network_audio_status | 写/读 |
+
+### 系统 / 校准 / 卫星
+| 工具 | 写/读 |
+|---|---|
+| calibrate_frequency / apply_frequency_correction / predict_passes | 读 |
+| set_fft_params / set_color_map / set_doppler_compensation / get_capabilities | 写/读 |
+
+合计 66 工具，与 docs/learn/phase31/agent-tool-documentation.md 头部一致。

@@ -71,7 +71,7 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
             "请检查设备是否完成扫频。"
         )
 
-    return {
+    out = {
         "model": client.info_lines[0] if client.info_lines else "unknown",
         "version": client.version,
         "sn": client.sn,
@@ -84,6 +84,14 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
         "vswr": [round(vswr(c), 3) for c in s11],
         "return_loss_db": [round(return_loss_db(c), 2) for c in s11],
     }
+    # 摘要行：一眼看最低驻波点
+    v = [vswr(c) for c in s11]
+    k = min(range(len(v)), key=lambda i: v[i])
+    out["summary"] = {
+        "min_vswr": round(v[k], 3),
+        "at_hz": freqs[k] if k < len(freqs) else 0,
+    }
+    return out
 
 
 def _selftest_script(start_hz: int, stop_hz: int, points: int):
