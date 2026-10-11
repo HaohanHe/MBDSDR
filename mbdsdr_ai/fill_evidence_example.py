@@ -11,6 +11,41 @@ from __future__ import annotations
 import json
 from .nanovna_dump import run_dump
 from .nanovna_client import vswr, return_loss_db
+import math
+
+
+def tdr_length_py(freqs_hz, s11, vf=0.66):
+    """Python 侧 TDR 近似：反射峰位置 -> 电缆长度 m（vf 默认 RG-58 0.66）。
+    与 C++ vna_rf::tdrCable 同思路，独立实现。合成占位。"""
+    c = 299792458.0
+    mag = [abs(complex(*s)) for s in s11]
+    k = max(range(len(mag)), key=lambda i: mag[i])
+    n = len(freqs_hz)
+    span = freqs_hz[-1] - freqs_hz[0]
+    if span <= 0:
+        return 0.0
+    t_roundtrip = (k / n) / span
+    return vf * c * t_roundtrip / 2.0
+
+
+def reactance_lc_py(freq_hz, xs):
+    """Z 虚部 -> 串感 nH / 并容 pF（与 vna::reactanceToHenries/Farads 同公式）。"""
+    if abs(xs) < 1e-9:
+        return (0.0, 0.0)
+    if xs > 0:
+        return (xs / (2 * math.pi * freq_hz) * 1e9, 0.0)
+    return (0.0, -1.0 / (2 * math.pi * freq_hz * xs) * 1e12)
+
+
+def filter_shape_py(s21_db):
+    """四形态判定（带通/带阻/高通/低通）。同 vna::analyzeFilter 思路，占位。"""
+    peak = max(s21_db)
+    n = len(s21_db)
+    low = min(s21_db[: max(1, n // 4)])
+    high = min(s21_db[-max(1, n // 4):])
+    if peak - low > peak - high:
+        return "bandstop" if low > high else "lowpass"
+    return "bandpass" if high < low else "highpass"
 
 
 def analyze_resonance_py(freqs_hz, s11):
@@ -43,6 +78,12 @@ def demo() -> dict:
     vswrs = [vswr(complex(*s)) for s in data["S11"]]
     i = min(range(len(vswrs)), key=lambda k: vswrs[k])
     res = analyze_resonance_py(data["frequencies_hz"], data["S11"])
+    length = tdr_length_py(data["frequencies_hz"], data["S11"])
+    fmid = data["frequencies_hz"][len(data["frequencies_hz"]) // 2]
+    xs_mid = complex(*data["S11"][len(data["S11"]) // 2]).imag
+    lnh, cpf = reactance_lc_py(fmid, xs_mid)
+    from .nanovna_client import s21_gain_db
+    fshape = filter_shape_py([s21_gain_db(complex(*s)) for s in data["S21"]])
     return {
         "_MARKER": "SYNTHETIC_PLACEHOLDER_真机替换",
         "频率": f"{data['frequencies_hz'][i]/1e6:.3f} MHz",
@@ -51,6 +92,9 @@ def demo() -> dict:
         "谐振_fr_MHz": round(res["fr_hz"] / 1e6, 4),
         "谐振_Q": round(res["q"], 2),
         "谐振_ESR_ohm": round(res["esr"], 2),
+        "电缆长度_m": round(length, 3),
+        "L_nH": round(lnh, 3), "C_pF": round(cpf, 3),
+        "滤波器形态": fshape,
     }
 
 

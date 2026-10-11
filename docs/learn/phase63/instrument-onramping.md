@@ -142,3 +142,10 @@
   |Z|极小=fr、半功率带宽 BW、|Z|谷=ESR）；输出加 谐振_fr_MHz/Q/ESR 列，仍带 SYNTHETIC 标注。
 - test_fill_evidence 1 passed（自造谷值钉扎 fr/ESR）。
 - SDR++ 侦察：候选（FFT/AGC/静噪/频段/WFM/书签）均已在，无新硬缺口，宁缺毋滥不落地。
+
+## 16. 第⑰批：fill 桥接 TDR/LC/滤波器列
+- fill_evidence_example.py 增 tdr_length_py（vf=0.66 默认）、reactance_lc_py（X->nH/pF）、
+  filter_shape_py（四形态判定）——Python 独立实现，与 C++ vna_rf 同公式；demo 输出补
+  电缆长度/L·C/滤波器形态列，仍带 SYNTHETIC 标注。
+- test_fill_evidence 1->4 passed（谐振谷 + TDR 正长度 + LC=1uH 钉扎 + 形态判定）。
+- SDR++ 侦察：候选均已在，无新硬缺口，不落地。

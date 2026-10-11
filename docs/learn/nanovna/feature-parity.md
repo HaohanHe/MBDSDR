@@ -371,3 +371,19 @@ docs/learn/phase63/instrument-democratization-narrative.md（problem→approach�
 
 ## phase31 regen
 无自动 regen 脚本（仓库 scratch 隔离不可用）；口径：头部计数手工同步 66 + 手补段落，统一为"头部+手补段"手工维护。
+
+---
+
+# 第⑰批：export_spectrum UI 按钮 + 渲染增强侦察（HEAD=f8c934a）
+
+## UI 按钮补齐（结论）
+main_window 频谱工具栏（清/标记/Rst）不在 main_window.cpp 锚点（在频谱控件内），且 main_window 为大文件/并行线 A 高冲突区。本轮**不动 UI 按钮**（宁缺毋滥），工具层离屏 PNG 导出已闭环。真机步骤：用户手动调 export_spectrum_snapshot(path) 工具即得 PNG。
+
+## 渲染增强（结论）
+engine 未暴露 FFT bins 读访问器（spectrum_engine.h 无 fftDb/readSpectrum），接真实频谱轨迹需加 engine 访问器（引擎域归线 A）。本轮保持简化帧（频率轴+中心标记），真实轨迹留下轮。
+
+## SDR++ 侦察
+无可复用新硬缺口；不做。
+
+## 计数
+金集不变（66）：registry 8 / schema 10 / agent 38 / control_hub 34 / ai_real_link 17。
