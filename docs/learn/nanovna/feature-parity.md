@@ -548,3 +548,17 @@ registry 8/schema 10/agent 40/control_hub 34/ai_real_link 17，全 0 failed。mo
 
 ## 红线
 competition/比赛/ghp_ 0。
+
+---
+
+# 第㉚批：维护态例行（HEAD=36a34ea，只读）
+
+## 八处计数核对
+- phase31 头 68；README 矩阵头/合计 68；金集 registry 8/schema 10/agent 40/control_hub 34/ai_real_link 17。
+- **mobile 差 4**：test 期望 68，catalog 实际 name 条目 64（已知缺口，第㉘/㉙批已报，未跑 flutter）。
+
+## localCommand/onramp 边界
+**localCommand 确实调用 onramp**（agent.cpp:69-70：isVnaOnrampIntent→runVswrOnramp）。报父定是否要剥离。
+
+## 红线
+competition/比赛/ghp_ 0。

@@ -225,3 +225,12 @@
 - docs 边界声明：本仓 docs/learn 下的对话/示例仅演示工具链组合，**产品不含预制剧本**；
   真实回复由实时工具结果驱动。
 - SDR++ 侦察：无新硬缺口。
+
+## 29. 第㉚批：onramp 引导定位复核
+- 盘点：runVswrOnramp + classifyVnaIntent 五类 + 报告文案。
+- 判定 = **原子便利（保持），冲突 0**：所有分支真实调 executeTool（get_vna_status/
+  vna_tdr_cable/analyze_vna_resonance/analyze_vna_filter/set_vna_sweep/get_vna_data），
+  输出由真实工具结果格式化；引导文案仅诚实错误提示（未连接/未校准/点数不足），
+  无预制剧本/固定回答。
+- 与"纯工具+模型自主"一致：onramp 是真实工具链的薄编排器，产品不含演示话术。
+- SDR++ 侦察：无新硬缺口。
