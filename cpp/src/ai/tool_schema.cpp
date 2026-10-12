@@ -1554,6 +1554,71 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // ---- 第 10 域「工作台编排」（AIGUI P0-b）-------------------------------
+    // The live WorkspaceController seam: resize the three-column splitter and
+    // show/hide right-panel tabs through the compile-time whitelist. Unknown
+    // component ids become honest placeholders (never rendered). These tools do
+    // NOT touch DSP / audio / hardware.
+
+    // arrange_workspace (write -- gated): apply an A2UI v1.0 subset message.
+    {
+        ToolSchemaSpec s;
+        s.name = "arrange_workspace";
+        s.description = QString::fromUtf8(
+            "写入：把一条 A2UI v1.0 子集布局消息应用到主界面三栏工作台——"
+            "op 枚举 createSurface（整面重建）/updateComponents（在当前布局上叠加，默认）/"
+            "deleteSurface（回默认）。components 为扁平邻接节点表，每节点 "
+            "{id,type,props:{sizes:[L,M,R],stretch:[a,b,c],current,visible},children:[...]}；"
+            "id 仅认编译期白名单（splitter/left_rail/center_spectrum/right_tabs/status_bar/"
+            "tab:XXX），未知 id 进 placeholders 诚实空态、绝不渲染。"
+            "sizes 软下限 120px clamp，默认 280/800/280 stretch 1/3/1。"
+            "只动 splitter 与右侧 tab 可见性，不碰 DSP/音频/硬件。属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec op;
+        op.name = "op"; op.type = "string";
+        op.description = QString::fromUtf8("布局语义：createSurface/updateComponents(默认)/deleteSurface");
+        op.required = false;
+        ToolParamSpec comps;
+        comps.name = "components"; comps.type = "object";
+        comps.description = QString::fromUtf8("A2UI 节点数组（untrusted：未知 id→placeholder，sizes clamp≥120）");
+        comps.required = false;
+        s.params << op << comps;
+        out.append(s);
+    }
+    // get_workspace_layout (read): current model snapshot.
+    {
+        ToolSchemaSpec s;
+        s.name = "get_workspace_layout";
+        s.description = QString::fromUtf8(
+            "只读：返回当前工作台布局模型——splitter_sizes[L,M,R]、splitter_stretch[a,b,c]、"
+            "visible_tabs（tab:XXX 列表）、current_tab、hidden_panels、placeholders。"
+            "默认三栏 280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见。");
+        s.write = false;
+        out.append(s);
+    }
+    // list_ui_components (read): whitelist catalog.
+    {
+        ToolSchemaSpec s;
+        s.name = "list_ui_components";
+        s.description = QString::fromUtf8(
+            "只读：返回编译期白名单组件目录——每项 {id,category,capabilities[],min_size}。"
+            "共 23 项：splitter/left_rail/center_spectrum/right_tabs/status_bar + 14 个 tab:XXX "
+            "+ 4 个 center:XXX。agent 编排工作台前先查此目录确认可引用的 id。");
+        s.write = false;
+        out.append(s);
+    }
+    // reset_workspace (write -- gated): back to the default three-column spec.
+    {
+        ToolSchemaSpec s;
+        s.name = "reset_workspace";
+        s.description = QString::fromUtf8(
+            "写入：把工作台重置为默认三栏布局（280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见），"
+            "等价于 deleteSurface。只动 splitter 与 tab 可见性，不碰 DSP/音频/硬件。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        out.append(s);
+    }
+
     return out;
 }
 

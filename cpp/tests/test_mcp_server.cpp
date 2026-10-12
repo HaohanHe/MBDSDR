@@ -98,7 +98,7 @@ void TestMcpServer::toolsListSingleSourceConsistency() {
     // Default view = 8 frozen domain cards; each card carries names only.
     QJsonArray cards = r.value(QStringLiteral("result")).toObject()
                            .value(QStringLiteral("tools")).toArray();
-    QCOMPARE(cards.size(), 9);
+    QCOMPARE(cards.size(), 10);
 
     // Single-source pin: flattening every card's name list == the declarative
     // registry name set, each tool appearing in EXACTLY one domain (no loss,
@@ -169,7 +169,7 @@ void TestMcpServer::toolsListGroupedBranches() {
                        "\"params\":{\"detailed\":true}}"), &engine);
     QJsonArray doms = det.value(QStringLiteral("result")).toObject()
                          .value(QStringLiteral("domains")).toArray();
-    QCOMPARE(doms.size(), 9);
+    QCOMPARE(doms.size(), 10);
     int detTotal = 0;
     for (const QJsonValue& c : doms)
         detTotal += c.toObject().value(QStringLiteral("tools")).toArray().size();
@@ -185,7 +185,7 @@ void TestMcpServer::toolsListDetailLevels() {
                        "\"params\":{\"detail\":\"name\"}}"), &engine);
     QJsonArray nameCards = byName.value(QStringLiteral("result")).toObject()
                                .value(QStringLiteral("tools")).toArray();
-    QCOMPARE(nameCards.size(), 9);
+    QCOMPARE(nameCards.size(), 10);
     for (const QJsonValue& c : nameCards)
         for (const QJsonValue& t : c.toObject().value(QStringLiteral("tools")).toArray())
             QVERIFY(t.isString());   // bare name, NOT an object
@@ -213,7 +213,7 @@ void TestMcpServer::toolsListDetailLevels() {
                        "\"params\":{\"detail\":\"schema\"}}"), &engine);
     QJsonArray schemaCards = bySchema.value(QStringLiteral("result")).toObject()
                                  .value(QStringLiteral("domains")).toArray();
-    QCOMPARE(schemaCards.size(), 9);
+    QCOMPARE(schemaCards.size(), 10);
     for (const QJsonValue& c : schemaCards)
         for (const QJsonValue& t : c.toObject().value(QStringLiteral("tools")).toArray())
             QVERIFY(t.toObject().contains(QStringLiteral("inputSchema")));
@@ -223,7 +223,7 @@ void TestMcpServer::toolsListDetailLevels() {
         QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":53,\"method\":\"tools/list\","
                        "\"params\":{\"detailed\":true}}"), &engine);
     QCOMPARE(detAlias.value(QStringLiteral("result")).toObject()
-                 .value(QStringLiteral("domains")).toArray().size(), 9);
+                 .value(QStringLiteral("domains")).toArray().size(), 10);
 
     // -- unknown detail value -> honest -32602 listing legal levels.
     QJsonObject bad = post(
@@ -385,7 +385,7 @@ void TestMcpServer::processLevelStdioRoundtrip() {
     QJsonObject listObj = QJsonDocument::fromJson(listLine).object();
     QJsonArray cards = listObj.value(QStringLiteral("result")).toObject()
                            .value(QStringLiteral("tools")).toArray();
-    QCOMPARE(cards.size(), 9);
+    QCOMPARE(cards.size(), 10);
     int flatTotal = 0;
     for (const QJsonValue& c : cards)
         flatTotal += c.toObject().value(QStringLiteral("tools")).toArray().size();

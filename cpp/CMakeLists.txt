@@ -196,6 +196,7 @@ set(SOURCES
     src/ui/task_steps_view.cpp
     src/ui/component_registry.cpp
     src/ui/workspace_layout.cpp
+    src/ui/workspace_controller.cpp
     src/agentapi/mcp_server.cpp
 )
 

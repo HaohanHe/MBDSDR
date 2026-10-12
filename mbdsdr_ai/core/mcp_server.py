@@ -418,7 +418,7 @@ def _build_tool_table() -> List[Dict[str, Any]]:
         lambda c, a: (c.shutdown(), {"ok": True})[1], write=True)
 
     # ==================================================================
-    # 解码器长尾（P0 #65）—— Python 面独立实现、C++ 9 域未覆盖的长尾
+    # 解码器长尾（P0 #65）—— Python 面独立实现、C++ 10 域未覆盖的长尾
     # 协议/硬件参数工具。全部为离线纯函数 handler：不依赖已连接后端，
     # 输入为结构化小数据（hex 字节串 / 文本 / 型号名），输出真实解析结果；
     # 输入非法时返回诚实错误，绝不造假。真机验证状态见
@@ -476,12 +476,12 @@ def _build_tool_table() -> List[Dict[str, Any]]:
 
 
 # ======================================================================
-# 二级域目录（P1 #64）——冻结 9 域，与 C++ 侧 mcp_server.cpp 同名同序
+# 二级域目录（P1 #64）——冻结 10 域，与 C++ 侧 mcp_server.cpp 同名同序
 #
 # 这是服务器侧分组视图：工具 schema 的唯一事实源仍是上面的
 # ``_build_tool_table()``；这里只做“每工具恰好归属一个域”的桶分组。
-# Python 面（SDRController）当前没有 VNA 工具，故三个 VNA 域与「记忆编排」
-# 在本表面向用户为空卡片（诚实空态）；9 域名集合本身保持与 C++ 完全一致，形成跨语言钉扎。
+# Python 面（SDRController）当前没有 VNA 工具，故三个 VNA 域、「记忆编排」与
+# 「工作台编排」在本表面向用户为空卡片（诚实空态）；10 域名集合本身保持与 C++ 完全一致，形成跨语言钉扎。
 # ======================================================================
 FROZEN_DOMAIN_SUMMARIES: Dict[str, str] = {
     "SDR 调谐/VFO": "接收机调谐、解调模式、带宽/静噪/降噪与多 VFO 及频谱读取参数控制。",
@@ -493,25 +493,26 @@ FROZEN_DOMAIN_SUMMARIES: Dict[str, str] = {
     "书签扫描卫星": "书签管理、步进扫描与卫星过境预报/调谐。",
     "系统设备": "设备连接、音频/服务开关与整体状态。",
     "记忆编排": "本地持久记忆（SQLite FTS5）的写入、覆盖与全文检索，按 user/agent/session 作用域分层。",
+    "工作台编排": "AIGUI 三栏工作台布局编排：按编译期白名单调整 splitter 尺寸/右侧 tab 可见性，未知 id 诚实占位，不碰 DSP/音频/硬件。",
 }
 
 FROZEN_DOMAIN_NAMES: List[str] = list(FROZEN_DOMAIN_SUMMARIES.keys())
 
-# Python 面扩展域（P0 #65）——不参与与 C++ 的 9 域跨语言冻结钉扎，
+# Python 面扩展域（P0 #65）——不参与与 C++ 的 10 域跨语言冻结钉扎，
 # 仅在本 Python MCP server 视图末尾追加。C++ 侧没有对应域；客户端合并视图时
-# 应把 C++ 的 9 域与本域并列拼装（两者 schema 各自独立，互不复制）。
+# 应把 C++ 的 10 域与本域并列拼装（两者 schema 各自独立，互不复制）。
 PYTHON_EXTENSION_DOMAIN_SUMMARIES: Dict[str, str] = {
-    "解码器长尾": "Python 侧独立实现、C++ 9 域尚未覆盖的长尾协议解码器与硬件参数查表"
+    "解码器长尾": "Python 侧独立实现、C++ 10 域尚未覆盖的长尾协议解码器与硬件参数查表"
                  "（DAB+/NRSC-5/433.92MHz ISM/GK-2A LRIT/FST4/bladeRF 参数）。"
                  "离线纯函数，真机验证多为 PENDING。",
 }
 
 PYTHON_EXTENSION_DOMAIN_NAMES: List[str] = list(PYTHON_EXTENSION_DOMAIN_SUMMARIES.keys())
 
-# 全域名 = 冻结 9 域（与 C++ 钉扎）+ Python 扩展域。
+# 全域名 = 冻结 10 域（与 C++ 钉扎）+ Python 扩展域。
 ALL_DOMAIN_NAMES: List[str] = FROZEN_DOMAIN_NAMES + PYTHON_EXTENSION_DOMAIN_NAMES
 
-# 域 -> summary 合并视图（冻结 9 域原样 + Python 扩展域）。
+# 域 -> summary 合并视图（冻结 10 域原样 + Python 扩展域）。
 ALL_DOMAIN_SUMMARIES: Dict[str, str] = {
     **FROZEN_DOMAIN_SUMMARIES, **PYTHON_EXTENSION_DOMAIN_SUMMARIES}
 
@@ -589,7 +590,7 @@ _TOOL_DOMAIN: Dict[str, str] = {
 
 
 def _resolve_domain(query: str) -> Optional[str]:
-    """把 params.domain 容错解析成域名（冻结 9 域 + Python 扩展域）；匹配不到返回 None。"""
+    """把 params.domain 容错解析成域名（冻结 10 域 + Python 扩展域）；匹配不到返回 None。"""
     if query in ALL_DOMAIN_NAMES:
         return query
     q = query.strip().lower()

@@ -76,6 +76,9 @@ const QSet<QString> kAllCxxTools = {
     // P3 #73/#74: local memory family + checkpoint writer control plane.
     "memory_add", "memory_search", "memory_update",
     "checkpoint_status", "memory_flush",
+    // 第 10 域「工作台编排」(AIGUI P0-b): live three-column workspace seam.
+    "arrange_workspace", "get_workspace_layout",
+    "list_ui_components", "reset_workspace",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -107,6 +110,8 @@ const QSet<QString> kExpectedWriteTools = {
     "vna_device",
     // P3 #73/#74: local memory add/upsert + explicit flush (gated writes).
     "memory_add", "memory_update", "memory_flush",
+    // 第 10 域「工作台编排」(P0-b): arrange/reset are gated writes.
+    "arrange_workspace", "reset_workspace",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -145,6 +150,8 @@ const QSet<QString> kFlutterUngatedReadTools = {
     "get_capabilities", "get_recording_state",
     // P3 #73/#74: local memory full-text search + writer status (desktop reads).
     "memory_search", "checkpoint_status",
+    // 第 10 域「工作台编排」(P0-b): workspace spec read + component catalog reads.
+    "get_workspace_layout", "list_ui_components",
 };
 } // namespace
 
@@ -170,7 +177,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 77, qPrintable(QString("expected 77 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 81, qPrintable(QString("expected 81 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -295,15 +302,15 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
     QVERIFY(!isWriteTool("definitely_not_a_real_tool"));
 }
 
-// Not-a-regression smoke: the on-wire contract still holds (77 defs, order kept)
+// Not-a-regression smoke: the on-wire contract still holds (81 defs, order kept)
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 77);
+    QCOMPARE(defs.size(), 81);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("memory_flush"));
+    QCOMPARE(defs.last().name, QString("reset_workspace"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

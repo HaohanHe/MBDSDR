@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，77 个工具）
+# Agent 工具能力清单（自动生成，81 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -379,3 +379,21 @@ dump1090 --aircraft 形状快照。只读工具（手动 gate 不拦截）。
 
 ## memory_flush（写，P3 #74 checkpoint writer）
 同步排空记忆队列并落库（memory_store.add/update），重写 `~/.mbdsdr/checkpoint.md` 人类可读快照（时间戳+本次落库条数+key 列表），返回 `written` 实际落库条数 + `checkpoint_rewritten=true`。写工具（手动 gate 拦截）。
+
+## arrange_workspace（写，第 10 域「工作台编排」AIGUI P0-b）
+把一条 A2UI v1.0 子集布局消息应用到主界面三栏工作台。写工具（手动 gate 拦截）。
+- `op` 枚举：createSurface（整面重建）/updateComponents（在当前布局上叠加，默认）/deleteSurface（回默认）。
+- `components` 扁平邻接节点表，每节点 `{id,type,props:{sizes:[L,M,R],stretch:[a,b,c],current,visible},children:[...]}`；id 仅认编译期白名单（splitter/left_rail/center_spectrum/right_tabs/status_bar/tab:XXX），未知 id 进 `placeholders` 诚实空态、绝不渲染。
+- `sizes` 软下限 120px clamp，默认 280/800/280 stretch 1/3/1。只动 splitter 与右侧 tab 可见性，不碰 DSP/音频/硬件。
+
+## get_workspace_layout（读，第 10 域「工作台编排」）
+只读：返回当前工作台布局模型——`splitter_sizes[L,M,R]`、`splitter_stretch[a,b,c]`、`visible_tabs`（tab:XXX 列表）、`current_tab`、`hidden_panels`、`placeholders`。只读工具（手动 gate 不拦截）。
+- 默认三栏 280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见。
+
+## list_ui_components（读，第 10 域「工作台编排」）
+只读：返回编译期白名单组件目录——每项 `{id,category,capabilities[],min_size}`。只读工具（手动 gate 不拦截）。
+- 共 23 项：splitter/left_rail/center_spectrum/right_tabs/status_bar + 14 个 tab:XXX + 4 个 center:XXX。agent 编排工作台前先查此目录确认可引用的 id。
+
+## reset_workspace（写，第 10 域「工作台编排」）
+把工作台重置为默认三栏布局（280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见），等价于 deleteSurface。写工具（手动 gate 拦截）。
+- 只动 splitter 与 tab 可见性，不碰 DSP/音频/硬件。

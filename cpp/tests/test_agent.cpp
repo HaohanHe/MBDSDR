@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QScopeGuard>
+#include <memory>
 
 #include "ai/agent_tools.h"
 #include "ai/tool_schema.h"
@@ -19,7 +20,10 @@
 #include "dsp/frequency_calibrator.h"
 #include "dsp/fcch_detector.h"
 #include "ui/bookmark_manager.h"
+#include "ui/workspace_controller.h"
 #include "core/tokens.h"
+#include <QSplitter>
+#include <QTabWidget>
 #include "synthetic_iq_fixture.h"
 
 using namespace mbdsdr;
@@ -118,6 +122,11 @@ private slots:
     void memoryScopeIsolation();
     void memoryUpdateOverwrite();
     void checkpointStatusFields();
+    // --- AIGUI P0-b: workspace controller three-channel seam -------------------
+    void workspace_notInjectedHonestError();
+    void workspace_applyOverlayRoundTripAndPlaceholder();
+    void workspace_getDefaultSpecThreeColumns();
+    void workspace_resetAndCatalogTabs();
 };
 
 void TestAgent::initTestCase() {
@@ -141,7 +150,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 77);
+    QCOMPARE(tools.size(), 81);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -884,17 +893,23 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
             // Every read deterministically returns ok:true on a fresh engine
             // EXCEPT predict_passes, which honestly returns ok:false with no
             // fresh TLE cache (honest empty state) -- that is NOT a gate block,
-            // which we already asserted above.
-            if (s.name != "predict_passes") {
+            // which we already asserted above. The two workspace reads also
+            // honestly return ok:false here: this headless gate test does not
+            // inject a WorkspaceController, so they report "工作台控制器未注入".
+            // That is an honest not-injected empty state, not a gate block.
+            if (s.name != QLatin1String("predict_passes")
+                && s.name != QLatin1String("get_workspace_layout")
+                && s.name != QLatin1String("list_ui_components")) {
                 QVERIFY2(r.contains("\"ok\":true"),
                          qPrintable(s.name + " (read) must execute ok:true: " + r));
             }
         }
     }
 
-    // The frozen split: 44 writes / 33 reads (77 tools; checkpoint writer added).
-    QCOMPARE(writes, 44);
-    QCOMPARE(reads, 33);
+    // The frozen split: 46 writes / 35 reads (81 tools; AIGUI P0-b workspace
+    // domain added two gated writes + two desktop reads).
+    QCOMPARE(writes, 46);
+    QCOMPARE(reads, 35);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -2276,9 +2291,126 @@ void TestAgent::checkpointStatusFields() {
     QVERIFY(st.contains("last_flush_ms"));
 }
 
-#include <QCoreApplication>
+// ---- AIGUI P0-b: workspace controller three-channel seam -------------------
+namespace {
+// Build a real (offscreen) splitter + right-tab widget mirroring the 14
+// registered right-panel tabs, so applyLayoutEngine has live widgets to drive.
+std::unique_ptr<aigui::WorkspaceController> makeTestWorkspace() {
+    auto* splitter = new QSplitter(Qt::Horizontal);
+    splitter->addWidget(new QWidget);   // left rail
+    splitter->addWidget(new QWidget);   // center spectrum
+    auto* tabs = new QTabWidget;
+    const QStringList labels = {QString::fromUtf8("CW"), QString::fromUtf8("ADS-B"),
+                                QString::fromUtf8("FT8"), QString::fromUtf8("寻呼"),
+                                QString::fromUtf8("数据"), QString::fromUtf8("m17"),
+                                QString::fromUtf8("VOR"), QString::fromUtf8("星座"),
+                                QString::fromUtf8("天空"), QString::fromUtf8("扫描/书签"),
+                                QString::fromUtf8("录制库"), QString::fromUtf8("AI 助手"),
+                                QString::fromUtf8("电台"), QString::fromUtf8("VNA")};
+    for (const QString& l : labels) tabs->addTab(new QWidget, l);
+    splitter->addWidget(tabs);   // third pane
+    return std::unique_ptr<aigui::WorkspaceController>(
+        new aigui::WorkspaceController(splitter, tabs));
+}
+}  // namespace
+
+// Not injected: the four workspace tools must return an honest "not injected"
+// envelope rather than crashing or fabricating a success.
+void TestAgent::workspace_notInjectedHonestError() {
+    dsp::SpectrumEngine engine;
+    for (const char* tool : {"get_workspace_layout", "list_ui_components",
+                             "arrange_workspace", "reset_workspace"}) {
+        const QJsonObject o = QJsonDocument::fromJson(
+            ai::executeTool(QString::fromUtf8(tool), QJsonObject(), &engine).toUtf8()).object();
+        QVERIFY2(!o.value("ok").toBool(),
+                 qPrintable(QString::fromUtf8("%1 must be ok:false when not injected").arg(tool)));
+        QVERIFY2(o.value("error").toString().contains(QString::fromUtf8("工作台控制器未注入")),
+                 qPrintable(QString::fromUtf8("%1: %2").arg(tool,
+                     QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)))));
+    }
+}
+
+// Injected: arrange_workspace applies an overlay; an unknown component id lands
+// in placeholders (honest empty state, never rendered), and the model round-trips.
+void TestAgent::workspace_applyOverlayRoundTripAndPlaceholder() {
+    dsp::SpectrumEngine engine;
+    auto ctrl = makeTestWorkspace();
+
+    QJsonObject splitterNode;
+    splitterNode["id"] = "splitter";
+    QJsonObject props;
+    props["sizes"] = QJsonArray{200, 900, 300};
+    splitterNode["props"] = props;
+    QJsonObject unknown;   // not in the whitelist -> placeholder
+    unknown["id"] = "tab:does_not_exist";
+
+    QJsonObject msg;
+    msg["op"] = "updateComponents";
+    msg["components"] = QJsonArray{splitterNode, unknown};
+
+    const QJsonObject o = QJsonDocument::fromJson(
+        ai::executeTool("arrange_workspace", msg, &engine, nullptr, ctrl.get()).toUtf8()).object();
+    QVERIFY2(o.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact))));
+    const QJsonArray ph = o.value("placeholders").toArray();
+    QVERIFY2(ph.contains("tab:does_not_exist"),
+             qPrintable("unknown id must land in placeholders: " +
+                        QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact))));
+
+    // Round-trip: the new sizes persisted into the current spec.
+    const QJsonObject spec = QJsonDocument::fromJson(
+        ai::executeTool("get_workspace_layout", QJsonObject(), &engine, nullptr, ctrl.get())
+            .toUtf8()).object();
+    const QJsonArray sizes = spec.value("splitter_sizes").toArray();
+    QCOMPARE(sizes.size(), 3);
+    QCOMPARE(sizes.at(0).toInt(), 200);
+    QCOMPARE(sizes.at(1).toInt(), 900);
+    QCOMPARE(sizes.at(2).toInt(), 300);
+}
+
+// Default spec: a freshly injected controller exposes the default three-column
+// sizes 280/800/280 (the current main-window layout), no regression.
+void TestAgent::workspace_getDefaultSpecThreeColumns() {
+    dsp::SpectrumEngine engine;
+    auto ctrl = makeTestWorkspace();
+    const QJsonObject spec = QJsonDocument::fromJson(
+        ai::executeTool("get_workspace_layout", QJsonObject(), &engine, nullptr, ctrl.get())
+            .toUtf8()).object();
+    QVERIFY2(spec.value("splitter_sizes").isArray(),
+             qPrintable(QString::fromUtf8(QJsonDocument(spec).toJson(QJsonDocument::Compact))));
+    const QJsonArray sizes = spec.value("splitter_sizes").toArray();
+    QCOMPARE(sizes.at(0).toInt(), 280);
+    QCOMPARE(sizes.at(1).toInt(), 800);
+    QCOMPARE(sizes.at(2).toInt(), 280);
+}
+
+// reset_workspace returns ok:true; list_ui_components exposes the 23-item
+// whitelist including the 14 right-panel tabs.
+void TestAgent::workspace_resetAndCatalogTabs() {
+    dsp::SpectrumEngine engine;
+    auto ctrl = makeTestWorkspace();
+    const QJsonObject r = QJsonDocument::fromJson(
+        ai::executeTool("reset_workspace", QJsonObject(), &engine, nullptr, ctrl.get())
+            .toUtf8()).object();
+    QVERIFY2(r.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(r).toJson(QJsonDocument::Compact))));
+
+    const QJsonObject cat = QJsonDocument::fromJson(
+        ai::executeTool("list_ui_components", QJsonObject(), &engine, nullptr, ctrl.get())
+            .toUtf8()).object();
+    QVERIFY(cat.value("ok").toBool());
+    QCOMPARE(cat.value("count").toInt(), 23);
+    int tabs = 0;
+    for (const QJsonValue& v : cat.value("components").toArray())
+        if (v.toObject().value("category").toString() == QLatin1String("tab")) ++tabs;
+    QCOMPARE(tabs, 14);
+}
+
+#include <QApplication>
 int main(int argc, char** argv) {
-    QCoreApplication app(argc, argv);
+    // QApplication (not Core): the AIGUI P0-b workspace tests construct real
+    // QSplitter/QTabWidget under QT_QPA_PLATFORM=offscreen.
+    QApplication app(argc, argv);
     TestAgent t;
     return QTest::qExec(&t, argc, argv);
 }

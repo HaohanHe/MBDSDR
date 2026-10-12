@@ -50,6 +50,8 @@
 #include <mutex>
 #include <vector>
 
+namespace aigui { class WorkspaceController; }  // P0-b live three-column workspace (GLOBAL ns)
+
 namespace mbdsdr {
 namespace dsp {
 class SpectrumEngine;
@@ -102,6 +104,12 @@ public:
     void setWriteEnabled(bool on) { writeEnabled_.store(on); }
     bool writeEnabled() const { return writeEnabled_.load(); }
 
+    // P0-b: inject the live AIGUI WorkspaceController (owned by MainWindow). The
+    // hub only holds an observing pointer; when null the four workspace commands
+    // return an honest "工作台控制器未注入" error. MainWindow calls this after
+    // creating the controller.
+    void setWorkspaceController(aigui::WorkspaceController* w) { workspace_ = w; }
+
     // Unified entry point. Returns a compact JSON object as a string:
     //   success: {"ok":true, ...echoed/applied fields...}
     //   gate:    {"ok":false,"gated":true,"error":...}
@@ -153,6 +161,9 @@ private:
     // Phase26 owned helpers. Held via unique_ptr so their (heavier) headers stay
     // out of this lightweight header; the dtor is out-of-line in the .cpp.
     std::unique_ptr<ui::BookmarkManager>   bookmarks_;
+    // P0-b: observing pointer to the live workspace controller (MainWindow owns).
+    // Null in headless tests -> the four workspace commands return honest errors.
+    aigui::WorkspaceController*           workspace_ = nullptr;
     // Network-audio tap: ControlHub creates + starts it, then hands ownership to
     // the engine's parallel-write seam (engine_->setNetworkAudioSink). We keep an
     // observing raw pointer for status; the engine destroys it on disable/replace.
@@ -288,6 +299,13 @@ private:
     QJsonObject cmdAddBookmark(const QJsonObject& a);
     QJsonObject cmdTuneToBookmark(const QJsonObject& a);
     QJsonObject cmdDeleteBookmark(const QJsonObject& a);
+    // 第 10 域「工作台编排」(AIGUI P0-b): mirror the four agent workspace tools
+    // through the injected WorkspaceController. arrange/reset are gated writes,
+    // get/list are read-only. Do NOT touch DSP / audio / hardware.
+    QJsonObject cmdArrangeWorkspace(const QJsonObject& a);
+    QJsonObject cmdGetWorkspaceLayout(const QJsonObject&);
+    QJsonObject cmdListUiComponents(const QJsonObject&);
+    QJsonObject cmdResetWorkspace(const QJsonObject&);
     // VFO list / add / switch / rename.
     QJsonObject cmdListVfos(const QJsonObject&);
     QJsonObject cmdAddVfo(const QJsonObject&);

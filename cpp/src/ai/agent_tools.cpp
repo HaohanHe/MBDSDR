@@ -9,6 +9,7 @@
 #include "dsp/frequency_calibrator.h"   // calibrateFromCapture / savePpmSetting
 #include "dsp/fcch_detector.h"          // kFcchToneHz
 #include "ui/bookmark_manager.h"   // ui::BookmarkManager / ui::Bookmark (real Agent-layer store)
+#include "ui/workspace_controller.h"  // aigui::WorkspaceController (P0-b workspace seam)
 #include "memory_store.h"         // SQLite FTS5 local memory store
 #include "checkpoint_writer.h"     // background single-writer drain for memory writes
 
@@ -193,7 +194,7 @@ QString errResult(const QString& msg);
 
 QString execTuneFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
                           const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     double f = args["freq_hz"].toDouble();
     // Honest guard (parity with the engine guard spectrum_engine.cpp:214 and CH
     // needDbl): a non-positive / non-finite frequency must be REJECTED here with
@@ -212,7 +213,7 @@ QString execTuneFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
 
 QString execSetMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
                     const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     // Whitelist (parity with CH needMode and execSetVfoMode): the engine's
     // VfoManager accepts ANY mode string, so without this gate an unknown mode
     // would be echoed as applied while the demod never really changes -- reject
@@ -235,7 +236,7 @@ QString execSetMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
 
 QString execStartRecording(const QJsonObject& /*args*/, dsp::SpectrumEngine* engine,
                            const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     // Propagate the engine's real bool: a failed recorder must NOT be
     // reported as "开始录制" (A4 P1-4). On the offline test source the
     // recorder really does write a SigMF file (sidecar labels it
@@ -255,7 +256,7 @@ QString execStartRecording(const QJsonObject& /*args*/, dsp::SpectrumEngine* eng
 
 QString execStopRecording(const QJsonObject& /*args*/, dsp::SpectrumEngine* engine,
                           const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     engine->stopRecording();
     QJsonObject o;
     o["ok"] = true;
@@ -270,7 +271,7 @@ QString execStopRecording(const QJsonObject& /*args*/, dsp::SpectrumEngine* engi
 // No source data -> honest ok:false (never a fabricated empty file).
 QString execExportIqSegment(const QJsonObject& args, dsp::SpectrumEngine* engine,
                             const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     int sampleCount = static_cast<int>(args["sample_count"].toDouble(65536.0));
     double tuneHz = -1.0;   // default: keep the current centre
     if (args.contains("tune_hz") && !args["tune_hz"].isNull()) {
@@ -306,7 +307,7 @@ QString execExportIqSegment(const QJsonObject& args, dsp::SpectrumEngine* engine
 
 QString execScanBand(const QJsonObject& args, dsp::SpectrumEngine* engine,
                      const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     double low = args["low_hz"].toDouble();
     double high = args["high_hz"].toDouble();
     double step = args["step_hz"].toDouble(200000);
@@ -338,7 +339,7 @@ QString execScanBand(const QJsonObject& args, dsp::SpectrumEngine* engine,
 
 QString execSetBandwidth(const QJsonObject& args, dsp::SpectrumEngine* engine,
                          const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     double bw = args["bandwidth_hz"].toDouble();
     // RAW direct-listen has NO demodulation filter: channelized IQ is passed
     // straight through as L=I/R=Q. Refuse honestly (ok:false) rather than
@@ -362,7 +363,7 @@ QString execSetBandwidth(const QJsonObject& args, dsp::SpectrumEngine* engine,
 
 QString execGetStatus(const QJsonObject& /*args*/, dsp::SpectrumEngine* engine,
                       const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     // Aligned with Flutter ai_tools.dart get_status: connected + source, plus
     // the read-back values. We do NOT fabricate gain/sample-rate the engine
     // does not expose. A human-readable summary is kept so existing UI copy
@@ -397,7 +398,7 @@ QString execGetStatus(const QJsonObject& /*args*/, dsp::SpectrumEngine* engine,
 
 QString execPredictPasses(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
                            const SourceInfo& /*src*/,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     // Read-only: does NOT touch the radio. Uses the FRESH on-disk TLE cache
     // via the planner; no builtin/demo TLE is reported as a real pass.
     QString sat = args["satellite_name"].toString();
@@ -452,7 +453,7 @@ constexpr int kCalibrationMinSamples = 4096;
 // presented as a real antenna capture).
 QString execCalibrateFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
                                const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const double refFreq = args["reference_freq_hz"].toDouble();
     const QString type = args["reference_type"].toString();
     int sampleCount = static_cast<int>(args["sample_count"].toDouble(kCalibrationDefaultSamples));
@@ -522,7 +523,7 @@ QString execCalibrateFrequency(const QJsonObject& args, dsp::SpectrumEngine* eng
 QString execApplyFrequencyCorrection(const QJsonObject& args,
                                      dsp::SpectrumEngine* engine,
                                      const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const double ppm = args["ppm"].toDouble();
     const double previous = dsp::currentPpmSetting();
     dsp::savePpmSetting(ppm);
@@ -603,7 +604,7 @@ bool resolveVfoTarget(const QJsonObject& args, dsp::SpectrumEngine* engine,
 
 QString execGetPocsagMessages(const QJsonObject& args, dsp::SpectrumEngine* engine,
                               const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const int channelId = resolveChannelId(args, engine);
     const std::vector<dsp::PocsagMessage> msgs = engine->pocsagMessages(channelId);
     QJsonArray arr;
@@ -633,7 +634,7 @@ QString execGetPocsagMessages(const QJsonObject& args, dsp::SpectrumEngine* engi
 
 QString execGetM17Calls(const QJsonObject& args, dsp::SpectrumEngine* engine,
                         const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const int channelId = resolveChannelId(args, engine);
     const std::vector<dsp::M17Call> calls = engine->m17Calls(channelId);
     QJsonArray arr;
@@ -662,7 +663,7 @@ QString execGetM17Calls(const QJsonObject& args, dsp::SpectrumEngine* engine,
 
 QString execGetAcarsPackets(const QJsonObject& args, dsp::SpectrumEngine* engine,
                             const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const int channelId = resolveChannelId(args, engine);
     const std::vector<dsp::AcarsPacket> pkts = engine->acarsPackets(channelId);
     QJsonArray arr;
@@ -694,7 +695,7 @@ QString execGetAcarsPackets(const QJsonObject& args, dsp::SpectrumEngine* engine
 
 QString execGetNavtexMessages(const QJsonObject& args, dsp::SpectrumEngine* engine,
                               const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const int channelId = resolveChannelId(args, engine);
     const std::vector<dsp::NavtexMessage> msgs = engine->navtexMessages(channelId);
     QJsonArray arr;
@@ -720,7 +721,7 @@ QString execGetNavtexMessages(const QJsonObject& args, dsp::SpectrumEngine* engi
 
 QString execGetVorRadial(const QJsonObject& args, dsp::SpectrumEngine* engine,
                          const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const int channelId = resolveChannelId(args, engine);
     const dsp::VorResult v = engine->vorResult(channelId);
     QJsonObject out;
@@ -788,7 +789,7 @@ QString routedOk(const char* command, const QJsonObject& echoed, const SourceInf
 //    them (CH cmdSetNetworkAudioSink already consumes them).
 QString execSetNetworkAudioSink(const QJsonObject& args, dsp::SpectrumEngine*,
                                 const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     double port = 0.0;
     if (!args.contains("enable") || !args.value("enable").isBool())
         return errResult(QString::fromUtf8("参数 enable 缺失或不是布尔值"));
@@ -809,7 +810,7 @@ QString execSetNetworkAudioSink(const QJsonObject& args, dsp::SpectrumEngine*,
 // 2. get_network_audio_status (read): no engine status slot yet -> honest off.
 QString execGetNetworkAudioStatus(const QJsonObject&, dsp::SpectrumEngine*,
                                   const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     o["enabled"] = false;
@@ -821,7 +822,7 @@ QString execGetNetworkAudioStatus(const QJsonObject&, dsp::SpectrumEngine*,
 // 3. start_scan_link (write): target_freq_hz. ScanActivityLink lives on control.
 QString execStartScanLink(const QJsonObject& args, dsp::SpectrumEngine*,
                           const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     double tgt = 0.0;
     if (!needNum(args, "target_freq_hz", tgt))
         return errResult(QString::fromUtf8("参数 target_freq_hz 缺失或不是数字"));
@@ -832,14 +833,14 @@ QString execStartScanLink(const QJsonObject& args, dsp::SpectrumEngine*,
 // 4. stop_scan_link (write).
 QString execStopScanLink(const QJsonObject&, dsp::SpectrumEngine*,
                          const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     return routedOk("stop_scan_link", QJsonObject{}, src);
 }
 
 // 5. get_scan_link_status (read): no link instance on the engine -> honest idle.
 QString execGetScanLinkStatus(const QJsonObject&, dsp::SpectrumEngine*,
                               const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     o["scanning"] = false;
@@ -855,7 +856,7 @@ QString execGetScanLinkStatus(const QJsonObject&, dsp::SpectrumEngine*,
 //    cmdSetSquelch), so get_squelch_status reads the real value back.
 QString execSetSquelch(const QJsonObject& args, dsp::SpectrumEngine* engine,
                        const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     if (args.contains("enabled") && args.value("enabled").isBool()) {
@@ -882,7 +883,7 @@ QString execSetSquelch(const QJsonObject& args, dsp::SpectrumEngine* engine,
 // (off / -50 dB / auto off / closed), identical to the CH/HTTP wire.
 QString execGetSquelchStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
                              const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     o["enabled"] = engine->squelchEnabled();
@@ -898,7 +899,7 @@ QString execGetSquelchStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
 //     must be a boolean -- missing/non-bool is an honest error, never a default.
 QString execSetNoiseBlanker(const QJsonObject& args, dsp::SpectrumEngine* engine,
                             const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     if (!args.contains("on") || !args.value("on").isBool())
         return errResult(QString::fromUtf8("参数 on 缺失或不是布尔值"));
     const bool on = args.value("on").toBool();
@@ -915,7 +916,7 @@ QString execSetNoiseBlanker(const QJsonObject& args, dsp::SpectrumEngine* engine
 //     (unlike squelch), so we return the real switch rather than a null.
 QString execGetNoiseBlankerStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
                                  const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     o["enabled"] = engine->noiseBlankerEnabled();
@@ -933,7 +934,7 @@ QString execGetNoiseBlankerStatus(const QJsonObject&, dsp::SpectrumEngine* engin
 //     never asked for). On success the engine setters run for real.
 QString execSetCtcss(const QJsonObject& args, dsp::SpectrumEngine* engine,
                      const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const QJsonValue en = args.value(QStringLiteral("enabled"));
     if (!en.isBool())
         return errResult(QString::fromUtf8("参数 enabled 缺失或不是布尔值"));
@@ -980,7 +981,7 @@ QString execSetCtcss(const QJsonObject& args, dsp::SpectrumEngine* engine,
 //     (never a fabricated tone).
 QString execGetCtcssStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
                            const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     o["enabled"] = engine->ctcssEnabled();
@@ -998,7 +999,7 @@ QString execGetCtcssStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
 //     ok:false rather than tuning to a nonsense address. `gate_audio` optional.
 QString execSetCdcss(const QJsonObject& args, dsp::SpectrumEngine* engine,
                      const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const QJsonValue en = args.value(QStringLiteral("enabled"));
     if (!en.isBool())
         return errResult(QString::fromUtf8("参数 enabled 缺失或不是布尔值"));
@@ -1040,7 +1041,7 @@ QString execSetCdcss(const QJsonObject& args, dsp::SpectrumEngine* engine,
 //     detection latch (false with no signal / disabled).
 QString execGetCdcssStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
                            const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     o["enabled"] = engine->cdcssEnabled();
@@ -1055,7 +1056,7 @@ QString execGetCdcssStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
 //     Detection layer only; C++ BP decode deferred to step 4.
 QString execSetFt8(const QJsonObject& args, dsp::SpectrumEngine* engine,
                    const SourceInfo& src,
-                   ui::BookmarkManager* /*bookmarks*/) {
+                   ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const QJsonValue en = args.value(QStringLiteral("enabled"));
     if (!en.isBool())
         return errResult(QString::fromUtf8("参数 enabled 缺失或不是布尔值"));
@@ -1072,7 +1073,7 @@ QString execSetFt8(const QJsonObject& args, dsp::SpectrumEngine* engine,
 // 7i. get_ft8_status (read): honest engine getters. `active` false with no signal.
 QString execGetFt8Status(const QJsonObject&, dsp::SpectrumEngine* engine,
                          const SourceInfo& src,
-                         ui::BookmarkManager* /*bookmarks*/) {
+                         ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     o["enabled"] = engine->ft8Enabled();
@@ -1091,7 +1092,7 @@ QString execGetFt8Status(const QJsonObject&, dsp::SpectrumEngine* engine,
 // limit clamped to [1,200] by the engine accessor (default 50 if omitted/NaN).
 QString execGetFt8History(const QJsonObject& args, dsp::SpectrumEngine* engine,
                           const SourceInfo& src,
-                          ui::BookmarkManager* /*bookmarks*/) {
+                          ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     int limit = 50;
     const QJsonValue lv = args.value(QStringLiteral("limit"));
     if (lv.isDouble() || lv.isBool()) {
@@ -1130,7 +1131,7 @@ QString execGetFt8History(const QJsonObject& args, dsp::SpectrumEngine* engine,
 // Reads engine->aircraftSnapshot(limit); empty array when no 1090 signal.
 QString execGetAdsbAircraft(const QJsonObject& args, dsp::SpectrumEngine* engine,
                             const SourceInfo& src,
-                            ui::BookmarkManager* /*bookmarks*/) {
+                            ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     int limit = 50;
     const QJsonValue lv = args.value(QStringLiteral("limit"));
     if (lv.isDouble() || lv.isBool()) {
@@ -1188,7 +1189,7 @@ QString execGetAdsbAircraft(const QJsonObject& args, dsp::SpectrumEngine* engine
 //     State/control layer only; C++ demod/FEC port deferred to step 4.
 QString execSetLrpt(const QJsonObject& args, dsp::SpectrumEngine* engine,
                     const SourceInfo& src,
-                    ui::BookmarkManager* /*bookmarks*/) {
+                    ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const QJsonValue en = args.value(QStringLiteral("enabled"));
     if (!en.isBool())
         return errResult(QString::fromUtf8("参数 enabled 缺失或不是布尔值"));
@@ -1206,7 +1207,7 @@ QString execSetLrpt(const QJsonObject& args, dsp::SpectrumEngine* engine,
 //     sync_locked stays false and decoded_frames 0 -- never fabricated.
 QString execGetLrptStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
                           const SourceInfo& src,
-                          ui::BookmarkManager* /*bookmarks*/) {
+                          ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     o["enabled"] = engine->lrptEnabled();
@@ -1223,7 +1224,7 @@ QString execGetLrptStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
 // ok:false on bad input) but the command is not sent -- applied=false.
 QString execSetVnaSweep(const QJsonObject& args, dsp::SpectrumEngine* engine,
                         const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const QJsonValue a = args.value(QStringLiteral("start_hz"));
     const QJsonValue b = args.value(QStringLiteral("stop_hz"));
     const QJsonValue p = args.value(QStringLiteral("points"));
@@ -1263,7 +1264,7 @@ QString execSetVnaSweep(const QJsonObject& args, dsp::SpectrumEngine* engine,
 // impedance. Empty arrays when no device / no data -- never fabricated.
 QString execGetVnaData(const QJsonObject&, dsp::SpectrumEngine* engine,
                         const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     auto& vna = engine->vnaClient();
@@ -1369,7 +1370,7 @@ QString execGetVnaData(const QJsonObject&, dsp::SpectrumEngine* engine,
 // into structured step/compensation/complete fields (honest unknown-items list).
 QString execGetVnaStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
                           const SourceInfo& src,
-                          ui::BookmarkManager* /*bookmarks*/) {
+                          ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     auto& vna = engine->vnaClient();
@@ -1399,7 +1400,7 @@ QString execGetVnaStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
 // connection of standards to ports is a hardware fact the caller controls.
 QString execVnaCalibration(const QJsonObject& args, dsp::SpectrumEngine* engine,
                           const SourceInfo& src,
-                          ui::BookmarkManager* /*bookmarks*/) {
+                          ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     auto& vna = engine->vnaClient();
     const QString step = args.value("step").toString(QStringLiteral("status"));
 
@@ -1505,7 +1506,7 @@ QString execVnaCalibration(const QJsonObject& args, dsp::SpectrumEngine* engine,
 // the caller decides when to change bias/delay/averaging.
 QString execVnaDevice(const QJsonObject& args, dsp::SpectrumEngine* engine,
                       const SourceInfo& src,
-                      ui::BookmarkManager* /*bookmarks*/) {
+                      ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     auto& vna = engine->vnaClient();
     const QString action = args.value("action").toString(QStringLiteral("status"));
 
@@ -1643,7 +1644,7 @@ QString execVnaDevice(const QJsonObject& args, dsp::SpectrumEngine* engine,
 // analyze_vna_resonance (read): run vna_rf::analyzeResonance on the live sweep.
 QString execAnalyzeVnaResonance(const QJsonObject&, dsp::SpectrumEngine* engine,
                                 const SourceInfo& src,
-                                ui::BookmarkManager* /*bookmarks*/) {
+                                ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     auto& vna = engine->vnaClient();
@@ -1673,7 +1674,7 @@ QString execAnalyzeVnaResonance(const QJsonObject&, dsp::SpectrumEngine* engine,
 // vna_tdr_cable (write, gated): TDR reflection run; velocity_factor required.
 QString execVnaTdrCable(const QJsonObject& args, dsp::SpectrumEngine* engine,
                         const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const QJsonValue v = args.value(QStringLiteral("velocity_factor"));
     if (!v.isDouble())
         return errResult(QString::fromUtf8("参数 velocity_factor 缺失或不是数字"));
@@ -1707,7 +1708,7 @@ QString execVnaTdrCable(const QJsonObject& args, dsp::SpectrumEngine* engine,
 // analyze_vna_filter (read): run vna_rf::analyzeFilter on live S21 magnitude.
 QString execAnalyzeVnaFilter(const QJsonObject&, dsp::SpectrumEngine* engine,
                             const SourceInfo& src,
-                            ui::BookmarkManager* /*bookmarks*/) {
+                            ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     auto& vna = engine->vnaClient();
@@ -1740,7 +1741,7 @@ QString execAnalyzeVnaFilter(const QJsonObject&, dsp::SpectrumEngine* engine,
 // series-RLC equivalent (ESR / Q / L / C at the series resonance).
 QString execAnalyzeVnaEquivalent(const QJsonObject&, dsp::SpectrumEngine* engine,
                                  const SourceInfo& src,
-                                 ui::BookmarkManager* /*bookmarks*/) {
+                                 ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o; o["ok"] = true;
     auto& vna = engine->vnaClient();
     o["connected"] = vna.isConnected();
@@ -1770,7 +1771,7 @@ QString execAnalyzeVnaEquivalent(const QJsonObject&, dsp::SpectrumEngine* engine
 // return the dataset (frequencies + S11/S21). Honest: unparseable -> ok:false.
 QString execAnalyzeVnaTouchstone(const QJsonObject& a, dsp::SpectrumEngine*,
                                  const SourceInfo& src,
-                                 ui::BookmarkManager* /*bookmarks*/) {
+                                 ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o; o["ok"] = true;
     QString content = a.value("content").toString();
     const QString path = a.value("path").toString();
@@ -1803,7 +1804,7 @@ QString execAnalyzeVnaTouchstone(const QJsonObject& a, dsp::SpectrumEngine*,
 // (Smith + VSWR) to a PNG at `path`. Honest: no device/data -> ok:false.
 QString execExportVnaSnapshot(const QJsonObject& a, dsp::SpectrumEngine* engine,
                               const SourceInfo& src,
-                              ui::BookmarkManager* /*bookmarks*/) {
+                              ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     const QString path = a.value("path").toString();
     if (path.isEmpty()) {
@@ -1854,7 +1855,7 @@ QString execExportVnaSnapshot(const QJsonObject& a, dsp::SpectrumEngine* engine,
 // spectrum panel (freq axis + center-marker) to a PNG at `path`. Honest.
 QString execExportSpectrumSnapshot(const QJsonObject& a, dsp::SpectrumEngine* engine,
                                    const SourceInfo& src,
-                                   ui::BookmarkManager* /*bookmarks*/) {
+                                   ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     const QString path = a.value("path").toString();
     if (path.isEmpty()) {
@@ -1912,7 +1913,7 @@ QString execExportSpectrumSnapshot(const QJsonObject& a, dsp::SpectrumEngine* en
 // descending by strength to a CSV at `path`. Honest: no peak list -> empty.
 QString execExportPeaksCsv(const QJsonObject& a, dsp::SpectrumEngine* engine,
                            const SourceInfo& src,
-                           ui::BookmarkManager* /*bookmarks*/) {
+                           ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     const QString path = a.value("path").toString();
     if (path.isEmpty()) {
@@ -1946,7 +1947,7 @@ QString execExportPeaksCsv(const QJsonObject& a, dsp::SpectrumEngine* engine,
 // candidate-list CSV (freq_hz,crc_ok,costas_score,rejected,reject_reason,iters).
 QString execExportFt8Results(const QJsonObject& a, dsp::SpectrumEngine* engine,
                               const SourceInfo& src,
-                              ui::BookmarkManager* /*bookmarks*/) {
+                              ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     const QString path = a.value("path").toString();
     if (path.isEmpty()) {
@@ -2013,7 +2014,7 @@ QString execExportFt8Results(const QJsonObject& a, dsp::SpectrumEngine* engine,
 // an EFHW / inverse-L matching network L/C suggestion.
 QString execAnalyzeVnaMatch(const QJsonObject& a, dsp::SpectrumEngine*,
                             const SourceInfo& src,
-                            ui::BookmarkManager* /*bookmarks*/) {
+                            ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o; o["ok"] = true;
     double r = a.value("load_r").toDouble(std::nan(""));
     double x = a.value("load_x").toDouble(0.0);
@@ -2067,7 +2068,7 @@ QString execAnalyzeVnaMatch(const QJsonObject& a, dsp::SpectrumEngine*,
 }
 QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
                           const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     o["bookmarks"] = QJsonArray{};
@@ -2082,7 +2083,7 @@ QString execListBookmarks(const QJsonObject&, dsp::SpectrumEngine*,
 //    is an honest error (never a routed stub); add() itself rejects freq<=0.
 QString execAddBookmark(const QJsonObject& args, dsp::SpectrumEngine*,
                         const SourceInfo& src,
-                        ui::BookmarkManager* bookmarks) {
+                        ui::BookmarkManager* bookmarks, aigui::WorkspaceController* /*workspace*/) {
     double f = 0.0;
     if (!needNum(args, "freq_hz", f))
         return errResult(QString::fromUtf8("参数 freq_hz 缺失或不是数字"));
@@ -2121,7 +2122,7 @@ QString execAddBookmark(const QJsonObject& args, dsp::SpectrumEngine*,
 //     the same in-band IF-offset path the band-box drag uses (vfoSetOffset).
 QString execTuneToBookmark(const QJsonObject& args, dsp::SpectrumEngine* engine,
                            const SourceInfo& src,
-                           ui::BookmarkManager* bookmarks) {
+                           ui::BookmarkManager* bookmarks, aigui::WorkspaceController* /*workspace*/) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
@@ -2147,7 +2148,7 @@ QString execTuneToBookmark(const QJsonObject& args, dsp::SpectrumEngine* engine,
 //     (removeAt itself is silently out-of-bounds, so we check before calling).
 QString execDeleteBookmark(const QJsonObject& args, dsp::SpectrumEngine*,
                            const SourceInfo& src,
-                           ui::BookmarkManager* bookmarks) {
+                           ui::BookmarkManager* bookmarks, aigui::WorkspaceController* /*workspace*/) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
@@ -2169,7 +2170,7 @@ QString execDeleteBookmark(const QJsonObject& args, dsp::SpectrumEngine*,
 // 12. list_vfos (read): engine exposes vfoMarkers() for real.
 QString execListVfos(const QJsonObject&, dsp::SpectrumEngine* engine,
                      const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonArray arr;
     for (const dsp::VfoMarker& m : engine->vfoMarkers()) {
         QJsonObject v;
@@ -2194,7 +2195,7 @@ QString execListVfos(const QJsonObject&, dsp::SpectrumEngine* engine,
 // 13. add_vfo (write): engine vfoAdd() is real.
 QString execAddVfo(const QJsonObject&, dsp::SpectrumEngine* engine,
                    const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     engine->vfoAdd();
     QJsonObject o;
     o["ok"] = true;
@@ -2207,7 +2208,7 @@ QString execAddVfo(const QJsonObject&, dsp::SpectrumEngine* engine,
 // 14. switch_vfo (write): index required; engine vfoSelect() is real.
 QString execSwitchVfo(const QJsonObject& args, dsp::SpectrumEngine* engine,
                       const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
@@ -2225,7 +2226,7 @@ QString execSwitchVfo(const QJsonObject& args, dsp::SpectrumEngine* engine,
 //     lands on the control side -> validated + routed.
 QString execRenameVfo(const QJsonObject& args, dsp::SpectrumEngine*,
                       const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
@@ -2241,7 +2242,7 @@ QString execRenameVfo(const QJsonObject& args, dsp::SpectrumEngine*,
 //     vfoSetArmed() is real (forwarder to VfoManager::setArmed).
 QString execSetVfoArmed(const QJsonObject& args, dsp::SpectrumEngine* engine,
                         const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     double idx = 0.0;
     if (!needNum(args, "index", idx))
         return errResult(QString::fromUtf8("参数 index 缺失或不是数字"));
@@ -2275,7 +2276,7 @@ QString execSetVfoArmed(const QJsonObject& args, dsp::SpectrumEngine* engine,
 //     "index" (marker ordinal, Agent schema) OR "id" (direct VFO id, CH/HTTP).
 QString execSetVfoFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine,
                             const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     double hz = 0.0;
     if (!needNum(args, "freq_hz", hz))
         return errResult(QString::fromUtf8("参数 freq_hz 缺失或不是数字"));
@@ -2296,7 +2297,7 @@ QString execSetVfoFrequency(const QJsonObject& args, dsp::SpectrumEngine* engine
 //     ControlHub mode table. Phase63 D1: accepts "index" OR "id".
 QString execSetVfoMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
                        const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QString mode;
     if (!needStr(args, "mode", mode))
         return errResult(QString::fromUtf8("参数 mode 缺失或不是字符串"));
@@ -2323,7 +2324,7 @@ QString execSetVfoMode(const QJsonObject& args, dsp::SpectrumEngine* engine,
 //     "index" OR "id"; positive-bandwidth guard preserved.
 QString execSetVfoBandwidth(const QJsonObject& args, dsp::SpectrumEngine* engine,
                             const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     double bw = 0.0;
     if (!needNum(args, "bandwidth_hz", bw))
         return errResult(QString::fromUtf8("参数 bandwidth_hz 缺失或不是数字"));
@@ -2345,7 +2346,7 @@ QString execSetVfoBandwidth(const QJsonObject& args, dsp::SpectrumEngine* engine
 // 20. list_recordings (read): scan the engine recDir_ honestly (empty if absent).
 QString execListRecordings(const QJsonObject&, dsp::SpectrumEngine* engine,
                            const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const QString dir = engine->recordingDir();
     QDir d(dir);
     QJsonArray arr;
@@ -2372,7 +2373,7 @@ QString execListRecordings(const QJsonObject&, dsp::SpectrumEngine* engine,
 // 17. delete_recording (write): name required; delete ONLY inside recDir_.
 QString execDeleteRecording(const QJsonObject& args, dsp::SpectrumEngine* engine,
                              const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QString name;
     if (!needStr(args, "name", name))
         return errResult(QString::fromUtf8("参数 name 缺失或不是字符串"));
@@ -2394,7 +2395,7 @@ QString execDeleteRecording(const QJsonObject& args, dsp::SpectrumEngine* engine
 // 18. export_recording (write): copy a recDir_ file out to out_path (honest).
 QString execExportRecording(const QJsonObject& args, dsp::SpectrumEngine* engine,
                             const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QString name, outPath;
     if (!needStr(args, "name", name))
         return errResult(QString::fromUtf8("参数 name 缺失或不是字符串"));
@@ -2434,7 +2435,7 @@ int mapAverageString(const QString& av) {
 } // namespace
 QString execSetFftParams(const QJsonObject& args, dsp::SpectrumEngine* engine,
                          const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     double sz = 0.0;
     if (!needNum(args, "fft_size", sz))
         return errResult(QString::fromUtf8("参数 fft_size 缺失或不是数字"));
@@ -2472,7 +2473,7 @@ QString execSetFftParams(const QJsonObject& args, dsp::SpectrumEngine* engine,
 // 20. set_color_map (write): persist the colormap file path to QSettings.
 QString execSetColorMap(const QJsonObject& args, dsp::SpectrumEngine*,
                         const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QString p;
     if (!needStr(args, "file_path", p))
         return errResult(QString::fromUtf8("参数 file_path 缺失或不是字符串"));
@@ -2488,7 +2489,7 @@ QString execSetColorMap(const QJsonObject& args, dsp::SpectrumEngine*,
 // 21. get_spectrum_status (read): engine fftSize()/windowType()/averageMode() real.
 QString execGetSpectrumStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
                               const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     o["fft_size"] = engine->fftSize();
@@ -2508,7 +2509,7 @@ QString execGetSpectrumStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
 // station/capture preconditions, so a toggle without them stays off.
 QString execSetDopplerCompensation(const QJsonObject& args, dsp::SpectrumEngine* engine,
                                   const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     auto* surf = engine->dopplerControlSurface();
     if (!surf) {
@@ -2532,7 +2533,7 @@ QString execSetDopplerCompensation(const QJsonObject& args, dsp::SpectrumEngine*
 // RTL0 header; the engine reports the honest socket reason on failure.
 QString execConnectNetworkSource(const QJsonObject& args, dsp::SpectrumEngine* engine,
                                  const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     const QString host = args.value("host").toString();
     if (host.isEmpty()) {
@@ -2559,7 +2560,7 @@ QString execConnectNetworkSource(const QJsonObject& args, dsp::SpectrumEngine* e
 // gain step table (the engine itself leaves those at 0 / empty for non-real sources).
 QString execGetCapabilities(const QJsonObject&, dsp::SpectrumEngine* engine,
                             const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const dsp::DeviceCapabilities c = engine->sourceCapabilities();
     QJsonArray gains;
     for (double g : engine->availableGainsDb()) gains.append(g);   // empty when no real source
@@ -2592,7 +2593,7 @@ QString execGetCapabilities(const QJsonObject&, dsp::SpectrumEngine* engine,
 // does not wait for a state-changed signal. watch/dir are real engine getters.
 QString execGetRecordingState(const QJsonObject&, dsp::SpectrumEngine* engine,
                               const SourceInfo& src,
-                        ui::BookmarkManager* /*bookmarks*/) {
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
     const QString path = engine->recordingPath();
     QJsonObject o;
     o["ok"] = true;
@@ -2628,7 +2629,7 @@ QString memoryArgCheck(const QJsonObject& args, QString* scope, QString* scopeId
 } // namespace
 
 QString execMemoryAdd(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
-                      const SourceInfo& src, ui::BookmarkManager*) {
+                      const SourceInfo& src, ui::BookmarkManager*, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     QString scope, scopeId, key, content;
     if (const QString bad = memoryArgCheck(args, &scope, &scopeId, &key, &content, nullptr);
@@ -2655,7 +2656,7 @@ QString execMemoryAdd(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
 }
 
 QString execMemorySearch(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
-                          const SourceInfo& src, ui::BookmarkManager*) {
+                          const SourceInfo& src, ui::BookmarkManager*, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     const QString query = args.value(QStringLiteral("query")).toString().trimmed();
     if (query.isEmpty()) {
@@ -2704,7 +2705,7 @@ QString execMemorySearch(const QJsonObject& args, dsp::SpectrumEngine* /*engine*
 }
 
 QString execMemoryUpdate(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
-                         const SourceInfo& src, ui::BookmarkManager*) {
+                         const SourceInfo& src, ui::BookmarkManager*, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     QString scope, scopeId, key, content;
     if (const QString bad = memoryArgCheck(args, &scope, &scopeId, &key, &content, nullptr);
@@ -2730,7 +2731,7 @@ QString execMemoryUpdate(const QJsonObject& args, dsp::SpectrumEngine* /*engine*
 
 // P3 #74: read-only writer introspection + synchronous checkpoint trigger.
 QString execCheckpointStatus(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
-                             const SourceInfo& src, ui::BookmarkManager*) {
+                             const SourceInfo& src, ui::BookmarkManager*, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     o["ok"] = true;
     o["pending_count"] = memoryWriter().pendingCount();
@@ -2741,7 +2742,7 @@ QString execCheckpointStatus(const QJsonObject&, dsp::SpectrumEngine* /*engine*/
 }
 
 QString execMemoryFlush(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
-                        const SourceInfo& src, ui::BookmarkManager*) {
+                        const SourceInfo& src, ui::BookmarkManager*, aigui::WorkspaceController* /*workspace*/) {
     QJsonObject o;
     QString err;
     const int written = memoryWriter().flush(&err);
@@ -2758,6 +2759,58 @@ QString execMemoryFlush(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
     return compact(o);
 }
 
+// ---- 第 10 域「工作台编排」（AIGUI P0-b）---------------------------------
+// These four tools drive the live WorkspaceController (three-column splitter +
+// right-tab visibility). They do NOT touch DSP / audio / hardware. When the
+// controller is not injected (headless tests / not-yet-wired MainWindow) they
+// return an honest error envelope rather than a fabricated success -- same shape
+// as the bookmark-not-injected path.
+
+namespace {
+QString workspaceNotInjected() {
+    QJsonObject o;
+    o["ok"] = false;
+    o["error"] = QString::fromUtf8("工作台控制器未注入（MainWindow 未创建 WorkspaceController）");
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+}  // namespace
+
+QString execArrangeWorkspace(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                             const SourceInfo& /*src*/,
+                             ui::BookmarkManager* /*bookmarks*/,
+                             aigui::WorkspaceController* workspace) {
+    if (!workspace) return workspaceNotInjected();
+    const QJsonObject res = workspace->applyOverlay(args);
+    return QString::fromUtf8(QJsonDocument(res).toJson(QJsonDocument::Compact));
+}
+
+QString execGetWorkspaceLayout(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
+                              const SourceInfo& /*src*/,
+                              ui::BookmarkManager* /*bookmarks*/,
+                              aigui::WorkspaceController* workspace) {
+    if (!workspace) return workspaceNotInjected();
+    const QJsonObject res = workspace->currentSpec();
+    return QString::fromUtf8(QJsonDocument(res).toJson(QJsonDocument::Compact));
+}
+
+QString execListUiComponents(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
+                             const SourceInfo& /*src*/,
+                             ui::BookmarkManager* /*bookmarks*/,
+                             aigui::WorkspaceController* workspace) {
+    if (!workspace) return workspaceNotInjected();
+    const QJsonObject res = workspace->componentCatalog();
+    return QString::fromUtf8(QJsonDocument(res).toJson(QJsonDocument::Compact));
+}
+
+QString execResetWorkspace(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
+                           const SourceInfo& /*src*/,
+                           ui::BookmarkManager* /*bookmarks*/,
+                           aigui::WorkspaceController* workspace) {
+    if (!workspace) return workspaceNotInjected();
+    const QJsonObject res = workspace->reset();
+    return QString::fromUtf8(QJsonDocument(res).toJson(QJsonDocument::Compact));
+}
+
 // The built-in tool registry: name -> executor. Learned (mechanism only) from
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
 // instead of an if-else chain. Clean-room reimplementation; no GPL code copied.
@@ -2766,9 +2819,11 @@ QString execMemoryFlush(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
 struct ToolDispatch {
     const char* name;
     // The 4th arg is the optional injected bookmark store; only the three
-    // bookmark tools consume it, every other executor ignores it.
+    // bookmark tools consume it, every other executor ignores it. The 5th arg is
+    // the optional injected AIGUI WorkspaceController; only the four workspace
+    // tools consume it, every other executor ignores it.
     QString (*exec)(const QJsonObject&, dsp::SpectrumEngine*, const SourceInfo&,
-                    ui::BookmarkManager*);
+                    ui::BookmarkManager*, aigui::WorkspaceController*);
 };
 
 const QList<ToolDispatch>& dispatchTable() {
@@ -2857,6 +2912,12 @@ const QList<ToolDispatch>& dispatchTable() {
         // P3 #74: checkpoint writer introspection (read) + synchronous flush (write, gated).
         {"checkpoint_status", &execCheckpointStatus},
         {"memory_flush", &execMemoryFlush},
+        // 第 10 域「工作台编排」(AIGUI P0-b): arrange/reset are gated writes,
+        // get/list are read-only. Drive the live WorkspaceController only.
+        {"arrange_workspace", &execArrangeWorkspace},
+        {"get_workspace_layout", &execGetWorkspaceLayout},
+        {"list_ui_components", &execListUiComponents},
+        {"reset_workspace", &execResetWorkspace},
     };
     return kTable;
 }
@@ -2889,7 +2950,7 @@ QList<ToolDef> toolDefs() {
 }
 
 QString executeTool(const QString& name, const QJsonObject& args,
-                    dsp::SpectrumEngine* engine, ui::BookmarkManager* bookmarks) {
+                    dsp::SpectrumEngine* engine, ui::BookmarkManager* bookmarks, aigui::WorkspaceController* workspace) {
     // Honest error envelope aligned with ControlHub::execute() (control_hub.cpp:354):
     // never a plain string, never {ok:true} with fabricated values. The executor
     // bodies below all dereference engine->... without their own null guard, so
@@ -2905,7 +2966,7 @@ QString executeTool(const QString& name, const QJsonObject& args,
 
     for (const ToolDispatch& d : dispatchTable()) {
         if (name == QLatin1String(d.name))
-            return d.exec(args, engine, src, bookmarks);
+            return d.exec(args, engine, src, bookmarks, workspace);
     }
     // Unknown-tool envelope aligned with the Python MCP server
     // (mbdsdr_ai/core/mcp_server.py call_tool): JSON object, never a bare

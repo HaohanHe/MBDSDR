@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 77);
+    QCOMPARE(specs.size(), 81);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -478,6 +478,32 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "写入：同步排空记忆队列并落库（memory_store.add/update），重写 ~/.mbdsdr/checkpoint.md "
             "人类可读快照（时间戳+本次落库条数+key 列表），返回 written 实际落库条数。"
             "属于写动作，手动模式下被拦截。")},
+        // 第 10 域「工作台编排」(AIGUI P0-b): descriptions pinned verbatim.
+        {"arrange_workspace",
+         QString::fromUtf8(
+            "写入：把一条 A2UI v1.0 子集布局消息应用到主界面三栏工作台——"
+            "op 枚举 createSurface（整面重建）/updateComponents（在当前布局上叠加，默认）/"
+            "deleteSurface（回默认）。components 为扁平邻接节点表，每节点 "
+            "{id,type,props:{sizes:[L,M,R],stretch:[a,b,c],current,visible},children:[...]}；"
+            "id 仅认编译期白名单（splitter/left_rail/center_spectrum/right_tabs/status_bar/"
+            "tab:XXX），未知 id 进 placeholders 诚实空态、绝不渲染。"
+            "sizes 软下限 120px clamp，默认 280/800/280 stretch 1/3/1。"
+            "只动 splitter 与右侧 tab 可见性，不碰 DSP/音频/硬件。属于写动作，手动模式下被拦截。")},
+        {"get_workspace_layout",
+         QString::fromUtf8(
+            "只读：返回当前工作台布局模型——splitter_sizes[L,M,R]、splitter_stretch[a,b,c]、"
+            "visible_tabs（tab:XXX 列表）、current_tab、hidden_panels、placeholders。"
+            "默认三栏 280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见。")},
+        {"list_ui_components",
+         QString::fromUtf8(
+            "只读：返回编译期白名单组件目录——每项 {id,category,capabilities[],min_size}。"
+            "共 23 项：splitter/left_rail/center_spectrum/right_tabs/status_bar + 14 个 tab:XXX "
+            "+ 4 个 center:XXX。agent 编排工作台前先查此目录确认可引用的 id。")},
+        {"reset_workspace",
+         QString::fromUtf8(
+            "写入：把工作台重置为默认三栏布局（280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见），"
+            "等价于 deleteSurface。只动 splitter 与 tab 可见性，不碰 DSP/音频/硬件。"
+            "属于写动作，手动模式下被拦截。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {
@@ -534,7 +560,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 77);
+    QCOMPARE(headerCount, 81);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

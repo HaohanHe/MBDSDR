@@ -5,6 +5,7 @@
 #include <QList>
 #include <QSet>
 #include <limits>
+#include <memory>
 
 // GnssFix is a value member (lastGnssFix_), so its layout must be visible here.
 #include "gnss/gnss_types.h"
@@ -42,6 +43,10 @@ class QLineEdit;
 class QSpinBox;
 
 #include "dsp/doppler_control_surface.h"
+
+// AIGUI P0-b: the workspace model lives in the GLOBAL aigui namespace (the P0-a
+// component_registry/workspace_layout layer), not under mbdsdr.
+namespace aigui { class WorkspaceController; }
 
 namespace mbdsdr {
 
@@ -674,6 +679,11 @@ private:
     // Right tabs
     QTabWidget*     rightTabs_   = nullptr;
     QSplitter*      mainSplitter_ = nullptr;
+    // AIGUI P0-b: live controller binding mainSplitter_ + rightTabs_ to the
+    // WorkspaceLayout model. Created after both widgets exist; the observing
+    // pointer is also handed to ControlHub so the headless/HTTP channel can
+    // arrange the three-column workspace through the same seam.
+    std::unique_ptr<aigui::WorkspaceController> workspace_;
     // Phase63: flat restore button, shown only while >=1 right-rail panel tab
     // is hidden (the tab-bar context menu offers the same action).
     QPushButton*    rightTabRestoreBtn_ = nullptr;

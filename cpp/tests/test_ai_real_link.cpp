@@ -369,6 +369,9 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         // P3 #73/#74: local memory family + checkpoint writer control plane.
         "memory_add", "memory_search", "memory_update",
         "checkpoint_status", "memory_flush",
+        // 第 10 域「工作台编排」(AIGUI P0-b).
+        "arrange_workspace", "get_workspace_layout",
+        "list_ui_components", "reset_workspace",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -413,6 +416,11 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(ai::isWriteTool("memory_flush"));
     QVERIFY(!ai::isWriteTool("memory_search"));
     QVERIFY(!ai::isWriteTool("checkpoint_status"));
+    // 第 10 域「工作台编排」(P0-b): arrange/reset gated writes; get/list reads.
+    QVERIFY(ai::isWriteTool("arrange_workspace"));
+    QVERIFY(ai::isWriteTool("reset_workspace"));
+    QVERIFY(!ai::isWriteTool("get_workspace_layout"));
+    QVERIFY(!ai::isWriteTool("list_ui_components"));
     QVERIFY(!ai::isWriteTool("get_network_audio_status"));
     QVERIFY(!ai::isWriteTool("get_scan_link_status"));
     QVERIFY(!ai::isWriteTool("get_squelch_status"));

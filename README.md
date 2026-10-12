@@ -5,9 +5,9 @@
 
 | 组件 | 位置 | 是什么 |
 |---|---|---|
-| 原生桌面端 | [`cpp/`](cpp/README.md) | C++/Qt 原生 SDR 接收软件（UI 与 DSP 同进程，不依赖 Python 运行时）。AI 助手工具面实测 **77 个**（`cpp/src/ai/tool_schema.cpp`，read/write 双态、写动作在手动模式被门拦截），并内置 ControlHub HTTP 控制通道 |
+| 原生桌面端 | [`cpp/`](cpp/README.md) | C++/Qt 原生 SDR 接收软件（UI 与 DSP 同进程，不依赖 Python 运行时）。AI 助手工具面实测 **81 个**（`cpp/src/ai/tool_schema.cpp`，read/write 双态、写动作在手动模式被门拦截），并内置 ControlHub HTTP 控制通道 |
 | 手机端 | [`mobile/`](mobile/README.md) | Flutter 一套代码（Android/iOS），手机作 AI 的"眼睛和手臂"：定位+罗盘指向+rtl_tcp 直连外置 SDR；经 ControlHub HTTP 只读对接桌面引擎 |
-| Python 智能体内核 | [`mbdsdr_ai/`](mbdsdr_ai/README.md) | **研究原型**：注册约 280 个 LLM 可调用工具（agent.py ~112 + sdr_tools.py ~137 + tool_registry 内置 ~63，口径见该 README §1）+ 工作流引擎。这是原型期工具面，**不是**随桌面交付的 77 工具集 |
+| Python 智能体内核 | [`mbdsdr_ai/`](mbdsdr_ai/README.md) | **研究原型**：注册约 280 个 LLM 可调用工具（agent.py ~112 + sdr_tools.py ~137 + tool_registry 内置 ~63，口径见该 README §1）+ 工作流引擎。这是原型期工具面，**不是**随桌面交付的 81 工具集 |
 | 论文实验管线 | [`experiments/`](experiments/README.md) | 可复现实验（Eb/N0 解码成功率 / 多普勒定轨 / AMR 基线 / LLM 基线），固定种子、逐图标口径 |
 | 真机工具 | [`tools/`](tools/) | 一键只读自检 `hw_selfcheck` + 联调向导 `onboarding` |
 | 学习与阶段规格 | [`docs/learn/`](docs/learn/) | 上游真实源码精读（sdrpp/gnuradio/librtlsdr…）+ phase3–6 实现规格与审计 |
@@ -122,7 +122,7 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 3. 回传 sweep.json（+ 连接日志 version/info/cal）即可比对。
 无设备可先 `--selftest` 跑通流程（合成演示，非真实测量）。详见 docs/learn/nanovna/hardware-quickstart.md。
 
-## 工具能力矩阵（77 工具，三通道：Agent / Hub / HTTP 透传）
+## 工具能力矩阵（81 工具，三通道：Agent / Hub / HTTP 透传）
 
 按域分组；写=手动模式 gate 拦截，读=不拦截。
 
@@ -192,13 +192,19 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 | memory_add / memory_update / memory_flush | 写（手动 gate；add/update 入队异步落库，flush 同步排空） |
 | memory_search / checkpoint_status | 读 |
 
-合计 77 工具，与 docs/learn/phase31/agent-tool-documentation.md 头部一致。
+### 工作台编排（AIGUI P0-b，三栏 splitter + 右侧 tab）
+| 工具 | 写/读 |
+|---|---|
+| arrange_workspace / reset_workspace | 写（手动 gate；按编译期白名单调整 splitter 尺寸/tab 可见性，未知 id 诚实占位，不碰 DSP/音频/硬件） |
+| get_workspace_layout / list_ui_components | 读 |
+
+合计 81 工具，与 docs/learn/phase31/agent-tool-documentation.md 头部一致。
 
 ## MCP 服务器（C++ mbdsdr-mcp 与 Python mbdsdr_ai/core/mcp_server.py）合并视图
 
 两套 MCP server 同仓并存、互为镜像：
 
-- **域分组一致**：两 server 的 `tools/list` 均按域分组（C++ 9 域、Python 10 域——Python 前 9 域与 C++ 同集合，另含「解码器长尾」扩展域；钉扎测试保证不漂移）。
+- **域分组一致**：两 server 的 `tools/list` 均按域分组（C++ 10 域、Python 11 域——Python 前 10 域与 C++ 同集合，另含「解码器长尾」扩展域；钉扎测试保证不漂移）。
 - **C++ `mbdsdr-mcp`**：面向外部第三方 agent 的 stdio 接入面（接入细节见 `docs/learn/phase63/third-party-agent-mcp.md`），工具本体与桌面 Agent 同一套 `registeredToolSpecs()`，不另立实现。
 - **Python `mbdsdr_ai/core/mcp_server.py`**：面向脚本/嵌入式控制器的本地调用面，便于在测试台与自动化脚本里直接驱动同一工具语义。
 - **写工具一致门控**：两 server 的写工具统一走 `arm_manual` / 手动 gate，人在环确认，不会因接入面不同而绕过。

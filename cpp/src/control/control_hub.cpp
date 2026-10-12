@@ -11,6 +11,7 @@
 #include "dsp/network_audio_sink.h"
 #include "dsp/scan_link.h"
 #include "ui/bookmark_manager.h"
+#include "ui/workspace_controller.h"  // P0-b: live three-column workspace seam
 #include "ai/sat_task_planner.h"
 #include "ai/memory_store.h"   // P3 #73: local SQLite FTS5 memory store
 #include "ai/checkpoint_writer.h" // P3 #74: background single-writer drain
@@ -140,6 +141,9 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"add_bookmark",          true,  &ControlHub::cmdAddBookmark},
         {"tune_to_bookmark",      true,  &ControlHub::cmdTuneToBookmark},
         {"delete_bookmark",       true,  &ControlHub::cmdDeleteBookmark},
+        // 第 10 域「工作台编排」(P0-b): arrange/reset are gated writes.
+        {"arrange_workspace",     true,  &ControlHub::cmdArrangeWorkspace},
+        {"reset_workspace",       true,  &ControlHub::cmdResetWorkspace},
         {"add_vfo",               true,  &ControlHub::cmdAddVfo},
         {"switch_vfo",            true,  &ControlHub::cmdSwitchVfo},
         {"rename_vfo",            true,  &ControlHub::cmdRenameVfo},
@@ -185,6 +189,9 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"analyze_vna_match",    false, &ControlHub::cmdAnalyzeVnaMatch},
         {"get_noise_blanker_status", false, &ControlHub::cmdGetNoiseBlankerStatus},
         {"list_bookmarks",        false, &ControlHub::cmdListBookmarks},
+        // 第 10 域「工作台编排」(P0-b): get/list are always-allowed reads.
+        {"get_workspace_layout",  false, &ControlHub::cmdGetWorkspaceLayout},
+        {"list_ui_components",    false, &ControlHub::cmdListUiComponents},
         {"list_vfos",             false, &ControlHub::cmdListVfos},
         {"list_recordings",       false, &ControlHub::cmdListRecordings},
         {"get_spectrum_status",   false, &ControlHub::cmdGetSpectrumStatus},
@@ -2251,6 +2258,42 @@ QJsonObject ControlHub::cmdDeleteBookmark(const QJsonObject& a) {
     QJsonObject o = okBase();
     o["command"] = "delete_bookmark";
     o["index"] = idx;
+    return o;
+}
+
+// ---- 第 10 域「工作台编排」(AIGUI P0-b) -----------------------------------
+// These mirror the four agent workspace tools through the injected
+// WorkspaceController. When the controller is not injected (headless tests) they
+// return an honest error; they never touch DSP / audio / hardware.
+QJsonObject ControlHub::cmdArrangeWorkspace(const QJsonObject& a) {
+    if (!workspace_)
+        return errResult(QString::fromUtf8("工作台控制器未注入（MainWindow 未创建 WorkspaceController）"));
+    QJsonObject o = workspace_->applyOverlay(a);
+    o["command"] = "arrange_workspace";
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetWorkspaceLayout(const QJsonObject&) {
+    if (!workspace_)
+        return errResult(QString::fromUtf8("工作台控制器未注入（MainWindow 未创建 WorkspaceController）"));
+    QJsonObject o = workspace_->currentSpec();
+    o["command"] = "get_workspace_layout";
+    return o;
+}
+
+QJsonObject ControlHub::cmdListUiComponents(const QJsonObject&) {
+    if (!workspace_)
+        return errResult(QString::fromUtf8("工作台控制器未注入（MainWindow 未创建 WorkspaceController）"));
+    QJsonObject o = workspace_->componentCatalog();
+    o["command"] = "list_ui_components";
+    return o;
+}
+
+QJsonObject ControlHub::cmdResetWorkspace(const QJsonObject&) {
+    if (!workspace_)
+        return errResult(QString::fromUtf8("工作台控制器未注入（MainWindow 未创建 WorkspaceController）"));
+    QJsonObject o = workspace_->reset();
+    o["command"] = "reset_workspace";
     return o;
 }
 

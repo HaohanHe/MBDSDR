@@ -22,8 +22,8 @@ from mbdsdr_ai.core.mcp_server import (
     _TOOL_DOMAIN,
 )
 
-# 与 C++ mcp_server.cpp domainGroups() 冻结的同一组 9 个域名。
-EXPECTED_9_DOMAINS = [
+# 与 C++ mcp_server.cpp domainGroups() 冻结的同一组 10 个域名。
+EXPECTED_10_DOMAINS = [
     "SDR 调谐/VFO",
     "亚音数字解码",
     "VNA 测量",
@@ -33,6 +33,7 @@ EXPECTED_9_DOMAINS = [
     "书签扫描卫星",
     "系统设备",
     "记忆编排",
+    "工作台编排",
 ]
 
 # Python 面扩展域（P0 #65）——不与 C++ 冻结，仅本 server 追加。
@@ -55,22 +56,22 @@ def _set() -> MCPToolSet:
 
 
 def test_frozen_domain_set_matches_cpp():
-    """9 域名集合与顺序 == C++ 冻结集合（跨语言钉扎，不受 Python 扩展影响）。"""
-    assert FROZEN_DOMAIN_NAMES == EXPECTED_9_DOMAINS
-    assert list(FROZEN_DOMAIN_SUMMARIES.keys()) == EXPECTED_9_DOMAINS
+    """10 域名集合与顺序 == C++ 冻结集合（跨语言钉扎，不受 Python 扩展影响）。"""
+    assert FROZEN_DOMAIN_NAMES == EXPECTED_10_DOMAINS
+    assert list(FROZEN_DOMAIN_SUMMARIES.keys()) == EXPECTED_10_DOMAINS
     # 每个域都有一句话 summary。
-    for name in EXPECTED_9_DOMAINS:
+    for name in EXPECTED_10_DOMAINS:
         assert FROZEN_DOMAIN_SUMMARIES[name].strip()
 
 
 def test_python_extension_domain_is_separate():
-    """Python 扩展域独立追加，不污染冻结 9 域。"""
+    """Python 扩展域独立追加，不污染冻结 10 域。"""
     assert PYTHON_EXTENSION_DOMAIN_NAMES == EXPECTED_EXTENSION_DOMAINS
-    assert ALL_DOMAIN_NAMES == EXPECTED_9_DOMAINS + EXPECTED_EXTENSION_DOMAINS
+    assert ALL_DOMAIN_NAMES == EXPECTED_10_DOMAINS + EXPECTED_EXTENSION_DOMAINS
     for name in EXPECTED_EXTENSION_DOMAINS:
         assert PYTHON_EXTENSION_DOMAIN_SUMMARIES[name].strip()
         # 扩展域不属于 C++ 冻结集合。
-        assert name not in EXPECTED_9_DOMAINS
+        assert name not in EXPECTED_10_DOMAINS
 
 
 def test_every_tool_in_exactly_one_domain():

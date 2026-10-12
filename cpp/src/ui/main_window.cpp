@@ -92,6 +92,7 @@
 #include "ui/s_meter.h"
 #include "ui/rssi_trend.h"
 #include "ui/bookmark_manager.h"
+#include "ui/workspace_controller.h"   // AIGUI P0-b: live three-column workspace seam
 #include "ui/scan_session.h"
 #include "dsp/frequency_scanner.h"
 #include "ui/shortcuts_dialog.h"
@@ -2499,6 +2500,11 @@ MainWindow::MainWindow(QWidget* parent)
     // (the card no longer crowds the bottom edge).
     if (guideCard_) centralLay->insertWidget(1, guideCard_);
     setCentralWidget(central);
+    // AIGUI P0-b: bind the live three-column splitter + right tab widget to the
+    // WorkspaceLayout controller. Both widgets exist by now; the controller
+    // observes them (no ownership). The default spec = the current three-column
+    // layout, so applying it here introduces no visual regression.
+    workspace_ = std::make_unique<aigui::WorkspaceController>(mainSplitter_, rightTabs_);
     statusBar()->showMessage("MBDSDR C++");
     // Permanent status strip: mode | sample rate | VFO | gain | source.
     // sr/vfo/gain are refreshed by the engine's ~1 Hz sourceTelemetry push with
@@ -3703,6 +3709,10 @@ void MainWindow::setupControlHttpServer() {
     // every endpoint dispatches onto the real SpectrumEngine on this home thread.
     controlHub_ = new control::ControlHub(this);
     controlHub_->setEngine(engine_);
+    // AIGUI P0-b: hand the live workspace controller to the headless/HTTP hub so
+    // arrange_workspace / get_workspace_layout / list_ui_components / reset_workspace
+    // dispatch to the real three-column widgets (honest not-injected otherwise).
+    if (workspace_) controlHub_->setWorkspaceController(workspace_.get());
     httpControlServer_ = new control::HttpControlServer(controlHub_, this);
 
     // startDefault() resolves env MBDSDR_CONTROL_HTTP_PORT -> QSettings

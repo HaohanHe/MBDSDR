@@ -49,8 +49,8 @@ QJsonObject toolEntry(const ai::ToolDef& def) {
     return t;
 }
 
-// ---- Frozen secondary-domain directory (P1 #64, P3 #73) --------------------
-// 9 domains, FROZEN and shared verbatim with the Python reference
+// ---- Frozen secondary-domain directory (P1 #64, P3 #73, AIGUI P0-b) -------
+// 10 domains, FROZEN and shared verbatim with the Python reference
 // (mbdsdr_ai/core/mcp_server.py). This is a server-side grouping view ONLY:
 // the schema + dispatch single source remains ai::toolDefs() /
 // registeredToolSpecs(); we never edit the registry here, we only bucket its
@@ -124,6 +124,10 @@ QList<DomainGroup> domainGroups() {
          {QStringLiteral("memory_add"), QStringLiteral("memory_search"),
           QStringLiteral("memory_update"), QStringLiteral("checkpoint_status"),
           QStringLiteral("memory_flush")}},
+        {QStringLiteral("工作台编排"),
+         QStringLiteral("AIGUI 三栏工作台布局编排：按编译期白名单调整 splitter 尺寸/右侧 tab 可见性，未知 id 诚实占位，不碰 DSP/音频/硬件。"),
+         {QStringLiteral("arrange_workspace"), QStringLiteral("get_workspace_layout"),
+          QStringLiteral("list_ui_components"), QStringLiteral("reset_workspace")}},
     };
 }
 
