@@ -37,8 +37,8 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: ToolsCatalogPage()));
     await tester.pump();
 
-    // 头部诚实说明（标注桌面 72 个、只读对照）。
-    expect(find.textContaining('桌面端共 71 个'), findsOneWidget);
+    // 头部诚实说明（标注桌面 77 个、只读对照；文案取 all.length 动态值）。
+    expect(find.textContaining('桌面端共 77 个'), findsOneWidget);
     // 顶部几个工具名渲染。
     expect(find.text('tune_frequency'), findsOneWidget);
     expect(find.text('set_mode'), findsOneWidget);
