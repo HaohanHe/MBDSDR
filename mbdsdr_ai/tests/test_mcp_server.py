@@ -289,3 +289,29 @@ def test_longtail_bad_inputs_honest_errors():
     out = ts.call_tool("decoder_rtl433_decode",
                        {"device_type": "nope", "message_hex": "aabb"})
     assert out["error"] == "unknown_device_type"
+
+
+def test_write_tools_manual_gate_aligns_cpp():
+    """Python MCP 写工具手动 gate：无 arm_manual 拒、有则执行；只读工具不 gate；
+    schema 视图暴露 write 字段（与 C++ 信封对齐）。"""
+    ts = _set()
+    # 1) 写工具无 arm -> gated 信封（同 C++ gatedToolResult 形状）。
+    g = ts.call_tool("set_frequency", {"hz": 100e6})
+    assert g == {"ok": False, "error": "手动模式：未执行 set_frequency", "gated": True}
+    # 2) arm_manual=true 才执行（无后端仍诚实 not_connected 而非 gate）。
+    r = ts.call_tool("set_frequency", {"hz": 100e6, "arm_manual": True})
+    assert "gated" not in r
+    # 3) arm_manual 不透传（消费后不落在 handler 参数里）：读工具不受 gate 影响。
+    ro = ts.call_tool("get_frequency", {})
+    assert "gated" not in ro
+    # 4) schema 视图含 write 标记。
+    full = ts.tools_list_result({"detail": "schema"})[0]
+    all_tools = {}
+    for dom in full["domains"]:
+        for t in dom["tools"]:
+            all_tools[t["name"]] = t
+    assert all_tools["set_frequency"]["write"] is True
+    assert all_tools["tune_satellite"]["write"] is True
+    # 只读工具 write=False。
+    any_read = next(t for t in all_tools.values() if not t["write"])
+    assert any_read is not None

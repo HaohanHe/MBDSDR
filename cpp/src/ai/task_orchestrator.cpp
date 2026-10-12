@@ -158,7 +158,12 @@ QString TaskOrchestrator::run(const TaskPlan& plan, StepCallback onStep) {
         r.elapsedMs = t.elapsed();
 
         const bool gated = doc.isObject() && doc.object().value("gated").toBool();
-        const bool isErr = out.startsWith("error") || out.startsWith("未知工具");
+        // Failure recognition: legacy bare-string prefixes plus the JSON
+        // unknown-tool envelope aligned with the Python MCP server. Other
+        // executor errors ({"ok":false,...}) keep their historical semantics.
+        const bool isErr = out.startsWith("error") || out.startsWith("未知工具")
+            || (doc.isObject()
+                && doc.object().value("error").toString() == "unknown_tool");
         if (gated) {
             r.state = StepState::Gated;
             r.gated = true;

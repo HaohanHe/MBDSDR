@@ -1,32 +1,29 @@
 {
-  "_comment": "MBDSDR AI 内核 MCP 接入示例：复制 mbdsdr 段到 Claude Desktop / Cursor / Cline / Kilo Code / OpenCode 等支持 MCP 的 AI Host。把 args 里的路径改成你本机 MBDSDR 目录的绝对路径。API Key 不写在这里，用环境变量 MBDSDR_API_KEY 或 ~/.mbdsdr/config.json。",
+  "_comment": "MBDSDR MCP 接入示例：复制 mbdsdr 段到 Claude Desktop / Cursor / Cline / Kilo Code / OpenCode 等支持 MCP 的 AI Host。把 args 里的路径改成你本机 MBDSDR 目录的绝对路径。两套 server 均为零 LLM 依赖的 stdio JSON-RPC（MCP 2024-11-05），外部 agent 不接任何模型也能列全工具并调用。",
   "mcpServers": {
-    "mbdsdr": {
+    "mbdsdr-cpp": {
+      "command": "/绝对路径/MBDSDR/cpp/build/mbdsdr_mcp",
+      "args": []
+    },
+    "mbdsdr-python": {
       "command": "python3",
-      "args": ["/绝对路径/MBDSDR/mbdsdr_ai_mcp_server.py"],
+      "args": ["-m", "mbdsdr_ai.core.mcp_server"],
       "env": {
-        "MBDSDR_BASE_URL": "https://api.siliconflow.cn/v1",
-        "MBDSDR_MODEL": "Qwen/Qwen3.6-35B-A3B"
+        "PYTHONPATH": "/绝对路径/MBDSDR"
       }
     }
   },
   "_exposed_tools_overview": {
-    "sdr": "sdr_status / sdr_set_frequency / sdr_set_gain / sdr_set_sample_rate / sdr_set_bandwidth / sdr_set_demod / sdr_connect / sdr_list_devices / sdr_switch_device（接收机控制）",
-    "spectrum": "sdr_spectrum_analyze / sdr_spectrum_zoom / sdr_spectrum_pan / sdr_spectrum_find_signals / sdr_spectrum_screenshot / sdr_spectrum_center_offset（频谱感知、缩放、平移、截图）",
-    "ai_sdr": "sdr_ai_sweep / sdr_ai_find_center / sdr_identify_modulation / sdr_detect_fhss / sdr_measure_signal / sdr_iq_correct（AI 辅助扫频、找中心频点、调制识别、跳频检测）",
-    "decode": "sdr_decode_sstv / sdr_decode_ft8 / sdr_decode_adsb / sdr_decode_aprs / sdr_decode_noaa_apt / sdr_analyze_recording（数字模式解码）",
-    "record": "sdr_record_start / sdr_record_stop / sdr_recordings_list（基带录制）",
-    "satellite": "sdr_satellite_sky_view / sdr_satellite_doppler / astro_set_observer / astro_equatorial_to_altaz / astro_pointing_guidance（卫星天空图、多普勒、天线指向辅助）",
-    "sensor": "sdr_get_gps / sdr_get_imu（GNSS / IMU）",
-    "self_evolution": "code_read_file / code_modify_file / code_modify_section / code_run_tests / code_hot_reload / code_git_commit / code_rollback / guardian_status / guardian_rollback / file_change_track / file_change_revert（自编程、自进化、一键回滚）",
-    "agent_core": "context_status / list_models / switch_model / model_status / memory_write / memory_search / hook_list / hook_trigger / judge_evaluate / learning_record / learning_learn（上下文、模型、记忆、钩子、评判、自学习）"
+    "C++ mbdsdr-mcp": "77 工具 / 9 域：SDR调谐/VFO（19）、亚音数字解码（15，含 get_adsb_aircraft/get_ft8_history）、VNA测量（4）、VNA分析（6）、VNA校准（1）、导出演制（11）、书签扫描卫星（9）、系统设备（7）、记忆编排（5：memory_add/search/update/checkpoint_status/memory_flush）。工具表=toolDefs() 唯一事实源。",
+    "Python mbdsdr_ai.core.mcp_server": "60 工具 / 10 域（前 9 域与 C++ 同集合，另含「解码器长尾」扩展域：DAB+/NRSC5/rtl433/GK-2A/FST4/bladeRF 参数）。面向脚本/嵌入式控制器。"
   },
   "_notes": [
     "协议：JSON-RPC 2.0 over stdio，MCP protocolVersion 2024-11-05，每行一个 JSON。",
-    "命令行自测：python3 mbdsdr_ai_mcp_server.py --cli list_tools；python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_status '{}'",
-    "API Key 优先级：命令行 --api-key > ~/.mbdsdr/config.json > 环境变量 MBDSDR_API_KEY > 默认。密钥不入库。",
-    "API Base 规范环境变量为 MBDSDR_BASE_URL；旧名 MBDSDR_API_BASE 仍作兼容别名可用（二者等价）。",
-    "工具返回为 JSON 文本，失败时 MCP isError=true，AI Host 可据此自纠换路。",
-    "所有写操作（改频率/增益/录制/改代码）带状态检查点与守护者快照，可一键回滚。"
+    "初始化握手：initialize（capabilities.tools.listChanged=true）-> notifications/initialized -> tools/list（默认域卡片；detail=name/desc/schema 三分级）-> tools/call。",
+    "写工具统一手动 gate：调用写工具（set_*/start_*/stop_*/memory_* 等）必须显式传 arm_manual=true，否则返回 {\"gated\":true,...} 不执行——人在环确认，任何接入面都不绕过。",
+    "未知工具返回 JSON 信封 {\"error\":\"unknown_tool\",\"tool\":...}，机器可解析；无设备/无信号时返回诚实空态（not_connected / 空数组 + note），不伪造数据。",
+    "命令行自测：echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}' | mbdsdr_mcp；Python 侧同理。",
+    "C++ 二进制路径：构建产物 cpp/build/mbdsdr_mcp；Python 入口：python3 -m mbdsdr_ai.core.mcp_server（cwd 或 PYTHONPATH 指向仓库根）。",
+    "无 LLM 依赖、无 API Key、无网络调用；真机数据验证状态 PENDING 的工具有诚实标注。"
   ]
 }

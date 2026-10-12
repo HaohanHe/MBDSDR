@@ -2907,7 +2907,14 @@ QString executeTool(const QString& name, const QJsonObject& args,
         if (name == QLatin1String(d.name))
             return d.exec(args, engine, src, bookmarks);
     }
-    return "未知工具: " + name;
+    // Unknown-tool envelope aligned with the Python MCP server
+    // (mbdsdr_ai/core/mcp_server.py call_tool): JSON object, never a bare
+    // string, so content[0].text stays machine-parseable for third-party hosts.
+    QJsonObject o;
+    o["error"] = QStringLiteral("unknown_tool");
+    o["tool"] = name;
+    o["suggestion"] = QStringLiteral("用 tools/list 查看可用工具。");
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
 
 } // namespace ai

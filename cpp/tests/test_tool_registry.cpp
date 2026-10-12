@@ -267,13 +267,18 @@ void TestToolRegistry::readOnlySet_parityWithFlutter() {
 void TestToolRegistry::unknownTool_honestErrorPath() {
     dsp::SpectrumEngine engine;
     QString r = executeTool("definitely_not_a_real_tool", QJsonObject{}, &engine);
-    QVERIFY2(r.contains(QString::fromUtf8("未知工具")),
-             qPrintable("unknown tool must say so, got: " + r));
-    QVERIFY2(r.contains("definitely_not_a_real_tool"),
-             qPrintable("unknown tool must name it, got: " + r));
-    // It is NOT a success object.
+    // JSON envelope aligned with the Python MCP server call_tool:
+    // {error:"unknown_tool", tool:<name>, suggestion:...} — never a bare string.
     QJsonObject o = QJsonDocument::fromJson(r.toUtf8()).object();
-    QVERIFY2(o.isEmpty() || o.value("ok").toBool() == false,
+    QVERIFY2(!o.isEmpty(), qPrintable("unknown tool must yield JSON, got: " + r));
+    QVERIFY2(o.value("error").toString() == "unknown_tool",
+             qPrintable("unknown tool error tag, got: " + r));
+    QVERIFY2(o.value("tool").toString() == "definitely_not_a_real_tool",
+             qPrintable("unknown tool must name it, got: " + r));
+    QVERIFY2(!o.value("suggestion").toString().isEmpty(),
+             qPrintable("unknown tool must suggest tools/list, got: " + r));
+    // It is NOT a success object.
+    QVERIFY2(o.value("ok").toBool() == false,
              qPrintable("unknown tool must not report ok:true, got: " + r));
 
     // Null engine -> the pre-dispatch guard: parseable JSON envelope,

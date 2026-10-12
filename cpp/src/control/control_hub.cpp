@@ -188,6 +188,9 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"list_vfos",             false, &ControlHub::cmdListVfos},
         {"list_recordings",       false, &ControlHub::cmdListRecordings},
         {"get_spectrum_status",   false, &ControlHub::cmdGetSpectrumStatus},
+        // ---- Local memory family read commands (P3 #73/#74, always allowed) --
+        {"memory_search",         false, &ControlHub::cmdMemorySearch},
+        {"checkpoint_status",     false, &ControlHub::cmdCheckpointStatus},
     };
     return kRows;
 }

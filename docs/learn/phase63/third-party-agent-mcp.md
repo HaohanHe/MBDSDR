@@ -34,7 +34,7 @@
 |------|------|------|
 | `initialize` | — | `{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"mbdsdr-core","version":"0.1.0"}}` |
 | `notifications/initialized` | — | 无回复（通知） |
-| `tools/list` | `{}` / `{"domain":<名>}` / `{"detailed":true}` / `{"detail":"name"\|"desc"\|"schema"}` | 默认→8 域卡片(name)；`domain`→该域；`detail`/`detailed` 控字段粗细（见 §2.1.1/§2.1.2） |
+| `tools/list` | `{}` / `{"domain":<名>}` / `{"detailed":true}` / `{"detail":"name"\|"desc"\|"schema"}` | 默认→9 域卡片(name)；`domain`→该域；`detail`/`detailed` 控字段粗细（见 §2.1.1/§2.1.2） |
 | `tools/call` | `{"name":..,"arguments":{..}}` | `{"content":[{"type":"text","text":<executeTool 返回的 JSON 串>}]}` |
 
 * **工具表唯一事实源**：`ai::toolDefs()`（底层 `toolDefsFromSpecs(registeredToolSpecs())`）。
@@ -45,12 +45,12 @@
 ### 2.1.1 tools/list 二级域分组视图（P1 #64）
 
 工具数量增长后，一次性吐出全部 schema 对 LLM 是噪声。`tools/list` 改为**两级目录**：
-第一级给 8 个**冻结域**卡片（只列工具名），第二级按需下钻到完整 schema。
+第一级给 9 个**冻结域**卡片（只列工具名），第二级按需下钻到完整 schema。
 域分配是**服务器侧视图**——`ai::toolDefs()` / `registeredToolSpecs()` 本体一个字不改，
-分组只是把既有名字桶分到 8 个域（C++ 侧 `domainForTool`，Python 侧 `_TOOL_DOMAIN`，
-两边**同 8 域名、同序**，跨语言钉扎）。
+分组只是把既有名字桶分到 9 个域（C++ 侧 `domainForTool`，Python 侧 `_TOOL_DOMAIN`，
+两边**同 9 域名、同序**，跨语言钉扎）。
 
-8 个冻结域（summary 为一句话用途）：
+9 个冻结域（summary 为一句话用途）：
 
 | 域 | 一句话 |
 |----|--------|
@@ -62,21 +62,22 @@
 | `导出演制` | IQ 录制、录制状态与各类快照/报文结果导出 |
 | `书签扫描卫星` | 书签管理、波段/链路扫描与卫星过境预报/调谐 |
 | `系统设备` | 设备连接、频率基准校准、网络音频/音源接入与整体状态 |
+| `记忆编排` | 本地持久记忆（SQLite FTS5）写入/覆盖/全文检索，按 user/agent/session 作用域分层 |
 
 三种入参分支（C++ 与 Python 参考实现同形状）：
 
-* **默认（无 params）** → `result.tools` = 8 张域卡片数组：
+* **默认（无 params）** → `result.tools` = 9 张域卡片数组：
   `[{"domain":<名>,"summary":<句>,"tools":[<工具名>...]}, ...]`。
   把全部卡片的 `tools` 名展开即等于 `ai::toolDefs()` 名集合——**不丢、不重**。
 * **`params.domain`**（精确名或容错：trim/小写/唯一子串）→ `result.tools` =
   该域完整工具列表 `[{name,description,inputSchema}...]`（schema 仍来自 `toolDefs()` 单源）。
   未知 `domain` → JSON-RPC 错误 `-32602`，message 里**诚实列出全部合法域名**。
-* **`params.detailed:true`** → `result.domains` = 8 张卡片，每张 `tools` 带完整 schema，
+* **`params.detailed:true`** → `result.domains` = 9 张卡片，每张 `tools` 带完整 schema，
   总数同样不丢。
 
-> 跨语言一致性：Python 参考 `mbdsdr_ai/core/mcp_server.py` 用**同一组 8 域名**做分组
+> 跨语言一致性：Python 参考 `mbdsdr_ai/core/mcp_server.py` 用**同一组 9 域名**做分组
 > （其工具表来自自身 `_build_tool_table`，逐名映射）。Python 面当前无 VNA 工具，故
-> 三个 VNA 域在该面为空卡片（诚实空态）；8 域名集合本身两侧逐名相等。
+> 三个 VNA 域与「记忆编排」域在该面为空卡片（诚实空态）；9 域名集合本身两侧逐名相等。
 
 ### 2.1.2 tools/list 多级详情分层（`detail` 按需分级 + 缓存语义）
 

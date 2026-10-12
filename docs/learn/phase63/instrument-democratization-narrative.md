@@ -50,7 +50,7 @@
 - 写工具手动模式 gate 拦截（ControlHub manual 语义 + MCP 侧 arm_manual），读工具诚实空态；
 - **校准闭环**：vna_calibration 门面（单工具状态机，只读引导给客观下一步 + 写步骤人在环）+ get_vna_status 校准结构化解读（每步 done/missing、补偿态、扫频范围变更后旧校准失效显式提示）；
 - **VNA 设备级杂项**：vna_device 门面（status/vbat/freq_offset/edelay/averaging 单工具状态机）；
-- **MCP 外部 agent 接入**：C++ mbdsdr-mcp（JSON-RPC 2.0 over stdio，initialize/tools/list/tools/call，工具表=toolDefs() 唯一事实源，零模型依赖）与 Python mbdsdr.decoders 可同时接入，**8 域分组视图**（SDR 调谐/VFO、亚音数字解码、VNA 测量、VNA 分析、VNA 校准、导出演制、书签扫描卫星、系统设备；每工具恰一域，C++/Python 域名集合钉扎一致）；
+- **MCP 外部 agent 接入**：C++ mbdsdr-mcp（JSON-RPC 2.0 over stdio，initialize/tools/list/tools/call，工具表=toolDefs() 唯一事实源，零模型依赖）与 Python mbdsdr.decoders 可同时接入，**9 域分组视图**（SDR 调谐/VFO、亚音数字解码、VNA 测量、VNA 分析、VNA 校准、导出演制、书签扫描卫星、系统设备、记忆编排；每工具恰一域，C++/Python 域名集合钉扎一致；Python 另含「解码器长尾」扩展域）；
 - **去预制化**：产品本体=Agent+tool call、模型自主推理；代码零场景话术/零固定多步剧本（onramp 为真实工具链薄编排）。
 
 ## 4. PENDING（真机列，诚实数据缺口）

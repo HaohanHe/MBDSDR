@@ -198,7 +198,7 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 
 两套 MCP server 同仓并存、互为镜像：
 
-- **域分组一致**：两 server 均提供 8 域分组的 `tools/list`，域名集合完全一致（由钉扎测试保证两边不漂移）。
+- **域分组一致**：两 server 的 `tools/list` 均按域分组（C++ 9 域、Python 10 域——Python 前 9 域与 C++ 同集合，另含「解码器长尾」扩展域；钉扎测试保证不漂移）。
 - **C++ `mbdsdr-mcp`**：面向外部第三方 agent 的 stdio 接入面（接入细节见 `docs/learn/phase63/third-party-agent-mcp.md`），工具本体与桌面 Agent 同一套 `registeredToolSpecs()`，不另立实现。
 - **Python `mbdsdr_ai/core/mcp_server.py`**：面向脚本/嵌入式控制器的本地调用面，便于在测试台与自动化脚本里直接驱动同一工具语义。
 - **写工具一致门控**：两 server 的写工具统一走 `arm_manual` / 手动 gate，人在环确认，不会因接入面不同而绕过。

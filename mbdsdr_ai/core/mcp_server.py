@@ -184,12 +184,14 @@ def _build_tool_table() -> List[Dict[str, Any]]:
     table: List[Dict[str, Any]] = []
 
     def add(name: str, desc: str, schema: Dict[str, Any],
-            handler: Callable[[SDRController, Dict[str, Any]], Any]) -> None:
+            handler: Callable[[SDRController, Dict[str, Any]], Any],
+            write: bool = False) -> None:
         table.append({
             "name": name,
             "description": desc,
             "inputSchema": schema,
             "handler": handler,
+            "write": write,   # write tools require explicit arm_manual (manual gate)
         })
 
     # ---- 设备 ----
@@ -202,10 +204,10 @@ def _build_tool_table() -> List[Dict[str, Any]]:
 
     add("connect", "连接设备。device_id 为序列号/'driver:serial'，或 'debug' 调试信号源。",
         _schema({"device_id": _STR}, ["device_id"]),
-        lambda c, a: {"connected": c.connect(a["device_id"])})
+        lambda c, a: {"connected": c.connect(a["device_id"])}, write=True)
 
     add("disconnect", "断开当前设备。", _schema({}),
-        lambda c, a: (c.disconnect(), {"connected": False})[1])
+        lambda c, a: (c.disconnect(), {"connected": False})[1], write=True)
 
     add("is_connected", "是否已连接后端。", _schema({}),
         lambda c, a: {"connected": c.is_connected()})
@@ -213,33 +215,33 @@ def _build_tool_table() -> List[Dict[str, Any]]:
     # ---- 接收参数 ----
     add("set_frequency", "调谐中心频率（Hz）。",
         _schema({"hz": _NUM}, ["hz"]),
-        lambda c, a: (c.set_frequency(float(a["hz"])), {"ok": True})[1])
+        lambda c, a: (c.set_frequency(float(a["hz"])), {"ok": True})[1], write=True)
 
     add("get_frequency", "读取当前中心频率（Hz）。", _schema({}),
         lambda c, a: {"frequency_hz": c.get_frequency()})
 
     add("set_demod", "设置解调模式（AM/FM/WFM/NFM/USB/LSB/CW）。",
         _schema({"mode": _STR}, ["mode"]),
-        lambda c, a: (c.set_demod(a["mode"]), {"ok": True})[1])
+        lambda c, a: (c.set_demod(a["mode"]), {"ok": True})[1], write=True)
 
     add("get_demod", "读取当前解调模式。", _schema({}),
         lambda c, a: {"demod": c.get_demod()})
 
     add("set_gain", "设置总增益（dB）。",
         _schema({"db": _NUM}, ["db"]),
-        lambda c, a: (c.set_gain(float(a["db"])), {"ok": True})[1])
+        lambda c, a: (c.set_gain(float(a["db"])), {"ok": True})[1], write=True)
 
     add("set_sample_rate", "设置基带采样率（Hz）。",
         _schema({"sr": _NUM}, ["sr"]),
-        lambda c, a: (c.set_sample_rate(float(a["sr"])), {"ok": True})[1])
+        lambda c, a: (c.set_sample_rate(float(a["sr"])), {"ok": True})[1], write=True)
 
     add("set_bandwidth", "设置信道带宽（Hz）。",
         _schema({"hz": _NUM}, ["hz"]),
-        lambda c, a: (c.set_bandwidth(float(a["hz"])), {"ok": True})[1])
+        lambda c, a: (c.set_bandwidth(float(a["hz"])), {"ok": True})[1], write=True)
 
     add("set_squelch", "设置静噪门限（dB）。",
         _schema({"db": _NUM}, ["db"]),
-        lambda c, a: (c.set_squelch(float(a["db"])), {"ok": True})[1])
+        lambda c, a: (c.set_squelch(float(a["db"])), {"ok": True})[1], write=True)
 
     # ---- 音频 ----
     add("list_audio_outputs", "枚举音频输出设备。", _schema({}),
@@ -247,21 +249,21 @@ def _build_tool_table() -> List[Dict[str, Any]]:
 
     add("set_audio_output", "选择音频输出设备索引。",
         _schema({"index": _INT}, ["index"]),
-        lambda c, a: {"ok": c.set_audio_output(int(a["index"]))})
+        lambda c, a: {"ok": c.set_audio_output(int(a["index"]))}, write=True)
 
     add("start_audio", "启动音频播放。", _schema({}),
-        lambda c, a: {"ok": c.start_audio()})
+        lambda c, a: {"ok": c.start_audio()}, write=True)
 
     add("stop_audio", "停止音频播放。", _schema({}),
-        lambda c, a: (c.stop_audio(), {"ok": True})[1])
+        lambda c, a: (c.stop_audio(), {"ok": True})[1], write=True)
 
     add("set_volume", "设置播放音量（dB）。",
         _schema({"db": _NUM}, ["db"]),
-        lambda c, a: (c.set_volume(float(a["db"])), {"ok": True})[1])
+        lambda c, a: (c.set_volume(float(a["db"])), {"ok": True})[1], write=True)
 
     add("set_mute", "静音/取消静音。",
         _schema({"muted": _BOOL}, ["muted"]),
-        lambda c, a: (c.set_mute(bool(a["muted"])), {"ok": True})[1])
+        lambda c, a: (c.set_mute(bool(a["muted"])), {"ok": True})[1], write=True)
 
     # ---- DSP ----
     add("read_spectrum", "读一帧功率谱（dB 数组，长度 nfft）。",
@@ -278,7 +280,7 @@ def _build_tool_table() -> List[Dict[str, Any]]:
 
     add("start_analyze", "对当前信号做自动调制识别。",
         _schema({"modulation": _STR}),
-        lambda c, a: c.start_analyze(a.get("modulation")))
+        lambda c, a: c.start_analyze(a.get("modulation")), write=True)
 
     # ---- 扫描 ----
     add("start_scan", "启动步进扫频，返回扫描句柄。",
@@ -286,11 +288,11 @@ def _build_tool_table() -> List[Dict[str, Any]]:
                 ["start_hz", "stop_hz", "step_hz"]),
         lambda c, a: {"handle": c.start_scan(float(a["start_hz"]),
                                              float(a["stop_hz"]),
-                                             float(a["step_hz"]))})
+                                             float(a["step_hz"]))}, write=True)
 
     add("stop_scan", "停止扫描。",
         _schema({"handle": _STR}, ["handle"]),
-        lambda c, a: (c.stop_scan(a["handle"]), {"ok": True})[1])
+        lambda c, a: (c.stop_scan(a["handle"]), {"ok": True})[1], write=True)
 
     add("get_scan_results", "获取扫描活动段结果。",
         _schema({"handle": _STR}, ["handle"]),
@@ -300,11 +302,11 @@ def _build_tool_table() -> List[Dict[str, Any]]:
     add("start_decoder", "启动解码器（adsb/aprs/noaa_apt/meteor），返回句柄。",
         _schema({"decoder_type": _STR, "params": {"type": "object"}},
                 ["decoder_type"]),
-        lambda c, a: {"handle": c.start_decoder(a["decoder_type"], a.get("params"))})
+        lambda c, a: {"handle": c.start_decoder(a["decoder_type"], a.get("params"))}, write=True)
 
     add("stop_decoder", "停止解码器。",
         _schema({"handle": _STR}, ["handle"]),
-        lambda c, a: (c.stop_decoder(a["handle"]), {"ok": True})[1])
+        lambda c, a: (c.stop_decoder(a["handle"]), {"ok": True})[1], write=True)
 
     add("get_decoder_messages", "取走解码器累积报文。",
         _schema({"handle": _STR}, ["handle"]),
@@ -320,21 +322,21 @@ def _build_tool_table() -> List[Dict[str, Any]]:
 
     add("tune_satellite", "按多普勒调谐到某卫星。",
         _schema({"norad": _INT}, ["norad"]),
-        lambda c, a: c.tune_satellite(int(a["norad"])))
+        lambda c, a: c.tune_satellite(int(a["norad"])), write=True)
 
     add("set_ground_station", "设置地面站位置。",
         _schema({"lat": _NUM, "lon": _NUM, "alt_m": _NUM},
                 ["lat", "lon"]),
         lambda c, a: (c.set_ground_station(float(a["lat"]), float(a["lon"]),
                                            float(a.get("alt_m", 0.0))),
-                      {"ok": True})[1])
+                      {"ok": True})[1], write=True)
 
     # ---- 书签 ----
     add("add_bookmark", "添加书签。",
         _schema({"freq_hz": _NUM, "name": _STR, "mode": _STR, "group": _STR},
                 ["freq_hz", "name"]),
         lambda c, a: c.add_bookmark(float(a["freq_hz"]), a["name"],
-                                    a.get("mode", "FM"), a.get("group", "")))
+                                    a.get("mode", "FM"), a.get("group", "")), write=True)
 
     add("list_bookmarks", "列出书签（可按 group 过滤）。",
         _schema({"group": _STR}),
@@ -342,7 +344,7 @@ def _build_tool_table() -> List[Dict[str, Any]]:
 
     add("delete_bookmark", "按 id（频率 Hz）删除书签。",
         _schema({"id": _INT}, ["id"]),
-        lambda c, a: {"ok": c.delete_bookmark(int(a["id"]))})
+        lambda c, a: {"ok": c.delete_bookmark(int(a["id"]))}, write=True)
 
     add("find_nearest_bookmark", "找离给定频率最近的书签。",
         _schema({"freq_hz": _NUM}, ["freq_hz"]),
@@ -351,10 +353,10 @@ def _build_tool_table() -> List[Dict[str, Any]]:
     # ---- 录制 ----
     add("start_recording", "开始 IQ 录制（SigMF）。",
         _schema({"path": _STR}, ["path"]),
-        lambda c, a: c.start_recording(a["path"]))
+        lambda c, a: c.start_recording(a["path"]), write=True)
 
     add("stop_recording", "停止录制。", _schema({}),
-        lambda c, a: c.stop_recording())
+        lambda c, a: c.stop_recording(), write=True)
 
     add("get_recording_status", "录制状态。", _schema({}),
         lambda c, a: c.get_recording_status())
@@ -362,17 +364,17 @@ def _build_tool_table() -> List[Dict[str, Any]]:
     # ---- 服务 ----
     add("start_remote_control", "启动 GQRX 风格远程控制服务。",
         _schema({"port": _INT}, ["port"]),
-        lambda c, a: c.start_remote_control(int(a["port"])))
+        lambda c, a: c.start_remote_control(int(a["port"])), write=True)
 
     add("stop_remote_control", "停止远程控制服务。", _schema({}),
-        lambda c, a: (c.stop_remote_control(), {"ok": True})[1])
+        lambda c, a: (c.stop_remote_control(), {"ok": True})[1], write=True)
 
     add("start_web_server", "启动 Web 服务器。",
         _schema({"port": _INT}, ["port"]),
-        lambda c, a: c.start_web_server(int(a["port"])))
+        lambda c, a: c.start_web_server(int(a["port"])), write=True)
 
     add("stop_web_server", "停止 Web 服务器。", _schema({}),
-        lambda c, a: (c.stop_web_server(), {"ok": True})[1])
+        lambda c, a: (c.stop_web_server(), {"ok": True})[1], write=True)
 
     add("get_service_status", "远程/Web 服务状态。", _schema({}),
         lambda c, a: c.get_service_status())
@@ -380,14 +382,14 @@ def _build_tool_table() -> List[Dict[str, Any]]:
     # ---- ANR ----
     add("set_anr_enabled", "开关自适应降噪。",
         _schema({"enabled": _BOOL}, ["enabled"]),
-        lambda c, a: (c.set_anr_enabled(bool(a["enabled"])), {"ok": True})[1])
+        lambda c, a: (c.set_anr_enabled(bool(a["enabled"])), {"ok": True})[1], write=True)
 
     add("set_anr_strength", "设置降噪强度 0-10。",
         _schema({"level": _INT}, ["level"]),
-        lambda c, a: (c.set_anr_strength(int(a["level"])), {"ok": True})[1])
+        lambda c, a: (c.set_anr_strength(int(a["level"])), {"ok": True})[1], write=True)
 
     add("learn_noise_floor", "用当前音频学习噪声底。", _schema({}),
-        lambda c, a: c.learn_noise_floor())
+        lambda c, a: c.learn_noise_floor(), write=True)
 
     # ---- 多 VFO ----
     add("add_vfo", "新建 VFO，返回 id。",
@@ -395,15 +397,15 @@ def _build_tool_table() -> List[Dict[str, Any]]:
                 ["freq_hz"]),
         lambda c, a: {"vfo_id": c.add_vfo(float(a["freq_hz"]),
                                           a.get("mode", "FM"),
-                                          float(a.get("bw_hz", 12500.0)))})
+                                          float(a.get("bw_hz", 12500.0)))}, write=True)
 
     add("remove_vfo", "删除 VFO。",
         _schema({"vfo_id": _STR}, ["vfo_id"]),
-        lambda c, a: (c.remove_vfo(a["vfo_id"]), {"ok": True})[1])
+        lambda c, a: (c.remove_vfo(a["vfo_id"]), {"ok": True})[1], write=True)
 
     add("set_primary_vfo", "设为主听 VFO。",
         _schema({"vfo_id": _STR}, ["vfo_id"]),
-        lambda c, a: {"ok": c.set_primary_vfo(a["vfo_id"])})
+        lambda c, a: {"ok": c.set_primary_vfo(a["vfo_id"])}, write=True)
 
     add("list_vfos", "列出全部 VFO。", _schema({}),
         lambda c, a: [v.to_dict() for v in c.list_vfos()])
@@ -413,10 +415,10 @@ def _build_tool_table() -> List[Dict[str, Any]]:
         lambda c, a: c.get_status().to_dict())
 
     add("shutdown", "优雅关闭全部资源。", _schema({}),
-        lambda c, a: (c.shutdown(), {"ok": True})[1])
+        lambda c, a: (c.shutdown(), {"ok": True})[1], write=True)
 
     # ==================================================================
-    # 解码器长尾（P0 #65）—— Python 面独立实现、C++ 8 域未覆盖的长尾
+    # 解码器长尾（P0 #65）—— Python 面独立实现、C++ 9 域未覆盖的长尾
     # 协议/硬件参数工具。全部为离线纯函数 handler：不依赖已连接后端，
     # 输入为结构化小数据（hex 字节串 / 文本 / 型号名），输出真实解析结果；
     # 输入非法时返回诚实错误，绝不造假。真机验证状态见
@@ -474,11 +476,11 @@ def _build_tool_table() -> List[Dict[str, Any]]:
 
 
 # ======================================================================
-# 二级域目录（P1 #64）——冻结 8 域，与 C++ 侧 mcp_server.cpp 同名同序
+# 二级域目录（P1 #64）——冻结 9 域，与 C++ 侧 mcp_server.cpp 同名同序
 #
 # 这是服务器侧分组视图：工具 schema 的唯一事实源仍是上面的
 # ``_build_tool_table()``；这里只做“每工具恰好归属一个域”的桶分组。
-# Python 面（SDRController）当前没有 VNA/记忆工具，故三个 VNA 域与「记忆编排」
+# Python 面（SDRController）当前没有 VNA 工具，故三个 VNA 域与「记忆编排」
 # 在本表面向用户为空卡片（诚实空态）；9 域名集合本身保持与 C++ 完全一致，形成跨语言钉扎。
 # ======================================================================
 FROZEN_DOMAIN_SUMMARIES: Dict[str, str] = {
@@ -495,21 +497,21 @@ FROZEN_DOMAIN_SUMMARIES: Dict[str, str] = {
 
 FROZEN_DOMAIN_NAMES: List[str] = list(FROZEN_DOMAIN_SUMMARIES.keys())
 
-# Python 面扩展域（P0 #65）——不参与与 C++ 的 8 域跨语言冻结钉扎，
+# Python 面扩展域（P0 #65）——不参与与 C++ 的 9 域跨语言冻结钉扎，
 # 仅在本 Python MCP server 视图末尾追加。C++ 侧没有对应域；客户端合并视图时
-# 应把 C++ 的 8 域与本域并列拼装（两者 schema 各自独立，互不复制）。
+# 应把 C++ 的 9 域与本域并列拼装（两者 schema 各自独立，互不复制）。
 PYTHON_EXTENSION_DOMAIN_SUMMARIES: Dict[str, str] = {
-    "解码器长尾": "Python 侧独立实现、C++ 8 域尚未覆盖的长尾协议解码器与硬件参数查表"
+    "解码器长尾": "Python 侧独立实现、C++ 9 域尚未覆盖的长尾协议解码器与硬件参数查表"
                  "（DAB+/NRSC-5/433.92MHz ISM/GK-2A LRIT/FST4/bladeRF 参数）。"
                  "离线纯函数，真机验证多为 PENDING。",
 }
 
 PYTHON_EXTENSION_DOMAIN_NAMES: List[str] = list(PYTHON_EXTENSION_DOMAIN_SUMMARIES.keys())
 
-# 全域名 = 冻结 8 域（与 C++ 钉扎）+ Python 扩展域。
+# 全域名 = 冻结 9 域（与 C++ 钉扎）+ Python 扩展域。
 ALL_DOMAIN_NAMES: List[str] = FROZEN_DOMAIN_NAMES + PYTHON_EXTENSION_DOMAIN_NAMES
 
-# 域 -> summary 合并视图（冻结 8 域原样 + Python 扩展域）。
+# 域 -> summary 合并视图（冻结 9 域原样 + Python 扩展域）。
 ALL_DOMAIN_SUMMARIES: Dict[str, str] = {
     **FROZEN_DOMAIN_SUMMARIES, **PYTHON_EXTENSION_DOMAIN_SUMMARIES}
 
@@ -587,7 +589,7 @@ _TOOL_DOMAIN: Dict[str, str] = {
 
 
 def _resolve_domain(query: str) -> Optional[str]:
-    """把 params.domain 容错解析成域名（冻结 8 域 + Python 扩展域）；匹配不到返回 None。"""
+    """把 params.domain 容错解析成域名（冻结 9 域 + Python 扩展域）；匹配不到返回 None。"""
     if query in ALL_DOMAIN_NAMES:
         return query
     q = query.strip().lower()
@@ -607,10 +609,11 @@ TOOL_DETAIL_LEVELS = ("name", "desc", "schema")
 
 def _tool_at_level(t: Dict[str, Any], level: str) -> Any:
     """按 detail 级别投影一条工具表记录：name->裸名串；desc->{name,description}；
-    schema->完整 {name,description,inputSchema}。"""
+    schema->完整 {name,description,inputSchema,write}（write 与 C++ schema 对齐）。"""
     if level == "schema":
         return {"name": t["name"], "description": t["description"],
-                "inputSchema": t["inputSchema"]}
+                "inputSchema": t["inputSchema"],
+                "write": bool(t.get("write", False))}
     if level == "desc":
         return {"name": t["name"], "description": t["description"]}
     return t["name"]
@@ -735,6 +738,14 @@ class MCPToolSet:
             return {"error": "unknown_tool", "tool": name,
                     "suggestion": "用 tools/list 查看可用工具。"}
         args = dict(arguments or {})
+        # Write-tool manual gate, aligned with the C++ mbdsdr-mcp server:
+        # real execution only when the caller explicitly arms it; the arm flag
+        # is consumed here and never leaks to the handler.
+        if tool.get("write"):
+            if args.pop("arm_manual", False) is not True:
+                return {"ok": False,
+                        "error": "手动模式：未执行 %s" % name,
+                        "gated": True}
         try:
             return tool["handler"](self.controller, args)
         except SDRUserError as e:
