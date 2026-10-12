@@ -88,6 +88,20 @@ def demo() -> dict:
     lnh, cpf = reactance_lc_py(fmid, xs_mid)
     from .nanovna_client import s21_gain_db
     fshape = filter_shape_py([s21_gain_db(complex(*s)) for s in data["S21"]])
+    return compute_evidence(data)
+
+
+def compute_evidence(data):
+    """从已加载的 sweep dict（nanovna_dump --out 结构）复算六列证据行。"""
+    vswrs = [vswr(complex(*s)) for s in data["S11"]]
+    i = min(range(len(vswrs)), key=lambda k: vswrs[k])
+    res = analyze_resonance_py(data["frequencies_hz"], data["S11"])
+    length = tdr_length_py(data["frequencies_hz"], data["S11"])
+    fmid = data["frequencies_hz"][len(data["frequencies_hz"]) // 2]
+    xs_mid = complex(*data["S11"][len(data["S11"]) // 2]).imag
+    lnh, cpf = reactance_lc_py(fmid, xs_mid)
+    from .nanovna_client import s21_gain_db
+    fshape = filter_shape_py([s21_gain_db(complex(*s)) for s in data["S21"]])
     return {
         "_MARKER": "SYNTHETIC_PLACEHOLDER_真机替换",
         "频率": f"{data['frequencies_hz'][i]/1e6:.3f} MHz",
@@ -102,5 +116,48 @@ def demo() -> dict:
     }
 
 
+def _load_sweep(path):
+    d = json.load(open(path, encoding="utf-8"))
+    for k in ("frequencies_hz", "S11", "S21"):
+        if k not in d:
+            raise SystemExit(f"sweep.json 缺字段 {k}（应来自 nanovna_dump --out）")
+    if not d["frequencies_hz"] or not d["S11"]:
+        raise SystemExit("sweep.json 空数据，无法复算")
+    return d
+
+
+def main(argv=None):
+    import argparse, csv, sys
+    ap = argparse.ArgumentParser(description="回传 sweep.json -> 六列证据表")
+    ap.add_argument("--input", default=None, help="真机 sweep.json（缺省走合成占位演示）")
+    ap.add_argument("--out", default="-", help="输出路径（缺省 stdout）")
+    ap.add_argument("--format", default="json", choices=["json", "csv"])
+    ap.add_argument("--json-pretty", action="store_true")
+    a = ap.parse_args(argv)
+
+    if a.input:
+        row = compute_evidence(_load_sweep(a.input))
+        row.pop("_MARKER", None)   # 真机真实数据，不再是占位
+    else:
+        row = demo()
+
+    if a.format == "csv":
+        import io
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(row.keys()); w.writerow(row.values())
+        text = buf.getvalue()
+    else:
+        text = json.dumps(row, ensure_ascii=False,
+                          indent=2 if a.json_pretty else None)
+
+    if a.out == "-":
+        print(text)
+    else:
+        open(a.out, "w", encoding="utf-8").write(text)
+        print(f"已写出 {a.out}", file=sys.stderr)
+    return 0
+
+
 if __name__ == "__main__":
-    print(json.dumps(demo(), ensure_ascii=False, indent=2))
+    raise SystemExit(main())

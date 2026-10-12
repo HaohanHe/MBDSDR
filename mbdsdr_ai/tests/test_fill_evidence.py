@@ -42,3 +42,28 @@ def test_resonance_empty_no_crash():
 def test_tdr_empty():
     from mbdsdr_ai.fill_evidence_example import tdr_length_py
     assert tdr_length_py([], []) == 0.0
+
+
+def test_cli_input_evidence(tmp_path):
+    import subprocess, sys, json
+    sw = tmp_path / "sw.json"
+    subprocess.run([sys.executable, "-m", "mbdsdr_ai.nanovna_dump", "--selftest",
+                    "--out", str(sw)], check=True, capture_output=True)
+    out = subprocess.run([sys.executable, "-m", "mbdsdr_ai.fill_evidence_example",
+                          "--input", str(sw), "--format", "json"],
+                         check=True, capture_output=True, text=True)
+    row = json.loads(out.stdout)
+    for k in ("VSWR", "回波损耗_dB", "谐振_fr_MHz", "谐振_ESR_ohm",
+              "电缆长度_m", "L_nH", "C_pF", "滤波器形态"):
+        assert k in row
+    assert "_MARKER" not in row  # 真机输入不再带占位
+
+
+def test_cli_bad_field(tmp_path):
+    import json, subprocess, sys
+    (tmp_path / "bad.json").write_text(json.dumps({"frequencies_hz": [], "S11": []}),
+                                       encoding="utf-8")
+    r = subprocess.run([sys.executable, "-m", "mbdsdr_ai.fill_evidence_example",
+                       "--input", str(tmp_path / "bad.json")],
+                      capture_output=True, text=True)
+    assert r.returncode == 1 or "空" in (r.stdout + r.stderr)

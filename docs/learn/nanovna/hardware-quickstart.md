@@ -60,3 +60,9 @@ DSP 端已用合成位流钉扎（test_squelch_gate 13，含 bit-flip 纠错）�
 2. 直出列：summary.min_vswr / at_hz（摘要行）、vswr、return_loss_db。
 3. vna_rf 复算列：fr/Q/ESR、TDR 长度、L/C、滤波器形态。
 4. 填 evidence.md 对照表对应行，替换 SYNTHETIC_PLACEHOLDER。
+
+## 一键复算（回传后）
+插线回传 sweep.json 后，一条命令出证据表：
+    python3 -m mbdsdr_ai.fill_evidence_example --input sweep.json --out evidence.csv
+（--format json|csv；无 --input 仍走合成占位演示，标注 SYNTHETIC_PLACEHOLDER。
+ 真机替换即换 --input 真实文件，字段映射不变。）
