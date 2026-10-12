@@ -73,6 +73,7 @@ const QSet<QString> kAllCxxTools = {
     "get_ft8_history",
     // P2 #72: ADS-B aircraft snapshot (read-only).
     "get_adsb_aircraft",
+    "get_aprs_messages",
     // P3 #73/#74: local memory family + checkpoint writer control plane.
     "memory_add", "memory_search", "memory_update",
     "checkpoint_status", "memory_flush",
@@ -142,6 +143,7 @@ const QSet<QString> kFlutterUngatedReadTools = {
     "get_ft8_status",
     "get_ft8_history",
     "get_adsb_aircraft",
+    "get_aprs_messages",
     "get_lrpt_status",
     "get_vna_data", "get_vna_status", "analyze_vna_resonance", "analyze_vna_filter", "analyze_vna_equivalent", "analyze_vna_touchstone", "analyze_vna_match",
     "get_noise_blanker_status",
@@ -177,7 +179,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 81, qPrintable(QString("expected 81 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 82, qPrintable(QString("expected 82 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -306,11 +308,11 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 81);
+    QCOMPARE(defs.size(), 82);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("reset_workspace"));
+    QCOMPARE(defs.last().name, QString("get_aprs_messages"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

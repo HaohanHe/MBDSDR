@@ -43,6 +43,7 @@
 
 namespace mbdsdr {
 namespace vna { class NanoVnaClient; }
+namespace radio { struct Ax25Frame; }
 namespace dsp {
 
 // What the main record button captures: raw baseband IQ (SigMF) or the
@@ -235,6 +236,29 @@ public:
     // Production decode path must never call this.
     void injectFt8HistoryEntry(double freq_hz, const QString& text, qint64 time_ms);
     static constexpr int kFt8HistoryMax = 200;
+
+    // ---- APRS/AX.25 message history ------------------------------------------
+    // Production path: feedApRsBits() deframes+CRC-checks an NRZI bit stream
+    // (hdlcDeframe) and decodes each passing AX.25 frame via decodeAx25();
+    // every valid frame is appended with its wall-clock ms. Honest empty when
+    // nothing decodes. Tests inject via injectAx25FrameForTest() -- the ONLY
+    // non-real rows, annotated.
+    struct ApRsSnapshot {
+        qint64  time_ms = 0;
+        QString src;        // callsign (from the frame, never preset)
+        QString dst;
+        QString path;       // digipeaters joined with ',', may be empty
+        QString info;       // payload text (e.g. APRS comment); may be empty
+    };
+    // Up to maxN most-recent messages, newest first. maxN clamped to [1,50].
+    QList<ApRsSnapshot> aprsMessages(int maxN) const;
+    // Test-only injection (NOT production): push a synthetic decoded message.
+    void injectAx25FrameForTest(const radio::Ax25Frame& frame);
+    // Production feed: a recovered NRZI bit stream (from an FSK demodulator).
+    // Deframes + CRC-checks + AX.25-decodes; invalid frames are dropped
+    // silently (honest empty). Deterministic, no hardware.
+    void feedApRsBits(const QByteArray& nrziBits);
+    static constexpr int kApRsMax = 50;
 
     // 喂一段 12 kS/s 复基带窗（检测→LLR→解码全链路）。未启用则直接空态返回。
     // 测试注入/引擎 run loop 共用此入口；CRC 不过/不收敛 -> ft8Decoded_ 保持空。
@@ -780,6 +804,8 @@ private:
     // happen inside processFt8Window() on a NEW dedup'd frame; tests inject via
     // injectFt8HistoryEntry(). Guarded by QMutex because entries carry QString.
     mutable QMutex ft8HistMu_;
+    mutable QMutex aprsMu_;
+    QList<ApRsSnapshot> aprsHistory_;   // oldest->newest; cap kApRsMax
     QList<Ft8HistoryEntry> ft8History_;   // oldest->newest; cap kFt8HistoryMax
     // VFO center Hz captured at feedFt8Baseband() time; stamped onto history
     // entries so absolute freq = ft8VfoCenterHz_ + detector freqOffsetHz.

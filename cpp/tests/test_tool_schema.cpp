@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 81);
+    QCOMPARE(specs.size(), 82);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -504,6 +504,13 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "写入：把工作台重置为默认三栏布局（280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见），"
             "等价于 deleteSurface。只动 splitter 与 tab 可见性，不碰 DSP/音频/硬件。"
             "属于写动作，手动模式下被拦截。")},
+        {"get_aprs_messages",
+         QString::fromUtf8(
+            "读取：最近解出的 APRS/AX.25 消息（最多 limit 条，1..50，默认 50）。"
+            "每条含 time_ms/src/dst/path/info。源为 1200/2400 baud FSK 解调后的 NRZI "
+            "位流经 HDLC 拆帧（CRC-16/X.25 校验）与 AX.25 解码；无效帧丢弃，无解码"
+            "则诚实空态。只读工具。")},
+
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {
@@ -560,7 +567,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 81);
+    QCOMPARE(headerCount, 82);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

@@ -8,6 +8,8 @@
 #include "noise_blanker.h"
 #include "null_audio_sink.h"
 #include "lrpt_fec.h"
+#include "radio/hdlc.h"
+#include "radio/ax25.h"
 #include "core/tokens.h"
 
 #include <QDebug>
@@ -342,6 +344,46 @@ void SpectrumEngine::injectFt8HistoryEntry(double freq_hz, const QString& text, 
     QMutexLocker lk(&ft8HistMu_);
     ft8History_.append(std::move(e));
     while (ft8History_.size() > kFt8HistoryMax) ft8History_.removeFirst();
+}
+
+QList<SpectrumEngine::ApRsSnapshot> SpectrumEngine::aprsMessages(int maxN) const {
+    int n = maxN;
+    if (n < 1) n = 1;
+    if (n > kApRsMax) n = kApRsMax;
+    QMutexLocker lk(&aprsMu_);
+    const int total = aprsHistory_.size();
+    if (total == 0) return {};
+    QList<ApRsSnapshot> out;
+    out.reserve(std::min(n, total));
+    for (int i = total - 1; i >= 0 && out.size() < n; --i)
+        out.append(aprsHistory_.at(i));
+    return out;
+}
+
+void SpectrumEngine::injectAx25FrameForTest(const radio::Ax25Frame& frame) {
+    // Test-only fixture: never called from production decode path.
+    ApRsSnapshot e;
+    e.time_ms = QDateTime::currentMSecsSinceEpoch();
+    e.src = frame.src.toString();
+    e.dst = frame.dst.toString();
+    QStringList path;
+    for (const auto& p : frame.path) path.append(p.toString());
+    e.path = path.join(QLatin1Char(','));
+    e.info = QString::fromUtf8(frame.info);
+    QMutexLocker lk(&aprsMu_);
+    aprsHistory_.append(std::move(e));
+    while (aprsHistory_.size() > kApRsMax) aprsHistory_.removeFirst();
+}
+
+void SpectrumEngine::feedApRsBits(const QByteArray& nrziBits) {
+    // Production feed: real NRZI bit stream -> HDLC deframe (CRC-16/X.25) ->
+    // AX.25 decode. Invalid frames are dropped (honest empty).
+    const QList<QByteArray> frames = radio::hdlcDeframe(nrziBits);
+    for (const QByteArray& f : frames) {
+        radio::Ax25Frame ax;
+        if (!radio::decodeAx25(f, ax)) continue;
+        injectAx25FrameForTest(ax);
+    }
 }
 
 QList<SpectrumEngine::AircraftSnapshot> SpectrumEngine::aircraftSnapshot(int maxN) const {

@@ -14,6 +14,8 @@
 #include "ai/tool_schema.h"
 #include "ai/agent.h"
 #include "ai/llm_worker.h"
+#include "radio/hdlc.h"
+#include "radio/ax25.h"
 #include "ai/ai_config.h"
 #include "dsp/spectrum_engine.h"
 #include "vna/nanovna_client.h"
@@ -72,6 +74,8 @@ private slots:
     void getFt8History_emptyState();
     void getFt8History_injectedRowsOrderAndFields();
     void getFt8History_limitClamp();
+    void getApRsMessages_emptyState();
+    void getApRsMessages_injectedAndFeedRoundTrip();
     void exportFt8Results_allHistoryEmptyAndInjected();
     // --- ADS-B aircraft snapshot (dump1090 shape) -------------------------
     void getAdsbAircraft_emptyState();
@@ -151,7 +155,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 81);
+    QCOMPARE(tools.size(), 82);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -907,10 +911,11 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 46 writes / 35 reads (81 tools; AIGUI P0-b workspace
-    // domain added two gated writes + two desktop reads).
+    // The frozen split: 46 writes / 36 reads (82 tools; AIGUI P0-b workspace
+    // domain added two gated writes + two desktop reads; APRS get_aprs_messages
+    // is a read tool).
     QCOMPARE(writes, 46);
-    QCOMPARE(reads, 35);
+    QCOMPARE(reads, 36);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -1058,6 +1063,67 @@ void TestAgent::getFt8History_limitClamp() {
 
 // export_ft8_results all_history=true: empty engine -> rows=0 header-only;
 // after injection -> rows == injected count, columns time_ms,freq_hz,demod,text.
+void TestAgent::getApRsMessages_emptyState() {
+    dsp::SpectrumEngine engine;
+    QJsonObject o = QJsonDocument::fromJson(
+        ai::executeTool("get_aprs_messages", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(o.value("ok").toBool(), qPrintable(
+        ai::executeTool("get_aprs_messages", QJsonObject{}, &engine)));
+    QCOMPARE(o.value("returned").toInt(), 0);
+    QVERIFY(o.value("messages").isArray());
+    QCOMPARE(o.value("messages").toArray().size(), 0);
+    QVERIFY(o.value("note").toString().contains(QStringLiteral("空态")));
+}
+
+// get_aprs_messages: injected rows carry src/dst/path/info; the production
+// feed path (feedApRsBits) decodes a synthetic HDLC stream end-to-end
+// (placeholder callsigns TEST-1/TEST-2, honest fixture, never preset).
+void TestAgent::getApRsMessages_injectedAndFeedRoundTrip() {
+    dsp::SpectrumEngine engine;
+
+    // Injection path (test fixture).
+    radio::Ax25Frame f;
+    QVERIFY(radio::parseAx25Addr(QStringLiteral("TEST-1"), f.dst));
+    QVERIFY(radio::parseAx25Addr(QStringLiteral("TEST-2"), f.src));
+    f.info = QByteArray("ARES DRILL");
+    engine.injectAx25FrameForTest(f);
+
+    QJsonObject o = QJsonDocument::fromJson(
+        ai::executeTool("get_aprs_messages", QJsonObject{}, &engine).toUtf8()).object();
+    QCOMPARE(o.value("returned").toInt(), 1);
+    const QJsonArray arr = o.value("messages").toArray();
+    QCOMPARE(arr.size(), 1);
+    const QJsonObject m = arr.at(0).toObject();
+    QCOMPARE(m.value("src").toString(), QStringLiteral("TEST-2"));
+    QCOMPARE(m.value("dst").toString(), QStringLiteral("TEST-1"));
+    QCOMPARE(m.value("info").toString(), QStringLiteral("ARES DRILL"));
+
+    // Production feed path: encode an AX.25 frame -> HDLC -> NRZI -> feedApRsBits.
+    radio::Ax25Frame g;
+    QVERIFY(radio::parseAx25Addr(QStringLiteral("TEST-3"), g.dst));
+    QVERIFY(radio::parseAx25Addr(QStringLiteral("TEST-4"), g.src));
+    g.info = QByteArray("GRID 73");
+    const QByteArray payload = radio::encodeAx25(g);
+    QVERIFY(!payload.isEmpty());
+    engine.feedApRsBits(radio::nrziDecode(radio::hdlcEncode(payload)));
+
+    QJsonObject o2 = QJsonDocument::fromJson(
+        ai::executeTool("get_aprs_messages", QJsonObject{}, &engine).toUtf8()).object();
+    QCOMPARE(o2.value("returned").toInt(), 2);   // injected + fed
+    const QJsonObject m2 = o2.value("messages").toArray().at(0).toObject();   // newest first
+    QCOMPARE(m2.value("src").toString(), QStringLiteral("TEST-4"));
+    QCOMPARE(m2.value("info").toString(), QStringLiteral("GRID 73"));
+
+    // Corrupted stream -> no new message (honest empty, nothing fabricated).
+    const QByteArray payload2 = radio::encodeAx25(g);
+    QByteArray stream = radio::hdlcEncode(payload2);
+    stream[stream.size() / 2] = stream[stream.size() / 2] == 0 ? 1 : 0;
+    engine.feedApRsBits(radio::nrziDecode(stream));
+    QJsonObject o3 = QJsonDocument::fromJson(
+        ai::executeTool("get_aprs_messages", QJsonObject{}, &engine).toUtf8()).object();
+    QCOMPARE(o3.value("returned").toInt(), 2);   // unchanged
+}
+
 void TestAgent::exportFt8Results_allHistoryEmptyAndInjected() {
     const QString path = "/tmp/mbd_test_ft8_hist.csv";
     // Empty state.

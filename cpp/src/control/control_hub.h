@@ -231,6 +231,7 @@ private:
     QJsonObject cmdGetVorRadial(const QJsonObject&);
     QJsonObject cmdGetAcarsPackets(const QJsonObject&);
     QJsonObject cmdGetNavtexMessages(const QJsonObject&);
+    QJsonObject cmdGetApRsMessages(const QJsonObject&);
     // Read-only pass prediction: mirrors the Agent predict_passes tool so the
     // three channels expose the same satellite capability. Pure function over
     // the fresh on-disk TLE cache; never fabricates a pass.

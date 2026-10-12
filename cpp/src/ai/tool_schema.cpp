@@ -1618,6 +1618,20 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.write = true;
         out.append(s);
     }
+    // get_aprs_messages (read): APRS/AX.25 messages decoded from a recovered
+    // FSK bit stream (NRZI -> HDLC deframe + CRC-16/X.25 -> AX.25 decode).
+    // Honest empty when nothing decoded / no feed.
+    {
+        ToolSchemaSpec s;
+        s.name = "get_aprs_messages";
+        s.description = QString::fromUtf8(
+            "读取：最近解出的 APRS/AX.25 消息（最多 limit 条，1..50，默认 50）。"
+            "每条含 time_ms/src/dst/path/info。源为 1200/2400 baud FSK 解调后的 NRZI "
+            "位流经 HDLC 拆帧（CRC-16/X.25 校验）与 AX.25 解码；无效帧丢弃，无解码"
+            "则诚实空态。只读工具。");
+        s.write = false;
+        out.append(s);
+    }
 
     return out;
 }

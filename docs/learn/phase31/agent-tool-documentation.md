@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，81 个工具）
+# Agent 工具能力清单（自动生成，82 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -397,3 +397,9 @@ dump1090 --aircraft 形状快照。只读工具（手动 gate 不拦截）。
 ## reset_workspace（写，第 10 域「工作台编排」）
 把工作台重置为默认三栏布局（280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见），等价于 deleteSurface。写工具（手动 gate 拦截）。
 - 只动 splitter 与 tab 可见性，不碰 DSP/音频/硬件。
+
+## get_aprs_messages（只读）
+
+读取最近解出的 APRS/AX.25 消息（limit 1..50 默认 50），字段 time_ms/src/dst/path/info。
+源为 1200/2400 baud FSK 解调后的 NRZI 位流，经 HDLC 拆帧（CRC-16/X.25 校验）与 AX.25 解码；无效帧丢弃，无解码诚实空态。
+属于只读工具，手动模式不拦截。

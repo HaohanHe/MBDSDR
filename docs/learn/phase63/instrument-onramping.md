@@ -329,3 +329,18 @@
 - memory_add/memory_update 语义升级为入队（返回 queued=true + pending_count）；新增 checkpoint_status(read)
   与 memory_flush(write，手动 gate)：flush 同步排空并落库，重写 ~/.mbdsdr/checkpoint.md 人类可读快照。
 - MCP 「记忆编排」域挂入两工具（域数仍 9，跨语言集合钉扎不变）；count 全链同步（registry/schema/ai_real_link/mobile/phase31/README）。
+
+## 37. 补批：APRS 全链路闭环 + AM AGC 深度（P3 #76，工具 81→82）
+- 闭环 phase12 两登记项：`sdrpp-demod.md:332`（APRS 1200/2400 FSK 判「未实现」——
+  实为 fsk_demod 孤岛无接线，本轮接成 NRZI→HDLC→AX.25 全链路）与 `:402`（AM 音频侧 AGC 判「缺深度」——
+  Agc 类本身完备，补骤降自动提升补测）。
+- 新模块 `cpp/src/radio/hdlc.{h,cpp}`（干净室 MIT）：nrziDecode / hdlcDeframe（flag 搜索 + 去填充 +
+  CRC-16/X.25 反射校验，closeFrame 丢弃 flag 前导残余位）/ hdlcEncode（测试夹具）。
+- 引擎 `SpectrumEngine::aprsMessages(limit 1..50)`（锁保护、newest-first、空态 {}）、`feedApRsBits`
+  （生产路径）、`injectAx25FrameForTest`（测试仅，显式标注）。
+- 工具 `get_aprs_messages`（只读）三通道：schema/executor+dispatch/control_hub 只读表行 + headless MCP
+  「亚音数字解码」域。测试：test_hdlc 5 用例 + test_agent 2 APRS 用例 + test_agc_dsp 骤降用例；
+  合成位流用占位呼号 TEST-1..4（诚实夹具，不预置真实呼号）。
+- 双构型：D135 Debug 与 R135 Release 各 146/146 主体 + 串行组 4/4 + e2e_smoke Skipped（无音频）。
+- 遗留 PENDING：真实 1200/2400 baud 射频信号端到端（FSK 解调器 → feedApRsBits）需真机验证；
+  hub 侧 limit 固定 50 未透传参数（引擎与工具侧已支持，登记）。

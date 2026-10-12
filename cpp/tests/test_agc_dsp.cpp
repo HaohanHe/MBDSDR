@@ -25,6 +25,7 @@ using namespace mbdsdr::dsp;
 class TestAgcDsp : public QObject {
     Q_OBJECT
 private slots:
+    void envelopeDipRaisesGain();
     void burstFirstSamplesDoNotClip();
     void steadyStateNotOverSuppressed();
     void boundaryBlocksAreSafe();
@@ -88,6 +89,32 @@ void TestAgcDsp::steadyStateNotOverSuppressed() {
         QVERIFY2(std::abs(std::abs(out[i]) - target) < 0.05f,
                  "steady tone must level to ~target, not be over-suppressed");
     }
+}
+
+void TestAgcDsp::envelopeDipRaisesGain() {
+    // AM-side AGC depth check: after a loud steady state, a sudden quiet
+    // envelope must raise gain automatically (attack is fast, so the very
+    // first quiet block already boosts) -- the classic squelch-free "drop
+    // recovery" behaviour.
+    Agc agc;
+    agc.setMaxGain(12.0f);
+    std::vector<float> loud(4800, 0.3f);
+    const std::vector<float> settled = agc.process(loud);
+    // Steady state: gain ~ target/env ~ 1 (constant envelope at target).
+    bool nearUnity = true;
+    for (size_t i = settled.size() / 2; i < settled.size(); ++i)
+        if (std::abs(std::abs(settled[i]) - 0.3f) > 0.08f) { nearUnity = false; break; }
+    QVERIFY2(nearUnity, "constant envelope at target must keep gain ~1");
+
+    // Sudden dip to 0.05 (factor 6 quieter).
+    std::vector<float> quiet(2400, 0.05f);
+    const std::vector<float> out = agc.process(quiet);
+    bool boosted = false;
+    for (float v : out)
+        if (std::abs(v) > 0.15f) { boosted = true; break; }   // >3x the raw input
+    QVERIFY2(boosted, "envelope dip must auto-raise gain");
+    // And never clip: every sample stays under the ceiling.
+    for (float v : out) QVERIFY(std::abs(v) <= Agc::OutputCeiling + 1e-4f);
 }
 
 void TestAgcDsp::boundaryBlocksAreSafe() {

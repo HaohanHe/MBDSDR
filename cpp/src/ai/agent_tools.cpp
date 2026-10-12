@@ -693,6 +693,38 @@ QString execGetAcarsPackets(const QJsonObject& args, dsp::SpectrumEngine* engine
     return compact(out);
 }
 
+QString execGetApRsMessages(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                              const SourceInfo& /*src*/,
+                              ui::BookmarkManager* /*bookmarks*/,
+                              aigui::WorkspaceController* /*workspace*/) {
+    int limit = 50;
+    const QJsonValue lv = args.value(QStringLiteral("limit"));
+    if (lv.isDouble() || lv.isBool()) {
+        const double v = lv.toDouble(std::nan(""));
+        if (std::isfinite(v)) limit = static_cast<int>(v);
+    }
+    if (limit < 1) limit = 1;
+    if (limit > 50) limit = 50;
+    const QList<dsp::SpectrumEngine::ApRsSnapshot> msgs = engine->aprsMessages(limit);
+    QJsonArray arr;
+    for (const auto& m : msgs) {
+        QJsonObject o;
+        o["time_ms"] = static_cast<double>(m.time_ms);
+        o["src"]     = m.src;
+        o["dst"]     = m.dst;
+        o["path"]    = m.path;
+        o["info"]    = m.info;
+        arr.append(o);
+    }
+    QJsonObject res;
+    res["ok"] = true;
+    res["returned"] = arr.size();
+    res["messages"] = arr;
+    if (arr.isEmpty())
+        res["note"] = QString::fromUtf8("空态：尚无 APRS 消息（未喂位流或无有效帧）");
+    return QString::fromUtf8(QJsonDocument(res).toJson(QJsonDocument::Compact));
+}
+
 QString execGetNavtexMessages(const QJsonObject& args, dsp::SpectrumEngine* engine,
                               const SourceInfo& src,
                         ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
@@ -2845,6 +2877,7 @@ const QList<ToolDispatch>& dispatchTable() {
         // Phase60 packet-text snapshot tools (read-only, append-only order).
         {"get_acars_packets", &execGetAcarsPackets},
         {"get_navtex_messages", &execGetNavtexMessages},
+        {"get_aprs_messages", &execGetApRsMessages},
         // Phase26: 21 capability tools (append-only, on-wire order kept).
         {"set_network_audio_sink", &execSetNetworkAudioSink},
         {"get_network_audio_status", &execGetNetworkAudioStatus},

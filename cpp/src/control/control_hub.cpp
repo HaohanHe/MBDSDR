@@ -167,6 +167,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         // ---- Phase60 packet-text read commands --------------------------
         {"get_acars_packets",     false, &ControlHub::cmdGetAcarsPackets},
         {"get_navtex_messages",   false, &ControlHub::cmdGetNavtexMessages},
+        {"get_aprs_messages",    false, &ControlHub::cmdGetApRsMessages},
         // Read-only satellite pass prediction (same capability as the Agent
         // predict_passes tool; pure function, never fabricates a pass).
         {"predict_passes",        false, &ControlHub::cmdPredictPasses},
@@ -1197,6 +1198,25 @@ QJsonObject ControlHub::cmdGetNavtexMessages(const QJsonObject& a) {
 // field-for-field so all three channels expose the same capability. Pure
 // function over the fresh on-disk TLE cache; ok=false is always honest (no
 // fresh cache / satellite absent / no pass in window / bad args).
+QJsonObject ControlHub::cmdGetApRsMessages(const QJsonObject& a) {
+    const QList<dsp::SpectrumEngine::ApRsSnapshot> msgs = engine_->aprsMessages(50);
+    QJsonArray arr;
+    for (const auto& m : msgs) {
+        QJsonObject o;
+        o["time_ms"] = static_cast<double>(m.time_ms);
+        o["src"] = m.src; o["dst"] = m.dst; o["path"] = m.path; o["info"] = m.info;
+        arr.append(o);
+    }
+    QJsonObject r;
+    r["command"] = "get_aprs_messages";
+    r["ok"] = true;
+    r["returned"] = arr.size();
+    r["messages"] = arr;
+    if (arr.isEmpty())
+        r["note"] = QString::fromUtf8("空态：尚无 APRS 消息（未喂位流或无有效帧）");
+    return r;
+}
+
 QJsonObject ControlHub::cmdPredictPasses(const QJsonObject& a) {
     QString sat = a.value(QStringLiteral("satellite_name")).toString();
     int hours = static_cast<int>(a.value(QStringLiteral("hours_ahead")).toDouble(24.0));

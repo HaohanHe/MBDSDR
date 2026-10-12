@@ -191,6 +191,7 @@ set(SOURCES
     src/radio/radio_link.cpp
     src/radio/cat_client.cpp
     src/radio/cw_keyer.cpp
+    src/radio/hdlc.cpp
     src/ui/radio_panel.cpp
     src/ui/recording_library.cpp
     src/ui/task_steps_view.cpp
@@ -1351,6 +1352,12 @@ target_include_directories(test_workspace_layout PRIVATE src)
 target_link_libraries(test_workspace_layout PRIVATE mbdsdr_core)
 target_link_libraries(test_workspace_layout PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME workspace_layout COMMAND test_workspace_layout)
+
+add_executable(test_hdlc tests/test_hdlc.cpp)
+target_include_directories(test_hdlc PRIVATE src)
+target_link_libraries(test_hdlc PRIVATE mbdsdr_core)
+target_link_libraries(test_hdlc PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME hdlc COMMAND test_hdlc)
 set_tests_properties(digital_panel_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # End-to-end: TestSignalSource digital IQ -> real channelizer -> DigitalDemod lock.
