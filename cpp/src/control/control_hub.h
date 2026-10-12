@@ -275,6 +275,11 @@ private:
     // P1 #70: device-level misc facade (status/vbat/freq_offset/edelay/averaging,
     // write -- gated). Mirrors the Agent vna_device tool.
     QJsonObject cmdVnaDevice(const QJsonObject& a);
+    // P3 #73: local memory family over SQLite FTS5. add/update are gated writes;
+    // search is read-only (absent from the write table on purpose).
+    QJsonObject cmdMemoryAdd(const QJsonObject& a);
+    QJsonObject cmdMemorySearch(const QJsonObject& a);
+    QJsonObject cmdMemoryUpdate(const QJsonObject& a);
     // Bookmarks (ControlHub holds a ui::BookmarkManager; same QSettings key).
     QJsonObject cmdListBookmarks(const QJsonObject&);
     QJsonObject cmdAddBookmark(const QJsonObject& a);

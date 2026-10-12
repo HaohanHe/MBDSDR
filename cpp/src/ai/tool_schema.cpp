@@ -1469,6 +1469,69 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // P3 #73: persistent local memory family (SQLite FTS5 on ~/.mbdsdr).
+    // memory_add creates a new (scope, key) record; duplicate keys are an
+    // honest error and callers fall through to memory_update.
+    {
+        ToolSchemaSpec s;
+        s.name = "memory_add";
+        s.description = QString::fromUtf8(
+            "写入：向本地记忆库（SQLite FTS5，~/.mbdsdr/memory.db）新增一条记忆。"
+            "scope 必填枚举 user（用户事实/偏好）/agent（模型经验/踩坑）/session（本次会话现场）；"
+            "scope_id 为作用域内实例标识（如台站号、过境 id）；key 在 scope 内唯一。"
+            "同 (scope,key) 已存在时诚实报错，覆盖请用 memory_update。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        auto en = [](const char* n) {
+            ToolParamSpec p; p.name = QString::fromUtf8(n); p.type = "string"; p.required = true; return p;
+        };
+        s.params << en("scope") << en("scope_id") << en("key") << en("content");
+        out.append(s);
+    }
+    {
+        ToolSchemaSpec s;
+        s.name = "memory_search";
+        s.description = QString::fromUtf8(
+            "只读：全文检索本地记忆库（中英文均可）。query 为自然语言词串，"
+            "词元经安全转义后走 FTS5 MATCH；可选 scope/scope_id 过滤；limit 1..100 默认 20。"
+            "无命中返回 hits=[] 空数组并附 note，不编造记忆。");
+        s.write = false;
+        ToolParamSpec q;
+        q.name = "query"; q.type = "string";
+        q.description = QString::fromUtf8("检索词（自然语言，自动词元化）");
+        q.required = true;
+        ToolParamSpec sc;
+        sc.name = "scope"; sc.type = "string";
+        sc.description = QString::fromUtf8("可选过滤：user/agent/session");
+        sc.required = false;
+        ToolParamSpec sid;
+        sid.name = "scope_id"; sid.type = "string";
+        sid.description = QString::fromUtf8("可选过滤：作用域内实例标识");
+        sid.required = false;
+        ToolParamSpec lim;
+        lim.name = "limit"; lim.type = "number";
+        lim.description = QString::fromUtf8("返回上限 1..100，默认 20；越界诚实 clamp");
+        lim.required = false;
+        lim.hasMin = true; lim.min = 1.0;
+        lim.hasMax = true; lim.max = 100.0;
+        s.params << q << sc << sid << lim;
+        out.append(s);
+    }
+    {
+        ToolSchemaSpec s;
+        s.name = "memory_update";
+        s.description = QString::fromUtf8(
+            "写入：按 (scope,key) upsert 记忆——存在则覆盖 content/scope_id 与时间戳，"
+            "不存在则等价于新增。scope 必填枚举 user/agent/session。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        auto en = [](const char* n) {
+            ToolParamSpec p; p.name = QString::fromUtf8(n); p.type = "string"; p.required = true; return p;
+        };
+        s.params << en("scope") << en("scope_id") << en("key") << en("content");
+        out.append(s);
+    }
+
     return out;
 }
 

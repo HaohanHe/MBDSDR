@@ -478,8 +478,8 @@ def _build_tool_table() -> List[Dict[str, Any]]:
 #
 # 这是服务器侧分组视图：工具 schema 的唯一事实源仍是上面的
 # ``_build_tool_table()``；这里只做“每工具恰好归属一个域”的桶分组。
-# Python 面（SDRController）当前没有 VNA 工具，故三个 VNA 域在本表面向用户
-# 为空卡片（诚实空态）；8 域名集合本身保持与 C++ 完全一致，形成跨语言钉扎。
+# Python 面（SDRController）当前没有 VNA/记忆工具，故三个 VNA 域与「记忆编排」
+# 在本表面向用户为空卡片（诚实空态）；9 域名集合本身保持与 C++ 完全一致，形成跨语言钉扎。
 # ======================================================================
 FROZEN_DOMAIN_SUMMARIES: Dict[str, str] = {
     "SDR 调谐/VFO": "接收机调谐、解调模式、带宽/静噪/降噪与多 VFO 及频谱读取参数控制。",
@@ -490,6 +490,7 @@ FROZEN_DOMAIN_SUMMARIES: Dict[str, str] = {
     "导出演制": "IQ 录制、录制状态与音频/频谱数据导出。",
     "书签扫描卫星": "书签管理、步进扫描与卫星过境预报/调谐。",
     "系统设备": "设备连接、音频/服务开关与整体状态。",
+    "记忆编排": "本地持久记忆（SQLite FTS5）的写入、覆盖与全文检索，按 user/agent/session 作用域分层。",
 }
 
 FROZEN_DOMAIN_NAMES: List[str] = list(FROZEN_DOMAIN_SUMMARIES.keys())

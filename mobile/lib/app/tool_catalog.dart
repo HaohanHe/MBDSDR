@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 72 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 75 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -33,7 +33,7 @@ class ToolCatalogEntry {
   final bool write;
 }
 
-/// 桌面端 72 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
+/// 桌面端 75 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
 /// 顺序与 write 标志逐字按 registeredToolSpecs() 注册顺序排列。
 const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
   // ---- 基础调谐 / 解调（注册序 #1-7）----
@@ -343,6 +343,22 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       description:
           '只读：返回最近 N 架已解码 ADS-B 飞机（按最后看到时间倒序，字段 icao/callsign/altitude_ft/lat/lon/groundspeed_kt/heading_deg/vertical_rate_fpm/df/crc_ok/last_seen_ms）。1090 MHz 无信号或未调谐 aircraft=[] 诚实空态。',
       write: false),
+  // ---- 本地记忆族（P3 #73，SQLite FTS5）----
+  ToolCatalogEntry(
+      name: 'memory_add',
+      description:
+          '写入：向本地记忆库（SQLite FTS5，~/.mbdsdr/memory.db）新增一条记忆。scope 必填枚举 user/agent/session；scope_id 作用域实例标识；key 在 scope 内唯一。同 (scope,key) 已存在诚实报错，覆盖用 memory_update。手动模式被拦截。',
+      write: true),
+  ToolCatalogEntry(
+      name: 'memory_search',
+      description:
+          '只读：全文检索本地记忆库（中英文均可）。query 自然语言词串经安全转义走 FTS5 MATCH；可选 scope/scope_id 过滤；limit 1..100 默认 20。无命中 hits=[] 空数组附 note，不编造记忆。',
+      write: false),
+  ToolCatalogEntry(
+      name: 'memory_update',
+      description:
+          '写入：按 (scope,key) upsert 记忆——存在则覆盖 content/scope_id 与时间戳，不存在等价新增。scope 必填枚举 user/agent/session。手动模式被拦截。',
+      write: true),
 ];
 
 /// 与移动端 buildRadioTools() 当前注册工具**同名**的集合，用于在目录里诚实标注

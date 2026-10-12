@@ -12,6 +12,7 @@
 #include "dsp/scan_link.h"
 #include "ui/bookmark_manager.h"
 #include "ai/sat_task_planner.h"
+#include "ai/memory_store.h"   // P3 #73: local SQLite FTS5 memory store
 #include "core/tokens.h"
 
 #include <QJsonDocument>
@@ -125,6 +126,8 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"vna_tdr_cable",         true,  &ControlHub::cmdVnaTdrCable},
         {"vna_calibration",       true,  &ControlHub::cmdVnaCalibration},
         {"vna_device",             true,  &ControlHub::cmdVnaDevice},
+        {"memory_add",             true,  &ControlHub::cmdMemoryAdd},
+        {"memory_update",          true,  &ControlHub::cmdMemoryUpdate},
         {"export_vna_snapshot",   true,  &ControlHub::cmdExportVnaSnapshot},
         {"export_spectrum_snapshot", true, &ControlHub::cmdExportSpectrumSnapshot},
         {"export_peaks_csv",    true,  &ControlHub::cmdExportPeaksCsv},
@@ -2074,6 +2077,82 @@ QJsonObject ControlHub::cmdVnaDevice(const QJsonObject& a) {
     }
 
     return errResult(QStringLiteral("未知 action，合法值：status/vbat/freq_offset/edelay/averaging"));
+}
+
+// ---- P3 #73: local memory family (SQLite FTS5; add/update gated writes) ----
+namespace {
+bool memoryHubArgs(const QJsonObject& a, QString* scope, QString* scopeId,
+                   QString* key, QString* content, QString* bad) {
+    *scope = a.value(QStringLiteral("scope")).toString();
+    *scopeId = a.value(QStringLiteral("scope_id")).toString();
+    *key = a.value(QStringLiteral("key")).toString();
+    *content = a.value(QStringLiteral("content")).toString();
+    if (*scope != QStringLiteral("user") && *scope != QStringLiteral("agent")
+        && *scope != QStringLiteral("session")) {
+        *bad = QStringLiteral("scope 必填枚举 user/agent/session"); return false;
+    }
+    if (scopeId->isEmpty()) { *bad = QStringLiteral("scope_id 必填"); return false; }
+    if (key->isEmpty())     { *bad = QStringLiteral("key 必填"); return false; }
+    if (content->isEmpty()) { *bad = QStringLiteral("content 必填"); return false; }
+    return true;
+}
+} // namespace
+
+QJsonObject ControlHub::cmdMemoryAdd(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "memory_add";
+    QString scope, scopeId, key, content, bad;
+    if (!memoryHubArgs(a, &scope, &scopeId, &key, &content, &bad)) return errResult(bad);
+    mbdsdr::ai::MemoryStore store(mbdsdr::ai::defaultMemoryDbPath());
+    QString err;
+    if (!store.open(&err)) { o["ok"] = false; o["error"] = QStringLiteral("记忆库不可用：%1").arg(err); return o; }
+    if (!store.add(scope, scopeId, key, content, &err)) {
+        o["ok"] = false; o["error"] = err;
+        o["hint"] = QStringLiteral("若 key 已存在，用 memory_update 覆盖");
+    } else {
+        o["stored"] = true; o["scope"] = scope; o["scope_id"] = scopeId; o["key"] = key;
+    }
+    return o;
+}
+
+QJsonObject ControlHub::cmdMemorySearch(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "memory_search";
+    const QString query = a.value(QStringLiteral("query")).toString().trimmed();
+    if (query.isEmpty()) return errResult(QStringLiteral("query 必填且不可为空"));
+    mbdsdr::ai::MemoryStore store(mbdsdr::ai::defaultMemoryDbPath());
+    QString err;
+    if (!store.open(&err)) { o["ok"] = false; o["error"] = QStringLiteral("记忆库不可用：%1").arg(err); return o; }
+    const int limit = (int)a.value(QStringLiteral("limit")).toDouble(20.0);
+    QList<mbdsdr::ai::MemoryHit> hits = store.search(query, a.value(QStringLiteral("scope")).toString(), limit, &err);
+    if (hits.isEmpty() && !err.isEmpty()) { o["ok"] = false; o["error"] = err; return o; }
+    QJsonArray arr;
+    for (const mbdsdr::ai::MemoryHit& h : hits) {
+        QJsonObject hh;
+        hh["scope"] = h.scope; hh["scope_id"] = h.scopeId;
+        hh["key"] = h.key; hh["content"] = h.content; hh["snippet"] = h.snippet;
+        arr.append(hh);
+    }
+    o["hits"] = arr;
+    o["count"] = arr.size();
+    if (arr.isEmpty()) o["note"] = QStringLiteral("无命中（检索词：%1）").arg(query);
+    return o;
+}
+
+QJsonObject ControlHub::cmdMemoryUpdate(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "memory_update";
+    QString scope, scopeId, key, content, bad;
+    if (!memoryHubArgs(a, &scope, &scopeId, &key, &content, &bad)) return errResult(bad);
+    mbdsdr::ai::MemoryStore store(mbdsdr::ai::defaultMemoryDbPath());
+    QString err;
+    if (!store.open(&err)) { o["ok"] = false; o["error"] = QStringLiteral("记忆库不可用：%1").arg(err); return o; }
+    if (!store.update(scope, scopeId, key, content, &err)) {
+        o["ok"] = false; o["error"] = err;
+    } else {
+        o["upserted"] = true; o["scope"] = scope; o["scope_id"] = scopeId; o["key"] = key;
+    }
+    return o;
 }
 
 QJsonObject ControlHub::cmdListBookmarks(const QJsonObject&) {

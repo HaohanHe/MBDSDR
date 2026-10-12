@@ -314,3 +314,11 @@
 - dump↔fill 六列对齐：fill 读 data["frequencies_hz"]/["S11"]/["S21"]，dump 输出同名；
   VSWR/回损(nanovna_client.vswr)、谐振/TDR/LC/滤波器重算自 S11/S21——列名单位一致，无需修。
 - pytest 14 passed（dump 6 + fill 6 + ft8 2）。quickstart/CDCSS/双平台命令与 argparse 一致。
+
+## 35. 补批：本地记忆族（P3 #73，工具 72→75）
+- 新模块 `cpp/src/ai/memory_store.{h,cpp}`：系统 SQLite C API + FTS5（unicode61），
+  `~/.mbdsdr/memory.db`（mem_meta 元数据 + mem_fts 索引，rowid 对齐，事务写）；测试用 MBDSDR_MEMORY_DB 重定向。
+- 三工具：memory_add(write)/memory_search(read)/memory_update(write)，scope=user/agent/session；
+  CJK 经双侧 cjkSplit 归一化（unicode61 连续汉字单 token 问题），查询词元化转义防注入。
+- MCP 域 8→9：双侧「记忆编排」（C++ domainGroups + Python FROZEN_DOMAIN_SUMMARIES 钉扎）。
+- 设计说明见 docs/learn/phase63/agent-memory-notes.md。

@@ -9,6 +9,7 @@
 #include "dsp/frequency_calibrator.h"   // calibrateFromCapture / savePpmSetting
 #include "dsp/fcch_detector.h"          // kFcchToneHz
 #include "ui/bookmark_manager.h"   // ui::BookmarkManager / ui::Bookmark (real Agent-layer store)
+#include "memory_store.h"         // SQLite FTS5 local memory store
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -2602,6 +2603,139 @@ QString execGetRecordingState(const QJsonObject&, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// ---- P3 #73: local memory family (SQLite FTS5, ~/.mbdsdr/memory.db) --------
+// Every call opens -> operates -> closes; no global handle. Writes go through
+// the manual gate (write=true); search is read-only and never gated.
+namespace {
+
+QString memoryArgCheck(const QJsonObject& args, QString* scope, QString* scopeId,
+                       QString* key, QString* content, QString* err) {
+    *scope = args.value(QStringLiteral("scope")).toString();
+    *scopeId = args.value(QStringLiteral("scope_id")).toString();
+    *key = args.value(QStringLiteral("key")).toString();
+    *content = args.value(QStringLiteral("content")).toString();
+    static const QSet<QString> kScopes{
+        QStringLiteral("user"), QStringLiteral("agent"), QStringLiteral("session")};
+    if (!kScopes.contains(*scope))
+        return QStringLiteral("scope 必填枚举 user/agent/session");
+    if (scopeId->isEmpty()) return QStringLiteral("scope_id 必填（作用域内实例标识）");
+    if (key->isEmpty()) return QStringLiteral("key 必填（scope 内唯一键）");
+    if (content->isEmpty()) return QStringLiteral("content 必填（记忆正文）");
+    return {};
+}
+
+} // namespace
+
+QString execMemoryAdd(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                      const SourceInfo& src, ui::BookmarkManager*) {
+    QJsonObject o;
+    QString scope, scopeId, key, content, err;
+    if (const QString bad = memoryArgCheck(args, &scope, &scopeId, &key, &content, &err);
+        !bad.isEmpty()) {
+        o["ok"] = false; o["error"] = bad;
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    MemoryStore store(defaultMemoryDbPath());
+    if (!store.open(&err)) {
+        o["ok"] = false;
+        o["error"] = QStringLiteral("记忆库不可用：%1").arg(err);
+        o["note"] = QStringLiteral("检查 ~/.mbdsdr 目录权限；不编造记忆");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    if (!store.add(scope, scopeId, key, content, &err)) {
+        o["ok"] = false;
+        o["error"] = err;
+        o["hint"] = QStringLiteral("若 key 已存在，用 memory_update 覆盖");
+    } else {
+        o["ok"] = true;
+        o["stored"] = true;
+        o["scope"] = scope; o["scope_id"] = scopeId; o["key"] = key;
+    }
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+QString execMemorySearch(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                          const SourceInfo& src, ui::BookmarkManager*) {
+    QJsonObject o;
+    const QString query = args.value(QStringLiteral("query")).toString().trimmed();
+    if (query.isEmpty()) {
+        o["ok"] = false; o["error"] = QStringLiteral("query 必填且不可为空");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    const QString scopeFilter = args.value(QStringLiteral("scope")).toString();
+    const QString scopeIdFilter = args.value(QStringLiteral("scope_id")).toString();
+    int limit = (int)args.value(QStringLiteral("limit")).toDouble(20.0);
+
+    MemoryStore store(defaultMemoryDbPath());
+    QString err;
+    if (!store.open(&err)) {
+        o["ok"] = false;
+        o["error"] = QStringLiteral("记忆库不可用：%1").arg(err);
+        o["note"] = QStringLiteral("检查 ~/.mbdsdr 目录权限");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    QList<MemoryHit> hits = store.search(query, scopeFilter, limit, &err);
+    if (hits.isEmpty() && !err.isEmpty()) {
+        o["ok"] = false;
+        o["error"] = err;
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    QJsonArray arr;
+    for (const MemoryHit& h : hits) {
+        QJsonObject hh;
+        hh["scope"] = h.scope;
+        hh["scope_id"] = h.scopeId;
+        hh["key"] = h.key;
+        hh["content"] = h.content;
+        hh["snippet"] = h.snippet;
+        if (!scopeIdFilter.isEmpty() && h.scopeId != scopeIdFilter) continue;  // honest client-side polish
+        arr.append(hh);
+    }
+    o["ok"] = true;
+    o["hits"] = arr;
+    o["count"] = arr.size();
+    if (arr.isEmpty())
+        o["note"] = QStringLiteral("无命中（检索词：%1）；不编造记忆").arg(query);
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+QString execMemoryUpdate(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                         const SourceInfo& src, ui::BookmarkManager*) {
+    QJsonObject o;
+    QString scope, scopeId, key, content, err;
+    if (const QString bad = memoryArgCheck(args, &scope, &scopeId, &key, &content, &err);
+        !bad.isEmpty()) {
+        o["ok"] = false; o["error"] = bad;
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    MemoryStore store(defaultMemoryDbPath());
+    if (!store.open(&err)) {
+        o["ok"] = false;
+        o["error"] = QStringLiteral("记忆库不可用：%1").arg(err);
+        o["note"] = QStringLiteral("检查 ~/.mbdsdr 目录权限；不编造记忆");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    if (!store.update(scope, scopeId, key, content, &err)) {
+        o["ok"] = false;
+        o["error"] = err;
+    } else {
+        o["ok"] = true;
+        o["upserted"] = true;
+        o["scope"] = scope; o["scope_id"] = scopeId; o["key"] = key;
+    }
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // The built-in tool registry: name -> executor. Learned (mechanism only) from
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
 // instead of an if-else chain. Clean-room reimplementation; no GPL code copied.
@@ -2694,6 +2828,10 @@ const QList<ToolDispatch>& dispatchTable() {
         {"vna_calibration", &execVnaCalibration},
         // P1 #61/#70: device-level misc facade state machine (write, gated).
         {"vna_device", &execVnaDevice},
+        // P3 #73: local memory family (SQLite FTS5; add/update gated, search read-only).
+        {"memory_add", &execMemoryAdd},
+        {"memory_search", &execMemorySearch},
+        {"memory_update", &execMemoryUpdate},
     };
     return kTable;
 }

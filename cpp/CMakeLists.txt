@@ -40,6 +40,14 @@ if(NOT RTLSDR_FOUND)
     endif()
 endif()
 
+# P3 #73: local memory store links the system SQLite C library (FTS5 built in
+# on distro builds). find_library keeps it portable; hard failure only if the
+# system truly lacks libsqlite3.
+find_library(SQLite3_LIBRARY NAMES sqlite3)
+if(NOT SQLite3_LIBRARY)
+    message(FATAL_ERROR "system libsqlite3 (with FTS5) is required for the memory store")
+endif()
+
 # ---- Build-platform detection (informational only) ----
 # The project is built generically for any CPU: there are no architecture-
 # specific source paths, compile definitions, or link rules gated on arch.
@@ -162,6 +170,7 @@ set(SOURCES
     src/ai/plan_parser.cpp
     src/ai/sat_task_planner.cpp
     src/ai/vna_onramp.cpp
+    src/ai/memory_store.cpp
     src/tx/modulator.cpp
     src/tx/loopback_backend.cpp
     src/tx/tx_controller.cpp
@@ -261,7 +270,8 @@ list(REMOVE_ITEM CORE_SRCS src/main.cpp)
 add_library(mbdsdr_core STATIC ${CORE_SRCS} ${HEADERS})
 target_include_directories(mbdsdr_core PUBLIC src)
 target_link_libraries(mbdsdr_core PUBLIC
-    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent)
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Multimedia Qt6::Network Qt6::Concurrent
+    ${SQLite3_LIBRARY})
 
 # The application itself is just the entry point + the env-gated heap probe;
 # everything else comes from the core.
@@ -1573,6 +1583,13 @@ target_link_libraries(test_tool_schema PRIVATE mbdsdr_core)
 target_include_directories(test_tool_schema PRIVATE src)
 target_link_libraries(test_tool_schema PRIVATE Qt6::Test Qt6::Core Qt6::Gui Qt6::Network)
 add_test(NAME tool_schema COMMAND test_tool_schema)
+
+# ---- P3 #73: SQLite FTS5 local memory store (real temp file, offline) -------
+add_executable(test_memory_store tests/test_memory_store.cpp)
+target_link_libraries(test_memory_store PRIVATE mbdsdr_core)
+target_include_directories(test_memory_store PRIVATE src)
+target_link_libraries(test_memory_store PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME memory_store COMMAND test_memory_store)
 
 # ---- M4: real function-calling loop (transport-injected, fully offline) ------
 # Drives LLMWorker with a canned mock transport (setDefaultTransportForTests),

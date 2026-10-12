@@ -49,8 +49,8 @@ QJsonObject toolEntry(const ai::ToolDef& def) {
     return t;
 }
 
-// ---- Frozen secondary-domain directory (P1 #64) ---------------------------
-// 8 domains, FROZEN and shared verbatim with the Python reference
+// ---- Frozen secondary-domain directory (P1 #64, P3 #73) --------------------
+// 9 domains, FROZEN and shared verbatim with the Python reference
 // (mbdsdr_ai/core/mcp_server.py). This is a server-side grouping view ONLY:
 // the schema + dispatch single source remains ai::toolDefs() /
 // registeredToolSpecs(); we never edit the registry here, we only bucket its
@@ -119,6 +119,10 @@ QList<DomainGroup> domainGroups() {
           QStringLiteral("apply_frequency_correction"), QStringLiteral("set_network_audio_sink"),
           QStringLiteral("get_network_audio_status"), QStringLiteral("connect_network_source"),
           QStringLiteral("get_capabilities")}},
+        {QStringLiteral("记忆编排"),
+         QStringLiteral("本地持久记忆（SQLite FTS5）的写入、覆盖与全文检索，按 user/agent/session 作用域分层。"),
+         {QStringLiteral("memory_add"), QStringLiteral("memory_search"),
+          QStringLiteral("memory_update")}},
     };
 }
 

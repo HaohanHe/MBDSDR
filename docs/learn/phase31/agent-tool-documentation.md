@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，72 个工具）
+# Agent 工具能力清单（自动生成，75 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -358,3 +358,17 @@ dump1090 --aircraft 形状快照。只读工具（手动 gate 不拦截）。
 - 返回最近 N 架已解码 ADS-B 飞机（按 last_seen 倒序），每条字段 icao（24bit hex）/callsign/altitude_ft/lat/lon（has_position=false 时为 null）/groundspeed_kt/heading_deg/vertical_rate_fpm（has_velocity=false 时为 null）/df/crc_ok/last_seen_ms。
 - `limit` 可选 1..50，默认 50；超界诚实 clamp。1090 MHz 无信号或未调谐时 aircraft=[] 诚实空态，不编造飞机。
 - 区别于 get_ft8_status / get_ft8_history（解码器结果面）。
+
+## memory_add（写，P3 #73 本地记忆族）
+向本地记忆库（SQLite FTS5，`~/.mbdsdr/memory.db`）新增一条记忆。写工具（手动 gate 拦截）。
+- `scope` 必填枚举：user（用户事实/偏好）/agent（模型经验/踩坑）/session（本次会话现场）；`scope_id` 作用域内实例标识（台站号、过境 id）；`key` 在 scope 内唯一；`content` 记忆正文。
+- 同 (scope,key) 已存在时诚实报错并提示用 memory_update 覆盖；db 打不开诚实报错，不编造记忆。
+
+## memory_search（读，P3 #73 本地记忆族）
+本地记忆库全文检索（中英文均可）。只读工具（手动 gate 不拦截）。
+- `query` 必填自然语言词串：词元经安全转义（非字母数字边界切分、Han 逐字分词、AND 拼接）后走 FTS5 MATCH，原始 query 永不直接拼入表达式。
+- 可选 `scope`/`scope_id` 过滤；`limit` 1..100 默认 20，越界 clamp。无命中返回 hits=[] 空数组并附 note，不编造记忆。
+
+## memory_update（写，P3 #73 本地记忆族）
+按 (scope,key) upsert 记忆。写工具（手动 gate 拦截）。
+- 存在则覆盖 content/scope_id 与时间戳；不存在等价新增。参数同 memory_add。

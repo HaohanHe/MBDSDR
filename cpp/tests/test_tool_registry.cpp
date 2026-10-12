@@ -73,6 +73,8 @@ const QSet<QString> kAllCxxTools = {
     "get_ft8_history",
     // P2 #72: ADS-B aircraft snapshot (read-only).
     "get_adsb_aircraft",
+    // P3 #73: local memory family (SQLite FTS5; search read-only, add/update gated).
+    "memory_add", "memory_search", "memory_update",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -102,6 +104,8 @@ const QSet<QString> kExpectedWriteTools = {
     "vna_calibration",
     // P1 #70: NanoVNA device-level misc facade (gated write).
     "vna_device",
+    // P3 #73: local memory add/upsert (gated writes).
+    "memory_add", "memory_update",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -138,6 +142,8 @@ const QSet<QString> kFlutterUngatedReadTools = {
     "list_bookmarks", "list_vfos", "list_recordings", "get_spectrum_status",
     // Read-only capability/recording-state snapshots (desktop-only reads).
     "get_capabilities", "get_recording_state",
+    // P3 #73: local memory full-text search (desktop-only read).
+    "memory_search",
 };
 } // namespace
 
@@ -163,7 +169,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 72, qPrintable(QString("expected 72 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 75, qPrintable(QString("expected 75 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -283,15 +289,15 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
     QVERIFY(!isWriteTool("definitely_not_a_real_tool"));
 }
 
-// Not-a-regression smoke: the on-wire contract still holds (72 defs, order kept)
+// Not-a-regression smoke: the on-wire contract still holds (75 defs, order kept)
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 72);
+    QCOMPARE(defs.size(), 75);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("get_adsb_aircraft"));
+    QCOMPARE(defs.last().name, QString("memory_update"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

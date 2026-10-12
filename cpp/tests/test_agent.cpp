@@ -111,6 +111,10 @@ private slots:
     // --- P1 #61: analyze_vna_match multi-topology (xps/xs/xpl + r_comp) --------
     void analyzeMatch_topologyEnumInSchema();
     void analyzeMatch_xpsNumericAndUnknownTopologyHonest();
+    // --- P3 #73: local memory family (SQLite FTS5, env-redirected temp db) -----
+    void memoryAddSearchRoundTrip();
+    void memoryScopeIsolation();
+    void memoryUpdateOverwrite();
 };
 
 void TestAgent::initTestCase() {
@@ -125,11 +129,16 @@ void TestAgent::initTestCase() {
     QCoreApplication::setApplicationName("MBDSDR");
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, cfg);
+    // P3 #73: redirect the memory tool layer to a throwaway db; production
+    // default ~/.mbdsdr/memory.db must never be touched by tests.
+    qputenv("MBDSDR_MEMORY_DB",
+            (QDir::tempPath() + "/mbdsdr_mem_agent_" +
+             QString::number(QCoreApplication::applicationPid()) + "/memory.db").toUtf8());
 }
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 72);
+    QCOMPARE(tools.size(), 75);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -810,6 +819,7 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         else if (name == "set_color_map") a["file_path"] = "/tmp/mbdsdr_phase62_gate_probe.cmap";
         else if (name == "set_doppler_compensation") a["enable"] = true;
         else if (name == "connect_network_source") { a["host"] = "127.0.0.1"; a["port"] = 1234; }
+        else if (name == "memory_search") a["query"] = "probe";
         return a;
     };
 
@@ -841,9 +851,9 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 41 writes / 31 reads (72 tools; get_adsb_aircraft added).
-    QCOMPARE(writes, 41);
-    QCOMPARE(reads, 31);
+    // The frozen split: 43 writes / 32 reads (75 tools; memory family added).
+    QCOMPARE(writes, 43);
+    QCOMPARE(reads, 32);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -2134,6 +2144,73 @@ void TestAgent::analyzeMatch_xpsNumericAndUnknownTopologyHonest() {
              qPrintable(QString::fromUtf8(QJsonDocument(rBad).toJson(QJsonDocument::Compact))));
     QVERIFY2(rBad.value("note").toString().contains(QStringLiteral("未知拓扑")),
              qPrintable(rBad.value("note").toString()));
+}
+
+// ---- P3 #73: local memory family (env-redirected temp db, real SQLite) ------
+void TestAgent::memoryAddSearchRoundTrip() {
+    dsp::SpectrumEngine engine;
+    QJsonObject a;
+    a["scope"] = "agent"; a["scope_id"] = "t1"; a["key"] = "vna-battery-note";
+    a["content"] = QString::fromUtf8("NanoVNA 电池电压低时读数漂移");
+    QJsonObject added = runTool(engine, "memory_add", a);
+    QVERIFY2(added.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(added).toJson(QJsonDocument::Compact))));
+
+    QJsonObject q; q["query"] = "电池";
+    QJsonObject found = runTool(engine, "memory_search", q);
+    QVERIFY2(found.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(found).toJson(QJsonDocument::Compact))));
+    QCOMPARE(found.value("count").toInt(), 1);
+    QCOMPARE(found.value("hits").toArray().at(0).toObject().value("key").toString(),
+             QString("vna-battery-note"));
+}
+
+void TestAgent::memoryScopeIsolation() {
+    dsp::SpectrumEngine engine;
+    QJsonObject u;
+    u["scope"] = "user"; u["scope_id"] = "st-1"; u["key"] = "station-fact";
+    u["content"] = "station east antenna height 12m";
+    QVERIFY(runTool(engine, "memory_add", u).value("ok").toBool());
+    QJsonObject s;
+    s["scope"] = "session"; s["scope_id"] = "live-1"; s["key"] = "session-obs";
+    s["content"] = "session east band noise note";
+    QVERIFY(runTool(engine, "memory_add", s).value("ok").toBool());
+
+    QJsonObject q; q["query"] = "east"; q["scope"] = "user";
+    QJsonObject onlyUser = runTool(engine, "memory_search", q);
+    QVERIFY2(onlyUser.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(onlyUser).toJson(QJsonDocument::Compact))));
+    QCOMPARE(onlyUser.value("count").toInt(), 1);
+    QCOMPARE(onlyUser.value("hits").toArray().at(0).toObject().value("scope").toString(),
+             QString("user"));
+}
+
+void TestAgent::memoryUpdateOverwrite() {
+    dsp::SpectrumEngine engine;
+    QJsonObject a;
+    a["scope"] = "agent"; a["scope_id"] = "t1"; a["key"] = "draft-note";
+    a["content"] = "draft v1";
+    QVERIFY(runTool(engine, "memory_add", a).value("ok").toBool());
+    // Second add with the same (scope,key) must be an honest duplicate error.
+    QJsonObject dup = runTool(engine, "memory_add", a);
+    QVERIFY2(!dup.value("ok").toBool(), "duplicate add must fail honestly");
+
+    QJsonObject u;
+    u["scope"] = "agent"; u["scope_id"] = "t1"; u["key"] = "draft-note";
+    u["content"] = "final v2";
+    QJsonObject upd = runTool(engine, "memory_update", u);
+    QVERIFY2(upd.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(upd).toJson(QJsonDocument::Compact))));
+
+    // "v1" lived only in the old content; after upsert it must be gone
+    // (the key "draft-note" itself does not contain v1/final).
+    QJsonObject q1; q1["query"] = "v1";
+    QCOMPARE(runTool(engine, "memory_search", q1).value("count").toInt(), 0);
+    QJsonObject q2; q2["query"] = "final";
+    QJsonObject hit = runTool(engine, "memory_search", q2);
+    QCOMPARE(hit.value("count").toInt(), 1);
+    QCOMPARE(hit.value("hits").toArray().at(0).toObject().value("content").toString(),
+             QString("final v2"));
 }
 
 #include <QCoreApplication>

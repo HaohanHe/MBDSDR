@@ -2,12 +2,12 @@
 """MCP tools/list 二级域分组视图（P1 #64）钉扎。
 
 与 C++ 侧 cpp/tests/test_mcp_server.cpp 形成跨语言一致性：
-  * 冻结 8 域名集合必须与 C++ mcp_server.cpp 完全一致；
+  * 冻结 9 域名集合必须与 C++ mcp_server.cpp 完全一致；
   * 每工具恰好归属一个域，分组后工具总数 == _build_tool_table() 工具数（不丢不重）；
   * 默认 / params.domain / params.detailed 三分支形状一致；未知 domain 报错。
 
-本面（SDRController）当前无 VNA 工具，三个 VNA 域为空卡片——这是诚实空态，
-不在此伪造 VNA 工具。
+本面（SDRController）当前无 VNA/记忆工具，VNA 三域与「记忆编排」为空卡片——
+这是诚实空态，不在此伪造 VNA/记忆工具。
 """
 from __future__ import annotations
 
@@ -22,8 +22,8 @@ from mbdsdr_ai.core.mcp_server import (
     _TOOL_DOMAIN,
 )
 
-# 与 C++ mcp_server.cpp domainGroups() 冻结的同一组 8 个域名。
-EXPECTED_8_DOMAINS = [
+# 与 C++ mcp_server.cpp domainGroups() 冻结的同一组 9 个域名。
+EXPECTED_9_DOMAINS = [
     "SDR 调谐/VFO",
     "亚音数字解码",
     "VNA 测量",
@@ -32,6 +32,7 @@ EXPECTED_8_DOMAINS = [
     "导出演制",
     "书签扫描卫星",
     "系统设备",
+    "记忆编排",
 ]
 
 # Python 面扩展域（P0 #65）——不与 C++ 冻结，仅本 server 追加。
@@ -54,22 +55,22 @@ def _set() -> MCPToolSet:
 
 
 def test_frozen_domain_set_matches_cpp():
-    """8 域名集合与顺序 == C++ 冻结集合（跨语言钉扎，不受 Python 扩展影响）。"""
-    assert FROZEN_DOMAIN_NAMES == EXPECTED_8_DOMAINS
-    assert list(FROZEN_DOMAIN_SUMMARIES.keys()) == EXPECTED_8_DOMAINS
+    """9 域名集合与顺序 == C++ 冻结集合（跨语言钉扎，不受 Python 扩展影响）。"""
+    assert FROZEN_DOMAIN_NAMES == EXPECTED_9_DOMAINS
+    assert list(FROZEN_DOMAIN_SUMMARIES.keys()) == EXPECTED_9_DOMAINS
     # 每个域都有一句话 summary。
-    for name in EXPECTED_8_DOMAINS:
+    for name in EXPECTED_9_DOMAINS:
         assert FROZEN_DOMAIN_SUMMARIES[name].strip()
 
 
 def test_python_extension_domain_is_separate():
-    """Python 扩展域独立追加，不污染冻结 8 域。"""
+    """Python 扩展域独立追加，不污染冻结 9 域。"""
     assert PYTHON_EXTENSION_DOMAIN_NAMES == EXPECTED_EXTENSION_DOMAINS
-    assert ALL_DOMAIN_NAMES == EXPECTED_8_DOMAINS + EXPECTED_EXTENSION_DOMAINS
+    assert ALL_DOMAIN_NAMES == EXPECTED_9_DOMAINS + EXPECTED_EXTENSION_DOMAINS
     for name in EXPECTED_EXTENSION_DOMAINS:
         assert PYTHON_EXTENSION_DOMAIN_SUMMARIES[name].strip()
         # 扩展域不属于 C++ 冻结集合。
-        assert name not in EXPECTED_8_DOMAINS
+        assert name not in EXPECTED_9_DOMAINS
 
 
 def test_every_tool_in_exactly_one_domain():
