@@ -127,6 +127,7 @@ private slots:
     void workspace_applyOverlayRoundTripAndPlaceholder();
     void workspace_getDefaultSpecThreeColumns();
     void workspace_resetAndCatalogTabs();
+    void workspace_llmDispatchPassesInjectedController();
 };
 
 void TestAgent::initTestCase() {
@@ -2404,6 +2405,64 @@ void TestAgent::workspace_resetAndCatalogTabs() {
     for (const QJsonValue& v : cat.value("components").toArray())
         if (v.toObject().value("category").toString() == QLatin1String("tab")) ++tabs;
     QCOMPARE(tabs, 14);
+}
+
+// LLMWorker dispatch path (the desktop chat-window seam): the injected
+// workspace controller must reach the four tools through
+// LLMWorker::dispatchToolCall -- the same static the worker thread uses --
+// instead of the honest "未注入" error; manualMode still gates the write ones.
+void TestAgent::workspace_llmDispatchPassesInjectedController() {
+    dsp::SpectrumEngine engine;
+    auto ctrl = makeTestWorkspace();
+
+    QJsonObject splitterNode;
+    splitterNode["id"] = "splitter";
+    QJsonObject props;
+    props["sizes"] = QJsonArray{200, 900, 300};
+    splitterNode["props"] = props;
+    QJsonObject unknown;
+    unknown["id"] = "tab:does_not_exist";
+    QJsonObject msg;
+    msg["op"] = "updateComponents";
+    msg["components"] = QJsonArray{splitterNode, unknown};
+
+    // Without injection: honest error through the dispatch seam.
+    {
+        const QJsonObject o = QJsonDocument::fromJson(
+            ai::LLMWorker::dispatchToolCall(QStringLiteral("arrange_workspace"), msg,
+                                            &engine, false, nullptr, nullptr).toUtf8()).object();
+        QVERIFY2(!o.value("ok").toBool() &&
+                 o.value("error").toString().contains(QString::fromUtf8("工作台控制器未注入")),
+                 qPrintable("dispatch null-workspace must stay honest"));
+    }
+    // With injection: the write executes for real.
+    {
+        const QJsonObject o = QJsonDocument::fromJson(
+            ai::LLMWorker::dispatchToolCall(QStringLiteral("arrange_workspace"), msg,
+                                            &engine, false, nullptr, ctrl.get()).toUtf8()).object();
+        QVERIFY2(o.value("ok").toBool(),
+                 qPrintable(QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact))));
+        QVERIFY2(o.value("placeholders").toArray().contains(QStringLiteral("tab:does_not_exist")),
+                 qPrintable("unknown id must land in placeholders through dispatch"));
+    }
+    // Manual mode still gates the write tool before it reaches the engine.
+    {
+        const QJsonObject o = QJsonDocument::fromJson(
+            ai::LLMWorker::dispatchToolCall(QStringLiteral("arrange_workspace"), msg,
+                                            &engine, true, nullptr, ctrl.get()).toUtf8()).object();
+        QVERIFY2(!o.value("ok").toBool(), qPrintable("manual mode must gate arrange_workspace"));
+        QVERIFY2(o.value("error").toString().contains(QString::fromUtf8("手动")),
+                 qPrintable("gated envelope must explain manual mode"));
+    }
+    // Read tool runs under manual mode (read-only never gated).
+    {
+        const QJsonObject o = QJsonDocument::fromJson(
+            ai::LLMWorker::dispatchToolCall(QStringLiteral("get_workspace_layout"), QJsonObject(),
+                                            &engine, true, nullptr, ctrl.get()).toUtf8()).object();
+        // get_workspace_layout returns the bare spec (no ok envelope) by design.
+        QVERIFY2(o.value("splitter_sizes").toArray().size() == 3,
+                 qPrintable("read tool must run under manual mode"));
+    }
 }
 
 #include <QApplication>

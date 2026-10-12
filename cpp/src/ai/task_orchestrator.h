@@ -18,6 +18,8 @@
 #include <atomic>
 #include <functional>
 
+namespace aigui { class WorkspaceController; }
+
 namespace mbdsdr {
 namespace dsp { class SpectrumEngine; }
 namespace ui  { struct Bookmark; class BookmarkManager; }
@@ -63,6 +65,9 @@ public:
     void setManualMode(bool on) { manualMode_ = on; }
     // Optional bookmark store; when set, "add_bookmark" steps persist there.
     void setBookmarkManager(ui::BookmarkManager* bm) { bookmarks_ = bm; }
+    /// AIGUI workspace controller forwarded to executeTool for the four
+    /// workspace tools; null (default) = honest "工作台控制器未注入".
+    void setWorkspaceController(aigui::WorkspaceController* wc) { workspace_ = wc; }
 
     // Run the whole plan synchronously, step by step. Honors max-steps token,
     // abortOnFail and requestStop(). Returns a final honest natural-language
@@ -92,6 +97,7 @@ public:
 private:
     dsp::SpectrumEngine* engine_ = nullptr;
     ui::BookmarkManager* bookmarks_ = nullptr;
+    aigui::WorkspaceController* workspace_ = nullptr;   // AIGUI layout seam
     bool manualMode_ = false;
     std::atomic<bool> stop_{false};
     QList<StepResult> results_;

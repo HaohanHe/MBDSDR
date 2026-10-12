@@ -6,6 +6,8 @@
 #include <QString>
 #include <functional>
 
+namespace aigui { class WorkspaceController; }
+
 namespace mbdsdr {
 namespace dsp { class SpectrumEngine; }
 namespace ui  { class BookmarkManager; }
@@ -28,6 +30,10 @@ public:
     /// owns the BookmarkManager's lifetime; wiring it here is a follow-up that
     /// does NOT change the null-path contract.
     void setBookmarkManager(ui::BookmarkManager* bm) { bookmarks_ = bm; }
+    /// Optional AIGUI workspace controller (arrange_workspace / get_workspace_layout
+    /// / list_ui_components / reset_workspace). Null (default) = those tools return
+    /// an honest "工作台控制器未注入" error. Mirrors the bookmark-store contract.
+    void setWorkspaceController(aigui::WorkspaceController* wc) { workspace_ = wc; }
     void setApiKey(const QString& k) { apiKey_ = k; if (client_) client_->setApiKey(k); }
     void setBaseUrl(const QString& u) { baseUrl_ = u; if (client_) client_->setBaseUrl(u); }
     void setModel(const QString& m) { model_ = m; if (client_) client_->setModel(m); }
@@ -81,7 +87,8 @@ public:
     /// delete_bookmark can execute for real; null -> honest "未注入" error.
     static QString dispatchToolCall(const QString& name, const QJsonObject& args,
                                      dsp::SpectrumEngine* engine, bool manualMode,
-                                     ui::BookmarkManager* bookmarks = nullptr);
+                                     ui::BookmarkManager* bookmarks = nullptr,
+                                     aigui::WorkspaceController* workspace = nullptr);
 
 public slots:
     void doChat(const QList<ChatMessage>& messages, const QList<ToolDef>& tools);
@@ -107,6 +114,7 @@ private:
     QString apiKey_, baseUrl_, model_;
     dsp::SpectrumEngine* engine_ = nullptr;
     ui::BookmarkManager* bookmarks_ = nullptr;   // optional Agent-layer store
+    aigui::WorkspaceController* workspace_ = nullptr;   // optional AIGUI layout seam
     bool manualMode_ = false;       // write tools gated when true
 };
 

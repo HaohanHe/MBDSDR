@@ -151,7 +151,7 @@ QString TaskOrchestrator::run(const TaskPlan& plan, StepCallback onStep) {
         // the injected BookmarkManager (bookmarks_) itself, so every step --
         // including the bookmark step -- flows through this one dispatch point.
         out = LLMWorker::dispatchToolCall(st.tool, resolved, engine_, manualMode_,
-                                          bookmarks_);
+                                  bookmarks_, workspace_);
         r.resultText = out;
         QJsonDocument doc = QJsonDocument::fromJson(out.toUtf8());
         if (doc.isObject()) r.resultJson = doc.object();

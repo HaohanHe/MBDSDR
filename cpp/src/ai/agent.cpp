@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "agent.h"
+#include "ui/workspace_controller.h"
 #include "agent_tools.h"
 #include "vna_onramp.h"
 #include "llm_worker.h"
@@ -43,6 +44,10 @@ Agent::Agent(QObject* parent) : QObject(parent) {
 void Agent::setEngine(dsp::SpectrumEngine* e) {
     engine_ = e;
     worker_->setEngine(e);
+}
+
+void Agent::setWorkspaceController(aigui::WorkspaceController* wc) {
+    worker_->setWorkspaceController(wc);
 }
 
 void Agent::setManualMode(bool on) {

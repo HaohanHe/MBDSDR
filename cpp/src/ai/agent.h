@@ -8,6 +8,8 @@
 #include <QString>
 #include <QList>
 
+namespace aigui { class WorkspaceController; }
+
 namespace mbdsdr {
 namespace dsp { class SpectrumEngine; }
 namespace ai { class LLMWorker; }
@@ -21,6 +23,10 @@ public:
     ~Agent();
 
     void setEngine(dsp::SpectrumEngine* e);
+    /// AIGUI workspace controller forwarded to the worker so arrange_workspace /
+    /// get_workspace_layout / list_ui_components / reset_workspace execute for
+    /// real from the chat window; null (default) = honest "工作台控制器未注入".
+    void setWorkspaceController(aigui::WorkspaceController* wc);
     void configureFromConfig();
     /// Set config directly (for tests / programmatic setup). Applies to worker.
     void setConfig(const AiConfig& c) { config_ = c; configureFromConfig(); }

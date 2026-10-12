@@ -3156,6 +3156,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     agent_ = new ai::Agent(this);
     agent_->setEngine(engine_);
+    if (workspace_) agent_->setWorkspaceController(workspace_.get());
     agent_->configureFromConfig();
     // Manual-mode toggle: initial state from the persisted backend value, then
     // two-way wiring. Toggling pushes straight into agent_->setManualMode() which
