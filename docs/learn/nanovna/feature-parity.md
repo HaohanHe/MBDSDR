@@ -636,3 +636,16 @@ competition/比赛/ghp_ 0。
 - 工具：新只读 `get_adsb_aircraft`（dump1090 --aircraft 形状：icao/callsign/altitude_ft/lat/lon/gs/heading/vr/df/crc_ok/last_seen_ms），1090 MHz 无信号 `aircraft=[]` 诚实 note。
 - 三通道 + MCP「亚音数字解码」域同步；工具数 71→72。
 - dump1090（GPL-2.0）仅参照输出形状与 CPR 算法，不复制代码；参照笔记 docs/learn/dump1090.md 中立。
+
+## 第㉔批：候选缺口复核（只读侦察，无新真缺口）
+- export_peaks_csv：三通道已完整接线（tool_schema/agent_tools/control_hub 各 2 处，
+  引擎 peaks() 访问器在位）——已闭环，非缺口。
+- 并联 RLC 拟合：既有侦察登记（第⑬批：并联型对高 Q 并联谐振有增量价值，但无
+  并联夹具/非明确缺口→不落地）。维持非缺口判定，不强行造任务。
+- FT8 复制/导出：get_ft8_history + export all_history + UI 历史表已闭环。
+- bandCombo 真机取景：已落地（main_window:616 联动）。
+- 640 spinbox 数值窄：已诚实接受为最小宽 floor（换行/略溢出，不崩），不追改。
+- SDR++ 机制深化：第 35 节全候选判定无真缺口，维持。
+- 真机回传链：真机就绪终检全绿，无代码缺口。
+- 结论：无新真缺口 → 只做维护线（计数 72 八处一致、写 gate 抽样在位、红线 0），
+  本轮 docs-only，双构型沿用 D130/R130=143/143。
