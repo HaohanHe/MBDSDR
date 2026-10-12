@@ -5,7 +5,10 @@
 // QScrollArea), the center spectrum/waterfall, and the right tab rail must not
 // clip or overlap text. No demo data -- the offline test-signal engine feeds it.
 #include <QApplication>
+#include "ui/workspace_controller.h"
 #include <QTimer>
+#include <QJsonObject>
+#include <QJsonArray>
 #include <QPixmap>
 #include <QSettings>
 #include <QTabWidget>
@@ -321,6 +324,31 @@ int main(int argc, char** argv) {
                     QMetaObject::invokeMethod(t, "tabCloseRequested",
                                               Qt::DirectConnection, Q_ARG(int, i));
             }
+        }
+    }
+
+    // Optional: apply a real AIGUI workspace overlay (MBD_WORKSPACE=1) through
+    // the SAME WorkspaceController the arrange_workspace tool drives -- narrower
+    // left rail, a hidden tab, and a selected VNA tab -- so the overlay-applied
+    // three-column layout is photographed, not just the default spec. Off by
+    // default so every other screenshot is unchanged.
+    if (qgetenv("MBD_WORKSPACE") == "1") {
+        if (aigui::WorkspaceController* wc = win.harnessWorkspaceController()) {
+            QJsonObject splitterNode;
+            splitterNode["id"] = "splitter";
+            QJsonObject props;
+            props["sizes"] = QJsonArray{220, 920, 300};
+            splitterNode["props"] = props;
+            QJsonObject hidden;
+            hidden["id"] = "tab:数据";
+            hidden["visible"] = false;
+            QJsonObject msg;
+            msg["op"] = "updateComponents";
+            msg["components"] = QJsonArray{splitterNode, hidden};
+            const QJsonObject r = wc->applyOverlay(msg);
+            qInfo("workspace overlay applied: ok=%s placeholders=%d",
+                  r.value("ok").toBool() ? "true" : "false",
+                  r.value("placeholders").toArray().size());
         }
     }
 

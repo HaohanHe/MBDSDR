@@ -165,6 +165,11 @@ public:
     QComboBox*  harnessDemodCombo()   const { return demodCombo_; }
     QComboBox*  harnessBwCombo()      const { return bwCombo_; }
     QLabel*     harnessSyntheticBanner() const { return syntheticBanner_; }
+    // AIGUI P0-b screenshot seam: hand the live three-column workspace
+    // controller to the offscreen harness so MBD_WORKSPACE=1 can apply a real
+    // overlay (splitter sizes / tab visibility) BEFORE the grab -- the same
+    // controller the arrange_workspace tool drives.
+    aigui::WorkspaceController* harnessWorkspaceController() const { return workspace_.get(); }
     // Receive-link state badge (Idle/Connecting/Running/Error). Read-only handle
     // so offscreen tests + the screenshot harness can assert the real four-state
     // text driven by the real engine signals.
