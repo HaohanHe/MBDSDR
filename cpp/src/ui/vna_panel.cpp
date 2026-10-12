@@ -213,6 +213,10 @@ VnaPanel::VnaPanel(dsp::SpectrumEngine* engine, QWidget* parent)
 
     auto* sweepForm = new QFormLayout;
     sweepForm->setLabelAlignment(Qt::AlignRight);
+    // Keep the short row labels ("起 Hz" etc.) fully readable on the narrow right
+    // rail: let the field grow instead of squeezing the label column.
+    sweepForm->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
+    sweepForm->setHorizontalSpacing(tokens::scaled(6));
     startSpin_ = new QSpinBox(this); startSpin_->setRange(0, 999999999);
     startSpin_->setSingleStep(1000000); startSpin_->setValue(1000000);
     stopSpin_ = new QSpinBox(this);  stopSpin_->setRange(0, 999999999);
