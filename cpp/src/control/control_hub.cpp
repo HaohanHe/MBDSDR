@@ -169,6 +169,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"get_cdcss_status",      false, &ControlHub::cmdGetCdcssStatus},
         {"get_ft8_status",        false, &ControlHub::cmdGetFt8Status},
         {"get_ft8_history",       false, &ControlHub::cmdGetFt8History},
+        {"get_adsb_aircraft",    false, &ControlHub::cmdGetAdsbAircraft},
         {"get_lrpt_status",       false, &ControlHub::cmdGetLrptStatus},
         {"get_vna_data",          false, &ControlHub::cmdGetVnaData},
         {"get_vna_status",        false, &ControlHub::cmdGetVnaStatus},
@@ -1518,6 +1519,60 @@ QJsonObject ControlHub::cmdGetFt8History(const QJsonObject& a) {
     o["history"] = arr;
     if (rows.isEmpty())
         o["note"] = QStringLiteral("无 FT8 解码历史：history=[] 诚实空态");
+    return o;
+}
+
+// get_adsb_aircraft (read-only): dump1090 --aircraft shape snapshot.
+QJsonObject ControlHub::cmdGetAdsbAircraft(const QJsonObject& a) {
+    int limit = 50;
+    const QJsonValue lv = a.value("limit");
+    if (lv.isDouble() || lv.isBool()) {
+        const double v = lv.toDouble(std::nan(""));
+        if (std::isfinite(v)) {
+            int iv = (int)std::lround(v);
+            if (iv < 1) iv = 1;
+            if (iv > dsp::SpectrumEngine::kAircraftSnapshotMax)
+                iv = dsp::SpectrumEngine::kAircraftSnapshotMax;
+            limit = iv;
+        }
+    }
+    QJsonObject o = okBase();
+    o["command"] = "get_adsb_aircraft";
+    o["limit"] = limit;
+    QJsonArray arr;
+    const auto rows = engine_->aircraftSnapshot(limit);
+    for (const auto& ac : rows) {
+        QJsonObject r;
+        r["icao"] = ac.icao;
+        r["callsign"] = ac.callsign;
+        r["altitude_ft"] = ac.altitude_ft;
+        if (ac.has_position) {
+            r["lat"] = ac.lat;
+            r["lon"] = ac.lon;
+        } else {
+            r["lat"] = QJsonValue(QJsonValue::Null);
+            r["lon"] = QJsonValue(QJsonValue::Null);
+        }
+        r["has_position"] = ac.has_position;
+        if (ac.has_velocity) {
+            r["groundspeed_kt"] = ac.groundspeed_kt;
+            r["heading_deg"] = ac.heading_deg;
+            r["vertical_rate_fpm"] = ac.vertical_rate_fpm;
+        } else {
+            r["groundspeed_kt"] = QJsonValue(QJsonValue::Null);
+            r["heading_deg"] = QJsonValue(QJsonValue::Null);
+            r["vertical_rate_fpm"] = QJsonValue(QJsonValue::Null);
+        }
+        r["has_velocity"] = ac.has_velocity;
+        r["df"] = ac.df;
+        r["crc_ok"] = ac.crc_ok;
+        r["last_seen_ms"] = (double)ac.last_seen_ms;
+        arr.append(r);
+    }
+    o["returned"] = (int)rows.size();
+    o["aircraft"] = arr;
+    if (rows.isEmpty())
+        o["note"] = QStringLiteral("1090 MHz 无信号或未调谐到 ADS-B：aircraft=[] 诚实空态");
     return o;
 }
 

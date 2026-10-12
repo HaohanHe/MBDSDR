@@ -630,3 +630,9 @@ competition/比赛/ghp_ 0。
 - spec_1920：横幅移顶部条下；tab 行（频谱/世界/气象/时空视图/VNA）右侧黑块融入统一深色 tab 条；左栏 splitter 全高控件可达。
 - vna_1920：中栏切 VNA 大图——Smith/Polar 大圆清晰可读（R/X 网格弧可见），S11 VSWR/S21 增益主轨迹占中栏；右栏只剩连接/扫描控制 + 小缩略 + 读数。
 - vna_640：中栏 VNA 大图仍渲染（Smith 圆可读）；右 rail 控制 caption 窄档 floor 截断（诚实）。
+
+## P2 #72: ADS-B 工具面闭环（get_adsb_aircraft）
+- 引擎：`SpectrumEngine::aircraftSnapshot(maxN)` 加锁读 `aircraftTable_`（按 icao upsert，与 `adsbAircraft()` 信号同源），返回 lastSeen 倒序、clamp 1..50、空表诚实 `[]`。
+- 工具：新只读 `get_adsb_aircraft`（dump1090 --aircraft 形状：icao/callsign/altitude_ft/lat/lon/gs/heading/vr/df/crc_ok/last_seen_ms），1090 MHz 无信号 `aircraft=[]` 诚实 note。
+- 三通道 + MCP「亚音数字解码」域同步；工具数 71→72。
+- dump1090（GPL-2.0）仅参照输出形状与 CPR 算法，不复制代码；参照笔记 docs/learn/dump1090.md 中立。

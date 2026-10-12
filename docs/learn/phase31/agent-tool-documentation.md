@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，71 个工具）
+# Agent 工具能力清单（自动生成，72 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -352,3 +352,9 @@ WSJT-X 风格滚动解码消息窗口。只读工具（手动 gate 不拦截）�
 - 返回最近 N 条 FT8 解码历史（按时间倒序），每条字段 time_ms（墙钟毫秒）/freq_hz（绝对 RF Hz）/demod（解调，如 FT8）/text（解码文本 FROM TO EXCHANGE）。
 - `limit` 可选 1..200，默认 50；超界诚实 clamp。无历史时 history=[] 诚实空态，不伪造呼号。
 - 区别于 `get_ft8_status`（当前帧即时状态）与 `export_ft8_results`（导出文件）。
+
+## get_adsb_aircraft（读，P2 #72 新增）
+dump1090 --aircraft 形状快照。只读工具（手动 gate 不拦截）。
+- 返回最近 N 架已解码 ADS-B 飞机（按 last_seen 倒序），每条字段 icao（24bit hex）/callsign/altitude_ft/lat/lon（has_position=false 时为 null）/groundspeed_kt/heading_deg/vertical_rate_fpm（has_velocity=false 时为 null）/df/crc_ok/last_seen_ms。
+- `limit` 可选 1..50，默认 50；超界诚实 clamp。1090 MHz 无信号或未调谐时 aircraft=[] 诚实空态，不编造飞机。
+- 区别于 get_ft8_status / get_ft8_history（解码器结果面）。

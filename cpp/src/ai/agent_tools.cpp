@@ -1124,6 +1124,64 @@ QString execGetFt8History(const QJsonObject& args, dsp::SpectrumEngine* engine,
     return compact(o);
 }
 
+// get_adsb_aircraft (read): dump1090 --aircraft shape snapshot.
+// Reads engine->aircraftSnapshot(limit); empty array when no 1090 signal.
+QString execGetAdsbAircraft(const QJsonObject& args, dsp::SpectrumEngine* engine,
+                            const SourceInfo& src,
+                            ui::BookmarkManager* /*bookmarks*/) {
+    int limit = 50;
+    const QJsonValue lv = args.value(QStringLiteral("limit"));
+    if (lv.isDouble() || lv.isBool()) {
+        const double v = lv.toDouble(std::nan(""));
+        if (std::isfinite(v)) {
+            int iv = (int)std::lround(v);
+            if (iv < 1) iv = 1;
+            if (iv > dsp::SpectrumEngine::kAircraftSnapshotMax)
+                iv = dsp::SpectrumEngine::kAircraftSnapshotMax;
+            limit = iv;
+        }
+    }
+    QJsonArray arr;
+    const auto rows = engine->aircraftSnapshot(limit);
+    for (const auto& a : rows) {
+        QJsonObject r;
+        r["icao"] = a.icao;
+        r["callsign"] = a.callsign;
+        r["altitude_ft"] = a.altitude_ft;
+        if (a.has_position) {
+            r["lat"] = a.lat;
+            r["lon"] = a.lon;
+        } else {
+            r["lat"] = QJsonValue(QJsonValue::Null);
+            r["lon"] = QJsonValue(QJsonValue::Null);
+        }
+        r["has_position"] = a.has_position;
+        if (a.has_velocity) {
+            r["groundspeed_kt"] = a.groundspeed_kt;
+            r["heading_deg"] = a.heading_deg;
+            r["vertical_rate_fpm"] = a.vertical_rate_fpm;
+        } else {
+            r["groundspeed_kt"] = QJsonValue(QJsonValue::Null);
+            r["heading_deg"] = QJsonValue(QJsonValue::Null);
+            r["vertical_rate_fpm"] = QJsonValue(QJsonValue::Null);
+        }
+        r["has_velocity"] = a.has_velocity;
+        r["df"] = a.df;
+        r["crc_ok"] = a.crc_ok;
+        r["last_seen_ms"] = (double)a.last_seen_ms;
+        arr.append(r);
+    }
+    QJsonObject o;
+    o["ok"] = true;
+    o["limit"] = limit;
+    o["returned"] = (int)rows.size();
+    o["aircraft"] = arr;
+    if (rows.isEmpty())
+        o["note"] = QString::fromUtf8("1090 MHz 无信号或未调谐到 ADS-B：aircraft=[] 诚实空态");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // 7j. set_lrpt (write): LRPT state-layer enable. `enabled` REQUIRED boolean.
 //     State/control layer only; C++ demod/FEC port deferred to step 4.
 QString execSetLrpt(const QJsonObject& args, dsp::SpectrumEngine* engine,
@@ -2591,6 +2649,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"set_ft8", &execSetFt8},
         {"get_ft8_status", &execGetFt8Status},
         {"get_ft8_history", &execGetFt8History},
+        {"get_adsb_aircraft", &execGetAdsbAircraft},
         {"set_lrpt", &execSetLrpt},
         {"get_lrpt_status", &execGetLrptStatus},
         {"set_vna_sweep", &execSetVnaSweep},

@@ -7,6 +7,7 @@
 #include <QString>
 #include <QColor>
 #include <QList>
+#include <QMap>
 #include <atomic>
 #include <memory>
 #include <vector>
@@ -380,6 +381,34 @@ public slots:
     void setRecordingDir(const QString& dir);
     QString recordingDir() const { return recDir_; }
     void setAdsbReferencePosition(double latDeg, double lonDeg) { adsbDecoder_.setReferencePosition(latDeg, lonDeg); }
+
+public:
+    // ---- ADS-B decoded-aircraft snapshot (dump1090 output shape) ---------
+    // Production path: every aircraft emitted via adsbAircraft() (run loop at
+    // selMode=="ADS-B") is also upserted into engine-side aircraftTable_ keyed
+    // by icao. aircraftSnapshot() reads that table under lock, returns up to
+    // maxN entries newest-lastSeen-first. Empty table = honest empty (no 1090
+    // signal / not tuned). snake_case JSON shape matches dump1090 --aircraft.
+    struct AircraftSnapshot {
+        QString icao;            // 24-bit hex, uppercase
+        QString  callsign;        // flight callsign (may be empty pre-CPR)
+        int      altitude_ft = -1;
+        double   lat = 0.0;
+        double   lon = 0.0;
+        bool     has_position = false;
+        double   groundspeed_kt = -1;
+        double   heading_deg = -1;
+        int      vertical_rate_fpm = 0;
+        bool     has_velocity = false;
+        int      df = 0;
+        bool     crc_ok = false;
+        qint64   last_seen_ms = 0;   // wall-clock ms since epoch
+    };
+    QList<AircraftSnapshot> aircraftSnapshot(int maxN) const;
+    static constexpr int kAircraftSnapshotMax = 50;
+    // Test-only injection (NOT production): push a synthetic AircraftInfo into
+    // the snapshot table. Production decode path never calls this.
+    void injectAircraftForTest(const AircraftInfo& info);
 
     // ---- Multi-VFO management (all take sourceMutex_) ---------------------
     // Add a VFO at the current source center; remove (keeps >=1); select; and
@@ -785,6 +814,12 @@ private:
     AudioNoiseReduction anr_;
     CWDecoder cwDecoder_;
     ADSBDecoder adsbDecoder_;
+    // Engine-side ADS-B aircraft table (keyed by icao). Upserted every time
+    // the run loop emits adsbAircraft(); read by aircraftSnapshot() under lock.
+    // Tests inject via injectAircraftForTest(); production decode is the only
+    // other writer. No pruning here (the UI tracker does its own TTL prune).
+    mutable QMutex aircraftMu_;
+    QMap<QString, AircraftInfo> aircraftTable_;
     // NOAA APT image decoder. Fed the SELECTED VFO's 48 kHz demodulated baseband
     // audio ONLY while that VFO is WFM. Constructed at the fixed 48 kHz audio
     // rate (every VFO resampler output is 48000 Hz; see vfo_manager.cpp).

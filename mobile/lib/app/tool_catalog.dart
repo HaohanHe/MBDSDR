@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 71 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 72 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -33,7 +33,7 @@ class ToolCatalogEntry {
   final bool write;
 }
 
-/// 桌面端 71 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
+/// 桌面端 72 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
 /// 顺序与 write 标志逐字按 registeredToolSpecs() 注册顺序排列。
 const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
   // ---- 基础调谐 / 解调（注册序 #1-7）----
@@ -336,6 +336,12 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'get_ft8_history',
       description:
           '只读：返回最近 N 条 FT8 解码历史（WSJT-X 风格，时间倒序，字段 time_ms/freq_hz/demod/text）。无历史 history=[] 诚实空态。区别于 get_ft8_status（当前帧即时状态）与 export_ft8_results（导出文件）。',
+      write: false),
+  // ---- ADS-B 飞机快照（P2 #72，读）----
+  ToolCatalogEntry(
+      name: 'get_adsb_aircraft',
+      description:
+          '只读：返回最近 N 架已解码 ADS-B 飞机（按最后看到时间倒序，字段 icao/callsign/altitude_ft/lat/lon/groundspeed_kt/heading_deg/vertical_rate_fpm/df/crc_ok/last_seen_ms）。1090 MHz 无信号或未调谐 aircraft=[] 诚实空态。',
       write: false),
 ];
 

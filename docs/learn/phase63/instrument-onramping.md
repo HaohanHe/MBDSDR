@@ -298,6 +298,13 @@
      "结果不可见"缺口；FT8 无历史解码列表表为历轮已登记项（第㉓批），已于后续批次落地为
      get_ft8_history 只读工具 + export_ft8_results all_history=true + SDR 主界面解码 tab "FT8"
      滚动历史表（200 条上限，引擎 ft8History() 单一数据源，badge 与表同源），闭环。
+  9) ADS-B 工具面闭环：引擎 adsbDecoder_ 已完整解码（AircraftInfo 与 dump1090 track.c
+     输出形状逐项对齐：icao/callsign/altitude/lat/lon/gs/heading/vr/df/crc/last_seen），
+     新增只读工具 get_adsb_aircraft（dump1090 --aircraft 形状，limit 1..50 默认 50，
+     1090 MHz 无信号 aircraft=[] 诚实空态）+ 引擎 aircraftSnapshot(accessor 与
+     adsbAircraft() 信号共用同一数据源（aircraftTable_ 按 icao upsert）。dump1090 为
+     GPL-2.0 项目，本轮仅参照其输出形状与 CPR 解码算法（已在 docs/learn/dump1090.md
+     中立注释），不复制其代码。
 - 结论：无真缺口，只做维护线，不强行改码（宁缺毋滥）。C++ 无改动，双构型沿用基线
   D125/R125=143/143。
 

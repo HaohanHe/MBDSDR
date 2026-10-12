@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 71);
+    QCOMPARE(specs.size(), 72);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -439,6 +439,16 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "每条字段 time_ms（墙钟毫秒）/freq_hz（绝对 RF Hz）/demod（解调，如 FT8）/"
             "text（解码文本 FROM TO EXCHANGE）。无历史时 history=[] 诚实空态，不伪造。"
             "区别于 get_ft8_status（当前帧即时状态）与 export_ft8_results（导出文件）。")},
+        // P2 #72: ADS-B aircraft snapshot (read-only).
+        {"get_adsb_aircraft",
+         QString::fromUtf8(
+            "只读：返回最近 N 架已解码 ADS-B 飞机（按最后看到时间倒序），"
+            "每条字段 icao（24bit hex）/callsign（呼号）/altitude_ft（高度 ft）/"
+            "lat/lon（经纬度，has_position=false 时 NaN）/groundspeed_kt（地速 kt）/"
+            "heading_deg（航向）/vertical_rate_fpm（垂直速率 fpm，has_velocity 标记）/"
+            "df（下行格式）/crc_ok（CRC 通过）/last_seen（墙钟毫秒）。"
+            "1090 MHz 无信号或未调谐时 aircraft=[] 诚实空态，不编造飞机。"
+            "区别于 get_ft8_status / get_ft8_history（解码器结果面）。")},
     };
     QCOMPARE(defs.size(), expected.size());
     for (int i = 0; i < expected.size(); ++i) {
@@ -495,7 +505,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 71);
+    QCOMPARE(headerCount, 72);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

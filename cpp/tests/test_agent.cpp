@@ -67,6 +67,10 @@ private slots:
     void getFt8History_injectedRowsOrderAndFields();
     void getFt8History_limitClamp();
     void exportFt8Results_allHistoryEmptyAndInjected();
+    // --- ADS-B aircraft snapshot (dump1090 shape) -------------------------
+    void getAdsbAircraft_emptyState();
+    void getAdsbAircraft_injectedFieldMapping();
+    void getAdsbAircraft_limitClamp();
     // --- Noise blanker three-channel tool: land / readback / honest empty / gate ---
     void noiseBlankerLandReadbackAndGate();
     // --- Phase63 D1: get_squelch_status returns REAL engine getters, not nulls ---
@@ -125,7 +129,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 71);
+    QCOMPARE(tools.size(), 72);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -837,9 +841,9 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 41 writes / 30 reads (71 tools; get_ft8_history added).
+    // The frozen split: 41 writes / 31 reads (72 tools; get_adsb_aircraft added).
     QCOMPARE(writes, 41);
-    QCOMPARE(reads, 30);
+    QCOMPARE(reads, 31);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -1032,6 +1036,107 @@ void TestAgent::exportFt8Results_allHistoryEmptyAndInjected() {
         QCOMPARE(lines[0], QString("freq_hz,crc_ok,costas_score,rejected,reject_reason,iters"));
         f.remove();
     }
+}
+
+// get_adsb_aircraft empty state: fresh engine -> ok:true, aircraft=[] + note.
+void TestAgent::getAdsbAircraft_emptyState() {
+    dsp::SpectrumEngine engine;
+    QJsonObject o = QJsonDocument::fromJson(
+        ai::executeTool("get_adsb_aircraft", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(o.value("ok").toBool(), qPrintable(
+        ai::executeTool("get_adsb_aircraft", QJsonObject{}, &engine)));
+    QCOMPARE(o.value("returned").toInt(), 0);
+    QVERIFY(o.value("aircraft").isArray());
+    QCOMPARE(o.value("aircraft").toArray().size(), 0);
+    QVERIFY(o.value("note").toString().contains(QStringLiteral("空态")));
+}
+
+// get_adsb_aircraft injected field mapping: AircraftInfo -> snapshot JSON shape.
+void TestAgent::getAdsbAircraft_injectedFieldMapping() {
+    dsp::SpectrumEngine engine;
+    dsp::AircraftInfo ac;
+    ac.icao = "ABC123";
+    ac.callsign = "DL1XYZ";
+    ac.altitudeFt = 35000;
+    ac.df = 17;
+    ac.crcOk = true;
+    ac.lat = 52.5; ac.lon = 13.4; ac.hasPosition = true;
+    ac.groundspeedKt = 450; ac.headingDeg = 270;
+    ac.verticalRateFpm = 0; ac.hasVelocity = true;
+    ac.lastSeen = QDateTime::currentDateTimeUtc();
+    engine.injectAircraftForTest(ac);
+
+    QJsonObject o = QJsonDocument::fromJson(
+        ai::executeTool("get_adsb_aircraft", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(o.value("ok").toBool(), qPrintable(
+        ai::executeTool("get_adsb_aircraft", QJsonObject{}, &engine)));
+    QCOMPARE(o.value("returned").toInt(), 1);
+    QJsonArray arr = o.value("aircraft").toArray();
+    QCOMPARE(arr.size(), 1);
+    QJsonObject r = arr.at(0).toObject();
+    QCOMPARE(r.value("icao").toString(), QStringLiteral("ABC123"));
+    QCOMPARE(r.value("callsign").toString(), QStringLiteral("DL1XYZ"));
+    QCOMPARE(r.value("altitude_ft").toInt(), 35000);
+    QCOMPARE(r.value("df").toInt(), 17);
+    QCOMPARE(r.value("crc_ok").toBool(), true);
+    QCOMPARE(r.value("has_position").toBool(), true);
+    QCOMPARE(r.value("lat").toDouble(), 52.5);
+    QCOMPARE(r.value("lon").toDouble(), 13.4);
+    QCOMPARE(r.value("has_velocity").toBool(), true);
+    QCOMPARE(r.value("groundspeed_kt").toDouble(), 450.0);
+    QCOMPARE(r.value("heading_deg").toDouble(), 270.0);
+    QVERIFY(r.value("last_seen_ms").toDouble() > 0);
+
+    // No-position / no-velocity aircraft -> null fields (honest).
+    dsp::AircraftInfo ac2;
+    ac2.icao = "DEF456"; ac2.callsign = "N12345";
+    ac2.altitudeFt = 10000; ac2.df = 18; ac2.crcOk = true;
+    ac2.lastSeen = QDateTime::currentDateTimeUtc().addSecs(1);
+    engine.injectAircraftForTest(ac2);
+    QJsonObject o2 = QJsonDocument::fromJson(
+        ai::executeTool("get_adsb_aircraft", QJsonObject{}, &engine).toUtf8()).object();
+    QCOMPARE(o2.value("returned").toInt(), 2);
+    QJsonArray arr2 = o2.value("aircraft").toArray();
+    // Newest first: ac2 (later lastSeen) is row 0.
+    QJsonObject r0 = arr2.at(0).toObject();
+    QCOMPARE(r0.value("icao").toString(), QStringLiteral("DEF456"));
+    QCOMPARE(r0.value("has_position").toBool(), false);
+    QVERIFY(r0.value("lat").isNull());
+    QVERIFY(r0.value("lon").isNull());
+    QCOMPARE(r0.value("has_velocity").toBool(), false);
+    QVERIFY(r0.value("groundspeed_kt").isNull());
+}
+
+// get_adsb_aircraft limit clamp: 3 injected -> limit=2 returns 2;
+// limit=9999 clamp to 50; limit=0 clamp to 1.
+void TestAgent::getAdsbAircraft_limitClamp() {
+    dsp::SpectrumEngine engine;
+    for (int i = 0; i < 3; ++i) {
+        dsp::AircraftInfo ac;
+        ac.icao = QString("ICA%1").arg(i);
+        ac.callsign = QString("FL%1").arg(i);
+        ac.altitudeFt = 30000 + i * 1000;
+        ac.df = 17; ac.crcOk = true;
+        ac.lastSeen = QDateTime::currentDateTimeUtc().addSecs(i);
+        engine.injectAircraftForTest(ac);
+    }
+    QJsonObject args; args["limit"] = 2;
+    QJsonObject o = QJsonDocument::fromJson(
+        ai::executeTool("get_adsb_aircraft", args, &engine).toUtf8()).object();
+    QCOMPARE(o.value("returned").toInt(), 2);
+    QCOMPARE(o.value("limit").toInt(), 2);
+
+    QJsonObject big; big["limit"] = 9999;
+    QJsonObject ob = QJsonDocument::fromJson(
+        ai::executeTool("get_adsb_aircraft", big, &engine).toUtf8()).object();
+    QCOMPARE(ob.value("returned").toInt(), 3);
+    QCOMPARE(ob.value("limit").toInt(), dsp::SpectrumEngine::kAircraftSnapshotMax);
+
+    QJsonObject tiny; tiny["limit"] = 0;
+    QJsonObject ot = QJsonDocument::fromJson(
+        ai::executeTool("get_adsb_aircraft", tiny, &engine).toUtf8()).object();
+    QCOMPARE(ot.value("returned").toInt(), 1);
+    QCOMPARE(ot.value("limit").toInt(), 1);
 }
 
 // Noise blanker three-channel tool: honest off on a fresh engine, the write

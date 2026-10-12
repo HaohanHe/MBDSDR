@@ -344,6 +344,49 @@ void SpectrumEngine::injectFt8HistoryEntry(double freq_hz, const QString& text, 
     while (ft8History_.size() > kFt8HistoryMax) ft8History_.removeFirst();
 }
 
+QList<SpectrumEngine::AircraftSnapshot> SpectrumEngine::aircraftSnapshot(int maxN) const {
+    int n = maxN;
+    if (n < 1) n = 1;
+    if (n > kAircraftSnapshotMax) n = kAircraftSnapshotMax;
+    QMutexLocker lk(&aircraftMu_);
+    if (aircraftTable_.isEmpty()) return {};
+    // Collect all entries, sort by lastSeen newest-first, take maxN.
+    QList<AircraftInfo> all;
+    all.reserve(aircraftTable_.size());
+    for (auto it = aircraftTable_.cbegin(); it != aircraftTable_.cend(); ++it)
+        all.append(it.value());
+    std::sort(all.begin(), all.end(), [](const AircraftInfo& a, const AircraftInfo& b) {
+        return a.lastSeen > b.lastSeen;
+    });
+    QList<AircraftSnapshot> out;
+    out.reserve(std::min(n, (int)all.size()));
+    for (int i = 0; i < all.size() && out.size() < n; ++i) {
+        const auto& a = all.at(i);
+        AircraftSnapshot s;
+        s.icao = a.icao;
+        s.callsign = a.callsign;
+        s.altitude_ft = a.altitudeFt;
+        s.lat = a.lat;
+        s.lon = a.lon;
+        s.has_position = a.hasPosition;
+        s.groundspeed_kt = a.groundspeedKt;
+        s.heading_deg = a.headingDeg;
+        s.vertical_rate_fpm = a.verticalRateFpm;
+        s.has_velocity = a.hasVelocity;
+        s.df = a.df;
+        s.crc_ok = a.crcOk;
+        s.last_seen_ms = a.lastSeen.toMSecsSinceEpoch();
+        out.append(std::move(s));
+    }
+    return out;
+}
+
+void SpectrumEngine::injectAircraftForTest(const AircraftInfo& info) {
+    // Test-only fixture: never called from production decode path.
+    QMutexLocker lk(&aircraftMu_);
+    aircraftTable_[info.icao] = info;
+}
+
 void SpectrumEngine::processFt8Window(const std::complex<float>* iq, std::size_t n) {
     ft8Decoded_.clear();
     if (!ft8Enabled_.load()) return;
@@ -1932,8 +1975,15 @@ void SpectrumEngine::run() {
         // ADS-B decode (operates on full-rate raw IQ)
         if (selMode == "ADS-B") {
             adsbDecoder_.feed(iq);
-            for (const auto& ac : adsbDecoder_.takeNewAircraft())
+            for (const auto& ac : adsbDecoder_.takeNewAircraft()) {
+                // Upsert into engine-side table so get_adsb_aircraft tool can
+                // read a coherent snapshot. Same data source as the UI signal.
+                {
+                    QMutexLocker lk(&aircraftMu_);
+                    aircraftTable_[ac.icao] = ac;
+                }
                 emit adsbAircraft(ac);
+            }
         }
 
         // RDS (WFM only): pull the selected channel's accumulated PS/PTY/RadioText.

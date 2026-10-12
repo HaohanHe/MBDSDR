@@ -126,7 +126,21 @@ public:
                     [this, sock, req, responded]() {
                         if (*responded) return;
                         *req += sock->readAll();
-                        if (!req->contains("\r\n\r\n")) return;   // need full headers
+                        const int he = req->indexOf("\r\n\r\n");
+                        if (he < 0) return;                    // headers incomplete
+                        // A server must not answer before the whole request body
+                        // has arrived: the toolDefs() request (72 schemas) crosses
+                        // the single-TCP-segment size, so responding on headers
+                        // alone races QNAM's body send -> RemoteHostClosed /
+                        // "Unknown error" and under-counted hits. Wait for the
+                        // Content-Length body to be complete.
+                        int contentLen = -1;
+                        for (const QByteArray& line : req->left(he).split('\n')) {
+                            if (line.toLower().startsWith("content-length:"))
+                                contentLen = line.mid(15).trimmed().toInt();
+                        }
+                        if (contentLen >= 0 && req->size() - (he + 4) < contentLen)
+                            return;                            // body still arriving
                         *responded = true;
                         QByteArray body;
                         if (statusCode >= 400) {

@@ -1445,6 +1445,30 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // get_adsb_aircraft (read-only): dump1090 --aircraft shape snapshot.
+    // Distinct from get_ft8_status / get_ft8_history (decoder result surface).
+    {
+        ToolSchemaSpec s;
+        s.name = "get_adsb_aircraft";
+        s.description = QString::fromUtf8(
+            "只读：返回最近 N 架已解码 ADS-B 飞机（按最后看到时间倒序），"
+            "每条字段 icao（24bit hex）/callsign（呼号）/altitude_ft（高度 ft）/"
+            "lat/lon（经纬度，has_position=false 时 NaN）/groundspeed_kt（地速 kt）/"
+            "heading_deg（航向）/vertical_rate_fpm（垂直速率 fpm，has_velocity 标记）/"
+            "df（下行格式）/crc_ok（CRC 通过）/last_seen（墙钟毫秒）。"
+            "1090 MHz 无信号或未调谐时 aircraft=[] 诚实空态，不编造飞机。"
+            "区别于 get_ft8_status / get_ft8_history（解码器结果面）。");
+        s.write = false;
+        ToolParamSpec lim;
+        lim.name = "limit"; lim.type = "number";
+        lim.description = QString::fromUtf8("返回架数上限 1..50，默认 50；超界诚实 clamp");
+        lim.required = false;
+        lim.hasMin = true; lim.min = 1.0;
+        lim.hasMax = true; lim.max = 50.0;
+        s.params << lim;
+        out.append(s);
+    }
+
     return out;
 }
 
