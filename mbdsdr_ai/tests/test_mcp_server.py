@@ -169,6 +169,84 @@ def test_handle_request_tools_list_branches():
 
 
 # ----------------------------------------------------------------------
+# tools/list 多级详情分层（detail=name/desc/schema）+ listChanged 缓存语义
+# ----------------------------------------------------------------------
+def test_detail_name_level_bare_names():
+    ts = _set()
+    result, err = ts.tools_list_result({"detail": "name"})
+    assert err is None
+    # 域卡片 tools 项是裸名字串（无 description 键）。
+    for card in result["tools"]:
+        for t in card["tools"]:
+            assert isinstance(t, str)
+
+
+def test_detail_desc_level_name_plus_description_no_schema():
+    ts = _set()
+    result, err = ts.tools_list_result({"detail": "desc"})
+    assert err is None
+    seen_desc = 0
+    for card in result["tools"]:
+        for t in card["tools"]:
+            assert {"name", "description"} <= set(t)
+            assert "inputSchema" not in t
+            seen_desc += 1
+    assert seen_desc == len(_build_tool_table())
+
+
+def test_detail_schema_level_full():
+    ts = _set()
+    result, err = ts.tools_list_result({"detail": "schema"})
+    assert err is None
+    assert "domains" in result
+    for card in result["domains"]:
+        for t in card["tools"]:
+            assert {"name", "description", "inputSchema"} <= set(t)
+
+
+def test_detailed_true_alias_equals_schema():
+    ts = _set()
+    a, _ = ts.tools_list_result({"detail": "schema"})
+    b, _ = ts.tools_list_result({"detailed": True})
+    assert a == b
+
+
+def test_detail_unknown_value_errors():
+    ts = _set()
+    result, err = ts.tools_list_result({"detail": "banana"})
+    assert result is None
+    assert "name" in err and "desc" in err and "schema" in err
+
+
+def test_domain_param_respects_explicit_detail():
+    ts = _set()
+    # 显式 detail=desc：单域条目含 name+description 但无 inputSchema。
+    result, err = ts.tools_list_result({"domain": "系统设备", "detail": "desc"})
+    assert err is None
+    assert result["tools"]
+    for t in result["tools"]:
+        assert {"name", "description"} <= set(t)
+        assert "inputSchema" not in t
+
+
+def test_initialize_declares_list_changed():
+    ts = _set()
+    r = ts.handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+    assert r["result"]["capabilities"]["tools"]["listChanged"] is True
+
+
+def test_notification_list_changed_no_stdout_when_untagged():
+    ts = _set()
+    # 无 id 的通知 -> None（不回 stdout）。
+    assert ts.handle_request({"jsonrpc": "2.0",
+                              "method": "notifications/tools/list_changed"}) is None
+    # 带 id（误用为请求）-> result:null。
+    r = ts.handle_request({"jsonrpc": "2.0", "id": 9,
+                          "method": "notifications/tools/list_changed"})
+    assert r["result"] is None
+
+
+# ----------------------------------------------------------------------
 # 长尾工具行为钉扎（P0 #65）：真实调用公开纯函数，诚实错误 / PENDING 标注。
 # ----------------------------------------------------------------------
 def test_longtail_fst4_encoder_real_roundtrip():

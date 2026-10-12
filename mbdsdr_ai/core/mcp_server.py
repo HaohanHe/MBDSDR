@@ -600,6 +600,21 @@ def _resolve_domain(query: str) -> Optional[str]:
     return None
 
 
+# tools/detail 三分级（与 C++ mcp_server.cpp 同形状、同合法值）。
+TOOL_DETAIL_LEVELS = ("name", "desc", "schema")
+
+
+def _tool_at_level(t: Dict[str, Any], level: str) -> Any:
+    """按 detail 级别投影一条工具表记录：name->裸名串；desc->{name,description}；
+    schema->完整 {name,description,inputSchema}。"""
+    if level == "schema":
+        return {"name": t["name"], "description": t["description"],
+                "inputSchema": t["inputSchema"]}
+    if level == "desc":
+        return {"name": t["name"], "description": t["description"]}
+    return t["name"]
+
+
 def _ndarray_to_json(arr: Any) -> Any:
     """numpy 数组转 JSON；None 表示无数据。"""
     if arr is None:
@@ -665,35 +680,51 @@ class MCPToolSet:
         return buckets
 
     def tools_list_result(self, params: Optional[Dict[str, Any]] = None):
-        """tools/list 的 result 体；带错误串时返回 (None, errmsg)。"""
+        """tools/list 的 result 体；带错误串时返回 (None, errmsg)。
+
+        detail 三分级（与 C++ 同形状）：
+          * ``"name"``（默认）：每工具仅名字串；
+          * ``"desc"``：每工具 ``{name, description}``（无 inputSchema）；
+          * ``"schema"``：每工具完整 ``{name, description, inputSchema}``。
+        ``detailed:true`` 是 ``detail="schema"`` 的兼容别名；未知 detail 报错。
+        """
         params = params or {}
         detailed = bool(params.get("detailed", False))
         dom = params.get("domain")
+
+        detail = params.get("detail")
+        explicit_detail = isinstance(detail, str) and bool(detail)
+        if explicit_detail:
+            if detail not in TOOL_DETAIL_LEVELS:
+                return None, ("未知 detail: %s（合法值: %s）"
+                              % (detail, "、".join(TOOL_DETAIL_LEVELS)))
+            level = detail
+        else:
+            level = "schema" if detailed else "name"
 
         if isinstance(dom, str) and dom:
             name = _resolve_domain(dom)
             if name is None:
                 return None, ("未知 domain: %s（合法域: %s）"
                               % (dom, "、".join(ALL_DOMAIN_NAMES)))
+            # 钻取单域：无显式 detail 时保持旧行为（全 schema）；显式 detail 按级返回。
+            eff = level if explicit_detail else "schema"
             entries = [
-                {"name": t["name"], "description": t["description"],
-                 "inputSchema": t["inputSchema"]}
+                _tool_at_level(t, eff)
                 for t in self._table if _TOOL_DOMAIN.get(t["name"]) == name]
             return {"tools": entries}, None
 
-        buckets = self._bucketed(full=detailed)
-        if detailed:
-            cards = [
-                {"domain": n, "summary": ALL_DOMAIN_SUMMARIES[n],
-                 "tools": buckets[n]}
-                for n in ALL_DOMAIN_NAMES]
-            return {"domains": cards}, None
-
-        # 默认：域卡片（只列工具名）。
+        buckets: Dict[str, List[Any]] = {n: [] for n in ALL_DOMAIN_NAMES}
+        for t in self._table:
+            dom2 = _TOOL_DOMAIN.get(t["name"])
+            if dom2 is None:
+                continue  # 未分配工具：测试会钉死不发生
+            buckets[dom2].append(_tool_at_level(t, level))
         cards = [
-            {"domain": n, "summary": ALL_DOMAIN_SUMMARIES[n],
-             "tools": [t["name"] for t in buckets[n]]}
+            {"domain": n, "summary": ALL_DOMAIN_SUMMARIES[n], "tools": buckets[n]}
             for n in ALL_DOMAIN_NAMES]
+        if level == "schema":
+            return {"domains": cards}, None
         return {"tools": cards}, None
 
     def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
@@ -727,11 +758,20 @@ class MCPToolSet:
                     "error": {"code": code, "message": message}}
 
         if method == "initialize":
+            # 声明 listChanged，允许 MCP client 缓存 tools/list 并在收到
+            # notifications/tools/list_changed 时失效重建。工具表当前静态，
+            # 服务端不会主动发该通知；未来动态注册时再发。
             return ok({"protocolVersion": "2024-11-05",
-                       "capabilities": {"tools": {}},
+                       "capabilities": {"tools": {"listChanged": True}},
                        "serverInfo": {"name": "mbdsdr-core", "version": "0.1.0"}})
         if method == "notifications/initialized":
             return None  # 通知无需回复
+        if method == "notifications/tools/list_changed":
+            # 缓存失效通知（通常由服务端->客户端）。无 id -> 不回 stdout；
+            # 带 id（被误用为请求）-> 诚实回 result:null，不当成未知方法。
+            if rid is None:
+                return None
+            return ok(None)
         if method == "tools/list":
             result, errmsg = self.tools_list_result(params)
             if errmsg is not None:

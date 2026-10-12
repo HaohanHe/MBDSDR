@@ -34,7 +34,7 @@
 |------|------|------|
 | `initialize` | — | `{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"mbdsdr-core","version":"0.1.0"}}` |
 | `notifications/initialized` | — | 无回复（通知） |
-| `tools/list` | `{}` / `{"domain":<名>}` / `{"detailed":true}` | 默认→8 域卡片；`domain`→该域完整 schema；`detailed`→全部域完整 schema（见 §2.1.1） |
+| `tools/list` | `{}` / `{"domain":<名>}` / `{"detailed":true}` / `{"detail":"name"\|"desc"\|"schema"}` | 默认→8 域卡片(name)；`domain`→该域；`detail`/`detailed` 控字段粗细（见 §2.1.1/§2.1.2） |
 | `tools/call` | `{"name":..,"arguments":{..}}` | `{"content":[{"type":"text","text":<executeTool 返回的 JSON 串>}]}` |
 
 * **工具表唯一事实源**：`ai::toolDefs()`（底层 `toolDefsFromSpecs(registeredToolSpecs())`）。
@@ -77,6 +77,36 @@
 > 跨语言一致性：Python 参考 `mbdsdr_ai/core/mcp_server.py` 用**同一组 8 域名**做分组
 > （其工具表来自自身 `_build_tool_table`，逐名映射）。Python 面当前无 VNA 工具，故
 > 三个 VNA 域在该面为空卡片（诚实空态）；8 域名集合本身两侧逐名相等。
+
+### 2.1.2 tools/list 多级详情分层（`detail` 按需分级 + 缓存语义）
+
+域目录给了「有哪些工具」，但一次拉全量 schema（`~50KB`）对每次发现都太贵。
+按 2026 MCP client best practice，`tools/list` 支持**按需分级**，由 `params.detail`
+控制每条工具记录的字段粗细（C++ 与 Python 同形状、同合法值）：
+
+| `detail` | 每条工具记录 | 用途 |
+|----------|--------------|------|
+| `"name"`（默认，省略） | 仅名字串 | 最小目录，先看全貌再决定下钻哪个 |
+| `"desc"` | `{name, description}`（无 `inputSchema`） | 不发 schema 就能读懂每个工具干什么 |
+| `"schema"` | `{name, description, inputSchema}`（全量） | 真正要构造 `tools/call` 参数时才拉 |
+
+* `params.detailed:true` 是 `detail:"schema"` 的**兼容别名**，保留旧客户端不破。
+* 省略 `detail` 时：目录默认回到 `"name"`；但**单独钻取某域**（带 `params.domain` 而
+  不显式给 `detail`）仍返回完整 schema（向后兼容的富下钻）。一旦显式给 `detail`，
+  目录与单域都按该级别返回。
+* 未知 `detail` 值 → JSON-RPC 错误 `-32602`，message 诚实列出 `name/desc/schema`。
+* 实测线报体积：`detail=name` 序列化长度明显小于 `detail=schema`（进程级用例钉死）。
+
+**缓存语义（`listChanged`）**：`initialize` 的 `capabilities.tools` 现在声明
+`"listChanged": true`。客户端可**缓存 tools/list 结果**，无需每次重拉；当工具表变化时，
+服务端发 `notifications/tools/list_changed`，客户端收到即失效重建。
+当前工具表是**静态**的（进程内不变），故服务端此刻**不会**主动发该通知——这是诚实声明，
+为未来动态注册预留；若客户端反向把它当请求发回，无 id 则不回 stdout，带 id 则诚实回
+`result:null`（不当成未知方法）。
+
+**客户端建议的发现节奏**：先 `tools/list`（默认 name 目录）→ 锁定要下钻的域后用
+`{"domain":<域>,"detail":"desc"}` 读描述 → 真要调用时再 `{"domain":<域>,"detail":"schema"}`
+取 inputSchema。既省往返体积，又不牺牲任何 schema 精度。
 
 ### 2.2 写工具手动 gate（MCP 侧强制）
 

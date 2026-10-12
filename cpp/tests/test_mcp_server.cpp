@@ -53,6 +53,8 @@ private slots:
     void initializeHandshake();
     void toolsListSingleSourceConsistency();
     void toolsListGroupedBranches();
+    void toolsListDetailLevels();
+    void listChangedCapabilityAndNotification();
     void toolsCallGetCapabilitiesRealRoundtrip();
     void writeToolGatedWithoutArmAndStateUnchanged();
     void writeToolRunsWhenArmed();
@@ -83,6 +85,10 @@ void TestMcpServer::initializeHandshake() {
     QCOMPARE(serverInfo.value(QStringLiteral("version")).toString(), QStringLiteral("0.1.0"));
     QVERIFY(result.value(QStringLiteral("capabilities")).toObject()
                 .contains(QStringLiteral("tools")));
+    // Cache-friendly: advertise listChanged so clients may cache tools/list.
+    QCOMPARE(result.value(QStringLiteral("capabilities")).toObject()
+                 .value(QStringLiteral("tools")).toObject()
+                 .value(QStringLiteral("listChanged")).toBool(), true);
 }
 
 void TestMcpServer::toolsListSingleSourceConsistency() {
@@ -168,6 +174,79 @@ void TestMcpServer::toolsListGroupedBranches() {
     for (const QJsonValue& c : doms)
         detTotal += c.toObject().value(QStringLiteral("tools")).toArray().size();
     QCOMPARE(detTotal, ai::toolDefs().size());
+}
+
+void TestMcpServer::toolsListDetailLevels() {
+    dsp::SpectrumEngine engine;
+
+    // -- detail=name: cards, each tool is a bare name string (no description).
+    QJsonObject byName = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"tools/list\","
+                       "\"params\":{\"detail\":\"name\"}}"), &engine);
+    QJsonArray nameCards = byName.value(QStringLiteral("result")).toObject()
+                               .value(QStringLiteral("tools")).toArray();
+    QCOMPARE(nameCards.size(), 8);
+    for (const QJsonValue& c : nameCards)
+        for (const QJsonValue& t : c.toObject().value(QStringLiteral("tools")).toArray())
+            QVERIFY(t.isString());   // bare name, NOT an object
+
+    // -- detail=desc: cards, each tool {name, description}, NO inputSchema.
+    QJsonObject byDesc = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":51,\"method\":\"tools/list\","
+                       "\"params\":{\"detail\":\"desc\"}}"), &engine);
+    QJsonArray descCards = byDesc.value(QStringLiteral("result")).toObject()
+                               .value(QStringLiteral("tools")).toArray();
+    int descCount = 0;
+    for (const QJsonValue& c : descCards)
+        for (const QJsonValue& t : c.toObject().value(QStringLiteral("tools")).toArray()) {
+            QJsonObject o = t.toObject();
+            QVERIFY(o.contains(QStringLiteral("name")));
+            QVERIFY(o.contains(QStringLiteral("description")));
+            QVERIFY(!o.contains(QStringLiteral("inputSchema")));
+            ++descCount;
+        }
+    QCOMPARE(descCount, ai::toolDefs().size());
+
+    // -- detail=schema: cards under "domains", each tool carries inputSchema.
+    QJsonObject bySchema = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":52,\"method\":\"tools/list\","
+                       "\"params\":{\"detail\":\"schema\"}}"), &engine);
+    QJsonArray schemaCards = bySchema.value(QStringLiteral("result")).toObject()
+                                 .value(QStringLiteral("domains")).toArray();
+    QCOMPARE(schemaCards.size(), 8);
+    for (const QJsonValue& c : schemaCards)
+        for (const QJsonValue& t : c.toObject().value(QStringLiteral("tools")).toArray())
+            QVERIFY(t.toObject().contains(QStringLiteral("inputSchema")));
+
+    // -- detailed:true is a kept alias == detail=schema (same card count).
+    QJsonObject detAlias = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":53,\"method\":\"tools/list\","
+                       "\"params\":{\"detailed\":true}}"), &engine);
+    QCOMPARE(detAlias.value(QStringLiteral("result")).toObject()
+                 .value(QStringLiteral("domains")).toArray().size(), 8);
+
+    // -- unknown detail value -> honest -32602 listing legal levels.
+    QJsonObject bad = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":54,\"method\":\"tools/list\","
+                       "\"params\":{\"detail\":\"banana\"}}"), &engine);
+    QJsonObject e = bad.value(QStringLiteral("error")).toObject();
+    QCOMPARE(e.value(QStringLiteral("code")).toInt(), -32602);
+    QVERIFY(e.value(QStringLiteral("message")).toString().contains(QStringLiteral("schema")));
+}
+
+void TestMcpServer::listChangedCapabilityAndNotification() {
+    dsp::SpectrumEngine engine;
+    // notifications/tools/list_changed (no id) -> no stdout reply.
+    QJsonObject r = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}"),
+        &engine);
+    QVERIFY(r.isEmpty());
+    // Misused as a request (with id) -> honest result:null, not -32601.
+    QJsonObject r2 = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":70,\"method\":\"notifications/tools/list_changed\"}"),
+        &engine);
+    QCOMPARE(r2.value(QStringLiteral("id")).toInt(), 70);
+    QVERIFY(!r2.contains(QStringLiteral("error")));
 }
 
 void TestMcpServer::toolsCallGetCapabilitiesRealRoundtrip() {
@@ -311,6 +390,19 @@ void TestMcpServer::processLevelStdioRoundtrip() {
     for (const QJsonValue& c : cards)
         flatTotal += c.toObject().value(QStringLiteral("tools")).toArray().size();
     QCOMPARE(flatTotal, ai::toolDefs().size());
+
+    // 2b) On-the-wire size: detail=name directory must be markedly smaller than
+    //     detail=schema (the whole point of the tiered, cache-friendly view).
+    QByteArray nameLine = exchange(
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/list\","
+        "\"params\":{\"detail\":\"name\"}}");
+    QByteArray schemaLine = exchange(
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/list\","
+        "\"params\":{\"detail\":\"schema\"}}");
+    QVERIFY2(!nameLine.isEmpty() && !schemaLine.isEmpty(), "detail replies missing");
+    QVERIFY2(nameLine.size() < schemaLine.size(),
+             qPrintable(QString("name %1B should be < schema %2B")
+                            .arg(nameLine.size()).arg(schemaLine.size())));
 
     // 3) tools/call get_capabilities -> ok:true
     QByteArray callLine = exchange(

@@ -152,18 +152,43 @@ const DomainGroup* resolveDomain(const QString& query, QStringList* legalNames) 
 }
 
 // Build the tools/list result object from params. Returns false (and fills
-// *errMessage) on an unknown "domain"; otherwise fills *out.
+// *errMessage) on an unknown "domain" / unknown "detail"; otherwise fills *out.
+//
+// detail (string, optional): "name" | "desc" | "schema".
+//   * omitted -> the directory default (name-only cards); `detailed:true` is a
+//     kept alias for "schema"; drilling into a single domain without an explicit
+//     detail stays at "schema" (backward-compatible rich drill-in).
+//   * unknown value -> -32602 listing the legal values.
 bool buildToolsListResult(const QJsonObject& params, QJsonObject* out,
                           QString* errMessage) {
     const QList<DomainGroup> groups = domainGroups();
     const bool detailed = params.value(QStringLiteral("detailed")).toBool(false);
     const QJsonValue domVal = params.value(QStringLiteral("domain"));
+    const bool hasDomain = domVal.isString() && !domVal.toString().isEmpty();
+
+    // Resolve the granularity level. Explicit "detail" wins; else backward-compat
+    // defaults. Legal values pinned for honest error reporting.
+    static const QStringList kLevels{QStringLiteral("name"), QStringLiteral("desc"),
+                                     QStringLiteral("schema")};
+    QString level;
+    const QJsonValue detailVal = params.value(QStringLiteral("detail"));
+    if (detailVal.isString() && !detailVal.toString().isEmpty()) {
+        level = detailVal.toString();
+        if (!kLevels.contains(level)) {
+            if (errMessage)
+                *errMessage = QStringLiteral("未知 detail: %1（合法值: %2）")
+                                  .arg(level, kLevels.join(QStringLiteral("、")));
+            return false;
+        }
+    } else {
+        level = detailed ? QStringLiteral("schema") : QStringLiteral("name");
+    }
 
     // index tool name -> its full entry (schema single-sourced from toolDefs())
     QHash<QString, QJsonObject> entry;
     for (const ai::ToolDef& def : ai::toolDefs()) entry.insert(def.name, toolEntry(def));
 
-    if (domVal.isString() && !domVal.toString().isEmpty()) {
+    if (hasDomain) {
         QStringList legal;
         const DomainGroup* g = resolveDomain(domVal.toString(), &legal);
         if (!g) {
@@ -172,42 +197,60 @@ bool buildToolsListResult(const QJsonObject& params, QJsonObject* out,
                                   .arg(domVal.toString(), legal.join(QStringLiteral("、")));
             return false;
         }
+        // Backward-compat: drilling one domain WITHOUT an explicit detail stays
+        // at full schema; an explicit detail governs the granularity otherwise.
+        const QString effLevel = (detailVal.isString() && !detailVal.toString().isEmpty())
+                                     ? level
+                                     : QStringLiteral("schema");
         QJsonArray tools;
-        for (const QString& tool : g->tools)
-            if (entry.contains(tool)) tools.append(entry.value(tool));
+        for (const QString& tool : g->tools) {
+            if (!entry.contains(tool)) continue;
+            const QJsonObject defObj = entry.value(tool);
+            if (effLevel == QLatin1String("schema")) {
+                tools.append(defObj);
+            } else if (effLevel == QLatin1String("desc")) {
+                QJsonObject o;
+                o[QStringLiteral("name")] = defObj.value(QStringLiteral("name"));
+                o[QStringLiteral("description")] = defObj.value(QStringLiteral("description"));
+                tools.append(o);
+            } else {
+                tools.append(defObj.value(QStringLiteral("name")));
+            }
+        }
         (*out)[QStringLiteral("tools")] = tools;
         return true;
     }
 
-    if (detailed) {
-        // All domains with FULL per-tool schema (name/description/inputSchema).
-        QJsonArray doms;
-        for (const DomainGroup& g : groups) {
-            QJsonArray tools;
-            for (const QString& tool : g.tools)
-                if (entry.contains(tool)) tools.append(entry.value(tool));
-            QJsonObject card;
-            card[QStringLiteral("domain")] = g.name;
-            card[QStringLiteral("summary")] = g.summary;
-            card[QStringLiteral("tools")] = tools;
-            doms.append(card);
-        }
-        (*out)[QStringLiteral("domains")] = doms;
-        return true;
-    }
-
-    // Default (no params): domain cards, names only — a two-level directory.
+    // Directory view (no specific domain): 8 cards. Schema-level goes under
+    // "domains" (historic key); name/desc cards under "tools" (historic default).
     QJsonArray doms;
     for (const DomainGroup& g : groups) {
-        QJsonArray names;
-        for (const QString& tool : g.tools) names.append(tool);
+        QJsonArray tools;
+        for (const QString& tool : g.tools) {
+            if (!entry.contains(tool)) continue;
+            const QJsonObject full = entry.value(tool);  // full schema entry
+            // Project down to the requested granularity level.
+            if (level == QLatin1String("schema")) {
+                tools.append(full);
+            } else if (level == QLatin1String("desc")) {
+                QJsonObject o;
+                o[QStringLiteral("name")] = full.value(QStringLiteral("name"));
+                o[QStringLiteral("description")] = full.value(QStringLiteral("description"));
+                tools.append(o);
+            } else {
+                tools.append(full.value(QStringLiteral("name")));
+            }
+        }
         QJsonObject card;
         card[QStringLiteral("domain")] = g.name;
         card[QStringLiteral("summary")] = g.summary;
-        card[QStringLiteral("tools")] = names;
+        card[QStringLiteral("tools")] = tools;
         doms.append(card);
     }
-    (*out)[QStringLiteral("tools")] = doms;
+    if (level == QLatin1String("schema"))
+        (*out)[QStringLiteral("domains")] = doms;
+    else
+        (*out)[QStringLiteral("tools")] = doms;
     return true;
 }
 
@@ -250,6 +293,16 @@ QString handleRequestLine(const QString& line,
     // Notifications (no id) never get a reply on the protocol stream.
     if (method == QLatin1String("notifications/initialized"))
         return QString();
+    // Cache-invalidation notification (normally SERVER->client). The tool table
+    // is static today, so the server never emits it; if a client echoes it back
+    // with no id we silently ack (no stdout). With an id (misused as a request)
+    // we honestly reply result:null rather than -32601.
+    if (method == QLatin1String("notifications/tools/list_changed")) {
+        if (!hasId) return QString();
+        QJsonObject nullResult;
+        return QString::fromUtf8(
+            QJsonDocument(makeResponse(id, nullResult)).toJson(QJsonDocument::Compact));
+    }
     if (!hasId)
         return QString();
 
@@ -257,8 +310,13 @@ QString handleRequestLine(const QString& line,
         QJsonObject serverInfo;
         serverInfo[QStringLiteral("name")] = QStringLiteral("mbdsdr-core");
         serverInfo[QStringLiteral("version")] = QStringLiteral("0.1.0");
+        // Declare listChanged so MCP clients may cache tools/list and invalidate
+        // on this notification. The registry is static now, so no emission fires;
+        // when dynamic tool registration lands, the server sends this notification.
+        QJsonObject toolsCaps;
+        toolsCaps[QStringLiteral("listChanged")] = true;
         QJsonObject caps;
-        caps[QStringLiteral("tools")] = QJsonObject();
+        caps[QStringLiteral("tools")] = toolsCaps;
         QJsonObject result;
         result[QStringLiteral("protocolVersion")] = QStringLiteral("2024-11-05");
         result[QStringLiteral("capabilities")] = caps;
