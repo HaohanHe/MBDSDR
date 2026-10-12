@@ -54,3 +54,14 @@ MCP 第 9 域「记忆编排」（`cpp/src/agentapi/mcp_server.cpp` + `mbdsdr_ai
 - 禁 mock：测试用真实 SQLite 临时文件（`test_memory_store.cpp`）；回放夹具仅用于 VNA wire。
 - db 打不开 / 目录不可写 / 空 query / 坏 scope：全部诚实 ok:false + 原因，不静默成功。
 - 未连接、无命中等空态一律显式 note；禁止编造记忆内容。
+
+## 6. checkpoint-writer 执行器落地（P3 #74，本轮代码）
+
+上节定义的编排语义已落为真实执行器 `cpp/src/ai/checkpoint_writer.{h,cpp}`（不依赖 cron 定时器）：
+
+- **内存队列 + 后台线程**：`submit()` 只入队、非阻塞，主 agent 不等写盘；后台 worker 约 150ms 周期 drain 队列落库。
+- **单写者不变量**：所有 `memory_store.add/update` 只发生在 writer 线程；读侧 `search()` 加 QMutex 保护并发。
+- **flush 触发点**：`flush()` 在调用线程同步排空（与 worker drain 用互斥串行化）；新增工具 `memory_flush`（write=true，手动 gate）即显式 checkpoint。
+- **checkpoint.md 快照**：每次 drain 后重写 `~/.mbdsdr/checkpoint.md`（ISO 时间戳 + 本次落库条数 + key 列表，人类可读，供未来 Rebuild 注入层参考）。
+- **主 agent 只读不写**：`checkpoint_status`（read）暴露 pending_count/queue_depth/last_flush_ms；`memory_add/update` 语义升级为入队（返回 queued=true + pending_count），DB 级查重错误只在 writer drain 时出现（fire-and-forget，文档级取舍）。
+- 工具计数 75→77；MCP 「记忆编排」域挂入两工具（域数仍 9）。

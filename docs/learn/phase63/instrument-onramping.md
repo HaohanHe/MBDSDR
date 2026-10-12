@@ -322,3 +322,10 @@
   CJK 经双侧 cjkSplit 归一化（unicode61 连续汉字单 token 问题），查询词元化转义防注入。
 - MCP 域 8→9：双侧「记忆编排」（C++ domainGroups + Python FROZEN_DOMAIN_SUMMARIES 钉扎）。
 - 设计说明见 docs/learn/phase63/agent-memory-notes.md。
+
+## 36. 补批：checkpoint-writer 执行器（P3 #74，工具 75→77）
+- 新模块 `cpp/src/ai/checkpoint_writer.{h,cpp}`：内存队列 + std::thread 后台 worker（~150ms drain，无 cron），
+  submit 非阻塞入队；单写者不变量=写盘只在 writer 线程，search 侧 QMutex 保护并发。
+- memory_add/memory_update 语义升级为入队（返回 queued=true + pending_count）；新增 checkpoint_status(read)
+  与 memory_flush(write，手动 gate)：flush 同步排空并落库，重写 ~/.mbdsdr/checkpoint.md 人类可读快照。
+- MCP 「记忆编排」域挂入两工具（域数仍 9，跨语言集合钉扎不变）；count 全链同步（registry/schema/ai_real_link/mobile/phase31/README）。

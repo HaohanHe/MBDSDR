@@ -1469,18 +1469,17 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
-    // P3 #73: persistent local memory family (SQLite FTS5 on ~/.mbdsdr).
-    // memory_add creates a new (scope, key) record; duplicate keys are an
-    // honest error and callers fall through to memory_update.
+    // P3 #73/#74: persistent local memory family (SQLite FTS5 on ~/.mbdsdr).
+    // memory_add/update enqueue; the background checkpoint writer persists rows.
     {
         ToolSchemaSpec s;
         s.name = "memory_add";
         s.description = QString::fromUtf8(
-            "写入：向本地记忆库（SQLite FTS5，~/.mbdsdr/memory.db）新增一条记忆。"
+            "写入：向本地记忆库（SQLite FTS5，~/.mbdsdr/memory.db）新增一条记忆——"
+            "实际落库由后台 checkpoint writer 异步执行（返回 queued=true，不阻塞主 agent）。"
             "scope 必填枚举 user（用户事实/偏好）/agent（模型经验/踩坑）/session（本次会话现场）；"
             "scope_id 为作用域内实例标识（如台站号、过境 id）；key 在 scope 内唯一。"
-            "同 (scope,key) 已存在时诚实报错，覆盖请用 memory_update。"
-            "属于写动作，手动模式下被拦截。");
+            "submit 不做 DB 级查重；立即落库用 memory_flush。属于写动作，手动模式下被拦截。");
         s.write = true;
         auto en = [](const char* n) {
             ToolParamSpec p; p.name = QString::fromUtf8(n); p.type = "string"; p.required = true; return p;
@@ -1522,13 +1521,36 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.name = "memory_update";
         s.description = QString::fromUtf8(
             "写入：按 (scope,key) upsert 记忆——存在则覆盖 content/scope_id 与时间戳，"
-            "不存在则等价于新增。scope 必填枚举 user/agent/session。"
+            "不存在则等价于新增；经后台 checkpoint writer 异步落库（返回 queued=true）。"
+            "scope 必填枚举 user/agent/session。立即落库用 memory_flush。"
             "属于写动作，手动模式下被拦截。");
         s.write = true;
         auto en = [](const char* n) {
             ToolParamSpec p; p.name = QString::fromUtf8(n); p.type = "string"; p.required = true; return p;
         };
         s.params << en("scope") << en("scope_id") << en("key") << en("content");
+        out.append(s);
+    }
+    // P3 #74: checkpoint-writer control plane. memory_add/update now enqueue;
+    // these two introspect / explicitly drain.
+    {
+        ToolSchemaSpec s;
+        s.name = "checkpoint_status";
+        s.description = QString::fromUtf8(
+            "只读：返回后台 checkpoint writer 状态——pending_count/queue_depth（待落库条目数）、"
+            "last_flush_ms（最近一次落库完成的墙钟毫秒，0=从未落库）。"
+            "主 agent 只读不写；写路径由 memory_add/update 入队后异步落库。");
+        s.write = false;
+        out.append(s);
+    }
+    {
+        ToolSchemaSpec s;
+        s.name = "memory_flush";
+        s.description = QString::fromUtf8(
+            "写入：同步排空记忆队列并落库（memory_store.add/update），重写 ~/.mbdsdr/checkpoint.md "
+            "人类可读快照（时间戳+本次落库条数+key 列表），返回 written 实际落库条数。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
         out.append(s);
     }
 

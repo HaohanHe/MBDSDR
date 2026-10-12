@@ -9,6 +9,7 @@
 #pragma once
 
 #include <QList>
+#include <QMutex>
 #include <QString>
 
 namespace mbdsdr {
@@ -58,6 +59,9 @@ public:
 private:
     QString m_path;
     void* m_db = nullptr;  // sqlite3*, opaque to keep the sqlite3 header local.
+    // Serializes search() against concurrent writer drains (readers run on the
+    // agent thread while the writer thread persists rows).
+    QMutex mutable m_searchGuard;
 };
 
 } // namespace ai

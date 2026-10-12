@@ -10,6 +10,7 @@
 #include "dsp/fcch_detector.h"          // kFcchToneHz
 #include "ui/bookmark_manager.h"   // ui::BookmarkManager / ui::Bookmark (real Agent-layer store)
 #include "memory_store.h"         // SQLite FTS5 local memory store
+#include "checkpoint_writer.h"     // background single-writer drain for memory writes
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -2629,29 +2630,25 @@ QString memoryArgCheck(const QJsonObject& args, QString* scope, QString* scopeId
 QString execMemoryAdd(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
                       const SourceInfo& src, ui::BookmarkManager*) {
     QJsonObject o;
-    QString scope, scopeId, key, content, err;
-    if (const QString bad = memoryArgCheck(args, &scope, &scopeId, &key, &content, &err);
+    QString scope, scopeId, key, content;
+    if (const QString bad = memoryArgCheck(args, &scope, &scopeId, &key, &content, nullptr);
         !bad.isEmpty()) {
         o["ok"] = false; o["error"] = bad;
         addSourceFields(o, src);
         return compact(o);
     }
-    MemoryStore store(defaultMemoryDbPath());
-    if (!store.open(&err)) {
-        o["ok"] = false;
-        o["error"] = QStringLiteral("记忆库不可用：%1").arg(err);
-        o["note"] = QStringLiteral("检查 ~/.mbdsdr 目录权限；不编造记忆");
-        addSourceFields(o, src);
-        return compact(o);
-    }
-    if (!store.add(scope, scopeId, key, content, &err)) {
+    // Async enqueue: the main agent never blocks on disk; the background
+    // checkpoint writer persists rows (single-writer invariant).
+    QString err;
+    if (!memoryWriter().submit(MemoryWriteRequest::Add, scope, scopeId, key, content, &err)) {
         o["ok"] = false;
         o["error"] = err;
-        o["hint"] = QStringLiteral("若 key 已存在，用 memory_update 覆盖");
     } else {
         o["ok"] = true;
-        o["stored"] = true;
+        o["queued"] = true;
+        o["pending_count"] = memoryWriter().pendingCount();
         o["scope"] = scope; o["scope_id"] = scopeId; o["key"] = key;
+        o["note"] = QStringLiteral("已入队，落库由后台 checkpoint writer 异步执行；立即落库用 memory_flush");
     }
     addSourceFields(o, src);
     return compact(o);
@@ -2709,28 +2706,53 @@ QString execMemorySearch(const QJsonObject& args, dsp::SpectrumEngine* /*engine*
 QString execMemoryUpdate(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
                          const SourceInfo& src, ui::BookmarkManager*) {
     QJsonObject o;
-    QString scope, scopeId, key, content, err;
-    if (const QString bad = memoryArgCheck(args, &scope, &scopeId, &key, &content, &err);
+    QString scope, scopeId, key, content;
+    if (const QString bad = memoryArgCheck(args, &scope, &scopeId, &key, &content, nullptr);
         !bad.isEmpty()) {
         o["ok"] = false; o["error"] = bad;
         addSourceFields(o, src);
         return compact(o);
     }
-    MemoryStore store(defaultMemoryDbPath());
-    if (!store.open(&err)) {
-        o["ok"] = false;
-        o["error"] = QStringLiteral("记忆库不可用：%1").arg(err);
-        o["note"] = QStringLiteral("检查 ~/.mbdsdr 目录权限；不编造记忆");
-        addSourceFields(o, src);
-        return compact(o);
-    }
-    if (!store.update(scope, scopeId, key, content, &err)) {
+    QString err;
+    if (!memoryWriter().submit(MemoryWriteRequest::Update, scope, scopeId, key, content, &err)) {
         o["ok"] = false;
         o["error"] = err;
     } else {
         o["ok"] = true;
-        o["upserted"] = true;
+        o["queued"] = true;
+        o["pending_count"] = memoryWriter().pendingCount();
         o["scope"] = scope; o["scope_id"] = scopeId; o["key"] = key;
+        o["note"] = QStringLiteral("已入队，upsert 由后台 checkpoint writer 异步落库；立即落库用 memory_flush");
+    }
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// P3 #74: read-only writer introspection + synchronous checkpoint trigger.
+QString execCheckpointStatus(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
+                             const SourceInfo& src, ui::BookmarkManager*) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["pending_count"] = memoryWriter().pendingCount();
+    o["queue_depth"] = memoryWriter().queueDepth();
+    o["last_flush_ms"] = (double)memoryWriter().lastFlushMs();
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+QString execMemoryFlush(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
+                        const SourceInfo& src, ui::BookmarkManager*) {
+    QJsonObject o;
+    QString err;
+    const int written = memoryWriter().flush(&err);
+    o["written"] = written;
+    o["checkpoint_rewritten"] = true;
+    if (!err.isEmpty()) {
+        o["ok"] = false;
+        o["error"] = err;
+        o["note"] = QStringLiteral("部分条目落库失败；已处理 %1 条").arg(written);
+    } else {
+        o["ok"] = true;
     }
     addSourceFields(o, src);
     return compact(o);
@@ -2832,6 +2854,9 @@ const QList<ToolDispatch>& dispatchTable() {
         {"memory_add", &execMemoryAdd},
         {"memory_search", &execMemorySearch},
         {"memory_update", &execMemoryUpdate},
+        // P3 #74: checkpoint writer introspection (read) + synchronous flush (write, gated).
+        {"checkpoint_status", &execCheckpointStatus},
+        {"memory_flush", &execMemoryFlush},
     };
     return kTable;
 }

@@ -122,7 +122,8 @@ QList<DomainGroup> domainGroups() {
         {QStringLiteral("记忆编排"),
          QStringLiteral("本地持久记忆（SQLite FTS5）的写入、覆盖与全文检索，按 user/agent/session 作用域分层。"),
          {QStringLiteral("memory_add"), QStringLiteral("memory_search"),
-          QStringLiteral("memory_update")}},
+          QStringLiteral("memory_update"), QStringLiteral("checkpoint_status"),
+          QStringLiteral("memory_flush")}},
     };
 }
 

@@ -111,10 +111,11 @@ private slots:
     // --- P1 #61: analyze_vna_match multi-topology (xps/xs/xpl + r_comp) --------
     void analyzeMatch_topologyEnumInSchema();
     void analyzeMatch_xpsNumericAndUnknownTopologyHonest();
-    // --- P3 #73: local memory family (SQLite FTS5, env-redirected temp db) -----
+    // --- P3 #73/#74: local memory family + checkpoint writer (env-redirected) ---
     void memoryAddSearchRoundTrip();
     void memoryScopeIsolation();
     void memoryUpdateOverwrite();
+    void checkpointStatusFields();
 };
 
 void TestAgent::initTestCase() {
@@ -138,7 +139,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 75);
+    QCOMPARE(tools.size(), 77);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -851,9 +852,9 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 43 writes / 32 reads (75 tools; memory family added).
-    QCOMPARE(writes, 43);
-    QCOMPARE(reads, 32);
+    // The frozen split: 44 writes / 33 reads (77 tools; checkpoint writer added).
+    QCOMPARE(writes, 44);
+    QCOMPARE(reads, 33);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -2146,7 +2147,7 @@ void TestAgent::analyzeMatch_xpsNumericAndUnknownTopologyHonest() {
              qPrintable(rBad.value("note").toString()));
 }
 
-// ---- P3 #73: local memory family (env-redirected temp db, real SQLite) ------
+// ---- P3 #73/#74: local memory family via checkpoint writer (env-redirected) --
 void TestAgent::memoryAddSearchRoundTrip() {
     dsp::SpectrumEngine engine;
     QJsonObject a;
@@ -2155,6 +2156,16 @@ void TestAgent::memoryAddSearchRoundTrip() {
     QJsonObject added = runTool(engine, "memory_add", a);
     QVERIFY2(added.value("ok").toBool(),
              qPrintable(QString::fromUtf8(QJsonDocument(added).toJson(QJsonDocument::Compact))));
+    // Async semantics: enqueued, not yet persisted.
+    QVERIFY2(added.value("queued").toBool(), "memory_add must enqueue (queued=true)");
+    QVERIFY2(added.value("pending_count").toInt() >= 1, "queue must report pending entries");
+
+    // Explicit checkpoint drain persists the row.
+    QJsonObject fl = runTool(engine, "memory_flush", {});
+    QVERIFY2(fl.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(fl).toJson(QJsonDocument::Compact))));
+    QVERIFY2(fl.value("written").toInt() >= 1, "flush must report persisted rows");
+    QVERIFY2(fl.value("checkpoint_rewritten").toBool(), "flush rewrites checkpoint.md");
 
     QJsonObject q; q["query"] = "电池";
     QJsonObject found = runTool(engine, "memory_search", q);
@@ -2175,6 +2186,7 @@ void TestAgent::memoryScopeIsolation() {
     s["scope"] = "session"; s["scope_id"] = "live-1"; s["key"] = "session-obs";
     s["content"] = "session east band noise note";
     QVERIFY(runTool(engine, "memory_add", s).value("ok").toBool());
+    runTool(engine, "memory_flush", {});
 
     QJsonObject q; q["query"] = "east"; q["scope"] = "user";
     QJsonObject onlyUser = runTool(engine, "memory_search", q);
@@ -2191,9 +2203,10 @@ void TestAgent::memoryUpdateOverwrite() {
     a["scope"] = "agent"; a["scope_id"] = "t1"; a["key"] = "draft-note";
     a["content"] = "draft v1";
     QVERIFY(runTool(engine, "memory_add", a).value("ok").toBool());
-    // Second add with the same (scope,key) must be an honest duplicate error.
+    // Duplicate adds are enqueued honestly too (dup detection surfaces at drain);
+    // the caller asked for upsert via memory_update.
     QJsonObject dup = runTool(engine, "memory_add", a);
-    QVERIFY2(!dup.value("ok").toBool(), "duplicate add must fail honestly");
+    QVERIFY2(dup.value("ok").toBool(), "duplicate add is enqueued, not refused at submit");
 
     QJsonObject u;
     u["scope"] = "agent"; u["scope_id"] = "t1"; u["key"] = "draft-note";
@@ -2201,9 +2214,9 @@ void TestAgent::memoryUpdateOverwrite() {
     QJsonObject upd = runTool(engine, "memory_update", u);
     QVERIFY2(upd.value("ok").toBool(),
              qPrintable(QString::fromUtf8(QJsonDocument(upd).toJson(QJsonDocument::Compact))));
+    runTool(engine, "memory_flush", {});
 
-    // "v1" lived only in the old content; after upsert it must be gone
-    // (the key "draft-note" itself does not contain v1/final).
+    // "v1" lived only in the old content; after upsert it must be gone.
     QJsonObject q1; q1["query"] = "v1";
     QCOMPARE(runTool(engine, "memory_search", q1).value("count").toInt(), 0);
     QJsonObject q2; q2["query"] = "final";
@@ -2211,6 +2224,16 @@ void TestAgent::memoryUpdateOverwrite() {
     QCOMPARE(hit.value("count").toInt(), 1);
     QCOMPARE(hit.value("hits").toArray().at(0).toObject().value("content").toString(),
              QString("final v2"));
+}
+
+void TestAgent::checkpointStatusFields() {
+    dsp::SpectrumEngine engine;
+    QJsonObject st = runTool(engine, "checkpoint_status", {});
+    QVERIFY2(st.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(st).toJson(QJsonDocument::Compact))));
+    QVERIFY(st.contains("pending_count"));
+    QVERIFY(st.contains("queue_depth"));
+    QVERIFY(st.contains("last_flush_ms"));
 }
 
 #include <QCoreApplication>

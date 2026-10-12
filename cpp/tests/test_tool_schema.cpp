@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 75);
+    QCOMPARE(specs.size(), 77);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -449,14 +449,14 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "df（下行格式）/crc_ok（CRC 通过）/last_seen（墙钟毫秒）。"
             "1090 MHz 无信号或未调谐时 aircraft=[] 诚实空态，不编造飞机。"
             "区别于 get_ft8_status / get_ft8_history（解码器结果面）。")},
-        // P3 #73: local memory family (SQLite FTS5).
+        // P3 #73/#74: local memory family + checkpoint writer control plane.
         {"memory_add",
          QString::fromUtf8(
-            "写入：向本地记忆库（SQLite FTS5，~/.mbdsdr/memory.db）新增一条记忆。"
+            "写入：向本地记忆库（SQLite FTS5，~/.mbdsdr/memory.db）新增一条记忆——"
+            "实际落库由后台 checkpoint writer 异步执行（返回 queued=true，不阻塞主 agent）。"
             "scope 必填枚举 user（用户事实/偏好）/agent（模型经验/踩坑）/session（本次会话现场）；"
             "scope_id 为作用域内实例标识（如台站号、过境 id）；key 在 scope 内唯一。"
-            "同 (scope,key) 已存在时诚实报错，覆盖请用 memory_update。"
-            "属于写动作，手动模式下被拦截。")},
+            "submit 不做 DB 级查重；立即落库用 memory_flush。属于写动作，手动模式下被拦截。")},
         {"memory_search",
          QString::fromUtf8(
             "只读：全文检索本地记忆库（中英文均可）。query 为自然语言词串，"
@@ -465,7 +465,18 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
         {"memory_update",
          QString::fromUtf8(
             "写入：按 (scope,key) upsert 记忆——存在则覆盖 content/scope_id 与时间戳，"
-            "不存在则等价于新增。scope 必填枚举 user/agent/session。"
+            "不存在则等价于新增；经后台 checkpoint writer 异步落库（返回 queued=true）。"
+            "scope 必填枚举 user/agent/session。立即落库用 memory_flush。"
+            "属于写动作，手动模式下被拦截。")},
+        {"checkpoint_status",
+         QString::fromUtf8(
+            "只读：返回后台 checkpoint writer 状态——pending_count/queue_depth（待落库条目数）、"
+            "last_flush_ms（最近一次落库完成的墙钟毫秒，0=从未落库）。"
+            "主 agent 只读不写；写路径由 memory_add/update 入队后异步落库。")},
+        {"memory_flush",
+         QString::fromUtf8(
+            "写入：同步排空记忆队列并落库（memory_store.add/update），重写 ~/.mbdsdr/checkpoint.md "
+            "人类可读快照（时间戳+本次落库条数+key 列表），返回 written 实际落库条数。"
             "属于写动作，手动模式下被拦截。")},
     };
     QCOMPARE(defs.size(), expected.size());
@@ -523,7 +534,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 75);
+    QCOMPARE(headerCount, 77);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

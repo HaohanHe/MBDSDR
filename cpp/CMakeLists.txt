@@ -171,6 +171,7 @@ set(SOURCES
     src/ai/sat_task_planner.cpp
     src/ai/vna_onramp.cpp
     src/ai/memory_store.cpp
+    src/ai/checkpoint_writer.cpp
     src/tx/modulator.cpp
     src/tx/loopback_backend.cpp
     src/tx/tx_controller.cpp
@@ -1590,6 +1591,13 @@ target_link_libraries(test_memory_store PRIVATE mbdsdr_core)
 target_include_directories(test_memory_store PRIVATE src)
 target_link_libraries(test_memory_store PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME memory_store COMMAND test_memory_store)
+
+# ---- P3 #74: checkpoint writer (real temp db + queue drain, offline) ---------
+add_executable(test_checkpoint_writer tests/test_checkpoint_writer.cpp)
+target_link_libraries(test_checkpoint_writer PRIVATE mbdsdr_core)
+target_include_directories(test_checkpoint_writer PRIVATE src)
+target_link_libraries(test_checkpoint_writer PRIVATE Qt6::Test Qt6::Core)
+add_test(NAME checkpoint_writer COMMAND test_checkpoint_writer)
 
 # ---- M4: real function-calling loop (transport-injected, fully offline) ------
 # Drives LLMWorker with a canned mock transport (setDefaultTransportForTests),

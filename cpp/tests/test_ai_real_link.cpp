@@ -366,8 +366,9 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "vna_calibration",
         // P1 #70: device-level misc facade state machine (write, gated).
         "vna_device",
-        // P3 #73: local memory family (SQLite FTS5; search read-only).
+        // P3 #73/#74: local memory family + checkpoint writer control plane.
         "memory_add", "memory_search", "memory_update",
+        "checkpoint_status", "memory_flush",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -406,10 +407,12 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(ai::isWriteTool("vna_calibration"));
     // P1 #70: vna_device facade (can write device state) is gated as a whole.
     QVERIFY(ai::isWriteTool("vna_device"));
-    // P3 #73: memory add/update gated writes; search read-only.
+    // P3 #73/#74: memory add/update/flush gated writes; search + status read-only.
     QVERIFY(ai::isWriteTool("memory_add"));
     QVERIFY(ai::isWriteTool("memory_update"));
+    QVERIFY(ai::isWriteTool("memory_flush"));
     QVERIFY(!ai::isWriteTool("memory_search"));
+    QVERIFY(!ai::isWriteTool("checkpoint_status"));
     QVERIFY(!ai::isWriteTool("get_network_audio_status"));
     QVERIFY(!ai::isWriteTool("get_scan_link_status"));
     QVERIFY(!ai::isWriteTool("get_squelch_status"));

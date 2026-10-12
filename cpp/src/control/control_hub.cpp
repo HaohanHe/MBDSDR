@@ -13,6 +13,7 @@
 #include "ui/bookmark_manager.h"
 #include "ai/sat_task_planner.h"
 #include "ai/memory_store.h"   // P3 #73: local SQLite FTS5 memory store
+#include "ai/checkpoint_writer.h" // P3 #74: background single-writer drain
 #include "core/tokens.h"
 
 #include <QJsonDocument>
@@ -128,6 +129,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"vna_device",             true,  &ControlHub::cmdVnaDevice},
         {"memory_add",             true,  &ControlHub::cmdMemoryAdd},
         {"memory_update",          true,  &ControlHub::cmdMemoryUpdate},
+        {"memory_flush",           true,  &ControlHub::cmdMemoryFlush},
         {"export_vna_snapshot",   true,  &ControlHub::cmdExportVnaSnapshot},
         {"export_spectrum_snapshot", true, &ControlHub::cmdExportSpectrumSnapshot},
         {"export_peaks_csv",    true,  &ControlHub::cmdExportPeaksCsv},
@@ -2103,14 +2105,14 @@ QJsonObject ControlHub::cmdMemoryAdd(const QJsonObject& a) {
     o["command"] = "memory_add";
     QString scope, scopeId, key, content, bad;
     if (!memoryHubArgs(a, &scope, &scopeId, &key, &content, &bad)) return errResult(bad);
-    mbdsdr::ai::MemoryStore store(mbdsdr::ai::defaultMemoryDbPath());
     QString err;
-    if (!store.open(&err)) { o["ok"] = false; o["error"] = QStringLiteral("记忆库不可用：%1").arg(err); return o; }
-    if (!store.add(scope, scopeId, key, content, &err)) {
+    if (!mbdsdr::ai::memoryWriter().submit(mbdsdr::ai::MemoryWriteRequest::Add,
+                                            scope, scopeId, key, content, &err)) {
         o["ok"] = false; o["error"] = err;
-        o["hint"] = QStringLiteral("若 key 已存在，用 memory_update 覆盖");
     } else {
-        o["stored"] = true; o["scope"] = scope; o["scope_id"] = scopeId; o["key"] = key;
+        o["queued"] = true;
+        o["pending_count"] = mbdsdr::ai::memoryWriter().pendingCount();
+        o["scope"] = scope; o["scope_id"] = scopeId; o["key"] = key;
     }
     return o;
 }
@@ -2144,13 +2146,37 @@ QJsonObject ControlHub::cmdMemoryUpdate(const QJsonObject& a) {
     o["command"] = "memory_update";
     QString scope, scopeId, key, content, bad;
     if (!memoryHubArgs(a, &scope, &scopeId, &key, &content, &bad)) return errResult(bad);
-    mbdsdr::ai::MemoryStore store(mbdsdr::ai::defaultMemoryDbPath());
     QString err;
-    if (!store.open(&err)) { o["ok"] = false; o["error"] = QStringLiteral("记忆库不可用：%1").arg(err); return o; }
-    if (!store.update(scope, scopeId, key, content, &err)) {
+    if (!mbdsdr::ai::memoryWriter().submit(mbdsdr::ai::MemoryWriteRequest::Update,
+                                            scope, scopeId, key, content, &err)) {
         o["ok"] = false; o["error"] = err;
     } else {
-        o["upserted"] = true; o["scope"] = scope; o["scope_id"] = scopeId; o["key"] = key;
+        o["queued"] = true;
+        o["pending_count"] = mbdsdr::ai::memoryWriter().pendingCount();
+        o["scope"] = scope; o["scope_id"] = scopeId; o["key"] = key;
+    }
+    return o;
+}
+
+QJsonObject ControlHub::cmdCheckpointStatus(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "checkpoint_status";
+    o["pending_count"] = mbdsdr::ai::memoryWriter().pendingCount();
+    o["queue_depth"] = mbdsdr::ai::memoryWriter().queueDepth();
+    o["last_flush_ms"] = (double)mbdsdr::ai::memoryWriter().lastFlushMs();
+    return o;
+}
+
+QJsonObject ControlHub::cmdMemoryFlush(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "memory_flush";
+    QString err;
+    const int written = mbdsdr::ai::memoryWriter().flush(&err);
+    o["written"] = written;
+    o["checkpoint_rewritten"] = true;
+    if (!err.isEmpty()) {
+        o["ok"] = false; o["error"] = err;
+        o["note"] = QStringLiteral("部分条目落库失败；已处理 %1 条").arg(written);
     }
     return o;
 }

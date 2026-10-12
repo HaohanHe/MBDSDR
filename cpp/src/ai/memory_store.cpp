@@ -276,6 +276,7 @@ bool MemoryStore::update(const QString& scope, const QString& scopeId,
 QList<MemoryHit> MemoryStore::search(const QString& query,
                                      const QString& scopeFilter,
                                      int limit, QString* err) {
+    QMutexLocker lock(&m_searchGuard);
     QList<MemoryHit> out;
     auto* db = static_cast<sqlite3*>(m_db);
     if (!db) { if (err) *err = QStringLiteral("记忆库未打开"); return out; }
