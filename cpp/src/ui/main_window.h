@@ -464,8 +464,10 @@ private:
     QFrame*         guideCard_ = nullptr;
     QPushButton*    guideDismissBtn_ = nullptr;
     QPushButton*    guideConnectBtn_ = nullptr;
+    QLabel*         guideStepsLabel_ = nullptr;
     void            buildGuideCard();
     void            dismissGuideCard();
+    void            updateGuideCardForTab(bool vnaDomain);
 
     // ---- Device info panel (real readback; honest empty state) -----------
     // Device name / tuning range / sample-rate range come from

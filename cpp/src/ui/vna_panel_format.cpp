@@ -8,8 +8,9 @@ namespace ui {
 
 QString vnaPortHintText() {
     // Honest identification hint: NanoVNA H/H4 enumerate as STM32 CDC.
+    // Kept short so it wraps cleanly in the narrow right rail (no clipping).
     return QString::fromUtf8(
-        "USB 串口：VID:PID 0483:5740（STM32 CDC）；未检测到设备时保持空态");
+        "串口：0483:5740（STM32 CDC）；无设备时空态");
 }
 
 QString vnaStatusText(bool connected, const QString& model,

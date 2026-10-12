@@ -2431,8 +2431,9 @@ MainWindow::MainWindow(QWidget* parent)
         // is selected; do not force when leaving other right tabs.
         QObject::connect(rightTabs_, &QTabWidget::currentChanged,
                          this, [this, vnaIdx](int idx) {
-            if (rightTabs_->tabText(idx) == QStringLiteral("VNA"))
-                centerTabs_->setCurrentIndex(vnaIdx);
+            const bool vnaDomain = (rightTabs_->tabText(idx) == QStringLiteral("VNA"));
+            if (vnaDomain) centerTabs_->setCurrentIndex(vnaIdx);
+            updateGuideCardForTab(vnaDomain);
         });
     }
 
@@ -5985,6 +5986,7 @@ void MainWindow::buildGuideCard() {
         QStringLiteral("① 连接 RTL-SDR　　② 调谐频率　　③ 选解调模式"), card);
     steps->setObjectName("dockHint");
     steps->setWordWrap(true);
+    guideStepsLabel_ = steps;
     textCol->addWidget(title);
     textCol->addWidget(steps);
     lay->addLayout(textCol, 1);
@@ -6017,6 +6019,15 @@ void MainWindow::dismissGuideCard() {
 
 bool MainWindow::harnessGuideCardVisible() const {
     return guideCard_ && guideCard_->isVisible();
+}
+
+// Switch the onboarding three-step copy to match the active instrument domain.
+// Honest: VNA steps mirror the real NanoVNA connect -> calibrate -> sweep path.
+void MainWindow::updateGuideCardForTab(bool vnaDomain) {
+    if (!guideStepsLabel_) return;
+    guideStepsLabel_->setText(vnaDomain
+        ? QStringLiteral("① 连接 NanoVNA　　② 校准（load/open/short/thru）　　③ 扫频测量")
+        : QStringLiteral("① 连接 RTL-SDR　　② 调谐频率　　③ 选解调模式"));
 }
 
 void MainWindow::setControlsEnabled(bool hw, bool hasData) {
