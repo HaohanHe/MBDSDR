@@ -21,7 +21,7 @@ namespace dsp {
 
 class TestSignalSource : public ISource {
 public:
-    explicit TestSignalSource(double sampleRateHz = 2.4e6,
+    explicit TestSignalSource(double sampleRateHz = tokens::kDefaultSampleRateHz,
                               double centerFreqHz = 98.5e6);
 
     bool start() override;

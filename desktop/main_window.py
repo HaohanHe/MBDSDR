@@ -54,6 +54,7 @@ from module_panel import ModulePanel
 from tokens import tokens
 from panel_registry import registry
 from dock_layout_manager import DockLayoutManager
+from constants import DEFAULT_SAMPLE_RATE_HZ
 # 气象云图 / 多普勒定轨面板（懒加载：构造时只建 Qt 控件，后端 ToolRegistry
 # 在用户首次点解码/定轨时才创建，避免拖慢启动）。
 from weather_panel import WeatherPanel
@@ -299,7 +300,7 @@ class MainWindow(QMainWindow):
         self._recording: bool = False
         self._record_file_path: Optional[str] = None
         self._record_iq_buffer: list = []
-        self._record_sr: float = 2_400_000.0
+        self._record_sr: float = float(DEFAULT_SAMPLE_RATE_HZ)
         self._record_center_hz: float = 0.0
         self._record_guard: bool = False  # 同步两个录音按钮时防重入
         # sidecar 元数据（开始录制时从真实后端捕获，停止落盘时写入 .json）
@@ -1672,7 +1673,7 @@ class MainWindow(QMainWindow):
             pass
         try:
             self.control_panel.set_sample_rate(
-                float(s.get("sample_rate_hz", 2_048_000.0)))
+                float(s.get("sample_rate_hz", DEFAULT_SAMPLE_RATE_HZ)))
         except Exception:
             pass
         try:
@@ -1784,7 +1785,7 @@ class MainWindow(QMainWindow):
 
         ok = self._connect_backend(
             backend,
-            sample_rate=2_048_000.0,
+            sample_rate=float(DEFAULT_SAMPLE_RATE_HZ),
             gain=20.0,
             ppm=0,
             agc=True,
@@ -1816,7 +1817,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def _connect_backend(self, backend, sample_rate: float = 2_048_000.0,
+    def _connect_backend(self, backend, sample_rate: float = float(DEFAULT_SAMPLE_RATE_HZ),
                          gain: float = 20.0, ppm: int = 0,
                          agc: bool = True, offset_tuning: bool = False) -> bool:
         """通用后端连接流程：connect → 成功则切状态 + 下发参数 + 启动 IQ 流。
@@ -1980,11 +1981,11 @@ class MainWindow(QMainWindow):
             for _r in RTLSDRBackend.SAMPLE_RATES:
                 sr_combo.addItem(f"{_r / 1e6:.3f} MS/s", _r)
             # 默认 2.048 MS/s（与后端 DEFAULT_SAMPLE_RATE 对齐）
-            _idx = sr_combo.findData(2_048_000)
+            _idx = sr_combo.findData(DEFAULT_SAMPLE_RATE_HZ)
             if _idx >= 0:
                 sr_combo.setCurrentIndex(_idx)
         except Exception:
-            sr_combo.addItem("2.048 MS/s", 2_048_000)
+            sr_combo.addItem("2.048 MS/s", DEFAULT_SAMPLE_RATE_HZ)
         param_form.addRow("采样率", sr_combo)
 
         gain_spin = QSpinBox()
@@ -2066,7 +2067,7 @@ class MainWindow(QMainWindow):
             return  # "未发现设备"项不可选；兜底
 
         # 收集对话框参数（WebSocket 路径不用）
-        chosen_sr = float(sr_combo.currentData() or 2_048_000)
+        chosen_sr = float(sr_combo.currentData() or DEFAULT_SAMPLE_RATE_HZ)
         chosen_gain = float(gain_spin.value())
         chosen_ppm = int(ppm_spin.value())
         chosen_agc = bool(agc_chk.isChecked())
@@ -3326,9 +3327,10 @@ class MainWindow(QMainWindow):
         if not callable(read):
             return None, None
         try:
-            sr = float(getattr(backend, "get_sample_rate", lambda: 2_400_000.0)())
+            sr = float(getattr(backend, "get_sample_rate",
+                               lambda: float(DEFAULT_SAMPLE_RATE_HZ))())
         except Exception:
-            sr = 2_400_000.0
+            sr = float(DEFAULT_SAMPLE_RATE_HZ)
         return read, sr
 
     def _tap_new_spacetime_iq(self, iq: np.ndarray, sr: float) -> None:
@@ -3796,7 +3798,7 @@ class MainWindow(QMainWindow):
         try:
             sr = float(backend.get_sample_rate())
         except Exception:
-            sr = 2_400_000.0
+            sr = float(DEFAULT_SAMPLE_RATE_HZ)
         try:
             center_hz = float(backend.get_frequency())
         except Exception:
@@ -4339,7 +4341,7 @@ class MainWindow(QMainWindow):
             return
         ok = self._connect_backend(
             backend,
-            sample_rate=float(dev.get("_sample_rate", 2_048_000.0)),
+            sample_rate=float(dev.get("_sample_rate", DEFAULT_SAMPLE_RATE_HZ)),
             gain=float(dev.get("_gain", 20.0)),
             ppm=int(dev.get("_ppm", 0)),
             agc=False,
@@ -4537,7 +4539,7 @@ class MainWindow(QMainWindow):
         try:
             sr = float(backend.get_sample_rate())
         except Exception:
-            sr = 2_400_000.0
+            sr = float(DEFAULT_SAMPLE_RATE_HZ)
         dlg = QDialog(self)
         dlg.setWindowTitle("扫频找台")
         dlg.setMinimumWidth(380)
@@ -4716,7 +4718,7 @@ class MainWindow(QMainWindow):
         if iq.size < 64:
             QMessageBox.information(self, "回放", "文件中有效样本太少，无法回放。")
             return
-        sr = float(rec.get("sample_rate", 2.4e6))
+        sr = float(rec.get("sample_rate", DEFAULT_SAMPLE_RATE_HZ))
         center_hz = float(rec.get("center_freq_hz", 0.0))
 
         # 停止实时轮询（回放期间独占频谱）；结束后按当时连接状态恢复

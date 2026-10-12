@@ -7,6 +7,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QScopeGuard>
 
 #include "ai/agent_tools.h"
 #include "ai/tool_schema.h"
@@ -31,6 +32,7 @@ private slots:
     void testTuneTool();
     void testModeTool();
     void testConfigFields();
+    void testConfigEnvPriority();
     void testLocalFrequency();
     void testLocalMode();
     void testLocalUnknown();
@@ -167,6 +169,44 @@ void TestAgent::testConfigFields() {
     cfg.model = "test-model";
     QVERIFY(cfg.isConfigured());
     QCOMPARE(cfg.baseUrl, QString("https://test.example.com/v1"));
+}
+
+// Pin the env > config-file priority in AiConfig::load(). The historical bug
+// was: `if (!envKey.isEmpty()) apiKey = obj["api_key"]` -- which overwrote a
+// freshly-read env value with whatever the file held (including empty). After
+// the fix, an env value must survive load() even when a file is present, and
+// once the env is unset the previously-set env value must not leak into a
+// subsequent load(). We do not control the on-disk config path, so we assert
+// the two observable invariants the priority fix guarantees.
+void TestAgent::testConfigEnvPriority() {
+    // Snapshot + clear any pre-existing env so the test is self-contained.
+    const QByteArray savedEnv = qgetenv("MBDSDR_API_KEY");
+    auto restore = qScopeGuard([savedEnv]() {
+        if (savedEnv.isEmpty()) qunsetenv("MBDSDR_API_KEY");
+        else qputenv("MBDSDR_API_KEY", savedEnv);
+    });
+
+    // (1) Env set -> load() must pick the env value and must NOT let any file
+    //     value (empty or otherwise) clobber it.
+    qputenv("MBDSDR_API_KEY", "env-priority-key-123");
+    {
+        ai::AiConfig cfg;
+        cfg.apiKey.clear();
+        cfg.load();
+        QCOMPARE(cfg.apiKey, QString("env-priority-key-123"));
+    }
+
+    // (2) Env unset -> a fresh load() must not carry over the previous env
+    //     value; it reflects the file (or empty). This proves load() reads the
+    //     env per-call and the priority branch is actually evaluated each time.
+    qunsetenv("MBDSDR_API_KEY");
+    {
+        ai::AiConfig cfg;
+        cfg.apiKey.clear();
+        cfg.load();
+        QVERIFY2(cfg.apiKey != QString("env-priority-key-123"),
+                 "unset env must not leak into a later load()");
+    }
 }
 
 void TestAgent::testLocalFrequency() {

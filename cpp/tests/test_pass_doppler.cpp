@@ -22,6 +22,7 @@
 // bands rather than the exact oracle.
 
 #include "dsp/tle_client.h"
+#include "ai/sat_task_planner.h"
 
 #include <cmath>
 #include <cstdio>
@@ -32,6 +33,7 @@
 #include <QDate>
 
 using namespace mbdsdr::dsp;
+using namespace mbdsdr::ai;
 
 static int failures = 0;
 static void check(bool c, const char* m) {
@@ -113,6 +115,71 @@ int main() {
 
     // f0=0 must yield zero Doppler (honest unknown carrier).
     check(dopplerHz(0.0, tAos.rangeRateKmS) == 0.0, "f0=0 => fd=0");
+
+    // ----------------------------------------------------------------------
+    // Freshness / demo-tagging contract for planSatelliteCapture.
+    //
+    // The test environment has no on-disk celestrak cache, so the public
+    // planSatelliteCapture() must NOT silently return ok=true from the 2006
+    // builtinTle() snapshot. It must instead return demo=true, ok=false, and a
+    // non-empty human warning. The pure seam (planCaptureFromEntries) must never
+    // tag demo=true itself -- that tag is the public wrapper's job.
+    // ----------------------------------------------------------------------
+    {
+        // (b) The 2006 epoch on line 1 of 28057 is orders of magnitude older than
+        // kMaxTleAgeDays (30 days) when evaluated against "now" in 2026.
+        const QDateTime epoch2006 = TleClient::parseTleEpoch(tle.line1);
+        check(epoch2006.isValid(), "2006 TLE line1 parses to a valid epoch");
+        const double daysOld = TleClient::daysSinceEpoch(epoch2006, QDateTime::currentDateTimeUtc());
+        check(daysOld > kMaxTleAgeDays,
+              "2006 epoch TLE is far older than kMaxTleAgeDays => stale");
+        std::printf("  2006 epoch is %.0f days old (threshold %.1f)\n",
+                    daysOld, kMaxTleAgeDays);
+
+        // (a) With no fresh cache in the test env, the public planner must tag
+        // the builtin reference result as demo-only and refuse to call ok=true.
+        const SatTaskResult sr = planSatelliteCapture(
+            QStringLiteral("CBERS"), 40.0, -100.0,
+            QDateTime::currentDateTimeUtc(), 12);
+        check(sr.demo == true, "no fresh cache => demo==true");
+        check(sr.ok == false,  "no fresh cache => ok==false (never a fake real plan)");
+        check(!sr.warning.isEmpty(), "demo warning is non-empty");
+        std::printf("  demo result: ok=%d demo=%d warning=\"%s\"\n",
+                    (int)sr.ok, (int)sr.demo, sr.warning.toUtf8().constData());
+
+        // (c) Pure seam: feed the oracle-fresh (epoch-relative) 28057 TLE at the
+        // oracle sweep start. The seam trusts its input -- it must NOT tag demo,
+        // and when a pass is found it must set ok=true. We are only pinning the
+        // demo/ok tagging contract, not re-claiming physical accuracy.
+        const SatTaskResult seam = planCaptureFromEntries(
+            {tle}, QStringLiteral("CBERS"), 40.0, -100.0, start, 6);
+        check(seam.demo == false, "pure seam never tags demo=true itself");
+        check(seam.ok == true,    "pure seam on a known-pass TLE returns ok=true");
+
+        // Freshness gate: a TLE whose epoch is within kMaxTleAgeDays must be
+        // accepted; the 2006 one must be rejected. We hand-craft a line1 with a
+        // 30-day-ago epoch and reuse the rest of the 28057 record shape.
+        QList<TleEntry> freshList;
+        TleEntry freshE = tle;
+        // Build a line1 with a recent epoch (today - 5 days). YYDDD.DDDDD.
+        const QDateTime now = QDateTime::currentDateTimeUtc();
+        const QDateTime recent = now.addDays(-5);
+        const int yy = recent.date().year() % 100;
+        const int doy = recent.date().dayOfYear();
+        const double frac =
+            static_cast<double>(recent.time().msecsSinceStartOfDay()) / 86400000.0;
+        // Reuse the trailing fields of the original line1; only cols 19..32 move.
+        freshE.line1 = QString("1 28057U 03049A   %1%2 .00000060  00000-0  35940-4 0  1836")
+                           .arg(yy, 2, 10, QLatin1Char('0'))
+                           .arg(doy + frac, 0, 'f', 8);
+        freshList.append(freshE);
+        check(entriesAreFresh(freshList, now) == true,
+              "entriesAreFresh accepts a 5-day-old epoch");
+        QList<TleEntry> staleList;
+        staleList.append(tle);
+        check(entriesAreFresh(staleList, now) == false,
+              "entriesAreFresh rejects the 2006 builtin snapshot");
+    }
 
     if (failures == 0) std::printf("test_pass_doppler: ALL PASS\n");
     else std::printf("test_pass_doppler: %d FAILURE(S)\n", failures);

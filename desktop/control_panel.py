@@ -29,6 +29,8 @@ if _HERE not in _sys.path:
 
 from tokens import tokens
 
+from constants import DEFAULT_SAMPLE_RATE_HZ
+
 # 解调模式元数据（默认带宽/显示名/解调函数）已收口到 mode_registry。
 # 这里只取查询函数；旧字典 MODE_VFO_BANDWIDTH 作为向后兼容别名在下方导出。
 from mode_registry import (
@@ -420,9 +422,9 @@ class ControlPanel(QWidget):
             else:
                 _txt = f"{_rate / 1e3:.0f} kHz"
             self.sample_rate_combo.addItem(_txt, float(_rate))
-        # 默认选中 2.048 MHz（索引 5）
+        # 默认选中项目统一基准采样率（2.048 MHz，索引随档位表定位，不写死索引）
         try:
-            _default_idx = self.SAMPLE_RATES.index(2_048_000)
+            _default_idx = self.SAMPLE_RATES.index(DEFAULT_SAMPLE_RATE_HZ)
         except ValueError:
             _default_idx = 0
         self.sample_rate_combo.setCurrentIndex(_default_idx)

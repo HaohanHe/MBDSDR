@@ -9,6 +9,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # harmless on Linux where these are already defined.
 add_compile_definitions(_USE_MATH_DEFINES)
 
+# Source files are UTF-8 without BOM. Without /utf-8, MSVC reads .cpp sources
+# using the active system code page (e.g. GBK on a Chinese Windows install),
+# which garbles every Chinese UI literal in the binary. This option tells MSVC
+# to treat both source execution and narrow-string literals as UTF-8. It is a
+# no-op on GCC/Clang (which already default to UTF-8) -- guarded to MSVC only so
+# we do not accidentally pass a non-portable flag elsewhere.
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()

@@ -16,6 +16,7 @@ AI 定义无线电全栈开源平台 - 桌面客户端。
 import sys
 import os
 import argparse
+import tempfile
 
 # 确保能导入同目录和上层目录模块
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -29,7 +30,56 @@ from themes import get_theme, DEFAULT_THEME, get_app_font
 from main_window import MainWindow
 
 
+def _ensure_stdio_for_pythonw():
+    """pythonw.exe 启动时没有控制台，sys.stdout/sys.stderr 会是 None。
+
+    此时任何 print() 落到 None 都会在启动阶段就抛 AttributeError 直接崩。
+    这里在最早时机把二者补回来：
+      1) 优先追加写日志文件（desktop 配置目录 ~/.config/MBDSDR，失败再退回
+         系统临时目录 tempfile.gettempdir() 下的 mbdsdr_desktop.log），
+         追加模式、UTF-8、errors="replace"；
+      2) 日志文件也打不开时退到 os.devnull（黑洞），保证任何 print 都不崩。
+    正常 python3 运行时 stdout/stderr 都不是 None，本函数直接返回、零副作用。
+    """
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+
+    def _open_log():
+        candidates = []
+        try:
+            cfg_dir = os.path.join(os.path.expanduser("~"), ".config", "MBDSDR")
+            os.makedirs(cfg_dir, exist_ok=True)
+            candidates.append(os.path.join(cfg_dir, "mbdsdr_desktop.log"))
+        except Exception:
+            pass
+        try:
+            candidates.append(os.path.join(tempfile.gettempdir(), "mbdsdr_desktop.log"))
+        except Exception:
+            pass
+        for path in candidates:
+            try:
+                return open(path, "a", encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+        # 日志目录都不可用 → 黑洞兜底
+        return open(os.devnull, "w", encoding="utf-8", errors="replace")
+
+    if sys.stdout is None:
+        try:
+            sys.stdout = _open_log()
+        except Exception:
+            sys.stdout = open(os.devnull, "w", encoding="utf-8", errors="replace")
+    if sys.stderr is None:
+        try:
+            sys.stderr = _open_log()
+        except Exception:
+            sys.stderr = sys.stdout
+
+
 def main():
+    # pythonw.exe 无控制台：必须在任何 print / argparse --help 之前兜底 stdio
+    _ensure_stdio_for_pythonw()
+
     parser = argparse.ArgumentParser(description="MBDSDR - AI 定义无线电桌面端")
     parser.add_argument("--host", type=str, default=None, help="设备 IP 地址")
     parser.add_argument("--port", type=int, default=81, help="设备端口")

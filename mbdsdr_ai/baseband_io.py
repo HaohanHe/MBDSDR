@@ -21,6 +21,7 @@ from __future__ import annotations
 import numpy as np
 import os
 import json
+import tempfile
 import wave as _wave
 from datetime import datetime, timezone
 from typing import Dict, Optional
@@ -209,11 +210,12 @@ if __name__ == "__main__":
     inter = np.empty(2000)
     inter[0::2] = iq.real
     inter[1::2] = iq.imag
-    info = save_iq(inter.tolist(), "/tmp/test.iq", 2.4e6,
+    demo_path = os.path.join(tempfile.gettempdir(), "test.iq")
+    info = save_iq(inter.tolist(), demo_path, 2.4e6,
                    center_freq_hz=100e6, note="test",
                    gain_db=20.5, device="RTL-SDR #0", driver="rtlsdr")
     print("存:", info["samples"], "samples, sidecar:", info["sidecar"])
-    back = load_iq("/tmp/test.iq")
+    back = load_iq(demo_path)
     print("读回:", back["samples"], "samples, sr:", back["sample_rate"],
           "gain:", back["gain_db"], "dev:", back["device"])
     # 验证虚部没丢

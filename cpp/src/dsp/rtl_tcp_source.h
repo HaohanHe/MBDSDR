@@ -68,7 +68,7 @@ protected:
     std::atomic<bool> eof_{false};  // peer closed / reset detected
     QString lastError_;
     double freqHz_ = 98.5e6;
-    double rateHz_ = 2.4e6;
+    double rateHz_ = tokens::kDefaultSampleRateHz;
     double gainDb_ = 0.0;
     int  tunerTypeRaw_ = -1;        // decoded from handshake; -1 = unknown
     int  tunerGainCount_ = 0;       // decoded from handshake; 0 = not reported

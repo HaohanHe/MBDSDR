@@ -72,7 +72,11 @@ class AgentConfig:
         if env_key and not self.api_key:
             self.api_key = env_key
 
-        env_url = os.environ.get("MBDSDR_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+        # API Base 规范环境变量为 MBDSDR_BASE_URL；MBDSDR_API_BASE 是旧名，
+        # 作兼容别名保留（不破坏已用旧名的用户）；OPENAI_BASE_URL 最后兜底。
+        env_url = (os.environ.get("MBDSDR_BASE_URL")
+                   or os.environ.get("MBDSDR_API_BASE")
+                   or os.environ.get("OPENAI_BASE_URL"))
         if env_url:
             self.base_url = env_url
 

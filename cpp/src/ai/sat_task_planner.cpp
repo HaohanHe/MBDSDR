@@ -7,9 +7,24 @@
 namespace mbdsdr {
 namespace ai {
 
-SatTaskResult planSatelliteCapture(const QString& satName,
-                                   double stationLatDeg, double stationLonDeg,
-                                   const QDateTime& nowUtc, int hoursAhead) {
+// ---------------------------------------------------------------------------
+// Pure seams (no disk / no network) -- see header for the honesty contract.
+// ---------------------------------------------------------------------------
+bool entriesAreFresh(const QList<dsp::TleEntry>& entries, const QDateTime& nowUtc) {
+    if (entries.isEmpty()) return false;
+    for (const dsp::TleEntry& e : entries) {
+        const QDateTime epoch = dsp::TleClient::parseTleEpoch(e.line1);
+        if (!epoch.isValid()) return false;
+        const double days = dsp::TleClient::daysSinceEpoch(epoch, nowUtc.toUTC());
+        if (days < 0.0 || days > kMaxTleAgeDays) return false;
+    }
+    return true;
+}
+
+SatTaskResult planCaptureFromEntries(const QList<dsp::TleEntry>& entries,
+                                     const QString& satName,
+                                     double stationLatDeg, double stationLonDeg,
+                                     const QDateTime& nowUtc, int hoursAhead) {
     SatTaskResult out;
     if (!qIsFinite(stationLatDeg) || !qIsFinite(stationLonDeg)) {
         out.error = QString::fromUtf8("站点坐标无效");
@@ -19,10 +34,8 @@ SatTaskResult planSatelliteCapture(const QString& satName,
         out.error = QString::fromUtf8("未选择卫星");
         return out;
     }
-
-    const QList<dsp::TleEntry> entries = dsp::TleClient::builtinTle();
     if (entries.isEmpty()) {
-        out.error = QString::fromUtf8("无可用 TLE（离线缓存为空）");
+        out.error = QString::fromUtf8("无可用 TLE");
         return out;
     }
 
@@ -32,7 +45,7 @@ SatTaskResult planSatelliteCapture(const QString& satName,
         if (e.name.contains(satName, Qt::CaseInsensitive))
             matched.append(e);
     if (matched.isEmpty()) {
-        out.error = QString::fromUtf8("离线 TLE 中找不到卫星「%1」").arg(satName);
+        out.error = QString::fromUtf8("TLE 中找不到卫星「%1」").arg(satName);
         return out;
     }
 
@@ -71,6 +84,56 @@ SatTaskResult planSatelliteCapture(const QString& satName,
     out.plan.name = QString::fromUtf8("卫星捕获：%1").arg(p.name);
     out.ok = true;
     return out;
+}
+
+SatTaskResult planSatelliteCapture(const QString& satName,
+                                   double stationLatDeg, double stationLonDeg,
+                                   const QDateTime& nowUtc, int hoursAhead) {
+    // Step 1: cheap input validation (no disk / no SGP4 work).
+    SatTaskResult out;
+    if (!qIsFinite(stationLatDeg) || !qIsFinite(stationLonDeg)) {
+        out.error = QString::fromUtf8("站点坐标无效");
+        return out;
+    }
+    if (satName.trimmed().isEmpty()) {
+        out.error = QString::fromUtf8("未选择卫星");
+        return out;
+    }
+
+    // Step 2: try the fresh on-disk cache first.
+    dsp::TleClient client;
+    const dsp::TleCache cache = client.cachedTle();
+    if (cache.valid && !cache.entries.isEmpty() &&
+        entriesAreFresh(cache.entries, nowUtc.toUTC())) {
+        return planCaptureFromEntries(cache.entries, satName, stationLatDeg,
+                                      stationLonDeg, nowUtc, hoursAhead);
+    }
+
+    // Step 3: no fresh cache. builtinTle() is the 2006 offline demo snapshot --
+    // we still propagate it so the UI has a reference number to show, but the
+    // result is explicitly tagged demo-only and MUST NOT be treated as a real
+    // upcoming pass. ok=false so callers (main_window.cpp AI plan path) route
+    // into the honest-failure UI branch; warning carries the operator-facing
+    // notice verbatim.
+    const QList<dsp::TleEntry> builtin = dsp::TleClient::builtinTle();
+    if (builtin.isEmpty()) {
+        out.error = QString::fromUtf8("无新鲜 TLE 缓存，且离线演示 TLE 为空");
+        out.warning = out.error;
+        return out;
+    }
+    SatTaskResult demo = planCaptureFromEntries(builtin, satName, stationLatDeg,
+                                                stationLonDeg, nowUtc, hoursAhead);
+    demo.demo = true;
+    demo.ok = false;
+    demo.warning = QString::fromUtf8(
+        "演示数据：内置 TLE 历元为 2006 年、已过期，结果仅为离线演示，"
+        "不代表真实过境，不能用于真实捕获");
+    // If the pure seam already failed (e.g. satellite not in builtin list, no
+    // pass in window), preserve its error but still surface the demo warning so
+    // the operator understands WHY no fresh result was produced.
+    if (!demo.ok && demo.error.isEmpty()) demo.error = demo.warning;
+    if (demo.error.isEmpty()) demo.error = demo.warning;
+    return demo;
 }
 
 // ---------------------------------------------------------------------------

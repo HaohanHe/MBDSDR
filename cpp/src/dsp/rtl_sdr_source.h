@@ -76,7 +76,7 @@ private:
     // Null whenever no device is open -- in stub builds it stays null forever.
     void* dev_ = nullptr;
     double f0_ = 98.5e6;
-    double fs_ = 2.4e6;
+    double fs_ = tokens::kDefaultSampleRateHz;
     double gainDb_ = 20.0;
     bool   running_ = false;
 

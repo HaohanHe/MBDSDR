@@ -278,6 +278,20 @@ inline constexpr double kGainMaxDb = 49.6;
 inline constexpr double kGainStepDb = 0.6;
 inline const std::initializer_list<double> kSampleRatesHz = {1.024e6, 2.048e6, 2.4e6, 3.2e6};
 
+// Default I/Q sample rate for the C++/Qt receiver stack. This 2.4 MS/s default
+// is DELIBERATELY chosen to align with SDR++ upstream (the project we are
+// forking UI/conventions from) so that band presets, waterfall width, and the
+// RTL-SDR gain table line up with what SDR++ users expect.
+//
+// DO NOT "harmonise" this to 2.048e6 to match the Python reference stack:
+// mbdsdr_ai/sdr_backend.py deliberately runs at 2.048 MS/s (an integer
+// multiple of 1.024 MHz, the cleanest RTL-SDR crystal-derived rate) because
+// the Python side targets gnuradio-style decimation chains, not the Qt/SDR++
+// UI. The cross-stack difference is an explicit design choice, not drift.
+// Keep kFixtureSrcRateHz (test fixture, 2.048e6) separate from this production
+// default -- see below.
+inline constexpr double kDefaultSampleRateHz = 2.4e6;
+
 // Continuous-capture auto-segmentation: after this many seconds of wall-clock
 // (by sample count) the recorder finalises the current SigMF capture and opens a
 // fresh, collision-avoided file. 0 = unlimited (single file). Not a hard-coded

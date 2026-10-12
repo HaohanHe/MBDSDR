@@ -15,6 +15,8 @@ import numpy as np
 import time
 from typing import Optional, List, Tuple
 
+from constants import DEFAULT_SAMPLE_RATE_HZ
+
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, Slot, QTimer
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QLinearGradient, QImage,
@@ -103,7 +105,7 @@ class SpectrumDataGenerator:
         self.num_bins = num_bins
         # 单位：Hz（SDR++ main_window.cpp:84-85 默认带宽 8MHz，这里给个常见 FM 广播中心）
         self.center_freq_hz = 98.5e6
-        self.sample_rate_hz = 2.4e6
+        self.sample_rate_hz = DEFAULT_SAMPLE_RATE_HZ
         # FFT 参数；默认窗 Nuttall（main_window.cpp:91 IQFrontEnd::FFTWindow::NUTTALL）
         self.window_name = "Nuttall"
         self.fft_size = 2048
@@ -1227,7 +1229,7 @@ class SpectrumPanel(QWidget):
 
     # 向后兼容：main_window 当前调用 set_iq_data(iq, sample_rate)
     @Slot(object, float)
-    def set_iq_data(self, iq, sample_rate: float = 2_400_000.0):
+    def set_iq_data(self, iq, sample_rate: float = float(DEFAULT_SAMPLE_RATE_HZ)):
         cf = self.generator.center_freq_hz
         self.update_iq(iq, cf, sample_rate)
 

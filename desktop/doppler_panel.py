@@ -43,6 +43,8 @@ from matplotlib.figure import Figure  # noqa: E402
 
 from themes import get_theme, DEFAULT_THEME
 
+from constants import DEFAULT_SAMPLE_RATE_HZ
+
 
 def _theme_colors() -> Dict[str, str]:
     return get_theme(DEFAULT_THEME).colors
@@ -362,7 +364,7 @@ class DopplerPanel(QWidget):
         freq_row = QHBoxLayout()
         self.f0_edit = QLineEdit(str(2271.0e6))
         self.f0_edit.setToolTip("下行中心频率 (Hz)")
-        self.fs_edit = QLineEdit(str(2.4e6))
+        self.fs_edit = QLineEdit(str(DEFAULT_SAMPLE_RATE_HZ))
         self.fs_edit.setToolTip("采样率 (Hz)；裸 IQ 文件需与此一致")
         freq_row.addWidget(QLabel("中心Hz")); freq_row.addWidget(self.f0_edit)
         freq_row.addWidget(QLabel("采样Hz")); freq_row.addWidget(self.fs_edit)

@@ -33,7 +33,7 @@ MCP 协议 (JSON-RPC 2.0 over stdio):
 配置:
   - API Key: 环境变量 MBDSDR_API_KEY 或 --api-key 参数
   - 模型: 环境变量 MBDSDR_MODEL 或 --model 参数 (默认 Qwen/Qwen3.6-35B-A3B)
-  - API Base: 环境变量 MBDSDR_API_BASE (默认 https://api.siliconflow.cn/v1)
+  - API Base: 环境变量 MBDSDR_BASE_URL（规范名；兼容旧名 MBDSDR_API_BASE）(默认 https://api.siliconflow.cn/v1)
 
 依赖: pip install numpy (MBDSDR AI 内核依赖)
 (标准库 json / sys / time / argparse / threading 无需安装)

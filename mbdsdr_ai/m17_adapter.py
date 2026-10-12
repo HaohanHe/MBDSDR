@@ -496,7 +496,9 @@ def register_m17_tools(registry) -> None:
     def _lsf_build(args):
         """构造并校验一个 M17 LSF。"""
         try:
-            src = str(args.get("src", "W9GL"))
+            # 占位呼号 N0CALL：FCC 标准虚构测试呼号，非真实电台。
+            # 纪律：真实呼号必须由调用方显式提供（args["src"]）。
+            src = str(args.get("src", "N0CALL"))
             dst = str(args.get("dst", ""))
             lsf = m17_build_lsf(src, dst)
             ok, s, d = m17_verify_lsf(lsf)
@@ -568,7 +570,8 @@ def register_m17_tools(registry) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "src": {"type": "string", "default": "W9GL"},
+                # N0CALL 为虚构测试呼号占位；真实呼号须由调用方提供。
+                "src": {"type": "string", "default": "N0CALL"},
                 "dst": {"type": "string", "default": ""},
             },
             "required": [],

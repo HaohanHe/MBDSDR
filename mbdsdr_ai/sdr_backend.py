@@ -49,6 +49,12 @@ from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# 项目统一默认采样率（Hz）。
+# 这是项目有意的选择：2.048 MS/s 是 1.024M 的整数倍，便于 ADS-B / 数字链路抽取；
+# 注意 SDR++ rtl_sdr_source 新设备默认其实是 2.4M（main.cpp:202），但本项目按
+# 设计基准统一选 2.048M。desktop / agent 等上层一律引用本常量，不要再写裸字面量。
+DEFAULT_SAMPLE_RATE_HZ = 2_048_000
+
 # 实时接收链 + 声卡输出（可选依赖，导入失败时音频路径安全降级，不崩）
 try:
     from .receive_chain import ReceiveChain
@@ -958,9 +964,10 @@ class RTLSDRBackend(SDRBackend):
         3_200_000,    # main.cpp:38
     ]
 
-    # 默认采样率：对齐 hint 的 2.048 MS/s（SDR++ main.cpp:202 默认 2.4M，
-    # 但我们按项目 hint 选 2.048M——1.024M 的整数倍，便于 ADS-B/数字链路抽取）。
-    DEFAULT_SAMPLE_RATE = 2_048_000
+    # 默认采样率：对齐项目统一基准 2.048 MS/s（模块级 DEFAULT_SAMPLE_RATE_HZ）。
+    # SDR++ main.cpp:202 新设备默认其实是 2.4M，但本项目按设计选 2.048M——
+    # 1.024M 的整数倍，便于 ADS-B/数字链路抽取。类属性保留以向后兼容。
+    DEFAULT_SAMPLE_RATE = DEFAULT_SAMPLE_RATE_HZ
 
     @classmethod
     def nearest_sample_rate(cls, rate_hz: float) -> int:

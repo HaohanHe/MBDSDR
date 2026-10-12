@@ -2719,7 +2719,7 @@ MainWindow::MainWindow(QWidget* parent)
                     // 1.024 MS/s is too narrow for 1090 MHz; step up to 2.4 MS/s
                     // if we're on the slowest rate. >=2.048 MS/s is fine.
                     if (srCombo_->currentIndex() == 0)
-                        srCombo_->setCurrentIndex(2);   // handler sets 2.4e6
+                        srCombo_->setCurrentIndex(2);   // handler sets tokens::kDefaultSampleRateHz (2.4 MS/s)
                 }
                 // --- Per-mode default bandwidth preset (B4) -------------------
                 // setDemodMode() already resets the selected VFO's bandwidth to
@@ -4825,7 +4825,7 @@ void MainWindow::restoreUiState() {
     // there is nothing to select yet; we remember the last rate as the
     // preference (used to pick the nearest option once a device appears) and
     // push it straight into the pipeline.
-    const double rateHz = s.value("rx/sampleRate", 2.4e6).toDouble();
+    const double rateHz = s.value("rx/sampleRate", tokens::kDefaultSampleRateHz).toDouble();
     lastSampleRateHz_ = rateHz;
 
     const QString demod = s.value("rx/demodMode", "NFM").toString();
@@ -5431,7 +5431,7 @@ void MainWindow::refreshDeviceCapabilities() {
     srCombo_->clear();
 
     const QList<double> rates = dsp::buildSampleRateOptions(caps);
-    const double preferred = lastSampleRateHz_ > 0.0 ? lastSampleRateHz_ : 2.4e6;
+    const double preferred = lastSampleRateHz_ > 0.0 ? lastSampleRateHz_ : tokens::kDefaultSampleRateHz;
     int bestIdx = -1;
     double bestDiff = std::numeric_limits<double>::infinity();
     for (double r : rates) {
@@ -7273,7 +7273,15 @@ void MainWindow::onRunAutoTask() {
         ai::SatTaskResult sr = ai::planSatelliteCapture(
             satName, lat, lon, QDateTime::currentDateTimeUtc(), 12);
         if (!sr.ok) {
-            const QString msg = QString::fromUtf8("卫星选频失败：%1").arg(sr.error);
+            // When planner fell back to the stale builtin TLE, sr.demo=true and
+            // sr.warning carries the operator-facing "demo data only, not a
+            // real pass" notice. Surface that verbatim so the chat/status bar
+            // shows WHY no real capture was produced, instead of a terse
+            // "选频失败" that hides the demo-data reason.
+            const QString reason = (sr.demo && !sr.warning.isEmpty())
+                                       ? sr.warning
+                                       : sr.error;
+            const QString msg = QString::fromUtf8("卫星选频失败：%1").arg(reason);
             if (aiStatus_) aiStatus_->setText(msg);
             if (aiSessionStore_ && !aiCurSessionId_.isEmpty()) {
                 aiSessionStore_->appendMessage(aiCurSessionId_,

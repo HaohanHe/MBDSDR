@@ -24,6 +24,8 @@ from typing import Optional
 
 import numpy as np
 
+from constants import DEFAULT_SAMPLE_RATE_HZ
+
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
@@ -96,7 +98,7 @@ class _ScanWorker(QThread):
         try:
             sr = float(be.get_sample_rate())
         except Exception:  # noqa: BLE001
-            sr = 2_400_000.0
+            sr = float(DEFAULT_SAMPLE_RATE_HZ)
 
         n_steps = max(1, int(round((self._f1 - self._f0) / self._step)))
         done_steps = [0]

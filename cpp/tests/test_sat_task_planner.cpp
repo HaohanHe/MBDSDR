@@ -3,6 +3,12 @@
 // propagator) to find CBERS-2's next pass, then assert the planner derives the
 // capture frequency = downlink carrier + peak-elevation Doppler and emits a real
 // capture TaskPlan. Unknown satellite / no downlink => honest ok=false.
+//
+// Note on data source: the public planSatelliteCapture() refuses to return
+// ok=true from the 2006 builtinTle() snapshot (it tags demo=true / ok=false
+// -- see sat_task_planner.h honesty contract). This test is about the SGP4 +
+// downlink math, not the freshness policy, so it goes through the pure seam
+// planCaptureFromEntries() with the builtin TLE list explicitly supplied.
 #include <QtTest/QtTest>
 #include <QDateTime>
 #include <QDate>
@@ -11,6 +17,7 @@
 #include <ctime>
 
 #include "ai/sat_task_planner.h"
+#include "dsp/tle_client.h"
 
 using namespace mbdsdr;
 
@@ -35,8 +42,11 @@ private slots:
 
 void TestSatTaskPlanner::findsPassAndAutoTunes() {
     const QDateTime start = cbersEpochStart();
-    ai::SatTaskResult r = ai::planSatelliteCapture(
-        "CBERS", 40.0, -100.0, start, 6);
+    // Pure seam: feed the builtin TLE list explicitly. The seam trusts its
+    // input and returns ok=true when a pass is found -- that is exactly the
+    // propagation + capture-frequency math this test pins.
+    ai::SatTaskResult r = ai::planCaptureFromEntries(
+        dsp::TleClient::builtinTle(), "CBERS", 40.0, -100.0, start, 6);
     QVERIFY2(r.ok, qPrintable(r.error));
     QCOMPARE(r.satName, QString::fromLatin1("CBERS 2"));
     QVERIFY(r.aosUtc.isValid());
@@ -56,8 +66,9 @@ void TestSatTaskPlanner::findsPassAndAutoTunes() {
 }
 
 void TestSatTaskPlanner::unknownSatHonest() {
-    ai::SatTaskResult r = ai::planSatelliteCapture(
-        "NOT_A_REAL_SAT_XYZ", 40.0, -100.0, cbersEpochStart(), 6);
+    ai::SatTaskResult r = ai::planCaptureFromEntries(
+        dsp::TleClient::builtinTle(), "NOT_A_REAL_SAT_XYZ", 40.0, -100.0,
+        cbersEpochStart(), 6);
     QVERIFY2(!r.ok, "unknown satellite must report honestly, not invent");
     QVERIFY(!r.error.isEmpty());
 }

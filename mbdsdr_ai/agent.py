@@ -20,6 +20,7 @@ import json
 import math
 import os
 import time
+import tempfile
 from typing import List, Dict, Any, Optional, Callable
 
 from .config import AgentConfig
@@ -1765,16 +1766,20 @@ class MBDSDRAgent:
     def _register_baseband_tools(self):
         """Baseband 录制/回放。"""
         from mbdsdr_ai.baseband_io import save_iq
+        # 统一默认采样率（修复#8：项目有意选 2.048M）。局部导入避免循环依赖。
+        from mbdsdr_ai.sdr_backend import DEFAULT_SAMPLE_RATE_HZ
 
         def _save(args):
             iq = args.get("iq")
             if not isinstance(iq, list):
                 return ToolResult(False, "iq 必须是复数采样列表")
             try:
+                # 默认落盘路径改跨平台临时目录，不再写死 /tmp
+                default_path = os.path.join(tempfile.gettempdir(), "mbdsdr_capture.iq")
                 info = save_iq(
                     iq,
-                    str(args.get("path", "/tmp/mbdsdr_capture.iq")),
-                    float(args.get("sample_rate", 2.4e6)),
+                    str(args.get("path", default_path)),
+                    float(args.get("sample_rate", DEFAULT_SAMPLE_RATE_HZ)),
                     center_freq_hz=float(args.get("center_freq_hz", 0)),
                     note=str(args.get("note", "")),
                 )
@@ -1790,7 +1795,7 @@ class MBDSDRAgent:
                 "type": "object",
                 "properties": {
                     "iq": {"type": "array", "items": {"type": "number"}},
-                    "path": {"type": "string", "description": "保存路径，默认 /tmp/mbdsdr_capture.iq"},
+                    "path": {"type": "string", "description": "保存路径，默认系统临时目录 mbdsdr_capture.iq"},
                     "sample_rate": {"type": "number"},
                     "center_freq_hz": {"type": "number"},
                     "note": {"type": "string"},

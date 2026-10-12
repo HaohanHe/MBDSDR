@@ -5,7 +5,7 @@
       "command": "python3",
       "args": ["/绝对路径/MBDSDR/mbdsdr_ai_mcp_server.py"],
       "env": {
-        "MBDSDR_API_BASE": "https://api.siliconflow.cn/v1",
+        "MBDSDR_BASE_URL": "https://api.siliconflow.cn/v1",
         "MBDSDR_MODEL": "Qwen/Qwen3.6-35B-A3B"
       }
     }
@@ -25,6 +25,7 @@
     "协议：JSON-RPC 2.0 over stdio，MCP protocolVersion 2024-11-05，每行一个 JSON。",
     "命令行自测：python3 mbdsdr_ai_mcp_server.py --cli list_tools；python3 mbdsdr_ai_mcp_server.py --cli call_tool sdr_status '{}'",
     "API Key 优先级：命令行 --api-key > ~/.mbdsdr/config.json > 环境变量 MBDSDR_API_KEY > 默认。密钥不入库。",
+    "API Base 规范环境变量为 MBDSDR_BASE_URL；旧名 MBDSDR_API_BASE 仍作兼容别名可用（二者等价）。",
     "工具返回为 JSON 文本，失败时 MCP isError=true，AI Host 可据此自纠换路。",
     "所有写操作（改频率/增益/录制/改代码）带状态检查点与守护者快照，可一键回滚。"
   ]

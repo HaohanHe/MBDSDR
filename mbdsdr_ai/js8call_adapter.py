@@ -223,11 +223,14 @@ def register_js8call_tools(registry) -> None:
 
     def _encode(args: Dict[str, Any]) -> ToolResult:
         try:
+            # 纪律：真实呼号/网格只能来自用户输入或配置。下面只是明确虚构的占位值
+            # （N0CALL/K1ABC 是 FCC 标准测试呼号段；EM12 是本仓 ft8 已使用的虚构测试网格），
+            # 不代表任何真实电台；调用方应显式传入自己的呼号与 Maidenhead 网格。
             msg = JS8Message(
                 type=int(args.get("type", 1)),
-                de=args.get("de", "BI4MIB"),
-                to=args.get("to", "SP1ABC"),
-                grid=args.get("grid", "OL95"),
+                de=args.get("de", "N0CALL"),
+                to=args.get("to", "K1ABC"),
+                grid=args.get("grid", "EM12"),
             )
             v = pack_message(msg)
             tones = message_to_tones(v)

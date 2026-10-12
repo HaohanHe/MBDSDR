@@ -33,6 +33,8 @@ except Exception:  # noqa: BLE001
     enumerate_all_sdr_devices = None  # type: ignore
     _ENUM_OK = False
 
+from constants import DEFAULT_SAMPLE_RATE_HZ
+
 
 def _list_audio_output_devices() -> List[Dict]:
     """枚举 sounddevice 输出设备；无 sounddevice 时返回空列表（不造假）。"""
@@ -105,7 +107,7 @@ class DevicePanel(QWidget):
         form.addRow("设备", dev_row)
 
         # 参数
-        self.sr_edit = QLineEdit("2048000")
+        self.sr_edit = QLineEdit(str(DEFAULT_SAMPLE_RATE_HZ))
         self.sr_edit.setToolTip("采样率 Hz")
         form.addRow("采样率(Hz)", self.sr_edit)
 
@@ -253,7 +255,7 @@ class DevicePanel(QWidget):
         try:
             dev["_sample_rate"] = float(self.sr_edit.text())
         except Exception:
-            dev["_sample_rate"] = 2_048_000.0
+            dev["_sample_rate"] = float(DEFAULT_SAMPLE_RATE_HZ)
         try:
             dev["_gain"] = float(self.gain_edit.text())
         except Exception:

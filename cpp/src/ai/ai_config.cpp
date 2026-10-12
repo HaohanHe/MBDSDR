@@ -18,7 +18,10 @@ QString AiConfig::configPath() const {
 }
 
 bool AiConfig::load() {
-    // Env var takes priority
+    // Priority order: environment variable > config file > built-in default.
+    // The env var (MBDSDR_API_KEY) wins when set; the config file only fills
+    // in fields the env does not provide. Do NOT let an empty/absent file
+    // value clobber an already-set env value.
     auto envKey = qgetenv("MBDSDR_API_KEY");
     if (!envKey.isEmpty()) apiKey = QString::fromUtf8(envKey);
 
@@ -26,7 +29,11 @@ bool AiConfig::load() {
     if (f.open(QIODevice::ReadOnly)) {
         auto doc = QJsonDocument::fromJson(f.readAll());
         auto obj = doc.object();
-        if (!envKey.isEmpty()) apiKey = obj["api_key"].toString();
+        // Only read the file's api_key when the env var did not already provide
+        // one. Previously this branch inverted the priority by overwriting the
+        // env-derived value with whatever the file held (including empty).
+        if (envKey.isEmpty() && obj.contains("api_key"))
+            apiKey = obj["api_key"].toString();
         if (obj.contains("base_url")) baseUrl = obj["base_url"].toString();
         if (obj.contains("model")) model = obj["model"].toString();
         if (obj.contains("audio_device")) audioDevice = obj["audio_device"].toString();

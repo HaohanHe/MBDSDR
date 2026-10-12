@@ -16,6 +16,8 @@
 #include "ui/tune_history.h"
 // dsp::TleEntry is a value member (tleEntries_); include its header.
 #include "dsp/tle_client.h"
+// kDefaultSampleRateHz is used as a member default below.
+#include "core/tokens.h"
 
 class QLabel;
 class QDoubleSpinBox;
@@ -714,7 +716,7 @@ private:
     // Cached real engine readback (from sourceTelemetry) so the SpyServer
     // handshake DEVICE_INFO reports the honest live sample rate / gain, not a
     // hard-coded guess.
-    double          lastSampleRateHz_ = 2.4e6;
+    double          lastSampleRateHz_ = tokens::kDefaultSampleRateHz;
     double          lastGainDb_ = 0.0;
 
     // AI

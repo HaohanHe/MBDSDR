@@ -5,6 +5,8 @@
 #pragma once
 
 #include "dsp/device_capabilities.h"
+#include "core/tokens.h"   // kDefaultSampleRateHz (see comment there for the
+                           // deliberate C++ vs Python 2.4 vs 2.048 MS/s split)
 
 #include <QString>
 #include <complex>
@@ -106,7 +108,7 @@ public:
     bool isConnected() const override { return false; }
 
 private:
-    static constexpr double kSampleRateHz = 2.4e6;
+    static constexpr double kSampleRateHz = tokens::kDefaultSampleRateHz;
     static constexpr double kCenterHz    = 98.5e6;
 };
 
