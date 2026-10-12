@@ -194,6 +194,8 @@ set(SOURCES
     src/ui/radio_panel.cpp
     src/ui/recording_library.cpp
     src/ui/task_steps_view.cpp
+    src/ui/component_registry.cpp
+    src/ui/workspace_layout.cpp
     src/agentapi/mcp_server.cpp
 )
 
@@ -266,6 +268,8 @@ set(HEADERS
     src/radio/cw_keyer.h
     src/ui/radio_panel.h
     src/ui/recording_library.h
+    src/ui/component_registry.h
+    src/ui/workspace_layout.h
 )
 
 # ---- mbdsdr_core: the whole application compiled ONCE as a static library --
@@ -1339,6 +1343,13 @@ target_link_libraries(test_digital_panel_ui PRIVATE mbdsdr_core)
 target_include_directories(test_digital_panel_ui PRIVATE src)
 target_link_libraries(test_digital_panel_ui PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME digital_panel_ui COMMAND test_digital_panel_ui)
+
+add_executable(test_workspace_layout tests/test_workspace_layout.cpp
+    src/ui/component_registry.cpp src/ui/workspace_layout.cpp)
+target_include_directories(test_workspace_layout PRIVATE src)
+target_link_libraries(test_workspace_layout PRIVATE mbdsdr_core)
+target_link_libraries(test_workspace_layout PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME workspace_layout COMMAND test_workspace_layout)
 set_tests_properties(digital_panel_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # End-to-end: TestSignalSource digital IQ -> real channelizer -> DigitalDemod lock.
