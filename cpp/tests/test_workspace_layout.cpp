@@ -82,6 +82,9 @@ private slots:
     void dataUnknownComponentRejected();
     void dataBadValueTypeRejected();
     void dataRoundTripThroughJson();
+    void topLevelTabHideFlatShape();
+    void topLevelTabShowFlatShape();
+    void topLevelTabHidePropsShape();
 };
 
 void TestWorkspaceLayout::defaultSpecIsThreeColumn() {
@@ -305,6 +308,69 @@ void TestWorkspaceLayout::dataRoundTripThroughJson() {
     QCOMPARE(workspaceSpecToJson(back).value(QStringLiteral("component_data"))
                  .toObject().value(QStringLiteral("tab:FT8")).toObject(),
              payload);
+}
+
+// A top-level whitelisted tab node carrying visible:false at the NODE TOP LEVEL
+// (flat A2UI shape, the same shape the offscreen screenshot harness uses) must
+// register the tab into hidden_panels AND remove it from visible_tabs, so the
+// layout engine actually hides the tab. Regression guard for the fixture that
+// previously sent {"id":"tab:数据","visible":false} as a standalone node and
+// silently dropped the flag.
+void TestWorkspaceLayout::topLevelTabHideFlatShape() {
+    QJsonObject hidden;
+    hidden.insert(QStringLiteral("id"), QStringLiteral("tab:数据"));
+    hidden.insert(QStringLiteral("visible"), false);
+
+    QJsonObject msg;
+    QJsonArray comps;
+    comps.push_back(hidden);
+    msg.insert(QStringLiteral("components"), comps);
+
+    WorkspaceLayout m = applyCreateSurface(msg);
+    QVERIFY2(m.hidden_panels.contains(QStringLiteral("tab:数据")),
+             "top-level visible:false must register hidden_panels");
+    QVERIFY2(!m.visible_tabs.contains(QStringLiteral("tab:数据")),
+             "top-level visible:false must remove the tab from visible_tabs");
+    // No placeholder: tab:数据 is whitelisted.
+    QVERIFY(!m.placeholder_ids.contains(QStringLiteral("tab:数据")));
+}
+
+// The inverse: a top-level tab node with visible:true must NOT hide the tab
+// (must not appear in hidden_panels) and must leave visible_tabs containing it.
+void TestWorkspaceLayout::topLevelTabShowFlatShape() {
+    // Start from a model where tab:数据 is already hidden, then send a
+    // top-level visible:true node to reverse it.
+    WorkspaceLayout base = defaultWorkspaceSpec();
+    base.hidden_panels.push_back(QStringLiteral("tab:数据"));
+    base.visible_tabs.removeAll(QStringLiteral("tab:数据"));
+
+    QJsonObject showNode;
+    showNode.insert(QStringLiteral("id"), QStringLiteral("tab:数据"));
+    showNode.insert(QStringLiteral("visible"), true);
+
+    QJsonObject msg;
+    QJsonArray comps;
+    comps.push_back(showNode);
+    msg.insert(QStringLiteral("components"), comps);
+
+    WorkspaceLayout m = applyUpdateComponents(base, msg);
+    QVERIFY2(!m.hidden_panels.contains(QStringLiteral("tab:数据")),
+             "top-level visible:true must clear hidden_panels");
+    QVERIFY2(m.visible_tabs.contains(QStringLiteral("tab:数据")),
+             "top-level visible:true must restore visible_tabs");
+}
+
+// Canonical shape: visible flag nested under props (the tabNode() helper
+// produces this). Top-level tab node with props.visible:false must also hide.
+void TestWorkspaceLayout::topLevelTabHidePropsShape() {
+    QJsonObject msg;
+    QJsonArray comps;
+    comps.push_back(tabNode(QStringLiteral("tab:FT8"), false));
+    msg.insert(QStringLiteral("components"), comps);
+
+    WorkspaceLayout m = applyCreateSurface(msg);
+    QVERIFY(m.hidden_panels.contains(QStringLiteral("tab:FT8")));
+    QVERIFY(!m.visible_tabs.contains(QStringLiteral("tab:FT8")));
 }
 
 QTEST_MAIN(TestWorkspaceLayout)

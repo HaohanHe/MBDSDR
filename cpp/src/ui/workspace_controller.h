@@ -74,6 +74,13 @@ public:
     //   {ok:false, error:"未知组件 id..."} when componentId is not whitelisted.
     QJsonObject updateComponentData(const QString& componentId, const QJsonValue& data);
 
+    // True when the model carries a non-default layout (custom splitter sizes
+    // OR any tab explicitly hidden). Used by MainWindow's first-launch splitter
+    // ratio restore to defer to an overlay the agent just applied, instead of
+    // clobbering it with the default 0.22/0.56/0.22 proportions. Pure state read
+    // -- no widget touch, no crash when widgets are null.
+    bool hasActiveOverlay() const;
+
 private:
     QSplitter*  splitter_ = nullptr;
     QTabWidget* rightTabs_ = nullptr;

@@ -4761,6 +4761,14 @@ void MainWindow::setFocusMode(bool on, bool animate) {
 
 void MainWindow::resetSplitterRatios() {
     if (!mainSplitter_) return;
+    // If the agent has applied a real workspace overlay (non-default splitter
+    // sizes or hidden tabs) via WorkspaceController, do NOT clobber it with
+    // the stock 0.22/0.56/0.22 proportions. This runs as a 0ms deferred timer
+    // at first launch; the screenshot harness / agent may have already pushed
+    // a custom layout into the same event-loop turn. When no overlay is active
+    // (normal first-launch, or after reset_workspace), the original behavior
+    // is preserved exactly.
+    if (workspace_ && workspace_->hasActiveOverlay()) return;
     const int total = mainSplitter_->width();
     if (total <= 0) return;
     const int l = int(total * tokens::kRatioLeft);

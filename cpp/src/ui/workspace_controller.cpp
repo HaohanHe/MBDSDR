@@ -127,4 +127,14 @@ QJsonObject WorkspaceController::componentCatalog() {
     return o;
 }
 
+bool WorkspaceController::hasActiveOverlay() const {
+    // Non-default iff the agent has moved splitter sizes away from the stock
+    // 280/800/280 triplet, or explicitly hidden at least one right rail tab.
+    // component_data slots alone do NOT count as a layout overlay -- they are
+    // inert per-node payloads and must not pin the splitter.
+    if (!model_.hidden_panels.isEmpty()) return true;
+    const auto dflt = defaultWorkspaceSpec().splitter_sizes;
+    return model_.splitter_sizes != dflt;
+}
+
 }  // namespace aigui

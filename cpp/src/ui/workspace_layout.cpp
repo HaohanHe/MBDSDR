@@ -115,6 +115,28 @@ void parseComponents(const QJsonObject& msg, WorkspaceLayout& out) {
             }
             continue;
         }
+
+        // A top-level whitelisted tab node may carry its own visible flag
+        // (mirroring right_tabs.children[] semantics). Accept the flag at the
+        // node top level (flat A2UI shape: {"id":"tab:数据","visible":false})
+        // or under props (canonical shape). visible:false registers the tab
+        // into hidden_panels and removes it from visible_tabs so the layout
+        // engine actually hides it; visible:true reverses that.
+        if (id.startsWith(QLatin1String("tab:"))) {
+            QJsonValue visVal = o.value(QStringLiteral("visible"));
+            if (!visVal.isBool()) visVal = props.value(QStringLiteral("visible"));
+            if (visVal.isBool()) {
+                const bool visible = visVal.toBool();
+                if (visible) {
+                    if (!out.visible_tabs.contains(id)) out.visible_tabs.push_back(id);
+                    out.hidden_panels.removeAll(id);
+                } else {
+                    if (!out.hidden_panels.contains(id)) out.hidden_panels.push_back(id);
+                    out.visible_tabs.removeAll(id);
+                }
+            }
+            continue;
+        }
         // Other registered containers (left_rail/center_spectrum/status_bar)
         // are accepted but carry no per-node layout payload in this subset.
     }
