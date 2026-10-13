@@ -15,10 +15,10 @@
 | L6 | 渲染/瀑布 | **doZoom 峰保持降采样**（块内取 max，防缩水时漏峰） | 已实现但缺深度 | `waterfall.cpp` doZoom | 频谱引擎降采样 | 高 | 部分 |
 | L7 | 渲染/瀑布 | **改色板/拖量程整段重染历史**（保留 raw dB 行，避免丢历史） | 已实现但缺深度 | `waterfall.cpp` | 环形行缓冲（改色板需重染） | 高 | ✅ |
 | L8 | 渲染/瀑布 | **外部 JSON 色板文件**（用户可扩展） | 未实现 | `colormaps.cpp` maps 扫描 | tokens 编译期 256 LUT | 中 | ✅ |
-| L9 | 解调链 | **解调链内 AGC**（载波/音频双 AGC） | 已实现但缺深度 | `am.h:34-35,103-106` | `demod.cpp:46-59` abs+DC 阻断，AGC 挂音频后端 | 中 | ✅ |
-| L10 | 解调链 | **NFM 鉴频后带宽匹配 FIR**（cutoff=bw/2, trans=0.1·bw） | 已实现但缺深度 | `fm.h:121` | `demod.cpp:65-66` 仅单极点去加重 | 中 | ✅ |
-| L11 | 信号处理 | **VOLK NCO 频移**（相位跨块连续） | 已实现但缺深度（性能） | `frequency_xlator.h:43-50` | 手写 cos/sin | 中（纯性能） | ✅ |
-| L12 | 信号处理 | **RxVFO 带宽短路+参数化过渡带**（带宽≠率才低通） | 已实现但缺深度 | `rx_vfo.h:89-117` | 截止写死 0.85 奈奎斯特 | 中 | ✅ |
+| L9 | 解调链 | **解调链内 AGC**（载波/音频双 AGC） | ✅ 已闭环（2026-10-13 复核） | `am.h:34-35,103-106` | `demod.cpp:86-161`：in-chain 复数载波 AGC（AM 包络检波前，默认开，仅追踪慢衰落）+ 下游音频 AGC | 中 | ✅ |
+| L10 | 解调链 | **NFM 鉴频后带宽匹配 FIR**（cutoff=bw/2, trans=0.1·bw） | ✅ 已闭环（2026-10-13 复核） | `fm.h:121` | `demod.cpp:139,161`：鉴频后 anti-adjacent-channel FIR，cutoff=bw/2、trans=0.1·bw（Nuttall 窗，mirrors taps::lowPass） | 中 | ✅ |
+| L11 | 信号处理 | **VOLK NCO 频移**（相位跨块连续） | ✅ 已闭环（2026-10-13 复核） | `frequency_xlator.h:43-50` | `channelizer.h:18-30`：`Nco` 连续相位复振荡器，`phase()/deltaPhase()` 暴露供连续性测试，流式跨块保相位（非逐块手算 cos/sin） | 中（纯性能） | ✅ |
+| L12 | 信号处理 | **RxVFO 带宽短路+参数化过渡带**（带宽≠率才低通） | ✅ 已闭环（2026-10-13 复核） | `rx_vfo.h:89-117` | `channelizer.h:53-69` `planChannelFilter`：filterNeeded 短路（bw==outRate 全带直通）、过渡带=0.1·(bw/2) 显式参数化，替换旧写死 0.85/0.9 Nyquist 回退 | 中 | ✅ |
 | L13 | 解调链 | **GFSK/FSK 数字解调链**（鉴频→浮点 RRC→MM） | 未实现 | `gfsk.h:31-34,131-135` | `digital_demod.h` 仅 BPSK/QPSK | 中（新特性） | ✅ |
 | L14 | 设备后端 | **read_async 回调直写双缓冲零拷贝** | 已实现但缺深度（性能） | `main.cpp:526-539` | `read_sync` 每帧 new vector+拷贝 | 中（先 benchmark） | 🟡 |
 | L15 | 渲染/瀑布 | GL 纹理上传路径（vs Qt raster） | 架构取向 | waterfall GL 段 | Qt QImage | 中 | 否 |
@@ -37,4 +37,4 @@
 **落地3（C++ 设备）**：L3+L4 tune 重试回读 + set_tuner_bandwidth（fake 驱动单测）。✅ 已完成 2026-10-02：`rtl_sdr_ops.h` 注入缝 + `test_rtl_sdr_tune`（重试收敛/耗尽诚实/带宽=0/打开失败诚实/stub 回归），ctest 全绿。注：fake rtlsdr 为测试替身（内存函数指针+调用日志），非硬件 mock，不碰 USB/RTL2832。
 **落地4（C++ AI）**：L5 工具注册表重构（tool_schema 单一事实源+一致性单测）。
 
-暂缓 backlog：L6/L7/L8（渲染深度，下批）、L9/L10/L13（解调增强）、L11/L12（DSP 性能/参数化）、L14（先 benchmark）、L16。
+暂缓 backlog：L6/L7（渲染深度，下批）、L14（先 benchmark）、L15（架构取向）、L16。（2026-10-13 复核：L9/L10/L11/L12 已被后续 channelizer/demod 轮闭环，原表误标「缺深度」，已更正；L8/L13 此前已闭环。）

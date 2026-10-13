@@ -237,6 +237,13 @@ MBDSDR P0 对齐了 A2UI v1.0 的**骨架语义**（声明式 JSON、扁平邻�
 - **真实成本被低估**：`WorkspaceController`（ui/workspace_controller.h:33）是**纯类、非 QObject、无 signals、无事件出口**（仅 applyOverlay/reset/currentSpec/componentCatalog/updateComponentData）。最小版需：① 给它加线程安全的事件队列 + push/drain；② main_window GUI 侧把 tab 切换/splitter 拖拽接到 push（CLI/offscreen 构建不可测，只能编译过）；③ tab 序号→白名单 `tab:XXX` id 的映射（依赖 14 个右侧 tab 目录序）；④ 再开一个 `get_pending_ui_events` 只读工具的**完整四通道链 + 金集八处再动一遍（86→87）+ 双构型再全量构建**。
 - **裁决**：这是「M」体量、与「新工具全链 + 金集再同步」同批，单轮内硬做会再次扰动本批刚转绿的 86 工具交付面。按「宁缺毋滥」纪律，本轮**只登记、不实现**；待 P1 后半/P2 真正需要「agent 感知用户面板操作」时，按既有触发条件建事件队列 + `get_pending_ui_events` 只读查询。
 
+#### 第三轮再评估（2026-10-13，机制学做深化批，计数维持 89）——结论：事件回传仍延后；本轮落地结构化错误码
+- **action 事件回传（差距 1.4.1）第三次再评估，仍延后**：补查 `applyLayoutEngine`（workspace_layout.cpp:256-296）确认它内部会 `rightTabs->setCurrentIndex(i)`（:285），这会**触发** `currentChanged` 信号——若直连推事件，agent 经 arrange_workspace 程序化切 tab 会自激污染队列。最小版因此多一个 `suppressEvents_` 守卫（applyOverlay/reset 包裹 applyLayoutEngine 期间静默）。叠加 GUI 接线 offscreen 不可测、tab 序号→`tab:XXX` 映射、新工具全链金集 89→90、双构型全量重建，仍为 M 体量；且边际价值低——agent 想知道当前 tab 直接轮询 `get_workspace_layout.current_tab` 即可。**裁决：第三次登记延后，不硬做。**
+- **本轮落地（S 体量，纯增量、不加新工具、计数 89 不变）：结构化错误码（差距 1.5.1）**
+  - `WorkspaceController` 错误信封补稳定机读 `code`：未连接 widgets=`CONTROLLER_NOT_CONNECTED`、未知组件=`UNKNOWN_COMPONENT`、负载类型错=`BAD_PAYLOAD_TYPE`；`agent_tools.cpp` 未注入控制器=`CONTROLLER_NOT_INJECTED`、缺参=`INVALID_PAYLOAD`。中文 `error` 文案不变，code 为附加字段。
+  - 价值：模型/第三方 MCP 客户端可按失败类分支而非解析中文散文；`control_hub` 经 `workspace_->...` 调用自动透传 controller 层 code（其通用 `errResult` 信封未扩，避免波及全命令测试面）。
+  - 单测：test_agent notInjected 断言 `CONTROLLER_NOT_INJECTED`；updateComponentData 未知组件断言 `UNKNOWN_COMPONENT`、缺 id 断言 `INVALID_PAYLOAD`。双构型受影响套件（agent/workspace_layout/tool_schema/tool_registry）4/4 绿，双构型全量 ctest 152/152（e2e_smoke Skipped 诚实计）。
+
 ### 未改（维持现状）
 - `component` vs `type` 判别器字段名：本差距表 §4.2 已登记为「有意不改」（P0 子集自有形状，不追求过官方 validator）。
-- surfaceId 多实例、catalogId 协商、结构化错误码、@path 绑定、allowedParents/Children、流式传输：均按 §3.2/§3.3 延后或不做。
+- surfaceId 单值化、catalogId 协商、@path 绑定、allowedParents/Children、流式传输：均按 §3.2/§3.3 延后或不做。（结构化错误码本轮已落地，见上。）

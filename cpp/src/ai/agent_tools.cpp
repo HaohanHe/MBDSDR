@@ -2986,6 +2986,9 @@ namespace {
 QString workspaceNotInjected() {
     QJsonObject o;
     o["ok"] = false;
+    // Distinct from CONTROLLER_NOT_CONNECTED (controller exists but widgets are
+    // null): here the controller itself was never wired by MainWindow.
+    o["code"] = "CONTROLLER_NOT_INJECTED";
     o["error"] = QString::fromUtf8("工作台控制器未注入（MainWindow 未创建 WorkspaceController）");
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }
@@ -3039,6 +3042,7 @@ QString execUpdateComponentData(const QJsonObject& args, dsp::SpectrumEngine* /*
     if (componentId.isEmpty()) {
         QJsonObject o;
         o["ok"] = false;
+        o["code"] = "INVALID_PAYLOAD";
         o["error"] = QString::fromUtf8("缺少 component_id（白名单组件 id）");
         return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
     }
@@ -3048,6 +3052,7 @@ QString execUpdateComponentData(const QJsonObject& args, dsp::SpectrumEngine* /*
     if (!args.contains(QStringLiteral("data"))) {
         QJsonObject o;
         o["ok"] = false;
+        o["code"] = "INVALID_PAYLOAD";
         o["error"] = QString::fromUtf8("缺少 data（object=upsert，null=清空）");
         return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
     }

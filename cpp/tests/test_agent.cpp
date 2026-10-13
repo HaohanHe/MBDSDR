@@ -2649,6 +2649,9 @@ void TestAgent::workspace_notInjectedHonestError() {
         QVERIFY2(o.value("error").toString().contains(QString::fromUtf8("工作台控制器未注入")),
                  qPrintable(QString::fromUtf8("%1: %2").arg(tool,
                      QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)))));
+        // Structured failure code (A2UI gap 1.5.1): the not-injected envelope
+        // carries a stable machine-readable code distinct from not-connected.
+        QCOMPARE(o.value("code").toString(), QStringLiteral("CONTROLLER_NOT_INJECTED"));
     }
 }
 
@@ -2795,13 +2798,15 @@ void TestAgent::workspace_updateComponentDataUpsertClearAndVersion() {
     QVERIFY2(!b.value("ok").toBool(), "unknown component id must be ok:false");
     QVERIFY2(b.value("error").toString().contains(QString::fromUtf8("未知组件")),
              qPrintable(QString::fromUtf8(QJsonDocument(b).toJson(QJsonDocument::Compact))));
+    QCOMPARE(b.value("code").toString(), QStringLiteral("UNKNOWN_COMPONENT"));
 
-    // Missing component_id -> honest error.
+    // Missing component_id -> honest error with a structured payload code.
     QJsonObject noId; noId["data"] = payload;
     const QJsonObject n = QJsonDocument::fromJson(
         ai::executeTool("update_component_data", noId, &engine, nullptr, ctrl.get())
             .toUtf8()).object();
     QVERIFY(!n.value("ok").toBool());
+    QCOMPARE(n.value("code").toString(), QStringLiteral("INVALID_PAYLOAD"));
 }
 
 // LLMWorker dispatch path (the desktop chat-window seam): the injected

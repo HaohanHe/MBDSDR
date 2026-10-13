@@ -13,9 +13,14 @@
 namespace aigui {
 namespace {
 
+// Structured error envelopes (A2UI v1.0 gap 1.5.1): every failure reply carries
+// a stable machine-readable `code` alongside the Chinese `error` string, so the
+// agent (and any third-party MCP client) can branch on the failure class instead
+// of parsing prose. Codes are additive -- existing `error` text is unchanged.
 QJsonObject notConnectedError() {
     QJsonObject o;
     o.insert(QStringLiteral("ok"), false);
+    o.insert(QStringLiteral("code"), QStringLiteral("CONTROLLER_NOT_CONNECTED"));
     o.insert(QStringLiteral("error"),
              QString::fromUtf8("工作台控制器未连接（splitter/rightTabs 为空，"
                               "无法应用布局到主界面）"));
@@ -82,6 +87,7 @@ QJsonObject WorkspaceController::updateComponentData(const QString& componentId,
     const DataUpdateStatus st = applyUpdateComponentData(model_, componentId, data);
     if (st == DataUpdateStatus::UnknownComponent) {
         o.insert(QStringLiteral("ok"), false);
+        o.insert(QStringLiteral("code"), QStringLiteral("UNKNOWN_COMPONENT"));
         o.insert(QStringLiteral("error"),
                  QString::fromUtf8("未知组件 id（不在编译期白名单内，"
                                   "不写入数据槽）：") + componentId);
@@ -89,6 +95,7 @@ QJsonObject WorkspaceController::updateComponentData(const QString& componentId,
     }
     if (st == DataUpdateStatus::BadValueType) {
         o.insert(QStringLiteral("ok"), false);
+        o.insert(QStringLiteral("code"), QStringLiteral("BAD_PAYLOAD_TYPE"));
         o.insert(QStringLiteral("error"),
                  QString::fromUtf8("data 仅接受 object（upsert）或 null（清空），"
                                   "收到其他类型不做静默转换"));
