@@ -456,5 +456,17 @@ bool NanoVnaClient::setAveraging(int n, QString* err) {
     return true;
 }
 
+bool NanoVnaClient::setBandwidth(int khz, QString* err) {
+    if (!guardConnected(connected_, err)) return false;
+    // 固件仅支持五档 IF 带宽：1000/300/100/30/10 kHz。非法档位在发出任何
+    // 线上命令前即拒绝（镜像 Python set_bandwidth），即时生效、不做会话回读。
+    if (khz != 1000 && khz != 300 && khz != 100 && khz != 30 && khz != 10) {
+        if (err) *err = QStringLiteral("bandwidth 仅支持 1000/300/100/30/10（kHz），收到 %1").arg(khz);
+        return false;
+    }
+    exec(QStringLiteral("bandwidth %1").arg(khz));
+    return true;
+}
+
 } // namespace vna
 } // namespace mbdsdr

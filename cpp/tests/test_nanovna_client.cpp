@@ -84,6 +84,7 @@ private slots:
     // --- Device misc command family (P1 #61 client side) ---------------------
     void deviceMiscWordsAndParsing();
     void deviceMiscRejectWhenDisconnected();
+    void setBandwidthEmitsPresetWordsAndRejectsOthers();
     // --- tcxo readback + capture screen (2026-10 audit backfill) ------------
     void tcxoParsesCurrentLine();
     void tcxoRejectsUnparseableReply();
@@ -409,6 +410,45 @@ void TestNanoVnaClient::deviceMiscRejectWhenDisconnected() {
     QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
     QVERIFY(!client.setAveraging(4, &err));
     QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
+    QVERIFY(!client.setBandwidth(1000, &err));
+    QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
+}
+
+void TestNanoVnaClient::setBandwidthEmitsPresetWordsAndRejectsOthers() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        ReplayTransport::Step{QStringLiteral("help"), {}},
+        ReplayTransport::Step{QStringLiteral("version"), {QStringLiteral("v1")}},
+        ReplayTransport::Step{QStringLiteral("info"), {QStringLiteral("H4")}},
+        // Writes: exact wire word + argument, one per valid preset.
+        ReplayTransport::Step{QStringLiteral("bandwidth 1000"), {}},
+        ReplayTransport::Step{QStringLiteral("bandwidth 300"), {}},
+        ReplayTransport::Step{QStringLiteral("bandwidth 100"), {}},
+        ReplayTransport::Step{QStringLiteral("bandwidth 30"), {}},
+        ReplayTransport::Step{QStringLiteral("bandwidth 10"), {}},
+    });
+    ReplayTransport* raw = tr.get();
+    NanoVnaClient client(std::move(tr));
+    QVERIFY(client.connect());
+
+    QString err;
+    // Valid presets (kHz) each succeed and emit the exact firmware word.
+    QVERIFY(client.setBandwidth(1000, &err));
+    QVERIFY(client.setBandwidth(300, &err));
+    QVERIFY(client.setBandwidth(100, &err));
+    QVERIFY(client.setBandwidth(30, &err));
+    QVERIFY(client.setBandwidth(10, &err));
+
+    // Invalid preset (500 kHz): rejected before any wire write — still 8 sent.
+    QVERIFY(!client.setBandwidth(500, &err));
+    QVERIFY(!err.isEmpty());
+    QCOMPARE(raw->sent_.size(), 8);
+
+    // Wire word/arg order on the wire (3 handshake + the 5 bandwidth writes).
+    QCOMPARE(raw->sent_.at(3), QStringLiteral("bandwidth 1000"));
+    QCOMPARE(raw->sent_.at(4), QStringLiteral("bandwidth 300"));
+    QCOMPARE(raw->sent_.at(5), QStringLiteral("bandwidth 100"));
+    QCOMPARE(raw->sent_.at(6), QStringLiteral("bandwidth 30"));
+    QCOMPARE(raw->sent_.at(7), QStringLiteral("bandwidth 10"));
 }
 
 void TestNanoVnaClient::tcxoParsesCurrentLine() {

@@ -157,6 +157,7 @@ public:
     bool setFreqOffset(long hz, QString* err);        // "freqoffset <hz>"
     bool setElectricalDelay(int ps, QString* err);    // "edelay <ps>" (port extension)
     bool setAveraging(int n, QString* err);           // "averages <n>", n validated 1..64
+    bool setBandwidth(int khz, QString* err);         // "bandwidth <khz>", khz in {1000,300,100,30,10}
 
     // Screen capture (firmware `capture`): fills `out` with the 320x240 RGB565
     // little-endian frame (kCaptureFrameBytes). Honest: false with *err set on
