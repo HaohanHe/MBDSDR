@@ -715,3 +715,33 @@ resume/vbat/freqoffset/edelay/bandwidth）两面对齐情况此前已登记；�
   复现率 100%，而同参数裸 `serial.Serial()` 在另一进程必成功；预开传输层注入
   + 跳过 connect() 的进程 6/6 成功。根因待 ProcMon 抓打开调用定位；怀疑与
   usbser.sys 独占共享模式相关（本机 cc1 损坏无法复测 C++ 侧）。
+
+---
+
+# 第㉚批：官方站 + NanoVNA-App 上游核对（2026-10-13）
+
+## 官方 nanovna.com 14 页核对（全部抓取成功）
+
+- 家族谱系坐实：edy555 原型 50k-300MHz 基波；Hugen 加 5V 升压（SA612A 稳定供电）并用本振谐波扩频：3 次 300-900MHz、5 次 900-1500MHz（**基波始终存在**——测放大器增益会串入基波，S21 增益类解释需提示）；最新 H rev3.6 / H4 rev4.3；SA602A/SA612A 于 2022-11 停产后 Hugen 改 NE602A；「2.7GHz plus」为假货警告（edy555 0.7.0 固件的真实上限，但 1.5GHz 以上噪声大）。
+- **101 点官方明文**（Start using 页）；H4=401、480x320 与 protocol-study §3 一致；「4 英寸与 2.8 英寸固件不通用」两次强调（DFU 进法亦不同：H 用 CONFIG->DFU 菜单，H4 上电前长按多功能开关）。
+- IF=5kHz、ADC 48kHz 采样、MCU 数字处理（protocol-study §2.2 仅记 bandwidth 档位，本批补 IF 架构背景）。
+- 校准权威流程：CAL RESET->OPEN->SHORT->LOAD->ISOLN->THRU->DONE->SAVE；每步须等显示稳定；**校准槽 5 个、开机自动载入 0 号**；RECALL 带回整套 UI 状态（频率范围、逐点误差、迹线/标记、域模式、速度因数、电延迟）；屏幕状态字母 D/R/S/T/X 释义见识屏页。
+- 屏幕小写 c0-c4 = 载入校准后频率范围被改、走互补近似校正（**读 dfata 可信度判据：见到小写 c 应提示重校**，protocol-study §5 补注）。
+- TDR 官方三档窗：MIN=矩形 / NORMAL=Kaiser beta=6 / MAX=Kaiser beta=13；速度因数按百分数输入（67=0.67）；bandpass 与 lowpass 冲激/阶跃两模式；lowpass 起始必须 50kHz+REAL 格式。
+- 迹线格式官方 11 种：LOGMAG/PHASE/DELAY/SMITH/SWR/POLAR/LINEAR/REAL/IMAG/RESISTANCE/REACTANCE（我们已取复 S11/S21，其余为低成本派生）。
+- 升级后必须取下 boot 跳线复位并重校（流程性备案，MBDSDR 不提供刷机）。
+- **官网（Hugen 系）无 NanoVNA-F/F V2/F V3/FZ2/SAA-2 任何记载**——F_V2 规格继续以固件仓库/nanovna-saver 为准；旁系机型：LiteVNA（50k-6.3G、接口兼容、IFFT TDR、MicroSD）、LibreVNA、tinySA/tinyPFA；克隆警示：V2 Plus/Plus4 克隆与 GPL 争议（非官方，机型识别防误判）。
+
+## NanoVNA-App（OneOfEleven）克隆审计——去重 saver 后的增量结论
+
+**超出 App 的**：谐振/ESR/BW/Q 提取、滤波器四形态、等效 RLC、NRW、多拓扑匹配、reqoffset（App 未用的反向盈余）。
+**真实缺口（按价值）**：① 宿主侧 12 项 SOLT 求解 + cal-kit 多项式（我们校准全靠固件，换线/去嵌入无链）② TDR 精度链（App=真 FFT+Kaiser+2x 共轭扩展+双曲峰值精修+LP-step 阻抗剖面）③ 主机侧时域平均/中值/平滑/归一化曲线运算 ④ 5 槽内存/历史 scrub/循环记录 ⑤ 机型维护面（V2 二进制/LiteVNA 身份判定/固件上传/TCP 远程/UART 桥接）。
+**半适配转正（本批已落地）**：s11_phase_deg/s21_phase_deg 此前只在 nanovna_client 定义、未进任何输出——已接线进 
+anovna_dump JSON（官方 11 格式之 PHASE 的 Python 侧对等物）；	dr_length_py 升级为窗口化 IDFT（rect/kaiser6/kaiser13 官方三档，默认 NORMAL），保留旧口径的诚实边界（无 2x 共轭与双曲精修，feature-parity §6 精度欠账继续登记）。
+
+## 后续候选（本批只登记不动工）
+
+- P1：segmented sweep 拼接（>101 点）——官方 NanoVNASaver 实测 >10k 点；主机侧自动分段合并是最高价值功能项。
+- P1：时域平均 2^n 帧（历史环形缓冲）+ 曲线平滑。
+- P2：trace 格式全集派生（REAL/IMAG/LINEAR/RESISTANCE/REACTANCE）。
+- P2：LiteVNA 机型支持（接口兼容，扩频至 6.3G）。
