@@ -13,6 +13,7 @@
 #include <memory>
 
 #include "ai/agent_tools.h"
+#include "ai/memory_store.h"
 #include "ai/tool_schema.h"
 #include "ai/agent.h"
 #include "ai/llm_worker.h"
@@ -131,6 +132,15 @@ private slots:
     void memoryScopeIsolation();
     void memoryUpdateOverwrite();
     void checkpointStatusFields();
+    // --- G1: task-run history (env-redirected task_runs table) -----------------
+    void getTaskHistory_emptyState();
+    void getTaskHistory_injectAndReadBack();
+    // --- G2: memory delete (round trip + honest not-found) + statistics --------
+    void memoryDelete_roundTripAndNotFound();
+    void memoryStats_fields();
+    // --- G3: chat-start memory injection (UNTRUSTED wrap / budget / scopes) ---
+    void memoryInjection_blockFormatAndScopes();
+    void memoryInjection_emptyAndBudget();
     // --- AIGUI P0-b: workspace controller three-channel seam -------------------
     void workspace_notInjectedHonestError();
     void workspace_applyOverlayRoundTripAndPlaceholder();
@@ -163,7 +173,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 86);
+    QCOMPARE(tools.size(), 89);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -919,10 +929,11 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 48 writes / 38 reads (86 tools; workspace domain three
-    // gated writes + APRS/colormap reads + the template runner gated write).
-    QCOMPARE(writes, 48);
-    QCOMPARE(reads, 38);
+    // The frozen split: 49 writes / 40 reads (89 tools; workspace domain three
+    // gated writes + APRS/colormap reads + the template runner gated write;
+    // G1 get_task_history read, G2 memory_delete gated write + memory_stats read).
+    QCOMPARE(writes, 49);
+    QCOMPARE(reads, 40);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -2363,6 +2374,171 @@ void TestAgent::checkpointStatusFields() {
     QVERIFY(st.contains("pending_count"));
     QVERIFY(st.contains("queue_depth"));
     QVERIFY(st.contains("last_flush_ms"));
+}
+
+// ---- G1: task-run history --------------------------------------------------
+// Honest empty state: a fresh db (no TaskRunner run yet) -> ok:true, runs=[]
+// with a note, never fabricated history.
+void TestAgent::getTaskHistory_emptyState() {
+    dsp::SpectrumEngine engine;
+    QJsonObject o = runTool(engine, "get_task_history", {});
+    QVERIFY2(o.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact))));
+    QVERIFY(o.value("runs").isArray());
+    QCOMPARE(o.value("runs").toArray().size(), 0);
+    QCOMPARE(o.value("count").toInt(), 0);
+    QVERIFY(o.value("note").toString().contains(QStringLiteral("无任务历史")));
+}
+
+// Inject one run straight into the task_runs table (what TaskRunner writes
+// after a plan finishes), then read it back through the tool in both list and
+// detail modes: field alignment + honest unknown-id.
+void TestAgent::getTaskHistory_injectAndReadBack() {
+    dsp::SpectrumEngine engine;
+    ai::MemoryStore store(ai::defaultMemoryDbPath());
+    QString err;
+    QVERIFY2(store.open(&err), qPrintable(err));
+    const QByteArray steps =
+        "[{\"tool\":\"tune_frequency\",\"state\":\"succeeded\",\"summary\":\"调谐到 100.0 MHz\"}]";
+    const qint64 id = store.recordTaskRun(
+        QString::fromUtf8("侦察测试计划"), QString::fromUtf8("计划完成：1 步成功"),
+        QStringLiteral("succeeded"), 1, QString::fromUtf8(steps), &err);
+    QVERIFY2(id > 0, qPrintable(err));
+
+    // List mode: newest-first, our injected row at the front.
+    QJsonObject list = runTool(engine, "get_task_history", {});
+    QVERIFY2(list.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(list).toJson(QJsonDocument::Compact))));
+    QVERIFY(list.value("count").toInt() >= 1);
+    QJsonObject first = list.value("runs").toArray().first().toObject();
+    QCOMPARE(first.value("id").toInt(), (int)id);
+    QCOMPARE(first.value("name").toString(), QString::fromUtf8("侦察测试计划"));
+    QCOMPARE(first.value("state").toString(), QString("succeeded"));
+    QCOMPARE(first.value("step_count").toInt(), 1);
+    QVERIFY(first.value("summary").toString().contains(QStringLiteral("计划完成")));
+
+    // Detail mode: the parsed steps array comes back aligned.
+    QJsonObject dargs; dargs["id"] = (double)id;
+    QJsonObject det = runTool(engine, "get_task_history", dargs);
+    QVERIFY2(det.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(det).toJson(QJsonDocument::Compact))));
+    QJsonObject run = det.value("run").toObject();
+    QCOMPARE(run.value("id").toInt(), (int)id);
+    QCOMPARE(run.value("name").toString(), QString::fromUtf8("侦察测试计划"));
+    QCOMPARE(run.value("steps").toArray().size(), 1);
+    QCOMPARE(run.value("steps").toArray().first().toObject().value("tool").toString(),
+             QString("tune_frequency"));
+
+    // Honest unknown id.
+    QJsonObject nargs; nargs["id"] = 9999999.0;
+    QJsonObject nf = runTool(engine, "get_task_history", nargs);
+    QVERIFY2(!nf.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(nf).toJson(QJsonDocument::Compact))));
+    QVERIFY(nf.value("error").toString().contains(QStringLiteral("不存在")));
+}
+
+// ---- G2: memory_delete ------------------------------------------------------
+void TestAgent::memoryDelete_roundTripAndNotFound() {
+    dsp::SpectrumEngine engine;
+    QJsonObject a;
+    a["scope"] = "agent"; a["scope_id"] = "t-del"; a["key"] = "ephemeral-note";
+    a["content"] = QString::fromUtf8("待删除的临时记忆 ephemeral");
+    QVERIFY(runTool(engine, "memory_add", a).value("ok").toBool());
+    runTool(engine, "memory_flush", {});
+
+    QJsonObject q; q["query"] = "ephemeral";
+    QCOMPARE(runTool(engine, "memory_search", q).value("count").toInt(), 1);
+
+    QJsonObject d; d["scope"] = "agent"; d["key"] = "ephemeral-note";
+    QJsonObject del = runTool(engine, "memory_delete", d);
+    QVERIFY2(del.value("ok").toBool() && del.value("deleted").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(del).toJson(QJsonDocument::Compact))));
+    QCOMPARE(runTool(engine, "memory_search", q).value("count").toInt(), 0);
+
+    // Honest not-found: deleting the same key again is an ok:true no-op with
+    // deleted=false -- never a fabricated "deleted".
+    QJsonObject nf = runTool(engine, "memory_delete", d);
+    QVERIFY2(nf.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(nf).toJson(QJsonDocument::Compact))));
+    QVERIFY2(!nf.value("deleted").toBool(), qPrintable(
+        QString::fromUtf8(QJsonDocument(nf).toJson(QJsonDocument::Compact))));
+    QVERIFY(nf.value("note").toString().contains(QStringLiteral("空操作")));
+
+    // Bad scope honest reject.
+    QJsonObject bad; bad["scope"] = "nosuch"; bad["key"] = "x";
+    QVERIFY(!runTool(engine, "memory_delete", bad).value("ok").toBool());
+}
+
+// ---- G2: memory_stats ------------------------------------------------------
+void TestAgent::memoryStats_fields() {
+    dsp::SpectrumEngine engine;
+    QJsonObject st = runTool(engine, "memory_stats", {});
+    QVERIFY2(st.value("ok").toBool(),
+             qPrintable(QString::fromUtf8(QJsonDocument(st).toJson(QJsonDocument::Compact))));
+    QJsonObject s = st.value("stats").toObject();
+    QVERIFY(s.contains("total_entries"));
+    QVERIFY(s.contains("by_scope"));
+    QVERIFY(s.contains("last_updated_ms"));
+    QVERIFY(s.contains("task_runs"));
+    QVERIFY(s.value("total_entries").toInt() >= 0);
+}
+
+// ---- G3: chat-start memory injection ---------------------------------------
+// Isolated throwaway db: user+agent rows are injected (UNTRUSTED-wrapped),
+// session-scope rows are NOT (they must never cross sessions).
+void TestAgent::memoryInjection_blockFormatAndScopes() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QByteArray savedEnv = qgetenv("MBDSDR_MEMORY_DB");
+    const QString dbPath = dir.filePath("mem.db");
+    qputenv("MBDSDR_MEMORY_DB", dbPath.toUtf8());
+
+    ai::MemoryStore store(dbPath);
+    QString err;
+    QVERIFY2(store.open(&err), qPrintable(err));
+    QVERIFY(store.add("user", "st-1", "station-east",
+                      QString::fromUtf8("用户自存：东天线高 12m"), &err));
+    QVERIFY(store.add("agent", "t1", "vna-battery",
+                      QString::fromUtf8("踩坑：NanoVNA 低电漂移"), &err));
+    QVERIFY(store.add("session", "live-1", "tmp-obs",
+                      QString::fromUtf8("会话临时现场不应被注入"), &err));
+
+    const QString block = ai::buildMemoryInjectionBlock();
+    qputenv("MBDSDR_MEMORY_DB", savedEnv);
+
+    QVERIFY2(block.contains(QStringLiteral("<UNTRUSTED_CONTENT>")), qPrintable(block));
+    QVERIFY2(block.contains(QStringLiteral("station-east")), qPrintable(block));
+    QVERIFY2(block.contains(QStringLiteral("vna-battery")), qPrintable(block));
+    QVERIFY2(block.contains(QStringLiteral("非系统自动收集")), qPrintable(block));
+    QVERIFY2(!block.contains(QStringLiteral("tmp-obs")),
+             qPrintable(QStringLiteral("session scope must NOT be injected: ") + block));
+}
+
+// G3: empty db -> honest empty block (inject nothing); one oversized row is
+// hard-truncated under the budget instead of blowing the prompt window.
+void TestAgent::memoryInjection_emptyAndBudget() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QByteArray savedEnv = qgetenv("MBDSDR_MEMORY_DB");
+    const QString emptyPath = dir.filePath("empty.db");
+    qputenv("MBDSDR_MEMORY_DB", emptyPath.toUtf8());
+
+    QVERIFY2(ai::buildMemoryInjectionBlock().isEmpty(),
+             "a fresh db must inject nothing (honest empty state)");
+
+    ai::MemoryStore store(emptyPath);
+    QString err;
+    QVERIFY2(store.open(&err), qPrintable(err));
+    const QString big = QStringLiteral("长记忆内容") + QString(20000, QLatin1Char('x'));
+    QVERIFY(store.add("user", "s1", "big-key", big, &err));
+
+    const QString block = ai::buildMemoryInjectionBlock(600);
+    qputenv("MBDSDR_MEMORY_DB", savedEnv);
+
+    QVERIFY2(!block.isEmpty(), "one stored row must yield a block");
+    QVERIFY2(block.size() <= 700,
+             qPrintable(QStringLiteral("block over budget: %1 chars").arg(block.size())));
+    QVERIFY2(block.contains(QStringLiteral("截断")), qPrintable(block));
 }
 
 // ---- AIGUI P0-b: workspace controller three-channel seam -------------------

@@ -1731,6 +1731,64 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // G1: task-run history (read-only). TaskRunner 完成计划后落一行到
+    // ~/.mbdsdr/memory.db 的 task_runs 表；本工具是它唯一的只读读面。
+    {
+        ToolSchemaSpec s;
+        s.name = "get_task_history";
+        s.description = QString::fromUtf8(
+            "只读：查询 TaskRunner 已完成任务的历史（落于本地记忆库 task_runs 表，跨重启保留）。"
+            "列表模式（默认）按完成时间倒序返回最近 limit 条（1..50 默认 10），"
+            "每条含 id/name/state（succeeded/failed/aborted/gated/partial）/finished_ms/step_count/summary；"
+            "传 id 进入详情模式，额外返回逐步 steps 数组（tool/state/summary/elapsed_ms/error）。"
+            "无记录时 runs=[] 并附诚实 note，不编造历史；id 不存在时 ok:false 并给提示。");
+        s.write = false;
+        ToolParamSpec lim;
+        lim.name = "limit"; lim.type = "number";
+        lim.description = QString::fromUtf8("列表模式返回条数上限 1..50，默认 10；越界诚实 clamp");
+        lim.required = false;
+        lim.hasMin = true; lim.min = 1.0;
+        lim.hasMax = true; lim.max = 50.0;
+        ToolParamSpec idp;
+        idp.name = "id"; idp.type = "number";
+        idp.description = QString::fromUtf8("可选：任务记录 id（来自列表模式）；传入则返回该条详情（含 steps 数组）");
+        idp.required = false;
+        s.params << lim << idp;
+        out.append(s);
+    }
+    // G2: memory_delete (gated write) + memory_stats (read-only).
+    {
+        ToolSchemaSpec s;
+        s.name = "memory_delete";
+        s.description = QString::fromUtf8(
+            "写入：按 (scope,key) 删除一条本地记忆——同时删 mem_meta 行与其 FTS 索引行。"
+            "scope 必填枚举 user/agent/session；key 必填。同步短连接执行："
+            "条目存在返回 deleted=true；不存在返回 deleted=false 并附 note（空操作，不编造已删）。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec sc;
+        sc.name = "scope"; sc.type = "string";
+        sc.description = QString::fromUtf8("作用域枚举：user/agent/session");
+        sc.enumValues = QVariantList{"user", "agent", "session"};
+        sc.required = true;
+        ToolParamSpec key;
+        key.name = "key"; key.type = "string";
+        key.description = QString::fromUtf8("scope 内唯一键");
+        key.required = true;
+        s.params << sc << key;
+        out.append(s);
+    }
+    {
+        ToolSchemaSpec s;
+        s.name = "memory_stats";
+        s.description = QString::fromUtf8(
+            "只读：本地记忆库统计——total_entries（条目总数）、by_scope（user/agent/session 分布）、"
+            "last_updated_ms（最近写入墙钟毫秒，0=空库）、task_runs（已完成任务数，G1 历史）。"
+            "空库全 0 诚实返回，不编造数据。");
+        s.write = false;
+        out.append(s);
+    }
+
     return out;
 }
 

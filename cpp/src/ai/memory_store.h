@@ -10,6 +10,7 @@
 
 #include <QList>
 #include <QMutex>
+#include <QJsonObject>
 #include <QString>
 
 namespace mbdsdr {
@@ -23,8 +24,30 @@ struct MemoryHit {
     QString snippet;
 };
 
+// One completed TaskRunner plan run (G1: task-result persistence). Append-only
+// observability: the LLM tool-loop never rewrites history; get_task_history is
+// its only reader.
+struct TaskRunRecord {
+    qint64 id = -1;
+    QString name;          // TaskPlan.name
+    QString summary;      // orchestrator's final NL summary
+    QString state;         // succeeded / failed / aborted / gated / partial
+    qint64 finishedMs = 0; // wall-clock completion time
+    int stepCount = 0;
+    QString stepsJson;     // raw JSON array text (per-step tool/state/summary/...)
+};
+
 // Default on-disk location: ~/.mbdsdr/memory.db (created on first write).
 QString defaultMemoryDbPath();
+
+// G3: build the chat-start <UNTRUSTED_CONTENT> memory-injection block. Reads the
+// most-recent rows of the "user" and "agent" scopes ONLY (session scope never
+// crosses sessions), wraps them in an untrusted-content disclaimer, and caps
+// the whole block at ~charBudget characters (oldest rows dropped first).
+// Returns "" on an empty DB / db-open failure -- the caller then injects nothing
+// (honest empty state, never fabricated). The block is meant for the system
+// prompt and must NOT be appended to the persisted conversation history.
+QString buildMemoryInjectionBlock(int charBudget = 6000);
 
 class MemoryStore {
 public:
@@ -55,6 +78,29 @@ public:
     // restricts hits to one scope. limit is clamped to 1..100.
     QList<MemoryHit> search(const QString& query, const QString& scopeFilter,
                             int limit, QString* err);
+
+    // ---- G1: task-run history (append-only, same on-disk DB) -----------------
+    // Append one completed plan run; returns the new row id (<0 on failure).
+    qint64 recordTaskRun(const QString& name, const QString& summary,
+                        const QString& state, int stepCount,
+                        const QString& stepsJson, QString* err);
+    // Newest-first listing; limit clamped to 1..50. Empty DB -> empty list.
+    QList<TaskRunRecord> listTaskRuns(int limit, QString* err);
+    // Honest lookup: returns false + *err="not_found" when the id does not exist.
+    bool getTaskRun(qint64 id, TaskRunRecord* out, QString* err);
+
+    // ---- G2: memory deletion -------------------------------------------------
+    // Delete one (scope, key) record (meta row + its FTS row). *found reports
+    // whether a row actually existed -- callers surface "not found" honestly.
+    bool deleteKey(const QString& scope, const QString& key, bool* found, QString* err);
+
+    // Read-only stats: row count, per-scope counts, most-recent updated_ms.
+    // Returns an object shape the tool layer serializes directly.
+    QJsonObject stats(QString* err);
+
+    // G3: most-recently-updated rows of one scope (newest first, limit 1..50).
+    // Used by the chat-start memory injection (NOT full-text search).
+    QList<MemoryHit> listRecent(const QString& scope, int limit, QString* err);
 
 private:
     QString m_path;

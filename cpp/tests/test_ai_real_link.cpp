@@ -379,6 +379,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "update_component_data",
         // Deterministic task templates: list (read) / run (gated write).
         "list_templates", "run_template",
+        // G1: task-run history (read). G2: memory delete (gated write) + stats (read).
+        "get_task_history", "memory_delete", "memory_stats",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -423,6 +425,10 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(ai::isWriteTool("memory_flush"));
     QVERIFY(!ai::isWriteTool("memory_search"));
     QVERIFY(!ai::isWriteTool("checkpoint_status"));
+    // G1/G2: task history + memory stats are reads; memory_delete is a gated write.
+    QVERIFY(!ai::isWriteTool("get_task_history"));
+    QVERIFY(!ai::isWriteTool("memory_stats"));
+    QVERIFY(ai::isWriteTool("memory_delete"));
     // 第 10 域「工作台编排」(P0-b): arrange/reset gated writes; get/list reads.
     QVERIFY(ai::isWriteTool("arrange_workspace"));
     QVERIFY(ai::isWriteTool("reset_workspace"));
@@ -501,6 +507,10 @@ void TestAiRealLink::phase26_tools_callableReturnJson() {
         // Deterministic task templates (list is a read; run returns an honest
         // missing-template_name error on empty args, never the unknown fallback).
         "list_templates", "run_template",
+        // G1/G2: task history (read, honest empty on fresh db), memory_delete
+        // (write, gated at manual mode; here executeTool bypasses the gate),
+        // memory_stats (read). All must dispatch, never the unknown fallback.
+        "get_task_history", "memory_delete", "memory_stats",
     };
     for (const QString& t : newTools) {
         const QString r = ai::executeTool(t, QJsonObject{}, &engine);

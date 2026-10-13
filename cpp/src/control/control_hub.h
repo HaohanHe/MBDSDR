@@ -295,6 +295,10 @@ private:
     // P3 #74: checkpoint writer introspection (read) + synchronous flush (write, gated).
     QJsonObject cmdCheckpointStatus(const QJsonObject& a);
     QJsonObject cmdMemoryFlush(const QJsonObject& a);
+    // G1: task-run history (read-only) + G2: memory delete (gated write) / stats (read).
+    QJsonObject cmdGetTaskHistory(const QJsonObject& a);
+    QJsonObject cmdMemoryDelete(const QJsonObject& a);
+    QJsonObject cmdMemoryStats(const QJsonObject& a);
     // Bookmarks (ControlHub holds a ui::BookmarkManager; same QSettings key).
     QJsonObject cmdListBookmarks(const QJsonObject&);
     QJsonObject cmdAddBookmark(const QJsonObject& a);

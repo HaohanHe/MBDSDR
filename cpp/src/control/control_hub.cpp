@@ -132,6 +132,8 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"memory_add",             true,  &ControlHub::cmdMemoryAdd},
         {"memory_update",          true,  &ControlHub::cmdMemoryUpdate},
         {"memory_flush",           true,  &ControlHub::cmdMemoryFlush},
+        // G2: delete one memory by (scope,key) -- honest found/not-found.
+        {"memory_delete",          true,  &ControlHub::cmdMemoryDelete},
         {"export_vna_snapshot",   true,  &ControlHub::cmdExportVnaSnapshot},
         {"export_spectrum_snapshot", true, &ControlHub::cmdExportSpectrumSnapshot},
         {"export_peaks_csv",    true,  &ControlHub::cmdExportPeaksCsv},
@@ -208,6 +210,9 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         // ---- Local memory family read commands (P3 #73/#74, always allowed) --
         {"memory_search",         false, &ControlHub::cmdMemorySearch},
         {"checkpoint_status",     false, &ControlHub::cmdCheckpointStatus},
+        // G1: task-run history (read-only) + G2: memory statistics (read-only).
+        {"get_task_history",      false, &ControlHub::cmdGetTaskHistory},
+        {"memory_stats",          false, &ControlHub::cmdMemoryStats},
     };
     return kRows;
 }
@@ -2217,6 +2222,94 @@ QJsonObject ControlHub::cmdMemoryFlush(const QJsonObject&) {
         o["ok"] = false; o["error"] = err;
         o["note"] = QStringLiteral("部分条目落库失败；已处理 %1 条").arg(written);
     }
+    return o;
+}
+
+// G1: read-only task-run history (mirrors the Agent get_task_history tool).
+QJsonObject ControlHub::cmdGetTaskHistory(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "get_task_history";
+    mbdsdr::ai::MemoryStore store(mbdsdr::ai::defaultMemoryDbPath());
+    QString err;
+    if (!store.open(&err)) { o["ok"] = false; o["error"] = QStringLiteral("任务历史库不可用：%1").arg(err); return o; }
+    const QJsonValue idVal = a.value(QStringLiteral("id"));
+    if (!idVal.isNull() && !idVal.isUndefined()) {
+        const qint64 id = (qint64)idVal.toDouble(-1.0);
+        mbdsdr::ai::TaskRunRecord rec;
+        if (!store.getTaskRun(id, &rec, &err)) {
+            o["ok"] = false; o["error"] = err;
+            o["note"] = QStringLiteral("没有该 id 的任务记录；用列表模式先查最近任务");
+            return o;
+        }
+        QJsonObject run;
+        run["id"] = (double)rec.id;
+        run["name"] = rec.name;
+        run["state"] = rec.state;
+        run["finished_ms"] = (double)rec.finishedMs;
+        run["step_count"] = rec.stepCount;
+        run["summary"] = rec.summary;
+        const QJsonDocument sd = QJsonDocument::fromJson(rec.stepsJson.toUtf8());
+        run["steps"] = sd.isArray() ? sd.array() : QJsonArray{};
+        o["run"] = run;
+    } else {
+        const int limit = (int)a.value(QStringLiteral("limit")).toDouble(10.0);
+        const QList<mbdsdr::ai::TaskRunRecord> runs = store.listTaskRuns(limit, &err);
+        if (runs.isEmpty() && !err.isEmpty()) { o["ok"] = false; o["error"] = err; return o; }
+        QJsonArray arr;
+        for (const mbdsdr::ai::TaskRunRecord& r : runs) {
+            QJsonObject rr;
+            rr["id"] = (double)r.id;
+            rr["name"] = r.name;
+            rr["state"] = r.state;
+            rr["finished_ms"] = (double)r.finishedMs;
+            rr["step_count"] = r.stepCount;
+            rr["summary"] = r.summary;
+            arr.append(rr);
+        }
+        o["runs"] = arr;
+        o["count"] = arr.size();
+        if (arr.isEmpty()) o["note"] = QStringLiteral("无任务历史（TaskRunner 尚未完成过任何任务）");
+    }
+    return o;
+}
+
+// G2: synchronous delete one memory by (scope,key); honest found/not-found.
+QJsonObject ControlHub::cmdMemoryDelete(const QJsonObject& a) {
+    QJsonObject o = okBase();
+    o["command"] = "memory_delete";
+    const QString scope = a.value(QStringLiteral("scope")).toString();
+    const QString key = a.value(QStringLiteral("key")).toString();
+    if (scope != QStringLiteral("user") && scope != QStringLiteral("agent")
+        && scope != QStringLiteral("session"))
+        return errResult(QStringLiteral("scope 必填枚举 user/agent/session"));
+    if (key.isEmpty()) return errResult(QStringLiteral("key 必填（scope 内唯一键）"));
+    mbdsdr::ai::MemoryStore store(mbdsdr::ai::defaultMemoryDbPath());
+    QString err;
+    if (!store.open(&err)) { o["ok"] = false; o["error"] = QStringLiteral("记忆库不可用：%1").arg(err); return o; }
+    bool found = false;
+    if (!store.deleteKey(scope, key, &found, &err)) {
+        o["ok"] = false; o["error"] = err;
+    } else if (!found) {
+        o["deleted"] = false;
+        o["scope"] = scope; o["key"] = key;
+        o["note"] = QStringLiteral("该 (scope,key) 不存在，删除为空操作；不编造已删条目");
+    } else {
+        o["deleted"] = true;
+        o["scope"] = scope; o["key"] = key;
+    }
+    return o;
+}
+
+// G2: read-only memory statistics.
+QJsonObject ControlHub::cmdMemoryStats(const QJsonObject&) {
+    QJsonObject o = okBase();
+    o["command"] = "memory_stats";
+    mbdsdr::ai::MemoryStore store(mbdsdr::ai::defaultMemoryDbPath());
+    QString err;
+    if (!store.open(&err)) { o["ok"] = false; o["error"] = QStringLiteral("记忆库不可用：%1").arg(err); return o; }
+    QJsonObject st = store.stats(&err);
+    if (st.isEmpty() && !err.isEmpty()) { o["ok"] = false; o["error"] = err; return o; }
+    o["stats"] = st;
     return o;
 }
 

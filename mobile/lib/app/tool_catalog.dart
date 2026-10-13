@@ -418,6 +418,23 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       description:
           '写入：按 template_name（sweep_find_record/target_capture/fixed_freq_record）构建并登记一个确定性任务计划，返回步骤序列（executed=false，本调用不同步调谐/录制，生产端经异步 TaskRunner 执行）。未知 template_name 或缺参数诚实报错。手动模式被拦截。',
       write: true),
+  // ---- G1: 任务执行历史（只读，task_runs 表跨重启保留）----
+  ToolCatalogEntry(
+      name: 'get_task_history',
+      description:
+          '只读：查询 TaskRunner 已完成任务的历史。列表模式按完成时间倒序返回最近 limit 条（1..50 默认 10），每条含 id/name/state/finished_ms/step_count/summary；传 id 返回详情（含 steps 数组）。无记录 runs=[] 诚实空态，不编造历史。',
+      write: false),
+  // ---- G2: 记忆删除（写，手动 gate）+ 记忆统计（只读）----
+  ToolCatalogEntry(
+      name: 'memory_delete',
+      description:
+          '写入：按 (scope,key) 删除一条本地记忆（scope 枚举 user/agent/session）。存在返回 deleted=true；不存在返回 deleted=false 并附 note（空操作，不编造已删）。手动模式被拦截。',
+      write: true),
+  ToolCatalogEntry(
+      name: 'memory_stats',
+      description:
+          '只读：本地记忆库统计——total_entries 条目总数、by_scope 分层分布、last_updated_ms 最近写入、task_runs 已完成任务数。空库全 0 诚实返回。',
+      write: false),
 ];
 
 /// 与移动端 buildRadioTools() 当前注册工具**同名**的集合，用于在目录里诚实标注

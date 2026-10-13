@@ -85,6 +85,8 @@ const QSet<QString> kAllCxxTools = {
     "update_component_data",
     // Deterministic task templates: list (read) / run (gated write).
     "list_templates", "run_template",
+    // G1: task-run history (read). G2: memory delete (gated write) + stats (read).
+    "get_task_history", "memory_delete", "memory_stats",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -122,6 +124,8 @@ const QSet<QString> kExpectedWriteTools = {
     "update_component_data",
     // Deterministic task template runner (gated write; builds + registers a plan).
     "run_template",
+    // G2: delete one memory by (scope,key) (gated write).
+    "memory_delete",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -166,6 +170,8 @@ const QSet<QString> kFlutterUngatedReadTools = {
     "get_workspace_layout", "list_ui_components",
     // Deterministic task template catalog (read-only metadata).
     "list_templates",
+    // G1: task-run history (desktop-only read). G2: memory statistics (desktop read).
+    "get_task_history", "memory_stats",
 };
 } // namespace
 
@@ -191,7 +197,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 86, qPrintable(QString("expected 86 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 89, qPrintable(QString("expected 89 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -320,11 +326,11 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 86);
+    QCOMPARE(defs.size(), 89);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("run_template"));
+    QCOMPARE(defs.last().name, QString("memory_stats"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

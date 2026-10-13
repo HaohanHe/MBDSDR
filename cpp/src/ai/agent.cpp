@@ -2,6 +2,7 @@
 #include "agent.h"
 #include "ui/workspace_controller.h"
 #include "agent_tools.h"
+#include "memory_store.h"        // G3: chat-start memory injection block
 #include "vna_onramp.h"
 #include "llm_worker.h"
 #include "dsp/spectrum_engine.h"
@@ -153,7 +154,15 @@ void Agent::sendMessage(const QString& userInput) {
 
     // Async: invoke worker thread to do LLM chat with tool loop
     QList<ChatMessage> msgs;
-    msgs.append(ChatMessage{"system", "你是 SDR 接收控制助手。可以调谐频率、切换解调模式、控制录制、扫描频段。回答简洁。"});
+    // G3: chat-start memory injection (OpenHands discipline). The injected
+    // block lives ONLY in this fresh system message -- history_ (the persisted
+    // conversation) never contains it, so untrusted memory text does not leak
+    // into cross-session transcript persistence.
+    QString sysPrompt = QStringLiteral(
+        "你是 SDR 接收控制助手。可以调谐频率、切换解调模式、控制录制、扫描频段。回答简洁。");
+    const QString memBlock = buildMemoryInjectionBlock();
+    if (!memBlock.isEmpty()) sysPrompt += QStringLiteral("\n\n") + memBlock;
+    msgs.append(ChatMessage{"system", sysPrompt});
     msgs.append(history_);
     auto tools = toolDefs();
 

@@ -12,6 +12,7 @@
 #include <QApplication>
 
 #include "ai/task_runner.h"
+#include "ai/memory_store.h"
 #include "dsp/spectrum_engine.h"
 #include "ui/bookmark_manager.h"
 
@@ -65,6 +66,18 @@ void TestTaskAsync::asyncRunKeepsUiResponsive() {
     QVERIFY(steps.size() == plan.steps.size());
     for (const auto& s : steps)
         QVERIFY2(s.state == ai::StepState::Succeeded, qPrintable(s.error));
+
+    // G1: the completed run must have been appended to the task_runs history.
+    ai::MemoryStore store(ai::defaultMemoryDbPath());
+    QString herr;
+    QVERIFY2(store.open(&herr), qPrintable(herr));
+    QList<ai::TaskRunRecord> runs = store.listTaskRuns(5, &herr);
+    QVERIFY2(!runs.isEmpty(), "TaskRunner must persist a history row after runPlan");
+    const ai::TaskRunRecord rec = runs.first();
+    QCOMPARE(rec.name, plan.name);
+    QCOMPARE(rec.stepCount, steps.size());
+    QCOMPARE(rec.state, QString("succeeded"));
+    QVERIFY(!rec.stepsJson.isEmpty());
 }
 
 void TestTaskAsync::requestStopHaltsLaterSteps() {
@@ -95,6 +108,10 @@ void TestTaskAsync::requestStopHaltsLaterSteps() {
 int main(int argc, char** argv) {
     QTemporaryDir tmp;
     QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, tmp.path());
+    // G1: redirect the task-run history + memory db off the production
+    // ~/.mbdsdr path -- the runner now appends a history row on every runPlan.
+    qputenv("MBDSDR_MEMORY_DB",
+            (tmp.path() + "/memory.db").toUtf8());
     QApplication app(argc, argv);
     TestTaskAsync t;
     return QTest::qExec(&t, argc, argv);

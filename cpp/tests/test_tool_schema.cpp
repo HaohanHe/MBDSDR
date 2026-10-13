@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 86);
+    QCOMPARE(specs.size(), 89);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -538,6 +538,26 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "未知 template_name 或缺参数诚实报错；本调用只构建/登记计划（executed=false），"
             "不在此同步调谐或录制——真实异步执行在生产端经 TaskRunner。"
             "属于写动作，手动模式下被拦截。")},
+        // G1: task-run history (read-only).
+        {"get_task_history",
+         QString::fromUtf8(
+            "只读：查询 TaskRunner 已完成任务的历史（落于本地记忆库 task_runs 表，跨重启保留）。"
+            "列表模式（默认）按完成时间倒序返回最近 limit 条（1..50 默认 10），"
+            "每条含 id/name/state（succeeded/failed/aborted/gated/partial）/finished_ms/step_count/summary；"
+            "传 id 进入详情模式，额外返回逐步 steps 数组（tool/state/summary/elapsed_ms/error）。"
+            "无记录时 runs=[] 并附诚实 note，不编造历史；id 不存在时 ok:false 并给提示。")},
+        // G2: memory_delete (gated write) + memory_stats (read-only).
+        {"memory_delete",
+         QString::fromUtf8(
+            "写入：按 (scope,key) 删除一条本地记忆——同时删 mem_meta 行与其 FTS 索引行。"
+            "scope 必填枚举 user/agent/session；key 必填。同步短连接执行："
+            "条目存在返回 deleted=true；不存在返回 deleted=false 并附 note（空操作，不编造已删）。"
+            "属于写动作，手动模式下被拦截。")},
+        {"memory_stats",
+         QString::fromUtf8(
+            "只读：本地记忆库统计——total_entries（条目总数）、by_scope（user/agent/session 分布）、"
+            "last_updated_ms（最近写入墙钟毫秒，0=空库）、task_runs（已完成任务数，G1 历史）。"
+            "空库全 0 诚实返回，不编造数据。")},
 
 
     };
@@ -596,7 +616,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 86);
+    QCOMPARE(headerCount, 89);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

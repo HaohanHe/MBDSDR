@@ -2834,6 +2834,147 @@ QString execMemoryFlush(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
     return compact(o);
 }
 
+// G1: read-only task-run history (TaskRunner completion records, ~/.mbdsdr/memory.db).
+// Two modes: list (default, newest N) or detail (id present -> one run + steps[]).
+QString execGetTaskHistory(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                           const SourceInfo& src, ui::BookmarkManager*, aigui::WorkspaceController* /*workspace*/) {
+    QJsonObject o;
+    MemoryStore store(defaultMemoryDbPath());
+    QString err;
+    if (!store.open(&err)) {
+        o["ok"] = false;
+        o["error"] = QStringLiteral("任务历史库不可用：%1").arg(err);
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    const QJsonValue idVal = args.value(QStringLiteral("id"));
+    if (!idVal.isNull() && !idVal.isUndefined()) {
+        // Detail mode: one run, with the parsed step array. Non-positive ids
+        // honestly miss (autoincrement starts at 1).
+        const qint64 id = (qint64)idVal.toDouble(-1.0);
+        TaskRunRecord rec;
+        if (!store.getTaskRun(id, &rec, &err)) {
+            o["ok"] = false;
+            o["error"] = err;
+            o["note"] = QStringLiteral("没有该 id 的任务记录；用列表模式先查最近任务");
+            addSourceFields(o, src);
+            return compact(o);
+        }
+        QJsonObject run;
+        run["id"] = (double)rec.id;
+        run["name"] = rec.name;
+        run["state"] = rec.state;
+        run["finished_ms"] = (double)rec.finishedMs;
+        run["step_count"] = rec.stepCount;
+        run["summary"] = rec.summary;
+        const QJsonDocument sd = QJsonDocument::fromJson(rec.stepsJson.toUtf8());
+        run["steps"] = sd.isArray() ? sd.array() : QJsonArray{};
+        o["ok"] = true;
+        o["run"] = run;
+    } else {
+        // List mode: newest-first snapshot (summary only).
+        int limit = (int)args.value(QStringLiteral("limit")).toDouble(10.0);
+        const QList<TaskRunRecord> runs = store.listTaskRuns(limit, &err);
+        if (runs.isEmpty() && !err.isEmpty()) {
+            o["ok"] = false;
+            o["error"] = err;
+            addSourceFields(o, src);
+            return compact(o);
+        }
+        QJsonArray arr;
+        for (const TaskRunRecord& r : runs) {
+            QJsonObject rr;
+            rr["id"] = (double)r.id;
+            rr["name"] = r.name;
+            rr["state"] = r.state;
+            rr["finished_ms"] = (double)r.finishedMs;
+            rr["step_count"] = r.stepCount;
+            rr["summary"] = r.summary;
+            arr.append(rr);
+        }
+        o["ok"] = true;
+        o["runs"] = arr;
+        o["count"] = arr.size();
+        if (arr.isEmpty())
+            o["note"] = QStringLiteral("无任务历史（TaskRunner 尚未完成过任何任务；执行 list_templates/run_template 计划后此处可查）");
+    }
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// G2: write-gated delete one memory by (scope, key). Synchronous short-lived
+// connection: honest immediate found/not-found (dup-add surfaces failures at
+// drain; delete must answer now).
+QString execMemoryDelete(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                         const SourceInfo& src, ui::BookmarkManager*, aigui::WorkspaceController* /*workspace*/) {
+    QJsonObject o;
+    QString scope, key;
+    static const QSet<QString> kScopes{
+        QStringLiteral("user"), QStringLiteral("agent"), QStringLiteral("session")};
+    scope = args.value(QStringLiteral("scope")).toString();
+    key = args.value(QStringLiteral("key")).toString();
+    if (!kScopes.contains(scope)) {
+        o["ok"] = false; o["error"] = QStringLiteral("scope 必填枚举 user/agent/session");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    if (key.isEmpty()) {
+        o["ok"] = false; o["error"] = QStringLiteral("key 必填（scope 内唯一键）");
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    MemoryStore store(defaultMemoryDbPath());
+    QString err;
+    if (!store.open(&err)) {
+        o["ok"] = false;
+        o["error"] = QStringLiteral("记忆库不可用：%1").arg(err);
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    bool found = false;
+    if (!store.deleteKey(scope, key, &found, &err)) {
+        o["ok"] = false;
+        o["error"] = err;
+    } else if (!found) {
+        // Honest: nothing was there -- not an error, but the caller must know
+        // the delete was a no-op (silent success would lie about memory state).
+        o["ok"] = true;
+        o["deleted"] = false;
+        o["scope"] = scope; o["key"] = key;
+        o["note"] = QStringLiteral("该 (scope,key) 不存在，删除为空操作；不编造已删条目");
+    } else {
+        o["ok"] = true;
+        o["deleted"] = true;
+        o["scope"] = scope; o["key"] = key;
+    }
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// G2: read-only memory statistics (honest empty on a fresh DB).
+QString execMemoryStats(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                        const SourceInfo& src, ui::BookmarkManager*, aigui::WorkspaceController* /*workspace*/) {
+    QJsonObject o;
+    MemoryStore store(defaultMemoryDbPath());
+    QString err;
+    if (!store.open(&err)) {
+        o["ok"] = false;
+        o["error"] = QStringLiteral("记忆库不可用：%1").arg(err);
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    QJsonObject st = store.stats(&err);
+    if (st.isEmpty() && !err.isEmpty()) {
+        o["ok"] = false; o["error"] = err;
+        addSourceFields(o, src);
+        return compact(o);
+    }
+    o["ok"] = true;
+    o["stats"] = st;
+    addSourceFields(o, src);
+    return compact(o);
+}
+
 // ---- 第 10 域「工作台编排」（AIGUI P0-b）---------------------------------
 // These four tools drive the live WorkspaceController (three-column splitter +
 // right-tab visibility). They do NOT touch DSP / audio / hardware. When the
@@ -3142,6 +3283,11 @@ const QList<ToolDispatch>& dispatchTable() {
         // Deterministic task templates: list (read) / run (gated write).
         {"list_templates", &execListTemplates},
         {"run_template", &execRunTemplate},
+        // G1: task-run history (read-only; TaskRunner completion records).
+        {"get_task_history", &execGetTaskHistory},
+        // G2: memory delete (gated write) + statistics (read-only).
+        {"memory_delete", &execMemoryDelete},
+        {"memory_stats", &execMemoryStats},
     };
     return kTable;
 }
