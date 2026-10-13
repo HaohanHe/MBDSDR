@@ -78,6 +78,10 @@ private slots:
     void roundTripDefaultSpec();
     void registryWhitelistTabs();
     void engineOnEmptyModelDoesNotCrash();
+    void dataUpsertAndClear();
+    void dataUnknownComponentRejected();
+    void dataBadValueTypeRejected();
+    void dataRoundTripThroughJson();
 };
 
 void TestWorkspaceLayout::defaultSpecIsThreeColumn() {
@@ -231,6 +235,76 @@ void TestWorkspaceLayout::engineOnEmptyModelDoesNotCrash() {
     // Also exercise a null splitter/tabs path (defensive).
     QString note2 = applyLayoutEngine(nullptr, nullptr, m);
     Q_UNUSED(note2);
+}
+
+// A2UI updateDataModel minimal subset: object upserts (whole-replace), null
+// clears the key. The layout layer stores the payload verbatim.
+void TestWorkspaceLayout::dataUpsertAndClear() {
+    WorkspaceLayout m = defaultWorkspaceSpec();
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("freq_hz"), 145000000.0);
+    payload.insert(QStringLiteral("label"), QStringLiteral("145.000"));
+    QVERIFY(applyUpdateComponentData(m, QStringLiteral("tab:CW"), payload)
+            == DataUpdateStatus::Applied);
+    QVERIFY(m.component_data.contains(QStringLiteral("tab:CW")));
+    QCOMPARE(m.component_data.value(QStringLiteral("tab:CW")).toObject()
+                 .value(QStringLiteral("freq_hz")).toDouble(), 145000000.0);
+
+    // Second upsert on the SAME key whole-replaces (not merged).
+    QJsonObject payload2;
+    payload2.insert(QStringLiteral("mode"), QStringLiteral("USB"));
+    QVERIFY(applyUpdateComponentData(m, QStringLiteral("tab:CW"), payload2)
+            == DataUpdateStatus::Applied);
+    QJsonObject back = m.component_data.value(QStringLiteral("tab:CW")).toObject();
+    QVERIFY2(!back.contains(QStringLiteral("freq_hz")),
+             "upsert must whole-replace, not merge");
+    QCOMPARE(back.value(QStringLiteral("mode")).toString(), QStringLiteral("USB"));
+
+    // null clears the key.
+    QVERIFY(applyUpdateComponentData(m, QStringLiteral("tab:CW"), QJsonValue::Null)
+            == DataUpdateStatus::Applied);
+    QVERIFY(!m.component_data.contains(QStringLiteral("tab:CW")));
+}
+
+// Unknown component ids are REJECTED (whitelist gate), never stored.
+void TestWorkspaceLayout::dataUnknownComponentRejected() {
+    WorkspaceLayout m = defaultWorkspaceSpec();
+    QJsonObject payload; payload.insert(QStringLiteral("x"), 1);
+    QVERIFY(applyUpdateComponentData(m, QStringLiteral("tab:ghost"), payload)
+            == DataUpdateStatus::UnknownComponent);
+    QVERIFY(!m.component_data.contains(QStringLiteral("tab:ghost")));
+}
+
+// Arrays / strings / numbers / bools are not accepted payloads.
+void TestWorkspaceLayout::dataBadValueTypeRejected() {
+    WorkspaceLayout m = defaultWorkspaceSpec();
+    QVERIFY(applyUpdateComponentData(m, QStringLiteral("tab:CW"),
+                                     QJsonValue(QStringLiteral("not-an-object")))
+            == DataUpdateStatus::BadValueType);
+    QVERIFY(applyUpdateComponentData(m, QStringLiteral("tab:CW"),
+                                     QJsonValue(42.0))
+            == DataUpdateStatus::BadValueType);
+    QVERIFY(!m.component_data.contains(QStringLiteral("tab:CW")));
+}
+
+// component_data survives the JSON round-trip (get-side cache restore).
+void TestWorkspaceLayout::dataRoundTripThroughJson() {
+    WorkspaceLayout m = defaultWorkspaceSpec();
+    QJsonObject payload; payload.insert(QStringLiteral("freq_hz"), 145000000.0);
+    applyUpdateComponentData(m, QStringLiteral("tab:FT8"), payload);
+
+    QJsonObject j = workspaceSpecToJson(m);
+    QVERIFY(j.value(QStringLiteral("component_data")).isObject());
+    WorkspaceLayout back = workspaceSpecFromJson(j);
+    QVERIFY(back.component_data.contains(QStringLiteral("tab:FT8")));
+    QCOMPARE(back.component_data.value(QStringLiteral("tab:FT8")).toObject()
+                 .value(QStringLiteral("freq_hz")).toDouble(), 145000000.0);
+
+    // Re-serialize is stable.
+    QCOMPARE(workspaceSpecToJson(back).value(QStringLiteral("component_data"))
+                 .toObject().value(QStringLiteral("tab:FT8")).toObject(),
+             payload);
 }
 
 QTEST_MAIN(TestWorkspaceLayout)

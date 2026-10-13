@@ -208,3 +208,29 @@ MBDSDR P0 对齐了 A2UI v1.0 的**骨架语义**（声明式 JSON、扁平邻�
 - A2UI Roadmap：<https://a2ui.org/roadmap/>（2026-10-13 全文读完，1 859 字符）
 - 我方实现：`ci/D135/cpp/src/ui/{workspace_layout,workspace_controller,component_registry}.{h,cpp}`、`agent_tools.cpp`、`tool_schema.cpp`
 - 设计依据：`docs/learn/phase63/agent-ui-protocol-basis.md`（2026-10-12 摘录）
+
+---
+
+## 6. P1 落地记录（2026-10-13，commit 前工作树）
+
+本轮按本差距表 §3.1 顺序闭合了 P1 主项的前两件，第三件（action 事件回传）诚实登记延后：
+
+### 已落地
+1. **updateDataModel 最小子集（差距 1.1.3 / 1.3.4，M 体量）**
+   - `WorkspaceLayout` 增 `component_data`（QJsonObject：组件 id→数据槽）。
+   - 纯函数 `applyUpdateComponentData(layout, id, value)`：object=整体 upsert；null=删键清空；未知 id（白名单外）拒绝不存；非 object/null 类型拒绝不静默转换。
+   - 新工具 `update_component_data`（写 gate）：参数 `{component_id, data}`，三通道 + MCP 第 10 域「工作台编排」全挂；headless/未注入 controller 走既有「工作台控制器未注入」诚实降级。
+   - `get_workspace_layout` 返回的 JSON 现含 `component_data` 字段（读回通道）。
+   - 计数 83→84（47 写 / 37 读），金集八处全链同步。
+2. **信封 version 字段（差距 1.1.7，S 体量）**
+   - `arrange_workspace` / `reset_workspace` 的 accepted 回包现带 `version:"v1.0"`；`update_component_data` 回包同带。
+
+### 诚实登记：延后未做
+3. **action 事件回传最小通道（差距 1.4.1，M 体量）——本轮未做，登记后续**
+   - 原因：该件需要 Qt 侧信号接线（tab 切换、splitter 手动拖拽 → 经 LLMWorker 通道推 `{action:{...}}` 到 agent 对话流），涉及 widget 信号槽 + 事件队列，与本轮 updateDataModel+version 同批会超单轮预算；按「宁缺毋滥」纪律不硬做。
+   - 现状：agent 仍是单向布局下发者，用户面板操作不回传。
+   - 触发条件：P1 后半或 P2，需要「agent 知道用户在面板上做了什么」时再做；先建事件队列 + `get_pending_ui_events` 只读查询，不做双向绑定。
+
+### 未改（维持现状）
+- `component` vs `type` 判别器字段名：本差距表 §4.2 已登记为「有意不改」（P0 子集自有形状，不追求过官方 validator）。
+- surfaceId 多实例、catalogId 协商、结构化错误码、@path 绑定、allowedParents/Children、流式传输：均按 §3.2/§3.3 延后或不做。

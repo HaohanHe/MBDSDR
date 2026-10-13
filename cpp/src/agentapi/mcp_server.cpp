@@ -129,7 +129,8 @@ QList<DomainGroup> domainGroups() {
         {QStringLiteral("工作台编排"),
          QStringLiteral("AIGUI 三栏工作台布局编排：按编译期白名单调整 splitter 尺寸/右侧 tab 可见性，未知 id 诚实占位，不碰 DSP/音频/硬件。"),
          {QStringLiteral("arrange_workspace"), QStringLiteral("get_workspace_layout"),
-          QStringLiteral("list_ui_components"), QStringLiteral("reset_workspace")}},
+          QStringLiteral("list_ui_components"), QStringLiteral("reset_workspace"),
+          QStringLiteral("update_component_data")}},
     };
 }
 

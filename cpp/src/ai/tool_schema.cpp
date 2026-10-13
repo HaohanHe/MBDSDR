@@ -1618,6 +1618,28 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.write = true;
         out.append(s);
     }
+    // update_component_data (write -- gated): A2UI updateDataModel minimal subset.
+    {
+        ToolSchemaSpec s;
+        s.name = "update_component_data";
+        s.description = QString::fromUtf8(
+            "写入：A2UI v1.0 updateDataModel 最小子集——给一个编译期白名单组件 id 写入/清空"
+            "内存数据槽。data 为 object 时整体替换该组件的数据（upsert）；data 为 null 时清空"
+            "（删键）。未知组件 id 诚实报错、不写入。布局层不解释 payload、不做 @path 绑定、"
+            "不碰 DSP/音频/硬件；数据可经 get_workspace_layout 的 component_data 字段读回。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec cid;
+        cid.name = "component_id"; cid.type = "string";
+        cid.description = QString::fromUtf8("白名单组件 id（splitter/left_rail/center_spectrum/right_tabs/status_bar/tab:XXX/center:XXX）");
+        cid.required = true;
+        ToolParamSpec data;
+        data.name = "data"; data.type = "object";
+        data.description = QString::fromUtf8("object=整体替换数据槽；null=清空（删键）；其他类型拒绝");
+        data.required = true;
+        s.params << cid << data;
+        out.append(s);
+    }
     // get_aprs_messages (read): APRS/AX.25 messages decoded from a recovered
     // FSK bit stream (NRZI -> HDLC deframe + CRC-16/X.25 -> AX.25 decode).
     // Honest empty when nothing decoded / no feed.

@@ -21,6 +21,7 @@
 #pragma once
 
 #include <QJsonObject>
+#include <QJsonValue>
 
 #include "workspace_layout.h"   // WorkspaceLayout (by-value model member)
 
@@ -63,6 +64,15 @@ public:
     // capabilities:[...], min_size}, ...]. Read-only introspection so the agent
     // can discover what it is allowed to reference.
     QJsonObject componentCatalog();
+
+    // updateDataModel minimal subset (A2UI v1.0): upsert (data is an object ->
+    // whole-replace) or clear (data is null -> remove the slot) the in-memory
+    // data slot for one whitelisted component. Does NOT touch widgets/DSP --
+    // it only mutates model_.component_data. Returns:
+    //   {ok:true, component_id, data, cleared:bool}
+    //   {ok:false, error:"工作台控制器未连接..."} when widgets are null.
+    //   {ok:false, error:"未知组件 id..."} when componentId is not whitelisted.
+    QJsonObject updateComponentData(const QString& componentId, const QJsonValue& data);
 
 private:
     QSplitter*  splitter_ = nullptr;

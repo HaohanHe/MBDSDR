@@ -81,6 +81,8 @@ const QSet<QString> kAllCxxTools = {
     // 第 10 域「工作台编排」(AIGUI P0-b): live three-column workspace seam.
     "arrange_workspace", "get_workspace_layout",
     "list_ui_components", "reset_workspace",
+    // A2UI v1.0 updateDataModel minimal subset (gated write).
+    "update_component_data",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -114,6 +116,8 @@ const QSet<QString> kExpectedWriteTools = {
     "memory_add", "memory_update", "memory_flush",
     // 第 10 域「工作台编排」(P0-b): arrange/reset are gated writes.
     "arrange_workspace", "reset_workspace",
+    // A2UI v1.0 updateDataModel minimal subset (gated write).
+    "update_component_data",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -181,7 +185,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 83, qPrintable(QString("expected 83 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 84, qPrintable(QString("expected 84 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -310,7 +314,7 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 83);
+    QCOMPARE(defs.size(), 84);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).

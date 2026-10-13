@@ -159,6 +159,28 @@ WorkspaceLayout applyDeleteSurface() {
     return defaultWorkspaceSpec();
 }
 
+DataUpdateStatus applyUpdateComponentData(WorkspaceLayout& m,
+                                          const QString& componentId,
+                                          const QJsonValue& value) {
+    // Whitelist gate: unknown ids are rejected, never stored (same gate as
+    // layout nodes -- no runtime/untrusted registration).
+    if (!isRegistered(componentId)) return DataUpdateStatus::UnknownComponent;
+
+    if (value.isNull()) {
+        // null = delete key (clear the slot). Absent key is a no-op success.
+        m.component_data.remove(componentId);
+        return DataUpdateStatus::Applied;
+    }
+    if (value.isObject()) {
+        // object = upsert (whole-replace the slot).
+        m.component_data.insert(componentId, value.toObject());
+        return DataUpdateStatus::Applied;
+    }
+    // Arrays / strings / numbers / bools are not accepted payloads -- the tool
+    // contract is "object or null". Honest refusal, no silent coercion.
+    return DataUpdateStatus::BadValueType;
+}
+
 QJsonObject workspaceSpecToJson(const WorkspaceLayout& m) {
     QJsonObject o;
     QJsonArray sizes, stretch;
@@ -172,6 +194,9 @@ QJsonObject workspaceSpecToJson(const WorkspaceLayout& m) {
     o.insert(QStringLiteral("current_tab"), m.current_tab);
     o.insert(QStringLiteral("hidden_panels"), QJsonArray::fromStringList(m.hidden_panels));
     o.insert(QStringLiteral("placeholders"), QJsonArray::fromStringList(m.placeholder_ids));
+    // Per-component data slots (A2UI updateDataModel minimal subset). Emitted
+    // verbatim; empty object when no component has data.
+    o.insert(QStringLiteral("component_data"), m.component_data);
     return o;
 }
 
@@ -200,6 +225,9 @@ WorkspaceLayout workspaceSpecFromJson(const QJsonObject& o) {
     m.placeholder_ids.clear();
     for (const QJsonValue& v : o.value(QStringLiteral("placeholders")).toArray())
         if (v.isString()) m.placeholder_ids.push_back(v.toString());
+    // Per-component data slots: read verbatim (untrusted but inert -- the layout
+    // layer never executes it). Missing/non-object -> empty (default).
+    m.component_data = o.value(QStringLiteral("component_data")).toObject();
     return m;
 }
 

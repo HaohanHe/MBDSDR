@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 83);
+    QCOMPARE(specs.size(), 84);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -504,6 +504,13 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "写入：把工作台重置为默认三栏布局（280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见），"
             "等价于 deleteSurface。只动 splitter 与 tab 可见性，不碰 DSP/音频/硬件。"
             "属于写动作，手动模式下被拦截。")},
+        {"update_component_data",
+         QString::fromUtf8(
+            "写入：A2UI v1.0 updateDataModel 最小子集——给一个编译期白名单组件 id 写入/清空"
+            "内存数据槽。data 为 object 时整体替换该组件的数据（upsert）；data 为 null 时清空"
+            "（删键）。未知组件 id 诚实报错、不写入。布局层不解释 payload、不做 @path 绑定、"
+            "不碰 DSP/音频/硬件；数据可经 get_workspace_layout 的 component_data 字段读回。"
+            "属于写动作，手动模式下被拦截。")},
         {"get_aprs_messages",
          QString::fromUtf8(
             "读取：最近解出的 APRS/AX.25 消息（最多 limit 条，1..50，默认 50）。"
@@ -573,7 +580,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 83);
+    QCOMPARE(headerCount, 84);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

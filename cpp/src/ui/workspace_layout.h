@@ -29,6 +29,7 @@
 #pragma once
 
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QString>
 #include <QStringList>
 
@@ -67,6 +68,14 @@ struct WorkspaceLayout {
     // never defined. LayoutEngine does NOT synthesize a widget for these; the
     // get-side JSON lists them under "placeholders".
     QStringList placeholder_ids;
+
+    // Per-component data-model slot (A2UI v1.0 updateDataModel MINIMAL subset).
+    // Maps a whitelisted component id -> an arbitrary JSON object payload. The
+    // layout layer does NOT interpret the payload (no @path binding, no DSP
+    // wiring); it only stores, serializes, and lets the agent upsert/clear it.
+    // value=null clears (removes) the slot; an object upserts (whole-replaces)
+    // it. This is the in-memory data model the panel can later bind to.
+    QJsonObject component_data;
 };
 
 // ---- Pure functions (no Qt widget dependency; safe to unit test headless) ----
@@ -104,6 +113,23 @@ QJsonObject workspaceSpecToJson(const WorkspaceLayout& m);
 // test and by the get-side cache restore. Unknown/garbage fields fall back to
 // the default spec rather than throwing.
 WorkspaceLayout workspaceSpecFromJson(const QJsonObject& o);
+
+// Result of an updateDataModel minimal upsert/clear on the in-memory data
+// slot. Kept out of the Qt envelope so the pure layer stays testable headless.
+enum class DataUpdateStatus {
+    Applied,           // object upserted, or null cleared the slot
+    UnknownComponent,  // componentId not in the compile-time whitelist
+    BadValueType,      // value was neither object nor null
+};
+
+// updateDataModel minimal subset: upsert (value is an object -> whole-replace
+// the slot) or clear (value is null -> remove the key) for one component.
+// Unknown ids are REJECTED (not stored, not rendered) -- same whitelist gate as
+// layout nodes. The layout layer never interprets the payload; it only stores
+// it. `m` is mutated in place.
+DataUpdateStatus applyUpdateComponentData(WorkspaceLayout& m,
+                                          const QString& componentId,
+                                          const QJsonValue& value);
 
 // ---- Qt application layer (thin; does NOT touch hardware/DP) ----
 

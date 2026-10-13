@@ -136,6 +136,7 @@ private slots:
     void workspace_applyOverlayRoundTripAndPlaceholder();
     void workspace_getDefaultSpecThreeColumns();
     void workspace_resetAndCatalogTabs();
+    void workspace_updateComponentDataUpsertClearAndVersion();
     void workspace_llmDispatchPassesInjectedController();
 };
 
@@ -160,7 +161,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 83);
+    QCOMPARE(tools.size(), 84);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -916,9 +917,9 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 46 writes / 37 reads (83 tools; workspace domain two
+    // The frozen split: 47 writes / 37 reads (84 tools; workspace domain three
     // gated writes + APRS/colormap read tools).
-    QCOMPARE(writes, 46);
+    QCOMPARE(writes, 47);
     QCOMPARE(reads, 37);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
@@ -2461,7 +2462,8 @@ void TestAgent::getColorMaps_externalState() {
 void TestAgent::workspace_notInjectedHonestError() {
     dsp::SpectrumEngine engine;
     for (const char* tool : {"get_workspace_layout", "list_ui_components",
-                             "arrange_workspace", "reset_workspace"}) {
+                             "arrange_workspace", "reset_workspace",
+                             "update_component_data"}) {
         const QJsonObject o = QJsonDocument::fromJson(
             ai::executeTool(QString::fromUtf8(tool), QJsonObject(), &engine).toUtf8()).object();
         QVERIFY2(!o.value("ok").toBool(),
@@ -2546,6 +2548,82 @@ void TestAgent::workspace_resetAndCatalogTabs() {
     for (const QJsonValue& v : cat.value("components").toArray())
         if (v.toObject().value("category").toString() == QLatin1String("tab")) ++tabs;
     QCOMPARE(tabs, 14);
+}
+
+// A2UI v1.0 updateDataModel minimal subset: write a data slot -> read it back
+// through get_workspace_layout -> null clears -> unknown id honest error. Also
+// pins the version:"v1.0" envelope marker on arrange/reset replies.
+void TestAgent::workspace_updateComponentDataUpsertClearAndVersion() {
+    dsp::SpectrumEngine engine;
+    auto ctrl = makeTestWorkspace();
+
+    // arrange_workspace reply carries the version envelope marker.
+    QJsonObject splitterNode;
+    splitterNode["id"] = "splitter";
+    QJsonObject sp; sp["sizes"] = QJsonArray{200, 900, 300};
+    splitterNode["props"] = sp;
+    QJsonObject arrange;
+    arrange["op"] = "updateComponents";
+    arrange["components"] = QJsonArray{splitterNode};
+    const QJsonObject ar = QJsonDocument::fromJson(
+        ai::executeTool("arrange_workspace", arrange, &engine, nullptr, ctrl.get())
+            .toUtf8()).object();
+    QVERIFY2(ar.value("ok").toBool(), qPrintable(QString::fromUtf8(
+        QJsonDocument(ar).toJson(QJsonDocument::Compact))));
+    QCOMPARE(ar.value("version").toString(), QStringLiteral("v1.0"));
+
+    // Upsert a data slot for a whitelisted tab.
+    QJsonObject up;
+    up["component_id"] = "tab:CW";
+    QJsonObject payload; payload["freq_hz"] = 145000000.0; payload["label"] = "145.000";
+    up["data"] = payload;
+    const QJsonObject w = QJsonDocument::fromJson(
+        ai::executeTool("update_component_data", up, &engine, nullptr, ctrl.get())
+            .toUtf8()).object();
+    QVERIFY2(w.value("ok").toBool(), qPrintable(QString::fromUtf8(
+        QJsonDocument(w).toJson(QJsonDocument::Compact))));
+    QCOMPARE(w.value("version").toString(), QStringLiteral("v1.0"));
+    QCOMPARE(w.value("cleared").toBool(), false);
+
+    // Read it back through get_workspace_layout.component_data.
+    const QJsonObject spec = QJsonDocument::fromJson(
+        ai::executeTool("get_workspace_layout", QJsonObject(), &engine, nullptr, ctrl.get())
+            .toUtf8()).object();
+    const QJsonObject cd = spec.value("component_data").toObject();
+    QVERIFY2(cd.contains("tab:CW"), qPrintable(QString::fromUtf8(
+        QJsonDocument(spec).toJson(QJsonDocument::Compact))));
+    QCOMPARE(cd.value("tab:CW").toObject().value("freq_hz").toDouble(), 145000000.0);
+
+    // null clears the slot.
+    QJsonObject cl; cl["component_id"] = "tab:CW"; cl["data"] = QJsonValue::Null;
+    const QJsonObject c = QJsonDocument::fromJson(
+        ai::executeTool("update_component_data", cl, &engine, nullptr, ctrl.get())
+            .toUtf8()).object();
+    QVERIFY2(c.value("ok").toBool(), qPrintable(QString::fromUtf8(
+        QJsonDocument(c).toJson(QJsonDocument::Compact))));
+    QCOMPARE(c.value("cleared").toBool(), true);
+    const QJsonObject spec2 = QJsonDocument::fromJson(
+        ai::executeTool("get_workspace_layout", QJsonObject(), &engine, nullptr, ctrl.get())
+            .toUtf8()).object();
+    QVERIFY2(!spec2.value("component_data").toObject().contains("tab:CW"),
+             "null must clear the data slot");
+
+    // Unknown component id -> honest error, no fabrication.
+    QJsonObject bad; bad["component_id"] = "tab:ghost";
+    QJsonObject bp; bp["x"] = 1; bad["data"] = bp;
+    const QJsonObject b = QJsonDocument::fromJson(
+        ai::executeTool("update_component_data", bad, &engine, nullptr, ctrl.get())
+            .toUtf8()).object();
+    QVERIFY2(!b.value("ok").toBool(), "unknown component id must be ok:false");
+    QVERIFY2(b.value("error").toString().contains(QString::fromUtf8("未知组件")),
+             qPrintable(QString::fromUtf8(QJsonDocument(b).toJson(QJsonDocument::Compact))));
+
+    // Missing component_id -> honest error.
+    QJsonObject noId; noId["data"] = payload;
+    const QJsonObject n = QJsonDocument::fromJson(
+        ai::executeTool("update_component_data", noId, &engine, nullptr, ctrl.get())
+            .toUtf8()).object();
+    QVERIFY(!n.value("ok").toBool());
 }
 
 // LLMWorker dispatch path (the desktop chat-window seam): the injected

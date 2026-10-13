@@ -375,6 +375,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         // 第 10 域「工作台编排」(AIGUI P0-b).
         "arrange_workspace", "get_workspace_layout",
         "list_ui_components", "reset_workspace",
+        // A2UI v1.0 updateDataModel minimal subset (gated write).
+        "update_component_data",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -424,6 +426,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
     QVERIFY(ai::isWriteTool("reset_workspace"));
     QVERIFY(!ai::isWriteTool("get_workspace_layout"));
     QVERIFY(!ai::isWriteTool("list_ui_components"));
+    // A2UI v1.0 updateDataModel minimal subset: gated write.
+    QVERIFY(ai::isWriteTool("update_component_data"));
     QVERIFY(!ai::isWriteTool("get_network_audio_status"));
     QVERIFY(!ai::isWriteTool("get_scan_link_status"));
     QVERIFY(!ai::isWriteTool("get_squelch_status"));

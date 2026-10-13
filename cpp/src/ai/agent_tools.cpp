@@ -2886,6 +2886,35 @@ QString execResetWorkspace(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
     return QString::fromUtf8(QJsonDocument(res).toJson(QJsonDocument::Compact));
 }
 
+// A2UI v1.0 updateDataModel minimal subset: upsert/clear one component's data
+// slot. data may be an object (whole-replace) or null (clear the key). Unknown
+// component ids are an honest error; not-injected controller -> honest error.
+QString execUpdateComponentData(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                                const SourceInfo& /*src*/,
+                                ui::BookmarkManager* /*bookmarks*/,
+                                aigui::WorkspaceController* workspace) {
+    if (!workspace) return workspaceNotInjected();
+    const QString componentId = args.value(QStringLiteral("component_id")).toString();
+    if (componentId.isEmpty()) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("缺少 component_id（白名单组件 id）");
+        return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+    }
+    // data is REQUIRED and may be null. QJsonObject::value() returns Null when
+    // the key is absent, so we must distinguish "key present with null" from
+    // "key missing" -- treat missing as an honest error (contract requires it).
+    if (!args.contains(QStringLiteral("data"))) {
+        QJsonObject o;
+        o["ok"] = false;
+        o["error"] = QString::fromUtf8("缺少 data（object=upsert，null=清空）");
+        return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+    }
+    const QJsonValue data = args.value(QStringLiteral("data"));
+    const QJsonObject res = workspace->updateComponentData(componentId, data);
+    return QString::fromUtf8(QJsonDocument(res).toJson(QJsonDocument::Compact));
+}
+
 // The built-in tool registry: name -> executor. Learned (mechanism only) from
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
 // instead of an if-else chain. Clean-room reimplementation; no GPL code copied.
@@ -2995,6 +3024,8 @@ const QList<ToolDispatch>& dispatchTable() {
         {"get_workspace_layout", &execGetWorkspaceLayout},
         {"list_ui_components", &execListUiComponents},
         {"reset_workspace", &execResetWorkspace},
+        // A2UI v1.0 updateDataModel minimal subset (gated write).
+        {"update_component_data", &execUpdateComponentData},
     };
     return kTable;
 }

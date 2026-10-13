@@ -145,6 +145,8 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         // 第 10 域「工作台编排」(P0-b): arrange/reset are gated writes.
         {"arrange_workspace",     true,  &ControlHub::cmdArrangeWorkspace},
         {"reset_workspace",       true,  &ControlHub::cmdResetWorkspace},
+        // A2UI v1.0 updateDataModel minimal subset (gated write).
+        {"update_component_data", true,  &ControlHub::cmdUpdateComponentData},
         {"add_vfo",               true,  &ControlHub::cmdAddVfo},
         {"switch_vfo",            true,  &ControlHub::cmdSwitchVfo},
         {"rename_vfo",            true,  &ControlHub::cmdRenameVfo},
@@ -2316,6 +2318,19 @@ QJsonObject ControlHub::cmdResetWorkspace(const QJsonObject&) {
         return errResult(QString::fromUtf8("工作台控制器未注入（MainWindow 未创建 WorkspaceController）"));
     QJsonObject o = workspace_->reset();
     o["command"] = "reset_workspace";
+    return o;
+}
+
+QJsonObject ControlHub::cmdUpdateComponentData(const QJsonObject& a) {
+    if (!workspace_)
+        return errResult(QString::fromUtf8("工作台控制器未注入（MainWindow 未创建 WorkspaceController）"));
+    const QString componentId = a.value(QStringLiteral("component_id")).toString();
+    if (componentId.isEmpty())
+        return errResult(QString::fromUtf8("缺少 component_id（白名单组件 id）"));
+    if (!a.contains(QStringLiteral("data")))
+        return errResult(QString::fromUtf8("缺少 data（object=upsert，null=清空）"));
+    QJsonObject o = workspace_->updateComponentData(componentId, a.value(QStringLiteral("data")));
+    o["command"] = "update_component_data";
     return o;
 }
 

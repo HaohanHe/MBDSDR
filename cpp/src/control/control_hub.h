@@ -307,6 +307,9 @@ private:
     QJsonObject cmdGetWorkspaceLayout(const QJsonObject&);
     QJsonObject cmdListUiComponents(const QJsonObject&);
     QJsonObject cmdResetWorkspace(const QJsonObject&);
+    // A2UI v1.0 updateDataModel minimal subset (gated write): upsert/clear one
+    // component's in-memory data slot.
+    QJsonObject cmdUpdateComponentData(const QJsonObject& a);
     // VFO list / add / switch / rename.
     QJsonObject cmdListVfos(const QJsonObject&);
     QJsonObject cmdAddVfo(const QJsonObject&);

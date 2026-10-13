@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，83 个工具）
+# Agent 工具能力清单（自动生成，84 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -397,6 +397,12 @@ dump1090 --aircraft 形状快照。只读工具（手动 gate 不拦截）。
 ## reset_workspace（写，第 10 域「工作台编排」）
 把工作台重置为默认三栏布局（280/800/280 stretch 1/3/1，14 个右侧 tab 全部可见），等价于 deleteSurface。写工具（手动 gate 拦截）。
 - 只动 splitter 与 tab 可见性，不碰 DSP/音频/硬件。
+
+## update_component_data（写，第 10 域「工作台编排」A2UI v1.0 updateDataModel）
+A2UI v1.0 updateDataModel 最小子集——给一个编译期白名单组件 id 写入/清空内存数据槽。写工具（手动 gate 拦截）。
+- `component_id`：白名单组件 id（splitter/left_rail/center_spectrum/right_tabs/status_bar/tab:XXX/center:XXX）。
+- `data`：object 时整体替换该组件的数据（upsert）；null 时清空（删键）；其他类型拒绝、不做静默转换。
+- 未知组件 id 诚实报错、不写入。布局层不解释 payload、不做 @path 绑定、不碰 DSP/音频/硬件；数据可经 `get_workspace_layout` 的 `component_data` 字段读回。
 
 ## get_aprs_messages（只读）
 
