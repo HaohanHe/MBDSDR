@@ -344,3 +344,16 @@
 - 双构型：D135 Debug 与 R135 Release 各 146/146 主体 + 串行组 4/4 + e2e_smoke Skipped（无音频）。
 - 遗留 PENDING：真实 1200/2400 baud 射频信号端到端（FSK 解调器 → feedApRsBits）需真机验证；
   hub 侧 limit 固定 50 未透传参数（引擎与工具侧已支持，登记）。
+
+## 38. 补批：色板工具诚实化 + get_color_maps（P3 #77，工具 82→83）
+- 侦察纠正：gap L8「外部 JSON 色板文件」判「未实现」已过时——`parseColormapJson`（spectrum_render.h）与
+  UI 右键加载/启动重应用完整存在；真缺口是 **headless 三通道断点**：set_color_map 只存路径不加载不校验，
+  文件坏时工具仍报成功（UI 静默回退内置）。
+- set_color_map 语义升级：加载 + 校验（复用 parseColormapJson）通过才持久化；缺失/非法 JSON/色标不足 →
+  ok:false + 人类可读原因，不保存偏好。UI 启动重应用同一文件不受影响。
+- 新增只读 get_color_maps：内置 3 色板 + 当前外部文件实时校验（path/name/stops）；文件消失/变坏 → external=null
+  + 诚实 note。三通道 schema/executor/hub + headless MCP 域（SDR 调谐/VFO）。
+- 测试：test_colormap_file 5 用例（对象/数组/缺文件/坏 JSON/单色标）+ test_agent 3 用例（合法加载/坏文件拒收
+  且不污染设置/外部态往返）+ test_control_hub 旧用例升级为真实临时文件。D135/R135 各 147/147 主体 + 串行 4/4。
+- 判定登记：L13 GFSK 高斯匹配滤波无用户可感知接入场景（fsk 基座已闭环 APRS），非缺口；L10/L11/L12 缺深度
+  低价值，不动。

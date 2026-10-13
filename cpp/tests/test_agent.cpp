@@ -2,6 +2,8 @@
 #include <QtTest/QtTest>
 #include <QRegularExpression>
 #include <QSettings>
+#include <QTemporaryDir>
+#include <QFile>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -76,6 +78,9 @@ private slots:
     void getFt8History_limitClamp();
     void getApRsMessages_emptyState();
     void getApRsMessages_injectedAndFeedRoundTrip();
+    void setColorMap_validJson();
+    void setColorMap_badJsonRejected();
+    void getColorMaps_externalState();
     void exportFt8Results_allHistoryEmptyAndInjected();
     // --- ADS-B aircraft snapshot (dump1090 shape) -------------------------
     void getAdsbAircraft_emptyState();
@@ -155,7 +160,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 82);
+    QCOMPARE(tools.size(), 83);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -911,11 +916,10 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 46 writes / 36 reads (82 tools; AIGUI P0-b workspace
-    // domain added two gated writes + two desktop reads; APRS get_aprs_messages
-    // is a read tool).
+    // The frozen split: 46 writes / 37 reads (83 tools; workspace domain two
+    // gated writes + APRS/colormap read tools).
     QCOMPARE(writes, 46);
-    QCOMPARE(reads, 36);
+    QCOMPARE(reads, 37);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -2383,6 +2387,77 @@ std::unique_ptr<aigui::WorkspaceController> makeTestWorkspace() {
 
 // Not injected: the four workspace tools must return an honest "not injected"
 // envelope rather than crashing or fabricating a success.
+
+void TestAgent::setColorMap_validJson() {
+    QTemporaryDir dir;
+    QFile f(dir.filePath(QStringLiteral("ramp.json")));
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("{\"name\":\"sunset\",\"stops\":[{\"t\":0,\"c\":\"#000000\"},"
+            "{\"t\":1,\"c\":\"#ffffff\"}]}");
+    f.close();
+    QJsonObject args;
+    args["file_path"] = f.fileName();
+    dsp::SpectrumEngine engine;
+    QJsonObject o = QJsonDocument::fromJson(
+        ai::executeTool("set_color_map", args, &engine).toUtf8()).object();
+    QVERIFY2(o.value("ok").toBool(), qPrintable(
+        ai::executeTool("set_color_map", args, &engine)));
+    QCOMPARE(o.value("name").toString(), QStringLiteral("sunset"));
+    QCOMPARE(o.value("stops").toInt(), 2);
+}
+
+void TestAgent::setColorMap_badJsonRejected() {
+    QSettings().remove(QStringLiteral("view/wfColormapFile"));   // isolate from earlier cases
+    QTemporaryDir dir;
+    QFile f(dir.filePath(QStringLiteral("bad.json")));
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("{ not json !!");
+    f.close();
+    QJsonObject args;
+    args["file_path"] = f.fileName();
+    dsp::SpectrumEngine engine;
+    QJsonObject o = QJsonDocument::fromJson(
+        ai::executeTool("set_color_map", args, &engine).toUtf8()).object();
+    QVERIFY(!o.value("ok").toBool());
+    QVERIFY(o.value("error").toString().contains(QStringLiteral("JSON")));
+    // The broken file must NOT be persisted as the configured preference.
+    QCOMPARE(QSettings().value(QStringLiteral("view/wfColormapFile")).toString(),
+             QString());
+}
+
+void TestAgent::getColorMaps_externalState() {
+    dsp::SpectrumEngine engine;
+    QJsonObject o1 = QJsonDocument::fromJson(
+        ai::executeTool("get_color_maps", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY2(o1.value("ok").toBool(), qPrintable(
+        ai::executeTool("get_color_maps", QJsonObject{}, &engine)));
+    QCOMPARE(o1.value("builtin").toArray().size(), 3);
+    QVERIFY(o1.value("external").isNull());   // no file configured yet
+
+    QTemporaryDir dir;
+    QFile f(dir.filePath(QStringLiteral("ramp.json")));
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("{\"name\":\"sunset\",\"stops\":[{\"t\":0,\"c\":\"#000000\"},"
+            "{\"t\":1,\"c\":\"#ffffff\"}]}");
+    f.close();
+    QJsonObject args;
+    args["file_path"] = f.fileName();
+    QVERIFY(ai::executeTool("set_color_map", args, &engine).contains("\"ok\":true"));
+
+    QJsonObject o2 = QJsonDocument::fromJson(
+        ai::executeTool("get_color_maps", QJsonObject{}, &engine).toUtf8()).object();
+    const QJsonObject ext = o2.value("external").toObject();
+    QCOMPARE(ext.value("name").toString(), QStringLiteral("sunset"));
+    QCOMPARE(ext.value("stops").toInt(), 2);
+
+    // Honest when the configured file disappears.
+    QFile::remove(f.fileName());
+    QJsonObject o3 = QJsonDocument::fromJson(
+        ai::executeTool("get_color_maps", QJsonObject{}, &engine).toUtf8()).object();
+    QVERIFY(o3.value("external").isNull());
+    QVERIFY(o3.value("note").toString().contains(QStringLiteral("不可用")));
+}
+
 void TestAgent::workspace_notInjectedHonestError() {
     dsp::SpectrumEngine engine;
     for (const char* tool : {"get_workspace_layout", "list_ui_components",

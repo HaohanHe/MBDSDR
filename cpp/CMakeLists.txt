@@ -1358,6 +1358,12 @@ target_include_directories(test_hdlc PRIVATE src)
 target_link_libraries(test_hdlc PRIVATE mbdsdr_core)
 target_link_libraries(test_hdlc PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
 add_test(NAME hdlc COMMAND test_hdlc)
+
+add_executable(test_colormap_file tests/test_colormap_file.cpp)
+target_include_directories(test_colormap_file PRIVATE src)
+target_link_libraries(test_colormap_file PRIVATE mbdsdr_core)
+target_link_libraries(test_colormap_file PRIVATE Qt6::Test Qt6::Widgets Qt6::Gui Qt6::Core)
+add_test(NAME colormap_file COMMAND test_colormap_file)
 set_tests_properties(digital_panel_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # End-to-end: TestSignalSource digital IQ -> real channelizer -> DigitalDemod lock.

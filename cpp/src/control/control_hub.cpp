@@ -16,6 +16,7 @@
 #include "ai/memory_store.h"   // P3 #73: local SQLite FTS5 memory store
 #include "ai/checkpoint_writer.h" // P3 #74: background single-writer drain
 #include "core/tokens.h"
+#include "ui/spectrum_render.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -196,6 +197,7 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"list_vfos",             false, &ControlHub::cmdListVfos},
         {"list_recordings",       false, &ControlHub::cmdListRecordings},
         {"get_spectrum_status",   false, &ControlHub::cmdGetSpectrumStatus},
+        {"get_color_maps",      false, &ControlHub::cmdGetColorMaps},
         // ---- Local memory family read commands (P3 #73/#74, always allowed) --
         {"memory_search",         false, &ControlHub::cmdMemorySearch},
         {"checkpoint_status",     false, &ControlHub::cmdCheckpointStatus},
@@ -2460,12 +2462,48 @@ QJsonObject ControlHub::cmdSetColorMap(const QJsonObject& a) {
     const QString path = a.value(QStringLiteral("file_path")).toString();
     if (path.isEmpty())
         return errResult(QString::fromUtf8("file_path 不能为空"));
+    ui::ParsedColormap parsed;
+    QString err;
+    if (!ui::loadColormapFileForTool(path, &parsed, &err))
+        return errResult(err);
     QSettings(QString::fromUtf8("MBDSDR"), QString::fromUtf8("MBDSDR"))
         .setValue(QLatin1String(tokens::kSettingsKeyColormapFile), path);
     QJsonObject o = okBase();
     o["command"] = "set_color_map";
     o["file_path"] = path;
-    o["note"] = QString::fromUtf8("已持久化到 QSettings view/wfColormapFile；重渲染由 UI 启动时重应用，headless 仅保存偏好");
+    o["name"] = QString::fromUtf8(parsed.name.c_str());
+    o["stops"] = static_cast<int>(parsed.stops.size());
+    o["note"] = QString::fromUtf8("色板文件已加载校验通过并持久化（UI 启动时重应用同一文件）");
+    return o;
+}
+
+QJsonObject ControlHub::cmdGetColorMaps(const QJsonObject&) {
+    QJsonArray builtin;
+    QJsonObject b1; b1["name"] = QStringLiteral("经典");   b1["palette"] = 0; builtin.append(b1);
+    QJsonObject b2; b2["name"] = QStringLiteral("单色");   b2["palette"] = 1; builtin.append(b2);
+    QJsonObject b3; b3["name"] = QStringLiteral("Viridis"); b3["palette"] = 2; builtin.append(b3);
+    QJsonObject o = okBase();
+    o["command"] = "get_color_maps";
+    o["builtin"] = builtin;
+    const QString path = QSettings(QString::fromUtf8("MBDSDR"), QString::fromUtf8("MBDSDR"))
+        .value(QLatin1String(tokens::kSettingsKeyColormapFile)).toString();
+    if (path.isEmpty()) {
+        o["external"] = QJsonValue::Null;
+        o["note"] = QString::fromUtf8("未配置外部色板文件");
+    } else {
+        ui::ParsedColormap parsed;
+        QString err;
+        if (ui::loadColormapFileForTool(path, &parsed, &err)) {
+            QJsonObject e;
+            e["path"] = path;
+            e["name"] = QString::fromUtf8(parsed.name.c_str());
+            e["stops"] = static_cast<int>(parsed.stops.size());
+            o["external"] = e;
+        } else {
+            o["external"] = QJsonValue::Null;
+            o["note"] = QString::fromUtf8("配置的外部色板文件当前不可用：%1").arg(err);
+        }
+    }
     return o;
 }
 

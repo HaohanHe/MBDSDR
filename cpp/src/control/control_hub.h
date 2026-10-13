@@ -319,6 +319,7 @@ private:
     // FFT / spectrum parameters + waterfall colormap preference.
     QJsonObject cmdSetFftParams(const QJsonObject& a);
     QJsonObject cmdSetColorMap(const QJsonObject& a);
+    QJsonObject cmdGetColorMaps(const QJsonObject& a);
     QJsonObject cmdGetSpectrumStatus(const QJsonObject&);
 
     // Argument extraction: fills `out` and returns true, else fills `err`.

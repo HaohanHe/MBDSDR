@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，82 个工具）
+# Agent 工具能力清单（自动生成，83 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -402,4 +402,9 @@ dump1090 --aircraft 形状快照。只读工具（手动 gate 不拦截）。
 
 读取最近解出的 APRS/AX.25 消息（limit 1..50 默认 50），字段 time_ms/src/dst/path/info。
 源为 1200/2400 baud FSK 解调后的 NRZI 位流，经 HDLC 拆帧（CRC-16/X.25 校验）与 AX.25 解码；无效帧丢弃，无解码诚实空态。
+属于只读工具，手动模式不拦截。
+
+## get_color_maps（只读）
+
+列出瀑布图可用色板：内置 3 个（经典/单色/Viridis，palette 0/1/2）与当前配置的外部 JSON 色板文件（path/name/stops）。外部文件缺失或损坏时 external=null 并附诚实 note。
 属于只读工具，手动模式不拦截。

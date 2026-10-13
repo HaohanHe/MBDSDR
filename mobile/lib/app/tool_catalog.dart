@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 82 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 83 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -33,7 +33,7 @@ class ToolCatalogEntry {
   final bool write;
 }
 
-/// 桌面端 82 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
+/// 桌面端 83 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
 /// 顺序与 write 标志逐字按 registeredToolSpecs() 注册顺序排列。
 const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
   // ---- 基础调谐 / 解调（注册序 #1-7）----
@@ -348,6 +348,12 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'get_aprs_messages',
       description:
           '只读：返回最近 N 条 APRS/AX.25 解码消息（时间倒序，字段 time_ms/src/dst/path/info）。1200/2400 baud FSK 位流经 HDLC 拆帧（CRC-16/X.25 校验）与 AX.25 解码；无解码 messages=[] 诚实空态。',
+      write: false),
+  // ---- 瀑布色板目录（P3 #77，读）----
+  ToolCatalogEntry(
+      name: 'get_color_maps',
+      description:
+          '只读：列出瀑布图可用色板——内置 3 个（经典/单色/Viridis，palette 0/1/2）与当前配置的外部 JSON 色板文件（如有：path/name/stops）。外部文件缺失或损坏时 external 为 null 并附诚实 note。',
       write: false),
   // ---- 本地记忆族 + checkpoint writer 控制面（P3 #73/#74，SQLite FTS5）----
   ToolCatalogEntry(

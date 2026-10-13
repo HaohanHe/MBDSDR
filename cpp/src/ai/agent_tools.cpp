@@ -3,6 +3,7 @@
 #include "tool_schema.h"
 #include "sat_task_planner.h"
 #include "core/tokens.h"
+#include "ui/spectrum_render.h"
 #include "dsp/spectrum_engine.h"
 #include "vna/vna_rf.h"
 #include "dsp/device_capabilities.h"
@@ -2509,11 +2510,53 @@ QString execSetColorMap(const QJsonObject& args, dsp::SpectrumEngine*,
     QString p;
     if (!needStr(args, "file_path", p))
         return errResult(QString::fromUtf8("参数 file_path 缺失或不是字符串"));
+    ui::ParsedColormap parsed;
+    QString err;
+    if (!ui::loadColormapFileForTool(p, &parsed, &err))
+        return errResult(err);
     QSettings().setValue(QStringLiteral("view/wfColormapFile"), p);
     QJsonObject o;
     o["ok"] = true;
     o["file_path"] = p;
-    o["message"] = QString::fromUtf8("色板路径已保存到设置（重绘由 UI 持有）");
+    o["name"] = QString::fromUtf8(parsed.name.c_str());
+    o["stops"] = static_cast<int>(parsed.stops.size());
+    o["message"] = QString::fromUtf8(
+        "色板文件已加载校验通过并持久化（UI 启动时重应用同一文件）");
+    addSourceFields(o, src);
+    return compact(o);
+}
+
+// get_color_maps (read): built-in palettes + live-validated external file.
+QString execGetColorMaps(const QJsonObject& /*args*/, dsp::SpectrumEngine*,
+                         const SourceInfo& src,
+                         ui::BookmarkManager* /*bookmarks*/,
+                         aigui::WorkspaceController* /*workspace*/) {
+    QJsonArray builtin;
+    QJsonObject b1; b1["name"] = QStringLiteral("经典");   b1["palette"] = 0; builtin.append(b1);
+    QJsonObject b2; b2["name"] = QStringLiteral("单色");   b2["palette"] = 1; builtin.append(b2);
+    QJsonObject b3; b3["name"] = QStringLiteral("Viridis"); b3["palette"] = 2; builtin.append(b3);
+
+    QJsonObject o;
+    o["ok"] = true;
+    o["builtin"] = builtin;
+    const QString path = QSettings().value(QStringLiteral("view/wfColormapFile")).toString();
+    if (path.isEmpty()) {
+        o["external"] = QJsonValue::Null;
+        o["note"] = QString::fromUtf8("未配置外部色板文件");
+    } else {
+        ui::ParsedColormap parsed;
+        QString err;
+        if (ui::loadColormapFileForTool(path, &parsed, &err)) {
+            QJsonObject e;
+            e["path"] = path;
+            e["name"] = QString::fromUtf8(parsed.name.c_str());
+            e["stops"] = static_cast<int>(parsed.stops.size());
+            o["external"] = e;
+        } else {
+            o["external"] = QJsonValue::Null;
+            o["note"] = QString::fromUtf8("配置的外部色板文件当前不可用：%1").arg(err);
+        }
+    }
     addSourceFields(o, src);
     return compact(o);
 }
@@ -2928,6 +2971,7 @@ const QList<ToolDispatch>& dispatchTable() {
         {"export_recording", &execExportRecording},
         {"set_fft_params", &execSetFftParams},
         {"set_color_map", &execSetColorMap},
+        {"get_color_maps", &execGetColorMaps},
         {"get_spectrum_status", &execGetSpectrumStatus},
         {"set_doppler_compensation", &execSetDopplerCompensation},
         {"connect_network_source", &execConnectNetworkSource},

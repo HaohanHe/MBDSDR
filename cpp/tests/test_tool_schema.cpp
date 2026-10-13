@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 82);
+    QCOMPARE(specs.size(), 83);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -510,6 +510,12 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "每条含 time_ms/src/dst/path/info。源为 1200/2400 baud FSK 解调后的 NRZI "
             "位流经 HDLC 拆帧（CRC-16/X.25 校验）与 AX.25 解码；无效帧丢弃，无解码"
             "则诚实空态。只读工具。")},
+        {"get_color_maps",
+         QString::fromUtf8(
+            "读取：列出瀑布图可用色板——内置 3 个（经典/单色/Viridis，palette 0/1/2）"
+            "与当前配置的外部 JSON 色板文件（如有：path/name/stops）。外部文件缺失或"
+            "已损坏时 external 为 null 并附诚实 note，不编造。只读工具。")},
+
 
     };
     QCOMPARE(defs.size(), expected.size());
@@ -567,7 +573,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 82);
+    QCOMPARE(headerCount, 83);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

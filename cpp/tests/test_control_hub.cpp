@@ -23,6 +23,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QSettings>
+#include <QTemporaryDir>
+#include <QFile>
 #include <cmath>
 
 #include "dsp/spectrum_engine.h"
@@ -1044,14 +1046,25 @@ void TestControlHub::phase26WritesAreGatedAndBadArgsHonest() {
 
     hub.setWriteEnabled(true);
 
-    // set_color_map really writes the QSettings persistence key.
+    // set_color_map loads + validates a real colormap file, then persists the
+    // path only on success; a missing/broken file is an honest ok:false.
+    QTemporaryDir cmDir;
+    QFile cmf(cmDir.filePath(QStringLiteral("ramp.json")));
+    QVERIFY(cmf.open(QIODevice::WriteOnly));
+    cmf.write("{\"name\":\"test\",\"stops\":[{\"t\":0,\"c\":\"#000000\"},"
+              "{\"t\":1,\"c\":\"#ffffff\"}]}");
+    cmf.close();
     QJsonObject r = parseObj(hub.execute("set_color_map",
-        {{"file_path", QStringLiteral("/tmp/wf_cmap_test.json")}}));
+        {{"file_path", cmf.fileName()}}));
     QVERIFY2(r.value("ok").toBool(), r.value("error").toString().toUtf8().constData());
     QSettings rs(QString::fromUtf8("MBDSDR"), QString::fromUtf8("MBDSDR"));
     QCOMPARE(rs.value(QLatin1String(tokens::kSettingsKeyColormapFile)).toString(),
-             QStringLiteral("/tmp/wf_cmap_test.json"));
+             cmf.fileName());
     rs.remove(QLatin1String(tokens::kSettingsKeyColormapFile));
+    QJsonObject rBad = parseObj(hub.execute("set_color_map",
+        {{"file_path", QStringLiteral("/tmp/wf_cmap_missing.json")}}));
+    QVERIFY(!rBad.value("ok").toBool());
+    QVERIFY(rBad.value("error").toString().contains(QStringLiteral("无法打开")));
 
     // Bad args are honest errors.
     QCOMPARE(parseObj(hub.execute("add_bookmark", {})).value("ok").toBool(), false);

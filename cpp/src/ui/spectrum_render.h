@@ -26,6 +26,7 @@
 #include <vector>
 
 #include <QByteArray>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -276,6 +277,27 @@ inline std::vector<double> freqTicksNice(double loHz, double hiHz,
     for (double f = std::floor(loHz / step) * step; f <= hiHz; f += step)
         ticks.push_back(f);
     return ticks;
+}
+
+// ---------------------------------------------------------------------------
+// Tool-side colormap file helper: read + parse + honest error. Used by the
+// headless channels (Agent executor / ControlHub) so that set_color_map is a
+// real load-and-validate, never a "save a preference and hope the UI applies
+// it later". Pure function: no QSettings writes, no UI state.
+// ---------------------------------------------------------------------------
+inline bool loadColormapFileForTool(const QString& absPath, ParsedColormap* out,
+                                    QString* errorOut) {
+    if (!out) {
+        if (errorOut) errorOut->assign(QStringLiteral("空输出"));
+        return false;
+    }
+    QFile f(absPath);
+    if (!f.open(QIODevice::ReadOnly)) {
+        if (errorOut)
+            errorOut->assign(QStringLiteral("无法打开文件：%1").arg(absPath));
+        return false;
+    }
+    return parseColormapJson(f.readAll(), out, errorOut);
 }
 
 } // namespace ui

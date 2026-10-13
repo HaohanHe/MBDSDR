@@ -1633,6 +1633,19 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // get_color_maps (read): built-in palettes + currently configured external
+    // colormap file (validated live). Honest when none / file gone / file bad.
+    {
+        ToolSchemaSpec s;
+        s.name = "get_color_maps";
+        s.description = QString::fromUtf8(
+            "读取：列出瀑布图可用色板——内置 3 个（经典/单色/Viridis，palette 0/1/2）"
+            "与当前配置的外部 JSON 色板文件（如有：path/name/stops）。外部文件缺失或"
+            "已损坏时 external 为 null 并附诚实 note，不编造。只读工具。");
+        s.write = false;
+        out.append(s);
+    }
+
     return out;
 }
 
