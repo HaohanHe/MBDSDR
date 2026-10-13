@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 86 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 90 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -33,7 +33,7 @@ class ToolCatalogEntry {
   final bool write;
 }
 
-/// 桌面端 86 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
+/// 桌面端 90 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
 /// 顺序与 write 标志逐字按 registeredToolSpecs() 注册顺序排列。
 const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
   // ---- 基础调谐 / 解调（注册序 #1-7）----
@@ -434,6 +434,12 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'memory_stats',
       description:
           '只读：本地记忆库统计——total_entries 条目总数、by_scope 分层分布、last_updated_ms 最近写入、task_runs 已完成任务数。空库全 0 诚实返回。',
+      write: false),
+  // ---- 卫星 TLE 目录（predict_passes 前置，读）----
+  ToolCatalogEntry(
+      name: 'list_satellites',
+      description:
+          '只读：列出本地 TLE 缓存中的卫星目录（name/catalog_number/epoch_utc/age_days/fresh/downlink_hz）与 count/fresh_count/fetched_at 汇总。predict_passes 的前置——先列可用卫星再选名预测过境；只读磁盘缓存，陈旧的离线内置 TLE 绝不列出。无缓存时 ok=false、source=none 诚实空态，不编造卫星。',
       write: false),
 ];
 
