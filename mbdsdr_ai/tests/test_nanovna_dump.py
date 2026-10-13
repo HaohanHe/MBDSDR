@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """nanovna_dump replay 测试：自造协议脚本，不抄 GPL。"""
 import json
+import math
 import os
 
 from mbdsdr_ai.nanovna_client import (
@@ -41,6 +42,12 @@ def test_replay_dump_shape(tmp_path):
     assert len(out["frequencies_hz"]) == 11
     assert len(out["S11"]) == 11 and len(out["S21"]) == 11
     assert len(out["vswr"]) == 11
+    # 官方 11 种迹线格式之 PHASE 的 Python 侧接线（2026-10-13 半适配转正）
+    assert len(out["s11_phase_deg"]) == 11
+    assert len(out["s21_phase_deg"]) == 11
+    # data1 = "0.1 -0.02" -> atan2(-0.02, 0.1)
+    _expect = round(math.degrees(math.atan2(-0.02, 0.1)), 2)
+    assert abs(out["s21_phase_deg"][0] - _expect) < 0.01
     # |Gamma|=0.5 -> VSWR = (1+0.5)/(1-0.5) = 3.0
     assert abs(out["vswr"][0] - 3.0) < 0.05
 

@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+import math
+
 from mbdsdr_ai.fill_evidence_example import analyze_resonance_py
 
 
@@ -19,6 +21,48 @@ def test_tdr_positive_length():
     s11 = [[0.1, 0.0]] * 5 + [[0.9, 0.0]] + [[0.1, 0.0]] * 5  # 反射峰在中间
     L = tdr_length_py(freqs, s11, vf=0.66)
     assert L > 0.0
+
+
+# ---------------------------------------------------------------------------
+# TDR 三档窗（2026-10-13 官方页核对后接线：rect/kaiser6/kaiser13）
+# ---------------------------------------------------------------------------
+
+def _cable_s11(freqs_hz, length_m, vf=0.66):
+    """理想开口线：复 S11 = exp(-j*2*pi*f*tau)，tau=往返时延。"""
+    c = 299792458.0
+    tau = 2.0 * length_m / (vf * c)
+    return [[math.cos(-2 * math.pi * f * tau), math.sin(-2 * math.pi * f * tau)]
+            for f in freqs_hz]
+
+
+def test_tdr_windowed_idft_recovers_cable_length():
+    """物理夹具：500MHz-1GHz、101 点，1.0m 理想线（往返时延 4.4ns）。
+    峰位 bin=tau*span≈4.4 -> bin4/5 -> L≈0.9-1.1m（bin 分辨率 0.9m）。
+    三档窗均应命中同一 bin（官方默认 NORMAL=kaiser6）。"""
+    from mbdsdr_ai.fill_evidence_example import tdr_length_py
+    freqs = [500e6 + i * 5e6 for i in range(101)]
+    s11 = _cable_s11(freqs, 1.0)
+    for w in ("rect", "kaiser6", "kaiser13"):
+        L = tdr_length_py(freqs, s11, vf=0.66, window=w)
+        assert 0.7 <= L <= 1.3, f"window={w} 离谱: {L}"
+
+
+def test_tdr_window_param_validation():
+    from mbdsdr_ai.fill_evidence_example import tdr_length_py
+    freqs = [500e6 + i * 5e6 for i in range(101)]
+    s11 = _cable_s11(freqs, 1.0)
+    try:
+        tdr_length_py(freqs, s11, window="hann")
+        assert False, "未知窗必须诚实报错，不许静默兜底"
+    except ValueError:
+        pass
+
+
+def test_tdr_degenerate_inputs():
+    from mbdsdr_ai.fill_evidence_example import tdr_length_py
+    assert tdr_length_py([], []) == 0.0
+    assert tdr_length_py([1e6, 1e6, 1e6], [[0.1, 0.0]] * 3) == 0.0  # span=0
+    assert tdr_length_py([1e6, 2e6], [[0.1, 0.0]] * 2) == 0.0       # n<4
 
 
 def test_lc_pin():

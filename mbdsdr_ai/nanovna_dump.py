@@ -25,6 +25,8 @@ from .nanovna_client import (
     ReplayTransport,
     NanoVNADriverError,
     find_nanovna_ports,
+    s11_phase_deg,
+    s21_phase_deg,
     vswr,
     return_loss_db,
 )
@@ -104,6 +106,10 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
         "frequencies_hz": freqs,
         "S11": [[c.real, c.imag] for c in s11],
         "S21": [[c.real, c.imag] for c in s21],
+        # 官方 11 种迹线格式中之 PHASE 的 Python 侧接线（此前 s21_phase_deg/
+        # s11_phase_deg 已存在却未进任何输出——半适配，2026-10-13 转正）。
+        "s11_phase_deg": [round(s11_phase_deg(c), 2) for c in s11],
+        "s21_phase_deg": [round(s21_phase_deg(c), 2) for c in s21],
         "vswr": [round(vswr(c), 3) for c in s11],
         "return_loss_db": [round(return_loss_db(c), 2) for c in s11],
     }

@@ -9,24 +9,44 @@
 """
 from __future__ import annotations
 import json
-from .nanovna_dump import run_dump
-from .nanovna_client import vswr, return_loss_db
 import math
 
+import numpy as np
 
-def tdr_length_py(freqs_hz, s11, vf=0.66):
-    """Python 侧 TDR 近似：反射峰位置 -> 电缆长度 m（vf 默认 RG-58 0.66）。
-    与 C++ vna_rf::tdrCable 同思路，独立实现。合成占位。"""
+from .nanovna_dump import run_dump
+from .nanovna_client import s11_phase_deg, s21_phase_deg, vswr, return_loss_db
+
+# TDR 窗三档（官方 Start measurement 页：DISPLAY->TRANSFORM 的窗口 MIN/NORMAL/MAX）。
+# MIN=矩形（最高分辨率）/ NORMAL=Kaiser beta=6（默认）/ MAX=Kaiser beta=13（最高动态）。
+TDR_WINDOWS = {"rect": 0.0, "kaiser6": 6.0, "kaiser13": 13.0}
+
+
+def tdr_length_py(freqs_hz, s11, vf=0.66, window="kaiser6"):
+    """Python 侧 TDR：窗口化 IDFT -> |时域响应| 峰位 -> 电缆长度 m。
+
+    与官方 bandpass TDR 机制对齐的三档窗（rect/kaiser6/kaiser13，默认 NORMAL）；
+    对复 S11 施加频域窗后 IDFT 取峰（跳过 0 延迟 bin——那是参考面本身）。
+    仍是轻量实现：无官方 2x 共轭对称扩展与双曲插值峰值精修
+    （feature-parity.md 第 6 节登记的精度欠账），物理口径一致。
+    vf 默认 RG-58 0.66（官方页面按百分数输入速度因数，同一物）。"""
     c = 299792458.0
-    mag = [abs(complex(*s)) for s in s11]
-    if not mag or not freqs_hz:
-        return 0.0
-    k = max(range(len(mag)), key=lambda i: mag[i])
     n = len(freqs_hz)
+    if n < 4 or not s11 or len(s11) != n:
+        return 0.0
     span = freqs_hz[-1] - freqs_hz[0]
     if span <= 0:
         return 0.0
-    t_roundtrip = (k / n) / span
+    if window not in TDR_WINDOWS:
+        raise ValueError(
+            f"unknown window {window!r}：官方三档 rect/kaiser6/kaiser13")
+    x = np.array([complex(*s) for s in s11], dtype=complex)
+    beta = TDR_WINDOWS[window]
+    if beta > 0:
+        x = x * np.kaiser(n, beta)
+    mag = np.abs(np.fft.ifft(x))
+    # 跳过 bin 0（t=0 参考面，含直流分量，不是远端反射峰）
+    k = int(np.argmax(mag[1:])) + 1
+    t_roundtrip = k / span
     return vf * c * t_roundtrip / 2.0
 
 

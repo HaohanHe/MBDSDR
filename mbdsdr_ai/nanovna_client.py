@@ -96,6 +96,13 @@ def s21_phase_deg(s21: complex) -> float:
     return math.degrees(math.atan2(s21.imag, s21.real))
 
 
+def s11_phase_deg(s11: complex) -> float:
+    """S11 -> 相位 (度)。官方 11 种迹线格式之 PHASE 的 Python 侧对等物
+    （nanovna.com Start measurement：LOGMAG/PHASE/DELAY/SMITH/SWR/POLAR/
+    LINEAR/REAL/IMAG/RESISTANCE/REACTANCE；其余均可由 re/im 直接派生）。"""
+    return math.degrees(math.atan2(s11.imag, s11.real))
+
+
 def rgb565_to_bmp_bytes(buf: bytes, width: int = CAPTURE_WIDTH,
                         height: int = CAPTURE_HEIGHT) -> bytes:
     """RGB565 小端裸帧 -> 24bit BMP（自底向上，行按 4 字节对齐）。
