@@ -55,8 +55,11 @@ def test_replay_cal_recorded(tmp_path):
 def test_nonexistent_port_fails_cleanly():
     import pytest
     with pytest.raises(SystemExit):
+        # 注入零间隔重试预算，避免测试真睡 2.5s x N（重试逻辑由下方假传输层
+        # 测试覆盖）；诚实失败语义保持不变
         run_dump("/dev/definitely-not-a-real-tty-1234",
-                 430_000_000, 431_000_000, 11, replay=None)
+                 430_000_000, 431_000_000, 11, replay=None,
+                 open_retries=1, retry_delay_s=0.0)
 
 
 def test_selftest_runs(tmp_path):
@@ -181,3 +184,129 @@ def test_rgb565_to_bmp_conversion():
     # 最后一行像素数据开头（BMP 自底向上；首行=x0 -> 末行=y239 的最后像素行）
     # 直接在像素区找红色三元组
     assert bytes((0, 0, 255)) in bmp
+
+
+# ---------------------------------------------------------------------------
+# 真机路径：串口打开有界重试 + 失败诊断（usbser.sys 偶发 PermissionError(13)）
+# ---------------------------------------------------------------------------
+
+class _FlakyOpenTransport:
+    """假传输层：按**全局尝试序号**前 fail_first 次 open() 抛
+    PermissionError(13)（镜像 Windows usbser.sys 已知怪癖），之后委托
+    ReplayTransport 正常回放协议脚本。
+
+    只干扰 open 这一个动作，其余协议行为全部走真 ReplayTransport——
+    验证的是真机路径的"重试 open"逻辑，不碰任何硬件。
+    run_dump 每次尝试都会新建 client/传输层，故 open 计数经 counter
+    注入跨实例共享，模拟"同一串口的多次打开尝试"。
+    """
+
+    def __init__(self, inner: ReplayTransport, fail_first: int,
+                 counter: dict | None = None):
+        self._inner = inner
+        self._fail_first = fail_first
+        self._counter = counter if counter is not None else {}
+        self._counter.setdefault("open_calls", 0)
+
+    def open(self) -> None:
+        self._counter["open_calls"] += 1
+        if self._counter["open_calls"] <= self._fail_first:
+            raise PermissionError(
+                13, f"模拟 usbser 拒绝 #{self._counter['open_calls']}")
+        self._inner.open()
+
+    def close(self) -> None:
+        self._inner.close()
+
+    @property
+    def is_open(self) -> bool:
+        return self._inner.is_open
+
+    def write(self, data: bytes) -> None:
+        self._inner.write(data)
+
+    def readline(self) -> bytes:
+        return self._inner.readline()
+
+    def read_bytes(self, n: int) -> bytes:
+        return self._inner.read_bytes(n)
+
+    def reset_input_buffer(self) -> None:
+        self._inner.reset_input_buffer()
+
+
+def _install_flaky_real_path(monkeypatch, fail_first: int) -> dict:
+    """把 nanovna_dump 的真机 client 构造换成"闪断 open + 回放底座"。
+
+    候选端口枚举一律静默为空（不探测真机）；返回 dict：
+    ``counter["open_calls"]`` 为累计 open 尝试次数，``transport`` 为最后
+    一次尝试的假传输层。
+    """
+    import mbdsdr_ai.nanovna_dump as nd
+
+    holder: dict = {"counter": {}}
+
+    def fake_client(port=None, transport=None):
+        tr = _FlakyOpenTransport(ReplayTransport(_script()),
+                                 fail_first=fail_first,
+                                 counter=holder["counter"])
+        holder["transport"] = tr
+        return NanoVNAClient(transport=tr)
+
+    monkeypatch.setattr(nd, "NanoVNAClient", fake_client)
+    monkeypatch.setattr(nd, "find_nanovna_ports", lambda: [])
+    return holder
+
+
+def test_real_path_open_retry_succeeds_on_last_default_attempt(monkeypatch):
+    """默认预算（重试 4 次 = 共 5 次尝试）内第 5 次 open 成功 -> 最终成功。"""
+    holder = _install_flaky_real_path(monkeypatch, fail_first=4)
+    out = run_dump("COM_FAKE", 430_000_000, 431_000_000, 11,
+                   retry_delay_s=0.0)  # 注入零间隔，别真睡 2.5s x 4
+    assert out["model"] == "NanoVNA-H"
+    assert len(out["frequencies_hz"]) == 11
+    assert len(out["S11"]) == 11
+    # 前 4 次失败（PermissionError）+ 第 5 次成功，总尝试 == 默认预算 5
+    assert holder["counter"]["open_calls"] == 5
+
+
+def test_real_path_open_retry_exhausted_is_honest_failure(monkeypatch):
+    """重试耗尽 -> SystemExit 诚实失败，错误信息来自最后一次失败。"""
+    import pytest
+    holder = _install_flaky_real_path(monkeypatch, fail_first=99)
+    with pytest.raises(SystemExit) as ei:
+        run_dump("COM_FAKE", 430_000_000, 431_000_000, 11,
+                 retry_delay_s=0.0)
+    msg = str(ei.value)
+    assert "无法打开串口 COM_FAKE" in msg
+    assert "模拟 usbser 拒绝 #5" in msg  # 最后一次失败的错误信息
+    assert "模拟 usbser 拒绝 #1" not in msg  # 不放旧错误充数
+    assert holder["counter"]["open_calls"] == 5  # 首次 + 4 次重试，有界
+
+
+def test_real_path_open_retry_bounded_by_param(monkeypatch):
+    """重试次数可注入：预算=1 时最多 2 次尝试，不超发。"""
+    import pytest
+    holder = _install_flaky_real_path(monkeypatch, fail_first=99)
+    with pytest.raises(SystemExit):
+        run_dump("COM_FAKE", 430_000_000, 431_000_000, 11,
+                 open_retries=1, retry_delay_s=0.0)
+    assert holder["counter"]["open_calls"] == 2  # 首次 + 1 次重试
+
+
+def test_real_path_open_failure_diagnostic_lists_candidates(monkeypatch, capsys):
+    """打开失败时诊断打印当前可见的 NanoVNA 候选（VID:PID 0483:5740）。"""
+    import pytest
+    import mbdsdr_ai.nanovna_dump as nd
+    holder = _install_flaky_real_path(monkeypatch, fail_first=99)
+    monkeypatch.setattr(
+        nd, "find_nanovna_ports",
+        lambda: [("COM7", 0x0483, 0x5740), ("COM9", 0x0483, 0x5740)])
+    with pytest.raises(SystemExit):
+        run_dump("COM_FAKE", 430_000_000, 431_000_000, 11,
+                 open_retries=1, retry_delay_s=0.0)
+    err = capsys.readouterr().err
+    assert "第 1/2 次" in err and "第 2/2 次" in err
+    assert "COM7 (VID:PID 0483:5740)" in err
+    assert "COM9 (VID:PID 0483:5740)" in err
+    assert holder["counter"]["open_calls"] == 2

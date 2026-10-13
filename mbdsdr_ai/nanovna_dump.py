@@ -7,7 +7,9 @@ CLI（真实串口，无设备即诚实报错，不伪造）：
     python3 -m mbdsdr_ai.nanovna_dump --screenshot screen.bmp --out sweep.json
     python3 -m mbdsdr_ai.nanovna_dump          # 自动探测端口（VID:PID 提示）
 
-测试用 replay 模式：--replay script.json 走 ReplayTransport，不碰硬件。
+真机串口打开带**有界重试**（默认 4 次、间隔 2.5s）：消化 usbser.sys 偶发
+PermissionError(13) 等瞬时失败；全部失败仍诚实 SystemExit（不伪造数据）。
+测试用 replay 模式：--replay script.json 走 ReplayTransport，不碰硬件、不重试。
 输出 JSON：model/version/sn/cal/tcxo_hz/sweep/frequencies/S11/S21/vswr/return_loss。
 """
 from __future__ import annotations
@@ -15,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from typing import List, Tuple
 
 from .nanovna_client import (
@@ -26,13 +29,30 @@ from .nanovna_client import (
     return_loss_db,
 )
 
+# 真机（非 replay）串口打开的有界重试参数：
+# Windows usbser.sys 对已枚举/刚重置的 CDC 设备偶发 PermissionError(13)
+# 等瞬时失败，重试一次往往即可自愈。取值：重试 4 次（含首次共 5 次尝试）、
+# 固定间隔 2.5s（任务给定 2-3s 退避区间取中值），最坏多等约 10s，全部失败
+# 仍诚实 SystemExit（带最后一次错误，不伪造数据）。
+# 两个参数均可注入：测试传 open_retries=1 / retry_delay_s=0.0 做到零等待。
+OPEN_MAX_RETRIES = 4
+OPEN_RETRY_DELAY_S = 2.5
+
 
 def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
-             replay: str | None = None, screenshot: str | None = None) -> dict:
+             replay: str | None = None, screenshot: str | None = None,
+             open_retries: int = OPEN_MAX_RETRIES,
+             retry_delay_s: float = OPEN_RETRY_DELAY_S) -> dict:
     """执行一次完整 sweep 采集，返回可序列化 dict。无设备抛错。
 
     screenshot 非空时在采集完成后抓取设备屏幕（capture 命令，RGB565 -> BMP
     写出到该路径）；固件不支持 / 传输失败时该项为诚实错误信封，不影响测量数据。
+
+    真机路径的串口打开带**有界重试**：open_retries 次重试（含首次共
+    1+open_retries 次尝试）、相邻尝试间隔 retry_delay_s 秒，用于消化
+    usbser.sys 偶发 PermissionError(13) 等瞬时失败；全部失败仍保持诚实
+    失败（SystemExit 带最后一次错误信息，不伪造数据）。replay 路径无硬件
+    时序问题，完全不重试、不加等待。
     """
     if replay:
         with open(replay, "r", encoding="utf-8") as f:
@@ -40,6 +60,7 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
                 (cmd, list(resp)) for cmd, resp in json.load(f)
             ]
         client = NanoVNAClient(transport=ReplayTransport(script))
+        client.connect()
     else:
         if not port:
             found = find_nanovna_ports()
@@ -50,17 +71,9 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
                     "并确认 USB 已连、udev/dialout 权限。"
                 )
             port = found[0][0]
-        try:
-            client = NanoVNAClient(port=port)
-            client.connect()
-        except (OSError, NanoVNADriverError) as e:
-            raise SystemExit(
-                f"无法打开串口 {port}：{e}\n"
-                "排查：(1) 端口是否存在；(2) 是否在 dialout 组 / udev 权限；"
-                "(3) 是否已被其它程序占用。"
-            ) from e
+        client = _open_with_retry(port, open_retries=open_retries,
+                                  retry_delay_s=retry_delay_s)
 
-    client.connect()
     try:
         client.read_cal_status()
         tcxo_hz = client.read_tcxo()
@@ -104,6 +117,65 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
     if shot is not None:
         out["screenshot_bmp"] = shot
     return out
+
+
+def _open_with_retry(port: str, *, open_retries: int,
+                     retry_delay_s: float) -> NanoVNAClient:
+    """打开真机串口并握手；打开失败有界重试，仍失败 -> SystemExit（诚实失败）。
+
+    open_retries：首次失败后的最大重试次数（总尝试 = 1 + open_retries）。
+    retry_delay_s：相邻两次尝试之间的间隔（秒；<=0 表示不退避，测试注入用）。
+    每次失败都会打印串口诊断（含当前可见的 NanoVNA 候选端口）；SystemExit
+    携带**最后一次**错误信息，绝不伪造数据。
+    """
+    attempts = max(1, int(open_retries) + 1)  # 首次 + N 次重试
+    client: NanoVNAClient | None = None
+    last_err: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            client = NanoVNAClient(port=port)
+            client.connect()
+            return client
+        except (OSError, NanoVNADriverError) as e:
+            if client is not None:
+                try:
+                    client.close()  # 释放半开/半握手的传输层再重试
+                except Exception:  # 清理失败不掩蔽真实错误
+                    pass
+                client = None
+            last_err = e
+            _diagnose_open_failure(port, e, attempt, attempts)
+            if attempt < attempts and retry_delay_s > 0:
+                time.sleep(retry_delay_s)
+    raise SystemExit(
+        f"无法打开串口 {port}：{last_err}\n"
+        "排查：(1) 端口是否存在；(2) 是否在 dialout 组 / udev 权限；"
+        "(3) 是否已被其它程序占用。"
+    ) from last_err
+
+
+def _diagnose_open_failure(port: str, err: Exception,
+                           attempt: int, attempts: int) -> None:
+    """串口打开失败的一次轻量诊断（仅真机路径，replay 不触发）。
+
+    打印失败明细，并列出当前可见的 NanoVNA 候选端口
+    （mbdsdr_ai.nanovna_client.find_nanovna_ports()，VID:PID
+    0x0483:0x5740 枚举）；没有候选就是空列表——诚实呈现，不猜端口。
+    """
+    print(f"[nanovna_dump] 第 {attempt}/{attempts} 次打开 {port} 失败：{err}",
+          file=sys.stderr)
+    try:
+        found = find_nanovna_ports()
+    except Exception as e:  # 诊断分支自己不许再炸（诚实报告枚举失败）
+        print(f"[nanovna_dump] NanoVNA 候选枚举失败：{e}", file=sys.stderr)
+        return
+    if found:
+        cand = ", ".join(f"{p} (VID:PID {vid:04X}:{pid:04X})"
+                         for p, vid, pid in found)
+    else:
+        cand = "（未枚举到 NanoVNA；确认 USB 已连、设备已被系统识别）"
+    print(f"[nanovna_dump] 当前可见 NanoVNA 候选（VID:PID 0483:5740）：{cand}",
+          file=sys.stderr)
 
 
 def _capture_screenshot(client, path: str) -> dict:

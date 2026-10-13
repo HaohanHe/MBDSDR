@@ -74,7 +74,12 @@ def test_callsign_roundtrip(cs):
 
 def test_no_builtin_callsign():
     """模块源码不得硬编码任何呼号常量。"""
-    src = open(os.path.join(os.path.dirname(__file__), "..", "ssdv_decoder.py")).read()
+    # 源码是 UTF-8（含中文 docstring）；显式指定编码，别在中文 Windows
+    # （locale=cp936）上把测试本身变成平台相关。
+    src = open(
+        os.path.join(os.path.dirname(__file__), "..", "ssdv_decoder.py"),
+        encoding="utf-8",
+    ).read()
     head = src.split("class SsdvEncoder")[0]
     for bad in ("BI4MIB", "BI4TST", "DEFAULT_CALLSIGN"):
         assert bad not in head

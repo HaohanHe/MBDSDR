@@ -304,7 +304,12 @@ class SDRController:
         if not devs:
             raise DeviceNotFoundError(
                 f"未发现任何 SDR 设备（请求 {device_id!r}）",
-                suggestion="请插好 USB 天线棒，或使用 connect('debug') 以调试信号源测试。",
+                suggestion=(
+                    "请插好 USB 天线棒，或使用 connect('debug') 以调试信号源测试；"
+                    "远端棒 / 无 USB 权限环境可设 MBDSDR_RTL_TCP=host:port 环境变量"
+                    "（多个源逗号分隔），rtl_tcp 网络源会出现在 list_devices"
+                    "（driver=rtltcp），再用其名称 connect。"
+                ),
             )
         target = None
         for d in devs:
