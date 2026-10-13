@@ -179,6 +179,8 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         // Read-only satellite pass prediction (same capability as the Agent
         // predict_passes tool; pure function, never fabricates a pass).
         {"predict_passes",        false, &ControlHub::cmdPredictPasses},
+        // Read-only TLE-cache catalog (prerequisite for predict_passes).
+        {"list_satellites",       false, &ControlHub::cmdListSatellites},
         // ---- Phase26 new read commands ----------------------------------
         {"get_network_audio_status", false, &ControlHub::cmdGetNetworkAudioStatus},
         {"get_scan_link_status",  false, &ControlHub::cmdGetScanLinkStatus},
@@ -1267,6 +1269,42 @@ QJsonObject ControlHub::cmdPredictPasses(const QJsonObject& a) {
         arr.append(p);
     }
     o["passes"] = arr;
+    return o;
+}
+
+// Read-only TLE-cache catalog, mirroring the Agent list_satellites tool. Pure
+// function over the on-disk cache; ok=false is always honest (no cache).
+QJsonObject ControlHub::cmdListSatellites(const QJsonObject&) {
+    ai::SatListResult r = ai::listCachedSatellites(QDateTime::currentDateTimeUtc());
+    QJsonObject o = okBase();
+    o["command"] = "list_satellites";
+    if (!r.ok) {
+        o["ok"] = false;
+        o["error"] = r.error;
+        o["source"] = r.source.isEmpty()
+            ? QString::fromUtf8("none") : r.source;
+        return o;
+    }
+    o["source"] = r.source;
+    o["fetched_at"] = r.fetchedAt.isValid()
+        ? r.fetchedAt.toUTC().toString(Qt::ISODate) : QString();
+    int freshCount = 0;
+    QJsonArray arr;
+    for (const ai::SatListEntry& e : r.sats) {
+        if (e.fresh) ++freshCount;
+        QJsonObject s;
+        s["name"] = e.name;
+        s["catalog_number"] = e.catalogNumber;
+        s["epoch_utc"] = e.epochUtc.isValid()
+            ? e.epochUtc.toUTC().toString(Qt::ISODate) : QString();
+        s["age_days"] = e.epochUtc.isValid() ? e.ageDays : -1.0;
+        s["fresh"] = e.fresh;
+        s["downlink_hz"] = e.downlinkHz;
+        arr.append(s);
+    }
+    o["count"] = static_cast<int>(arr.size());
+    o["fresh_count"] = freshCount;
+    o["satellites"] = arr;
     return o;
 }
 

@@ -219,5 +219,42 @@ SatPassListResult predictSatellitePasses(const QString& satName,
                                     stationLonDeg, nowUtc, hoursAhead);
 }
 
+SatListResult listCachedSatellites(const QDateTime& nowUtc) {
+    // On-disk cache ONLY. The stale offline builtinTle() (epoch 2006) is
+    // deliberately NOT listed -- it is demo data and must not be presented as a
+    // real satellite catalog.
+    dsp::TleClient client;
+    const dsp::TleCache cache = client.cachedTle();
+    if (!cache.valid || cache.entries.isEmpty()) {
+        SatListResult out;
+        out.error = QString::fromUtf8("无 TLE 缓存（尚未从 celestrak 拉取；predict_passes 同样依赖此缓存）");
+        out.source = QString::fromUtf8("none");
+        return out;
+    }
+    SatListResult out = listSatellitesFromEntries(cache.entries, nowUtc);
+    out.fetchedAt = cache.fetchedAt.toUTC();
+    return out;
+}
+
+SatListResult listSatellitesFromEntries(const QList<dsp::TleEntry>& entries,
+                                        const QDateTime& nowUtc) {
+    SatListResult out;
+    out.ok = true;
+    out.source = QString::fromUtf8("cached_tle");
+    for (const dsp::TleEntry& e : entries) {
+        SatListEntry se;
+        se.name = e.name;
+        se.catalogNumber = dsp::TleClient::catalogNumber(e);
+        se.epochUtc = dsp::TleClient::parseTleEpoch(e.line1).toUTC();
+        if (se.epochUtc.isValid()) {
+            se.ageDays = dsp::TleClient::daysSinceEpoch(se.epochUtc, nowUtc.toUTC());
+            se.fresh = se.ageDays >= 0.0 && se.ageDays <= kMaxTleAgeDays;
+        }
+        se.downlinkHz = dsp::TleClient::downlinkHzFor(e.name);
+        out.sats.append(se);
+    }
+    return out;
+}
+
 } // namespace ai
 } // namespace mbdsdr

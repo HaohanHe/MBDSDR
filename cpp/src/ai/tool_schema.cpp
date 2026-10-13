@@ -1789,6 +1789,23 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // list_satellites (read-only) ------------------------------------------
+    // Read-only catalog of satellites present in the on-disk TLE cache. This is
+    // the prerequisite for predict_passes: the model needs the available
+    // satellite names before it can predict a pass. Uses ONLY the on-disk cache;
+    // the stale offline builtinTle() (epoch 2006) is deliberately NOT listed.
+    // Honest empty state when there is no cache. Kept out of the manual write gate.
+    {
+        ToolSchemaSpec s;
+        s.name = "list_satellites";
+        s.description = QString::fromUtf8(
+            "只读：列出本地 TLE 缓存中的卫星目录（名、NORAD 编号、TLE 历元、龄期天数、是否新鲜、标称下行频率）。"
+            "这是 predict_passes 的前置——先列出可用卫星再选名预测过境。"
+            "无缓存时诚实返回空态（source=none），不使用陈旧内置演示数据，不编造卫星。");
+        s.write = false;   // pure read of the on-disk TLE cache
+        out.append(s);
+    }
+
     return out;
 }
 

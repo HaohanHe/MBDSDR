@@ -73,6 +73,7 @@ private slots:
     void predictPasses_deterministicKnownTle();
     void predictPasses_emptyEntriesHonest();
     void predictPasses_badStationHonest();
+    void listSatellites_honestEmptyAndInjected();
     void pocsagSnapshot_honestEmptyOffline();
     void m17Snapshot_honestEmptyOffline();
     void vorSnapshot_honestUnlockedOffline();
@@ -203,6 +204,42 @@ void TestAiRealLink::predictPasses_badStationHonest() {
     QJsonObject noStation; noStation["satellite_name"] = "ISS";
     QJsonObject o2 = parseObj(ai::executeTool("predict_passes", noStation, &engine));
     QCOMPARE(o2.value("ok").toBool(), false);
+}
+
+// list_satellites: (1) on a fresh engine with no on-disk TLE cache the tool
+// honestly returns ok=false / source=none (never fabricates a satellite, never
+// gated); (2) the pure injected seam maps entries -> name/catalog/epoch/fresh/
+// downlink fields deterministically.
+void TestAiRealLink::listSatellites_honestEmptyAndInjected() {
+    dsp::SpectrumEngine engine;
+    // (1) honest empty on a fresh engine (no cache).
+    QString r = ai::executeTool("list_satellites", QJsonObject{}, &engine);
+    QJsonObject o = parseObj(r);
+    QVERIFY2(!o.isEmpty(), qPrintable("expected JSON, got: " + r));
+    QCOMPARE(o.value("ok").toBool(), false);
+    QCOMPARE(o.value("source").toString(), QString::fromUtf8("none"));
+    QVERIFY2(!o.contains("gated"), qPrintable("list_satellites must never be gated: " + r));
+
+    // (2) pure injected seam with the offline builtin TLE set (epoch 2006 ->
+    // age huge, fresh=false; we never claim builtin is a real fresh catalog).
+    // Use a fixed far-future "now" so the 2006 epoch is deterministically stale.
+    const QList<dsp::TleEntry> known = dsp::TleClient::builtinTle();
+    QVERIFY(!known.isEmpty());
+    const QDateTime farFuture(QDate(2026, 10, 13), QTime(0, 0, 0), Qt::UTC);
+    ai::SatListResult lr = ai::listSatellitesFromEntries(known, farFuture);
+    QVERIFY2(lr.ok, qPrintable(lr.error));
+    QCOMPARE(lr.sats.size(), known.size());
+    // The CBERS 2 entry must carry its known NORAD catalog number and a valid epoch.
+    bool sawCbers = false;
+    for (const ai::SatListEntry& e : lr.sats) {
+        if (e.name == QString::fromLatin1("CBERS 2")) {
+            sawCbers = true;
+            QCOMPARE(e.catalogNumber, 28057);
+            QVERIFY(e.epochUtc.isValid());
+            QVERIFY(!e.fresh);   // 2006 epoch is years stale -> not fresh
+        }
+    }
+    QVERIFY2(sawCbers, "builtinTle() must include CBERS 2");
 }
 
 // Wave2 read-only POCSAG snapshot tool. The offline test source runs a plain
@@ -381,6 +418,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "list_templates", "run_template",
         // G1: task-run history (read). G2: memory delete (gated write) + stats (read).
         "get_task_history", "memory_delete", "memory_stats",
+        // Read-only TLE-cache catalog (prerequisite for predict_passes).
+        "list_satellites",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -509,8 +548,10 @@ void TestAiRealLink::phase26_tools_callableReturnJson() {
         "list_templates", "run_template",
         // G1/G2: task history (read, honest empty on fresh db), memory_delete
         // (write, gated at manual mode; here executeTool bypasses the gate),
-        // memory_stats (read). All must dispatch, never the unknown fallback.
+        // memory_stats (read), list_satellites (read, honest empty on no TLE cache).
+        // All must dispatch, never the unknown fallback.
         "get_task_history", "memory_delete", "memory_stats",
+        "list_satellites",
     };
     for (const QString& t : newTools) {
         const QString r = ai::executeTool(t, QJsonObject{}, &engine);

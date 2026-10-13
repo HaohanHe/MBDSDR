@@ -111,6 +111,7 @@ QList<DomainGroup> domainGroups() {
         {QStringLiteral("书签扫描卫星"),
          QStringLiteral("书签管理、波段/链路扫描与卫星过境预报/调谐；确定性任务模板的列举、登记执行与完成历史查询。"),
          {QStringLiteral("scan_band"), QStringLiteral("predict_passes"),
+          QStringLiteral("list_satellites"),
           QStringLiteral("start_scan_link"), QStringLiteral("stop_scan_link"),
           QStringLiteral("get_scan_link_status"), QStringLiteral("list_bookmarks"),
           QStringLiteral("add_bookmark"), QStringLiteral("tune_to_bookmark"),

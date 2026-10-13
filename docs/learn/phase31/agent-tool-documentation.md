@@ -1,4 +1,4 @@
-# Agent 工具能力清单（自动生成，89 个工具）
+# Agent 工具能力清单（自动生成，90 个工具）
 固定字段：name / description / JSON Schema / read-write 标记 / 错误示例。参数可能是非法 JSON 或幻觉字段，调用前由 runtime 校验器拒绝并以 role=tool 回注自纠。
 
 ## tune_frequency  [write 写(手动模式拦截)]
@@ -448,4 +448,12 @@ A2UI v1.0 updateDataModel 最小子集——给一个编译期白名单组件 id
 ## memory_stats（读，G2）
 
 本地记忆库统计——total_entries（条目总数）、by_scope（user/agent/session 分层分布）、last_updated_ms（最近写入墙钟毫秒，0=空库）、task_runs（已完成任务数，G1 历史）。空库全 0 诚实返回，不编造数据。
+属于只读工具，手动模式不拦截。
+
+## list_satellites（读，TLE 目录）
+
+列出本地 TLE 缓存中的卫星目录——这是 predict_passes 的前置：模型先看有哪些卫星名可用，再选名预测过境。
+- 每条含 name（卫星名）、catalog_number（NORAD 编号，0=无法解析）、epoch_utc（TLE line-1 历元，ISO8601）、age_days（距历元天数，-1=历元不可解析）、fresh（历元在 30 天内为 true）、downlink_hz（标称下行频率，0=未知，绝不编造）。
+- 汇总 count / fresh_count / fetched_at（缓存拉取时间）。
+- 只读 on-disk 缓存；陈旧的离线 builtinTle()（2006 历元）绝不列出。无缓存时 ok=false、source=none 并给提示，不编造卫星。
 属于只读工具，手动模式不拦截。

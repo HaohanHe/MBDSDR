@@ -173,7 +173,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 89);
+    QCOMPARE(tools.size(), 90);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -914,13 +914,14 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
             QVERIFY2(!r.contains("\"gated\""),
                      qPrintable(s.name + " (read) must NOT be gated: " + r));
             // Every read deterministically returns ok:true on a fresh engine
-            // EXCEPT predict_passes, which honestly returns ok:false with no
-            // fresh TLE cache (honest empty state) -- that is NOT a gate block,
-            // which we already asserted above. The two workspace reads also
-            // honestly return ok:false here: this headless gate test does not
-            // inject a WorkspaceController, so they report "工作台控制器未注入".
+            // EXCEPT predict_passes / list_satellites, which honestly return
+            // ok:false with no fresh TLE cache (honest empty state) -- that is
+            // NOT a gate block, which we already asserted above. The two workspace
+            // reads also honestly return ok:false here: this headless gate test
+            // does not inject a WorkspaceController, so they report "工作台控制器未注入".
             // That is an honest not-injected empty state, not a gate block.
             if (s.name != QLatin1String("predict_passes")
+                && s.name != QLatin1String("list_satellites")
                 && s.name != QLatin1String("get_workspace_layout")
                 && s.name != QLatin1String("list_ui_components")) {
                 QVERIFY2(r.contains("\"ok\":true"),
@@ -929,11 +930,12 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 49 writes / 40 reads (89 tools; workspace domain three
+    // The frozen split: 49 writes / 41 reads (90 tools; workspace domain three
     // gated writes + APRS/colormap reads + the template runner gated write;
-    // G1 get_task_history read, G2 memory_delete gated write + memory_stats read).
+    // G1 get_task_history read, G2 memory_delete gated write + memory_stats read;
+    // list_satellites read-only TLE cache catalog).
     QCOMPARE(writes, 49);
-    QCOMPARE(reads, 40);
+    QCOMPARE(reads, 41);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/

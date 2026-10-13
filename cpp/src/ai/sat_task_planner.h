@@ -74,6 +74,41 @@ SatPassListResult predictPassesFromEntries(const QList<dsp::TleEntry>& entries,
 // is orders of magnitude older and therefore always demo-only.
 inline constexpr double kMaxTleAgeDays = 30.0;
 
+// One satellite in the on-disk TLE cache, surfaced by list_satellites.
+// Pure read of the cache; never falls back to builtinTle().
+struct SatListEntry {
+    QString name;
+    int catalogNumber = 0;          // NORAD catalog number (0 = unknown/malformed)
+    QDateTime epochUtc;             // TLE line-1 epoch (invalid when unparseable)
+    double ageDays = 0.0;           // days since epoch; 0 when epoch invalid
+    bool fresh = false;            // epoch within kMaxTleAgeDays of now
+    double downlinkHz = 0.0;        // nominal downlink (0 = unknown, never invented)
+};
+
+// Honest result of a read-only TLE-cache listing. ok==false always carries a
+// human-readable reason; we never fabricate a satellite when the cache is empty.
+struct SatListResult {
+    bool ok = false;
+    QString error;                  // honest reason when ok==false
+    QString source;                 // "cached_tle" when a cache exists
+    QDateTime fetchedAt;            // cache fetch time (invalid when no cache)
+    QList<SatListEntry> sats;
+};
+
+// Read-only catalog of satellites present in the FRESH on-disk TLE cache.
+// This is the prerequisite for predict_passes / planSatelliteCapture: the model
+// needs to know which satellite names are actually in the cache before it can
+// predict a pass. Uses ONLY the on-disk cache (dsp::TleClient::cachedTle); the
+// stale offline builtinTle() (epoch 2006) is deliberately NOT listed. Honest
+// empty state when there is no cache (ok=false, source="none").
+SatListResult listCachedSatellites(const QDateTime& nowUtc);
+
+// Pure, deterministic seam over an explicit TLE list (no disk / no network).
+// Unit tests inject a fixed known TLE here; production goes through
+// listCachedSatellites() above. Never falls back to builtin data.
+SatListResult listSatellitesFromEntries(const QList<dsp::TleEntry>& entries,
+                                        const QDateTime& nowUtc);
+
 struct SatTaskResult {
     TaskPlan plan;
     bool ok = false;            // true ONLY when the result comes from a fresh

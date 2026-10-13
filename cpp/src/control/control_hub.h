@@ -236,6 +236,10 @@ private:
     // three channels expose the same satellite capability. Pure function over
     // the fresh on-disk TLE cache; never fabricates a pass.
     QJsonObject cmdPredictPasses(const QJsonObject&);
+    // Read-only TLE-cache catalog: mirrors the Agent list_satellites tool.
+    // Prerequisite for predict_passes; lists cached satellites with epoch age,
+    // freshness and nominal downlink. Honest empty state when no cache.
+    QJsonObject cmdListSatellites(const QJsonObject&);
 
     // ---- Phase26: 21 newly tool-ized capabilities -------------------------
     // Network audio tap (ControlHub owns the sink lifecycle; hands it to the

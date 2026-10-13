@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 89);
+    QCOMPARE(specs.size(), 90);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -558,6 +558,12 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "只读：本地记忆库统计——total_entries（条目总数）、by_scope（user/agent/session 分布）、"
             "last_updated_ms（最近写入墙钟毫秒，0=空库）、task_runs（已完成任务数，G1 历史）。"
             "空库全 0 诚实返回，不编造数据。")},
+        // Read-only TLE-cache catalog (prerequisite for predict_passes).
+        {"list_satellites",
+         QString::fromUtf8(
+            "只读：列出本地 TLE 缓存中的卫星目录（名、NORAD 编号、TLE 历元、龄期天数、是否新鲜、标称下行频率）。"
+            "这是 predict_passes 的前置——先列出可用卫星再选名预测过境。"
+            "无缓存时诚实返回空态（source=none），不使用陈旧内置演示数据，不编造卫星。")},
 
 
     };
@@ -616,7 +622,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 89);
+    QCOMPARE(headerCount, 90);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

@@ -438,6 +438,48 @@ QString execPredictPasses(const QJsonObject& args, dsp::SpectrumEngine* /*engine
     return compact(o);
 }
 
+// list_satellites (read-only): catalog the on-disk TLE cache. Prerequisite for
+// predict_passes -- the model needs to know which satellite names are actually
+// cached before it can predict a pass. Uses ONLY the on-disk cache; the stale
+// builtinTle() (epoch 2006) is never listed. Honest empty state when no cache.
+QString execListSatellites(const QJsonObject& /*args*/, dsp::SpectrumEngine* /*engine*/,
+                           const SourceInfo& /*src*/,
+                        ui::BookmarkManager* /*bookmarks*/, aigui::WorkspaceController* /*workspace*/) {
+    const SatListResult r = listCachedSatellites(QDateTime::currentDateTimeUtc());
+    QJsonObject o;
+    if (!r.ok) {
+        o["ok"] = false;
+        o["error"] = r.error;
+        o["source"] = r.source.isEmpty() ? QString::fromUtf8("none") : r.source;
+        return compact(o);
+    }
+    o["ok"] = true;
+    o["source"] = r.source;
+    o["fetched_at"] = r.fetchedAt.isValid()
+        ? r.fetchedAt.toUTC().toString(Qt::ISODate)
+        : QString();
+    int freshCount = 0;
+    QJsonArray arr;
+    for (const SatListEntry& e : r.sats) {
+        if (e.fresh) ++freshCount;
+        QJsonObject s;
+        s["name"] = e.name;
+        s["catalog_number"] = e.catalogNumber;
+        s["epoch_utc"] = e.epochUtc.isValid()
+            ? e.epochUtc.toUTC().toString(Qt::ISODate) : QString();
+        s["age_days"] = e.epochUtc.isValid() ? e.ageDays : -1.0;
+        s["fresh"] = e.fresh;
+        s["downlink_hz"] = e.downlinkHz;
+        arr.append(s);
+    }
+    o["count"] = static_cast<int>(arr.size());
+    o["fresh_count"] = freshCount;
+    o["satellites"] = arr;
+    if (arr.isEmpty())
+        o["note"] = QString::fromUtf8("缓存存在但无卫星条目");
+    return compact(o);
+}
+
 // Default capture length for a calibration measurement (complex samples).
 // 32768 splits into 4 independent 8192-point FFT blocks; at the common 2.048e6
 // rate that gives ~250 Hz bins refined by parabolic interpolation to well under
@@ -3293,6 +3335,8 @@ const QList<ToolDispatch>& dispatchTable() {
         // G2: memory delete (gated write) + statistics (read-only).
         {"memory_delete", &execMemoryDelete},
         {"memory_stats", &execMemoryStats},
+        // Read-only TLE-cache catalog: prerequisite for predict_passes.
+        {"list_satellites", &execListSatellites},
     };
     return kTable;
 }
