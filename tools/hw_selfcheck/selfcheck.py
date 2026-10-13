@@ -29,12 +29,18 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import glob
-import grp
+try:  # POSIX-only; absent on Windows (group-aware checks degrade to unknown)
+    import grp
+except ImportError:  # pragma: no cover - Windows
+    grp = None
 import importlib.util
 import json
 import os
 import platform
-import pwd
+try:  # POSIX-only; absent on Windows (user-name lookup degrades to unknown)
+    import pwd
+except ImportError:  # pragma: no cover - Windows
+    pwd = None
 import re
 import shutil
 import signal

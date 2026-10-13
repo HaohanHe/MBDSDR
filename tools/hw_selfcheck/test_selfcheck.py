@@ -205,7 +205,12 @@ def test_main_no_hardware_no_traceback(monkeypatch, capsys):
     assert len(data["checks"]) == 6
     # 无硬件场景：第 2、3 项应为 SKIP
     statuses = {c["name"][:6]: c["status"] for c in data["checks"]}
-    assert any(v == "SKIP" for v in statuses.values())
+    # 无 rtl_test/rtl_sdr 二进制的裸机（如 Windows）这两项为 WARN；有二进制但无
+    # USB 设备的环境（如带工具的 Linux 云主机）为 SKIP——两种“无硬件”场景下
+    # 都不允许出现 PASS/FAIL（不许假装测过）。
+    for key, status in statuses.items():
+        if key.startswith(("2.", "3.")):
+            assert status in ("WARN", "SKIP"), (key, status)
     # 至少有一个 FAIL（USB 没设备）
     assert data["summary"]["counts"]["FAIL"] >= 1
     # 退出码应是非 0（有 FAIL）
