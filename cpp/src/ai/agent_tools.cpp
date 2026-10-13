@@ -1454,6 +1454,14 @@ QString execGetVnaStatus(const QJsonObject&, dsp::SpectrumEngine* engine,
     o["version"] = vna.version();
     if (vna.isConnected()) vna.readCalStatus();   // live refresh before interpreting
     o["cal"] = QJsonArray::fromStringList(vna.calStatus());
+    // tcxo_hz: live query; emitted only when the firmware answers with a
+    // parseable "current: <Hz>" (older firmware -> field absent, not 0).
+    if (vna.isConnected()) {
+        long tcxoHz = 0;
+        QString tcxoErr;
+        if (vna.readTcxo(tcxoHz, &tcxoErr))
+            o["tcxo_hz"] = (double)tcxoHz;
+    }
     o["has_sweep"] = vna.hasSweep();
     o["start_hz"] = (double)vna.sweepStartHz();
     o["stop_hz"] = (double)vna.sweepStopHz();

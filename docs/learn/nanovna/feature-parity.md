@@ -649,3 +649,69 @@ competition/比赛/ghp_ 0。
 - 真机回传链：真机就绪终检全绿，无代码缺口。
 - 结论：无新真缺口 → 只做维护线（计数 72 八处一致、写 gate 抽样在位、红线 0），
   本轮 docs-only，双构型沿用 D130/R130=143/143。
+
+---
+
+# 真机审计补缺批：tcxo 回读 + capture 截图（2026-10-13，真机 NanoVNA-H 1.2.50 在环）
+
+## 审计方法
+
+以设备自报能力清单为准（`help` 回 57 条命令）对齐两侧实现：Python 客户端
+（nanovna_client.py）当时 9 条、C++ 客户端（cpp/src/vna/nanovna_client.cpp）
+24 条。测量核心链路（sweep/frequencies/data/cal 族/save-recall/scan/pause/
+resume/vbat/freqoffset/edelay/bandwidth）两面对齐情况此前已登记；本轮只补审计
+判定为**真缺口**的两项，未实现的其余命令按类判定为显示/触控/SD/桥接类或已有
+主机侧对等功能（transform=seriesParallel、marker=主机侧极值分析），不硬造。
+
+## 缺口 1：tcxo 频率基准回读
+
+- Python：`NanoVNAClient.read_tcxo()`（`tcxo` -> `current: <Hz>`，无法解析返回
+  None 不编值）；run_dump 固定查询，输出 JSON 新增 `tcxo_hz` 字段。
+- C++：`NanoVnaClient::readTcxo()`；`get_vna_status` 三通道
+  （agent_tools.cpp execGetVnaStatus / control_hub.cpp cmdGetVnaStatus）
+  新增 `tcxo_hz` 字段——仅在固件回出可解析 `current: <Hz>` 时出现，老固件
+  字段缺失而非伪造 0。
+- 真机实测：`current: 26000000`（26.000000 MHz）。
+
+## 缺口 2：capture 屏幕截图（原为"探测到特性但无实现"的半适配）
+
+协议实测（固件 1.2.50）：发 `capture\r` -> 回显行 -> 153600 字节 RGB565
+小端裸帧（320x240）-> `ch> ` 提示符（4 字节）。
+
+- Python：`_Transport.read_bytes()` 二进制读抽象（SerialTransport 实现；
+  文本 ReplayTransport 不实现，二进制夹具由测试自注入）；`capture_screen()`
+  收满整帧、超时/短帧诚实抛 `NanoVNADriverError`，绝不返回半帧；
+  `rgb565_to_bmp_bytes()` 纯函数转 24bit BMP（无第三方依赖）。
+- CLI：`nanovna_dump --screenshot <path>` 采集后顺带抓屏写 BMP，失败为诚实
+  错误信封（`screenshot_bmp.ok=false`）不影响测量数据。
+- C++：`VnaTransport::readBytes()`（默认返回 0，文本回放传输层零改动）+
+  Termios 实现；`NanoVnaClient::captureScreen()` 帧不完整即失败。
+- 握手探测与实现一一对应：capture/bandwidth/sn 三个特性位现有全部实现。
+
+## 测试
+
+- Python：test_nanovna_dump.py 9->11 例（tcxo 回放/无法解析 None、
+  capture 二进制夹具整帧/短帧诚实报错、BMP 转换已知红像素），
+  run_dump 输出新增 tcxo_hz 断言；test_nanovna_client.py /
+  test_fill_evidence.py 回归全绿（合计 36 passed）。
+- C++：test_nanovna_client.cpp ReplayTransport 扩展 hex 二进制夹具
+  （readBytes），新增 tcxoParsesCurrentLine / tcxoRejectsUnparseableReply /
+  captureScreenReadsExactFrame / captureScreenShortFrameIsHonest 四例。
+  **本机 Qt MinGW cc1.exe 损坏（0xC000007B）无法编译验证，需在有 healthy
+  工具链的机器上跑一次 ctest。**
+
+## 真机验证证据（COM11，注入式预开传输层）
+
+- `read_tcxo()` -> 26000000；
+- `capture_screen()` -> 153600 字节（0.6s）；
+- RGB565->BMP 230454 字节（54+320x240x3）精确一致，PNG 目视确认为设备屏幕
+  （残留上一发 152-175MHz 扫描与 Smith 图）。
+
+## 顺带登记（未做，宁缺毋滥）
+
+- C++ 面无 `bandwidth`（Python 面独有）——两侧命令覆盖不对称，接入 C++ 工具
+  时补 `set_bandwidth`。
+- Windows 串口 PermissionError：`python -m mbdsdr_ai.nanovna_dump` 路径
+  复现率 100%，而同参数裸 `serial.Serial()` 在另一进程必成功；预开传输层注入
+  + 跳过 connect() 的进程 6/6 成功。根因待 ProcMon 抓打开调用定位；怀疑与
+  usbser.sys 独占共享模式相关（本机 cc1 损坏无法复测 C++ 侧）。

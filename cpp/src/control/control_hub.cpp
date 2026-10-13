@@ -1739,6 +1739,14 @@ QJsonObject ControlHub::cmdGetVnaStatus(const QJsonObject&) {
     o["model"] = vna.model();
     o["version"] = vna.version();
     o["cal"] = QJsonArray::fromStringList(vna.calStatus());
+    // tcxo_hz: live query; emitted only on a parseable "current: <Hz>"
+    // (older firmware -> field absent, not a fabricated 0).
+    if (vna.isConnected()) {
+        long tcxoHz = 0;
+        QString tcxoErr;
+        if (vna.readTcxo(tcxoHz, &tcxoErr))
+            o["tcxo_hz"] = (double)tcxoHz;
+    }
     o["has_sweep"] = vna.hasSweep();
     o["start_hz"] = (double)vna.sweepStartHz();
     o["stop_hz"] = (double)vna.sweepStopHz();

@@ -4,10 +4,11 @@
 
 CLI（真实串口，无设备即诚实报错，不伪造）：
     python3 -m mbdsdr_ai.nanovna_dump --port /dev/ttyACM0 --out sweep.json
+    python3 -m mbdsdr_ai.nanovna_dump --screenshot screen.bmp --out sweep.json
     python3 -m mbdsdr_ai.nanovna_dump          # 自动探测端口（VID:PID 提示）
 
 测试用 replay 模式：--replay script.json 走 ReplayTransport，不碰硬件。
-输出 JSON：model/version/sn/cal/sweep/frequencies/S11/S21/vswr/return_loss。
+输出 JSON：model/version/sn/cal/tcxo_hz/sweep/frequencies/S11/S21/vswr/return_loss。
 """
 from __future__ import annotations
 
@@ -27,8 +28,12 @@ from .nanovna_client import (
 
 
 def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
-             replay: str | None = None) -> dict:
-    """执行一次完整 sweep 采集，返回可序列化 dict。无设备抛错。"""
+             replay: str | None = None, screenshot: str | None = None) -> dict:
+    """执行一次完整 sweep 采集，返回可序列化 dict。无设备抛错。
+
+    screenshot 非空时在采集完成后抓取设备屏幕（capture 命令，RGB565 -> BMP
+    写出到该路径）；固件不支持 / 传输失败时该项为诚实错误信封，不影响测量数据。
+    """
     if replay:
         with open(replay, "r", encoding="utf-8") as f:
             script: List[Tuple[str, List[str]]] = [
@@ -58,10 +63,14 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
     client.connect()
     try:
         client.read_cal_status()
+        tcxo_hz = client.read_tcxo()
         client.set_sweep(start_hz, stop_hz, points)
         freqs = client.read_frequencies()
         s11 = client.read_data(0)
         s21 = client.read_data(1)
+        shot = None
+        if screenshot:
+            shot = _capture_screenshot(client, screenshot)
     finally:
         client.close()
 
@@ -76,6 +85,7 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
         "version": client.version,
         "sn": client.sn,
         "cal": list(client.cal_status),
+        "tcxo_hz": tcxo_hz,
         "port": port or "replay",
         "sweep": {"start_hz": start_hz, "stop_hz": stop_hz, "points": points},
         "frequencies_hz": freqs,
@@ -91,7 +101,23 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
         "min_vswr": round(v[k], 3),
         "at_hz": freqs[k] if k < len(freqs) else 0,
     }
+    if shot is not None:
+        out["screenshot_bmp"] = shot
     return out
+
+
+def _capture_screenshot(client, path: str) -> dict:
+    """抓取设备屏幕并写 BMP。失败返回诚实错误信封（不伪造截图）。"""
+    from .nanovna_client import CAPTURE_HEIGHT, CAPTURE_WIDTH, rgb565_to_bmp_bytes
+    try:
+        raw = client.capture_screen()
+        bmp = rgb565_to_bmp_bytes(raw, CAPTURE_WIDTH, CAPTURE_HEIGHT)
+        with open(path, "wb") as f:
+            f.write(bmp)
+        return {"ok": True, "path": path, "bytes": len(bmp),
+                "width": CAPTURE_WIDTH, "height": CAPTURE_HEIGHT}
+    except Exception as e:  # noqa: BLE001 - 诚实信封：截图失败不拖垮测量
+        return {"ok": False, "error": str(e)}
 
 
 def _selftest_script(start_hz: int, stop_hz: int, points: int):
@@ -103,6 +129,7 @@ def _selftest_script(start_hz: int, stop_hz: int, points: int):
         ["version", ["selftest-1.0"]],
         ["info", ["NanoVNA-H(selftest)"]],
         ["cal", ["load open short thru cal'ed"]],
+        ["tcxo", ["usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"]],
         [f"sweep {int(start_hz)} {int(stop_hz)} {int(points)}", []],
         ["frequencies", [str(f) for f in freqs]],
         ["data 0", ["0.3 0.0"] * points],
@@ -126,6 +153,9 @@ def main(argv: List[str]) -> int:
                     help="缩进 2 输出 JSON（便于阅读/回传）；缺省紧凑单行")
     ap.add_argument("--cal", action="store_true",
                     help="dump 时在 stderr 直显校准状态（open/short/load/thru 逐项）")
+    ap.add_argument("--screenshot", default="",
+                    help="抓取设备屏幕（capture 命令，RGB565 320x240）转存为 BMP "
+                         "到该路径；失败为诚实错误信封，不影响测量数据")
     args = ap.parse_args(argv)
 
     replay = args.replay
@@ -136,7 +166,8 @@ def main(argv: List[str]) -> int:
             json.dump(_selftest_script(args.start, args.stop, args.points), f)
 
     try:
-        data = run_dump(args.port, args.start, args.stop, args.points, replay)
+        data = run_dump(args.port, args.start, args.stop, args.points, replay,
+                        screenshot=args.screenshot or None)
     except NanoVNADriverError as e:
         print(f"错误：{e}", file=sys.stderr)
         return 1

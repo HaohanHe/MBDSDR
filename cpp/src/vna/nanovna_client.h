@@ -20,6 +20,7 @@
 #include <QByteArray>
 #include <QString>
 #include <QStringList>
+#include <QtGlobal>
 
 #include <complex>
 #include <memory>
@@ -30,6 +31,13 @@ namespace vna {
 
 // Standard reference impedance (Ohm).
 constexpr double kRefImpedanceOhm = 50.0;
+
+// Screen-capture frame spec (verified on NanoVNA-H firmware 1.2.50): after the
+// echo line the device streams a 320x240 RGB565 little-endian raw frame
+// followed by the "ch> " prompt.
+constexpr int kCaptureWidth = 320;
+constexpr int kCaptureHeight = 240;
+constexpr int kCaptureFrameBytes = kCaptureWidth * kCaptureHeight * 2;
 
 // ---- RF conversion pure functions (general engineering formulas) ----------
 // All are self-written from the closed forms; nothing device-specific.
@@ -51,6 +59,14 @@ public:
     virtual void write(const QByteArray& data) = 0;
     // Read one '\n'-terminated line; trailing '\r' stripped. false on EOF/closed.
     virtual bool readLine(QByteArray& out) = 0;
+    // Read up to maxLen raw bytes (binary frames, e.g. the `capture`
+    // screenshot). The default returns 0 (no binary support) so text-only
+    // transports — the scripted replay included — keep working unchanged.
+    virtual int readBytes(char* buf, int maxLen) {
+        Q_UNUSED(buf);
+        Q_UNUSED(maxLen);
+        return 0;
+    }
     virtual void resetInputBuffer() = 0;
 };
 
@@ -136,10 +152,16 @@ public:
     // honest error (never a fabricated value). Writes record the session member
     // below so the applied value can be read back without re-querying the device.
     bool readVbat(double& volts, QString* err);       // "vbat" -> reply line voltage
+    bool readTcxo(long& hz, QString* err);            // "tcxo" -> "current: <Hz>"
     bool readFreqOffset(long& hz, QString* err);      // "freqoffset" readback
     bool setFreqOffset(long hz, QString* err);        // "freqoffset <hz>"
     bool setElectricalDelay(int ps, QString* err);    // "edelay <ps>" (port extension)
     bool setAveraging(int n, QString* err);           // "averages <n>", n validated 1..64
+
+    // Screen capture (firmware `capture`): fills `out` with the 320x240 RGB565
+    // little-endian frame (kCaptureFrameBytes). Honest: false with *err set on
+    // short frame / timeout / a transport without binary read support.
+    bool captureScreen(QByteArray& out, QString* err);
 
     // Honest session readback of the misc writes this client performed. Default
     // 0 = "not set this session" (empty state, not a device query).

@@ -10,6 +10,7 @@
 
 #include "vna/nanovna_client.h"
 
+#include <cstring>
 #include <memory>
 #include <vector>
 
@@ -22,7 +23,9 @@ namespace {
 // line per readLine().
 class ReplayTransport : public VnaTransport {
 public:
-    struct Step { QString expect; QStringList lines; };
+    // frameHex: optional hex payload served by readBytes() (the `capture`
+    // binary frame). Empty -> readBytes() returns 0 (text-only steps).
+    struct Step { QString expect; QStringList lines; QString frameHex; };
     explicit ReplayTransport(std::vector<Step> script) : script_(std::move(script)) {}
 
     bool open() override { open_ = true; return true; }
@@ -37,6 +40,7 @@ public:
         QCOMPARE(cmd, script_[cursor_].expect);
         queue_ = script_[cursor_].lines;
         queue_.push_back(QStringLiteral("ch>"));
+        frame_ = QByteArray::fromHex(script_[cursor_].frameHex.toUtf8());
         ++cursor_;
     }
     bool readLine(QByteArray& out) override {
@@ -44,12 +48,19 @@ public:
         out = queue_.takeFirst().toUtf8();
         return true;
     }
+    int readBytes(char* buf, int maxLen) override {
+        const int n = qMin<int>(maxLen, frame_.size());
+        if (n > 0) memcpy(buf, frame_.constData(), (size_t)n);
+        frame_.remove(0, n);
+        return n;
+    }
     void resetInputBuffer() override { queue_.clear(); }
 
     QStringList sent_;
 private:
     std::vector<Step> script_;
     QStringList queue_;
+    QByteArray frame_;
     int cursor_ = 0;
     bool open_ = false;
 };
@@ -73,6 +84,11 @@ private slots:
     // --- Device misc command family (P1 #61 client side) ---------------------
     void deviceMiscWordsAndParsing();
     void deviceMiscRejectWhenDisconnected();
+    // --- tcxo readback + capture screen (2026-10 audit backfill) ------------
+    void tcxoParsesCurrentLine();
+    void tcxoRejectsUnparseableReply();
+    void captureScreenReadsExactFrame();
+    void captureScreenShortFrameIsHonest();
 };
 
 void TestNanoVnaClient::rfMathKnownValues() {
@@ -393,6 +409,79 @@ void TestNanoVnaClient::deviceMiscRejectWhenDisconnected() {
     QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
     QVERIFY(!client.setAveraging(4, &err));
     QCOMPARE(err, QStringLiteral("NanoVNA 未连接"));
+}
+
+void TestNanoVnaClient::tcxoParsesCurrentLine() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        ReplayTransport::Step{QStringLiteral("help"), {}, {}},
+        ReplayTransport::Step{QStringLiteral("version"), {QStringLiteral("1.2.50")}, {}},
+        ReplayTransport::Step{QStringLiteral("info"), {QStringLiteral("NanoVNA-H")}, {}},
+        ReplayTransport::Step{QStringLiteral("tcxo"),
+            {QStringLiteral("usage: tcxo {TCXO frequency(Hz)}"),
+             QStringLiteral("current: 26000000")}, {}},
+    });
+    NanoVnaClient client(std::move(tr));
+    QVERIFY(client.connect());
+    long hz = 0;
+    QString err;
+    QVERIFY(client.readTcxo(hz, &err));
+    QCOMPARE(hz, 26000000L);
+}
+
+void TestNanoVnaClient::tcxoRejectsUnparseableReply() {
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        ReplayTransport::Step{QStringLiteral("help"), {}, {}},
+        ReplayTransport::Step{QStringLiteral("version"), {QStringLiteral("1.0.0")}, {}},
+        ReplayTransport::Step{QStringLiteral("info"), {QStringLiteral("H")}, {}},
+        // Old firmware without the tcxo word: usage echoed, no current line.
+        ReplayTransport::Step{QStringLiteral("tcxo"), {QStringLiteral("unknown")}, {}},
+    });
+    NanoVnaClient client(std::move(tr));
+    QVERIFY(client.connect());
+    long hz = -1;
+    QString err;
+    QVERIFY(!client.readTcxo(hz, &err));
+    QCOMPARE(hz, 0L);          // honest: value untouched-from-zero, not fabricated
+    QVERIFY(!err.isEmpty());
+}
+
+void TestNanoVnaClient::captureScreenReadsExactFrame() {
+    const QByteArray frame(kCaptureFrameBytes, '\x5a');
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        ReplayTransport::Step{QStringLiteral("help"), {}, {}},
+        ReplayTransport::Step{QStringLiteral("version"), {QStringLiteral("1.2.50")}, {}},
+        ReplayTransport::Step{QStringLiteral("info"), {QStringLiteral("NanoVNA-H")}, {}},
+        ReplayTransport::Step{QStringLiteral("capture"), {}, frame.toHex()},
+    });
+    ReplayTransport* raw = tr.get();
+    NanoVnaClient client(std::move(tr));
+    QVERIFY(client.connect());
+
+    QByteArray out;
+    QString err;
+    QVERIFY(client.captureScreen(out, &err));
+    QCOMPARE(out.size(), kCaptureFrameBytes);
+    QVERIFY(out == frame);
+    // 3 handshake + the capture word.
+    QCOMPARE(raw->sent_.size(), 4);
+    QCOMPARE(raw->sent_.at(3), QStringLiteral("capture"));
+}
+
+void TestNanoVnaClient::captureScreenShortFrameIsHonest() {
+    // Only 100 bytes of the frame -> must fail with an error, never a half frame.
+    auto tr = std::make_unique<ReplayTransport>(std::vector<ReplayTransport::Step>{
+        ReplayTransport::Step{QStringLiteral("help"), {}, {}},
+        ReplayTransport::Step{QStringLiteral("version"), {QStringLiteral("1.2.50")}, {}},
+        ReplayTransport::Step{QStringLiteral("info"), {QStringLiteral("NanoVNA-H")}, {}},
+        ReplayTransport::Step{QStringLiteral("capture"), {}, QByteArray(100, '\x11').toHex()},
+    });
+    NanoVnaClient client(std::move(tr));
+    QVERIFY(client.connect());
+    QByteArray out;
+    QString err;
+    QVERIFY(!client.captureScreen(out, &err));
+    QVERIFY(out.isEmpty());
+    QVERIFY(!err.isEmpty());
 }
 
 QTEST_MAIN(TestNanoVnaClient)

@@ -7,6 +7,7 @@
 #include <QRegularExpression>
 
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 #if defined(__unix__)
@@ -95,6 +96,16 @@ public:
             if (c == '\n') return true;
             if (c != '\r') out.append(c);
         }
+    }
+    int readBytes(char* buf, int maxLen) override {
+        if (fd_ < 0 || maxLen <= 0) return 0;
+        int total = 0;
+        while (total < maxLen) {
+            ssize_t n = ::read(fd_, buf + total, (size_t)(maxLen - total));
+            if (n <= 0) break;   // EINTR/timeout (VMIN=0,VTIME=1) — return short
+            total += (int)n;
+        }
+        return total;
     }
     void resetInputBuffer() override { if (fd_ >= 0) tcflush(fd_, TCIFLUSH); }
 private:
@@ -350,6 +361,61 @@ bool NanoVnaClient::readVbat(double& volts, QString* err) {
     }
     if (err) *err = QStringLiteral("vbat 回复无法解析为电压值");
     return false;
+}
+
+bool NanoVnaClient::readTcxo(long& hz, QString* err) {
+    hz = 0;
+    if (!guardConnected(connected_, err)) return false;
+    // Firmware 1.2.50 replies "usage: tcxo {TCXO frequency(Hz)}" +
+    // "current: 26000000". Older firmware without the word has no current
+    // line -> honest error (never a fabricated reference frequency).
+    const QList<QString> lines = exec(QStringLiteral("tcxo"));
+    for (const QString& line : lines) {
+        if (!line.startsWith(QStringLiteral("current:"))) continue;
+        bool ok = false;
+        const long v = line.mid(8).trimmed().toLong(&ok);
+        if (ok) { hz = v; return true; }
+    }
+    if (err) *err = QStringLiteral("tcxo 回复无法解析（current: <Hz>）");
+    return false;
+}
+
+bool NanoVnaClient::captureScreen(QByteArray& out, QString* err) {
+    out.clear();
+    if (!guardConnected(connected_, err)) return false;
+    if (!tr_) { if (err) *err = QStringLiteral("NanoVNA 未连接"); return false; }
+    tr_->resetInputBuffer();
+    tr_->write(QByteArrayLiteral("capture\r"));
+    // Echo line (this firmware echoes; a non-echo firmware would eat the first
+    // frame bytes here — known boundary, all tested firmwares echo).
+    QByteArray echo;
+    tr_->readLine(echo);
+    out.resize(kCaptureFrameBytes);
+    int got = 0;
+    const int kChunk = 4096;
+    const int kMaxPolls = 600;   // termios VTIME 0.1s per empty poll -> <=60s
+    QByteArray chunk(kChunk, Qt::Uninitialized);
+    int polls = 0;
+    while (got < kCaptureFrameBytes && polls < kMaxPolls) {
+        const int n = tr_->readBytes(chunk.data(),
+                                     qMin(kChunk, kCaptureFrameBytes - got));
+        if (n > 0) {
+            memcpy(out.data() + got, chunk.constData(), (size_t)n);
+            got += n;
+        } else {
+            ++polls;
+        }
+    }
+    if (got < kCaptureFrameBytes) {
+        out.clear();   // never hand back a half frame
+        if (err) *err = QStringLiteral("capture 超时或短帧");
+        return false;
+    }
+    // Trailing "ch> " prompt (4 bytes, no newline). Shape anomalies are not
+    // fatal: the frame above is complete.
+    QByteArray tail(4, Qt::Uninitialized);
+    tr_->readBytes(tail.data(), 4);
+    return true;
 }
 
 bool NanoVnaClient::readFreqOffset(long& hz, QString* err) {

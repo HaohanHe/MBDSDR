@@ -21,6 +21,7 @@ nanovna-saver）的**机制学习**（命令字 / 数据格式 / 握手时序）
 from __future__ import annotations
 
 import math
+import struct
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -35,6 +36,12 @@ Z0_DEFAULT = 50.0  # 标准参考阻抗 (Ohm)
 NANOVNA_VID_PID: Tuple[Tuple[int, int], ...] = (
     (0x0483, 0x5740),  # STM32 CDC，NanoVNA / H / H4
 )
+
+# `capture` 屏幕截图的帧规格（实测 NanoVNA-H 固件 1.2.50）：回显行之后是
+# 320x240 的 RGB565（小端 16bit）裸帧，末尾是 "ch> " 提示符（4 字节）。
+CAPTURE_WIDTH = 320
+CAPTURE_HEIGHT = 240
+CAPTURE_FRAME_BYTES = CAPTURE_WIDTH * CAPTURE_HEIGHT * 2  # 153600
 
 
 class NanoVNADriverError(RuntimeError):
@@ -89,6 +96,40 @@ def s21_phase_deg(s21: complex) -> float:
     return math.degrees(math.atan2(s21.imag, s21.real))
 
 
+def rgb565_to_bmp_bytes(buf: bytes, width: int = CAPTURE_WIDTH,
+                        height: int = CAPTURE_HEIGHT) -> bytes:
+    """RGB565 小端裸帧 -> 24bit BMP（自底向上，行按 4 字节对齐）。
+
+    公开格式转换（BITMAPFILEHEADER + BITMAPINFOHEADER + BGR888），无第三方依赖；
+    输入长度不足时诚实抛 ValueError，不补假像素。
+    """
+    need = width * height * 2
+    if len(buf) < need:
+        raise ValueError(f"RGB565 帧长度不足：{len(buf)} < {need}")
+    rows: List[bytes] = []
+    src_stride = width * 2
+    for y in range(height - 1, -1, -1):  # BMP 行为自底向上
+        base = y * src_stride
+        row = bytearray()
+        for x in range(width):
+            px = buf[base + x * 2] | (buf[base + x * 2 + 1] << 8)
+            r = (px >> 11) & 0x1F
+            g = (px >> 5) & 0x3F
+            b = px & 0x1F
+            row += bytes(((b * 255 + 15) // 31,
+                          (g * 255 + 31) // 63,
+                          (r * 255 + 15) // 31))
+        pad = (-len(row)) % 4
+        row += b"\x00" * pad
+        rows.append(bytes(row))
+    pixels = b"".join(rows)
+    file_size = 54 + len(pixels)
+    header = struct.pack("<2sIHHI", b"BM", file_size, 0, 0, 54)
+    info = struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0,
+                       len(pixels), 2835, 2835, 0, 0)
+    return header + info + pixels
+
+
 # ===========================================================================
 # 传输层抽象
 # ===========================================================================
@@ -111,6 +152,14 @@ class _Transport:
 
     def readline(self) -> bytes:
         """读一行（含结尾换行）；超时/无数据返回 b""。"""
+        raise NotImplementedError
+
+    def read_bytes(self, n: int) -> bytes:
+        """读最多 n 字节原始数据（二进制帧用，如 capture 截图）。
+
+        文本回放传输层（ReplayTransport）不实现二进制读取——需要二进制
+        夹具的测试请自行注入实现了本方法的假传输层。
+        """
         raise NotImplementedError
 
     def reset_input_buffer(self) -> None:  # noqa: D401 - 镜像 pyserial 命名
@@ -160,6 +209,13 @@ class SerialTransport(_Transport):
         if self._ser is None:
             return b""
         return self._ser.readline()
+
+    def read_bytes(self, n: int) -> bytes:
+        if self._ser is None:
+            raise NanoVNADriverError("串口未连接")
+        if n <= 0:
+            return b""
+        return self._ser.read(n)
 
     def reset_input_buffer(self) -> None:
         if self._ser is not None:
@@ -359,7 +415,8 @@ class NanoVNAClient:
 
     # -- 握手 / 能力探测 ---------------------------------------------------
     def _handshake(self) -> None:
-        # help：探测能力
+        # help：探测能力。'capture'/'bandwidth'/'sn' 三个特性位均有对应实现
+        # （capture_screen / set_bandwidth / sn 查询），探测与实现一一对应。
         help_lines = self._exec("help")
         help_text = " ".join(help_lines)
         if "capture" in help_text:
@@ -446,6 +503,52 @@ class NanoVNAClient:
         joined = " ".join(lines)
         self.cal_status = joined.split() if joined else []
         return self.cal_status
+
+    def read_tcxo(self) -> Optional[int]:
+        """读 TCXO 频率基准（Hz）。固件不支持 / 无法解析时返回 None（诚实空态）。
+
+        固件 1.2.50 回两行：usage 行 + "current: 26000000"。
+        """
+        lines = self._exec("tcxo", read_timeout=0.2)
+        for line in lines:
+            if line.startswith("current:"):
+                try:
+                    return int(float(line.split(":", 1)[1].strip()))
+                except ValueError:
+                    return None
+        return None
+
+    def capture_screen(self, timeout_s: float = 30.0) -> bytes:
+        """抓取设备屏幕：返回 RGB565 小端裸帧（320x240，见 CAPTURE_* 常量）。
+
+        协议（实测固件 1.2.50）：发 "capture\\r" -> 回显行 -> 153600 字节
+        RGB565 小端裸帧 -> "ch> " 提示符。115200 波特下帧传输约 13.4s，
+        故默认超时 30s。传输层需实现 read_bytes()；超时/缺字节诚实抛
+        NanoVNADriverError，绝不返回半帧充数。
+        """
+        if not self._transport.is_open:
+            raise NanoVNADriverError("未连接 NanoVNA")
+        self._drain()
+        self._transport.write(b"capture\r")
+        # 回显行（本固件会回显；没有回显的固件首帧字节可能被本行吃掉，
+        # 属已知边界，实测固件均为回显型）
+        self._transport.readline()
+        out = bytearray()
+        t0 = time.time()
+        while len(out) < CAPTURE_FRAME_BYTES:
+            chunk = self._transport.read_bytes(min(4096, CAPTURE_FRAME_BYTES - len(out)))
+            if chunk:
+                out += chunk
+                continue
+            if time.time() - t0 > timeout_s:
+                raise NanoVNADriverError(
+                    f"capture 超时：仅收到 {len(out)}/{CAPTURE_FRAME_BYTES} 字节")
+        # 收尾提示符 "ch> "（4 字节，无换行）；读掉以保持协议流干净
+        tail = self._transport.read_bytes(4)
+        if tail and not tail.startswith(b"ch>"):
+            # 非致命：提示符形态异常不影响已完整收到的帧
+            pass
+        return bytes(out)
 
     # -- 便捷派生量（单点） ------------------------------------------------
     @staticmethod
