@@ -203,6 +203,51 @@ DataUpdateStatus applyUpdateComponentData(WorkspaceLayout& m,
     return DataUpdateStatus::BadValueType;
 }
 
+WorkspaceLayout applyResponsiveCompaction(const WorkspaceLayout& requested,
+                                          int availableWidth) {
+    // Wide window, or width unknown (headless / null splitter): never second-
+    // guess the agent's requested form. compact=false.
+    if (availableWidth >= kCompactBreakpoint || availableWidth <= 0) {
+        WorkspaceLayout out = requested;
+        out.compact = false;
+        return out;
+    }
+
+    WorkspaceLayout out = requested;
+    out.compact = true;
+
+    // Re-plan column widths: hold the two control rails at readable compact
+    // widths and give the center (the high-density spectrum/VSWR/return-loss
+    // view) the remainder. A pane never drops below the soft floor.
+    int left = kCompactRailW;
+    int right = kCompactRightW;
+    int center = availableWidth - left - right;
+    if (center < kMinPanel) {
+        // Not enough room for rails + a usable center: shrink the rails toward
+        // the floor rather than squeezing the center below the floor.
+        center = kMinPanel;
+        const int slack = availableWidth - center;
+        left = slack / 2;
+        right = slack - left;
+        if (left < kMinPanel) left = kMinPanel;
+        if (right < kMinPanel) right = kMinPanel;
+    }
+    out.splitter_sizes = {left, center, right};
+
+    // Fold the secondary right tabs to the agent-declared PRIMARY panel, but
+    // only when the agent actually picked a current_tab: on a too-narrow window
+    // the whole tab strip cannot be hosted, so we show just the one instrument
+    // the agent marked primary. We never hide panels the agent left visible.
+    if (!out.current_tab.isEmpty() && isRegistered(out.current_tab)) {
+        out.visible_tabs = {out.current_tab};
+        out.hidden_panels.clear();
+        for (const auto& t : listTabs()) {
+            if (t.id != out.current_tab) out.hidden_panels.push_back(t.id);
+        }
+    }
+    return out;
+}
+
 QJsonObject workspaceSpecToJson(const WorkspaceLayout& m) {
     QJsonObject o;
     QJsonArray sizes, stretch;
@@ -219,6 +264,8 @@ QJsonObject workspaceSpecToJson(const WorkspaceLayout& m) {
     // Per-component data slots (A2UI updateDataModel minimal subset). Emitted
     // verbatim; empty object when no component has data.
     o.insert(QStringLiteral("component_data"), m.component_data);
+    // Responsive derived form (self-owned value-add). Additive read-back.
+    o.insert(QStringLiteral("compact"), m.compact);
     return o;
 }
 
@@ -250,20 +297,35 @@ WorkspaceLayout workspaceSpecFromJson(const QJsonObject& o) {
     // Per-component data slots: read verbatim (untrusted but inert -- the layout
     // layer never executes it). Missing/non-object -> empty (default).
     m.component_data = o.value(QStringLiteral("component_data")).toObject();
+    // Responsive derived form: read back; default false when absent.
+    m.compact = o.value(QStringLiteral("compact")).toBool(false);
     return m;
 }
 
 QString applyLayoutEngine(QSplitter* splitter, QTabWidget* rightTabs,
                           const WorkspaceLayout& layout) {
+    // Responsive compaction: re-plan to the narrow-width compact form when the
+    // measured surface width is below the breakpoint; above it the request is
+    // honored verbatim. This is the auto form-switch the narrow-window
+    // acceptance scenario requires -- not by editing the fixed control rail's
+    // buttons, but by re-planning the splitter geometry + folding secondary tabs.
+    const int avail = splitter ? splitter->width() : 0;
+    const WorkspaceLayout eff = applyResponsiveCompaction(layout, avail);
+
     QStringList notes;
+    if (eff.compact) {
+        notes << (QStringLiteral("compact:on (width ") +
+                  QString::number(avail) + QStringLiteral(" <= ") +
+                  QString::number(kCompactBreakpoint) + QStringLiteral(")"));
+    }
 
     if (splitter) {
-        splitter->setStretchFactor(0, layout.splitter_stretch[0]);
-        splitter->setStretchFactor(1, layout.splitter_stretch[1]);
-        splitter->setStretchFactor(2, layout.splitter_stretch[2]);
-        QList<int> sizes = {layout.splitter_sizes[0],
-                            layout.splitter_sizes[1],
-                            layout.splitter_sizes[2]};
+        splitter->setStretchFactor(0, eff.splitter_stretch[0]);
+        splitter->setStretchFactor(1, eff.splitter_stretch[1]);
+        splitter->setStretchFactor(2, eff.splitter_stretch[2]);
+        QList<int> sizes = {eff.splitter_sizes[0],
+                            eff.splitter_sizes[1],
+                            eff.splitter_sizes[2]};
         splitter->setSizes(sizes);
     }
 
@@ -274,12 +336,12 @@ QString applyLayoutEngine(QSplitter* splitter, QTabWidget* rightTabs,
             const QString label = rightTabs->tabText(i);
             const QString id = QStringLiteral("tab:") + label;
             if (!isRegistered(id)) continue;  // e.g. disabled section headers
-            const bool show = layout.visible_tabs.contains(id);
+            const bool show = eff.visible_tabs.contains(id);
             rightTabs->setTabVisible(i, show);
         }
         // Select current_tab if it resolves to a visible index.
-        if (!layout.current_tab.isEmpty()) {
-            const QString want = layout.current_tab;
+        if (!eff.current_tab.isEmpty()) {
+            const QString want = eff.current_tab;
             for (int i = 0; i < rightTabs->count(); ++i) {
                 if (QStringLiteral("tab:") + rightTabs->tabText(i) == want) {
                     rightTabs->setCurrentIndex(i);
@@ -289,8 +351,8 @@ QString applyLayoutEngine(QSplitter* splitter, QTabWidget* rightTabs,
         }
     }
 
-    if (!layout.placeholder_ids.isEmpty()) {
-        notes << QStringLiteral("placeholders: ") + layout.placeholder_ids.join(QStringLiteral(", "));
+    if (!eff.placeholder_ids.isEmpty()) {
+        notes << QStringLiteral("placeholders: ") + eff.placeholder_ids.join(QStringLiteral(", "));
     }
     return notes.join(QStringLiteral("; "));
 }

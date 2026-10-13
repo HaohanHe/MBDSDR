@@ -247,3 +247,27 @@ MBDSDR P0 对齐了 A2UI v1.0 的**骨架语义**（声明式 JSON、扁平邻�
 ### 未改（维持现状）
 - `component` vs `type` 判别器字段名：本差距表 §4.2 已登记为「有意不改」（P0 子集自有形状，不追求过官方 validator）。
 - surfaceId 单值化、catalogId 协商、@path 绑定、allowedParents/Children、流式传输：均按 §3.2/§3.3 延后或不做。（结构化错误码本轮已落地，见上。）
+
+---
+
+## 7. 响应式布局断点（我方增值项，2026-10-13，commit 前工作树）
+
+### 7.1 spec 核实结论：A2UI v1.0 无响应式定义
+逐项核对 `agent-ui-protocol-basis.md` §3（A2UI v1.0 组件模型：`id`/`component`/`catalogId`/props/数据绑定/ChildList/AccessibilityAttributes）与本文件 §1.1–1.7 全部官方能力点——**没有任何 breakpoint / variant / responsive / 自适应 / minWidth 形态切换概念**。官方组件模型是「扁平邻接表 + 静态 props」，宿主如何按宽度重排不属于协议。P0 里的「640/960/1920 三档快照 0 裁切」（§9.6）是**验收测试**，不是协议机制。`component_registry.ComponentInfo` 此前也只有 `min_size`（软下限），无变体/断点。
+
+**裁决：这是我方增值项，不是对齐官方差距。** 按「宁缺毋滥」落地一个最小自写纯函数，不碰生产控件树（左栏按钮图标化/标签省略需改 main_window 内部 QGroupBox 树，offscreen 不可测，超单轮预算，登记为后续）。
+
+### 7.2 落地（S 体量，纯增量、不加新工具、计数 89 不变）
+- **纯函数** `applyResponsiveCompaction(requested, availableWidth)`（workspace_layout.{h,cpp}）：
+  - 断点常量 `kCompactBreakpoint=1100`、紧凑栏宽 `kCompactRailW=200` / `kCompactRightW=160`。
+  - `width>=breakpoint` 或 `<=0`（null/offscreen）→ 原样返回，`compact=false`。
+  - `width<breakpoint` → 紧凑形态：左右栏压到可读紧凑宽、center（频谱/VSWR/回损高密度视图）取剩余；**当 agent 声明了 `current_tab` 时，次要右栏折叠为仅该 primary 面板**（visible_tabs={current}，其余进 hidden_panels）。agent 未声明 current_tab 时不动其显隐决定。
+- **applyLayoutEngine** 按 `splitter->width()` 实测宽度自动套紧凑/完整形态，note 报 `compact:on (width W <= 1100)`；宽窗恢复 agent 请求形态。
+- **get-side JSON** 增 `compact` 字段；`WorkspaceController::applyOverlay/reset` 按实测宽度回写 `model_.compact`，`get_workspace_layout` 反映实际渲染形态。
+- 单测 6 个：宽窗 verbatim、窄窗重规划+折叠、回宽恢复、无 current_tab 不折叠、未知宽度不越权、compact 字段 JSON 往返。
+
+### 7.3 验证与诚实边界
+- 双构型全量 ctest：D135 Debug 152/152、R135 Release 152/152（e2e_smoke Skipped 诚实计）；受影响套件 agent/tool_schema/tool_registry/ai_real_link 全绿；计数 89 不变。
+- 三档快照（offscreen 真渲染，ci/D135/scratch/responsive/）：1920 overlay 292/1222/398 与 1b0c5ff 基线逐像素一致（宽窗零回归）；640/960 note=`compact:on`，右栏次要 tab 折叠为仅 VNA、center 优先。
+- **诚实边界**：左栏在 640 窗（实际渲染 764px）下仍有 ~111px 的窄栏裁切——这是 center 频谱 widget 硬最小宽（~556px）的物理约束，QSplitter 几何不允许 center 缩到 404px；断点重规划在此物理下限内尽力（左右栏可读宽、center 优先），不越权改 center 最小宽。左栏按钮图标化/标签省略属后续 GUI 形态工程，本轮不硬做。
+

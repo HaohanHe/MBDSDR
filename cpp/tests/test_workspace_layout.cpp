@@ -85,6 +85,12 @@ private slots:
     void topLevelTabHideFlatShape();
     void topLevelTabShowFlatShape();
     void topLevelTabHidePropsShape();
+    void responsiveWideHonorsRequest();
+    void responsiveNarrowReplansAndFolds();
+    void responsiveBackToWideRestores();
+    void responsiveNarrowWithoutCurrentTabKeepsTabs();
+    void responsiveUnknownWidthNeverOverrides();
+    void responsiveCompactSurvivesJson();
 };
 
 void TestWorkspaceLayout::defaultSpecIsThreeColumn() {
@@ -371,6 +377,118 @@ void TestWorkspaceLayout::topLevelTabHidePropsShape() {
     WorkspaceLayout m = applyCreateSurface(msg);
     QVERIFY(m.hidden_panels.contains(QStringLiteral("tab:FT8")));
     QVERIFY(!m.visible_tabs.contains(QStringLiteral("tab:FT8")));
+}
+
+// ---- Responsive compaction (self-owned value-add; A2UI v1.0 has no spec) ----
+
+// At/above the breakpoint the agent's requested sizes are honored verbatim and
+// compact=false.
+void TestWorkspaceLayout::responsiveWideHonorsRequest() {
+    WorkspaceLayout req = defaultWorkspaceSpec();
+    req.splitter_sizes = {420, 1000, 380};
+
+    WorkspaceLayout wide = applyResponsiveCompaction(req, 1920);
+    QVERIFY2(!wide.compact, "wide window must stay in full form");
+    QCOMPARE(wide.splitter_sizes[0], 420);
+    QCOMPARE(wide.splitter_sizes[1], 1000);
+    QCOMPARE(wide.splitter_sizes[2], 380);
+
+    // Right at the breakpoint boundary is also "wide" (>= breakpoint).
+    WorkspaceLayout atEdge = applyResponsiveCompaction(req, kCompactBreakpoint);
+    QVERIFY(!atEdge.compact);
+    QCOMPARE(atEdge.splitter_sizes[0], 420);
+}
+
+// Below the breakpoint the layout is re-planned: rails held at compact widths,
+// center takes the remainder, and a declared current_tab folds the secondary
+// right tabs to that single primary panel.
+void TestWorkspaceLayout::responsiveNarrowReplansAndFolds() {
+    WorkspaceLayout req = defaultWorkspaceSpec();
+    req.current_tab = QStringLiteral("tab:VNA");
+    // Agent asked for a wide three-column layout that cannot fit a 640 window.
+    req.splitter_sizes = {280, 800, 280};
+
+    WorkspaceLayout compact = applyResponsiveCompaction(req, 640);
+    QVERIFY2(compact.compact, "narrow window must switch to compact form");
+
+    // Rails held at readable compact widths, center emphasized.
+    QCOMPARE(compact.splitter_sizes[0], kCompactRailW);
+    QCOMPARE(compact.splitter_sizes[2], kCompactRightW);
+    QCOMPARE(compact.splitter_sizes[1], 640 - kCompactRailW - kCompactRightW);
+    // Center never below the soft floor at this width.
+    QVERIFY(compact.splitter_sizes[1] >= kMinPanel);
+
+    // Secondary right tabs folded to the single primary panel.
+    QCOMPARE(compact.visible_tabs.size(), 1);
+    QCOMPARE(compact.visible_tabs.first(), QStringLiteral("tab:VNA"));
+    QVERIFY(compact.hidden_panels.contains(QStringLiteral("tab:CW")));
+    QVERIFY(compact.hidden_panels.contains(QStringLiteral("tab:FT8")));
+    QVERIFY(!compact.hidden_panels.contains(QStringLiteral("tab:VNA")));
+}
+
+// Going back from narrow to wide restores the verbatim request -- the form is a
+// pure function of (request, width), not sticky state.
+void TestWorkspaceLayout::responsiveBackToWideRestores() {
+    WorkspaceLayout req = defaultWorkspaceSpec();
+    req.current_tab = QStringLiteral("tab:VNA");
+    req.splitter_sizes = {420, 1000, 380};
+
+    WorkspaceLayout narrow = applyResponsiveCompaction(req, 640);
+    QVERIFY(narrow.compact);
+    QVERIFY(narrow.splitter_sizes[0] != 420);   // re-planned
+    QVERIFY(narrow.visible_tabs.size() == 1);    // folded
+
+    WorkspaceLayout back = applyResponsiveCompaction(req, 1920);
+    QVERIFY(!back.compact);
+    QCOMPARE(back.splitter_sizes[0], 420);
+    QCOMPARE(back.splitter_sizes[1], 1000);
+    QCOMPARE(back.splitter_sizes[2], 380);
+    // Tabs restored to the agent's request (default = all visible).
+    QVERIFY(back.visible_tabs.contains(QStringLiteral("tab:CW")));
+    QVERIFY(back.hidden_panels.isEmpty());
+}
+
+// When the agent did NOT declare a current_tab, narrow mode re-plans sizes but
+// must NOT hide panels the agent left visible.
+void TestWorkspaceLayout::responsiveNarrowWithoutCurrentTabKeepsTabs() {
+    WorkspaceLayout req = defaultWorkspaceSpec();   // all tabs visible, no current
+    WorkspaceLayout compact = applyResponsiveCompaction(req, 640);
+    QVERIFY(compact.compact);
+    // Sizes re-planned...
+    QCOMPARE(compact.splitter_sizes[0], kCompactRailW);
+    // ...but the agent's tab visibility decision is untouched.
+    QVERIFY(compact.hidden_panels.isEmpty());
+    QVERIFY(compact.visible_tabs.contains(QStringLiteral("tab:CW")));
+    QVERIFY(compact.visible_tabs.contains(QStringLiteral("tab:VNA")));
+}
+
+// Unknown width (<=0, e.g. null/offscreen splitter in the pure layer) must
+// never second-guess the request: compact=false, sizes verbatim.
+void TestWorkspaceLayout::responsiveUnknownWidthNeverOverrides() {
+    WorkspaceLayout req = defaultWorkspaceSpec();
+    req.splitter_sizes = {280, 800, 280};
+    WorkspaceLayout none = applyResponsiveCompaction(req, 0);
+    QVERIFY(!none.compact);
+    QCOMPARE(none.splitter_sizes[0], 280);
+    WorkspaceLayout neg = applyResponsiveCompaction(req, -50);
+    QVERIFY(!neg.compact);
+    QCOMPARE(neg.splitter_sizes[1], 800);
+}
+
+// The derived compact flag round-trips through the get-side JSON so
+// get_workspace_layout reflects the active form.
+void TestWorkspaceLayout::responsiveCompactSurvivesJson() {
+    WorkspaceLayout req = defaultWorkspaceSpec();
+    req.current_tab = QStringLiteral("tab:VNA");
+    WorkspaceLayout compact = applyResponsiveCompaction(req, 640);
+    QVERIFY(compact.compact);
+
+    QJsonObject j = workspaceSpecToJson(compact);
+    QVERIFY2(j.value(QStringLiteral("compact")).toBool(false),
+             "get-side JSON must carry compact=true");
+    WorkspaceLayout back = workspaceSpecFromJson(j);
+    QVERIFY(back.compact);
+    QCOMPARE(workspaceSpecToJson(back), j);
 }
 
 QTEST_MAIN(TestWorkspaceLayout)

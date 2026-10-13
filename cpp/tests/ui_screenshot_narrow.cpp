@@ -334,6 +334,14 @@ int main(int argc, char** argv) {
     // default so every other screenshot is unchanged.
     if (qgetenv("MBD_WORKSPACE") == "1") {
         if (aigui::WorkspaceController* wc = win.harnessWorkspaceController()) {
+            // Pump the layout so the splitter has a REALIZED width before we
+            // measure it for responsive compaction -- otherwise applyLayoutEngine
+            // reads a pre-layout width and the narrow compact form never fires.
+            win.resize(qEnvironmentVariableIntValue("MBD_W") > 0
+                           ? qEnvironmentVariableIntValue("MBD_W") : 820,
+                       qEnvironmentVariableIntValue("MBD_H") > 0
+                           ? qEnvironmentVariableIntValue("MBD_H") : 640);
+            QApplication::processEvents();
             QJsonObject splitterNode;
             splitterNode["id"] = "splitter";
             QJsonObject props;
@@ -342,13 +350,21 @@ int main(int argc, char** argv) {
             QJsonObject hidden;
             hidden["id"] = "tab:数据";
             hidden["visible"] = false;
+            // Declare the primary panel so responsive compaction folds the
+            // secondary right tabs to this single instrument at narrow width.
+            QJsonObject rt;
+            rt["id"] = "right_tabs";
+            QJsonObject rtProps;
+            rtProps["current"] = "tab:VNA";
+            rt["props"] = rtProps;
             QJsonObject msg;
             msg["op"] = "updateComponents";
-            msg["components"] = QJsonArray{splitterNode, hidden};
+            msg["components"] = QJsonArray{splitterNode, hidden, rt};
             const QJsonObject r = wc->applyOverlay(msg);
-            qInfo("workspace overlay applied: ok=%s placeholders=%d",
+            qInfo("workspace overlay applied: ok=%s placeholders=%d note=%s",
                   r.value("ok").toBool() ? "true" : "false",
-                  r.value("placeholders").toArray().size());
+                  r.value("placeholders").toArray().size(),
+                  r.value("note").toString().toLocal8Bit().constData());
         }
     }
 

@@ -48,6 +48,13 @@ QJsonObject WorkspaceController::applyOverlay(const QJsonObject& msg) {
     }
 
     const QString note = applyLayoutEngine(splitter_, rightTabs_, model_);
+    // Reflect the RENDER-TIME responsive form in the get-side spec: compaction
+    // is derived from the live surface width inside applyLayoutEngine, so read
+    // the same derivation back and stamp it on the stored model. This lets
+    // get_workspace_layout report compact:true when the renderer is actually in
+    // the narrow-width form, without the agent having to ask.
+    model_.compact = applyResponsiveCompaction(
+        model_, splitter_ ? splitter_->width() : 0).compact;
 
     QJsonObject o;
     o.insert(QStringLiteral("ok"), true);
@@ -69,6 +76,8 @@ QJsonObject WorkspaceController::reset() {
 
     model_ = applyDeleteSurface();
     const QString note = applyLayoutEngine(splitter_, rightTabs_, model_);
+    model_.compact = applyResponsiveCompaction(
+        model_, splitter_ ? splitter_->width() : 0).compact;
 
     QJsonObject o;
     o.insert(QStringLiteral("ok"), true);

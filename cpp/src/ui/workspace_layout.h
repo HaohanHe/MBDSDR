@@ -46,6 +46,29 @@ namespace aigui {
 // the rail never collapses to zero-width by an adversarial/typo'd message.
 inline constexpr int kMinPanel = 120;
 
+// ---- Responsive compaction (self-owned value-add) -------------------------
+// A2UI v1.0 defines NO breakpoint / component-variant / minWidth mechanism
+// (verified: agent-ui-protocol-basis.md §3 component model + the full gap
+// table in a2ui-v1-delta.md §1.1-1.7 enumerate every official capability and
+// none of them is responsive layout). The P0 "640/960/1920 三档快照" line is
+// an acceptance test, not a protocol rule. So this is OUR extension:
+//
+// When the measured surface width drops below kCompactBreakpoint, the layout
+// engine re-plans the three columns into a compact form that PRIORITIZES the
+// center high-density view (spectrum / VSWR / return-loss / scale) and demotes
+// the side control rails. This is the "model orchestrates primary/secondary +
+// show/hide" behavior a single static splitter ratio cannot express. Above the
+// breakpoint the agent's requested sizes/visibility are honored verbatim, so
+// widening the window restores the full form automatically.
+//
+// This is NOT per-button surgery on the fixed left control rail (that is not
+// headless-testable and would touch the production widget tree): it is a pure
+// re-plan of the splitter geometry + tab folding, the two levers the AIGUI
+// layer already owns.
+inline constexpr int kCompactBreakpoint = 1100; // total available px threshold
+inline constexpr int kCompactRailW      = 200;  // left control rail compact width
+inline constexpr int kCompactRightW     = 160;  // right tab strip compact width
+
 // The default three-column spec, matching cpp/src/ui/main_window.cpp
 // (splitter->setStretchFactor(0/1/2, 1/3/1); setSizes({280,800,280})).
 inline constexpr int kDefaultSizeL = 280;
@@ -76,6 +99,13 @@ struct WorkspaceLayout {
     // value=null clears (removes) the slot; an object upserts (whole-replaces)
     // it. This is the in-memory data model the panel can later bind to.
     QJsonObject component_data;
+
+    // RENDER-TIME DERIVED flag (never set directly by the agent): true when the
+    // layout engine re-planned this into the narrow-width compact form via
+    // applyResponsiveCompaction(). Surfaced in the get-side JSON so the model
+    // can read back which form the renderer is actually showing at the current
+    // window width.
+    bool compact = false;
 };
 
 // ---- Pure functions (no Qt widget dependency; safe to unit test headless) ----
@@ -130,6 +160,19 @@ enum class DataUpdateStatus {
 DataUpdateStatus applyUpdateComponentData(WorkspaceLayout& m,
                                           const QString& componentId,
                                           const QJsonValue& value);
+
+// Pure responsive planner: choose the EFFECTIVE layout for a given available
+// surface width.
+//   * width >= kCompactBreakpoint, OR width unknown (<=0, e.g. a null/offscreen
+//     splitter)  -> the requested layout is honored verbatim, compact=false.
+//   * width  <  kCompactBreakpoint -> a compact re-plan: the left control rail
+//     and right tab strip are held at readable compact widths, the center (the
+//     high-density view) takes the remainder, and WHEN the agent declared a
+//     current_tab the secondary right tabs are folded to that single primary
+//     panel. placeholder_ids and per-component data slots pass through.
+// Never hides tabs when the agent did not declare a current_tab.
+WorkspaceLayout applyResponsiveCompaction(const WorkspaceLayout& requested,
+                                          int availableWidth);
 
 // ---- Qt application layer (thin; does NOT touch hardware/DP) ----
 
