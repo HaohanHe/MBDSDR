@@ -115,5 +115,18 @@ TaskPlan planTargetCapture(double targetHz, const QString& mode);
 TaskPlan planFixedFrequencyRecord(double freqHz, const QString& mode,
                                   double bandwidthHz);
 
+// ---- Deterministic template catalog (read-only metadata, single source) ----
+// Shared by the Agent tool layer (list_templates / run_template) and the
+// headless ControlHub so the three template keys never drift. Pure metadata:
+// no engine, no station names / locations / TLE. The plan* builders above are
+// the only thing that turns these keys into a real step sequence.
+struct TaskTemplateInfo {
+    QString key;          // machine key passed to run_template
+    QString description;  // human summary
+    QStringList params;   // expected argument slots, in call order
+    int stepCount = 0;    // deterministic step count the built plan yields
+};
+QList<TaskTemplateInfo> taskTemplateCatalog();
+
 } // namespace ai
 } // namespace mbdsdr

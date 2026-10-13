@@ -312,5 +312,23 @@ TaskPlan planFixedFrequencyRecord(double freqHz, const QString& mode,
     return p;
 }
 
+QList<TaskTemplateInfo> taskTemplateCatalog() {
+    // The three deterministic templates, in a stable order. Params mirror the
+    // plan* signatures exactly (no extra/missing slots).
+    return {
+        {QStringLiteral("sweep_find_record"),
+         QString::fromUtf8("扫频找信号并存档：扫描频段定位峰值命中，把命中频率存为书签，"
+                           "retune 到命中频率并录制。"),
+         {"low_hz", "high_hz", "step_hz", "mode", "book_name"}, 6},
+        {QStringLiteral("target_capture"),
+         QString::fromUtf8("目标频率捕获录制：调到指定目标频率、设置解调模式后录制"
+                           "（卫星过境捕获；实时多普勒补偿由引擎自理）。"),
+         {"target_hz", "mode"}, 4},
+        {QStringLiteral("fixed_freq_record"),
+         QString::fromUtf8("固定频率录制解码：调到指定频率、设置信道带宽与解调模式后录制解码。"),
+         {"freq_hz", "mode", "bandwidth_hz"}, 5},
+    };
+}
+
 } // namespace ai
 } // namespace mbdsdr

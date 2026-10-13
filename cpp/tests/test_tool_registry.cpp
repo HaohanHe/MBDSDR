@@ -83,6 +83,8 @@ const QSet<QString> kAllCxxTools = {
     "list_ui_components", "reset_workspace",
     // A2UI v1.0 updateDataModel minimal subset (gated write).
     "update_component_data",
+    // Deterministic task templates: list (read) / run (gated write).
+    "list_templates", "run_template",
 };
 
 // The mutating (write) tools -- the ONLY ones gated in manual mode. This is
@@ -118,6 +120,8 @@ const QSet<QString> kExpectedWriteTools = {
     "arrange_workspace", "reset_workspace",
     // A2UI v1.0 updateDataModel minimal subset (gated write).
     "update_component_data",
+    // Deterministic task template runner (gated write; builds + registers a plan).
+    "run_template",
 };
 
 // The Flutter side (mobile/lib/app/ai_tools.dart, treated as READ-ONLY reference)
@@ -160,6 +164,8 @@ const QSet<QString> kFlutterUngatedReadTools = {
     "memory_search", "checkpoint_status",
     // 第 10 域「工作台编排」(P0-b): workspace spec read + component catalog reads.
     "get_workspace_layout", "list_ui_components",
+    // Deterministic task template catalog (read-only metadata).
+    "list_templates",
 };
 } // namespace
 
@@ -185,7 +191,7 @@ void TestToolRegistry::completeness_everySchemaHasExecutor() {
     for (const QString& n : executorToolNames()) executors.insert(n);
 
     // Each schema declares an executor...
-    QVERIFY2(schemas.size() == 84, qPrintable(QString("expected 84 tools, got %1").arg(schemas.size())));
+    QVERIFY2(schemas.size() == 86, qPrintable(QString("expected 86 tools, got %1").arg(schemas.size())));
     QCOMPARE(executors.size(), schemas.size());
     const QSet<QString> missingExec = schemas - executors;
     QVERIFY2(missingExec.isEmpty(),
@@ -314,11 +320,11 @@ void TestToolRegistry::unknownTool_honestErrorPath() {
 // and a known read tool still executes against the offline engine.
 void TestToolRegistry::notARegression_smoke() {
     QList<ToolDef> defs = toolDefs();
-    QCOMPARE(defs.size(), 84);
+    QCOMPARE(defs.size(), 86);
     QCOMPARE(defs[0].name, QString("tune_frequency"));
     QCOMPARE(defs[1].name, QString("set_mode"));
     // The newest tool is appended last (on-wire order kept).
-    QCOMPARE(defs.last().name, QString("get_color_maps"));
+    QCOMPARE(defs.last().name, QString("run_template"));
 
     dsp::SpectrumEngine engine;
     QJsonObject status = QJsonDocument::fromJson(

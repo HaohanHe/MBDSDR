@@ -42,7 +42,7 @@ static const ToolSchemaSpec* findSpec(const QList<ToolSchemaSpec>& specs,
 // required, and toolDefsFromSpecs() passes name/description verbatim.
 void TestToolSchema::schemaShape() {
     QList<ToolSchemaSpec> specs = registeredToolSpecs();
-    QCOMPARE(specs.size(), 84);
+    QCOMPARE(specs.size(), 86);
     for (const ToolSchemaSpec& s : specs) {
         QJsonObject j = buildToolSchema(s);
         QCOMPARE(j.value("type").toString(), QString("object"));
@@ -522,6 +522,22 @@ void TestToolSchema::sevenToolsNameDescriptionMatch() {
             "读取：列出瀑布图可用色板——内置 3 个（经典/单色/Viridis，palette 0/1/2）"
             "与当前配置的外部 JSON 色板文件（如有：path/name/stops）。外部文件缺失或"
             "已损坏时 external 为 null 并附诚实 note，不编造。只读工具。")},
+        {"list_templates",
+         QString::fromUtf8(
+            "读取：列出内置确定性任务模板目录——每项 {name, description, params[], steps}。"
+            "共 3 个：sweep_find_record（扫频找信号并存档，参数 low_hz/high_hz/step_hz/mode/book_name，6 步）、"
+            "target_capture（目标频率捕获录制，参数 target_hz/mode，4 步）、"
+            "fixed_freq_record（固定频率录制解码，参数 freq_hz/mode/bandwidth_hz，5 步）。"
+            "模板机制来自内部既有实现，不预置场景/呼号/TLE。只读工具，手动模式不拦截。")},
+        {"run_template",
+         QString::fromUtf8(
+            "写入：按 template_name 构建一个确定性任务计划并登记返回其步骤序列。"
+            "template_name 枚举 sweep_find_record/target_capture/fixed_freq_record（先用 list_templates 查看）。"
+            "参数槽：sweep_find_record 需 low_hz/high_hz/step_hz/mode/book_name；"
+            "target_capture 需 target_hz/mode；fixed_freq_record 需 freq_hz/mode/bandwidth_hz。"
+            "未知 template_name 或缺参数诚实报错；本调用只构建/登记计划（executed=false），"
+            "不在此同步调谐或录制——真实异步执行在生产端经 TaskRunner。"
+            "属于写动作，手动模式下被拦截。")},
 
 
     };
@@ -580,7 +596,7 @@ void TestToolSchema::generateToolDocumentationCoversAllTools() {
         }
         ++headerCount;
     }
-    QCOMPARE(headerCount, 84);
+    QCOMPARE(headerCount, 86);
     // Fixed schema + error-example fields present on every block.
     QVERIFY(doc.contains(QStringLiteral("schema:")));
     QVERIFY(doc.contains(QStringLiteral("错误示例")));

@@ -5,7 +5,7 @@
 
 | 组件 | 位置 | 是什么 |
 |---|---|---|
-| 原生桌面端 | [`cpp/`](cpp/README.md) | C++/Qt 原生 SDR 接收软件（UI 与 DSP 同进程，不依赖 Python 运行时）。AI 助手工具面实测 **84 个**（`cpp/src/ai/tool_schema.cpp`，read/write 双态、写动作在手动模式被门拦截），并内置 ControlHub HTTP 控制通道 |
+| 原生桌面端 | [`cpp/`](cpp/README.md) | C++/Qt 原生 SDR 接收软件（UI 与 DSP 同进程，不依赖 Python 运行时）。AI 助手工具面实测 **86 个**（`cpp/src/ai/tool_schema.cpp`，read/write 双态、写动作在手动模式被门拦截），并内置 ControlHub HTTP 控制通道 |
 | 手机端 | [`mobile/`](mobile/README.md) | Flutter 一套代码（Android/iOS），手机作 AI 的"眼睛和手臂"：定位+罗盘指向+rtl_tcp 直连外置 SDR；经 ControlHub HTTP 只读对接桌面引擎 |
 | Python 智能体内核 | [`mbdsdr_ai/`](mbdsdr_ai/README.md) | **研究原型**：注册约 280 个 LLM 可调用工具（agent.py ~112 + sdr_tools.py ~137 + tool_registry 内置 ~63，口径见该 README §1）+ 工作流引擎。这是原型期工具面，**不是**随桌面交付的 81 工具集 |
 | 论文实验管线 | [`experiments/`](experiments/README.md) | 可复现实验（Eb/N0 解码成功率 / 多普勒定轨 / AMR 基线 / LLM 基线），固定种子、逐图标口径 |
@@ -122,7 +122,7 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 3. 回传 sweep.json（+ 连接日志 version/info/cal）即可比对。
 无设备可先 `--selftest` 跑通流程（合成演示，非真实测量）。详见 docs/learn/nanovna/hardware-quickstart.md。
 
-## 工具能力矩阵（84 工具，三通道：Agent / Hub / HTTP 透传）
+## 工具能力矩阵（86 工具，三通道：Agent / Hub / HTTP 透传）
 
 按域分组；写=手动模式 gate 拦截，读=不拦截。
 
@@ -179,6 +179,7 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 | list_bookmarks / add_bookmark / tune_to_bookmark / delete_bookmark | 读/写 |
 | scan_band / start_scan_link / stop_scan_link / get_scan_link_status | 写/读 |
 | connect_network_source / set_network_audio_sink / get_network_audio_status | 写/读 |
+| list_templates / run_template | 读/写（确定性任务模板：list 列举 3 模板；run 按名构建并登记计划 executed=false，不同步调谐/录制，手动 gate） |
 
 ### 系统 / 校准 / 卫星
 | 工具 | 写/读 |
@@ -198,7 +199,7 @@ repos/      克隆的上游源码（仅供学习，不入产品路径）
 | arrange_workspace / reset_workspace / update_component_data | 写（手动 gate；按编译期白名单调整 splitter 尺寸/tab 可见性，未知 id 诚实占位；update_component_data 为 A2UI updateDataModel 最小子集 upsert/清空组件数据槽，不碰 DSP/音频/硬件） |
 | get_workspace_layout / list_ui_components | 读 |
 
-合计 84 工具，与 docs/learn/phase31/agent-tool-documentation.md 头部一致。
+合计 86 工具，与 docs/learn/phase31/agent-tool-documentation.md 头部一致。
 
 ## MCP 服务器（C++ mbdsdr-mcp 与 Python mbdsdr_ai/core/mcp_server.py）合并视图
 

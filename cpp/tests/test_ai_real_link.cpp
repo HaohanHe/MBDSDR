@@ -377,6 +377,8 @@ void TestAiRealLink::toolCount_registryEqualsExecution() {
         "list_ui_components", "reset_workspace",
         // A2UI v1.0 updateDataModel minimal subset (gated write).
         "update_component_data",
+        // Deterministic task templates: list (read) / run (gated write).
+        "list_templates", "run_template",
     };
     QCOMPARE(registered.size(), supported.size());
     QCOMPARE(registered, supported);
@@ -496,6 +498,9 @@ void TestAiRealLink::phase26_tools_callableReturnJson() {
         "list_vfos", "add_vfo", "switch_vfo", "rename_vfo",
         "list_recordings", "delete_recording", "export_recording",
         "set_fft_params", "set_color_map", "get_spectrum_status",
+        // Deterministic task templates (list is a read; run returns an honest
+        // missing-template_name error on empty args, never the unknown fallback).
+        "list_templates", "run_template",
     };
     for (const QString& t : newTools) {
         const QString r = ai::executeTool(t, QJsonObject{}, &engine);

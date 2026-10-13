@@ -1668,6 +1668,69 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         out.append(s);
     }
 
+    // list_templates (read): enumerate the three deterministic task templates.
+    // Pure metadata -- no engine, no station data. Always the same three.
+    {
+        ToolSchemaSpec s;
+        s.name = "list_templates";
+        s.description = QString::fromUtf8(
+            "读取：列出内置确定性任务模板目录——每项 {name, description, params[], steps}。"
+            "共 3 个：sweep_find_record（扫频找信号并存档，参数 low_hz/high_hz/step_hz/mode/book_name，6 步）、"
+            "target_capture（目标频率捕获录制，参数 target_hz/mode，4 步）、"
+            "fixed_freq_record（固定频率录制解码，参数 freq_hz/mode/bandwidth_hz，5 步）。"
+            "模板机制来自内部既有实现，不预置场景/呼号/TLE。只读工具，手动模式不拦截。");
+        s.write = false;
+        out.append(s);
+    }
+    // run_template (write -- gated): build a deterministic plan from one of the
+    // three templates and return the registered step sequence. Reuses the internal
+    // plan* builders (no reimplementation); does NOT synchronously tune/record in
+    // this call -- production execution goes through the async TaskRunner. Classified
+    // as a write because the plan WOULD mutate the receiver, so manual mode gates it.
+    {
+        ToolSchemaSpec s;
+        s.name = "run_template";
+        s.description = QString::fromUtf8(
+            "写入：按 template_name 构建一个确定性任务计划并登记返回其步骤序列。"
+            "template_name 枚举 sweep_find_record/target_capture/fixed_freq_record（先用 list_templates 查看）。"
+            "参数槽：sweep_find_record 需 low_hz/high_hz/step_hz/mode/book_name；"
+            "target_capture 需 target_hz/mode；fixed_freq_record 需 freq_hz/mode/bandwidth_hz。"
+            "未知 template_name 或缺参数诚实报错；本调用只构建/登记计划（executed=false），"
+            "不在此同步调谐或录制——真实异步执行在生产端经 TaskRunner。"
+            "属于写动作，手动模式下被拦截。");
+        s.write = true;
+        ToolParamSpec tname;
+        tname.name = "template_name";
+        tname.type = "string";
+        tname.description = QString::fromUtf8("模板名枚举：sweep_find_record/target_capture/fixed_freq_record");
+        tname.enumValues = QVariantList{"sweep_find_record", "target_capture", "fixed_freq_record"};
+        tname.required = true;
+        ToolParamSpec lowHz;
+        lowHz.name = "low_hz"; lowHz.type = "number";
+        lowHz.description = QString::fromUtf8("sweep_find_record：扫描下限 Hz");
+        ToolParamSpec highHz;
+        highHz.name = "high_hz"; highHz.type = "number";
+        highHz.description = QString::fromUtf8("sweep_find_record：扫描上限 Hz（亦作 target_capture 的目标频率）");
+        ToolParamSpec stepHz;
+        stepHz.name = "step_hz"; stepHz.type = "number";
+        stepHz.description = QString::fromUtf8("sweep_find_record：扫描步进 Hz");
+        ToolParamSpec mode;
+        mode.name = "mode"; mode.type = "string";
+        mode.enumValues = QVariantList{"AM", "NFM", "WFM", "USB", "LSB", "CW"};
+        mode.description = QString::fromUtf8("解调模式");
+        ToolParamSpec bookName;
+        bookName.name = "book_name"; bookName.type = "string";
+        bookName.description = QString::fromUtf8("sweep_find_record：命中书签名");
+        ToolParamSpec freqHz;
+        freqHz.name = "freq_hz"; freqHz.type = "number";
+        freqHz.description = QString::fromUtf8("fixed_freq_record（亦作 target_hz）：固定/目标频率 Hz");
+        ToolParamSpec bwHz;
+        bwHz.name = "bandwidth_hz"; bwHz.type = "number";
+        bwHz.description = QString::fromUtf8("fixed_freq_record：信道带宽 Hz");
+        s.params << tname << lowHz << highHz << stepHz << mode << bookName << freqHz << bwHz;
+        out.append(s);
+    }
+
     return out;
 }
 

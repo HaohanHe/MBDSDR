@@ -138,6 +138,8 @@ private slots:
     void workspace_resetAndCatalogTabs();
     void workspace_updateComponentDataUpsertClearAndVersion();
     void workspace_llmDispatchPassesInjectedController();
+    // --- Deterministic task templates (list_templates / run_template) ----------
+    void taskTemplates_listCatalogRunGatedAndHonest();
 };
 
 void TestAgent::initTestCase() {
@@ -161,7 +163,7 @@ void TestAgent::initTestCase() {
 
 void TestAgent::testToolParse() {
     auto tools = ai::toolDefs();
-    QCOMPARE(tools.size(), 84);
+    QCOMPARE(tools.size(), 86);
     QCOMPARE(tools[0].name, "tune_frequency");
     QCOMPARE(tools[1].name, "set_mode");
 }
@@ -917,10 +919,10 @@ void TestAgent::manualMode_gateSpotCheckAllWrites() {
         }
     }
 
-    // The frozen split: 47 writes / 37 reads (84 tools; workspace domain three
-    // gated writes + APRS/colormap read tools).
-    QCOMPARE(writes, 47);
-    QCOMPARE(reads, 37);
+    // The frozen split: 48 writes / 38 reads (86 tools; workspace domain three
+    // gated writes + APRS/colormap reads + the template runner gated write).
+    QCOMPARE(writes, 48);
+    QCOMPARE(reads, 38);
 
     // Every observable back-end must be byte-for-byte unchanged: the gated writes
     // never reached executeTool(), so no frequency/mode/bandwidth/VFO/squelch/
@@ -2681,6 +2683,88 @@ void TestAgent::workspace_llmDispatchPassesInjectedController() {
         // get_workspace_layout returns the bare spec (no ok envelope) by design.
         QVERIFY2(o.value("splitter_sizes").toArray().size() == 3,
                  qPrintable("read tool must run under manual mode"));
+    }
+}
+
+// Deterministic task templates: list_templates (read) enumerates the three
+// templates; run_template (gated write) builds + registers a plan without
+// synchronously tuning/recording. Unknown name and null-engine are honest errors.
+void TestAgent::taskTemplates_listCatalogRunGatedAndHonest() {
+    dsp::SpectrumEngine engine;
+
+    // 1) list_templates: read-only, always three templates, ok:true.
+    {
+        const QJsonObject o = QJsonDocument::fromJson(
+            ai::executeTool(QStringLiteral("list_templates"), QJsonObject(), &engine).toUtf8()).object();
+        QVERIFY2(o.value("ok").toBool(), qPrintable("list_templates must be ok:true"));
+        const QJsonArray t = o.value("templates").toArray();
+        QCOMPARE(t.size(), 3);
+        QStringList names;
+        for (const QJsonValue& v : t) names << v.toObject().value("name").toString();
+        QVERIFY(names.contains("sweep_find_record"));
+        QVERIFY(names.contains("target_capture"));
+        QVERIFY(names.contains("fixed_freq_record"));
+        QCOMPARE(o.value("count").toInt(), 3);
+    }
+
+    // 2) run_template with a valid name builds + registers the plan (executed=false).
+    {
+        QJsonObject args;
+        args["template_name"] = "fixed_freq_record";
+        args["freq_hz"] = 137.1e6;
+        args["mode"] = "FM";
+        args["bandwidth_hz"] = 12500.0;
+        const QJsonObject o = QJsonDocument::fromJson(
+            ai::executeTool(QStringLiteral("run_template"), args, &engine).toUtf8()).object();
+        QVERIFY2(o.value("ok").toBool(), qPrintable("valid run_template must be ok:true: " +
+            QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact))));
+        QVERIFY2(!o.value("executed").toBool(),
+                 qPrintable("run_template must register, not synchronously execute"));
+        QCOMPARE(o.value("step_count").toInt(), 5);
+        QCOMPARE(o.value("template_name").toString(), QStringLiteral("fixed_freq_record"));
+    }
+
+    // 3) run_template unknown name -> honest ok:false, never crashes.
+    {
+        QJsonObject args;
+        args["template_name"] = "no_such_template";
+        const QJsonObject o = QJsonDocument::fromJson(
+            ai::executeTool(QStringLiteral("run_template"), args, &engine).toUtf8()).object();
+        QVERIFY2(!o.value("ok").toBool(), qPrintable("unknown template_name must be ok:false"));
+        QVERIFY2(o.value("error").toString().contains(QString::fromUtf8("未知 template_name")),
+                 qPrintable("unknown template error must be explicit"));
+    }
+
+    // 4) run_template missing required param -> honest ok:false.
+    {
+        QJsonObject args;
+        args["template_name"] = "fixed_freq_record";   // freq_hz / mode / bandwidth_hz absent
+        const QJsonObject o = QJsonDocument::fromJson(
+            ai::executeTool(QStringLiteral("run_template"), args, &engine).toUtf8()).object();
+        QVERIFY2(!o.value("ok").toBool(), qPrintable("missing params must be ok:false"));
+    }
+
+    // 5) run_template is a gated write: manual mode blocks it before execution.
+    {
+        QJsonObject args;
+        args["template_name"] = "fixed_freq_record";
+        args["freq_hz"] = 137.1e6; args["mode"] = "FM"; args["bandwidth_hz"] = 12500.0;
+        const QJsonObject o = QJsonDocument::fromJson(
+            ai::LLMWorker::dispatchToolCall(QStringLiteral("run_template"), args,
+                                            &engine, /*manualMode=*/true).toUtf8()).object();
+        QVERIFY2(!o.value("ok").toBool(), qPrintable("manual mode must gate run_template"));
+        QVERIFY2(o.value("gated").toBool(), qPrintable("run_template must carry gated:true"));
+        QVERIFY2(o.value("error").toString().contains(QString::fromUtf8("手动")),
+                 qPrintable("gated envelope must explain manual mode"));
+    }
+
+    // 6) Null engine (headless, not attached) -> honest not-connected envelope,
+    //    same shape every other tool uses (历轮模式降级).
+    {
+        const QJsonObject o = QJsonDocument::fromJson(
+            ai::executeTool(QStringLiteral("list_templates"), QJsonObject(), nullptr).toUtf8()).object();
+        QVERIFY2(!o.value("ok").toBool(), qPrintable("null engine must be ok:false"));
+        QVERIFY2(!o.value("error").toString().isEmpty(), qPrintable("null engine must carry an error"));
     }
 }
 

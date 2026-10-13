@@ -231,6 +231,12 @@ MBDSDR P0 对齐了 A2UI v1.0 的**骨架语义**（声明式 JSON、扁平邻�
    - 现状：agent 仍是单向布局下发者，用户面板操作不回传。
    - 触发条件：P1 后半或 P2，需要「agent 知道用户在面板上做了什么」时再做；先建事件队列 + `get_pending_ui_events` 只读查询，不做双向绑定。
 
+#### 第二轮再评估（2026-10-13，模板工具批，计数 84→86）——结论：维持延后，未硬做
+本轮按任务要求只读复核了 Qt 信号接线点复杂度，结论仍是 >1h、不硬做：
+- **信号落点已定位**：`rightTabs_`（main_window.cpp:1206）已有 `currentChanged` 连接（:2433，VNA 域判断用）；水平 splitter 在 :258。理论上各加一条 `connect` 即可推事件。
+- **真实成本被低估**：`WorkspaceController`（ui/workspace_controller.h:33）是**纯类、非 QObject、无 signals、无事件出口**（仅 applyOverlay/reset/currentSpec/componentCatalog/updateComponentData）。最小版需：① 给它加线程安全的事件队列 + push/drain；② main_window GUI 侧把 tab 切换/splitter 拖拽接到 push（CLI/offscreen 构建不可测，只能编译过）；③ tab 序号→白名单 `tab:XXX` id 的映射（依赖 14 个右侧 tab 目录序）；④ 再开一个 `get_pending_ui_events` 只读工具的**完整四通道链 + 金集八处再动一遍（86→87）+ 双构型再全量构建**。
+- **裁决**：这是「M」体量、与「新工具全链 + 金集再同步」同批，单轮内硬做会再次扰动本批刚转绿的 86 工具交付面。按「宁缺毋滥」纪律，本轮**只登记、不实现**；待 P1 后半/P2 真正需要「agent 感知用户面板操作」时，按既有触发条件建事件队列 + `get_pending_ui_events` 只读查询。
+
 ### 未改（维持现状）
 - `component` vs `type` 判别器字段名：本差距表 §4.2 已登记为「有意不改」（P0 子集自有形状，不追求过官方 validator）。
 - surfaceId 多实例、catalogId 协商、结构化错误码、@path 绑定、allowedParents/Children、流式传输：均按 §3.2/§3.3 延后或不做。

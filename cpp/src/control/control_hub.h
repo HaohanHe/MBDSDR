@@ -324,6 +324,12 @@ private:
     QJsonObject cmdSetColorMap(const QJsonObject& a);
     QJsonObject cmdGetColorMaps(const QJsonObject& a);
     QJsonObject cmdGetSpectrumStatus(const QJsonObject&);
+    // Deterministic task templates: list (read-only) / run (gated write).
+    // Mirror the Agent list_templates / run_template tools by reusing the internal
+    // plan* builders. run_template builds + registers a plan (executed=false) and
+    // never synchronously tunes/records on this surface.
+    QJsonObject cmdListTemplates(const QJsonObject&);
+    QJsonObject cmdRunTemplate(const QJsonObject& a);
 
     // Argument extraction: fills `out` and returns true, else fills `err`.
     static bool needDbl(const QJsonObject& a, const char* key, double& out, QString& err);

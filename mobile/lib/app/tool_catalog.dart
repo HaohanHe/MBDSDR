@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
-//   * 桌面端（C++/Qt）注册了 84 个 Agent 工具；移动端 AiClient 实际接入的工具
+//   * 桌面端（C++/Qt）注册了 86 个 Agent 工具；移动端 AiClient 实际接入的工具
 //     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
 //     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
@@ -33,7 +33,7 @@ class ToolCatalogEntry {
   final bool write;
 }
 
-/// 桌面端 84 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
+/// 桌面端 86 个工具的只读目录（对齐 cpp/src/ai/tool_schema.cpp:registeredToolSpecs）。
 /// 顺序与 write 标志逐字按 registeredToolSpecs() 注册顺序排列。
 const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
   // ---- 基础调谐 / 解调（注册序 #1-7）----
@@ -406,6 +406,17 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
       name: 'update_component_data',
       description:
           '写入：A2UI v1.0 updateDataModel 最小子集——给一个编译期白名单组件 id 写入/清空内存数据槽。data 为 object 时整体替换（upsert）；data 为 null 时清空（删键）。未知组件 id 诚实报错。不碰 DSP/音频/硬件。手动模式被拦截。',
+      write: true),
+  // ---- 确定性任务模板（只读列举 / 登记执行，内部 plan* 复用）----
+  ToolCatalogEntry(
+      name: 'list_templates',
+      description:
+          '只读：列出内置确定性任务模板目录——共 3 个：sweep_find_record（扫频找信号并存档，6 步）、target_capture（目标频率捕获录制，4 步）、fixed_freq_record（固定频率录制解码，5 步）。只读工具，手动模式不拦截。',
+      write: false),
+  ToolCatalogEntry(
+      name: 'run_template',
+      description:
+          '写入：按 template_name（sweep_find_record/target_capture/fixed_freq_record）构建并登记一个确定性任务计划，返回步骤序列（executed=false，本调用不同步调谐/录制，生产端经异步 TaskRunner 执行）。未知 template_name 或缺参数诚实报错。手动模式被拦截。',
       write: true),
 ];
 

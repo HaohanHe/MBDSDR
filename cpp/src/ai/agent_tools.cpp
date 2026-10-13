@@ -2915,6 +2915,119 @@ QString execUpdateComponentData(const QJsonObject& args, dsp::SpectrumEngine* /*
     return QString::fromUtf8(QJsonDocument(res).toJson(QJsonDocument::Compact));
 }
 
+// ---- Deterministic task templates (list_templates / run_template) ----------
+// These wrap the internal plan* builders (task_orchestrator.{h,cpp}) -- we do
+// NOT reimplement the step sequence here. list_templates is pure metadata;
+// run_template BUILDS + REGISTERS a plan and returns its step sequence, honestly
+// labeled executed=false (this call never synchronously tunes/records; production
+// runs the plan on the async TaskRunner). Both route through the normal engine
+// guard, so a headless/no-engine caller gets the same honest "无引擎连接" envelope.
+namespace {
+
+QString toolErr(const QString& error) {
+    QJsonObject o;
+    o["ok"] = false;
+    o["error"] = error;
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+// Honest required-number extraction: missing / non-numeric / non-finite -> error.
+bool needArgDbl(const QJsonObject& a, const char* key, double& out, QString& err) {
+    const QJsonValue v = a.value(QString::fromUtf8(key));
+    if (!v.isDouble()) { err = QString::fromUtf8("缺少数字参数: %1").arg(QString::fromUtf8(key)); return false; }
+    out = v.toDouble();
+    if (!std::isfinite(out)) { err = QString::fromUtf8("参数非有限数: %1").arg(QString::fromUtf8(key)); return false; }
+    return true;
+}
+
+// Render a built TaskPlan as an honest registered-plan object (no execution).
+QJsonObject planToRegisteredJson(const TaskPlan& p) {
+    QJsonObject o;
+    o["ok"] = true;
+    o["plan_name"] = p.name;
+    o["abort_on_fail"] = p.abortOnFail;
+    QJsonArray steps;
+    for (const TaskStep& s : p.steps) {
+        QJsonObject step;
+        step["tool"] = s.tool;
+        step["description"] = s.description;
+        step["arg_keys"] = QJsonArray::fromStringList(s.args.keys());
+        steps.append(step);
+    }
+    o["steps"] = steps;
+    o["step_count"] = p.steps.size();
+    o["executed"] = false;
+    o["note"] = QString::fromUtf8(
+        "计划已构建并登记，未在本调用执行（executed=false）。本工具不做同步调谐/录制；"
+        "生产环境经异步 TaskRunner 逐步执行，每步经同一 executeTool 通道驱动引擎。");
+    return o;
+}
+
+} // namespace
+
+QString execListTemplates(const QJsonObject&, dsp::SpectrumEngine* /*engine*/,
+                          const SourceInfo& /*src*/,
+                          ui::BookmarkManager* /*bookmarks*/,
+                          aigui::WorkspaceController* /*workspace*/) {
+    QJsonObject o;
+    o["ok"] = true;
+    QJsonArray arr;
+    for (const TaskTemplateInfo& t : taskTemplateCatalog()) {
+        QJsonObject e;
+        e["name"] = t.key;
+        e["description"] = t.description;
+        e["params"] = QJsonArray::fromStringList(t.params);
+        e["steps"] = t.stepCount;
+        arr.append(e);
+    }
+    o["templates"] = arr;
+    o["count"] = arr.size();
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
+QString execRunTemplate(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/,
+                        const SourceInfo& /*src*/,
+                        ui::BookmarkManager* /*bookmarks*/,
+                        aigui::WorkspaceController* /*workspace*/) {
+    const QString name = args.value(QStringLiteral("template_name")).toString();
+    if (name.isEmpty())
+        return toolErr(QString::fromUtf8("缺少 template_name（用 list_templates 查看可用模板）"));
+
+    QString err;
+    TaskPlan plan;
+    if (name == QLatin1String("sweep_find_record")) {
+        double lowHz, highHz, stepHz;
+        if (!needArgDbl(args, "low_hz", lowHz, err)) return toolErr(err);
+        if (!needArgDbl(args, "high_hz", highHz, err)) return toolErr(err);
+        if (!needArgDbl(args, "step_hz", stepHz, err)) return toolErr(err);
+        const QString mode = args.value(QStringLiteral("mode")).toString();
+        if (mode.isEmpty()) return toolErr(QString::fromUtf8("缺少模式参数: mode"));
+        const QString book = args.value(QStringLiteral("book_name")).toString();
+        if (book.isEmpty()) return toolErr(QString::fromUtf8("缺少书签名: book_name"));
+        plan = planSweepFindAndRecord(lowHz, highHz, stepHz, mode, book);
+    } else if (name == QLatin1String("target_capture")) {
+        double targetHz;
+        if (!needArgDbl(args, "target_hz", targetHz, err)) return toolErr(err);
+        const QString mode = args.value(QStringLiteral("mode")).toString();
+        if (mode.isEmpty()) return toolErr(QString::fromUtf8("缺少模式参数: mode"));
+        plan = planTargetCapture(targetHz, mode);
+    } else if (name == QLatin1String("fixed_freq_record")) {
+        double freqHz, bwHz;
+        if (!needArgDbl(args, "freq_hz", freqHz, err)) return toolErr(err);
+        if (!needArgDbl(args, "bandwidth_hz", bwHz, err)) return toolErr(err);
+        const QString mode = args.value(QStringLiteral("mode")).toString();
+        if (mode.isEmpty()) return toolErr(QString::fromUtf8("缺少模式参数: mode"));
+        plan = planFixedFrequencyRecord(freqHz, mode, bwHz);
+    } else {
+        return toolErr(QString::fromUtf8("未知 template_name: %1（合法: sweep_find_record/target_capture/fixed_freq_record）")
+                           .arg(name));
+    }
+
+    QJsonObject o = planToRegisteredJson(plan);
+    o["template_name"] = name;
+    return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
+}
+
 // The built-in tool registry: name -> executor. Learned (mechanism only) from
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
 // instead of an if-else chain. Clean-room reimplementation; no GPL code copied.
@@ -3026,6 +3139,9 @@ const QList<ToolDispatch>& dispatchTable() {
         {"reset_workspace", &execResetWorkspace},
         // A2UI v1.0 updateDataModel minimal subset (gated write).
         {"update_component_data", &execUpdateComponentData},
+        // Deterministic task templates: list (read) / run (gated write).
+        {"list_templates", &execListTemplates},
+        {"run_template", &execRunTemplate},
     };
     return kTable;
 }

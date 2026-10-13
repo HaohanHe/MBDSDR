@@ -147,6 +147,9 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"reset_workspace",       true,  &ControlHub::cmdResetWorkspace},
         // A2UI v1.0 updateDataModel minimal subset (gated write).
         {"update_component_data", true,  &ControlHub::cmdUpdateComponentData},
+        // Deterministic task template runner (gated write: builds + registers a
+        // plan; never synchronously tunes/records on this surface).
+        {"run_template",          true,  &ControlHub::cmdRunTemplate},
         {"add_vfo",               true,  &ControlHub::cmdAddVfo},
         {"switch_vfo",            true,  &ControlHub::cmdSwitchVfo},
         {"rename_vfo",            true,  &ControlHub::cmdRenameVfo},
@@ -200,6 +203,8 @@ const QList<ControlHub::CommandRow>& ControlHub::table() {
         {"list_recordings",       false, &ControlHub::cmdListRecordings},
         {"get_spectrum_status",   false, &ControlHub::cmdGetSpectrumStatus},
         {"get_color_maps",      false, &ControlHub::cmdGetColorMaps},
+        // Deterministic task template catalog (read-only; always allowed).
+        {"list_templates",        false, &ControlHub::cmdListTemplates},
         // ---- Local memory family read commands (P3 #73/#74, always allowed) --
         {"memory_search",         false, &ControlHub::cmdMemorySearch},
         {"checkpoint_status",     false, &ControlHub::cmdCheckpointStatus},
@@ -2528,6 +2533,82 @@ QJsonObject ControlHub::cmdGetSpectrumStatus(const QJsonObject&) {
     o["fft_size"] = engine_->fftSize();
     o["window"] = engine_->windowType();
     o["average"] = engine_->averageMode();
+    return o;
+}
+
+// Deterministic task templates. Mirrors the Agent list_templates / run_template
+// tools by reusing the internal plan* builders (no reimplementation). The
+// engine guard in execute() already rejected headless callers before we get here.
+QJsonObject ControlHub::cmdListTemplates(const QJsonObject&) {
+    QJsonArray arr;
+    for (const ai::TaskTemplateInfo& t : ai::taskTemplateCatalog()) {
+        QJsonObject e;
+        e["name"] = t.key;
+        e["description"] = t.description;
+        e["params"] = QJsonArray::fromStringList(t.params);
+        e["steps"] = t.stepCount;
+        arr.append(e);
+    }
+    QJsonObject o = okBase();
+    o["command"] = "list_templates";
+    o["templates"] = arr;
+    o["count"] = arr.size();
+    return o;
+}
+
+QJsonObject ControlHub::cmdRunTemplate(const QJsonObject& a) {
+    const QString name = a.value(QStringLiteral("template_name")).toString();
+    if (name.isEmpty())
+        return errResult(QString::fromUtf8("缺少 template_name（用 list_templates 查看可用模板）"));
+
+    QString err;
+    ai::TaskPlan plan;
+    if (name == QLatin1String("sweep_find_record")) {
+        double lowHz, highHz, stepHz;
+        if (!needDbl(a, "low_hz", lowHz, err)) return errResult(err);
+        if (!needDbl(a, "high_hz", highHz, err)) return errResult(err);
+        if (!needDbl(a, "step_hz", stepHz, err)) return errResult(err);
+        QString mode;
+        if (!needMode(a, "mode", mode, err)) return errResult(err);
+        const QString book = a.value(QStringLiteral("book_name")).toString();
+        if (book.isEmpty()) return errResult(QString::fromUtf8("缺少书签名: book_name"));
+        plan = ai::planSweepFindAndRecord(lowHz, highHz, stepHz, mode, book);
+    } else if (name == QLatin1String("target_capture")) {
+        double targetHz;
+        if (!needDbl(a, "target_hz", targetHz, err)) return errResult(err);
+        QString mode;
+        if (!needMode(a, "mode", mode, err)) return errResult(err);
+        plan = ai::planTargetCapture(targetHz, mode);
+    } else if (name == QLatin1String("fixed_freq_record")) {
+        double freqHz, bwHz;
+        if (!needDbl(a, "freq_hz", freqHz, err)) return errResult(err);
+        if (!needDbl(a, "bandwidth_hz", bwHz, err)) return errResult(err);
+        QString mode;
+        if (!needMode(a, "mode", mode, err)) return errResult(err);
+        plan = ai::planFixedFrequencyRecord(freqHz, mode, bwHz);
+    } else {
+        return errResult(QString::fromUtf8("未知 template_name: %1（合法: sweep_find_record/target_capture/fixed_freq_record）")
+                             .arg(name));
+    }
+
+    QJsonArray steps;
+    for (const ai::TaskStep& s : plan.steps) {
+        QJsonObject step;
+        step["tool"] = s.tool;
+        step["description"] = s.description;
+        step["arg_keys"] = QJsonArray::fromStringList(s.args.keys());
+        steps.append(step);
+    }
+    QJsonObject o = okBase();
+    o["command"] = "run_template";
+    o["template_name"] = name;
+    o["plan_name"] = plan.name;
+    o["steps"] = steps;
+    o["step_count"] = plan.steps.size();
+    o["executed"] = false;
+    o["note"] = QString::fromUtf8(
+        "计划已构建并登记，未在本调用执行（executed=false）。本通道不做同步调谐/录制；"
+        "生产环境经异步 TaskRunner 逐步执行。");
     return o;
 }
 
