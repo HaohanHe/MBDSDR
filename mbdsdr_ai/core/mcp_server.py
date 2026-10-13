@@ -179,6 +179,48 @@ def _lt_bladerf_params(model: str, freq_hz: Any, sr_hz: Any, bw_hz: Any) -> Any:
     return out
 
 
+def _aigui_catalog() -> Any:
+    """A2UI 组件白名单目录（agent 侧查询；渲染与布局模型的事实源在 C++ renderer，
+    此处不持有布局状态，目录同步由 test_aigui_messages.py 跨语言钉扎）。"""
+    from mbdsdr_ai.aigui_messages import (A2UI_VERSION, DEFAULT_SURFACE_ID,
+                                          catalog_entries)
+    entries = catalog_entries()
+    return {
+        "a2ui_version": A2UI_VERSION,
+        "surface_id": DEFAULT_SURFACE_ID,
+        "components": entries,
+        "count": len(entries),
+        "note": "渲染/布局模型唯一事实源是 C++ renderer"
+                "（cpp/src/ui/component_registry.cpp）；本目录仅 agent 编排参考。",
+        "real_hardware_verified": False,  # 纯静态目录，无硬件面
+    }
+
+
+def _aigui_validate_message(op: str, components: Any) -> Any:
+    """agent 侧 A2UI 消息校验与信封翻译（只读：不动布局、不碰 DSP/音频/硬件）。
+
+    返回官方信封草稿 + 未知 id 清单：renderer 对未知 id 是 placeholder 兜底，
+    但 agent 在构造期就应当看见自己引用了什么。
+    """
+    from mbdsdr_ai.aigui_messages import arrange_to_envelope, validate_components
+    v = validate_components(components)
+    out: Dict[str, Any] = {
+        "valid": v["ok"],
+        "unknown_ids": v["unknown_ids"],
+        "node_count": v["node_count"],
+        "child_refs": v["child_refs"],
+        "envelope": arrange_to_envelope(op, components),
+    }
+    if "error" in v:
+        out["error"] = v["error"]
+    out["hint"] = ("信封可下发；未知 id 也会被 renderer 诚实占位，"
+                   "但最好现在就用 aigui_component_catalog 修正。"
+                   if v["ok"] else
+                   "存在未注册 id：请先用 aigui_component_catalog 核对可引用 id。")
+    out["real_hardware_verified"] = False  # 纯校验，无硬件面
+    return out
+
+
 def _build_tool_table() -> List[Dict[str, Any]]:
     """构造静态工具表（与 SDRController 方法一一对应）。"""
     table: List[Dict[str, Any]] = []
@@ -472,6 +514,27 @@ def _build_tool_table() -> List[Dict[str, Any]]:
             a.get("model", "bladerf2_micro"),
             a.get("freq_hz"), a.get("sample_rate_hz"), a.get("bandwidth_hz")))
 
+    # ---- 工作台编排（A2UI agent 侧作者工具；渲染/布局模型在 C++ renderer，
+    #      本面刻意只做信封构造+白名单校验，不做第二个布局模型）----
+    add("aigui_component_catalog",
+        "A2UI v1.0 组件白名单目录（23 项：5 结构容器 + 14 tab + 4 center 视图）。"
+        "agent 编排工作台前先查可引用的组件 id。目录与 C++ renderer 跨语言钉扎。",
+        _schema({}),
+        lambda c, a: _aigui_catalog())
+
+    add("aigui_validate_message",
+        "agent 侧 A2UI 消息校验与信封翻译：给定 op（createSurface/"
+        "updateComponents/deleteSurface，默认 updateComponents）与 components"
+        "（扁平邻接表 [{id,component,props,children}]），返回官方信封草稿与"
+        "未知 id 清单。只读：不下发、不动布局、不碰 DSP/音频/硬件——真正的"
+        "下发由 C++ 面的 arrange_workspace 执行。",
+        _schema({"op": _STR,
+                 "components": {"type": "array",
+                                "items": {"type": "object"}}},
+                ["components"]),
+        lambda c, a: _aigui_validate_message(a.get("op", "updateComponents"),
+                                             a.get("components")))
+
     return table
 
 
@@ -480,8 +543,10 @@ def _build_tool_table() -> List[Dict[str, Any]]:
 #
 # 这是服务器侧分组视图：工具 schema 的唯一事实源仍是上面的
 # ``_build_tool_table()``；这里只做“每工具恰好归属一个域”的桶分组。
-# Python 面（SDRController）当前没有 VNA 工具，故三个 VNA 域、「记忆编排」与
-# 「工作台编排」在本表面向用户为空卡片（诚实空态）；10 域名集合本身保持与 C++ 完全一致，形成跨语言钉扎。
+# Python 面（SDRController）当前没有 VNA 工具，故三个 VNA 域与「记忆编排」
+# 在本表面向用户为空卡片（诚实空态）；「工作台编排」现有 agent 侧作者工具
+# （catalog/validate，只读，渲染在 C++），布局执行类工具仍以 C++ 为单一事实源；
+# 10 域名集合本身保持与 C++ 完全一致，形成跨语言钉扎。
 # ======================================================================
 FROZEN_DOMAIN_SUMMARIES: Dict[str, str] = {
     "SDR 调谐/VFO": "接收机调谐、解调模式、带宽/静噪/降噪与多 VFO 及频谱读取参数控制。",
@@ -586,6 +651,10 @@ _TOOL_DOMAIN: Dict[str, str] = {
     "decoder_gk2a_parse_headers": "解码器长尾",
     "decoder_fst4_encode_text": "解码器长尾",
     "device_bladerf_params_query": "解码器长尾",
+    # A2UI agent 侧作者工具（渲染/布局模型事实源在 C++ renderer，本面只做
+    # 信封构造+白名单校验；两个新工具让「工作台编排」域在 Python 面不再空置）
+    "aigui_component_catalog": "工作台编排",
+    "aigui_validate_message": "工作台编排",
 }
 
 
