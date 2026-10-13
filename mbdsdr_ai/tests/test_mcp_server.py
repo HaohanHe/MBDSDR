@@ -11,6 +11,12 @@
 """
 from __future__ import annotations
 
+import io
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from mbdsdr_ai.core.mcp_server import (
     ALL_DOMAIN_NAMES,
     FROZEN_DOMAIN_NAMES,
@@ -19,6 +25,8 @@ from mbdsdr_ai.core.mcp_server import (
     PYTHON_EXTENSION_DOMAIN_NAMES,
     PYTHON_EXTENSION_DOMAIN_SUMMARIES,
     _build_tool_table,
+    _prepare_stdio_utf8,
+    _reconfigure_to_utf8,
     _TOOL_DOMAIN,
 )
 
@@ -316,3 +324,61 @@ def test_write_tools_manual_gate_aligns_cpp():
     # 只读工具 write=False。
     any_read = next(t for t in all_tools.values() if not t["write"])
     assert any_read is not None
+
+
+# ----------------------------------------------------------------------
+# stdio 编码启动准备（中文 Windows cp936/GBK 回归）
+#
+# JSON-RPC 响应行按 UTF-8 约定传输（ensure_ascii=False 写中文/µ），但
+# 中文 Windows 上进程 stdout 默认落 ANSI 代码页，响应行失去 UTF-8 合法性，
+# 严格按约定解析的外部客户端会解帧崩溃。启动准备必须先于 stdin/stdout
+# 读写把输出流切成 UTF-8。
+# ----------------------------------------------------------------------
+def test_prepare_reconfigures_ansi_codepage_stream_to_utf8():
+    """cp936 文本流经准备逻辑后：编码必须变 utf-8、errors=replace（确定性断言）。"""
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp936")
+    assert stream.encoding != "utf-8"  # 前提：确实是 ANSI 代码页坏编码
+    assert _reconfigure_to_utf8(stream) is True
+    assert stream.encoding.lower() == "utf-8"
+    assert stream.errors == "replace"  # 不可编码字符退化替换，不炸协议流
+
+
+def test_prepare_silently_skips_stream_without_reconfigure():
+    """无 reconfigure 的流（io.StringIO 等替身 / 旧 Python）静默跳过，不炸启动。"""
+    stream = io.StringIO()
+    assert not hasattr(stream, "reconfigure")
+    assert _reconfigure_to_utf8(stream) is False
+
+
+def test_prepare_stdio_utf8_forces_real_stdout():
+    """启动准备执行后，进程真实 sys.stdout 编码必须为 utf-8。"""
+    _prepare_stdio_utf8()
+    assert sys.stdout.encoding.lower().replace("_", "-") == "utf-8"
+
+
+def test_child_pythonioencoding_gbk_becomes_utf8_after_prepare():
+    """端到端：PYTHONIOENCODING=cp936 起子进程复现中文 Windows 坏环境，
+    执行入口启动准备后 stdout 编码必须从 cp936 变成 utf-8（修复前会失败）。"""
+    code = (
+        "import sys;"
+        "from mbdsdr_ai.core.mcp_server import _prepare_stdio_utf8;"
+        "before = sys.stdout.encoding;"
+        "_prepare_stdio_utf8();"
+        "print(before);"
+        "print(sys.stdout.encoding);"
+        "print(sys.stdout.errors)"
+    )
+    root = Path(__file__).resolve().parents[2]
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
+        cwd=root,
+        env={**os.environ, "PYTHONPATH": str(root),
+             "PYTHONIOENCODING": "cp936"},
+    )
+    assert proc.returncode == 0, proc.stderr
+    before, after, errors = proc.stdout.strip().splitlines()
+    # 子进程确实被钉在 GBK 家族（否则本用例失去回归意义）。
+    assert before.lower() in ("cp936", "gbk")
+    assert after.lower() == "utf-8"
+    assert errors == "replace"

@@ -72,7 +72,8 @@ def test_unknown_tool_returns_error(toolset):
 def test_call_with_debug_backend(toolset):
     ts, c = toolset
     c.connect("debug")
-    out = ts.call_tool("set_frequency", {"hz": 98_500_000})
+    # 写工具有人工门（arm_manual）；直调 call_tool 同样过门。
+    out = ts.call_tool("set_frequency", {"hz": 98_500_000, "arm_manual": True})
     assert out == {"ok": True}
     spec = ts.call_tool("read_spectrum", {"nfft": 128})
     assert spec["length"] == 128
@@ -90,16 +91,35 @@ def test_jsonrpc_initialize(toolset):
 def test_jsonrpc_tools_list(toolset):
     ts, _ = toolset
     resp = ts.handle_request({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
-    names = {t["name"] for t in resp["result"]["tools"]}
+    # 默认视图是域卡片（domain cards）：摊平两种形状（裸工具 / 分组卡片）
+    # 再取名字，兼容未来默认视图调整。
+    names = set()
+    for entry in resp["result"]["tools"]:
+        if "name" in entry:
+            names.add(entry["name"])
+        for t in entry.get("tools", []) or []:
+            if isinstance(t, dict) and "name" in t:
+                names.add(t["name"])
+            elif isinstance(t, str):
+                names.add(t)
     assert REQUIRED_TOOLS.issubset(names)
 
 
 def test_jsonrpc_tools_call(toolset):
     ts, c = toolset
     c.connect("debug")
-    resp = ts.handle_request({
+    # 写工具有人工门：不带 arm_manual 必须被拦（gated），不下发硬件。
+    gated = ts.handle_request({
         "jsonrpc": "2.0", "id": 3, "method": "tools/call",
         "params": {"name": "set_demod", "arguments": {"mode": "FM"}},
+    })
+    gtext = gated["result"]["content"][0]["text"]
+    assert json.loads(gtext).get("gated") is True
+    # 带人工门授权后正常执行。
+    resp = ts.handle_request({
+        "jsonrpc": "2.0", "id": 4, "method": "tools/call",
+        "params": {"name": "set_demod",
+                   "arguments": {"mode": "FM", "arm_manual": True}},
     })
     text = resp["result"]["content"][0]["text"]
     assert json.loads(text) == {"ok": True}

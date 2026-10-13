@@ -801,13 +801,50 @@ class MCPToolSet:
 
 
 # ======================================================================
+# stdio 编码启动准备
+#
+# JSON-RPC 2.0 over stdio 的响应行按 UTF-8 约定传输，但中文 Windows 上
+# 进程标准流编码默认落到 ANSI 代码页（cp936/GBK）：用 ensure_ascii=False
+# 写出的含中文/µ 响应行不是合法 UTF-8，严格按约定解析的外部客户端会
+# 解帧崩溃（本机实测复现）。因此开始读写 stdin/stdout 之前，必须先把
+# 输出流切成 UTF-8。
+# ======================================================================
+def _reconfigure_to_utf8(stream: Any) -> bool:
+    """尽力把单个文本流切成 UTF-8（errors="replace"）；返回是否真的切换。
+
+    没有 ``reconfigure`` 的流（Python < 3.7，或被替身换掉的对象）静默
+    跳过并返回 False——诚实降级，不谎称已修复。
+    """
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return False
+    reconfigure(encoding="utf-8", errors="replace")
+    return True
+
+
+def _prepare_stdio_utf8() -> None:
+    """stdio MCP server 启动准备：把 sys.stdout / sys.stderr 强制为 UTF-8。
+
+    必须在读写 stdin/stdout 之前调用（见 :func:`run_mcp_server`）。
+    stderr 是日志通道、日志同样含中文，一并修正；``errors="replace"``
+    保证极端不可编码字符也退化成替换符，而不是抛异常打断协议流。
+    """
+    _reconfigure_to_utf8(sys.stdout)
+    _reconfigure_to_utf8(sys.stderr)
+
+
+# ======================================================================
 # stdio 服务器主循环
 # ======================================================================
 def run_mcp_server(controller: Optional[SDRController] = None) -> None:
     """启动 stdio MCP 服务器（JSON-RPC 2.0 over stdin/stdout）。
 
     阻塞运行，逐行读 stdin、逐行写 stdout。错误打到 stderr（不污染协议流）。
+
+    启动第一件事是 :func:`_prepare_stdio_utf8`：中文 Windows 的 ANSI
+    代码页会让含中文/µ 的响应行失去 UTF-8 合法性，必须在任何读写前修正。
     """
+    _prepare_stdio_utf8()
     toolset = MCPToolSet(controller)
     for line in sys.stdin:
         line = line.strip()
