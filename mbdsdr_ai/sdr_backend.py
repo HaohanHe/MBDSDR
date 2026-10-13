@@ -49,6 +49,34 @@ from typing import List, Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# rtl_tcp 网络源的环境变量登记口（comma-separated host[:port]，默认端口 1234）。
+# 让 MCP server / GUI / CLI 在零代码变化下把同一根（远端或本机）rtl_tcp 棒
+# 纳入枚举：SDRBackendManager._discover() 读取本变量登记 RTLSDRBackend(host=...)。
+# 注意 rtl_tcp 是单客户端协议（listen backlog=1），登记不等于连接。
+RTL_TCP_ENV = "MBDSDR_RTL_TCP"
+
+
+def parse_rtl_tcp_env(value: str) -> List[Tuple[str, int]]:
+    """解析 ``host[:port][,host[:port]...]`` 为 [(host, port), ...]。
+
+    无法解析的条目记 debug 日志后跳过（诚实忽略，不为坏配置造后端）；
+    空值返回 []（显式未登记）。裸主机名/IP 用默认端口 1234。
+    """
+    out: List[Tuple[str, int]] = []
+    for raw in (value or "").split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        if ":" in item:
+            host, _, port_s = item.rpartition(":")
+            if not host or not port_s.isdigit() or not (0 < int(port_s) < 65536):
+                logger.debug(f"rtl_tcp 配置无法解析（已跳过）: {item!r}")
+                continue
+            out.append((host, int(port_s)))
+        else:
+            out.append((item, 1234))
+    return out
+
 # 项目统一默认采样率（Hz）。
 # 这是项目有意的选择：2.048 MS/s 是 1.024M 的整数倍，便于 ADS-B / 数字链路抽取；
 # 注意 SDR++ rtl_sdr_source 新设备默认其实是 2.4M（main.cpp:202），但本项目按
@@ -3258,6 +3286,18 @@ class SDRBackendManager:
         except Exception as e:
             logger.debug(f"PlutoSDR 枚举失败(忽略): {e}")
 
+        # rtl_tcp 网络源：env 驱动的显式登记（上面 USB 发现都失败时的最常见
+        # 情形——本机装不上 librtlsdr / 棒在远端 / 多客户端共享）。登记的是
+        # 真实网络前端（RTLSDRBackend(host=...) 走自研 MIT rtl_tcp 客户端），
+        # connect() 克制不立即联网，保持在 list_devices / MCP connect 语义内。
+        for _host, _port in parse_rtl_tcp_env(os.environ.get(RTL_TCP_ENV, "")):
+            try:
+                _rt = RTLSDRBackend(host=_host, port=_port)
+                self.backends[_rt.device.device_id] = _rt
+                logger.debug(f"rtl_tcp 源已登记: {_host}:{_port}")
+            except Exception as e:
+                logger.debug(f"rtl_tcp 后端登记失败(忽略): {_host}:{_port}: {e}")
+
         # 无默认后端：active_backend 保持 None，等用户显式 connect 真实设备。
 
     def list_devices(self) -> List[Dict[str, Any]]:
@@ -3537,7 +3577,29 @@ def enumerate_all_sdr_devices() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"gr-osmosdr 枚举异常: {e}")
 
-    # 6) 去重收尾：osmosdr 的 "rtl" 条目与原生 RTLSDR 走同一根 librtlsdr，
+    # 6) rtl_tcp 网络源（env 驱动显式登记）：上面 USB/网络枚举都失败时的常见
+    #    情形——本机装不上 librtlsdr/SoapySDR、棒在远端、或多客户端共享同一根。
+    #    登记的是真实网络前端（RTLSDRBackend(host=...) 走自研 MIT rtl_tcp
+    #    客户端）；enumerate 不联网、不 connect，成败交给 backend.connect()。
+    #    rtl_tcp 是单客户端协议，同 host:port 重复登记没有意义——按 key 去重。
+    for _host, _port in parse_rtl_tcp_env(os.environ.get(RTL_TCP_ENV, "")):
+        _key = f"rtl_tcp_{_host}_{_port}"
+        if _key in merged:
+            continue
+        merged[_key] = {
+            "driver": "rtlsdr",
+            "source": "rtl_tcp",
+            "label": f"rtl_tcp {_host}:{_port}",
+            "serial": _key,
+            "manufacturer": "osmocom rtl_tcp",
+            "product": "RTL-SDR (network source)",
+            "gain_range": (0.0, 49.6),
+            "sample_rate_range": (225001, 3_200_000),
+            "freq_range": (24e6, 1764e6),
+            "device_args": {"driver": "rtlsdr", "host": _host, "port": _port},
+        }
+
+    # 7) 去重收尾：osmosdr 的 "rtl" 条目与原生 RTLSDR 走同一根 librtlsdr，
     #    同一根棒会出现两次（一条带真实增益/频率范围的 rtl_native，一条 osmosdr
     #    的空参数 rtl 条目）。原生条目信息更全，优先保留；同 index 时丢 osmosdr 条目。
     native_rtl_idx = {
@@ -3577,6 +3639,14 @@ def build_backend_for_device(dev: Dict[str, Any]) -> Optional[SDRBackend]:
         # 绑定时 connect 必失败）。
         if driver == "rtlsdr" and dev.get("source") == "rtl_native":
             return RTLSDRBackend(device_index=int(args.get("index", 0)))
+        # env 登记的 rtl_tcp 网络源（enumerate 步骤6）：走 RTLSDRBackend 的
+        # host/port 模式（自研 RtlTcpClient + RtlTcpDeviceAdapter，MIT 无 GPL）。
+        # 真正 connect 的成败由后端自己负责，本函数不假装成功。
+        if driver == "rtlsdr" and dev.get("source") == "rtl_tcp":
+            return RTLSDRBackend(
+                host=str(args.get("host", "127.0.0.1")),
+                port=int(args.get("port", 1234)),
+                ppm=int(args.get("ppm", 0)))
         if driver == "hackrf":
             return HackRFBackend(device_index=int(args.get("index", 0)))
         if driver == "bladerf":

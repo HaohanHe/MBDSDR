@@ -71,6 +71,9 @@ class DeviceInfo:
     serial: str
     sample_rates: Tuple[float, ...] = field(default_factory=tuple)
     gains: Tuple[float, ...] = field(default_factory=tuple)
+    # rtl_tcp 网络源的 host/port（本地 USB 设备为空元组）。driver="rtltcp"
+    # 时由 _probe_rtltcp 从 MBDSDR_RTL_TCP env 登记并供 _open_rtltcp 使用。
+    endpoint: Tuple[str, int] = ("", 0)
 
     @property
     def device_key(self) -> str:
@@ -462,6 +465,36 @@ class DeviceManager:
         out: List[DeviceInfo] = []
         out.extend(self._probe_rtlsdr())
         out.extend(self._probe_soapysdr())
+        out.extend(self._probe_rtltcp())
+        return out
+
+    def _probe_rtltcp(self) -> List[DeviceInfo]:
+        """env 驱动的 rtl_tcp 网络源登记（MBDSDR_RTL_TCP=host[:port][,...]）。
+
+        与 USB 探测的关系：本机装不上 pyrtlsdr/SoapySDR、棒在远端、或多
+        客户端共享同一根时的标准入口。只登记元数据（enumerate 不联网），
+        真正 connect 的成败由 _open_rtltcp/RtlTcpDeviceAdapter 负责。
+        解析器与 sdr_backend.parse_rtl_tcp_env 同一份语义（坏条目跳过）。
+        """
+        try:
+            from .sdr_backend import parse_rtl_tcp_env, RTL_TCP_ENV
+            import os as _os
+            entries = parse_rtl_tcp_env(_os.environ.get(RTL_TCP_ENV, ""))
+        except Exception as e:
+            logger.debug("rtl_tcp env 解析失败(忽略): %s", e)
+            return []
+        out: List[DeviceInfo] = []
+        for host, port in entries:
+            out.append(
+                DeviceInfo(
+                    name=f"rtl_tcp {host}:{port}",
+                    driver="rtltcp",
+                    serial=f"rtl_tcp_{host}_{port}",
+                    sample_rates=self._RTL_SRATES,
+                    gains=self._RTL_GAINS,
+                    endpoint=(host, port),
+                )
+            )
         return out
 
     # -- 打开 / 关闭 --------------------------------------------------------
@@ -475,6 +508,8 @@ class DeviceManager:
             )
         if info.driver == "rtlsdr":
             return self._open_rtlsdr(info)
+        if info.driver == "rtltcp":
+            return self._open_rtltcp(info)
         if info.driver.startswith("soapysdr:"):
             return self._open_soapysdr(info)
         raise DeviceNotFoundError(f"未知驱动: {info.driver}")
@@ -495,6 +530,26 @@ class DeviceManager:
             backend = rtlsdr.RtlSdr(device_index=idx)
         except Exception as e:
             raise DeviceNotFoundError(f"打开 RTL-SDR #{idx} 失败: {e}") from e
+        return OpenDevice(info, backend)
+
+    def _open_rtltcp(self, info: DeviceInfo) -> OpenDevice:
+        """打开 env 登记的 rtl_tcp 网络源。
+
+        适配层 RtlTcpDeviceAdapter（自研 MIT、无 GPL）提供 pyrtlsdr RtlSdr
+        风格的属性/方法与 read_bytes()，OpenDevice 的 uint8 读路径直接复用。
+        连不上抛 OSError -> DeviceNotFoundError，绝不伪造连接。
+        rtl_tcp 是单客户端协议：同一时间只有一个 OpenDevice 持有该源。
+        """
+        host, port = info.endpoint if info.endpoint else ("127.0.0.1", 1234)
+        try:
+            from .rtltcp_client import RtlTcpDeviceAdapter
+
+            backend = RtlTcpDeviceAdapter(host=host, port=port)
+        except Exception as e:
+            raise DeviceNotFoundError(
+                f"打开 rtl_tcp 源 {host}:{port} 失败（rtl_tcp 服务是否在跑？"
+                f"注意它是单客户端协议）: {e}"
+            ) from e
         return OpenDevice(info, backend)
 
     def _open_soapysdr(self, info: DeviceInfo) -> OpenDevice:

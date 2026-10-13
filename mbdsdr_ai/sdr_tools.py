@@ -19,6 +19,7 @@ AI 可以通过 tool calling 直接调用，也可以通过工作流组合调用
 - 定位（2个）：get_gps/get_imu
 - 信号分析（3个）：identify_modulation/detect_fhss/measure_signal
 - AI 辅助（2个）：ai_sweep/ai_find_center
+- 频率校准 ppm（2个）：estimate_ppm_offset/set_ppm_correction（对照已知信标估计晶振误差）
 
 共 38 个 SDR 专用工具。
 """
@@ -39,6 +40,7 @@ from .dsp import front_end, demodulate, DCBlocker, IQCalibrator, compute_snr, es
 from .audio_out import AudioPlayer
 from .sweep import sweep_scan
 from .frequency_manager import FrequencyManager
+from .ppm_calibration import estimate_ppm, clamp_ppm
 from .watcher import watch_capture
 from .adsb_lite import decode_adsb
 from .rds_lite import decode_rds
@@ -1452,6 +1454,49 @@ def register_sdr_tools(agent):
         },
         handler=lambda args: ToolResult(success=True, content=_cfo_correct(mgr, args)),
         category="sdr_analysis",
+    )
+
+    # ═══════════════════════════════════════════════════
+    # 13.5 频率校准 ppm（2个）— 廉价棒晶振误差：对照已知信标估计并下发
+    # ═══════════════════════════════════════════════════
+
+    agent.tool_registry.register(
+        name="estimate_ppm_offset",
+        description=("由「已知参考频率 + 实测谱峰频率」折合晶振 ppm 误差的纯函数工具（不触硬件）。"
+                     "这是 agent 频率校准环的第二步：先把已知频率参考（FM 整点载波/授时台/卫星信标）"
+                     "调到中心，用 sdr_spectrum_center_offset / sdr_measure_signal / sdr_cfo_correct "
+                     "读出实际谱峰频率，再用本工具折合 ppm。返回 ppm 原始值、钳位建议（±200ppm 之外"
+                     "标记可疑）与按 kalibrate 约定的建议下发值（=原始误差取负）。"
+                     "没有已知参考时不可校准——工具会诚实报错，不返回 0 冒充已校准。"),
+        parameters={
+            "type": "object",
+            "properties": {
+                "expected_hz": {"type": "number", "description": "已知参考频率 Hz（信标标称频率，如 435000000）"},
+                "measured_hz": {"type": "number", "description": "实测谱峰频率 Hz（频谱工具读出的峰，如 435010875）"},
+            },
+            "required": ["expected_hz", "measured_hz"],
+        },
+        handler=_estimate_ppm_offset_tool,
+        category="sdr_analysis",
+    )
+
+    agent.tool_registry.register(
+        name="set_ppm_correction",
+        description=("把晶振频偏校正值（ppm）经活跃后端的频率校正入口下发到设备。这是频率校准环的"
+                     "最后一步：estimate_ppm_offset 得到 ppm 后用本工具应用。写操作，带 arm_manual "
+                     "手动门（必须显式 arm_manual=true 才真正下发，防误触）。超出 ±200ppm 的钳位值会"
+                     "在结果里标记'可疑'后仍按 limit 应用。后端没有运行时校正入口时诚实报错，"
+                     "绝不假装下发成功。"),
+        parameters={
+            "type": "object",
+            "properties": {
+                "ppm": {"type": "number", "description": "要下发的 ppm 校正值（estimate_ppm_offset 的建议下发值）"},
+                "arm_manual": {"type": "boolean", "description": "手动确认门：写操作必须显式传 true 才执行"},
+            },
+            "required": ["ppm", "arm_manual"],
+        },
+        handler=lambda args: _set_ppm_correction(mgr, args),
+        category="sdr_frequency",
     )
 
     # ═══════════════════════════════════════════════════
@@ -6034,6 +6079,138 @@ def _cfo_correct(mgr, args):
              f"相位相干性: {r.coherence:.3f}，可信度: {conf}",
              f"建议调谐修正: 将接收频率上移 {r.offset_hz:.1f} Hz（或在基带用该值复混频补偿）"]
     return '\n'.join(lines)
+
+
+def _estimate_ppm_offset_tool(args):
+    """ppm 校准环第 2 步：已知参考 vs 实测峰 → ppm 原始值 + 钳位建议（纯计算，不触硬件）。
+
+    没有已知参考（expected_hz<=0 / 非有限）时estimate_ppm 诚实抛错，这里
+    转成 success=False 信封，绝不返回 ppm=0 冒充"已校准"。
+    """
+    try:
+        expected_hz = float(args["expected_hz"])
+        measured_hz = float(args["measured_hz"])
+    except (KeyError, TypeError, ValueError):
+        return ToolResult(
+            success=False,
+            content="必须提供数值参数 expected_hz（已知参考频率）与 measured_hz（实测谱峰频率）")
+
+    try:
+        ppm = estimate_ppm(expected_hz, measured_hz)
+    except ValueError as e:
+        # 无参考不可校准：如实把原因告诉 agent，不糊弄
+        return ToolResult(success=False, content=str(e))
+
+    applied, clamped = clamp_ppm(ppm)
+    # kalibrate 口径（offset.cc:125）：建议下发值 = 原始误差取负（新校正 = 旧校正 - 误差ppm）
+    suggest = -applied
+    lines = [
+        "=== ppm 误差估计 ===",
+        f"已知参考: {expected_hz/1e6:.6f} MHz，实测谱峰: {measured_hz/1e6:.6f} MHz",
+        f"频率差: {measured_hz - expected_hz:+.3f} Hz",
+        f"原始误差估计: {ppm:+.4f} ppm",
+        f"钳位建议: {applied:+.4f} ppm"
+        + ("（已被钳位，值可疑：请核对参考频率与谱峰是否看对）" if clamped else "（未触发钳位）"),
+        f"建议下发值: {suggest:+.4f} ppm（kalibrate 约定：新校正 = 原始误差取负）",
+        f"下一步: 确认可信后调用 set_ppm_correction(ppm={suggest:.4f}, arm_manual=true) 下发。",
+    ]
+    return ToolResult(
+        success=True, content="\n".join(lines),
+        data={
+            "expected_hz": expected_hz,
+            "measured_hz": measured_hz,
+            "offset_hz": measured_hz - expected_hz,
+            "ppm_raw": ppm,
+            "ppm_clamped": applied,
+            "clamped": clamped,
+            "suggested_correction_ppm": suggest,
+        },
+    )
+
+
+def _set_ppm_correction(mgr, args):
+    """ppm 校准环第 3 步：把校正值经活跃后端的频率校正入口下发（写操作，带手动门）。
+
+    分发顺序（都指向同一条真实硬件命令，不重复发明入口）：
+      1. 后端自带 set_ppm：RTLSDRBackend（本地 USB 走 librtlsdr ctypes、
+         rtl_tcp 模式经 RtlTcpDeviceAdapter 的 freq_correction setter 下发
+         协议 0x05）与 RtlTcpBackend 都有；未连接时仅保存、reconnect 再发。
+      2. 后端句柄 _sdr 上的 freq_correction 属性 setter（RtlTcpDeviceAdapter）。
+    两者都没有（回放源等无射频前端）时诚实报错，绝不假装下发成功。
+    """
+    # 手动门（与 core/mcp_server.py 写工具 gate 同语义）：未显式武装不执行，
+    # arm 标记在此消费，不透传给下层；返回 gated 信封而非假装成功。
+    if args.get("arm_manual", False) is not True:
+        return ToolResult(
+            success=False,
+            content="手动模式：未执行 set_ppm_correction（写操作需显式传 arm_manual=true）",
+            data={"gated": True},
+        )
+
+    raw = args.get("ppm", 0)
+    try:
+        raw = float(raw)
+    except (TypeError, ValueError):
+        return ToolResult(success=False, content=f"ppm 值无效: {raw!r}（应为数值）")
+
+    b = _get_backend(mgr)
+    if b is None:
+        return ToolResult(
+            success=False,
+            content="ppm 校正失败：当前无连接设备，请先 sdr_connect 或 sdr_open_iq_file")
+
+    applied, clamped = clamp_ppm(raw)
+    ppm_int = int(round(applied))
+    dev = getattr(b, "device", None)
+    dev_name = getattr(dev, "name", "") or getattr(dev, "device_type", "未知后端")
+    # 后端未连接时 set_ppm 的语义是"仅保存、reconnect 再发"——如实标注，不当成已下发
+    connected = bool(getattr(getattr(b, "status", None), "connected", False))
+
+    # 出口 A：后端自带运行时校正入口（RTLSDRBackend / RtlTcpBackend）
+    set_ppm = getattr(b, "set_ppm", None)
+    if callable(set_ppm):
+        try:
+            ok = bool(set_ppm(ppm_int))
+        except Exception as e:
+            return ToolResult(success=False, content=f"ppm 校正下发失败（{dev_name}）: {e!r}")
+        if not ok:
+            return ToolResult(success=False, content=f"ppm 校正下发失败（{dev_name}）：后端 set_ppm 返回失败")
+        return _ppm_applied_result(dev_name, raw, applied, clamped, ppm_int,
+                                   "后端 set_ppm 入口", connected)
+
+    # 出口 B：句柄上的 freq_correction 属性 setter（RtlTcpDeviceAdapter，rtl_tcp 协议 0x05）
+    sdr = getattr(b, "_sdr", None)
+    if sdr is not None and isinstance(getattr(type(sdr), "freq_correction", None), property):
+        try:
+            setattr(sdr, "freq_correction", ppm_int)
+        except Exception as e:
+            return ToolResult(success=False, content=f"ppm 校正下发失败（{dev_name}）: {e!r}")
+        return _ppm_applied_result(dev_name, raw, applied, clamped, ppm_int,
+                                   "RtlTcpDeviceAdapter.freq_correction setter", connected)
+
+    # 出口 C：无运行时校正入口——诚实报错，绝不假装成功
+    return ToolResult(
+        success=False,
+        content=(f"当前后端不支持在线 ppm 校正（pyrtlsdr 原生路径需在连接时传 ppm）。"
+                 f"活跃后端: {dev_name}"),
+    )
+
+
+def _ppm_applied_result(dev_name, raw, applied, clamped, ppm_int, path, connected=True):
+    """下发成功的结果信封（钳位过就如实标注'可疑'）。"""
+    lines = [
+        "=== ppm 校正已下发 ===",
+        f"后端: {dev_name}（下发路径: {path}）",
+        f"请求值: {raw:+.4f} ppm → 实际下发: {ppm_int:+d} ppm",
+    ]
+    if clamped:
+        lines.append(f"注意: 请求值超出 ±200ppm 合理范围，已钳位到 {ppm_int:+d} ppm；"
+                     "这个值可疑，请核对参考频率与谱峰是否看对。")
+    if not connected:
+        lines.append("注意: 后端当前未连接，值已保存，将在 reconnect 时下发。")
+    return ToolResult(success=True, content="\n".join(lines),
+                      data={"ppm_requested": raw, "ppm_applied": float(ppm_int),
+                            "clamped": clamped, "backend": dev_name})
 
 
 def _energy_sense(mgr, args):

@@ -353,6 +353,15 @@ class RtlTcpDeviceAdapter:
     def read_samples(self, num_samples: int):
         return self._client.read_samples(num_samples)
 
+    def read_bytes(self, num_bytes: int) -> Optional[bytes]:
+        """pyrtlsdr RtlSdr.read_bytes() 风格的原始字节读（8-bit CU8 交织）。
+
+        直通底层 RtlTcpClient.read_iq_bytes()，不做 complex 往返量化——
+        OpenDevice.read_samples() 的 uint8 路径拿到的就是线上原字节。
+        连接断开返回 None（与 read_samples 一致，由上层转 DeviceDisconnectedError）。
+        """
+        return self._client.read_iq_bytes(int(num_bytes))
+
     def close(self):
         self._client.close()
 
