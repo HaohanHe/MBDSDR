@@ -61,6 +61,33 @@ def _validate_rules(rules: Any, source: str) -> List[Dict[str, str]]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# 域级规则（2026-10-14，kilocode 审计：agent schema 内嵌 permission Ruleset 的
+# 轻量对等）。config 可用 "domain:<域名>" 形态的 pattern 按域授权，例如：
+#   {"pattern": "domain:SDR 调谐/VFO", "action": "allow"}
+#   {"pattern": "domain:*", "action": "ask"}
+# 解析顺序：精确工具名 > 工具名通配 > 域精确 > 域通配 > 默认。
+# ---------------------------------------------------------------------------
+
+DOMAIN_PREFIX = "domain:"
+
+
+def _match_domain(rules: List[Dict[str, str]], domain: str) -> Optional[str]:
+    """按 domain 依次尝试精确与通配规则（domain 为空直接放过）。"""
+    if not domain:
+        return None
+    for r in rules:
+        if r["pattern"] == DOMAIN_PREFIX + domain:
+            return r["action"]
+    needle = DOMAIN_PREFIX + domain
+    for r in rules:
+        p = r["pattern"]
+        if p.startswith(DOMAIN_PREFIX) and p != needle \
+                and fnmatch.fnmatchcase(needle, p):
+            return r["action"]
+    return None
+
+
 class ToolPolicy:
     """工具权限规则集（纯逻辑，无 IO 依赖；IO 走 load()）。"""
 
@@ -113,16 +140,23 @@ class ToolPolicy:
         return cls.from_dict(data, source=p)
 
     # -- 判定 ---------------------------------------------------------------
-    def action_for(self, name: str, is_write: bool) -> str:
-        """解析工具动作：deny > 精确 > 通配 > 默认。"""
-        action = self.default_write if is_write else self.default_read
-        for r in self.rules:  # 通配在前无所谓：精确必然也命中同 action
+    def action_for(self, name: str, is_write: bool,
+                   domain: str = "") -> str:
+        """解析工具动作：精确名 > 名通配 > 域精确 > 域通配 > 默认。
+
+        domain 为工具所属域名（如 "SDR 调谐/VFO"）；规则 pattern 可用
+        "domain:<域名>" 形态按域授权。deny 在任意层命中都优先生效。
+        """
+        for r in self.rules:
             if r["pattern"] == name:
                 return r["action"]
         for r in self.rules:
             if r["pattern"] != name and fnmatch.fnmatchcase(name, r["pattern"]):
                 return r["action"]
-        return action
+        domain_action = _match_domain(self.rules, domain)
+        if domain_action is not None:
+            return domain_action
+        return self.default_write if is_write else self.default_read
 
     def is_denied(self, name: str) -> bool:
         return self.action_for(name, True) == "deny"

@@ -30,6 +30,7 @@ from .controller import SDRController
 from .errors import SDRUserError
 from ..questions import QuestionError, QuestionStore
 from ..hooks import Event, EventType, HookManager
+from ..hook_commands import HookCommandRunner
 from ..tool_policy import ToolPolicy, normalize_key
 
 
@@ -888,15 +889,25 @@ class MCPToolSet:
     ----------
     controller :
         共享的 :class:`SDRController`。不传则自建一个（无后端）。
+    hook_commands :
+        外部命令 hooks 执行器（配置驱动 ``~/.mbdsdr/hooks.json``，
+        MBDSDR_HOOKS_CONFIG 可覆盖路径）。不传则默认构造
+        :class:`HookCommandRunner`——配置路径不存在时空转；
+        测试可注入自定义 runner。在进程内 PreToolUse 钩子判定放行后
+        追加运行（双重闸，任一否决即拦）。
     """
 
     def __init__(self, controller: Optional[SDRController] = None,
-                 policy: Optional[ToolPolicy] = None) -> None:
+                 policy: Optional[ToolPolicy] = None,
+                 hook_commands: Optional[HookCommandRunner] = None) -> None:
         self.controller = controller if controller is not None else SDRController()
         # 人机问答 store（会话内存态；stdout 请求-响应，提问不阻塞）
         self.questions = QuestionStore()
         # 事件钩子（AGENT_PRE_TOOL_USE 可否决；无注入时本进程独立实例）
         self.hooks = HookManager()
+        # 外部命令 hooks（配置驱动；无注入时默认构造，配置缺失则空转）
+        self.hook_commands = (hook_commands if hook_commands is not None
+                              else HookCommandRunner())
         # 工具权限规则集（默认写 ask/读 allow = 既有 arm_manual 语义不变）；
         # 会话批准缓存：approve_session=true 的 (工具, 参数) 本进程免问。
         self.policy = policy if policy is not None else ToolPolicy.load()
@@ -1020,7 +1031,9 @@ class MCPToolSet:
         if tool.get("write"):
             approve_session = args.pop("approve_session", False) is True
             armed = args.pop("arm_manual", False) is True
-            action = self.policy.action_for(name, True)
+            # 域级规则第三级：名规则未命中时按 domain:<域名> 判定
+            action = self.policy.action_for(
+                name, True, _TOOL_DOMAIN.get(name, ""))
             if action == "deny":
                 # hard veto: even an explicitly armed call does not execute
                 # (aligned with kilocode hard-ruleset veto).
@@ -1059,17 +1072,29 @@ class MCPToolSet:
 
     def _pre_tool_veto(self, name: str, args: Dict[str, Any],
                        is_write: bool) -> Optional[Dict[str, Any]]:
-        """触发 AGENT_PRE_TOOL_USE 钩子并提取否决。
+        """触发 AGENT_PRE_TOOL_USE 钩子并提取否决（进程内 + 外部命令双闸）。
+
+        进程内钩子（HookManager）判完后，再跑配置驱动的外部命令 hooks
+        （HookCommandRunner，~/.mbdsdr/hooks.json）：任一闸否决即拦。
 
         钩子异常绝不影响主流程（Hook.trigger 已兜底为 None；这里再兜一层
-        防御——钩子系统整体故障时记 stderr 并放行，绝不让观测面变成单点）。
+        防御——钩子整体故障时记 stderr 并放行，绝不让观测面变成单点；
+        HookCommandRunner.decide 自身同样 fail-open + stderr 留痕）。
         """
         try:
             ev = Event(event_type=EventType.AGENT_PRE_TOOL_USE,
                        data={"tool": name, "arguments": dict(args),
                              "write": is_write},
                        source="mcp_toolset")
-            return self.hooks.veto_for(ev)
+            inner = self.hooks.veto_for(ev)
+            if inner is not None:
+                return inner
+            # 外部命令 hooks（kimi-code externalHooks 子集）：exit 2 或
+            # stdout JSON deny 即否决；超时/启动失败/其他退出码一律放行。
+            cmd_veto = self.hook_commands.decide(ev)
+            if cmd_veto is not None:
+                return cmd_veto
+            return None
         except Exception as e:  # pragma: no cover - 防御
             print(f"[mcp] pre_tool_use 钩子故障（放行）: {e}", file=sys.stderr)
             return None

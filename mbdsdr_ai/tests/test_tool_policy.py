@@ -97,6 +97,37 @@ def test_normalize_key_is_arg_sensitive_and_order_free():
 
 
 # ---------------------------------------------------------------------------
+# 域级规则（2026-10-14，kilocode Ruleset 轻量对等）
+# ---------------------------------------------------------------------------
+
+def test_domain_exact_rule_allow():
+    policy = ToolPolicy([{"pattern": "domain:SDR 调谐/VFO",
+                          "action": "allow"}])
+    assert policy.action_for("set_frequency", True, "SDR 调谐/VFO") == "allow"
+    assert policy.action_for("tune_satellite", True, "卫星轨道") == "ask"
+
+
+def test_domain_wildcard_rule():
+    policy = ToolPolicy([{"pattern": "domain:SDR*", "action": "allow"}])
+    assert policy.action_for("set_frequency", True, "SDR 调谐/VFO") == "allow"
+    assert policy.action_for("set_gain", True, "SDR 调谐/VFO") == "allow"
+    assert policy.action_for("shutdown", True, "系统设置") == "ask"
+
+
+def test_name_rule_beats_domain_rule():
+    policy = ToolPolicy([{"pattern": "domain:SDR 调谐/VFO",
+                          "action": "allow"},
+                         {"pattern": "set_tx_power", "action": "deny"}])
+    assert policy.action_for("set_frequency", True, "SDR 调谐/VFO") == "allow"
+    assert policy.action_for("set_tx_power", True, "SDR 调谐/VFO") == "deny"
+
+
+def test_domain_rule_ignored_without_domain_arg():
+    policy = ToolPolicy([{"pattern": "domain:*", "action": "allow"}])
+    assert policy.action_for("set_frequency", True, "") == "ask"
+
+
+# ---------------------------------------------------------------------------
 # MCP 写门集成（默认语义与旧门完全兼容）
 # ---------------------------------------------------------------------------
 
@@ -150,6 +181,20 @@ def test_read_tools_never_gated():
     ts = _set()
     out = ts.call_tool("get_frequency", {})
     assert "gated" not in (out if isinstance(out, dict) else {})
+
+
+def test_domain_rule_allow_skips_ask_via_mcp():
+    """MCP 集成层：domain:<域名> allow 让写工具免问执行。"""
+    policy = ToolPolicy([{"pattern": "domain:SDR 调谐/VFO",
+                          "action": "allow"}])
+    ts = MCPToolSet(policy=policy)
+    out = ts.call_tool("set_frequency", {"hz": 98_500_000})
+    assert out == {"ok": True}
+    # 别的域仍走默认 ask
+    gated = ts.call_tool("add_bookmark", {"name": "x", "frequency_hz": 435e6}) \
+        if ts._by_name.get("add_bookmark", {}).get("write") else None
+    if gated is not None:
+        assert gated.get("gated") is True
 
 
 def test_arm_flags_never_leak_to_handler():

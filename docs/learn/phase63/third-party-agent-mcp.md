@@ -398,5 +398,119 @@ MBDSDR 取进程内子集（不上外部命令执行面——那是另一个威�
 - 每 toolset 实例独立 HookManager；未注入时用本进程实例。
 - 测试 6 例（test_tool_hooks.py）：armed 写工具被否、读工具同样过钩、
   非 deny 结果放行、钩子异常不炸主流程、disable 后不否、实例隔离。
-- 未做（登记）：外部命令 hooks（stdin JSON + exit 2 语义，需先定威胁模型）、
-  hook 配置持久化（~/.mbdsdr/hooks.json）、C++ 面对等事件。
+- 未做（登记）：hook 配置持久化之外的 C++ 面对等事件。
+  （外部命令 hooks 已于同日下一批落地，见文末「外部命令 hooks
+  （2026-10-14）」；威胁模型与 fail-open 取舍记在其节内。）
+
+
+---
+
+## 外部命令 hooks（2026-10-14）
+
+kimi-code 审计 Top-3 的完整形态：进程内 PreToolUse 钩子（上一节）只覆盖
+同进程回调，无法让**用户自有的本地命令**在生命周期关键点 gate 风险工具
+调用。本批补齐外部命令 hooks（配置驱动），模块
+`mbdsdr_ai/hook_commands.py`、测试 `mbdsdr_ai/tests/test_hook_commands.py`
+（19 例）。
+
+### 配置格式
+
+`~/.mbdsdr/hooks.json`（路径可经 `MBDSDR_HOOKS_CONFIG` 环境变量覆盖；
+构造 `HookCommandRunner` 时显式传 `path` 优先，对齐 tool_policy 的
+`MBDSDR_TOOL_POLICY` 解析序）：
+
+```json
+{"hooks": [{"event": "agent.pre_tool_use",
+            "command": ["python", "check.py"],
+            "timeout_s": 30}]}
+```
+
+- `event`：当前仅支持 `"agent.pre_tool_use"`；未知 event 名**诚实跳过并
+  在 stderr 明说**，不静默吞。
+- `command`：非空字符串数组，`shell=False` 原样 execve（**不引入
+  shell=True、不做任何参数插值**——事件数据只走 stdin，不拼命令行）。
+- `timeout_s`：可选，默认 30s。
+- 配置缺失 = 空转（默认 `MCPToolSet()` 的 runner 在无配置时不拦任何
+  调用）；坏 JSON / 坏数组条目逐条 stderr 留痕、跳过、放行。
+- 懒加载 + mtime 缓存：首次 `decide` 读盘，配置 mtime 变化才重载
+  （复用 skill_registry 缓存思路，未做 inotify）。
+
+### 否决语义
+
+`MCPToolSet._pre_tool_veto` 在进程内 `HookManager` 判定放行后，追加运行
+`HookCommandRunner.decide(ev)`（注入点：`MCPToolSet(hook_commands=runner)`）；
+任一闸否决即拦，否决信封与进程内钩子同形：
+
+| 子进程结局 | 判定 | 留痕 |
+|-----------|------|------|
+| 退出码 == 2 | **否决** | reason 取 stdout JSON deny 的 reason/message，否则 `hook_command_exit_2` |
+| 退出码 0 且 stdout JSON `{"decision":"deny","reason"/"message":...}` | **否决** | 并入 `veto_reason` |
+| 退出码 0 且 stdout 非 deny（含非 JSON） | 放行 | 无 |
+| 其他非零退出码（1 等） | 放行 | stderr 记退出码 |
+| 超时（默认 30s，`timeout_s` 可配） | 放行 | stderr 记超时（子进程已杀） |
+| 命令不存在 / 启动失败 | 放行 | stderr 记启动失败 |
+
+事件 JSON 经 stdin 以 UTF-8 传入，形态同 `hooks.Event.to_dict()`
+（`event_type` + `data`，`data` 含 `tool`/`arguments`/`write`），stdout
+回读供 deny 判定。
+
+### 超时放行（fail-open）的理由
+
+外部命令 hook 是**策略/观测面，不是可靠性单点**。若超时/崩溃/依赖缺失
+按拦截处理，一个有 bug 的 check 脚本会把接收机全部工具调用冻结——这与
+进程内 `Hook.trigger` 把钩子异常降为 None 的既有兜底同源。fail-open 的
+代价是「观测故障期策略真空」，取舍依据：需要硬保证的拦截应落在进程内
+hook 或 tool_policy deny 规则（同为本地信任面，不引入进程外故障域）。
+超时与失败全部 stderr 留痕，失败显式报、不静默。
+
+### 威胁模型（边界）
+
+- **配置文件属于用户本人的信任面**：`hooks.json` 里的命令以调用方
+  （MBDSDR 进程自身）的同等权限执行——能跑进程内 hook 的一切都能做。
+  不要把来路不明的 hooks 配置装进来，那等同于把 shell 交出去。
+- 已知并刻意收敛的攻击面：不引入 `shell=True`（无命令解释器、无元字符
+   expands）、无参数插值（事件数据仅经 stdin 传递）。
+- fail-open 的另一面：一个返回 exit 2 的本地脚本可任意否决工具调用
+  （DoS 面）——仍在用户信任面内，与进程内 hook 无差别。
+
+### 与 kimi-code 的对应关系
+
+kimi-code externalHooks 的本地命令 gate：事件 JSON 走 stdin + 退出码 2
+否决 + 30s 默认超时。MBDSDR 落地即该子集（stdin JSON / exit 2 / 30s
+三件同形），差异仅在事件名集合与 fail-open 取舍（kimi 侧超时语义以
+其实现为准，本面按仓库钩子兜底传统取放行）。
+
+### 登记（未做）
+
+- **其他生命周期事件**：当前只接 `agent.pre_tool_use`；post_tool_use /
+  session 级事件（kimi-code 有更多 lifecycle hooks）待需求驱动。
+- **per-tool 过滤**：规则暂按 event 匹配，不支持 `{"tool": "set_*"}`
+  形式的工具名过滤（命令内可自行按 stdin JSON 判定，先不在此发明 DSL）。
+- **配置 schema 校验严格化**：当前逐条诚实跳过（坏字段 stderr 明说），
+  无 schema 版本号 / 无 unknown-key 告警；后续可引入显式 schema 版本。
+- C++ 面镜像与跨语言钉扎测试：同本文件前几节登记，待 mbdsdr_mcp 构建。
+
+
+---
+
+## 域级工具规则 + 外部命令 hooks（2026-10-14，两份审计收尾）
+
+**域级规则**（kilocode「agent schema 内嵌 permission: Ruleset」的轻量对等）：
+tool_policy 的 pattern 新增 `domain:<域名>` 形态，`~/.mbdsdr/tool_policy.json`
+可按整域授权，如 `{"pattern": "domain:SDR 调岑/VFO", "action": "allow"}`；
+解析顺序 精确工具名 > 名通配 > 域精确 > 域通配 > 默认（deny 任意层优先生效）。
+域名来自 MCP `_TOOL_DOMAIN` 映射（与 tools/list 域卡片同源）。用例：把常用
+域整体设为 allow 免问、敏感域按域 deny。
+
+**外部命令 hooks**（mbdsdr_ai/hook_commands.py，对齐 kimi-code externalHooks
+安全子集）：`~/.mbdsdr/hooks.json`（或 `MBDSDR_HOOKS_CONFIG`）声明
+`{"hooks": [{"event": "agent.pre_tool_use", "command": [...], "timeout_s": 30}]}`；
+事件 JSON 走 stdin，退出码 2 或 stdout `{"decision":"deny"}` 即否决；超时/
+崩溃/缺依赖一律放行并留痕 stderr（观测面 fail-open，硬拦截仍由进程内 hook 与
+tool_policy deny 保证）；shell=False、无参数插值、配置属用户信任面（威胁模型
+写入模块 docstring）。至此工具调用前共有四道串联：command hook -> 进程内
+hook -> policy deny -> arm_manual 门。
+
+**测试**：域规则 5 例 + MCP 集成 1 例；外部命令 hooks 19 例（真子进程，
+覆盖 exit 2 / JSON deny / 放行 / 超时 / 坏配置 / env 覆盖 / 集成）。
+全量 520 passed / 10 skipped。
