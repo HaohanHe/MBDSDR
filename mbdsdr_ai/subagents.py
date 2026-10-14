@@ -7,7 +7,9 @@ Subagents：子代理框架，让主 Agent 可以创建专门的子 Agent 处理
 对照白皮书第四章 4.5 Subagents 子代理框架。
 
 核心概念：
-- Subagent：子代理，有自己的工具集、上下文、系统提示
+- Subagent：子代理，有自己的工具集、上下文、系统提示；注入 model_manager
+  后 execute_task 跑真 LLM 循环（隔离上下文 + 工具白名单过滤 + max_steps
+  截断诚实返回 partial，见 execute_task 文档）
 - SubagentManager：子代理管理器，创建/管理/销毁子代理
 - SubagentTask：子代理任务，包含目标、输入、超时、回调
 
@@ -21,13 +23,16 @@ Subagents：子代理框架，让主 Agent 可以创建专门的子 Agent 处理
 - CodeEvolver：代码进化专家，专门做自编程、算法优化、代码审查
 """
 
+import json
 import time
 
 import threading
 import traceback
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Callable, Tuple
+from typing import Dict, List, Any, Optional, Callable
 from enum import Enum
+
+from .context_manager import estimate_message_tokens
 
 
 class SubagentStatus(str, Enum):
@@ -43,7 +48,17 @@ class SubagentStatus(str, Enum):
 
 @dataclass
 class SubagentResult:
-    """子代理执行结果。"""
+    """子代理执行结果。
+
+    字段分两代（旧字段语义不变，既有调用方零改可用）：
+    - 旧字段：success / output / data / error / steps_executed / tools_called ...；
+    - 新字段（2026-10-14 subagent 隔离执行，kimi-code 审计 Top-4 落地面）：
+      - status："" / "ok" / "truncated" / "error"——truncated=达到 max_steps
+        上限的 partial 结果，error=model_manager 缺失或 LLM 调用失败；
+      - steps_used：实际消耗的 LLM 循环步数（与 steps_executed 同值镜像）；
+      - tools_used：实际执行过的工具名（与 tools_called 同值镜像）；
+      - truncated：是否因 max_steps 上限被截断（partial 结果必须可见）。
+    """
     success: bool
     output: str = ""
     data: Dict[str, Any] = field(default_factory=dict)
@@ -53,6 +68,11 @@ class SubagentResult:
     tools_called: List[str] = field(default_factory=list)
     subagent_id: str = ""
     task_id: str = ""
+    # ── LLM 循环新增可观测字段 ──────────────────────────
+    status: str = ""          # "ok" / "truncated" / "error"
+    steps_used: int = 0       # 实际消耗的 LLM 循环步数
+    tools_used: List[str] = field(default_factory=list)  # 实际执行过的工具名
+    truncated: bool = False   # 是否因 max_steps 上限被截断（partial 结果）
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -65,6 +85,10 @@ class SubagentResult:
             "tools_called": self.tools_called,
             "subagent_id": self.subagent_id,
             "task_id": self.task_id,
+            "status": self.status,
+            "steps_used": self.steps_used,
+            "tools_used": self.tools_used,
+            "truncated": self.truncated,
         }
 
 
@@ -75,7 +99,7 @@ class SubagentTask:
     goal: str  # 任务目标
     input_data: Dict[str, Any] = field(default_factory=dict)  # 输入数据
     timeout_s: float = 120.0  # 超时时间
-    max_steps: int = 20  # 最大步数
+    max_steps: int = 8  # LLM 循环步数上限（≤0 = 用 Subagent 自身默认）
     callback: Optional[Callable[[SubagentResult], None]] = None  # 完成回调
     status: SubagentStatus = SubagentStatus.IDLE
     result: Optional[SubagentResult] = None
@@ -207,8 +231,14 @@ class Subagent:
     每个子代理有自己的：
     - 系统提示（专业角色）
     - 工具集（只能访问特定工具）
-    - 上下文（独立的对话历史）
+    - 上下文（独立的对话历史，与主 agent / 其它子代理零共享）
     - 任务队列
+
+    执行模型（2026-10-14 起）：注入 model_manager 后 execute_task 运行真 LLM
+    循环——self.context 维护本任务独立对话，多步「LLM → tool_calls → tool
+    消息回灌 → LLM」直到无工具调用或达到 max_steps；工具调用只允许
+    allowed_tools 之内（越界本地拒绝）；截断/失败均诚实标注（见
+    :class:`SubagentResult` 的 status/steps_used/tools_used/truncated）。
     """
 
     def __init__(
@@ -220,6 +250,7 @@ class Subagent:
         allowed_tools: List[str] = None,  # 允许使用的工具列表（None=全部）
         system_prompt: str = None,
         max_context_tokens: int = 4096,
+        max_steps: int = 8,  # LLM 循环步数上限
     ):
         self.subagent_id = subagent_id
         self.agent_type = agent_type
@@ -228,6 +259,8 @@ class Subagent:
         self.allowed_tools = set(allowed_tools) if allowed_tools else None
         self.system_prompt = system_prompt or SUBAGENT_PROMPTS.get(agent_type, "你是 MBDSDR 的子代理。")
         self.max_context_tokens = max_context_tokens
+        # LLM 循环步数上限；非法值回退默认 8（execute_task 显式参数优先）
+        self.max_steps = int(max_steps) if max_steps and int(max_steps) > 0 else 8
 
         self.status = SubagentStatus.IDLE
         self.context: List[Dict[str, str]] = []  # 对话历史
@@ -239,17 +272,34 @@ class Subagent:
         self._lock = threading.Lock()
 
     def can_use_tool(self, tool_name: str) -> bool:
-        """检查子代理是否可以使用指定工具。"""
+        """检查子代理是否可以使用指定工具（语义：allowed_tools=None 即全部）。
+
+        注意：LLM 循环内部用 :meth:`_effective_allowed_names`（None 时额外排除
+        subagent_* 防递归），本方法保持原公开语义不变。
+        """
         if self.allowed_tools is None:
             return True
         return tool_name in self.allowed_tools
 
-    def execute_task(self, task: SubagentTask) -> SubagentResult:
+    def execute_task(self, task: SubagentTask, max_steps: int = None) -> SubagentResult:
         """
-        执行任务（同步）。
+        执行任务（同步，真 LLM 循环）。
 
-        这是简化版执行：直接调用工具完成任务，不做完整的 LLM 循环。
-        完整的 LLM 驱动执行需要主 Agent 的模型管理器。
+        对齐 kimi subagentService 的隔离语义（最小同步版，不含异步/stop/wait）：
+        1. **隔离上下文**：self.context 重置为本任务独立对话——system = 子代理
+           类型提示词 + 本次任务描述 + 执行约定，user = 任务目标 + 输入数据；
+           与主 agent 的 ContextManager、其它子代理、本代理的上个任务零共享；
+        2. **多步循环**：「LLM → tool_calls → tool 消息回灌 → LLM」直到无工具
+           调用或达到 max_steps（优先级：本参数 > task.max_steps >
+           self.max_steps，默认 8）；
+        3. **工具过滤**：只允许 allowed_tools 之内的工具，越界调用在本地被拒
+           （回灌拒绝说明，不触达 registry、不上抛崩溃）；
+        4. **结果回收**：最终文本作为 output 单条回主 agent，SubagentResult
+           带 steps_used / tools_used / truncated / status 可观测字段；
+        5. **诚实语义**：model_manager 缺失或 LLM 调用失败 → status=error +
+           技术细节，output 为空，绝不伪造输出；达到 max_steps 仍在索取工具
+           → status=truncated + truncated=True + 带 [已截断] 标记的 partial
+           结果，绝不伪装成完成。
         """
         start_time = time.time()
         self.status = SubagentStatus.RUNNING
@@ -263,21 +313,51 @@ class Subagent:
         )
 
         try:
-            # 简化执行：根据任务类型调用相应工具
-            output, data, tools_called = self._execute(task)
+            if self.model_manager is None:
+                # 诚实文化：没有 LLM 循环能力就不保留"直接打工具"旁路——
+                # 无推理的动作不得冒充自主执行（审计 F5 的修复前提）
+                raise RuntimeError(
+                    f"子代理 {self.subagent_id} 未注入 model_manager，无法运行 "
+                    f"LL 循环；按诚实原则拒绝伪造执行结果")
 
-            result.success = True
+            limit = self._resolve_max_steps(task, max_steps)
+            output, data, steps_used, tools_used, truncated, error = \
+                self._run_llm_loop(task, limit)
+
             result.output = output
             result.data = data
-            result.tools_called = tools_called
-            result.steps_executed = len(tools_called)
-            self.total_tasks_completed += 1
-            task.status = SubagentStatus.COMPLETED
+            result.steps_used = steps_used
+            result.tools_used = list(tools_used)
+            result.truncated = truncated
+            # 旧字段镜像（同值），既有调用方零改
+            result.steps_executed = steps_used
+            result.tools_called = list(tools_used)
+            result.error = error
+
+            if truncated:
+                # 截断：partial 结果 + 显式标记，不当成完成
+                # （error 里同步带 max_steps_exhausted 说明）
+                result.success = False
+                result.status = "truncated"
+                self.total_tasks_failed += 1
+                task.status = SubagentStatus.FAILED
+            elif error:
+                # LLM 调用失败：技术细节进 error，绝不伪造 output
+                result.success = False
+                result.status = "error"
+                self.total_tasks_failed += 1
+                task.status = SubagentStatus.FAILED
+            else:
+                result.success = True
+                result.status = "ok"
+                self.total_tasks_completed += 1
+                task.status = SubagentStatus.COMPLETED
 
         except Exception as e:
             result.success = False
+            result.status = "error"
             result.error = f"{type(e).__name__}: {str(e)}"
-            result.output = f"任务执行失败: {result.error}"
+            result.output = ""
             self.total_tasks_failed += 1
             task.status = SubagentStatus.FAILED
             traceback.print_exc()
@@ -298,89 +378,233 @@ class Subagent:
 
         return result
 
-    def _execute(self, task: SubagentTask) -> Tuple[str, Dict[str, Any], List[str]]:
-        """实际执行任务：真调 tool_registry 对应的工具，不是打印占位。
+    # ── LLM 循环内部实现 ────────────────────────────────
 
-        修复"假执行"：
-        - 必须有 tool_registry；没有则直接报错（不造假成功）。
-        - 每个工具调用检查 ToolResult.success，失败即抛异常，由 execute_task
-          标记为 FAILED，而不是把错误串当成功输出。
-        - 支持 input_data 里显式指定 tool_name（通用调用路径）。
-        - 未内置映射的子代理类型不再返回假数据，而是抛 NotImplementedError。
+    def _resolve_max_steps(self, task: SubagentTask, max_steps: Optional[int]) -> int:
+        """解析循环步数上限：execute_task 参数 > task.max_steps > self.max_steps。"""
+        for cand in (max_steps, getattr(task, "max_steps", None), self.max_steps):
+            if cand and int(cand) > 0:
+                return int(cand)
+        return 8
+
+    def _effective_allowed_names(self) -> set:
+        """循环期有效工具白名单。
+
+        allowed_tools 非空 = 该集合；为 None = 全部注册工具但排除 subagent_*
+        （防子代理递归调 subagent_execute 造成无限自激——最小同步实现里分层
+        递归会指数放大 LLM 调用）。显式列入 allowed_tools 的 subagent_* 仍
+        可用（用户显式授权嵌套子代理，递归风险自担）。
         """
-        tools_called: List[str] = []
-        data: Dict[str, Any] = {}
-
+        if self.allowed_tools is not None:
+            return set(self.allowed_tools)
         if self.tool_registry is None:
-            raise RuntimeError(
-                f"子代理 {self.subagent_id} 未注入 tool_registry，无法真调工具")
+            return set()
+        try:
+            names = set(self.tool_registry.get_tool_names())
+        except Exception:
+            return set()
+        return {n for n in names if not n.startswith("subagent_")}
 
-        def _call(name: str, args: Optional[Dict[str, Any]] = None) -> str:
-            """真调工具并记录；权限/存在/成功与否都显式判定。"""
-            if not self.can_use_tool(name):
-                raise PermissionError(
-                    f"子代理 {self.agent_type} 无权使用工具 {name}")
-            res = self.tool_registry.call(name, args or {})
-            tools_called.append(name)
-            if not res.success:
-                # 工具不存在/不可用/执行失败：明确报错，不当成功
-                raise RuntimeError(
-                    f"工具 {name} 执行失败 [{res.error}]: {res.content}")
-            return res.content
+    def _tool_schemas(self, visible: set) -> List[Dict[str, Any]]:
+        """取白名单内工具的 OpenAI function calling 定义（异常/空集 → 空列表）。"""
+        if not visible or self.tool_registry is None:
+            return []
+        try:
+            defs = self.tool_registry.get_tool_definitions() or []
+        except Exception:
+            return []
+        schemas = []
+        for d in defs:
+            try:
+                if d.get("function", {}).get("name") in visible:
+                    schemas.append(d)
+            except Exception:
+                continue
+        return schemas
 
-        # 通用路径：input_data 显式指定 tool_name → 真调该工具
-        explicit_tool = task.input_data.get("tool_name") or task.input_data.get("tool")
-        if explicit_tool:
-            params = {k: v for k, v in task.input_data.items()
-                      if k not in ("tool_name", "tool")}
-            output = _call(explicit_tool, params)
-            data = {"tool_name": explicit_tool, "params": params}
-            return output, data, tools_called
+    def _build_task_context(self, task: SubagentTask, limit: int,
+                            visible: set) -> List[Dict[str, Any]]:
+        """构成本任务独立对话（每任务重置 = 上下文隔离，不继承历史任务）。"""
+        tool_view = "、".join(sorted(visible)) if visible else "（无可用工具）"
+        input_part = ""
+        if task.input_data:
+            try:
+                input_part = ("\n输入数据: "
+                              + json.dumps(task.input_data, ensure_ascii=False,
+                                           default=str))
+            except Exception:
+                input_part = f"\n输入数据: {task.input_data!r}"
+        system_content = (
+            f"{self.system_prompt}\n\n"
+            f"【本次任务】\n目标: {task.goal}{input_part}\n\n"
+            f"【执行约定】\n"
+            f"- 你只能调用白名单内的工具: {tool_view}\n"
+            f"- 工具结果会作为 tool 消息回灌给你，可多步推进，直到能给出最终结论\n"
+            f"- 步数上限 {limit} 步；超出后你的部分结论会被标记 truncated 返回，"
+            f"不得把没做的测量写成已完成\n"
+            f"- 缺工具/缺数据时诚实说明缺口，不得编造数值"
+        )
+        user_content = f"任务目标: {task.goal}{input_part}"
+        return [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ]
 
-        # 内置类型 → 默认工具映射
-        if self.agent_type == "spectrum_analyzer":
-            freq = task.input_data.get("frequency_hz", 100000000)
-            output = _call("sdr_spectrum_analyze", {"frequency_hz": freq})
-            data = {"frequency_hz": freq, "analysis_type": "spectrum"}
-        elif self.agent_type == "satellite_tracker":
-            sat = task.input_data.get("satellite_name", "NOAA 19")
-            output = _call("sdr_satellite_sky_view", {"satellite": sat})
-            data = {"satellite": sat, "tracking_type": "orbit"}
-        elif self.agent_type == "baseband_recorder":
-            dur = task.input_data.get("duration", 10)
-            output = _call("sdr_record_start", {"duration_s": dur})
-            data = {"duration": dur, "recording_type": "baseband"}
-        else:
-            # 未内置默认工具的子代理类型：返回明确错误，不造假成功数据
-            raise NotImplementedError(
-                f"子代理类型 {self.agent_type!r} 未配置默认工具；"
-                f"请在 input_data 中传入 tool_name 及参数")
+    def _trim_context(self) -> bool:
+        """超 max_context_tokens 预算时，从最老的完整轮次成对摘除上下文。
 
-        return output, data, tools_called
+        轮次 = 一条 assistant（含 tool_calls）+ 紧随的若干 tool 消息，必须成
+        对摘除（半对会破坏 OpenAI tool_call/tool 配对约定）；system 与首条
+        user（任务目标）永保留。返回是否有摘除（调用方写入 data.context_trimmed）。
+        """
+        def _total() -> int:
+            try:
+                return sum(estimate_message_tokens(m) for m in self.context)
+            except Exception:
+                return 0
 
-    def _execute_spectrum_analysis(self, task: SubagentTask) -> Tuple[str, Dict[str, Any]]:
-        """频谱分析子代理的简化执行。"""
-        freq = task.input_data.get("frequency_hz", 100000000)
-        output = f"频谱分析完成\n中心频率: {freq/1e6:.3f} MHz\n"
-        output += "（简化执行，实际需要连接 SDR 设备读取 IQ 样本）\n"
-        data = {"frequency_hz": freq, "analysis_type": "spectrum"}
-        return output, data
+        if _total() <= self.max_context_tokens:
+            return False
+        trimmed = False
+        while _total() > self.max_context_tokens and len(self.context) > 2:
+            idx = next((i for i in range(2, len(self.context))
+                        if self.context[i].get("role") == "assistant"), None)
+            if idx is None:
+                break
+            end = idx + 1
+            while end < len(self.context) and self.context[end].get("role") == "tool":
+                end += 1
+            del self.context[idx:end]
+            trimmed = True
+        return trimmed
 
-    def _execute_satellite_tracking(self, task: SubagentTask) -> Tuple[str, Dict[str, Any]]:
-        """卫星跟踪子代理的简化执行。"""
-        sat_name = task.input_data.get("satellite_name", "NOAA 19")
-        output = f"卫星跟踪完成\n卫星: {sat_name}\n"
-        output += "（简化执行，实际需要 sgp4 计算轨道）\n"
-        data = {"satellite": sat_name, "tracking_type": "orbit"}
-        return output, data
+    def _run_llm_loop(self, task: SubagentTask, limit: int):
+        """真 LLM 循环：LLM → tool_calls → tool 回灌 → LLM，直到无调用或超限。
 
-    def _execute_recording(self, task: SubagentTask) -> Tuple[str, Dict[str, Any]]:
-        """基带录制子代理的简化执行。"""
-        duration = task.input_data.get("duration", 10)
-        output = f"基带录制完成\n时长: {duration} 秒\n"
-        output += "（简化执行，实际需要连接 SDR 设备）\n"
-        data = {"duration": duration, "recording_type": "baseband"}
-        return output, data
+        返回 (output, data, steps_used, tools_used, truncated, error)：
+        - error 非空 = LLM 调用失败（技术细节，调用方按 status=error 处理）；
+        - truncated=True = 达到 limit 步仍在索取工具，output 为带标记 partial；
+        - 其余 = 正常完成，output 为最终文本结论。
+        """
+        visible = self._effective_allowed_names()
+        schemas = self._tool_schemas(visible)
+        # 每任务重置上下文：隔离语义（与主 agent / 其它子代理 / 上个任务零共享）
+        self.context = self._build_task_context(task, limit, visible)
+
+        tools_used: List[str] = []
+        trimmed_seen = False
+        last_content = ""
+
+        for step in range(1, limit + 1):
+            if self._trim_context():
+                trimmed_seen = True
+
+            try:
+                response = self.model_manager.chat(
+                    messages=self.context, tools=schemas or None,
+                    tool_choice="auto")
+            except Exception as e:
+                return "", {}, step - 1, tools_used, False, (
+                    f"model_manager.chat 调用异常: {type(e).__name__}: {e}")
+
+            if not isinstance(response, dict) or not response.get("success"):
+                err = "unknown_error"
+                if isinstance(response, dict):
+                    err = response.get("error") or err
+                return "", {}, step - 1, tools_used, False, (
+                    f"模型调用失败: {err}（step {step}/{limit}）")
+
+            content = response.get("content", "") or ""
+            tool_calls = list(response.get("tool_calls") or [])
+
+            # 弱模型兜底：原生 tool_calls 为空时从正文提取（只采纳引用真实
+            # 工具名的）；stub/异常解析一律按"无工具调用"处理
+            if not tool_calls and content and schemas:
+                try:
+                    parsed = self.model_manager.parse_tool_calls_from_text(
+                        content, visible)
+                    if parsed:
+                        tool_calls = parsed
+                except Exception:
+                    pass
+
+            if not tool_calls:
+                # 无工具调用 = 最终结论（assistant 消息入上下文，独立对话保持完整）
+                self.context.append({"role": "assistant", "content": content})
+                data = {
+                    "agent_type": self.agent_type,
+                    "steps_used": step,
+                    "tools_used": list(tools_used),
+                    "truncated": False,
+                    "context_messages": len(self.context),
+                    "context_trimmed": trimmed_seen,
+                }
+                return content, data, step, tools_used, False, ""
+
+            last_content = content
+            # 规范化 tool_call id（文本兜底来源可能缺 id）
+            for i, tc in enumerate(tool_calls):
+                if isinstance(tc, dict) and not tc.get("id"):
+                    tc["id"] = f"call_{task.task_id}_{step}_{i}"
+
+            # assistant 消息（含 tool_calls）先入上下文，保持 OpenAI 配对
+            self.context.append({
+                "role": "assistant",
+                "content": content,
+                "tool_calls": tool_calls,
+            })
+
+            for tc in tool_calls:
+                if isinstance(tc, dict):
+                    fn = tc.get("function") or {}
+                    tc_id = tc.get("id", "") or ""
+                else:
+                    fn, tc_id = {}, ""
+                name = fn.get("name", "") or ""
+                if not name:
+                    tool_content = "拒绝：工具调用缺少 function.name，未执行"
+                elif self.tool_registry is None:
+                    tool_content = (f"拒绝：子代理 {self.subagent_id} 未注入 "
+                                    f"tool_registry，工具 {name} 无法执行")
+                elif name not in visible:
+                    # 工具视图过滤：越界调用本地拒绝，不触达 registry、不上抛
+                    tool_content = (
+                        f"拒绝：子代理 {self.subagent_id}（{self.agent_type}）"
+                        f"无权调用工具 {name}（不在 allowed_tools 白名单），"
+                        f"调用未执行。白名单: {sorted(visible)}")
+                else:
+                    try:
+                        res = self.tool_registry.call_from_model(tc)
+                        tool_content = getattr(res, "content", None) or str(res)
+                    except Exception as e:
+                        tool_content = (
+                            f"工具执行异常: {type(e).__name__}: {e}"
+                            f"（未得到真实结果，不得据此下结论）")
+                    tools_used.append(name)
+                self.context.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "name": name,
+                    "content": tool_content,
+                })
+
+        # 达到 limit 步仍在索取工具：诚实截断（partial 结果 + 显式标记）
+        marker = (f"\n\n[已截断] 子代理 {self.subagent_id} 达到 max_steps={limit} "
+                  f"步上限，任务未完成；以上为截断前的部分结论，不得视为完成。")
+        output = (last_content + marker) if last_content.strip() else (
+            f"[已截断] 子代理 {self.subagent_id} 达到 max_steps={limit} 步上限，"
+            f"且未产出任何文本结论（已执行工具: {tools_used or '无'}）。")
+        data = {
+            "agent_type": self.agent_type,
+            "steps_used": limit,
+            "tools_used": list(tools_used),
+            "truncated": True,
+            "context_messages": len(self.context),
+            "context_trimmed": trimmed_seen,
+        }
+        return output, data, limit, tools_used, True, (
+            f"max_steps_exhausted: 达到 max_steps={limit} 步上限，"
+            f"返回截断的部分结果（truncated=True）")
 
     def get_stats(self) -> Dict[str, Any]:
         """获取子代理统计信息。"""
@@ -392,6 +616,7 @@ class Subagent:
             "total_tasks_failed": self.total_tasks_failed,
             "context_size": len(self.context),
             "allowed_tools_count": len(self.allowed_tools) if self.allowed_tools else "all",
+            "max_steps": self.max_steps,
             "created_at": self.created_at,
             "uptime_s": time.time() - self.created_at,
         }
@@ -463,11 +688,14 @@ class SubagentManager:
         subagent_id: str = None,
         allowed_tools: List[str] = None,
         system_prompt: str = None,
+        max_steps: int = None,
     ) -> str:
         """
         创建一个子代理。
 
         返回 subagent_id。
+
+        max_steps: LLM 循环步数上限（None=用 Subagent 默认 8）。
         """
         if subagent_id is None:
             subagent_id = f"subagent_{agent_type}_{int(time.time() * 1000)}_{len(self.subagents)}"
@@ -482,6 +710,7 @@ class SubagentManager:
             model_manager=self.model_manager,
             allowed_tools=allowed_tools,
             system_prompt=system_prompt,
+            max_steps=max_steps if max_steps else 8,
         )
 
         with self._lock:
@@ -547,11 +776,14 @@ class SubagentManager:
         goal: str,
         input_data: Dict[str, Any] = None,
         timeout_s: float = 120.0,
+        max_steps: int = None,
     ) -> SubagentResult:
         """
         执行任务（同步，等待完成）。
 
         返回 SubagentResult。
+
+        max_steps: LLM 循环步数上限（None=按 task.max_steps/Subagent 默认 8）。
         """
         subagent = self.subagents.get(subagent_id)
         if subagent is None:
@@ -567,7 +799,7 @@ class SubagentManager:
             timeout_s=timeout_s,
         )
 
-        return subagent.execute_task(task)
+        return subagent.execute_task(task, max_steps=max_steps)
 
     def get_task_result(self, subagent_id: str, task_id: str) -> Optional[SubagentResult]:
         """获取任务结果。"""

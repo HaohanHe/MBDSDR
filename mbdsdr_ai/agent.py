@@ -2113,35 +2113,56 @@ class MBDSDRAgent:
         self.tool_registry.register(
             name="subagent_create",
             description=(
-                "创建一个子代理（同步工具执行器，非自主 AI 子代理：无 LLM 推理、无多步循环）。"
-                "有内置默认执行工具的类型：spectrum_analyzer(频谱分析)、satellite_tracker(卫星跟踪)、"
-                "baseband_recorder(基带录制)。其余类型（signal_decoder/interference_hunter/"
-                "hardware_controller/code_evolver）无内置默认工具，执行时必须在 input_data 中传 "
-                "tool_name 及参数走通用路径，否则报 NotImplementedError。"
+                "创建一个子代理（自主 AI 子代理：注入 model_manager 后运行真 LLM 循环，"
+                "维护独立隔离上下文，只能调用其 allowed_tools 白名单内的工具，步数超限"
+                "会诚实返回 status=truncated 的部分结果）。内置默认工具白名单的类型："
+                "spectrum_analyzer(频谱分析)、satellite_tracker(卫星跟踪)、"
+                "baseband_recorder(基带录制) 等 7 类；未列出的类型 allowed_tools=None"
+                "（全部工具，视图自动排除 subagent_* 防递归）。max_steps 控制 LLM 循环"
+                "步数上限（默认 8）。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "agent_type": {"type": "string", "description": "子代理类型: spectrum_analyzer/satellite_tracker/baseband_recorder 有内置默认工具；其余类型需在 input_data 传 tool_name"},
+                    "agent_type": {"type": "string", "description": "子代理类型: spectrum_analyzer/satellite_tracker/baseband_recorder 等 7 类有内置默认工具白名单；其余类型 allowed_tools=None=全部工具（排除 subagent_*）"},
                     "subagent_id": {"type": "string", "description": "自定义 ID（可选，自动生成）"},
+                    "max_steps": {"type": "integer", "description": "LLM 循环步数上限，默认 8；超限返回截断的部分结果（truncated=true）"},
                 },
                 "required": ["agent_type"],
             },
-            handler=lambda args: ToolResult(success=True, content=f"子代理已创建\nID: {sm.create(args['agent_type'], args.get('subagent_id'))}\n类型: {args['agent_type']}"),
+            handler=lambda args: ToolResult(success=True, content=f"子代理已创建\nID: {sm.create(args['agent_type'], args.get('subagent_id'), max_steps=args.get('max_steps'))}\n类型: {args['agent_type']}"),
             category="subagent",
         )
 
         self.tool_registry.register(
             name="subagent_list",
-            description="列出所有子代理及其状态。包括 ID、类型、状态、已完成任务数、失败任务数、运行时间。",
+            description="列出所有子代理及其状态。包括 ID、类型、状态、已完成任务数、失败任务数、上下文消息数、max_steps、运行时间。",
             parameters={"type": "object", "properties": {}, "required": []},
             handler=lambda args: ToolResult(success=True, content=json.dumps(sm.list_subagents(), ensure_ascii=False, indent=2)),
             category="subagent",
         )
 
+        def _subagent_execute_handler(args):
+            # 同步真 LLM 循环执行；success/error 如实回传（truncated/error 都不
+            # 伪装成 success，partial/失败细节在 content JSON 里可见）
+            res = sm.execute_task(
+                args["subagent_id"], args["goal"], args.get("input_data"),
+                args.get("timeout_s", 120), max_steps=args.get("max_steps"))
+            return ToolResult(
+                success=res.success,
+                content=json.dumps(res.to_dict(), ensure_ascii=False, indent=2),
+                error=res.error,
+            )
+
         self.tool_registry.register(
             name="subagent_execute",
-            description="同步执行一个子代理任务，等待完成并返回结果。子代理会使用其专用工具集完成任务。",
+            description=(
+                "同步执行一个子代理任务，等待完成并返回结果。子代理在独立隔离上下文里跑"
+                "「LLM→工具→回灌→LLM」多步循环（默认最多 8 步），只能调用白名单内的工具"
+                "（越界调用本地拒绝不执行）；达到 max_steps 仍未完成时返回 status=truncated "
+                "的部分结果（success=false、truncated=true）；model_manager 缺失或模型调用"
+                "失败时 status=error 且带技术细节，绝不伪造输出。"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -2149,10 +2170,11 @@ class MBDSDRAgent:
                     "goal": {"type": "string", "description": "任务目标描述"},
                     "input_data": {"type": "object", "description": "输入数据（可选）"},
                     "timeout_s": {"type": "number", "description": "超时秒数，默认 120", "default": 120},
+                    "max_steps": {"type": "integer", "description": "LLM 循环步数上限，默认 8；超限返回截断的部分结果"},
                 },
                 "required": ["subagent_id", "goal"],
             },
-            handler=lambda args: ToolResult(success=True, content=json.dumps(sm.execute_task(args["subagent_id"], args["goal"], args.get("input_data"), args.get("timeout_s", 120)).to_dict(), ensure_ascii=False, indent=2)),
+            handler=_subagent_execute_handler,
             category="subagent",
         )
 
