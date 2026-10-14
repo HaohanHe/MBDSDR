@@ -202,3 +202,20 @@ K.1-K.2 量化表），非任何 GPL 源码：
 2. Q≥128 带内量化表头解析；
 3. 上述两件完成后，把 decode_image_blocks 从“整 JPEG”入口切到
    “RTP 头 + 硬编码表 + 重组流”入口，即真实 Meteor LRPT 解码路径。
+
+
+---
+
+## Annex K.3 硬编码 Huffman 表落地（2026-10-14，真实路径第二块）
+
+- mbdsdr_ai/jpeg_k3_tables.py（新）：T.81 Annex K.3.1/K.3.2（DC 12 值）、
+  K.3.3/K.3.4（AC 162 值）四张规范表以纯数据声明，经 lrpt_huffman.HuffmanTable
+  构造为可解码表；k3_tables_for_component(分量序号) 按 JPEG 口径选择
+  luma/chroma 表（分量 0 -> DC0/AC0，其余 -> DC1/AC1）。
+- 表值来自 ITU T.81 公开规范文本，非任何 GPL 源码转录。
+- 测试 7 例（test_jpeg_k3_tables.py）：表长/counts 和钉死、构造、真实码流
+  首符号解码（DC luma '00' -> 0x00、DC chroma '10' -> 0x02）、分量选择、
+  AC luma/chroma 差异、构造期校验同 DHT 口径。
+
+进度：RFC 2435 头 + IJG 量化表 + K.3 硬编码表三块已就位；剩余
+Segment 重组入口与 Q≥128 解析（未做项见上节）。
