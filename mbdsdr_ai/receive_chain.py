@@ -113,6 +113,11 @@ _MODE_TABLE = {
 # NFM 去加重时间常数：欧/中 50μs（demod_nfm 默认 0=不去加重，这里给标准值）
 _NFM_DEEMPH_TAU = 50e-6
 
+# 去加重档位（sdrpp WFM 去emphasis 下拉 none/22us/50us/75us 的同口径表；
+# 2026-10-14 之前链路上只有 NFM 固定 50μs 与 WFM 固定 50μs，无档位入口
+# ——sdrpp 审计缺口，本批补 deemph_tau_us 参数与 set_deemphasis）。
+DEEMPH_TAU_US = {"none": 0.0, "22us": 22e-6, "50us": 50e-6, "75us": 75e-6}
+
 
 class ReceiveChain:
     """一条状态化实时接收链（= 一个 VFO）。
@@ -133,6 +138,9 @@ class ReceiveChain:
         链后数字音频增益 dB（硬件增益由设备端/GainStager 负责）。
     audio_out_sr : float
         输出音频采样率，默认 48000 Hz。
+    deemph_tau_us : str
+        去加重档位名（DEEMPH_TAU_US 的键：none/22us/50us/75us）。
+        None 时按模式取历史默认（NFM/WFM=50us 欧标口径，其余 none）。
     """
 
     def __init__(self,
@@ -142,7 +150,8 @@ class ReceiveChain:
                  frequency_offset: float = 0.0,
                  squelch_db: float = -150.0,
                  gain_db: float = 0.0,
-                 audio_out_sr: float = 48000.0) -> None:
+                 audio_out_sr: float = 48000.0,
+                 deemph_tau_us: Optional[str] = None) -> None:
         self.fs_in = float(fs_in)
         self.audio_out_sr = float(audio_out_sr)
         self._mode = (mode or "FM").upper()
@@ -150,6 +159,10 @@ class ReceiveChain:
         self._squelch_db = float(squelch_db)
         self._gain_db = float(gain_db)
         self._bandwidth = float(bandwidth) if bandwidth else None
+        if deemph_tau_us is not None and deemph_tau_us not in DEEMPH_TAU_US:
+            raise ValueError(
+                f"未知去加重档位 {deemph_tau_us!r}，可用：{sorted(DEEMPH_TAU_US)}")
+        self._deemph_us = deemph_tau_us
 
         # ── 前端（fs_in，与模式无关，只建一次）──
         self._dc = DCBlocker(r=0.999)
@@ -231,12 +244,16 @@ class ReceiveChain:
         elif kind == "dsb":
             # DSB-SC 乘积检波（SDR++ 8 模拟模式最后一档，2026-10-14 补）
             self._demod = DemodDSB(if_sr=if_sr, bandwidth=bw)
-        elif kind == "nfm":
-            self._demod = DemodNFM(if_sr=if_sr, bandwidth=bw,
-                                   deemph_tau=_NFM_DEEMPH_TAU)
-        elif kind == "wfm":
-            self._demod = DemodWFM(if_sr=if_sr, bandwidth=bw,
-                                   stereo=True, deemph_tau=50e-6)
+        elif kind in ("nfm", "wfm"):
+            # 去加重档位：deemph_tau_us 显式指定优先，否则按模式取历史默认
+            # （欧/中 50μs 口径；2026-10-14 sdrpp 审计缺口补档位表）。
+            tau = self._deemph_tau(kind)
+            if kind == "nfm":
+                self._demod = DemodNFM(if_sr=if_sr, bandwidth=bw,
+                                       deemph_tau=tau)
+            else:
+                self._demod = DemodWFM(if_sr=if_sr, bandwidth=bw,
+                                       stereo=True, deemph_tau=tau)
         elif kind == "usb":
             self._demod = DemodSSB(mode="usb", if_sr=if_sr, bandwidth=bw)
         elif kind == "lsb":
@@ -257,6 +274,32 @@ class ReceiveChain:
     # ------------------------------------------------------------------
     # 控制面（动态可调）
     # ------------------------------------------------------------------
+    def _deemph_tau(self, kind: str) -> float:
+        """当前去加重档位 -> 时间常数（秒）。
+
+        deemph_tau_us 显式指定优先；None 时按模式回退历史默认
+        （NFM/WFM=50us 欧标口径，其余 0=不去加重）。
+        """
+        if self._deemph_us is not None:
+            return DEEMPH_TAU_US[self._deemph_us]
+        return _NFM_DEEMPH_TAU if kind == "nfm" else 50e-6
+
+    def set_deemphasis(self, tau_us: str) -> None:
+        """运行期切换去加重档位（none/22us/50us/75us；重建解调器清状态）。
+
+        对齐 sdrpp 的 WFM/NFM 去加重下拉。无效档位诚实报错并列出可用项。
+        """
+        if tau_us not in DEEMPH_TAU_US:
+            raise ValueError(
+                f"未知去加重档位 {tau_us!r}，可用：{sorted(DEEMPH_TAU_US)}")
+        self._deemph_us = tau_us
+        self._build_backend()
+
+    @property
+    def deemph_tau_us(self) -> Optional[str]:
+        """当前去加重档位名（None=模式默认）。"""
+        return self._deemph_us
+
     @property
     def mode(self) -> str:
         return self._mode
