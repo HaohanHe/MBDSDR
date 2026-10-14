@@ -14,14 +14,16 @@ MBDSDR Core - MCP / JSON-RPC 2.0 接口
 无后端 / 未连接时，工具返回 ``{"error": "not_connected", "suggestion": ...}``，
 绝不崩溃、绝不造假数据。
 
-本文件纯标准库（json / sys / threading），绝不 import PySide6/Qt。
+本文件纯标准库（json / sys / os / threading / datetime），绝不 import PySide6/Qt。
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from .controller import SDRController
@@ -704,6 +706,90 @@ def _ndarray_to_json(arr: Any) -> Any:
 
 
 # ======================================================================
+# 工具结果 spill 与 outcome 分类（2026-10-14 上游审计第二落点）
+#
+# read_spectrum/read_iq 等工具动辄返回上千点 JSON，全量塞进对话上下文会把
+# LLM 上下文打爆（desktop 侧 tool_registry 只有 4000 字符硬截断、无落盘
+# 指针）。这里在 :meth:`MCPToolSet.call_tool` 的结果出口统一处理：
+#   * 序列化未超阈值：原对象原样返回（零行为变化，既有测试钉死）；
+#   * 超阈值：完整 JSON 落盘 ``~/.mbdsdr/tool_results/``，上下文只留
+#     spill 信封（spill_path + 头尾预览）；
+#   * 落盘失败（OSError）：诚实返回 ``spill_write_failed`` 错误信封，
+#     不假装成功、不返回半截结果、不让主流程崩。
+# 阈值 / 预览长度 / 落盘目录都是模块级常量，可被测试注入覆盖。
+# ======================================================================
+#: 序列化结果超过该字符数即落盘（与 desktop tool_output_max_chars=4000 对齐；
+#: 严格大于才 spill，等于阈值仍原样返回）。可被测试 monkeypatch 注入。
+TOOL_RESULT_SPILL_THRESHOLD = 4000
+#: preview_head / preview_tail 各取 JSON 串头/尾的字符数上限
+#: （600×2 < 4000，头尾永不重叠）。可被测试 monkeypatch 注入。
+TOOL_RESULT_PREVIEW_CHARS = 600
+#: spill 落盘目录（``~`` 会 expanduser）；目录不存在则现场创建。
+TOOL_RESULT_SPILL_DIR = "~/.mbdsdr/tool_results"
+
+
+def _spill_tool_result(tool: str, text: str) -> str:
+    """把超长结果 JSON 写入 spill 目录，返回 spill_path；OSError 向上抛。
+
+    文件名 ``<tool>_<UTC 时间戳>.json``（微秒精度，防同秒碰撞）；
+    工具名做文件系统安全过滤（注册表内的名字本就安全，防御性兜底）。
+    """
+    safe_tool = "".join(c for c in tool if c.isalnum() or c in "-_.")[:60] or "tool"
+    spill_dir = os.path.expanduser(TOOL_RESULT_SPILL_DIR)
+    os.makedirs(spill_dir, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%f")
+    path = os.path.join(spill_dir, "%s_%s.json" % (safe_tool, stamp))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
+
+
+def _finalize_tool_result(name: str, result: Any,
+                          extra: Optional[Dict[str, Any]] = None) -> Any:
+    """call_tool 结果出口：未超阈值原样返回；超阈值落盘并返回 spill 信封。
+
+    序列化选项与 ``tools/call`` 响应一致（``ensure_ascii=False,
+    default=str``），超长判定与客户端实际看到的文本同源。
+
+    Parameters
+    ----------
+    extra :
+        需要一并带进 spill 信封的可观测字段（如会话批准标注
+        ``approval:"session"``）；信封既有键优先，extra 只补位。
+    """
+    try:
+        text = json.dumps(result, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return result  # 不可序列化：保持既有行为（上层 default=str 再见）
+    if len(text) <= TOOL_RESULT_SPILL_THRESHOLD:
+        return result
+    try:
+        path = _spill_tool_result(name, text)
+    except OSError as e:
+        # 诚实失败：不假装成功、不给半截结果；stderr 留痕不污染协议流
+        print("[mcp] tool 结果 spill 写入失败（%s，%d 字符）: %s"
+              % (name, len(text), e), file=sys.stderr)
+        return {"ok": False,
+                "outcome": "error",
+                "error": "spill_write_failed",
+                "technical_detail": str(e)}
+    envelope: Dict[str, Any] = {
+        "ok": True,
+        "tool": name,
+        "outcome": "executed",
+        "truncated": True,
+        "spill_path": path,
+        "preview_head": text[:TOOL_RESULT_PREVIEW_CHARS],
+        "preview_tail": text[-TOOL_RESULT_PREVIEW_CHARS:],
+        "bytes": len(text.encode("utf-8")),
+        "full_result_available": True,
+    }
+    for k, v in (extra or {}).items():
+        envelope.setdefault(k, v)
+    return envelope
+
+
+# ======================================================================
 # MCPToolSet
 # ======================================================================
 class MCPToolSet:
@@ -808,10 +894,17 @@ class MCPToolSet:
         return {"tools": cards}, None
 
     def call_tool(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Any:
-        """按名调用工具。无后端时安全降级，绝不抛异常。"""
+        """按名调用工具。无后端时安全降级，绝不抛异常。
+
+        结果出口（outcome 分类，2026-10-14 上游审计第二落点）：正常执行且
+        结果超长 -> spill 落盘信封（outcome="executed"，见
+        :func:`_finalize_tool_result`）；未超长 -> 原样返回（零行为变化）。
+        门/拒/错信封只增 ``outcome`` 键（gated/denied/error），既有键不变。
+        """
         tool = self._by_name.get(name)
         if tool is None:
             return {"error": "unknown_tool", "tool": name,
+                    "outcome": "error",
                     "suggestion": "用 tools/list 查看可用工具。"}
         args = dict(arguments or {})
         # Write-tool gate: ruleset (allow/ask/deny) + explicit once-approval
@@ -829,7 +922,8 @@ class MCPToolSet:
                 # (aligned with kilocode hard-ruleset veto).
                 return {"ok": False,
                         "error": "denied_by_policy：规则集拒绝执行 %s" % name,
-                        "denied": True, "gated": True}
+                        "denied": True, "gated": True,
+                        "outcome": "denied"}
             key = normalize_key(name, args)
             session_cached = key in self._session_approvals
             if action == "ask" and not session_cached:
@@ -838,6 +932,7 @@ class MCPToolSet:
                             "error": "手动模式：未执行 %s" % name,
                             "gated": True,
                             "policy": action,
+                            "outcome": "gated",
                             "hint": "带 arm_manual=true 执行；"
                                     "approve_session=true 则本会话免问"}
                 if approve_session:
@@ -845,13 +940,18 @@ class MCPToolSet:
         try:
             result = tool["handler"](self.controller, args)
         except SDRUserError as e:
-            return e.to_dict()
+            out = e.to_dict()
+            out["outcome"] = "error"
+            return out
         except Exception as e:  # pragma: no cover - 防御
-            return {"error": "internal_error", "technical_detail": str(e)}
+            return {"error": "internal_error", "technical_detail": str(e),
+                    "outcome": "error"}
         if session_cached and isinstance(result, dict):
             # 本会话免问命中：可观测地标注，不隐形放行
             result.setdefault("approval", "session")
-        return result
+        return _finalize_tool_result(
+            name, result,
+            extra={"approval": "session"} if session_cached else None)
 
     # ------------------------------------------------------------------
     # JSON-RPC 2.0 分发（纯函数，便于测试）

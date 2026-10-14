@@ -240,3 +240,102 @@ Python MCP 面落地第一段（C++ 面镜像待 mbdsdr_mcp 构建后同步，�
   question 服务）为下一批候选。
 - deny 的工具从 tools/list 视野隐藏（kilocode 行为）暂未做：当前 deny 仍在
   目录可见但执行被拒——诚实可见 > 隐藏，待产品决策。
+
+
+---
+
+## 工具结果 spill 与 outcome 分类（2026-10-14）
+
+上游审计第二落点：工具结果信封升级——长输出 spill 落盘 + 结果分类（outcome）。
+read_spectrum/read_iq 等工具动辄返回上千点 JSON，全量塞进对话上下文会把 LLM
+上下文打爆；desktop 侧 tool_registry 只有 4000 字符硬截断、无落盘指针。本批
+在 Python MCP 面落地（测试 `mbdsdr_ai/tests/test_tool_result_spill.py` 钉死）。
+
+### 机制
+
+- 位置：`mbdsdr_ai/core/mcp_server.py` 的 `MCPToolSet.call_tool` 结果出口
+  （handler 返回后统一过 `_finalize_tool_result`）。
+- 序列化：handler 结果按与 `tools/call` 响应相同的选项序列化
+  （`json.dumps(..., ensure_ascii=False, default=str)`），超长判定与客户端
+  实际看到的文本同源。
+- 未超阈值：**原对象原样返回（零行为变化）**——既有调用方的相等性断言不回退。
+- 超阈值：完整 JSON 落盘，上下文只留 spill 信封（字段见下）。
+- 会话批准标注（`approval:"session"`）若被 spill 信封替换，会一并补位进信封，
+  不因落盘丢失可观测性。
+
+### 信封字段
+
+spill 信封（正常执行且超长）：
+
+```json
+{"ok": true, "tool": "read_spectrum", "outcome": "executed",
+ "truncated": true, "spill_path": "~/.mbdsdr/tool_results/read_spectrum_20261014T083952_123456.json",
+ "preview_head": "……≤600 字符……", "preview_tail": "……≤600 字符……",
+ "bytes": 12345, "full_result_available": true}
+```
+
+`bytes` = 完整结果序列化后的 UTF-8 字节数（= 落盘文件大小）。
+
+outcome 分类（对齐 kimi-code toolHooks outcome 枚举的 MBDSDR 子集；既有信封
+只增 `outcome` 键、既有键一律不变，向后兼容）：
+
+| outcome | 触发路径 |
+|---------|----------|
+| `executed` | 正常执行且结果超长（spill 信封；未落盘的小结果信封零变化、不带 outcome） |
+| `gated` | 手动门未授权（既有 gated 信封 + `policy`/`hint`） |
+| `denied` | deny 规则硬否决（既有 denied 信封，arm_manual 也拒） |
+| `error` | SDRUserError / 内部异常 / unknown_tool / spill_write_failed |
+
+### 阈值常量（模块级，可被测试 monkeypatch 注入）
+
+- `TOOL_RESULT_SPILL_THRESHOLD = 4000`：序列化字符数，**严格超过**才落盘
+  （等于阈值仍原样返回）；与 desktop `tool_output_max_chars=4000` 对齐。
+- `TOOL_RESULT_PREVIEW_CHARS = 600`：`preview_head`/`preview_tail` 各取
+  JSON 串头/尾的字符数上限；600×2 < 4000， spilled 结果头尾永不重叠。
+- `TOOL_RESULT_SPILL_DIR = "~/.mbdsdr/tool_results"`：落盘目录，目录不存在
+  则现场创建。
+
+### spill 目录
+
+`~/.mbdsdr/tool_results/<tool>_<YYYYMMDDTHHMMSS_ffffff>.json`（UTC 微秒
+时间戳防同秒碰撞；工具名经文件系统安全过滤）。文件内容 = 完整结果的 UTF-8
+JSON，`json.load` 可无损读回。
+
+### 失败语义
+
+spill 写盘失败（OSError，makedirs 或 open 任一环节）：**诚实返回**
+
+```json
+{"ok": false, "outcome": "error", "error": "spill_write_failed",
+ "technical_detail": "<OSError 原文>"}
+```
+
+不假装成功、不给半截结果、不把超大原文塞回上下文，也不让 `call_tool` /
+stdio 主循环崩；stderr 同步记一行（`[mcp] tool 结果 spill 写入失败...`），
+不污染协议流。不可序列化的结果（如循环引用）按既有行为原样上交，不在此发明
+新语义。
+
+### 与 kimi-code 的对应关系
+
+kimi-code 的 toolHooks 用 output/isError/truncated/spill 信封承载工具结果，
+MBDSDR 落地的是其子集：
+
+- `truncated` -> 本面 `truncated:true` + `preview_head`/`preview_tail`
+  （kimi 只截断丢尾部；MBDSDR 落盘后另给 `spill_path`/
+  `full_result_available` 指针，全文不丢）。
+- `spill` -> 本面 `spill_path`（MBDSDR 子集：JSON 全文落盘 + 头尾预览；
+  未做行号读回/分段检索——agent 面 sdr_tools 的 `sdr_spill_read` 是另一套
+  文本 spill，两面暂不合并）。
+- `isError` -> 本面 `outcome:"error"`（外加 gated/denied 两个 MBDSDR 门
+  特有的分类，kimi-code 侧无对应）。
+- `output` -> 本面未超阈值时的原样返回（零变化，不套信封）。
+
+### 登记（未做）
+
+- C++ 面镜像（`cpp/src/agentapi/mcp_server.cpp` 的 executeTool 出口）：
+  待 mbdsdr_mcp 构建落地，信封 schema 与 Python 面同形（跨语言钉扎测试
+  届时一起补）。
+- spill 保留策略/清理：当前只写不删，`~/.mbdsdr/tool_results` 会随调用增长；
+  保留期/TTL/容量上限（及与 `~/.mbdsdr/spill` 的统一治理）是下一批候选。
+- spill 读回工具（在 MCP 面暴露按 spill_path 读回全文的工具）：当前 agent
+  只能自行按路径读文件；是否产品化待决策。
