@@ -85,6 +85,7 @@ from .demod_ssb import DemodSSB
 from .demod_nfm import DemodNFM
 from .demod_wfm import DemodWFM
 from .demod_cw import DemodCW
+from .demod_dsb import DemodDSB
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,8 @@ Array1d = np.ndarray
 # ---------------------------------------------------------------------------
 _MODE_TABLE = {
     "AM":  dict(if_sr=15000.0,  bandwidth=10000.0, kind="am"),
+    # DSB-SC：抑制载波双边带，带宽口径同 AM（乘积检波而非包络检波）
+    "DSB": dict(if_sr=15000.0,  bandwidth=10000.0, kind="dsb"),
     "FM":  dict(if_sr=50000.0,  bandwidth=12500.0, kind="nfm"),
     "NFM": dict(if_sr=50000.0,  bandwidth=12500.0, kind="nfm"),
     "WFM": dict(if_sr=250000.0, bandwidth=150000.0, kind="wfm"),
@@ -119,7 +122,7 @@ class ReceiveChain:
     fs_in : float
         前端复采样率 Hz（设备 IQ 采样率，如 2.048e6）。
     mode : str
-        初始解调模式（AM/FM/NFM/WFM/USB/LSB/SSB/CW）。
+        初始解调模式（AM/DSB/FM/NFM/WFM/USB/LSB/SSB/CW）。
     bandwidth : float, optional
         信道双边带宽 Hz；None 时按模式表取默认。
     frequency_offset : float
@@ -225,6 +228,9 @@ class ReceiveChain:
         # 4) 解调器
         if kind == "am":
             self._demod = DemodAM(if_sr=if_sr, bandwidth=bw)
+        elif kind == "dsb":
+            # DSB-SC 乘积检波（SDR++ 8 模拟模式最后一档，2026-10-14 补）
+            self._demod = DemodDSB(if_sr=if_sr, bandwidth=bw)
         elif kind == "nfm":
             self._demod = DemodNFM(if_sr=if_sr, bandwidth=bw,
                                    deemph_tau=_NFM_DEEMPH_TAU)

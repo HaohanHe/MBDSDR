@@ -40,7 +40,7 @@ from .errors import (
 logger = logging.getLogger(__name__)
 
 # 合法解调模式（CLI/MCP 做参数校验用）
-VALID_MODES = ("AM", "FM", "WFM", "NFM", "USB", "LSB", "CW")
+VALID_MODES = ("AM", "DSB", "FM", "WFM", "NFM", "USB", "LSB", "CW")
 
 # 支持的解码器类型
 SUPPORTED_DECODERS = ("adsb", "aprs", "noaa_apt", "meteor")
@@ -379,7 +379,7 @@ class SDRController:
         return self._freq_hz
 
     def set_demod(self, mode: str) -> None:
-        """设置解调模式（AM/FM/WFM/NFM/USB/LSB/CW）。"""
+        """设置解调模式（AM/DSB/FM/WFM/NFM/USB/LSB/CW）。"""
         m = (mode or "").upper()
         if m not in VALID_MODES:
             raise SDRUserError(

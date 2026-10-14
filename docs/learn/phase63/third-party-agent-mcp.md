@@ -514,3 +514,199 @@ hook -> policy deny -> arm_manual 门。
 **测试**：域规则 5 例 + MCP 集成 1 例；外部命令 hooks 19 例（真子进程，
 覆盖 exit 2 / JSON deny / 放行 / 超时 / 坏配置 / env 覆盖 / 集成）。
 全量 520 passed / 10 skipped。
+
+
+---
+
+## MCP 客户端（2026-10-14，Kilo Top-4）
+
+kilocode 审计 Top-4：MCP 客户端需要 **transport 抽象 + 连接状态机**
+（stdio / SSE / HTTP 传输，connected / failed / needs_auth 等连接状态）。
+MBDSDR 此前只有服务端两副（`mbdsdr_ai/core/mcp_server.py` 的 Python 面、
+`cpp/src/agentapi/mcp_server.cpp` 的 C++ 面）和一个 ESP32 特例桥
+（`mbdsdr_mcp_client.py`，WebSocket→stdio，硬件专用）。本批新增**通用
+MCP 客户端** `mbdsdr_ai/mcp_client.py`（SPDX MIT，中文注释，**纯标准库、
+零新依赖**：只用 json / os / subprocess / threading / queue / urllib /
+socket / enum / collections，不引入 requests 或任何三方件），
+让 MBDSDR 的 agent 侧能消费外部 MCP server（第三方工具链、satdump 的
+MCP 化、其他 agent 暴露的工具面）。
+
+### 配置格式
+
+`~/.mbdsdr/mcp_servers.json`（路径可经 `MBDSDR_MCP_SERVERS` 环境变量
+覆盖；显式传 `path` 优先——与 `MBDSDR_TOOL_POLICY` / `MBDSDR_HOOKS_CONFIG`
+同一解析约定；`utf-8-sig` 读取，透明剥离子 Windows 编辑器写的 BOM）：
+
+```json
+{"servers": [
+    {"name": "demo", "type": "stdio",
+     "command": ["python", "-m", "mbdsdr_ai.core.mcp_server"],
+     "env": {"PYTHONPATH": "D:/mbdsdr/MBDSDR"}},
+    {"name": "http1", "type": "streamable_http",
+     "url": "http://127.0.0.1:50732/mcp",
+     "headers": {"Authorization": "Bearer ..."},
+     "timeout_s": 20}
+]}
+```
+
+| 字段 | 适用 | 语义 |
+|------|------|------|
+| `name` | 全部 | 注册名（manager API 的句柄），非空字符串 |
+| `type` | 全部 | `stdio` 或 `streamable_http`（唯一两个合法值，其余诚实跳过） |
+| `command` | stdio | 非空字符串数组，`shell=False` 原样 execve（无 shell、无插值） |
+| `env` | stdio | 可选对象，逐键覆盖子进程环境（与 `os.environ` 合并） |
+| `url` | streamable_http | `http(s)://` 端点（MCP streamable HTTP 的 POST URL） |
+| `headers` | streamable_http | 可选对象，随每个请求透传（Authorization 等） |
+| `timeout_s` | 全部 | 可选，单次请求超时（默认 15s，必须为正） |
+
+坏配置的诚实语义：文件缺失 -> `config_not_found` 信封；坏 JSON ->
+`bad_json`；顶层非 `{"servers":[...]}` -> `bad_config`；**坏条目逐条
+跳过并把理由收进 `skipped`**（缺 name / 未知 type / 缺 command/url /
+坏 headers），绝不让一条坏条目把整个 manager 拖垮，也不静默吞。
+
+### 传输层
+
+- **stdio**（`StdioTransport`）：`subprocess.Popen`（text 模式、
+  UTF-8、errors=replace），逐行 framing（与 mbdsdr server 侧同一约定）；
+  `initialize` 握手带 `capabilities` + `clientInfo`，随后发
+  `notifications/initialized`。stdout 由读线程逐行解析入队，请求侧按
+  id 匹配 + 超时等待（Windows 无名管道没有 select，读线程+队列是跨平台
+  的正解）；stderr 另起线程排入 50 行有界环形缓冲（诊断用，不进协议流）。
+- **streamable_http**（`StreamableHttpTransport`）：`urllib.request`
+  POST JSON-RPC，`Content-Type: application/json` +
+  `Accept: application/json, text/event-stream`（MCP streamable HTTP
+  约定）；`initialize` 响应的 `Mcp-Session-Id` 头被捕获并在后续请求
+  回带；202 空体（通知的常态）识别为「无响应」。
+
+**SSE 实现边界（诚实声明）**：`text/event-stream` 响应路径**已做**——
+`data:` 多行拼接（SSE 语义以 `\n` 连接）、`event:` 字段记录、空行派发、
+`:` 开头注释/keep-alive 跳过、按 id 匹配取回本请求的 JSON-RPC 响应。
+**未做（文档化 TODO，不伪造）**：SSE 断线重连续传（`Last-Event-ID` /
+`retry`）、服务端→客户端的 GET 通知流、批量（batch）请求。即「能做多少
+做多少」落在标准库舒适区内：单请求-单响应（JSON 或 SSE 两种外壳）完整
+可跑，长连接/续传面明确留白。
+
+### 连接状态机
+
+| 迁移 | 触发 |
+|------|------|
+| `DISCONNECTED` → `CONNECTING` | `connect()` 开始握手 |
+| `CONNECTING` → `CONNECTED` | `initialize` 握手成功 |
+| `CONNECTING` → `FAILED` | 握手失败 / 子进程起不来 |
+| `CONNECTED` → `FAILED` | 运行时传输故障（超时 / 子进程死亡 / IO 失败） |
+| `CONNECTED` → `DISCONNECTED` | 主动 `disconnect()` |
+| `FAILED` → `CONNECTING` | 失败后重连（`FAILED` 可重试） |
+
+- **四状态钉死**：`disconnected` / `connecting` / `connected` / `failed`
+  （`ConnState` 枚举，测试直接断言枚举成员表）。**needs_auth 是文档化
+  TODO，未实现为第五状态**：HTTP 401 诚实落入 `FAILED` + 错误信封
+  `error="needs_auth"`（`technical_detail.status=401`）——OAuth/token
+  刷新整个认证面不在本批范围，宁可用错误码说话，不造一个永远不翻转的
+  假状态。
+- **运行时降级**：`CONNECTED` 期间发生超时 / 子进程退出 / IO 失败，
+  状态降为 `FAILED` 并记录 `last_error`——状态永远反映事实，不假装
+  还连着。反过来，服务端能回 **JSON-RPC error** 说明传输是活的，
+  此时**不打** `FAILED`（信封如实报 `jsonrpc_error` + code/message）。
+- **失败可重试**：`FAILED` 后再次 `connect()` 是普通重试路径
+  （failed → connecting → connected 全链路有测试覆盖）。
+
+### 单客户端纪律（rtl_tcp 式）
+
+**每个已注册 server 同时最多一个活客户端**。对已 `CONNECTED` 的 server
+再次 `connect()`：先断开旧连接（terminate 子进程 / 关流）再建新连接，
+返回信封带 `replaced_existing: true`（可观测的接管，不是静默替换）；
+对 `FAILED`/`DISCONNECTED` 的旧客户端则是普通重试，**不带**该标记
+（诚实语义：没连上过就谈不上"替换"）。并发双 connect 由 per-name 小锁
+串行化：4 线程同时连同一 server，最终只剩一个活客户端、旧子进程全部
+被杀（测试 4 连钉死）。`disconnect()` 幂等（未连接也返回成功 + note）。
+
+### API 与错误信封
+
+`MCPClientManager()`：`register(entry)` /
+`register_from_config(path=None)` / `connect(name)` /
+`disconnect(name)` / `disconnect_all()` / `status()` / `tools(name)` /
+`call(name, tool, args)`。**全部返回 dict 信封、不向调用方抛异常**
+（编程错误除外）：未知名 `unknown_server`、未连接 `not_connected`、
+超时 `timeout`、JSON-RPC error `jsonrpc_error`（detail 带 code/message）、
+HTTP 错误 `http_error` / `needs_auth`（technical_detail 带 status 与
+body 片段）、坏响应 `bad_response`、坏参数 `bad_arguments`、起进程失败
+`spawn_failed`、传输中断 `transport` / `transport_closed`……每个信封都带
+`suggestion` 或 `technical_detail`，绝不伪造成功。
+
+`tools/list` 做了**形状归一化**：mbdsdr 自己的 server 无 params 时只回
+域卡片 name 级（省 token 的目录约定），客户端显式带 `detail="schema"`
+并把三种返回形状（标准 flat / mbdsdr 域卡片 name 级 / mbdsdr
+`domains` detailed）统一归一成扁平工具表，从域卡片展开时补记 `domain`
+字段；无法识别的形状返回空表，不把不可解析的响应当成工具清单。
+`tools/call` 结果（`content` 数组）翻译成可编程消费的值：单 text 段且
+为 JSON 则解析，否则原文；`isError=true` -> `ok:false` +
+`error:"external_tool_error"`。
+
+### MCP 工具面（「外部工具」扩展域）
+
+`mbdsdr_ai/core/mcp_server.py` 新增扩展域「外部工具」（与解码器长尾 /
+人机问答并列，`PYTHON_EXTENSION_DOMAIN_SUMMARIES` 与 `_TOOL_DOMAIN`
+同步，`tests/test_mcp_server.py` 的 `EXPECTED_EXTENSION_DOMAINS` 加新域）：
+
+| 工具 | 读/写 | 门 | 语义 |
+|------|-------|----|------|
+| `mcp_client_list` | 读 | 无 | 各 server 状态 + serverInfo + last_error（不起子进程） |
+| `mcp_client_connect` | 写 | arm_manual | 连接外部 server（起子进程/发请求；先断后连） |
+| `mcp_client_disconnect` | 写 | arm_manual | 断开外部 server（杀子进程/关流；幂等） |
+| `mcp_client_call` | 写 | arm_manual | 代发外部 `tools/call`（server/tool/arguments） |
+
+`MCPToolSet` 持有一个 `MCPClientManager` 实例，构造即
+`register_from_config()`（配置缺失 = 空注册的诚实空态，不抛不崩；
+**构造期不连接**——连接是写工具动作，走既有 `arm_manual` 门）。
+`shutdown` 工具顺带 `disconnect_all()`：外部客户端是 stdio 子进程 /
+HTTP 会话，不清就会随 server 生命周期泄漏。
+
+### 与 kilocode mcp/index.ts 的对应（粗粒度）
+
+kilocode 的 MCP 客户端子系统（transports + auth 分层）是本设计的
+参照系；MBDSDR 落地的是其**协议子集**，差异如实登记：
+
+| kilocode 概念 | MBDSDR 对应 | 差异 |
+|---------------|-------------|------|
+| StdioTransport | `StdioTransport` | 同形（子进程 + 逐行 JSON-RPC + initialize 握手） |
+| StreamableHttpTransport | `StreamableHttpTransport` | 单请求-单响应（JSON/SSE 两种外壳）完整；断线重连续传、GET 通知流未做 |
+| SSETransport（旧式） | 未单独实现 | SSE 仅作为 streamable_HTTP 的响应外壳解析；旧式独立 SSE 传输（GET 长连接 + endpoint POST）未做 |
+| auth / OAuth 流程 | **不做** | 401 -> FAILED + `needs_auth` 错误信封；`needs_auth` 状态、token 刷新、OAuth 发现均为文档化 TODO |
+| 连接状态管理 | `ConnState` 四状态枚举 | kilocode 的 needs_auth 等细分状态未镜像（见上） |
+| 工具结果消毒 | **不做** | 外部结果一律按不可信数据上抛，消毒责任在调用方 |
+
+### 安全边界
+
+- **外部 server 的工具结果一律当不可信数据**：本客户端只做协议转发与
+  信封标注，不解释、不执行外部内容；`mcp_client_call` 的信封里
+  `external_tool_error` 也明示"勿直接执行"。
+- **连接动作走 manual 门**：connect/disconnect/call 均注册为写工具
+  （会起子进程 / 发网络请求），无 `arm_manual` 即被既有规则门拦下
+  （`mcp_client_list` 只读，不 gate）。
+- **配置文件属于用户信任面**：`mcp_servers.json` 里的 `command` 以
+  MBDSDR 进程同等权限 execve、`url`/`headers` 决定网络出口——同
+  `hooks.json` 的威胁模型，不要把来路不明的配置装进来。
+
+### 测试
+
+`mbdsdr_ai/tests/test_mcp_client.py` 26 例：stdio 全链路对真 server
+（initialize/notifications/tools/list/tools/call get_status）、单客户端
+纪律（接管杀旧进程 / 失败重连不冒充接管 / 4 并发连只剩一个活客户端）、
+配置诚实信封（缺失/坏 JSON/坏结构/5 类坏条目跳过）、状态机（四状态枚举
+钉死、慢握手期间 connecting 可观测、spawn 失败、**握手超时也杀子进程**、
+运行时可观测降级 failed、JSON-RPC error 保持 connected）、入站通知进
+有界缓冲、streamable_http（JSON 路径 / SSE 多行 data + 注释跳过路径 /
+Accept 头约定 / headers 透传 / 不伪造 session 头 / 401 needs_auth /
+500 / garbage / 连不上）、MCP 工具四件套端到端（gated + arm_manual
+真连真调真断）。
+
+### 登记（未做）
+
+- **认证/OAuth**：401 只是 FAILED + 错误信封；`needs_auth` 独立状态、
+  token 刷新、OAuth discovery 全部未做（文档化 TODO）。
+- **SSE 长连接面**：断线重连续传（Last-Event-ID/retry）、服务端→客户端
+  GET 通知流、batch 请求未做。
+- **通知消费**：服务端→客户端入站通知只进有界缓冲（`inbound`），没有
+  订阅/回调表。
+- **C++ 面客户端镜像**：同前几节登记，待 mbdsdr_mcp 构建后评估（服务端
+  优先级高于客户端）。

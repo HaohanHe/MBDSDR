@@ -45,7 +45,7 @@ EXPECTED_10_DOMAINS = [
 ]
 
 # Python 面扩展域（P0 #65）——不与 C++ 冻结，仅本 server 追加。
-EXPECTED_EXTENSION_DOMAINS = ["解码器长尾", "人机问答"]
+EXPECTED_EXTENSION_DOMAINS = ["解码器长尾", "人机问答", "外部工具"]
 
 # 长尾解码器工具（P0 #65）必须挂入工具表且归属「解码器长尾」。
 EXPECTED_LONGTAIL_TOOLS = [
@@ -56,6 +56,15 @@ EXPECTED_LONGTAIL_TOOLS = [
     "decoder_gk2a_parse_headers",
     "decoder_fst4_encode_text",
     "device_bladerf_params_query",
+]
+
+# 外部 MCP 客户端管理工具（2026-10-14，Kilo Top-4）——前两个读、
+# connect/disconnect/call 为写（起子进程/发网络请求，走 arm_manual 门）。
+EXPECTED_MCP_CLIENT_TOOLS = [
+    "mcp_client_list",
+    "mcp_client_connect",
+    "mcp_client_disconnect",
+    "mcp_client_call",
 ]
 
 
@@ -102,6 +111,51 @@ def test_longtail_tools_registered_and_grouped():
     # 该域工具数 == 长尾工具数（不混入冻结域）。
     lt = [n for n, d in _TOOL_DOMAIN.items() if d == "解码器长尾"]
     assert sorted(lt) == sorted(EXPECTED_LONGTAIL_TOOLS)
+
+
+def test_mcp_client_tools_registered_and_grouped():
+    """外部工具四件套挂入工具表、归属「外部工具」扩展域。"""
+    table = _build_tool_table()
+    names = {t["name"] for t in table}
+    for t in EXPECTED_MCP_CLIENT_TOOLS:
+        assert t in names
+        assert _TOOL_DOMAIN[t] == "外部工具"
+    ext = [n for n, d in _TOOL_DOMAIN.items() if d == "外部工具"]
+    assert sorted(ext) == sorted(EXPECTED_MCP_CLIENT_TOOLS)
+    # write 标记：只 list 读，其余三个写（连接动作起子进程/发网络请求）。
+    writes = {t["name"]: t["write"] for t in table if t["name"] in ext}
+    assert writes["mcp_client_list"] is False
+    assert writes["mcp_client_connect"] is True
+    assert writes["mcp_client_disconnect"] is True
+    assert writes["mcp_client_call"] is True
+
+
+def test_mcp_client_tools_gate_behaviour():
+    """四件套门行为：mcp_client_list 只读过即回；三个写工具无 arm_manual
+    被 gated、带 arm_manual 才真正执行（此刻以 unknown_server 诚实信封
+    证明门已放行——未注册的 server 不会假装连上）。"""
+    ts = _set()
+    # 1) 只读：无 arm_manual 也执行（空注册 = 0 server 的诚实空态）。
+    out = ts.call_tool("mcp_client_list", {})
+    assert out["ok"] is True and "servers" in out and "gated" not in out
+    # 2) 写工具无 arm -> gated（既有信封形状，policy/hint 同形）。
+    for tool, args in (("mcp_client_connect", {"name": "x"}),
+                       ("mcp_client_disconnect", {"name": "x"}),
+                       ("mcp_client_call",
+                        {"server": "x", "tool": "get_status"})):
+        g = ts.call_tool(tool, args)
+        assert g["ok"] is False and g["gated"] is True
+        assert g["error"] == "手动模式：未执行 %s" % tool
+        assert g["policy"] == "ask"
+        assert "arm_manual=true" in g["hint"]
+    # 3) 带 arm_manual -> 门放行，落到 manager 的诚实信封（unknown_server）。
+    u = ts.call_tool("mcp_client_connect", {"name": "x", "arm_manual": True})
+    assert "gated" not in u and u["ok"] is False
+    assert u["error"] == "unknown_server"
+    # 4) 未连接 server 的调用：not_connected（先注册再问，不假装通）。
+    assert ts.call_tool("mcp_client_call",
+                        {"server": "x", "tool": "t",
+                         "arm_manual": True})["error"] == "unknown_server"
 
 
 def test_default_grouped_view_loses_nothing():
