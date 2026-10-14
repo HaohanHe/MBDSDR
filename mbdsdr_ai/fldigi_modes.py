@@ -717,7 +717,7 @@ def register_fldigi_modes_tools(registry) -> None:
         )
 
     def _rtty_decode(args):
-        text = args.get("text", "HELLO BI4MIB")
+        text = args.get("text", "HELLO BI1AAA")
         m = RTTYModem()
         wav = m.modulate(text)
         out = m.demodulate(wav)

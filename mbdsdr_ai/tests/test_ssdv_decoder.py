@@ -81,7 +81,7 @@ def test_no_builtin_callsign():
         encoding="utf-8",
     ).read()
     head = src.split("class SsdvEncoder")[0]
-    for bad in ("BI4MIB", "BI4TST", "DEFAULT_CALLSIGN"):
+    for bad in ("BI1AAA", "BI4TST", "DEFAULT_CALLSIGN"):
         assert bad not in head
 
 

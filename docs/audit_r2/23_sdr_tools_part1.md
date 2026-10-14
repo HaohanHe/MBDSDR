@@ -69,7 +69,7 @@
   def _get_gps(mgr):
       return "GPS 定位（需自研 ai-sdr Mini 设备连接）\n当前为模拟后端，实际数据需连接 ATGM336H 模块\n模拟数据: 43.82°N, 125.32°E, 海拔 250m, 12 星, HDOP 0.8"
   ```
-- **判定**: **[空壳]**。不读取 mgr，不检查设备连接状态，不访问串口/I²C。无论连接什么设备，永远返回长春坐标。描述里写"需要设备带 GPS 模块"但实际不做任何硬件交互。
+- **判定**: **[空壳]**。不读取 mgr，不检查设备连接状态，不访问串口/I²C。无论连接什么设备，永远返回示例坐标。描述里写"需要设备带 GPS 模块"但实际不做任何硬件交互。
 
 ### S2. `sdr_get_imu` — 永远返回硬编码模拟数据
 - **位置**: `sdr_tools.py:979`（注册），helper `_get_imu` 在 `sdr_tools.py:3460-3461`
@@ -232,7 +232,7 @@
 | 45 | sdr_satellite_doppler | 899 | 3288 | ✅ | |
 | 46 | sdr_satellite_passes | 916 | 3314 | ✅ | |
 | 47 | sdr_satellite_doppler_track | 935 | 3337 | ✅ | 跟踪录制 |
-| 48 | sdr_get_gps | 971 | 3457 | 📦 | **永远返回长春坐标 [S1]** |
+| 48 | sdr_get_gps | 971 | 3457 | 📦 | **永远返回示例坐标 [S1]** |
 | 49 | sdr_get_imu | 979 | 3460 | 📦 | **永远返回固定值 [S2]** |
 | 50 | sdr_identify_modulation | 991 | 3463 | ✅ | 特征提取 |
 | 51 | sdr_detect_fhss | 1005 | 3474 | ⚠️ | threshold_db=-60 [P3] |

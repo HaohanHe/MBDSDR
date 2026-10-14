@@ -79,7 +79,7 @@ Eb/N0 = (Ps/Rb)/N0 = Ps/(N0·Rb) = (Ps/(N0·B))·(B/Rb) = SNR_meas · (B/Rb)
 
 **缺口**：模块**没有 main/自测试**（grep 无 `__main__/demo/simulate/truth`）——即没有"真值轨道→加噪多普勒观测→解算→位置误差收敛曲线"的可跑闭环；`plot_convergence_curve` 需要的 `pos_err_rls/pos_err_ekf` 序列目前无人产出。
 
-**最小实现（云内可确定性仿真）**：固定一条缓存 TLE（如 NOAA-19/ISS），用 `leosat_state_from_tle` 生成一次 10 min 过境真值，在长春站（43.8868,125.3245）逐历元用 `pseudorange_rate_and_jacobian`+`rangerate_to_fd`（`:297`）算真 fd(t)，加高斯噪声 σ_fd∈{1,5,10,20,50} Hz，给 `doppler_orbit_determine` 一个加了 ~5 km/50 m/s 扰动的初值，逐时刻用 `position_error_curve`（`:700`）算三维位置误差，调 `plot_convergence_curve` 出图，扫 σ_fd 得"收敛误差地板 vs 观测噪声"。**这部分完全可云内跑、必须标"仿真"**。
+**最小实现（云内可确定性仿真）**：固定一条缓存 TLE（如 NOAA-19/ISS），用 `leosat_state_from_tle` 生成一次 10 min 过境真值，在示例站（43.8868,125.3245）逐历元用 `pseudorange_rate_and_jacobian`+`rangerate_to_fd`（`:297`）算真 fd(t)，加高斯噪声 σ_fd∈{1,5,10,20,50} Hz，给 `doppler_orbit_determine` 一个加了 ~5 km/50 m/s 扰动的初值，逐时刻用 `position_error_curve`（`:700`）算三维位置误差，调 `plot_convergence_curve` 出图，扫 σ_fd 得"收敛误差地板 vs 观测噪声"。**这部分完全可云内跑、必须标"仿真"**。
 **必须 OTA 的部分**：真实录制过境 IQ 经 `extract_doppler_observations` 验证 FFT 前端在多径/AGC/真实噪声下的可用性——无录制时走 2.2 的诚实空态。
 
 ### 2.5 数据图自动生成：matplotlib 可用，但目前零图

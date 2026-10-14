@@ -59,7 +59,7 @@ if __name__ == "__main__":
     for t, want in [(0, "DE"), (1, "QRZ"), (2, "CQ")]:
         got, ok = unpack28(t)
         print(f"token {t}: {got} (期望 {want}) ok={ok}")
-    # 标准呼号：反向编码 BI4MIB 附近——手工算一个已知值困难，
+    # 标准呼号：反向编码 BI1AAA 附近——手工算一个已知值困难，
     # 这里只验证解码不崩 + CQ_ 数字段
     got, ok = unpack28(5)
     print("CQ_nnn(5):", got, ok)
@@ -68,7 +68,7 @@ if __name__ == "__main__":
     got, ok = unpack28(n)
     print("标准呼号抽样:", repr(got), "ok=", ok)
 
-    # 往返：手算 BI4MIB 的标准呼号编码，解回应还原
+    # 往返：手算 BI1AAA 的标准呼号编码，解回应还原
     i1 = _C1.index("B")
     i2 = _C2.index("I")
     i3 = _C3.index("4")
@@ -80,4 +80,4 @@ if __name__ == "__main__":
          + i4 * 27**2 + i5 * 27 + i6)
     n28 = n + MAX22 + NTOKENS
     got, ok = unpack28(n28)
-    print(f"BI4MIB 往返: n28={n28} -> {got!r} (期望 BI4MIB) ok={ok}")
+    print(f"BI1AAA 往返: n28={n28} -> {got!r} (期望 BI1AAA) ok={ok}")

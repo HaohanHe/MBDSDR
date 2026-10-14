@@ -662,7 +662,7 @@ def _self_test() -> None:
                 f"误差={err:.6f}°"
             )
     # 测试 GroundStation + 坐标链
-    station = GroundStation(126.63, 45.75, 200.0, "Changchun")
+    station = GroundStation(126.63, 45.75, 200.0, "ExampleSite")
     jd = 2460000.5  # 任意测试日期
     v = vec_from_radec(100.0, 30.0)
     v_altaz = j2000_to_altaz(v, station, jd)

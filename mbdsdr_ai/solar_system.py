@@ -911,7 +911,7 @@ def get_backend_info() -> Dict[str, Any]:
 # 系统不内置任何默认站址；实际使用时请在 ~/.mbdsdr/config.json
 # 设置 ground_station_lat / ground_station_lon，或在调用时显式传入。
 
-# 长春（参考示例）
+# 示例城市（参考示例）
 CHANGCHUN = GroundStation(latitude_deg=43.817, longitude_deg=125.323, height_m=200.0)
 
 # 北京（参考示例）

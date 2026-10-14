@@ -313,12 +313,12 @@ def encode_ft8_tones(msg77: list[int]) -> list[int]:
 
 
 def encode_ft8_text(text: str) -> list[int]:
-    """标准文本消息（如 'CQ BI4MIB OM74'）→ 79 音调。"""
+    """标准文本消息（如 'CQ BI1AAA OM74'）→ 79 音调。"""
     parts = text.split()
     if len(parts) < 2:
         raise ValueError(
-            f"FT8 消息至少需要 2 个空格分隔字段，如 'CQ BI4MIB OM74' 或 "
-            f"'BI4MIB K1ABC 73'，当前收到 {len(parts)} 个字段: {parts!r}"
+            f"FT8 消息至少需要 2 个空格分隔字段，如 'CQ BI1AAA OM74' 或 "
+            f"'BI1AAA K1ABC 73'，当前收到 {len(parts)} 个字段: {parts!r}"
         )
     if parts[0].upper() == "CQ":
         call1 = "CQ"
@@ -333,7 +333,7 @@ def encode_ft8_text(text: str) -> list[int]:
 
 
 if __name__ == "__main__":
-    tones = encode_ft8_text("CQ BI4MIB OM74")
+    tones = encode_ft8_text("CQ BI1AAA OM74")
     print(f"生成 FT8 音调数: {len(tones)}")
     for bi, block in enumerate(SYNC_BLOCKS):
         got = [tones[p] for p in block]

@@ -109,14 +109,14 @@ raw = r.read(max_bytes + 1)   # 322 行
 
 - 上界被 `min(...,500000)` 卡住，但**没有下界**。LLM 传 `max_bytes=-5` → `min(-5,500000)=-5` → `r.read(-4)` 在 HTTPResponse 上表示"读到 EOF"（不限大小），随后 `raw[:max_bytes]` 切掉末尾 5 字节。单次可拉回远超 500KB 的内容，撑爆上下文。建议 `max_bytes = max(1024, min(int(...), 500000))`。
 
-### R3. 长春地理坐标硬编码为默认值，跨地区部署静默出错
+### R3. 示例城市地理坐标硬编码为默认值，跨地区部署静默出错
 **位置**:
-- `agent.py:118` `PoseFusion(mode="fused", declination=-9.0)`（长春磁偏角）
+- `agent.py:118` `PoseFusion(mode="fused", declination=-9.0)`（示例站点磁偏角）
 - `agent.py:955-956` `predict_satellite_passes` 默认 `observer_lat=43.8, observer_lon=126.5`
-- `agent.py:996-997` `satellite_now_pointing` 同样默认长春
-- `agent.py:1072-1073` `doppler_tune_frequency` 同样默认长春
+- `agent.py:996-997` `satellite_now_pointing` 同样默认示例城市
+- `agent.py:1072-1073` `doppler_tune_frequency` 同样默认示例城市
 
-用户在其他地区使用时，如果不显式传 lat/lon，卫星过境预测/指向/多普勒全部按长春算，且不会有任何警告。建议从 GPS/配置读，缺省时**不要**给一个具体城市默认值，而是要求用户显式提供。
+用户在其他地区使用时，如果不显式传 lat/lon，卫星过境预测/指向/多普勒全部按示例城市算，且不会有任何警告。建议从 GPS/配置读，缺省时**不要**给一个具体城市默认值，而是要求用户显式提供。
 
 ### R4. `demod_analog_audio` 假定返回 dict 必含 "audio" 键
 **位置**: `mbdsdr_ai/agent.py:859` `audio_len = len(r.pop("audio"))`
@@ -152,7 +152,7 @@ if errors:
 | 温度/top_p 参数合理性 | 不在本范围，由 ModelManager 在 __init__ 传入（agent.py:77-85） |
 | tool-call 解析/参数校验 | 在 tool_registry.py:388 `call_from_model` 有 JSON 修复+`_raw` 兜底；required 参数预校验在 tool_registry.py:307-326。本范围各 handler 自己做类型判断，整体被 registry 的 try/except 兜底 |
 | 循环调用终止条件 | chat 循环 `for round_num in range(max_tool_rounds)` 在 **2681**，有上限（默认10），本范围不可见，归 part2 |
-| pose 数据全靠 LLM 填 JSON | 确认：agent.py:1774 `IMUData(**args)`、1795 `GPSData(**args)`——args 直接来自 LLM JSON，无字段范围校验。**但 1774 > 1500，正式结论归 part2**；本范围 118 行已见 `pose_fusion` 实例化硬编码长春磁偏角（R3） |
+| pose 数据全靠 LLM 填 JSON | 确认：agent.py:1774 `IMUData(**args)`、1795 `GPSData(**args)`——args 直接来自 LLM JSON，无字段范围校验。**但 1774 > 1500，正式结论归 part2**；本范围 118 行已见 `pose_fusion` 实例化硬编码示例站点磁偏角（R3） |
 | 模拟过真机错的错误处理 | 本范围大量解码工具把入参写成 inline 数值数组（A1），真机上 AI 拿不到真实数据，这是"实验室绿真机红"的根因 |
 | prompt 注入防护 | **缺失**（S1）：web_fetch 回喂无信任围栏 |
 | 工具调用权限控制/沙箱 | **缺失**（S3/S2）：baseband_save 任意路径写、git_clone 任意 URL、web_fetch 任意 URL，无 allowlist |
@@ -174,6 +174,6 @@ if errors:
 | A1 | 架构 | agent.py:429-1364 多处 | 解码工具要求 LLM 内联传 IQ/audio 数组，真机不可行（实验室绿真机红） |
 | R1 | 建议 | agent.py:351 | workspace_root 从未赋值，hasattr 永远走 fallback |
 | R2 | 建议 | agent.py:318 | max_bytes 负数可绕过 500KB 上限 |
-| R3 | 建议 | agent.py:118,955,996,1072 | 长春经纬度/磁偏角硬编码默认值 |
+| R3 | 建议 | agent.py:118,955,996,1072 | 示例城市经纬度/磁偏角硬编码默认值 |
 | R4 | 建议 | agent.py:859 | 假定 r 必含 "audio" 键，建议 .get 判空 |
 | R5 | 建议 | agent.py:245-247 | config.validate() 失败不中断 |

@@ -6,7 +6,7 @@
     (sheet (number "1") (name "/") (tstamps "/")
       (title_block
         (title "MBDSDR ai-sdr Mini - AI Defined Radio Hardware")
-        (company "MBDSDR Open Source Project (BI4MIB)")
+        (company "MBDSDR Open Source Project (BI1AAA)")
         (rev "v0.7.1")
         (date "2026-09-16")
         (source "ai-sdr-mini.kicad_sch")

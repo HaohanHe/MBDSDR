@@ -699,7 +699,7 @@ class MBDSDRAgent:
         def _ft8_encode(args):
             text = (args.get("text") or "").strip()
             if not text:
-                return ToolResult(False, "text 不能为空，如 'CQ BI4MIB OM74'")
+                return ToolResult(False, "text 不能为空，如 'CQ BI1AAA OM74'")
             from mbdsdr_ai.ft8_encode import encode_ft8_text
             try:
                 tones = encode_ft8_text(text)
@@ -707,7 +707,7 @@ class MBDSDRAgent:
                 return ToolResult(
                     False,
                     f"FT8编码失败: {type(e).__name__}: {e}，请使用标准消息格式如 "
-                    f"'CQ BI4MIB OM74'、'BI4MIB K1ABC 73'、'BI4MIB K1ABC -17'",
+                    f"'CQ BI1AAA OM74'、'BI1AAA K1ABC 73'、'BI1AAA K1ABC -17'",
                 )
             return ToolResult(True, json.dumps({
                 "tones": tones, "n_tones": len(tones),
@@ -716,15 +716,15 @@ class MBDSDRAgent:
 
         self.tool_registry.register(
             name="ft8_encode",
-            description="FT8 编码：把标准文本消息（如 'CQ BI4MIB OM74'、'BI4MIB K1ABC 73'、"
-                        "'BI4MIB K1ABC -17'）编码成 79 个 8FSK 音调索引。参数依据公开标准 "
+            description="FT8 编码：把标准文本消息（如 'CQ BI1AAA OM74'、'BI1AAA K1ABC 73'、"
+                        "'BI1AAA K1ABC -17'）编码成 79 个 8FSK 音调索引。参数依据公开标准 "
                         "（Costas7 同步、Gray 映射、CRC14、LDPC(174,91)，WSJT-X 仅作技术参考）。"
                         "与 ft8_soft_decode 互为往返。",
             parameters={
                 "type": "object",
                 "properties": {
                     "text": {"type": "string",
-                             "description": "标准消息文本，如 'CQ BI4MIB OM74'"},
+                             "description": "标准消息文本，如 'CQ BI1AAA OM74'"},
                 },
                 "required": ["text"],
             },
@@ -820,7 +820,7 @@ class MBDSDRAgent:
         def _fst4_encode(args):
             text = (args.get("text") or "").strip()
             if not text:
-                return ToolResult(False, "text 不能为空，如 'CQ BI4MIB OM74'")
+                return ToolResult(False, "text 不能为空，如 'CQ BI1AAA OM74'")
             from mbdsdr_ai.fst4_encode import encode_fst4_text
             try:
                 tones = encode_fst4_text(text)
@@ -828,7 +828,7 @@ class MBDSDRAgent:
                 return ToolResult(
                     False,
                     f"FST4编码失败：消息格式不正确，请使用标准格式如 "
-                    f"'CQ BI4MIB OM74'、'BI4MIB K1ABC 73'",
+                    f"'CQ BI1AAA OM74'、'BI1AAA K1ABC 73'",
                 )
             return ToolResult(True, json.dumps({
                 "tones": tones, "n_tones": len(tones),
@@ -844,7 +844,7 @@ class MBDSDRAgent:
                 "type": "object",
                 "properties": {
                     "text": {"type": "string",
-                             "description": "标准消息文本，如 'CQ BI4MIB OM74'"},
+                             "description": "标准消息文本，如 'CQ BI1AAA OM74'"},
                 },
                 "required": ["text"],
             },

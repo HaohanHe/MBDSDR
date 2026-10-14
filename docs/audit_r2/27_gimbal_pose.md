@@ -98,7 +98,7 @@
 - 四元数运动学 `q_dot`（`pose.py:339-344`）：与 `0.5·q⊗ω` 标准展开逐项核对，**w/x/y/z 四项符号全部正确**。
 - `get_euler` 转 ZYX 欧拉角（`pose.py:373-387`）：`atan2(2(wx+yz),1-2(x²+y²))` 等三式与标准公式一致，pitch 反正弦已做 ±1 截断（`:379-382`），yaw 归 0–360（`:388`）。**正确。**
 - 互补滤波（`pose.py:177-187`）：gyro rad/s 经 `math.degrees` 转度×dt；`accel_roll=atan2(ay,az)`、`accel_pitch=atan2(-ax,√(ay²+az²))` 均为标准重力倾角公式；dt 窗口保护 `dt<=0 or dt>1`（`:173`）。**正确。**
-- 罗盘倾斜补偿（`pose.py:254-269`）：先 roll 后 pitch 两次旋转矩阵展开正确；`yaw=atan2(-mx_tilt,my_tilt)` + 磁偏角（长春 -9°）真北换算符号正确。
+- 罗盘倾斜补偿（`pose.py:254-269`）：先 roll 后 pitch 两次旋转矩阵展开正确；`yaw=atan2(-mx_tilt,my_tilt)` + 磁偏角（示例城市 -9°）真北换算符号正确。
 - GNSS 速度 NED 分解（`pose.py:460-463`）：`v_n=speed·cos(course)`, `v_e=speed·sin(course)`，NED 约定正确；航向环绕处理（`:470-475`）正确。
 - 角度单位：gyro 全程 rad、对外输出度，转换点都用了 `math.degrees/radians`，**未发现度/弧度混用**。
 

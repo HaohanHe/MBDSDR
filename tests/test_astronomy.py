@@ -34,8 +34,8 @@ class TestCoordinateChain(unittest.TestCase):
 
     def setUp(self):
         from mbdsdr_ai.celestial_geometry import GroundStation
-        # 长春 (真实城市站, 仅用于几何测试)
-        self.gs = GroundStation(126.63, 45.75, 200.0, "Changchun")
+        # 示例城市 (真实城市站, 仅用于几何测试)
+        self.gs = GroundStation(126.63, 45.75, 200.0, "ExampleSite")
         self.jd = 2461308.5  # 2026-09-26 前后
 
     def test_j2000_altaz_roundtrip(self):

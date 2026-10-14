@@ -246,7 +246,7 @@ def encode_fst4_text(text: str) -> list[int]:
 
 
 if __name__ == "__main__":
-    tones = encode_fst4_text("CQ BI4MIB OM74")
+    tones = encode_fst4_text("CQ BI1AAA OM74")
     print(f"FST4 音调数: {len(tones)}")
     sync_starts = [0, 38, 76, 114, 152]
     expected = [SYNC_WORD1, SYNC_WORD2, SYNC_WORD1, SYNC_WORD2, SYNC_WORD1]

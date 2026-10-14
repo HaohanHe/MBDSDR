@@ -189,7 +189,7 @@ obs_lon = getattr(self, "obs_lon", 125.32)   # 属性名是 self._observer_lon
 
 实际定义的属性是 `self._observer_lat`（L49）和 `self._observer_lon`（L50），带下划线前缀。`getattr(self, "obs_lat", ...)` 永远找不到，始终返回默认值 43.88/125.32。
 
-**影响**：`_load_gui_config`（L824-825）从配置文件恢复的观察者坐标永远不会传递给 SatelliteTracker。即使配置文件中保存了不同的经纬度，卫星跟踪仍使用长春硬编码坐标。
+**影响**：`_load_gui_config`（L824-825）从配置文件恢复的观察者坐标永远不会传递给 SatelliteTracker。即使配置文件中保存了不同的经纬度，卫星跟踪仍使用示例城市硬编码坐标。
 
 ---
 

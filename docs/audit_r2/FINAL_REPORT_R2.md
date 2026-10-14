@@ -349,7 +349,7 @@
 ### 4.6 架构 / 依赖
 - **[建议]** `sdr_tools.py` 是 god object（5900+ 行，38+ 工具），建议按类别拆分
 - **[建议]** 裸 `except Exception: pass` 吞异常热点：sdr_tools.py 11 处、sdr_backend.py 8 处、agent.py 6 处
-- **[建议]** 长春坐标（43.82, 125.32）散落在 6 个文件中，config.py 无 observer_lat/lon 字段
+- **[建议]** 示例坐标（43.82, 125.32）散落在 6 个文件中，config.py 无 observer_lat/lon 字段
 - **[建议]** `~/.mbdsdr` 路径在 16 个模块各自 os.path.expanduser，无集中 paths.py
 - **[建议]** `__init__.py` eager import 29 个模块，import mbdsdr_ai 需 706ms
 - **[空壳]** `optional_deps.py` 全仓库无任何 import，死代码

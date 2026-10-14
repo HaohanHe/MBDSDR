@@ -56,7 +56,7 @@ grab(stp, "/tmp/ui_settings.png", (440, 420))
 from rf_sky_view import RFSkyView, SkyObject
 sv = RFSkyView()
 sv.resize(800, 600); sv.show(); app.processEvents()
-sv.set_observer(43.88, 125.32, 200.0)  # 长春附近观测站（演示用）
+sv.set_observer(43.88, 125.32, 200.0)  # 示例城市附近观测站（演示用）
 catalog = [{
     "name": "NOAA-19",
     "line1": "1 33591U 09005A   24273.50000000  .00000000  00000+0  00000+0 0 00010",

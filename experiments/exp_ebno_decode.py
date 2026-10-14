@@ -46,7 +46,7 @@ def trial_ax25(rng: np.random.Generator, snr_db: float,
     """AX.25 1200: 合成 APRS 位置帧 -> AFSK 调制 -> 加噪 -> 解调 -> FCS 有效?"""
     k = int(rng.integers(0, 1000))
     frame = ax25.build_aprs_position_frame(
-        "BI4MIB", 43.88 + k * 0.0001, 125.32 + k * 0.0001)
+        "BI1AAA", 43.88 + k * 0.0001, 125.32 + k * 0.0001)
     audio = modem.modulate(frame)               # real @ 44100 Hz
     sp = float(np.mean(audio ** 2))
     if np.isfinite(snr_db):

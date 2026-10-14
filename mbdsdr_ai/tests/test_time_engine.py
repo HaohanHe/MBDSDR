@@ -118,7 +118,7 @@ class TestTimeTravelAffectsSatellitePositions(unittest.TestCase):
 
     def setUp(self):
         reset_time_engine()
-        # 长春坐标
+        # 示例坐标
         self.lat, self.lon = 43.88, 125.32
 
     def test_jump_24h_changes_satellite_az_alt(self):

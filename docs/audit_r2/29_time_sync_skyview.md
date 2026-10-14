@@ -64,7 +64,7 @@
 #### [占位] T4. 无 GPS PPS / 无硬件守时路径
 - 全仓 grep `pps|PPS|gpstme|gpstime|settimeofday|adjtime` 无任何命中（除本文件 `gps_week/gps_tow` 字段名）。
 - `new_spacetime.py:66` 硬编码 `leap_seconds: int = 18`（2017-01-01 起正确值；下次闰秒未自动跟踪）。
-- `sdr_backend.py:732-738` 的 `get_gps()/get_imu()` 只是 `_send_mcp("get_gps")` 透传到固件；而固件侧 `sdr_tools._get_gps` 已在 R2 23/24 号审查中确认是**硬编码长春坐标字符串**，真机接 GNSS 模块也不会更新（见 `docs/audit_r2/23_sdr_tools_part1.md:S1`）。
+- `sdr_backend.py:732-738` 的 `get_gps()/get_imu()` 只是 `_send_mcp("get_gps")` 透传到固件；而固件侧 `sdr_tools._get_gps` 已在 R2 23/24 号审查中确认是**硬编码示例坐标字符串**，真机接 GNSS 模块也不会更新（见 `docs/audit_r2/23_sdr_tools_part1.md:S1`）。
 - 因此 UI 上 `rf_sky_view.py:776-779` 画的 `GPS W{week} {tow}s` 永远是 `GPS --:--:--`（因为 `info.gps_time` 在无 NTP 时为 0）。
 
 #### [建议] T5. FT8 时序与 time_sync 完全解耦

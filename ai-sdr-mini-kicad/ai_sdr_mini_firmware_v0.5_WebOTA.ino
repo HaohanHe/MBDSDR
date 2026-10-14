@@ -3,7 +3,7 @@
  *   v0.6: 引脚对齐硬件 v0.7.1 — IMU_INT=IO12, MAG_INT=IO13,
  *         SI4732_RST 独占 IO11 (旧版与 IMU_INT 复用已拆开), 修注释
  * MBDSDR Project - AI定义无线电
- * 呼号: BI4MIB
+ * 呼号: BI1AAA
  * 全开源 GPL-3.0
  *
  * 硬件 (v0.7 BOM):
@@ -979,7 +979,7 @@ void mcp_handleCall(uint8_t client, uint32_t id, const String& method, const Str
   }
   else if (method == "check_update") {
     // 返回当前版本, 电脑端/手机端软件可对比GitHub release最新版本
-    mcp_sendResponse(client, id, "{\"current\":\"" FIRMWARE_VERSION "\",\"build\":\"" FIRMWARE_BUILD "\",\"latest_url\":\"https://github.com/BI4MIB/MBDSDR/releases\",\"ota_web\":\"http://192.168.4.1/update\",\"note\":\"请将最新固件.bin通过Web OTA页面上传, 或使用ArduinoOTA推送\"}");
+    mcp_sendResponse(client, id, "{\"current\":\"" FIRMWARE_VERSION "\",\"build\":\"" FIRMWARE_BUILD "\",\"latest_url\":\"https://github.com/BI1AAA/MBDSDR/releases\",\"ota_web\":\"http://192.168.4.1/update\",\"note\":\"请将最新固件.bin通过Web OTA页面上传, 或使用ArduinoOTA推送\"}");
   }
   else if (method == "trigger_ota") {
     // 触发OTA: 提示用户通过Web页面上传, 或电脑端用espota推送
@@ -1138,7 +1138,7 @@ void setup() {
   delay(1000);
   Serial.println("\n========================================");
   Serial.println("  MBDSDR Mini Firmware v0.6 (hw v0.7.1)");
-  Serial.println("  AI定义无线电 - BI4MIB");
+  Serial.println("  AI定义无线电 - BI1AAA");
   Serial.println("  全开源 GPL-3.0");
   Serial.println("========================================\n");
   

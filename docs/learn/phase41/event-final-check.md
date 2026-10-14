@@ -67,7 +67,7 @@ SSDV 物理层 IQ→包）均无硬件、未在真实过境中验证，须活动
 | 清单项 | 现状 | 证据 / 说明 |
 |---|---|---|
 | TLE 粘进 `pass_predict.py` `tle_lines` | 🟡 **快照已登记、脚本录入位仍空** | 见下方「TLE 现状」 |
-| `GROUND_STATION` 填本机坐标 | ⬜ 待用户填 | `pass_predict.py:59-63` 当前 `lat/lon=None`（未套长春示例，符合红线） |
+| `GROUND_STATION` 填本机坐标 | ⬜ 待用户填 | `pass_predict.py:59-63` 当前 `lat/lon=None`（未套示例城市示例，符合红线） |
 | 过境表跑出（两星 fresh、status≠none） | ⬜ 待录入后跑 | 录入位为空时脚本诚实打印「未录入，跳过」不伪造 |
 | 主攻过境 AOS/仰角/fd 抄进值班笔记 | ⬜ 待 D 完成后 | 依赖上一项 |
 | 官方下行频率填 `P3-event-params.md §2` + `downlink_hz` | ⬜ **待官方发布** | `P3-event-params.md §2` 四个模式行均 `_待官方发布填入_`；`pass_predict.py:71,77` `downlink_hz=None` |
@@ -122,7 +122,7 @@ SSDV 物理层 IQ→包）均无硬件、未在真实过境中验证，须活动
 | 4 | **JAMX01 真实 TLE** | AutoTLE 快照历元 2026-10-02，活动日龄 ≈5.5 天；CelesTrak 无公开 GP | 活动前一天重拉 AutoTLE，或催主办方发正式 TLE；粘入 `pass_predict.py` 后确认 `fresh` |
 | 5 | **设备/USB/驱动/占用** | 云内无 RTL-SDR 硬件 | 现场按 checklist A 段逐项 `lsusb` / `detect` / 关占用进程 |
 | 6 | **天线指向精度与信号强度** | 无 70 cm 实天线 | 按 AOS/LOS 方位大致对准；优先 ≥30° 仰角过境；增益 24dB 现场微调 |
-| 7 | **本机接收点经纬度** | 不得套长春示例坐标 | 用户把本机 lat/lon 填进 `GROUND_STATION` 后再跑预测 |
+| 7 | **本机接收点经纬度** | 不得套示例坐标 | 用户把本机 lat/lon 填进 `GROUND_STATION` 后再跑预测 |
 
 ---
 

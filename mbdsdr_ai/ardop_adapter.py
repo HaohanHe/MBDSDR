@@ -412,7 +412,7 @@ def register_ardop_tools(registry) -> None:
         try:
             s = ARDOPSession()
             steps = [("listen", {}),
-                     ("connect_request", {"callsign": "BI4MIB", "bw": "500"}),
+                     ("connect_request", {"callsign": "BI1AAA", "bw": "500"}),
                      ("connect_ack", {}),
                      ("send_data", {}), ("ack", {}),
                      ("disconnect", {})]

@@ -762,29 +762,29 @@
   "sdr_encode_ax25": {
     "cat": "OK",
     "args": {
-      "source": "BI4MIB",
+      "source": "BI1AAA",
       "destination": "TEST",
       "info": "test"
     },
-    "snippet": "=== AX.25 帧编码 === 源: BI4MIB-0 目的: TEST-0 控制: 0x03 协议ID: 0xF0 信息: test FCS: 0xFF02 帧长度: 22 "
+    "snippet": "=== AX.25 帧编码 === 源: BI1AAA-0 目的: TEST-0 控制: 0x03 协议ID: 0xF0 信息: test FCS: 0xFF02 帧长度: 22 "
   },
   "sdr_aprs_encode": {
     "cat": "OK",
     "args": {
-      "source": "BI4MIB",
+      "source": "BI1AAA",
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== APRS 位置编码 === 源: BI4MIB-0 位置: 43.886800, 125.324500 符号: /- 注释:  中继: WIDE2-2 APRS 报文: !"
+    "snippet": "=== APRS 位置编码 === 源: BI1AAA-0 位置: 43.886800, 125.324500 符号: /- 注释:  中继: WIDE2-2 APRS 报文: !"
   },
   "sdr_aprs_send_position": {
     "cat": "OK",
     "args": {
-      "callsign": "BI4MIB",
+      "callsign": "BI1AAA",
       "latitude": 43.8868,
       "longitude": 125.3245
     },
-    "snippet": "=== APRS 位置发送 === 呼号: BI4MIB-0 位置: 43.886800, 125.324500 频率: 144.640 MHz APRS 报文: !4353.21"
+    "snippet": "=== APRS 位置发送 === 呼号: BI1AAA-0 位置: 43.886800, 125.324500 频率: 144.640 MHz APRS 报文: !4353.21"
   },
   "sdr_kiss_encode": {
     "cat": "OK",
@@ -848,7 +848,7 @@
   "pnt_update_source": {
     "cat": "OK",
     "args": {
-      "source": "BI4MIB",
+      "source": "BI1AAA",
       "latitude": 43.8868,
       "longitude": 125.3245
     },
@@ -1436,7 +1436,7 @@
     "args": {
       "text": "HELLO"
     },
-    "snippet": "FT8编码失败: ValueError: FT8 消息至少需要 2 个空格分隔字段，如 'CQ BI4MIB OM74' 或 'BI4MIB K1ABC 73'，当前收到 1 个字"
+    "snippet": "FT8编码失败: ValueError: FT8 消息至少需要 2 个空格分隔字段，如 'CQ BI1AAA OM74' 或 'BI1AAA K1ABC 73'，当前收到 1 个字"
   },
   "spectrum_analyze_iq": {
     "cat": "OK",
@@ -1458,7 +1458,7 @@
     "args": {
       "text": "HELLO"
     },
-    "snippet": "FST4编码失败：消息格式不正确，请使用标准格式如 'CQ BI4MIB OM74'、'BI4MIB K1ABC 73'"
+    "snippet": "FST4编码失败：消息格式不正确，请使用标准格式如 'CQ BI1AAA OM74'、'BI1AAA K1ABC 73'"
   },
   "cw_decode_audio": {
     "cat": "OK",
@@ -1491,7 +1491,7 @@
   "ax25_encode": {
     "cat": "OK",
     "args": {
-      "source": "BI4MIB"
+      "source": "BI1AAA"
     },
     "snippet": "{\"hex\": \"82a0a4a64040e08492689a92846103f09317\", \"fcs\": \"0x1793\", \"len\": 18, \"stuffed_hex\":"
   },
@@ -1505,7 +1505,7 @@
   "afsk_modulate": {
     "cat": "OK",
     "args": {
-      "source": "BI4MIB"
+      "source": "BI1AAA"
     },
     "snippet": "{\"sample_rate\": 48000.0, \"samples\": 13760, \"audio\": [0.0, 0.022700000554323196, -0.0284000"
   },

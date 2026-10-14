@@ -148,7 +148,7 @@ def build_requests():
         ("ok_gis",         "gis_distance",            {"lat1": 43.8868, "lon1": 125.3245,
                                                          "lat2": 39.9042, "lon2": 116.4074},
          "exec_success"),
-        ("ok_aprs",        "aprs_position_encode",    {"source": "BI4MIB", "latitude": 43.88,
+        ("ok_aprs",        "aprs_position_encode",    {"source": "BI1AAA", "latitude": 43.88,
                                                          "longitude": 125.32}, "exec_success"),
         ("ok_nmea",        "gnss_parse_rmc",         {"nmea": nmea}, "exec_success"),
         # --- 短名/别名（应被 registry 自动解析/归一化，仍成功）---

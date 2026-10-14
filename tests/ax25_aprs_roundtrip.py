@@ -21,7 +21,7 @@ from mbdsdr_ai.ax25 import (  # noqa: E402
 from mbdsdr_ai.aprs_parser import parse_aprs_frame  # noqa: E402
 
 
-def _mkframe(info: bytes, dst: str = "APRS", src: str = "BI4MIB") -> AX25Frame:
+def _mkframe(info: bytes, dst: str = "APRS", src: str = "BI1AAA") -> AX25Frame:
     return AX25Frame(destination=dst, source=src,
                      control=0x03, pid=0xF0, info=info)
 
@@ -32,13 +32,13 @@ def test_crc_vector() -> None:
 
 
 def test_frame_roundtrip() -> None:
-    f = build_aprs_position_frame("BI4MIB", 39.9042, 116.4074,
+    f = build_aprs_position_frame("BI1AAA", 39.9042, 116.4074,
                                    comment="roundtrip", digipeaters=["WIDE2-1"])
     blob = f.to_bytes()
     g = AX25Frame.from_bytes(blob)
     assert g is not None, "解帧失败"
     assert g.fcs_valid, f"FCS 校验失败: got 0x{g.fcs:04X}"
-    assert g.source == "BI4MIB"
+    assert g.source == "BI1AAA"
     assert g.destination == "APRS"
     assert len(g.digipeaters) == 1 and g.digipeaters[0][0] == "WIDE2"
     print(f"  [ok] 帧往返: {g.source}->{g.destination} via "
@@ -49,7 +49,7 @@ def test_bitstuff_roundtrip() -> None:
     patterns = [
         bytes([0xFF, 0x01, 0x7E, 0x03]),
         bytes(range(256)),
-        b"BI4MIB>APRS,WIDE2-1:!3954.25N/11624.44E-test",
+        b"BI1AAA>APRS,WIDE2-1:!3954.25N/11624.44E-test",
         bytes([0xFF] * 7),
     ]
     for p in patterns:
@@ -64,7 +64,7 @@ def test_afsk_noisy_roundtrip() -> None:
     ok = 0
     for i in range(N):
         f = build_aprs_position_frame(
-            "BI4MIB", 39.9 + i * 0.01, 116.4 + i * 0.01,
+            "BI1AAA", 39.9 + i * 0.01, 116.4 + i * 0.01,
             comment=f"noise test {i}", digipeaters=[])
         audio = modem.modulate(f, preamble_bytes=15, postamble_bytes=4)
         sig_pow = float(np.mean(audio ** 2))
@@ -120,10 +120,10 @@ def test_positionless_weather() -> None:
 
 
 def test_message() -> None:
-    f = _mkframe(b":BI4MIB   :Hello 73{01")
+    f = _mkframe(b":BI1AAA   :Hello 73{01")
     r = parse_aprs_frame(f)
     assert r["type"] == "message"
-    assert r["message"]["addressee"] == "BI4MIB"
+    assert r["message"]["addressee"] == "BI1AAA"
     assert r["message"]["message"] == "Hello 73"
     assert r["message"]["message_id"] == "01"
     print(f"  [ok] 消息: to={r['message']['addressee']!r} "

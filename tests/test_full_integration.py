@@ -1300,8 +1300,8 @@ def test_ax25_roundtrip(result: TestResult):
     except Exception as e:  # noqa: BLE001
         result.record("AX.25 模块可导入", False, str(e))
         return
-    f = AX25Frame(destination="CQ", dest_ssid=0, source="BI4MIB", source_ssid=9,
-                  info=b">TEST from BI4MIB")
+    f = AX25Frame(destination="CQ", dest_ssid=0, source="BI1AAA", source_ssid=9,
+                  info=b">TEST from BI1AAA")
     blob = f.to_bytes()
     back = AX25Frame.from_bytes(blob)
     result.record("AX.25 帧可解析", back is not None)
@@ -1309,9 +1309,9 @@ def test_ax25_roundtrip(result: TestResult):
         return
     result.record("AX.25 FCS 有效", back.fcs_valid is True, f"fcs_valid={back.fcs_valid}")
     result.record("AX.25 目的/源呼号往返",
-                  back.destination == "CQ" and back.source == "BI4MIB",
+                  back.destination == "CQ" and back.source == "BI1AAA",
                   f"{back.destination}/{back.source}")
-    result.record("AX.25 信息字段往返", back.info == b">TEST from BI4MIB",
+    result.record("AX.25 信息字段往返", back.info == b">TEST from BI1AAA",
                   back.info[:30].decode("ascii", "replace"))
 
 
@@ -1322,7 +1322,7 @@ def test_aprs_position_roundtrip(result: TestResult):
     except Exception as e:  # noqa: BLE001
         result.record("APRS 模块可导入", False, str(e))
         return
-    p = APRSPosition(latitude=43.88, longitude=125.32, comment="BI4MIB test")
+    p = APRSPosition(latitude=43.88, longitude=125.32, comment="BI1AAA test")
     s = p.encode()
     back = APRSPosition.decode(s)
     result.record("APRS 报文可解码", back is not None)
@@ -1343,7 +1343,7 @@ def test_hdlc_bitstuff_roundtrip(result: TestResult):
         result.record("HDLC 位填充函数可导入", False, str(e))
         return
     cases = [b"\x7e", b"\xff\xff", bytes(range(256)),
-             b"\x01\x03\xf0>BI4MIB", b"\xff\x00\xff\x01\x02"]
+             b"\x01\x03\xf0>BI1AAA", b"\xff\x00\xff\x01\x02"]
     ok = True
     for c in cases:
         stuffed = hdlc_bit_stuff(c)
@@ -1385,7 +1385,7 @@ def test_afsk_modem_roundtrip(result: TestResult):
     except Exception as e:  # noqa: BLE001
         result.record("AFSK modem 可导入", False, str(e))
         return
-    f = AX25Frame(destination="CQ", source="BI4MIB", info=b">HI BI4MIB AFSK test")
+    f = AX25Frame(destination="CQ", source="BI1AAA", info=b">HI BI1AAA AFSK test")
     modem = AFSKModem()
     audio = modem.modulate(f)
     frames = modem.demodulate(_np.asarray(audio, dtype=float))
@@ -1394,7 +1394,7 @@ def test_afsk_modem_roundtrip(result: TestResult):
         return
     got = frames[0]
     result.record("AFSK 信息字段往返",
-                  got.info == b">HI BI4MIB AFSK test",
+                  got.info == b">HI BI1AAA AFSK test",
                   got.info[:20].decode("ascii", "replace"))
     result.record("AFSK FCS 有效", got.fcs_valid is True, f"fcs_valid={got.fcs_valid}")
 

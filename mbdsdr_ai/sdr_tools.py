@@ -1631,7 +1631,7 @@ def register_sdr_tools(agent):
         parameters={
             "type": "object",
             "properties": {
-                "source": {"type": "string", "description": "源呼号（如 BI4MIB 或 BI4MIB-7）"},
+                "source": {"type": "string", "description": "源呼号（如 BI1AAA 或 BI1AAA-7）"},
                 "destination": {"type": "string", "description": "目的呼号（如 APRS 或 CQ）"},
                 "digipeaters": {"type": "array", "items": {"type": "string"}, "description": "中继器路径列表（如 ['WIDE1-1', 'WIDE2-2']）"},
                 "info": {"type": "string", "description": "信息字段内容（文本）"},
@@ -1664,7 +1664,7 @@ def register_sdr_tools(agent):
         parameters={
             "type": "object",
             "properties": {
-                "source": {"type": "string", "description": "源呼号（如 BI4MIB）"},
+                "source": {"type": "string", "description": "源呼号（如 BI1AAA）"},
                 "latitude": {"type": "number", "description": "纬度（十进制度，北纬正）"},
                 "longitude": {"type": "number", "description": "经度（十进制度，东经正）"},
                 "comment": {"type": "string", "description": "注释文本"},
@@ -1698,7 +1698,7 @@ def register_sdr_tools(agent):
         parameters={
             "type": "object",
             "properties": {
-                "callsign": {"type": "string", "description": "你的呼号（如 BI4MIB）"},
+                "callsign": {"type": "string", "description": "你的呼号（如 BI1AAA）"},
                 "latitude": {"type": "number", "description": "纬度（十进制度）"},
                 "longitude": {"type": "number", "description": "经度（十进制度）"},
                 "comment": {"type": "string", "description": "注释文本（如 'MBDSDR AI SDR Station'）"},
@@ -1749,7 +1749,7 @@ def register_sdr_tools(agent):
             "type": "object",
             "properties": {
                 "ax25_hex": {"type": "string", "description": "接收到的 AX.25 帧十六进制数据"},
-                "mycall": {"type": "string", "description": "本中继站呼号（如 BI4MIB）"},
+                "mycall": {"type": "string", "description": "本中继站呼号（如 BI1AAA）"},
                 "myssid": {"type": "integer", "description": "本中继站 SSID，默认 0"},
                 "digi_calls": {"type": "array", "items": {"type": "string"}, "description": "额外响应的中继器呼号列表"},
             },
@@ -2299,7 +2299,7 @@ def register_sdr_tools(agent):
         parameters={
             "type": "object",
             "properties": {
-                "text": {"type": "string", "description": "要发送的文本，如 'CQ CQ DE BI4MIB'"},
+                "text": {"type": "string", "description": "要发送的文本，如 'CQ CQ DE BI1AAA'"},
                 "wpm": {"type": "number", "description": "速度（词/分钟），默认20", "default": 20},
             },
             "required": ["text"],

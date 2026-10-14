@@ -36,14 +36,14 @@ def main():
     from mbdsdr_ai import ax25
     for sr in (22050, 44100, 48000):
         m = ax25.AFSKModem(sample_rate=sr)
-        f = ax25.build_aprs_position_frame("BI4MIB", 43.8868, 125.3245, comment="SMOKE")
+        f = ax25.build_aprs_position_frame("BI1AAA", 43.8868, 125.3245, comment="SMOKE")
         out = m.demodulate(m.modulate(f))
-        ok = bool(out) and out[0].fcs_valid and out[0].source == "BI4MIB"
+        ok = bool(out) and out[0].fcs_valid and out[0].source == "BI1AAA"
         check(f"AX.25往返 {sr}Hz", ok, out[0].info.decode("latin1")[:28] if ok else "0帧")
 
     # 真实采集链路（高率合成 -> 降采样 -> 解调）
     m44 = ax25.AFSKModem(sample_rate=44100)
-    f44 = ax25.build_aprs_position_frame("BI4MIB", 43.8868, 125.3245)
+    f44 = ax25.build_aprs_position_frame("BI1AAA", 43.8868, 125.3245)
     a44 = m44.modulate(f44)
     for sr, step in ((22050, 2), (11025, 4)):
         mc = ax25.AFSKModem(sample_rate=sr)
@@ -53,7 +53,7 @@ def main():
     # 2) Morse / CW
     print("\n[2] Morse / CW")
     from mbdsdr_ai import radio_control
-    morse_txt = getattr(radio_control, "morse_encode")("BI4MIB") if hasattr(radio_control, "morse_encode") else None
+    morse_txt = getattr(radio_control, "morse_encode")("BI1AAA") if hasattr(radio_control, "morse_encode") else None
     if morse_txt is None:
         from mbdsdr_ai import sdr_tools  # noqa
         morse_txt = " -.. .. .--."  # placeholder
@@ -94,7 +94,7 @@ def main():
 
     # 7) APRS 编码
     print("\n[7] APRS 编码")
-    enc = reg.call("sdr_aprs_encode", {"source": "BI4MIB", "lat": 43.8868, "lon": 125.3245})
+    enc = reg.call("sdr_aprs_encode", {"source": "BI1AAA", "lat": 43.8868, "lon": 125.3245})
     check("aprs_encode 出 AX.25 帧", "AX.25" in str(enc) or "hex" in str(enc).lower() or "帧" in str(enc))
 
     print("\n" + "=" * 60)

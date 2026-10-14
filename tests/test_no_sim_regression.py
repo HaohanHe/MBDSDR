@@ -55,7 +55,7 @@ FORBIDDEN_CLASS_REFS = {"SimDataGenerator", "MockSDRBackend"}
 FORBIDDEN_METHODS = {"_connect_simulation", "_auto_connect_simulation", "_sim_tool"}
 # 禁止出现的属性/变量
 FORBIDDEN_ATTRS = {"sim_btn", "_is_sim"}
-# 禁止硬编码的假坐标（北京 39.9042 / 长春 43.8868, 125.3245）
+# 禁止硬编码的假坐标（北京 39.9042 / 示例城市 43.8868, 125.3245）
 FORBIDDEN_FLOAT_COORDS = (39.9042, 43.8868, 125.3245)
 # 禁止在运行时数据生成里使用 np.random 的面板
 RANDOM_FORBIDDEN_PANELS = (

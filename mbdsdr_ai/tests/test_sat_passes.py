@@ -32,7 +32,7 @@ ISS_TLE_FALLBACK = [
     "2 25544  51.6400 235.5478 0006703  76.5300  25.5300 15.49000100 12345",
 ]
 
-# 长春站（用户所在地）：约 43.82°N, 125.32°E
+# 示例站（用户所在地）：约 43.82°N, 125.32°E
 CHANGCHUN = GroundStation(lat_deg=43.82, lon_deg=125.32, alt_m=0.0)
 
 
@@ -67,7 +67,7 @@ def test_iss_pass_geometry():
     passes = predict_passes(tle, CHANGCHUN, start_time=ts.now(),
                             hours=36.0, min_alt=10.0)
     assert len(passes) >= 1, "36h 内至少应预测出一次 ISS 过境"
-    print(f"\n[test] 共预测出 {len(passes)} 次过境（长春, 36h, min_alt=10°）：")
+    print(f"\n[test] 共预测出 {len(passes)} 次过境（示例城市, 36h, min_alt=10°）：")
     for p in passes[:8]:
         print("   " + p.summary())
 

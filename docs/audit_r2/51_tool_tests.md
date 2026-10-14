@@ -81,7 +81,7 @@ L57 对每个工具**无参调用** `reg.call(name, {})`，按文本分到 OK/NE
 - **[真bug] "live" 名不副实：全程 mock + 合成数据，无真实硬件验证。** L73 `sdr_connect {"device_id":"mock"}`；频谱/扫频/干扰检测全部跑在 `MockSDRBackend`（`sdr_backend.py` L324）合成的 1 kHz 频偏载波 + 高斯噪声上。真实 RTL-SDR 的驱动失败、IQ 直流偏置、时钟频偏、天线失配等问题这里 100% 捕获不到。
 - **[空壳] Morse 测试的 placeholder 兜底（L56-58）。**
   ```python
-  morse_txt = getattr(radio_control, "morse_encode")("BI4MIB") if hasattr(...) else None
+  morse_txt = getattr(radio_control, "morse_encode")("BI1AAA") if hasattr(...) else None
   if morse_txt is None:
       morse_txt = " -.. .. .--."  # placeholder
   check(..., isinstance(morse_txt, str) and "-" in morse_txt, ...)
@@ -94,7 +94,7 @@ L57 对每个工具**无参调用** `reg.call(name, {})`，按文本分到 OK/NE
   - L87：`check("interference 真实返回", bool(it))` ——bool() 非空即过。
   - L92：`"NOAA" in str(sky) or "仰角" in str(sky)` ——子串。
   - L97：`"AX.25" in str(enc) or "hex" in str(enc).lower() or "帧" in str(enc)` ——子串。
-- **[建议·唯一真测试] L36-50 AX.25/AFSK 往返是全文件唯一有断言质量的部分：** 调制→解调→断言 `fcs_valid and source=="BI4MIB"`，还跨 22050/44100/48000 三档采样率做了降采样链路测试。但它**直接调 `ax25` 模块，不走工具注册表**——注册的 `sdr_encode_ax25`/`sdr_decode_ax25` 工具并未被往返验证。
+- **[建议·唯一真测试] L36-50 AX.25/AFSK 往返是全文件唯一有断言质量的部分：** 调制→解调→断言 `fcs_valid and source=="BI1AAA"`，还跨 22050/44100/48000 三档采样率做了降采样链路测试。但它**直接调 `ax25` 模块，不走工具注册表**——注册的 `sdr_encode_ax25`/`sdr_decode_ax25` 工具并未被往返验证。
 - L69 硬编码 `n >= 190`：只数工具个数，个数够就过，与正确性无关。
 
 ---

@@ -288,7 +288,7 @@ def _find_crossings_on_day(date_local: date, lat_deg: float, lon_deg: float,
 
     ``date_local`` 是地面站所在本地日历日。本地子夜近似为
     ``UTC 子夜(date_local) - lon/15 小时``（本地太阳时 = UTC + lon/15h），
-    这样长春(125°E, UTC+8)的"3月20日"会正确包含该日清晨/傍晚的事件，
+    这样示例城市(125°E, UTC+8)的"3月20日"会正确包含该日清晨/傍晚的事件，
     而不会落到相邻 UTC 日。
 
     返回 (rising_jd, setting_jd)，未发生（极昼/极夜）为 None。

@@ -54,7 +54,7 @@ python3 docs/learn/phase14/pass_predict.py --json
 - **通过判据**：打印过境表，两星 `TLE 新鲜度=fresh`（age<3 天）；
   `status=none` 或 `TLE 新鲜度=stale` 时**不要盲收**（重拉 TLE / 催主办方）。
 - **选主攻**：优先中天仰角 ≥30° 的过境（参考计划见 `P3-receive-sop.md` §3，
-  长春站示例；活动当天按本机坐标重跑，勿套示例坐标）。
+  示例站示例；活动当天按本机坐标重跑，勿套示例坐标）。
 - **【待真机确认】**：JAMX01 在 CelesTrak 无公开 GP，须用 AutoTLE 聚合源三行
   （`P3-receive-sop.md` §2）；活动当天 TLE 历元 >3 天建议催主办方发正式 TLE。
 
@@ -211,7 +211,7 @@ python3 tools/onboarding/onboard.py --step decode --mode ssdv \
 - [ ] 接收 **UTC** 时间（抄 SigMF meta `core:datetime` 或 `pass_predict.py --json`；**不写北京时**）
 - [ ] 卫星与制式（JAMX01 / ASRTU-1；SSTV / SSDV）
 - [ ] 下行频率（按实际对准频率，MHz）+ 最大仰角
-- [ ] 接收地点经纬度（实际接收点，勿套长春示例）+ 城市
+- [ ] 接收地点经纬度（实际接收点，勿套示例城市示例）+ 城市
 - [ ] 接收设备（RTL-SDR 型号/采样率/增益）+ 天线（波段/类型）
 - [ ] 姓名 / 单位 / 合法呼号（无呼号按主办方公告注明，不冒用）
 - [ ] 累计已收幅数（活动共 34 幅）

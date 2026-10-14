@@ -48,7 +48,7 @@ def test_varicode_all_printable():
 
 def test_varicode_text_roundtrip():
     """多字符文本往返。"""
-    for text in ["hello", "CQ CQ BI4MIB", "123 !@#", "The quick brown fox"]:
+    for text in ["hello", "CQ CQ BI1AAA", "123 !@#", "The quick brown fox"]:
         bits = Varicode.encode_text(text)
         out = Varicode.decode_bits(bits)
         assert out.decode("ascii") == text, \
@@ -65,7 +65,7 @@ def test_psk31_roundtrip():
     """
     modem = PSK31Modem(sample_rate=8000, carrier_hz=1500.0)
     assert modem.BAUD == 31.25, f"PSK31 baud should be 31.25, got {modem.BAUD}"
-    for text in ["Hello", "hello world", "BI4MIB", "CQ CQ CQ", "73!"]:
+    for text in ["Hello", "hello world", "BI1AAA", "CQ CQ CQ", "73!"]:
         wav = modem.modulate(text)
         out = modem.demodulate(wav)
         assert out == text, f"PSK31 roundtrip failed: {text!r} -> {out!r}"
@@ -104,7 +104,7 @@ def test_rtty_roundtrip():
     modem = RTTYModem()
     assert abs(modem.shift_hz - 170.0) < 0.1
     assert abs(modem.baud - 45.45) < 0.01
-    for text in ["HELLO", "HELLO BI4MIB", "CQ CQ", "123 TEST", "S9 599", "BI4MIB"]:
+    for text in ["HELLO", "HELLO BI1AAA", "CQ CQ", "123 TEST", "S9 599", "BI1AAA"]:
         wav = modem.modulate(text)
         out = modem.demodulate(wav)
         assert out.strip() == text.strip(), \

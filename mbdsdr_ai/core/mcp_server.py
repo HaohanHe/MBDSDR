@@ -153,7 +153,7 @@ def _lt_fst4_encode(text: str) -> Any:
     text = (text or "").strip()
     if not text:
         return {"error": "empty_input",
-                "suggestion": "text 形如 'CQ BI4MIB OM74'。"}
+                "suggestion": "text 形如 'CQ BI1AAA OM74'。"}
     from mbdsdr_ai.fst4_encode import encode_fst4_text
     tones = encode_fst4_text(text)
     return {"tones": [int(t) for t in tones],
@@ -645,7 +645,7 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
 
     add("decoder_fst4_encode_text",
         "FST4 文本消息 -> 160 音调（WSJT 公开协议独立编码器）。"
-        "text 形如 'CQ BI4MIB OM74'。",
+        "text 形如 'CQ BI1AAA OM74'。",
         _schema({"text": _STR}, ["text"]),
         lambda c, a: _lt_fst4_encode(a.get("text", "")))
 

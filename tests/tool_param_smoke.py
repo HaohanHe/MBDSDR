@@ -129,9 +129,9 @@ def value_for(pname, schema):
         return "/dev/ttyUSB0"
     # --- 无线电业务字段 ---
     if n in ("callsign", "call"):
-        return "BI4MIB"
+        return "BI1AAA"
     if n == "source":
-        return "BI4MIB"
+        return "BI1AAA"
     if n in ("destination", "dest", "target"):
         return "TEST"
     if n == "symbol":

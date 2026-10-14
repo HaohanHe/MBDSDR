@@ -2,7 +2,7 @@
 
 > 仓库：`https://github.com/wb2osz/direwolf.git`（浅克隆 depth=1）
 > 阅读范围：`src/demod_afsk.c`、`src/hdlc_rec.c`、`src/hdlc_rec2.c`、`src/fcs_calc.c`、`src/ax25_pad.c`、`src/ax25_pad.h`、`src/decode_aprs.c`、`src/demod.c`、`src/fsk_demod_state.h`、`src/audio.h`、`src/dsp.c`
-> 对照文件：`mbdsdr_ai/ax25.py`（BI4MIB）
+> 对照文件：`mbdsdr_ai/ax25.py`（BI1AAA）
 >
 > 约定：所有 `file:line` 均相对于 `direwolf/src/`。
 

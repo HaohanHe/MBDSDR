@@ -315,7 +315,7 @@ def test_notification_list_changed_no_stdout_when_untagged():
 # ----------------------------------------------------------------------
 def test_longtail_fst4_encoder_real_roundtrip():
     ts = _set()
-    out = ts.call_tool("decoder_fst4_encode_text", {"text": "CQ BI4MIB OM74"})
+    out = ts.call_tool("decoder_fst4_encode_text", {"text": "CQ BI1AAA OM74"})
     assert out["n_tones"] == 160
     assert len(out["tones"]) == 160
     # FST4 同步块固定在 0/38/76/114/152，第一块为 SYNC_WORD1。

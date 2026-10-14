@@ -215,7 +215,7 @@ class TiltCompensatedCompass:
 
     def __init__(self, declination: float = 0.0):
         """
-        declination: 磁偏角（度），长春约 -9°（磁北比真北偏西 9°）
+        declination: 磁偏角（度），示例城市约 -9°（磁北比真北偏西 9°）
         """
         self.declination = declination
         self.yaw = 0.0
@@ -414,7 +414,7 @@ class PoseFusion:
     def __init__(self, mode: str = "fused", declination: float = -9.0):
         """
         mode: imu_only / gps_only / fused
-        declination: 磁偏角（长春约 -9°）
+        declination: 磁偏角（示例城市约 -9°）
         """
         self.mode = mode
         self.complementary = ComplementaryFilter(alpha=0.98)

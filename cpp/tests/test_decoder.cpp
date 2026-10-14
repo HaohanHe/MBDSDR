@@ -120,13 +120,13 @@ void TestDecoder::testCwDecodeNoisy() {
 }
 
 void TestDecoder::testAdsbCrc() {
-    // Known DF17 frame: DF=17, CA=5, ICAO=ABCDEF, TC=1, callsign "BI4MIB"
+    // Known DF17 frame: DF=17, CA=5, ICAO=ABCDEF, TC=1, callsign "BI1AAA"
     uint8_t frame[14] = {0};
     frame[0] = (17 << 3) | 5;  // DF=17, CA=5
     frame[1] = 0xAB;
     frame[2] = 0xCD;
     frame[3] = 0xEF;
-    // ME: TC=1 (bits 0-4 of ME), callsign "BI4MIB"
+    // ME: TC=1 (bits 0-4 of ME), callsign "BI1AAA"
     frame[4] = (1 << 3); // TC=1
     // Callsign chars: B=2, I=9, 4=21, M=19, I=9, B=2, padded
     uint8_t cs[] = {2, 9, 21, 19, 9, 2, 32, 32};
@@ -157,7 +157,7 @@ void TestDecoder::testAdsbCallsign() {
     frame[1] = 0xAB; frame[2] = 0xCD; frame[3] = 0xEF;
     frame[4] = (1 << 3); // TC=1 (callsign)
 
-    // Pack callsign "BI4MIB  " into ME field (bytes 4..10, 56 bits)
+    // Pack callsign "BI1AAA  " into ME field (bytes 4..10, 56 bits)
     // ME = TC(5 bits) + 3 reserved + 8 chars * 6 bits = 56 bits
     uint8_t chars[] = {2, 9, 21, 19, 9, 2, 32, 32};
     uint64_t me = static_cast<uint64_t>(1) << 51; // TC=1 at top 5 bits

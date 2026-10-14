@@ -164,10 +164,10 @@ def test_observer_not_hardcoded(qapp):
     panel = NewSpacetimePanel()
     lat = panel.lat_spin.value()
     lon = panel.lon_spin.value()
-    # 不允许出现北京 / 长春的硬编码坐标
+    # 不允许出现北京 / 示例城市的硬编码坐标
     assert lat != pytest.approx(39.9042, abs=1e-6), "纬度不得硬编码北京"
-    assert lat != pytest.approx(43.8868, abs=1e-6), "纬度不得硬编码长春"
-    assert lon != pytest.approx(125.3245, abs=1e-6), "经度不得硬编码长春"
+    assert lat != pytest.approx(43.8868, abs=1e-6), "纬度不得硬编码示例城市"
+    assert lon != pytest.approx(125.3245, abs=1e-6), "经度不得硬编码示例城市"
     panel.close()
 
 

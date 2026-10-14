@@ -261,7 +261,7 @@ class MainWindow(QMainWindow):
         self._record_timer: Optional[QTimer] = None
         self._record_seconds = 0
         self._sky_update_timer: Optional[QTimer] = None
-        # 观测站坐标：默认 None 表示“未配置观测站位置”（不再硬编码长春坐标）。
+        # 观测站坐标：默认 None 表示“未配置观测站位置”（不再硬编码示例坐标）。
         # 由 GNSS 真实定位或 gui_config.json 手动配置后填充；None 时天空图不计算卫星。
         self._observer_lat: Optional[float] = None
         self._observer_lon: Optional[float] = None
@@ -5375,7 +5375,7 @@ class MainWindow(QMainWindow):
                 y = win.get("y", 100)
                 self.resize(w, h)
                 self.move(x, y)
-            # 恢复观测站坐标：缺失时默认 None（未配置），不再回退到长春硬编码坐标
+            # 恢复观测站坐标：缺失时默认 None（未配置），不再回退到示例城市硬编码坐标
             self._observer_lat = config.get("observer_lat")
             self._observer_lon = config.get("observer_lon")
             # 恢复 GNSS 串口配置（port="" 留空 → 连接时 auto_detect）

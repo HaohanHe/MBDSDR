@@ -177,7 +177,7 @@ alt_approx = 45.0  # 占位值
   ```
 - **确认：这是硬编码字符串，不读串口、不解析 NMEA。** 全仓搜 `ATGM336H` 只在 `agent.py:1780` 的工具描述和 `pose.py:11` 的注释里出现，没有驱动。
 - `gnss_monitor.py` 本身**不输出位置**（它是干扰监视），所以"gnss_monitor 能否提供真实位置"答案是：**它根本不打算提供**。项目里唯一的位置来源就是这个硬编码字符串 + `new_spacetime.PNTFusionEngine` 由 LLM/工具调用手填的 (lat, lon)。
-- 测试里 `Observer(latitude_deg=43.88, longitude_deg=125.32, height_m=250)`（`tests/test_full_integration.py:752`）和硬编码 GPS 坐标高度重合——整个项目被锚定在长春坐标，其他地点未经验证。
+- 测试里 `Observer(latitude_deg=43.88, longitude_deg=125.32, height_m=250)`（`tests/test_full_integration.py:752`）和硬编码 GPS 坐标高度重合——整个项目被锚定在示例坐标，其他地点未经验证。
 
 ---
 
@@ -210,7 +210,7 @@ alt_approx = 45.0  # 占位值
 | 2 | [空壳] | `gnss_monitor.py` 整体 | 不是 GNSS 监测，是干扰频谱监视；无 NMEA/无定位/无 PPP-RTK |
 | 3 | [占位] | `new_spacetime.py:484,529` | PPP-RTK 只是枚举标签；`_fuse` 是位置加权均值，无 RTCM/精密星历/模糊度固定/EKF |
 | 4 | [真bug] | `sdr_tools.py:4633,4681` | GNSS 监测喂合成 IQ，从不读硬件——"实验室绿、真机红" |
-| 5 | [真bug] | `sdr_tools.py:3457` | `_get_gps` 返回硬编码长春坐标字符串，无 ATGM336H 驱动 |
+| 5 | [真bug] | `sdr_tools.py:3457` | `_get_gps` 返回硬编码示例坐标字符串，无 ATGM336H 驱动 |
 | 6 | [真bug] | `gnss_monitor.py:195,202-204` | 注释称 Welch 实为单次 FFT 周期图；字段叫 dBm 实为相对 dB，未校准 |
 | 7 | [空壳] | `gnss_monitor.py:35-36` | CHIRP/PULSE 枚举定义了但分类器永远不返回它们 |
 | 8 | [真bug] | `agent.py:2537` | `AntennaParams(...) if False else None` 死分支，beamwidth_deg 参数被吞 |

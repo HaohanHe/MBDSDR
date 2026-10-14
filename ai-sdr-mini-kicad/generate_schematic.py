@@ -515,7 +515,7 @@ f'''  (symbol (lib_id "{libid}") (at {x} {y} 0) (unit 1)
 # ----------------------------------------------------------------------------
 titles=[
  (20,20,"MBDSDR  ai-sdr Mini  原理图  v0.7.1",7,True),
- (20,30,"AI-Defined Radio | 80x60mm 2-layer | 62 components / global-label nets | GPL-3.0 | BI4MIB",3.5,False),
+ (20,30,"AI-Defined Radio | 80x60mm 2-layer | 62 components / global-label nets | GPL-3.0 | BI1AAA",3.5,False),
  (30,55,"[1] 电源输入与稳压 (Type-C / Fuse / AMS1117)",4,True),
  (250,40,"[2] USB2514B Hub + 24MHz (上行Type-C / 下行ESP32 & USB-A)",4,True),
  (468,30,"[3] USB-A扩展口 / 状态LED",4,True),
@@ -545,7 +545,7 @@ header=f'''(kicad_sch (version 20221115) (generator eeschema)
     (title "MBDSDR ai-sdr Mini - AI Defined Radio Hardware")
     (date "2026-09-16")
     (rev "v0.7.1")
-    (company "MBDSDR Open Source Project (BI4MIB)")
+    (company "MBDSDR Open Source Project (BI1AAA)")
     (comment 1 "Complete v0.7.1 schematic, global-label nets, auto-routable")
     (comment 2 "GPL-3.0 License")
     (comment 3 "80x60mm 2-layer, JLCPCB SMT")

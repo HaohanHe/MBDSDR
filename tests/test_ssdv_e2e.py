@@ -16,7 +16,7 @@
         → ASM(0x1ACFFC1D) 帧同步（噪声 preamble）→ SSDV 帧字节
 
 红线（与规格 §6 一致）：
-  - 不内置任何呼号（含 BI4MIB）；callsign 一律由参数传入。
+  - 不内置任何呼号（含 BI1AAA）；callsign 一律由参数传入。
   - 超纠错能力时**诚实**报告具体缺失 MCU 列表（``missing_mcus``），不造假图、不假装完整。
   - 无数据 / 纯噪声 → 空结果（无图、无假包）。
 """
@@ -425,7 +425,7 @@ def test_ccsds_empty_state():
 
 
 # ==========================================================================
-# 5. callsign 由参数传入；被测代码不内置任何呼号（含 BI4MIB）
+# 5. callsign 由参数传入；被测代码不内置任何呼号（含 BI1AAA）
 # ==========================================================================
 def test_callsign_passed_by_parameter():
     rgb = _gradient_rgb(48, 48)
@@ -444,11 +444,11 @@ def test_callsign_passed_by_parameter():
 
 
 def test_no_builtin_callsign_in_sources():
-    """被测两模块源码不得硬编码任何呼号常量（红线：含 BI4MIB）。"""
+    """被测两模块源码不得硬编码任何呼号常量（红线：含 BI1AAA）。"""
     for fname in ("ssdv_decoder.py", "ccsds_rx.py"):
         path = os.path.join(_REPO_ROOT, "mbdsdr_ai", fname)
         src = open(path, encoding="utf-8").read()
-        for bad in ("BI4MIB", "DEFAULT_CALLSIGN"):
+        for bad in ("BI1AAA", "DEFAULT_CALLSIGN"):
             assert bad not in src, f"{fname} 内置了呼号常量 {bad!r}"
 
 

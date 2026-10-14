@@ -101,14 +101,14 @@ def test_fsk_roundtrip_snr10():
 def test_bell103_text_roundtrip():
     fr = ASCIIFrame()
     modem = FSKModem(baud=300)   # Bell 103
-    text = "HELLO BI4MIB 123"
+    text = "HELLO BI1AAA 123"
     bits = fr.encode_bytes(text.encode("ascii"))
     audio = modem.modulate_bits(bits)
     rng = np.random.default_rng(7)
     noisy = add_noise(audio, snr_db=12.0, rng=rng)
     rx, conf = modem.demodulate_bits(noisy, n_bits=len(bits))
     out = fr.decode_bits(rx)
-    assert out.decode("ascii", errors="replace").startswith("HELLO BI4MIB")
+    assert out.decode("ascii", errors="replace").startswith("HELLO BI1AAA")
 
 
 # ---------------------------------------------------------------------

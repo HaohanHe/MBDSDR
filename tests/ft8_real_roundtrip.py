@@ -7,7 +7,7 @@
   编码 → 加噪 → 软判决 → LDPC BP → CRC14/24 → unpack77 → 文本 一致。
 
 测试项：
-  1. 参考向量：CQ BI4MIB OM74 → 79 音调，3 个 Costas7 同步块位置正确
+  1. 参考向量：CQ BI1AAA OM74 → 79 音调，3 个 Costas7 同步块位置正确
   2. 加噪往返：sigma=0.4（每bin高斯噪声，信号=1）下解码成功率 > 50%
   3. 呼号往返：100 个随机合法呼号，编码→解码还原率 100%
   4. 消息格式往返：CQ / 呼号+网格 / 信号报告 / 73/RRR/RR73 文本一致
@@ -71,8 +71,8 @@ def decode_ft8_text(energies) -> str | None:
 
 # ---------------------------------------------------------------------------
 def test_reference_vector():
-    print("\n[1] 参考向量：CQ BI4MIB OM74")
-    tones = encode_ft8_text("CQ BI4MIB OM74")
+    print("\n[1] 参考向量：CQ BI1AAA OM74")
+    tones = encode_ft8_text("CQ BI1AAA OM74")
     check("79 音调", len(tones) == NN == 79, f"got {len(tones)}")
     check("全部 0-7", all(0 <= t <= 7 for t in tones))
     for bi, block in enumerate(SYNC_BLOCKS):
@@ -80,13 +80,13 @@ def test_reference_vector():
         check(f"Costas 同步块{bi}", got == ICOS7, f"got={got}")
     # 无噪解码
     txt = decode_ft8_text(tones_to_ft8_energies(tones))
-    check("无噪解码文本", txt == "CQ BI4MIB OM74", f"got={txt!r}")
+    check("无噪解码文本", txt == "CQ BI1AAA OM74", f"got={txt!r}")
 
 
 def test_noise_roundtrip():
     print("\n[2] 加噪往返（sigma=0.35，每bin高斯噪声，信号=1.0）")
-    msgs = ["CQ BI4MIB OM74", "CQ W9KXY FN42", "K1ABC BI4MIB",
-            "BI4MIB K1ABC 73", "CQ K7XYZ DM31"]
+    msgs = ["CQ BI1AAA OM74", "CQ W9KXY FN42", "K1ABC BI1AAA",
+            "BI1AAA K1ABC 73", "CQ K7XYZ DM31"]
     ok = 0
     tot = 0
     for m in msgs:
@@ -119,7 +119,7 @@ def test_callsign_roundtrip():
             call = (pick(letters) + pick(digits)
                     + "".join(pick(letters) for _ in range(3)))
         else:
-            # iarea=3: letter letter digit letter letter letter (e.g. BI4MIB)
+            # iarea=3: letter letter digit letter letter letter (e.g. BI1AAA)
             call = (pick(letters) + pick(letters) + pick(digits)
                     + "".join(pick(letters) for _ in range(3)))
         msg = f"CQ {call} OM74"
@@ -137,17 +137,17 @@ def test_callsign_roundtrip():
 def test_message_formats():
     print("\n[4] 消息格式往返")
     cases = [
-        "CQ BI4MIB OM74",       # CQ + 呼号 + 网格
-        "BI4MIB K1ABC",         # 两个呼号，无附加
-        "BI4MIB K1ABC 73",      # 73
-        "BI4MIB K1ABC RRR",     # RRR
-        "BI4MIB K1ABC RR73",    # RR73
-        "BI4MIB K1ABC -17",     # 信号报告
-        "BI4MIB K1ABC R-07",    # R+报告；解码显示为 'BI4MIB R K1ABC -07'
+        "CQ BI1AAA OM74",       # CQ + 呼号 + 网格
+        "BI1AAA K1ABC",         # 两个呼号，无附加
+        "BI1AAA K1ABC 73",      # 73
+        "BI1AAA K1ABC RRR",     # RRR
+        "BI1AAA K1ABC RR73",    # RR73
+        "BI1AAA K1ABC -17",     # 信号报告
+        "BI1AAA K1ABC R-07",    # R+报告；解码显示为 'BI1AAA R K1ABC -07'
         "CQ W9KXY FN42",        # 另一个 CQ 网格（5 字符标准呼号）
     ]
     expect_overrides = {
-        "BI4MIB K1ABC R-07": "BI4MIB R K1ABC -07",
+        "BI1AAA K1ABC R-07": "BI1AAA R K1ABC -07",
     }
     for m in cases:
         tones = encode_ft8_text(m)
@@ -179,7 +179,7 @@ def test_fst4_roundtrip():
         bits, it = fst4_ldpc.ldpc_bp_decode(llr)
         return fst4_ldpc.decode_fst4_message(bits[:101])
 
-    cases = ["CQ BI4MIB OM74", "BI4MIB K1ABC 73", "CQ W9KXY FN42"]
+    cases = ["CQ BI1AAA OM74", "BI1AAA K1ABC 73", "CQ W9KXY FN42"]
     for m in cases:
         tones = encode_fst4_text(m)
         check("FST4 160 音调", len(tones) == 160, f"got {len(tones)}")

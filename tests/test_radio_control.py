@@ -150,7 +150,7 @@ class TestMorseUnchanged(unittest.TestCase):
 
     def test_morse_roundtrip(self):
         from mbdsdr_ai.radio_control import morse_encode, morse_decode
-        text = "BI4MIB DE BI4MIB"
+        text = "BI1AAA DE BI1AAA"
         self.assertEqual(morse_decode(morse_encode(text)), text)
 
 

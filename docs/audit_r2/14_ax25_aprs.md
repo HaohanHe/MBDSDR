@@ -35,7 +35,7 @@ frame += encode_address(self.source, self.source_ssid, is_last=is_last)
 代码在无 digi 时把**目的和源都置 E=1**。实跑验证：
 
 ```
-AX25Frame(destination='APRS', source='BI4MIB-9', ...).to_bytes().hex()
+AX25Frame(destination='APRS', source='BI1AAA-9', ...).to_bytes().hex()
 = 82a0a4a64040 61  8492689a9284 73  03 f0 74657374 5cbf
                 ^^dest E=1       ^^src E=1
 ```

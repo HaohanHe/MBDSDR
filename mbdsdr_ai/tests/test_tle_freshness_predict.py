@@ -67,7 +67,7 @@ def test_predict_time_source_system_with_injected_clock():
     # TLE 新鲜度随报告带出
     assert rep["tle"]["status"] in ("fresh", "stale")
     assert rep["tle"]["age_days"] is not None
-    # 长春站对 ISS 在 4h 内应有过境
+    # 示例站对 ISS 在 4h 内应有过境
     assert rep["n_passes"] >= 1
 
 

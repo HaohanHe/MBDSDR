@@ -92,14 +92,14 @@ class TestAprsPanel:
         from mbdsdr_ai.ax25 import AFSKModem, AX25Frame
         from aprs_panel import AprsPanel
         info = b"!3542.84N/13945.60E>test"
-        fr = AX25Frame(destination="APRS", source="BI4MIB",
+        fr = AX25Frame(destination="APRS", source="BI1AAA",
                        digipeaters=[("WIDE2", 1, False)],
                        control=0x03, pid=0xF0, info=info)
         audio = AFSKModem().modulate(fr)
         p = AprsPanel()
         p.feed_audio(audio, 48000)
         assert p.packet_count() == 1
-        assert "BI4MIB" in p.table.item(0, 1).text()
+        assert "BI1AAA" in p.table.item(0, 1).text()
         assert p.table.item(0, 4).text() == "位置"
 
     def test_filter(self):

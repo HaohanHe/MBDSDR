@@ -28,7 +28,7 @@ def main():
         for snr in SNRS:
             passed = 0
             for k in range(TRIALS):
-                f = ax25.build_aprs_position_frame("BI4MIB", 43.88 + k * 0.001, 125.32 + k * 0.001)
+                f = ax25.build_aprs_position_frame("BI1AAA", 43.88 + k * 0.001, 125.32 + k * 0.001)
                 a = m44.modulate(f)[::step].copy()
                 if snr is not None:
                     rng = random.Random(1000 * sr + k)

@@ -51,7 +51,7 @@ Phase34 块4：活动前核对清单（设备/天线/时间/预测/邮件）
       `tle_lines`（JAMX01 须用 AutoTLE 聚合源；ASRTU-1 可 `norad_catnr=61781`）
       【待真机确认：活动当天 TLE 历元是否 <3 天，超期重拉/催主办方】
 - [ ] **GROUND_STATION 已填本机坐标**：`pass_predict.py` 顶部 `lat_deg/lon_deg`
-      填实际接收点（勿套长春示例 43.81/125.32）【待真机确认：实际接收点坐标】
+      填实际接收点（勿套示例城市示例 43.81/125.32）【待真机确认：实际接收点坐标】
 - [ ] **过境表已跑出**：`python3 docs/learn/phase14/pass_predict.py`，
       两星 `TLE 新鲜度=fresh`、`status != none`
 - [ ] **主攻过境已锁定**：把 ≥30° 仰角过境的 AOS UTC / 中天仰角 / |fd| 抄进值班笔记

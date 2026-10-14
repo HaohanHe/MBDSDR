@@ -245,7 +245,7 @@ accuracy 0.9938 [0.984, 0.998]; the only residual confusion is FSK→QAM (4/80).
 ### F. Single-station Doppler orbit determination (Figs. 8–9, N=155 / N=6)
 
 Using a fixed public ISS TLE propagated through SGP4, we add fixed-seed Gaussian
-noise to the Doppler-rates observed from a single Changchun station and run an EKF
+noise to the Doppler-rates observed from a single ExampleSite station and run an EKF
 and a reference-epoch RLS. At Doppler-noise σ=1 Hz the RLS reference-epoch error
 floor is ≈1.1 km; error degrades as σ grows. Sweeping the observation window
 around peak elevation at σ=10 Hz (Fig. 9) shows the expected single-station

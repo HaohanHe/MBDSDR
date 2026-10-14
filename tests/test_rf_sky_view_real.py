@@ -96,7 +96,7 @@ class TestRealSatelliteComputation:
         from desktop.rf_sky_view import RFSkyView, SatelliteTracker
         v = RFSkyView()
         v.resize(600, 600)
-        # 长春站；refresh 同步执行
+        # 示例站；refresh 同步执行
         t = SatelliteTracker(v, 43.817, 125.323, alt_km=0.2, interval_ms=10**9)
         t.refresh()
         assert v._satellites_connected is True, "sgp4 应至少成功算出一颗卫星"

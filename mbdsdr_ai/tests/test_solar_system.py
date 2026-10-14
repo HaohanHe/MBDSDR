@@ -70,14 +70,14 @@ def test_sun_bounds():
 def test_sun_noon_altitude():
     """
     正午太阳高度角：alt_max ≈ 90° - |lat - dec|
-    找长春正午（太阳最高）时刻，验证高度角公式。
+    找示例站正午（太阳最高）时刻，验证高度角公式。
     """
     _require_ephemeris()
     station = CHANGCHUN
     lat = station.latitude_deg
     lon = station.longitude_deg
 
-    # 长春经度 125.3E，地方正午 UTC ≈ 12:00 - lon/15 = 03:32 UTC
+    # 示例站经午 125.3E，地方正午 UTC ≈ 12:00 - lon/15 = 03:32 UTC
     # 扫描 02:00 ~ 05:00 UTC（3 小时窗口，步长 5 分钟 = 36 点）
     now = _time.time()
     today_00_utc = now - (now % 86400)  # 今天 00:00 UTC

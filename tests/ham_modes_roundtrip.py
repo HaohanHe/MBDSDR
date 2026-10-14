@@ -81,7 +81,7 @@ def test_registration_counts():
 def test_pat_b2f_roundtrip():
     att = B2FAttachment(filename="note.txt", data=b"hello winlink")
     msg = B2FMessage(
-        fromcall="BI4MIB", tocall="SP1ABC",
+        fromcall="BI1AAA", tocall="SP1ABC",
         subject="Test via B2F",
         timestamp=datetime(2024, 1, 1, 12, 0, 0),
         body="Hello from MBDSDR",
@@ -90,7 +90,7 @@ def test_pat_b2f_roundtrip():
     )
     blob = msg.encode()
     back = B2FMessage.decode(blob)
-    assert back.fromcall == "BI4MIB"
+    assert back.fromcall == "BI1AAA"
     assert back.tocall == "SP1ABC"
     assert back.subject == "Test via B2F"
     assert back.timestamp == datetime(2024, 1, 1, 12, 0, 0)
@@ -144,7 +144,7 @@ def test_ardop_sync_and_constellation():
     # 状态机
     s = ARDOPSession()
     assert s.listen()
-    assert s.connect_request("BI4MIB", "500")
+    assert s.connect_request("BI1AAA", "500")
     assert s.connect_ack()
     assert s.send_data()
     assert s.ack()
@@ -157,26 +157,26 @@ def test_ardop_sync_and_constellation():
 # ---------------------------------------------------------------------
 def test_js8_message_roundtrip():
     # 呼号/网格单独往返（学习模型固定布局: [alnum][alnum][digit][L][L][L]）
-    for call in ["BI4MIB", "SP1ABC", "DL1ABC", "EA5XYZ"]:
+    for call in ["BI1AAA", "SP1ABC", "DL1ABC", "EA5XYZ"]:
         assert unpack_callsign(pack_callsign(call)) == call.ljust(6).strip()
     for grid in ["OL95", "JO22", "CN86"]:
         assert unpack_grid(pack_grid(grid)) == grid
 
     # 完整 77-bit 消息往返
-    msg = JS8Message(type=1, de="BI4MIB", to="SP1ABC", grid="OL95")
+    msg = JS8Message(type=1, de="BI1AAA", to="SP1ABC", grid="OL95")
     v = pack_message(msg)
     assert 0 <= v < (1 << JS8_PAYLOAD_BITS)
     back = unpack_message(v)
-    assert back.de == "BI4MIB"
+    assert back.de == "BI1AAA"
     assert back.to == "SP1ABC"
     assert back.grid == "OL95"
     assert back.type == 1
 
     # CQ 消息
-    cq = JS8Message(type=0, de="BI4MIB", to="CQ0AAA", grid="OL95")
+    cq = JS8Message(type=0, de="BI1AAA", to="CQ0AAA", grid="OL95")
     v2 = pack_message(cq)
     b2 = unpack_message(v2)
-    assert b2.type == 0 and b2.de == "BI4MIB" and b2.to == "CQ0AAA"
+    assert b2.type == 0 and b2.de == "BI1AAA" and b2.to == "CQ0AAA"
 
     # 8-FSK 符号序列
     tones = message_to_tones(v)
@@ -197,7 +197,7 @@ def test_xastir_aprs_roundtrip():
         assert abs(decode_longitude(encode_longitude(lo)) - lo) < 0.001
 
     # 对象帧往返
-    obj = APRSObject(name="BI4MIB", lat=39.9042, lon=116.4074,
+    obj = APRSObject(name="BI1AAA", lat=39.9042, lon=116.4074,
                      live=True, symbol_table="/", symbol_code=">",
                      comment="testing")
     pkt = obj.encode()
@@ -205,7 +205,7 @@ def test_xastir_aprs_roundtrip():
     assert pkt[10:11] == b"*"  # live flag
     res = decode_object_or_item(pkt)
     assert res["kind"] == "object"
-    assert res["name"] == "BI4MIB"
+    assert res["name"] == "BI1AAA"
     assert abs(res["lat"] - 39.9042) < 0.001
     assert abs(res["lon"] - 116.4074) < 0.001
     assert res["live"] is True
@@ -244,13 +244,13 @@ def test_bell103_roundtrip():
 
     # 端到端文本往返（加一点 SNR）
     rng = np.random.default_rng(3)
-    text = "HELLO BI4MIB 123"
+    text = "HELLO BI1AAA 123"
     audio = np.asarray(bell103_modulate_text(text), dtype=np.float64)
     sig_p = np.mean(audio ** 2)
     noise_p = sig_p / (10 ** (15.0 / 10.0))
     noisy = audio + rng.normal(0, np.sqrt(noise_p), size=len(audio))
     res = bell103_demodulate_text(noisy)
-    assert res["text"].startswith("HELLO BI4MIB"), f"解调文本: {res['text']!r}"
+    assert res["text"].startswith("HELLO BI1AAA"), f"解调文本: {res['text']!r}"
     assert res["mark_freq"] == 1270.0
 
     # 现有 Bell202 接口仍可用（回归保护）
