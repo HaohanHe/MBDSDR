@@ -387,6 +387,46 @@
   仓库文化算 bug，本批按 bug 处理。
 
 **4. 仍未结（需真机）**：三处 Viterbi 实现（lrpt_fec / meteor_sat 经 demod /
-  satdump_adapter）与真实 Meteor-M2 空口的端到端对齐，唯一裁决手段是一段真实
-  LRPT 录制。候选输入：ISS/NOAA LRIT 直播过境时抓录，或 SatDump 官方 sample
-  基带（clone 内 plugins 测试数据若可得）。
+satdump_adapter）与真实 Meteor-M2 空口的端到端对齐，唯一裁决手段是一段真实
+LRPT 录制。候选输入：ISS/NOAA LRIT 直播过境时抓录，或 SatDump 官方 sample
+基带（clone 内 plugins 测试数据若可得）。
+
+---
+
+## skill 注册表缓存与 user 根（2026-10-14，kimi-code 审计第五落点）
+
+`mbdsdr_ai/skill_registry.py` SkillRegistry 原状：每次 list()/load() 前全量
+`os.listdir` 重扫、只有项目根 `skills/` 一个根、无激活事件。本批三项升级：
+
+- **目录 mtime 缓存**：`_scan()` 改为按根缓存——仅当某技能根 `st_mtime`
+  变化（或首次见到该根）才重扫该根，否则复用缓存条目；合并视图（项目根
+  优先）每次重建但零 I/O。既有单参构造 `SkillRegistry(skills_dir)` 与
+  list()/load() 调用方式不变（agent.py:523、tests/test_modularization_audit.py
+  调用方零改）。
+- **user 根**：新增第二个技能根 `~/.mbdsdr/skills`（对齐 kimi-code 的
+  user/project 双根，路径约定同 plugin_system 的 `~/.mbdsdr/plugins`）。
+  构造签名 `SkillRegistry(skills_dir, user_dir=None, hook_manager=None)`：
+  `user_dir=None` 取默认 `~/.mbdsdr/skills`（expanduser+normpath）、显式传
+  `""` 禁用。**同名技能项目根优先**，user 根不得覆盖；`to_summary()` 增
+  `source` 字段（"project"/"user"）区分来源，既有键不动。
+- **激活事件**：`load()` 成功读取正文后向注入的 HookManager 发
+  `EventType.AGENT_TOOL_CALL`（"agent.tool_call"），data 含
+  `{skill, path, source}`，事件 `source="skill_registry"`；未注入
+  hook_manager / 无订阅 / 触发异常一律静默跳过，绝不影响主流程
+  （可选注入 + except 静默的兜底风格同 plugin_system）。
+- **mtime 边界（如实标注）**：若目录内容以不影响父目录 mtime 的方式被改动
+  （少见：部分编辑器/原子替换直接操作子条目而不触父目录时间戳），重扫不被
+  触发、缓存过期；文件系统 mtime 粒度较粗时，同粒度窗口内的改动也可能不改变
+  `st_mtime`。不引 inotify/watchdog 依赖、不过度设计；确需严格热更新可后续换。
+- **与 kimi-code skill 机制的对应**：user/project 双根、同名项目根优先、
+  Markdown+frontmatter、目录摘要+按需加载（省 token）同构；本项目特有多根
+  缓存与 HookManager 事件面。
+- **未做（诚实标注）**：URL 技能源、技能信任分级/签名校验、激活遥测上报；
+  agent.py `_register_skill_tools` 侧接线（传入 `hook_manager`、显式声明
+  user 根）不在本轮文件范围，留待后续批次——当前 SkillRegistry 已具备注入点。
+- **测试**：`mbdsdr_ai/tests/test_skill_registry.py` 11 用例（缓存命中
+  不重扫以 os.listdir spy 计数、mtime 变化触发重扫、user 根发现+项目根
+  同名优先、空/不存在目录诚实空列表、激活事件 data 字段+未命中不发+
+  无 hook_manager 静默+触发异常不炸、单参构造向后兼容）；
+  `python -m pytest mbdsdr_ai/tests -q` **477 passed / 10 skipped**
+  （改前基线 466/10，+11 新用例，无退步）。
