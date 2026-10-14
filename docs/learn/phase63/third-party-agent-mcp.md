@@ -201,3 +201,42 @@ printf '%s\n' \
 * 响应 1：`serverInfo.name=="mbdsdr-core"`。
 * 响应 2：`tools` 数组长度 == `ai::toolDefs().size()`（当前 68，随工具增长）。
 * 响应 3：text 解析后 `ok:true`、`provenance:"未连接"`（无硬件时诚实标注）。
+
+
+---
+
+## 工具权限规则集（2026-10-14，上游审计第一落点落地）
+
+kimi-code（MoonshotAI/kimi-code）与 kilocode（Kilo-Org/kilocode）两份克隆审计
+独立收敛于同一结论：二值 arm_manual 门是 MBDSDR agent 侧最大缺口。本批在
+Python MCP 面落地第一段（C++ 面镜像待 mbdsdr_mcp 构建后同步，见文末登记）。
+
+### 语义（Python 面）
+
+- **三级策略**：读工具默认 `allow`；写工具默认 `ask`（= 既有 arm_manual 语义，
+  完全向后兼容）；可经规则覆盖为 `allow`（免问自动执行）或 `deny`（硬否决，
+  即使带 arm_manual=true 也不执行——对齐 kilocode hard ruleset veto）。
+- **规则解析**：精确工具名 > fnmatch 通配（如 `set_*`）> 默认。deny 精确规则
+  不被宽松通配放行。
+- **会话批准缓存**：调用带 `arm_manual=true` 且 `approve_session=true` 时，
+  按 (工具名, 规范化参数) 记入本会话免问名单；后续同工具同参数自动执行，
+  结果带 `approval:"session"`（可观测，不隐形放行）；参数变化则重新询问。
+- **信封**：gated 信封新增 `policy`（ask）与 `hint`（如何授权）两个引导字段，
+  原三键（ok/error/gated）不变——外部 agent 收到门时知道下一步怎么走，
+  不再是哑门。
+- **配置**（可选）：`~/.mbdsdr/tool_policy.json`（或
+  `MBDSDR_TOOL_POLICY` 环境变量覆盖路径）：
+  `{"rules":[{"pattern":"shutdown","action":"deny"},{"pattern":"set_*","action":"allow"}]}`；
+  文件缺失/坏 JSON -> 默认策略并在 stderr 明说（不静默吞、不伪造策略）。
+- **测试注入**：`MCPToolSet(policy=ToolPolicy(...))`；活体规则文件经 env 覆盖。
+
+### 登记（未做）
+
+- C++ 面（llm_worker.cpp:120 门）规则集镜像：待本机 Qt MinGW 修复后随
+  mbdsdr_mcp 构建落地，规则 JSON schema 与 Python 面同形（跨语言钉扎测试
+  届时一起补，参考 aigui_messages 的 C++ registry 钉扎模式）。
+- 域级 ruleset（域分组卡片 + 子代理继承裁剪，kilocode agent schema 内嵌
+  permission: Ruleset 形态）与结构化 question 工具（kilocode
+  question 服务）为下一批候选。
+- deny 的工具从 tools/list 视野隐藏（kilocode 行为）暂未做：当前 deny 仍在
+  目录可见但执行被拒——诚实可见 > 隐藏，待产品决策。

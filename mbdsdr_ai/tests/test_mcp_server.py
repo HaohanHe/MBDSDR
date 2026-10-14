@@ -304,9 +304,13 @@ def test_write_tools_manual_gate_aligns_cpp():
     """Python MCP 写工具手动 gate：无 arm_manual 拒、有则执行；只读工具不 gate；
     schema 视图暴露 write 字段（与 C++ 信封对齐）。"""
     ts = _set()
-    # 1) 写工具无 arm -> gated 信封（同 C++ gatedToolResult 形状）。
+    # 1) 写工具无 arm -> gated 信封（同 C++ gatedToolResult 形状；2026-10-14
+    #    规则集升级后新增 policy/hint 两个引导字段，核心三键不变）。
     g = ts.call_tool("set_frequency", {"hz": 100e6})
-    assert g == {"ok": False, "error": "手动模式：未执行 set_frequency", "gated": True}
+    assert g["ok"] is False and g["gated"] is True
+    assert g["error"] == "手动模式：未执行 set_frequency"
+    assert g["policy"] == "ask"
+    assert "arm_manual=true" in g["hint"] and "approve_session=true" in g["hint"]
     # 2) arm_manual=true 才执行（无后端仍诚实 not_connected 而非 gate）。
     r = ts.call_tool("set_frequency", {"hz": 100e6, "arm_manual": True})
     assert "gated" not in r

@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .controller import SDRController
 from .errors import SDRUserError
+from ..tool_policy import ToolPolicy, normalize_key
 
 
 # JSON Schema 片段复用
@@ -714,12 +715,17 @@ class MCPToolSet:
         共享的 :class:`SDRController`。不传则自建一个（无后端）。
     """
 
-    def __init__(self, controller: Optional[SDRController] = None) -> None:
+    def __init__(self, controller: Optional[SDRController] = None,
+                 policy: Optional[ToolPolicy] = None) -> None:
         self.controller = controller if controller is not None else SDRController()
         self._table = _build_tool_table()
         self._by_name: Dict[str, Dict[str, Any]] = {
             t["name"]: t for t in self._table
         }
+        # 工具权限规则集（默认写 ask/读 allow = 既有 arm_manual 语义不变）；
+        # 会话批准缓存：approve_session=true 的 (工具, 参数) 本进程免问。
+        self.policy = policy if policy is not None else ToolPolicy.load()
+        self._session_approvals: set = set()
 
     # ------------------------------------------------------------------
     def list_tools(self) -> List[Dict[str, Any]]:
@@ -808,20 +814,44 @@ class MCPToolSet:
             return {"error": "unknown_tool", "tool": name,
                     "suggestion": "用 tools/list 查看可用工具。"}
         args = dict(arguments or {})
-        # Write-tool manual gate, aligned with the C++ mbdsdr-mcp server:
-        # real execution only when the caller explicitly arms it; the arm flag
-        # is consumed here and never leaks to the handler.
+        # Write-tool gate: ruleset (allow/ask/deny) + explicit once-approval
+        # (arm_manual) + optional session-level approval cache
+        # (approve_session). Semantics aligned with the C++ llm_worker gate:
+        # real execution only when policy allows or the caller explicitly arms;
+        # the arm flags are consumed here and never leak to the handler.
+        session_cached = False
         if tool.get("write"):
-            if args.pop("arm_manual", False) is not True:
+            approve_session = args.pop("approve_session", False) is True
+            armed = args.pop("arm_manual", False) is True
+            action = self.policy.action_for(name, True)
+            if action == "deny":
+                # hard veto: even an explicitly armed call does not execute
+                # (aligned with kilocode hard-ruleset veto).
                 return {"ok": False,
-                        "error": "手动模式：未执行 %s" % name,
-                        "gated": True}
+                        "error": "denied_by_policy：规则集拒绝执行 %s" % name,
+                        "denied": True, "gated": True}
+            key = normalize_key(name, args)
+            session_cached = key in self._session_approvals
+            if action == "ask" and not session_cached:
+                if not armed:
+                    return {"ok": False,
+                            "error": "手动模式：未执行 %s" % name,
+                            "gated": True,
+                            "policy": action,
+                            "hint": "带 arm_manual=true 执行；"
+                                    "approve_session=true 则本会话免问"}
+                if approve_session:
+                    self._session_approvals.add(key)
         try:
-            return tool["handler"](self.controller, args)
+            result = tool["handler"](self.controller, args)
         except SDRUserError as e:
             return e.to_dict()
         except Exception as e:  # pragma: no cover - 防御
             return {"error": "internal_error", "technical_detail": str(e)}
+        if session_cached and isinstance(result, dict):
+            # 本会话免问命中：可观测地标注，不隐形放行
+            result.setdefault("approval", "session")
+        return result
 
     # ------------------------------------------------------------------
     # JSON-RPC 2.0 分发（纯函数，便于测试）
