@@ -413,3 +413,38 @@ def test_segmented_sweep_short_frame_is_error():
         assert False, "短帧必须诚实抛错"
     except NanoVNADriverError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# 11 种官方迹线格式 Python 侧派生集（2026-10-14，NanoVNA-App 审计缺口销账）
+# ---------------------------------------------------------------------------
+
+def test_replay_dump_trace_formats_complete(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps(_script()), encoding="utf-8")
+    out = run_dump("", 430_000_000, 431_000_000, 11, replay=str(p))
+    for key in ("s11_linear_mag", "s11_real", "s11_imag",
+                "s11_resistance_ohm", "s11_reactance_ohm"):
+        assert len(out[key]) == 11, key
+    # S11 = 0.5+0j（正交无虚部）-> Z = 50*(1.5/0.5) = 150+0j：R=150, X=0
+    assert abs(out["s11_resistance_ohm"][0] - 150.0) < 0.05
+    assert abs(out["s11_reactance_ohm"][0] - 0.0) < 0.05
+    assert abs(out["s11_linear_mag"][0] - 0.5) < 1e-6
+    assert abs(out["s11_real"][0] - 0.5) < 1e-6
+    assert abs(out["s11_imag"][0] - 0.0) < 1e-6
+
+
+def test_s11_trace_formats_pure_function():
+    from mbdsdr_ai.nanovna_client import (Z0_DEFAULT, s11_resistance,
+                                          s11_reactance,
+                                          s11_trace_formats)
+    # 50+0j 纯电阻：S11=0 -> Z=50 -> R=50 X=0
+    f = s11_trace_formats(0.0 + 0.0j, Z0_DEFAULT)
+    assert abs(f["resistance_ohm"] - 50.0) < 1e-9
+    assert abs(f["reactance_ohm"] - 0.0) < 1e-9
+    # 开路 S11=1 -> Z=inf：诚实返回 inf，不 NaN、不伪造
+    f2 = s11_trace_formats(1.0 + 0.0j, Z0_DEFAULT)
+    assert f2["resistance_ohm"] == float("inf") or f2["resistance_ohm"] > 1e12
+    # 相位：90 度
+    f3 = s11_trace_formats(0.5 + 0.5j, Z0_DEFAULT)
+    assert abs(f3["phase_deg"] - 45.0) < 1e-9

@@ -85,3 +85,62 @@ def test_hooks_instance_is_per_toolset():
     out = b.call_tool("set_frequency",
                       {"hz": 98_500_000, "arm_manual": True})
     assert out == {"ok": True}                # b 不受 a 的钩子影响
+
+
+# ---------------------------------------------------------------------------
+# PostToolUse（AGENT_TOOL_RESULT）观测事件——只读、不改写
+# ---------------------------------------------------------------------------
+
+def test_tool_result_event_fires_on_success():
+    ts = _set()
+    seen = []
+    ts.hooks.register("agent.tool_result",
+                      lambda e: seen.append(e.data))
+    out = ts.call_tool("set_frequency",
+                       {"hz": 98_500_000, "arm_manual": True})
+    assert out == {"ok": True}
+    assert len(seen) == 1
+    s = seen[0]
+    assert s["tool"] == "set_frequency" and s["ok"] is True
+    assert s["outcome"] == "executed"      # 执行成功分类
+    assert s["spilled"] is False
+
+
+def test_tool_result_event_fires_on_gate_and_error():
+    ts = _set()
+    seen = []
+    ts.hooks.register("agent.tool_result", lambda e: seen.append(e.data))
+    ts.call_tool("set_frequency", {"hz": 98_500_000})          # gated
+    # read-side 工具照常执行并返回（connect 失败路径走 SDRUserError）
+    out = ts.call_tool("connect", {"device_id": 1})            # 读工具无门
+    # connect 无后端时报 not_connected/no_backend 一类错误信封
+    assert out.get("ok") is False or out.get("connected") is False
+    assert out is not None
+    gated = [s for s in seen if s.get("outcome") == "gated"]
+    assert gated and gated[0]["tool"] == "set_frequency"
+    # set_demod 走 SDRUserError（非法 mode）-> outcome=error
+    bad = ts.call_tool("set_demod",
+                       {"mode": "NOT_A_MODE", "arm_manual": True})
+    assert bad.get("outcome") == "error"
+    assert bad.get("ok", False) is False
+    assert any(s["outcome"] == "error" for s in seen)
+
+
+def test_tool_result_event_hook_cannot_mutate_result():
+    ts = _set()
+    def evil(e):
+        return {"decision": "deny", "reason": "too late"}      # 试图事后否决
+    ts.hooks.register("agent.tool_result", evil)
+    out = ts.call_tool("set_frequency",
+                       {"hz": 98_500_000, "arm_manual": True})
+    assert out == {"ok": True}      # 结果不因事后钩子改变
+
+
+def test_tool_result_event_exception_isolated(capsys):
+    ts = _set()
+    ts.hooks.register("agent.tool_result", lambda e: 1 / 0)
+    out = ts.call_tool("set_frequency",
+                       {"hz": 98_500_000, "arm_manual": True})
+    assert out == {"ok": True}
+    logged = (capsys.readouterr().out + capsys.readouterr().err)
+    assert "Hook Error" in logged or "division" in logged

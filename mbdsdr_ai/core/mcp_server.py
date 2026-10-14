@@ -989,7 +989,8 @@ def _spill_tool_result(tool: str, text: str) -> str:
 
 
 def _finalize_tool_result(name: str, result: Any,
-                          extra: Optional[Dict[str, Any]] = None) -> Any:
+                          extra: Optional[Dict[str, Any]] = None,
+                          hooks: Optional[HookManager] = None) -> Any:
     """call_tool 结果出口：未超阈值原样返回；超阈值落盘并返回 spill 信封。
 
     序列化选项与 ``tools/call`` 响应一致（``ensure_ascii=False,
@@ -1000,37 +1001,78 @@ def _finalize_tool_result(name: str, result: Any,
     extra :
         需要一并带进 spill 信封的可观测字段（如会话批准标注
         ``approval:"session"``）；信封既有键优先，extra 只补位。
+    hooks :
+        传入时在返回前冒泡 ``AGENT_TOOL_RESULT``（PostToolUse）事件；
+        观测面只读结果信封的摘要（ok/outcome/spilled），绝不让钩子
+        改写结果（对齐 kimi-code 的 PostToolUse 语义）。
     """
     try:
         text = json.dumps(result, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
         return result  # 不可序列化：保持既有行为（上层 default=str 再见）
     if len(text) <= TOOL_RESULT_SPILL_THRESHOLD:
-        return result
+        out = result
+    else:
+        try:
+            path = _spill_tool_result(name, text)
+        except OSError as e:
+            # 诚实失败：不假装成功、不给半截结果；stderr 留痕不污染协议流
+            print("[mcp] tool 结果 spill 写入失败（%s，%d 字符）: %s"
+                  % (name, len(text), e), file=sys.stderr)
+            out = {"ok": False,
+                   "outcome": "error",
+                   "error": "spill_write_failed",
+                   "technical_detail": str(e)}
+        else:
+            envelope: Dict[str, Any] = {
+                "ok": True,
+                "tool": name,
+                "outcome": "executed",
+                "truncated": True,
+                "spill_path": path,
+                "preview_head": text[:TOOL_RESULT_PREVIEW_CHARS],
+                "preview_tail": text[-TOOL_RESULT_PREVIEW_CHARS:],
+                "bytes": len(text.encode("utf-8")),
+                "full_result_available": True,
+            }
+            for k, v in (extra or {}).items():
+                envelope.setdefault(k, v)
+            out = envelope
+    if hooks is not None:
+        _emit_tool_result(hooks, name, out)
+    return out
+
+
+def _emit_tool_result(hooks: "HookManager", name: str, result: Any) -> None:
+    """冒泡 AGENT_TOOL_RESULT（PostToolUse）观测事件；钩子异常不冒泡。
+
+    事件只携带结果信封的摘要（ok/outcome/spilled），不携带完整负载
+    （长结果已在 spill 路径上，摘要够观测用）；钩子只读不改写。
+    """
     try:
-        path = _spill_tool_result(name, text)
-    except OSError as e:
-        # 诚实失败：不假装成功、不给半截结果；stderr 留痕不污染协议流
-        print("[mcp] tool 结果 spill 写入失败（%s，%d 字符）: %s"
-              % (name, len(text), e), file=sys.stderr)
-        return {"ok": False,
-                "outcome": "error",
-                "error": "spill_write_failed",
-                "technical_detail": str(e)}
-    envelope: Dict[str, Any] = {
-        "ok": True,
-        "tool": name,
-        "outcome": "executed",
-        "truncated": True,
-        "spill_path": path,
-        "preview_head": text[:TOOL_RESULT_PREVIEW_CHARS],
-        "preview_tail": text[-TOOL_RESULT_PREVIEW_CHARS:],
-        "bytes": len(text.encode("utf-8")),
-        "full_result_available": True,
-    }
-    for k, v in (extra or {}).items():
-        envelope.setdefault(k, v)
-    return envelope
+        ev = Event(event_type=EventType.AGENT_TOOL_RESULT,
+                   data=_result_summary(name, result), source="mcp_toolset")
+        hooks.trigger(ev)
+    except Exception as e:  # pragma: no cover - 观测面不得影响主流程
+        print("[mcp] tool_result 钩子故障（忽略）: %s" % e, file=sys.stderr)
+
+
+def _result_summary(name: str, result: Any) -> Dict[str, Any]:
+    """结果信封的观测摘要（不含完整负载）。
+
+    outcome 缺省为 None 时按信封形态归类：dict 带 ok=True 视为 executed
+    （executed 是本仓新约定，未及全量回填；gate/error 信封均自带该键）。
+    """
+    if not isinstance(result, dict):
+        return {"tool": name, "kind": type(result).__name__,
+                "ok": None, "outcome": None, "spilled": False}
+    outcome = result.get("outcome")
+    if outcome is None and result.get("ok") is True:
+        outcome = "executed"
+    return {"tool": name, "kind": "dict",
+            "ok": result.get("ok"),
+            "outcome": outcome,
+            "spilled": bool(result.get("truncated"))}
 
 
 # ======================================================================
@@ -1205,13 +1247,15 @@ class MCPToolSet:
             session_cached = key in self._session_approvals
             if action == "ask" and not session_cached:
                 if not armed:
-                    return {"ok": False,
-                            "error": "手动模式：未执行 %s" % name,
-                            "gated": True,
-                            "policy": action,
-                            "outcome": "gated",
-                            "hint": "带 arm_manual=true 执行；"
-                                    "approve_session=true 则本会话免问"}
+                    gated_env = {"ok": False,
+                                 "error": "手动模式：未执行 %s" % name,
+                                 "gated": True,
+                                 "policy": action,
+                                 "outcome": "gated",
+                                 "hint": "带 arm_manual=true 执行；"
+                                         "approve_session=true 则本会话免问"}
+                    self._emit_result_event(name, gated_env)
+                    return gated_env
                 if approve_session:
                     self._session_approvals.add(key)
         try:
@@ -1219,16 +1263,24 @@ class MCPToolSet:
         except SDRUserError as e:
             out = e.to_dict()
             out["outcome"] = "error"
+            self._emit_result_event(name, out)
             return out
         except Exception as e:  # pragma: no cover - 防御
-            return {"error": "internal_error", "technical_detail": str(e),
-                    "outcome": "error"}
+            out = {"error": "internal_error", "technical_detail": str(e),
+                   "outcome": "error"}
+            self._emit_result_event(name, out)
+            return out
         if session_cached and isinstance(result, dict):
             # 本会话免问命中：可观测地标注，不隐形放行
             result.setdefault("approval", "session")
         return _finalize_tool_result(
             name, result,
-            extra={"approval": "session"} if session_cached else None)
+            extra={"approval": "session"} if session_cached else None,
+            hooks=self.hooks)
+
+    def _emit_result_event(self, name: str, result: Any) -> None:
+        """结果出口的 PostToolUse 观测事件（异常不冒泡，见 _emit_tool_result）。"""
+        _emit_tool_result(self.hooks, name, result)
 
     def _pre_tool_veto(self, name: str, args: Dict[str, Any],
                        is_write: bool) -> Optional[Dict[str, Any]]:

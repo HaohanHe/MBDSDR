@@ -27,6 +27,8 @@ from .nanovna_client import (
     MAX_SWEEP_POINTS,
     find_nanovna_ports,
     s11_phase_deg,
+    s11_resistance,
+    s11_reactance,
     s21_phase_deg,
     vswr,
     return_loss_db,
@@ -133,6 +135,14 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
         "s21_phase_deg": [round(s21_phase_deg(c), 2) for c in s21],
         "vswr": [round(vswr(c), 3) for c in s11],
         "return_loss_db": [round(return_loss_db(c), 2) for c in s11],
+        # 2026-10-14：补齐 11 种官方迹线格式的 Python 侧派生集
+        # （LOGMAG/PHASE/SWR 已由上面三列覆盖，这里补 LINEAR/REAL/IMAG/
+        # RESISTANCE/REACTANCE——nanoVNA.com Start measurement 页口径）。
+        "s11_linear_mag": [round(abs(c), 4) for c in s11],
+        "s11_real": [round(c.real, 4) for c in s11],
+        "s11_imag": [round(c.imag, 4) for c in s11],
+        "s11_resistance_ohm": [round(s11_resistance(c), 2) for c in s11],
+        "s11_reactance_ohm": [round(s11_reactance(c), 2) for c in s11],
     }
     # 摘要行：一眼看最低驻波点
     v = [vswr(c) for c in s11]

@@ -108,6 +108,37 @@ def s11_phase_deg(s11: complex) -> float:
     return math.degrees(math.atan2(s11.imag, s11.real))
 
 
+def s11_resistance(s11: complex, z0: float = Z0_DEFAULT) -> float:
+    """S11 -> 串联电阻 Re(Z) (Ohm)。官方迹线格式之 RESISTANCE。"""
+    return s11_to_impedance(s11, z0).real
+
+
+def s11_reactance(s11: complex, z0: float = Z0_DEFAULT) -> float:
+    """S11 -> 串联电抗 Im(Z) (Ohm)。官方迹线格式之 REACTANCE。"""
+    return s11_to_impedance(s11, z0).imag
+
+
+def s11_trace_formats(s11: complex, z0: float = Z0_DEFAULT) -> Dict[str, float]:
+    """S11 的 11 种官方迹线格式中可由 Python 侧派生的全部读数。
+
+    覆盖：LOGMAG(return_loss) / LINEAR(gamma_mag) / PHASE / RESISTANCE /
+    REACTANCE / REAL / IMAG；SMITH/POLAR/DELAY/SWR 分别由 vswr() 与
+    vna_rf 层承担（非本函数职责）。z0 默认 50 Ohm。
+    """
+    z = s11_to_impedance(s11, z0)
+    return {
+        "logmag_db": return_loss_db(s11),
+        "linear_mag": gamma_mag(s11),
+        "phase_deg": s11_phase_deg(s11),
+        "swr": vswr(s11),
+        "real": s11.real,
+        "imag": s11.imag,
+        "resistance_ohm": z.real,
+        "reactance_ohm": z.imag,
+        "impedance_ohm": complex(z.real, z.imag),
+    }
+
+
 def rgb565_to_bmp_bytes(buf: bytes, width: int = CAPTURE_WIDTH,
                         height: int = CAPTURE_HEIGHT) -> bytes:
     """RGB565 小端裸帧 -> 24bit BMP（自底向上，行按 4 字节对齐）。
