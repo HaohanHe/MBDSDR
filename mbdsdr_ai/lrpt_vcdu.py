@@ -23,7 +23,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
 
 from .lrpt_huffman import LrptJpegError, locate_scan_start
 
@@ -169,4 +171,110 @@ def reassemble_image_stream(
     else:
         res.reason = "ok"
     return res
+
+
+# --------------------------------------------------------------------------- #
+# Meteor Segment 级重组（RFC 2435 路径）
+# --------------------------------------------------------------------------- #
+@dataclass
+class MeteorScan:
+    """按 RFC 2435 fragment_offset 拼出的 Meteor 图像扫描结果。
+
+    ``scan`` 为按 fragment_offset 升序拼出的“原子化扫描”字节（已剥掉每个
+    Segment 的 4B/12B RTP 头）；``quant_tables`` 为首段 Q 字段算出的
+    luma/chroma 量化表（K 表 + IJG 公式，可注入 lrpt_huffman.JpegHeader）；
+    ``huffman_builtin`` 恒为 True——Meteor Segment 不带 DHT，解码器须用
+    Annex K.3 硬编码表（jpeg_k3_tables.build_k3_tables()）。
+    """
+    scan: bytes
+    complete: bool                             # 头信息齐 + fragment 无洞 + 非空
+    width: int
+    height: int
+    q_field: int
+    quant_tables: Dict[int, np.ndarray]
+    num_segments: int
+    num_gaps: int
+    gap_offsets: List[int] = field(default_factory=list)
+    reason: str = ""
+
+
+def reassemble_meteor_scan(segments: List[bytes]) -> MeteorScan:
+    """把一串 Meteor 图像 Segment 拼为一条原子化扫描（RFC 2435 口径）。
+
+    每个输入 Segment 的数据域形如 ``[4B RTP/JPEG 头] (+8B 尺寸头, 仅
+    fragment_offset==0) [熵/量化表数据]``。本函数：
+
+    1. 逐段解析 RTP 头（:func:`lrpt_huffman.parse_rtp_jpeg_header`），
+       剥掉头部得到“atomic scan 片段”；
+    2. 按 fragment_offset 升序拼接（offset 重降序/非递增的段拒绝并如实
+       报错——绝不在乱序流上悄悄拼出错图）；
+    3. 由首段 Q 字段（1..99）用 IJG 公式生成 luma(表 0)/chroma(表 1)
+       量化表；Q≥128 带内表路径按未做项诚实抛
+       :class:`lrpt_huffman.LrptJpegUnsupportedError`；
+    4. ``complete`` 要求：有首段（带尺寸头）+ fragment 无空洞 + 有数据。
+
+    表注入约定（解码方照此装配 JpegHeader）：DC/AC 表用
+    ``jpeg_k3_tables.build_k3_tables()``（Annex K.3 规范表，Meteor 不带
+    DHT）；本函数只负责量化表与字节流。
+    """
+    from . import lrpt_huffman
+    from .jpeg_k3_tables import build_k3_tables  # noqa: F401（约定文档化）
+
+    if not segments:
+        return MeteorScan(scan=b"", complete=False, width=0, height=0,
+                          q_field=0, quant_tables={}, num_segments=0,
+                          num_gaps=0, reason="无 Segment 输入")
+
+    parsed: List[Tuple[lrpt_huffman.RtpJpegHeader, int, bytes]] = []
+    for seg in segments:
+        hdr, off = lrpt_huffman.parse_rtp_jpeg_header(seg)
+        parsed.append((hdr, off, seg[off:]))
+
+    first_offset = min(h.fragment_offset for h, _, _ in parsed)
+    if first_offset != 0:
+        return MeteorScan(scan=b"", complete=False, width=0, height=0,
+                          q_field=0, quant_tables={}, num_segments=0,
+                          num_gaps=0,
+                          reason=f"未收到 fragment_offset=0 的首段（最小 offset="
+                                 f"{first_offset}）：图像尺寸/Type/Q 未知，"
+                                 f"拒绝解码")
+
+    ordered = sorted(parsed, key=lambda t: t[0].fragment_offset)
+    width = ordered[0][0].width
+    height = ordered[0][0].height
+    q_field = ordered[0][0].q_field
+
+    if q_field >= 128:
+        raise lrpt_huffman.LrptJpegUnsupportedError(
+            "Meteor Q≥128 带内量化表路径尚未解析（未做项）")
+
+    if not (1 <= q_field <= 99):
+        return MeteorScan(scan=b"", complete=False, width=width,
+                          height=height, q_field=q_field, quant_tables={},
+                          num_segments=len(parsed), num_gaps=0,
+                          reason=f"Q 字段 {q_field} 非法（RFC 2435 定义域 "
+                                 f"1..99 或 ≥128 带内表）")
+
+    pieces: List[bytes] = []
+    gap_offsets: List[int] = []
+    expected = 0
+    for hdr, _off, payload in ordered:
+        if hdr.fragment_offset != expected:
+            gap_offsets.append(hdr.fragment_offset)
+        pieces.append(payload)
+        expected = hdr.fragment_offset + len(payload)
+    scan = b"".join(pieces)
+    quant_tables = {
+        0: lrpt_huffman.ijg_quant_table(q_field, chroma=False),
+        1: lrpt_huffman.ijg_quant_table(q_field, chroma=True),
+    }
+    complete = bool(gap_offsets == [] and len(scan) > 0 and width > 0
+                    and height > 0)
+    reason = ("ok" if complete else
+              (f"存在 fragment 空洞：断点 offset={gap_offsets}" if gap_offsets
+               else "扫描为空"))
+    return MeteorScan(scan=scan, complete=complete, width=width, height=height,
+                      q_field=q_field, quant_tables=quant_tables,
+                      num_segments=len(parsed), num_gaps=len(gap_offsets),
+                      gap_offsets=gap_offsets, reason=reason)
 

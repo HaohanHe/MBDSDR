@@ -219,3 +219,19 @@ K.1-K.2 量化表），非任何 GPL 源码：
 
 进度：RFC 2435 头 + IJG 量化表 + K.3 硬编码表三块已就位；剩余
 Segment 重组入口与 Q≥128 解析（未做项见上节）。
+
+---
+
+## Segment 级组入口落地（2026-10-14，真实路径第三块）
+
+- lrpt_vcdu.py 新增 reassemble_meteor_scan(segments)：按 RFC 2435
+  fragment_offset（原子化扫描流内位置）升序拼接，剥掉每段 4B/12B RTP
+  头；由首段 Q 字段经 IJG 公式产出 luma(表 0)/chroma(表 1)
+  量化表；缺首段拒绝解码（尺寸/Type/Q 未知）；Q>=128 带内表路径诚实抛 Unsupported；
+  断点 offset 计入 gap_offsets 且 complete=False（绝不静默拼错图）。
+- 测试 7 例（test_meteor_reassembly.py）：有序拼接、空洞检测、缺首段拒绝、
+  Q 域外/越界、空输入、量化表与 IJG 一致。
+
+至此真实 Meteor LRPT 路径的头/表/重组三块齐备；剩余收口项：把
+decode_image_blocks 的入口从“整 JPEG”改为“MeteorScan + K.3 表 + 量化表”
+驱动（单块入口适配），以及 fill_missing 黑行回填（SatDump 同款参数）。
