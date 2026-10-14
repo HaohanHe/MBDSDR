@@ -158,3 +158,24 @@ def inject_imbalance(iq: np.ndarray, gain_ratio: float,
     q = iq.imag.astype(np.float64)
     q_bad = g * (np.cos(phi) * q + np.sin(phi) * i)
     return (i + 1j * q_bad).astype(iq.dtype)
+
+
+def dsp_iq_invert(iq: np.ndarray, invert: bool = True) -> np.ndarray:
+    """I/Q 反相（sdrpp IqInvert：取复共轭）。
+
+    对齐 sdrpp/misc_modules/iq_invert/src/main.cpp:8-9
+        "Taking the conjugate of a complex signal swaps the sidebands"
+        "or, in other words it mirrors the signal around DC."
+
+    语义：输出 = conj(输入)。等价于把 Q 路取负——零中频频谱关于 DC
+    镜像（上下边带对调），用于修正接反的 Q 路 / 负采样率设备。
+    幂等性：invert=True 应用一次；invert=False 原样返回（不复制数据）。
+    复数输入：返回新数组，绝不原地改动调用方缓冲区。
+
+    与 IQCorrector 的关系：两者互不依赖——IQCorrector 修增益/正交
+    误差（2x2 矩阵），dsp_iq_invert 修边带方向（共轭）；按需串联使用。
+    """
+    x = np.asarray(iq)
+    if not invert or x.size == 0 or not np.iscomplexobj(x):
+        return x
+    return np.conjugate(x)
