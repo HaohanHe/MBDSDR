@@ -188,3 +188,38 @@ class TestHonestEmpty:
         # 如果有失败块，data 应为空
         if any(e < 0 for e in errors):
             assert data == b""
+
+
+# ---------------------------------------------------------------------------
+# 系数字约定收敛钉扎（2026-10-14 SatDump clone 深挖）
+# ---------------------------------------------------------------------------
+
+def _reverse7(x: int) -> int:
+    r = 0
+    for i in range(7):
+        r = (r << 1) | ((x >> i) & 1)
+    return r
+
+
+def test_poly_conventions_are_bit_reversal_pairs():
+    """lrpt_fec {79,109} 与 meteor_sat G1=171/G2=133（八进制）必须互为逆序。
+
+    这是两套谱系（LSB-first vs NASA 八进制）的安全钉：任何一侧未来改常数
+    而被忘记同步时本测试红——禁止两套约定在同一条链路混用。
+    """
+    from mbdsdr_ai.lrpt_fec import CCSDS_POLY1, CCSDS_POLY2
+    assert _reverse7(CCSDS_POLY1) == int("171", 8)   # 79 -> 121
+    assert _reverse7(CCSDS_POLY2) == int("133", 8)   # 109 -> 91
+
+
+def test_viterbi_signature_has_no_dead_depth_param():
+    """traceback_depth=96 曾是死参数（文档声明、函数体从不使用）——已删除。
+
+    本测试防止它悄悄复活：语义是「全帧回溯」，任何滑窗深度必须先在模块
+    docstring 里写明并与 SatDump chainback（cc_decoder.cpp:228-276）对齐。
+    """
+    import inspect
+    from mbdsdr_ai.lrpt_fec import viterbi_decode
+    params = inspect.signature(viterbi_decode).parameters
+    assert "traceback_depth" not in params
+    assert list(params) == ["soft_bits", "poly1", "poly2"]

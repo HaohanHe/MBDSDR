@@ -357,3 +357,36 @@
   且不污染设置/外部态往返）+ test_control_hub 旧用例升级为真实临时文件。D135/R135 各 147/147 主体 + 串行 4/4。
 - 判定登记：L13 GFSK 高斯匹配滤波无用户可感知接入场景（fsk 基座已闭环 APRS），非缺口；L10/L11/L12 缺深度
   低价值，不动。
+
+
+---
+
+## SatDump 深挖批：Viterbi 口径收敛（2026-10-14，对 %TEMP%/kilo/upstream/SatDump clone 逐行核对）
+
+承接第㉘批 SatDump 审计登记的「Viterbi 参数三套并存未收敛」，本批逐行核对上游源码后结案：
+
+**1. 多项式常数：两套书写约定，非两套码。**
+- 本模块 `{79, 109}`（= 0o117/0o155）与 `meteor_sat.py:635` 的 `G1=171/G2=133`（八进制=121/91）
+  **互为 7bit 逆序**：79=0b1001111 逆序=0b1111001=121=0o171；109=0o155 逆序=91=0o133。
+- 即 LSB-first 系数表（本模块，同 SatDump `viterbi27.h:8 CCSDS_R2_K7_POLYS={79,109}`）
+  与 NASA 八进制约定描述的是同一物理码，各自编码器/译码器内部自洽（两套合成往返都能过），
+  差异仅系数书写方向。已加钉扎测试 `test_poly_conventions_are_bit_reversal_pairs`
+  （任何一侧改常数忘了同步即红）。**「哪一端 u0 先进寄存器」在真实 Meteor-M2 空口对接前
+  无数据可裁决**——自审计登记继续有效，OTA 样本到位前禁止两套约定在同链路混用。
+
+**2. 译码语义：与 SatDump/GNU Radio 同构（全帧回溯 + 度量自选终态）。**
+- SatDump `Viterbi27` 包装 `cc_decoder(frame_size,7,2,polys,0,-1)`
+  （viterbi27.cpp:7）；其 `chainback_viterbi` 从 final_state=-1 的最小度量终态做
+  整帧回溯（cc_decoder.cpp:228-276），前向窗口比帧长少 K-1 个符号（:40）。
+- 本模块 `viterbi_decode` 同为全帧 ACS + argmax 终态整帧回溯，仅前向跑满含尾符号、
+  输出剥除末尾 6 个尾比特——对带尾比特的 CCSDS 流与上游行为等价。语义已写进
+  docstring 并附上游 file:line。
+
+**3. 死参数清除。** 原 `traceback_depth=96` 参数**函数体从未使用**（文档声明回溯深度，
+  实际恒为全帧回溯）——删除，并加签名钉扎测试防复活。文档与实现掰腕子的情况按
+  仓库文化算 bug，本批按 bug 处理。
+
+**4. 仍未结（需真机）**：三处 Viterbi 实现（lrpt_fec / meteor_sat 经 demod /
+  satdump_adapter）与真实 Meteor-M2 空口的端到端对齐，唯一裁决手段是一段真实
+  LRPT 录制。候选输入：ISS/NOAA LRIT 直播过境时抓录，或 SatDump 官方 sample
+  基带（clone 内 plugins 测试数据若可得）。

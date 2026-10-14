@@ -36,8 +36,17 @@ __all__ = [
 # CCSDS 卷积码参数（公开标准；证据 viterbi27.h:8 / viterbi.h:27）
 # --------------------------------------------------------------------------- #
 CONV_K: int = 7                  # 约束长度
-CCSDS_POLY1: int = 79            # g1 = 117 octal = 1001111
-CCSDS_POLY2: int = 109            # g2 = 155 octal = 1101101
+# 【系数字约定深挖（2026-10-14，SatDump clone 逐行核对）】
+# 本模块 {79, 109} 与 meteor_sat.py:635 的 G1=171/G2=133（八进制）是
+# **同一物理码的两种系数书写约定**：79 = 0o117 = 0b1001111，其 7bit 逆序
+# = 0b1111001 = 121 = 0o171；109 = 0o155 的逆序 = 0b1011011 = 91 = 0o133。
+# 即 LSB-first 系数表（本模块 / SatDump viterbi27.h:8 的 {79,109}）与
+# MSB-first NASA 八进制约定（0o171/0o133）互为比特逆序——各自编码器/译码器
+# 内部自洽（合成往返两套都能过），但在与真实 Meteor-M2 空口对接前，
+# 「哪一端 u0 先进寄存器」没有真实录制数据可裁决（仓库自审计已登记）。
+# 在真实 OTA 样本对齐之前，禁止把两套约定混用于同一条链路。
+CCSDS_POLY1: int = 79            # g1 = 117 octal = 1001111（0o171/121 的逆序）
+CCSDS_POLY2: int = 109            # g2 = 155 octal = 1101101（0o133/91 的逆序）
 NUM_STATES: int = 1 << (CONV_K - 1)   # 64 状态
 
 # CADU 帧大小（SatDump module_meteor_lrpt_decoder.cpp:14）
@@ -128,15 +137,21 @@ _NEXT_STATE, _OUTPUT = _build_transitions()
 
 def viterbi_decode(soft_bits: np.ndarray,
                    poly1: int = CCSDS_POLY1,
-                   poly2: int = CCSDS_POLY2,
-                   traceback_depth: int = 96) -> np.ndarray:
-    """Viterbi K=7 r=1/2 软判决译码（ACS + 回溯）。
+                   poly2: int = CCSDS_POLY2) -> np.ndarray:
+    """Viterbi K=7 r=1/2 软判决译码（ACS + 全帧回溯）。
 
     参数:
         soft_bits: 软判决位串，形状 (2N,)，顺序 c0,c1,c0,c1,...。
-                   正值 = 大概率 bit 1，负值 = 大概率 bit 0；
-                   绝对值越大越确定。硬判决可传 ±1.0。
-        traceback_depth: 回溯深度（默认 96 ≈ 15×K）。
+                    正值 = 大概率 bit 1，负值 = 大概率 bit 0；
+                    绝对值越大越确定。硬判决可传 ±1.0。
+
+    语义（2026-10-14 与 SatDump 逐行核对后收敛至此）：
+    前向 ACS 跑满全部符号对（含尾部 6 个归零尾比特的影响），从终态
+    最大度量状态做**全帧回溯**——与 SatDump/GNU Radio cc_decoder 的
+    chainback_viterbi（src-core/common/codings/viterbi/cc_decoder.cpp:228-276，
+    final_state=-1 由度量自选终态）同构；差异仅在 SatDump 前向窗口少算
+    K-1 个符号（viterbi27.cpp:40 的 cc_decoder_in.work），对带尾比特的
+    CCSDS 流可忽略。译码输出剥除末尾 K-1=6 个尾比特。
 
     返回:
         译码后信息位 (0/1)，形状 (N,)（不含尾比特）。
