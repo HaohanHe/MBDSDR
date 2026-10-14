@@ -1,5 +1,14 @@
 # MBDSDR · AI 定义无线电（AI-defined SDR）
 
+> **30 秒读懂**：这是一套把示波器/矢网/软件无线电（SDR）的每个动作封装成
+> LLM 可调用工具的系统——外部 AI agent 通过 MCP 协议直接遥控真实硬件：
+> 测天线、收信号、解调、解码、抓星历。**没有 mock、没有假数据**：没插硬件
+> 就报空，未校准就标口径。
+>
+> **真机实证（2026-10）**：NanoVNA-H 实测自制天线谐振与馈线时延、
+> RTL-SDR 实抄 435MHz 业余频段载波、外部 agent 经 MCP 遥控收发全链路、
+> 设备屏幕截图回传——全部见 [`docs/learn/agent-onboarding-runbook.md`](docs/learn/agent-onboarding-runbook.md)。
+
 把 SDR 的接收 / 解调 / 解码 / 卫星过境 / AR 指向，全部封装成 LLM 可调用的工具（function calling），
 由智能体编排成"一键工作流"。本仓库是同一套体系在**三个端 + 一套论文实验 + 一套真机工具**上的落地。
 
@@ -13,6 +22,42 @@
 | 学习与阶段规格 | [`docs/learn/`](docs/learn/) | 上游真实源码精读（sdrpp/gnuradio/librtlsdr…）+ phase3–6 实现规格与审计 |
 
 许可证：**MIT**（见 [`LICENSE`](LICENSE)、第三方归属 [`NOTICE.md`](NOTICE.md)）。
+
+**能力台账（git 实测，2026-10-14）**：792 commits · 全仓 MIT 干净室自研
+（FT8/LRPT/CCSDS 协议栈未抄任何 GPL 代码）· Python 内核 **574 项测试全绿** ·
+桌面端 151 个 C++ 测试 target · LLM 工具面：C++ **90 个**（三通道+人工门）/
+Python MCP **70 个**（38 个写工具走 arm_manual 人工确认）· 已对
+SDR++、SatDump、nanovna-saver、NanoVNA-App、kimi-code、kilocode
+六个上游项目做源码级克隆审计（见 [`docs/learn/`](docs/learn/)）。
+
+---
+
+<details open>
+<summary><b>日本語 / For Japanese readers</b></summary>
+
+**MBDSDR は「AI が計測器を直接操作するシステム」です。** SDR（ソフトウェア無線）と
+向量网络分析仪（NanoVNA）の全操作を LLM から呼び出せるツールとして実装し、
+MCP（Model Context Protocol）を通じて外部エージェントが実機を遠隔操作できます。
+「専用機器が使いにくい」という問題を、AI に操作させることで解く——これが本作の
+出発点です。
+
+**実機検証済み（2026年10月、ダミーデータなし）**：
+NanoVNA-H による自作アンテナの共振周波数・給線路遅延の実測 / RTL-SDR による
+435MHz 帯アマチュア周波数の実キャリア受信・FM 復調 / 外部エージェントからの
+MCP 遠隔操作（list_devices→connect→set_frequency→get_status 全闭环）。
+
+**数値（git 実測）**：792 commits / Python テスト 574 項目パス / LLM ツール
+90 種（C++）+ 70 種（Python）/ 全倉庫 MIT（GPL コード非流用、クリーンルーム
+自願実装）/ SDR++・SatDump・NanoVNA-App・kimi-code 等の主要 OSS 6 件を
+クローンして源码監査。
+
+**作者**：业余无线电爱好者（呼号 BI4MIB）。本项目以 MIT 许可全量开源，
+是作者对"AI 民主化仪器"这一命题的持续工程实践。
+
+零硬件 30 秒演示：`python3 -m mbdsdr_ai.aigui_demo --out demo.html`（AI 编排 UI
+的完整闭环）、`python3 -m pytest mbdsdr_ai/tests -q`（574 项测试）。
+
+</details>
 
 ---
 
