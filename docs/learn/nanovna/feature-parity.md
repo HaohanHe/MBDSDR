@@ -771,3 +771,30 @@ NanoVNASaver 实测可拼到 >10k 点）。本批在 Python 面落地同机制�
 
 未做（登记）：C++ 面 set_vna_sweep 的分段拼接（待 mbdsdr_mcp 构建后验证
 再落）、H4 运行期 401 自动识别（当前靠 seg_points 显式声明，不猜机型）。
+
+
+---
+
+# 第㉜批：WAV 位宽档位 + 其余审计缺口收尾（2026-10-14）
+
+## sdrpp recorder 位宽缺口（销账）
+
+- Python 面落地（mbdsdr_ai/recorder.py）：AudioRecorder 新增
+  ``bit_depth`` 参数（8/16/24/32bit PCM；默认 16 保持向后兼容）。
+  8=uint8 偏移 128（WAV 标准）、16=int16、24=int24（3 字节小端，手写
+  移位、不用 numpy view 技巧）、32=int32 定点 PCM；量化一律 clip 不
+  自动缩放（与既有语义一致）。测试 9 例（test_recorder_bitdepth.py）：
+  位宽回读、8bit 偏移语义、24bit 小端字节序、clip 不缩放、非法位宽
+  拒绝、默认 16 向后兼容。
+- C++ 面登记（未做）：cpp/src/dsp/recorder.{h,cpp} + wav_writer.{h,cpp}
+  同样钉死 Int16；位宽档位待 mbdsdr_mcp 工具链恢复后按同语义补齐，
+  与 Python 面共用同一档位表口径（8/16/24/32）。
+
+## 其余审计缺口的当前状态（核对后登记，未承诺排期）
+
+- sdrpp：DSB（已销账）、IQ 反相、通用 network_source、去加重档位
+  50/75us —— 仍登记未做（分别属链路/传输/解调小项，Python 面可测，
+  按需逐个销账）；
+- NanoVNA-App：marker 交互、机型运行期适配（H4 401 点识别、F_V2 协议）、
+  TDR 精度链（真 FFT + 双曲峰值精修）—— 仍登记未做；
+- SatDump：物理定标链、ZIQ/RF64 基带格式 —— 仍登记未做。

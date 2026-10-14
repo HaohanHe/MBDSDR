@@ -228,26 +228,40 @@ class IQRecorder:
 # 音频录制器（WAV, 48kHz, 16bit PCM）
 # ---------------------------------------------------------------------------
 class AudioRecorder:
-    """流式音频录制：WAV 48kHz 16bit PCM（单声道或立体声）。
+    """流式音频录制：WAV PCM（单声道或立体声）。
 
     对照 sdrpp/misc_modules/recorder/src/main.cpp:178-181
         writer.setFormat(WAV); writer.setSampleType(Int16);
         writer.setSamplerate(samplerate);
 
+    ``bit_depth`` 对齐 sdrpp recorder 的格式档位（8/16/24/32bit PCM；
+    2026-10-14 之前本类钉死 16bit——SDR++ 审计缺口，本批补齐）：
+    8=uint8 偏移 128、16=int16、24=int24（3 字节小端）、32=int32。
+    量化一律 clip 不自动缩放（电平由 AGC/手动增益负责），32bit 输出
+    为定点 PCM（非 float WAV，文件头清晰可读、下游工具零猜测）。
+
     Usage::
 
-        arec = AudioRecorder("/tmp/voice.wav", sample_rate=48000)
+        arec = AudioRecorder("/tmp/voice.wav", sample_rate=48000,
+                             bit_depth=24)
         arec.open()
         for audio_block in demod_stream:    # float32 (N,) 或 (N,2)
             arec.write(audio_block)
         arec.close()
     """
 
+    #: 支持的位宽（bit_depth -> wave sampwidth 字节数）
+    _BIT_DEPTHS = {8: 1, 16: 2, 24: 3, 32: 4}
+
     def __init__(self, path: str, sample_rate: int = 48000,
-                 channels: int = 1):
+                 channels: int = 1, bit_depth: int = 16):
+        if bit_depth not in self._BIT_DEPTHS:
+            raise ValueError(
+                f"不支持的位宽 {bit_depth}，可用：{sorted(self._BIT_DEPTHS)}")
         self.path = str(path)
         self.sample_rate = int(sample_rate)
         self.channels = int(channels)
+        self.bit_depth = int(bit_depth)
         self._wf = None        # wave.Wave_write 句柄
         self._n_frames: int = 0
         self.closed = True
@@ -259,7 +273,7 @@ class AudioRecorder:
         try:
             self._wf = _wave.open(self.path, "wb")
             self._wf.setnchannels(self.channels)
-            self._wf.setsampwidth(2)           # 16bit
+            self._wf.setsampwidth(self._BIT_DEPTHS[self.bit_depth])
             self._wf.setframerate(self.sample_rate)
         except (OSError, _wave.Error) as e:
             logger.error("AudioRecorder 打开 %s 失败: %s", self.path, e)
@@ -270,7 +284,7 @@ class AudioRecorder:
         return True
 
     def write(self, audio: np.ndarray) -> int:
-        """写入一块 float32 音频。自动 clip 到 [-1,1] 并量化到 int16。
+        """写入一块 float32 音频。按 bit_depth 量化（clip 不自动缩放）。
 
         返回写入的帧数（单声道样本数；立体声按帧计）。
         """
@@ -279,9 +293,18 @@ class AudioRecorder:
         x = np.asarray(audio, dtype=np.float32)
         if x.size == 0:
             return 0
-        # 归一化到 int16 满幅（不自动缩放，clip 即可——录音电平由 AGC/手动增益控制）
+        # 归一化到满幅（不自动缩放，clip 即可——录音电平由 AGC/手动增益控制）
         clipped = np.clip(x, -1.0, 1.0)
-        pcm = (clipped * 32767.0).astype(np.int16)
+        if self.bit_depth == 8:
+            # 8bit PCM 为无符号偏移 128（WAV 标准）
+            pcm = ((clipped * 127.0) + 128.0).astype(np.uint8)
+        elif self.bit_depth == 16:
+            pcm = (clipped * 32767.0).astype(np.int16)
+        elif self.bit_depth == 24:
+            i24 = np.round(clipped * 8388607.0).astype(np.int32)
+            pcm = self._to_int24(i24)
+        else:  # 32bit 定点 PCM
+            pcm = (clipped * 2147483647.0).astype(np.int32)
         # wave.writeframes 要交错 bytes
         try:
             self._wf.writeframes(pcm.tobytes())
@@ -292,6 +315,16 @@ class AudioRecorder:
         except (OSError, _wave.Error) as e:
             logger.error("AudioRecorder 写失败: %s", e)
             return 0
+
+    @staticmethod
+    def _to_int24(i24: np.ndarray) -> np.ndarray:
+        """int32 满幅值 -> 3 字节小端 PCM24 字节流（无 numpy view 技巧）。"""
+        out = np.empty(i24.size * 3, dtype=np.uint8)
+        v = i24.astype("<i4")
+        out[0::3] = (v & 0xFF).astype(np.uint8)
+        out[1::3] = ((v >> 8) & 0xFF).astype(np.uint8)
+        out[2::3] = ((v >> 16) & 0xFF).astype(np.uint8)
+        return out
 
     def close(self) -> None:
         if self._wf is not None:
