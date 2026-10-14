@@ -113,3 +113,7 @@ mbdsdr-ui-mockup/_backup/
 
 # QtTest hand-run moc residue (AUTOMOC generates these into build/)
 cpp/tests/*.moc
+
+# SPICE ephemeris kernel downloaded into CWD by an older test path
+# (proper location is ~/.mbdsdr/ephemeris per solar_system.py:49)
+*.bsp

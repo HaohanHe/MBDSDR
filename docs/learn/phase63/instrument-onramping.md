@@ -430,3 +430,62 @@ LRPT 录制。候选输入：ISS/NOAA LRIT 直播过境时抓录，或 SatDump �
   无 hook_manager 静默+触发异常不炸、单参构造向后兼容）；
   `python -m pytest mbdsdr_ai/tests -q` **477 passed / 10 skipped**
   （改前基线 466/10，+11 新用例，无退步）。
+
+## subagent 隔离执行（2026-10-14，audit Top-4）
+
+承接 kimi-code 审计 Top-4（子代理隔离上下文 + 真 LLM 循环）。本仓自审计
+`docs/audit_r2/34_subagents_orchestrator.md:146` 早已登记「骨架在，缺隔离
+上下文+真循环」（F3 `allowed_tools` 假隔离、F5 无 LLM 循环、X4 执行路径
+零测试覆盖）。本批在 `mbdsdr_ai/subagents.py` 落地最小可用的同步隔离执行：
+
+- **循环形态**：`Subagent.execute_task`（subagents.py）在注入 model_manager
+  后把 `self.context` 重置为本任务独立对话——system = 子代理类型提示词
+  （`SUBAGENT_PROMPTS`）+ 本次任务描述 + 执行约定（白名单/步数上限/诚实
+  约定），user = goal + input_data；跑「LLM → tool_calls → tool 消息回灌 →
+  LLM」多步循环，直到无工具调用或达到 max_steps。上下文与主 agent 的
+  ContextManager、其它子代理、本代理的上个任务零共享（每任务重置）。
+  工具经 `tool_registry.call_from_model` 既有分发执行（最小耦合，不碰
+  MCPToolSet）。
+- **步数与截断语义**：max_steps 为新增参数，优先级 execute_task 参数 >
+  `task.max_steps` > `Subagent.max_steps`，各级默认 **8**。达到上限仍在
+  索取工具 → `success=false` + `status="truncated"` + `truncated=true` +
+  `steps_used=N` + output 带可见 `[已截断]` 标记（截断前的最后文本作为
+  partial 保留），error 带 `max_steps_exhausted` 说明——partial
+  必须可见，绝不伪装成完成。
+- **工具过滤接线**：循环期有效白名单 = `allowed_tools`（非空即该集合）；
+  `None` = 全部注册工具但**视图与运行时均排除 `subagent_*`**（防子代理递归
+  调 `subagent_execute` 无限自激；显式列入 allowed_tools 仍可用）。越界
+  调用在本地被拒：不触达 registry、不上抛崩溃，拒绝原因回灌成 tool 消息
+  让 LLM 可见。公开方法 `can_use_tool()` 旧语义（None=全部）保持不变。
+- **诚实错误**：model_manager 缺失 / `chat` 返回 `success=false` / `chat`
+  抛异常 → `status="error"` + error 技术细节，output 为空，绝不伪造输出
+  （旧"_execute 直接打工具"旁路随之删除，无推理动作不得冒充自主执行）。
+- **上下文预算**：`max_context_tokens`（默认 4096）生效——每轮 chat 前按
+  `context_manager.estimate_message_tokens` 估算，超预算则从最老的**完整
+  轮次**（assistant+其 tool 消息）成对摘除（半对会破坏 OpenAI tool_call/
+  tool 配对），system 与首条 user 永保留，摘除以 `data.context_trimmed`
+  留痕。
+- **结果回收**：最终文本作为单条 `SubagentResult.output` 回主 agent；
+  `to_dict()` 在旧字段（success/output/steps_executed/tools_called/...）
+  之外新增 `status/steps_used/tools_used/truncated`（新旧字段同值镜像，
+  既有调用方零改）。agent.py 工具面同步接线：`subagent_create`/
+  `subagent_execute` 增加 `max_steps` 参数，描述从"同步工具执行器，无 LLM
+  推理、无多步循环"更正为真循环语义，`subagent_execute` 的 success 按结果
+  如实回传（truncated/error 不伪装成功）。
+- **与 kimi-code subagentService 的对应**：隔离上下文（每任务独立对话，
+  不共享主会话）、工具白名单视图过滤、步数上限 + partial 返回、结果以单条
+  结构化结果回主 agent——四者同构。
+- **差距（未做，诚实标注）**：无异步执行/无 stop/无 wait（`submit_task`
+  仍是裸 daemon 线程，未对 LLM 暴露工具面）；无 context fork 快照（重置
+  即丢弃，非快照恢复）；`timeout_s` 仍未生效（audit F1 未结，本轮不追求
+  watchdog）；弱模型文本工具调用兜底（`parse_tool_calls_from_text`）未接
+  入循环；线程安全/并发上限（F2/F7）未动。
+- **后续候选**：subagent_submit/subagent_get_result 工具面对 LLM 暴露；
+  timeout_s 用 ThreadPoolExecutor future 包装（F1）；F2/F7 并发与锁；
+  把弱模型文本兜底接进循环；allowed_tools 默认表与 MCP 域对齐。
+- **测试**：`mbdsdr_ai/tests/test_subagents.py` 13 用例（两轮循环+隔离+
+  每任务重置、max_steps 截断诚实+参数优先级、越界拒绝+subagent_* 递归
+  防护、model_manager 缺失/调用失败/抛异常三类诚实错误、既有 API 不破、
+  上下文预算成对摘除）；`python -m pytest mbdsdr_ai/tests -q`
+  **490 passed / 10 skipped**（改前基线 477/10，+13 新用例，无退步；
+  根目录集成测试中 subagent 相关两个用例复核通过）。

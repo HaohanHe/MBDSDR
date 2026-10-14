@@ -29,6 +29,7 @@ from typing import Any, Callable, Dict, List, Optional
 from .controller import SDRController
 from .errors import SDRUserError
 from ..questions import QuestionError, QuestionStore
+from ..hooks import Event, EventType, HookManager
 from ..tool_policy import ToolPolicy, normalize_key
 
 
@@ -894,6 +895,8 @@ class MCPToolSet:
         self.controller = controller if controller is not None else SDRController()
         # 人机问答 store（会话内存态；stdout 请求-响应，提问不阻塞）
         self.questions = QuestionStore()
+        # 事件钩子（AGENT_PRE_TOOL_USE 可否决；无注入时本进程独立实例）
+        self.hooks = HookManager()
         # 工具权限规则集（默认写 ask/读 allow = 既有 arm_manual 语义不变）；
         # 会话批准缓存：approve_session=true 的 (工具, 参数) 本进程免问。
         self.policy = policy if policy is not None else ToolPolicy.load()
@@ -997,6 +1000,17 @@ class MCPToolSet:
                     "outcome": "error",
                     "suggestion": "用 tools/list 查看可用工具。"}
         args = dict(arguments or {})
+        # PreToolUse hook（可否否决）：在规则门与分发之前触发。veto 压过
+        # arm_manual 与 policy allow——与 deny 规则同级的运行时安全闸（外部
+        # 编排方/测试可在 self.hooks 上注册 pre_tool_use 钩子拦截调用）。
+        veto = self._pre_tool_veto(name, args, bool(tool.get("write")))
+        if veto is not None:
+            return {"ok": False,
+                    "error": "hook_vetoed：%s"
+                             % (veto.get("reason") or "denied"),
+                    "gated": True,
+                    "outcome": "vetoed",
+                    "veto_reason": veto.get("reason") or "hook_denied"}
         # Write-tool gate: ruleset (allow/ask/deny) + explicit once-approval
         # (arm_manual) + optional session-level approval cache
         # (approve_session). Semantics aligned with the C++ llm_worker gate:
@@ -1042,6 +1056,23 @@ class MCPToolSet:
         return _finalize_tool_result(
             name, result,
             extra={"approval": "session"} if session_cached else None)
+
+    def _pre_tool_veto(self, name: str, args: Dict[str, Any],
+                       is_write: bool) -> Optional[Dict[str, Any]]:
+        """触发 AGENT_PRE_TOOL_USE 钩子并提取否决。
+
+        钩子异常绝不影响主流程（Hook.trigger 已兜底为 None；这里再兜一层
+        防御——钩子系统整体故障时记 stderr 并放行，绝不让观测面变成单点）。
+        """
+        try:
+            ev = Event(event_type=EventType.AGENT_PRE_TOOL_USE,
+                       data={"tool": name, "arguments": dict(args),
+                             "write": is_write},
+                       source="mcp_toolset")
+            return self.hooks.veto_for(ev)
+        except Exception as e:  # pragma: no cover - 防御
+            print(f"[mcp] pre_tool_use 钩子故障（放行）: {e}", file=sys.stderr)
+            return None
 
     # ------------------------------------------------------------------
     # JSON-RPC 2.0 分发（纯函数，便于测试）

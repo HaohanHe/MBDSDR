@@ -56,6 +56,9 @@ class EventType(str, Enum):
 
     # Agent 事件
     AGENT_TOOL_CALL = "agent.tool_call"
+    # 工具执行前事件（可否决）：任一同步钩子返回
+    # {"decision": "deny", "reason"/"message": ...} 即否决本次调用。
+    AGENT_PRE_TOOL_USE = "agent.pre_tool_use"
     AGENT_TOOL_RESULT = "agent.tool_result"
     AGENT_ERROR = "agent.error"
     AGENT_CONTEXT_COMPACT = "agent.context_compact"
@@ -266,6 +269,19 @@ class HookManager:
                 results.append(result)
 
         return results
+
+    def veto_for(self, event: Event) -> Optional[Dict[str, Any]]:
+        """触发事件并提取否决决定（用于 AGENT_PRE_TOOL_USE 等可否决事件）。
+
+        任一同步钩子返回 {"decision": "deny", "reason"/"message": ...} 即
+        否决；返回 {"reason": ...} 或 None。钩子自身异常已被 Hook.trigger
+        兜底为 None（不影响主流程），因此这里只做决定提取。
+        """
+        for r in self.trigger(event):
+            if isinstance(r, dict) and str(r.get("decision", "")).lower() == "deny":
+                return {"reason": r.get("reason") or r.get("message")
+                        or "hook_denied"}
+        return None
 
     def trigger_async(self, event: Event):
         """异步触发事件（如果启用了异步模式）。"""

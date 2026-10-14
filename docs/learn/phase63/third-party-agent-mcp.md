@@ -339,3 +339,64 @@ MBDSDR 落地的是其子集：
   保留期/TTL/容量上限（及与 `~/.mbdsdr/spill` 的统一治理）是下一批候选。
 - spill 读回工具（在 MCP 面暴露按 spill_path 读回全文的工具）：当前 agent
   只能自行按路径读文件；是否产品化待决策。
+
+
+---
+
+## 工具权限规则集（2026-10-14，上游审计第一落点落地）
+
+kimi-code（MoonshotAI/kimi-code）与 kilocode（Kilo-Org/kilocode）两份克隆审计
+独立收敛于同一结论：二值 arm_manual 门是 MBDSDR agent 侧最大缺口。本批在
+Python MCP 面落地第一段（C++ 面镜像待 mbdsdr_mcp 构建后同步，见文末登记）。
+
+### 语义（Python 面）
+
+- **三级策略**：读工具默认 `allow`；写工具默认 `ask`（= 既有 arm_manual 语义，
+  完全向后兼容）；可经规则覆盖为 `allow`（免问自动执行）或 `deny`（硬否决，
+  即使带 arm_manual=true 也不执行——对齐 kilocode hard ruleset veto）。
+- **规则解析**：精确工具名 > fnmatch 通配（如 `set_*`）> 默认。deny 精确规则
+  不被宽松通配放行。
+- **会话批准缓存**：调用带 `arm_manual=true` 且 `approve_session=true` 时，
+  按 (工具名, 规范化参数) 记入本会话免问名单；后续同工具同参数自动执行，
+  结果带 `approval:"session"`（可观测，不隐形放行）；参数变化则重新询问。
+- **信封**：gated 信封新增 `policy`（ask）与 `hint`（如何授权）两个引导字段，
+  原三键（ok/error/gated）不变——外部 agent 收到门时知道下一步怎么走，
+  不再是哑门。
+- **配置**（可选）：`~/.mbdsdr/tool_policy.json`（或
+  `MBDSDR_TOOL_POLICY` 环境变量覆盖路径）：
+  `{"rules":[{"pattern":"shutdown","action":"deny"},{"pattern":"set_*","action":"allow"}]}`；
+  文件缺失/坏 JSON -> 默认策略并在 stderr 明说（不静默吞、不伪造策略）。
+- **测试注入**：`MCPToolSet(policy=ToolPolicy(...))`；活体规则文件经 env 覆盖。
+
+### 登记（未做）
+
+- C++ 面（llm_worker.cpp:120 门）规则集镜像：待本机 Qt MinGW 修复后随
+  mbdsdr_mcp 构建落地，规则 JSON schema 与 Python 面同形（跨语言钉扎测试
+  届时一起补，参考 aigui_messages 的 C++ registry 钉扎模式）。
+- 域级 ruleset（域分组卡片 + 子代理继承裁剪，kilocode agent schema 内嵌
+  permission: Ruleset 形态）与结构化 question 工具（kilocode
+  question 服务）为下一批候选。
+- deny 的工具从 tools/list 视野隐藏（kilocode 行为）暂未做：当前 deny 仍在
+  目录可见但执行被拒——诚实可见 > 隐藏，待产品决策。
+
+
+---
+
+## PreToolUse 可否决钩子（2026-10-14，kimi-code 审计 Top-3）
+
+形态对齐 kimi-code externalHooks 的「本地命令在关键点 gate 风险工具调用」，
+MBDSDR 取进程内子集（不上外部命令执行面——那是另一个威胁模型，暂不开放）：
+
+- 新事件 `AGENT_PRE_TOOL_USE`（hooks.py）：在 `MCPToolSet.call_tool` 的
+  规则门与分发**之前**触发，payload = {tool, arguments, write}；
+- 否决语义：任一同步钩子返回 `{"decision": "deny", "reason": ...}` 即拦截，
+  信封 `{ok:false, gated:true, outcome:"vetoed", veto_reason}`；
+- **优先级**：veto 压过 `arm_manual` 与 policy allow——与 deny 规则同级的
+  运行时安全闸（外部编排方/测试可经 `toolset.hooks` 注册拦截）；
+- 兜底：`Hook.trigger` 已把钩子异常降为 None 并留痕 stdout，`_pre_tool_veto`
+  再兜一层（钩子整体故障记 stderr 放行）——观测面绝不当主流程单点；
+- 每 toolset 实例独立 HookManager；未注入时用本进程实例。
+- 测试 6 例（test_tool_hooks.py）：armed 写工具被否、读工具同样过钩、
+  非 deny 结果放行、钩子异常不炸主流程、disable 后不否、实例隔离。
+- 未做（登记）：外部命令 hooks（stdin JSON + exit 2 语义，需先定威胁模型）、
+  hook 配置持久化（~/.mbdsdr/hooks.json）、C++ 面对等事件。
