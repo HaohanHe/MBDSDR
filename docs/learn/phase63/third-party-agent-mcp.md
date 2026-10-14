@@ -710,3 +710,33 @@ Accept 头约定 / headers 透传 / 不伪造 session 头 / 401 needs_auth /
   订阅/回调表。
 - **C++ 面客户端镜像**：同前几节登记，待 mbdsdr_mcp 构建后评估（服务端
   优先级高于客户端）。
+
+
+---
+
+## A2UI 便携 renderer + 演示闭环（2026-10-14）
+
+「AI 编排 UI」在此前只有 agent 侧（构造/校验）与 C++ renderer（编不了）。
+本批补上投影 renderer，把整环在无 Qt 机器上闭合：
+
+- **mbdsdr_ai/aigui_render.py**：官方信封 -> 单文件 HTML 终态投影（纯函数）。
+  语义对齐 renderer 契约：createSurface 整面替换、updateComponents 按 id
+  合并、props.visible=false 收起（连 children 引用一并收起）、未知 id 诚实
+  占位、updateDataModel 只读 JSON 面板、deleteSurface 回默认；扁平邻接表
+  的 children 引用补渲（tab/center 视图）。**不持有布局状态、不与 C++ 争
+  事实源**——它是投影，不是第二个模型（红线不动）。
+- **mbdsdr_ai/aigui_demo.py**：`python -m mbdsdr_ai.aigui_demo --out x.html`
+  四幕演示（默认三栏 280/800/280 -> 选中 tab:VNA 收起 CW/ADS-B ->
+  updateDataModel 状态面板 -> 故意引用未知 id 看诚实占位）。
+- **MCP 工具 aigui_render_preview**（工作台编排域，读）：编 (op, components,
+  data_model) 直接出 HTML 文件返回路径；产物是对话层预览，不碰布局模型/
+  硬件，不走 arm_manual 门（同 ask_question 判定）。
+- 测试 9 例（test_aigui_render.py）：终态非逐帧、合并/收起/占位/数据面板/
+  deleteSurface 复位、纯函数确定性、演示信封全部官方形状、MCP 落盘+默认
+  目录。踩坑记录：新工具忘记登记 _TOOL_DOMAIN 触发「未分配工具」钉扎测试
+  （分组视图静默丢工具正是该测试要防的）。
+- 位置声明：这是 cc1 损坏期间的**可用见证**与 P2 Flutter renderer 的协议
+  参照；C++ renderer 落地后两者应保持投影一致（后续可加跨语言快照比对，
+  参考 aigui_messages 的 component_registry 钉扎模式）。
+
+全量 564 passed / 10 skipped。

@@ -46,6 +46,7 @@ _NUM = {"type": "number"}
 _INT = {"type": "integer"}
 _STR = {"type": "string"}
 _BOOL = {"type": "boolean"}
+_OBJ = {"type": "object"}
 
 
 def _schema(props: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -232,6 +233,39 @@ def _aigui_validate_message(op: str, components: Any) -> Any:
                    "存在未注册 id：请先用 aigui_component_catalog 核对可引用 id。")
     out["real_hardware_verified"] = False  # 纯校验，无硬件面
     return out
+
+
+def _aigui_render_preview(op: str, components: Any, data_model: Any = None,
+                          title: str = "A2UI preview",
+                          out_path: str = "") -> Any:
+    """把编排信封投影成终态 HTML 预览文件（无 Qt 的机器上也能看）。
+
+    写本地 HTML（默认 ~/.mbdsdr/aigui/），不碰布局模型、不碰 DSP/硬件，
+    故不走 arm_manual 门——判定同 ask_question：产物是对话层预览，不是
+    系统状态。
+    """
+    import os
+    import time
+    from mbdsdr_ai.aigui_messages import arrange_to_envelope, \
+        message_update_data_model
+    from mbdsdr_ai.aigui_render import render
+    envelopes = [arrange_to_envelope(op, components)]
+    if data_model is not None:
+        envelopes.append(message_update_data_model(data_model))
+    page = render(envelopes, title=title or "A2UI preview")
+    out = os.path.expanduser(out_path) if out_path else \
+        os.path.expanduser("~/.mbdsdr/aigui/preview_%d.html"
+                           % int(time.time() * 1000))
+    try:
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(page)
+    except OSError as e:
+        return {"ok": False, "error": f"预览写出失败: {e}",
+                "technical_detail": str(e)}
+    return {"ok": True, "path": out, "bytes": len(page.encode("utf-8")),
+            "hint": "浏览器打开该文件即可看到终态工作台；布局模型唯一"
+                    "事实源仍是 C++ renderer。"}
 
 
 def _qa_ask(store: QuestionStore, question: str, options: Any,
@@ -646,6 +680,19 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         lambda c, a: _aigui_validate_message(a.get("op", "updateComponents"),
                                              a.get("components")))
 
+    add("aigui_render_preview",
+        "把同一份 (op, components[, data_model]) 投影成终态 HTML 预览文件并"
+        "返回路径（无 Qt 的机器上验证编排效果的便携 renderer）。不碰布局模型、"
+        "不碰硬件，不走 arm_manual 门——产物是对话层预览。",
+        _schema({"op": _STR, "components": {"type": "array",
+                                            "items": {"type": "object"}},
+                 "data_model": _OBJ, "title": _STR, "out_path": _STR},
+                ["components"]),
+        lambda c, a: _aigui_render_preview(
+            a.get("op", "updateComponents"), a.get("components"),
+            data_model=a.get("data_model"), title=a.get("title", ""),
+            out_path=a.get("out_path", "")))
+
     # ---- 人机问答（Python 扩展域：结构化提问原语，不走 arm_manual 门）----
     add("ask_question",
         "向人类提一个结构化选择题（不阻塞，立即返回 pending 信封）：options "
@@ -844,6 +891,7 @@ _TOOL_DOMAIN: Dict[str, str] = {
     # 信封构造+白名单校验；两个新工具让「工作台编排」域在 Python 面不再空置）
     "aigui_component_catalog": "工作台编排",
     "aigui_validate_message": "工作台编排",
+    "aigui_render_preview": "工作台编排",
     # A2UI agent 侧作者工具（渲染/布局模型事实源在 C++ renderer，本面只做
     # 信封构造+白名单校验；两个新工具让「工作台编排」域在 Python 面不再空置）
     "ask_question": "人机问答",
