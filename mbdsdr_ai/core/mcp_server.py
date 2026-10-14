@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .controller import SDRController
 from .errors import SDRUserError
+from ..questions import QuestionError, QuestionStore
 from ..tool_policy import ToolPolicy, normalize_key
 
 
@@ -224,9 +225,56 @@ def _aigui_validate_message(op: str, components: Any) -> Any:
     return out
 
 
-def _build_tool_table() -> List[Dict[str, Any]]:
+def _qa_ask(store: QuestionStore, question: str, options: Any,
+            context: str = "", question_id: str = "") -> Any:
+    """结构化提问（不阻塞）：立即返回 pending 信封，答案经 answer_question 回落。"""
+    try:
+        q = store.ask(question, list(options or []),
+                      context=context, question_id=question_id)
+    except QuestionError as e:
+        return {"ok": False, "error": str(e), "suggestion":
+                "question 非空 + options>=2 个互异选项；qa 状态用 "
+                "question_status 轮询。"}
+    return {"ok": True, "outcome": "question_pending",
+            "question": q.to_dict(include_answer=False),
+            "hint": "答案经 answer_question 写回，然后用 "
+                    "question_status(question_id) 取回。"}
+
+
+def _qa_answer(store: QuestionStore, question_id: str, answer: str,
+               free_text: bool = False, override: bool = False) -> Any:
+    """把人类答案写回 store（answer 默认必须命中选项，防幻觉自由发挥）。"""
+    try:
+        q = store.answer(question_id, answer, free_text=free_text,
+                         override=override)
+    except QuestionError as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "outcome": "answered", "question": q.to_dict()}
+
+
+def _qa_status(store: QuestionStore, question_id: str = "") -> Any:
+    """查询问答状态：给 question_id 查单条，否则列出全部未决。"""
+    try:
+        if question_id:
+            return {"ok": True, "question": store.get(question_id).to_dict()}
+    except QuestionError as e:
+        return {"ok": False, "error": str(e)}
+    pending = store.pending_envelopes()
+    answered = len(store.list(status="answered"))
+    return {"ok": True, "pending": pending, "pending_count": len(pending),
+            "answered_count": answered,
+            "note": "会话内存态：服务重启后 pending 全部丢失（不假装持久化）。"}
+
+
+# 无 toolset 上下文时的问答兜底 store（仅桌面旧路径/独立构建工具表时使用；
+# MCPToolSet 一律注入自己的实例 store）。
+_QA_FALLBACK = QuestionStore()
+
+
+def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, Any]]:
     """构造静态工具表（与 SDRController 方法一一对应）。"""
     table: List[Dict[str, Any]] = []
+    qa = toolset.questions if toolset is not None else _QA_FALLBACK
 
     def add(name: str, desc: str, schema: Dict[str, Any],
             handler: Callable[[SDRController, Dict[str, Any]], Any],
@@ -538,6 +586,37 @@ def _build_tool_table() -> List[Dict[str, Any]]:
         lambda c, a: _aigui_validate_message(a.get("op", "updateComponents"),
                                              a.get("components")))
 
+    # ---- 人机问答（Python 扩展域：结构化提问原语，不走 arm_manual 门）----
+    add("ask_question",
+        "向人类提一个结构化选择题（不阻塞，立即返回 pending 信封）：options "
+        ">=2 个互异选项，可选 context 补充背景。适用于 VNA/记忆域空态需用户"
+        "决策、仪器接线确认等场景。答案经 answer_question 写回、question_status "
+        "取回。不走 arm_manual：问答是对话层动作，不碰硬件。",
+        _schema({"question": _STR, "options": {"type": "array",
+                                               "items": {"type": "string"}},
+                 "context": _STR, "question_id": _STR},
+                ["question", "options"]),
+        lambda c, a: _qa_ask(qa, a.get("question", ""),
+                             a.get("options"), a.get("context", ""),
+                             a.get("question_id", "")))
+
+    add("answer_question",
+        "把人类答案写回问题（默认必须命中 ask_question 给的选项——防幻觉"
+        "自由发挥；确需自由文本带 free_text=true；修正已答问题带 override）。",
+        _schema({"question_id": _STR, "answer": _STR,
+                 "free_text": _BOOL, "override": _BOOL},
+                ["question_id", "answer"]),
+        lambda c, a: _qa_answer(qa, a.get("question_id", ""),
+                                a.get("answer", ""),
+                                free_text=a.get("free_text", False),
+                                override=a.get("override", False)))
+
+    add("question_status",
+        "查询问答状态：给 question_id 查单条；不给则列出全部未决问题与已答"
+        "计数。会话内存态——服务重启后 pending 全部丢失（信封如实标注）。",
+        _schema({"question_id": _STR}),
+        lambda c, a: _qa_status(qa, a.get("question_id", "")))
+
     return table
 
 
@@ -573,6 +652,10 @@ PYTHON_EXTENSION_DOMAIN_SUMMARIES: Dict[str, str] = {
     "解码器长尾": "Python 侧独立实现、C++ 10 域尚未覆盖的长尾协议解码器与硬件参数查表"
                  "（DAB+/NRSC-5/433.92MHz ISM/GK-2A LRIT/FST4/bladeRF 参数）。"
                  "离线纯函数，真机验证多为 PENDING。",
+    "人机问答": "结构化提问原语（ask_question/answer_question/question_status）："
+               "agent 在选项间请求人类决策，stdout 请求-响应式传输不阻塞——"
+               "会话内存态，重启即丢 pending（如实文档化）。不走 arm_manual 门："
+               "问答是对话层动作，不碰 DSP/音频/硬件。",
 }
 
 PYTHON_EXTENSION_DOMAIN_NAMES: List[str] = list(PYTHON_EXTENSION_DOMAIN_SUMMARIES.keys())
@@ -658,6 +741,11 @@ _TOOL_DOMAIN: Dict[str, str] = {
     # 信封构造+白名单校验；两个新工具让「工作台编排」域在 Python 面不再空置）
     "aigui_component_catalog": "工作台编排",
     "aigui_validate_message": "工作台编排",
+    # A2UI agent 侧作者工具（渲染/布局模型事实源在 C++ renderer，本面只做
+    # 信封构造+白名单校验；两个新工具让「工作台编排」域在 Python 面不再空置）
+    "ask_question": "人机问答",
+    "answer_question": "人机问答",
+    "question_status": "人机问答",
 }
 
 
@@ -804,14 +892,16 @@ class MCPToolSet:
     def __init__(self, controller: Optional[SDRController] = None,
                  policy: Optional[ToolPolicy] = None) -> None:
         self.controller = controller if controller is not None else SDRController()
-        self._table = _build_tool_table()
-        self._by_name: Dict[str, Dict[str, Any]] = {
-            t["name"]: t for t in self._table
-        }
+        # 人机问答 store（会话内存态；stdout 请求-响应，提问不阻塞）
+        self.questions = QuestionStore()
         # 工具权限规则集（默认写 ask/读 allow = 既有 arm_manual 语义不变）；
         # 会话批准缓存：approve_session=true 的 (工具, 参数) 本进程免问。
         self.policy = policy if policy is not None else ToolPolicy.load()
         self._session_approvals: set = set()
+        self._table = _build_tool_table(self)
+        self._by_name: Dict[str, Dict[str, Any]] = {
+            t["name"]: t for t in self._table
+        }
 
     # ------------------------------------------------------------------
     def list_tools(self) -> List[Dict[str, Any]]:
