@@ -745,3 +745,29 @@ anovna_dump JSON（官方 11 格式之 PHASE 的 Python 侧对等物）；	dr_le
 - P1：时域平均 2^n 帧（历史环形缓冲）+ 曲线平滑。
 - P2：trace 格式全集派生（REAL/IMAG/LINEAR/RESISTANCE/REACTANCE）。
 - P2：LiteVNA 机型支持（接口兼容，扩频至 6.3G）。
+
+
+---
+
+# 第㉛批：分段扫描拼接落地（2026-10-14，两轮审计共同圈定的最高价值缺口）
+
+nanovna-saver 与 NanoVNA-App 审计都把「>101 点」列为首要功能缺口（官方
+NanoVNASaver 实测可拼到 >10k 点）。本批在 Python 面落地同机制：
+
+- `NanoVNAClient.segmented_sweep(start, stop, points_total, seg_points=101)`：
+  host 侧把总点数切成 ≤seg_points 连续段，逐段 set_sweep + frequencies +
+  data 0/1，段间去掉 1 个重复边界点，拼出连续曲线；段表随结果返回，坏段
+  可定位。任一段取数长度不一致即抛错（不拼半截曲线）。
+- `nanovna_dump`：`points > seg_points`（默认 101）自动走分段；新增
+  `--seg-points` 显式段长（H4 可传 401）。输出带 segments/segment_count/
+  cal_caveat（设备校准与范围绑定——载入后改范围走互补近似，屏幕小写
+  c0-c4——非校准段精度以首段为准，这条警告强制在场）。
+- `--selftest` 合成脚本同步段感知，`--points 202` 可端到端演练分段路径。
+- 模块级常量 `MAX_SWEEP_POINTS=101` / `MAX_SWEEP_POINTS_H4=401`（官网
+  明文 101；H4=401 来自 protocol-study §3 与 NanoVNA-App 机型表）。
+- 测试 +8：两段拼接/边界重点只出现一次/段表与 cal 警告在场/≤101 无
+  segments 键/四项输入校验/短帧诚实抛错（test_nanovna_dump.py，
+  test_nanovna_client.py 同步）。
+
+未做（登记）：C++ 面 set_vna_sweep 的分段拼接（待 mbdsdr_mcp 构建后验证
+再落）、H4 运行期 401 自动识别（当前靠 seg_points 显式声明，不猜机型）。

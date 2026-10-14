@@ -317,3 +317,99 @@ def test_real_path_open_failure_diagnostic_lists_candidates(monkeypatch, capsys)
     assert "COM7 (VID:PID 0483:5740)" in err
     assert "COM9 (VID:PID 0483:5740)" in err
     assert holder["counter"]["open_calls"] == 2
+
+# ---------------------------------------------------------------------------
+# 分段扫描拼接（2026-10-14，官方 NanoVNASaver 同机制：突破单 sweep 101 点上限）
+# ---------------------------------------------------------------------------
+
+def _segmented_script():
+    # 21 点 / 430-431MHz / 段长 11 -> 两段：430.0-430.5M(11 点) + 430.5-431.0M(11 点)
+    f1 = [str(430_000_000 + i * 50_000) for i in range(11)]
+    f2 = [str(430_500_000 + i * 50_000) for i in range(11)]
+    d0 = ["0.5 0.0"] * 11
+    d1 = ["0.1 -0.02"] * 11
+    return [
+        ["help", []],
+        ["version", ["1.0.174-hugen"]],
+        ["info", ["NanoVNA-H"]],
+        ["cal", ["load open short thru cal'ed"]],
+        ["tcxo", ["usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"]],
+        ["sweep 430000000 430500000 11", []],
+        ["frequencies", f1],
+        ["data 0", d0],
+        ["data 1", d1],
+        ["sweep 430500000 431000000 11", []],
+        ["frequencies", f2],
+        ["data 0", d0],
+        ["data 1", d1],
+    ]
+
+
+def test_replay_segmented_dump(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps(_segmented_script()), encoding="utf-8")
+    out = run_dump("", 430_000_000, 431_000_000, 21, replay=str(p),
+                   seg_points=11)
+    # 拼接后 21 点：11 + 10（去边界重点），频率连续到 431.0MHz
+    assert len(out["frequencies_hz"]) == 21
+    assert out["frequencies_hz"][0] == 430_000_000
+    assert out["frequencies_hz"][10] == 430_500_000   # 边界点只出现一次
+    assert out["frequencies_hz"][-1] == 431_000_000
+    assert out["sweep"]["points"] == 21
+    seg = out["segments"]
+    assert seg["segmented"] is True
+    assert seg["segment_count"] == 2
+    assert seg["segments"][0] == {"start_hz": 430_000_000,
+                                  "stop_hz": 430_500_000, "points": 11}
+    assert seg["segments"][1] == {"start_hz": 430_500_000,
+                                  "stop_hz": 431_000_000, "points": 11}
+    # cal 绑定诚实警告必须在场（每段独立扫描范围）
+    assert "校准" in seg["cal_caveat"] and "互补" in seg["cal_caveat"]
+    assert len(out["s11_phase_deg"]) == 21
+
+
+def test_single_sweep_has_no_segments_key(tmp_path):
+    p = tmp_path / "s.json"
+    p.write_text(json.dumps(_script()), encoding="utf-8")
+    out = run_dump("", 430_000_000, 431_000_000, 11, replay=str(p))
+    assert "segments" not in out
+
+
+def test_segmented_sweep_input_validation():
+    from mbdsdr_ai.nanovna_client import (NanoVNAClient, NanoVNADriverError,
+                                          ReplayTransport)
+    c = NanoVNAClient(transport=ReplayTransport([]))
+    cases = [
+        ((440_000_000, 430_000_000, 21), {}),      # stop<=start
+        ((430_000_000, 431_000_000, 1), {}),       # <2 点
+        ((430_000_000, 431_000_000, 21), {"seg_points": 1}),     # 段长越界
+        ((430_000_000, 431_000_000, 21), {"seg_points": 500}),   # >401
+    ]
+    for args, kwargs in cases:
+        try:
+            c.segmented_sweep(*args, **kwargs)
+            assert False, f"应当诚实报错: {args} {kwargs}"
+        except NanoVNADriverError:
+            pass
+
+
+def test_segmented_sweep_short_frame_is_error():
+    """某段取数不足（设备点数上限被突破等）-> 拼装即抛错，不出半截曲线。"""
+    from mbdsdr_ai.nanovna_client import (NanoVNAClient, NanoVNADriverError,
+                                          ReplayTransport)
+    script = [
+        ["sweep 430000000 430500000 11", []],
+        ["frequencies", [str(430_000_000 + i * 50_000) for i in range(11)]],
+        ["data 0", ["0.5 0.0"] * 11],
+        ["data 1", ["0.1 -0.02"] * 11],
+        ["sweep 430500000 431000000 11", []],
+        ["frequencies", [str(430_500_000 + i * 50_000) for i in range(5)]],
+        ["data 0", ["0.5 0.0"] * 5],
+        ["data 1", ["0.1 -0.02"] * 5],
+    ]
+    c = NanoVNAClient(transport=ReplayTransport(script))
+    try:
+        c.segmented_sweep(430_000_000, 431_000_000, 21)
+        assert False, "短帧必须诚实抛错"
+    except NanoVNADriverError:
+        pass

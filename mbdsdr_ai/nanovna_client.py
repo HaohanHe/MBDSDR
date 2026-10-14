@@ -43,6 +43,11 @@ CAPTURE_WIDTH = 320
 CAPTURE_HEIGHT = 240
 CAPTURE_FRAME_BYTES = CAPTURE_WIDTH * CAPTURE_HEIGHT * 2  # 153600
 
+# 设备单 sweep 点数上限：NanoVNA-H 文本固件官网明文 101（H4 为 401）。
+# 分段拼接的默认段长与 CLI 自动分段阈值都用 101；H4 用户显式传 401。
+MAX_SWEEP_POINTS = 101
+MAX_SWEEP_POINTS_H4 = 401
+
 
 class NanoVNADriverError(RuntimeError):
     """与 NanoVNA 通信或状态相关的错误。无设备时优先抛此异常。"""
@@ -497,6 +502,82 @@ class NanoVNAClient:
                 continue
             out.append(complex(re, im))
         return out
+
+    def segmented_sweep(self, start_hz: int, stop_hz: int,
+                        points_total: int,
+                        seg_points: int = MAX_SWEEP_POINTS) -> dict:
+        """分段扫描拼接：突破设备单 sweep 点数上限。
+
+        机制对齐官方 NanoVNASaver/NanoVNA-App：host 侧把总点数切成
+        ≤seg_points 的连续段，逐段 set_sweep+frequencies+data 0/1，
+        段间去掉 1 个重复边界点，拼出 points_total 点连续曲线。
+
+        诚实边界（返回值与文档同等标注，不许装没这回事）：
+        - 设备校准与扫描范围绑定（官方：载入校准后改范围走互补近似，
+          屏幕小写 c0-c4）——非校准段数据精度以首段为准，高精度需求
+          应先在整个目标范围做 open/short/load 校准；
+        - 每段一次完整 sweep，总耗时随段数线性增长；
+        - 段表随结果返回，坏段可定位。
+
+        返回 {segmented, segment_count, segments, frequencies_hz,
+        S11, S21, cal_caveat}。任一段取数长度不一致即抛
+        NanoVNADriverError（不拼半截曲线）。
+        """
+        if stop_hz <= start_hz:
+            raise NanoVNADriverError(
+                f"stop({stop_hz}) 必须大于 start({start_hz})")
+        if points_total < 2:
+            raise NanoVNADriverError(
+                f"points_total 必须 ≥2，收到 {points_total}")
+        if not (2 <= seg_points <= MAX_SWEEP_POINTS_H4):
+            raise NanoVNADriverError(
+                f"seg_points 必须 ∈ [2,{MAX_SWEEP_POINTS_H4}]，"
+                f"收到 {seg_points}（H 固件用 101，H4 可用 401）")
+
+        df = (stop_hz - start_hz) / (points_total - 1)
+        freqs_all: List[int] = []
+        s11_all: List[complex] = []
+        s21_all: List[complex] = []
+        segments: List[dict] = []
+        idx = 0
+        while idx < points_total - 1:
+            # 已覆盖 0..idx（共 idx+1 点）；一段 m 点把覆盖推进 m-1。
+            # m 不超过剩余需求 + 1，绝不出 1 点退化段（由下面的数值保护兜底）。
+            m = min(seg_points, points_total - idx)
+            seg_start = int(round(start_hz + idx * df))
+            seg_stop = int(round(start_hz + (idx + m - 1) * df))
+            if seg_stop <= seg_start:
+                raise NanoVNADriverError(
+                    f"段 {len(segments)} 数值退化（{seg_start}→{seg_stop}）")
+            self.set_sweep(seg_start, seg_stop, m)
+            f = self.read_frequencies()
+            a = self.read_data(0)
+            b = self.read_data(1)
+            if not (len(f) == len(a) == len(b) == m):
+                raise NanoVNADriverError(
+                    f"段 {len(segments)} 取数长度不一致："
+                    f"frequencies={len(f)} S11={len(a)} S21={len(b)}，"
+                    f"应为 {m}（设备点数上限被突破？）")
+            if segments:  # 段首与上一段段尾重合，去重复边界点
+                f, a, b = f[1:], a[1:], b[1:]
+            freqs_all += f
+            s11_all += a
+            s21_all += b
+            segments.append({"start_hz": seg_start, "stop_hz": seg_stop,
+                             "points": m})
+            idx += m - 1
+        return {
+            "segmented": True,
+            "segment_count": len(segments),
+            "segments": segments,
+            "frequencies_hz": freqs_all,
+            "S11": [[c.real, c.imag] for c in s11_all],
+            "S21": [[c.real, c.imag] for c in s21_all],
+            "cal_caveat": "每段为独立扫描范围；设备校准与范围绑定（载入后"
+                          "改范围走互补近似，屏幕小写 c0-c4），非校准段精度"
+                          "以首段为准——高精度需求请先在总范围做 "
+                          "open/short/load 校准。",
+        }
 
     def read_s11(self) -> List[complex]:
         return self.read_data(0)

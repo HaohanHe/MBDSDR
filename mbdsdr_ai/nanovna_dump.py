@@ -24,6 +24,7 @@ from .nanovna_client import (
     NanoVNAClient,
     ReplayTransport,
     NanoVNADriverError,
+    MAX_SWEEP_POINTS,
     find_nanovna_ports,
     s11_phase_deg,
     s21_phase_deg,
@@ -43,6 +44,7 @@ OPEN_RETRY_DELAY_S = 2.5
 
 def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
              replay: str | None = None, screenshot: str | None = None,
+             seg_points: int | None = None,
              open_retries: int = OPEN_MAX_RETRIES,
              retry_delay_s: float = OPEN_RETRY_DELAY_S) -> dict:
     """执行一次完整 sweep 采集，返回可序列化 dict。无设备抛错。
@@ -79,10 +81,29 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
     try:
         client.read_cal_status()
         tcxo_hz = client.read_tcxo()
-        client.set_sweep(start_hz, stop_hz, points)
-        freqs = client.read_frequencies()
-        s11 = client.read_data(0)
-        s21 = client.read_data(1)
+        seg_info = None
+        seg_points = seg_points or MAX_SWEEP_POINTS
+        if points > seg_points:
+            # 超过单 sweep 点数上限（H 固件官网明文 101；H4 可用 401，
+            # 经 seg_points 显式声明）：host 侧自动分段拼接，对齐官方
+            # NanoVNASaver 机制。每段一次完整 sweep，总耗时随段数线性
+            # 增长；段表与 cal 绑定警告随结果返回。
+            seg = client.segmented_sweep(start_hz, stop_hz, points,
+                                         seg_points=seg_points)
+            freqs = seg["frequencies_hz"]
+            s11 = [complex(*p) for p in seg["S11"]]
+            s21 = [complex(*p) for p in seg["S21"]]
+            seg_info = {
+                "segmented": seg["segmented"],
+                "segment_count": seg["segment_count"],
+                "segments": seg["segments"],
+                "cal_caveat": seg["cal_caveat"],
+            }
+        else:
+            client.set_sweep(start_hz, stop_hz, points)
+            freqs = client.read_frequencies()
+            s11 = client.read_data(0)
+            s21 = client.read_data(1)
         shot = None
         if screenshot:
             shot = _capture_screenshot(client, screenshot)
@@ -120,6 +141,9 @@ def run_dump(port: str, start_hz: int, stop_hz: int, points: int,
         "min_vswr": round(v[k], 3),
         "at_hz": freqs[k] if k < len(freqs) else 0,
     }
+    if seg_info is not None:
+        out["sweep"]["points"] = len(freqs)  # 拼接后的实际点数
+        out["segments"] = seg_info
     if shot is not None:
         out["screenshot_bmp"] = shot
     return out
@@ -198,21 +222,47 @@ def _capture_screenshot(client, path: str) -> dict:
         return {"ok": False, "error": str(e)}
 
 
-def _selftest_script(start_hz: int, stop_hz: int, points: int):
-    """合成演示脚本（标注合成，非真实测量）：跑通连接→sweep→data 形状校验。"""
-    freqs = [start_hz + (stop_hz - start_hz) * i // max(1, points - 1)
-             for i in range(points)]
-    return [
+def _selftest_script(start_hz: int, stop_hz: int, points: int,
+                     seg_points: int = MAX_SWEEP_POINTS):
+    """合成演示脚本（标注合成，非真实测量）：跑通连接→sweep→data 形状校验。
+
+    points>seg_points 时按 host 侧分段算法生成同构的多段序列（与
+    segmented_sweep 的切段一致），让 --selftest 也能演练分段路径。
+    """
+    script: List[list] = [
         ["help", []],
         ["version", ["selftest-1.0"]],
         ["info", ["NanoVNA-H(selftest)"]],
         ["cal", ["load open short thru cal'ed"]],
         ["tcxo", ["usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"]],
-        [f"sweep {int(start_hz)} {int(stop_hz)} {int(points)}", []],
-        ["frequencies", [str(f) for f in freqs]],
-        ["data 0", ["0.3 0.0"] * points],
-        ["data 1", ["0.1 0.0"] * points],
     ]
+    if points <= seg_points:
+        freqs = [start_hz + (stop_hz - start_hz) * i // max(1, points - 1)
+                 for i in range(points)]
+        script += [
+            [f"sweep {int(start_hz)} {int(stop_hz)} {int(points)}", []],
+            ["frequencies", [str(f) for f in freqs]],
+            ["data 0", ["0.3 0.0"] * points],
+            ["data 1", ["0.1 0.0"] * points],
+        ]
+        return script
+    # 分段路径：与 segmented_sweep 相同的切段逻辑（df/边界重点语义一致）
+    df = (stop_hz - start_hz) / (points - 1)
+    idx = 0
+    while idx < points - 1:
+        m = min(seg_points, points - idx)
+        seg_start = int(round(start_hz + idx * df))
+        seg_stop = int(round(start_hz + (idx + m - 1) * df))
+        freqs = [int(round(seg_start + (seg_stop - seg_start) * k / (m - 1)))
+                 for k in range(m)]
+        script += [
+            [f"sweep {seg_start} {seg_stop} {m}", []],
+            ["frequencies", [str(f) for f in freqs]],
+            ["data 0", ["0.3 0.0"] * m],
+            ["data 1", ["0.1 0.0"] * m],
+        ]
+        idx += m - 1
+    return script
 
 
 def main(argv: List[str]) -> int:
@@ -223,6 +273,9 @@ def main(argv: List[str]) -> int:
     ap.add_argument("--start", type=int, default=430_000_000, help="扫频起点 Hz")
     ap.add_argument("--stop", type=int, default=440_000_000, help="扫频终点 Hz")
     ap.add_argument("--points", type=int, default=101, help="扫频点数")
+    ap.add_argument("--seg-points", type=int, default=None,
+                    help="分段拼接的段长（超过该值自动分段；默认 101，即 H "
+                         "固件单 sweep 上限，H4 可传 401）")
     ap.add_argument("--out", default="-", help="输出 JSON 路径；- 为 stdout")
     ap.add_argument("--replay", default=None, help="测试用：自造协议脚本 JSON（不碰硬件）")
     ap.add_argument("--selftest", action="store_true",
@@ -241,11 +294,14 @@ def main(argv: List[str]) -> int:
         import tempfile, os
         fd, replay = tempfile.mkstemp(suffix=".json")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(_selftest_script(args.start, args.stop, args.points), f)
+            json.dump(_selftest_script(args.start, args.stop, args.points,
+                                    seg_points=args.seg_points or MAX_SWEEP_POINTS),
+                  f)
 
     try:
         data = run_dump(args.port, args.start, args.stop, args.points, replay,
-                        screenshot=args.screenshot or None)
+                        screenshot=args.screenshot or None,
+                        seg_points=args.seg_points)
     except NanoVNADriverError as e:
         print(f"错误：{e}", file=sys.stderr)
         return 1
