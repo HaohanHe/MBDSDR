@@ -178,3 +178,27 @@ bytes → bit array (MSB first)
 - **不 git 写操作**：仅写文件，未 add/commit/push。
 - **隔离文件勿动**：未碰 `cpp/*`、`ui_diag_freeze.cpp`、`cpp/scratch/*`；无 cpp 改动。
 - **无 cpp 改动** → 双构型基线 D98/R98 139/139 保持有效。
+
+
+---
+
+## RFC 2435 RTP/JPEG 接入点落地（2026-10-14，联网核实后）
+
+依据公开规范（RFC 2435 §3.1 头布局 / §3.1.6 Q 字段公式 / ITU T.81 Annex
+K.1-K.2 量化表），非任何 GPL 源码：
+
+- ijg_quant_table(q, chroma)：IJG 公式缩放表（Q=50 为基准表本身、
+  Q=99 全 1、Q=1 全 255，均 clamp 1..255；Q 越大量化越粗），边界断言
+  钉死。
+- parse_rtp_jpeg_header(seg)：解析 Meteor LRPT 图像 Segment 的 4 字节
+  JPEG 头（MBZ|TypeSpecific|FragmentOffset 24bit）+ fragment_offset==0 段
+  的 8 字节尺寸头（宽/高大端 + Type/Q/色深/通道）；短输入与 Q≥128 带内
+  量化表路径诚实抛错（LrptJpegTruncated/Unsupported）。
+- 测试 11 例（test_lrpt_rtp_jpeg.py）。
+
+仍未做（登记，接真实 OTA 的前提项）：
+1. Segment 重组为完整扫描（fragment_offset 升序拼接 + Meteor 硬编码
+   Huffman 表（T.81 Annex K.3）的 DHT 化导出）；
+2. Q≥128 带内量化表头解析；
+3. 上述两件完成后，把 decode_image_blocks 从“整 JPEG”入口切到
+   “RTP 头 + 硬编码表 + 重组流”入口，即真实 Meteor LRPT 解码路径。

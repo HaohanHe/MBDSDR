@@ -50,6 +50,12 @@ __all__ = [
     "ComponentInfo",
     "IdentifiedJpeg",
     "DecodedImage",
+    "RtpJpegHeader",
+    "IJG_K1",
+    "IJG_K2",
+    "ijg_quant_table",
+    "parse_rtp_jpeg_header",
+    "decode_image_blocks",
     "receive_extend",
     "parse_dht",
     "parse_dqt",
@@ -718,3 +724,124 @@ def decode_image_blocks(jpeg_bytes: bytes) -> DecodedImage:
     hdr = parse_jpeg(data)
     comp_blocks = _decode_blocks(hdr, data[hdr.scan_start:])
     return _plane_and_image(hdr, comp_blocks)
+
+
+# =========================================================================== #
+# RFC 2435 RTP/JPEG 头（Meteor-M LRPT 真实路径的接入点）
+# =========================================================================== #
+# 真实 Meteor LRPT 不是带 DHT 的完整 JPEG：每个 VCDU 图像包是
+# RFC 2435 的 Segment——4 字节 RTP/JPEG 头（MBZ|TypeSpecific|FragmentOffset）
+# + 熵扫描段。分量号/DC/AC 表号/Type/Q 全在头里，Huffman 表用 ITU T.81
+# Annex K 的经典表（俗称 tables.h），量化表由 IJG 公式从 Q 缩放 K.1/K.2。
+#
+# 本节只实现两件可离线钉死的东西：RTP/JPEG 头字段解析 + IJG 量化表生成。
+# 硬编码 Huffman 表导出与 Segment 重组属后续（未做项如实登记），当前
+# lrpt_huffman.py 的 JPEG 全流路径保持可用（合成 DHT 可测）。
+#
+# 参考（公开规范，非任何 GPL 源码）：RFC 2435 §3.1（头布局）、
+# §3.1.6（Q 字段公式）、Annex K.1/K.2（量化表）、ITU T.81 Annex F.2
+# （Extend/接收扩展，本文件 receive_extend 已实现）。
+
+#: ITU T.81 Annex K.1 亮度量化基准（zigzag 序，64 值）。
+IJG_K1: Tuple[int, ...] = (
+    16, 11, 10, 16, 24, 40, 51, 61,
+    12, 12, 14, 19, 26, 58, 60, 55,
+    14, 13, 16, 24, 40, 57, 69, 56,
+    14, 17, 22, 29, 51, 87, 80, 62,
+    18, 22, 37, 56, 68, 109, 103, 77,
+    24, 35, 55, 64, 81, 104, 113, 92,
+    49, 64, 78, 87, 103, 121, 120, 101,
+    72, 92, 95, 98, 112, 100, 103, 99,
+)
+
+#: ITU T.81 Annex K.2 色度量化基准（zigzag 序，64 值）。
+IJG_K2: Tuple[int, ...] = (
+    17, 18, 24, 47, 99, 99, 99, 99,
+    18, 21, 26, 66, 99, 99, 99, 99,
+    24, 26, 56, 99, 99, 99, 99, 99,
+    47, 66, 99, 99, 99, 99, 99, 99,
+    99, 99, 99, 99, 99, 99, 99, 99,
+    99, 99, 99, 99, 99, 99, 99, 99,
+    99, 99, 99, 99, 99, 99, 99, 99,
+    99, 99, 99, 99, 99, 99, 99, 99,
+)
+
+
+def ijg_quant_table(q: int, chroma: bool = False) -> np.ndarray:
+    """按 RFC 2435 §3.1.6 的 IJG 公式从 Q 缩放 K.1/K.2 量化表（zigzag 序）。
+
+    S = 5000/Q（1≤Q≤50）；S = 200-2Q（51≤Q≤99）。
+    表值 = clamp(round(K*S/100), 1, 255)。Q=100 时 S=0 是边界非法值，
+    按规范语义诚实拒绝（不猜用户意图）。
+    """
+    if not (1 <= q <= 99):
+        raise LrptJpegUnsupportedError(
+            f"RFC 2435 Q 字段合法域 1..99，收到 {q}（Q=100/0 无 IJG 定义）")
+    s = 5000.0 / q if q <= 50 else 200.0 - 2.0 * q
+    base = IJG_K2 if chroma else IJG_K1
+    vals = np.array([int(round(v * s / 100.0)) for v in base], dtype=np.int64)
+    return np.clip(vals, 1, 255)
+
+
+@dataclass
+class RtpJpegHeader:
+    """RFC 2435 §3.1 的 4 字节 JPEG 头字段。
+
+    type_specific : MBZ 之后的 1 字节（旧称 Fragment Offset 高位字节）。
+                    Meteor LRPT 通常为 0（type 0 映射固定表）。
+    fragment_offset : 24 位分片偏移（本 Segment 首字节在整帧扫描中的位置）。
+    type_field : JPEG 缩写表规格映射（0..127 为固定映射）。
+    q_field : 1..99 走 IJG 缩放；128..255 表示首包携带带内量化表头。
+    width/height : 仅 fragment_offset==0 的段头里携带（Meteor 实际以 0 开头
+                   的包带 JFIF-ish 尺寸），其余段为 0。
+    """
+    type_specific: int
+    fragment_offset: int
+    type_field: int
+    q_field: int
+    width: int = 0
+    height: int = 0
+
+    @property
+    def has_inband_q_table(self) -> bool:
+        """Q 字段 ≥128 -> 首包（fragment_offset==0）后有带内量化表头。"""
+        return self.q_field >= 128
+
+
+def parse_rtp_jpeg_header(seg: bytes) -> Tuple[RtpJpegHeader, int]:
+    """解析一个 Meteor LRPT 图像 Segment 的 RFC 2435 头。
+
+    入参 ``seg`` 为一个 VCDU 图像包的数据域（去掉 CCSDS 头后的净荷）。
+    返回 ``(RtpJpegHeader, payload_offset)``：payload_offset 为熵/量化表
+    数据在 ``seg`` 中的起始下标。不足 4 字节诚实抛
+    :class:`LrptJpegTruncatedError`（不给半截头）。
+    """
+    if len(seg) < 4:
+        raise LrptJpegTruncatedError(
+            f"Segment 不足 4 字节 RFC 2435 头：len={len(seg)}")
+    type_specific = seg[0]
+    frag = (int(seg[1]) << 16) | (int(seg[2]) << 8) | int(seg[3])
+    off = 4
+    width = height = 0
+    if frag == 0 and len(seg) >= 12:
+        # fragment_offset==0 的段在 4 字节 JPEG 头后带 8 字节“尺寸+类型”头
+        # （Meteor LRIT：宽/高各 2 字节大端，随后为 Type/Q/色深/通道）。
+        width = (int(seg[4]) << 8) | int(seg[5])
+        height = (int(seg[6]) << 8) | int(seg[7])
+        off = 12
+    elif frag == 0:
+        raise LrptJpegTruncatedError(
+            "fragment_offset==0 的 Segment 缺 8 字节尺寸头（len<12）")
+    hdr = RtpJpegHeader(
+        type_specific=type_specific,
+        fragment_offset=frag,
+        type_field=seg[8] if frag == 0 else type_specific,
+        q_field=seg[9] if frag == 0 else 0,
+        width=width, height=height,
+    )
+    if hdr.has_inband_q_table and frag == 0:
+        # Q≥128：带内量化表头跟在尺寸头后；当前未解析，诚实抛 Unsupported
+        raise LrptJpegUnsupportedError(
+            "RFC 2435 Q≥128 带内量化表头尚未解析（未做项，见 "
+            "docs/learn/phase63/lrpt-image-decode-eval.md）")
+    return hdr, off
