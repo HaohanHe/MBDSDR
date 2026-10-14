@@ -23,12 +23,11 @@
 
 许可证：**MIT**（见 [`LICENSE`](LICENSE)、第三方归属 [`NOTICE.md`](NOTICE.md)）。
 
-**能力台账（git 实测，2026-10-14）**：792 commits · 全仓 MIT 干净室自研
-（FT8/LRPT/CCSDS 协议栈未抄任何 GPL 代码）· Python 内核 **574 项测试全绿** ·
-桌面端 151 个 C++ 测试 target · LLM 工具面：C++ **90 个**（三通道+人工门）/
-Python MCP **70 个**（38 个写工具走 arm_manual 人工确认）· 已对
-SDR++、SatDump、nanovna-saver、NanoVNA-App、kimi-code、kilocode
-六个上游项目做源码级克隆审计（见 [`docs/learn/`](docs/learn/)）。
+**工程口径**：全仓 **MIT 干净室自研**（FT8/LRPT/CCSDS 等协议栈未抄任何
+GPL 代码，机制学走、许可证不沾）· LLM 工具三通道（Agent / ControlHub /
+HTTP）行为一致且有测试钉住，写动作一律过人工门 · 已对 SDR++、SatDump、
+nanovna-saver、NanoVNA-App、kimi-code、kilocode 六个上游项目做过源码级
+克隆审计（见 [`docs/learn/`](docs/learn/)）。
 
 ---
 
@@ -46,16 +45,13 @@ NanoVNA-H による自作アンテナの共振周波数・給線路遅延の実�
 435MHz 帯アマチュア周波数の実キャリア受信・FM 復調 / 外部エージェントからの
 MCP 遠隔操作（list_devices→connect→set_frequency→get_status 全闭环）。
 
-**数値（git 実測）**：792 commits / Python テスト 574 項目パス / LLM ツール
-90 種（C++）+ 70 種（Python）/ 全倉庫 MIT（GPL コード非流用、クリーンルーム
-自願実装）/ SDR++・SatDump・NanoVNA-App・kimi-code 等の主要 OSS 6 件を
-クローンして源码監査。
+**工程口径**：全倉庫 MIT（クリーンルーム自願実装、GPL コード非流用）·
+LLM ツールは三チャネル（Agent / ControlHub / HTTP）で動作一致・書き込みは
+人工承認ゲート必須 · SDR++・SatDump・NanoVNA-App・kimi-code 等の主要 OSS
+6 件をクローンして源码監査済み。
 
-**作者**：业余无线电爱好者（呼号 BI4MIB）。本项目以 MIT 许可全量开源，
-是作者对"AI 民主化仪器"这一命题的持续工程实践。
-
-零硬件 30 秒演示：`python3 -m mbdsdr_ai.aigui_demo --out demo.html`（AI 编排 UI
-的完整闭环）、`python3 -m pytest mbdsdr_ai/tests -q`（574 项测试）。
+零硬件演示：`python3 -m mbdsdr_ai.aigui_demo --out demo.html`（AI 编排 UI
+的完整闭环）、`python3 -m pytest mbdsdr_ai/tests -q`（离线确定性测试）。
 
 </details>
 
