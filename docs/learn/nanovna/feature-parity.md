@@ -798,3 +798,45 @@ NanoVNASaver 实测可拼到 >10k 点）。本批在 Python 面落地同机制�
 - NanoVNA-App：marker 交互、机型运行期适配（H4 401 点识别、F_V2 协议）、
   TDR 精度链（真 FFT + 双曲峰值精修）—— 仍登记未做；
 - SatDump：物理定标链、ZIQ/RF64 基带格式 —— 仍登记未做。
+
+
+---
+
+# 第㉷批：NanoVNA-App 深挖六批（2026-10-15，全部销账）
+
+上游 OneOfEleven/NanoVNA-App 重新克隆后做 very thorough 特性普查（Graphs/
+Calibration/tfft/滤波器/LCMatch/数据模型/设备协议全单元），按"缺失/部分/
+已有"三档定级后落地六批（全部 Python 面，测试钉死，公开公式/协议事实独立
+实现，不抄 GPL）：
+
+1. **DSP 底座**（vna_dsp.py）：RBJ 双二阶 IIR 五种（转置直接 II 型 +
+   prime 直流预充）、滑动中值/加权中值、Coax Loss 陷波机制（去趋势后
+   FFT 定位振铃窄谱线，双阈值防误触发，零相位往返滤波）。施工中抓到
+   K 形式系数漏 K²、clean 迹误触发两个真 bug，频响直接求值修正测量伪差。
+2. **L 网络求解 + VF 库**（vna_match.py）：高阻/低阻两族闭式解（Pozar
+   教科书口径独立推导，端到端接回负载验证 ==R0 双 1e-6 钉死）；推导中
+   并联臂导纳负号、Z' 虚部误加 rl 两个错均由端到端测试抓住。34 条电缆
+   VF 公开数据表。
+3. **单端口 SOLT**（vna_cal.py）：非理想 OSL 多项式定义件（Keysight
+   惯例 f 代 GHz）+ 偏移双程相移；误差盒求解的关键推导——Γm=e00+
+   T·Γ/(1−e11·Γ) 对 (e00, T−e00·e11, e11) 线性，3×3 闭式解；闭环仿真
+   恢复 1e-16。S21 增强响应（上游同款近似式，注释标明严格式差异）。
+4. **扫间平均**（vna_avg.py）：256 深环形缓冲，|Z|²+相位/IQ 双模式，
+   2 的幂平均长度，历史回放，越界全部显式报错。
+5. **V2 线协议**（nanovna_v2_proto.py）：命令帧/32 字节 FIFO/校验和
+   （seed 0x46）/S 参数比值口径，缺帧重帧零前向超上限全部显式拒绝。
+6. **迹线数学**（vna_trace_math.py）：群延迟（unwrap+后向差分+端点复制）、
+   归一化记忆通道（复数/dB 双域）、GJB 电导图、20 档业余频段表。
+
+TDR 精度链（Python 双曲精修 + C++ I0 Kaiser 窗同口径）本批前已落地
+（test_tdr_refinement.py 亚 bin 场景 1% vs 11% 对比）。
+
+**deepseek-harness 侦察**（MIT，克隆于 %TEMP%\kilo\upstream\）：插件容器/
+会话持久化/沙箱全套不借（数量级错配）；三条边界纪律登记为后续增量——
+审批事件可观测落盘、deny 单调性写成类型契约、turn 作为审计/中断恢复
+最小原子单元。等价物对照：四道门≈pre-execute 瀑布+ask；_TOOL_DOMAIN≈
+scoped 可见性；policy 规则集≈ToolRestriction；arm_manual≈allowed-once。
+
+剩余登记（均未做，非新缺口）：C++ 面六批镜像（待 cc1 修复）；
+JanVNA2 CRC32 包协议（仅兼容 LibreVNA 时需要）；marker 吸附/频带背景
+着色/GJB 图/CAL_LOGMAG 的 UI 层；真实设备 OTA。
