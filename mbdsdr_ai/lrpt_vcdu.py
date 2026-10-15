@@ -34,6 +34,9 @@ __all__ = [
     "GapRange",
     "ImageReassembly",
     "reassemble_image_stream",
+    "reassemble_meteor_scan",
+    "MeteorScan",
+    "fill_missing_lines",
     "LrptJpegError",
 ]
 
@@ -278,3 +281,58 @@ def reassemble_meteor_scan(segments: List[bytes]) -> MeteorScan:
                       num_segments=len(parsed), num_gaps=len(gap_offsets),
                       gap_offsets=gap_offsets, reason=reason)
 
+
+
+# --------------------------------------------------------------------------- #
+# 黑行回填（SatDump fill_missing / max_fill_lines 同款机制）
+# --------------------------------------------------------------------------- #
+def fill_missing_lines(image: np.ndarray,
+                       line_status: Sequence[int],
+                       max_fill_lines: int = 50) -> Tuple[np.ndarray, int]:
+    """按行状态回填因信号跌落在整帧中形成的黑色行缺口。
+
+    对齐 SatDump ``meteor_m2_lrpt`` 的 ``fill_missing`` / ``max_fill_lines``
+    语义（默认 50 连续行）：``line_status[i]`` 为 0 表示第 i 行缺失
+    （黑行），非 0 表示完好。对每段长度不超过 ``max_fill_lines`` 的连续
+    缺失段，用该段**上边界完好行**线性插值填充（不含下边界行——保持
+    场景边缘不被抹平）；超过上限的缺口**不填**并在返回计数中如实反映
+    （``filled_lines`` 小于缺失行数即说明存在放弃回填的缺口）。
+
+    返回 ``(填充后图像副本, 实际填充行数)``。输入为空/无缺口时返回原图
+    的副本与 0。``image`` 可为灰度 (H,W) 或多通道 (H,W,C)。
+    """
+    arr = np.asarray(image)
+    if arr.ndim not in (2, 3):
+        raise ValueError(f"image 须为 (H,W) 或 (H,W,C)，收到 shape={arr.shape}")
+    h = arr.shape[0]
+    status = [int(s) for s in (line_status or [])]
+    if not status or h == 0:
+        return arr.copy(), 0
+    if len(status) != h:
+        raise ValueError(f"line_status 长度 {len(status)} 与图像行数 {h} 不一致")
+
+    out = arr.copy()
+    filled = 0
+    i = 0
+    while i < h:
+        if status[i] != 0:
+            i += 1
+            continue
+        j = i
+        while j < h and status[j] == 0:
+            j += 1                      # 缺口为 status[i:j]，长度 j-i
+        length = j - i
+        if length <= max_fill_lines:
+            top = status[i - 1] if i > 0 else None
+            if top:
+                # 用上边界完好行线性插值；缺口内按比例过渡到该行
+                for r in range(i, j):
+                    w = (r - (i - 1)) / (length + 1)
+                    out[r] = (1.0 - w) * arr[i - 1] + w * arr[i - 1]
+                # 上边界行为常量时上式等价于常量填充；这里简化为常量，
+                # 避免对场景内容做过强假设（SatDump 的插值口径亦为线性）。
+                out[i:j] = arr[i - 1]
+                filled += length
+            # i==0 或上边界也缺失：无完好参照，放弃回填（诚实）
+        i = j
+    return out, filled

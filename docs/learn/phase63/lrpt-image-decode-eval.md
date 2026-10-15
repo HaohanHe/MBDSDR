@@ -257,3 +257,21 @@ decode_image_blocks 的入口从“整 JPEG”改为“MeteorScan + K.3 表 + �
 真实 Meteor LRPT 解码路径（断言层面）今后为：
 reassemble_meteor_scan -> decode_meteor_scan，无需 DHT/DQT/SOI。
 剩余：真实 OTA 采样验证（Viterbi 口径 + 整链）。
+
+
+---
+
+## fill_missing_lines 落地（2026-10-15，真实路径收口项／）
+
+- lrpt_vcdu.py 新增 fill_missing_lines(image, line_status, max_fill_lines=50)：
+  对齐 SatDump meteor_m2_lrpt 的 fill_missing / max_fill_lines 语义（默认 50
+  连续行）。长度超限的缺口不填（诚实返回填充行数，不拿假图
+  境填入）；缺口顶到图像开头时同样不填。
+- 测试 8 例（test_fill_missing_lines.py）：短缺口填充、超限不填、边界含等价、
+  无缺口返回副本、开头缺口跳过、多通道、均形律拒绝、空状态。
+
+真实 Meteor LRPT 路径的断言层面现在为：
+VCDU 图像包重组 -> reassemble_meteor_scan -> decode_meteor_scan
+-> 行状态维护 + fill_missing_lines 黑行回填；
+行状态本身产生于真实 VCDU 采样（APID 序列完整度），
+需真实 OTA 样本方能验证。
