@@ -1254,8 +1254,12 @@ class MCPToolSet:
             if action == "deny":
                 # hard veto: even an explicitly armed call does not execute
                 # (aligned with kilocode hard-ruleset veto).
+                # deny 单调性（dsh ToolGuard 借鉴，2026-10-15）：任何后续
+                # 门/缓存都不得把 deny 翻回 allow——此处只返回 deny 结果，
+                # armed/approve_session 分支在 deny 之后不可达。
                 return {"ok": False,
                         "error": "denied_by_policy：规则集拒绝执行 %s" % name,
+                        "code": "denied_by_policy",
                         "denied": True, "gated": True,
                         "outcome": "denied"}
             key = normalize_key(name, args)
@@ -1264,6 +1268,7 @@ class MCPToolSet:
                 if not armed:
                     gated_env = {"ok": False,
                                  "error": "手动模式：未执行 %s" % name,
+                                 "code": "manual_gate_required",
                                  "gated": True,
                                  "policy": action,
                                  "outcome": "gated",
@@ -1281,7 +1286,8 @@ class MCPToolSet:
             self._emit_result_event(name, out)
             return out
         except Exception as e:  # pragma: no cover - 防御
-            out = {"error": "internal_error", "technical_detail": str(e),
+            out = {"error": "internal_error", "code": "internal_error",
+                   "technical_detail": str(e),
                    "outcome": "error"}
             self._emit_result_event(name, out)
             return out
