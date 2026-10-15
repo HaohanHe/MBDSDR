@@ -21,6 +21,7 @@ from __future__ import annotations
 import numpy as np
 import os
 import json
+import struct
 import tempfile
 import wave as _wave
 from datetime import datetime, timezone
@@ -201,6 +202,99 @@ def load_iq(path: str, sample_rate: float = None) -> Dict:
         "samples": int(len(iq)),
         "duration_s": round(len(iq) / (sample_rate or 1), 3),
     }
+
+
+# ========================================================================
+# RF64 立体声 WAV（>4GB / 64 位尺寸；SatDump 长录制的互操作格式）
+# ========================================================================
+# 规范口径（公开 RIFF 变体，非任何 GPL 源码）：
+#   头部 magic 为 "RF64"（而非 "RIFF"），form type 为 "WAVE"；
+#   随后依次是 ds64 块（含 riffSize/dataSize/sampleCount 三个 64 位字段，
+#   不足时以 0xFFFFFFFFFFFFFFFF 表示"未知/流式"）与 fmt/data 块；
+#   data 块长度为 32 位，故超 4GiB 时以 ds64.dataSize 为准，块内长度为
+#   0xFFFFFFFF（W64 风格哨兵）。写入端在 <4GiB 时同样输出合法 RF64
+#   （尺寸确定），读取端对 RIFF/RF64 均兼容。
+_RF64_DS64_BODY = 24          # 'ds64' + size(4) + riffSize(8)+dataSize(8)+sampleCount(8)
+_RF64_HEADER_BYTES = 12 + (8 + _RF64_DS64_BODY) + (8 + 16) + 8
+
+
+def _write_rf64_wav(path: str, arr, sample_rate: float):
+    """写立体声 int16 RF64 WAV（左=I，右=Q，归一化同 _write_wav）。
+
+    Returns (size_bytes, wav_scale)。
+    """
+    peak = float(max(np.max(np.abs(arr.real)), np.max(np.abs(arr.imag)), 1e-12))
+    scale = peak / 32767.0
+    pcm_i = np.clip(arr.real / scale, -32767.0, 32767.0).astype(np.int16)
+    pcm_q = np.clip(arr.imag / scale, -32767.0, 32767.0).astype(np.int16)
+    stereo = np.empty(len(arr) * 2, dtype=np.int16)
+    stereo[0::2] = pcm_i
+    stereo[1::2] = pcm_q
+    payload = stereo.tobytes()
+    frames = int(len(arr))
+    with open(path, "wb") as f:
+        f.write(b"RF64")
+        f.write(struct.pack("<I", 0xFFFFFFFF))
+        f.write(b"WAVE")
+        # ds64：riffSize/dataSize/sampleCount 均已知（小文件亦按确定值写）
+        f.write(b"ds64")
+        f.write(struct.pack("<I", _RF64_DS64_BODY))
+        riff_size = 4 + (8 + _RF64_DS64_BODY) + (8 + 16) + 8 + len(payload)
+        f.write(struct.pack("<Q", riff_size))
+        f.write(struct.pack("<Q", len(payload)))
+        f.write(struct.pack("<Q", frames))
+        # fmt 16 字节（PCM）
+        f.write(b"fmt ")
+        f.write(struct.pack("<I", 16))
+        f.write(struct.pack("<HHIIHH", 1, 2, int(sample_rate),
+                            int(sample_rate) * 4, 4, 16))
+        # data 32 位长度；载荷大 4GiB 时用哨兵（本实现按实际长度写，
+        # 超过 0xFFFFFFFF 才退化为哨兵——真实超过 4GiB 的会话由 ds64 兜底）
+        f.write(b"data")
+        f.write(struct.pack("<I", len(payload) if len(payload) < 0xFFFFFFFF
+                            else 0xFFFFFFFF))
+        f.write(payload)
+    return int(os.path.getsize(path)), scale
+
+
+def _read_rf64_wav(path: str):
+    """读 RF64 WAV -> (int16 交错数组, sample_rate)。RIFF 头亦兼容。"""
+    with open(path, "rb") as f:
+        head = f.read(_RF64_HEADER_BYTES)
+        if len(head) < _RF64_HEADER_BYTES or head[:4] not in (b"RF64", b"RIFF"):
+            raise ValueError("不是 RF64/RIFF WAV 文件")
+        magic = head[:4]
+        i = 12
+        sample_rate = 0
+        payload = b""
+        while i + 8 <= len(head):
+            cid = head[i:i + 4]
+            size = struct.unpack_from("<I", head, i + 4)[0]
+            body = i + 8
+            if cid == b"ds64":
+                riff, dsize, _sc = struct.unpack_from("<QQQ", head, body)
+                payload_len = dsize
+                i = body + _RF64_DS64_BODY
+                continue
+            if cid == b"fmt ":
+                (_fmt, _ch, sr, _br, _align, _bits) = struct.unpack_from(
+                    "<HHIIHH", head, body)
+                sample_rate = sr
+                i = body + size
+                continue
+            if cid == b"data":
+                if size == 0xFFFFFFFF and magic == b"RF64":
+                    # 超 4GiB：读文件剩余全部
+                    rest = f.read()
+                    payload = rest
+                else:
+                    payload = f.read(size)
+                break
+            i = body + size
+        if not payload:
+            payload = f.read()
+    arr = np.frombuffer(payload, dtype=np.int16).astype(np.float64)
+    return arr, float(sample_rate)
 
 
 if __name__ == "__main__":
