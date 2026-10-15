@@ -297,6 +297,152 @@ def _read_rf64_wav(path: str):
     return arr, float(sample_rate)
 
 
+# ========================================================================
+# ZIQ 基带格式（SatDump 压缩录制互操作；官方 docs/pages/ZIQ.md 口径）
+# ========================================================================
+# 头部（公开规格，非任何 GPL 源码）：
+#   "ZIQ_"                4 字节签名
+#   is_compressed         1 字节（0=裸样本，1=ZSTD 压缩流）
+#   bits_per_sample       1 字节（8=int8 交错，16=int16 LE，32=f32 LE）
+#   samplerate            8 字节 uint64
+#   annotation_length     8 字节 uint64
+#   annotation_str         变长 ASCII（JSON 注解，长度以 annotation_length 为准）
+# 载荷直接附在头后；ZSTD 为流式，损坏可自同步。
+#
+# 本实现的诚实边界：
+#   - 无 zstandard 包时 is_compressed=1 的写/读均**不可用**——不拿裸数据冒充
+#     压缩流，也不把压缩流当裸样本解析；安装依赖后自动启用。
+#   - 不实现 ZIQ2 变体（SatDump 另有 VITA-49 风格扩展），按未做项登记。
+ZIQ_MAGIC = b"ZIQ_"
+
+
+def _ziq_dtype(bits: int) -> str:
+    if bits == 8:
+        return "i1"
+    if bits == 16:
+        "<i2"
+        return "<i2"
+    if bits == 32:
+        return "<f4"
+    raise ValueError(f"ZIQ 仅支持 8/16/32 bit，收到 {bits}")
+
+
+def write_ziq(path: str, iq, sample_rate: float, annotation: Optional[Dict] = None,
+              bits: int = 16, compress: bool = True) -> Dict:
+    """写 ZIQ 文件。compress=True 且装有 zstandard 时走 ZSTD，否则诚实报错。
+
+    Returns 落盘信息（含压缩开关与字节数）。
+    """
+    arr = _to_complex(iq)
+    if bits not in (8, 16, 32):
+        raise ValueError(f"ZIQ 仅支持 8/16/32 bit，收到 {bits}")
+    annotation = dict(annotation or {})
+    annotation.setdefault("sample_rate", float(sample_rate))
+    annotation.setdefault("samples", int(len(arr)))
+    ann = json.dumps(annotation, ensure_ascii=False).encode("ascii")
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+
+    payload: bytes
+    compressed = False
+    if compress:
+        try:
+            import zstandard as zstd
+        except ImportError as e:
+            raise OSError(
+                "ZIQ 压缩写入需要 zstandard 包（未安装）——不改写裸数据冒充压缩流"
+            ) from e
+        payload = zstd.ZstdCompressor().compress(_interleave_for_bits(arr, bits))
+        compressed = True
+    else:
+        payload = _interleave_for_bits(arr, bits)
+
+    with open(path, "wb") as f:
+        f.write(ZIQ_MAGIC)
+        f.write(struct.pack("<B", 1 if compressed else 0))
+        f.write(struct.pack("<B", bits))
+        f.write(struct.pack("<Q", int(sample_rate)))
+        f.write(struct.pack("<Q", len(ann)))
+        f.write(ann)
+        f.write(payload)
+    return {"path": path, "format": "ziq", "compressed": compressed,
+            "bits": bits, "samples": int(len(arr)),
+            "size_bytes": int(os.path.getsize(path))}
+
+
+def _interleave_for_bits(arr, bits: int) -> bytes:
+    """按位宽把复数 IQ 交织为字节（8/16 有符号，32 为 float）。"""
+    if bits == 8:
+        # int8 满幅量化（幅度超出饱和，不自动缩放——与 cu8 口径一致）
+        qi = np.clip(np.round(arr.real * 127.0), -128, 127).astype("<i1")
+        qq = np.clip(np.round(arr.imag * 127.0), -128, 127).astype("<i1")
+        out = np.empty(len(arr) * 2, dtype="<i1")
+        out[0::2] = qi
+        out[1::2] = qq
+        return out.tobytes()
+    if bits == 16:
+        qi = np.clip(np.round(arr.real * 32767.0), -32768, 32767).astype("<i2")
+        qq = np.clip(np.round(arr.imag * 32767.0), -32768, 32767).astype("<i2")
+        out = np.empty(len(arr) * 2, dtype="<i2")
+        out[0::2] = qi
+        out[1::2] = qq
+        return out.tobytes()
+    out = np.empty(len(arr) * 2, dtype="<f4")
+    out[0::2] = arr.real.astype("<f4")
+    out[1::2] = arr.imag.astype("<f4")
+    return out.tobytes()
+
+
+def read_ziq(path: str) -> Dict:
+    """读 ZIQ -> (iq, 头字段)。坏签名/坏位宽/压缩不可解均诚实抛错。"""
+    with open(path, "rb") as f:
+        blob = f.read()
+    if len(blob) < 22 or blob[:4] != ZIQ_MAGIC:
+        raise ValueError("不是 ZIQ 文件（缺 ZIQ_ 签名）")
+    off = 4
+    is_compressed = blob[off]; off += 1
+    bits = blob[off]; off += 1
+    (sample_rate,) = struct.unpack_from("<Q", blob, off); off += 8
+    (ann_len,) = struct.unpack_from("<Q", blob, off); off += 8
+    ann_raw = blob[off:off + ann_len]; off += ann_len
+    if len(ann_raw) != ann_len:
+        raise ValueError("ZIQ 注解字段被截断")
+    annotation = {}
+    if ann_raw:
+        try:
+            annotation = json.loads(ann_raw.decode("ascii"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            raise ValueError(f"ZIQ 注解非合法 JSON: {e}") from e
+
+    payload = blob[off:]
+    if is_compressed == 1:
+        try:
+            import zstandard as zstd
+        except ImportError as e:
+            raise OSError(
+                "ZIQ 压缩读取需要 zstandard 包（未安装）——不把压缩流当裸样本解析"
+            ) from e
+        try:
+            payload = zstd.ZstdDecompressor().decompress(payload)
+        except Exception as e:
+            raise ValueError(f"ZIQ 压缩载荷解压失败: {e}") from e
+    elif is_compressed != 0:
+        raise ValueError(f"ZIQ is_compressed={is_compressed} 非 0/1（未知格式版本）")
+
+    dt = np.dtype(_ziq_dtype(bits))
+    raw = np.frombuffer(payload, dtype=dt).astype(np.float64)
+    if len(raw) % 2:
+        raw = raw[:-1]          # 奇数尾部按半样本丢弃并如实体现于 samples
+    n = len(raw) // 2
+    iq = raw[0::2] + 1j * raw[1::2]
+    if bits == 8:
+        iq = iq / 127.0
+    elif bits == 16:
+        iq = iq / 32767.0
+    return {"iq": iq.tolist(), "sample_rate": float(sample_rate),
+            "bits": bits, "compressed": bool(is_compressed),
+            "annotation": annotation, "samples": int(n)}
+
+
 if __name__ == "__main__":
     rng = np.random.default_rng(0)
     iq = (rng.standard_normal(1000) + 1j * rng.standard_normal(1000))
