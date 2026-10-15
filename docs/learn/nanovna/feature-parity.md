@@ -790,14 +790,17 @@ NanoVNASaver 实测可拼到 >10k 点）。本批在 Python 面落地同机制�
   同样钉死 Int16；位宽档位待 mbdsdr_mcp 工具链恢复后按同语义补齐，
   与 Python 面共用同一档位表口径（8/16/24/32）。
 
-## 其余审计缺口的当前状态（核对后登记，未承诺排期）
+## 其余审计缺口的当前状态（2026-10-15 复核更新，未承诺排期项仅剩外部依赖）
 
-- sdrpp：DSB（已销账）、IQ 反相、通用 network_source、去加重档位
-  50/75us —— 仍登记未做（分别属链路/传输/解调小项，Python 面可测，
-  按需逐个销账）；
-- NanoVNA-App：marker 交互、机型运行期适配（H4 401 点识别、F_V2 协议）、
-  TDR 精度链（真 FFT + 双曲峰值精修）—— 仍登记未做；
-- SatDump：物理定标链、ZIQ/RF64 基带格式 —— 仍登记未做。
+- sdrpp：DSB、IQ 反相（set_iq_invert）、去加重档位 22/50/75us
+  （set_deemphasis）、通用 network_source（NetworkIQBackend 四格式
+  TCP/UDP）均已销账；
+- NanoVNA-App：marker 数据层（吸附/delta/峰值检索，第九批）、TDR 精度链
+  （双曲精修 + 真 Kaiser 窗双面对齐）、F_V2 协议编解码（第五批）、
+  JanVNA2 协议（第八批）、LP-Step 阻抗剖面（第七批）均已销账；
+  机型运行期识别（H4 401 点）与 marker 的 UI 层维持登记；
+- SatDump：物理定标链（sat_calibration）、ZIQ（write/read_ziq）、
+  RF64（_RF64 DS64 真 bug 修复）均已销账；真实 OTA 维持登记（硬件依赖）。
 
 
 ---
