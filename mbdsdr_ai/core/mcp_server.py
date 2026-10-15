@@ -48,6 +48,15 @@ _STR = {"type": "string"}
 _BOOL = {"type": "boolean"}
 _OBJ = {"type": "object"}
 _ARR = {"type": "array", "items": {"type": "number"}}
+_ARR2 = {"type": "array",
+         "items": {"type": "array", "items": {"type": "number"}}}
+
+
+def np_from_pairs(pairs):
+    """[[re, im], ...] -> complex128 数组（工具参数入参统一入口）。"""
+    import numpy as np
+    return np.array([complex(float(r), float(i)) for r, i in pairs],
+                    dtype=np.complex128)
 
 
 def _schema(props: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -548,7 +557,7 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         换算；返回结构化报告（子分析失败字段为 None 带原因，不伪造）。
         """
         from ..vna_pipeline import analyze_one_port
-        s11 = [complex(*v) for v in a["s11"]]
+        s11 = np_from_pairs(a["s11"])
         return analyze_one_port(
             a["freqs_hz"], s11, z0=float(a.get("z0", 50.0)),
             vf=float(a.get("vf", 0.66)),
@@ -567,6 +576,65 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
                  "freq_hz": _NUM},
                 ["freqs_hz", "s11"]),
         _vna_analyze_sweep)
+
+    def _pairs(a, key):
+        return np_from_pairs(a[key])
+
+    def _vna_solve_error_box(c, a):
+        """三件标准实测 -> 误差盒（vna_cal 线性闭式解）。
+
+        定义件参数缺省为理想 O/S/Load（描述里明示）；给了 kit 字段则
+        按非理想多项式口径。返回误差盒复数数组（e00/t/e11），调用方
+        可喂 vna_apply_calibration 或 vna_calio 落盘。
+        """
+        from ..vna_cal import (LoadStandard, OpenStandard, ShortStandard,
+                               solve_error_box)
+        f = a["freqs_hz"]
+        o = OpenStandard(
+            c0_pF=float(a.get("open_c0_pF", 0.0)),
+            offset_len_m=float(a.get("open_offset_m", 0.0)),
+            use_ideal=not any(k in a for k in ("open_c0_pF",)))
+        s = ShortStandard(
+            l0_nH=float(a.get("short_l0_nH", 0.0)),
+            offset_len_m=float(a.get("short_offset_m", 0.0)),
+            use_ideal=not any(k in a for k in ("short_l0_nH",)))
+        ld = LoadStandard(offset_len_m=float(a.get("load_offset_m", 0.0)))
+        box = solve_error_box(_pairs(a, "meas_open"),
+                              _pairs(a, "meas_short"),
+                              _pairs(a, "meas_load"),
+                              o.gamma(f), s.gamma(f), ld.gamma(f))
+        return {"e00": [[v.real, v.imag] for v in box.e00],
+                "t": [[v.real, v.imag] for v in box.t],
+                "e11": [[v.real, v.imag] for v in box.e11],
+                "ideal_kit": "open_c0_pF" not in a and "short_l0_nH" not in a}
+
+    add("vna_solve_error_box",
+        "单端口 SOLT 校准求解：三件标准实测 Γ -> 误差盒（e00/t/e11）。"
+        "定义件缺省按理想 O/S/Load（显式声明）；open_c0_pF/short_l0_nH 等"
+        "字段给出则按非理想多项式口径。",
+        _schema({"freqs_hz": _ARR,
+                 "meas_open": _ARR2, "meas_short": _ARR2,
+                 "meas_load": _ARR2,
+                 "open_c0_pF": _NUM, "open_offset_m": _NUM,
+                 "short_l0_nH": _NUM, "short_offset_m": _NUM,
+                 "load_offset_m": _NUM},
+                ["freqs_hz", "meas_open", "meas_short", "meas_load"]),
+        _vna_solve_error_box)
+
+    def _vna_apply_calibration(c, a):
+        """误差盒校正：Γ -> (Γm−e00)/(t+e11(Γm−e00))。"""
+        from ..vna_cal import ErrorBox, apply_calibration
+        box = ErrorBox(e00=np_from_pairs(a["e00"]),
+                       t=np_from_pairs(a["t"]),
+                       e11=np_from_pairs(a["e11"]))
+        out = apply_calibration(np_from_pairs(a["s11"]), box)
+        return [[v.real, v.imag] for v in out]
+
+    add("vna_apply_calibration",
+        "用 vna_solve_error_box 的误差盒校正被测件实测 Γ。",
+        _schema({"s11": _ARR2, "e00": _ARR2, "t": _ARR2, "e11": _ARR2},
+                ["s11", "e00", "t", "e11"]),
+        _vna_apply_calibration)
 
     add("start_analyze", "对当前信号做自动调制识别。",
         _schema({"modulation": _STR}),
@@ -950,6 +1018,8 @@ _TOOL_DOMAIN: Dict[str, str] = {
     # VNA 测量 / VNA 分析 / VNA 校准：本面无 VNA 工具（空卡片，诚实空态）
     # VNA 分析
     "vna_analyze_sweep": "VNA 分析",
+    "vna_solve_error_box": "VNA 校准",
+    "vna_apply_calibration": "VNA 校准",
     # 导出演制
     "start_recording": "导出演制",
     "stop_recording": "导出演制",
