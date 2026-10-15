@@ -636,6 +636,27 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
                 ["s11", "e00", "t", "e11"]),
         _vna_apply_calibration)
 
+    def _export_vna_report(c, a):
+        """单端口报告 PNG 落盘：log-mag + Smith 双面板。"""
+        from ..vna_report import render_s11_report
+        png, meta = render_s11_report(
+            a["freqs_hz"], np_from_pairs(a["s11"]),
+            width=int(a.get("width", 800)), height=int(a.get("height", 420)))
+        path = a["path"]
+        with open(path, "wb") as fh:
+            fh.write(png)
+        out = {"ok": True, "path": path, "bytes": len(png)}
+        out.update(meta)
+        return out
+
+    add("export_vna_report",
+        "S11 扫频报告 PNG：左 log-mag（0..−60dB）右 Smith（常数 r/x 网格）。"
+        "|Γ|>1 越界点钳到盘沿并在 clipped_points 如实上报。写工具。",
+        _schema({"freqs_hz": _ARR, "s11": _ARR2, "path": _STR,
+                 "width": _INT, "height": _INT},
+                ["freqs_hz", "s11", "path"]),
+        _export_vna_report, write=True)
+
     add("start_analyze", "对当前信号做自动调制识别。",
         _schema({"modulation": _STR}),
         lambda c, a: c.start_analyze(a.get("modulation")), write=True)
@@ -1028,6 +1049,7 @@ _TOOL_DOMAIN: Dict[str, str] = {
     "read_audio": "导出演制",
     "export_spectrum_snapshot": "导出演制",
     "export_peaks_csv": "导出演制",
+    "export_vna_report": "导出演制",
     # 书签扫描卫星
     "start_scan": "书签扫描卫星",
     "stop_scan": "书签扫描卫星",
