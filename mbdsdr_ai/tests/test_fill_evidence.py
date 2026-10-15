@@ -89,13 +89,19 @@ def test_tdr_empty():
 
 
 def test_cli_input_evidence(tmp_path):
-    import subprocess, sys, json
+    import subprocess, sys, json, os
+    # 子进程显式钉 UTF-8（与父进程解码口径无关）：父侧以 -X utf8 /
+    # PYTHONIOENCODING 运行时，子进程默认走 locale（GBK）会让
+    # capture_output(text=True) 的读取线程崩 UnicodeDecodeError——
+    # 2026-10-15 踩过，此处钉死消除隐式耦合。
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     sw = tmp_path / "sw.json"
     subprocess.run([sys.executable, "-m", "mbdsdr_ai.nanovna_dump", "--selftest",
-                    "--out", str(sw)], check=True, capture_output=True)
+                    "--out", str(sw)], check=True, capture_output=True, env=env)
     out = subprocess.run([sys.executable, "-m", "mbdsdr_ai.fill_evidence_example",
                           "--input", str(sw), "--format", "json"],
-                         check=True, capture_output=True, text=True)
+                         check=True, capture_output=True, text=True,
+                         encoding="utf-8", env=env)
     row = json.loads(out.stdout)
     for k in ("VSWR", "回波损耗_dB", "谐振_fr_MHz", "谐振_ESR_ohm",
               "电缆长度_m", "L_nH", "C_pF", "滤波器形态"):
@@ -104,10 +110,11 @@ def test_cli_input_evidence(tmp_path):
 
 
 def test_cli_bad_field(tmp_path):
-    import json, subprocess, sys
+    import json, subprocess, sys, os
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     (tmp_path / "bad.json").write_text(json.dumps({"frequencies_hz": [], "S11": []}),
                                        encoding="utf-8")
     r = subprocess.run([sys.executable, "-m", "mbdsdr_ai.fill_evidence_example",
-                       "--input", str(tmp_path / "bad.json")],
-                      capture_output=True, text=True)
+                        "--input", str(tmp_path / "bad.json")],
+                       capture_output=True, text=True, encoding="utf-8", env=env)
     assert r.returncode == 1 or "空" in (r.stdout + r.stderr)
