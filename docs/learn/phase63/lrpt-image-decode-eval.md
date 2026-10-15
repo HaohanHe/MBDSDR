@@ -235,3 +235,25 @@ Segment 重组入口与 Q≥128 解析（未做项见上节）。
 至此真实 Meteor LRPT 路径的头/表/重组三块齐备；剩余收口项：把
 decode_image_blocks 的入口从“整 JPEG”改为“MeteorScan + K.3 表 + 量化表”
 驱动（单块入口适配），以及 fill_missing 黑行回填（SatDump 同款参数）。
+
+
+---
+
+## decode_meteor_scan 入口落地（2026-10-15，真实路径收口）
+
+- lrpt_huffman.py 新增 decode_meteor_scan(scan, quant_tables=None)：上一节
+  MeteorScan 产物的 JPEG 侧入口。与 decode_image_blocks 的区别：
+  Segment 不带 DHT -> DC/AC 表用 Annex K.3 硬编码表；不带 DQT ->
+  量化表由首段 Q 字段经 IJG 公式生成或调用方显传入；扫描无
+  SOI/SOS 头 -> SOF 字段由参数化提供，缺省 Meteor 4:2:0
+  （Y 2x2，Cb/Cr 1x1）。
+- 三条守卫：空扫描/缺尺寸/缺量化表各自诚实抛错，不补零、不给
+  半截图。
+- 测试 4 例（test_decode_meteor_scan.py）：守卫三拦、全零块 8x8
+  解出三平面常量 128（JPEG 电平偏置，手工按 K.3 码表编码的
+  32 bit 比特流）、短空扫描拒绝、Q=20/Q=80 量化差分
+  （DC +1 重建 133 vs 128）、缺省 4:2:0 分量口径。
+
+真实 Meteor LRPT 解码路径（断言层面）今后为：
+reassemble_meteor_scan -> decode_meteor_scan，无需 DHT/DQT/SOI。
+剩余：真实 OTA 采样验证（Viterbi 口径 + 整链）。

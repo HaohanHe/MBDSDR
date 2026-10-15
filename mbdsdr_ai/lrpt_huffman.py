@@ -726,6 +726,73 @@ def decode_image_blocks(jpeg_bytes: bytes) -> DecodedImage:
     return _plane_and_image(hdr, comp_blocks)
 
 
+def decode_meteor_scan(scan: MeteorScan,
+                       quant_tables: Optional[Dict[int, np.ndarray]] = None) -> DecodedImage:
+    """把 Meteor LRPT 原子化扫描（RFC 2435 Segment 重组产物）解码为图像。
+
+    与 :func:`decode_image_blocks` 的区别（Meteor 真实路径）：
+      - Segment 不带 DHT -> DC/AC 表用 Annex K.3 硬编码表
+        （:mod:`mbdsdr_ai.jpeg_k3_tables`）；
+      - 不带 DQT -> 量化表由首段 Q 字段经 IJG 公式生成
+        （:func:`ijg_quant_table`），或调用方显式传入；
+      - 扫描无 SOI/SOS 头 -> SOF 字段（尺寸/采样因子）由调用方以
+        ``scan_comps``/``force_so`` 参数化提供，缺省按 Meteor LRPT 的
+        3 分量 4:2:0（Y 2x2、Cb/Cr 1x1）构造；拿不准就显式传，不许猜。
+
+    参数
+    ----
+    scan : MeteorScan
+        :func:`mbdsdr_ai.lrpt_vcdu.reassemble_meteor_scan` 的产物。
+    quant_tables : dict[int, np.ndarray], optional
+        {0: luma_table, 1: chroma_table}（zigzag 序）。None 时按扫描的
+        Q 字段现算（IJG）；空 dict 或显式 None 表缺项 -> 诚实抛错，
+        不拿默认量化值糊弄。
+    """
+    from .jpeg_k3_tables import build_k3_tables
+
+    data = bytes(getattr(scan, "scan", b"") or b"")
+    if not data:
+        raise LrptJpegTruncatedError("空扫描：无 Meteor 熵数据")
+
+    if quant_tables is None:
+        quant_tables = getattr(scan, "quant_tables", None) or {}
+    quant_tables = {int(k): np.asarray(v, dtype=np.int64)
+                    for k, v in (quant_tables or {}).items()}
+    if set(quant_tables) < {0, 1}:
+        raise LrptJpegMarkerError(
+            "缺量化表：Meteor 扫描不带 DQT，需提供表 0/表 1"
+            "（可在 reassemble_meteor_scan 的产物里带出，或显式传入）")
+
+    k3 = build_k3_tables()
+    width = int(getattr(scan, "width", 0) or 0)
+    height = int(getattr(scan, "height", 0) or 0)
+    if width <= 0 or height <= 0:
+        raise LrptJpegMarkerError(
+            f"Meteor 扫描缺尺寸（w={width}, h={height}）："
+            "fragment_offset==0 首段必须携带尺寸头")
+
+    # SOF 分量口径：3 分量 4:2:0（Y 2x2，Cb/Cr 各 1x1）——调用方可用
+    # scan_comps/force_so 覆盖（见 docstring 的“不许猜”约定）。
+    comps = list(getattr(scan, "scan_comps", None) or
+                [ComponentInfo(1, 2, 2, 0), ComponentInfo(2, 1, 1, 1),
+                 ComponentInfo(3, 1, 1, 1)])
+    hdr = JpegHeader(
+        precision=8,
+        height=height,
+        width=width,
+        components=comps,
+        quant_tables=quant_tables,
+        dc_tables={0: k3[("DC", 0)], 1: k3[("DC", 1)]},
+        ac_tables={0: k3[("AC", 0)], 1: k3[("AC", 1)]},
+        scan_comps=[(c.id, 0 if i == 0 else 1, 0 if i == 0 else 1)
+                    for i, c in enumerate(comps)],
+        scan_start=0,
+        restart_interval=0,
+    )
+    comp_blocks = _decode_blocks(hdr, data)
+    return _plane_and_image(hdr, comp_blocks)
+
+
 # =========================================================================== #
 # RFC 2435 RTP/JPEG 头（Meteor-M LRPT 真实路径的接入点）
 # =========================================================================== #
