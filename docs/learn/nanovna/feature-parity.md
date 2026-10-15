@@ -862,3 +862,24 @@ JanVNA2 CRC32 包协议（仅兼容 LibreVNA 时需要）；marker 吸附/频带
 
 剩余登记（均未做，非新缺口）：C++ 面六批镜像（待 cc1 修复）；
 marker 吸附/频带背景着色/GJB 图/CAL_LOGMAG 的 UI 层；真实设备 OTA。
+
+
+---
+
+# 第㉹批：VNA 工作流全链路 + 报告渲染（2026-10-15，全部销账）
+
+- **vna_pipeline**（第十二批）：扫频 -> 结构化报告；谐振分析在阻抗域
+  教科书口径重实现（不复用 analyze_resonance_py |S11| 域占位）；校准
+  不内嵌（调用方先 vna_cal 显式求盒）。
+- **vna_analyze_sweep 工具**（第十三批）：管道上线只读工具。
+- **vna_calio**（第十四批）：误差盒 + OSL 定义件 JSON 落盘（schema
+  versioned，坏文件显式拒绝）；落盘后 apply 逐点一致 1e-12。
+- **vna_solve_error_box / vna_apply_calibration 工具**（第十五批）：
+  "采标->求盒->校正->分析->落盘"全链路最后两环补齐。
+- **vna_report + export_vna_report**（第十六批）：log-mag + Smith 双
+  面板 PNG（参数方程画 r/x 网格），|Γ|>1 越界钳沿计数如实上报。
+
+VNA 主链路至此闭环：nanovna_client 采标 -> solve -> apply ->
+analyze -> report/calio。剩余登记不变：C++ 面镜像（本机无任何 C++
+编译器——MSVC/LLVM/gcc/mingw 全缺，比 cc1 损坏更根本，待装工具链）、
+UI 层、真实设备 OTA。
