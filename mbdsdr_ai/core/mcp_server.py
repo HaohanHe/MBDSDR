@@ -47,6 +47,7 @@ _INT = {"type": "integer"}
 _STR = {"type": "string"}
 _BOOL = {"type": "boolean"}
 _OBJ = {"type": "object"}
+_ARR = {"type": "array", "items": {"type": "number"}}
 
 
 def _schema(props: Dict[str, Any], required: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -478,6 +479,35 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         _schema({"n": _INT}, ["n"]),
         lambda c, a: _ndarray_to_json(c.read_audio(int(a["n"]))))
 
+    def _export_spectrum_snapshot(c, a):
+        """渲染并落盘频谱快照 PNG（spectrum_snapshot 渲染核心）。
+
+        数据源由调用方显式给（如 get_spectrum_status / scan_band 的
+        输出），无数据不伪造；写文件失败原样冒泡为诚实错误。
+        """
+        from mbdsdr_ai.spectrum_snapshot import render_spectrum_png
+        freqs = a["freqs_hz"]
+        db = a["db"]
+        png = render_spectrum_png(
+            freqs, db,
+            width=int(a.get("width", 640)),
+            height=int(a.get("height", 400)),
+            dynamic_range_db=float(a.get("dynamic_range_db", 80.0)))
+        path = a["path"]
+        with open(path, "wb") as fh:
+            fh.write(png)
+        return {"ok": True, "path": path, "bytes": len(png)}
+
+    add("export_spectrum_snapshot",
+        "把频谱 dB 迹线渲染成 PNG 快照并落盘（SDR++ 主频谱图导出同口径）。"
+        "freqs_hz/db 由调用方从 get_spectrum_status 或扫描结果显式提供；"
+        "越界点钳到边不丢点；无渲染依赖（stdlib zlib PNG）。",
+        _schema({"freqs_hz": _ARR, "db": _ARR, "path": _STR,
+                 "width": _INT, "height": _INT,
+                 "dynamic_range_db": _NUM},
+                ["freqs_hz", "db", "path"]),
+        _export_spectrum_snapshot, write=True)
+
     add("start_analyze", "对当前信号做自动调制识别。",
         _schema({"modulation": _STR}),
         lambda c, a: c.start_analyze(a.get("modulation")), write=True)
@@ -864,6 +894,7 @@ _TOOL_DOMAIN: Dict[str, str] = {
     "get_recording_status": "导出演制",
     "read_iq": "导出演制",
     "read_audio": "导出演制",
+    "export_spectrum_snapshot": "导出演制",
     # 书签扫描卫星
     "start_scan": "书签扫描卫星",
     "stop_scan": "书签扫描卫星",
