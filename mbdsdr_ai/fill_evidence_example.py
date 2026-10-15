@@ -25,9 +25,10 @@ def tdr_length_py(freqs_hz, s11, vf=0.66, window="kaiser6"):
     """Python 侧 TDR：窗口化 IDFT -> |时域响应| 峰位 -> 电缆长度 m。
 
     与官方 bandpass TDR 机制对齐的三档窗（rect/kaiser6/kaiser13，默认 NORMAL）；
-    对复 S11 施加频域窗后 IDFT 取峰（跳过 0 延迟 bin——那是参考面本身）。
-    仍是轻量实现：无官方 2x 共轭对称扩展与双曲插值峰值精修
-    （feature-parity.md 第 6 节登记的精度欠账），物理口径一致。
+    对复 S11 施加频域窗后 IDFT，取 |时域响应| 峰位（跳过 0 延迟 bin——
+    那是参考面本身），并用**双曲（对数幅度）插值**精修峰位：在峰 bin
+    左右邻点拟合 d/(a+bd+cd^2)，突破 bin 量化限制（NanoVNA-App
+    TDR 精度链口径，2026-10-15 落地）。
     vf 默认 RG-58 0.66（官方页面按百分数输入速度因数，同一物）。"""
     c = 299792458.0
     n = len(freqs_hz)
@@ -46,7 +47,18 @@ def tdr_length_py(freqs_hz, s11, vf=0.66, window="kaiser6"):
     mag = np.abs(np.fft.ifft(x))
     # 跳过 bin 0（t=0 参考面，含直流分量，不是远端反射峰）
     k = int(np.argmax(mag[1:])) + 1
-    t_roundtrip = k / span
+    # 双曲（对数幅度）插值精修峰位（NanoVNA-App TDR 口径）：
+    # 对峰 bin 左右邻点拟合 d/(a+bd+cd^2)（d=±1），得亚 bin 偏移；
+    # 峰在频域阵列端点（无邻点）时退化为原始 bin——诚实标注不硬插。
+    offset = 0.0
+    if 1 <= k < len(mag) - 1:
+        m0, m1, m2 = mag[k - 1], mag[k], mag[k + 1]
+        if min(m0, m1, m2) > 0.0:
+            y0, y1, y2 = np.log(m0), np.log(m1), np.log(m2)
+            denom = y0 - 2.0 * y1 + y2
+            if denom < -1e-12:                 # 上凸才插；否者为平顶噪声
+                offset = float(np.clip(0.5 * (y0 - y2) / denom, -0.5, 0.5))
+    t_roundtrip = (k + offset) / span
     return vf * c * t_roundtrip / 2.0
 
 

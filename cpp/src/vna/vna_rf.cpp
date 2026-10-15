@@ -107,13 +107,33 @@ TdrResult tdrCable(const std::vector<double>& f_hz,
     double span = f_hz.back() - f_hz.front();
     if (span <= 0.0 || velocity_factor <= 0.0) return out;
 
-    // Kaiser window (TDR.py:46 kaiser correction, beta=6 typical).
+    // Kaiser window (TDR.py:46 kaiser correction; Python 侧官方三档
+    // rect/kaiser6/kaiser13 的 NORMAL 档为 beta=6，2026-10-15 对齐)。
     const double beta = 6.0;
     std::vector<std::complex<double>> win(n);
     for (int i = 0; i < n; ++i) {
-        double t = (2.0 * i) / (n - 1) - 1.0;
-        double kaiser = 1.0; // flat fallback; window shape only affects sidelobes
-        (void)kaiser;
+        double kaiser = 1.0;
+        if (beta > 0.0) {
+            // Kaiser 窗（I0 贝塞尔级数口径，与 numpy.kaiser 同式）
+            double a = 2.0 * i / (n - 1) - 1.0;
+            double arg = 1.0 - a * a;
+            kaiser = std::max(0.0, arg);
+            // I0(beta*sqrt(arg)) / I0(beta)
+            auto I0 = [](double x) {
+                double sum = 1.0, term = 1.0, y = x / 2.0;
+                for (int k = 1; k < 24; ++k) {
+                    term *= (y * y) / ((double)k * (double)k);
+                    sum += term;
+                    if (term < 1e-12 * sum) break;
+                }
+                return sum;
+            };
+            if (kaiser > 0.0) {
+                kaiser = I0(beta * std::sqrt(kaiser)) / I0(beta);
+            } else {
+                kaiser = 0.0;
+            }
+        }
         win[i] = s11[i] * kaiser;
     }
     auto imp = idft(win);
@@ -135,7 +155,19 @@ TdrResult tdrCable(const std::vector<double>& f_hz,
         if (i > 1 && i + 1 < n / 2) {
             double mi = std::abs(imp[i]);
             if (mi > std::abs(imp[i-1]) && mi > std::abs(imp[i+1]) && mi > floor) {
-                double pi = v * (i * dt) / 2.0;
+                // 与主峰同口径的双曲插值精修（端点/平顶退化为 bin 值）
+                double off = 0.0;
+                if (i >= 1 && i + 1 < n / 2) {
+                    double a0 = std::abs(imp[i-1]), a1 = std::abs(imp[i]),
+                           a2 = std::abs(imp[i+1]);
+                    if (a0 > 0.0 && a1 > 0.0 && a2 > 0.0) {
+                        double b0 = std::log(a0), b1 = std::log(a1), b2 = std::log(a2);
+                        double d = b0 - 2.0 * b1 + b2;
+                        if (d < -1e-12)
+                            off = std::max(-0.5, std::min(0.5, 0.5 * (b0 - b2) / d));
+                    }
+                }
+                double pi = v * ((i + off) * dt) / 2.0;
                 out.peak_distances_m.push_back(pi);
             }
         }
@@ -143,7 +175,24 @@ TdrResult tdrCable(const std::vector<double>& f_hz,
     if (peak < 0) return out;
     out.valid = true;
     out.peak_reflection = peakMag;
-    double t = peak * dt;
+    // 双曲（对数幅度）插值精修峰位（NanoVNA-App TDR 精度链口径，
+    // 2026-10-15 与 Python 侧 tdr_length_py 对齐）：峰 bin 在阵列内部且
+    // 三点幅度均为正时拟合 d/(a+bd+cd^2)（d=±1）取亚 bin 偏移；平顶/
+    // 噪声或端点峰退化为原始 bin——不硬插。
+    double offset = 0.0;
+    if (peak >= 1 && peak + 1 < n / 2) {
+        double m0 = std::abs(imp[peak - 1]);
+        double m1 = std::abs(imp[peak]);
+        double m2 = std::abs(imp[peak + 1]);
+        if (m0 > 0.0 && m1 > 0.0 && m2 > 0.0) {
+            double y0 = std::log(m0), y1 = std::log(m1), y2 = std::log(m2);
+            double denom = y0 - 2.0 * y1 + y2;
+            if (denom < -1e-12) {
+                offset = std::max(-0.5, std::min(0.5, 0.5 * (y0 - y2) / denom));
+            }
+        }
+    }
+    double t = (peak + offset) * dt;
     out.distance_m = v * t / 2.0;          // round trip -> one-way
     out.cable_length_m = out.distance_m;  // far end -> length = one-way
     (void)z0;
