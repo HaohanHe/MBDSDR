@@ -188,6 +188,19 @@ class OpenDevice:
                 self._chain = None
         return self._chain
 
+    def set_deemphasis(self, tau_us: str) -> bool:
+        """运行期切换去加重档位（none/22us/50us/75us）。
+
+        未在跑音频链时先按当前模式建链再设置（与 set_squelch 同口径的
+        懒建链）；非法档名由 ReceiveChain 抛 ValueError，本方法如实向上传
+        （调用方负责转用户可读错误）。
+        """
+        chain = self._chain or self._ensure_chain(self._chain_mode)
+        if chain is None:
+            return False
+        chain.set_deemphasis(tau_us)
+        return True
+
     def start_audio(self, mode: str = "WFM") -> bool:
         """启动 ReceiveChain 实时播放线程。已在跑返回 True；无法建链返回 False。"""
         if self._audio_thread is not None and self._audio_thread.is_alive():

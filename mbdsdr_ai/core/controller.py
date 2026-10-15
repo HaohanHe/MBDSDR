@@ -431,6 +431,24 @@ class SDRController:
         """设置静噪门限（dB，负值）。"""
         self._squelch_db = float(db)
 
+    def set_deemphasis(self, tau_us: str) -> None:
+        """设置去加重档位（none/22us/50us/75us；sdrpp WFM/NFM 下拉口径）。
+
+        委托当前后端的实时链路（ReceiveChain）；未连接/后端不支持时抛
+        SDRUserError 诚实信封，不伪造“已设置”。
+        """
+        backend = self._backend
+        setter = getattr(backend, "set_deemphasis", None) if backend else None
+        if setter is None:
+            raise SDRUserError(
+                "当前后端不支持去加重档位",
+                suggestion="连接 RTL-SDR / rtl_tcp 等实时后端后再试。",
+            )
+        try:
+            setter(tau_us)
+        except ValueError as e:
+            raise SDRUserError(str(e)) from e
+
     # ==================================================================
     # 音频
     # ==================================================================

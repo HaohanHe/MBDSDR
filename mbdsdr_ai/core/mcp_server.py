@@ -430,6 +430,12 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         _schema({"db": _NUM}, ["db"]),
         lambda c, a: (c.set_squelch(float(a["db"])), {"ok": True})[1], write=True)
 
+    add("set_deemphasis",
+        "设置去加重（de-emphasis）档位：none/22us/50us/75us（sdrpp WFM/NFM "
+        "下拉同口径）。作用于当前实时接收链路；未连接后端时诚实报错。",
+        _schema({"tau_us": _STR}, ["tau_us"]),
+        lambda c, a: (c.set_deemphasis(a["tau_us"]), {"ok": True})[1], write=True)
+
     # ---- 音频 ----
     add("list_audio_outputs", "枚举音频输出设备。", _schema({}),
         lambda c, a: [d.to_dict() for d in c.list_audio_outputs()])
@@ -829,6 +835,7 @@ _TOOL_DOMAIN: Dict[str, str] = {
     "set_sample_rate": "SDR 调谐/VFO",
     "set_bandwidth": "SDR 调谐/VFO",
     "set_squelch": "SDR 调谐/VFO",
+    "set_deemphasis": "SDR 调谐/VFO",
     "start_analyze": "SDR 调谐/VFO",
     "set_anr_enabled": "SDR 调谐/VFO",
     "set_anr_strength": "SDR 调谐/VFO",
