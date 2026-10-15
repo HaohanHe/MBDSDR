@@ -22,7 +22,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
-__all__ = ["render_spectrum_png"]
+__all__ = ["render_spectrum_png", "render_waterfall_png"]
 
 #: 5x7 点阵字体（本功能字符集：0-9 A-Z . - 空格 ? k M G H z d B）
 _FONT: Dict[str, Tuple[str, ...]] = {
@@ -91,6 +91,54 @@ def _png_rgb(img: np.ndarray) -> bytes:
 
 _MARGIN_L, _MARGIN_R = 48, 8
 _MARGIN_T, _MARGIN_B = 8, 24
+
+
+def render_waterfall_png(rows_db, freqs_hz=None, width: int = 640,
+                         height: int = 400,
+                         dynamic_range_db: float = 80.0) -> bytes:
+    """瀑布图 PNG：rows_db 为时间×频率的 dB 矩阵（首行最新，类瀑布
+    下滑口径）；颜色映射为蓝->青->绿->黄->红（强度升序）。
+
+    矩阵须 2D、有限值、每行等长；dynamic_range 以矩阵最大值为顶。
+    频率轴标注与折线图同口径（给定 freqs 时），缺省不标。
+    """
+    m = np.asarray(rows_db, dtype=np.float64)
+    if m.ndim != 2 or m.shape[0] < 2 or m.shape[1] < 2:
+        raise ValueError("rows_db 须为 >=2x2 的 dB 矩阵")
+    if np.any(~np.isfinite(m)):
+        raise ValueError("矩阵含非有限值，拒绝渲染假图")
+    if dynamic_range_db <= 0:
+        raise ValueError("dynamic_range_db 须为正")
+    if width < 160 or height < 120:
+        raise ValueError(f"画布 {width}x{height} 过小（最小 160x120）")
+    # 归一化到 [0,1]
+    top, lo = float(np.max(m)), float(np.max(m)) - dynamic_range_db
+    t = np.clip((m - lo) / dynamic_range_db, 0.0, 1.0)
+    # 色带：蓝->青->绿->黄->红（5 锚点线性插值）
+    anchors = np.array([[0, 0, 180], [0, 180, 220], [0, 200, 60],
+                        [240, 220, 0], [230, 30, 20]], dtype=np.float64)
+    seg = t * (len(anchors) - 1)
+    i0 = np.minimum(seg.astype(int), len(anchors) - 2)
+    frac = (seg - i0)[..., None]
+    img = (anchors[i0] * (1 - frac) + anchors[i0 + 1] * frac
+           ).astype(np.uint8)
+    # 最近邻重采样到画布（频率轴横、时间轴纵；最新行在顶部）
+    idx_r = (np.arange(height) * m.shape[0] // height)
+    idx_c = (np.arange(width) * m.shape[1] // width)
+    img = img[idx_r][:, idx_c]
+    # 频率轴标注（底边三档，同折线图口径）
+    if freqs_hz is not None:
+        f = np.asarray(freqs_hz, dtype=np.float64)
+        if len(f) != m.shape[1] or np.any(np.diff(f) < 0):
+            raise ValueError("freqs_hz 须与矩阵列数一致且非降序")
+        canvas = np.full((height + 24, width, 3), 255, dtype=np.uint8)
+        canvas[:height] = img
+        mid = len(f) // 2
+        _draw_text(canvas, 0, height + 6, _eng(f[0]))
+        _draw_text(canvas, width // 2 - 12, height + 6, _eng(f[mid]))
+        _draw_text(canvas, width - 30, height + 6, _eng(f[-1]))
+        img = canvas
+    return _png_rgb(img)
 
 
 def render_spectrum_png(freqs_hz, db_values, width: int = 640,

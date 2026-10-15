@@ -484,16 +484,18 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
 
         数据源由调用方显式给（如 get_spectrum_status / scan_band 的
         输出），无数据不伪造；写文件失败原样冒泡为诚实错误。
+        view="spectrum"（默认）画 dB 折线；view="waterfall" 时 db 传
+        时间×频率矩阵（行=时间，首行最新），画瀑布图。
         """
-        from mbdsdr_ai.spectrum_snapshot import render_spectrum_png
-        freqs = a["freqs_hz"]
-        db = a["db"]
-        png = render_spectrum_png(
-            freqs, db,
-            width=int(a.get("width", 640)),
-            height=int(a.get("height", 400)),
-            dynamic_range_db=float(a.get("dynamic_range_db", 80.0)))
+        from mbdsdr_ai import spectrum_snapshot as _ss
+        w, h = int(a.get("width", 640)), int(a.get("height", 400))
+        rng = float(a.get("dynamic_range_db", 80.0))
         path = a["path"]
+        if a.get("view", "spectrum") == "waterfall":
+            png = _ss.render_waterfall_png(a["db"], a.get("freqs_hz"),
+                                           w, h, rng)
+        else:
+            png = _ss.render_spectrum_png(a["freqs_hz"], a["db"], w, h, rng)
         with open(path, "wb") as fh:
             fh.write(png)
         return {"ok": True, "path": path, "bytes": len(png)}
@@ -501,12 +503,43 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
     add("export_spectrum_snapshot",
         "把频谱 dB 迹线渲染成 PNG 快照并落盘（SDR++ 主频谱图导出同口径）。"
         "freqs_hz/db 由调用方从 get_spectrum_status 或扫描结果显式提供；"
-        "越界点钳到边不丢点；无渲染依赖（stdlib zlib PNG）。",
+        "view=waterfall 时 db 传时间×频率矩阵画瀑布图；越界点钳到边不丢"
+        "点；无渲染依赖（stdlib zlib PNG）。",
         _schema({"freqs_hz": _ARR, "db": _ARR, "path": _STR,
                  "width": _INT, "height": _INT,
-                 "dynamic_range_db": _NUM},
+                 "dynamic_range_db": _NUM, "view": _STR},
                 ["freqs_hz", "db", "path"]),
         _export_spectrum_snapshot, write=True)
+
+    def _export_peaks_csv(c, a):
+        """峰值表 -> CSV 落盘（freq_hz,db[,label] 三列，RFC 4180 引号）。"""
+        import csv as _csv
+        peaks = a["peaks"]
+        if not isinstance(peaks, list) or not peaks:
+            raise ValueError("peaks 须为非空列表")
+        path = a["path"]
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            wr = _csv.writer(fh)
+            wr.writerow(["freq_hz", "db", "label"])
+            for i, p in enumerate(peaks):
+                if isinstance(p, dict):
+                    freq, db = p.get("freq_hz"), p.get("db")
+                    label = p.get("label", "")
+                else:                       # [freq, db] 对
+                    freq, db = p[0], p[1]
+                    label = ""
+                if freq is None or db is None:
+                    raise ValueError(
+                        f"峰值 #{i} 缺 freq_hz/db 字段（诚实报错不补零）")
+                wr.writerow([freq, db, label])
+        return {"ok": True, "path": path, "peaks": len(peaks)}
+
+    add("export_peaks_csv",
+        "把峰值表（scan_band 等输出的 peaks）导出为 CSV 三列"
+        "（freq_hz,db,label）。写工具，走 arm_manual 门。",
+        _schema({"peaks": {"type": "array"}, "path": _STR},
+                ["peaks", "path"]),
+        _export_peaks_csv, write=True)
 
     add("start_analyze", "对当前信号做自动调制识别。",
         _schema({"modulation": _STR}),
@@ -895,6 +928,7 @@ _TOOL_DOMAIN: Dict[str, str] = {
     "read_iq": "导出演制",
     "read_audio": "导出演制",
     "export_spectrum_snapshot": "导出演制",
+    "export_peaks_csv": "导出演制",
     # 书签扫描卫星
     "start_scan": "书签扫描卫星",
     "stop_scan": "书签扫描卫星",
