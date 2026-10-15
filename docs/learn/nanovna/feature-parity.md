@@ -840,3 +840,22 @@ scoped 可见性；policy 规则集≈ToolRestriction；arm_manual≈allowed-onc
 剩余登记（均未做，非新缺口）：C++ 面六批镜像（待 cc1 修复）；
 JanVNA2 CRC32 包协议（仅兼容 LibreVNA 时需要）；marker 吸附/频带背景
 着色/GJB 图/CAL_LOGMAG 的 UI 层；真实设备 OTA。
+
+
+---
+
+# 第㉸批：SDR 侧导出双缺口 + dsh 借鉴落地（2026-10-15）
+
+- **export_spectrum_snapshot**（SDR++ 登记缺口销账）：stdlib zlib 手写
+  PNG 渲染核心（5x7 点阵字体/工程单位标注/钳位不丢点），dB 折线 +
+  view=waterfall 瀑布图（五锚点色带）；工具挂导出演制域走 arm_manual
+  门。
+- **export_peaks_csv**（scan_band 峰值导出口径）：RFC 4180 三列 CSV，
+  dict/[freq,db] 混合输入，空表/缺字段显式报错。
+- **dsh 借鉴第一项**：门层信封稳定错误 code（denied_by_policy /
+  manual_gate_required / internal_error）+ deny 单调性钉扎（armed +
+  会话批准缓存叠加仍拒）。审批落盘/turn 边界两项维持登记，待未来做
+  持久化时第一优先级（不硬套无状态模型）。
+
+剩余登记（均未做，非新缺口）：C++ 面六批镜像（待 cc1 修复）；
+marker 吸附/频带背景着色/GJB 图/CAL_LOGMAG 的 UI 层；真实设备 OTA。
