@@ -436,6 +436,13 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
         _schema({"tau_us": _STR}, ["tau_us"]),
         lambda c, a: (c.set_deemphasis(a["tau_us"]), {"ok": True})[1], write=True)
 
+    add("set_iq_invert",
+        "设置 I/Q 反相（sdrpp IqInvert：true=取复共轭，频谱关于 DC 镜像）。"
+        "用于修正接反的 Q 路/负采样率设备；与增益/正交误差校正可叠加。",
+        _schema({"invert": _BOOL}, ["invert"]),
+        lambda c, a: (c.set_iq_invert(a["invert"] is True), {"ok": True})[1],
+        write=True)
+
     # ---- 音频 ----
     add("list_audio_outputs", "枚举音频输出设备。", _schema({}),
         lambda c, a: [d.to_dict() for d in c.list_audio_outputs()])
@@ -836,6 +843,7 @@ _TOOL_DOMAIN: Dict[str, str] = {
     "set_bandwidth": "SDR 调谐/VFO",
     "set_squelch": "SDR 调谐/VFO",
     "set_deemphasis": "SDR 调谐/VFO",
+    "set_iq_invert": "SDR 调谐/VFO",
     "start_analyze": "SDR 调谐/VFO",
     "set_anr_enabled": "SDR 调谐/VFO",
     "set_anr_strength": "SDR 调谐/VFO",

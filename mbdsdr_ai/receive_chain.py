@@ -295,6 +295,15 @@ class ReceiveChain:
         self._deemph_us = tau_us
         self._build_backend()
 
+    def set_iq_invert(self, invert: bool) -> None:
+        """运行期切换 I/Q 反相（sdrpp IqInvert 口径；不重建链路）。"""
+        self._iqcorr.set_iq_invert(invert)
+
+    @property
+    def iq_invert(self) -> bool:
+        """当前 I/Q 反相状态。"""
+        return self._iqcorr._invert
+
     @property
     def deemph_tau_us(self) -> Optional[str]:
         """当前去加重档位名（None=模式默认）。"""

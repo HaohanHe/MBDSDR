@@ -449,6 +449,21 @@ class SDRController:
         except ValueError as e:
             raise SDRUserError(str(e)) from e
 
+    def set_iq_invert(self, invert: bool) -> None:
+        """设置 I/Q 反相（sdrpp IqInvert：true=复共轭，边带镜像）。
+
+        用于修正接反的 Q 路 / 负采样率设备；与增益/正交误差校正可叠加。
+        无后端/链路不支持时抛 SDRUserError 诚实信封。
+        """
+        backend = self._backend
+        setter = getattr(backend, "set_iq_invert", None) if backend else None
+        if setter is None:
+            raise SDRUserError(
+                "当前后端不支持 I/Q 反相",
+                suggestion="连接 RTL-SDR / rtl_tcp 等实时后端后再试。",
+            )
+        setter(bool(invert))
+
     # ==================================================================
     # 音频
     # ==================================================================

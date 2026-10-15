@@ -201,6 +201,22 @@ class OpenDevice:
         chain.set_deemphasis(tau_us)
         return True
 
+    def set_iq_invert(self, invert: bool) -> bool:
+        """运行期切换 I/Q 反相（sdrpp IqInvert 口径：复共轭=边带镜像）。
+
+        委托 ReceiveChain 的 IQCorrector（增益/正交误差校正器，本次只翻其
+        invert 标志——两件事互不依赖，可叠加）。未建链时懒建链；后端/链路
+        不可用时返回 False 由调用方转诚实错误。
+        """
+        chain = self._chain or self._ensure_chain(self._chain_mode)
+        if chain is None:
+            return False
+        setter = getattr(chain, "set_iq_invert", None)
+        if setter is None:
+            return False
+        setter(bool(invert))
+        return True
+
     def start_audio(self, mode: str = "WFM") -> bool:
         """启动 ReceiveChain 实时播放线程。已在跑返回 True；无法建链返回 False。"""
         if self._audio_thread is not None and self._audio_thread.is_alive():

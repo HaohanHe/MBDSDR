@@ -91,6 +91,7 @@ class IQCorrector:
         self._g = 1.0
         self._phi = 0.0  # rad
         self._matrix = np.eye(2, dtype=np.float64)
+        self._invert = False                 # sdrpp IqInvert：false=直通
 
     # ---- 参数设置 ----
     def set_imbalance(self, gain_ratio: float, phase_error_deg: float) -> None:
@@ -98,6 +99,15 @@ class IQCorrector:
         self._g = float(gain_ratio)
         self._phi = float(np.radians(phase_error_deg))
         self._rebuild()
+
+    def set_iq_invert(self, invert: bool) -> None:
+        """切换 I/Q 反相（sdrpp IqInvert：true 时输出 conj(输入)）。
+
+        与增益/正交误差校正**互不依赖、可叠加**：先施加 2x2 校正矩阵，再
+        按需取复共轭（dsp_iq_invert 口径，见 :mod:`mbdsdr_ai.iq_correction`
+        模块底部）。未校准时矩阵为单位阵，此时反相等价于纯共轭。
+        """
+        self._invert = bool(invert)
 
     def fit(self, iq: np.ndarray) -> IQImbalance:
         """从一段 IQ 估计 g, φ 并应用。"""
@@ -141,7 +151,11 @@ class IQCorrector:
             return x
         iq = np.column_stack((x.real, x.imag)).astype(np.float64)
         out = iq @ self._matrix.T
-        return (out[:, 0] + 1j * out[:, 1]).astype(x.dtype)
+        y = (out[:, 0] + 1j * out[:, 1]).astype(x.dtype)
+        if self._invert:
+            # IqInvert 开关：在矩阵校正之后取复共轭（与 dsp_iq_invert 同口径）
+            y = np.conjugate(y)
+        return y
 
 
 def inject_imbalance(iq: np.ndarray, gain_ratio: float,
