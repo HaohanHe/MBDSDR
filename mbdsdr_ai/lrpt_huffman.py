@@ -55,6 +55,7 @@ __all__ = [
     "IJG_K2",
     "ijg_quant_table",
     "parse_rtp_jpeg_header",
+    "parse_inband_q_tables",
     "decode_image_blocks",
     "receive_extend",
     "parse_dht",
@@ -875,13 +876,14 @@ class RtpJpegHeader:
         return self.q_field >= 128
 
 
-def parse_rtp_jpeg_header(seg: bytes) -> Tuple[RtpJpegHeader, int]:
+def parse_rtp_jpeg_header(seg: bytes) -> Tuple[RtpJpegHeader, int, Dict[int, np.ndarray]]:
     """解析一个 Meteor LRPT 图像 Segment 的 RFC 2435 头。
 
     入参 ``seg`` 为一个 VCDU 图像包的数据域（去掉 CCSDS 头后的净荷）。
-    返回 ``(RtpJpegHeader, payload_offset)``：payload_offset 为熵/量化表
-    数据在 ``seg`` 中的起始下标。不足 4 字节诚实抛
-    :class:`LrptJpegTruncatedError`（不给半截头）。
+    返回 ``(RtpJpegHeader, payload_offset, inband_q_tables)``：
+    payload_offset 为熵/量化表数据在 ``seg`` 中的起始下标；
+    inband_q_tables 为 RFC 2435 §3.1.8 带内量化表（Q<128 时为空 dict）。
+    不足 4 字节诚实抛 :class:`LrptJpegTruncatedError`（不给半截头）。
     """
     if len(seg) < 4:
         raise LrptJpegTruncatedError(
@@ -906,9 +908,50 @@ def parse_rtp_jpeg_header(seg: bytes) -> Tuple[RtpJpegHeader, int]:
         q_field=seg[9] if frag == 0 else 0,
         width=width, height=height,
     )
+    inband: Dict[int, np.ndarray] = {}
     if hdr.has_inband_q_table and frag == 0:
-        # Q≥128：带内量化表头跟在尺寸头后；当前未解析，诚实抛 Unsupported
+        # RFC 2435 §3.1.8：Q≥128 时首段在尺寸头后携带带内量化表头。
+        # 表数由 Type 决定（Type 0 -> 2 表：luma + chroma；每表 64 值
+        # zigzag 序，布局与 JFIF DQT 一致）。解析出的表经
+        # :func:`parse_inband_q_tables` 返回 {tq: 数组}；短输入/表数不符
+        # 诚实抛错，绝不拿 IJG 默认表顶替（见该函数 docstring）。
+        try:
+            inband, off = parse_inband_q_tables(seg, off, hdr.type_field)
+        except LrptJpegTruncatedError as e:
+            raise LrptJpegTruncatedError(
+                f"Q≥128 带内量化表头解析失败：{e}") from e
+    return hdr, off, inband
+
+
+def parse_inband_q_tables(
+    seg: bytes, off: int, type_field: int
+) -> Tuple[Dict[int, np.ndarray], int]:
+    """解析 RFC 2435 §3.1.8 的带内量化表头。
+
+    入参 ``seg`` 为首段数据域，``off`` 为表头起始下标（通常紧随 8 字节
+    尺寸头），``type_field`` 为 JPEG 缩写表规格（决定表数：Type 0/1 -> 2
+    表，其余未知口径 -> 诚实抛 :class:`LrptJpegUnsupportedError`，不猜）。
+
+    表布局（规范原文）：每表 64 个 8-bit 值，zigzag 序，等价 JFIF DQT 的
+    zigzag 布局；表序为 luma(表 0)、chroma(表 1)。
+
+    返回 ``({tq: np.ndarray(64,)}, 表头结束下标)``。长度不足/表数不足
+    时抛 :class:`LrptJpegTruncatedError`（绝不返回半截表）。
+    """
+    if type_field in (0, 1):
+        count = 2
+    else:
         raise LrptJpegUnsupportedError(
-            "RFC 2435 Q≥128 带内量化表头尚未解析（未做项，见 "
-            "docs/learn/phase63/lrpt-image-decode-eval.md）")
-    return hdr, off
+            f"RFC 2435 Type 字段 {type_field} 对应的带内量化表表数未定义"
+            "（本模块仅实现 Type 0/1 的 2 表口径）")
+    tables: Dict[int, np.ndarray] = {}
+    i = off
+    for tq in range(count):
+        if i + 64 > len(seg):
+            raise LrptJpegTruncatedError(
+                f"带内量化表 {tq} 需 64 zigzag 值，余 {len(seg) - i} 字节"
+                "（表头截断）")
+        tables[tq] = np.frombuffer(seg[i:i + 64],
+                                   dtype=np.uint8).astype(np.int64)
+        i += 64
+    return tables, i

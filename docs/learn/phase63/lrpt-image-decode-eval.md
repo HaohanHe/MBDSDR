@@ -275,3 +275,22 @@ VCDU 图像包重组 -> reassemble_meteor_scan -> decode_meteor_scan
 -> 行状态维护 + fill_missing_lines 黑行回填；
 行状态本身产生于真实 VCDU 采样（APID 序列完整度），
 需真实 OTA 样本方能验证。
+
+
+---
+
+## Q≥128 带内量化表解析落地（2026-10-15，最后一个登记未做项销账）
+
+- lrpt_huffman.py 新增 parse_inband_q_tables(seg, off, type_field)：RFC 2435
+  §3.1.8 带内量化表头（Type 0/1 -> 2 表各 64 zigzag 值，其余 Type
+  诚实抛 Unsupported）；表头被截断抛 Truncated，不给半张表。
+- parse_rtp_jpeg_header 返回值扩为三元组
+  (RtpJpegHeader, payload_offset, inband_q_tables)；Q<128 时 inband 为空 dict。
+- reassemble_meteor_scan：Q≥128 时带内表优先于 IJG 缩放；缺表/表不齐
+  诚实拒绝，不拿 IJG 表顶替。
+- 测试：带内表解出（表 0/1 值与偏移验证）、截断拒绝、未知 Type
+  拒绝、Q≥128 既6表/无表两路径。
+
+至此，docs/learn/phase63/lrpt-image-decode-eval.md 中登记的所有 LRPT 图像压缩
+域未做项全部销账；唯一剩余是真实 OTA 样本端到端验证
+（Viterbi 口径 + 整链），属硬件/采样层面。

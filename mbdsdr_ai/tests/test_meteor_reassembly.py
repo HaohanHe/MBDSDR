@@ -1,5 +1,6 @@
-# SPDX-License-Identifier: MIT
-"""Meteor Segment 重组测试（RFC 2435 fragment_offset 口径）。"""
+﻿# SPDX-License-Identifier: MIT
+"""Meteor Segment reassembly tests (RFC 2435 fragment_offset path)."""
+import numpy as np
 import pytest
 
 from mbdsdr_ai.lrpt_huffman import LrptJpegUnsupportedError
@@ -18,7 +19,7 @@ def _seg(frag: int, q: int = 32, width: int = 1024,
 
 
 def test_ordered_segments_reassemble():
-    """fragment_offset 为扫描流内位置：首段 payload 2 字节 -> 续段 offset=2。"""
+    """fragment_offset 是扫描流内位置：首段 payload 2 字节 -> 继续段 offset=2。"""
     a = bytes([0, 0, 0, 0, 4, 0, 1, 0x40, 0x00, 0x20, 0x08, 0x03]) + b"\x01\x02"
     b = bytes([0, 0, 0, 2]) + b"\x03\x04"
     r = reassemble_meteor_scan([a, b])
@@ -31,9 +32,9 @@ def test_ordered_segments_reassemble():
 
 
 def test_gap_detected():
-    """续段 offset=4 而首段只覆盖 0..1 -> offset 2 处空洞。"""
+    """继续段 offset=4 而首段只覆盖 0..1 -> offset 2 处空洞。"""
     a = bytes([0, 0, 0, 0, 4, 0, 1, 0x40, 0x00, 0x20, 0x08, 0x03]) + b"\x01\x02"
-    c = bytes([0, 0, 0, 4]) + b"\x05\x06"   # 跳过了 offset 2..3
+    c = bytes([0, 0, 0, 4]) + b"\x05\x06"
     r = reassemble_meteor_scan([a, c])
     assert r.complete is False
     assert r.num_gaps == 1
@@ -47,9 +48,29 @@ def test_missing_first_segment_rejected():
     assert r.complete is False and "首段" in r.reason
 
 
-def test_q_over_128_rejected():
-    a = bytes([0, 0, 0, 0, 4, 0, 1, 0x40, 0x00, 0x80, 0x08, 0x03]) + b"\x00" * 80
-    with pytest.raises(LrptJpegUnsupportedError):
+def test_q_over_128_with_inband_tables():
+    """Q>=128 且首段携带带内量化表：解析成功且表优先于 IJG。"""
+    head = bytes([0, 0, 0, 0, 4, 0, 1, 0x40, 0x00, 0x80, 0x08, 0x03])
+    tables = bytes(range(64)) + bytes(range(64, 128))
+    a = head + tables + b"\x01"
+    b = bytes([0, 0, 0, 1]) + b"\x02"
+    r = reassemble_meteor_scan([a, b])
+    assert r.complete is True
+    assert r.q_field == 0x80
+    assert (r.quant_tables[0] == np.arange(64)).all()
+    assert (r.quant_tables[1] == np.arange(64, 128)).all()
+    assert r.scan == b"\x01\x02"
+
+
+def test_q_over_128_without_inband_tables_rejected():
+    """Q>=128 但首段没带表：诚实拒绝（Truncated/Unsupported，不拿 IJG 表顶替）。
+
+    首段尾部不足 2x64 字节，表头解析在 §3.1.8 层即截断拒绝——这正是
+    “没带表就不猜”的守卫路径。
+    """
+    from mbdsdr_ai.lrpt_huffman import LrptJpegTruncatedError
+    a = bytes([0, 0, 0, 0, 4, 0, 1, 0x40, 0x00, 0x80, 0x08, 0x03]) + b"\x01" * 80
+    with pytest.raises((LrptJpegTruncatedError, LrptJpegUnsupportedError)):
         reassemble_meteor_scan([a])
 
 

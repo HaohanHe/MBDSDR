@@ -229,9 +229,13 @@ def reassemble_meteor_scan(segments: List[bytes]) -> MeteorScan:
                           num_gaps=0, reason="无 Segment 输入")
 
     parsed: List[Tuple[lrpt_huffman.RtpJpegHeader, int, bytes]] = []
+    inband_tables: Dict[int, np.ndarray] = {}
     for seg in segments:
-        hdr, off = lrpt_huffman.parse_rtp_jpeg_header(seg)
+        hdr, off, inband = lrpt_huffman.parse_rtp_jpeg_header(seg)
         parsed.append((hdr, off, seg[off:]))
+        if inband:
+            # RFC 2435 §3.1.8：Q≥128 首段携带带内量化表——优先于 IJG 缩放
+            inband_tables.update(inband)
 
     first_offset = min(h.fragment_offset for h, _, _ in parsed)
     if first_offset != 0:
@@ -248,15 +252,25 @@ def reassemble_meteor_scan(segments: List[bytes]) -> MeteorScan:
     q_field = ordered[0][0].q_field
 
     if q_field >= 128:
-        raise lrpt_huffman.LrptJpegUnsupportedError(
-            "Meteor Q≥128 带内量化表路径尚未解析（未做项）")
-
-    if not (1 <= q_field <= 99):
-        return MeteorScan(scan=b"", complete=False, width=width,
-                          height=height, q_field=q_field, quant_tables={},
-                          num_segments=len(parsed), num_gaps=0,
-                          reason=f"Q 字段 {q_field} 非法（RFC 2435 定义域 "
-                                 f"1..99 或 ≥128 带内表）")
+        if not inband_tables:
+            raise lrpt_huffman.LrptJpegUnsupportedError(
+                "Meteor Q≥128 但未解析到带内量化表（fragment_offset==0 "
+                "首段必须携带 §3.1.8 表头）")
+        quant_tables = {int(k): v for k, v in inband_tables.items()}
+        if 0 not in quant_tables or 1 not in quant_tables:
+            raise lrpt_huffman.LrptJpegUnsupportedError(
+                "带内量化表缺表 0/表 1（Type 0/1 口径要求两张表齐备）")
+    else:
+        if not (1 <= q_field <= 99):
+            return MeteorScan(scan=b"", complete=False, width=width,
+                              height=height, q_field=q_field, quant_tables={},
+                              num_segments=len(parsed), num_gaps=0,
+                              reason=f"Q 字段 {q_field} 非法（RFC 2435 定义域 "
+                                     f"1..99 或 ≥128 带内表）")
+        quant_tables = {
+            0: lrpt_huffman.ijg_quant_table(q_field, chroma=False),
+            1: lrpt_huffman.ijg_quant_table(q_field, chroma=True),
+        }
 
     pieces: List[bytes] = []
     gap_offsets: List[int] = []
@@ -267,10 +281,6 @@ def reassemble_meteor_scan(segments: List[bytes]) -> MeteorScan:
         pieces.append(payload)
         expected = hdr.fragment_offset + len(payload)
     scan = b"".join(pieces)
-    quant_tables = {
-        0: lrpt_huffman.ijg_quant_table(q_field, chroma=False),
-        1: lrpt_huffman.ijg_quant_table(q_field, chroma=True),
-    }
     complete = bool(gap_offsets == [] and len(scan) > 0 and width > 0
                     and height > 0)
     reason = ("ok" if complete else

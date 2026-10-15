@@ -11,6 +11,7 @@ from mbdsdr_ai.lrpt_huffman import (
     IJG_K2,
     RtpJpegHeader,
     ijg_quant_table,
+    parse_inband_q_tables,
     parse_rtp_jpeg_header,
     LrptJpegTruncatedError,
     LrptJpegUnsupportedError,
@@ -77,21 +78,23 @@ def _m2_segment(frag: int, q: int = 32, width: int = 1024,
 
 def test_first_segment_header_fields():
     seg = _m2_segment(0, q=32, width=1024, height=320)
-    hdr, off = parse_rtp_jpeg_header(seg)
+    hdr, off, inband = parse_rtp_jpeg_header(seg)
     assert hdr.fragment_offset == 0
     assert hdr.width == 1024
     assert hdr.height == 320
     assert hdr.type_field == 32 or hdr.q_field in (0, 32)
     assert off == 12
     assert hdr.has_inband_q_table is False
+    assert inband == {}
 
 
 def test_continuation_segment_header_fields():
     """fragment_offset>0 的续段：4 字节头后无尺寸头，offset 原样透出。"""
     seg = bytes([0x00, 0x00, 0x12, 0x34, 0x99, 0x88, 0x77])
-    hdr, off = parse_rtp_jpeg_header(seg)
+    hdr, off, inband = parse_rtp_jpeg_header(seg)
     assert hdr.fragment_offset == 0x1234
     assert off == 4
+    assert inband == {}
 
 
 def test_short_input_rejected():
@@ -99,10 +102,33 @@ def test_short_input_rejected():
         parse_rtp_jpeg_header(b"\x00\x00\x00")
 
 
-def test_inband_q_table_flagged_unsupported():
-    """首段 Q≥128：带内量化表路径诚实抛 Unsupported（未做项）。"""
+def test_inband_q_table_parsed():
+    """首段 Q≥128：§3.1.8 带内表解析（Type 0 -> 2 表各 64 zigzag 值）。"""
     seg = bytes([0x00, 0x00, 0x00, 0x00]) + bytes(
-        [0x00, 0x04, 0x01, 0x40, 0x00, 0x80, 0x08, 0x03]) + b"\x00" * 70
+        [0x00, 0x04, 0x01, 0x40, 0x00, 0x80, 0x08, 0x03])
+    seg += bytes(range(64)) + bytes(range(64, 128))   # 表 0、表 1
+    hdr, off, inband = parse_rtp_jpeg_header(seg)
+    assert hdr.q_field == 0x80
+    assert set(inband) == {0, 1}
+    assert off == 12 + 128
+    assert list(inband[0]) == list(range(64))
+    assert list(inband[1]) == list(range(64, 128))
+
+
+def test_inband_q_table_truncated_rejected():
+    """表头短于 2×64：诚实抛 Truncated（不给半截表）。"""
+    seg = bytes([0x00, 0x00, 0x00, 0x00]) + bytes(
+        [0x00, 0x04, 0x01, 0x40, 0x00, 0x80, 0x08, 0x03])
+    seg += bytes(range(64))                            # 只有表 0
+    with pytest.raises(LrptJpegTruncatedError):
+        parse_rtp_jpeg_header(seg)
+
+
+def test_inband_q_table_unknown_type_rejected():
+    """Type 字段非 0/1：表数未定义 -> 诚实抛 Unsupported。"""
+    seg = bytes([0x00, 0x00, 0x00, 0x00]) + bytes(
+        [0x00, 0x04, 0x01, 0x40, 0x63, 0x80, 0x08, 0x03])
+    seg += bytes(range(64)) * 2
     with pytest.raises(LrptJpegUnsupportedError):
         parse_rtp_jpeg_header(seg)
 
