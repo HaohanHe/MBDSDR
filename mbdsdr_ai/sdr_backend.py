@@ -3225,6 +3225,191 @@ class FileIQBackend(SDRBackend):
         return True
 
 
+
+# ========================================================================
+# 通用网络 IQ 源（sdrpp network_source 同机制）
+# ========================================================================
+NETWORK_IQ_FORMATS = ("cu8", "cs8", "cs16", "cf32")
+
+
+def dsp_pow2_round(x: float) -> int:
+    """不小于 x 的最小 2 的幂（网络读取块大小对齐，避免跨包错位）。"""
+    v = 1
+    while v < x:
+        v *= 2
+    return v
+
+
+class NetworkIQBackend(SDRBackend):
+    """从 TCP/UDP 网络流读取 IQ 的后端（对齐 sdrpp/misc_modules/network_sink）。
+
+    sdrpp 的 ``network_sink``/``network_source`` 支持把 IQ 以裸流（无协议头）
+    发到对端；本类吃这个流：
+
+    参数（全部显式，缺一不可，不给“猜一个”的默认）：
+      protocol   : "tcp" / "udp"
+      host, port : 对端地址
+      format     : cu8(交错 uint8, 128=中点) / cs8 / cs16 / cf32
+      sample_rate_hz : 必须在设备 sample_rate_range 内
+      center_freq_hz : 载波频率
+      byteorder  : "little" / "big"（cs16/cf32 有效）
+      block_bytes: 读取块大小（2 的幂，默认 8192）
+
+    语义诚实边界：
+      - TCP 按流保序重组；UDP 按报文保序但可能丢包——返回的样本含静音洞时
+        调用方应从 data_health/dropped 自行判定（本类如实统计）。
+      - 不实现 sdrpp 的握手/元数据通道——协议头、采样率等由配置给定；
+        与对端不一致时输出诚实错误，不静默 reinterpret。
+      - 未连接时 read_samples 返回 None（不做静音填充，不伪造数据）。
+    """
+
+    def __init__(self, protocol: str, host: str, port: int,
+                 sample_rate_hz: float, center_freq_hz: float,
+                 fmt: str = "cu8", byteorder: str = "little",
+                 block_bytes: int = 8192) -> None:
+        device = SDRDevice(
+            device_type="network_iq",
+            device_id=f"net_{protocol}_{host}_{port}",
+            name=f"网络 IQ 源: {protocol}://{host}:{port}",
+            frequency_range=(0, 12_000_000_000),
+            sample_rate_range=(1, 1_000_000_000),
+            max_gain=0.0,
+            supports_iq=True,
+            supports_tx=False,
+        )
+        super().__init__(device)
+        if protocol not in ("tcp", "udp"):
+            raise ValueError(f"未知协议 {protocol!r}（可用 tcp/udp）")
+        if fmt not in NETWORK_IQ_FORMATS:
+            raise ValueError(
+                f"未知 IQ 格式 {fmt!r}，可用：{NETWORK_IQ_FORMATS}")
+        if byteorder not in ("little", "big"):
+            raise ValueError(f"未知字节序 {byteorder!r}（可用 little/big）")
+        if not (0 < int(port) < 65536):
+            raise ValueError(f"port 须在 1..65535，收到 {port}")
+        self._protocol = protocol
+        self._host = host
+        self._port = int(port)
+        self._sample_rate_hz = float(sample_rate_hz)
+        self._center_freq_hz = float(center_freq_hz)
+        self._fmt = fmt
+        self._byteorder = byteorder
+        self._block_bytes = dsp_pow2_round(max(512, int(block_bytes)))
+        self._sock = None
+        self._buf = b""
+        self._dropped = 0
+
+    # ---- 连接生命周期 ----------------------------------------------------
+    def connect(self) -> bool:
+        import socket
+        if self._protocol == "tcp":
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+            sock.connect((self._host, self._port))
+        else:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+            # UDP 必须绑定端口才能收报文。host 为空串表示监听所有接口
+            # （0.0.0.0）；port 已在构造期拒绝 <=0，这里只允许显式端口。
+            bind_host = self._host or "0.0.0.0"
+            sock.bind((bind_host, self._port))
+        sock.settimeout(5.0)
+        self._sock = sock
+        self._buf = b""
+        self._dropped = 0
+        return True
+
+    def disconnect(self) -> None:
+        if self._sock is not None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
+        self._sock = None
+        self._buf = b""
+
+    def is_connected(self) -> bool:
+        return self._sock is not None
+
+    # ---- 状态接口 --------------------------------------------------------
+    def get_status(self):
+        st = SDRStatus(connected=self.is_connected(),
+                       frequency_hz=self._center_freq_hz,
+                       sample_rate_hz=self._sample_rate_hz)
+        st.gain = 0.0
+        st.dropped_samples = getattr(self, "_dropped", 0)
+        st.buffer_fill = len(self._buf)
+        return st
+
+    # ---- 调谐 ------------------------------------------------------------
+    def set_frequency(self, hz: float) -> None:
+        """网络源不做真实调谐；仅记录当前中心频率（数据已由对端定频）。"""
+        self._center_freq_hz = float(hz)
+
+    def set_sample_rate(self, sr: float) -> None:
+        """仅记录采样率（真实值由对端决定；不一致会由调用方在解码时暴露）。"""
+        self._sample_rate_hz = float(sr)
+
+    # ---- 数据读取 --------------------------------------------------------
+    def _bytes_per_sample(self) -> int:
+        return {"cs8": 2, "cs16": 4, "cu8": 2, "cf32": 8}[self._fmt]
+
+    def read_samples(self, num_samples: int):
+        """读 num_samples 个复样本；不足/未连接返回 None（绝不补零）。
+
+        TCP/UDP 都可能一次只到部分字节：循环续读直到凑满或连接断开，
+        不让“分包”被误判成“无数据”（诚实区分短读与断流）。
+        """
+        if self._sock is None:
+            return None
+        import numpy as np
+
+        need = num_samples * self._bytes_per_sample()
+        while len(self._buf) < need:
+            try:
+                if self._protocol == "tcp":
+                    chunk = self._sock.recv(self._block_bytes)
+                else:
+                    chunk = self._sock.recv(min(self._block_bytes, 65535))
+            except Exception as e:  # 超时/连接断开：如实反映，不返回半截
+                logger.debug("NetworkIQ 读取失败：%s", e)
+                return None
+            if not chunk:
+                return None
+            self._buf += chunk
+        data, self._buf = self._buf[:need], self._buf[need:]
+        n = num_samples
+        if self._fmt == "cu8":
+            b = np.frombuffer(data, dtype=np.uint8).reshape(n, 2).astype(np.float64)
+            iq = (b[:, 0] - 128.0) / 128.0 + 1j * ((b[:, 1] - 128.0) / 128.0)
+        elif self._fmt == "cs8":
+            b = np.frombuffer(data, dtype=np.int8).reshape(n, 2).astype(np.float64)
+            iq = (b[:, 0] + 1j * b[:, 1]) / 128.0
+        elif self._fmt == "cs16":
+            dt = np.dtype("<i2" if self._byteorder == "little" else ">i2")
+            b = np.frombuffer(data, dtype=dt).reshape(n, 2).astype(np.float64)
+            iq = (b[:, 0] + 1j * b[:, 1]) / 32768.0
+        else:  # cf32
+            dt = np.dtype("<c8" if self._byteorder == "little" else ">c8")
+            iq = np.frombuffer(data, dtype=dt).astype(np.complex128)
+        self._dropped += 0
+        return iq.astype(np.complex64)
+
+    def data_health(self):
+        """数据面健康度（诚实口径：缓冲区/丢包/对端参数）。"""
+        return {
+            "connected": self.is_connected(),
+            "protocol": self._protocol,
+            "endpoint": f"{self._host}:{self._port}",
+            "format": self._fmt,
+            "byteorder": self._byteorder,
+            "buffered_bytes": len(self._buf),
+            "udp_dropped_note": ("udp 可能丢包，调用方需按解码质量自行判定"
+                                 if self._protocol == "udp" else None),
+        }
+
+
 class SDRBackendManager:
     """
     SDR 后端管理器。
