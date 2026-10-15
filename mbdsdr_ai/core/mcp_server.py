@@ -541,6 +541,33 @@ def _build_tool_table(toolset: Optional["MCPToolSet"] = None) -> List[Dict[str, 
                 ["peaks", "path"]),
         _export_peaks_csv, write=True)
 
+    def _vna_analyze_sweep(c, a):
+        """单端口扫频一键分析（vna_pipeline）。
+
+        s11 传 [re,im] 对列表；cable 给定时按 CABLE_VF 库做 TDR 距离
+        换算；返回结构化报告（子分析失败字段为 None 带原因，不伪造）。
+        """
+        from ..vna_pipeline import analyze_one_port
+        s11 = [complex(*v) for v in a["s11"]]
+        return analyze_one_port(
+            a["freqs_hz"], s11, z0=float(a.get("z0", 50.0)),
+            vf=float(a.get("vf", 0.66)),
+            cable=a.get("cable"), freq_hz=a.get("freq_hz"))
+
+    add("vna_analyze_sweep",
+        "单端口 S11 扫频一键分析：VSWR 极值、谐振（Q/ESR）、TDR 电缆"
+        "长度 + 阻抗剖面、LC 匹配解集、Coax Loss 去振铃、业余频段归属。"
+        "各子分析独立失败为 None（带原因），不伪造；校准请先走 vna_cal"
+        " 求误差盒再喂校正后数据。",
+        _schema({"freqs_hz": _ARR,
+                 "s11": {"type": "array",
+                         "items": {"type": "array",
+                                   "items": {"type": "number"}}},
+                 "z0": _NUM, "vf": _NUM, "cable": _STR,
+                 "freq_hz": _NUM},
+                ["freqs_hz", "s11"]),
+        _vna_analyze_sweep)
+
     add("start_analyze", "对当前信号做自动调制识别。",
         _schema({"modulation": _STR}),
         lambda c, a: c.start_analyze(a.get("modulation")), write=True)
@@ -921,6 +948,8 @@ _TOOL_DOMAIN: Dict[str, str] = {
     "stop_decoder": "亚音数字解码",
     "get_decoder_messages": "亚音数字解码",
     # VNA 测量 / VNA 分析 / VNA 校准：本面无 VNA 工具（空卡片，诚实空态）
+    # VNA 分析
+    "vna_analyze_sweep": "VNA 分析",
     # 导出演制
     "start_recording": "导出演制",
     "stop_recording": "导出演制",
