@@ -85,7 +85,10 @@ void TestVnaRf::tdrFindsSyntheticCable() {
         double fr = 1e6 + 30e6 * i / 63.0;
         f.push_back(fr);
         // small reflection midway: phase ramp ~ a 50ns round-trip.
-        double ph = 6.2831853 * fr * 50e-9;
+        // 因果时延的物理符号是负相位（exp(-j*2pi*f*tau)），与 Python 孪生
+        // 夹具 _cable_s11（test_fill_evidence.py:30-35）同口径；正相位是非物理
+        // 的"负电缆"，IDFT 后峰绕到记录末端、搜索窗口 [1,n/2) 够不着。
+        double ph = -6.2831853 * fr * 50e-9;
         s11.push_back(0.1 * std::complex<double>(std::cos(ph), std::sin(ph)));
     }
     TdrResult t = tdrCable(f, s11, 0.66, 50.0);
@@ -237,7 +240,7 @@ void TestVnaRf::tdrToleranceBand() {
     for (int i = 0; i < 64; ++i) {
         double fr = 1e6 + 30e6 * i / 63.0;
         f.push_back(fr);
-        double ph = 6.2831853 * fr * 50e-9;   // 50 ns round-trip
+        double ph = -6.2831853 * fr * 50e-9;   // 50 ns round-trip（因果时延=负相位）
         s11.push_back(0.1 * std::complex<double>(std::cos(ph), std::sin(ph)));
     }
     TdrResult t = tdrCable(f, s11, 0.66, 50.0);
@@ -269,8 +272,9 @@ void TestVnaRf::tdrMultiPeak() {
     for (int i = 0; i < 128; ++i) {
         double fr = 1e6 + 60e6 * i / 127.0;
         f.push_back(fr);
-        double ph1 = 6.2831853 * fr * 30e-9;
-        double ph2 = 6.2831853 * fr * 70e-9;
+        // 因果时延=负相位（与 Python 孪生 _cable_s11 同口径）。
+        double ph1 = -6.2831853 * fr * 30e-9;
+        double ph2 = -6.2831853 * fr * 70e-9;
         std::complex<double> g =
             0.1 * std::complex<double>(std::cos(ph1), std::sin(ph1)) +
             0.07 * std::complex<double>(std::cos(ph2), std::sin(ph2));
@@ -292,8 +296,9 @@ void TestVnaRf::tdrPeakSeparation() {
     for (int i = 0; i < 256; ++i) {
         double fr = 1e6 + 100e6 * i / 255.0;
         f.push_back(fr);
-        double ph1 = 6.2831853 * fr * 20e-9;
-        double ph2 = 6.2831853 * fr * 150e-9;
+        // 因果时延=负相位（与 Python 孪生 _cable_s11 同口径）。
+        double ph1 = -6.2831853 * fr * 20e-9;
+        double ph2 = -6.2831853 * fr * 150e-9;
         std::complex<double> g =
             0.1 * std::complex<double>(std::cos(ph1), std::sin(ph1)) +
             0.08 * std::complex<double>(std::cos(ph2), std::sin(ph2));

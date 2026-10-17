@@ -69,8 +69,14 @@ std::vector<ReplayTransport::Step> calibratedScript(double targetGamma) {
         {"help", {}},
         {"version", {"1.0.174-hugen"}},
         {"info", {"NanoVNA-H"}},
+        // execGetVnaStatus 每次调用依次发 readCalStatus()("cal") 与
+        // readTcxo()("tcxo")（agent_tools.cpp:1455/1462）——两处 status
+        // 刷新各跟一条 tcxo，缺了会在 ReplayTransport 的 QCOMPARE 处炸
+        // （CI 首跑实测：脚本停留在 tcxo 特性上线前的形态）。
         {"cal", {"load open short thru cal'ed"}},   // get_vna_status live readCalStatus()
+        {"tcxo", {"usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"}},
         {"cal", {"load open short thru cal'ed"}},   // runVswrOnramp's own cal refresh
+        {"tcxo", {"usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"}},
         {"sweep 438000000 439000000 101", {}},
         {"frequencies", freqs},
         {"data 0", data0},
@@ -141,8 +147,12 @@ void TestVnaOnramp::uncalibratedGuidance() {
     dsp::SpectrumEngine engine;
     // Same handshake but "cal" yields no "cal'ed" -> uncalibrated branch.
     auto script = calibratedScript(0.1);
-    script[3] = {"cal", {"load open short thru"}};  // get_vna_status refresh, no cal'ed
-    script[4] = {"cal", {"load open short thru"}};  // onramp's own refresh, no cal'ed
+    // 按值替换而非按下标：calibratedScript 里每条 cal 后跟一条 tcxo，
+    // 硬编码下标会随握手序列演进而漂移。
+    for (auto& s : script) {
+        if (s.expect == QStringLiteral("cal"))
+            s.lines = {QStringLiteral("load open short thru")};  // no cal'ed
+    }
     engine.vnaClient().attachTransport(
         std::make_unique<ReplayTransport>(std::move(script)));
     QString out = ai::runVswrOnramp(&engine, QString::fromUtf8("438.5MHz驻波多少"));
@@ -242,8 +252,11 @@ void TestVnaOnramp::filterNoShapeHonest() {
     // 滤波器分支不发 sweep，直接 frequencies + data 1(S21 空) -> 无形态 -> 诚实引导。
     std::vector<ReplayTransport::Step> script = {
         {"help", {}}, {"version", {"1.0.174-hugen"}}, {"info", {"NanoVNA-H"}},
+        // 每条 cal 后跟一条 tcxo（execGetVnaStatus 发 cal 后发 tcxo）。
         {"cal", {"load open short thru cal'ed"}},   // get_vna_status live refresh
+        {"tcxo", {"usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"}},
         {"cal", {"load open short thru cal'ed"}},   // onramp's own cal refresh
+        {"tcxo", {"usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"}},
         {"frequencies", {"438000000", "439000000"}},
         {"data 1", {}},
     };

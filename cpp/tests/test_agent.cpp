@@ -2004,6 +2004,9 @@ void TestAgent::getVnaStatus_calInterpretationAndCoverageOutOfRange() {
         {"cal", {"done", "c1"}},    // internal refresh after calDone (coverage recorded)
         {"sweep 2000000 200000000 101", {}},
         {"cal", {"done", "c1"}},    // get_vna_status live readCalStatus
+        // execGetVnaStatus 在 readCalStatus 后还发 readTcxo（agent_tools.cpp:1462），
+        // 脚本须跟上，否则 ReplayTransport 步数耗尽炸 QVERIFY（CI 首跑实测）。
+        {"tcxo", {"usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"}},
     });
     dsp::SpectrumEngine engine;
     engine.vnaClient().attachTransport(std::move(tr));

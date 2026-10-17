@@ -3,6 +3,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSet>
 #include <QTextStream>
 #include <QWaitCondition>
@@ -89,6 +90,10 @@ int CheckpointWriter::drainLocked(QString* err) {
     }
 
     // Rewrite the human-readable checkpoint snapshot from what was just written.
+    // mkpath first: ~/.mbdsdr/ may not exist on a fresh machine (CI runner,
+    // clean profile) -- QFile::open would fail silently without it. Same
+    // convention as memory_store.cpp:95 and wav_writer.cpp:31.
+    QDir().mkpath(QFileInfo(m_checkpointPath).absolutePath());
     QFile f(m_checkpointPath);
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         QTextStream ts(&f);
