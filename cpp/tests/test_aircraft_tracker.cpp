@@ -19,7 +19,7 @@ static void check(bool c, const char* m) {
 
 // Deterministic "simulated clock" so TTL behaviour is hermetic.
 static QDateTime clock0() {
-    return QDateTime::fromSecsSinceEpoch(1700000000, QTimeZone::UTC);
+    return QDateTime::fromSecsSinceEpoch(1700000000, QTimeZone::utc());
 }
 
 // A message that carries ONLY a callsign, no fix, no velocity.

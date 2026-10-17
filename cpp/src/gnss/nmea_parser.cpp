@@ -117,7 +117,7 @@ static void applyTime(QDateTime& dt, bool& hasUtc, int h, int m, double sec) {
     QDate d = dt.isValid() ? dt.date() : QDate(1970, 1, 1);
     int s = static_cast<int>(sec);
     int ms = static_cast<int>((sec - s) * 1000.0 + 0.5);
-    dt = QDateTime(d, QTime(h, m, s, ms), QTimeZone::UTC);
+    dt = QDateTime(d, QTime(h, m, s, ms), QTimeZone::utc());
     if (d.year() >= 1980) hasUtc = true;
 }
 
@@ -126,7 +126,7 @@ static void applyDate(QDateTime& dt, bool& hasUtc, int yy, int mon, int day) {
     QDate d(year, mon, day);
     if (!d.isValid()) return;
     QTime t = (dt.isValid() && dt.time().isValid()) ? dt.time() : QTime(0, 0);
-    dt = QDateTime(d, t, QTimeZone::UTC);
+    dt = QDateTime(d, t, QTimeZone::utc());
     if (t.isValid()) hasUtc = true;
 }
 
@@ -282,7 +282,7 @@ void NmeaParser::parseZda(const QByteArrayList& f) {
         QDate d(year4, mon, day);
         if (d.isValid()) {
             QTime tm = (m_fix.utc.isValid() && m_fix.utc.time().isValid()) ? m_fix.utc.time() : QTime(0, 0);
-            m_fix.utc = QDateTime(d, tm, QTimeZone::UTC);
+            m_fix.utc = QDateTime(d, tm, QTimeZone::utc());
             if (tm.isValid()) m_fix.hasUtc = true;
         }
     }
