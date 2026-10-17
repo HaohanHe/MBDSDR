@@ -74,7 +74,11 @@ QString renderReport(const VswrReport& r);
 
 // 端到端编排：解析目标频率 -> 真实调 get_vna_status/set_vna_sweep/get_vna_data ->
 // 纯函数判定 -> 返回对话文本。未连接诚实空态，不内置假数据。测试可直接调用。
-QString runVswrOnramp(dsp::SpectrumEngine* engine, const QString& input);
+// manualMode 透传操作员的手动模式开关：为 true 时写工具（set_vna_sweep/
+// vna_tdr_cable）走与 LLM 回路同形的人工门（llm_worker.cpp:113-124），
+// 被拦时诚实停流，不拿过期扫频数据继续分析。默认 false = 本地指令直通。
+QString runVswrOnramp(dsp::SpectrumEngine* engine, const QString& input,
+                      bool manualMode = false);
 
 } // namespace ai
 } // namespace mbdsdr

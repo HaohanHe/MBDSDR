@@ -9,6 +9,7 @@
 #include <QHash>
 
 #include "ai/agent_tools.h"
+#include "ai/arguments_validator.h"
 #include "ai/llm_protocol.h"   // ToolDef (type-only)
 
 namespace mbdsdr {
@@ -280,6 +281,26 @@ QString callToolText(const QString& name, QJsonObject arguments,
             return ai::gatedToolResult(name);   // tool NOT executed
         }
         arguments.remove(QStringLiteral("arm_manual"));  // don't leak to executor
+    }
+
+    // Schema validation BEFORE dispatch. The GUI agent loop validates every
+    // tool call against the M1-generated JSON Schema (llm_worker.cpp:245-258);
+    // this headless JSON-RPC path -- the one third-party MCP hosts speak --
+    // used to skip that step, so hallucinated, ill-typed or out-of-range
+    // arguments reached executeTool() and from there real device commands.
+    // The gate flag above is consumed FIRST on purpose: validateArguments
+    // rejects any key outside `properties` (check ⑥) and arm_manual is a
+    // transport-level flag, not a tool property. On failure the compact
+    // errorJson is handed straight back as the tool result so the model can
+    // self-correct on the next turn (arguments_validator.h:9-11). Unknown
+    // tool names carry no schema and keep their existing executor envelope
+    // (executeTool's unknown_tool) -- validate only what the registry knows.
+    for (const ai::ToolDef& def : ai::toolDefs()) {
+        if (def.name != name) continue;
+        const ai::ValidationResult vr =
+            ai::validateArguments(name, arguments, def.parameters);
+        if (!vr.ok) return vr.errorJson;
+        break;
     }
     return ai::executeTool(name, arguments, engine, bm);
 }

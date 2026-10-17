@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import subprocess
 import sys
@@ -440,3 +441,61 @@ def test_child_pythonioencoding_gbk_becomes_utf8_after_prepare():
     assert before.lower() in ("cp936", "gbk")
     assert after.lower() == "utf-8"
     assert errors == "replace"
+
+
+def test_audit_log_persists_tool_events(tmp_path):
+    """持久审计账本：注入 AuditLog 后 pre/result 两事件各落一行 JSONL，
+    带工具名与 outcome；账本只读观测，不改写工具结果。"""
+    from mbdsdr_ai.core.mcp_server import AuditLog
+
+    ledger = tmp_path / "audit.jsonl"
+    ts = MCPToolSet(audit_log=AuditLog(str(ledger)))
+    # 读工具（不 gate）：execute 一次，pre + result 两个事件。
+    out = ts.call_tool("get_frequency", {})
+    assert "frequency_hz" in out       # 观测面不得改写结果
+    lines = [json.loads(l) for l in ledger.read_text(encoding="utf-8").splitlines()]
+    types = [l["event_type"] for l in lines]
+    assert "agent.pre_tool_use" in types
+    assert "agent.tool_result" in types
+    pre = next(l for l in lines if l["event_type"] == "agent.pre_tool_use")
+    assert pre["data"]["tool"] == "get_frequency"
+    assert pre["source"] == "mcp_toolset"
+    res = next(l for l in lines if l["event_type"] == "agent.tool_result")
+    assert res["data"]["tool"] == "get_frequency"
+    # 普通处理器返回裸 dict（无 ok 键）：摘要如实记 ok=None——"executed"
+    # 是本仓新约定、尚未全量回填（见 _result_summary 文档字符串）。
+    assert res["data"]["ok"] is None
+    # 追加式增长：第二次调用只增行，不重写。
+    ts.call_tool("get_frequency", {})
+    assert len(ledger.read_text(encoding="utf-8").splitlines()) == 4
+
+
+def test_audit_log_default_off_without_env(tmp_path, monkeypatch):
+    """未注入且未设 MBDSDR_AUDIT_LOG：库内构造默认不落盘（测试/CI 无副作用）。"""
+    from mbdsdr_ai.core.mcp_server import AuditLog, AUDIT_LOG_ENV
+
+    monkeypatch.delenv(AUDIT_LOG_ENV, raising=False)
+    assert AuditLog.from_env() is None
+    ts = MCPToolSet()
+    assert ts.audit_log is None
+    # 默认关闭时工具调用照常，不产生任何账本文件。
+    ts.call_tool("get_frequency", {})
+    assert not (tmp_path / "audit.jsonl").exists()
+
+
+def test_audit_log_env_semantics(tmp_path, monkeypatch):
+    """MBDSDR_AUDIT_LOG 三态：设路径=开在彼处；显式 off=关；产品入口
+    default_on=True 时未设=开在默认路径（与 tool_results spill 同惯例）。"""
+    from mbdsdr_ai.core.mcp_server import AuditLog, AUDIT_LOG_ENV
+
+    ledger = tmp_path / "custom.jsonl"
+    monkeypatch.setenv(AUDIT_LOG_ENV, str(ledger))
+    assert AuditLog.from_env().path == str(ledger)
+    # 显式 off / 0 均可关（产品入口也不例外）。
+    for off in ("off", "0"):
+        monkeypatch.setenv(AUDIT_LOG_ENV, off)
+        assert AuditLog.from_env(default_on=True) is None
+    # 产品入口默认开：未设 -> 默认 ~/.mbdsdr/audit.jsonl。
+    monkeypatch.delenv(AUDIT_LOG_ENV, raising=False)
+    assert AuditLog.from_env(default_on=True) is not None
+    assert AuditLog.from_env(default_on=True).path.endswith("audit.jsonl")

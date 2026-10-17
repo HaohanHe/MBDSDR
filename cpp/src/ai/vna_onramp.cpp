@@ -175,7 +175,43 @@ QString renderReport(const VswrReport& r) {
     return out;
 }
 
-QString runVswrOnramp(dsp::SpectrumEngine* engine, const QString& input) {
+// ---- 写工具人工门（与 LLM 回路同形） ---------------------------------------
+// The onramp used to call executeTool() directly, silently ignoring the
+// operator's persisted manual-mode switch: a natural-language question like
+// "438.5MHz 驻波" would program a hardware sweep with no gate at all. Write
+// tools now go through the SAME gate as the LLM loop
+// (LLMWorker::dispatchToolCall, llm_worker.cpp:113-124). When the gate fires
+// the caller stops the flow -- analysing stale sweep data would fabricate a
+// measurement the operator never authorized.
+namespace {
+
+QString gatedCall(const QString& name, const QJsonObject& args,
+                  dsp::SpectrumEngine* engine, bool manualMode) {
+    if (manualMode && isWriteTool(name))
+        return gatedToolResult(name);
+    return executeTool(name, args, engine, nullptr);
+}
+
+// True when a tool result is the manual-gate envelope (ok:false + gated:true).
+bool isGatedResult(const QString& text) {
+    const QJsonObject o = QJsonDocument::fromJson(text.toUtf8()).object();
+    return o.contains(QStringLiteral("gated")) &&
+           o.value(QStringLiteral("gated")).toBool() &&
+           !o.value(QStringLiteral("ok")).toBool(true);
+}
+
+QString manualGateStopText(const QString& toolName) {
+    return QString::fromUtf8(
+               "手动模式已开启：未执行 %1（写动作需人工确认）。\n"
+               "- 请在 AI 面板关闭「手动模式」后重试；\n"
+               "- 该问题的测量需要一次扫频，已被门拦下，没有读数可解读。")
+        .arg(toolName);
+}
+
+} // namespace
+
+QString runVswrOnramp(dsp::SpectrumEngine* engine, const QString& input,
+                      bool manualMode) {
     if (!engine) return QString::fromUtf8("无引擎连接，无法测量驻波。");
     auto tgt = parseTargetMhz(input);
 
@@ -205,8 +241,11 @@ QString runVswrOnramp(dsp::SpectrumEngine* engine, const QString& input) {
                 "请在问题里指定同轴电缆类型以取速度因子，例如“RG-58 电缆多长”。\n"
                 "可选：") + cableVfOptionsText();
         QJsonObject tdrArgs; tdrArgs["velocity_factor"] = cvf->second;
-        QJsonObject tdr = QJsonDocument::fromJson(
-            executeTool("vna_tdr_cable", tdrArgs, engine, nullptr).toUtf8()).object();
+        const QString tdrText =
+            gatedCall("vna_tdr_cable", tdrArgs, engine, manualMode);
+        if (isGatedResult(tdrText))
+            return manualGateStopText(QStringLiteral("TDR 反射测量"));
+        QJsonObject tdr = QJsonDocument::fromJson(tdrText.toUtf8()).object();
         if (!tdr.value("valid").toBool(false))
             return QString::fromUtf8("未检出明显反射点（%1）。请确认已做 OSL 校准、电缆接 PORT1，"
                                      "并在更宽扫频上重测。").arg(tdr.value("note").toString());
@@ -227,7 +266,9 @@ QString runVswrOnramp(dsp::SpectrumEngine* engine, const QString& input) {
         long s0, s1; int pts;
         planSweep(tgtHz, s0, s1, pts, 20'000, 201);  // 窄 span 20kHz
         QJsonObject sw; sw["start_hz"]=(double)s0; sw["stop_hz"]=(double)s1; sw["points"]=pts;
-        executeTool("set_vna_sweep", sw, engine, nullptr);
+        const QString swText = gatedCall("set_vna_sweep", sw, engine, manualMode);
+        if (isGatedResult(swText))
+            return manualGateStopText(QStringLiteral("谐振窄带扫频"));
         QJsonObject rr = QJsonDocument::fromJson(
             executeTool("analyze_vna_resonance", QJsonObject(), engine, nullptr).toUtf8()).object();
         if (!rr.value("valid").toBool(false))
@@ -270,7 +311,9 @@ QString runVswrOnramp(dsp::SpectrumEngine* engine, const QString& input) {
     QJsonObject sweepArgs;
     sweepArgs["start_hz"] = (double)s0; sweepArgs["stop_hz"] = (double)s1;
     sweepArgs["points"] = pts;
-    executeTool("set_vna_sweep", sweepArgs, engine, nullptr);
+    const QString sweepText = gatedCall("set_vna_sweep", sweepArgs, engine, manualMode);
+    if (isGatedResult(sweepText))
+        return manualGateStopText(QStringLiteral("驻波扫频"));
 
     QJsonObject data = QJsonDocument::fromJson(
         executeTool("get_vna_data", QJsonObject(), engine, nullptr).toUtf8()).object();

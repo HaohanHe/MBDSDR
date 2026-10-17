@@ -1277,6 +1277,70 @@ def _result_summary(name: str, result: Any) -> Dict[str, Any]:
 
 
 # ======================================================================
+# 持久审计账本（AI 操作员可追溯性）
+# ======================================================================
+#: 审计账本开关：设为 JSONL 文件路径即开启；空串/未设则关闭（库内构造与
+#: 测试默认无副作用，与 MBDSDR_HOOKS_CONFIG 同 pattern）。
+AUDIT_LOG_ENV = "MBDSDR_AUDIT_LOG"
+
+#: 操作员手动开启时的默认账本位置（~/.mbdsdr/ 已是 hooks.json 的家）。
+AUDIT_LOG_DEFAULT = os.path.join(os.path.expanduser("~"), ".mbdsdr", "audit.jsonl")
+
+
+class AuditLog:
+    """工具调用事件的持久 JSONL 审计账本。
+
+    进程内 ``HookManager._history`` 重启即丢；"AI 操作员"叙事要求
+    "谁/何时/对哪个工具/结果如何"可回溯。本类以通配符钩子挂在
+    ``MCPToolSet.hooks`` 上，把 AGENT_PRE_TOOL_USE / AGENT_TOOL_RESULT
+    事件按行追加到 JSONL（两事件都经 ``HookManager.trigger``，通配符
+    钩子必然收到）。
+
+    口径与事件总线一致：只落事件信封（tool / arguments / ok / outcome
+    摘要），长结果不重复落盘（spill 路径已有全文）。任何 IO 失败只记
+    stderr 并放行——审计面绝不当工具链的单点故障源。
+    """
+
+    def __init__(self, path: Optional[str] = None) -> None:
+        self.path = path if path is not None else AUDIT_LOG_DEFAULT
+        self._lock = threading.Lock()
+        self._dir_ready = False
+
+    @classmethod
+    def from_env(cls, env: Optional[Dict[str, str]] = None,
+                 default_on: bool = False) -> Optional["AuditLog"]:
+        """按 MBDSDR_AUDIT_LOG 构造账本。
+
+        ``default_on=False``（库内构造默认）：未设/空串 -> None（关闭），
+        测试与 CI 无副作用。``default_on=True``（产品入口
+        :func:`run_mcp_server`）：未设 -> 默认路径 ``~/.mbdsdr/audit.jsonl``
+        （与 ``tool_results`` spill 落盘同惯例）；显式 ``off``/``0`` 可关。
+        """
+        env = os.environ if env is None else env
+        raw = (env.get(AUDIT_LOG_ENV) or "").strip()
+        if raw:
+            if raw.lower() in ("off", "0", "none", "false"):
+                return None
+            return cls(raw)
+        return cls() if default_on else None
+
+    def record(self, event: Event) -> None:
+        """钩子回调：追加一行 JSONL。绝不抛异常（Hook.trigger 已兜底）。"""
+        try:
+            line = json.dumps(event.to_dict(), ensure_ascii=False)
+            with self._lock:
+                if not self._dir_ready:
+                    parent = os.path.dirname(os.path.abspath(self.path))
+                    if parent:
+                        os.makedirs(parent, exist_ok=True)
+                    self._dir_ready = True
+                with open(self.path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+        except Exception as e:  # pragma: no cover - 审计失败不阻断工具流
+            print(f"[mcp] 审计账本写入失败（忽略）: {e}", file=sys.stderr)
+
+
+# ======================================================================
 # MCPToolSet
 # ======================================================================
 class MCPToolSet:
@@ -1292,16 +1356,27 @@ class MCPToolSet:
         :class:`HookCommandRunner`——配置路径不存在时空转；
         测试可注入自定义 runner。在进程内 PreToolUse 钩子判定放行后
         追加运行（双重闸，任一否决即拦）。
+    audit_log :
+        持久审计账本。显式注入优先；未传则按 ``MBDSDR_AUDIT_LOG``
+        环境变量开启（未设/空串 = 关闭，库内构造无副作用）。开启后
+        以通配符钩子挂到本实例的 hooks 上，只读观测不改写。
     """
 
     def __init__(self, controller: Optional[SDRController] = None,
                  policy: Optional[ToolPolicy] = None,
-                 hook_commands: Optional[HookCommandRunner] = None) -> None:
+                 hook_commands: Optional[HookCommandRunner] = None,
+                 audit_log: Optional[AuditLog] = None) -> None:
         self.controller = controller if controller is not None else SDRController()
         # 人机问答 store（会话内存态；stdout 请求-响应，提问不阻塞）
         self.questions = QuestionStore()
         # 事件钩子（AGENT_PRE_TOOL_USE 可否决；无注入时本进程独立实例）
         self.hooks = HookManager()
+        # 持久审计账本：显式注入 > MBDSDR_AUDIT_LOG 环境变量 > 关闭。
+        # 通配符钩子只读观测，钩子异常已被 Hook.trigger 兜底。
+        self.audit_log = audit_log if audit_log is not None else AuditLog.from_env()
+        if self.audit_log is not None:
+            self.hooks.register("*", self.audit_log.record,
+                                description="JSONL 持久审计账本（只读观测）")
         # 外部命令 hooks（配置驱动；无注入时默认构造，配置缺失则空转）
         self.hook_commands = (hook_commands if hook_commands is not None
                               else HookCommandRunner())
@@ -1607,9 +1682,14 @@ def run_mcp_server(controller: Optional[SDRController] = None) -> None:
 
     启动第一件事是 :func:`_prepare_stdio_utf8`：中文 Windows 的 ANSI
     代码页会让含中文/µ 的响应行失去 UTF-8 合法性，必须在任何读写前修正。
+
+    第二件事是挂持久审计账本（"AI 操作员"可追溯性）：默认写
+    ``~/.mbdsdr/audit.jsonl``（与 tool_results spill 同惯例），
+    ``MBDSDR_AUDIT_LOG`` 可改路径或显式 ``off`` 关闭。
     """
     _prepare_stdio_utf8()
-    toolset = MCPToolSet(controller)
+    toolset = MCPToolSet(controller,
+                         audit_log=AuditLog.from_env(default_on=True))
     for line in sys.stdin:
         line = line.strip()
         if not line:

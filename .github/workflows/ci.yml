@@ -21,7 +21,7 @@ on:
 
 # 同一 ref 的新提交取消旧的排队运行，省 runner 资源
 concurrency:
-  group: ci-${{ ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

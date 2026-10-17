@@ -72,8 +72,9 @@ void Agent::configureFromConfig() {
 
 QString Agent::localCommand(const QString& input) {
     // 统一 VNA 意图入口：驻波/谐振晶体/TDR 电缆/L-C，内部按问题分发。
+    // manualMode_ 透传：写工具（扫频/TDR）在手动模式下与 LLM 回路同形被门拦。
     if (isVnaOnrampIntent(input))
-        return runVswrOnramp(engine_, input);
+        return runVswrOnramp(engine_, input, manualMode_);
 
     static QRegularExpression freqRe(
         R"(^\s*(\d+(\.\d+)?)\s*([mM]?[Hh]?[Zz]?)\s*$)");

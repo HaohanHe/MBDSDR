@@ -58,6 +58,7 @@ private slots:
     void toolsCallGetCapabilitiesRealRoundtrip();
     void writeToolGatedWithoutArmAndStateUnchanged();
     void writeToolRunsWhenArmed();
+    void toolsCallRejectsInvalidArguments();
     void notificationsInitializedNoReply();
     void malformedJsonNoReplyNoCrash();
     void unknownMethodError();
@@ -307,6 +308,63 @@ void TestMcpServer::writeToolRunsWhenArmed() {
     QCOMPARE(text.value(QStringLiteral("ok")).toBool(), true);
     // arm_manual must not leak into the result envelope.
     QVERIFY(!text.contains(QStringLiteral("arm_manual")));
+}
+
+void TestMcpServer::toolsCallRejectsInvalidArguments() {
+    dsp::SpectrumEngine engine;
+    // 1) Hallucinated parameter (schema 外键): an ARMED write tool carrying a
+    //    key no schema declares must be rejected BEFORE dispatch. The gate
+    //    flag is consumed first, so arm_manual itself never trips the check.
+    QJsonObject r = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":60,\"method\":\"tools/call\","
+                       "\"params\":{\"name\":\"set_mode\","
+                       "\"arguments\":{\"mode\":\"AM\",\"arm_manual\":true,\"bogus\":1}}}"),
+        &engine);
+    QJsonObject text = callText(r);
+    QCOMPARE(text.value(QStringLiteral("ok")).toBool(), false);
+    const QJsonArray reasons = text.value(QStringLiteral("reasons")).toArray();
+    QVERIFY2(!reasons.isEmpty(), "validator must list failure reasons");
+    QVERIFY2(reasons.at(0).toString().contains(QStringLiteral("未知参数")),
+             qPrintable(reasons.at(0).toString()));
+
+    // 2) Out-of-range value: freq_hz below kFreqMinHz (24 MHz, core/tokens.h:273)
+    //    on an armed write tool -> rejected before dispatch; the receiver's
+    //    actual frequency must not move.
+    QJsonObject before = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"tools/call\","
+                       "\"params\":{\"name\":\"get_frequency\",\"arguments\":{}}}"),
+        &engine);
+    const double freqBefore = callText(before).value(QStringLiteral("frequency_hz")).toDouble();
+    QJsonObject r2 = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":62,\"method\":\"tools/call\","
+                       "\"params\":{\"name\":\"tune_frequency\","
+                       "\"arguments\":{\"freq_hz\":1000,\"arm_manual\":true}}}"),
+        &engine);
+    QJsonObject text2 = callText(r2);
+    QCOMPARE(text2.value(QStringLiteral("ok")).toBool(), false);
+    QVERIFY(text2.contains(QStringLiteral("reasons")));
+    QJsonObject after = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":63,\"method\":\"tools/call\","
+                       "\"params\":{\"name\":\"get_frequency\",\"arguments\":{}}}"),
+        &engine);
+    QCOMPARE(callText(after).value(QStringLiteral("frequency_hz")).toDouble(), freqBefore);
+
+    // 3) Wrong type: mode must be a string, not a number -> rejected.
+    QJsonObject r3 = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":64,\"method\":\"tools/call\","
+                       "\"params\":{\"name\":\"set_mode\","
+                       "\"arguments\":{\"mode\":123,\"arm_manual\":true}}}"),
+        &engine);
+    QCOMPARE(callText(r3).value(QStringLiteral("ok")).toBool(), false);
+
+    // 4) Unknown tool keeps its executor envelope (no schema to validate
+    //    against; executeTool's unknown_tool path is unchanged).
+    QJsonObject r4 = post(
+        QStringLiteral("{\"jsonrpc\":\"2.0\",\"id\":65,\"method\":\"tools/call\","
+                       "\"params\":{\"name\":\"no_such_tool\",\"arguments\":{}}}"),
+        &engine);
+    QJsonObject text4 = callText(r4);
+    QCOMPARE(text4.value(QStringLiteral("error")).toString(), QStringLiteral("unknown_tool"));
 }
 
 void TestMcpServer::notificationsInitializedNoReply() {

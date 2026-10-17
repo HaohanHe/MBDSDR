@@ -98,6 +98,8 @@ private slots:
     void resonanceNoNominalAsks();
     void resonanceRlcTheoryPin();
     void filterNoShapeHonest();
+    void manualModeGatesVswrSweep();
+    void manualModeGatesTdr();
 };
 
 void TestVnaOnramp::parseTarget() {
@@ -250,6 +252,38 @@ void TestVnaOnramp::filterNoShapeHonest() {
     QString out = ai::runVswrOnramp(&engine, QString::fromUtf8("这个滤波器什么特性"));
     QVERIFY(out.contains(QString::fromUtf8("滤波器")));
     QVERIFY(out.contains(QString::fromUtf8("扫频")));
+}
+
+void TestVnaOnramp::manualModeGatesVswrSweep() {
+    dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(
+        std::make_unique<ReplayTransport>(calibratedScript(0.1)));
+    // manualMode=true: set_vna_sweep is a WRITE tool and must NOT reach the
+    // wire. ReplayTransport QCOMPAREs every write against the script, so a
+    // leaked sweep command would fail inside the transport before we even
+    // inspect the text -- the script deliberately still lists the sweep step
+    // so an ungated regression is caught loudly.
+    QString out = ai::runVswrOnramp(&engine, QString::fromUtf8("438.5MHz驻波多少"),
+                                    /*manualMode=*/true);
+    QVERIFY2(out.contains(QString::fromUtf8("手动模式")),
+             qPrintable(out));
+    QVERIFY(out.contains(QString::fromUtf8("未执行")));
+    // No measurement interpretation may be fabricated from data the operator
+    // never authorized us to collect.
+    QVERIFY(!out.contains(QString::fromUtf8("匹配良好")));
+    QVERIFY(!out.contains(QString::fromUtf8("VSWR 1.")));
+}
+
+void TestVnaOnramp::manualModeGatesTdr() {
+    dsp::SpectrumEngine engine;
+    engine.vnaClient().attachTransport(
+        std::make_unique<ReplayTransport>(calibratedScript(0.1)));
+    // Same gate on the TDR branch's write tool (vna_tdr_cable).
+    QString out = ai::runVswrOnramp(&engine, QString::fromUtf8("RG-58 电缆多长"),
+                                    /*manualMode=*/true);
+    QVERIFY2(out.contains(QString::fromUtf8("手动模式")), qPrintable(out));
+    QVERIFY(out.contains(QString::fromUtf8("TDR")));
+    QVERIFY(!out.contains(QString::fromUtf8("估算电缆长度")));
 }
 
 QTEST_MAIN(TestVnaOnramp)
