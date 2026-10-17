@@ -70,13 +70,11 @@ std::vector<ReplayTransport::Step> calibratedScript(double targetGamma) {
         {"version", {"1.0.174-hugen"}},
         {"info", {"NanoVNA-H"}},
         // execGetVnaStatus 每次调用依次发 readCalStatus()("cal") 与
-        // readTcxo()("tcxo")（agent_tools.cpp:1455/1462）——两处 status
-        // 刷新各跟一条 tcxo，缺了会在 ReplayTransport 的 QCOMPARE 处炸
-        // （CI 首跑实测：脚本停留在 tcxo 特性上线前的形态）。
+        // readTcxo()("tcxo")（agent_tools.cpp:1455/1462）；而 onramp 自己的
+        // 刷新是直接 vna.readCalStatus()（vna_onramp.cpp:227）——只发 "cal"。
         {"cal", {"load open short thru cal'ed"}},   // get_vna_status live readCalStatus()
         {"tcxo", {"usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"}},
-        {"cal", {"load open short thru cal'ed"}},   // runVswrOnramp's own cal refresh
-        {"tcxo", {"usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"}},
+        {"cal", {"load open short thru cal'ed"}},   // onramp's own cal refresh (cal only)
         {"sweep 438000000 439000000 101", {}},
         {"frequencies", freqs},
         {"data 0", data0},
@@ -252,11 +250,10 @@ void TestVnaOnramp::filterNoShapeHonest() {
     // 滤波器分支不发 sweep，直接 frequencies + data 1(S21 空) -> 无形态 -> 诚实引导。
     std::vector<ReplayTransport::Step> script = {
         {"help", {}}, {"version", {"1.0.174-hugen"}}, {"info", {"NanoVNA-H"}},
-        // 每条 cal 后跟一条 tcxo（execGetVnaStatus 发 cal 后发 tcxo）。
+        // get_vna_status 发 cal+tcxo；onramp 自己的刷新只发 cal（直接 readCalStatus）。
         {"cal", {"load open short thru cal'ed"}},   // get_vna_status live refresh
         {"tcxo", {"usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"}},
-        {"cal", {"load open short thru cal'ed"}},   // onramp's own cal refresh
-        {"tcxo", {"usage: tcxo {TCXO frequency(Hz)}", "current: 26000000"}},
+        {"cal", {"load open short thru cal'ed"}},   // onramp's own cal refresh (cal only)
         {"frequencies", {"438000000", "439000000"}},
         {"data 1", {}},
     };
