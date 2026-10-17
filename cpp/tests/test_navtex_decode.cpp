@@ -221,11 +221,12 @@ void TestNavtexDecode::cleanMessageDecodesExactly() {
     QVERIFY2(msg.phasingOk, "phasing should lock on clean signal");
     QVERIFY2(msg.diversityOk, "clean signal must have 0 diversity errors");
     QCOMPARE(msg.diversityErrors, 0);
-    QCOMPARE(msg.stationB1, QString::fromStdString(b1));
-    QCOMPARE(msg.typeB2, QString::fromStdString(b2));
-    QCOMPARE(msg.numberB3B4, QString::fromStdString(num));
-    QCOMPARE(QString::fromStdString(msg.text),
-             QString::fromStdString(text));
+    // NavtexMessage 字段是 std::string（navtex_decoder.h:49-53），
+    // QCOMPARE 两侧须同型——直接比 string，不经 QString 中转。
+    QCOMPARE(msg.stationB1, b1);
+    QCOMPARE(msg.typeB2, b2);
+    QCOMPARE(msg.numberB3B4, num);
+    QCOMPARE(msg.text, text);
 }
 
 void TestNavtexDecode::snrGradientTable() {
