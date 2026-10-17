@@ -1,0 +1,12 @@
+# MBDSDR 实验层依赖（experiments/）
+# 安装: python -m pip install -r experiments/requirements.txt
+#
+# 根 requirements.txt 不含 matplotlib：它是 experiments 绘图/可视化代码
+# （experiments/common/plot.py，Agg 后端）的依赖，不属于 AI 内核/MCP/
+# 硬件桥接核心路径。桌面端依赖同理单独放在 desktop/requirements.txt。
+#
+# experiments/tests 下多个测试文件经 experiments.common 传递 import plot，
+# 缺 matplotlib 时 pytest 收集阶段即 ImportError 整批报错（CI 首跑实测），
+# 故 CI 的 python job 需单独安装本文件。
+
+matplotlib>=3.7.0        # 实验绘图（Agg 后端，无显示环境可用）

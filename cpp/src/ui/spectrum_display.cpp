@@ -820,7 +820,7 @@ bool SpectrumDisplay::loadColormapFromFile(const QString& absPath, QString* erro
     QFile f(absPath);
     if (!f.open(QIODevice::ReadOnly)) {
         if (errorOut)
-            errorOut->assign(QStringLiteral("无法打开文件：%1").arg(absPath));
+            *errorOut = QStringLiteral("无法打开文件：%1").arg(absPath);
         return false;
     }
     return loadColormapFromJson(f.readAll(), errorOut);

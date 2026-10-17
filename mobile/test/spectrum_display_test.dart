@@ -98,6 +98,9 @@ Future<void> _pumpAndCapture(
         as RenderRepaintBoundary;
     final image = await boundary.toImage(pixelRatio: 2.0);
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    // CI checkout 无 scratch/ 目录（本地有、但未入 git）——先建目录再写，
+    // 否则全新环境 File 打开即失败（CI 首跑实测截图用例挂在此）。
+    File(path).parent.createSync(recursive: true);
     File(path).writeAsBytesSync(bytes!.buffer.asUint8List());
     // 卸载 widget 并等待挂起的解码回调跑完，避免收尾时 channel 报错。
     await tester.pumpWidget(const SizedBox.shrink());

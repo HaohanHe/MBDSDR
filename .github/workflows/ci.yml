@@ -81,6 +81,10 @@ jobs:
           # pytest 套件里 offscreen 用例直接 import PySide6，缺了会整批 skip 而非真跑。
           # 该文件内全部为 manylinux 可装 wheel，无需 || true。
           pip install -r desktop/requirements.txt
+          # 实验层依赖（matplotlib，Agg 绘图）——experiments/tests 经
+          # experiments.common.plot 传递 import，缺了会在 pytest 收集阶段
+          # 整批 ImportError（CI 首跑实测三个测试文件挂在此）。
+          pip install -r experiments/requirements.txt
           pip install pytest
 
       - name: pytest（五个根目录）

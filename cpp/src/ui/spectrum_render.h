@@ -175,11 +175,11 @@ struct ParsedColormap {
 inline bool parseColormapJson(const QByteArray& json, ParsedColormap* out,
                               QString* errorOut = nullptr) {
     if (!out) {
-        if (errorOut) errorOut->assign(QStringLiteral("空输出"));
+        if (errorOut) *errorOut = QStringLiteral("空输出");
         return false;
     }
     auto fail = [&](const QString& msg) {
-        if (errorOut) errorOut->assign(msg);
+        if (errorOut) *errorOut = msg;
         return false;
     };
 
@@ -288,13 +288,13 @@ inline std::vector<double> freqTicksNice(double loHz, double hiHz,
 inline bool loadColormapFileForTool(const QString& absPath, ParsedColormap* out,
                                     QString* errorOut) {
     if (!out) {
-        if (errorOut) errorOut->assign(QStringLiteral("空输出"));
+        if (errorOut) *errorOut = QStringLiteral("空输出");
         return false;
     }
     QFile f(absPath);
     if (!f.open(QIODevice::ReadOnly)) {
         if (errorOut)
-            errorOut->assign(QStringLiteral("无法打开文件：%1").arg(absPath));
+            *errorOut = QStringLiteral("无法打开文件：%1").arg(absPath);
         return false;
     }
     return parseColormapJson(f.readAll(), out, errorOut);
