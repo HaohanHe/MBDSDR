@@ -461,7 +461,9 @@ def fsk_demodulate(samples: Sequence[float], baud: float = 300.0,
     """FSK 解调：音频采样 → 比特流 + 置信度。"""
     modem = FSKModem(sample_rate=sample_rate, baud=baud,
                      mark_freq=mark_freq, space_freq=space_freq)
-    audio = np.asarray(samples, dtype=np.float64)
+    if isinstance(samples, (str, bytes)) or not hasattr(samples, "__iter__"):
+        raise ValueError("samples 必须是数字数组")
+    audio = np.asarray(samples, dtype=np.float64).reshape(-1)
     bits, conf = modem.demodulate_bits(audio, n_bits=n_bits)
     return {"bits": bits, "confidence": conf,
             "mark_freq": modem.f_mark, "space_freq": modem.f_space}
@@ -485,7 +487,9 @@ def minimodem_decode_audio(samples: Sequence[float], baud: float = 300.0,
     codec: "ascii" (8N1 UART) 或 "baudot" (5N1)。
     """
     modem = FSKModem(sample_rate=sample_rate, baud=baud)
-    audio = np.asarray(samples, dtype=np.float64)
+    if isinstance(samples, (str, bytes)) or not hasattr(samples, "__iter__"):
+        raise ValueError("samples 必须是数字数组")
+    audio = np.asarray(samples, dtype=np.float64).reshape(-1)
     if codec == "ascii":
         # 8N1 帧长 = 10 bit；先按整段解调，再切帧
         frame = ASCIIFrame()
@@ -543,7 +547,9 @@ def bell103_demodulate_text(samples: Sequence[float],
                             sample_rate: float = 48000.0) -> dict:
     """Bell 103 300baud 接收：FSK 音频 -> ASCII 8N1 文本。"""
     modem = bell103_300baud_modem(sample_rate)
-    audio = np.asarray(samples, dtype=np.float64)
+    if isinstance(samples, (str, bytes)) or not hasattr(samples, "__iter__"):
+        raise ValueError("samples 必须是数字数组")
+    audio = np.asarray(samples, dtype=np.float64).reshape(-1)
     fr = ASCIIFrame()
     n_frames = len(audio) // modem.bit_nsamples // 10
     bits, conf = modem.demodulate_bits(audio, n_bits=n_frames * 10)
