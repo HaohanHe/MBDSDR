@@ -237,11 +237,9 @@ def step_capture(
     """跑 rtl_sdr -f freq -s sr -n nsamples 输出 interleaved uint8 IQ。"""
     r = StepResult(step="capture", status="FAIL")
 
-    exe = find_rtl_sdr()
-    if not exe:
-        r.message = "未找到 rtl_sdr 命令（PATH 与 ~/.local/bin 均无）"
-        r.add_fix("编译安装 librtlsdr 或 apt install rtl-sdr")
-        return r
+    # 参数范围校验先行：越界参数在任何环境下都该先报参数问题
+    # （TestCaptureNoRTLSDR 的口径——无 rtl_sdr 的机器上也必须报范围错，
+    # 而不是被"未找到命令"掩盖）。工具存在性检查在此之后。
 
     # 采样率合理性检查（rtl-sdr 支持 225k~3.2M，典型 2.4M）
     if not (225_000 <= sample_rate_hz <= 3_200_000):
@@ -253,6 +251,12 @@ def step_capture(
     if not (24e6 <= freq_hz <= 1700e6):
         r.message = f"中心频率 {freq_hz/1e6:.1f} MHz 超出 RTL-SDR 范围 (24~1700 MHz)"
         r.add_fix("检查 --freq 单位（Hz），如 1090e6 = 1090 MHz")
+        return r
+
+    exe = find_rtl_sdr()
+    if not exe:
+        r.message = "未找到 rtl_sdr 命令（PATH 与 ~/.local/bin 均无）"
+        r.add_fix("编译安装 librtlsdr 或 apt install rtl-sdr")
         return r
 
     expected_bytes = n_samples * _RTL_BYTES_PER_SAMPLE

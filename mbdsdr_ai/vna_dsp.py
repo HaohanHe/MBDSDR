@@ -203,7 +203,8 @@ def coax_loss_s11(s11, notch_q: float = 0.3,
     未触发陷波时为 None（诚实标注，调用方可区分"滤过了"与"本来干净"）。
 
     诚实边界：缓变趋势经线性去趋势后再检测——只认**窄谱线**振铃；
-    宁缺毋滥，检不出就原样返回 None。
+    宁缺毋滥，检不出就原样返回 None。去趋势残差低于信号尺度 1e-9 时
+    判干净（浮点残影不是振铃；真实振铃幅值远高于此）。
     """
     x = np.asarray(s11, dtype=np.complex128)
     n = len(x)
@@ -215,6 +216,17 @@ def coax_loss_s11(s11, notch_q: float = 0.3,
     coef_r, *_ = np.linalg.lstsq(a, x.real, rcond=None)
     coef_i, *_ = np.linalg.lstsq(a, x.imag, rcond=None)
     resid = (x.real - a @ coef_r) + 1j * (x.imag - a @ coef_i)
+    # 数值噪声底：精确线性数据经 lstsq 去趋势后的残差是机器精度量级的
+    # 浮点残影（实测 512 点 max|resid|≈1.7e-16），但它在谱域是**相干**
+    # 窄线——prominence（峰/中位）与 peak_ratio（峰/(n/2)·max|resid|）
+    # 两道相对阈值都按"残差即信号"标定，对这种残影实测集中度比 ~60、
+    # 且 spec[k]>=abs_peak 同样过关，两关全失守（跨 numpy/LAPACK 表现
+    # 不一致，构成隐性平台依赖）。残差低于信号尺度的 1e-9 时判定
+    # "本来干净"：真实振铃幅值远高于此，此量级的"波纹"不可测也不可滤
+    # ——宁缺毋滥（docstring 口径），诚实返回 None。
+    sig_scale = float(np.max(np.abs(x)))
+    if float(np.max(np.abs(resid))) <= 1e-9 * sig_scale:
+        return x.copy(), None
     spec = np.abs(np.fft.fft(resid))
     lo, hi = 1, n // 2                       # 忽略直流与镜像
     if hi <= lo:

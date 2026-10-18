@@ -137,6 +137,10 @@ def test_default_user_root_discovered(tmp_path, monkeypatch):
     """user_dir=None（默认）解析到 ~/.mbdsdr/skills 并参与扫描。"""
     home = tmp_path / "home"
     _make_skill(home / ".mbdsdr" / "skills", "personal", "个人技能")
+    # 跨平台重定向家目录：POSIX 的 expanduser 只认 HOME，Windows 只认
+    # USERPROFILE——只 patch 一个在另一平台上是静默失效的重定向
+    # （CI runner 是 ubuntu，Linux 下实测因此挂过）。
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
 
     sr = SkillRegistry(str(tmp_path / "no_project"))  # 项目根不存在
@@ -235,8 +239,10 @@ def test_user_root_activation_event_source(tmp_path):
 # ---------------------------------------------------------------------------
 def test_legacy_single_arg_constructor(tmp_path, monkeypatch):
     # 重定向 HOME 让默认 user 根指向 tmp，保持 hermetic
+    # （USERPROFILE 一并 patch：Windows 口径，POSIX 只认 HOME）
     home = tmp_path / "home"
     home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
 
     proj = tmp_path / "skills"
