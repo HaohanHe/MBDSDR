@@ -72,15 +72,34 @@ SATELLITE_CATNR = {
 }
 
 
+# TLE 联网拉取失败冷却表：satellite_name -> monotonic 到期时刻。
+# 卫星预测以 30s 步长扫窗口（24h = 2880 步），每步都过 _resolve_tle；
+# 失败若不进冷却，外网不可达时每步都要等满一次网络超时（fetch_tle 的
+# urlopen timeout=15s），单星预测被拖到小时量级、工具调用实际不可用
+# （tests/ 根 test_tool_callability dry-call 即因此挂起 10 分钟以上）。
+# 冷却期内直接回退内置 TLE，source 仍如实标 "builtin-fallback"——失败
+# 缓存只省重试，不伪造联网来源；成功拉取即清冷却，冷却到期自动恢复重试。
+_TLE_FAIL_UNTIL: Dict[str, float] = {}
+_TLE_FAIL_COOLDOWN_S = 300.0
+
+
 def _resolve_tle(satellite_name: str):
-    """优先联网拉最新 TLE；失败回退内置近似值。返回 (line1, line2, source)。"""
+    """优先联网拉最新 TLE；失败回退内置近似值。返回 (line1, line2, source)。
+
+    联网失败进入 _TLE_FAIL_COOLDOWN_S（5 分钟）负缓存冷却：预测循环逐步
+    解析时不会每步重试网络；冷却到期后恢复重试。冷却期内 source 为
+    "builtin-fallback"（诚实标注回退路径，不冒充 celestrak）。
+    """
     catnr = SATELLITE_CATNR.get(satellite_name)
-    if catnr is not None:
+    if catnr is not None and time.monotonic() >= _TLE_FAIL_UNTIL.get(satellite_name, 0.0):
         try:
             from .orbit import fetch_tle
-            return (*fetch_tle(catnr), "celestrak")
+            tle = fetch_tle(catnr)
         except Exception:
-            pass
+            _TLE_FAIL_UNTIL[satellite_name] = time.monotonic() + _TLE_FAIL_COOLDOWN_S
+        else:
+            _TLE_FAIL_UNTIL.pop(satellite_name, None)
+            return (*tle, "celestrak")
     return (*BUILTIN_TLE[satellite_name], "builtin-fallback")
 
 # 卫星下行频率（MHz）
