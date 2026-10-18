@@ -1076,9 +1076,12 @@ def decode_iq_to_image(iq: np.ndarray, out_png: str,
                                     n_files=len(reassembler._vcs))
 
         # 5. 保存 PNG（uint8 → L；uint16 → I;16，保留 10/16-bit 位深）
+        # Pillow 13 起 Image.fromarray 不再接受 mode="I;16"（typemap 收紧，
+        # 抛 "Invalid mode for data type"）；改走 frombuffer，语义不变。
         from PIL import Image
         if img.pixels.dtype == np.uint16:
-            Image.fromarray(img.pixels, mode="I;16").save(out_png)
+            Image.frombuffer("I;16", (img.width, img.height),
+                             img.pixels.astype("<u2").tobytes()).save(out_png)
         else:
             Image.fromarray(img.pixels.astype(np.uint8), mode="L").save(out_png)
         return GK2ADecodeResult(
