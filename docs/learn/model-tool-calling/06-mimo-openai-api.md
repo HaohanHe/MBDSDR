@@ -4,7 +4,7 @@
 > - 主页面（在线抓取，全量 3811 字符已读完）：https://mimo.mi.com/docs/api/chat/openai-api
 > - 补充1（函数调用请求示例 + thinking+tool 稳定性警告）：https://mimo.mi.com/docs/en-US/quick-start/faq/api-integration
 > - 补充2（role=tool 回传 + 多轮工具调用完整循环示例）：https://mimo.mi.com/docs/zh-CN/usage-guide/passing-back-reasoning_content
-> - 本地壳文件（已核实为空壳，无正文）：`/home/user/Doubao/chats/38438160041798146/repos/model-docs/xiaomi-mimo/api_chat_openai-api.html`
+> - 本地壳文件（已核实为空壳，无正文）：`/path/to/MBDSDR/repos/model-docs/xiaomi-mimo/api_chat_openai-api.html`
 >
 > **精读方式**：web_fetch 在线抓取（pagination 模式 offset=0 一次读完全部，end_offset=3811 ≥ total_length=3811）；disable_cache=true 重试结果一致。主页面"函数调用"标签页内容为 JS 渲染，静态 HTML 未包含，经 general_search 定位到 FAQ 与 passing-back 两页补充。
 > **精读日期**：2026-10-01　**作者**：s_000c4GAYYm6

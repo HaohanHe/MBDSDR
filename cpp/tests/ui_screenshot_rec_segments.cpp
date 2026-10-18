@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
         QApplication::processEvents();
 
         const QString dir =
-            "/home/user/Doubao/chats/38438160041798146/cpp/scratch";
+            "scratch";
         QTimer::singleShot(600, [&]() {
             QPixmap pm = win.grab();
             pm.save(dir + "/ui_rec_segments.png", "PNG");

@@ -1,7 +1,7 @@
 # Phase63 — MBDSDR 47 工具「读/写分类 ↔ 实际副作用」边界完整性核对（只读审计 + 落档）
 
 - **HEAD**: `ac3d86cf2646469f9378beb22a2428ea3d01a09d`（审计前后均未变）
-- **仓库根**: `/home/user/Doubao/chats/38438160041798146/MBDSDR`
+- **仓库根**: `/path/to/MBDSDR/MBDSDR`
 - **范围**: 本轮不再审 gate 语义本身（Agent 单点 `llm_worker.cpp`、CH 单点 `control_hub.cpp:360`、HTTP 透传、gated 呈现四通道历轮已审）。本轮只审**分类边界本身**——47 个工具逐一核对 `isWriteTool` 分类与真实副作用是否一致：
   - **漏 gate 的写工具** = 有副作用却被分为读 → 手动模式下绕过拦截（危险，应拦未拦）；
   - **误 gate 的读工具** = 无副作用却被分为写 → 手动模式下被误拦（保守误伤）。

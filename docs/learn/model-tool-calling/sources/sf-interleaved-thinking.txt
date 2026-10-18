@@ -1,7 +1,7 @@
 # SiliconFlow 官方文档《Interleaved Thinking》纯文本（供引用）
 # ============================================================
 # 【来源与可靠性说明（重要）】
-# - 任务指定的本地 HTML：/home/user/Doubao/chats/38438160041798146/repos/model-docs/siliconflow/docs_userguide_guides_interleaved-thinking.html
+# - 任务指定的本地 HTML：/path/to/MBDSDR/repos/model-docs/siliconflow/docs_userguide_guides_interleaved-thinking.html
 #   经逐字节核查 = 404 壳页（Next.js NOT_FOUND 边界）：
 #     * 尾部 flight payload 含 "This page could not be found." / "页面未找到" / "NEXT_HTTP_ERROR_FALLBACK;404"
 #     * 侧边栏目录树中不存在 interleaved-thinking.mdx 条目（仅有 function-calling.mdx、reasoning.mdx 等）

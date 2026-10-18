@@ -6,6 +6,7 @@ ai-sdr Mini KiCad PCB 生成器
 可直接导入立创EDA
 """
 
+import os
 import math
 
 # ============================================================
@@ -846,7 +847,8 @@ def generate_pcb():
 
 if __name__ == "__main__":
     pcb = generate_pcb()
-    outpath = "/home/user/Doubao/chats/38438160041798146/ai-sdr-mini-kicad/ai-sdr-mini.kicad_pcb"
+    outpath = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "ai-sdr-mini.kicad_pcb")
     with open(outpath, "w", encoding="utf-8") as f:
         f.write(pcb)
     print(f"PCB generated: {outpath}")

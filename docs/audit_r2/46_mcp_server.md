@@ -1,6 +1,6 @@
 # 46. MCP 服务器入口审查 — `mbdsdr_ai_mcp_server.py`
 
-> 审查范围：`/home/user/Doubao/chats/38438160041798146/mbdsdr_ai_mcp_server.py`（404 行，14.4 KB）
+> 审查范围：`/path/to/MBDSDR/mbdsdr_ai_mcp_server.py`（404 行，14.4 KB）
 > 审查方式：静态阅读 + 真实 JSON-RPC 握手回放（用 Python subprocess 模拟 Cursor/Claude Desktop 客户端）+ 边界用例压测
 > 关联文件：`mbdsdr_ai/tool_registry.py`、`mbdsdr_ai/agent.py`、`mbdsdr_ai/sdr_backend.py`、`mcp_server.example.json`、`MCP配置示例-Cursor-Claude.md`
 

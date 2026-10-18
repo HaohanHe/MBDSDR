@@ -1,6 +1,6 @@
 # B3 移动原生能力缺口审计与可执行契约（只读）
 
-> 范围：`mobile/`（根 `/home/user/Doubao/chats/38438160041798146/mobile`）。
+> 范围：`mobile/`（根 `/path/to/MBDSDR/mobile`）。
 > 红线：纯只读审计，仅产出本报告；不改代码、不 git。云 VM 无 Android/iOS 工具链，
 > 所有原生（Kotlin/Swift）代码均为**待实现契约，云未编译、真机待验**，不得描述为已验证。
 > 拿不准处标「推断」。所有断言带 `file:line`。审计日期 2026-10-01。

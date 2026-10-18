@@ -1,7 +1,7 @@
 # Phase63 — MBDSDR 只读工具「引擎缺失 / 未 attach」态抽查（只读审计 + 落档）
 
 - **HEAD**: `aabc309`（审计前后均未变）
-- **仓库根**: `/home/user/Doubao/chats/38438160041798146/MBDSDR`
+- **仓库根**: `/path/to/MBDSDR/MBDSDR`
 - **范围**: 上一轮 `readonly-tools-audit.md` 审过「引擎在、源断」三态（connected=false / dropped / no_telemetry）。本轮聚焦**更基础态**：**引擎指针本身为 null**（ControlHub 未 `setEngine` / Agent 未 `setEngine`）时，三个只读工具 `get_status / get_squelch_status / get_spectrum_status` 在 Agent / ControlHub / HTTP 三通道的返回形状与错误语义，重点验证**无假成功**（无引擎时不得回包 `ok:true` + 假数值）。
 - **方法**: 全程只读源码 + offscreen 跑既有测试二进制（`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`，clean env，未设 `MBDSDR_TEST_SOURCE`）。未改源码、未 git add/commit/push、未 mock、未操控 GUI。
 

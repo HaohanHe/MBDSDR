@@ -1,6 +1,6 @@
 # R2 深度代码审查 — `mbdsdr_ai/decoders.py`（解码调度/分发器）
 
-- 审查对象：`/home/user/Doubao/chats/38438160041798146/mbdsdr_ai/decoders.py`（829 行）
+- 审查对象：`/path/to/MBDSDR/mbdsdr_ai/decoders.py`（829 行）
 - 审查方式：只读，通读全文 + 跨文件核对后端真实接线（adsb.py / ax25.py / sstv_decoder.py / ft8_lite.py / noaa_apt_lite.py / orbit.py / sdr_tools.py）
 - 结论速览：**本文件并非"全模式中央调度器"，它只是一个 4 模式（adsb/ft8/aprs/wspr）的窄分发器，且 4 个里只有 adsb 真正调到后端；FT8/APRS/WSPR 在本层均为 note-only 占位。** BPSK31/RTTY/PSK63/Olivia/Hellschreiber/JT65/JT9/FT4 在本文件中**连名字都没出现**，不存在"注册了但空壳"，而是根本未注册。
 

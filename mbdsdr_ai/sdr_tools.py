@@ -2153,11 +2153,11 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_connect_hardware",
-        description="连接指定的 SDR 硬件。输入设备名称或 SoapySDR device string（如 'driver=hackrf'、'driver=rtlsdr'、'driver=plutosdr'、'mock'）。自动检测设备能力（RX/TX/频率范围），失败时降级到模拟后端。",
+        description="连接指定的 SDR 硬件。输入设备名称或 SoapySDR device string（如 'driver=hackrf'、'driver=rtlsdr'、'driver=plutosdr'）。自动检测设备能力（RX/TX/频率范围），连接失败时诚实报错，绝不降级到模拟后端。",
         parameters={
             "type": "object",
             "properties": {
-                "device": {"type": "string", "description": "设备名称或SoapySDR device string，如 'driver=hackrf'、'mock'"},
+                "device": {"type": "string", "description": "设备名称或SoapySDR device string，如 'driver=hackrf'、'driver=rtlsdr'"},
             },
             "required": ["device"],
         },
@@ -2512,7 +2512,7 @@ def register_sdr_tools(agent):
             "算 FM 信道功率（中心 150kHz 内功率谱密度 vs 带外噪声底）+ 19kHz 导频存在性（立体声指示），"
             "输出按强度排序的电台列表 [{freq_mhz, strength_db, stereo, active}]。"
             "自动对比上次保存的预设，标注新增/消失/持续电台。save=true 时把结果存到 ~/.mbdsdr/fm_presets.json。"
-            "无硬件时用 Mock 后端合成信号自测不崩。"
+            "无硬件时诚实报错（不生成合成信号冒充测量结果）。"
         ),
         parameters={
             "type": "object",
@@ -2555,7 +2555,7 @@ def register_sdr_tools(agent):
         description=(
             "收听 FM 广播：调谐到指定频率 → 宽带 FM 解调（单声道）→ audio_out 实时播放。"
             "action=start 启动后台解调播放线程，action=stop 停止。"
-            "无 sounddevice 时安全降级（解调正常运行但不输出声音），无硬件时用 Mock 后端合成信号不崩。"
+            "无 sounddevice 时安全降级（解调正常运行但不输出声音）；无硬件时诚实报错，不用合成信号冒充。"
             "同一时刻只能收听一个频率，start 新频率会自动 stop 旧的。"
         ),
         parameters={
@@ -6814,15 +6814,14 @@ def _wsjtx_read_decodes(args):
 def _fm_make_acquire(mgr, sample_rate_hz):
     """构造 scan_fm_band 用的 acquire 回调，封装后端调谐+读 IQ。
 
-    后端未连接时返回合成噪声（让扫描流程不崩）；
+    后端未连接时返回 None（诚实空态，由调用方报"无设备"）；
     已连接时调谐到中心频率并读取 IQ。
     """
     backend = _get_backend(mgr)
     if backend is None or not getattr(backend, "status", None) or not backend.status.connected:
-        # 无硬件：纯噪声 acquire（扫描会跑完，检出 0 台，不崩）
-        def _noise_acquire(center_hz, sr, n):
-            return 0.05 * (np.random.randn(n) + 1j * np.random.randn(n)).astype(np.complex128)
-        return _noise_acquire
+        # 无硬件：诚实空态——不生成合成噪声冒充测量（诚实红线），
+        # 与 iq_file 一样返回 None，由调用方报"无设备"错误。
+        return None
 
     dev_type = getattr(backend.device, "device_type", "")
     if dev_type == "iq_file":
@@ -6874,8 +6873,8 @@ def _fm_scan_tool(mgr, args) -> "ToolResult":
     acquire = _fm_make_acquire(mgr, sr)
     if acquire is None:
         return ToolResult(success=False, content=(
-            "当前是离线 IQ 文件回放源（单段固定录制），不能步进调谐扫频。"
-            "请切换到实时 SDR 设备后再扫频。"))
+            "当前无可用的实时 SDR 设备（离线 IQ 回放源是单段固定录制，也不能步进调谐扫频）。"
+            "请先 sdr_connect 连接真实设备后再扫频。"))
 
     backend = _get_backend(mgr)
     hw_connected = backend is not None and getattr(backend, "status", None) and backend.status.connected
@@ -6938,8 +6937,6 @@ def _fm_scan_tool(mgr, args) -> "ToolResult":
         f"每点 {result.dwell_samples} 样本，噪声底 {result.noise_floor_db:.1f}dB",
         f"门限 {threshold}dB，检出 {len(result.stations)} 个电台（按强度排序），耗时 {result.scan_time_s:.1f}s",
     ]
-    if not hw_connected:
-        lines.append("（无硬件：当前为模拟后端，结果仅供链路验证）")
     if not result.stations:
         lines.append("  未检出超过门限的电台。可降低 threshold_db 或确认天线/频率范围。")
     for k, st in enumerate(result.stations[:30], 1):
@@ -7152,7 +7149,7 @@ def _listen_fm_tool(mgr, args) -> "ToolResult":
     if backend is None or not getattr(backend, "status", None) or not backend.status.connected:
         return ToolResult(success=False, content=(
             "设备未连接，无法收听。请先 sdr_connect 连接 SDR 设备（RTL-SDR/HackRF 等），"
-            "或用 Mock 后端做链路测试。"))
+            "。"))
 
     # 如果已有 listener 在运行，先停掉
     if listener is not None and listener.is_running:

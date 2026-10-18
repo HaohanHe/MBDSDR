@@ -3,7 +3,7 @@
 """
 MBDSDR AI 内核 - MCP stdio 服务器
 ====================================
-将 MBDSDR AI 内核的 195 个工具暴露为标准 MCP (Model Context Protocol) 服务，
+将 MBDSDR AI 内核的全部工具（数量以运行时 list_tools 为准）暴露为标准 MCP (Model Context Protocol) 服务，
 让任意 MCP 客户端 (Cursor / Claude Desktop / VS Code Copilot / 通用 agent / AI IDE)
 都能直接调用 MBDSDR 的全部功能。
 
@@ -26,7 +26,7 @@ MBDSDR AI 内核 - MCP stdio 服务器
 
 MCP 协议 (JSON-RPC 2.0 over stdio):
   - initialize: 初始化握手
-  - tools/list: 列出全部 195 个工具
+  - tools/list: 列出全部工具
   - tools/call: 调用工具
   - notifications/initialized: 初始化完成通知
 
@@ -64,7 +64,7 @@ class MBSDRAIMCPServer:
     """
     MBDSDR AI 内核 MCP stdio 服务器。
 
-    将 MBDSDRAgent 的 195 个工具暴露为标准 MCP 服务。
+    将 MBDSDRAgent 的全部工具暴露为标准 MCP 服务。
     任意 MCP 客户端 (Cursor / Claude Desktop / 通用 agent) 都能调用。
     """
 
@@ -100,16 +100,10 @@ class MBSDRAIMCPServer:
         self._tools = self.tool_registry.list_tools()
         self._log(f"MBDSDR AI 内核初始化完成，共 {len(self._tools)} 个工具可用")
 
-        # 无硬件时自动连接 Mock 后端，让外部 AI IDE 一连接就能测试全部 SDR 功能
-        # 用户可以通过 sdr_connect 切换到真实硬件（RTL-SDR/HackRF/USRP/ai-sdr Mini）
-        try:
-            result = self.tool_registry.call("sdr_connect", {"backend": "mock"})
-            if result.success:
-                self._log("已自动连接 Mock SDR 后端（无真实硬件时的默认行为，可随时切换）")
-            else:
-                self._log(f"自动连接 Mock 后端返回: {result.error}")
-        except Exception as e:
-            self._log(f"自动连接 Mock 后端失败: {e}")
+        # 诚实红线：不自动连接任何模拟后端。无硬件时保持未连接，
+        # SDR 类工具返回诚实空态；用户显式 sdr_connect 连接真实设备
+        # （RTL-SDR/HackRF/USRP/ai-sdr Mini），连接失败也如实报错。
+        self._log("未自动连接任何后端（诚实空态模式，请显式 sdr_connect）")
 
         # MCP 协议状态
         self._initialized = False
@@ -352,7 +346,7 @@ class MBSDRAIMCPServer:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="MBDSDR AI 内核 MCP stdio 服务器 - 暴露 195 个工具给任意通用 agent",
+        description="MBDSDR AI 内核 MCP stdio 服务器 - 暴露全部 SDR 工具给任意通用 agent",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:

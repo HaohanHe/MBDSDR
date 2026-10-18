@@ -5,7 +5,7 @@
 # - 在线 URL：https://mimo.mi.com/docs/usage-guide/passing-back-reasoning_content
 #   （2026-10-01 web.fetch pagination 模式抓取，total_length=4581，end_offset=4581，已读完整，无需 disable_cache 重试）
 # - 该 URL 页面标题 = 「深度思考」（Deep Thinking），即任务所称 "Passing Back Reasoning Content" 页。
-# - 本地壳文件：/home/user/Doubao/chats/38438160041798146/repos/model-docs/xiaomi-mimo/usage-guide_passing-back-reasoning_content.html
+# - 本地壳文件：/path/to/MBDSDR/repos/model-docs/xiaomi-mimo/usage-guide_passing-back-reasoning_content.html
 #   经逐字节核查 = SPA 空壳（仅 <div id="root"></div> + rspack 引导脚本，title="Xiaomi MiMo Home"，无正文），
 #   与 quick-start_first-api-call.html / api_chat_openai-api.html md5 相同（c1000a79650eeee0895cb00ca78619b3）。
 #   正文不在本地，本文件下方正文 = 在线官方页全文逐节转录。

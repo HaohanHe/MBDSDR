@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
 
         QTimer::singleShot(600, [&]() {
             const QString out =
-                "/home/user/Doubao/chats/38438160041798146/cpp/scratch/ui_rec_library.png";
+                "scratch/ui_rec_library.png";
             QPixmap pm = win.grab();
             pm.save(out, "PNG");
             qInfo("ui_rec_library saved %dx%d -> %s", pm.width(), pm.height(),

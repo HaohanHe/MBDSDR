@@ -1,6 +1,6 @@
 # B4 缺口学习笔记：实时声卡 / 多VFO / ANR / 热插拔 / 分段增益
 
-> 审计对象：MBDSDR 根 `/home/user/Doubao/chats/38438160041798146`。
+> 审计对象：MBDSDR 根 `/path/to/MBDSDR`。
 > 方法：每个专题先读上游真实源码 `file:line`，再读我方 `file:line`。上游 sdrpp=GPLv3、librtlsdr=GPLv2、gnuradio=GPLv3，**只学机制、不逐字照抄**（我方为 MIT 干净室）。拿不准处标「推断」。
 > 云 VM 无硬件；凡依赖真机/USB 声卡的项，建议里明确标注，不写空壳。
 

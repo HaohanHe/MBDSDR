@@ -3,8 +3,8 @@
 > 日期：2026-10-10  作者：MBDSDR 工程轮
 > HEAD：MBDSDR @ 764866a
 > 学习源：
->   - `/home/user/Doubao/chats/38438160041798146/repos/wsjtx`（主，GPL 源码）
->   - `/home/user/Doubao/chats/38438160041798146/repos/js8call`（辅助对照，GPL，FT8 同族但非同一编码族）
+>   - `/path/to/MBDSDR/repos/wsjtx`（主，GPL 源码）
+>   - `/path/to/MBDSDR/repos/js8call`（辅助对照，GPL，FT8 同族但非同一编码族）
 
 ---
 

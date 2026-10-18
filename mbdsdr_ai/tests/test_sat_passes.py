@@ -32,8 +32,8 @@ ISS_TLE_FALLBACK = [
     "2 25544  51.6400 235.5478 0006703  76.5300  25.5300 15.49000100 12345",
 ]
 
-# 示例站（用户所在地）：约 43.82°N, 125.32°E
-CHANGCHUN = GroundStation(lat_deg=43.82, lon_deg=125.32, alt_m=0.0)
+# 示例站（中性坐标）：45.0°N, 120.0°E
+SAMPLE_SITE = GroundStation(lat_deg=45.0, lon_deg=120.0, alt_m=0.0)
 
 
 def fetch_iss_tle() -> list:
@@ -54,8 +54,8 @@ def fetch_iss_tle() -> list:
 
 def test_empty_tle_returns_empty():
     """无/无效 TLE 必须返回空列表，不造假。"""
-    assert predict_passes([], CHANGCHUN, hours=1) == []
-    assert predict_passes(["garbage", "not a tle"], CHANGCHUN, hours=1) == []
+    assert predict_passes([], SAMPLE_SITE, hours=1) == []
+    assert predict_passes(["garbage", "not a tle"], SAMPLE_SITE, hours=1) == []
     print("[ok] 空/无效 TLE → 空列表")
 
 
@@ -64,10 +64,10 @@ def test_iss_pass_geometry():
     ts = make_timescale()
     tle = fetch_iss_tle()
     # 向后扫 36 小时，LEO(90min 周期) 必有多次 >10° 过境
-    passes = predict_passes(tle, CHANGCHUN, start_time=ts.now(),
+    passes = predict_passes(tle, SAMPLE_SITE, start_time=ts.now(),
                             hours=36.0, min_alt=10.0)
     assert len(passes) >= 1, "36h 内至少应预测出一次 ISS 过境"
-    print(f"\n[test] 共预测出 {len(passes)} 次过境（示例城市, 36h, min_alt=10°）：")
+    print(f"\n[test] 共预测出 {len(passes)} 次过境（示例站, 36h, min_alt=10°）：")
     for p in passes[:8]:
         print("   " + p.summary())
 
@@ -91,7 +91,7 @@ def test_trail_sampling():
     """trail 采样：围绕某时刻采一组 az/alt。"""
     ts = make_timescale()
     tle = ISS_TLE_FALLBACK
-    trail = sample_trail(tle, CHANGCHUN, ts.now(),
+    trail = sample_trail(tle, SAMPLE_SITE, ts.now(),
                          before_s=300, after_s=300, step_s=30)
     assert len(trail) >= 5, "应采样到一组轨迹点"
     print(f"\n[ok] trail 采样 {len(trail)} 个点，首末 az/alt: "

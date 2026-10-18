@@ -1,7 +1,7 @@
 # Phase63 — 接收状态栏窄视口信息密度复核（候选 1 主复核）
 
 - **HEAD**: `9950cf8`（落地前后未变，未做任何 git add/commit/push）
-- **仓库根**: `/home/user/Doubao/chats/38438160041798146/MBDSDR`
+- **仓库根**: `/path/to/MBDSDR/MBDSDR`
 - **运行方式**: 全程 CLI/offscreen（`QT_QPA_PLATFORM=offscreen`，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`），未操控 GUI；截图走既有 `ui_shot_narrow`（`cpp/tests/ui_screenshot_narrow.cpp`）通道，环境变量 `MBD_W/MBD_H/MBD_RSSITREND`。真实数据源 + 诚实空态，未注入任何 mock。
 
 ## 1. 现状（侦察）

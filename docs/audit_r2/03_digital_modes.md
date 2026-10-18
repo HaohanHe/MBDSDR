@@ -1,6 +1,6 @@
 # 第二轮深度审查 — mbdsdr_ai/digital_modes.py
 
-- 文件：`/home/user/Doubao/chats/38438160041798146/mbdsdr_ai/digital_modes.py`
+- 文件：`/path/to/MBDSDR/mbdsdr_ai/digital_modes.py`
 - 行数：199（实际读到 199 行，与题面一致）
 - 审查方式：逐行通读
 - 审查日期：2026-09-24

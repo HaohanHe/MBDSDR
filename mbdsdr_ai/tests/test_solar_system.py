@@ -21,7 +21,7 @@ from mbdsdr_ai.solar_system import (
     get_planet_position,
     get_backend_info,
     GroundStation,
-    CHANGCHUN,
+    SAMPLE_SITE,
 )
 
 
@@ -54,7 +54,7 @@ def test_sun_bounds():
     """太阳位置基本范围检查。"""
     _require_ephemeris()
     t = _time.time()
-    sun = get_sun_position(t, CHANGCHUN)
+    sun = get_sun_position(t, SAMPLE_SITE)
     assert sun is not None, "太阳位置返回 None"
     assert 0 <= sun.ra_deg < 360, f"RA 越界: {sun.ra_deg}"
     assert -23.5 <= sun.dec_deg <= 23.5, f"太阳赤纬越界: {sun.dec_deg}"
@@ -73,7 +73,7 @@ def test_sun_noon_altitude():
     找示例站正午（太阳最高）时刻，验证高度角公式。
     """
     _require_ephemeris()
-    station = CHANGCHUN
+    station = SAMPLE_SITE
     lat = station.latitude_deg
     lon = station.longitude_deg
 
@@ -104,7 +104,7 @@ def test_moon():
     """月亮位置检查。"""
     _require_ephemeris()
     t = _time.time()
-    moon = get_moon_position(t, CHANGCHUN)
+    moon = get_moon_position(t, SAMPLE_SITE)
     assert moon is not None, "月亮位置返回 None"
     assert 0 <= moon.ra_deg < 360, f"RA 越界: {moon.ra_deg}"
     assert -90 <= moon.dec_deg <= 90, f"赤纬越界: {moon.dec_deg}"
@@ -128,7 +128,7 @@ def test_planets():
     _require_ephemeris()
     t = _time.time()
     for name in ["mercury", "venus", "mars", "jupiter", "saturn"]:
-        pos = get_planet_position(name, t, CHANGCHUN)
+        pos = get_planet_position(name, t, SAMPLE_SITE)
         assert pos is not None, f"{name} 返回 None"
         assert 0 <= pos.ra_deg < 360, f"{name} RA 越界: {pos.ra_deg}"
         assert -90 <= pos.dec_deg <= 90, f"{name} dec 越界: {pos.dec_deg}"
@@ -145,10 +145,10 @@ def test_time_normalization():
     _require_ephemeris()
     now = _time.time()
     # unix 时间戳
-    p1 = get_sun_position(now, CHANGCHUN)
+    p1 = get_sun_position(now, SAMPLE_SITE)
     # datetime
     dt = datetime.fromtimestamp(now, tz=timezone.utc)
-    p2 = get_sun_position(dt, CHANGCHUN)
+    p2 = get_sun_position(dt, SAMPLE_SITE)
     assert p1 is not None and p2 is not None
     assert abs(p1.ra_deg - p2.ra_deg) < 0.01, "时间格式不一致"
     print(f"[OK] 时间归一化: unix vs datetime RA 差={abs(p1.ra_deg - p2.ra_deg):.6f}°")
@@ -158,9 +158,9 @@ def test_station_normalization():
     """测试多种站址输入格式。"""
     _require_ephemeris()
     now = _time.time()
-    p1 = get_sun_position(now, CHANGCHUN)
-    p2 = get_sun_position(now, (43.817, 125.323, 200.0))
-    p3 = get_sun_position(now, GroundStation(43.817, 125.323, 200.0))
+    p1 = get_sun_position(now, SAMPLE_SITE)
+    p2 = get_sun_position(now, (45.0, 120.0, 200.0))
+    p3 = get_sun_position(now, GroundStation(45.0, 120.0, 200.0))
     assert p1 is not None and p2 is not None and p3 is not None
     assert abs(p1.ra_deg - p2.ra_deg) < 0.001
     assert abs(p1.ra_deg - p3.ra_deg) < 0.001

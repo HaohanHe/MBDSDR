@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
                 sa->ensureWidgetVisible(grp);
             QApplication::processEvents();
             const QString out =
-                "/home/user/Doubao/chats/38438160041798146/cpp/scratch/ui_squelch_auto.png";
+                "scratch/ui_squelch_auto.png";
             QPixmap pm = win.grab();
             pm.save(out, "PNG");
             qInfo("ui_squelch_auto saved %dx%d -> %s", pm.width(), pm.height(),

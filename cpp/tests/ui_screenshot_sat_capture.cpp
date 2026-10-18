@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
             pm = win.grab();
         }
         const QString out =
-            "/home/user/Doubao/chats/38438160041798146/cpp/scratch/ui_sat_capture.png";
+            "scratch/ui_sat_capture.png";
         pm.save(out, "PNG");
         qInfo("ui_sat_capture saved %dx%d -> %s", pm.width(), pm.height(),
               qPrintable(out));

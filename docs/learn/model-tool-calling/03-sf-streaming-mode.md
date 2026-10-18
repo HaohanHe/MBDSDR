@@ -1,6 +1,6 @@
 # 硅基流动「流式输出（Stream Mode）」学习笔记
 
-> 文档来源：本地 HTML `/home/user/Doubao/chats/38438160041798146/repos/model-docs/siliconflow/docs_userguide_capabilities_stream-mode.html`
+> 文档来源：本地 HTML `/path/to/MBDSDR/repos/model-docs/siliconflow/docs_userguide_capabilities_stream-mode.html`
 > （Fumadocs 路由 `userguide/capabilities/stream-mode`，页面标题「流式输出」；204KB 中绝大部分为 Next.js/Fumadocs 站点导航与 RSC 数据壳，正文仅两小节）
 > 精读方式：HTML → 纯文本（Python stdlib `html.parser`，取 `<main>…</main>` 切片，`<pre>` 代码块按原样合并以还原语法高亮拆散的 token），全文逐节读完。
 > 转换产物：`sources/sf-stream-mode.txt`（173 行，供他人引用复核）

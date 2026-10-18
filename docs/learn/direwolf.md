@@ -313,7 +313,7 @@ Base-91 编码（`decode_aprs.c:95-97`，`'!'`=33 到 `'{'`=123）：
 
 ## 6. 对照 mbdsdr_ai/ax25.py 的问题清单
 
-> 对照文件：`/home/user/Doubao/chats/38438160041798146/mbdsdr_ai/ax25.py`
+> 对照文件：`/path/to/MBDSDR/mbdsdr_ai/ax25.py`
 
 ### 6.1 AFSK 解调
 

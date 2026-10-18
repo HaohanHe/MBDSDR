@@ -19,9 +19,9 @@ from mbdsdr_ai.sdr_tools import register_sdr_tools
 # (问题, 期望工具, 关键参数必须出现)
 CASES = [
     ("把呼号 BI1AAA 编成摩尔斯电码", "morse_encode", ["text"]),
-    ("我在示例城市43.8868,125.3245，预测 NOAA 19 最近过境时间", "satellite_predict_pass", ["observer_lat", "observer_lon"]),
-    ("用 BI1AAA 在示例城市43.8868,125.3245 发一条APRS位置", "sdr_aprs_encode", ["source", "latitude"]),
-    ("算示例城市43.8868,125.3245到北京39.9042,116.4074大圆距离", "gis_distance", ["lat1", "lon1"]),
+    ("我在示例站45.0,120.0，预测 NOAA 19 最近过境时间", "satellite_predict_pass", ["observer_lat", "observer_lon"]),
+    ("用 BI1AAA 在示例站45.0,120.0 发一条APRS位置", "sdr_aprs_encode", ["source", "latitude"]),
+    ("算示例站45.0,120.0到北京39.9042,116.4074大圆距离", "gis_distance", ["lat1", "lon1"]),
     ("我在示例城市，现在天上有哪些卫星可见", "sdr_satellite_sky_view", ["latitude", "longitude"]),
     ("分析当前频谱找出峰值频率", "sdr_spectrum_analyze", []),
     ("从88MHz扫到108MHz找最强FM台", "sdr_ai_sweep", ["freq_start_hz", "freq_end_hz"]),

@@ -1,7 +1,7 @@
 # MiMo Anthropic 兼容协议 学习笔记
 
 > **文档来源**：
-> - 在线抓取（已落盘）：`/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/mimo-anthropic.txt`
+> - 在线抓取（已落盘）：`/path/to/MBDSDR/docs/learn/model-tool-calling/sources/mimo-anthropic.txt`
 >   （源 URL：https://mimo.mi.com/docs/zh-CN/api/chat/anthropic-api ，字段表 2863 token 全文读完；
 >   镜像 https://mimo.mi.com/docs/api/chat/anthropic-api 、https://platform.xiaomimimo.com/docs/en-US/api/chat/anthropic-api ）
 > - 本地精读成果：`sources/mimo-openai-api.txt`（OpenAI 兼容 API 全文）、`sources/mimo-quickstart.txt`（首次调用）、

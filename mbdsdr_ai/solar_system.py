@@ -907,15 +907,9 @@ def get_backend_info() -> Dict[str, Any]:
 
 
 # ── 便捷：地面站参考示例（非默认值）─────────────────────────────
-# 以下为常见城市坐标参考，仅供用户查阅/手动选用。
+# 中性示例站坐标，仅供测试/演示/手动选用，不指向任何真实默认站址。
 # 系统不内置任何默认站址；实际使用时请在 ~/.mbdsdr/config.json
 # 设置 ground_station_lat / ground_station_lon，或在调用时显式传入。
 
-# 示例城市（参考示例）
-CHANGCHUN = GroundStation(latitude_deg=43.817, longitude_deg=125.323, height_m=200.0)
-
-# 北京（参考示例）
-BEIJING = GroundStation(latitude_deg=39.904, longitude_deg=116.407, height_m=50.0)
-
-# 上海（参考示例）
-SHANGHAI = GroundStation(latitude_deg=31.230, longitude_deg=121.474, height_m=10.0)
+# 示例站（中性示例坐标，120°E 标准经线附近）
+SAMPLE_SITE = GroundStation(latitude_deg=45.0, longitude_deg=120.0, height_m=200.0)

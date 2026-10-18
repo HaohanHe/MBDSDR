@@ -1,7 +1,7 @@
 # Phase63 — 写工具→读工具状态回读闭环抽查（只读审计 + 落档）
 
 - **HEAD**: `e1b296a`（审计前后未变；`git status --short` 仍仅任务开始前即存在的 4 个未跟踪 scratch 文件，tracked 零改动）
-- **仓库根**: `/home/user/Doubao/chats/38438160041798146/MBDSDR`
+- **仓库根**: `/path/to/MBDSDR/MBDSDR`
 - **范围**: 5 对「set_* 写 → get_* 读」闭环。聚焦：写回包是否真实反映引擎落定（无假成功字段、无陈旧值）；Agent 侧名 vs CH 侧名先查实际注册表。
 - **方法**: 全程只读源码 + offscreen 跑既有测试二进制（`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`，`env -i` clean env，`QT_QPA_PLATFORM=offscreen`，未设 `MBDSDR_TEST_SOURCE`）。未改源码、未 git add/commit/push、未 mock、未操控 GUI、未用 `/tmp`。
 - **前置**: 47 工具 gate/错误语义/参数边界/只读语义/状态一致性已审计（D1/D3 已修；状态一致性档已覆盖工具→UI 链路）。本轮不重复，只做「写→读」往返本身。

@@ -1,6 +1,6 @@
 # ai-sdr Mini 原理图 / PCB 工程导入说明（v0.7.1）
 
-项目：**MBDSDR**（AI 定义无线电）　硬件板名：**ai-sdr Mini**　呼号：BI4MIB
+项目：**MBDSDR**（AI 定义无线电）　硬件板名：**ai-sdr Mini**　呼号：BI1AAA（中性示例）
 62 个元件、49 个网络、80×60 mm 双层板、全 SMT（SMA 直插除外）。
 本工程为**单文件自包含**：符号库已内嵌进 `ai-sdr-mini.kicad_sch`，不依赖任何外部符号库，拷走一个文件也能打开。
 

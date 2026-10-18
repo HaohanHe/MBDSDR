@@ -379,7 +379,7 @@ def test_decoders_module(result: TestResult, agent: MBDSDRAgent):
 
     # 可见卫星列表
     try:
-        sats = list_visible_satellites(observer_lat=43.88, observer_lon=125.32, observer_alt=0.25)
+        sats = list_visible_satellites(observer_lat=45.0, observer_lon=120.0, observer_alt=0.25)
         result.record("list_visible_satellites", isinstance(sats, list))
     except Exception as e:
         result.record("list_visible_satellites", False, str(e))
@@ -389,7 +389,7 @@ def test_decoders_module(result: TestResult, agent: MBDSDRAgent):
         doppler = compute_doppler_correction(
             satellite_name="ISS",
             nominal_freq_hz=145800000,
-            observer_lat=43.88, observer_lon=125.32,
+            observer_lat=45.0, observer_lon=120.0,
         )
         result.record("compute_doppler_correction", isinstance(doppler, dict) or isinstance(doppler, float))
     except Exception as e:
@@ -521,7 +521,7 @@ def test_pose_module(result: TestResult, agent: MBDSDRAgent):
         # 位姿融合（update_imu / update_gps / get_pose）
         pf = PoseFusion()
         pf.update_imu(make_imu(0))
-        gps = GPSData(latitude=43.88, longitude=125.32, altitude=250, timestamp=0)
+        gps = GPSData(latitude=45.0, longitude=120.0, altitude=250, timestamp=0)
         pf.update_gps(gps)
         pose = pf.get_pose()
         result.record("PoseFusion", pose is not None)
@@ -795,8 +795,8 @@ def test_astronomy_module(result: TestResult, agent: MBDSDRAgent):
     )
 
     # 观测者
-    obs = Observer(latitude_deg=43.88, longitude_deg=125.32, height_m=250)
-    result.record("创建观测者", obs.latitude_deg == 43.88)
+    obs = Observer(latitude_deg=45.0, longitude_deg=120.0, height_m=250)
+    result.record("创建观测者", obs.latitude_deg == 45.0)
 
     # 时间系统
     jd = unix_to_jd()
@@ -805,7 +805,7 @@ def test_astronomy_module(result: TestResult, agent: MBDSDRAgent):
     result.record("JD→MJD", mjd > 60000)
     gmst = jd_to_gmst(jd)
     result.record("GMST", 0 <= gmst <= 2 * math.pi)
-    lst = jd_to_lst(jd, 125.32)
+    lst = jd_to_lst(jd, 120.0)
     result.record("LST", 0 <= lst <= 2 * math.pi)
     result.record("LST→HMS", ":" in lst_to_hms(lst))
 
@@ -1347,7 +1347,7 @@ def test_aprs_position_roundtrip(result: TestResult):
     except Exception as e:  # noqa: BLE001
         result.record("APRS 模块可导入", False, str(e))
         return
-    p = APRSPosition(latitude=43.88, longitude=125.32, comment="BI1AAA test")
+    p = APRSPosition(latitude=45.0, longitude=120.0, comment="BI1AAA test")
     s = p.encode()
     back = APRSPosition.decode(s)
     result.record("APRS 报文可解码", back is not None)
@@ -1355,9 +1355,9 @@ def test_aprs_position_roundtrip(result: TestResult):
         return
     # DDMM.mm 分钟精度，比较容差 0.01°
     result.record("APRS 纬度往返(容差0.01)",
-                  abs(back.latitude - 43.88) < 0.01, f"{back.latitude}")
+                  abs(back.latitude - 45.0) < 0.01, f"{back.latitude}")
     result.record("APRS 经度往返(容差0.01)",
-                  abs(back.longitude - 125.32) < 0.01, f"{back.longitude}")
+                  abs(back.longitude - 120.0) < 0.01, f"{back.longitude}")
 
 
 def test_hdlc_bitstuff_roundtrip(result: TestResult):

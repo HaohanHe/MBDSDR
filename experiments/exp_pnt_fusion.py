@@ -17,7 +17,7 @@ import sys, os, math, csv, random, json
 from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-TRUE_LAT, TRUE_LON = 43.8868, 125.3245
+TRUE_LAT, TRUE_LON = 45.0, 120.0
 METERS_PER_DEG_LAT = 111320.0
 METERS_PER_DEG_LON = 111320.0 * math.cos(math.radians(TRUE_LAT))
 N = 300

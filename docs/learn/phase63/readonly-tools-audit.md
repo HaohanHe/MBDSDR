@@ -1,7 +1,7 @@
 # Phase63 — MBDSDR 只读工具（get_*）语义一致性抽查（只读审计 + 落档）
 
 - **HEAD**: `bda5e48`（审计前后均未变）
-- **仓库根**: `/home/user/Doubao/chats/38438160041798146/MBDSDR`
+- **仓库根**: `/path/to/MBDSDR/MBDSDR`
 - **范围**: 任务点名的 6 个只读项 `get_status / get_rssi / get_spectrum_status / get_noise_blanker_status / get_squelch_status / get_capabilities`，聚焦「无设备 / 断连 / 未初始化」三态下，Agent / ControlHub / HTTP 三通道的返回形状与字段一致性，并下钻引擎真实状态源。
 - **方法**: 全程只读源码 + offscreen 跑既有测试二进制（`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`，clean env，未设 `MBDSDR_TEST_SOURCE`）。未改源码、未 git add/commit/push、未 mock、未操控 GUI。
 

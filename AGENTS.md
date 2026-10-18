@@ -47,7 +47,7 @@ tracked 文件（含 commit message）中：
 
 ## 5. 基线
 
-`python -m pytest mbdsdr_ai/tests -q` 当前基线 **901 passed / 5 skipped**
+`python -m pytest mbdsdr_ai/tests -q` 基线锨点（commit 级回归手段，不作对外宣传数字）：最近一次全绿记录 **901 passed / 5 skipped**
 （2026-10-18 上游 c6217d9 整合后沙箱复测；补齐 astropy 后 7 个 skip 解锁
 且全过。无网环境下 `test_real_tle_fresh_or_skip` 等真实联网用例转 skip，
 passed 数相应下浮——skip 均属无 env/无硬件的诚实 skip）。任何改动不得

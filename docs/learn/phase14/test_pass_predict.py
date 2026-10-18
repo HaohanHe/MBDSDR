@@ -43,7 +43,7 @@ _SAMPLE_TLE = [
     "2 25544  51.6400 208.9163 0006703  45.6260 312.5170 15.4976  69.8600   10001",
 ]
 # 示例站（仅测试用）。
-_GS = GroundStation(lat_deg=43.81, lon_deg=125.32, alt_m=200.0)
+_GS = GroundStation(lat_deg=45.0, lon_deg=120.0, alt_m=200.0)
 # 固定时钟：测试不依赖墙钟，结果可复现。
 _FIXED_CLOCK = lambda: datetime(2026, 10, 8, 1, 0, 0, tzinfo=timezone.utc)  # noqa: E731
 

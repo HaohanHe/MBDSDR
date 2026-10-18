@@ -79,7 +79,7 @@ Claude Desktop 的 MCP 配置文件位置：
 **使用方法**：
 1. 重启 Claude Desktop
 2. 在对话中输入："你能调用哪些 SDR 工具？"
-3. Claude 会自动发现并调用 ai-sdr Mini 的 14 个工具
+3. Claude 会自动发现并调用 ai-sdr Mini 的全部工具
 4. 可以用自然语言驱动："帮我接收 14.070 MHz 的短波信号"、"录 30 秒当前电台"、"获取 GPS 定位"
 
 ---
@@ -131,7 +131,7 @@ python3 mbdsdr_mcp_client.py --host localhost --port 81 get_status
 
 ---
 
-## 5. 14 个工具一览
+## 5. 工具一览（数量以固件 tools/list 实时口径为准）
 
 | 工具名 | 功能 | 参数 |
 |---|---|---|
@@ -165,5 +165,5 @@ python3 mbdsdr_mcp_client.py --host localhost --port 81 get_status
 
 ---
 
-*MBDSDR Project - AI定义无线电 - 全开源 GPL-3.0 - 呼号 BI4MIB*
+*MBDSDR Project - AI定义无线电 - 全开源 MIT*
 *文档版本: v0.1 (2026-09-16)*

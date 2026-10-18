@@ -1,6 +1,6 @@
 # 硅基流动 Function Calling 协议学习笔记
 
-> **文档来源**：本地 HTML `/home/user/Doubao/chats/38438160041798146/repos/model-docs/siliconflow/docs_userguide_guides_function-calling.html`
+> **文档来源**：本地 HTML `/path/to/MBDSDR/repos/model-docs/siliconflow/docs_userguide_guides_function-calling.html`
 > **在线对照源**：https://api-docs.siliconflow.cn/docs/userguide/guides/function-calling（未单独抓取，本地文本已完整）
 > **精读方式**：html2text 转纯文本后逐节通读
 > **转换文本**：`sources/sf-function-calling.txt`（441 行，12826 字符）

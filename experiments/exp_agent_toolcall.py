@@ -148,17 +148,17 @@ def build_requests():
         ("ok_gis",         "gis_distance",            {"lat1": 43.8868, "lon1": 125.3245,
                                                          "lat2": 39.9042, "lon2": 116.4074},
          "exec_success"),
-        ("ok_aprs",        "aprs_position_encode",    {"source": "BI1AAA", "latitude": 43.88,
-                                                         "longitude": 125.32}, "exec_success"),
+        ("ok_aprs",        "aprs_position_encode",    {"source": "BI1AAA", "latitude": 45.0,
+                                                         "longitude": 120.0}, "exec_success"),
         ("ok_nmea",        "gnss_parse_rmc",         {"nmea": nmea}, "exec_success"),
         # --- 短名/别名（应被 registry 自动解析/归一化，仍成功）---
-        ("alias_gis_short", "distance",              {"lat": 43.88, "lon": 125.32,
+        ("alias_gis_short", "distance",              {"lat": 45.0, "lon": 120.0,
                                                          "lat2": 39.9, "lon2": 116.4},
          "exec_success"),
         # --- 错误路径：应优雅失败（不崩溃，返回明确错误码）---
         ("bad_unknown_tool", "sdr_spectrum_analyze",  {}, "tool_not_found"),
         ("bad_missing_args", "morse_encode",         {}, "missing_required_params"),
-        ("bad_missing_gis",  "gis_distance",         {"lat1": 43.88}, "missing_required_params"),
+        ("bad_missing_gis",  "gis_distance",         {"lat1": 45.0}, "missing_required_params"),
     ]
 
 
