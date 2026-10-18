@@ -20,6 +20,7 @@ import os
 import json
 import time
 import math
+import tempfile
 import traceback
 
 import pytest
@@ -1232,15 +1233,39 @@ def test_tool_callability(result: TestResult, agent: MBDSDRAgent):
            "math domain")
     crashes = []
     tr = agent.tool_registry
+    # dry-call 通用字符串值必须落在 tmp：曾用仓库内真实文件 "README.md"
+    # （读类工具能真跑）——但写类工具会把它当真路径落盘，tracked 文件被
+    # 写坏后又被 code_git_commit（git add -A）自动提交（phase64 实测）。
+    # tmp 探针同样满足"存在的小文件"语义；写工具现已带 arm_manual 门，
+    # 这里是纵深防御。
+    probe = os.path.join(tempfile.gettempdir(), "mbdsdr_drycall_probe.txt")
+    with open(probe, "w", encoding="utf-8") as f:
+        f.write("dry-call 探针文件（读类工具的真跑目标）\n")
+    # 门存在性回归：四个写工具必须都声明 arm_manual 人工门（AGENTS.md §3）。
+    # 缺门时 dry-call 即可真实改文件/真实 git add -A 提交（phase64 实测）。
+    for wt in ("code_modify_file", "code_modify_section",
+               "code_git_commit", "code_rollback"):
+        if wt not in tr.tools:
+            crashes.append((wt, "tool missing"))
+            continue
+        req = (tr.tools[wt]["definition"].get("function", {})
+               .get("parameters", {}).get("required") or [])
+        if "arm_manual" not in req:
+            crashes.append((wt, "missing arm_manual gate"))
     for name in tr.get_tool_names():
         try:
             defn = tr.tools[name]["definition"].get("function", {}).get("parameters", {})
             props = defn.get("properties", {})
-            args = {r: 1.0 if props[r].get("type") == "number" else (
-                1 if props[r].get("type") == "integer" else (
-                    True if props[r].get("type") == "boolean" else (
-                        [] if props[r].get("type") == "array" else "README.md")))
-                for r in (defn.get("required") or []) if r in props}
+            # arm_manual 喂 False：无人值守的 dry-call 不存在"人工"，按类型
+            # 规则喂 True 等于机器替人确认——phase64 实测该机械值穿过人工门，
+            # 测试自动 git add -A 提交了工作区。写工具被门拒绝（gated 信封）
+            # 才是 dry-call 的正确预期；喂 False 走 handler 纵深门验证其在位。
+            args = {r: (False if r == "arm_manual" else
+                        1.0 if props[r].get("type") == "number" else (
+                        1 if props[r].get("type") == "integer" else (
+                            True if props[r].get("type") == "boolean" else (
+                                [] if props[r].get("type") == "array" else probe))))
+                    for r in (defn.get("required") or []) if r in props}
             res = tr.call(name, args)
             low = (getattr(res, "content", "") or "").lower()
             if any(b in low for b in bad):
