@@ -372,6 +372,8 @@ def tool_remotecontrol_roundtrip(args: Dict[str, Any]) -> Dict[str, Any]:
                           sample_rate_hz=int(args.get("sr", 1024000))))
     out: List[Dict[str, Any]] = []
     for cmd in args.get("commands", []):
+        if not isinstance(cmd, dict) or "command" not in cmd:
+            raise ValueError("commands 每项需为 {command, args} 对象")
         wire = proto.encode_command(cmd["command"], cmd.get("args", {}))
         resp = proto.decode_and_apply(wire)
         out.append({"request": json.loads(wire),

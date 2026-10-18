@@ -683,7 +683,10 @@ def register_multimon_tools(registry) -> None:
 
     def _dtmf_decode(args):
         import numpy as _np
-        audio = _np.array(args.get("samples", []), dtype=_np.float32)
+        raw = args.get("samples", [])
+        if not isinstance(raw, (list, tuple)) or isinstance(raw, (str, bytes)):
+            return {"success": False, "content": "samples 必须是数字数组"}
+        audio = _np.asarray(raw, dtype=_np.float32).reshape(-1)
         if audio.size == 0:
             return {"success": False, "content": "需要 samples 数组"}
         dec = DTMFDecoder(sample_rate=args.get("sample_rate", 22050))
@@ -707,7 +710,10 @@ def register_multimon_tools(registry) -> None:
 
     def _zvei_decode(args):
         import numpy as _np
-        audio = _np.array(args.get("samples", []), dtype=_np.float32)
+        raw = args.get("samples", [])
+        if not isinstance(raw, (list, tuple)) or isinstance(raw, (str, bytes)):
+            return {"success": False, "content": "samples 必须是数字数组"}
+        audio = _np.asarray(raw, dtype=_np.float32).reshape(-1)
         if audio.size == 0:
             return {"success": False, "content": "需要 samples 数组"}
         dec = ZVEIDecoder(sample_rate=args.get("sample_rate", 22050))
@@ -732,7 +738,10 @@ def register_multimon_tools(registry) -> None:
 
     def _afsk1200_demod(args):
         import numpy as _np
-        audio = _np.array(args.get("samples", []), dtype=_np.float32)
+        raw = args.get("samples", [])
+        if not isinstance(raw, (list, tuple)) or isinstance(raw, (str, bytes)):
+            return {"success": False, "content": "samples 必须是数字数组"}
+        audio = _np.asarray(raw, dtype=_np.float32).reshape(-1)
         if audio.size == 0:
             return {"success": False, "content": "需要 samples 数组"}
         dec = AFSK1200Demod(sample_rate=args.get("sample_rate", 22050))
