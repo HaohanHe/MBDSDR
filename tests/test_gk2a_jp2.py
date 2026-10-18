@@ -36,7 +36,13 @@ def _encode_jp2_lossless(arr: np.ndarray) -> bytes:
         mode = "I;16"
     else:
         mode = "L"
-    im = Image.fromarray(arr.astype(np.uint8) if mode == "L" else arr, mode=mode)
+    # Pillow 13 起 fromarray 拒绝 mode="I;16"（typemap 收紧）；frombuffer
+    # 直出小端字节流，位深语义不变（与 gk2a_lrit.py:1078-1083 同修法）。
+    if mode == "I;16":
+        im = Image.frombuffer("I;16", (arr.shape[1], arr.shape[0]),
+                              arr.astype("<u2").tobytes())
+    else:
+        im = Image.fromarray(arr.astype(np.uint8), mode=mode)
     buf = io.BytesIO()
     im.save(buf, format="JPEG2000", quality_mode="lossless")
     return buf.getvalue()
