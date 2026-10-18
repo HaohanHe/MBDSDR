@@ -127,7 +127,7 @@ void checkRtl(const char* what, int rc) {
 }
 
 // Test-installed fake ops table (see rtl_sdr_ops.h). Nullptr in production.
-const RtlLibOps* g_testOps = nullptr;
+// The three-way seam state lives with rtlLibOps() below.
 
 #ifdef HAVE_RTLSDR
 // ---- Real librtlsdr bindings (adapt rtlsdr_dev_t* -> opaque void*) ----------
@@ -203,8 +203,20 @@ const RtlLibOps g_realOps{
 
 } // namespace
 
+// Test-seam state, three-way:
+//   * g_testOps == nullptr && !g_testOpsForcedNull -> no fake installed,
+//     production table applies (real bindings under HAVE_RTLSDR, else nullptr);
+//   * g_testOps != nullptr -> installed test double wins;
+//   * g_testOpsForcedNull -> simulate a stub build (librtlsdr not compiled in):
+//     rtlLibOps() returns nullptr even under HAVE_RTLSDR. This is distinct from
+//     "restore default" (rtlSetLibOpsForTesting(nullptr)) so the graceful-stub
+//     path stays covered on builds that DO link librtlsdr.
+static const RtlLibOps* g_testOps = nullptr;
+static bool g_testOpsForcedNull = false;
+
 const RtlLibOps* rtlLibOps() {
-    if (g_testOps) return g_testOps;   // test double wins (never set in production)
+    if (g_testOps) return g_testOps;              // installed test double wins
+    if (g_testOpsForcedNull) return nullptr;      // forced stub simulation
 #ifdef HAVE_RTLSDR
     return &g_realOps;
 #else
@@ -212,7 +224,15 @@ const RtlLibOps* rtlLibOps() {
 #endif
 }
 
-void rtlSetLibOpsForTesting(const RtlLibOps* ops) { g_testOps = ops; }
+void rtlSetLibOpsForTesting(const RtlLibOps* ops) {
+    g_testOps = ops;
+    g_testOpsForcedNull = false;   // any explicit install/restore clears the forced state
+}
+
+void rtlForceNoLibOpsForTesting() {
+    g_testOps = nullptr;
+    g_testOpsForcedNull = true;
+}
 
 bool RtlSdrSource::pushCenterFreq(double freqHz) {
     const RtlLibOps* ops = rtlLibOps();

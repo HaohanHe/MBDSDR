@@ -74,14 +74,16 @@ void TestCheckpointWriter::backgroundDrainAsyncPersists() {
     QVERIFY2(w.submit(MemoryWriteRequest::Add, "session", "live-1", "async-key",
                       QString::fromUtf8("会话现场异步条目"), &err), qPrintable(err));
 
-    // Poll the background drain: worker wakes every ~150ms.
+    // Poll the background drain to COMPLETION: the queue is swapped out before
+    // the store write + checkpoint rewrite + lastFlushMs stamp, so pending==0
+    // alone is a transient state -- wait for the full completion signal.
     int waitedMs = 0;
-    while (w.pendingCount() != 0 && waitedMs < 3000) {
+    while ((w.pendingCount() != 0 || w.lastFlushMs() == 0) && waitedMs < 3000) {
         QThread::msleep(20);
         waitedMs += 20;
     }
     QVERIFY2(w.pendingCount() == 0, "background drain never emptied the queue");
-    QVERIFY(w.lastFlushMs() > 0);
+    QVERIFY2(w.lastFlushMs() > 0, "background drain never stamped a completed flush");
 
     MemoryStore s(dbPath());
     QVERIFY(s.open(&err));

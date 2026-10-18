@@ -51,7 +51,15 @@ const RtlLibOps* rtlLibOps();
 
 // TEST-ONLY injection seam -- never used for production wiring. Install a fake
 // table for the duration of a case and restore the previous value afterwards.
+// Passing nullptr RESTORES the production default (real bindings under
+// HAVE_RTLSDR, nullptr on stub builds) -- it does not simulate a stub build.
 void rtlSetLibOpsForTesting(const RtlLibOps* ops);
+
+// TEST-ONLY: force rtlLibOps() to nullptr even when librtlsdr IS compiled in
+// (HAVE_RTLSDR), so the graceful-stub path (start() fails, name() reports
+// "unsupported") stays covered on builds that link the real library. Cleared
+// by any subsequent rtlSetLibOpsForTesting() call.
+void rtlForceNoLibOpsForTesting();
 
 // Total center-frequency write attempts (first write + retries). Clean-room
 // re-derivation of the SDR++ RTL2832 PLL write-loss defence (upstream retries

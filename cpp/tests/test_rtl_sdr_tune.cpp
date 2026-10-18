@@ -165,10 +165,10 @@ void TestRtlSdrTune::openFailureIsHonest() {
     QVERIFY(!src.isConnected());
 }
 
-// Regression guard: with no ops table installed (e.g. librtlsdr not compiled in)
-// the source stays the graceful stub -- start() fails, engine falls back.
+// Regression guard: with the ops table forced null (e.g. librtlsdr not compiled
+// in) the source stays the graceful stub -- start() fails, engine falls back.
 void TestRtlSdrTune::noOpsMeansStubStartFails() {
-    rtlSetLibOpsForTesting(nullptr);
+    rtlForceNoLibOpsForTesting();
     RtlSdrSource src;
     QVERIFY(!src.start());
     QVERIFY(!src.isConnected());
