@@ -1,9 +1,9 @@
 # 思考模式 × 工具调用稳定性 学习笔记（能力边界 e 专篇）
 
 > 文档来源（本地绝对路径）：
-> - `/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/sf-interleaved-thinking.txt`（241 行，硅基流动官方英文站 Interleaved Thinking 全文转录）
-> - `/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/sf-chat-completions-api.txt`（545 行，硅基流动 `/chat/completions` API 手册）
-> - `/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/mimo-faq.txt`（303 行，小米 MiMo 官方 FAQ「API Integration」页）
+> - `/path/to/MBDSDR/docs/learn/model-tool-calling/sources/sf-interleaved-thinking.txt`（241 行，硅基流动官方英文站 Interleaved Thinking 全文转录）
+> - `/path/to/MBDSDR/docs/learn/model-tool-calling/sources/sf-chat-completions-api.txt`（545 行，硅基流动 `/chat/completions` API 手册）
+> - `/path/to/MBDSDR/docs/learn/model-tool-calling/sources/mimo-faq.txt`（303 行，小米 MiMo 官方 FAQ「API Integration」页）
 > - 旁证：`sources/sf-function-calling.txt`、`sources/sf-stream-mode.txt`（仅交叉引用，无新增 thinking 规则）
 >
 > 精读方式：本地纯文本逐行通读（HTML 已转文本落盘）；硅基 interleaved-thinking 本地 HTML 经核查为 404 壳页，真实正文为 2026-10-01 web.fetch 现行英文站 `docs.siliconflow.com/en/userguide/guides/interleaved-thinking` 全文转录（见 `sf-interleaved-thinking.txt:3-19` 元信息）。

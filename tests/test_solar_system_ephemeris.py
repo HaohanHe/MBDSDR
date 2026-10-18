@@ -136,7 +136,7 @@ def test_backend_name_in_result(monkeypatch):
     be = s._EphemerisBackend(auto_download=False)
     from datetime import datetime, timezone
     pos = s.get_sun_position(datetime(2025, 6, 21, 12, 0, tzinfo=timezone.utc),
-                             s.BEIJING)
+                             s.SAMPLE_SITE)
     assert pos is not None
     d = pos.to_dict()
     assert "backend" in d

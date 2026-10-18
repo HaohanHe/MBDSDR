@@ -1,12 +1,12 @@
 # 上下文缓存与性能实践 学习笔记
 
 > **文档来源**（本地绝对路径，均已全文精读）：
-> - `/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/sf-chat-completions-api.txt`（硅基流动 OpenAI 兼容 Chat Completions API 参考，545 行）
-> - `/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/sf-stream-mode.txt`（硅基流动《流式输出》指南，172 行）
-> - `/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/sf-interleaved-thinking.txt`（硅基流动《Interleaved Thinking》指南英文站全文转录，241 行）
-> - `/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/sf-cache-extras.txt`（硅基流动官方博客《Prompt Caching on SiliconFlow》在线抓取全文摘录，本次补抓落盘）
-> - `/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/mimo-faq.txt`（小米 MiMo FAQ「API Integration」页，303 行）
-> - `/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/mimo-quickstart.txt`（小米 MiMo《首次调用 API》，201 行）
+> - `/path/to/MBDSDR/docs/learn/model-tool-calling/sources/sf-chat-completions-api.txt`（硅基流动 OpenAI 兼容 Chat Completions API 参考，545 行）
+> - `/path/to/MBDSDR/docs/learn/model-tool-calling/sources/sf-stream-mode.txt`（硅基流动《流式输出》指南，172 行）
+> - `/path/to/MBDSDR/docs/learn/model-tool-calling/sources/sf-interleaved-thinking.txt`（硅基流动《Interleaved Thinking》指南英文站全文转录，241 行）
+> - `/path/to/MBDSDR/docs/learn/model-tool-calling/sources/sf-cache-extras.txt`（硅基流动官方博客《Prompt Caching on SiliconFlow》在线抓取全文摘录，本次补抓落盘）
+> - `/path/to/MBDSDR/docs/learn/model-tool-calling/sources/mimo-faq.txt`（小米 MiMo FAQ「API Integration」页，303 行）
+> - `/path/to/MBDSDR/docs/learn/model-tool-calling/sources/mimo-quickstart.txt`（小米 MiMo《首次调用 API》，201 行）
 >
 > **精读方式**：本地纯文本逐节精读（_SPEC §6 全文读完）；SF 缓存博客为 `web.fetch` 在线抓取（offset=0 与 offset=7996 两段续读，end_offset=10359=total_length，已读完整）后落盘 `sources/sf-cache-extras.txt`。
 > **精读日期**：2026-10-01　**作者**：MainAgent（批次学习子任务）

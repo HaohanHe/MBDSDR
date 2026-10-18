@@ -120,3 +120,7 @@ cpp/tests/*.moc
 
 # 测试退出期崩溃核心转储（PySide6+CPython3.12 已知缺陷，规避见 tests/conftest.py）
 core.*
+
+# 运行产物（不入库，脚本每次重写）
+tests/tool_param_smoke_result.json
+scratch/

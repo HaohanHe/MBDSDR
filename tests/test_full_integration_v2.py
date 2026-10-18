@@ -295,7 +295,7 @@ def test_decoders_module(result, agent):
     result.record("内置 TLE 数量 >= 5", len(BUILTIN_TLE) >= 5, f"实际 {len(BUILTIN_TLE)}")
 
     try:
-        sats = list_visible_satellites(observer_lat=43.88, observer_lon=125.32, observer_alt=0.25)
+        sats = list_visible_satellites(observer_lat=45.0, observer_lon=120.0, observer_alt=0.25)
         result.record("list_visible_satellites", isinstance(sats, list))
     except Exception as e:
         result.record("list_visible_satellites", False, str(e))
@@ -303,7 +303,7 @@ def test_decoders_module(result, agent):
     try:
         doppler = compute_doppler_correction(
             satellite_name="ISS", nominal_freq_hz=145800000,
-            observer_lat=43.88, observer_lon=125.32,
+            observer_lat=45.0, observer_lon=120.0,
         )
         result.record("compute_doppler_correction", isinstance(doppler, dict))
     except Exception as e:
@@ -426,7 +426,7 @@ def test_pose_module(result, agent):
         # 位姿融合（方法是 update_imu/update_gps，不是 update）
         pf = PoseFusion()
         imu = IMUData(accel_x=0, accel_y=0, accel_z=1, gyro_x=0, gyro_y=0, gyro_z=0, mag_x=0.2, mag_y=0, mag_z=0.4, timestamp=0)
-        gps = GPSData(latitude=43.88, longitude=125.32, altitude=250)
+        gps = GPSData(latitude=45.0, longitude=120.0, altitude=250)
         pf.update_imu(imu)
         pf.update_gps(gps)
         pose = pf.get_pose()
@@ -661,7 +661,7 @@ def test_astronomy_module(result, agent):
         compute_refraction, compute_airmass, compute_pointing_guidance,
     )
 
-    obs = Observer(latitude_deg=43.88, longitude_deg=125.32, height_m=250)
+    obs = Observer(latitude_deg=45.0, longitude_deg=120.0, height_m=250)
     result.record("创建观测者", obs.latitude_deg == 43.88)
 
     jd = unix_to_jd()

@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
 
     QTimer::singleShot(2200, [&]() {
         const QString out =
-            "/home/user/Doubao/chats/38438160041798146/cpp/scratch/ui_status_strip.png";
+            "scratch/ui_status_strip.png";
         QPixmap pm = win.grab();
         pm.save(out, "PNG");
         qInfo("ui_status_strip saved %dx%d -> %s", pm.width(), pm.height(),

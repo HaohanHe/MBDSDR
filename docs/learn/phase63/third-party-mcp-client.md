@@ -14,7 +14,7 @@
 ## 1. 被测对象与运行环境
 
 ```text
-二进制:  /home/user/Doubao/chats/38438160041798146/MBDSDR/ci/D135/cpp/build/mbdsdr_mcp
+二进制:  /path/to/MBDSDR/MBDSDR/ci/D135/cpp/build/mbdsdr_mcp
          (ELF 64-bit LSB pie, x86-64, with debug_info, not stripped)
 启动 env: QT_QPA_PLATFORM=offscreen
           MBDSDR_NULL_AUDIO=1

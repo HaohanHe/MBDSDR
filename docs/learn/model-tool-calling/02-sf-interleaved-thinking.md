@@ -1,7 +1,7 @@
 # SiliconFlow Interleaved Thinking 学习笔记
 
 > **文档来源**：
-> - 任务指定本地 HTML：`/home/user/Doubao/chats/38438160041798146/repos/model-docs/siliconflow/docs_userguide_guides_interleaved-thinking.html`
+> - 任务指定本地 HTML：`/path/to/MBDSDR/repos/model-docs/siliconflow/docs_userguide_guides_interleaved-thinking.html`
 >   —— 经逐字节核查为 **404 壳页**（尾部 flight payload 含 `"This page could not be found."` / `"页面未找到"` / `NEXT_HTTP_ERROR_FALLBACK;404`；侧边栏目录树无 `interleaved-thinking.mdx` 条目；可见 DOM 正文为空）。
 > - 现行官方全文（web.fetch 抓取，total_length=2828 已读完）：`https://docs.siliconflow.com/en/userguide/guides/interleaved-thinking`
 > - 旁证页：`https://docs.siliconflow.cn/docs/userguide/capabilities/reasoning`（思考开关参数）、`https://api-docs.siliconflow.cn/docs/userguide/guides/function-calling`（tools 循环）

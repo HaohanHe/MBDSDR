@@ -1,7 +1,7 @@
 # 步进 / 瀑布深度 / Marker 分层 — 三候选复核定案 + 三档 UI 快照复核
 
 - HEAD：`bda5e48`（docs: param-boundary audit (D3 fixed) + statusbar density recon）
-- 仓库根：`/home/user/Doubao/chats/38438160041798146/MBDSDR`
+- 仓库根：`/path/to/MBDSDR/MBDSDR`
 - 方式：全程 CLI/offscreen（`QT_QPA_PLATFORM=offscreen`，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`），未操控 GUI；截图走既有 `ui_shot_narrow`（`cpp/tests/ui_screenshot_narrow.cpp`）通道。真实数据源 + 诚实空态，未注入 mock。
 - 项目许可：MIT（根 `LICENSE`）。
 

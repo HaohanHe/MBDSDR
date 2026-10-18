@@ -1,11 +1,11 @@
 # tool_choice 行为 + 并行工具调用 学习笔记
 
 > 文档来源（本地纯文本，均为 2026-10-01 精读成果）：
-> - 硅基流动 Chat Completions API 参考：`/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/sf-chat-completions-api.txt`
-> - 硅基流动 Function Calling 指南：`/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/sf-function-calling.txt`
-> - 小米 MiMo OpenAI 兼容 API：`/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/mimo-openai-api.txt`
-> - 小米 MiMo 深度思考（回传 reasoning_content）：`/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/mimo-reasoning.txt`
-> - 小米 MiMo FAQ API Integration：`/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/sources/mimo-faq.txt`
+> - 硅基流动 Chat Completions API 参考：`/path/to/MBDSDR/docs/learn/model-tool-calling/sources/sf-chat-completions-api.txt`
+> - 硅基流动 Function Calling 指南：`/path/to/MBDSDR/docs/learn/model-tool-calling/sources/sf-function-calling.txt`
+> - 小米 MiMo OpenAI 兼容 API：`/path/to/MBDSDR/docs/learn/model-tool-calling/sources/mimo-openai-api.txt`
+> - 小米 MiMo 深度思考（回传 reasoning_content）：`/path/to/MBDSDR/docs/learn/model-tool-calling/sources/mimo-reasoning.txt`
+> - 小米 MiMo FAQ API Integration：`/path/to/MBDSDR/docs/learn/model-tool-calling/sources/mimo-faq.txt`
 > - 对照（思考稳定性）：`sources/sf-interleaved-thinking.txt`
 >
 > 精读方式：直接通读上述已落盘的纯文本精读成果（HTML 转文本 / web.fetch pagination 在线抓取，前序 agent 已完成落盘），本笔记仅做交叉整理，未新抓页面、未调任何 API。
@@ -216,7 +216,7 @@ for call_id, res in results.by_id():               # 按 id 顺序回传（与�
 
 ## 4. 红线与自检记录
 
-- [x] 目标文件可写入：`/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/10-tool-choice-and-parallel.md`。
+- [x] 目标文件可写入：`/path/to/MBDSDR/docs/learn/model-tool-calling/10-tool-choice-and-parallel.md`。
 - [x] 引用的每个 `sources/*.txt:<行>` 均已在原文核对：
   - tool_choice 逐字 = `mimo-openai-api.txt:57-59` ✓；
   - SF 参数表无 tool_choice、仅示例 `:459` ✓（通读 `sf-chat-completions-api.txt:35-319` 全表确认）；

@@ -1,7 +1,7 @@
 # SDR++ (SDRPlusPlus) 源码学习笔记
 
 > 仓库: https://github.com/AlexandreRouma/SDRPlusPlus
-> 本地路径: `/home/user/Doubao/chats/38438160041798146/repos/sdrpp`
+> 本地路径: `/path/to/MBDSDR/repos/sdrpp`
 > 学习目标: 拆解模块化信号流 / 源插件 / 频谱瀑布 / 设备抽象四层, 并对照 MBDSDR 给出可迁移点.
 > 所有 `file:line` 引用均相对仓库根目录.
 

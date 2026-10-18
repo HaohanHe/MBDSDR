@@ -46,7 +46,7 @@ SDR/GNSS 硬件，所有与硬件相关的项按预期输出 FAIL/WARN/SKIP，�
 命令：
 
 ```bash
-cd /home/user/Doubao/chats/38438160041798146
+cd /path/to/MBDSDR
 python3 tools/hw_selfcheck/selfcheck.py
 echo "EXIT=$?"
 ```
@@ -147,7 +147,7 @@ OS：Linux-6.6.95.bck.2-rc1-amd64-x86_64-with-glibc2.35  Python：3.12.11
 sudo usermod -aG plugdev,dialout $USER
 
 # 2) udev 规则（直接复用仓库里 librtlsdr 自带的）
-sudo cp /home/user/Doubao/chats/38438160041798146/repos/librtlsdr/rtl-sdr.rules \
+sudo cp /path/to/MBDSDR/repos/librtlsdr/rtl-sdr.rules \
         /etc/udev/rules.d/99-rtlsdr.rules
 sudo udevadm control --reload
 sudo udevadm trigger
@@ -169,7 +169,7 @@ exit
 ### 3.3 跑自检，对照预期
 
 ```bash
-cd /home/user/Doubao/chats/38438160041798146
+cd /path/to/MBDSDR
 python3 tools/hw_selfcheck/selfcheck.py
 ```
 
@@ -252,7 +252,7 @@ python3 tools/hw_selfcheck/selfcheck.py
 ## 6. 复现命令
 
 ```bash
-cd /home/user/Doubao/chats/38438160041798146
+cd /path/to/MBDSDR
 
 # 1) 人类报告
 python3 tools/hw_selfcheck/selfcheck.py
@@ -271,9 +271,9 @@ python3 -m pytest tools/hw_selfcheck/test_selfcheck.py -v
 
 | 绝对路径 | 用途 |
 |----------|------|
-| `/home/user/Doubao/chats/38438160041798146/tools/hw_selfcheck/selfcheck.py` | 主入口（stdlib-only，~470 行） |
-| `/home/user/Doubao/chats/38438160041798146/tools/hw_selfcheck/README.md` | 使用说明、检查项表、真机步骤 |
-| `/home/user/Doubao/chats/38438160041798146/tools/hw_selfcheck/test_selfcheck.py` | pytest 离线测试（14 用例） |
-| `/home/user/Doubao/chats/38438160041798146/docs/learn/phase4/B1-cloud-selfcheck.md` | 本报告 |
+| `/path/to/MBDSDR/tools/hw_selfcheck/selfcheck.py` | 主入口（stdlib-only，~470 行） |
+| `/path/to/MBDSDR/tools/hw_selfcheck/README.md` | 使用说明、检查项表、真机步骤 |
+| `/path/to/MBDSDR/tools/hw_selfcheck/test_selfcheck.py` | pytest 离线测试（14 用例） |
+| `/path/to/MBDSDR/docs/learn/phase4/B1-cloud-selfcheck.md` | 本报告 |
 
 未执行 `git commit` / `git push`，等待人工审阅后再决定是否入库。

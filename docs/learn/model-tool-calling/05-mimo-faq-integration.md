@@ -1,6 +1,6 @@
 # 小米 MiMo API 集成 FAQ 学习笔记
 
-> **文档来源**：本地克隆 `/home/user/Doubao/chats/38438160041798146/repos/model-docs/xiaomi-mimo/en-US_quick-start_faq_api-integration.html`（约 160KB）。
+> **文档来源**：本地克隆 `/path/to/MBDSDR/repos/model-docs/xiaomi-mimo/en-US_quick-start_faq_api-integration.html`（约 160KB）。
 > **精读方式**：python3 stdlib `html.parser` 转纯文本，全文 303 行逐节读完（脚本在 agent workspace，未入仓库）。
 > **转换文本**：`docs/learn/model-tool-calling/sources/mimo-faq.txt`（本笔记所有 `mimo-faq.txt:<行号>` 引用均指向该文件）。
 > **精读日期**：2026-10-01；**作者**：s_000c4GAuTz6。

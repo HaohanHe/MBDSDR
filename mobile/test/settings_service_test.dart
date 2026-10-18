@@ -97,16 +97,16 @@ void main() {
     s.rtlPort = 8080;
     s.apiModel = 'deepseek-chat';
     s.apiKey = 'sk-abcdef123456';
-    s.stationLat = 43.88;
-    s.stationLon = 125.32;
+    s.stationLat = 45.0;
+    s.stationLon = 120.0;
     s.stationAlt = 230.5;
 
     // host 落盘前已 trim
     expect(kv.data['rtlHost'], '192.168.1.10');
     expect(kv.data['rtlPort'], 8080);
     expect(kv.data['apiModel'], 'deepseek-chat');
-    expect(kv.data['stationLat'], 43.88);
-    expect(kv.data['stationLon'], 125.32);
+    expect(kv.data['stationLat'], 45.0);
+    expect(kv.data['stationLon'], 120.0);
     expect(kv.data['stationAlt'], 230.5);
 
     final SettingsService s2 = SettingsService(kv: kv, secure: secure);
@@ -115,8 +115,8 @@ void main() {
     expect(s2.rtlPort, 8080);
     expect(s2.apiModel, 'deepseek-chat');
     expect(s2.apiKey, 'sk-abcdef123456');
-    expect(s2.stationLat, 43.88);
-    expect(s2.stationLon, 125.32);
+    expect(s2.stationLat, 45.0);
+    expect(s2.stationLon, 120.0);
     expect(s2.stationAlt, 230.5);
     expect(s2.hasManualStation, isTrue);
   });

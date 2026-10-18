@@ -2,7 +2,7 @@
 
 > **文档来源**：
 > - 在线正文：https://mimo.mi.com/docs/quick-start/first-api-call （在线抓取，全文 1424 字符一次读完）
-> - 本地壳（仅作核实，无正文）：`/home/user/Doubao/chats/38438160041798146/repos/model-docs/xiaomi-mimo/quick-start_first-api-call.html`
+> - 本地壳（仅作核实，无正文）：`/path/to/MBDSDR/repos/model-docs/xiaomi-mimo/quick-start_first-api-call.html`
 >
 > **精读方式**：web_fetch 在线抓取（pagination offset=0, limit=8000，end_offset=1424=total_length，单页读完，无需续读）；本地 HTML 仅核实壳性质。
 > **精读日期**：2026-10-01　**作者**：MainAgent（子任务 07）

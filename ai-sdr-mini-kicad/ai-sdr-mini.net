@@ -1,6 +1,6 @@
 (export (version "E")
   (design
-    (source "/home/user/Doubao/chats/38438160041798146/ai-sdr-mini-kicad/ai-sdr-mini.kicad_sch")
+    (source "/path/to/MBDSDR/ai-sdr-mini-kicad/ai-sdr-mini.kicad_sch")
     (date "Wed 16 Sep 2026 11:07:50 PM +08")
     (tool "Eeschema 7.0.11-7.0.11~ubuntu22.04.1")
     (sheet (number "1") (name "/") (tstamps "/")

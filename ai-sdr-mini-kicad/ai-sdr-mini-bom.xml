@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <export version="E">
   <design>
-    <source>/home/user/Doubao/chats/38438160041798146/ai-sdr-mini-kicad/ai-sdr-mini.kicad_sch</source>
+    <source>/path/to/MBDSDR/ai-sdr-mini-kicad/ai-sdr-mini.kicad_sch</source>
     <date>Wed 16 Sep 2026 11:07:35 PM +08</date>
     <tool>Eeschema 7.0.11-7.0.11~ubuntu22.04.1</tool>
     <sheet number="1" name="/" tstamps="/">

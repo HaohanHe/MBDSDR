@@ -14,8 +14,8 @@
     }
   },
   "_exposed_tools_overview": {
-    "C++ mbdsdr-mcp": "77 工具 / 9 域：SDR调谐/VFO（19）、亚音数字解码（15，含 get_adsb_aircraft/get_ft8_history）、VNA测量（4）、VNA分析（6）、VNA校准（1）、导出演制（11）、书签扫描卫星（9）、系统设备（7）、记忆编排（5：memory_add/search/update/checkpoint_status/memory_flush）。工具表=toolDefs() 唯一事实源。",
-    "Python mbdsdr_ai.core.mcp_server": "60 工具 / 10 域（前 9 域与 C++ 同集合，另含「解码器长尾」扩展域：DAB+/NRSC5/rtl433/GK-2A/FST4/bladeRF 参数）。面向脚本/嵌入式控制器。"
+    "C++ mbdsdr-mcp": "DSP 原语工具集（数量/域以 toolDefs() 实时口径为准）：SDR调谐/VFO（19）、亚音数字解码（15，含 get_adsb_aircraft/get_ft8_history）、VNA测量（4）、VNA分析（6）、VNA校准（1）、导出演制（11）、书签扫描卫星（9）、系统设备（7）、记忆编排（5：memory_add/search/update/checkpoint_status/memory_flush）。工具表=toolDefs() 唯一事实源。",
+    "Python mbdsdr_ai.core.mcp_server": "SDR 控制工具集（数量/域以 tools/list 实时口径为准；前 9 域与 C++ 同集合，另含「解码器长尾」扩展域：DAB+/NRSC5/rtl433/GK-2A/FST4/bladeRF 参数）。面向脚本/嵌入式控制器。"
   },
   "_notes": [
     "协议：JSON-RPC 2.0 over stdio，MCP protocolVersion 2024-11-05，每行一个 JSON。",

@@ -1,7 +1,7 @@
 # Phase63 — MBDSDR engine↔UI 状态一致性抽查（只读审计 + 落档）
 
 - **HEAD**: `e9d4440`（审计前后未变，`git diff --stat` 为空）
-- **仓库根**: `/home/user/Doubao/chats/38438160041798146/MBDSDR`
+- **仓库根**: `/path/to/MBDSDR/MBDSDR`
 - **范围**: 3 个写工具 + 1 个回读工具的「工具→engine→UI」状态链路。聚焦：工具改状态后 UI 是否如实反映（无陈旧值、无假成功），以及 `sbMode_/sbSr_` 的回读真实源。
 - **方法**: 全程只读源码 + offscreen 跑既有测试二进制（`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`，`env -i` clean env，`QT_QPA_PLATFORM=offscreen`，未设 `MBDSDR_TEST_SOURCE`）。未改源码、未 git add/commit/push、未 mock、未操控 GUI、未用 `/tmp` 做自有 scratch。
 

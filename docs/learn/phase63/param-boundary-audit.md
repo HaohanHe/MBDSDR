@@ -1,7 +1,7 @@
 # Phase63 — MBDSDR 数值参数边界一致性抽查（只读审计 + 落档）
 
 - **HEAD**: `9950cf8`（审计前后未变）
-- **仓库根**: `/home/user/Doubao/chats/38438160041798146/MBDSDR`
+- **仓库根**: `/path/to/MBDSDR/MBDSDR`
 - **范围**: 47 工具三通道（Agent / ControlHub / HTTP）中的 **6 个数值类工具**，聚焦「越界/非法参数在三通道是 clamp 还是拒绝」的一致性。
 - **方法**: 全程只读源码 + offscreen 跑既有测试二进制（`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`，clean env，未设 `MBDSDR_TEST_SOURCE`）。未改源码、未 git add/commit/push、未 mock、未操控 GUI。
 

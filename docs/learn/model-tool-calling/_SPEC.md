@@ -9,10 +9,10 @@
 
 ## 1. 落盘位置与命名
 
-- 目录：`/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling/`（不存在则 mkdir -p）
+- 目录：`/path/to/MBDSDR/docs/learn/model-tool-calling/`（不存在则 mkdir -p）
 - 转换出的纯文本：同目录 `sources/<slug>.txt`（供他人引用）
 - 笔记：同目录 `NN-<slug>.md`（NN = 两位序号，由任务指定）
-- 综合稿：`/home/user/Doubao/chats/38438160041798146/docs/learn/model-tool-calling-boundaries.md`（由综合 agent 产出）
+- 综合稿：`/path/to/MBDSDR/docs/learn/model-tool-calling-boundaries.md`（由综合 agent 产出）
 
 ## 2. 每篇笔记固定结构（顺序不可乱）
 
@@ -56,5 +56,5 @@
 
 ## 7. 示例（既有格式基准）
 
-- `/home/user/Doubao/chats/38438160041798146/docs/learn/port_report.md`（表格 + file:line 引用 + 红线）
-- `/home/user/Doubao/chats/38438160041798146/docs/learn/satnogs_client.md`（元信息头 + 标注约定）
+- `/path/to/MBDSDR/docs/learn/port_report.md`（表格 + file:line 引用 + 红线）
+- `/path/to/MBDSDR/docs/learn/satnogs_client.md`（元信息头 + 标注约定）

@@ -32,7 +32,7 @@ from mbdsdr_ai.sat_passes import GroundStation  # noqa: E402
 L1 = ("1 25544U 98067A   24275.50000000  .00016717  00000-0  10270-3 0  9000")
 L2 = ("2 25544  51.6400 292.0000 0001333  90.0000 270.0000 15.50000000    000")
 TLE = ["ISS (ZARYA)", L1, L2]
-CHANGCHUN = GroundStation(43.82, 125.32, 0.0)
+SAMPLE_SITE = GroundStation(45.0, 120.0, 0.0)
 
 
 def test_parse_epoch():
@@ -61,7 +61,7 @@ def test_fresh_stale_none_three_states():
 
 def test_predict_time_source_system_with_injected_clock():
     fixed = lambda: datetime(2024, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
-    rep = predict_passes_report(TLE, CHANGCHUN, hours=4, min_alt=5, clock=fixed)
+    rep = predict_passes_report(TLE, SAMPLE_SITE, hours=4, min_alt=5, clock=fixed)
     assert rep["time_source"] == "system"
     assert rep["prediction_start_utc"] == "2024-10-01T12:00:00Z"
     # TLE 新鲜度随报告带出
@@ -73,14 +73,14 @@ def test_predict_time_source_system_with_injected_clock():
 
 def test_predict_time_source_gnss():
     g = datetime(2024, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
-    rep = predict_passes_report(TLE, CHANGCHUN, hours=4, min_alt=5, gnss_dt=g)
+    rep = predict_passes_report(TLE, SAMPLE_SITE, hours=4, min_alt=5, gnss_dt=g)
     assert rep["time_source"] == "gnss"
     assert rep["prediction_start_utc"] == "2024-10-01T12:00:00Z"
 
 
 def test_predict_no_tle_is_honest_empty():
     fixed = lambda: datetime(2024, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
-    rep = predict_passes_report([], CHANGCHUN, hours=4, min_alt=5, clock=fixed)
+    rep = predict_passes_report([], SAMPLE_SITE, hours=4, min_alt=5, clock=fixed)
     assert rep["n_passes"] == 0
     assert rep["passes"] == []
     assert rep["tle"]["status"] == "none"

@@ -114,7 +114,7 @@ Crostini 是隔离 VM，通常不需要像普通 Linux 那样 blacklist `dvb_usb
 ## 5. 拉取项目并构建 C++ 桌面引擎
 
 ```bash
-git clone https://github.com/HaohanHe/MBDSDR.git
+git clone https://github.com/<your-github-account>/MBDSDR.git
 cd MBDSDR/cpp
 
 cmake -B build -S .

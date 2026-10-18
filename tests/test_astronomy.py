@@ -156,7 +156,7 @@ class TestTLEPropagation(unittest.TestCase):
         l1, l2 = self._iss_tle()
         sat = Satrec.twoline2rv(l1, l2)
         st = orbit._state_from_satrec(sat, "ISS", 2461308.5,
-                                      43.817, 125.323, 0.2)
+                                      45.0, 120.0, 0.2)
         self.assertIsNotNone(st)
         self.assertTrue(0.0 <= st["azimuth"] <= 360.0)
         self.assertTrue(-90.0 <= st["elevation"] <= 90.0)

@@ -13,8 +13,9 @@
 set -u
 BUILD_DIR="$(cd "$(dirname "$0")/../build" 2>/dev/null && pwd)"
 if [ -n "${BUILD_DIR:-}" ] && [ -x "${BUILD_DIR}/mbdsdr" ]; then cd "$BUILD_DIR"; fi
-export PATH=/home/user/Qt/6.8.2/gcc_64/bin:$PATH
-export LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib:${LD_LIBRARY_PATH:-}
+QT6_HOME="${QT6_HOME:-/home/user/Qt/6.8.2/gcc_64}"   # 覆盖：QT6_HOME=/path/to/qt6
+export PATH="${QT6_HOME}/bin:$PATH"
+export LD_LIBRARY_PATH="${QT6_HOME}/lib:${LD_LIBRARY_PATH:-}"
 export QT_QPA_PLATFORM=offscreen
 export MBDSDR_TEST_SOURCE=1
 

@@ -1,9 +1,14 @@
 # MBDSDR 的 MCP 对外集成：让 SDR 成为 AI 的标准工具
 
+> **实现落点报告（仓库布局勘误）**：本文中 `ai/mcp_stdio_server.py` 与 15 个
+> 桌面工具名为设计期命名。实际落点：`mbdsdr_ai/core/mcp_server.py` 与
+> `mbdsdr_ai_mcp_server.py` 双 MCP server（协议层 NDJSON/JSON-RPC 2.0/inputSchema/
+> isError 与本文一致），工具名为 `sdr_*` 体系；本地 HTTP 桥为设计缺口。
+
 > 模块：`src/desktop/ai/mcp_stdio_server.py`（Python，桥接运行中的桌面端）
 > 配置示例：`src/desktop/ai/mcp_server.example.json`
-> 对称实现：C++ 核心 `src/mcp`（DSP 原语，66 工具，`mbdsdr mcp`）
-> License: GPL-3.0-or-later
+> 对称实现：C++ 核心 `src/mcp`（DSP 原语，数量以 toolDefs() 实时口径为准，`mbdsdr mcp`）
+> License: MIT（全仓统一，见根 LICENSE；学上游只学机制、不抄 GPL 代码）
 
 ## 1. 定位：AI 定义无线电的"最后一公里"
 
@@ -80,7 +85,7 @@ baseband_analyze_file 完成任务。
   （工具数与 inputSchema 合法）、tools/call（content 文本、ok 判定）、未知方法
   -32601 错误码全部断言通过；
 - 真实 stdio 管道测试：以 NDJSON 向 stdin 喂 initialize/tools/list，stdout 正确
-  回包，15 工具、schema 含 default/minimum/maximum。
+  回包，全部工具、schema 含 default/minimum/maximum。
 
 ## 7. 论文创新点对应
 

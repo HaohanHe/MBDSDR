@@ -58,7 +58,7 @@ from mbdsdr_ai.spacetime_predict import predict_passes_report  # noqa: E402
 # 地面站（操作者本机位置）。填本机经纬度即可，海拔可留 0。
 GROUND_STATION: Dict[str, Any] = {
     "lat_deg": None,      # TODO(官方发布后/本机)：本机纬度，如 43.81
-    "lon_deg": None,      # TODO(本机)：本机经度，如 125.32
+    "lon_deg": None,      # TODO(用户站址)：填自己的观测站经度，例如 120.0
     "alt_m":   0.0,       # 海拔 m（平原环境可保持 0）
 }
 

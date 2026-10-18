@@ -168,7 +168,7 @@ class MBDSDRClient:
         raise TimeoutError(f"调用 {method} 超时 ({self.timeout}s)")
 
     # ------------------------------------------------------------------
-    # 14 个工具的 Python 封装 (每个都有真实硬件调用，非空壳)
+    # ai-sdr Mini 硬件工具的 Python 封装 (每个都有真实硬件调用，非空壳；数量以固件 tools/list 为准)
     # ------------------------------------------------------------------
 
     def list_tools(self) -> List[Dict]:

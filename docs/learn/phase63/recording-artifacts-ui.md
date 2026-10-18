@@ -1,7 +1,7 @@
 # Phase63 — 录制产物管理 UI / 书签交互 / 状态栏密度 三候选复核
 
 - **HEAD**: `e1b296a`（侦察前后未变，未做任何 git add/commit/push）
-- **仓库根**: `/home/user/Doubao/chats/38438160041798146/MBDSDR`
+- **仓库根**: `/path/to/MBDSDR/MBDSDR`
 - **运行方式**: 全程 CLI/offscreen（`QT_QPA_PLATFORM=offscreen`，`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib`），未操控 GUI；构建走持久 `cpp/build/` 增量；截图走既有 `ui_shot_narrow`（`cpp/tests/ui_screenshot_narrow.cpp`）通道，环境变量 `MBD_W/MBD_H/MBD_SCROLL/MBD_TAB/MBD_OUT`。真实数据源 + 诚实空态，未注入任何 mock。
 
 > 背景：本轮回执的假设快照早于此前若干 phase 落地——假设"录制产物管理 UI 缺失、全仓无 recFileList 类"。本轮侦察核实：**该假设已被既有 `RecordingLibrary` + 录制库 tab + "打开录制目录"按钮整体覆盖**，三个候选均判非缺口（证据如下）。
@@ -61,7 +61,7 @@
 
 ## 3. 快照核查（ui_shot_narrow，门控先例 MBD_PEAKSHOT）
 
-输出目录：`/home/user/Doubao/chats/38438160041798146/ci/phase63_shots/`
+输出目录：`/path/to/MBDSDR/ci/phase63_shots/`
 
 | 快照 | 尺寸 | 内容 | 核查结论 |
 |---|---|---|---|

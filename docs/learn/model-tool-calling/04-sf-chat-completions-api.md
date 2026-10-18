@@ -1,6 +1,6 @@
 # 硅基流动 Chat Completions API（OpenAI 兼容）学习笔记
 
-> 文档来源（本地原始 HTML）：`/home/user/Doubao/chats/38438160041798146/repos/model-docs/siliconflow/docs_api_chat-completions-post.html`（628,559 字节）
+> 文档来源（本地原始 HTML）：`/path/to/MBDSDR/repos/model-docs/siliconflow/docs_api_chat-completions-post.html`（628,559 字节）
 > 转换纯文本：`sources/sf-chat-completions-api.txt`（545 行，本目录 `sources/` 下，他人可引用）
 > 精读方式：HTML→文本（Python `html2text`，提取 `<article>` 正文），逐节读完转换文本全文
 > 精读日期：2026-10-01　作者：s_000c4GAuGAS（MainAgent）

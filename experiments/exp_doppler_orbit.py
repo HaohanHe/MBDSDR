@@ -40,10 +40,10 @@ FIG_DIR = os.path.join(OUT_DIR, "figures")
 # 固定 TLE（ISS/ZARYA，公开发布）；真值传播用 sgp4。
 TLE_L1 = ("1 25544U 98067A   24275.50000000  .00016717  00000-0  10270-3 0  9000")
 TLE_L2 = ("2 25544  51.6400 292.0000 0001333  90.0000 270.0000 15.50000000    000")
-# 过境窗口：仰角 0.8->71->2.6 deg（示例站 43.8868N,125.3245E）
+# 过境窗口：仰角 0.8->71->2.6 deg（示例站 45.0N,120.0E，中性示例坐标）
 T_BASE = datetime.datetime(2024, 10, 1, 12, 0, 0,
                            tzinfo=datetime.timezone.utc).timestamp() + 6240.0
-RX_LAT, RX_LON, RX_ALT = 43.8868, 125.3245, 0.0
+RX_LAT, RX_LON, RX_ALT = 45.0, 120.0, 0.0
 
 
 def build_truth(n_obs: int, pass_s: float):

@@ -3,7 +3,7 @@
 # 主来源: https://mimo.mi.com/docs/api/chat/openai-api  (抓取于 2026-10-01, 全量 3811 字符)
 # 补充来源1: https://mimo.mi.com/docs/en-US/quick-start/faq/api-integration (函数调用示例 + thinking+tool 稳定性警告)
 # 补充来源2: https://mimo.mi.com/docs/zh-CN/usage-guide/passing-back-reasoning_content (role=tool 回传 + 多轮工具调用完整示例)
-# 本地壳文件: /home/user/Doubao/chats/38438160041798146/repos/model-docs/xiaomi-mimo/api_chat_openai-api.html (47行, SPA空壳, 无正文)
+# 本地壳文件: /path/to/MBDSDR/repos/model-docs/xiaomi-mimo/api_chat_openai-api.html (47行, SPA空壳, 无正文)
 # ============================================================
 
 # OpenAI Chat Completions API 兼容

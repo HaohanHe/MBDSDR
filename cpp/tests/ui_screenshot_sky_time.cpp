@@ -27,7 +27,8 @@
 using namespace mbdsdr;
 
 static const QString kOut =
-    "/home/user/Doubao/chats/38438160041798146/cpp/scratch/";
+    QString::fromLocal8Bit(qgetenv("MBD_OUTDIR").isEmpty()
+        ? QByteArray("scratch") : qgetenv("MBD_OUTDIR")) + "/";
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
