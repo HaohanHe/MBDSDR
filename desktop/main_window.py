@@ -526,7 +526,13 @@ class MainWindow(QMainWindow):
             app = QApplication.instance()
             if app is not None:
                 base = getattr(self, "_theme_qss", "")
-                app.setStyleSheet(base + extra)
+                target = base + extra
+                # 幂等：app 级 setStyleSheet 重抛光全部控件（成本 O(全部控件)，
+                # 见 Theme.apply 的说明）。触屏模式切换时每个存亡窗口的槽都会
+                # 调到这里，不跳过就是 O(N²)——tests/ 根 90% 处挂死的真因。
+                # 内容相同则跳过：重复应用不改变任何视觉表现。
+                if app.styleSheet() != target:
+                    app.setStyleSheet(target)
         except Exception:
             pass
 

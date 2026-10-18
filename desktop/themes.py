@@ -63,7 +63,15 @@ class Theme:
         self.spectrum_colors = spectrum_colors  # 频谱渐变颜色列表 (hex)
 
     def apply(self, app: QApplication):
-        """应用主题到 QApplication。"""
+        """应用主题到 QApplication（幂等：状态相同则跳过重抛光）。
+
+        setPalette/setFont/setStyleSheet 都是 app 级全量操作——重抛光**全部**
+        控件，成本 O(全部控件)。每个新 MainWindow 构造都会应用一次主题，N 个
+        窗口累计 O(N²)：实测 20+ 个 MainWindow 后单次构造从 1.7s 恶化到 30s+
+        且持续恶化，长驻进程与 pytest 套件（tests/ 根 90% 处挂死）直接把 UI
+        线程卡死。状态（palette/font/stylesheet）完全相同时重复应用不改变任何
+        视觉表现，跳过是安全的；三者任一不同才真正应用。
+        """
         palette = QPalette()
         c = self.colors
 
@@ -86,11 +94,20 @@ class Theme:
         palette.setColor(QPalette.Disabled, QPalette.Text, QColor(c["text_disabled"]))
         palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(c["text_disabled"]))
 
+        qss = self._build_qss()
+        font = get_app_font()
+        try:
+            if (app.palette() == palette and app.font() == font
+                    and app.styleSheet() == qss):
+                return                      # 已应用过同一状态：跳过全量重抛光
+        except Exception:
+            pass                            # 比较失败（异常平台）则照常应用
+
         app.setPalette(palette)
-        app.setFont(get_app_font())
+        app.setFont(font)
 
         # 应用 QSS 样式表
-        app.setStyleSheet(self._build_qss())
+        app.setStyleSheet(qss)
 
     def _build_qss(self) -> str:
         """构建 QSS 样式表。"""
