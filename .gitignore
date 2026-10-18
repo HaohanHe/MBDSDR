@@ -117,3 +117,6 @@ cpp/tests/*.moc
 # SPICE ephemeris kernel downloaded into CWD by an older test path
 # (proper location is ~/.mbdsdr/ephemeris per solar_system.py:49)
 *.bsp
+
+# 测试退出期崩溃核心转储（PySide6+CPython3.12 已知缺陷，规避见 tests/conftest.py）
+core.*
