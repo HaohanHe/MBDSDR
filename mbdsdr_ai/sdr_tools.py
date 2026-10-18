@@ -1529,7 +1529,7 @@ def register_sdr_tools(agent):
         parameters={
             "type": "object",
             "properties": {
-                "file_path": {"type": "string", "description": "录制文件路径（.cf32/.cs16/.wav）"},
+                "file_path": {"type": "string", "description": "录制文件路径（.cf32/.cs16/.cu8/.wav/.csv）"},
                 "correct_iq": {"type": "boolean", "description": "是否先做 IQ 前端校正，默认 true"},
                 "fft_size": {"type": "integer", "description": "FFT 大小，默认 1024"},
             },
@@ -4387,8 +4387,19 @@ def _analyze_recording(args):
                     samples = (audio_data[0::2].astype(np.float32) / 32767.0) + 1j * (audio_data[1::2].astype(np.float32) / 32767.0)
                 else:
                     samples = audio_data.astype(np.float32) + 1j * 0
+        elif ext == ".cu8":
+            # rtl_sdr / SDR# / GQRX 通用 unsigned 8-bit 交错，中心 127.5
+            raw = np.fromfile(file_path, dtype=np.uint8)
+            samples = ((raw[0::2].astype(np.float32) - 127.5) / 127.5
+                       + 1j * (raw[1::2].astype(np.float32) - 127.5) / 127.5)
+        elif ext == ".csv":
+            # 文本行 I,Q（首行表头可选）——与 dsp.write_csv 对称
+            rows = np.loadtxt(file_path, delimiter=",", skiprows=1, ndmin=2)
+            if rows.shape[1] < 2:
+                return "错误: csv 需至少两列 (I,Q)"
+            samples = rows[:, 0].astype(np.float32) + 1j * rows[:, 1].astype(np.float32)
         else:
-            return f"错误: 不支持的格式: {ext}（支持 .cf32/.cs16/.wav）"
+            return f"错误: 不支持的格式: {ext}（支持 .cf32/.cs16/.cu8/.wav/.csv）"
     except Exception as e:
         return f"错误: 读取文件失败: {e}"
 
@@ -4407,7 +4418,7 @@ def _analyze_recording(args):
     # 频谱分析
     spec = SpectrumProcessor(fft_size=fft_size)
     spectrum = spec.compute_spectrum(samples, center_freq, sample_rate, fft_size=fft_size)
-    signals = spec.detect_signals(spectrum, threshold_db=-40)
+    signals = spec.find_signals(spectrum, threshold_db=-40)
 
     # SNR 和带宽
     snr_info = compute_snr(samples, sample_rate=sample_rate)
@@ -4432,7 +4443,7 @@ def _analyze_recording(args):
         result += "跳过\n"
 
     result += f"\n--- 频谱分析 ---\n"
-    result += f"峰值频率: {spectrum.peak_freq_hz/1e6:.3f} MHz\n"
+    result += f"峰值频率: {spectrum.peak_freq/1e6:.3f} MHz\n"
     result += f"峰值功率: {spectrum.peak_power_db:.1f} dB\n"
     result += f"噪声底: {spectrum.noise_floor_db:.1f} dB\n"
     result += f"检测到信号: {len(signals)} 个\n"
