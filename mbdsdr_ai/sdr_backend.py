@@ -582,13 +582,16 @@ class SDRBackend:
 
     def start_recording(self, path: str, duration: float = 0,
                         fmt: str = "cf32", gain: float = 1.0,
-                        decimation: int = 1) -> bool:
+                        decimation: int = 1,
+                        max_bytes: int = 2 * 1024 * 1024 * 1024) -> bool:
         """
         开始录制基带（真正写文件）。
 
         启动后台线程，边采边流式写盘，支持长时间录制不占内存。
         支持 cu8（rtl_sdr 原生 unsigned8，生态最通用）/ cf32 / cs16 / wav / csv。
         duration > 0 时到点自动停止。
+        max_bytes 为防爆盘软上限（默认 2GB）：到达后按样本帧对齐截断并自动收尾，
+        不写半个样本（诚实红线：截断如实记录在 sidecar bytes/samples）。
         录制同时写同名 .json sidecar（含 format/sample_rate/center_freq），可直接回放。
         """
         if not self.status.connected:
@@ -610,6 +613,7 @@ class SDRBackend:
         self._recording_stop_event.clear()
 
         # 启动录制线程
+        self._recording_max_bytes = int(max_bytes) if max_bytes else 0
         self._recording_thread = threading.Thread(
             target=self._recording_loop,
             args=(path, fmt, duration, gain, decimation),
@@ -641,6 +645,12 @@ class SDRBackend:
             else:
                 fh = open(path, "wb")  # cf32 / cs16 / cu8
 
+            # 每样本字节数（csv 文本不定长，按写前文件大小近似判断，到限同样收尾）
+            _bytes_per_sample = {"cf32": 8, "cs16": 4, "cu8": 2, "wav": 4, "csv": 0}
+            max_bytes = getattr(self, "_recording_max_bytes", 0)
+            _truncate_after_write = False
+            _check_size_after_write = False
+
             while not self._recording_stop_event.is_set():
                 if duration > 0 and (time.time() - self._recording_start_time) >= duration:
                     break
@@ -652,6 +662,22 @@ class SDRBackend:
 
                 if decimation > 1:
                     samples = samples[::decimation]
+
+                # 防爆盘：写前按样本帧裁剪到剩余额度，到限本块写完即收尾
+                if max_bytes:
+                    bps = _bytes_per_sample.get(fmt_l, 0)
+                    if bps > 0:
+                        written = (fh.tell() if fh is not None
+                                   else (os.path.getsize(path) if wf is not None else 0))
+                        room = max_bytes - written
+                        if room < bps:
+                            break
+                        fit = room // bps
+                        if len(samples) > fit:
+                            samples = samples[:fit]
+                            _truncate_after_write = True
+                    else:
+                        _check_size_after_write = True  # csv：写后按实际大小判断
 
                 # pyrtlsdr 等后端返回的 IQ 已归一化到约 [-1,1]，直接按满量程量化
                 z = np.asarray(samples, dtype=np.complex128) * gain
@@ -675,6 +701,11 @@ class SDRBackend:
 
                 samples_total += len(z)
                 self._recording_samples_total = samples_total
+                if _truncate_after_write:
+                    break  # 防爆盘到限：整帧写完即收尾
+                if _check_size_after_write and max_bytes:
+                    if os.path.getsize(path) >= max_bytes:
+                        break  # csv 到限：文本写完即收尾
 
         except Exception as e:
             print(f"录制线程错误: {e}")
