@@ -300,6 +300,9 @@ public slots:
     // snapshot with no ring reset.
     bool              scrollPausedForTest() const { return scrollPaused_; }
     const QImage&     pausedHistoryForTest() const { return pausedHistory_; }
+    /// Line-spectrum panel rect (offscreen tests aim pointer events at it so
+    /// they do not accidentally land on the shared strip's pan region).
+    QRect             traceRectForTest() const { return lay_.traceRect; }
 
 signals:
     void frequencyChanged(double newFreqHz);

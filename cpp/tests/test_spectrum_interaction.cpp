@@ -33,12 +33,16 @@ static mbdsdr::SpectrumFrame fakeFrame() {
     return fr;
 }
 
-static void sendWheel(mbdsdr::ui::SpectrumDisplay* canvas, int dy, Qt::KeyboardModifiers mod) {
-    const QPoint pc = canvas->rect().center();
-    const QPointF pf(pc);
+static void sendWheelAt(mbdsdr::ui::SpectrumDisplay* canvas, const QPoint& localPt,
+                        int dy, Qt::KeyboardModifiers mod) {
+    const QPointF pf(localPt);
     QWheelEvent ev(pf, pf, QPoint(0, dy), QPoint(0, dy), Qt::NoButton, mod,
                    Qt::NoScrollPhase, false);
     canvas->wheelEvent(&ev);
+}
+
+static void sendWheel(mbdsdr::ui::SpectrumDisplay* canvas, int dy, Qt::KeyboardModifiers mod) {
+    sendWheelAt(canvas, canvas->rect().center(), dy, mod);
 }
 
 void TestSpectrumInteraction::dragRetunes() {
@@ -74,7 +78,11 @@ void TestSpectrumInteraction::plainWheelDoesNotZoomButStepTunes() {
     QSignalSpy spy(&w, &mbdsdr::ui::SpectrumWidget::frequencyChanged);
     const double zoomBefore = w.zoomFactor();
 
-    sendWheel(canvas, 120, Qt::NoModifier);
+    // Aim at the line-spectrum panel: the canvas centre can fall on the shared
+    // tick strip (which pans instead of tunes), so the trace rect is used.
+    const QRect trace = canvas->traceRectForTest();
+    QVERIFY2(!trace.isEmpty(), "trace rect must be laid out after show()");
+    sendWheelAt(canvas, trace.center(), 120, Qt::NoModifier);
 
     // Zoom must NOT move on a plain wheel (it moved to Ctrl).
     QCOMPARE(w.zoomFactor(), zoomBefore);
