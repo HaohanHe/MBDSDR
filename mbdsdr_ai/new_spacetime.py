@@ -893,9 +893,9 @@ class PNTState:
         lines.append(f"融合模式: {self.fusion_mode}")
         lines.append(f"激活源: {', '.join([s.value for s in self.active_sources]) or '无'}")
         for src, status in self.source_status.items():
-            lines.append(f"  {src}: {status.get('status', 'unknown')}"
-                         f"{f', 精度 {status.get('accuracy_m', '?')}m' if 'accuracy_m' in status else ''}"
-                         f"{f', 卫星数 {status.get('satellites', '?')}' if 'satellites' in status else ''}")
+            acc_txt = f", 精度 {status.get('accuracy_m', '?')}m" if 'accuracy_m' in status else ""
+            sat_txt = f", 卫星数 {status.get('satellites', '?')}" if 'satellites' in status else ""
+            lines.append(f"  {src}: {status.get('status', 'unknown')}{acc_txt}{sat_txt}")
         return '\n'.join(lines)
 
 
