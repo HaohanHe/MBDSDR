@@ -5099,8 +5099,8 @@ def _pnt_update_source(args):
     state = engine.get_state()
 
     lines = [f"=== PNT 源更新: {source.value} ==="]
-    lines.append(f"输入: 纬度 {args['latitude']:.6f}°, 经度 {args['longitude']:.6f}°"
-                 f"{f', 精度 ±{data['accuracy_m']:.1f}m' if data['accuracy_m'] else ''}")
+    acc_txt = f", 精度 ±{data['accuracy_m']:.1f}m" if data['accuracy_m'] else ""
+    lines.append(f"输入: 纬度 {args['latitude']:.6f}°, 经度 {args['longitude']:.6f}°{acc_txt}")
     lines.append("")
     lines.append(state.summary())
     return '\n'.join(lines)
