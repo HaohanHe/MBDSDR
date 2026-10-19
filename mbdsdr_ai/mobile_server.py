@@ -80,7 +80,10 @@ def compute_passes(lat: float, lon: float):
     """用 sgp4 算当前可见卫星。失败时返回空列表。"""
     try:
         from mbdsdr_ai import orbit
-        return orbit.visible_satellites(lat, lon, min_el=0)
+        # 注意：orbit.visible_satellites 的阈值参数名是 min_elevation。
+        # 曾误写 min_el 致 TypeError 被 except 吞掉、过境计算恒返回空列表
+        # （phase66 覆盖测试补全时实证发现并修复）。
+        return orbit.visible_satellites(lat, lon, min_elevation=0)
     except Exception as e:
         log.debug("orbit compute skipped: %s", e)
         return []
