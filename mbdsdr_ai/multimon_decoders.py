@@ -657,7 +657,10 @@ def register_multimon_tools(registry) -> None:
     registry.register(
         name="pocsag_decode",
         description="POCSAG 寻呼解码：BCH(31,21)纠错，"
-                    "同步字0x7CD215D8，17字/批，地址+数字(BCD)/文本(ASCII7bit)。",
+                    "同步字0x7CD215D8，17字/批，地址+数字(BCD)/文本(ASCII7bit)。"
+                    "输入契约: codewords 为一批 32-bit 整数（0=sync 同步字），通常 17 个一组; 单个码字纠错请用 pocsag_bch_correct。"
+                    "失败恢复: codewords 为空或缺失时返回明确错误——补齐数组后重试; 空数组不会伪造解码结果。"
+                    "能力边界: 仅解调制后的码字流，不做信号解调——射频侧请先用解调工具得到码字。",
         parameters={
             "type": "object",
             "properties": {
@@ -671,7 +674,9 @@ def register_multimon_tools(registry) -> None:
     )
     registry.register(
         name="pocsag_bch_correct",
-        description="POCSAG BCH(31,21,2) 单码字纠错（生成多项式0x769/八进制03551）。",
+        description="POCSAG BCH(31,21,2) 单码字纠错（生成多项式0x769/八进制03551）。"
+                    "输入契约: codeword 为单个 32-bit 整数。"
+                    "失败恢复: errors_corrected 为 0 表示该码字无错或已不可纠正——批量解码请改用 pocsag_decode。",
         parameters={
             "type": "object",
             "properties": {"codeword": {"type": "integer", "description": "32-bit 码字"}},
@@ -695,7 +700,10 @@ def register_multimon_tools(registry) -> None:
 
     registry.register(
         name="dtmf_decode",
-        description="DTMF 双音解码：8频(697/770/852/941 + 1209/1336/1477/1633)，正交能量法。",
+        description="DTMF 双音解码：8频(697/770/852/941 + 1209/1336/1477/1633)，正交能量法。"
+                    "输入契约: samples 为一段音频采样数组（约含 1-3 个按键音，每音 40ms 以上）; sample_rate 须与音频真实采样率一致（默认 22050）。"
+                    "失败恢复: samples 为空或非数组时返回明确错误——补齐后重试; 解不出按键时返回 success=false，不要虚构数字。"
+                    "能力边界: 每次调用只解一个主导按键; 连续拨号串请分段调用或用实时解码链路。",
         parameters={
             "type": "object",
             "properties": {
@@ -722,7 +730,9 @@ def register_multimon_tools(registry) -> None:
 
     registry.register(
         name="zvei_decode",
-        description="ZVEI-1 选呼解码：16音调序列(5位hex)。",
+        description="ZVEI-1 选呼解码：16音调序列(5位hex)。"
+                    "输入契约: samples 为一段音频采样数组（约含 1-3 组选呼序列，每组 5 音）; sample_rate 须与音频真实采样率一致（默认 22050）。"
+                    "失败恢复: samples 为空或非数组时返回明确错误——补齐后重试; 序列不完整时返回 success=false，不要虚构选呼码。",
         parameters={
             "type": "object",
             "properties": {
@@ -750,7 +760,9 @@ def register_multimon_tools(registry) -> None:
 
     registry.register(
         name="afsk1200_demod",
-        description="Bell-202 AFSK1200 解调：mark1200/space2200, 1200bps, 正交相关。",
+        description="Bell-202 AFSK1200 解调：mark1200/space2200, 1200bps, 正交相关。"
+                    "输入契约: samples 为解调后的音频采样数组（8kHz 左右最佳），sample_rate 须与真实采样率一致（默认 22050）。"
+                    "失败恢复: samples 为空时返回明确错误——补齐后重试; 输出为空表示未检出帧，不要虚构解码文本。",
         parameters={
             "type": "object",
             "properties": {
