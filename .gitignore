@@ -90,6 +90,9 @@ syn_*.npy
 mbdsdr_ai/artifacts/*.npy
 tests/test_report.txt
 repos/
+tools/.acceptance_logs/
+.coverage
+.coverage.*
 
 # Agent 运行工作区（内部 scratch，不入库）
 .sessions/

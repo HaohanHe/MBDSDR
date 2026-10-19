@@ -93,7 +93,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-STAMP="$(date +%Y%m%d_%H%M%S)"
+# 秒级时间戳在测试连跑（亚秒级 subprocess）下会撞车：多个 run 共享同一
+# LOG_DIR，raw.jsonl 跨 run 累积，后一个 run 读到前一个的步骤——
+# tools/ 全套件跑时 test_event_single_mode_sstv 必败、单跑必过即此根因。
+# 加纳秒 + PID 双保险，保证同机并发/连跑不撞目录。
+STAMP="$(date +%Y%m%d_%H%M%S)_$(date +%N)_$$"
 LOG_DIR="$ROOT/tools/.acceptance_logs/${STAMP}"
 RAW="$LOG_DIR/raw.jsonl"
 mkdir -p "$LOG_DIR"
