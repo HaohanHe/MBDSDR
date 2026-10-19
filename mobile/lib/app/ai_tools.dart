@@ -60,7 +60,11 @@ List<AiTool> buildRadioTools(
     AiTool(
       name: 'set_frequency',
       description: '把 RTL-SDR 接收机调到指定中心频率。'
-          '必须且只能提供 frequency_hz（整数 Hz）或 frequency_mhz（数字 MHz）之一。',
+          '必须且只能提供 frequency_hz（整数 Hz）或 frequency_mhz（数字 MHz）之一。'
+          '前置条件: 接收机必须已连接，未连接时返回「接收机未连接」错误而非假装调谐。'
+          '失败恢复: 超出 24–1700 MHz 时返回范围错误——换范围内频率重试，不要重发同一越界值。'
+          '副作用: 改变实际调谐频率（硬件状态），后续收听、静噪门、录制内容都以新频率为准。'
+          '能力边界: 仅覆盖 RTL-SDR 硬件范围 24–1700 MHz。',
       parameters: const <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{
@@ -108,7 +112,13 @@ List<AiTool> buildRadioTools(
     ),
     AiTool(
       name: 'set_mode',
-      description: '设置解调模式：nfm = 窄带调频（语音），wfm = 宽带调频（广播）。',
+      description: '设置解调模式：nfm = 窄带调频（语音），wfm = 宽带调频（广播）。'
+          '前置条件: 接收机必须已连接。'
+          '失败恢复: 模式名无效时返回合法值列表（nfm / wfm）——按列表重试; '
+          '缺 mode 参数时返回明确错误。'
+          '副作用: 改变解调模式会影响音频输出与 start_recording 的录制内容。'
+          '能力边界: 移动端仅支持 nfm / wfm 两种; 桌面端的 AM/CW/SSB 等模式本端未实现，'
+          '不要向用户承诺。',
       parameters: const <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{
@@ -141,7 +151,14 @@ List<AiTool> buildRadioTools(
     AiTool(
       name: 'set_gain',
       description: '设置增益：传 {auto: true} 启用 AGC，或传 {gain_db: 数字} '
-          '手动指定增益（范围 0–49.6 dB）。',
+          '手动指定增益（范围 0–49.6 dB）。'
+          '前置条件: 接收机必须已连接。'
+          '输入契约: auto（布尔）或 gain_db（数字）必须提供其一。'
+          '失败恢复: gain_db 超出 0–49.6 时返回范围错误——换范围内值重试。'
+          '副作用: auto=true 立即开启 AGC; auto=false 切手动。'
+          '关键行为: gain_db 仅在 AGC 关闭时才真正生效——AGC 开启时手动增益只被保存、'
+          '不应用到射频链路; 要用手动增益必须先 set_gain {auto: false}。'
+          '能力边界: 仅设置接收增益; 本端无发射能力，不存在发射增益。',
       parameters: const <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{
@@ -184,7 +201,12 @@ List<AiTool> buildRadioTools(
     ),
     AiTool(
       name: 'set_sample_rate',
-      description: '设置采样率（Hz），只能取支持的档位之一。',
+      description: '设置采样率（Hz），只能取支持的档位之一。'
+          '前置条件: 接收机必须已连接。'
+          '失败恢复: 传入非档位值时返回四个合法档位列表（1.02 / 2.05 / 2.40 / 3.20 MHz）'
+          '——按列表重试，不要重发同一非法值。'
+          '副作用: 改变采样率会重建数据流，并决定可见带宽上限（约为采样率八成）。'
+          '能力边界: 只能取四个固定档位，不能任意设定。',
       parameters: const <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{
@@ -225,7 +247,13 @@ List<AiTool> buildRadioTools(
           '（过静噪门后"录听到的"），落盘 .wav + sidecar JSON，结束后可在录音列表回放。'
           '需已连接接收机；重复调用安全（已在录则不另开文件）。'
           '与桌面端 start_recording 对齐——桌面录原始 IQ（SigMF），本端录解调音频'
-          '（WAV），产物不同但 AI 入口一致。',
+          '（WAV），产物不同但 AI 入口一致。'
+          '前置条件: 接收机必须已连接，未连接时返回明确错误而非假装开录。'
+          '副作用: 按过门音频持续写盘（约 32KB/s），长录制前确认存储余量; '
+          '录制内容受当前静噪门限影响。'
+          '失败恢复: 底层抛 StateError（未连接/未配录音目录）时诚实回错——'
+          '先 get_status 确认连接，再重试。'
+          '能力边界: 只录解调音频，不录原始 IQ; 手动模式下被 gate（仅记录不执行）。',
       parameters: const <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{},
@@ -261,7 +289,11 @@ List<AiTool> buildRadioTools(
     AiTool(
       name: 'stop_recording',
       description: '停止当前录制，收尾落盘 .wav + sidecar 并写入录音列表。'
-          '未在录制时诚实返回（不报错、不造文件）。断连时也允许调用以收尾落盘。',
+          '未在录制时诚实返回（不报错、不造文件）。断连时也允许调用以收尾落盘。'
+          '前置条件: 无（任意时刻可调，断连时也允许收尾）。'
+          '失败恢复: 未在录制时返回「当前未在录制」而非报错——不要反复重试。'
+          '副作用: 落盘并关闭文件句柄; 之后 start_recording 生成新文件而非续写。'
+          '能力边界: 仅收尾本端（WAV）录制; 手动模式下被 gate（仅记录不执行）。',
       parameters: const <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{},
@@ -296,7 +328,11 @@ List<AiTool> buildRadioTools(
       description: '设置静噪门控。可分别提供 enabled（是否使能静噪）、'
           'threshold_db（手动门限，dBFS，范围 -100 到 -20，越接近 0 越严）、'
           'auto（true = 门限自动跟随噪声底）；至少提供其中一项。'
-          '同时给 threshold_db 时按手动门限生效并退出自动跟随。',
+          '同时给 threshold_db 时按手动门限生效并退出自动跟随。'
+          '前置条件: 接收机必须已连接（只读门配置用 get_squelch_status，无需连接）。'
+          '失败恢复: 三项全缺时返回明确错误——补齐至少一项后重试。'
+          '副作用: 静噪门同时决定音频播出与 start_recording 的录制内容'
+          '（录的是过门后的音频）——门限设太严会录不到弱信号。',
       parameters: const <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{
@@ -342,7 +378,9 @@ List<AiTool> buildRadioTools(
       name: 'get_squelch_status',
       description: '只读：读取静噪门控状态——是否使能、是否自动门限、'
           '当前手动门限（dBFS）、门当前是否开门（true=送声）、实测解调电平（dBFS）。'
-          '不需要接收机连接也可读取当前门配置。',
+          '前置条件: 无，不需要接收机连接也可读取当前门配置。'
+          '能力边界: 只读，不改变任何状态; level_db 为实时解调电平，仅在连接时有意义，'
+          '未连接时不要据此判断信号有无。',
       parameters: const <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{},
@@ -366,7 +404,11 @@ List<AiTool> buildRadioTools(
       name: 'get_status',
       description: '读取当前接收机状态。返回连接状态机 status'
           '（connected/connecting/reconnecting/disconnected/error）、是否就绪 '
-          'connected、错误原因 error_message，以及频率、模式、增益、采样率。',
+          'connected、错误原因 error_message，以及频率、模式、增益、采样率。'
+          '前置条件: 无（未连接也可查询，返回 disconnected 状态）。'
+          '能力边界: 只读，不改变任何状态。'
+          '判读要点: 不要只看 connected 布尔——reconnecting 表示掉线后自动重连中'
+          '（不是用户停手），error 时应读 error_message 拿真实失败原因再决定下一步。',
       parameters: const <String, dynamic>{'type': 'object', 'properties': <String, dynamic>{}},
       execute: (Map<String, dynamic> args) async {
         try {
@@ -396,7 +438,10 @@ List<AiTool> buildRadioTools(
       description: '只读：预测某卫星未来数小时相对本站的过境（升/降时刻、'
           '最大仰角、方位）。数据源为真实 Celestrak TLE + 本地 SGP4；'
           '无 TLE / 无同名卫星 / 窗口内无过境时诚实返回空态，绝不编造。'
-          '本工具只读、不需要接收机连接。',
+          '本工具只读、不需要接收机连接。'
+          '前置条件: 需要已配置 TLE 数据源与测站坐标（设置页填写本站位置）。'
+          '失败恢复: 缺 TLE 数据源时返回「未配置」提示——检查网络后刷新; '
+          '缺测站坐标时返回明确错误并提示去设置填写，不要向用户编造坐标或过境。',
       parameters: const <String, dynamic>{
         'type': 'object',
         'properties': <String, dynamic>{
