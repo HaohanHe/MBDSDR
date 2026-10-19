@@ -47,10 +47,11 @@ tracked 文件（含 commit message）中：
 
 ## 5. 基线
 
-`python -m pytest mbdsdr_ai/tests -q` 基线锨点（commit 级回归手段，不作对外宣传数字）：最近一次全绿记录 **915 passed / 5 skipped**
-（2026-10-19 云端 c35bc08 整合后沙箱复测；901→915 净增 14，来自红线清扫后的
-新特性测试：录制 max_bytes 防爆盘 / 录制分析五格式 / 解码器输入形状校验，
-外加 phase65 补的语法兼容编译守卫 1 项。Python 3.11 与 3.12 双解释器实测同数。
+`python -m pytest mbdsdr_ai/tests -q` 基线锨点（commit 级回归手段，不作对外宣传数字）：最近一次全绿记录 **1041 passed / 5 skipped**
+（2026-10-19 phase66 覆盖缺口补齐后沙箱复测；915→1041 净增 126，全部为
+零覆盖模块的首套行为测试：cfo 18 / position_service 14 / optional_deps 6 /
+mimo 9 / feature_manager 13 / module_graph 23 / sdrpp_decoders 20 /
+mobile_server 23。Python 3.11 与 3.12 双解释器实测同数。
 无网环境下 `test_real_tle_fresh_or_skip` 等真实联网用例转 skip，
 passed 数相应下浮——skip 均属无 env/无硬件的诚实 skip）。任何改动不得
 降低此数。
