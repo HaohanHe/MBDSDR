@@ -59,38 +59,44 @@ class EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 单滚降级：视口被压缩（如首跑引导横幅占位、小屏横屏）时内容可滚动，
+    // 不出现 RenderFlex 溢出。正常视口下内容一屏放得下，滚动条不出现。
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppTokens.spacingL * 2),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: AppTokens.emptyStateMaxWidth),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Icon(
-                icon,
-                size: AppTokens.iconSizeEmpty,
-                color: AppTokens.textAt(AppTokens.textAlphaFaint),
-              ),
-              const SizedBox(height: AppTokens.spacingL),
-              Text(
-                title,
-                style: AppTokens.sectionTitle,
-                textAlign: TextAlign.center,
-              ),
-              if (message != null) ...[
-                const SizedBox(height: AppTokens.spacingM),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(AppTokens.spacingL * 2),
+          child: ConstrainedBox(
+            constraints:
+                const BoxConstraints(maxWidth: AppTokens.emptyStateMaxWidth),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(
+                  icon,
+                  size: AppTokens.iconSizeEmpty,
+                  color: AppTokens.textAt(AppTokens.textAlphaFaint),
+                ),
+                const SizedBox(height: AppTokens.spacingL),
                 Text(
-                  message!,
-                  style: AppTokens.auxiliary,
+                  title,
+                  style: AppTokens.sectionTitle,
                   textAlign: TextAlign.center,
                 ),
+                if (message != null) ...[
+                  const SizedBox(height: AppTokens.spacingM),
+                  Text(
+                    message!,
+                    style: AppTokens.auxiliary,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+                if (actionLabel != null && onAction != null) ...[
+                  const SizedBox(height: AppTokens.spacingL),
+                  FilledButton(
+                      onPressed: onAction, child: Text(actionLabel!)),
+                ],
               ],
-              if (actionLabel != null && onAction != null) ...[
-                const SizedBox(height: AppTokens.spacingL),
-                FilledButton(onPressed: onAction, child: Text(actionLabel!)),
-              ],
-            ],
+            ),
           ),
         ),
       ),

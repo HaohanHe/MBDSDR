@@ -47,11 +47,16 @@ tracked 文件（含 commit message）中：
 
 ## 5. 基线
 
-`python -m pytest mbdsdr_ai/tests -q` 基线锨点（commit 级回归手段，不作对外宣传数字）：最近一次全绿记录 **1041 passed / 5 skipped**
-（2026-10-19 phase66 覆盖缺口补齐后沙箱复测；915→1041 净增 126，全部为
-零覆盖模块的首套行为测试：cfo 18 / position_service 14 / optional_deps 6 /
-mimo 9 / feature_manager 13 / module_graph 23 / sdrpp_decoders 20 /
-mobile_server 23。Python 3.11 与 3.12 双解释器实测同数。
+`python -m pytest mbdsdr_ai/tests -q` 基线锨点（commit 级回归手段，不作对外宣传数字）：最近一次全绿记录 **1086 passed / 5 skipped**
+（2026-10-12 phase67 模型体验/UI/工作流三轮后沙箱复测；1041→1086 净增 45，
+全部为模型体验轴新增：test_model_experience.py 10 项（DSH nextStep 框架）+
+test_tool_description_quality.py 35 项（描述质量门禁：地板/schema 形状/状态变更型
+四维齐全/诚实契约钉死/棘轮覆盖率）。Python 3.11 与 3.12 双解释器实测同数。
+历史增量：915→1041（phase66 零覆盖模块首套行为测试）→1086（phase67 模型体验）。
 无网环境下 `test_real_tle_fresh_or_skip` 等真实联网用例转 skip，
 passed 数相应下浮——skip 均属无 env/无硬件的诚实 skip）。任何改动不得
 降低此数。
+
+移动端（`mobile/`）：`flutter test` 基线 **389 passed**（phase67 新增 5 项：
+帮助页/首跑引导 Widget 测试）；`flutter analyze` 零问题（Flutter 3.47.7，
+SDK 约束 >=3.9，勿用 /opt/flutter 旧版 3.0 跑）。

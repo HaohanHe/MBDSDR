@@ -56,6 +56,20 @@ from .astronomy import Observer, EquatorialCoord, AltAzCoord, AntennaParams, uni
 from .amr import AMRClassifier, AMRResult, ModulationType
 
 
+def _tool_result_to_model_content(result) -> str:
+    """工具结果转模型可见文本。
+
+    DSH（deepseek-harness）nextStep 模式：next_step 非空时追加
+    "[下一步建议]" 块——失败/部分成功时给模型明确的恢复路径，
+    避免它从错误码反推。纯函数，便于单测。
+    """
+    content = getattr(result, "content", "") or ""
+    ns = (getattr(result, "next_step", "") or "").strip()
+    if ns:
+        content = content + "\n[下一步建议] " + ns
+    return content
+
+
 class MBDSDRAgent:
     """
     MBDSDR AI 定义无线电智能体。
@@ -3183,10 +3197,12 @@ class MBDSDRAgent:
                              "不要重复同一调用；若证据已足够就给最终答案。" % (tool_name, self._repeat_count))
                     result.content = nudge + "\n---\n" + result.content
 
+                # DSH nextStep 模式：失败/部分成功时把恢复指引注入模型可见消息，
+                # 让模型不必从错误码猜恢复路径（框架错误路径与 handler 均可提供）
                 # 添加工具结果到上下文
                 self.context_manager.add_tool_message(
                     tool_call_id=tc_id,
-                    content=result.content,
+                    content=_tool_result_to_model_content(result),
                     tool_name=tool_name,
                 )
 
