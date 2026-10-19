@@ -146,6 +146,11 @@ const String _kDemodMode = 'demodMode';
 const String _kVolume = 'volume';
 const String _kMuted = 'muted';
 
+/// 首跑引导是否已看过的持久化键。
+/// OnAir 首跑向导模式：首次启动显示三步引导（连电台 → 配测站 → 完成），
+/// 看过即置位，之后不再打扰；缺失视为未看过（默认 false）。
+const String _kFirstRunGuideSeen = 'firstRunGuideSeen';
+
 /// AI 助手运行模式：是否处于「手动模式」。
 ///   * false（默认）= AI 接管：AI 的调谐/模式/增益等动作真正执行；
 ///   * true        = 手动：AI 仍可对话，但工具动作仅记录不执行。
@@ -211,6 +216,9 @@ class SettingsService extends ChangeNotifier {
   double _volume = 1.0;
   bool _muted = false;
   bool _aiManualMode = false;
+
+  /// 首跑引导已看过（持久化）。false = 尚未看过，首屏挂引导卡片。
+  bool _firstRunGuideSeen = false;
 
   /// rtl_tcp 主机（已 trim）。
   String get rtlHost => _rtlHost;
@@ -356,6 +364,14 @@ class SettingsService extends ChangeNotifier {
   set aiManualMode(bool value) {
     _aiManualMode = value;
     unawaited(_kv.setBool(_kAiManualMode, value));
+    notifyListeners();
+  }
+
+  /// 首跑引导看过标记。读写即持久化；外壳据此决定是否挂引导卡片。
+  bool get firstRunGuideSeen => _firstRunGuideSeen;
+  set firstRunGuideSeen(bool value) {
+    _firstRunGuideSeen = value;
+    unawaited(_kv.setBool(_kFirstRunGuideSeen, value));
     notifyListeners();
   }
 
@@ -585,6 +601,9 @@ class SettingsService extends ChangeNotifier {
 
     // AI 模式：缺失回退 false（AI 接管）。
     _aiManualMode = _kv.getBool(_kAiManualMode) ?? false;
+
+    // 首跑引导：缺失回退 false（未看过，首屏挂引导）。
+    _firstRunGuideSeen = _kv.getBool(_kFirstRunGuideSeen) ?? false;
 
     // 频点书签：兼容旧「纯频率数字数组」并迁移为完整 Bookmark 对象。
     // 解析失败/非法项静默丢弃，回退空列表，绝不抛异常。

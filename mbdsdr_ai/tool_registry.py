@@ -32,6 +32,10 @@ class ToolResult:
     error: str = ""
     truncated: bool = False
     data: Dict[str, Any] = field(default_factory=dict)
+    # DSH（deepseek-harness）nextStep 模式：失败/部分成功时给模型的下一步
+    # 恢复指引（"该做什么或告诉用户什么"）。非空时由 agent 追加进模型可见
+    # 消息，让模型不必从错误码猜恢复路径。
+    next_step: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -43,6 +47,7 @@ class ToolResult:
             "error": self.error,
             "truncated": self.truncated,
             "data": self.data,
+            "next_step": self.next_step,
         }
 
 
@@ -260,6 +265,7 @@ class ToolRegistry:
                 tool_name=tool_name,
                 args=args,
                 error="tool_not_found",
+                next_step="用 list_tools 查看全部工具名，或按 category 检索；确认名称拼写与前缀（如 sdr_/vna_）后重试。",
             )
             self._log_call(result)
             return result
@@ -274,6 +280,7 @@ class ToolRegistry:
                 tool_name=tool_name,
                 args=args,
                 error="tool_unavailable",
+                next_step="先调用对应的连接/枚举工具（如 sdr_list_devices → sdr_connect，或 vna_connect）；若本机无硬件，改用返回诚实空态的只读工具，不要虚构数据。",
             )
             self._log_call(result)
             return result
@@ -323,6 +330,7 @@ class ToolRegistry:
                     tool_name=tool_name,
                     args=args,
                     error="missing_required_params",
+                    next_step="按上面的参数说明补齐必填项后重试；可选参数不确定时省略即可，不要编造取值。",
                 )
                 self._log_call(result)
                 return result
@@ -344,6 +352,8 @@ class ToolRegistry:
                     tool_name=tool_name,
                     args=args,
                     data=raw_result,
+                    # handler 可在 dict 里带 next_step 给模型恢复指引（DSH 模式）
+                    next_step=str(raw_result.get("next_step", "") or ""),
                 )
             elif isinstance(raw_result, str):
                 result = ToolResult(
@@ -367,6 +377,7 @@ class ToolRegistry:
                 tool_name=tool_name,
                 args=args,
                 error=f"exception: {type(e).__name__}",
+                next_step="按报错类型修正参数（单位/范围/类型）后重试；同一参数重试不超过 2 次，仍失败则换方法或向用户说明。",
             )
 
         result.latency_ms = round((time.time() - start_time) * 1000, 1)

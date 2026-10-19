@@ -278,7 +278,8 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_connect",
-        description="连接 SDR 设备。默认连接当前激活的设备，也可以指定 device_id。连接后才能进行频率设置、频谱分析、录制等操作。",
+        description="连接 SDR 设备（默认当前激活设备，可指定 device_id）。所有频率/频谱/录制工具的前置条件。无可用设备时如实返回失败并提示，不会伪造连接；失败时先用 sdr_list_devices 枚举真实设备，再用返回的 device_id 重试。"
+                    "副作用: 连接会独占占用设备，其他程序（如 GQRX/SDR#）将无法同时打开该设备; 能力边界: 只能连接 sdr_list_devices 枚举到的真实设备。",
         parameters={
             "type": "object",
             "properties": {
@@ -295,7 +296,7 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_disconnect",
-        description="断开当前 SDR 设备。断开后停止所有接收和录制。",
+        description="断开当前 SDR 设备，同时停止所有进行中的接收与录制（副作用）。前置条件: 无（未连接时调用也安全，幂等，返回已断开而非报错）。能力边界: 仅释放本进程对该设备的占用，不影响其他程序。",
         parameters={"type": "object", "properties": {}, "required": []},
         handler=lambda args: ToolResult(success=True, content=_disconnect_sdr(mgr)),
         category="sdr_device",
@@ -303,7 +304,7 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_list_devices",
-        description="列出所有可用的 SDR 设备。包括设备类型、频率范围、采样率范围、最大增益、是否支持 IQ、连接状态。用于选择要连接的设备。",
+        description="枚举所有可用 SDR 设备（类型/频率范围/采样率范围/最大增益/连接状态）。连接前第一步；列表为空即本机无可用硬件——如实空态，不要虚构设备。返回的 device_id 供 sdr_connect / sdr_switch_device 使用。",
         parameters={"type": "object", "properties": {}, "required": []},
         handler=lambda args: ToolResult(success=True, content=json.dumps(mgr.list_devices(), ensure_ascii=False, indent=2)),
         category="sdr_device",
@@ -311,7 +312,7 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_switch_device",
-        description="切换到另一个 SDR 设备。会先断开当前设备，再连接指定设备。支持异构双前端切换（如从 RTL-SDR 切换到自研 ai-sdr Mini）。",
+        description="切换到另一个 SDR 设备（先断开当前设备再连接目标，会中断进行中的接收/录制——副作用）。前置条件: device_id 必须来自 sdr_list_devices 的枚举结果。失败恢复: 切换失败时当前设备保持断开，需重新 sdr_connect；失败先用 sdr_list_devices 核对 device_id 是否存在。能力边界: 只能在枚举到的真实设备间切换。",
         parameters={
             "type": "object",
             "properties": {
@@ -328,7 +329,7 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_status",
-        description="查询当前 SDR 设备状态。包括连接状态、当前频率、采样率、增益、AGC、解调模式、RSSI、SNR、录音状态、设备温度、运行时间等。这是最常用的查询工具。",
+        description="查询当前 SDR 设备完整状态（连接状态/频率/采样率/增益/AGC/解调模式/RSSI/SNR/录音状态/温度）。前置条件: 无（未连接也可查询）。失败恢复: 未连接时返回未连接状态而非报错。能力边界: 只读查询，不改变任何设备状态; 任何操作前不确定设备状态时，先用它确认。",
         parameters={"type": "object", "properties": {}, "required": []},
         handler=lambda args: ToolResult(success=True, content=_format_status(mgr.get_status())),
         category="sdr_device",
@@ -341,6 +342,9 @@ def register_sdr_tools(agent):
             "支持 .cu8/.bin(rtl_sdr 原始 unsigned8 交错)、.cfile/.cf32(GNU Radio 浮点交错)、"
             ".cs16/.s16(有符号16位交错)、.npy(复数数组)。同名 .json sidecar 可带 sample_rate/center_freq。"
             "打开后即成为当前设备，可对其跑频谱、解调、CW/FT8/SSTV/ADS-B 等全部解码工具，默认循环回放。"
+            "前置条件: path 必须真实存在且格式受支持。"
+            "失败恢复: 文件不存在或格式无法识别时返回明确错误——先用 sdr_recordings_list 查看已有录制文件的真实路径与格式，"
+            "再用正确路径重试; cu8/cfile 等无元数据格式必须显式传 sample_rate_hz，否则按默认值解析会导致频率轴整体偏移。"
         ),
         parameters={
             "type": "object",
@@ -374,7 +378,7 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_set_frequency",
-        description="设置接收频率（中心频率）。单位 Hz。例如 FM 广播 98.5MHz = 98500000，航空波段 118MHz = 118000000，433MHz = 433000000。设置后自动开始接收。",
+        description="设置接收中心频率，单位 Hz（FM 广播 98.5MHz=98500000；航空 118MHz=118000000；433MHz=433000000）。需先 sdr_connect 或 sdr_open_iq_file。失败多为超出设备频率范围——用 sdr_list_devices 的频率范围核对后重试，不要反复重发同一频率。副作用: 会改变当前接收频率（硬件调谐），后续频谱/录制/解码都以新频率为目标。",
         parameters={
             "type": "object",
             "properties": {
@@ -388,7 +392,7 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_get_frequency",
-        description="查询当前接收频率。返回中心频率 Hz 和 MHz。",
+        description="查询当前接收频率。返回中心频率 Hz 和 MHz。前置条件: 设备已连接或已打开 IQ 文件; 未连接时返回调用错误而非虚构频率值，先 sdr_connect 再查。能力边界: 只读查询，不改变任何设备状态。",
         parameters={"type": "object", "properties": {}, "required": []},
         handler=lambda args: ToolResult(success=True, content=f"当前频率: {_get_backend(mgr).get_frequency():.0f} Hz ({_get_backend(mgr).get_frequency()/1e6:.3f} MHz)"),
         category="sdr_frequency",
@@ -406,7 +410,7 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_set_sample_rate",
-        description="设置采样率。单位 Hz。常用值：2400000(2.4MHz), 1800000(1.8MHz), 1024000(1.024MHz), 250000(250kHz)。采样率越高带宽越宽，但 CPU 占用越大。",
+        description="设置采样率，单位 Hz（常用 2400000/1800000/1024000/250000）。采样率越高带宽越宽，但 CPU 占用越大。需先连接设备；不在设备支持范围会失败（返回'采样率设置失败'），用 sdr_list_devices 核对支持范围后重试。副作用: 改变采样率会同时影响带宽上限与录制码率。能力边界: 只能取设备支持的离散值，不能任意设定。",
         parameters={
             "type": "object",
             "properties": {
@@ -429,7 +433,10 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_set_bandwidth",
-        description="设置接收带宽（低通滤波器带宽）。单位 Hz。0 表示自动（跟随采样率）。常用值：12500(12.5kHz 窄带FM), 2500(2.5kHz CW), 100000(100kHz 宽带FM)。",
+        description="设置接收带宽（低通滤波器带宽）。单位 Hz。0 表示自动（跟随采样率）。常用值：12500(12.5kHz 窄带FM), 2500(2.5kHz CW), 100000(100kHz 宽带FM)。"
+                    "前置条件: 设备必须先已连接（先 sdr_connect 或 sdr_open_iq_file）。"
+                    "失败恢复: 设备不支持该带宽时返回'操作失败'——用 sdr_list_devices 核对设备支持的带宽范围，换合法值重试，不要反复重试同一值。"
+                    "副作用: 改变带宽会影响后续频谱分辨率与音频带宽。",
         parameters={
             "type": "object",
             "properties": {
@@ -447,7 +454,7 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_set_gain",
-        description="设置接收增益。单位 dB。关闭 AGC 后手动设置增益。RTL-SDR 增益范围 0-49.6dB，常用 0/14/27/40dB。增益过高会导致信号过载失真。",
+        description="设置手动接收增益，单位 dB（RTL-SDR 范围 0-49.6，常用 0/14/27/40）。前置条件: 设备必须先已连接（先 sdr_connect 或 sdr_open_iq_file）。失败恢复: 超出设备增益范围时返回'操作失败'——用 sdr_list_devices 的增益范围核对后重试。会关闭 AGC（副作用）。增益过高导致信号过载失真——强信号用低增益；不确定时改用 sdr_set_agc 开启自动增益。能力边界: 仅设置接收增益，不影响发射功率（电台发射增益用 radio_* 工具）。",
         parameters={
             "type": "object",
             "properties": {
@@ -461,7 +468,11 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_set_agc",
-        description="开关自动增益控制（AGC）。开启后设备自动调整增益，适合信号强度变化大的场景。关闭后使用手动增益。",
+        description="开关自动增益控制（AGC）。开启后设备自动调整增益，适合信号强度变化大的场景。关闭后使用手动增益。"
+                    "前置条件: 设备必须先已连接（先 sdr_connect 或 sdr_open_iq_file）。"
+                    "失败恢复: 设备不支持 AGC 时返回'操作失败'——改用 sdr_set_gain 手动设置增益。"
+                    "副作用: 关闭 AGC 后设备使用 sdr_set_gain 设置的手动增益; 开启 AGC 会覆盖手动增益设置。"
+                    "能力边界: 仅自动调整接收增益，不影响静噪与音量。",
         parameters={
             "type": "object",
             "properties": {
@@ -489,7 +500,7 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_set_demod",
-        description="设置解调模式。支持 FM(调频广播), NFM(窄带FM/对讲机), WFM(宽带FM), AM(调幅/航空/短波), LSB(下边带/短波), USB(上边带/短波), CW(等幅报/电报)。",
+        description="设置解调模式（FM 调频广播 / NFM 窄带对讲 / WFM 宽带广播 / AM 调幅航空短波 / LSB / USB / CW）。前置条件: 设备必须先已连接（先 sdr_connect 或 sdr_open_iq_file）。失败恢复: 未连接时返回'当前无连接设备'提示，先连接再设; 模式名无效时返回'不支持的解调模式'并列出合法值。副作用: 改变解调模式会影响音频输出与解码链路输出。模式与带宽要匹配（NFM≈12.5kHz、WFM≈150kHz、CW≈300Hz 量级），改模式后按需调 sdr_set_bandwidth。能力边界: 仅切换解调算法，不改变射频硬件频率。",
         parameters={
             "type": "object",
             "properties": {
@@ -503,7 +514,10 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_set_squelch",
-        description="设置静噪阈值。单位 dB。信号低于此阈值时静音，适合对讲机/航空等有间歇通话的场景。常用 -80 到 -40 dB。-100 表示关闭静噪。",
+        description="设置静噪阈值。单位 dB。信号低于此阈值时静音，适合对讲机/航空等有间歇通话的场景。常用 -80 到 -40 dB。-100 表示关闭静噪。"
+                    "前置条件: 设备必须先已连接（先 sdr_connect 或 sdr_open_iq_file）。"
+                    "失败恢复: 设备不支持静噪时返回'操作失败'——改用解调侧滤波或接受持续音频，不要虚构已生效。"
+                    "副作用: 静音仅作用于音频输出，不影响 IQ 录制与解码链路。",
         parameters={
             "type": "object",
             "properties": {
@@ -517,7 +531,9 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_set_volume",
-        description="设置音频输出音量。范围 0.0-1.0。0=静音，0.5=中等，1.0=最大。",
+        description="设置音频输出音量。范围 0.0-1.0。0=静音，0.5=中等，1.0=最大。"
+                    "前置条件: 无（任意时刻可调，立即生效）。"
+                    "失败恢复: 若无声卡输出（sounddevice 未安装），设置仍成功但不发声——用 sdr_play_audio status 查询实际播放状态。",
         parameters={
             "type": "object",
             "properties": {
@@ -606,7 +622,10 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="vfo_add",
-        description="添加一个监听频率（VFO）。VFO 是预存的频率+解调模式预设，可快速切换守听。",
+        description="添加一个监听频率（VFO）。VFO 是预存的频率+解调模式预设，可快速切换守听。"
+                    "前置条件: 无（未连接设备也可预先配置）。"
+                    "失败恢复: 频率超出设备范围时返回错误——先用 vfo_list 核对已存 VFO，或调整 freq_mhz。"
+                    "副作用: 仅写入本地 VFO 列表（持久化），不会改动当前接收状态; 需切换到该频率请用 vfo_select。",
         parameters={
             "type": "object",
             "properties": {
@@ -623,7 +642,12 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="vfo_remove",
-        description="删除一个 VFO。",
+        description="按名称删除一个已保存的 VFO（监听频率预设）。"
+                    "前置条件: VFO 必须已存在（先用 vfo_list 确认名称，名称须精确匹配）。"
+                    "失败恢复: 名称不存在时返回未找到提示而非报错——重新用 vfo_list 核对名称后重试。"
+                    "副作用: 仅从本地 VFO 列表移除该预设（持久化）; 若删除的是当前激活 VFO，"
+                    "当前接收频率不变（已调谐到的硬件频率不受影响）。"
+                    "能力边界: 只能删除本工具保存的 VFO，不能删除电台内部频道。",
         parameters={
             "type": "object",
             "properties": {
@@ -637,7 +661,9 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="vfo_list",
-        description="列出所有已保存的 VFO（监听频率预设），包含当前激活状态。",
+        description="列出所有已保存的 VFO（监听频率预设），包含当前激活状态。"
+                    "前置条件: 无。空列表表示尚未添加任何 VFO——先用 vfo_add 创建。"
+                    "失败恢复: 无（纯查询，不改变任何状态）。",
         parameters={"type": "object", "properties": {}, "required": []},
         handler=lambda args: _vfo_list_tool(mgr, args),
         category="sdr_frequency",
@@ -645,7 +671,11 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="vfo_select",
-        description="切换到指定 VFO：将当前 SDR 设备调谐到该 VFO 的频率和解调模式，并标记为激活。",
+        description="切换到指定 VFO：将当前 SDR 设备调谐到该 VFO 的频率和解调模式，并标记为激活。"
+                    "前置条件: 设备必须先已连接（先 sdr_connect 或 sdr_open_iq_file），且 VFO 已存在（先用 vfo_list 核对名称）。"
+                    "失败恢复: 未连接时先连接设备; VFO 不存在时返回未找到提示，用 vfo_list 核对名称。"
+                    "副作用: 会改变当前接收频率与解调模式（硬件状态变更）。"
+                    "能力边界: 只能在已保存的 VFO 间切换，不能直接指定任意频率——后者用 sdr_set_frequency。",
         parameters={
             "type": "object",
             "properties": {
@@ -663,7 +693,7 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_spectrum_analyze",
-        description="分析当前频谱。读取 IQ 样本，做 FFT，返回频谱数据（频率轴、功率轴、峰值、噪声底）。这是最核心的频谱工具，所有频谱操作的基础。",
+        description="对当前设备做 FFT 频谱分析，返回频率轴/功率轴/峰值/噪声底。所有频谱操作的基础，需先 sdr_connect 或 sdr_open_iq_file。fft_size 越大频率分辨率越高但越慢（常用 512-4096）；无设备时返回诚实空态。",
         parameters={
             "type": "object",
             "properties": {
@@ -920,13 +950,24 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_record_start",
-        description="开始录制基带/音频。支持多种格式：cf32(复数浮点IQ，标准SDR格式), wav(音频), csv(文本CSV), iq(原始IQ)。可设置录制时长（0=手动停止）。录制文件自动保存到 ~/.mbdsdr/recordings/。",
+        description="开始录制基带/音频。支持多种格式: cf32(复数浮点IQ，标准SDR格式), wav(音频), csv(文本CSV), iq(原始IQ)。"
+                    "前置条件: 设备必须先已连接（先 sdr_connect 或 sdr_open_iq_file），否则返回'设备未连接'。"
+                    "录制文件自动保存到 ~/.mbdsdr/recordings/（save_path 可覆盖）。"
+                    "duration=0 表示持续录制直到调用 sdr_record_stop。"
+                    "副作用: 按采样率×格式持续写盘（cf32 每秒约 4×采样率 字节，如 2MS/s 约 8MB/s），"
+                    "长录制前确认磁盘余量，必要时先调低 sdr_set_sample_rate 或设置 duration。"
+                    "失败恢复: 若返回'设备未连接'，改用 sdr_list_devices + sdr_connect 后再试;"
+                    "若磁盘写入失败，检查 save_path 目录权限与磁盘空间。"
+                    "产物透传: 返回数据的 recording_path 字段可直接作为 sdr_decode_* 系列与工作流 {{recording_path}} 模板的输入。"
+                    "能力边界: 仅录制基带/音频数据，不含解调文本——文本留存请用对应解码工具另行保存。",
         parameters={
             "type": "object",
             "properties": {
                 "duration": {"type": "number", "description": "录制时长，单位秒。0=持续录制直到手动停止，默认 0"},
                 "format": {"type": "string", "description": "录制格式: cf32/wav/csv/iq，默认 cf32"},
                 "save_path": {"type": "string", "description": "保存路径（可选，默认自动生成）"},
+                "gain": {"type": "number", "description": "录制增益系数，默认 1.0（不放大）；仅对可缩放格式生效"},
+                "decimation": {"type": "integer", "description": "录制前整数抽取倍率，默认 1（不抽取）；>1 可降低码率，须为整数"},
             },
             "required": [],
         },
@@ -936,7 +977,13 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_record_stop",
-        description="停止当前录制。返回录制文件路径、时长、文件大小、采样率、中心频率等元数据。",
+        description="停止当前录制。返回录制文件路径、时长、文件大小、采样率、中心频率等元数据。"
+                    "前置条件: 无（任意时刻可调）。"
+                    "失败恢复: 若当前没有正在进行的录制，返回'没有正在进行的录制'而非报错——"
+                    "此时应检查是否已停止（可先用 sdr_recordings_list 确认已生成文件），不要反复重试。"
+                    "副作用: 落盘并关闭文件句柄; 之后 sdr_record_start 将生成新文件而非续写。"
+                    "产物透传: 返回数据的 recording_path 字段可直接作为 sdr_decode_* 系列与工作流 {{recording_path}} 模板的输入。"
+                    "能力边界: 仅停止本进程的录制，不影响其他程序的录制。",
         parameters={"type": "object", "properties": {}, "required": []},
         handler=lambda args: _tr_pair(_record_stop(mgr)),
         category="sdr_record",
@@ -944,7 +991,10 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="sdr_recordings_list",
-        description="列出所有历史录制文件。包括文件名、格式、时长、大小、采样率、中心频率、录制时间。用于回放或后续分析。",
+        description="列出所有历史录制文件。包括文件名、格式、时长、大小、采样率、中心频率、录制时间。用于回放或后续分析。"
+                    "前置条件: 无（任意时刻可查）。"
+                    "失败恢复: 录制目录不存在时返回空列表/无文件提示而非报错——表示尚无录制文件。"
+                    "能力边界: 只读列表，不删除文件; 打开某个文件请用 sdr_open_iq_file。",
         parameters={
             "type": "object",
             "properties": {
@@ -1375,7 +1425,8 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="openapi_people_in_space",
-        description="获取当前太空人数和航天员姓名。用于科普、航天爱好者参考。免费API无需key。",
+        description="获取当前太空人数和航天员姓名。用于科普、航天爱好者参考。免费API无需key。"
+                    "前置条件: 需联网; 失败恢复: 网络不可达时返回错误，不要虚构人数——可改用本地卫星过境工具做航天科普。",
         parameters={
             "type": "object",
             "properties": {},
@@ -2253,7 +2304,9 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="radio_set_frequency",
-        description="设置电台接收/发射频率。指定频率（Hz），电台自动切换到对应VFO。",
+        description="设置电台接收/发射频率。指定频率（Hz），电台自动切换到对应VFO。"
+                    "前置条件: 电台必须先已连接; 失败恢复: 频率超出电台范围时返回硬件支持的频段范围，按提示范围内的频率重试。"
+                    "副作用: 会改变电台实际接收频率（硬件调谐）。",
         parameters={
             "type": "object",
             "properties": {
@@ -2267,7 +2320,9 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="radio_set_mode",
-        description="设置电台模式（USB/LSB/CW/AM/FM/DIG）。",
+        description="设置电台模式（USB/LSB/CW/AM/FM/DIG）。前置条件: 设备必须先已连接。"
+                    "失败恢复: 未连接时返回提示而非报错——先 sdr_connect 再重试; 模式名无效时列出合法值。"
+                    "副作用: 改变解调模式会影响音频输出与解码链路; 能力边界: 仅作用于本进程连接的电台。",
         parameters={
             "type": "object",
             "properties": {
@@ -2281,7 +2336,9 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="radio_ptt",
-        description="控制电台PTT（发射/接收切换）。on=发射，off=接收。用于发射前的切换。",
+        description="控制电台PTT（发射/接收切换）。on=发射，off=接收。用于发射前的切换。"
+                    "前置条件: 电台必须先已连接且具备发射能力; 副作用: on 会使电台实际发射射频信号——"
+                    "仅在合法频段、已确认天线连接的前提下使用; 失败恢复: 电台只收时返回不支持提示，不要虚构发射成功。",
         parameters={
             "type": "object",
             "properties": {
@@ -2324,7 +2381,8 @@ def register_sdr_tools(agent):
 
     agent.tool_registry.register(
         name="morse_decode",
-        description="Morse码转文本。输入Morse码字符串（.和-），输出解码文本。",
+        description="Morse码转文本。输入Morse码字符串（.和-），输出解码文本。"
+                    "输入契约: 字符间用空格分隔、单词间用 / 分隔; 失败恢复: 含非法字符时返回错误并指出位置，修正后重试。",
         parameters={
             "type": "object",
             "properties": {

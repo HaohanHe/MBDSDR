@@ -8,6 +8,7 @@ import '../models/recording.dart';
 import '../models/satellite.dart';
 import '../pages/activity_log_page.dart';
 import '../pages/chat_page.dart';
+import '../pages/help_page.dart';
 import '../pages/recordings_page.dart';
 import '../pages/settings_page.dart';
 import '../pages/sky_page.dart';
@@ -19,6 +20,7 @@ import '../services/recording_store.dart';
 import '../services/sat_passes_provider.dart';
 import '../services/settings_service.dart';
 import '../widgets/connection_status_line.dart';
+import '../widgets/first_run_guide.dart';
 import 'ai_tools.dart';
 import 'tokens.dart';
 
@@ -155,14 +157,27 @@ class _HomeShellState extends State<HomeShell> {
           const SizedBox(width: AppTokens.spacingM),
           // 安静状态行：订阅 RadioController（ChangeNotifier），状态变化即
           // 重建。连接中/已连接/掉线等待重插/真实失败原因，均为克制小字。
-          Consumer<RadioController>(
-            builder: (BuildContext context, RadioController radio, _) {
-              return ConnectionStatusLine(radio: radio);
-            },
+          // Flexible：AppBar 动作区（帮助/历史图标）占位后，状态行让位并
+          // 省略号截断，不再整体溢出（360px 窄屏实测 30px 溢出回归）。
+          Flexible(
+            child: Consumer<RadioController>(
+              builder: (BuildContext context, RadioController radio, _) {
+                return ConnectionStatusLine(radio: radio);
+              },
+            ),
           ),
         ],
       ),
       actions: <Widget>[
+        // 「帮助」入口：应用内手册（sdroxide F1 模式），快速开始/页面导览/
+        // 解调模式/FAQ/术语速查。随时可查，不占导航位。
+        IconButton(
+          icon: const Icon(Icons.help_outline),
+          tooltip: '帮助',
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const HelpPage()),
+          ),
+        ),
         // 「活动记录」入口：窄屏底栏收敛到 5 项后它不在底栏里，从 AppBar 进入
         // （宽屏 Rail 本就有该项，这里作为快捷入口，行为一致）。
         IconButton(
@@ -178,6 +193,9 @@ class _HomeShellState extends State<HomeShell> {
     return Consumer<SettingsService>(
       builder: (BuildContext context, SettingsService settings, _) {
         final RadioController radio = context.read<RadioController>();
+        // 首跑引导（OnAir 向导模式轻量版）：未看过时横幅挂 body 顶部，
+        // 不阻断操作；「知道了」写持久化标记后永不再现。
+        final bool showGuide = !settings.firstRunGuideSeen;
         // 回放注入：store 解析 wav 绝对路径，player 走 mbdsdr/audio 通道。
         // 任一缺失（导航单测）→ onPlay/onStop 为 null，录音页不渲染假播放按钮。
         final RecordingStore? store = _maybeRead<RecordingStore>();
@@ -192,7 +210,7 @@ class _HomeShellState extends State<HomeShell> {
             alt: settings.stationAlt!,
           );
         }
-        return IndexedStack(
+        final Widget stack = IndexedStack(
           index: _index,
           children: <Widget>[
             SpectrumPage(
@@ -277,6 +295,16 @@ class _HomeShellState extends State<HomeShell> {
             ),
             const ActivityLogPage(),
             SettingsPage(settings: settings, radio: radio),
+          ],
+        );
+        if (!showGuide) return stack;
+        return Column(
+          children: <Widget>[
+            FirstRunGuide(
+              onOpenSettings: _openSettings,
+              onDismiss: () => settings.firstRunGuideSeen = true,
+            ),
+            Expanded(child: stack),
           ],
         );
       },
