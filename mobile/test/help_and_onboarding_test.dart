@@ -59,7 +59,7 @@ Widget _wrap(SettingsService settings, RadioController radio) => MaterialApp(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  Future<SettingsService> _settings({bool guideSeen = false}) async {
+  Future<SettingsService> settingsWith({bool guideSeen = false}) async {
     final kv = _MemKv();
     if (guideSeen) await kv.setBool('firstRunGuideSeen', true);
     final s = SettingsService(kv: kv, secure: _MemSecure());
@@ -100,7 +100,7 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    final settings = await _settings(guideSeen: true);
+    final settings = await settingsWith(guideSeen: true);
     final radio = RadioController();
 
     await tester.pumpWidget(_wrap(settings, radio));
@@ -124,7 +124,7 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    final settings = await _settings(guideSeen: false);
+    final settings = await settingsWith(guideSeen: false);
     final radio = RadioController();
 
     await tester.pumpWidget(_wrap(settings, radio));
@@ -145,7 +145,7 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    final settings = await _settings(guideSeen: true);
+    final settings = await settingsWith(guideSeen: true);
     final radio = RadioController();
 
     await tester.pumpWidget(_wrap(settings, radio));
@@ -161,7 +161,7 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    final settings = await _settings(guideSeen: false);
+    final settings = await settingsWith(guideSeen: false);
     final radio = RadioController();
 
     await tester.pumpWidget(_wrap(settings, radio));

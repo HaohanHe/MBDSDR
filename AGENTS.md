@@ -57,6 +57,6 @@ test_tool_description_quality.py 35 项（描述质量门禁：地板/schema 形
 passed 数相应下浮——skip 均属无 env/无硬件的诚实 skip）。任何改动不得
 降低此数。
 
-移动端（`mobile/`）：`flutter test` 基线 **389 passed**（phase67 新增 5 项：
-帮助页/首跑引导 Widget 测试）；`flutter analyze` 零问题（Flutter 3.47.7，
+移动端（`mobile/`）：`flutter test` 基线 **404 passed**（phase67 新增 5 项帮助页/
+首跑引导 Widget 测试 + 15 项 AI 工具描述门禁）; `flutter analyze` 零问题（Flutter 3.47.7，
 SDK 约束 >=3.9，勿用 /opt/flutter 旧版 3.0 跑）。
