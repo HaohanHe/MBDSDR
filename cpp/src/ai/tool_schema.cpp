@@ -67,12 +67,20 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     {
         ToolSchemaSpec s;
         s.name = "tune_frequency";
-        s.description = "Tune the receiver to a center frequency in Hz (single/main VFO). For multi-VFO setups use set_vfo_frequency with a vfo_id instead.";
+        s.description = QString::fromUtf8(
+            "写入：把接收机中心频率调谐到指定 Hz（单/主 VFO）。属于写动作，手动模式下被拦截。"
+            "前置条件: freq_hz 必须提供且为正的有限数（Hz）；合法范围由 schema 边界"
+            "（tokens::kFreqMinHz..kFreqMaxHz）在参数校验层强制。"
+            "失败恢复: 非正/非有限频率被明确拒绝（不会假报成功也不会静默丢弃）——"
+            "改正数值后重试; 多 VFO 场景请改用 set_vfo_frequency（index 或 id 定位目标 VFO）。"
+            "副作用: 立即改变中心频率（硬件状态），音频与瀑布显示随之变化。"
+            "能力边界: 只调主 VFO 中心频率; 不改模式/带宽，也不读回状态"
+            "（读回用 get_status）。");
         s.write = true;   // changes center frequency
         ToolParamSpec p;
         p.name = "freq_hz";
         p.type = "number";
-        p.description = "Center frequency in Hz, e.g. 98500000 for 98.5 MHz";
+        p.description = QString::fromUtf8("中心频率（Hz），如 98500000 表示 98.5 MHz");
         p.hasMin = true; p.min = tokens::kFreqMinHz;
         p.hasMax = true; p.max = tokens::kFreqMaxHz;
         p.required = true;
@@ -294,14 +302,22 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.name = "get_pocsag_messages";
         s.description = QString::fromUtf8(
             "只读：读取指定（默认当前选中）信道已解码的 POCSAG 寻呼消息快照"
-            "（地址 RIC/功能位/文本）。无解码结果时诚实返回空列表，不编造消息。");
+            "（地址 RIC/功能位/文本）。"
+            "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
+            "失败恢复: 无失败路径——无解码结果时诚实返回空列表，不编造消息。"
+            "能力边界: 只读引擎已解出的快照，不触发解调; 信道选择不改调谐状态。");
         s.write = false;
         ToolParamSpec ch;
         ch.name = "channel_id";
         ch.type = "number";
-        ch.description = QString::fromUtf8("可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道");
+        ch.description = QString::fromUtf8("可选：信道 VFO id；与 channel 二选一；缺省为当前选中信道");
         ch.required = false;
-        s.params.append(ch);
+        ToolParamSpec chAlias;
+        chAlias.name = "channel";
+        chAlias.type = "number";
+        chAlias.description = QString::fromUtf8("可选：channel_id 的别名（ControlHub/HTTP 键名）；二选一");
+        chAlias.required = false;
+        s.params << ch << chAlias;
         out.append(s);
     }
 
@@ -312,14 +328,21 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.description = QString::fromUtf8(
             "只读：读取指定（默认当前选中）信道已解码的 M17 呼叫/帧快照"
             "（源/目的呼号、类型、CRC 状态、语音帧诚实标注未解码）。"
-            "无解码结果时诚实返回空列表。");
+            "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
+            "失败恢复: 无失败路径——无解码结果时诚实返回空列表。"
+            "能力边界: 只读引擎已解出的快照，不触发解调; 语音帧未解码时显式标注。");
         s.write = false;
         ToolParamSpec ch;
         ch.name = "channel_id";
         ch.type = "number";
-        ch.description = QString::fromUtf8("可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道");
+        ch.description = QString::fromUtf8("可选：信道 VFO id；与 channel 二选一；缺省为当前选中信道");
         ch.required = false;
-        s.params.append(ch);
+        ToolParamSpec chAlias;
+        chAlias.name = "channel";
+        chAlias.type = "number";
+        chAlias.description = QString::fromUtf8("可选：channel_id 的别名（ControlHub/HTTP 键名）；二选一");
+        chAlias.required = false;
+        s.params << ch << chAlias;
         out.append(s);
     }
 
@@ -330,14 +353,22 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.description = QString::fromUtf8(
             "只读：读取指定（默认当前选中）VOR 信道最新径向读数"
             "（radialDeg 方位、质量、莫尔斯识别码、锁定态）。"
-            "未锁定时 locked=false，方位不可信并被显式标注，不编造方位。");
+            "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
+            "失败恢复: 无失败路径——未锁定时 locked=false，方位不可信并被显式标注，"
+            "不编造方位。"
+            "能力边界: 只读引擎最新读数; 方位仅锁定后可信。");
         s.write = false;
         ToolParamSpec ch;
         ch.name = "channel_id";
         ch.type = "number";
-        ch.description = QString::fromUtf8("可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道");
+        ch.description = QString::fromUtf8("可选：信道 VFO id；与 channel 二选一；缺省为当前选中信道");
         ch.required = false;
-        s.params.append(ch);
+        ToolParamSpec chAlias;
+        chAlias.name = "channel";
+        chAlias.type = "number";
+        chAlias.description = QString::fromUtf8("可选：channel_id 的别名（ControlHub/HTTP 键名）；二选一");
+        chAlias.required = false;
+        s.params << ch << chAlias;
         out.append(s);
     }
 
@@ -348,14 +379,21 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.description = QString::fromUtf8(
             "只读：读取指定（默认当前选中）信道已解码的 ACARS 航空报文快照"
             "（方向 air/ground、label、block id、ack、正文、CRC 结果）。"
-            "无解码结果时诚实返回空列表，不编造报文。");
+            "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
+            "失败恢复: 无失败路径——无解码结果时诚实返回空列表，不编造报文。"
+            "能力边界: 只读引擎已解出的快照，不触发解调; CRC 失败帧显式标注。");
         s.write = false;
         ToolParamSpec ch;
         ch.name = "channel_id";
         ch.type = "number";
-        ch.description = QString::fromUtf8("可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道");
+        ch.description = QString::fromUtf8("可选：信道 VFO id；与 channel 二选一；缺省为当前选中信道");
         ch.required = false;
-        s.params.append(ch);
+        ToolParamSpec chAlias;
+        chAlias.name = "channel";
+        chAlias.type = "number";
+        chAlias.description = QString::fromUtf8("可选：channel_id 的别名（ControlHub/HTTP 键名）；二选一");
+        chAlias.required = false;
+        s.params << ch << chAlias;
         out.append(s);
     }
 
@@ -366,14 +404,21 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.description = QString::fromUtf8(
             "只读：读取指定（默认当前选中）信道已解码的 NAVTEX 海上安全报文快照"
             "（发台 B1、类型 B2、编号、正文、时间分集/定相状态）。"
-            "无解码结果时诚实返回空列表，不编造报文。");
+            "前置条件: 无（channel_id/channel 可选，缺省为当前选中信道）。"
+            "失败恢复: 无失败路径——无解码结果时诚实返回空列表，不编造报文。"
+            "能力边界: 只读引擎已解出的快照，不触发解调; 分集/定相失败在条目内显式标注。");
         s.write = false;
         ToolParamSpec ch;
         ch.name = "channel_id";
         ch.type = "number";
-        ch.description = QString::fromUtf8("可选：信道 VFO id；键名 channel_id（亦可接受 channel）；缺省为当前选中信道");
+        ch.description = QString::fromUtf8("可选：信道 VFO id；与 channel 二选一；缺省为当前选中信道");
         ch.required = false;
-        s.params.append(ch);
+        ToolParamSpec chAlias;
+        chAlias.name = "channel";
+        chAlias.type = "number";
+        chAlias.description = QString::fromUtf8("可选：channel_id 的别名（ControlHub/HTTP 键名）；二选一");
+        chAlias.required = false;
+        s.params << ch << chAlias;
         out.append(s);
     }
 
@@ -463,7 +508,10 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.name = "get_network_audio_status";
         s.description = QString::fromUtf8(
             "只读：返回网络音频流状态（是否使能、端口、格式）。"
-            "无状态时诚实返回 enabled=false，不编造端口。");
+            "无状态时诚实返回 enabled=false，不编造端口。"
+            "前置条件: 无。"
+            "能力边界: 当前 Agent 层无网络音频流读数（后端由 ControlHub 提供），"
+            "enabled=false 是诚实空态而非故障——不要据此声称网络音频损坏。");
         out.append(s);
     }
 
@@ -491,7 +539,13 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "stop_scan_link";
         s.description = QString::fromUtf8(
-            "写入：停止扫描活动链路。属于写动作，手动模式下被拦截。");
+            "写入：停止扫描活动链路。属于写动作，手动模式下被拦截。"
+            "前置条件: 无（无参数，任意时刻可调）。"
+            "失败恢复: 指令经 ControlHub 路由执行; 链路未运行时停止为空操作，"
+            "返回成功而非报错——不要反复重试。"
+            "副作用: 停止当前进行中的扫描活动链路（若有）。"
+            "能力边界: 只发停止指令; 扫描链路真实运行态在 ControlHub 侧，"
+            "用 get_scan_link_status 读取（Agent 层无链路实例时为空态读数）。");
         s.write = true;
         out.append(s);
     }
@@ -921,7 +975,12 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "set_noise_blanker";
         s.description = QString::fromUtf8(
-            "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。");
+            "写入：开关噪声抑制器（on 布尔）。属于写动作，手动模式下被拦截。"
+            "前置条件: on 必须提供且为布尔值。"
+            "失败恢复: on 缺失或非布尔时返回明确错误（绝不静默取默认值）——"
+            "补齐布尔值后重试。"
+            "副作用: 立即改变解调链路的噪声抑制状态。"
+            "能力边界: 仅开关，不含门限/强度参数; 状态回读用 get_noise_blanker_status。");
         s.write = true;
         ToolParamSpec on;
         on.name = "on";
@@ -938,7 +997,9 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.name = "get_noise_blanker_status";
         s.description = QString::fromUtf8(
             "只读：返回噪声抑制器状态（enabled 是否使能）。"
-            "读取引擎真实开关，不编造。");
+            "读取引擎真实开关，不编造。"
+            "前置条件: 无（未连接设备也可读当前开关配置）。"
+            "能力边界: 只读，不改变任何状态; 开关操作用 set_noise_blanker。");
         out.append(s);
     }
 
@@ -947,7 +1008,10 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "list_bookmarks";
         s.description = QString::fromUtf8(
-            "只读：列出书签（频率/名称/模式）。无书签时诚实返回空列表，不编造。");
+            "只读：列出书签（频率/名称/模式）。无书签时诚实返回空列表，不编造。"
+            "前置条件: 无。"
+            "能力边界: Agent 层未注入书签管理器时返回空列表+note（诚实空态），"
+            "真实书签数据在 control 层——空列表不等于没有书签，不要虚构条目。");
         out.append(s);
     }
 
@@ -998,7 +1062,12 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "tune_to_bookmark";
         s.description = QString::fromUtf8(
-            "写入：调谐到指定下标书签的频率。属于写动作，手动模式下被拦截。");
+            "写入：调谐到指定下标书签的频率。属于写动作，手动模式下被拦截。"
+            "前置条件: index 必须是 0 起整数下标，且书签管理器已注入。"
+            "失败恢复: index 越界时错误信息含真实书签总数（如「书签 index 5 越界"
+            "（共 3 条）」）——按总数改下标重试; 管理器未注入时返回明确错误而非假装调谐。"
+            "副作用: 改变当前选中 VFO 的调谐频率（硬件状态）。"
+            "能力边界: 只调谐到书签频率，不改书签本身; 书签列表用 list_bookmarks 读取。");
         s.write = true;
         ToolParamSpec idx;
         idx.name = "index";
@@ -1014,7 +1083,12 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "delete_bookmark";
         s.description = QString::fromUtf8(
-            "写入：删除指定下标书签。属于写动作，手动模式下被拦截。");
+            "写入：删除指定下标书签。属于写动作，手动模式下被拦截。"
+            "前置条件: index 必须是 0 起整数下标，且书签管理器已注入。"
+            "失败恢复: index 越界时错误信息含真实书签总数——按总数改下标重试。"
+            "副作用: 真删除书签（无回收站/无撤销接口），返回值 remaining 为删除后剩余数。"
+            "能力边界: 只能删已注入管理器的书签; 不确定下标时先用 tune_to_bookmark "
+            "的越界错误探测总数，或让用户确认。");
         s.write = true;
         ToolParamSpec idx;
         idx.name = "index";
@@ -1030,7 +1104,10 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "list_vfos";
         s.description = QString::fromUtf8(
-            "只读：列出全部 VFO 信道（id/频率/带宽/模式/选中态）。");
+            "只读：列出全部 VFO 信道（id/频率/带宽/模式/选中态）。"
+            "前置条件: 无。"
+            "能力边界: 返回引擎真实 VFO 标记，空列表即当前无 VFO; "
+            "新增/切换/改参分别用 add_vfo / switch_vfo / set_vfo_* 系列。");
         out.append(s);
     }
 
@@ -1039,7 +1116,11 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "add_vfo";
         s.description = QString::fromUtf8(
-            "写入：新增一个 VFO 信道。属于写动作，手动模式下被拦截。");
+            "写入：新增一个 VFO 信道。属于写动作，手动模式下被拦截。"
+            "前置条件: 无（无参数，任意时刻可调）。"
+            "失败恢复: 无失败路径——新增必定成功并回显新信道 id。"
+            "副作用: 在引擎新增一个 VFO 信道（不自动切换选中，不改变当前调谐）。"
+            "能力边界: 只增不选; 返回 selected_vfo_id 供后续 switch_vfo 参考。");
         s.write = true;
         out.append(s);
     }
@@ -1049,7 +1130,11 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "switch_vfo";
         s.description = QString::fromUtf8(
-            "写入：切换选中的 VFO 信道（index）。属于写动作，手动模式下被拦截。");
+            "写入：切换选中的 VFO 信道（index）。属于写动作，手动模式下被拦截。"
+            "前置条件: index 必须提供且为数字; 有效下标范围用 list_vfos 读取。"
+            "失败恢复: index 缺失或非数字时返回明确错误——先 list_vfos 拿真实 id 再重试。"
+            "副作用: 切换选中 VFO，解调输出与调谐目标随之改变。"
+            "能力边界: 只切换不新增; 选错信道不会丢数据，再次 switch_vfo 即可。");
         s.write = true;
         ToolParamSpec idx;
         idx.name = "index";
@@ -1065,7 +1150,11 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolSchemaSpec s;
         s.name = "rename_vfo";
         s.description = QString::fromUtf8(
-            "写入：重命名指定 VFO 信道（index/name）。属于写动作，手动模式下被拦截。");
+            "写入：重命名指定 VFO 信道（index/name）。属于写动作，手动模式下被拦截。"
+            "前置条件: index（数字）与 name（字符串）都必须提供。"
+            "失败恢复: 任一缺失或类型不符时返回明确错误——补齐后重试。"
+            "副作用: 重命名经 control 层路由生效; 不影响频率/带宽/模式。"
+            "能力边界: 只改显示名; 频率/模式/带宽用 set_vfo_* 系列。");
         s.write = true;
         ToolParamSpec idx;
         idx.name = "index";
@@ -1106,114 +1195,179 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
 
     // set_vfo_frequency (write -- gated) ---------------------------------
     // Phase63 D1: accept EITHER index (marker ordinal) OR id (direct VFO id).
+    // Phase67.2 honesty: BOTH keys are declared and NEITHER is required.
+    // The strict validator (arguments_validator.cpp) rejects unknown keys AND
+    // missing required ones, so an undeclared alias is unreachable from the
+    // model even though execSetVfoFrequency resolves it -- declaring both is
+    // the only way the D1 bilateral contract survives the validated path.
+    // The handler itself errors honestly when neither is supplied.
     {
         ToolSchemaSpec s;
         s.name = "set_vfo_frequency";
         s.description = QString::fromUtf8(
             "写入：把指定 VFO 调谐到新频率（index 或 id 二选一 + freq_hz）。"
+            "前置条件: index（list_vfos 返回的序号）或 id（VFO 直传 id）必须提供其一；"
+            "freq_hz 为目标频率（Hz，必填）。"
+            "失败恢复: 两者都缺或类型不符时返回明确参数错误；index 越界时错误附当前"
+            "VFO 总数——用 list_vfos 重新取序号/id 后重试。"
+            "副作用: 该 VFO 的解调频率立即改变，音频与瀑布显示随之变化；不影响其他 "
+            "VFO，也不改变模式/带宽。"
+            "能力边界: 只调谐已存在的 VFO（不新增信道）；频率合法性由引擎与硬件决定。"
             "属于写动作，手动模式下被拦截。");
         s.write = true;
         ToolParamSpec idx;
         idx.name = "index";
         idx.type = "number";
-        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序；亦可改用 id 直传 VFO id）");
-        idx.required = true;
+        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序；与 id 二选一）");
+        idx.required = false;
+        ToolParamSpec idp;
+        idp.name = "id";
+        idp.type = "number";
+        idp.description = QString::fromUtf8("VFO id（直传；与 index 二选一）");
+        idp.required = false;
         ToolParamSpec fq;
         fq.name = "freq_hz";
         fq.type = "number";
         fq.description = QString::fromUtf8("目标频率（Hz）");
         fq.required = true;
-        s.params << idx << fq;
+        s.params << idx << idp << fq;
         out.append(s);
     }
 
     // set_vfo_mode (write -- gated) --------------------------------------
+    // Phase67.2 honesty: same bilateral declaration as set_vfo_frequency --
+    // index AND id both declared, neither required (validator whitelist).
     {
         ToolSchemaSpec s;
         s.name = "set_vfo_mode";
         s.description = QString::fromUtf8(
-            "写入：切换指定 VFO 的解调模式（index 或 id 二选一 + mode，mode 取值见 ControlHub 模式表："
-            "AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX）。属于写动作，手动模式下被拦截。");
+            "写入：切换指定 VFO 的解调模式（index 或 id 二选一 + mode）。"
+            "前置条件: index 或 id 必须提供其一；mode 取值见 ControlHub 模式表："
+            "AM/NFM/WFM/USB/LSB/CW/POCSAG/m17/VOR/ACARS/NAVTEX（大小写不敏感）。"
+            "失败恢复: 目标缺失/越界或 mode 不在表中时返回明确错误（越界附 VFO 总数）——"
+            "用 list_vfos 核对后重试。"
+            "副作用: 该 VFO 的解调模式立即切换，音频输出随之改变。"
+            "能力边界: 只改已存在 VFO 的模式; 不影响其他 VFO。"
+            "属于写动作，手动模式下被拦截。");
         s.write = true;
         ToolParamSpec idx;
         idx.name = "index";
         idx.type = "number";
-        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序；亦可改用 id 直传 VFO id）");
-        idx.required = true;
+        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序；与 id 二选一）");
+        idx.required = false;
+        ToolParamSpec idp;
+        idp.name = "id";
+        idp.type = "number";
+        idp.description = QString::fromUtf8("VFO id（直传；与 index 二选一）");
+        idp.required = false;
         ToolParamSpec md;
         md.name = "mode";
         md.type = "string";
         md.description = QString::fromUtf8("解调模式（大小写不敏感）");
         md.required = true;
-        s.params << idx << md;
+        s.params << idx << idp << md;
         out.append(s);
     }
 
     // set_vfo_bandwidth (write -- gated) ---------------------------------
+    // Phase67.2 honesty: same bilateral declaration as set_vfo_frequency.
     {
         ToolSchemaSpec s;
         s.name = "set_vfo_bandwidth";
         s.description = QString::fromUtf8(
             "写入：设置指定 VFO 的信道带宽（index 或 id 二选一 + bandwidth_hz）。"
+            "前置条件: index 或 id 必须提供其一；bandwidth_hz 必须为正数（Hz）。"
+            "失败恢复: 目标缺失/越界或带宽非正时返回明确错误（越界附 VFO 总数）——"
+            "补齐后重试。"
+            "副作用: 该 VFO 的滤波器带宽立即改变，音频随之变化。"
+            "能力边界: 只改已存在 VFO 的带宽; 可用范围由硬件/引擎决定。"
             "属于写动作，手动模式下被拦截。");
         s.write = true;
         ToolParamSpec idx;
         idx.name = "index";
         idx.type = "number";
-        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序；亦可改用 id 直传 VFO id）");
-        idx.required = true;
+        idx.description = QString::fromUtf8("VFO 序号（list_vfos 返回顺序；与 id 二选一）");
+        idx.required = false;
+        ToolParamSpec idp;
+        idp.name = "id";
+        idp.type = "number";
+        idp.description = QString::fromUtf8("VFO id（直传；与 index 二选一）");
+        idp.required = false;
         ToolParamSpec bw;
         bw.name = "bandwidth_hz";
         bw.type = "number";
-        bw.description = QString::fromUtf8("信道带宽（Hz）");
+        bw.description = QString::fromUtf8("信道带宽（Hz，必须为正数）");
         bw.required = true;
-        s.params << idx << bw;
+        s.params << idx << idp << bw;
         out.append(s);
     }
 
     // list_recordings (read-only) ---------------------------------------
+    // Phase67.2: four-dimension contract against execListRecordings --
+    // a missing dir is an HONEST empty list (ok:true, count 0), not an error.
     {
         ToolSchemaSpec s;
         s.name = "list_recordings";
         s.description = QString::fromUtf8(
-            "只读：扫描录制目录并列出已有录制文件。目录不存在或为空时诚实返回空列表。");
+            "只读：扫描录制目录并列出已有录制文件。"
+            "前置条件: 无（任意时刻可调；目录路径由引擎配置决定，随结果 dir 字段透传）。"
+            "失败恢复: 无失败路径——目录不存在或为空时诚实返回空列表（count=0），"
+            "不编造文件。"
+            "能力边界: 只列文件不读取内容; 每条含 name/bytes/modified; "
+            "删除/导出分别用 delete_recording / export_recording。");
         out.append(s);
     }
 
     // delete_recording (write -- gated) ----------------------------------
+    // Phase67.2: four-dimension contract against execDeleteRecording --
+    // bare filename only (traversal refused), missing file is an explicit
+    // error, removal is real and irreversible.
     {
         ToolSchemaSpec s;
         s.name = "delete_recording";
         s.description = QString::fromUtf8(
-            "写入：删除录制目录下指定名称的文件（仅限录制目录内）。"
-            "属于写动作，手动模式下被拦截。");
+            "写入：删除录制目录下指定名称的文件。属于写动作，手动模式下被拦截。"
+            "前置条件: name 必须是录制目录内的纯文件名（不得含 / 或 \\，不得为 . / ..）——"
+            "可用 list_recordings 先取真实文件名。"
+            "失败恢复: name 含路径分隔符时明确拒绝（防目录穿越）；文件不存在时返回"
+            "明确错误——核对 list_recordings 后重试; 删除本身失败也会明确报错。"
+            "副作用: 真删除磁盘文件（无回收站/无撤销接口），不可恢复。"
+            "能力边界: 只能删录制目录内的文件; 导出而非删除用 export_recording。");
         s.write = true;
         ToolParamSpec nm;
         nm.name = "name";
         nm.type = "string";
-        nm.description = QString::fromUtf8("录制文件名（仅文件名，不得含路径）");
+        nm.description = QString::fromUtf8("录制文件名（仅纯文件名，不得含路径）");
         nm.required = true;
         s.params.append(nm);
         out.append(s);
     }
 
     // export_recording (write -- gated) ----------------------------------
+    // Phase67.2: four-dimension contract against execExportRecording --
+    // bare filename only, missing source is explicit, QFile::copy fails
+    // honestly when the target exists or is unwritable, source untouched.
     {
         ToolSchemaSpec s;
         s.name = "export_recording";
         s.description = QString::fromUtf8(
-            "写入：把录制目录下指定文件复制导出到 out_path。"
-            "属于写动作，手动模式下被拦截。");
+            "写入：把录制目录下指定文件复制导出到 out_path。属于写动作，手动模式下被拦截。"
+            "前置条件: name（录制目录内纯文件名，不得含路径）与 out_path（目标完整路径）"
+            "都必须提供; 文件名可用 list_recordings 核对。"
+            "失败恢复: name 含路径分隔符时明确拒绝; 源文件不存在时返回明确错误; "
+            "目标已存在或不可写时返回「导出失败」——换目标路径后重试。"
+            "副作用: 在 out_path 生成一份副本; 不改动/删除源文件。"
+            "能力边界: 只导出录制目录内的文件; 复制失败不产生半成品承诺（QFile::copy 语义）。");
         s.write = true;
         ToolParamSpec nm;
         nm.name = "name";
         nm.type = "string";
-        nm.description = QString::fromUtf8("录制文件名（仅文件名）");
+        nm.description = QString::fromUtf8("录制文件名（仅纯文件名）");
         nm.required = true;
         ToolParamSpec outPath;
         outPath.name = "out_path";
         outPath.type = "string";
-        outPath.description = QString::fromUtf8("导出目标完整路径");
+        outPath.description = QString::fromUtf8("导出目标完整路径（已存在则导出失败）");
         outPath.required = true;
         s.params << nm << outPath;
         out.append(s);
@@ -1228,8 +1382,10 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.name = "set_fft_params";
         s.description = QString::fromUtf8(
             "写入：设置频谱 FFT 参数（fft_size/window/average）。"
-            "window/average 接受字符串枚举（推荐）或原始整数 0/1/2。"
-            "属于写动作，手动模式下被拦截。");
+            "window/average 使用字符串枚举（Hann/Flattop/Blackman、Off/Slow/Fast）。"
+            "属于写动作，手动模式下被拦截。"
+            "能力边界: 模型侧只接受字符串枚举——原始整数 0/1/2 是 ControlHub/HTTP "
+            "内部通道键，经 LLM/MCP 校验路径传入会被类型校验拒绝。");
         s.write = true;
         ToolParamSpec sz;
         sz.name = "fft_size";
@@ -1241,13 +1397,13 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolParamSpec w;
         w.name = "window";
         w.type = "string";
-        w.description = QString::fromUtf8("窗函数（亦接受整数 0=Hann/1=Flattop/2=Blackman）");
+        w.description = QString::fromUtf8("窗函数（Hann/Flattop/Blackman）");
         w.enumValues = QVariantList{"Hann", "Flattop", "Blackman"};
         w.required = false;
         ToolParamSpec av;
         av.name = "average";
         av.type = "string";
-        av.description = QString::fromUtf8("平均模式（亦接受整数 0=Off/1=Slow/2=Fast）");
+        av.description = QString::fromUtf8("平均模式（Off/Slow/Fast）");
         av.enumValues = QVariantList{"Off", "Slow", "Fast"};
         av.required = false;
         s.params << sz << w << av;
@@ -1272,11 +1428,17 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     }
 
     // get_spectrum_status (read-only) ------------------------------------
+    // Phase67.2: four-dimension contract against execGetSpectrumStatus --
+    // real engine fftSize()/windowType()/averageMode() readback; output keys
+    // (fft_size/window/average) match the schema and set_fft_params echo.
     {
         ToolSchemaSpec s;
         s.name = "get_spectrum_status";
         s.description = QString::fromUtf8(
-            "只读：返回频谱当前参数（fft_size/window/average）真实值。");
+            "只读：返回频谱当前 FFT 参数真实值（fft_size/window/average）。"
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径——值直接读引擎，不编造; 与预期不符时以本工具读回为准。"
+            "能力边界: 只读不改; 修改 FFT 参数用 set_fft_params。");
         out.append(s);
     }
 
@@ -1643,6 +1805,9 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
     // get_aprs_messages (read): APRS/AX.25 messages decoded from a recovered
     // FSK bit stream (NRZI -> HDLC deframe + CRC-16/X.25 -> AX.25 decode).
     // Honest empty when nothing decoded / no feed.
+    // Phase67.2 honesty: the description has always promised `limit` (1..50,
+    // default 50) but the param was never declared -- the strict validator
+    // rejects it as an unknown key. Declared with min/max like get_task_history.
     {
         ToolSchemaSpec s;
         s.name = "get_aprs_messages";
@@ -1650,8 +1815,18 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
             "读取：最近解出的 APRS/AX.25 消息（最多 limit 条，1..50，默认 50）。"
             "每条含 time_ms/src/dst/path/info。源为 1200/2400 baud FSK 解调后的 NRZI "
             "位流经 HDLC 拆帧（CRC-16/X.25 校验）与 AX.25 解码；无效帧丢弃，无解码"
-            "则诚实空态。只读工具。");
+            "则诚实空态。只读工具。"
+            "前置条件: 无（任意时刻可调）。"
+            "失败恢复: 无失败路径; limit 越界诚实 clamp 到 1..50，不报错。"
+            "能力边界: 只读引擎已解出的快照，不触发解调; 只返回最近 limit 条。");
         s.write = false;
+        ToolParamSpec lim;
+        lim.name = "limit"; lim.type = "number";
+        lim.description = QString::fromUtf8("返回条数上限，取值 1..50，默认 50（越界由参数校验拒绝）");
+        lim.required = false;
+        lim.hasMin = true; lim.min = 1.0;
+        lim.hasMax = true; lim.max = 50.0;
+        s.params << lim;
         out.append(s);
     }
 
@@ -1710,7 +1885,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         lowHz.description = QString::fromUtf8("sweep_find_record：扫描下限 Hz");
         ToolParamSpec highHz;
         highHz.name = "high_hz"; highHz.type = "number";
-        highHz.description = QString::fromUtf8("sweep_find_record：扫描上限 Hz（亦作 target_capture 的目标频率）");
+        highHz.description = QString::fromUtf8("sweep_find_record：扫描上限 Hz");
         ToolParamSpec stepHz;
         stepHz.name = "step_hz"; stepHz.type = "number";
         stepHz.description = QString::fromUtf8("sweep_find_record：扫描步进 Hz");
@@ -1721,13 +1896,17 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         ToolParamSpec bookName;
         bookName.name = "book_name"; bookName.type = "string";
         bookName.description = QString::fromUtf8("sweep_find_record：命中书签名");
+        ToolParamSpec targetHz;
+        targetHz.name = "target_hz"; targetHz.type = "number";
+        targetHz.description = QString::fromUtf8("target_capture：目标频率 Hz（必填）");
         ToolParamSpec freqHz;
         freqHz.name = "freq_hz"; freqHz.type = "number";
-        freqHz.description = QString::fromUtf8("fixed_freq_record（亦作 target_hz）：固定/目标频率 Hz");
+        freqHz.description = QString::fromUtf8("fixed_freq_record：固定频率 Hz（必填）");
         ToolParamSpec bwHz;
         bwHz.name = "bandwidth_hz"; bwHz.type = "number";
         bwHz.description = QString::fromUtf8("fixed_freq_record：信道带宽 Hz");
-        s.params << tname << lowHz << highHz << stepHz << mode << bookName << freqHz << bwHz;
+        s.params << tname << lowHz << highHz << stepHz << mode << bookName
+                 << targetHz << freqHz << bwHz;
         out.append(s);
     }
 
@@ -1745,7 +1924,7 @@ QList<ToolSchemaSpec> registeredToolSpecs() {
         s.write = false;
         ToolParamSpec lim;
         lim.name = "limit"; lim.type = "number";
-        lim.description = QString::fromUtf8("列表模式返回条数上限 1..50，默认 10；越界诚实 clamp");
+        lim.description = QString::fromUtf8("列表模式返回条数上限，取值 1..50，默认 10（越界由参数校验拒绝）");
         lim.required = false;
         lim.hasMin = true; lim.min = 1.0;
         lim.hasMax = true; lim.max = 50.0;
