@@ -87,6 +87,7 @@ recordings/
 reference/
 # 测试/运行产物
 syn_*.npy
+mbdsdr_ai/artifacts/*.npy
 tests/test_report.txt
 repos/
 
