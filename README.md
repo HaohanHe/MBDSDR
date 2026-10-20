@@ -19,6 +19,7 @@
 | Python 智能体内核 | [`mbdsdr_ai/`](mbdsdr_ai/README.md) | **研究原型**：注册大量 LLM 可调用工具（数量随版本漂移，实时口径见该 README §1 与运行时 `tool_registry.list_tools()`）+ 工作流引擎。这是原型期工具面，**不是**随桌面交付的工具集 |
 | 论文实验管线 | [`experiments/`](experiments/README.md) | 可复现实验（Eb/N0 解码成功率 / 多普勒定轨 / AMR 基线 / LLM 基线），固定种子、逐图标口径 |
 | 真机工具 | [`tools/`](tools/) | 一键只读自检 `hw_selfcheck` + 联调向导 `onboarding` |
+| 重复实现台账 | [`docs/learn/dedup-ledger.md`](docs/learn/dedup-ledger.md) | 同主题多份实现的状态台账（已收敛/有意分层/待收敛）+ 成对工具自洽审计方法与已修缺陷 | 
 | 能力地图 | [`docs/learn/capability-map.md`](docs/learn/capability-map.md) | 任务→积木编排对照表（气象对星接收/多普勒定轨/ASTU-1遥测/前端搭建/链路自测）+ 新积木参数速查 + 诚实边界 |
 | 学习与阶段规格 | [`docs/learn/`](docs/learn/) | 上游真实源码精读（sdrpp/gnuradio/librtlsdr…）+ phase3–6 实现规格与审计 |
 
