@@ -7,7 +7,8 @@
 ## 1. 这是什么
 
 `MBDSDRAgent` 是一个把全部 SDR 能力封装成 LLM 可调用工具（function calling）的 Python 原型内核。
-LLM 通过 `tool_registry` 调用约 280 个工具（agent.py 注册 ~112 + sdr_tools.py ~137 + tool_registry 内置 63），
+LLM 通过 `tool_registry` 调用全部注册工具（agent.py + sdr_tools.py + tool_registry 内置三处注册，
+确切规模以运行时 `tool_registry` 注册表计数为准——数字随版本浮动，不写死入文，见 AGENTS.md §1），
 工作流引擎把多个工具调用串成预设多步任务（干扰定位 / NOAA APT 解码 / SSTV / APRS / 基带录制等）。
 
 **云 VM 无硬件（无 USB/串口/声卡）**：所有依赖真实 RTL-SDR / GNSS / 云台 / 声卡的工具在无设备时

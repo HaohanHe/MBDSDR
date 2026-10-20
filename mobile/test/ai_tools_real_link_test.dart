@@ -3,17 +3,21 @@
 // 红线（_PHASE3_SPEC §3 / A4 §4-P0）：
 //   * 断开时 4 个动作工具不得回 ok:true，且不得真正调用 RadioApi；
 //   * predict_passes 用固定 TLE/固定时间注入，禁真网、禁编造过境；
-//   * buildRadioTools().length 必须等于登记工具数，未来漏注册即失败。
+//   * buildRadioTools().length 必须等于登记工具数，未来漏注册即失败；
+//   * tool-count-sync：目录已接入集合必须等于 buildRadioTools 名 ∩ 桌面目录名。
 library;
 
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mbdsdr_mobile/app/ai_tools.dart';
+import 'package:mbdsdr_mobile/app/tool_catalog.dart';
 import 'package:mbdsdr_mobile/astro/tle.dart';
+import 'package:mbdsdr_mobile/models/bookmark.dart';
 import 'package:mbdsdr_mobile/models/radio_state.dart';
 import 'package:mbdsdr_mobile/models/recording.dart';
 import 'package:mbdsdr_mobile/models/satellite.dart';
+import 'package:mbdsdr_mobile/services/ai_client.dart';
 import 'package:mbdsdr_mobile/services/radio_controller.dart';
 import 'package:mbdsdr_mobile/services/sat_passes_provider.dart';
 
@@ -59,6 +63,35 @@ class RecordingRadio implements RadioApi {
 
   @override
   bool muted = false;
+
+  // ---- 静噪门真值（get_status 细化 / get_squelch_status 用）----
+  @override
+  bool squelchEnabled = true;
+
+  @override
+  double squelchThresholdDb = -60;
+
+  @override
+  bool squelchOpen = true;
+
+  @override
+  double squelchLevelDb = -45.5;
+
+  @override
+  bool squelchAuto = false;
+
+  // ---- 范围扫描真值（get_status 细化 / get_scan_status 用）----
+  @override
+  bool scanning = false;
+
+  @override
+  int? scanHz;
+
+  @override
+  double scanProgress = 0;
+
+  @override
+  bool scanPaused = false;
 
   @override
   Future<void> setFrequencyHz(int hz) async {
@@ -316,13 +349,14 @@ void main() {
   });
 
   group('工具总数审计：注册数 = Schema 数，漏注册即失败', () {
-    test('buildRadioTools 恰好登记 10 个工具且名字齐全', () {
+    test('buildRadioTools 恰好登记 14 个工具且名字齐全', () {
       final radio = RecordingRadio();
       final tools = buildRadioTools(radio);
-      expect(tools.length, 10,
+      expect(tools.length, 14,
           reason: 'set_frequency/set_mode/set_gain/set_sample_rate/'
               'start_recording/stop_recording/set_squelch/get_squelch_status/'
-              'get_status/predict_passes 共 10 个；'
+              'get_status/predict_passes + 只读补全 list_bookmarks/'
+              'list_recordings/get_recording_state/get_scan_status 共 14 个；'
               '新增工具须同步更新本断言');
       final names = tools.map((t) => t.name).toSet();
       expect(names, <String>{
@@ -336,7 +370,23 @@ void main() {
         'get_squelch_status',
         'get_status',
         'predict_passes',
+        'list_bookmarks',
+        'list_recordings',
+        'get_recording_state',
+        'get_scan_status',
       });
+    });
+
+    test('tool-count-sync：目录已接入集合 == buildRadioTools 名 ∩ 桌面目录名', () {
+      final radio = RecordingRadio();
+      final Set<String> toolNames =
+          buildRadioTools(radio).map((t) => t.name).toSet();
+      final Set<String> desktopNames =
+          kDesktopToolCatalog.map((e) => e.name).toSet();
+      final Set<String> overlap = toolNames.intersection(desktopNames);
+      expect(kMobileImplementedToolNames, overlap,
+          reason: '目录「已接入」标注与真实注册工具必须同真值：'
+              '多标=冒充能力，少标=藏能力');
     });
   });
 
@@ -398,6 +448,229 @@ void main() {
       expect(r['ok'], isFalse);
       expect(r['gated'], isTrue);
       expect(radio.startRecordingCalls, 0, reason: '手动模式不真正下发');
+    });
+  });
+
+  group('get_status 细化字段：录制/播放/静噪门/扫描均为实时真值', () {
+    test('细化字段逐项等于 RadioApi 当前真值（不摆拍）', () async {
+      final radio = RecordingRadio(status: ConnectionStatus.connected)
+        ..recording = true
+        ..volume = 0.5
+        ..muted = true
+        ..squelchEnabled = true
+        ..squelchAuto = true
+        ..squelchThresholdDb = -55
+        ..squelchOpen = false
+        ..squelchLevelDb = -70.25
+        ..scanning = true
+        ..scanHz = 145000000
+        ..scanProgress = 0.5
+        ..scanPaused = true;
+      final tools = buildRadioTools(radio);
+      final t = tools.firstWhere((e) => e.name == 'get_status');
+      final r = jsonDecode(await t.execute(<String, dynamic>{}))
+          as Map<String, dynamic>;
+
+      expect(r['ok'], isTrue);
+      expect(r['recording'], isTrue);
+      expect(r['volume'], 0.5);
+      expect(r['muted'], isTrue);
+      final squelch = r['squelch']! as Map<String, dynamic>;
+      expect(squelch['enabled'], isTrue);
+      expect(squelch['auto'], isTrue);
+      expect(squelch['threshold_db'], -55);
+      expect(squelch['open'], isFalse);
+      expect(squelch['level_db'], -70.25);
+      final scan = r['scan']! as Map<String, dynamic>;
+      expect(scan['scanning'], isTrue);
+      expect(scan['scan_hz'], 145000000);
+      expect(scan['scan_progress'], 0.5);
+      expect(scan['paused'], isTrue);
+    });
+
+    test('空闲真值：未扫描 scan_hz=null、未录制 recording=false', () async {
+      final radio = RecordingRadio(status: ConnectionStatus.disconnected);
+      final tools = buildRadioTools(radio);
+      final t = tools.firstWhere((e) => e.name == 'get_status');
+      final r = jsonDecode(await t.execute(<String, dynamic>{}))
+          as Map<String, dynamic>;
+      expect(r['recording'], isFalse);
+      final scan = r['scan']! as Map<String, dynamic>;
+      expect(scan['scanning'], isFalse);
+      expect(scan['scan_hz'], isNull);
+    });
+  });
+
+  group('只读查询工具：真数据源返回真值，无数据源诚实报错/空态', () {
+    test('list_bookmarks：返回真实书签逐字段（不编造台名）', () async {
+      final radio = RecordingRadio();
+      final tools = buildRadioTools(
+        radio,
+        bookmarksProvider: () => const <Bookmark>[
+          Bookmark(name: '中继', frequencyHz: 145000000, mode: 'nfm', bandwidthHz: 12500),
+          Bookmark(name: '', frequencyHz: 439000000, mode: 'wfm'),
+        ],
+      );
+      final t = tools.firstWhere((e) => e.name == 'list_bookmarks');
+      final r = jsonDecode(await t.execute(<String, dynamic>{}))
+          as Map<String, dynamic>;
+      expect(r['ok'], isTrue);
+      expect(r['count'], 2);
+      final List<dynamic> list = r['bookmarks']! as List<dynamic>;
+      expect(list.length, 2);
+      final Map<String, dynamic> b0 = list[0]! as Map<String, dynamic>;
+      expect(b0['name'], '中继');
+      expect(b0['frequency_hz'], 145000000);
+      expect(b0['mode'], 'nfm');
+      expect(b0['bandwidth_hz'], 12500);
+      // 未命名书签如实为空串，不占位假名。
+      expect((list[1]! as Map<String, dynamic>)['name'], '');
+    });
+
+    test('list_bookmarks：空源 → 空数组诚实空态；未注入 → 诚实报错（不冒充空）',
+        () async {
+      final radio = RecordingRadio();
+
+      final AiTool emptyTool = buildRadioTools(
+        radio,
+        bookmarksProvider: () => const <Bookmark>[],
+      ).firstWhere((e) => e.name == 'list_bookmarks');
+      final Map<String, dynamic> emptyR =
+          jsonDecode(await emptyTool.execute(<String, dynamic>{}))
+              as Map<String, dynamic>;
+      expect(emptyR['ok'], isTrue);
+      expect(emptyR['count'], 0);
+      expect(emptyR['bookmarks'], isEmpty);
+
+      final AiTool noSource =
+          buildRadioTools(radio).firstWhere((e) => e.name == 'list_bookmarks');
+      final Map<String, dynamic> noR =
+          jsonDecode(await noSource.execute(<String, dynamic>{}))
+              as Map<String, dynamic>;
+      expect(noR['ok'], isFalse);
+      expect(noR['error'], contains('数据源未注入'));
+    });
+
+    test('list_recordings：真实索引逐字段，旧索引缺字段如实 null', () async {
+      final radio = RecordingRadio();
+      final tools = buildRadioTools(
+        radio,
+        recordingsProvider: () => <RecordingMeta>[
+          const RecordingMeta(
+            startedAtEpochMs: 1700000000000,
+            frequencyHz: 145000000,
+            mode: 'nfm',
+            wavFileName: 'rec_a.wav',
+            durationMs: 1234,
+            deviceSource: RecordingSource.connected,
+          ),
+          // 旧索引条目：无时长/文件名/来源。
+          const RecordingMeta(
+            startedAtEpochMs: 1600000000000,
+            frequencyHz: 439000000,
+            mode: 'wfm',
+          ),
+        ],
+      );
+      final t = tools.firstWhere((e) => e.name == 'list_recordings');
+      final r = jsonDecode(await t.execute(<String, dynamic>{}))
+          as Map<String, dynamic>;
+      expect(r['ok'], isTrue);
+      expect(r['count'], 2);
+      final List<dynamic> list = r['recordings']! as List<dynamic>;
+      final Map<String, dynamic> r0 = list[0]! as Map<String, dynamic>;
+      expect(r0['started_at_ms'], 1700000000000);
+      expect(r0['frequency_hz'], 145000000);
+      expect(r0['wav_file'], 'rec_a.wav');
+      expect(r0['duration_ms'], 1234);
+      final Map<String, dynamic> r1 = list[1]! as Map<String, dynamic>;
+      expect(r1['duration_ms'], isNull);
+      expect(r1['wav_file'], isNull);
+      expect(r1['source'], isNull);
+    });
+
+    test('list_recordings：未注入数据源 → 诚实报错，不编造文件名', () async {
+      final radio = RecordingRadio();
+      final t = buildRadioTools(radio).firstWhere((e) => e.name == 'list_recordings');
+      final r = jsonDecode(await t.execute(<String, dynamic>{}))
+          as Map<String, dynamic>;
+      expect(r['ok'], isFalse);
+      expect(r['error'], contains('数据源未注入'));
+    });
+
+    test('get_recording_state：recording 真值 + 索引条数；未注入只给 note', () async {
+      final radio = RecordingRadio(status: ConnectionStatus.connected)..recording = true;
+      final AiTool withSource = buildRadioTools(
+        radio,
+        recordingsProvider: () => <RecordingMeta>[
+          const RecordingMeta(
+            startedAtEpochMs: 1,
+            frequencyHz: 1,
+            mode: 'nfm',
+          ),
+        ],
+      ).firstWhere((e) => e.name == 'get_recording_state');
+      final Map<String, dynamic> r =
+          jsonDecode(await withSource.execute(<String, dynamic>{}))
+              as Map<String, dynamic>;
+      expect(r['ok'], isTrue);
+      expect(r['recording'], isTrue);
+      expect(r['connected'], isTrue);
+      expect(r['recordings_indexed'], 1);
+
+      final AiTool noSource = buildRadioTools(radio)
+          .firstWhere((e) => e.name == 'get_recording_state');
+      final Map<String, dynamic> r2 =
+          jsonDecode(await noSource.execute(<String, dynamic>{}))
+              as Map<String, dynamic>;
+      expect(r2['ok'], isTrue);
+      expect(r2['recording'], isTrue, reason: '录制真值不依赖索引数据源');
+      expect(r2.containsKey('recordings_indexed'), isFalse);
+      expect(r2['note'], contains('未注入'));
+    });
+
+    test('get_scan_status：扫描真值（未扫描 scan_hz 为 null，不臆造频点）', () async {
+      final radio = RecordingRadio()
+        ..scanning = true
+        ..scanHz = 145500000
+        ..scanProgress = 0.25
+        ..scanPaused = true;
+      final tools = buildRadioTools(radio);
+      final t = tools.firstWhere((e) => e.name == 'get_scan_status');
+      final r = jsonDecode(await t.execute(<String, dynamic>{}))
+          as Map<String, dynamic>;
+      expect(r['ok'], isTrue);
+      expect(r['scanning'], isTrue);
+      expect(r['scan_hz'], 145500000);
+      expect(r['scan_progress'], 0.25);
+      expect(r['paused'], isTrue);
+
+      final idle = RecordingRadio();
+      final t2 = buildRadioTools(idle).firstWhere((e) => e.name == 'get_scan_status');
+      final r2 = jsonDecode(await t2.execute(<String, dynamic>{}))
+          as Map<String, dynamic>;
+      expect(r2['scanning'], isFalse);
+      expect(r2['scan_hz'], isNull);
+    });
+
+    test('只读工具在断开时照常可读（读取不构成动作，不设连接门）', () async {
+      final radio = RecordingRadio(status: ConnectionStatus.disconnected);
+      final tools = buildRadioTools(
+        radio,
+        bookmarksProvider: () => const <Bookmark>[],
+        recordingsProvider: () => const <RecordingMeta>[],
+      );
+      for (final String name in <String>[
+        'list_bookmarks',
+        'list_recordings',
+        'get_recording_state',
+        'get_scan_status',
+      ]) {
+        final t = tools.firstWhere((e) => e.name == name);
+        final r = jsonDecode(await t.execute(<String, dynamic>{}))
+            as Map<String, dynamic>;
+        expect(r['ok'], isTrue, reason: '$name 只读不应被连接门拦截');
+      }
     });
   });
 }

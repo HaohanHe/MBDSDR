@@ -151,6 +151,18 @@ const String _kMuted = 'muted';
 /// 看过即置位，之后不再打扰；缺失视为未看过（默认 false）。
 const String _kFirstRunGuideSeen = 'firstRunGuideSeen';
 
+/// UI 语言持久化键；值为 [kSupportedUiLocales] 中的语言代码（'zh'/'en'/'ja'）。
+const String _kUiLocale = 'uiLocale';
+
+/// 支持的 UI 语言代码：简体中文（源语言）/ English / 日本語。
+///
+/// 与 lib/l10n 三个 arb 档一一对应；新增语言 = 新 arb + 进此表 + 设置页选择器，
+/// 跨表一致性由 l10n 往返测试钉死。
+const List<String> kSupportedUiLocales = <String>['zh', 'en', 'ja'];
+
+/// 默认 UI 语言：简体中文（源语言，现行为不变）。
+const String kDefaultUiLocale = 'zh';
+
 /// AI 助手运行模式：是否处于「手动模式」。
 ///   * false（默认）= AI 接管：AI 的调谐/模式/增益等动作真正执行；
 ///   * true        = 手动：AI 仍可对话，但工具动作仅记录不执行。
@@ -219,6 +231,9 @@ class SettingsService extends ChangeNotifier {
 
   /// 首跑引导已看过（持久化）。false = 尚未看过，首屏挂引导卡片。
   bool _firstRunGuideSeen = false;
+
+  /// UI 语言代码（'zh'/'en'/'ja'），见 [uiLocaleCode]。
+  String _uiLocale = kDefaultUiLocale;
 
   /// rtl_tcp 主机（已 trim）。
   String get rtlHost => _rtlHost;
@@ -316,6 +331,22 @@ class SettingsService extends ChangeNotifier {
 
   /// 外观主题名；当前唯一可选即「默认」（深色）。
   String get themeName => kDefaultThemeName;
+
+  /// UI 语言代码（'zh' / 'en' / 'ja'），始终合法：未知写法归一为 [kDefaultUiLocale]。
+  ///
+  /// 读写即持久化；App 外壳据此设置 MaterialApp locale（gen-l10n 官方机制）。
+  String get uiLocaleCode => _uiLocale;
+  set uiLocaleCode(String value) {
+    _uiLocale = normalizeUiLocale(value);
+    unawaited(_kv.setString(_kUiLocale, _uiLocale));
+    notifyListeners();
+  }
+
+  /// 语言代码归一：trim + 小写后必须命中 [kSupportedUiLocales]，否则回退源语言 zh。
+  static String normalizeUiLocale(String raw) {
+    final String v = raw.trim().toLowerCase();
+    return kSupportedUiLocales.contains(v) ? v : kDefaultUiLocale;
+  }
 
   /// 上次调谐频率（Hz）。
   int get lastFreqHz => _lastFreqHz;
@@ -604,6 +635,9 @@ class SettingsService extends ChangeNotifier {
 
     // 首跑引导：缺失回退 false（未看过，首屏挂引导）。
     _firstRunGuideSeen = _kv.getBool(_kFirstRunGuideSeen) ?? false;
+
+    // UI 语言：缺失/未知写法回退源语言 zh（归一化绝不抛异常）。
+    _uiLocale = normalizeUiLocale(_kv.getString(_kUiLocale) ?? '');
 
     // 频点书签：兼容旧「纯频率数字数组」并迁移为完整 Bookmark 对象。
     // 解析失败/非法项静默丢弃，回退空列表，绝不抛异常。

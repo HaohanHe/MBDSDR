@@ -2,12 +2,14 @@
 // MBDSDR native C++ -- entry point.
 // No Python runtime, no embeddings, no subprocesses.
 #include <QApplication>
+#include "core/app_settings.h"
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QLockFile>
 #include <QPixmap>
 #include <QSettings>
+#include <QTranslator>
 #include <QStandardPaths>
 #include <QString>
 #include <QStringList>
@@ -15,6 +17,7 @@
 #include <QElapsedTimer>
 
 #include "core/tokens.h"
+#include "core/l10n.h"
 #include "heap_probe.h"
 #include "ui/main_window.h"
 
@@ -90,6 +93,31 @@ int main(int argc, char** argv) {
     QApplication::setApplicationName("mbdsdr");
     QApplication::setApplicationVersion("0.2.0");
 
+    // i18n：按 ui/language 装翻译器（Qt Linguist .qm，构建期产出到可执行文件
+    // 旁 i18n/）。源语言 zh_CN 不装翻译器（tr() 直接回源文）；找不到 .qm 时
+    // 诚实保持源语言并提示一次，不装半坏的翻译。必须先于任何窗口构造。
+    {
+        const QString tag = mbdsdr::core::uiLanguageTag(
+            mbdsdr::core::AppSettings().value("ui/language").toString());
+        const QString base = mbdsdr::core::qmFileBase(tag);
+        if (!base.isEmpty()) {
+            auto* translator = new QTranslator(&app);
+            bool loaded = false;
+            const QStringList dirs =
+                mbdsdr::core::qmSearchDirs(app.applicationDirPath());
+            for (const QString& d : dirs) {
+                if (translator->load(base, d)) { loaded = true; break; }
+            }
+            if (loaded) {
+                app.installTranslator(translator);
+            } else {
+                qWarning() << "[mbdsdr] i18n: no .qm for" << tag
+                           << "- keeping source language (zh_CN)";
+                delete translator;
+            }
+        }
+    }
+
     // Phase53 block3: optional startup-phase timing (off unless
     // MBDSDR_STARTUP_PROFILE=1). Prints wall-clock ms for each init phase so the
     // slow step can be found and optimized with before/after numbers.
@@ -134,7 +162,7 @@ int main(int argc, char** argv) {
     // Restore persisted UI scale before building the stylesheet; a --scale on
     // the command line wins for this run (automation hooks only, no write-back).
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         double scale = s.value("ui/scaleFactor", 1.0).toDouble();
         if (cliScale > 0.0) scale = cliScale;
         mbdsdr::tokens::setUserScale(scale);

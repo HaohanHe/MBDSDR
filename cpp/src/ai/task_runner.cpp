@@ -2,6 +2,7 @@
 #include "task_runner.h"
 
 #include "memory_store.h"         // G1: append the completed run to task_runs
+#include "pending_plan_store.h"   // 待执行计划槽：runPendingPlan 消费 + 状态回写
 #include "dsp/spectrum_engine.h"
 #include "ui/bookmark_manager.h"
 
@@ -53,6 +54,26 @@ const char* stateName(StepState s) {
     return "unknown";
 }
 
+// 整轮运行的诚实状态词（与 task_runs.state / PendingPlanState 同词表）：
+// 只从真实步骤记录归纳，绝不先写结论。
+QString deriveRunState(const QList<StepResult>& steps) {
+    bool anyFailed = false, anyAborted = false, anyGated = false, anySucceeded = false;
+    for (const StepResult& s : steps) {
+        switch (s.state) {
+        case StepState::Failed:   anyFailed = true; break;
+        case StepState::Aborted:   anyAborted = true; break;
+        case StepState::Gated:     anyGated = true; break;
+        case StepState::Succeeded: anySucceeded = true; break;
+        default: break;
+        }
+    }
+    if (anyFailed)    return QStringLiteral("failed");
+    if (anyAborted)   return QStringLiteral("aborted");
+    if (anyGated)     return QStringLiteral("gated");
+    if (anySucceeded) return QStringLiteral("succeeded");
+    return QStringLiteral("partial");
+}
+
 // G1: after a plan finishes, append one row to the shared memory DB's
 // task_runs table so get_task_history can answer "what did this agent do?"
 // across restarts. Best-effort: a history write failure must never break the
@@ -60,7 +81,6 @@ const char* stateName(StepState s) {
 void recordTaskRunHistory(const TaskPlan& plan, const QList<StepResult>& steps,
                           const QString& report) {
     QJsonArray arr;
-    bool anyFailed = false, anyAborted = false, anyGated = false, anySucceeded = false;
     for (const StepResult& s : steps) {
         QJsonObject so;
         so["tool"] = s.tool;
@@ -70,20 +90,8 @@ void recordTaskRunHistory(const TaskPlan& plan, const QList<StepResult>& steps,
         so["elapsed_ms"] = (double)s.elapsedMs;
         if (!s.error.isEmpty()) so["error"] = s.error;
         arr.append(so);
-        switch (s.state) {
-        case StepState::Failed:   anyFailed = true; break;
-        case StepState::Aborted:   anyAborted = true; break;
-        case StepState::Gated:     anyGated = true; break;
-        case StepState::Succeeded: anySucceeded = true; break;
-        default: break;
-        }
     }
-    const QString state =
-        anyFailed   ? QStringLiteral("failed") :
-        anyAborted  ? QStringLiteral("aborted") :
-        anyGated    ? QStringLiteral("gated") :
-        anySucceeded ? QStringLiteral("succeeded") :
-                       QStringLiteral("partial");
+    const QString state = deriveRunState(steps);
 
     MemoryStore store(defaultMemoryDbPath());
     QString err;
@@ -96,6 +104,18 @@ void recordTaskRunHistory(const TaskPlan& plan, const QList<StepResult>& steps,
 } // namespace
 
 void TaskRunner::runPlan(const TaskPlan plan) {
+    runPlanInternal(plan, /*pendingPlanId=*/0);
+}
+
+void TaskRunner::runPendingPlan(int planId) {
+    // 消费入口：先看单飞，再从登记槽取计划（只有 Pending 可取一次）。
+    if (running_.load()) return;
+    PendingPlanEntry entry;
+    if (!PendingPlanStore::instance().take(planId, &entry)) return;   // 诚实空操作
+    runPlanInternal(entry.plan, planId);
+}
+
+void TaskRunner::runPlanInternal(const TaskPlan& plan, int pendingPlanId) {
     if (running_.load()) return;          // single-flight; UI disables the button
     running_.store(true);
     orch_.setEngine(engine_);
@@ -107,6 +127,12 @@ void TaskRunner::runPlan(const TaskPlan plan) {
         [this](const StepResult& s) { emit stepUpdated(s); });
 
     recordTaskRunHistory(plan, orch_.results(), report);
+    // 执行状态真实回写待执行计划槽（断环修复：登记 -> 消费 -> 回写闭环）。
+    if (pendingPlanId > 0) {
+        PendingPlanStore::instance().finish(
+            pendingPlanId, pendingPlanStateFromName(deriveRunState(orch_.results())),
+            report);
+    }
 
     running_.store(false);
     emit finished(report);

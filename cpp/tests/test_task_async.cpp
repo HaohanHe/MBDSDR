@@ -107,7 +107,9 @@ void TestTaskAsync::requestStopHaltsLaterSteps() {
 
 int main(int argc, char** argv) {
     QTemporaryDir tmp;
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, tmp.path());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmp.path());
+    qputenv("MBDSDR_SETTINGS_DIR", (tmp.path()).toUtf8());
     // G1: redirect the task-run history + memory db off the production
     // ~/.mbdsdr path -- the runner now appends a history row on every runPlan.
     qputenv("MBDSDR_MEMORY_DB",

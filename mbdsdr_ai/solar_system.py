@@ -202,10 +202,15 @@ def load_de421_bsp(path: str) -> Optional["_EphemerisHandle"]:
         handle.eph = eph
         for key in ("sun", "moon", "mercury", "venus", "mars",
                     "jupiter", "saturn", "earth"):
-            try:
-                handle.planets[key] = eph[key]
-            except Exception:
-                pass
+            # skyfield 1.54 起 de421 的外行星只剩质心名（"jupiter barycenter"），
+            # 1.53 会把 "jupiter" 自动解析到质心。按"本名 → 质心名"双键探测，
+            # 两个版本通吃，不写死版本号。
+            for name in (key, f"{key} barycenter"):
+                try:
+                    handle.planets[key] = eph[name]
+                    break
+                except Exception:
+                    continue
         return handle
     except Exception:
         pass
@@ -455,6 +460,30 @@ def _normalize_station(station: Any) -> GroundStation:
     raise TypeError(f"不支持的地面站类型: {type(station)}")
 
 
+def _make_topos(station: GroundStation):
+    """skyfield Topos 构造的版本兼容层。
+
+    skyfield 1.53 的 kwarg 名是 latitude_deg/longitude_deg，1.54 起改名为
+    latitude_degrees/longitude_degrees（旧名直接移除，报 TypeError）。
+    CI 钉 1.53、开发机可能是 1.54——按签名探测而非写死版本号：先试新名，
+    TypeError 再回退旧名，两个版本都真跑通，绝不 mock。
+    """
+    from skyfield.api import Topos
+
+    try:
+        return Topos(
+            latitude_degrees=station.latitude_deg,
+            longitude_degrees=station.longitude_deg,
+            elevation_m=station.height_m,
+        )
+    except TypeError:
+        return Topos(
+            latitude_deg=station.latitude_deg,
+            longitude_deg=station.longitude_deg,
+            elevation_m=station.height_m,
+        )
+
+
 # ── skyfield 后端实现 ──────────────────────────────────
 
 def _position_skyfield(body_key: str, t_unix: float,
@@ -462,7 +491,6 @@ def _position_skyfield(body_key: str, t_unix: float,
     be = _get_backend()
     if be._engine != "skyfield":
         return None
-    from skyfield.api import Topos
 
     ts = be._sf_ts
     eph = be._sf_eph
@@ -472,11 +500,7 @@ def _position_skyfield(body_key: str, t_unix: float,
 
     # unix → skyfield Time
     t = ts.utc(datetime.fromtimestamp(t_unix, tz=timezone.utc))
-    observer = eph["earth"] + Topos(
-        latitude_deg=station.latitude_deg,
-        longitude_deg=station.longitude_deg,
-        elevation_m=station.height_m,
-    )
+    observer = eph["earth"] + _make_topos(station)
 
     # astrometric().apparent() 给出视位置（含光行差、章动、岁差）
     astrometric = observer.at(t).observe(body)
@@ -486,10 +510,11 @@ def _position_skyfield(body_key: str, t_unix: float,
     dec_deg = dec_deg._degrees
     distance_au = float(distance_au.au)
 
-    # Alt/Az
-    altaz = apparent.altaz()
-    alt_deg = float(altaz.alt.degrees)
-    az_deg = float(altaz.az.degrees)
+    # Alt/Az。skyfield 1.53 的 altaz() 返回带 .alt/.az 的命名元组，1.54 起
+    # 是裸 tuple——统一用解包口径（与 sat_passes.py 既有写法一致，双版本通吃）。
+    alt, az, _dist = apparent.altaz()
+    alt_deg = float(alt.degrees)
+    az_deg = float(az.degrees)
 
     # 距离公里
     distance_km = distance_au * AU_KM
@@ -510,15 +535,10 @@ def _moon_phase_skyfield(t_unix: float, station: GroundStation,
                          moon_pos: BodyPosition) -> Tuple[float, float]:
     """计算月相角和照亮比例（被照亮比例 = 0.5*(1+cos_phase)）。"""
     be = _get_backend()
-    from skyfield.api import Topos
     ts = be._sf_ts
     eph = be._sf_eph
     t = ts.utc(datetime.fromtimestamp(t_unix, tz=timezone.utc))
-    observer = eph["earth"] + Topos(
-        latitude_deg=station.latitude_deg,
-        longitude_deg=station.longitude_deg,
-        elevation_m=station.height_m,
-    )
+    observer = eph["earth"] + _make_topos(station)
 
     # 地心太阳方向（单位矢量）
     sun = eph["sun"]

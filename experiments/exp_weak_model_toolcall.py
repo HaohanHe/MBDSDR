@@ -32,8 +32,12 @@ CASES = [
 
 
 def main():
-    cfg = json.load(open(os.path.expanduser("~/.mbdsdr/config.json")))
-    ag = MBDSDRAgent(AgentConfig(api_key=cfg["api_key"], base_url=cfg["api_base"],
+    # 配置键经 normalize_config_keys 归一（api_base 旧键 -> base_url，2026-10-20
+    # A 线键收敛的遗留收尾）：不再直读旧键，配置迁移后不再 KeyError。
+    from mbdsdr_ai.config import normalize_config_keys
+    cfg = normalize_config_keys(
+        json.load(open(os.path.expanduser("~/.mbdsdr/config.json"))))
+    ag = MBDSDRAgent(AgentConfig(api_key=cfg["api_key"], base_url=cfg["base_url"],
                                  model=cfg.get("model", "Qwen/Qwen3.5-4B"), max_output_tokens=400))
     register_sdr_tools(ag)
     # 只暴露本题集合相关工具，降低干扰

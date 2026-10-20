@@ -47,16 +47,22 @@ tracked 文件（含 commit message）中：
 
 ## 5. 基线
 
-`python -m pytest mbdsdr_ai/tests -q` 基线锨点（commit 级回归手段，不作对外宣传数字）：最近一次全绿记录 **1086 passed / 5 skipped**
-（2026-10-12 phase67 模型体验/UI/工作流三轮后沙箱复测；1041→1086 净增 45，
-全部为模型体验轴新增：test_model_experience.py 10 项（DSH nextStep 框架）+
-test_tool_description_quality.py 35 项（描述质量门禁：地板/schema 形状/状态变更型
-四维齐全/诚实契约钉死/棘轮覆盖率）。Python 3.11 与 3.12 双解释器实测同数。
-历史增量：915→1041（phase66 零覆盖模块首套行为测试）→1086（phase67 模型体验）。
+`python -m pytest mbdsdr_ai/tests -q` 基线锨点（commit 级回归手段，不作对外宣传数字）：最近一次全绿记录 **1097 passed / 5 skipped**
+（2026-10-20 沙箱复测：skyfield 1.54 三层漂移兼容修复消 6 红 + FT8/ADS-B 跨语言
+对拍新增 6 项；1086→1097 净增 11。
+历史增量：915→1041（phase66 零覆盖模块首套行为测试）→1086（phase67 模型体验）
+→1097（skyfield 1.54 兼容 + 跨语言对拍）。
 无网环境下 `test_real_tle_fresh_or_skip` 等真实联网用例转 skip，
 passed 数相应下浮——skip 均属无 env/无硬件的诚实 skip）。任何改动不得
 降低此数。
 
-移动端（`mobile/`）：`flutter test` 基线 **404 passed**（phase67 新增 5 项帮助页/
-首跑引导 Widget 测试 + 15 项 AI 工具描述门禁）; `flutter analyze` 零问题（Flutter 3.47.7，
-SDK 约束 >=3.9，勿用 /opt/flutter 旧版 3.0 跑）。
+C++ 桌面端（`cpp/`）：`ctest --test-dir build_cpp`（Qt 6.8.2 MinGW 工具链 +
+offscreen）基线 **155/155 全绿**（2026-10-20 实测；含跨语言对拍 cross_golden、
+i18n l10n、freq_input、快速调谐/首启向导接线、core::AppSettings 设置隔离）。
+新增测试目标只增不减；测试目标数与 ctest 注册数对不上按 bug 处理。
+
+移动端（`mobile/`）：`flutter test` 基线 **404 passed**（最后一次本地全绿；
+phase67 新增 5 项帮助页/首跑引导 Widget 测试 + 15 项 AI 工具描述门禁）。
+phase67.1 工具面收窄与 i18n 三语另新增约 40 项测试已入库，**本地无 Flutter SDK
+未能实测——待 CI 首跑后按实数钉新基线**（只升不降）。`flutter analyze` 零问题
+（Flutter 3.47.7，SDK 约束 >=3.9，勿用 /opt/flutter 旧版 3.0 跑）。

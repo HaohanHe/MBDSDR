@@ -46,7 +46,9 @@ int main(int argc, char** argv) {
     QString tmpDir = QDir::tempPath() + "/mbdsdr_shot_reclib";
     QDir(tmpDir).removeRecursively();
     QDir().mkpath(tmpDir);
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, tmpDir + "/cfg");
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmpDir + "/cfg");
+    qputenv("MBDSDR_SETTINGS_DIR", (tmpDir + "/cfg").toUtf8());
     app.setStyleSheet(tokens::buildDarkQss());
 
     // Drop two real captures into the throwaway record dir.

@@ -3,8 +3,11 @@
 // 诚实性断言：
 //   * 目录恰为 90 条，名称唯一、说明非空；
 //   * write=true 才显示「write」标记，read 显示「read」；
-//   * 「已接入」只打在与移动端同名的子集上，其余绝不冒充；
+//   * 「已接入」只打在与移动端同名的子集上，其余逐条标注
+//     「桌面端提供 / 移动端未接入」，绝不冒充；
 //   * 页面只读渲染：不构造 AiTool、不发请求。
+//   * 与真实注册工具的同真值同步由 ai_tools_real_link_test 的
+//     tool-count-sync 断言钉死。
 library;
 
 import 'package:flutter/material.dart';
@@ -48,5 +51,37 @@ void main() {
     await tester.drag(find.byType(ListView), const Offset(0, -500));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('未接入条目诚实标注「桌面端提供 / 移动端未接入」，绝不冒充', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: ToolsCatalogPage()));
+    await tester.pump();
+
+    // 未接入条目（tune_frequency 是桌面工具，移动端未接）：明示缺口。
+    final Finder tuneTile = find.ancestor(
+      of: find.text('tune_frequency'),
+      matching: find.byType(ListTile),
+    );
+    expect(find.descendant(of: tuneTile, matching: find.text('桌面端提供')),
+        findsOneWidget);
+    expect(find.descendant(of: tuneTile, matching: find.text('移动端未接入')),
+        findsOneWidget);
+    expect(
+        find.descendant(of: tuneTile, matching: find.text('已接入')), findsNothing,
+        reason: '未接入条目不得标「已接入」');
+
+    // 已接入条目（set_mode）：标「已接入」，不带缺口标注。
+    final Finder modeTile = find.ancestor(
+      of: find.text('set_mode'),
+      matching: find.byType(ListTile),
+    );
+    expect(
+        find.descendant(of: modeTile, matching: find.text('已接入')), findsOneWidget);
+    expect(find.descendant(of: modeTile, matching: find.text('桌面端提供')),
+        findsNothing);
+
+    // read/write 属性标记与接入状态并存（列宽两层，不互相顶替）。
+    expect(find.text('read'), findsWidgets);
+    expect(find.text('write'), findsWidgets);
   });
 }

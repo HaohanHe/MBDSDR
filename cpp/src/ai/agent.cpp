@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "agent.h"
+#include "core/app_settings.h"
 #include "ui/workspace_controller.h"
 #include "agent_tools.h"
 #include "memory_store.h"        // G3: chat-start memory injection block
@@ -25,7 +26,7 @@ Agent::Agent(QObject* parent) : QObject(parent) {
     config_.load();
     // Restore persisted manual mode (default false = AI takeover).
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         manualMode_ = s.value(kManualModeKey, false).toBool();
     }
     workerThread_ = new QThread(this);
@@ -53,7 +54,7 @@ void Agent::setWorkspaceController(aigui::WorkspaceController* wc) {
 
 void Agent::setManualMode(bool on) {
     manualMode_ = on;
-    QSettings("MBDSDR", "MBDSDR").setValue(kManualModeKey, on);
+    mbdsdr::core::AppSettings().setValue(kManualModeKey, on);
     worker_->setManualMode(on);
 }
 

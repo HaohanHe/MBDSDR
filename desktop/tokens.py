@@ -13,13 +13,16 @@ MBDSDR 桌面端 CarWith 设计体系 Token 单例
   * 间距（顶栏 23px 40px 25px 36px、底 Dock 14px 40px、卡片 26px 28px、gutter 20）
   * 尺寸（顶栏 56、底 Dock 64、QSplitter handle 4、折叠窄条 36）
   * 动效（反馈 150ms、过渡 300ms、OutCubic）
+  * AI 面板 / MCP 行为常量（截断长度、示例频率、ai-sdr Mini 默认端点）
 
 只持有"数值"，不直接操作 Qt 控件。to_stylesheet(mode) 把令牌翻译成 QSS：
   * mode="dark"  → CarWith 深色方向（对应 themes.py 的 "dark_car" 主题）
   * mode="light" → 保留 default 主题配色（米白 #F5F3EF / 蓝灰 #5B7B8C / 橙 #C4845C），
                    但套用同一套圆角/间距/字号令牌，保证两个主题视觉语言一致。
 
-红线：不造假数据；令牌只描述外观，不引入任何业务数值。
+红线：不造假数据；外观令牌只描述外观，不引入任何业务数值。AI 面板 / MCP
+编排的行为常量（文本截断长度、示例频率、ai-sdr Mini 默认端点）另设命名区
+（AI / MCP）集中收口，业务代码不得散落魔法数字；两区互不混用。
 """
 
 from __future__ import annotations
@@ -219,6 +222,23 @@ class DesignTokens:
             "feedback_ms":   150,
             "transition_ms": 300,
             "easing":        "OutCubic",
+        }
+
+        # ---- AI 面板行为常量（步骤卡/日志文本截断、示例频率）----
+        # 与 desktop/ai_steps.py 的摘要语义配套；业务代码不得再写死这些长度。
+        self.AI: Dict[str, object] = {
+            "args_preview_chars":   80,   # 步骤卡关键参数预览截断
+            "summary_chars":       200,   # 步骤卡结果摘要截断
+            "result_preview_chars": 300,  # 工具原始结果预览截断
+            "demo_freq_mhz":      98.5,   # 快捷指令/UI 兜底示例频率（FM 广播段示例值）
+        }
+
+        # ---- ai-sdr Mini（ESP32-S3）MCP 端点默认值 ----
+        # 仅默认值在此收口；运行时可被环境变量 MBDSDR_MCP_HOST / MBDSDR_MCP_PORT
+        # 或显式参数覆盖（见 desktop/mcp_protocol.resolve_mcp_endpoint）。
+        self.MCP: Dict[str, object] = {
+            "default_host": "192.168.4.1",  # ai-sdr Mini AP 默认地址
+            "default_port": 81,
         }
 
         # ---- 画布比例（1920x1200 设计稿按实际窗口缩放）----

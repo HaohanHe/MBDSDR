@@ -10,6 +10,7 @@
 //  (e) wheel zoom / Shift-drag pan move the visible window while the left/right
 //      edges stay pixel-equal between trace and waterfall (lockstep).
 #include <QtTest/QtTest>
+#include "core/app_settings.h"
 #include <QApplication>
 #include <QSettings>
 #include <QVariant>
@@ -129,7 +130,7 @@ void TestSpectrumDisplay::initTestCase() {
         tokens::kSettingsKeyWfScrollPaused,
         QStringLiteral("rx/peakThresholdDb"),
     };
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     saved_.clear();
     for (const QString& k : keys) {
         SavedKey sk;
@@ -144,7 +145,7 @@ void TestSpectrumDisplay::initTestCase() {
 
 void TestSpectrumDisplay::cleanupTestCase() {
     // Restore exactly what we found: real values back, absent keys removed.
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     for (const SavedKey& sk : saved_) {
         if (sk.had) s.setValue(sk.key, sk.val);
         else        s.remove(sk.key);
@@ -186,7 +187,7 @@ void TestSpectrumDisplay::defaultLayoutProportions() {
 }
 
 void TestSpectrumDisplay::dividerDragIsClamped() {
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeySpecFraction);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeySpecFraction);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
@@ -549,7 +550,7 @@ void TestSpectrumDisplay::freqTickDecimalsAdaptive() {
 // no-key path falls back to tokens::kDefaultSpecFraction (not a leftover value
 // written by an earlier divider-drag test).
 void TestSpectrumDisplay::defaultShareIsOneToOne() {
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeySpecFraction);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeySpecFraction);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
@@ -708,7 +709,7 @@ void TestSpectrumDisplay::downscaleUsesBlockMaxDecimation() {
 // share, release (which persists it), then build a FRESH widget and prove it
 // read back the exact stored share -- no pixels inspected.
 void TestSpectrumDisplay::specFractionRoundTripPersists() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     s.remove(tokens::kSettingsKeySpecFraction);
 
     // Instance 1: no key -> honest default, then drag the divider off-centre.
@@ -744,7 +745,7 @@ void TestSpectrumDisplay::specFractionRoundTripPersists() {
 // out-of-range numeric value is clamped into the legal band (never left raw,
 // which would break geometry).
 void TestSpectrumDisplay::specFractionInvalidFallsBackToDefault() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     s.remove(tokens::kSettingsKeySpecFraction);
 
     // Non-numeric garbage => default (the "illegal value" case).
@@ -849,7 +850,7 @@ void TestSpectrumDisplay::bookmarkOverlayRefeedsUpdate() {
 void TestSpectrumDisplay::waterfallTimeTickLabelsAreRealSeconds() {
     // Deterministic 1:1 trace/waterfall split (a prior divider-drag suite may
     // have persisted a traceShare_ we must not inherit).
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeySpecFraction);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeySpecFraction);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
@@ -910,7 +911,7 @@ void TestSpectrumDisplay::waterfallTimeTickHonestEmptyState() {
 // both as the requested depth before the first frame and as the active depth
 // after allocateRing(). No invented depth.
 void TestSpectrumDisplay::waterfallDepthDefaultsTo256() {
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfDepth);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyWfDepth);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
@@ -925,7 +926,7 @@ void TestSpectrumDisplay::waterfallDepthDefaultsTo256() {
 // now capped at the NEW depth -- proving the ring was actually re-allocated and
 // not left at the old size.
 void TestSpectrumDisplay::waterfallDepthChangeRebuildsRing() {
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfDepth);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyWfDepth);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
@@ -958,7 +959,7 @@ void TestSpectrumDisplay::waterfallDepthChangeRebuildsRing() {
 // An out-of-set or non-numeric requested depth honestly resolves to the default
 // (256) -- there is no continuous band to clamp into, only the named choices.
 void TestSpectrumDisplay::waterfallDepthInvalidFallsBackToDefault() {
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfDepth);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyWfDepth);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
@@ -979,7 +980,7 @@ void TestSpectrumDisplay::waterfallDepthInvalidFallsBackToDefault() {
 // ctor and allocate the first ring at the stored depth; a garbage stored value
 // must honestly fall back to the default (256).
 void TestSpectrumDisplay::waterfallDepthPersistsRoundTrip() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
 
     // Legal stored choice -> honoured on a fresh instance.
     s.setValue(tokens::kSettingsKeyWfDepth, 512);
@@ -1016,7 +1017,7 @@ void TestSpectrumDisplay::waterfallDepthPersistsRoundTrip() {
 // With no persisted key the dB reference gridline step must come up at the named
 // default (20 dB), both as the ctor-read value. No invented density.
 void TestSpectrumDisplay::dbGridStepDefaultsTo20() {
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyDbGridStep);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyDbGridStep);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
@@ -1028,7 +1029,7 @@ void TestSpectrumDisplay::dbGridStepDefaultsTo20() {
 // yields more grid lines than a sparser one (40) for the SAME dB range:
 //   lines(step) = ceil(range/step)+1, so 10 dB > 20 dB > 40 dB.
 void TestSpectrumDisplay::dbGridStepSetterHonoursTier() {
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyDbGridStep);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyDbGridStep);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
@@ -1059,7 +1060,7 @@ void TestSpectrumDisplay::dbGridStepSetterHonoursTier() {
 // ctor and come up at the stored density (the toolbar combo is just the live
 // reflection). Writes then removes the real key so the user's config is untouched.
 void TestSpectrumDisplay::dbGridStepPersistsRoundTrip() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
 
     s.setValue(tokens::kSettingsKeyDbGridStep, 10);
     {
@@ -1077,14 +1078,14 @@ void TestSpectrumDisplay::dbGridStepPersistsRoundTrip() {
         QCOMPARE(w.dbGridStepForTest(), 40);
     }
 
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyDbGridStep);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyDbGridStep);
 }
 
 // An out-of-set or non-numeric persisted grid step honestly resolves to the
 // default (20) -- there is no continuous band to clamp into, only the named
 // choices (mirrors the waterfall-depth invalid case).
 void TestSpectrumDisplay::dbGridStepInvalidFallsBack() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
 
     // Out-of-set number -> default.
     s.setValue(tokens::kSettingsKeyDbGridStep, 99);
@@ -1104,13 +1105,13 @@ void TestSpectrumDisplay::dbGridStepInvalidFallsBack() {
         QCOMPARE(w.dbGridStepForTest(), tokens::kDbGridStepDefault);
     }
 
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyDbGridStep);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyDbGridStep);
 }
 
 // With no persisted key the waterfall scroll-pause flag must come up off --
 // the default live-scrolling waterfall, never a silently frozen display.
 void TestSpectrumDisplay::scrollPauseDefaultsOff() {
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfScrollPaused);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyWfScrollPaused);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
@@ -1127,7 +1128,7 @@ void TestSpectrumDisplay::scrollPauseDefaultsOff() {
 // colour, while the live history() must show the new bright bin 200 row --
 // proving the display froze but the buffer did not stop recording.
 void TestSpectrumDisplay::scrollPauseFreezesDisplayButKeepsBuffering() {
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfScrollPaused);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyWfScrollPaused);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
@@ -1161,7 +1162,7 @@ void TestSpectrumDisplay::scrollPauseFreezesDisplayButKeepsBuffering() {
 // no reset, no fabricated catch-up frames. The row count keeps climbing from the
 // live value reached during the pause.
 void TestSpectrumDisplay::scrollPauseResumeContinuesWithoutReset() {
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfScrollPaused);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyWfScrollPaused);
     ui::SpectrumDisplay w;
     w.resize(1000, 700);
     w.recomputeGeometry();
@@ -1191,7 +1192,7 @@ void TestSpectrumDisplay::scrollPauseResumeContinuesWithoutReset() {
 // Persistence round trip: a fresh instance must read kSettingsKeyWfScrollPaused
 // in its ctor; a missing key / garbage value honestly resolves to off.
 void TestSpectrumDisplay::scrollPausePersistsRoundTrip() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
 
     s.setValue(tokens::kSettingsKeyWfScrollPaused, true);
     {
@@ -1218,7 +1219,7 @@ void TestSpectrumDisplay::scrollPausePersistsRoundTrip() {
         QVERIFY(!w.scrollPausedForTest());
     }
 
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyWfScrollPaused);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyWfScrollPaused);
 }
 
 // Phase63: switching the FFT tier changes the bin count of every published frame.

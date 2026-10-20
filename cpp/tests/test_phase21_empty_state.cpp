@@ -17,6 +17,7 @@
 //   4. Narrow window: the onboarding card stays inside the window width
 //      (elastic tokens::scaled, no horizontal overflow).
 #include <QApplication>
+#include "core/app_settings.h"
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
@@ -60,7 +61,9 @@ int main(int argc, char** argv) {
         const QString cfgDir = QDir::tempPath() + "/mbdsdr_cfg_phase21_" +
                                QString::number(QCoreApplication::applicationPid());
         QDir().mkpath(cfgDir);
-        QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, cfgDir);
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, cfgDir);
+        qputenv("MBDSDR_SETTINGS_DIR", (cfgDir).toUtf8());
     }
 
     int failures = 0;
@@ -71,7 +74,7 @@ int main(int argc, char** argv) {
 
     // --- Fresh first-run state: forget any prior dismissal. ----------------
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.remove(QString::fromUtf8(kOnboardingKey));
         s.sync();
     }
@@ -193,7 +196,7 @@ int main(int argc, char** argv) {
             QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
         }
         check(!win.harnessGuideCardVisible(), "dismiss: card hidden immediately");
-        check(QSettings("MBDSDR", "MBDSDR")
+        check(mbdsdr::core::AppSettings()
               .value(QString::fromUtf8(kOnboardingKey), false).toBool(),
               "dismiss: QSettings remembers the dismissal");
     }

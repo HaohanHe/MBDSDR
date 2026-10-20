@@ -4,6 +4,7 @@
 // To stay isolated from the developer's real config, the "ui/bookmarks" key
 // is removed from QSettings("MBDSDR","MBDSDR") both before and after the run.
 #include <QtTest/QtTest>
+#include "core/app_settings.h"
 #include <QSettings>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -24,11 +25,11 @@ private slots:
 };
 
 void TestBookmark::initTestCase() {
-    QSettings("MBDSDR", "MBDSDR").remove(kKey);
+    mbdsdr::core::AppSettings().remove(kKey);
 }
 
 void TestBookmark::cleanupTestCase() {
-    QSettings("MBDSDR", "MBDSDR").remove(kKey);
+    mbdsdr::core::AppSettings().remove(kKey);
 }
 
 void TestBookmark::lifecycle() {
@@ -133,7 +134,7 @@ void TestBookmark::lifecycle() {
         o["note"] = "旧备注";
         QJsonArray arr;
         arr.append(o);
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue(kKey, QJsonDocument(arr).toJson(QJsonDocument::Compact));
     }
     {

@@ -6,6 +6,7 @@ import 'app/home_shell.dart';
 import 'app/theme.dart';
 import 'audio/file_player.dart';
 import 'audio/platform_pcm_sink.dart';
+import 'l10n/gen/app_localizations.dart';
 import 'services/chat_session_store.dart';
 import 'services/radio_controller.dart';
 import 'services/recording_store.dart';
@@ -18,7 +19,9 @@ import 'services/settings_service.dart';
 //   * 音频：PlatformPcmSink（MethodChannel mbdsdr/audio）注入 RadioController，
 //     由控制器在 connect 成功后 start、断开/dispose 时释放；
 //   * 会话恢复：启动时把上次频率/模式/音量/静音通过 applySession 灌给控制器；
-//   * 唯一主题：深色「默认」。
+//   * 唯一主题：深色「默认」；
+//   * 语言：gen-l10n 官方机制（AppLocalizations），locale 由 SettingsService
+//     持久化（默认 zh 源语言），设置页切换即重建 MaterialApp。
 // ============================================================================
 
 Future<void> main() async {
@@ -95,9 +98,17 @@ class MbdsdrApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // UI 语言：启动即按持久化设置加载（默认 zh 源语言，现行为不变）；
+    // 设置页切语言只改这一处来源，MaterialApp 立即重建生效。
+    final String localeCode = context.select<SettingsService, String>(
+      (SettingsService s) => s.uiLocaleCode,
+    );
     return MaterialApp(
       title: 'MBDSDR',
       debugShowCheckedModeBanner: false,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: Locale(localeCode),
       theme: AppTheme.data,
       home: const HomeShell(),
     );

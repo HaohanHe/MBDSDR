@@ -114,8 +114,9 @@ python3 experiments/exp_ebno_decode.py --trials 50 --seed 20261001
   真机步骤与回传格式见 [`docs/learn/phase6/P2-hw-report-format.md`](docs/learn/phase6/P2-hw-report-format.md)。
 - 云内可验证的部分（构建 offscreen + 测试信号、离线确定性测试、仿真口径实验）已在各端自测通过；
   真机专项（真实拔插、出声、USB-GNSS）标注为"待真机"，未宣称已验证。
-- 当前云内 offscreen 实测基线（Phase41 验收口径）：**C++ ctest 127 全过**（另 `startup_robustness` 新增 1 项 → 127+1；`e2e_smoke` 因云内无 PulseAudio 诚实 SKIP）、
-  **Flutter `flutter test` 351 全过 + `analyze` 0 issue**、**pytest 42/42 全绿**。换机 / 真机后需重测，不代表真机已验。
+- 三端测试基线与回归锚点见 [`AGENTS.md`](AGENTS.md) §5，随每轮工程实测更新；验证能力以**可复现命令**
+  （见上方命令区）与云端 CI（`.github/workflows/ci.yml`）为准，不设数字标语——数字随时间浮动，
+  写入即过期（AGENTS.md §1）。无硬件环境下的用例以诚实 SKIP 结算，换机 / 真机后需重测，不代表真机已验。
 - 未解决项总账（逐项带阶段溯源）见 [`docs/learn/phase41/open-items.md`](docs/learn/phase41/open-items.md)。
 
 ## LLM 基线（诚实说明）

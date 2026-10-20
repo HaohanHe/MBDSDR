@@ -4,10 +4,11 @@
 // 诚实性说明：
 //   * 这是**只读参考目录**，不是"移动端现在能调这些工具"的声明。
 //   * 桌面端（C++/Qt）注册了 90 个 Agent 工具；移动端 AiClient 实际接入的工具
-//     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前为 10 个）。
+//     由 lib/app/ai_tools.dart 的 buildRadioTools() 决定（当前 14 个，见
+//     test/ai_tools_real_link_test.dart 的总数钉扎）。
 //   * 本目录逐项给出 name / 一句话说明 / read|write 标记；其中与移动端当前工具
-//     **同名**的条目会被 UI 标为「移动端已接入」，其余为桌面端能力，移动端未实现，
-//     此处仅作只读对照，绝不冒充移动端已有。
+//     **同名**的条目会被 UI 标为「已接入」，其余条目诚实标注「桌面端提供 /
+//     移动端未接入」——未接入不是能力声明，绝不冒充移动端已有。
 //   * 数据为手写只读快照（与 tool_schema.cpp registeredToolSpecs 对齐）；不发请求、
 //     不构造 AiTool、不执行任何动作。
 // ============================================================================
@@ -444,8 +445,11 @@ const List<ToolCatalogEntry> kDesktopToolCatalog = <ToolCatalogEntry>[
 ];
 
 /// 与移动端 buildRadioTools() 当前注册工具**同名**的集合，用于在目录里诚实标注
-/// 「移动端已接入」。注意：移动端另有的 set_frequency/set_gain/set_sample_rate
-/// 命名与桌面不同（桌面为 tune_frequency 等），不在这里冒充对齐。
+/// 「已接入」。移动端 14 个工具中 10 个与桌面同名落在本集合；另 4 个为移动端
+/// 专有命名（set_frequency / set_gain / set_sample_rate / get_scan_status），
+/// 语义与桌面同类工具（tune_frequency 等）不一一对齐，不在目录里冒充对齐。
+/// 同步性由 test/ai_tools_real_link_test.dart 的 tool-count-sync 断言钉死
+/// （本集合 == buildRadioTools 输出名 ∩ 桌面目录名）。
 const Set<String> kMobileImplementedToolNames = <String>{
   'set_mode',
   'start_recording',
@@ -454,4 +458,7 @@ const Set<String> kMobileImplementedToolNames = <String>{
   'get_squelch_status',
   'get_status',
   'predict_passes',
+  'list_bookmarks',
+  'list_recordings',
+  'get_recording_state',
 };
