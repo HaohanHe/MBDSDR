@@ -78,6 +78,10 @@ ADS-B 审计中另查出一处真缺陷：精简版门限在 MAD=0（无噪/极�
 | `freedv_modulate` → `freedv_demodulate` | 比特零误码 |
 | `modulate_symbols` → `demodulate_symbols` | 比特零误码 |
 | `m17_4fsk_roundtrip` | 显式比特列表输入可用且往返全对 |
+| `urh_modulate` → `urh_decode_iq` | ASK/BPSK 链路零误码；载荷长度 = 2×sps×bits（防截断回归）；PSK 如实报告 Costas 锁定期偏移 |
+| `ax25_encode` → `ax25_decode` | 解出原呼号/信息且 FCS 有效 |
+| `bell103_modulate_text` → `bell103_demodulate_text` | 文本完整回解 |
+| `gmsk_modulate` → `gmsk_demodulate` | 比特零误码 |
 
 审计中查出的真缺陷（均已修并加回归）：
 
@@ -85,7 +89,14 @@ ADS-B 审计中另查出一处真缺陷：精简版门限在 MAD=0（无噪/极�
 2. **ADS-B 精简版无噪输入漏检**（见 §2）；
 3. **AFSK 调制输出被降采样到 2000 点且只在 content 里** → 编码→解码链路走不通；
 4. **M17 往返工具只接受整数**，模型传比特列表时抛晦涩 `int(list)` 错误；
-5. **RDS 组块提示示例与"16bit 块"契约矛盾**（文案修正，解析行为保持宽松）。
+5. **RDS 组块提示示例与"16bit 块"契约矛盾**（文案修正，解析行为保持宽松）；
+6. **URH 调制载荷只给第一个采样点**（下游拿到 1 个点 → 位判决永远 0 比特），
+   **URHDecoder 已实现却未暴露为工具**（链路断在“调制→解调”），
+   **模型说 BPSK/QPSK/8PSK 直接被拒**（"\u6682\u4e0d\u652f\u6301\u7684\u8c03\u5236: BPSK"），
+   **载频默认值写死 40 kHz**（48 kSPS 下逼近 Nyquist 混叠），
+   **PSK 判决极性用了 ASK 的规则**（整体反相），
+   **Costas 锁定期未裁除**（头部出现误码）。上述均已修，并以
+   `urh_decode_iq` 工具补全链路（见 §4 新增链路表）。
 
 ---
 
