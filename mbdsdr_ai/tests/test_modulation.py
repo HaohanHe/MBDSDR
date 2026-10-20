@@ -187,3 +187,58 @@ def test_odd_bit_count_for_multibit_scheme_fails():
     """QPSK 要求比特数为 2 的整数倍。"""
     with pytest.raises(ValueError):
         modulate_bits([0, 1, 0], "qpsk")
+
+
+# ── 映射参数化（gray/binary）与外部收敛等价性 ──
+def test_gray_mapping_matches_legacy_qpsk():
+    """Gray 映射与历史 QPSK 映射逐点一致（防回归漂移）。"""
+    from mbdsdr_ai.freedv_modem import bits_to_qpsk
+    from mbdsdr_ai.modulation import symbol_points
+    bits = np.array([0, 0, 0, 1, 1, 0, 1, 1], dtype=np.uint8)
+    pts = symbol_points("qpsk", "gray")
+    expect = np.array([pts[(b0 << 1) | b1]
+                       for b0, b1 in zip(bits[0::2], bits[1::2])])
+    assert np.allclose(bits_to_qpsk(bits), expect)
+
+
+def test_gray_mapping_is_single_bit_adjacent():
+    """Gray 映射：相邻位值对应的星座点只差 1 bit。"""
+    from mbdsdr_ai.modulation import symbol_points
+    pts = symbol_points("qpsk", "gray")
+    # 灰序码的性质：位值测（泰量距离）为 1 的两个位值，
+    # 对应星座点只差 1 bit（I/Q 中恰好一个变化）
+    for v in range(4):
+        for w in range(v + 1, 4):
+            if bin(v ^ w).count("1") != 1:
+                continue
+            a, b = pts[v], pts[w]
+            d = int(np.sign(a.real) != np.sign(b.real)) + \
+                int(np.sign(a.imag) != np.sign(b.imag))
+            assert d == 1, (v, w, a, b)
+
+
+def test_gray_roundtrip_zero_errors():
+    """Gray 映射下无噪往返零误码。"""
+    bits = _bits(998 * 2)
+    mod = modulate_bits(bits, "qpsk", sps=4, shaping="rrc", mapping="gray")
+    dem = demodulate_iq(mod["waveform"], "qpsk", sps=4, shaping="rrc",
+                        mapping="gray")
+    n = min(len(bits), len(dem["bits"]))
+    assert int(np.sum(bits[:n] != np.asarray(dem["bits"][:n]))) == 0
+
+
+def test_binary_and_gray_differ_but_both_valid():
+    """binary 与 gray 映射不同（映射不得被静默写死），但各自都自洽。"""
+    from mbdsdr_ai.modulation import symbol_points
+    b = symbol_points("qpsk", "binary")
+    g = symbol_points("qpsk", "gray")
+    assert not np.allclose(b, g)
+    for pts in (b, g):
+        # QPSK 点幅度为 1（I/Q 各分量 1/sqrt(2)）
+        assert np.allclose(np.abs(pts), 1.0)
+        assert np.allclose(np.abs(pts.real), 1.0 / np.sqrt(2.0))
+
+
+def test_unknown_mapping_fails():
+    with pytest.raises(ValueError):
+        modulate_bits([0, 1, 1, 0], "qpsk", mapping="weird")

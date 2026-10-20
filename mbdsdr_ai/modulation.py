@@ -68,22 +68,47 @@ def theoretical_ber(scheme: str, ebn0_db: float) -> float:
     raise ValueError(f"未知调制 {scheme!r}，可选 {SCHEMES}")
 
 
-def symbol_points(scheme: str) -> np.ndarray:
-    """该调制的理想星座点（单位平均功率，QPSK 归一化到 1/√2）。"""
-    s = scheme.lower()
-    if s == "bpsk":
-        return np.array([1 + 0j, -1 + 0j])
-    if s == "ask":
-        # 索引即位值：bit1=有载波（幅度 1），bit0=空（幅度 0）
-        return np.array([0j, 1 + 0j])
-    if s == "qpsk":
-        return (np.array([1 + 1j, -1 + 1j, -1 - 1j, 1 - 1j]) / math.sqrt(2.0))
-    if s == "8psk":
-        k = np.arange(8)
-        ang = 2 * np.pi * k / 8 + np.pi / 8
-        return np.exp(1j * ang)
-    raise ValueError(f"未知调制 {scheme!r}，可选 {SCHEMES}")
+# Gray 映射表（相邻星座点只差 1 bit）：索引 = 二进制位值 -> Gray 序位
+_GRAY_INDEX = {
+    # 位值 v -> 星座索引（pts_binary 顺序）；相邻位值对应的星座点只差 1 bit
+    2: [0, 3, 1, 2],        # 00->(1+j), 01->(1-j), 10->(-1+j), 11->(-1-j)
+    3: [0, 1, 3, 2, 6, 7, 5, 4],
+}
 
+
+def symbol_points(scheme: str, mapping: str = "binary") -> np.ndarray:
+    """该调制的理想星座点（单位平均功率，QPSK 归一化到 1/√2）。
+
+    mapping="binary"：索引即二进制位值（自然映射）；
+    mapping="gray"   ：索引按 Gray 序排布（相邻点仅差 1 bit）。
+    映射方式此前被各处写死，这里参数化，消除"同一个 QPSK 两套映射"的隐患。
+    """
+    s = scheme.lower()
+    m = str(mapping).lower()
+    if m not in ("binary", "gray"):
+        raise ValueError(f"未知映射 {mapping!r}，可选 binary/gray")
+    if s == "bpsk":
+        pts = np.array([1 + 0j, -1 + 0j])
+    elif s == "ask":
+        # 索引即位值：bit1=有载波（幅度 1），bit0=空（幅度 0）
+        pts = np.array([0j, 1 + 0j])
+    elif s == "qpsk":
+        pts = np.array([1 + 1j, -1 + 1j, -1 - 1j, 1 - 1j]) / math.sqrt(2.0)
+    elif s == "8psk":
+        k = np.arange(8)
+        ang = 2 * np.pi * k / 8 + math.pi / 8
+        pts = np.exp(1j * ang)
+    else:
+        raise ValueError(f"未知调制 {scheme!r}，可选 {SCHEMES}")
+    if m == "gray":
+        k = BITS_PER_SYMBOL[s]
+        if k not in _GRAY_INDEX:
+            raise ValueError(f"{s} 无 Gray 映射定义")
+        out = np.zeros_like(pts)
+        for bit, gidx in enumerate(_GRAY_INDEX[k]):
+            out[bit] = pts[gidx]
+        return out
+    return pts
 
 def _bits_to_symbol_indices(bits: np.ndarray, scheme: str) -> np.ndarray:
     """比特流 → 符号索引（MSB 优先打包）。"""
@@ -110,7 +135,8 @@ def _rrc_taps(sps: int, alpha: float, length_sps: int = 10) -> np.ndarray:
 def modulate_bits(bits: Sequence[int], scheme: str = "bpsk", sps: int = 1,
                   shaping: str = "rect", alpha: float = 0.35,
                   amplitude: float = 1.0,
-                  length_sps: int = 10) -> Dict[str, Any]:
+                  length_sps: int = 10,
+                  mapping: str = "binary") -> Dict[str, Any]:
     """比特流 → 基带波形（原子积木）。
 
     shaping="rect" 矩形脉冲（不滤波）；"rrc" 根升余弦成形（单次成形，
@@ -126,7 +152,7 @@ def modulate_bits(bits: Sequence[int], scheme: str = "bpsk", sps: int = 1,
     if len(bits) == 0:
         raise ValueError("bits 为空：无存在可调制的符号")
     idx = _bits_to_symbol_indices(bits, scheme)
-    pts = symbol_points(scheme)
+    pts = symbol_points(scheme, mapping)
     syms = pts[idx]
     up = np.repeat(syms, sps) * float(amplitude)
 
@@ -152,13 +178,14 @@ def modulate_bits(bits: Sequence[int], scheme: str = "bpsk", sps: int = 1,
         "n_symbols": int(len(syms)),
         "params": {"scheme": scheme, "sps": sps, "shaping": shape,
                    "alpha": alpha, "amplitude": amplitude,
-                   "n_taps": int(len(taps))},
+                   "mapping": mapping, "n_taps": int(len(taps))},
     }
 
 
 def demodulate_iq(iq: Sequence[complex], scheme: str = "bpsk", sps: int = 1,
                   shaping: str = "rect", alpha: float = 0.35,
-                  length_sps: int = 10) -> Dict[str, Any]:
+                  length_sps: int = 10,
+                  mapping: str = "binary") -> Dict[str, Any]:
     """基带波形 → 符号与比特（原子积木）。
 
     匹配滤波（rrc 时用同抽头）+ 按 sps 抽取符号（假设符号定时已对齐；
@@ -191,7 +218,7 @@ def demodulate_iq(iq: Sequence[complex], scheme: str = "bpsk", sps: int = 1,
         raise ValueError("iq 长度不足一个符号")
     syms = x[:usable].reshape(-1, sps)[:, phase]
 
-    pts = symbol_points(scheme)
+    pts = symbol_points(scheme, mapping)
     if scheme == "ask":
         # OOK 幅度判决：有载波电平取 90 分位，门限取其一半
         mag = np.abs(syms)
@@ -217,17 +244,19 @@ def demodulate_iq(iq: Sequence[complex], scheme: str = "bpsk", sps: int = 1,
         "hard_bits": hard.ravel(),
         "bits": hard.ravel(),
         "n_symbols": int(len(nearest)),
-        "params": {"scheme": scheme, "sps": sps, "shaping": shape, "alpha": alpha},
+        "params": {"scheme": scheme, "sps": sps, "shaping": shape,
+                   "alpha": alpha, "mapping": mapping},
     }
 
 
-def constellation_metrics(symbols: Sequence[complex], scheme: str = "qpsk") -> Dict[str, Any]:
+def constellation_metrics(symbols: Sequence[complex], scheme: str = "qpsk",
+                         mapping: str = "binary") -> Dict[str, Any]:
     """星座质量：EVM / 相位误差 / I-Q 失衡 / 误判率（原子积木）。"""
     scheme = scheme.lower()
     x = np.asarray(symbols, dtype=np.complex128).ravel()
     if x.size == 0:
         raise ValueError("symbols 为空")
-    pts = symbol_points(scheme)
+    pts = symbol_points(scheme, mapping)
     if scheme == "ask":
         mag = np.abs(x)
         on_level = float(np.percentile(mag, 90)) if mag.size else 0.0
@@ -301,7 +330,8 @@ def ber_measure(bits_tx: Sequence[int], bits_rx: Sequence[int]) -> Dict[str, Any
 
 def link_ber_test(scheme: str = "bpsk", n_bits: int = 4000, ebn0_db: float = 6.0,
                   sps: int = 4, shaping: str = "rrc", alpha: float = 0.35,
-                  seed: int = 20241012) -> Dict[str, Any]:
+                  seed: int = 20241012,
+                  mapping: str = "binary") -> Dict[str, Any]:
     """链路误码实测：调制 → AWGN → 解调 → BER，并与理论值对照（原子积木）。
 
     Eb/N0 定义：噪声方差按信号平均功率 / (Eb/N0) 归一（整形后信号功率）。
@@ -313,7 +343,8 @@ def link_ber_test(scheme: str = "bpsk", n_bits: int = 4000, ebn0_db: float = 6.0
         raise ValueError(f"未知调制 {scheme!r}，可选 {SCHEMES}")
     rng = np.random.default_rng(seed)
     bits = rng.integers(0, 2, int(n_bits)).astype(np.int8)
-    mod = modulate_bits(bits, scheme=scheme, sps=sps, shaping=shaping, alpha=alpha)
+    mod = modulate_bits(bits, scheme=scheme, sps=sps, shaping=shaping,
+                        alpha=alpha, mapping=mapping)
     wave = mod["waveform"].astype(np.complex128)
     sig_pow = float(np.mean(np.abs(wave) ** 2))
     if sig_pow <= 0:
@@ -325,7 +356,8 @@ def link_ber_test(scheme: str = "bpsk", n_bits: int = 4000, ebn0_db: float = 6.0
     noise_pow = sig_pow * sps / (k_bits * ebn0)
     noisy = wave + np.sqrt(noise_pow / 2.0) * (
         rng.standard_normal(len(wave)) + 1j * rng.standard_normal(len(wave)))
-    dem = demodulate_iq(noisy, scheme=scheme, sps=sps, shaping=shaping, alpha=alpha)
+    dem = demodulate_iq(noisy, scheme=scheme, sps=sps, shaping=shaping,
+                        alpha=alpha, mapping=mapping)
     # 去掉成形/滤波引入的首尾过渡符号（各端长度_sps 量级）
     k = BITS_PER_SYMBOL[scheme]
     tx_syms = bits[: (len(bits) // k) * k].reshape(-1, k)
@@ -340,12 +372,13 @@ def link_ber_test(scheme: str = "bpsk", n_bits: int = 4000, ebn0_db: float = 6.0
         "shaping": shaping,
         "alpha": alpha,
         "seed": seed,
+        "mapping": mapping,
         "measured_ber": meas["ber"],
         "measured_ser": meas["symbol_error_rate"],
         "bit_errors": meas["bit_errors"],
         "bits_compared": meas["bits_compared"],
         "theoretical_ber": theo,
-        "constellation": constellation_metrics(dem["symbols"], scheme),
+        "constellation": constellation_metrics(dem["symbols"], scheme, mapping),
         "note": ("理论值按 AWGN 硬判决教科书式；实测受抽头长度/定时对齐影响，"
                  "两者同量级即视为实现正确"),
     }
