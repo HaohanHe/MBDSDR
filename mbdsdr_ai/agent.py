@@ -295,6 +295,19 @@ class MBDSDRAgent:
         self._register_orbit_tools()
         self._register_pointing_tools()
         self._register_doppler_tools()
+        # 轨道动力学原子积木（多普勒换算/取状态/STM/观测模型/RLS单步/校时/坐标）：
+        # 每块一个独立小工具，模型现场编排，不打包成「定轨工具」大黑盒。
+        from mbdsdr_ai.orbit_tools import register_orbit_brick_tools
+        register_orbit_brick_tools(self.tool_registry)
+        # 同步/调制解调原子积木（FLL锁频/符号同步/GMSK/频率轨迹）：
+        # 同样逐块注册，模型现场编排接收链，不打包成「解调工具」大黑盒。
+        from mbdsdr_ai.sync_tools import register_sync_brick_tools
+        register_sync_brick_tools(self.tool_registry)
+        # 射频前端与指向规划积木（星表/同步轨道指向/天线增益/指向容差/
+        # 链路预算/故障诊断/罐子馈源几何/遥测接收链参数）：
+        # 同样逐块注册，模型现场编排接收前端，不打包成「接收方案」大黑盒。
+        from mbdsdr_ai.acquisition import register_acquisition_tools
+        register_acquisition_tools(self.tool_registry)
         self._register_time_sync_tools()
         self._register_constellation_tools()
         self._register_baseband_tools()
