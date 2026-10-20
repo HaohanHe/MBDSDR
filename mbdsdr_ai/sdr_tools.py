@@ -1739,7 +1739,7 @@ def register_sdr_tools(agent):
                 "audio_path": {"type": "string", "description": "WAV 音频文件路径"},
             },
         },
-        handler=lambda args: ToolResult(success=True, content=_aprs_decode(args)),
+        handler=lambda args: _decode_result(_aprs_decode(args)),
         category="sdr_network",
     )
 
@@ -1789,7 +1789,7 @@ def register_sdr_tools(agent):
             },
             "required": ["hex_data"],
         },
-        handler=lambda args: ToolResult(success=True, content=_kiss_decode(args)),
+        handler=lambda args: _decode_result(_kiss_decode(args)),
         category="sdr_network",
     )
 
@@ -2390,7 +2390,7 @@ def register_sdr_tools(agent):
             },
             "required": ["morse"],
         },
-        handler=lambda args: ToolResult(success=True, content=_morse_decode(args)),
+        handler=lambda args: _decode_result(_morse_decode(args)),
         category="radio_control",
     )
 
@@ -4529,6 +4529,14 @@ def _encode_result(res):
                           data=res)
     return ToolResult(success=True, content=str(res))
 
+def _decode_result(res):
+    """解码器返回值 -> ToolResult（dict 契约带结构化载荷；str 契约向后兼容）。"""
+    if isinstance(res, dict):
+        return ToolResult(success=True,
+                          content=str(res.get("content", "")),
+                          data=res)
+    return ToolResult(success=True, content=str(res))
+
 def _encode_ax25(args):
     """编码 AX.25 帧。"""
     from .ax25 import AX25Frame
@@ -4773,7 +4781,13 @@ def _aprs_decode(args):
 
         result += f"\n"
 
-    return result
+    return {"content": result,
+            "packets": [{"source": p.source,
+                         "destination": p.destination,
+                         "data_type": p.data_type,
+                         "text": getattr(p, "text", "")}
+                        for p in aprs_packets],
+            "count": len(aprs_packets)}
 
 
 def _aprs_send_position(args):
@@ -4909,7 +4923,10 @@ def _kiss_decode(args):
                 pass
         result += f"\n"
 
-    return result
+    return {"content": result,
+            "frames": [{"port": p, "ax25_hex": d.hex().upper()}
+                       for p, d in frames],
+            "count": len(frames)}
 
 
 def _digipeater_process(args):
@@ -5745,7 +5762,9 @@ def _morse_decode(args):
     lines.append(f"Morse: {morse}")
     lines.append(f"文本: {result}")
 
-    return '\n'.join(lines)
+    return {"content": '\n'.join(lines),
+            "text": result,
+            "morse": morse}
 
 
 # ========================================================================
