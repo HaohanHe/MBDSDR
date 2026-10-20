@@ -468,9 +468,19 @@ def register_m17_tools(registry) -> None:
     def _fsk_roundtrip(args):
         """4FSK 调制 -> 鉴频解调 -> 硬判决 bit 往返。"""
         try:
-            n_bits = int(args.get("bits", 96))
-            rng = np.random.default_rng(int(args.get("seed", 1)))
-            bits = rng.integers(0, 2, size=n_bits).tolist()
+            raw_bits = args.get("bits", 96)
+            if isinstance(raw_bits, (list, tuple)):
+                # 模型直接给一个比特列表：就用它（无需随机）
+                bits = [int(b) & 1 for b in raw_bits]
+                if not bits:
+                    raise ValueError("bits 列表为空")
+                n_bits = len(bits)
+            else:
+                n_bits = int(raw_bits)
+                if n_bits <= 0:
+                    raise ValueError("bits 个数必须为正数")
+                rng = np.random.default_rng(int(args.get("seed", 1)))
+                bits = rng.integers(0, 2, size=n_bits).tolist()
             syms = m17_bits_to_symbols(bits)
             iq = m17_fsk_modulate(syms, sample_rate=48000.0)
             rx_syms = m17_fsk_demodulate(iq, sample_rate=48000.0)
@@ -480,6 +490,7 @@ def register_m17_tools(registry) -> None:
                                                   m17_symbols_to_bits(rx_syms[:m])))
             out = {
                 "bits": n_bits,
+                "bit_source": "given" if isinstance(raw_bits, (list, tuple)) else "random",
                 "symbols_tx": int(len(syms)),
                 "symbols_rx": int(len(rx_syms)),
                 "iq_samples": int(len(iq)),

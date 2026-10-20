@@ -1131,10 +1131,16 @@ class MBDSDRAgent:
                 audio = AFSKModem(sample_rate=sr).modulate(f)
             except Exception:  # noqa: BLE001
                 return ToolResult(False, "AFSK 调制失败：参数格式不正确，请检查 source/destination 呼号格式")
+            # payload 进 data（完整音频，可直接回灌给 afsk_demodulate）；
+            # content 只给摘要。之前音频被降采样到 2000 点且只在
+            # content 里，导致“编码→解码”链路无法回灌。
             return ToolResult(True, json.dumps({
                 "sample_rate": sr, "samples": len(audio),
-                "audio": np.round(audio[::max(1, len(audio)//2000)], 4).tolist(),
-            }, ensure_ascii=False))
+                "hint": "完整音频见 data.audio（未降采样），可直接传给 afsk_demodulate",
+            }, ensure_ascii=False), data={
+                "sample_rate": sr, "samples": len(audio),
+                "audio": np.asarray(audio, dtype=float).round(6).tolist(),
+            })
         self.tool_registry.register(
             name="afsk_modulate",
             description="AFSK 1200 Bell 202 调制：把 AX.25 帧调制成 mark=1200Hz/space=2200Hz "
@@ -1155,7 +1161,8 @@ class MBDSDRAgent:
                     "info": f.info.decode("latin-1", "replace"), "fcs_valid": f.fcs_valid}
                    for f in frames]
             return ToolResult(True, json.dumps({"frames": out, "count": len(out)},
-                                               ensure_ascii=False))
+                                               ensure_ascii=False),
+                              data={"frames": out, "count": len(out)})
         self.tool_registry.register(
             name="afsk_demodulate",
             description="AFSK 1200 Bell 202 解调：音频 -> 鉴频 -> 数字 PLL 位同步 -> "

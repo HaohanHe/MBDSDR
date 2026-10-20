@@ -547,7 +547,9 @@ def register_rds_tools(registry) -> None:
         parts = blocks_hex.split()
         if len(parts) != 4:
             return ToolResult(success=False,
-                              content="需要 4 个 16bit 块字(hex, 空格分隔): A B C D",
+                              content=("需要 4 个 16bit 块字（hex，空格分隔）："
+                          "每块 1–4 位 hex（左侧补零到 16bit），"
+                          "例如 0A1B 2C3D 4E5F 6071"),
                               error="bad_args")
         try:
             blocks = {"A": int(parts[0], 16), "B": int(parts[1], 16),
