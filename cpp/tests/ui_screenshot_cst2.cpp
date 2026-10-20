@@ -21,9 +21,12 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     // Throwaway QSettings so persisted focus-mode (专注) never hides the right
     // rail that holds the constellation tab.
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope,
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                        QDir::tempPath() + "/mbdsdr_shot_cst2_" +
                            QString::number(QCoreApplication::applicationPid()));
+    qputenv("MBDSDR_SETTINGS_DIR", (QDir::tempPath() + "/mbdsdr_shot_cst2_" +
+                           QString::number(QCoreApplication::applicationPid())).toUtf8());
     app.setStyleSheet(mbdsdr::tokens::buildDarkQss());
     const QString out = QString::fromLocal8Bit(qgetenv("MBD_OUT"));
 

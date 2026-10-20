@@ -35,6 +35,7 @@ private:
     QLineEdit* baseUrlEdit_  = nullptr;
     QLineEdit* modelEdit_    = nullptr;
     QComboBox* srCombo_      = nullptr;
+    QComboBox* languageCombo_ = nullptr;
     QComboBox* audioDeviceCombo_ = nullptr;
     QLabel*    audioNoDevLabel_ = nullptr;
     QSlider*   volumeSlider_ = nullptr;

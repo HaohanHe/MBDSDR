@@ -216,6 +216,7 @@ void TestFrequencyCalibrator::initTestCase() {
     QCoreApplication::setApplicationName("MBDSDR");
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, cfg);
+    qputenv("MBDSDR_SETTINGS_DIR", (cfg).toUtf8());
 }
 
 void TestFrequencyCalibrator::settingRoundtrip_andRefName() {

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 // ChatSessionStore 单元测试 —— 全部注入 InMemoryKvStore，不碰真实 SharedPreferences。
 // 覆盖：首跑单空会话 / 索引+会话 JSON 形状与桌面同形 / CRUD / 切换 / 删除永不归零 /
-//       incomplete 标记 / 新 user 行清 incomplete / 损坏索引回退。
+//       incomplete 标记 / 新 user 行清 incomplete / 损坏索引回退 /
+//       任务步骤 steps 随行落盘的往返与容错。
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mbdsdr_mobile/models/task_step.dart';
 import 'package:mbdsdr_mobile/services/chat_session_store.dart';
 import 'package:mbdsdr_mobile/services/settings_service.dart';
 
@@ -225,6 +227,110 @@ void main() {
       await store.load();
       expect(store.sessions.length, 1);
       expect(store.currentMessages(), isEmpty);
+    });
+  });
+
+  group('任务步骤 steps 随行落盘（移动端扩展键）', () {
+    test('steps 序列化往返：tool/args/status/summary 逐字段保真', () {
+      final SessionLine line = SessionLine(
+        role: 'assistant',
+        content: '调好了',
+        tsMs: 1700000000000,
+        steps: <TaskStep>[
+          TaskStep.finished(
+            tool: 'set_frequency',
+            argumentsPreview: '{"frequency_mhz":145}',
+            result: '{"ok": true, "frequency_hz": 145000000}',
+          ),
+          TaskStep.finished(
+            tool: 'set_gain',
+            argumentsPreview: '{}',
+            result: '{"ok": false, "error": "增益超出范围"}',
+          ),
+        ],
+      );
+
+      final Map<String, dynamic> json = line.toJson();
+      final List<dynamic> rawSteps = json['steps']! as List<dynamic>;
+      expect(rawSteps.length, 2);
+
+      final SessionLine back = SessionLine.fromJson(json)!;
+      expect(back.steps.length, 2);
+      expect(back.steps[0].tool, 'set_frequency');
+      expect(back.steps[0].argumentsPreview, '{"frequency_mhz":145}');
+      expect(back.steps[0].status, TaskStepStatus.success);
+      expect(back.steps[1].tool, 'set_gain');
+      expect(back.steps[1].status, TaskStepStatus.failed);
+      expect(back.steps[1].summary, contains('增益超出范围'));
+    });
+
+    test('空 steps 不写键（JSON 形状与旧版一致，不膨胀）', () {
+      final SessionLine line =
+          const SessionLine(role: 'user', content: '你好');
+      expect(line.toJson().containsKey('steps'), isFalse);
+      // 读回缺 steps 的旧数据 → 空列表，向后兼容。
+      final SessionLine back = SessionLine.fromJson(<String, dynamic>{
+        'role': 'assistant',
+        'content': '在的',
+        'kind': 'chat',
+      })!;
+      expect(back.steps, isEmpty);
+    });
+
+    test('坏步骤单步丢弃、好步骤保留（坏一步不拖垮整行）', () {
+      final SessionLine back = SessionLine.fromJson(<String, dynamic>{
+        'role': 'assistant',
+        'content': '行内容',
+        'steps': <Object?>[
+          <String, dynamic>{'tool': '', 'status': 'success'}, // 空工具名 → 丢
+          'not a map', // 非对象 → 丢
+          <String, dynamic>{'tool': 'get_status', 'status': 'success'},
+        ],
+      })!;
+      expect(back.content, '行内容', reason: '整行不丢');
+      expect(back.steps.length, 1);
+      expect(back.steps.single.tool, 'get_status');
+    });
+
+    test('重载往返：appendLine 带 steps → 新实例读回同样步骤', () async {
+      final _MemKv kv = _MemKv();
+      final ChatSessionStore store = ChatSessionStore(kv: kv);
+      await store.load();
+      final String id = store.currentId;
+      store.appendLine(
+        id,
+        SessionLine(
+          role: 'assistant',
+          content: '已完成调谐',
+          tsMs: 1700000000000,
+          steps: <TaskStep>[
+            TaskStep.finished(
+              tool: 'set_frequency',
+              argumentsPreview: '{}',
+              result: '{"ok": true}',
+            ),
+          ],
+        ),
+      );
+
+      final ChatSessionStore restored = ChatSessionStore(kv: kv);
+      await restored.load();
+      final SessionLine line = restored.currentMessages().single;
+      expect(line.role, 'assistant');
+      expect(line.steps.length, 1);
+      expect(line.steps.single.tool, 'set_frequency');
+      expect(line.steps.single.status, TaskStepStatus.success);
+    });
+
+    test('unknown status 字符串不臆造成功：读回为 failed（诚实缺省）', () {
+      final SessionLine back = SessionLine.fromJson(<String, dynamic>{
+        'role': 'assistant',
+        'content': 'x',
+        'steps': <Object?>[
+          <String, dynamic>{'tool': 't', 'status': 'made_up_state'},
+        ],
+      })!;
+      expect(back.steps.single.status, TaskStepStatus.failed);
     });
   });
 }

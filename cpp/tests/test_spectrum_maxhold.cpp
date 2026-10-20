@@ -19,6 +19,7 @@
 // Persistence tests write then REMOVE the real QSettings key so they leave no
 // residue in the user's MBDSDR config.
 #include <QtTest/QtTest>
+#include "core/app_settings.h"
 #include <QApplication>
 #include <QSettings>
 #include <vector>
@@ -142,7 +143,7 @@ void TestSpectrumMaxHold::decayTierChangesFalloff() {
 // real key so the user's config is left untouched.
 void TestSpectrumMaxHold::persistedTierHonouredOnCtor() {
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue(tokens::kSettingsKeyMaxHoldDecay, tokens::kMaxHoldDecaySlow);
     }
     {
@@ -152,7 +153,7 @@ void TestSpectrumMaxHold::persistedTierHonouredOnCtor() {
                  "a persisted 慢 tier must be read by the ctor");
     }
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue(tokens::kSettingsKeyMaxHoldDecay, tokens::kMaxHoldDecayFast);
     }
     {
@@ -161,7 +162,7 @@ void TestSpectrumMaxHold::persistedTierHonouredOnCtor() {
         QVERIFY2(std::abs(w.maxHoldDecayDbForTest() - tokens::kMaxHoldDecayFast) < 1e-6f,
                  "a persisted 快 tier must be read by the ctor");
     }
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyMaxHoldDecay);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyMaxHoldDecay);
 }
 
 // Phase63 (f): a persisted value outside the named tiers (hand-edited config), or
@@ -169,7 +170,7 @@ void TestSpectrumMaxHold::persistedTierHonouredOnCtor() {
 // than being silently clamped into an arbitrary continuous band.
 void TestSpectrumMaxHold::illegalPersistedValueFallsBack() {
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue(tokens::kSettingsKeyMaxHoldDecay, 99.0);   // not a named tier
     }
     {
@@ -179,7 +180,7 @@ void TestSpectrumMaxHold::illegalPersistedValueFallsBack() {
                  "an out-of-set persisted decay must fall back to the default tier");
     }
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue(tokens::kSettingsKeyMaxHoldDecay, "not-a-number");
     }
     {
@@ -188,7 +189,7 @@ void TestSpectrumMaxHold::illegalPersistedValueFallsBack() {
         QVERIFY2(std::abs(w.maxHoldDecayDbForTest() - tokens::kMaxHoldDecayDefault) < 1e-6f,
                  "a non-numeric persisted decay must fall back to the default tier");
     }
-    QSettings("MBDSDR", "MBDSDR").remove(tokens::kSettingsKeyMaxHoldDecay);
+    mbdsdr::core::AppSettings().remove(tokens::kSettingsKeyMaxHoldDecay);
 }
 
 QTEST_MAIN(TestSpectrumMaxHold)

@@ -20,7 +20,9 @@ using namespace mbdsdr;
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QTemporaryDir tmp;
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, tmp.path());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmp.path());
+    qputenv("MBDSDR_SETTINGS_DIR", (tmp.path()).toUtf8());
     app.setStyleSheet(tokens::buildDarkQss());
 
     const QString out = QString::fromLocal8Bit(qgetenv("MBD_OUT"));

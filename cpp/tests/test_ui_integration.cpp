@@ -18,6 +18,7 @@
 // QSettings is redirected to a throwaway dir in initTestCase so these tests
 // never touch the user's persisted bookmarks / AI / squelch state.
 #include <QtTest/QtTest>
+#include "core/app_settings.h"
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -114,6 +115,12 @@ private slots:
     // persist through the real saveUiState() and restore on the next launch. The
     // honest badge never claims 检测到 without a real ctcssPresent().
     void ctcssUiWiresEngineAndPersistsRoundTrip();
+    // 仪器民主化：快速调谐"说人话就能调台"——"137.62M" 经 core/freq_input 解析
+    // 后走既有 freqSpin_ 调谐主路径；垃圾输入诚实报错、不调谐、不改值。
+    void quickTuneHumanFrequencyWiresTunePath();
+    // 首启向导卡的三步按钮必须驱动真实控件路径（点下去是真动作）：②去调谐真聚焦
+    // 快速调谐输入；✕ 真落盘永久关闭。①打开捕获文件是模态对话框，测试不点（会阻塞）。
+    void guideCardButtonsDriveRealControls();
 };
 
 QString TestUiIntegration::tmpSettingsDir;
@@ -129,7 +136,9 @@ void TestUiIntegration::initTestCase() {
     QDir().mkpath(tmpSettingsDir);
     // Redirect all QSettings("MBDSDR","MBDSDR") storage to the throwaway dir so
     // the tests never pollute the real user config / bookmarks.
-    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, tmpSettingsDir);
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmpSettingsDir);
+    qputenv("MBDSDR_SETTINGS_DIR", (tmpSettingsDir).toUtf8());
     // Redirect the AI session store to a throwaway dir too.
     qputenv("MBDSDR_AI_SESSIONS_DIR",
             (tmpSettingsDir + "/ai_sessions").toUtf8());
@@ -577,7 +586,7 @@ static void waitVfoCount(MainWindow& win, int n) {
 // redirected QSettings dir, so wipe the VFO group (count + per-channel + names)
 // before each VFO test so a fresh window starts from the engine's default 1 VFO.
 static void clearVfoSettings() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     s.remove("vfo");
     s.remove("ui/vfoNames");
     s.sync();
@@ -676,7 +685,7 @@ void TestUiIntegration::vfoNamingPersistsRoundTrip() {
         waitVfoCount(win, 1);
         const int id = eng->selectedVfoId();
 
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         QVERIFY2(s.value("ui/vfoNames").toByteArray().isEmpty(),
                  "ui/vfoNames must default to empty (no preset names)");
 
@@ -687,7 +696,7 @@ void TestUiIntegration::vfoNamingPersistsRoundTrip() {
         QApplication::processEvents();
 
         // Persisted JSON must map this id -> the name.
-        QSettings s2("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s2;
         const QByteArray raw = s2.value("ui/vfoNames").toByteArray();
         QVERIFY2(!raw.isEmpty(), "renaming must persist ui/vfoNames");
         const QJsonObject obj = QJsonDocument::fromJson(raw).object();
@@ -880,7 +889,7 @@ void TestUiIntegration::rightTabCloseHidesTabKeepsIndexStable() {
 // Phase63: the hidden tab list persists through a fresh QSettings round-trip.
 void TestUiIntegration::rightTabVisibilityPersistsRoundTrip() {
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.remove("ui/hiddenRightTabs");
         s.sync();
     }
@@ -907,7 +916,7 @@ void TestUiIntegration::rightTabVisibilityPersistsRoundTrip() {
     }
     // The flush must have recorded the closed tab by text.
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         const QStringList hidden = s.value("ui/hiddenRightTabs").toStringList();
         QVERIFY2(hidden.contains(QString::fromUtf8("数据")),
                  qPrintable(QString("ui/hiddenRightTabs must record 数据, got: %1")
@@ -966,7 +975,7 @@ void TestUiIntegration::tuneHistoryEmptyStateLoadsAndJumps() {
     // (1) Honest empty state: no persisted history -> a single disabled
     //     "无调谐记录" item, never a fabricated seed.
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.remove(tokens::kSettingsKeyTuneHistory);
         s.sync();
     }
@@ -983,7 +992,7 @@ void TestUiIntegration::tuneHistoryEmptyStateLoadsAndJumps() {
     // (2) Persisted history loads most-recent-first, and picking an entry drives
     //     the real spinbox tune path.
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue(tokens::kSettingsKeyTuneHistory,
                    QVariantList{100.0e6, 98.5e6});
         s.sync();
@@ -1098,7 +1107,7 @@ void TestUiIntegration::demodBandwidthPersistsAndRestoresRoundTrip() {
 
     // Fresh QSettings on disk (window 1 already destroyed + flushed).
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.sync();
         QCOMPARE(s.value("rx/demodMode").toString(), targetMode);
         QCOMPARE(s.value("rx/bandwidth").toDouble(), targetBwHz);
@@ -1129,7 +1138,7 @@ void TestUiIntegration::demodBandwidthPersistsAndRestoresRoundTrip() {
 void TestUiIntegration::demodBandwidthIllegalPersistedFallsBack() {
     clearVfoSettings();
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue("rx/demodMode", "NOT_A_REAL_MODE");
         s.setValue("rx/bandwidth", 5.0e9);   // far outside every preset
         s.sync();
@@ -1180,7 +1189,7 @@ void TestUiIntegration::fftSizePersistsAndRestoresRoundTrip() {
 
     // Fresh QSettings on disk (window 1 destroyed + flushed).
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.sync();
         QCOMPARE(s.value("rx/fftSize").toInt(), targetFft);
     }
@@ -1206,7 +1215,7 @@ void TestUiIntegration::fftSizePersistsAndRestoresRoundTrip() {
 void TestUiIntegration::fftSizeIllegalPersistedFallsBack() {
     clearVfoSettings();
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.setValue("rx/fftSize", 8192);   // outside {1024,2048,4096}
         s.sync();
     }
@@ -1283,7 +1292,7 @@ void TestUiIntegration::ctcssUiWiresEngineAndPersistsRoundTrip() {
 
     // Fresh QSettings on disk (window 1 destroyed + flushed).
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         s.sync();
         QCOMPARE(s.value(tokens::kSettingsKeyCtcssEnabled).toBool(), true);
         QCOMPARE(s.value(tokens::kSettingsKeyCtcssToneHz).toDouble(), targetHz);
@@ -1309,6 +1318,60 @@ void TestUiIntegration::ctcssUiWiresEngineAndPersistsRoundTrip() {
         QTRY_VERIFY_WITH_TIMEOUT(std::abs(eng->ctcssFreqHz() - targetHz) < 0.05, 2000);
         QTRY_VERIFY_WITH_TIMEOUT(eng->ctcssGateAudio(), 2000);
     }
+}
+
+void TestUiIntegration::quickTuneHumanFrequencyWiresTunePath() {
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    auto* quick = win.findChild<QLineEdit*>("freqQuickEdit");
+    auto* hint  = win.findChild<QLabel*>("freqQuickHint");
+    auto* spin  = win.findChild<QDoubleSpinBox*>("freqSpin");
+    QVERIFY(quick && hint && spin);
+
+    // 人话入，真调谐："137.62M" -> freqSpin_ 137.62 MHz（既有调谐主路径）。
+    quick->setText(QString::fromUtf8("137.62M"));
+    QMetaObject::invokeMethod(quick, "returnPressed", Qt::DirectConnection);
+    QApplication::processEvents();
+    QCOMPARE(spin->value(), 137.62);
+    QVERIFY2(!hint->isVisible(), "valid input must not leave an error hint");
+    QVERIFY(quick->text().isEmpty());   // 成功后清空，方便连续输入
+
+    // 垃圾输入：诚实报错、不调谐、不改值。
+    const double before = spin->value();
+    quick->setText(QString::fromUtf8("abc"));
+    QMetaObject::invokeMethod(quick, "returnPressed", Qt::DirectConnection);
+    QApplication::processEvents();
+    QVERIFY2(hint->isVisible(), "junk input must surface an honest error hint");
+    QVERIFY(!hint->text().isEmpty());
+    QCOMPARE(spin->value(), before);
+}
+
+void TestUiIntegration::guideCardButtonsDriveRealControls() {
+    // 隔离 QSettings 下必为"首次启动"，向导卡必在。
+    MainWindow win;
+    win.show();
+    QApplication::processEvents();
+    auto* tuneBtn = win.findChild<QPushButton*>("guideTuneBtn");
+    auto* demodBtn = win.findChild<QPushButton*>("guideDemodBtn");
+    auto* dismissBtn = win.findChild<QPushButton*>("guideDismissBtn");
+    auto* quick = win.findChild<QLineEdit*>("freqQuickEdit");
+    QVERIFY(tuneBtn && demodBtn && dismissBtn && quick);
+
+    // ② 去调谐：真聚焦快速调谐输入（下一步就是输入 "137.62M"）。
+    tuneBtn->click();
+    QApplication::processEvents();
+    QCOMPARE(QApplication::focusWidget(), quick);
+
+    // ③ 选解调：空态下 demodCombo 被诚实禁用，点击不崩、不误改状态。
+    demodBtn->click();
+    QApplication::processEvents();
+
+    // ✕ 不再提示：真落盘，二次启动不再出现（永久性由 phase21 测试另行钉扎）。
+    dismissBtn->click();
+    QApplication::processEvents();
+    mbdsdr::core::AppSettings s;
+    QCOMPARE(s.value(QStringLiteral("ui/onboardingDismissed")).toBool(), true);
 }
 
 QTEST_MAIN(TestUiIntegration)

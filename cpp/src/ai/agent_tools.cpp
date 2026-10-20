@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "agent_tools.h"
+#include "core/app_settings.h"
 #include "tool_schema.h"
 #include "sat_task_planner.h"
 #include "core/tokens.h"
@@ -13,6 +14,7 @@
 #include "ui/workspace_controller.h"  // aigui::WorkspaceController (P0-b workspace seam)
 #include "memory_store.h"         // SQLite FTS5 local memory store
 #include "checkpoint_writer.h"     // background single-writer drain for memory writes
+#include "pending_plan_store.h"    // 待执行计划槽：run_template 登记 / get_task_history 读面
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -2564,7 +2566,7 @@ QString execSetColorMap(const QJsonObject& args, dsp::SpectrumEngine*,
     QString err;
     if (!ui::loadColormapFileForTool(p, &parsed, &err))
         return errResult(err);
-    QSettings().setValue(QStringLiteral("view/wfColormapFile"), p);
+    mbdsdr::core::AppSettings().setValue(QStringLiteral("view/wfColormapFile"), p);
     QJsonObject o;
     o["ok"] = true;
     o["file_path"] = p;
@@ -2589,7 +2591,7 @@ QString execGetColorMaps(const QJsonObject& /*args*/, dsp::SpectrumEngine*,
     QJsonObject o;
     o["ok"] = true;
     o["builtin"] = builtin;
-    const QString path = QSettings().value(QStringLiteral("view/wfColormapFile")).toString();
+    const QString path = mbdsdr::core::AppSettings().value(QStringLiteral("view/wfColormapFile")).toString();
     if (path.isEmpty()) {
         o["external"] = QJsonValue::Null;
         o["note"] = QString::fromUtf8("未配置外部色板文件");
@@ -2945,6 +2947,11 @@ QString execGetTaskHistory(const QJsonObject& args, dsp::SpectrumEngine* /*engin
         o["ok"] = true;
         o["runs"] = arr;
         o["count"] = arr.size();
+        // 待执行计划槽快照（run_template 登记、执行后状态真实回写）：列表模式
+        // 一并返回，模型可查自己登记的计划走到哪一步。空槽 plans=[] 诚实空态。
+        const QJsonObject pending = PendingPlanStore::instance().toJson();
+        o["pending_plans"] = pending.value("plans");
+        o["pending_count"] = pending.value("count");
         if (arr.isEmpty())
             o["note"] = QStringLiteral("无任务历史（TaskRunner 尚未完成过任何任务；执行 list_templates/run_template 计划后此处可查）");
     }
@@ -3114,10 +3121,13 @@ QString execUpdateComponentData(const QJsonObject& args, dsp::SpectrumEngine* /*
 // ---- Deterministic task templates (list_templates / run_template) ----------
 // These wrap the internal plan* builders (task_orchestrator.{h,cpp}) -- we do
 // NOT reimplement the step sequence here. list_templates is pure metadata;
-// run_template BUILDS + REGISTERS a plan and returns its step sequence, honestly
-// labeled executed=false (this call never synchronously tunes/records; production
-// runs the plan on the async TaskRunner). Both route through the normal engine
-// guard, so a headless/no-engine caller gets the same honest "无引擎连接" envelope.
+// run_template BUILDS the plan and REGISTERS it into the real pending-plan slot
+// (PendingPlanStore), returning its step sequence + the real pending_plan_id,
+// honestly labeled executed=false (this call never synchronously tunes/records;
+// the plan only runs after the user confirms, via the AI-panel 「执行待执行
+// 计划」 button -> TaskRunner::runPendingPlan, and its execution state is
+// written back into the slot). Both route through the normal engine guard, so a
+// headless/no-engine caller gets the same honest "无引擎连接" envelope.
 namespace {
 
 QString toolErr(const QString& error) {
@@ -3137,7 +3147,8 @@ bool needArgDbl(const QJsonObject& a, const char* key, double& out, QString& err
 }
 
 // Render a built TaskPlan as an honest registered-plan object (no execution).
-QJsonObject planToRegisteredJson(const TaskPlan& p) {
+// planId is the REAL pending-plan slot id the plan was registered under.
+QJsonObject planToRegisteredJson(const TaskPlan& p, int planId) {
     QJsonObject o;
     o["ok"] = true;
     o["plan_name"] = p.name;
@@ -3153,9 +3164,15 @@ QJsonObject planToRegisteredJson(const TaskPlan& p) {
     o["steps"] = steps;
     o["step_count"] = p.steps.size();
     o["executed"] = false;
+    o["pending_plan_id"] = planId;
+    o["plan_status"] = QString::fromUtf8("pending");
+    o["consumed"] = false;
     o["note"] = QString::fromUtf8(
-        "计划已构建并登记，未在本调用执行（executed=false）。本工具不做同步调谐/录制；"
-        "生产环境经异步 TaskRunner 逐步执行，每步经同一 executeTool 通道驱动引擎。");
+        "计划已登记为待执行计划 #%1（PendingPlanStore 真实登记表，状态 pending）。"
+        "本调用不做同步调谐/录制（executed=false）；需用户确认后经 AI 面板「执行待执行计划」"
+        "按钮或 TaskRunner::runPendingPlan(#%1) 异步执行，执行状态（running/succeeded/"
+        "failed/…）真实回写登记表，可经 get_task_history 的 pending_plans 查询进度。")
+        .arg(planId);
     return o;
 }
 
@@ -3219,7 +3236,9 @@ QString execRunTemplate(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/
                            .arg(name));
     }
 
-    QJsonObject o = planToRegisteredJson(plan);
+    // 真实登记：进待执行计划槽，拿到回执用的 pending_plan_id。
+    const int planId = PendingPlanStore::instance().submit(plan, name);
+    QJsonObject o = planToRegisteredJson(plan, planId);
     o["template_name"] = name;
     return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));
 }

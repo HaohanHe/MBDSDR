@@ -10,6 +10,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../app/tokens.dart';
+import '../l10n/gen/app_localizations.dart';
 
 class FirstRunGuide extends StatelessWidget {
   const FirstRunGuide({
@@ -26,6 +27,7 @@ class FirstRunGuide extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppTokens.spacingL,
@@ -39,30 +41,30 @@ class FirstRunGuide extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Row(
+            Row(
               children: <Widget>[
-                Icon(Icons.explore_outlined,
+                const Icon(Icons.explore_outlined,
                     size: AppTokens.iconSizeInlineLg, color: AppTokens.accent),
-                SizedBox(width: AppTokens.spacingM),
-                Text('第一次使用？三步上路', style: AppTokens.sectionTitle),
+                const SizedBox(width: AppTokens.spacingM),
+                Text(l10n.guideTitle, style: AppTokens.sectionTitle),
               ],
             ),
             const SizedBox(height: AppTokens.spacingM),
-            const _Bullet(text: '设置页填 rtl_tcp 接收机的主机地址与端口（同一局域网）'),
-            const _Bullet(text: '回频谱页点连接，瀑布图实时绘制'),
-            const _Bullet(text: '点瀑布选频率，选对解调模式即可收听'),
+            _Bullet(text: l10n.guideStep1),
+            _Bullet(text: l10n.guideStep2),
+            _Bullet(text: l10n.guideStep3),
             const SizedBox(height: AppTokens.spacingM),
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: <Widget>[
                 TextButton(
                   onPressed: onDismiss,
-                  child: const Text('知道了'),
+                  child: Text(l10n.guideDismiss),
                 ),
                 const SizedBox(width: AppTokens.spacingS),
                 FilledButton(
                   onPressed: onOpenSettings,
-                  child: const Text('去设置'),
+                  child: Text(l10n.guideOpenSettings),
                 ),
               ],
             ),

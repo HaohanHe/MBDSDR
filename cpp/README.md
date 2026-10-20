@@ -124,9 +124,13 @@ LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib:/home/user/.local/lib \
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 ```
 
-16 个测试套件：fft / peak_detector / channelizer / chain / demod / demod_e2e /
-recorder / decoder / agent / bookmark / noise_blanker / engine_integration /
-spectrum_interaction / shortcuts / geo / adsb_cpr。
+ctest 全量 **155 个测试目标**（2026-10-20 实测 155/155 全绿）：dsp 域（fft /
+peak_detector / channelizer / chain / demod / demod_e2e / noise_blanker /
+adsb_cpr …）、ai 域（agent / tool_schema / cross_golden / l10n / freq_input …）、
+control/engine 域（control_hub / control_http_e2e / engine_* …）、UI 域
+（ui_integration / phase21_empty_state / shortcuts / geo …）。其中
+**cross_golden 与 `mbdsdr_ai/tests/test_cross_golden.py` 钉同一份 golden JSON**
+（FT8 / ADS-B 双实现跨语言自动对拍）。
 
 ## 目录结构
 

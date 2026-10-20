@@ -113,6 +113,7 @@ private slots:
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            tmp_->path());
+        qputenv("MBDSDR_SETTINGS_DIR", (tmp_->path()).toUtf8());
         dlg_ = new CalibrationDialog;
     }
     void cleanup() {

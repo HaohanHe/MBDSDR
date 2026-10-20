@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "main_window.h"
+#include "core/app_settings.h"
+#include "core/freq_input.h"
 #include "spectrum_widget.h"
 
 #include <QVBoxLayout>
@@ -93,6 +95,7 @@
 #include "ui/rssi_trend.h"
 #include "ui/bookmark_manager.h"
 #include "ui/workspace_controller.h"   // AIGUI P0-b: live three-column workspace seam
+#include <QTreeWidget>                 // A2UI component_data 数据卡渲染出口
 #include "ui/scan_session.h"
 #include "dsp/frequency_scanner.h"
 #include "ui/shortcuts_dialog.h"
@@ -457,7 +460,7 @@ MainWindow::MainWindow(QWidget* parent)
                 this, &MainWindow::onSpyServerToggled);
         connect(spyserverPortSpin_, QOverload<int>::of(&QSpinBox::valueChanged),
                 this, [this](int v) {
-            QSettings("MBDSDR", "MBDSDR").setValue("net/spyPort", v);
+            mbdsdr::core::AppSettings().setValue("net/spyPort", v);
             scheduleSave();
         });
     }
@@ -547,7 +550,31 @@ MainWindow::MainWindow(QWidget* parent)
     freqSpin_->setDecimals(3);
     freqSpin_->setSuffix(" MHz");
     freqSpin_->setMinimumWidth(tokens::scaled(tokens::kFreqSpinMinW));
-    gFreqLay->addRow("中心频率", freqSpin_);
+    gFreqLay->addRow(tr("中心频率"), freqSpin_);
+    // 快速调谐：说人话就能调台（仪器民主化）。解析在 core/freq_input——
+    // 失败诚实报错不调谐，绝不猜测单位、绝不静默夹值。
+    freqQuickEdit_ = new QLineEdit(gFreq);
+    freqQuickEdit_->setObjectName("freqQuickEdit");
+    freqQuickEdit_->setPlaceholderText(tr("例: 137.62M / 7050k（裸数=MHz）"));
+    freqQuickHint_ = new QLabel(gFreq);
+    freqQuickHint_->setObjectName("freqQuickHint");
+    freqQuickHint_->setWordWrap(true);
+    freqQuickHint_->setVisible(false);
+    gFreqLay->addRow(tr("快速调谐"), freqQuickEdit_);
+    gFreqLay->addRow("", freqQuickHint_);
+    connect(freqQuickEdit_, &QLineEdit::returnPressed, this, [this]() {
+        double hz = 0.0;
+        QString err;
+        if (mbdsdr::core::parseHumanFrequency(freqQuickEdit_->text(), &hz, &err)) {
+            freqQuickHint_->setVisible(false);
+            freqQuickEdit_->clear();
+            // 走既有调谐主路径（freqSpin_ 变化即调谐），行为零分叉。
+            freqSpin_->setValue(hz / 1e6);
+        } else {
+            freqQuickHint_->setText(err);
+            freqQuickHint_->setVisible(true);
+        }
+    });
     stepCombo_ = new QComboBox(gFreq);
     stepCombo_->addItems({"1 Hz", "10 Hz", "100 Hz", "1 kHz",
                           "10 kHz", "100 kHz", "1 MHz"});
@@ -647,7 +674,7 @@ MainWindow::MainWindow(QWidget* parent)
             this, [this, decimCombo](int) {
         const int d = decimCombo->currentData().toInt();
         if (engine_) engine_->setFrontendDecimation(d);
-        QSettings("MBDSDR", "MBDSDR").setValue("rx/frontendDecimation", d);
+        mbdsdr::core::AppSettings().setValue("rx/frontendDecimation", d);
     });
     gRxLay->addRow("抽取", decimCombo);
     // Channel-status badge: "立体声" only when the engine's real 19 kHz pilot is
@@ -1086,7 +1113,7 @@ MainWindow::MainWindow(QWidget* parent)
             QAction* resetAct = menu.addAction(QStringLiteral("恢复内置色板"));
             QAction* chosen = menu.exec(QCursor::pos());
             if (chosen == loadAct) {
-                QSettings s("MBDSDR", "MBDSDR");
+                mbdsdr::core::AppSettings s;
                 const QString startDir =
                     s.value(tokens::kSettingsKeyColormapFile).toString();
                 const QString path = QFileDialog::getOpenFileName(
@@ -1100,13 +1127,13 @@ MainWindow::MainWindow(QWidget* parent)
                     QMessageBox::warning(this, QStringLiteral("色板加载失败"), err);
             } else if (chosen == resetAct) {
                 canvas->setPalette(0);   // back to built-in classic, drop custom ramp
-                QSettings("MBDSDR", "MBDSDR")
+                mbdsdr::core::AppSettings()
                     .remove(tokens::kSettingsKeyColormapFile);
             }
         });
         // Re-apply a previously chosen colormap file (honest silent fallback).
         const QString savedFile =
-            QSettings("MBDSDR", "MBDSDR").value(tokens::kSettingsKeyColormapFile)
+            mbdsdr::core::AppSettings().value(tokens::kSettingsKeyColormapFile)
                 .toString();
         if (!savedFile.isEmpty()) {
             QString err;
@@ -1295,7 +1322,7 @@ MainWindow::MainWindow(QWidget* parent)
         pocsagLay->setContentsMargins(0, 0, 0, 0);
         pocsagPanel_ = new ui::PocsagPanel(pocsagPage);
         pocsagLay->addWidget(pocsagPanel_);
-        rightTabs_->addTab(pocsagPage, "寻呼");
+        rightTabs_->addTab(pocsagPage, tr("寻呼"));
     }
 
     // ---- Data-message panel (ACARS + NAVTEX; fed by engine list signals) ----
@@ -1308,7 +1335,7 @@ MainWindow::MainWindow(QWidget* parent)
         dataLay->setContentsMargins(0, 0, 0, 0);
         dataTextPanel_ = new ui::DataTextPanel(dataPage);
         dataLay->addWidget(dataTextPanel_);
-        rightTabs_->addTab(dataPage, "数据");
+        rightTabs_->addTab(dataPage, tr("数据"));
     }
 
     // ---- m17 digital-call panel (fed by engine m17CallsChanged) --------------
@@ -1403,7 +1430,7 @@ MainWindow::MainWindow(QWidget* parent)
                 constellationView_, &ui::ConstellationView::setHistogramVisible);
 
         addTabGroupHeader(QString::fromUtf8("观测"));
-        rightTabs_->addTab(cstPage, "星座");
+        rightTabs_->addTab(cstPage, tr("星座"));
     }
 
     // Sky tab: polar view on top, TLE freshness badge, pass list below.
@@ -1572,7 +1599,7 @@ MainWindow::MainWindow(QWidget* parent)
     passTable_->setSelectionBehavior(QAbstractItemView::SelectRows);
     passTable_->setSelectionMode(QAbstractItemView::SingleSelection);
     skyLay->addWidget(passTable_, 1);
-    rightTabs_->addTab(skyPage, "天空");
+    rightTabs_->addTab(skyPage, tr("天空"));
 
     // ---- Bookmarks / Scanner tab (SDR++-style "扫描/书签" panel) ----
     bookmarkManager_ = new ui::BookmarkManager();
@@ -2057,7 +2084,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     updateScanStatus();
 
-    rightTabs_->addTab(bmPage, "扫描/书签");
+    rightTabs_->addTab(bmPage, tr("扫描/书签"));
 
     // ===== 录制库 tab: scan the REAL recording directory (rec/dir) =====
     // Lists actual .wav captures + their sidecar .json proof. The directory is
@@ -2157,7 +2184,7 @@ MainWindow::MainWindow(QWidget* parent)
 
 
         addTabGroupHeader(QString::fromUtf8("系统"));
-        rightTabs_->addTab(recPage, "录制库");
+        rightTabs_->addTab(recPage, tr("录制库"));
 
         connect(recLibRefreshBtn_, &QPushButton::clicked,
                 this, [this]{ refreshRecLib(); });
@@ -2333,13 +2360,13 @@ MainWindow::MainWindow(QWidget* parent)
     aiParamLat_->setRange(-90.0, 90.0);
     aiParamLat_->setDecimals(2);
     aiParamLat_->setSuffix(QString::fromUtf8("°lat"));
-    aiParamLat_->setValue(40.0);
+    aiParamLat_->setValue(tokens::kStationLatDefaultDeg);   // 中性示例站点（AGENTS.md §1）
     aiParamLon_ = new QDoubleSpinBox(aiPage);
     aiParamLon_->setObjectName("aiParamLon");
     aiParamLon_->setRange(-180.0, 180.0);
     aiParamLon_->setDecimals(2);
     aiParamLon_->setSuffix(QString::fromUtf8("°lon"));
-    aiParamLon_->setValue(-100.0);
+    aiParamLon_->setValue(tokens::kStationLonDefaultDeg);   // 中性示例站点（AGENTS.md §1）
     aiParamSatName_ = new QLineEdit(aiPage);
     aiParamSatName_->setObjectName("aiParamSatName");
     aiParamSatName_->setPlaceholderText(QString::fromUtf8("卫星名(如 CBERS)"));
@@ -2368,6 +2395,22 @@ MainWindow::MainWindow(QWidget* parent)
     aiTaskHint_->setObjectName("dockHint");
     aiLay->addWidget(aiTaskHint_);
     aiLay->addWidget(aiTaskSteps_);
+
+    // ---- A2UI updateDataModel 渲染出口（断环修复）----
+    // 此前 AI 写入 component_data 后"写入即消失"（仅 get_workspace_layout
+    // 可读回，无任何 widget 渲染）。此数据卡把内存数据槽实时呈现在 AI 面板：
+    // 空槽诚实显示空态，不编造内容；只读渲染，不回写数据槽。
+    auto* dataHead = new QLabel(QString::fromUtf8("A2UI 编排数据槽（component_data）"), aiPage);
+    dataHead->setObjectName("panelTitle");
+    aiLay->addWidget(dataHead);
+    aiComponentData_ = new QTreeWidget(aiPage);
+    aiComponentData_->setObjectName("aiComponentData");
+    aiComponentData_->setHeaderLabels(
+        {QString::fromUtf8("组件 / 键"), QString::fromUtf8("值")});
+    aiComponentData_->setMaximumHeight(tokens::scaled(tokens::kAiDataCardMaxH));
+    aiComponentData_->setRootIsDecorated(true);
+    aiLay->addWidget(aiComponentData_);
+    refreshComponentDataCard();
 
     // ---- AGC + automatic signal activity log (separate from bookmarks) ----
     aiAgcCheck_ = new QCheckBox(QString::fromUtf8("Tuner AGC（自动增益）"), aiPage);
@@ -2415,10 +2458,10 @@ MainWindow::MainWindow(QWidget* parent)
             ? QString::fromUtf8("已配置 API Key — AI 功能接入中")
             : QString::fromUtf8("未配置模型：对话/LLM 规划不可用，可使用下方确定性自主任务模板"));
     }
-    rightTabs_->addTab(aiPage, "AI 助手");
+    rightTabs_->addTab(aiPage, tr("AI 助手"));
 
     // Radio / transmit panel: serial CAT, CW, AX.25/KISS, SoapySDR TX.
-    rightTabs_->addTab(new ui::RadioPanel(rightCard), "电台");
+    rightTabs_->addTab(new ui::RadioPanel(rightCard), tr("电台"));
 
     // Instrument: external NanoVNA (H/H4) over USB CDC serial. Honest empty
     // state when no device; shares engine_->vnaClient() with the MCP tools.
@@ -2555,7 +2598,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     // ---- Engine wiring (engine_ created before UI construction) ----
     {
-        QSettings s("MBDSDR", "MBDSDR");
+        mbdsdr::core::AppSettings s;
         if (engine_->audioOutput())
             engine_->audioOutput()->setVolume(s.value("rx/volume", 80).toInt() / 100.0);
     }
@@ -3290,6 +3333,9 @@ MainWindow::MainWindow(QWidget* parent)
             aiToolNotes_.append(QString("[调用工具: %1 — %2]").arg(tool, result));
         }
         aiRenderChat();
+        // update_component_data / arrange_workspace / reset_workspace 可能刚
+        // 改了数据槽——同步刷新 A2UI 数据卡，让"写入"立刻可见。
+        refreshComponentDataCard();
     });
     connect(sendBtn, &QPushButton::clicked, this, [this]() {
         QString t = aiInput_->text().trimmed();
@@ -4458,7 +4504,7 @@ void MainWindow::onVfoItemEdited(QListWidgetItem* it) {
 }
 
 void MainWindow::loadVfoNames() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     vfoNames_.clear();
     const QByteArray raw = s.value("ui/vfoNames").toByteArray();
     if (raw.isEmpty()) return;   // default: empty map, no preset names
@@ -4501,7 +4547,7 @@ void MainWindow::updateRightTabRestoreAffordance() {
 }
 
 void MainWindow::saveUiState() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     s.setValue("geometry", saveGeometry());
 
     // ---- RX state (Hz / dB as stored) ----
@@ -4792,7 +4838,7 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event) {
 }
 
 void MainWindow::restoreUiState() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     restoreGeometry(s.value("geometry").toByteArray());
 
     // User VFO display names (JSON by engine id); default empty, no presets.
@@ -5580,7 +5626,7 @@ void MainWindow::onSpyServerToggled(bool on) {
     } else {
         spyServer_->stop();
     }
-    QSettings("MBDSDR", "MBDSDR").setValue("net/spyEnabled", on);
+    mbdsdr::core::AppSettings().setValue("net/spyEnabled", on);
     scheduleSave();
     updateSpyServerStatus();
 }
@@ -5983,7 +6029,7 @@ void MainWindow::onAdsbPrune() {
 
 void MainWindow::buildGuideCard() {
     // First-run only: if the user already dismissed this, never build it again.
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     if (s.value(QStringLiteral("ui/onboardingDismissed"), false).toBool())
         return;
 
@@ -5997,13 +6043,14 @@ void MainWindow::buildGuideCard() {
     // Left column: title + the three steps.
     auto* textCol = new QVBoxLayout;
     textCol->setSpacing(tokens::scaled(2));
-    auto* title = new QLabel(QStringLiteral("欢迎使用 MBDSDR · 三步上手"), card);
+    auto* title = new QLabel(tr("欢迎使用 MBDSDR · 三步上手"), card);
     QFont tf = title->font();
     tf.setBold(true);
     title->setFont(tf);
     auto* steps = new QLabel(
-        QStringLiteral("① 连接 RTL-SDR　　② 调谐频率　　③ 选解调模式"), card);
-    steps->setObjectName("dockHint");
+        tr("① 接信号源（无设备可打开捕获文件）　② 快速调谐说人话（如 137.62M）　③ 选解调模式看结果"),
+        card);
+    steps->setObjectName("guideSteps");
     steps->setWordWrap(true);
     guideStepsLabel_ = steps;
     textCol->addWidget(title);
@@ -6012,17 +6059,45 @@ void MainWindow::buildGuideCard() {
 
     lay->addStretch();
 
-    // "去连接" entry in the empty state: drives the REAL connect button so the
-    // user lands straight on the first step (no fake/demo action).
-    guideConnectBtn_ = new QPushButton(QStringLiteral("去连接"), card);
+    // 每步一个真动作按钮：点下去就是真实控件路径，绝不做假按钮（仪器民主化：
+    // 新手 3 分钟出第一个结果）。
+    // ① 真源：驱动真实连接按钮；无硬件的诚实替代路径 = 打开捕获文件（真实 IQ）。
+    guideConnectBtn_ = new QPushButton(tr("① 连接设备"), card);
+    guideConnectBtn_->setObjectName("guideConnectBtn");
     connect(guideConnectBtn_, &QPushButton::clicked, this, [this]() {
         if (connectBtn_ && connectBtn_->text() == QStringLiteral("连接"))
             connectBtn_->click();
     });
     lay->addWidget(guideConnectBtn_);
+    guideFileBtn_ = new QPushButton(tr("① 打开捕获文件…"), card);
+    guideFileBtn_->setObjectName("guideFileBtn");
+    connect(guideFileBtn_, &QPushButton::clicked, this, [this]() {
+        if (offAnaOpenBtn_) offAnaOpenBtn_->click();
+    });
+    lay->addWidget(guideFileBtn_);
+
+    // ② 说人话调台：聚焦快速调谐输入（core/freq_input 解析 "137.62M"）。
+    guideTuneBtn_ = new QPushButton(tr("② 去调谐"), card);
+    guideTuneBtn_->setObjectName("guideTuneBtn");
+    connect(guideTuneBtn_, &QPushButton::clicked, this, [this]() {
+        if (freqQuickEdit_) {
+            freqQuickEdit_->setFocus();
+            freqQuickEdit_->selectAll();
+        }
+    });
+    lay->addWidget(guideTuneBtn_);
+
+    // ③ 选解调：聚焦解调模式（有数据流才可用——诚实空态不装可用）。
+    guideDemodBtn_ = new QPushButton(tr("③ 选解调"), card);
+    guideDemodBtn_->setObjectName("guideDemodBtn");
+    connect(guideDemodBtn_, &QPushButton::clicked, this, [this]() {
+        if (demodCombo_) demodCombo_->setFocus();
+    });
+    lay->addWidget(guideDemodBtn_);
 
     // "不再提示": permanent dismissal remembered in QSettings (never shown again).
-    guideDismissBtn_ = new QPushButton(QStringLiteral("✕ 不再提示"), card);
+    guideDismissBtn_ = new QPushButton(tr("✕ 不再提示"), card);
+    guideDismissBtn_->setObjectName("guideDismissBtn");
     connect(guideDismissBtn_, &QPushButton::clicked, this,
             [this]() { dismissGuideCard(); });
     lay->addWidget(guideDismissBtn_);
@@ -6031,7 +6106,7 @@ void MainWindow::buildGuideCard() {
 }
 
 void MainWindow::dismissGuideCard() {
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     s.setValue(QStringLiteral("ui/onboardingDismissed"), true);
     if (guideCard_) guideCard_->hide();
 }
@@ -6045,8 +6120,8 @@ bool MainWindow::harnessGuideCardVisible() const {
 void MainWindow::updateGuideCardForTab(bool vnaDomain) {
     if (!guideStepsLabel_) return;
     guideStepsLabel_->setText(vnaDomain
-        ? QStringLiteral("① 连接 NanoVNA　　② 校准（load/open/short/thru）　　③ 扫频测量")
-        : QStringLiteral("① 连接 RTL-SDR　　② 调谐频率　　③ 选解调模式"));
+        ? tr("① 连接 NanoVNA　　② 校准（load/open/short/thru）　　③ 扫频测量")
+        : tr("① 接信号源（无设备可打开捕获文件）　② 快速调谐说人话（如 137.62M）　③ 选解调模式看结果"));
 }
 
 void MainWindow::setControlsEnabled(bool hw, bool hasData) {
@@ -6351,7 +6426,7 @@ void MainWindow::onPassRowClicked(int row) {
         dopplerCompChk_->setChecked(false);
     // Persist the user's choice.
     const QString name = passes_[idx].name;
-    QSettings("MBDSDR", "MBDSDR").setValue("ui/selectedSatellite", name);
+    mbdsdr::core::AppSettings().setValue("ui/selectedSatellite", name);
     // Drive both views + elevation plot from the TLE name (slots don't re-emit).
     worldView_->setSelectedSatellite(name);
     skyView_->setSelectedSatellite(name);
@@ -7027,8 +7102,8 @@ void MainWindow::onGnssConnectClicked() {
     }
     bool baudOk = false;
     const int baud = gnssBaudCombo_->currentText().toInt(&baudOk);
-    QSettings("MBDSDR", "MBDSDR").setValue("gnss/device", path);
-    QSettings("MBDSDR", "MBDSDR").setValue("gnss/baud", gnssBaudCombo_->currentText());
+    mbdsdr::core::AppSettings().setValue("gnss/device", path);
+    mbdsdr::core::AppSettings().setValue("gnss/baud", gnssBaudCombo_->currentText());
     gnssConnectBtn_->setText("连接中…");
     gnssRx_->setDevice(path, baudOk ? baud : 9600);
     gnssRx_->start();
@@ -7039,7 +7114,7 @@ void MainWindow::selectSatelliteByName(const QString& name) {
     // views from the name; their setSelectedSatellite() slots do not re-emit.
     worldView_->setSelectedSatellite(name);
     skyView_->setSelectedSatellite(name);
-    QSettings("MBDSDR", "MBDSDR").setValue("ui/selectedSatellite", name);
+    mbdsdr::core::AppSettings().setValue("ui/selectedSatellite", name);
 
     int idx = -1;
     for (int i = 0; i < passes_.size(); ++i)
@@ -7102,6 +7177,50 @@ void MainWindow::aiRenderChat() {
         aiChat_->appendPlainText(QString("AI: %1 ▌").arg(aiTransient_));
 }
 
+// ---- A2UI updateDataModel 渲染出口（断环修复）--------------------------------
+// 把 WorkspaceController 的内存数据槽 component_data 拉到 AI 面板数据卡上。
+// 只读渲染：不回写数据槽、不解释 payload 语义（与离线参照 aigui_render.py
+// 同口径）。空槽诚实显示空态，不编造内容。
+void MainWindow::refreshComponentDataCard() {
+    if (!aiComponentData_) return;
+    aiComponentData_->clear();
+    QJsonObject data;
+    if (workspace_)
+        data = workspace_->currentSpec().value(QStringLiteral("component_data")).toObject();
+    if (data.isEmpty()) {
+        aiComponentData_->addTopLevelItem(new QTreeWidgetItem(
+            {QString::fromUtf8("（空）AI 尚未写入数据槽"), QString()}));
+        return;
+    }
+    for (auto it = data.constBegin(); it != data.constEnd(); ++it) {
+        auto* top = new QTreeWidgetItem({it.key(), QString()});
+        const QJsonValue v = it.value();
+        if (v.isObject()) {
+            const QJsonObject slot = v.toObject();
+            for (auto kt = slot.constBegin(); kt != slot.constEnd(); ++kt) {
+                const QJsonValue sv = kt.value();
+                QString text;
+                if (sv.isString())      text = sv.toString();
+                else if (sv.isDouble()) text = QString::number(sv.toDouble());
+                else if (sv.isBool())   text = sv.toBool() ? QStringLiteral("true")
+                                                           : QStringLiteral("false");
+                else if (sv.isNull())   text = QString::fromUtf8("null");
+                else                    text = QString::fromUtf8(
+                    QJsonDocument(sv.toObject()).toJson(QJsonDocument::Compact));
+                top->addChild(new QTreeWidgetItem({kt.key(), text}));
+            }
+        } else if (v.isString()) {
+            top->setText(1, v.toString());
+        } else if (v.isNull()) {
+            top->setText(1, QString::fromUtf8("null（数据槽已清空）"));
+        } else {
+            top->setText(1, QString::fromUtf8(
+                QJsonDocument(v.toObject()).toJson(QJsonDocument::Compact)));
+        }
+        aiComponentData_->addTopLevelItem(top);
+    }
+}
+
 // ---- Phase32 block1: streaming transient / incomplete lifecycle -------------
 void MainWindow::aiBeginUserTurn(const QString& text) {
     if (!aiSessionStore_) return;
@@ -7140,6 +7259,7 @@ void MainWindow::aiOnResponseReady(const QString& finalText) {
         aiSessionStore_->setIncomplete(aiCurSessionId_, false);
     }
     aiRenderChat();
+    refreshComponentDataCard();   // 回合收尾：数据槽最终状态上卡
     // Autonomous task bridge: if the model replied with a trusted JSON plan
     // block, execute it for real on the worker thread. If it did NOT parse (no
     // plan block / unknown tool), the reply stays a normal chat message -- we
@@ -7285,8 +7405,8 @@ void MainWindow::onRunAutoTask() {
     } else if (kind == QLatin1String("sat")) {
         // Real SGP4 auto-tune from the offline TLE cache. No TLE / no pass /
         // unknown downlink => honest message, never a fake frequency.
-        const double lat = aiParamLat_ ? aiParamLat_->value() : 40.0;
-        const double lon = aiParamLon_ ? aiParamLon_->value() : -100.0;
+        const double lat = aiParamLat_ ? aiParamLat_->value() : tokens::kStationLatDefaultDeg;
+        const double lon = aiParamLon_ ? aiParamLon_->value() : tokens::kStationLonDefaultDeg;
         const QString satName = aiParamSatName_ ? aiParamSatName_->text().trimmed()
                                                  : QStringLiteral("CBERS");
         ai::SatTaskResult sr = ai::planSatelliteCapture(

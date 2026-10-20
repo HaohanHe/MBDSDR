@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "bookmark_manager.h"
+#include "core/app_settings.h"
 
 #include <QSettings>
 #include <QJsonArray>
@@ -30,7 +31,7 @@ void BookmarkManager::insertSorted(QList<Bookmark>& items, const Bookmark& b) {
 
 void BookmarkManager::load() {
     items_.clear();
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     const QJsonDocument doc = QJsonDocument::fromJson(
         s.value(kKey).toByteArray());
     if (!doc.isArray()) return;  // no storage -> empty list, never built-in
@@ -66,7 +67,7 @@ void BookmarkManager::save() const {
         o["group"] = b.group;
         arr.append(o);
     }
-    QSettings s("MBDSDR", "MBDSDR");
+    mbdsdr::core::AppSettings s;
     s.setValue(kKey, QJsonDocument(arr).toJson(QJsonDocument::Compact));
 }
 

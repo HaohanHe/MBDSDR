@@ -3,7 +3,7 @@ import os
 """
 MBDSDR AI 对话面板
 ===================
-自然语言指令输入、对话历史、工具调用日志。
+自然语言指令输入、对话历史、执行步骤视图（结构化步骤卡）。
 AI 是技能触发入口（用户对模型说才触发），不是功能按钮。
 使用真正的 MBDSDRAgent（LLM 驱动，支持工具调用、上下文管理、记忆系统）。
 """
@@ -11,23 +11,27 @@ AI 是技能触发入口（用户对模型说才触发），不是功能按钮�
 import json
 import traceback
 from datetime import datetime
+from html import escape as _esc
 from typing import Optional, List, Dict, Any
 
 from PySide6.QtCore import Qt, Signal, Slot, QTimer, QThread, QObject
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QLineEdit, QFrame, QGroupBox, QComboBox,
-    QSplitter, QSizePolicy, QMessageBox
+    QSplitter, QSizePolicy, QMessageBox, QScrollArea
 )
 from PySide6.QtGui import QFont, QTextCursor
 
 # 尝试导入 AI 内核
 try:
     from mbdsdr_ai import MBDSDRAgent, AgentConfig
+    from mbdsdr_ai.config import normalize_config_keys
     AI_CORE_AVAILABLE = True
 except ImportError:
     AI_CORE_AVAILABLE = False
+    normalize_config_keys = None
 
+import ai_steps  # noqa: E402  # 步骤卡投影（Qt 无关）
 from tokens import tokens as _tok  # noqa: E402
 
 
@@ -35,7 +39,7 @@ from tokens import tokens as _tok  # noqa: E402
 QUICK_COMMANDS = [
     "找一个信号强的 FM 电台",
     "扫频 87-108 MHz 找所有电台",
-    "调谐到 98.5 MHz 并录 30 秒",
+    f"调谐到 {_tok().AI['demo_freq_mhz']} MHz 并录 30 秒",
     "当前信号质量怎么样",
     "获取 GPS 定位",
     "查看 9 轴姿态",
@@ -82,30 +86,46 @@ class AIPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._conversation: List[Dict] = []
-        self._tool_log: List[Dict] = []
+        self._tool_log: List[ai_steps.StepRecord] = []
         self.agent: Optional["MBDSDRAgent"] = None
         self._worker_thread: Optional[QThread] = None
         self._worker: Optional[AIWorker] = None
         self._is_processing = False
+        # MCP 硬件工具挂起区：agent 可能稍后才创建（配置 API Key 后），
+        # 已取到的硬件工具 schema + 调用 handler 缓存起来，重建 agent 时补注册。
+        self._pending_mcp: Optional[tuple] = None
+        self._mcp_tool_names: set = set()
         self._saved_config = self._load_config()
         self._build_ui()
         self._add_welcome_message()
 
     @classmethod
     def _load_config(cls) -> Dict[str, Any]:
-        """从配置文件加载 API 配置。"""
+        """从配置文件加载 API 配置。
+
+        读后迁移：旧键 api_base 一次性归一为 base_url 并回写（见
+        mbdsdr_ai.config.normalize_config_keys），消除同文件键名打架。
+        """
         try:
             if os.path.exists(cls.CONFIG_FILE):
                 with open(cls.CONFIG_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                if normalize_config_keys is None:
+                    return data
+                normalized = normalize_config_keys(data)
+                if normalized != data:
+                    cls._save_config(normalized)  # 一次性迁移回写
+                return normalized
         except Exception:
             pass
         return {}
 
     @classmethod
     def _save_config(cls, config: Dict[str, Any]):
-        """保存 API 配置到配置文件。"""
+        """保存 API 配置到配置文件（统一键名 base_url）。"""
         try:
+            if normalize_config_keys is not None:
+                config = normalize_config_keys(config)
             os.makedirs(cls.CONFIG_DIR, exist_ok=True)
             with open(cls.CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
@@ -125,7 +145,7 @@ class AIPanel(QWidget):
         # 标题栏
         title_bar = QHBoxLayout()
         _t = _tok()
-        title_label = QLabel("AI 智能体")
+        title_label = QLabel(self.tr("AI 智能体"))
         title_label.setStyleSheet(
             f"font-size: 11pt; font-weight: 600; color: {_t.COLORS['light_text_strong']};")
         title_bar.addWidget(title_label)
@@ -139,7 +159,7 @@ class AIPanel(QWidget):
         title_bar.addWidget(self.ai_status_label)
 
         # API Key 配置按钮
-        self.config_btn = QPushButton("配置")
+        self.config_btn = QPushButton(self.tr("配置"))
         self.config_btn.setMinimumHeight(24)
         self.config_btn.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.config_btn.setStyleSheet("font-size: 8pt; padding: 2px 8px;")
@@ -213,7 +233,7 @@ class AIPanel(QWidget):
         self.input_field.returnPressed.connect(self._on_submit)
         input_bar.addWidget(self.input_field, 1)
 
-        self.send_btn = QPushButton("发送")
+        self.send_btn = QPushButton(self.tr("发送"))
         self.send_btn.setMinimumHeight(28)
         self.send_btn.setMaximumHeight(40)
         self.send_btn.setStyleSheet(f"""
@@ -234,34 +254,38 @@ class AIPanel(QWidget):
 
         layout.addLayout(input_bar)
 
-        # 工具调用日志（可折叠）
-        self.tool_log_group = QGroupBox("工具调用日志")
+        # 执行步骤视图（可折叠）：结构化步骤卡，字段对齐
+        # cpp/src/ui/task_steps_view.h（StepResult：工具/关键参数/状态/结果摘要/耗时）
+        self.tool_log_group = QGroupBox("执行步骤")
         self.tool_log_group.setStyleSheet(
             f"QGroupBox {{ font-size: 8pt; color: {_t.COLORS['text_muted']}; "
             f"border: none; margin-top: 4px; }}")
         tool_log_layout = QVBoxLayout()
         tool_log_layout.setContentsMargins(0, 4, 0, 0)
-        self.tool_log_view = QTextEdit()
-        self.tool_log_view.setReadOnly(True)
-        self.tool_log_view.setMaximumHeight(100)
-        self.tool_log_view.setStyleSheet(f"""
-            QTextEdit {{
+        self.step_list_host = QWidget()
+        self.step_list_layout = QVBoxLayout(self.step_list_host)
+        self.step_list_layout.setContentsMargins(2, 2, 2, 2)
+        self.step_list_layout.setSpacing(4)
+        self.step_list_layout.addStretch(1)
+        step_scroll = QScrollArea()
+        step_scroll.setWidgetResizable(True)
+        step_scroll.setFrameShape(QFrame.NoFrame)
+        step_scroll.setWidget(self.step_list_host)
+        step_scroll.setMaximumHeight(160)
+        step_scroll.setStyleSheet(f"""
+            QScrollArea {{
                 background: {_t.COLORS['light_log_bg']};
                 border: 1px solid {_t.COLORS['light_border_subtle']};
                 border-radius: 4px;
-                padding: 4px;
-                font-size: 8pt;
-                color: {_t.COLORS['gray_300']};
-                font-family: monospace;
             }}
         """)
-        tool_log_layout.addWidget(self.tool_log_view)
+        tool_log_layout.addWidget(step_scroll)
         self.tool_log_group.setLayout(tool_log_layout)
         self.tool_log_group.setVisible(False)  # 默认隐藏
         layout.addWidget(self.tool_log_group)
 
-        # 切换日志显示按钮
-        self.toggle_log_btn = QPushButton("显示工具日志")
+        # 切换步骤视图显示按钮
+        self.toggle_log_btn = QPushButton(self.tr("显示执行步骤"))
         self.toggle_log_btn.setMinimumHeight(20)
         self.toggle_log_btn.setMaximumHeight(28)
         self.toggle_log_btn.setStyleSheet(
@@ -290,11 +314,11 @@ class AIPanel(QWidget):
             self.ai_status_label.setStyleSheet(
                 f"font-size: 8pt; color: {_tok().COLORS['status_success']};")
         elif AI_CORE_AVAILABLE:
-            self.ai_status_label.setText("未配置 API")
+            self.ai_status_label.setText(self.tr("未配置 API"))
             self.ai_status_label.setStyleSheet(
                 f"font-size: 8pt; color: {_tok().COLORS['status_warning']};")
         else:
-            self.ai_status_label.setText("AI 内核不可用")
+            self.ai_status_label.setText(self.tr("AI 内核不可用"))
             self.ai_status_label.setStyleSheet(
                 f"font-size: 8pt; color: {_tok().COLORS['status_danger']};")
 
@@ -307,7 +331,7 @@ class AIPanel(QWidget):
         from PySide6.QtWidgets import QDialog, QFormLayout, QLineEdit, QDialogButtonBox
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("AI 配置")
+        dialog.setWindowTitle(self.tr("AI 配置"))
         dialog.setMinimumWidth(400)
         form = QFormLayout(dialog)
 
@@ -323,7 +347,7 @@ class AIPanel(QWidget):
         base_url_edit = QLineEdit()
         base_url_edit.setText(
             (self.agent.config.base_url if self.agent else None)
-            or self._saved_config.get("api_base", "https://api.siliconflow.cn/v1")
+            or self._saved_config.get("base_url", "https://api.siliconflow.cn/v1")
         )
         form.addRow("Base URL:", base_url_edit)
 
@@ -332,7 +356,7 @@ class AIPanel(QWidget):
             (self.agent.config.model if self.agent else None)
             or self._saved_config.get("model", "Qwen/Qwen3.6-35B-A3B")
         )
-        form.addRow("模型:", model_edit)
+        form.addRow(self.tr("模型:"), model_edit)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(dialog.accept)
@@ -343,10 +367,11 @@ class AIPanel(QWidget):
             api_key = api_key_edit.text().strip()
             base_url = base_url_edit.text().strip()
             model = model_edit.text().strip()
-            # 保存到配置文件
+            # 保存到配置文件（统一键名 base_url；其余既有键原样保留）
             self._saved_config = {
+                **self._saved_config,
                 "api_key": api_key,
-                "api_base": base_url,
+                "base_url": base_url,
                 "model": model,
             }
             self._save_config(self._saved_config)
@@ -368,6 +393,7 @@ class AIPanel(QWidget):
             # 重新初始化 agent
             config = AgentConfig(api_key=api_key, base_url=base_url, model=model)
             self.agent = MBDSDRAgent(config)
+            self._apply_pending_mcp_tools()
             self._update_ai_status()
             self._add_system_message(f"AI 已配置并保存: {model}（配置文件: ~/.mbdsdr/config.json）")
 
@@ -377,7 +403,7 @@ class AIPanel(QWidget):
         配置优先级：传入参数 > 配置文件(~/.mbdsdr/config.json) > 环境变量 > 默认值
         """
         if not AI_CORE_AVAILABLE:
-            self._add_system_message("警告: mbdsdr_ai 模块不可用，使用规则引擎降级。")
+            self._add_system_message("警告: mbdsdr_ai 模块不可用，AI 对话与工具调用均不可用（不提供假降级）。")
             return
 
         # 优先级：参数 > 配置文件 > 环境变量 > 默认值
@@ -388,7 +414,8 @@ class AIPanel(QWidget):
         )
         final_base_url = (
             base_url
-            or self._saved_config.get("api_base", "")
+            or self._saved_config.get("base_url", "")
+            or os.environ.get("MBDSDR_BASE_URL", "")
             or os.environ.get("MBDSDR_API_BASE", "https://api.siliconflow.cn/v1")
         )
         final_model = (
@@ -408,15 +435,38 @@ class AIPanel(QWidget):
 
         config = AgentConfig(api_key=final_api_key, base_url=final_base_url, model=final_model)
         self.agent = MBDSDRAgent(config)
+        self._apply_pending_mcp_tools()
         self._update_ai_status()
         source = "参数" if api_key else ("配置文件" if self._saved_config.get("api_key") else ("环境变量" if os.environ.get("MBDSDR_API_KEY") else "默认"))
         self._add_system_message(f"AI 内核已初始化: {final_model}（配置来源: {source}）")
 
     def register_mcp_tools(self, mcp_tools: List[Dict], mcp_call_handler):
-        """注册 MCP 硬件工具到 AI Agent。"""
+        """注册 MCP 硬件工具到 AI Agent（让模型硬件调用直接走 MCP handler 执行）。
+
+        agent 尚未创建（未配 API Key）时挂起缓存，等 init_agent/_show_config
+        重建 agent 后由 _apply_pending_mcp_tools 补注册；工具 schema 来自真实
+        设备 list_tools，未连接时列表为空（如实空态，不注册任何工具）。
+        """
+        mcp_tools = list(mcp_tools or [])
+        self._pending_mcp = (mcp_tools, mcp_call_handler)
+        self._mcp_tool_names = {t.get("name", "") for t in mcp_tools if t.get("name")}
         if self.agent:
             self.agent.register_mcp_tools(mcp_tools, mcp_call_handler)
-            self._add_system_message(f"已注册 {len(mcp_tools)} 个 MCP 硬件工具")
+            if mcp_tools:
+                self._add_system_message(f"已注册 {len(mcp_tools)} 个 MCP 硬件工具")
+            else:
+                self._add_system_message("硬件未连接（或未报告工具）：MCP 硬件工具未注册")
+        elif mcp_tools:
+            self._add_system_message(
+                f"已缓存 {len(mcp_tools)} 个硬件工具 schema，配置 API Key 后自动注册")
+
+    def _apply_pending_mcp_tools(self):
+        """agent 重建后补注册挂起的 MCP 硬件工具（无挂起则 no-op）。"""
+        if self.agent and self._pending_mcp:
+            mcp_tools, handler = self._pending_mcp
+            self.agent.register_mcp_tools(mcp_tools, handler)
+            if mcp_tools:
+                self._add_system_message(f"已注册 {len(mcp_tools)} 个 MCP 硬件工具")
 
     def _add_welcome_message(self):
         self._add_ai_message(
@@ -455,34 +505,78 @@ class AIPanel(QWidget):
             f'<div style="margin: 4px 0; padding: 4px 8px; background: {_t["light_system_bg"]};'
             f' border-radius: 4px; font-size: 8pt; color: {_t["accent_warm"]};">{text}</div>')
 
-    def _add_tool_log(self, tool_name: str, args: Dict, success: bool, result: str, latency: float):
-        entry = {
-            "time": datetime.now().strftime("%H:%M:%S"),
-            "tool": tool_name,
-            "args": args,
-            "success": success,
-            "result": result[:200],
-            "latency": latency,
-        }
-        self._tool_log.append(entry)
-        status = "OK" if success else "FAIL"
+    # ── 执行步骤卡（字段语义对齐 cpp StepResult / mobile TaskStep）─────
+
+    def _append_step_card(self, step: ai_steps.StepRecord):
+        """渲染一张结构化步骤卡：序号/工具名/关键参数/状态/结果摘要/耗时。"""
+        self._tool_log.append(step)
+        idx = len(self._tool_log)
         _t = _tok().COLORS
-        color = _t["status_success"] if success else _t["status_danger"]
-        self.tool_log_view.append(
-            f'<span style="color:{color};">{status}</span> '
-            f'<span style="color:{_t["text_muted"]};">{entry["time"]}</span> '
-            f'<b>{tool_name}</b>({json.dumps(args, ensure_ascii=False)[:80]}) '
-            f'<span style="color:{_t["disabled_gray"]};">{latency:.0f}ms</span>'
+        status_color = {
+            ai_steps.STATUS_SUCCESS: _t["status_success"],
+            ai_steps.STATUS_FAILED: _t["status_danger"],
+            ai_steps.STATUS_RUNNING: _t["status_warning"],
+            ai_steps.STATUS_SKIPPED: _t["disabled_gray"],
+        }.get(step.status, _t["text_muted"])
+        status_label = {
+            ai_steps.STATUS_SUCCESS: "OK",
+            ai_steps.STATUS_FAILED: "FAIL",
+            ai_steps.STATUS_RUNNING: "运行中",
+            ai_steps.STATUS_SKIPPED: "跳过",
+        }.get(step.status, step.status)
+
+        html = (
+            f'<div>'
+            f'<span style="color:{_t["text_muted"]}; font-family: monospace;">'
+            f'{idx:02d}</span> '
+            f'<b style="color:{_t["light_text_strong"]};">{_esc(step.tool)}</b> '
+            f'<span style="color:{status_color};">{status_label}</span> '
+            f'<span style="color:{_t["disabled_gray"]};">{step.elapsed_ms:.0f}ms</span>'
         )
+        if step.args_preview:
+            html += (f'<br><span style="color:{_t["light_text_secondary"]};">'
+                     f'参数 {_esc(step.args_preview)}</span>')
+        if step.summary:
+            html += (f'<br><span style="color:{status_color};">'
+                     f'{_esc(step.summary)}</span>')
+        if step.error and step.error not in step.summary:
+            html += (f'<br><span style="color:{_t["status_danger"]};">'
+                     f'错误 {_esc(step.error)}</span>')
+        html += '</div>'
+
+        card = QFrame()
+        card.setStyleSheet(
+            f"QFrame {{ background: {_t['light_panel_bg']};"
+            f" border: 1px solid {_t['light_border_subtle']};"
+            f" border-radius: 4px; }}")
+        lay = QVBoxLayout(card)
+        # 子步骤（workflow_execute / subagent_execute 展开）左缩进
+        lay.setContentsMargins(20 if step.depth > 0 else 6, 4, 6, 4)
+        lay.setSpacing(2)
+        label = QLabel(html)
+        label.setWordWrap(True)
+        label.setTextFormat(Qt.RichText)
+        label.setStyleSheet(
+            f"font-size: 8pt; color: {_t['light_text_strong']}; background: transparent;")
+        lay.addWidget(label)
+        # 插在尾部 stretch 之前
+        self.step_list_layout.insertWidget(self.step_list_layout.count() - 1, card)
+
+        self.tool_log_group.setVisible(True)
+        self.toggle_log_btn.setText(self.tr("隐藏执行步骤"))
 
     @Slot(str, dict)
     def on_tool_result(self, tool_name: str, result: dict):
-        """Worker 工具调用结果回调（MCP/设备工具调用完成后更新 AI 面板日志）。"""
+        """Worker 异步工具调用结果（UI→worker 转发链）→ 追加一张步骤卡。
+
+        软件工具不二次转发（skipped）——不是硬件执行，不进步骤卡、不制造噪声。
+        """
         if not isinstance(result, dict):
             result = {"result": str(result)}
-        success = "error" not in result
-        result_str = json.dumps(result, ensure_ascii=False)[:300]
-        self._add_tool_log(tool_name, {}, success, result_str, 0.0)
+        step = ai_steps.steps_from_tool_result(tool_name, result)
+        if step.status == ai_steps.STATUS_SKIPPED:
+            return
+        self._append_step_card(step)
 
     def _append_to_view(self, html: str):
         cursor = self.conversation_view.textCursor()
@@ -592,26 +686,26 @@ class AIPanel(QWidget):
         latency = result.get("latency_ms", 0)
         error = result.get("error")
 
-        # 显示工具调用过程
+        # 结构化步骤卡：本轮全部工具调用（含 workflow_execute / subagent_execute
+        # 多步 JSON 结果的子步骤投影）
         if tool_calls:
-            self.tool_log_group.setVisible(True)
-            self.toggle_log_btn.setText("隐藏工具日志")
+            for step in ai_steps.steps_from_chat(tool_calls, tool_results):
+                self._append_step_card(step)
+            # 转发链只服务「模型请求但工具环未执行」的硬件调用（MCP 注册名）：
+            # 已执行的调用在工具环内已经走 MCP handler 落到硬件，不再事后转发
+            # （"先执行再转发"是被拆除的坏结构）；软件工具一律不过二次转发。
+            executed = len(tool_results)
             for i, tc in enumerate(tool_calls):
-                args = {}
-                try:
-                    args = json.loads(tc.get("arguments", "{}"))
-                except Exception:
-                    pass
-                tr = tool_results[i] if i < len(tool_results) else {}
-                self._add_tool_log(
-                    tc.get("name", "unknown"),
-                    args,
-                    tr.get("success", False),
-                    tr.get("content", ""),
-                    tr.get("latency_ms", 0),
-                )
-                # 发射工具调用信号（外部可监听）
-                self.tool_call_requested.emit(tc.get("name", ""), args)
+                if i < executed:
+                    continue
+                name = tc.get("name", "")
+                if name in self._mcp_tool_names:
+                    args = {}
+                    try:
+                        args = json.loads(tc.get("arguments", "{}"))
+                    except Exception:
+                        pass
+                    self.tool_call_requested.emit(name, args)
 
         if compacted:
             self._add_system_message("上下文已自动压缩")
@@ -638,71 +732,11 @@ class AIPanel(QWidget):
         self.send_btn.setText("发送")
         self._add_ai_message(f"AI 调用出错: {error}")
 
-    def _rule_based_response(self, text: str):
-        """降级规则引擎（AI 不可用时使用）。"""
-        text_lower = text.lower()
-
-        # 调谐
-        import re
-        freq_match = re.search(r'(\d+\.?\d*)\s*(mhz|兆赫|MHz)', text_lower)
-        if freq_match:
-            freq = float(freq_match.group(1))
-            self.tool_call_requested.emit("tune_fm", {"frequency": freq})
-            self._add_ai_message(f"好的，正在调谐到 FM {freq} MHz...")
-            return
-
-        # 扫频
-        if any(kw in text_lower for kw in ["扫频", "扫描", "找台", "找电台", "scan"]):
-            self.tool_call_requested.emit("scan_fm", {"start": 87.5, "end": 108.0})
-            self._add_ai_message("好的，正在 87.5-108 MHz 扫频找台...")
-            return
-
-        # 录音
-        if any(kw in text_lower for kw in ["录音", "录制", "record", "录"]):
-            self.tool_call_requested.emit("start_record", {})
-            self._add_ai_message("好的，开始录音。再次说'停止录音'结束。")
-            return
-
-        # GPS
-        if any(kw in text_lower for kw in ["gps", "定位", "位置", "坐标"]):
-            self.tool_call_requested.emit("get_gps", {})
-            self._add_ai_message("正在获取 GPS 定位...")
-            return
-
-        # IMU
-        if any(kw in text_lower for kw in ["imu", "姿态", "加速度", "陀螺仪", "磁力计"]):
-            self.tool_call_requested.emit("get_imu", {})
-            self._add_ai_message("正在获取 9 轴姿态数据...")
-            return
-
-        # 状态
-        if any(kw in text_lower for kw in ["状态", "status", "信号质量", "信号怎么样"]):
-            self.tool_call_requested.emit("get_status", {})
-            self._add_ai_message("正在获取设备状态...")
-            return
-
-        # 找干扰源
-        if any(kw in text_lower for kw in ["干扰", "干扰源", "找干扰"]):
-            self._add_ai_message(
-                "找干扰源需要以下步骤：\n"
-                "1. 先用全向 GP 天线探测干扰频段\n"
-                "2. 再用八木天线+云台进行指向性扫描\n"
-                "3. 通过信号强度变化定位干扰源方向\n\n"
-                "这是一个技能，需要你说'开始找干扰源'才会触发。"
-            )
-            return
-
-        # 默认
-        self._add_ai_message(
-            f"我理解你想：{text}\n\n"
-            "当前使用规则引擎降级模式。配置 API Key 后可使用完整 AI 能力。\n"
-            "你可以试试：扫频找台、调谐到 XX MHz、录音、获取 GPS、查看姿态。"
-        )
-
     def _toggle_log(self):
         visible = self.tool_log_group.isVisible()
         self.tool_log_group.setVisible(not visible)
-        self.toggle_log_btn.setText("隐藏工具日志" if not visible else "显示工具日志")
+        self.toggle_log_btn.setText(
+            "隐藏执行步骤" if not visible else "显示执行步骤")
 
     def get_conversation(self) -> List[Dict]:
         return self._conversation
@@ -711,7 +745,11 @@ class AIPanel(QWidget):
         self._conversation.clear()
         self.conversation_view.clear()
         self._tool_log.clear()
-        self.tool_log_view.clear()
+        while self.step_list_layout.count() > 1:  # 末位 stretch 保留
+            item = self.step_list_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
         self._add_welcome_message()
         if self.agent:
             self.agent.context_manager.clear_history()

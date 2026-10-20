@@ -4,16 +4,20 @@
 //   a) 无 key → 诚实空态（引导去设置，不假输出）；
 //   b) 会话 CRUD / 切换渲染；
 //   c) 流式行完成固化去重（assistant 行只落盘一次）；
-//   d) 出错时保留已流式 partial 内容。
+//   d) 出错时保留已流式 partial 内容；
+//   e) 任务步骤随会话落盘 + 历史恢复重建 TaskProgressView chip（含中断诚实收尾）。
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mbdsdr_mobile/l10n/gen/app_localizations.dart';
+import 'package:mbdsdr_mobile/models/task_step.dart';
 import 'package:mbdsdr_mobile/pages/chat_page.dart';
 import 'package:mbdsdr_mobile/services/ai_client.dart';
 import 'package:mbdsdr_mobile/services/chat_session_store.dart';
 import 'package:mbdsdr_mobile/services/settings_service.dart';
+import 'package:mbdsdr_mobile/widgets/task_progress.dart';
 
 class _MemKv implements KvStore {
   final Map<String, Object?> d = <String, Object?>{};
@@ -50,8 +54,13 @@ ChatTransport _textTransport(String text) {
   };
 }
 
+/// 测试壳固定源语言 zh（gen-l10n delegates + 显式 locale）：
+/// 既有断言文案与源语言真值一致，不随宿主测试 locale 漂移。
 Widget _wrap(ChatPage page) => MaterialApp(
       debugShowCheckedModeBanner: false,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: const Locale('zh'),
       home: Scaffold(body: page),
     );
 
@@ -314,5 +323,214 @@ void main() {
     expect(find.textContaining('已折叠'), findsOneWidget,
         reason: '自动压缩应弹统一文案提示');
     expect(find.textContaining('6000'), findsOneWidget);
+  });
+
+  // --------------------------------------------------------- 历史工具步骤恢复
+  testWidgets('历史恢复：会话里的任务步骤重建 TaskProgressView chip（重启不丢）',
+      (tester) async {
+    final ChatSessionStore store = ChatSessionStore(kv: _MemKv());
+    await store.load();
+    final String id = store.currentId;
+    store.appendLine(id, const SessionLine(role: 'user', content: '调到 145 兆'));
+    store.appendLine(
+      id,
+      SessionLine(
+        role: 'assistant',
+        content: '已调谐',
+        tsMs: 1700000000000,
+        steps: <TaskStep>[
+          TaskStep.finished(
+            tool: 'set_frequency',
+            argumentsPreview: '{"frequency_mhz":145}',
+            result: '{"ok": true, "frequency_hz": 145000000}',
+          ),
+          TaskStep.finished(
+            tool: 'set_gain',
+            argumentsPreview: '{}',
+            result: '{"ok": false, "error": "手动模式：未执行"}',
+          ),
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(_wrap(ChatPage(
+      isConfigured: true,
+      store: store,
+      clientFactory: () => AiClient(apiKey: 'x', transport: _textTransport('ok')),
+    )));
+    await tester.pump();
+
+    // chip 重建：步骤面板 + 两个工具名 + 成功/失败图标逐一在场。
+    expect(find.byType(TaskProgressView), findsOneWidget);
+    expect(find.text('执行步骤'), findsOneWidget);
+    expect(find.text('set_frequency'), findsOneWidget);
+    expect(find.text('set_gain'), findsOneWidget);
+    expect(find.byIcon(Icons.check), findsOneWidget);
+    expect(find.byIcon(Icons.close), findsOneWidget);
+    // 纯文本行照常恢复。
+    expect(findRich('已调谐'), findsOneWidget);
+    expect(findRich('调到 145 兆'), findsOneWidget);
+  });
+
+  testWidgets('历史恢复：落盘里异常的 running 步骤不渲染假进度，诚实转「未收到结果」',
+      (tester) async {
+    final ChatSessionStore store = ChatSessionStore(kv: _MemKv());
+    await store.load();
+    final String id = store.currentId;
+    store.appendLine(
+      id,
+      SessionLine(
+        role: 'assistant',
+        content: '半截回复',
+        steps: <TaskStep>[
+          // 异常数据（正常收尾不会落 running）：恢复时必须诚实降级。
+          TaskStep.running(
+            tool: 'set_frequency',
+            argumentsPreview: '{"frequency_mhz":145}',
+          ),
+        ],
+      ),
+    );
+
+    await tester.pumpWidget(_wrap(ChatPage(
+      isConfigured: true,
+      store: store,
+      clientFactory: () => AiClient(apiKey: 'x', transport: _textTransport('ok')),
+    )));
+    await tester.pump();
+
+    expect(find.byType(TaskProgressView), findsOneWidget);
+    expect(find.textContaining('未收到结果'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing,
+        reason: '恢复行绝不渲染永久旋转的假进度');
+    expect(find.byIcon(Icons.close), findsOneWidget);
+  });
+
+  testWidgets('工具轮收尾：真实工具步骤随 assistant 行落盘，UI 当场渲染 chip',
+      (tester) async {
+    final ChatSessionStore store = ChatSessionStore(kv: _MemKv());
+    await store.load();
+
+    // 两轮 transport：第一轮吐 tool_calls，第二轮收最终文本。
+    int round = 0;
+    Future<Stream<String>> toolTransport(
+        Uri url, Map<String, String> headers, String body) async {
+      round++;
+      if (round == 1) {
+        return Stream<String>.fromIterable(<String>[
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",'
+              '"function":{"name":"echo_probe","arguments":"{\\"x\\":\\"hi\\"}"}}]},'
+              '"finish_reason":"tool_calls"}]}',
+          'data: [DONE]',
+        ]);
+      }
+      return Stream<String>.fromIterable(<String>[
+        'data: {"choices":[{"delta":{"content":"完成"},"finish_reason":"stop"}]}',
+        'data: [DONE]',
+      ]);
+    }
+
+    await tester.pumpWidget(_wrap(ChatPage(
+      isConfigured: true,
+      store: store,
+      clientFactory: () => AiClient(
+        apiKey: 'x',
+        transport: toolTransport,
+        // 测试本地回显工具：不接硬件、不联网，只为走真实工具调用链路。
+        tools: <AiTool>[
+          AiTool(
+            name: 'echo_probe',
+            description: '测试专用回显工具：返回入参，仅注入测试，不触碰硬件。',
+            parameters: const <String, dynamic>{
+              'type': 'object',
+              'properties': <String, dynamic>{
+                'x': <String, dynamic>{'type': 'string'},
+              },
+            },
+            execute: (Map<String, dynamic> args) async =>
+                '{"ok": true, "echo": "${args['x']}"}',
+          ),
+        ],
+      ),
+    )));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField), '用工具');
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+
+    // 落盘：user + assistant，assistant 行带 1 步 success 快照。
+    final List<SessionLine> lines = store.currentMessages();
+    expect(lines.length, 2);
+    expect(lines[1].role, 'assistant');
+    expect(lines[1].content, '完成');
+    expect(lines[1].steps.length, 1);
+    expect(lines[1].steps.single.tool, 'echo_probe');
+    expect(lines[1].steps.single.status, TaskStepStatus.success);
+    // UI 当场渲染 chip（实时行走 toolCalls 现算）。
+    expect(find.byType(TaskProgressView), findsOneWidget);
+    expect(find.text('echo_probe'), findsOneWidget);
+  });
+
+  testWidgets('出错收尾：已执行工具步骤照实落盘，并在错误气泡里如实展示',
+      (tester) async {
+    final ChatSessionStore store = ChatSessionStore(kv: _MemKv());
+    await store.load();
+
+    // 第一轮吐 tool_calls，第二轮请求直接失败。
+    int round = 0;
+    Future<Stream<String>> flakyToolTransport(
+        Uri url, Map<String, String> headers, String body) async {
+      round++;
+      if (round == 1) {
+        return Stream<String>.fromIterable(<String>[
+          'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",'
+              '"function":{"name":"echo_probe","arguments":"{\\"x\\":\\"hi\\"}"}}]},'
+              '"finish_reason":"tool_calls"}]}',
+          'data: [DONE]',
+        ]);
+      }
+      throw AiException('Request failed (HTTP 500): Internal Server Error');
+    }
+
+    await tester.pumpWidget(_wrap(ChatPage(
+      isConfigured: true,
+      store: store,
+      clientFactory: () => AiClient(
+        apiKey: 'x',
+        transport: flakyToolTransport,
+        tools: <AiTool>[
+          AiTool(
+            name: 'echo_probe',
+            description: '测试专用回显工具：返回入参，仅注入测试，不触碰硬件。',
+            parameters: const <String, dynamic>{
+              'type': 'object',
+              'properties': <String, dynamic>{
+                'x': <String, dynamic>{'type': 'string'},
+              },
+            },
+            execute: (Map<String, dynamic> args) async =>
+                '{"ok": true, "echo": "${args['x']}"}',
+          ),
+        ],
+      ),
+    )));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField), '用工具');
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+
+    // 步骤照实落盘（不因出错而丢）。
+    final List<SessionLine> lines = store.currentMessages();
+    expect(lines.last.role, 'assistant');
+    expect(lines.last.steps.length, 1);
+    expect(lines.last.steps.single.tool, 'echo_probe');
+    // 错误气泡里也展示真实工具步骤 + 错误说明。
+    expect(find.byType(TaskProgressView), findsOneWidget);
+    expect(find.text('echo_probe'), findsOneWidget);
+    expect(find.textContaining('HTTP 500'), findsOneWidget);
   });
 }

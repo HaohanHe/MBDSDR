@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/tokens.dart';
+import '../l10n/gen/app_localizations.dart';
 
 // ============================================================================
 // 诚实空态：图标 + 标题 + 一行说明 + 可选操作按钮。
@@ -23,33 +24,59 @@ class EmptyState extends StatelessWidget {
   /// 未连接 rtl_tcp：IQ 流尚未建立。
   ///
   /// [onConnect] 提供后渲染「连接」按钮；文案提示先在设置里配好主机端口。
-  const EmptyState.notConnected({VoidCallback? onConnect, super.key})
-      : icon = Icons.link_off_outlined,
-        title = '未连接 rtl_tcp',
-        message = '请在「设置」中确认接收机主机与端口，'
-            '并在电脑或树莓派上启动 rtl_tcp。',
-        actionLabel = onConnect == null ? null : '连接',
-        onAction = onConnect;
+  factory EmptyState.notConnected(
+    BuildContext context, {
+    VoidCallback? onConnect,
+    Key? key,
+  }) {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    return EmptyState(
+      key: key,
+      icon: Icons.link_off_outlined,
+      title: l10n.emptyNotConnectedTitle,
+      message: l10n.emptyNotConnectedMessage,
+      actionLabel: onConnect == null ? null : l10n.emptyConnect,
+      onAction: onConnect,
+    );
+  }
 
   /// 未定位：还没有可用的本站坐标。
   ///
   /// [onRetry] 提供后渲染「重试定位」按钮；文案同时提示可手动填坐标。
-  const EmptyState.noFix({VoidCallback? onRetry, super.key})
-      : icon = Icons.location_disabled_outlined,
-        title = '暂未定位',
-        message = '请开启系统定位并授权，或在「设置 → 本站位置」中手动填写坐标。',
-        actionLabel = onRetry == null ? null : '重试定位',
-        onAction = onRetry;
+  factory EmptyState.noFix(
+    BuildContext context, {
+    VoidCallback? onRetry,
+    Key? key,
+  }) {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    return EmptyState(
+      key: key,
+      icon: Icons.location_disabled_outlined,
+      title: l10n.emptyNoFixTitle,
+      message: l10n.emptyNoFixMessage,
+      actionLabel: onRetry == null ? null : l10n.emptyRetryLocate,
+      onAction: onRetry,
+    );
+  }
 
   /// 无可用卫星 / TLE：轨道数据尚未就绪。
   ///
   /// [onRefresh] 提供后渲染「刷新」按钮；文案不展示任何占位卫星。
-  const EmptyState.noSatellites({VoidCallback? onRefresh, super.key})
-      : icon = Icons.satellite_alt_outlined,
-        title = '暂无可用卫星数据',
-        message = '尚未加载到卫星轨道参数（TLE）。请检查网络后刷新，或先设置本站位置。',
-        actionLabel = onRefresh == null ? null : '刷新',
-        onAction = onRefresh;
+  factory EmptyState.noSatellites(
+    BuildContext context, {
+    VoidCallback? onRefresh,
+    Key? key,
+  }) {
+    final AppLocalizations l10n = AppLocalizations.of(context)!;
+    return EmptyState(
+      key: key,
+      icon: Icons.satellite_alt_outlined,
+      title: l10n.emptyNoSatellitesTitle,
+      message: l10n.emptyNoSatellitesMessage,
+      actionLabel: onRefresh == null ? null : l10n.emptyRefresh,
+      onAction: onRefresh,
+    );
+  }
 
   final IconData icon;
   final String title;

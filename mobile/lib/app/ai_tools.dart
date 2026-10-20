@@ -1,6 +1,8 @@
 import 'dart:convert';
 
+import '../models/bookmark.dart';
 import '../models/radio_state.dart';
+import '../models/recording.dart';
 import '../models/satellite.dart';
 import '../services/ai_client.dart';
 import '../services/radio_controller.dart';
@@ -50,11 +52,19 @@ String _gated(String toolName) => jsonEncode(<String, dynamic>{
 /// [passesService] / [station] 为只读卫星过境工具 predict_passes 的数据源与
 /// 本站坐标；任一缺失时 predict_passes 回诚实空态（不编造过境）。二者均为
 /// 可选注入，缺省不影响其余射频工具。
+///
+/// [bookmarksProvider] / [recordingsProvider] 为只读查询工具 list_bookmarks /
+/// list_recordings / get_recording_state 的真实数据源（生产注入
+/// SettingsService.bookmarks / SettingsService.recordings 的实时视图）。
+/// 缺省注入时相关工具回「数据源未注入」诚实错误——绝不回空列表冒充"没有书签/
+/// 没有录音"，因为那可能是未接线而不是事实。
 List<AiTool> buildRadioTools(
   RadioApi radio, {
   bool manualMode = false,
   SatPassesService? passesService,
   Station? station,
+  List<Bookmark> Function()? bookmarksProvider,
+  List<RecordingMeta> Function()? recordingsProvider,
 }) {
   final List<AiTool> tools = <AiTool>[
     AiTool(
@@ -404,9 +414,13 @@ List<AiTool> buildRadioTools(
       name: 'get_status',
       description: '读取当前接收机状态。返回连接状态机 status'
           '（connected/connecting/reconnecting/disconnected/error）、是否就绪 '
-          'connected、错误原因 error_message，以及频率、模式、增益、采样率。'
+          'connected、错误原因 error_message，以及频率、模式、增益、采样率；'
+          '并细化返回 recording 是否正在录制、volume/muted 播放侧状态、'
+          'squelch 静噪门（enabled/auto/threshold_db/open/level_db）与 '
+          'scan 范围扫描（scanning/scan_hz/scan_progress/paused）的实时真值。'
           '前置条件: 无（未连接也可查询，返回 disconnected 状态）。'
-          '能力边界: 只读，不改变任何状态。'
+          '能力边界: 只读，不改变任何状态; 桌面端的 VFO 信道/网络音频等字段移动端没有，'
+          '不要向用户编造这些字段。'
           '判读要点: 不要只看 connected 布尔——reconnecting 表示掉线后自动重连中'
           '（不是用户停手），error 时应读 error_message 拿真实失败原因再决定下一步。',
       parameters: const <String, dynamic>{'type': 'object', 'properties': <String, dynamic>{}},
@@ -427,6 +441,24 @@ List<AiTool> buildRadioTools(
             'gain_db': radio.gainDb,
             'auto_gain': radio.autoGain,
             'sample_rate_hz': radio.sampleRateHz,
+            // 细化段：全部为 RadioApi 实时真值（录制/播放/静噪门/范围扫描），
+            // 未发生的动作不摆拍。
+            'recording': radio.recording,
+            'volume': radio.volume,
+            'muted': radio.muted,
+            'squelch': <String, dynamic>{
+              'enabled': radio.squelchEnabled,
+              'auto': radio.squelchAuto,
+              'threshold_db': radio.squelchThresholdDb,
+              'open': radio.squelchOpen,
+              'level_db': radio.squelchLevelDb,
+            },
+            'scan': <String, dynamic>{
+              'scanning': radio.scanning,
+              'scan_hz': radio.scanHz,
+              'scan_progress': radio.scanProgress,
+              'paused': radio.scanPaused,
+            },
           });
         } catch (e) {
           return _err('读取状态失败: $e');
@@ -515,12 +547,150 @@ List<AiTool> buildRadioTools(
         }
       },
     ),
+    AiTool(
+      name: 'list_bookmarks',
+      description: '只读：列出本机已保存的频点书签（名称/频率 Hz/解调模式/信道带宽），'
+          '数据源为用户真实添加的书签列表。无书签时 bookmarks=[] 诚实空态，'
+          '绝不预置电台名/假条目。'
+          '前置条件: 需要书签数据源已注入（外壳接本地设置服务）；未注入时返回'
+          '「数据源未注入」错误而非空列表——空列表会被误读成"用户没有书签"。'
+          '失败恢复: 数据源未注入时告知用户本端当前无法读取书签，不要编造书签内容。'
+          '能力边界: 只读；仅本机移动端书签，不读桌面端配置；name 可为空串'
+          '（未命名，展示用频率占位），bandwidth_hz=0 表示未指定。',
+      parameters: const <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{},
+      },
+      execute: (Map<String, dynamic> args) async {
+        try {
+          final provider = bookmarksProvider;
+          if (provider == null) {
+            return _err('书签数据源未注入，无法读取书签列表（不编造）');
+          }
+          final List<Bookmark> bookmarks = provider();
+          return jsonEncode(<String, dynamic>{
+            'ok': true,
+            'count': bookmarks.length,
+            'bookmarks': bookmarks
+                .map((Bookmark b) => <String, dynamic>{
+                      'name': b.name,
+                      'frequency_hz': b.frequencyHz,
+                      'mode': b.mode,
+                      'bandwidth_hz': b.bandwidthHz,
+                    })
+                .toList(growable: false),
+          });
+        } catch (e) {
+          return _err('读取书签失败: $e');
+        }
+      },
+    ),
+    AiTool(
+      name: 'list_recordings',
+      description: '只读：列出本机已落盘的录制（开始时刻/频率/模式/时长/WAV 文件名/来源），'
+          '数据源为真实录制收尾后写入的本地索引。无录制时 recordings=[] 诚实空态，'
+          '绝不预置假文件。'
+          '前置条件: 需要录音索引数据源已注入（外壳接本地设置服务）；未注入时返回'
+          '「数据源未注入」错误而非空列表。'
+          '失败恢复: 数据源未注入时告知用户本端当前无法读取录音列表，不要编造文件名。'
+          '能力边界: 只读；仅本机移动端解调音频 WAV 录音索引，不含桌面端 IQ/SigMF 录制；'
+          '旧索引缺字段（时长/文件名/来源）时如实为 null，不补默认值。',
+      parameters: const <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{},
+      },
+      execute: (Map<String, dynamic> args) async {
+        try {
+          final provider = recordingsProvider;
+          if (provider == null) {
+            return _err('录音索引数据源未注入，无法读取录音列表（不编造）');
+          }
+          final List<RecordingMeta> metas = provider();
+          return jsonEncode(<String, dynamic>{
+            'ok': true,
+            'count': metas.length,
+            'recordings': metas
+                .map((RecordingMeta r) => <String, dynamic>{
+                      'started_at_ms': r.startedAtEpochMs,
+                      'frequency_hz': r.frequencyHz,
+                      'mode': r.mode,
+                      'duration_ms': r.durationMs,
+                      'wav_file': r.wavFileName,
+                      'source': r.deviceSource,
+                    })
+                .toList(growable: false),
+          });
+        } catch (e) {
+          return _err('读取录音列表失败: $e');
+        }
+      },
+    ),
+    AiTool(
+      name: 'get_recording_state',
+      description: '只读：返回当前录制状态——recording 是否正在录、connected 接收机是否就绪、'
+          'recordings_indexed 已入索引的录制条数（录音索引数据源注入时才返回）。'
+          '前置条件: 无，不需要接收机连接；未连接时 recording 必为 false、connected=false。'
+          '失败恢复: 读取异常时返回诚实错误，不要据此向用户宣布"正在录制"。'
+          '能力边界: 只读；移动端无「值守录制/录制目录」概念（桌面端同名工具的这些字段'
+          '在本端不存在），录制中的文件名/路径在 stop_recording 收尾落盘时才产生，此处不预支。',
+      parameters: const <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{},
+      },
+      execute: (Map<String, dynamic> args) async {
+        try {
+          final provider = recordingsProvider;
+          return jsonEncode(<String, dynamic>{
+            'ok': true,
+            'recording': radio.recording,
+            'connected': radio.status == ConnectionStatus.connected,
+            if (provider != null)
+              'recordings_indexed': provider().length
+            else
+              'note': '录音索引数据源未注入，未返回 recordings_indexed',
+          });
+        } catch (e) {
+          return _err('读取录制状态失败: $e');
+        }
+      },
+    ),
+    AiTool(
+      name: 'get_scan_status',
+      description: '只读：返回移动端范围扫描的实时状态——scanning 是否在扫、'
+          'scan_hz 当前调谐频点（未扫描为 null）、scan_progress 进度 0..1、'
+          'paused 是否暂停（暂停冻结频点调谐与驻留计时）。'
+          '前置条件: 无，不需要接收机连接；未连接时 scanning 必为 false、scan_hz 为 null。'
+          '失败恢复: 读取异常时返回诚实错误，不要臆测扫描进度。'
+          '能力边界: 只读；这是移动端范围扫描（逐点真实调谐+真实电平量测），'
+          '与桌面端扫描活动链路 get_scan_link_status（扫描→命中→驻留→解码→录制）'
+          '不是同一功能，不要互相代入。',
+      parameters: const <String, dynamic>{
+        'type': 'object',
+        'properties': <String, dynamic>{},
+      },
+      execute: (Map<String, dynamic> args) async {
+        try {
+          return jsonEncode(<String, dynamic>{
+            'ok': true,
+            'scanning': radio.scanning,
+            'scan_hz': radio.scanHz,
+            'scan_progress': radio.scanProgress,
+            'paused': radio.scanPaused,
+          });
+        } catch (e) {
+          return _err('读取扫描状态失败: $e');
+        }
+      },
+    ),
   ];
 
   if (!manualMode) return tools;
 
-  // 手动模式：只读 get_status 放行，其余动作包一层 gate——不调用 radio，
-  // 返回「手动模式：未执行」的 JSON（由对话层 chip 原样展示）。
+  // 手动模式：只读工具（get_status / get_squelch_status / predict_passes /
+  // list_bookmarks / list_recordings / get_recording_state / get_scan_status）
+  // 全部放行（读取不构成动作），写动作包一层 gate——不调用 radio，返回
+  // 「手动模式：未执行」的 JSON（由对话层 chip 原样展示）。
+  // 新增写工具必须登记进本集合（有门语义测试钉死，漏登记即红）。
   const Set<String> mutatingTools = <String>{
     'set_frequency',
     'set_mode',
