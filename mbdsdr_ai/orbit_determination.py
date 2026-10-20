@@ -612,6 +612,85 @@ def _moon_position_meeus(jd: float) -> Tuple[np.ndarray, float]:
     return np.array([x, y, z]), dist
 
 
+
+def _skyfield_time_from_jd(ts, jds):
+    """JD 数组 -> skyfield Time（跨 skyfield 版本兼容）。
+
+    版本差异实测（1.54）：`ts.tt(jd)` / `ts.utc(jd)` 收的是"日历量"（把 JD
+    当公元年 → 历表越界 EphemerisRangeError）；`ts.tt_jd(jd)` 只收标量；
+    数组场景的可靠入口是 `ts.from_datetimes([aware datetime, ...])`（UTC 日历）。
+    逐路径尝试并用"映射年份落在 1900–2100"自检，避免误用。
+    """
+    import datetime as _dt
+    last_err = None
+
+    def _year_of(t):
+        """Time -> 日历年（跨版本：utc_iso 字符串解析最稳）。
+
+        skyfield 1.54 的 `t.tt` 返回浮点 JD（不是日历数组），1.4x 才是日历数组，
+        因此统一走 `utc_iso()` 的前 4 位年份。
+        """
+        iso = t.utc_iso()
+        if isinstance(iso, str):
+            return float(iso[:4])
+        return float(iso[0][:4])
+
+    # 路径 1：UTC 日历数组（语义明确，首选）
+    fd = getattr(ts, "from_datetimes", None)
+    if fd is not None:
+        try:
+            epoch = _dt.datetime(1970, 1, 1, tzinfo=_dt.timezone.utc)
+            dts = [epoch + _dt.timedelta(days=float(jd - 2440587.5))
+                   for jd in jds]
+            t = fd(dts)
+            if 1900.0 <= _year_of(t) <= 2100.0:
+                return t
+            last_err = ValueError("from_datetimes 映射年份异常")
+        except Exception as e:
+            last_err = e
+
+    # 路径 2：JD 标量构造器（逐点）
+    for attr in ("tt_jd", "JD"):
+        fn = getattr(ts, attr, None)
+        if fn is None:
+            continue
+        try:
+            t = fn(np.asarray(jds, dtype=float)[0])
+            if 1900.0 <= _year_of(t) <= 2100.0:
+                return t
+        except Exception as e:
+            last_err = e
+    raise RuntimeError(f"skyfield 时间构造失败: {last_err}")
+
+
+def _skyfield_frame_xyz_km(astrometric, frame, n_times):
+    """frame_xyz -> (N,3) km 数组（兼容 1.5x 返回 Distance 向量与旧版 .x/.y/.z）。"""
+    vec = astrometric.frame_xyz(frame)
+    au_km = 149597870.700
+    if hasattr(vec, "x") and hasattr(vec, "au"):     # 旧版：分量对象
+        return np.column_stack([vec.x.au * au_km, vec.y.au * au_km, vec.z.au * au_km])
+    arr = np.asarray(vec.au if hasattr(vec, "au") else vec, dtype=float)
+    # skyfield 对多时刻返回 (3, N)（按坐标轴排列），旧版/标量为 (N, 3)
+    if arr.shape[0] == 3 and arr.shape[1] != 3:
+        arr = arr.T
+    arr = arr.reshape(n_times, 3)
+    return arr * au_km
+
+
+def _skyfield_inertial_frame():
+    """J2000/ICRS 惯性参考系对象（跨版本：1.5x 起 frame 对象在 framelib）。"""
+    try:
+        from skyfield.framelib import ICRS
+        return ICRS()
+    except Exception:
+        pass
+    try:
+        from skyfield import frames as _frames
+        return _frames.ICRS()
+    except Exception:
+        return "J2000"
+
+
 def get_lro_reference(unix_times: np.ndarray,
                       use_skyfield: bool = True
                       ) -> Dict[str, np.ndarray]:
@@ -642,14 +721,11 @@ def get_lro_reference(unix_times: np.ndarray,
     if eph is not None:
         earth = eph["earth"]
         moon = eph["moon"]
-        t_obj = ts.J(jds)
+        t_obj = _skyfield_time_from_jd(ts, jds)
         astrometric = earth.at(t_obj).observe(moon)
-        gc = astrometric.frame_xyz("J2000")
-        moon_eci = np.column_stack([
-            gc.x.au * 149597870.700,
-            gc.y.au * 149597870.700,
-            gc.z.au * 149597870.700,
-        ])
+        moon_eci = _skyfield_frame_xyz_km(astrometric,
+                                          _skyfield_inertial_frame(),
+                                          len(times))
     else:
         for i, jd in enumerate(jds):
             r, _ = _moon_position_meeus(jd)
