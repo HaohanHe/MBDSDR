@@ -174,7 +174,7 @@ class TestBasebandRoundTrip:
         save_iq(iq, path, sample_rate=2_400_000.0,
                 center_freq_hz=98_500_000.0, note="pytest")
         assert os.path.exists(path + ".json")
-        with open(path + ".json") as f:
+        with open(path + ".json", encoding="utf-8") as f:
             meta = json.load(f)
         assert meta["sample_rate"] == 2_400_000.0
         assert meta["center_freq_hz"] == 98_500_000.0
@@ -276,7 +276,7 @@ class TestMainWindowRecordingFlow:
         path = w._record_file_path
         assert os.path.exists(path), f"录制文件应存在: {path}"
         assert os.path.exists(path + ".json")
-        with open(path + ".json") as f:
+        with open(path + ".json", encoding="utf-8") as f:
             meta = json.load(f)
         assert meta["sample_rate"] == b.get_sample_rate()
         assert meta["samples"] > 0
