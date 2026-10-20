@@ -82,8 +82,19 @@ ADS-B 审计中另查出一处真缺陷：精简版门限在 MAD=0（无噪/极�
 | `ax25_encode` → `ax25_decode` | 解出原呼号/信息且 FCS 有效 |
 | `bell103_modulate_text` → `bell103_demodulate_text` | 文本完整回解 |
 | `gmsk_modulate` → `gmsk_demodulate` | 比特零误码 |
+| `morse_encode` → `morse_decode` | 文本完整回解（解码结果也在 data） |
+| `sdr_encode_ax25` → `sdr_kiss_encode` → `sdr_kiss_decode` | 解出原呼号/信息，结构化载荷 |
+| `sdr_aprs_encode` → `sdr_aprs_decode` | 解出源呼号/报文类型 |
+| `ft8_encode` / `fst4_encode` | 返回 79 / 160 个 tone 索引（可给解调侧用） |
 
 审计中查出的真缺陷（均已修并加回归）：
+
+> 本表第四轮（数字语音/卫星/协议族）又查出：
+> **解码器结果也只在 content 里**（morse_decode / sdr_kiss_decode / sdr_aprs_decode）——
+> 模型拿不到解码结果，三者已改为结构化载荷（与编码器同一套契约）；
+> **JS8 的 type 只接受整数**（模型说 "CQ" 直接 int('CQ') 报错）——已增名称归一；
+> **JSON 读写用平台默认编码**（Windows GBK 环境必烨，CI 的 UTF-8 环境不显见）——
+> 已全仓显式 UTF-8（含生产代码 sdr_tools.py 写出侧）。
 
 1. **ACARS 公开解码入口自环不通**（见 §1）；
 2. **ADS-B 精简版无噪输入漏检**（见 §2）；
