@@ -95,3 +95,50 @@ def test_m17_roundtrip_accepts_explicit_bits(reg):
     assert r.success is True
     assert r.data.get("roundtrip_ok") is True
     assert r.data.get("bit_source") == "given"
+
+
+def test_urh_modulate_to_decode_chain(reg):
+    """URH 链路补全：调制 -> 位判决 必须解回原比特，且调制载荷必须是完整波形。
+
+    历史缺陷：urh_modulate 只返回第一个采样点的 I/Q（载荷截断），
+    且 URHDecoder 未暴露为工具 -> 链路断在"调完拿不到波形"。
+    """
+    bits = [1, 0, 1, 1, 0, 0, 1, 0] * 10
+    m = reg.call("urh_modulate", {"bits": bits, "modulation": "ASK",
+                                  "samples_per_symbol": 100,
+                                  "sample_rate": 48000})
+    assert m.success is True
+    iq = m.data.get("complex_iq")
+    assert iq and len(iq) == 2 * 100 * len(bits), \
+        f"调制载荷长度异常（应为完整交错 IQ）: {len(iq) if iq else 0}"
+    d = reg.call("urh_decode_iq", {"iq": iq, "modulation": "ASK",
+                                    "samples_per_symbol": 100})
+    assert d.success is True
+    got = list(d.data.get("bits", []))
+    n = min(len(got), len(bits))
+    assert n > 0
+    err = sum(1 for i in range(n) if int(got[i]) != int(bits[i]))
+    assert err == 0, f"误码 {err}/{n}"
+
+
+def test_urh_bpsk_alias_works(reg):
+    """模型说 BPSK 必须能用（此前报"暂不支持的调制: BPSK"）。"""
+    bits = [1, 0, 1, 1, 0, 0, 1, 0] * 10
+    m = reg.call("urh_modulate", {"bits": bits, "modulation": "BPSK",
+                                  "samples_per_symbol": 100,
+                                  "sample_rate": 48000})
+    assert m.success is True, m.content[:120]
+    d = reg.call("urh_decode_iq", {"iq": m.data.get("complex_iq"),
+                                    "modulation": "BPSK",
+                                    "samples_per_symbol": 100})
+    assert d.success is True, d.content[:120]
+    got = list(d.data.get("bits", []))
+    # Costas 锁定期的前几个符号不可信，工具如实报告偏移，对齐后比较
+    off = int(d.data.get("symbol_offset", 0))
+    assert off >= 1, "PSK 应跳过 Costas 锁定期并报告偏移"
+    exp = bits[off:]
+    got = got[:len(exp)]
+    n = min(len(got), len(exp))
+    assert n > 0
+    err = sum(1 for i in range(n) if int(got[i]) != int(exp[i]))
+    assert err == 0, f"误码 {err}/{n}"
