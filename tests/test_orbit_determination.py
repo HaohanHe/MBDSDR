@@ -143,11 +143,16 @@ def test_lro_reference_orbit():
     times = t0 + np.linspace(0, 24 * 3600.0, 288)
     ref = od.get_lro_reference(times)
 
-    # LRO 地距应在月球距离附近（36万-40万 km）
+    # LRO 地距应在月球距离附近（物理界）：
+    #   下界 = 月球近地点 356500 km；
+    #   上界 = 月球远地点 406700 km + LRO 相对月心轨道半径
+    #        (MOON_RADIUS + LRO_ORBIT_ALT = 1787 km)
     dmin, dmax = float(ref["dist_km"].min()), float(ref["dist_km"].max())
+    lro_radius_km = float(od.MOON_RADIUS + od.LRO_ORBIT_ALT)
     print(f"\n[Test2] LRO geocentric dist {dmin:.0f}..{dmax:.0f} km")
     assert 360000.0 < dmin, f"LRO 地距过小 {dmin:.0f}"
-    assert dmax < 405000.0, f"LRO 地距过大 {dmax:.0f}"
+    assert dmax < 406700.0 + lro_radius_km + 1000.0, (
+        f"LRO 地距过大 {dmax:.0f}（上界 = 月球远地点 + LRO 半径）")
 
     # 从北京看的方位/仰角，生成天空图
     rx_pos, _ = _beijing_rx()
