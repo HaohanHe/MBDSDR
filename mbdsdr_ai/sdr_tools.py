@@ -1691,7 +1691,7 @@ def register_sdr_tools(agent):
             },
             "required": ["source", "destination", "info"],
         },
-        handler=lambda args: ToolResult(success=True, content=_encode_ax25(args)),
+        handler=lambda args: _encode_result(_encode_ax25(args)),
         category="sdr_network",
     )
 
@@ -1725,7 +1725,7 @@ def register_sdr_tools(agent):
             },
             "required": ["source", "latitude", "longitude"],
         },
-        handler=lambda args: ToolResult(success=True, content=_aprs_encode(args)),
+        handler=lambda args: _encode_result(_aprs_encode(args)),
         category="sdr_network",
     )
 
@@ -1775,7 +1775,7 @@ def register_sdr_tools(agent):
             },
             "required": ["ax25_hex"],
         },
-        handler=lambda args: ToolResult(success=True, content=_kiss_encode(args)),
+        handler=lambda args: _encode_result(_kiss_encode(args)),
         category="sdr_network",
     )
 
@@ -2375,7 +2375,7 @@ def register_sdr_tools(agent):
             },
             "required": ["text"],
         },
-        handler=lambda args: ToolResult(success=True, content=_morse_encode(args)),
+        handler=lambda args: _encode_result(_morse_encode(args)),
         category="radio_control",
     )
 
@@ -4521,6 +4521,14 @@ def _analyze_recording(args):
 # AX.25 / APRS 工具实现
 # ═══════════════════════════════════════════════════════
 
+def _encode_result(res):
+    """编码器返回值 -> ToolResult（dict 契约带载荷；str 契约向后兼容）。"""
+    if isinstance(res, dict):
+        return ToolResult(success=True,
+                          content=str(res.get("content", "")),
+                          data=res)
+    return ToolResult(success=True, content=str(res))
+
 def _encode_ax25(args):
     """编码 AX.25 帧。"""
     from .ax25 import AX25Frame
@@ -4576,7 +4584,12 @@ def _encode_ax25(args):
     result += f"帧长度: {len(frame_bytes)} 字节\n"
     result += f"十六进制: {hex_str}\n"
 
-    return result
+    return {"content": result,
+            "hex": hex_str,
+            "source": src_call, "destination": dst_call,
+            "fcs": f"0x{frame.fcs:04X}",
+            "n_bytes": len(frame_bytes),
+            "info": info}
 
 
 def _decode_ax25(args):
@@ -4689,7 +4702,12 @@ def _aprs_encode(args):
         else:
             result += f"警告: AFSK 音频保存失败\n"
 
-    return result
+    return {"content": result,
+            "hex": frame_bytes.hex().upper(),
+            "payload": f"!{pos.encode()[1:]}",
+            "source": src_call,
+            "latitude": latitude, "longitude": longitude,
+            "n_bytes": len(frame_bytes)}
 
 
 def _aprs_decode(args):
@@ -4849,7 +4867,12 @@ def _kiss_encode(args):
     result += f"十六进制: {kiss_frame.hex().upper()}\n"
     result += f"\n提示: 可通过串口发送给硬件 TNC（如 Kenwood TM-D710、Yaesu FTM-400）\n"
 
-    return result
+    return {"content": result,
+            "hex": kiss_frame.hex().upper(),
+            "kiss_hex": kiss_frame.hex().upper(),
+            "port": port, "command": command,
+            "n_bytes": len(kiss_frame),
+            "ax25_n_bytes": len(ax25_data)}
 
 
 def _kiss_decode(args):
@@ -5705,7 +5728,10 @@ def _morse_encode(args):
     lines.append(f"文本: {text}")
     lines.append(f"Morse: {result}")
 
-    return '\n'.join(lines)
+    return {"content": '\n'.join(lines),
+            "morse": result,
+            "text": text,
+            "n_symbols": len(result.replace(" ", ""))}
 
 
 def _morse_decode(args):

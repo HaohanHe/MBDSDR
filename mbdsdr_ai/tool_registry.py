@@ -345,6 +345,18 @@ class ToolRegistry:
                 result = raw_result
                 result.tool_name = tool_name
                 result.args = args
+                # 通用载荷提升：一批工具只把载荷写在 content（JSON 文本），
+                # 模型需自行解析文本才能拿到结果。这里统一提升：
+                # content 是 JSON 对象/数组且 data 为空时，自动填进 data。
+                if not result.data and isinstance(result.content, str):
+                    _txt = result.content.strip()
+                    if _txt[:1] in "{[":
+                        try:
+                            _parsed = json.loads(_txt)
+                        except Exception:
+                            _parsed = None
+                        if isinstance(_parsed, (dict, list)):
+                            result.data = _parsed
             elif isinstance(raw_result, dict):
                 result = ToolResult(
                     success=raw_result.get("success", True),
