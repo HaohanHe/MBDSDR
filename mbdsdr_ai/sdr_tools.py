@@ -4037,7 +4037,7 @@ def _satellite_doppler_track(mgr, args):
         "elevation_end_deg": track[-1]["elevation_deg"],
         "track": track,
     }
-    with open(out + ".json", "w") as f:
+    with open(out + ".json", "w", encoding="utf-8") as f:
         json.dump(sidecar, f, ensure_ascii=False, indent=1)
     lines = [
         f"=== {sat} 多普勒跟踪录制完成 ===",

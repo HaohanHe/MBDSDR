@@ -124,7 +124,7 @@ class TestRecordSigMF:
             f"SigMF data 字节数 {data_bytes} ≠ {n_samples}*8 = {n_samples*8}"
 
         # meta 字段检查
-        with open(meta_path) as f:
+        with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
         assert meta["global"]["core:datatype"] == "cf32_le"
         assert meta["global"]["core:sample_rate"] == fs
@@ -216,7 +216,7 @@ class TestOutputArtifacts:
 
         # 找 manifest.json 验证内容
         manifest_path = next(a for a in artifacts if a.endswith("manifest.json"))
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             m = json.load(f)
         assert m["data_origin"] == "captured"
         assert m["params"]["freq_hz"] == 1090e6
@@ -294,7 +294,7 @@ class TestEndToEnd:
         # manifest 里 n_samples 与 record 一致
         manifest_path = next(a for a in out.detail["artifacts"]
                              if a.endswith("manifest.json"))
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             m = json.load(f)
         assert m["n_samples"] == n_samples
         assert m["params"]["n_samples"] == n_samples
