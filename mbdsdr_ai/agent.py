@@ -308,6 +308,10 @@ class MBDSDRAgent:
         # 同样逐块注册，模型现场编排接收前端，不打包成「接收方案」大黑盒。
         from mbdsdr_ai.acquisition import register_acquisition_tools
         register_acquisition_tools(self.tool_registry)
+        # 统一调制/解调积木（ASK/BPSK/QPSK/8PSK 调制、匹配滤波解调、星座质量、
+        # 误码实测、RRC 抽头）：收敛全仓重复的调制实现到单一参数化内核。
+        from mbdsdr_ai.modulation import register_modulation_tools
+        register_modulation_tools(self.tool_registry)
         self._register_time_sync_tools()
         self._register_constellation_tools()
         self._register_baseband_tools()
