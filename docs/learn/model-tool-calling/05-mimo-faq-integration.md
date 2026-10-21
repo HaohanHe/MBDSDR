@@ -3,7 +3,7 @@
 > **文档来源**：本地克隆 `/path/to/MBDSDR/repos/model-docs/xiaomi-mimo/en-US_quick-start_faq_api-integration.html`（约 160KB）。
 > **精读方式**：python3 stdlib `html.parser` 转纯文本，全文 303 行逐节读完（脚本在 agent workspace，未入仓库）。
 > **转换文本**：`docs/learn/model-tool-calling/sources/mimo-faq.txt`（本笔记所有 `mimo-faq.txt:<行号>` 引用均指向该文件）。
-> **精读日期**：2026-10-01；**作者**：s_000c4GAuTz6。
+> **精读日期**：2026-10-01；**作者**：笔记 agent。
 > **覆盖边界**：a、b、c、d、e、f 中与本 FAQ 相关的部分。
 > **标注约定**：「原文」= `mimo-faq.txt` 可直接定位；「推断」= 原文无直接证据、仅据常识/其他服务商惯例推测。
 >

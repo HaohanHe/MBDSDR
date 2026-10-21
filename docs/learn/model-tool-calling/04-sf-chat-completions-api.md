@@ -3,7 +3,7 @@
 > 文档来源（本地原始 HTML）：`/path/to/MBDSDR/repos/model-docs/siliconflow/docs_api_chat-completions-post.html`（628,559 字节）
 > 转换纯文本：`sources/sf-chat-completions-api.txt`（545 行，本目录 `sources/` 下，他人可引用）
 > 精读方式：HTML→文本（Python `html2text`，提取 `<article>` 正文），逐节读完转换文本全文
-> 精读日期：2026-10-01　作者：s_000c4GAuGAS（MainAgent）
+> 精读日期：2026-10-01　作者：笔记 agent（MainAgent）
 > 覆盖边界：**a / c / d 的参数侧**（function calling 循环参数、arguments 合法性、tool_choice 取值）；旁及 b（reasoning_content 保留）、e（thinking+工具的模型差异）
 > 标注约定：「原文」= 转换文本可直接定位；「推断」= 原文无直接证据、按 OpenAI 兼容惯例/代码示例合理外推；行号均指 `sources/sf-chat-completions-api.txt:<行>`。
 >
