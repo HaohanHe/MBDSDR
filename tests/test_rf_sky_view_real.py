@@ -91,9 +91,31 @@ class TestNoStationDisconnected:
 
 # ----------------------------------------------------------------------
 class TestRealSatelliteComputation:
-    def test_with_station_az_alt_ranges(self):
-        """配置站址 + 内置 TLE：至少一颗卫星算出合法 az/alt。"""
+    def test_with_station_az_alt_ranges(self, tmp_path, monkeypatch):
+        """配置站址 + 自带 TLE：至少一颗卫星算出合法 az/alt。
+
+        TLE 由测试自己放进临时 HOME 的 ~/.mbdsdr/tle/（rf_sky_view 明确
+        "无硬编码 TLE 元素"，卫星只来自用户目录或 celestrak）——不依赖网络、
+        不依赖用户目录残留、也不依赖套件执行顺序。
+        """
         from desktop.rf_sky_view import RFSkyView, SatelliteTracker
+        home = tmp_path / "home"
+        tle_dir = home / ".mbdsdr" / "tle"
+        tle_dir.mkdir(parents=True, exist_ok=True)
+        fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "fixtures", "iridium107", "tle.txt")
+        with open(fixture, "r", encoding="utf-8") as f:
+            lines = [ln.rstrip() for ln in f if ln.strip()]
+        # 夹具是 "名称 + TLE 两行"（可能带多行）——取名称行与两条 TLE 行
+        name = lines[0]
+        l1 = next(ln for ln in lines if ln.startswith("1 "))
+        l2 = next(ln for ln in lines if ln.startswith("2 "))
+        (tle_dir / "iridium107.tle").write_text(
+            f"{name}\n{l1}\n{l2}\n", encoding="utf-8")
+        # expanduser：POSIX 看 HOME，Windows 看 USERPROFILE，两个都指过去
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+
         v = RFSkyView()
         v.resize(600, 600)
         # 示例站；refresh 同步执行
