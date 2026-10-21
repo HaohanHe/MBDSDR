@@ -1201,7 +1201,7 @@ void SpectrumDisplay::paintEvent(QPaintEvent*) {
                 // bilinear would average a narrow CW peak into its neighbours and
                 // dim it. Instead block-MAX each stored raw-dB row so the peak
                 // survives the zoom-out (SDR++ doZoom waterfall.cpp:65-90,
-                // clean-room) -- pure decimateBlockMaxRange under the hood.
+                // independent) -- pure decimateBlockMaxRange under the hood.
                 if (fallsPeak_.width() != outW || fallsPeak_.height() != ringDepth_)
                     fallsPeak_ = QImage(outW, ringDepth_, QImage::Format_ARGB32);
                 if (static_cast<int>(decScratch_.size()) < outW)

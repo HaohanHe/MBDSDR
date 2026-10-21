@@ -109,7 +109,7 @@ StreamChunk parseStreamChunk(const QByteArray& payload, Protocol); // 一条 SSE
 ## 8. 红线（全部模块）
 
 - 禁 eval / 禁把 args 当代码执行；禁真调 API（无 key 一切 mock）；禁造假数据、禁假峰值/假执行。
-- 禁逐字复制 GPL 源码（干净室 MIT）；文档与代码不得出现"比赛/competition"字样。
+- 禁逐字复制 GPL 源码（MIT 独立实现）；文档与代码不得出现"比赛/competition"字样。
 - 禁硬编码魔法数：数值一律走 tokens.h / AppTokens / bandwidth_preset.h。
 - 每模块交付：实现 + 确定性测试（可运行、全绿）+ 自检记录；不动 git（推送由主控统一做）。
 - 设计气质与 UI 无关，但新增对话文案保持克制中文、不夸大。

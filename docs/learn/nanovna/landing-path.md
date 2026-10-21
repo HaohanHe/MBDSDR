@@ -1,7 +1,7 @@
 # NanoVNA 接入 MBDSDR 落地路径（landing-path）
 
 > 本文件是 P5 仪器仪表主线「MBDSDR × NanoVNA」的**分阶段路线图**。
-> 本轮（第①轮）只交付：协议深研笔记 + Python 干净室客户端 + pytest。
+> 本轮（第①轮）只交付：协议深研笔记 + Python 独立实现客户端 + pytest。
 > 三通道工具与桌面 UI **本轮不落码**，仅在此登记方案。全仓 MIT 口径。
 
 ---
@@ -14,9 +14,9 @@
 
 ## 2. 分阶段路线
 
-### 第①轮（本轮已做）——协议 + Python 干净室客户端
+### 第①轮（本轮已做）——协议 + Python 独立实现客户端
 - [x] 协议深研：`docs/learn/nanovna/protocol-study.md`（命令集 / 型号差异 / VID-PID / cal 语义 / 公式链，逐条 file:line）
-- [x] 干净室客户端：`mbdsdr_ai/nanovna_client.py`（MIT，pyserial 传输，自写不抄上游）
+- [x] 独立实现客户端：`mbdsdr_ai/nanovna_client.py`（MIT，pyserial 传输，自写不抄上游）
 - [x] pytest：`mbdsdr_ai/tests/test_nanovna_client.py`（replay 自造 fixture，确定性）
 - [x] 诚实空态：无设备 → 明确报错/空态，不伪造数据；提供 replay 回放模式跑测试
 

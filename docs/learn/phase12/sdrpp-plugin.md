@@ -1,7 +1,7 @@
 # SDR++ 插件架构子系统 — 源码精读笔记（Phase12 Wave1-F）
 
 > 上游：`repos/sdrpp/`（GPLv3，见根目录 `license`）。本笔记**只学机制/契约/生命周期范式**，
-> 不逐字复制代码；落地到 MBDSDR 时一律用自有干净室实现。
+> 不逐字复制代码；落地到 MBDSDR 时一律用自有独立实现。
 > 所有上游引用均为 `repos/sdrpp/<path>:<line>`；MBDSDR 引用均为 `cpp/<path>:<line>` 或
 > `mbdsdr_ai/<path>:<line>`。
 >
@@ -259,7 +259,7 @@ DemoModule(std::string name) {
 `agent_tools.cpp:96-201` 的 if-else 链，重构为**进程内注册表**：
 
 ```cpp
-// 自有设计（干净室，非 GPL 复制）
+// 自有设计（独立实现，非 GPL 复制）
 struct ToolEntry {
     ToolSchemaSpec spec;
     std::function<QString(const QJsonObject&, dsp::SpectrumEngine*)> handler;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Rational (fractional) sample-rate converter for complex baseband.
 //
-// Clean-room implementation of the two-rate design learned from the multirate
+// Independent implementation of the two-rate design learned from the multirate
 // chain (mechanism only, no upstream code reused):
 //
 //   outRate / inRate  ==  L / M  after reducing the rounded rates by GCD,

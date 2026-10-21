@@ -7,7 +7,7 @@
 // telemetry wedge, AM-modulated onto 2400 Hz), feed it through AptDecoder in
 // streaming chunks, and assert that the recovered image matches the original.
 //
-// Clean-room encoder/decoder; no GPL code copied.
+// Independent encoder/decoder; no GPL code copied.
 #include <cmath>
 #include <cstdint>
 #include <cstdio>

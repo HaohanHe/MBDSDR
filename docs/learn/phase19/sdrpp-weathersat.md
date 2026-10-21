@@ -1,7 +1,7 @@
 # SDR++ `weather_sat_decoder` 精读笔记（Phase19-B）
 
 > 范围：`repos/sdrpp/decoder_modules/weather_sat_decoder/src/`（真读源码原文）。
->  GPL 声明：同 SDR++ 整体 **GPLv3**（`repos/sdrpp/license`）。本笔记只学机制，不复制代码；MBDSDR 侧 MIT 干净室。
+>  GPL 声明：同 SDR++ 整体 **GPLv3**（`repos/sdrpp/license`）。本笔记只学机制，不复制代码；MBDSDR 侧 MIT 独立实现。
 
 ---
 
@@ -70,11 +70,11 @@ SDR++ 的 `weather_sat_decoder` **只实现了 NOAA HRPT**（1700 MHz、数字 B
 | 行结构 | 2080 像素/行×2 通道（`apt_decoder.h:29-36`：sync39/space47/video909/telem45） | 221800 bit/帧 → AVHRR 5×10bit + TIP + HIRS |
 | 同步 | 7 脉冲波形相关（`apt_decoder.cpp:96-124 buildTemplate`） | HRPTSyncWord 字同步（`noaa_hrpt_decoder.h:31`） |
 | 输出 | 1818px 灰度 QImage（`apt_decoder.h:45`） | 2048px AVHRR 五通道 + 221 RGB 合成 |
-| 流处理 | `feed(float baseband)→image()` 干净室（`apt_decoder.h:60-86`） | 同上思路：sink handler→行缓冲（:315-330） |
+| 流处理 | `feed(float baseband)→image()` 独立实现（`apt_decoder.h:60-86`） | 同上思路：sink handler→行缓冲（:315-330） |
 
 ### 4.2 自有 C++ apt_decoder 完成度（file:line）
 
-- `cpp/src/dsp/apt_decoder.h:29-46` 行布局常量（经 noaa-apt GPL 参考对齐，干净室）。
+- `cpp/src/dsp/apt_decoder.h:29-46` 行布局常量（经 noaa-apt GPL 参考对齐，独立实现）。
 - `cpp/src/dsp/apt_decoder.cpp:48-78` 2400 Hz NCO 混频 + 127-tap Hann windowed-sinc LPF（自设计，不用共享 FirLowpass）。
 - `apt_decoder.cpp:157-178 feed()` 逐样本 I/Q 包络检测。
 - `apt_decoder.cpp:180-255` 归一化 Pearson 相关同步状态机（Search/Locked，升沿捕获/降沿提交/连续 3 次失锁重捕）。
@@ -87,10 +87,10 @@ SDR++ 的 `weather_sat_decoder` **只实现了 NOAA HRPT**（1700 MHz、数字 B
 - **APT 路径：零差距**——SDR++ weather_sat_decoder 根本不做 APT，自有实现已完整且有合成 ctest，spec §B.2"跳过不重复造"成立。
 - **HRPT 路径：不移植**，理由：
   1. HRPT 需要 ~1.7 GHz 碟形/TEC 硬件，超出本产品 137 MHz rtl-sdr 信封；云内无硬件更无法验证。
-  2. SDR++ 本模块核心 deframe/demux 依赖读不到的核心库头（§2），无干净室可学的完整机制。
+  2. SDR++ 本模块核心 deframe/demux 依赖读不到的核心库头（§2），无独立实现可学的完整机制。
   3. HIRS 20 通道 handler 在 SDR++ 自己代码里都是空壳（:392-470）——照它移植只会搬来半成品。
   4. ui/ 是 A 组并行域，落地即无调用方。
-- 若未来要补 HRPT：等真实 1.7 GHz 硬件 + 公开 HRPT 录制样本到位，再参照 SDR++ `noaa_hrpt_decoder.h:31-36` 的 deframe→manchester→packer→demux 装配顺序干净室重写；当前不做。
+- 若未来要补 HRPT：等真实 1.7 GHz 硬件 + 公开 HRPT 录制样本到位，再参照 SDR++ `noaa_hrpt_decoder.h:31-36` 的 deframe→manchester→packer→demux 装配顺序独立重写；当前不做。
 
 ---
 

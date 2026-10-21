@@ -10,7 +10,7 @@
 
 | 文件 | 行数 | 说明 |
 |------|------|------|
-| `mbdsdr_ai/lrpt_modem.py` | 497 | 调制器 + 解调器 + 帧同步（干净室 MIT，纯 NumPy） |
+| `mbdsdr_ai/lrpt_modem.py` | 497 | 调制器 + 解调器 + 帧同步（MIT 独立实现，纯 NumPy） |
 | `mbdsdr_ai/tests/test_lrpt_modem.py` | 194 | 36 个确定性 pytest（镜像 test_ft8_modem.py 风格） |
 
 ---
@@ -97,7 +97,7 @@
 
 ## 5. 红线与纪律
 
-- **干净室**：lrpt_modem.py 自写 MIT，未复制 SatDump/meteor_demod/goestools 代码；
+- **独立实现**：lrpt_modem.py 自写 MIT，未复制 SatDump/meteor_demod/goestools 代码；
   file:line 仅作机制证据。
 - **不预置呼号**：占位 payload 用 PRNG，无呼号。
 - **不发射**：纯被动接收合成。

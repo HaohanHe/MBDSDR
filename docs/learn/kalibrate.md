@@ -1,6 +1,6 @@
 # kalibrate（kal）GSM 频率校准工具学习笔记
 
-> 本笔记在干净室条件下只读 `repos/kalibrate`（steve-m/kalibrate-rtl 分支，
+> 本笔记在独立实现前提下只读 `repos/kalibrate`（steve-m/kalibrate-rtl 分支，
 > 面向 RTL-SDR 的移植版）C++ 源码整理而成，不逐字复制，每条结论尽量标
 > `文件:行号`。目标：搞清它**如何用 GSM 基站当频率基准算出本地晶振的 ppm
 > 偏差**，以及 MBDSDR 若要做「自动频率校准」能搬哪几步、需要什么真实信号。

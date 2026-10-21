@@ -1,6 +1,6 @@
 # FT8 收尾轮：运行时全链路接线（detector→LLR→decode）
 
-HEAD=73382c5。干净室自写 MIT，规范为 Python `mbdsdr_ai/ft8_modem.py` +
+HEAD=73382c5。独立实现 MIT，规范为 Python `mbdsdr_ai/ft8_modem.py` +
 `ft8_codec.py:335`。
 
 ## 1. 全链路接线 file:line

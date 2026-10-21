@@ -32,5 +32,5 @@
 ## 质量门 / 红线
 - 每工具：ControlHub 命令（写入写门 gate）+ Agent exec（写经 llm_worker isWriteTool 拦截）+ tool_schema 声明式规格；**工具清单全同步 14→35**：test_tool_registry（kAllCxxTools/kExpectedWriteTools）、test_tool_schema（计数+逐字 description）、test_ai_real_link（集合+isWriteTool）——精确一致，漏一处即红。
 - 每工具带 ctest 真实引擎效应断言（set_squelch 后门限真实改变、add_bookmark 后 QSettings 真实落盘、switch_vfo 后活动点真实切换、set_fft_params 后 fftSize 真实改变、list_recordings 真实目录/空态）；写门拦截断言；坏参诚实报错。
-- 干净室 MIT、不复制 GPL；通用非专用；不硬编码（端口/阈值 tokens）；诚实空态；活动参数禁入代码。
+- MIT 独立实现、不复制 GPL；通用非专用；不硬编码（端口/阈值 tokens）；诚实空态；活动参数禁入代码。
 - 全量构建 + 全量 ctest（118 基线不回归）全量输出；只暂存相关文件（禁 add -A）；**不 commit/push**；如实报告 file:line、全量输出、未解决项。

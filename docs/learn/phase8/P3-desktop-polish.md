@@ -5,7 +5,7 @@
 > 频谱交互手感（候选 1）在上一轮已落地并被 `test_spectrum_interaction` 覆盖，本轮**不重造**，仅复核（见末节）。
 >
 > 验证基线：`QT_QPA_PLATFORM=offscreen ctest` = **93/93 全绿**（原 91 基线不破 + 新增 `shortcut_catalog`、`status_format` 2 项；重写 `shortcuts` 由空壳变为 5 用例真断言）。
-> 红线：只写 `cpp/`、`docs/learn/phase8/`；CMake 末尾追加，未改既有测试注册；MIT 干净室；未 commit/push。
+> 红线：只写 `cpp/`、`docs/learn/phase8/`；CMake 末尾追加，未改既有测试注册；MIT 独立实现；未 commit/push。
 
 ---
 

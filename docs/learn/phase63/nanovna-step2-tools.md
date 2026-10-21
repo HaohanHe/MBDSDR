@@ -1,9 +1,9 @@
 # NanoVNA 第②轮·线 A：C++ VNA 状态层 + 三通道工具
 
-> HEAD=b312abc 起。本轮在 C++ 侧建 NanoVNA 干净室客户端 + 状态层，并接三通道工具
+> HEAD=b312abc 起。本轮在 C++ 侧建 NanoVNA 独立实现客户端 + 状态层，并接三通道工具
 > （`set_vna_sweep`/`get_vna_data`/`get_vna_status`）。**不做 UI tab（线 B 另一 agent 做，未碰 main_window）**。
 > 协议事实学自公开上游（ttrftech/NanoVNA 固件、nanovna-saver）的机制（命令字/数据格式/提示符时序），
-> 实现为本项目独立编写（clean-room），不复制任何上游代码；射频为通用工程公式。
+> 实现为本项目独立编写（independent），不复制任何上游代码；射频为通用工程公式。
 
 ## 1. 传输层选择
 

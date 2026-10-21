@@ -1,6 +1,6 @@
 # FT8 第③步落地：C++ 检测层 + 三通道工具
 
-HEAD=1c78080。干净室自写 MIT，不抄 WSJT-X GPL；Python 原型
+HEAD=1c78080。独立实现 MIT，不抄 WSJT-X GPL；Python 原型
 (`mbdsdr_ai/ft8_modem.py`/`ft8_codec.py`) 为自写基准。
 
 ## 1. 检测层落地 file:line

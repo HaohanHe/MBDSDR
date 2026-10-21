@@ -50,7 +50,7 @@ public:
     // outside the slots section, so moc does not choke on a nested type.
     struct FixedMarker { double freqHz = 0; QString name; };
 
-    // One row of the auto peak table (clean-room SDR++ "signal list"). Pure
+    // One row of the auto peak table (independent SDR++ "signal list"). Pure
     // POD read-back of the matured, tracked detection -- no synthetic peaks.
     // deltaHz is the signed offset of the carrier from the current dial/tuned
     // frequency (positive = the peak sits above where the receiver is tuned).
@@ -192,7 +192,7 @@ public slots:
     void setScrollPaused(bool on);
     bool scrollPaused() const { return scrollPaused_; }
 
-    // External user colormap (clean-room SDR++ colormaps). Parses a JSON document
+    // External user colormap (independent SDR++ colormaps). Parses a JSON document
     // of {"name":..,"stops":["#rrggbb",..]} / [{"t":..,"c":"#rrggbb"},..] or a
     // bare top-level array of the same; on success it becomes the active ramp and
     // the ENTIRE waterfall history is re-coloured from the stored raw-dB rows (no

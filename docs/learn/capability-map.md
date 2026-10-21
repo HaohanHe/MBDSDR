@@ -127,7 +127,7 @@
 3. `doppler_to_frequency` / `doppler_tune_frequency` → 计入多普勒后的调谐频率
    （预置值 = 真实下行 − 10 kHz，用于吸收多普勒漂移）。
 
-**帧级能力（CCSDS 通用链，已工具化）**：仓内的干净室 CCSDS 数字接收链
+**帧级能力（CCSDS 通用链，已工具化）**：仓内的独立实现 CCSDS 数字接收链
 （`mbdsdr_ai/ccsds_rx.py`）此前只经 SSDV 专用入口暴露给模型；现已把**通用链**
 也拆成积木交给模型直接操作，覆盖 ASTU-1 这类同为 CCSDS TM 体制的任务：
 

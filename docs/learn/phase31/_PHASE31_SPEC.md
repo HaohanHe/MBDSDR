@@ -22,5 +22,5 @@
 
 ## Wave 3：验证
 - 每项带测试；ctest 123 基线不回归（全量输出）；flutter 331 不回归 + analyze 0（若动 mobile）；
-- 干净室 MIT、通用非专用、无假数据假空态（LLM 无 key 诚实 PENDING）；活动参数禁入通用代码；无比赛字样；
+- MIT 独立实现、通用非专用、无假数据假空态（LLM 无 key 诚实 PENDING）；活动参数禁入通用代码；无比赛字样；
 - 只暂存相关文件（禁 add -A）；**不 commit/push**；如实报告 file:line、学习笔记与落地映射、全量输出、未解决项。

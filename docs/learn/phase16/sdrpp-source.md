@@ -153,7 +153,7 @@ MBDSDR 走的是**与 SDR++ 不同但更「统一」的路线**：一个纯 C++ 
 
 ### 3.3 RtlSdrSource（rtl_sdr_source.{h,cpp}）`[MIT]`
 - 经 `RtlLibOps` 函数指针缝（`rtl_sdr_ops.h:24-46`）调用 librtlsdr；生产绑定在 `HAVE_RTLSDR`（`rtl_sdr_source.cpp:132-202` 的 `adv*` 适配器 + `g_realOps`），否则 `rtlLibOps()` 返回 nullptr、`start()` 优雅失败 `:254-258`。
-- **调谐重试（干净室派生 SDR++ 的 10 次，MBDSDR 收紧为 5）**：`pushCenterFreq` `:217-251`，每次写后 `getCenterFreq` 回读；`kRtlMaxTuneAttempts=5`（`rtl_sdr_ops.h:62`）；不收敛 `qWarning` 且**请求保留、标 `tuneConverged_=false`**（`:246-250`），不假装成功。
+- **调谐重试（独立实现派生 SDR++ 的 10 次，MBDSDR 收紧为 5）**：`pushCenterFreq` `:217-251`，每次写后 `getCenterFreq` 回读；`kRtlMaxTuneAttempts=5`（`rtl_sdr_ops.h:62`）；不收敛 `qWarning` 且**请求保留、标 `tuneConverged_=false`**（`:246-250`），不假装成功。
 - **增益 snap**：`setGain` `:28-40` 用 `gainTable_.snap(gainDb)` 先吸附到最近合法档再推送；`start()` `:299-332` 从 `getTunerGains` 读表、重 snap、并 `getTunerGain` **回读驱动实际接受值**写入 `gainDb_`（诚实上报）。
 - **读失败看门狗**：`readIQ` `:365-380` 连续 `kReadFailThreshold=20` 次失败（`rtl_sdr_source.h:104`）后**主动 close 设备、`dev_=nullptr`、`isConnected()=false`**——比 SDR++「仅告警」多了「判死关设备 + 引擎据此回落测试信号/重连」。
 

@@ -51,7 +51,7 @@ def bpsk_modulate_bits(bits, fs: float, symrate: float,
 
 def estimate_cfo_bpsk(iq: np.ndarray, fs: float,
                       min_prominence: float = 8.0) -> tuple[float, float]:
-    """BPSK 盲载波频偏估计（平方环，干净室教科书实现）。
+    """BPSK 盲载波频偏估计（平方环，独立实现教科书实现）。
 
     原理：复基带 BPSK ``z(t)=d(t)·exp(j2π f₀ t)`` 平方后 ``d²=1`` 数据被抹除，
     出现一根在 ``2·f₀`` 的谱线 → FFT 找峰 /2 即频偏估计。对抑制载波 BPSK 适用。
@@ -167,7 +167,7 @@ PLL_WARMUP: int = 200                # 环路建立前 NCO 相位冻结样本数
 def pll_bpsk(iq: np.ndarray, fs: float, symrate: float,
              kp: float = PLL_KP, ki: float = PLL_KI,
              warmup: int = PLL_WARMUP) -> np.ndarray:
-    """二阶 decision-directed PLL 精载波恢复（干净室教科书实现）。
+    """二阶 decision-directed PLL 精载波恢复（独立实现教科书实现）。
 
     在分段 AFC 粗校正之后使用：AFC 把信号拉到零中频附近但残 ~Hz 频偏/频斜；
     二阶 type-2 环路（比例 + 积分）对**频率斜升（多普勒斜率）稳态误差为零**，
@@ -314,7 +314,7 @@ def _gardner_symbols(r: np.ndarray, sps: float,
                      init_phase: float = 0.0,
                      kp: float = 0.06, ki: float = 0.002,
                      warmup: int = 8) -> tuple[np.ndarray, TedDiagnostics]:
-    """Gardner 误差检测 + 二阶环路滤波 + 线性插值的符号定时恢复闭环（干净室）。
+    """Gardner 误差检测 + 二阶环路滤波 + 线性插值的符号定时恢复闭环（独立实现）。
 
     依据公开教科书算法（Gardner 1986, "A BPSK/QPSK Timing-Error Detector
     for Sampled Receivers"）独立重写，未复制任何 GPL 参考代码。
@@ -356,7 +356,7 @@ def _gardner_symbols(r: np.ndarray, sps: float,
         if cnt >= warmup:
             mu += ki * e
             # 负反馈：Gardner S 曲线 d(e)/d(τ)>0 穿过眼图中心，误差增大时应让游标走慢
-            # （step<sps）把相位拉回中心——kp*e / mu 前取负号（干净室按 S 曲线整定）。
+            # （step<sps）把相位拉回中心——kp*e / mu 前取负号（独立实现按 S 曲线整定）。
             step = sps - kp * e - mu
         bits.append(1 if y_now > 0.0 else 0)
         errs.append(e)

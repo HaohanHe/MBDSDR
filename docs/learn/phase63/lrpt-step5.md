@@ -1,6 +1,6 @@
 # LRPT 线 A 第⑤轮：QPSK 前段 C++ 移植（IQ→CADU 全链闭环）
 
-HEAD=f7e7874。干净室自写 MIT，规范 `mbdsdr_ai/lrpt_modem.py` + `lrpt_pipeline.py`。
+HEAD=f7e7874。独立实现 MIT，规范 `mbdsdr_ai/lrpt_modem.py` + `lrpt_pipeline.py`。
 
 ## 1. 落地 file:line
 

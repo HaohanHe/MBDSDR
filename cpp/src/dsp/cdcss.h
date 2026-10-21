@@ -2,7 +2,7 @@
 //
 // CDCSS / DCS (Digital Coded Squelch System) decoder.
 //
-// Mechanism (clean-room, derived from the public algebraic description of the
+// Mechanism (independent, derived from the public algebraic description of the
 // Golay(23,12) code and the standard DCS frame format -- no GPL code copied):
 //
 //   * The NFM post-ANR mono audio (real-valued, 48 kHz) carries a 134.4 baud

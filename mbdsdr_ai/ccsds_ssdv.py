@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""SSDV over CCSDS 级联全链的可复用 TX 合成 / RX 解码层（干净室 MIT）。
+"""SSDV over CCSDS 级联全链的可复用 TX 合成 / RX 解码层（MIT 独立实现）。
 
 本模块把 ``tests/test_phase45_cascade.py`` 里已跑通的合成器与接收链抽出为单一
 可复用入口，供 ``tools/onboarding/onboard.py`` 与测试共用——**不在 onboard 里重写

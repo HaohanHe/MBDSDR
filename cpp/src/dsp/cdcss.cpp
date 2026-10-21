@@ -13,7 +13,7 @@ namespace dsp {
 namespace {
 
 // ---------------------------------------------------------------------------
-// Golay(23,12) -- clean-room implementation from the public algebraic spec.
+// Golay(23,12) -- independent implementation from the public algebraic spec.
 //
 // The binary Golay code G23 is a [23,12,7] linear block code.  Its generator
 // polynomial over GF(2) is

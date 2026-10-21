@@ -2,7 +2,7 @@
 //
 // CTCSS (Continuous Tone-Coded Squelch System) sub-audible tone detector.
 //
-// Mechanism (clean-room, derived from the standard Goertzel bin-energy idea):
+// Mechanism (independent, derived from the standard Goertzel bin-energy idea):
 // the NFM audio stream (real-valued, 48 kHz) is fed through a streaming
 // Goertzel resonator tuned to the configured sub-audible tone f0 (67.0 ..
 // 254.1 Hz). Every N = round(sampleRate / passband) samples we compare the

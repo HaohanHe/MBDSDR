@@ -1,6 +1,6 @@
 # UHD（USRP Hardware Driver，Ettus）核心接口学习笔记
 
-> 干净室研究：只读 `repos/uhd`（UHD **v4.11.0.0**，`git describe` = `v4.11.0.0`），不写代码、不逐字复制。
+> 独立实现研究：只读 `repos/uhd`（UHD **v4.11.0.0**，`git describe` = `v4.11.0.0`），不写代码、不逐字复制。
 > 所有 `file:line` 相对 `repos/uhd/`。MBDSDR 侧引用相对仓库根。
 > 标注约定：
 > - **【确认】**＝直接读到源码声明/实现，可逐行核对；
@@ -398,4 +398,4 @@ MBDSDR 用 `import uhd`。绑定结构【确认，`host/python/uhd/usrp/multi_us
 - 各具体型号（B210/X310/N320…）的**真实**可调频率/采样率/增益数值——本仓库头文件只
   暴露 `get_*_range()` 接口，具体数值在各 `*_impl.cpp` 与 FPGA 镜像里，本笔记未逐一枚举；
 - RFNoC graph 的完整 API（仅确认其存在与入口 `rfnoc_graph.hpp`）；
-- Python `uhd` pip 包是否在本环境可 import、能否真打开设备（干净室，未跑）。
+- Python `uhd` pip 包是否在本环境可 import、能否真打开设备（独立实现，未跑）。

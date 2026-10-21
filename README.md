@@ -25,8 +25,8 @@
 
 许可证：**MIT**（见 [`LICENSE`](LICENSE)、第三方归属 [`NOTICE.md`](NOTICE.md)）。
 
-**工程口径**：全仓 **MIT 干净室自研**（FT8/LRPT/CCSDS 等协议栈未抄任何
-GPL 代码，机制学走、许可证不沾）· LLM 工具三通道（Agent / ControlHub /
+**工程口径**：全仓 **MIT 发布**，第三方上游项目与许可归属见 [`NOTICE.md`](NOTICE.md)；
+协议栈（FT8/LRPT/CCSDS 等）按公开标准与协议事实独立实现 · LLM 工具三通道（Agent / ControlHub /
 HTTP）行为一致且有测试钉住，写动作一律过人工门 · 已对 SDR++、SatDump、
 nanovna-saver、NanoVNA-App、kimi-code、kilocode 六个上游项目做过源码级
 克隆审计（见 [`docs/learn/`](docs/learn/)）。
@@ -135,8 +135,9 @@ transport 层已透传真实 HTTP 状态码（`llm_client.cpp` 读 `HttpStatusCo
 ## 受保护编码器（不内置）
 
 DMR / P25 / C4FM 等涉及专利或许可受限的语音编码器**不内置**本仓库。需要时由用户自行上传合法的外部
-解码器/二进制；系统在检测到外部组件时接线、没有时诚实标注不可用。本仓库为 **MIT 干净室**实现，
-上游 GPL 项目（sdrpp / gnuradio / librtlsdr 等）仅作机制学习、不逐字复制（归属见 [`NOTICE.md`](NOTICE.md)）。
+解码器/二进制；系统在检测到外部组件时接线、没有时诚实标注不可用。本仓库为 **MIT 独立实现**实现，
+上游项目（sdrpp / gnuradio / librtlsdr 等）的协议事实与交互范式是实现依据，
+项目与许可归属见 [`NOTICE.md`](NOTICE.md)。
 
 ---
 

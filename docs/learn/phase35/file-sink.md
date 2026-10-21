@@ -2,7 +2,7 @@
 
 > 精读对象：`repos/sdrpp/misc_modules/recorder`、`misc_modules/iq_exporter`、`sink_modules/network_sink`、`core/src/utils/wav.{h,cpp}`、`core/src/utils/riff.{h,cpp}`、`source_modules/rtl_tcp_source`、`source_modules/file_source`。
 > 我方对照：`cpp/src/dsp/recorder.*`、`gated_recorder.*`、`wav_writer.*`、`network_audio_sink.*`、`file_source.*`、`rtl_tcp_source.*`、`spectrum_engine.h::exportIqSegment`。
-> 基线：HEAD b20bfb7；只学机制不抄代码（GPL 干净室）。
+> 基线：HEAD b20bfb7；只学机制不抄代码（GPL 独立实现）。
 
 ---
 
@@ -80,7 +80,7 @@ SDR++ 的"录制"不在 `sink_modules/`，而在 `misc_modules/recorder`——�
 | >4GB 长录 | 实际会坏（uint32 size，RF64 未实现） | SigMF 裸写无上限（recorder.cpp:155-156） | **我们更好**，反例 §5-2。 |
 | 自动分段 | 无 | 按样本数分段 + 碰撞规避文件名（recorder.cpp:161-168, 134-151） | **我们更好**。 |
 | 静音门控录制 | 粗糙 abs-max 跳过（recorder/main.cpp:535） | pre-roll ring buffer + attack/release 包络 + hangover + 头尾修剪 + fade-in + 归一化（gated_recorder.cpp:113-117, 28-29, 67-88） | **我们更好**。 |
-| 连续 IQ 网络导出 | TCP srv / TCP cli / UDP，int8/16/32/f32（iq_exporter/main.cpp:68-83） | **无**。只有 one-shot `exportIqSegment` 落盘（spectrum_engine.h:133） | **YAGNI**。产品形态是本机分析 + MCP 按需 dump，不对外做 IQ 服务器；外部 SDR 客户端接入不在 v0.8 范围。若后续要做 SDR++ 兼容的 IQ stream server，再按 Reshaper+volk 机制干净室重写。 |
+| 连续 IQ 网络导出 | TCP srv / TCP cli / UDP，int8/16/32/f32（iq_exporter/main.cpp:68-83） | **无**。只有 one-shot `exportIqSegment` 落盘（spectrum_engine.h:133） | **YAGNI**。产品形态是本机分析 + MCP 按需 dump，不对外做 IQ 服务器；外部 SDR 客户端接入不在 v0.8 范围。若后续要做 SDR++ 兼容的 IQ stream server，再按 Reshaper+volk 机制独立重写。 |
 | 音频网络 sink | TCP/UDP int16（network_sink/main.cpp:241-259） | UDP connected + TCP server + keepalive + RCVTIMEO + 单客户端替换 + EPIPE 检测（network_audio_sink.cpp:59-220） | **我们更鲁棒**。 |
 | WAV 多比特深 | u8/i16/i32/f32 可选（recorder/main.cpp:59-62） | i16 only（wav_writer.cpp:75-83） | **YAGNI**。i16 WAV 覆盖 99% 回放场景；f32 WAV 用 SigMF cf32 代替。 |
 | VFO 级 IQ 导出 | 可建指定采样率 VFO 后导出（iq_exporter/main.cpp:433-438） | 仅 baseband 整段导出（spectrum_engine.h:126） | **YAGNI**。VFO 重采样导出等价于 demod 后再采样，与现有 demod 链重叠。 |
@@ -110,11 +110,11 @@ SDR++ 的"录制"不在 `sink_modules/`，而在 `misc_modules/recorder`——�
 
 - 不写新代码。差距表落到 `gap-table.md` 时，"连续 IQ 网络导出" 与 "VFO 级 IQ 导出" 两项标记 YAGNI 并引用本文件 §4/§5-4。
 - 反例 §5-1/§5-2/§5-3/§5-4 直接进 `counterexamples.md`。
-- 若 v0.9 要做外部 IQ stream server（如给 GQRX/SDRangel 当源），按 iq_exporter/main.cpp:487-528 的 Reshaper+volk+try_lock 机制干净室重写，不要照抄。
+- 若 v0.9 要做外部 IQ stream server（如给 GQRX/SDRangel 当源），按 iq_exporter/main.cpp:487-528 的 Reshaper+volk+try_lock 机制独立重写，不要照抄。
 
 ## 7. 范围与未决
 
 - **未深读**：`new_portaudio_sink` 与 `audio_sink` 的差异仅在 RtAudio 版本兼容层（audio_sink/main.cpp:34-60 的 `RTAUDIO_VERSION_MAJOR >= 6` 宏分支），机制同构，按 §1 末尾处理。
 - **未深读**：`misc_modules/scanner`（306 行，自动扫频触发录制）——它通过 ModCom 调用 recorder 的 `START/STOP`（recorder_interface.h:3-8），机制已被 §2.2 覆盖；我方 `frequency_scanner.*` 是独立实现，无需对照。
 - **未验证**：SDR++ iq_exporter 在 UDP 模式下是否真的走 connected UDP（`net::openudp(host, port, "0.0.0.0", 0, true)`，iq_exporter/main.cpp:212 的最后一个 `true` 参数语义未读 utils/net 实现）。不影响我方裁决。
-- **红线遵守**：本文件只引 file:line 证据，不复制 GPL 代码片段；所有"借鉴"均为机制描述，落地时需干净室重写。
+- **红线遵守**：本文件只引 file:line 证据，不复制 GPL 代码片段；所有"借鉴"均为机制描述，落地时需独立重写。

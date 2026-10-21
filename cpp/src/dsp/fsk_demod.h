@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Real 2-FSK / GFSK receiver (clean-room, mechanism learned from SDR++
+// Real 2-FSK / GFSK receiver (independent, mechanism learned from SDR++
 // gfsk.h:31-34,131-135 and clock_recovery/mm.h:121-149 -- GPLv3, mechanism
 // only; code below re-derived).
 //

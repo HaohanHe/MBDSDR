@@ -563,7 +563,7 @@ void TestSpectrumDisplay::defaultShareIsOneToOne() {
                         .arg(th).arg(fh)));
 }
 
-// G2 (clean-room SDR++ waterfall): the ring stores RAW dB rows, so swapping the
+// G2 (independent SDR++ waterfall): the ring stores RAW dB rows, so swapping the
 // palette or the dB range RE-COLOURS the whole existing history (not just future
 // rows) without dropping a frame. Pin the range (auto off), push known frames,
 // then swap to a grayscale ramp and assert the same raw pixel moves to the new

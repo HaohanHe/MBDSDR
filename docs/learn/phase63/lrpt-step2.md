@@ -10,7 +10,7 @@
 
 | 文件 | 行数 | 说明 |
 |------|------|------|
-| `mbdsdr_ai/lrpt_fec.py` | ~280 | Viterbi + CADU 解码链（干净室 MIT，纯 NumPy） |
+| `mbdsdr_ai/lrpt_fec.py` | ~280 | Viterbi + CADU 解码链（MIT 独立实现，纯 NumPy） |
 | `mbdsdr_ai/tests/test_lrpt_fec.py` | ~160 | 12 个确定性 pytest |
 
 ---
@@ -98,7 +98,7 @@
 
 ## 6. 红线与纪律
 
-- **干净室**：lrpt_fec.py 自写 MIT，未复制 SatDump/goestools 代码；file:line 仅作机制证据。
+- **独立实现**：lrpt_fec.py 自写 MIT，未复制 SatDump/goestools 代码；file:line 仅作机制证据。
 - **复用既有 MIT**：RS + 解扰直接用本仓 `fec.py`（已 MIT），不引入 GPL。
 - **不预置呼号**：占位 payload 用 PRNG。
 - **不发射**：纯合成闭环。

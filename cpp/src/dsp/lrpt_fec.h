@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// lrpt_fec.h -- LRPT CCSDS 解码链（干净室自写 MIT，规范 mbdsdr_ai/lrpt_fec.py）。
+// lrpt_fec.h -- LRPT CCSDS 解码链（独立实现 MIT，规范 mbdsdr_ai/lrpt_fec.py）。
 #pragma once
 
 #include <cstdint>

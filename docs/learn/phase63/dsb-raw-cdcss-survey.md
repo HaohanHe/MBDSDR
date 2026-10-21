@@ -1,4 +1,4 @@
-# Phase63 — DSB / RAW / CDCSS 三候选侦察与接口设计（干净室，未落地）
+# Phase63 — DSB / RAW / CDCSS 三候选侦察与接口设计（独立实现，未落地）
 
 > 状态：**侦察完成 + 接口设计，本轮不落地**。三候选均为真缺口；DSB/RAW 工作量小、CDCSS 偏大，
 > 本轮时间预算优先给了双构型验证与门控快照，完整落地排后续轮。本档只登记现状与设计，不写代码。
@@ -11,7 +11,7 @@
 | **RAW 直听** | 无 RAW 模式 | grep kModeRaw/RawMode 零命中；解调链入口按 mode 分发，无 pass-through 分支 |
 | **CDCSS/DCS** | 登记未实现 | ctcss.h:20 注释 + tokens.h:363 注释显式声明 "CDCSS/DCS (digital coded squelch, 134.4 bps 3-of-8 code) is NOT implemented"；全仓无 Golay(23,12) 码检测器 |
 
-参考：SDR++ radio/demodulators 有 dsb.h（平衡调制 DSB 解调）与 raw.h（IQ 直通），本项目干净室只学机制概念。
+参考：SDR++ radio/demodulators 有 dsb.h（平衡调制 DSB 解调）与 raw.h（IQ 直通），本项目仅学习机制概念。
 
 ## 2. DSB 解调接口设计（价值：中等——广播 DSB 收听、调试平衡调制器）
 

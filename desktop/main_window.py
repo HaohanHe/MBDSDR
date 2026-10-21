@@ -4963,7 +4963,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self, "关于 MBDSDR",
             "<h3>MBDSDR - AI 定义无线电</h3>"
-            "<p>开源 MIT 许可的软件定义无线电平台（干净室独立实现）</p>"
+            "<p>开源 MIT 许可的软件定义无线电平台（独立实现）</p>"
             "<p>呼号：在「设置」中配置</p>"
             "<p>对标 GNU Radio / SDR++ / SatDump 等开源项目能力，独立实现（未包含其源代码）</p>"
             "<p>支持 MCP 工具调用，任意 AI IDE 可直接控制硬件</p>"

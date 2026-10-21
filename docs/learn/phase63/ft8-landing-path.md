@@ -2,7 +2,7 @@
 
 > 日期：2026-10-10  作者：MBDSDR 工程轮
 > HEAD：MBDSDR @ 764866a
-> 配套文档：`ft8-mechanism-study.md`（机制学习，干净室）
+> 配套文档：`ft8-mechanism-study.md`（机制学习，独立实现）
 > 约束：本轮**只设计方案，不写 cpp 代码**。下列伪代码仅为接口签名示意，
 > 不得进 `cpp/src/` 或 `cpp/tests/`。后续轮在不参考 GPL 源码文本的前提下自写。
 
@@ -312,7 +312,7 @@ BPSK/QPSK 实验更极端。可新增实验：
 
 ## 6. 红线与纪律
 
-- **干净室**：MBDSDR 内所有 FT8 代码由后续轮自写，不复制 wsjtx Fortran/C
+- **独立实现**：MBDSDR 内所有 FT8 代码由后续轮自写，不复制 wsjtx Fortran/C
   文本；本笔记的 file:line 引用仅作机制证据。
 - **不预置呼号**：合成器示例用 `CALL1/CALL2`；真实接收时字段空则空。
 - **不发射**：FT8 工具是被动接收，不接 PTT，不做 Tx。

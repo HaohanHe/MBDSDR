@@ -1099,7 +1099,7 @@ MainWindow::MainWindow(QWidget* parent)
     centerTabs_->addTab(worldPage, "世界");
 
     // L8 closed loop: right-click the spectrum/waterfall canvas to load an
-    // external colormap JSON (clean-room SDR++ colormaps). The ring keeps raw-dB
+    // external colormap JSON (independent SDR++ colormaps). The ring keeps raw-dB
     // rows, so the whole history is re-coloured, not just future rows. A parse
     // failure is reported honestly (message box) and the built-in ramp is kept;
     // the chosen file path persists and is re-applied on launch with a silent

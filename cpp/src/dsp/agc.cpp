@@ -41,7 +41,7 @@ void Agc::processWithGain(const std::vector<float>& in,
     out->resize(in.size());
     gain->resize(in.size());
 
-    // Block-level lookahead anti-clip (clean-room; the *idea* of previewing the
+    // Block-level lookahead anti-clip (independent; the *idea* of previewing the
     // block peak before scaling, written independently). Before touching the
     // envelope, scan this block ONCE for its loudest sample -- O(n), deliberately
     // not a per-sample nested inner scan. A burst that arrives while the
@@ -58,7 +58,7 @@ void Agc::processWithGain(const std::vector<float>& in,
 
     // First block after reset (env_ still exactly 0): seed the envelope from
     // the block's mean magnitude instead of letting the first sample derive a
-    // tentative gain from a near-zero envelope. Clean-room; the *idea* of
+    // tentative gain from a near-zero envelope. Independent; the *idea* of
     // setting gain in one shot from the first block's average magnitude
     // (gr-analog agc3 sweeps the first samples to compute gain directly),
     // written independently. Matters for a QUIET block: the tentative first
@@ -111,7 +111,7 @@ float Agc::currentLevelDb() const {
     return static_cast<float>(20.0 * std::log10(env_));
 }
 
-// ---- ComplexCarrierAgc (clean-room carrier AGC) ---------------------------
+// ---- ComplexCarrierAgc (independent carrier AGC) ---------------------------
 ComplexCarrierAgc::ComplexCarrierAgc(double sr, float setPoint,
                                      double attackMs, double decayMs,
                                      float maxGain)

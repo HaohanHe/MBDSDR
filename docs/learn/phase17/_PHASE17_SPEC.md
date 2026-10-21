@@ -40,7 +40,7 @@
 - UI 简单显示（寻呼列表/m17 呼叫/VOR radial+识别），弹性布局、新常量走 core/tokens.h + tokens::scaled；无信号诚实空态。
 
 ## 4. 质量门
-- ctest **107 基线不破** + 三个新 decoder 全绿（offscreen）；干净室 MIT（不复制 GPL、命名自有）；通用能力（非专用）；不硬编码/不预存；合成仅测试。
+- ctest **107 基线不破** + 三个新 decoder 全绿（offscreen）；MIT 独立实现（不复制 GPL、命名自有）；通用能力（非专用）；不硬编码/不预存；合成仅测试。
 - git：只暂存相关文件（禁 add -A）；**不自行 push**。
 
 ## 5. 红线

@@ -2,7 +2,7 @@
 
 > 范围：`repos/sdrpp/decoder_modules/meteor_demodulator/src/`（真读源码原文，非 README）。
 >  GPL 声明：SDR++ 整体为 **GPLv3**（`repos/sdrpp/license` 文件即 GPL-3.0 全文，第 1-2 行）。
->  本笔记只做机制学习，**不复制任何代码**；MBDSDR 侧一律 MIT 干净室重写。
+>  本笔记只做机制学习，**不复制任何代码**；MBDSDR 侧一律 MIT 独立重写。
 
 ---
 
@@ -128,7 +128,7 @@ SDR++ 的 `meteor_demodulator` **只做到"软符号录制"为止**：QPSK/OQPSK
 1. **拿到真实录制样本**：至少 1 份 Meteor-M2 LRPT `.s` 软符号文件或带基带 IQ wav 的公开样本，且能与一个权威参考译码器（satdump/meteor_decode 输出图）逐帧对齐——先在 Python 侧把参数口径（ASM、多项式、加扰）收敛到"真实样本端到端出图成功"。
 2. **C++ 侧出现明确调用方**：如 ControlHub 要把 LRPT 接入生产只读命令（仿照 Phase18 pocsag/m17/vor 模式），或嵌入式低延迟约束出现，Python 路径不够用。
 3. **Python 侧 `compose_visible_image` 补齐并经真实样本验证**（C++ 应搬运已验证算法，不同时开荒协议未知部分）。
-4. 若做，落地形态建议：干净室独立命名（如 `dsp/lrpt_*`，不复制 GPL）、合成 QPSK 已知帧 ctest（帧同步→Viterbi→去交织→重组断言 + 纯噪声空态）、复用 QImage 行缓冲（仿 `apt_decoder.cpp:311-333 finalizeRow` 模式）。
+4. 若做，落地形态建议：独立实现独立命名（如 `dsp/lrpt_*`，不复制 GPL）、合成 QPSK 已知帧 ctest（帧同步→Viterbi→去交织→重组断言 + 纯噪声空态）、复用 QImage 行缓冲（仿 `apt_decoder.cpp:311-333 finalizeRow` 模式）。
 
 ---
 

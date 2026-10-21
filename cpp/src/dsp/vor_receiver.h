@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // MBDSDR VOR (VHF Omnidirectional Range, ICAO Annex 10) audio-baseband receiver.
 //
-// Clean-room, hardware-independent decoder for the COMPOSITE AUDIO that comes
+// Independent, hardware-independent decoder for the COMPOSITE AUDIO that comes
 // out of the VOR carrier's FM demodulator. It does NOT touch the RF carrier.
 //
 // The audio carries three things at once:

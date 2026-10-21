@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: MIT | Phase36 G3: GNU Radio AGC 机制深读（clean-room，只学不抄） -->
+<!-- SPDX-License-Identifier: MIT | Phase36 G3: GNU Radio AGC 机制深读（independent，只学不抄） -->
 
 # Phase36 G3：GNU Radio AGC 与增益控制
 

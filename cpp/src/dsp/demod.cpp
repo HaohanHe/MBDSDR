@@ -33,7 +33,7 @@ void FirLowpass::process(const std::vector<float>& in, std::vector<float>& out) 
     }
 }
 
-// ---- Nuttall-windowed-sinc lowpass (clean-room) ----
+// ---- Nuttall-windowed-sinc lowpass (independent) ----
 // Minimum 4-term Nuttall coefficients (same set as SDR++ window/nuttall.h).
 // Window index runs 0..count-1 so the window peaks at the center tap and falls
 // to ~0 at both edges (standard cosine-sum window).

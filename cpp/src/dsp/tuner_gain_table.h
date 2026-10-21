@@ -2,7 +2,7 @@
 // Discrete tuner gain table: snaps a continuous UI gain request to the nearest
 // legal hardware step and reports the ACTUAL applied gain honestly.
 //
-// MECHANISM (learned clean-room from librtlsdr GPLv2 src/librtlsdr.c:956
+// MECHANISM (learned independent from librtlsdr GPLv2 src/librtlsdr.c:956
 // rtlsdr_get_tuner_gains -- we do NOT copy that driver's arrays): the C driver
 // returns a per-tuner fixed array of legal gain levels in tenths of dB
 // (R82xx 29 levels, E4000 14 levels, ...). This class takes that table as an

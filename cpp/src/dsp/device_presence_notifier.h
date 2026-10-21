@@ -9,7 +9,7 @@
 // fake enumerator drives DeviceLister, the notifier forwards devicesAdded /
 // devicesRemoved, and the test asserts the produced text verbatim.
 //
-// MECHANISM (learned clean-room from librtlsdr GPLv2): librtlsdr itself does no
+// MECHANISM (learned independent from librtlsdr GPLv2): librtlsdr itself does no
 // libusb hotplug callback; "plugged" / "unplugged" is an application-level diff
 // of re-enumerated devices. This class only formats whatever the injected
 // enumerator reports -- it never opens a device. True physical USB plug/unplug

@@ -18,7 +18,7 @@
 | 环节 | 位置 | 作用 |
 |---|---|---|
 | FFT 找峰 + 抛物线亚插值 | `dsp/frequency_calibrator.cpp` `measureCarrier()` | 在期望基带位置附近找参考载波峰，亚 bin 细化到 Hz 级 |
-| 残余→ppm | `frequency_calibrator.h:18-26` 干净室符号约定 | `ppm = -offsetHz / Fc * 1e6`（kalibrate 同约定） |
+| 残余→ppm | `frequency_calibrator.h:18-26` 独立实现符号约定 | `ppm = -offsetHz / Fc * 1e6`（kalibrate 同约定） |
 | 多段聚合 + 一致性剔除 | `calibrateFromCapture()` | 分 4 段测，剔除离群、给置信度/散布 |
 | 诚实空态 | `CalibrationMeasurement.detected` / `CalibrationResult.detected` | 无载波过门限 → `detected=false`，**绝不编读数** |
 | 引擎喂数 | `SpectrumEngine::captureForCalibration`（`agent_tools.cpp:366` 调用） | 抓一段复数 IQ 给校准器 |

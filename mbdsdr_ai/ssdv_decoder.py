@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""fsphil SSDV（Slow Scan Digital Video）256 字节包解码器 / 编码器 —— 干净室实现。
+"""fsphil SSDV（Slow Scan Digital Video）256 字节包解码器 / 编码器 —— 独立实现。
 
 本模块依据 fsphil SSDV 公开包格式独立编写；参考 fsphil/ssdv（GPL）仅学习机制，
 **未逐字复制任何 GPL 代码**。JPEG 表为 ITU-T T.81 Annex K 公开标准采样表。
@@ -59,7 +59,7 @@ OFFSET_CRC_NOFEC: int = HEADER_LEN + PAYLOAD_NOFEC               # 252
 # ---------------------------------------------------------------------------
 # DSLWP 变体（LilacSat / ASRTU 家族）包层常量 —— 通用能力，非活动专用。
 #
-# 与 fsphil 经典的区别（来源：daniestevez/ssdv fork，GPL 仅学机制，本实现干净室重写）：
+# 与 fsphil 经典的区别（来源：daniestevez/ssdv fork，GPL 仅学机制，本实现独立重写）：
 #   - 包长 218 字节（非 256）；头 9 字节（非 15）；
 #   - byte0 = image_id（无 sync 0x55、无 type 0x66/0x67、无 base-40 呼号）；
 #   - 包内无 RS 校验字节（FEC 由上游 CCSDS 信道级提供）；
@@ -158,7 +158,7 @@ _ZIGZAG: Tuple[int, ...] = (
 # Reed-Solomon（fsphil 约定；复用 fec._GF256 字段表，根生成元 gamma=alpha^11）
 # ---------------------------------------------------------------------------
 class _SsdvRS:
-    """fsphil/rs8.c 兼容 RS(255,223) 系统编/解码（干净室，BM+Chien+Forney）。
+    """fsphil/rs8.c 兼容 RS(255,223) 系统编/解码（独立实现，BM+Chien+Forney）。
 
     字段表复用 :class:`mbdsdr_ai.fec._GF256`（本原多项式 0x187，已与 rs8.c
     ALPHA_TO 表逐字节一致）。根集 beta_i = gamma^(112+i)，gamma = alpha^11。

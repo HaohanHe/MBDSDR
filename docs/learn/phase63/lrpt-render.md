@@ -127,7 +127,7 @@ experiments/output/lrpt_render/
 
 ## 8. 红线与纪律
 
-- **干净室**：lrpt_render.py 自写 MIT，未复制 SatDump 图像解码代码；file:line 仅作机制证据。
+- **独立实现**：lrpt_render.py 自写 MIT，未复制 SatDump 图像解码代码；file:line 仅作机制证据。
 - **不预置呼号**：仿真数据无呼号。
 - **不发射**：纯离线渲染。
 - **不 git add/commit/push**：仅写文件。

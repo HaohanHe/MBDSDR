@@ -61,7 +61,7 @@ std::vector<float> tonePlusNoiseBlock(int n, double toneHz, double amp,
 // ---------------------------------------------------------------------------
 // CDCSS/DCS test-side synthesizer (*** SYNTHETIC -- NOT HARDWARE ***).
 //
-// Clean-room Golay(23,12) encoder (same public polynomial 0xC75, re-implemented
+// independent Golay(23,12) encoder (same public polynomial 0xC75, re-implemented
 // here so the product code is not exercised by its own test synthesizer).
 // Bits are emitted LSB-first, Manchester-II encoded (bit 1 = high-then-low),
 // and key a 1500 Hz sine at +/- amplitude (BPSK).  A fixed-seed LCG adds

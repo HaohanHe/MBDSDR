@@ -142,6 +142,6 @@ Captured offscreen at 640 / 960 / 1920:
 
 - Real data only — the time base is the measured inter-frame gap; the test pin
   is a seam, not a production mock. No invented fps, no TLE/call-sign, neutral
-  wording, clean-room (no SDR++ source consulted for the axis).
+  wording, independent (no SDR++ source consulted for the axis).
 - Active params all via tokens; only the allowed files touched.
 - No `git add/commit/push`.

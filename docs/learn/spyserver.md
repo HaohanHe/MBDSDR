@@ -1,6 +1,6 @@
 # SpyServer 协议学习笔记（SDR++ 服务端 / Airspy SpyServer）
 
-> 干净室研究。只读两个**客户端**实现：
+> 独立实现研究。只读两个**客户端**实现：
 > - 主参考：`repos/sdrpp/source_modules/spyserver_source/src/`（`spyserver_protocol.h`、`spyserver_client.cpp/.h`、`main.cpp`）。
 > - 交叉核对：`repos/sdrangel/plugins/samplesource/remotetcpinput/`（`spyserver.h`、`remotetcpinputtcphandler.cpp`）——SDRangel 独立重写了同一套线格式。
 >
@@ -253,7 +253,7 @@ gain = 10 ^ (mflags / 20.0)     // client.cpp:138,148,158
 ```
 然后 UInt8 额外除 128、Int16 除 32768 归一化到浮点（`client.cpp:139,149`）。
 
-> ⚠️这是 sdrpp 客户端的解读；SDRangel 直接忽略高 16 位、用自己固定的归一化（`spyserver.h` 里没读 mflags）。所以「高 16 位=增益 dB」这一条**只有 sdrpp 一家在用**，SDRangel 不依赖它。干净室实现里建议照 sdrpp 发，但知道另一家不看它。
+> ⚠️这是 sdrpp 客户端的解读；SDRangel 直接忽略高 16 位、用自己固定的归一化（`spyserver.h` 里没读 mflags）。所以「高 16 位=增益 dB」这一条**只有 sdrpp 一家在用**，SDRangel 不依赖它。独立实现里建议照 sdrpp 发，但知道另一家不看它。
 
 ### 8.4 流控 / 缓冲
 - 客户端读缓冲上限 `SPYSERVER_MAX_MESSAGE_BODY_SIZE = 1 MiB`（`protocol.h:19`，`client.cpp:10`）。
@@ -291,7 +291,7 @@ Client                                   Server
 
 ---
 
-## 10. 干净室最小服务端：必须支持的命令子集 + 精确字节布局
+## 10. 独立实现最小服务端：必须支持的命令子集 + 精确字节布局
 
 目标：让 sdrpp/SDRangel 客户端能连上、拿到设备信息、开推流、收到 IQ。下面是**最小闭环**需要实现的服务端侧行为（均为小端 u32）。
 

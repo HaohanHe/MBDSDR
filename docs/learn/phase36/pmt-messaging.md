@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: MIT | Phase36 G5: GNU Radio PMT / message passing 机制深读（clean-room，只学不抄） -->
+<!-- SPDX-License-Identifier: MIT | Phase36 G5: GNU Radio PMT / message passing 机制深读（independent，只学不抄） -->
 
 # Phase36 G5：GNU Radio PMT 与消息传递机制
 

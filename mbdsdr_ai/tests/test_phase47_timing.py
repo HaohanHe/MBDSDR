@@ -12,7 +12,7 @@
 诚实声明（红线）
 ----------------
 - coarse 眼图扫描滑移率如实报告。
-- **当前干净室 Gardner TED 闭环尚未正确锁到眼心**：在随机（非 0x55 前导）数据上
+- **当前独立实现 Gardner TED 闭环尚未正确锁到眼心**：在随机（非 0x55 前导）数据上
   收敛到约半符号稳态偏差，BER≈0.5。本测试不伪造"gardner 优于 coarse"；gardner
   滑移率如实计入并标注未收敛 FAIL。低 SNR / 未收敛区间不给假图。
 """
@@ -119,7 +119,7 @@ class TestTimingSlipRates:
         """中等噪声(sd=0.5)+CFO30Hz：如实打印 coarse/gardner 滑移率。
 
         断言只锁 coarse 不崩溃（滑移率有上界）；**不**断言 gardner 优于 coarse
-        ——当前干净室 gardner 未正确锁眼心（见模块 docstring），如实记录。
+        ——当前独立实现 gardner 未正确锁眼心（见模块 docstring），如实记录。
         """
         r = _slip_rates(0.5, 30.0)
         c_slips, c_ber = r["coarse"]

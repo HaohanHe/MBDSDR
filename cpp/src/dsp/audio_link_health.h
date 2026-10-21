@@ -12,7 +12,7 @@
 // to every one of those targets. Inline methods keep the dependency at the
 // header level.
 //
-// MECHANISM (learned clean-room from sdrpp GPLv3 sink_modules/audio_sink):
+// MECHANISM (learned independent from sdrpp GPLv3 sink_modules/audio_sink):
 //   * sdrpp decouples the DSP thread from the sound-card interrupt with a Packer
 //     and treats the sound card as the master clock; a starved buffer is an
 //     underrun, not a crash.

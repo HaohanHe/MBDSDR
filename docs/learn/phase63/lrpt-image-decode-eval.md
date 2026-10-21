@@ -118,7 +118,7 @@ bytes → bit array (MSB first)
 
 ## 5. 红线与纪律
 
-- **干净室**：lrpt_dct.py 自写 MIT，未复制 SatDump DCT/Huffman 代码；file:line 仅作机制证据。
+- **独立实现**：lrpt_dct.py 自写 MIT，未复制 SatDump DCT/Huffman 代码；file:line 仅作机制证据。
 - **不预置呼号**：无呼号。
 - **不 git add/commit/push**：仅写文件。
 - **隔离文件勿动**：未碰 `cpp/*`、`ui_diag_freeze.cpp`、`cpp/scratch/*`。
@@ -142,7 +142,7 @@ bytes → bit array (MSB first)
 ### 6.2 函数/类清单（`lrpt_huffman.py`）
 
 - 异常族：`LrptJpegError`（基类）/ `LrptJpegMarkerError` / `LrptJpegTruncatedError` / `LrptJpegHuffmanError` / `LrptJpegUnsupportedError`（均带 offset/marker 上下文）。
-- `receive_extend(v, size)`：JPEG Annex F“Extend”符号位数值（clean-room，非 SatDump 源码）。
+- `receive_extend(v, size)`：JPEG Annex F“Extend”符号位数值（independent，非 SatDump 源码）。
 - `BitReader`：字节对齐起点、MSB-first、0xFF00 去填充、marker 边界即停（`read_bit/read_bits/byte_align/hit_marker/peek_restart`）。
 - `HuffmanTable` + `parse_dht`：canonical mincode/maxcode/valptr 查表（DC/AC、多表 id 0..3）。
 - `parse_dqt` / `_parse_sof` / `_parse_sos` / `parse_jpeg` / `iter_markers`：分段解析与标记流游走。
@@ -173,7 +173,7 @@ bytes → bit array (MSB first)
 
 ### 6.6 红线执行
 
-- **干净室**：`lrpt_huffman.py`/`lrpt_vcdu.py` 自写 MIT；SatDump 仅读机制（huffman.cpp/segment.cpp/tables.h/lrpt_msumr_reader.cpp 的 file:line 已在 6.2 处引用），未复制任何 GPL 代码；`receive_extend` 用 JPEG Annex F 标准算法。测试自带的最小 baseline JPEG 编码器为 clean-room。
+- **独立实现**：`lrpt_huffman.py`/`lrpt_vcdu.py` 自写 MIT；SatDump 仅读机制（huffman.cpp/segment.cpp/tables.h/lrpt_msumr_reader.cpp 的 file:line 已在 6.2 处引用），未复制任何 GPL 代码；`receive_extend` 用 JPEG Annex F 标准算法。测试自带的最小 baseline JPEG 编码器为 independent。
 - **未引入上游测试数据**：本 clone 无 `test_data/`，未复制；如后续引入 SatDump 向量，只复制少量并注明出处。
 - **不 git 写操作**：仅写文件，未 add/commit/push。
 - **隔离文件勿动**：未碰 `cpp/*`、`ui_diag_freeze.cpp`、`cpp/scratch/*`；无 cpp 改动。

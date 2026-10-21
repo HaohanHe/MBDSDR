@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Window-normalization tests for dsp::PowerSpectrum (Phase36 W2, clean-room).
+// Window-normalization tests for dsp::PowerSpectrum (Phase36 W2, independent).
 //
 // Acceptance:
 //  (a) Unit-RMS window: after rebuild, mean(w^2) == 1 for Hann/Blackman/Flattop
