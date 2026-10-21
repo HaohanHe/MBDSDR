@@ -54,8 +54,26 @@ jobs:
   #   runner 上若该目录超时，按该文档排查，勿据此扩大其它 job。
   # ---------------------------------------------------------------------------
   python:
+    name: pytest (${{ matrix.root }})
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      # 按根拆并行：快的四个根各自独立完成，根 tests/ 单独一个 job
+      # 并给足够墙钟（它实测约 40 分钟，慢在跨文件的单例 QApplication 累积）。
+      # fail-fast: false ——一个根失败不应取消其他根的结果。
+      fail-fast: false
+      matrix:
+        include:
+          - root: mbdsdr_ai/tests
+            timeout: 20
+          - root: experiments/tests
+            timeout: 20
+          - root: tools/onboarding
+            timeout: 20
+          - root: tools/hw_selfcheck
+            timeout: 20
+          - root: tests/
+            timeout: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -87,16 +105,11 @@ jobs:
           pip install -r experiments/requirements.txt
           pip install pytest
 
-      - name: pytest（五个根目录）
+      - name: pytest (${{ matrix.root }})
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          python -m pytest -q \
-            experiments/tests \
-            mbdsdr_ai/tests \
-            tools/onboarding \
-            tools/hw_selfcheck \
-            tests/
+          python -m pytest -q "${{ matrix.root }}"
 
   # ---------------------------------------------------------------------------
   # Flutter：test + analyze
