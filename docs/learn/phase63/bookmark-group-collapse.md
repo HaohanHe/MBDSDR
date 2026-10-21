@@ -3,7 +3,7 @@
 > 范围：在 phase63 已落地的书签分组视图（`bookmark-group-view.md`）之上，补
 > **组 header 点击折叠/展开该组全部书签行**的交互。
 > 全程 offscreen/CLI（`QT_QPA_PLATFORM=offscreen`），未操控 GUI；零 mock
-> （数据全部来自真实 `BookmarkManager`）；干净室实现；不 git add/commit/push。
+> （数据全部来自真实 `BookmarkManager`）；独立实现；不 git add/commit/push。
 
 ## 三候选侦察判定表
 

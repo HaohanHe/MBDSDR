@@ -10,7 +10,7 @@
 // the painting / event code delegates to them. One source of truth; the widget
 // stays thin.
 //
-// Clean-room provenance: the SDR++ waterfall mechanism (GPLv3, core/src/gui/
+// Independent provenance: the SDR++ waterfall mechanism (GPLv3, core/src/gui/
 // widgets/waterfall.cpp:65-90 doZoom block-max, :600-631 updateWaterfallFb
 // re-render, colormaps.cpp:12-47 external JSON) was studied only for its
 // algorithm shape in docs/learn/phase12/sdrpp-waterfall.md and is reimplemented
@@ -152,7 +152,7 @@ inline int lutIndexForDb(float db, float floorDb, float ceilDb) {
 }
 
 // ---------------------------------------------------------------------------
-// External colormap JSON (SDR++ colormaps.cpp:12-47 shape, clean-room).
+// External colormap JSON (SDR++ colormaps.cpp:12-47 shape, independent).
 // Accepted document, TWO equivalent roots:
 //   { "name": "optional",
 //     "stops": [ "#rrggbb", ... ] }                       // evenly spaced 0..1

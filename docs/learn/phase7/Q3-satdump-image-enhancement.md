@@ -1,6 +1,6 @@
 # Q3 学习笔记：SatDump 图像增强管线
 
-> 上游：[SatDump](https://github.com/SatDump/SatDump)（GPLv3）。本笔记只学机制，不照抄代码；落地实现为 MIT 干净室重写。
+> 上游：[SatDump](https://github.com/SatDump/SatDump)（GPLv3）。本笔记只学机制，不照抄代码；落地实现为 MIT 独立重写。
 
 ## ① 上游真实做法（file:line）
 
@@ -81,7 +81,7 @@ template <typename T> Image LUT_jet() {
 ## ④ 落地建议
 
 **已落地**（本阶段）：
-- 新建 `mbdsdr_ai/image_enhance.py`：干净室实现 tan-slant brightness/contrast、黑白点线性拉伸、百分位自动色阶、CDF 直方图均衡、jet/iron/gray LUT、`enhance_apt()` 一站式管线。
+- 新建 `mbdsdr_ai/image_enhance.py`：独立实现 tan-slant brightness/contrast、黑白点线性拉伸、百分位自动色阶、CDF 直方图均衡、jet/iron/gray LUT、`enhance_apt()` 一站式管线。
 - 修改 `tools/onboarding/onboard.py`：修复 image_a/image_b key 错误；输出步调用 `IE.enhance_apt()` 存增强后灰度 A + iron 伪彩 B。
 - 测试：`tests/test_image_enhance.py`（21 个确定性测试，合成图逐像素断言）。
 

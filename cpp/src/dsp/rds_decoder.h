@@ -41,7 +41,7 @@ struct RdsInfo {
 /// on the 26-bit CRC blocks, and parses PS (0A), PTY and RadioText (2A).
 ///
 /// Not implemented this round (left as TODO in code): CT clock (type 4),
-/// TMC (type 8), and 0B/2B version fallback. Clean-room reimplementation from
+/// TMC (type 8), and 0B/2B version fallback. Independent reimplementation from
 /// the EN 300 401 standard; no GPL code copied.
 class RdsDecoder {
 public:

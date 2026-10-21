@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// NanoVNA text-protocol client implementation (clean-room, self-written).
+// NanoVNA text-protocol client implementation (independent, self-written).
 #include "nanovna_client.h"
 
 #include <QString>

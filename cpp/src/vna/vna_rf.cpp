@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// NanoVNA RF analysis pure functions — clean-room, self-written.
+// NanoVNA RF analysis pure functions — independent, self-written.
 #include "vna_rf.h"
 
 #include <algorithm>
@@ -317,7 +317,7 @@ LMatchResult efhwMatch(std::complex<double> z_load, double f_hz, double r0) {
     return out;
 }
 
-// ---- Multi-reactance matching topologies (clean-room closed forms) ---------
+// ---- Multi-reactance matching topologies (independent closed forms) ---------
 namespace {
 // Signed reactance -> component value at f. X>=0 inductive -> Henry;
 // X<0 capacitive -> Farad. The unused unit stays 0.
@@ -438,7 +438,7 @@ std::string writeTouchstone(double start_hz, double stop_hz,
                             const std::vector<std::complex<double>>& s11,
                             const std::vector<std::complex<double>>& s21) {
     std::ostringstream os;
-    os << "! MBDSDR Touchstone export (clean-room, R/I)\n";
+    os << "! MBDSDR Touchstone export (independent, R/I)\n";
     os << "# Hz S R Z R\n";
     const size_t n = std::min(s11.size(), size_t(1));
     for (size_t i = 0; i < s11.size(); ++i) {

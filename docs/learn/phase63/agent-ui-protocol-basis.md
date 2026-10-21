@@ -27,7 +27,7 @@
 - **传输**：P0 复用 MBDSDR 已有的 MCP / 进程内直连，在工具结果里承载 A2UI 形状的 JSON；**AG-UI 事件流列为远期**（Web / 远程 / 流式 / 多客户端再上）。
 - **不走 MCP Apps 的 iframe HTML 路数**（官方自述 Web-focused、远端服务器控制外观、界面由服务器预制而非模型流式生成），只借鉴其「工具元数据关联界面、预声明可审查、UI 发起写操作需用户同意」思想。
 - 工具上下文采用 MCP 官方 **Progressive Tool Discovery** 三层模式做二级分层。
-- Qt 渲染器干净室自写：**组件名白名单工厂**，不 eval、不动态 import、不加载任意 QML 字符串或外部 `.ui`。
+- Qt 渲染器独立实现：**组件名白名单工厂**，不 eval、不动态 import、不加载任意 QML 字符串或外部 `.ui`。
 
 > **关键事实（不得记错）**：A2UI 官方对比页写明 A2UI 与 MCP 的桥是 **“Upcoming bridge”**（截至摘录日尚未稳定）。因此 P0 **不得假设“A2UI 已有稳定的原生 MCP 绑定”**；先在自有 MCP 工具输出中承载 A2UI 形状的 JSON，待官方桥定稿后再对齐（见第 2.3、11 节）。
 
@@ -287,7 +287,7 @@ HTML-only MVP 的理由：普遍支持、最简单安全模型（标准 iframe s
 
 ## 8. Qt 原生侧动态 UI 的官方机制与安全告诫
 
-> 背景：MBDSDR 桌面端为 QWidget / QSplitter / QDockWidget；A2UI 官方 renderer 仅列 Angular / Flutter / Lit，**没有 Qt renderer**，需干净室自写。以下为 Qt 官方机制与权威技术资料。
+> 背景：MBDSDR 桌面端为 QWidget / QSplitter / QDockWidget；A2UI 官方 renderer 仅列 Angular / Flutter / Lit，**没有 Qt renderer**，需独立实现。以下为 Qt 官方机制与权威技术资料。
 
 - **QFormBuilder（Qt 官方，Qt Widgets Designer）**：
 
@@ -345,9 +345,9 @@ HTML-only MVP 的理由：普遍支持、最简单安全模型（标准 iframe s
 - **P1**：`@path` 数据绑定（读数实时进面板）+ 工具 progressive discovery 三元组 + workspace 存取 + A2UI 形状经 MCP 输出（第三方 agent 可驱动界面）+ 能力协商（`supportedCatalogIds`）。
 - **P2**：Flutter 同源渲染 + 数据级第三方 inline catalog + A2A 多 agent surface 命名空间隔离；评估 AG-UI 与定稿后的 A2UI↔MCP 桥。
 
-### 9.7 许可与干净室
+### 9.7 许可与独立实现
 
-A2UI（Apache 2.0）、AG-UI（开源）、MCP（开放协议）仅作为协议与机制参考；MBDSDR 整体 MIT，渲染器与工具代码干净室自写，**不复制上述库源码、不引入其 npm 依赖**；assistant-ui 只借鉴工具形态与安全模型。
+A2UI（Apache 2.0）、AG-UI（开源）、MCP（开放协议）仅作为协议与机制参考；MBDSDR 整体 MIT，渲染器与工具代码独立实现，**不复制上述库源码、不引入其 npm 依赖**；assistant-ui 只借鉴工具形态与安全模型。
 
 ---
 

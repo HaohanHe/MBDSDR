@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """LRPT 压缩域（Huffman + JPEG 基线扫描）与 VCDU 重组确定性互测。
 
-自验证策略（tests 里自带最小 baseline JPEG 编码器，全部 clean-room）：
+自验证策略（tests 里自带最小 baseline JPEG 编码器，全部 independent）：
   - 优先跑 SatDump huffman 测试向量（若目录存在）；本 clone 无 test_data，
     故以“已知 DQT/DHT/SOI/SOF0/SOS 构造合成 JPEG”做收验证收。
   - 覆盖：多长度 canonical Huffman 解码、接收扩展、DC 差分跨块、AC(ZRL/EOB)、
@@ -36,7 +36,7 @@ QT_ZIG2 = np.full(64, 64, dtype=np.int64)   # 第二分量用（恒 64）
 
 
 # =========================================================================== #
-# 测试用最小 baseline JPEG 编码器（clean-room；仅供确定性自验证）
+# 测试用最小 baseline JPEG 编码器（independent；仅供确定性自验证）
 # =========================================================================== #
 class _BW:
     """熵位写者：MSB-first，尾按 1 填充到字节，0xFF 后插 0x00。"""

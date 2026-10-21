@@ -3,7 +3,7 @@
 > 范围：把线 A 的 `vna::NanoVnaClient` 接到桌面右栏「仪器」tab；真实串口连接流程；
 > S11(VSWR)/S21(增益) 最小可视化；MBD_VNASHOT 三档快照。纯 UI/测试层，
 > 不碰 `cpp/*` 冻结面之外的既有逻辑、不改 tool_schema/agent_tools/control_hub。
-> 全仓 MIT；干净室自写，不抄 GPL/WTFPL 上游代码。
+> 全仓 MIT；独立实现，不抄 GPL/WTFPL 上游代码。
 
 ## 1. 串口接线 file:line
 

@@ -33,5 +33,5 @@ VfoManager（及 SpectrumEngine 转发）提供，按当前/指定 channel：
 - 各自 ctest：ControlHub 新命令、Agent 契约、UI 集成（合成帧→面板显示）。
 
 ## 质量门 / 红线
-- ctest 110 基线不破 + 新增全绿（offscreen）；干净室 MIT；通用非专用；不硬编码/不预存；合成仅测试；只暂存相关文件（禁 add -A）；**不自行 push**。
+- ctest 110 基线不破 + 新增全绿（offscreen）；MIT 独立实现；通用非专用；不硬编码/不预存；合成仅测试；只暂存相关文件（禁 add -A）；**不自行 push**。
 - 如实报告 file:line、ctest 实跑数、未解决项（MainAgent 全量构建+跑 ctest+查 git 复核）。

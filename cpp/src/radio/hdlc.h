@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //
 // HDLC bit-level receiver for AX.25/APRS over a recovered FSK bit stream
-// (clean-room; AX.25 v2.2 link layer + ISO 3309 HDLC frame structure).
+// (independent; AX.25 v2.2 link layer + ISO 3309 HDLC frame structure).
 //
 // Chain (all deterministic, no hardware):
 //   recovered FSK symbols (0/1 per sample-symbol)

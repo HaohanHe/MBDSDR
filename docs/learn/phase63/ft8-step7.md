@@ -1,6 +1,6 @@
 # FT8 工程性收尾：vfo 真实喂数 + 时隙对齐 + SIC 评估
 
-HEAD=622c46a。干净室自写 MIT。
+HEAD=622c46a。独立实现 MIT。
 
 ## 1. vfo 喂数 / 时隙对齐 file:line
 

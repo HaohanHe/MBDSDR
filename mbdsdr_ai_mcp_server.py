@@ -38,7 +38,7 @@ MCP 协议 (JSON-RPC 2.0 over stdio):
 依赖: pip install numpy (MBDSDR AI 内核依赖)
 (标准库 json / sys / time / argparse / threading 无需安装)
 
-MBDSDR Project - AI定义无线电 - MIT License（干净室独立实现）
+MBDSDR Project - AI定义无线电 - MIT License（独立实现）
 """
 
 import json

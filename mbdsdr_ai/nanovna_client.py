@@ -3,7 +3,7 @@
 MBDSDR AI - NanoVNA (H / H4) 串口客户端
 ==========================================
 
-干净室（clean-room）**从零自写**的 NanoVNA 文本协议客户端。
+独立实现（independent）**从零自写**的 NanoVNA 文本协议客户端。
 
 协议事实来自对 GPL-3.0 上游（ttrftech/NanoVNA 固件、NanoVNA-H-hugen 固件、
 nanovna-saver）的**机制学习**（命令字 / 数据格式 / 握手时序），实现为本项目

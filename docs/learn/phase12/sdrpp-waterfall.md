@@ -1,7 +1,7 @@
 # SDR++ 频谱/瀑布渲染子系统研习（waterfall / colormaps / GL 绘制 / style）
 
 > 上游：`repos/sdrpp`（master `8c9f5ee`），**GPLv3**（`repos/sdrpp/license` 即 GNU GPL v3 全文）。
-> 本文只学机制/算法/管线划分，按干净室原则描述思路，**不复制源码**；所有引用给 `file:line` 与极短示意（注释性引用），落地时以自有实现重写。
+> 本文只学机制/算法/管线划分，按独立实现原则描述思路，**不复制源码**；所有引用给 `file:line` 与极短示意（注释性引用），落地时以自有实现重写。
 > 对照基线：MBDSDR `cpp/src/ui/spectrum_display.{cpp,h}`、`spectrum_widget.{cpp,h}`、`dsp/power_spectrum.{cpp,h}`、`dsp/fft.{cpp,h}`（MIT）。
 > 范围：`core/src/gui/widgets/waterfall.{cpp,h}`、`core/src/gui/colormaps.{cpp,h}`、`core/src/gui/gui.cpp`、`core/src/gui/style.{cpp,h}`，以及 FFT 引擎交接点 `core/src/gui/main_window.cpp`。
 
@@ -309,7 +309,7 @@ hugeFont = ...128.0f*uiScale;   // 标题，字形范围只留 'S','D','R','+','
 ---
 
 ## 10. 红线与未决
-- 全部为机制性引用，**未复制 GPLv3 代码**；落地须以自有实现重写并保留 MIT（GPL 干净室）。
+- 全部为机制性引用，**未复制 GPLv3 代码**；落地须以自有实现重写并保留 MIT（GPL 独立实现）。
 - 未在本机实跑：SDR++ 实际 GL 驱动行为、`Turbo` 色板文件落点（`colormaps::maps` 的扫描目录）需落地时再读 `theme_manager.cpp` / `main_window.cpp` 启动段。
 - 本轮只读机制，**未改任何 cpp/ 代码，未 commit/push**（遵循云环境无凭据约定）。
 
@@ -317,7 +317,7 @@ hugeFont = ...128.0f*uiScale;   // 标题，字形范围只留 'S','D','R','+','
 
 ## 11. 落地记录（Phase12 waterfall 深度落地，G1/G2/G3 + 时间轴联动）
 
-> 本节记录差距清单 G1/G2/G3 的干净室落地结果。全部为自有 MIT 实现，未抄 GPLv3。
+> 本节记录差距清单 G1/G2/G3 的独立落地地结果。全部为自有 MIT 实现，未抄 GPLv3。
 > 纯函数抽离到新头 `cpp/src/ui/spectrum_render.h`（对标 `spectrum_tune.h` 的 header-only、
 > widget-free 风格），widget 只做接线。
 
@@ -368,5 +368,5 @@ hugeFont = ...128.0f*uiScale;   // 标题，字形范围只留 'S','D','R','+','
 ### 11.7 红线遵守
 - 只写 `cpp/src/ui/{spectrum_render.h, spectrum_display.{h,cpp}}`、`cpp/tests/{test_spectrum_render.cpp,
   test_spectrum_display.cpp}`、`cpp/CMakeLists.txt`（追加）、`docs/learn/phase12/`、`docs/learn/phase13/`。
-- GPL 干净室：仅学机制，全部自有重写；禁 mock（纯函数直断言数值）；未 commit/push。
+- GPL 独立实现：仅学机制，全部自有重写；禁 mock（纯函数直断言数值）；未 commit/push。
 

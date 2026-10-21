@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""LRPT 卷积内码 + CCSDS 解扰 + RS 外码（干净室自写，第②步）。
+"""LRPT 卷积内码 + CCSDS 解扰 + RS 外码（独立实现，第②步）。
 
 本模块依据 ``docs/learn/phase63/weather-sat-digital-study.md`` 自述重写：
   - Viterbi K=7 r=1/2 软判决译码（多项式 {79,109}，CCSDS 域）

@@ -1,7 +1,7 @@
 # P1 渲染深度落地：SDR++ waterfall 对标（doZoom 峰保持 / 历史重染 / JSON 色板 / 时间轴联动）
 
 > 批次：Phase13-Wave1 P1。上游机制来源 `docs/learn/phase12/sdrpp-waterfall.md`（GPLv3 只学机制，
-> 干净室自有重写）。差距项 L6 doZoom 峰保持 / L7 重染历史 / L8 JSON 色板 + 时间轴刻度联动。
+> 独立实现自有重写）。差距项 L6 doZoom 峰保持 / L7 重染历史 / L8 JSON 色板 + 时间轴刻度联动。
 > 红线：只写 `cpp/src/ui/`、`cpp/tests/`、`cpp/CMakeLists.txt`（追加）、`docs/learn/`；禁 mock；未 commit/push。
 
 ## 1. 架构改动一句话

@@ -620,7 +620,7 @@ target_compile_definitions(test_lrpt_cpp PRIVATE SRCDIR="${CMAKE_CURRENT_SOURCE_
 target_link_libraries(test_lrpt_cpp PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME lrpt_cpp COMMAND test_lrpt_cpp)
 
-# NanoVNA step-2: clean-room client + RF math over a self-made scripted replay.
+# NanoVNA step-2: independent client + RF math over a self-made scripted replay.
 add_executable(test_nanovna_client tests/test_nanovna_client.cpp)
 target_link_libraries(test_nanovna_client PRIVATE mbdsdr_core)
 target_include_directories(test_nanovna_client PRIVATE src)
@@ -1787,7 +1787,7 @@ target_include_directories(test_spectrum_tune PRIVATE src)
 target_link_libraries(test_spectrum_tune PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME spectrum_tune COMMAND test_spectrum_tune)
 
-# ---- Phase12 waterfall render (clean-room SDR++ mechanism, header-only) ------
+# ---- Phase12 waterfall render (independent SDR++ mechanism, header-only) ------
 # doZoom block-max decimation, 256-entry LUT build, dB->LUT range re-map,
 # external colormap JSON parse (valid/invalid/fallback), and nice frequency
 # ticks that follow zoom/pan. No QApplication: pure arithmetic, unit-tested
@@ -1799,7 +1799,7 @@ target_link_libraries(test_spectrum_render PRIVATE Qt6::Test Qt6::Core Qt6::Gui)
 add_test(NAME spectrum_render COMMAND test_spectrum_render)
 
 # ---- phase12 Wave2: RTL-SDR device-layer robustness (gap-analysis L3 + L4) ---
-# L3: tune retry + get_center_freq readback (clean-room re-derivation of the
+# L3: tune retry + get_center_freq readback (independent re-derivation of the
 #     SDR++ RTL2832 PLL write-loss defence, main.cpp:344-359).
 # L4: start() explicitly asks tuner bandwidth = 0 (driver auto, main.cpp:310).
 # Driven by an injected FAKE librtlsdr ops table -- a test double, NOT a
@@ -1811,7 +1811,7 @@ target_link_libraries(test_rtl_sdr_tune PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME rtl_sdr_tune COMMAND test_rtl_sdr_tune)
 
 # ---- phase12 Wave2: channelizer rational resampling (gap-analysis L1) -------
-# Clean-room two-rate chain: power-of-two pre-decimation (the decimating FIR) +
+# Independent two-rate chain: power-of-two pre-decimation (the decimating FIR) +
 # GCD-reduced polyphase rational residual (rational_resampler.h). Fixes the
 # 2.048MHz->48kHz round(in/out)=43 drift (was 47.62kHz). Integer-exact ratios
 # still take the single-stage integer path. Header-only resampler, so no new
@@ -1836,7 +1836,7 @@ target_link_libraries(test_demod_enhance PRIVATE Qt6::Test Qt6::Core)
 add_test(NAME demod_enhance COMMAND test_demod_enhance)
 
 # ---- phase13: RxVFO bandwidth short-circuit + transition-band parameterization
-# Clean-room mapping of SDR++ rx_vfo.h (GPLv3, mechanism only):
+# Independent mapping of SDR++ rx_vfo.h (GPLv3, mechanism only):
 #   filterNeeded = (bandwidth != outRate); transition width = 0.1*(bw/2).
 # Pure decision (planChannelFilter), Channelizer whole-band passthrough fast
 # path, and NCO retune phase continuity. Links channelizer only (no FFT).

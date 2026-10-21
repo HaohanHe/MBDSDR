@@ -1,6 +1,6 @@
 // GSM FCCH (Frequency Correction CHannel) detector + clock-ppm estimator.
 //
-// This is a PURE OFFLINE algorithm ported (clean-room) from the kalibrate-rtl
+// This is a PURE OFFLINE algorithm ported (independent) from the kalibrate-rtl
 // study notes (docs/learn/kalibrate.md). It touches NO hardware: given a block
 // of complex baseband IQ it looks for the GSM FCCH pure tone, which lands at
 // GSM_RATE/4 = 67708.333 Hz above the carrier, and from the measured tone

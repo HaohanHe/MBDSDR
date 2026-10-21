@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// NanoVNA (H / H4) text-protocol client — clean-room, self-written.
+// NanoVNA (H / H4) text-protocol client — independent, self-written.
 //
 // Protocol facts (command words / data framing / prompt timing) were learned
 // from public upstream (ttrftech/NanoVNA firmware, nanovna-saver) as a

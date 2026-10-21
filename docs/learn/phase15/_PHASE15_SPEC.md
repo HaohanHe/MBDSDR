@@ -30,7 +30,7 @@
 
 ## 2. 质量门
 - ctest **103 基线不破** + 新增全绿（offscreen：`LD_LIBRARY_PATH=/home/user/Qt/6.8.2/gcc_64/lib:/home/user/.local/lib QT_QPA_PLATFORM=offscreen`）。
-- 干净室 MIT（只学 SDR++/GNU Radio 机制、不复制 GPL）；合成仅测试、生产无信号诚实空态（禁假峰值/假设备/假出声）；无密钥；无「比赛/competition」。
+- MIT 独立实现（只学 SDR++/GNU Radio 机制、不复制 GPL）；合成仅测试、生产无信号诚实空态（禁假峰值/假设备/假出声）；无密钥；无「比赛/competition」。
 - git：只暂存相关文件（禁 add -A）；**不自行 push**（MainAgent 验收统一推）。
 
 ## 3. 红线

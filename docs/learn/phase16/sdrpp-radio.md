@@ -446,12 +446,12 @@ ch.audio48k = ch.resampler.process(aif);                            // :292
 
 ### 3.5 WFM 立体声 — `cpp/src/dsp/wfm_stereo.{h,cpp}`
 - MBDSDR 是**独立类 `WfmStereoDecoder`**（wfm_stereo.h:35），feed `rawMpxOut()`（pre-去加重）tap，内部二阶 19kHz PLL（wfm_stereo.cpp:129-147）+ 38kHz 再相干解调（:158）+ M/S 各 15kHz FIR + 50us 去加重（:166-169），输出 sample-aligned 的 M/S，由 engine 矩阵成 L/R。
-- 对照 SDR++：立体声在 `dsp::demod::BroadcastFM` **内核**（core DSP，不在本目录），由 `setStereo(bool)`（wfm.h:289）开关。**两边都靠 pilot PLL 再生 38kHz，但 MBDSDR 是 clean-room 独立类、可单测**，架构上等价于"tap 下游解码"，无需照抄内核。
+- 对照 SDR++：立体声在 `dsp::demod::BroadcastFM` **内核**（core DSP，不在本目录），由 `setStereo(bool)`（wfm.h:289）开关。**两边都靠 pilot PLL 再生 38kHz，但 MBDSDR 是 independent 独立类、可单测**，架构上等价于"tap 下游解码"，无需照抄内核。
 
 ### 3.6 RDS — `cpp/src/dsp/rds_decoder.{h,cpp}`
 - MBDSDR `RdsDecoder`（rds_decoder.h:46）feed `mpxOut()`（去加重后 MPX，57kHz 副载波仍在）。
 - 解调路径：**自由运行 57kHz NCO 复数下变频**（rds_decoder.cpp:124-132）→ I/Q 双臂 FIR 低通（:136-137）→ **相位不变差分积分解 biphase**（:154 `dot = x*prevX + y*prevY`）→ 26 位块同步 + CRC（:180-264）。
-- 对照 SDR++ `RDSDemod`：用 **两个 Costas 环 + MM 时钟恢复**（rds_demod.h:65-72）锁副载波与符号时钟。**MBDSDR 不用 Costas**，靠自由 NCO + 双臂差分（相位不变）免载波恢复——这是更简单、确定性更强的 clean-room 路线，已能单测。
+- 对照 SDR++ `RDSDemod`：用 **两个 Costas 环 + MM 时钟恢复**（rds_demod.h:65-72）锁副载波与符号时钟。**MBDSDR 不用 Costas**，靠自由 NCO + 双臂差分（相位不变）免载波恢复——这是更简单、确定性更强的 independent 路线，已能单测。
 - 状态机对照：MBDSDR `processBit/handleGroup/parseGroup`（rds_decoder.cpp:180,266,281）对应 SDR++ `Decoder::process/decodeGroup/decodeGroup0/2/10`（rds.cpp:133,400,275,311,360）。两边都按组类型 0(PS)/2(RadioText) 分发；MBDSDR 明确留 TODO：type4 时钟、type8 TMC、0B/2B 版本（rds_decoder.cpp:305-306）。
 
 ---
@@ -468,12 +468,12 @@ ch.audio48k = ch.resampler.process(aif);                            // :292
 | G4 | 模式切换=换对象+重接线+计时 | stop/delete/new/重接 stream + flog 计时（radio_module.h:419-416） | `needsRebuild` 标记 + `rebuild()`（vfo_manager.cpp:232） | **已实现** | 已同构。可补：切换耗时记录与"切换前后块状态 reset"契约（demod.reset 已存在 demod.h:21） | 单测：切 WFM↔NFM 后 rds/stereo 指针随 rebuild 重建、旧状态清零（reset 被调） |
 | G5 | 后处理旁路（RAW 直通） | `getPostProcEnabled()=false` → AF链全禁（raw.h:58, radio_module.h:555-557） | 无 RAW；数字/ADS-B 走独立路径（vfo_manager.cpp:36-74） | **未实现（模拟侧）** | 通用价值：caps.postProcEnabled=false 时 engine 跳过重采样/去加重，直通原始基带——对"数字解调旁路"与"频谱/录制 tap"有用 | 单测：caps.postProcEnabled=false 的模式，其 `audio48k` 直通 IF 率、不经过 48k resampler |
 | G6 | 远程命令 GET/SET + 写门 | modCom handler，写命令带 `enabled` 门 + bwLocked（radio_module.h:787-835） | 无（属 Wave2 server 层） | **未实现（本阶段外）** | 通用价值：同一批 setter 暴露为读写分离命令，写动作 gate——正是 Wave2 无头控制接口蓝本 | Wave2 单测：未知命令诚实报错；写门关闭时 SET 不改状态、GET 回读一致 |
-| G7 | RDS 副载波解调 | 双 Costas + MM 时钟（rds_demod.h:65-72） | 自由 NCO + 相位不变差分（rds_decoder.cpp:124-177） | **已实现（clean-room 替代）** | 无需照抄 Costas；MBDSDR 路线更确定。可补 type4 时钟/0B/2B（rds_decoder.cpp:305 TODO） | 单测：合成 57kHz biphase 序列 → 块同步收敛、PS/RT 字段正确 |
+| G7 | RDS 副载波解调 | 双 Costas + MM 时钟（rds_demod.h:65-72） | 自由 NCO + 相位不变差分（rds_decoder.cpp:124-177） | **已实现（independent 替代）** | 无需照抄 Costas；MBDSDR 路线更确定。可补 type4 时钟/0B/2B（rds_decoder.cpp:305 TODO） | 单测：合成 57kHz biphase 序列 → 块同步收敛、PS/RT 字段正确 |
 | G8 | WFM 立体声 | BroadcastFM 内核内 setStereo（wfm.h:289） | 独立 WfmStereoDecoder 消费 rawMpxOut tap（wfm_stereo.cpp:112） | **已实现（且更可测）** | 架构等价（tap 下游）。可补 pilot 丢失时平滑回落 mono（已实现 wfm_stereo.cpp:195-215） | 单测：合成 MPX（含 19k pilot + 38k DSB）→ M/S 对齐、blend 随 pilot 质量线性 |
 | G9 | SSB 多模式参数化 | USB/LSB/DSB 复用同一 SSB 模板 + Mode 枚举（usb/lsb/dsb.h） | USB/LSB 复用 DemodSSB + Sideband（demod.h:135）；缺 DSB | **已实现（USB/LSB）** | 补 DSB：DemodSSB 加 Sideband::DSB 即可（同一 BFO/低通，双边带不滤边带） | 单测：DSB 模式不过边带、输出带宽对称；caps 表注册 |
 | G10 | CW | 独立 CW 类 + 音调振荡（cw.h:101） | 复用 DemodSSB(Lsb)，无音调（vfo_manager.cpp:96） | **缺深度** | 通用价值：CW = SSB + 可设音调 BFO。给 DemodSSB 加可选 pitch 偏移即可，不必新类 | 单测：设 pitch=800Hz，合成 CW 单音 → 音频落在 800Hz |
 
-**收敛总评**：MBDSDR 在"每 VFO 独立解调 + tap 下游 stereo/RDS"上**已经比 SDR++ 单 VFO 更现代、更可测**；真正的差距集中在 **G1（能力自述接口）、G2（模式注册表）、G6（远程命令层，Wave2）**。这三项是"统一接口收敛"的核心——G1/G2 可在本笔记指导下干净室落地（MIT、不抄 GPL），G6 是 Wave2 无头控制的直接目标。G3/G4/G5 是同一机制的不同形态，无需返工。
+**收敛总评**：MBDSDR 在"每 VFO 独立解调 + tap 下游 stereo/RDS"上**已经比 SDR++ 单 VFO 更现代、更可测**；真正的差距集中在 **G1（能力自述接口）、G2（模式注册表）、G6（远程命令层，Wave2）**。这三项是"统一接口收敛"的核心——G1/G2 可在本笔记指导下独立落地地（MIT、不抄 GPL），G6 是 Wave2 无头控制的直接目标。G3/G4/G5 是同一机制的不同形态，无需返工。
 
 ---
 
@@ -481,7 +481,7 @@ ch.audio48k = ch.resampler.process(aif);                            // :292
 
 1. **`dsp::demod::BroadcastFM` 内核**（core/src/dsp/demod/broadcast_fm.*，含立体声解调、rdsOut 端口生成、RDS 副载波抽取）——不在本目录，未逐行读；WFM 立体声在 SDR++ 侧的内部实现细节未对照。属 Wave1-A（signal_path）范围。
 2. **`dsp::chain` / `dsp::stream` / `dsp::sink::Handler`** 的线程模型与双缓冲语义（radio 模块大量依赖）——未读 core 实现；本笔记只从用法推断"stream 重接线即重连缓冲"。属 Wave1-A。
-3. **`dsp::demod::FM/AM/SSB/CW` 模板内核**（core/src/dsp/demod/*）——radio 模块只是薄包装，具体解调算法（FM 鉴权器、AM AGC、SSB BFO）未逐行；MBDSDR 侧已有等价 clean-room 实现可对照。
+3. **`dsp::demod::FM/AM/SSB/CW` 模板内核**（core/src/dsp/demod/*）——radio 模块只是薄包装，具体解调算法（FM 鉴权器、AM AGC、SSB BFO）未逐行；MBDSDR 侧已有等价 independent 实现可对照。
 4. **RDS 高级软判决路径**（rds_demod.h:84-86 `soft.swap`、wfm.h:81 reshape + SymbolDiagram）——读了结构，但软符号如何喂给纠错（WFM 高级 RDS）未深入；MBDSDR 暂只做硬判决。
 5. **CTCSS/DCS 静噪的音調表与解码细节**（`dsp::noise_reduction::ctcss_squelch`）——只从 radio_module 用法（radio_module.h:61-67,681-688）了解接口，未读内核。
 6. **modCom 注册/分发的底层**（`core::modComManager`）——只看 radio 侧 handler（radio_module.h:780-842），未看 core 如何跨模块路由；Wave1-B 范围。

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Band-preset table: well-known public frequency allocations, each with a sane
 // mode + default channel bandwidth. Pure data + lookup, no Qt, no DSP state,
-// fully unit-testable. Clean-room: allocations are public ITU/IARU band plans,
+// fully unit-testable. Independent: allocations are public ITU/IARU band plans,
 // not copied from any SDR++ source file.
 #ifndef MBDSDR_BAND_PRESET_H
 #define MBDSDR_BAND_PRESET_H

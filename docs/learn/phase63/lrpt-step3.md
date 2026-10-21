@@ -120,7 +120,7 @@
 
 ## 7. 红线与纪律
 
-- **干净室**：lrpt_pipeline.py 只做串联，复用第①②轮 MIT 模块；未碰 GPL 源码。
+- **独立实现**：lrpt_pipeline.py 只做串联，复用第①②轮 MIT 模块；未碰 GPL 源码。
 - **不预置呼号**：占位 payload 用 PRNG。
 - **不发射**：纯合成闭环。
 - **不 git add/commit/push**：仅写文件。

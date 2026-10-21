@@ -3245,7 +3245,7 @@ QString execRunTemplate(const QJsonObject& args, dsp::SpectrumEngine* /*engine*/
 
 // The built-in tool registry: name -> executor. Learned (mechanism only) from
 // SDR++'s registerSource(name, handler) table pattern -- a name-keyed lookup
-// instead of an if-else chain. Clean-room reimplementation; no GPL code copied.
+// instead of an if-else chain. Independent reimplementation; no GPL code copied.
 // Every name here MUST equal a ToolSchemaSpec name (see test_tool_registry);
 // adding a tool = add the declarative spec in tool_schema.cpp + one row here.
 struct ToolDispatch {

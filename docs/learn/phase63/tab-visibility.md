@@ -1,7 +1,7 @@
 # Phase63 右栏 tab 显隐（SDR++ 模块显隐机制的轻量等价）
 
 > 范围：右栏 `rightTabs_`（QTabWidget）面板 tab 可关闭、可恢复、可持久化。
-> 全程 offscreen/CLI，未操控 GUI；零 mock；活动参数零硬编码；干净室实现，未抄 SDR++ 源码。
+> 全程 offscreen/CLI，未操控 GUI；零 mock；活动参数零硬编码；独立实现，未抄 SDR++ 源码。
 
 ## 为什么做这个
 

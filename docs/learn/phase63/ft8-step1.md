@@ -2,7 +2,7 @@
 
 > 日期：2026-10-10  作者：MBDSDR 工程轮
 > 基线 HEAD：2ff3840  产物：纯 Python 层，未改任何 cpp
-> 配套：`ft8-mechanism-study.md`（机制笔记，干净室）、`ft8-landing-path.md` §轮次 1
+> 配套：`ft8-mechanism-study.md`（机制笔记，独立实现）、`ft8-landing-path.md` §轮次 1
 > 许可：本模块自写 MIT，未抄 wsjtx GPL 源码；下列 file:line 仅指本仓实现位置
 
 ---
@@ -33,7 +33,7 @@
 | §2 nssy=4 / nfos=2（3.125 Hz bin） | 时间步 480（L300）、DFT 3840（L297）、相关平面 L347-356 |
 | §5 符号谱 + 二维 Costas 相关峰 | `_symbol_spectrum()` L315；`process()` 相关峰搜索 L358-368 |
 | §5 峰/次峰比作同步质量 | `sync_quality = p_peak/p_2nd` L370；门限 1.5 L289 |
-| §0 干净室 / 诚实空态 | 模块 docstring L1-30；纯噪声 `synced=False` 空符号 L371-373 |
+| §0 独立实现 / 诚实空态 | 模块 docstring L1-30；纯噪声 `synced=False` 空符号 L371-373 |
 
 ### 1.1 调制器 Ft8Modulator（L120-252）
 - 连续相位 8-FSK：`np.cumsum` 相位不重置符号边界，避免硬切换宽带泄漏（L215-218）；
@@ -114,7 +114,7 @@ SNR 曲线要点（逐符号精确检出率）：
 
 ## 4. 红线核对
 
-- [x] 干净室：MIT 头，未抄 wsjtx GPL 代码；常量为公开协议事实；
+- [x] 独立实现：MIT 头，未抄 wsjtx GPL 代码；常量为公开协议事实；
 - [x] GPL 措辞中立：无活动竞赛类字样；活动参数只进 docs；
 - [x] 不预置呼号：示例占位 `CALL1`（仅在 NotImplementedError docstring 出现）；
 - [x] 未碰 `cpp/*`、`cpp/tests/*`、`ui_diag_freeze.cpp`、`cpp/scratch/*`；

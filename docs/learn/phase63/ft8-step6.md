@@ -1,6 +1,6 @@
 # FT8 收尾轮 2：UI 控件 + 状态徽标
 
-HEAD=10e5024。干净室自写 MIT，镜像 main_window.cpp ctcss/cdcss badge 先例。
+HEAD=10e5024。独立实现 MIT，镜像 main_window.cpp ctcss/cdcss badge 先例。
 
 ## 1. UI 落地 file:line
 

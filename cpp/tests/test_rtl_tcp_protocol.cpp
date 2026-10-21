@@ -6,7 +6,7 @@
 // deterministic mock that records the exact bytes the client sends. No hardware,
 // no audio, no engine worker thread (so it runs green in a headless container).
 //
-// Reference (clean-room, rtl_tcp public daemon wire format):
+// Reference (independent, rtl_tcp public daemon wire format):
 //   * client -> server: 5 bytes = [cmd:u8][param:u32 big-endian]
 //   * server -> client on accept: 12 bytes = "RTL0"[tuner_type:u32 BE][gain_count:u32 BE]
 //   * IQ stream: interleaved uint8 I/Q, offset 127 (0 = -1.0, 255 = +1.0)

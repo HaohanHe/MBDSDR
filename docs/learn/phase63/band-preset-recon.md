@@ -18,7 +18,7 @@
 - `cpp/src/dsp/band_preset.h`：公开频率分配表（FM广播 87.5-108M/WFM、航空 118-136M/AM、
   中波 531-1602k/AM、20m/2m/70cm 业余段），每项 name+[low,high]+mode+bw；
   `bandPresetForFrequency(hz)` 命中返回预设，越界返回 nullopt（诚实不猜默认）。
-  干净室：频率分配是公开 ITU/IARU band plan，非抄 SDR++ 代码。
+  独立实现：频率分配是公开 ITU/IARU band plan，非抄 SDR++ 代码。
 - `cpp/tests/test_band_preset.cpp`：6 用例（表完整性/命中/越界 miss/边界 inclusive），
   QtTest，确定性，离线 moc 跑通 6 passed。
 

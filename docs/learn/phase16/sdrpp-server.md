@@ -2,7 +2,7 @@
 
 > 阶段：Phase16 · Wave1 Batch B（无头/远程控制 + 模块间通信）。
 > 精读日期：2026-10-03。基线 ctest 104/104。
-> **许可证边界**：`repos/sdrpp/**` 为 **GPLv3**（`repos/sdrpp/license` 首行 `GNU GENERAL PUBLIC LICENSE Version 3`）。本笔记只摘录机制性短片段并标注出处，**不复制代码、不把 GPL 源码入库**；MBDSDR 自有代码为 MIT，干净室重写。
+> **许可证边界**：`repos/sdrpp/**` 为 **GPLv3**（`repos/sdrpp/license` 首行 `GNU GENERAL PUBLIC LICENSE Version 3`）。本笔记只摘录机制性短片段并标注出处，**不复制代码、不把 GPL 源码入库**；MBDSDR 自有代码为 MIT，独立重写。
 > 本笔记只写事实与设计要点，不改生产代码、不 commit/push。
 
 ---
@@ -376,7 +376,7 @@ struct SpyServerTuner {
 
 ---
 
-## 4. 差距判定表 + 「MBDSDR 无头控制层」干净室设计要点
+## 4. 差距判定表 + 「MBDSDR 无头控制层」独立设计要点
 
 ### 4.1 差距判定表
 
@@ -398,7 +398,7 @@ struct SpyServerTuner {
 | 不经 GUI 操控 | SDR++ 反而是"把 GUI 序列化到远端" `server.cpp:250-353` | 引擎槽纯 C++/QThread、无 QWidget 依赖（已验证） | **MBDSDR 有更好的底子**：引擎本就可脱离 GUI |
 | 鉴权/多客户端 | 无鉴权、单客户端（IP 还是 TODO `server.cpp:166`） | 单客户端、无鉴权 `spyserver_server.h:66` | 诚实空态：都没做，云内可后续加 |
 
-### 4.2 「MBDSDR 无头控制层」干净室设计要点（供 Wave2 落地）
+### 4.2 「MBDSDR 无头控制层」独立设计要点（供 Wave2 落地）
 
 **定位**：在 `dsp::SpectrumEngine`（已存在、无 QWidget 依赖）之上，加一层**与 GUI 解耦的命令分发器**。它不是 SDR++ 的"远程 GUI"，而是一组**具名命令 → 直接打引擎槽**的窄接口；GUI、AI worker、SpyServer 服务端三者都只是它的"前端"。
 

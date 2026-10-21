@@ -36,7 +36,7 @@ private:
     int numTaps_;
 };
 
-// ---- Nuttall-windowed-sinc lowpass, designed from Hz (clean-room) ----------
+// ---- Nuttall-windowed-sinc lowpass, designed from Hz (independent) ----------
 // Mirrors SDR++ taps::lowPass(cutoff, transWidth, sr) with a Nuttall window:
 // tap count ~= ceil(3.8 * sr / transWidth), windowed-sinc impulse, DC-gain
 // normalized. Owns its own tail delay line so blocks stream continuously and

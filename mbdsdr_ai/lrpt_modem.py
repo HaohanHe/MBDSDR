@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""LRPT QPSK 调制器 + 解调/帧同步（干净室自写，第①步）。
+"""LRPT QPSK 调制器 + 解调/帧同步（独立实现，第①步）。
 
-本模块依据 ``docs/learn/phase63/weather-sat-digital-study.md``（干净室机制笔记）
+本模块依据 ``docs/learn/phase63/weather-sat-digital-study.md``（独立实现机制笔记）
 自述重写，只依赖 NumPy，可离线逐比特复现。SatDump / meteor_demod / goestools
 （GPL/BSD）源码仅作机制证据（笔记中已记 file:line），本仓未包含其代码文本。
 

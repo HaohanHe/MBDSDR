@@ -15,7 +15,7 @@
 //   4. repeat over several blocks and average with a consistency check, also
 //      reporting the spread and a confidence value.
 //
-// SIGN CONVENTION (learned from kalibrate offset.cc, clean-room):
+// SIGN CONVENTION (learned from kalibrate offset.cc, independent):
 //   Let r = measured baseband position - expected baseband position (Hz) and
 //   Fc = the nominal tuned RF centre (Hz). The correction value to hand to the
 //   source is

@@ -82,7 +82,7 @@
 ## 红线
 - 射频频率（ACARS 131.525 MHz、NAVTEX 518/490 kHz）仅存在于 docs，代码零硬编码。
 - 不预置 TLE/呼号/电台；诚实空态（0 包/0 报文/空列表）禁 mock。
-- 干净室 MIT：协议常量来自公开标准（ARINC 618、ITU-R M.540、CCIR 476、ITA2），
+- MIT 独立实现：协议常量来自公开标准（ARINC 618、ITU-R M.540、CCIR 476、ITA2），
   未复制任何 GPL 源码。
 - 全仓无「比赛/competition」字样；工具三通道一致；新工具为只读（write=false），
   写工具手动 gate 规则未变。

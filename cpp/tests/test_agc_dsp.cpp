@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Block-level lookahead anti-clip tests for dsp::Agc (clean-room mechanism).
+// Block-level lookahead anti-clip tests for dsp::Agc (independently implemented mechanism).
 //
 // Acceptance (Phase35 W2):
 //  (a) Burst: after the envelope has settled on a quiet floor, a sudden strong

@@ -105,7 +105,7 @@ void PowerSpectrum::rebuildWindow(std::size_t n) {
         window_[i] = v;
     }
 
-    // Unit-RMS normalization (clean-room; the *idea* of dividing a window by its
+    // Unit-RMS normalization (independent; the *idea* of dividing a window by its
     // RMS so the level readout is independent of the window choice, written
     // independently): GNU Radio's gr-fft window::build(normalize=true) divides
     // the taps by sqrt(mean(w^2)); we do the same here at the end of rebuild.

@@ -1,4 +1,4 @@
-# 气象卫星数字云图机制学习笔记（LRPT / HRPT / LRIT-HRIT，干净室）
+# 气象卫星数字云图机制学习笔记（LRPT / HRPT / LRIT-HRIT，独立实现）
 
 > 日期：2026-10-10  作者：MBDSDR 工程轮（phase63）
 > 仓库：MBDSDR（MIT）
@@ -9,10 +9,10 @@
 
 ---
 
-## 0. 干净室声明（Clean-Room Notice）
+## 0. 独立实现声明（Implementation Notice）
 
 上述三个学习源均为开源许可项目（SatDump/meteor_demod 为 GPL，goestools 为 BSD）。
-本笔记遵循干净室规则：
+本笔记遵循独立实现规则：
 
 - **只读机制，不抄代码**。下列所有 file:line 引用仅作"机制证据"，回答
   "这条数字下传在物理层/链路层做了什么、为什么这么做"。
@@ -205,13 +205,13 @@ LRIT/HRIT × 0°/180°）→ Viterbi K7 r1/2 → LRIT 取反/HRIT NRZ-M → 解�
 
 ---
 
-## 6. 诚实边界：RS / 卷积码干净室自写路径
+## 6. 诚实边界：RS / 卷积码独立实现路径
 
-- **卷积内码（K7 r1/2）**：生成多项式 {79,109} 是 CCSDS 公开事实。干净室自写
+- **卷积内码（K7 r1/2）**：生成多项式 {79,109} 是 CCSDS 公开事实。独立实现
   路径：按公开 trellis（64 状态）自写 Viterbi ACS（add-compare-select）+ 回溯，
   不抄 volk_k7 表。参数证据：`viterbi27.h:8` / `viterbi.h:27`。
 - **RS(255,223)**：本原多项式、首根 112、index 11、32 校验字节是 CCSDS 公开
-  事实。干净室自写路径：用 GF(256)（CCSDS 本原多项式 x^8+x^7+x^2+x+1）自写
+  事实。独立实现路径：用 GF(256)（CCSDS 本原多项式 x^8+x^7+x^2+x+1）自写
   Berlekamp-Massey + Chien 搜索，或引入 MIT/Apache 许可的小型 RS 库（如
   `libcorrect` 是 MIT——见 reedsolomon.cpp:6 引用，可评估直接用 MIT 库而非自写）。
   对偶基变换是 CCSDS 规定的线性变换，可按 tal 矩阵自述重写。

@@ -1,9 +1,9 @@
 # Phase 60 — ACARS + NAVTEX packet-text modes (cloud rebuild SPEC)
 
-Baseline: origin/main = 33258d9. Clean-room MIT; no GPL copied; no hardcoded
+Baseline: origin/main = 33258d9. Independent MIT; no GPL copied; no hardcoded
 frequencies; honest empty states; tool count 38 -> 40 (two read-only tools).
 
-## Standards (mechanism learned from public specs, clean-room)
+## Standards (mechanism learned from public specs, independent)
 - ACARS over VHF airband: ARINC 618 character framing over MSK
   (2400 b/s, deviation ±600 Hz). Block check = CRC-16/CCITT-FALSE.
 - NAVTEX: ITU-R M.540 message layout over SITOR-B (CCIR 476 FEC),
@@ -108,5 +108,5 @@ integrator later — the test must compile standalone with g++ first)
 ## Red lines
 - No hardcoded RF frequencies (ACARS 131.525 MHz / NAVTEX 518/490 kHz go to
   docs ONLY, not code); no callsign/TLE seeds; no fake packets — pure noise
-  must yield 0 frames; MIT clean-room (reference public specs, not GPL code);
+  must yield 0 frames; MIT independent (reference public specs, not GPL code);
   no "competition" wording.

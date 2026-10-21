@@ -5,7 +5,7 @@
 > 复用：Phase52 afc_correct / notch_cw / _demod_resync（ssdv_phy.py、ccsds_ssdv.py）；Phase51 stress_iq_stream.sh + soak_rss.csv（RSS 89.5→137.6MB）；P38 曾测 MainWindow 构造 ~218ms。
 
 ## 块 1（最高优先，Python 域）：二阶 PLL 精载波恢复
-- 分段 AFC 粗校正基础上加**二阶锁相环相位跟踪**（公开教科书算法干净室重写）；
+- 分段 AFC 粗校正基础上加**二阶锁相环相位跟踪**（公开教科书算法独立重写）；
 - 合成线性扫 **0→200Hz / 0→500Hz**、真实 LEO 多普勒曲线全链实测：**跟踪残余相位/解码成功率 vs AFC-only 对比**真实数字；
 - 仍失效区间（低 SNR×陡斜率）**诚实标 FAIL 并给理论解释**（PLL 带宽-噪声权衡）；gate 具名常量。
 
@@ -20,7 +20,7 @@
 - 优化低成本项（延迟样式表应用、网络探测超时等），**改前改后数字对比**。
 
 ## 质量门 / 红线
-- 干净室 MIT 不复制 GPL；无比赛字样；活动参数禁入；不预置 TLE；诚实空态不 mock；
+- MIT 独立实现 不复制 GPL；无比赛字样；活动参数禁入；不预置 TLE；诚实空态不 mock；
 - 8GB OOM（-j2，如实记录）；只暂存相关文件（禁 add -A）；**不 commit/push**；
 - pytest 176/7 skip、flutter 384、ctest 129 不回归（全量输出实际计数）；
 - 如实报告 file:line、各场景真实数字（改前改后）、未解决项。

@@ -240,7 +240,7 @@ bool RtlSdrSource::pushCenterFreq(double freqHz) {
     tuneAttemptsLast_ = 0;
     if (!ops || !dev_ || !ops->setCenterFreq || !ops->getCenterFreq) return false;
 
-    // SDR++-style PLL write-loss defence (clean-room re-derivation of
+    // SDR++-style PLL write-loss defence (independent re-derivation of
     // main.cpp:344-359): retry the write, and after each write read the
     // frequency the hardware actually parked at. A write that returns "ok"
     // but reads back something else IS the failure we defend against --
