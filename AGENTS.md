@@ -63,12 +63,26 @@ test_cross_golden、test_modulation、test_rrc_single_source 四个文件。
 passed 数相应下浮——skip 均属无 env/无硬件的诚实 skip）。任何改动不得
 降低此数。
 
-根 `tests/`（大套件，156 个测试文件）同样是对拍门禁所在，新增 5 个门禁文件：
+根 `tests/`（大套件，160 个测试文件）同样是对拍门禁所在。**它整跑很慢**：
+单进程跑 160 个文件约 45 分钟——慢在同进程内单例 QApplication 跨文件累积
+（前面的文件留下成百上千个 widget，后续每次新建窗口都要连带做全量样式/
+布局重算，越往后越慢；孤立构造 MainWindow 只需 5.5 s，累积后可要 11 分钟）。
+对策有两条，都已落地：
+① `tests/conftest.py` 的模块级 autouse fixture 在每个模块结束后回收遗留
+   顶层 widget（治本，显著降耗）；
+② **CI 与本地跑测脚本都按 A/B 两组并行跑**（`scripts/ci_pytest_groups.py`
+   按文件名排序交替分组，自动生成无需维护清单）——分组后单组只要
+   约 3–4 分钟（实测 A 组 695 项 3.6 分钟、B 组 807 项 3.1 分钟），
+   单进程整跑的累积问题自然消失。
+
+根 `tests/` 新增 6 个门禁文件：
 `test_material_task_chains.py`（五份材料 39 个任务步的存在性 + 端到端链路）、
 `test_tle_parse_crosscheck.py`（TLE 文本↔SGP4 解析对拍）、
 `test_empty_result_diagnostics.py`（空结果必须带说明）、
 `test_external_api_honesty.py`（外部 API 错误载荷不得谎报为空）、
-`test_rx_acceptance.py`（材料验收口径可执行判据）。
+`test_rx_acceptance.py`（材料验收口径可执行判据）、
+`test_material_table_consistency.py`（材料表 ↔ 实现：工具存在性、声明
+用例数、验证文件存在）、`test_identity_redline.py`（身份红线机械护栏）。
 
 C++ 桌面端（`cpp/`）：`ctest --test-dir build_cpp`（Qt 6.8.2 MinGW 工具链 +
 offscreen）基线 **155/155 全绿**（2026-10-20 实测；含跨语言对拍 cross_golden、
