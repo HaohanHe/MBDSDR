@@ -51,6 +51,13 @@ ADS-B 审计中另查出一处真缺陷：精简版门限在 MAD=0（无噪/极�
 恰好踩中该模块 docstring 声称要避免的失效模式，整帧漏检。已改为无噪档使用
 "中位数与峰值比例门限"（等价经典 OOK 半幅门限）。
 
+### 2.1 新增：能力表面的体能化（非重复实现，只记录一次性收尾）
+
+| 主题 | 事实 | 处置 |
+|---|---|---|
+| CCSDS 通用链的模型入口 | `ccsds_rx.py` 的整条链（ASM 同步→K=7 Viterbi→PN 解扰→RS）之前只有 SSDV 专用入口，模型对 ASTU-1 这类 CCSDS TM 体制任务无入口 | 新增 `ccsds_tools.py`：`ccsds_encode_frame` / `ccsds_decode_bits` / `ccsds_decode_iq`（参数逐项可覆盖，不替任务猜参数）；自环对拍测试 7 项 |
+| 统一调制内核 | 新增 `modulation.py`（ASK/BPSK/QPSK/8PSK，NRZ/RRC，映射参数化），后续把 freedv QPSK 收敛进来 | 已收敛（等价断言钉死） |
+
 ---
 
 ## 3. 待收敛（确属重复，已识别，前置条件写在表里）

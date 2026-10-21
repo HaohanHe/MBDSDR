@@ -29,7 +29,7 @@
 |---|---|---|---|
 | 气象卫星图片接收（GK-2A / FY-4 / FY-3） | `sat_rx_profile` → `geo_pointing` → `dish_gain` → `fe_link_budget` → 设备与解码面 | 指向偏差 ≤ 2°；SNR ≥ 5 dB；馈线 < 5 m；LNA ≥ 20 dB / NF < 1 dB | 指向表 + 前端预算 + 判据清单 |
 | 深空/LEO 多普勒定轨（LRO / Iridium 类） | `doppler_from_frequency` → `pseudorange_rate_model` → `tle_state_ecef` → `propagate_state_stm` → `rls_update` → `calibrate_time_offset` → `coord_*` | 观测方程 ρ = −c·Δf/f₀；状态 7 维（含钟差） | 状态矢量 + 协方差 + 残差统计 |
-| ASTU-1 遥测接收 | `sat_rx_profile` → `telemetry_rx_chain` → `doppler_to_frequency` → `doppler_tune_frequency` → 设备面 | 预置频率 = 真实下行 − 10 kHz | 逐块接收链参数 + 调谐频率 |
+| ASTU-1 遥测接收 | `sat_rx_profile` → `telemetry_rx_chain` → `doppler_to_frequency` → `doppler_tune_frequency` → 设备面 → `ccsds_decode_iq` | 预置频率 = 真实下行 − 10 kHz | 逐块接收链参数 + 调谐频率 + 帧字节 |
 | 前端搭建与故障排查 | `dish_gain` → `cantenna_design` → `fe_link_budget` → `fe_diagnose` | 见上；罐子探针偏差 > 5 mm 恶化驻波 | 几何/预算/诊断三件套 |
 | 通信对抗与链路自测 | `modulate_symbols` → `pulse_shape_taps` → `demodulate_symbols` → `constellation_metrics` → `measure_ber` → `link_ber_test` | Eb/N0 口径见 `link_ber_test` 说明 | 实测 BER + 星座质量 + 理论对照 |
 | 轨道与过境预报 | `sat_pass_predict` → `sgp4_propagate` → `coord_enu_to_az_el` | — | 过境窗口（方位/仰角/距离/多普勒） |
@@ -107,11 +107,22 @@
 3. `doppler_to_frequency` / `doppler_tune_frequency` → 计入多普勒后的调谐频率
    （预置值 = 真实下行 − 10 kHz，用于吸收多普勒漂移）。
 
-**诚实边界（重要）**：**帧级协议参数不在本工具内**——帧同步字/字同步、CRC 算法与
-覆盖范围、Scrambler 多项式与种子、TM 差分基准与复位时机、卷积码多项式与码率、
-交织方式、符号映射与字节序、遥测包头与各通道换算系数，公开教程未给出，
-需由外部 dslwp 补丁与专用程序承担。`telemetry_rx_chain` 的输出里
-`frame_protocol_missing` 字段逐项列明缺什么，**不臆造参数**。
+**帧级能力（CCSDS 通用链，已工具化）**：仓内的干净室 CCSDS 数字接收链
+（`mbdsdr_ai/ccsds_rx.py`）此前只经 SSDV 专用入口暴露给模型；现已把**通用链**
+也拆成积木交给模型直接操作，覆盖 ASTU-1 这类同为 CCSDS TM 体制的任务：
+
+- `ccsds_encode_frame` — 信息字节 →（扰码 → K=7 r=1/2 卷积 → 32bit ASM）比特流
+  （用于造向量与自环对拍）；
+- `ccsds_decode_bits` — 比特流 → ASM 同步 → [Viterbi] → 解扰 → [RS] → 帧字节；
+- `ccsds_decode_iq` — 复 IQ →（统一调制内核 demod：ASK/BPSK/QPSK/8PSK）→ 比特
+  → 同上。ASTU-1 走 BPSK + RRC：`scheme=bpsk, shaping=rrc`。
+
+**诚实边界（仍然存在）**：公开教程只给了星座/比特级链路参数，**任务级帧参数
+未给**——具体帧长（ASM 之后的信息比特数）、是否启用卷积与解扰、RS 参数、
+以及各任务特有的 CRC 覆盖范围与遥测字段换算系数。本仓**不替它猜**：
+上述参数在三个工具里都是**具名参数**，须按任务参数填写；`telemetry_rx_chain`
+的 `frame_protocol_missing` 字段仍逐项列明"教程未给"的部分。
+换句话说：**链路能力已具备，任务参数需外部给定**——这正是工具与"猜答案"的界线。
 
 ### 2.4 前端搭建与故障排查
 
@@ -165,6 +176,9 @@
 | `measure_ber` | `bits_tx`, `bits_rx` | — | BER、误符号率、误比特数 |
 | `link_ber_test` | — | `scheme`, `n_bits`, `ebn0_db`, `sps`, `shaping`, `alpha`, `seed` | 实测 BER + 理论对照 + 星座质量 |
 | `pulse_shape_taps` | — | `sps`, `alpha`, `num_taps` | RRC 抽头（与全仓 fir_taps 同源） |
+| `ccsds_encode_frame` | `data` | `use_viterbi`, `use_descramble`, `info_bits`, `asm_word`, `g1`, `g2`, `conv_tail_bits` | 帧比特流 + ASM/卷积/解扰状态 |
+| `ccsds_decode_bits` | `bits` | `asm_word`, `asm_max_hamming`, `frame_bits_after_asm`, `use_viterbi`, `use_descramble`, `use_rs`, `rs_nsym` | 同步帧数 + 每帧 hex/ASCII 预览 |
+| `ccsds_decode_iq` | `iq` | `scheme`, `sps`, `shaping`, `alpha` + 上述 CCSDS 参数 | IQ 直达帧（ASTU-1 走 bpsk+rrc） |
 
 ---
 
