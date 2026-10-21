@@ -775,6 +775,21 @@ class ToolRegistry:
             logger.warning("fengyun_sat 不可用: %s", e)
             return
         FY.register_tool_registry(self)
+        self.register_interferometry_tools()
+
+    def register_interferometry_tools(self):
+        """注册射电干涉测量工具（双站互相关测向 + 角分辨率/可见度）。
+
+        依据材料《通信对抗材料包》射电干涉讲义：几何时延 τ = D·sinθ/c、
+        双路相关得可见度 I·cos(2πf·D·sinθ/c)、分辨率 θ_res ≈ λ/D。
+        """
+        try:
+            from . import interferometry as IFM
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("interferometry 不可用: %s", e)
+            return
+        IFM.register_tool_registry(self)
 
     def register_ssdv_rx_tools(self):
         """注册 Python 侧 SSDV/CCSDS 接收链健壮性工具（无设备，吃 complex64 IQ 文件）。

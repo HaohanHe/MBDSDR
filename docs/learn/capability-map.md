@@ -31,7 +31,7 @@
 | 深空/LEO 多普勒定轨（LRO / Iridium 类） | `doppler_from_frequency` → `pseudorange_rate_model` → `tle_state_ecef` → `propagate_state_stm` → `rls_update` → `calibrate_time_offset` → `coord_*` | 观测方程 ρ = −c·Δf/f₀；状态 7 维（含钟差） | 状态矢量 + 协方差 + 残差统计 |
 | ASTU-1 遥测接收 | `sat_rx_profile` → `telemetry_rx_chain` → `doppler_to_frequency` → `doppler_tune_frequency` → 设备面 → `ccsds_decode_iq` | 预置频率 = 真实下行 − 10 kHz | 逐块接收链参数 + 调谐频率 + 帧字节 |
 | 前端搭建与故障排查 | `dish_gain` → `cantenna_design` → `fe_link_budget` → `fe_diagnose` | 见上；罐子探针偏差 > 5 mm 恶化驻波 | 几何/预算/诊断三件套 |
-| 通信对抗与链路自测 | `modulate_symbols` → `pulse_shape_taps` → `demodulate_symbols` → `constellation_metrics` → `measure_ber` → `link_ber_test` | Eb/N0 口径见 `link_ber_test` 说明 | 实测 BER + 星座质量 + 理论对照 |
+| 通信对抗与链路自测 | `modulate_symbols` → `pulse_shape_taps` → `demodulate_symbols` → `constellation_metrics` → `measure_ber` → `link_ber_test` / `interferometry_tdoa` / `interferometry_resolution`；**射电干涉测向**（双站互相关 TDOA、角分辨率、可见度） | | Eb/N0 口径见 `link_ber_test` 说明 | 实测 BER + 星座质量 + 理论对照 |
 | 轨道与过境预报 | `sat_pass_predict` → `sgp4_propagate` → `coord_enu_to_az_el` | — | 过境窗口（方位/仰角/距离/多普勒） |
 
 ---
@@ -50,7 +50,7 @@
 | **赛前培训-定轨**（PPT） | 轨道力学与观测模型原理、坐标变换、估计器原理 | 同上 + `coord_ecef_to_eci` / `coord_eci_to_ecef` / `coord_ecef_to_enu` / `coord_enu_to_az_el` / `coord_ecef_to_geodetic` / `coord_geodetic_to_ecef` / `pseudorange_rate_model` | `tests/test_orbit_dynamics.py`（雅可比有限差分自洽）+ `tests/test_orbit_determination.py` |
 | **阿斯图友谊号遥测教程**（ASTU-1，SDR 收卫星遥测） | 卫星接收剖面；比特级接收链参数；多普勒调谐余量；CCSDS 帧构造/同步/解扰/维特比译码 | `sat_rx_profile` / `telemetry_rx_chain` / `doppler_tune_frequency` / `ccsds_encode_frame` / `ccsds_decode_bits` / `ccsds_decode_iq` / **`astu_telemetry_decode`** | `tests/test_ccsds_tools.py`（7 项自环：ASM+Viterbi+解扰+IQ 通路）+ `tests/test_tool_pair_chains.py` |
 | **气象卫星图片接收赛前培训**（PPT） | 同步轨道指向；抛物面增益与波束；指向容差；前端链路预算与判据；**赛训验收口径可执行化**（指向/SNR/前端指标/解码成功率逐项判定）；罐子馈源几何；症状→环节诊断；LRIT/HRIT/HRPT 图像解码（**IQ 直达 PNG**：GK-2A 与 FY-4 两条链都有 IQ 入口） | `geo_pointing` / `dish_gain` / `pointing_tolerance` / `fe_link_budget` / `fe_diagnose` / `rx_acceptance` / `cantenna_design` / `gk2a_lrit_decode` / `fy4_lrit_decode` / **`fy4_lrit_decode_iq`** / `meteor_lrpt_demod` / **`meteor_lrpt_decode_iq`** | `mbdsdr_ai/tests/test_acquisition.py`（25 项，含罐子馈源几何与材料数值对照）+ 各协议自带测试 |
-| **通信对抗材料包**（learnSDR 教学包：ASK/BPSK/QPSK、FLL/载波同步、RC 成形、星座与眼图） | 统一调制/解调内核；星座质量；眼图与抖动；误码实测与理论对照；成形抽头 | `modulate_symbols` / `demodulate_symbols` / `constellation_metrics` / `eye_diagram` / `measure_ber` / `link_ber_test` / `pulse_shape_taps` | `mbdsdr_ai/tests/test_modulation.py`（32 项：往返零误码、BER 与理论对照、Gray 映射等价）+ `tests/test_eye_diagram.py`（7 项：噪声单调退化）+ `tests/test_tool_pair_chains.py` |
+| **通信对抗材料包**（learnSDR 教学包：ASK/BPSK/QPSK、FLL/载波同步、RC 成形、星座与眼图；另含射电干涉讲义） | 统一调制/解调内核；星座质量；眼图与抖动；误码实测与理论对照；成形抽头；**射电干涉测向**（双站互相关 TDOA、角分辨率 λ/D、可见度函数） | `modulate_symbols` / `demodulate_symbols` / `constellation_metrics` / `eye_diagram` / `measure_ber` / `link_ber_test` / `pulse_shape_taps` / `interferometry_tdoa` / `interferometry_resolution` | `mbdsdr_ai/tests/test_modulation.py`（32 项：往返零误码、BER 与理论对照、Gray 映射等价）+ `tests/test_eye_diagram.py`（7 项：噪声单调退化）+ `tests/test_tool_pair_chains.py` + `tests/test_interferometry.py`（7 项：TDOA 测向与讲义分辨率对照表） |
 
 > **框架级协议（帧同步/CRC/解扰/卷积/交织）不猜参数**：材料未给的任务级参数
 > （如 ASTU-1 的帧长与是否启用卷积）一律作为具名参数由调用方给出；

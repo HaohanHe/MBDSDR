@@ -78,6 +78,8 @@ TASK_STEPS = [
     ("对抗", "GMSK", ["gmsk_modulate", "gmsk_demodulate"]),
     ("对抗", "FreeDV", ["freedv_modulate", "freedv_demodulate"]),
     ("对抗", "M17 4FSK", ["m17_4fsk_roundtrip"]),
+    ("对抗", "射电干涉测向(TDOA)", ["interferometry_tdoa"]),
+    ("对抗", "角分辨率/可见度", ["interferometry_resolution"]),
 ]
 
 
