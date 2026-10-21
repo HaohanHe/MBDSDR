@@ -72,8 +72,12 @@ jobs:
             timeout: 20
           - root: tools/hw_selfcheck
             timeout: 20
+          # 根 tests/ 是大套件（156 个测试文件）：本地实测约 40 分钟，跨文件
+          # 的单例 QApplication 累积是主要耗时。timeout 是防挂死上限而非预算
+          # （Actions 按实际运行分钟计费），45 分钟只剩 12% 余量，慢机器或
+          # 依赖升级都可能顶穿，故放宽到 75 分钟消除误红。
           - root: tests/
-            timeout: 45
+            timeout: 75
     steps:
       - name: Checkout
         uses: actions/checkout@v4
