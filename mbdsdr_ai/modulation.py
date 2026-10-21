@@ -31,7 +31,7 @@ from .tool_registry import ToolResult
 
 __all__ = [
     "SCHEMES", "symbol_points", "modulate_bits", "demodulate_iq",
-    "constellation_metrics", "ber_measure", "link_ber_test",
+    "constellation_metrics", "eye_diagram", "ber_measure", "link_ber_test",
     "q_function", "theoretical_ber",
 ]
 
@@ -246,6 +246,118 @@ def demodulate_iq(iq: Sequence[complex], scheme: str = "bpsk", sps: int = 1,
         "n_symbols": int(len(nearest)),
         "params": {"scheme": scheme, "sps": sps, "shaping": shape,
                    "alpha": alpha, "mapping": mapping},
+    }
+
+
+def eye_diagram(samples, sps: int = 4, n_traces: int = 200,
+                skip: int = 0) -> Dict[str, Any]:
+    """波形 -> 眼图度量（99% 开口 / 眼宽 / 噪声裕度 / 抖动）+ 折叠轨迹。
+
+    samples : 复基带或实基带序列（可带直流；实数输入按 BPSK 判决簇处理）
+    sps     : 每符号采样数
+    n_traces: 取多少条轨迹（上限 n_traces*sps）
+    skip    : 丢弃开头的瞬态采样数（Costas/AGC 锁定前的样本）
+
+    返回 {"traces": (n_traces, sps) 轨迹, "eye_height": 99% 开口高度,
+    "eye_width_ratio": 眼开度（开口为正的相位占比）, "noise_margin": 眼高/噪声标准差,
+    "jitter_ratio": RMS 抖动（占符号周期）, "transition_ratio": 相邻轨迹判决翻转
+    比例（数据自身跳变率，非质量指标）, "decision_phase": 判决相位,
+    "levels": [下簇均值, 上簇均值]}
+    """
+    sps = int(sps)
+    if sps < 2:
+        raise ValueError("sps 必须 >= 2")
+    x = np.asarray(samples)
+    if x.ndim == 0 or x.size == 0:
+        raise ValueError("samples 为空")
+    v = x.real.astype(np.float64) if np.iscomplexobj(x) else x.astype(np.float64)
+    if skip > 0:
+        v = v[skip:]
+    need = sps * 2
+    if v.size < need:
+        raise ValueError(f"样本不足一个符号（需 >= {need}，实得 {v.size}）")
+    n_traces = max(1, min(int(n_traces), v.size // sps))
+    seg = v[:n_traces * sps].reshape(n_traces, sps)
+
+    def _split(col):
+        m = float(np.median(col))
+        return col[col <= m], col[col > m]
+
+    def _opening(col, q=0.01):
+        """99% 开口：上簇 1% 分位 − 下簇 99% 分位。"""
+        lo, hi = _split(col)
+        if lo.size == 0 or hi.size == 0:
+            return 0.0
+        return float(np.quantile(hi, q) - np.quantile(lo, 1.0 - q))
+
+    # 判决相位：99% 开口最大处（经典"最大眼张开"判据）
+    openings = np.array([_opening(seg[:, k]) for k in range(sps)])
+    decision = int(np.argmax(openings))
+    eye_height = float(openings[decision])
+
+    at_dec = seg[:, decision]
+    low, high = _split(at_dec)
+    if low.size == 0 or high.size == 0:
+        raise ValueError("眼图判决簇为空（信号无幅度变化？）")
+    level_lo = float(np.mean(low))
+    level_hi = float(np.mean(high))
+    threshold = 0.5 * (level_lo + level_hi)
+
+    # 标签法：以判决相位的符号给轨迹打标签，逐相位比较两标签均值差（电平间距）
+    labels = seg[:, decision] > threshold
+    if labels.all() or not labels.any():
+        # 判决相位上只有单一电平（常量数据）：退化为按该相位中位数二分
+        labels = seg[:, decision] > float(np.median(seg[:, decision]))
+    sep = np.zeros(sps)
+    for k in range(sps):
+        col = seg[:, k]
+        a = col[labels]
+        b = col[~labels]
+        if a.size and b.size:
+            sep[k] = float(np.mean(a) - np.mean(b))
+    # 眼开度：电平间距为正且不小于判决相位间距一半的相位占比
+    if sep[decision] > 0:
+        eye_width_ratio = float(np.mean(sep > 0.5 * sep[decision]))
+    else:
+        eye_width_ratio = 0.0
+
+    # 簇内标准差（噪声估计）→ 噪声裕度
+    sigma = max(0.5 * (float(np.std(low)) + float(np.std(high))), 1e-12)
+    noise_margin = float(eye_height / (2.0 * sigma)) if eye_height > 0 else 0.0
+
+    # 相邻轨迹判决翻转 = 数据自身跳变率（非质量指标，如实命名）
+    flips = 0
+    for i in range(n_traces - 1):
+        if bool(labels[i]) != bool(labels[i + 1]):
+            flips += 1
+    transition_ratio = flips / max(1, n_traces - 1)
+
+    # 抖动：逐轨迹过零时刻线性插值（判决边界附近）
+    edge = min(sps - 1, decision + 1)
+    zeros = []
+    for i in range(n_traces):
+        a = seg[i, decision]
+        b = seg[i, edge]
+        if a == 0.0 or (a < 0) != (b < 0):
+            denom = (b - a)
+            frac = 0.0 if denom == 0 else (-a / denom)
+            zeros.append(decision + max(0.0, min(1.0, frac)))
+    jitter = 0.0
+    if len(zeros) >= 2:
+        jitter = float(np.std(zeros)) / sps
+
+    return {
+        "traces": seg.tolist(),
+        "n_traces": int(n_traces),
+        "sps": int(sps),
+        "decision_phase": decision,
+        "eye_height": eye_height,
+        "eye_width_ratio": eye_width_ratio,
+        "noise_margin": noise_margin,
+        "transition_ratio": float(transition_ratio),
+        "jitter_ratio": float(jitter),
+        "levels": [level_lo, level_hi],
+        "cluster_sigma": float(sigma),
     }
 
 
@@ -510,6 +622,31 @@ def _link_ber(args):
         return _err(e)
 
 
+def _eye(args):
+    """眼图度量计算。"""
+    try:
+        samples = args.get("samples")
+        if samples is None:
+            return ToolResult(False, "samples 必须提供采样列表")
+        r = eye_diagram(samples,
+                        sps=int(args.get("sps", 4)),
+                        n_traces=int(args.get("n_traces", 200)),
+                        skip=int(args.get("skip", 0)))
+        traces = r.pop("traces")
+        r["traces_preview"] = traces[:8]
+        r["traces_rows"] = len(traces)
+        return ToolResult(
+            success=True,
+            content=("99%% 眼高 %.4f  眼宽比 %.2f  噪声裕度 %.2f  抖动 %.4f  "
+                     "判决相位 %d（跳变率 %.3f 为数据属性）"
+                     % (r["eye_height"], r["eye_width_ratio"], r["noise_margin"],
+                        r["jitter_ratio"], r["decision_phase"],
+                        r["transition_ratio"])),
+            data=r)
+    except Exception as e:
+        return ToolResult(False, f"眼图计算失败: {type(e).__name__}: {e}")
+
+
 def _pulse_taps(args):
     """成形系数：根升余弦抽头（复用 fir_taps 单一来源）。"""
     try:
@@ -592,6 +729,20 @@ def register_modulation_tools(registry) -> None:
             "seed": {"type": "integer", "default": 20241012},
         }, "required": []},
         handler=_link_ber, category="modulation",
+    )
+    R(
+        name="eye_diagram",
+        description="眼图度量：波形 -> 折叠轨迹 + 99% 开口眼高/眼宽/噪声裕度/抖动，"
+                    "判决相位自动选为开口最大处（不写死采样相位）。"
+                    "用于链路质量评估。原子积木。",
+        parameters={"type": "object", "properties": {
+            "samples": {"type": "array", "items": {"type": "number"},
+                        "description": "实基带或复基带采样列表"},
+            "sps": {"type": "integer", "default": 4},
+            "n_traces": {"type": "integer", "default": 200},
+            "skip": {"type": "integer", "default": 0},
+        }, "required": ["samples"]},
+        handler=_eye, category="modulation",
     )
     R(
         name="pulse_shape_taps",
