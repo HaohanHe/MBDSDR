@@ -58,6 +58,19 @@ ADS-B 审计中另查出一处真缺陷：精简版门限在 MAD=0（无噪/极�
 | CCSDS 通用链的模型入口 | `ccsds_rx.py` 的整条链（ASM 同步→K=7 Viterbi→PN 解扰→RS）之前只有 SSDV 专用入口，模型对 ASTU-1 这类 CCSDS TM 体制任务无入口 | 新增 `ccsds_tools.py`：`ccsds_encode_frame` / `ccsds_decode_bits` / `ccsds_decode_iq`（参数逐项可覆盖，不替任务猜参数）；自环对拍测试 7 项 |
 | 统一调制内核 | 新增 `modulation.py`（ASK/BPSK/QPSK/8PSK，NRZ/RRC，映射参数化），后续把 freedv QPSK 收敛进来 | 已收敛（等价断言钉死） |
 
+### 2.2 新增：定轨链的单一来源与真体定轨固定（不是重复实现，记录一次性收尾）
+
+| 主题 | 事实 | 处置 |
+|---|---|---|
+| 传播器 | 仓内曾有两份：`orbit_determination.propagate_ecef_state_and_stm`（旋转系直积二体，漏离心/科里奥利）与 `orbit_dynamics.propagate_state_and_stm`（ECI 口径）。实测：传播 600 s 相差 **1388 km / 4601 m/s** | 删除旋转系直积版，统一委托 ECI 口径；新增传播器自洽护栏（与 TLE 真值差 < 5 km） |
+| 单位制 | `orbit_determination` 用 km/km/s、`orbit_dynamics` 用 m/m/s，校时与估计跨制传递，偏置差 **1000 倍** | 全链统一 km/km/s（对外字段仍报 m/s）；新增量纲一致性护栏（状态放大 1000 倍预测率同比例放大） |
+| 观测噪声单位 | `r_sigma` 按 km/s 传而残差是 m/s → 增益大 1000 倍 | 与残差同量纲 |
+| 状态第 7 维语义 | 一处当"钟差×c"、一处当"速率偏置" | 统一为速率偏置（km/s），模型直接相加 |
+| 法方程求解 | `np.linalg.solve` 在 1e9 条件数上爆 | 改堆叠加权系统的 `lstsq` |
+| 参数化确定性 | 多普勒创新量是"钟差+轨道误差"的和，单次观测无法分离 | 加 `fix_clock`（默认固定钟差）；不固定时创新意被摆到速度上（实测 9 m/s 量级），位置预测随之发散 |
+| 估计器物理护栏 | 发散时返回靠谱轨道 | 加轨道合理性校验（半径/速度/有限性），越界即诚实报错 |
+| 不确定性可见 | 输出只有状态，不确定性被吞 | 输出补后验协方差 |
+
 ---
 
 ## 3. 待收敛（确属重复，已识别，前置条件写在表里）

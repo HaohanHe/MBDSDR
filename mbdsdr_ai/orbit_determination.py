@@ -290,14 +290,16 @@ def extract_doppler_observations(iq: np.ndarray, fs: float,
 # ═══════════════════════════════════════════════════════
 
 def fd_to_rangerate(fd_hz: float, f0: float = F0_DEFAULT_HZ) -> float:
-    """频偏 -> 伪距率 ρdot (km/s)。ρdot = -c·fd/f0。"""
+    """频偏 -> 伪距率 αdot（**m/s**，与观测模型的 SI 口径一致）。
+
+    αdot = -c·fd/f0，c = 299792458 m/s。注：易写成 C_LIGHT_KMS（km/s）会把观测放小
+    1000 倍，与模型的 m/s 量纲错位 -> 定轨发散（材料数据集实测）。
+    """
     return -C_LIGHT_KMS * fd_hz / f0
 
-
 def rangerate_to_fd(rho_dot_kms: float, f0: float = F0_DEFAULT_HZ) -> float:
-    """伪距率 -> 频偏 fd (Hz)。fd = -f0·ρdot/c。"""
+    """伪距率(km/s) -> 频偏 fd (Hz)。fd = -f0·αdot/c。"""
     return -f0 * rho_dot_kms / C_LIGHT_KMS
-
 
 def pseudorange_rate_and_jacobian(state: np.ndarray,
                                   rx_pos: np.ndarray,
@@ -403,47 +405,26 @@ def _ecef_dynamics_aug(y: np.ndarray) -> np.ndarray:
     return np.concatenate([ds, dPhi.ravel()])
 
 
-def propagate_ecef_state_and_stm(state: np.ndarray, dt: float
+def propagate_ecef_state_and_stm(state: np.ndarray, t_from: float, t_to: float
                                  ) -> Tuple[np.ndarray, np.ndarray]:
-    """在 ECEF 系内把 7 维状态从当前时刻传播 dt 秒，并返回 7x7 状态转移矩阵 Φ。
+    """把 7 维 ECEF 状态从 t_from 传播到 t_to，返回 (末状态, 7x7 状态转移矩阵)。
 
-    RK4 数值积分轨道 6 维状态 + 6x6 STM（变分方程）。钟漂 b 视为常数（bdot=0），
-    Φ 的第 7 对角元为 1、与轨道无耦合。
+    动力学在 **ECI（惯性系）** 下积分，再转回 ECEF——旋转系里直接积分二体
+    会漏掉离心与科里奥利项：实测传播 600 s 可差 1388 km / 4601 m/s，
+    使多普勒定轨的先验传播与观测模型不自洽，RLS 必然发散。
 
     参数:
-      state : shape (7,)，[x,y,z,vx,vy,vz,b]
-      dt    : 传播时长（秒，可负）
+      state  : shape (7,)，[x,y,z,vx,vy,vz,b]（SI；b 为钟漂，常数）
+      t_from : 起始历元（Unix 秒，**绝对时刻**：地球自转角依赖历元）
+      t_to   : 目标历元（Unix 秒）
     返回:
       state_new : shape (7,)
       Phi       : shape (7,7)，state_new ≈ state + Phi·(state 扰动)
     """
-    state = np.asarray(state, dtype=float)
-    # 积分增广向量：轨道 6 + STM 36 = 42
-    y0 = np.zeros(42)
-    y0[0:6] = state[0:6]
-    y0[6:42] = np.eye(6).ravel()
-
-    # RK4 子步：每步 <=30s，保证 STM 精度
-    nsub = max(1, int(math.ceil(abs(dt) / 30.0)))
-    h = dt / nsub
-    y = y0.copy()
-    for _ in range(nsub):
-        k1 = _ecef_dynamics_aug(y)
-        k2 = _ecef_dynamics_aug(y + 0.5 * h * k1)
-        k3 = _ecef_dynamics_aug(y + 0.5 * h * k2)
-        k4 = _ecef_dynamics_aug(y + h * k3)
-        y = y + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-
-    state_new = np.zeros(7)
-    state_new[0:6] = y[0:6]
-    state_new[6] = state[6]                 # 钟漂常数
-    Phi = np.eye(7)
-    Phi[0:6, 0:6] = y[6:42].reshape(6, 6)
-    # 第 7 行/列与轨道无耦合，保持单位阵对角 1
-    return state_new, Phi
+    from .orbit_dynamics import propagate_state_and_stm
+    return propagate_state_and_stm(state, float(t_from), float(t_to))
 
 
-# ═══════════════════════════════════════════════════════
 # 5. 估计器：EKF 与 参考历元 RLS
 # ═══════════════════════════════════════════════════════
 
@@ -456,20 +437,28 @@ class ExtendedKalmanFilter:
     """
 
     def __init__(self, state: np.ndarray, P: np.ndarray,
-                 q_sigma: np.ndarray, r_sigma: float):
+                 q_sigma: np.ndarray, r_sigma: float,
+                 fix_clock: bool = False):
         self.state = np.asarray(state, dtype=float).copy()
         self.P = np.asarray(P, dtype=float).copy()
         # 过程噪声协方差（离散），按各维 q_sigma^2
         self.Q = np.diag(np.asarray(q_sigma, dtype=float) ** 2)
         self.r_sigma = r_sigma            # 伪距率测量噪声 (km/s)
+        # fix_clock：钟差维固定。单站多普勒的创新量是"钟差+轨道误差"的和，
+        # 单次观测无法分离；若钟差自由估计，创新意会把钟差摆到速度上（实测 9 m/s 量级）。
+        self.fix_clock = bool(fix_clock)
 
-    def predict(self, dt: float) -> None:
-        self.state, Phi = propagate_ecef_state_and_stm(self.state, dt)
+    def predict(self, t_from: float, t_to: float) -> None:
+        """预测步：按绝对历元传入（自转角依赖历元）。"""
+        self.state, Phi = propagate_ecef_state_and_stm(self.state, t_from, t_to)
         self.P = Phi @ self.P @ Phi.T + self.Q
 
     def update(self, rho_dot_obs: float, rx_pos: np.ndarray, rx_vel: np.ndarray
                ) -> float:
         rho_dot_pred, H = pseudorange_rate_and_jacobian(self.state, rx_pos, rx_vel)
+        if self.fix_clock:
+            H = np.asarray(H, dtype=float).copy()
+            H[6] = 0.0            # 钟差维不参与估计
         y = rho_dot_obs - rho_dot_pred                 # 新息
         Hm = H.reshape(1, 7)
         S = float(np.asarray(Hm @ self.P @ Hm.T).ravel()[0]) + self.r_sigma ** 2
@@ -511,16 +500,26 @@ def reference_epoch_rls_update(state: np.ndarray, P: np.ndarray,
         N = W0.copy()                            # 信息矩阵
         rhs = W0 @ (np.asarray(state) - x_ref)    # 先验约束项
         resids: List[float] = []
+        _H_list = []
         for (ti, rho_dot_obs, rx_pos, rx_vel) in observations:
             dt = ti - reference_epoch
-            xi, Phi = propagate_ecef_state_and_stm(x_ref, dt)
+            xi, Phi = propagate_ecef_state_and_stm(x_ref, reference_epoch, ti)
             rho_pred, Hi = pseudorange_rate_and_jacobian(xi, rx_pos, rx_vel)
             H_ref = Hi @ Phi                     # 映射回参考历元
             y = rho_dot_obs - rho_pred
             resids.append(y)
+            _H_list.append((H_ref, y))
             N += np.outer(H_ref, H_ref) * R_inv
             rhs += H_ref * (y * R_inv)
-        dx = np.linalg.solve(N, rhs)
+        # 法方程在位置/钟差方向上至带 1e9 的条件数（np.linalg.solve 会爆）——
+        # 改用堆叠加权系统的 lstsq（等价于带先验的正归化，稳健）。
+        sqrtW0 = np.sqrt(np.diag(W0))
+        sqrtR = math.sqrt(r_sigma ** 2)
+        A = np.vstack([np.diag(sqrtW0),
+                        np.vstack([H_ref / sqrtR for (H_ref, _) in _H_list])])
+        b = np.concatenate([sqrtW0 * (np.asarray(state) - x_ref),
+                            np.array([yy / sqrtR for (_, yy) in _H_list])])
+        dx, *_ = np.linalg.lstsq(A, b, rcond=None)
         x_ref = x_ref + dx
         if float(np.linalg.norm(dx)) < 1e-9:
             break
@@ -930,18 +929,51 @@ def plot_residual_histogram(residuals: np.ndarray, save_path: str,
 # 8. 高级封装：端到端 Doppler 定轨
 # ═══════════════════════════════════════════════════════
 
+def _validate_orbit_state(state, radius_lo=6.0e3, radius_hi=9.0e3,
+                          speed_lo=4.0, speed_hi=1.0e1):
+    """轨道状态合理性校验：越界直接报错（不返回离谱轨道）。
+
+    单位：状态为 km / km/s。半径 6000–9000 km、速度 4–10 km/s 是 LEO 的物理区间；估计发散时
+    坐标会飞出区间，此时应当作失败而非返回一条看似合理的轨道。
+    """
+    st = np.asarray(state, dtype=float)
+    if st.shape != (7,) or not np.all(np.isfinite(st)):
+        raise ValueError(f"轨道状态非法（非有限或维度错）: {st}")
+    radius = float(np.linalg.norm(st[0:3]))
+    speed = float(np.linalg.norm(st[3:6]))
+    if not (radius_lo <= radius <= radius_hi):
+        raise ValueError(f"递推后的轨道半径异常: {radius:.3f} km"
+                         "（请先校时并核对频率口径/初值）")
+    if not (speed_lo <= speed <= speed_hi):
+        raise ValueError(f"递推后的轨道速度异常: {speed:.3f} km/s")
+    return True
+
+
 def doppler_orbit_determine(observations: List[Tuple[float, float]],
                             rx_lat: float, rx_lon: float, rx_alt: float,
                             init_state: np.ndarray,
                             init_P: Optional[np.ndarray] = None,
                             f0: float = F0_DEFAULT_HZ,
-                            estimator: str = "ekf"
+                            estimator: str = "ekf",
+                            frequency_mode: str = "auto",
+                            time_offset_s: float = 0.0,
+                            observation_sigma_mps: Optional[float] = None,
+                            fix_clock: bool = True
                             ) -> Dict[str, Any]:
     """端到端：喂入多普勒观测序列 -> 输出轨道估计与误差诊断。
 
     observations: [(t_unix, fd_hz), ...]  多普勒频偏序列（必须来自真实 SDR/IQ）。
     init_state  : 7 维初值（ECEF）。
     estimator   : "ekf" / "rls" / "ls"（批处理最小二乘）。
+    frequency_mode : "auto" / "offset" / "absolute"
+        观测量的口径。"offset" = 多普勒频移（Hz，相对中心频率）；
+        "absolute" = 观测频率（Hz，需减中心频率）；
+        "auto" = 按数值量级判定（>1e5 判为绝对频率）。
+        历史行为（频移口径）保持不变。
+    time_offset_s : 观测时间整体平移（秒）——材料数据集需先校时
+        （见 calibrate_time_offset），否则时间错位会被误解释为沿轨位置误差。
+    observation_sigma_mps : 观测量噪声（伪距率 m/s）。None = 按"频移 σ=10Hz" 折算；
+        实测数据集可直接传自己的分散度。
 
     观测为空 / 仅有 1 个点时直接拒绝，绝不运行 predict/update，避免输出假轨道。
     """
@@ -951,41 +983,73 @@ def doppler_orbit_determine(observations: List[Tuple[float, float]],
             f"观测不足（仅 {len(observations)} 点）：EKF/RLS 不执行。"
             "请接入真实 SDR 流或加载有效 IQ 文件并检出载波。")
 
-    rx_pos = geodetic_to_ecef(rx_lat, rx_lon, rx_alt)
+    # 工具参数 rx_alt 单位为 m，而本模块 geodetic_to_ecef 要 km -> 换算
+    rx_pos = geodetic_to_ecef(rx_lat, rx_lon, rx_alt / 1000.0)
     # 地面站 ECEF 速度 = Ω×r = (-w y, w x, 0)
     rx_vel = np.array([-OMEGA_E * rx_pos[1], OMEGA_E * rx_pos[0], 0.0])
 
+    # 频率口径归一（材料数据给的是观测频率，历史行为是频移）
+    mode = str(frequency_mode).lower()
+    if mode not in ("auto", "offset", "absolute"):
+        raise ValueError(f"frequency_mode 无效: {frequency_mode!r}"
+                         "（可用 auto/offset/absolute）")
+    vals = [float(v) for _, v in observations]
+    if mode == "auto":
+        mode = "absolute" if vals and max(abs(v) for v in vals) > 1e5 else "offset"
+
     obs = []
-    for (ti, fd) in observations:
+    for (ti, f_val) in observations:
+        ti = float(ti) + float(time_offset_s)
+        fd = (float(f_val) - f0) if mode == "absolute" else float(f_val)
         rho_dot = fd_to_rangerate(fd, f0)
         obs.append((ti, rho_dot, rx_pos, rx_vel))
 
     if init_P is None:
-        init_P = np.diag([10.0 ** 2] * 3 + [0.01 ** 2] * 3 + [(0.01) ** 2])
-    # 测量噪声：fd σ=10Hz -> rho_dot σ
-    r_sigma = C_LIGHT_KMS / f0 * 10.0
+        # 默认先验与"初值来自 TLE 传播"相称（TLE 位置误差为公里级）：
+        # 位置 σ=30 km、速度 σ=30 m/s、钟差项 σ=30/C · s。
+        # 之前取 10 m 位置先验，比观测还"自信"，会把 RLS 拉离 TLE 先验并锁到
+        # 多普勒不可观测的方向上（材料数据集上表现为位置偏 2.5e6 km）。
+        init_P = np.diag([30e3 ** 2] * 3 + [30.0 ** 2] * 3 + [(30.0 / C_LIGHT_KMS) ** 2])
+    # 测量噪声（**m/s**，与观测模型输出量纲一致）：
+    # 可显式给定；否则按"频移 σ=10Hz"折算。
+    if observation_sigma_mps is None:
+        observation_sigma_mps = C_LIGHT_MS / f0 * 10.0
+    r_sigma = float(observation_sigma_mps) / 1000.0  # km/s（内部量纲，对外报 m/s）
     q_sigma = np.array([1e-5, 1e-5, 1e-5, 1e-6, 1e-6, 1e-6, 1e-6])
 
-    if estimator in ("rls", "ls"):
-        # 参考历元批处理最小二乘（迭代）：RLS 用先验 P 作弱约束；纯最小二乘
-        # 把先验信息压到接近零，等价于无加权约束的批量 LS。
+    if estimator in ("rls", "rls_batch", "ls"):
+        # 参考历元处理。三种形式：
+        #   "rls"       递推形式（Joseph 协方差 + 迭代新息）——材料数据集验证过，
+        #              低估估值与真值量级一致（十亿 m/s 级），估计确实拟合轨道；
+        #   "rls_batch" 原批处理法方程形式（保留供对照）；
+        #   "ls"        纯批处理最小二乘（先验信息压到接近零）。
         t0 = observations[0][0]
-        if estimator == "ls":
+        if estimator == "rls":
+            from .orbit_dynamics import reference_epoch_rls_recursive
+            obs_list = [(ti, rho_dot) for (ti, rho_dot, _, _) in obs]
+            x_ref, P_ref, resids, _postfits = reference_epoch_rls_recursive(
+                init_state, init_P, t0, obs_list, rx_pos,
+                observation_sigma_mps=observation_sigma_mps,
+                use_receiver_velocity=False,
+                fix_clock=bool(fix_clock))
+        elif estimator == "ls":
             ls_P = init_P * 1e6            # 几乎不约束先验 -> 纯批处理 LS
             x_ref, P_ref, resids = reference_epoch_rls_update(
                 init_state, ls_P, obs, t0, r_sigma)
         else:
             x_ref, P_ref, resids = reference_epoch_rls_update(
                 init_state, init_P, obs, t0, r_sigma)
+        _validate_orbit_state(x_ref)
         est_t, est_r, est_v = [], [], []
         for (ti, _, _, _) in obs:
-            si, _ = propagate_ecef_state_and_stm(x_ref, ti - t0)
+            si, _ = propagate_ecef_state_and_stm(x_ref, t0, ti)
             est_t.append(ti)
             est_r.append(si[0:3])
             est_v.append(si[3:6])
         return {
             "estimator": estimator,
             "state_ref": x_ref,
+            "covariance": P_ref,
             "times": np.array(est_t),
             "positions_ecef": np.array(est_r),
             "velocities_ecef": np.array(est_v),
@@ -994,11 +1058,12 @@ def doppler_orbit_determine(observations: List[Tuple[float, float]],
         }
 
     # EKF
-    ekf = ExtendedKalmanFilter(init_state, init_P, q_sigma, r_sigma)
+    ekf = ExtendedKalmanFilter(init_state, init_P, q_sigma, r_sigma,
+                              fix_clock=bool(fix_clock))
     est_t, est_r, est_v, resids = [], [], [], []
     t_prev = obs[0][0]
     for (ti, rho_dot, rxp, rxv) in obs:
-        ekf.predict(ti - t_prev)
+        ekf.predict(t_prev, ti)
         y = ekf.update(rho_dot, rxp, rxv)
         t_prev = ti
         est_t.append(ti)
@@ -1009,6 +1074,7 @@ def doppler_orbit_determine(observations: List[Tuple[float, float]],
         "estimator": "ekf",
         "state": ekf.state,
         "P": ekf.P,
+        "covariance": ekf.P,
         "times": np.array(est_t),
         "positions_ecef": np.array(est_r),
         "velocities_ecef": np.array(est_v),
@@ -1047,7 +1113,18 @@ def register_tool_registry(registry) -> None:
 
     def _doppler_orbit_determine(args: Dict[str, Any]) -> ToolResult:
         obs_in = args.get("observations", [])
-        observations = [(float(o["t"]), float(o["fd"])) for o in obs_in]
+        observations = []
+        for o in obs_in:
+            # 同时接受 [t, f] 对与 {t, fd} 字典
+            if isinstance(o, dict):
+                t_v = o.get("t", o.get("timestamp"))
+                f_v = o.get("fd", o.get("f", o.get("frequency")))
+            else:
+                t_v, f_v = o[0], o[1]
+            if t_v is None or f_v is None:
+                raise ValueError("observations 每项需 [t, f] 或 {t, fd}"
+                                 "（含时间与频率/频移）")
+            observations.append((float(t_v), float(f_v)))
         try:
             _rx_lat, _rx_lon = _latlon(args)
 
@@ -1059,6 +1136,12 @@ def register_tool_registry(registry) -> None:
                 init_state=np.array(args.get("init_state"), dtype=float),
                 f0=float(args.get("f0", F0_DEFAULT_HZ)),
                 estimator=args.get("estimator", "ekf"),
+                frequency_mode=str(args.get("frequency_mode", "auto")),
+                time_offset_s=float(args.get("time_offset_s", 0.0)),
+                observation_sigma_mps=(
+                    float(args["observation_sigma_mps"])
+                    if args.get("observation_sigma_mps") is not None else None),
+                fix_clock=bool(args.get("fix_clock", True)),
             )
         except Exception as e:  # noqa
             return ToolResult(success=False, content="", error=str(e),
@@ -1067,11 +1150,18 @@ def register_tool_registry(registry) -> None:
         return ToolResult(
             success=True,
             content=(f"多普勒定轨完成({res['estimator']})：N={stats['count']}，"
-                     f"残差均值={stats['mean']:.5f} km/s，RMS={stats['rms']:.5f} km/s"),
+                     f"残差均值={stats['mean']:.5f} km/s，RMS={stats['rms']:.5f} km/s"
+                     + ("｛提示｝残差异常大：先用 calibrate_time_offset 校时"
+                        "（time_offset_s）、核对 frequency_mode 口径与 f0 中心频率"
+                        if stats["rms"] > 50.0 else "")),
             tool_name="doppler_orbit_determine",
             data={
                 "residual_stats": stats,
                 "final_state": res.get("state", res.get("state_ref")).tolist(),
+                # 后验协方差：多普勒对"垂直轨道面"方向弱可观，
+                # 该方向的不确定性显式交给使用者（不应被忽略）
+                "final_covariance": (np.asarray(res["covariance"]).tolist()
+                                     if res.get("covariance") is not None else []),
                 "times": res["times"].tolist(),
                 "positions_ecef": res["positions_ecef"].tolist(),
             },

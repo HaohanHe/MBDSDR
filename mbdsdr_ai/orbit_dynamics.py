@@ -32,9 +32,10 @@ except Exception:  # noqa: BLE001 - scipy 为可选，缺失时走纯 numpy RK4
     _HAS_SCIPY = False
 
 # 物理常量（SI：m、m/s、rad/s）
-MU_EARTH = 3.986004418e14     # m^3/s^2, 地球引力常数
+MU_EARTH = 398600.4418        # km^3/s^2, 地球引力常数（全链口径统一为 km）
 OMEGA_E = 7.2921151467e-5     # rad/s, 地球自转角速度
-C_LIGHT = 299792458.0         # m/s, 真空光速
+C_LIGHT = 299792458.0         # m/s, 真空光速（仅供频率换算用）
+C_LIGHT_KMS = 299792.458       # km/s, 真空光速（内部量线统一用这个）
 
 # WGS-72 椭球（与 orbit.py / SGP4 内核一致，避免米级系统差）
 WGS72_A = 6378135.0           # m, 赤道半径
@@ -58,8 +59,8 @@ def two_body_dynamics_stm(_t: float, augmented: np.ndarray) -> np.ndarray:
     r = state[:3]
     v = state[3:6]
     radius = float(np.linalg.norm(r))
-    if radius < 6.0e6:
-        raise ValueError(f"轨道半径异常: {radius:.3f} m")
+    if radius < 6.0e3:
+        raise ValueError(f"轨道半径异常: {radius:.3f} km")
 
     accel = -MU_EARTH * r / radius**3
     # 引力梯度 d(-mu*r/|r|^3)/dr = mu*(3 r r^T/|r|^5 - I/|r|^3)
@@ -199,11 +200,13 @@ def pseudorange_rate_and_jacobian(
         raise ValueError("卫星与接收机距离异常")
 
     los = rel / dist
-    estimate = float(los @ state[3:6] + C_LIGHT * state[6])
+    # 单位统一：状态为 km / km/s；第 7 维 = 速率偏置 b（km/s），
+    # 直接相加（不乘光速），与 orbit_determination 的第 7 维语义一致。
+    estimate = float(los @ state[3:6] + state[6])
     jac = np.zeros(7)
     jac[:3] = ((np.eye(3) - np.outer(los, los)) @ state[3:6]) / dist
     jac[3:6] = los
-    jac[6] = C_LIGHT
+    jac[6] = 1.0
     return estimate, jac
 
 
@@ -212,12 +215,13 @@ def observed_pseudorange_rate(frequency: float, center_frequency: float) -> floa
 
     range_rate = -c * (f_obs - f_center) / f_center（远离为正）。
     """
-    return -C_LIGHT * (float(frequency) - float(center_frequency)) / float(center_frequency)
+    return (-C_LIGHT_KMS * (float(frequency) - float(center_frequency))
+            / float(center_frequency))
 
 
 def range_rate_to_doppler_hz(range_rate: float, center_frequency: float) -> float:
     """伪距率(m/s) -> 多普勒频移(Hz)（observed_pseudorange_rate 的逆）。"""
-    return -float(range_rate) * float(center_frequency) / C_LIGHT
+    return -float(range_rate) * float(center_frequency) / C_LIGHT_KMS
 
 
 def tle_state_ecef(tle_line1: str, tle_line2: str, timestamp: float) -> np.ndarray:
@@ -239,8 +243,9 @@ def tle_state_ecef(tle_line1: str, tle_line2: str, timestamp: float) -> np.ndarr
 
     theta = earth_rotation_angle(timestamp)
     cg, sg = math.cos(-theta), math.sin(-theta)
-    r_teme = np.asarray(r_teme, dtype=float) * 1e3   # -> m
-    v_teme = np.asarray(v_teme, dtype=float) * 1e3   # -> m/s
+    # 保留 sgp4 原始单位：km / km/s（与全链口径统一，避免 1000 倍错位）
+    r_teme = np.asarray(r_teme, dtype=float)
+    v_teme = np.asarray(v_teme, dtype=float)
     rx = cg * r_teme[0] - sg * r_teme[1]
     ry = sg * r_teme[0] + cg * r_teme[1]
     rz = r_teme[2]
@@ -290,14 +295,110 @@ def calibrate_time_offset(
     idx = int(np.argmin([x[0] for x in results]))
     return {
         "time_offset_s": float(fine[idx]),
-        "rate_bias_mps": results[idx][1],
-        "centered_rms_mps": results[idx][0],
+        # 内部 km/s -> 对外 m/s（字段名保持诚实）
+        "rate_bias_mps": results[idx][1] * 1000.0,
+        "centered_rms_mps": results[idx][0] * 1000.0,
     }
 
 
 # ─────────────────────────────────────────────────────────────
 # 估计：参考历元非线性递推最小二乘（单步）
 # ─────────────────────────────────────────────────────────────
+def reference_epoch_rls_recursive(state, P, reference_timestamp, observations,
+                                 receiver_ecef, observation_sigma_mps=20.0,
+                                 iterations=8, use_receiver_velocity=False,
+                                 receiver_velocity=None, fix_clock=True):
+    """参考历元递推 RLS（Joseph 协方差 + 迭代新息），逐观测更新参考历元状态。
+
+    参数:
+      state               : 7 维参考历元先验状态 [x,y,z,vx,vy,vz,b]
+      P                   : 7x7 参考历元先验协方差
+      reference_timestamp : 参考历元（Unix 秒）
+      observations        : [(t_abs, rho_dot_mps), ...]，t 为绝对秒
+      receiver_ecef       : 接收机 ECEF 位置（m）
+      observation_sigma_mps: 伪距率观测噪声（m/s）
+      iterations          : 每次观测的线性化迭代次数
+      use_receiver_velocity: 观测模型是否计入接收机速度项
+      receiver_velocity   : 接收机 ECEF 速度（m/s），缺省按 Ω×r 估算
+      fix_clock          : 默认 True——钟差维固定为先验值（不由数据吸收）。
+                           多普勒率观测无法区分"距离偏置"与"钟差"（短弧上近乎共线），
+                           若钟差自由估计，求解会把巨大位置改正量塞进这组退化方向，
+                           导致轨道半径飞掉（实测 2.3e6 m 级）。
+
+    返回 (state_ref, P_ref, residuals_mps, postfits_mps)
+    """
+    x_ref = np.asarray(state, dtype=float).copy()
+    P = np.asarray(P, dtype=float).copy()
+    rec = np.asarray(receiver_ecef, dtype=float)
+    if receiver_velocity is None and use_receiver_velocity:
+        receiver_velocity = np.array([-OMEGA_E * rec[1], OMEGA_E * rec[0], 0.0])
+    rx_vel = (np.asarray(receiver_velocity, dtype=float)
+              if use_receiver_velocity else np.zeros(3))
+    clock_fixed = bool(fix_clock)
+    clock_prior = float(np.asarray(state, dtype=float)[6])
+
+    def _predict(state):
+        """按当前模型口径预测伪距率与雅可比（2 参/3 参统一入口）。"""
+        if use_receiver_velocity:
+            from .orbit_determination import (pseudorange_rate_and_jacobian
+                                              as _jac_rx)
+            est, Hj = _jac_rx(state, rec, rx_vel)
+        else:
+            est, Hj = pseudorange_rate_and_jacobian(state, rec)
+        if clock_fixed:
+            # 钟差不参与估计（初值即校时偏置）：雅可比的第 7 列清零
+            Hj = np.asarray(Hj, dtype=float).copy()
+            Hj[6] = 0.0
+        return est, Hj
+    sigma = float(observation_sigma_mps) / 1000.0  # km/s（内部量纲，对外报 m/s）
+    # 收敛判据的量纲缩放：位置 m / 速度 m/s / 钟差 s
+    state_scale = np.array([1e6, 1e6, 1e6, 1e3, 1e3, 1e3, 1e-6])
+
+    residuals = []
+    postfits = []
+    for (t_abs, rho_dot_obs) in observations:
+        t_abs = float(t_abs)
+        rho_dot_obs = float(rho_dot_obs)
+        xi, Phi = propagate_state_and_stm(x_ref, reference_timestamp, t_abs)
+        est, Hj = _predict(xi)
+        H_ref = Hj @ Phi
+        S = float(H_ref @ (P @ H_ref) + sigma ** 2)
+        if not np.isfinite(S) or S <= 0.0:
+            raise ValueError(f"新息方差异常: {S}")
+        K = (P @ H_ref) / S
+        # 迭代线性化（以观测时刻的当前迭代解重新线性化）
+        x_it = x_ref.copy()
+        for _ in range(int(iterations)):
+            xi_i, Phi_i = propagate_state_and_stm(x_it, reference_timestamp, t_abs)
+            est_i, Hj_i = _predict(xi_i)
+            H_i = Hj_i @ Phi_i
+            S_i = float(H_i @ (P @ H_i) + sigma ** 2)
+            if not np.isfinite(S_i) or S_i <= 0.0:
+                break
+            K_i = (P @ H_i) / S_i
+            innov = float(rho_dot_obs - est_i + H_i @ (x_it - x_ref))
+            x_next = x_ref + K_i * innov
+            change = float(np.max(np.abs((x_next - x_it) / state_scale)))
+            x_it = x_next
+            K = K_i
+            H_ref = H_i
+            if change < 1e-8:
+                break
+        x_it = np.asarray(x_it, dtype=float).copy()
+        if clock_fixed:
+            x_it[6] = clock_prior
+        x_ref = x_it
+        # Joseph 形式协方差更新（保持对称正定）
+        IKH = np.eye(7) - np.outer(K, H_ref)
+        P = IKH @ P @ IKH.T + sigma ** 2 * np.outer(K, K)
+        P = 0.5 * (P + P.T)
+        xi_p, _ = propagate_state_and_stm(x_ref, reference_timestamp, t_abs)
+        est_p, _ = _predict(xi_p)
+        residuals.append(rho_dot_obs - est_p)
+        postfits.append(rho_dot_obs - est_p)
+    return x_ref, P, np.asarray(residuals), np.asarray(postfits)
+
+
 def rls_update(
     ref_state_prior: np.ndarray,
     ref_cov_prior: np.ndarray,
