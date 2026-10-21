@@ -227,20 +227,25 @@ def range_rate_to_doppler_hz(range_rate: float, center_frequency: float) -> floa
 def _tle_mean_motion_token(line2: str) -> float:
     """从 TLE 行 2 文本取平均运动（rev/day）。两种行 2 变体都能定位。"""
     toks = str(line2).split()
-    if len(toks) < 7:
+    if len(toks) < 8:
         raise ValueError(
-            f"TLE 行 2 字段不足（读到 {len(toks)} 个，需 ≥ 7）：{line2!r}")
-    if "." in toks[-1]:
-        mm_tok = toks[-1]          # 带平均近点角变体：末位即平均运动
-    elif len(toks) >= 9:
-        mm_tok = toks[-3]          # 经典变体：平均运动 / 轨道号 / 校验位
-    else:
-        mm_tok = toks[-2]
+            f"TLE 行 2 字段不足（读到 {len(toks)} 个，需 ≥ 8：卫星号/倾角/"
+            f"升交点赤经/偏心率/近地点幅角/平均近点角/平均运动）：{line2!r}")
+    mm_tok = toks[7]
+    if "." not in mm_tok:
+        # 平均运动必然带小数点（15.4976 / 14.34218356 / 1.00270000）；
+        # 纯整数说明这里是轨道号/校验位，即行 2 缺"平均近点角"字段或列位偏移。
+        raise ValueError(
+            f"TLE 行 2 第 8 个字段应为平均运动（必然带小数点），实得 {mm_tok!r}"
+            f"（行 2 = {line2!r}）——行 2 缺少'平均近点角'字段或列位偏移；"
+            f"此类 TLE 会被 SGP4 静默解析成完全不同的轨道，故报错不返回")
     try:
         return float(mm_tok)
     except ValueError as e:
         raise ValueError(
-            f"TLE 行 2 平均运动字段无法解析为数值：{mm_tok!r}（行 2 = {line2!r}）") from e
+            f"TLE 行 2 第 8 个字段应为平均运动，实得 {mm_tok!r}（行 2 = {line2!r}）"
+            f"——行 2 缺少'平均近点角'字段或列位偏移；此类 TLE 会被 SGP4 静默"
+            f"解析成完全不同的轨道，故报错不返回") from e
 
 
 def _tle_crosscheck(line2: str, sat) -> None:
@@ -265,6 +270,19 @@ def _tle_crosscheck(line2: str, sat) -> None:
                 raise ValueError(
                     f"TLE 行 2 倾角解析不一致：文本 = {text_incl:.6f}°，"
                     f"SGP4 解析 = {parsed_incl:.6f}°——TLE 列位/字段异常，"
+                    f"故报错不返回")
+    if len(toks) >= 5:
+        try:
+            text_ecc = float("0." + toks[4].lstrip("0").rjust(7, "0")) \
+                if "." not in toks[4] else float(toks[4])
+        except ValueError:
+            text_ecc = None
+        if text_ecc is not None:
+            parsed_ecc = float(sat.ecco)
+            if abs(parsed_ecc - text_ecc) > 1e-7:
+                raise ValueError(
+                    f"TLE 行 2 偏心率解析不一致：文本 = {text_ecc:.7f}，"
+                    f"SGP4 解析 = {parsed_ecc:.7f}——TLE 列位/字段异常，"
                     f"故报错不返回")
 
 
