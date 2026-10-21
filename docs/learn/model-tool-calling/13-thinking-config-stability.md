@@ -7,7 +7,7 @@
 > - 旁证：`sources/sf-function-calling.txt`、`sources/sf-stream-mode.txt`（仅交叉引用，无新增 thinking 规则）
 >
 > 精读方式：本地纯文本逐行通读（HTML 已转文本落盘）；硅基 interleaved-thinking 本地 HTML 经核查为 404 壳页，真实正文为 2026-10-01 web.fetch 现行英文站 `docs.siliconflow.com/en/userguide/guides/interleaved-thinking` 全文转录（见 `sf-interleaved-thinking.txt:3-19` 元信息）。
-> 精读日期：2026-10-01。作者：s_000c4Gl0GwB。
+> 精读日期：2026-10-01。作者：笔记 agent。
 > 覆盖边界：本批 a–f 六条中**专攻 e（思考模式 + 工具调用可能不稳定，需按模型配置 thinking）**，并顺带核验 b（reasoning_content 逐字回传）在两家的一致性。a/c/d/f 仅在对比表中提及，不展开。
 >
 > 标注约定：「原文」= 源文件逐字/逐节可复核；「推断」= 原文无直接证据，由本 agent 据上下文合理推断；「未覆盖」= 两份源文件均无此细节，需另读 model-hyperparameters 等页确认。
