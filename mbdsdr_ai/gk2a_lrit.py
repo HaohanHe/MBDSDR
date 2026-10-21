@@ -520,27 +520,20 @@ class ViterbiDecoder:
 
 def rrc_filter(sps: int, alpha: float = GK2A_RRC_ALPHA,
                num_taps: int = 33) -> np.ndarray:
-    """根升余弦 (RRC) 成形/匹配滤波器。
+    """根升余弦（RRC）成形/匹配滤波器——委托 `fir_taps` 单一来源。
 
-    RRC 滚降 α=0.5。
+    滚降 α=0.5。保持本模块原有的**单位能量归一化**（SNR 口径不变）。
+    旧实现的特殊抽头判据写作 |ti| == 1/(4α)，而标准 RRC 的特殊点在
+    ti = ±sps/(4α)（ti 以采样计）——少了 sps 因子，该抽头永不命中，
+    形状与标准 RRC 有偏差（归一化内积 0.91）。收敛后形状正确。
     """
-    half = num_taps // 2
-    t = np.arange(num_taps) - half
-    h = np.zeros(num_taps)
-    for i, ti in enumerate(t):
-        if ti == 0:
-            h[i] = 1.0 - alpha + 4 * alpha / math.pi
-        elif abs(ti) == 1.0 / (4 * alpha):
-            h[i] = (alpha / math.sqrt(2)) * (
-                (1 + 2 / math.pi) * math.sin(math.pi / (4 * alpha))
-                + (1 - 2 / math.pi) * math.cos(math.pi / (4 * alpha))
-            )
-        else:
-            num = math.sin(math.pi * ti * (1 - alpha) / sps) + 4 * alpha * ti / sps * math.cos(
-                math.pi * ti * (1 + alpha) / sps)
-            den = math.pi * ti / sps * (1 - (4 * alpha * ti / sps) ** 2)
-            h[i] = num / den if abs(den) > 1e-12 else 0.0
-    h /= np.sqrt(np.sum(h ** 2))
+    from .fir_taps import root_raised_cosine_taps
+    h = np.asarray(root_raised_cosine_taps(int(num_taps), float(alpha),
+                                           1.0, float(sps)),
+                   dtype=np.float64)
+    norm = float(np.sqrt(np.sum(h ** 2)))
+    if norm > 0:
+        h = h / norm
     return h
 
 

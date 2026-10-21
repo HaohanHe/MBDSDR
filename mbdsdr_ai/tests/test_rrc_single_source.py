@@ -45,3 +45,15 @@ def test_matched_filter_unchanged_behaviour():
     out = demod.matched_filter(iq, num_taps=101, sps=4, beta=0.35)
     assert out.shape == iq.shape
     assert np.all(np.isfinite(out))
+
+
+@pytest.mark.parametrize("sps,alpha,num_taps", [(4, 0.5, 33), (8, 0.5, 33), (2, 0.35, 33)])
+def test_gk2a_rrc_equals_fir_taps(sps, alpha, num_taps):
+    """gk2a_lrit.rrc_filter 必须与 fir_taps 单一来源逐点相同（单位能量口径）。"""
+    from mbdsdr_ai import gk2a_lrit
+    got = gk2a_lrit.rrc_filter(sps, alpha, num_taps)
+    ref = np.asarray(root_raised_cosine_taps(num_taps, alpha, 1.0, float(sps)),
+                     dtype=np.float64)
+    ref = ref / np.sqrt(np.sum(ref ** 2))
+    assert got.shape == ref.shape
+    assert float(np.max(np.abs(got - ref))) < 1e-12
