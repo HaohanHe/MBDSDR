@@ -49,7 +49,7 @@
 | **定轨 demo**（IRIDIUM 107 多普勒定轨） | 观测时间错位标定；多普勒→伪距率；参考历元递推最小二乘；轨道状态与协方差；轨道合理性校验 | `calibrate_time_offset` / `doppler_from_frequency` / `doppler_to_frequency` / `tle_state_ecef` / `propagate_state_stm` / `rls_update` / `doppler_orbit_determine` | `tests/test_orbit_material_dataset.py`（7 项，材料数据集锚定）+ `tests/test_orbit_dynamics.py` / `tests/test_orbit_determination.py`；细节见 [orbit-determination.md](orbit-determination.md) |
 | **赛前培训-定轨**（PPT） | 轨道力学与观测模型原理、坐标变换、估计器原理 | 同上 + `coord_ecef_to_eci` / `coord_eci_to_ecef` / `coord_ecef_to_enu` / `coord_enu_to_az_el` / `coord_ecef_to_geodetic` / `coord_geodetic_to_ecef` / `pseudorange_rate_model` | `tests/test_orbit_dynamics.py`（雅可比有限差分自洽）+ `tests/test_orbit_determination.py` |
 | **阿斯图友谊号遥测教程**（ASTU-1，SDR 收卫星遥测） | 卫星接收剖面；比特级接收链参数；多普勒调谐余量；CCSDS 帧构造/同步/解扰/维特比译码 | `sat_rx_profile` / `telemetry_rx_chain` / `doppler_tune_frequency` / `ccsds_encode_frame` / `ccsds_decode_bits` / `ccsds_decode_iq` | `tests/test_ccsds_tools.py`（7 项自环：ASM+Viterbi+解扰+IQ 通路）+ `tests/test_tool_pair_chains.py` |
-| **气象卫星图片接收赛前培训**（PPT） | 同步轨道指向；抛物面增益与波束；指向容差；前端链路预算与判据；罐子馈源几何；症状→环节诊断；LRIT/HRIT/HRPT 图像解码 | `geo_pointing` / `dish_gain` / `pointing_tolerance` / `fe_link_budget` / `fe_diagnose` / `cantenna_design` / `gk2a_lrit_decode` / `fy4_lrit_decode` / `meteor_lrpt_demod` | `mbdsdr_ai/tests/test_acquisition.py`（25 项，含罐子馈源几何与材料数值对照）+ 各协议自带测试 |
+| **气象卫星图片接收赛前培训**（PPT） | 同步轨道指向；抛物面增益与波束；指向容差；前端链路预算与判据；**赛训验收口径可执行化**（指向/SNR/前端指标/解码成功率逐项判定）；罐子馈源几何；症状→环节诊断；LRIT/HRIT/HRPT 图像解码 | `geo_pointing` / `dish_gain` / `pointing_tolerance` / `fe_link_budget` / `fe_diagnose` / `rx_acceptance` / `cantenna_design` / `gk2a_lrit_decode` / `fy4_lrit_decode` / `meteor_lrpt_demod` | `mbdsdr_ai/tests/test_acquisition.py`（25 项，含罐子馈源几何与材料数值对照）+ 各协议自带测试 |
 | **通信对抗材料包**（learnSDR 教学包：ASK/BPSK/QPSK、FLL/载波同步、RC 成形、星座与眼图） | 统一调制/解调内核；星座质量；眼图与抖动；误码实测与理论对照；成形抽头 | `modulate_symbols` / `demodulate_symbols` / `constellation_metrics` / `eye_diagram` / `measure_ber` / `link_ber_test` / `pulse_shape_taps` | `mbdsdr_ai/tests/test_modulation.py`（31 项：往返零误码、BER 与理论对照、Gray 映射等价）+ `tests/test_eye_diagram.py`（7 项：噪声单调退化）+ `tests/test_tool_pair_chains.py` |
 
 > **框架级协议（帧同步/CRC/解扰/卷积/交织）不猜参数**：材料未给的任务级参数
@@ -199,6 +199,7 @@
 | `ccsds_encode_frame` | `data` | `use_viterbi`, `use_descramble`, `info_bits`, `asm_word`, `g1`, `g2`, `conv_tail_bits` | 帧比特流 + ASM/卷积/解扰状态 |
 | `ccsds_decode_bits` | `bits` | `asm_word`, `asm_max_hamming`, `frame_bits_after_asm`, `use_viterbi`, `use_descramble`, `use_rs`, `rs_nsym` | 同步帧数 + 每帧 hex/ASCII 预览 |
 | `ccsds_decode_iq` | `iq` | `scheme`, `sps`, `shaping`, `alpha` + 上述 CCSDS 参数 | IQ 直达帧（ASTU-1 走 bpsk+rrc） |
+| `rx_acceptance` | —（可给子集） | `pointing_error_deg`, `snr_db`, `decode_attempts/successes`, `lna_nf_db`, `feedline_m`, `system_nf_db`, `dish_offset_cm` + 各门限覆盖项 | 逐项判定 + 总判定 + 处置建议（门限标注来源：材料口径 / 材料未给→工程常规） |
 
 ---
 
