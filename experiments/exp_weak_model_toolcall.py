@@ -37,7 +37,7 @@ def main():
     from mbdsdr_ai.config import normalize_config_keys
     cfg = normalize_config_keys(
         json.load(open(os.path.expanduser("~/.mbdsdr/config.json"),
-                                  encoding="utf-8"))))
+                         encoding="utf-8")))
     ag = MBDSDRAgent(AgentConfig(api_key=cfg["api_key"], base_url=cfg["base_url"],
                                  model=cfg.get("model", "Qwen/Qwen3.5-4B"), max_output_tokens=400))
     register_sdr_tools(ag)
