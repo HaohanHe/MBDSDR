@@ -70,6 +70,46 @@ def build_config(args: Dict[str, Any]) -> CcsdsRxConfig:
     )
 
 
+def _asm_diagnostic(bits: List[int], cfg: CcsdsRxConfig) -> Dict[str, Any]:
+    """0 帧时的可执行诊断：ASM 是否存在/在何处、帧长差多少、下一步查什么。"""
+    asm_bits = bytes_to_bits_msb(int(cfg.asm_word).to_bytes(4, "big"))
+    n = len(bits)
+    positions: List[int] = []
+    for i in range(0, max(0, n - 32) + 1):
+        if list(bits[i:i + 32]) == asm_bits:
+            positions.append(i)
+    need = int(cfg.frame_bits_after_asm)
+    info: Dict[str, Any] = {
+        "asm_hex": f"{int(cfg.asm_word):08X}",
+        "asm_found": bool(positions),
+        "asm_positions": positions[:8],
+        "n_bits_in": n,
+        "frame_bits_after_asm": need,
+        "asm_max_hamming": int(cfg.asm_max_hamming),
+    }
+    if positions:
+        p = positions[0]
+        avail = n - p - 32
+        info["bits_after_first_asm"] = avail
+        if avail < need:
+            info["cause"] = "frame_bits_after_asm 与输入不匹配"
+            info["hint"] = (f"输入在 ASM 后只有 {avail} bit，不足当前配置的 "
+                            f"frame_bits_after_asm={need} bit；请把该参数改回 "
+                            f"{avail}（或编码端返回的 frame_bits_after_asm）再试")
+        else:
+            info["cause"] = "帧已收集但内容校验未过"
+            info["hint"] = ("帧长够但没解出帧：检查 use_descramble / use_viterbi / "
+                            "use_rs 是否与发送端一致，以及 ASM 是否误同步")
+    else:
+        info["cause"] = "未找到 ASM 同步字"
+        info["hint"] = (f"输入里找不到 ASM 0x{int(cfg.asm_word):08X}"
+                        f"（hamming 容差 {int(cfg.asm_max_hamming)}）：依次排查 "
+                        "比特序(MSB/LSB)、是否被卷积编码、是否需要先解扰、"
+                        "以及发送端是否用了不同 ASM 字；"
+                        "若是误码导致可放宽 asm_max_hamming")
+    return info
+
+
 # ── 编码侧：造帧（信息字节 → 比特流）─────────────────────────────────
 def ccsds_encode_frame(args) -> Dict[str, Any]:
     """信息字节 → CCSDS 帧比特流（扰码 → K=7 卷积 → 32bit ASM 前导）。
@@ -127,7 +167,7 @@ def ccsds_decode_bits(args) -> Dict[str, Any]:
             "hex": f.hex().upper(),
             "ascii_preview": "".join(chr(b) if 32 <= b < 127 else "." for b in f[:64]),
         })
-    return {
+    out = {
         "frames": out_frames,
         "count": len(out_frames),
         "config": {
@@ -138,6 +178,9 @@ def ccsds_decode_bits(args) -> Dict[str, Any]:
             "use_rs": cfg.use_rs,
         },
     }
+    if not out_frames:
+        out["diagnostic"] = _asm_diagnostic([int(b) & 1 for b in bits], cfg)
+    return out
 
 
 # ── 解码侧：IQ → 帧（接统一调制内核）───────────────────────────────
@@ -160,15 +203,18 @@ def ccsds_decode_iq(args) -> Dict[str, Any]:
     cfg = build_config(args)
     chain = CcsdsReceiveChain(cfg)
     frames = chain.process_bits(bits)
-    return {
+    out = {
         "frames": [{"n_bytes": len(f), "hex": f.hex().upper(),
-                     "ascii_preview": "".join(chr(b) if 32 <= b < 127 else "."
-                                              for b in f[:64])}
-                    for f in frames],
+                    "ascii_preview": "".join(chr(b) if 32 <= b < 127 else "."
+                                             for b in f[:64])}
+                   for f in frames],
         "count": len(frames),
         "demod": dem["params"],
         "n_bits_demodded": len(bits),
     }
+    if not out["frames"]:
+        out["diagnostic"] = _asm_diagnostic(bits, cfg)
+    return out
 
 
 # ═══════════════════════════════════════════════════════════
