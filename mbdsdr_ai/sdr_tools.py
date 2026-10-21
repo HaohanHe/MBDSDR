@@ -1100,6 +1100,46 @@ def register_sdr_tools(agent):
     )
 
     agent.tool_registry.register(
+        name="meteor_lrpt_decode_iq",
+        description=(
+            "Meteor LRPT 从 IQ 一路出图：QPSK 解调（统一调制内核：RRC 匹配滤波 + "
+            "符号抽取；QPSK 的 π/2 相位模糊按 0/90/180/270 四种旋转试解，"
+            "用链路层能否解出帧来裁决）→ 字节流（CCSDS 同步字 + 扰码 + K=7 卷积 + "
+            "RS(255,223)）→ 图像段（RFC 2435 片段头）→ 段重组 → Annex K.3 熵解码 "
+            "→ PNG。"
+            "前置条件：需给 iq_path（complex64 raw）或 iq_base64（float32 交错 "
+            "base64）、sample_rate（LRPT 符号率 72k sym/s）与 out_png。"
+            "失败恢复：返回 stage（qpsk/frame/segments/image）与 reason，"
+            "并附 stats（符号数/帧数/每帧为何被弃）——不会用半幅图冒充整图。"
+            "副作用：只在 out_png 写一个 PNG，不动设备状态。"
+            "能力边界：图像熵解码需真实 JPEG 熵数据（合成乱码会在熵解码阶段"
+            "诚实报错）；RS 块→图像段的片段头/尺寸头口径按仓内 RFC 2435 布局"
+            "（4B 片段头 + 首段 8B 尺寸头），真实链路若口径不同需自行分段；"
+            "默认前端不做载波/定时恢复（仓内 Costas+Gardner 前端当前判决一致率"
+            "仅约 70%），有频偏的信号需先自行粗估计并补偿。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "iq_path": {"type": "string",
+                            "description": "complex64 IQ raw 文件路径"},
+                "iq_base64": {"type": "string",
+                              "description": "复数 IQ 的 base64（float32 交错）"},
+                "sample_rate": {"type": "number", "default": 72000,
+                                "description": "IQ 采样率 Hz"},
+                "out_png": {"type": "string", "description": "输出 PNG 文件路径"},
+                "sps": {"type": "integer",
+                        "description": "每符号采样数（缺省按 72k 符号率推）"},
+                "rrc_beta": {"type": "number", "default": 0.35,
+                             "description": "RRC 滚降系数（匹配滤波用）"},
+            },
+            "required": ["out_png"],
+        },
+        handler=lambda args: _meteor_lrpt_decode_iq_fn_tool(args),
+        category="sdr_decode",
+    )
+
+    agent.tool_registry.register(
         name="sdr_wfm_stereo",
         description=(
             "解商用 FM 广播的立体声复合信号并输出双声道 WAV（对标 GQRX/SDR# 立体声）。"
@@ -3301,6 +3341,122 @@ def _meteor_lrpt_demod_fn_tool(args) -> "ToolResult":
     iq = (raw[0::2] + 1j * raw[1::2]).astype(np.complex64)
     summary = meteor_lrpt_demod(iq, sr)
     return ToolResult(success=True, content=_json.dumps(summary), data=summary)
+
+
+def _meteor_lrpt_decode_iq_fn_tool(args) -> "ToolResult":
+    """Meteor LRPT：IQ → QPSK 符号 → 字节 → RS 译码块 → 图像段 → 图像 PNG。
+
+    每一步都单独报失败（stage 指出断在哪一步），不做半途"成功"。
+    """
+    import json as _json
+    from .lrpt_vcdu import (blocks_to_meteor_segments,
+                            meteor_segments_to_image)
+
+    sr = float(args.get("sample_rate", 72000))
+    iq_path = args.get("iq_path")
+    b64 = args.get("iq_base64")
+    if not iq_path and not b64:
+        return ToolResult(
+            success=False,
+            content="需要 iq_path（complex64 raw 文件）或 iq_base64"
+                    "（float32 交错复数 IQ 的 base64）——没有信号可解。")
+    try:
+        if iq_path:
+            iq = np.fromfile(iq_path, dtype=np.complex64)
+        else:
+            import base64 as _b64
+            raw = _b64.b64decode(str(b64))
+            arr = np.frombuffer(raw, dtype=np.float32)
+            if arr.size % 2:
+                arr = arr[:-1]
+            iq = (arr[0::2] + 1j * arr[1::2]).astype(np.complex64)
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(success=False,
+                          content=f"读取 IQ 失败：{type(e).__name__}: {e}")
+    if iq.size == 0:
+        return ToolResult(success=False, content="IQ 为空（无采样可解）")
+
+    out_png = args.get("out_png")
+    if not out_png:
+        return ToolResult(success=False,
+                          content="需要 out_png（输出 PNG 路径）。")
+
+    sps = args.get("sps")
+    sps = int(sps) if sps else max(1, int(round(sr / 72000)))
+    beta = float(args.get("rrc_beta", 0.35))
+
+    # 1) IQ → 比特（统一调制内核：RRC 匹配滤波 + 按 sps 抽取符号 + 星座判决）
+    #    说明：仓内 demod.QPSKDemodulator（Costas+Gardner）当前在本仓标准
+    #    调制风格上判决一致率仅约 70%，故此处不用它做默认前端；需要载波/
+    #    定时恢复的调用方应先自行做粗频偏估计与定时对齐。
+    try:
+        from .modulation import demodulate_iq as _demod_iq
+        _dem = _demod_iq(iq, scheme="qpsk", sps=sps, shaping="rrc",
+                         alpha=beta)
+        _raw_syms = _dem.get("symbols")
+        _syms = np.asarray(_raw_syms if _raw_syms is not None else [],
+                           dtype=complex)
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(success=False,
+                          content=f"QPSK 解调失败：{type(e).__name__}: {e}")
+    if _syms.size == 0:
+        return ToolResult(success=False, content="QPSK 解调未产出符号（无信号？）")
+
+    # 2) 符号 → 字节 → RS 译码块
+    #    QPSK 的 Costas 环有 π/2 相位模糊（I/Q 可能互换），故按 0/90/180/270
+    #    四种旋转依次尝试，用链路层能否解出帧来裁决（并报告用的是哪一路）。
+    try:
+        from .satellite.meteor_lrpt import MeteorLRPTChain
+        chain = MeteorLRPTChain()
+        frames = []
+        rot_used = None
+        # 相位模糊：QPSK 星座有 π/2 旋转歧义（等价 I/Q 互换），
+        # 且统一内核的映射极性与字节栈相反（差一个 180°），
+        # 故按 0/90/180/270 四种旋转重解一次，用链路层能否解出帧来裁决。
+        for k in range(4):
+            rot = iq * np.exp(-1j * (np.pi / 2) * k)
+            _d = _demod_iq(rot, scheme="qpsk", sps=sps, shaping="rrc",
+                           alpha=beta)
+            _raw_sy = _d.get("symbols")
+            _sy = np.asarray(_raw_sy if _raw_sy is not None else [],
+                             dtype=complex)
+            if _sy.size == 0:
+                continue
+            # 按字节栈口径出比特：I>0 → 1、Q>0 → 1，按 I,Q 交织
+            _bits = np.empty(2 * _sy.size, dtype=np.uint8)
+            _bits[0::2] = (_sy.real > 0).astype(np.uint8)
+            _bits[1::2] = (_sy.imag > 0).astype(np.uint8)
+            _raw = np.packbits(_bits[:len(_bits) // 8 * 8]).tobytes()
+            cand = chain.decode_stream(_raw)
+            if cand:
+                frames = cand
+                rot_used = k
+                break
+    except Exception as e:  # noqa: BLE001
+        return ToolResult(success=False,
+                          content=f"LRPT 译码失败：{type(e).__name__}: {e}")
+    if not frames:
+        return ToolResult(
+            success=False,
+            content="未解出任何 LRPT 帧（四种相位旋转都未命中同步字/RS 块）"
+                    "——检查采样率、sps 与信号质量。")
+    blocks = [bytes(getattr(f, "data", b"") or b"") for f in frames]
+
+    # 3) RS 块 → 图像段 → 图
+    segments, stats = blocks_to_meteor_segments(blocks)
+    if not segments:
+        return ToolResult(
+            success=False,
+            content=f"解出 {len(blocks)} 个 RS 块但没取到图像段——"
+                    f"stats: {stats}")
+    res = meteor_segments_to_image(segments, str(out_png))
+    res["stats"] = {"n_symbols": int(_syms.size), "n_frames": len(frames),
+                    "phase_rotation_deg": (rot_used * 90 if rot_used is not None
+                                           else None),
+                    **stats}
+    return ToolResult(success=bool(res.get("success")),
+                      content=_json.dumps(res, ensure_ascii=False, default=str),
+                      data=res)
 
 
 def _noaa_apt_decode_tool(mgr, args) -> "ToolResult":

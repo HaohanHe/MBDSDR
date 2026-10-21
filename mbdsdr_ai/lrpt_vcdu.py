@@ -35,6 +35,13 @@ __all__ = [
     "ImageReassembly",
     "reassemble_image_stream",
     "reassemble_meteor_scan",
+    "frames_to_meteor_segments",
+    "blocks_to_meteor_segments",
+    "METEOR_FRAG_HEADER_LEN",
+    "METEOR_DIM_HEADER_LEN",
+    "meteor_segments_to_image",
+    "LRPT_FRAME_SYNC",
+    "LRPT_CADU_SYNC",
     "MeteorScan",
     "fill_missing_lines",
     "LrptJpegError",
@@ -346,3 +353,180 @@ def fill_missing_lines(image: np.ndarray,
             # i==0 或上边界也缺失：无完好参照，放弃回填（诚实）
         i = j
     return out, filled
+
+
+# --------------------------------------------------------------------------- #
+# 传输帧 → Meteor 图像段（LRPT 端到端的最后一环）
+# --------------------------------------------------------------------------- #
+#: 仓内 LRPT 帧同步字（3B，0x1DFCDC）——meteor_sat.LRPT_SYNC_WORD 口径
+LRPT_FRAME_SYNC = b"\x1d\xfc\xdc"
+#: SatDump 风格 CADU 同步字（4B，0x1DFCFC1D）——satdump_adapter 口径
+LRPT_CADU_SYNC = b"\x1d\xcf\xfc\x1d"
+
+
+def frames_to_meteor_segments(frames: List[bytes], *,
+                              sync: bytes = LRPT_CADU_SYNC,
+                              header_len: int = 3,
+                              segment_len: Optional[int] = None,
+                              max_frames: int = 4096) -> Tuple[List[bytes], Dict]:
+    """传输帧列表 → Meteor 图像段列表（剥同步字与头部）。
+
+    参数（全部具名可覆盖，因为上游位级细节口径不一，本实现不写死猜测）：
+      sync      : 帧首同步字。默认 SatDump 风格 CADU 同步（4B 0x1DFCFC1D）；
+                  仓内 LRPT 帧模型用 3B 0x1DFCDC（LRPT_FRAME_SYNC）。
+      header_len: 同步字之后、图像段载荷之前的头部字节数（vcid/apid/序号等）。
+                  默认 3（vcid 1B + apid 2B，对齐 meteor_sat.lrpc_build_frame）。
+      segment_len: 段载荷字节数（来自空间包头/外部已知）。None 表示取帧内
+                  剩余全部——注意 CADU 尾部有零填充，真实链路应显式给出。
+      max_frames: 最多处理多少帧（防御性上限）。
+
+    返回 (segments, stats)：segments 是图像段字节列表，可直接喂
+    :func:`reassemble_meteor_scan`；stats 报告每帧为何被收/被弃。
+    """
+    segments: List[bytes] = []
+    stats = {
+        "n_frames": 0, "n_segments": 0,
+        "n_no_sync": 0, "n_short": 0, "n_empty": 0,
+        "sync_hex": sync.hex().upper(), "header_len": int(header_len),
+        "segment_len": (None if segment_len is None else int(segment_len)),
+    }
+    for frame in frames[:max_frames]:
+        stats["n_frames"] += 1
+        if not frame:
+            stats["n_empty"] += 1
+            continue
+        if sync and not frame.startswith(sync):
+            stats["n_no_sync"] += 1
+            continue
+        body = frame[len(sync):] if sync else frame
+        if header_len:
+            if len(body) <= header_len:
+                stats["n_short"] += 1
+                continue
+            body = body[header_len:]
+        if segment_len is not None:
+            if len(body) < int(segment_len):
+                stats["n_short"] += 1
+                continue
+            body = body[:int(segment_len)]
+        if not body:
+            stats["n_empty"] += 1
+            continue
+        segments.append(bytes(body))
+    stats["n_segments"] = len(segments)
+    return segments, stats
+
+
+def meteor_segments_to_image(segments: List[bytes], out_png: str, *,
+                             quant_tables: Optional[Dict[int, np.ndarray]] = None
+                             ) -> Dict:
+    """Meteor 图像段列表 → 图像 PNG（重组 + 熵解码）。
+
+    段不全/有空洞时**诚实失败**（回 reassemble 的 reason 与 gap 信息），
+    绝不用半幅图冒充整图。
+    """
+    import os as _os
+    try:
+        scan = reassemble_meteor_scan(segments)
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "stage": "reassemble",
+                "error": f"{type(e).__name__}: {e}"}
+    if not getattr(scan, "complete", False):
+        return {
+            "success": False,
+            "stage": "reassemble",
+            "error": "图像段不完整，无法解出整图",
+            "reason": getattr(scan, "reason", ""),
+            "n_segments": len(segments),
+            "num_gaps": int(getattr(scan, "num_gaps", 0) or 0),
+            "gap_offsets": list(getattr(scan, "gap_offsets", []) or []),
+        }
+    try:
+        from .lrpt_huffman import decode_meteor_scan
+        tables = quant_tables if quant_tables is not None else \
+            (getattr(scan, "quant_tables", None) or None)
+        img = decode_meteor_scan(scan, tables)
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "stage": "entropy_decode",
+                "error": f"{type(e).__name__}: {e}",
+                "width": int(getattr(scan, "width", 0) or 0),
+                "height": int(getattr(scan, "height", 0) or 0)}
+    # DecodedImage 的成品图字段是 .image（组件平面在 .planes）
+    arr = getattr(img, "image", None)
+    if arr is None:
+        arr = getattr(img, "pixels", None)
+    if arr is None:
+        return {"success": False, "stage": "entropy_decode",
+                "error": "熵解码未给出像素数组"}
+    try:
+        from PIL import Image
+        Image.fromarray(np.asarray(arr)).save(out_png)
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "stage": "save_png",
+                "error": f"{type(e).__name__}: {e}"}
+    return {
+        "success": True,
+        "png_path": out_png,
+        "width": int(getattr(scan, "width", 0) or 0),
+        "height": int(getattr(scan, "height", 0) or 0),
+        "q_field": int(getattr(scan, "q_field", 0) or 0),
+        "n_segments": len(segments),
+        "shape": list(np.asarray(arr).shape),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# RS 译码块 → Meteor 图像段（字节栈 ↔ 图像栈之间的接线）
+# --------------------------------------------------------------------------- #
+#: RFC 2435 片段头长度（fragment_offset 4B）
+METEOR_FRAG_HEADER_LEN = 4
+#: 首段尺寸头长度（宽 2B + 高 2B + 保留 1B + Q 1B + 0x08 + 分量数 1B）
+METEOR_DIM_HEADER_LEN = 8
+
+
+def blocks_to_meteor_segments(blocks: List[bytes], *,
+                              frag_header_len: int = METEOR_FRAG_HEADER_LEN,
+                              dim_header_len: int = METEOR_DIM_HEADER_LEN,
+                              max_blocks: int = 65536) -> Tuple[List[bytes], Dict]:
+    """RS 译码块载荷 → Meteor 图像段列表（**一块即一段**）。
+
+    每个块载荷按 RFC 2435 片段头开头：4B fragment_offset（大端），offset=0
+    的首段随后带 8B 尺寸头（宽 2B + 高 2B + type 1B + Q 1B + 0x08 + 分量数 1B）。
+    拼接由 :func:`reassemble_meteor_scan` 按 offset 升序完成；本函数负责
+    校验（片段头可解析 / 首段带尺寸头 / offset 连续）并如实报告异常。
+
+    参数（位级细节口径不一，故全部参数化）：
+      frag_header_len: 片段头字节数（默认 4）。
+      dim_header_len : 首段尺寸头字节数（默认 8）。
+      max_blocks     : 最多处理多少块（防御性上限）。
+
+    返回 (segments, stats)。
+    """
+    segments: List[bytes] = []
+    stats = {"n_blocks": 0, "n_segments": 0, "n_bad_header": 0,
+             "n_short": 0, "n_missing_dim": 0, "n_gap": 0,
+             "offsets": []}
+    expect_next: Optional[int] = None
+    for blk in blocks[:max_blocks]:
+        stats["n_blocks"] += 1
+        if not blk:
+            stats["n_short"] += 1
+            continue
+        if len(blk) < frag_header_len:
+            stats["n_short"] += 1
+            continue
+        off = int.from_bytes(blk[:frag_header_len], "big")
+        if off == 0:
+            if len(blk) < frag_header_len + dim_header_len:
+                stats["n_short"] += 1
+                continue
+        elif expect_next is not None and off != expect_next:
+            stats["n_gap"] += 1
+        # 一块即一段：片段头 + [尺寸头] + 数据，原样交给重组层
+        segments.append(bytes(blk))
+        stats["offsets"].append(off)
+        # 下一段的期望 offset = 本段数据长度（去掉片段头与首段尺寸头）
+        expect_next = off + (len(blk) - frag_header_len
+                             - (dim_header_len if off == 0 else 0))
+    stats["n_segments"] = len(segments)
+    return segments, stats
