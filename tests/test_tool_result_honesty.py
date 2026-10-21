@@ -101,6 +101,10 @@ PAYLOAD_CASES = [
     ("measure_ber", {"bits_tx": [1, 0], "bits_rx": [1, 0]}),
     ("link_ber_test", {"scheme": "bpsk", "n_bits": 512}),
     ("pulse_shape_taps", {"sps": 4}),
+    ("rx_acceptance", {"pointing_error_deg": 0.8, "snr_db": 14.0,
+                       "decode_attempts": 100, "decode_successes": 99,
+                       "lna_nf_db": 0.6, "feedline_m": 1.5,
+                       "system_nf_db": 1.0, "dish_offset_cm": 0.5}),
 ]
 
 

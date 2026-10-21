@@ -172,6 +172,94 @@ RX_PROFILES: Dict[str, RxProfile] = {
 }
 
 
+def rx_acceptance(args) -> Dict[str, Any]:
+    """接收验收判据：逐项判定 + 总判定（材料口径的可执行版）。
+
+    输入（可按需给子集，缺项记为"未提供"不参与判定）：
+        pointing_error_deg : 指向偏差（度）        门限 pointing_tol_deg（默认 2.0，材料口径）
+        snr_db             : 实测信噪比（dB）      门限 min_snr_db（默认 5.0，材料口径）
+        decode_attempts    : 解码尝试次数
+        decode_successes   : 解码成功次数            门限 min_decode_rate（默认 0.9，材料未给→工程常规）
+        lna_nf_db          : LNA 噪声系数（dB）      门限 max_lna_nf_db（默认 1.0，材料口径）
+        feedline_m         : 馈线长度（m）           门限 max_feedline_m（默认 5.0，材料口径）
+        system_nf_db       : 前端系统噪声系数（dB）  门限 max_system_nf_db（默认 2.5，材料未给→工程常规）
+        dish_offset_cm     : 馈源离焦（cm）          门限 max_focus_offset_cm（默认 3.0，材料口径）
+    """
+    def num(key):
+        v = args.get(key)
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} 必须是数值")
+
+    def limit(key, default):
+        v = args.get(key)
+        return default if v is None else float(v)
+
+    checks: List[Dict[str, Any]] = []
+
+    def add(name, value, op, threshold, unit, source, advice):
+        if value is None:
+            checks.append({"item": name, "value": None, "threshold": threshold,
+                           "unit": unit, "pass": None, "source": source,
+                           "note": "未提供该项，不参与判定", "advice": ""})
+            return
+        ok = value <= threshold if op == "<=" else value >= threshold
+        checks.append({"item": name, "value": value, "threshold": threshold,
+                       "unit": unit, "pass": bool(ok), "source": source,
+                       "advice": "" if ok else advice})
+
+    add("指向偏差", num("pointing_error_deg"), "<=",
+        limit("pointing_tol_deg", 2.0), "度", "材料口径",
+        "重新对准：粗对准后按 0.5° 步进扫峰，锁定频谱最大值方向")
+    add("实测 SNR", num("snr_db"), ">=",
+        limit("min_snr_db", 5.0), "dB", "材料口径",
+        "降噪：LNA 紧贴馈源、缩短馈线、避开干扰频段或加带通滤波")
+    add("LNA 噪声系数", num("lna_nf_db"), "<=",
+        limit("max_lna_nf_db", 1.0), "dB", "材料口径",
+        "更换低噪声系数 LNA，并把增益调到不抬高底噪的档位")
+    add("馈线长度", num("feedline_m"), "<=",
+        limit("max_feedline_m", 5.0), "m", "材料口径",
+        "缩短馈线；1.69 GHz 每米约 0.5–1 dB")
+    add("馈源离焦", num("dish_offset_cm"), "<=",
+        limit("max_focus_offset_cm", 3.0), "cm", "材料口径",
+        "重新对焦：离焦超过 3 cm 增益下降 3–6 dB")
+    add("前端系统噪声系数", num("system_nf_db"), "<=",
+        limit("max_system_nf_db", 2.5), "dB", "材料未给→工程常规",
+        "把 LNA 放到馈源旁（< 30 cm），必要时加第二级低噪声放大")
+
+    attempts = num("decode_attempts")
+    successes = num("decode_successes")
+    if attempts is not None and successes is not None and attempts > 0:
+        rate = successes / attempts
+        thr = limit("min_decode_rate", 0.9)
+        checks.append({"item": "解码成功率", "value": rate, "threshold": thr,
+                       "unit": "比例", "pass": bool(rate >= thr),
+                       "source": "材料未给→工程常规",
+                       "advice": "" if rate >= thr else
+                       "查下行时机是否落在过境窗口、极化是否正确、增益是否抬底噪"})
+    else:
+        checks.append({"item": "解码成功率", "value": None, "threshold":
+                       limit("min_decode_rate", 0.9), "unit": "比例",
+                       "pass": None, "source": "材料未给→工程常规",
+                       "note": "未提供尝试/成功次数，不参与判定", "advice": ""})
+
+    judged = [c for c in checks if c["pass"] is not None]
+    failed = [c for c in judged if not c["pass"]]
+    verdict = ("不通过" if failed else
+               ("通过" if judged else "无可判定项"))
+    return {
+        "verdict": verdict,
+        "checks": checks,
+        "failed_items": [c["item"] for c in failed],
+        "next_steps": [c["advice"] for c in failed if c["advice"]],
+        "note": ("门限默认值标注了来源：材料口径=材料给出的验收值；"
+                 "材料未给→工程常规=可按任务指标覆盖的常规取值"),
+    }
+
+
 def _err(e: Exception) -> ToolResult:
     return ToolResult(
         success=False,
@@ -853,6 +941,30 @@ def register_acquisition_tools(registry) -> None:
             "focus_offset_m": {"type": "number", "description": "馈源离焦量"},
         }, "required": ["diameter_m", "frequency_mhz"]},
         handler=_fe_link_budget, category="acquisition",
+    )
+    R(
+        name="rx_acceptance",
+        description="接收验收判据：把材料的验收口径（指向偏差/SNR/前端指标/解码成功率）"
+                    "变成可执行逐项判定 + 总判定 + 处置建议。门限均为具名参数，"
+                    "默认值标注来源（材料口径 / 材料未给→工程常规）。原子积木。",
+        parameters={"type": "object", "properties": {
+            "pointing_error_deg": {"type": "number"},
+            "snr_db": {"type": "number"},
+            "decode_attempts": {"type": "integer"},
+            "decode_successes": {"type": "integer"},
+            "lna_nf_db": {"type": "number"},
+            "feedline_m": {"type": "number"},
+            "system_nf_db": {"type": "number"},
+            "dish_offset_cm": {"type": "number"},
+            "pointing_tol_deg": {"type": "number", "default": 2.0},
+            "min_snr_db": {"type": "number", "default": 5.0},
+            "max_lna_nf_db": {"type": "number", "default": 1.0},
+            "max_feedline_m": {"type": "number", "default": 5.0},
+            "max_system_nf_db": {"type": "number", "default": 2.5},
+            "max_focus_offset_cm": {"type": "number", "default": 3.0},
+            "min_decode_rate": {"type": "number", "default": 0.9},
+        }, "required": []},
+        handler=rx_acceptance, category="acquisition",
     )
     R(
         name="fe_diagnose",
