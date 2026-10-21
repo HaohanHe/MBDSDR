@@ -42,6 +42,8 @@ TASK_STEPS = [
     ("气象", "罐子馈源几何", ["cantenna_design"]),
     ("气象", "症状→环节诊断", ["fe_diagnose"]),
     ("气象", "LRIT 图像解码", ["gk2a_lrit_decode"]),
+    ("气象", "FY-4 LRIT 解码", ["fy4_lrit_decode"]),
+    ("气象", "Meteor LRPT 解调", ["meteor_lrpt_demod"]),
     ("气象", "图像增强", ["sat_image_enhance"]),
     ("气象", "过境预报", ["sat_pass_predict"]),
     ("定轨", "频偏→伪距率", ["doppler_from_frequency"]),
