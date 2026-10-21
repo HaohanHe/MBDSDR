@@ -224,6 +224,50 @@ def range_rate_to_doppler_hz(range_rate: float, center_frequency: float) -> floa
     return -float(range_rate) * float(center_frequency) / C_LIGHT_KMS
 
 
+def _tle_mean_motion_token(line2: str) -> float:
+    """从 TLE 行 2 文本取平均运动（rev/day）。两种行 2 变体都能定位。"""
+    toks = str(line2).split()
+    if len(toks) < 7:
+        raise ValueError(
+            f"TLE 行 2 字段不足（读到 {len(toks)} 个，需 ≥ 7）：{line2!r}")
+    if "." in toks[-1]:
+        mm_tok = toks[-1]          # 带平均近点角变体：末位即平均运动
+    elif len(toks) >= 9:
+        mm_tok = toks[-3]          # 经典变体：平均运动 / 轨道号 / 校验位
+    else:
+        mm_tok = toks[-2]
+    try:
+        return float(mm_tok)
+    except ValueError as e:
+        raise ValueError(
+            f"TLE 行 2 平均运动字段无法解析为数值：{mm_tok!r}（行 2 = {line2!r}）") from e
+
+
+def _tle_crosscheck(line2: str, sat) -> None:
+    """TLE 文本字段 vs SGP4 解析字段对拍；不一致必须报错，不静默给错轨道。"""
+    text_mm = _tle_mean_motion_token(line2)
+    parsed_mm = float(sat.no_kozai) * 1440.0 / (2.0 * math.pi)
+    if abs(parsed_mm - text_mm) > max(1e-6, abs(text_mm) * 1e-6):
+        raise ValueError(
+            f"TLE 行 2 平均运动解析不一致：文本 = {text_mm:.8f} rev/day，"
+            f"SGP4 解析 = {parsed_mm:.8f} rev/day——TLE 列位/字段异常"
+            f"（行 2 长度 {len(str(line2))}，期望 68–69 字符的规范 TLE），"
+            f"若强行传播会得到物理上错误的轨道，故报错不返回")
+    toks = str(line2).split()
+    if len(toks) >= 3:
+        try:
+            text_incl = float(toks[2])
+        except ValueError:
+            text_incl = None
+        if text_incl is not None:
+            parsed_incl = math.degrees(float(sat.inclo))
+            if abs(parsed_incl - text_incl) > 1e-4:
+                raise ValueError(
+                    f"TLE 行 2 倾角解析不一致：文本 = {text_incl:.6f}°，"
+                    f"SGP4 解析 = {parsed_incl:.6f}°——TLE 列位/字段异常，"
+                    f"故报错不返回")
+
+
 def tle_state_ecef(tle_line1: str, tle_line2: str, timestamp: float) -> np.ndarray:
     """SGP4 传播 TLE -> ECEF 状态（7 维 [x,y,z,vx,vy,vz,0]，SI）。
 
@@ -237,6 +281,8 @@ def tle_state_ecef(tle_line1: str, tle_line2: str, timestamp: float) -> np.ndarr
     jd = timestamp / 86400.0 + 2440587.5
     jdi = int(jd)
     jdf = jd - jdi
+    # 先对拍再传播：列位异常要给出具体原因，而不是笼统的 SGP4 错误码
+    _tle_crosscheck(tle_line2, sat)
     err, r_teme, v_teme = sat.sgp4(jdi, jdf)  # km, km/s
     if err != 0:
         raise ValueError(f"SGP4 传播失败，错误码 {err}")

@@ -74,11 +74,12 @@ PAYLOAD_CASES = [
     ("hdradio_decode_iq", {"iq": [0.0] * 64}),
     ("adsb_decode_iq", {"iq": [0.0] * 64}),
     ("ccsds_decode_bits", {"bits": [0] * 2048}),
-    ("tle_state_ecef", {"tle_line1": "1 25544U 98067A   24001.50000000 "
-                                   " .00000000  00000-0  00000+0 0  9995",
-                         "tle_line2": "2 25544  51.6400 100.0000 "
-                                      "0005000  50.0000  10.0000 1 05",
-                         "timestamp": 1704067200.0}),
+    ("tle_state_ecef", {"tle_line1": "1 42960U 17061F   25117.46489195 "
+                                   " .00000241  00000+0  78821-4 0  9994",
+                         "tle_line2": "2 42960  86.4033 198.9703 "
+                                      "0001974 107.2578 252.8834 "
+                                      "14.34218356395236",
+                         "timestamp": 1745764814.0}),
     ("doppler_from_frequency", {"frequency_hz": 1626303262.0,
                                 "center_frequency_hz": 1626270833.0}),
     ("pseudorange_rate_model", {
