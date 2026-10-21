@@ -4781,13 +4781,22 @@ def _aprs_decode(args):
 
         result += f"\n"
 
+    if aprs_packets:
+        aprs_note = f"解出 {len(aprs_packets)} 条 APRS 报文"
+    elif frames:
+        aprs_note = ("AX.25 帧已解析出 "
+                     f"{len(frames)} 个，但信息字段不构成 APRS 报文"
+                     "（APRS 数据类型标识无法识别）")
+    else:
+        aprs_note = "输入未解析出可用的 AX.25 帧（地址/长度/FCS 不符）"
     return {"content": result,
             "packets": [{"source": p.source,
                          "destination": p.destination,
                          "data_type": p.data_type,
                          "text": getattr(p, "text", "")}
                         for p in aprs_packets],
-            "count": len(aprs_packets)}
+            "count": len(aprs_packets),
+            "note": aprs_note}
 
 
 def _aprs_send_position(args):
@@ -4926,7 +4935,9 @@ def _kiss_decode(args):
     return {"content": result,
             "frames": [{"port": p, "ax25_hex": d.hex().upper()}
                        for p, d in frames],
-            "count": len(frames)}
+            "count": len(frames),
+            "note": (f"解出 {len(frames)} 个 KISS 帧" if frames else
+                     "输入中未检出 KISS 帧（缺 FEND 0xC0 定界或端口字节不符）")}
 
 
 def _digipeater_process(args):

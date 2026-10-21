@@ -610,6 +610,8 @@ def _fe_link_budget(args):
                 "measured_snr_db": meas_snr,
                 "verdict_ok": ok,
                 "findings": findings,
+                "note": ("" if findings else
+                         "未发现异常项：各参数均在材料建议门限内（findings 为空即无超限项）"),
             },
         )
     except Exception as e:
@@ -774,6 +776,9 @@ def _cantenna_design(args):
                 "recommended_probe_insertion_mm": rec_insert,
                 "recommended_probe_offset_mm": rec_probe,
                 "findings": findings,
+                "note": ("" if findings else
+                         "罐体几何满足工作条件：无异常项"
+                         "（findings 为空即无超限项）"),
             },
         )
     except Exception as e:

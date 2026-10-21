@@ -466,6 +466,18 @@ def decode_adsb(iq: np.ndarray, sample_rate: float, threshold_sigma: float = 4.0
         "threshold_amp": round(thr, 5),
         "duration_s": round(len(iq) / sample_rate, 4),
     }
+    if not out["frames"]:
+        out["note"] = (
+            f"未检出有效 Mode-S 帧：前导候选 {out['candidates']} 个、"
+            f"CRC 通过 {out['crc_ok']} 个、失败 {out['crc_failed']} 个；"
+            f"自适应幅度门限 {out['threshold_amp']}、噪声底 {out['noise_floor_amp']}、"
+            f"时长 {out['duration_s']} s"
+            + ("（输入全零或过短，无信号可检）" if peak <= 0.0 or len(iq) < 1000
+               else "（幅度未越门限或前导码不匹配）"))
+    else:
+        out["note"] = (
+            f"检出 {out['crc_ok']} 帧（CRC 通过）、失败 {out['crc_failed']} 帧，"
+            f"涉及 {len(out['aircraft'])} 个 ICAO 地址")
     if return_invalid:
         out["invalid_preambles"] = invalid
     return out
