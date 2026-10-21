@@ -19,6 +19,10 @@ tracked 文件（含 commit message）中：
 （具体值见 git log，不写进本文件）；内容层（含 commit message）同样执行
 本条红线。
 
+**机械护栏**：`tests/test_identity_redline.py` 扫 git tracked 文本文件，
+命中个人信息或就业意向措辞即红（邮箱/手机号/学校/居所类词；规则字面量用
+拼接构造，门禁自身不命中自己）。新增或修改 tracked 文件后该门禁必须仍绿。
+
 ## 2. 诚实文化（本仓库的第一性）
 
 - 无硬件/无信号 → 显式空态或错误信封，**绝不 mock、绝不伪造数据**；
