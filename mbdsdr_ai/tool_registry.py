@@ -368,11 +368,15 @@ class ToolRegistry:
                     next_step=str(raw_result.get("next_step", "") or ""),
                 )
             elif isinstance(raw_result, str):
+                # 契约：handler 以"错误:"开头即为失败信号（仓内 50+ 处统一用此契约）。
+                # 不能包装成 success=True：否则模型（与人）会把失败读成成功。
+                _is_err = raw_result.lstrip().startswith(("\u9519\u8bef:", "\u9519\u8bef\uff1a"))
                 result = ToolResult(
-                    success=True,
+                    success=not _is_err,
                     content=raw_result,
                     tool_name=tool_name,
                     args=args,
+                    error=("handler_error" if _is_err else ""),
                 )
             else:
                 result = ToolResult(
@@ -391,6 +395,19 @@ class ToolRegistry:
                 error=f"exception: {type(e).__name__}",
                 next_step="按报错类型修正参数（单位/范围/类型）后重试；同一参数重试不超过 2 次，仍失败则换方法或向用户说明。",
             )
+
+        # 诚实语义兜底：仓内约定 handler 以"错误:"开头即为失败信号。
+        # 无论 handler 怎么包装（裸字符串 / dict / 显式 ToolResult），统一在此判定，
+        # 避免"失败被读成成功"。
+        _txt = result.content if isinstance(result.content, str) else ""
+        if result.success and _txt.lstrip().startswith(("错误:", "错误：")):
+            result.success = False
+            result.error = result.error or "handler_error"
+
+        # 失败但没有可见文本时，用 error 兜底（模型侧不能只看到空串）
+        if not result.success and not (result.content or "").strip():
+            result.content = (result.error
+                              or f"工具 '{tool_name}' 调用失败（未提供错误详情）")
 
         result.latency_ms = round((time.time() - start_time) * 1000, 1)
 
