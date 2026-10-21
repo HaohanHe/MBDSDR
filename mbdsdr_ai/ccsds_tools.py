@@ -70,14 +70,22 @@ def build_config(args: Dict[str, Any]) -> CcsdsRxConfig:
     )
 
 
+#: ASM 诊断的最大扫描位数（8 处命中即停），避免大输入上做 O(n×32) 全扫
+_ASM_SCAN_LIMIT = 1 << 18
+
+
 def _asm_diagnostic(bits: List[int], cfg: CcsdsRxConfig) -> Dict[str, Any]:
     """0 帧时的可执行诊断：ASM 是否存在/在何处、帧长差多少、下一步查什么。"""
     asm_bits = bytes_to_bits_msb(int(cfg.asm_word).to_bytes(4, "big"))
     n = len(bits)
     positions: List[int] = []
-    for i in range(0, max(0, n - 32) + 1):
+    # 扫描上界：诊断只需定位"前若干处 ASM"，全量扫描 O(n×32) 在大输入上太慢
+    scan_limit = min(n - 31, _ASM_SCAN_LIMIT) if n >= 32 else 0
+    for i in range(0, max(0, scan_limit)):
         if list(bits[i:i + 32]) == asm_bits:
             positions.append(i)
+            if len(positions) >= 8:
+                break
     need = int(cfg.frame_bits_after_asm)
     info: Dict[str, Any] = {
         "asm_hex": f"{int(cfg.asm_word):08X}",
@@ -87,6 +95,9 @@ def _asm_diagnostic(bits: List[int], cfg: CcsdsRxConfig) -> Dict[str, Any]:
         "frame_bits_after_asm": need,
         "asm_max_hamming": int(cfg.asm_max_hamming),
     }
+    if scan_limit < max(0, n - 31):
+        info["scan_truncated"] = True
+        info["scanned_bits"] = scan_limit
     if positions:
         p = positions[0]
         avail = n - p - 32

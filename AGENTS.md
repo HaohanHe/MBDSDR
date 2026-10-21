@@ -46,14 +46,25 @@ tracked 文件（含 commit message）中：
 
 ## 5. 基线
 
-`python -m pytest mbdsdr_ai/tests -q` 基线锨点（commit 级回归手段，不作对外宣传数字）：最近一次全绿记录 **1097 passed / 5 skipped**
-（2026-10-20 沙箱复测：skyfield 1.54 三层漂移兼容修复消 6 红 + FT8/ADS-B 跨语言
-对拍新增 6 项；1086→1097 净增 11。
+`python -m pytest mbdsdr_ai/tests -q` 基线锚点（commit 级回归手段，不作对外宣传数字）：最近一次全绿记录 **1168 passed / 5 skipped**
+（2026-10-21 实测：1097→1168 净增 71。同期 `mbdsdr_ai/tests` 由 104 个文件 /
+992 个 `test_` 函数增至 108 个文件 / 1051 个 `test_` 函数，新增 test_acquisition、
+test_cross_golden、test_modulation、test_rrc_single_source 四个文件。
+主要增量来源：多普勒定轨链的量纲/传播系统性修复、CCSDS 通用数字接收链、
+调制内核收敛（RRC 与 FreeDV QPSK 归一到单一来源）、工具载荷契约与
+"错误:即失败"的诚实语义、外部 API 静默降级修复。
 历史增量：915→1041（phase66 零覆盖模块首套行为测试）→1086（phase67 模型体验）
-→1097（skyfield 1.54 兼容 + 跨语言对拍）。
+→1097（skyfield 1.54 兼容 + 跨语言对拍）→1168（材料能力补齐 + 门禁化）。
 无网环境下 `test_real_tle_fresh_or_skip` 等真实联网用例转 skip，
 passed 数相应下浮——skip 均属无 env/无硬件的诚实 skip）。任何改动不得
 降低此数。
+
+根 `tests/`（大套件，156 个测试文件）同样是对拍门禁所在，新增 5 个门禁文件：
+`test_material_task_chains.py`（五份材料 39 个任务步的存在性 + 端到端链路）、
+`test_tle_parse_crosscheck.py`（TLE 文本↔SGP4 解析对拍）、
+`test_empty_result_diagnostics.py`（空结果必须带说明）、
+`test_external_api_honesty.py`（外部 API 错误载荷不得谎报为空）、
+`test_rx_acceptance.py`（材料验收口径可执行判据）。
 
 C++ 桌面端（`cpp/`）：`ctest --test-dir build_cpp`（Qt 6.8.2 MinGW 工具链 +
 offscreen）基线 **155/155 全绿**（2026-10-20 实测；含跨语言对拍 cross_golden、
