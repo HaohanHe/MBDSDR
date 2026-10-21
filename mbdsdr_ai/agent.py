@@ -1111,11 +1111,17 @@ class MBDSDRAgent:
             f = AX25Frame.from_bytes(blob)
             if f is None:
                 return ToolResult(False, "帧过短或解析失败")
+            notes = []
+            if not f.digipeaters:
+                notes.append("无 digipeater 中继路径（地址字段只含源/目的呼号）")
+            if not f.fcs_valid:
+                notes.append("FCS(CRC-16/X.25) 校验未通过，帧可能被截断或误码")
             return ToolResult(True, json.dumps({
                 "source": f.source, "destination": f.destination,
                 "digipeaters": [c for c, _, _ in f.digipeaters],
                 "info": f.info.decode("latin-1", "replace"),
                 "fcs_valid": f.fcs_valid,
+                "note": "；".join(notes),
             }, ensure_ascii=False))
         self.tool_registry.register(
             name="ax25_decode",
