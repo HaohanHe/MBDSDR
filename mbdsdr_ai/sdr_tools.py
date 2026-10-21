@@ -3289,8 +3289,14 @@ def _meteor_lrpt_demod_fn_tool(args) -> "ToolResult":
     sr = float(args.get("sample_rate", 72000))
     b64 = args.get("iq_base64")
     if not b64:
-        out = {"sym_rate": METEOR_SYM_RATE, "note": "提供 iq_base64(float32 interleaved) 后返回解调摘要"}
-        return ToolResult(success=True, content=_json.dumps(out), data=out)
+        # 无信号不得回"成功 + 占位说明"——显式失败并说明缺什么
+        msg = (f"需要 iq_base64：复数 IQ 的 base64（float32 交错，"
+               f"实部/虚部交替）。Meteor LRPT 符号率 {METEOR_SYM_RATE} sym/s，"
+               f"采样率按此换算 sps（当前 sample_rate={sr}）。"
+               f"没有 IQ 就无法解调——本次不返回任何解调结果。")
+        out = {"sym_rate": METEOR_SYM_RATE, "sample_rate": sr,
+               "error": "缺少 iq_base64"}
+        return ToolResult(success=False, content=msg, data=out)
     raw = np.frombuffer(_b64.b64decode(b64), dtype=np.float32)
     iq = (raw[0::2] + 1j * raw[1::2]).astype(np.complex64)
     summary = meteor_lrpt_demod(iq, sr)
