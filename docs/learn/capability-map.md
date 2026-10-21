@@ -36,6 +36,9 @@
 
 ---
 
+
+> 定轨族的真实状态、单位口径、已修缺陷与物理边界：见 [`orbit-determination.md`](orbit-determination.md)（数据与测试均在仓内）。
+
 ## 2. 各族详解
 
 ### 2.1 气象卫星图片接收

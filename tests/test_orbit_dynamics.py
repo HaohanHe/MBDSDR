@@ -20,7 +20,7 @@ from mbdsdr_ai import orbit_dynamics as od  # noqa: E402
 
 def _leo_state(t: float) -> np.ndarray:
     """解析圆轨道参考状态（ECI，再转 ECEF）——测试真值发生器。"""
-    r = 7.0e6
+    r = 7.0e3          # km（全链口径统一为 km）
     n = np.sqrt(od.MU_EARTH / r**3)
     pos_eci = np.array([r * np.cos(n * t), r * np.sin(n * t), 0.0])
     vel_eci = np.array([-r * n * np.sin(n * t), r * n * np.cos(n * t), 0.0])
@@ -69,13 +69,13 @@ class TestObservationModel:
         assert abs(rate) < 1e-6
 
     def test_jacobian_finite_difference(self):
-        rec = np.array([-2.63785e6, 3.50512e6, 4.6147e6])
+        rec = np.array([-2637.85, 3505.12, 4614.7])   # km
         st = _leo_state(1.7e9)
         _, jac = od.pseudorange_rate_and_jacobian(st, rec)
 
         fd = np.zeros(7)
         for i in range(7):
-            eps = 1e-3 if i < 3 else (1e-6 if i < 6 else 1e-12)
+            eps = 1e-3 if i < 3 else (1e-6 if i < 6 else 1e-9)
             sp = st.copy(); sp[i] += eps
             sm = st.copy(); sm[i] -= eps
             rp, _ = od.pseudorange_rate_and_jacobian(sp, rec)
@@ -85,20 +85,21 @@ class TestObservationModel:
 
     def test_doppler_roundtrip(self):
         fc = 1626.270833e6
-        rr = 250.0
-        f = fc - rr * fc / od.C_LIGHT  # range_rate = -c*(f-fc)/fc
-        assert abs(od.observed_pseudorange_rate(f, fc) - rr) < 1e-6
+        rr = 0.25                      # km/s（= 250 m/s）
+        f = fc - rr * fc / od.C_LIGHT_KMS  # range_rate = -c*(f-fc)/fc
+        assert abs(od.observed_pseudorange_rate(f, fc) - rr) < 1e-9
 
 
 class TestRLS:
     def test_truth_init_zero_noise_residual_zero(self):
         """真值初值 + 零噪声 -> 后验残差 ~0（动力学+观测模型自洽）。"""
         t0 = 1.7e9
-        rec = np.array([-2.63785e6, 3.50512e6, 4.6147e6])
+        rec = np.array([-2637.85, 3505.12, 4614.7])   # km
         true0 = _leo_state(t0)
-        sig = 20.0
+        sig = 0.02                 # km/s（20 m/s）
         x0 = true0.copy()
-        cov = np.diag(np.array([3e3, 3e3, 3e3, 3.0, 3.0, 3.0, 3e-8]) ** 2)
+        # 位置 σ=3 km、速度 σ=3 m/s、钟差项（km 口径）
+        cov = np.diag(np.array([3.0, 3.0, 3.0, 0.003, 0.003, 0.003, 3e-11]) ** 2)
         worst = 0.0
         for k in range(1, 20):
             tk = t0 + 8.0 * k
@@ -117,14 +118,15 @@ class TestRLS:
         44655 -> 30930 m 单调降）。
         """
         t0 = 1.7e9
-        rec = np.array([-2.63785e6, 3.50512e6, 4.6147e6])
+        rec = np.array([-2637.85, 3505.12, 4614.7])   # km
         true0 = _leo_state(t0)
-        sig = 20.0
+        sig = 0.02                 # km/s（20 m/s）
         rng = np.random.default_rng(42)
         x0 = true0.copy()
-        x0[:3] += rng.normal(0, 3e3, 3)
-        x0[3:6] += rng.normal(0, 3.0, 3)
-        cov = np.diag(np.array([3e3, 3e3, 3e3, 3.0, 3.0, 3.0, 3e-8]) ** 2)
+        x0[:3] += rng.normal(0, 3.0, 3)      # 3 km
+        x0[3:6] += rng.normal(0, 0.003, 3)   # 3 m/s
+        # 位置 σ=3 km、速度 σ=3 m/s、钟差项（km 口径）
+        cov = np.diag(np.array([3.0, 3.0, 3.0, 0.003, 0.003, 0.003, 3e-11]) ** 2)
 
         prev_sigma = np.inf
         first_sigma = None
@@ -153,7 +155,7 @@ class TestRLS:
 class TestCoordinates:
     def test_ecef_eci_roundtrip(self):
         t = 1.7e9
-        p = np.array([6.5e6, 1.2e6, 2.3e6])
+        p = np.array([6.5e3, 1.2e3, 2.3e3])   # km
         v = np.array([100.0, -200.0, 300.0])
         pe, ve = od.ecef_to_eci(p, v, t)
         p2, v2 = od.eci_to_ecef(pe, ve, t)
