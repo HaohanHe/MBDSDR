@@ -66,6 +66,7 @@ TASK_STEPS = [
     ("ASTU", "CCSDS 帧构造", ["ccsds_encode_frame"]),
     ("ASTU", "CCSDS 比特解码", ["ccsds_decode_bits"]),
     ("ASTU", "CCSDS IQ 解码", ["ccsds_decode_iq"]),
+    ("ASTU", "遥测文本还原(IQ→字符流)", ["astu_telemetry_decode"]),
     ("对抗", "统一调制", ["modulate_symbols"]),
     ("对抗", "统一解调", ["demodulate_symbols"]),
     ("对抗", "星座质量", ["constellation_metrics"]),
