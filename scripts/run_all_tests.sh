@@ -155,6 +155,35 @@ else
         else
             root_timeout="$PYTEST_TIMEOUT"
         fi
+        # 根 tests/ 与 CI 一致拆成 A/B 两组（各自独立进程，墙钟减半、
+        # 跨文件 QApplication 累积影响减半）；分组脚本按文件名排序生成。
+        if [ "$d" = "tests" ] && [ -f "$ROOT/scripts/ci_pytest_groups.py" ]; then
+            for g in 0 1; do
+                files="$("$PYTHON_BIN" "$ROOT/scripts/ci_pytest_groups.py" \
+                          --group "$g" --total 2)"
+                [ -z "$files" ] && { report SKIP "pytest:tests[$g]" "分组为空"; continue; }
+                log="$LOG_DIR/pytest_tests_g${g}.log"
+                echo "       日志: $log  (tests 组 $g)"
+                # shellcheck disable=SC2086
+                if [ "$root_timeout" -gt 0 ] 2>/dev/null && command -v timeout >/dev/null 2>&1; then
+                    QT_QPA_PLATFORM=offscreen timeout -k 20 "$root_timeout" \
+                        "$PYTHON_BIN" -m pytest -q $files >"$log" 2>&1
+                else
+                    QT_QPA_PLATFORM=offscreen \
+                        "$PYTHON_BIN" -m pytest -q $files >"$log" 2>&1
+                fi
+                rc=$?
+                summary="$(grep -E 'passed|failed|error|no tests ran' "$log" | tail -1)"
+                [ -z "$summary" ] && summary="(见日志, rc=$rc)"
+                case "$rc" in
+                    0) report PASS "pytest:tests[$g]" "$summary" ;;
+                    5) report SKIP "pytest:tests[$g]" "未收集到用例 (rc=5): $summary" ;;
+                    124) report FAIL "pytest:tests[$g]" "墙钟超时 ${root_timeout}s（疑卡死用例，见日志）: $summary" ;;
+                    *) report FAIL "pytest:tests[$g]" "$summary (rc=$rc)" ;;
+                esac
+            done
+            continue
+        fi
         log="$LOG_DIR/pytest_$(echo "$d" | tr '/' '_').log"
         echo "       日志: $log  ($d)"
         # exit codes: 0=全部通过  1=有用例失败  2=被中断  5=未收集到任何用例
