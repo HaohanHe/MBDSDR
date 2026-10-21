@@ -20,7 +20,7 @@
 | 主题 | 权威实现 | 薄层/历史位置 | 钉死方式 |
 |---|---|---|---|
 | CRC | `mbdsdr_ai/crc.py`（参数化内核 + 命名预设，CRC8/14/16/24/32 + 比特域） | 各协议模块原内联实现已改为调用预设 | 回归向量（"123456789" → X.25=0x906E / CCITT-FALSE=0x29B1）+ 既有协议测试 |
-| 调制/解调 | `mbdsdr_ai/modulation.py`（ASK/BPSK/QPSK/8PSK，NRZ/RRC，映射参数化） | `freedv_modem.bits_to_qpsk` 已改为委托（mapping="gray"） | `tests/test_modulation.py`（31 项：往返零误码、BER 与理论对照、Gray 单 bit 相邻、外来实现等价） |
+| 调制/解调 | `mbdsdr_ai/modulation.py`（ASK/BPSK/QPSK/8PSK，NRZ/RRC，映射参数化） | `freedv_modem.bits_to_qpsk` 已改为委托（mapping="gray"） | `mbdsdr_ai/tests/test_modulation.py`（31 项：往返零误码、BER 与理论对照、Gray 单 bit 相邻、外来实现等价） |
 | RRC 抽头 | `mbdsdr_ai/fir_taps.root_raised_cosine_taps` | `modulation._rrc_taps` 复用之 | `test_pulse_shape_taps_matches_fir_taps`（逐点相等断言） |
 | ACARS 编解码 | `mbdsdr_ai/acars_protocol.py`（已验证实现：相位搜索 + 极性对齐 + CRC 校验选择） | `acars_decoder.acars_decode_iq` 高层入口已委托之 | `tests/test_acars_consistency.py`（公开入口必须 crc_ok=True；两条入口结果一致；ETB 与 1200 bps 兼容） |
 
@@ -77,7 +77,7 @@ ADS-B 审计中另查出一处真缺陷：精简版门限在 MAD=0（无噪/极�
 
 | 主题 | 重复现状 | 为什么现在不动 | 收敛前置条件 |
 |---|---|---|---|
-| RRC 成形（协议侧各自一份） | `demod.py.rrc_filter`（已**收敛**：委托 `fir_taps.root_raised_cosine_taps`，归一化后逐点相同，maxdiff=0，行为零漂移；等价性已钉死于 `tests/test_rrc_single_source.py`）；`gk2a_lrit.rrc_filter`（保留，见下）；`fir_taps.root_raised_cosine_taps`（权威实现） | `gk2a_lrit` 版与标准形式在 α=0.5 时形状有差（归一化内积 0.91，α=0.35 时逐点相同）——它是接收端对"发射端滤波未知"的匹配选择，不是同款重复，故保留并在此登记 | 已完成 demod 收敛（零漂移）；若未来需统一 α=0.5 口径，需先重算 gk2a 的旧期望值再改实现 |
+| RRC 成形（协议侧各自一份） | `demod.py.rrc_filter`（已**收敛**：委托 `fir_taps.root_raised_cosine_taps`，归一化后逐点相同，maxdiff=0，行为零漂移；等价性已钉死于 `mbdsdr_ai/tests/test_rrc_single_source.py`）；`gk2a_lrit.rrc_filter`（保留，见下）；`fir_taps.root_raised_cosine_taps`（权威实现） | `gk2a_lrit` 版与标准形式在 α=0.5 时形状有差（归一化内积 0.91，α=0.35 时逐点相同）——它是接收端对"发射端滤波未知"的匹配选择，不是同款重复，故保留并在此登记 | 已完成 demod 收敛（零漂移）；若未来需统一 α=0.5 口径，需先重算 gk2a 的旧期望值再改实现 |
 | HAL / MIMO / 遥控三套 | `hal_enhanced` / `mimo_v2` / `remote_control_v2` 各自实现同一层硬件抽象的相邻能力 | 三者面向不同设备族（增强 HAL、多天线、遥控），合并会牵动设备枚举与工具注册 | 先做能力矩阵表（谁能替代谁），再定合并顺序；每步保持工具名与参数不变 |
 | 旧 `src/desktop/` 布局的路径引用 | 根目录编号文档 03–07 仍写 `src/desktop/...`（该目录已不存在） | 文档已加"实现落点"勘误头说明真实落点 | 逐份把路径引用改为实际模块位置（勘误头为过渡方案） |
 
