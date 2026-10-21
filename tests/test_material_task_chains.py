@@ -45,6 +45,7 @@ TASK_STEPS = [
     ("气象", "FY-4 LRIT 解码", ["fy4_lrit_decode"]),
     ("气象", "FY-4 IQ 直达图", ["fy4_lrit_decode_iq"]),
     ("气象", "Meteor LRPT 解调", ["meteor_lrpt_demod"]),
+    ("气象", "Meteor LRPT IQ 直达图", ["meteor_lrpt_decode_iq"]),
     ("气象", "图像增强", ["sat_image_enhance"]),
     ("气象", "过境预报", ["sat_pass_predict"]),
     ("定轨", "频偏→伪距率", ["doppler_from_frequency"]),
