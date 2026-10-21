@@ -36,24 +36,23 @@ DBPSK_1600_FREQ_SPACING = 12.5  # Hz between carriers (FDMDV)
 # ── QPSK modulation helpers ──────────────────────────────────────────────
 
 def bits_to_qpsk(bits: np.ndarray) -> np.ndarray:
-    """Convert bits to QPSK symbols (Gray coded).
+    """Convert bits to QPSK symbols (Gray coded) — 委托统一内核。
 
- 星座点（Gray 映射，与内核口径一致）：
- 00 → ( 1+ j) / sqrt(2)      01 → ( 1- j) / sqrt(2)
- 10 → (-1+ j) / sqrt(2)      11 → (-1- j) / sqrt(2)
+    星座点（Gray 映射）：
+     00 → ( 1+ j) / sqrt(2)      01 → ( 1- j) / sqrt(2)
+     10 → (-1+ j) / sqrt(2)      11 → (-1- j) / sqrt(2)
 
- 实现收敛到全仓统一参数化内核 mbdsdr_ai.modulation
- （映射方式不再各处写死）。
- """
+    实现收敛到 `mbdsdr_ai.modulation.symbol_points("qpsk", "gray")`：两处各写一份映射定义时易出现
+    "看赵来对、实际错一位"的位错位（定轨链上已因类比例问题做过该主题）。
+    """
     from .modulation import symbol_points
     b = np.asarray(bits, dtype=np.uint8).ravel()
-    if b.size < 2:
-        return np.zeros(0, dtype=complex)
     n_syms = b.size // 2
+    if n_syms == 0:
+        return np.zeros(0, dtype=complex)
     b = b[: n_syms * 2].reshape(n_syms, 2)
     idx = (b[:, 0].astype(np.int64) << 1) | b[:, 1].astype(np.int64)
     return symbol_points("qpsk", "gray")[idx]
-
 
 def qpsk_to_bits(symbols: np.ndarray) -> np.ndarray:
     """Demodulate QPSK symbols to bits (hard decision)."""

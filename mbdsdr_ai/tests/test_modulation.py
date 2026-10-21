@@ -242,3 +242,17 @@ def test_binary_and_gray_differ_but_both_valid():
 def test_unknown_mapping_fails():
     with pytest.raises(ValueError):
         modulate_bits([0, 1, 1, 0], "qpsk", mapping="weird")
+
+
+def test_freedv_qpsk_equals_unified_kernel():
+    """freedv_modem 的 QPSK 映射必须与统一内核逐点相同（消除第二份映射实现）。"""
+    from mbdsdr_ai.freedv_modem import bits_to_qpsk
+    from mbdsdr_ai.modulation import symbol_points
+    rng = np.random.default_rng(5)
+    bits = rng.integers(0, 2, 200).astype(np.uint8)
+    got = bits_to_qpsk(bits)
+    pts = symbol_points("qpsk", "gray")
+    expect = np.array([pts[(b0 << 1) | b1]
+                       for b0, b1 in zip(bits[0::2], bits[1::2])])
+    assert got.shape == expect.shape
+    assert np.allclose(got, expect)
