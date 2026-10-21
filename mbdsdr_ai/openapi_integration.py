@@ -49,11 +49,19 @@ def get_people_in_space() -> Dict:
     try:
         resp = requests.get("http://api.open-notify.org/astros.json", timeout=5)
         data = resp.json()
+        # 错误载荷不是"太空有 0 人"——必须显式失败，别报假数
+        if data.get("message") != "success":
+            return {"success": False,
+                    "error": f"open-notify 返回异常: {str(data)[:160]}"}
+        number = data.get("number")
+        if number is None:
+            return {"success": False,
+                    "error": f"open-notify 返回缺少 number 字段: {str(data)[:160]}"}
         return {
             "success": True,
-            "number": data.get("number", 0),
+            "number": number,
             "people": [p["name"] for p in data.get("people", [])],
-            "message": f"当前太空有{data.get('number', 0)}人",
+            "message": f"当前太空有{number}人",
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -69,6 +77,10 @@ def get_weather(lat: float, lon: float) -> Dict:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,wind_speed_10m,relative_humidity_2m,weather_code"
         resp = requests.get(url, timeout=5)
         data = resp.json()
+        # 错误载荷（如参数非法）会带 error/reason，必须显式失败
+        if data.get("error") or "current" not in data:
+            reason = data.get("reason") or str(data)[:160]
+            return {"success": False, "error": f"open-meteo 返回异常: {reason}"}
 
         current = data.get("current", {})
         return {
@@ -101,8 +113,13 @@ def get_aircraft_nearby(lat: float, lon: float, radius_km: float = 50) -> Dict:
         url = f"https://opensky-network.org/api/states/all?lamin={lat-dlat}&lamax={lat+dlat}&lomin={lon-dlon}&lomax={lon+dlon}"
         resp = requests.get(url, timeout=10)
         data = resp.json()
+        # 错误载荷没有 states 字段：不能当成"半径内没有飞机"
+        if "states" not in data:
+            reason = data.get("message") or str(data)[:160]
+            return {"success": False,
+                    "error": f"opensky 返回异常: {reason}"}
 
-        states = data.get("states", [])
+        states = data.get("states", []) or []
         aircraft = []
         for s in states[:10]:  # 最多10架
             aircraft.append({

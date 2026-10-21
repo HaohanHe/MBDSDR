@@ -19,7 +19,9 @@
 #   CPP_BUILD_DIR  C++ 构建目录（默认 <root>/cpp/build）
 #   MOBILE_DIR     Flutter 工程目录（默认 <root>/mobile）
 #   PYTHON_BIN     python 解释器（默认 python3）
-#   PYTEST_TIMEOUT  每个 pytest 根目录的墙钟秒数上限（默认 900=15 分钟）。
+#   PYTEST_TIMEOUT  四个小 pytest 根的墙钟秒数上限（默认 900=15 分钟）。
+#   PYTEST_TIMEOUT_BIG  根 tests/（大套件）的墙钟秒数上限（默认 3600=60 分钟，
+#                     对齐 CI 里该根 45 min 的 job 超时）。
 #                   超时判该根 FAIL（不是 SKIP），避免某个卡死的用例
 #                   （无显示/网络长超时/空转）把整个一键脚本挂死。设 0 关闭。
 #
@@ -43,7 +45,10 @@ FLUTTER_BIN="${FLUTTER_BIN:-/home/user/tools/flutter/bin/flutter}"
 CPP_BUILD_DIR="${CPP_BUILD_DIR:-$ROOT/cpp/build}"
 MOBILE_DIR="${MOBILE_DIR:-$ROOT/mobile}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-PYTEST_TIMEOUT="${PYTEST_TIMEOUT:-900}"   # 每个 pytest 根目录墙钟秒；0=不限制
+PYTEST_TIMEOUT="${PYTEST_TIMEOUT:-900}"   # 小根墙钟秒；0=不限制
+# 根 tests/ 是大套件，单独给更长预算（对齐 CI 该根 45 min job 超时），
+# 免得慢机器上被误判成"卡死用例"。
+PYTEST_TIMEOUT_BIG="${PYTEST_TIMEOUT_BIG:-3600}"   # 根 tests/ 墙钟秒；0=不限制
 
 LOG_DIR="$ROOT/scratch/test-logs"
 mkdir -p "$LOG_DIR"
@@ -144,12 +149,18 @@ else
             report SKIP "pytest:$d" "目录不存在: $d"
             continue
         fi
+        # 分档墙钟：根 tests/ 用更长预算（对齐 CI 的 45 min）
+        if [ "$d" = "tests" ]; then
+            root_timeout="$PYTEST_TIMEOUT_BIG"
+        else
+            root_timeout="$PYTEST_TIMEOUT"
+        fi
         log="$LOG_DIR/pytest_$(echo "$d" | tr '/' '_').log"
         echo "       日志: $log  ($d)"
         # exit codes: 0=全部通过  1=有用例失败  2=被中断  5=未收集到任何用例
         #            124=被外层 timeout 墙钟杀掉（卡死用例）
-        if [ "$PYTEST_TIMEOUT" -gt 0 ] 2>/dev/null && command -v timeout >/dev/null 2>&1; then
-            QT_QPA_PLATFORM=offscreen timeout -k 20 "$PYTEST_TIMEOUT" \
+        if [ "$root_timeout" -gt 0 ] 2>/dev/null && command -v timeout >/dev/null 2>&1; then
+            QT_QPA_PLATFORM=offscreen timeout -k 20 "$root_timeout" \
                 "$PYTHON_BIN" -m pytest -q "$ROOT/$d" >"$log" 2>&1
         else
             QT_QPA_PLATFORM=offscreen \
@@ -161,7 +172,7 @@ else
         case "$rc" in
             0) report PASS "pytest:$d" "$summary" ;;
             5) report SKIP "pytest:$d" "未收集到用例 (rc=5): $summary" ;;
-            124) report FAIL "pytest:$d" "墙钟超时 ${PYTEST_TIMEOUT}s（疑卡死用例，见日志）: $summary" ;;
+            124) report FAIL "pytest:$d" "墙钟超时 ${root_timeout}s（疑卡死用例，见日志）: $summary" ;;
             *) report FAIL "pytest:$d" "$summary (rc=$rc)" ;;
         esac
     done

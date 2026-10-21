@@ -243,3 +243,22 @@ ASTU/对抗）共 39 个任务步：每一步都要有可调用工具，且链�
 | TLE 列位异常 | sgp4 按固定列位静默解析（例：56 字符行 2 → 平均运动被读成 1.00 rev/day → 42,164 km 地球同步轨道），err=0 无告警 | 传播前做 TLE 文本 ↔ SGP4 解析对拍（平均运动/倾角），不一致即报错并说明差在哪 |
 
 其余口径纪律不变：门限具名可覆盖、缺项标"未判定"、无信号不编造。
+
+## 外部依赖销账表（运行时网络依赖）
+
+仓库运行时真正会联网的地方只有下列几处，其余 URL 均在源码致谢注释里
+（上游项目出处），不构成依赖。每一项的失败行为都已核对：
+
+| 依赖 | 位置 | 离线/失败行为 | 是否诚实 |
+| --- | --- | --- | --- |
+| celestrak TLE | `orbit.py` / `new_spacetime_tle.py` | 离线模式（env 开关）直接抛 `TLEUnavailableError`；拉取失败同样抛错并说明异常类型；返回体异常抛 `RuntimeError` | 是 |
+| celestrak TLE（C++） | `cpp/src/dsp/tle_client.cpp` | 拉取失败/无卫星 → 失败信号 + 内置快照/缓存 | 是 |
+| open-notify（ISS 位置 / 太空人数） | `openapi_integration.py` | 网络异常 → `success=False` + 错误文本；**错误载荷不再被报成"太空有 0 人"** | 是（本次修复） |
+| open-meteo（天气） | `openapi_integration.py` | 同上；**错误载荷不再返回 `temperature_c=None` 却标 success** | 是（本次修复） |
+| opensky（附近航班） | `openapi_integration.py` | 同上；**错误载荷不再被报成"半径内 0 架飞机"** | 是（本次修复） |
+| JPL DE421 历表 | `solar_system.py` | 下载失败 → 保持回退后端（VSOP87），并且 `backend_name` 明确标 `vsop87_astropy[回退]` + `precision_note` 说明精度 | 是 |
+| LLM 端点（siliconflow 默认值） | `config.py` / `ai_config.h` / `llm_client.h` | 用户可改 base_url 与 key；无 key 时工具层报"未配置"，不静默假装调用成功 | 是 |
+
+判据：网络失败必须**显式报错或显式降级并标明降级后端**，不得用默认值或
+空值冒充真实数据。上表"本次修复"三行对应的回归由
+`tests/test_external_api_honesty.py`（6 项，桩替换 `requests.get`，不打网络）钉住。
