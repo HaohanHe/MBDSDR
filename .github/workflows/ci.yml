@@ -54,30 +54,44 @@ jobs:
   #   runner 上若该目录超时，按该文档排查，勿据此扩大其它 job。
   # ---------------------------------------------------------------------------
   python:
-    name: pytest (${{ matrix.root }})
+    name: pytest (${{ matrix.root }}${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
-      # 按根拆并行：快的四个根各自独立完成，根 tests/ 单独一个 job
-      # 并给足够墙钟（它实测约 40 分钟，慢在跨文件的单例 QApplication 累积）。
+      # 按根拆并行：快的四个根各自独立完成；根 tests/ 拆成 A/B 两个并行
+      # job（按文件名排序交替分组，见 scripts/ci_pytest_groups.py）——它整跑
+      # 本地约 48 分钟（慢在跨文件的单例 QApplication 累积），拆开后每组
+      # 约一半，墙钟与累积影响都减半。
       # fail-fast: false ——一个根失败不应取消其他根的结果。
       fail-fast: false
       matrix:
         include:
           - root: mbdsdr_ai/tests
             timeout: 20
+            label: ""
           - root: experiments/tests
             timeout: 20
+            label: ""
           - root: tools/onboarding
             timeout: 20
+            label: ""
           - root: tools/hw_selfcheck
             timeout: 20
-          # 根 tests/ 是大套件（156 个测试文件）：本地实测约 40 分钟，跨文件
-          # 的单例 QApplication 累积是主要耗时。timeout 是防挂死上限而非预算
-          # （Actions 按实际运行分钟计费），45 分钟只剩 12% 余量，慢机器或
-          # 依赖升级都可能顶穿，故放宽到 75 分钟消除误红。
+            label: ""
+          # 根 tests/ 是大套件（160 个测试文件）：跨文件的单例 QApplication
+          # 累积是主要耗时，整跑本地约 48 分钟（CI 侧历史实测约 40 分钟），
+          # 45 分钟的 job 上限余量太薄。故拆成 A/B 两个并行 job：按文件名
+          # 排序交替分组（scripts/ci_pytest_groups.py 自动生成，无需维护
+          # 清单），各自独立进程，墙钟约为一半、累积影响也减半。
+          # timeout 是防挂死上限而非预算（Actions 按实际运行分钟计费）。
           - root: tests/
-            timeout: 75
+            timeout: 45
+            group: 0
+            label: " (A)"
+          - root: tests/
+            timeout: 45
+            group: 1
+            label: " (B)"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -109,11 +123,22 @@ jobs:
           pip install -r experiments/requirements.txt
           pip install pytest
 
-      - name: pytest (${{ matrix.root }})
+      - name: pytest (${{ matrix.root }}${{ matrix.label }})
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          python -m pytest -q "${{ matrix.root }}"
+          # 根 tests/ 拆成两组并行跑（见 scripts/ci_pytest_groups.py）：
+          # 按文件名排序交替分组，各自独立进程——墙钟约为整跑一半，
+          # 且跨文件的单例 QApplication 累积影响减半。
+          if [ -n "${{ matrix.group }}" ]; then
+            python scripts/ci_pytest_groups.py --check
+            files=$(python scripts/ci_pytest_groups.py \
+                      --group "${{ matrix.group }}" --total 2)
+            # shellcheck disable=SC2086
+            python -m pytest -q $files
+          else
+            python -m pytest -q "${{ matrix.root }}"
+          fi
 
   # ---------------------------------------------------------------------------
   # Flutter：test + analyze

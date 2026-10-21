@@ -207,9 +207,12 @@ class TestBasebandRoundTrip:
 # (D) AudioPlayer 无 sounddevice 时安全降级
 # ---------------------------------------------------------------------------
 class TestAudioPlayerDegrade:
-    def test_available_false_and_write_noop(self):
-        from mbdsdr_ai.audio_out import AudioPlayer
-        p = AudioPlayer(sample_rate=48000, channels=1, gain=0.5)
+    def test_available_false_and_write_noop(self, monkeypatch):
+        """降级契约：无音频后端时全部方法安全降级（不抛异常、不假装在放）。"""
+        import mbdsdr_ai.audio_out as ao
+        # 显式强制降级路径：与开发机有没有声卡无关（否则有声卡即假红）
+        monkeypatch.setattr(ao, "_SD_AVAILABLE", False)
+        p = ao.AudioPlayer(sample_rate=48000, channels=1, gain=0.5)
         started = p.start()
         assert started is False
         assert p.available is False
@@ -217,6 +220,23 @@ class TestAudioPlayerDegrade:
         assert p.write(audio) == 0
         p.stop()
         p.stop()
+
+    def test_available_path_when_device_present(self):
+        """有可用设备时：能开流就断言可用，打不开（CI 无声卡）就 skip。"""
+        import mbdsdr_ai.audio_out as ao
+        if not ao._SD_AVAILABLE:
+            pytest.skip("本机无 sounddevice，跳过可用路径")
+        p = ao.AudioPlayer(sample_rate=48000, channels=1, gain=0.5)
+        started = p.start()
+        if not started:
+            pytest.skip("无可用音频设备（CI 环境常见），跳过")
+        try:
+            assert p.available is True
+            assert p.is_playing is True
+            assert p.write(np.zeros(1024, dtype=np.float32)) == 1024
+        finally:
+            p.stop()
+        assert p.is_playing is False
 
     def test_set_gain_clamp(self):
         from mbdsdr_ai.audio_out import AudioPlayer
