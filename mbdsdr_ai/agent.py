@@ -312,6 +312,11 @@ class MBDSDRAgent:
         # 误码实测、RRC 抽头）：收敛全仓重复的调制实现到单一参数化内核。
         from mbdsdr_ai.modulation import register_modulation_tools
         register_modulation_tools(self.tool_registry)
+        # CCSDS 通用数字接收链积木（帧构造/比特解码/IQ 解码）：
+        # 此前仓内只有 SSDV 专用入口，像 ASTU-1 这类同为 CCSDS TM 体制的
+        # BPSK 遥测任务没有模型可用入口。
+        from mbdsdr_ai.ccsds_tools import register_ccsds_tools
+        register_ccsds_tools(self.tool_registry)
         self._register_time_sync_tools()
         self._register_constellation_tools()
         self._register_baseband_tools()
