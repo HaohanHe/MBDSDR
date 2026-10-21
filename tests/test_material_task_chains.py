@@ -80,6 +80,8 @@ TASK_STEPS = [
     ("对抗", "M17 4FSK", ["m17_4fsk_roundtrip"]),
     ("对抗", "射电干涉测向(TDOA)", ["interferometry_tdoa"]),
     ("对抗", "角分辨率/可见度", ["interferometry_resolution"]),
+    ("对抗", "GPS 扩频伪随机序列", ["gps_prn_sequence"]),
+    ("对抗", "GPS 码相关捕获", ["gps_code_acquire"]),
 ]
 
 

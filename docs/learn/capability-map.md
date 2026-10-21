@@ -31,7 +31,7 @@
 | 深空/LEO 多普勒定轨（LRO / Iridium 类） | `doppler_from_frequency` → `pseudorange_rate_model` → `tle_state_ecef` → `propagate_state_stm` → `rls_update` → `calibrate_time_offset` → `coord_*` | 观测方程 ρ = −c·Δf/f₀；状态 7 维（含钟差） | 状态矢量 + 协方差 + 残差统计 |
 | ASTU-1 遥测接收 | `sat_rx_profile` → `telemetry_rx_chain` → `doppler_to_frequency` → `doppler_tune_frequency` → 设备面 → `ccsds_decode_iq` | 预置频率 = 真实下行 − 10 kHz | 逐块接收链参数 + 调谐频率 + 帧字节 |
 | 前端搭建与故障排查 | `dish_gain` → `cantenna_design` → `fe_link_budget` → `fe_diagnose` | 见上；罐子探针偏差 > 5 mm 恶化驻波 | 几何/预算/诊断三件套 |
-| 通信对抗与链路自测 | `modulate_symbols` → `pulse_shape_taps` → `demodulate_symbols` → `constellation_metrics` → `measure_ber` → `link_ber_test` / `interferometry_tdoa` / `interferometry_resolution`；**射电干涉测向**（双站互相关 TDOA、角分辨率、可见度） | | Eb/N0 口径见 `link_ber_test` 说明 | 实测 BER + 星座质量 + 理论对照 |
+| 通信对抗与链路自测 | `modulate_symbols` → `pulse_shape_taps` → `demodulate_symbols` → `constellation_metrics` → `measure_ber` → `link_ber_test` / `interferometry_tdoa` / `interferometry_resolution` / `gps_prn_sequence` / `gps_code_acquire`；**射电干涉测向**（双站互相关 TDOA、角分辨率、可见度） | | Eb/N0 口径见 `link_ber_test` 说明 | 实测 BER + 星座质量 + 理论对照 |
 | 轨道与过境预报 | `sat_pass_predict` → `sgp4_propagate` → `coord_enu_to_az_el` | — | 过境窗口（方位/仰角/距离/多普勒） |
 
 ---
@@ -284,6 +284,19 @@ ASTU/对抗）共 39 个任务步：每一步都要有可调用工具，且链�
 `sdr_kiss_decode` 那样回一条干净错误。模型侧仍拿到统一错误信封（不影响
 可操作性 ✓），但属代码卫生欠账：仓内约定"错误:即失败"应优先用返回错误而非
 抛异常表达。此项已测出清单，待逐个收敛。
+
+**GPS C/A 相位分配的边界（实测结论，不猜）**：材料 learnSDR 课程
+lesson21–23 涉及 LFSR/伪随机、Gold 码与 GPS 相关接收。仓内已实现并**自校验
+通过**的是：G1/G2 的 m 序列（公开 ICD-GPS-200 多项式，平衡性与循环自相关
+恒 −1）、Gold 码族（族内两两相关呈三值结构）、以及**码相关捕获**（chip 域
+统一口径 + 多普勒搜索 + 相对门限，纯噪声不误报）。
+
+**未实现**的是 C/A 码的 PRN 相位分配：其依据是 IS-GPS-200 Table 3-I 的
+"码相位选择"（标准数据，仓内没有），而材料自带的 `GPScacodes.py` 经核验
+**并非标准 C/A 码**——它的循环自相关取三值（±65），而标准 C/A 码的循环自相关
+必须恒为 −1（lag0 除外），故它不能充当校验源。没有可用的本地权威校验源时，
+仓内不发"看起来能用但没验证"的实现；捕获器本身对码集无假设，调用方自带
+公开标准码表即可使用。
 
 身份侧同样有机械护栏：`tests/test_identity_redline.py` 扫 tracked 文本
 文件，命中个人信息或就业意向措辞即红（规则字面量拼接构造，门禁自身不命中

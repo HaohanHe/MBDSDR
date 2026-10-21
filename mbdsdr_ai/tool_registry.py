@@ -776,6 +776,17 @@ class ToolRegistry:
             return
         FY.register_tool_registry(self)
         self.register_interferometry_tools()
+        self.register_gps_ca_tools()
+
+    def register_gps_ca_tools(self):
+        """注册 GPS 扩频伪随机序列与码相关捕获工具（材料 learnSDR lesson21-23）。"""
+        try:
+            from . import gps_ca as GCA
+        except Exception as e:  # pragma: no cover
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning("gps_ca 不可用: %s", e)
+            return
+        GCA.register_tool_registry(self)
 
     def register_interferometry_tools(self):
         """注册射电干涉测量工具（双站互相关测向 + 角分辨率/可见度）。
