@@ -50,7 +50,7 @@ tracked 文件（含 commit message）中：
 
 ## 5. 基线
 
-`python -m pytest mbdsdr_ai/tests -q` 基线锚点（commit 级回归手段，不作对外宣传数字）：最近一次全绿记录 **1168 passed / 5 skipped**
+`python -m pytest mbdsdr_ai/tests -q` 基线锚点（commit 级回归手段，不作对外宣传数字）：全绿时**共 1168 项**（当前沙箱实测 1164 passed / 4 skipped；skip 全是无 env/无硬件的诚实跳过——SatDump 目录缺失、`reedsolo` 未装、`MBDSDR_RTL_TCP` 未配置，故 passed/skip 的分布随环境浮动，总数不变）
 （2026-10-21 实测：1097→1168 净增 71。同期 `mbdsdr_ai/tests` 由 104 个文件 /
 992 个 `test_` 函数增至 108 个文件 / 1051 个 `test_` 函数，新增 test_acquisition、
 test_cross_golden、test_modulation、test_rrc_single_source 四个文件。
